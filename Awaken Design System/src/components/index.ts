@@ -41,6 +41,8 @@ export * from "./AwakenPrimaryNav";
 export * from "./AwakenProductLogo";
 export * from "./AwakenProfileButton";
 export * from "./AwakenProfileBalancePanel";
+export * from "./AwakenProjectFoldersEditor";
+export * from "./AwakenProjectHoverCard";
 export * from "./AwakenProjectSkillFolder";
 export * from "./AwakenProjectSkillsDialog";
 export * from "./AwakenProjectTree";

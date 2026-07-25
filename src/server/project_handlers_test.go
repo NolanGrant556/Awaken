@@ -129,6 +129,132 @@ func TestProjectLifecycleRESTReordersEveryActiveProject(t *testing.T) {
 	}
 }
 
+func TestProjectFoldersRESTCreateAttachSwitchPrimaryAndDetach(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	service := awruntime.NewRunService(nil, nil)
+	router := NewRouter(service, nil)
+	first, second, third := t.TempDir(), t.TempDir(), t.TempDir()
+
+	create := projectJSONRequest(t, router, http.MethodPost, "/v1/projects", map[string]any{
+		"folders": []map[string]any{
+			{"path": first},
+			{"path": second, "primary": true},
+		},
+		"display_name": "multi folder",
+	}, "")
+	if create.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", create.Code, create.Body.String())
+	}
+	var project awruntime.Project
+	if err := json.Unmarshal(create.Body.Bytes(), &project); err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Folders) != 2 || project.WorkspaceRoot != second {
+		t.Fatalf("unexpected created project: %+v", project)
+	}
+
+	attach := projectJSONRequest(t, router, http.MethodPost, "/v1/projects/"+project.ProjectID+"/folders", map[string]any{
+		"path": third,
+	}, "")
+	if attach.Code != http.StatusOK {
+		t.Fatalf("expected attach 200, got %d: %s", attach.Code, attach.Body.String())
+	}
+	if err := json.Unmarshal(attach.Body.Bytes(), &project); err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Folders) != 3 {
+		t.Fatalf("attach did not add the folder: %+v", project.Folders)
+	}
+
+	primary := projectJSONRequest(t, router, http.MethodPut, "/v1/projects/"+project.ProjectID+"/primary-folder", map[string]any{
+		"path": third,
+	}, "")
+	if primary.Code != http.StatusOK {
+		t.Fatalf("expected primary switch 200, got %d: %s", primary.Code, primary.Body.String())
+	}
+	if err := json.Unmarshal(primary.Body.Bytes(), &project); err != nil {
+		t.Fatal(err)
+	}
+	if project.WorkspaceRoot != third {
+		t.Fatalf("primary switch did not take effect: %+v", project)
+	}
+
+	detach := projectJSONRequest(t, router, http.MethodDelete, "/v1/projects/"+project.ProjectID+"/folders", map[string]any{
+		"path": first,
+	}, "")
+	if detach.Code != http.StatusOK {
+		t.Fatalf("expected detach 200, got %d: %s", detach.Code, detach.Body.String())
+	}
+	if err := json.Unmarshal(detach.Body.Bytes(), &project); err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Folders) != 2 || project.HasFolder(first) {
+		t.Fatalf("detach did not unbind the folder: %+v", project.Folders)
+	}
+
+	// A folder is not owned exclusively: creating a second project on a folder
+	// the first one still holds succeeds, and both keep it.
+	shared := projectJSONRequest(t, router, http.MethodPost, "/v1/projects", map[string]any{
+		"folders":      []map[string]any{{"path": third}},
+		"display_name": "shares the folder",
+	}, "")
+	if shared.Code != http.StatusCreated {
+		t.Fatalf("expected shared folder 201, got %d: %s", shared.Code, shared.Body.String())
+	}
+	var sharedProject awruntime.Project
+	if err := json.Unmarshal(shared.Body.Bytes(), &sharedProject); err != nil {
+		t.Fatal(err)
+	}
+	if !sharedProject.HasFolder(third) {
+		t.Fatalf("the shared folder must join the new project: %+v", sharedProject.Folders)
+	}
+	if sharedProject.ProjectID == project.ProjectID {
+		t.Fatalf("sharing a folder must mint a new project, got %q", sharedProject.ProjectID)
+	}
+	listed := projectJSONRequest(t, router, http.MethodGet, "/v1/projects", nil, "")
+	var projects []awruntime.Project
+	if err := json.Unmarshal(listed.Body.Bytes(), &projects); err != nil {
+		t.Fatal(err)
+	}
+	holders := 0
+	for _, candidate := range projects {
+		if candidate.HasFolder(third) {
+			holders++
+		}
+	}
+	if holders != 2 {
+		t.Fatalf("both projects must hold the shared folder, got %d holders in %+v", holders, projects)
+	}
+}
+
+// Creating a project needs nothing but a name, so the sidebar can mint one
+// before the user has a folder to bind to it.
+func TestProjectFoldersRESTCreatesAProjectFromANameAlone(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	service := awruntime.NewRunService(nil, nil)
+	router := NewRouter(service, nil)
+
+	create := projectJSONRequest(t, router, http.MethodPost, "/v1/projects", map[string]any{
+		"display_name": "folderless",
+	}, "")
+	if create.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", create.Code, create.Body.String())
+	}
+	var project awruntime.Project
+	if err := json.Unmarshal(create.Body.Bytes(), &project); err != nil {
+		t.Fatal(err)
+	}
+	if len(project.Folders) != 0 {
+		t.Fatalf("no folder may be invented for the project, got %+v", project.Folders)
+	}
+	if project.WorkspaceRoot != "" {
+		t.Fatalf("a folderless project must not advertise a root: %+v", project)
+	}
+	if project.DisplayName != "folderless" || project.ProjectID == "" {
+		t.Fatalf("the project must keep its identity: %+v", project)
+	}
+}
+
 func TestProjectLifecycleRESTTrashPrepareClaimFail(t *testing.T) {
 	t.Setenv("AWAKEN_HOME", t.TempDir())
 	service := awruntime.NewRunService(nil, nil)
@@ -140,7 +266,9 @@ func TestProjectLifecycleRESTTrashPrepareClaimFail(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	prepare := projectJSONRequest(t, router, http.MethodPost, "/v1/projects/"+project.ProjectID+"/trash", nil, "trash-rest-1")
+	prepare := projectJSONRequest(t, router, http.MethodPost, "/v1/projects/"+project.ProjectID+"/folders/trash", map[string]any{
+		"path": workspaceRoot,
+	}, "trash-rest-1")
 	if prepare.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 prepare, got %d: %s", prepare.Code, prepare.Body.String())
 	}

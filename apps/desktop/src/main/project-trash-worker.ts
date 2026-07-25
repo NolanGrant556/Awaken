@@ -8,7 +8,7 @@ export type ProjectTrashWorkerDependencies = {
   ) => Promise<RuntimeProjectOperationWire>;
   pathExists: (path: string) => Promise<boolean>;
   beginInvocation: (operationId: string, attemptId: string) => Promise<void>;
-  trash: (workspaceRoot: string) => Promise<void>;
+  trash: (stagingPath: string) => Promise<void>;
   complete: (operationId: string, attemptId: string) => Promise<void>;
   fail: (
     operationId: string,
@@ -18,7 +18,7 @@ export type ProjectTrashWorkerDependencies = {
   ) => Promise<void>;
   reportTrashFailure?: (args: {
     operationId: string;
-    workspaceRoot: string;
+    folderPath: string;
     error: string;
   }) => void;
 };
@@ -46,12 +46,14 @@ export async function executeProjectTrashOperation(
     return;
   }
 
-  const workspaceRoot = claimed.workspace_root?.trim();
+  // Trash is folder-scoped: workspace_root carries the single folder this
+  // operation targets, not the whole project.
+  const folderPath = claimed.workspace_root?.trim();
   const attemptId = claimed.attempt_id?.trim();
   if (!attemptId) {
     throw new Error("Claimed project trash operation is missing its attempt token.");
   }
-  if (!workspaceRoot || !claimed.path_fingerprint) {
+  if (!folderPath || !claimed.path_fingerprint) {
     await dependencies.fail(
       claimed.operation_id,
       attemptId,
@@ -70,7 +72,7 @@ export async function executeProjectTrashOperation(
         claimed.operation_id,
         attemptId,
         "PROJECT_PATH_FINGERPRINT_CHANGED",
-        "The project path identity changed before it could be moved to trash.",
+        "The folder path identity changed before it could be moved to trash.",
       );
       return;
     }
@@ -106,7 +108,7 @@ export async function executeProjectTrashOperation(
     const message = errorMessage(error);
     dependencies.reportTrashFailure?.({
       operationId: claimed.operation_id,
-      workspaceRoot,
+      folderPath,
       error: message,
     });
     await dependencies.fail(

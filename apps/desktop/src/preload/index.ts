@@ -34,6 +34,7 @@ import {
   type MemoryListRequest,
   type MemorySettingsDocument,
   type MemorySettingsPatch,
+  type ProjectFolderSelection,
   type ProjectMutationResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
@@ -57,6 +58,7 @@ import {
   type SupervisorStatusInfo,
   type ThreadDeleteResult,
   type UpdateMcpServerConfigRequest,
+  type ProjectFoldersPickResult,
   type UpsertProjectResult,
   type WorkspacePickResult,
   type WorkspaceValidationResult,
@@ -179,6 +181,26 @@ const bridge: AwakenBridge = {
       workspaceRoot,
       displayName,
     }) as Promise<UpsertProjectResult>,
+  createProject: (folders: ProjectFolderSelection[], displayName?: string) =>
+    ipcRenderer.invoke("awaken:create-project", {
+      folders,
+      displayName,
+    }) as Promise<UpsertProjectResult>,
+  attachProjectFolder: (projectId: string, path: string) =>
+    ipcRenderer.invoke("awaken:attach-project-folder", {
+      projectId,
+      path,
+    }) as Promise<UpsertProjectResult>,
+  detachProjectFolder: (projectId: string, path: string) =>
+    ipcRenderer.invoke("awaken:detach-project-folder", {
+      projectId,
+      path,
+    }) as Promise<UpsertProjectResult>,
+  setPrimaryProjectFolder: (projectId: string, path: string) =>
+    ipcRenderer.invoke("awaken:set-primary-project-folder", {
+      projectId,
+      path,
+    }) as Promise<UpsertProjectResult>,
   reorderProjects: (projectIds: string[]) =>
     ipcRenderer.invoke("awaken:reorder-projects", projectIds) as Promise<ProjectReorderResult>,
   detachProject: (projectId: string, idempotencyKey: string) =>
@@ -191,9 +213,10 @@ const bridge: AwakenBridge = {
       projectId,
       idempotencyKey,
     }) as Promise<ProjectMutationResult>,
-  trashProject: (projectId: string, idempotencyKey: string) =>
-    ipcRenderer.invoke("awaken:trash-project", {
+  trashProjectFolder: (projectId: string, path: string, idempotencyKey: string) =>
+    ipcRenderer.invoke("awaken:trash-project-folder", {
       projectId,
+      path,
       idempotencyKey,
     }) as Promise<ProjectMutationResult>,
   getProjectOperation: (operationId: string) =>
@@ -203,6 +226,11 @@ const bridge: AwakenBridge = {
     ) as Promise<RuntimeProjectOperation>,
   openArtifact: (request: ArtifactOpenRequest) =>
     ipcRenderer.invoke("awaken:open-artifact", request) as Promise<ArtifactOpenResult>,
+  revealPath: (target: string) =>
+    ipcRenderer.invoke("awaken:reveal-path", target) as Promise<{
+      ok: boolean;
+      message?: string;
+    }>,
   revealArtifact: (request: ArtifactOpenRequest) =>
     ipcRenderer.invoke("awaken:reveal-artifact", request) as Promise<ArtifactOpenResult>,
   startRun: (request: StartRunRequest) =>
@@ -349,8 +377,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:pick-attachments", defaultPath) as Promise<AttachmentPickResult>,
   pickDirectory: (defaultPath?: string) =>
     ipcRenderer.invoke("awaken:pick-directory", defaultPath) as Promise<WorkspacePickResult>,
-  pickWorkspace: (defaultPath?: string) =>
-    ipcRenderer.invoke("awaken:pick-workspace", defaultPath) as Promise<WorkspacePickResult>,
+  pickProjectFolders: (defaultPath?: string) =>
+    ipcRenderer.invoke("awaken:pick-project-folders", defaultPath) as Promise<ProjectFoldersPickResult>,
   validateWorkspace: (path: string) =>
     ipcRenderer.invoke("awaken:validate-workspace", path) as Promise<WorkspaceValidationResult>,
   getSupervisorStatus: () =>

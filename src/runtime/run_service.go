@@ -19,6 +19,7 @@ import (
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
+	"awaken/src/desktopdata"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
 	"awaken/src/tool"
@@ -50,14 +51,35 @@ var threadTitleRetryDelays = []time.Duration{
 }
 
 type TaskScope struct {
-	ScopeID           string            `json:"scope_id,omitempty"`
-	WorkspaceRoot     string            `json:"workspace_root"`
-	ReadableRoots     []string          `json:"readable_roots,omitempty"`
-	WritableRoots     []string          `json:"writable_roots,omitempty"`
-	OutputRoots       []string          `json:"output_roots,omitempty"`
-	AttachedFiles     []tool.ScopedFile `json:"attached_files,omitempty"`
-	ProtectedRoots    []string          `json:"protected_roots,omitempty"`
-	TemporaryWorkRoot string            `json:"temporary_work_root,omitempty"`
+	ScopeID string `json:"scope_id,omitempty"`
+	// ProjectID names the project this scope belongs to. It is what lets a
+	// project with no folder bound still resolve a working directory, and it
+	// spares callers from deriving a project identity out of a path.
+	ProjectID string `json:"project_id,omitempty"`
+	// ProjectName is the display name the user gave this project. It exists so
+	// the agent can name the project it is working in; nothing resolves paths or
+	// permissions from it, and it is absent for runs that belong to no project.
+	ProjectName string `json:"project_name,omitempty"`
+	// WorkspaceRoot is the primary folder, and the base for relative paths. It
+	// may be empty when ProjectID is set: a folder-less project resolves to its
+	// session workspace instead.
+	WorkspaceRoot  string            `json:"workspace_root"`
+	ReadableRoots  []string          `json:"readable_roots,omitempty"`
+	WritableRoots  []string          `json:"writable_roots,omitempty"`
+	OutputRoots    []string          `json:"output_roots,omitempty"`
+	AttachedFiles  []tool.ScopedFile `json:"attached_files,omitempty"`
+	ProtectedRoots []string          `json:"protected_roots,omitempty"`
+	// ProtectedRootExceptions releases narrow subtrees of an otherwise
+	// protected root. It is populated only when a root of this scope is an
+	// Awaken-managed project workspace, which lives inside the protected
+	// business-data root.
+	ProtectedRootExceptions []string `json:"protected_root_exceptions,omitempty"`
+	TemporaryWorkRoot       string   `json:"temporary_work_root,omitempty"`
+	// SessionWorkspace reports that WorkspaceRoot is the Awaken-managed session
+	// directory rather than a folder the user picked, which is how a folder-less
+	// project runs. normalizeWorkspace always assigns it, so a value supplied by
+	// a client never survives.
+	SessionWorkspace bool `json:"session_workspace,omitempty"`
 	// ExecutionProfile is the unified policy bundle applied to every tool
 	// call made by agents running under this task scope. When nil, the
 	// agent falls back to profile.DefaultProfile() (WorkspaceWrite).
@@ -141,10 +163,12 @@ type RunService struct {
 	// runWG tracks in-flight run goroutines. Terminal run status is
 	// observable before the final transcript flush completes; tests and
 	// shutdown paths use drainRunWorkers to join those trailing writes.
-	runWG             sync.WaitGroup
-	sessions          map[string]*Session
-	threads           map[string]*Thread
-	projectFences     map[string]bool
+	runWG    sync.WaitGroup
+	sessions map[string]*Session
+	threads  map[string]*Thread
+	// projectFences maps a folder to the projects currently fencing it. A folder
+	// stays fenced while any of them holds a fence.
+	projectFences     map[string]map[string]struct{}
 	defaultWorkspace  WorkspaceConfig
 	newAgent          func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
 	newProfileAgent   func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent
@@ -295,7 +319,7 @@ func NewRunService(
 	service := &RunService{
 		sessions:      make(map[string]*Session),
 		threads:       make(map[string]*Thread),
-		projectFences: make(map[string]bool),
+		projectFences: make(map[string]map[string]struct{}),
 		newAgent:      newAgent,
 		newExecutor:   newExecutor,
 		threadStore:   store,
@@ -336,22 +360,33 @@ func (s *RunService) unlockProjectMutation() {
 	s.projectMutationMu.Unlock()
 }
 
-func (s *RunService) setProjectDeletionFence(workspaceRoot string, fenced bool) {
+// setProjectDeletionFence blocks or unblocks run creation on one folder on
+// behalf of one project. The fence records which projects raised it, because a
+// folder can be shared: if project A releases its fence, a fence B raised on the
+// same folder must stay up.
+func (s *RunService) setProjectDeletionFence(projectID, workspaceRoot string, fenced bool) {
 	if s == nil {
 		return
 	}
 	key := normalizeProjectWorkspaceRoot(workspaceRoot)
-	if key == "" {
+	owner := strings.TrimSpace(projectID)
+	if key == "" || owner == "" {
 		return
 	}
 	s.mu.Lock()
 	if s.projectFences == nil {
-		s.projectFences = make(map[string]bool)
+		s.projectFences = make(map[string]map[string]struct{})
 	}
 	if fenced {
-		s.projectFences[key] = true
-	} else {
-		delete(s.projectFences, key)
+		if s.projectFences[key] == nil {
+			s.projectFences[key] = make(map[string]struct{})
+		}
+		s.projectFences[key][owner] = struct{}{}
+	} else if owners := s.projectFences[key]; owners != nil {
+		delete(owners, owner)
+		if len(owners) == 0 {
+			delete(s.projectFences, key)
+		}
 	}
 	s.mu.Unlock()
 }
@@ -363,6 +398,63 @@ func (s *RunService) threadIDsForWorkspace(workspaceRoot string) []string {
 	threadIDs := make([]string, 0)
 	for threadID, thread := range s.threads {
 		if normalizeProjectWorkspaceRoot(thread.workspace.WorkspaceRoot) == key {
+			threadIDs = append(threadIDs, threadID)
+		}
+	}
+	return threadIDs
+}
+
+// threadIDsForProjectFolder collects live threads anchored on one folder of one
+// project. A folder can be shared between projects, so detaching it from one of
+// them must not reach into the threads of the others.
+// clearProjectDeletionFences reopens a folder for everyone. It is the counter
+// part of the per-project fence: a folder that has just become part of a live
+// project is live work again, whichever project fenced it earlier. Releasing
+// only the attaching project's own fence would leave a folder one project
+// detached permanently unusable for the next one to pick it up.
+func (s *RunService) clearProjectDeletionFences(workspaceRoot string) {
+	if s == nil {
+		return
+	}
+	key := normalizeProjectWorkspaceRoot(workspaceRoot)
+	if key == "" {
+		return
+	}
+	s.mu.Lock()
+	delete(s.projectFences, key)
+	s.mu.Unlock()
+}
+
+func (s *RunService) threadIDsForProjectFolder(projectID, workspaceRoot string) []string {
+	projectID = strings.TrimSpace(projectID)
+	key := normalizeProjectWorkspaceRoot(workspaceRoot)
+	if projectID == "" || key == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	threadIDs := make([]string, 0)
+	for threadID, thread := range s.threads {
+		if thread.projectID == projectID && normalizeProjectWorkspaceRoot(thread.workspace.WorkspaceRoot) == key {
+			threadIDs = append(threadIDs, threadID)
+		}
+	}
+	return threadIDs
+}
+
+// threadIDsForProject collects live threads by project identity rather than by
+// a single workspace path, so a project holding several folders is covered
+// whichever folder a thread was started in.
+func (s *RunService) threadIDsForProject(projectID string) []string {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	threadIDs := make([]string, 0)
+	for threadID, thread := range s.threads {
+		if thread.projectID == projectID {
 			threadIDs = append(threadIDs, threadID)
 		}
 	}
@@ -526,7 +618,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		}
 	}
 	s.mu.RLock()
-	projectFenced := s.projectFences[normalizeProjectWorkspaceRoot(workspace.WorkspaceRoot)]
+	projectFenced := len(s.projectFences[normalizeProjectWorkspaceRoot(workspace.WorkspaceRoot)]) > 0
 	s.mu.RUnlock()
 	if projectFenced {
 		return Run{}, ErrProjectOperationConflict
@@ -606,7 +698,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			runIDs = append(runIDs, runID)
 			s.threads[threadID] = &Thread{
 				threadID:  threadID,
-				projectID: firstNonEmpty(restoredMeta.Snapshot.ProjectID, stableProjectID(workspace.WorkspaceRoot)),
+				projectID: firstNonEmpty(restoredMeta.Snapshot.ProjectID, scopeProjectID(workspace)),
 				agent:     agent,
 				workspace: workspace,
 				// thread label is only the creation-time fallback and must not overwrite
@@ -692,7 +784,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		}
 		s.threads[threadID] = &Thread{
 			threadID:        threadID,
-			projectID:       stableProjectID(workspace.WorkspaceRoot),
+			projectID:       scopeProjectID(workspace),
 			agent:           agent,
 			workspace:       workspace,
 			label:           threadLabel,
@@ -1428,7 +1520,7 @@ func threadSnapshotFromRestored(threadID string, workspace WorkspaceConfig, rest
 	}
 	return ThreadSnapshot{
 		ThreadID:  threadID,
-		ProjectID: stableProjectID(workspace.WorkspaceRoot),
+		ProjectID: scopeProjectID(workspace),
 		Label:     restored.Label,
 		RunID:     latestRunID,
 		Workspace: workspace,
@@ -2030,6 +2122,11 @@ func sameTaskScope(a, b WorkspaceConfig) bool {
 	if !sameWorkspaceRoot(a, b) {
 		return false
 	}
+	// The project name reaches the model through the system prompt, so a rename
+	// has to rebuild the agent instead of leaving the old name in place.
+	if a.ProjectName != b.ProjectName {
+		return false
+	}
 	if !sameStringSet(a.ReadableRoots, b.ReadableRoots) {
 		return false
 	}
@@ -2040,6 +2137,9 @@ func sameTaskScope(a, b WorkspaceConfig) bool {
 		return false
 	}
 	if !sameStringSet(a.ProtectedRoots, b.ProtectedRoots) {
+		return false
+	}
+	if !sameStringSet(a.ProtectedRootExceptions, b.ProtectedRootExceptions) {
 		return false
 	}
 	if a.TemporaryWorkRoot != b.TemporaryWorkRoot {
@@ -2110,15 +2210,45 @@ func (s sessionEventSink) AwaitExternalInteraction(ctx context.Context, request 
 	return s.session.AwaitExternalInteraction(ctx, request)
 }
 
+// scopeProjectID prefers the project identity the caller supplied. Deriving it
+// from the workspace root only holds while a project owns exactly one folder, so
+// it remains a fallback for callers that predate the field.
+func scopeProjectID(workspace WorkspaceConfig) string {
+	if id := strings.TrimSpace(workspace.ProjectID); id != "" {
+		return id
+	}
+	return stableProjectID(workspace.WorkspaceRoot)
+}
+
 func normalizeWorkspace(ws WorkspaceConfig) (WorkspaceConfig, error) {
 	root := strings.TrimSpace(ws.WorkspaceRoot)
+	projectID := strings.TrimSpace(ws.ProjectID)
+	sessionWorkspace := ""
 	if root == "" {
-		return WorkspaceConfig{}, fmt.Errorf("%w: workspace_root is required", ErrInvalidInput)
+		// A project with no folder bound still has to run somewhere. It gets a
+		// stable directory of its own under the business-data root, which is
+		// what gives Bash a cwd and relative paths a base. Falling back to the
+		// core process working directory instead would put the agent's output
+		// wherever Awaken happened to be launched from.
+		if projectID == "" {
+			return WorkspaceConfig{}, fmt.Errorf("%w: workspace_root or project_id is required", ErrInvalidInput)
+		}
+		home := desktopdata.AwakenHomeRoot()
+		if home == "" {
+			return WorkspaceConfig{}, fmt.Errorf("%w: a session workspace needs a business-data root", ErrInvalidInput)
+		}
+		root = desktopdata.SessionWorkspacePath(home, projectID)
+		sessionWorkspace = desktopdata.SessionOutputPath(home, projectID)
 	}
 	if !filepath.IsAbs(root) {
 		return WorkspaceConfig{}, fmt.Errorf("%w: workspace_root must be an absolute path", ErrInvalidInput)
 	}
 	root = filepath.Clean(root)
+	if sessionWorkspace != "" {
+		if err := os.MkdirAll(sessionWorkspace, 0o755); err != nil {
+			return WorkspaceConfig{}, fmt.Errorf("prepare session workspace: %w", err)
+		}
+	}
 
 	// Normalize the client-supplied ExecutionProfile against the server
 	// allowlist. NormalizeClientProfile maps nil, tampered, and
@@ -2130,21 +2260,77 @@ func normalizeWorkspace(ws WorkspaceConfig) (WorkspaceConfig, error) {
 	readableRoots := normalizeTaskScopeRoots(ws.ReadableRoots, root)
 	writableRoots := normalizeTaskScopeRoots(ws.WritableRoots, root)
 	outputRoots := normalizeTaskScopeRoots(ws.OutputRoots, root)
+	if sessionWorkspace != "" && len(ws.OutputRoots) == 0 {
+		// Produced files land in the session's output directory rather than at
+		// the top of the session workspace, so what the agent made stays
+		// separable from anything else the session keeps.
+		outputRoots = []string{filepath.Clean(sessionWorkspace)}
+	}
 	attachedFiles := normalizeTaskScopeFiles(ws.AttachedFiles, root)
 	scopeID := buildTaskScopeID(root, readableRoots, writableRoots, outputRoots, attachedFiles)
-	protectedRoots := buildProtectedRoots(root)
+	scopeRoots := dedupeTaskScopeRoots(root, readableRoots, writableRoots, outputRoots)
+	protectedRoots := buildProtectedRoots(root, scopeRoots)
 	temporaryWorkRoot := filepath.Join(os.TempDir(), "awaken-task-scopes", scopeID)
 	return WorkspaceConfig{
-		ScopeID:           scopeID,
-		WorkspaceRoot:     root,
-		ReadableRoots:     readableRoots,
-		WritableRoots:     writableRoots,
-		OutputRoots:       outputRoots,
-		AttachedFiles:     attachedFiles,
-		ProtectedRoots:    protectedRoots,
-		TemporaryWorkRoot: temporaryWorkRoot,
-		ExecutionProfile:  &normalizedProfile,
+		ScopeID:                 scopeID,
+		ProjectID:               projectID,
+		ProjectName:             strings.TrimSpace(ws.ProjectName),
+		WorkspaceRoot:           root,
+		ReadableRoots:           readableRoots,
+		WritableRoots:           writableRoots,
+		OutputRoots:             outputRoots,
+		AttachedFiles:           attachedFiles,
+		ProtectedRoots:          protectedRoots,
+		ProtectedRootExceptions: buildProtectedRootExceptions(scopeRoots),
+		TemporaryWorkRoot:       temporaryWorkRoot,
+		SessionWorkspace:        sessionWorkspace != "",
+		ExecutionProfile:        &normalizedProfile,
 	}, nil
+}
+
+// dedupeTaskScopeRoots collects every directory this scope may touch. Boundary
+// rules that used to be derived from the single workspace root are derived from
+// this set instead, so a project holding several folders is covered.
+func dedupeTaskScopeRoots(workspaceRoot string, groups ...[]string) []string {
+	roots := make([]string, 0, 8)
+	seen := make(map[string]struct{}, 8)
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" || !filepath.IsAbs(value) {
+			return
+		}
+		value = filepath.Clean(value)
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		roots = append(roots, value)
+	}
+	add(workspaceRoot)
+	for _, group := range groups {
+		for _, value := range group {
+			add(value)
+		}
+	}
+	return roots
+}
+
+// buildProtectedRootExceptions releases the session workspace subtree, and only
+// when this scope actually runs inside it. A scope made of user folders never
+// receives a carve-out, so the business-data root stays fully protected by
+// default.
+func buildProtectedRootExceptions(scopeRoots []string) []string {
+	home := desktopdata.AwakenHomeRoot()
+	if home == "" {
+		return nil
+	}
+	sessionsRoot := filepath.Clean(desktopdata.SessionsRoot(home))
+	for _, root := range scopeRoots {
+		if tool.PathWithinRoot(root, sessionsRoot) {
+			return []string{sessionsRoot}
+		}
+	}
+	return nil
 }
 
 func normalizeTaskScopeRoots(values []string, workspaceRoot string) []string {
@@ -2219,12 +2405,18 @@ func buildTaskScopeID(
 	return "scope_" + hex.EncodeToString(sum[:8])
 }
 
-func buildProtectedRoots(workspaceRoot string) []string {
-	protected := []string{
-		filepath.Join(workspaceRoot, ".git"),
-		filepath.Join(workspaceRoot, ".awaken"),
-		filepath.Join(workspaceRoot, ".vscode"),
-		filepath.Join(workspaceRoot, ".idea"),
+// buildProtectedRoots generates the per-folder protections for every root of the
+// scope. Generating them only for the primary folder would leave a secondary
+// repository's .git and .awaken directories writable.
+func buildProtectedRoots(workspaceRoot string, scopeRoots []string) []string {
+	protected := make([]string, 0, len(scopeRoots)*4+24)
+	for _, root := range scopeRoots {
+		protected = append(protected,
+			filepath.Join(root, ".git"),
+			filepath.Join(root, ".awaken"),
+			filepath.Join(root, ".vscode"),
+			filepath.Join(root, ".idea"),
+		)
 	}
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
 		protected = append(protected,

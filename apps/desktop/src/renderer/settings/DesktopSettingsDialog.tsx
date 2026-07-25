@@ -52,11 +52,6 @@ const MODEL_SETTINGS_TABS = [
   { id: "configured", label: "已配置模型" },
 ];
 
-const SETTINGS_NAV_ITEMS = [
-  ...AwakenSettingsNavItems,
-  { id: "acp", label: "ACP" },
-];
-
 const SETTINGS_SECTION_TITLES: Record<SettingsDialogSection, string> = {
   models: "模型",
   search: "搜索",
@@ -906,7 +901,7 @@ export function DesktopSettingsDialog({
         rootRef={settingsRootRef}
         presentation="screen"
         contentLayout={activeSettingsSection === "memory" ? "full-bleed" : "standard"}
-        navItems={SETTINGS_NAV_ITEMS}
+        navItems={AwakenSettingsNavItems}
         activeSectionId={activeSettingsSection}
         sectionTitle={SETTINGS_SECTION_TITLES[activeSettingsSection]}
         toast={toastMessage}

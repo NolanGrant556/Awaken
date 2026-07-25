@@ -21,12 +21,30 @@ function projectAction(label: string) {
   );
 }
 
+// 与 Desktop 项目行菜单一致。废纸篓已经下沉到文件夹粒度，不在项目层出现。
 function projectMenuItems() {
   return [
+    { id: "add-project-folder", label: "添加文件夹", onSelect: noop },
+    { id: "edit-project", label: "编辑项目", onSelect: noop },
     { id: "remove-project", label: "从 Awaken 移除", onSelect: noop },
     { id: "delete-project-history", label: "删除 Awaken 历史", tone: "danger" as const, onSelect: noop },
-    { id: "trash-project", label: "移到废纸篓", tone: "danger" as const, onSelect: noop },
   ];
+}
+
+function projectHoverCard(title: string, summary: string, folders: string[]) {
+  return {
+    title,
+    summary,
+    folders: folders.map((path) => ({
+      path,
+      label: path.split("/").pop() ?? path,
+    })),
+    emptyFoldersLabel: "这个项目还没有文件夹",
+    revealHint: "在文件管理器中显示：",
+    actionLabel: "编辑项目",
+    onRevealFolder: noop,
+    onAction: noop,
+  };
 }
 
 function threadMenuItems() {
@@ -62,6 +80,9 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
           path: "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/09_经营管理部",
           action: projectAction("09_经营管理部"),
           menuItems: projectMenuItems(),
+          hoverCard: projectHoverCard("09_经营管理部", "1 个对话串", [
+            "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/09_经营管理部",
+          ]),
           children: [
             { id: "weekly-review", kind: "thread", label: "管理层周报", menuItems: threadMenuItems() },
           ],
@@ -95,6 +116,10 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
           path: "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/01_财务部",
           action: projectAction("01_财务部"),
           menuItems: projectMenuItems(),
+          hoverCard: projectHoverCard("01_财务部", "1 个对话串", [
+            "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/01_财务部/deliverables",
+            "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/01_财务部/typst-work",
+          ]),
           children: [
             {
               id: "finance-attachment",

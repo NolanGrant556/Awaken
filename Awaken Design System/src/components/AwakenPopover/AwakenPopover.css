@@ -1,3 +1,7 @@
 @import "../../tokens/components.css";
 
-/* AwakenPopover currently uses shared Awaken Design System tokens and component classes. */
+/* AwakenPopover otherwise uses shared Awaken Design System tokens and component classes. */
+
+.aw-popover__floating {
+  z-index: var(--aw-z-popover);
+}

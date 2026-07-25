@@ -41,7 +41,7 @@ type params struct {
 func (t *Tool) Name() string { return ToolName }
 
 func (t *Tool) Description() string {
-	return "Read a text file, supported image, or PDF from the task's readable roots. Text uses 1-based offset/limit; images and PDFs return model-visible media when the selected model supports it."
+	return "Read a text file, supported image, or PDF. A relative path resolves against the primary folder; an absolute path is read wherever it points, including outside the task's folders. Text uses 1-based offset/limit; images and PDFs return model-visible media when the selected model supports it."
 }
 
 func (t *Tool) Parameters() []tool.ToolParameter {

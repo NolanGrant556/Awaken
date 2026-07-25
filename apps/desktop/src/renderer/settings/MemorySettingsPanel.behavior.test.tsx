@@ -69,6 +69,7 @@ describe("MemorySettingsPanel recent activity behavior", () => {
     const project: RuntimeProject = {
       projectId: "project-1",
       workspaceRoot: "/tmp/project-1",
+      folders: [{ path: "/tmp/project-1", role: "user" as const, isPrimary: true }],
       displayName: "项目一",
       state: "active",
       createdAt: "2026-07-23T08:00:00Z",

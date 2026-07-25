@@ -91,3 +91,35 @@
   border-radius: var(--aw-radius-pill);
   background: var(--aw-button-black);
 }
+
+.aw-selectable-card[data-compact="true"] {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  min-height: 0;
+  gap: var(--aw-space-2);
+  padding: 4px var(--aw-space-3) 4px var(--aw-space-2);
+  border-radius: var(--aw-radius-pill);
+}
+
+/* At chip size the card's focus ring reads as a glow that competes with the
+   dialog's primary button, so selection rests on the border and fill alone. */
+.aw-selectable-card[data-compact="true"][data-selected="true"] {
+  box-shadow: none;
+}
+
+.aw-selectable-card[data-compact="true"] .aw-selectable-card__icon {
+  width: 20px;
+  height: 20px;
+  background: none;
+}
+
+.aw-selectable-card[data-compact="true"] .aw-selectable-card__content {
+  display: block;
+}
+
+.aw-selectable-card[data-compact="true"] .aw-selectable-card__title {
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+  font-weight: var(--aw-font-weight-medium);
+}

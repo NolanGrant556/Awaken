@@ -24,8 +24,12 @@ import {
   promptTokenViews,
   reconcileComposerStructuredInput,
   resolveBackendProjectOrder,
+  resolveRunProjectForRun,
+  resolveRunRootsForRun,
+  partitionPickedProjectFolders,
   resolveWorkspaceRootForRun,
   selectedUserQuestionLabels,
+  sharedFolderTrashWarning,
   shouldResetActiveThreadForWorkspaceChange,
   shouldShowSidebarThreadSpinner,
   workbenchInspectorPresentation,
@@ -56,6 +60,8 @@ import {
   removeWorkspaceProject,
   upsertTrackedTrashOperation,
   workspaceLabelForPath,
+  workspaceProjectRunRoots,
+  type WorkspaceProjectFolder,
 } from "./projectWorkspace";
 import {
   anchoredTurnMinHeight,
@@ -89,6 +95,15 @@ import {
 } from "./workbenchPresentation";
 import type { AwakenBridge } from "../shared/runtime";
 
+/** 第一个路径是主文件夹，其余按顺序作为次文件夹。 */
+function userFolders(...paths: string[]): WorkspaceProjectFolder[] {
+  return paths.map((path, index) => ({
+    path,
+    role: "user" as const,
+    isPrimary: index === 0,
+  }));
+}
+
 function stubElectronBridge(): void {
   vi.stubGlobal("window", {
     awaken: {
@@ -118,9 +133,14 @@ function stubElectronBridge(): void {
       reorderProjects: vi.fn(),
       detachProject: vi.fn(),
       deleteProjectThreads: vi.fn(),
-      trashProject: vi.fn(),
+      createProject: vi.fn(),
+      attachProjectFolder: vi.fn(),
+      detachProjectFolder: vi.fn(),
+      setPrimaryProjectFolder: vi.fn(),
+      trashProjectFolder: vi.fn(),
       getProjectOperation: vi.fn(),
       openArtifact: vi.fn(async () => ({ ok: true as const })),
+      revealPath: vi.fn(async () => ({ ok: true as const })),
       revealArtifact: vi.fn(async () => ({ ok: true as const })),
       startRun: vi.fn(),
       cancelRun: vi.fn(),
@@ -177,7 +197,7 @@ function stubElectronBridge(): void {
       getModelProfileBalances: vi.fn(async () => ({ balances: [] })),
       pickAttachments: vi.fn(async () => ({ canceled: true as const })),
       pickDirectory: vi.fn(async () => ({ canceled: true as const })),
-      pickWorkspace: vi.fn(async () => ({ canceled: true as const })),
+      pickProjectFolders: vi.fn(async () => ({ canceled: true as const })),
       validateWorkspace: vi.fn(async () => ({ valid: true as const })),
       getSupervisorStatus: vi.fn(async () => ({ status: "running" as const })),
       onSupervisorStatusChange: vi.fn(() => () => {}),
@@ -304,12 +324,15 @@ describe("shouldResetActiveThreadForWorkspaceChange", () => {
 
 describe("project ordering", () => {
   it("moves only the dragged top-level project around the target", () => {
-    expect(
-      reorderProjectIds(["a", "b", "c", "d"], "a", "c", "after"),
-    ).toEqual(["b", "c", "a", "d"]);
-    expect(
-      reorderProjectIds(["a", "b", "c", "d"], "d", "b", "before"),
-    ).toEqual(["a", "d", "b", "c"]);
+    expect(reorderProjectIds(["a", "b", "c", "d"], "a", "c", "after")).toEqual([
+      "b",
+      "c",
+      "a",
+      "d",
+    ]);
+    expect(reorderProjectIds(["a", "b", "c", "d"], "d", "b", "before")).toEqual(
+      ["a", "d", "b", "c"],
+    );
   });
 
   it("keeps the order stable for an invalid or self target", () => {
@@ -324,8 +347,20 @@ describe("project ordering", () => {
         ["project-b", DEFAULT_WORKSPACE_PROJECT_ID, "project-a"],
         "backend-default",
         [
-          { id: "project-a", backendProjectId: "backend-a", label: "A", path: "/a" },
-          { id: "project-b", backendProjectId: "backend-b", label: "B", path: "/b" },
+          {
+            id: "project-a",
+            backendProjectId: "backend-a",
+            label: "A",
+            path: "/a",
+            folders: userFolders("/a"),
+          },
+          {
+            id: "project-b",
+            backendProjectId: "backend-b",
+            label: "B",
+            path: "/b",
+            folders: userFolders("/b"),
+          },
         ],
       ),
     ).toEqual(["backend-b", "backend-default", "backend-a"]);
@@ -348,6 +383,7 @@ describe("resolveWorkspaceRootForRun", () => {
             id: "project-new",
             label: "new",
             path: "/tmp/new",
+            folders: userFolders("/tmp/new"),
           },
         ],
       }),
@@ -365,6 +401,7 @@ describe("resolveWorkspaceRootForRun", () => {
             id: "project-knowledge",
             label: "knowledge",
             path: "/tmp/knowledge",
+            folders: userFolders("/tmp/knowledge"),
           },
         ],
       }),
@@ -390,6 +427,337 @@ describe("resolveWorkspaceRootForRun", () => {
         defaultWorkspacePath: "/tmp/default",
         defaultProjectRemoved: true,
         projectsFromWorkspace: [],
+      }),
+    ).toBe("");
+  });
+
+  // A project created without a folder anchors nothing on disk. Borrowing the
+  // previous thread's directory would silently run the agent somewhere the user
+  // never associated with this project, so the root stays empty and the core
+  // resolves that project's own session workspace.
+  it("returns no root for a project that has no folder bound", () => {
+    const folderless = {
+      id: "project-folderless",
+      label: "folderless",
+      path: "",
+      folders: [],
+    };
+    expect(
+      resolveWorkspaceRootForRun({
+        workspacePath: "/tmp/previous",
+        activeThreadWorkspacePath: "/tmp/previous",
+        selectedProjectId: "project-folderless",
+        defaultWorkspacePath: "/tmp/default",
+        projectsFromWorkspace: [folderless],
+      }),
+    ).toBe("");
+  });
+
+  // An explicit target is a direct instruction and still wins, so opening a
+  // folder while a folder-less project is selected behaves normally.
+  it("still honours an explicit target for a folder-less project", () => {
+    expect(
+      resolveWorkspaceRootForRun({
+        workspaceTargetPath: "/tmp/picked",
+        selectedProjectId: "project-folderless",
+        defaultWorkspacePath: "/tmp/default",
+        projectsFromWorkspace: [
+          {
+            id: "project-folderless",
+            label: "folderless",
+            path: "",
+            folders: [],
+          },
+        ],
+      }),
+    ).toBe("/tmp/picked");
+  });
+
+  it("keeps using the bound folder once one is attached", () => {
+    expect(
+      resolveWorkspaceRootForRun({
+        selectedProjectId: "project-grown",
+        defaultWorkspacePath: "/tmp/default",
+        projectsFromWorkspace: [
+          {
+            id: "project-grown",
+            label: "grown",
+            path: "/tmp/grown",
+            folders: userFolders("/tmp/grown"),
+          },
+        ],
+      }),
+    ).toBe("/tmp/grown");
+  });
+});
+
+describe("picking several project folders at once", () => {
+  it("accepts every folder when nothing is taken", () => {
+    expect(
+      partitionPickedProjectFolders({
+        candidates: ["/tmp/a", "/tmp/b", "/tmp/c"],
+        attachedPaths: [],
+      }),
+    ).toEqual({ accepted: ["/tmp/a", "/tmp/b", "/tmp/c"], skipped: [] });
+  });
+
+  // One unusable folder must not cost the user the rest of the selection, which
+  // is the whole reason the picker reports a partition instead of failing.
+  it("keeps the usable folders and explains each one it skips", () => {
+    const result = partitionPickedProjectFolders({
+      candidates: ["/tmp/fresh", "/tmp/already", "/tmp/second"],
+      attachedPaths: ["/tmp/already"],
+    });
+    expect(result.accepted).toEqual(["/tmp/fresh", "/tmp/second"]);
+    expect(result.skipped).toEqual(["“already”已经在这个项目里。"]);
+  });
+
+  // A folder belonging to another project is not a reason to skip it: the same
+  // directory may be part of several projects.
+  it("accepts a folder that another project already holds", () => {
+    expect(
+      partitionPickedProjectFolders({
+        candidates: ["/tmp/shared"],
+        attachedPaths: ["/tmp/mine"],
+      }),
+    ).toEqual({ accepted: ["/tmp/shared"], skipped: [] });
+  });
+
+  // Accepted folders join the taken set, so two selections pointing at the same
+  // place cannot both be attached.
+  it("does not accept the same folder twice within one selection", () => {
+    const result = partitionPickedProjectFolders({
+      candidates: ["/tmp/docs", "/tmp/docs/", "/tmp/other"],
+      attachedPaths: [],
+    });
+    expect(result.accepted).toEqual(["/tmp/docs", "/tmp/other"]);
+    expect(result.skipped).toEqual(["“docs”已经在这个项目里。"]);
+  });
+});
+
+describe("multi-folder run scope", () => {
+  const multiFolderProject = {
+    id: "project-multi",
+    label: "multi",
+    path: "/tmp/primary",
+    folders: userFolders("/tmp/primary", "/tmp/secondary", "/tmp/docs"),
+  };
+
+  it("keeps the primary folder first and every other folder in project order", () => {
+    expect(workspaceProjectRunRoots(multiFolderProject)).toEqual([
+      "/tmp/primary",
+      "/tmp/secondary",
+      "/tmp/docs",
+    ]);
+    expect(
+      workspaceProjectRunRoots({
+        path: "/tmp/primary",
+        folders: [
+          { path: "/tmp/secondary", role: "user", isPrimary: false },
+          { path: "/tmp/primary", role: "user", isPrimary: true },
+        ],
+      }),
+    ).toEqual(["/tmp/primary", "/tmp/secondary"]);
+  });
+
+  it("expands the run scope for any folder of the project, not just the primary", () => {
+    expect(
+      resolveRunRootsForRun({
+        workspaceRoot: "/tmp/primary",
+        projectsFromWorkspace: [multiFolderProject],
+      }),
+    ).toEqual(["/tmp/primary", "/tmp/secondary", "/tmp/docs"]);
+  });
+
+  it("keeps a secondary-anchored run inside the whole project with its cwd first", () => {
+    expect(
+      resolveRunRootsForRun({
+        workspaceRoot: "/tmp/secondary",
+        projectsFromWorkspace: [multiFolderProject],
+      }),
+    ).toEqual(["/tmp/secondary", "/tmp/primary", "/tmp/docs"]);
+    expect(
+      resolveRunRootsForRun({
+        workspaceRoot: "/tmp/docs",
+        projectsFromWorkspace: [multiFolderProject],
+      }),
+    ).toEqual(["/tmp/docs", "/tmp/primary", "/tmp/secondary"]);
+  });
+
+  it("stays single-root for a path that belongs to no project", () => {
+    expect(
+      resolveRunRootsForRun({
+        workspaceRoot: "/tmp/unrelated",
+        projectsFromWorkspace: [multiFolderProject],
+      }),
+    ).toEqual(["/tmp/unrelated"]);
+    expect(
+      resolveRunRootsForRun({
+        workspaceRoot: "",
+        projectsFromWorkspace: [multiFolderProject],
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("resolveRunProjectForRun", () => {
+  const multiFolderProject = {
+    id: "project-multi",
+    label: "研发项目",
+    path: "/tmp/primary",
+    folders: userFolders("/tmp/primary", "/tmp/secondary"),
+  };
+
+  it("names the project a freshly created folder group belongs to", () => {
+    expect(
+      resolveRunProjectForRun({
+        workspaceRoot: "/tmp/primary",
+        selectedProjectId: "project-multi",
+        defaultWorkspacePath: "/tmp/awaken-default",
+        effectiveDefaultWorkspacePath: "/tmp/awaken-default",
+        projectsFromWorkspace: [multiFolderProject],
+      }),
+    ).toEqual({ projectId: "project-multi", projectName: "研发项目" });
+  });
+
+  // Re-primarying or continuing an older thread anchors the run on a secondary
+  // folder; the project identity must survive that, or the model loses its name.
+  it("names the project when the run is anchored on a secondary folder", () => {
+    expect(
+      resolveRunProjectForRun({
+        workspaceRoot: "/tmp/secondary",
+        selectedProjectId: "project-multi",
+        projectsFromWorkspace: [multiFolderProject],
+      }),
+    ).toEqual({ projectId: "project-multi", projectName: "研发项目" });
+  });
+
+  it("carries the identity of a folder-less project that has no root at all", () => {
+    expect(
+      resolveRunProjectForRun({
+        workspaceRoot: "",
+        selectedProjectId: "project-empty",
+        projectsFromWorkspace: [
+          multiFolderProject,
+          { id: "project-empty", label: "无文件夹项目", path: "", folders: [] },
+        ],
+      }),
+    ).toEqual({ projectId: "project-empty", projectName: "无文件夹项目" });
+  });
+
+  it("names the default workspace project from its path", () => {
+    expect(
+      resolveRunProjectForRun({
+        workspaceRoot: "/tmp/awaken-default",
+        selectedProjectId: DEFAULT_WORKSPACE_PROJECT_ID,
+        defaultWorkspacePath: "/tmp/awaken-default",
+        effectiveDefaultWorkspacePath: "/tmp/awaken-default",
+        projectsFromWorkspace: [multiFolderProject],
+      }),
+    ).toEqual({
+      projectId: DEFAULT_WORKSPACE_PROJECT_ID,
+      projectName: "awaken-default",
+    });
+  });
+
+  it("reports no project for a root outside every project", () => {
+    expect(
+      resolveRunProjectForRun({
+        workspaceRoot: "/tmp/unrelated",
+        selectedProjectId: "project-multi",
+        projectsFromWorkspace: [multiFolderProject],
+      }),
+    ).toEqual({});
+  });
+
+  describe("when a folder is shared between projects", () => {
+    const sharing = {
+      id: "project-sharing",
+      label: "共享方",
+      path: "/tmp/shared",
+      folders: userFolders("/tmp/shared", "/tmp/extra"),
+    };
+    const projects = [multiFolderProject, sharing];
+
+    // The path alone matches both projects, so the project the user picked wins.
+    it("follows the selected project rather than the first match", () => {
+      expect(
+        resolveRunProjectForRun({
+          workspaceRoot: "/tmp/shared",
+          selectedProjectId: "project-sharing",
+          projectsFromWorkspace: [
+            { ...multiFolderProject, folders: userFolders("/tmp/shared") },
+            sharing,
+          ],
+        }),
+      ).toEqual({ projectId: "project-sharing", projectName: "共享方" });
+    });
+
+    // Continuing an old thread anchors the run outside the selected project, so
+    // the path has to decide instead.
+    it("falls back to the path when the selection does not hold the root", () => {
+      expect(
+        resolveRunProjectForRun({
+          workspaceRoot: "/tmp/secondary",
+          selectedProjectId: "project-sharing",
+          projectsFromWorkspace: projects,
+        }),
+      ).toEqual({ projectId: "project-multi", projectName: "研发项目" });
+    });
+
+    // The roots must come from the same project the run is attributed to, or the
+    // model is shown another project's folder group.
+    it("takes the run roots from the attributed project", () => {
+      expect(
+        resolveRunRootsForRun({
+          workspaceRoot: "/tmp/shared",
+          projectsFromWorkspace: [
+            { ...multiFolderProject, folders: userFolders("/tmp/shared") },
+            sharing,
+          ],
+          projectId: "project-sharing",
+        }),
+      ).toEqual(["/tmp/shared", "/tmp/extra"]);
+    });
+  });
+});
+
+describe("sharedFolderTrashWarning", () => {
+  const projects = [
+    {
+      id: "project-a",
+      label: "甲项目",
+      folders: [{ path: "/tmp/shared" }, { path: "/tmp/only-a" }],
+    },
+    { id: "project-b", label: "乙项目", folders: [{ path: "/tmp/shared" }] },
+    { id: "project-c", label: "丙项目", folders: [{ path: "/tmp/shared" }] },
+  ];
+
+  it("names every other project that would lose the folder", () => {
+    expect(
+      sharedFolderTrashWarning({
+        folderPath: "/tmp/shared",
+        actingProjectId: "project-a",
+        projects,
+      }),
+    ).toBe("该文件夹同时属于“乙项目”、“丙项目”，也会一并从这些项目中移除。");
+  });
+
+  it("stays silent for a folder only this project holds", () => {
+    expect(
+      sharedFolderTrashWarning({
+        folderPath: "/tmp/only-a",
+        actingProjectId: "project-a",
+        projects,
+      }),
+    ).toBe("");
+  });
+
+  it("stays silent when there is no folder to trash", () => {
+    expect(
+      sharedFolderTrashWarning({
+        actingProjectId: "project-a",
+        projects,
       }),
     ).toBe("");
   });
@@ -1880,17 +2248,47 @@ describe("project workspace helpers", () => {
     },
   );
 
-  it("waits for the durable project state before reconciling a terminal trash operation", () => {
-    expect(canReconcileTrackedTrashOperation("failed", "trash_pending")).toBe(
-      false,
-    );
-    expect(canReconcileTrackedTrashOperation("failed", "active")).toBe(true);
+  it("reconciles a folder trash operation by whether the folder is still attached", () => {
+    const stillAttached = {
+      state: "active" as const,
+      folders: [{ path: "/tmp/primary" }, { path: "/tmp/secondary" }],
+    };
+    const detached = {
+      state: "active" as const,
+      folders: [{ path: "/tmp/primary" }],
+    };
+
     expect(
-      canReconcileTrackedTrashOperation("succeeded", "trash_pending"),
+      canReconcileTrackedTrashOperation(
+        "failed",
+        { ...stillAttached, state: "trash_pending" },
+        "/tmp/secondary",
+      ),
     ).toBe(false);
-    expect(canReconcileTrackedTrashOperation("succeeded", "removed")).toBe(
-      true,
-    );
+    expect(
+      canReconcileTrackedTrashOperation(
+        "failed",
+        stillAttached,
+        "/tmp/secondary",
+      ),
+    ).toBe(true);
+    expect(
+      canReconcileTrackedTrashOperation("failed", detached, "/tmp/secondary"),
+    ).toBe(false);
+    expect(
+      canReconcileTrackedTrashOperation(
+        "succeeded",
+        stillAttached,
+        "/tmp/secondary",
+      ),
+    ).toBe(false);
+    expect(
+      canReconcileTrackedTrashOperation(
+        "succeeded",
+        detached,
+        "/tmp/secondary",
+      ),
+    ).toBe(true);
   });
 
   it("persists valid trash trackers, removes malformed entries, and replaces duplicates", () => {
@@ -1898,7 +2296,8 @@ describe("project workspace helpers", () => {
       operationId: "operation-1",
       projectId: "project-ui-1",
       backendProjectId: "project-backend-1",
-      label: "待删除项目",
+      folderPath: "/tmp/secondary",
+      label: "待删除文件夹",
       wasExpanded: true,
     };
     expect(
@@ -1907,6 +2306,11 @@ describe("project workspace helpers", () => {
       ),
     ).toEqual([tracked]);
     expect(parseTrackedTrashOperations("not-json")).toEqual([]);
+    expect(
+      parseTrackedTrashOperations(
+        JSON.stringify([{ ...tracked, folderPath: undefined }]),
+      ),
+    ).toEqual([]);
     expect(
       upsertTrackedTrashOperation([tracked], {
         ...tracked,
@@ -1956,12 +2360,27 @@ describe("project workspace helpers", () => {
 
   it("removes folder projects", () => {
     const projects = [
-      { id: "project-demo", label: "demo", path: "/tmp/demo" },
-      { id: "project-keep", label: "keep", path: "/tmp/keep" },
+      {
+        id: "project-demo",
+        label: "demo",
+        path: "/tmp/demo",
+        folders: userFolders("/tmp/demo"),
+      },
+      {
+        id: "project-keep",
+        label: "keep",
+        path: "/tmp/keep",
+        folders: userFolders("/tmp/keep"),
+      },
     ];
 
     expect(removeWorkspaceProject(projects, "project-demo")).toEqual([
-      { id: "project-keep", label: "keep", path: "/tmp/keep" },
+      {
+        id: "project-keep",
+        label: "keep",
+        path: "/tmp/keep",
+        folders: userFolders("/tmp/keep"),
+      },
     ]);
   });
 });

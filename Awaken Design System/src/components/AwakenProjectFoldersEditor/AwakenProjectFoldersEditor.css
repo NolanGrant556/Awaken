@@ -1,0 +1,245 @@
+@import "../../tokens/components.css";
+
+.aw-project-folders-editor {
+  display: grid;
+  gap: var(--aw-space-2);
+  min-width: 0;
+}
+
+.aw-project-folders-editor__empty {
+  margin: 0;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-project-folders-editor__list {
+  display: grid;
+  gap: var(--aw-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aw-project-folders-editor__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--aw-space-3);
+  min-height: 48px;
+  padding: var(--aw-space-2) var(--aw-space-3);
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-white);
+}
+
+.aw-project-folders-editor__row[data-primary="true"] {
+  border-color: var(--aw-border-active);
+}
+
+.aw-project-folders-editor__row[data-busy="true"] {
+  opacity: 0.56;
+}
+
+.aw-project-folders-editor__row-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-secondary);
+}
+
+.aw-project-folders-editor__row-label {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-project-folders-editor__row-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--aw-space-2);
+}
+
+/* 徽章与切主按钮共用同一条宽度基线，两种行的 × 才不会左右错位。 */
+.aw-project-folders-editor__badge,
+.aw-project-folders-editor__make-primary {
+  min-width: 78px;
+  padding: 3px 10px;
+  border-radius: var(--aw-radius-pill);
+  font-size: var(--aw-font-size-xs);
+  line-height: 16px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.aw-project-folders-editor__badge {
+  border: 1px solid var(--aw-border-main);
+  background: transparent;
+  color: var(--aw-text-secondary);
+}
+
+.aw-project-folders-editor__make-primary {
+  border: 1px solid transparent;
+  background: var(--aw-bg-fill-main);
+  color: var(--aw-text-primary);
+  cursor: pointer;
+  /* 静默态保留占位，避免悬停时整行控件左右跳动。 */
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--aw-transition-fast),
+    background-color var(--aw-transition-fast);
+}
+
+.aw-project-folders-editor__row:hover .aw-project-folders-editor__make-primary,
+.aw-project-folders-editor__row:focus-within .aw-project-folders-editor__make-primary {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.aw-project-folders-editor__make-primary:hover:not(:disabled) {
+  background: var(--aw-bg-fill-dark);
+}
+
+.aw-project-folders-editor__make-primary:disabled {
+  cursor: not-allowed;
+}
+
+.aw-project-folders-editor__remove {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--aw-radius-compact);
+  background: transparent;
+  color: var(--aw-text-tertiary);
+  cursor: pointer;
+  transition:
+    background-color var(--aw-transition-fast),
+    color var(--aw-transition-fast);
+}
+
+.aw-project-folders-editor__remove:hover:not(:disabled),
+.aw-project-folders-editor__remove:focus-visible:not(:disabled) {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.aw-project-folders-editor__remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.aw-project-folders-editor__row-menu-trigger {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--aw-radius-compact);
+  background: transparent;
+  color: var(--aw-text-tertiary);
+  cursor: pointer;
+  transition:
+    background-color var(--aw-transition-fast),
+    color var(--aw-transition-fast);
+}
+
+.aw-project-folders-editor__row-menu-trigger:hover,
+.aw-project-folders-editor__row-menu-trigger:focus-visible {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.aw-project-folders-editor__row-menu-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.aw-project-folders-editor__menu {
+  display: grid;
+  gap: 2px;
+}
+
+.aw-project-folders-editor__menu-item {
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--aw-radius-compact);
+  background: transparent;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.aw-project-folders-editor__menu-item:hover:not(:disabled),
+.aw-project-folders-editor__menu-item:focus-visible:not(:disabled) {
+  background: var(--aw-bg-fill-light);
+}
+
+.aw-project-folders-editor__menu-item--danger {
+  color: var(--aw-status-danger);
+}
+
+.aw-project-folders-editor__menu-item--danger:hover:not(:disabled),
+.aw-project-folders-editor__menu-item--danger:focus-visible:not(:disabled) {
+  background: var(--aw-surface-danger);
+  color: var(--aw-status-danger);
+}
+
+.aw-project-folders-editor__menu-item:disabled {
+  color: var(--aw-text-muted);
+  cursor: not-allowed;
+}
+
+.aw-project-folders-editor__add {
+  display: flex;
+  align-items: center;
+  gap: var(--aw-space-2);
+  min-height: 44px;
+  padding: var(--aw-space-2) var(--aw-space-3);
+  border: 1px dashed var(--aw-border-control);
+  border-radius: var(--aw-radius-md);
+  background: transparent;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--aw-transition-fast),
+    border-color var(--aw-transition-fast),
+    color var(--aw-transition-fast);
+}
+
+.aw-project-folders-editor__add:hover:not(:disabled),
+.aw-project-folders-editor__add:focus-visible:not(:disabled) {
+  border-color: var(--aw-border-control-hover);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.aw-project-folders-editor__add:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.aw-project-folders-editor__add-icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-secondary);
+}

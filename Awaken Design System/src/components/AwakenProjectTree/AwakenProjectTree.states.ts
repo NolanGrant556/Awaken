@@ -77,6 +77,59 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
     } as unknown as Partial<ComponentProps<typeof AwakenProjectTree>>,
   },
   {
+    id: "hover-card-folders",
+    label: "悬停展示文件夹组成",
+    props: {
+      items: [
+        {
+          id: "multi-folder",
+          label: "Awaken 开发",
+          kind: "project",
+          path: "/Users/nolangrant/Awaken",
+          action: createElement(
+            AwakenSidebarSectionAction,
+            {
+              label: "新建会话",
+              children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
+            },
+          ),
+          menuItems: [
+            { id: "add-project-folder", label: "添加文件夹" },
+            { id: "edit-project", label: "编辑项目" },
+          ],
+          hoverCard: {
+            title: "Awaken 开发",
+            summary: "3 个对话串",
+            folders: [
+              { path: "/Users/nolangrant/Awaken", label: "Awaken" },
+              { path: "/Users/nolangrant/Codex 源代码", label: "Codex 源代码" },
+              { path: "/Users/nolangrant/claudecode源代码", label: "claudecode源代码" },
+            ],
+            revealHint: "在文件管理器中显示：",
+            actionLabel: "编辑项目",
+            onRevealFolder: noop,
+            onAction: noop,
+          },
+        },
+        {
+          id: "no-folder",
+          label: "只聊天的项目",
+          kind: "project",
+          hoverCard: {
+            title: "只聊天的项目",
+            summary: "暂无对话串",
+            folders: [],
+            emptyFoldersLabel: "这个项目还没有文件夹",
+            actionLabel: "编辑项目",
+            onAction: noop,
+          },
+        },
+      ],
+      activeId: "multi-folder",
+      onSelect: noop,
+    } as unknown as Partial<ComponentProps<typeof AwakenProjectTree>>,
+  },
+  {
     id: "loading-node",
     label: "节点加载中",
     props: {

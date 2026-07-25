@@ -66,7 +66,7 @@ export function AwakenTooltip({
             {...getFloatingProps()}
             style={{
               ...floatingStyles,
-              zIndex: 30,
+              zIndex: "var(--aw-z-tooltip)",
               maxWidth: 260,
               padding: "6px 8px",
               border: "1px solid var(--aw-border-main)",

@@ -432,6 +432,8 @@ func (rb *RequestBuilder) buildRuntimeSnapshot(tools []tool.ToolSchema) RuntimeS
 		ToolSummary:      rb.runtimeInfo.ToolSummary,
 		SkillSummary:     rb.runtimeInfo.SkillSummary,
 		ScopeID:          permissionContext.ScopeID,
+		ProjectName:      strings.TrimSpace(rb.config.Workspace.ProjectName),
+		ProjectFolders:   projectFolderObservations(rb.config.Workspace, permissionContext),
 		WorkspaceRoot:    permissionContext.WorkspaceRoot,
 		ReadableRoots:    append([]string(nil), permissionContext.ReadableRoots...),
 		WritableRoots:    append([]string(nil), permissionContext.WritableRoots...),
@@ -460,6 +462,28 @@ func (rb *RequestBuilder) buildRuntimeSnapshot(tools []tool.ToolSchema) RuntimeS
 	return snapshot
 }
 
+// projectFolderObservations describes the project's folder group as the model
+// should see it. The readable roots are that group, ordered with the thread's
+// working directory first. A folder-less project is the one case where the root
+// is Awaken's own session directory, so it reports no folders rather than
+// presenting an internal path as something the user picked.
+func projectFolderObservations(workspace TaskScope, permissionContext tool.PermissionContext) []ProjectFolderObservation {
+	if workspace.SessionWorkspace {
+		return nil
+	}
+	folders := make([]ProjectFolderObservation, 0, len(permissionContext.ReadableRoots))
+	for _, root := range permissionContext.ReadableRoots {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		folders = append(folders, ProjectFolderObservation{
+			Path:      root,
+			IsPrimary: root == permissionContext.WorkspaceRoot,
+		})
+	}
+	return folders
+}
+
 func (rb *RequestBuilder) buildToolSummary(tools []tool.ToolSchema) string {
 	if len(tools) == 0 {
 		return "无可用工具"
@@ -475,11 +499,26 @@ func (rb *RequestBuilder) buildToolSummary(tools []tool.ToolSchema) string {
 	return summary
 }
 
+// runtimeSnapshotIdentity is the fingerprint that decides whether the runtime
+// context the model was given still holds. The project identity belongs in it
+// because renaming a project or re-pointing its folder group changes the system
+// prompt without touching the working directory.
+func runtimeSnapshotIdentity(snapshot RuntimeSnapshot) string {
+	folders := make([]string, 0, len(snapshot.ProjectFolders))
+	for _, folder := range snapshot.ProjectFolders {
+		folders = append(folders, folder.Path)
+	}
+	return snapshot.WorkingDirectory + "|" + snapshot.ModelName + "|" + snapshot.EntryPoint +
+		"|skills:" + snapshot.SkillSummary + "|tools:" + snapshot.ToolSnapshotID +
+		"|env:" + snapshot.EnvironmentID + "|project:" + snapshot.ProjectName +
+		"|folders:" + strings.Join(folders, ";")
+}
+
 func (rb *RequestBuilder) buildCacheKeys(staticContent string, tools []tool.ToolSchema, snapshot RuntimeSnapshot) []ContextCacheKey {
 	return []ContextCacheKey{
 		{Name: "system_prompt", Value: fmt.Sprintf("len:%d", len(staticContent))},
 		{Name: "tool_pool", Value: rb.buildToolSummary(tools)},
-		{Name: "runtime_snapshot", Value: snapshot.WorkingDirectory + "|" + snapshot.ModelName + "|" + snapshot.EntryPoint + "|skills:" + snapshot.SkillSummary + "|tools:" + snapshot.ToolSnapshotID + "|env:" + snapshot.EnvironmentID},
+		{Name: "runtime_snapshot", Value: runtimeSnapshotIdentity(snapshot)},
 	}
 }
 
@@ -487,7 +526,7 @@ func (rb *RequestBuilder) buildContextDeltas(snapshot RuntimeSnapshot, tools []t
 	return []ContextDelta{
 		{
 			Type:    ContextDeltaRuntimeSnapshot,
-			Summary: snapshot.WorkingDirectory + "|" + snapshot.ModelName + "|" + snapshot.EntryPoint + "|skills:" + snapshot.SkillSummary + "|tools:" + snapshot.ToolSnapshotID + "|env:" + snapshot.EnvironmentID,
+			Summary: runtimeSnapshotIdentity(snapshot),
 		},
 		{
 			Type:    ContextDeltaToolPool,
@@ -529,7 +568,7 @@ func BuildRequest(config AgentConfig, ctx ContextProvider) LLMRequest {
 }
 
 func permissionContextFromTaskScope(scope WorkspaceConfig) tool.PermissionContext {
-	return tool.NewTaskScopePermissionContext(
+	permissionContext := tool.NewTaskScopePermissionContext(
 		scope.ScopeID,
 		scope.Root,
 		scope.ReadableRoots,
@@ -539,4 +578,6 @@ func permissionContextFromTaskScope(scope WorkspaceConfig) tool.PermissionContex
 		scope.ProtectedRoots,
 		scope.TemporaryWorkRoot,
 	)
+	permissionContext.ProtectedRootExceptions = scope.ProtectedRootExceptions
+	return permissionContext.Normalize()
 }

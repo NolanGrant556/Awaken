@@ -554,6 +554,88 @@ func TestRequestBuilderDegradesWhenMemoryProviderFails(t *testing.T) {
 	}
 }
 
+func TestRequestBuilderSendsTheProjectFolderGroupToTheModel(t *testing.T) {
+	ctx := convcontext.New()
+	ctx.AddUserMessage("hello")
+	base := t.TempDir()
+	primary := filepath.Join(base, "01_汇总")
+	secondary := filepath.Join(base, "02_跟踪")
+
+	builder := NewRequestBuilder(AgentConfig{
+		SystemPrompt: "static {{.RuntimeInfo}}",
+		ModelConfig:  ModelConfig{Model: "test-model"},
+		Workspace: WorkspaceConfig{
+			ProjectName:   "测试项目",
+			Root:          primary,
+			ReadableRoots: []string{primary, secondary},
+		},
+	})
+
+	envelope := builder.BuildContextEnvelope(ctx, nil)
+	snapshot := envelope.RuntimeSnapshot
+	if snapshot.ProjectName != "测试项目" {
+		t.Fatalf("project name lost: %+v", snapshot)
+	}
+	if len(snapshot.ProjectFolders) != 2 {
+		t.Fatalf("expected both folders, got %+v", snapshot.ProjectFolders)
+	}
+	if snapshot.ProjectFolders[0].Path != primary || !snapshot.ProjectFolders[0].IsPrimary {
+		t.Fatalf("working directory must be the primary folder: %+v", snapshot.ProjectFolders)
+	}
+	if snapshot.ProjectFolders[1].IsPrimary {
+		t.Fatalf("secondary folder marked primary: %+v", snapshot.ProjectFolders)
+	}
+
+	// The folder group only counts if it survives into the prompt the provider
+	// actually receives.
+	request := builder.BuildLLMRequestFromEnvelope(envelope)
+	if !strings.Contains(request.SystemPrompt, "**当前项目**: 测试项目") {
+		t.Fatalf("project name missing from system prompt: %s", request.SystemPrompt)
+	}
+	if !strings.Contains(request.SystemPrompt, secondary) {
+		t.Fatalf("secondary folder missing from system prompt: %s", request.SystemPrompt)
+	}
+}
+
+func TestRequestBuilderKeepsASessionWorkspaceOutOfTheProjectFolderGroup(t *testing.T) {
+	ctx := convcontext.New()
+	ctx.AddUserMessage("hello")
+	sessionRoot := filepath.Join(t.TempDir(), "sessions", "project_1", "workspace")
+
+	builder := NewRequestBuilder(AgentConfig{
+		SystemPrompt: "static {{.RuntimeInfo}}",
+		ModelConfig:  ModelConfig{Model: "test-model"},
+		Workspace: WorkspaceConfig{
+			ProjectName:      "空项目",
+			Root:             sessionRoot,
+			SessionWorkspace: true,
+		},
+	})
+
+	envelope := builder.BuildContextEnvelope(ctx, nil)
+	if len(envelope.RuntimeSnapshot.ProjectFolders) != 0 {
+		t.Fatalf("Awaken's own session directory is not a user folder: %+v", envelope.RuntimeSnapshot.ProjectFolders)
+	}
+	request := builder.BuildLLMRequestFromEnvelope(envelope)
+	if !strings.Contains(request.SystemPrompt, "未绑定文件夹") {
+		t.Fatalf("expected the folder-less note, got %s", request.SystemPrompt)
+	}
+}
+
+func TestRuntimeSnapshotIdentityTracksProjectIdentity(t *testing.T) {
+	base := RuntimeSnapshot{WorkingDirectory: "/data/a", ProjectName: "one"}
+	renamed := base
+	renamed.ProjectName = "two"
+	if runtimeSnapshotIdentity(base) == runtimeSnapshotIdentity(renamed) {
+		t.Fatal("a rename must change the runtime snapshot fingerprint")
+	}
+	regrouped := base
+	regrouped.ProjectFolders = []ProjectFolderObservation{{Path: "/data/b"}}
+	if runtimeSnapshotIdentity(base) == runtimeSnapshotIdentity(regrouped) {
+		t.Fatal("a changed folder group must change the runtime snapshot fingerprint")
+	}
+}
+
 func TestRequestBuilderBuildsContextEnvelope(t *testing.T) {
 	ctx := convcontext.New()
 	ctx.AddUserMessage("hello")

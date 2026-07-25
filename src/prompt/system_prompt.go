@@ -2,6 +2,7 @@ package prompt
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -39,25 +40,61 @@ func (p *SystemPrompt) buildEffectivePrompt() string {
 // RuntimeInfo placeholder. Keeping this formatter public lets context
 // accounting attribute the runtime leaf without parsing prompt prose.
 func FormatRuntimeInfo(info RuntimeInfo) string {
-	runtimeInfoStr := fmt.Sprintf(
-		"### 当前运行环境\n\n"+
-			"- **工作目录**: %s\n"+
-			"- **当前日期**: %s\n"+
+	var builder strings.Builder
+	builder.WriteString("### 当前运行环境\n\n")
+	if name := strings.TrimSpace(info.ProjectName); name != "" {
+		builder.WriteString(fmt.Sprintf("- **当前项目**: %s\n", name))
+	}
+	builder.WriteString(fmt.Sprintf("- **工作目录**: %s\n", info.WorkingDir))
+	if folders := formatRuntimeProjectFolders(info); folders != "" {
+		builder.WriteString(folders)
+	}
+	builder.WriteString(fmt.Sprintf(
+		"- **当前日期**: %s\n"+
 			"- **当前模型**: %s\n"+
 			"- **入口方式**: %s\n"+
 			"- **可用工具**: %s\n"+
 			"- **可用 Skills**: %s",
-		info.WorkingDir,
 		info.CurrentDate,
 		info.ModelName,
 		info.EntryPoint,
 		info.ToolSummary,
 		info.SkillSummary,
-	)
+	))
 	if len(info.AttachedFiles) > 0 {
-		runtimeInfoStr += "\n- **已授权附件**:\n" + formatRuntimeAttachedFiles(info.AttachedFiles)
+		builder.WriteString("\n- **已授权附件**:\n" + formatRuntimeAttachedFiles(info.AttachedFiles))
 	}
-	return runtimeInfoStr
+	return builder.String()
+}
+
+// formatRuntimeProjectFolders renders the project's folder group. A single
+// folder is left out because the working directory line already names it; the
+// listing exists so a multi-folder project stops looking like a lone directory
+// with unrelated siblings above it.
+func formatRuntimeProjectFolders(info RuntimeInfo) string {
+	if len(info.ProjectFolders) == 0 {
+		if strings.TrimSpace(info.ProjectName) == "" {
+			return ""
+		}
+		return "- **项目文件夹**: 无（该项目未绑定文件夹，工作目录是 Awaken 为它准备的会话目录）\n"
+	}
+	if len(info.ProjectFolders) < 2 {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString("- **项目文件夹**:\n")
+	for _, folder := range info.ProjectFolders {
+		path := strings.TrimSpace(folder.Path)
+		if path == "" {
+			continue
+		}
+		suffix := ""
+		if folder.IsPrimary {
+			suffix = "（主文件夹，即当前工作目录）"
+		}
+		builder.WriteString(fmt.Sprintf("  - %s%s: %s\n", filepath.Base(path), suffix, path))
+	}
+	return builder.String()
 }
 
 func formatRuntimeAttachedFiles(files []RuntimeAttachedFile) string {

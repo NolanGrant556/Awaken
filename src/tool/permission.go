@@ -105,14 +105,21 @@ type PermissionDecision struct {
 }
 
 type PermissionContext struct {
-	ScopeID           string
-	WorkspaceRoot     string
-	ReadableRoots     []string
-	WritableRoots     []string
-	OutputRoots       []string
-	AttachedFiles     []ScopedFile
-	ProtectedRoots    []string
-	TemporaryWorkRoot string
+	ScopeID        string
+	WorkspaceRoot  string
+	ReadableRoots  []string
+	WritableRoots  []string
+	OutputRoots    []string
+	AttachedFiles  []ScopedFile
+	ProtectedRoots []string
+	// ProtectedRootExceptions are narrow carve-outs inside an otherwise
+	// protected subtree. They exist because Awaken keeps managed project
+	// working directories under its own business-data root, which is protected
+	// as a whole. Only the listed subtrees are released, and the rules that
+	// apply inside any working directory (.git, .env, credential files) still
+	// hold there, so the default stays fail-closed.
+	ProtectedRootExceptions []string
+	TemporaryWorkRoot       string
 }
 
 type permissionContextKey struct{}
@@ -193,6 +200,11 @@ func NewTaskScopePermissionContext(
 func (c PermissionContext) Normalize() PermissionContext {
 	root, ok := absoluteCleanRoot(c.WorkspaceRoot)
 	if !ok {
+		// Unreachable from a run: the runtime resolves every scope to a real
+		// directory, giving a project with no folder bound its own session
+		// workspace. This last resort only keeps a directly constructed context
+		// usable, and it is why relative paths must never be the way a caller
+		// reaches outside the project.
 		root, _ = absoluteCleanRoot(".")
 	}
 
@@ -243,6 +255,13 @@ func (c PermissionContext) Normalize() PermissionContext {
 		}
 	}
 
+	protectedRootExceptions := make([]string, 0, len(c.ProtectedRootExceptions))
+	for _, candidate := range c.ProtectedRootExceptions {
+		if normalized, ok := AbsoluteCleanPath(candidate, root); ok {
+			protectedRootExceptions = append(protectedRootExceptions, normalized)
+		}
+	}
+
 	temporaryWorkRoot := strings.TrimSpace(c.TemporaryWorkRoot)
 	if normalized, ok := AbsoluteCleanPath(temporaryWorkRoot, root); ok {
 		temporaryWorkRoot = normalized
@@ -251,14 +270,15 @@ func (c PermissionContext) Normalize() PermissionContext {
 	}
 
 	return PermissionContext{
-		ScopeID:           strings.TrimSpace(c.ScopeID),
-		WorkspaceRoot:     root,
-		ReadableRoots:     dedupeStrings(readableRoots),
-		WritableRoots:     dedupeStrings(writableRoots),
-		OutputRoots:       dedupeStrings(outputRoots),
-		AttachedFiles:     dedupeScopedFiles(attachedFiles),
-		ProtectedRoots:    dedupeStrings(protectedRoots),
-		TemporaryWorkRoot: temporaryWorkRoot,
+		ScopeID:                 strings.TrimSpace(c.ScopeID),
+		WorkspaceRoot:           root,
+		ReadableRoots:           dedupeStrings(readableRoots),
+		WritableRoots:           dedupeStrings(writableRoots),
+		OutputRoots:             dedupeStrings(outputRoots),
+		AttachedFiles:           dedupeScopedFiles(attachedFiles),
+		ProtectedRoots:          dedupeStrings(protectedRoots),
+		ProtectedRootExceptions: dedupeStrings(protectedRootExceptions),
+		TemporaryWorkRoot:       temporaryWorkRoot,
 	}
 }
 
@@ -374,14 +394,19 @@ func (c PermissionContext) ResolveACPCwd(cwd string) (string, error) {
 		return "", fmt.Errorf("cwd %q resolves outside workspace root", cwd)
 	}
 
+	exception := narrowestContainingRoot(realPath, normalized.resolvedProtectedRootExceptions())
 	for _, protectedRoot := range normalized.ProtectedRoots {
 		realProtected, err := ResolvePathWithExistingAncestor(protectedRoot)
 		if err != nil {
 			continue
 		}
-		if PathWithinRoot(realPath, realProtected) {
-			return "", fmt.Errorf("cwd %q is inside protected task-scope root %q", cwd, protectedRoot)
+		if !PathWithinRoot(realPath, realProtected) {
+			continue
 		}
+		if exception != "" && PathWithinRoot(exception, realProtected) {
+			continue
+		}
+		return "", fmt.Errorf("cwd %q is inside protected task-scope root %q", cwd, protectedRoot)
 	}
 
 	if err := normalized.checkResolvedSensitiveAbsolutePath(realPath); err != nil {
@@ -408,16 +433,20 @@ func (c PermissionContext) IsWithinWorkspaceResolved(path string) bool {
 	return PathWithinRoot(realPath, realRoot)
 }
 
-// ResolveReadablePathChecked enforces readable_roots after resolving symlinks.
-// Attached file references are an explicit read grant and may live outside the
-// workspace roots.
+// ResolveReadablePathChecked turns a tool-provided path into an absolute path.
+//
+// Roots describe where work happens by default, not what the agent is allowed
+// to touch: a relative path resolves against the primary folder, while an
+// absolute path is honoured wherever it points. Confining reads to the roots
+// would only have constrained the structured tools, because Bash runs arbitrary
+// commands with no path check at all, so the fence pushed out-of-scope work
+// into shell invocations instead of preventing it.
 func (c PermissionContext) ResolveReadablePathChecked(path string) (string, error) {
 	normalized := c.Normalize()
 	if attachedPath, ok, err := normalized.resolveAttachedFileReference(path); ok || err != nil {
 		return attachedPath, err
 	}
-	resolved, _, err := normalized.resolvePathWithinRootsChecked(path, normalized.ReadableRoots, "readable")
-	return resolved, err
+	return normalized.resolvePath(path), nil
 }
 
 // ResolvePathChecked preserves the historical API name for read-tool callers.
@@ -425,35 +454,39 @@ func (c PermissionContext) ResolvePathChecked(path string) (string, error) {
 	return c.ResolveReadablePathChecked(path)
 }
 
+// ResolveWritablePathChecked resolves a path a caller intends to modify. It
+// carries the mutation policy rather than a bare resolution, so a caller that
+// reaches for the "writable" name cannot accidentally skip the sensitive-path
+// checks now that writable roots no longer form a boundary.
 func (c PermissionContext) ResolveWritablePathChecked(path string) (string, error) {
-	normalized := c.Normalize()
-	resolved, _, err := normalized.resolvePathWithinRootsChecked(path, normalized.WritableRoots, "writable")
-	return resolved, err
+	return c.ResolveMutationPathChecked(path)
 }
 
+// ResolveOutputPathChecked resolves a path that is read or inspected as a
+// produced artifact. Output roots are where such files are expected to live,
+// not where they are required to live, so this is a plain resolution.
 func (c PermissionContext) ResolveOutputPathChecked(path string) (string, error) {
-	normalized := c.Normalize()
-	resolved, _, err := normalized.resolvePathWithinRootsChecked(path, normalized.OutputRoots, "output")
-	return resolved, err
+	return c.ResolveReadablePathChecked(path)
 }
 
-// ResolveMutationPathChecked is like ResolvePathChecked but additionally
-// rejects paths that the runtime considers sensitive (e.g. .git/, .env, key
-// files, agent metadata directories). Use this for any file-chain mutation
-// (write/delete) path resolution. Reads must continue to use ResolvePathChecked
-// so that sensitive paths remain readable.
+// ResolveMutationPathChecked resolves a mutation target and applies the
+// sensitive-path policy to both the lexical path and its symlink destination.
+// Use it for any file-chain mutation (write/edit/delete).
+//
+// Like reads, mutations are not fenced to the roots. What stays denied is a
+// fixed set of shapes that a mutation is never meant to hit -- .git internals,
+// .env, key material, shell profiles and Awaken's own state directory -- so an
+// out-of-scope write succeeds while a write that would corrupt a repository or
+// the agent's own store still fails.
 func (c PermissionContext) ResolveMutationPathChecked(path string) (string, error) {
-	normalized := c.Normalize()
-	return normalized.resolveMutationPathWithinRootsChecked(path, normalized.WritableRoots, "writable")
+	return c.Normalize().resolveMutationPath(path)
 }
 
-// ResolveOutputMutationPathChecked enforces the output-root boundary and the
-// mutation sensitive/protected-path policy against both the lexical path and
-// its symlink-resolved destination. Use this for tools that publish or replace
-// files in OutputRoots.
+// ResolveOutputMutationPathChecked resolves a publish/replace target. Output
+// roots are the default destination for produced files; the path itself is
+// subject to the same sensitive-path policy as any other mutation.
 func (c PermissionContext) ResolveOutputMutationPathChecked(path string) (string, error) {
-	normalized := c.Normalize()
-	return normalized.resolveMutationPathWithinRootsChecked(path, normalized.OutputRoots, "output")
+	return c.Normalize().resolveMutationPath(path)
 }
 
 // RecoverableDeletePathError reports a path that cannot safely enter the
@@ -529,7 +562,7 @@ func samePermissionPath(left, right string) bool {
 	return PathWithinRoot(left, right) && PathWithinRoot(right, left)
 }
 
-func (c PermissionContext) resolveMutationPathWithinRootsChecked(path string, roots []string, rootKind string) (string, error) {
+func (c PermissionContext) resolveMutationPath(path string) (string, error) {
 	resolved := c.resolvePath(path)
 	if err := c.checkSensitiveAbsolutePath(resolved); err != nil {
 		return "", err
@@ -541,68 +574,7 @@ func (c PermissionContext) resolveMutationPathWithinRootsChecked(path string, ro
 	if err := c.checkResolvedSensitiveAbsolutePath(realPath); err != nil {
 		return "", err
 	}
-	if err := checkPathWithinRealRoots(path, resolved, realPath, roots, rootKind); err != nil {
-		return "", err
-	}
 	return resolved, nil
-}
-
-func (c PermissionContext) resolvePathWithinRootsChecked(path string, roots []string, rootKind string) (string, string, error) {
-	resolved := c.resolvePath(path)
-	lexicallyAllowed := false
-	for _, root := range roots {
-		if PathWithinRoot(resolved, root) {
-			lexicallyAllowed = true
-			break
-		}
-	}
-	if !lexicallyAllowed {
-		return "", "", fmt.Errorf("path %q resolves to %q which is outside %s roots", path, resolved, rootKind)
-	}
-
-	realPath, err := ResolvePathWithExistingAncestor(resolved)
-	if err != nil {
-		return "", "", fmt.Errorf("path %q cannot be resolved safely inside %s roots: %w", path, rootKind, err)
-	}
-	if err := checkPathWithinRealRoots(path, resolved, realPath, roots, rootKind); err != nil {
-		return "", "", err
-	}
-	return resolved, realPath, nil
-}
-
-func checkPathWithinRealRoots(path, resolved, realPath string, roots []string, rootKind string) error {
-	lexicallyAllowed := false
-	for _, root := range roots {
-		if PathWithinRoot(resolved, root) {
-			lexicallyAllowed = true
-			break
-		}
-	}
-	if !lexicallyAllowed {
-		return fmt.Errorf("path %q resolves to %q which is outside %s roots", path, resolved, rootKind)
-	}
-
-	resolvedRootCount := 0
-	for _, root := range roots {
-		realRoot, err := ResolvePathWithExistingAncestor(root)
-		if err != nil {
-			continue
-		}
-		resolvedRootCount++
-		if PathWithinRoot(realPath, realRoot) {
-			return nil
-		}
-	}
-	if resolvedRootCount == 0 {
-		return fmt.Errorf("path %q cannot be checked because no %s root resolves safely", path, rootKind)
-	}
-	return fmt.Errorf(
-		"path %q resolves through symlinks from %q to %q which is outside real %s roots",
-		path,
-		resolved,
-		realPath,
-		rootKind,
-	)
 }
 
 // ResolvePathWithExistingAncestor resolves every symlink in an existing path.
@@ -735,34 +707,8 @@ func (m SensitivePathMatcher) IsSensitive(path string) (bool, string) {
 	base := filepath.Base(cleaned)
 	lowerBase := strings.ToLower(base)
 
-	// Protected directories anywhere in the path hierarchy.
-	for _, component := range strings.Split(filepath.ToSlash(cleaned), "/") {
-		if reason, ok := sensitivePathComponents[component]; ok {
-			return true, reason
-		}
-	}
-
-	// .env files: basename ".env" or starting with ".env.". This
-	// intentionally covers ".env.example" as well — denying is safer than
-	// allowing, because templates are easy to mistake for real secret files.
-	if base == ".env" || strings.HasPrefix(base, ".env.") {
-		return true, ".env file may contain secrets"
-	}
-
-	// Key/certificate extensions. Check all dot-separated extension
-	// components so that backups like "server.pem.bak" are still flagged.
-	parts := strings.Split(lowerBase, ".")
-	for _, part := range parts[1:] {
-		if reason, ok := sensitiveExtensions["."+part]; ok {
-			return true, reason
-		}
-	}
-
-	// Basenames containing sensitive tokens (id_rsa, credentials, etc.).
-	for _, token := range sensitiveTokens {
-		if strings.Contains(lowerBase, token) {
-			return true, "key/credential file"
-		}
+	if sensitive, reason := sensitivePathShape(cleaned); sensitive {
+		return true, reason
 	}
 
 	// Agent metadata directory: ~/.awaken and ~/.trae-cn.
@@ -791,6 +737,59 @@ func (m SensitivePathMatcher) IsSensitive(path string) (bool, string) {
 	return false, ""
 }
 
+// IsSensitiveBelow applies only the location-independent rules to the part of
+// path that lives below root. It exists for roots that are an explicit carve-out
+// from an otherwise protected subtree: the carve-out must stop the enclosing
+// location rule from matching, without also unlocking `.git`, `.env` or
+// credential files inside the carve-out itself.
+func (m SensitivePathMatcher) IsSensitiveBelow(root, path string) (bool, string) {
+	relative, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+	if err != nil || relative == "." {
+		return false, ""
+	}
+	return sensitivePathShape(relative)
+}
+
+// sensitivePathShape holds the rules that depend only on the shape of a path:
+// protected directory components, .env files, key/certificate extensions and
+// credential-looking basenames.
+func sensitivePathShape(path string) (bool, string) {
+	base := filepath.Base(path)
+	lowerBase := strings.ToLower(base)
+
+	// Protected directories anywhere in the path hierarchy.
+	for _, component := range strings.Split(filepath.ToSlash(path), "/") {
+		if reason, ok := sensitivePathComponents[component]; ok {
+			return true, reason
+		}
+	}
+
+	// .env files: basename ".env" or starting with ".env.". This
+	// intentionally covers ".env.example" as well — denying is safer than
+	// allowing, because templates are easy to mistake for real secret files.
+	if base == ".env" || strings.HasPrefix(base, ".env.") {
+		return true, ".env file may contain secrets"
+	}
+
+	// Key/certificate extensions. Check all dot-separated extension
+	// components so that backups like "server.pem.bak" are still flagged.
+	parts := strings.Split(lowerBase, ".")
+	for _, part := range parts[1:] {
+		if reason, ok := sensitiveExtensions["."+part]; ok {
+			return true, reason
+		}
+	}
+
+	// Basenames containing sensitive tokens (id_rsa, credentials, etc.).
+	for _, token := range sensitiveTokens {
+		if strings.Contains(lowerBase, token) {
+			return true, "key/credential file"
+		}
+	}
+
+	return false, ""
+}
+
 // IsSensitivePath reports whether path is considered sensitive for mutation
 // purposes. The path is resolved against the workspace root before checking.
 // Sensitive paths are denied for writes/deletes regardless of whether they
@@ -810,7 +809,19 @@ func (c PermissionContext) CheckSensitivePath(path string) error {
 }
 
 func (c PermissionContext) checkSensitiveAbsolutePath(path string) error {
-	return checkSensitiveAbsolutePathAgainst(path, c.ProtectedRoots, NewSensitivePathMatcher())
+	return checkSensitiveAbsolutePathAgainst(path, c.ProtectedRoots, c.ProtectedRootExceptions, NewSensitivePathMatcher())
+}
+
+// resolvedProtectedRootExceptions resolves carve-out roots through symlinks so
+// they can be compared against already-resolved real paths.
+func (c PermissionContext) resolvedProtectedRootExceptions() []string {
+	exceptions := make([]string, 0, len(c.ProtectedRootExceptions))
+	for _, exception := range c.ProtectedRootExceptions {
+		if realException, err := ResolvePathWithExistingAncestor(exception); err == nil {
+			exceptions = append(exceptions, realException)
+		}
+	}
+	return exceptions
 }
 
 func (c PermissionContext) checkResolvedSensitiveAbsolutePath(realPath string) error {
@@ -820,6 +831,7 @@ func (c PermissionContext) checkResolvedSensitiveAbsolutePath(realPath string) e
 			protectedRoots = append(protectedRoots, realProtectedRoot)
 		}
 	}
+	exceptions := c.resolvedProtectedRootExceptions()
 
 	matcher := NewSensitivePathMatcher()
 	if matcher.HomeDir != "" {
@@ -832,20 +844,49 @@ func (c PermissionContext) checkResolvedSensitiveAbsolutePath(realPath string) e
 			matcher.ConfigDir = realConfigDir
 		}
 	}
-	return checkSensitiveAbsolutePathAgainst(realPath, protectedRoots, matcher)
+	return checkSensitiveAbsolutePathAgainst(realPath, protectedRoots, exceptions, matcher)
 }
 
-func checkSensitiveAbsolutePathAgainst(path string, protectedRoots []string, matcher SensitivePathMatcher) error {
+func checkSensitiveAbsolutePathAgainst(path string, protectedRoots, exceptions []string, matcher SensitivePathMatcher) error {
+	exception := narrowestContainingRoot(path, exceptions)
 	for _, protectedRoot := range protectedRoots {
-		if PathWithinRoot(path, protectedRoot) {
-			return &SensitivePathError{Path: path, Reason: "protected task-scope root"}
+		if !PathWithinRoot(path, protectedRoot) {
+			continue
 		}
+		// A protected root that encloses the carve-out is what the carve-out
+		// exists to release. One that sits inside the carve-out still applies,
+		// so per-folder protections such as `<root>/.git` keep working.
+		if exception != "" && PathWithinRoot(exception, protectedRoot) {
+			continue
+		}
+		return &SensitivePathError{Path: path, Reason: "protected task-scope root"}
+	}
+	if exception != "" {
+		if sensitive, reason := matcher.IsSensitiveBelow(exception, path); sensitive {
+			return &SensitivePathError{Path: path, Reason: reason}
+		}
+		return nil
 	}
 	sensitive, reason := matcher.IsSensitive(path)
 	if !sensitive {
 		return nil
 	}
 	return &SensitivePathError{Path: path, Reason: reason}
+}
+
+// narrowestContainingRoot returns the deepest root that contains path, or an
+// empty string when none does.
+func narrowestContainingRoot(path string, roots []string) string {
+	best := ""
+	for _, root := range roots {
+		if root == "" || !PathWithinRoot(path, root) {
+			continue
+		}
+		if len(root) > len(best) {
+			best = root
+		}
+	}
+	return best
 }
 
 func ContextWithPermissionContext(ctx context.Context, permissionContext PermissionContext) context.Context {

@@ -25,3 +25,28 @@ func AwakenHomeRoot() string {
 func MCPConfigPath(root string) string {
 	return filepath.Join(filepath.Clean(root), "config", "mcp-servers.json")
 }
+
+// SessionsRoot is the single subtree of the Awaken business-data root that the
+// agent is allowed to mutate. Everything else under the root (config,
+// credentials, store generations, user memory) stays protected, so this path is
+// the only carve-out the task-scope protected-root check honours.
+func SessionsRoot(root string) string {
+	return filepath.Join(filepath.Clean(root), "sessions")
+}
+
+// SessionWorkspacePath is the working directory a run falls back to when its
+// project has no folder attached. It gives the run a Bash cwd and a base for
+// relative paths without asking the user to pick a folder first.
+//
+// The directory is keyed by project rather than by thread because the workspace
+// root is what identifies a thread in the run service; a per-thread directory
+// would mint a new identity on every conversation. Threads in the same
+// folder-less project therefore share one place to keep what they produce.
+func SessionWorkspacePath(root, projectID string) string {
+	return filepath.Join(SessionsRoot(root), projectID)
+}
+
+// SessionOutputPath is where a folder-less run's produced files land.
+func SessionOutputPath(root, projectID string) string {
+	return filepath.Join(SessionWorkspacePath(root, projectID), "output")
+}

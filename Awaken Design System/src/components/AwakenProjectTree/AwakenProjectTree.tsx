@@ -12,6 +12,10 @@ import { createPortal } from "react-dom";
 import { ChevronRight, Folder, FolderOpen, MoreHorizontal } from "lucide-react";
 import type { ProjectItem } from "../../types";
 import { AwakenDropdown } from "../AwakenDropdown";
+import {
+  AwakenProjectHoverCard,
+  type ProjectHoverCardAnchorProps,
+} from "../AwakenProjectHoverCard";
 import { AwakenSidebarThreadSpinner } from "../AwakenSidebarThreadSpinner";
 
 export type AwakenProjectTreeProps = {
@@ -403,12 +407,14 @@ function ProjectNode({
     padding: "3px 0 4px 8px",
   };
 
-  return (
-    <div className={nodeClassName}>
+  // render prop 而不是包一层容器：行的激活、拖拽、菜单展开样式都挂在
+  // `.aw-project-node > .aw-project-row` 直接子选择器上，多一层会静默打断它们。
+  const renderRow = (anchor?: ProjectHoverCardAnchorProps) => (
       <div
         className="aw-project-row"
         style={rowStyle}
         data-aw-project-id={isTopLevel ? item.id : undefined}
+        {...anchor}
       >
         <button
           type="button"
@@ -491,6 +497,17 @@ function ProjectNode({
           </span>
         ) : null}
       </div>
+  );
+
+  return (
+    <div className={nodeClassName}>
+      {item.hoverCard && isTopLevel && !isDisabled ? (
+        <AwakenProjectHoverCard card={item.hoverCard} disabled={isDragging || menuOpen}>
+          {(anchor) => renderRow(anchor)}
+        </AwakenProjectHoverCard>
+      ) : (
+        renderRow()
+      )}
 
       {isExpandable && isExpanded ? (
         <div style={childrenContainerStyle}>

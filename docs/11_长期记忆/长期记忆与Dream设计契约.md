@@ -74,11 +74,12 @@ user scope     ~/.awaken/memory/
 project scope  <workspace>/.awaken/memory/
 ```
 
+- `<workspace>` 是项目的**主文件夹**：一个项目可以有多个文件夹，但 project Memory 只锚定主文件夹，次文件夹里的 `.awaken/memory` 当前不参与保存或召回；切换主文件夹会同步改变 project Memory 根。项目组成语义由 [项目生命周期与删除](../01_桌面工作台/左侧栏/项目生命周期与删除/产品与状态机.md) 拥有；
 - user scope 可跨项目召回，保存用户背景和个人协作偏好；
 - project scope 只在 canonical workspace/project identity 匹配时召回；
 - project 路径位于工作区，可能被版本控制系统观察或提交，因此禁止写入 user profile、私密反馈和秘密；
 - Awaken 不自动修改 `.gitignore`、`.git/info/exclude` 或 Git 状态；
-- 移除项目只解除 Awaken 项目关系，不删除 workspace 内 Memory；项目整体移到废纸篓时 project Memory 随工作区一起移动；
+- 移除项目只解除 Awaken 项目关系，不删除文件夹内 Memory；把主文件夹移到废纸篓时它的 project Memory 随该文件夹一起移动，项目本身和其余文件夹保持不变；
 - thread 删除不删除已经独立保存的 Memory，但其 source UI 应显示来源已不可用。
 
 ## 4. Markdown 存储合同

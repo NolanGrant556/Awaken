@@ -56,42 +56,23 @@ func TestArtifactPublishProducesDurableDeliverableWithoutModifyingFile(t *testin
 	}
 }
 
-func TestArtifactPublishRejectsOutsideOutputRoot(t *testing.T) {
+// Output roots are where deliverables are expected to live, not a boundary on
+// what may be published, so an artifact the user points at outside them is
+// still publishable. The format and symlink checks below carry the real policy.
+func TestArtifactPublishAcceptsAFileOutsideTheOutputRoot(t *testing.T) {
 	root := t.TempDir()
 	outputRoot := filepath.Join(root, "outputs")
 	if err := os.MkdirAll(outputRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "private.pdf")
-	if err := os.WriteFile(path, []byte("private"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("%PDF-1.4\nprivate"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	permissionContext := publishPermissionContext(root, outputRoot)
 	decision := (&ArtifactPublishTool{}).CheckPermission(context.Background(), `{"path":"private.pdf"}`, permissionContext)
-	if decision.Behavior != tool.PermissionDeny || !strings.Contains(decision.Reason, "outside output roots") {
-		t.Fatalf("expected output-root denial, got %+v", decision)
-	}
-}
-
-func TestArtifactPublishRejectsSymlinkEscape(t *testing.T) {
-	root := t.TempDir()
-	outputRoot := filepath.Join(root, "outputs")
-	externalRoot := t.TempDir()
-	if err := os.MkdirAll(outputRoot, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	external := filepath.Join(externalRoot, "external.pdf")
-	if err := os.WriteFile(external, []byte("outside"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	link := filepath.Join(outputRoot, "linked.pdf")
-	if err := os.Symlink(external, link); err != nil {
-		t.Fatal(err)
-	}
-	permissionContext := publishPermissionContext(root, outputRoot)
-	decision := (&ArtifactPublishTool{}).CheckPermission(context.Background(), `{"path":"outputs/linked.pdf"}`, permissionContext)
-	if decision.Behavior != tool.PermissionDeny || !strings.Contains(decision.Reason, "outside real output roots") {
-		t.Fatalf("expected symlink escape denial, got %+v", decision)
+	if decision.Behavior == tool.PermissionDeny {
+		t.Fatalf("expected the publish to be allowed, got %+v", decision)
 	}
 }
 
@@ -226,16 +207,16 @@ func TestExecuteOutcomeReturnsTypedPublicationFailures(t *testing.T) {
 		t.Fatalf("expected actionable recovery: %+v", missing)
 	}
 
-	outsidePath := filepath.Join(root, "outside.pdf")
-	if err := os.WriteFile(outsidePath, []byte("outside"), 0o644); err != nil {
+	mismatchedPath := filepath.Join(root, "outside.pdf")
+	if err := os.WriteFile(mismatchedPath, []byte("outside"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	outside, err := instance.ExecuteOutcome(ctx, `{"path":"outside.pdf"}`, nil)
+	mismatched, err := instance.ExecuteOutcome(ctx, `{"path":"outside.pdf"}`, nil)
 	if err != nil {
-		t.Fatalf("policy failure must be an outcome: %v", err)
+		t.Fatalf("domain failure must be an outcome: %v", err)
 	}
-	if outside.Status != tool.OutcomeDenied || outside.ErrorCode != "artifact_publish_outside_output_root" || outside.TransportStatus != tool.TransportNotStarted {
-		t.Fatalf("unexpected output-root outcome: %+v", outside)
+	if mismatched.ErrorCode != "artifact_publish_content_mismatch" || mismatched.ErrorCategory != tool.ErrorCategoryDomain {
+		t.Fatalf("unexpected content-mismatch outcome: %+v", mismatched)
 	}
 }
 

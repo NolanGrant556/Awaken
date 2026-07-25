@@ -14,6 +14,7 @@ import (
 
 	"awaken/src/tool"
 	"awaken/src/tools/internal/rgexec"
+	"awaken/src/tools/internal/searchroots"
 )
 
 const (
@@ -49,12 +50,12 @@ type contentRecord struct {
 
 func (t *Tool) Name() string { return ToolName }
 func (t *Tool) Description() string {
-	return "Search file contents with the run-pinned ripgrep executable (hidden and ignored files included). Supports content/files_with_matches/count modes, contexts, line numbers, case folding, offsets, limits, and multiline regex."
+	return "Search file contents with the run-pinned ripgrep executable (hidden and ignored files included). Without an explicit path the search covers every readable root of the task and returns absolute paths; with one root the paths stay root-relative. An explicit path is searched wherever it points, including outside those roots. Supports content/files_with_matches/count modes, contexts, line numbers, case folding, offsets, limits, and multiline regex."
 }
 func (t *Tool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{Name: "pattern", Description: "ripgrep regular expression.", Type: "string", Required: true},
-		{Name: "path", Description: "Readable file or directory. Defaults to thread cwd.", Type: "string"},
+		{Name: "path", Description: "Readable file or directory. Omit to search every readable root of the task, starting at the thread cwd.", Type: "string"},
 		{Name: "glob", Description: "Additional file glob.", Type: "string"},
 		{Name: "type", Description: "ripgrep file type, for example go or ts.", Type: "string"},
 		{Name: "output_mode", Description: "content (default), files_with_matches, or count.", Type: "string"},
@@ -114,29 +115,50 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 	}
 	permissionContext := tool.PermissionContextFromContext(ctx)
 	state, _ := tool.ToolSessionStateFromContext(ctx)
-	root := permissionContext.WorkspaceRootOrCWD()
+	cwd := permissionContext.WorkspaceRootOrCWD()
 	if state != nil {
-		root = state.CWD(root)
+		cwd = state.CWD(cwd)
 	}
-	root, err = permissionContext.ResolveReadablePathChecked(root)
+	resolvedCWD, err := permissionContext.ResolveReadablePathChecked(cwd)
 	if err != nil {
 		return tool.DeniedOutcome(err.Error(), tool.ErrorCodeToolDenied).WithTiming(started, time.Now().UTC()), nil
 	}
-	target := "."
-	if strings.TrimSpace(p.Path) != "" {
-		target, err = permissionContext.ResolveReadablePathChecked(p.Path)
-		if err != nil {
-			return tool.DeniedOutcome(err.Error(), tool.ErrorCodeToolDenied).WithTiming(started, time.Now().UTC()), nil
-		}
+	roots, err := searchroots.Resolve(permissionContext, cwd, p.Path)
+	if err != nil {
+		return tool.DeniedOutcome(err.Error(), tool.ErrorCodeToolDenied).WithTiming(started, time.Now().UTC()), nil
 	}
 	runtime, err := rgexec.Resolve(ctx)
 	if err != nil {
 		return needsRuntime(started, err.Error()), nil
 	}
+	targets := searchTargets(p.Path, resolvedCWD, roots)
 	if p.OutputMode == "content" {
-		return executeContent(ctx, started, p, root, target, runtime), nil
+		return executeContent(ctx, started, p, targets, runtime), nil
 	}
-	return executeSummaryMode(ctx, started, p, root, target, runtime), nil
+	return executeSummaryMode(ctx, started, p, targets, runtime), nil
+}
+
+// searchTarget is one rg invocation: where it runs, what it scans, and the base
+// that match paths are reported against.
+type searchTarget struct {
+	dir     string
+	scan    string
+	display string
+}
+
+// searchTargets keeps the explicit-path shape untouched — rg runs in the thread
+// cwd and scans the named path, which may be a single file. Without an explicit
+// path each readable root is scanned from its own directory so a project with
+// several folders is covered in one call.
+func searchTargets(explicitPath, resolvedCWD string, roots []string) []searchTarget {
+	if strings.TrimSpace(explicitPath) != "" {
+		return []searchTarget{{dir: resolvedCWD, scan: roots[0], display: resolvedCWD}}
+	}
+	targets := make([]searchTarget, 0, len(roots))
+	for _, root := range roots {
+		targets = append(targets, searchTarget{dir: root, scan: ".", display: root})
+	}
+	return targets
 }
 
 func baseArgs(p params) []string {
@@ -156,7 +178,31 @@ func baseArgs(p params) []string {
 	return args
 }
 
-func executeContent(ctx context.Context, started time.Time, p params, root, target string, runtime rgexec.Runtime) tool.ExecutionOutcome {
+func executeContent(ctx context.Context, started time.Time, p params, targets []searchTarget, runtime rgexec.Runtime) tool.ExecutionOutcome {
+	multiRoot := len(targets) > 1
+	var records []contentRecord
+	matchCount := 0
+	for _, target := range targets {
+		targetRecords, targetMatches, failure := contentForTarget(ctx, started, p, target, multiRoot, len(records), runtime)
+		if failure != nil {
+			return *failure
+		}
+		records = append(records, targetRecords...)
+		matchCount += targetMatches
+	}
+	sort.SliceStable(records, func(i, j int) bool {
+		if records[i].Path != records[j].Path {
+			return records[i].Path < records[j].Path
+		}
+		if records[i].Line != records[j].Line {
+			return records[i].Line < records[j].Line
+		}
+		return records[i].Order < records[j].Order
+	})
+	return grepOutcome(started, p, targets, records, matchCount, runtime.SnapshotID)
+}
+
+func contentForTarget(ctx context.Context, started time.Time, p params, target searchTarget, multiRoot bool, orderOffset int, runtime rgexec.Runtime) ([]contentRecord, int, *tool.ExecutionOutcome) {
 	args := append(baseArgs(p), "--json")
 	if p.Context > 0 {
 		args = append(args, "-C", strconv.Itoa(p.Context))
@@ -168,20 +214,22 @@ func executeContent(ctx context.Context, started time.Time, p params, root, targ
 			args = append(args, "-A", strconv.Itoa(p.After))
 		}
 	}
-	args = append(args, "--", p.Pattern, target)
-	command := runtime.Command(ctx, root, args...)
+	args = append(args, "--", p.Pattern, target.scan)
+	command := runtime.Command(ctx, target.dir, args...)
 	stdout, err := command.StdoutPipe()
 	if err != nil {
-		return tool.FailedOutcome(err.Error(), "grep_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC())
+		failure := tool.FailedOutcome(err.Error(), "grep_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC())
+		return nil, 0, &failure
 	}
 	var stderr strings.Builder
 	command.Stderr = &stderr
 	if err := command.Start(); err != nil {
-		return tool.FailedOutcome(err.Error(), "grep_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC())
+		failure := tool.FailedOutcome(err.Error(), "grep_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC())
+		return nil, 0, &failure
 	}
 	var records []contentRecord
 	matchCount := 0
-	order := 0
+	order := orderOffset
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	for scanner.Scan() {
@@ -203,7 +251,7 @@ func executeContent(ctx context.Context, started time.Time, p params, root, targ
 		if event.Type == "match" {
 			matchCount++
 		}
-		path := stableDisplayPath(event.Data.Path.Text, root)
+		path := displayMatchPath(event.Data.Path.Text, target.display, multiRoot)
 		for index, line := range strings.Split(strings.TrimSuffix(event.Data.Lines.Text, "\n"), "\n") {
 			records = append(records, contentRecord{Path: path, Line: event.Data.LineNumber + index, Text: strings.TrimSuffix(line, "\r"), Match: event.Type == "match", Order: order})
 			order++
@@ -212,47 +260,43 @@ func executeContent(ctx context.Context, started time.Time, p params, root, targ
 	scanErr := scanner.Err()
 	waitErr := command.Wait()
 	if scanErr != nil {
-		return tool.FailedOutcome(scanErr.Error(), "grep_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC())
+		failure := tool.FailedOutcome(scanErr.Error(), "grep_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC())
+		return nil, 0, &failure
 	}
 	if waitErr != nil && command.ProcessState != nil && command.ProcessState.ExitCode() != 1 {
-		return tool.FailedOutcome(strings.TrimSpace(stderr.String()), "grep_invalid_pattern", tool.ErrorCategoryValidation, false).WithTiming(started, time.Now().UTC())
+		failure := tool.FailedOutcome(strings.TrimSpace(stderr.String()), "grep_invalid_pattern", tool.ErrorCategoryValidation, false).WithTiming(started, time.Now().UTC())
+		return nil, 0, &failure
 	}
-	sort.SliceStable(records, func(i, j int) bool {
-		if records[i].Path != records[j].Path {
-			return records[i].Path < records[j].Path
-		}
-		if records[i].Line != records[j].Line {
-			return records[i].Line < records[j].Line
-		}
-		return records[i].Order < records[j].Order
-	})
-	return grepOutcome(started, p, root, records, matchCount, runtime.SnapshotID)
+	return records, matchCount, nil
 }
 
-func executeSummaryMode(ctx context.Context, started time.Time, p params, root, target string, runtime rgexec.Runtime) tool.ExecutionOutcome {
-	args := baseArgs(p)
-	if p.OutputMode == "files_with_matches" {
-		args = append(args, "--files-with-matches")
-	} else {
-		args = append(args, "--count-matches")
-	}
-	args = append(args, "--", p.Pattern, target)
-	command := runtime.Command(ctx, root, args...)
-	output, err := command.Output()
-	if err != nil {
-		if exit, ok := err.(*os.PathError); ok {
-			return tool.FailedOutcome(exit.Error(), "grep_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC())
+func executeSummaryMode(ctx context.Context, started time.Time, p params, targets []searchTarget, runtime rgexec.Runtime) tool.ExecutionOutcome {
+	multiRoot := len(targets) > 1
+	var lines []string
+	for _, target := range targets {
+		args := baseArgs(p)
+		if p.OutputMode == "files_with_matches" {
+			args = append(args, "--files-with-matches")
+		} else {
+			args = append(args, "--count-matches")
 		}
-		if command.ProcessState == nil || command.ProcessState.ExitCode() != 1 {
-			return tool.FailedOutcome(err.Error(), "grep_invalid_pattern", tool.ErrorCategoryValidation, false).WithTiming(started, time.Now().UTC())
+		args = append(args, "--", p.Pattern, target.scan)
+		command := runtime.Command(ctx, target.dir, args...)
+		output, err := command.Output()
+		if err != nil {
+			if exit, ok := err.(*os.PathError); ok {
+				return tool.FailedOutcome(exit.Error(), "grep_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC())
+			}
+			if command.ProcessState == nil || command.ProcessState.ExitCode() != 1 {
+				return tool.FailedOutcome(err.Error(), "grep_invalid_pattern", tool.ErrorCategoryValidation, false).WithTiming(started, time.Now().UTC())
+			}
 		}
-	}
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) == 1 && lines[0] == "" {
-		lines = nil
-	}
-	for i := range lines {
-		lines[i] = stableDisplayPath(lines[i], root)
+		for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+			if line == "" {
+				continue
+			}
+			lines = append(lines, displayMatchPath(line, target.display, multiRoot))
+		}
 	}
 	sort.Strings(lines)
 	total := len(lines)
@@ -265,11 +309,26 @@ func executeSummaryMode(ctx context.Context, started time.Time, p params, root, 
 	outcome := tool.SucceededOutcome(content).WithTiming(started, time.Now().UTC())
 	outcome.Truncated = end < total
 	outcome.Summary = fmt.Sprintf("Grep returned %d of %d %s row(s).", len(selected), total, p.OutputMode)
-	outcome.Details = map[string]any{"output_mode": p.OutputMode, "rows": selected, "offset": p.Offset, "head_limit": p.HeadLimit, "total": total, "truncated": outcome.Truncated, "environment_snapshot_id": runtime.SnapshotID}
+	outcome.Details = map[string]any{"output_mode": p.OutputMode, "roots": targetRoots(targets), "path_style": pathStyle(multiRoot), "rows": selected, "offset": p.Offset, "head_limit": p.HeadLimit, "total": total, "truncated": outcome.Truncated, "environment_snapshot_id": runtime.SnapshotID}
 	return outcome
 }
 
-func grepOutcome(started time.Time, p params, root string, records []contentRecord, matchCount int, snapshotID string) tool.ExecutionOutcome {
+func targetRoots(targets []searchTarget) []string {
+	roots := make([]string, 0, len(targets))
+	for _, target := range targets {
+		roots = append(roots, target.display)
+	}
+	return roots
+}
+
+func pathStyle(multiRoot bool) string {
+	if multiRoot {
+		return "absolute"
+	}
+	return "root_relative"
+}
+
+func grepOutcome(started time.Time, p params, targets []searchTarget, records []contentRecord, matchCount int, snapshotID string) tool.ExecutionOutcome {
 	start, end := pageBounds(len(records), p.Offset, p.HeadLimit)
 	includeLine := p.LineNumber == nil || *p.LineNumber
 	rows := make([]string, 0, end-start)
@@ -290,8 +349,9 @@ func grepOutcome(started time.Time, p params, root string, records []contentReco
 	}
 	outcome := tool.SucceededOutcome(content).WithTiming(started, time.Now().UTC())
 	outcome.Truncated = end < len(records)
-	outcome.Summary = fmt.Sprintf("Grep found %d match event(s); returned %d row(s).", matchCount, len(rows))
-	outcome.Details = map[string]any{"output_mode": "content", "path": root, "match_count": matchCount, "returned_rows": len(rows), "total_rows": len(records), "offset": p.Offset, "head_limit": p.HeadLimit, "truncated": outcome.Truncated, "environment_snapshot_id": snapshotID}
+	outcome.Summary = fmt.Sprintf("Grep found %d match event(s) across %d root(s); returned %d row(s).", matchCount, len(targets), len(rows))
+	roots := targetRoots(targets)
+	outcome.Details = map[string]any{"output_mode": "content", "path": roots[0], "roots": roots, "path_style": pathStyle(len(targets) > 1), "match_count": matchCount, "returned_rows": len(rows), "total_rows": len(records), "offset": p.Offset, "head_limit": p.HeadLimit, "truncated": outcome.Truncated, "environment_snapshot_id": snapshotID}
 	return outcome
 }
 
@@ -335,20 +395,19 @@ func pageBounds(total, offset, limit int) (int, int) {
 	return start, end
 }
 
-func stableDisplayPath(path, root string) string {
+// displayMatchPath renders one rg output path. Count mode appends ":<n>", which
+// has to survive the rewrite, so the numeric suffix is split off first.
+func displayMatchPath(path, root string, multiRoot bool) string {
 	path = strings.TrimSpace(path)
+	suffix := ""
 	if colon := strings.LastIndex(path, ":"); colon > 1 {
 		if _, err := strconv.Atoi(path[colon+1:]); err == nil {
-			path = path[:colon] + ":" + path[colon+1:]
-			return filepath.ToSlash(path)
+			suffix = path[colon:]
+			path = path[:colon]
 		}
 	}
-	if filepath.IsAbs(path) {
-		if relative, err := filepath.Rel(root, path); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return filepath.ToSlash(relative)
-		}
-	}
-	return filepath.ToSlash(strings.TrimPrefix(path, "."+string(filepath.Separator)))
+	path = strings.TrimPrefix(path, "."+string(filepath.Separator))
+	return searchroots.DisplayPath(root, path, multiRoot) + suffix
 }
 
 func needsRuntime(started time.Time, message string) tool.ExecutionOutcome {

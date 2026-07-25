@@ -28,6 +28,7 @@ import {
   AwakenDeliverableList as DeliverableList,
   AwakenExecutionFeed as ExecutionFeed,
   AwakenInspectorRail as InspectorRail,
+  AwakenProjectFoldersEditor as ProjectFoldersEditor,
   AwakenSelectableCard as SelectableCard,
   AwakenSidebar as Sidebar,
   AwakenSidebarSectionAction as SidebarSectionAction,
@@ -46,6 +47,8 @@ import {
   type AwakenContextUsagePanelProps,
   type NavItem,
   type PlatformKind,
+  type ProjectFolderRow,
+  type ProjectHoverCard,
   type ProjectItem,
 } from "@awaken/design-system";
 import {
@@ -66,6 +69,7 @@ import type {
   RuntimeRunStatus,
   RuntimeThread,
   StartRunRequest,
+  UpsertProjectResult,
 } from "../shared/runtime";
 import type { AguiEvent } from "../shared/agui";
 import {
@@ -103,13 +107,17 @@ import {
   TRACKED_TRASH_OPERATIONS_STORAGE_KEY,
   canReconcileTrackedTrashOperation,
   isSameWorkspacePath,
+  normalizeWorkspacePath,
   parseTrackedTrashOperations,
   projectIdForThread,
   projectOperationReconciliationState,
   upsertTrackedTrashOperation,
   workspaceLabelForPath,
+  workspaceProjectForFolderPath,
+  workspaceProjectRunRoots,
   type TrackedTrashOperation,
   type WorkspaceProject,
+  type WorkspaceProjectFolder,
 } from "./projectWorkspace";
 import { DesktopSettingsDialog } from "./settings/DesktopSettingsDialog";
 import { ProfileBalancePopover } from "./ProfileBalancePopover";
@@ -165,6 +173,8 @@ type PendingProjectDelete = {
   label: string;
   action: ProjectDeleteAction;
   threadCount: number;
+  /** 仅 trash 用：废纸篓是文件夹粒度，这里是本次要移走的那个目录。 */
+  folderPath?: string;
 };
 
 export type WorkbenchInspectorPresentation = {
@@ -696,6 +706,21 @@ export function resolveWorkspaceRootForRun(args: {
     return explicitTarget;
   }
 
+  const selectedProject =
+    selectedProjectId === undefined ||
+    selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID
+      ? undefined
+      : projectsFromWorkspace.find(
+          (project) => project.id === selectedProjectId,
+        );
+
+  // A project the user created without picking a folder anchors nothing on disk.
+  // Returning empty lets Core resolve that project's session workspace, instead
+  // of falling through and silently borrowing the previous thread's directory.
+  if (selectedProject && selectedProject.folders.length === 0) {
+    return "";
+  }
+
   const selectedProjectPath =
     selectedProjectId === undefined
       ? undefined
@@ -703,9 +728,7 @@ export function resolveWorkspaceRootForRun(args: {
         ? defaultProjectRemoved
           ? undefined
           : defaultWorkspacePath
-        : projectsFromWorkspace.find(
-            (project) => project.id === selectedProjectId,
-          )?.path;
+        : selectedProject?.path;
 
   return (
     [
@@ -716,6 +739,182 @@ export function resolveWorkspaceRootForRun(args: {
     ]
       .find((candidate) => candidate?.trim())
       ?.trim() ?? ""
+  );
+}
+
+/**
+ * 决定一批选中的目录里哪些能加入项目。
+ *
+ * 文件夹选择器允许一次选中多个目录，所以整批因为其中一个不合格而失败是没必要的：
+ * 不能加入的逐个说明原因，其余照常加入。已接受的目录也参与后续判重，这样同一批里
+ * 指向同一位置的两个选择不会被加入两次。
+ *
+ * 目录属于哪些项目是用户的事，所以这里唯一会跳过的情况是它已经在当前这一组里，
+ * 也就是加入了也不会产生任何变化。被别的项目持有不构成理由。
+ */
+export function partitionPickedProjectFolders(args: {
+  candidates: string[];
+  /** 已经挂在目标项目上的文件夹。 */
+  attachedPaths: string[];
+}): { accepted: string[]; skipped: string[] } {
+  const accepted: string[] = [];
+  const skipped: string[] = [];
+  for (const candidate of args.candidates) {
+    const label = workspaceLabelForPath(candidate);
+    if (
+      [...args.attachedPaths, ...accepted].some((taken) =>
+        isSameWorkspacePath(taken, candidate),
+      )
+    ) {
+      skipped.push(`“${label}”已经在这个项目里。`);
+      continue;
+    }
+    accepted.push(candidate);
+  }
+  return { accepted, skipped };
+}
+
+/**
+ * 废纸篓确认文案里的共享说明。
+ *
+ * 移到废纸篓真的会删掉磁盘目录，所以这个文件夹会同时从每一个持有它的项目里消失。
+ * 别的项目也在用它时必须在确认之前说明，否则用户是在替另一个项目做决定而不自知。
+ */
+export function sharedFolderTrashWarning(args: {
+  folderPath?: string;
+  actingProjectId?: string;
+  projects: { id: string; label: string; folders: { path: string }[] }[];
+}): string {
+  if (!args.folderPath) {
+    return "";
+  }
+  const others = args.projects
+    .filter(
+      (project) =>
+        project.id !== args.actingProjectId &&
+        project.folders.some((folder) =>
+          isSameWorkspacePath(folder.path, args.folderPath),
+        ),
+    )
+    .map((project) => `“${project.label}”`);
+  if (others.length === 0) {
+    return "";
+  }
+  return `该文件夹同时属于${others.join("、")}，也会一并从这些项目中移除。`;
+}
+
+/**
+ * run 的执行根集合：cwd 所属项目的全部文件夹。
+ *
+ * 匹配按「任意文件夹」而不是「主文件夹」进行。锚在次文件夹上的 run（继续旧线程、
+ * 或切换过主文件夹之后）同样属于这个项目，只认主文件夹会让它塌回单根，把主文件夹
+ * 和其余文件夹挤出 scope。cwd 排在首位，因为搜索类工具按这个顺序遍历根。
+ *
+ * 共享文件夹下同一个根会命中多个项目，这时候 projectId 决定用哪一组：run 的归属已经
+ * 由 resolveRunProjectForRun 定过，roots 必须跟它取同一个项目，否则模型会拿到另一个
+ * 项目的文件夹组。
+ */
+export function resolveRunRootsForRun(args: {
+  workspaceRoot: string;
+  projectsFromWorkspace: WorkspaceProject[];
+  projectId?: string;
+}): string[] {
+  const root = normalizeWorkspacePath(args.workspaceRoot ?? "");
+  if (!root) {
+    return [];
+  }
+  const project =
+    args.projectsFromWorkspace.find(
+      (candidate) =>
+        candidate.id === args.projectId &&
+        candidate.folders.some((folder) =>
+          isSameWorkspacePath(folder.path, root),
+        ),
+    ) ?? workspaceProjectForFolderPath(args.projectsFromWorkspace, root);
+  if (!project) {
+    return [root];
+  }
+  const roots = workspaceProjectRunRoots(project).filter(
+    (candidate) => !isSameWorkspacePath(candidate, root),
+  );
+  return [root, ...roots];
+}
+
+/**
+ * run 归属的项目身份与展示名。
+ *
+ * 两者一起解析，因为它们一起下发：`project_id` 让零文件夹项目找到自己的会话目录，
+ * `project_name` 是模型侧「当前项目」那一行。只解析出 id 而漏掉名字，模型就只剩一堆
+ * 路径，会重新退回到只认 cwd 的行为。
+ *
+ * 同一个目录可以同时属于多个项目，所以路径本身不再能确定身份：选中的项目只要确实
+ * 持有这个根就优先采信，只有在选中项与这个根无关时（比如继续一条旧线程）才回退到
+ * 按路径查找。匹配按「任意文件夹」进行，锚在次文件夹上的线程同样算这个项目。
+ */
+export function resolveRunProjectForRun(args: {
+  workspaceRoot: string;
+  selectedProjectId?: string;
+  defaultWorkspacePath?: string;
+  effectiveDefaultWorkspacePath?: string;
+  projectsFromWorkspace: WorkspaceProject[];
+}): { projectId?: string; projectName?: string } {
+  const {
+    workspaceRoot,
+    selectedProjectId,
+    defaultWorkspacePath,
+    effectiveDefaultWorkspacePath,
+    projectsFromWorkspace,
+  } = args;
+  const selectedHoldsRoot =
+    selectedProjectId !== undefined &&
+    selectedProjectId !== DEFAULT_WORKSPACE_PROJECT_ID &&
+    projectsFromWorkspace
+      .find((project) => project.id === selectedProjectId)
+      ?.folders.some((folder) =>
+        isSameWorkspacePath(folder.path, workspaceRoot),
+      ) === true;
+  // 没有根就只能靠选中项来定身份，那正是零文件夹项目的情形。
+  const projectId = !workspaceRoot
+    ? selectedProjectId
+    : selectedHoldsRoot
+      ? selectedProjectId
+      : isSameWorkspacePath(workspaceRoot, effectiveDefaultWorkspacePath)
+        ? DEFAULT_WORKSPACE_PROJECT_ID
+        : workspaceProjectForFolderPath(projectsFromWorkspace, workspaceRoot)
+            ?.id;
+  if (!projectId) {
+    return {};
+  }
+  if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
+    return {
+      projectId,
+      projectName: defaultWorkspacePath
+        ? workspaceLabelForPath(defaultWorkspacePath)
+        : "awaken",
+    };
+  }
+  return {
+    projectId,
+    projectName: projectsFromWorkspace.find(
+      (project) => project.id === projectId,
+    )?.label,
+  };
+}
+
+function sameWorkspaceProjectFolders(
+  current: WorkspaceProjectFolder[],
+  next: WorkspaceProjectFolder[],
+): boolean {
+  return (
+    next.length === current.length &&
+    next.every((folder, index) => {
+      const existing = current[index];
+      return (
+        existing?.path === folder.path &&
+        existing.role === folder.role &&
+        existing.isPrimary === folder.isPrimary
+      );
+    })
   );
 }
 
@@ -731,7 +930,8 @@ function sameWorkspaceProjects(
         existing?.id === project.id &&
         existing.backendProjectId === project.backendProjectId &&
         existing.path === project.path &&
-        existing.label === project.label
+        existing.label === project.label &&
+        sameWorkspaceProjectFolders(existing.folders, project.folders)
       );
     })
   );
@@ -871,11 +1071,7 @@ function usageMatchesSnapshot(
   ) {
     return false;
   }
-  if (
-    usage.modelId &&
-    snapshot.modelId &&
-    usage.modelId !== snapshot.modelId
-  ) {
+  if (usage.modelId && snapshot.modelId && usage.modelId !== snapshot.modelId) {
     return false;
   }
   if (
@@ -970,9 +1166,7 @@ function proportionallyAllocateTokens(
     return values.map(() => 0);
   }
   if (sourceTotal <= 0) {
-    return values.map((_, index) =>
-      index === values.length - 1 ? target : 0,
-    );
+    return values.map((_, index) => (index === values.length - 1 ? target : 0));
   }
 
   const exact = values.map((value) => (value * target) / sourceTotal);
@@ -1107,11 +1301,9 @@ export function contextUsagePanelData(
           outputTokens: contextWindow.latestModelUsage.outputTokens,
           reasoningTokens: contextWindow.latestModelUsage.reasoningTokens,
           totalTokens: contextWindow.latestModelUsage.totalTokens,
-          calculatedCostUsd:
-            contextWindow.latestModelUsage.calculatedCostUsd,
+          calculatedCostUsd: contextWindow.latestModelUsage.calculatedCostUsd,
           currency: contextWindow.latestModelUsage.currency,
-          invalidationReason:
-            contextWindow.latestModelUsage.invalidationReason,
+          invalidationReason: contextWindow.latestModelUsage.invalidationReason,
           purpose: contextWindow.latestModelUsage.purpose,
           errorCode: contextWindow.latestModelUsage.errorCode,
         }
@@ -1371,6 +1563,14 @@ export function App() {
   const [pendingProjectMode, setPendingProjectMode] =
     useState<"local">("local");
   const [pickingWorkspace, setPickingWorkspace] = useState(false);
+  const [draftProjectFolders, setDraftProjectFolders] = useState<string[]>([]);
+  const [draftPrimaryFolder, setDraftPrimaryFolder] = useState<string>("");
+  const [draftProjectName, setDraftProjectName] = useState<string>("");
+  const [createProjectSubmitting, setCreateProjectSubmitting] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [projectFolderBusyPath, setProjectFolderBusyPath] = useState<
+    string | undefined
+  >(undefined);
   const [projectsFromWorkspace, setProjectsFromWorkspace] = useState<
     WorkspaceProject[]
   >([]);
@@ -1401,12 +1601,16 @@ export function App() {
   );
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([]);
   const [projectOrderIds, setProjectOrderIds] = useState<string[]>([]);
-  const [projectReorderSubmitting, setProjectReorderSubmitting] = useState(false);
+  const [projectReorderSubmitting, setProjectReorderSubmitting] =
+    useState(false);
   const projectReorderSubmittingRef = useRef(false);
   const [removedProjectIds, setRemovedProjectIds] = useState<string[]>([]);
   const [defaultBackendProjectId, setDefaultBackendProjectId] = useState<
     string | undefined
   >(undefined);
+  const [defaultProjectFolders, setDefaultProjectFolders] = useState<
+    WorkspaceProjectFolder[]
+  >([]);
   const [pendingProjectDelete, setPendingProjectDelete] =
     useState<PendingProjectDelete | null>(null);
   const [projectDeleteSubmitting, setProjectDeleteSubmitting] = useState(false);
@@ -1785,6 +1989,17 @@ export function App() {
       ),
     );
     setDefaultBackendProjectId(defaultProject?.projectId);
+    const nextDefaultFolders =
+      defaultProject?.folders.map<WorkspaceProjectFolder>((folder) => ({
+        path: folder.path,
+        role: folder.role,
+        isPrimary: folder.isPrimary,
+      })) ?? [];
+    setDefaultProjectFolders((current) =>
+      sameWorkspaceProjectFolders(current, nextDefaultFolders)
+        ? current
+        : nextDefaultFolders,
+    );
     setRemovedProjectIds(
       defaultProject && defaultProject.state !== "active"
         ? [DEFAULT_WORKSPACE_PROJECT_ID]
@@ -1794,7 +2009,10 @@ export function App() {
     const nextProjectOrderIds = projects
       .filter((project) => project.state === "active")
       .map((project) =>
-        isSameWorkspacePath(project.workspaceRoot, configuredDefaultWorkspacePath)
+        isSameWorkspacePath(
+          project.workspaceRoot,
+          configuredDefaultWorkspacePath,
+        )
           ? DEFAULT_WORKSPACE_PROJECT_ID
           : project.projectId,
       );
@@ -1820,6 +2038,11 @@ export function App() {
         label:
           project.displayName || workspaceLabelForPath(project.workspaceRoot),
         path: project.workspaceRoot,
+        folders: project.folders.map<WorkspaceProjectFolder>((folder) => ({
+          path: folder.path,
+          role: folder.role,
+          isPrimary: folder.isPrimary,
+        })),
       }));
     setProjectsFromWorkspace((current) =>
       sameWorkspaceProjects(current, nextProjects) ? current : nextProjects,
@@ -1904,7 +2127,11 @@ export function App() {
             const project = projects.find(
               (candidate) => candidate.projectId === tracked.backendProjectId,
             );
-            return canReconcileTrackedTrashOperation(state, project?.state);
+            return canReconcileTrackedTrashOperation(
+              state,
+              project,
+              tracked.folderPath,
+            );
           });
 
           if (reconciled.length > 0) {
@@ -1927,10 +2154,12 @@ export function App() {
                 return next;
               });
               setNotice(
-                `未能将“${failed[0].tracked.label}”移到废纸篓，项目、历史和磁盘文件均保持不变。`,
+                `未能将“${failed[0].tracked.label}”移到废纸篓，文件夹、项目历史和磁盘文件均保持不变。`,
               );
             } else {
-              setNotice(`已将“${reconciled[0].tracked.label}”移到废纸篓。`);
+              setNotice(
+                `已将“${reconciled[0].tracked.label}”移到废纸篓，项目的其余文件夹不受影响。`,
+              );
             }
             setTrackedTrashOperations((current) =>
               current.filter(
@@ -2646,8 +2875,63 @@ export function App() {
     });
   }
 
+  async function handleRevealFolder(folderPath: string): Promise<void> {
+    const result = await runtimeClient.revealPath(folderPath);
+    if (!result.ok) {
+      setNotice(result.message ?? "无法在文件管理器中定位该目录。");
+    }
+  }
+
+  /**
+   * 悬停项目行时展示这个项目由哪些文件夹组成。侧栏树本身不展开文件夹行，
+   * 文件夹的完整视图和写操作都留在编辑项目弹窗里。
+   */
+  function projectHoverCard(
+    projectId: string,
+    label: string,
+    threadCount: number,
+  ): ProjectHoverCard {
+    return {
+      title: label,
+      summary: threadCount > 0 ? `${threadCount} 个对话串` : "暂无对话串",
+      folders: foldersForProjectId(projectId).map((folder) => ({
+        path: folder.path,
+        label: workspaceLabelForPath(folder.path),
+      })),
+      emptyFoldersLabel: "还没有文件夹，对话会在这个项目自己的工作目录里进行",
+      revealHint: "在文件管理器中显示：",
+      actionLabel: "编辑项目",
+      onRevealFolder: (path) => {
+        void handleRevealFolder(path);
+      },
+      onAction: () => {
+        setEditingProjectId(projectId);
+        setNotice(null);
+      },
+    };
+  }
+
+  /**
+   * 项目层菜单只负责项目自身：加文件夹、编辑文件夹列表、从 Awaken 移除、删除历史。
+   * 「移到废纸篓」是文件夹粒度的，只出现在编辑项目弹窗里的文件夹行菜单。
+   */
   function projectMenuItems(projectId: string) {
     return [
+      {
+        id: "add-project-folder",
+        label: "添加文件夹",
+        onSelect: () => {
+          void handleAddProjectFolder(projectId);
+        },
+      },
+      {
+        id: "edit-project",
+        label: "编辑项目",
+        onSelect: () => {
+          setEditingProjectId(projectId);
+          setNotice(null);
+        },
+      },
       {
         id: "remove-project",
         label: "从 Awaken 移除",
@@ -2661,14 +2945,6 @@ export function App() {
         tone: "danger" as const,
         onSelect: () => {
           requestProjectDelete(projectId, "delete_history");
-        },
-      },
-      {
-        id: "trash-project",
-        label: "移到废纸篓",
-        tone: "danger" as const,
-        onSelect: () => {
-          requestProjectDelete(projectId, "trash");
         },
       },
     ];
@@ -2721,6 +2997,11 @@ export function App() {
               projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
             ),
             menuItems: projectMenuItems(DEFAULT_WORKSPACE_PROJECT_ID),
+            hoverCard: projectHoverCard(
+              DEFAULT_WORKSPACE_PROJECT_ID,
+              projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
+              defaultProjectThreads.length,
+            ),
             children:
               defaultProjectThreads.length > 0
                 ? defaultProjectThreads
@@ -2741,6 +3022,11 @@ export function App() {
           path: project.path,
           action: projectAction(project.id, project.label),
           menuItems: projectMenuItems(project.id),
+          hoverCard: projectHoverCard(
+            project.id,
+            project.label,
+            threads.length,
+          ),
           children: threads.length > 0 ? threads : undefined,
         };
       }),
@@ -3184,10 +3470,14 @@ export function App() {
       activeThreadWorkspacePath,
       projectsFromWorkspace,
     });
-    const validation = await runtimeClient.validateWorkspace(workspaceRoot);
-    if (!validation.valid) {
-      setNotice(validation.error);
-      return;
+    // An empty root means the selected project has no folder bound, so there is
+    // no directory to validate; Core resolves its session workspace instead.
+    if (workspaceRoot) {
+      const validation = await runtimeClient.validateWorkspace(workspaceRoot);
+      if (!validation.valid) {
+        setNotice(validation.error);
+        return;
+      }
     }
     unsubscribeRef.current?.();
     unsubscribeRef.current = null;
@@ -3210,14 +3500,19 @@ export function App() {
     setComposerTokenLeadingTexts({});
 
     try {
-      const runProjectId = isSameWorkspacePath(
+      const { projectId: runProjectId, projectName: runProjectName } =
+        resolveRunProjectForRun({
+          workspaceRoot,
+          selectedProjectId,
+          defaultWorkspacePath,
+          effectiveDefaultWorkspacePath,
+          projectsFromWorkspace,
+        });
+      const runRoots = resolveRunRootsForRun({
         workspaceRoot,
-        effectiveDefaultWorkspacePath,
-      )
-        ? DEFAULT_WORKSPACE_PROJECT_ID
-        : projectsFromWorkspace.find((project) =>
-            isSameWorkspacePath(project.path, workspaceRoot),
-          )?.id;
+        projectsFromWorkspace,
+        projectId: runProjectId,
+      });
       const isNewThread = forceNewThread || !runtimeState.activeThreadId;
       const nextThreadLabel = isNewThread
         ? composerThreadLabel(prompt, draftAttachments, draftComposerTokens)
@@ -3236,10 +3531,19 @@ export function App() {
           ? undefined
           : runtimeState.activeThreadId || undefined,
         workspace: {
+          // projectId is what lets Core place a folder-less run in that
+          // project's own session workspace rather than guess an identity from
+          // the path. With no folder there is no root to declare either.
+          projectId: runProjectId
+            ? backendProjectIdFor(runProjectId)
+            : undefined,
+          // The agent is told which project it is in, so it can answer about the
+          // folder group as a whole instead of only seeing its cwd.
+          projectName: runProjectName,
           workspaceRoot,
-          readableRoots: workspaceRoot ? [workspaceRoot] : [],
-          writableRoots: workspaceRoot ? [workspaceRoot] : [],
-          outputRoots: workspaceRoot ? [workspaceRoot] : [],
+          readableRoots: runRoots.length > 0 ? runRoots : undefined,
+          writableRoots: runRoots.length > 0 ? runRoots : undefined,
+          outputRoots: runRoots.length > 0 ? runRoots : undefined,
           attachedFiles: attachedFiles.length > 0 ? attachedFiles : undefined,
         },
         client: {
@@ -3394,8 +3698,9 @@ export function App() {
                 pending.backendProjectId,
                 idempotencyKey,
               )
-            : await runtimeClient.trashProject(
+            : await runtimeClient.trashProjectFolder(
                 pending.backendProjectId,
+                pending.folderPath ?? "",
                 idempotencyKey,
               );
       if (!result.ok) {
@@ -3422,14 +3727,16 @@ export function App() {
             operationId: operation.operationId,
             projectId: pending.projectId,
             backendProjectId: pending.backendProjectId,
+            folderPath: pending.folderPath ?? "",
             label: pending.label,
             wasExpanded: expandedProjectIds.includes(pending.projectId),
           }),
         );
-        resetActiveThreadContext();
-        setExpandedProjectIds((current) =>
-          current.filter((id) => id !== pending.projectId),
-        );
+        if (
+          isSameWorkspacePath(activeThreadWorkspacePath, pending.folderPath)
+        ) {
+          resetActiveThreadContext();
+        }
         setPendingProjectDelete(null);
         setNotice(`正在将“${pending.label}”移到废纸篓，Awaken 会自动完成。`);
         const refreshResults = await Promise.allSettled([
@@ -3447,14 +3754,18 @@ export function App() {
         return;
       }
 
-      if (pending.action !== "delete_history") {
+      if (
+        pending.action === "detach" ||
+        (pending.action === "trash" &&
+          isSameWorkspacePath(activeThreadWorkspacePath, pending.folderPath))
+      ) {
         resetActiveThreadContext();
       }
       await Promise.all([refreshProjects(), loadThreadsIntoState()]);
       setExpandedProjectIds((current) =>
-        pending.action === "delete_history"
-          ? current
-          : current.filter((id) => id !== pending.projectId),
+        pending.action === "detach"
+          ? current.filter((id) => id !== pending.projectId)
+          : current,
       );
       setPendingProjectDelete(null);
       setNotice(
@@ -3462,7 +3773,7 @@ export function App() {
           ? `已从 Awaken 移除“${pending.label}”，磁盘文件和历史均已保留。`
           : pending.action === "delete_history"
             ? `已删除“${pending.label}”的 Awaken 历史，磁盘文件未改变。`
-            : `已将“${pending.label}”移到废纸篓。`,
+            : `已将“${pending.label}”移到废纸篓，项目的其余文件夹不受影响。`,
       );
     } catch (error) {
       console.error("project_delete_ui_failed", error);
@@ -3635,82 +3946,125 @@ export function App() {
 
   function handleOpenCreateProject(): void {
     setPendingProjectMode("local");
+    setDraftProjectFolders([]);
+    setDraftPrimaryFolder("");
+    setDraftProjectName("");
     setCreateProjectDialogOpen(true);
     setNotice(null);
   }
 
-  async function handleUseExistingFolder(): Promise<void> {
+  function foldersForProjectId(projectId: string): WorkspaceProjectFolder[] {
+    if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
+      return defaultProjectFolders;
+    }
+    return (
+      projectsFromWorkspace.find((project) => project.id === projectId)
+        ?.folders ?? []
+    );
+  }
+
+  /** 目标项目之外，所有已经占用了某个目录的项目。 */
+  /** 选一个或多个目录，逐个通过 Core 校验后再判定哪些能加入。 */
+  async function pickProjectFolders(
+    excludedPaths: string[],
+  ): Promise<{ paths: string[]; skipped: string[] }> {
+    const result = await runtimeClient.pickProjectFolders(
+      workspacePath || defaultWorkspacePath,
+    );
+    if (result.canceled) {
+      if (result.error) {
+        setNotice(result.error);
+      }
+      return { paths: [], skipped: [] };
+    }
+    const readable: string[] = [];
+    const skipped: string[] = [...(result.errors ?? [])];
+    for (const candidate of result.paths) {
+      const validation = await runtimeClient.validateWorkspace(candidate);
+      if (validation.valid) {
+        readable.push(candidate);
+      } else {
+        skipped.push(
+          `“${workspaceLabelForPath(candidate)}”：${validation.error}`,
+        );
+      }
+    }
+    const partition = partitionPickedProjectFolders({
+      candidates: readable,
+      attachedPaths: excludedPaths,
+    });
+    return {
+      paths: partition.accepted,
+      skipped: [...skipped, ...partition.skipped],
+    };
+  }
+
+  async function handleAddDraftProjectFolder(): Promise<void> {
     if (pickingWorkspace) {
       return;
     }
     setPickingWorkspace(true);
     setNotice(null);
-
     try {
-      const result = await runtimeClient.pickWorkspace(
-        workspacePath || defaultWorkspacePath,
+      const { paths, skipped } = await pickProjectFolders(draftProjectFolders);
+      if (skipped.length > 0) {
+        setNotice(skipped.join(" "));
+      }
+      if (paths.length === 0) {
+        return;
+      }
+      setDraftProjectFolders((current) => [...current, ...paths]);
+      setDraftPrimaryFolder((current) => current || paths[0]);
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Failed to select folder",
       );
-      if (result.canceled) {
-        if (result.error) {
-          setNotice(result.error);
-        }
-        return;
-      }
+    } finally {
+      setPickingWorkspace(false);
+    }
+  }
 
-      const validation = await runtimeClient.validateWorkspace(result.path);
-      if (!validation.valid) {
-        setNotice(validation.error);
-        return;
-      }
-
-      if (
-        !defaultProjectRemoved &&
-        isSameWorkspacePath(result.path, effectiveDefaultWorkspacePath)
-      ) {
-        setNotice("该项目已存在");
-        workspaceTargetPathRef.current = result.path;
-        setWorkspacePath(result.path);
-        setSelectedProjectId(DEFAULT_WORKSPACE_PROJECT_ID);
-        setExpandedProjectIds((current) =>
-          current.includes(DEFAULT_WORKSPACE_PROJECT_ID)
-            ? current
-            : [DEFAULT_WORKSPACE_PROJECT_ID, ...current],
-        );
-        setCreateProjectDialogOpen(false);
-        return;
-      }
-
-      const existingProject = projectsFromWorkspace.find((project) =>
-        isSameWorkspacePath(project.path, result.path),
+  function handleRemoveDraftProjectFolder(path: string): void {
+    setDraftProjectFolders((current) => {
+      const next = current.filter(
+        (candidate) => !isSameWorkspacePath(candidate, path),
       );
-      if (existingProject) {
-        setNotice("该项目已存在");
-        workspaceTargetPathRef.current = result.path;
-        setWorkspacePath(result.path);
-        setSelectedProjectId(existingProject.id);
-        setExpandedProjectIds((current) =>
-          current.includes(existingProject.id)
-            ? current
-            : [...current, existingProject.id],
-        );
-        setCreateProjectDialogOpen(false);
-        return;
-      }
-
-      const upsertResult = await runtimeClient.upsertProject(
-        result.path,
-        workspaceLabelForPath(result.path),
+      setDraftPrimaryFolder((primary) =>
+        isSameWorkspacePath(primary, path) ? (next[0] ?? "") : primary,
       );
-      if (!upsertResult.ok) {
+      return next;
+    });
+  }
+
+  async function handleCreateProject(): Promise<void> {
+    if (createProjectSubmitting || !desktopReady) {
+      return;
+    }
+    setCreateProjectSubmitting(true);
+    setNotice(null);
+    try {
+      const folders = draftProjectFolders.map((path) => ({
+        path,
+        primary: isSameWorkspacePath(path, draftPrimaryFolder),
+      }));
+      // The name the user typed wins. Without one, a bound folder still supplies
+      // a sensible label, and a project with neither is named by the backend.
+      const displayName =
+        draftProjectName.trim() ||
+        (draftPrimaryFolder
+          ? workspaceLabelForPath(draftPrimaryFolder)
+          : undefined);
+      const result = await runtimeClient.createProject(folders, displayName);
+      if (!result.ok) {
         setNotice(
-          upsertResult.code === "PROJECT_OPERATION_CONFLICT"
+          result.code === "PROJECT_OPERATION_CONFLICT"
             ? "该项目正在移除中"
-            : upsertResult.message,
+            : result.message,
         );
         return;
       }
 
-      const project = upsertResult.project;
+      const project = result.project;
       const nextProjectId = isSameWorkspacePath(
         project.workspaceRoot,
         effectiveDefaultWorkspacePath,
@@ -3721,18 +4075,133 @@ export function App() {
       if (
         shouldResetActiveThreadForWorkspaceChange(
           activeThreadWorkspacePath,
-          result.path,
+          project.workspaceRoot,
         )
       ) {
         resetActiveThreadContext();
       }
-      workspaceTargetPathRef.current = result.path;
-      setWorkspacePath(result.path);
+      // A folder-less project has no path to select. Leaving the target and the
+      // workspace path untouched would keep pointing at the previous project, so
+      // both are cleared and the selection carries the identity instead.
+      workspaceTargetPathRef.current = project.workspaceRoot;
+      setWorkspacePath(project.workspaceRoot);
       setSelectedProjectId(nextProjectId);
       setExpandedProjectIds((current) =>
         current.includes(nextProjectId) ? current : [...current, nextProjectId],
       );
       setCreateProjectDialogOpen(false);
+      setDraftProjectFolders([]);
+      setDraftPrimaryFolder("");
+      setDraftProjectName("");
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Failed to create project",
+      );
+    } finally {
+      setCreateProjectSubmitting(false);
+    }
+  }
+
+  async function runProjectFolderMutation(
+    projectId: string,
+    folderPath: string,
+    mutate: (backendProjectId: string) => Promise<UpsertProjectResult>,
+    successNotice: string,
+  ): Promise<void> {
+    const backendProjectId = backendProjectIdFor(projectId);
+    if (!backendProjectId) {
+      setNotice("项目正在初始化，请稍后重试。");
+      return;
+    }
+    if (projectFolderBusyPath) {
+      return;
+    }
+    setProjectFolderBusyPath(folderPath);
+    setNotice(null);
+    try {
+      const result = await mutate(backendProjectId);
+      if (!result.ok) {
+        setNotice(
+          result.code === "PROJECT_FOLDER_NOT_FOUND"
+            ? "该文件夹已经不在这个项目里。"
+            : result.message,
+        );
+        await refreshProjects();
+        return;
+      }
+      await refreshProjects();
+      setNotice(successNotice);
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "项目文件夹操作暂时失败。",
+      );
+      await refreshProjects().catch(() => []);
+    } finally {
+      setProjectFolderBusyPath(undefined);
+    }
+  }
+
+  /**
+   * 逐个挂载并汇总结果。走 runProjectFolderMutation 的循环会为每个目录刷新一次项目
+   * 列表并覆盖一次 notice，选中五个目录时用户只会看到最后一条。
+   */
+  async function attachProjectFolders(
+    backendProjectId: string,
+    paths: string[],
+    skipped: string[],
+  ): Promise<void> {
+    const attached: string[] = [];
+    const failures: string[] = [...skipped];
+    for (const path of paths) {
+      const label = workspaceLabelForPath(path);
+      setProjectFolderBusyPath(path);
+      try {
+        const result = await runtimeClient.attachProjectFolder(
+          backendProjectId,
+          path,
+        );
+        if (result.ok) {
+          attached.push(label);
+        } else {
+          failures.push(`“${label}”：${result.message}`);
+        }
+      } catch (error) {
+        failures.push(
+          `“${label}”：${error instanceof Error ? error.message : "加入失败"}`,
+        );
+      }
+    }
+    setProjectFolderBusyPath(undefined);
+    await refreshProjects().catch(() => []);
+    const success =
+      attached.length > 0
+        ? `已把${attached.map((label) => `“${label}”`).join("、")}加入项目。`
+        : "";
+    setNotice([success, ...failures].filter(Boolean).join(" ") || null);
+  }
+
+  async function handleAddProjectFolder(projectId: string): Promise<void> {
+    if (pickingWorkspace || projectFolderBusyPath) {
+      return;
+    }
+    const backendProjectId = backendProjectIdFor(projectId);
+    if (!backendProjectId) {
+      setNotice("项目正在初始化，请稍后重试。");
+      return;
+    }
+    setPickingWorkspace(true);
+    setNotice(null);
+    try {
+      const { paths, skipped } = await pickProjectFolders(
+        foldersForProjectId(projectId).map((folder) => folder.path),
+      );
+      if (paths.length === 0) {
+        if (skipped.length > 0) {
+          setNotice(skipped.join(" "));
+        }
+        return;
+      }
+      await attachProjectFolders(backendProjectId, paths, skipped);
     } catch (error) {
       setNotice(
         error instanceof Error ? error.message : "Failed to select folder",
@@ -3740,6 +4209,74 @@ export function App() {
     } finally {
       setPickingWorkspace(false);
     }
+  }
+
+  async function handleSetPrimaryProjectFolder(
+    projectId: string,
+    path: string,
+  ): Promise<void> {
+    await runProjectFolderMutation(
+      projectId,
+      path,
+      (id) => runtimeClient.setPrimaryProjectFolder(id, path),
+      `已把“${workspaceLabelForPath(path)}”设为主文件夹。`,
+    );
+  }
+
+  async function handleDetachProjectFolder(
+    projectId: string,
+    path: string,
+  ): Promise<void> {
+    await runProjectFolderMutation(
+      projectId,
+      path,
+      (id) => runtimeClient.detachProjectFolder(id, path),
+      `已把“${workspaceLabelForPath(path)}”从项目移除，磁盘文件保留。`,
+    );
+  }
+
+  function requestProjectFolderTrash(projectId: string, path: string): void {
+    const backendProjectId = backendProjectIdFor(projectId);
+    if (!backendProjectId) {
+      setNotice("项目正在初始化，请稍后重试。");
+      return;
+    }
+    setPendingProjectDelete({
+      projectId,
+      backendProjectId,
+      label: workspaceLabelForPath(path),
+      action: "trash",
+      threadCount: threadsForProject(projectId).length,
+      folderPath: path,
+    });
+  }
+
+  function projectFolderRows(projectId: string): ProjectFolderRow[] {
+    // Every folder is one the user picked, so every row offers the same actions.
+    // Removing the last one is allowed: the project keeps its name and threads
+    // and goes back to running without a folder.
+    return foldersForProjectId(projectId).map((folder) => ({
+      path: folder.path,
+      isPrimary: folder.isPrimary,
+      onMakePrimary: (path: string) => {
+        void handleSetPrimaryProjectFolder(projectId, path);
+      },
+      onRemove: (path: string) => {
+        void handleDetachProjectFolder(projectId, path);
+      },
+      // × 只把文件夹移出项目，磁盘文件保留。真正动磁盘的废纸篓留在菜单里，
+      // 不和这个非破坏性动作放在同一个一键位置。
+      actions: [
+        {
+          id: "trash-folder",
+          label: "移到废纸篓",
+          tone: "danger" as const,
+          onSelect: (path: string) => {
+            requestProjectFolderTrash(projectId, path);
+          },
+        },
+      ],
+    }));
   }
 
   function handleNewProjectSession(projectId: string): void {
@@ -4253,7 +4790,9 @@ export function App() {
       .join(" ");
   }
 
-  function acpDisplayStatusToToolStatus(status: ACPDisplayStatus): ToolDisplayState {
+  function acpDisplayStatusToToolStatus(
+    status: ACPDisplayStatus,
+  ): ToolDisplayState {
     switch (status) {
       case "started":
       case "active":
@@ -4281,7 +4820,8 @@ export function App() {
     if (activeExternalInteraction) {
       const resolving =
         resolvingExternalInteractionId === activeExternalInteraction.id;
-      const isACPPermission = activeExternalInteraction.kind === "acp-permission";
+      const isACPPermission =
+        activeExternalInteraction.kind === "acp-permission";
       return (
         <ExternalActionGate
           compact
@@ -4403,14 +4943,32 @@ export function App() {
       ? "从 Awaken 移除项目"
       : pendingProjectDelete?.action === "delete_history"
         ? "删除 Awaken 历史"
-        : "将项目移到废纸篓";
+        : "将文件夹移到废纸篓";
   const projectDeleteDialogBody = !pendingProjectDelete
     ? ""
     : pendingProjectDelete.action === "detach"
       ? `“${pendingProjectDelete.label}”会从侧栏移除。${pendingProjectDelete.threadCount} 条历史会话和磁盘文件都会保留。`
       : pendingProjectDelete.action === "delete_history"
         ? `将删除“${pendingProjectDelete.label}”的 ${pendingProjectDelete.threadCount} 条 Awaken 历史会话。项目和磁盘目录都会保留；运行中的任务会先自动停止。`
-        : `“${pendingProjectDelete.label}”的磁盘目录将进入系统废纸篓。只有废纸篓操作成功后，Awaken 才会删除对应历史；失败时项目、历史和文件都会保持原样。`;
+        : [
+            `“${pendingProjectDelete.label}”的磁盘目录将进入系统废纸篓，并从项目中解绑。项目和它的 Awaken 历史都会保留；失败时文件夹、项目和文件都保持原样。`,
+            sharedFolderTrashWarning({
+              folderPath: pendingProjectDelete.folderPath,
+              actingProjectId: pendingProjectDelete.projectId,
+              projects: [
+                ...projectsFromWorkspace,
+                {
+                  id: DEFAULT_WORKSPACE_PROJECT_ID,
+                  label:
+                    projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ??
+                    "awaken",
+                  folders: defaultProjectFolders,
+                },
+              ],
+            }),
+          ]
+            .filter(Boolean)
+            .join(" ");
   const projectDeleteConfirmLabel =
     pendingProjectDelete?.action === "detach"
       ? "确认移除"
@@ -4530,7 +5088,9 @@ export function App() {
                 onReorderProjects={(ids) => {
                   void handleReorderProjects(ids);
                 }}
-                projectReorderDisabled={!desktopReady || projectReorderSubmitting}
+                projectReorderDisabled={
+                  !desktopReady || projectReorderSubmitting
+                }
                 onExpandedChange={setExpandedProjectIds}
                 onNewTask={handleNewTask}
                 onProfileClick={() => setProfilePopoverOpen(true)}
@@ -4822,40 +5382,110 @@ export function App() {
       </div>
       <Dialog
         open={createProjectDialogOpen}
-        title="Create project"
-        onOpenChange={setCreateProjectDialogOpen}
+        title="创建项目"
+        onOpenChange={(open) => {
+          if (!open && createProjectSubmitting) {
+            return;
+          }
+          setCreateProjectDialogOpen(open);
+        }}
         footer={
           <>
+            <div className="create-project-dialog-source">
+              <SelectableCard
+                compact
+                selected={pendingProjectMode === "local"}
+                icon={<Monitor size={15} strokeWidth={1.9} />}
+                title="Local"
+                onSelect={() => setPendingProjectMode("local")}
+              />
+            </div>
             <Button
               variant="default"
               size="md"
-              loading={pickingWorkspace}
-              onClick={() => {
-                void handleUseExistingFolder();
-              }}
+              disabled={createProjectSubmitting}
+              onClick={() => setCreateProjectDialogOpen(false)}
             >
-              Use existing folder
+              取消
             </Button>
             <Button
               variant="primary"
               size="md"
-              loading={pickingWorkspace}
+              loading={createProjectSubmitting}
               onClick={() => {
-                void handleUseExistingFolder();
+                void handleCreateProject();
               }}
             >
-              Next
+              创建项目
             </Button>
           </>
         }
       >
         <div className="create-project-dialog-body">
-          <SelectableCard
-            selected={pendingProjectMode === "local"}
-            icon={<Monitor size={18} strokeWidth={1.9} />}
-            title="Local"
-            description="Use a folder on this Mac as an Awaken project."
-            onSelect={() => setPendingProjectMode("local")}
+          <label className="create-project-dialog-field">
+            <span className="create-project-dialog-label">项目名称</span>
+            <input
+              type="text"
+              className="create-project-dialog-input"
+              value={draftProjectName}
+              onChange={(event) => setDraftProjectName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void handleCreateProject();
+                }
+              }}
+              placeholder="例如：季度复盘"
+              disabled={createProjectSubmitting}
+            />
+          </label>
+          <ProjectFoldersEditor
+            folders={draftProjectFolders.map((path) => ({
+              path,
+              isPrimary: isSameWorkspacePath(path, draftPrimaryFolder),
+              onMakePrimary: (target: string) => setDraftPrimaryFolder(target),
+              onRemove: handleRemoveDraftProjectFolder,
+            }))}
+            addDisabled={pickingWorkspace || createProjectSubmitting}
+            emptyHint="可以先不选文件夹。项目会直接创建，之后随时能加。"
+            onAddFolder={() => {
+              void handleAddDraftProjectFolder();
+            }}
+          />
+        </div>
+      </Dialog>
+      <Dialog
+        open={Boolean(editingProjectId)}
+        title="编辑项目"
+        onOpenChange={(open) => {
+          if (!open && !projectFolderBusyPath) {
+            setEditingProjectId(null);
+          }
+        }}
+        footer={
+          <Button
+            variant="primary"
+            size="md"
+            disabled={Boolean(projectFolderBusyPath)}
+            onClick={() => setEditingProjectId(null)}
+          >
+            完成
+          </Button>
+        }
+      >
+        <div className="create-project-dialog-body">
+          <ProjectFoldersEditor
+            folders={
+              editingProjectId ? projectFolderRows(editingProjectId) : []
+            }
+            addDisabled={pickingWorkspace || Boolean(projectFolderBusyPath)}
+            busyPath={projectFolderBusyPath}
+            emptyHint="这个项目还没有文件夹。"
+            onAddFolder={() => {
+              if (editingProjectId) {
+                void handleAddProjectFolder(editingProjectId);
+              }
+            }}
           />
         </div>
       </Dialog>

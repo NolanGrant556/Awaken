@@ -17,9 +17,22 @@ type projectHandlers struct {
 	service *awruntime.ProjectService
 }
 
+// upsertProjectRequest accepts either the single-folder form (workspace_root)
+// or the multi-folder form (folders). Omitting both creates a project backed
+// only by its Awaken-managed working directory.
 type upsertProjectRequest struct {
-	WorkspaceRoot string `json:"workspace_root"`
-	DisplayName   string `json:"display_name,omitempty"`
+	WorkspaceRoot string               `json:"workspace_root,omitempty"`
+	Folders       []projectFolderInput `json:"folders,omitempty"`
+	DisplayName   string               `json:"display_name,omitempty"`
+}
+
+type projectFolderInput struct {
+	Path    string `json:"path"`
+	Primary bool   `json:"primary,omitempty"`
+}
+
+type projectFolderRequest struct {
+	Path string `json:"path"`
 }
 
 type reorderProjectsRequest struct {
@@ -57,12 +70,73 @@ func (h projectHandlers) handleUpsertProject(w http.ResponseWriter, r *http.Requ
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
-	project, err := h.service.UpsertProject(request.WorkspaceRoot, request.DisplayName)
+	// The single-folder form stays an upsert so reopening a known folder keeps
+	// reactivating its project instead of minting a duplicate.
+	if len(request.Folders) == 0 && strings.TrimSpace(request.WorkspaceRoot) != "" {
+		project, err := h.service.UpsertProject(request.WorkspaceRoot, request.DisplayName)
+		if err != nil {
+			writeProjectServiceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, project)
+		return
+	}
+	folders := make([]awruntime.ProjectFolder, 0, len(request.Folders))
+	for _, folder := range request.Folders {
+		folders = append(folders, awruntime.ProjectFolder{
+			Path:      folder.Path,
+			Role:      awruntime.ProjectFolderRoleUser,
+			IsPrimary: folder.Primary,
+		})
+	}
+	project, err := h.service.CreateProject(folders, request.DisplayName)
 	if err != nil {
 		writeProjectServiceError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, project)
+}
+
+func (h projectHandlers) handleAttachProjectFolder(w http.ResponseWriter, r *http.Request) {
+	var request projectFolderRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	project, err := h.service.AttachProjectFolder(r.PathValue("project_id"), request.Path)
+	if err != nil {
+		writeProjectServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, project)
+}
+
+func (h projectHandlers) handleDetachProjectFolder(w http.ResponseWriter, r *http.Request) {
+	var request projectFolderRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	project, err := h.service.DetachProjectFolder(r.PathValue("project_id"), request.Path)
+	if err != nil {
+		writeProjectServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, project)
+}
+
+func (h projectHandlers) handleSetPrimaryProjectFolder(w http.ResponseWriter, r *http.Request) {
+	var request projectFolderRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	project, err := h.service.SetPrimaryProjectFolder(r.PathValue("project_id"), request.Path)
+	if err != nil {
+		writeProjectServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, project)
 }
 
 func (h projectHandlers) handleReorderProjects(w http.ResponseWriter, r *http.Request) {
@@ -101,8 +175,16 @@ func (h projectHandlers) handleDeleteProjectThreads(w http.ResponseWriter, r *ht
 	writeJSON(w, status, operation)
 }
 
+// handlePrepareTrash moves a single attached folder to the system trash. The
+// project and its threads are untouched; project removal and history deletion
+// are separate endpoints.
 func (h projectHandlers) handlePrepareTrash(w http.ResponseWriter, r *http.Request) {
-	operation, err := h.service.PrepareTrash(r.PathValue("project_id"), idempotencyKey(r))
+	var request projectFolderRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	operation, err := h.service.PrepareTrash(r.PathValue("project_id"), request.Path, idempotencyKey(r))
 	if err != nil {
 		writeProjectServiceError(w, err)
 		return
@@ -242,6 +324,8 @@ func writeProjectServiceError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	switch code {
 	case "PROJECT_NOT_FOUND", "PROJECT_OPERATION_NOT_FOUND":
+		status = http.StatusNotFound
+	case "PROJECT_FOLDER_NOT_FOUND":
 		status = http.StatusNotFound
 	case "PROJECT_OPERATION_CONFLICT", "PROJECT_RUNS_BUSY", "IDEMPOTENCY_KEY_CONFLICT", "PROJECT_PATH_FINGERPRINT_CHANGED", "PROJECT_TRASH_ATTEMPT_INVALID":
 		status = http.StatusConflict

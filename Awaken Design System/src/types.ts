@@ -53,8 +53,25 @@ export type ProjectItem = {
   menuItems?: ProjectMenuItem[];  // 行内更多菜单项，由业务层提供行为
   isLoading?: boolean;          // 展开时显示 loading ring
   disabled?: boolean;
+  hoverCard?: ProjectHoverCard;  // 悬停时在行右侧展示的文件夹组成卡片
   // 注意：展开状态由 ProjectTree 组件通过 expandedIds / defaultExpandedIds 管理，
   // 不在节点数据中保存，避免 controlled/uncontrolled 状态重复。
+};
+
+export type ProjectHoverCardFolder = {
+  path: string;
+  label?: string;               // 缺省时展示完整 path
+};
+
+export type ProjectHoverCard = {
+  title: string;
+  summary?: string;             // 如 "3 个对话串"
+  folders: ProjectHoverCardFolder[];
+  emptyFoldersLabel?: string;   // 零文件夹项目的占位文案
+  revealHint?: string;          // 文件夹行 title 前缀，如 "在访达中显示："
+  actionLabel?: string;         // 底部动作，如 "编辑项目"
+  onRevealFolder?: (path: string) => void;
+  onAction?: () => void;
 };
 
 export type ProjectMenuItem = {
@@ -63,6 +80,25 @@ export type ProjectMenuItem = {
   tone?: "neutral" | "danger";
   disabled?: boolean;
   onSelect?: () => void;
+};
+
+// === 项目文件夹编辑 ===
+
+export type ProjectFolderRowAction = {
+  id: string;
+  label: string;
+  tone?: "neutral" | "danger";
+  disabled?: boolean;
+  onSelect?: (path: string) => void;
+};
+
+export type ProjectFolderRow = {
+  path: string;
+  label?: string;               // 缺省时由组件从 path 取末段
+  isPrimary?: boolean;          // 主文件夹徽标
+  onMakePrimary?: (path: string) => void;  // 非主文件夹行悬停/聚焦时露出
+  onRemove?: (path: string) => void;       // 常显 ×，把文件夹移出这一组
+  actions?: ProjectFolderRowAction[];      // 仅承载切主与移出之外的额外操作
 };
 
 // === 运行步骤 ===

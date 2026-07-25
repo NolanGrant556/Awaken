@@ -86,6 +86,8 @@ type RuntimeSnapshot struct {
 	ToolSummary       string
 	SkillSummary      string
 	ScopeID           string
+	ProjectName       string
+	ProjectFolders    []ProjectFolderObservation
 	WorkspaceRoot     string
 	ReadableRoots     []string
 	WritableRoots     []string
@@ -102,6 +104,13 @@ type RuntimeSnapshot struct {
 	RefreshReason     string
 	Executables       []string
 	PackageManagers   []string
+}
+
+// ProjectFolderObservation is one folder of the project the run belongs to.
+// Primary marks the folder that is also the working directory.
+type ProjectFolderObservation struct {
+	Path      string
+	IsPrimary bool
 }
 
 type ContextCacheKey struct {
@@ -131,20 +140,29 @@ func (snapshot RuntimeSnapshot) ToRuntimeInfo() prompt.RuntimeInfo {
 			DisplayName: file.DisplayName,
 		})
 	}
+	projectFolders := make([]prompt.RuntimeProjectFolder, 0, len(snapshot.ProjectFolders))
+	for _, folder := range snapshot.ProjectFolders {
+		projectFolders = append(projectFolders, prompt.RuntimeProjectFolder{
+			Path:      folder.Path,
+			IsPrimary: folder.IsPrimary,
+		})
+	}
 	return prompt.RuntimeInfo{
-		WorkingDir:    snapshot.WorkingDirectory,
-		CurrentDate:   snapshot.CurrentDate,
-		ModelName:     snapshot.ModelName,
-		EntryPoint:    snapshot.EntryPoint,
-		ToolSummary:   snapshot.ToolSummary,
-		SkillSummary:  snapshot.SkillSummary,
-		AttachedFiles: attachedFiles,
+		WorkingDir:     snapshot.WorkingDirectory,
+		CurrentDate:    snapshot.CurrentDate,
+		ModelName:      snapshot.ModelName,
+		EntryPoint:     snapshot.EntryPoint,
+		ToolSummary:    snapshot.ToolSummary,
+		SkillSummary:   snapshot.SkillSummary,
+		ProjectName:    snapshot.ProjectName,
+		ProjectFolders: projectFolders,
+		AttachedFiles:  attachedFiles,
 	}
 }
 
 func runtimeSnapshotSystemItem(snapshot RuntimeSnapshot) ContextItem {
 	content := fmt.Sprintf(
-		"current_date=%s\nworking_directory=%s\nmodel_name=%s\nentry_point=%s\ntool_summary=%s\nskill_summary=%s\nscope_id=%s\nworkspace_root=%s\nreadable_roots=%s\nwritable_roots=%s\noutput_roots=%s\nattached_files=%s\ntool_snapshot_id=%s\ntool_catalog_version=%d\nenvironment_snapshot_id=%s\nos=%s\narchitecture=%s\npath_source=%s\nskill_roots=%s\ntemporary_work_root=%s\nenvironment_refresh_reason=%s\nobserved_executables=%s\npackage_managers=%s",
+		"current_date=%s\nworking_directory=%s\nmodel_name=%s\nentry_point=%s\ntool_summary=%s\nskill_summary=%s\nscope_id=%s\nproject_name=%s\nproject_folders=%s\nworkspace_root=%s\nreadable_roots=%s\nwritable_roots=%s\noutput_roots=%s\nattached_files=%s\ntool_snapshot_id=%s\ntool_catalog_version=%d\nenvironment_snapshot_id=%s\nos=%s\narchitecture=%s\npath_source=%s\nskill_roots=%s\ntemporary_work_root=%s\nenvironment_refresh_reason=%s\nobserved_executables=%s\npackage_managers=%s",
 		snapshot.CurrentDate,
 		snapshot.WorkingDirectory,
 		snapshot.ModelName,
@@ -152,6 +170,8 @@ func runtimeSnapshotSystemItem(snapshot RuntimeSnapshot) ContextItem {
 		snapshot.ToolSummary,
 		snapshot.SkillSummary,
 		snapshot.ScopeID,
+		formatRuntimeSnapshotProjectName(snapshot.ProjectName),
+		formatRuntimeSnapshotProjectFolders(snapshot.ProjectFolders),
 		snapshot.WorkspaceRoot,
 		strings.Join(snapshot.ReadableRoots, ","),
 		strings.Join(snapshot.WritableRoots, ","),
@@ -174,6 +194,34 @@ func runtimeSnapshotSystemItem(snapshot RuntimeSnapshot) ContextItem {
 		Type:    "runtime_snapshot",
 		Content: content,
 	}
+}
+
+func formatRuntimeSnapshotProjectName(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return "none"
+	}
+	return strings.TrimSpace(name)
+}
+
+func formatRuntimeSnapshotProjectFolders(folders []ProjectFolderObservation) string {
+	if len(folders) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(folders))
+	for _, folder := range folders {
+		path := strings.TrimSpace(folder.Path)
+		if path == "" {
+			continue
+		}
+		if folder.IsPrimary {
+			path += "(primary)"
+		}
+		parts = append(parts, path)
+	}
+	if len(parts) == 0 {
+		return "none"
+	}
+	return strings.Join(parts, ",")
 }
 
 func formatRuntimeSnapshotSkillRoots(roots []tool.SkillRootObservation) string {

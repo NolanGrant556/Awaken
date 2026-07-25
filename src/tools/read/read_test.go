@@ -91,15 +91,17 @@ trailer << /Root 1 0 R >>
 	}
 }
 
-func TestReadDeniesOutsideReadableRootsAndOfficeBinary(t *testing.T) {
+func TestReadReachesOutsideRootsAndRejectsOfficeBinary(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
 	outsidePath := filepath.Join(outside, "outside.txt")
 	if err := os.WriteFile(outsidePath, []byte("secret"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	denied, _ := (&Tool{}).ExecuteOutcome(readTestContext(root, tool.ModelCapabilities{}), `{"file_path":`+quote(outsidePath)+`}`, nil)
-	if denied.Status != tool.OutcomeFailed || denied.ErrorCode != "read_path_unavailable" {
-		t.Fatalf("denied=%+v", denied)
+	// Roots say where work happens by default, not what may be opened, so an
+	// absolute path the user named is read wherever it lives.
+	reached, _ := (&Tool{}).ExecuteOutcome(readTestContext(root, tool.ModelCapabilities{}), `{"file_path":`+quote(outsidePath)+`}`, nil)
+	if reached.IsError() || !strings.Contains(reached.Content, "secret") {
+		t.Fatalf("outside=%+v", reached)
 	}
 	if err := os.WriteFile(filepath.Join(root, "book.xlsx"), []byte{'P', 'K', 3, 4, 0, 0}, 0o644); err != nil {
 		t.Fatal(err)

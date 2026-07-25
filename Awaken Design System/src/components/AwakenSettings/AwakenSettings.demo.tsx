@@ -27,6 +27,7 @@ const sectionTitles: Record<string, string> = {
   memory: "记忆",
   appearance: "外观",
   pets: "宠物",
+  acp: "ACP",
 };
 
 const configuredModel = {
@@ -123,6 +124,12 @@ export function AwakenSettingsDemo() {
         {...AwakenPetsSettingsSample}
         onToggleOverlay={() => setLastAction("已触发唤醒宠物（Gallery 模拟）。")}
       />
+    );
+  } else if (activeSectionId === "acp") {
+    // 设计系统只拥有 ACP 这一个导航入口，runner 列表和编辑表单由 Desktop 拥有。
+    // 不占位就会落进下面的 else，在「ACP」标题下显示模型设置。
+    content = (
+      <p>ACP runner 的列表与编辑表单由 Desktop 拥有，Gallery 只观测这个导航入口。</p>
     );
   } else {
     content = (

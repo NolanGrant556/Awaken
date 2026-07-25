@@ -122,7 +122,7 @@ Gallery 左栏按“原子组件”“左侧栏组件”“设置页组件”“
 
 “「技能」组件库”入口同时观测完整 Skills 组合、Skill 卡片、项目窗口和 Markdown 预览窗口；其中开关与项目文件夹直接消费原子 `AwakenSwitch`、`AwakenFolder`，并分别在原子组件目录单独观测。Skill/Connector 的旧命名组件只保留兼容外壳，不再拥有独立视觉实现。
 
-“「左侧栏」组件库”同样先观测 Desktop 当前使用的 `AwakenWorkbenchSidebarFrame + AwakenSidebar` 完整组合，再集中展示 New Agent、主导航、项目树、区块动作和线程运行指示，并补充项目/会话更多菜单、项目树空状态，以及创建项目、移除项目和重命名会话三个 App 级真实弹窗流程；账户入口只在完整组合中保留实际位置，不在该组件族内重复展开。`AwakenDropdown` 保留独立源码和公开导出，并在项目树的真实更多菜单中观测；它不再用虚构的模型、视图菜单重复占用原子组件目录，原 `awaken-dropdown` URL 跳转到“「左侧栏」组件库”。跨产品区域复用的 `AwakenDialog` 同样保留独立源码和公开导出，但不再重复占用原子组件目录；弹窗关闭动作继续使用 `AwakenIconButton`，创建项目流程在弹窗内观测 Desktop 当前唯一支持的本地 `AwakenSelectableCard`。技能、设置和连接器仍在各自组件族中观测相应弹窗；原 `awaken-dialog` 与 `awaken-selectable-card` URL 均跳转到“「左侧栏」组件库”。
+“「左侧栏」组件库”同样先观测 Desktop 当前使用的 `AwakenWorkbenchSidebarFrame + AwakenSidebar` 完整组合，再集中展示 New Agent、主导航、项目树、区块动作和线程运行指示，并补充项目/会话更多菜单、项目树空状态，以及创建项目、编辑项目、移除项目和重命名会话四个 App 级真实弹窗流程；账户入口只在完整组合中保留实际位置，不在该组件族内重复展开。`AwakenDropdown` 保留独立源码和公开导出，并在项目树的真实更多菜单中观测；它不再用虚构的模型、视图菜单重复占用原子组件目录，原 `awaken-dropdown` URL 跳转到“「左侧栏」组件库”。跨产品区域复用的 `AwakenDialog` 同样保留独立源码和公开导出，但不再重复占用原子组件目录；弹窗关闭动作继续使用 `AwakenIconButton`，创建项目流程在弹窗内观测 Desktop 当前唯一支持的本地 `AwakenSelectableCard`；`AwakenProjectFoldersEditor` 保留独立源码和公开导出，并在创建项目与编辑项目两个弹窗中观测项目的文件夹列表、主文件夹徽标和文件夹行更多菜单；`AwakenProjectHoverCard` 只能由项目行悬停触发，因此它的状态演示落在项目树的「悬停展示文件夹组成」里，用来观测多文件夹项目和零文件夹项目两种卡片。技能、设置和连接器仍在各自组件族中观测相应弹窗；原 `awaken-dialog` 与 `awaken-selectable-card` URL 均跳转到“「左侧栏」组件库”。
 
 “「账户」组件库”集中展示 `AwakenAccount` 完整组合、`AwakenProfileButton` 个人入口和 `AwakenProfileBalancePanel` 额度/设置面板；`AwakenPopover` 只作为账户与项目菜单等真实组合的浮层能力观测，不再展示虚构的模型、Plan/Act 或权限菜单，原 `awaken-popover` URL 跳转到本组件族。运行时额度请求留在 Desktop，Design System 只接收数据和回调。
 

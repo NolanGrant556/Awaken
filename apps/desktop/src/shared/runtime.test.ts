@@ -173,6 +173,25 @@ describe("runtime shared start run normalization", () => {
     );
   });
 
+  it("sends the project name so the agent can name where it is working", () => {
+    const wire = normalizeStartRunRequest({
+      input: "本项目有什么文件",
+      workspace: {
+        projectId: "project_1",
+        projectName: "测试项目",
+        workspaceRoot: "/workspace/01",
+        readableRoots: ["/workspace/01", "/workspace/02"],
+      },
+      client: {
+        sessionId: "session-3",
+        requestId: "request-3",
+        entrypoint: "desktop",
+      },
+    });
+    expect(wire.workspace.project_name).toBe("测试项目");
+    expect(wire.workspace.project_id).toBe("project_1");
+  });
+
   it("passes composer tokens through the wire request without mutating input text", () => {
     expect(
       normalizeStartRunRequest({

@@ -18,6 +18,7 @@
 - `AwakenProfileButton`：只作为 Nolan 账户入口在完整侧栏中出现；它与额度面板的完整组合归入独立“「账户」组件库”。
 - `AwakenDialog + AwakenIconButton`：保留统一模态与关闭按钮能力；Gallery 在本组件族中观测创建项目、移除项目和重命名会话三个 App 级真实流程。
 - `AwakenSelectableCard`：只在创建项目弹窗中展示 Desktop 当前支持的本地文件夹来源，不展示尚未支持的远程或云端来源。
+- `AwakenProjectFoldersEditor`：在创建项目和编辑项目两个弹窗中观测项目的文件夹列表、主文件夹徽标和每行更多操作；Gallery 只模拟回调，不打开系统对话框、不触碰磁盘。
 
 项目树同时展示当前真实支持的项目/会话更多菜单、展开与选中状态，以及“暂无项目”“暂无会话”两种空状态。`AwakenDropdown` 保留自己的组件目录与公开导出，但不再单独占用 Gallery 入口；`AwakenTooltip` 随侧栏区块动作和其他真实消费组件观测，`AwakenAvatar` 仍保留独立入口。New Agent 加号、项目树箭头和账户入口箭头直接使用 `lucide-react`，不再经过重复的 `AwakenIcon` 包装层。
 

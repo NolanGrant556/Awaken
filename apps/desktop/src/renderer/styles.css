@@ -175,6 +175,47 @@ pre {
   gap: 10px;
 }
 
+.create-project-dialog-field {
+  display: grid;
+  gap: 6px;
+}
+
+/* Keeps the source chip against the left edge of the footer while the confirm
+   and cancel buttons stay right-aligned. */
+.create-project-dialog-source {
+  margin-right: auto;
+}
+
+.create-project-dialog-label {
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+}
+
+.create-project-dialog-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: 6px;
+  background: var(--aw-bg-white);
+  color: var(--aw-text-primary);
+  font-size: 13px;
+  line-height: 1.4;
+  outline: none;
+}
+
+.create-project-dialog-input:focus {
+  border-color: var(--aw-border-control-hover);
+}
+
+.create-project-dialog-input::placeholder {
+  color: var(--aw-text-muted);
+}
+
+.create-project-dialog-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .project-delete-dialog-copy {
   margin: 0;
   color: var(--aw-text-secondary);

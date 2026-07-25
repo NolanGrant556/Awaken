@@ -31,7 +31,7 @@ function createElectronBridge(
     unsubscribeRun: vi.fn(),
     getRuntimeInfo: vi.fn(),
     pickDirectory: vi.fn(async () => ({ canceled: true as const })),
-    pickWorkspace: vi.fn(async () => ({ canceled: true as const })),
+    pickProjectFolders: vi.fn(async () => ({ canceled: true as const })),
     validateWorkspace: vi.fn(async () => ({ valid: true as const })),
     deleteMcpServer: vi.fn(async () => undefined),
     getSupervisorStatus: vi.fn(() => Promise.resolve(status)),

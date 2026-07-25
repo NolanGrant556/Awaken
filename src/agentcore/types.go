@@ -134,14 +134,22 @@ func (c AgentConfig) EffectiveProfile() profile.ExecutionProfile {
 }
 
 type TaskScope struct {
-	ScopeID           string
-	Root              string
-	ReadableRoots     []string
-	WritableRoots     []string
-	OutputRoots       []string
-	AttachedFiles     []tool.ScopedFile
-	ProtectedRoots    []string
-	TemporaryWorkRoot string
+	ScopeID string
+	// ProjectName is the display name of the project this scope belongs to. It
+	// is model-facing context only; no path or permission is derived from it.
+	ProjectName             string
+	Root                    string
+	ReadableRoots           []string
+	WritableRoots           []string
+	OutputRoots             []string
+	AttachedFiles           []tool.ScopedFile
+	ProtectedRoots          []string
+	ProtectedRootExceptions []string
+	TemporaryWorkRoot       string
+	// SessionWorkspace marks Root as the Awaken-managed session directory of a
+	// folder-less project, which is why the readable roots must not then be
+	// presented to the model as folders the user picked.
+	SessionWorkspace bool
 }
 
 type WorkspaceConfig = TaskScope

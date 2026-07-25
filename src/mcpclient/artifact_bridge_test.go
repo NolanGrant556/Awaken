@@ -301,7 +301,6 @@ func TestMCPArtifactBridgeRejectsUnverifiedOrOutOfScopeOutputs(t *testing.T) {
 		{mode: "oversize", code: ErrorCodeArtifactOutputOversize},
 		{mode: "traversal", code: ErrorCodeArtifactOutputPathDenied},
 		{mode: "absolute", code: ErrorCodeArtifactOutputPathDenied},
-		{mode: "out_of_scope", code: ErrorCodeArtifactOutputPathDenied},
 		{mode: "sensitive", code: ErrorCodeArtifactOutputPathDenied},
 		{mode: "unsupported_extension", code: ErrorCodeArtifactOutputPathDenied},
 		{mode: "content_mismatch", code: ErrorCodeArtifactOutputContentMismatch},
@@ -352,7 +351,10 @@ func TestMCPArtifactBridgeRejectsSymlinkPath(t *testing.T) {
 	}
 }
 
-func TestMCPArtifactBridgeRequiresWritableOutputIntersectionAndRejectsProtectedRoot(t *testing.T) {
+// Writable and output roots say where produced files are expected to land, not
+// where they are confined to, so a destination that sits in only one of them is
+// published. Protected roots are a separate mechanism and still deny.
+func TestMCPArtifactBridgePublishesOutsideTheRootIntersectionButNotIntoProtectedRoots(t *testing.T) {
 	adapter, _ := startArtifactBridgeAdapter(t, artifactBridgeTool(defaultArtifactBridgeContract()))
 	workspace := t.TempDir()
 	writableOnly := filepath.Join(workspace, "writable-only")
@@ -373,16 +375,22 @@ func TestMCPArtifactBridgeRequiresWritableOutputIntersectionAndRejectsProtectedR
 	ctx = tool.ContextWithExecutionBroker(ctx, tool.NewWorkspaceExecutionBrokerWithOptions(tool.WorkspaceExecutionBrokerOptions{
 		StagingParent: t.TempDir(), TrashAdapter: trashAdapter,
 	}))
-	for _, mode := range []string{"writable_only", "output_only", "protected"} {
+	for _, mode := range []string{"writable_only", "output_only"} {
 		t.Run(mode, func(t *testing.T) {
 			outcome, err := adapter.ExecuteOutcome(ctx, fmt.Sprintf(`{"mode":%q}`, mode), nil)
-			if err != nil || outcome.Status != tool.OutcomeDenied || outcome.ErrorCode != ErrorCodeArtifactOutputPathDenied || len(outcome.Artifacts) != 0 {
+			if err != nil || outcome.IsError() || len(outcome.Artifacts) != 1 {
 				t.Fatalf("mode=%s outcome=%+v err=%v", mode, outcome, err)
 			}
 		})
 	}
+	t.Run("protected", func(t *testing.T) {
+		outcome, err := adapter.ExecuteOutcome(ctx, `{"mode":"protected"}`, nil)
+		if err != nil || outcome.Status != tool.OutcomeDenied || outcome.ErrorCode != ErrorCodeArtifactOutputPathDenied || len(outcome.Artifacts) != 0 {
+			t.Fatalf("protected outcome=%+v err=%v", outcome, err)
+		}
+	})
 	if trashAdapter.calls != 0 {
-		t.Fatalf("intersection/protected denials reached Trash: %d", trashAdapter.calls)
+		t.Fatalf("creating new artifacts must not reach Trash: %d", trashAdapter.calls)
 	}
 }
 

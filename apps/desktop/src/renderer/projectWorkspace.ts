@@ -1,14 +1,26 @@
+export type WorkspaceProjectFolderRole = "user" | "managed";
+
+export type WorkspaceProjectFolder = {
+  path: string;
+  role: WorkspaceProjectFolderRole;
+  isPrimary: boolean;
+};
+
 export type WorkspaceProject = {
   id: string;
   backendProjectId?: string;
   label: string;
+  /** 主文件夹路径；Core 始终保证项目恰好有一个主文件夹。 */
   path: string;
+  folders: WorkspaceProjectFolder[];
 };
 
 export type TrackedTrashOperation = {
   operationId: string;
   projectId: string;
   backendProjectId: string;
+  /** 本次进废纸篓的文件夹；废纸篓是文件夹粒度而不是项目粒度。 */
+  folderPath: string;
   label: string;
   wasExpanded: boolean;
 };
@@ -46,15 +58,30 @@ export function projectOperationReconciliationState(operation: {
   return "pending";
 }
 
+export type TrackedTrashProjectSnapshot = {
+  state?: "active" | "removed" | "trash_pending";
+  folders?: { path: string }[];
+};
+
+/**
+ * 文件夹级废纸篓成功后项目仍然存活，只是这个文件夹被解绑；失败后文件夹原样挂回。
+ * 因此对账只看「项目是否还挂着这个文件夹」，不再看项目是否被整体移除。
+ */
 export function canReconcileTrackedTrashOperation(
   operationState: ProjectOperationReconciliationState,
-  projectState: "active" | "removed" | "trash_pending" | undefined,
+  project: TrackedTrashProjectSnapshot | undefined,
+  folderPath: string,
 ): boolean {
+  const stillAttached = Boolean(
+    project?.folders?.some((folder) =>
+      isSameWorkspacePath(folder.path, folderPath),
+    ),
+  );
   if (operationState === "failed") {
-    return projectState === "active";
+    return project?.state === "active" && stillAttached;
   }
   if (operationState === "succeeded") {
-    return projectState !== "active" && projectState !== "trash_pending";
+    return project?.state !== "trash_pending" && !stillAttached;
   }
   return false;
 }
@@ -82,6 +109,9 @@ export function parseTrackedTrashOperations(
         typeof candidate.projectId !== "string" ||
         !("backendProjectId" in candidate) ||
         typeof candidate.backendProjectId !== "string" ||
+        !("folderPath" in candidate) ||
+        typeof candidate.folderPath !== "string" ||
+        !candidate.folderPath ||
         !("label" in candidate) ||
         typeof candidate.label !== "string" ||
         !("wasExpanded" in candidate) ||
@@ -96,6 +126,7 @@ export function parseTrackedTrashOperations(
         operationId: candidate.operationId,
         projectId: candidate.projectId,
         backendProjectId: candidate.backendProjectId,
+        folderPath: candidate.folderPath,
         label: candidate.label,
         wasExpanded: candidate.wasExpanded,
       });
@@ -163,4 +194,46 @@ export function removeWorkspaceProject(
   projectId: string,
 ): WorkspaceProject[] {
   return projects.filter((project) => project.id !== projectId);
+}
+
+export function primaryWorkspaceProjectFolder(
+  project: Pick<WorkspaceProject, "path" | "folders">,
+): WorkspaceProjectFolder | undefined {
+  return (
+    project.folders.find((folder) => folder.isPrimary) ?? project.folders[0]
+  );
+}
+
+/**
+ * run 的执行根：主文件夹在前，其余文件夹按项目里的顺序跟随。
+ * TaskScope 的三个 roots 数组都用这个顺序，主文件夹同时是 cwd 与相对路径基准。
+ */
+export function workspaceProjectRunRoots(
+  project: Pick<WorkspaceProject, "path" | "folders">,
+): string[] {
+  const primary = normalizeWorkspacePath(
+    primaryWorkspaceProjectFolder(project)?.path ?? project.path,
+  );
+  const roots = primary ? [primary] : [];
+  for (const folder of project.folders) {
+    const path = normalizeWorkspacePath(folder.path);
+    if (path && !roots.includes(path)) {
+      roots.push(path);
+    }
+  }
+  return roots;
+}
+
+export function workspaceProjectForFolderPath(
+  projects: WorkspaceProject[],
+  folderPath: string | undefined,
+): WorkspaceProject | undefined {
+  if (!folderPath) {
+    return undefined;
+  }
+  return projects.find((project) =>
+    project.folders.some((folder) =>
+      isSameWorkspacePath(folder.path, folderPath),
+    ),
+  );
 }

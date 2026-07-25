@@ -93,10 +93,8 @@ export function AwakenPopover({
           <FloatingFocusManager context={context} modal={false}>
             <div
               ref={refs.setFloating}
-              style={{
-                ...floatingStyles,
-                zIndex: 10,
-              }}
+              className="aw-popover__floating"
+              style={floatingStyles}
               {...getFloatingProps()}
             >
               {content}

@@ -511,7 +511,7 @@ func TestFileStoreTrashLifecycleHappyPathAndFailureRestore(t *testing.T) {
 	}
 	createProjectTestThread(t, service, workspaceRoot, "thread_trash")
 
-	prepared, err := projects.PrepareTrash(project.ProjectID, "trash-1")
+	prepared, err := projects.PrepareTrash(project.ProjectID, workspaceRoot, "trash-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,12 +557,23 @@ func TestFileStoreTrashLifecycleHappyPathAndFailureRestore(t *testing.T) {
 	if completed.Status != ProjectOperationAccepted && completed.Status != ProjectOperationSucceeded {
 		t.Fatalf("complete failed: %+v", completed)
 	}
-	trashed, err := projects.ListProjects(true)
+	// Trash is folder-scoped: the directory is gone and the folder is detached,
+	// but the project survives on its Awaken-managed working directory.
+	afterTrash, err := projects.ListProjects(true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(trashed) != 1 || trashed[0].State != ProjectStateRemoved || trashed[0].RemovalReason != "trashed" {
-		t.Fatalf("trashed durable state wrong: %+v", trashed)
+	if len(afterTrash) != 1 || afterTrash[0].State != ProjectStateActive {
+		t.Fatalf("folder trash must keep the project active: %+v", afterTrash)
+	}
+	if afterTrash[0].HasFolder(workspaceRoot) {
+		t.Fatalf("trashed folder must be detached: %+v", afterTrash[0].Folders)
+	}
+	if _, ok := afterTrash[0].PrimaryFolder(); ok {
+		t.Fatalf("trashing the only folder must leave the project folderless: %+v", afterTrash[0].Folders)
+	}
+	if got := service.ListThreads(); len(got) != 1 {
+		t.Fatalf("folder trash must keep Awaken history, got %+v", got)
 	}
 
 	// Failure path on a second project restores the previous state and
@@ -575,7 +586,7 @@ func TestFileStoreTrashLifecycleHappyPathAndFailureRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	preparedSecond, err := projects.PrepareTrash(second.ProjectID, "trash-2")
+	preparedSecond, err := projects.PrepareTrash(second.ProjectID, secondRoot, "trash-2")
 	if err != nil {
 		t.Fatal(err)
 	}

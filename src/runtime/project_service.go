@@ -21,6 +21,8 @@ var (
 	ErrIdempotencyKeyConflict   = errors.New("idempotency key already belongs to another operation")
 	ErrProjectPathInvalid       = errors.New("project path is invalid")
 	ErrProjectOrderInvalid      = errors.New("project order must contain every active project exactly once")
+
+	ErrProjectFolderNotFound = errors.New("folder is not attached to this project")
 )
 
 func ProjectErrorCode(err error) string {
@@ -45,6 +47,8 @@ func ProjectErrorCode(err error) string {
 		return "PROJECT_PATH_INVALID"
 	case errors.Is(err, ErrProjectOrderInvalid):
 		return "PROJECT_ORDER_INVALID"
+	case errors.Is(err, ErrProjectFolderNotFound):
+		return "PROJECT_FOLDER_NOT_FOUND"
 	default:
 		return "INTERNAL_ERROR"
 	}
@@ -71,19 +75,33 @@ func newProjectService(runService *RunService, store ProjectLifecycleRepository)
 	}
 }
 
+// CanStartRun answers whether the folder a run is anchored on is still usable.
+// A shared folder is judged as one directory rather than per project: any holder
+// on its way to the trash is about to take the directory away from all of them,
+// so that blocks everyone, while a single active holder is enough to keep the
+// folder open. A folder no project holds is not this gate's business.
 func (s *ProjectService) CanStartRun(workspaceRoot string) (bool, error) {
 	root := normalizeProjectWorkspaceRoot(workspaceRoot)
 	if root == "" {
 		return false, ErrProjectPathInvalid
 	}
-	state, found, err := s.store.ProjectStateForWorkspace(root)
+	holders, err := s.store.ProjectsHoldingFolder(root)
 	if err != nil {
 		return false, err
 	}
-	if !found {
+	if len(holders) == 0 {
 		return true, nil
 	}
-	return state == ProjectStateActive, nil
+	runnable := false
+	for _, holder := range holders {
+		if holder.State == ProjectStateTrashPending {
+			return false, nil
+		}
+		if holder.State == ProjectStateActive {
+			runnable = true
+		}
+	}
+	return runnable, nil
 }
 
 func (s *ProjectService) ListProjects(includeRemoved bool) ([]Project, error) {
@@ -97,19 +115,152 @@ func (s *ProjectService) UpsertProject(workspaceRoot, displayName string) (Proje
 	if root == "" {
 		return Project{}, ErrProjectPathInvalid
 	}
-	existingState, found, err := s.store.ProjectStateForWorkspace(root)
+	holders, err := s.store.ProjectsHoldingFolder(root)
 	if err != nil {
 		return Project{}, fmt.Errorf("read project before upsert: %w", err)
 	}
-	if found && existingState == ProjectStateTrashPending {
-		return Project{}, ErrProjectOperationConflict
+	for _, holder := range holders {
+		if holder.State == ProjectStateTrashPending {
+			return Project{}, ErrProjectOperationConflict
+		}
 	}
 	project, err := s.store.EnsureProjectActive(root, displayName, time.Now().UTC())
 	if err != nil {
 		return Project{}, err
 	}
-	s.runService.setProjectDeletionFence(root, false)
+	s.runService.clearProjectDeletionFences(root)
 	return project, nil
+}
+
+// CreateProject mints a project from an explicit folder list. Passing no folder
+// is legal: the project is then backed by its Awaken-managed working directory
+// and stays runnable, which is what keeps "a project without folders" a real
+// product state rather than a broken one.
+//
+// Folders are not owned exclusively. The same directory may be part of several
+// projects, because which pieces of work a directory belongs to is the user's
+// call, not something the store gets to arbitrate.
+func (s *ProjectService) CreateProject(folders []ProjectFolder, displayName string) (Project, error) {
+	s.runService.lockProjectMutation()
+	defer s.runService.unlockProjectMutation()
+
+	prepared := make([]ProjectFolder, 0, len(folders))
+	seen := make(map[string]struct{}, len(folders))
+	primaryAssigned := false
+	for _, folder := range folders {
+		root := normalizeProjectWorkspaceRoot(folder.Path)
+		if root == "" || !filepath.IsAbs(root) {
+			return Project{}, ErrProjectPathInvalid
+		}
+		if _, duplicate := seen[root]; duplicate {
+			continue
+		}
+		seen[root] = struct{}{}
+		isPrimary := folder.IsPrimary && !primaryAssigned
+		if isPrimary {
+			primaryAssigned = true
+		}
+		prepared = append(prepared, ProjectFolder{
+			Path:      root,
+			Role:      ProjectFolderRoleUser,
+			IsPrimary: isPrimary,
+		})
+	}
+	if len(prepared) > 0 && !primaryAssigned {
+		prepared[0].IsPrimary = true
+	}
+
+	project, err := s.store.CreateProject(prepared, displayName, time.Now().UTC())
+	if err != nil {
+		return Project{}, err
+	}
+	for _, root := range project.AllRoots() {
+		s.runService.clearProjectDeletionFences(root)
+	}
+	return project, nil
+}
+
+// AttachProjectFolder adds one more readable/writable folder to a project. The
+// folder may already be attached to other projects.
+func (s *ProjectService) AttachProjectFolder(projectID, path string) (Project, error) {
+	s.runService.lockProjectMutation()
+	defer s.runService.unlockProjectMutation()
+	root := normalizeProjectWorkspaceRoot(path)
+	if root == "" || !filepath.IsAbs(root) {
+		return Project{}, ErrProjectPathInvalid
+	}
+	project, err := s.store.AttachProjectFolder(projectID, root, time.Now().UTC())
+	if err != nil {
+		return Project{}, err
+	}
+	s.runService.clearProjectDeletionFences(root)
+	return project, nil
+}
+
+// DetachProjectFolder unbinds a folder from the project without touching the
+// directory on disk.
+func (s *ProjectService) DetachProjectFolder(projectID, path string) (Project, error) {
+	s.runService.lockProjectMutation()
+	defer s.runService.unlockProjectMutation()
+	project, err := s.store.DetachProjectFolder(projectID, path, time.Now().UTC())
+	if err != nil {
+		return Project{}, err
+	}
+	// Only this project's threads on that folder end; another project sharing it
+	// keeps working there, which is also why the folder is fenced off only once
+	// nothing holds it anymore.
+	s.runService.cancelRunsForThreads(s.runService.threadIDsForProjectFolder(project.ProjectID, path))
+	remaining, err := s.store.ProjectsHoldingFolder(path)
+	if err != nil {
+		return Project{}, err
+	}
+	if len(remaining) == 0 {
+		s.runService.setProjectDeletionFence(project.ProjectID, path, true)
+	}
+	return project, nil
+}
+
+// SetPrimaryProjectFolder moves the working directory and project-level
+// discovery anchor onto another attached folder.
+func (s *ProjectService) SetPrimaryProjectFolder(projectID, path string) (Project, error) {
+	s.runService.lockProjectMutation()
+	defer s.runService.unlockProjectMutation()
+	return s.store.SetPrimaryProjectFolder(projectID, path, time.Now().UTC())
+}
+
+// fenceProjectRoots blocks or unblocks run creation for every folder of a
+// project. A project-scoped removal must fence all of its roots, not just the
+// primary one.
+func (s *ProjectService) fenceProjectRoots(projectID string, fenced bool) {
+	project, err := s.store.ProjectByID(projectID)
+	if err != nil {
+		return
+	}
+	for _, root := range project.AllRoots() {
+		// Raising a fence on a folder another live project holds would stop work
+		// that has nothing to do with this operation: removing a project or
+		// deleting its history never touches the disk. Trashing does, and fences
+		// the shared folder for its holders explicitly. Releasing is never
+		// filtered, so a fence raised while the folder was still exclusive
+		// cannot be left behind.
+		if fenced && s.folderHasOtherLiveHolder(project.ProjectID, root) {
+			continue
+		}
+		s.runService.setProjectDeletionFence(project.ProjectID, root, fenced)
+	}
+}
+
+func (s *ProjectService) folderHasOtherLiveHolder(projectID, root string) bool {
+	holders, err := s.store.ProjectsHoldingFolder(root)
+	if err != nil {
+		return false
+	}
+	for _, holder := range holders {
+		if holder.ProjectID != projectID && holder.State != ProjectStateRemoved {
+			return true
+		}
+	}
+	return false
 }
 
 // ReorderProjects replaces the complete active-project order in one durable
@@ -134,8 +285,8 @@ func (s *ProjectService) DetachProject(projectID, idempotencyKey string) (Projec
 	if err != nil {
 		return ProjectOperation{}, err
 	}
-	s.runService.setProjectDeletionFence(operation.WorkspaceRoot, true)
-	s.runService.cancelRunsForThreads(s.runService.threadIDsForWorkspace(operation.WorkspaceRoot))
+	s.fenceProjectRoots(operation.ProjectID, true)
+	s.runService.cancelRunsForThreads(s.runService.threadIDsForProject(operation.ProjectID))
 	return operation, nil
 }
 
@@ -155,11 +306,11 @@ func (s *ProjectService) DeleteProjectThreads(projectID, idempotencyKey string) 
 	if project.State == ProjectStateTrashPending {
 		return ProjectOperation{}, ErrProjectOperationConflict
 	}
-	s.runService.setProjectDeletionFence(project.WorkspaceRoot, true)
+	s.fenceProjectRoots(project.ProjectID, true)
 	committed := false
 	defer func() {
 		if !committed || project.State == ProjectStateActive {
-			s.runService.setProjectDeletionFence(project.WorkspaceRoot, false)
+			s.fenceProjectRoots(project.ProjectID, false)
 		}
 	}()
 	operation, threadIDs, err := s.store.CommitDeleteHistory(project, idempotencyKey, time.Now().UTC())
@@ -214,7 +365,11 @@ func (s *ProjectService) DeleteThread(threadID string) error {
 	return nil
 }
 
-func (s *ProjectService) PrepareTrash(projectID, idempotencyKey string) (ProjectOperation, error) {
+// PrepareTrash starts moving one attached folder to the system trash. Trash is
+// folder-scoped: the project and its threads survive, only the directory leaves
+// the disk and the folder leaves the project. The Awaken-managed working
+// directory is never eligible, because it is owned by the project itself.
+func (s *ProjectService) PrepareTrash(projectID, folderPath, idempotencyKey string) (ProjectOperation, error) {
 	s.runService.lockProjectMutation()
 	defer s.runService.unlockProjectMutation()
 	if err := requireIdempotencyKey(idempotencyKey); err != nil {
@@ -222,7 +377,7 @@ func (s *ProjectService) PrepareTrash(projectID, idempotencyKey string) (Project
 	}
 	if existing, found, err := s.store.LookupIdempotentOperation(idempotencyKey, projectID, ProjectOperationTrashAndPurge); err != nil || found {
 		if found && (existing.Status == ProjectOperationAccepted || existing.Status == ProjectOperationRunning) {
-			s.runService.setProjectDeletionFence(existing.WorkspaceRoot, true)
+			s.fenceProjectRoots(existing.ProjectID, true)
 		}
 		return existing, err
 	}
@@ -233,27 +388,69 @@ func (s *ProjectService) PrepareTrash(projectID, idempotencyKey string) (Project
 	if project.State == ProjectStateTrashPending {
 		return ProjectOperation{}, ErrProjectOperationConflict
 	}
-	if err := validateTrashProjectPath(project.WorkspaceRoot, s.store.UserDataRoot()); err != nil {
+	folder, ok := project.FolderByPath(folderPath)
+	if !ok {
+		return ProjectOperation{}, ErrProjectFolderNotFound
+	}
+	if err := validateTrashProjectPath(folder.Path, s.store.UserDataRoot()); err != nil {
 		return ProjectOperation{}, err
 	}
-	fingerprint, err := projectPathFingerprint(project.WorkspaceRoot)
+	fingerprint, err := projectPathFingerprint(folder.Path)
 	if err != nil {
 		return ProjectOperation{}, fmt.Errorf("%w: %v", ErrProjectPathInvalid, err)
 	}
-	s.runService.setProjectDeletionFence(project.WorkspaceRoot, true)
+	// The folder may be shared. Moving it to the trash takes the directory away
+	// from every project holding it, so all of them are fenced off it, not just
+	// the one that asked.
+	coHolders, err := s.otherFolderHolders(project.ProjectID, folder.Path)
+	if err != nil {
+		return ProjectOperation{}, err
+	}
+	s.fenceProjectRoots(project.ProjectID, true)
+	s.fenceCoHolders(coHolders, folder.Path, true)
 	committed := false
 	defer func() {
 		if !committed {
-			s.runService.setProjectDeletionFence(project.WorkspaceRoot, false)
+			s.fenceProjectRoots(project.ProjectID, false)
+			s.fenceCoHolders(coHolders, folder.Path, false)
 		}
 	}()
-	operation, threadIDs, err := s.store.CommitPrepareTrash(project, idempotencyKey, fingerprint, time.Now().UTC())
+	operation, threadIDs, err := s.store.CommitPrepareTrash(project, folder.Path, idempotencyKey, fingerprint, time.Now().UTC())
 	if err != nil {
 		return ProjectOperation{}, err
 	}
 	committed = true
+	// Threads of another holder anchored on this folder are stopped too: the
+	// directory is about to leave the disk under them.
 	s.runService.cancelRunsForThreads(threadIDs)
+	s.runService.cancelRunsForThreads(s.runService.threadIDsForWorkspace(folder.Path))
 	return operation, nil
+}
+
+// otherFolderHolders lists the projects sharing a folder with the one acting on
+// it. It must be read before the folder is detached, because the holder list is
+// derived from the folder lists that the operation is about to change.
+func (s *ProjectService) otherFolderHolders(actingProjectID, folderPath string) ([]string, error) {
+	holders, err := s.store.ProjectsHoldingFolder(folderPath)
+	if err != nil {
+		return nil, err
+	}
+	others := make([]string, 0, len(holders))
+	for _, holder := range holders {
+		if holder.ProjectID == actingProjectID {
+			continue
+		}
+		others = append(others, holder.ProjectID)
+	}
+	return others, nil
+}
+
+// fenceCoHolders fences exactly the shared folder for the other holders, rather
+// than all of their roots: their remaining folders are untouched by this trash.
+func (s *ProjectService) fenceCoHolders(projectIDs []string, folderPath string, fenced bool) {
+	for _, projectID := range projectIDs {
+		s.runService.setProjectDeletionFence(projectID, folderPath, fenced)
+	}
 }
 
 func (s *ProjectService) GetOperation(operationID string) (ProjectOperation, error) {
@@ -483,14 +680,19 @@ func (s *ProjectService) CompleteTrashOperation(operationID, attemptID string) (
 		}
 	}
 	_ = os.Remove(container)
-	threadIDs, err := s.store.OperationThreadIDs(operationID)
+	// Read the co-holders before the commit detaches the folder from them.
+	coHolders, err := s.otherFolderHolders(operation.ProjectID, operation.WorkspaceRoot)
 	if err != nil {
 		return ProjectOperation{}, err
 	}
-	if err := s.store.CommitCompleteTrash(operation, threadIDs, time.Now().UTC()); err != nil {
+	if err := s.store.CommitCompleteTrash(operation, time.Now().UTC()); err != nil {
 		return ProjectOperation{}, err
 	}
-	s.runService.markThreadsDeletionRequested(threadIDs)
+	// The folder is gone but the projects stay; run creation must be allowed
+	// again on the roots they still hold. The trashed path itself stays fenced.
+	s.fenceProjectRoots(operation.ProjectID, false)
+	s.fenceCoHolders(coHolders, operation.WorkspaceRoot, false)
+	s.runService.setProjectDeletionFence(operation.ProjectID, operation.WorkspaceRoot, true)
 	s.Wake()
 	return s.GetOperation(operationID)
 }
@@ -524,11 +726,18 @@ func (s *ProjectService) finishTrashWithoutDeletion(operationID, attemptID strin
 	if err := restoreStagedProject(operation); err != nil {
 		return ProjectOperation{}, err
 	}
+	// The directory is back where it was, so the fence this operation put on the
+	// other holders is released whatever happens to the acting project.
+	coHolders, err := s.otherFolderHolders(operation.ProjectID, operation.WorkspaceRoot)
+	if err != nil {
+		return ProjectOperation{}, err
+	}
 	if err := s.store.CommitTrashFailure(operation, status, phase, code, message, time.Now().UTC()); err != nil {
 		return ProjectOperation{}, err
 	}
+	s.fenceCoHolders(coHolders, operation.WorkspaceRoot, false)
 	if operation.PreviousProjectState == ProjectStateActive {
-		s.runService.setProjectDeletionFence(operation.WorkspaceRoot, false)
+		s.fenceProjectRoots(operation.ProjectID, false)
 	}
 	return s.GetOperation(operationID)
 }

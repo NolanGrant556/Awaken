@@ -33,4 +33,16 @@ export const AwakenSelectableCardStates: AwakenSelectableCardState[] = [
       onSelect: noop,
     } as Partial<ComponentProps<typeof AwakenSelectableCard>>,
   },
+  {
+    id: "local-compact",
+    label: "本地紧凑",
+    props: {
+      compact: true,
+      selected: true,
+      icon: createElement(Monitor, { size: 15, strokeWidth: 1.9 }),
+      title: "Local",
+      description: "Use a folder on this Mac as an Awaken project.",
+      onSelect: noop,
+    } as Partial<ComponentProps<typeof AwakenSelectableCard>>,
+  },
 ];

@@ -216,9 +216,26 @@ export type RuntimeThread = {
 
 export type RuntimeProjectState = "active" | "removed" | "trash_pending";
 
+/** A folder Awaken created and owns cannot be detached or moved to the trash. */
+export type RuntimeProjectFolderRole = "user" | "managed";
+
+export type RuntimeProjectFolderWire = {
+  path: string;
+  role: RuntimeProjectFolderRole;
+  is_primary: boolean;
+};
+
+export type RuntimeProjectFolder = {
+  path: string;
+  role: RuntimeProjectFolderRole;
+  isPrimary: boolean;
+};
+
 export type RuntimeProjectWire = {
   project_id: string;
+  /** Mirrors the primary folder path. `folders` is authoritative. */
   workspace_root: string;
+  folders?: RuntimeProjectFolderWire[];
   display_name: string;
   state: RuntimeProjectState;
   removal_reason?: "detached" | "trashed" | string;
@@ -231,6 +248,7 @@ export type RuntimeProjectWire = {
 export type RuntimeProject = {
   projectId: string;
   workspaceRoot: string;
+  folders: RuntimeProjectFolder[];
   displayName: string;
   state: RuntimeProjectState;
   removalReason?: string;
@@ -238,6 +256,13 @@ export type RuntimeProject = {
   createdAt: string;
   updatedAt: string;
   version: number;
+};
+
+/** Folder list submitted when creating a project. An empty list is legal: the
+ * project exists under its own name and binds folders later, if ever. */
+export type ProjectFolderSelection = {
+  path: string;
+  primary?: boolean;
 };
 
 export type RuntimeProjectOperationAction =
@@ -881,6 +906,8 @@ export type TaskScopeFile = {
 };
 
 export type WorkspaceConfigWire = {
+  project_id?: string;
+  project_name?: string;
   workspace_root: string;
   readable_roots?: string[];
   writable_roots?: string[];
@@ -889,9 +916,16 @@ export type WorkspaceConfigWire = {
 };
 
 export type WorkspaceConfig = {
+  /** Identifies the project a run belongs to. It is what lets a project with no
+   * folder bound resolve its own session workspace, so it is required whenever
+   * workspaceRoot is empty. */
+  projectId?: string;
+  /** Display name of the project, sent so the agent can name where it is
+   * working. Core derives no path or permission from it. */
+  projectName?: string;
   workspaceRoot: string;
   readableRoots?: string[];
-  writableRoots: string[];
+  writableRoots?: string[];
   outputRoots?: string[];
   attachedFiles?: TaskScopeFile[];
 };
@@ -969,6 +1003,13 @@ export type ModelProfileRunConfig = {
 export type WorkspacePickResult =
   | { canceled: true; error?: string }
   | { canceled: false; path: string };
+
+/** Result of picking project folders. The picker allows several directories at
+ * once, so `errors` reports the ones that could not be read while `paths` still
+ * carries whatever was readable. */
+export type ProjectFoldersPickResult =
+  | { canceled: true; error?: string }
+  | { canceled: false; paths: string[]; errors?: string[] };
 
 export type WorkspaceValidationResult =
   | { valid: true }
@@ -1117,12 +1158,24 @@ export type AwakenBridge = {
   deleteThread: (threadId: string) => Promise<ThreadDeleteResult>;
   listProjects: (includeRemoved?: boolean) => Promise<RuntimeProject[]>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
+  createProject: (
+    folders: ProjectFolderSelection[],
+    displayName?: string,
+  ) => Promise<UpsertProjectResult>;
+  attachProjectFolder: (projectId: string, path: string) => Promise<UpsertProjectResult>;
+  detachProjectFolder: (projectId: string, path: string) => Promise<UpsertProjectResult>;
+  setPrimaryProjectFolder: (projectId: string, path: string) => Promise<UpsertProjectResult>;
   reorderProjects: (projectIds: string[]) => Promise<ProjectReorderResult>;
   detachProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
   deleteProjectThreads: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
-  trashProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
+  trashProjectFolder: (
+    projectId: string,
+    path: string,
+    idempotencyKey: string,
+  ) => Promise<ProjectMutationResult>;
   getProjectOperation: (operationId: string) => Promise<RuntimeProjectOperation>;
   openArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
+  revealPath: (target: string) => Promise<{ ok: boolean; message?: string }>;
   revealArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
   startRun: (
     request: StartRunRequest,
@@ -1206,7 +1259,7 @@ export type AwakenBridge = {
   getModelProfileBalances: () => Promise<ModelProfileBalancesResult>;
   pickAttachments: (defaultPath?: string) => Promise<AttachmentPickResult>;
   pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
-  pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
+  pickProjectFolders: (defaultPath?: string) => Promise<ProjectFoldersPickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
@@ -1260,9 +1313,21 @@ export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread
 }
 
 export function normalizeRuntimeProject(project: RuntimeProjectWire): RuntimeProject {
+  // A project persisted before multi-folder support has no folders array; its
+  // workspace_root is the single primary user folder. A project created without
+  // picking a folder has neither, and stays folder-less.
+  const folders: RuntimeProjectFolder[] = (project.folders ?? []).map((folder) => ({
+    path: folder.path,
+    role: folder.role === "managed" ? "managed" : "user",
+    isPrimary: Boolean(folder.is_primary),
+  }));
+  if (folders.length === 0 && project.workspace_root) {
+    folders.push({ path: project.workspace_root, role: "user", isPrimary: true });
+  }
   return {
     projectId: project.project_id,
     workspaceRoot: project.workspace_root,
+    folders,
     displayName: project.display_name,
     state: project.state,
     removalReason: project.removal_reason || undefined,
@@ -1333,6 +1398,8 @@ export function normalizeStartRunRequest(request: StartRunRequest): StartRunRequ
     composer_tokens: request.composerTokens,
     thread_id: request.threadId,
     workspace: {
+      project_id: request.workspace.projectId,
+      project_name: request.workspace.projectName,
       workspace_root: request.workspace.workspaceRoot,
       readable_roots: request.workspace.readableRoots,
       writable_roots: request.workspace.writableRoots,

@@ -205,7 +205,15 @@
 }
 
 .aw-sidebar-demo__dialog-card {
+  display: grid;
+  gap: var(--aw-space-4);
   width: min(100%, 420px);
+}
+
+/* Holds the source chip at the left edge of the footer while the confirm and
+   cancel buttons stay right-aligned, matching the Desktop dialog. */
+.aw-sidebar-demo__dialog-source {
+  margin-right: auto;
 }
 
 .aw-sidebar-demo__dialog-copy {

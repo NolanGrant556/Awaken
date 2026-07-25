@@ -58,7 +58,7 @@ func TestProjectUpsertCannotReactivateTrashPendingOrClearFence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := projects.PrepareTrash(project.ProjectID, "trash-pending-upsert")
+	prepared, err := projects.PrepareTrash(project.ProjectID, workspaceRoot, "trash-pending-upsert")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestProjectHistoryDeleteCancelsBusyRunAndCleansAfterTerminal(t *testing.T) 
 	}
 }
 
-func TestTrashTwoPhaseFailureKeepsHistoryAndSuccessDeletesIt(t *testing.T) {
+func TestTrashTwoPhaseFailureRestoresFolderAndSuccessDetachesIt(t *testing.T) {
 	t.Setenv(awakenHomeEnv, t.TempDir())
 	workspaceRoot := t.TempDir()
 	service := newDurableThreadTestService()
@@ -191,7 +191,7 @@ func TestTrashTwoPhaseFailureKeepsHistoryAndSuccessDeletesIt(t *testing.T) {
 	}
 	createProjectTestThread(t, service, workspaceRoot, "thread_trash")
 
-	prepared, err := projects.PrepareTrash(project.ProjectID, "trash-attempt-1")
+	prepared, err := projects.PrepareTrash(project.ProjectID, workspaceRoot, "trash-attempt-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestTrashTwoPhaseFailureKeepsHistoryAndSuccessDeletesIt(t *testing.T) {
 		t.Fatalf("trash failure must restore project, got %+v err=%v", visible, err)
 	}
 
-	prepared, err = projects.PrepareTrash(project.ProjectID, "trash-attempt-2")
+	prepared, err = projects.PrepareTrash(project.ProjectID, workspaceRoot, "trash-attempt-2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,18 +252,25 @@ func TestTrashTwoPhaseFailureKeepsHistoryAndSuccessDeletesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completed.LogicalCommittedAt == nil || completed.MatchedThreads != 1 {
+	if completed.LogicalCommittedAt == nil || completed.Status != ProjectOperationSucceeded {
 		t.Fatalf("expected logical trash commit, got %+v", completed)
 	}
-	if got := service.ListThreads(); len(got) != 0 {
-		t.Fatalf("successful trash must hide history immediately, got %+v", got)
+	// Folder trash only removes the directory and its binding; deleting Awaken
+	// history is a separate project-level action.
+	if got := service.ListThreads(); len(got) != 1 {
+		t.Fatalf("successful folder trash must keep history, got %+v", got)
 	}
-	if _, err := projects.ProcessCleanupJobs(context.Background(), 16); err != nil {
-		t.Fatal(err)
+	surviving, err := projects.ListProjects(false)
+	if err != nil || len(surviving) != 1 || surviving[0].State != ProjectStateActive {
+		t.Fatalf("project must survive folder trash, got %+v err=%v", surviving, err)
 	}
-	completed, err = projects.GetOperation(prepared.OperationID)
-	if err != nil || completed.Status != ProjectOperationSucceeded {
-		t.Fatalf("expected fully completed trash, got %+v err=%v", completed, err)
+	if surviving[0].HasFolder(workspaceRoot) {
+		t.Fatalf("trashed folder must be detached, got %+v", surviving[0].Folders)
+	}
+	// Trashing the only folder returns the project to the folder-less state, so
+	// it keeps its name and threads without being bound to a directory.
+	if len(surviving[0].Folders) != 0 {
+		t.Fatalf("project must end up folderless, got %+v", surviving[0].Folders)
 	}
 }
 
@@ -276,7 +283,7 @@ func TestTrashLeaseCanBeReclaimedAfterCrash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := projects.PrepareTrash(project.ProjectID, "trash-lease-1")
+	prepared, err := projects.PrepareTrash(project.ProjectID, workspaceRoot, "trash-lease-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +346,7 @@ func TestTrashFailureAfterStagingAtomicallyRestoresProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	createProjectTestThread(t, service, workspaceRoot, "thread_restore")
-	prepared, err := projects.PrepareTrash(project.ProjectID, "trash-restore-1")
+	prepared, err := projects.PrepareTrash(project.ProjectID, workspaceRoot, "trash-restore-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +399,7 @@ func TestTrashCrashRecoveryAcrossDurableFilesystemPhases(t *testing.T) {
 				t.Fatal(err)
 			}
 			createProjectTestThread(t, service, workspaceRoot, "thread_"+crashPoint)
-			prepared, err := projects.PrepareTrash(project.ProjectID, "trash-crash-"+crashPoint)
+			prepared, err := projects.PrepareTrash(project.ProjectID, workspaceRoot, "trash-crash-"+crashPoint)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -448,8 +455,12 @@ func TestTrashCrashRecoveryAcrossDurableFilesystemPhases(t *testing.T) {
 			if _, err := projects.CompleteTrashOperation(prepared.OperationID, recovered.AttemptID); err != nil {
 				t.Fatal(err)
 			}
-			if got := service.ListThreads(); len(got) != 0 {
-				t.Fatalf("completed recovery must hide cutoff history, got %+v", got)
+			recoveredProject, err := projects.store.ProjectByID(project.ProjectID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if recoveredProject.HasFolder(workspaceRoot) || recoveredProject.State != ProjectStateActive {
+				t.Fatalf("completed recovery must detach the folder and keep the project, got %+v", recoveredProject)
 			}
 		})
 	}
@@ -469,7 +480,7 @@ func TestTrashStagingSurvivesContentChangesAndNeverTrashesSamePathReplacement(t 
 		t.Fatal(err)
 	}
 	createProjectTestThread(t, service, workspaceRoot, "thread_identity")
-	prepared, err := projects.PrepareTrash(project.ProjectID, "trash-identity-1")
+	prepared, err := projects.PrepareTrash(project.ProjectID, workspaceRoot, "trash-identity-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,7 +540,7 @@ func TestTrashStageRejectsReplacementBeforeRenameWithoutDeletingEitherDirectory(
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := projects.PrepareTrash(project.ProjectID, "trash-identity-replaced")
+	prepared, err := projects.PrepareTrash(project.ProjectID, workspaceRoot, "trash-identity-replaced")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -238,6 +238,12 @@
   --aw-inspector-collapsed-width: 42px;
   --aw-content-width: 768px;
   --aw-chrome-height: 44px;
+
+  /* Layering：浮层都 portal 到 document.body，彼此是兄弟节点，只能靠 z-index 排序。
+     菜单、提示、悬浮卡随时可能由对话框内部的控件触发，必须排在对话框之上。 */
+  --aw-z-dialog: 120;
+  --aw-z-popover: 200;
+  --aw-z-tooltip: 220;
 }
 
 :root[data-aw-theme="dark"] {

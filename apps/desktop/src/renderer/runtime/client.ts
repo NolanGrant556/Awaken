@@ -35,6 +35,7 @@ import {
   type MemoryListRequest,
   type MemorySettingsDocument,
   type MemorySettingsPatch,
+  type ProjectFolderSelection,
   type ProjectMutationResult,
   type ProjectReorderResult,
   type RuntimeConnector,
@@ -62,6 +63,7 @@ import {
   type SupervisorStatusInfo,
   type ThreadDeleteResult,
   type UpdateMcpServerConfigRequest,
+  type ProjectFoldersPickResult,
   type UpsertProjectResult,
   type WorkspacePickResult,
   type WorkspaceValidationResult,
@@ -195,12 +197,24 @@ export type RuntimeClient = {
   deleteThread: (threadId: string) => Promise<ThreadDeleteResult>;
   listProjects: (includeRemoved?: boolean) => Promise<RuntimeProject[]>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
+  createProject: (
+    folders: ProjectFolderSelection[],
+    displayName?: string,
+  ) => Promise<UpsertProjectResult>;
+  attachProjectFolder: (projectId: string, path: string) => Promise<UpsertProjectResult>;
+  detachProjectFolder: (projectId: string, path: string) => Promise<UpsertProjectResult>;
+  setPrimaryProjectFolder: (projectId: string, path: string) => Promise<UpsertProjectResult>;
   reorderProjects: (projectIds: string[]) => Promise<ProjectReorderResult>;
   detachProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
   deleteProjectThreads: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
-  trashProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
+  trashProjectFolder: (
+    projectId: string,
+    path: string,
+    idempotencyKey: string,
+  ) => Promise<ProjectMutationResult>;
   getProjectOperation: (operationId: string) => Promise<RuntimeProjectOperation>;
   openArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
+  revealPath: (target: string) => Promise<{ ok: boolean; message?: string }>;
   revealArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
@@ -239,7 +253,7 @@ export type RuntimeClient = {
   ) => Promise<() => void>;
   pickAttachments: (defaultPath?: string) => Promise<AttachmentPickResult>;
   pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
-  pickWorkspace: (defaultPath?: string) => Promise<WorkspacePickResult>;
+  pickProjectFolders: (defaultPath?: string) => Promise<ProjectFoldersPickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
@@ -338,16 +352,22 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     listProjects: (includeRemoved) => bridge.listProjects(includeRemoved),
     upsertProject: (workspaceRoot, displayName) =>
       bridge.upsertProject(workspaceRoot, displayName),
+    createProject: (folders, displayName) => bridge.createProject(folders, displayName),
+    attachProjectFolder: (projectId, path) => bridge.attachProjectFolder(projectId, path),
+    detachProjectFolder: (projectId, path) => bridge.detachProjectFolder(projectId, path),
+    setPrimaryProjectFolder: (projectId, path) =>
+      bridge.setPrimaryProjectFolder(projectId, path),
     reorderProjects: (projectIds) => bridge.reorderProjects(projectIds),
     detachProject: (projectId, idempotencyKey) =>
       bridge.detachProject(projectId, idempotencyKey),
     deleteProjectThreads: (projectId, idempotencyKey) =>
       bridge.deleteProjectThreads(projectId, idempotencyKey),
-    trashProject: (projectId, idempotencyKey) =>
-      bridge.trashProject(projectId, idempotencyKey),
+    trashProjectFolder: (projectId, path, idempotencyKey) =>
+      bridge.trashProjectFolder(projectId, path, idempotencyKey),
     getProjectOperation: (operationId) =>
       bridge.getProjectOperation(operationId),
     openArtifact: (request) => bridge.openArtifact(request),
+    revealPath: (target) => bridge.revealPath(target),
     revealArtifact: (request) => bridge.revealArtifact(request),
     startRun: (request) => unwrapDesktopOperation(bridge.startRun(request)),
     cancelRun: bridge.cancelRun,
@@ -476,7 +496,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     },
     pickAttachments: (defaultPath) => bridge.pickAttachments(defaultPath),
     pickDirectory: (defaultPath) => bridge.pickDirectory(defaultPath),
-    pickWorkspace: (defaultPath) => bridge.pickWorkspace(defaultPath),
+    pickProjectFolders: (defaultPath) => bridge.pickProjectFolders(defaultPath),
     validateWorkspace: (path) => bridge.validateWorkspace(path),
     getSupervisorStatus: () => bridge.getSupervisorStatus(),
     onSupervisorStatusChange: (callback) => bridge.onSupervisorStatusChange(callback),

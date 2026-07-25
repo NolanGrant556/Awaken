@@ -41,12 +41,12 @@ func (e *artifactPublishError) Error() string { return e.message }
 func (t *ArtifactPublishTool) Name() string { return "artifact_publish" }
 
 func (t *ArtifactPublishTool) Description() string {
-	return "将 output roots 内已经存在的 Word、Markdown、Excel/CSV、PDF 或 PowerPoint 普通文件显式发布为最终交付物；只读取并校验文件，不修改内容"
+	return "将已经存在的 Word、Markdown、Excel/CSV、PDF 或 PowerPoint 普通文件显式发布为最终交付物；只读取并校验文件，不修改内容"
 }
 
 func (t *ArtifactPublishTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
-		{Name: "path", Description: "要发布的现有文件路径；必须位于 output roots 内，且扩展名受支持", Type: "string", Required: true},
+		{Name: "path", Description: "要发布的现有文件路径；相对路径按主文件夹解析，绝对路径可指向 output roots 之外，扩展名需受支持", Type: "string", Required: true},
 		{Name: "title", Description: "最终交付卡片标题；默认使用文件名", Type: "string", Required: false},
 	}
 }
@@ -56,14 +56,14 @@ func (t *ArtifactPublishTool) Definition() tool.ToolDefinition {
 		Name:        t.Name(),
 		DisplayName: "Artifact Publish",
 		Description: t.Description(),
-		Purpose:     "把 output roots 内已存在且受支持的文件标记为最终交付物，不改写文件内容。",
+		Purpose:     "把已存在且受支持的文件标记为最终交付物，不改写文件内容；output roots 是交付物的默认存放位置而非硬性要求。",
 		WhenToUse: []string{
 			"最终文件已经生成并通过校验，但尚未作为 deliverable 发布时",
 			"需要为现有 Markdown、Office、PDF 或表格文件生成最终交付物事实时",
 		},
 		WhenNotToUse: []string{
 			"文件尚未创建、修改或验证时先使用对应 typed artifact 工具",
-			"路径不在 output roots 或扩展名不受支持时不得发布",
+			"扩展名不受支持时不得发布",
 		},
 		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
 			"publication_status": {Type: "string", Enum: []any{"published"}, Description: "交付物发布分类状态"},
@@ -76,10 +76,10 @@ func (t *ArtifactPublishTool) Definition() tool.ToolDefinition {
 		FailureModes: []tool.ToolFailureMode{
 			{Code: "artifact_publish_invalid_input", Cause: "输入不是有效 JSON 或 path 缺失", Retryable: false, Recovery: []string{"提供现有 output 文件"}},
 			{Code: "artifact_publish_unsupported_type", Cause: "扩展名不属于可发布交付物", Retryable: false, Recovery: []string{"选择受支持类型"}},
-			{Code: "artifact_publish_outside_output_root", Cause: "文件不在 output roots 内", Retryable: false, Recovery: []string{"先把最终文件生成到 output roots"}},
+			{Code: "artifact_publish_outside_output_root", Cause: "路径无法安全解析（例如断链的符号链接）", Retryable: false, Recovery: []string{"确认文件真实存在再发布"}},
 			{Code: "artifact_publish_file_unavailable", Cause: "目标文件尚不存在", Retryable: true, Recovery: []string{"完成文件生成并验证实际路径"}},
 			{Code: "artifact_publish_permission_denied", Cause: "现有文件不可读", Retryable: false, Recovery: []string{"选择可读文件或修正文件权限"}},
-			{Code: "artifact_publish_not_regular_file", Cause: "目标是目录、符号链接或其他非普通文件", Retryable: false, Recovery: []string{"选择 output roots 内的普通文件"}},
+			{Code: "artifact_publish_not_regular_file", Cause: "目标是目录、符号链接或其他非普通文件", Retryable: false, Recovery: []string{"选择一个普通文件"}},
 		},
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        true,

@@ -86,6 +86,83 @@ func TestBuildEffectiveSystemPromptIncludesAttachedFiles(t *testing.T) {
 	}
 }
 
+func TestRuntimeInfoNamesTheProjectAndItsFolderGroup(t *testing.T) {
+	runtimeInfo := NewRuntimeInfo()
+	runtimeInfo.SetWorkingDir("/data/公司/09_经营管理部/01_汇总")
+	runtimeInfo.SetProjectName("测试项目")
+	runtimeInfo.SetProjectFolders([]RuntimeProjectFolder{
+		{Path: "/data/公司/09_经营管理部/01_汇总", IsPrimary: true},
+		{Path: "/data/公司/09_经营管理部/02_跟踪"},
+	})
+
+	rendered := FormatRuntimeInfo(runtimeInfo)
+
+	if !strings.Contains(rendered, "**当前项目**: 测试项目") {
+		t.Fatalf("project name missing: %s", rendered)
+	}
+	if !strings.Contains(rendered, "01_汇总（主文件夹，即当前工作目录）: /data/公司/09_经营管理部/01_汇总") {
+		t.Fatalf("primary folder not marked: %s", rendered)
+	}
+	if !strings.Contains(rendered, "02_跟踪: /data/公司/09_经营管理部/02_跟踪") {
+		t.Fatalf("secondary folder missing: %s", rendered)
+	}
+}
+
+func TestRuntimeInfoOmitsFolderListForASingleFolderProject(t *testing.T) {
+	runtimeInfo := NewRuntimeInfo()
+	runtimeInfo.SetWorkingDir("/data/solo")
+	runtimeInfo.SetProjectName("Solo")
+	runtimeInfo.SetProjectFolders([]RuntimeProjectFolder{{Path: "/data/solo", IsPrimary: true}})
+
+	rendered := FormatRuntimeInfo(runtimeInfo)
+
+	// The working directory line already names it; repeating it as a group of
+	// one only adds noise.
+	if strings.Contains(rendered, "项目文件夹") {
+		t.Fatalf("single folder should not render a folder group: %s", rendered)
+	}
+	if !strings.Contains(rendered, "**当前项目**: Solo") {
+		t.Fatalf("project name missing: %s", rendered)
+	}
+}
+
+func TestRuntimeInfoSaysAFolderlessProjectRunsInItsSessionDirectory(t *testing.T) {
+	runtimeInfo := NewRuntimeInfo()
+	runtimeInfo.SetProjectName("空项目")
+	runtimeInfo.SetProjectFolders(nil)
+
+	rendered := FormatRuntimeInfo(runtimeInfo)
+
+	if !strings.Contains(rendered, "**项目文件夹**: 无（该项目未绑定文件夹") {
+		t.Fatalf("folder-less projects must say so: %s", rendered)
+	}
+}
+
+func TestRuntimeInfoStaysSilentAboutProjectsWhenThereIsNone(t *testing.T) {
+	rendered := FormatRuntimeInfo(NewRuntimeInfo())
+
+	if strings.Contains(rendered, "当前项目") || strings.Contains(rendered, "项目文件夹") {
+		t.Fatalf("a run without a project must not claim one: %s", rendered)
+	}
+}
+
+func TestDefaultPromptStatesTheWorkingScopeConvention(t *testing.T) {
+	content, err := LoadDefaultPrompt()
+	if err != nil {
+		t.Fatalf("expected default prompt to load: %v", err)
+	}
+	for _, expected := range []string{
+		"项目文件夹与作业范围",
+		"默认在主文件夹作业",
+		"跨文件夹检索省略",
+		"不是访问边界",
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("default prompt lost the working-scope convention %q", expected)
+		}
+	}
+}
+
 func TestLoadDefaultPrompt(t *testing.T) {
 	content, err := LoadDefaultPrompt()
 	if err != nil {

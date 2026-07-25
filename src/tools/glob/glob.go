@@ -13,6 +13,7 @@ import (
 
 	"awaken/src/tool"
 	"awaken/src/tools/internal/rgexec"
+	"awaken/src/tools/internal/searchroots"
 )
 
 const (
@@ -28,12 +29,12 @@ type params struct {
 
 func (t *Tool) Name() string { return ToolName }
 func (t *Tool) Description() string {
-	return "List files using the run-pinned ripgrep executable with --hidden and --no-ignore. Results are stably path-sorted and capped at 100 while reporting the true total and truncation."
+	return "List files using the run-pinned ripgrep executable with --hidden and --no-ignore. Without an explicit path the search covers every readable root of the task and returns absolute paths; with one root the paths stay root-relative. An explicit path is listed wherever it points, including outside those roots. Results are stably path-sorted and capped at 100 while reporting the true total and truncation."
 }
 func (t *Tool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{Name: "pattern", Description: "ripgrep glob pattern, for example **/*.go.", Type: "string", Required: true},
-		{Name: "path", Description: "Readable search directory. Defaults to the thread cwd.", Type: "string"},
+		{Name: "path", Description: "Readable search directory. Omit to search every readable root of the task, starting at the thread cwd.", Type: "string"},
 	}
 }
 func (t *Tool) IsReadOnly() bool { return true }
@@ -82,52 +83,34 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 	}
 	permissionContext := tool.PermissionContextFromContext(ctx)
 	state, _ := tool.ToolSessionStateFromContext(ctx)
-	root := permissionContext.WorkspaceRootOrCWD()
+	cwd := permissionContext.WorkspaceRootOrCWD()
 	if state != nil {
-		root = state.CWD(root)
+		cwd = state.CWD(cwd)
 	}
-	if strings.TrimSpace(p.Path) != "" {
-		root, err = permissionContext.ResolveReadablePathChecked(p.Path)
-	} else {
-		root, err = permissionContext.ResolveReadablePathChecked(root)
-	}
+	roots, err := searchroots.Resolve(permissionContext, cwd, p.Path)
 	if err != nil {
 		return tool.DeniedOutcome(err.Error(), tool.ErrorCodeToolDenied).WithTiming(started, time.Now().UTC()), nil
 	}
-	info, err := os.Stat(root)
-	if err != nil || !info.IsDir() {
-		return tool.FailedOutcome(fmt.Sprintf("Glob path is not a readable directory: %s", root), "glob_path_unavailable", tool.ErrorCategoryDomain, false).WithTiming(started, time.Now().UTC()), nil
+	for _, root := range roots {
+		info, statErr := os.Stat(root)
+		if statErr != nil || !info.IsDir() {
+			return tool.FailedOutcome(fmt.Sprintf("Glob path is not a readable directory: %s", root), "glob_path_unavailable", tool.ErrorCategoryDomain, false).WithTiming(started, time.Now().UTC()), nil
+		}
 	}
 	runtime, err := rgexec.Resolve(ctx)
 	if err != nil {
 		return needsRuntime(started, err.Error()), nil
 	}
-	command := runtime.Command(ctx, root, "--files", "--hidden", "--no-ignore", "--glob", p.Pattern, ".")
-	stdout, err := command.StdoutPipe()
-	if err != nil {
-		return tool.ExecutionOutcome{}, err
-	}
-	var stderr strings.Builder
-	command.Stderr = &stderr
-	if err := command.Start(); err != nil {
-		return tool.FailedOutcome(err.Error(), "glob_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC()), nil
-	}
+	multiRoot := len(roots) > 1
 	total := 0
 	kept := make([]string, 0, defaultMaximum)
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		total++
-		candidate := filepath.ToSlash(strings.TrimPrefix(scanner.Text(), "."+string(filepath.Separator)))
-		kept = insertSmallest(kept, candidate, defaultMaximum)
-	}
-	scanErr := scanner.Err()
-	waitErr := command.Wait()
-	if scanErr != nil {
-		return tool.FailedOutcome(scanErr.Error(), "glob_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC()), nil
-	}
-	if waitErr != nil {
-		return tool.FailedOutcome(strings.TrimSpace(stderr.String()), "glob_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC()), nil
+	for _, root := range roots {
+		rootTotal, rootKept, failure := globRoot(ctx, started, runtime, root, p.Pattern, multiRoot, kept)
+		if failure != nil {
+			return *failure, nil
+		}
+		total += rootTotal
+		kept = rootKept
 	}
 	sort.Strings(kept)
 	truncated := total > len(kept)
@@ -137,9 +120,47 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 	}
 	outcome := tool.SucceededOutcome(content).WithTiming(started, time.Now().UTC())
 	outcome.Truncated = truncated
-	outcome.Summary = fmt.Sprintf("Glob found %d file(s); returned %d.", total, len(kept))
-	outcome.Details = map[string]any{"path": root, "pattern": p.Pattern, "paths": kept, "returned": len(kept), "total": total, "truncated": truncated, "environment_snapshot_id": runtime.SnapshotID}
+	outcome.Summary = fmt.Sprintf("Glob found %d file(s) across %d root(s); returned %d.", total, len(roots), len(kept))
+	pathStyle := "root_relative"
+	if multiRoot {
+		pathStyle = "absolute"
+	}
+	outcome.Details = map[string]any{"path": roots[0], "roots": roots, "path_style": pathStyle, "pattern": p.Pattern, "paths": kept, "returned": len(kept), "total": total, "truncated": truncated, "environment_snapshot_id": runtime.SnapshotID}
 	return outcome, nil
+}
+
+func globRoot(ctx context.Context, started time.Time, runtime rgexec.Runtime, root, pattern string, multiRoot bool, kept []string) (int, []string, *tool.ExecutionOutcome) {
+	command := runtime.Command(ctx, root, "--files", "--hidden", "--no-ignore", "--glob", pattern, ".")
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		failure := tool.FailedOutcome(err.Error(), "glob_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC())
+		return 0, kept, &failure
+	}
+	var stderr strings.Builder
+	command.Stderr = &stderr
+	if err := command.Start(); err != nil {
+		failure := tool.FailedOutcome(err.Error(), "glob_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC())
+		return 0, kept, &failure
+	}
+	total := 0
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		total++
+		relative := strings.TrimPrefix(scanner.Text(), "."+string(filepath.Separator))
+		kept = insertSmallest(kept, searchroots.DisplayPath(root, relative, multiRoot), defaultMaximum)
+	}
+	scanErr := scanner.Err()
+	waitErr := command.Wait()
+	if scanErr != nil {
+		failure := tool.FailedOutcome(scanErr.Error(), "glob_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC())
+		return 0, kept, &failure
+	}
+	if waitErr != nil {
+		failure := tool.FailedOutcome(strings.TrimSpace(stderr.String()), "glob_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC())
+		return 0, kept, &failure
+	}
+	return total, kept, nil
 }
 
 func parseParams(input string) (params, error) {

@@ -35,6 +35,8 @@ GET    /v1/runs/{run_id}/audit
 POST   /v1/shutdown
 ```
 
+`POST /v1/runs` 的 `workspace` 对象即 TaskScope wire。`workspace_root` 与 `project_id` 至少要有一个：`workspace_root` 是主文件夹，`project_id` 让没有绑定任何文件夹的项目解析到自己的 session 工作目录，两者都为空返回 `INVALID_INPUT`。可选的 `project_name` 是项目展示名，只用于让模型说得出自己在哪个项目里，Core 不从它解析任何路径或权限。`session_workspace` 由服务端派生并回写，客户端传入的值一律被覆盖。roots 的语义与形状名单由 [TaskScope 与路径安全](../04_工具权限与审批/TaskScope与路径安全.md) 唯一拥有。
+
 `/v1/shutdown` 只有注入 shutdown callback 才注册。`/audit` 当前返回空数组，查询链尚未接通；其审计语义由 04 域记录。`POST /v1/threads/{thread_id}/context-snapshot` 接收与 run 相同的 `model_profile`，只重建并耐久化该 thread 的当前下一请求 projection；不发 provider 请求，响应为 204。Desktop 在 GET transcript 前调用它；没有可运行 profile 时直接读取历史 transcript。
 
 ### 3.2 项目与可恢复删除
@@ -45,7 +47,10 @@ POST   /v1/projects
 PUT    /v1/projects/order
 DELETE /v1/projects/{project_id}
 DELETE /v1/projects/{project_id}/threads
-POST   /v1/projects/{project_id}/trash
+POST   /v1/projects/{project_id}/folders
+DELETE /v1/projects/{project_id}/folders
+PUT    /v1/projects/{project_id}/primary-folder
+POST   /v1/projects/{project_id}/folders/trash
 GET    /v1/project-operations
 GET    /v1/project-operations/{operation_id}
 POST   /v1/project-operations/{operation_id}/cancel
@@ -57,7 +62,7 @@ POST   /v1/project-operations/{operation_id}/complete-trash
 POST   /v1/project-operations/{operation_id}/fail-trash
 ```
 
-只有 ProjectService 存在时注册。
+只有 ProjectService 存在时注册。`POST /v1/projects` 同时承担单文件夹 upsert（body 带 `workspace_root`）与多文件夹创建（body 带 `folders`）；废纸篓是文件夹粒度，`POST /v1/projects/{project_id}/folders/trash` 的 body 必须指明目标 `path`。请求与响应字段、错误码由 [项目生命周期与删除：API 与持久化](../01_桌面工作台/左侧栏/项目生命周期与删除/API与持久化.md) 唯一拥有。
 
 ### 3.3 Tool、MCP、Connector 和 Skill
 

@@ -6,6 +6,7 @@ import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 import { AwakenNewTaskButton } from "../AwakenNewTaskButton";
 import { AwakenPrimaryNav } from "../AwakenPrimaryNav";
+import { AwakenProjectFoldersEditor } from "../AwakenProjectFoldersEditor";
 import { AwakenProjectTree } from "../AwakenProjectTree";
 import { AwakenSelectableCard } from "../AwakenSelectableCard";
 import { AwakenSidebarSectionAction } from "../AwakenSidebarSectionAction";
@@ -14,7 +15,17 @@ import { AwakenWorkbenchSidebarFrame } from "../AwakenWorkbenchSidebarFrame";
 import { AwakenSidebar } from "./AwakenSidebar";
 import { AwakenSidebarStates } from "./AwakenSidebar.states";
 
-type SidebarDialogMode = "create-project" | "detach-project" | "rename-thread" | null;
+type SidebarDialogMode =
+  | "create-project"
+  | "edit-project"
+  | "detach-project"
+  | "rename-thread"
+  | null;
+
+const DEMO_PROJECT_FOLDER_PATHS = [
+  "/Users/awaken/Projects/awaken",
+  "/Users/awaken/Projects/awaken-design-system",
+];
 
 export function AwakenSidebarDemo() {
   const desktopProps = AwakenSidebarStates[0]?.props ?? {};
@@ -25,6 +36,9 @@ export function AwakenSidebarDemo() {
   const [expandedIds, setExpandedIds] = useState<string[]>(desktopProps.expandedIds ?? []);
   const [dialogMode, setDialogMode] = useState<SidebarDialogMode>(null);
   const [renameDraft, setRenameDraft] = useState("设计系统清理");
+  const [projectNameDraft, setProjectNameDraft] = useState("");
+  const [folderPaths, setFolderPaths] = useState<string[]>(DEMO_PROJECT_FOLDER_PATHS);
+  const [primaryFolderPath, setPrimaryFolderPath] = useState(DEMO_PROJECT_FOLDER_PATHS[0]);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [lastAction, setLastAction] = useState("当前展示 Awaken Desktop 正在使用的左侧栏组合。");
   const originalThemeRef = useRef<string | null>(null);
@@ -91,17 +105,70 @@ export function AwakenSidebarDemo() {
     }
   }
 
+  function removeFolder(path: string): void {
+    setFolderPaths((current) => {
+      const next = current.filter((item) => item !== path);
+      if (path === primaryFolderPath) {
+        setPrimaryFolderPath(next[0] ?? "");
+      }
+      return next;
+    });
+    setLastAction(`已模拟把 ${path} 从项目移除（磁盘文件保留）。`);
+  }
+
+  // 创建项目时文件夹还没挂到项目上，没有废纸篓这一档；编辑项目才有。
+  function renderFoldersEditor(withTrash: boolean) {
+    return (
+      <AwakenProjectFoldersEditor
+        folders={folderPaths.map((path) => ({
+          path,
+          isPrimary: path === primaryFolderPath,
+          onMakePrimary: (target: string) => {
+            setPrimaryFolderPath(target);
+            setLastAction(`已模拟把 ${target} 设为主文件夹。`);
+          },
+          onRemove: removeFolder,
+          actions: withTrash
+            ? [
+                {
+                  id: "trash",
+                  label: "移到废纸篓",
+                  tone: "danger" as const,
+                  onSelect: (target: string) =>
+                    setLastAction(`已模拟把 ${target} 移到废纸篓（Gallery 不触碰磁盘）。`),
+                },
+              ]
+            : undefined,
+        }))}
+        emptyHint="可以先不选文件夹。项目会直接创建，之后随时能加。"
+        onAddFolder={() => setLastAction("已触发选择文件夹（Gallery 模拟，不打开系统对话框）。")}
+      />
+    );
+  }
+
   const dialogTitle = dialogMode === "create-project"
-    ? "Create project"
-    : dialogMode === "detach-project"
-      ? "从 Awaken 移除项目"
-      : "重命名会话";
+    ? "创建项目"
+    : dialogMode === "edit-project"
+      ? "编辑项目"
+      : dialogMode === "detach-project"
+        ? "从 Awaken 移除项目"
+        : "重命名会话";
 
   const dialogFooter = dialogMode === "create-project" ? (
     <>
-      <AwakenButton onClick={() => closeDialog("已模拟选择现有文件夹。")}>Use existing folder</AwakenButton>
-      <AwakenButton variant="primary" onClick={() => closeDialog("已模拟创建本地项目。")}>Next</AwakenButton>
+      <div className="aw-sidebar-demo__dialog-source">
+        <AwakenSelectableCard
+          compact
+          selected
+          icon={<Monitor size={15} strokeWidth={1.9} />}
+          title="Local"
+        />
+      </div>
+      <AwakenButton onClick={() => closeDialog()}>取消</AwakenButton>
+      <AwakenButton variant="primary" onClick={() => closeDialog("已模拟创建本地项目。")}>创建项目</AwakenButton>
     </>
+  ) : dialogMode === "edit-project" ? (
+    <AwakenButton variant="primary" onClick={() => closeDialog("已关闭编辑项目弹窗。")}>完成</AwakenButton>
   ) : dialogMode === "detach-project" ? (
     <>
       <AwakenButton onClick={() => closeDialog()}>取消</AwakenButton>
@@ -283,11 +350,12 @@ export function AwakenSidebarDemo() {
           <article className="aw-sidebar-demo__part">
             <header>
               <h4>侧栏弹窗流程</h4>
-              <code>AwakenDialog + AwakenIconButton + AwakenSelectableCard</code>
-              <p>集中观测 App 从左侧栏触发的创建项目、移除项目和重命名会话；关闭图标按钮与本地来源选择卡片均使用真实组合。</p>
+              <code>AwakenDialog + AwakenIconButton + AwakenSelectableCard + AwakenProjectFoldersEditor</code>
+              <p>集中观测 App 从左侧栏触发的创建项目、编辑项目、移除项目和重命名会话；关闭图标按钮、本地来源选择卡片和文件夹编辑器均使用真实组合。</p>
             </header>
             <div className="aw-sidebar-demo__part-canvas aw-sidebar-demo__dialog-actions">
               <AwakenButton onClick={() => setDialogMode("create-project")}>创建项目</AwakenButton>
+              <AwakenButton onClick={() => setDialogMode("edit-project")}>编辑项目</AwakenButton>
               <AwakenButton onClick={() => setDialogMode("detach-project")}>移除项目</AwakenButton>
               <AwakenButton onClick={() => setDialogMode("rename-thread")}>重命名会话</AwakenButton>
             </div>
@@ -308,13 +376,18 @@ export function AwakenSidebarDemo() {
       >
         {dialogMode === "create-project" ? (
           <div className="aw-sidebar-demo__dialog-card">
-            <AwakenSelectableCard
-              selected
-              icon={<Monitor size={18} strokeWidth={1.9} />}
-              title="Local"
-              description="Use a folder on this Mac as an Awaken project."
-            />
+            <label className="aw-sidebar-demo__rename-field">
+              <span>项目名称</span>
+              <input
+                value={projectNameDraft}
+                onChange={(event) => setProjectNameDraft(event.target.value)}
+                placeholder="例如：季度复盘"
+              />
+            </label>
+            {renderFoldersEditor(false)}
           </div>
+        ) : dialogMode === "edit-project" ? (
+          <div className="aw-sidebar-demo__dialog-card">{renderFoldersEditor(true)}</div>
         ) : dialogMode === "detach-project" ? (
           <p className="aw-sidebar-demo__dialog-copy">
             “Awaken”会从侧栏移除。3 条历史会话和磁盘文件都会保留。

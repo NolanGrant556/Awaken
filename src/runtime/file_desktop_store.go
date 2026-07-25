@@ -64,7 +64,6 @@ var _ ProjectLifecycleRepository = (*FileDesktopStore)(nil)
 type fileLifecycleState struct {
 	AppliedSeq       uint64                      `json:"applied_seq"`
 	Projects         map[string]Project          `json:"projects"`          // by project_id
-	WorkspaceIndex   map[string]string           `json:"workspace_index"`   // normalized root -> project_id
 	Operations       map[string]ProjectOperation `json:"operations"`        // by operation_id
 	OperationKeys    map[string]string           `json:"operation_keys"`    // idempotency key -> operation_id
 	OperationThreads map[string][]string         `json:"operation_threads"` // operation_id -> thread ids
@@ -76,7 +75,6 @@ type fileLifecycleState struct {
 func newFileLifecycleState() *fileLifecycleState {
 	return &fileLifecycleState{
 		Projects:         map[string]Project{},
-		WorkspaceIndex:   map[string]string{},
 		Operations:       map[string]ProjectOperation{},
 		OperationKeys:    map[string]string{},
 		OperationThreads: map[string][]string{},
@@ -218,6 +216,7 @@ func (s *FileDesktopStore) openLifecycle() error {
 			state = newFileLifecycleState()
 		}
 	}
+	normalizeLoadedProjects(state)
 	records, err := journal.Records()
 	if err != nil {
 		return err
@@ -242,6 +241,19 @@ func (s *FileDesktopStore) openLifecycle() error {
 		return s.persistState()
 	}
 	return nil
+}
+
+// normalizeLoadedProjects upgrades a snapshot written before multi-folder
+// projects existed. Such a snapshot has a WorkspaceRoot per project and no
+// folder list; promoting it here means the rest of the store only ever sees the
+// folder-list invariant.
+func normalizeLoadedProjects(state *fileLifecycleState) {
+	if state == nil || len(state.Projects) == 0 {
+		return
+	}
+	for projectID, project := range state.Projects {
+		state.Projects[projectID] = project.withNormalizedFolders()
+	}
 }
 
 func (s *FileDesktopStore) statePath() string {
@@ -329,8 +341,11 @@ func (s *FileDesktopStore) persistState() error {
 // idempotent so journal replay after a crash converges.
 func (s *FileDesktopStore) applyMutation(state *fileLifecycleState, mutation fileLifecycleMutation) error {
 	for _, project := range mutation.Projects {
+		// Normalizing on apply is what lets pre-multi-folder snapshots and
+		// journal records replay unchanged: their WorkspaceRoot is promoted to a
+		// single primary user folder here, once, for every code path.
+		project = project.withNormalizedFolders()
 		state.Projects[project.ProjectID] = project
-		state.WorkspaceIndex[normalizeProjectWorkspaceRoot(project.WorkspaceRoot)] = project.ProjectID
 	}
 	for _, operation := range mutation.Operations {
 		state.Operations[operation.OperationID] = operation
@@ -563,6 +578,21 @@ func (s *FileDesktopStore) upsertThread(snapshot ThreadSnapshot, modelProfileKey
 	return s.writeSessionMetadata(next)
 }
 
+// folderHolderToReopen picks which of a folder's holders the single-folder
+// upsert should reuse. An active holder is the one the user is working in; a
+// removed one is only reactivated when nothing active holds the folder.
+func folderHolderToReopen(holders []Project) (Project, bool) {
+	if len(holders) == 0 {
+		return Project{}, false
+	}
+	for _, holder := range holders {
+		if holder.State == ProjectStateActive {
+			return holder, true
+		}
+	}
+	return holders[0], true
+}
+
 // ensureProjectLocked only journals a lifecycle mutation when project facts actually
 // change; the Version counter therefore advances per material change, not per
 // thread append.
@@ -572,8 +602,11 @@ func (s *FileDesktopStore) ensureProjectLocked(root string, reactivate bool) (st
 		return "", fmt.Errorf("project workspace root must be an absolute path")
 	}
 	now := time.Now().UTC()
-	if projectID, ok := s.state.WorkspaceIndex[normalized]; ok {
-		project := s.state.Projects[projectID]
+	// Reopening a known folder must land in a project that already holds it
+	// rather than mint a duplicate. Several projects may hold it, so an active
+	// holder wins; reactivation is only for the case where none is active.
+	if project, ok := folderHolderToReopen(s.projectsHoldingFolderLocked(normalized)); ok {
+		projectID := project.ProjectID
 		if !reactivate || (project.State == ProjectStateActive && project.RemovalReason == "" && project.RemovedAt == nil) {
 			return projectID, nil
 		}
@@ -594,6 +627,7 @@ func (s *FileDesktopStore) ensureProjectLocked(root string, reactivate bool) (st
 	project := Project{
 		ProjectID:     stableProjectID(normalized),
 		WorkspaceRoot: normalized,
+		Folders:       []ProjectFolder{{Path: normalized, Role: ProjectFolderRoleUser, IsPrimary: true}},
 		DisplayName:   projectDisplayName(normalized),
 		State:         ProjectStateActive,
 		CreatedAt:     now,
@@ -845,14 +879,32 @@ func (s *FileDesktopStore) DeleteThread(threadID string) error {
 
 // --- ProjectRepository queries ---
 
-func (s *FileDesktopStore) ProjectStateForWorkspace(root string) (ProjectState, bool, error) {
+// ProjectsHoldingFolder lists every project this folder is attached to. A
+// directory may be shared by any number of projects, so callers must handle a
+// list; those needing a single project take the first, which is the topmost one
+// in the order the user sees.
+func (s *FileDesktopStore) ProjectsHoldingFolder(root string) ([]Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	projectID, ok := s.state.WorkspaceIndex[normalizeProjectWorkspaceRoot(root)]
-	if !ok {
-		return "", false, nil
+	return s.projectsHoldingFolderLocked(root), nil
+}
+
+// projectsHoldingFolderLocked derives folder ownership from the folder lists
+// themselves. There is deliberately no reverse index to keep in sync: the lists
+// are the only fact, and a project count small enough to scan makes a cache a
+// drift risk rather than a win.
+func (s *FileDesktopStore) projectsHoldingFolderLocked(root string) []Project {
+	normalized := normalizeProjectWorkspaceRoot(root)
+	if normalized == "" {
+		return nil
 	}
-	return s.state.Projects[projectID].State, true, nil
+	holders := make([]Project, 0, 1)
+	for _, project := range s.listProjectsLocked(true) {
+		if project.HasFolder(normalized) {
+			holders = append(holders, project)
+		}
+	}
+	return holders
 }
 
 func (s *FileDesktopStore) ListProjects(includeRemoved bool) ([]Project, error) {
@@ -1063,6 +1115,212 @@ func (s *FileDesktopStore) EnsureProjectActive(root, displayName string, now tim
 	return s.state.Projects[projectID], nil
 }
 
+// CreateProject mints a project with an explicit folder list. The list may be
+// empty: a project is a named piece of work, and binding it to a folder is a
+// choice the user makes when they have one to bind. A folder-less project gets
+// its working directory from the run service instead.
+func (s *FileDesktopStore) CreateProject(folders []ProjectFolder, displayName string, now time.Time) (Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return Project{}, err
+	}
+	defer lock.Release()
+
+	project := Project{
+		ProjectID:   newProjectID(),
+		Folders:     append([]ProjectFolder(nil), folders...),
+		DisplayName: strings.TrimSpace(displayName),
+		State:       ProjectStateActive,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Version:     1,
+	}.withNormalizedFolders()
+	projectID := project.ProjectID
+	if project.DisplayName == "" {
+		if primary, ok := project.PrimaryFolder(); ok {
+			project.DisplayName = projectDisplayName(primary.Path)
+		} else {
+			project.DisplayName = "Untitled project"
+		}
+	}
+	projectOrder := append([]string{projectID}, s.orderedProjectIDsLocked()...)
+	last := project.PrimaryRoot()
+	if err := s.commitMutation(fileLifecycleMutation{
+		Kind:          "CreateProject",
+		Now:           now,
+		Projects:      []Project{project},
+		ProjectOrder:  &projectOrder,
+		LastWorkspace: &last,
+	}); err != nil {
+		return Project{}, err
+	}
+	return s.state.Projects[projectID], nil
+}
+
+// AttachProjectFolder adds a readable/writable folder to an existing project.
+// The folder may already belong to other projects: a directory is shared work,
+// not property. Attaching the first folder of a folder-less project promotes it
+// to primary, because that is where the user now expects work to happen.
+func (s *FileDesktopStore) AttachProjectFolder(projectID, path string, now time.Time) (Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return Project{}, err
+	}
+	defer lock.Release()
+
+	project, ok := s.state.Projects[strings.TrimSpace(projectID)]
+	if !ok {
+		return Project{}, ErrProjectNotFound
+	}
+	if project.State == ProjectStateTrashPending {
+		return Project{}, ErrProjectOperationConflict
+	}
+	normalized := normalizeProjectWorkspaceRoot(path)
+	if normalized == "" || !filepath.IsAbs(normalized) {
+		return Project{}, ErrProjectPathInvalid
+	}
+	if project.HasFolder(normalized) {
+		return project, nil
+	}
+
+	// The first folder of a folder-less project becomes its primary; anything
+	// attached later joins as a secondary folder.
+	promote := len(project.Folders) == 0
+	if promote {
+		for index := range project.Folders {
+			project.Folders[index].IsPrimary = false
+		}
+	}
+	project.Folders = append(project.Folders, ProjectFolder{
+		Path:      normalized,
+		Role:      ProjectFolderRoleUser,
+		IsPrimary: promote,
+	})
+	project.State = ProjectStateActive
+	project.RemovalReason = ""
+	project.RemovedAt = nil
+	project.UpdatedAt = now
+	project.Version++
+	project = project.withNormalizedFolders()
+	if err := s.commitMutation(fileLifecycleMutation{
+		Kind:     "AttachProjectFolder",
+		Now:      now,
+		Projects: []Project{project},
+	}); err != nil {
+		return Project{}, err
+	}
+	return s.state.Projects[project.ProjectID], nil
+}
+
+// DetachProjectFolder unbinds a user folder without touching the directory on
+// disk. Detaching the last user folder falls back to the Awaken-managed working
+// directory so the project never ends up rootless.
+func (s *FileDesktopStore) DetachProjectFolder(projectID, path string, now time.Time) (Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return Project{}, err
+	}
+	defer lock.Release()
+
+	project, ok := s.state.Projects[strings.TrimSpace(projectID)]
+	if !ok {
+		return Project{}, ErrProjectNotFound
+	}
+	if project.State == ProjectStateTrashPending {
+		return Project{}, ErrProjectOperationConflict
+	}
+	next, err := s.projectWithoutFolderLocked(project, path, now)
+	if err != nil {
+		return Project{}, err
+	}
+	if err := s.commitMutation(fileLifecycleMutation{
+		Kind:     "DetachProjectFolder",
+		Now:      now,
+		Projects: []Project{next},
+	}); err != nil {
+		return Project{}, err
+	}
+	return s.state.Projects[next.ProjectID], nil
+}
+
+// projectWithoutFolderLocked computes the post-detach project without
+// committing, so folder detach and folder trash completion share one rule set.
+func (s *FileDesktopStore) projectWithoutFolderLocked(project Project, path string, now time.Time) (Project, error) {
+	index := project.folderIndex(path)
+	if index < 0 {
+		return Project{}, ErrProjectFolderNotFound
+	}
+	remaining := make([]ProjectFolder, 0, len(project.Folders))
+	remaining = append(remaining, project.Folders[:index]...)
+	remaining = append(remaining, project.Folders[index+1:]...)
+	// Detaching the last folder leaves the project itself intact. It keeps its
+	// name, threads and history, and falls back to the run service's working
+	// directory the same way a project created without a folder does.
+	project.Folders = remaining
+	if len(remaining) == 0 {
+		// withNormalizedFolders promotes the mirrored WorkspaceRoot when a
+		// project carries no folders, which is how a row written before
+		// multi-folder projects gets upgraded on load. An intentional detach of
+		// the last folder must not be mistaken for that case, so the mirror is
+		// dropped here rather than being left to resurrect the folder.
+		project.WorkspaceRoot = ""
+	}
+	project.UpdatedAt = now
+	project.Version++
+	return project.withNormalizedFolders(), nil
+}
+
+// SetPrimaryProjectFolder moves the discovery and working-directory anchor onto
+// another attached folder.
+func (s *FileDesktopStore) SetPrimaryProjectFolder(projectID, path string, now time.Time) (Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return Project{}, err
+	}
+	defer lock.Release()
+
+	project, ok := s.state.Projects[strings.TrimSpace(projectID)]
+	if !ok {
+		return Project{}, ErrProjectNotFound
+	}
+	if project.State == ProjectStateTrashPending {
+		return Project{}, ErrProjectOperationConflict
+	}
+	index := project.folderIndex(path)
+	if index < 0 {
+		return Project{}, ErrProjectFolderNotFound
+	}
+	if project.Folders[index].IsPrimary {
+		return project, nil
+	}
+	folders := append([]ProjectFolder(nil), project.Folders...)
+	for i := range folders {
+		folders[i].IsPrimary = i == index
+	}
+	project.Folders = folders
+	project.UpdatedAt = now
+	project.Version++
+	project = project.withNormalizedFolders()
+	last := project.PrimaryRoot()
+	if err := s.commitMutation(fileLifecycleMutation{
+		Kind:          "SetPrimaryProjectFolder",
+		Now:           now,
+		Projects:      []Project{project},
+		LastWorkspace: &last,
+	}); err != nil {
+		return Project{}, err
+	}
+	return s.state.Projects[project.ProjectID], nil
+}
+
 func (s *FileDesktopStore) ReorderProjects(projectIDs []string, now time.Time) ([]Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1173,7 +1431,7 @@ func (s *FileDesktopStore) fallbackWorkspaceLocked(excludedProjectID string) *st
 		empty := ""
 		return &empty
 	}
-	root := fallback.WorkspaceRoot
+	root := fallback.PrimaryRoot()
 	return &root
 }
 
@@ -1260,7 +1518,11 @@ func (s *FileDesktopStore) CommitDeleteThread(project Project, threadID, idempot
 	return operation, nil
 }
 
-func (s *FileDesktopStore) CommitPrepareTrash(project Project, idempotencyKey, fingerprint string, now time.Time) (ProjectOperation, []string, error) {
+// CommitPrepareTrash starts a folder-scoped trash operation. The project enters
+// trash_pending so no new run can start while the directory is being staged; the
+// thread list is collected only to gate on active runs, because folder trash no
+// longer deletes Awaken history.
+func (s *FileDesktopStore) CommitPrepareTrash(project Project, folderPath, idempotencyKey, fingerprint string, now time.Time) (ProjectOperation, []string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	lock, err := s.lockStore()
@@ -1273,7 +1535,7 @@ func (s *FileDesktopStore) CommitPrepareTrash(project Project, idempotencyKey, f
 	if err != nil {
 		return ProjectOperation{}, nil, err
 	}
-	operation := newProjectOperation(project, idempotencyKey, ProjectOperationTrashAndPurge, ProjectOperationAccepted, projectOperationPhaseWaitingForRuns, now)
+	operation := newProjectFolderOperation(project, folderPath, idempotencyKey, ProjectOperationTrashAndPurge, ProjectOperationAccepted, projectOperationPhaseWaitingForRuns, now)
 	operation.PathFingerprint = fingerprint
 	operation.MatchedThreads = len(threadIDs)
 	current := s.state.Projects[project.ProjectID]
@@ -1421,7 +1683,15 @@ func (s *FileDesktopStore) CommitBeginTrash(operationID, attemptID string, now t
 	})
 }
 
-func (s *FileDesktopStore) CommitCompleteTrash(operation ProjectOperation, threadIDs []string, now time.Time) error {
+// CommitCompleteTrash finalizes a folder-scoped trash: the directory is already
+// gone from disk, so the folder is detached from the project and the project
+// returns to the state it had before the operation. The project itself and its
+// threads survive; removing the project or its history are separate actions.
+//
+// A shared folder is detached from every project holding it. The directory no
+// longer exists, and leaving a row pointing at it in another project would be a
+// path that resolves to nothing.
+func (s *FileDesktopStore) CommitCompleteTrash(operation ProjectOperation, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	lock, err := s.lockStore()
@@ -1434,26 +1704,48 @@ func (s *FileDesktopStore) CommitCompleteTrash(operation ProjectOperation, threa
 	if !ok {
 		return ErrProjectNotFound
 	}
-	removedAt := now
-	project.State = ProjectStateRemoved
-	project.RemovalReason = "trashed"
-	project.RemovedAt = &removedAt
-	project.UpdatedAt = now
-	project.Version++
+	restoredState := operation.PreviousProjectState
+	if restoredState == "" {
+		restoredState = ProjectStateActive
+	}
+	project.State = restoredState
+	next, err := s.projectWithoutFolderLocked(project, operation.WorkspaceRoot, now)
+	if err != nil {
+		if !errors.Is(err, ErrProjectFolderNotFound) {
+			return err
+		}
+		// A replayed completion finds the folder already detached; converge on
+		// the current project instead of failing the idempotent retry.
+		next = project
+		next.UpdatedAt = now
+		next.Version++
+		next = next.withNormalizedFolders()
+	}
+
+	projects := []Project{next}
+	for _, holder := range s.projectsHoldingFolderLocked(operation.WorkspaceRoot) {
+		if holder.ProjectID == next.ProjectID {
+			continue
+		}
+		detached, detachErr := s.projectWithoutFolderLocked(holder, operation.WorkspaceRoot, now)
+		if detachErr != nil {
+			if errors.Is(detachErr, ErrProjectFolderNotFound) {
+				continue
+			}
+			return detachErr
+		}
+		projects = append(projects, detached)
+	}
 
 	current := s.state.Operations[operation.OperationID]
-	current.Status = ProjectOperationAccepted
-	current.Phase = projectOperationPhaseCleaning
-	if len(threadIDs) == 0 {
-		current.Status = ProjectOperationSucceeded
-		current.Phase = projectOperationPhaseCompleted
-		current.PhysicalCompletedAt = &now
-	}
+	current.Status = ProjectOperationSucceeded
+	current.Phase = projectOperationPhaseCompleted
 	current.LogicalCommittedAt = &now
-	current.MatchedThreads = len(threadIDs)
+	current.PhysicalCompletedAt = &now
+	current.MatchedThreads = 0
 	current.UpdatedAt = now
 
-	jobs := newThreadPurgeJobs(operation.OperationID, threadIDs, now)
+	jobs := make([]fileCleanupJob, 0, 1)
 	if trashJob, ok := s.trashJobForOperationLocked(operation.OperationID); ok {
 		trashJob.Status = cleanupJobSucceeded
 		trashJob.CompletedAt = now
@@ -1462,16 +1754,15 @@ func (s *FileDesktopStore) CommitCompleteTrash(operation ProjectOperation, threa
 		trashJob.UpdatedAt = now
 		jobs = append(jobs, trashJob)
 	}
+	last := next.PrimaryRoot()
 	mutation := fileLifecycleMutation{
-		Kind:              "CommitCompleteTrash",
-		Now:               now,
-		Projects:          []Project{project},
-		Operations:        []ProjectOperation{current},
-		SoftDeleteThreads: threadIDs,
-		SoftDeleteOpID:    operation.OperationID,
-		CleanupJobs:       jobs,
+		Kind:          "CommitCompleteTrash",
+		Now:           now,
+		Projects:      projects,
+		Operations:    []ProjectOperation{current},
+		CleanupJobs:   jobs,
+		LastWorkspace: &last,
 	}
-	mutation.LastWorkspace = s.fallbackWorkspaceLocked(operation.ProjectID)
 	return s.commitMutation(mutation)
 }
 

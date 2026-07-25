@@ -6,18 +6,28 @@ import (
 )
 
 type RuntimeInfo struct {
-	WorkingDir    string
-	CurrentDate   string
-	ModelName     string
-	EntryPoint    string
-	ToolSummary   string
-	SkillSummary  string
-	AttachedFiles []RuntimeAttachedFile
+	WorkingDir     string
+	CurrentDate    string
+	ModelName      string
+	EntryPoint     string
+	ToolSummary    string
+	SkillSummary   string
+	ProjectName    string
+	ProjectFolders []RuntimeProjectFolder
+	AttachedFiles  []RuntimeAttachedFile
 }
 
 type RuntimeAttachedFile struct {
 	Path        string
 	DisplayName string
+}
+
+// RuntimeProjectFolder is one folder of the project this thread runs in.
+// IsPrimary marks the folder that is also the working directory, which is the
+// base for relative paths and the cwd handed to Bash.
+type RuntimeProjectFolder struct {
+	Path      string
+	IsPrimary bool
 }
 
 func NewRuntimeInfo() RuntimeInfo {
@@ -72,6 +82,18 @@ func (r *RuntimeInfo) SetSkillSummary(summary string) {
 		summary = "none"
 	}
 	r.SkillSummary = summary
+}
+
+func (r *RuntimeInfo) SetProjectName(name string) {
+	r.ProjectName = name
+}
+
+func (r *RuntimeInfo) SetProjectFolders(folders []RuntimeProjectFolder) {
+	if len(folders) == 0 {
+		r.ProjectFolders = nil
+		return
+	}
+	r.ProjectFolders = append([]RuntimeProjectFolder(nil), folders...)
 }
 
 func (r *RuntimeInfo) SetAttachedFiles(files []RuntimeAttachedFile) {

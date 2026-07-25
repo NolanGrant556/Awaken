@@ -93,6 +93,8 @@ import {
   type ThreadDeleteResult,
   type UpdateMcpServerConfigRequest,
   type UpsertProjectResult,
+  type ProjectFolderSelection,
+  type ProjectFoldersPickResult,
 } from "../shared/runtime.js";
 import {
   updateMainWindowBackground,
@@ -632,8 +634,8 @@ async function executeProjectTrashOperation(
       );
     },
     fail: failProjectTrashOperation,
-    reportTrashFailure: ({ operationId, workspaceRoot, error }) => {
-      console.error("project_trash_failed", { operationId, workspaceRoot, error });
+    reportTrashFailure: ({ operationId, folderPath, error }) => {
+      console.error("project_trash_failed", { operationId, folderPath, error });
     },
   });
 }
@@ -1807,6 +1809,96 @@ ipcMain.handle(
   },
 );
 
+// upsertProjectFolders POSTs the multi-folder create form. Core mints a new
+// project identity for it, and an empty folder list yields a project backed by
+// an Awaken-managed working directory.
+async function requestProjectWrite(
+  pathname: string,
+  method: "POST" | "PUT" | "DELETE",
+  body: unknown,
+  logContext: Record<string, unknown>,
+): Promise<UpsertProjectResult> {
+  try {
+    const project = await requestRuntimeDomain<RuntimeProjectWire>(pathname, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { ok: true, project: normalizeRuntimeProject(project) };
+  } catch (error) {
+    const code = error instanceof RuntimeDomainError ? error.code : "INTERNAL_ERROR";
+    console.error("project_folder_write_failed", {
+      ...logContext,
+      pathname,
+      code,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { ok: false, code, message: upsertProjectFailureMessage(error) };
+  }
+}
+
+ipcMain.handle(
+  "awaken:create-project",
+  async (
+    _event,
+    request: { folders: ProjectFolderSelection[]; displayName?: string },
+  ): Promise<UpsertProjectResult> =>
+    requestProjectWrite(
+      "/v1/projects",
+      "POST",
+      {
+        folders: (request.folders ?? []).map((folder) => ({
+          path: folder.path,
+          primary: Boolean(folder.primary),
+        })),
+        display_name: request.displayName,
+      },
+      { folderCount: request.folders?.length ?? 0 },
+    ),
+);
+
+ipcMain.handle(
+  "awaken:attach-project-folder",
+  async (
+    _event,
+    request: { projectId: string; path: string },
+  ): Promise<UpsertProjectResult> =>
+    requestProjectWrite(
+      `/v1/projects/${encodeURIComponent(request.projectId)}/folders`,
+      "POST",
+      { path: request.path },
+      { projectId: request.projectId },
+    ),
+);
+
+ipcMain.handle(
+  "awaken:detach-project-folder",
+  async (
+    _event,
+    request: { projectId: string; path: string },
+  ): Promise<UpsertProjectResult> =>
+    requestProjectWrite(
+      `/v1/projects/${encodeURIComponent(request.projectId)}/folders`,
+      "DELETE",
+      { path: request.path },
+      { projectId: request.projectId },
+    ),
+);
+
+ipcMain.handle(
+  "awaken:set-primary-project-folder",
+  async (
+    _event,
+    request: { projectId: string; path: string },
+  ): Promise<UpsertProjectResult> =>
+    requestProjectWrite(
+      `/v1/projects/${encodeURIComponent(request.projectId)}/primary-folder`,
+      "PUT",
+      { path: request.path },
+      { projectId: request.projectId },
+    ),
+);
+
 ipcMain.handle(
   "awaken:reorder-projects",
   async (_event, projectIds: string[]): Promise<ProjectReorderResult> => {
@@ -1841,11 +1933,16 @@ async function runProjectMutation(
   method: "DELETE" | "POST",
   projectId: string,
   idempotencyKey: string,
+  body?: unknown,
 ): Promise<ProjectMutationResult> {
   try {
     const operation = await requestRuntimeDomain<RuntimeProjectOperationWire>(pathname, {
       method,
-      headers: { "Idempotency-Key": idempotencyKey },
+      headers:
+        body === undefined
+          ? { "Idempotency-Key": idempotencyKey }
+          : { "Idempotency-Key": idempotencyKey, "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
     });
     return { ok: true, operation: normalizeRuntimeProjectOperation(operation) };
   } catch (error) {
@@ -1888,16 +1985,17 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
-  "awaken:trash-project",
+  "awaken:trash-project-folder",
   async (
     _event,
-    request: { projectId: string; idempotencyKey: string },
+    request: { projectId: string; path: string; idempotencyKey: string },
   ): Promise<ProjectMutationResult> => {
     const result = await runProjectMutation(
-      `/v1/projects/${encodeURIComponent(request.projectId)}/trash`,
+      `/v1/projects/${encodeURIComponent(request.projectId)}/folders/trash`,
       "POST",
       request.projectId,
       request.idempotencyKey,
+      { path: request.path },
     );
     if (result.ok) {
       void processPendingProjectTrashOperations();
@@ -1986,6 +2084,28 @@ ipcMain.handle(
         message: "暂时无法读取任务记录，请稍后重试。",
       };
     }
+  },
+);
+
+// 项目文件夹定位。artifact 的 reveal 绑死在 transcript 上，项目文件夹没有 run 归属，
+// 因此单独走一条通道。只接受主窗口发来的绝对路径，并在定位前确认它仍然存在。
+ipcMain.handle(
+  "awaken:reveal-path",
+  async (event, target: string): Promise<{ ok: boolean; message?: string }> => {
+    if (!mainWindowRef || event.sender.id !== mainWindowRef.webContents.id) {
+      return { ok: false, message: "无法确认定位请求来自 Awaken 主窗口。" };
+    }
+    const folderPath = typeof target === "string" ? target.trim() : "";
+    if (!folderPath || !path.isAbsolute(folderPath)) {
+      return { ok: false, message: "需要一个绝对路径。" };
+    }
+    try {
+      await fs.access(folderPath);
+    } catch {
+      return { ok: false, message: `目录已不存在：${folderPath}` };
+    }
+    shell.showItemInFolder(folderPath);
+    return { ok: true };
   },
 );
 
@@ -2178,25 +2298,40 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
-  "awaken:pick-workspace",
-  async (_event, defaultPath?: string) => {
+  "awaken:pick-project-folders",
+  async (_event, defaultPath?: string): Promise<ProjectFoldersPickResult> => {
     const result = await dialog.showOpenDialog({
-      properties: ["openDirectory"],
+      properties: ["openDirectory", "multiSelections"],
       defaultPath,
     });
     if (result.canceled || result.filePaths.length === 0) {
       return { canceled: true };
     }
-    const selected = result.filePaths[0];
-    try {
-      const stat = await fs.stat(selected);
-      if (!stat.isDirectory()) {
-        return { canceled: true, error: "Selected path is not a directory" };
+    const paths: string[] = [];
+    const errors: string[] = [];
+    for (const selected of result.filePaths) {
+      try {
+        const stat = await fs.stat(selected);
+        if (stat.isDirectory()) {
+          paths.push(selected);
+        } else {
+          errors.push(`${selected} 不是文件夹。`);
+        }
+      } catch {
+        errors.push(`无法访问 ${selected}。`);
       }
-      return { canceled: false, path: selected };
-    } catch {
-      return { canceled: true, error: "Cannot access selected directory" };
     }
+    if (paths.length === 0) {
+      return {
+        canceled: true,
+        error: errors[0] ?? "Cannot access selected directory",
+      };
+    }
+    return {
+      canceled: false,
+      paths,
+      errors: errors.length > 0 ? errors : undefined,
+    };
   },
 );
 

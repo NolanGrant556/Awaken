@@ -49,6 +49,7 @@ export { AwakenSkillsDemo } from "../src/components/AwakenSkills/AwakenSkills.de
 export { AwakenSwitchDemo } from "../src/components/AwakenSwitch/AwakenSwitch.demo";
 export { AwakenTaskWelcomeDemo } from "../src/components/AwakenTaskWelcome/AwakenTaskWelcome.demo";
 export { AwakenThemeChoiceGroupDemo } from "../src/components/AwakenThemeChoiceGroup/AwakenThemeChoiceGroup.demo";
+export { AwakenThinkingOrbDemo } from "../src/components/AwakenThinkingOrb/AwakenThinkingOrb.demo";
 export { AwakenThoughtTraceDemo } from "../src/components/AwakenThoughtTrace/AwakenThoughtTrace.demo";
 export { AwakenToolTraceGroupDemo } from "../src/components/AwakenToolTraceGroup/AwakenToolTraceGroup.demo";
 export { AwakenToolTraceLineDemo } from "../src/components/AwakenToolTraceLine/AwakenToolTraceLine.demo";

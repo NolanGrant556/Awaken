@@ -754,12 +754,14 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 
 .thought-trace {
   display: grid;
-  gap: 5px;
+  gap: 6px;
   min-width: 0;
   color: var(--aw-text-secondary);
 }
 
 .thought-trace summary {
+  width: max-content;
+  max-width: 100%;
   list-style: none;
   cursor: pointer;
 }
@@ -769,15 +771,61 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .thought-trace-heading {
+  border-radius: 8px;
+}
+
+.thought-trace-heading:focus-visible {
+  outline: 2px solid var(--aw-border-control-hover);
+  outline-offset: 3px;
+}
+
+.thought-trace-status {
+  transition: opacity 140ms ease;
+}
+
+.thought-trace-disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 20px;
   color: var(--aw-text-tertiary);
-  font-size: var(--aw-font-size-xs);
-  font-weight: var(--aw-font-weight-semibold);
-  line-height: var(--aw-line-height-xs);
+  font-size: 12px;
+  line-height: 14px;
+  animation: thought-trace-disclosure-enter 140ms ease-out both;
+}
+
+.thought-trace-disclosure-icon {
+  display: grid;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+}
+
+.thought-trace-disclosure-icon svg {
+  display: block;
+  transition: transform 140ms ease;
+}
+
+.thought-trace[open] .thought-trace-disclosure-icon svg {
+  transform: rotate(90deg);
+}
+
+.thought-trace-disclosure-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.thought-trace-done summary:hover .thought-trace-disclosure,
+.thought-trace-error summary:hover .thought-trace-disclosure {
+  color: var(--aw-text-secondary);
 }
 
 .thought-trace p {
   max-width: 76ch;
   margin: 0;
+  padding-inline: 26px 0;
   color: var(--aw-text-secondary);
   font-size: var(--aw-font-size-sm);
   line-height: 1.6;
@@ -787,6 +835,28 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 
 .thought-trace-error p {
   color: var(--aw-status-danger-text);
+}
+
+@keyframes thought-trace-disclosure-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thought-trace-disclosure {
+    animation: none;
+  }
+
+  .thought-trace-disclosure-icon svg {
+    transition: none;
+  }
 }
 
 .tool-trace-group {

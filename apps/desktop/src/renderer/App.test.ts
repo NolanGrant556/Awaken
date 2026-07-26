@@ -76,6 +76,7 @@ import {
   latestTurnMinHeightBottomReserve,
   latestTurnPromptAnchorSlack,
   projectNarrativeTurnBodySegments,
+  projectVisibleNarrativeItems,
   scrollTopForLatestTurnScrollTail,
   scrollTopForPromptAnchor,
   shouldCancelPendingPromptAnchorForScrollIntent,
@@ -2552,6 +2553,47 @@ describe("App workbench presentation", () => {
         needsRestart: true,
       }),
     ).toBe(true);
+  });
+
+  it("shows only the trailing planning item while a run awaits its first visible output", () => {
+    const prompt: RunNarrativeItem = {
+      kind: "prompt",
+      id: "prompt:draft:1",
+      text: "Start the run",
+    };
+    const planning: RunNarrativeItem = {
+      kind: "planning",
+      id: "planning:draft:1",
+      text: "Planning next moves",
+      status: "done",
+    };
+    const thinking: RunNarrativeItem = {
+      kind: "thinking",
+      id: "thinking:run-1:reasoning-1",
+      text: "Inspecting the current state",
+      status: "active",
+    };
+
+    expect(
+      projectVisibleNarrativeItems({
+        items: [prompt, planning],
+        isBusy: true,
+      }),
+    ).toEqual([prompt, planning]);
+
+    expect(
+      projectVisibleNarrativeItems({
+        items: [prompt, planning, thinking],
+        isBusy: true,
+      }),
+    ).toEqual([prompt, thinking]);
+
+    expect(
+      projectVisibleNarrativeItems({
+        items: [prompt, planning],
+        isBusy: false,
+      }),
+    ).toEqual([prompt]);
   });
 
   it("shows turn markers once the run stage has at least three turns", () => {

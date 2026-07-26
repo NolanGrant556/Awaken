@@ -14,6 +14,7 @@ export { AwakenContextUsagePanelDemo } from "../src/components/AwakenContextUsag
 export { AwakenDeliverableCardDemo } from "../src/components/AwakenDeliverableCard/AwakenDeliverableCard.demo";
 export { AwakenDeliverableListDemo } from "../src/components/AwakenDeliverableList/AwakenDeliverableList.demo";
 export { AwakenDisclosureDemo } from "../src/components/AwakenDisclosure/AwakenDisclosure.demo";
+export { AwakenDotmSquare3Demo } from "../src/components/AwakenDotmSquare3/AwakenDotmSquare3.demo";
 export { AwakenExecutionFeedDemo } from "../src/components/AwakenExecutionFeed/AwakenExecutionFeed.demo";
 export { AwakenFolderDemo } from "../src/components/AwakenFolder/AwakenFolder.demo";
 export { AwakenInspectorRailDemo } from "../src/components/AwakenInspectorRail/AwakenInspectorRail.demo";

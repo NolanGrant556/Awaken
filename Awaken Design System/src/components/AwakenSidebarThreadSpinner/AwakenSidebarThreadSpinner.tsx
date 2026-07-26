@@ -1,5 +1,7 @@
 import "./AwakenSidebarThreadSpinner.css";
 
+import { AwakenDotmSquare3 } from "../AwakenDotmSquare3/AwakenDotmSquare3";
+
 export type AwakenSidebarThreadSpinnerProps = {
   label?: string;
   className?: string;
@@ -10,9 +12,11 @@ export function AwakenSidebarThreadSpinner({
   className,
 }: AwakenSidebarThreadSpinnerProps) {
   return (
-    <span
+    <AwakenDotmSquare3
       className={["aw-sidebar-thread-spinner", className].filter(Boolean).join(" ")}
-      aria-label={label}
+      ariaLabel={label}
+      size={14}
+      dotSize={2}
     />
   );
 }

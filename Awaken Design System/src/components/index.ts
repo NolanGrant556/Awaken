@@ -20,6 +20,7 @@ export * from "./AwakenContextUsagePanel";
 export * from "./AwakenCopyButton";
 export * from "./AwakenDisclosure";
 export * from "./AwakenDialog";
+export * from "./AwakenDotmSquare3";
 export * from "./AwakenDropdown";
 export * from "./AwakenExecutionFeed";
 export * from "./AwakenFolder";

@@ -1,0 +1,31 @@
+.aw-dotm-square3-demo__grid {
+  display: grid;
+  grid-template-columns: minmax(96px, 108px);
+  justify-content: start;
+  gap: 16px;
+  padding: 16px;
+}
+
+.aw-dotm-square3-demo__cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 12px;
+  border-radius: 12px;
+  background: var(--aw-surface-panel, var(--aw-bg-nav));
+}
+
+.aw-dotm-square3-demo__orb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+}
+
+.aw-dotm-square3-demo__label {
+  font-size: var(--aw-font-size-sm, 13px);
+  color: var(--aw-text-secondary);
+  text-align: center;
+}

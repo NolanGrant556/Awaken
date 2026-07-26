@@ -2446,6 +2446,8 @@ describe("sidebar thread status presentation", () => {
     expect(html).toContain("正在执行的会话");
     expect(html).toContain('aria-current="true"');
     expect(html).toContain('aria-label="加载中"');
+    expect(html).toContain("aw-sidebar-thread-spinner");
+    expect(html).toContain("aw-dotm-square3");
   });
 });
 

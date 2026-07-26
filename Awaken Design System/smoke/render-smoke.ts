@@ -89,6 +89,104 @@ for (const [name, Demo] of demoEntries) {
   }
 }
 
+const expectedThinkingOrbStateIds = [
+  "working",
+  "searching",
+  "solving",
+  "listening",
+  "composing",
+  "shaping",
+];
+const thinkingOrbStateIds = AwakenDesignSystem.AwakenThinkingOrbStates.map((state) => state.id);
+
+if (thinkingOrbStateIds.join(",") !== expectedThinkingOrbStateIds.join(",")) {
+  throw new Error(`AwakenThinkingOrb states are incomplete or out of order: ${thinkingOrbStateIds.join(", ")}`);
+}
+
+const composingOrbState = AwakenDesignSystem.AwakenThinkingOrbStates.find(
+  (state) => state.id === "composing",
+);
+
+if (composingOrbState?.props.size !== 64 || composingOrbState.props.speed !== 2.4) {
+  throw new Error("AwakenThinkingOrb composing state must preserve the selected 64px / 2.4x configuration");
+}
+
+const thinkingOrbHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenThinkingOrb, {
+    state: "composing",
+    size: 64,
+    speed: 2.4,
+    "aria-label": "正在组织回答",
+  }),
+);
+
+if (!thinkingOrbHtml.includes("<canvas") || !thinkingOrbHtml.includes('role="img"')) {
+  throw new Error("AwakenThinkingOrb must render an accessible canvas image");
+}
+
+if (!thinkingOrbHtml.includes('aria-label="正在组织回答"')) {
+  throw new Error("AwakenThinkingOrb must forward the consumer accessibility label");
+}
+
+const thinkingOrbStatusHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenThinkingOrbStatus),
+);
+
+if (!thinkingOrbStatusHtml.includes('role="status"') || !thinkingOrbStatusHtml.includes('aria-label="Thinking..."')) {
+  throw new Error("AwakenThinkingOrbStatus must expose the Thinking line as an accessible status");
+}
+
+if (!thinkingOrbStatusHtml.includes('aria-hidden="true"')) {
+  throw new Error("AwakenThinkingOrbStatus must hide its decorative canvas from assistive technology");
+}
+
+if (!productionCss.includes(".aw-thinking-orb-status")) {
+  throw new Error("Production CSS is missing the shared AwakenThinkingOrbStatus surface");
+}
+
+if (
+  productionCss.includes("--aw-thinking-orb-status-fill") ||
+  productionCss.includes("--aw-thinking-orb-status-ring") ||
+  productionCss.includes("width:270px")
+) {
+  throw new Error("AwakenThinkingOrbStatus must remain a transparent inline state without capsule styling");
+}
+
+const activeThoughtTraceHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenThoughtTrace, {
+    text: "Inspecting the current implementation",
+    status: "active",
+    theme: "dark",
+  }),
+);
+
+if (
+  !activeThoughtTraceHtml.includes('aria-label="Thinking..."') ||
+  !activeThoughtTraceHtml.includes("aw-thinking-orb-status") ||
+  !activeThoughtTraceHtml.includes('data-size="20"') ||
+  activeThoughtTraceHtml.includes('data-paused="true"')
+) {
+  throw new Error("Active AwakenThoughtTrace must use the compact animated Thinking line");
+}
+
+const completedThoughtTraceHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenThoughtTrace, {
+    text: "Inspection complete",
+    status: "done",
+    theme: "light",
+  }),
+);
+
+if (
+  !completedThoughtTraceHtml.includes("Thought") ||
+  !completedThoughtTraceHtml.includes("thought-trace-disclosure") ||
+  !completedThoughtTraceHtml.includes('aria-hidden="true"') ||
+  completedThoughtTraceHtml.includes("aw-thinking-orb-status") ||
+  completedThoughtTraceHtml.includes("<canvas")
+) {
+  throw new Error("Completed AwakenThoughtTrace must replace the orb with a disclosure chevron");
+}
+
 const richMarkdownState = AwakenDesignSystem.AwakenAssistantMessageStates.find(
   (state) => state.id === "rich-markdown",
 );

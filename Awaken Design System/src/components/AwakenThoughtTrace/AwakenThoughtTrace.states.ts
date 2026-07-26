@@ -9,6 +9,15 @@ export type AwakenThoughtTraceState = {
 
 export const AwakenThoughtTraceStates: AwakenThoughtTraceState[] = [
   {
+    id: "waiting-first-output",
+    label: "等待首个输出（Desktop 提交后）",
+    props: {
+      text: "",
+      status: "active",
+      theme: "light",
+    } as unknown as Partial<ComponentProps<typeof AwakenThoughtTrace>>,
+  },
+  {
     id: "active-open",
     label: "运行中（Desktop 默认）",
     props: {

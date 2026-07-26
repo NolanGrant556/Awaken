@@ -66,6 +66,7 @@ export * from "./AwakenSkills";
 export * from "./AwakenSwitch";
 export * from "./AwakenTaskWelcome";
 export * from "./AwakenThemeChoiceGroup";
+export * from "./AwakenThinkingOrb";
 export * from "./AwakenThoughtTrace";
 export * from "./AwakenTooltip";
 export * from "./AwakenToolTraceGroup";

@@ -12,8 +12,8 @@ export function AwakenThoughtTraceDemo() {
       <header className="ads-component-demo-header">
         <h2>思路轨迹 <code>AwakenThoughtTrace</code></h2>
         <p>
-          展示 runtime 明确提供的 reasoning summary。Desktop 当前只传入文本与
-          active/done 状态，因此标题使用默认的 Thought，不显示虚构的中文标签或耗时。
+          Thinking 行内状态从提交后的首个等待帧开始持续显示；runtime 提供 reasoning
+          summary 后，文本在下方流式展开；完成态移除思考球，以轻量 Chevron 保留折叠回看能力。
         </p>
       </header>
       <div className="ads-component-demo-grid">

@@ -20,6 +20,7 @@ import { AwakenSkillsDemo } from "../src/components/AwakenSkills/AwakenSkills.de
 import { AwakenSwitchDemo } from "../src/components/AwakenSwitch/AwakenSwitch.demo";
 import { AwakenTaskWelcomeDemo } from "../src/components/AwakenTaskWelcome/AwakenTaskWelcome.demo";
 import { AwakenDotmSquare3Demo } from "../src/components/AwakenDotmSquare3/AwakenDotmSquare3.demo";
+import { AwakenThinkingOrbDemo } from "../src/components/AwakenThinkingOrb/AwakenThinkingOrb.demo";
 import { AwakenThoughtTraceDemo } from "../src/components/AwakenThoughtTrace/AwakenThoughtTrace.demo";
 import { AwakenToolTraceGroupDemo } from "../src/components/AwakenToolTraceGroup/AwakenToolTraceGroup.demo";
 import { AwakenWorkbenchShellDemo } from "../src/components/AwakenWorkbenchShell/AwakenWorkbenchShell.demo";
@@ -61,6 +62,7 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-avatar", name: "AwakenAvatar", displayName: "头像", demo: AwakenAvatarDemo, category: "atomic" },
   { id: "awaken-composer-bar", name: "AwakenComposerBar", displayName: "「输入栏」组件库", demo: AwakenComposerBarDemo, category: "workbench", aliases: ["awaken-composer-input", "awaken-context-button", "awaken-user-prompt-block", "awaken-composer-dock", "awaken-icon-button", "awaken-send-button", "awaken-tooltip"] },
   { id: "awaken-original-thinking", name: "AwakenOriginalThinking", displayName: "原始思考动效", demo: AwakenOriginalThinkingDemo, category: "atomic" },
+  { id: "awaken-thinking-orb", name: "AwakenThinkingOrb", displayName: "思考球", demo: AwakenThinkingOrbDemo, category: "atomic" },
   { id: "awaken-dotm-square3", name: "AwakenDotmSquare3", displayName: "矩阵方块", demo: AwakenDotmSquare3Demo, category: "atomic" },
   { id: "awaken-run-stage", name: "AwakenRunStage", displayName: "「运行阶段」组件库", demo: AwakenRunStageDemo, category: "workbench", aliases: ["awaken-execution-feed"] },
   { id: "awaken-task-welcome", name: "AwakenTaskWelcome", displayName: "「任务欢迎区」组件库", demo: AwakenTaskWelcomeDemo, category: "workbench" },

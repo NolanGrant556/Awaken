@@ -1,0 +1,167 @@
+.aw-thinking-orb-demo__featured {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.2fr) minmax(240px, 0.8fr);
+  gap: 16px;
+  margin: 16px 16px 0;
+  overflow: hidden;
+  border: 1px solid var(--aw-border-subtle);
+  border-radius: 20px;
+  background: var(--aw-surface-panel);
+}
+
+.aw-thinking-orb-demo__featured-stage {
+  display: grid;
+  min-height: 240px;
+  place-items: center;
+  padding: 32px;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.055), transparent 58%),
+    #0a0a0a;
+}
+
+.aw-thinking-orb-demo__featured-copy {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  padding: 28px;
+}
+
+.aw-thinking-orb-demo__featured-copy h3,
+.aw-thinking-orb-demo__featured-copy p {
+  margin: 0;
+}
+
+.aw-thinking-orb-demo__featured-copy h3 {
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-lg);
+}
+
+.aw-thinking-orb-demo__featured-copy p {
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: 1.6;
+}
+
+.aw-thinking-orb-demo__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  padding: 16px;
+}
+
+.aw-thinking-orb-demo__card {
+  display: grid;
+  grid-template-rows: 120px auto;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--aw-border-subtle);
+  border-radius: 16px;
+  background: var(--aw-surface-panel);
+}
+
+.aw-thinking-orb-demo__stage {
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.08), transparent 62%),
+    #0a0a0a;
+  color: #f5f5f5;
+}
+
+.aw-thinking-orb-demo__meta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+  align-items: baseline;
+  padding: 14px 16px 16px;
+}
+
+.aw-thinking-orb-demo__meta strong {
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+}
+
+.aw-thinking-orb-demo__meta code {
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-thinking-orb-demo__meta span {
+  grid-column: 1 / -1;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: 1.5;
+}
+
+.aw-thinking-orb-demo__compact {
+  display: grid;
+  gap: 14px;
+  margin: 0 16px 16px;
+  padding: 18px;
+  border: 1px solid var(--aw-border-subtle);
+  border-radius: 16px;
+  background: var(--aw-surface-panel);
+}
+
+.aw-thinking-orb-demo__compact header {
+  display: grid;
+  gap: 4px;
+}
+
+.aw-thinking-orb-demo__compact h3,
+.aw-thinking-orb-demo__compact p {
+  margin: 0;
+}
+
+.aw-thinking-orb-demo__compact h3 {
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+}
+
+.aw-thinking-orb-demo__compact p {
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-thinking-orb-demo__compact-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.aw-thinking-orb-demo__compact-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 38px;
+  padding: 6px 12px 6px 9px;
+  border-radius: 999px;
+  background: #111;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: var(--aw-font-size-sm);
+}
+
+@media (max-width: 900px) {
+  .aw-thinking-orb-demo__featured {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aw-thinking-orb-demo__featured-copy {
+    padding: 0 24px 24px;
+  }
+
+  .aw-thinking-orb-demo__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .aw-thinking-orb-demo__featured-stage {
+    min-height: 200px;
+    padding: 24px 16px;
+  }
+
+  .aw-thinking-orb-demo__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

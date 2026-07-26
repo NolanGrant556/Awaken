@@ -12,6 +12,7 @@ const externalDependencies = [
   "react-markdown",
   "rehype-sanitize",
   "remark-gfm",
+  "thinking-orbs",
 ];
 
 export default defineConfig(({ mode }) => {

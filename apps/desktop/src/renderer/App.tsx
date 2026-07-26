@@ -89,6 +89,7 @@ import { projectPetActivity } from "./pets/pet-activity-projector";
 import {
   projectNarrativeTurnBodySegments,
   contextUsagePanelBottomOffset,
+  projectVisibleNarrativeItems,
   shouldShowAssistantAnswerFooter,
   shouldUseCenterComposer,
   turnMarkerRailHeight,
@@ -1665,6 +1666,11 @@ export function App() {
   const [slashActiveActionId, setSlashActiveActionId] = useState<
     string | undefined
   >();
+  const isBusy =
+    runtimeState.phase === "starting" ||
+    runtimeState.phase === "running" ||
+    runtimeState.phase === "reconnecting" ||
+    runtimeState.phase === "cancelling";
   const visibleNarrativeItems = useMemo<RunNarrativeItem[]>(() => {
     const narrativeItems: RunNarrativeItem[] = [
       ...runtimeState.narrative.committedItems,
@@ -1672,14 +1678,8 @@ export function App() {
         ? [runtimeState.narrative.activeItem]
         : []),
     ];
-    return narrativeItems.filter((item) => item.kind !== "planning");
-  }, [runtimeState.narrative]);
-
-  const isBusy =
-    runtimeState.phase === "starting" ||
-    runtimeState.phase === "running" ||
-    runtimeState.phase === "reconnecting" ||
-    runtimeState.phase === "cancelling";
+    return projectVisibleNarrativeItems({ items: narrativeItems, isBusy });
+  }, [isBusy, runtimeState.narrative]);
   const desktopReady =
     runtimeState.supervisorStatus === "running" && runtimeInfo !== null;
   const desktopStarting =
@@ -4559,8 +4559,15 @@ export function App() {
   }
 
   function renderNarrativeItem(item: RunNarrativeItem, key: string) {
-    if (item.kind === "thinking") {
-      return <ThoughtTrace key={key} text={item.text} status={item.status} />;
+    if (item.kind === "planning" || item.kind === "thinking") {
+      return (
+        <ThoughtTrace
+          key={key}
+          text={item.kind === "planning" ? "" : item.text}
+          status={item.kind === "planning" ? "active" : item.status}
+          theme={appearanceTheme}
+        />
+      );
     }
     if (item.kind === "answer") {
       const showAnswerFooter = shouldShowAssistantAnswerFooter({

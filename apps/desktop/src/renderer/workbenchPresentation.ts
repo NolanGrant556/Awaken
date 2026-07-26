@@ -102,6 +102,20 @@ export function shouldUseCenterComposer({
   return !hasNarrative && !hasRun;
 }
 
+export function projectVisibleNarrativeItems({
+  items,
+  isBusy,
+}: {
+  items: RunNarrativeItem[];
+  isBusy: boolean;
+}): RunNarrativeItem[] {
+  const trailingIndex = items.length - 1;
+  return items.filter(
+    (item, index) =>
+      item.kind !== "planning" || (isBusy && index === trailingIndex),
+  );
+}
+
 export function shouldShowAssistantAnswerFooter({
   status,
   isFinal,

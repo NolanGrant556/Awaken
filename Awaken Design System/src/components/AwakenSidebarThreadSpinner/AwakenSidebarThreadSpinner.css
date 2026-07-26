@@ -1,18 +1,10 @@
 @import "../../tokens/components.css";
 
 .aw-sidebar-thread-spinner {
-  display: inline-block;
+  display: inline-flex;
   width: 14px;
   height: 14px;
   flex: 0 0 14px;
-  border: 2px solid var(--aw-border-main);
-  border-top-color: var(--aw-text-tertiary);
-  border-radius: 999px;
-  animation: spin 900ms linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .aw-sidebar-thread-spinner {
-    animation-duration: 1800ms;
-  }
+  color: var(--aw-text-tertiary);
+  pointer-events: none;
 }

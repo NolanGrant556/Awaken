@@ -304,7 +304,7 @@ export function AwakenSidebarDemo() {
             <header>
               <h4>线程运行指示</h4>
               <code>AwakenSidebarThreadSpinner</code>
-              <p>Desktop 仅在对应线程存在 running 或 cancelling run 时显示。</p>
+              <p>Desktop 仅在对应线程存在 running 或 cancelling run 时显示 14px 方形点阵。</p>
             </header>
             <div className="aw-sidebar-demo__part-canvas aw-sidebar-demo__spinner-row">
               <span>项目附件确认</span>

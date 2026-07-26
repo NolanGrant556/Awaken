@@ -1,97 +1,113 @@
 #!/usr/bin/env python3
-"""将 pptx 转为逐页 JPEG，供 Awaken Read（视觉）自检。"""
+"""严格把 PPTX 转为逐页 JPEG，拒绝旧 PDF/旧页图假成功。"""
 
 from __future__ import annotations
 
-import os
-import platform
+import argparse
+import json
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
+from xml.etree import ElementTree
+
+sys.dont_write_bytecode = True
+
+from office_runtime import run_soffice
 
 
-def find_soffice() -> str | None:
-    for name in ("soffice", "libreoffice"):
-        path = shutil.which(name)
-        if path:
-            return path
-    system = platform.system()
-    if system == "Darwin":
-        mac = Path("/Applications/LibreOffice.app/Contents/MacOS/soffice")
-        if mac.exists():
-            return str(mac)
-    elif system == "Windows":
-        for env_name in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
-            base = os.environ.get(env_name)
-            if not base:
+P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
+
+
+def slide_counts(path: Path) -> tuple[int, int]:
+    with zipfile.ZipFile(path) as package:
+        presentation = ElementTree.fromstring(package.read("ppt/presentation.xml"))
+        total = sum(1 for _ in presentation.iter(f"{{{P_NS}}}sldId"))
+        hidden = 0
+        for name in package.namelist():
+            if not re.fullmatch(r"ppt/slides/slide\d+\.xml", name):
                 continue
-            candidate = Path(base) / "LibreOffice" / "program" / "soffice.exe"
-            if candidate.exists():
-                return str(candidate)
-    return None
+            root = ElementTree.fromstring(package.read(name))
+            if root.attrib.get("show", "1").lower() in ("0", "false"):
+                hidden += 1
+    return total, hidden
+
+
+def numeric_key(path: Path) -> tuple[int, str]:
+    match = re.search(r"(\d+)$", path.stem)
+    return (int(match.group(1)) if match else 0, path.name)
+
+
+def render(input_path: Path, output_dir: Path, dpi: int, timeout: int) -> dict:
+    if not input_path.is_file():
+        raise FileNotFoundError(f"输入文件不存在: {input_path}")
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise ValueError(f"预览目录不是空目录，请为本轮 QA 使用新目录: {output_dir}")
+    pdftoppm = shutil.which("pdftoppm")
+    if not pdftoppm:
+        raise FileNotFoundError("未找到 pdftoppm（Poppler）")
+    declared, hidden = slide_counts(input_path)
+    if declared == 0:
+        raise ValueError("演示文稿没有注册任何 slide")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="awaken-ppt-render-", ignore_cleanup_errors=True) as directory:
+        temporary = Path(directory)
+        result = run_soffice(
+            ["--convert-to", "pdf", "--outdir", str(temporary), str(input_path.resolve())],
+            timeout=timeout,
+        )
+        pdf = temporary / f"{input_path.stem}.pdf"
+        if result.returncode != 0 or not pdf.is_file() or pdf.stat().st_size == 0:
+            detail = (result.stderr or result.stdout or "LibreOffice 未生成目标 PDF").strip()
+            raise RuntimeError(detail)
+        image_result = subprocess.run(
+            [pdftoppm, "-jpeg", "-r", str(dpi), str(pdf), str(temporary / "slide")],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        if image_result.returncode != 0:
+            raise RuntimeError((image_result.stderr or image_result.stdout or "pdftoppm 失败").strip())
+        temporary_images = sorted(temporary.glob("slide-*.jpg"), key=numeric_key)
+        visible = declared - hidden
+        if len(temporary_images) not in {declared, visible}:
+            raise RuntimeError(
+                f"渲染页数与 PPTX 注册不一致: declared={declared}, hidden={hidden}, rendered={len(temporary_images)}"
+            )
+        images: list[str] = []
+        for index, source in enumerate(temporary_images, start=1):
+            destination = output_dir / f"slide-{index:03d}.jpg"
+            shutil.copy2(source, destination)
+            images.append(str(destination.resolve()))
+    return {
+        "status": "success",
+        "declared_slides": declared,
+        "hidden_slides": hidden,
+        "rendered_slides": len(images),
+        "images": images,
+    }
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        print("usage: render_slides.py <deck.pptx> [outdir] [dpi]", file=sys.stderr)
-        return 2
-
-    src = Path(sys.argv[1]).expanduser().resolve()
-    outdir = Path(sys.argv[2]).expanduser().resolve() if len(sys.argv) > 2 else src.parent / "preview"
-    dpi = sys.argv[3] if len(sys.argv) > 3 else "150"
-
-    if not src.exists():
-        print(f"not found: {src}", file=sys.stderr)
+    parser = argparse.ArgumentParser(description="渲染 PPTX 供逐页视觉 QA")
+    parser.add_argument("input", type=Path)
+    parser.add_argument("output_dir", type=Path)
+    parser.add_argument("--dpi", type=int, default=150)
+    parser.add_argument("--timeout", type=int, default=180)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    try:
+        result = render(args.input.resolve(), args.output_dir.resolve(), args.dpi, args.timeout)
+        print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else "\n".join(result["images"]))
+        return 0
+    except Exception as error:
+        result = {"status": "failed", "error": str(error)}
+        print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else result["error"])
         return 1
-
-    soffice = find_soffice()
-    pdftoppm = shutil.which("pdftoppm")
-    if not soffice:
-        print("LibreOffice (soffice) not found", file=sys.stderr)
-        return 1
-    if not pdftoppm:
-        print("pdftoppm (poppler) not found; install poppler-utils / brew install poppler", file=sys.stderr)
-        return 1
-
-    outdir.mkdir(parents=True, exist_ok=True)
-    conv = subprocess.run(
-        [
-            soffice,
-            "--headless",
-            "--nologo",
-            "--convert-to",
-            "pdf",
-            "--outdir",
-            str(outdir),
-            str(src),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-    pdfs = list(outdir.glob("*.pdf"))
-    if not pdfs:
-        print(conv.stderr or "pdf conversion failed", file=sys.stderr)
-        return 1
-
-    pdf = pdfs[0]
-    prefix = outdir / "slide"
-    render = subprocess.run(
-        [pdftoppm, "-jpeg", "-r", str(dpi), str(pdf), str(prefix)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    if render.returncode != 0:
-        print(render.stderr or "pdftoppm failed", file=sys.stderr)
-        return 1
-
-    slides = sorted(outdir.glob("slide*.jpg"))
-    print(f"rendered {len(slides)} slides into {outdir}")
-    for p in slides:
-        print(p)
-    return 0
 
 
 if __name__ == "__main__":

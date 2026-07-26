@@ -1,130 +1,149 @@
 ---
 name: excel
-version: 1.0.0
-description: 创建、阅读、编辑或整理电子表格（.xlsx / .xlsm / .csv / .tsv）。适用于新建工作簿、加列、公式、格式、图表、清洗脏表、财务模型与表格互转。用户提到 Excel、xlsx、表格文件时使用。主交付物必须是表格文件；不要在交付物是 Word/PPT/纯脚本时误用。
-when_to_use: 需要产出或修改 Excel/CSV 时；需要用公式驱动的可更新模型时；需要清洗或重组表格数据时。
+version: 2.0.0
+description: 创建、读取、编辑、清洗和校验电子表格（.xlsx/.xlsm/.xltx/.csv/.tsv）。只要表格文件是主要输入或输出，就应使用本 Skill；包括公式、格式、图表、财务模型、脏表整理、模板填充和格式转换。若表格只是输入而最终还要交付 Word/PPT/PDF，应再加载对应的最小 Skill 集合。
+when_to_use: 用户提到 Excel、xlsx、xlsm、xltx、csv、tsv、工作簿、公式、财务模型、表格清洗或需要产出可继续编辑的表格文件时。
 user-invocable: true
 ---
 
 # Awaken Excel Skill
 
-用 **Bash + pandas/openpyxl** 处理表格，公式用 Excel 公式而非 Python 硬编码结果；交付前用 LibreOffice 重算并经 **`artifact_publish`** 发布。
+本 Skill 使用 `Bash + openpyxl/pandas + LibreOffice` 完成电子表格工作。缺少依赖时先探测，再通过 Awaken 现有安装能力或 `Bash` 恢复。公式工作簿必须重算、检查错误并进行语义抽查，最终通过 `artifact_publish` 发布。
 
-## Awaken 工具约定
+## 先判断任务路线
 
-| 步骤 | 工具 |
+| 任务 | 首选路线 |
 | --- | --- |
-| 跑 Python / LibreOffice | `Bash` |
-| 安装 LibreOffice 等系统级依赖 | `dependency_install`（优先），或 `Bash` |
-| 读脚本、抽查 CSV 文本 | `Read` |
-| 改生成脚本 | `Edit` / `Write` |
-| 找数据文件 | `Glob` / `Grep` |
-| 最终交付 | **`artifact_publish`** |
+| 快速阅读/摘要 | `markitdown` 或 pandas；需要单元格坐标时用 openpyxl |
+| 批量清洗、聚合、格式转换 | pandas |
+| 公式、样式、多 sheet、图表、批注 | openpyxl |
+| 阅读公式模型 | 同一文件分别以公式模式和 `data_only=True` 加载 |
+| 编辑现有模板 | 先检查原格式、输入单元格、宏和外链，再只修改目标位置 |
+| 含公式的最终文件 | `inspect_workbook.py` → `recalc.py` → 再次 inspect |
 
-**重要**：最终表格文件必须生成在任务工作区（output roots）内，`artifact_publish` 不接受工作区外的路径。
+## Awaken 工具与路径合同
 
-## 依赖
+| 动作 | 工具 |
+| --- | --- |
+| Python、LibreOffice、转换和校验 | `Bash` |
+| 安装依赖 | 优先执行 Awaken 提供的 `dependency_install` 计划，否则用 `Bash` |
+| 读取脚本、CSV/TSV 和校验 JSON | `Read` |
+| 修改数据处理脚本 | `Edit` / `Write` |
+| 查找数据文件 | `Glob` / `Grep` |
+| 发布最终交付物 | `artifact_publish`（必做） |
+
+- 包内脚本一律通过 `${AWAKEN_SKILL_DIR}` 的绝对路径调用。
+- 最终表格必须位于当前任务工作区的 output root。
+- 编辑用户原文件时默认输出新文件，不覆盖原件。
+- Skill 已加载不代表 Python 包或 LibreOffice 已存在；以真实探测和执行结果为准。
+
+## 第一步：依赖探测与恢复
 
 ```bash
-# Python 库：新 macOS/Homebrew Python 受 PEP 668 保护。优先顺序：
-#   1) uv pip install openpyxl pandas
-#   2) python3 -m venv .venv && .venv/bin/pip install openpyxl pandas
-#   3) pip3 install --user --break-system-packages openpyxl pandas
-python3 -c "import openpyxl, pandas" 2>/dev/null || echo "need openpyxl pandas"
-
-# 有公式时需要重算：缺 LibreOffice 优先用 dependency_install 安装
-which soffice || which libreoffice
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --json
 ```
 
-Windows 上把 `python3` / `pip3` 换成 `python` / `pip`（或 `py -m pip`）。
+根据 JSON 只安装缺失项：
 
-## 库怎么选
+- `openpyxl`：公式、样式、多表、图表和精确单元格操作；
+- `pandas`：批量数据清洗和分析；
+- `markitdown[xlsx]`：快速文本浏览；
+- LibreOffice：公式重算。
 
-| 场景 | 库 |
-| --- | --- |
-| 分析、清洗、简单导出 | **pandas** |
-| 公式、样式、多表、图表 | **openpyxl** |
+macOS PEP 668 环境优先使用工作区 `.venv` 或 `uv`；Windows 可使用 `py -m pip`。安装完成后重新运行 doctor，不根据安装命令退出码之外的猜测继续。
 
-## 铁律：用公式，不要硬编码计算结果
-
-错误：在 Python 里 `sum()` 再把数字写进单元格。
-正确：写入 `=SUM(B2:B9)`，再用重算脚本刷新缓存值。
-
-## 标准流程
-
-1. 选库 → 创建或 `load_workbook`。
-2. 写入数据、公式、格式。
-3. `wb.save("output.xlsx")`。
-4. **有公式则必须重算**：
+## 编辑前检查（必须）
 
 ```bash
-python3 "${AWAKEN_SKILL_DIR}/scripts/recalc.py" output.xlsx
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/inspect_workbook.py" input.xlsx --json
 ```
 
-注意：重算脚本会就地覆写目标文件（LibreOffice 往返），图表等 openpyxl 本就不支持的对象可能丢失；要保留原件先自行备份。
+先确认：
 
-5. 根据脚本 JSON 修 `#REF!` / `#DIV/0!` / `#VALUE!` / `#NAME?`。
-6. 抽查：`python3 -c "import pandas as pd; print(pd.read_excel('output.xlsx').head())"`。
-7. **`artifact_publish`**。
+- sheet 名称、隐藏状态、使用范围；
+- 公式数量、缓存缺失和已有错误；
+- 是否含 VBA 宏；
+- 是否含外部工作簿链接；
+- 是否使用本运行环境无法可靠验证的动态数组/新函数；
+- 原模板如何标识输入单元格、公式、跨表引用和外链。
 
-## 新建示例（openpyxl）
+`.xlsm` 使用 openpyxl 编辑时必须 `keep_vba=True`；即便如此也要认识到 openpyxl 不能完整维护所有 Excel 扩展。含宏和复杂外链的文件不能在没有备份与明确风险说明时保存或重算。
 
-```python
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+## 每个输出都必须满足
 
-wb = Workbook()
-ws = wb.active
-ws.title = "汇总"
-ws["A1"] = "项目"
-ws["B1"] = "金额"
-ws["A1"].font = Font(bold=True)
-ws.append(["销售收入", 100])
-ws.append(["成本", 40])
-ws["A4"] = "合计"
-ws["B4"] = "=SUM(B2:B3)"
-ws.column_dimensions["A"].width = 16
-ws.column_dimensions["B"].width = 12
-wb.save("output.xlsx")
+- 用户指定的 sheet 名、列名、顺序、公式和格式优先于本 Skill 的默认建议；
+- 需要随输入变化的结果使用 Excel 公式，不写死 Python 计算值；
+- 关键假设与硬编码数字在工作簿可见位置写明来源或说明；
+- 新建“供人填写”的模板必须有简短图例和一行真实格式示例；编辑已有文件时不得擅自插入示例行；
+- 编辑已有文件时匹配其样式和输入约定，不把自己的财务配色强加给用户模板；
+- 公式错误为零；但“零错误”仍不能证明引用范围和业务逻辑正确。
+
+## openpyxl 铁律
+
+- `data_only=True` 只读缓存值，公式字符串已经消失；这个 workbook 绝不能保存；
+- 同时读取公式和值需要加载两次；
+- 刚由 openpyxl 写出的公式没有缓存值，必须重算后再用 `data_only=True` 检查；
+- merged range 只能写左上角 anchor；其他 `MergedCell` 是只读的；
+- sheet 名含空格时，跨表引用必须加单引号，例如 `='Assumptions Inputs'!$B$5`；
+- `.xlsm` 加载时使用 `keep_vba=True`，并在输出后确认宏部件仍存在；
+- 外链、图表、条件格式、数据验证、命名区域和 Excel 扩展需要单独复核。
+
+按需读取 `references/formulas.md`、`references/editing.md` 和 `references/financial-model.md`。
+
+## 重算（含公式时必须）
+
+对 Agent 新生成的 `output.xlsx`：
+
+```bash
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/recalc.py" output.xlsx --json
 ```
 
-## 编辑已有
+对用户原文件的编辑结果，显式输出新路径：
 
-```python
-from openpyxl import load_workbook
-
-wb = load_workbook("existing.xlsx")
-ws = wb.active
-ws["A1"] = "新标题"
-wb.save("existing.xlsx")
+```bash
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/recalc.py" edited-before-recalc.xlsx --output final.xlsx --json
 ```
 
-注意：`data_only=True` 读到的是缓存值；若再保存会**毁掉公式**。重算用 `scripts/recalc.py`，不要用 data_only 回写。
+脚本使用独立 LibreOffice profile，在临时副本上重算；只有 LibreOffice 真正写回后才原子替换目标。以下情况必须失败而不是假成功：
 
-## 财务模型习惯（可按用户模板覆盖）
+- LibreOffice 未找到、非零退出或超时；
+- 文件包含外部工作簿链接；
+- 有公式但文件没有被真正写回；
+- 输出无法再由 openpyxl 读取。
 
-- 输入：蓝色字体；公式：黑色；跨表引用：绿色（若项目有惯例则从其惯例）。
-- 关键假设写独立单元格，公式引用假设，禁止魔法数字。
-- 年份作文本；百分比 `0.0%`；负数用括号格式。
-- 硬编码来源在旁注或批注写明出处。
+若 JSON `status=errors_found`，根据 `error_summary` 修复后再次重算。不能只看进程是否启动或 Bash 是否打印了文件路径。
 
-## 阅读分析（pandas）
+## 公式语义抽查
 
-```python
-import pandas as pd
-df = pd.read_excel("file.xlsx")
-df.head(); df.info(); df.describe()
-```
+重算成功后：
 
-## 交付检查清单
+1. 抽查 2–3 个关键公式的输入、范围、绝对/相对引用和结果；
+2. 检查横向/纵向复制的公式是否连续一致；
+3. 检查除数为零、空值、日期边界和单位换算；
+4. 检查总计是否遗漏最后一行或包含表头；
+5. 再运行 `inspect_workbook.py`，确认缓存和错误状态。
 
-- [ ] 无公式错误
-- [ ] 计算用公式而非写死数字（除非用户只要静态表）
-- [ ] 列宽/表头可读，中文不乱码
-- [ ] 最终文件位于任务工作区内
-- [ ] 已 **`artifact_publish`**
+## 财务模型默认习惯
 
-## 明确不做
+仅在用户或现有模板没有其他规则时使用：
 
-- 不把 Google Sheets API 或数据库管道当成默认路径。
-- 缺 LibreOffice 时不假装已重算：如实报告并给出安装路径。
+- 蓝色字体：硬编码输入和情景参数；黑色：公式；绿色：同工作簿跨表引用；红色：外部文件引用；黄色填充：需要用户填写的关键假设；
+- 金额单位写在表头；负数用括号；零显示为 `-`；百分比以小数存储；估值倍数显示 `0.0x`；年份存为文本；
+- 每个假设放在独立、有标签的单元格，公式引用假设，不在公式中散落魔法数字；
+- 各预测期公式保持一致，异常的单个手工覆盖必须明确标注。
+
+## 发布前检查
+
+- [ ] sheet、列、公式和格式符合用户要求
+- [ ] 没有公式错误，缓存已刷新
+- [ ] 已抽查关键公式语义，不只检查 `#REF!`
+- [ ] 宏、外链和高级特性的风险已处理或明确说明
+- [ ] 表头、列宽、冻结窗格、数字格式和中文显示可读
+- [ ] 最终文件位于工作区 output root
+- [ ] 已调用 `artifact_publish`
+
+## 明确边界
+
+- 当前 `recalc.py` 只接受 `.xlsx`，避免把宏或模板转换成普通工作簿时静默丢失能力。
+- `.xlsm/.xltx` 可以作为输入进行受控分析；需要正式发布时根据用户要求和 `artifact_publish` 当前支持类型输出 `.xlsx/.xls/.csv/.tsv`。
+- Google Sheets API、数据库管道和在线协作权限不是本 Skill 的默认执行路线。

@@ -1,160 +1,135 @@
 ---
 name: word
-version: 1.0.0
-description: 创建、阅读、编辑或处理 Word 文档（.docx）。适用于报告、备忘录、函件、模板、目录/页眉页脚/页码、表格与图片排版，以及从现有 .docx 提取或重组内容。用户提到 Word、docx、报告文档时使用。不要用于 PDF、表格或演示文稿主交付物。
-when_to_use: 需要生成或修改 .docx 专业文档时；需要从 Word 提取正文/修订痕迹时；需要把草稿整理成可交付 Word 文件时。
+version: 2.0.0
+description: 创建、读取、编辑和校验 Word 文档（.docx）或 Word 模板（.dotx）。只要 .docx/.dotx 是主要输入或输出，就应使用本 Skill；包括专业报告、备忘录、函件、目录、页眉页脚、表格、图片、批注、修订和高保真模板改稿。若 Word 只是输入而最终还要交付 Excel/PPT/PDF，应再加载对应的最小 Skill 集合。
+when_to_use: 用户提到 Word、docx、dotx、报告文档、修订、批注、套用 Word 模板，或需要把内容整理成可交付 Word 文件时。
 user-invocable: true
 ---
 
 # Awaken Word Skill
 
-用 **Bash + 脚本/库** 生成与编辑 `.docx`，再经 **`artifact_publish`** 发布为 Workbench 最终交付物卡片。
+本 Skill 使用 Awaken 现有的 `Bash`、文件工具和本机 Office 依赖完成 Word 工作，不注册新的基础工具。缺少依赖时先探测，再使用 `dependency_install` 返回的可用计划或 `Bash` 安装；文件验证完成后必须调用 `artifact_publish`。
 
-## Awaken 工具约定
+## 先判断任务路线
 
-| 步骤 | 工具 |
+| 任务 | 首选路线 |
 | --- | --- |
-| 跑脚本、pandoc/markitdown、LibreOffice 转换 | `Bash` |
-| 安装 LibreOffice / Poppler 等系统级依赖 | `dependency_install`（优先），或 `Bash` |
-| 读文本/脚本、渲图后的预览图 | `Read` |
-| 改脚本或中间 Markdown | `Edit` / `Write` |
-| 定位文件 | `Glob` / `Grep` |
-| 最终交付 | **`artifact_publish`**（必做） |
+| 阅读、摘录、总结 | `pandoc` 或 `markitdown`；需要精确定位时再安全解包 OOXML |
+| 从零创建 | Node `docx`；简单场景也可用 `python-docx` |
+| 修改普通文档 | 能证明目标结构简单时使用 `python-docx`，修改后仍需结构与视觉 QA |
+| 高保真模板改稿 | 安全解包 → 只改目标 XML → 重新打包 → 与原件做基线校验 |
+| 批注、修订 | 使用包内专用脚本或 OOXML 路线，不用 Pandoc 往返冒充高保真修改 |
+| 旧 `.doc` | 先用 LibreOffice 转换为 `.docx`，再按上述路线处理 |
 
-包内文本资源用 `skill_resource_read`；二进制资产用 `Read` / `Bash`。
+只要输入文件包含复杂页眉页脚、文本框、批注、修订、域、目录、嵌入对象或自定义 XML，就不要默认用 `python-docx` 整体读写；它可能丢弃未建模内容。
 
-**重要**：最终 `.docx` 必须生成在任务工作区（output roots）内，`artifact_publish` 不接受工作区外（如 /tmp）的路径。
+## Awaken 工具与路径合同
 
-## 依赖
+| 动作 | 工具 |
+| --- | --- |
+| 运行脚本、Node/Python、Pandoc、LibreOffice、Poppler | `Bash` |
+| 安装缺失依赖 | 优先执行 Awaken 提供的 `dependency_install` 计划，否则用 `Bash` |
+| 读取文本、脚本和渲染页图 | `Read` |
+| 修改生成脚本、中间 Markdown、已解包 XML | `Edit` / `Write` |
+| 查找目标文件和文本 | `Glob` / `Grep` |
+| 发布最终交付物 | `artifact_publish`（必做） |
 
-首次使用前用 `Bash` 检查并按需安装：
+- 包内脚本一律通过 `${AWAKEN_SKILL_DIR}` 的绝对路径调用。
+- 最终 `.docx` 必须位于当前任务工作区的 output root 内。
+- 临时解包和预览不得覆盖用户原文件；默认写到新的输出路径。
+- 对外部 DOCX 解包时必须使用 `scripts/ooxml_package.py`，不要直接信任压缩包路径或符号链接。
+
+## 第一步：依赖探测与恢复
 
 ```bash
-# Node 库：在任务工作目录本地安装（不要 -g，全局包 require 不到）
-npm install docx
-
-# Python 库：新 macOS/Homebrew Python 受 PEP 668 保护，直接 pip3 install 会报
-# externally-managed-environment。优先顺序：
-#   1) uv pip install "markitdown[docx]"        （本机有 uv 时）
-#   2) python3 -m venv .venv && .venv/bin/pip install "markitdown[docx]"
-#   3) pip3 install --user --break-system-packages "markitdown[docx]"
-python3 -c "import markitdown" 2>/dev/null || echo "need markitdown"
-
-# 转换与修订处理：pandoc；预览（可选）：LibreOffice + Poppler。
-# 缺失时优先用 dependency_install 工具安装
-which pandoc
-which soffice || which libreoffice
-which pdftoppm
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --json
 ```
 
-Windows 上把 `python3` / `pip3` 换成 `python` / `pip`（或 `py -m pip`）。
+根据 JSON 只安装缺失项。常用依赖：
 
-## 快速对照
+- 创建：`docx`（Node）或 `python-docx`；
+- 阅读：`pandoc`、`markitdown[docx]`；
+- OOXML：`lxml`；
+- 转换与视觉 QA：LibreOffice、Poppler (`pdftoppm`)。
 
-| 任务 | 做法 |
-| --- | --- |
-| 阅读/分析 | `python3 -m markitdown 文件.docx` 或 `pandoc 文件.docx -t markdown` |
-| 新建 | `docx`（Node）或 `python-docx` |
-| 编辑已有 | 优先 `python-docx` 结构化改；复杂修订再考虑解包 XML |
-| 旧 `.doc` → `.docx` | `soffice --headless --convert-to docx 文件.doc` |
-| 接受全部修订 | `pandoc --track-changes=accept`（见下） |
-| 预览页图 | LibreOffice 转 PDF → `pdftoppm` → `Read` 看图 |
-| 交付 | `artifact_publish` |
+macOS/Homebrew Python 遇到 PEP 668 时优先使用工作区 `.venv` 或 `uv`；不要反复执行同一条已失败的安装命令。Windows 可使用 `py -m pip`，命令名以 doctor 的真实探测结果为准。
 
-## 新建文档（推荐 docx-js）
+## 创建新文档
 
-1. `Bash`：任务目录内 `npm install docx`。
-2. `Write` 写出生成脚本（如 `build_doc.js`）。
-3. `Bash`：`node build_doc.js` 生成 `.docx`。
-4. `Bash`：`python3 -m markitdown output.docx` 抽查正文。
-5. 需要版式确认时转图并用 `Read` 检查。
-6. **`artifact_publish`**，路径指向工作区内的最终 `.docx`。
+创建前按需读取 `references/creation.md`。至少遵守：
 
-要点：
+- 明确页面尺寸和页边距；
+- 标题使用内置 Heading/outline level，保证目录可用；
+- 列表使用真正的 numbering，不手写 `•`；
+- 表格同时设置表宽、列宽和单元格宽度，优先使用 DXA；
+- `ImageRun` 明确图片类型；分页符必须放在段落内；
+- 不用换行符拼接多个段落；不使用空表格冒充装饰线。
 
-- **页面尺寸写死**：国内常用 A4，美式信纸需显式设置。
-- **列表不要手写 `•`**：用 numbering / LevelFormat。
-- 标题用内置 Heading 样式（便于目录）。
-- 字体优先系统常见中西文字体（如 `PingFang SC` / `Microsoft YaHei` / `Arial`），避免缺字。
+生成后先抽查文本，再执行结构和视觉 QA。
 
-最小示例：
+## 编辑已有文档
 
-```javascript
-const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require("docx");
-const fs = require("fs");
-
-const doc = new Document({
-  styles: {
-    default: { document: { run: { font: "Arial", size: 22 } } },
-  },
-  sections: [{
-    properties: {
-      page: {
-        size: { width: 11906, height: 16838 }, // A4
-        margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
-      },
-    },
-    children: [
-      new Paragraph({
-        heading: HeadingLevel.HEADING_1,
-        children: [new TextRun("报告标题")],
-      }),
-      new Paragraph({ children: [new TextRun("正文段落。")] }),
-    ],
-  }],
-});
-
-Packer.toBuffer(doc).then((buf) => fs.writeFileSync("output.docx", buf));
-```
-
-## 备选：python-docx 新建/编辑
-
-```python
-from docx import Document
-from docx.shared import Pt, Cm
-
-doc = Document()
-doc.add_heading("报告标题", level=1)
-p = doc.add_paragraph("正文。")
-doc.save("output.docx")
-```
-
-编辑已有文件用 `Document("existing.docx")`，改段落后再 `save`。
-
-## 阅读与修订痕迹
+高保真路线：
 
 ```bash
-pandoc --track-changes=all document.docx -t markdown -o out.md
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/ooxml_package.py" unpack input.docx ./docx-unpacked
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/merge_runs.py" ./docx-unpacked
+# 使用 Read/Edit 精确修改 ./docx-unpacked/word/*.xml
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/ooxml_package.py" pack ./docx-unpacked output.docx
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/validate_docx.py" output.docx --original input.docx --json
+```
+
+`merge_runs.py` 只合并格式完全一致、且只包含普通文本的相邻 run；含域、超链接、批注标记、制表符、换行、绘图或修订的 run 不会合并。更完整的判断见 `references/editing.md`。
+
+接受全部修订时输出新文件，不覆盖原件：
+
+```bash
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/accept_changes.py" input.docx accepted.docx --json
+```
+
+超时、LibreOffice 未写回、输出仍含修订节点都必须视为失败。
+
+## 三层 QA（必须）
+
+### 1. 内容 QA
+
+```bash
+pandoc output.docx -t markdown -o output.check.md
 # 或
-python3 -m markitdown document.docx
+python3 -m markitdown output.docx
 ```
 
-接受全部修订：
+检查缺段、错序、占位符、乱码、错误链接、空白项目符号和用户要求的关键字段。
+
+### 2. 结构 QA
 
 ```bash
-pandoc --track-changes=accept input.docx -o output.docx
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/validate_docx.py" output.docx --json
 ```
 
-**保真度边界**：pandoc 的 docx→docx 会经内部 AST 重建文档，页眉页脚、文本框、部分样式等版式信息会丢失。该路线适合"接受修订后继续加工内容"；若用户要求"仅接受修订、版式一字不动"，应改走解包 OOXML 处理 `w:ins` / `w:del` 节点的高级路径，或明确建议用户在 Word/LibreOffice 中人工接受。
+模板改稿必须增加 `--original 原文件.docx`。脚本检查 ZIP 路径、必需部件、XML、关系目标、批注引用和修订元数据；它不把“结构可打开”冒充“内容正确”。
 
-## 视觉抽查
+### 3. 视觉 QA
+
+每轮使用一个新的预览目录：
 
 ```bash
-soffice --headless --convert-to pdf --outdir . output.docx
-pdftoppm -jpeg -r 120 output.pdf page
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/render_docx.py" output.docx ./preview-word-1 --json
 ```
 
-然后对 `page-1.jpg` 等调用 Awaken **`Read`**（需视觉能力模型）。检查：溢出、空白过多、中文乱码、页眉页脚碰撞。
+对返回的每张页图调用 `Read`，逐页检查：文字溢出、分页孤行、表格跨页、中文字体回退、页眉页脚碰撞、图片变形、目录与页码、异常空白。发现问题后修复，使用新的预览目录重新生成并复核受影响页。
 
-## 交付检查清单
+## 发布前检查
 
-- [ ] 正文无占位符（lorem / TODO / xxxx）
-- [ ] 标题层级合理，中英文混排可读
-- [ ] 需要时已做预览图抽查
-- [ ] 最终文件位于任务工作区内
-- [ ] 已调用 **`artifact_publish`**，Workbench 出现可点击打开的交付物卡片
+- [ ] 用户要求的正文、表格、图片、修订或批注都已完成
+- [ ] 没有 lorem、TODO、xxxx、待填等占位内容
+- [ ] 结构校验通过
+- [ ] 已逐页视觉检查；无法视觉检查时明确说明，不能伪称通过
+- [ ] 最终文件位于工作区 output root
+- [ ] 已调用 `artifact_publish`，Workbench 出现可点击交付物卡片
 
-## 明确不做
+## 明确边界
 
-- 不伪造「已发布交付物」：只写文件不够，必须 `artifact_publish`。
-- 不假装完成 pandoc/LibreOffice 不可用时的转换：缺依赖先安装或如实说明。
+- `.dotx` 可以作为输入模板，但当前 `artifact_publish` 的正式 Word 交付类型是 `.doc/.docx`；需要发布时输出 `.docx`。
+- PDF 主交付物交给 `pdf` 或用户明确选择的其他 PDF Skill；本 Skill 只负责 Word 部分。
+- 结构校验、LibreOffice 可打开和视觉预览都不能替代业务事实核对。

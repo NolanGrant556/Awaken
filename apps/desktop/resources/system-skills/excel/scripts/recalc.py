@@ -1,141 +1,164 @@
 #!/usr/bin/env python3
-"""用 LibreOffice 重算 xlsx 公式，并扫描常见错误单元格。输出 JSON。
-
-注意：会就地覆写目标文件（LibreOffice 往返转换），图表等 openpyxl
-不支持的对象可能丢失；需要保留原件请先自行备份。
-"""
+"""使用独立 LibreOffice profile 重算 XLSX，并阻止未写回却报告成功。"""
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import os
-import platform
 import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
+from collections import Counter
 from pathlib import Path
 
-ERROR_MARKERS = ("#REF!", "#DIV/0!", "#VALUE!", "#N/A", "#NAME?", "#NULL!", "#NUM!")
+sys.dont_write_bytecode = True
+
+from openpyxl import load_workbook
+
+from office_runtime import find_soffice, office_env
 
 
-def find_soffice() -> str | None:
-    for name in ("soffice", "libreoffice"):
-        path = shutil.which(name)
-        if path:
-            return path
-    system = platform.system()
-    if system == "Darwin":
-        mac = Path("/Applications/LibreOffice.app/Contents/MacOS/soffice")
-        if mac.exists():
-            return str(mac)
-    elif system == "Windows":
-        for env_name in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
-            base = os.environ.get(env_name)
-            if not base:
-                continue
-            candidate = Path(base) / "LibreOffice" / "program" / "soffice.exe"
-            if candidate.exists():
-                return str(candidate)
-    return None
+ERROR_VALUES = {"#REF!", "#DIV/0!", "#VALUE!", "#N/A", "#NAME?", "#NULL!", "#NUM!"}
+MACRO = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE script:module PUBLIC "-//OpenOffice.org//DTD OfficeDocument 1.0//EN" "module.dtd">
+<script:module xmlns:script="http://openoffice.org/2000/script" script:name="Module1" script:language="StarBasic">
+Sub AwakenRecalculateAndSave()
+  ThisComponent.calculateAll()
+  ThisComponent.store()
+  ThisComponent.close(True)
+End Sub
+</script:module>
+"""
 
 
-def scan_errors(path: Path) -> dict:
-    try:
-        from openpyxl import load_workbook
-    except ImportError:
-        return {"warning": "openpyxl not installed; skipped error scan"}
+def digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
-    wb = load_workbook(path, data_only=True)
-    summary: dict[str, dict] = {}
-    formula_wb = load_workbook(path, data_only=False)
-    total_formulas = 0
-    for sheet in formula_wb.worksheets:
+
+def workbook_risks(path: Path) -> tuple[int, list[str]]:
+    with zipfile.ZipFile(path) as package:
+        external = sorted(name for name in package.namelist() if name.startswith("xl/externalLinks/") and name.endswith(".xml"))
+    workbook = load_workbook(path, data_only=False, read_only=False)
+    formulas = 0
+    for sheet in workbook.worksheets:
         for row in sheet.iter_rows():
             for cell in row:
                 if isinstance(cell.value, str) and cell.value.startswith("="):
-                    total_formulas += 1
+                    formulas += 1
+    workbook.close()
+    return formulas, external
 
-    total_errors = 0
-    for sheet in wb.worksheets:
+
+def scan_errors(path: Path) -> dict:
+    values = load_workbook(path, data_only=True, read_only=False)
+    formulas = load_workbook(path, data_only=False, read_only=False)
+    locations: list[str] = []
+    formula_count = 0
+    for sheet in formulas.worksheets:
         for row in sheet.iter_rows():
             for cell in row:
-                value = cell.value
-                if isinstance(value, str) and value in ERROR_MARKERS:
-                    total_errors += 1
-                    bucket = summary.setdefault(value, {"count": 0, "locations": []})
-                    bucket["count"] += 1
-                    if len(bucket["locations"]) < 50:
-                        bucket["locations"].append(f"{sheet.title}!{cell.coordinate}")
+                if isinstance(cell.value, str) and cell.value.startswith("="):
+                    formula_count += 1
+    for sheet in values.worksheets:
+        for row in sheet.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and cell.value in ERROR_VALUES:
+                    locations.append(f"{sheet.title}!{cell.coordinate}:{cell.value}")
+    values.close()
+    formulas.close()
+    counts = Counter(item.rsplit(":", 1)[1] for item in locations)
+    return {
+        "status": "success" if not locations else "errors_found",
+        "total_formulas": formula_count,
+        "total_errors": len(locations),
+        "error_summary": dict(counts),
+        "error_locations": locations[:200],
+        "error_locations_truncated": max(0, len(locations) - 200),
+    }
 
-    status = "errors_found" if total_errors else "success"
-    out = {"status": status, "total_errors": total_errors, "total_formulas": total_formulas}
-    if summary:
-        out["error_summary"] = summary
-    return out
+
+def recalculate(input_path: Path, output_path: Path, timeout: int) -> dict:
+    if input_path.suffix.lower() != ".xlsx":
+        raise ValueError("recalc.py 只接受 .xlsx；宏和模板文件需要专门路线")
+    if not input_path.is_file():
+        raise FileNotFoundError(f"输入文件不存在: {input_path}")
+    formulas, external = workbook_risks(input_path)
+    if external:
+        raise ValueError(
+            "工作簿包含外部工作簿链接，LibreOffice 重算可能破坏链接和缓存；已拒绝。"
+            f" parts={external[:20]}"
+        )
+    executable = find_soffice()
+    if executable is None:
+        raise FileNotFoundError("未找到 LibreOffice")
+    with tempfile.TemporaryDirectory(prefix="awaken-excel-recalc-", ignore_cleanup_errors=True) as directory:
+        root = Path(directory)
+        profile = root / "profile"
+        working = root / "working.xlsx"
+        shutil.copy2(input_path, working)
+        init = subprocess.run(
+            [str(executable), "--headless", "--terminate_after_init", f"-env:UserInstallation={profile.resolve().as_uri()}"],
+            capture_output=True,
+            text=True,
+            timeout=min(timeout, 30),
+            check=False,
+            env=office_env(),
+        )
+        if init.returncode != 0:
+            raise RuntimeError((init.stderr or init.stdout or "LibreOffice profile 初始化失败").strip())
+        macro_dir = profile / "user" / "basic" / "Standard"
+        macro_dir.mkdir(parents=True, exist_ok=True)
+        (macro_dir / "Module1.xba").write_text(MACRO, encoding="utf-8")
+        before_hash = digest(working)
+        command = [
+            str(executable),
+            "--headless",
+            "--nologo",
+            "--norestore",
+            f"-env:UserInstallation={profile.resolve().as_uri()}",
+            "vnd.sun.star.script:Standard.Module1.AwakenRecalculateAndSave?language=Basic&location=application",
+            str(working.resolve()),
+        ]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False, env=office_env())
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError(f"LibreOffice 在 {timeout}s 后超时，工作簿没有被确认重算") from error
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout or f"LibreOffice 退出码 {result.returncode}").strip())
+        after_hash = digest(working)
+        if formulas and before_hash == after_hash:
+            raise RuntimeError("工作簿包含公式，但 LibreOffice 没有真正写回文件")
+        scan = scan_errors(working)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = output_path.with_name(f".{output_path.name}.awaken-tmp")
+        if temporary.exists():
+            raise RuntimeError(f"临时输出已存在: {temporary}")
+        shutil.copy2(working, temporary)
+        os.replace(temporary, output_path)
+    return {**scan, "output": str(output_path), "rewritten": before_hash != after_hash}
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        print(json.dumps({"error": "usage: recalc.py <file.xlsx> [timeout_seconds]"}, ensure_ascii=False))
-        return 2
-
-    src = Path(sys.argv[1]).expanduser().resolve()
-    timeout = int(sys.argv[2]) if len(sys.argv) > 2 else 60
-    if not src.exists():
-        print(json.dumps({"error": f"file not found: {src}"}, ensure_ascii=False))
+    parser = argparse.ArgumentParser(description="重算 XLSX 公式并扫描错误")
+    parser.add_argument("input", type=Path)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--timeout", type=int, default=90)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    input_path = args.input.resolve()
+    output_path = args.output.resolve() if args.output else input_path
+    try:
+        result = recalculate(input_path, output_path, args.timeout)
+        print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else json.dumps(result, ensure_ascii=False))
+        return 0 if result["status"] == "success" else 2
+    except Exception as error:
+        result = {"status": "failed", "error": str(error)}
+        print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else result["error"])
         return 1
-
-    soffice = find_soffice()
-    if not soffice:
-        print(json.dumps({"error": "LibreOffice (soffice) not found on PATH"}, ensure_ascii=False))
-        return 1
-
-    with tempfile.TemporaryDirectory(prefix="awaken-xlsx-recalc-") as tmp:
-        tmp_path = Path(tmp)
-        work = tmp_path / src.name
-        work.write_bytes(src.read_bytes())
-        cmd = [
-            soffice,
-            "--headless",
-            "--nologo",
-            "--nolockcheck",
-            "--convert-to",
-            "xlsx",
-            "--outdir",
-            str(tmp_path),
-            str(work),
-        ]
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            print(json.dumps({"error": f"LibreOffice timed out after {timeout}s"}, ensure_ascii=False))
-            return 1
-
-        converted = tmp_path / src.name
-        if not converted.exists():
-            # LibreOffice sometimes changes casing/extension handling
-            candidates = list(tmp_path.glob("*.xlsx"))
-            if not candidates:
-                print(
-                    json.dumps(
-                        {
-                            "error": "conversion produced no xlsx",
-                            "stdout": proc.stdout[-2000:],
-                            "stderr": proc.stderr[-2000:],
-                        },
-                        ensure_ascii=False,
-                    )
-                )
-                return 1
-            converted = candidates[0]
-
-        src.write_bytes(converted.read_bytes())
-
-    result = scan_errors(src)
-    result["file"] = str(src)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0 if result.get("status") == "success" else 1
 
 
 if __name__ == "__main__":

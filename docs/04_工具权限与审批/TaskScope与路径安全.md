@@ -16,7 +16,9 @@
 
 roots 要生效，模型必须知道它们存在。scope 通过 `workspace.project_name` 拿到项目展示名，system prompt 的「当前运行环境」据此列出项目名与整组项目文件夹并标出主文件夹，默认系统提示的「项目文件夹与作业范围」再声明四条约定：默认在主文件夹作业、文件夹组是一个整体、跨文件夹检索省略 `path`、项目外路径按用户指令直达。模型侧渲染由 [上下文窗口与压缩](../02_主智能体闭环/上下文窗口与压缩.md) 拥有；此处只声明它与 roots 语义必须一致。
 
-项目可以没有任何文件夹。此时 Desktop 传 `workspace.project_id` 而 `workspace_root` 为空，Core 把它解析到该项目自己的 session 工作目录：`<AWAKEN_HOME>/sessions/<project_id>`，产出默认落在其下的 `output/`。目录按项目而不是按 thread 划分，因为 `workspace_root` 在 run service 里就是 thread 的身份锚点。`workspace_root` 与 `project_id` 同时为空时拒绝该 run，不回退到 core 进程的当前目录。
+项目可以没有任何文件夹。此时 Desktop 传 `workspace.project_id` 而 `workspace_root` 为空，Core 把它解析到该项目自己的 session 工作目录：`<AWAKEN_HOME>/sessions/<project_id>`，产出默认落在其下的 `output/`；同一零文件夹项目的 thread 共享这一区域。
+
+独立对话同时省略 `workspace_root` 与 `project_id`。Core 必须先确定稳定 thread ID，再解析到 `<AWAKEN_HOME>/sessions/<thread_id>`，产出同样落在 `output/`。新独立对话由 Core 生成 thread ID，继续对话使用请求中的已有 `thread_id`；不回退到 Core 进程 cwd、用户主目录或 Renderer 记住的项目路径。managed workspace owner ID 只能包含安全的路径组件字符，不能用 `..` 或分隔符逃出 sessions 子树。
 
 `ProtectedRoots` 按 **每个** root 生成 `.git` / `.awaken` / `.vscode` / `.idea` 保护项，不只为主文件夹生成；否则次文件夹仓库的 `.git` 会变成可写。
 
@@ -68,7 +70,7 @@ WorkspaceRoot 是 typed 文件/Artifact/provider 的默认 run 范围，不是�
 ## 4. 代码 owner
 
 - `src/tool/permission.go`、`sensitive.go`：TaskScope、敏感路径与 `ProtectedRootExceptions`。
-- `src/runtime/run_service.go`：`normalizeWorkspace`、`scopeProjectID`、`buildProtectedRoots`、`buildProtectedRootExceptions`。
+- `src/runtime/run_service.go`：`normalizeWorkspace` / `normalizeWorkspaceForThread`、`scopeProjectID`、`buildProtectedRoots`、`buildProtectedRootExceptions`。
 - `src/desktopdata/paths.go`：`SessionsRoot` / `SessionWorkspacePath` / `SessionOutputPath`，session 工作目录路径的唯一构造点。
 - `src/tools/internal/searchroots`：只读搜索工具的多根解析与展示路径规则。
 - `src/prompt/system_prompt.go`、`runtime.go`、`templates/default_system.md`：项目名、文件夹组与作业范围约定的模型可见渲染。

@@ -372,6 +372,20 @@ describe("project ordering", () => {
 });
 
 describe("resolveWorkspaceRootForRun", () => {
+  it("keeps an independent conversation unbound even when stale project paths exist", () => {
+    expect(
+      resolveWorkspaceRootForRun({
+        workspacePath: "/tmp/old",
+        workspaceTargetPath: "/tmp/target",
+        conversationScope: true,
+        activeThreadWorkspacePath: "/tmp/managed-thread",
+        selectedProjectId: undefined,
+        defaultWorkspacePath: "/tmp/default",
+        projectsFromWorkspace: [],
+      }),
+    ).toBe("");
+  });
+
   it("prefers the immediate workspace target over stale workspace state", () => {
     expect(
       resolveWorkspaceRootForRun({
@@ -2472,7 +2486,12 @@ describe("App workbench presentation", () => {
     expect(html).toContain('rows="3"');
     expect(html).toContain("New Agent");
     expect(html).not.toContain("⌘N");
-    expect(html).toContain("Add folder");
+    expect(html).toContain('aria-label="创建项目"');
+    expect(html).toContain('aria-label="展开全部项目"');
+    expect(html).toContain('aria-label="新增对话"');
+    expect(html).toContain(">对话<");
+    expect(html).toContain('aria-label="选择项目，当前：选择项目"');
+    expect(html).toContain(">选择项目<");
     expect(html).toContain("连接器");
     expect(html).toContain("技能");
     expect(html).toContain("请点击头像配置模型");

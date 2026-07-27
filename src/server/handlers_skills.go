@@ -106,13 +106,13 @@ func (h skillHandlers) handleListSkills(w http.ResponseWriter, r *http.Request) 
 		writeErrorJSON(w, http.StatusServiceUnavailable, "SKILLS_UNAVAILABLE", "skill registry not configured")
 		return
 	}
-	projectRoot, err := resolveSkillPreviewProjectRoot(r.URL.Query().Get("projectRoot"), h.workspaceRoot)
+	projectRoots, err := resolveSkillPreviewProjectRoots(r.URL.Query()["projectRoot"], h.workspaceRoot)
 	if err != nil {
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_PROJECT_ROOT", err.Error())
 		return
 	}
 
-	all := h.registry.PreviewLocalSources(h.skillSourceDirs(projectRoot))
+	all := h.registry.PreviewLocalSources(h.skillSourceDirsForProjectRoots(projectRoots))
 	out := make([]skillInfo, 0, len(all))
 	for _, def := range all {
 		out = append(out, skillInfoFromDefinition(def))
@@ -173,18 +173,45 @@ func (h skillHandlers) handlePreviewSkill(w http.ResponseWriter, r *http.Request
 }
 
 func resolveSkillPreviewProjectRoot(rawProjectRoot, fallback string) (string, error) {
-	projectRoot := strings.TrimSpace(fallback)
-	if rawProjectRoot = strings.TrimSpace(rawProjectRoot); rawProjectRoot != "" {
+	projectRoots, err := resolveSkillPreviewProjectRoots([]string{rawProjectRoot}, fallback)
+	if err != nil || len(projectRoots) == 0 {
+		return "", err
+	}
+	return projectRoots[0], nil
+}
+
+func resolveSkillPreviewProjectRoots(rawProjectRoots []string, fallback string) ([]string, error) {
+	hasExplicitRoot := false
+	for _, rawProjectRoot := range rawProjectRoots {
+		if strings.TrimSpace(rawProjectRoot) != "" {
+			hasExplicitRoot = true
+			break
+		}
+	}
+	if !hasExplicitRoot {
+		rawProjectRoots = []string{fallback}
+	}
+	projectRoots := make([]string, 0, len(rawProjectRoots))
+	seen := make(map[string]struct{}, len(rawProjectRoots))
+	for _, rawProjectRoot := range rawProjectRoots {
+		rawProjectRoot = strings.TrimSpace(rawProjectRoot)
+		if rawProjectRoot == "" {
+			continue
+		}
 		_, resolved, _, _, err := skills.ResolveInstallTarget(skills.InstallTargetRequest{
 			Scope:       string(skills.SourceProject),
 			ProjectRoot: rawProjectRoot,
 		})
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		projectRoot = resolved
+		if _, duplicate := seen[resolved]; duplicate {
+			continue
+		}
+		seen[resolved] = struct{}{}
+		projectRoots = append(projectRoots, resolved)
 	}
-	return projectRoot, nil
+	return projectRoots, nil
 }
 
 func (h skillHandlers) handleInstallSkill(w http.ResponseWriter, r *http.Request) {
@@ -282,6 +309,10 @@ func (h skillHandlers) handleDeleteSkill(w http.ResponseWriter, r *http.Request)
 
 func (h skillHandlers) skillSourceDirs(projectRoot string) map[skills.SourceOrigin]string {
 	return skills.LocalSourceDirs(projectRoot)
+}
+
+func (h skillHandlers) skillSourceDirsForProjectRoots(projectRoots []string) map[skills.SourceOrigin]string {
+	return skills.LocalSourceDirsForProjectRoots(projectRoots)
 }
 
 // handleExecuteSkill triggers direct execution of a skill by ID.

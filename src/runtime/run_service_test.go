@@ -13,6 +13,7 @@ import (
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
+	"awaken/src/desktopdata"
 	"awaken/src/tool/profile"
 )
 
@@ -704,6 +705,7 @@ func TestStartRunValidWorkspaceStartsRun(t *testing.T) {
 }
 
 func TestStartRunEmptyWorkspaceReturnsInvalidInput(t *testing.T) {
+	t.Setenv(awakenHomeEnv, "")
 	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
 		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 			return "done", nil
@@ -712,6 +714,73 @@ func TestStartRunEmptyWorkspaceReturnsInvalidInput(t *testing.T) {
 
 	if _, err := service.StartRun(StartRunRequest{Input: "hello"}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("expected ErrInvalidInput for empty workspace, got %v", err)
+	}
+}
+
+func TestProjectlessConversationsGetThreadOwnedSessionWorkspaces(t *testing.T) {
+	home := setRuntimeUserDataDir(t)
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			return "done", nil
+		})
+	})
+
+	first, err := service.StartRun(StartRunRequest{Input: "first"})
+	if err != nil {
+		t.Fatalf("start first project-less conversation: %v", err)
+	}
+	firstThread := service.ListThreads()[0]
+	wantFirstRoot := filepath.Clean(desktopdata.SessionWorkspacePath(home, first.ThreadID))
+	if firstThread.Workspace.WorkspaceRoot != wantFirstRoot {
+		t.Fatalf("first workspace root=%q want=%q", firstThread.Workspace.WorkspaceRoot, wantFirstRoot)
+	}
+	if firstThread.Workspace.ProjectID != "" {
+		t.Fatalf("project-less conversation acquired project %q", firstThread.Workspace.ProjectID)
+	}
+	wantOutput := filepath.Clean(desktopdata.SessionOutputPath(home, first.ThreadID))
+	if len(firstThread.Workspace.OutputRoots) != 1 || firstThread.Workspace.OutputRoots[0] != wantOutput {
+		t.Fatalf("first output roots=%+v want=[%q]", firstThread.Workspace.OutputRoots, wantOutput)
+	}
+	waitForRunTerminal(t, service, first.RunID)
+	waitForThreadIdle(t, service, first.ThreadID)
+
+	followUp, err := service.StartRun(StartRunRequest{
+		Input:    "follow up",
+		ThreadID: first.ThreadID,
+	})
+	if err != nil {
+		t.Fatalf("continue project-less conversation: %v", err)
+	}
+	followUpThread := service.ListThreads()[0]
+	if followUpThread.Workspace.WorkspaceRoot != wantFirstRoot {
+		t.Fatalf("follow-up workspace root=%q want=%q", followUpThread.Workspace.WorkspaceRoot, wantFirstRoot)
+	}
+	waitForRunTerminal(t, service, followUp.RunID)
+
+	second, err := service.StartRun(StartRunRequest{Input: "second"})
+	if err != nil {
+		t.Fatalf("start second project-less conversation: %v", err)
+	}
+	var secondRoot string
+	for _, thread := range service.ListThreads() {
+		if thread.ThreadID == second.ThreadID {
+			secondRoot = thread.Workspace.WorkspaceRoot
+		}
+	}
+	if secondRoot == wantFirstRoot {
+		t.Fatalf("two project-less conversations shared %q", wantFirstRoot)
+	}
+	waitForRunTerminal(t, service, second.RunID)
+	if err := service.DeleteThread(first.ThreadID); err != nil {
+		t.Fatalf("delete project-less conversation: %v", err)
+	}
+	for _, thread := range service.ListThreads() {
+		if thread.ThreadID == first.ThreadID {
+			t.Fatalf("deleted project-less conversation remained in thread list: %+v", thread)
+		}
+	}
+	if info, err := os.Stat(wantOutput); err != nil || !info.IsDir() {
+		t.Fatalf("deleting conversation must preserve produced files: info=%v err=%v", info, err)
 	}
 }
 

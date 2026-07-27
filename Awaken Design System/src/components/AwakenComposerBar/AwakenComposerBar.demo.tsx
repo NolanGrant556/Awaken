@@ -64,6 +64,9 @@ function InteractiveComposerDemoState(props: ComposerDemoStateProps) {
     if (!props.projectPicker) {
       return undefined;
     }
+    const globalProjectOptionId =
+      props.projectPicker.options.find((option) => option.icon === null)?.id ??
+      null;
     return {
       ...props.projectPicker,
       options: props.projectPicker.options.map((option) => ({
@@ -74,6 +77,15 @@ function InteractiveComposerDemoState(props: ComposerDemoStateProps) {
           setSelectedProjectId(option.id);
         },
       })),
+      clearAction: props.projectPicker.clearAction
+        ? {
+            ...props.projectPicker.clearAction,
+            onClick: () => {
+              props.projectPicker?.clearAction?.onClick();
+              setSelectedProjectId(globalProjectOptionId);
+            },
+          }
+        : undefined,
     };
   }, [props.projectPicker, selectedProjectId]);
 

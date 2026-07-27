@@ -592,6 +592,8 @@ export type RuntimeSkill = {
   lastInvokedAt?: string;
 };
 
+export type SkillProjectRoots = string | string[];
+
 export type ComposerTokenType = "skill" | "file" | "workflow" | "prompt" | "connector";
 
 export type SkillComposerTokenPayload = {
@@ -916,9 +918,9 @@ export type WorkspaceConfigWire = {
 };
 
 export type WorkspaceConfig = {
-  /** Identifies the project a run belongs to. It is what lets a project with no
-   * folder bound resolve its own session workspace, so it is required whenever
-   * workspaceRoot is empty. */
+  /** Identifies the project a run belongs to. A folder-less project uses it to
+   * resolve a project session workspace. When both this field and workspaceRoot
+   * are empty, Core resolves a project-less conversation by thread ID. */
   projectId?: string;
   /** Display name of the project, sent so the agent can name where it is
    * working. Core derives no path or permission from it. */
@@ -1239,7 +1241,7 @@ export type AwakenBridge = {
   deleteMcpServer: (name: string) => Promise<void>;
   getRuntimeLogs: () => Promise<RuntimeLogEntry[]>;
   listMcpTools: () => Promise<RuntimeToolInfo[]>;
-  listSkills: (projectRoot?: string) => Promise<RuntimeSkill[]>;
+  listSkills: (projectRoots?: SkillProjectRoots) => Promise<RuntimeSkill[]>;
   getSkillPreview: (request: GetSkillPreviewRequest) => Promise<SkillPreviewResponse>;
   installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
   deleteSkill: (request: DeleteSkillRequest) => Promise<DeleteSkillResponse>;

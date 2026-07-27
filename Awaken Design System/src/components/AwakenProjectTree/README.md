@@ -6,7 +6,7 @@
 
 `AwakenProjectTree` 用于展示工作区项目、会话分组或文件组的树形列表，支持展开、选中、加载中、禁用节点，以及顶层项目按住拖拽或 `Alt + ↑/↓` 排序。拖拽激活后，原行淡化并出现跟随指针的悬浮项目卡片，目标位置显示插入线。父级负责提供树数据、当前选中项、数据加载和持久化展开/排序状态；组件只管理临时拖拽反馈并通过 `onReorder` 回传完整顶层 id 顺序，不主动读取文件系统。
 
-线程的 `isLoading` 使用独立的 `AwakenSidebarThreadSpinner`，对应 Desktop 中 `running | cancelling` run；项目和线程的 `menuItems` 继续由业务层传入。无项目显示“暂无项目”，空项目展开后显示“暂无会话”。
+线程的 `isLoading` 使用独立的 `AwakenSidebarThreadSpinner`，对应 Desktop 中 `running | cancelling` run；项目和线程的 `menuItems` 继续由业务层传入。`emptyLabel` 控制根列表空态：项目区使用“暂无项目”，独立对话区使用“暂无对话”；空项目展开后仍显示“暂无会话”。根级 `kind: "thread"` 使用紧凑行与消息图标，因此同一组件可承载扁平独立对话列表。
 
 ## 文件
 

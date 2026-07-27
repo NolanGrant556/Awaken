@@ -77,12 +77,24 @@ export const AwakenComposerBarStates: AwakenComposerBarState[] = [
       variant: "center",
       metaItems: composerMetaItems,
       projectPicker: {
+        label: "选择项目",
         placeholder: "选择项目",
         options: [
-          { id: "awaken", label: "Awaken", selected: true, onSelect: noop },
+          {
+            id: "conversation",
+            label: "选择项目",
+            icon: null,
+            selected: true,
+            onSelect: noop,
+          },
+          { id: "awaken", label: "Awaken", onSelect: noop },
           { id: "erp", label: "ERP 项目", onSelect: noop },
           { id: "marketing", label: "市场部", onSelect: noop },
         ],
+        clearAction: {
+          label: "取消选择项目",
+          onClick: noop,
+        },
         createAction: {
           label: "创建项目",
           description: "可选择一个或多个文件夹",

@@ -30,6 +30,7 @@ import type {
   RuntimeLogEntry,
   RuntimeMcpServer,
   RuntimeMcpServerConfigResponse,
+  RuntimeProject,
   RuntimeSkill,
   RuntimeToolInfo,
 } from "../shared/runtime";
@@ -58,8 +59,14 @@ export type SkillView = "awaken" | "project" | "user" | "agents";
 type SkillInstallScope = "project" | "global";
 
 type SkillProjectGroup = {
+  id: string;
   root: string;
   label: string;
+  folders: Array<{
+    root: string;
+    label: string;
+    isPrimary: boolean;
+  }>;
   skills: RuntimeSkill[];
   errorMessage?: string;
 };
@@ -417,6 +424,12 @@ type SkillListLoadResult = {
   errorMessage?: string;
 };
 
+type SkillProjectLoadResult = {
+  project: RuntimeProject;
+  skills: RuntimeSkill[];
+  errorMessage?: string;
+};
+
 type SkillCatalogSnapshot = {
   skills: RuntimeSkill[];
   projectGroups: SkillProjectGroup[];
@@ -458,7 +471,7 @@ export async function loadMcpSettingsResources(
 
 export async function loadSkillListsForRoots(
   roots: Array<string | undefined>,
-  listSkills: RuntimeClient["listSkills"],
+  listSkills: (projectRoot?: string) => Promise<RuntimeSkill[]>,
 ): Promise<SkillListLoadResult[]> {
   return Promise.all(
     roots.map(async (root) => {
@@ -479,20 +492,70 @@ export async function loadSkillListsForRoots(
   );
 }
 
+function orderedProjectRoots(project: RuntimeProject): string[] {
+  const primary = project.folders.find((folder) => folder.isPrimary)?.path;
+  return dedupePaths([
+    primary,
+    project.workspaceRoot,
+    ...project.folders
+      .filter((folder) => folder.path !== primary)
+      .map((folder) => folder.path),
+  ]);
+}
+
+export async function loadSkillListsForProjects(
+  projects: RuntimeProject[],
+  listSkills: RuntimeClient["listSkills"],
+): Promise<SkillProjectLoadResult[]> {
+  return Promise.all(
+    projects.map(async (project) => {
+      const roots = orderedProjectRoots(project);
+      if (roots.length === 0) {
+        return { project, skills: [] };
+      }
+      try {
+        return { project, skills: await listSkills(roots) };
+      } catch (error) {
+        return {
+          project,
+          skills: [],
+          errorMessage:
+            error instanceof Error ? error.message : "项目 Skills 加载失败",
+        };
+      }
+    }),
+  );
+}
+
 function buildSkillCatalogSnapshot(
-  projectRoots: string[],
-  results: SkillListLoadResult[],
+  results: SkillProjectLoadResult[],
+  fallbackSkills: RuntimeSkill[] = [],
 ): SkillCatalogSnapshot {
-  const skillLists = results.map((result) => result.skills);
-  const skills = dedupeSkills(skillLists.flat());
-  const projectGroups = projectRoots.map((root, index) => ({
-    root,
-    label: projectLabelFromRoot(root),
-    skills: (skillLists[index] ?? []).filter(
+  const skills = dedupeSkills([
+    ...results.flatMap((result) => result.skills),
+    ...fallbackSkills,
+  ]);
+  const projectGroups = results.map(({ project, skills: projectSkills, errorMessage }) => {
+    const roots = orderedProjectRoots(project);
+    const primaryRoot = roots[0] ?? "";
+    const folderByRoot = new Map(
+      project.folders.map((folder) => [folder.path, folder]),
+    );
+    return {
+      id: project.projectId,
+      root: primaryRoot,
+      label: project.displayName.trim() || projectLabelFromRoot(primaryRoot),
+      folders: roots.map((root) => ({
+        root,
+        label: projectLabelFromRoot(root),
+        isPrimary: Boolean(folderByRoot.get(root)?.isPrimary),
+      })),
+      skills: projectSkills.filter(
       (skill) => skill.sourceOrigin === "project",
-    ),
-    errorMessage: results[index]?.errorMessage,
-  }));
+      ),
+      errorMessage,
+    };
+  });
   return {
     skills,
     projectGroups,
@@ -526,6 +589,11 @@ export function dedupeSkills(skills: RuntimeSkill[]): RuntimeSkill[] {
     result.push(skill);
   }
   return result;
+}
+
+function skillCatalogIdentity(skill: RuntimeSkill, projectRoot?: string): string {
+  return skill.catalogEntryId?.trim()
+    || `${skill.id}:${skill.sourceOrigin}:${projectRoot ?? skill.rootDir ?? ""}`;
 }
 
 export const SKILL_CATALOG_SYNC_INTERVAL_MS = 1_000;
@@ -584,7 +652,6 @@ export function ExtensionsView({
   const [skillPreviewTarget, setSkillPreviewTarget] =
     useState<SkillPreviewTarget | null>(null);
   const projectSkillPreviewScrollRef = useRef<HTMLDivElement>(null);
-  const skillProjectRootsRef = useRef<string[]>([]);
   const skillSnapshotSignatureRef = useRef("");
   const skillSyncInFlightRef = useRef(false);
   const [skillToggleStates, setSkillToggleStates] = useState<Record<string, boolean>>({});
@@ -627,27 +694,31 @@ export function ExtensionsView({
         runtimeClient.getRuntimeInfo(),
         runtimeClient.listProjects(false),
       ]);
-      const projectRoots = dedupePaths([
+      const projectRoots = dedupePaths(
+        runtimeProjects.flatMap((project) => orderedProjectRoots(project)),
+      );
+      const fallbackRoots = dedupePaths([
         projectRootOverride,
         skillProjectRoot,
         activeWorkspaceRoot,
         runtimeInfo?.defaultWorkspace,
-        ...runtimeProjects.map((project) => project.workspaceRoot),
-      ]);
-      const skillRoots = projectRoots.length > 0 ? projectRoots : [undefined];
-      const [nextConnectors, nextCliConnectors, nextMcpServers, nextSkillResults] = await Promise.all([
+      ]).filter((root) => !projectRoots.includes(root));
+      const needsFallbackCatalog = projectRoots.length === 0 || fallbackRoots.length > 0;
+      const [
+        nextConnectors,
+        nextCliConnectors,
+        nextMcpServers,
+        nextProjectSkillResults,
+        fallbackSkills,
+      ] = await Promise.all([
         runtimeClient.listConnectors(),
         runtimeClient.listCliConnectors(),
         runtimeClient.listMcpServers(),
-        loadSkillListsForRoots(skillRoots, runtimeClient.listSkills),
+        loadSkillListsForProjects(runtimeProjects, runtimeClient.listSkills),
+        needsFallbackCatalog
+          ? runtimeClient.listSkills(fallbackRoots.length > 0 ? fallbackRoots : undefined)
+          : Promise.resolve([]),
       ]);
-      const nextSkillLists = nextSkillResults.map((result) => result.skills);
-      const allSkills = dedupeSkills(nextSkillLists.flat());
-      console.debug("[ExtensionsView] activeWorkspaceRoot:", activeWorkspaceRoot, "projectRoots:", projectRoots);
-      nextSkillLists.forEach((list, index) => {
-        console.debug(`[ExtensionsView] projectRoot[${index}]=${projectRoots[index]} agents count=${list.filter((s) => s.sourceOrigin === "agents").length}`, list.filter((s) => s.sourceOrigin === "agents").map((s) => ({ id: s.id, root: s.rootDir })));
-      });
-      console.debug("[ExtensionsView] deduped agents skills:", allSkills.filter((s) => s.sourceOrigin === "agents").map((s) => ({ id: s.id, root: s.rootDir })));
       const nextProjectRoot =
         projectRootOverride?.trim() ||
         skillProjectRoot.trim() ||
@@ -663,9 +734,8 @@ export function ExtensionsView({
       setConnectors(nextConnectors);
       setCliConnectors(nextCliConnectors);
       setMcpServers(nextMcpServers);
-      skillProjectRootsRef.current = projectRoots;
       applySkillCatalogSnapshot(
-        buildSkillCatalogSnapshot(projectRoots, nextSkillResults),
+        buildSkillCatalogSnapshot(nextProjectSkillResults, fallbackSkills),
       );
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "扩展列表加载失败");
@@ -724,17 +794,25 @@ export function ExtensionsView({
       }
       skillSyncInFlightRef.current = true;
       try {
-        const projectRoots = skillProjectRootsRef.current;
-        const roots = projectRoots.length > 0 ? projectRoots : [undefined];
-        const results = await loadSkillListsForRoots(
-          roots,
+        const runtimeProjects = await runtimeClient.listProjects(false);
+        const results = await loadSkillListsForProjects(
+          runtimeProjects,
           runtimeClient.listSkills,
         );
         if (disposed || results.some((result) => result.errorMessage)) {
           return;
         }
+        const hasProjectFolders = runtimeProjects.some(
+          (project) => orderedProjectRoots(project).length > 0,
+        );
+        const fallbackResults = hasProjectFolders
+          ? []
+          : await loadSkillListsForRoots([undefined], runtimeClient.listSkills);
+        if (disposed || fallbackResults.some((result) => result.errorMessage)) {
+          return;
+        }
         applySkillCatalogSnapshot(
-          buildSkillCatalogSnapshot(projectRoots, results),
+          buildSkillCatalogSnapshot(results, fallbackResults[0]?.skills ?? []),
         );
       } finally {
         skillSyncInFlightRef.current = false;
@@ -757,10 +835,10 @@ export function ExtensionsView({
     const previewExists = skillPreviewTarget.projectRoot
       ? skillProjectGroups.some(
           (group) =>
-            group.root === skillPreviewTarget.projectRoot &&
             group.skills.some(
               (skill) =>
-                skill.catalogEntryId === skillPreviewTarget.catalogEntryId,
+                skill.catalogEntryId === skillPreviewTarget.catalogEntryId &&
+                (skill.projectPath || group.root) === skillPreviewTarget.projectRoot,
             ),
         )
       : skills.some(
@@ -856,7 +934,9 @@ export function ExtensionsView({
         .map((group) => {
           const projectMatches =
             matchesQuery(group.label, normalizedQuery) ||
-            matchesQuery(group.root, normalizedQuery);
+            group.folders.some((folder) =>
+              matchesQuery(folder.root, normalizedQuery),
+            );
           return {
             ...group,
             visibleSkills: projectMatches
@@ -870,14 +950,16 @@ export function ExtensionsView({
           (group) =>
             !normalizedQuery ||
             matchesQuery(group.label, normalizedQuery) ||
-            matchesQuery(group.root, normalizedQuery) ||
+            group.folders.some((folder) =>
+              matchesQuery(folder.root, normalizedQuery),
+            ) ||
             group.visibleSkills.length > 0,
         ),
     [skillProjectGroups, normalizedQuery],
   );
 
   const openProjectSkillGroup = visibleProjectSkillGroups.find(
-    (group) => group.root === openProjectRoot,
+    (group) => group.id === openProjectRoot,
   );
 
   const openProjectSkillDialog = useMemo<AwakenSkillProject | null>(() => {
@@ -885,27 +967,39 @@ export function ExtensionsView({
       return null;
     }
     return {
-      id: openProjectSkillGroup.root,
+      id: openProjectSkillGroup.id,
       name: openProjectSkillGroup.label,
       path: openProjectSkillGroup.root,
+      folders: openProjectSkillGroup.folders.map((folder) => ({
+        path: folder.root,
+        label: folder.label,
+        isPrimary: folder.isPrimary,
+      })),
       skills: openProjectSkillGroup.visibleSkills.map((skill): AwakenSkillItem => {
-        const skillKey = `${skill.id}:${skill.sourceOrigin}:${openProjectSkillGroup.root}`;
+        const projectRoot = skill.projectPath || openProjectSkillGroup.root;
+        const skillKey = `${skill.id}:${skill.sourceOrigin}:${projectRoot}`;
+        const sourceFolder = openProjectSkillGroup.folders.find(
+          (folder) => folder.root === projectRoot,
+        );
         const diagnostics = (skill.diagnostics ?? [])
           .map(skillDiagnosticText)
           .filter(Boolean);
         return {
-          id: skill.id,
+          id: skillCatalogIdentity(skill, projectRoot),
           name: skill.displayName || skill.name,
           description: skill.whenToUse || skill.description,
           enabled:
             skillToggleStates[skillKey] ?? skill.state !== "disabled_by_policy",
           scope: "project",
-          sourceLabel: skillSourceLabel(skill.sourceOrigin),
+          sourceLabel: sourceFolder
+            ? sourceFolder.label
+            : skillSourceLabel(skill.sourceOrigin),
           diagnostic: diagnostics.length > 0 ? diagnostics.join(" · ") : undefined,
           previewable: canPreviewSkill(skill),
           busy: busySkillId === skill.id,
           toggleDisabled: busySkillId === skill.id || deletingSkill,
-          projectId: openProjectSkillGroup.root,
+          projectId: projectRoot,
+          folderPath: projectRoot,
         };
       }),
     };
@@ -916,14 +1010,14 @@ export function ExtensionsView({
     skillToggleStates,
   ]);
 
-  const projectSkillPreviewTarget =
-    skillPreviewTarget?.projectRoot === openProjectRoot
-      ? skillPreviewTarget
-      : null;
-  const projectSkillDeleteTarget =
-    pendingSkillDelete?.projectRoot === openProjectRoot
-      ? pendingSkillDelete
-      : null;
+  const projectSkillPreviewTarget = skillPreviewTarget && openProjectSkillGroup?.skills.some(
+    (skill) => skill.catalogEntryId === skillPreviewTarget.catalogEntryId,
+  ) ? skillPreviewTarget : null;
+  const projectSkillDeleteTarget = pendingSkillDelete && openProjectSkillGroup?.skills.some(
+    (skill) =>
+      skill.id === pendingSkillDelete.skill.id &&
+      (skill.projectPath || openProjectSkillGroup.root) === pendingSkillDelete.projectRoot,
+  ) ? pendingSkillDelete : null;
   const projectSkillPreviewSkill = projectSkillPreviewTarget
     ? openProjectSkillGroup?.skills.find(
         (skill) => skill.catalogEntryId === projectSkillPreviewTarget.catalogEntryId,
@@ -964,7 +1058,9 @@ export function ExtensionsView({
   );
 
   const visibleAgentsSkills = useMemo<VisibleAgentsSkill[]>(() => {
-    const projectRoots = skillProjectGroups.map((group) => group.root);
+    const projectRoots = skillProjectGroups.flatMap((group) =>
+      group.folders.map((folder) => folder.root),
+    );
     return visibleSkills.flatMap((skill) => {
       if (skill.sourceOrigin !== "agents") {
         return [];
@@ -1339,14 +1435,18 @@ export function ExtensionsView({
     }
   }
 
-  function openSkillPreview(skill: RuntimeSkill, projectRoot?: string): void {
+  function openSkillPreview(
+    skill: RuntimeSkill,
+    projectRoot?: string,
+    returnFocusSkillId = skillCatalogIdentity(skill, projectRoot),
+  ): void {
     if (!canPreviewSkill(skill)) {
       return;
     }
     setSkillPreviewTarget({
       catalogEntryId: skill.catalogEntryId!,
       projectRoot,
-      skillId: skill.id,
+      skillId: returnFocusSkillId,
     });
   }
 
@@ -1437,17 +1537,17 @@ export function ExtensionsView({
   }
 
   function renderProjectSkillFolder(group: VisibleSkillProjectGroup) {
-    const open = openProjectRoot === group.root;
+    const open = openProjectRoot === group.id;
     return (
       <AwakenFolder
-        key={group.root}
+        key={group.id}
         label={group.label}
         meta={projectSkillCountText(group)}
         size="dense"
         open={open}
         showNativeTitle={false}
         aria-label={`打开${group.label} 项目 Skills`}
-        onOpen={() => setOpenProjectRoot(group.root)}
+        onOpen={() => setOpenProjectRoot(group.id)}
       />
     );
   }
@@ -1739,12 +1839,12 @@ export function ExtensionsView({
               target={projectSkillPreviewTarget}
               presentation={createSkillPreviewPresentation(
                 projectSkillPreviewSkill,
-                openProjectSkillGroup?.root,
+                projectSkillPreviewTarget.projectRoot,
               )}
               runtimeClient={runtimeClient}
               scrollRef={projectSkillPreviewScrollRef}
               onEnabledChange={(enabled) => {
-                const projectRoot = openProjectSkillGroup?.root;
+                const projectRoot = projectSkillPreviewTarget.projectRoot;
                 if (!projectRoot) {
                   return;
                 }
@@ -1757,7 +1857,7 @@ export function ExtensionsView({
             <SkillPreviewDeleteButton
               deleting={deletingSkill}
               onDelete={() => {
-                const projectRoot = openProjectSkillGroup?.root;
+                const projectRoot = projectSkillPreviewTarget.projectRoot;
                 setSkillPreviewTarget(null);
                 requestSkillDelete(projectSkillPreviewSkill, projectRoot);
               }}
@@ -1810,7 +1910,10 @@ export function ExtensionsView({
               </Button>
             </>
           ),
-          returnFocusSkillId: projectSkillDeleteTarget.skill.id,
+          returnFocusSkillId: skillCatalogIdentity(
+            projectSkillDeleteTarget.skill,
+            projectSkillDeleteTarget.projectRoot,
+          ),
         } : null}
         onDetailClose={() => {
           if (projectSkillPreviewTarget) {
@@ -1826,16 +1929,22 @@ export function ExtensionsView({
         }}
         onSkillPreview={(item) => {
           const group = openProjectSkillGroup;
-          const skill = group?.skills.find((entry) => entry.id === item.id);
+          const skill = group?.skills.find((entry) =>
+            skillCatalogIdentity(entry, entry.projectPath || group.root) === item.id,
+          );
           if (group && skill) {
-            openSkillPreview(skill, group.root);
+            const projectRoot = skill.projectPath || group.root;
+            openSkillPreview(skill, projectRoot, item.id);
           }
         }}
         onSkillToggle={(item, enabled) => {
           const group = openProjectSkillGroup;
-          const skill = group?.skills.find((entry) => entry.id === item.id);
+          const skill = group?.skills.find((entry) =>
+            skillCatalogIdentity(entry, entry.projectPath || group.root) === item.id,
+          );
           if (group && skill) {
-            const skillKey = `${skill.id}:${skill.sourceOrigin}:${group.root}`;
+            const projectRoot = skill.projectPath || group.root;
+            const skillKey = `${skill.id}:${skill.sourceOrigin}:${projectRoot}`;
             void handleToggleSkill(skill, skillKey, enabled);
           }
         }}

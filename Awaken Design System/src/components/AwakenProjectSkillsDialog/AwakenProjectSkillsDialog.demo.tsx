@@ -13,7 +13,7 @@ export function AwakenProjectSkillsDialogDemo() {
     <section className="ads-component-demo" aria-label="项目 Skills 窗口 AwakenProjectSkillsDialog 组件演示">
       <header className="ads-component-demo-header">
         <h2>项目 Skills 窗口 <code>AwakenProjectSkillsDialog</code></h2>
-        <p>承接项目文件夹的下一层交互，标题标识项目，内容区保留路径和 Skill 卡片。</p>
+        <p>承接项目文件夹的下一层交互，通过紧凑来源摘要筛选全部或单个文件夹，不展示路径。</p>
       </header>
       <div className="ads-component-demo-state">
         <h3>实时交互</h3>

@@ -342,6 +342,18 @@ func (s *ProjectService) DeleteThread(threadID string) error {
 		s.Wake()
 		return nil
 	}
+	// A project-less conversation has no project lifecycle row to transact
+	// against. It is still an ordinary durable thread, so evict its live state
+	// and delete its FileStore record directly under the same mutation lock.
+	if strings.TrimSpace(projectID) == "" {
+		if s.runService.isThreadActive(threadID) {
+			return ErrThreadBusy
+		}
+		if err := s.runService.closeAndEvictDeletedThread(threadID); err != nil {
+			return err
+		}
+		return s.store.DeleteThread(threadID)
+	}
 	project, err := s.store.ProjectByID(projectID)
 	if err != nil {
 		return err

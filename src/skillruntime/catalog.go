@@ -35,6 +35,7 @@ type CatalogEntry struct {
 	Description string              `json:"description,omitempty"`
 	WhenToUse   string              `json:"when_to_use,omitempty"`
 	Source      skills.SourceOrigin `json:"source"`
+	SourcePath  string              `json:"source_path,omitempty"`
 }
 
 type CatalogSnapshot struct {
@@ -67,6 +68,7 @@ func CompileCatalog(definitions []*skills.SkillDefinition, contextWindowTokens i
 			Description: strings.Join(strings.Fields(def.Description), " "),
 			WhenToUse:   strings.Join(strings.Fields(def.WhenToUse), " "),
 			Source:      def.Source,
+			SourcePath:  catalogSourcePath(def),
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
@@ -87,7 +89,7 @@ func CompileCatalog(definitions []*skills.SkillDefinition, contextWindowTokens i
 
 	nameOverhead := 0
 	for _, entry := range entries {
-		nameOverhead += utf8.RuneCountInString(fmt.Sprintf("- %s [%s]: ", entry.Name, entry.Source))
+		nameOverhead += utf8.RuneCountInString(fmt.Sprintf("- %s [%s]: ", entry.Name, catalogEntrySource(entry)))
 	}
 	nameOverhead += len(entries) - 1
 	availableForDescs := budget - nameOverhead
@@ -140,9 +142,27 @@ func renderCatalog(entries []CatalogEntry, descriptions bool) string {
 func renderCatalogWithDetails(entries []CatalogEntry, details []string) string {
 	lines := make([]string, 0, len(entries))
 	for i, entry := range entries {
-		lines = append(lines, fmt.Sprintf("- %s [%s]: %s", entry.Name, entry.Source, details[i]))
+		lines = append(lines, fmt.Sprintf("- %s [%s]: %s", entry.Name, catalogEntrySource(entry), details[i]))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func catalogSourcePath(def *skills.SkillDefinition) string {
+	if def == nil || def.Source != skills.SourceProject {
+		return ""
+	}
+	return strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ").Replace(def.ProjectPath))
+}
+
+func catalogEntrySource(entry CatalogEntry) string {
+	source := string(entry.Source)
+	if path := strings.TrimSpace(entry.SourcePath); path != "" {
+		// The listing is plain model context, not Markdown. Flatten bracket and
+		// line-control characters so a folder name cannot forge another entry.
+		path = strings.NewReplacer("[", "(", "]", ")", "\r", " ", "\n", " ").Replace(path)
+		return source + " @ " + path
+	}
+	return source
 }
 
 func truncateCatalogText(value string, limit int) string {

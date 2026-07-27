@@ -59,6 +59,8 @@ export type ComposerBarMetaItem = {
 export type ComposerBarProjectOption = {
   id: string;
   label: string;
+  /** `undefined` uses the default folder icon; `null` renders no icon. */
+  icon?: ReactNode;
   selected?: boolean;
   disabled?: boolean;
   onSelect?: () => void;
@@ -72,9 +74,11 @@ export type ComposerBarProjectAction = {
 };
 
 export type ComposerBarProjectPicker = {
+  label?: string;
   placeholder?: string;
   options: ComposerBarProjectOption[];
   emptyLabel?: string;
+  clearAction?: ComposerBarProjectAction;
   createAction?: ComposerBarProjectAction;
   disabled?: boolean;
 };
@@ -533,68 +537,131 @@ export function AwakenComposerBar({
 
     const triggerLabel =
       selectedProjectOption?.label ?? projectPicker.placeholder ?? "选择项目";
+    const pickerLabel = projectPicker.label ?? "选择项目";
+    const selectedProjectIcon =
+      selectedProjectOption?.icon === null
+        ? null
+        : (selectedProjectOption?.icon ?? (
+            <Folder size={17} strokeWidth={1.85} aria-hidden="true" />
+          ));
+    const showClearAction = Boolean(
+      projectPicker.clearAction &&
+        selectedProjectOption &&
+        selectedProjectIcon !== null,
+    );
 
     return (
-      <div className="composer-bar-project-shelf" aria-label="项目选择">
+      <div className="composer-bar-project-shelf" aria-label={pickerLabel}>
         <AwakenDropdown
           open={projectMenuOpen}
           onOpenChange={setProjectMenuOpen}
           placement="bottom-start"
           offset={8}
           trigger={
-            <button
-              type="button"
-              className="composer-bar-project-trigger"
-              aria-label={`选择项目，当前：${triggerLabel}`}
-              aria-haspopup="menu"
-              aria-expanded={projectMenuOpen}
-              disabled={projectPicker.disabled}
+            <div
+              className={`composer-bar-project-trigger-group${
+                showClearAction
+                  ? " composer-bar-project-trigger-group-clearable"
+                  : ""
+              }`}
             >
-              <Folder size={17} strokeWidth={1.85} aria-hidden="true" />
-              <span className="composer-bar-project-trigger-label">
-                {triggerLabel}
-              </span>
-              <ChevronDown
-                className="composer-bar-project-trigger-chevron"
-                size={14}
-                strokeWidth={1.9}
-                aria-hidden="true"
-              />
-            </button>
+              {showClearAction ? (
+                <button
+                  type="button"
+                  className="composer-bar-project-clear"
+                  aria-label={`${projectPicker.clearAction?.label}：${triggerLabel}`}
+                  title={projectPicker.clearAction?.label}
+                  disabled={
+                    projectPicker.disabled || projectPicker.clearAction?.disabled
+                  }
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setProjectMenuOpen(false);
+                    projectPicker.clearAction?.onClick();
+                  }}
+                >
+                  <X size={11} strokeWidth={2.1} aria-hidden="true" />
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={`composer-bar-project-trigger${
+                  selectedProjectIcon === null
+                    ? " composer-bar-project-trigger-no-icon"
+                    : ""
+                }`}
+                aria-label={`${pickerLabel}，当前：${triggerLabel}`}
+                aria-haspopup="menu"
+                aria-expanded={projectMenuOpen}
+                disabled={projectPicker.disabled}
+              >
+                {selectedProjectIcon !== null ? (
+                  <span className="composer-bar-project-trigger-icon">
+                    {selectedProjectIcon}
+                  </span>
+                ) : null}
+                <span className="composer-bar-project-trigger-label">
+                  {triggerLabel}
+                </span>
+                <ChevronDown
+                  className="composer-bar-project-trigger-chevron"
+                  size={14}
+                  strokeWidth={1.9}
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
           }
         >
-          <div className="composer-bar-project-menu" role="menu" aria-label="选择项目">
-            <div className="composer-bar-project-menu-label">选择项目</div>
+          <div className="composer-bar-project-menu" role="menu" aria-label={pickerLabel}>
+            <div className="composer-bar-project-menu-label">{pickerLabel}</div>
             {projectPicker.options.length > 0 ? (
               <div className="composer-bar-project-options">
-                {projectPicker.options.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    className={`composer-bar-project-option${
-                      option.selected
-                        ? " composer-bar-project-option-selected"
-                        : ""
-                    }`}
-                    role="menuitemradio"
-                    aria-checked={option.selected ?? false}
-                    disabled={option.disabled}
-                    onClick={() => {
-                      setProjectMenuOpen(false);
-                      option.onSelect?.();
-                    }}
-                  >
-                    <Folder size={16} strokeWidth={1.8} aria-hidden="true" />
-                    <span className="composer-bar-project-option-label">
-                      {option.label}
-                    </span>
-                    {option.selected ? (
-                      <Check size={15} strokeWidth={2} aria-hidden="true" />
-                    ) : (
-                      <span aria-hidden="true" />
-                    )}
-                  </button>
-                ))}
+                {projectPicker.options.map((option) => {
+                  const optionIcon =
+                    option.icon === null
+                      ? null
+                      : (option.icon ?? (
+                          <Folder
+                            size={16}
+                            strokeWidth={1.8}
+                            aria-hidden="true"
+                          />
+                        ));
+
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`composer-bar-project-option${
+                        option.selected
+                          ? " composer-bar-project-option-selected"
+                          : ""
+                      }${
+                        optionIcon === null
+                          ? " composer-bar-project-option-no-icon"
+                          : ""
+                      }`}
+                      role="menuitemradio"
+                      aria-checked={option.selected ?? false}
+                      disabled={option.disabled}
+                      onClick={() => {
+                        setProjectMenuOpen(false);
+                        option.onSelect?.();
+                      }}
+                    >
+                      {optionIcon}
+                      <span className="composer-bar-project-option-label">
+                        {option.label}
+                      </span>
+                      {option.selected ? (
+                        <Check size={15} strokeWidth={2} aria-hidden="true" />
+                      ) : (
+                        <span aria-hidden="true" />
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             ) : (
               <div className="composer-bar-project-empty">

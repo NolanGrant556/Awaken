@@ -58,6 +58,73 @@ func TestLocalSourceDirsProductionContract(t *testing.T) {
 	}
 }
 
+func TestLocalSourceDirsForProjectRootsDiscoversEveryAwakenFolderPrimaryFirst(t *testing.T) {
+	base := t.TempDir()
+	home := filepath.Join(base, "home")
+	primary := filepath.Join(base, "primary")
+	secondary := filepath.Join(base, "secondary")
+	for _, dir := range []string{home, primary, secondary} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeTestSkillPackage(t, filepath.Join(primary, ".awaken", "skills"), "shared", "---\nname: shared\ndescription: primary winner\n---\nPrimary")
+	writeTestSkillPackage(t, filepath.Join(secondary, ".awaken", "skills"), "shared", "---\nname: shared\ndescription: secondary shadowed\n---\nSecondary")
+	writeTestSkillPackage(t, filepath.Join(secondary, ".awaken", "skills"), "secondary-only", "---\nname: secondary-only\ndescription: from secondary\n---\nSecondary")
+	t.Setenv("HOME", home)
+	t.Setenv(EnvManagedSkillDirs, filepath.Join(base, "managed"))
+	t.Setenv(EnvAdditionalSkillDirs, "")
+	t.Setenv(EnvPluginSkillDirs, "")
+	t.Setenv(EnvBundledSkillDirs, "")
+	t.Setenv(EnvLegacyCommandDirs, "")
+
+	dirs := LocalSourceDirsForProjectRoots([]string{primary, secondary, primary})
+	wantProjectDirs := []string{
+		filepath.Join(primary, ".awaken", "skills"),
+		filepath.Join(secondary, ".awaken", "skills"),
+	}
+	if got := splitSourceDirList(dirs[SourceProject]); !equalStringSlices(got, wantProjectDirs) {
+		t.Fatalf("project skill roots=%v want=%v", got, wantProjectDirs)
+	}
+	wantAgents := []string{
+		filepath.Join(primary, ".agents", "skills"),
+		filepath.Join(home, ".agents", "skills"),
+	}
+	if got := splitSourceDirList(dirs[SourceAgents]); !equalStringSlices(got, wantAgents) {
+		t.Fatalf("agents roots=%v want=%v", got, wantAgents)
+	}
+
+	registry := NewSkillRegistry(nil)
+	registry.LoadFromSources(dirs)
+	if got := registry.Get("shared"); got == nil || got.Description != "primary winner" || got.ProjectPath != filepath.Clean(primary) {
+		t.Fatalf("primary same-ID Skill did not win: %+v", got)
+	}
+	if got := registry.Get("secondary-only"); got == nil || got.State != StateLoaded || got.ProjectPath != filepath.Clean(secondary) {
+		t.Fatalf("secondary Skill was not discovered with provenance: %+v", got)
+	}
+	shadowedSecondary := 0
+	for _, def := range registry.ListAll() {
+		if def.ID == "shared" && def.State == StateShadowed && def.ProjectPath == filepath.Clean(secondary) {
+			shadowedSecondary++
+		}
+	}
+	if shadowedSecondary != 1 {
+		t.Fatalf("expected one shadowed secondary definition, got %d", shadowedSecondary)
+	}
+}
+
+func equalStringSlices(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != filepath.Clean(right[index]) {
+			return false
+		}
+	}
+	return true
+}
+
 func TestProductionDiscoveryMultipleRootsPriorityAndRealpathDedupe(t *testing.T) {
 	base := t.TempDir()
 	home := filepath.Join(base, "home")

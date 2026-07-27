@@ -18,7 +18,7 @@ import (
 type runHandlers struct {
 	runService             *awruntime.RunService
 	skillRegistry          *skills.SkillRegistry
-	syncSkillsForWorkspace func(string)
+	syncSkillsForWorkspace func(awruntime.WorkspaceConfig)
 	acpManager             *acp.Manager
 }
 
@@ -79,7 +79,7 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.syncSkillsForWorkspace != nil {
-		h.syncSkillsForWorkspace(req.Workspace.WorkspaceRoot)
+		h.syncSkillsForWorkspace(req.Workspace)
 	}
 	if err := h.validateComposerTokens(req.ComposerTokens); err != nil {
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_COMPOSER_TOKEN", err.Error())
@@ -221,7 +221,7 @@ func (h runHandlers) handleRefreshThreadContextSnapshot(w http.ResponseWriter, r
 		return
 	}
 	if h.syncSkillsForWorkspace != nil {
-		h.syncSkillsForWorkspace(transcript.Thread.Workspace.WorkspaceRoot)
+		h.syncSkillsForWorkspace(transcript.Thread.Workspace)
 	}
 	if _, err := h.runService.RefreshThreadContextSnapshot(r.Context(), threadID, req.ModelProfile); err != nil {
 		switch {

@@ -78,6 +78,7 @@ import {
   type RuntimeProjectOperationWire,
   type RuntimeProjectWire,
   type RuntimeSkill,
+  type SkillProjectRoots,
   type SkillPreviewResponse,
   type RuntimeModelProfileSummaryWire,
   type RenameThreadRequest,
@@ -1429,16 +1430,18 @@ ipcMain.handle("awaken:delete-mcp-server", async (_event, name: string) => {
 	});
 });
 
-ipcMain.handle("awaken:list-skills", async (_event, projectRoot?: string) => {
-	console.log("[main:list-skills] projectRoot:", projectRoot);
-	const path = projectRoot
-		? `/v1/skills?projectRoot=${encodeURIComponent(projectRoot)}`
-		: "/v1/skills";
-	const result = await requestRuntime<RuntimeSkill[]>(path, {
+ipcMain.handle("awaken:list-skills", async (_event, projectRoots?: SkillProjectRoots) => {
+	const roots = (Array.isArray(projectRoots) ? projectRoots : [projectRoots])
+		.map((root) => root?.trim())
+		.filter((root): root is string => Boolean(root));
+	const query = new URLSearchParams();
+	for (const root of roots) {
+		query.append("projectRoot", root);
+	}
+	const requestPath = query.size > 0 ? `/v1/skills?${query.toString()}` : "/v1/skills";
+	return requestRuntime<RuntimeSkill[]>(requestPath, {
 		method: "GET",
 	});
-	console.log("[main:list-skills] path:", path, "agents count:", result.filter((s) => s.sourceOrigin === "agents").length);
-	return result;
 });
 
 ipcMain.handle("awaken:get-skill-preview", async (_event, request: GetSkillPreviewRequest) => {

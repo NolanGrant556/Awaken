@@ -50,6 +50,7 @@ import {
   type ProjectReorderResult,
   type RuntimeProjectOperation,
   type RuntimeSkill,
+  type SkillProjectRoots,
   type SkillPreviewResponse,
   type RuntimeThreadTranscript,
   type RuntimeThread,
@@ -341,8 +342,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:delete-mcp-server", name) as Promise<void>,
   listMcpTools: () =>
     ipcRenderer.invoke("awaken:list-mcp-tools") as Promise<RuntimeToolInfo[]>,
-  listSkills: (projectRoot?: string) =>
-    ipcRenderer.invoke("awaken:list-skills", projectRoot) as Promise<RuntimeSkill[]>,
+  listSkills: (projectRoots?: SkillProjectRoots) =>
+    ipcRenderer.invoke("awaken:list-skills", projectRoots) as Promise<RuntimeSkill[]>,
   getSkillPreview: (request: GetSkillPreviewRequest) =>
     ipcRenderer.invoke("awaken:get-skill-preview", request) as Promise<SkillPreviewResponse>,
   installSkill: (request: InstallSkillRequest) =>

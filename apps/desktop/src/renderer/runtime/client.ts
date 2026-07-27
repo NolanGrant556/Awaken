@@ -50,6 +50,7 @@ import {
   type RuntimeProject,
   type RuntimeProjectOperation,
   type RuntimeSkill,
+  type SkillProjectRoots,
   type SkillPreviewResponse,
   type RuntimeThreadTranscript,
   type RuntimeThread,
@@ -176,7 +177,7 @@ export type RuntimeClient = {
   enableMcpServer: (name: string) => Promise<void>;
   deleteMcpServer: (name: string) => Promise<void>;
   listMcpTools: () => Promise<RuntimeToolInfo[]>;
-  listSkills: (projectRoot?: string) => Promise<RuntimeSkill[]>;
+  listSkills: (projectRoots?: SkillProjectRoots) => Promise<RuntimeSkill[]>;
   getSkillPreview: (request: GetSkillPreviewRequest) => Promise<SkillPreviewResponse>;
   installSkill: (request: InstallSkillRequest) => Promise<InstallSkillResponse>;
   deleteSkill: (request: DeleteSkillRequest) => Promise<DeleteSkillResponse>;

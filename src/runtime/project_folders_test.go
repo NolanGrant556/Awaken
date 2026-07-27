@@ -621,6 +621,33 @@ func TestWorkspaceWithNeitherRootNorProjectIsRejected(t *testing.T) {
 	}
 }
 
+func TestProjectlessThreadResolvesToItsOwnSessionWorkspace(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(awakenHomeEnv, home)
+
+	scope, err := normalizeWorkspaceForThread(WorkspaceConfig{}, "thread_projectless")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRoot := filepath.Clean(desktopdata.SessionWorkspacePath(home, "thread_projectless"))
+	if scope.WorkspaceRoot != wantRoot {
+		t.Fatalf("workspace root=%q want=%q", scope.WorkspaceRoot, wantRoot)
+	}
+	if scope.ProjectID != "" || scopeProjectID(scope) != "" {
+		t.Fatalf("project-less thread must keep an empty project identity, got %+v", scope)
+	}
+	if !scope.SessionWorkspace {
+		t.Fatal("project-less thread workspace must be marked as managed")
+	}
+}
+
+func TestManagedWorkspaceRejectsUnsafeOwnerID(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	if _, err := normalizeWorkspaceForThread(WorkspaceConfig{}, "../outside"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("unsafe managed workspace owner must be rejected, got %v", err)
+	}
+}
+
 func TestTaskScopeCarvesOutOnlyTheSessionsSubtree(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(awakenHomeEnv, home)

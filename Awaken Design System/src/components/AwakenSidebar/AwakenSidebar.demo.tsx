@@ -1,7 +1,13 @@
 import "./AwakenSidebar.css";
 import "./AwakenSidebar.demo.css";
 import { useEffect, useRef, useState } from "react";
-import { FolderPlus, ListFilter, Monitor } from "lucide-react";
+import {
+  ChevronsDownUp,
+  ChevronsUpDown,
+  FolderPlus,
+  MessageCirclePlus,
+  Monitor,
+} from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 import { AwakenNewTaskButton } from "../AwakenNewTaskButton";
@@ -31,9 +37,11 @@ export function AwakenSidebarDemo() {
   const desktopProps = AwakenSidebarStates[0]?.props ?? {};
   const navItems = desktopProps.navItems ?? [];
   const [projects, setProjects] = useState(desktopProps.projects ?? []);
+  const conversations = desktopProps.conversations ?? [];
   const [activeNavId, setActiveNavId] = useState(desktopProps.activeNavId);
   const [activeProjectId, setActiveProjectId] = useState(desktopProps.activeProjectId);
   const [expandedIds, setExpandedIds] = useState<string[]>(desktopProps.expandedIds ?? []);
+  const [conversationSectionExpanded, setConversationSectionExpanded] = useState(true);
   const [dialogMode, setDialogMode] = useState<SidebarDialogMode>(null);
   const [renameDraft, setRenameDraft] = useState("设计系统清理");
   const [projectNameDraft, setProjectNameDraft] = useState("");
@@ -59,19 +67,50 @@ export function AwakenSidebarDemo() {
     }
   }, []);
 
+  const allProjectsExpanded = projects.length > 0 && projects.every((project) => expandedIds.includes(project.id));
   const projectSectionActions = (
     <span className="aw-sidebar-demo__section-actions">
       <AwakenSidebarSectionAction
-        label="Filter projects"
-        onClick={() => setLastAction("当前产品提示：Project filters are not available yet.")}
+        label={allProjectsExpanded ? "收起全部项目" : "展开全部项目"}
+        onClick={() => {
+          setExpandedIds(allProjectsExpanded ? [] : projects.map((project) => project.id));
+          setLastAction(allProjectsExpanded ? "已收起全部项目。" : "已展开全部项目。");
+        }}
       >
-        <ListFilter size={13} strokeWidth={1.85} />
+        {allProjectsExpanded ? (
+          <ChevronsDownUp size={13} strokeWidth={1.85} />
+        ) : (
+          <ChevronsUpDown size={13} strokeWidth={1.85} />
+        )}
       </AwakenSidebarSectionAction>
       <AwakenSidebarSectionAction
-        label="Add folder"
-        onClick={() => setLastAction("已触发 Add folder 回调（Gallery 模拟）。")}
+        label="创建项目"
+        onClick={() => setLastAction("已触发创建项目回调（Gallery 模拟）。")}
       >
         <FolderPlus size={13} strokeWidth={1.85} />
+      </AwakenSidebarSectionAction>
+    </span>
+  );
+  const conversationSectionActions = (
+    <span className="aw-sidebar-demo__section-actions">
+      <AwakenSidebarSectionAction
+        label={conversationSectionExpanded ? "收起对话" : "展开对话"}
+        onClick={() => {
+          setConversationSectionExpanded((expanded) => !expanded);
+          setLastAction(conversationSectionExpanded ? "已收起对话。" : "已展开对话。");
+        }}
+      >
+        {conversationSectionExpanded ? (
+          <ChevronsDownUp size={13} strokeWidth={1.85} />
+        ) : (
+          <ChevronsUpDown size={13} strokeWidth={1.85} />
+        )}
+      </AwakenSidebarSectionAction>
+      <AwakenSidebarSectionAction
+        label="新增对话"
+        onClick={() => setLastAction("已触发新增对话回调（Gallery 模拟）。")}
+      >
+        <MessageCirclePlus size={13} strokeWidth={1.85} />
       </AwakenSidebarSectionAction>
     </span>
   );
@@ -86,7 +125,8 @@ export function AwakenSidebarDemo() {
     setActiveProjectId(id);
     const topLevel = projects.find((item) => item.id === id);
     const child = projects.flatMap((item) => item.children ?? []).find((item) => item.id === id);
-    setLastAction(`已选择${topLevel?.label ?? child?.label ?? id}。`);
+    const conversation = conversations.find((item) => item.id === id);
+    setLastAction(`已选择${topLevel?.label ?? child?.label ?? conversation?.label ?? id}。`);
   }
 
   function reorderProjects(ids: string[]): void {
@@ -227,12 +267,16 @@ export function AwakenSidebarDemo() {
               <AwakenSidebar
                 {...desktopProps}
                 projects={projects}
+                conversations={conversations}
                 activeNavId={activeNavId}
                 activeProjectId={activeProjectId}
                 expandedIds={expandedIds}
                 projectSectionActions={projectSectionActions}
+                conversationSectionExpanded={conversationSectionExpanded}
+                conversationSectionActions={conversationSectionActions}
                 onSelectNav={selectNav}
                 onSelectProject={selectProject}
+                onSelectConversation={selectProject}
                 onReorderProjects={reorderProjects}
                 onExpandedChange={setExpandedIds}
                 onNewTask={() => setLastAction("已触发 New Agent 回调（Gallery 模拟）。")}
@@ -242,8 +286,8 @@ export function AwakenSidebarDemo() {
           </div>
           <div className="aw-sidebar-demo__composition-note">
             <span>当前 Desktop 组合</span>
-            <strong>无品牌行、无最近对话区</strong>
-            <p>保留 New Agent、连接器/技能导航、项目工作区项目树、运行中线程指示、行内菜单和 Nolan 个人入口。</p>
+            <strong>项目与独立对话共用一个滚动区</strong>
+            <p>保留 New Agent、连接器/技能导航、项目工作区、独立对话、运行中线程指示、行内菜单和 Nolan 个人入口；顶部与账户区固定。</p>
             <output aria-live="polite">{lastAction}</output>
           </div>
         </div>
@@ -339,10 +383,11 @@ export function AwakenSidebarDemo() {
             <header>
               <h4>侧栏区块动作</h4>
               <code>AwakenSidebarSectionAction + AwakenTooltip</code>
-              <p>承载筛选与添加文件夹等紧凑图标操作，并提供 Tooltip。</p>
+              <p>承载项目/对话展开收起、创建项目与新增对话等紧凑图标操作，并提供 Tooltip。</p>
             </header>
             <div className="aw-sidebar-demo__part-canvas aw-sidebar-demo__standalone-actions">
               {projectSectionActions}
+              {conversationSectionActions}
               <span>{lastAction}</span>
             </div>
           </article>

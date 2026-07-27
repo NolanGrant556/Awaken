@@ -61,7 +61,7 @@ func NewRouterWithWorkspace(runService *awruntime.RunService, infoProvider Runti
 
 // NewRouterWithWorkspaceAndSkillSync additionally lets the runtime synchronize
 // project-scoped skill tools to the workspace that is about to run.
-func NewRouterWithWorkspaceAndSkillSync(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, workspaceRoot string, syncSkillsForWorkspace func(string), shutdown ...func()) http.Handler {
+func NewRouterWithWorkspaceAndSkillSync(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, workspaceRoot string, syncSkillsForWorkspace func(awruntime.WorkspaceConfig), shutdown ...func()) http.Handler {
 	cfg := routerConfig{
 		runService:             runService,
 		infoProvider:           infoProvider,
@@ -79,13 +79,13 @@ func NewRouterWithWorkspaceAndSkillSync(runService *awruntime.RunService, infoPr
 
 // NewRouterWithWorkspaceSkillSyncAndACP builds a fully-wired router that also
 // exposes ACP runner/session/permission routes when acpManager is non-nil.
-func NewRouterWithWorkspaceSkillSyncAndACP(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, acpManager *acp.Manager, workspaceRoot string, syncSkillsForWorkspace func(string), shutdown ...func()) http.Handler {
+func NewRouterWithWorkspaceSkillSyncAndACP(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, acpManager *acp.Manager, workspaceRoot string, syncSkillsForWorkspace func(awruntime.WorkspaceConfig), shutdown ...func()) http.Handler {
 	return NewRouterWithControl(runService, infoProvider, manager, connectorRegistry, skillRegistry, acpManager, workspaceRoot, syncSkillsForWorkspace, nil, shutdown...)
 }
 
 // NewRouterWithControl builds a fully-wired router that also exposes bridge-only
 // control routes protected by a Bearer control token.
-func NewRouterWithControl(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, acpManager *acp.Manager, workspaceRoot string, syncSkillsForWorkspace func(string), control *ControlConfig, shutdown ...func()) http.Handler {
+func NewRouterWithControl(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, acpManager *acp.Manager, workspaceRoot string, syncSkillsForWorkspace func(awruntime.WorkspaceConfig), control *ControlConfig, shutdown ...func()) http.Handler {
 	cfg := routerConfig{
 		runService:             runService,
 		infoProvider:           infoProvider,
@@ -125,7 +125,7 @@ type routerConfig struct {
 	skillRegistry          *skills.SkillRegistry
 	skillTrashAdapter      trash.TrashAdapter
 	workspaceRoot          string
-	syncSkillsForWorkspace func(string)
+	syncSkillsForWorkspace func(awruntime.WorkspaceConfig)
 	shutdown               func()
 	acpManager             *acp.Manager
 	control                *ControlConfig

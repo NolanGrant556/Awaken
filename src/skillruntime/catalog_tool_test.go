@@ -41,6 +41,26 @@ func TestCompileCatalogUsesOnePercentAndNamesOnlyFallback(t *testing.T) {
 	}
 }
 
+func TestCompileCatalogIncludesProjectFolderProvenance(t *testing.T) {
+	projectRoot := filepath.Join(t.TempDir(), "secondary folder")
+	defs := []*skills.SkillDefinition{{
+		ID:          "secondary-report",
+		Description: "Build the secondary folder report",
+		Source:      skills.SourceProject,
+		ProjectPath: projectRoot,
+		State:       skills.StateLoaded,
+	}}
+
+	catalog := CompileCatalog(defs, 100_000)
+	if len(catalog.Entries) != 1 || catalog.Entries[0].SourcePath != projectRoot {
+		t.Fatalf("catalog entry lost project folder provenance: %+v", catalog.Entries)
+	}
+	want := "[project @ " + projectRoot + "]"
+	if !strings.Contains(catalog.Listing, want) {
+		t.Fatalf("catalog listing=%q want source %q", catalog.Listing, want)
+	}
+}
+
 func TestCompileCatalogDegradesToUniformlyTruncatedDescriptionsBeforeNamesOnly(t *testing.T) {
 	defs := []*skills.SkillDefinition{
 		{ID: "x", Description: strings.Repeat("d", 300), Source: skills.SourceProject, State: skills.StateLoaded},

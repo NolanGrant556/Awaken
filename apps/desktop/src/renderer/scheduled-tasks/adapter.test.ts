@@ -286,12 +286,12 @@ describe("describeCronExpression / formatScheduleText", () => {
     const task = calendarTask({
       schedule: { kind: "cron", cron: "30 9 * * 1-5", timezone: "Asia/Shanghai" },
     });
-    expect(formatScheduleText(task)).toBe("工作日 09:30 · Asia/Shanghai");
+    expect(formatScheduleText(task)).toBe("工作日 09:30 · 中国标准时间（东8小时）");
   });
 
   it("formats calendar schedule text with repeat rules", () => {
     expect(formatScheduleText(calendarTask())).toBe(
-      "2026-07-28 09:00 · 每 1 天 · 限 14 次 · Asia/Shanghai",
+      "2026-07-28 09:00 · 每 1 天 · 限 14 次 · 中国标准时间（东8小时）",
     );
     const once = calendarTask({
       schedule: {
@@ -300,7 +300,7 @@ describe("describeCronExpression / formatScheduleText", () => {
         timezone: "Asia/Shanghai",
       },
     });
-    expect(formatScheduleText(once)).toBe("2027-01-01 09:00 · 不重复 · Asia/Shanghai");
+    expect(formatScheduleText(once)).toBe("2027-01-01 09:00 · 不重复 · 中国标准时间（东8小时）");
     const until = calendarTask({
       schedule: {
         kind: "calendar",
@@ -311,7 +311,7 @@ describe("describeCronExpression / formatScheduleText", () => {
       },
     });
     expect(formatScheduleText(until)).toBe(
-      "2026-07-31 08:45 · 每 7 天 · 截至 2026-09-25 08:45 · Asia/Shanghai",
+      "2026-07-31 08:45 · 每 7 天 · 截至 2026-09-25 08:45 · 中国标准时间（东8小时）",
     );
   });
 });

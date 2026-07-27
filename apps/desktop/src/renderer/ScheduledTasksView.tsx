@@ -1,7 +1,7 @@
 // 定时任务产品页面（契约 §4.1/§4.4）：列表 + 创建/编辑 + 模板闭环 + 启停/立即执行/删除。
 // 所有 Core payload 组装与错误映射都委托 ./adapter，本组件只做状态编排；
 // 切换本页面不触碰当前项目、活动 thread 或进行中的 run。
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
 import {
   AwakenButton,
@@ -21,7 +21,6 @@ import {
 import type {
   RuntimeProject,
   ScheduledTask,
-  ScheduledTaskEvent,
 } from "../shared/runtime";
 import type { RuntimeClient } from "./runtime/client";
 import {
@@ -50,8 +49,6 @@ export type ScheduledTasksViewProps = {
   runtimeClient: RuntimeClient;
   desktopReady: boolean;
   onOpenThread: (threadId: string) => void;
-  /** 执行结束后让 App 刷新线程列表（新专属 thread 可能出现）。 */
-  onExecutionsChanged?: () => void;
 };
 
 type EditorState = {
@@ -160,7 +157,6 @@ export function ScheduledTasksView({
   runtimeClient,
   desktopReady,
   onOpenThread,
-  onExecutionsChanged,
 }: ScheduledTasksViewProps) {
   const [tasks, setTasks] = useState<ScheduledTask[] | null>(null);
   const [projects, setProjects] = useState<RuntimeProject[]>([]);
@@ -172,8 +168,6 @@ export function ScheduledTasksView({
   const [history, setHistory] = useState<HistoryState | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const timezones = useMemo(supportedTimezones, []);
-  const onExecutionsChangedRef = useRef(onExecutionsChanged);
-  onExecutionsChangedRef.current = onExecutionsChanged;
 
   const refreshTasks = useCallback(async (): Promise<void> => {
     try {
@@ -211,7 +205,7 @@ export function ScheduledTasksView({
           .filter((profile) => profile.enabled && profile.profileStatus === "ready")
           .map((profile) => ({
             profileId: profile.id,
-            name: profile.displayName || profile.id,
+            name: profile.modelId || profile.displayName || profile.id,
           })),
       );
       setSystemTimezone(timezone || "UTC");
@@ -226,11 +220,8 @@ export function ScheduledTasksView({
     if (!desktopReady) {
       return;
     }
-    return runtimeClient.subscribeScheduledTaskEvents((event: ScheduledTaskEvent) => {
+    return runtimeClient.subscribeScheduledTaskEvents(() => {
       void refreshTasks();
-      if (event.type === "execution_finished") {
-        onExecutionsChangedRef.current?.();
-      }
     });
   }, [desktopReady, runtimeClient, refreshTasks]);
 
@@ -371,7 +362,6 @@ export function ScheduledTasksView({
       await runtimeClient.runScheduledTaskNow(task.taskId, window.crypto.randomUUID());
       setConfirm(null);
       await refreshTasks();
-      onExecutionsChangedRef.current?.();
     } catch (error) {
       setConfirm(null);
       setNotice(
@@ -545,6 +535,7 @@ export function ScheduledTasksView({
           projects={projectOptions}
           profiles={profiles}
           timezones={timezones}
+          systemTimezone={systemTimezone}
           busy={editor.busy}
           errorMessage={editor.errorMessage}
           fieldErrors={editor.fieldErrors}

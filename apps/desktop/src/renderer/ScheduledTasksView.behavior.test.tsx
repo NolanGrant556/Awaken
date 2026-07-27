@@ -150,7 +150,7 @@ describe("ScheduledTasksView", () => {
 
   async function renderView(
     runtimeClient: RuntimeClient,
-    props: { onOpenThread?: (threadId: string) => void; onExecutionsChanged?: () => void } = {},
+    props: { onOpenThread?: (threadId: string) => void } = {},
   ): Promise<void> {
     await act(async () => {
       root = createRoot(container);
@@ -159,7 +159,6 @@ describe("ScheduledTasksView", () => {
           runtimeClient={runtimeClient}
           desktopReady
           onOpenThread={props.onOpenThread ?? (() => {})}
-          onExecutionsChanged={props.onExecutionsChanged}
         />,
       );
     });
@@ -180,6 +179,65 @@ describe("ScheduledTasksView", () => {
     expect(document.body.textContent).toContain("创建定时任务");
   });
 
+  it("labels configured profiles by their actual model IDs", async () => {
+    const kimiStandard: RuntimeModelProfileSummary = {
+      ...readyProfile,
+      id: "profile-kimi-standard",
+      providerId: "kimi-coding-plan",
+      displayName: "Kimi Coding Plan",
+      modelId: "kimi-for-coding",
+    };
+    const kimiK3: RuntimeModelProfileSummary = {
+      ...kimiStandard,
+      id: "profile-kimi-k3",
+      modelId: "k3",
+      isDefault: false,
+    };
+    await renderView(
+      createRuntimeClientMock({
+        listModelProfiles: vi.fn(async () => [kimiStandard, kimiK3]),
+      }),
+    );
+
+    await click(buttonByText("创建任务"));
+    const profileSelect = document.querySelector<HTMLSelectElement>('select[aria-label="模型 profile"]');
+    expect(Array.from(profileSelect?.options ?? []).map((option) => option.textContent)).toEqual([
+      "每次运行时使用当前默认 profile",
+      "kimi-for-coding",
+      "k3",
+    ]);
+    expect(Array.from(profileSelect?.options ?? []).map((option) => option.value)).toEqual([
+      "",
+      "profile-kimi-standard",
+      "profile-kimi-k3",
+    ]);
+  });
+
+  it("uses Chinese searchable timezone labels and the custom calendar", async () => {
+    await renderView(createRuntimeClientMock());
+
+    await click(buttonByText("创建任务"));
+    await click(buttonByText("日程任务"));
+    expect(document.querySelector('input[type="datetime-local"]')).toBeNull();
+
+    await click(buttonByAriaLabel("开始时间"));
+    expect(document.body.textContent).toContain("时间");
+    expect(buttonByAriaLabel("上个月")).toBeTruthy();
+    expect(buttonByAriaLabel("下个月")).toBeTruthy();
+
+    await click(buttonByAriaLabel("时区"));
+    expect(document.body.textContent).toContain("本机时区");
+    expect(document.body.textContent).toContain("中国标准时间");
+    expect(document.body.textContent).not.toContain("Asia/Shanghai");
+
+    await setFieldValue(
+      document.querySelector<HTMLInputElement>('input[aria-label="搜索时区"]'),
+      "Tokyo",
+    );
+    expect(document.body.textContent).toContain("日本标准时间");
+    expect(document.body.textContent).not.toContain("Asia/Tokyo");
+  });
+
   it("renders rows with state badges and resolved project names", async () => {
     const tasks = [
       cronTask(),
@@ -193,7 +251,7 @@ describe("ScheduledTasksView", () => {
 
     const text = document.body.textContent ?? "";
     expect(text).toContain("工作日早报");
-    expect(text).toContain("工作日 09:30 · Asia/Shanghai");
+    expect(text).toContain("工作日 09:30 · 中国标准时间（东8小时）");
     expect(text).toContain("Alpha");
     expect(text).toContain("启用");
     expect(text).toContain("已暂停");
@@ -213,10 +271,13 @@ describe("ScheduledTasksView", () => {
 
     const nameInput = document.querySelector<HTMLInputElement>('input[aria-label="任务名称"]');
     await setFieldValue(nameInput, "新提醒");
-    const projectRadio = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]')).find(
-      (radio) => radio.closest("label")?.textContent?.includes("Alpha"),
+    await click(buttonByAriaLabel("运行项目"));
+    const projectOption = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('button[role="option"]'),
+    ).find(
+      (option) => option.textContent?.includes("Alpha"),
     );
-    await click(projectRadio);
+    await click(projectOption);
     const content = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="提醒正文"]');
     await setFieldValue(content, "记得喝水");
     await click(buttonByText("保存任务"));
@@ -230,6 +291,42 @@ describe("ScheduledTasksView", () => {
         schedule: { kind: "cron", cron: "0 9 * * *", timezone: "Asia/Shanghai" },
       }),
     );
+  });
+
+  it("uses a searchable project dropdown instead of expanding project cards", async () => {
+    const projects: RuntimeProject[] = Array.from({ length: 12 }, (_, index) => ({
+      ...project,
+      projectId: `project-${index + 1}`,
+      displayName: `测试项目${String(index + 1).padStart(2, "0")}`,
+      workspaceRoot: `/workspace/project-${index + 1}`,
+    }));
+    await renderView(
+      createRuntimeClientMock({ listProjects: vi.fn(async () => projects) }),
+    );
+
+    await click(buttonByText("创建任务"));
+    expect(document.querySelector('input[type="radio"][name$="-project"]')).toBeNull();
+    const trigger = buttonByAriaLabel("运行项目");
+    expect(trigger?.getAttribute("aria-expanded")).toBe("false");
+
+    await click(trigger);
+    expect(buttonByAriaLabel("运行项目")?.getAttribute("aria-expanded")).toBe("true");
+    expect(document.body.textContent).toContain("12 个项目");
+    expect(document.querySelector('[role="listbox"][aria-label="运行项目列表"]')).toBeTruthy();
+
+    await setFieldValue(
+      document.querySelector<HTMLInputElement>('input[aria-label="搜索项目"]'),
+      "项目11",
+    );
+    const options = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('button[role="option"]'),
+    );
+    expect(options).toHaveLength(1);
+    expect(options[0]?.textContent).toContain("测试项目11");
+
+    await click(options[0]);
+    expect(buttonByAriaLabel("运行项目")?.textContent).toContain("测试项目11");
+    expect(buttonByAriaLabel("运行项目")?.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("prefills from a template without calling create", async () => {
@@ -320,10 +417,9 @@ describe("ScheduledTasksView", () => {
     expect(deleteScheduledTask).toHaveBeenCalledWith("task-1", 2, expect.any(String));
   });
 
-  it("refreshes silently on scheduled task events and notifies execution completion", async () => {
+  it("refreshes the task list silently on scheduled task events", async () => {
     let eventHandler: ((event: ScheduledTaskEvent) => void) | undefined;
     const listScheduledTasks = vi.fn(async () => [cronTask()]);
-    const onExecutionsChanged = vi.fn();
     await renderView(
       createRuntimeClientMock({
         listScheduledTasks,
@@ -332,7 +428,6 @@ describe("ScheduledTasksView", () => {
           return () => {};
         }),
       }),
-      { onExecutionsChanged },
     );
 
     expect(listScheduledTasks).toHaveBeenCalledTimes(1);
@@ -342,7 +437,6 @@ describe("ScheduledTasksView", () => {
     await settle();
 
     expect(listScheduledTasks).toHaveBeenCalledTimes(2);
-    expect(onExecutionsChanged).toHaveBeenCalledTimes(1);
   });
 
   it("opens the execution thread from history", async () => {

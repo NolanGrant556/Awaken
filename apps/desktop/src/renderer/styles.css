@@ -1727,6 +1727,10 @@ pre {
 }
 
 /* 定时任务页面 */
+.scheduled-tasks-view .extension-view-inner {
+  width: min(1040px, calc(100% - 72px));
+}
+
 .scheduled-tasks-view__notice {
   display: flex;
   align-items: center;

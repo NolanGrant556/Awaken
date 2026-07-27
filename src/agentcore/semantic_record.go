@@ -47,6 +47,11 @@ const (
 	SemanticKindACPToolSnapshot        SemanticKind = "acp_tool_snapshot"
 	SemanticKindACPPermissionRequested SemanticKind = "acp_permission_requested"
 	SemanticKindACPPermissionResolved  SemanticKind = "acp_permission_resolved"
+	// SemanticKindScheduledNotice is the host-owned fixed-reminder fact of a
+	// scheduled task (contract §9.4). The payload carries only task/execution
+	// identity, the task name and the fixed content; it is never a user or
+	// assistant message.
+	SemanticKindScheduledNotice SemanticKind = "scheduled_notice"
 )
 
 // SemanticRecord is the canonical durable execution-journal record (schema_version=2).

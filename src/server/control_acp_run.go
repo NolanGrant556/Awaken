@@ -171,23 +171,7 @@ func (h *acpRunControlHandlers) handleCreateACPRun(w http.ResponseWriter, r *htt
 }
 
 func runtimeModelProfile(profile modelprofile.ResolvedProfile) *awruntime.ModelProfileConfig {
-	return &awruntime.ModelProfileConfig{
-		ProfileID:          profile.ID,
-		ProviderID:         profile.ProviderID,
-		DisplayName:        profile.DisplayName,
-		ModelID:            profile.ModelID,
-		BaseURL:            profile.BaseURL,
-		Protocol:           profile.Protocol,
-		AuthScheme:         profile.AuthScheme,
-		APIKey:             profile.APIKey,
-		Temperature:        profile.Temperature,
-		MaxTokens:          profile.MaxTokens,
-		ContextWindow:      profile.ContextWindow,
-		CredentialRevision: profile.CredentialRevision,
-		SupportsVision:     profile.SupportsVision,
-		SupportsNativePDF:  profile.SupportsNativePDF,
-		SupportsVideo:      profile.SupportsVideo,
-	}
+	return awruntime.ModelProfileConfigFromResolved(profile)
 }
 
 func (h *acpRunControlHandlers) handleClearCurrentRun(w http.ResponseWriter, r *http.Request) {

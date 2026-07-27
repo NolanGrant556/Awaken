@@ -130,7 +130,16 @@ export type RunNarrativeItem =
       isFinal?: boolean;
       elapsedMs?: number;
     }
-  | { kind: "hint"; id: string; text: string };
+  | { kind: "hint"; id: string; text: string }
+  | {
+      kind: "scheduledNotice";
+      id: string;
+      taskId: string;
+      executionId?: string;
+      taskName?: string;
+      noticeContent: string;
+      timestamp?: number;
+    };
 
 export type RunNarrativeState = {
   committedItems: RunNarrativeItem[];

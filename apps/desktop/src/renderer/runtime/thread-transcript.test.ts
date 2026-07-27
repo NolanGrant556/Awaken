@@ -61,6 +61,70 @@ function makeTranscript(): RuntimeThreadTranscript {
 }
 
 describe("thread transcript replay helpers", () => {
+  it("replays a host-owned scheduled reminder without a user prompt", () => {
+    const transcript: RuntimeThreadTranscript = {
+      thread: {
+        threadId: "thread-reminder",
+        label: "喝水提醒",
+        runId: "run-reminder",
+        workspace: {
+          workspaceRoot: "/tmp/awaken",
+          writableRoots: ["/tmp/awaken"],
+        },
+        createdAt: "2026-07-27T09:43:00Z",
+        updatedAt: "2026-07-27T09:43:01Z",
+      },
+      runs: [
+        {
+          run: {
+            runId: "run-reminder",
+            threadId: "thread-reminder",
+            status: "finished",
+            cancelRequested: false,
+            createdAt: "2026-07-27T09:43:00Z",
+            updatedAt: "2026-07-27T09:43:01Z",
+            finishedAt: "2026-07-27T09:43:01Z",
+          },
+          events: [
+            {
+              type: "RUN_STARTED",
+              runId: "run-reminder",
+              threadId: "thread-reminder",
+            },
+            {
+              type: "AWAKEN_SCHEDULED_NOTICE",
+              runId: "run-reminder",
+              threadId: "thread-reminder",
+              taskId: "task-reminder",
+              executionId: "execution-reminder",
+              taskName: "喝水提醒",
+              noticeContent: "起来喝水",
+            },
+            {
+              type: "RUN_FINISHED",
+              runId: "run-reminder",
+              threadId: "thread-reminder",
+            },
+          ],
+        },
+      ],
+    };
+
+    const state = actionsForThreadTranscript(transcript).reduce(
+      reduceRuntimeState,
+      createInitialRuntimeState(),
+    );
+
+    expect(state.narrative.committedItems).toContainEqual(
+      expect.objectContaining({
+        kind: "scheduledNotice",
+        taskId: "task-reminder",
+        executionId: "execution-reminder",
+        noticeContent: "起来喝水",
+      }),
+    );
+  });
+
   it("retains the last durable context snapshot across a later run without one", () => {
     const transcript = makeTranscript();
     transcript.runs[0].events.splice(2, 0, {

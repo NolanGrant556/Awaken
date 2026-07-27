@@ -12,6 +12,7 @@ import (
 	"awaken/src/modelprofile"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
+	"awaken/src/scheduledtask"
 	"awaken/src/skills"
 	"awaken/src/tool/trash"
 )
@@ -103,6 +104,28 @@ func NewRouterWithControl(runService *awruntime.RunService, infoProvider Runtime
 	return newRouterInternal(cfg)
 }
 
+// NewRouterWithScheduledTasks builds a fully-wired router that also exposes
+// the /v1/scheduled-tasks/* surface. A nil service keeps the routes
+// registered but answering 503 (the runtime started without a store).
+func NewRouterWithScheduledTasks(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, acpManager *acp.Manager, workspaceRoot string, syncSkillsForWorkspace func(awruntime.WorkspaceConfig), control *ControlConfig, scheduledTasks *scheduledtask.Service, shutdown ...func()) http.Handler {
+	cfg := routerConfig{
+		runService:             runService,
+		infoProvider:           infoProvider,
+		manager:                manager,
+		connectorRegistry:      connectorRegistry,
+		skillRegistry:          skillRegistry,
+		workspaceRoot:          workspaceRoot,
+		syncSkillsForWorkspace: syncSkillsForWorkspace,
+		acpManager:             acpManager,
+		control:                control,
+		scheduledTasks:         scheduledTasks,
+	}
+	if len(shutdown) > 0 {
+		cfg.shutdown = shutdown[0]
+	}
+	return newRouterInternal(cfg)
+}
+
 // ControlConfig groups the runtime identity and lease manager used for bridge-only
 // control routes.
 type ControlConfig struct {
@@ -129,6 +152,7 @@ type routerConfig struct {
 	shutdown               func()
 	acpManager             *acp.Manager
 	control                *ControlConfig
+	scheduledTasks         *scheduledtask.Service
 }
 
 func newRouterInternal(cfg routerConfig) http.Handler {
@@ -234,6 +258,24 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	mux.HandleFunc("DELETE /v1/skills/{id}", skillH.handleDeleteSkill)
 	mux.HandleFunc("POST /v1/skills/{id}/enable", skillH.handleEnableSkill)
 	mux.HandleFunc("POST /v1/skills/{id}/disable", skillH.handleDisableSkill)
+	// Scheduled-task routes are always registered; a nil service answers 503.
+	// Go 1.22 mux precedence lets the literal /events beat /{task_id}.
+	schedH := newScheduledTaskHandlers(cfg.scheduledTasks)
+	mux.HandleFunc("GET /v1/scheduled-tasks", schedH.handleList)
+	mux.HandleFunc("POST /v1/scheduled-tasks", schedH.handleCreate)
+	mux.HandleFunc("GET /v1/scheduled-tasks/events", schedH.handleEvents)
+	mux.HandleFunc("GET /v1/scheduled-tasks/{task_id}", schedH.handleGet)
+	mux.HandleFunc("PATCH /v1/scheduled-tasks/{task_id}", schedH.handlePatch)
+	mux.HandleFunc("DELETE /v1/scheduled-tasks/{task_id}", schedH.handleDelete)
+	mux.HandleFunc("POST /v1/scheduled-tasks/{task_id}/pause", func(w http.ResponseWriter, r *http.Request) {
+		schedH.handleSetEnabled(w, r, false)
+	})
+	mux.HandleFunc("POST /v1/scheduled-tasks/{task_id}/resume", func(w http.ResponseWriter, r *http.Request) {
+		schedH.handleSetEnabled(w, r, true)
+	})
+	mux.HandleFunc("POST /v1/scheduled-tasks/{task_id}/run", schedH.handleRun)
+	mux.HandleFunc("POST /v1/scheduled-tasks/{task_id}/cancel", schedH.handleCancel)
+	mux.HandleFunc("GET /v1/scheduled-tasks/{task_id}/executions", schedH.handleListExecutions)
 	if cfg.acpManager != nil {
 		acpH := acpHandlers{manager: cfg.acpManager, runService: cfg.runService}
 		mux.HandleFunc("GET /v1/acp/runners", acpH.handleListRunners)

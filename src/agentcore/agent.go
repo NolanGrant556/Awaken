@@ -116,7 +116,7 @@ func (a *Agent) RefreshRunAvailabilityWithReason(ctx stdcontext.Context, reason 
 	hostEnvironment := tool.ResolveHostEnvironment(ctx, tool.ExecutionEnvironmentProbeOptions{
 		WorkspaceRoot:     permissionContext.WorkspaceRoot,
 		WorkingDirectory:  permissionContext.WorkspaceRootOrCWD(),
-		SkillRoots:        localSkillRootObservations(permissionContext.WorkspaceRoot),
+		SkillRoots:        localSkillRootObservations(cfg.Workspace),
 		TemporaryWorkRoot: permissionContext.TemporaryWorkRoot,
 		RefreshReason:     reason,
 		ProbeVersions:     true,
@@ -128,8 +128,13 @@ func (a *Agent) RefreshRunAvailabilityWithReason(ctx stdcontext.Context, reason 
 	a.Reconfigure(cfg)
 }
 
-func localSkillRootObservations(workspaceRoot string) []tool.SkillRootObservation {
-	sourceDirs := skills.LocalSourceDirs(workspaceRoot)
+func localSkillRootObservations(workspace WorkspaceConfig) []tool.SkillRootObservation {
+	projectRoots := []string(nil)
+	if !workspace.SessionWorkspace {
+		projectRoots = append(projectRoots, workspace.Root)
+		projectRoots = append(projectRoots, workspace.ReadableRoots...)
+	}
+	sourceDirs := skills.LocalSourceDirsForProjectRoots(projectRoots)
 	result := make([]tool.SkillRootObservation, 0, len(sourceDirs)+2)
 	for source, pathList := range sourceDirs {
 		for _, path := range filepath.SplitList(pathList) {

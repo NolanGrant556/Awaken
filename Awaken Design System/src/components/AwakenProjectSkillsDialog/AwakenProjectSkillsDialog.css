@@ -23,17 +23,215 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--aw-space-7);
+  min-width: 0;
 }
 
-.aw-project-skills-dialog__path {
+.aw-project-skills-dialog__folder-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--aw-space-2);
+  max-width: 100%;
+  min-height: 32px;
   min-width: 0;
+  padding: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--aw-radius-control);
+  background: transparent;
+  color: var(--aw-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background var(--aw-transition-fast),
+    border-color var(--aw-transition-fast),
+    color var(--aw-transition-fast);
+}
+
+.aw-project-skills-dialog__folder-summary:hover,
+.aw-project-skills-dialog__folder-summary[aria-expanded="true"] {
+  border-color: var(--aw-border-light);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.aw-project-skills-dialog__folder-summary:focus-visible {
+  outline: 2px solid var(--aw-focus-ring);
+  outline-offset: 2px;
+}
+
+.aw-project-skills-dialog__folder-summary-icon,
+.aw-project-skills-dialog__folder-summary-chevron {
+  flex: 0 0 auto;
+  color: var(--aw-text-tertiary);
+}
+
+.aw-project-skills-dialog__folder-summary-count {
+  flex: 0 0 auto;
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-medium);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-project-skills-dialog__folder-summary-separator {
+  flex: 0 0 auto;
+  color: var(--aw-text-muted);
+}
+
+.aw-project-skills-dialog__folder-summary-primary {
   overflow: hidden;
   color: var(--aw-text-tertiary);
-  font-family: var(--aw-font-mono);
-  font-size: var(--aw-font-size-xs);
-  line-height: var(--aw-line-height-xs);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.aw-project-skills-dialog__folder-summary-chevron {
+  transition: transform var(--aw-transition-fast);
+}
+
+.aw-project-skills-dialog__folder-summary-chevron[data-open="true"] {
+  transform: rotate(180deg);
+}
+
+.aw-project-skills-dialog__folder-popover {
+  box-sizing: border-box;
+  width: min(340px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-panel);
+  background: var(--aw-bg-white);
+  color: var(--aw-text-primary);
+  box-shadow: var(--aw-shadow-popover);
+}
+
+.aw-popover__floating:has(.aw-project-skills-dialog__folder-popover):focus-visible {
+  outline: none;
+}
+
+.aw-project-skills-dialog__folder-popover-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 11px 8px;
+  border-bottom: 1px solid var(--aw-border-light);
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-medium);
+  line-height: var(--aw-line-height-xs);
+}
+
+.aw-project-skills-dialog__folder-popover-count {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  place-items: center;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-main);
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-regular);
+  line-height: 1;
+}
+
+.aw-project-skills-dialog__folder-list {
+  display: grid;
+  gap: 1px;
+  padding: 5px;
+}
+
+.aw-project-skills-dialog__folder-item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--aw-space-2);
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--aw-radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--aw-transition-fast),
+    color var(--aw-transition-fast);
+}
+
+.aw-project-skills-dialog__folder-item:hover {
+  background: color-mix(in srgb, var(--aw-bg-fill-light) 72%, transparent);
+}
+
+.aw-project-skills-dialog__folder-item[data-selected="true"] {
+  background: var(--aw-bg-fill-light);
+}
+
+.aw-project-skills-dialog__folder-item:focus-visible {
+  outline: 2px solid var(--aw-focus-ring);
+  outline-offset: -2px;
+}
+
+.aw-project-skills-dialog__folder-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-bg-white);
+  color: var(--aw-text-tertiary);
+}
+
+.aw-project-skills-dialog__folder-copy {
+  display: block;
+  min-width: 0;
+}
+
+.aw-project-skills-dialog__folder-name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--aw-space-2);
+  min-width: 0;
+}
+
+.aw-project-skills-dialog__folder-name {
+  overflow: hidden;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-medium);
+  line-height: var(--aw-line-height-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-project-skills-dialog__primary-badge {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-main);
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+}
+
+.aw-project-skills-dialog__folder-meta {
+  display: grid;
+  grid-template-columns: minmax(14px, auto) 14px;
+  align-items: center;
+  gap: var(--aw-space-2);
+  min-width: 36px;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+  text-align: right;
+}
+
+.aw-project-skills-dialog__folder-item[data-selected="true"]
+  .aw-project-skills-dialog__folder-meta {
+  color: var(--aw-text-secondary);
 }
 
 .aw-project-skills-dialog__count {
@@ -63,6 +261,11 @@
 }
 
 @media (max-width: 720px) {
+  .aw-project-skills-dialog__folder-summary-separator,
+  .aw-project-skills-dialog__folder-summary-primary {
+    display: none;
+  }
+
   .aw-project-skills-dialog__grid {
     grid-template-columns: minmax(0, 1fr);
   }

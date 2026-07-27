@@ -1,10 +1,51 @@
 package agentcore
 
 import (
+	"path/filepath"
 	"testing"
 
 	convcontext "awaken/src/context"
 )
+
+func TestLocalSkillRootObservationsIncludeEveryProjectAwakenFolder(t *testing.T) {
+	primary := filepath.Join(t.TempDir(), "primary")
+	secondary := filepath.Join(t.TempDir(), "secondary")
+	observations := localSkillRootObservations(WorkspaceConfig{
+		Root:          primary,
+		ReadableRoots: []string{primary, secondary},
+	})
+
+	want := map[string]bool{
+		filepath.Join(primary, ".awaken", "skills"):   false,
+		filepath.Join(secondary, ".awaken", "skills"): false,
+	}
+	for _, observation := range observations {
+		if observation.Source == "project" {
+			if _, ok := want[observation.Path]; ok {
+				want[observation.Path] = true
+			}
+		}
+	}
+	for path, seen := range want {
+		if !seen {
+			t.Fatalf("project Skill root %q missing from observations: %+v", path, observations)
+		}
+	}
+}
+
+func TestLocalSkillRootObservationsExcludeManagedSessionWorkspace(t *testing.T) {
+	managed := filepath.Join(t.TempDir(), "sessions", "thread_123")
+	observations := localSkillRootObservations(WorkspaceConfig{
+		Root:             managed,
+		ReadableRoots:    []string{managed},
+		SessionWorkspace: true,
+	})
+	for _, observation := range observations {
+		if observation.Source == "project" {
+			t.Fatalf("managed session workspace leaked as a project Skill root: %+v", observations)
+		}
+	}
+}
 
 func TestNewAgentWithConversationAndThreadIDSetsThreadID(t *testing.T) {
 	cfg := testAgentConfig("http://unused", 1)

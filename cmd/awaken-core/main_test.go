@@ -3,12 +3,41 @@ package main
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"awaken/src/mcpclient"
 	"awaken/src/runtime"
+	"awaken/src/skills"
 	"awaken/src/tool"
 )
+
+func TestSkillSourceDirsForWorkspaceUsesAllProjectFolders(t *testing.T) {
+	primary := filepath.Join(t.TempDir(), "primary")
+	secondary := filepath.Join(t.TempDir(), "secondary")
+	dirs := skillSourceDirsForWorkspace(runtime.WorkspaceConfig{
+		WorkspaceRoot: primary,
+		ReadableRoots: []string{primary, secondary},
+	})
+	got := filepath.SplitList(dirs[skills.SourceProject])
+	want := []string{
+		filepath.Join(primary, ".awaken", "skills"),
+		filepath.Join(secondary, ".awaken", "skills"),
+	}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("project Skill roots=%v want=%v", got, want)
+	}
+}
+
+func TestSkillSourceDirsForWorkspaceDoesNotTreatManagedSessionAsProject(t *testing.T) {
+	dirs := skillSourceDirsForWorkspace(runtime.WorkspaceConfig{
+		WorkspaceRoot:    filepath.Join(t.TempDir(), "sessions", "thread_123"),
+		SessionWorkspace: true,
+	})
+	if got := dirs[skills.SourceProject]; got != "" {
+		t.Fatalf("managed session workspace became project Skill root %q", got)
+	}
+}
 
 func TestResolveDefaultWorkspaceUsesEnv(t *testing.T) {
 	t.Setenv("AWAKEN_DEFAULT_WORKSPACE", "/tmp/awaken-workspace")

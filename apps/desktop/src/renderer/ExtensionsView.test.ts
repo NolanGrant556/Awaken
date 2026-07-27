@@ -16,6 +16,7 @@ import {
   isSkillVisibleInView,
   loadMcpSettingsResources,
   loadSkillListsForRoots,
+  loadSkillListsForProjects,
   nextMcpConfigTextForMode,
   skillDiagnosticText,
 } from "./ExtensionsView";
@@ -142,6 +143,54 @@ describe("loadSkillListsForRoots", () => {
         severity: "error",
       }),
     ).toBe("parse_failed: frontmatter is invalid");
+  });
+});
+
+describe("loadSkillListsForProjects", () => {
+  it("requests primary-first folders as one project Catalog and keeps folder-less projects", async () => {
+    const primary = "/workspace/primary";
+    const secondary = "/workspace/secondary";
+    const projects = [
+      {
+        projectId: "project-multi",
+        workspaceRoot: primary,
+        folders: [
+          { path: secondary, role: "user" as const, isPrimary: false },
+          { path: primary, role: "user" as const, isPrimary: true },
+        ],
+        displayName: "Multi",
+        state: "active" as const,
+        createdAt: "2026-07-27T00:00:00Z",
+        updatedAt: "2026-07-27T00:00:00Z",
+        version: 1,
+      },
+      {
+        projectId: "project-empty",
+        workspaceRoot: "",
+        folders: [],
+        displayName: "Empty",
+        state: "active" as const,
+        createdAt: "2026-07-27T00:00:00Z",
+        updatedAt: "2026-07-27T00:00:00Z",
+        version: 1,
+      },
+    ];
+    const skill = {
+      id: "secondary",
+      name: "secondary",
+      description: "Secondary",
+      state: "loaded" as const,
+      sourceOrigin: "project",
+      context: "inline" as const,
+    };
+    const listSkills = vi.fn(async () => [skill]);
+
+    await expect(loadSkillListsForProjects(projects, listSkills)).resolves.toEqual([
+      { project: projects[0], skills: [skill] },
+      { project: projects[1], skills: [] },
+    ]);
+    expect(listSkills).toHaveBeenCalledTimes(1);
+    expect(listSkills).toHaveBeenCalledWith([primary, secondary]);
   });
 });
 

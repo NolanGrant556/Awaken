@@ -1,5 +1,12 @@
 import { createElement, type ComponentProps } from "react";
-import { FolderPlus, ListFilter, MessageCirclePlus, Plug, Wrench } from "lucide-react";
+import {
+  ChevronsDownUp,
+  ChevronsUpDown,
+  FolderPlus,
+  MessageCirclePlus,
+  Plug,
+  Wrench,
+} from "lucide-react";
 import { AwakenSidebarSectionAction } from "../AwakenSidebarSectionAction";
 import type { AwakenSidebar } from "./AwakenSidebar";
 
@@ -131,6 +138,15 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
           ],
         },
       ],
+      conversations: [
+        { id: "conversation-1", kind: "thread", label: "梳理今天的工作重点", menuItems: threadMenuItems() },
+        { id: "conversation-2", kind: "thread", label: "比较两个实施方案", menuItems: threadMenuItems() },
+        { id: "conversation-3", kind: "thread", label: "整理会议笔记", menuItems: threadMenuItems() },
+        { id: "conversation-4", kind: "thread", label: "生成一份说明文档", menuItems: threadMenuItems() },
+        { id: "conversation-5", kind: "thread", label: "检查交付清单", menuItems: threadMenuItems() },
+        { id: "conversation-6", kind: "thread", label: "分析临时数据", menuItems: threadMenuItems() },
+        { id: "conversation-7", kind: "thread", label: "规划下周任务", menuItems: threadMenuItems() },
+      ],
       activeProjectId: "finance-attachment",
       expandedIds: ["finance"],
       defaultExpandedIds: ["finance"],
@@ -146,15 +162,35 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
         createElement(
           AwakenSidebarSectionAction,
           {
-            label: "Filter projects",
-            children: createElement(ListFilter, { size: 13, strokeWidth: 1.85 }),
+            label: "展开全部项目",
+            children: createElement(ChevronsUpDown, { size: 13, strokeWidth: 1.85 }),
           },
         ),
         createElement(
           AwakenSidebarSectionAction,
           {
-            label: "Add folder",
+            label: "创建项目",
             children: createElement(FolderPlus, { size: 13, strokeWidth: 1.85 }),
+          },
+        ),
+      ),
+      conversationSectionLabel: "对话",
+      conversationSectionExpanded: true,
+      conversationSectionActions: createElement(
+        "span",
+        { style: { display: "inline-flex", alignItems: "center", gap: 2 } },
+        createElement(
+          AwakenSidebarSectionAction,
+          {
+            label: "收起对话",
+            children: createElement(ChevronsDownUp, { size: 13, strokeWidth: 1.85 }),
+          },
+        ),
+        createElement(
+          AwakenSidebarSectionAction,
+          {
+            label: "新增对话",
+            children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
           },
         ),
       ),
@@ -184,6 +220,7 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
       profileAvatarSrc: undefined,
       newTaskLabel: "新建任务",
       projectSectionLabel: "",
+      conversationSectionLabel: "",
       showProjectCount: false,
       projectSectionActions: null,
       profileSubtitle: undefined,
@@ -223,6 +260,7 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
       profileAvatarSrc: undefined,
       newTaskLabel: "新建任务",
       projectSectionLabel: "项目",
+      conversationSectionLabel: "",
       showProjectCount: true,
       projectSectionActions: null,
       profileSubtitle: "正在扫描工作区",
@@ -262,6 +300,7 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
       profileAvatarSrc: undefined,
       newTaskLabel: "新建带当前上下文的任务",
       projectSectionLabel: "当前项目与组件分组",
+      conversationSectionLabel: "",
       showProjectCount: true,
       projectSectionActions: createElement(
         AwakenSidebarSectionAction,

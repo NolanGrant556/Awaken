@@ -35,7 +35,7 @@ GET    /v1/runs/{run_id}/audit
 POST   /v1/shutdown
 ```
 
-`POST /v1/runs` 的 `workspace` 对象即 TaskScope wire。`workspace_root` 与 `project_id` 至少要有一个：`workspace_root` 是主文件夹，`project_id` 让没有绑定任何文件夹的项目解析到自己的 session 工作目录，两者都为空返回 `INVALID_INPUT`。可选的 `project_name` 是项目展示名，只用于让模型说得出自己在哪个项目里，Core 不从它解析任何路径或权限。`session_workspace` 由服务端派生并回写，客户端传入的值一律被覆盖。roots 的语义与形状名单由 [TaskScope 与路径安全](../04_工具权限与审批/TaskScope与路径安全.md) 唯一拥有。
+`POST /v1/runs` 的 `workspace` 对象即 TaskScope wire。`workspace_root` 是已绑定项目的主文件夹；只给 `project_id` 表示零文件夹项目；两者都为空表示独立对话。Core 在规范化 workspace 前确定 thread ID：新对话生成 ID，follow-up 使用请求的 `thread_id`，然后解析到 thread 专属 session 工作目录。业务数据根不可用或 managed owner ID 不安全时返回 `INVALID_INPUT`。可选的 `project_name` 只用于让模型说得出自己在哪个项目里，Core 不从它解析路径或权限。`session_workspace` 由服务端派生并回写，客户端传入值一律被覆盖。roots 的语义与形状名单由 [TaskScope 与路径安全](../04_工具权限与审批/TaskScope与路径安全.md) 唯一拥有。
 
 `/v1/shutdown` 只有注入 shutdown callback 才注册。`/audit` 当前返回空数组，查询链尚未接通；其审计语义由 04 域记录。`POST /v1/threads/{thread_id}/context-snapshot` 接收与 run 相同的 `model_profile`，只重建并耐久化该 thread 的当前下一请求 projection；不发 provider 请求，响应为 204。Desktop 在 GET transcript 前调用它；没有可运行 profile 时直接读取历史 transcript。
 
@@ -84,7 +84,7 @@ GET    /v1/skills
 POST   /v1/skills/install
 ```
 
-`/v1/mcp/servers*` 依赖 MCP manager；connector routes 依赖 registry。Skill list/install 始终注册，registry 缺失时返回 503。`POST /v1/skills/{id}/execute` 未注册，只是保留 handler。
+`/v1/mcp/servers*` 依赖 MCP manager；connector routes 依赖 registry。Skill list/install 始终注册，registry 缺失时返回 503。`GET /v1/skills` 可按主文件夹优先重复提交 `projectRoot` query；Core 把这些值视为同一个项目的有序文件夹组，在一次 discovery 中合并并返回每条 project Skill 的实际 `projectPath`。只提交一次保持原单文件夹语义。`POST /v1/skills/{id}/execute` 未注册，只是保留 handler。
 
 ### 3.4 Memory 与 Dream
 

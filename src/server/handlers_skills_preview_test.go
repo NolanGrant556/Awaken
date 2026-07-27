@@ -5,12 +5,72 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"awaken/src/skills"
 )
+
+func TestSkillListAcceptsOrderedProjectFolderRoots(t *testing.T) {
+	home := t.TempDir()
+	primary := filepath.Join(t.TempDir(), "primary")
+	secondary := filepath.Join(t.TempDir(), "secondary")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv(skills.EnvManagedSkillDirs, filepath.Join(t.TempDir(), "managed"))
+	t.Setenv(skills.EnvAdditionalSkillDirs, "")
+	t.Setenv(skills.EnvPluginSkillDirs, "")
+	t.Setenv(skills.EnvBundledSkillDirs, "")
+	t.Setenv(skills.EnvLegacyCommandDirs, "")
+	for _, fixture := range []struct {
+		root, id, description string
+	}{
+		{primary, "shared", "primary winner"},
+		{secondary, "shared", "secondary shadow"},
+		{secondary, "secondary-only", "secondary only"},
+	} {
+		packageRoot := filepath.Join(fixture.root, ".awaken", "skills", fixture.id)
+		if err := os.MkdirAll(packageRoot, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		raw := "---\nname: " + fixture.id + "\ndescription: " + fixture.description + "\n---\nBody"
+		if err := os.WriteFile(filepath.Join(packageRoot, "SKILL.md"), []byte(raw), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	handler := skillHandlers{registry: skills.NewSkillRegistry(nil)}
+	query := url.Values{}
+	query.Add("projectRoot", primary)
+	query.Add("projectRoot", secondary)
+	recorder := httptest.NewRecorder()
+	handler.handleListSkills(recorder, httptest.NewRequest(http.MethodGet, "/v1/skills?"+query.Encode(), nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var listed []skillInfo
+	if err := json.Unmarshal(recorder.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	loaded := map[string]skillInfo{}
+	secondaryShadowed := 0
+	for _, info := range listed {
+		if info.State == string(skills.StateLoaded) {
+			loaded[info.ID] = info
+		}
+		if info.ID == "shared" && info.State == string(skills.StateShadowed) && info.ProjectPath == secondary {
+			secondaryShadowed++
+		}
+	}
+	if loaded["shared"].ProjectPath != primary || loaded["secondary-only"].ProjectPath != secondary {
+		t.Fatalf("multi-folder project provenance is wrong: %+v", loaded)
+	}
+	if secondaryShadowed != 1 {
+		t.Fatalf("expected one shadowed secondary duplicate, got %d", secondaryShadowed)
+	}
+}
 
 func TestSkillPreviewHandlerReadsExactCatalogEntry(t *testing.T) {
 	home := t.TempDir()

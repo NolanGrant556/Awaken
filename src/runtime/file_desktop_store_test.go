@@ -157,6 +157,45 @@ func TestFileStoreThreadCRUDListOrderAndTitleCAS(t *testing.T) {
 	}
 }
 
+func TestFileStoreProjectlessSessionThreadDoesNotCreateProject(t *testing.T) {
+	home := setFileStoreTestRoots(t)
+	store, ok := newThreadStore().(*FileDesktopStore)
+	if !ok {
+		t.Fatal("expected FileDesktopStore")
+	}
+	threadID := "thread_projectless"
+	workspaceRoot := filepath.Clean(filepath.Join(home, "sessions", threadID))
+	snapshot := ThreadSnapshot{
+		ThreadID:  threadID,
+		ProjectID: "project_stale_path_inference",
+		Label:     "independent conversation",
+		Workspace: WorkspaceConfig{
+			WorkspaceRoot:    workspaceRoot,
+			SessionWorkspace: true,
+		},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateThread(snapshot, "profile-key", "preview"); err != nil {
+		t.Fatalf("create project-less thread: %v", err)
+	}
+
+	threads, err := store.ListThreads()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(threads) != 1 || threads[0].ProjectID != "" || threads[0].Workspace.ProjectID != "" {
+		t.Fatalf("project-less thread acquired a project: %+v", threads)
+	}
+	projects, err := store.ListProjects(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 0 {
+		t.Fatalf("project-less thread created lifecycle projects: %+v", projects)
+	}
+}
+
 func TestFileStoreStructuredInputSurvivesServiceRestart(t *testing.T) {
 	setFileStoreTestRoots(t)
 	workspace := t.TempDir()

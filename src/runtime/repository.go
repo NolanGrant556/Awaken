@@ -63,6 +63,7 @@ type CleanupJobStore interface {
 type ProjectLifecycleRepository interface {
 	ProjectRepository
 	CleanupJobStore
+	DeleteThread(threadID string) error
 	ThreadTranscriptPath(threadID string) string
 	UserDataRoot() string
 }

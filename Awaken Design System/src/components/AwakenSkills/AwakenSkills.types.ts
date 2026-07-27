@@ -20,6 +20,7 @@ export type AwakenSkillItem = {
   busy?: boolean;
   toggleDisabled?: boolean;
   projectId?: string;
+  folderPath?: string;
 };
 
 export type AwakenSkillGroup = {
@@ -33,5 +34,10 @@ export type AwakenSkillProject = {
   id: string;
   name: string;
   path?: string;
+  folders?: Array<{
+    path: string;
+    label?: string;
+    isPrimary?: boolean;
+  }>;
   skills: AwakenSkillItem[];
 };

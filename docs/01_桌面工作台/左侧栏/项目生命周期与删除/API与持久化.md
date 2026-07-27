@@ -139,7 +139,7 @@ Renderer 启动无条件调用项目列表 API，并只把返回的 stable `proj
 7. Renderer 不能直接调用文件删除命令。
 8. FileStore lifecycle mutation journal-first；snapshot 损坏只能重建，不能反向覆盖 journal。
 9. Renderer与localStorage不得成为项目顺序authority；拖拽只产生乐观UI，Core拒绝后必须按FileStore回滚。
-10. 项目的文件夹数可以为零；有文件夹时恰好一个是 primary。零文件夹项目的 run 由 `workspace.project_id` 解析到 session 工作目录，`workspace_root` 与 `project_id` 同时为空的 run 必须拒绝。
+10. 项目的文件夹数可以为零；有文件夹时恰好一个是 primary。零文件夹项目的 run 由 `workspace.project_id` 解析到项目 session 工作目录。`workspace_root` 与 `project_id` 同时为空属于独立对话，不创建 project row，也不进入项目生命周期状态机；其 thread/session 契约由 02、03、04 域拥有。
 11. 一个磁盘路径可以属于任意多个项目；归属只从各 project 的 `folders` 派生，不存在需要维护一致性的反向索引。判断「这个文件夹还能不能开 run」必须聚合它的全部持有者，而不是任取一个。
 
 ## 11. 验证

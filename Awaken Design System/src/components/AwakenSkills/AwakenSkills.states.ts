@@ -17,6 +17,7 @@ function skill(
   sourceLabel: string,
   enabled = true,
   projectId?: string,
+  folderPath?: string,
 ): AwakenSkillItem {
   return {
     id,
@@ -27,6 +28,7 @@ function skill(
     enabled,
     previewable: true,
     projectId,
+    folderPath,
   };
 }
 
@@ -73,12 +75,29 @@ export const AwakenSkillsProjectStates: AwakenSkillProject[] = [
   },
   {
     id: "management",
-    name: "09_经营管理部",
-    path: "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/09_经营管理部",
+    name: "Nolan 实业项目",
+    path: "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/07_客户服务部",
+    folders: [
+      {
+        path: "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/07_客户服务部",
+        label: "07_客户服务部",
+        isPrimary: true,
+      },
+      {
+        path: "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/08_行政与法务部",
+        label: "08_行政与法务部",
+        isPrimary: false,
+      },
+      {
+        path: "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/09_经营管理部",
+        label: "09_经营管理部",
+        isPrimary: false,
+      },
+    ],
     skills: [
-      skill("management-analysis", "经营分析", "汇总关键指标并解释经营偏差。", "project", "09_经营管理部", true, "management"),
-      skill("management-weekly", "管理层周报", "将跨部门进展整理为管理层周报。", "project", "09_经营管理部", true, "management"),
-      skill("management-kpi", "关键指标巡检", "巡检核心指标并标注异常变化。", "project", "09_经营管理部", true, "management"),
+      skill("management-analysis", "经营分析", "汇总关键指标并解释经营偏差。", "project", "07_客户服务部", true, "management", "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/07_客户服务部"),
+      skill("management-weekly", "管理层周报", "将跨部门进展整理为管理层周报。", "project", "08_行政与法务部", true, "management", "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/08_行政与法务部"),
+      skill("management-kpi", "关键指标巡检", "巡检核心指标并标注异常变化。", "project", "07_客户服务部", true, "management", "/Users/nolangrant/Awaken 测试集/Nolan实业有限公司/07_客户服务部"),
     ],
   },
 ];

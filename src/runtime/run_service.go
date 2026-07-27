@@ -61,8 +61,8 @@ type TaskScope struct {
 	// permissions from it, and it is absent for runs that belong to no project.
 	ProjectName string `json:"project_name,omitempty"`
 	// WorkspaceRoot is the primary folder, and the base for relative paths. It
-	// may be empty when ProjectID is set: a folder-less project resolves to its
-	// session workspace instead.
+	// may be empty for a folder-less project or a project-less conversation;
+	// normalizeWorkspaceForThread resolves the managed session workspace.
 	WorkspaceRoot  string            `json:"workspace_root"`
 	ReadableRoots  []string          `json:"readable_roots,omitempty"`
 	WritableRoots  []string          `json:"writable_roots,omitempty"`
@@ -76,9 +76,9 @@ type TaskScope struct {
 	ProtectedRootExceptions []string `json:"protected_root_exceptions,omitempty"`
 	TemporaryWorkRoot       string   `json:"temporary_work_root,omitempty"`
 	// SessionWorkspace reports that WorkspaceRoot is the Awaken-managed session
-	// directory rather than a folder the user picked, which is how a folder-less
-	// project runs. normalizeWorkspace always assigns it, so a value supplied by
-	// a client never survives.
+	// directory rather than a folder the user picked. Folder-less projects are
+	// project-keyed and project-less conversations are thread-keyed. Normalizing
+	// always assigns it, so a value supplied by a client never survives.
 	SessionWorkspace bool `json:"session_workspace,omitempty"`
 	// ExecutionProfile is the unified policy bundle applied to every tool
 	// call made by agents running under this task scope. When nil, the
@@ -602,7 +602,14 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		}
 	}
 
-	workspace, err := normalizeWorkspace(req.Workspace)
+	runID := newRuntimeID("run")
+	threadID := strings.TrimSpace(req.ThreadID)
+	hasRequestedThread := threadID != ""
+	if threadID == "" {
+		threadID = newRuntimeID("thread")
+	}
+
+	workspace, err := normalizeWorkspaceForThread(req.Workspace, threadID)
 	if err != nil {
 		return Run{}, err
 	}
@@ -627,16 +634,12 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		return Run{}, err
 	}
 
-	runID := newRuntimeID("run")
-	threadID := req.ThreadID
 	now := time.Now().UTC()
 	var agent *agentcore.Agent
 	modelProfileKey := modelProfileCacheKey(req.ModelProfile)
 	var restored *restoredTranscript
 	var restoredMeta *storedThreadRecord
-	if threadID == "" {
-		threadID = newRuntimeID("thread")
-	} else {
+	if hasRequestedThread {
 		s.mu.RLock()
 		_, threadInMemory := s.threads[threadID]
 		s.mu.RUnlock()
@@ -666,7 +669,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		rollbackErr := s.rollbackFailedStartRun(
 			threadID,
 			runID,
-			req.ThreadID == "",
+			!hasRequestedThread,
 			metadataMayBeTouched,
 			previousThread,
 			restoredMeta,
@@ -680,8 +683,8 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	}
 
 	s.mu.Lock()
-	if req.ThreadID != "" {
-		thread, ok := s.threads[req.ThreadID]
+	if hasRequestedThread {
+		thread, ok := s.threads[threadID]
 		if !ok {
 			if restored == nil {
 				s.mu.Unlock()
@@ -2217,28 +2220,43 @@ func scopeProjectID(workspace WorkspaceConfig) string {
 	if id := strings.TrimSpace(workspace.ProjectID); id != "" {
 		return id
 	}
+	// A managed conversation is intentionally not a project. Its thread ID owns
+	// the workspace directory, while ProjectID remains empty in durable metadata
+	// so the Renderer can keep it in the independent conversation section.
+	if workspace.SessionWorkspace {
+		return ""
+	}
 	return stableProjectID(workspace.WorkspaceRoot)
 }
 
 func normalizeWorkspace(ws WorkspaceConfig) (WorkspaceConfig, error) {
+	return normalizeWorkspaceForThread(ws, "")
+}
+
+func normalizeWorkspaceForThread(ws WorkspaceConfig, threadID string) (WorkspaceConfig, error) {
 	root := strings.TrimSpace(ws.WorkspaceRoot)
 	projectID := strings.TrimSpace(ws.ProjectID)
 	sessionWorkspace := ""
 	if root == "" {
-		// A project with no folder bound still has to run somewhere. It gets a
-		// stable directory of its own under the business-data root, which is
-		// what gives Bash a cwd and relative paths a base. Falling back to the
-		// core process working directory instead would put the agent's output
-		// wherever Awaken happened to be launched from.
-		if projectID == "" {
-			return WorkspaceConfig{}, fmt.Errorf("%w: workspace_root or project_id is required", ErrInvalidInput)
+		// Folder-less projects are keyed by project; project-less conversations
+		// are keyed by thread. Both get a stable cwd and output directory under
+		// the business-data root instead of borrowing Core's process directory.
+		ownerID := projectID
+		if ownerID == "" {
+			ownerID = strings.TrimSpace(threadID)
+		}
+		if ownerID == "" {
+			return WorkspaceConfig{}, fmt.Errorf("%w: workspace_root, project_id, or thread_id is required", ErrInvalidInput)
+		}
+		if !validSessionWorkspaceOwnerID(ownerID) {
+			return WorkspaceConfig{}, fmt.Errorf("%w: managed workspace owner id is invalid", ErrInvalidInput)
 		}
 		home := desktopdata.AwakenHomeRoot()
 		if home == "" {
 			return WorkspaceConfig{}, fmt.Errorf("%w: a session workspace needs a business-data root", ErrInvalidInput)
 		}
-		root = desktopdata.SessionWorkspacePath(home, projectID)
-		sessionWorkspace = desktopdata.SessionOutputPath(home, projectID)
+		root = desktopdata.SessionWorkspacePath(home, ownerID)
+		sessionWorkspace = desktopdata.SessionOutputPath(home, ownerID)
 	}
 	if !filepath.IsAbs(root) {
 		return WorkspaceConfig{}, fmt.Errorf("%w: workspace_root must be an absolute path", ErrInvalidInput)
@@ -2286,6 +2304,21 @@ func normalizeWorkspace(ws WorkspaceConfig) (WorkspaceConfig, error) {
 		SessionWorkspace:        sessionWorkspace != "",
 		ExecutionProfile:        &normalizedProfile,
 	}, nil
+}
+
+func validSessionWorkspaceOwnerID(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "." || value == ".." {
+		return false
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // dedupeTaskScopeRoots collects every directory this scope may touch. Boundary

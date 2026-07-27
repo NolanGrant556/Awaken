@@ -1,12 +1,15 @@
 import "./AwakenProjectSkillsDialog.css";
+import { Check, ChevronDown, Folder, Folders } from "lucide-react";
 import {
   useEffect,
   useRef,
+  useState,
   type ReactNode,
   type Ref,
   type RefObject,
 } from "react";
 import { AwakenDialog } from "../AwakenDialog";
+import { AwakenPopover } from "../AwakenPopover";
 import { AwakenSkillCard } from "../AwakenSkillCard";
 import type {
   AwakenSkillItem,
@@ -36,6 +39,24 @@ export type AwakenProjectSkillsDialogProps = {
   onDetailClose?: () => void;
 };
 
+function folderName(path: string): string {
+  const normalizedPath = path.replace(/[\\/]+$/, "");
+  return normalizedPath.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+}
+
+function skillBelongsToFolder(
+  skill: AwakenSkillItem,
+  folder: NonNullable<AwakenSkillProject["folders"]>[number],
+): boolean {
+  if (skill.folderPath) {
+    return skill.folderPath === folder.path;
+  }
+  if (skill.projectId === folder.path) {
+    return true;
+  }
+  return skill.sourceLabel === (folder.label || folderName(folder.path));
+}
+
 export function AwakenProjectSkillsDialog({
   open,
   project,
@@ -47,6 +68,26 @@ export function AwakenProjectSkillsDialog({
 }: AwakenProjectSkillsDialogProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<string | null>(null);
+  const [folderPopoverOpen, setFolderPopoverOpen] = useState(false);
+  const [selectedFolderPath, setSelectedFolderPath] = useState<string | null>(null);
+
+  const projectFolders = project?.folders && project.folders.length > 0
+    ? project.folders
+    : project?.path
+      ? [{ path: project.path, label: folderName(project.path), isPrimary: true }]
+      : [];
+  const primaryFolder = projectFolders.find((folder) => folder.isPrimary) ?? projectFolders[0];
+  const selectedFolder = selectedFolderPath
+    ? projectFolders.find((folder) => folder.path === selectedFolderPath) ?? null
+    : null;
+  const visibleSkills = selectedFolder
+    ? project?.skills.filter((skill) => skillBelongsToFolder(skill, selectedFolder)) ?? []
+    : project?.skills ?? [];
+
+  useEffect(() => {
+    setFolderPopoverOpen(false);
+    setSelectedFolderPath(null);
+  }, [detailView, open, project?.id]);
 
   useEffect(() => {
     if (detailView?.returnFocusSkillId) {
@@ -93,16 +134,148 @@ export function AwakenProjectSkillsDialog({
       {detailView ? detailView.content : project ? (
         <div ref={listRef} className="aw-project-skills-dialog__content">
           <div className="aw-project-skills-dialog__heading">
-            {project.path ? (
-              <span className="aw-project-skills-dialog__path">{project.path}</span>
+            {primaryFolder ? (
+              <AwakenPopover
+                open={folderPopoverOpen}
+                onOpenChange={setFolderPopoverOpen}
+                placement="bottom-start"
+                offset={8}
+                trigger={
+                  <button
+                    type="button"
+                    className="aw-project-skills-dialog__folder-summary"
+                    aria-label={`筛选 ${projectFolders.length} 个项目文件夹`}
+                    aria-expanded={folderPopoverOpen}
+                    aria-haspopup="dialog"
+                  >
+                    <Folders
+                      className="aw-project-skills-dialog__folder-summary-icon"
+                      size={16}
+                      strokeWidth={1.8}
+                      aria-hidden="true"
+                    />
+                    <span className="aw-project-skills-dialog__folder-summary-count">
+                      {projectFolders.length} 个项目文件夹
+                    </span>
+                    <span
+                      className="aw-project-skills-dialog__folder-summary-separator"
+                      aria-hidden="true"
+                    >
+                      ·
+                    </span>
+                    <span className="aw-project-skills-dialog__folder-summary-primary">
+                      {selectedFolder
+                        ? `当前：${selectedFolder.label || folderName(selectedFolder.path)}`
+                        : `主：${primaryFolder.label || folderName(primaryFolder.path)}`}
+                    </span>
+                    <ChevronDown
+                      className="aw-project-skills-dialog__folder-summary-chevron"
+                      data-open={folderPopoverOpen ? "true" : "false"}
+                      size={14}
+                      strokeWidth={1.8}
+                      aria-hidden="true"
+                    />
+                  </button>
+                }
+                content={
+                  <section
+                    className="aw-project-skills-dialog__folder-popover"
+                    aria-label="项目文件夹"
+                  >
+                    <header className="aw-project-skills-dialog__folder-popover-heading">
+                      <span>项目文件夹</span>
+                      <span
+                        className="aw-project-skills-dialog__folder-popover-count"
+                        aria-label={`${projectFolders.length} 个文件夹`}
+                      >
+                        {projectFolders.length}
+                      </span>
+                    </header>
+                    <div className="aw-project-skills-dialog__folder-list">
+                      <button
+                        type="button"
+                        className="aw-project-skills-dialog__folder-item"
+                        data-selected={selectedFolder ? "false" : "true"}
+                        aria-label="查看全部文件夹的 Skills"
+                        aria-pressed={!selectedFolder}
+                        onClick={() => {
+                          setSelectedFolderPath(null);
+                          setFolderPopoverOpen(false);
+                        }}
+                      >
+                        <span className="aw-project-skills-dialog__folder-icon">
+                          <Folders size={15} strokeWidth={1.8} aria-hidden="true" />
+                        </span>
+                        <span className="aw-project-skills-dialog__folder-copy">
+                          <span className="aw-project-skills-dialog__folder-name-row">
+                            <span className="aw-project-skills-dialog__folder-name">
+                              全部文件夹
+                            </span>
+                          </span>
+                        </span>
+                        <span className="aw-project-skills-dialog__folder-meta">
+                          <span>{project.skills.length}</span>
+                          {!selectedFolder ? (
+                            <Check size={14} strokeWidth={2} aria-hidden="true" />
+                          ) : null}
+                        </span>
+                      </button>
+                      {projectFolders.map((folder) => {
+                        const label = folder.label || folderName(folder.path);
+                        const folderSkillCount = project.skills.filter((skill) =>
+                          skillBelongsToFolder(skill, folder)
+                        ).length;
+                        const selected = selectedFolder?.path === folder.path;
+                        return (
+                          <button
+                            type="button"
+                            key={folder.path}
+                            className="aw-project-skills-dialog__folder-item"
+                            data-primary={folder.isPrimary ? "true" : "false"}
+                            data-selected={selected ? "true" : "false"}
+                            aria-label={`查看 ${label} 的 Skills`}
+                            aria-pressed={selected}
+                            onClick={() => {
+                              setSelectedFolderPath(folder.path);
+                              setFolderPopoverOpen(false);
+                            }}
+                          >
+                            <span className="aw-project-skills-dialog__folder-icon">
+                              <Folder size={15} strokeWidth={1.8} aria-hidden="true" />
+                            </span>
+                            <span className="aw-project-skills-dialog__folder-copy">
+                              <span className="aw-project-skills-dialog__folder-name-row">
+                                <span className="aw-project-skills-dialog__folder-name">
+                                  {label}
+                                </span>
+                                {folder.isPrimary ? (
+                                  <span className="aw-project-skills-dialog__primary-badge">
+                                    主文件夹
+                                  </span>
+                                ) : null}
+                              </span>
+                            </span>
+                            <span className="aw-project-skills-dialog__folder-meta">
+                              <span>{folderSkillCount}</span>
+                              {selected ? (
+                                <Check size={14} strokeWidth={2} aria-hidden="true" />
+                              ) : null}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                }
+              />
             ) : null}
             <span className="aw-project-skills-dialog__count">
-              {project.skills.length} Skills
+              {visibleSkills.length} Skills
             </span>
           </div>
-          {project.skills.length > 0 ? (
+          {visibleSkills.length > 0 ? (
             <div className="aw-project-skills-dialog__grid">
-              {project.skills.map((skill) => (
+              {visibleSkills.map((skill) => (
                 <AwakenSkillCard
                   key={skill.id}
                   data-skill-id={skill.id}
@@ -113,7 +286,9 @@ export function AwakenProjectSkillsDialog({
               ))}
             </div>
           ) : (
-            <div className="aw-project-skills-dialog__empty">这个项目还没有 Skills</div>
+            <div className="aw-project-skills-dialog__empty">
+              {selectedFolder ? "这个文件夹还没有 Skills" : "这个项目还没有 Skills"}
+            </div>
           )}
         </div>
       ) : null}

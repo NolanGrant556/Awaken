@@ -7,8 +7,9 @@ import type {
 import {
   ChevronDown,
   ChevronUp,
+  ChevronsDownUp,
+  ChevronsUpDown,
   FolderPlus,
-  ListFilter,
   MessageCirclePlus,
   Monitor,
   PanelRightClose,
@@ -686,6 +687,7 @@ export function shouldResetActiveThreadForWorkspaceChange(
 export function resolveWorkspaceRootForRun(args: {
   workspacePath?: string;
   workspaceTargetPath?: string;
+  conversationScope?: boolean;
   selectedProjectId?: string;
   defaultWorkspacePath?: string;
   defaultProjectRemoved?: boolean;
@@ -695,12 +697,20 @@ export function resolveWorkspaceRootForRun(args: {
   const {
     workspacePath,
     workspaceTargetPath,
+    conversationScope,
     selectedProjectId,
     defaultWorkspacePath,
     defaultProjectRemoved,
     activeThreadWorkspacePath,
     projectsFromWorkspace,
   } = args;
+
+  // A project-less conversation is deliberately unbound. Core owns its
+  // thread-keyed managed workspace, so neither a remembered default folder nor
+  // an existing thread's resolved path may turn it back into a project run.
+  if (conversationScope) {
+    return "";
+  }
 
   const explicitTarget = workspaceTargetPath?.trim();
   if (explicitTarget) {
@@ -1578,6 +1588,7 @@ export function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<
     string | undefined
   >(undefined);
+  const [conversationScope, setConversationScope] = useState(true);
   useEffect(
     () =>
       runtimeClient.onMemoryDreamReceipt((task) => {
@@ -1601,6 +1612,8 @@ export function App() {
     [runtimeClient, selectedProjectId],
   );
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([]);
+  const [conversationSectionExpanded, setConversationSectionExpanded] =
+    useState(true);
   const [projectOrderIds, setProjectOrderIds] = useState<string[]>([]);
   const [projectReorderSubmitting, setProjectReorderSubmitting] =
     useState(false);
@@ -2500,15 +2513,23 @@ export function App() {
   const workspaceRootForRun = resolveWorkspaceRootForRun({
     workspacePath,
     workspaceTargetPath: workspaceTargetPathRef.current,
+    conversationScope,
     selectedProjectId,
     defaultWorkspacePath,
     defaultProjectRemoved,
     activeThreadWorkspacePath,
     projectsFromWorkspace,
   });
+  const selectedFolderlessProject =
+    selectedProjectId !== undefined &&
+    selectedProjectId !== DEFAULT_WORKSPACE_PROJECT_ID &&
+    projectsFromWorkspace.find((project) => project.id === selectedProjectId)
+      ?.folders.length === 0;
   const isWorkspaceValid =
-    workspaceRootForRun !== "" &&
-    /^([A-Za-z]:[\\/]|\/)/.test(workspaceRootForRun);
+    conversationScope ||
+    selectedFolderlessProject ||
+    (workspaceRootForRun !== "" &&
+      /^([A-Za-z]:[\\/]|\/)/.test(workspaceRootForRun));
   const {
     composerValue,
     setComposerValue,
@@ -2728,10 +2749,14 @@ export function App() {
   const workspaceLabelPath =
     activeThreadWorkspacePath ?? pathForSelectedProject;
   const activeProjectLabel =
-    (workspaceLabelProjectId
-      ? projectLabelById.get(workspaceLabelProjectId)
-      : undefined) ??
-    (workspaceLabelPath ? workspaceLabelForPath(workspaceLabelPath) : "awaken");
+    conversationScope
+      ? "选择项目"
+      : (workspaceLabelProjectId
+          ? projectLabelById.get(workspaceLabelProjectId)
+          : undefined) ??
+        (workspaceLabelPath
+          ? workspaceLabelForPath(workspaceLabelPath)
+          : "awaken");
   const contextMeta = contextUsageMeta(
     runtimeState.inspectorSummary.contextWindow,
     selectedModelProfile,
@@ -2950,8 +2975,8 @@ export function App() {
     ];
   }
 
-  function threadItemsForProject(projectId: string): ProjectItem[] {
-    return threadsForProject(projectId).map((thread) => {
+  function threadItems(threads: ThreadItem[]): ProjectItem[] {
+    return threads.map((thread) => {
       return {
         id: `thread:${thread.threadId}`,
         kind: "thread",
@@ -2977,6 +3002,16 @@ export function App() {
       };
     });
   }
+
+  function threadItemsForProject(projectId: string): ProjectItem[] {
+    return threadItems(threadsForProject(projectId));
+  }
+
+  const conversationThreads = runtimeState.threads.filter(
+    (thread) =>
+      projectIdForThread(thread, effectiveDefaultWorkspacePath) === undefined,
+  );
+  const conversationItems = threadItems(conversationThreads);
 
   const defaultProjectThreads = threadItemsForProject(
     DEFAULT_WORKSPACE_PROJECT_ID,
@@ -3044,16 +3079,37 @@ export function App() {
       (project) => !orderedRepositoryProjectIds.has(project.id),
     ),
   ];
+  const allProjectsExpanded =
+    repositoryProjects.length > 0 &&
+    repositoryProjects.every((project) =>
+      expandedProjectIds.includes(project.id),
+    );
   const composerProjectPicker = {
+    label: "选择项目",
     placeholder: "选择项目",
-    options: repositoryProjects.map((project) => ({
-      id: project.id,
-      label: project.label,
-      selected: project.id === selectedProjectId,
-      disabled: project.disabled,
-      onSelect: () => handleSelectProject(project.id),
-    })),
-    emptyLabel: "暂无项目，可先创建一个。",
+    options: [
+      {
+        id: "conversation",
+        label: "选择项目",
+        icon: null,
+        selected: conversationScope,
+        onSelect: handleSelectConversationScope,
+      },
+      ...repositoryProjects.map((project) => ({
+        id: project.id,
+        label: project.label,
+        selected: !conversationScope && project.id === selectedProjectId,
+        disabled: project.disabled,
+        onSelect: () => handleSelectProject(project.id),
+      })),
+    ],
+    emptyLabel: "未选择项目时，对话在电脑全局范围中运行。",
+    clearAction: conversationScope
+      ? undefined
+      : {
+          label: "取消选择项目",
+          onClick: handleSelectConversationScope,
+        },
     createAction: {
       label: "创建项目",
       description: "可选择一个或多个文件夹",
@@ -3187,7 +3243,11 @@ export function App() {
       return undefined;
     }
 
-    syncProjectSelectionForWorkspace(transcript.thread.workspace.workspaceRoot);
+    syncProjectSelectionForThread({
+      threadId: transcript.thread.threadId,
+      projectId: transcript.thread.projectId,
+      workspaceRoot: transcript.thread.workspace.workspaceRoot,
+    });
     applyRuntimeActions(actionsForThreadTranscript(transcript));
     void runtimeClient
       .listMemoryDreams(transcript.thread.projectId, 5)
@@ -3482,8 +3542,10 @@ export function App() {
     const workspaceRoot = resolveWorkspaceRootForRun({
       workspacePath,
       workspaceTargetPath: workspaceTargetPathRef.current,
+      conversationScope,
       selectedProjectId,
       defaultWorkspacePath,
+      defaultProjectRemoved,
       activeThreadWorkspacePath,
       projectsFromWorkspace,
     });
@@ -3584,7 +3646,7 @@ export function App() {
         label: nextThreadLabel,
         runId: run.runId,
         projectId: runProjectId,
-        workspaceRoot: workspaceRoot,
+        workspaceRoot,
       });
       if (isNewThread) {
         startThreadTitlePoll(run.threadId);
@@ -3639,7 +3701,7 @@ export function App() {
     const thread = runtimeState.threads.find(
       (item) => item.threadId === threadId,
     );
-    syncProjectSelectionForWorkspace(thread?.workspaceRoot);
+    syncProjectSelectionForThread(thread);
     if (!thread?.runId) {
       localStorage.removeItem("awaken:runId");
       return;
@@ -3661,23 +3723,33 @@ export function App() {
     );
   }
 
-  function syncProjectSelectionForWorkspace(nextWorkspacePath?: string): void {
-    if (!nextWorkspacePath) {
+  function syncProjectSelectionForThread(
+    thread?: Pick<ThreadItem, "threadId" | "projectId" | "workspaceRoot">,
+  ): void {
+    if (!thread) {
       return;
     }
-
-    const nextProjectId = isSameWorkspacePath(
-      nextWorkspacePath,
+    const nextProjectId = projectIdForThread(
+      thread,
       effectiveDefaultWorkspacePath,
-    )
-      ? DEFAULT_WORKSPACE_PROJECT_ID
-      : projectsFromWorkspace.find((project) =>
-          isSameWorkspacePath(project.path, nextWorkspacePath),
-        )?.id;
+    );
     if (!nextProjectId) {
+      setConversationScope(true);
+      setSelectedProjectId(undefined);
+      workspaceTargetPathRef.current = thread.workspaceRoot ?? "";
+      setWorkspacePath(thread.workspaceRoot ?? "");
+      setConversationSectionExpanded(true);
       return;
     }
+    setConversationScope(false);
     setSelectedProjectId(nextProjectId);
+    const projectHasNoFolders =
+      nextProjectId !== DEFAULT_WORKSPACE_PROJECT_ID &&
+      projectsFromWorkspace.find((project) => project.id === nextProjectId)
+        ?.folders.length === 0;
+    const nextWorkspacePath = projectHasNoFolders
+      ? ""
+      : (thread.workspaceRoot ?? "");
     workspaceTargetPathRef.current = nextWorkspacePath;
     setWorkspacePath(nextWorkspacePath);
     setExpandedProjectIds((current) =>
@@ -3901,11 +3973,14 @@ export function App() {
       return;
     }
 
+    setConversationScope(false);
+
     const projectPath =
       id === DEFAULT_WORKSPACE_PROJECT_ID
         ? defaultWorkspacePath
         : projectsFromWorkspace.find((project) => project.id === id)?.path;
     if (
+      (runtimeState.activeThreadId && activeThreadProjectId !== id) ||
       shouldResetActiveThreadForWorkspaceChange(
         activeThreadWorkspacePath,
         projectPath,
@@ -3914,10 +3989,8 @@ export function App() {
       resetActiveThreadContext();
     }
     setSelectedProjectId(id);
-    if (projectPath) {
-      workspaceTargetPathRef.current = projectPath;
-      setWorkspacePath(projectPath);
-    }
+    workspaceTargetPathRef.current = projectPath ?? "";
+    setWorkspacePath(projectPath ?? "");
   }
 
   async function handleReorderProjects(ids: string[]): Promise<void> {
@@ -4102,6 +4175,7 @@ export function App() {
       // both are cleared and the selection carries the identity instead.
       workspaceTargetPathRef.current = project.workspaceRoot;
       setWorkspacePath(project.workspaceRoot);
+      setConversationScope(false);
       setSelectedProjectId(nextProjectId);
       setExpandedProjectIds((current) =>
         current.includes(nextProjectId) ? current : [...current, nextProjectId],
@@ -4301,7 +4375,7 @@ export function App() {
     setExpandedProjectIds((current) =>
       current.includes(projectId) ? current : [...current, projectId],
     );
-    handleNewTask();
+    resetNewTaskDraft();
     requestComposerFocus();
   }
 
@@ -4373,7 +4447,7 @@ export function App() {
     }
   }
 
-  function handleNewTask(): void {
+  function resetNewTaskDraft(): void {
     setActiveNavId(undefined);
     clearComposerValue();
     setComposerAttachments([]);
@@ -4381,6 +4455,26 @@ export function App() {
     setComposerTokenPlacements({});
     setComposerTokenLeadingTexts({});
     resetActiveThreadContext();
+  }
+
+  function handleSelectConversationScope(): void {
+    if (runtimeState.activeThreadId && activeThreadProjectId !== undefined) {
+      resetActiveThreadContext();
+    }
+    setConversationScope(true);
+    setSelectedProjectId(undefined);
+    workspaceTargetPathRef.current = "";
+    setWorkspacePath("");
+    setConversationSectionExpanded(true);
+  }
+
+  function handleNewTask(): void {
+    setConversationScope(true);
+    setSelectedProjectId(undefined);
+    workspaceTargetPathRef.current = "";
+    setWorkspacePath("");
+    setConversationSectionExpanded(true);
+    resetNewTaskDraft();
   }
 
   function handleSelectNav(id: string): void {
@@ -5081,6 +5175,7 @@ export function App() {
                 navItems={navItems}
                 activeNavId={activeNavId}
                 projects={repositoryProjects}
+                conversations={conversationItems}
                 activeProjectId={activeProjectId}
                 expandedIds={expandedProjectIds}
                 defaultExpandedIds={[DEFAULT_WORKSPACE_PROJECT_ID]}
@@ -5091,24 +5186,66 @@ export function App() {
                 projectSectionActions={
                   <span className="sidebar-section-actions">
                     <SidebarSectionAction
-                      label="Filter projects"
+                      label={
+                        allProjectsExpanded
+                          ? "收起全部项目"
+                          : "展开全部项目"
+                      }
                       onClick={() =>
-                        setNotice("Project filters are not available yet.")
+                        setExpandedProjectIds(
+                          allProjectsExpanded
+                            ? []
+                            : repositoryProjects.map((project) => project.id),
+                        )
                       }
                     >
-                      <ListFilter size={13} strokeWidth={1.85} />
+                      {allProjectsExpanded ? (
+                        <ChevronsDownUp size={13} strokeWidth={1.85} />
+                      ) : (
+                        <ChevronsUpDown size={13} strokeWidth={1.85} />
+                      )}
                     </SidebarSectionAction>
                     <SidebarSectionAction
-                      label="Add folder"
+                      label="创建项目"
                       onClick={handleOpenCreateProject}
                     >
                       <FolderPlus size={13} strokeWidth={1.85} />
                     </SidebarSectionAction>
                   </span>
                 }
+                conversationSectionLabel="对话"
+                conversationSectionExpanded={conversationSectionExpanded}
+                conversationSectionActions={
+                  <span className="sidebar-section-actions">
+                    <SidebarSectionAction
+                      label={
+                        conversationSectionExpanded
+                          ? "收起对话"
+                          : "展开对话"
+                      }
+                      onClick={() =>
+                        setConversationSectionExpanded((expanded) => !expanded)
+                      }
+                    >
+                      {conversationSectionExpanded ? (
+                        <ChevronsDownUp size={13} strokeWidth={1.85} />
+                      ) : (
+                        <ChevronsUpDown size={13} strokeWidth={1.85} />
+                      )}
+                    </SidebarSectionAction>
+                    <SidebarSectionAction
+                      label="新增对话"
+                      onClick={handleNewTask}
+                    >
+                      <MessageCirclePlus size={13} strokeWidth={1.85} />
+                    </SidebarSectionAction>
+                  </span>
+                }
                 showProjectCount={false}
+                showConversationCount={false}
                 onSelectNav={handleSelectNav}
                 onSelectProject={handleSelectProject}
+                onSelectConversation={handleSelectProject}
                 onReorderProjects={(ids) => {
                   void handleReorderProjects(ids);
                 }}

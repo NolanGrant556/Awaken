@@ -501,9 +501,17 @@ func (s *FileDesktopStore) upsertThread(snapshot ThreadSnapshot, modelProfileKey
 	if snapshot.UpdatedAt.IsZero() {
 		snapshot.UpdatedAt = snapshot.CreatedAt
 	}
-	projectID, err := s.ensureProjectLocked(snapshot.Workspace.WorkspaceRoot, false)
-	if err != nil {
-		return err
+	projectID := ""
+	// A thread-owned session workspace is not a project folder. In particular,
+	// ignore a stale top-level ProjectID that older path inference may have
+	// written: an actual folder-less project always carries its identity inside
+	// Workspace.ProjectID after normalization.
+	if !snapshot.Workspace.SessionWorkspace || strings.TrimSpace(snapshot.Workspace.ProjectID) != "" {
+		var err error
+		projectID, err = s.ensureProjectLocked(snapshot.Workspace.WorkspaceRoot, false)
+		if err != nil {
+			return err
+		}
 	}
 
 	incomingTitle := trimThreadLabel(firstNonEmpty(snapshot.Label, snapshot.ThreadID))

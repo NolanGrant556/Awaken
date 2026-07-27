@@ -19,14 +19,30 @@ const (
 // by the existing Core boot path. Map values are OS path lists, not single
 // directories; SkillRegistry expands them deterministically in listed order.
 func LocalSourceDirs(projectRoot string) map[SourceOrigin]string {
+	return LocalSourceDirsForProjectRoots([]string{projectRoot})
+}
+
+// LocalSourceDirsForProjectRoots builds the discovery contract for one
+// project whose attached folders are ordered primary-first. Every attached
+// folder contributes its .awaken/skills directory; the first folder wins
+// same-ID conflicts within the project. Project-level .agents/skills and
+// legacy commands intentionally remain anchored to the primary folder so the
+// separate compatibility sources do not silently change scope.
+func LocalSourceDirsForProjectRoots(projectRoots []string) map[SourceOrigin]string {
 	dirs := make(map[SourceOrigin]string)
 	home, _ := os.UserHomeDir()
-	projectRoot = cleanAbsoluteDir(projectRoot, home)
 	home = cleanAbsoluteDir(home, home)
-
-	if projectRoot != "" {
-		dirs[SourceProject] = joinSourceDirList([]string{filepath.Join(projectRoot, ".awaken", "skills")})
+	projectRoots = cleanSourceDirs(projectRoots, home)
+	projectRoot := ""
+	if len(projectRoots) > 0 {
+		projectRoot = projectRoots[0]
 	}
+
+	projectSkillDirs := make([]string, 0, len(projectRoots))
+	for _, root := range projectRoots {
+		projectSkillDirs = append(projectSkillDirs, filepath.Join(root, ".awaken", "skills"))
+	}
+	setSourceDirList(dirs, SourceProject, projectSkillDirs)
 	if home != "" {
 		dirs[SourceUser] = joinSourceDirList([]string{filepath.Join(home, ".awaken", "skills")})
 	}

@@ -13,6 +13,7 @@ export type AwakenSidebarProps = {
   navItems?: NavItem[];
   activeNavId?: string;
   projects?: ProjectItem[];
+  conversations?: ProjectItem[];
   activeProjectId?: string;
   expandedIds?: string[];
   defaultExpandedIds?: string[];
@@ -23,11 +24,16 @@ export type AwakenSidebarProps = {
   projectSectionLabel?: string;
   showProjectCount?: boolean;
   projectSectionActions?: ReactNode;
+  conversationSectionLabel?: string;
+  showConversationCount?: boolean;
+  conversationSectionActions?: ReactNode;
+  conversationSectionExpanded?: boolean;
   profileSubtitle?: string;
   profileExpanded?: boolean;
   profileControls?: string;
   onSelectNav?: (id: string) => void;
   onSelectProject?: (id: string) => void;
+  onSelectConversation?: (id: string) => void;
   onReorderProjects?: (ids: string[]) => void;
   projectReorderDisabled?: boolean;
   onNewTask?: () => void;
@@ -90,6 +96,7 @@ export function AwakenSidebar({
   navItems = [],
   activeNavId,
   projects = [],
+  conversations = [],
   activeProjectId,
   expandedIds,
   defaultExpandedIds,
@@ -100,11 +107,16 @@ export function AwakenSidebar({
   projectSectionLabel = "项目工作区",
   showProjectCount = true,
   projectSectionActions,
+  conversationSectionLabel = "对话",
+  showConversationCount = false,
+  conversationSectionActions,
+  conversationSectionExpanded = true,
   profileSubtitle,
   profileExpanded,
   profileControls,
   onSelectNav,
   onSelectProject,
+  onSelectConversation,
   onReorderProjects,
   projectReorderDisabled,
   onNewTask,
@@ -113,6 +125,8 @@ export function AwakenSidebar({
   profileButtonRef,
 }: AwakenSidebarProps) {
   const showProjects = projectSectionLabel !== "" || projects.length > 0;
+  const showConversations =
+    conversationSectionLabel !== "" || conversations.length > 0;
 
   return (
     <aside className="aw-sidebar" aria-label="Awaken 导航" style={sidebarStyle}>
@@ -126,7 +140,7 @@ export function AwakenSidebar({
 
       <AwakenPrimaryNav items={navItems} activeId={activeNavId} onSelect={onSelectNav} />
 
-      <div className="aw-scroll-hidden" style={scrollStyle}>
+      <div className="aw-sidebar-scroll" style={scrollStyle}>
         {showProjects ? (
           <section style={sectionStyle}>
             <div style={sectionHeadStyle}>
@@ -148,6 +162,27 @@ export function AwakenSidebar({
               onReorder={onReorderProjects}
               reorderDisabled={projectReorderDisabled}
             />
+          </section>
+        ) : null}
+        {showConversations ? (
+          <section style={sectionStyle}>
+            <div style={sectionHeadStyle}>
+              <span>{conversationSectionLabel}</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                {showConversationCount && conversations.length > 0 ? (
+                  <span style={headCountStyle}>{conversations.length}</span>
+                ) : null}
+                {conversationSectionActions}
+              </span>
+            </div>
+            {conversationSectionExpanded ? (
+              <AwakenProjectTree
+                items={conversations}
+                activeId={activeProjectId}
+                onSelect={onSelectConversation ?? onSelectProject}
+                emptyLabel="暂无对话"
+              />
+            ) : null}
           </section>
         ) : null}
       </div>

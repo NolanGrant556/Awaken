@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RuntimeSkill } from "../shared/runtime";
+import type { RuntimeProject, RuntimeSkill } from "../shared/runtime";
 import {
   ExtensionsView,
   SKILL_CATALOG_SYNC_INTERVAL_MS,
@@ -22,7 +22,19 @@ const projectSkill: RuntimeSkill = {
   sourceOrigin: "project",
   rootDir: `${projectRoot}/.awaken/skills/project-report`,
   skillFilePath: `${projectRoot}/.awaken/skills/project-report/SKILL.md`,
+  projectPath: projectRoot,
   context: "inline",
+};
+
+const runtimeProject: RuntimeProject = {
+  projectId: "project-marketing",
+  workspaceRoot: projectRoot,
+  folders: [{ path: projectRoot, role: "user", isPrimary: true }],
+  displayName: "营销项目",
+  state: "active",
+  createdAt: "2026-07-27T00:00:00Z",
+  updatedAt: "2026-07-27T00:00:00Z",
+  version: 1,
 };
 
 const bundledSkill: RuntimeSkill = {
@@ -114,7 +126,7 @@ describe("ExtensionsView project Skills flow", () => {
     });
     const runtimeClient = {
       getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
-      listProjects: vi.fn(async () => []),
+      listProjects: vi.fn(async () => [runtimeProject]),
       listConnectors: vi.fn(async () => []),
       listCliConnectors: vi.fn(async () => []),
       listMcpServers: vi.fn(async () => []),
@@ -151,7 +163,7 @@ describe("ExtensionsView project Skills flow", () => {
 
     await act(async () => buttonByText("项目 Skills")?.click());
     const folder = document.querySelector<HTMLButtonElement>(
-      '[aria-label="打开marketing 项目 Skills"]',
+      '[aria-label="打开营销项目 项目 Skills"]',
     );
     expect(folder).not.toBeNull();
     expect(folder?.dataset.size).toBe("dense");
@@ -160,7 +172,7 @@ describe("ExtensionsView project Skills flow", () => {
 
     await act(async () => folder?.click());
     const projectDialog = document.querySelector('[role="dialog"]');
-    expect(projectDialog?.textContent).toContain("marketing");
+    expect(projectDialog?.textContent).toContain("营销项目");
     expect(projectDialog?.textContent).toContain("项目报告");
     expect(
       projectDialog?.querySelector(".aw-skill-card .aw-switch")?.getAttribute("data-size"),
@@ -168,9 +180,20 @@ describe("ExtensionsView project Skills flow", () => {
     expect(
       projectDialog?.querySelector(".aw-project-skills-dialog__heading strong"),
     ).toBeNull();
-    expect(
-      projectDialog?.querySelector(".aw-project-skills-dialog__path")?.textContent,
-    ).toBe(projectRoot);
+    const folderSummary = projectDialog?.querySelector<HTMLButtonElement>(
+      '[aria-label="筛选 1 个项目文件夹"]',
+    );
+    expect(folderSummary?.textContent).toContain("1 个项目文件夹");
+    expect(folderSummary?.textContent).toContain("主：marketing");
+    expect(projectDialog?.textContent).not.toContain(projectRoot);
+    await act(async () => folderSummary?.click());
+    const folderPopover = document.querySelector<HTMLElement>(
+      ".aw-project-skills-dialog__folder-popover",
+    );
+    expect(folderPopover?.textContent).toContain("marketing");
+    expect(folderPopover?.textContent).not.toContain(projectRoot);
+    expect(folderPopover?.querySelector(".aw-project-skills-dialog__path")).toBeNull();
+    await act(async () => folderSummary?.click());
     const projectBackdrop = projectDialog?.closest(".aw-dialog-backdrop");
 
     const previewButton = document.querySelector<HTMLButtonElement>(
@@ -236,10 +259,133 @@ describe("ExtensionsView project Skills flow", () => {
     );
   });
 
+  it("shows project entities immediately and aggregates Skills from every attached folder", async () => {
+    const secondaryRoot = "/workspace/shared-data";
+    const emptyRoot = "/workspace/legal";
+    const secondarySkill: RuntimeSkill = {
+      ...projectSkill,
+      id: "secondary-analysis",
+      catalogEntryId: "catalog-secondary-analysis",
+      name: "secondary-analysis",
+      displayName: "次文件夹分析",
+      description: "读取次文件夹数据",
+      rootDir: `${secondaryRoot}/.awaken/skills/secondary-analysis`,
+      skillFilePath: `${secondaryRoot}/.awaken/skills/secondary-analysis/SKILL.md`,
+      projectPath: secondaryRoot,
+    };
+    const multiFolderProject: RuntimeProject = {
+      ...runtimeProject,
+      projectId: "project-quarterly",
+      displayName: "季度经营分析",
+      folders: [
+        { path: projectRoot, role: "user", isPrimary: true },
+        { path: secondaryRoot, role: "user", isPrimary: false },
+        { path: emptyRoot, role: "user", isPrimary: false },
+      ],
+    };
+    const folderlessProject: RuntimeProject = {
+      ...runtimeProject,
+      projectId: "project-empty",
+      workspaceRoot: "",
+      folders: [],
+      displayName: "待规划项目",
+    };
+    const listSkills = vi.fn(async () => [projectSkill, secondarySkill]);
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => [multiFolderProject, folderlessProject]),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills,
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="skills"
+          desktopReady
+          runtimeClient={runtimeClient}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={vi.fn()}
+        />,
+      );
+    });
+    await settle();
+
+    expect(listSkills).toHaveBeenCalledWith([projectRoot, secondaryRoot, emptyRoot]);
+    await act(async () => buttonByText("项目 Skills")?.click());
+    const projectFolder = document.querySelector<HTMLButtonElement>(
+      '[aria-label="打开季度经营分析 项目 Skills"]',
+    );
+    const emptyProjectFolder = document.querySelector<HTMLButtonElement>(
+      '[aria-label="打开待规划项目 项目 Skills"]',
+    );
+    expect(projectFolder?.textContent).toContain("2 Skill");
+    expect(emptyProjectFolder?.textContent).toContain("0 Skill");
+
+    await act(async () => projectFolder?.click());
+    const projectDialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    expect(projectDialog?.textContent).toContain("季度经营分析 Skills");
+    const folderSummary = projectDialog?.querySelector<HTMLButtonElement>(
+      '[aria-label="筛选 3 个项目文件夹"]',
+    );
+    expect(folderSummary?.textContent).toContain("3 个项目文件夹");
+    expect(folderSummary?.textContent).toContain("主：marketing");
+    expect(projectDialog?.textContent).not.toContain(projectRoot);
+    expect(projectDialog?.textContent).not.toContain(secondaryRoot);
+    expect(projectDialog?.textContent).toContain("项目报告marketing");
+    expect(projectDialog?.textContent).toContain("次文件夹分析shared-data");
+    expect(projectDialog?.textContent).not.toContain("主文件夹 · marketing");
+    expect(projectDialog?.textContent).not.toContain("文件夹 · shared-data");
+
+    await act(async () => folderSummary?.click());
+    const folderPopover = document.querySelector<HTMLElement>(
+      ".aw-project-skills-dialog__folder-popover",
+    );
+    const folderPopoverHeading = folderPopover?.querySelector(
+      ".aw-project-skills-dialog__folder-popover-heading",
+    );
+    expect(folderPopoverHeading?.firstElementChild?.textContent).toBe("项目文件夹");
+    expect(
+      folderPopoverHeading?.querySelector(
+        ".aw-project-skills-dialog__folder-popover-count",
+      )?.textContent,
+    ).toBe("3");
+    expect(folderPopover?.textContent).toContain("marketing主文件夹");
+    expect(folderPopover?.textContent).toContain("shared-data");
+    expect(folderPopover?.textContent).toContain("legal");
+    expect(folderPopover?.textContent).not.toContain(projectRoot);
+    expect(folderPopover?.textContent).not.toContain(secondaryRoot);
+    expect(folderPopover?.textContent).not.toContain(emptyRoot);
+
+    const emptyFolderOption = document.querySelector<HTMLButtonElement>(
+      '[aria-label="查看 legal 的 Skills"]',
+    );
+    expect(emptyFolderOption?.disabled).toBe(false);
+    await act(async () => emptyFolderOption?.click());
+    expect(folderSummary?.textContent).toContain("当前：legal");
+    expect(projectDialog?.textContent).toContain("0 Skills");
+    expect(projectDialog?.textContent).toContain("这个文件夹还没有 Skills");
+    expect(projectDialog?.textContent).not.toContain("项目报告marketing");
+    expect(projectDialog?.textContent).not.toContain("次文件夹分析shared-data");
+
+    await act(async () => folderSummary?.click());
+    const allFoldersOption = document.querySelector<HTMLButtonElement>(
+      '[aria-label="查看全部文件夹的 Skills"]',
+    );
+    await act(async () => allFoldersOption?.click());
+    expect(folderSummary?.textContent).toContain("主：marketing");
+    expect(projectDialog?.textContent).toContain("2 Skills");
+    expect(projectDialog?.textContent).toContain("项目报告marketing");
+    expect(projectDialog?.textContent).toContain("次文件夹分析shared-data");
+  });
+
   it("shows all Agents Skills directly without collapsible source groups", async () => {
     const runtimeClient = {
       getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
-      listProjects: vi.fn(async () => []),
+      listProjects: vi.fn(async () => [runtimeProject]),
       listConnectors: vi.fn(async () => []),
       listCliConnectors: vi.fn(async () => []),
       listMcpServers: vi.fn(async () => []),
@@ -286,7 +432,7 @@ describe("ExtensionsView project Skills flow", () => {
     );
     const runtimeClient = {
       getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
-      listProjects: vi.fn(async () => []),
+      listProjects: vi.fn(async () => [runtimeProject]),
       listConnectors: vi.fn(async () => []),
       listCliConnectors: vi.fn(async () => []),
       listMcpServers: vi.fn(async () => []),
@@ -313,7 +459,7 @@ describe("ExtensionsView project Skills flow", () => {
 
     await act(async () => buttonByText("项目 Skills")?.click());
     const folder = document.querySelector<HTMLButtonElement>(
-      '[aria-label="打开marketing 项目 Skills"]',
+      '[aria-label="打开营销项目 项目 Skills"]',
     );
     await act(async () => folder?.click());
     const projectDialog = document.querySelector<HTMLElement>('[role="dialog"]');

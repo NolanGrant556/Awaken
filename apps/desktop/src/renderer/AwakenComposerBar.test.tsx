@@ -478,6 +478,7 @@ describe("AwakenComposerBar unified token editing", () => {
   it("renders the center project shelf and forwards selection and creation", () => {
     const onSelectAwaken = vi.fn();
     const onSelectErp = vi.fn();
+    const onClearProject = vi.fn();
     const onCreateProject = vi.fn();
     renderComposer({
       variant: "center",
@@ -492,6 +493,10 @@ describe("AwakenComposerBar unified token editing", () => {
           },
           { id: "erp", label: "ERP 项目", onSelect: onSelectErp },
         ],
+        clearAction: {
+          label: "取消选择项目",
+          onClick: onClearProject,
+        },
         createAction: {
           label: "创建项目",
           description: "可选择一个或多个文件夹",
@@ -504,6 +509,19 @@ describe("AwakenComposerBar unified token editing", () => {
       '.composer-bar-project-trigger[aria-haspopup="menu"]',
     );
     expect(trigger?.textContent).toContain("Awaken");
+    expect(trigger?.querySelector("button")).toBeNull();
+
+    const clearProject = host.querySelector<HTMLButtonElement>(
+      ".composer-bar-project-clear",
+    );
+    expect(clearProject?.getAttribute("aria-label")).toBe(
+      "取消选择项目：Awaken",
+    );
+    act(() => {
+      clearProject?.click();
+    });
+    expect(onClearProject).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".composer-bar-project-menu")).toBeNull();
 
     act(() => {
       trigger?.click();
@@ -533,6 +551,60 @@ describe("AwakenComposerBar unified token editing", () => {
       createAction?.click();
     });
     expect(onCreateProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the global conversation scope as an iconless unselected-project state", () => {
+    renderComposer({
+      variant: "center",
+      projectPicker: {
+        label: "选择项目",
+        placeholder: "选择项目",
+        options: [
+          {
+            id: "conversation",
+            label: "选择项目",
+            icon: null,
+            selected: true,
+          },
+          { id: "erp", label: "ERP 项目" },
+        ],
+      },
+    });
+
+    const trigger = host.querySelector<HTMLButtonElement>(
+      '.composer-bar-project-trigger[aria-haspopup="menu"]',
+    );
+    expect(trigger?.getAttribute("aria-label")).toBe(
+      "选择项目，当前：选择项目",
+    );
+    expect(trigger?.firstElementChild?.classList).toContain(
+      "composer-bar-project-trigger-label",
+    );
+    expect(trigger?.classList.contains("composer-bar-project-trigger-no-icon")).toBe(
+      true,
+    );
+
+    act(() => {
+      trigger?.click();
+    });
+    const options = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(
+        '.composer-bar-project-option[role="menuitemradio"]',
+      ),
+    );
+    const globalOption = options.find((option) =>
+      option.textContent?.includes("选择项目"),
+    );
+    const projectOption = options.find((option) =>
+      option.textContent?.includes("ERP 项目"),
+    );
+    expect(globalOption?.firstElementChild?.classList).toContain(
+      "composer-bar-project-option-label",
+    );
+    expect(
+      globalOption?.classList.contains("composer-bar-project-option-no-icon"),
+    ).toBe(true);
+    expect(projectOption?.firstElementChild?.tagName).toBe("svg");
   });
 
   it("keeps the project shelf out of the dock composer", () => {

@@ -67,8 +67,8 @@ func main() {
 	manager := buildMCPManager(defaultWorkspace)
 	connRegistry := buildConnectorRegistry(manager, defaultWorkspace, legacyCLIReport.ReviewRequired)
 	skillRegistry := buildSkillRegistry(manager, defaultWorkspace)
-	syncSkillsForWorkspace := func(workspaceRoot string) {
-		skillRegistry.ReloadLocalSources(skills.LocalSourceDirs(workspaceRoot))
+	syncSkillsForWorkspace := func(workspace runtime.WorkspaceConfig) {
+		skillRegistry.ReloadLocalSources(skillSourceDirsForWorkspace(workspace))
 	}
 	skillManager := skillruntime.NewManager(skillRegistry, skillruntime.StdLogger{})
 	skillManager.RefreshTools()
@@ -98,7 +98,7 @@ func main() {
 				EntryPoint:  "awaken-core",
 				ModelConfig: modelCfg,
 				SkillSummary: skills.FormatRuntimeSkillSummary(
-					skillRegistry.PreviewLocalSources(skills.LocalSourceDirs(workspaceRoot)),
+					skillRegistry.PreviewLocalSources(skillSourceDirsForWorkspace(workspace)),
 				),
 				MemoryContextProvider: func() (string, error) {
 					if recallManager != nil {
@@ -408,6 +408,16 @@ func buildSkillRegistry(manager *mcpclient.Manager, workspace string) *skills.Sk
 
 	log.Printf("[skills] loaded %d skill definitions", len(registry.ListAll()))
 	return registry
+}
+
+func skillSourceDirsForWorkspace(workspace runtime.WorkspaceConfig) map[skills.SourceOrigin]string {
+	if workspace.SessionWorkspace {
+		return skills.LocalSourceDirs("")
+	}
+	projectRoots := make([]string, 0, len(workspace.ReadableRoots)+1)
+	projectRoots = append(projectRoots, workspace.WorkspaceRoot)
+	projectRoots = append(projectRoots, workspace.ReadableRoots...)
+	return skills.LocalSourceDirsForProjectRoots(projectRoots)
 }
 
 // buildACPManager loads the user-scoped runner config and starts the ACP manager.

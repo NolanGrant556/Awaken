@@ -34,19 +34,15 @@ func SessionsRoot(root string) string {
 	return filepath.Join(filepath.Clean(root), "sessions")
 }
 
-// SessionWorkspacePath is the working directory a run falls back to when its
-// project has no folder attached. It gives the run a Bash cwd and a base for
-// relative paths without asking the user to pick a folder first.
-//
-// The directory is keyed by project rather than by thread because the workspace
-// root is what identifies a thread in the run service; a per-thread directory
-// would mint a new identity on every conversation. Threads in the same
-// folder-less project therefore share one place to keep what they produce.
-func SessionWorkspacePath(root, projectID string) string {
-	return filepath.Join(SessionsRoot(root), projectID)
+// SessionWorkspacePath is the working directory for an Awaken-managed run.
+// ownerID is a stable project ID for a folder-less project, or a stable thread
+// ID for a conversation that does not belong to a project. Runtime validates
+// this identifier before using the returned path.
+func SessionWorkspacePath(root, ownerID string) string {
+	return filepath.Join(SessionsRoot(root), ownerID)
 }
 
-// SessionOutputPath is where a folder-less run's produced files land.
-func SessionOutputPath(root, projectID string) string {
-	return filepath.Join(SessionWorkspacePath(root, projectID), "output")
+// SessionOutputPath is where an Awaken-managed run's produced files land.
+func SessionOutputPath(root, ownerID string) string {
+	return filepath.Join(SessionWorkspacePath(root, ownerID), "output")
 }

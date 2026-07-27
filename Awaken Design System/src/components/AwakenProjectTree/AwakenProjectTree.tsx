@@ -9,7 +9,13 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronRight, Folder, FolderOpen, MoreHorizontal } from "lucide-react";
+import {
+  ChevronRight,
+  Folder,
+  FolderOpen,
+  MessageSquare,
+  MoreHorizontal,
+} from "lucide-react";
 import type { ProjectItem } from "../../types";
 import { AwakenDropdown } from "../AwakenDropdown";
 import {
@@ -27,6 +33,7 @@ export type AwakenProjectTreeProps = {
   onSelect?: (id: string) => void;
   onReorder?: (ids: string[]) => void;
   reorderDisabled?: boolean;
+  emptyLabel?: string;
 };
 
 type DropPosition = "before" | "after";
@@ -86,6 +93,7 @@ export function AwakenProjectTree({
   onSelect,
   onReorder,
   reorderDisabled = false,
+  emptyLabel = "暂无项目",
 }: AwakenProjectTreeProps) {
   const [internalExpanded, setInternalExpanded] = useState<string[]>(defaultExpandedIds);
   const [dragSourceId, setDragSourceId] = useState<string>();
@@ -265,7 +273,7 @@ export function AwakenProjectTree({
   };
 
   if (!items || items.length === 0) {
-    return <div style={emptyStyle}>暂无项目</div>;
+    return <div style={emptyStyle}>{emptyLabel}</div>;
   }
 
   return (
@@ -353,13 +361,13 @@ function ProjectNode({
     ? dropTarget.position
     : undefined;
 
-  const rowHeight = depth === 0 ? 36 : 32;
+  const rowHeight = isProject ? 36 : 32;
   const fontSize =
-    depth === 0 ? "var(--aw-font-size-base)" : "var(--aw-font-size-sm)";
+    isProject ? "var(--aw-font-size-base)" : "var(--aw-font-size-sm)";
   const lineHeight =
-    depth === 0 ? "var(--aw-line-height-base)" : "var(--aw-line-height-sm)";
+    isProject ? "var(--aw-line-height-base)" : "var(--aw-line-height-sm)";
   const idleColor =
-    depth === 0 ? "var(--aw-text-secondary)" : "var(--aw-text-tertiary)";
+    isProject ? "var(--aw-text-secondary)" : "var(--aw-text-tertiary)";
   const baseColor = isActive ? "var(--aw-text-primary)" : idleColor;
 
   const nodeClassName = [
@@ -437,6 +445,8 @@ function ProjectNode({
               ) : (
                 <Folder size={20} strokeWidth={1.75} aria-hidden="true" />
               )
+            ) : isTopLevel ? (
+              <MessageSquare size={17} strokeWidth={1.75} aria-hidden="true" />
             ) : null}
           </span>
           <span className="aw-project-row-label-wrap">

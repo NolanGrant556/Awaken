@@ -10,3 +10,43 @@
   background: var(--aw-border-light);
   pointer-events: none;
 }
+
+.aw-sidebar-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color:
+    color-mix(in srgb, var(--aw-text-tertiary) 42%, transparent)
+    transparent;
+}
+
+.aw-sidebar-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.aw-sidebar-scroll::-webkit-scrollbar-track,
+.aw-sidebar-scroll::-webkit-scrollbar-track-piece,
+.aw-sidebar-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.aw-sidebar-scroll::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--aw-text-tertiary) 42%, transparent);
+  background-clip: padding-box;
+}
+
+.aw-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--aw-text-secondary) 58%, transparent);
+  background-clip: padding-box;
+}
+
+.aw-sidebar-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}

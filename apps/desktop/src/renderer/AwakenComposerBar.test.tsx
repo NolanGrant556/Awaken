@@ -474,4 +474,81 @@ describe("AwakenComposerBar unified token editing", () => {
     });
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
+
+  it("renders the center project shelf and forwards selection and creation", () => {
+    const onSelectAwaken = vi.fn();
+    const onSelectErp = vi.fn();
+    const onCreateProject = vi.fn();
+    renderComposer({
+      variant: "center",
+      projectPicker: {
+        placeholder: "选择项目",
+        options: [
+          {
+            id: "awaken",
+            label: "Awaken",
+            selected: true,
+            onSelect: onSelectAwaken,
+          },
+          { id: "erp", label: "ERP 项目", onSelect: onSelectErp },
+        ],
+        createAction: {
+          label: "创建项目",
+          description: "可选择一个或多个文件夹",
+          onClick: onCreateProject,
+        },
+      },
+    });
+
+    const trigger = host.querySelector<HTMLButtonElement>(
+      '.composer-bar-project-trigger[aria-haspopup="menu"]',
+    );
+    expect(trigger?.textContent).toContain("Awaken");
+
+    act(() => {
+      trigger?.click();
+    });
+    const erpOption = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(
+        '.composer-bar-project-option[role="menuitemradio"]',
+      ),
+    ).find((option) => option.textContent?.includes("ERP 项目"));
+    expect(erpOption).toBeDefined();
+    act(() => {
+      erpOption?.click();
+    });
+    expect(onSelectErp).toHaveBeenCalledTimes(1);
+    expect(onSelectAwaken).not.toHaveBeenCalled();
+
+    act(() => {
+      trigger?.click();
+    });
+    const createAction = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(
+        '.composer-bar-project-create[role="menuitem"]',
+      ),
+    ).find((button) => button.textContent?.includes("创建项目"));
+    expect(createAction?.textContent).toContain("可选择一个或多个文件夹");
+    act(() => {
+      createAction?.click();
+    });
+    expect(onCreateProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the project shelf out of the dock composer", () => {
+    renderComposer({
+      variant: "dock",
+      projectPicker: {
+        options: [
+          {
+            id: "awaken",
+            label: "Awaken",
+            selected: true,
+          },
+        ],
+      },
+    });
+
+    expect(host.querySelector(".composer-bar-project-shelf")).toBeNull();
+  });
 });

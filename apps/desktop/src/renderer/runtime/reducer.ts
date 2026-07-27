@@ -434,7 +434,7 @@ function upsertThread(threads: ThreadItem[], next: ThreadItem): ThreadItem[] {
   return updated;
 }
 
-function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
+export function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
   return {
     threadId: thread.threadId,
     projectId: thread.projectId,

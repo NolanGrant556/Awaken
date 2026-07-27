@@ -403,4 +403,169 @@ if (!unclosedMermaidHtml.includes("language-mermaid")) {
   throw new Error("AwakenAssistantMessage did not preserve unclosed Mermaid as a code block");
 }
 
+const scheduledTaskListHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenScheduledTaskList, {
+    items: [
+      {
+        taskId: "sched_demo_running",
+        name: "工作日科技新闻早报",
+        kindLabel: "Agent",
+        projectName: "Awaken",
+        scheduleText: "工作日 09:30 · Asia/Shanghai",
+        enabled: true,
+        state: "running" as const,
+        stateLabel: "运行中",
+        nextRunText: "下次：明天 09:30",
+        lastRunText: "最近：今天 09:30 成功",
+        running: true,
+      },
+    ],
+  }),
+);
+
+if (
+  !scheduledTaskListHtml.includes('role="switch"') ||
+  !scheduledTaskListHtml.includes("aw-scheduled-task-list__row") ||
+  !scheduledTaskListHtml.includes("运行中") ||
+  !scheduledTaskListHtml.includes("工作日 09:30 · Asia/Shanghai")
+) {
+  throw new Error("AwakenScheduledTaskList should render a running task row with switch and state badge");
+}
+
+const scheduledTaskEmptyListHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenScheduledTaskList, { items: [] }),
+);
+
+if (
+  !scheduledTaskEmptyListHtml.includes("创建任务") ||
+  !scheduledTaskEmptyListHtml.includes("从模板创建")
+) {
+  throw new Error("AwakenScheduledTaskList empty state must offer both create entries");
+}
+
+const scheduledTaskTemplateDialogHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenScheduledTaskTemplateDialog, {
+    open: true,
+    title: "从模板创建",
+    description: "先选内置模板，再在编辑器里微调关键参数后保存",
+    categories: [
+      {
+        id: "cron",
+        label: "循环任务",
+        templates: [
+          {
+            templateId: "daily_tech_news_brief",
+            name: "工作日科技新闻早报",
+            description: "每个工作日早上整理科技新闻",
+            frequencyText: "工作日 09:30",
+          },
+        ],
+      },
+      {
+        id: "calendar",
+        label: "日程任务",
+        templates: [
+          {
+            templateId: "once_text_birthday_reminder",
+            name: "生日提醒",
+            description: "下一个 1 月 1 日早上提醒",
+            frequencyText: "下一个 1 月 1 日 09:00，不重复",
+          },
+        ],
+      },
+    ],
+    onOpenChange: () => undefined,
+    onSelect: () => undefined,
+  }),
+);
+
+if (
+  !scheduledTaskTemplateDialogHtml.includes("循环任务") ||
+  !scheduledTaskTemplateDialogHtml.includes("日程任务") ||
+  !scheduledTaskTemplateDialogHtml.includes("使用模板") ||
+  !scheduledTaskTemplateDialogHtml.includes("先选内置模板")
+) {
+  throw new Error("AwakenScheduledTaskTemplateDialog should expose both categories and template cards");
+}
+
+const scheduledTaskEditorHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenScheduledTaskEditorDialog, {
+    open: true,
+    mode: "create",
+    value: AwakenDesignSystem.createEmptyAwakenScheduledTaskDraft("Asia/Shanghai"),
+    projects: [{ projectId: "project_demo", name: "Awaken" }],
+    profiles: [{ profileId: "profile_demo", name: "Kimi for Coding" }],
+    timezones: ["Asia/Shanghai"],
+    errorMessage: "保存失败：请修正以下字段后重试。",
+    fieldErrors: { name: "名称不能为空" },
+    onOpenChange: () => undefined,
+    onValueChange: () => undefined,
+    onSubmit: () => undefined,
+  }),
+);
+
+if (
+  !scheduledTaskEditorHtml.includes("保存任务") ||
+  !scheduledTaskEditorHtml.includes("每次运行时使用当前默认 profile") ||
+  !scheduledTaskEditorHtml.includes("循环任务") ||
+  !scheduledTaskEditorHtml.includes("日程任务") ||
+  !scheduledTaskEditorHtml.includes("高级选项") ||
+  !scheduledTaskEditorHtml.includes("名称不能为空") ||
+  !scheduledTaskEditorHtml.includes('role="alert"')
+) {
+  throw new Error("AwakenScheduledTaskEditorDialog should render all sections and inline field errors");
+}
+
+const scheduledTaskHistoryHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenScheduledTaskHistoryDialog, {
+    open: true,
+    title: "执行记录",
+    items: [
+      {
+        executionId: "exec_demo",
+        triggerLabel: "计划触发",
+        status: "error" as const,
+        statusLabel: "失败",
+        scheduledForText: "2026-07-26 15:00",
+        startedAtText: "2026-07-26 15:00:01",
+        finishedAtText: "2026-07-26 15:00:12",
+        errorText: "MODEL_PROFILE_UNAVAILABLE：显式 profile 已被禁用",
+        threadId: "thread_demo",
+      },
+    ],
+    onOpenChange: () => undefined,
+    onOpenThread: () => undefined,
+  }),
+);
+
+if (
+  !scheduledTaskHistoryHtml.includes("打开线程") ||
+  !scheduledTaskHistoryHtml.includes("MODEL_PROFILE_UNAVAILABLE") ||
+  !scheduledTaskHistoryHtml.includes("失败")
+) {
+  throw new Error("AwakenScheduledTaskHistoryDialog should render error rows with the thread action");
+}
+
+const scheduledTaskHistoryEmptyHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenScheduledTaskHistoryDialog, {
+    open: true,
+    title: "执行记录",
+    items: [],
+    onOpenChange: () => undefined,
+  }),
+);
+
+if (!scheduledTaskHistoryEmptyHtml.includes("还没有执行记录")) {
+  throw new Error("AwakenScheduledTaskHistoryDialog should render its empty state");
+}
+
+if (
+  !productionCss.includes(".aw-scheduled-task-list__row") ||
+  !productionCss.includes(".aw-scheduled-task-template-dialog") ||
+  !productionCss.includes(".aw-scheduled-task-editor__section") ||
+  !productionCss.includes(".aw-scheduled-task-state-badge")
+) {
+  throw new Error("Production CSS is missing scheduled task component surfaces");
+}
+
 console.log(`awaken design system render smoke passed: ${demoEntries.length} components`);

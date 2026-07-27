@@ -437,4 +437,29 @@ describe("projectAguiEventToNarrative", () => {
 
     expect(state.committedItems).toHaveLength(0);
   });
+
+  it("projects AWAKEN_SCHEDULED_NOTICE as a scheduled notice card", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_SCHEDULED_NOTICE",
+      runId: "run-notice-1",
+      threadId: "thread-1",
+      recordId: "record-1",
+      seq: 5,
+      taskId: "sched-1",
+      executionId: "exec-1",
+      taskName: "休息提醒",
+      noticeContent: "起来活动一下，喝口水～",
+      timestamp: 1700000000000,
+    });
+
+    expect(state.committedItems).toHaveLength(1);
+    expect(state.committedItems[0]).toMatchObject({
+      kind: "scheduledNotice",
+      taskId: "sched-1",
+      executionId: "exec-1",
+      taskName: "休息提醒",
+      noticeContent: "起来活动一下，喝口水～",
+    });
+  });
 });

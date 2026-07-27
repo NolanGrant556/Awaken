@@ -5,8 +5,10 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import {
+  CalendarClock,
   ChevronDown,
   ChevronUp,
+  Clock,
   FolderPlus,
   ListFilter,
   MessageCirclePlus,
@@ -75,6 +77,7 @@ import type { AguiEvent } from "../shared/agui";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
+  threadItemFromRuntime,
   type ThreadItem,
   type RuntimeAction,
   type UserQuestionItem,
@@ -123,6 +126,7 @@ import {
 import { DesktopSettingsDialog } from "./settings/DesktopSettingsDialog";
 import { ProfileBalancePopover } from "./ProfileBalancePopover";
 import { ExtensionsView, type ExtensionSection } from "./ExtensionsView";
+import { ScheduledTasksView } from "./ScheduledTasksView";
 import { ExternalActionGate } from "./ExternalActionGate";
 import {
   assignDreamReceiptToThread,
@@ -187,11 +191,26 @@ export type WorkbenchInspectorPresentation = {
     | "desktop-root-inspector-hidden";
 };
 
+export type WorkbenchNavSection = ExtensionSection | "scheduled-tasks";
+
+/** 一级导航中占据主内容区、且不属于 workbench 的页面（inspector 在这些页面隐藏）。 */
+export function workbenchNavSectionForNavId(
+  activeNavId: string | undefined,
+): WorkbenchNavSection | undefined {
+  if (activeNavId === "connectors" || activeNavId === "skills") {
+    return activeNavId;
+  }
+  if (activeNavId === "scheduled-tasks") {
+    return "scheduled-tasks";
+  }
+  return undefined;
+}
+
 export function workbenchInspectorPresentation(
-  activeExtensionSection: ExtensionSection | undefined,
+  activeNavSection: WorkbenchNavSection | undefined,
   inspectorCollapsed: boolean,
 ): WorkbenchInspectorPresentation {
-  if (activeExtensionSection) {
+  if (activeNavSection) {
     return {
       available: false,
       effectiveCollapsed: true,
@@ -1498,9 +1517,25 @@ export function App() {
         readStoredString(DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY),
       ),
     );
-  const petThreadActivationRef = useRef<(threadId: string) => void>(() => {});
-  petThreadActivationRef.current = (threadId: string) => {
-    void handleSelectConversation(threadId);
+  const backgroundThreadActivationRef = useRef<(threadId: string) => void>(
+    () => {},
+  );
+  backgroundThreadActivationRef.current = async (threadId: string) => {
+    // Refresh the thread authority before selecting: scheduled tasks can create
+    // a dedicated thread in the background while other pages are mounted.
+    let runtimeThreads: RuntimeThread[] | undefined;
+    try {
+      runtimeThreads = await loadThreadsIntoState();
+    } catch {
+      setNotice("无法加载线程列表");
+      return;
+    }
+    const threads = runtimeThreads.map(threadItemFromRuntime);
+    // A scheduled-task thread can already be the reducer's active thread while
+    // its cached view is still the empty shell created by a background thread
+    // list refresh. Force a transcript replay when activation comes from a
+    // notification or execution history.
+    await handleSelectConversation(threadId, threads, true);
   };
 
   useEffect(() => {
@@ -1511,7 +1546,15 @@ export function App() {
   useEffect(
     () =>
       runtimeClient.onPetThreadActivationRequested((threadId) => {
-        petThreadActivationRef.current(threadId);
+        backgroundThreadActivationRef.current(threadId);
+      }),
+    [runtimeClient],
+  );
+
+  useEffect(
+    () =>
+      runtimeClient.onScheduledTaskThreadActivation((threadId) => {
+        backgroundThreadActivationRef.current(threadId);
       }),
     [runtimeClient],
   );
@@ -2666,6 +2709,11 @@ export function App() {
       label: "技能",
       icon: <Wrench size={16} strokeWidth={1.9} />,
     },
+    {
+      id: "scheduled-tasks",
+      label: "定时任务",
+      icon: <CalendarClock size={16} strokeWidth={1.9} />,
+    },
   ];
   const topbarStatusLabel = desktopNeedsRestart
     ? "Needs restart"
@@ -3098,12 +3146,14 @@ export function App() {
     }),
   });
   const showTurnMarkerRail = turnMarkerDisplay.mode !== "hidden";
+  const activeNavSection = workbenchNavSectionForNavId(activeNavId);
   const activeExtensionSection: ExtensionSection | undefined =
-    activeNavId === "connectors" || activeNavId === "skills"
-      ? activeNavId
+    activeNavSection === "connectors" || activeNavSection === "skills"
+      ? activeNavSection
       : undefined;
+  const scheduledTasksNavActive = activeNavSection === "scheduled-tasks";
   const inspectorPresentation = workbenchInspectorPresentation(
-    activeExtensionSection,
+    activeNavSection,
     inspectorCollapsed,
   );
 
@@ -3602,11 +3652,19 @@ export function App() {
     requestComposerFocus();
   }
 
-  async function handleSelectConversation(threadId: string): Promise<void> {
+  async function handleSelectConversation(
+    threadId: string,
+    prefetchedThreads?: ThreadItem[],
+    forceReplay = false,
+  ): Promise<void> {
     if (!desktopReady) {
       return;
     }
-    if (threadId === runtimeState.activeThreadId) {
+    // Exit any extension-level page (scheduled tasks, connectors, skills) so
+    // that activation from system notifications or execution history always
+    // lands on the workbench thread view.
+    setActiveNavId(undefined);
+    if (!forceReplay && threadId === runtimeState.activeThreadId) {
       return;
     }
 
@@ -3619,9 +3677,8 @@ export function App() {
     prepareForThreadSwitch();
     dispatch({ type: "run/threadSwitch", threadId });
 
-    const thread = runtimeState.threads.find(
-      (item) => item.threadId === threadId,
-    );
+    const threads = prefetchedThreads ?? runtimeState.threads;
+    const thread = threads.find((item) => item.threadId === threadId);
     syncProjectSelectionForWorkspace(thread?.workspaceRoot);
     if (!thread?.runId) {
       localStorage.removeItem("awaken:runId");
@@ -4641,6 +4698,24 @@ export function App() {
         />
       );
     }
+    if (item.kind === "scheduledNotice") {
+      return (
+        <div key={key} className="scheduled-notice-card" role="note" aria-label="定时提醒">
+          <span className="scheduled-notice-card__icon" aria-hidden="true">
+            <Clock size={14} strokeWidth={1.9} />
+          </span>
+          <span className="scheduled-notice-card__body">
+            <span className="scheduled-notice-card__header">
+              <span className="scheduled-notice-card__label">定时提醒</span>
+              {item.taskName ? (
+                <span className="scheduled-notice-card__title">{item.taskName}</span>
+              ) : null}
+            </span>
+            <span className="scheduled-notice-card__text">{item.noticeContent}</span>
+          </span>
+        </div>
+      );
+    }
     if (item.kind === "memoryReceipt") {
       return (
         <ToolTraceLine
@@ -5118,6 +5193,17 @@ export function App() {
                     activeWorkspaceRoot={workspacePath}
                   />
                 </>
+              ) : scheduledTasksNavActive ? (
+                <ScheduledTasksView
+                  runtimeClient={runtimeClient}
+                  desktopReady={desktopReady}
+                  onOpenThread={(threadId) => {
+                    backgroundThreadActivationRef.current(threadId);
+                  }}
+                  onExecutionsChanged={() => {
+                    void loadThreadsIntoState();
+                  }}
+                />
               ) : (
                 <WorkbenchShell
                   inspectorCollapsed={inspectorCollapsed}

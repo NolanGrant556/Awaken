@@ -1130,6 +1130,250 @@ export type ACPRunnerUpdateRequest = Partial<Omit<ACPRunnerCreateRequest, "id" |
   env_remove?: string[];
 };
 
+// ---------------------------------------------------------------------------
+// Scheduled tasks (contract docs/12_定时任务 §10). Wire shapes mirror the Go
+// json tags of src/scheduledtask; the camelCase projections are the only
+// shapes Renderer code may touch.
+// ---------------------------------------------------------------------------
+
+export type ScheduledTaskState = "enabled" | "paused" | "running" | "completed" | "invalid";
+
+export type ScheduledTaskActionKind = "reminder" | "agent";
+
+export type ScheduledTaskActionWire = {
+  kind: ScheduledTaskActionKind;
+  content: string;
+};
+
+export type ScheduledTaskAction = {
+  kind: ScheduledTaskActionKind;
+  content: string;
+};
+
+export type ScheduledTaskExecutionOptionsWire = {
+  profile_id: string;
+  timeout_seconds: number;
+  misfire_grace_seconds: number;
+};
+
+export type ScheduledTaskExecutionOptions = {
+  profileId: string;
+  timeoutSeconds: number;
+  misfireGraceSeconds: number;
+};
+
+export type ScheduledTaskTemplateOriginWire = {
+  template_id: string;
+  source: string;
+};
+
+export type ScheduledTaskTemplateOrigin = {
+  templateId: string;
+  source: string;
+};
+
+export type ScheduledTaskRepeatEndKind = "never" | "until" | "count";
+
+export type ScheduledTaskRepeatEndWire = {
+  kind: ScheduledTaskRepeatEndKind;
+  until?: string;
+  count?: number;
+};
+
+export type ScheduledTaskRepeatEnd = {
+  kind: ScheduledTaskRepeatEndKind;
+  until?: string;
+  count?: number;
+};
+
+export type ScheduledTaskScheduleWire = {
+  kind: "cron" | "calendar";
+  timezone: string;
+  cron?: string;
+  run_at?: string;
+  repeat_every_days?: number;
+  repeat_end?: ScheduledTaskRepeatEndWire;
+};
+
+export type ScheduledTaskSchedule =
+  | { kind: "cron"; cron: string; timezone: string }
+  | {
+      kind: "calendar";
+      runAt: string;
+      timezone: string;
+      repeatEveryDays?: number;
+      repeatEnd?: ScheduledTaskRepeatEnd;
+    };
+
+export type ScheduledTaskLastExecutionWire = {
+  execution_id: string;
+  status: string;
+  started_at?: string;
+  finished_at?: string;
+};
+
+export type ScheduledTaskLastExecution = {
+  executionId: string;
+  status: string;
+  startedAt?: string;
+  finishedAt?: string;
+};
+
+export type ScheduledTaskWire = {
+  task_id: string;
+  version: number;
+  name: string;
+  enabled: boolean;
+  project_id: string;
+  thread_id?: string;
+  schedule: ScheduledTaskScheduleWire;
+  action: ScheduledTaskActionWire;
+  execution: ScheduledTaskExecutionOptionsWire;
+  template_origin?: ScheduledTaskTemplateOriginWire;
+  state: ScheduledTaskState;
+  invalid_reason?: string;
+  next_run_at?: string | null;
+  last_execution?: ScheduledTaskLastExecutionWire | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ScheduledTask = {
+  taskId: string;
+  version: number;
+  name: string;
+  enabled: boolean;
+  projectId: string;
+  threadId?: string;
+  schedule: ScheduledTaskSchedule;
+  action: ScheduledTaskAction;
+  execution: ScheduledTaskExecutionOptions;
+  templateOrigin?: ScheduledTaskTemplateOrigin;
+  state: ScheduledTaskState;
+  invalidReason?: string;
+  nextRunAt?: string | null;
+  lastExecution?: ScheduledTaskLastExecution | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ScheduledTaskExecutionTrigger = "scheduled" | "manual" | "misfire";
+
+export type ScheduledTaskExecutionStatus =
+  | "queued"
+  | "running"
+  | "success"
+  | "error"
+  | "skipped"
+  | "cancelled"
+  | "interrupted";
+
+export type ScheduledTaskExecutionWire = {
+  execution_id: string;
+  task_id: string;
+  task_version: number;
+  trigger: ScheduledTaskExecutionTrigger;
+  scheduled_for: string;
+  started_at?: string;
+  finished_at?: string;
+  status: ScheduledTaskExecutionStatus;
+  run_id?: string;
+  thread_id?: string;
+  error_code?: string;
+  error_message?: string;
+};
+
+export type ScheduledTaskExecution = {
+  executionId: string;
+  taskId: string;
+  taskVersion: number;
+  trigger: ScheduledTaskExecutionTrigger;
+  scheduledFor: string;
+  startedAt?: string;
+  finishedAt?: string;
+  status: ScheduledTaskExecutionStatus;
+  runId?: string;
+  threadId?: string;
+  errorCode?: string;
+  errorMessage?: string;
+};
+
+export type ScheduledTaskEventType =
+  | "execution_started"
+  | "execution_finished"
+  | "notice"
+  | "task_changed";
+
+export type ScheduledTaskEventWire = {
+  type: ScheduledTaskEventType;
+  task_id: string;
+  execution_id?: string;
+  thread_id?: string;
+  task_name?: string;
+  status?: string;
+  content?: string;
+};
+
+export type ScheduledTaskEvent = {
+  type: ScheduledTaskEventType;
+  taskId: string;
+  executionId?: string;
+  threadId?: string;
+  taskName?: string;
+  status?: string;
+  content?: string;
+};
+
+export type ScheduledTaskCreateInput = {
+  name: string;
+  enabled: boolean;
+  projectId: string;
+  schedule: ScheduledTaskSchedule;
+  action: ScheduledTaskAction;
+  execution: ScheduledTaskExecutionOptions;
+  templateOrigin?: ScheduledTaskTemplateOrigin;
+};
+
+export type ScheduledTaskCreateWire = {
+  name: string;
+  enabled: boolean;
+  project_id: string;
+  schedule: ScheduledTaskScheduleWire;
+  action: ScheduledTaskActionWire;
+  execution: ScheduledTaskExecutionOptionsWire;
+  template_origin?: ScheduledTaskTemplateOriginWire;
+};
+
+export type ScheduledTaskPatchInput = {
+  expectedVersion: number;
+  name?: string;
+  enabled?: boolean;
+  projectId?: string;
+  schedule?: ScheduledTaskSchedule;
+  action?: ScheduledTaskAction;
+  execution?: ScheduledTaskExecutionOptions;
+  templateOrigin?: ScheduledTaskTemplateOrigin;
+};
+
+export type ScheduledTaskPatchWire = {
+  expected_version: number;
+  name?: string;
+  enabled?: boolean;
+  project_id?: string;
+  schedule?: ScheduledTaskScheduleWire;
+  action?: ScheduledTaskActionWire;
+  execution?: ScheduledTaskExecutionOptionsWire;
+  template_origin?: ScheduledTaskTemplateOriginWire;
+};
+
+export type ScheduledTaskListWire = {
+  tasks: ScheduledTaskWire[];
+};
+
+export type ScheduledTaskExecutionListWire = {
+  executions: ScheduledTaskExecutionWire[];
+};
+
 export type AwakenBridge = {
   platform: DesktopPlatform;
   onSelectAllRequested: (callback: () => void) => () => void;
@@ -1264,6 +1508,19 @@ export type AwakenBridge = {
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
   notifyRendererReady: () => void;
+  listScheduledTasks: () => Promise<ScheduledTask[]>;
+  getScheduledTask: (taskId: string) => Promise<ScheduledTask>;
+  createScheduledTask: (input: ScheduledTaskCreateInput) => Promise<ScheduledTask>;
+  patchScheduledTask: (taskId: string, input: ScheduledTaskPatchInput) => Promise<ScheduledTask>;
+  deleteScheduledTask: (taskId: string, expectedVersion: number, idempotencyKey: string) => Promise<void>;
+  pauseScheduledTask: (taskId: string, expectedVersion: number) => Promise<ScheduledTask>;
+  resumeScheduledTask: (taskId: string, expectedVersion: number) => Promise<ScheduledTask>;
+  runScheduledTaskNow: (taskId: string, idempotencyKey: string) => Promise<ScheduledTaskExecution>;
+  cancelScheduledTaskExecution: (taskId: string) => Promise<void>;
+  listScheduledTaskExecutions: (taskId: string) => Promise<ScheduledTaskExecution[]>;
+  getSystemTimezone: () => Promise<string>;
+  subscribeScheduledTaskEvents: (handler: (event: ScheduledTaskEvent) => void) => () => void;
+  onScheduledTaskThreadActivation: (handler: (threadId: string) => void) => () => void;
 } & PetBridge;
 
 export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
@@ -1630,5 +1887,227 @@ export function normalizeModelProfileBalancesResult(
 ): ModelProfileBalancesResult {
   return {
     balances: result.balances.map(normalizeModelProfileBalance),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled-task normalization (snake_case wire ↔ camelCase projection).
+// ---------------------------------------------------------------------------
+
+/** Go encodes an unset time.Time as the year-1 zero value; treat it as absent. */
+function isZeroTimeValue(value?: string): boolean {
+  return !value || value.startsWith("0001-01-01");
+}
+
+function presentTime(value?: string): string | undefined {
+  return isZeroTimeValue(value) ? undefined : value;
+}
+
+export function normalizeScheduledTaskRepeatEnd(
+  repeatEnd: ScheduledTaskRepeatEndWire,
+): ScheduledTaskRepeatEnd {
+  return {
+    kind: repeatEnd.kind,
+    until: presentTime(repeatEnd.until),
+    count: repeatEnd.count,
+  };
+}
+
+export function toScheduledTaskRepeatEndWire(
+  repeatEnd: ScheduledTaskRepeatEnd,
+): ScheduledTaskRepeatEndWire {
+  return {
+    kind: repeatEnd.kind,
+    until: repeatEnd.until,
+    count: repeatEnd.count,
+  };
+}
+
+export function normalizeScheduledTaskSchedule(
+  schedule: ScheduledTaskScheduleWire,
+): ScheduledTaskSchedule {
+  if (schedule.kind === "calendar") {
+    return {
+      kind: "calendar",
+      runAt: schedule.run_at ?? "",
+      timezone: schedule.timezone,
+      repeatEveryDays:
+        schedule.repeat_every_days && schedule.repeat_every_days > 0
+          ? schedule.repeat_every_days
+          : undefined,
+      repeatEnd: schedule.repeat_end
+        ? normalizeScheduledTaskRepeatEnd(schedule.repeat_end)
+        : undefined,
+    };
+  }
+  return {
+    kind: "cron",
+    cron: schedule.cron ?? "",
+    timezone: schedule.timezone,
+  };
+}
+
+export function toScheduledTaskScheduleWire(
+  schedule: ScheduledTaskSchedule,
+): ScheduledTaskScheduleWire {
+  if (schedule.kind === "calendar") {
+    return {
+      kind: "calendar",
+      timezone: schedule.timezone,
+      run_at: schedule.runAt,
+      repeat_every_days: schedule.repeatEveryDays,
+      repeat_end: schedule.repeatEnd
+        ? toScheduledTaskRepeatEndWire(schedule.repeatEnd)
+        : undefined,
+    };
+  }
+  return {
+    kind: "cron",
+    timezone: schedule.timezone,
+    cron: schedule.cron,
+  };
+}
+
+export function normalizeScheduledTaskExecutionOptions(
+  options: ScheduledTaskExecutionOptionsWire,
+): ScheduledTaskExecutionOptions {
+  return {
+    profileId: options.profile_id,
+    timeoutSeconds: options.timeout_seconds,
+    misfireGraceSeconds: options.misfire_grace_seconds,
+  };
+}
+
+export function toScheduledTaskExecutionOptionsWire(
+  options: ScheduledTaskExecutionOptions,
+): ScheduledTaskExecutionOptionsWire {
+  return {
+    profile_id: options.profileId,
+    timeout_seconds: options.timeoutSeconds,
+    misfire_grace_seconds: options.misfireGraceSeconds,
+  };
+}
+
+export function normalizeScheduledTaskTemplateOrigin(
+  origin: ScheduledTaskTemplateOriginWire,
+): ScheduledTaskTemplateOrigin {
+  return {
+    templateId: origin.template_id,
+    source: origin.source,
+  };
+}
+
+export function toScheduledTaskTemplateOriginWire(
+  origin: ScheduledTaskTemplateOrigin,
+): ScheduledTaskTemplateOriginWire {
+  return {
+    template_id: origin.templateId,
+    source: origin.source,
+  };
+}
+
+export function normalizeScheduledTaskLastExecution(
+  execution: ScheduledTaskLastExecutionWire,
+): ScheduledTaskLastExecution {
+  return {
+    executionId: execution.execution_id,
+    status: execution.status,
+    startedAt: presentTime(execution.started_at),
+    finishedAt: presentTime(execution.finished_at),
+  };
+}
+
+export function normalizeScheduledTask(task: ScheduledTaskWire): ScheduledTask {
+  return {
+    taskId: task.task_id,
+    version: task.version,
+    name: task.name,
+    enabled: Boolean(task.enabled),
+    projectId: task.project_id,
+    threadId: task.thread_id || undefined,
+    schedule: normalizeScheduledTaskSchedule(task.schedule),
+    action: { kind: task.action.kind, content: task.action.content },
+    execution: normalizeScheduledTaskExecutionOptions(task.execution),
+    templateOrigin: task.template_origin
+      ? normalizeScheduledTaskTemplateOrigin(task.template_origin)
+      : undefined,
+    state: task.state,
+    invalidReason: task.invalid_reason || undefined,
+    nextRunAt: task.next_run_at ?? null,
+    lastExecution: task.last_execution
+      ? normalizeScheduledTaskLastExecution(task.last_execution)
+      : null,
+    createdAt: task.created_at,
+    updatedAt: task.updated_at,
+  };
+}
+
+export function normalizeScheduledTaskExecution(
+  execution: ScheduledTaskExecutionWire,
+): ScheduledTaskExecution {
+  return {
+    executionId: execution.execution_id,
+    taskId: execution.task_id,
+    taskVersion: execution.task_version,
+    trigger: execution.trigger,
+    scheduledFor: execution.scheduled_for,
+    startedAt: presentTime(execution.started_at),
+    finishedAt: presentTime(execution.finished_at),
+    status: execution.status,
+    runId: execution.run_id || undefined,
+    threadId: execution.thread_id || undefined,
+    errorCode: execution.error_code || undefined,
+    errorMessage: execution.error_message || undefined,
+  };
+}
+
+export function normalizeScheduledTaskEvent(
+  event: ScheduledTaskEventWire,
+): ScheduledTaskEvent {
+  return {
+    type: event.type,
+    taskId: event.task_id,
+    executionId: event.execution_id || undefined,
+    threadId: event.thread_id || undefined,
+    taskName: event.task_name || undefined,
+    status: event.status || undefined,
+    content: event.content || undefined,
+  };
+}
+
+export function toScheduledTaskCreateWire(
+  input: ScheduledTaskCreateInput,
+): ScheduledTaskCreateWire {
+  return {
+    name: input.name,
+    enabled: input.enabled,
+    project_id: input.projectId,
+    schedule: toScheduledTaskScheduleWire(input.schedule),
+    action: { kind: input.action.kind, content: input.action.content },
+    execution: toScheduledTaskExecutionOptionsWire(input.execution),
+    template_origin: input.templateOrigin
+      ? toScheduledTaskTemplateOriginWire(input.templateOrigin)
+      : undefined,
+  };
+}
+
+export function toScheduledTaskPatchWire(
+  input: ScheduledTaskPatchInput,
+): ScheduledTaskPatchWire {
+  return {
+    expected_version: input.expectedVersion,
+    name: input.name,
+    enabled: input.enabled,
+    project_id: input.projectId,
+    schedule: input.schedule ? toScheduledTaskScheduleWire(input.schedule) : undefined,
+    action: input.action
+      ? { kind: input.action.kind, content: input.action.content }
+      : undefined,
+    execution: input.execution
+      ? toScheduledTaskExecutionOptionsWire(input.execution)
+      : undefined,
+    template_origin: input.templateOrigin
+      ? toScheduledTaskTemplateOriginWire(input.templateOrigin)
+      : undefined,
   };
 }

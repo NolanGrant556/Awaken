@@ -241,3 +241,303 @@ describe("runtime shared start run normalization", () => {
     });
   });
 });
+
+import {
+  normalizeScheduledTask,
+  normalizeScheduledTaskEvent,
+  normalizeScheduledTaskExecution,
+  normalizeScheduledTaskSchedule,
+  toScheduledTaskCreateWire,
+  toScheduledTaskPatchWire,
+  toScheduledTaskScheduleWire,
+  type ScheduledTaskEventWire,
+  type ScheduledTaskExecutionWire,
+  type ScheduledTaskWire,
+} from "./runtime.js";
+
+describe("scheduled task wire normalization", () => {
+  it("normalizes a cron schedule and round-trips it", () => {
+    const schedule = normalizeScheduledTaskSchedule({
+      kind: "cron",
+      cron: "0 9 * * 1-5",
+      timezone: "Asia/Shanghai",
+    });
+    expect(schedule).toEqual({
+      kind: "cron",
+      cron: "0 9 * * 1-5",
+      timezone: "Asia/Shanghai",
+    });
+    expect(toScheduledTaskScheduleWire(schedule)).toEqual({
+      kind: "cron",
+      cron: "0 9 * * 1-5",
+      timezone: "Asia/Shanghai",
+    });
+  });
+
+  it("normalizes a one-time calendar schedule", () => {
+    const schedule = normalizeScheduledTaskSchedule({
+      kind: "calendar",
+      run_at: "2026-08-01T09:00:00+08:00",
+      timezone: "Asia/Shanghai",
+    });
+    expect(schedule).toEqual({
+      kind: "calendar",
+      runAt: "2026-08-01T09:00:00+08:00",
+      timezone: "Asia/Shanghai",
+      repeatEveryDays: undefined,
+      repeatEnd: undefined,
+    });
+  });
+
+  it("normalizes a repeating calendar schedule with until repeat end", () => {
+    const schedule = normalizeScheduledTaskSchedule({
+      kind: "calendar",
+      run_at: "2026-08-01T09:00:00+08:00",
+      timezone: "Asia/Shanghai",
+      repeat_every_days: 3,
+      repeat_end: { kind: "until", until: "2026-09-01T09:00:00+08:00" },
+    });
+    expect(schedule).toEqual({
+      kind: "calendar",
+      runAt: "2026-08-01T09:00:00+08:00",
+      timezone: "Asia/Shanghai",
+      repeatEveryDays: 3,
+      repeatEnd: { kind: "until", until: "2026-09-01T09:00:00+08:00", count: undefined },
+    });
+    expect(toScheduledTaskScheduleWire(schedule)).toEqual({
+      kind: "calendar",
+      run_at: "2026-08-01T09:00:00+08:00",
+      timezone: "Asia/Shanghai",
+      repeat_every_days: 3,
+      repeat_end: { kind: "until", until: "2026-09-01T09:00:00+08:00", count: undefined },
+    });
+  });
+
+  it("normalizes count and never repeat ends", () => {
+    const count = normalizeScheduledTaskSchedule({
+      kind: "calendar",
+      run_at: "2026-08-01T09:00:00Z",
+      timezone: "UTC",
+      repeat_every_days: 7,
+      repeat_end: { kind: "count", count: 10 },
+    });
+    expect(count).toMatchObject({ repeatEnd: { kind: "count", count: 10 } });
+
+    const never = normalizeScheduledTaskSchedule({
+      kind: "calendar",
+      run_at: "2026-08-01T09:00:00Z",
+      timezone: "UTC",
+      repeat_every_days: 1,
+      repeat_end: { kind: "never" },
+    });
+    expect(never).toMatchObject({ repeatEnd: { kind: "never" } });
+  });
+
+  it("normalizes a full task with state, next run and last execution", () => {
+    const wire: ScheduledTaskWire = {
+      task_id: "sched_1",
+      version: 3,
+      name: "喝水提醒",
+      enabled: true,
+      project_id: "project-1",
+      thread_id: "thread-9",
+      schedule: { kind: "cron", cron: "0 * * * *", timezone: "UTC" },
+      action: { kind: "reminder", content: "喝水" },
+      execution: { profile_id: "", timeout_seconds: 600, misfire_grace_seconds: 300 },
+      template_origin: { template_id: "hydration", source: "builtin" },
+      state: "running",
+      next_run_at: "2026-08-01T10:00:00Z",
+      last_execution: {
+        execution_id: "exec_1",
+        status: "running",
+        started_at: "2026-08-01T09:00:00Z",
+      },
+      created_at: "2026-07-01T00:00:00Z",
+      updated_at: "2026-07-02T00:00:00Z",
+    };
+    expect(normalizeScheduledTask(wire)).toEqual({
+      taskId: "sched_1",
+      version: 3,
+      name: "喝水提醒",
+      enabled: true,
+      projectId: "project-1",
+      threadId: "thread-9",
+      schedule: { kind: "cron", cron: "0 * * * *", timezone: "UTC" },
+      action: { kind: "reminder", content: "喝水" },
+      execution: { profileId: "", timeoutSeconds: 600, misfireGraceSeconds: 300 },
+      templateOrigin: { templateId: "hydration", source: "builtin" },
+      state: "running",
+      invalidReason: undefined,
+      nextRunAt: "2026-08-01T10:00:00Z",
+      lastExecution: {
+        executionId: "exec_1",
+        status: "running",
+        startedAt: "2026-08-01T09:00:00Z",
+        finishedAt: undefined,
+      },
+      createdAt: "2026-07-01T00:00:00Z",
+      updatedAt: "2026-07-02T00:00:00Z",
+    });
+  });
+
+  it("keeps null projections null and drops empty optional fields", () => {
+    const wire: ScheduledTaskWire = {
+      task_id: "sched_2",
+      version: 1,
+      name: "暂停任务",
+      enabled: false,
+      project_id: "project-1",
+      schedule: { kind: "cron", cron: "0 * * * *", timezone: "UTC" },
+      action: { kind: "agent", content: "整理日报" },
+      execution: { profile_id: "p1", timeout_seconds: 900, misfire_grace_seconds: 0 },
+      state: "paused",
+      next_run_at: null,
+      last_execution: null,
+      created_at: "2026-07-01T00:00:00Z",
+      updated_at: "2026-07-01T00:00:00Z",
+    };
+    const task = normalizeScheduledTask(wire);
+    expect(task.nextRunAt).toBeNull();
+    expect(task.lastExecution).toBeNull();
+    expect(task.threadId).toBeUndefined();
+    expect(task.templateOrigin).toBeUndefined();
+  });
+
+  it("normalizes executions and treats the Go zero time as absent", () => {
+    const queued: ScheduledTaskExecutionWire = {
+      execution_id: "exec_1",
+      task_id: "sched_1",
+      task_version: 2,
+      trigger: "manual",
+      scheduled_for: "2026-08-01T09:00:00Z",
+      started_at: "0001-01-01T00:00:00Z",
+      status: "queued",
+    };
+    expect(normalizeScheduledTaskExecution(queued)).toEqual({
+      executionId: "exec_1",
+      taskId: "sched_1",
+      taskVersion: 2,
+      trigger: "manual",
+      scheduledFor: "2026-08-01T09:00:00Z",
+      startedAt: undefined,
+      finishedAt: undefined,
+      status: "queued",
+      runId: undefined,
+      threadId: undefined,
+      errorCode: undefined,
+      errorMessage: undefined,
+    });
+
+    const failed: ScheduledTaskExecutionWire = {
+      execution_id: "exec_2",
+      task_id: "sched_1",
+      task_version: 2,
+      trigger: "scheduled",
+      scheduled_for: "2026-08-01T09:00:00Z",
+      started_at: "2026-08-01T09:00:01Z",
+      finished_at: "2026-08-01T09:10:00Z",
+      status: "error",
+      run_id: "run-1",
+      thread_id: "thread-9",
+      error_code: "EXECUTION_TIMEOUT",
+      error_message: "execution timed out",
+    };
+    expect(normalizeScheduledTaskExecution(failed)).toMatchObject({
+      status: "error",
+      runId: "run-1",
+      threadId: "thread-9",
+      errorCode: "EXECUTION_TIMEOUT",
+      errorMessage: "execution timed out",
+      finishedAt: "2026-08-01T09:10:00Z",
+    });
+  });
+
+  it("normalizes events and drops empty optional fields", () => {
+    const notice: ScheduledTaskEventWire = {
+      type: "notice",
+      task_id: "sched_1",
+      execution_id: "exec_1",
+      thread_id: "thread-9",
+      task_name: "喝水提醒",
+      status: "success",
+      content: "该喝水了",
+    };
+    expect(normalizeScheduledTaskEvent(notice)).toEqual({
+      type: "notice",
+      taskId: "sched_1",
+      executionId: "exec_1",
+      threadId: "thread-9",
+      taskName: "喝水提醒",
+      status: "success",
+      content: "该喝水了",
+    });
+
+    const changed: ScheduledTaskEventWire = {
+      type: "task_changed",
+      task_id: "sched_1",
+      status: "enabled",
+    };
+    expect(normalizeScheduledTaskEvent(changed)).toEqual({
+      type: "task_changed",
+      taskId: "sched_1",
+      executionId: undefined,
+      threadId: undefined,
+      taskName: undefined,
+      status: "enabled",
+      content: undefined,
+    });
+  });
+
+  it("converts create input to snake_case wire", () => {
+    expect(
+      toScheduledTaskCreateWire({
+        name: "每日站会",
+        enabled: true,
+        projectId: "project-1",
+        schedule: {
+          kind: "calendar",
+          runAt: "2026-08-01T09:00:00+08:00",
+          timezone: "Asia/Shanghai",
+          repeatEveryDays: 1,
+          repeatEnd: { kind: "count", count: 30 },
+        },
+        action: { kind: "agent", content: "写日报" },
+        execution: { profileId: "profile-1", timeoutSeconds: 1200, misfireGraceSeconds: 600 },
+        templateOrigin: { templateId: "daily-report", source: "builtin" },
+      }),
+    ).toEqual({
+      name: "每日站会",
+      enabled: true,
+      project_id: "project-1",
+      schedule: {
+        kind: "calendar",
+        run_at: "2026-08-01T09:00:00+08:00",
+        timezone: "Asia/Shanghai",
+        repeat_every_days: 1,
+        repeat_end: { kind: "count", count: 30, until: undefined },
+      },
+      action: { kind: "agent", content: "写日报" },
+      execution: { profile_id: "profile-1", timeout_seconds: 1200, misfire_grace_seconds: 600 },
+      template_origin: { template_id: "daily-report", source: "builtin" },
+    });
+  });
+
+  it("converts patch input to snake_case wire with expected_version and only set fields", () => {
+    expect(
+      toScheduledTaskPatchWire({
+        expectedVersion: 4,
+        name: "改名",
+        schedule: { kind: "cron", cron: "30 8 * * *", timezone: "UTC" },
+      }),
+    ).toEqual({
+      expected_version: 4,
+      name: "改名",
+      enabled: undefined,
+      project_id: undefined,
+      schedule: { kind: "cron", cron: "30 8 * * *", timezone: "UTC" },
+      action: undefined,
+      execution: undefined,
+      template_origin: undefined,
+    });
+  });
+});

@@ -27,6 +27,7 @@ type Tool struct{}
 type params struct {
 	Pattern    string `json:"pattern"`
 	Path       string `json:"path,omitempty"`
+	ScopeMode  string `json:"scope_mode,omitempty"`
 	Glob       string `json:"glob,omitempty"`
 	Type       string `json:"type,omitempty"`
 	OutputMode string `json:"output_mode,omitempty"`
@@ -50,12 +51,13 @@ type contentRecord struct {
 
 func (t *Tool) Name() string { return ToolName }
 func (t *Tool) Description() string {
-	return "Search file contents with the run-pinned ripgrep executable (hidden and ignored files included). Without an explicit path the search covers every readable root of the task and returns absolute paths; with one root the paths stay root-relative. An explicit path is searched wherever it points, including outside those roots. Supports content/files_with_matches/count modes, contexts, line numbers, case folding, offsets, limits, and multiline regex."
+	return "Search file contents with the run-pinned ripgrep executable. The default scope_mode=project keeps 'this project' on the exact Host-provided workspace roots; omit path to cover every root. Project mode rejects a common-parent or outside path without changing filesystem permissions. Use scope_mode=explicit_path only when the user explicitly names a path outside the project. Supports content/files_with_matches/count modes, contexts, offsets, limits, and multiline regex."
 }
 func (t *Tool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{Name: "pattern", Description: "ripgrep regular expression.", Type: "string", Required: true},
-		{Name: "path", Description: "Readable file or directory. Omit to search every readable root of the task, starting at the thread cwd.", Type: "string"},
+		{Name: "path", Description: "Search file or directory. Omit for the exact project roots. A project-internal target is allowed in project mode.", Type: "string"},
+		{Name: "scope_mode", Description: "project (default) or explicit_path. Use explicit_path only for a user-named path outside the project.", Type: "string"},
 		{Name: "glob", Description: "Additional file glob.", Type: "string"},
 		{Name: "type", Description: "ripgrep file type, for example go or ts.", Type: "string"},
 		{Name: "output_mode", Description: "content (default), files_with_matches, or count.", Type: "string"},
@@ -76,8 +78,8 @@ func (t *Tool) Definition() tool.ToolDefinition {
 		WhenToUse:    []string{"Finding symbols, text, regex matches, or candidate files", "Counting matches or listing files that contain matches"},
 		WhenNotToUse: []string{"Use Glob for path-only patterns", "Use Read for a known file"},
 		SideEffects:  []tool.ToolSideEffect{{Kind: tool.SideEffectRead, Resources: []string{"file contents"}, Description: "Reads files through rg without mutation.", Reversibility: tool.ReversibilityNotApplicable}},
-		Examples:     []tool.ToolExample{{Scenario: "Find Go declarations", Input: map[string]any{"pattern": "^func ", "path": "src", "type": "go", "output_mode": "content", "head_limit": 100}, Outcome: "Returns stable path/line/content rows and total match count."}},
-		FailureModes: []tool.ToolFailureMode{{Code: tool.ErrorCodeNeedsRuntime, Cause: "The pinned run has no rg executable", Retryable: true}, {Code: "grep_invalid_pattern", Cause: "rg rejected the regex", Retryable: false}},
+		Examples:     []tool.ToolExample{{Scenario: "Find project Go declarations", Input: map[string]any{"pattern": "^func ", "type": "go", "output_mode": "content", "head_limit": 100}, Outcome: "Returns stable rows across the exact project roots."}},
+		FailureModes: []tool.ToolFailureMode{{Code: tool.ErrorCodeNeedsRuntime, Cause: "The pinned run has no rg executable", Retryable: true}, {Code: searchroots.ErrorCodeProjectScopePathMismatch, Cause: "Project mode received a common-parent or outside path", Retryable: true}, {Code: "grep_invalid_pattern", Cause: "rg rejected the regex", Retryable: false}},
 		OutputSchema: tool.ToolParam{Type: "object", Description: "Ripgrep rows, counts, offsets, truncation, and runtime snapshot details.", AdditionalProperties: tool.BoolPtr(true)},
 		Annotations:  tool.ToolAnnotations{ReadOnly: true, CapabilityClass: tool.CapabilityArtifactRead, TrustedOrigin: tool.TrustedOriginBuiltin},
 	})
@@ -123,19 +125,32 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 	if err != nil {
 		return tool.DeniedOutcome(err.Error(), tool.ErrorCodeToolDenied).WithTiming(started, time.Now().UTC()), nil
 	}
-	roots, err := searchroots.Resolve(permissionContext, cwd, p.Path)
+	resolution, err := searchroots.Resolve(permissionContext, cwd, p.Path, p.ScopeMode)
 	if err != nil {
+		if scopeErr, ok := err.(*searchroots.ScopeError); ok {
+			return tool.FailedOutcome(scopeErr.Message, scopeErr.Code, tool.ErrorCategoryValidation, true).WithTiming(started, time.Now().UTC()), nil
+		}
 		return tool.DeniedOutcome(err.Error(), tool.ErrorCodeToolDenied).WithTiming(started, time.Now().UTC()), nil
 	}
+	roots := resolution.Roots
 	runtime, err := rgexec.Resolve(ctx)
 	if err != nil {
 		return needsRuntime(started, err.Error()), nil
 	}
 	targets := searchTargets(p.Path, resolvedCWD, roots)
+	var outcome tool.ExecutionOutcome
 	if p.OutputMode == "content" {
-		return executeContent(ctx, started, p, targets, runtime), nil
+		outcome = executeContent(ctx, started, p, targets, runtime)
+	} else {
+		outcome = executeSummaryMode(ctx, started, p, targets, runtime)
 	}
-	return executeSummaryMode(ctx, started, p, targets, runtime), nil
+	if outcome.Details == nil {
+		outcome.Details = map[string]any{}
+	}
+	outcome.Details["scope_mode"] = resolution.ScopeMode
+	outcome.Details["scope_relation"] = resolution.ScopeRelation
+	outcome.Details["scope_source"] = resolution.ScopeSource
+	return outcome, nil
 }
 
 // searchTarget is one rg invocation: where it runs, what it scans, and the base
@@ -367,6 +382,12 @@ func parseParams(input string) (params, error) {
 	}
 	if p.OutputMode == "" {
 		p.OutputMode = "content"
+	}
+	if p.ScopeMode == "" {
+		p.ScopeMode = searchroots.ScopeModeProject
+	}
+	if p.ScopeMode != searchroots.ScopeModeProject && p.ScopeMode != searchroots.ScopeModeExplicitPath {
+		return params{}, fmt.Errorf("scope_mode must be project or explicit_path")
 	}
 	if p.OutputMode != "content" && p.OutputMode != "files_with_matches" && p.OutputMode != "count" {
 		return params{}, fmt.Errorf("output_mode must be content, files_with_matches, or count")

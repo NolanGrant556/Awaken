@@ -146,6 +146,7 @@ func main() {
 				},
 				Workspace: agentcore.WorkspaceConfig{
 					ScopeID:                 workspace.ScopeID,
+					ProjectID:               workspace.ProjectID,
 					ProjectName:             workspace.ProjectName,
 					SessionWorkspace:        workspace.SessionWorkspace,
 					Root:                    workspace.WorkspaceRoot,

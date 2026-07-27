@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"awaken/src/tool"
+	"awaken/src/tools/internal/searchroots"
 )
 
 func multiRootContext(t *testing.T, roots ...string) context.Context {
@@ -110,13 +111,38 @@ func TestGrepSearchesAnExplicitPathOutsideEveryRoot(t *testing.T) {
 
 	outcome, err := (&Tool{}).ExecuteOutcome(
 		multiRootContext(t, primary),
-		`{"pattern":"needle","path":"`+outside+`"}`,
+		`{"pattern":"needle","path":"`+outside+`","scope_mode":"explicit_path"}`,
 		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if outcome.IsError() || !strings.Contains(outcome.Content, "secret.go") {
+		t.Fatalf("outcome=%+v", outcome)
+	}
+}
+
+func TestGrepProjectModeRejectsTheSiblingRootsCommonParent(t *testing.T) {
+	parent := t.TempDir()
+	primary := filepath.Join(parent, "project-a")
+	secondary := filepath.Join(parent, "project-b")
+	outside := filepath.Join(parent, "not-in-project")
+	for _, dir := range []string{primary, secondary, outside} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, outside, "outside.go", "needle\n")
+
+	outcome, err := (&Tool{}).ExecuteOutcome(
+		multiRootContext(t, primary, secondary),
+		`{"pattern":"needle","path":"`+parent+`"}`,
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.ErrorCode != searchroots.ErrorCodeProjectScopePathMismatch {
 		t.Fatalf("outcome=%+v", outcome)
 	}
 }

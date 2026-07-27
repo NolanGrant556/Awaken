@@ -12,6 +12,7 @@ type RuntimeInfo struct {
 	EntryPoint     string
 	ToolSummary    string
 	SkillSummary   string
+	ProjectID      string
 	ProjectName    string
 	ProjectFolders []RuntimeProjectFolder
 	AttachedFiles  []RuntimeAttachedFile
@@ -86,6 +87,10 @@ func (r *RuntimeInfo) SetSkillSummary(summary string) {
 
 func (r *RuntimeInfo) SetProjectName(name string) {
 	r.ProjectName = name
+}
+
+func (r *RuntimeInfo) SetProjectID(id string) {
+	r.ProjectID = id
 }
 
 func (r *RuntimeInfo) SetProjectFolders(folders []RuntimeProjectFolder) {

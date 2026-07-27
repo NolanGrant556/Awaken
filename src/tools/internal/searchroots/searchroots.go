@@ -7,6 +7,7 @@
 package searchroots
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,20 +15,80 @@ import (
 	"awaken/src/tool"
 )
 
+const (
+	ScopeModeProject      = "project"
+	ScopeModeExplicitPath = "explicit_path"
+
+	ErrorCodeProjectScopePathMismatch = "PROJECT_SCOPE_PATH_MISMATCH"
+)
+
+type Resolution struct {
+	Roots         []string
+	ScopeMode     string
+	ScopeRelation string
+	ScopeSource   string
+}
+
+type ScopeError struct {
+	Code    string
+	Message string
+}
+
+func (e *ScopeError) Error() string { return e.Message }
+
 // Resolve returns the ordered directories to search. When explicitPath is set
 // the caller asked for one specific place and the result is exactly that path.
 // Otherwise the thread cwd comes first, followed by the remaining readable
 // roots in scope order. Nested and duplicate roots are dropped so a file is
 // never reported twice.
-func Resolve(permissionContext tool.PermissionContext, cwd, explicitPath string) ([]string, error) {
-	if strings.TrimSpace(explicitPath) != "" {
-		resolved, err := permissionContext.ResolveReadablePathChecked(explicitPath)
-		if err != nil {
-			return nil, err
-		}
-		return []string{resolved}, nil
+func Resolve(permissionContext tool.PermissionContext, cwd, explicitPath, scopeMode string) (Resolution, error) {
+	if scopeMode == "" {
+		scopeMode = ScopeModeProject
+	}
+	if scopeMode != ScopeModeProject && scopeMode != ScopeModeExplicitPath {
+		return Resolution{}, fmt.Errorf("scope_mode must be project or explicit_path")
+	}
+	if scopeMode == ScopeModeExplicitPath && strings.TrimSpace(explicitPath) == "" {
+		return Resolution{}, fmt.Errorf("path is required when scope_mode is explicit_path")
 	}
 
+	projectRoots, err := defaultRoots(permissionContext, cwd)
+	if err != nil {
+		return Resolution{}, err
+	}
+	if strings.TrimSpace(explicitPath) == "" {
+		return Resolution{
+			Roots:         projectRoots,
+			ScopeMode:     ScopeModeProject,
+			ScopeRelation: "inside_project",
+			ScopeSource:   "project_default",
+		}, nil
+	}
+
+	resolved, err := permissionContext.ResolveReadablePathChecked(explicitPath)
+	if err != nil {
+		return Resolution{}, err
+	}
+	relation := scopeRelation(resolved, projectRoots)
+	if scopeMode == ScopeModeProject && relation != "inside_project" {
+		return Resolution{}, &ScopeError{
+			Code:    ErrorCodeProjectScopePathMismatch,
+			Message: fmt.Sprintf("“本项目”只包含 Host 列出的精确 workspace_roots；%s 不属于这些 roots。请省略 path 重新调用，或仅在用户明确点名项目外位置时使用 scope_mode=explicit_path。", resolved),
+		}
+	}
+	source := "model_explicit"
+	if scopeMode == ScopeModeExplicitPath {
+		source = "user_explicit"
+	}
+	return Resolution{
+		Roots:         []string{resolved},
+		ScopeMode:     scopeMode,
+		ScopeRelation: relation,
+		ScopeSource:   source,
+	}, nil
+}
+
+func defaultRoots(permissionContext tool.PermissionContext, cwd string) ([]string, error) {
 	primary, err := permissionContext.ResolveReadablePathChecked(cwd)
 	if err != nil {
 		return nil, err
@@ -52,6 +113,20 @@ func Resolve(permissionContext tool.PermissionContext, cwd, explicitPath string)
 		roots = append(roots, resolved)
 	}
 	return roots, nil
+}
+
+func scopeRelation(path string, projectRoots []string) string {
+	for _, root := range projectRoots {
+		if isSameOrBelow(path, root) {
+			return "inside_project"
+		}
+	}
+	for _, root := range projectRoots {
+		if isSameOrBelow(root, path) {
+			return "common_ancestor"
+		}
+	}
+	return "outside_project"
 }
 
 // DisplayPath renders a match for the caller. With a single root the tool keeps

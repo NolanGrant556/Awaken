@@ -565,6 +565,7 @@ func TestRequestBuilderSendsTheProjectFolderGroupToTheModel(t *testing.T) {
 		SystemPrompt: "static {{.RuntimeInfo}}",
 		ModelConfig:  ModelConfig{Model: "test-model"},
 		Workspace: WorkspaceConfig{
+			ProjectID:     "project_test",
 			ProjectName:   "测试项目",
 			Root:          primary,
 			ReadableRoots: []string{primary, secondary},
@@ -589,7 +590,7 @@ func TestRequestBuilderSendsTheProjectFolderGroupToTheModel(t *testing.T) {
 	// The folder group only counts if it survives into the prompt the provider
 	// actually receives.
 	request := builder.BuildLLMRequestFromEnvelope(envelope)
-	if !strings.Contains(request.SystemPrompt, "**当前项目**: 测试项目") {
+	if !strings.Contains(request.SystemPrompt, `<project id="project_test" name="测试项目" />`) {
 		t.Fatalf("project name missing from system prompt: %s", request.SystemPrompt)
 	}
 	if !strings.Contains(request.SystemPrompt, secondary) {

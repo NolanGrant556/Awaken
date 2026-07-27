@@ -41,7 +41,7 @@ type Repository interface {
 	SetResumed(taskID string, expectedVersion int64) (Task, error)
 
 	// BindThread records the task's stable dedicated thread (created by Core
-	// at first execution).
+	// at first execution or recreated after explicit thread deletion).
 	BindThread(taskID string, expectedVersion int64, threadID string) (Task, error)
 
 	// ConsumeOccurrence records that a due occurrence was processed

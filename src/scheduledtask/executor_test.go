@@ -443,6 +443,51 @@ func TestExecutorReminderWritesNotice(t *testing.T) {
 	assertNoSecretOnDisk(t, f.home)
 }
 
+func TestExecutorAgentRecreatesDeletedDedicatedThread(t *testing.T) {
+	f := newExecutorFixture(t)
+	task := f.agentTask("重建 Agent 线程")
+
+	_, deletedThreadID, execErr := f.executor.ExecuteAgent(context.Background(), task, Execution{ExecutionID: "exec_1"})
+	if execErr != nil {
+		t.Fatalf("first ExecuteAgent: %+v", execErr)
+	}
+	waitForAllThreadsIdle(t, f.service)
+	if err := f.service.DeleteThread(deletedThreadID); err != nil {
+		t.Fatalf("DeleteThread: %v", err)
+	}
+
+	task.ThreadID = deletedThreadID
+	_, recreatedThreadID, execErr := f.executor.ExecuteAgent(context.Background(), task, Execution{ExecutionID: "exec_2"})
+	if execErr != nil {
+		t.Fatalf("ExecuteAgent after thread deletion: %+v", execErr)
+	}
+	if recreatedThreadID == "" || recreatedThreadID == deletedThreadID {
+		t.Fatalf("recreated thread = %q, deleted thread = %q", recreatedThreadID, deletedThreadID)
+	}
+}
+
+func TestExecutorReminderRecreatesDeletedDedicatedThread(t *testing.T) {
+	f := newExecutorFixture(t)
+	task := f.reminderTask("重建提醒线程")
+
+	deletedThreadID, execErr := f.executor.ExecuteReminder(context.Background(), task, Execution{ExecutionID: "exec_1"})
+	if execErr != nil {
+		t.Fatalf("first ExecuteReminder: %+v", execErr)
+	}
+	if err := f.service.DeleteThread(deletedThreadID); err != nil {
+		t.Fatalf("DeleteThread: %v", err)
+	}
+
+	task.ThreadID = deletedThreadID
+	recreatedThreadID, execErr := f.executor.ExecuteReminder(context.Background(), task, Execution{ExecutionID: "exec_2"})
+	if execErr != nil {
+		t.Fatalf("ExecuteReminder after thread deletion: %+v", execErr)
+	}
+	if recreatedThreadID == "" || recreatedThreadID == deletedThreadID {
+		t.Fatalf("recreated thread = %q, deleted thread = %q", recreatedThreadID, deletedThreadID)
+	}
+}
+
 func TestExecutorInteractionGates(t *testing.T) {
 	gates := []struct {
 		name      string

@@ -113,20 +113,21 @@ type titleSyncCall struct {
 // propagation and marks the task so a released call returns a cancelled
 // outcome, mirroring the production executor contract.
 type schedFakeExecutor struct {
-	mu            sync.Mutex
-	block         bool
-	releaseCh     chan struct{}
-	releaseOnce   sync.Once
-	enteredCh     chan string
-	agentTasks    []string
-	agentExecs    []Execution
-	reminderTasks []string
-	cancels       []string
-	cancelled     map[string]bool
-	titleSyncs    []titleSyncCall
-	agentErr      *ExecError
-	reminderErr   *ExecError
-	onStarted     func(task Task, exec Execution, runID, threadID string)
+	mu             sync.Mutex
+	block          bool
+	releaseCh      chan struct{}
+	releaseOnce    sync.Once
+	enteredCh      chan string
+	agentTasks     []string
+	agentExecs     []Execution
+	reminderTasks  []string
+	cancels        []string
+	cancelled      map[string]bool
+	titleSyncs     []titleSyncCall
+	agentErr       *ExecError
+	reminderErr    *ExecError
+	forcedThreadID string
+	onStarted      func(task Task, exec Execution, runID, threadID string)
 }
 
 func newSchedFakeExecutor() *schedFakeExecutor {
@@ -154,12 +155,15 @@ func (e *schedFakeExecutor) ExecuteAgent(ctx context.Context, task Task, exec Ex
 	block := e.block
 	agentErr := e.agentErr
 	onStarted := e.onStarted
+	threadID := e.forcedThreadID
 	e.mu.Unlock()
 	if agentErr != nil {
 		return "", "", agentErr
 	}
 	runID := "run-" + exec.ExecutionID
-	threadID := "thread-" + task.TaskID
+	if threadID == "" {
+		threadID = "thread-" + task.TaskID
+	}
 	if onStarted != nil {
 		onStarted(task, exec, runID, threadID)
 	}
@@ -185,11 +189,14 @@ func (e *schedFakeExecutor) ExecuteReminder(_ context.Context, task Task, exec E
 	e.reminderTasks = append(e.reminderTasks, task.TaskID)
 	reminderErr := e.reminderErr
 	onStarted := e.onStarted
+	threadID := e.forcedThreadID
 	e.mu.Unlock()
 	if reminderErr != nil {
 		return "", reminderErr
 	}
-	threadID := "thread-" + task.TaskID
+	if threadID == "" {
+		threadID = "thread-" + task.TaskID
+	}
 	if onStarted != nil {
 		onStarted(task, exec, "", threadID)
 	}
@@ -981,6 +988,27 @@ func TestRunManualOnPausedTask(t *testing.T) {
 	if fresh.ConsumedOccurrences != 0 {
 		t.Fatalf("consumed = %d, want 0 (manual never counts)", fresh.ConsumedOccurrences)
 	}
+}
+
+func TestSchedulerRebindsRecreatedDedicatedThread(t *testing.T) {
+	h := newSchedHarness(t)
+	task := h.mustCreate(t, reminderCronTask("rebind", "* * * * *", 300))
+	bound, err := h.repo.BindThread(task.TaskID, task.Version, "thread-deleted")
+	if err != nil {
+		t.Fatalf("BindThread: %v", err)
+	}
+	h.exec.mu.Lock()
+	h.exec.forcedThreadID = "thread-recreated"
+	h.exec.mu.Unlock()
+	h.mustStart(t)
+
+	if _, err := h.sched.RunManual(bound, "manual-rebind-1"); err != nil {
+		t.Fatalf("RunManual: %v", err)
+	}
+	waitForCond(t, "recreated thread rebound", func() bool {
+		fresh, getErr := h.repo.Get(task.TaskID)
+		return getErr == nil && fresh.ThreadID == "thread-recreated"
+	})
 }
 
 func TestSchedulerPublishesEvents(t *testing.T) {

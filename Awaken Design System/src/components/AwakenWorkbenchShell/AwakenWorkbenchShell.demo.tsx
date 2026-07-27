@@ -112,15 +112,18 @@ function WorkbenchAnatomyScene() {
                     <div className="aw-workbench-anatomy__component aw-workbench-anatomy__component--inspector">
                       <AnatomyMarker number="4" name="AwakenInspectorRail" />
                       <AwakenInspectorRail
-                        title="On Awaken"
+                        ariaLabel="文件"
                         items={[
                           {
-                            id: "right-sidebar-placeholder",
-                            label: "右侧栏待开发",
+                            id: "files-placeholder",
+                            label: "文件",
                             disabled: true,
+                            icon: (
+                              <Folder size={16} strokeWidth={1.8} aria-hidden="true" />
+                            ),
                           },
                         ]}
-                        activeId="right-sidebar-placeholder"
+                        activeId="files-placeholder"
                       />
                     </div>
                   }

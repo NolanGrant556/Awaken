@@ -6,7 +6,7 @@
 
 `AwakenWorkbenchShell` 负责主舞台和可选 Inspector 的两栏布局、Inspector 折叠槽位与 resize 边界。父级负责运行内容、折叠状态和 resize 交互；组件不读取运行数据，也不决定 Inspector 详情。
 
-Gallery 的“「工作台框架」组件库”统一展示 Desktop 当前消费的 `AwakenAppShell`、`AwakenWorkbenchChrome`、`AwakenWorkbenchShell` 和 `AwakenInspectorRail`。其中 Desktop 的 Inspector 当前仍是禁用占位项，不代表详情能力已实现。
+Gallery 的“「工作台框架」组件库”统一展示 Desktop 当前消费的 `AwakenAppShell`、`AwakenWorkbenchChrome`、`AwakenWorkbenchShell` 和 `AwakenInspectorRail`。其中 Desktop 的 Inspector 当前只在顶部显示禁用的“文件”占位入口，不代表文件详情能力已实现。
 
 ## 文件
 

@@ -24,7 +24,9 @@ const (
 type Event struct {
 	Type        EventType
 	TaskID      string
+	ProjectID   string
 	ExecutionID string
+	RunID       string
 	ThreadID    string
 	TaskName    string
 	Status      string
@@ -206,7 +208,13 @@ func (s *Service) Delete(taskID string, expectedVersion int64, idempotencyKey st
 		return err
 	}
 	s.nudge()
-	s.PublishEvent(Event{Type: EventTaskChanged, TaskID: taskID, TaskName: task.Name, Status: "deleted"})
+	s.PublishEvent(Event{
+		Type:      EventTaskChanged,
+		TaskID:    taskID,
+		ProjectID: task.ProjectID,
+		TaskName:  task.Name,
+		Status:    "deleted",
+	})
 	return nil
 }
 
@@ -290,10 +298,11 @@ func (s *Service) nudge() {
 
 func (s *Service) publishTaskChanged(task Task) {
 	s.PublishEvent(Event{
-		Type:     EventTaskChanged,
-		TaskID:   task.TaskID,
-		ThreadID: task.ThreadID,
-		TaskName: task.Name,
-		Status:   string(task.State(s.IsRunning(task.TaskID))),
+		Type:      EventTaskChanged,
+		TaskID:    task.TaskID,
+		ProjectID: task.ProjectID,
+		ThreadID:  task.ThreadID,
+		TaskName:  task.Name,
+		Status:    string(task.State(s.IsRunning(task.TaskID))),
 	})
 }

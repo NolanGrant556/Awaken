@@ -67,6 +67,14 @@ type Executor interface {
 	Cancel(taskID string)
 }
 
+// ExecutionStartReporter lets the production executor report the durable
+// run/thread identity immediately after RunService creates it, while the
+// blocking ExecuteAgent call continues waiting for terminal. The scheduler
+// remains the only owner that persists and publishes that identity.
+type ExecutionStartReporter interface {
+	SetExecutionStartedHandler(handler func(task Task, exec Execution, runID, threadID string))
+}
+
 // RunServiceExecutor is the production Executor backed by RunService. The
 // resolved model profile (including the API key) only ever lives in memory
 // inside a single call; nothing here persists it.
@@ -77,8 +85,25 @@ type RunServiceExecutor struct {
 	// test ever waits on the wall clock. Nil uses real timers.
 	NewTimer func(d time.Duration) Timer
 
-	mu     sync.Mutex
-	active map[string]string // taskID -> runID
+	mu        sync.Mutex
+	active    map[string]string // taskID -> runID
+	onStarted func(task Task, exec Execution, runID, threadID string)
+}
+
+// SetExecutionStartedHandler implements ExecutionStartReporter.
+func (e *RunServiceExecutor) SetExecutionStartedHandler(handler func(task Task, exec Execution, runID, threadID string)) {
+	e.mu.Lock()
+	e.onStarted = handler
+	e.mu.Unlock()
+}
+
+func (e *RunServiceExecutor) reportExecutionStarted(task Task, exec Execution, runID, threadID string) {
+	e.mu.Lock()
+	handler := e.onStarted
+	e.mu.Unlock()
+	if handler != nil {
+		handler(task, exec, runID, threadID)
+	}
 }
 
 // NewRunServiceExecutor builds the production executor.
@@ -210,6 +235,7 @@ func (e *RunServiceExecutor) ExecuteAgent(ctx context.Context, task Task, exec E
 		return "", "", mapStartError(err)
 	}
 	e.registerActive(task.TaskID, run.RunID)
+	e.reportExecutionStarted(task, exec, run.RunID, run.ThreadID)
 	defer e.unregisterActive(task.TaskID)
 	// Cancellation can arrive after the run starts but before registerActive
 	// has observed it. Propagate ctx cancellation directly to the run so the
@@ -249,7 +275,7 @@ func (e *RunServiceExecutor) ExecuteReminder(ctx context.Context, task Task, exe
 	}
 	publishCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	threadID, _, err := e.RunService.PublishScheduledNotice(publishCtx, runtime.ScheduledNoticeRequest{
+	threadID, runID, err := e.RunService.PublishScheduledNotice(publishCtx, runtime.ScheduledNoticeRequest{
 		TaskID:      task.TaskID,
 		ExecutionID: exec.ExecutionID,
 		TaskName:    task.Name,
@@ -260,6 +286,7 @@ func (e *RunServiceExecutor) ExecuteReminder(ctx context.Context, task Task, exe
 	if err != nil {
 		return "", mapStartError(err)
 	}
+	e.reportExecutionStarted(task, exec, runID, threadID)
 	return threadID, nil
 }
 

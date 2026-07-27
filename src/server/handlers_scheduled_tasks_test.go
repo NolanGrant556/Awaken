@@ -684,7 +684,9 @@ func TestScheduledTaskEventsStream(t *testing.T) {
 	f.service.PublishEvent(scheduledtask.Event{
 		Type:        scheduledtask.EventNotice,
 		TaskID:      "sched_1",
+		ProjectID:   "project-1",
 		ExecutionID: "exec_1",
+		RunID:       "run-1",
 		ThreadID:    "thread-1",
 		TaskName:    "喝水",
 		Status:      "success",
@@ -706,7 +708,7 @@ func TestScheduledTaskEventsStream(t *testing.T) {
 		if err := json.Unmarshal([]byte(dataLine), &payload); err != nil {
 			t.Fatalf("decode frame data %q: %v", dataLine, err)
 		}
-		if payload["type"] != "notice" || payload["task_id"] != "sched_1" || payload["content"] != "该喝水了" || payload["task_name"] != "喝水" {
+		if payload["type"] != "notice" || payload["task_id"] != "sched_1" || payload["project_id"] != "project-1" || payload["run_id"] != "run-1" || payload["content"] != "该喝水了" || payload["task_name"] != "喝水" {
 			t.Fatalf("unexpected notice payload: %v", payload)
 		}
 	case <-ctx.Done():

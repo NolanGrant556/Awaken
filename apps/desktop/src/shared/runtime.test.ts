@@ -456,7 +456,9 @@ describe("scheduled task wire normalization", () => {
     const notice: ScheduledTaskEventWire = {
       type: "notice",
       task_id: "sched_1",
+      project_id: "project-1",
       execution_id: "exec_1",
+      run_id: "run-1",
       thread_id: "thread-9",
       task_name: "喝水提醒",
       status: "success",
@@ -465,7 +467,9 @@ describe("scheduled task wire normalization", () => {
     expect(normalizeScheduledTaskEvent(notice)).toEqual({
       type: "notice",
       taskId: "sched_1",
+      projectId: "project-1",
       executionId: "exec_1",
+      runId: "run-1",
       threadId: "thread-9",
       taskName: "喝水提醒",
       status: "success",

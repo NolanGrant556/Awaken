@@ -83,7 +83,7 @@ describe("startScheduledTaskEventStream", () => {
       .mockResolvedValueOnce(
         okResponse(
           streamFrom(
-            'event: scheduled-task\ndata: {"type":"execution_started","task_id":"sched_1","execution_id":"exec_1","status":"running"}\n\n',
+            'event: scheduled-task\ndata: {"type":"execution_started","task_id":"sched_1","project_id":"project_1","execution_id":"exec_1","run_id":"run_1","thread_id":"thread_1","status":"running"}\n\n',
           ),
         ),
       )
@@ -104,8 +104,10 @@ describe("startScheduledTaskEventStream", () => {
       {
         type: "execution_started",
         taskId: "sched_1",
+        projectId: "project_1",
         executionId: "exec_1",
-        threadId: undefined,
+        runId: "run_1",
+        threadId: "thread_1",
         taskName: undefined,
         status: "running",
         content: undefined,

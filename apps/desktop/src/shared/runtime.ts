@@ -1343,7 +1343,9 @@ export type ScheduledTaskEventType =
 export type ScheduledTaskEventWire = {
   type: ScheduledTaskEventType;
   task_id: string;
+  project_id?: string;
   execution_id?: string;
+  run_id?: string;
   thread_id?: string;
   task_name?: string;
   status?: string;
@@ -1353,7 +1355,9 @@ export type ScheduledTaskEventWire = {
 export type ScheduledTaskEvent = {
   type: ScheduledTaskEventType;
   taskId: string;
+  projectId?: string;
   executionId?: string;
+  runId?: string;
   threadId?: string;
   taskName?: string;
   status?: string;
@@ -2106,7 +2110,9 @@ export function normalizeScheduledTaskEvent(
   return {
     type: event.type,
     taskId: event.task_id,
+    projectId: event.project_id || undefined,
     executionId: event.execution_id || undefined,
+    runId: event.run_id || undefined,
     threadId: event.thread_id || undefined,
     taskName: event.task_name || undefined,
     status: event.status || undefined,

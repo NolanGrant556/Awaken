@@ -2146,6 +2146,52 @@ export function App() {
   }
 
   useEffect(() => {
+    if (!desktopReady) {
+      return;
+    }
+    let cancelled = false;
+    const reconcileScheduledThreads = async (startedThreadId?: string) => {
+      try {
+        const threads = await runtimeClient.listThreads();
+        if (!cancelled) {
+          dispatch({ type: "run/threadsLoaded", threads });
+          if (startedThreadId) {
+            const startedThread = threads.find(
+              (thread) => thread.threadId === startedThreadId,
+            );
+            if (startedThread) {
+              const projectId = startedThread.projectId;
+              if (projectId) {
+                setExpandedProjectIds((current) =>
+                  current.includes(projectId) ? current : [...current, projectId],
+                );
+              } else {
+                setConversationSectionExpanded(true);
+              }
+            }
+          }
+        }
+      } catch {
+        // The runtime reachability surface owns the visible error. Reconnect
+        // or the next scheduled event retries this durable reconciliation.
+      }
+    };
+    void reconcileScheduledThreads();
+    const unsubscribe = runtimeClient.subscribeScheduledTaskEvents((event) => {
+      if (
+        (event.type === "execution_started" || event.type === "execution_finished") &&
+        event.threadId
+      ) {
+        void reconcileScheduledThreads(event.threadId);
+      }
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [desktopReady, runtimeClient]);
+
+  useEffect(() => {
     if (!desktopReady || trackedTrashOperations.length === 0) {
       return;
     }
@@ -5431,9 +5477,6 @@ export function App() {
                   desktopReady={desktopReady}
                   onOpenThread={(threadId) => {
                     backgroundThreadActivationRef.current(threadId);
-                  }}
-                  onExecutionsChanged={() => {
-                    void loadThreadsIntoState();
                   }}
                 />
               ) : (

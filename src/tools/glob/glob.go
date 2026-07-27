@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,24 +18,34 @@ import (
 )
 
 const (
-	ToolName       = "Glob"
-	defaultMaximum = 100
+	ToolName      = "Glob"
+	defaultLimit  = 100
+	maximumLimit  = 1000
+	maximumOffset = 1_000_000
+	cursorPrefix  = "glob-v1:"
 )
 
 type Tool struct{}
 type params struct {
-	Pattern string `json:"pattern"`
-	Path    string `json:"path,omitempty"`
+	Pattern   string `json:"pattern"`
+	Path      string `json:"path,omitempty"`
+	ScopeMode string `json:"scope_mode,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
+	Cursor    string `json:"cursor,omitempty"`
+	Offset    int    `json:"-"`
 }
 
 func (t *Tool) Name() string { return ToolName }
 func (t *Tool) Description() string {
-	return "List files using the run-pinned ripgrep executable with --hidden and --no-ignore. Without an explicit path the search covers every readable root of the task and returns absolute paths; with one root the paths stay root-relative. An explicit path is listed wherever it points, including outside those roots. Results are stably path-sorted and capped at 100 while reporting the true total and truncation."
+	return "List files with the run-pinned ripgrep executable. The default scope_mode=project keeps 'this project' on the exact Host-provided workspace roots; omit path to cover every root. Project mode rejects a common-parent or outside path without changing filesystem permissions. Use scope_mode=explicit_path only when the user explicitly names a path outside the project. Results are stably sorted and paginated with limit/cursor."
 }
 func (t *Tool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{Name: "pattern", Description: "ripgrep glob pattern, for example **/*.go.", Type: "string", Required: true},
-		{Name: "path", Description: "Readable search directory. Omit to search every readable root of the task, starting at the thread cwd.", Type: "string"},
+		{Name: "path", Description: "Search directory. Omit for the exact project roots. A project-internal subdirectory is allowed in project mode.", Type: "string"},
+		{Name: "scope_mode", Description: "project (default) or explicit_path. Use explicit_path only for a user-named path outside the project.", Type: "string"},
+		{Name: "limit", Description: "Maximum returned paths, default 100 and maximum 1000.", Type: "integer"},
+		{Name: "cursor", Description: "Continuation cursor returned by the previous Glob call.", Type: "string"},
 	}
 }
 func (t *Tool) IsReadOnly() bool { return true }
@@ -44,8 +55,8 @@ func (t *Tool) Definition() tool.ToolDefinition {
 		WhenToUse:    []string{"Finding files by name or extension before Read or Grep", "Enumerating hidden or ignored task files intentionally"},
 		WhenNotToUse: []string{"Use Grep for content search", "Use Read when the exact path is known"},
 		SideEffects:  []tool.ToolSideEffect{{Kind: tool.SideEffectRead, Resources: []string{"directory entries"}, Description: "Enumerates paths only.", Reversibility: tool.ReversibilityNotApplicable}},
-		Examples:     []tool.ToolExample{{Scenario: "Find Go sources", Input: map[string]any{"pattern": "**/*.go", "path": "."}, Outcome: "Returns at most 100 sorted paths plus total_matches and truncated."}},
-		FailureModes: []tool.ToolFailureMode{{Code: tool.ErrorCodeNeedsRuntime, Cause: "The pinned run has no rg executable", Retryable: true}, {Code: "glob_failed", Cause: "rg rejected the pattern or could not scan the path", Retryable: true}},
+		Examples:     []tool.ToolExample{{Scenario: "Find project Go sources", Input: map[string]any{"pattern": "**/*.go"}, Outcome: "Returns the first sorted page across the exact project roots and a next_cursor when more paths exist."}},
+		FailureModes: []tool.ToolFailureMode{{Code: tool.ErrorCodeNeedsRuntime, Cause: "The pinned run has no rg executable", Retryable: true}, {Code: searchroots.ErrorCodeProjectScopePathMismatch, Cause: "Project mode received a common-parent or outside path", Retryable: true}, {Code: "glob_failed", Cause: "rg rejected the pattern or could not scan the path", Retryable: true}},
 		OutputSchema: tool.ToolParam{Type: "object", Description: "Matched paths, total count, truncation, and runtime snapshot details.", AdditionalProperties: tool.BoolPtr(true)},
 		Annotations:  tool.ToolAnnotations{ReadOnly: true, CapabilityClass: tool.CapabilityArtifactRead, TrustedOrigin: tool.TrustedOriginBuiltin},
 	})
@@ -87,10 +98,14 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 	if state != nil {
 		cwd = state.CWD(cwd)
 	}
-	roots, err := searchroots.Resolve(permissionContext, cwd, p.Path)
+	resolution, err := searchroots.Resolve(permissionContext, cwd, p.Path, p.ScopeMode)
 	if err != nil {
+		if scopeErr, ok := err.(*searchroots.ScopeError); ok {
+			return tool.FailedOutcome(scopeErr.Message, scopeErr.Code, tool.ErrorCategoryValidation, true).WithTiming(started, time.Now().UTC()), nil
+		}
 		return tool.DeniedOutcome(err.Error(), tool.ErrorCodeToolDenied).WithTiming(started, time.Now().UTC()), nil
 	}
+	roots := resolution.Roots
 	for _, root := range roots {
 		info, statErr := os.Stat(root)
 		if statErr != nil || !info.IsDir() {
@@ -103,9 +118,10 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 	}
 	multiRoot := len(roots) > 1
 	total := 0
-	kept := make([]string, 0, defaultMaximum)
+	keepMaximum := p.Offset + p.Limit
+	kept := make([]string, 0, keepMaximum)
 	for _, root := range roots {
-		rootTotal, rootKept, failure := globRoot(ctx, started, runtime, root, p.Pattern, multiRoot, kept)
+		rootTotal, rootKept, failure := globRoot(ctx, started, runtime, root, p.Pattern, multiRoot, kept, keepMaximum)
 		if failure != nil {
 			return *failure, nil
 		}
@@ -113,23 +129,36 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 		kept = rootKept
 	}
 	sort.Strings(kept)
-	truncated := total > len(kept)
-	content := strings.Join(kept, "\n")
+	pageStart := p.Offset
+	if pageStart > len(kept) {
+		pageStart = len(kept)
+	}
+	pageEnd := pageStart + p.Limit
+	if pageEnd > len(kept) {
+		pageEnd = len(kept)
+	}
+	selected := append([]string(nil), kept[pageStart:pageEnd]...)
+	truncated := pageEnd < total
+	nextCursor := ""
+	if truncated {
+		nextCursor = fmt.Sprintf("%s%d", cursorPrefix, pageEnd)
+	}
+	content := strings.Join(selected, "\n")
 	if content == "" {
 		content = "No files matched."
 	}
 	outcome := tool.SucceededOutcome(content).WithTiming(started, time.Now().UTC())
 	outcome.Truncated = truncated
-	outcome.Summary = fmt.Sprintf("Glob found %d file(s) across %d root(s); returned %d.", total, len(roots), len(kept))
+	outcome.Summary = fmt.Sprintf("Glob found %d file(s) across %d root(s); returned %d from offset %d.", total, len(roots), len(selected), p.Offset)
 	pathStyle := "root_relative"
 	if multiRoot {
 		pathStyle = "absolute"
 	}
-	outcome.Details = map[string]any{"path": roots[0], "roots": roots, "path_style": pathStyle, "pattern": p.Pattern, "paths": kept, "returned": len(kept), "total": total, "truncated": truncated, "environment_snapshot_id": runtime.SnapshotID}
+	outcome.Details = map[string]any{"path": roots[0], "roots": roots, "path_style": pathStyle, "pattern": p.Pattern, "paths": selected, "returned": len(selected), "total": total, "limit": p.Limit, "cursor": p.Cursor, "next_cursor": nextCursor, "truncated": truncated, "scope_mode": resolution.ScopeMode, "scope_relation": resolution.ScopeRelation, "scope_source": resolution.ScopeSource, "environment_snapshot_id": runtime.SnapshotID}
 	return outcome, nil
 }
 
-func globRoot(ctx context.Context, started time.Time, runtime rgexec.Runtime, root, pattern string, multiRoot bool, kept []string) (int, []string, *tool.ExecutionOutcome) {
+func globRoot(ctx context.Context, started time.Time, runtime rgexec.Runtime, root, pattern string, multiRoot bool, kept []string, maximum int) (int, []string, *tool.ExecutionOutcome) {
 	command := runtime.Command(ctx, root, "--files", "--hidden", "--no-ignore", "--glob", pattern, ".")
 	stdout, err := command.StdoutPipe()
 	if err != nil {
@@ -148,7 +177,7 @@ func globRoot(ctx context.Context, started time.Time, runtime rgexec.Runtime, ro
 	for scanner.Scan() {
 		total++
 		relative := strings.TrimPrefix(scanner.Text(), "."+string(filepath.Separator))
-		kept = insertSmallest(kept, searchroots.DisplayPath(root, relative, multiRoot), defaultMaximum)
+		kept = insertSmallest(kept, searchroots.DisplayPath(root, relative, multiRoot), maximum)
 	}
 	scanErr := scanner.Err()
 	waitErr := command.Wait()
@@ -173,6 +202,31 @@ func parseParams(input string) (params, error) {
 	p.Pattern = strings.TrimSpace(p.Pattern)
 	if p.Pattern == "" {
 		return params{}, fmt.Errorf("pattern is required")
+	}
+	if p.ScopeMode == "" {
+		p.ScopeMode = searchroots.ScopeModeProject
+	}
+	if p.ScopeMode != searchroots.ScopeModeProject && p.ScopeMode != searchroots.ScopeModeExplicitPath {
+		return params{}, fmt.Errorf("scope_mode must be project or explicit_path")
+	}
+	if p.Limit == 0 {
+		p.Limit = defaultLimit
+	}
+	if p.Limit < 1 || p.Limit > maximumLimit {
+		return params{}, fmt.Errorf("limit must be between 1 and %d", maximumLimit)
+	}
+	if p.Cursor != "" {
+		if !strings.HasPrefix(p.Cursor, cursorPrefix) {
+			return params{}, fmt.Errorf("cursor is invalid")
+		}
+		offset, cursorErr := strconv.Atoi(strings.TrimPrefix(p.Cursor, cursorPrefix))
+		if cursorErr != nil || offset < 0 || offset > maximumOffset {
+			return params{}, fmt.Errorf("cursor is invalid")
+		}
+		p.Offset = offset
+	}
+	if p.Offset > maximumOffset-p.Limit {
+		return params{}, fmt.Errorf("cursor is out of range")
 	}
 	return p, nil
 }

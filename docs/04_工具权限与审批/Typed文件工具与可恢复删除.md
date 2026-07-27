@@ -9,10 +9,10 @@
 | `Read` | 文本从 1 开始分页，默认/上限 2000 行；PNG/JPEG/GIF/WebP 进入模型媒体；PDF 默认 1-5 页、单次最多 20 页，按模型能力走原生 PDF 或 Poppler 144 DPI；Office/Notebook 返回 `unsupported_media` |
 | `Edit` | 既有文本必须在当前 thread 成功 `Read` 且宿主快照未变化；默认要求 `old_string` 唯一匹配，只有 `replace_all=true` 可替换多处 |
 | `Write` | 新文件无需预读并写 UTF-8；覆盖既有文件必须预读且未外部变化；保留可识别的编码/BOM、换行和权限 |
-| `Glob` | 使用 run snapshot 固定的真实 `rg`，默认 hidden/no-ignore，稳定排序，最多返回 100 条并报告 total/truncated |
-| `Grep` | 使用真实 `rg` argv，支持 glob/type/output mode/context/line/ignore-case/head/offset/multiline，保留真实无匹配和截断事实 |
+| `Glob` | 使用 run snapshot 固定的真实 `rg`，默认 hidden/no-ignore、稳定排序；默认每页 100 条、`limit` 最大 1000，以 opaque `cursor/next_cursor` 继续枚举并报告 total/truncated |
+| `Grep` | 使用真实 `rg` argv，支持 glob/type/output mode/context/line/ignore-case/head/offset/multiline，保留真实无匹配和截断事实；`head_limit/offset` 提供稳定续读 |
 
-缺少 `rg` 时 `Glob`/`Grep` 返回 `needs_runtime`，不回退到语义较弱的 Go 搜索。`Edit`/`Write` 使用同目录临时文件、fsync 和原子替换；未知/二进制编码拒绝覆盖。失败不刷新 thread 文件状态，成功会记录新的 SHA-256/size/mtime/type 快照。
+缺少 `rg` 时 `Glob`/`Grep` 返回 `needs_runtime`，不回退到语义较弱的 Go 搜索。两者默认按 TaskScope 精确 roots 搜索；共同父目录或项目外路径必须通过 TaskScope 文档定义的 `scope_mode` 明确区分，不得靠退回 `Bash find` 绕过分页。`Edit`/`Write` 使用同目录临时文件、fsync 和原子替换；未知/二进制编码拒绝覆盖。失败不刷新 thread 文件状态，成功会记录新的 SHA-256/size/mtime/type 快照。
 
 删除统一使用 `trash_file`，支持单路径或明确路径列表。成功结果返回 `original_path`、`method`，并在平台可观察时返回 `trashed_path`，同时写 observed `trashed` change；批量中途失败标为 partial/unknown，要求先检查原路径和 Trash，禁止自动改用永久删除。
 

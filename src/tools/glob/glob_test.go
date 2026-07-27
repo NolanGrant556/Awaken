@@ -2,6 +2,7 @@ package glob
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,35 @@ func TestGlobUsesRealRGAndStableSort(t *testing.T) {
 	}
 	if outcome.Content != ".hidden.go\na.go\nz.go" {
 		t.Fatalf("sort/content=%q", outcome.Content)
+	}
+}
+
+func TestGlobPaginatesStableResultsWithoutShellFallback(t *testing.T) {
+	root := t.TempDir()
+	for index := 0; index < 135; index++ {
+		name := fmt.Sprintf("file-%03d.txt", index)
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	first, err := (&Tool{}).ExecuteOutcome(ctx, `{"pattern":"*.txt","limit":50}`, nil)
+	if err != nil || first.IsError() {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	cursor, _ := first.Details["next_cursor"].(string)
+	if cursor == "" || first.Details["total"] != 135 || first.Details["returned"] != 50 {
+		t.Fatalf("first page metadata=%+v", first.Details)
+	}
+	second, err := (&Tool{}).ExecuteOutcome(ctx, fmt.Sprintf(`{"pattern":"*.txt","limit":50,"cursor":%q}`, cursor), nil)
+	if err != nil || second.IsError() {
+		t.Fatalf("second=%+v err=%v", second, err)
+	}
+	if strings.Contains(second.Content, "file-049.txt") || !strings.Contains(second.Content, "file-050.txt") {
+		t.Fatalf("second page is not the stable continuation: %q", second.Content)
+	}
+	if second.Details["next_cursor"] == "" {
+		t.Fatalf("second page lost continuation: %+v", second.Details)
 	}
 }
 

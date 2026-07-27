@@ -135,6 +135,10 @@ func (c AgentConfig) EffectiveProfile() profile.ExecutionProfile {
 
 type TaskScope struct {
 	ScopeID string
+	// ProjectID is the durable Host-owned project identity. It is exposed to
+	// the model only as structured environment context; paths and permissions
+	// are never derived from it.
+	ProjectID string
 	// ProjectName is the display name of the project this scope belongs to. It
 	// is model-facing context only; no path or permission is derived from it.
 	ProjectName             string

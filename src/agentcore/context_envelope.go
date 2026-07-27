@@ -86,6 +86,7 @@ type RuntimeSnapshot struct {
 	ToolSummary       string
 	SkillSummary      string
 	ScopeID           string
+	ProjectID         string
 	ProjectName       string
 	ProjectFolders    []ProjectFolderObservation
 	WorkspaceRoot     string
@@ -154,6 +155,7 @@ func (snapshot RuntimeSnapshot) ToRuntimeInfo() prompt.RuntimeInfo {
 		EntryPoint:     snapshot.EntryPoint,
 		ToolSummary:    snapshot.ToolSummary,
 		SkillSummary:   snapshot.SkillSummary,
+		ProjectID:      snapshot.ProjectID,
 		ProjectName:    snapshot.ProjectName,
 		ProjectFolders: projectFolders,
 		AttachedFiles:  attachedFiles,
@@ -162,7 +164,7 @@ func (snapshot RuntimeSnapshot) ToRuntimeInfo() prompt.RuntimeInfo {
 
 func runtimeSnapshotSystemItem(snapshot RuntimeSnapshot) ContextItem {
 	content := fmt.Sprintf(
-		"current_date=%s\nworking_directory=%s\nmodel_name=%s\nentry_point=%s\ntool_summary=%s\nskill_summary=%s\nscope_id=%s\nproject_name=%s\nproject_folders=%s\nworkspace_root=%s\nreadable_roots=%s\nwritable_roots=%s\noutput_roots=%s\nattached_files=%s\ntool_snapshot_id=%s\ntool_catalog_version=%d\nenvironment_snapshot_id=%s\nos=%s\narchitecture=%s\npath_source=%s\nskill_roots=%s\ntemporary_work_root=%s\nenvironment_refresh_reason=%s\nobserved_executables=%s\npackage_managers=%s",
+		"current_date=%s\nworking_directory=%s\nmodel_name=%s\nentry_point=%s\ntool_summary=%s\nskill_summary=%s\nscope_id=%s\nproject_id=%s\nproject_name=%s\nproject_folders=%s\nworkspace_root=%s\nreadable_roots=%s\nwritable_roots=%s\noutput_roots=%s\nattached_files=%s\ntool_snapshot_id=%s\ntool_catalog_version=%d\nenvironment_snapshot_id=%s\nos=%s\narchitecture=%s\npath_source=%s\nskill_roots=%s\ntemporary_work_root=%s\nenvironment_refresh_reason=%s\nobserved_executables=%s\npackage_managers=%s",
 		snapshot.CurrentDate,
 		snapshot.WorkingDirectory,
 		snapshot.ModelName,
@@ -170,6 +172,7 @@ func runtimeSnapshotSystemItem(snapshot RuntimeSnapshot) ContextItem {
 		snapshot.ToolSummary,
 		snapshot.SkillSummary,
 		snapshot.ScopeID,
+		snapshot.ProjectID,
 		formatRuntimeSnapshotProjectName(snapshot.ProjectName),
 		formatRuntimeSnapshotProjectFolders(snapshot.ProjectFolders),
 		snapshot.WorkspaceRoot,

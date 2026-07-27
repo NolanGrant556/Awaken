@@ -14,7 +14,7 @@
 
 三个 roots 数组本来就是多根的。一个项目有多个文件夹时，Desktop 用 `[主文件夹, ...次文件夹]` 填这三个数组，`WorkspaceRoot` 是主文件夹。线程锚定在次文件夹时，那个文件夹排在数组首位并成为该 run 的 `WorkspaceRoot`。
 
-roots 要生效，模型必须知道它们存在。scope 通过 `workspace.project_name` 拿到项目展示名，system prompt 的「当前运行环境」据此列出项目名与整组项目文件夹并标出主文件夹，默认系统提示的「项目文件夹与作业范围」再声明四条约定：默认在主文件夹作业、文件夹组是一个整体、跨文件夹检索省略 `path`、项目外路径按用户指令直达。模型侧渲染由 [上下文窗口与压缩](../02_主智能体闭环/上下文窗口与压缩.md) 拥有；此处只声明它与 roots 语义必须一致。
+roots 要生效，模型必须知道它们存在。scope 通过 `workspace.project_id/project_name` 拿到稳定项目身份和展示名，system prompt 以结构化 `<environment_context>` 分开渲染项目 ID/名称、cwd、逐项保留的 `workspace_roots` 和独立的 unrestricted `permission_profile`。Host 不计算或注入多个 root 的共同父目录。默认系统提示的「项目文件夹与作业范围」再声明四条约定：默认在主文件夹作业、文件夹组是一个整体、“本项目”严格等于这组 roots、跨文件夹检索省略 `path`；项目外路径只有在用户明确点名时才进入显式路径模式。模型侧渲染由 [上下文窗口与压缩](../02_主智能体闭环/上下文窗口与压缩.md) 拥有；此处只声明它与 roots 语义必须一致。
 
 项目可以没有任何文件夹。此时 Desktop 传 `workspace.project_id` 而 `workspace_root` 为空，Core 把它解析到该项目自己的 session 工作目录：`<AWAKEN_HOME>/sessions/<project_id>`，产出默认落在其下的 `output/`；同一零文件夹项目的 thread 共享这一区域。
 
@@ -24,7 +24,7 @@ roots 要生效，模型必须知道它们存在。scope 通过 `workspace.proje
 
 `ProtectedRootExceptions` 是受保护子树内部的窄口子，只为 session 工作目录存在：`~/.awaken` 整体受保护，而 session 目录在它下面。只有当本次 scope 的某个 root 落在 `<AWAKEN_HOME>/sessions` 里时才放行这一条子树，`config`、`credentials`、`store-generations`、`memory` 依旧不可写。例外内部仍然适用上述形状规则。
 
-`Glob` 和 `Grep` 在调用方没有显式给 `path` 时覆盖全部 readable roots：cwd 在前，其余按 scope 顺序跟随，嵌套与重复 root 会被去掉，同一个文件不会出现两次。合并多个 root 的结果时输出绝对路径（`path_style=absolute`），只有一个 root 时保持原来的 root 相对路径（`path_style=root_relative`）。显式给了 `path` 就按它搜，落在 roots 之外也搜。
+`Glob` 和 `Grep` 默认使用 `scope_mode=project`。调用方没有显式给 `path` 时覆盖全部 readable roots：cwd 在前，其余按 scope 顺序跟随，嵌套与重复 root 会被去掉，同一个文件不会出现两次。合并多个 root 的结果时输出绝对路径（`path_style=absolute`），只有一个 root 时保持原来的 root 相对路径（`path_style=root_relative`）。project 模式显式收到多个 roots 的共同父目录或项目外路径时返回 `PROJECT_SCOPE_PATH_MISMATCH`，提示省略 `path`；用户明确要求项目外路径时，模型必须使用 `scope_mode=explicit_path`，该模式仍按开放权限合同直接搜索，不触发审批。回执同时记录 `scope_mode/scope_relation/scope_source`，区分 `inside_project/common_ancestor/outside_project` 与默认/显式来源。
 
 `WorkspaceExecutionBroker` 只由 `dependency_install`、`git_remote` 和 MCP Artifact bridge 使用。调用方从 normalized `PermissionContext` 产生 canonical writable/protected scope；workspace 外 root 不进入可发布集，protected roots 同时保留 lexical 位置和 resolved target。`Bash` 不调用该 broker，也没有 `workspace_scope_declared`/staging 分支。
 
@@ -62,10 +62,11 @@ WorkspaceRoot 是 typed 文件/Artifact/provider 的默认 run 范围，不是�
 - `ProtectedRoots` 必须覆盖 scope 里的每一个 root；只为 `WorkspaceRoot` 生成保护项是不安全的。
 - `ProtectedRootExceptions` 只能是 `<AWAKEN_HOME>/sessions` 这一条子树，且只在本次 scope 真有 root 落在其中时出现。没有例外时 `~/.awaken` 全域保护不得被削弱，例外内部的形状规则也不得跳过。
 - roots 不得被重新当成路径围栏。越界访问由用户指令驱动，不引入审批；要收紧只能通过形状名单，而形状名单只作用于写，不作用于读。
+- `Glob`/`Grep` 的 `project` 模式纠正共同父目录和项目外路径只约束默认意图，不是权限拒绝；`explicit_path` 必须继续允许用户点名的外部绝对路径。
 - 第三方提议的路径与用户指令不同源，但当前**不**因此额外收紧：MCP Artifact bridge 已放开 `writable ∩ output` 约束，仅保留 `relative_path` 格式校验（相对、canonical、禁止 `..`）、symlink 组件拒绝和 `ProtectedRoots`。
 - 不带 `path` 的搜索必须只覆盖 readable roots；把默认范围放大到全盘会让一次无范围搜索不可用。
-- 项目文件夹组必须出现在 provider 可见的 system prompt 里。只写进宿主侧 `runtime_snapshot` 不算下发：模型看不到的 roots 会退化成「只知道 cwd」，进而靠 `..` 向上级目录试探。
-- `project_name` 只做模型可读上下文。任何路径解析、权限判定或 scope 身份都不得从它派生。
+- 项目 ID、项目名、cwd、精确文件夹组和 permission profile 必须出现在 provider 可见的结构化 environment context 里。只写进宿主侧 `runtime_snapshot` 不算下发：模型看不到的 roots 会退化成「只知道 cwd」，进而靠 `..` 向上级目录试探。
+- `project_id` 是 scope 身份，`project_name` 只做模型可读上下文。任何路径解析或权限判定都不得从展示名派生。
 - 写失败、删除失败或副作用未知时不得把目标状态写成已完成。
 - Windows 盘符、UNC、反斜杠、大小写与非 ASCII 路径需要平台测试，不能从 Unix fixture 推断。
 

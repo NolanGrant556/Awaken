@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"awaken/src/tool"
+	"awaken/src/tools/internal/searchroots"
 )
 
 func multiRootContext(t *testing.T, roots ...string) context.Context {
@@ -98,5 +99,48 @@ func TestGlobDoesNotReportAFileTwiceWhenARootIsNestedInAnother(t *testing.T) {
 	}
 	if outcome.Details["path_style"] != "root_relative" {
 		t.Fatalf("path_style=%v", outcome.Details["path_style"])
+	}
+}
+
+func TestGlobProjectModeRejectsTheSiblingRootsCommonParent(t *testing.T) {
+	parent := t.TempDir()
+	primary := filepath.Join(parent, "project-a")
+	secondary := filepath.Join(parent, "project-b")
+	outside := filepath.Join(parent, "not-in-project")
+	for _, dir := range []string{primary, secondary, outside} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, outside, "outside.go")
+
+	outcome, err := (&Tool{}).ExecuteOutcome(
+		multiRootContext(t, primary, secondary),
+		`{"pattern":"*.go","path":"`+parent+`"}`,
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.ErrorCode != searchroots.ErrorCodeProjectScopePathMismatch {
+		t.Fatalf("outcome=%+v", outcome)
+	}
+}
+
+func TestGlobExplicitPathModeKeepsOpenFilesystemAccess(t *testing.T) {
+	primary := t.TempDir()
+	outside := t.TempDir()
+	writeFile(t, outside, "outside.go")
+
+	outcome, err := (&Tool{}).ExecuteOutcome(
+		multiRootContext(t, primary),
+		`{"pattern":"*.go","path":"`+outside+`","scope_mode":"explicit_path"}`,
+		nil,
+	)
+	if err != nil || outcome.IsError() || outcome.Content != "outside.go" {
+		t.Fatalf("outcome=%+v err=%v", outcome, err)
+	}
+	if outcome.Details["scope_relation"] != "outside_project" || outcome.Details["scope_source"] != "user_explicit" {
+		t.Fatalf("scope metadata=%+v", outcome.Details)
 	}
 }

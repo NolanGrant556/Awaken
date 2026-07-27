@@ -432,6 +432,7 @@ func (rb *RequestBuilder) buildRuntimeSnapshot(tools []tool.ToolSchema) RuntimeS
 		ToolSummary:      rb.runtimeInfo.ToolSummary,
 		SkillSummary:     rb.runtimeInfo.SkillSummary,
 		ScopeID:          permissionContext.ScopeID,
+		ProjectID:        strings.TrimSpace(rb.config.Workspace.ProjectID),
 		ProjectName:      strings.TrimSpace(rb.config.Workspace.ProjectName),
 		ProjectFolders:   projectFolderObservations(rb.config.Workspace, permissionContext),
 		WorkspaceRoot:    permissionContext.WorkspaceRoot,
@@ -510,7 +511,7 @@ func runtimeSnapshotIdentity(snapshot RuntimeSnapshot) string {
 	}
 	return snapshot.WorkingDirectory + "|" + snapshot.ModelName + "|" + snapshot.EntryPoint +
 		"|skills:" + snapshot.SkillSummary + "|tools:" + snapshot.ToolSnapshotID +
-		"|env:" + snapshot.EnvironmentID + "|project:" + snapshot.ProjectName +
+		"|env:" + snapshot.EnvironmentID + "|project:" + snapshot.ProjectID + ":" + snapshot.ProjectName +
 		"|folders:" + strings.Join(folders, ";")
 }
 

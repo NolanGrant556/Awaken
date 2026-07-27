@@ -69,17 +69,18 @@ describe("ProjectFilesWorkspace", () => {
     body!.getBoundingClientRect = () =>
       ({ left: 0, right: 720, top: 0, bottom: 600, width: 720, height: 600 }) as DOMRect;
     navigator!.getBoundingClientRect = () =>
-      ({ left: 360, right: 720, top: 0, bottom: 600, width: 360, height: 600 }) as DOMRect;
+      ({ left: 480, right: 720, top: 0, bottom: 600, width: 240, height: 600 }) as DOMRect;
     const toggle = container.querySelector<HTMLButtonElement>(
       '[aria-label="收起文件列表"]',
     );
     expect(toggle?.getAttribute("aria-expanded")).toBe("true");
     expect(navigator?.getAttribute("aria-hidden")).toBe("false");
+    expect(divider?.getAttribute("aria-valuenow")).toBe("240");
     expect(container.textContent).toContain("README.md");
 
     await act(async () => {
       divider?.dispatchEvent(
-        new MouseEvent("pointerdown", { bubbles: true, clientX: 360 }),
+        new MouseEvent("pointerdown", { bubbles: true, clientX: 480 }),
       );
       window.dispatchEvent(
         new MouseEvent("pointermove", { bubbles: true, clientX: 300 }),
@@ -175,18 +176,27 @@ describe("ProjectFilesWorkspace", () => {
 
     await act(async () => {
       dispatchTimedPointerEvent(divider!, "pointerdown", 480, 2_000);
-      dispatchTimedPointerEvent(window, "pointermove", 510, 2_035);
-      dispatchTimedPointerEvent(window, "pointermove", 550, 2_075);
+      dispatchTimedPointerEvent(window, "pointermove", 530, 2_040);
+      dispatchTimedPointerEvent(window, "pointermove", 570, 2_080);
+      dispatchTimedPointerEvent(window, "pointerup", 570, 2_090);
+    });
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    expect(navigator?.getAttribute("aria-hidden")).toBe("false");
+
+    await act(async () => {
+      dispatchTimedPointerEvent(divider!, "pointerdown", 480, 3_000);
+      dispatchTimedPointerEvent(window, "pointermove", 540, 3_035);
+      dispatchTimedPointerEvent(window, "pointermove", 610, 3_070);
     });
     expect(toggle?.getAttribute("aria-expanded")).toBe("false");
     expect(navigator?.getAttribute("aria-hidden")).toBe("true");
 
     await act(async () => toggle?.click());
     await act(async () => {
-      dispatchTimedPointerEvent(divider!, "pointerdown", 480, 3_000);
-      dispatchTimedPointerEvent(window, "pointermove", 520, 3_220);
-      dispatchTimedPointerEvent(window, "pointermove", 560, 3_500);
-      dispatchTimedPointerEvent(window, "pointerup", 560, 3_520);
+      dispatchTimedPointerEvent(divider!, "pointerdown", 480, 4_000);
+      dispatchTimedPointerEvent(window, "pointermove", 550, 4_220);
+      dispatchTimedPointerEvent(window, "pointermove", 620, 4_500);
+      dispatchTimedPointerEvent(window, "pointerup", 620, 4_520);
     });
     expect(toggle?.getAttribute("aria-expanded")).toBe("true");
     expect(navigator?.getAttribute("aria-hidden")).toBe("false");

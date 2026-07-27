@@ -587,7 +587,9 @@ data: {"type":"message_stop"}`,
 
 	cfg := testAgentConfig(server.URL+"/anthropic", 3)
 	var gotEvents []AwakenEvent
+	recorder := &failingRecorder{}
 	agent := NewAgent(cfg)
+	agent.SetSemanticRecorder(recorder)
 	answer, err := agent.RunStreamWithEvents(context.Background(), "stream tool with events", EventSinkFunc(func(event AwakenEvent) {
 		gotEvents = append(gotEvents, event)
 	}))
@@ -662,6 +664,56 @@ data: {"type":"message_stop"}`,
 	}
 	if gotEvents[23].Delta != "done" {
 		t.Fatalf("expected final text delta done, got %q", gotEvents[23].Delta)
+	}
+	var summaries []SemanticRecord
+	for _, record := range recorder.records {
+		if record.Kind == SemanticKindReasoningSummary {
+			summaries = append(summaries, record)
+		}
+	}
+	if len(summaries) != 1 || summaries[0].Payload["content"] != "Let me think" || summaries[0].Payload["role"] != "reasoning" {
+		t.Fatalf("expected one durable Anthropic reasoning summary, got %+v", summaries)
+	}
+}
+
+func TestRunnerPersistsOpenAICompatibleReasoningSummary(t *testing.T) {
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeRunnerStreamEvent(t, w, map[string]interface{}{
+			"choices": []map[string]interface{}{{
+				"delta": map[string]interface{}{"reasoning_content": "先检查技能目录"},
+			}},
+		})
+		writeRunnerStreamEvent(t, w, map[string]interface{}{
+			"choices": []map[string]interface{}{{
+				"delta": map[string]interface{}{"content": "检查完成"},
+			}},
+		})
+		writeRunnerStreamLines(t, w, []string{"data: [DONE]"})
+	})
+	defer server.Close()
+
+	recorder := &failingRecorder{}
+	agent := NewAgent(testAgentConfig(server.URL, 1))
+	agent.SetSemanticRecorder(recorder)
+	answer, err := agent.RunStreamWithEvents(context.Background(), "检查", nil)
+	if err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
+	}
+	if answer != "检查完成" {
+		t.Fatalf("expected final answer, got %q", answer)
+	}
+
+	var summaries []SemanticRecord
+	for _, record := range recorder.records {
+		if record.Kind == SemanticKindReasoningSummary {
+			summaries = append(summaries, record)
+		}
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected one durable OpenAI-compatible reasoning summary, got %+v", summaries)
+	}
+	if summaries[0].Payload["content"] != "先检查技能目录" || summaries[0].Payload["role"] != "reasoning" || summaries[0].Payload["message_id"] == "" {
+		t.Fatalf("unexpected durable reasoning summary: %+v", summaries[0])
 	}
 }
 

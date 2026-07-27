@@ -89,6 +89,48 @@ func TestProjectSemanticRecordSuppressesLocalContextAuthorities(t *testing.T) {
 	}
 }
 
+func TestProjectReasoningSummaryProducesCompleteLifecycle(t *testing.T) {
+	record := agentcore.SemanticRecord{
+		SchemaVersion: 2,
+		RecordID:      "rec-reasoning",
+		Seq:           7,
+		ThreadID:      "thread-1",
+		RunID:         "run-1",
+		Kind:          agentcore.SemanticKindReasoningSummary,
+		Timestamp:     time.Now().UTC(),
+		Payload: map[string]any{
+			"content":    "先检查技能目录",
+			"role":       "reasoning",
+			"message_id": "reasoning-1",
+		},
+	}
+
+	frames := ProjectSemanticRecord(record)
+	wantTypes := []EventType{
+		EventReasoningStart,
+		EventReasoningMessageStart,
+		EventReasoningMessageContent,
+		EventReasoningMessageEnd,
+		EventReasoningEnd,
+	}
+	if len(frames) != len(wantTypes) {
+		t.Fatalf("expected complete reasoning lifecycle, got %+v", frames)
+	}
+	seenSeq := map[uint64]bool{}
+	for i, want := range wantTypes {
+		if frames[i].Type != want || frames[i].MessageID != "reasoning-1" || frames[i].RecordID != "rec-reasoning" {
+			t.Fatalf("unexpected reasoning frame[%d]: %+v", i, frames[i])
+		}
+		if seenSeq[frames[i].Seq] {
+			t.Fatalf("projected reasoning frame seq must be unique: %+v", frames)
+		}
+		seenSeq[frames[i].Seq] = true
+	}
+	if frames[1].Role != "reasoning" || frames[2].Delta != "先检查技能目录" {
+		t.Fatalf("reasoning summary fields lost: %+v", frames)
+	}
+}
+
 func TestArtifactV2SemanticRoundTrip(t *testing.T) {
 	event := agentcore.AwakenEvent{
 		Type:                    agentcore.ArtifactCreatedEventType,

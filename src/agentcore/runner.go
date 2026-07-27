@@ -1379,6 +1379,7 @@ type runEventEmitter struct {
 	reasoningOpen         bool
 	textStartedThisTurn   bool
 	mutationOccurred      bool
+	reasoningText         strings.Builder
 	assistantText         strings.Builder
 	pendingToolCallDeltas []llm.ToolCallDelta
 	pendingTerminalReason TerminalReason
@@ -1725,6 +1726,7 @@ func (e *runEventEmitter) onLLMDelta(content string, isThinking bool) {
 	}
 	if isThinking {
 		e.startReasoningIfNeeded()
+		e.reasoningText.WriteString(content)
 		e.emit(AwakenEvent{
 			Type:      ReasoningDeltaEventType,
 			MessageID: e.reasoningMessageID,
@@ -2408,12 +2410,37 @@ func (e *runEventEmitter) finishReasoningIfOpen() {
 	if !e.reasoningOpen {
 		return
 	}
-	e.emit(AwakenEvent{
+	finished := AwakenEvent{
 		Type:      ReasoningFinishedEventType,
 		MessageID: e.reasoningMessageID,
-	})
+	}
+	e.fillIDs(&finished)
+	content := e.reasoningText.String()
+	if e.recorder != nil && strings.TrimSpace(content) != "" {
+		if err := e.persistDurable(stdcontext.Background(), "reasoning_summary", NewSemanticRecord(
+			SemanticKindReasoningSummary,
+			e.threadID,
+			e.runID,
+			e.turnID(),
+			"",
+			e.sessionID,
+			map[string]any{
+				"content":    content,
+				"role":       "reasoning",
+				"message_id": e.reasoningMessageID,
+			},
+		), finished); err != nil {
+			e.reasoningOpen = false
+			e.reasoningMessageID = ""
+			e.reasoningText.Reset()
+			return
+		}
+	} else {
+		e.sink.Emit(finished)
+	}
 	e.reasoningOpen = false
 	e.reasoningMessageID = ""
+	e.reasoningText.Reset()
 }
 
 func (e *runEventEmitter) ensureAssistantMessageID() string {
@@ -2430,6 +2457,7 @@ func (e *runEventEmitter) resetTurn() {
 	e.textOpen = false
 	e.reasoningOpen = false
 	e.textStartedThisTurn = false
+	e.reasoningText.Reset()
 	e.assistantText.Reset()
 	e.pendingToolCallDeltas = nil
 }

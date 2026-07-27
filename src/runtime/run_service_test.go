@@ -17,6 +17,34 @@ import (
 	"awaken/src/tool/profile"
 )
 
+func TestCanonicalizeActiveTranscriptEventsSupersedesEphemeralReasoning(t *testing.T) {
+	record := agentcore.NewSemanticRecord(
+		agentcore.SemanticKindReasoningSummary,
+		"thread-1",
+		"run-1",
+		"turn-1",
+		"",
+		"session-1",
+		map[string]any{
+			"content":    "完整思考过程",
+			"role":       "reasoning",
+			"message_id": "reasoning-1",
+		},
+	)
+	record.RecordID = "record-reasoning-1"
+	record.Seq = 9
+	events := []Event{
+		{Kind: EventKindAgent, Seq: 1, AgentEvent: agentcore.AwakenEvent{Type: agentcore.ReasoningStartedEventType, MessageID: "reasoning-1"}},
+		{Kind: EventKindAgent, Seq: 2, AgentEvent: agentcore.AwakenEvent{Type: agentcore.ReasoningDeltaEventType, MessageID: "reasoning-1", Delta: "部分"}},
+		{Kind: EventKindAgent, Seq: 3, AgentEvent: agentcore.AwakenEvent{Type: agentcore.ReasoningFinishedEventType, MessageID: "reasoning-1"}},
+	}
+
+	got := canonicalizeActiveTranscriptEvents(events, []agentcore.SemanticRecord{record})
+	if len(got) != 1 || got[0].Kind != EventKindSemantic || got[0].SemanticRecord.RecordID != "record-reasoning-1" {
+		t.Fatalf("durable reasoning summary must supersede ephemeral deltas: %+v", got)
+	}
+}
+
 func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})

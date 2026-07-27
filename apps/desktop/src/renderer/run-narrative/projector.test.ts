@@ -115,6 +115,117 @@ describe("projectAguiEventToNarrative", () => {
     });
   });
 
+  it("reconciles a durable reasoning snapshot with already streamed deltas", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "REASONING_MESSAGE_START",
+      rawType: "REASONING_MESSAGE_START",
+      runId: "run-1",
+      messageId: "reasoning-1",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "REASONING_MESSAGE_CONTENT",
+      rawType: "REASONING_MESSAGE_CONTENT",
+      runId: "run-1",
+      messageId: "reasoning-1",
+      delta: "先检查技能目录",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "REASONING_MESSAGE_START",
+      rawType: "REASONING_MESSAGE_START",
+      runId: "run-1",
+      messageId: "reasoning-1",
+      seq: 40,
+      semanticSeq: 50,
+      recordId: "rec-reasoning-1",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "REASONING_MESSAGE_CONTENT",
+      rawType: "REASONING_MESSAGE_CONTENT",
+      runId: "run-1",
+      messageId: "reasoning-1",
+      delta: "先检查技能目录",
+      seq: 41,
+      semanticSeq: 51,
+      recordId: "rec-reasoning-1",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "REASONING_MESSAGE_END",
+      rawType: "REASONING_MESSAGE_END",
+      runId: "run-1",
+      messageId: "reasoning-1",
+      seq: 42,
+      semanticSeq: 52,
+      recordId: "rec-reasoning-1",
+    });
+
+    expect(state.committedItems).toContainEqual({
+      kind: "thinking",
+      id: "thinking:run-1:reasoning-1",
+      text: "先检查技能目录",
+      status: "done",
+    });
+  });
+
+  it("keeps reasoning before the answer when its durable snapshot arrives after streamed text", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "REASONING_MESSAGE_START",
+      rawType: "REASONING_MESSAGE_START",
+      runId: "run-1",
+      messageId: "reasoning-1",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "REASONING_MESSAGE_CONTENT",
+      rawType: "REASONING_MESSAGE_CONTENT",
+      runId: "run-1",
+      messageId: "reasoning-1",
+      delta: "先思考",
+    });
+    state = projectAguiEventToNarrative(state, textMessageStart());
+    state = projectAguiEventToNarrative(state, textMessageContent("最终回答"));
+
+    for (const event of [
+      {
+        type: "REASONING_MESSAGE_START",
+        rawType: "REASONING_MESSAGE_START",
+        runId: "run-1",
+        messageId: "reasoning-1",
+        seq: 50,
+        recordId: "rec-reasoning-1",
+      },
+      {
+        type: "REASONING_MESSAGE_CONTENT",
+        rawType: "REASONING_MESSAGE_CONTENT",
+        runId: "run-1",
+        messageId: "reasoning-1",
+        delta: "先思考",
+        seq: 51,
+        recordId: "rec-reasoning-1",
+      },
+      {
+        type: "REASONING_MESSAGE_END",
+        rawType: "REASONING_MESSAGE_END",
+        runId: "run-1",
+        messageId: "reasoning-1",
+        seq: 52,
+        recordId: "rec-reasoning-1",
+      },
+      { ...textMessageStart(), seq: 60, recordId: "rec-answer-1" },
+      { ...textMessageContent("最终回答"), seq: 61, recordId: "rec-answer-1" },
+      { ...textMessageEnd(), seq: 62, recordId: "rec-answer-1" },
+    ] satisfies AguiEvent[]) {
+      state = projectAguiEventToNarrative(state, event);
+    }
+
+    expect(state.committedItems.map((item) => item.id)).toEqual([
+      "thinking:run-1:reasoning-1",
+      "answer:run-1:msg-1",
+    ]);
+    expect(state.committedItems[0]).toMatchObject({ text: "先思考" });
+    expect(state.committedItems[1]).toMatchObject({ markdown: "最终回答" });
+  });
+
   it("adds a hint item when a run is cancelled by the user", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(state, textMessageStart());

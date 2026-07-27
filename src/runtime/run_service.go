@@ -1454,10 +1454,15 @@ func isActiveTranscriptReplaySupplement(kind agentcore.SemanticKind) bool {
 func canonicalizeActiveTranscriptEvents(events []Event, durableRecords []agentcore.SemanticRecord) []Event {
 	durableByID := make(map[string]agentcore.SemanticRecord, len(durableRecords))
 	assistantMessages := make(map[string]struct{})
+	reasoningMessages := make(map[string]struct{})
 	toolCalls := make(map[string]struct{})
 	for _, record := range durableRecords {
 		durableByID[record.RecordID] = record
 		switch record.Kind {
+		case agentcore.SemanticKindReasoningSummary:
+			if id := stringPayload(record.Payload, "message_id"); id != "" {
+				reasoningMessages[id] = struct{}{}
+			}
 		case agentcore.SemanticKindAssistantMessage:
 			if id := stringPayload(record.Payload, "message_id"); id != "" {
 				assistantMessages[id] = struct{}{}
@@ -1486,6 +1491,12 @@ func canonicalizeActiveTranscriptEvents(events []Event, durableRecords []agentco
 		}
 		if event.Kind == EventKindAgent {
 			switch event.AgentEvent.Type {
+			case agentcore.ReasoningStartedEventType,
+				agentcore.ReasoningDeltaEventType,
+				agentcore.ReasoningFinishedEventType:
+				if _, superseded := reasoningMessages[event.AgentEvent.MessageID]; superseded {
+					continue
+				}
 			case agentcore.TextMessageStartedEventType,
 				agentcore.TextDeltaEventType,
 				agentcore.TextMessageFinishedEventType:

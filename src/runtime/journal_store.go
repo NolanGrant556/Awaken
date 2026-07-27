@@ -814,6 +814,17 @@ func semanticRecordToAgentEvents(record agentcore.SemanticRecord) []agentcore.Aw
 			RunID:     record.RunID,
 			TurnID:    record.TurnID,
 		}}
+	case agentcore.SemanticKindReasoningSummary:
+		content := stringPayload(record.Payload, "content")
+		if strings.TrimSpace(content) == "" {
+			return nil
+		}
+		messageID := firstNonEmpty(stringPayload(record.Payload, "message_id"), record.RecordID)
+		return []agentcore.AwakenEvent{
+			{Type: agentcore.ReasoningStartedEventType, Timestamp: record.Timestamp, ThreadID: record.ThreadID, RunID: record.RunID, TurnID: record.TurnID, MessageID: messageID},
+			{Type: agentcore.ReasoningDeltaEventType, Timestamp: record.Timestamp, ThreadID: record.ThreadID, RunID: record.RunID, TurnID: record.TurnID, MessageID: messageID, Delta: content},
+			{Type: agentcore.ReasoningFinishedEventType, Timestamp: record.Timestamp, ThreadID: record.ThreadID, RunID: record.RunID, TurnID: record.TurnID, MessageID: messageID},
+		}
 	case agentcore.SemanticKindAssistantMessage:
 		content := stringPayload(record.Payload, "content")
 		if strings.TrimSpace(content) == "" {

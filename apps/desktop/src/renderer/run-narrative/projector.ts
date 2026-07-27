@@ -721,6 +721,17 @@ function answerId(state: RunNarrativeState, event: AguiEvent): string {
     return state.activeItem.id;
   }
 
+  // A durable assistant_message is the canonical snapshot for this message.
+  // If reasoning replay temporarily moved the streamed answer into committed
+  // items, reconcile the snapshot back into the same base identity instead of
+  // inventing a second answer segment.
+  if (
+    event.recordId &&
+    state.committedItems.some((item) => item.kind === "answer" && item.id === baseId)
+  ) {
+    return baseId;
+  }
+
   const usedIds = state.committedItems
     .filter((item) => item.kind === "answer")
     .map((item) => item.id)
@@ -1135,7 +1146,10 @@ function appendThinking(
   return setActive(state, {
     kind: "thinking",
     id,
-    text: current + delta,
+    // A durable reasoning_summary frame is the full user-visible snapshot.
+    // Replace already streamed deltas for the same message instead of
+    // appending the summary a second time.
+    text: event.recordId ? delta : current + delta,
     status: "active",
   });
 }

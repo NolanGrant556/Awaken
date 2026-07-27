@@ -184,6 +184,15 @@ func projectV1Event(out *[]agentcore.SemanticRecord, seq *uint64, record Transcr
 	case agentcore.TextMessageStartedEventType, agentcore.TextDeltaEventType, agentcore.TextMessageFinishedEventType:
 		// Text streaming is ephemeral in v2; final assistant_message comes from message records.
 		// Keep a compact assistant_message only when message layer lacked content (handled elsewhere).
+	case agentcore.ReasoningDeltaEventType:
+		if strings.TrimSpace(event.Delta) == "" {
+			return
+		}
+		appendProjected(out, seq, base, agentcore.SemanticKindReasoningSummary, map[string]any{
+			"content":    event.Delta,
+			"role":       "reasoning",
+			"message_id": firstNonEmpty(event.MessageID, record.MessageID),
+		})
 	case agentcore.TurnDiffEventType:
 		appendProjected(out, seq, base, agentcore.SemanticKindTurnDiff, map[string]any{
 			"diff":      event.Diff,

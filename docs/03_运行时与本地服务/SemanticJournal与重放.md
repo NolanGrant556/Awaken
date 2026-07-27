@@ -5,7 +5,7 @@
 SemanticJournal v2 是 run 内容与恢复的耐久事实源；09 域拥有 wire event/字段，01 域拥有 Desktop narrative。当前稳定 kind：
 
 ```text
-thread, run_started, user_message, assistant_message,
+thread, run_started, user_message, reasoning_summary, assistant_message,
 tool_call, tool_result, artifact, file_change, turn_diff,
 permission_decision, skill_activated, resource_receipt,
 runtime_notice, recovery_decision, context_compacted, turn_boundary,
@@ -27,6 +27,7 @@ provider_opaque_state
 - observed changes、artifacts 与 canonical `tool_result` 成批写入；
 - 上下文压缩结果在替换内存消息前写并 flush `context_compacted`；
 - 每次 thread-bound 模型调用在 transport 前写并 flush 脱敏 `model_request`，结束后以同一 request ID 写 `model_usage`；对话状态变化后写当前下一请求的 `context_snapshot`；
+- 统一 LLM observer 发出的可展示 reasoning 在该段结束时 append `reasoning_summary`，再发布其 canonical live record；该记录只含展示正文、reasoning role 与稳定 message ID，并随 run terminal 的 flush 进入稳定存储；
 - Context Epoch 的 exact baseline/source/tool 内容写 sidecar；journal 的 `context_epoch` 只写 epoch ID、digest、状态和边界原因；
 - 最后写唯一 `run_terminal`。
 
@@ -65,7 +66,9 @@ agent_id               # 仅 child runner
 
 Desktop 打开 thread 时先调用 `POST /v1/threads/{thread_id}/context-snapshot`，body 只复用当前 run profile 合同。Core 从 durable conversation 恢复 compact、附件、tool result 和已激活 Skill，结合当前 tool/MCP availability、Skill catalog、Memory 与当前 profile 生成下一请求的 v4 snapshot，flush 后 Desktop 再 GET transcript。该动作不发 provider 请求、不写 `model_request/model_usage`、不保存 API key；相同 projection 不重复追加。旧 run 的终态 session 仍驻留内存时，transcript 合并必须把此类 replay supplement 投影出来。没有可运行 profile 或 active run 正在拥有 live projection 时，历史 transcript 仍可读，不伪造 snapshot。
 
-Kimi `provider_opaque_state` 的 reasoning 正文不投影到 AG-UI、Memory、日志或 telemetry。恢复只能在 provider/profile、credential revision、model、protocol 和 endpoint identity 全部匹配时把它重新附加到 provider history；不匹配时忽略，不能降成普通 assistant/user 文本。
+`reasoning_summary` 是 provider-neutral 的可展示事实：其来源只能是 LLM transport 已归一化的 `OnContent(text, isThinking=true)` 流；OpenAI-compatible、Anthropic 或后续适配器越过 `src/llm` 后都走同一写入与重放路径。模型没有发出可展示 reasoning 时不创建该记录。它不进入下一次模型上下文，也不替代 provider 私有续接状态。
+
+`provider_opaque_state` 的 reasoning 正文不投影到 AG-UI、Memory、日志或 telemetry。恢复只能在 provider/profile、credential revision、model、protocol 和 endpoint identity 全部匹配时把它重新附加到 provider history；不匹配时忽略，不能降成 `reasoning_summary` 或普通 assistant/user 文本。修复前没有 `reasoning_summary` 的旧 run 不能从 opaque state 反向补造界面历史。
 
 ## 6. 工具、环境与大结果事实
 
@@ -95,4 +98,4 @@ tool call/result payload 持久保存 tool/environment snapshot ID、provider ID
 - 耐久、Context Epoch、工具媒体/大结果与模型历史恢复：`src/runtime/journal_store.go`、`context_epoch_store.go`、`tool_result_store.go`、`transcript_store.go`、`session.go`。
 - wire 投影：`src/protocol/agui/semantic_projector.go`。
 
-自动化必须覆盖压缩 append/flush 先于内存/epoch 替换、model request flush 先于 transport、orphan usage 封口、重建 `RunService` 后 snapshot/usage/summary+tail 精确恢复、坏 compaction fail closed、tool pairing、attachment/tool-media storage key 重放、文本大结果只 offload 一次、blob 缺失 warning、Base64 不落盘，以及 Memory receipt 无正文且 live/replay 同投影。真实 Desktop 还需执行一次含 `Read` 图片/PDF/大文本结果的重启回放，并确认旧新工具卡片和上下文面板都不崩溃；Memory/Dream 的额外重启旅程按 11 域验收执行。
+自动化必须覆盖压缩 append/flush 先于内存/epoch 替换、model request flush 先于 transport、OpenAI-compatible 与 Anthropic observer 的 `reasoning_summary` 同合同写入、active ephemeral reasoning 被 durable snapshot 取代、orphan usage 封口、重建 `RunService` 后 reasoning/snapshot/usage/summary+tail 精确恢复、坏 compaction fail closed、tool pairing、attachment/tool-media storage key 重放、文本大结果只 offload 一次、blob 缺失 warning、Base64 不落盘，以及 Memory receipt 无正文且 live/replay 同投影。真实 Desktop 还需执行一次含可展示 reasoning 的重启回放，并确认过程历史与最终回答仍在；含 `Read` 图片/PDF/大文本结果的旧新工具卡片和上下文面板也不得崩溃。Memory/Dream 的额外重启旅程按 11 域验收执行。

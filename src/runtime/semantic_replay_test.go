@@ -29,7 +29,15 @@ func TestLiveAndReplaySemanticProjectionDeepEqual(t *testing.T) {
 			Kind: agentcore.SemanticKindRunStarted, Timestamp: ts, Payload: map[string]any{},
 		},
 		{
-			SchemaVersion: 2, RecordID: "rec_call", Seq: 2, ThreadID: "thread_live", RunID: "run_1", TurnID: "turn_1",
+			SchemaVersion: 2, RecordID: "rec_reasoning", Seq: 2, ThreadID: "thread_live", RunID: "run_1", TurnID: "turn_1",
+			Kind: agentcore.SemanticKindReasoningSummary, Timestamp: ts.Add(time.Second), Payload: map[string]any{
+				"content":    "先检查当前目录",
+				"role":       "reasoning",
+				"message_id": "reasoning_1",
+			},
+		},
+		{
+			SchemaVersion: 2, RecordID: "rec_call", Seq: 3, ThreadID: "thread_live", RunID: "run_1", TurnID: "turn_1",
 			Kind: agentcore.SemanticKindToolCall, Timestamp: ts.Add(time.Second), Payload: map[string]any{
 				"tool_call_id": "call_1",
 				"tool_name":    "shell",
@@ -37,7 +45,7 @@ func TestLiveAndReplaySemanticProjectionDeepEqual(t *testing.T) {
 			},
 		},
 		{
-			SchemaVersion: 2, RecordID: "rec_result", Seq: 3, ThreadID: "thread_live", RunID: "run_1", TurnID: "turn_1",
+			SchemaVersion: 2, RecordID: "rec_result", Seq: 4, ThreadID: "thread_live", RunID: "run_1", TurnID: "turn_1",
 			Kind: agentcore.SemanticKindToolResult, Timestamp: ts.Add(2 * time.Second), Payload: map[string]any{
 				"tool_call_id": "call_1",
 				"tool_name":    "shell",
@@ -53,7 +61,7 @@ func TestLiveAndReplaySemanticProjectionDeepEqual(t *testing.T) {
 			},
 		},
 		{
-			SchemaVersion: 2, RecordID: "rec_art", Seq: 4, ThreadID: "thread_live", RunID: "run_1", TurnID: "turn_1",
+			SchemaVersion: 2, RecordID: "rec_art", Seq: 5, ThreadID: "thread_live", RunID: "run_1", TurnID: "turn_1",
 			Kind: agentcore.SemanticKindArtifact, Timestamp: ts.Add(3 * time.Second), Payload: map[string]any{
 				"contract_version": tool.ArtifactContractVersion,
 				"role":             "deliverable",
@@ -68,7 +76,7 @@ func TestLiveAndReplaySemanticProjectionDeepEqual(t *testing.T) {
 			},
 		},
 		{
-			SchemaVersion: 2, RecordID: "rec_term", Seq: 5, ThreadID: "thread_live", RunID: "run_1",
+			SchemaVersion: 2, RecordID: "rec_term", Seq: 6, ThreadID: "thread_live", RunID: "run_1",
 			Kind: agentcore.SemanticKindRunTerminal, Timestamp: ts.Add(4 * time.Second), Payload: map[string]any{
 				"status": "finished",
 				"result": "done",
@@ -103,6 +111,15 @@ func TestLiveAndReplaySemanticProjectionDeepEqual(t *testing.T) {
 	}
 	if !foundArtifact {
 		t.Fatal("expected replayed artifact")
+	}
+	foundReasoning := false
+	for _, event := range replay {
+		if event.Type == agui.EventReasoningMessageContent && event.Delta == "先检查当前目录" {
+			foundReasoning = true
+		}
+	}
+	if !foundReasoning {
+		t.Fatal("expected replayed reasoning summary")
 	}
 }
 

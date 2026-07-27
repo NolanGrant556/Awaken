@@ -100,6 +100,35 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 	case agentcore.SemanticKindUserMessage:
 		// User prompts are restored via run metadata; no AG-UI frame required.
 		return nil
+	case agentcore.SemanticKindReasoningSummary:
+		messageID := stringFromAny(payload["message_id"])
+		if messageID == "" {
+			messageID = record.RecordID
+		}
+		content := stringFromAny(payload["content"])
+		if strings.TrimSpace(content) == "" {
+			return nil
+		}
+		start := base
+		start.Type = EventReasoningStart
+		start.MessageID = messageID
+		messageStart := base
+		messageStart.Type = EventReasoningMessageStart
+		messageStart.MessageID = messageID
+		messageStart.Role = "reasoning"
+		delta := base
+		delta.Type = EventReasoningMessageContent
+		delta.MessageID = messageID
+		delta.Role = "reasoning"
+		delta.Delta = content
+		messageEnd := base
+		messageEnd.Type = EventReasoningMessageEnd
+		messageEnd.MessageID = messageID
+		messageEnd.Role = "reasoning"
+		reasoningEnd := base
+		reasoningEnd.Type = EventReasoningEnd
+		reasoningEnd.MessageID = messageID
+		return []Event{start, messageStart, delta, messageEnd, reasoningEnd}
 	case agentcore.SemanticKindAssistantMessage:
 		messageID := stringFromAny(payload["message_id"])
 		if messageID == "" {

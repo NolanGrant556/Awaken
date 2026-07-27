@@ -998,6 +998,11 @@ func TestGetThreadTranscriptEndpointProjectsDurableSemanticFramesAfterRestart(t 
 						"content": input,
 						"role":    "user",
 					}),
+					agentcore.NewSemanticRecord(agentcore.SemanticKindReasoningSummary, durableThreadID, durableRunID, "turn-1", "", "", map[string]any{
+						"content":    "先检查当前技能目录",
+						"role":       "reasoning",
+						"message_id": "reasoning-durable",
+					}),
 					agentcore.NewSemanticRecord(agentcore.SemanticKindAssistantMessage, durableThreadID, durableRunID, "turn-1", "", "", map[string]any{
 						"content":    "先读取数据",
 						"role":       "assistant",
@@ -1074,8 +1079,9 @@ func TestGetThreadTranscriptEndpointProjectsDurableSemanticFramesAfterRestart(t 
 
 	seenSeq := map[uint64]bool{}
 	var assistantText string
+	var reasoningText string
 	var toolArgs string
-	var textStarts, textEnds, toolStarts, toolEnds int
+	var textStarts, textEnds, reasoningStarts, reasoningMessageStarts, reasoningMessageEnds, reasoningEnds, toolStarts, toolEnds int
 	for _, event := range transcript.Runs[0].Events {
 		if seenSeq[event.Seq] {
 			t.Fatalf("durable transcript frame seq must be unique, duplicate %d", event.Seq)
@@ -1088,6 +1094,16 @@ func TestGetThreadTranscriptEndpointProjectsDurableSemanticFramesAfterRestart(t 
 			assistantText += event.Delta
 		case agui.EventTextMessageEnd:
 			textEnds++
+		case agui.EventReasoningStart:
+			reasoningStarts++
+		case agui.EventReasoningMessageStart:
+			reasoningMessageStarts++
+		case agui.EventReasoningMessageContent:
+			reasoningText += event.Delta
+		case agui.EventReasoningMessageEnd:
+			reasoningMessageEnds++
+		case agui.EventReasoningEnd:
+			reasoningEnds++
 		case agui.EventToolCallStart:
 			toolStarts++
 		case agui.EventToolCallArgs:
@@ -1099,11 +1115,17 @@ func TestGetThreadTranscriptEndpointProjectsDurableSemanticFramesAfterRestart(t 
 	if assistantText != "先读取数据历史最终回答" {
 		t.Fatalf("unexpected durable assistant text %q; events=%+v", assistantText, transcript.Runs[0].Events)
 	}
+	if reasoningText != "先检查当前技能目录" {
+		t.Fatalf("unexpected durable reasoning text %q; events=%+v", reasoningText, transcript.Runs[0].Events)
+	}
 	if toolArgs != `{"path":"README.md"}` {
 		t.Fatalf("unexpected durable tool args %q", toolArgs)
 	}
 	if textStarts != 2 || textEnds != 2 || toolStarts != 1 || toolEnds != 1 {
 		t.Fatalf("incomplete durable frame lifecycle: text=%d/%d tool=%d/%d", textStarts, textEnds, toolStarts, toolEnds)
+	}
+	if reasoningStarts != 1 || reasoningMessageStarts != 1 || reasoningMessageEnds != 1 || reasoningEnds != 1 {
+		t.Fatalf("incomplete durable reasoning lifecycle: reasoning=%d/%d/%d/%d", reasoningStarts, reasoningMessageStarts, reasoningMessageEnds, reasoningEnds)
 	}
 }
 

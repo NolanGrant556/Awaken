@@ -107,6 +107,21 @@ func semanticRecordToV1Transcript(record agentcore.SemanticRecord) ([]Transcript
 		base.ComposerTokens = composerTokensFromSemanticUserMessage(record.Payload)
 		base.MessageID = firstNonEmpty(record.RecordID, fmt.Sprintf("msg_%s", record.RecordID))
 		return []TranscriptRecord{base}, true
+	case agentcore.SemanticKindReasoningSummary:
+		content := stringPayload(record.Payload, "content")
+		if strings.TrimSpace(content) == "" {
+			return nil, false
+		}
+		event := agentcore.AwakenEvent{
+			Type:      agentcore.ReasoningDeltaEventType,
+			Timestamp: ts,
+			ThreadID:  record.ThreadID,
+			RunID:     record.RunID,
+			TurnID:    record.TurnID,
+			MessageID: firstNonEmpty(stringPayload(record.Payload, "message_id"), record.RecordID),
+			Delta:     content,
+		}
+		return []TranscriptRecord{eventRecord(base, event)}, true
 	case agentcore.SemanticKindAssistantMessage:
 		base.RecordType = transcriptRecordTypeMessage
 		base.Role = "assistant"

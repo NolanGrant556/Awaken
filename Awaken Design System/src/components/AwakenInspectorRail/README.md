@@ -6,7 +6,7 @@
 
 `AwakenInspectorRail` 负责右侧 rail 的可选标题、导航项、计数/语气状态和详情插槽。父级提供 `items`、当前 `activeId`、选择回调与详情内容；组件不读取 runtime、文件或工具数据。没有标题时导航从内容区顶部开始。
 
-当前 Desktop 只传入一个带文件夹图标、禁用的“文件”占位项，并把它固定在右栏顶部；尚未支持文件浏览/预览/编辑、Changes、Browser、Terminal、侧边任务或详情面板。Gallery 必须如实展示这一当前边界，不把可扩展 props 写成已接线能力。
+当前 Desktop 在普通 Inspector 中只传入一个带文件夹图标、可选择的“文件”入口，并把它固定在右栏顶部。点击后 Desktop 用产品侧 `ProjectFilesWorkspace` 替换这个 rail；文件夹组、筛选、目录读取和路径安全不属于本组件。当前仍未支持文件内容预览/编辑、Changes、Browser、Terminal、侧边任务或其他详情面板。Gallery 必须如实展示这一边界。
 
 ## 文件
 

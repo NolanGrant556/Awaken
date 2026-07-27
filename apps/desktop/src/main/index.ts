@@ -64,6 +64,8 @@ import {
   type ModelProfileSaveRequest,
   type ModelProviderWire,
   type PickedAttachmentFile,
+  type ProjectDirectoryListRequest,
+  type ProjectDirectoryListResult,
   type ProjectMutationResult,
   type ProjectReorderResult,
   type RuntimeConnector,
@@ -126,6 +128,7 @@ import {
 } from "./system-skills-importer.js";
 import { CliConnectorManager } from "./cli-connectors/manager.js";
 import { MemoryDreamSchedulerStore } from "./memory-dream-scheduler-store.js";
+import { listProjectDirectory } from "./project-files.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let runtimeBaseUrl: string | null = null;
@@ -1783,6 +1786,28 @@ ipcMain.handle("awaken:list-projects", async (_event, includeRemoved = false) =>
   );
   return projects.map(normalizeRuntimeProject);
 });
+
+ipcMain.handle(
+  "awaken:list-project-directory",
+  async (event, request: ProjectDirectoryListRequest): Promise<ProjectDirectoryListResult> => {
+    if (
+      !mainWindowRef ||
+      mainWindowRef.isDestroyed() ||
+      event.sender.id !== mainWindowRef.webContents.id
+    ) {
+      return {
+        ok: false,
+        code: "UNAUTHORIZED",
+        message: "文件目录请求来源无效。",
+      };
+    }
+    const projects = await requestRuntimeDomain<RuntimeProjectWire[]>(
+      "/v1/projects?include_removed=false",
+      { method: "GET" },
+    );
+    return listProjectDirectory(projects.map(normalizeRuntimeProject), request);
+  },
+);
 
 ipcMain.handle(
   "awaken:upsert-project",

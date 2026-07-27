@@ -36,6 +36,8 @@ import {
   type MemorySettingsDocument,
   type MemorySettingsPatch,
   type ProjectFolderSelection,
+  type ProjectDirectoryListRequest,
+  type ProjectDirectoryListResult,
   type ProjectMutationResult,
   type ProjectReorderResult,
   type RuntimeConnector,
@@ -197,6 +199,9 @@ export type RuntimeClient = {
   renameThread: (threadId: string, label: string) => Promise<RuntimeThread>;
   deleteThread: (threadId: string) => Promise<ThreadDeleteResult>;
   listProjects: (includeRemoved?: boolean) => Promise<RuntimeProject[]>;
+  listProjectDirectory: (
+    request: ProjectDirectoryListRequest,
+  ) => Promise<ProjectDirectoryListResult>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
   createProject: (
     folders: ProjectFolderSelection[],
@@ -351,6 +356,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     renameThread: (threadId, label) => bridge.renameThread(threadId, label),
     deleteThread: (threadId) => bridge.deleteThread(threadId),
     listProjects: (includeRemoved) => bridge.listProjects(includeRemoved),
+    listProjectDirectory: (request) => bridge.listProjectDirectory(request),
     upsertProject: (workspaceRoot, displayName) =>
       bridge.upsertProject(workspaceRoot, displayName),
     createProject: (folders, displayName) => bridge.createProject(folders, displayName),

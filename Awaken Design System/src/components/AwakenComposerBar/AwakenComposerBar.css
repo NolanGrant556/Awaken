@@ -74,6 +74,223 @@
   white-space: nowrap;
 }
 
+.composer-bar-has-project-picker .composer-bar-surface {
+  position: relative;
+  z-index: 1;
+}
+
+.composer-bar-project-shelf {
+  position: relative;
+  z-index: 0;
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-end;
+  width: calc(100% - 28px);
+  min-height: 60px;
+  margin: -28px auto 0;
+  padding: 22px 12px 8px;
+  border: 1px solid var(--aw-border-light);
+  border-top: 0;
+  border-radius: 0 0 18px 18px;
+  background: var(--aw-surface-panel);
+  box-shadow: var(--aw-shadow-raised);
+}
+
+.composer-bar-project-trigger {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  max-width: min(320px, calc(100vw - 112px));
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--aw-radius-control);
+  background: transparent;
+  color: var(--aw-text-secondary);
+  font-family: var(--aw-font-sans);
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-medium);
+  line-height: var(--aw-line-height-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--aw-transition-fast),
+    color var(--aw-transition-fast);
+}
+
+.composer-bar-project-trigger:hover,
+.composer-bar-project-trigger:focus-visible,
+.composer-bar-project-trigger[aria-expanded="true"] {
+  background: var(--aw-bg-fill-main);
+  color: var(--aw-text-primary);
+}
+
+.composer-bar-project-trigger:focus-visible {
+  outline: 2px solid var(--aw-focus-ring);
+  outline-offset: 1px;
+}
+
+.composer-bar-project-trigger:disabled {
+  color: var(--aw-text-disabled);
+  cursor: not-allowed;
+}
+
+.composer-bar-project-trigger-label,
+.composer-bar-project-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-bar-project-trigger-chevron {
+  color: var(--aw-text-tertiary);
+  transition: transform var(--aw-transition-fast);
+}
+
+.composer-bar-project-trigger[aria-expanded="true"]
+  .composer-bar-project-trigger-chevron {
+  transform: rotate(180deg);
+}
+
+.composer-bar-project-menu {
+  display: grid;
+  width: min(300px, calc(100vw - 32px));
+  min-width: 236px;
+}
+
+.composer-bar-project-menu-label {
+  padding: 6px 10px 7px;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: var(--aw-line-height-xs);
+}
+
+.composer-bar-project-options {
+  display: grid;
+  gap: 2px;
+  max-height: 224px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent)
+    transparent;
+  scrollbar-width: thin;
+}
+
+.composer-bar-project-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--aw-radius-control);
+  background: transparent;
+  color: var(--aw-text-primary);
+  font-family: var(--aw-font-sans);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.composer-bar-project-option:hover,
+.composer-bar-project-option:focus-visible,
+.composer-bar-project-option-selected {
+  background: var(--aw-bg-fill-main);
+}
+
+.composer-bar-project-option:focus-visible,
+.composer-bar-project-create:focus-visible {
+  outline: 2px solid var(--aw-focus-ring);
+  outline-offset: 1px;
+}
+
+.composer-bar-project-option:disabled,
+.composer-bar-project-create:disabled {
+  color: var(--aw-text-disabled);
+  cursor: not-allowed;
+}
+
+.composer-bar-project-empty {
+  padding: 9px 10px 11px;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.composer-bar-project-create {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 0;
+  border-top: 1px solid var(--aw-border-light);
+  border-radius: 0 0 var(--aw-radius-control) var(--aw-radius-control);
+  background: transparent;
+  color: var(--aw-text-primary);
+  font-family: var(--aw-font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.composer-bar-project-create:hover,
+.composer-bar-project-create:focus-visible {
+  background: var(--aw-bg-fill-main);
+}
+
+.composer-bar-project-create-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-bg-fill-main);
+  color: var(--aw-text-secondary);
+}
+
+.composer-bar-project-create-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.composer-bar-project-create-label {
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: var(--aw-line-height-sm);
+}
+
+.composer-bar-project-create-description {
+  overflow: hidden;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .composer-bar-project-shelf {
+    width: calc(100% - 18px);
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .composer-bar-project-trigger {
+    max-width: calc(100vw - 92px);
+  }
+}
+
 .composer-bar-slash-palette {
   position: absolute;
   z-index: 36;

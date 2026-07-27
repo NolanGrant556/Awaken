@@ -3044,6 +3044,23 @@ export function App() {
       (project) => !orderedRepositoryProjectIds.has(project.id),
     ),
   ];
+  const composerProjectPicker = {
+    placeholder: "选择项目",
+    options: repositoryProjects.map((project) => ({
+      id: project.id,
+      label: project.label,
+      selected: project.id === selectedProjectId,
+      disabled: project.disabled,
+      onSelect: () => handleSelectProject(project.id),
+    })),
+    emptyLabel: "暂无项目，可先创建一个。",
+    createAction: {
+      label: "创建项目",
+      description: "可选择一个或多个文件夹",
+      disabled: !desktopReady || createProjectSubmitting,
+      onClick: handleOpenCreateProject,
+    },
+  };
   const activeProjectId = runtimeState.activeThreadId
     ? `thread:${runtimeState.activeThreadId}`
     : selectedProjectId;
@@ -5274,6 +5291,7 @@ export function App() {
                             submitDisabled={composerBarState.submitDisabled}
                             variant="center"
                             metaItems={composerMetaItems}
+                            projectPicker={composerProjectPicker}
                             focusRequest={composerFocusRequest}
                             attachments={composerBarAttachments}
                             tokens={composerBarTokens}

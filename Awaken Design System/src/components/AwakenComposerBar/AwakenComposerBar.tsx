@@ -7,9 +7,17 @@ import type {
   ReactNode,
   Ref,
 } from "react";
-import { Check, ChevronDown, FileText, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  FileText,
+  Folder,
+  FolderPlus,
+  X,
+} from "lucide-react";
 import { AwakenComposerInput } from "../AwakenComposerInput";
 import { AwakenContextButton } from "../AwakenContextButton";
+import { AwakenDropdown } from "../AwakenDropdown";
 import { AwakenSendButton } from "../AwakenSendButton";
 import {
   AwakenComposerInlineInput,
@@ -46,6 +54,29 @@ export type ComposerBarMetaItem = {
   ariaControls?: string;
   menuItems?: ComposerBarMetaMenuItem[];
   menuFooterAction?: ComposerBarMetaAction;
+};
+
+export type ComposerBarProjectOption = {
+  id: string;
+  label: string;
+  selected?: boolean;
+  disabled?: boolean;
+  onSelect?: () => void;
+};
+
+export type ComposerBarProjectAction = {
+  label: string;
+  description?: string;
+  disabled?: boolean;
+  onClick: () => void;
+};
+
+export type ComposerBarProjectPicker = {
+  placeholder?: string;
+  options: ComposerBarProjectOption[];
+  emptyLabel?: string;
+  createAction?: ComposerBarProjectAction;
+  disabled?: boolean;
 };
 
 export type ComposerBarAttachment = {
@@ -183,6 +214,7 @@ export type AwakenComposerBarProps = {
   submitMode?: "send" | "stop";
   variant?: "center" | "dock";
   metaItems?: ComposerBarMetaItem[];
+  projectPicker?: ComposerBarProjectPicker;
   focusRequest?: number;
   submitDisabled?: boolean;
   attachments?: ComposerBarAttachment[];
@@ -211,6 +243,7 @@ export function AwakenComposerBar({
   submitMode = "send",
   variant = "dock",
   metaItems = [],
+  projectPicker,
   focusRequest = 0,
   submitDisabled = false,
   attachments = [],
@@ -223,6 +256,7 @@ export function AwakenComposerBar({
 }: AwakenComposerBarProps) {
   const canSubmit = submitMode === "stop" || (!disabled && !submitDisabled);
   const [openMetaMenuId, setOpenMetaMenuId] = useState<string | null>(null);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [slashPreviewState, setSlashPreviewState] =
     useState<SlashPreviewState | null>(null);
   const [slashPaletteStyle, setSlashPaletteStyle] =
@@ -231,6 +265,10 @@ export function AwakenComposerBar({
   const inputWrapRef = useRef<HTMLDivElement | null>(null);
   const slashPaletteRef = useRef<HTMLDivElement | null>(null);
   const modelMetaItem = metaItems.find((item) => item.id === "model");
+  const selectedProjectOption = projectPicker?.options.find(
+    (option) => option.selected,
+  );
+  const showProjectPicker = variant === "center" && Boolean(projectPicker);
   const topMetaItems: ComposerBarMetaItem[] = [];
   const bottomMetaItems =
     variant === "dock" ? metaItems.filter((item) => item.id !== "model") : [];
@@ -271,6 +309,12 @@ export function AwakenComposerBar({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [openMetaMenuId]);
+
+  useEffect(() => {
+    if (!showProjectPicker) {
+      setProjectMenuOpen(false);
+    }
+  }, [showProjectPicker]);
 
   useEffect(() => {
     if (!slashPalette?.open) {
@@ -482,6 +526,113 @@ export function AwakenComposerBar({
     );
   }
 
+  function renderProjectPicker() {
+    if (!showProjectPicker || !projectPicker) {
+      return null;
+    }
+
+    const triggerLabel =
+      selectedProjectOption?.label ?? projectPicker.placeholder ?? "选择项目";
+
+    return (
+      <div className="composer-bar-project-shelf" aria-label="项目选择">
+        <AwakenDropdown
+          open={projectMenuOpen}
+          onOpenChange={setProjectMenuOpen}
+          placement="bottom-start"
+          offset={8}
+          trigger={
+            <button
+              type="button"
+              className="composer-bar-project-trigger"
+              aria-label={`选择项目，当前：${triggerLabel}`}
+              aria-haspopup="menu"
+              aria-expanded={projectMenuOpen}
+              disabled={projectPicker.disabled}
+            >
+              <Folder size={17} strokeWidth={1.85} aria-hidden="true" />
+              <span className="composer-bar-project-trigger-label">
+                {triggerLabel}
+              </span>
+              <ChevronDown
+                className="composer-bar-project-trigger-chevron"
+                size={14}
+                strokeWidth={1.9}
+                aria-hidden="true"
+              />
+            </button>
+          }
+        >
+          <div className="composer-bar-project-menu" role="menu" aria-label="选择项目">
+            <div className="composer-bar-project-menu-label">选择项目</div>
+            {projectPicker.options.length > 0 ? (
+              <div className="composer-bar-project-options">
+                {projectPicker.options.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={`composer-bar-project-option${
+                      option.selected
+                        ? " composer-bar-project-option-selected"
+                        : ""
+                    }`}
+                    role="menuitemradio"
+                    aria-checked={option.selected ?? false}
+                    disabled={option.disabled}
+                    onClick={() => {
+                      setProjectMenuOpen(false);
+                      option.onSelect?.();
+                    }}
+                  >
+                    <Folder size={16} strokeWidth={1.8} aria-hidden="true" />
+                    <span className="composer-bar-project-option-label">
+                      {option.label}
+                    </span>
+                    {option.selected ? (
+                      <Check size={15} strokeWidth={2} aria-hidden="true" />
+                    ) : (
+                      <span aria-hidden="true" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="composer-bar-project-empty">
+                {projectPicker.emptyLabel ?? "暂无项目"}
+              </div>
+            )}
+            {projectPicker.createAction ? (
+              <button
+                type="button"
+                className="composer-bar-project-create"
+                role="menuitem"
+                disabled={projectPicker.createAction.disabled}
+                onClick={() => {
+                  setProjectMenuOpen(false);
+                  projectPicker.createAction?.onClick();
+                }}
+              >
+                <span className="composer-bar-project-create-icon">
+                  <FolderPlus size={16} strokeWidth={1.85} aria-hidden="true" />
+                </span>
+                <span className="composer-bar-project-create-copy">
+                  <span className="composer-bar-project-create-label">
+                    {projectPicker.createAction.label}
+                  </span>
+                  {projectPicker.createAction.description ? (
+                    <span className="composer-bar-project-create-description">
+                      {projectPicker.createAction.description}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            ) : null}
+          </div>
+        </AwakenDropdown>
+      </div>
+    );
+  }
+
   function renderAttachment(attachment: ComposerBarAttachment) {
     const label = attachment.label ?? attachment.alt;
     const title = attachment.tooltip ?? [label, attachment.mimeType, attachment.detail]
@@ -651,7 +802,7 @@ export function AwakenComposerBar({
     <div
       className={`composer-bar composer-bar-${variant}${
         modelMetaItem ? " composer-bar-has-model" : ""
-      }`}
+      }${showProjectPicker ? " composer-bar-has-project-picker" : ""}`}
     >
       {topMetaItems.length > 0 ? (
         <div className="composer-bar-meta" aria-label="Awaken composer context">
@@ -725,6 +876,7 @@ export function AwakenComposerBar({
           </div>
         </div>
       </div>
+      {renderProjectPicker()}
       {bottomMetaItems.length > 0 ? (
         <div
           className="composer-bar-meta composer-bar-meta-bottom"

@@ -8,6 +8,8 @@
 
 当前 Desktop 的 `center` 与 `dock` 形态共享同一个受控模型选择入口：父级通过 `metaItems` 传入当前模型、可选模型、选中回调和“添加模型”动作，组件负责列表的展开、收起、选中标记及键盘关闭。Gallery 使用 mock profile 复现这条交互，但不读取或保存真实模型配置。
 
+`center` 还可以通过受控 `projectPicker` 在输入 surface 下方显示项目低栏。当前项目直接从 `options[].selected` 派生；菜单只展示父级传入的项目并回调选择动作，「创建项目」也只回调父级。组件不读取 workspace、FileStore 或 Electron，也不保存第二份项目选择；`dock` 不渲染这条首页低栏。Gallery 的 `center-idle` 状态提供可切换 mock 项目和创建入口。
+
 无结构化 token 时继续使用原生 textarea。结构化 token 存在时，整个输入流只有一个 `contenteditable="plaintext-only"` editing host；每个 token 是带稳定 `data-composer-token-id` 的 `contenteditable="false"` 原子节点，token 前文、token 间正文和最后尾文都可在同一光标、选区与 IME 上下文中编辑。长前缀自然换行后，剩余宽度允许时 token、尾文与光标继续当前行；token 的视觉间距不改写正文值。
 
 组件以 DOM 为编辑期事实源：`input` 后把 token 前的文本映射为对应 `leadingText`，把最后一个 token 后的文本映射为 `value`，再通过 `onStructuredInputChange` 交给父级持久化。React 不控制 editing host 的 children；只有 token identity/label 或外部 draft 真正变化时才在 layout 阶段重建 DOM，并按不包含 token label 的逻辑 offset 恢复选区。composition 期间禁止重建，复制纯文本时也不把 token label 写入正文或剪贴板。
@@ -25,6 +27,7 @@
 
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
 - 通过 props 输入，通过回调输出。
+- `projectPicker` 只属于 `center` 首页视觉；项目 authority、排序、选择清理和创建弹窗均留在 Desktop。
 - token label/source/path 不进入 `value`；selection、复制、持久化和提交均只使用结构化 segment。
 - 不使用 zero-width caret sentinel；空 segment 由真实空文本节点表示。
 - 公共 API 变化时同步更新可观测状态。

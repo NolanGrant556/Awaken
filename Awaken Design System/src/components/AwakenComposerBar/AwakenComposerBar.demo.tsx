@@ -32,6 +32,9 @@ function InteractiveComposerDemoState(props: ComposerDemoStateProps) {
     modelItem?.menuItems?.[0]?.id ??
     null;
   const [selectedModelId, setSelectedModelId] = useState(initialModelId);
+  const initialProjectId =
+    props.projectPicker?.options.find((option) => option.selected)?.id ?? null;
+  const [selectedProjectId, setSelectedProjectId] = useState(initialProjectId);
   const interactiveMetaItems = useMemo(
     () =>
       props.metaItems?.map((item) => {
@@ -57,8 +60,30 @@ function InteractiveComposerDemoState(props: ComposerDemoStateProps) {
       }),
     [props.metaItems, selectedModelId],
   );
+  const interactiveProjectPicker = useMemo(() => {
+    if (!props.projectPicker) {
+      return undefined;
+    }
+    return {
+      ...props.projectPicker,
+      options: props.projectPicker.options.map((option) => ({
+        ...option,
+        selected: option.id === selectedProjectId,
+        onSelect: () => {
+          option.onSelect?.();
+          setSelectedProjectId(option.id);
+        },
+      })),
+    };
+  }, [props.projectPicker, selectedProjectId]);
 
-  return <AwakenComposerBar {...props} metaItems={interactiveMetaItems} />;
+  return (
+    <AwakenComposerBar
+      {...props}
+      metaItems={interactiveMetaItems}
+      projectPicker={interactiveProjectPicker}
+    />
+  );
 }
 
 function WorkbenchComposerScene({
@@ -166,7 +191,7 @@ export function AwakenComposerBarDemo() {
           输入栏 <code>AwakenComposerBar + AwakenComposerDock + AwakenSendButton</code>
         </h2>
         <p>
-          集中观测输入栏组合、底层输入框、添加上下文图标按钮、发送/停止按钮及其工具提示，以及提交后的用户提示。运行态中，历史消息与最终输出只在上方滚动，输入栏固定在最底部；有真实快照时可点击“上下文窗口”查看用量浮层。
+          集中观测输入栏组合、底层输入框、添加上下文图标按钮、发送/停止按钮及其工具提示，以及提交后的用户提示。center 空态还展示与侧栏同源的项目低栏，可切换 mock 项目并查看创建入口；运行态中，历史消息与最终输出只在上方滚动，输入栏固定在最底部；有真实快照时可点击“上下文窗口”查看用量浮层。
         </p>
       </header>
       <div className="ads-component-demo-grid">

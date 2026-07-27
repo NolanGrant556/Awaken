@@ -28,6 +28,7 @@ export function AwakenScheduledTaskEditorDialogDemo() {
             projects={AwakenScheduledTaskEditorDemoProjects}
             profiles={AwakenScheduledTaskEditorDemoProfiles}
             timezones={AwakenScheduledTaskEditorDemoTimezones}
+            systemTimezone="Asia/Shanghai"
             errorMessage={state.errorMessage ?? null}
             fieldErrors={state.fieldErrors}
             onOpenChange={(open) => setOpenStateId(open ? state.id : null)}

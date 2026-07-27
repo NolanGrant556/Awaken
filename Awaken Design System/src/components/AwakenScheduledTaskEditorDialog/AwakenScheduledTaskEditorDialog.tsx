@@ -1,9 +1,12 @@
 import "./AwakenScheduledTaskEditorDialog.css";
 import { useId, type ChangeEvent, type ReactNode } from "react";
-import { Check, Clock } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, Clock } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 import { AwakenSwitch } from "../AwakenSwitch";
+import { AwakenScheduledTaskDateTimeField } from "./AwakenScheduledTaskDateTimeField";
+import { AwakenScheduledTaskProjectPicker } from "./AwakenScheduledTaskProjectPicker";
+import { AwakenScheduledTaskTimezonePicker } from "./AwakenScheduledTaskTimezonePicker";
 
 export type AwakenScheduledTaskScheduleKind = "cron" | "calendar";
 export type AwakenScheduledTaskActionKind = "reminder" | "agent";
@@ -76,6 +79,7 @@ export type AwakenScheduledTaskEditorDialogProps = {
   projects: AwakenScheduledTaskProjectOption[];
   profiles: AwakenScheduledTaskProfileOption[];
   timezones: string[];
+  systemTimezone?: string;
   busy?: boolean;
   errorMessage?: string | null;
   fieldErrors?: Partial<Record<AwakenScheduledTaskDraftField, string>>;
@@ -195,6 +199,7 @@ export function AwakenScheduledTaskEditorDialog({
   projects,
   profiles,
   timezones,
+  systemTimezone,
   busy = false,
   errorMessage,
   fieldErrors,
@@ -209,16 +214,21 @@ export function AwakenScheduledTaskEditorDialog({
       const parsed = Number.parseInt(event.target.value, 10);
       update({ [key]: Number.isFinite(parsed) ? parsed : 0 });
     };
-  // 编辑历史任务时 draft.timezone 可能不在当前候选列表里，保留原值避免静默改时区。
-  const timezoneOptions = value.timezone && !timezones.includes(value.timezone)
-    ? [value.timezone, ...timezones]
-    : timezones;
-
   return (
     <AwakenDialog
       open={open}
       className="aw-scheduled-task-editor-dialog"
-      title={mode === "create" ? "创建定时任务" : "编辑定时任务"}
+      title={
+        <span className="aw-scheduled-task-editor__dialog-title">
+          <span className="aw-scheduled-task-editor__dialog-icon" aria-hidden="true">
+            <CalendarClock size={18} strokeWidth={1.8} />
+          </span>
+          <span>
+            <strong>{mode === "create" ? "创建定时任务" : "编辑定时任务"}</strong>
+            <small>设定运行位置、执行计划与任务内容</small>
+          </span>
+        </span>
+      }
       onOpenChange={onOpenChange}
       footer={
         <>
@@ -234,8 +244,14 @@ export function AwakenScheduledTaskEditorDialog({
           <div className="aw-scheduled-task-editor__error" role="alert">{errorMessage}</div>
         ) : null}
 
-        <section className="aw-scheduled-task-editor__section" aria-label="基本信息">
-          <h3 className="aw-scheduled-task-editor__section-title">基本信息</h3>
+        <section className="aw-scheduled-task-editor__section aw-scheduled-task-editor__section--intro" aria-label="基本信息">
+          <div className="aw-scheduled-task-editor__section-heading">
+            <span>01</span>
+            <div>
+              <h3 className="aw-scheduled-task-editor__section-title">基本信息</h3>
+              <p>为任务命名，并选择是否立即启用。</p>
+            </div>
+          </div>
           <EditorField label="名称" error={fieldErrors?.name}>
             <input
               type="text"
@@ -247,34 +263,37 @@ export function AwakenScheduledTaskEditorDialog({
               onChange={(event) => update({ name: event.target.value })}
             />
           </EditorField>
-          <EditorField label="启用">
+          <div className="aw-scheduled-task-editor__switch-row">
+            <span>
+              <strong>保存后启用</strong>
+              <small>关闭后会保存为暂停状态</small>
+            </span>
             <AwakenSwitch
               checked={value.enabled}
-              label="定时任务"
+              label="保存后启用"
               busy={busy}
               onCheckedChange={(enabled) => update({ enabled })}
             />
-          </EditorField>
+          </div>
         </section>
 
         <section className="aw-scheduled-task-editor__section" aria-label="运行位置">
-          <h3 className="aw-scheduled-task-editor__section-title">运行位置</h3>
+          <div className="aw-scheduled-task-editor__section-heading">
+            <span>02</span>
+            <div>
+              <h3 className="aw-scheduled-task-editor__section-title">运行位置</h3>
+              <p>任务只会继承所选项目的默认工作目录。</p>
+            </div>
+          </div>
           <EditorField label="项目" error={fieldErrors?.projectId}>
             {projects.length > 0 ? (
-              <div className="aw-scheduled-task-editor__radio-list" role="radiogroup" aria-label="运行项目">
-                {projects.map((project) => (
-                  <label className="aw-scheduled-task-editor__radio" key={project.projectId}>
-                    <input
-                      type="radio"
-                      name={`${radioGroupName}-project`}
-                      checked={value.projectId === project.projectId}
-                      disabled={busy}
-                      onChange={() => update({ projectId: project.projectId })}
-                    />
-                    <span>{project.name}</span>
-                  </label>
-                ))}
-              </div>
+              <AwakenScheduledTaskProjectPicker
+                value={value.projectId}
+                projects={projects}
+                invalid={Boolean(fieldErrors?.projectId)}
+                disabled={busy}
+                onChange={(projectId) => update({ projectId })}
+              />
             ) : (
               <span className="aw-scheduled-task-editor__hint">暂无可用项目，请先在项目中创建。</span>
             )}
@@ -282,7 +301,13 @@ export function AwakenScheduledTaskEditorDialog({
         </section>
 
         <section className="aw-scheduled-task-editor__section" aria-label="调度">
-          <h3 className="aw-scheduled-task-editor__section-title">调度</h3>
+          <div className="aw-scheduled-task-editor__section-heading">
+            <span>03</span>
+            <div>
+              <h3 className="aw-scheduled-task-editor__section-title">执行计划</h3>
+              <p>选择循环规则，或指定一次日程时间。</p>
+            </div>
+          </div>
           <div className="aw-scheduled-task-editor__tabs" role="tablist" aria-label="调度方式">
             <button
               type="button"
@@ -423,14 +448,13 @@ export function AwakenScheduledTaskEditorDialog({
           ) : (
             <>
               <EditorField label="开始时间" error={fieldErrors?.runAt}>
-                <input
-                  type="datetime-local"
-                  className="aw-scheduled-task-editor__control"
-                  aria-label="开始时间"
-                  aria-invalid={fieldErrors?.runAt ? true : undefined}
+                <AwakenScheduledTaskDateTimeField
+                  ariaLabel="开始时间"
                   value={value.runAtLocal}
+                  timezone={value.timezone}
+                  invalid={Boolean(fieldErrors?.runAt)}
                   disabled={busy}
-                  onChange={(event) => update({ runAtLocal: event.target.value })}
+                  onChange={(runAtLocal) => update({ runAtLocal })}
                 />
               </EditorField>
               <EditorField label="重复">
@@ -492,14 +516,13 @@ export function AwakenScheduledTaskEditorDialog({
                   </EditorField>
                   {value.repeatEndKind === "until" ? (
                     <EditorField label="截止时间" error={fieldErrors?.repeatUntil}>
-                      <input
-                        type="datetime-local"
-                        className="aw-scheduled-task-editor__control"
-                        aria-label="重复截止时间"
-                        aria-invalid={fieldErrors?.repeatUntil ? true : undefined}
+                      <AwakenScheduledTaskDateTimeField
+                        ariaLabel="重复截止时间"
                         value={value.repeatUntilLocal}
+                        timezone={value.timezone}
+                        invalid={Boolean(fieldErrors?.repeatUntil)}
                         disabled={busy}
-                        onChange={(event) => update({ repeatUntilLocal: event.target.value })}
+                        onChange={(repeatUntilLocal) => update({ repeatUntilLocal })}
                       />
                     </EditorField>
                   ) : null}
@@ -524,23 +547,26 @@ export function AwakenScheduledTaskEditorDialog({
             </>
           )}
           <EditorField label="时区" error={fieldErrors?.timezone}>
-            <select
-              className="aw-scheduled-task-editor__control"
-              aria-label="时区"
-              aria-invalid={fieldErrors?.timezone ? true : undefined}
+            <AwakenScheduledTaskTimezonePicker
               value={value.timezone}
+              timezones={timezones}
+              systemTimezone={systemTimezone}
+              referenceLocal={value.scheduleKind === "calendar" ? value.runAtLocal : undefined}
+              invalid={Boolean(fieldErrors?.timezone)}
               disabled={busy}
-              onChange={(event) => update({ timezone: event.target.value })}
-            >
-              {timezoneOptions.map((timezone) => (
-                <option key={timezone} value={timezone}>{timezone}</option>
-              ))}
-            </select>
+              onChange={(timezone) => update({ timezone })}
+            />
           </EditorField>
         </section>
 
         <section className="aw-scheduled-task-editor__section" aria-label="任务内容">
-          <h3 className="aw-scheduled-task-editor__section-title">任务内容</h3>
+          <div className="aw-scheduled-task-editor__section-heading">
+            <span>04</span>
+            <div>
+              <h3 className="aw-scheduled-task-editor__section-title">任务内容</h3>
+              <p>发送一条提醒，或让 Agent 在项目中完成工作。</p>
+            </div>
+          </div>
           <div className="aw-scheduled-task-editor__tabs" role="tablist" aria-label="任务类型">
             <button
               type="button"
@@ -579,55 +605,63 @@ export function AwakenScheduledTaskEditorDialog({
           </EditorField>
         </section>
 
-        <section className="aw-scheduled-task-editor__section" aria-label="模型">
-          <h3 className="aw-scheduled-task-editor__section-title">模型</h3>
-          <EditorField label="Profile">
-            <select
-              className="aw-scheduled-task-editor__control"
-              aria-label="模型 profile"
-              value={value.profileId}
-              disabled={busy}
-              onChange={(event) => update({ profileId: event.target.value })}
-            >
-              <option value="">每次运行时使用当前默认 profile</option>
-              {profiles.map((profile) => (
-                <option key={profile.profileId} value={profile.profileId}>{profile.name}</option>
-              ))}
-            </select>
-          </EditorField>
-        </section>
-
-        <section className="aw-scheduled-task-editor__section" aria-label="高级选项">
-          <h3 className="aw-scheduled-task-editor__section-title">高级选项</h3>
-          <EditorField label="超时秒数" error={fieldErrors?.timeoutSeconds}>
-            <input
-              type="number"
-              className="aw-scheduled-task-editor__control"
-              aria-label="超时秒数"
-              aria-invalid={fieldErrors?.timeoutSeconds ? true : undefined}
-              min={30}
-              max={3600}
-              step={1}
-              value={value.timeoutSeconds}
-              disabled={busy}
-              onChange={updateNumber("timeoutSeconds")}
-            />
-          </EditorField>
-          <EditorField label="misfire 宽限秒数" error={fieldErrors?.misfireGraceSeconds}>
-            <input
-              type="number"
-              className="aw-scheduled-task-editor__control"
-              aria-label="misfire 宽限秒数"
-              aria-invalid={fieldErrors?.misfireGraceSeconds ? true : undefined}
-              min={0}
-              max={86400}
-              step={1}
-              value={value.misfireGraceSeconds}
-              disabled={busy}
-              onChange={updateNumber("misfireGraceSeconds")}
-            />
-          </EditorField>
-        </section>
+        <details className="aw-scheduled-task-editor__advanced">
+          <summary>
+            <span>
+              <strong>模型与高级选项</strong>
+              <small>默认会使用运行时的当前模型配置</small>
+            </span>
+            <ChevronDown size={16} strokeWidth={1.9} aria-hidden="true" />
+          </summary>
+          <div className="aw-scheduled-task-editor__advanced-body">
+            <section aria-label="模型">
+              <EditorField label="模型 Profile">
+                <select
+                  className="aw-scheduled-task-editor__control"
+                  aria-label="模型 profile"
+                  value={value.profileId}
+                  disabled={busy}
+                  onChange={(event) => update({ profileId: event.target.value })}
+                >
+                  <option value="">每次运行时使用当前默认 profile</option>
+                  {profiles.map((profile) => (
+                    <option key={profile.profileId} value={profile.profileId}>{profile.name}</option>
+                  ))}
+                </select>
+              </EditorField>
+            </section>
+            <section aria-label="高级选项" className="aw-scheduled-task-editor__advanced-grid">
+              <EditorField label="超时秒数" error={fieldErrors?.timeoutSeconds}>
+                <input
+                  type="number"
+                  className="aw-scheduled-task-editor__control"
+                  aria-label="超时秒数"
+                  aria-invalid={fieldErrors?.timeoutSeconds ? true : undefined}
+                  min={30}
+                  max={3600}
+                  step={1}
+                  value={value.timeoutSeconds}
+                  disabled={busy}
+                  onChange={updateNumber("timeoutSeconds")}
+                />
+              </EditorField>
+              <EditorField label="错过执行宽限秒数" error={fieldErrors?.misfireGraceSeconds}>
+                <input
+                  type="number"
+                  className="aw-scheduled-task-editor__control"
+                  aria-label="misfire 宽限秒数"
+                  aria-invalid={fieldErrors?.misfireGraceSeconds ? true : undefined}
+                  min={0}
+                  max={86400}
+                  step={1}
+                  value={value.misfireGraceSeconds}
+                  disabled={busy}
+                  onChange={updateNumber("misfireGraceSeconds")}
+                />
+              </EditorField>
+            </section>
+          </div>
+        </details>
       </div>
     </AwakenDialog>
   );

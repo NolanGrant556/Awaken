@@ -5,6 +5,7 @@ import {
   AWAKEN_SCHEDULED_TASK_CRON_PRESET_EXPRESSIONS,
   buildCronExpressionFromPreset,
   createEmptyAwakenScheduledTaskDraft,
+  formatAwakenTimezoneLabel,
   type AwakenScheduledTaskCronPreset,
   type AwakenScheduledTaskDraft,
   type AwakenScheduledTaskDraftField,
@@ -367,7 +368,7 @@ function formatDateTimeInZone(rfc3339: string, timeZone?: string): string {
 export function formatScheduleText(task: ScheduledTask): string {
   const schedule = task.schedule;
   if (schedule.kind === "cron") {
-    return `${describeCronExpression(schedule.cron)} · ${schedule.timezone}`;
+    return `${describeCronExpression(schedule.cron)} · ${formatAwakenTimezoneLabel(schedule.timezone)}`;
   }
   const parts = [formatDateTimeInZone(schedule.runAt, schedule.timezone)];
   if (schedule.repeatEveryDays !== undefined) {
@@ -381,7 +382,11 @@ export function formatScheduleText(task: ScheduledTask): string {
   } else {
     parts.push("不重复");
   }
-  parts.push(schedule.timezone);
+  const scheduleInstant = new Date(schedule.runAt);
+  parts.push(formatAwakenTimezoneLabel(
+    schedule.timezone,
+    Number.isNaN(scheduleInstant.getTime()) ? new Date() : scheduleInstant,
+  ));
   return parts.join(" · ");
 }
 

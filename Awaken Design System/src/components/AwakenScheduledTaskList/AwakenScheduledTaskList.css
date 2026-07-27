@@ -2,7 +2,7 @@
 
 .aw-scheduled-task-list {
   display: grid;
-  gap: var(--aw-space-2);
+  gap: 10px;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -13,12 +13,20 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--aw-space-3);
-  min-height: 64px;
-  padding: var(--aw-space-3) var(--aw-space-4);
+  gap: 13px;
+  min-height: 78px;
+  padding: 13px 15px;
   border: 1px solid var(--aw-border-main);
-  border-radius: var(--aw-radius-md);
+  border-radius: 13px;
   background: var(--aw-bg-white);
+  box-shadow: 0 1px 1px color-mix(in srgb, var(--aw-text-primary) 3%, transparent);
+  transition: border-color var(--aw-transition-fast), box-shadow var(--aw-transition-fast), background var(--aw-transition-fast);
+}
+
+.aw-scheduled-task-list__row:hover {
+  border-color: var(--aw-border-control-hover);
+  background: var(--aw-surface-raised);
+  box-shadow: var(--aw-shadow-raised);
 }
 
 .aw-scheduled-task-list__row[data-state="invalid"] {
@@ -28,11 +36,11 @@
 .aw-scheduled-task-list__row-icon {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--aw-radius-sm);
-  background: var(--aw-bg-fill-light);
-  color: var(--aw-text-secondary);
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--aw-accent) 8%, var(--aw-bg-white));
+  color: var(--aw-accent);
 }
 
 .aw-scheduled-task-list__row[data-running="true"] .aw-scheduled-task-list__row-icon {
@@ -42,14 +50,14 @@
 
 .aw-scheduled-task-list__row-copy {
   display: grid;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
 
 .aw-scheduled-task-list__row-title-line {
   display: flex;
   align-items: center;
-  gap: var(--aw-space-2);
+  gap: 6px;
   min-width: 0;
 }
 
@@ -57,7 +65,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--aw-text-primary);
-  font-size: var(--aw-font-size-base);
+  font-size: 14px;
   font-weight: var(--aw-font-weight-heavy);
   line-height: var(--aw-line-height-base);
   text-overflow: ellipsis;
@@ -83,10 +91,15 @@
   min-width: 0;
   overflow: hidden;
   color: var(--aw-text-secondary);
-  font-size: var(--aw-font-size-sm);
-  line-height: var(--aw-line-height-sm);
+  font-size: 12px;
+  line-height: 17px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.aw-scheduled-task-list__row-meta + .aw-scheduled-task-list__row-meta {
+  color: var(--aw-text-tertiary);
+  font-size: 11px;
 }
 
 .aw-scheduled-task-list__row-actions {
@@ -99,8 +112,8 @@
 .aw-scheduled-task-list__row-menu-trigger {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   border: none;
   border-radius: var(--aw-radius-compact);
   background: transparent;

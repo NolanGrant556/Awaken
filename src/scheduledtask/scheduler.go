@@ -683,7 +683,7 @@ func (s *Scheduler) runExecution(active *activeExecution, task Task, exec Execut
 	}
 
 	if threadID != "" {
-		s.bindThread(task.TaskID, threadID)
+		s.bindThread(task.TaskID, task.ThreadID, threadID)
 	}
 
 	switch {
@@ -814,13 +814,17 @@ func (s *Scheduler) publishFinished(task Task, exec Execution, status ExecutionS
 	})
 }
 
-// bindThread records the task's dedicated thread after its first execution.
-// The task may have been edited concurrently, so the CAS retries on the
-// freshest version while the task still has no thread.
-func (s *Scheduler) bindThread(taskID, threadID string) {
+// bindThread records the task's dedicated thread after its first execution or
+// replaces a stale binding after the user deleted that thread. The task may
+// have been edited concurrently, so the CAS retries only while the freshest
+// task still has the binding the execution started with.
+func (s *Scheduler) bindThread(taskID, previousThreadID, threadID string) {
 	for attempt := 0; attempt < 4; attempt++ {
 		current, err := s.repo.Get(taskID)
-		if err != nil || current.ThreadID != "" {
+		if err != nil || current.ThreadID == threadID {
+			return
+		}
+		if current.ThreadID != previousThreadID {
 			return
 		}
 		if _, err := s.repo.BindThread(taskID, current.Version, threadID); err != nil {

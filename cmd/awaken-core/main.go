@@ -21,11 +21,13 @@ import (
 	"awaken/src/agentcore"
 	"awaken/src/connectors"
 	"awaken/src/desktopdata"
+	"awaken/src/filestore"
 	"awaken/src/llm"
 	"awaken/src/mcpclient"
 	"awaken/src/memory"
 	"awaken/src/modelprofile"
 	"awaken/src/runtime"
+	"awaken/src/scheduledtask"
 	"awaken/src/server"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
@@ -190,6 +192,53 @@ func main() {
 		go projectService.RunCleanupWorker(cleanupCtx)
 	}
 
+	// Scheduled tasks: open the repository fail-closed, wire the executor
+	// against RunService and run startup recovery before HTTP becomes ready.
+	var schedSvc *scheduledtask.Service
+	var sched *scheduledtask.Scheduler
+	if home := desktopdata.AwakenHomeRoot(); home != "" {
+		genDir, _, err := filestore.ReadCurrentGeneration(home)
+		if err != nil {
+			log.Fatalf("scheduled tasks: resolve store generation: %v", err)
+		}
+		repo, err := scheduledtask.OpenFileRepository(genDir, scheduledtask.RealClock{})
+		if err != nil {
+			log.Fatalf("scheduled tasks: open repository: %v", err)
+		}
+		profileStore := modelprofile.NewUserStore(home)
+		validator := scheduledtask.Validator{
+			CheckProfile: func(profileID string) error {
+				_, err := profileStore.Resolve(profileID)
+				return err
+			},
+		}
+		if projectService := runService.ProjectService(); projectService != nil {
+			validator.CheckProject = func(projectID string) error {
+				projects, err := projectService.ListProjects(false)
+				if err != nil {
+					return err
+				}
+				for _, project := range projects {
+					if project.ProjectID == projectID {
+						return nil
+					}
+				}
+				return errors.New("scheduled tasks: project unavailable")
+			}
+		}
+		executor := scheduledtask.NewRunServiceExecutor(runService, profileStore)
+		schedSvc = scheduledtask.NewService(repo, validator, executor)
+		sched = scheduledtask.NewScheduler(scheduledtask.SchedulerConfig{
+			Repo:      repo,
+			Executor:  executor,
+			Validator: validator,
+			Emit:      schedSvc.PublishEvent,
+		})
+		schedSvc.SetScheduler(sched)
+	} else {
+		log.Println("scheduled tasks disabled: AWAKEN_HOME unavailable")
+	}
+
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatalf("failed to listen on %s: %v", addr, err)
@@ -238,7 +287,7 @@ func main() {
 	}
 
 	srv := &http.Server{
-		Handler: server.NewRouterWithControl(
+		Handler: server.NewRouterWithScheduledTasks(
 			runService,
 			infoProvider,
 			manager,
@@ -248,8 +297,17 @@ func main() {
 			defaultWorkspace,
 			syncSkillsForWorkspace,
 			control,
+			schedSvc,
 			shutdownOnce,
 		),
+	}
+
+	// Start the scheduler after the event listener is wired into the router so
+	// startup recovery events can be buffered and replayed instead of dropped.
+	if sched != nil {
+		if err := sched.Start(); err != nil {
+			log.Fatalf("scheduled tasks: start scheduler: %v", err)
+		}
 	}
 
 	if leaseManager != nil {
@@ -281,6 +339,14 @@ func main() {
 		defer acpCancel()
 		if err := acpManager.CloseAll(acpCtx); err != nil {
 			log.Printf("awaken-core acp close error: %v", err)
+		}
+	}
+	if sched != nil {
+		sched.Stop()
+	}
+	if schedSvc != nil {
+		if err := schedSvc.Close(); err != nil {
+			log.Printf("awaken-core scheduled tasks close error: %v", err)
 		}
 	}
 	if err := runService.FlushTranscripts(); err != nil {

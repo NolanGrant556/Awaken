@@ -12,6 +12,7 @@ import { AwakenModelSettingsDemo } from "../src/components/AwakenModelSettings/A
 import { AwakenOriginalThinkingDemo } from "../src/components/AwakenOriginalThinking/AwakenOriginalThinking.demo";
 import { AwakenProductLogoDemo } from "../src/components/AwakenProductLogo/AwakenProductLogo.demo";
 import { AwakenRunStageDemo } from "../src/components/AwakenRunStage/AwakenRunStage.demo";
+import { AwakenScheduledTaskListDemo } from "../src/components/AwakenScheduledTaskList/AwakenScheduledTaskList.demo";
 import { AwakenSettingsDemo } from "../src/components/AwakenSettings/AwakenSettings.demo";
 import { AwakenSearchSettingsDemo } from "../src/components/AwakenSearchSettings/AwakenSearchSettings.demo";
 import { AwakenPetsSettingsDemo } from "../src/components/AwakenPetsSettings/AwakenPetsSettings.demo";
@@ -44,6 +45,20 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-skills", name: "AwakenSkills", displayName: "「技能」组件库", demo: AwakenSkillsDemo, category: "sidebar" },
   { id: "awaken-account", name: "AwakenAccount", displayName: "「账户」组件库", demo: AwakenAccountDemo, category: "sidebar", aliases: ["awaken-popover"] },
   { id: "awaken-connectors", name: "AwakenConnectors", displayName: "「连接器」组件库", demo: AwakenConnectorsDemo, category: "sidebar" },
+  {
+    id: "awaken-scheduled-tasks",
+    name: "AwakenScheduledTaskList",
+    displayName: "「定时任务」组件库",
+    demo: AwakenScheduledTaskListDemo,
+    category: "sidebar",
+    aliases: [
+      "awaken-scheduled-task-editor-dialog",
+      "awaken-scheduled-task-history-dialog",
+      "awaken-scheduled-task-list",
+      "awaken-scheduled-task-state-badge",
+      "awaken-scheduled-task-template-dialog",
+    ],
+  },
   { id: "awaken-settings", name: "AwakenSettings", displayName: "设置页框架", demo: AwakenSettingsDemo, category: "settings", aliases: ["awaken-button"] },
   { id: "awaken-model-settings", name: "AwakenModelSettings", displayName: "模型设置", demo: AwakenModelSettingsDemo, category: "settings" },
   { id: "awaken-search-settings", name: "AwakenSearchSettings", displayName: "搜索设置", demo: AwakenSearchSettingsDemo, category: "settings" },

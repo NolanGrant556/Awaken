@@ -1,0 +1,378 @@
+// @vitest-environment jsdom
+
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  RuntimeModelProfileSummary,
+  RuntimeProject,
+  ScheduledTask,
+  ScheduledTaskEvent,
+} from "../shared/runtime";
+import type { RuntimeClient } from "./runtime/client";
+import { ScheduledTasksView } from "./ScheduledTasksView";
+
+const project: RuntimeProject = {
+  projectId: "project-1",
+  workspaceRoot: "/workspace/alpha",
+  folders: [],
+  displayName: "Alpha",
+  state: "active",
+  createdAt: "2026-07-01T00:00:00Z",
+  updatedAt: "2026-07-01T00:00:00Z",
+  version: 1,
+};
+
+const readyProfile: RuntimeModelProfileSummary = {
+  id: "profile-1",
+  providerId: "openai",
+  displayName: "GPT 默认",
+  modelId: "gpt-5",
+  baseURL: "https://api.example.com",
+  protocol: "openai",
+  authScheme: "api_key",
+  hasKey: true,
+  enabled: true,
+  isDefault: true,
+  profileStatus: "ready",
+};
+
+function cronTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
+  return {
+    taskId: "task-1",
+    version: 2,
+    name: "工作日早报",
+    enabled: true,
+    projectId: "project-1",
+    schedule: { kind: "cron", cron: "30 9 * * 1-5", timezone: "Asia/Shanghai" },
+    action: { kind: "agent", content: "整理新闻" },
+    execution: { profileId: "", timeoutSeconds: 600, misfireGraceSeconds: 600 },
+    state: "enabled",
+    createdAt: "2026-07-01T00:00:00Z",
+    updatedAt: "2026-07-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function createRuntimeClientMock(overrides: Partial<RuntimeClient> = {}): RuntimeClient {
+  return {
+    listScheduledTasks: vi.fn(async () => []),
+    listProjects: vi.fn(async () => [project]),
+    listModelProfiles: vi.fn(async () => [readyProfile]),
+    getSystemTimezone: vi.fn(async () => "Asia/Shanghai"),
+    subscribeScheduledTaskEvents: vi.fn(() => () => {}),
+    createScheduledTask: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    patchScheduledTask: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    pauseScheduledTask: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    resumeScheduledTask: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    runScheduledTaskNow: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    cancelScheduledTaskExecution: vi.fn(async () => undefined),
+    deleteScheduledTask: vi.fn(async () => undefined),
+    listScheduledTaskExecutions: vi.fn(async () => []),
+    ...overrides,
+  } as unknown as RuntimeClient;
+}
+
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+function buttonByText(text: string): HTMLButtonElement | undefined {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+    (button) => button.textContent?.trim() === text,
+  );
+}
+
+function buttonByAriaLabel(label: string): HTMLButtonElement | undefined {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+    (button) => button.getAttribute("aria-label") === label,
+  );
+}
+
+async function click(element: Element | null | undefined): Promise<void> {
+  expect(element, "expected element to exist").toBeTruthy();
+  await act(async () => {
+    element?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  await settle();
+}
+
+async function setFieldValue(
+  element: HTMLInputElement | HTMLTextAreaElement | null | undefined,
+  value: string,
+): Promise<void> {
+  expect(element, "expected field to exist").toBeTruthy();
+  const prototype =
+    element instanceof HTMLTextAreaElement
+      ? window.HTMLTextAreaElement.prototype
+      : window.HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+  await act(async () => {
+    setter?.call(element, value);
+    element?.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await settle();
+}
+
+describe("ScheduledTasksView", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    if (typeof window.crypto?.randomUUID !== "function") {
+      vi.stubGlobal("crypto", { randomUUID: () => "uuid-test" });
+    }
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    vi.unstubAllGlobals();
+    document.body.innerHTML = "";
+  });
+
+  async function renderView(
+    runtimeClient: RuntimeClient,
+    props: { onOpenThread?: (threadId: string) => void; onExecutionsChanged?: () => void } = {},
+  ): Promise<void> {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(
+        <ScheduledTasksView
+          runtimeClient={runtimeClient}
+          desktopReady
+          onOpenThread={props.onOpenThread ?? (() => {})}
+          onExecutionsChanged={props.onExecutionsChanged}
+        />,
+      );
+    });
+    await settle();
+  }
+
+  it("renders the empty state with both create entries", async () => {
+    await renderView(createRuntimeClientMock());
+
+    expect(document.body.textContent).toContain("定时任务");
+    expect(document.body.textContent).toContain("Awaken 退出期间不会运行");
+    expect(document.body.textContent).toContain("还没有定时任务");
+    const empty = document.querySelector(".aw-scheduled-task-list__empty");
+    expect(empty?.textContent).toContain("创建任务");
+    expect(empty?.textContent).toContain("从模板创建");
+
+    await click(buttonByText("创建任务"));
+    expect(document.body.textContent).toContain("创建定时任务");
+  });
+
+  it("renders rows with state badges and resolved project names", async () => {
+    const tasks = [
+      cronTask(),
+      cronTask({ taskId: "task-2", name: "暂停的任务", enabled: false, state: "paused" }),
+      cronTask({ taskId: "task-3", name: "运行中的任务", state: "running" }),
+      cronTask({ taskId: "task-4", name: "孤儿任务", projectId: "project-gone" }),
+    ];
+    await renderView(
+      createRuntimeClientMock({ listScheduledTasks: vi.fn(async () => tasks) }),
+    );
+
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("工作日早报");
+    expect(text).toContain("工作日 09:30 · Asia/Shanghai");
+    expect(text).toContain("Alpha");
+    expect(text).toContain("启用");
+    expect(text).toContain("已暂停");
+    expect(text).toContain("运行中");
+    // 未知项目回退为项目 ID
+    expect(text).toContain("project-gone");
+  });
+
+  it("creates a task only when the editor submits", async () => {
+    const created = cronTask({ taskId: "task-new" });
+    const createScheduledTask = vi.fn(async () => created);
+    const client = createRuntimeClientMock({ createScheduledTask });
+    await renderView(client);
+
+    expect(createScheduledTask).not.toHaveBeenCalled();
+    await click(buttonByText("创建任务"));
+
+    const nameInput = document.querySelector<HTMLInputElement>('input[aria-label="任务名称"]');
+    await setFieldValue(nameInput, "新提醒");
+    const projectRadio = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]')).find(
+      (radio) => radio.closest("label")?.textContent?.includes("Alpha"),
+    );
+    await click(projectRadio);
+    const content = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="提醒正文"]');
+    await setFieldValue(content, "记得喝水");
+    await click(buttonByText("保存任务"));
+
+    expect(createScheduledTask).toHaveBeenCalledTimes(1);
+    expect(createScheduledTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "新提醒",
+        projectId: "project-1",
+        action: { kind: "reminder", content: "记得喝水" },
+        schedule: { kind: "cron", cron: "0 9 * * *", timezone: "Asia/Shanghai" },
+      }),
+    );
+  });
+
+  it("prefills from a template without calling create", async () => {
+    const createScheduledTask = vi.fn(async () => cronTask());
+    await renderView(createRuntimeClientMock({ createScheduledTask }));
+
+    await click(buttonByText("从模板创建"));
+    expect(document.body.textContent).toContain("循环任务");
+    await click(buttonByText("使用模板"));
+
+    // 模板选择只打开预填的编辑器，绝不发创建请求。
+    expect(createScheduledTask).not.toHaveBeenCalled();
+    const nameInput = document.querySelector<HTMLInputElement>('input[aria-label="任务名称"]');
+    expect(nameInput?.value).toBe("工作日科技新闻早报");
+  });
+
+  it("pauses optimistically and rolls back on failure", async () => {
+    const task = cronTask();
+    const pauseScheduledTask = vi.fn(async () => {
+      throw new Error(
+        "Error invoking remote method 'awaken:pause-scheduled-task': RuntimeDomainError: VERSION_CONFLICT: task was modified; reload and retry",
+      );
+    });
+    const listScheduledTasks = vi.fn(async () => [task]);
+    await renderView(
+      createRuntimeClientMock({ listScheduledTasks, pauseScheduledTask }),
+    );
+
+    const toggle = document.querySelector<HTMLButtonElement>('button[role="switch"]');
+    expect(toggle?.getAttribute("aria-checked")).toBe("true");
+    await click(toggle);
+
+    expect(pauseScheduledTask).toHaveBeenCalledWith("task-1", 2);
+    // 失败后按真实状态回滚并提示版本冲突。
+    expect(document.querySelector<HTMLButtonElement>('button[role="switch"]')?.getAttribute("aria-checked")).toBe("true");
+    expect(document.body.textContent).toContain("任务已被其他地方修改，请刷新后重试。");
+  });
+
+  it("resumes a paused task with its current version", async () => {
+    const paused = cronTask({ enabled: false, state: "paused" });
+    const resumed = cronTask();
+    const resumeScheduledTask = vi.fn(async () => resumed);
+    await renderView(
+      createRuntimeClientMock({
+        listScheduledTasks: vi.fn(async () => [paused]),
+        resumeScheduledTask,
+      }),
+    );
+
+    await click(document.querySelector<HTMLButtonElement>('button[role="switch"]'));
+    expect(resumeScheduledTask).toHaveBeenCalledWith("task-1", 2);
+  });
+
+  it("runs a task now after confirmation and shows the already-running conflict", async () => {
+    const runScheduledTaskNow = vi.fn(async () => {
+      throw new Error(
+        "Error invoking remote method 'awaken:run-scheduled-task-now': RuntimeDomainError: TASK_ALREADY_RUNNING: task already has an active execution",
+      );
+    });
+    await renderView(
+      createRuntimeClientMock({
+        listScheduledTasks: vi.fn(async () => [cronTask()]),
+        runScheduledTaskNow,
+      }),
+    );
+
+    await click(buttonByAriaLabel("工作日早报 更多操作"));
+    await click(buttonByText("立即执行"));
+    expect(runScheduledTaskNow).not.toHaveBeenCalled();
+    await click(buttonByText("确认执行"));
+
+    expect(runScheduledTaskNow).toHaveBeenCalledWith("task-1", expect.any(String));
+    expect(document.body.textContent).toContain("该任务已有正在进行的执行，请等待结束后再试。");
+  });
+
+  it("deletes a task after confirmation", async () => {
+    const deleteScheduledTask = vi.fn(async () => undefined);
+    const listScheduledTasks = vi.fn(async () => [cronTask()]);
+    await renderView(
+      createRuntimeClientMock({ listScheduledTasks, deleteScheduledTask }),
+    );
+
+    await click(buttonByAriaLabel("工作日早报 更多操作"));
+    await click(buttonByText("删除"));
+    expect(deleteScheduledTask).not.toHaveBeenCalled();
+    await click(buttonByText("确认删除"));
+
+    expect(deleteScheduledTask).toHaveBeenCalledWith("task-1", 2, expect.any(String));
+  });
+
+  it("refreshes silently on scheduled task events and notifies execution completion", async () => {
+    let eventHandler: ((event: ScheduledTaskEvent) => void) | undefined;
+    const listScheduledTasks = vi.fn(async () => [cronTask()]);
+    const onExecutionsChanged = vi.fn();
+    await renderView(
+      createRuntimeClientMock({
+        listScheduledTasks,
+        subscribeScheduledTaskEvents: vi.fn((handler) => {
+          eventHandler = handler;
+          return () => {};
+        }),
+      }),
+      { onExecutionsChanged },
+    );
+
+    expect(listScheduledTasks).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      eventHandler?.({ type: "execution_finished", taskId: "task-1", status: "success" });
+    });
+    await settle();
+
+    expect(listScheduledTasks).toHaveBeenCalledTimes(2);
+    expect(onExecutionsChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the execution thread from history", async () => {
+    const onOpenThread = vi.fn();
+    await renderView(
+      createRuntimeClientMock({
+        listScheduledTasks: vi.fn(async () => [cronTask()]),
+        listScheduledTaskExecutions: vi.fn(async () => [
+          {
+            executionId: "exec-1",
+            taskId: "task-1",
+            taskVersion: 2,
+            trigger: "manual" as const,
+            scheduledFor: "2026-07-27T01:00:00Z",
+            startedAt: "2026-07-27T01:00:01Z",
+            finishedAt: "2026-07-27T01:01:00Z",
+            status: "success" as const,
+            threadId: "thread-1",
+          },
+        ]),
+      }),
+      { onOpenThread },
+    );
+
+    await click(buttonByAriaLabel("工作日早报 更多操作"));
+    await click(buttonByText("执行记录"));
+    expect(document.body.textContent).toContain("执行记录 · 工作日早报");
+    expect(document.body.textContent).toContain("手动");
+
+    await click(buttonByText("打开线程"));
+    expect(onOpenThread).toHaveBeenCalledWith("thread-1");
+  });
+});

@@ -308,6 +308,18 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		notice.RuntimeName = stringFromAny(payload["runtime_name"])
 		notice.RuntimeVersion = stringFromAny(payload["runtime_version"])
 		return []Event{notice}
+	case agentcore.SemanticKindScheduledNotice:
+		// Host-owned fixed reminder (contract §9.4/§10): one replayable frame
+		// carrying only task/execution identity, the task name and the fixed
+		// content. Missing payload fields degrade to empty strings; the frame
+		// is still emitted so live and replay stay in lockstep.
+		notice := base
+		notice.Type = EventAwakenScheduledNotice
+		notice.TaskID = stringFromAny(payload["task_id"])
+		notice.ExecutionID = stringFromAny(payload["execution_id"])
+		notice.TaskName = stringFromAny(payload["task_name"])
+		notice.NoticeContent = stringFromAny(payload["content"])
+		return []Event{notice}
 	case agentcore.SemanticKindRecoveryDecision:
 		recovery := base
 		if boolFromAny(payload["blocked"]) {

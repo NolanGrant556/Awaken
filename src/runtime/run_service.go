@@ -107,6 +107,15 @@ type StartRunRequest struct {
 	Client         ClientInfo           `json:"client"`
 	ThreadID       string               `json:"thread_id,omitempty"`
 	ModelProfile   *ModelProfileConfig  `json:"model_profile,omitempty"`
+	// Title pins the initial thread title for a newly created thread instead
+	// of deriving it from the prompt. Host-only (scheduled tasks); HTTP
+	// handlers never map it. It also suppresses LLM title generation.
+	Title string `json:"-"`
+	// reanchorWorkspace lets a trusted host caller (scheduled tasks) move a
+	// dedicated thread onto the project's current workspace when the project
+	// folders changed, bypassing the client-mistake workspace-mismatch guard.
+	// HTTP handlers never set it.
+	reanchorWorkspace bool
 }
 
 type ComposerToken struct {
@@ -264,6 +273,10 @@ const (
 	ThreadTitleSourceLocal     ThreadTitleSource = "local"
 	ThreadTitleSourceLLM       ThreadTitleSource = "llm"
 	ThreadTitleSourceManual    ThreadTitleSource = "manual"
+	// ThreadTitleSourceTask marks a title owned by a scheduled task: the
+	// initial thread title is the task name and task renames keep following
+	// it until the user renames the thread manually.
+	ThreadTitleSourceTask ThreadTitleSource = "task"
 )
 
 type ThreadTitleStatus string
@@ -748,7 +761,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			return session.Snapshot(), nil
 		}
 		previousThread = cloneThread(thread)
-		if !sameWorkspaceRoot(thread.workspace, workspace) {
+		if !sameWorkspaceRoot(thread.workspace, workspace) && !req.reanchorWorkspace {
 			s.mu.Unlock()
 			return rollbackStart(ErrThreadWorkspaceMismatch, false)
 		}
@@ -780,8 +793,15 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		threadSnapshot = thread.snapshot()
 	} else {
 		agent = s.createAgent(workspace, threadID, req.ModelProfile)
+		titleSource := ThreadTitleSourceFirstUser
 		titleStatus := ThreadTitleStatusReady
-		if req.ModelProfile != nil && shouldGenerateThreadTitleForClient(req.Client) {
+		if pinned := trimThreadLabel(req.Title); pinned != "" {
+			// Host-pinned title (scheduled tasks): the task name owns the
+			// thread title until the user renames it manually.
+			threadLabel = pinned
+			titleSource = ThreadTitleSourceTask
+			shouldGenerateThreadTitle = false
+		} else if req.ModelProfile != nil && shouldGenerateThreadTitleForClient(req.Client) {
 			titleStatus = ThreadTitleStatusPending
 			shouldGenerateThreadTitle = true
 		}
@@ -791,7 +811,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			agent:           agent,
 			workspace:       workspace,
 			label:           threadLabel,
-			titleSource:     ThreadTitleSourceFirstUser,
+			titleSource:     titleSource,
 			titleStatus:     titleStatus,
 			titleSeedRunID:  runID,
 			titleUpdatedAt:  now,

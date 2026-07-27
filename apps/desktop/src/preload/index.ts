@@ -57,6 +57,11 @@ import {
   type RuntimeThreadTranscript,
   type RuntimeThread,
   type RuntimeToolInfo,
+  type ScheduledTask,
+  type ScheduledTaskCreateInput,
+  type ScheduledTaskEvent,
+  type ScheduledTaskExecution,
+  type ScheduledTaskPatchInput,
   type StartRunRequest,
   type SupervisorStatusInfo,
   type ThreadDeleteResult,
@@ -77,6 +82,8 @@ import {
 const subscriptions = new Map<string, RunStreamHandlers>();
 const cliConnectorStateHandlers = new Set<(event: CliConnectorStateEvent) => void>();
 const memoryDreamReceiptHandlers = new Set<(task: MemoryDreamTask) => void>();
+const scheduledTaskEventHandlers = new Set<(event: ScheduledTaskEvent) => void>();
+const scheduledTaskThreadActivationHandlers = new Set<(threadId: string) => void>();
 
 ipcRenderer.on("awaken:cli-connector-state", (_event, payload: CliConnectorStateEvent) => {
   for (const handler of cliConnectorStateHandlers) handler(payload);
@@ -84,6 +91,17 @@ ipcRenderer.on("awaken:cli-connector-state", (_event, payload: CliConnectorState
 ipcRenderer.on("awaken:memory-dream-receipt", (_event, task: MemoryDreamTask) => {
   for (const handler of memoryDreamReceiptHandlers) handler(task);
 });
+ipcRenderer.on("awaken:scheduled-task-event", (_event, payload: ScheduledTaskEvent) => {
+  for (const handler of scheduledTaskEventHandlers) handler(payload);
+});
+ipcRenderer.on(
+  "awaken:scheduled-task-thread-activation",
+  (_event, payload: { threadId?: string }) => {
+    const threadId = typeof payload?.threadId === "string" ? payload.threadId : "";
+    if (!threadId) return;
+    for (const handler of scheduledTaskThreadActivationHandlers) handler(threadId);
+  },
+);
 
 function toDesktopPlatform(platform: string): DesktopPlatform {
   switch (platform) {
@@ -398,6 +416,51 @@ const bridge: AwakenBridge = {
   },
   notifyRendererReady: () => {
     ipcRenderer.send("awaken:renderer-ready");
+  },
+  listScheduledTasks: () =>
+    ipcRenderer.invoke("awaken:list-scheduled-tasks") as Promise<ScheduledTask[]>,
+  getScheduledTask: (taskId: string) =>
+    ipcRenderer.invoke("awaken:get-scheduled-task", taskId) as Promise<ScheduledTask>,
+  createScheduledTask: (input: ScheduledTaskCreateInput) =>
+    ipcRenderer.invoke("awaken:create-scheduled-task", input) as Promise<ScheduledTask>,
+  patchScheduledTask: (taskId: string, input: ScheduledTaskPatchInput) =>
+    ipcRenderer.invoke("awaken:patch-scheduled-task", taskId, input) as Promise<ScheduledTask>,
+  deleteScheduledTask: (taskId: string, expectedVersion: number, idempotencyKey: string) =>
+    ipcRenderer.invoke("awaken:delete-scheduled-task", {
+      taskId,
+      expectedVersion,
+      idempotencyKey,
+    }) as Promise<void>,
+  pauseScheduledTask: (taskId: string, expectedVersion: number) =>
+    ipcRenderer.invoke("awaken:pause-scheduled-task", {
+      taskId,
+      expectedVersion,
+    }) as Promise<ScheduledTask>,
+  resumeScheduledTask: (taskId: string, expectedVersion: number) =>
+    ipcRenderer.invoke("awaken:resume-scheduled-task", {
+      taskId,
+      expectedVersion,
+    }) as Promise<ScheduledTask>,
+  runScheduledTaskNow: (taskId: string, idempotencyKey: string) =>
+    ipcRenderer.invoke("awaken:run-scheduled-task-now", {
+      taskId,
+      idempotencyKey,
+    }) as Promise<ScheduledTaskExecution>,
+  cancelScheduledTaskExecution: (taskId: string) =>
+    ipcRenderer.invoke("awaken:cancel-scheduled-task-execution", taskId) as Promise<void>,
+  listScheduledTaskExecutions: (taskId: string) =>
+    ipcRenderer.invoke("awaken:list-scheduled-task-executions", taskId) as Promise<
+      ScheduledTaskExecution[]
+    >,
+  getSystemTimezone: () =>
+    ipcRenderer.invoke("awaken:get-system-timezone") as Promise<string>,
+  subscribeScheduledTaskEvents: (handler) => {
+    scheduledTaskEventHandlers.add(handler);
+    return () => scheduledTaskEventHandlers.delete(handler);
+  },
+  onScheduledTaskThreadActivation: (handler) => {
+    scheduledTaskThreadActivationHandlers.add(handler);
+    return () => scheduledTaskThreadActivationHandlers.delete(handler);
   },
   listPets: () =>
     ipcRenderer.invoke(PET_IPC_CHANNELS.listPets) as Promise<PetSummary[]>,

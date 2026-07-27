@@ -66,6 +66,7 @@ export type AguiEventType =
   | "AWAKEN_MEMORY_DREAM_FAILED"
   | "AWAKEN_MEMORY_DREAM_CANCELLED"
   | "AWAKEN_MEMORY_DREAM_INTERRUPTED"
+  | "AWAKEN_SCHEDULED_NOTICE"
   | "AWAKEN_UNKNOWN_EVENT";
 
 export type AguiMemoryReceipt = {
@@ -239,6 +240,10 @@ export type AguiEvent = {
   truncated?: boolean;
   message?: string;
   code?: string;
+  taskId?: string;
+  executionId?: string;
+  taskName?: string;
+  noticeContent?: string;
   terminalReason?: string;
   transitionReason?: string;
   contextModelWindow?: number;

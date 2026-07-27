@@ -227,6 +227,19 @@ function createMockRuntimeClient(): RuntimeClient {
     listMemoryDreams: vi.fn(async () => []),
     cancelMemoryDream: vi.fn(async () => undefined),
     onMemoryDreamReceipt: vi.fn(() => () => {}),
+    listScheduledTasks: vi.fn(async () => []),
+    getScheduledTask: vi.fn(async () => { throw new Error("not found"); }),
+    createScheduledTask: vi.fn(async () => { throw new Error("not implemented"); }),
+    patchScheduledTask: vi.fn(async () => { throw new Error("not implemented"); }),
+    deleteScheduledTask: vi.fn(async () => undefined),
+    pauseScheduledTask: vi.fn(async () => { throw new Error("not implemented"); }),
+    resumeScheduledTask: vi.fn(async () => { throw new Error("not implemented"); }),
+    runScheduledTaskNow: vi.fn(async () => { throw new Error("not implemented"); }),
+    cancelScheduledTaskExecution: vi.fn(async () => undefined),
+    listScheduledTaskExecutions: vi.fn(async () => []),
+    getSystemTimezone: vi.fn(async () => "UTC"),
+    subscribeScheduledTaskEvents: vi.fn(() => () => {}),
+    onScheduledTaskThreadActivation: vi.fn(() => () => {}),
   } satisfies RuntimeClient;
 }
 

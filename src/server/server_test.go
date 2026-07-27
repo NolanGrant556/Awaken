@@ -1778,6 +1778,50 @@ func TestMapRuntimeCancelledUsesAGUIRunErrorWithCancelCode(t *testing.T) {
 	}
 }
 
+func TestMapRuntimeEventProjectsScheduledNotice(t *testing.T) {
+	// The live SSE path wraps assigned scheduled_notice records as
+	// EventKindSemantic and maps them through the canonical projector, so the
+	// wire frame must carry the full reminder payload plus the resume cursor.
+	events := mapRuntimeEvent(awruntime.Event{
+		Kind:     awruntime.EventKindSemantic,
+		Seq:      9,
+		ThreadID: "thread-1",
+		RunID:    "run-1",
+		SemanticRecord: agentcore.SemanticRecord{
+			SchemaVersion: 2,
+			RecordID:      "rec_scheduled_notice_1",
+			Seq:           2,
+			ThreadID:      "thread-1",
+			RunID:         "run-1",
+			Kind:          agentcore.SemanticKindScheduledNotice,
+			Timestamp:     time.Date(2026, 7, 27, 8, 0, 0, 0, time.UTC),
+			Payload: map[string]any{
+				"task_id":      "task_1",
+				"execution_id": "exec_1",
+				"task_name":    "每日站会提醒",
+				"content":      "记得填写日报",
+			},
+		},
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("expected one mapped event, got %+v", events)
+	}
+	event := events[0]
+	if event.Type != agui.EventAwakenScheduledNotice {
+		t.Fatalf("expected AWAKEN_SCHEDULED_NOTICE, got %s", event.Type)
+	}
+	if event.TaskID != "task_1" || event.ExecutionID != "exec_1" || event.TaskName != "每日站会提醒" || event.NoticeContent != "记得填写日报" {
+		t.Fatalf("live mapping lost scheduled notice fields: %+v", event)
+	}
+	if cursor := frameSeq(9, 0); event.Seq != cursor || event.StreamCursor != cursor {
+		t.Fatalf("expected live cursor %d, got seq=%d streamCursor=%d", cursor, event.Seq, event.StreamCursor)
+	}
+	if event.SemanticSeq != agui.FrameSeq(2, 0) || event.RecordID != "rec_scheduled_notice_1" {
+		t.Fatalf("live mapping lost durable identity: %+v", event)
+	}
+}
+
 func TestGetRunReturnsRunSnapshot(t *testing.T) {
 	started := make(chan struct{})
 	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {

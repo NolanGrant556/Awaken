@@ -1,0 +1,101 @@
+@import "../../tokens/components.css";
+
+.aw-dialog.aw-scheduled-task-history-dialog {
+  width: min(640px, calc(100vw - 48px));
+}
+
+.aw-scheduled-task-history__list {
+  display: grid;
+  gap: var(--aw-space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aw-scheduled-task-history__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--aw-space-3);
+  min-width: 0;
+  padding: var(--aw-space-3) var(--aw-space-4);
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-white);
+}
+
+.aw-scheduled-task-history__row[data-status="error"] {
+  border-color: var(--aw-error-soft-border);
+}
+
+.aw-scheduled-task-history__row-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.aw-scheduled-task-history__row-title-line {
+  display: flex;
+  align-items: center;
+  gap: var(--aw-space-2);
+  min-width: 0;
+}
+
+.aw-scheduled-task-history__row-trigger {
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-scheduled-task-history__row-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--aw-space-4);
+  min-width: 0;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+}
+
+.aw-scheduled-task-history__row-error {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aw-error);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-scheduled-task-history__row-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.aw-scheduled-task-history__empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--aw-space-2);
+  min-width: 0;
+  padding: var(--aw-space-8) var(--aw-space-5);
+  border: 1px dashed var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  text-align: center;
+}
+
+.aw-scheduled-task-history__empty-title {
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  font-weight: var(--aw-font-weight-heavy);
+  line-height: var(--aw-line-height-base);
+}
+
+.aw-scheduled-task-history__empty-description {
+  max-width: 420px;
+  margin: 0;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}

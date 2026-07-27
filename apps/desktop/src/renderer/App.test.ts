@@ -130,6 +130,11 @@ function stubElectronBridge(): void {
       renameThread: vi.fn(),
       deleteThread: vi.fn(async () => ({ ok: true as const })),
       listProjects: vi.fn(async () => []),
+      listProjectDirectory: vi.fn(async () => ({
+        ok: true as const,
+        relativePath: "",
+        entries: [],
+      })),
       upsertProject: vi.fn(),
       reorderProjects: vi.fn(),
       detachProject: vi.fn(),
@@ -2477,7 +2482,12 @@ describe("App workbench presentation", () => {
     const html = renderToString(React.createElement(App));
 
     expect(html).toContain('aria-label="文件"');
-    expect(html).toContain('disabled="" aria-current="page"');
+    const fileEntry = html.match(
+      /<button[^>]*class="light-inspector-tab[^>]*>[\s\S]*?<\/button>/,
+    )?.[0];
+    expect(fileEntry).toBeDefined();
+    expect(fileEntry).not.toContain("disabled");
+    expect(fileEntry).not.toContain("aria-current");
     expect(html).toContain(">文件<");
     expect(html).not.toContain("On Awaken");
     expect(html).not.toContain("右侧栏待开发");

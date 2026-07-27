@@ -35,6 +35,8 @@ import {
   type MemorySettingsDocument,
   type MemorySettingsPatch,
   type ProjectFolderSelection,
+  type ProjectDirectoryListRequest,
+  type ProjectDirectoryListResult,
   type ProjectMutationResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
@@ -177,6 +179,11 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:delete-thread", threadId) as Promise<ThreadDeleteResult>,
   listProjects: (includeRemoved = false) =>
     ipcRenderer.invoke("awaken:list-projects", includeRemoved) as Promise<RuntimeProject[]>,
+  listProjectDirectory: (request: ProjectDirectoryListRequest) =>
+    ipcRenderer.invoke(
+      "awaken:list-project-directory",
+      request,
+    ) as Promise<ProjectDirectoryListResult>,
   upsertProject: (workspaceRoot: string, displayName?: string) =>
     ipcRenderer.invoke("awaken:upsert-project", {
       workspaceRoot,

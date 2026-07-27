@@ -14,9 +14,8 @@ const currentInspector = createElement(AwakenInspectorRail, {
   ariaLabel: "文件",
   items: [
     {
-      id: "files-placeholder",
+      id: "files",
       label: "文件",
-      disabled: true,
       icon: createElement(Folder, {
         size: 16,
         strokeWidth: 1.8,
@@ -24,7 +23,6 @@ const currentInspector = createElement(AwakenInspectorRail, {
       }),
     },
   ],
-  activeId: "files-placeholder",
 });
 
 export const AwakenWorkbenchShellStates: AwakenWorkbenchShellState[] = [

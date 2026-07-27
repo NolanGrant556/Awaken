@@ -258,6 +258,40 @@ export type RuntimeProject = {
   version: number;
 };
 
+export type ProjectDirectoryEntryKind = "directory" | "file" | "symlink";
+
+export type ProjectDirectoryEntry = {
+  name: string;
+  /** Project-folder-relative path using forward slashes on every platform. */
+  relativePath: string;
+  kind: ProjectDirectoryEntryKind;
+};
+
+export type ProjectDirectoryListRequest = {
+  projectId: string;
+  folderPath: string;
+  /** Empty or omitted means the selected project-folder root. */
+  relativePath?: string;
+};
+
+export type ProjectDirectoryListResult =
+  | {
+      ok: true;
+      relativePath: string;
+      entries: ProjectDirectoryEntry[];
+    }
+  | {
+      ok: false;
+      code:
+        | "INVALID_REQUEST"
+        | "UNAUTHORIZED"
+        | "PROJECT_NOT_FOUND"
+        | "FOLDER_NOT_ATTACHED"
+        | "PATH_OUTSIDE_PROJECT"
+        | "DIRECTORY_UNREADABLE";
+      message: string;
+    };
+
 /** Folder list submitted when creating a project. An empty list is legal: the
  * project exists under its own name and binds folders later, if ever. */
 export type ProjectFolderSelection = {
@@ -1159,6 +1193,9 @@ export type AwakenBridge = {
   renameThread: (threadId: string, label: string) => Promise<RuntimeThread>;
   deleteThread: (threadId: string) => Promise<ThreadDeleteResult>;
   listProjects: (includeRemoved?: boolean) => Promise<RuntimeProject[]>;
+  listProjectDirectory: (
+    request: ProjectDirectoryListRequest,
+  ) => Promise<ProjectDirectoryListResult>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
   createProject: (
     folders: ProjectFolderSelection[],

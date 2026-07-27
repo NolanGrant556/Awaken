@@ -115,15 +115,13 @@ function WorkbenchAnatomyScene() {
                         ariaLabel="文件"
                         items={[
                           {
-                            id: "files-placeholder",
+                            id: "files",
                             label: "文件",
-                            disabled: true,
                             icon: (
                               <Folder size={16} strokeWidth={1.8} aria-hidden="true" />
                             ),
                           },
                         ]}
-                        activeId="files-placeholder"
                       />
                     </div>
                   }

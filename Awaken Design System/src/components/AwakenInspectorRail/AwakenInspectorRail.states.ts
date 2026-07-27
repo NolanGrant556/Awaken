@@ -10,15 +10,14 @@ export type AwakenInspectorRailState = {
 
 export const AwakenInspectorRailStates: AwakenInspectorRailState[] = [
   {
-    id: "desktop-placeholder",
-    label: "Desktop 文件入口占位",
+    id: "desktop-file-entry",
+    label: "Desktop 文件入口",
     props: {
       ariaLabel: "文件",
       items: [
         {
-          id: "files-placeholder",
+          id: "files",
           label: "文件",
-          disabled: true,
           tone: "neutral",
           icon: createElement(Folder, {
             size: 16,
@@ -27,7 +26,6 @@ export const AwakenInspectorRailStates: AwakenInspectorRailState[] = [
           }),
         },
       ],
-      activeId: "files-placeholder",
     },
   },
 ];

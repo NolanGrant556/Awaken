@@ -9,6 +9,7 @@ import {
   ChevronUp,
   ChevronsDownUp,
   ChevronsUpDown,
+  File as FileIcon,
   Folder,
   FolderPlus,
   MessageCirclePlus,
@@ -18,6 +19,7 @@ import {
   Plug,
   Settings,
   Wrench,
+  X,
 } from "lucide-react";
 import {
   AwakenAppShell as AppShell,
@@ -126,6 +128,7 @@ import { DesktopSettingsDialog } from "./settings/DesktopSettingsDialog";
 import { ProfileBalancePopover } from "./ProfileBalancePopover";
 import { ExtensionsView, type ExtensionSection } from "./ExtensionsView";
 import { ExternalActionGate } from "./ExternalActionGate";
+import { ProjectFilesWorkspace } from "./ProjectFilesWorkspace";
 import {
   assignDreamReceiptToThread,
   dreamTasksForThreadReplay,
@@ -1362,14 +1365,14 @@ const MIN_SIDEBAR_WIDTH = 228;
 const MAX_SIDEBAR_WIDTH = 420;
 const DEFAULT_INSPECTOR_WIDTH = 300;
 const MIN_INSPECTOR_WIDTH = 260;
-const MAX_INSPECTOR_WIDTH = 520;
+const MAX_INSPECTOR_WIDTH = 760;
+const FILE_WORKSPACE_INSPECTOR_WIDTH = 720;
 const LAYOUT_STEP = 12;
 const INSPECTOR_RESPONSIVE_COLLAPSE_QUERY = "(max-width: 1180px)";
 const INSPECTOR_FILE_ITEMS = [
   {
-    id: "files-placeholder",
+    id: "files",
     label: "文件",
-    disabled: true,
     tone: "neutral" as const,
     icon: <Folder size={16} strokeWidth={1.8} aria-hidden="true" />,
   },
@@ -1492,6 +1495,7 @@ export function App() {
   const threadLoadSeqRef = useRef(0);
   const inspectorCollapsedValueRef = useRef(false);
   const inspectorCollapsedBeforeResponsiveRef = useRef<boolean | null>(null);
+  const inspectorWidthBeforeFileWorkspaceRef = useRef<number | null>(null);
   const projectOperationPollFailuresRef = useRef<Set<string>>(new Set());
   const threadTitlePollsRef = useRef<Map<string, () => void>>(new Map());
   const workspaceTargetPathRef = useRef("");
@@ -1668,6 +1672,7 @@ export function App() {
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
     readStoredBoolean("awaken:layout:inspectorCollapsed", false),
   );
+  const [fileWorkspaceOpen, setFileWorkspaceOpen] = useState(false);
   const [promptBubbleModeByTurnId, setPromptBubbleModeByTurnId] = useState<
     Record<string, "collapsed" | "expanded">
   >({});
@@ -4493,6 +4498,27 @@ export function App() {
     });
   }
 
+  function handleOpenFileWorkspace(): void {
+    if (!fileWorkspaceOpen) {
+      inspectorWidthBeforeFileWorkspaceRef.current = inspectorWidth;
+    }
+    setFileWorkspaceOpen(true);
+    setInspectorWidth(FILE_WORKSPACE_INSPECTOR_WIDTH);
+    setInspectorCollapsed(false);
+    if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
+      inspectorCollapsedBeforeResponsiveRef.current = false;
+    }
+  }
+
+  function handleCloseFileWorkspace(): void {
+    setFileWorkspaceOpen(false);
+    const previousWidth = inspectorWidthBeforeFileWorkspaceRef.current;
+    inspectorWidthBeforeFileWorkspaceRef.current = null;
+    if (previousWidth !== null) {
+      setInspectorWidth(previousWidth);
+    }
+  }
+
   async function handleAddContext(): Promise<void> {
     if (composerBarState.disabled) {
       return;
@@ -4931,6 +4957,19 @@ export function App() {
 
   const platform = runtimeClient.platform as PlatformKind;
   const composerBarAttachments = composerAttachmentViews(composerAttachments);
+  const fileWorkspaceProjectId = workspaceLabelProjectId
+    ? backendProjectIdFor(workspaceLabelProjectId)
+    : undefined;
+  const fileWorkspaceProjectLabel = workspaceLabelProjectId
+    ? projectLabelById.get(workspaceLabelProjectId)
+    : undefined;
+  const fileWorkspaceFolders = workspaceLabelProjectId
+    ? foldersForProjectId(workspaceLabelProjectId).map((folder) => ({
+        path: folder.path,
+        label: workspaceLabelForPath(folder.path),
+        isPrimary: folder.isPrimary,
+      }))
+    : [];
   const layoutStyle = {
     "--aw-sidebar-width": `${sidebarWidth}px`,
     "--aw-inspector-width": `${inspectorWidth}px`,
@@ -5143,13 +5182,24 @@ export function App() {
               }
               onNewTask={handleNewTask}
               right={
-                <div className="workbench-chrome-status">
-                  {topbarStatusLabel ? (
-                    <span className="workbench-chrome-state">
-                      {topbarStatusLabel}
-                    </span>
-                  ) : null}
-                  {inspectorPresentation.available ? (
+                fileWorkspaceOpen && inspectorPresentation.available ? (
+                  <div className="workbench-chrome-file-mode">
+                    <div
+                      className="project-files-tab"
+                      role="tab"
+                      aria-selected="true"
+                    >
+                      <FileIcon size={16} strokeWidth={1.8} aria-hidden="true" />
+                      <span className="project-files-tab__label">打开文件</span>
+                      <button
+                        type="button"
+                        className="project-files-tab__close"
+                        aria-label="关闭文件视图"
+                        onClick={handleCloseFileWorkspace}
+                      >
+                        <X size={15} strokeWidth={1.9} />
+                      </button>
+                    </div>
                     <button
                       type="button"
                       className="workbench-chrome-icon workbench-chrome-panel-toggle"
@@ -5166,8 +5216,34 @@ export function App() {
                         <PanelRightClose size={14} strokeWidth={1.9} />
                       )}
                     </button>
-                  ) : null}
-                </div>
+                  </div>
+                ) : (
+                  <div className="workbench-chrome-status">
+                    {topbarStatusLabel ? (
+                      <span className="workbench-chrome-state">
+                        {topbarStatusLabel}
+                      </span>
+                    ) : null}
+                    {inspectorPresentation.available ? (
+                      <button
+                        type="button"
+                        className="workbench-chrome-icon workbench-chrome-panel-toggle"
+                        aria-label={
+                          inspectorCollapsed
+                            ? "Expand inspector"
+                            : "Collapse inspector"
+                        }
+                        onClick={handleToggleInspectorCollapsed}
+                      >
+                        {inspectorCollapsed ? (
+                          <PanelRightOpen size={14} strokeWidth={1.9} />
+                        ) : (
+                          <PanelRightClose size={14} strokeWidth={1.9} />
+                        )}
+                      </button>
+                    ) : null}
+                  </div>
+                )
               }
             />
           }
@@ -5532,11 +5608,25 @@ export function App() {
                     </RunStage>
                   }
                   inspector={
-                    <InspectorRail
-                      ariaLabel="文件"
-                      items={INSPECTOR_FILE_ITEMS}
-                      activeId="files-placeholder"
-                    />
+                    fileWorkspaceOpen ? (
+                      <ProjectFilesWorkspace
+                        key={fileWorkspaceProjectId ?? "no-project"}
+                        runtimeClient={runtimeClient}
+                        projectId={fileWorkspaceProjectId}
+                        projectLabel={fileWorkspaceProjectLabel}
+                        folders={fileWorkspaceFolders}
+                      />
+                    ) : (
+                      <InspectorRail
+                        ariaLabel="文件"
+                        items={INSPECTOR_FILE_ITEMS}
+                        onSelect={(id) => {
+                          if (id === "files") {
+                            handleOpenFileWorkspace();
+                          }
+                        }}
+                      />
+                    )
                   }
                 />
               )}

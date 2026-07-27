@@ -52,12 +52,12 @@ export type ProjectFilesWorkspaceProps = {
 const MIN_FILE_LIST_WIDTH = 240;
 const MAX_FILE_LIST_WIDTH = 400;
 const MIN_FILE_PREVIEW_WIDTH = 240;
-const DEFAULT_FILE_LIST_WIDTH = 360;
+const DEFAULT_FILE_LIST_WIDTH = MIN_FILE_LIST_WIDTH;
 const DEFAULT_FILE_WORKSPACE_WIDTH = 720;
 const FILE_LIST_RESIZE_STEP = 12;
-const MINIMUM_WIDTH_FLING_SAMPLE_WINDOW = 160;
-const MINIMUM_WIDTH_FLING_DISTANCE = 56;
-const MINIMUM_WIDTH_FLING_VELOCITY = 0.5;
+const MINIMUM_WIDTH_FLING_SAMPLE_WINDOW = 140;
+const MINIMUM_WIDTH_FLING_DISTANCE = 120;
+const MINIMUM_WIDTH_FLING_VELOCITY = 1.2;
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));

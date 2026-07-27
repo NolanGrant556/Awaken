@@ -64,7 +64,7 @@
     minmax(0, 1fr) 1px
     clamp(
       240px,
-      var(--project-file-list-width, 360px),
+      var(--project-file-list-width, 240px),
       min(400px, calc(100cqw - 1px))
     );
   min-width: 0;

@@ -1569,9 +1569,13 @@ button.tool-trace-line:focus-visible {
 .light-inspector-rail {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
   min-height: 0;
+}
+
+.light-inspector-rail-no-head {
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .light-inspector-head {
@@ -1606,7 +1610,8 @@ button.tool-trace-line:focus-visible {
 
 .light-inspector-nav {
   display: grid;
-  gap: 2px;
+  align-content: start;
+  gap: 8px;
 }
 
 .light-inspector-tab {
@@ -1615,13 +1620,13 @@ button.tool-trace-line:focus-visible {
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  height: 30px;
-  padding: 0 8px;
-  border-radius: var(--aw-radius-compact);
-  background: transparent;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-surface-panel-muted);
   color: var(--aw-text-secondary);
-  font-size: var(--aw-font-size-sm);
-  line-height: var(--aw-line-height-sm);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
   text-align: left;
   cursor: pointer;
 }
@@ -1634,13 +1639,20 @@ button.tool-trace-line:focus-visible {
 }
 
 .light-inspector-tab-label {
-  gap: 7px;
+  gap: 10px;
 }
 
 .light-inspector-tab-icon {
   display: inline-flex;
+  align-items: center;
   flex: 0 0 auto;
   color: var(--aw-text-tertiary);
+}
+
+.light-inspector-tab-icon svg {
+  width: var(--aw-icon-size-16);
+  height: var(--aw-icon-size-16);
+  stroke-width: var(--aw-icon-stroke);
 }
 
 .light-inspector-tab-meta {
@@ -1650,12 +1662,12 @@ button.tool-trace-line:focus-visible {
 
 .light-inspector-tab:hover:enabled,
 .light-inspector-tab.is-active {
-  background: var(--aw-bg-fill-light);
+  background: var(--aw-surface-panel);
   color: var(--aw-text-primary);
 }
 
 .light-inspector-tab:disabled {
-  opacity: 0.45;
+  opacity: 1;
   cursor: default;
 }
 

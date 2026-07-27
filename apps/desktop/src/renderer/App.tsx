@@ -9,6 +9,7 @@ import {
   ChevronUp,
   ChevronsDownUp,
   ChevronsUpDown,
+  Folder,
   FolderPlus,
   MessageCirclePlus,
   Monitor,
@@ -1364,6 +1365,15 @@ const MIN_INSPECTOR_WIDTH = 260;
 const MAX_INSPECTOR_WIDTH = 520;
 const LAYOUT_STEP = 12;
 const INSPECTOR_RESPONSIVE_COLLAPSE_QUERY = "(max-width: 1180px)";
+const INSPECTOR_FILE_ITEMS = [
+  {
+    id: "files-placeholder",
+    label: "文件",
+    disabled: true,
+    tone: "neutral" as const,
+    icon: <Folder size={16} strokeWidth={1.8} aria-hidden="true" />,
+  },
+];
 const STORED_THEME_KEY = "awaken:appearance:theme";
 const DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY =
   "awaken:memory:dreamReceiptThreadAssignments";
@@ -3120,14 +3130,6 @@ export function App() {
   const activeProjectId = runtimeState.activeThreadId
     ? `thread:${runtimeState.activeThreadId}`
     : selectedProjectId;
-  const inspectorPlaceholderItems = [
-    {
-      id: "right-sidebar-placeholder",
-      label: "右侧栏待开发",
-      disabled: true,
-      tone: "neutral" as const,
-    },
-  ];
   const showCenterComposer = shouldUseCenterComposer({
     hasNarrative: visibleNarrativeItems.length > 0,
     hasRun: Boolean(runtimeState.runId),
@@ -5531,9 +5533,9 @@ export function App() {
                   }
                   inspector={
                     <InspectorRail
-                      title="On Awaken"
-                      items={inspectorPlaceholderItems}
-                      activeId="right-sidebar-placeholder"
+                      ariaLabel="文件"
+                      items={INSPECTOR_FILE_ITEMS}
+                      activeId="files-placeholder"
                     />
                   }
                 />

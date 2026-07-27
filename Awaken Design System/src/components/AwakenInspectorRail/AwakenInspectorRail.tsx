@@ -14,6 +14,7 @@ export type AwakenInspectorRailItem = {
 
 export type AwakenInspectorRailProps = {
   title?: string;
+  ariaLabel?: string;
   status?: string;
   items: AwakenInspectorRailItem[];
   activeId?: string;
@@ -23,7 +24,8 @@ export type AwakenInspectorRailProps = {
 };
 
 export function AwakenInspectorRail({
-  title = "On Awaken",
+  title,
+  ariaLabel,
   status,
   items,
   activeId,
@@ -31,17 +33,24 @@ export function AwakenInspectorRail({
   action,
   children,
 }: AwakenInspectorRailProps) {
+  const hasHeader = Boolean(title || status || action);
+
   return (
-    <aside className="light-inspector-rail" aria-label={title}>
-      <div className="light-inspector-head">
-        <h2>{title}</h2>
-        {status || action ? (
-          <div className="light-inspector-head-meta">
-            {status ? <span>{status}</span> : null}
-            {action}
-          </div>
-        ) : null}
-      </div>
+    <aside
+      className={`light-inspector-rail${hasHeader ? "" : " light-inspector-rail-no-head"}`}
+      aria-label={ariaLabel ?? title ?? "Inspector"}
+    >
+      {hasHeader ? (
+        <div className="light-inspector-head">
+          {title ? <h2>{title}</h2> : null}
+          {status || action ? (
+            <div className="light-inspector-head-meta">
+              {status ? <span>{status}</span> : null}
+              {action}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <nav className="light-inspector-nav" aria-label="Inspector views">
         {items.map((item) => {
           const active = item.id === activeId;

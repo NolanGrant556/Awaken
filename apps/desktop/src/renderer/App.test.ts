@@ -2476,7 +2476,15 @@ describe("App workbench presentation", () => {
 
     const html = renderToString(React.createElement(App));
 
-    expect(html).toContain("On Awaken");
+    expect(html).toContain('aria-label="文件"');
+    expect(html).toContain('disabled="" aria-current="page"');
+    expect(html).toContain(">文件<");
+    expect(html).not.toContain("On Awaken");
+    expect(html).not.toContain("右侧栏待开发");
+    expect(html).not.toContain(">审阅<");
+    expect(html).not.toContain(">终端<");
+    expect(html).not.toContain(">浏览器<");
+    expect(html).not.toContain(">侧边任务<");
     expect(html).toContain("desktop-root-inspector-expanded");
     expect(html).toContain('aria-label="Collapse inspector"');
     expect(html).toContain('aria-label="Resize inspector"');

@@ -4,9 +4,9 @@
 
 ## 用途
 
-`AwakenInspectorRail` 负责右侧 rail 的标题、导航项、计数/语气状态和详情插槽。父级提供 `items`、当前 `activeId`、选择回调与详情内容；组件不读取 runtime、文件或工具数据。
+`AwakenInspectorRail` 负责右侧 rail 的可选标题、导航项、计数/语气状态和详情插槽。父级提供 `items`、当前 `activeId`、选择回调与详情内容；组件不读取 runtime、文件或工具数据。没有标题时导航从内容区顶部开始。
 
-当前 Desktop 只传入一个禁用的“右侧栏待开发”占位项，尚未支持 Changes、Browser、Terminal、Files 标签或详情面板。Gallery 必须如实展示这一当前边界，不把可扩展 props 写成已接线能力。
+当前 Desktop 只传入一个带文件夹图标、禁用的“文件”占位项，并把它固定在右栏顶部；尚未支持文件浏览/预览/编辑、Changes、Browser、Terminal、侧边任务或详情面板。Gallery 必须如实展示这一当前边界，不把可扩展 props 写成已接线能力。
 
 ## 文件
 

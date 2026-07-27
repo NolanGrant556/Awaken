@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -197,7 +198,7 @@ func (e *RunServiceExecutor) ExecuteAgent(ctx context.Context, task Task, exec E
 	if execErr != nil {
 		return "", "", execErr
 	}
-	run, err := e.RunService.StartScheduledRun(runtime.ScheduledRunRequest{
+	request := runtime.ScheduledRunRequest{
 		TaskID:       task.TaskID,
 		ExecutionID:  exec.ExecutionID,
 		TaskName:     task.Name,
@@ -205,7 +206,16 @@ func (e *RunServiceExecutor) ExecuteAgent(ctx context.Context, task Task, exec E
 		ThreadID:     task.ThreadID,
 		Workspace:    workspace,
 		ModelProfile: profile,
-	})
+	}
+	run, err := e.RunService.StartScheduledRun(request)
+	if errors.Is(err, runtime.ErrThreadNotFound) && strings.TrimSpace(task.ThreadID) != "" {
+		// A user may explicitly delete a task's dedicated thread while keeping
+		// the task. Recreate it once instead of leaving the durable task bound
+		// to an ID that can never run again. The scheduler CAS-rebinds the new
+		// ID only if the task still points at the stale one.
+		request.ThreadID = ""
+		run, err = e.RunService.StartScheduledRun(request)
+	}
 	if err != nil {
 		return "", "", mapStartError(err)
 	}
@@ -249,14 +259,19 @@ func (e *RunServiceExecutor) ExecuteReminder(ctx context.Context, task Task, exe
 	}
 	publishCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	threadID, _, err := e.RunService.PublishScheduledNotice(publishCtx, runtime.ScheduledNoticeRequest{
+	request := runtime.ScheduledNoticeRequest{
 		TaskID:      task.TaskID,
 		ExecutionID: exec.ExecutionID,
 		TaskName:    task.Name,
 		Content:     task.Action.Content,
 		ThreadID:    task.ThreadID,
 		Workspace:   workspace,
-	})
+	}
+	threadID, _, err := e.RunService.PublishScheduledNotice(publishCtx, request)
+	if errors.Is(err, runtime.ErrThreadNotFound) && strings.TrimSpace(task.ThreadID) != "" {
+		request.ThreadID = ""
+		threadID, _, err = e.RunService.PublishScheduledNotice(publishCtx, request)
+	}
 	if err != nil {
 		return "", mapStartError(err)
 	}

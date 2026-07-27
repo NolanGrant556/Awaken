@@ -127,7 +127,9 @@ type scheduledTaskWire struct {
 type scheduledTaskEventWire struct {
 	Type        string `json:"type"`
 	TaskID      string `json:"task_id"`
+	ProjectID   string `json:"project_id,omitempty"`
 	ExecutionID string `json:"execution_id,omitempty"`
+	RunID       string `json:"run_id,omitempty"`
 	ThreadID    string `json:"thread_id,omitempty"`
 	TaskName    string `json:"task_name,omitempty"`
 	Status      string `json:"status,omitempty"`
@@ -474,7 +476,9 @@ func (h *scheduledTaskHandlers) handleEvents(w http.ResponseWriter, r *http.Requ
 		payload, err := json.Marshal(scheduledTaskEventWire{
 			Type:        string(event.Type),
 			TaskID:      event.TaskID,
+			ProjectID:   event.ProjectID,
 			ExecutionID: event.ExecutionID,
+			RunID:       event.RunID,
 			ThreadID:    event.ThreadID,
 			TaskName:    event.TaskName,
 			Status:      event.Status,

@@ -481,6 +481,59 @@ func TestExecutorInteractionGates(t *testing.T) {
 	}
 }
 
+func TestExecutorReportsRunAndThreadBeforeWaitingForTerminal(t *testing.T) {
+	f := newExecutorFixture(t)
+	release := make(chan struct{})
+	f.probe.setRun(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+		select {
+		case <-release:
+			return "done", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	})
+
+	type startedIdentity struct {
+		runID    string
+		threadID string
+	}
+	started := make(chan startedIdentity, 1)
+	f.executor.SetExecutionStartedHandler(func(task Task, exec Execution, runID, threadID string) {
+		if task.TaskID == "sched_sidebar-visible" && exec.ExecutionID == "exec_1" {
+			started <- startedIdentity{runID: runID, threadID: threadID}
+		}
+	})
+	task := f.agentTask("sidebar-visible")
+	done := make(chan *ExecError, 1)
+	go func() {
+		_, _, execErr := f.executor.ExecuteAgent(
+			context.Background(),
+			task,
+			Execution{ExecutionID: "exec_1"},
+		)
+		done <- execErr
+	}()
+
+	select {
+	case identity := <-started:
+		if identity.runID == "" || identity.threadID == "" {
+			t.Fatalf("reported identity = %+v", identity)
+		}
+		select {
+		case execErr := <-done:
+			t.Fatalf("ExecuteAgent returned before release: %+v", execErr)
+		default:
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatalf("executor did not report started identity")
+	}
+
+	close(release)
+	if execErr := <-done; execErr != nil {
+		t.Fatalf("ExecuteAgent: %+v", execErr)
+	}
+}
+
 func TestExecutorTimeout(t *testing.T) {
 	f := newExecutorFixture(t)
 	timer := NewManualTimer()

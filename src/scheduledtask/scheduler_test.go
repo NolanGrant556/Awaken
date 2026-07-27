@@ -126,6 +126,7 @@ type schedFakeExecutor struct {
 	titleSyncs    []titleSyncCall
 	agentErr      *ExecError
 	reminderErr   *ExecError
+	onStarted     func(task Task, exec Execution, runID, threadID string)
 }
 
 func newSchedFakeExecutor() *schedFakeExecutor {
@@ -152,9 +153,15 @@ func (e *schedFakeExecutor) ExecuteAgent(ctx context.Context, task Task, exec Ex
 	e.agentExecs = append(e.agentExecs, exec)
 	block := e.block
 	agentErr := e.agentErr
+	onStarted := e.onStarted
 	e.mu.Unlock()
 	if agentErr != nil {
 		return "", "", agentErr
+	}
+	runID := "run-" + exec.ExecutionID
+	threadID := "thread-" + task.TaskID
+	if onStarted != nil {
+		onStarted(task, exec, runID, threadID)
 	}
 	if block {
 		e.enteredCh <- task.TaskID
@@ -170,18 +177,31 @@ func (e *schedFakeExecutor) ExecuteAgent(ctx context.Context, task Task, exec Ex
 	if wasCancelled {
 		return "", "", &ExecError{Code: ErrorCodeRunCancelled, Message: "run cancelled", Cancelled: true}
 	}
-	return "run-" + exec.ExecutionID, "thread-" + task.TaskID, nil
+	return runID, threadID, nil
 }
 
-func (e *schedFakeExecutor) ExecuteReminder(_ context.Context, task Task, _ Execution) (string, *ExecError) {
+func (e *schedFakeExecutor) ExecuteReminder(_ context.Context, task Task, exec Execution) (string, *ExecError) {
 	e.mu.Lock()
 	e.reminderTasks = append(e.reminderTasks, task.TaskID)
 	reminderErr := e.reminderErr
+	onStarted := e.onStarted
 	e.mu.Unlock()
 	if reminderErr != nil {
 		return "", reminderErr
 	}
-	return "thread-" + task.TaskID, nil
+	threadID := "thread-" + task.TaskID
+	if onStarted != nil {
+		onStarted(task, exec, "", threadID)
+	}
+	return threadID, nil
+}
+
+func (e *schedFakeExecutor) SetExecutionStartedHandler(
+	handler func(task Task, exec Execution, runID, threadID string),
+) {
+	e.mu.Lock()
+	e.onStarted = handler
+	e.mu.Unlock()
 }
 
 func (e *schedFakeExecutor) Cancel(taskID string) {
@@ -988,6 +1008,44 @@ func TestSchedulerPublishesEvents(t *testing.T) {
 	if h.events.count(EventExecutionStarted) != 1 || h.events.count(EventExecutionFinished) != 1 {
 		t.Fatalf("events = %+v", h.events.snapshot())
 	}
+}
+
+func TestSchedulerPublishesThreadIdentityBeforeAgentRunFinishes(t *testing.T) {
+	h := newSchedHarness(t)
+	h.exec.setBlock(true)
+	taskDraft := agentCronTask("sidebar-visible", "* * * * *", 300)
+	taskDraft.ProjectID = "project-visible"
+	task := h.mustCreate(t, taskDraft)
+	h.mustStart(t)
+
+	h.clock.Set(time.Date(2026, 7, 26, 11, 0, 0, 0, time.UTC))
+	h.timers.fireUntil(t, h.clock, "agent entered executor", func() bool {
+		return h.exec.agentCallCount() == 1
+	})
+	waitForCond(t, "started event with thread identity", func() bool {
+		for _, event := range h.events.snapshot() {
+			if event.Type == EventExecutionStarted && event.TaskID == task.TaskID {
+				return event.ProjectID == task.ProjectID && event.RunID != "" && event.ThreadID == "thread-"+task.TaskID
+			}
+		}
+		return false
+	})
+
+	fresh, err := h.repo.Get(task.TaskID)
+	if err != nil {
+		t.Fatalf("Get task: %v", err)
+	}
+	if fresh.ThreadID != "thread-"+task.TaskID {
+		t.Fatalf("thread binding before finish = %q", fresh.ThreadID)
+	}
+	if h.events.count(EventExecutionFinished) != 0 {
+		t.Fatalf("execution finished before the blocked agent was released")
+	}
+
+	h.exec.release()
+	waitForCond(t, "agent execution finished", func() bool {
+		return h.events.count(EventExecutionFinished) == 1
+	})
 }
 
 func TestRunManualIdempotencyKey(t *testing.T) {

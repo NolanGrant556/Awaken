@@ -80,12 +80,13 @@ const (
 // activeExecution tracks one dispatched execution of a task. All fields are
 // protected by the scheduler mutex except cancelCh, which is closed only once.
 type activeExecution struct {
-	executionID string
-	state       activeState
-	shutdown    bool // true when Stop requested; worker leaves terminal to recovery
-	cancelOnce  sync.Once
-	cancelCh    chan struct{}
-	execCancel  context.CancelFunc // cancels the per-execution side-effect context
+	executionID    string
+	startPublished bool
+	state          activeState
+	shutdown       bool // true when Stop requested; worker leaves terminal to recovery
+	cancelOnce     sync.Once
+	cancelCh       chan struct{}
+	execCancel     context.CancelFunc // cancels the per-execution side-effect context
 }
 
 func (a *activeExecution) cancel() {
@@ -136,7 +137,7 @@ func NewScheduler(cfg SchedulerConfig) *Scheduler {
 	if newTimer == nil {
 		newTimer = RealTimer
 	}
-	return &Scheduler{
+	scheduler := &Scheduler{
 		repo:      cfg.Repo,
 		clock:     clock,
 		executor:  cfg.Executor,
@@ -147,6 +148,10 @@ func NewScheduler(cfg SchedulerConfig) *Scheduler {
 		active:    map[string]*activeExecution{},
 		agentSem:  make(chan struct{}, maxConcurrentAgentExecutions),
 	}
+	if reporter, ok := cfg.Executor.(ExecutionStartReporter); ok {
+		reporter.SetExecutionStartedHandler(scheduler.handleExecutionStarted)
+	}
+	return scheduler
 }
 
 // Start runs the startup recovery of contract §8.1 and launches the
@@ -576,6 +581,7 @@ func (s *Scheduler) recordSkipped(task Task, occurrence time.Time, trigger Trigg
 	s.publish(Event{
 		Type:        EventExecutionFinished,
 		TaskID:      task.TaskID,
+		ProjectID:   task.ProjectID,
 		ExecutionID: exec.ExecutionID,
 		TaskName:    task.Name,
 		Status:      string(ExecutionStatusSkipped),
@@ -666,13 +672,10 @@ func (s *Scheduler) runExecution(active *activeExecution, task Task, exec Execut
 	s.mu.Unlock()
 	defer execCancel()
 
-	s.publish(Event{
-		Type:        EventExecutionStarted,
-		TaskID:      task.TaskID,
-		ExecutionID: exec.ExecutionID,
-		TaskName:    task.Name,
-		Status:      string(ExecutionStatusRunning),
-	})
+	_, executorReportsStart := s.executor.(ExecutionStartReporter)
+	if !executorReportsStart {
+		s.handleExecutionStarted(task, exec, "", "")
+	}
 
 	var runID, threadID string
 	var execErr *ExecError
@@ -681,9 +684,11 @@ func (s *Scheduler) runExecution(active *activeExecution, task Task, exec Execut
 	} else {
 		threadID, execErr = s.executor.ExecuteReminder(execCtx, task, exec)
 	}
-
-	if threadID != "" {
-		s.bindThread(task.TaskID, threadID)
+	if executorReportsStart && (runID != "" || threadID != "") {
+		// Defensive fallback for an ExecutionStartReporter implementation that
+		// returned identity without invoking its callback. The active record
+		// deduplicates this against the production callback.
+		s.handleExecutionStarted(task, exec, runID, threadID)
 	}
 
 	switch {
@@ -695,6 +700,7 @@ func (s *Scheduler) runExecution(active *activeExecution, task Task, exec Execut
 			s.publish(Event{
 				Type:        EventNotice,
 				TaskID:      task.TaskID,
+				ProjectID:   task.ProjectID,
 				ExecutionID: exec.ExecutionID,
 				ThreadID:    threadID,
 				TaskName:    task.Name,
@@ -716,6 +722,43 @@ func (s *Scheduler) runExecution(active *activeExecution, task Task, exec Execut
 	if !manual {
 		s.checkCompletion(task.TaskID)
 	}
+}
+
+func (s *Scheduler) handleExecutionStarted(task Task, exec Execution, runID, threadID string) {
+	s.mu.Lock()
+	active := s.active[task.TaskID]
+	if active == nil || active.executionID != exec.ExecutionID || active.startPublished {
+		s.mu.Unlock()
+		return
+	}
+	active.startPublished = true
+	s.mu.Unlock()
+
+	if threadID != "" {
+		s.bindThread(task.TaskID, threadID)
+	}
+	if runID != "" || threadID != "" {
+		_, _, _ = s.repo.AppendExecution(task.TaskID, Execution{
+			ExecutionID:  exec.ExecutionID,
+			Trigger:      exec.Trigger,
+			ScheduledFor: exec.ScheduledFor,
+			TaskVersion:  task.Version,
+			StartedAt:    exec.StartedAt,
+			Status:       ExecutionStatusRunning,
+			RunID:        runID,
+			ThreadID:     threadID,
+		})
+	}
+	s.publish(Event{
+		Type:        EventExecutionStarted,
+		TaskID:      task.TaskID,
+		ProjectID:   task.ProjectID,
+		ExecutionID: exec.ExecutionID,
+		RunID:       runID,
+		ThreadID:    threadID,
+		TaskName:    task.Name,
+		Status:      string(ExecutionStatusRunning),
+	})
 }
 
 func (s *Scheduler) checkCancelled(active *activeExecution) bool {
@@ -807,6 +850,7 @@ func (s *Scheduler) publishFinished(task Task, exec Execution, status ExecutionS
 	s.publish(Event{
 		Type:        EventExecutionFinished,
 		TaskID:      task.TaskID,
+		ProjectID:   task.ProjectID,
 		ExecutionID: exec.ExecutionID,
 		ThreadID:    threadID,
 		TaskName:    task.Name,

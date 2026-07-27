@@ -9,12 +9,14 @@ import {
   nativeTheme,
   nativeImage,
   net,
+  Notification,
   powerMonitor,
   protocol,
   screen as electronScreen,
   shell,
   webContents,
   type IpcMainEvent,
+  type IpcMainInvokeEvent,
   type Rectangle,
   type WebContents,
 } from "electron";
@@ -89,6 +91,19 @@ import {
   type SearchSettingsSaveResult,
   type SearchProviderTestRequest,
   type SearchProviderTestResult,
+  type ScheduledTask,
+  type ScheduledTaskCreateInput,
+  type ScheduledTaskEvent,
+  type ScheduledTaskExecution,
+  type ScheduledTaskExecutionListWire,
+  type ScheduledTaskExecutionWire,
+  type ScheduledTaskListWire,
+  type ScheduledTaskPatchInput,
+  type ScheduledTaskWire,
+  normalizeScheduledTask,
+  normalizeScheduledTaskExecution,
+  toScheduledTaskCreateWire,
+  toScheduledTaskPatchWire,
   type StartRunRequest,
   type ThreadDeleteResult,
   type UpdateMcpServerConfigRequest,
@@ -125,6 +140,11 @@ import {
 } from "./system-skills-importer.js";
 import { CliConnectorManager } from "./cli-connectors/manager.js";
 import { MemoryDreamSchedulerStore } from "./memory-dream-scheduler-store.js";
+import {
+  scheduledTaskNotificationContent,
+  startScheduledTaskEventStream,
+  type ScheduledTaskEventStream,
+} from "./scheduled-tasks.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let runtimeBaseUrl: string | null = null;
@@ -492,25 +512,37 @@ class RuntimeDomainError extends Error {
   }
 }
 
+async function throwRuntimeDomainError(response: Response): Promise<never> {
+  const fallback = `Runtime request failed (${response.status})`;
+  const raw = (await response.text()).trim();
+  let code = "INTERNAL_ERROR";
+  let message = raw || fallback;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as { code?: string; error?: string; message?: string };
+      code = parsed.code ?? parsed.error ?? code;
+      message = parsed.message ?? message;
+    } catch {
+      // Keep the raw body for internal logs. Renderer-facing callers map it.
+    }
+  }
+  throw new RuntimeDomainError(code, message, response.status);
+}
+
 async function requestRuntimeDomain<T>(pathname: string, init?: RequestInit): Promise<T> {
   const response = await fetch(runtimeUrl(pathname), init);
   if (!response.ok) {
-    const fallback = `Runtime request failed (${response.status})`;
-    const raw = (await response.text()).trim();
-    let code = "INTERNAL_ERROR";
-    let message = raw || fallback;
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as { code?: string; error?: string; message?: string };
-        code = parsed.code ?? parsed.error ?? code;
-        message = parsed.message ?? message;
-      } catch {
-        // Keep the raw body for internal logs. Renderer-facing callers map it.
-      }
-    }
-    throw new RuntimeDomainError(code, message, response.status);
+    await throwRuntimeDomainError(response);
   }
   return (await response.json()) as T;
+}
+
+/** Domain-error variant for 204 No Content endpoints. */
+async function requestRuntimeDomainOK(pathname: string, init?: RequestInit): Promise<void> {
+  const response = await fetch(runtimeUrl(pathname), init);
+  if (!response.ok) {
+    await throwRuntimeDomainError(response);
+  }
 }
 
 function upsertProjectFailureMessage(error: unknown): string {
@@ -1001,6 +1033,193 @@ function broadcastPetCatalogChanged(): void {
       wc.send(PET_IPC_CHANNELS.petCatalogChanged);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled tasks (contract docs/12_定时任务 §10): typed IPC forwards plus a
+// resident SSE subscription that feeds renderer refreshes and native
+// notifications. Renderer pages being closed never affects this pump, so a
+// notice is never lost with the page.
+// ---------------------------------------------------------------------------
+
+let scheduledTaskEventStream: ScheduledTaskEventStream | null = null;
+
+function broadcastScheduledTaskEvent(event: ScheduledTaskEvent): void {
+  for (const wc of webContents.getAllWebContents()) {
+    if (!wc.isDestroyed()) {
+      wc.send("awaken:scheduled-task-event", event);
+    }
+  }
+}
+
+function handleScheduledTaskEvent(event: ScheduledTaskEvent): void {
+  broadcastScheduledTaskEvent(event);
+  // Only live notice events become native notifications; Core emits a notice
+  // exactly once when it fires, so reconnects never re-notify.
+  const content = scheduledTaskNotificationContent(event);
+  if (!content || !Notification.isSupported()) {
+    return;
+  }
+  const notification = new Notification({ title: content.title, body: content.body });
+  notification.on("click", () => {
+    const mainWindow = focusOrCreateMainWindow();
+    const threadId = event.threadId ?? "";
+    if (threadId && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send("awaken:scheduled-task-thread-activation", { threadId });
+    }
+  });
+  notification.show();
+}
+
+function startScheduledTaskEventStreamIfNeeded(): void {
+  if (scheduledTaskEventStream || !runtimeBaseUrl) {
+    return;
+  }
+  scheduledTaskEventStream = startScheduledTaskEventStream({
+    baseUrl: runtimeBaseUrl,
+    onEvent: handleScheduledTaskEvent,
+    onError: (message) => {
+      console.error("[awaken-desktop] scheduled task event stream", { message });
+    },
+  });
+}
+
+function stopScheduledTaskEventStream(): void {
+  scheduledTaskEventStream?.stop();
+  scheduledTaskEventStream = null;
+}
+
+/** Scheduled-task IPC is accepted from the main window only, mirroring the
+ * artifact handler sender check. */
+function assertMainWindowSender(event: IpcMainInvokeEvent): void {
+  if (!mainWindowRef || mainWindowRef.isDestroyed() || event.sender.id !== mainWindowRef.webContents.id) {
+    throw new Error("无法确认定时任务请求来自 Awaken 主窗口。");
+  }
+}
+
+function scheduledTaskPath(taskId: string, suffix = ""): string {
+  return `/v1/scheduled-tasks/${encodeURIComponent(taskId)}${suffix}`;
+}
+
+function registerScheduledTaskIpcHandlers(): void {
+  ipcMain.handle("awaken:list-scheduled-tasks", async (event): Promise<ScheduledTask[]> => {
+    assertMainWindowSender(event);
+    const result = await requestRuntimeDomain<ScheduledTaskListWire>("/v1/scheduled-tasks", {
+      method: "GET",
+    });
+    return (result.tasks ?? []).map(normalizeScheduledTask);
+  });
+
+  ipcMain.handle("awaken:get-scheduled-task", async (event, taskId: string): Promise<ScheduledTask> => {
+    assertMainWindowSender(event);
+    const task = await requestRuntimeDomain<ScheduledTaskWire>(scheduledTaskPath(taskId), {
+      method: "GET",
+    });
+    return normalizeScheduledTask(task);
+  });
+
+  ipcMain.handle(
+    "awaken:create-scheduled-task",
+    async (event, input: ScheduledTaskCreateInput): Promise<ScheduledTask> => {
+      assertMainWindowSender(event);
+      const task = await requestRuntimeDomain<ScheduledTaskWire>("/v1/scheduled-tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toScheduledTaskCreateWire(input)),
+      });
+      return normalizeScheduledTask(task);
+    },
+  );
+
+  ipcMain.handle(
+    "awaken:patch-scheduled-task",
+    async (event, taskId: string, input: ScheduledTaskPatchInput): Promise<ScheduledTask> => {
+      assertMainWindowSender(event);
+      const task = await requestRuntimeDomain<ScheduledTaskWire>(scheduledTaskPath(taskId), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toScheduledTaskPatchWire(input)),
+      });
+      return normalizeScheduledTask(task);
+    },
+  );
+
+  ipcMain.handle(
+    "awaken:delete-scheduled-task",
+    async (
+      event,
+      request: { taskId: string; expectedVersion: number; idempotencyKey: string },
+    ): Promise<void> => {
+      assertMainWindowSender(event);
+      await requestRuntimeDomainOK(
+        `${scheduledTaskPath(request.taskId)}?expected_version=${encodeURIComponent(String(request.expectedVersion))}`,
+        {
+          method: "DELETE",
+          headers: { "Idempotency-Key": request.idempotencyKey },
+        },
+      );
+    },
+  );
+
+  const handleSetEnabled = (enabled: boolean) =>
+    async (event: IpcMainInvokeEvent, request: { taskId: string; expectedVersion: number }): Promise<ScheduledTask> => {
+      assertMainWindowSender(event);
+      const task = await requestRuntimeDomain<ScheduledTaskWire>(
+        scheduledTaskPath(request.taskId, enabled ? "/resume" : "/pause"),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ expected_version: request.expectedVersion }),
+        },
+      );
+      return normalizeScheduledTask(task);
+    };
+  ipcMain.handle("awaken:pause-scheduled-task", handleSetEnabled(false));
+  ipcMain.handle("awaken:resume-scheduled-task", handleSetEnabled(true));
+
+  ipcMain.handle(
+    "awaken:run-scheduled-task-now",
+    async (
+      event,
+      request: { taskId: string; idempotencyKey: string },
+    ): Promise<ScheduledTaskExecution> => {
+      assertMainWindowSender(event);
+      const execution = await requestRuntimeDomain<ScheduledTaskExecutionWire>(
+        scheduledTaskPath(request.taskId, "/run"),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ idempotency_key: request.idempotencyKey }),
+        },
+      );
+      return normalizeScheduledTaskExecution(execution);
+    },
+  );
+
+  ipcMain.handle(
+    "awaken:cancel-scheduled-task-execution",
+    async (event, taskId: string): Promise<void> => {
+      assertMainWindowSender(event);
+      await requestRuntimeDomainOK(scheduledTaskPath(taskId, "/cancel"), { method: "POST" });
+    },
+  );
+
+  ipcMain.handle(
+    "awaken:list-scheduled-task-executions",
+    async (event, taskId: string): Promise<ScheduledTaskExecution[]> => {
+      assertMainWindowSender(event);
+      const result = await requestRuntimeDomain<ScheduledTaskExecutionListWire>(
+        scheduledTaskPath(taskId, "/executions"),
+        { method: "GET" },
+      );
+      return (result.executions ?? []).map(normalizeScheduledTaskExecution);
+    },
+  );
+
+  ipcMain.handle("awaken:get-system-timezone", async (event): Promise<string> => {
+    assertMainWindowSender(event);
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  });
 }
 
 function registerPetIpcHandlers(): void {
@@ -2475,6 +2694,7 @@ app.whenReady().then(async () => {
   }
 
   registerPetIpcHandlers();
+  registerScheduledTaskIpcHandlers();
 
   supervisor = new RuntimeSupervisor(
     {},
@@ -2504,9 +2724,11 @@ app.whenReady().then(async () => {
     if (info.runtimeBaseUrl) {
       runtimeBaseUrl = info.runtimeBaseUrl;
       startProjectTrashWorker();
+      startScheduledTaskEventStreamIfNeeded();
       void cliConnectorManager?.refreshAll();
     } else if (info.status !== "running") {
       runtimeBaseUrl = null;
+      stopScheduledTaskEventStream();
     }
     for (const wc of webContents.getAllWebContents()) {
       if (!wc.isDestroyed()) {
@@ -2524,6 +2746,7 @@ app.whenReady().then(async () => {
     if (statusInfo.runtimeBaseUrl) {
       runtimeBaseUrl = statusInfo.runtimeBaseUrl;
       startProjectTrashWorker();
+      startScheduledTaskEventStreamIfNeeded();
       void cliConnectorManager?.refreshAll();
     }
   });
@@ -2549,6 +2772,7 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   isQuitting = true;
   stopProjectTrashWorker();
+  stopScheduledTaskEventStream();
   if (memoryDreamSchedulerTimer) clearInterval(memoryDreamSchedulerTimer);
   memoryDreamSchedulerTimer = null;
   for (const subscription of subscriptions.values()) {

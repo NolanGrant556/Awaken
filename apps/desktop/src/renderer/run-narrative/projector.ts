@@ -353,9 +353,31 @@ export function projectAguiEventToNarrative(
         return markLatestAnswerFinal(commitActive(base, "done"), event);
       }
       return base;
+    case "AWAKEN_SCHEDULED_NOTICE":
+      return commitScheduledNotice(base, event);
     default:
       return base;
   }
+}
+
+function commitScheduledNotice(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
+  const item: RunNarrativeItem = {
+    kind: "scheduledNotice",
+    id: `scheduled-notice:${eventScope(event)}:${event.executionId ?? event.recordId ?? event.seq ?? event.type}`,
+    taskId: event.taskId ?? "",
+    executionId: event.executionId,
+    taskName: event.taskName,
+    noticeContent: event.noticeContent ?? "",
+    timestamp: event.timestamp,
+  };
+  const settledState = state.activeItem ? commitActive(state, "done") : state;
+  return {
+    ...settledState,
+    committedItems: upsertCommitted(settledState.committedItems, item),
+  };
 }
 
 function commitMemoryReceipt(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
@@ -698,6 +720,7 @@ function applyStatus(
       return status === "done" || status === "error" ? { ...item, status } : item;
     case "answer":
       return status === "done" || status === "error" ? { ...item, status } : item;
+    case "scheduledNotice":
     case "hint":
       return item;
   }

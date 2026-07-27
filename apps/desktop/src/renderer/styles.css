@@ -1725,3 +1725,99 @@ pre {
     grid-template-columns: 1fr;
   }
 }
+
+/* 定时任务页面 */
+.scheduled-tasks-view__notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--aw-error) 36%, var(--aw-border-main));
+  border-radius: var(--aw-radius-panel);
+  background: color-mix(in srgb, var(--aw-error) 7%, var(--aw-bg-white));
+  color: var(--aw-text-primary);
+  font-size: 13px;
+}
+
+.scheduled-tasks-view__notice-dismiss {
+  border: none;
+  background: transparent;
+  color: var(--aw-text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+
+.scheduled-tasks-view__confirm-text {
+  margin: 0;
+  color: var(--aw-text-primary);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* 定时提醒叙事卡：明确标识为定时提醒，不伪装成用户/助手消息 */
+.scheduled-notice-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--aw-accent) 48%, var(--aw-border-main));
+  border-radius: var(--aw-radius-panel);
+  background: color-mix(in srgb, var(--aw-accent) 6%, var(--aw-bg-white));
+}
+
+.scheduled-notice-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--aw-accent) 14%, var(--aw-bg-white));
+  color: var(--aw-accent);
+}
+
+.scheduled-notice-card__body {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.scheduled-notice-card__header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.scheduled-notice-card__label {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--aw-accent) 14%, var(--aw-bg-white));
+  color: var(--aw-accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.scheduled-notice-card__title {
+  color: var(--aw-text-primary);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.scheduled-notice-card__time {
+  color: var(--aw-text-tertiary);
+  font-size: 12px;
+}
+
+.scheduled-notice-card__text {
+  color: var(--aw-text-primary);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

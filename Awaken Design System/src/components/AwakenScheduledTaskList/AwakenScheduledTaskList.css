@@ -1,0 +1,199 @@
+@import "../../tokens/components.css";
+
+.aw-scheduled-task-list {
+  display: grid;
+  gap: var(--aw-space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aw-scheduled-task-list__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--aw-space-3);
+  min-height: 64px;
+  padding: var(--aw-space-3) var(--aw-space-4);
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-white);
+}
+
+.aw-scheduled-task-list__row[data-state="invalid"] {
+  border-color: var(--aw-error-soft-border);
+}
+
+.aw-scheduled-task-list__row-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-secondary);
+}
+
+.aw-scheduled-task-list__row[data-running="true"] .aw-scheduled-task-list__row-icon {
+  background: var(--aw-status-running-bg);
+  color: var(--aw-status-running);
+}
+
+.aw-scheduled-task-list__row-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.aw-scheduled-task-list__row-title-line {
+  display: flex;
+  align-items: center;
+  gap: var(--aw-space-2);
+  min-width: 0;
+}
+
+.aw-scheduled-task-list__row-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  font-weight: var(--aw-font-weight-heavy);
+  line-height: var(--aw-line-height-base);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-scheduled-task-list__row-kind {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 0 6px;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-tertiary);
+  font-size: 10px;
+  font-weight: var(--aw-font-weight-heavy);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.aw-scheduled-task-list__row-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-scheduled-task-list__row-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--aw-space-2);
+}
+
+.aw-scheduled-task-list__row-menu-trigger {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--aw-radius-compact);
+  background: transparent;
+  color: var(--aw-text-tertiary);
+  cursor: pointer;
+  transition:
+    background-color var(--aw-transition-fast),
+    color var(--aw-transition-fast);
+}
+
+.aw-scheduled-task-list__row-menu-trigger:hover,
+.aw-scheduled-task-list__row-menu-trigger:focus-visible {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.aw-scheduled-task-list__menu {
+  display: grid;
+  gap: 2px;
+}
+
+.aw-scheduled-task-list__menu-item {
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--aw-radius-compact);
+  background: transparent;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.aw-scheduled-task-list__menu-item:hover:not(:disabled),
+.aw-scheduled-task-list__menu-item:focus-visible:not(:disabled) {
+  background: var(--aw-bg-fill-light);
+}
+
+.aw-scheduled-task-list__menu-item--danger {
+  color: var(--aw-status-danger);
+}
+
+.aw-scheduled-task-list__menu-item--danger:hover:not(:disabled),
+.aw-scheduled-task-list__menu-item--danger:focus-visible:not(:disabled) {
+  background: var(--aw-surface-danger);
+  color: var(--aw-status-danger);
+}
+
+.aw-scheduled-task-list__menu-item:disabled {
+  color: var(--aw-text-muted);
+  cursor: not-allowed;
+}
+
+.aw-scheduled-task-list__loading {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  border: 1px dashed var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-scheduled-task-list__empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--aw-space-3);
+  min-width: 0;
+  padding: var(--aw-space-8) var(--aw-space-5);
+  border: 1px dashed var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  text-align: center;
+}
+
+.aw-scheduled-task-list__empty-title {
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  font-weight: var(--aw-font-weight-heavy);
+  line-height: var(--aw-line-height-base);
+}
+
+.aw-scheduled-task-list__empty-description {
+  max-width: 420px;
+  margin: 0;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-scheduled-task-list__empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--aw-space-3);
+}

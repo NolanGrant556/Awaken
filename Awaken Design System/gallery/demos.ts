@@ -33,6 +33,11 @@ export { AwakenProjectSkillFolderDemo } from "../src/components/AwakenProjectSki
 export { AwakenProjectSkillsDialogDemo } from "../src/components/AwakenProjectSkillsDialog/AwakenProjectSkillsDialog.demo";
 export { AwakenProjectTreeDemo } from "../src/components/AwakenProjectTree/AwakenProjectTree.demo";
 export { AwakenRunStageDemo } from "../src/components/AwakenRunStage/AwakenRunStage.demo";
+export { AwakenScheduledTaskEditorDialogDemo } from "../src/components/AwakenScheduledTaskEditorDialog/AwakenScheduledTaskEditorDialog.demo";
+export { AwakenScheduledTaskHistoryDialogDemo } from "../src/components/AwakenScheduledTaskHistoryDialog/AwakenScheduledTaskHistoryDialog.demo";
+export { AwakenScheduledTaskListDemo } from "../src/components/AwakenScheduledTaskList/AwakenScheduledTaskList.demo";
+export { AwakenScheduledTaskStateBadgeDemo } from "../src/components/AwakenScheduledTaskStateBadge/AwakenScheduledTaskStateBadge.demo";
+export { AwakenScheduledTaskTemplateDialogDemo } from "../src/components/AwakenScheduledTaskTemplateDialog/AwakenScheduledTaskTemplateDialog.demo";
 export { AwakenSearchSettingsDemo } from "../src/components/AwakenSearchSettings/AwakenSearchSettings.demo";
 export { AwakenSettingsDemo } from "../src/components/AwakenSettings/AwakenSettings.demo";
 export { AwakenSettingsNavDemo } from "../src/components/AwakenSettingsNav/AwakenSettingsNav.demo";

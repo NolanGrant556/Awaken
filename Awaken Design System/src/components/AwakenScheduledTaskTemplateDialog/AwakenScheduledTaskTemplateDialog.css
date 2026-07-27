@@ -1,0 +1,123 @@
+@import "../../tokens/components.css";
+
+/* 契约 §4.3：模板窗口宽度约 860px；body 可滚动，header/footer 由 AwakenDialog 保持稳定。 */
+.aw-dialog.aw-scheduled-task-template-dialog {
+  width: min(860px, calc(100vw - 48px));
+  min-height: min(560px, calc(100vh - 48px));
+}
+
+.aw-scheduled-task-template-dialog__content {
+  display: grid;
+  gap: var(--aw-space-4);
+  min-width: 0;
+}
+
+.aw-scheduled-task-template-dialog__description {
+  margin: 0;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-scheduled-task-template-dialog__tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-fill-light);
+}
+
+.aw-scheduled-task-template-dialog__tabs button {
+  min-width: 0;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--aw-radius-md) - 2px);
+  background: transparent;
+  color: var(--aw-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: var(--aw-font-weight-heavy);
+  cursor: pointer;
+}
+
+.aw-scheduled-task-template-dialog__tabs button:hover:enabled {
+  color: var(--aw-text-primary);
+}
+
+.aw-scheduled-task-template-dialog__tabs button:focus-visible {
+  outline: none;
+  box-shadow: var(--aw-shadow-focus);
+}
+
+.aw-scheduled-task-template-dialog__tabs button[data-active="true"] {
+  border-color: var(--aw-border-main);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-primary);
+  box-shadow: var(--aw-shadow-control);
+}
+
+.aw-scheduled-task-template-dialog__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--aw-space-3);
+  min-width: 0;
+}
+
+.aw-scheduled-task-template-dialog__card {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+  padding: var(--aw-space-4);
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-panel);
+}
+
+.aw-scheduled-task-template-dialog__card-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  font-weight: var(--aw-font-weight-heavy);
+  line-height: var(--aw-line-height-base);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-scheduled-task-template-dialog__card-description {
+  display: -webkit-box;
+  min-width: 0;
+  min-height: calc(var(--aw-line-height-sm) * 2);
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-scheduled-task-template-dialog__card-frequency {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-scheduled-task-template-dialog__card-action {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+@media (max-width: 720px) {
+  .aw-scheduled-task-template-dialog__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

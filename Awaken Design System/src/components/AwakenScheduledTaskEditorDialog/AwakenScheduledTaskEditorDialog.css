@@ -1,0 +1,235 @@
+@import "../../tokens/components.css";
+
+.aw-dialog.aw-scheduled-task-editor-dialog {
+  width: min(640px, calc(100vw - 48px));
+}
+
+.aw-scheduled-task-editor__body {
+  display: grid;
+  gap: var(--aw-space-4);
+  min-width: 0;
+}
+
+.aw-scheduled-task-editor__section {
+  display: grid;
+  gap: var(--aw-space-3);
+  min-width: 0;
+  padding: var(--aw-space-4);
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-panel);
+}
+
+.aw-scheduled-task-editor__section-title {
+  margin: 0;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-heavy);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-scheduled-task-editor__field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.aw-scheduled-task-editor__field-label {
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+}
+
+.aw-scheduled-task-editor__control {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--aw-border-control);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-bg-white);
+  color: var(--aw-text-primary);
+  font: inherit;
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
+}
+
+.aw-scheduled-task-editor__control:focus {
+  border-color: var(--aw-border-control-hover);
+  outline: none;
+  box-shadow: var(--aw-shadow-focus);
+}
+
+.aw-scheduled-task-editor__control:disabled {
+  opacity: 0.58;
+}
+
+.aw-scheduled-task-editor__control--mono {
+  font-family: var(--aw-font-mono);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-scheduled-task-editor__textarea {
+  min-height: 120px;
+  max-height: 260px;
+  overflow-y: auto;
+  resize: vertical;
+}
+
+.aw-scheduled-task-editor__tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-fill-light);
+}
+
+.aw-scheduled-task-editor__tabs button {
+  min-width: 0;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--aw-radius-md) - 2px);
+  background: transparent;
+  color: var(--aw-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: var(--aw-font-weight-heavy);
+  cursor: pointer;
+}
+
+.aw-scheduled-task-editor__tabs button:hover:enabled {
+  color: var(--aw-text-primary);
+}
+
+.aw-scheduled-task-editor__tabs button:focus-visible {
+  outline: none;
+  box-shadow: var(--aw-shadow-focus);
+}
+
+.aw-scheduled-task-editor__tabs button[data-active="true"] {
+  border-color: var(--aw-border-main);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-primary);
+  box-shadow: var(--aw-shadow-control);
+}
+
+/* disabled 只来自提交中的 busy，属于瞬时态，因此不切换光标。 */
+.aw-scheduled-task-editor__tabs button:disabled {
+  cursor: pointer;
+  opacity: 0.58;
+}
+
+.aw-scheduled-task-editor__radio-list {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.aw-scheduled-task-editor__radio {
+  display: flex;
+  align-items: center;
+  gap: var(--aw-space-2);
+  min-width: 0;
+  min-height: 30px;
+  padding: 2px 6px;
+  border-radius: var(--aw-radius-compact);
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
+  cursor: pointer;
+}
+
+.aw-scheduled-task-editor__radio:hover {
+  background: var(--aw-bg-fill-light);
+}
+
+.aw-scheduled-task-editor__radio input {
+  flex: 0 0 auto;
+  accent-color: var(--aw-text-primary);
+}
+
+.aw-scheduled-task-editor__radio span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-scheduled-task-editor__hint {
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-scheduled-task-editor__field-error {
+  color: var(--aw-error);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+}
+
+.aw-scheduled-task-editor__error {
+  padding: 10px 12px;
+  border: 1px solid var(--aw-error-soft-border);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-error-soft-bg);
+  color: var(--aw-text-primary);
+  font-size: 13px;
+}
+
+.aw-scheduled-task-editor__weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--aw-space-3);
+  min-width: 0;
+}
+
+.aw-scheduled-task-editor__weekday {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
+  cursor: pointer;
+}
+
+.aw-scheduled-task-editor__weekday input {
+  flex: 0 0 auto;
+  accent-color: var(--aw-text-primary);
+}
+
+/* 时间输入：统一外观 + 点击任意位置打开原生下拉 */
+.aw-scheduled-task-editor__time-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.aw-scheduled-task-editor__control--time {
+  padding-right: 34px;
+}
+
+.aw-scheduled-task-editor__control--time::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.aw-scheduled-task-editor__time-icon {
+  position: absolute;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--aw-text-tertiary);
+  pointer-events: none;
+}

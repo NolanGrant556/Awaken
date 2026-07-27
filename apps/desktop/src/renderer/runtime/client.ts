@@ -59,6 +59,11 @@ import {
   type SearchSettingsSaveResult,
   type SearchProviderTestRequest,
   type SearchProviderTestResult,
+  type ScheduledTask,
+  type ScheduledTaskCreateInput,
+  type ScheduledTaskEvent,
+  type ScheduledTaskExecution,
+  type ScheduledTaskPatchInput,
   type StartRunRequest,
   type SupervisorStatusInfo,
   type ThreadDeleteResult,
@@ -258,6 +263,19 @@ export type RuntimeClient = {
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
   notifyRendererReady: () => void;
+  listScheduledTasks: () => Promise<ScheduledTask[]>;
+  getScheduledTask: (taskId: string) => Promise<ScheduledTask>;
+  createScheduledTask: (input: ScheduledTaskCreateInput) => Promise<ScheduledTask>;
+  patchScheduledTask: (taskId: string, input: ScheduledTaskPatchInput) => Promise<ScheduledTask>;
+  deleteScheduledTask: (taskId: string, expectedVersion: number, idempotencyKey: string) => Promise<void>;
+  pauseScheduledTask: (taskId: string, expectedVersion: number) => Promise<ScheduledTask>;
+  resumeScheduledTask: (taskId: string, expectedVersion: number) => Promise<ScheduledTask>;
+  runScheduledTaskNow: (taskId: string, idempotencyKey: string) => Promise<ScheduledTaskExecution>;
+  cancelScheduledTaskExecution: (taskId: string) => Promise<void>;
+  listScheduledTaskExecutions: (taskId: string) => Promise<ScheduledTaskExecution[]>;
+  getSystemTimezone: () => Promise<string>;
+  subscribeScheduledTaskEvents: (handler: (event: ScheduledTaskEvent) => void) => () => void;
+  onScheduledTaskThreadActivation: (handler: (threadId: string) => void) => () => void;
   listPets: () => Promise<PetSummary[]>;
   getPetSettings: () => Promise<PetSettings>;
   selectPet: (petId: string) => Promise<PetSettings>;
@@ -501,6 +519,24 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getSupervisorStatus: () => bridge.getSupervisorStatus(),
     onSupervisorStatusChange: (callback) => bridge.onSupervisorStatusChange(callback),
     notifyRendererReady: () => bridge.notifyRendererReady(),
+    listScheduledTasks: () => bridge.listScheduledTasks(),
+    getScheduledTask: (taskId) => bridge.getScheduledTask(taskId),
+    createScheduledTask: (input) => bridge.createScheduledTask(input),
+    patchScheduledTask: (taskId, input) => bridge.patchScheduledTask(taskId, input),
+    deleteScheduledTask: (taskId, expectedVersion, idempotencyKey) =>
+      bridge.deleteScheduledTask(taskId, expectedVersion, idempotencyKey),
+    pauseScheduledTask: (taskId, expectedVersion) =>
+      bridge.pauseScheduledTask(taskId, expectedVersion),
+    resumeScheduledTask: (taskId, expectedVersion) =>
+      bridge.resumeScheduledTask(taskId, expectedVersion),
+    runScheduledTaskNow: (taskId, idempotencyKey) =>
+      bridge.runScheduledTaskNow(taskId, idempotencyKey),
+    cancelScheduledTaskExecution: (taskId) => bridge.cancelScheduledTaskExecution(taskId),
+    listScheduledTaskExecutions: (taskId) => bridge.listScheduledTaskExecutions(taskId),
+    getSystemTimezone: () => bridge.getSystemTimezone(),
+    subscribeScheduledTaskEvents: (handler) => bridge.subscribeScheduledTaskEvents(handler),
+    onScheduledTaskThreadActivation: (handler) =>
+      bridge.onScheduledTaskThreadActivation(handler),
     listPets: () => bridge.listPets(),
     getPetSettings: () => bridge.getPetSettings(),
     selectPet: (petId) => bridge.selectPet(petId),

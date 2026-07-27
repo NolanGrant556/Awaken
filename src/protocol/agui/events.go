@@ -66,7 +66,11 @@ const (
 	EventAwakenACPToolChanged               EventType = "AWAKEN_ACP_TOOL_CHANGED"
 	EventAwakenACPPermissionRequested       EventType = "AWAKEN_ACP_PERMISSION_REQUESTED"
 	EventAwakenACPPermissionResolved        EventType = "AWAKEN_ACP_PERMISSION_RESOLVED"
-	EventAwakenUnknown                      EventType = "AWAKEN_UNKNOWN_EVENT"
+	// EventAwakenScheduledNotice is the host-owned fixed-reminder fact of a
+	// scheduled task (contract docs/12_定时任务/定时任务设计契约.md §9.4/§10).
+	// It is a replayable in-thread fact, never a user or assistant message.
+	EventAwakenScheduledNotice EventType = "AWAKEN_SCHEDULED_NOTICE"
+	EventAwakenUnknown         EventType = "AWAKEN_UNKNOWN_EVENT"
 )
 
 type RunOutcome struct {
@@ -328,22 +332,30 @@ type Event struct {
 	InteractionProvider        string           `json:"interactionProvider,omitempty"`
 	InteractionRecoveries      []string         `json:"interactionRecoveries,omitempty"`
 	// ACP fields surfaced on AWAKEN_ACP_* events.
-	ACPSessionID               string                `json:"acpSessionId,omitempty"`
-	ACPRunnerID                string                `json:"acpRunnerId,omitempty"`
-	ACPTurnID                  string                `json:"acpTurnId,omitempty"`
-	ACPToolCallID              string                `json:"acpToolCallId,omitempty"`
-	ACPPermissionOptions       []ACPPermissionOption `json:"acpPermissionOptions,omitempty"`
-	ArtifactContractVersion    int                   `json:"artifactContractVersion,omitempty"`
-	ArtifactRole               string           `json:"artifactRole,omitempty"`
-	ArtifactProducer           string           `json:"artifactProducer,omitempty"`
-	ArtifactID                 string           `json:"artifactId,omitempty"`
-	ArtifactTitle              string           `json:"artifactTitle,omitempty"`
-	ArtifactDescription        string           `json:"artifactDescription,omitempty"`
-	ArtifactKind               string           `json:"artifactKind,omitempty"`
-	ArtifactPath               string           `json:"artifactPath,omitempty"`
-	ArtifactContent            string           `json:"artifactContent,omitempty"`
-	ArtifactStatus             string           `json:"artifactStatus,omitempty"`
-	Outcome                    *RunOutcome      `json:"outcome,omitempty"`
-	RawType                    string           `json:"rawType,omitempty"`
-	RawEvent                   any              `json:"rawEvent,omitempty"`
+	ACPSessionID            string                `json:"acpSessionId,omitempty"`
+	ACPRunnerID             string                `json:"acpRunnerId,omitempty"`
+	ACPTurnID               string                `json:"acpTurnId,omitempty"`
+	ACPToolCallID           string                `json:"acpToolCallId,omitempty"`
+	ACPPermissionOptions    []ACPPermissionOption `json:"acpPermissionOptions,omitempty"`
+	ArtifactContractVersion int                   `json:"artifactContractVersion,omitempty"`
+	ArtifactRole            string                `json:"artifactRole,omitempty"`
+	ArtifactProducer        string                `json:"artifactProducer,omitempty"`
+	ArtifactID              string                `json:"artifactId,omitempty"`
+	ArtifactTitle           string                `json:"artifactTitle,omitempty"`
+	ArtifactDescription     string                `json:"artifactDescription,omitempty"`
+	ArtifactKind            string                `json:"artifactKind,omitempty"`
+	ArtifactPath            string                `json:"artifactPath,omitempty"`
+	ArtifactContent         string                `json:"artifactContent,omitempty"`
+	ArtifactStatus          string                `json:"artifactStatus,omitempty"`
+	// Scheduled-task fixed-reminder fields, surfaced on AWAKEN_SCHEDULED_NOTICE
+	// (contract §9.4). They carry only task/execution identity, the task name
+	// and the fixed notice content; JSON keys follow the existing camelCase
+	// wire convention consumed by apps/desktop/src/shared/agui.ts.
+	TaskID        string      `json:"taskId,omitempty"`
+	ExecutionID   string      `json:"executionId,omitempty"`
+	TaskName      string      `json:"taskName,omitempty"`
+	NoticeContent string      `json:"noticeContent,omitempty"`
+	Outcome       *RunOutcome `json:"outcome,omitempty"`
+	RawType       string      `json:"rawType,omitempty"`
+	RawEvent      any         `json:"rawEvent,omitempty"`
 }

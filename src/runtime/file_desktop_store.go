@@ -45,6 +45,8 @@ func activeSessionsDir() string {
 //	  lifecycle/mutations.jsonl   (transaction journal: source of truth)
 //	  lifecycle/state.json        (materialized snapshot: rebuildable)
 //	  locks/store.lock            (short-lived cross-process mutation lock)
+//	  scheduled-tasks/            (scheduled task authority; see src/scheduledtask)
+//	  scheduled-tasks/executions/ (per-task execution history journals)
 //
 // Every lifecycle mutation is journal-first: the mutation record carries all
 // generated identity (operation IDs, job IDs, timestamps) so replay after a
@@ -131,26 +133,29 @@ type fileLifecycleMutation struct {
 }
 
 type fileSessionMetadata struct {
-	SchemaVersion     int             `json:"schema_version"`
-	ThreadID          string          `json:"thread_id"`
-	Title             string          `json:"title"`
-	TitleSource       string          `json:"title_source,omitempty"`
-	TitleStatus       string          `json:"title_status,omitempty"`
-	TitleUpdatedAt    string          `json:"title_updated_at,omitempty"`
-	TitleSeedRunID    string          `json:"title_seed_run_id,omitempty"`
-	WorkspaceRoot     string          `json:"workspace_root"`
-	ProjectID         string          `json:"project_id,omitempty"`
-	ScopeID           string          `json:"scope_id,omitempty"`
-	LatestRunID       string          `json:"latest_run_id,omitempty"`
-	CreatedAt         string          `json:"created_at"`
-	UpdatedAt         string          `json:"updated_at"`
-	Archived          bool            `json:"archived,omitempty"`
-	Deleted           bool            `json:"deleted,omitempty"`
-	DeletedAt         string          `json:"deleted_at,omitempty"`
-	DeleteOperationID string          `json:"delete_operation_id,omitempty"`
-	Preview           string          `json:"preview,omitempty"`
-	ModelProfileKey   string          `json:"model_profile_key,omitempty"`
-	Workspace         WorkspaceConfig `json:"workspace"`
+	SchemaVersion     int    `json:"schema_version"`
+	ThreadID          string `json:"thread_id"`
+	Title             string `json:"title"`
+	TitleSource       string `json:"title_source,omitempty"`
+	TitleStatus       string `json:"title_status,omitempty"`
+	TitleUpdatedAt    string `json:"title_updated_at,omitempty"`
+	TitleSeedRunID    string `json:"title_seed_run_id,omitempty"`
+	WorkspaceRoot     string `json:"workspace_root"`
+	ProjectID         string `json:"project_id,omitempty"`
+	ScopeID           string `json:"scope_id,omitempty"`
+	LatestRunID       string `json:"latest_run_id,omitempty"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
+	Archived          bool   `json:"archived,omitempty"`
+	Deleted           bool   `json:"deleted,omitempty"`
+	DeletedAt         string `json:"deleted_at,omitempty"`
+	DeleteOperationID string `json:"delete_operation_id,omitempty"`
+	Preview           string `json:"preview,omitempty"`
+	ModelProfileKey   string `json:"model_profile_key,omitempty"`
+	// Source records the thread origin ("" for regular Desktop threads,
+	// "scheduled_task" for scheduled-task dedicated threads).
+	Source    string          `json:"source,omitempty"`
+	Workspace WorkspaceConfig `json:"workspace"`
 }
 
 func newFileDesktopStore(root string) (*FileDesktopStore, error) {
@@ -186,6 +191,8 @@ func newFileDesktopStore(root string) (*FileDesktopStore, error) {
 		filepath.Join(genDir, "sessions"),
 		filepath.Join(genDir, "lifecycle"),
 		filepath.Join(genDir, "locks"),
+		filepath.Join(genDir, "scheduled-tasks"),
+		filepath.Join(genDir, "scheduled-tasks", "executions"),
 	} {
 		if err := filestore.EnsureDir(dir); err != nil {
 			return nil, err
@@ -477,6 +484,7 @@ func storedRecordFromSessionMetadata(meta fileSessionMetadata) storedThreadRecor
 			Workspace:      workspace,
 			CreatedAt:      parseStoredTime(meta.CreatedAt),
 			UpdatedAt:      parseStoredTime(meta.UpdatedAt),
+			Source:         strings.TrimSpace(meta.Source),
 		},
 		ModelProfileKey: meta.ModelProfileKey,
 		Preview:         meta.Preview,
@@ -530,6 +538,7 @@ func (s *FileDesktopStore) upsertThread(snapshot ThreadSnapshot, modelProfileKey
 			UpdatedAt:       formatStoredTime(snapshot.UpdatedAt),
 			Preview:         strings.TrimSpace(preview),
 			ModelProfileKey: strings.TrimSpace(modelProfileKey),
+			Source:          strings.TrimSpace(snapshot.Source),
 			Workspace:       snapshot.Workspace,
 		}
 		return s.writeSessionMetadata(meta)
@@ -573,6 +582,9 @@ func (s *FileDesktopStore) upsertThread(snapshot ThreadSnapshot, modelProfileKey
 	}
 	if strings.TrimSpace(modelProfileKey) != "" {
 		next.ModelProfileKey = strings.TrimSpace(modelProfileKey)
+	}
+	if source := strings.TrimSpace(snapshot.Source); source != "" {
+		next.Source = source
 	}
 	next.Workspace = snapshot.Workspace
 	return s.writeSessionMetadata(next)
@@ -810,7 +822,7 @@ func (s *FileDesktopStore) RenameThread(threadID, label string, updatedAt time.T
 func (s *FileDesktopStore) UpdateThreadTitleMetadata(threadID, label string, source ThreadTitleSource, status ThreadTitleStatus, seedRunID string, updatedAt time.Time) (ThreadSnapshot, error) {
 	threadID = strings.TrimSpace(threadID)
 	seedRunID = strings.TrimSpace(seedRunID)
-	if threadID == "" || seedRunID == "" {
+	if threadID == "" {
 		return ThreadSnapshot{}, ErrThreadNotFound
 	}
 	nextLabel := trimThreadLabel(strings.TrimSpace(label))
@@ -840,6 +852,27 @@ func (s *FileDesktopStore) UpdateThreadTitleMetadata(threadID, label string, sou
 	}
 	if meta.Deleted {
 		return ThreadSnapshot{}, ErrThreadNotFound
+	}
+	// Task-owned titles follow scheduled-task renames until the user renames
+	// the thread manually (which flips the source to manual and ends the CAS).
+	if meta.TitleSource == string(ThreadTitleSourceTask) {
+		if nextLabel == "" {
+			return storedRecordFromSessionMetadata(meta).Snapshot, nil
+		}
+		meta.Title = nextLabel
+		meta.TitleSource = string(source)
+		meta.TitleStatus = string(status)
+		meta.TitleUpdatedAt = formatStoredTime(updatedAt)
+		meta.UpdatedAt = formatStoredTime(updatedAt)
+		if err := s.writeSessionMetadata(meta); err != nil {
+			return ThreadSnapshot{}, err
+		}
+		return storedRecordFromSessionMetadata(meta).Snapshot, nil
+	}
+	if seedRunID == "" {
+		// The first_user CAS below keys on the seed run; without one there is
+		// nothing safe to transition.
+		return storedRecordFromSessionMetadata(meta).Snapshot, nil
 	}
 	// CAS: only a pending first_user seed for the same run may transition.
 	if meta.TitleSource != string(ThreadTitleSourceFirstUser) ||

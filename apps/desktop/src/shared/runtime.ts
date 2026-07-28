@@ -1575,6 +1575,11 @@ export type AwakenBridge = {
     request: StartRunRequest,
   ) => Promise<DesktopOperationResult<RuntimeRun>>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
+  cancelSubagent?: (
+    runId: string,
+    taskId: string,
+    reason?: string,
+  ) => Promise<void>;
   answerUserQuestion: (
     runId: string,
     questionId: string,

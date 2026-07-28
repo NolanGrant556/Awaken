@@ -14,6 +14,7 @@ import (
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
 	"awaken/src/desktopdata"
+	"awaken/src/subagentruntime"
 	"awaken/src/tool/profile"
 )
 
@@ -2315,6 +2316,17 @@ func TestFlushAgentTranscriptDoesNotFlushCanonicalRecorder(t *testing.T) {
 			store.conversationCalls,
 			store.runEventCalls,
 		)
+	}
+}
+
+func TestSubagentSemanticPayloadNormalizesStatusAlias(t *testing.T) {
+	payload := subagentSemanticPayload(subagentruntime.TaskSnapshot{
+		TaskID: "subtask-1",
+		Status: subagentruntime.StatusCompleted,
+	})
+	status, ok := payload["status"].(string)
+	if !ok || status != "completed" {
+		t.Fatalf("subagent status must be a plain string for AG-UI projection, got %#v", payload["status"])
 	}
 }
 

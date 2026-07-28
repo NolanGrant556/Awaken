@@ -1825,3 +1825,105 @@ pre {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.subagent-inspector {
+  display: grid;
+  gap: 18px;
+  padding: 16px;
+  overflow: auto;
+}
+
+.subagent-inspector__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.subagent-inspector__header h3,
+.subagent-inspector section h4 {
+  margin: 0;
+}
+
+.subagent-inspector__header h3 {
+  margin-top: 4px;
+  font-size: 15px;
+}
+
+.subagent-inspector__eyebrow,
+.subagent-inspector__status {
+  color: var(--aw-color-text-muted, #777);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.subagent-inspector__status {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.1);
+}
+
+.subagent-inspector__status--running,
+.subagent-inspector__status--queued,
+.subagent-inspector__status--cancelling {
+  color: #526ee8;
+  background: rgba(82, 110, 232, 0.12);
+}
+
+.subagent-inspector__status--completed {
+  color: #237d50;
+  background: rgba(35, 125, 80, 0.12);
+}
+
+.subagent-inspector__status--failed,
+.subagent-inspector__status--interrupted {
+  color: #b24a43;
+  background: rgba(178, 74, 67, 0.12);
+}
+
+.subagent-inspector__switcher {
+  display: grid;
+  gap: 4px;
+}
+
+.subagent-inspector__switcher button {
+  overflow: hidden;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.subagent-inspector__switcher button:hover,
+.subagent-inspector__switcher button.is-active {
+  background: rgba(127, 127, 127, 0.1);
+}
+
+.subagent-inspector section {
+  display: grid;
+  gap: 7px;
+}
+
+.subagent-inspector section h4 {
+  font-size: 12px;
+}
+
+.subagent-inspector section p,
+.subagent-inspector section pre {
+  margin: 0;
+  color: var(--aw-color-text-muted, #666);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.subagent-inspector__error p {
+  color: #b24a43 !important;
+}

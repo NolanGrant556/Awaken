@@ -2504,6 +2504,23 @@ ipcMain.handle("awaken:cancel-run", async (_event, runId: string) => {
 });
 
 ipcMain.handle(
+  "awaken:cancel-subagent",
+  async (
+    _event,
+    payload: { runId: string; taskId: string; reason?: string },
+  ) => {
+    await requestRuntimeOK(
+      `/v1/runs/${encodeURIComponent(payload.runId)}/subagents/${encodeURIComponent(payload.taskId)}/cancel`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: payload.reason ?? "desktop_user" }),
+      },
+    );
+  },
+);
+
+ipcMain.handle(
   "awaken:answer-user-question",
   async (_event, payload: { runId: string; questionId: string; answer: string }) => {
     await requestRuntimeOK(`/v1/runs/${payload.runId}/user-questions/${payload.questionId}/answer`, {

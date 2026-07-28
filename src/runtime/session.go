@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/subagentruntime"
 )
 
 type RunStatus string
@@ -65,8 +66,27 @@ type Session struct {
 	cancel               context.CancelFunc
 	bus                  *EventBus
 	semanticRecorder     agentcore.SemanticRecorder
+	subagents            subagentruntime.Controller
 	userQuestions        map[string]*pendingUserQuestion
 	externalInteractions map[string]*pendingExternalInteraction
+}
+
+func (s *Session) SetSubagentController(controller subagentruntime.Controller) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.subagents = controller
+	s.mu.Unlock()
+}
+
+func (s *Session) SubagentController() subagentruntime.Controller {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.subagents
 }
 
 type pendingUserQuestion struct {

@@ -44,6 +44,28 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 	if payload == nil {
 		payload = map[string]any{}
 	}
+	if taskID := stringFromAny(payload["subagent_task_id"]); taskID != "" {
+		switch record.Kind {
+		case agentcore.SemanticKindToolCall, agentcore.SemanticKindToolResult:
+			activity := base
+			activity.Type = EventAwakenSubagentActivity
+			activity.SubagentTaskID = taskID
+			activity.SubagentAgentID = stringFromAny(payload["agent_id"])
+			activity.SubagentParentAgentID = stringFromAny(payload["parent_agent_id"])
+			activity.ToolCallID = stringFromAny(payload["tool_call_id"])
+			activity.ToolCallName = stringFromAny(payload["tool_name"])
+			activity.SubagentActivity = activity.ToolCallName
+			if record.Kind == agentcore.SemanticKindToolResult {
+				activity.Status = "finished"
+			} else {
+				activity.Status = "running"
+			}
+			return []Event{activity}
+		default:
+			// Child transcript facts stay durable but never become root narrative.
+			return nil
+		}
+	}
 
 	switch record.Kind {
 	case agentcore.SemanticKindRunStarted:
@@ -73,6 +95,23 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		base.Type = EventAwakenModelUsage
 		base.ModelUsage = mapModelUsageRecord(&usage)
 		return []Event{base}
+	case agentcore.SemanticKindSubagentSpawned,
+		agentcore.SemanticKindSubagentStatusChanged,
+		agentcore.SemanticKindSubagentTerminal:
+		changed := base
+		changed.Type = EventAwakenSubagentChanged
+		applySubagentPayload(&changed, payload)
+		return []Event{changed}
+	case agentcore.SemanticKindSubagentProgress:
+		activity := base
+		activity.Type = EventAwakenSubagentActivity
+		applySubagentPayload(&activity, payload)
+		return []Event{activity}
+	case agentcore.SemanticKindSubagentMessageQueued:
+		message := base
+		message.Type = EventAwakenSubagentMessageQueued
+		applySubagentPayload(&message, payload)
+		return []Event{message}
 	case agentcore.SemanticKindMemoryRecalled:
 		memoryEvent := base
 		memoryEvent.Type = EventAwakenMemoryRecalled
@@ -380,6 +419,31 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		unknown.RawType = string(record.Kind)
 		return []Event{unknown}
 	}
+}
+
+func applySubagentPayload(dst *Event, payload map[string]any) {
+	if dst == nil {
+		return
+	}
+	dst.SubagentTaskID = firstNonEmpty(stringFromAny(payload["task_id"]), stringFromAny(payload["subagent_task_id"]))
+	dst.SubagentAgentID = firstNonEmpty(stringFromAny(payload["agent_id"]), stringFromAny(payload["subagent_agent_id"]))
+	dst.SubagentParentAgentID = stringFromAny(payload["parent_agent_id"])
+	dst.SubagentParentToolCallID = stringFromAny(payload["parent_tool_call_id"])
+	dst.SubagentAgentType = stringFromAny(payload["agent_type"])
+	dst.SubagentDescription = stringFromAny(payload["description"])
+	dst.SubagentStatus = stringFromAny(payload["status"])
+	dst.SubagentWorkspaceMode = stringFromAny(payload["workspace_mode"])
+	dst.SubagentModelProfileID = stringFromAny(payload["model_profile_id"])
+	dst.SubagentActivity = stringFromAny(payload["current_activity"])
+	dst.SubagentToolUseCount = intFromAny(payload["tool_use_count"])
+	dst.SubagentEstimatedTokens = intFromAny(payload["estimated_tokens"])
+	dst.SubagentResultPreview = stringFromAny(payload["result_preview"])
+	dst.SubagentErrorCode = stringFromAny(payload["error_code"])
+	dst.SubagentErrorMessage = stringFromAny(payload["error_message"])
+	dst.SubagentSideEffectState = stringFromAny(payload["side_effect_state"])
+	dst.SubagentCreatedAt = stringFromAny(payload["created_at"])
+	dst.SubagentStartedAt = stringFromAny(payload["started_at"])
+	dst.SubagentFinishedAt = stringFromAny(payload["finished_at"])
 }
 
 func decodeSemanticPayload(payload map[string]any, target any) error {

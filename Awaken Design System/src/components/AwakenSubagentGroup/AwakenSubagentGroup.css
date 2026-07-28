@@ -1,0 +1,108 @@
+.aw-subagent-group {
+  overflow: hidden;
+  border: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.22));
+  border-radius: 12px;
+  background: var(--aw-color-surface-raised, rgba(127, 127, 127, 0.04));
+}
+
+.aw-subagent-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.18));
+  font-size: 12px;
+}
+
+.aw-subagent-group__header span {
+  color: var(--aw-color-text-muted, #777);
+}
+
+.aw-subagent-group__rows {
+  display: grid;
+}
+
+.aw-subagent-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.14));
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.aw-subagent-row:last-child {
+  border-bottom: 0;
+}
+
+.aw-subagent-row:hover,
+.aw-subagent-row:focus-visible,
+.aw-subagent-row.is-selected {
+  background: var(--aw-color-surface-hover, rgba(127, 127, 127, 0.09));
+  outline: none;
+}
+
+.aw-subagent-row__status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #909090;
+}
+
+.aw-subagent-row--running .aw-subagent-row__status,
+.aw-subagent-row--queued .aw-subagent-row__status,
+.aw-subagent-row--cancelling .aw-subagent-row__status {
+  background: #5f7cff;
+  box-shadow: 0 0 0 3px rgba(95, 124, 255, 0.14);
+}
+
+.aw-subagent-row--completed .aw-subagent-row__status {
+  background: #2e9b65;
+}
+
+.aw-subagent-row--failed .aw-subagent-row__status,
+.aw-subagent-row--interrupted .aw-subagent-row__status {
+  background: #d05b52;
+}
+
+.aw-subagent-row__body,
+.aw-subagent-row__title {
+  min-width: 0;
+}
+
+.aw-subagent-row__body {
+  display: grid;
+  gap: 3px;
+}
+
+.aw-subagent-row__title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.aw-subagent-row__title strong,
+.aw-subagent-row__detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-subagent-row__title strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.aw-subagent-row__title small,
+.aw-subagent-row__detail,
+.aw-subagent-row__label {
+  color: var(--aw-color-text-muted, #777);
+  font-size: 11px;
+}

@@ -246,6 +246,11 @@ export type RuntimeClient = {
   revealArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
+  cancelSubagent?: (
+    runId: string,
+    taskId: string,
+    reason?: string,
+  ) => Promise<void>;
   answerUserQuestion: (
     runId: string,
     questionId: string,
@@ -418,6 +423,10 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     revealArtifact: (request) => bridge.revealArtifact(request),
     startRun: (request) => unwrapDesktopOperation(bridge.startRun(request)),
     cancelRun: bridge.cancelRun,
+    cancelSubagent: bridge.cancelSubagent
+      ? (runId, taskId, reason) =>
+          bridge.cancelSubagent!(runId, taskId, reason)
+      : undefined,
     answerUserQuestion: bridge.answerUserQuestion,
     resolveExternalInteraction: bridge.resolveExternalInteraction,
     resolveACPPermission: bridge.resolveACPPermission,

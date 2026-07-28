@@ -589,9 +589,33 @@ func TestGenerateThreadTitleWithProfileUsesProviderRequestPolicy(t *testing.T) {
 	if temperature != 1 {
 		t.Fatalf("expected Kimi K2.7 request policy temperature 1, got %v in body %+v", temperature, body)
 	}
+	var maxTokens int
+	if raw := body["max_tokens"]; len(raw) == 0 {
+		t.Fatalf("expected max_tokens in request body: %+v", body)
+	} else if err := json.Unmarshal(raw, &maxTokens); err != nil {
+		t.Fatalf("failed to decode max_tokens: %v", err)
+	}
+	if maxTokens != threadTitleForcedReasoningMaxTokens {
+		t.Fatalf("expected forced-reasoning title budget %d, got %d in body %+v", threadTitleForcedReasoningMaxTokens, maxTokens, body)
+	}
 
 	if _, ok := body["thinking"]; ok {
 		t.Fatalf("expected Kimi K2.7 request to omit thinking.disabled, got %+v", body)
+	}
+}
+
+func TestThreadTitleMaxTokensForProfileKeepsCompactDefault(t *testing.T) {
+	if got := threadTitleMaxTokensForProfile(&ModelProfileConfig{ModelID: "deepseek-v4-flash"}); got != threadTitleMaxTokens {
+		t.Fatalf("expected default title budget %d, got %d", threadTitleMaxTokens, got)
+	}
+	if got := threadTitleMaxTokensForProfile(&ModelProfileConfig{ModelID: "kimi-for-coding-highspeed"}); got != threadTitleForcedReasoningMaxTokens {
+		t.Fatalf("expected Kimi forced-reasoning budget %d, got %d", threadTitleForcedReasoningMaxTokens, got)
+	}
+	if got := threadTitleGenerationTimeoutForProfile(&ModelProfileConfig{ModelID: "deepseek-v4-flash"}); got != threadTitleGenerationTimeout {
+		t.Fatalf("expected default title timeout %s, got %s", threadTitleGenerationTimeout, got)
+	}
+	if got := threadTitleGenerationTimeoutForProfile(&ModelProfileConfig{ModelID: "kimi-for-coding"}); got != threadTitleForcedReasoningTimeout {
+		t.Fatalf("expected Kimi forced-reasoning timeout %s, got %s", threadTitleForcedReasoningTimeout, got)
 	}
 }
 

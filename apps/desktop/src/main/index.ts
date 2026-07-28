@@ -31,6 +31,9 @@ import {
   isDesktopSelectAllShortcut,
 } from "../shared/desktop-selection.js";
 import {
+  PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL,
+} from "../shared/project-file-preview-interaction.js";
+import {
   normalizeModelProfileBalancesResult,
   normalizeModelProvider,
   normalizeModelProfileRunConfig,
@@ -2890,6 +2893,13 @@ app.whenReady().then(async () => {
           ? await dialog.showSaveDialog(mainWindowRef, options)
           : await dialog.showSaveDialog(options);
       return result.canceled ? undefined : result.filePath;
+    },
+    onPreviewInteraction: (interaction) => {
+      if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
+      mainWindowRef.webContents.send(
+        PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL,
+        interaction,
+      );
     },
   });
   projectFilePreviewManager.initialize();

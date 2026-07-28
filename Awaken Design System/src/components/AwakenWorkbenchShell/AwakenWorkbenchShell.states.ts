@@ -46,6 +46,27 @@ export const AwakenWorkbenchShellStates: AwakenWorkbenchShellState[] = [
     },
   },
   {
+    id: "inspector-expanded",
+    label: "Inspector 覆盖式展开",
+    description: "Inspector 覆盖 shell 内完整可用区域，不提供 resize handle，也不改写普通右栏宽度。",
+    props: {
+      stage: "主舞台保留在原位",
+      inspector: currentInspector,
+      inspectorExpanded: true,
+    },
+  },
+  {
+    id: "inspector-expanded-conversation",
+    label: "展开后显示当前会话",
+    description: "文件表面保持挂载但隐藏，Desktop 可显示会话内容并保留文件预览状态。",
+    props: {
+      stage: "当前会话可见",
+      inspector: currentInspector,
+      inspectorExpanded: true,
+      inspectorSurfaceActive: false,
+    },
+  },
+  {
     id: "stage-only",
     label: "组件能力：只显示主舞台",
     description: "未传入 Inspector 时，这个布局组件只保留主舞台，不会生成空白右栏。",

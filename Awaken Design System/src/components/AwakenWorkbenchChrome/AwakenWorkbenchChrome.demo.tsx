@@ -8,7 +8,7 @@ export function AwakenWorkbenchChromeDemo() {
     <section className="ads-component-demo aw-framework-subdemo aw-workbench-chrome-demo" aria-label="工作台顶部控制 AwakenWorkbenchChrome 组件演示">
       <header className="ads-component-demo-header">
         <h2>工作台顶部控制 <code>AwakenWorkbenchChrome</code></h2>
-        <p>它就是 Awaken 窗口最上方的控制栏：左侧开合项目侧栏，并在侧栏收起时提供新任务入口；右侧由 Desktop 放入启动状态和 Inspector 开关。</p>
+        <p>它就是 Awaken 窗口最上方的控制栏：左侧开合项目侧栏，中间可承载当前会话标签，右侧由 Desktop 放入文件标签、启动状态和 Inspector 开关。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenWorkbenchChromeStates.map((state) => (

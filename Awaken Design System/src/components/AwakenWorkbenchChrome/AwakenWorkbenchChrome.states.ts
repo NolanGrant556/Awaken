@@ -53,4 +53,16 @@ export const AwakenWorkbenchChromeStates: AwakenWorkbenchChromeState[] = [
       right: "Needs restart",
     } as unknown as Partial<ComponentProps<typeof AwakenWorkbenchChrome>>,
   },
+  {
+    id: "expanded-file-workspace",
+    label: "文件工作区已展开",
+    description: "中间插槽显示当前会话标签，右侧插槽显示文件标签和收起操作。",
+    props: {
+      sidebarCollapsed: false,
+      onToggleSidebar: noop,
+      onNewTask: noop,
+      center: "当前会话",
+      right: "README.md  收起面板",
+    } as unknown as Partial<ComponentProps<typeof AwakenWorkbenchChrome>>,
+  },
 ];

@@ -82,6 +82,9 @@ import {
   type WorkspaceValidationResult,
 } from "../../shared/runtime";
 import type {
+  ProjectFilePreviewInteraction,
+} from "../../shared/project-file-preview-interaction";
+import type {
   PetActivitySnapshot,
   PetImportReport,
   PetSettings,
@@ -218,6 +221,9 @@ export type RuntimeClient = {
   closeProjectFilePreview: (
     request: ProjectFilePreviewCloseRequest,
   ) => Promise<void>;
+  onProjectFilePreviewInteraction: (
+    handler: (interaction: ProjectFilePreviewInteraction) => void,
+  ) => () => void;
   openProjectFileExternally: (
     request: ProjectFilePreviewActionRequest,
   ) => Promise<ProjectFilePreviewActionResult>;
@@ -399,6 +405,8 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     listProjectDirectory: (request) => bridge.listProjectDirectory(request),
     startProjectFilePreview: (request) => bridge.startProjectFilePreview(request),
     closeProjectFilePreview: (request) => bridge.closeProjectFilePreview(request),
+    onProjectFilePreviewInteraction: (handler) =>
+      bridge.onProjectFilePreviewInteraction(handler),
     openProjectFileExternally: (request) =>
       bridge.openProjectFileExternally(request),
     revealProjectFile: (request) => bridge.revealProjectFile(request),

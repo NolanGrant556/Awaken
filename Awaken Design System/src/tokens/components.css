@@ -234,6 +234,17 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
     padding-right 210ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+.workbench-chrome-center {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  box-sizing: border-box;
+  height: 100%;
+  min-width: 0;
+  padding: 0 12px;
+  -webkit-app-region: drag;
+}
+
 .workbench-chrome-collapsed .workbench-chrome-left {
   width: auto;
   border-right: 0;
@@ -292,6 +303,7 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
 
 .workbench-chrome-right {
   display: flex;
+  flex: 0 0 var(--aw-inspector-width, 300px);
   align-items: center;
   justify-content: flex-end;
   box-sizing: border-box;
@@ -299,11 +311,14 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
   height: 100%;
   min-width: 0;
   padding: 0 12px;
-  transition: width 170ms ease;
+  transition:
+    width 170ms ease,
+    flex-basis 170ms ease;
   -webkit-app-region: no-drag;
 }
 
 .desktop-root-inspector-collapsed .workbench-chrome-right {
+  flex-basis: var(--aw-inspector-collapsed-width, 42px);
   width: var(--aw-inspector-collapsed-width, 42px);
   padding: 0 10px;
 }
@@ -344,6 +359,32 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
 
 .aw-workbench-shell-inspector-collapsed {
   grid-template-columns: minmax(0, 1fr) 0px;
+}
+
+.aw-workbench-shell-inspector-expanded {
+  grid-template-columns: minmax(0, 1fr) 0px;
+}
+
+.aw-workbench-shell-inspector-expanded .aw-run-stage {
+  border-right: 0;
+}
+
+.aw-workbench-shell-inspector-expanded .aw-workbench-inspector {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  box-sizing: border-box;
+  width: 100%;
+  max-height: none;
+  border-left: 0;
+  box-shadow: none;
+}
+
+.aw-workbench-shell-inspector-expanded
+  .aw-workbench-inspector-surface-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .aw-workbench-shell-inspector-collapsed .aw-run-stage {
@@ -395,6 +436,10 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
 .aw-run-stage-scroll > * {
   min-width: 0;
   max-width: 100%;
+}
+
+.aw-run-stage-scroll-inactive {
+  pointer-events: none;
 }
 
 .aw-composer-dock {
@@ -2460,6 +2505,14 @@ button.tool-trace-line:focus-visible {
 
   .aw-workbench-shell-inspector-collapsed .aw-workbench-inspector {
     width: var(--aw-inspector-collapsed-width, 42px);
+    border-left: 0;
+    box-shadow: none;
+  }
+
+  .aw-workbench-shell-inspector-expanded .aw-workbench-inspector {
+    inset: 0;
+    z-index: 4;
+    width: 100%;
     border-left: 0;
     box-shadow: none;
   }

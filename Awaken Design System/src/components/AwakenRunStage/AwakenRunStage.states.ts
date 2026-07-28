@@ -60,6 +60,26 @@ export const AwakenRunStageStates: AwakenRunStageState[] = [
     } as unknown as Partial<ComponentProps<typeof AwakenRunStage>>,
   },
   {
+    id: "inactive-content-with-composer",
+    label: "叙事区暂时隐藏",
+    props: {
+      children: stageBlock("当前会话", "会话叙事保持挂载，但由其他工作表面覆盖。"),
+      composer: createElement(
+        "div",
+        {
+          style: {
+            padding: 12,
+            borderTop: "1px solid var(--aw-border-main)",
+            background: "var(--aw-bg-white)",
+          },
+        },
+        "输入区仍然可见",
+      ),
+      contentInactive: true,
+      onScroll: noop,
+    } as unknown as Partial<ComponentProps<typeof AwakenRunStage>>,
+  },
+  {
     id: "long-run",
     label: "长运行内容",
     props: {

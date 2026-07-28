@@ -1,4 +1,5 @@
 import type { AguiEvent } from "./agui.js";
+import type { ProjectFilePreviewInteraction } from "./project-file-preview-interaction.js";
 import type {
   PetActivitySnapshot,
   PetBridge,
@@ -1545,6 +1546,9 @@ export type AwakenBridge = {
   closeProjectFilePreview: (
     request: ProjectFilePreviewCloseRequest,
   ) => Promise<void>;
+  onProjectFilePreviewInteraction: (
+    handler: (interaction: ProjectFilePreviewInteraction) => void,
+  ) => () => void;
   openProjectFileExternally: (
     request: ProjectFilePreviewActionRequest,
   ) => Promise<ProjectFilePreviewActionResult>;

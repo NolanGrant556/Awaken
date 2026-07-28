@@ -7,6 +7,7 @@ export type AwakenWorkbenchChromeProps = {
   sidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
   onNewTask?: () => void;
+  center?: ReactNode;
   right?: ReactNode;
   platform?: PlatformKind;
 };
@@ -38,6 +39,7 @@ export function AwakenWorkbenchChrome({
   sidebarCollapsed,
   onToggleSidebar,
   onNewTask,
+  center,
   right,
   platform,
 }: AwakenWorkbenchChromeProps) {
@@ -64,6 +66,7 @@ export function AwakenWorkbenchChrome({
           </ChromeIconButton>
         ) : null}
       </div>
+      <div className="workbench-chrome-center">{center}</div>
       <div className="workbench-chrome-right">{right}</div>
     </header>
   );

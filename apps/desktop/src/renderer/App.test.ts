@@ -15,6 +15,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   App,
+  composerMetaItemsForFileWorkspaceSurface,
   contextUsageMeta,
   contextUsagePanelData,
   isUserQuestionSelectionAnswered,
@@ -31,6 +32,8 @@ import {
   resolveWorkspaceRootForRun,
   selectedUserQuestionLabels,
   sharedFolderTrashWarning,
+  shouldEnableInspectorResizeHandle,
+  shouldUseCenterComposerWithFileWorkspace,
   shouldResetActiveThreadForWorkspaceChange,
   shouldShowSidebarThreadSpinner,
   workbenchInspectorPresentation,
@@ -142,6 +145,7 @@ function stubElectronBridge(): void {
         message: "unsupported",
       })),
       closeProjectFilePreview: vi.fn(async () => undefined),
+      onProjectFilePreviewInteraction: vi.fn(() => () => {}),
       openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
       revealProjectFile: vi.fn(async () => ({ ok: true as const })),
       upsertProject: vi.fn(),
@@ -2496,6 +2500,69 @@ describe("sidebar thread status presentation", () => {
 describe("App workbench presentation", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("keeps the existing dock composer visible over the expanded file surface", () => {
+    expect(
+      shouldUseCenterComposerWithFileWorkspace({
+        standardCenterComposer: true,
+        fileWorkspaceOpen: true,
+        fileWorkspaceExpanded: true,
+        expandedWorkspaceSurface: "file",
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseCenterComposerWithFileWorkspace({
+        standardCenterComposer: true,
+        fileWorkspaceOpen: true,
+        fileWorkspaceExpanded: true,
+        expandedWorkspaceSurface: "conversation",
+      }),
+    ).toBe(true);
+    expect(
+      shouldUseCenterComposerWithFileWorkspace({
+        standardCenterComposer: true,
+        fileWorkspaceOpen: true,
+        fileWorkspaceExpanded: false,
+        expandedWorkspaceSurface: "file",
+      }),
+    ).toBe(true);
+  });
+
+  it("pauses the outer inspector resize handle only while the file workspace is expanded", () => {
+    expect(
+      shouldEnableInspectorResizeHandle({
+        inspectorAvailable: true,
+        fileWorkspaceExpanded: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldEnableInspectorResizeHandle({
+        inspectorAvailable: true,
+        fileWorkspaceExpanded: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldEnableInspectorResizeHandle({
+        inspectorAvailable: false,
+        fileWorkspaceExpanded: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("hides project and context metadata only on the expanded file surface", () => {
+    const metaItems = [
+      { id: "model", label: "kimi-for-coding" },
+      { id: "workspace", label: "测试项目" },
+      { id: "context", label: "上下文窗口", value: "61k / 246k" },
+    ];
+
+    expect(
+      composerMetaItemsForFileWorkspaceSurface(metaItems, true),
+    ).toEqual([{ id: "model", label: "kimi-for-coding" }]);
+    expect(
+      composerMetaItemsForFileWorkspaceSurface(metaItems, false),
+    ).toBe(metaItems);
   });
 
   it("renders idle as a blank execution stage with the light shell", () => {

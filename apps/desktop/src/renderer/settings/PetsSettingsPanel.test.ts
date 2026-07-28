@@ -116,6 +116,7 @@ function createMockRuntimeClient(): RuntimeClient {
       message: "unsupported",
     })),
     closeProjectFilePreview: vi.fn(async () => undefined),
+    onProjectFilePreviewInteraction: vi.fn(() => () => {}),
     openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
     revealProjectFile: vi.fn(async () => ({ ok: true as const })),
     upsertProject: vi.fn(async () => ({} as never)),

@@ -4,7 +4,7 @@
 
 ## 用途
 
-`AwakenWorkbenchChrome` 用于承载 Workbench 顶部的 chrome 控件，包括侧栏切换、折叠态的新任务入口和右侧状态插槽。它适合放在 `AwakenAppShell` 的 chrome 区域；父级负责侧栏折叠状态、新任务行为和右侧内容，本组件只负责这些控件的顶部布局与 tooltip 包装。
+`AwakenWorkbenchChrome` 用于承载 Workbench 顶部的 chrome 控件，包括侧栏切换、折叠态的新任务入口，以及中间标签和右侧状态两个插槽。它适合放在 `AwakenAppShell` 的 chrome 区域；父级负责侧栏折叠状态、新任务行为和标签内容，本组件只负责这些控件的顶部布局与 tooltip 包装。
 
 ## 文件
 

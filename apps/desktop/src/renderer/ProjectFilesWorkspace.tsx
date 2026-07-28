@@ -12,9 +12,13 @@ import {
   Folder,
   FolderOpen,
   Globe2,
+  Maximize2,
   Search,
 } from "lucide-react";
-import { AwakenPopover as Popover } from "@awaken/design-system";
+import {
+  AwakenPopover as Popover,
+  AwakenTooltip as Tooltip,
+} from "@awaken/design-system";
 import type { ProjectDirectoryEntry } from "../shared/runtime";
 import type { RuntimeClient } from "./runtime/client";
 import FilePreviewHost, {
@@ -54,8 +58,11 @@ export type ProjectFilesWorkspaceProps = {
   folders: ProjectFilesFolder[];
   initialMode?: ProjectFileWorkspaceMode;
   activeTab?: ProjectFileWorkspaceTab;
+  expanded?: boolean;
   onWorkspaceModeChange?: (mode: ProjectFileWorkspaceMode) => void;
   onOpenTab?: (tab: ProjectFileWorkspaceTab) => void;
+  onExpand?: () => void;
+  onPreviewPrimaryClick?: () => void;
 };
 
 const MIN_FILE_LIST_WIDTH = 240;
@@ -67,6 +74,14 @@ const FILE_LIST_RESIZE_STEP = 12;
 const MINIMUM_WIDTH_FLING_SAMPLE_WINDOW = 140;
 const MINIMUM_WIDTH_FLING_DISTANCE = 120;
 const MINIMUM_WIDTH_FLING_VELOCITY = 1.2;
+const PREVIEW_PRIMARY_CLICK_DISTANCE = 6;
+
+type PreviewPrimaryPointerGesture = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  moved: boolean;
+};
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
@@ -107,8 +122,11 @@ export function ProjectFilesWorkspace({
   folders,
   initialMode = "files",
   activeTab,
+  expanded = false,
   onWorkspaceModeChange,
   onOpenTab,
+  onExpand,
+  onPreviewPrimaryClick,
 }: ProjectFilesWorkspaceProps) {
   const workspaceBodyRef = useRef<HTMLDivElement>(null);
   const fileNavigatorRef = useRef<HTMLElement>(null);
@@ -129,6 +147,8 @@ export function ProjectFilesWorkspace({
   );
   const [errorMessage, setErrorMessage] = useState<string>();
   const requestGenerationRef = useRef(0);
+  const previewPrimaryPointerGestureRef =
+    useRef<PreviewPrimaryPointerGesture | undefined>(undefined);
 
   const selectedFolder =
     folders.find((folder) => folder.path === selectedFolderPath) ?? folders[0];
@@ -384,6 +404,71 @@ export function ProjectFilesWorkspace({
       ? "为当前项目添加文件夹后即可浏览"
       : "从工作区目录树中选择文件";
 
+  function isInteractivePreviewTarget(target: EventTarget | null): boolean {
+    return (
+      target instanceof Element &&
+      Boolean(
+        target.closest(
+          "button, a, input, textarea, select, [role='button'], [contenteditable='true']",
+        ),
+      )
+    );
+  }
+
+  function handlePreviewPointerDown(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void {
+    if (
+      event.button !== 0 ||
+      !onPreviewPrimaryClick ||
+      isInteractivePreviewTarget(event.target)
+    ) {
+      return;
+    }
+    previewPrimaryPointerGestureRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+    };
+  }
+
+  function handlePreviewPointerMove(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void {
+    const gesture = previewPrimaryPointerGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId || gesture.moved) {
+      return;
+    }
+    const distanceX = event.clientX - gesture.startX;
+    const distanceY = event.clientY - gesture.startY;
+    if (
+      distanceX * distanceX + distanceY * distanceY >
+      PREVIEW_PRIMARY_CLICK_DISTANCE * PREVIEW_PRIMARY_CLICK_DISTANCE
+    ) {
+      gesture.moved = true;
+    }
+  }
+
+  function handlePreviewPointerUp(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void {
+    const gesture = previewPrimaryPointerGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    previewPrimaryPointerGestureRef.current = undefined;
+    if (!gesture.moved && !isInteractivePreviewTarget(event.target)) {
+      onPreviewPrimaryClick?.();
+    }
+  }
+
+  function handlePreviewPointerCancel(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void {
+    if (previewPrimaryPointerGestureRef.current?.pointerId === event.pointerId) {
+      previewPrimaryPointerGestureRef.current = undefined;
+    }
+  }
+
   return (
     <section className="project-files-workspace" aria-label="项目文件">
       <header className="project-files-pathbar">
@@ -407,21 +492,35 @@ export function ProjectFilesWorkspace({
             浏览器
           </button>
         </div>
-        <button
-          type="button"
-          className={`project-files-pathbar__icon${
-            fileListExpanded ? " is-expanded" : ""
-          }`}
-          aria-label={fileListExpanded ? "收起文件列表" : "展开文件列表"}
-          aria-expanded={fileListExpanded}
-          aria-controls="awaken-project-files-navigator"
-          onClick={() => {
-            setFolderMenuOpen(false);
-            setFileListExpanded((expanded) => !expanded);
-          }}
-        >
-          <FolderOpen size={18} strokeWidth={1.8} />
-        </button>
+        <div className="project-files-pathbar__actions">
+          {!expanded && onExpand ? (
+            <Tooltip label="展开面板" placement="bottom">
+              <button
+                type="button"
+                className="project-files-pathbar__icon"
+                aria-label="展开面板"
+                onClick={onExpand}
+              >
+                <Maximize2 size={17} strokeWidth={1.8} />
+              </button>
+            </Tooltip>
+          ) : null}
+          <button
+            type="button"
+            className={`project-files-pathbar__icon${
+              fileListExpanded ? " is-expanded" : ""
+            }`}
+            aria-label={fileListExpanded ? "收起文件列表" : "展开文件列表"}
+            aria-expanded={fileListExpanded}
+            aria-controls="awaken-project-files-navigator"
+            onClick={() => {
+              setFolderMenuOpen(false);
+              setFileListExpanded((current) => !current);
+            }}
+          >
+            <FolderOpen size={18} strokeWidth={1.8} />
+          </button>
+        </div>
       </header>
 
       <div
@@ -437,7 +536,13 @@ export function ProjectFilesWorkspace({
               } as CSSProperties)
         }
       >
-        <div className="project-files-preview">
+        <div
+          className="project-files-preview"
+          onPointerDown={handlePreviewPointerDown}
+          onPointerMove={handlePreviewPointerMove}
+          onPointerUp={handlePreviewPointerUp}
+          onPointerCancel={handlePreviewPointerCancel}
+        >
           {activeTab || workspaceMode === "browser" ? (
             <FilePreviewHost
               runtimeClient={runtimeClient}
@@ -446,6 +551,7 @@ export function ProjectFilesWorkspace({
               selection={activeTab}
               mode={workspaceMode}
               onModeChange={changeWorkspaceMode}
+              onPreviewPrimaryClick={onPreviewPrimaryClick}
             />
           ) : (
             <div className="project-files-preview-empty is-centered">

@@ -1,0 +1,206 @@
+# 计算机操作能力目标架构与 CUA 集成契约
+
+> 权威状态：已确认的目标设计，尚未实现
+
+本文拥有 Computer Use 的模块边界、执行主链、CUA 集成形态、Driver 合同和依赖发布策略。状态与 wire 见 [目标状态、数据与事件契约](./目标状态、数据与事件契约.md)，安全不变量见 [目标安全、审计与恢复契约](./目标安全、审计与恢复契约.md)。
+
+## 1. 已确认技术选择
+
+Awaken 首个本机 Computer Driver 采用 MIT 许可的开源 [trycua/cua](https://github.com/trycua/cua)。目标是把 CUA 的桌面采集、accessibility、窗口定位和输入能力纳入 Awaken 现有 Agent/Tool/Runtime 主链，不是把 CUA 当作用户自行安装的普通 MCP Connector。
+
+CUA 只拥有设备层事实和动作执行。以下能力始终由 Awaken 拥有：
+
+- 唯一 Agent loop、任务规划和模型调用；
+- Tool Catalog、run 快照和模型可见工具面；
+- app/window/action policy 与风险分类；
+- action review、human takeover 和控制身份；
+- session lease、fencing、幂等与未知结果恢复；
+- SemanticJournal、媒体策略、只读 replay 和产品 UI。
+
+原始 `cua-driver mcp`、`cua-driver call` 和完整 SDK 方法不注册为 Awaken Tool，也不向模型暴露。CUA 自带 recording 只能作为底层诊断证据，不能替代 Awaken 真相。
+
+## 2. 当前上游事实与采用范围
+
+设计依据是 CUA 官方公开合同：
+
+- [Process Model](https://cua.ai/docs/reference/cua-driver/process-model)：同进程 `CuaDriver.create()`、daemon 和下游 CLI/MCP 的关系；
+- [SDK Reference](https://cua.ai/docs/reference/cua-driver/sdk-reference) 与 [Interface Contracts](https://cua.ai/docs/reference/cua-driver/contracts)：session、window/desktop scope、state 和 action；
+- [Platform Support](https://cua.ai/docs/reference/cua-driver/platform-support) 与 [Known Limits](https://cua.ai/docs/reference/cua-driver/limits)：平台能力与降级；
+- [Permission Modes](https://cua.ai/docs/reference/cua-driver/permission-modes) 与 [Permission Policies](https://cua.ai/docs/reference/cua-driver/permission-policies)：CUA 自身的风险和授权层；
+- [Browser Profile Attachment](https://cua.ai/docs/reference/cua-driver/browser-profile-attachment) 与 [Browser Semantic Snapshots](https://cua.ai/docs/reference/cua-driver/browser-semantic-snapshots)：浏览器 generation 和 snapshot 生命周期；
+- [Electron app hosting](https://cua.ai/docs/how-to-guides/driver/expose-mcp-from-desktop-app) 与 [Install](https://cua.ai/docs/how-to-guides/driver/install)：macOS TCC、可执行文件、签名和打包要求。
+
+首版采用 CUA Driver 的本机能力，不采用 CUA Sandbox/Lume 作为产品运行环境。CUA 当前没有公开保证 Awaken 需要的 lease/fence、原子 `perform_checked`、quiesce/takeover、通用动作幂等或 unknown-outcome 自动恢复；这些必须由 Awaken Host/Runtime 补齐。
+
+上游文档描述不能直接升级为 Awaken 当前支持。实现时必须把实际采用的 commit、包版本、原生二进制 checksum 和本地 conformance 结果写入依赖清单。
+
+## 3. 目标主链
+
+```mermaid
+flowchart TD
+    Desktop["Awaken Desktop"] --> RunService["runtime.RunService"]
+    RunService --> Runner["唯一 agentcore.Runner"]
+    Runner --> ToolRuntime["ToolRuntime + pinned run snapshot"]
+    ToolRuntime --> Intent["ExecutionIntent"]
+    Intent --> Router["executors.Router"]
+    Router --> Executor["LaneComputer / ComputerExecutor"]
+    Executor --> Runtime["Computer Runtime"]
+    Runtime --> Policy["Policy / Review / Lease / Recorder"]
+    Runtime --> Client["ComputerHostClient"]
+    Client --> Host["签名的 AwakenComputerHost"]
+    Host --> Adapter["CUADriverAdapter"]
+    Adapter --> CUA["锁定版本的 CUA typed SDK"]
+    CUA --> OS["macOS Window / AX / Capture / Input"]
+    Runtime --> Journal["SemanticJournal + ToolResultStore"]
+```
+
+唯一允许的模型执行入口是 `ToolRuntime -> executors.Router -> LaneComputer`。Renderer、LLM adapter、Skill、Connector、MCP server 和 CUA 本身都不能直接触发输入。
+
+## 4. 本机进程模型
+
+### 4.1 首选形态
+
+首版 macOS 目标采用由 Desktop Main 管理、随 Awaken 一起签名和发布的 `AwakenComputerHost`：
+
+- Host 是 Awaken app bundle 内的专用 helper/sidecar，拥有稳定 bundle/code-sign identity 和 TCC 权限；
+- Host 使用锁定版本的 CUA typed SDK 同进程创建 Driver；
+- Desktop Main 负责安装完整性、启动、健康检查、崩溃重启、权限引导和停止；
+- Core 的 `ComputerHostClient` 只调用 Awaken 自有最小 IPC，不连接公开 CUA daemon；
+- Host 的 IPC 只接受当前 Runtime 身份和 run-bound capability，不监听公网；
+- CUA 需要 protected consent 时，Host 只接受从 Desktop Main 的已认证 review 控制链回传的决定；模型消息、MCP prompt、TTY、环境变量或文件都不能充当同意；
+- Renderer 只能经 typed Electron IPC 调用 Main，再由 Main 调用已认证的 `/v1/control/computer/*`，不能拿到 Host 地址或密钥。
+
+选择专用 Host 而不是把 CUA native runtime 直接装入 Electron Renderer，是为了稳定 TCC 身份、隔离 native crash、限制调用面并在输入注入处执行 fence/precondition 检查。实现 POC 可以比较“Electron Main 内嵌”和“签名 helper”两种托管方式，但发布形态必须满足上述身份、隔离和原子检查不变量；不得退化为用户手工启动的无认证 daemon。
+
+### 4.2 不采用的形态
+
+- 不要求用户全局安装 `/Applications/CuaDriver.app` 才能使用 Awaken 核心能力；
+- 不把 `cua-driver mcp` 加到 Connector 列表后直接宣称集成完成；
+- 不允许 Core/Bash 通过环境变量、磁盘 token 或公开端口访问原始 CUA surface；
+- 不让 CUA daemon 自行更新、改变 policy 或发送未由 Awaken 明示的遥测；
+- 不允许 Renderer 加载 native CUA SDK 或直接拥有 Screen Recording/Accessibility 调用权。
+
+CUA 的 permission mode 和低层 policy 按 Host/Driver generation 固定，模型 tool call 不能切换。Awaken policy 变化若需要改变 CUA 低层 policy，必须先 quiesce 并重建 Host/Driver generation；不能在活动 session 中悄悄放宽。
+
+## 5. 目标模块 ownership
+
+命名可在实现时按仓库惯例微调，但职责和依赖方向不能变化。
+
+| 目标模块 | 唯一职责 |
+| --- | --- |
+| `src/computer` | 模型无关 domain 类型、Runtime、policy、lease/fence、review、recorder 和 Driver contract |
+| `src/agentcore/executors/computer.go` | 把 `ExecutionIntent` 交给 run-bound Computer Runtime，并转成 `ExecutionOutcome` |
+| `src/tools/computer` 与 `src/tool` profile/capability | 三个 strict-v2 工具、capability class、`LaneComputer` 和 run availability 事实 |
+| `src/runtime` | 为 root run 创建/恢复/关闭 `ComputerBinding`，将语义记录纳入正式 session |
+| `src/server` | 实现状态契约定义的 review/takeover/session 控制 route 和安全契约定义的鉴权；不得承载 raw Driver API |
+| `src/protocol/agui` | 从 SemanticJournal 投影 Computer live/replay 事件 |
+| `apps/desktop/src/main` | Host lifecycle、TCC/readiness、control token 调用和 Renderer 隔离 |
+| `apps/desktop/src/shared` | Main/Renderer 共享的判别联合与 typed IPC contract |
+| `apps/desktop/src/renderer` | 状态、画面、review、takeover 和只读 replay 的消费，不拥有 policy |
+| `AwakenComputerHost` | 验证调用身份/fence/precondition，适配 CUA 并注入输入 |
+
+`executors.Router` 必须改为可注入 Computer executor，不能继续在 `ToolRuntime` 内用不可替换的默认实例掩盖 run binding。
+
+进程级构造和 run 注入顺序固定为：
+
+1. `cmd/awaken-core/main.go` 构造唯一 `computer.Service`，持有 DriverFactory、policy、media/state store 和资源 lease/fence manager；
+2. 同一个 service 注入 `RunService` 与 server control handlers，handler 或 Tool 不能临时创建 Driver；
+3. `RunService.StartRun` 先建立 run/thread/recorder，再创建只属于当前 root run 的 `ComputerBinding`；
+4. binding 的 CUA readiness、policy ceiling、model capability 和媒体 readiness 进入同一份 pinned tool snapshot；
+5. Agent 设置 run identity 后，用已注入的 `ComputerExecutor` 构造 ToolRuntime/Router；
+6. cancel、terminal 和 Core shutdown 都 revoke binding、quiesce Host、提升 fence 并释放资源 lease。
+
+当前 `src/runtime/run_service.go` 的 run 启动顺序和 `ToolRuntime` 内部硬编码的 `executors.NewRouter()` 都需要在实现时调整。binding 与 tool snapshot 必须属于同一 run generation，不能先固定 snapshot 再晚绑定 Computer。
+
+## 6. `ComputerDriver` 与 Host 合同
+
+Awaken-facing 最小合同至少包含：
+
+```text
+Health()
+OpenSession(binding, policy_snapshot, fence_token)
+Observe(session, scope, target, options)
+Prepare(session, observation, action)
+PerformChecked(session, prepared_action, precondition, fence_token, control_epoch)
+Quiesce(session, next_control_epoch)
+Resume(session, policy_snapshot, fence_token, control_epoch)
+CloseSession(session, reason)
+```
+
+语义要求：
+
+- `OpenSession` 固定 capture scope、policy/version 和资源身份；
+- `Observe` 返回 CUA 原始状态经 Awaken 规范化后的 `Observation`；
+- `Prepare` 只解析目标和生成前置条件，不产生外部副作用；
+- `PerformChecked` 必须在输入注入的同一可信进程内复验 session、fence、control epoch、target generation、freshness 和 action digest；
+- 任一复验失败都必须在发送鼠标/键盘事件前 fail closed；
+- `Quiesce` 返回后不得再有旧 epoch 输入在途；
+- `Resume` 必须要求 fresh observation；
+- Host crash、IPC timeout 或 response 丢失不能被包装成明确失败，必须返回 `unknown_outcome`。
+
+CUA 上游若没有单个原子 primitive，`CUADriverAdapter` 必须在 Host 内把复验与最后一次输入调用放进同一串行 critical section。仅在 Core 检查后再通过网络调用 CUA 存在 TOCTOU，不满足发布要求。
+
+## 7. CUA 语义映射
+
+### 7.1 Capture scope
+
+- 默认使用 CUA `WINDOW`，保留 window-local 坐标和可用的 background delivery；
+- `DESKTOP` 是显式升级，属于 foreground-only、屏幕绝对坐标路径，必须经过 policy；
+- `AUTO` 只可用于探测/兼容，正式 session 建立后必须记录解析出的不可变 scope；
+- macOS 无 Screen Recording 时可降级为 accessibility/tree-only 观察，但不得伪造截图已获取；缺少 Accessibility 时禁止动作。
+
+### 7.2 Target 与 observation
+
+`get_window_state` 的截图与 accessibility tree 进入同一 observation。元素引用必须绑定：
+
+- CUA session；
+- PID/window identity；
+- target generation；
+- observation ID 与 capture time；
+- accessibility locator 或 window-local pixel fallback；
+- 内容摘要和坐标空间。
+
+优先 accessibility 动作，无法稳定定位时才允许像素动作。像素动作的 freshness window 更短，风险策略可以要求 review 或拒绝。
+
+### 7.3 浏览器能力
+
+现有 profile attachment 是附加能力，不是首版桌面控制的必需入口。采用时必须保留 CUA 的 generation 语义：新 snapshot、navigation、reconnect、进程替换或 session 结束会使旧 browser refs 失效。Awaken action 还必须同时绑定自己的 observation、fence 和 control epoch。
+
+首版不能把 Chromium typed mutation 能力宣传为 Safari/Firefox 等价支持；不支持时降级为普通 accessibility/像素路径并明确风险。
+
+## 8. Run binding 与工具暴露
+
+Computer readiness 必须在 run 创建时进入 `ExecutionEnvironmentSnapshot` 和 `RunToolAvailabilitySnapshot`，至少记录：
+
+- Driver/Host 版本、协议版本和健康状态；
+- OS、TCC 权限和 capture/action capability；
+- 允许的应用、窗口、scope 和 action classes；
+- policy snapshot ID；
+- session resource key、fence 和 root-agent ownership；
+- provider 是否支持 tool calling 与所需图像输入；
+- Computer media policy readiness。
+
+任何硬依赖不满足时，三个 Computer 工具都不得暴露。运行中 Host 崩溃只能把当前 binding 标为不可用并进入恢复，不能从全局 registry 偷换 Driver 或临时开启原始 MCP。
+
+当前模型能力只有 vision/native-PDF 等媒体位，尚无统一 `supports_tools`。实现必须把该能力贯穿 Go model profile、用户配置、Desktop capability sync、run config 和 profile cache key；不能只根据 vision=true 推断模型可调用 Computer 工具。
+
+## 9. 媒体与 Provider
+
+截图必须复用 `ExecutionOutcome.ModelContent -> ToolResultStore -> context.Message.ModelContent -> provider adapter`。不得引入 Computer 私有 Base64 message 通道。
+
+目标实现扩展现有媒体存储的 `computer` policy namespace，提供加密、按 session/thread 访问、保留期、删除和访问审计；Journal 只记录 `storage_key`、MIME、尺寸、hash、redaction 和 policy metadata。模型不支持图像或媒体策略未 ready 时，Computer 工具不暴露，不能只发送未经验证的 OCR 文本假装等价。
+
+## 10. 依赖、更新与发布
+
+CUA 作为产品内开源依赖管理：
+
+1. 锁定 upstream commit、语言包版本、native artifact checksum 和许可证清单；
+2. 维护 Awaken adapter conformance，不直接依赖未锁定的 `main`；
+3. 需要补 `PerformChecked`、身份验证或 quiesce 时，补丁保持最小、可审阅，并记录对应 upstream issue/PR；
+4. 上游更新先在独立验证矩阵通过，再随 Awaken 发布；禁止运行时自更新；
+5. CUA 遥测和 release check 在产品构建中默认关闭，任何外发必须进入 Awaken 隐私设置和文档；
+6. native/helper 文件必须位于 ASAR 外、保留 executable bit，先签 helper/native library，再签/notarize app；
+7. helper identity 在升级中保持稳定，避免无理由丢失 TCC 授权；
+8. 开发模式与正式签名模式分别验收，未签名 POC 不能证明正式包可用。
+
+Windows/Linux 是同一 Driver 合同的后续平台实现。不得用 macOS 验收结果替代其 capture、background delivery、权限和完整性边界验证。

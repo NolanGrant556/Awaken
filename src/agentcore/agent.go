@@ -11,6 +11,7 @@ import (
 	"awaken/src/context"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
+	"awaken/src/subagentruntime"
 	"awaken/src/tool"
 )
 
@@ -188,6 +189,17 @@ func (a *Agent) SetRunIdentity(runID, sessionID string) {
 	a.sessionID = sessionID
 }
 
+// SetSubagentController binds the host-owned run-scoped task registry. A new
+// run must replace this value; child configs deliberately never inherit it.
+func (a *Agent) SetSubagentController(controller subagentruntime.Controller) {
+	if a == nil {
+		return
+	}
+	cfg := a.config
+	cfg.SubagentController = controller
+	a.Reconfigure(cfg)
+}
+
 // ExecutionIdentity returns the IDs bound by RunService for the current run.
 // Custom Executor implementations that emit SemanticRecord values must use
 // these IDs so restart replay can associate records with the correct run.
@@ -216,6 +228,20 @@ func (a *Agent) RunForkedSkill(ctx stdcontext.Context, request skillruntime.Skil
 	parentRunner.sessionID = a.sessionID
 	parentRunner.recorder = a.recorder
 	return parentRunner.startSkillChild(ctx, request, sink)
+}
+
+// RunNativeSubagent executes one host-registered native child with a fresh
+// conversation while sharing the owning run's journal and immutable snapshots.
+func (a *Agent) RunNativeSubagent(ctx stdcontext.Context, request subagentruntime.StartRequest, sink EventSink) (string, error) {
+	if a == nil {
+		return "", fmt.Errorf("parent Agent unavailable")
+	}
+	parentRunner := NewRunner(a.config, context.NewConversation(nil), NewRequestBuilder(a.config))
+	parentRunner.threadID = a.threadID
+	parentRunner.runID = a.runID
+	parentRunner.sessionID = a.sessionID
+	parentRunner.recorder = a.recorder
+	return parentRunner.startNativeChild(ctx, request, sink)
 }
 
 func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, sink EventSink) (string, error) {

@@ -21,6 +21,7 @@ import {
   PanelRightOpen,
   Plug,
   Settings,
+  Workflow,
   Wrench,
   X,
 } from "lucide-react";
@@ -35,6 +36,7 @@ import {
   AwakenDeliverableList as DeliverableList,
   AwakenExecutionFeed as ExecutionFeed,
   AwakenInspectorRail as InspectorRail,
+  AwakenSubagentGroup as SubagentGroup,
   AwakenProjectFoldersEditor as ProjectFoldersEditor,
   AwakenSelectableCard as SelectableCard,
   AwakenSidebar as Sidebar,
@@ -91,6 +93,7 @@ import type {
   ACPDisplayStatus,
   PromptNarrativeToken,
   RunNarrativeItem,
+  SubagentNarrativeTask,
 } from "./run-narrative";
 import type { ToolDisplayState } from "../shared/toolStatus";
 import { projectPetActivity } from "./pets/pet-activity-projector";
@@ -1739,6 +1742,12 @@ export function App() {
     undefined,
     createProjectFileTabsState,
   );
+  const [selectedSubagentTaskId, setSelectedSubagentTaskId] = useState<
+    string | undefined
+  >();
+  const [cancellingSubagentTaskId, setCancellingSubagentTaskId] = useState<
+    string | undefined
+  >();
   const [promptBubbleModeByTurnId, setPromptBubbleModeByTurnId] = useState<
     Record<string, "collapsed" | "expanded">
   >({});
@@ -1774,6 +1783,22 @@ export function App() {
     ];
     return projectVisibleNarrativeItems({ items: narrativeItems, isBusy });
   }, [isBusy, runtimeState.narrative]);
+  const subagentTasks = useMemo<SubagentNarrativeTask[]>(() => {
+    const byId = new Map<string, SubagentNarrativeTask>();
+    for (const item of runtimeState.narrative.committedItems) {
+      if (item.kind !== "subagentGroup") continue;
+      for (const task of item.tasks) byId.set(task.taskId, task);
+    }
+    return [...byId.values()];
+  }, [runtimeState.narrative.committedItems]);
+  const selectedSubagent =
+    subagentTasks.find((task) => task.taskId === selectedSubagentTaskId) ??
+    (selectedSubagentTaskId
+      ? undefined
+      : subagentTasks[subagentTasks.length - 1]);
+  const runningSubagentCount = subagentTasks.filter((task) =>
+    ["queued", "running", "cancelling"].includes(task.status),
+  ).length;
   const desktopReady =
     runtimeState.supervisorStatus === "running" && runtimeInfo !== null;
   const desktopStarting =
@@ -2940,6 +2965,8 @@ export function App() {
 
   useEffect(() => {
     setContextUsagePanelOpen(false);
+    setSelectedSubagentTaskId(undefined);
+    setCancellingSubagentTaskId(undefined);
   }, [runtimeState.activeThreadId]);
 
   useEffect(() => {
@@ -4628,6 +4655,7 @@ export function App() {
   }
 
   function handleOpenFileWorkspace(mode: ProjectFileWorkspaceMode = "files"): void {
+    setSelectedSubagentTaskId(undefined);
     if (!fileWorkspaceOpen) {
       inspectorWidthBeforeFileWorkspaceRef.current = inspectorWidth;
     }
@@ -4667,6 +4695,33 @@ export function App() {
     });
     dispatchFileWorkspaceTabs({ type: "close", tabId });
     setFileWorkspaceMode(activeProjectFileTab(nextState)?.mode ?? "files");
+  }
+
+  function handleOpenSubagent(taskId?: string): void {
+    if (fileWorkspaceOpen) {
+      handleCloseFileWorkspace();
+    }
+    setSelectedSubagentTaskId(
+      taskId ?? selectedSubagent?.taskId ?? subagentTasks[0]?.taskId,
+    );
+    setInspectorWidth((width) => Math.max(width, 420));
+    setInspectorCollapsed(false);
+    if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
+      inspectorCollapsedBeforeResponsiveRef.current = false;
+    }
+  }
+
+  async function handleCancelSubagent(taskId: string): Promise<void> {
+    if (!runtimeState.runId || !runtimeClient.cancelSubagent) return;
+    setCancellingSubagentTaskId(taskId);
+    setNotice(null);
+    try {
+      await runtimeClient.cancelSubagent(runtimeState.runId, taskId, "desktop_user");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "取消子任务失败");
+    } finally {
+      setCancellingSubagentTaskId(undefined);
+    }
   }
 
   async function handleAddContext(): Promise<void> {
@@ -4927,6 +4982,18 @@ export function App() {
           title={item.title}
           detail={toolTraceDetail(tool, item.detail)}
           status={item.status}
+        />
+      );
+    }
+    if (item.kind === "subagentGroup") {
+      return (
+        <SubagentGroup
+          key={key}
+          tasks={item.tasks.map((task) => ({
+            ...task,
+            selected: task.taskId === selectedSubagentTaskId,
+          }))}
+          onSelect={handleOpenSubagent}
         />
       );
     }
@@ -5873,16 +5940,125 @@ export function App() {
                       />
                     ) : (
                       <InspectorRail
-                        ariaLabel="文件"
-                        items={INSPECTOR_FILE_ITEMS}
+                        ariaLabel={
+                          selectedSubagentTaskId ? "子任务" : "文件"
+                        }
+                        activeId={
+                          selectedSubagentTaskId ? "subagents" : undefined
+                        }
+                        items={[
+                          ...INSPECTOR_FILE_ITEMS,
+                          ...(subagentTasks.length
+                            ? [
+                                {
+                                  id: "subagents",
+                                  label: "子任务",
+                                  badge:
+                                    runningSubagentCount ||
+                                    subagentTasks.length,
+                                  tone: runningSubagentCount
+                                    ? ("warning" as const)
+                                    : ("neutral" as const),
+                                  icon: (
+                                    <Workflow
+                                      size={16}
+                                      strokeWidth={1.8}
+                                      aria-hidden="true"
+                                    />
+                                  ),
+                                },
+                              ]
+                            : []),
+                        ]}
                         onSelect={(id) => {
                           if (id === "files") {
                             handleOpenFileWorkspace("files");
                           } else if (id === "browser") {
                             handleOpenFileWorkspace("browser");
+                          } else if (id === "subagents") {
+                            handleOpenSubagent();
                           }
                         }}
-                      />
+                      >
+                        {selectedSubagentTaskId && selectedSubagent ? (
+                          <div className="subagent-inspector">
+                            <header className="subagent-inspector__header">
+                              <div>
+                                <span className="subagent-inspector__eyebrow">
+                                  {selectedSubagent.agentType}
+                                </span>
+                                <h3>{selectedSubagent.description}</h3>
+                              </div>
+                              <span
+                                className={`subagent-inspector__status subagent-inspector__status--${selectedSubagent.status}`}
+                              >
+                                {selectedSubagent.status}
+                              </span>
+                            </header>
+                            <div className="subagent-inspector__switcher">
+                              {subagentTasks.map((task) => (
+                                <button
+                                  key={task.taskId}
+                                  type="button"
+                                  className={
+                                    task.taskId === selectedSubagent.taskId
+                                      ? "is-active"
+                                      : undefined
+                                  }
+                                  onClick={() =>
+                                    setSelectedSubagentTaskId(task.taskId)
+                                  }
+                                >
+                                  {task.description}
+                                </button>
+                              ))}
+                            </div>
+                            <section>
+                              <h4>最近活动</h4>
+                              <p>
+                                {selectedSubagent.activity ||
+                                  (selectedSubagent.status === "completed"
+                                    ? "子任务已完成"
+                                    : "等待活动更新")}
+                              </p>
+                            </section>
+                            {selectedSubagent.resultPreview ? (
+                              <section>
+                                <h4>结果</h4>
+                                <pre>{selectedSubagent.resultPreview}</pre>
+                              </section>
+                            ) : null}
+                            {selectedSubagent.errorCode ? (
+                              <section className="subagent-inspector__error">
+                                <h4>错误</h4>
+                                <p>{selectedSubagent.errorCode}</p>
+                              </section>
+                            ) : null}
+                            {["queued", "running"].includes(
+                              selectedSubagent.status,
+                            ) ? (
+                              <Button
+                                variant="default"
+                                size="sm"
+                                disabled={
+                                  cancellingSubagentTaskId ===
+                                  selectedSubagent.taskId
+                                }
+                                onClick={() =>
+                                  void handleCancelSubagent(
+                                    selectedSubagent.taskId,
+                                  )
+                                }
+                              >
+                                {cancellingSubagentTaskId ===
+                                selectedSubagent.taskId
+                                  ? "正在取消…"
+                                  : "取消子任务"}
+                              </Button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </InspectorRail>
                     )
                   }
                 />

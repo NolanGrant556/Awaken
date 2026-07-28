@@ -573,4 +573,71 @@ describe("projectAguiEventToNarrative", () => {
       noticeContent: "起来活动一下，喝口水～",
     });
   });
+
+  it("upserts native subagent lifecycle and activity without replacing active thinking", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "REASONING_MESSAGE_START",
+      runId: "run-1",
+      messageId: "reasoning-1",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_SUBAGENT_CHANGED",
+      runId: "run-1",
+      subagentTaskId: "task-1",
+      subagentDescription: "检查认证边界",
+      subagentAgentType: "review",
+      subagentStatus: "running",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_SUBAGENT_ACTIVITY",
+      runId: "run-1",
+      subagentTaskId: "task-1",
+      toolCallName: "Read",
+      subagentActivity: "读取 auth/service.go",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_SUBAGENT_CHANGED",
+      runId: "run-1",
+      subagentTaskId: "task-2",
+      subagentDescription: "检查测试入口",
+      subagentAgentType: "explore",
+      subagentStatus: "running",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_SUBAGENT_CHANGED",
+      runId: "run-1",
+      subagentTaskId: "task-1",
+      subagentDescription: "检查认证边界",
+      subagentAgentType: "review",
+      subagentStatus: "completed",
+      subagentResultPreview: "未发现越权路径",
+    });
+
+    expect(state.activeItem).toMatchObject({ kind: "thinking" });
+    expect(state.committedItems).toContainEqual({
+      kind: "subagentGroup",
+      id: "subagents:run-1",
+      tasks: [
+        {
+          taskId: "task-1",
+          description: "检查认证边界",
+          agentType: "review",
+          status: "completed",
+          activity: "读取 auth/service.go",
+          resultPreview: "未发现越权路径",
+          errorCode: undefined,
+        },
+        {
+          taskId: "task-2",
+          description: "检查测试入口",
+          agentType: "explore",
+          status: "running",
+          activity: undefined,
+          resultPreview: undefined,
+          errorCode: undefined,
+        },
+      ],
+    });
+  });
 });

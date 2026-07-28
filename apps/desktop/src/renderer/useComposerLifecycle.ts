@@ -1,9 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type {
-  DesktopOperationIssue,
-  DesktopOperationRecoveryAction,
-} from "../shared/runtime";
+import type { DesktopOperationIssue, DesktopOperationRecoveryAction } from "../shared/runtime";
 
 export type ComposerSubmitMode = "send" | "stop";
 
@@ -44,7 +41,8 @@ type ComposerLifecycle = {
   restoreComposerValue: (value: string) => void;
   trimmedComposerValue: string;
   composerFocusRequest: number;
-  requestComposerFocus: () => void;
+  composerFocusOffset?: number;
+  requestComposerFocus: (offset?: number) => void;
   composerBarState: ComposerBarLifecycleState;
   composerRuntimePanels: ComposerRuntimePanel[];
 };
@@ -101,11 +99,17 @@ export function useComposerLifecycle({
   runtimeOperationIssue,
 }: ComposerLifecycleOptions): ComposerLifecycle {
   const [composerValue, setComposerValue] = useState("");
-  const [composerFocusRequest, setComposerFocusRequest] = useState(0);
+  const [composerFocusTarget, setComposerFocusTarget] = useState<{
+    request: number;
+    offset?: number;
+  }>({ request: 0 });
   const trimmedComposerValue = composerValue.trim();
 
-  const requestComposerFocus = useCallback(() => {
-    setComposerFocusRequest((request) => request + 1);
+  const requestComposerFocus = useCallback((offset?: number) => {
+    setComposerFocusTarget((current) => ({
+      request: current.request + 1,
+      offset,
+    }));
   }, []);
 
   const clearComposerValue = useCallback(() => {
@@ -118,11 +122,7 @@ export function useComposerLifecycle({
 
   const composerBarState = useMemo<ComposerBarLifecycleState>(() => {
     const hasDraftInput = trimmedComposerValue.length > 0 || hasAttachments;
-    const canSend =
-      desktopReady &&
-      hasDraftInput &&
-      isWorkspaceValid &&
-      !inputAttachmentBlocked;
+    const canSend = desktopReady && hasDraftInput && isWorkspaceValid && !inputAttachmentBlocked;
     const submitMode = isBusy ? "stop" : "send";
     return {
       disabled: !desktopReady || isBusy || !isWorkspaceValid,
@@ -147,12 +147,7 @@ export function useComposerLifecycle({
         runtimeErrorMessage,
         runtimeOperationIssue,
       }),
-    [
-      desktopNeedsRestart,
-      desktopStarting,
-      runtimeErrorMessage,
-      runtimeOperationIssue,
-    ],
+    [desktopNeedsRestart, desktopStarting, runtimeErrorMessage, runtimeOperationIssue],
   );
 
   return {
@@ -161,7 +156,8 @@ export function useComposerLifecycle({
     clearComposerValue,
     restoreComposerValue,
     trimmedComposerValue,
-    composerFocusRequest,
+    composerFocusRequest: composerFocusTarget.request,
+    composerFocusOffset: composerFocusTarget.offset,
     requestComposerFocus,
     composerBarState,
     composerRuntimePanels,

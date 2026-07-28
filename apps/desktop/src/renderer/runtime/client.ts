@@ -38,6 +38,10 @@ import {
   type ProjectFolderSelection,
   type ProjectDirectoryListRequest,
   type ProjectDirectoryListResult,
+  type ProjectEntryActionRequest,
+  type ProjectEntryActionResult,
+  type ProjectEntryOpenWithRequest,
+  type ProjectEntryResolveResult,
   type ProjectFilePreviewActionRequest,
   type ProjectFilePreviewActionResult,
   type ProjectFilePreviewCloseRequest,
@@ -81,9 +85,7 @@ import {
   type WorkspacePickResult,
   type WorkspaceValidationResult,
 } from "../../shared/runtime";
-import type {
-  ProjectFilePreviewInteraction,
-} from "../../shared/project-file-preview-interaction";
+import type { ProjectFilePreviewInteraction } from "../../shared/project-file-preview-interaction";
 import type {
   PetActivitySnapshot,
   PetImportReport,
@@ -108,9 +110,7 @@ const DESKTOP_OPERATION_RECOVERY_ACTIONS = new Set<DesktopOperationRecoveryActio
   "reenter",
 ]);
 
-export function desktopOperationIssueFromError(
-  error: unknown,
-): DesktopOperationIssue | null {
+export function desktopOperationIssueFromError(error: unknown): DesktopOperationIssue | null {
   if (!(error instanceof Error)) return null;
   const candidate = error as Error & {
     code?: unknown;
@@ -119,9 +119,7 @@ export function desktopOperationIssueFromError(
   };
   if (
     typeof candidate.code !== "string" ||
-    !DESKTOP_OPERATION_ISSUE_CODES.has(
-      candidate.code as DesktopOperationIssue["code"],
-    )
+    !DESKTOP_OPERATION_ISSUE_CODES.has(candidate.code as DesktopOperationIssue["code"])
   ) {
     return null;
   }
@@ -129,9 +127,7 @@ export function desktopOperationIssueFromError(
     ? candidate.actions.filter(
         (action): action is DesktopOperationRecoveryAction =>
           typeof action === "string" &&
-          DESKTOP_OPERATION_RECOVERY_ACTIONS.has(
-            action as DesktopOperationRecoveryAction,
-          ),
+          DESKTOP_OPERATION_RECOVERY_ACTIONS.has(action as DesktopOperationRecoveryAction),
       )
     : [];
   return {
@@ -179,14 +175,22 @@ export type RuntimeClient = {
   startCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
   cancelCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
   retryCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
-  setCliConnectorActivation: (providerId: CliProviderId, activation: CliActivation) => Promise<CliConnectorView>;
+  setCliConnectorActivation: (
+    providerId: CliProviderId,
+    activation: CliActivation,
+  ) => Promise<CliConnectorView>;
   logoutCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
   uninstallManagedCli: (providerId: CliProviderId) => Promise<CliConnectorView>;
   subscribeCliConnectorState: (handler: CliConnectorStateHandler) => () => void;
   listMcpServers: () => Promise<RuntimeMcpServer[]>;
-  configureMcpServers: (request: ConfigureMcpServersRequest) => Promise<ConfigureMcpServersResponse>;
+  configureMcpServers: (
+    request: ConfigureMcpServersRequest,
+  ) => Promise<ConfigureMcpServersResponse>;
   getMcpServerConfig: (name: string) => Promise<RuntimeMcpServerConfigResponse>;
-  updateMcpServerConfig: (name: string, request: UpdateMcpServerConfigRequest) => Promise<ConfigureMcpServersResponse>;
+  updateMcpServerConfig: (
+    name: string,
+    request: UpdateMcpServerConfigRequest,
+  ) => Promise<ConfigureMcpServersResponse>;
   getRuntimeLogs: () => Promise<RuntimeLogEntry[]>;
   disableMcpServer: (name: string) => Promise<void>;
   enableMcpServer: (name: string) => Promise<void>;
@@ -215,12 +219,15 @@ export type RuntimeClient = {
   listProjectDirectory: (
     request: ProjectDirectoryListRequest,
   ) => Promise<ProjectDirectoryListResult>;
+  resolveProjectEntryForTask: (
+    request: ProjectEntryActionRequest,
+  ) => Promise<ProjectEntryResolveResult>;
+  copyProjectEntryPath: (request: ProjectEntryActionRequest) => Promise<ProjectEntryActionResult>;
+  openProjectEntryWith: (request: ProjectEntryOpenWithRequest) => Promise<ProjectEntryActionResult>;
   startProjectFilePreview: (
     request: ProjectFilePreviewStartRequest,
   ) => Promise<ProjectFilePreviewStartResult>;
-  closeProjectFilePreview: (
-    request: ProjectFilePreviewCloseRequest,
-  ) => Promise<void>;
+  closeProjectFilePreview: (request: ProjectFilePreviewCloseRequest) => Promise<void>;
   onProjectFilePreviewInteraction: (
     handler: (interaction: ProjectFilePreviewInteraction) => void,
   ) => () => void;
@@ -240,7 +247,10 @@ export type RuntimeClient = {
   setPrimaryProjectFolder: (projectId: string, path: string) => Promise<UpsertProjectResult>;
   reorderProjects: (projectIds: string[]) => Promise<ProjectReorderResult>;
   detachProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
-  deleteProjectThreads: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
+  deleteProjectThreads: (
+    projectId: string,
+    idempotencyKey: string,
+  ) => Promise<ProjectMutationResult>;
   trashProjectFolder: (
     projectId: string,
     path: string,
@@ -252,16 +262,8 @@ export type RuntimeClient = {
   revealArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
-  cancelSubagent?: (
-    runId: string,
-    taskId: string,
-    reason?: string,
-  ) => Promise<void>;
-  answerUserQuestion: (
-    runId: string,
-    questionId: string,
-    answer: string,
-  ) => Promise<void>;
+  cancelSubagent?: (runId: string, taskId: string, reason?: string) => Promise<void>;
+  answerUserQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
   resolveExternalInteraction: (
     runId: string,
     interactionId: string,
@@ -301,7 +303,11 @@ export type RuntimeClient = {
   getScheduledTask: (taskId: string) => Promise<ScheduledTask>;
   createScheduledTask: (input: ScheduledTaskCreateInput) => Promise<ScheduledTask>;
   patchScheduledTask: (taskId: string, input: ScheduledTaskPatchInput) => Promise<ScheduledTask>;
-  deleteScheduledTask: (taskId: string, expectedVersion: number, idempotencyKey: string) => Promise<void>;
+  deleteScheduledTask: (
+    taskId: string,
+    expectedVersion: number,
+    idempotencyKey: string,
+  ) => Promise<void>;
   pauseScheduledTask: (taskId: string, expectedVersion: number) => Promise<ScheduledTask>;
   resumeScheduledTask: (taskId: string, expectedVersion: number) => Promise<ScheduledTask>;
   runScheduledTaskNow: (taskId: string, idempotencyKey: string) => Promise<ScheduledTaskExecution>;
@@ -367,7 +373,8 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     startCliAuth: (providerId) => bridge.startCliAuth(providerId),
     cancelCliAuth: (providerId) => bridge.cancelCliAuth(providerId),
     retryCliAuth: (providerId) => bridge.retryCliAuth(providerId),
-    setCliConnectorActivation: (providerId, activation) => bridge.setCliConnectorActivation(providerId, activation),
+    setCliConnectorActivation: (providerId, activation) =>
+      bridge.setCliConnectorActivation(providerId, activation),
     logoutCliConnector: (providerId) => bridge.logoutCliConnector(providerId),
     uninstallManagedCli: (providerId) => bridge.uninstallManagedCli(providerId),
     subscribeCliConnectorState: (handler) => bridge.subscribeCliConnectorState(handler),
@@ -388,12 +395,10 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     enableSkill: (id) => bridge.enableSkill(id),
     listModelProviders: () => bridge.listModelProviders(),
     listModelProfiles: () => bridge.listModelProfiles(),
-    saveModelProfile: (request) =>
-      unwrapDesktopOperation(bridge.saveModelProfile(request)),
+    saveModelProfile: (request) => unwrapDesktopOperation(bridge.saveModelProfile(request)),
     deleteModelProfile: (profileId) => bridge.deleteModelProfile(profileId),
     setDefaultModelProfile: (profileId) => bridge.setDefaultModelProfile(profileId),
-    testModelProfile: (request) =>
-      unwrapDesktopOperation(bridge.testModelProfile(request)),
+    testModelProfile: (request) => unwrapDesktopOperation(bridge.testModelProfile(request)),
     syncModelCapabilities: () => bridge.syncModelCapabilities(),
     getModelProfileBalances: () => bridge.getModelProfileBalances(),
     getRun: (runId) => bridge.getRun(runId),
@@ -403,37 +408,33 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     deleteThread: (threadId) => bridge.deleteThread(threadId),
     listProjects: (includeRemoved) => bridge.listProjects(includeRemoved),
     listProjectDirectory: (request) => bridge.listProjectDirectory(request),
+    resolveProjectEntryForTask: (request) => bridge.resolveProjectEntryForTask(request),
+    copyProjectEntryPath: (request) => bridge.copyProjectEntryPath(request),
+    openProjectEntryWith: (request) => bridge.openProjectEntryWith(request),
     startProjectFilePreview: (request) => bridge.startProjectFilePreview(request),
     closeProjectFilePreview: (request) => bridge.closeProjectFilePreview(request),
-    onProjectFilePreviewInteraction: (handler) =>
-      bridge.onProjectFilePreviewInteraction(handler),
-    openProjectFileExternally: (request) =>
-      bridge.openProjectFileExternally(request),
+    onProjectFilePreviewInteraction: (handler) => bridge.onProjectFilePreviewInteraction(handler),
+    openProjectFileExternally: (request) => bridge.openProjectFileExternally(request),
     revealProjectFile: (request) => bridge.revealProjectFile(request),
-    upsertProject: (workspaceRoot, displayName) =>
-      bridge.upsertProject(workspaceRoot, displayName),
+    upsertProject: (workspaceRoot, displayName) => bridge.upsertProject(workspaceRoot, displayName),
     createProject: (folders, displayName) => bridge.createProject(folders, displayName),
     attachProjectFolder: (projectId, path) => bridge.attachProjectFolder(projectId, path),
     detachProjectFolder: (projectId, path) => bridge.detachProjectFolder(projectId, path),
-    setPrimaryProjectFolder: (projectId, path) =>
-      bridge.setPrimaryProjectFolder(projectId, path),
+    setPrimaryProjectFolder: (projectId, path) => bridge.setPrimaryProjectFolder(projectId, path),
     reorderProjects: (projectIds) => bridge.reorderProjects(projectIds),
-    detachProject: (projectId, idempotencyKey) =>
-      bridge.detachProject(projectId, idempotencyKey),
+    detachProject: (projectId, idempotencyKey) => bridge.detachProject(projectId, idempotencyKey),
     deleteProjectThreads: (projectId, idempotencyKey) =>
       bridge.deleteProjectThreads(projectId, idempotencyKey),
     trashProjectFolder: (projectId, path, idempotencyKey) =>
       bridge.trashProjectFolder(projectId, path, idempotencyKey),
-    getProjectOperation: (operationId) =>
-      bridge.getProjectOperation(operationId),
+    getProjectOperation: (operationId) => bridge.getProjectOperation(operationId),
     openArtifact: (request) => bridge.openArtifact(request),
     revealPath: (target) => bridge.revealPath(target),
     revealArtifact: (request) => bridge.revealArtifact(request),
     startRun: (request) => unwrapDesktopOperation(bridge.startRun(request)),
     cancelRun: bridge.cancelRun,
     cancelSubagent: bridge.cancelSubagent
-      ? (runId, taskId, reason) =>
-          bridge.cancelSubagent!(runId, taskId, reason)
+      ? (runId, taskId, reason) => bridge.cancelSubagent!(runId, taskId, reason)
       : undefined,
     answerUserQuestion: bridge.answerUserQuestion,
     resolveExternalInteraction: bridge.resolveExternalInteraction,
@@ -442,7 +443,8 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     saveDesktopPreferences: (request) => bridge.saveDesktopPreferences(request),
     listMemories: (request) => bridge.listMemories(request),
     getMemory: (memoryId, projectId) => bridge.getMemory(memoryId, projectId),
-    deleteMemory: (memoryId, expectedRevision, projectId) => bridge.deleteMemory(memoryId, expectedRevision, projectId),
+    deleteMemory: (memoryId, expectedRevision, projectId) =>
+      bridge.deleteMemory(memoryId, expectedRevision, projectId),
     getMemorySettings: () => bridge.getMemorySettings(),
     updateMemorySettings: (request) => bridge.updateMemorySettings(request),
     startMemoryDream: (projectId) => bridge.startMemoryDream(projectId),
@@ -520,30 +522,18 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
       async function resubscribe(): Promise<void> {
         if (disposed || terminalSeen) return;
         try {
-          currentSubscriptionId = await bridge.subscribeRun(
-            runId,
-            wrappedHandlers,
-            lastCursor,
-          );
+          currentSubscriptionId = await bridge.subscribeRun(runId, wrappedHandlers, lastCursor);
         } catch (error) {
           if (disposed || terminalSeen) return;
-          attemptReconnect(
-            error instanceof Error ? error.message : "Reconnection failed",
-          );
+          attemptReconnect(error instanceof Error ? error.message : "Reconnection failed");
         }
       }
 
       try {
-        currentSubscriptionId = await bridge.subscribeRun(
-          runId,
-          wrappedHandlers,
-          lastCursor,
-        );
+        currentSubscriptionId = await bridge.subscribeRun(runId, wrappedHandlers, lastCursor);
       } catch (error) {
         if (disposed) throw error;
-        attemptReconnect(
-          error instanceof Error ? error.message : "Initial subscription failed",
-        );
+        attemptReconnect(error instanceof Error ? error.message : "Initial subscription failed");
       }
 
       return () => {
@@ -581,8 +571,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     listScheduledTaskExecutions: (taskId) => bridge.listScheduledTaskExecutions(taskId),
     getSystemTimezone: () => bridge.getSystemTimezone(),
     subscribeScheduledTaskEvents: (handler) => bridge.subscribeScheduledTaskEvents(handler),
-    onScheduledTaskThreadActivation: (handler) =>
-      bridge.onScheduledTaskThreadActivation(handler),
+    onScheduledTaskThreadActivation: (handler) => bridge.onScheduledTaskThreadActivation(handler),
     listPets: () => bridge.listPets(),
     getPetSettings: () => bridge.getPetSettings(),
     selectPet: (petId) => bridge.selectPet(petId),
@@ -592,8 +581,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     setPetImportPreferences: (input) => bridge.setPetImportPreferences(input),
     updatePetActivity: (snapshot) => bridge.updatePetActivity(snapshot),
     onPetCatalogChanged: (callback) => bridge.onPetCatalogChanged(callback),
-    onPetThreadActivationRequested: (callback) =>
-      bridge.onPetThreadActivationRequested(callback),
+    onPetThreadActivationRequested: (callback) => bridge.onPetThreadActivationRequested(callback),
     openAwakenPetsDirectory: () => bridge.openAwakenPetsDirectory(),
     openCodexPetsDirectory: () => bridge.openCodexPetsDirectory(),
   };

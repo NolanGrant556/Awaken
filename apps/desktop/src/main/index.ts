@@ -4,6 +4,7 @@ import { TextDecoder } from "node:util";
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   nativeTheme,
@@ -30,9 +31,7 @@ import {
   DESKTOP_SELECT_ALL_REQUESTED_CHANNEL,
   isDesktopSelectAllShortcut,
 } from "../shared/desktop-selection.js";
-import {
-  PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL,
-} from "../shared/project-file-preview-interaction.js";
+import { PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL } from "../shared/project-file-preview-interaction.js";
 import {
   normalizeModelProfileBalancesResult,
   normalizeModelProvider,
@@ -72,6 +71,10 @@ import {
   type PickedAttachmentFile,
   type ProjectDirectoryListRequest,
   type ProjectDirectoryListResult,
+  type ProjectEntryActionRequest,
+  type ProjectEntryActionResult,
+  type ProjectEntryOpenWithRequest,
+  type ProjectEntryResolveResult,
   type ProjectFilePreviewActionRequest,
   type ProjectFilePreviewActionResult,
   type ProjectFilePreviewCloseRequest,
@@ -123,10 +126,7 @@ import {
   type ProjectFolderSelection,
   type ProjectFoldersPickResult,
 } from "../shared/runtime.js";
-import {
-  updateMainWindowBackground,
-  windowBackgroundColor,
-} from "./window-background.js";
+import { updateMainWindowBackground, windowBackgroundColor } from "./window-background.js";
 import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
 import { ensureConfigDir } from "./config-bootstrap.js";
 import { DesktopPreferencesStore } from "./desktop-preferences-store.js";
@@ -140,9 +140,7 @@ import { PetWindowManager } from "./pets/pet-window-manager.js";
 import { PET_IPC_CHANNELS } from "../shared/pets.js";
 import { openRecordedArtifact, revealRecordedArtifact } from "./artifact-open.js";
 import { executeProjectTrashOperation as executeClaimedProjectTrashOperation } from "./project-trash-worker.js";
-import {
-  desktopInstanceIdentity,
-} from "./desktop-instance.js";
+import { desktopInstanceIdentity } from "./desktop-instance.js";
 import { cleanupLegacyPrimaryRuntime } from "./legacy-runtime-cleanup.js";
 import {
   resolveSystemSkillsSourceRoot,
@@ -152,7 +150,8 @@ import {
 } from "./system-skills-importer.js";
 import { CliConnectorManager } from "./cli-connectors/manager.js";
 import { MemoryDreamSchedulerStore } from "./memory-dream-scheduler-store.js";
-import { listProjectDirectory } from "./project-files.js";
+import { openProjectEntryWithApplication } from "./project-entry-actions.js";
+import { listProjectDirectory, resolveProjectEntry } from "./project-files.js";
 import { ProjectFilePreviewManager } from "./project-file-preview-manager.js";
 import {
   scheduledTaskNotificationContent,
@@ -165,17 +164,12 @@ let runtimeBaseUrl: string | null = null;
 const isDevServer = process.argv.includes("--dev");
 const instanceIdentity = desktopInstanceIdentity(isDevServer);
 app.setName(instanceIdentity.applicationName);
-app.setPath(
-  "userData",
-  join(app.getPath("appData"), ...instanceIdentity.userDataPathSegments),
-);
+app.setPath("userData", join(app.getPath("appData"), ...instanceIdentity.userDataPathSegments));
 if (process.platform === "win32") {
   app.setAppUserModelId(instanceIdentity.applicationId);
 }
 
-const ownsSingleInstanceLock = app.requestSingleInstanceLock(
-  instanceIdentity,
-);
+const ownsSingleInstanceLock = app.requestSingleInstanceLock(instanceIdentity);
 if (!ownsSingleInstanceLock) {
   app.quit();
 } else {
@@ -367,8 +361,10 @@ const attachmentMimeTypesByExtension = new Map<string, string>([
 ]);
 
 function mimeTypeForAttachmentPath(filePath: string): string {
-  return attachmentMimeTypesByExtension.get(path.extname(filePath).toLowerCase()) ??
-    "application/octet-stream";
+  return (
+    attachmentMimeTypesByExtension.get(path.extname(filePath).toLowerCase()) ??
+    "application/octet-stream"
+  );
 }
 
 function isInlineImageMimeType(mimeType: string): boolean {
@@ -479,10 +475,15 @@ function runtimeUrl(pathname: string): string {
   if (!runtimeBaseUrl) {
     throw new Error("Runtime unavailable");
   }
-  return new URL(pathname, runtimeBaseUrl.endsWith("/") ? runtimeBaseUrl : `${runtimeBaseUrl}/`).toString();
+  return new URL(
+    pathname,
+    runtimeBaseUrl.endsWith("/") ? runtimeBaseUrl : `${runtimeBaseUrl}/`,
+  ).toString();
 }
 
-function toRendererSupervisorStatus(info: SupervisorStatusInfo): { status: SupervisorStatusInfo["status"] } {
+function toRendererSupervisorStatus(info: SupervisorStatusInfo): {
+  status: SupervisorStatusInfo["status"];
+} {
   return { status: info.status };
 }
 
@@ -510,7 +511,10 @@ async function readErrorMessage(response: Response): Promise<string> {
   return body;
 }
 
-async function requestRuntime<T = RuntimeRunWire>(pathname: string, init?: RequestInit): Promise<T> {
+async function requestRuntime<T = RuntimeRunWire>(
+  pathname: string,
+  init?: RequestInit,
+): Promise<T> {
   const response = await fetch(runtimeUrl(pathname), init);
   if (!response.ok) {
     throw new Error(await readErrorMessage(response));
@@ -544,7 +548,11 @@ async function throwRuntimeDomainError(response: Response): Promise<never> {
   let message = raw || fallback;
   if (raw) {
     try {
-      const parsed = JSON.parse(raw) as { code?: string; error?: string; message?: string };
+      const parsed = JSON.parse(raw) as {
+        code?: string;
+        error?: string;
+        message?: string;
+      };
       code = parsed.code ?? parsed.error ?? code;
       message = parsed.message ?? message;
     } catch {
@@ -576,12 +584,10 @@ function upsertProjectFailureMessage(error: unknown): string {
   }
   const messages: Record<string, string> = {
     PROJECT_NOT_FOUND: "项目不存在或已经被移除。",
-    PROJECT_OPERATION_CONFLICT:
-      "该文件夹正在处理其他操作（例如移除），请稍后再试。",
+    PROJECT_OPERATION_CONFLICT: "该文件夹正在处理其他操作（例如移除），请稍后再试。",
     PROJECT_RUNS_BUSY: "项目中有正在运行的任务，请等待任务结束后再打开。",
     PROJECT_PATH_INVALID: "该文件夹不能作为 Awaken 项目。",
-    PROJECT_PATH_FINGERPRINT_CHANGED:
-      "文件夹内容已发生变化，Awaken 已停止本次操作以避免误操作。",
+    PROJECT_PATH_FINGERPRINT_CHANGED: "文件夹内容已发生变化，Awaken 已停止本次操作以避免误操作。",
   };
   return messages[error.code] ?? "打开项目失败，请稍后重试。";
 }
@@ -623,9 +629,7 @@ async function failProjectTrashOperation(
   );
 }
 
-async function executeProjectTrashOperation(
-  operation: RuntimeProjectOperationWire,
-): Promise<void> {
+async function executeProjectTrashOperation(operation: RuntimeProjectOperationWire): Promise<void> {
   await executeClaimedProjectTrashOperation(operation, {
     claim: async (operationId) => {
       try {
@@ -634,14 +638,16 @@ async function executeProjectTrashOperation(
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ worker_id: "desktop-main", lease_seconds: 30 }),
+            body: JSON.stringify({
+              worker_id: "desktop-main",
+              lease_seconds: 30,
+            }),
           },
         );
       } catch (error) {
         if (
           error instanceof RuntimeDomainError &&
-          (error.code === "PROJECT_RUNS_BUSY" ||
-            error.code === "PROJECT_OPERATION_CONFLICT")
+          (error.code === "PROJECT_RUNS_BUSY" || error.code === "PROJECT_OPERATION_CONFLICT")
         ) {
           return null;
         }
@@ -705,7 +711,9 @@ async function processPendingProjectTrashOperations(): Promise<void> {
   try {
     const operations = await requestRuntimeDomain<RuntimeProjectOperationWire[]>(
       "/v1/project-operations",
-      { method: "GET" },
+      {
+        method: "GET",
+      },
     );
     for (const operation of operations) {
       if (
@@ -936,14 +944,11 @@ function createMainWindow(): BrowserWindow {
     return { action: "deny" };
   });
 
-  mainWindow.webContents.on(
-    "will-attach-webview",
-    (event, webPreferences, params) => {
-      if (!projectFilePreviewManager?.authorizeWebview(webPreferences, params)) {
-        event.preventDefault();
-      }
-    },
-  );
+  mainWindow.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    if (!projectFilePreviewManager?.authorizeWebview(webPreferences, params)) {
+      event.preventDefault();
+    }
+  });
   mainWindow.webContents.on("did-attach-webview", (_event, guest) => {
     projectFilePreviewManager?.attachGuest(guest);
   });
@@ -975,10 +980,7 @@ function createMainWindow(): BrowserWindow {
     rendererReadyToShow = true;
     showMainWindow();
     if (pendingPetThreadId) {
-      event.sender.send(
-        PET_IPC_CHANNELS.petThreadActivationRequested,
-        pendingPetThreadId,
-      );
+      event.sender.send(PET_IPC_CHANNELS.petThreadActivationRequested, pendingPetThreadId);
       pendingPetThreadId = null;
     }
   }
@@ -1058,10 +1060,7 @@ function activatePetThread(threadId: string): void {
   pendingPetThreadId = threadId;
   const mainWindow = focusOrCreateMainWindow();
   if (!mainWindow.webContents.isLoadingMainFrame()) {
-    mainWindow.webContents.send(
-      PET_IPC_CHANNELS.petThreadActivationRequested,
-      threadId,
-    );
+    mainWindow.webContents.send(PET_IPC_CHANNELS.petThreadActivationRequested, threadId);
     pendingPetThreadId = null;
   }
 }
@@ -1099,12 +1098,17 @@ function handleScheduledTaskEvent(event: ScheduledTaskEvent): void {
   if (!content || !Notification.isSupported()) {
     return;
   }
-  const notification = new Notification({ title: content.title, body: content.body });
+  const notification = new Notification({
+    title: content.title,
+    body: content.body,
+  });
   notification.on("click", () => {
     const mainWindow = focusOrCreateMainWindow();
     const threadId = event.threadId ?? "";
     if (threadId && !mainWindow.webContents.isDestroyed()) {
-      mainWindow.webContents.send("awaken:scheduled-task-thread-activation", { threadId });
+      mainWindow.webContents.send("awaken:scheduled-task-thread-activation", {
+        threadId,
+      });
     }
   });
   notification.show();
@@ -1118,7 +1122,9 @@ function startScheduledTaskEventStreamIfNeeded(): void {
     baseUrl: runtimeBaseUrl,
     onEvent: handleScheduledTaskEvent,
     onError: (message) => {
-      console.error("[awaken-desktop] scheduled task event stream", { message });
+      console.error("[awaken-desktop] scheduled task event stream", {
+        message,
+      });
     },
   });
 }
@@ -1131,7 +1137,11 @@ function stopScheduledTaskEventStream(): void {
 /** Scheduled-task IPC is accepted from the main window only, mirroring the
  * artifact handler sender check. */
 function assertMainWindowSender(event: IpcMainInvokeEvent): void {
-  if (!mainWindowRef || mainWindowRef.isDestroyed() || event.sender.id !== mainWindowRef.webContents.id) {
+  if (
+    !mainWindowRef ||
+    mainWindowRef.isDestroyed() ||
+    event.sender.id !== mainWindowRef.webContents.id
+  ) {
     throw new Error("无法确认定时任务请求来自 Awaken 主窗口。");
   }
 }
@@ -1149,13 +1159,16 @@ function registerScheduledTaskIpcHandlers(): void {
     return (result.tasks ?? []).map(normalizeScheduledTask);
   });
 
-  ipcMain.handle("awaken:get-scheduled-task", async (event, taskId: string): Promise<ScheduledTask> => {
-    assertMainWindowSender(event);
-    const task = await requestRuntimeDomain<ScheduledTaskWire>(scheduledTaskPath(taskId), {
-      method: "GET",
-    });
-    return normalizeScheduledTask(task);
-  });
+  ipcMain.handle(
+    "awaken:get-scheduled-task",
+    async (event, taskId: string): Promise<ScheduledTask> => {
+      assertMainWindowSender(event);
+      const task = await requestRuntimeDomain<ScheduledTaskWire>(scheduledTaskPath(taskId), {
+        method: "GET",
+      });
+      return normalizeScheduledTask(task);
+    },
+  );
 
   ipcMain.handle(
     "awaken:create-scheduled-task",
@@ -1187,7 +1200,11 @@ function registerScheduledTaskIpcHandlers(): void {
     "awaken:delete-scheduled-task",
     async (
       event,
-      request: { taskId: string; expectedVersion: number; idempotencyKey: string },
+      request: {
+        taskId: string;
+        expectedVersion: number;
+        idempotencyKey: string;
+      },
     ): Promise<void> => {
       assertMainWindowSender(event);
       await requestRuntimeDomainOK(
@@ -1200,8 +1217,12 @@ function registerScheduledTaskIpcHandlers(): void {
     },
   );
 
-  const handleSetEnabled = (enabled: boolean) =>
-    async (event: IpcMainInvokeEvent, request: { taskId: string; expectedVersion: number }): Promise<ScheduledTask> => {
+  const handleSetEnabled =
+    (enabled: boolean) =>
+    async (
+      event: IpcMainInvokeEvent,
+      request: { taskId: string; expectedVersion: number },
+    ): Promise<ScheduledTask> => {
       assertMainWindowSender(event);
       const task = await requestRuntimeDomain<ScheduledTaskWire>(
         scheduledTaskPath(request.taskId, enabled ? "/resume" : "/pause"),
@@ -1239,7 +1260,9 @@ function registerScheduledTaskIpcHandlers(): void {
     "awaken:cancel-scheduled-task-execution",
     async (event, taskId: string): Promise<void> => {
       assertMainWindowSender(event);
-      await requestRuntimeDomainOK(scheduledTaskPath(taskId, "/cancel"), { method: "POST" });
+      await requestRuntimeDomainOK(scheduledTaskPath(taskId, "/cancel"), {
+        method: "POST",
+      });
     },
   );
 
@@ -1368,11 +1391,7 @@ ipcMain.handle(
       throw new Error("Desktop preferences store unavailable");
     }
     const preferences = await desktopPreferencesStore.savePreferences(request);
-    updateMainWindowBackground(
-      mainWindowRef,
-      preferences.theme,
-      nativeTheme.shouldUseDarkColors,
-    );
+    updateMainWindowBackground(mainWindowRef, preferences.theme, nativeTheme.shouldUseDarkColors);
     return preferences;
   },
 );
@@ -1400,7 +1419,7 @@ ipcMain.handle("awaken:get-runtime-info", async () => {
   } catch {
     console.error("[awaken-desktop] failed to get runtime info");
     throw new Error("Runtime unavailable");
-	}
+  }
 });
 
 type MemoryWire = {
@@ -1419,7 +1438,12 @@ type MemoryWire = {
 
 type MemorySettingsDocumentWire = {
   revision: number;
-  value: { enabled: boolean; automatic_recall: boolean; proactive_memory: boolean; auto_dream: boolean };
+  value: {
+    enabled: boolean;
+    automatic_recall: boolean;
+    proactive_memory: boolean;
+    auto_dream: boolean;
+  };
 };
 
 type MemoryDreamTaskWire = {
@@ -1428,7 +1452,10 @@ type MemoryDreamTaskWire = {
   phase: string;
   project_id?: string;
   scopes: Array<"user" | "project">;
-  reports?: Record<string, { updated: number; superseded: number; conflicts: number; skipped: number }>;
+  reports?: Record<
+    string,
+    { updated: number; superseded: number; conflicts: number; skipped: number }
+  >;
   error_code?: string;
   error_message?: string;
   created_at: string;
@@ -1437,31 +1464,68 @@ type MemoryDreamTaskWire = {
 };
 
 const normalizeMemory = (item: MemoryWire) => ({
-  memoryId: item.memory_id, name: item.name, description: item.description,
-  type: item.type, status: item.status, revision: item.revision, updatedAt: item.updated_at,
-  sourceThreadId: item.source_thread_id, sourceRecordId: item.source_record_id,
-  scope: item.scope, content: item.content,
+  memoryId: item.memory_id,
+  name: item.name,
+  description: item.description,
+  type: item.type,
+  status: item.status,
+  revision: item.revision,
+  updatedAt: item.updated_at,
+  sourceThreadId: item.source_thread_id,
+  sourceRecordId: item.source_record_id,
+  scope: item.scope,
+  content: item.content,
 });
 const normalizeMemorySettings = (document: MemorySettingsDocumentWire) => ({
   revision: document.revision,
-  value: { enabled: document.value.enabled, automaticRecall: document.value.automatic_recall, proactiveMemory: document.value.proactive_memory, autoDream: document.value.auto_dream },
+  value: {
+    enabled: document.value.enabled,
+    automaticRecall: document.value.automatic_recall,
+    proactiveMemory: document.value.proactive_memory,
+    autoDream: document.value.auto_dream,
+  },
 });
 const normalizeMemoryDream = (task: MemoryDreamTaskWire) => ({
-  taskId: task.task_id, status: task.status, phase: task.phase, projectId: task.project_id, scopes: task.scopes, reports: task.reports,
-  errorCode: task.error_code, errorMessage: task.error_message, createdAt: task.created_at,
-  startedAt: task.started_at, finishedAt: task.finished_at,
+  taskId: task.task_id,
+  status: task.status,
+  phase: task.phase,
+  projectId: task.project_id,
+  scopes: task.scopes,
+  reports: task.reports,
+  errorCode: task.error_code,
+  errorMessage: task.error_message,
+  createdAt: task.created_at,
+  startedAt: task.started_at,
+  finishedAt: task.finished_at,
 });
 
-async function startMemoryDreamTask(projectId: string | undefined, scopes: Array<"user" | "project">): Promise<ReturnType<typeof normalizeMemoryDream>> {
+async function startMemoryDreamTask(
+  projectId: string | undefined,
+  scopes: Array<"user" | "project">,
+): Promise<ReturnType<typeof normalizeMemoryDream>> {
   const profile = await modelProfileStore?.resolveDefaultRunProfile();
   if (!profile) throw new Error("请先配置并启用主模型。");
-  const task = normalizeMemoryDream(await requestRuntime<MemoryDreamTaskWire>("/v1/memory/dream", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project_id: projectId, scopes, model_profile: normalizeModelProfileRunConfig(profile) }) }));
+  const task = normalizeMemoryDream(
+    await requestRuntime<MemoryDreamTaskWire>("/v1/memory/dream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: projectId,
+        scopes,
+        model_profile: normalizeModelProfileRunConfig(profile),
+      }),
+    }),
+  );
   activeDreamTaskIds.add(task.taskId);
   return task;
 }
 
-async function getMemoryDreamTask(taskId: string): Promise<ReturnType<typeof normalizeMemoryDream>> {
-  const task = normalizeMemoryDream(await requestRuntime<MemoryDreamTaskWire>(`/v1/memory/dream/${encodeURIComponent(taskId)}`));
+async function getMemoryDreamTask(
+  taskId: string,
+): Promise<ReturnType<typeof normalizeMemoryDream>> {
+  const task = normalizeMemoryDream(
+    await requestRuntime<MemoryDreamTaskWire>(`/v1/memory/dream/${encodeURIComponent(taskId)}`),
+  );
   if (["completed", "failed", "cancelled", "interrupted"].includes(task.status)) {
     activeDreamTaskIds.delete(taskId);
     if (!emittedDreamReceiptTaskIds.has(taskId)) {
@@ -1480,26 +1544,42 @@ async function waitForMemoryDream(taskId: string): Promise<void> {
   for (;;) {
     const task = await getMemoryDreamTask(taskId);
     if (task.status === "completed") return;
-    if (["failed", "cancelled", "interrupted"].includes(task.status)) throw new Error(task.errorMessage || `Dream ${task.status}`);
+    if (["failed", "cancelled", "interrupted"].includes(task.status))
+      throw new Error(task.errorMessage || `Dream ${task.status}`);
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 }
 
 async function cancelActiveDreams(): Promise<void> {
   const tasks = [...activeDreamTaskIds];
-  await Promise.allSettled(tasks.map((taskId) => requestRuntimeOK(`/v1/memory/dream/${encodeURIComponent(taskId)}/cancel`, { method: "POST" })));
+  await Promise.allSettled(
+    tasks.map((taskId) =>
+      requestRuntimeOK(`/v1/memory/dream/${encodeURIComponent(taskId)}/cancel`, { method: "POST" }),
+    ),
+  );
   for (const taskId of tasks) activeDreamTaskIds.delete(taskId);
 }
 
 async function runAutomaticDreamIfEligible(): Promise<void> {
-  if (automaticDreamRunning || !runtimeBaseUrl || !memoryDreamSchedulerStore?.eligible() || powerMonitor.getSystemIdleTime() < 5 * 60) return;
+  if (
+    automaticDreamRunning ||
+    !runtimeBaseUrl ||
+    !memoryDreamSchedulerStore?.eligible() ||
+    powerMonitor.getSystemIdleTime() < 5 * 60
+  )
+    return;
   automaticDreamRunning = true;
   try {
-    const settings = normalizeMemorySettings(await requestRuntime<MemorySettingsDocumentWire>("/v1/memory/settings"));
+    const settings = normalizeMemorySettings(
+      await requestRuntime<MemorySettingsDocumentWire>("/v1/memory/settings"),
+    );
     if (!settings.value.enabled || !settings.value.autoDream) return;
     const threads = await requestRuntime<RuntimeThreadWire[]>("/v1/threads");
-    if (threads.some((thread) => Boolean(thread.active_run_id)) || activeDreamTaskIds.size > 0) return;
-    const projects = await requestRuntime<RuntimeProjectWire[]>("/v1/projects?include_removed=false");
+    if (threads.some((thread) => Boolean(thread.active_run_id)) || activeDreamTaskIds.size > 0)
+      return;
+    const projects = await requestRuntime<RuntimeProjectWire[]>(
+      "/v1/projects?include_removed=false",
+    );
     const userTask = await startMemoryDreamTask(undefined, ["user"]);
     await waitForMemoryDream(userTask.taskId);
     for (const project of projects.filter((item) => item.state === "active")) {
@@ -1514,14 +1594,31 @@ async function runAutomaticDreamIfEligible(): Promise<void> {
 }
 
 function trackMemoryActivity(event: AguiEvent): void {
-  if (event.type === "RUN_FINISHED" && event.runId) memoryDreamSchedulerStore?.recordCompletedRun(event.runId);
-  if (["AWAKEN_MEMORY_CREATED", "AWAKEN_MEMORY_UPDATED", "AWAKEN_MEMORY_SUPERSEDED", "AWAKEN_MEMORY_DELETED"].includes(event.type)) {
-    memoryDreamSchedulerStore?.recordMemoryMutation(event.recordId || `${event.runId ?? "run"}:${event.seq ?? event.streamCursor ?? 0}`);
+  if (event.type === "RUN_FINISHED" && event.runId)
+    memoryDreamSchedulerStore?.recordCompletedRun(event.runId);
+  if (
+    [
+      "AWAKEN_MEMORY_CREATED",
+      "AWAKEN_MEMORY_UPDATED",
+      "AWAKEN_MEMORY_SUPERSEDED",
+      "AWAKEN_MEMORY_DELETED",
+    ].includes(event.type)
+  ) {
+    memoryDreamSchedulerStore?.recordMemoryMutation(
+      event.recordId || `${event.runId ?? "run"}:${event.seq ?? event.streamCursor ?? 0}`,
+    );
   }
 }
 
 ipcMain.handle("awaken:list-memories", async (_event, request = {}) => {
-  const input = request as { query?: string; scope?: string; projectId?: string; limit?: number; type?: string; status?: string };
+  const input = request as {
+    query?: string;
+    scope?: string;
+    projectId?: string;
+    limit?: number;
+    type?: string;
+    status?: string;
+  };
   const params = new URLSearchParams();
   if (input.query) params.set("query", input.query);
   if (input.scope) params.set("scope", input.scope);
@@ -1534,228 +1631,291 @@ ipcMain.handle("awaken:list-memories", async (_event, request = {}) => {
 });
 ipcMain.handle("awaken:get-memory", async (_event, memoryId: string, projectId?: string) => {
   const suffix = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
-  return normalizeMemory(await requestRuntime<MemoryWire>(`/v1/memories/${encodeURIComponent(memoryId)}${suffix}`));
+  return normalizeMemory(
+    await requestRuntime<MemoryWire>(`/v1/memories/${encodeURIComponent(memoryId)}${suffix}`),
+  );
 });
-ipcMain.handle("awaken:delete-memory", async (_event, memoryId: string, expectedRevision: number, projectId?: string) => {
-  const suffix = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
-  await requestRuntimeOK(`/v1/memories/${encodeURIComponent(memoryId)}${suffix}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision: expectedRevision }) });
-  memoryDreamSchedulerStore?.recordMemoryMutation(`settings-delete:${memoryId}:${expectedRevision}`);
-});
-ipcMain.handle("awaken:get-memory-settings", async () => normalizeMemorySettings(await requestRuntime<MemorySettingsDocumentWire>("/v1/memory/settings")));
+ipcMain.handle(
+  "awaken:delete-memory",
+  async (_event, memoryId: string, expectedRevision: number, projectId?: string) => {
+    const suffix = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+    await requestRuntimeOK(`/v1/memories/${encodeURIComponent(memoryId)}${suffix}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    });
+    memoryDreamSchedulerStore?.recordMemoryMutation(
+      `settings-delete:${memoryId}:${expectedRevision}`,
+    );
+  },
+);
+ipcMain.handle("awaken:get-memory-settings", async () =>
+  normalizeMemorySettings(await requestRuntime<MemorySettingsDocumentWire>("/v1/memory/settings")),
+);
 ipcMain.handle("awaken:update-memory-settings", async (_event, request) => {
-  const input = request as { expectedRevision: number; enabled?: boolean; automaticRecall?: boolean; proactiveMemory?: boolean; autoDream?: boolean };
-  return normalizeMemorySettings(await requestRuntime<MemorySettingsDocumentWire>("/v1/memory/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ expected_revision: input.expectedRevision, enabled: input.enabled, automatic_recall: input.automaticRecall, proactive_memory: input.proactiveMemory, auto_dream: input.autoDream }) }));
+  const input = request as {
+    expectedRevision: number;
+    enabled?: boolean;
+    automaticRecall?: boolean;
+    proactiveMemory?: boolean;
+    autoDream?: boolean;
+  };
+  return normalizeMemorySettings(
+    await requestRuntime<MemorySettingsDocumentWire>("/v1/memory/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expected_revision: input.expectedRevision,
+        enabled: input.enabled,
+        automatic_recall: input.automaticRecall,
+        proactive_memory: input.proactiveMemory,
+        auto_dream: input.autoDream,
+      }),
+    }),
+  );
 });
 ipcMain.handle("awaken:start-memory-dream", async (_event, projectId?: string) => {
   const scopes: Array<"user" | "project"> = projectId ? ["user", "project"] : ["user"];
   return startMemoryDreamTask(projectId, scopes);
 });
-ipcMain.handle("awaken:get-memory-dream", async (_event, taskId: string) => getMemoryDreamTask(taskId));
+ipcMain.handle("awaken:get-memory-dream", async (_event, taskId: string) =>
+  getMemoryDreamTask(taskId),
+);
 ipcMain.handle("awaken:list-memory-dreams", async (_event, projectId?: string, limit = 5) => {
   const params = new URLSearchParams({ limit: String(limit) });
   if (projectId) params.set("project_id", projectId);
-  const tasks = await requestRuntime<MemoryDreamTaskWire[]>(`/v1/memory/dream?${params.toString()}`);
+  const tasks = await requestRuntime<MemoryDreamTaskWire[]>(
+    `/v1/memory/dream?${params.toString()}`,
+  );
   return tasks.map(normalizeMemoryDream);
 });
 ipcMain.handle("awaken:cancel-memory-dream", async (_event, taskId: string) => {
-  await requestRuntimeOK(`/v1/memory/dream/${encodeURIComponent(taskId)}/cancel`, { method: "POST" });
+  await requestRuntimeOK(`/v1/memory/dream/${encodeURIComponent(taskId)}/cancel`, {
+    method: "POST",
+  });
   activeDreamTaskIds.delete(taskId);
 });
 
 ipcMain.handle("awaken:list-connectors", async () => {
-	const connectors = await requestRuntime<RuntimeConnector[]>("/v1/connectors", {
-		method: "GET",
-	});
-	const cliById = new Map((cliConnectorManager?.list() ?? []).map((entry) => [entry.providerId, entry]));
-	return connectors.map((connector) => {
-		const cli = cliById.get(connector.id as CliProviderId);
-		return cli ? { ...connector, kind: "cli" as const, cliReadiness: cli.readiness } : connector;
-	});
+  const connectors = await requestRuntime<RuntimeConnector[]>("/v1/connectors", {
+    method: "GET",
+  });
+  const cliById = new Map(
+    (cliConnectorManager?.list() ?? []).map((entry) => [entry.providerId, entry]),
+  );
+  return connectors.map((connector) => {
+    const cli = cliById.get(connector.id as CliProviderId);
+    return cli ? { ...connector, kind: "cli" as const, cliReadiness: cli.readiness } : connector;
+  });
 });
 
 ipcMain.handle("awaken:connect-connector", async (_event, connectorId: string) => {
-	return requestRuntime<RuntimeConnectorActionResponse>(`/v1/connectors/${connectorId}/connect`, {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify({}),
-	});
+  return requestRuntime<RuntimeConnectorActionResponse>(`/v1/connectors/${connectorId}/connect`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({}),
+  });
 });
 
 ipcMain.handle("awaken:disconnect-connector", async (_event, connectorId: string) => {
-	return requestRuntime<RuntimeConnectorActionResponse>(`/v1/connectors/${connectorId}/disconnect`, {
-		method: "POST",
-	});
+  return requestRuntime<RuntimeConnectorActionResponse>(
+    `/v1/connectors/${connectorId}/disconnect`,
+    {
+      method: "POST",
+    },
+  );
 });
 
 ipcMain.handle("awaken:list-cli-connectors", async () => cliConnectorManager?.list() ?? []);
 ipcMain.handle("awaken:refresh-cli-connector", async (_event, providerId: CliProviderId) => {
-	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
-	return cliConnectorManager.refreshProvider(providerId);
+  if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+  return cliConnectorManager.refreshProvider(providerId);
 });
 ipcMain.handle("awaken:install-cli-connector", async (_event, providerId: CliProviderId) => {
-	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
-	return cliConnectorManager.install(providerId);
+  if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+  return cliConnectorManager.install(providerId);
 });
 ipcMain.handle("awaken:cancel-cli-install", async (_event, providerId: CliProviderId) => {
-	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
-	return cliConnectorManager.cancelInstall(providerId);
+  if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+  return cliConnectorManager.cancelInstall(providerId);
 });
 ipcMain.handle("awaken:start-cli-auth", async (_event, providerId: CliProviderId) => {
-	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
-	return cliConnectorManager.startAuth(providerId);
+  if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+  return cliConnectorManager.startAuth(providerId);
 });
 ipcMain.handle("awaken:cancel-cli-auth", async (_event, providerId: CliProviderId) => {
-	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
-	return cliConnectorManager.cancelAuth(providerId);
+  if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+  return cliConnectorManager.cancelAuth(providerId);
 });
 ipcMain.handle("awaken:retry-cli-auth", async (_event, providerId: CliProviderId) => {
-	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
-	return cliConnectorManager.retryAuth(providerId);
+  if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+  return cliConnectorManager.retryAuth(providerId);
 });
-ipcMain.handle("awaken:set-cli-activation", async (_event, providerId: CliProviderId, activation: CliActivation) => {
-	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
-	return cliConnectorManager.setActivation(providerId, activation);
-});
+ipcMain.handle(
+  "awaken:set-cli-activation",
+  async (_event, providerId: CliProviderId, activation: CliActivation) => {
+    if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+    return cliConnectorManager.setActivation(providerId, activation);
+  },
+);
 ipcMain.handle("awaken:logout-cli-connector", async (_event, providerId: CliProviderId) => {
-	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
-	return cliConnectorManager.logout(providerId);
+  if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+  return cliConnectorManager.logout(providerId);
 });
 ipcMain.handle("awaken:uninstall-managed-cli", async (_event, providerId: CliProviderId) => {
-	if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
-	return cliConnectorManager.uninstallManaged(providerId);
+  if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
+  return cliConnectorManager.uninstallManaged(providerId);
 });
 
 ipcMain.handle("awaken:list-mcp-servers", async () => {
-	return requestRuntime<RuntimeMcpServer[]>("/v1/mcp/servers", {
-		method: "GET",
-	});
+  return requestRuntime<RuntimeMcpServer[]>("/v1/mcp/servers", {
+    method: "GET",
+  });
 });
 
-ipcMain.handle("awaken:configure-mcp-servers", async (_event, request: ConfigureMcpServersRequest) => {
-	return requestRuntime<ConfigureMcpServersResponse>("/v1/mcp/servers", {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify(request),
-	});
-});
+ipcMain.handle(
+  "awaken:configure-mcp-servers",
+  async (_event, request: ConfigureMcpServersRequest) => {
+    return requestRuntime<ConfigureMcpServersResponse>("/v1/mcp/servers", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
+    });
+  },
+);
 
 ipcMain.handle("awaken:get-mcp-server-config", async (_event, name: string) => {
-	return requestRuntime<RuntimeMcpServerConfigResponse>(`/v1/mcp/servers/${encodeURIComponent(name)}/config`, {
-		method: "GET",
-	});
+  return requestRuntime<RuntimeMcpServerConfigResponse>(
+    `/v1/mcp/servers/${encodeURIComponent(name)}/config`,
+    {
+      method: "GET",
+    },
+  );
 });
 
-ipcMain.handle("awaken:update-mcp-server-config", async (_event, name: string, request: UpdateMcpServerConfigRequest) => {
-	return requestRuntime<ConfigureMcpServersResponse>(`/v1/mcp/servers/${encodeURIComponent(name)}/config`, {
-		method: "PATCH",
-		headers: {
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify(request),
-	});
-});
+ipcMain.handle(
+  "awaken:update-mcp-server-config",
+  async (_event, name: string, request: UpdateMcpServerConfigRequest) => {
+    return requestRuntime<ConfigureMcpServersResponse>(
+      `/v1/mcp/servers/${encodeURIComponent(name)}/config`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request),
+      },
+    );
+  },
+);
 
 ipcMain.handle("awaken:get-runtime-logs", async () => {
-	return supervisor?.getLogs() ?? [] as RuntimeLogEntry[];
+  return supervisor?.getLogs() ?? ([] as RuntimeLogEntry[]);
 });
 
 ipcMain.handle("awaken:list-mcp-tools", async () => {
-	return requestRuntime<RuntimeToolInfo[]>("/v1/mcp/tools", {
-		method: "GET",
-	});
+  return requestRuntime<RuntimeToolInfo[]>("/v1/mcp/tools", {
+    method: "GET",
+  });
 });
 
 ipcMain.handle("awaken:disable-mcp-server", async (_event, name: string) => {
-	return requestRuntimeOK(`/v1/mcp/servers/${encodeURIComponent(name)}/disable`, {
-		method: "POST",
-	});
+  return requestRuntimeOK(`/v1/mcp/servers/${encodeURIComponent(name)}/disable`, {
+    method: "POST",
+  });
 });
 
 ipcMain.handle("awaken:enable-mcp-server", async (_event, name: string) => {
-	return requestRuntimeOK(`/v1/mcp/servers/${encodeURIComponent(name)}/enable`, {
-		method: "POST",
-	});
+  return requestRuntimeOK(`/v1/mcp/servers/${encodeURIComponent(name)}/enable`, {
+    method: "POST",
+  });
 });
 
 ipcMain.handle("awaken:delete-mcp-server", async (_event, name: string) => {
-	return requestRuntimeOK(`/v1/mcp/servers/${encodeURIComponent(name)}`, {
-		method: "DELETE",
-	});
+  return requestRuntimeOK(`/v1/mcp/servers/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
 });
 
 ipcMain.handle("awaken:list-skills", async (_event, projectRoots?: SkillProjectRoots) => {
-	const roots = (Array.isArray(projectRoots) ? projectRoots : [projectRoots])
-		.map((root) => root?.trim())
-		.filter((root): root is string => Boolean(root));
-	const query = new URLSearchParams();
-	for (const root of roots) {
-		query.append("projectRoot", root);
-	}
-	const requestPath = query.size > 0 ? `/v1/skills?${query.toString()}` : "/v1/skills";
-	return requestRuntime<RuntimeSkill[]>(requestPath, {
-		method: "GET",
-	});
+  const roots = (Array.isArray(projectRoots) ? projectRoots : [projectRoots])
+    .map((root) => root?.trim())
+    .filter((root): root is string => Boolean(root));
+  const query = new URLSearchParams();
+  for (const root of roots) {
+    query.append("projectRoot", root);
+  }
+  const requestPath = query.size > 0 ? `/v1/skills?${query.toString()}` : "/v1/skills";
+  return requestRuntime<RuntimeSkill[]>(requestPath, {
+    method: "GET",
+  });
 });
 
 ipcMain.handle("awaken:get-skill-preview", async (_event, request: GetSkillPreviewRequest) => {
-	return requestRuntime<SkillPreviewResponse>("/v1/skills/preview", {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify(request),
-	});
+  return requestRuntime<SkillPreviewResponse>("/v1/skills/preview", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(request),
+  });
 });
 
 ipcMain.handle("awaken:install-skill", async (_event, request: InstallSkillRequest) => {
-	return requestRuntime<InstallSkillResponse>("/v1/skills/install", {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify(request),
-	});
+  return requestRuntime<InstallSkillResponse>("/v1/skills/install", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(request),
+  });
 });
 
 ipcMain.handle("awaken:delete-skill", async (_event, request: DeleteSkillRequest) => {
-	const id = request.id.trim();
-	if (!id) {
-		throw new Error("Skill id is required");
-	}
-	return requestRuntime<DeleteSkillResponse>(`/v1/skills/${encodeURIComponent(id)}`, {
-		method: "DELETE",
-		headers: {
-			"Content-Type": "application/json",
-		},
-		body: JSON.stringify({
-			sourceOrigin: request.sourceOrigin,
-			projectRoot: request.projectRoot,
-		}),
-	});
+  const id = request.id.trim();
+  if (!id) {
+    throw new Error("Skill id is required");
+  }
+  return requestRuntime<DeleteSkillResponse>(`/v1/skills/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      sourceOrigin: request.sourceOrigin,
+      projectRoot: request.projectRoot,
+    }),
+  });
 });
 
 ipcMain.handle("awaken:disable-skill", async (_event, id: string) => {
-	const trimmed = id.trim();
-	if (!trimmed) {
-		throw new Error("Skill id is required");
-	}
-	return requestRuntime<{ id: string; state: string }>(`/v1/skills/${encodeURIComponent(trimmed)}/disable`, {
-		method: "POST",
-	});
+  const trimmed = id.trim();
+  if (!trimmed) {
+    throw new Error("Skill id is required");
+  }
+  return requestRuntime<{ id: string; state: string }>(
+    `/v1/skills/${encodeURIComponent(trimmed)}/disable`,
+    {
+      method: "POST",
+    },
+  );
 });
 
 ipcMain.handle("awaken:enable-skill", async (_event, id: string) => {
-	const trimmed = id.trim();
-	if (!trimmed) {
-		throw new Error("Skill id is required");
-	}
-	return requestRuntime<{ id: string; state: string }>(`/v1/skills/${encodeURIComponent(trimmed)}/enable`, {
-		method: "POST",
-	});
+  const trimmed = id.trim();
+  if (!trimmed) {
+    throw new Error("Skill id is required");
+  }
+  return requestRuntime<{ id: string; state: string }>(
+    `/v1/skills/${encodeURIComponent(trimmed)}/enable`,
+    {
+      method: "POST",
+    },
+  );
 });
 
 ipcMain.handle("awaken:list-model-providers", async () => {
@@ -1770,7 +1930,8 @@ ipcMain.handle("awaken:list-model-profiles", async () => {
   if (!modelProfileStore) {
     throw new Error("Model profile store unavailable");
   }
-  const profiles = (await modelProfileStore.listProfiles()) satisfies RuntimeModelProfileSummaryWire[];
+  const profiles =
+    (await modelProfileStore.listProfiles()) satisfies RuntimeModelProfileSummaryWire[];
   return profiles.map(normalizeModelProfileSummary);
 });
 
@@ -1833,10 +1994,7 @@ ipcMain.handle("awaken:get-search-settings", async (): Promise<SearchSettings> =
 
 ipcMain.handle(
   "awaken:test-search-provider",
-  async (
-    _event,
-    request: SearchProviderTestRequest,
-  ): Promise<SearchProviderTestResult> => {
+  async (_event, request: SearchProviderTestRequest): Promise<SearchProviderTestResult> => {
     if (!searchSettingsStore) {
       throw new Error("Search settings store unavailable");
     }
@@ -1846,10 +2004,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   "awaken:save-search-settings",
-  async (
-    _event,
-    request: SearchSettingsSaveRequest,
-  ): Promise<SearchSettingsSaveResult> => {
+  async (_event, request: SearchSettingsSaveRequest): Promise<SearchSettingsSaveResult> => {
     if (!searchSettingsStore || !supervisor) {
       throw new Error("Search settings are unavailable");
     }
@@ -1879,7 +2034,9 @@ ipcMain.handle(
 );
 
 ipcMain.handle("awaken:get-acp-runners", async (): Promise<ACPRunnersSettings> => {
-  return requestRuntime<ACPRunnersSettings>("/v1/acp/runners", { method: "GET" });
+  return requestRuntime<ACPRunnersSettings>("/v1/acp/runners", {
+    method: "GET",
+  });
 });
 
 ipcMain.handle(
@@ -1895,19 +2052,12 @@ ipcMain.handle(
 
 ipcMain.handle(
   "awaken:update-acp-runner",
-  async (
-    _event,
-    runnerId: string,
-    request: ACPRunnerUpdateRequest,
-  ): Promise<ACPRunnerView> => {
-    return requestRuntime<ACPRunnerView>(
-      `/v1/acp/runners/${encodeURIComponent(runnerId)}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request),
-      },
-    );
+  async (_event, runnerId: string, request: ACPRunnerUpdateRequest): Promise<ACPRunnerView> => {
+    return requestRuntime<ACPRunnerView>(`/v1/acp/runners/${encodeURIComponent(runnerId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
   },
 );
 
@@ -1922,7 +2072,9 @@ ipcMain.handle(
   async (_event, runnerId: string): Promise<ACPRunnerProbeResult> => {
     return requestRuntime<ACPRunnerProbeResult>(
       `/v1/acp/runners/${encodeURIComponent(runnerId)}/probe`,
-      { method: "POST" },
+      {
+        method: "POST",
+      },
     );
   },
 );
@@ -1931,22 +2083,14 @@ ipcMain.handle("awaken:relaunch-desktop", () => {
   setImmediate(() => {
     if (isDevServer && process.platform === "darwin") {
       const repositoryRoot = path.resolve(__dirname, "../../../..");
-      const helperPath = join(
-        repositoryRoot,
-        "scripts",
-        "relaunch-managed-desktop.mjs",
-      );
+      const helperPath = join(repositoryRoot, "scripts", "relaunch-managed-desktop.mjs");
       const nodeExecutable = process.env.npm_node_execpath || "node";
-      const helper = spawn(
-        nodeExecutable,
-        [helperPath, String(process.pid)],
-        {
-          cwd: repositoryRoot,
-          detached: true,
-          stdio: "ignore",
-          env: process.env,
-        },
-      );
+      const helper = spawn(nodeExecutable, [helperPath, String(process.pid)], {
+        cwd: repositoryRoot,
+        detached: true,
+        stdio: "ignore",
+        env: process.env,
+      });
       helper.unref();
     } else {
       app.relaunch();
@@ -1960,7 +2104,7 @@ ipcMain.handle("awaken:get-run", async (_event, runId: string) => {
     method: "GET",
   });
 
-	return normalizeRuntimeRun(run);
+  return normalizeRuntimeRun(run);
 });
 
 ipcMain.handle("awaken:get-thread-transcript", async (_event, threadId: string) => {
@@ -1994,11 +2138,11 @@ ipcMain.handle("awaken:get-thread-transcript", async (_event, threadId: string) 
 });
 
 ipcMain.handle("awaken:list-threads", async () => {
-	const threads = await requestRuntime<RuntimeThreadWire[]>("/v1/threads", {
-		method: "GET",
-	});
+  const threads = await requestRuntime<RuntimeThreadWire[]>("/v1/threads", {
+    method: "GET",
+  });
 
-	return threads.map(normalizeRuntimeThread);
+  return threads.map(normalizeRuntimeThread);
 });
 
 ipcMain.handle("awaken:rename-thread", async (_event, threadId: string, label: string) => {
@@ -2014,24 +2158,27 @@ ipcMain.handle("awaken:rename-thread", async (_event, threadId: string, label: s
   return normalizeRuntimeThread(thread);
 });
 
-ipcMain.handle("awaken:delete-thread", async (_event, threadId: string): Promise<ThreadDeleteResult> => {
-  try {
-    await requestRuntimeOK(`/v1/threads/${threadId}`, {
-      method: "DELETE",
-    });
-    return { ok: true };
-  } catch (error) {
-    console.error("thread_delete_failed", {
-      threadId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return {
-      ok: false,
-      code: "THREAD_DELETE_FAILED",
-      message: "删除请求暂时未完成，Awaken 会保留当前会话，请稍后重试。",
-    };
-  }
-});
+ipcMain.handle(
+  "awaken:delete-thread",
+  async (_event, threadId: string): Promise<ThreadDeleteResult> => {
+    try {
+      await requestRuntimeOK(`/v1/threads/${threadId}`, {
+        method: "DELETE",
+      });
+      return { ok: true };
+    } catch (error) {
+      console.error("thread_delete_failed", {
+        threadId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        ok: false,
+        code: "THREAD_DELETE_FAILED",
+        message: "删除请求暂时未完成，Awaken 会保留当前会话，请稍后重试。",
+      };
+    }
+  },
+);
 
 ipcMain.handle("awaken:list-projects", async (_event, includeRemoved = false) => {
   const projects = await requestRuntimeDomain<RuntimeProjectWire[]>(
@@ -2040,6 +2187,16 @@ ipcMain.handle("awaken:list-projects", async (_event, includeRemoved = false) =>
   );
   return projects.map(normalizeRuntimeProject);
 });
+
+async function resolveCurrentProjectEntry(request: ProjectEntryActionRequest) {
+  const projects = await requestRuntimeDomain<RuntimeProjectWire[]>(
+    "/v1/projects?include_removed=false",
+    {
+      method: "GET",
+    },
+  );
+  return resolveProjectEntry(projects.map(normalizeRuntimeProject), request);
+}
 
 ipcMain.handle(
   "awaken:list-project-directory",
@@ -2057,9 +2214,86 @@ ipcMain.handle(
     }
     const projects = await requestRuntimeDomain<RuntimeProjectWire[]>(
       "/v1/projects?include_removed=false",
-      { method: "GET" },
+      {
+        method: "GET",
+      },
     );
     return listProjectDirectory(projects.map(normalizeRuntimeProject), request);
+  },
+);
+
+ipcMain.handle(
+  "awaken:resolve-project-entry-for-task",
+  async (event, request: ProjectEntryActionRequest): Promise<ProjectEntryResolveResult> => {
+    if (
+      !mainWindowRef ||
+      mainWindowRef.isDestroyed() ||
+      event.sender.id !== mainWindowRef.webContents.id
+    ) {
+      return {
+        ok: false,
+        code: "UNAUTHORIZED",
+        message: "添加任务请求来源无效。",
+      };
+    }
+    const result = await resolveCurrentProjectEntry(request);
+    if (!result.ok) return result;
+    return {
+      ok: true,
+      entry: {
+        projectId: result.entry.projectId,
+        folderPath: result.entry.registeredRoot,
+        absolutePath: result.entry.absolutePath,
+        relativePath: result.entry.relativePath,
+        displayName: result.entry.displayName,
+        kind: result.entry.kind,
+      },
+    };
+  },
+);
+
+ipcMain.handle(
+  "awaken:copy-project-entry-path",
+  async (event, request: ProjectEntryActionRequest): Promise<ProjectEntryActionResult> => {
+    if (
+      !mainWindowRef ||
+      mainWindowRef.isDestroyed() ||
+      event.sender.id !== mainWindowRef.webContents.id
+    ) {
+      return {
+        ok: false,
+        code: "UNAUTHORIZED",
+        message: "复制路径请求来源无效。",
+      };
+    }
+    const result = await resolveCurrentProjectEntry(request);
+    if (!result.ok) return result;
+    clipboard.writeText(result.entry.absolutePath);
+    return { ok: true };
+  },
+);
+
+ipcMain.handle(
+  "awaken:open-project-entry-with",
+  async (event, request: ProjectEntryOpenWithRequest): Promise<ProjectEntryActionResult> => {
+    if (
+      !mainWindowRef ||
+      mainWindowRef.isDestroyed() ||
+      event.sender.id !== mainWindowRef.webContents.id
+    ) {
+      return {
+        ok: false,
+        code: "UNAUTHORIZED",
+        message: "指定应用打开请求来源无效。",
+      };
+    }
+    const result = await resolveCurrentProjectEntry(request);
+    if (!result.ok) return result;
+    return openProjectEntryWithApplication(
+      request.application,
+      result.entry.absolutePath,
+      result.entry.kind,
+    );
   },
 );
 
@@ -2227,10 +2461,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   "awaken:attach-project-folder",
-  async (
-    _event,
-    request: { projectId: string; path: string },
-  ): Promise<UpsertProjectResult> =>
+  async (_event, request: { projectId: string; path: string }): Promise<UpsertProjectResult> =>
     requestProjectWrite(
       `/v1/projects/${encodeURIComponent(request.projectId)}/folders`,
       "POST",
@@ -2241,10 +2472,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   "awaken:detach-project-folder",
-  async (
-    _event,
-    request: { projectId: string; path: string },
-  ): Promise<UpsertProjectResult> =>
+  async (_event, request: { projectId: string; path: string }): Promise<UpsertProjectResult> =>
     requestProjectWrite(
       `/v1/projects/${encodeURIComponent(request.projectId)}/folders`,
       "DELETE",
@@ -2255,10 +2483,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   "awaken:set-primary-project-folder",
-  async (
-    _event,
-    request: { projectId: string; path: string },
-  ): Promise<UpsertProjectResult> =>
+  async (_event, request: { projectId: string; path: string }): Promise<UpsertProjectResult> =>
     requestProjectWrite(
       `/v1/projects/${encodeURIComponent(request.projectId)}/primary-folder`,
       "PUT",
@@ -2271,14 +2496,11 @@ ipcMain.handle(
   "awaken:reorder-projects",
   async (_event, projectIds: string[]): Promise<ProjectReorderResult> => {
     try {
-      const projects = await requestRuntimeDomain<RuntimeProjectWire[]>(
-        "/v1/projects/order",
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ project_ids: projectIds }),
-        },
-      );
+      const projects = await requestRuntimeDomain<RuntimeProjectWire[]>("/v1/projects/order", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_ids: projectIds }),
+      });
       return { ok: true, projects: projects.map(normalizeRuntimeProject) };
     } catch (error) {
       const code = error instanceof RuntimeDomainError ? error.code : "INTERNAL_ERROR";
@@ -2309,7 +2531,10 @@ async function runProjectMutation(
       headers:
         body === undefined
           ? { "Idempotency-Key": idempotencyKey }
-          : { "Idempotency-Key": idempotencyKey, "Content-Type": "application/json" },
+          : {
+              "Idempotency-Key": idempotencyKey,
+              "Content-Type": "application/json",
+            },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     return { ok: true, operation: normalizeRuntimeProjectOperation(operation) };
@@ -2396,12 +2621,12 @@ ipcMain.handle(
     try {
       const transcript = await requestRuntime<RuntimeThreadTranscriptWire>(
         `/v1/threads/${request.threadId}/transcript`,
-        { method: "GET" },
+        {
+          method: "GET",
+        },
       );
-      return openRecordedArtifact(
-        normalizeRuntimeThreadTranscript(transcript),
-        request,
-        (target) => shell.openPath(target),
+      return openRecordedArtifact(normalizeRuntimeThreadTranscript(transcript), request, (target) =>
+        shell.openPath(target),
       );
     } catch (error) {
       console.error("artifact_open_failed", {
@@ -2432,7 +2657,9 @@ ipcMain.handle(
     try {
       const transcript = await requestRuntime<RuntimeThreadTranscriptWire>(
         `/v1/threads/${request.threadId}/transcript`,
-        { method: "GET" },
+        {
+          method: "GET",
+        },
       );
       return revealRecordedArtifact(
         normalizeRuntimeThreadTranscript(transcript),
@@ -2479,7 +2706,7 @@ ipcMain.handle(
 
 ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
   return runDesktopOperation(async () => {
-	await cancelActiveDreams();
+    await cancelActiveDreams();
     const body = normalizeStartRunRequest(request);
     const defaultProfile = await modelProfileStore?.resolveDefaultRunProfile();
     if (!defaultProfile) {
@@ -2508,10 +2735,7 @@ ipcMain.handle("awaken:cancel-run", async (_event, runId: string) => {
 
 ipcMain.handle(
   "awaken:cancel-subagent",
-  async (
-    _event,
-    payload: { runId: string; taskId: string; reason?: string },
-  ) => {
+  async (_event, payload: { runId: string; taskId: string; reason?: string }) => {
     await requestRuntimeOK(
       `/v1/runs/${encodeURIComponent(payload.runId)}/subagents/${encodeURIComponent(payload.taskId)}/cancel`,
       {
@@ -2526,13 +2750,16 @@ ipcMain.handle(
 ipcMain.handle(
   "awaken:answer-user-question",
   async (_event, payload: { runId: string; questionId: string; answer: string }) => {
-    await requestRuntimeOK(`/v1/runs/${payload.runId}/user-questions/${payload.questionId}/answer`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    await requestRuntimeOK(
+      `/v1/runs/${payload.runId}/user-questions/${payload.questionId}/answer`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ answer: payload.answer }),
       },
-      body: JSON.stringify({ answer: payload.answer }),
-    });
+    );
   },
 );
 
@@ -2588,7 +2815,15 @@ ipcMain.handle(
 
 ipcMain.handle(
   "awaken:subscribe-run",
-  async (event, payload: { runId: string; subscriptionId: string; afterCursor?: number; afterSeq?: number }) => {
+  async (
+    event,
+    payload: {
+      runId: string;
+      subscriptionId: string;
+      afterCursor?: number;
+      afterSeq?: number;
+    },
+  ) => {
     await subscribeToRun(
       event.sender,
       payload.runId,
@@ -2659,28 +2894,25 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle(
-  "awaken:pick-directory",
-  async (_event, defaultPath?: string) => {
-    const result = await dialog.showOpenDialog({
-      properties: ["openDirectory"],
-      defaultPath,
-    });
-    if (result.canceled || result.filePaths.length === 0) {
-      return { canceled: true };
+ipcMain.handle("awaken:pick-directory", async (_event, defaultPath?: string) => {
+  const result = await dialog.showOpenDialog({
+    properties: ["openDirectory"],
+    defaultPath,
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return { canceled: true };
+  }
+  const selected = result.filePaths[0];
+  try {
+    const stat = await fs.stat(selected);
+    if (!stat.isDirectory()) {
+      return { canceled: true, error: "Selected path is not a directory" };
     }
-    const selected = result.filePaths[0];
-    try {
-      const stat = await fs.stat(selected);
-      if (!stat.isDirectory()) {
-        return { canceled: true, error: "Selected path is not a directory" };
-      }
-      return { canceled: false, path: selected };
-    } catch {
-      return { canceled: true, error: "Cannot access selected directory" };
-    }
-  },
-);
+    return { canceled: false, path: selected };
+  } catch {
+    return { canceled: true, error: "Cannot access selected directory" };
+  }
+});
 
 ipcMain.handle(
   "awaken:pick-project-folders",
@@ -2735,7 +2967,10 @@ ipcMain.handle("awaken:validate-workspace", async (_event, candidate: string) =>
     }
     return { valid: true };
   } catch {
-    return { valid: false, error: "Workspace directory does not exist or is not accessible" };
+    return {
+      valid: false,
+      error: "Workspace directory does not exist or is not accessible",
+    };
   }
 });
 
@@ -2766,9 +3001,7 @@ app.whenReady().then(async () => {
     resourcesPath: process.resourcesPath,
     appPath: app.getAppPath(),
   });
-  const systemSkillsTargetRoot = resolveSystemSkillsTargetRoot(
-    app.getPath("home"),
-  );
+  const systemSkillsTargetRoot = resolveSystemSkillsTargetRoot(app.getPath("home"));
   try {
     const report = await syncSystemSkills({
       sourceRoot: systemSkillsSourceRoot,
@@ -2780,10 +3013,7 @@ app.whenReady().then(async () => {
     // Bundled Skills are an optional startup input. A missing or invalid
     // packaged resource must not prevent Desktop/Core from starting.
     console.warn("system_skills_sync_failed", {
-      code:
-        error instanceof SystemSkillsSyncError
-          ? error.code
-          : "SYSTEM_SKILLS_SYNC_FAILED",
+      code: error instanceof SystemSkillsSyncError ? error.code : "SYSTEM_SKILLS_SYNC_FAILED",
       sourceRoot: systemSkillsSourceRoot,
       targetRoot: systemSkillsTargetRoot,
       error: error instanceof Error ? error.message : String(error),
@@ -2796,11 +3026,7 @@ app.whenReady().then(async () => {
   await desktopPreferencesStore.initialize();
   nativeTheme.on("updated", () => {
     if (desktopPreferencesStore?.snapshot().theme === "system") {
-      updateMainWindowBackground(
-        mainWindowRef,
-        "system",
-        nativeTheme.shouldUseDarkColors,
-      );
+      updateMainWindowBackground(mainWindowRef, "system", nativeTheme.shouldUseDarkColors);
     }
   });
   const awakenHome = join(app.getPath("home"), ".awaken");
@@ -2866,7 +3092,9 @@ app.whenReady().then(async () => {
     getProjects: async () => {
       const projects = await requestRuntimeDomain<RuntimeProjectWire[]>(
         "/v1/projects?include_removed=false",
-        { method: "GET" },
+        {
+          method: "GET",
+        },
       );
       return projects.map(normalizeRuntimeProject);
     },
@@ -2877,8 +3105,7 @@ app.whenReady().then(async () => {
       cachePath: join(app.getPath("userData"), "cache"),
     },
     defaultSession: session.defaultSession,
-    sessionFromPartition: (partition) =>
-      session.fromPartition(partition, { cache: false }),
+    sessionFromPartition: (partition) => session.fromPartition(partition, { cache: false }),
     openExternal: (url) => shell.openExternal(url),
     openPath: (filePath) => shell.openPath(filePath),
     showItemInFolder: (filePath) => shell.showItemInFolder(filePath),
@@ -2896,10 +3123,7 @@ app.whenReady().then(async () => {
     },
     onPreviewInteraction: (interaction) => {
       if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
-      mainWindowRef.webContents.send(
-        PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL,
-        interaction,
-      );
+      mainWindowRef.webContents.send(PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL, interaction);
     },
   });
   projectFilePreviewManager.initialize();
@@ -3011,6 +3235,4 @@ process.on("unhandledRejection", (error) => {
   console.error("[awaken-desktop] unhandledRejection", error);
 });
 
-console.info(
-  `[awaken-desktop] platform=${toDesktopPlatform(process.platform)}`,
-);
+console.info(`[awaken-desktop] platform=${toDesktopPlatform(process.platform)}`);

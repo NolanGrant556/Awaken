@@ -54,6 +54,7 @@ import {
   AwakenWorkbenchSidebarFrame as WorkbenchSidebarFrame,
   AwakenRunStage as RunStage,
   AwakenComposerDock as ComposerDock,
+  type ComposerBarInputSelection,
   type ComposerBarMetaItem,
   type ComposerBarStructuredInputValue,
   type AwakenContextUsagePanelProps,
@@ -74,6 +75,8 @@ import type {
   ComposerToken,
   DesktopOperationIssue,
   MemoryDreamTask,
+  ProjectEntryActionRequest,
+  ProjectPathComposerTokenPayload,
   RuntimeInfo,
   RuntimeProject,
   RunInputAttachment,
@@ -233,11 +236,10 @@ export function shouldUseCenterComposerWithFileWorkspace({
   fileWorkspaceExpanded: boolean;
   expandedWorkspaceSurface: ExpandedWorkspaceSurface;
 }): boolean {
-  return !(
-    fileWorkspaceOpen &&
-    fileWorkspaceExpanded &&
-    expandedWorkspaceSurface === "file"
-  ) && standardCenterComposer;
+  return (
+    !(fileWorkspaceOpen && fileWorkspaceExpanded && expandedWorkspaceSurface === "file") &&
+    standardCenterComposer
+  );
 }
 
 export function shouldEnableInspectorResizeHandle({
@@ -254,9 +256,7 @@ export function composerMetaItemsForFileWorkspaceSurface(
   metaItems: ComposerBarMetaItem[],
   fileWorkspaceSurfaceActive: boolean,
 ): ComposerBarMetaItem[] {
-  return fileWorkspaceSurfaceActive
-    ? metaItems.filter((item) => item.id === "model")
-    : metaItems;
+  return fileWorkspaceSurfaceActive ? metaItems.filter((item) => item.id === "model") : metaItems;
 }
 
 export type WorkbenchNavSection = ExtensionSection | "scheduled-tasks";
@@ -307,41 +307,26 @@ const emptyUserQuestionSelection = (): UserQuestionSelection => ({
   otherText: "",
 });
 
-export function selectedUserQuestionLabels(
-  selection: UserQuestionSelection,
-): string[] {
-  const labels = selection.selected.filter(
-    (label) => label !== USER_QUESTION_OTHER_OPTION,
-  );
-  if (
-    selection.selected.includes(USER_QUESTION_OTHER_OPTION) &&
-    selection.otherText.trim()
-  ) {
+export function selectedUserQuestionLabels(selection: UserQuestionSelection): string[] {
+  const labels = selection.selected.filter((label) => label !== USER_QUESTION_OTHER_OPTION);
+  if (selection.selected.includes(USER_QUESTION_OTHER_OPTION) && selection.otherText.trim()) {
     labels.push(selection.otherText.trim());
   }
   return labels;
 }
 
-export function isUserQuestionSelectionAnswered(
-  selection: UserQuestionSelection,
-): boolean {
+export function isUserQuestionSelectionAnswered(selection: UserQuestionSelection): boolean {
   return selectedUserQuestionLabels(selection).length > 0;
 }
 
-export function nextUserQuestionPromptIndex(
-  currentIndex: number,
-  questionCount: number,
-): number {
+export function nextUserQuestionPromptIndex(currentIndex: number, questionCount: number): number {
   if (questionCount <= 0) {
     return 0;
   }
   return Math.min(currentIndex + 1, questionCount - 1);
 }
 
-function clampUserQuestionPromptIndex(
-  index: number,
-  questionCount: number,
-): number {
+function clampUserQuestionPromptIndex(index: number, questionCount: number): number {
   if (questionCount <= 0) {
     return 0;
   }
@@ -377,9 +362,7 @@ export function reconcileComposerStructuredInput(
   );
   const currentTokenIds = new Set(tokens.map((token) => token.id));
   const remainingTokenIds = new Set(
-    nextValue.tokens
-      .map((token) => token.id)
-      .filter((tokenId) => currentTokenIds.has(tokenId)),
+    nextValue.tokens.map((token) => token.id).filter((tokenId) => currentTokenIds.has(tokenId)),
   );
   const nextTokens = tokens
     .filter((token) => remainingTokenIds.has(token.id))
@@ -387,17 +370,13 @@ export function reconcileComposerStructuredInput(
       const leadingText = leadingTextByTokenId.get(token.id) ?? "";
       const tokenWithoutLeadingText = { ...token };
       delete tokenWithoutLeadingText.leadingText;
-      return leadingText
-        ? { ...tokenWithoutLeadingText, leadingText }
-        : tokenWithoutLeadingText;
+      return leadingText ? { ...tokenWithoutLeadingText, leadingText } : tokenWithoutLeadingText;
     });
 
   return {
     tokens: nextTokens,
     placements: Object.fromEntries(
-      Object.entries(placements).filter(([tokenId]) =>
-        remainingTokenIds.has(tokenId),
-      ),
+      Object.entries(placements).filter(([tokenId]) => remainingTokenIds.has(tokenId)),
     ),
     leadingTexts: Object.fromEntries(
       nextValue.tokens
@@ -408,6 +387,114 @@ export function reconcileComposerStructuredInput(
   };
 }
 
+function composerTokenLeadingText(
+  token: ComposerToken,
+  leadingTexts: Record<string, string>,
+): string {
+  return token.leadingText ?? leadingTexts[token.id] ?? "";
+}
+
+export function composerStructuredDraftLength(
+  tokens: ComposerToken[],
+  leadingTexts: Record<string, string>,
+  value: string,
+): number {
+  return tokens.reduce(
+    (length, token) => length + composerTokenLeadingText(token, leadingTexts).length + 1,
+    value.length,
+  );
+}
+
+function composerTokenEndOffset(
+  tokens: ComposerToken[],
+  leadingTexts: Record<string, string>,
+  tokenId: string,
+): number | undefined {
+  let offset = 0;
+  for (const token of tokens) {
+    offset += composerTokenLeadingText(token, leadingTexts).length + 1;
+    if (token.id === tokenId) return offset;
+  }
+  return undefined;
+}
+
+export function insertComposerTokenAtOffset(args: {
+  tokens: ComposerToken[];
+  placements: Record<string, ComposerTokenPlacement>;
+  leadingTexts: Record<string, string>;
+  value: string;
+  offset: number;
+  token: ComposerToken;
+}): {
+  tokens: ComposerToken[];
+  placements: Record<string, ComposerTokenPlacement>;
+  leadingTexts: Record<string, string>;
+  value: string;
+  focusOffset: number;
+} {
+  const totalLength = composerStructuredDraftLength(args.tokens, args.leadingTexts, args.value);
+  const offset = Math.max(0, Math.min(args.offset, totalLength));
+  const nextTokens: ComposerToken[] = [];
+  let consumed = 0;
+  let inserted = false;
+
+  for (const currentToken of args.tokens) {
+    const leadingText = composerTokenLeadingText(currentToken, args.leadingTexts);
+    if (!inserted && offset <= consumed + leadingText.length) {
+      const splitOffset = offset - consumed;
+      const before = leadingText.slice(0, splitOffset);
+      const after = leadingText.slice(splitOffset);
+      nextTokens.push(
+        before ? { ...args.token, leadingText: before } : { ...args.token },
+        after
+          ? { ...currentToken, leadingText: after }
+          : (() => {
+              const token = { ...currentToken };
+              delete token.leadingText;
+              return token;
+            })(),
+      );
+      inserted = true;
+    } else {
+      nextTokens.push(
+        leadingText
+          ? { ...currentToken, leadingText }
+          : (() => {
+              const token = { ...currentToken };
+              delete token.leadingText;
+              return token;
+            })(),
+      );
+    }
+    consumed += leadingText.length + 1;
+  }
+
+  let value = args.value;
+  if (!inserted) {
+    const tailOffset = Math.max(0, Math.min(offset - consumed, value.length));
+    const before = value.slice(0, tailOffset);
+    value = value.slice(tailOffset);
+    nextTokens.push(before ? { ...args.token, leadingText: before } : { ...args.token });
+  }
+
+  return {
+    tokens: nextTokens,
+    placements: Object.fromEntries(
+      nextTokens.map((token) => [
+        token.id,
+        token.id === args.token.id ? "after" : (args.placements[token.id] ?? "after"),
+      ]),
+    ),
+    leadingTexts: Object.fromEntries(
+      nextTokens
+        .filter((token) => Boolean(token.leadingText))
+        .map((token) => [token.id, token.leadingText ?? ""]),
+    ),
+    value,
+    focusOffset: offset + 1,
+  };
+}
+
 export function promptTokenViews(tokens?: PromptNarrativeToken[]) {
   return tokens?.map((token) => ({
     id: token.id,
@@ -415,9 +502,7 @@ export function promptTokenViews(tokens?: PromptNarrativeToken[]) {
     label: token.label,
     leadingText: token.leadingText || undefined,
     title:
-      typeof token.payload?.skillFilePath === "string"
-        ? token.payload.skillFilePath
-        : token.label,
+      typeof token.payload?.skillFilePath === "string" ? token.payload.skillFilePath : token.label,
   }));
 }
 
@@ -441,12 +526,9 @@ export function promptTextAfterTokenLeadingText(
       leadingText.trimEnd(),
       leadingText.trim(),
     ].filter(
-      (candidate, index, values) =>
-        candidate.length > 0 && values.indexOf(candidate) === index,
+      (candidate, index, values) => candidate.length > 0 && values.indexOf(candidate) === index,
     );
-    const matchedLeadingText = candidates.find((candidate) =>
-      remainingText.startsWith(candidate),
-    );
+    const matchedLeadingText = candidates.find((candidate) => remainingText.startsWith(candidate));
     if (!matchedLeadingText) {
       return text;
     }
@@ -455,14 +537,8 @@ export function promptTextAfterTokenLeadingText(
   return remainingText;
 }
 
-export function UserQuestionPrompt({
-  question,
-  disabled,
-  onSubmit,
-}: UserQuestionPromptProps) {
-  const [answers, setAnswers] = useState<Record<number, UserQuestionSelection>>(
-    {},
-  );
+export function UserQuestionPrompt({ question, disabled, onSubmit }: UserQuestionPromptProps) {
+  const [answers, setAnswers] = useState<Record<number, UserQuestionSelection>>({});
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const otherInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const questions = question.questions;
@@ -473,9 +549,7 @@ export function UserQuestionPrompt({
   }, [question.id]);
 
   useEffect(() => {
-    setActiveQuestionIndex((current) =>
-      clampUserQuestionPromptIndex(current, questions.length),
-    );
+    setActiveQuestionIndex((current) => clampUserQuestionPromptIndex(current, questions.length));
   }, [questions.length]);
 
   if (questions.length === 0) {
@@ -483,10 +557,7 @@ export function UserQuestionPrompt({
   }
 
   const questionCount = questions.length;
-  const currentPageIndex = clampUserQuestionPromptIndex(
-    activeQuestionIndex,
-    questionCount,
-  );
+  const currentPageIndex = clampUserQuestionPromptIndex(activeQuestionIndex, questionCount);
   const activeQuestion = questions[currentPageIndex];
   const hasPreviousQuestion = currentPageIndex > 0;
   const hasNextQuestion = currentPageIndex < questionCount - 1;
@@ -532,9 +603,7 @@ export function UserQuestionPrompt({
     if (!multiSelect && label !== USER_QUESTION_OTHER_OPTION) {
       window.setTimeout(() => {
         setActiveQuestionIndex((current) =>
-          current === index
-            ? nextUserQuestionPromptIndex(index, questionCount)
-            : current,
+          current === index ? nextUserQuestionPromptIndex(index, questionCount) : current,
         );
       }, 120);
     }
@@ -554,12 +623,8 @@ export function UserQuestionPrompt({
     return selectedUserQuestionLabels(currentAnswer(index));
   };
 
-  const canSubmit = questions.every(
-    (_item, index) => selectedLabelsForQuestion(index).length > 0,
-  );
-  const currentQuestionAnswered = isUserQuestionSelectionAnswered(
-    currentAnswer(currentPageIndex),
-  );
+  const canSubmit = questions.every((_item, index) => selectedLabelsForQuestion(index).length > 0);
+  const currentQuestionAnswered = isUserQuestionSelectionAnswered(currentAnswer(currentPageIndex));
   const answeredCount = questions.filter((_item, index) =>
     isUserQuestionSelectionAnswered(currentAnswer(index)),
   ).length;
@@ -592,9 +657,7 @@ export function UserQuestionPrompt({
   };
 
   const isMulti = activeQuestion.multiSelect ?? false;
-  const options = Array.isArray(activeQuestion.options)
-    ? activeQuestion.options
-    : [];
+  const options = Array.isArray(activeQuestion.options) ? activeQuestion.options : [];
   const hasOther = isSelected(currentPageIndex, USER_QUESTION_OTHER_OPTION);
   const primaryActionDisabled =
     disabled || (hasNextQuestion ? !currentQuestionAnswered : !canSubmit);
@@ -608,9 +671,7 @@ export function UserQuestionPrompt({
       {activeQuestion.header || hasMultipleQuestions ? (
         <div className="user-question-card__topbar">
           {activeQuestion.header ? (
-            <div className="user-question-card__header">
-              {activeQuestion.header}
-            </div>
+            <div className="user-question-card__header">{activeQuestion.header}</div>
           ) : (
             <span aria-hidden="true" />
           )}
@@ -648,9 +709,7 @@ export function UserQuestionPrompt({
           className="user-question-card__question"
           key={`${currentPageIndex}:${activeQuestion.question}`}
         >
-          <div className="user-question-card__title">
-            {activeQuestion.question}
-          </div>
+          <div className="user-question-card__title">{activeQuestion.question}</div>
           <div className="user-question-card__options">
             {options.map((option) => (
               <button
@@ -661,14 +720,10 @@ export function UserQuestionPrompt({
                     ? " user-question-card__option--selected"
                     : ""
                 }`}
-                onClick={() =>
-                  toggleOption(currentPageIndex, isMulti, option.label)
-                }
+                onClick={() => toggleOption(currentPageIndex, isMulti, option.label)}
                 disabled={disabled}
               >
-                <span className="user-question-card__option-label">
-                  {option.label}
-                </span>
+                <span className="user-question-card__option-label">{option.label}</span>
                 {option.description ? (
                   <span className="user-question-card__option-description">
                     {option.description}
@@ -682,11 +737,7 @@ export function UserQuestionPrompt({
               }${disabled ? " user-question-card__option--disabled" : ""}`}
               onClick={() => {
                 if (!disabled) {
-                  toggleOption(
-                    currentPageIndex,
-                    isMulti,
-                    USER_QUESTION_OTHER_OPTION,
-                  );
+                  toggleOption(currentPageIndex, isMulti, USER_QUESTION_OTHER_OPTION);
                 }
               }}
               onKeyDown={(event) => {
@@ -694,19 +745,13 @@ export function UserQuestionPrompt({
                   return;
                 }
                 event.preventDefault();
-                toggleOption(
-                  currentPageIndex,
-                  isMulti,
-                  USER_QUESTION_OTHER_OPTION,
-                );
+                toggleOption(currentPageIndex, isMulti, USER_QUESTION_OTHER_OPTION);
               }}
               role="button"
               aria-pressed={hasOther}
               tabIndex={disabled ? -1 : 0}
             >
-              <span className="user-question-card__option-label">
-                其他（输入你的答案）
-              </span>
+              <span className="user-question-card__option-label">其他（输入你的答案）</span>
               {hasOther ? (
                 <input
                   ref={(node) => {
@@ -716,9 +761,7 @@ export function UserQuestionPrompt({
                   className="user-question-card__other-input"
                   placeholder="请输入你的回答..."
                   value={currentAnswer(currentPageIndex).otherText}
-                  onChange={(event) =>
-                    setOtherText(currentPageIndex, event.target.value)
-                  }
+                  onChange={(event) => setOtherText(currentPageIndex, event.target.value)}
                   disabled={disabled}
                   onClick={(event) => event.stopPropagation()}
                   onKeyDown={(event) => {
@@ -811,12 +854,9 @@ export function resolveWorkspaceRootForRun(args: {
   }
 
   const selectedProject =
-    selectedProjectId === undefined ||
-    selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID
+    selectedProjectId === undefined || selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID
       ? undefined
-      : projectsFromWorkspace.find(
-          (project) => project.id === selectedProjectId,
-        );
+      : projectsFromWorkspace.find((project) => project.id === selectedProjectId);
 
   // A project the user created without picking a folder anchors nothing on disk.
   // Returning empty lets Core resolve that project's session workspace, instead
@@ -866,9 +906,7 @@ export function partitionPickedProjectFolders(args: {
   for (const candidate of args.candidates) {
     const label = workspaceLabelForPath(candidate);
     if (
-      [...args.attachedPaths, ...accepted].some((taken) =>
-        isSameWorkspacePath(taken, candidate),
-      )
+      [...args.attachedPaths, ...accepted].some((taken) => isSameWorkspacePath(taken, candidate))
     ) {
       skipped.push(`“${label}”已经在这个项目里。`);
       continue;
@@ -896,9 +934,7 @@ export function sharedFolderTrashWarning(args: {
     .filter(
       (project) =>
         project.id !== args.actingProjectId &&
-        project.folders.some((folder) =>
-          isSameWorkspacePath(folder.path, args.folderPath),
-        ),
+        project.folders.some((folder) => isSameWorkspacePath(folder.path, args.folderPath)),
     )
     .map((project) => `“${project.label}”`);
   if (others.length === 0) {
@@ -931,9 +967,7 @@ export function resolveRunRootsForRun(args: {
     args.projectsFromWorkspace.find(
       (candidate) =>
         candidate.id === args.projectId &&
-        candidate.folders.some((folder) =>
-          isSameWorkspacePath(folder.path, root),
-        ),
+        candidate.folders.some((folder) => isSameWorkspacePath(folder.path, root)),
     ) ?? workspaceProjectForFolderPath(args.projectsFromWorkspace, root);
   if (!project) {
     return [root];
@@ -974,9 +1008,7 @@ export function resolveRunProjectForRun(args: {
     selectedProjectId !== DEFAULT_WORKSPACE_PROJECT_ID &&
     projectsFromWorkspace
       .find((project) => project.id === selectedProjectId)
-      ?.folders.some((folder) =>
-        isSameWorkspacePath(folder.path, workspaceRoot),
-      ) === true;
+      ?.folders.some((folder) => isSameWorkspacePath(folder.path, workspaceRoot)) === true;
   // 没有根就只能靠选中项来定身份，那正是零文件夹项目的情形。
   const projectId = !workspaceRoot
     ? selectedProjectId
@@ -984,24 +1016,19 @@ export function resolveRunProjectForRun(args: {
       ? selectedProjectId
       : isSameWorkspacePath(workspaceRoot, effectiveDefaultWorkspacePath)
         ? DEFAULT_WORKSPACE_PROJECT_ID
-        : workspaceProjectForFolderPath(projectsFromWorkspace, workspaceRoot)
-            ?.id;
+        : workspaceProjectForFolderPath(projectsFromWorkspace, workspaceRoot)?.id;
   if (!projectId) {
     return {};
   }
   if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
     return {
       projectId,
-      projectName: defaultWorkspacePath
-        ? workspaceLabelForPath(defaultWorkspacePath)
-        : "awaken",
+      projectName: defaultWorkspacePath ? workspaceLabelForPath(defaultWorkspacePath) : "awaken",
     };
   }
   return {
     projectId,
-    projectName: projectsFromWorkspace.find(
-      (project) => project.id === projectId,
-    )?.label,
+    projectName: projectsFromWorkspace.find((project) => project.id === projectId)?.label,
   };
 }
 
@@ -1022,10 +1049,7 @@ function sameWorkspaceProjectFolders(
   );
 }
 
-function sameWorkspaceProjects(
-  current: WorkspaceProject[],
-  next: WorkspaceProject[],
-): boolean {
+function sameWorkspaceProjects(current: WorkspaceProject[], next: WorkspaceProject[]): boolean {
   return (
     next.length === current.length &&
     next.every((project, index) => {
@@ -1046,17 +1070,11 @@ export function resolveBackendProjectOrder(
   defaultBackendProjectId: string | undefined,
   projects: WorkspaceProject[],
 ): string[] | undefined {
-  const backendById = new Map(
-    projects.map((project) => [project.id, project.backendProjectId]),
-  );
+  const backendById = new Map(projects.map((project) => [project.id, project.backendProjectId]));
   const backendIds = ids.map((id) =>
-    id === DEFAULT_WORKSPACE_PROJECT_ID
-      ? defaultBackendProjectId
-      : backendById.get(id),
+    id === DEFAULT_WORKSPACE_PROJECT_ID ? defaultBackendProjectId : backendById.get(id),
   );
-  return backendIds.every((id): id is string => Boolean(id))
-    ? backendIds
-    : undefined;
+  return backendIds.every((id): id is string => Boolean(id)) ? backendIds : undefined;
 }
 
 function formatTokenCount(value?: number): string | undefined {
@@ -1088,9 +1106,7 @@ type RuntimeContextWindow = ReturnType<
   typeof createInitialRuntimeState
 >["inspectorSummary"]["contextWindow"];
 
-type RuntimeModelUsage = NonNullable<
-  NonNullable<RuntimeContextWindow>["latestModelUsage"]
->;
+type RuntimeModelUsage = NonNullable<NonNullable<RuntimeContextWindow>["latestModelUsage"]>;
 
 type RuntimeModelIdentity = {
   id?: string;
@@ -1112,9 +1128,7 @@ function safeTokenSum(...values: number[]): number | undefined {
   return Number.isSafeInteger(total) && total >= 0 ? total : undefined;
 }
 
-function providerCurrentContextTokens(
-  usage: RuntimeModelUsage | undefined,
-): number | undefined {
+function providerCurrentContextTokens(usage: RuntimeModelUsage | undefined): number | undefined {
   if (
     !usage ||
     usage.purpose !== "agent_turn" ||
@@ -1157,18 +1171,14 @@ function usageMatchesSnapshot(
   }
   if (
     currentModel &&
-    ((usage.profileId &&
-      currentModel.id &&
-      usage.profileId !== currentModel.id) ||
+    ((usage.profileId && currentModel.id && usage.profileId !== currentModel.id) ||
       (usage.providerId &&
         currentModel.providerId &&
         usage.providerId !== currentModel.providerId) ||
       (usage.credentialRevision !== undefined &&
         currentModel.credentialRevision !== undefined &&
         usage.credentialRevision !== currentModel.credentialRevision) ||
-      (usage.modelId &&
-        currentModel.modelId &&
-        usage.modelId !== currentModel.modelId) ||
+      (usage.modelId && currentModel.modelId && usage.modelId !== currentModel.modelId) ||
       (usage.protocolFamily &&
         currentModel.protocol &&
         usage.protocolFamily !== currentModel.protocol))
@@ -1199,11 +1209,7 @@ function currentContextTokens(
   currentModel?: RuntimeModelIdentity,
 ): number | undefined {
   const usage = contextWindow?.latestModelUsage;
-  const providerActual = usageMatchesSnapshot(
-    usage,
-    contextWindow?.snapshot,
-    currentModel,
-  )
+  const providerActual = usageMatchesSnapshot(usage, contextWindow?.snapshot, currentModel)
     ? providerCurrentContextTokens(usage)
     : undefined;
   return (
@@ -1224,10 +1230,7 @@ export function contextUsageMeta(
     contextWindow?.snapshot?.effectiveInputWindowTokens ??
     contextWindow?.effectiveWindow ??
     (typeof contextWindow?.modelWindow === "number"
-      ? Math.max(
-          0,
-          contextWindow.modelWindow - (contextWindow.outputReserve ?? 0),
-        )
+      ? Math.max(0, contextWindow.modelWindow - (contextWindow.outputReserve ?? 0))
       : undefined);
   const effectiveWindow = formatTokenCount(effectiveWindowValue);
   if (usage && effectiveWindow) {
@@ -1261,10 +1264,7 @@ const CONTEXT_PANEL_CONTRIBUTIONS = [
   { id: "conversation", label: "对话" },
 ] as const;
 
-function proportionallyAllocateTokens(
-  values: number[],
-  target: number,
-): number[] {
+function proportionallyAllocateTokens(values: number[], target: number): number[] {
   const sourceTotal = values.reduce((sum, value) => sum + value, 0);
   if (target <= 0) {
     return values.map(() => 0);
@@ -1278,20 +1278,14 @@ function proportionallyAllocateTokens(
   let remainder = target - allocated.reduce((sum, value) => sum + value, 0);
   const byFraction = exact
     .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
-    .sort(
-      (left, right) =>
-        right.fraction - left.fraction || left.index - right.index,
-    );
+    .sort((left, right) => right.fraction - left.fraction || left.index - right.index);
   for (let index = 0; remainder > 0; index += 1, remainder -= 1) {
     allocated[byFraction[index % byFraction.length].index] += 1;
   }
   return allocated;
 }
 
-function reconcileContributionTokens(
-  values: number[],
-  currentTokens: number,
-): number[] {
+function reconcileContributionTokens(values: number[], currentTokens: number): number[] {
   const sourceTotal = values.reduce((sum, value) => sum + value, 0);
   const delta = currentTokens - sourceTotal;
   if (delta === 0) {
@@ -1322,10 +1316,8 @@ export function contextUsagePanelData(
   }
   const snapshot = contextWindow.snapshot;
   const currentInputTokens = currentContextTokens(contextWindow, currentModel);
-  const outputReserveTokens =
-    snapshot?.outputReserveTokens ?? contextWindow.outputReserve ?? 0;
-  const modelWindowTokens =
-    snapshot?.modelWindowTokens ?? contextWindow.modelWindow;
+  const outputReserveTokens = snapshot?.outputReserveTokens ?? contextWindow.outputReserve ?? 0;
+  const modelWindowTokens = snapshot?.modelWindowTokens ?? contextWindow.modelWindow;
   const effectiveInputWindowTokens =
     snapshot?.effectiveInputWindowTokens ??
     contextWindow.effectiveWindow ??
@@ -1344,20 +1336,15 @@ export function contextUsagePanelData(
     CONTEXT_PANEL_CONTRIBUTIONS.map((contribution) => contribution.id),
   );
   const hasRetainedContributionContract =
-    ((snapshot?.schemaVersion === 4 &&
-      snapshot.estimatorId === "awaken_leaf_v4") ||
-      (snapshot?.schemaVersion === 3 &&
-        snapshot.estimatorId === "awaken_leaf_v3")) &&
-    rawContributions.every((contribution) =>
-      supportedKinds.has(contribution.kind),
-    );
+    ((snapshot?.schemaVersion === 4 && snapshot.estimatorId === "awaken_leaf_v4") ||
+      (snapshot?.schemaVersion === 3 && snapshot.estimatorId === "awaken_leaf_v3")) &&
+    rawContributions.every((contribution) => supportedKinds.has(contribution.kind));
   const tokensByKind = new Map<string, number>();
   if (hasRetainedContributionContract) {
     for (const contribution of rawContributions) {
       tokensByKind.set(
         contribution.kind,
-        (tokensByKind.get(contribution.kind) ?? 0) +
-          contribution.estimatedTokens,
+        (tokensByKind.get(contribution.kind) ?? 0) + contribution.estimatedTokens,
       );
     }
   }
@@ -1371,9 +1358,7 @@ export function contextUsagePanelData(
     classifiedTokens === snapshot?.estimatedInputTokens;
   const reconciledTokens = hasCompleteBreakdown
     ? reconcileContributionTokens(
-        CONTEXT_PANEL_CONTRIBUTIONS.map(
-          (contribution) => tokensByKind.get(contribution.id) ?? 0,
-        ),
+        CONTEXT_PANEL_CONTRIBUTIONS.map((contribution) => tokensByKind.get(contribution.id) ?? 0),
         currentInputTokens,
       )
     : [];
@@ -1383,9 +1368,7 @@ export function contextUsagePanelData(
     modelWindowTokens,
     outputReserveTokens,
     autoCompactThresholdTokens:
-      snapshot?.autoCompactThresholdTokens ??
-      contextWindow.autoCompactThreshold ??
-      0,
+      snapshot?.autoCompactThresholdTokens ?? contextWindow.autoCompactThreshold ?? 0,
     contributions: hasCompleteBreakdown
       ? CONTEXT_PANEL_CONTRIBUTIONS.map((contribution, index) => ({
           ...contribution,
@@ -1398,8 +1381,7 @@ export function contextUsagePanelData(
           cacheMode: contextWindow.latestModelUsage.cacheMode,
           cacheKeyApplied: contextWindow.latestModelUsage.cacheKeyApplied,
           cachedInputTokens: contextWindow.latestModelUsage.cachedInputTokens,
-          uncachedInputTokens:
-            contextWindow.latestModelUsage.uncachedInputTokens,
+          uncachedInputTokens: contextWindow.latestModelUsage.uncachedInputTokens,
           cacheWriteTokens: contextWindow.latestModelUsage.cacheWriteTokens,
           inputTokens: contextWindow.latestModelUsage.inputTokens,
           outputTokens: contextWindow.latestModelUsage.outputTokens,
@@ -1473,20 +1455,14 @@ const INSPECTOR_FILE_ITEMS = [
   },
 ];
 const STORED_THEME_KEY = "awaken:appearance:theme";
-const DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY =
-  "awaken:memory:dreamReceiptThreadAssignments";
+const DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY = "awaken:memory:dreamReceiptThreadAssignments";
 const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function readStoredNumber(
-  key: string,
-  fallback: number,
-  min: number,
-  max: number,
-): number {
+function readStoredNumber(key: string, fallback: number, min: number, max: number): number {
   if (typeof window === "undefined" || !window.localStorage) {
     return fallback;
   }
@@ -1566,9 +1542,7 @@ function writeStoredValue(key: string, value: string): void {
 }
 
 function dreamTaskReceiptEvent(task: MemoryDreamTask): AguiEvent | undefined {
-  if (
-    !["completed", "failed", "cancelled", "interrupted"].includes(task.status)
-  ) {
+  if (!["completed", "failed", "cancelled", "interrupted"].includes(task.status)) {
     return undefined;
   }
   const suffix = task.status.toUpperCase();
@@ -1596,11 +1570,7 @@ export function App() {
   const workspaceTargetPathRef = useRef("");
   const runtimeClient = runtimeClientRef.current;
   const slashProviders = useMemo(
-    () => [
-      skillSlashProvider((workspaceRoot) =>
-        runtimeClient.listSkills(workspaceRoot),
-      ),
-    ],
+    () => [skillSlashProvider((workspaceRoot) => runtimeClient.listSkills(workspaceRoot))],
     [runtimeClient],
   );
 
@@ -1611,15 +1581,12 @@ export function App() {
   );
   const activeThreadIdRef = useRef(runtimeState.activeThreadId);
   activeThreadIdRef.current = runtimeState.activeThreadId;
-  const dreamReceiptThreadAssignmentsRef =
-    useRef<DreamReceiptThreadAssignments>(
-      parseDreamReceiptThreadAssignments(
-        readStoredString(DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY),
-      ),
-    );
-  const backgroundThreadActivationRef = useRef<(threadId: string) => void>(
-    () => {},
+  const dreamReceiptThreadAssignmentsRef = useRef<DreamReceiptThreadAssignments>(
+    parseDreamReceiptThreadAssignments(
+      readStoredString(DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY),
+    ),
   );
+  const backgroundThreadActivationRef = useRef<(threadId: string) => void>(() => {});
   backgroundThreadActivationRef.current = async (threadId: string) => {
     // Refresh the thread authority before selecting: scheduled tasks can create
     // a dedicated thread in the background while other pages are mounted.
@@ -1661,37 +1628,27 @@ export function App() {
 
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
-  const [resolvingExternalInteractionId, setResolvingExternalInteractionId] =
-    useState<string | null>(null);
-  const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(
-    null,
-  );
-  const [answeringUserQuestionId, setAnsweringUserQuestionId] = useState<
+  const [resolvingExternalInteractionId, setResolvingExternalInteractionId] = useState<
     string | null
   >(null);
+  const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(null);
+  const [answeringUserQuestionId, setAnsweringUserQuestionId] = useState<string | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
-  const [modelProfiles, setModelProfiles] = useState<
-    RuntimeModelProfileSummary[]
-  >([]);
+  const [modelProfiles, setModelProfiles] = useState<RuntimeModelProfileSummary[]>([]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const [
-    modelSettingsInitialModelSection,
-    setModelSettingsInitialModelSection,
-  ] = useState<"configure" | "configured">("configure");
-  const [runCreateIssue, setRunCreateIssue] =
-    useState<DesktopOperationIssue | null>(null);
+  const [modelSettingsInitialModelSection, setModelSettingsInitialModelSection] = useState<
+    "configure" | "configured"
+  >("configure");
+  const [runCreateIssue, setRunCreateIssue] = useState<DesktopOperationIssue | null>(null);
   const [appearanceThemePreference, setAppearanceThemePreference] =
     useState<AwakenThemePreference>(readStoredThemePreference);
-  const [systemAppearanceTheme, setSystemAppearanceTheme] =
-    useState<AwakenTheme>(readSystemTheme);
+  const [systemAppearanceTheme, setSystemAppearanceTheme] = useState<AwakenTheme>(readSystemTheme);
   const appearanceTheme = effectiveThemeForPreference(
     appearanceThemePreference,
     systemAppearanceTheme,
   );
   const [appearanceSaving, setAppearanceSaving] = useState(false);
-  const [appearanceMessage, setAppearanceMessage] = useState<string | null>(
-    null,
-  );
+  const [appearanceMessage, setAppearanceMessage] = useState<string | null>(null);
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
   const profileButtonRef = useRef<HTMLDivElement>(null);
   const [contextUsagePanelOpen, setContextUsagePanelOpen] = useState(false);
@@ -1704,23 +1661,16 @@ export function App() {
   const [renameDraft, setRenameDraft] = useState("");
   const [renameSubmitting, setRenameSubmitting] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
-  const [pendingProjectMode, setPendingProjectMode] =
-    useState<"local">("local");
+  const [pendingProjectMode, setPendingProjectMode] = useState<"local">("local");
   const [pickingWorkspace, setPickingWorkspace] = useState(false);
   const [draftProjectFolders, setDraftProjectFolders] = useState<string[]>([]);
   const [draftPrimaryFolder, setDraftPrimaryFolder] = useState<string>("");
   const [draftProjectName, setDraftProjectName] = useState<string>("");
   const [createProjectSubmitting, setCreateProjectSubmitting] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
-  const [projectFolderBusyPath, setProjectFolderBusyPath] = useState<
-    string | undefined
-  >(undefined);
-  const [projectsFromWorkspace, setProjectsFromWorkspace] = useState<
-    WorkspaceProject[]
-  >([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<
-    string | undefined
-  >(undefined);
+  const [projectFolderBusyPath, setProjectFolderBusyPath] = useState<string | undefined>(undefined);
+  const [projectsFromWorkspace, setProjectsFromWorkspace] = useState<WorkspaceProject[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(undefined);
   const [conversationScope, setConversationScope] = useState(true);
   useEffect(
     () =>
@@ -1734,43 +1684,30 @@ export function App() {
           threadId,
         );
         dreamReceiptThreadAssignmentsRef.current = assignments;
-        writeStoredValue(
-          DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY,
-          JSON.stringify(assignments),
-        );
+        writeStoredValue(DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(assignments));
         const event = dreamTaskReceiptEvent(task);
-        if (event)
-          dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
+        if (event) dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
       }),
     [runtimeClient, selectedProjectId],
   );
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([]);
-  const [conversationSectionExpanded, setConversationSectionExpanded] =
-    useState(true);
+  const [conversationSectionExpanded, setConversationSectionExpanded] = useState(true);
   const [projectOrderIds, setProjectOrderIds] = useState<string[]>([]);
-  const [projectReorderSubmitting, setProjectReorderSubmitting] =
-    useState(false);
+  const [projectReorderSubmitting, setProjectReorderSubmitting] = useState(false);
   const projectReorderSubmittingRef = useRef(false);
   const [removedProjectIds, setRemovedProjectIds] = useState<string[]>([]);
-  const [defaultBackendProjectId, setDefaultBackendProjectId] = useState<
-    string | undefined
-  >(undefined);
-  const [defaultProjectFolders, setDefaultProjectFolders] = useState<
-    WorkspaceProjectFolder[]
-  >([]);
-  const [pendingProjectDelete, setPendingProjectDelete] =
-    useState<PendingProjectDelete | null>(null);
+  const [defaultBackendProjectId, setDefaultBackendProjectId] = useState<string | undefined>(
+    undefined,
+  );
+  const [defaultProjectFolders, setDefaultProjectFolders] = useState<WorkspaceProjectFolder[]>([]);
+  const [pendingProjectDelete, setPendingProjectDelete] = useState<PendingProjectDelete | null>(
+    null,
+  );
   const [projectDeleteSubmitting, setProjectDeleteSubmitting] = useState(false);
-  const [trackedTrashOperations, setTrackedTrashOperations] = useState<
-    TrackedTrashOperation[]
-  >(() =>
-    parseTrackedTrashOperations(
-      readStoredString(TRACKED_TRASH_OPERATIONS_STORAGE_KEY),
-    ),
+  const [trackedTrashOperations, setTrackedTrashOperations] = useState<TrackedTrashOperation[]>(
+    () => parseTrackedTrashOperations(readStoredString(TRACKED_TRASH_OPERATIONS_STORAGE_KEY)),
   );
-  const defaultProjectRemoved = removedProjectIds.includes(
-    DEFAULT_WORKSPACE_PROJECT_ID,
-  );
+  const defaultProjectRemoved = removedProjectIds.includes(DEFAULT_WORKSPACE_PROJECT_ID);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     readStoredNumber(
@@ -1793,34 +1730,27 @@ export function App() {
   );
   const [fileWorkspaceOpen, setFileWorkspaceOpen] = useState(false);
   const [fileWorkspaceExpanded, setFileWorkspaceExpanded] = useState(false);
-  const [expandedWorkspaceSurface, setExpandedWorkspaceSurface] = useState<
-    ExpandedWorkspaceSurface
-  >("file");
+  const [expandedWorkspaceSurface, setExpandedWorkspaceSurface] =
+    useState<ExpandedWorkspaceSurface>("file");
   const [expandedFileComposerIdleMode, setExpandedFileComposerIdleMode] =
     useState<ExpandedFileComposerIdleMode>("full");
   const [expandedFileComposerTrackedRun, setExpandedFileComposerTrackedRun] =
     useState<ExpandedFileComposerTrackedRun>();
-  const [fileWorkspaceMode, setFileWorkspaceMode] =
-    useState<ProjectFileWorkspaceMode>("files");
+  const [fileWorkspaceMode, setFileWorkspaceMode] = useState<ProjectFileWorkspaceMode>("files");
   const [fileWorkspaceTabsState, dispatchFileWorkspaceTabs] = useReducer(
     projectFileTabsReducer,
     undefined,
     createProjectFileTabsState,
   );
-  const [selectedSubagentTaskId, setSelectedSubagentTaskId] = useState<
-    string | undefined
-  >();
-  const [cancellingSubagentTaskId, setCancellingSubagentTaskId] = useState<
-    string | undefined
-  >();
+  const [selectedSubagentTaskId, setSelectedSubagentTaskId] = useState<string | undefined>();
+  const [cancellingSubagentTaskId, setCancellingSubagentTaskId] = useState<string | undefined>();
   const [promptBubbleModeByTurnId, setPromptBubbleModeByTurnId] = useState<
     Record<string, "collapsed" | "expanded">
   >({});
-  const [executionProcessOpenByTurnId, setExecutionProcessOpenByTurnId] =
-    useState<Record<string, boolean>>({});
-  const [composerAttachments, setComposerAttachments] = useState<
-    ComposerDraftAttachment[]
-  >([]);
+  const [executionProcessOpenByTurnId, setExecutionProcessOpenByTurnId] = useState<
+    Record<string, boolean>
+  >({});
+  const [composerAttachments, setComposerAttachments] = useState<ComposerDraftAttachment[]>([]);
   const [composerTokens, setComposerTokens] = useState<ComposerToken[]>([]);
   const [composerTokenPlacements, setComposerTokenPlacements] = useState<
     Record<string, ComposerTokenPlacement>
@@ -1828,12 +1758,11 @@ export function App() {
   const [composerTokenLeadingTexts, setComposerTokenLeadingTexts] = useState<
     Record<string, string>
   >({});
+  const composerInputSelectionRef = useRef<ComposerBarInputSelection | undefined>(undefined);
   const [slashActions, setSlashActions] = useState<SlashAction[]>([]);
   const [slashLoading, setSlashLoading] = useState(false);
   const [slashError, setSlashError] = useState<string | null>(null);
-  const [slashActiveActionId, setSlashActiveActionId] = useState<
-    string | undefined
-  >();
+  const [slashActiveActionId, setSlashActiveActionId] = useState<string | undefined>();
   const isBusy =
     runtimeState.phase === "starting" ||
     runtimeState.phase === "running" ||
@@ -1842,9 +1771,7 @@ export function App() {
   const visibleNarrativeItems = useMemo<RunNarrativeItem[]>(() => {
     const narrativeItems: RunNarrativeItem[] = [
       ...runtimeState.narrative.committedItems,
-      ...(runtimeState.narrative.activeItem
-        ? [runtimeState.narrative.activeItem]
-        : []),
+      ...(runtimeState.narrative.activeItem ? [runtimeState.narrative.activeItem] : []),
     ];
     return projectVisibleNarrativeItems({ items: narrativeItems, isBusy });
   }, [isBusy, runtimeState.narrative]);
@@ -1858,14 +1785,11 @@ export function App() {
   }, [runtimeState.narrative.committedItems]);
   const selectedSubagent =
     subagentTasks.find((task) => task.taskId === selectedSubagentTaskId) ??
-    (selectedSubagentTaskId
-      ? undefined
-      : subagentTasks[subagentTasks.length - 1]);
+    (selectedSubagentTaskId ? undefined : subagentTasks[subagentTasks.length - 1]);
   const runningSubagentCount = subagentTasks.filter((task) =>
     ["queued", "running", "cancelling"].includes(task.status),
   ).length;
-  const desktopReady =
-    runtimeState.supervisorStatus === "running" && runtimeInfo !== null;
+  const desktopReady = runtimeState.supervisorStatus === "running" && runtimeInfo !== null;
   const desktopStarting =
     runtimeState.supervisorStatus === null ||
     runtimeState.supervisorStatus === "starting" ||
@@ -1878,18 +1802,13 @@ export function App() {
       return;
     }
     document.documentElement.dataset.awTheme = appearanceTheme;
-    document.documentElement.dataset.awThemePreference =
-      appearanceThemePreference;
-    document.documentElement.style.colorScheme =
-      appearanceTheme === "dark" ? "dark" : "light";
+    document.documentElement.dataset.awThemePreference = appearanceThemePreference;
+    document.documentElement.style.colorScheme = appearanceTheme === "dark" ? "dark" : "light";
     writeStoredValue(STORED_THEME_KEY, appearanceThemePreference);
   }, [appearanceTheme, appearanceThemePreference]);
 
   useEffect(() => {
-    if (
-      typeof window === "undefined" ||
-      typeof window.matchMedia !== "function"
-    ) {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
       return;
     }
 
@@ -1952,18 +1871,12 @@ export function App() {
   }, [inspectorWidth]);
 
   useEffect(() => {
-    writeStoredValue(
-      "awaken:layout:inspectorCollapsed",
-      String(inspectorCollapsed),
-    );
+    writeStoredValue("awaken:layout:inspectorCollapsed", String(inspectorCollapsed));
     inspectorCollapsedValueRef.current = inspectorCollapsed;
   }, [inspectorCollapsed]);
 
   useEffect(() => {
-    writeStoredValue(
-      TRACKED_TRASH_OPERATIONS_STORAGE_KEY,
-      JSON.stringify(trackedTrashOperations),
-    );
+    writeStoredValue(TRACKED_TRASH_OPERATIONS_STORAGE_KEY, JSON.stringify(trackedTrashOperations));
   }, [trackedTrashOperations]);
 
   useEffect(() => {
@@ -1971,10 +1884,7 @@ export function App() {
   }, [workspacePath]);
 
   useEffect(() => {
-    if (
-      typeof window === "undefined" ||
-      typeof window.matchMedia !== "function"
-    ) {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
       return;
     }
 
@@ -1982,8 +1892,7 @@ export function App() {
     const handleResponsiveInspector = (matches: boolean) => {
       if (matches) {
         if (inspectorCollapsedBeforeResponsiveRef.current === null) {
-          inspectorCollapsedBeforeResponsiveRef.current =
-            inspectorCollapsedValueRef.current;
+          inspectorCollapsedBeforeResponsiveRef.current = inspectorCollapsedValueRef.current;
           setInspectorCollapsed(true);
         }
         return;
@@ -2089,10 +1998,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (
-      rendererReadyNotifiedRef.current ||
-      (!desktopReady && !desktopNeedsRestart)
-    ) {
+    if (rendererReadyNotifiedRef.current || (!desktopReady && !desktopNeedsRestart)) {
       return;
     }
 
@@ -2105,12 +2011,8 @@ export function App() {
       } catch {
         // Font readiness is a polish signal only; rendering should continue.
       }
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => resolve()),
-      );
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => resolve()),
-      );
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       if (!cancelled) {
         runtimeClient.notifyRendererReady();
       }
@@ -2164,13 +2066,9 @@ export function App() {
   }, []);
 
   function applyRuntimeProjects(projects: RuntimeProject[]): void {
-    const configuredDefaultWorkspacePath =
-      runtimeInfo?.defaultWorkspace ?? workspacePath;
+    const configuredDefaultWorkspacePath = runtimeInfo?.defaultWorkspace ?? workspacePath;
     const defaultProject = projects.find((project) =>
-      isSameWorkspacePath(
-        project.workspaceRoot,
-        configuredDefaultWorkspacePath,
-      ),
+      isSameWorkspacePath(project.workspaceRoot, configuredDefaultWorkspacePath),
     );
     setDefaultBackendProjectId(defaultProject?.projectId);
     const nextDefaultFolders =
@@ -2180,23 +2078,16 @@ export function App() {
         isPrimary: folder.isPrimary,
       })) ?? [];
     setDefaultProjectFolders((current) =>
-      sameWorkspaceProjectFolders(current, nextDefaultFolders)
-        ? current
-        : nextDefaultFolders,
+      sameWorkspaceProjectFolders(current, nextDefaultFolders) ? current : nextDefaultFolders,
     );
     setRemovedProjectIds(
-      defaultProject && defaultProject.state !== "active"
-        ? [DEFAULT_WORKSPACE_PROJECT_ID]
-        : [],
+      defaultProject && defaultProject.state !== "active" ? [DEFAULT_WORKSPACE_PROJECT_ID] : [],
     );
 
     const nextProjectOrderIds = projects
       .filter((project) => project.state === "active")
       .map((project) =>
-        isSameWorkspacePath(
-          project.workspaceRoot,
-          configuredDefaultWorkspacePath,
-        )
+        isSameWorkspacePath(project.workspaceRoot, configuredDefaultWorkspacePath)
           ? DEFAULT_WORKSPACE_PROJECT_ID
           : project.projectId,
       );
@@ -2211,16 +2102,12 @@ export function App() {
       .filter(
         (project) =>
           project.state === "active" &&
-          !isSameWorkspacePath(
-            project.workspaceRoot,
-            configuredDefaultWorkspacePath,
-          ),
+          !isSameWorkspacePath(project.workspaceRoot, configuredDefaultWorkspacePath),
       )
       .map<WorkspaceProject>((project) => ({
         id: project.projectId,
         backendProjectId: project.projectId,
-        label:
-          project.displayName || workspaceLabelForPath(project.workspaceRoot),
+        label: project.displayName || workspaceLabelForPath(project.workspaceRoot),
         path: project.workspaceRoot,
         folders: project.folders.map<WorkspaceProjectFolder>((folder) => ({
           path: folder.path,
@@ -2269,9 +2156,7 @@ export function App() {
         if (!cancelled) {
           dispatch({ type: "run/threadsLoaded", threads });
           if (startedThreadId) {
-            const startedThread = threads.find(
-              (thread) => thread.threadId === startedThreadId,
-            );
+            const startedThread = threads.find((thread) => thread.threadId === startedThreadId);
             if (startedThread) {
               const projectId = startedThread.projectId;
               if (projectId) {
@@ -2316,9 +2201,7 @@ export function App() {
       const checked = await Promise.all(
         trackedTrashOperations.map(async (tracked) => {
           try {
-            const operation = await runtimeClient.getProjectOperation(
-              tracked.operationId,
-            );
+            const operation = await runtimeClient.getProjectOperation(tracked.operationId);
             projectOperationPollFailuresRef.current.delete(tracked.operationId);
             return {
               tracked,
@@ -2326,9 +2209,7 @@ export function App() {
               state: projectOperationReconciliationState(operation),
             };
           } catch (error) {
-            if (
-              !projectOperationPollFailuresRef.current.has(tracked.operationId)
-            ) {
+            if (!projectOperationPollFailuresRef.current.has(tracked.operationId)) {
               projectOperationPollFailuresRef.current.add(tracked.operationId);
               console.warn("project_operation_poll_failed", {
                 operationId: tracked.operationId,
@@ -2357,27 +2238,18 @@ export function App() {
             const project = projects.find(
               (candidate) => candidate.projectId === tracked.backendProjectId,
             );
-            return canReconcileTrackedTrashOperation(
-              state,
-              project,
-              tracked.folderPath,
-            );
+            return canReconcileTrackedTrashOperation(state, project, tracked.folderPath);
           });
 
           if (reconciled.length > 0) {
             applyRuntimeProjects(projects);
-            const reconciledIds = new Set(
-              reconciled.map(({ tracked }) => tracked.operationId),
-            );
+            const reconciledIds = new Set(reconciled.map(({ tracked }) => tracked.operationId));
             const failed = reconciled.filter(({ state }) => state === "failed");
             if (failed.length > 0) {
               setExpandedProjectIds((current) => {
                 const next = [...current];
                 for (const { tracked } of failed) {
-                  if (
-                    tracked.wasExpanded &&
-                    !next.includes(tracked.projectId)
-                  ) {
+                  if (tracked.wasExpanded && !next.includes(tracked.projectId)) {
                     next.push(tracked.projectId);
                   }
                 }
@@ -2392,9 +2264,7 @@ export function App() {
               );
             }
             setTrackedTrashOperations((current) =>
-              current.filter(
-                (tracked) => !reconciledIds.has(tracked.operationId),
-              ),
+              current.filter((tracked) => !reconciledIds.has(tracked.operationId)),
             );
             for (const operationId of reconciledIds) {
               projectOperationPollFailuresRef.current.delete(operationId);
@@ -2540,15 +2410,11 @@ export function App() {
       await runtimeClient.setDefaultModelProfile(profileId);
       await refreshRuntimeInfoNow();
     } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : "Failed to switch model",
-      );
+      setNotice(error instanceof Error ? error.message : "Failed to switch model");
     }
   }
 
-  async function handleAppearanceThemeChange(
-    theme: AwakenThemePreference,
-  ): Promise<void> {
+  async function handleAppearanceThemeChange(theme: AwakenThemePreference): Promise<void> {
     if (theme === appearanceThemePreference || appearanceSaving) {
       return;
     }
@@ -2562,9 +2428,7 @@ export function App() {
       setAppearanceThemePreference(preferences.theme);
     } catch (error) {
       setAppearanceThemePreference(previousTheme);
-      setAppearanceMessage(
-        error instanceof Error ? error.message : "Failed to save theme",
-      );
+      setAppearanceMessage(error instanceof Error ? error.message : "Failed to save theme");
     } finally {
       setAppearanceSaving(false);
     }
@@ -2588,20 +2452,13 @@ export function App() {
         resolution,
       );
     } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Failed to resolve external interaction",
-      );
+      setNotice(error instanceof Error ? error.message : "Failed to resolve external interaction");
     } finally {
       setResolvingExternalInteractionId(null);
     }
   }
 
-  async function resolveActiveACPPermission(
-    optionId: string,
-    cancelled = false,
-  ): Promise<void> {
+  async function resolveActiveACPPermission(optionId: string, cancelled = false): Promise<void> {
     if (!runtimeState.runId || !activeExternalInteraction) {
       return;
     }
@@ -2618,11 +2475,7 @@ export function App() {
         cancelled,
       );
     } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Failed to resolve ACP permission",
-      );
+      setNotice(error instanceof Error ? error.message : "Failed to resolve ACP permission");
     } finally {
       setResolvingExternalInteractionId(null);
     }
@@ -2690,28 +2543,18 @@ export function App() {
     dispatch({ type: "run/reset" });
   }
 
-  const enabledModelProfiles = modelProfiles.filter(
-    (profile) => profile.enabled,
-  );
+  const enabledModelProfiles = modelProfiles.filter((profile) => profile.enabled);
   const selectedModelProfile =
-    enabledModelProfiles.find(
-      (profile) => profile.id === runtimeInfo?.modelProfile?.id,
-    ) ??
+    enabledModelProfiles.find((profile) => profile.id === runtimeInfo?.modelProfile?.id) ??
     enabledModelProfiles.find((profile) => profile.isDefault) ??
     enabledModelProfiles[0];
   const defaultWorkspacePath = runtimeInfo?.defaultWorkspace ?? workspacePath;
-  const effectiveDefaultWorkspacePath = defaultProjectRemoved
-    ? undefined
-    : defaultWorkspacePath;
+  const effectiveDefaultWorkspacePath = defaultProjectRemoved ? undefined : defaultWorkspacePath;
   // Without a user-selected workspace there is no implicit default project;
   // 项目工作区 shows a true empty state until the user opens/adds a project.
-  const hasDefaultWorkspaceProject = Boolean(
-    effectiveDefaultWorkspacePath?.trim(),
-  );
+  const hasDefaultWorkspaceProject = Boolean(effectiveDefaultWorkspacePath?.trim());
   const activeThread = runtimeState.activeThreadId
-    ? runtimeState.threads.find(
-        (thread) => thread.threadId === runtimeState.activeThreadId,
-      )
+    ? runtimeState.threads.find((thread) => thread.threadId === runtimeState.activeThreadId)
     : undefined;
   const activeThreadWorkspacePath = activeThread?.workspaceRoot;
   const activeThreadProjectId = activeThread
@@ -2724,9 +2567,7 @@ export function App() {
         ? defaultProjectRemoved
           ? undefined
           : defaultWorkspacePath
-        : projectsFromWorkspace.find(
-            (project) => project.id === selectedProjectId,
-          )?.path;
+        : projectsFromWorkspace.find((project) => project.id === selectedProjectId)?.path;
   const workspaceRootForRun = resolveWorkspaceRootForRun({
     workspacePath,
     workspaceTargetPath: workspaceTargetPathRef.current,
@@ -2740,19 +2581,18 @@ export function App() {
   const selectedFolderlessProject =
     selectedProjectId !== undefined &&
     selectedProjectId !== DEFAULT_WORKSPACE_PROJECT_ID &&
-    projectsFromWorkspace.find((project) => project.id === selectedProjectId)
-      ?.folders.length === 0;
+    projectsFromWorkspace.find((project) => project.id === selectedProjectId)?.folders.length === 0;
   const isWorkspaceValid =
     conversationScope ||
     selectedFolderlessProject ||
-    (workspaceRootForRun !== "" &&
-      /^([A-Za-z]:[\\/]|\/)/.test(workspaceRootForRun));
+    (workspaceRootForRun !== "" && /^([A-Za-z]:[\\/]|\/)/.test(workspaceRootForRun));
   const {
     composerValue,
     setComposerValue,
     clearComposerValue,
     restoreComposerValue,
     composerFocusRequest,
+    composerFocusOffset,
     requestComposerFocus,
     composerBarState,
     composerRuntimePanels,
@@ -2770,21 +2610,15 @@ export function App() {
   const composerInlineTextPrefix = useMemo(
     () =>
       composerTokens
-        .map(
-          (token) =>
-            token.leadingText ?? composerTokenLeadingTexts[token.id] ?? "",
-        )
+        .map((token) => token.leadingText ?? composerTokenLeadingTexts[token.id] ?? "")
         .join(""),
     [composerTokenLeadingTexts, composerTokens],
   );
-  const trimmedEffectiveComposerValue =
-    `${composerInlineTextPrefix}${composerValue}`.trim();
+  const trimmedEffectiveComposerValue = `${composerInlineTextPrefix}${composerValue}`.trim();
   const slashTrigger = slashTriggerFromComposerValue(composerValue);
-  const slashPaletteOpen =
-    Boolean(slashTrigger) && desktopReady && isWorkspaceValid && !isBusy;
+  const slashPaletteOpen = Boolean(slashTrigger) && desktopReady && isWorkspaceValid && !isBusy;
   const filteredSlashActions = useMemo(
-    () =>
-      filterSlashActions(slashActions, slashTrigger?.query ?? "").slice(0, 24),
+    () => filterSlashActions(slashActions, slashTrigger?.query ?? "").slice(0, 24),
     [slashActions, slashTrigger?.query],
   );
   const composerBarTokens = useMemo(
@@ -2805,16 +2639,7 @@ export function App() {
   const composerBarSlashActions = useMemo(
     () =>
       filteredSlashActions.map(
-        ({
-          id,
-          type,
-          label,
-          description,
-          icon,
-          disabled,
-          disabledReason,
-          preview,
-        }) => ({
+        ({ id, type, label, description, icon, disabled, disabledReason, preview }) => ({
           id,
           type,
           label,
@@ -2862,9 +2687,7 @@ export function App() {
           return;
         }
         setSlashActions([]);
-        setSlashError(
-          error instanceof Error ? error.message : "斜杠菜单加载失败",
-        );
+        setSlashError(error instanceof Error ? error.message : "斜杠菜单加载失败");
       })
       .finally(() => {
         if (!cancelled) {
@@ -2885,9 +2708,7 @@ export function App() {
       (action) => action.id === slashActiveActionId,
     );
     if (!activeStillVisible) {
-      setSlashActiveActionId(
-        firstSelectableSlashAction(filteredSlashActions)?.id,
-      );
+      setSlashActiveActionId(firstSelectableSlashAction(filteredSlashActions)?.id);
     }
   }, [filteredSlashActions, slashActiveActionId, slashPaletteOpen]);
 
@@ -2916,8 +2737,7 @@ export function App() {
       ? "Starting"
       : undefined;
   useEffect(() => {
-    const defaultProjectAvailable =
-      !defaultProjectRemoved && hasDefaultWorkspaceProject;
+    const defaultProjectAvailable = !defaultProjectRemoved && hasDefaultWorkspaceProject;
     const knownProjectIds = new Set([
       ...(defaultProjectAvailable ? [DEFAULT_WORKSPACE_PROJECT_ID] : []),
       ...projectsFromWorkspace.map((project) => project.id),
@@ -2934,22 +2754,14 @@ export function App() {
     );
     setExpandedProjectIds((current) => {
       const next = current.filter((id) => knownProjectIds.has(id));
-      return !defaultProjectAvailable ||
-        next.includes(DEFAULT_WORKSPACE_PROJECT_ID)
+      return !defaultProjectAvailable || next.includes(DEFAULT_WORKSPACE_PROJECT_ID)
         ? next
         : [DEFAULT_WORKSPACE_PROJECT_ID, ...next];
     });
-  }, [
-    defaultProjectRemoved,
-    hasDefaultWorkspaceProject,
-    projectsFromWorkspace,
-  ]);
+  }, [defaultProjectRemoved, hasDefaultWorkspaceProject, projectsFromWorkspace]);
 
   useEffect(() => {
-    if (
-      pathForSelectedProject &&
-      !isSameWorkspacePath(workspacePath, pathForSelectedProject)
-    ) {
+    if (pathForSelectedProject && !isSameWorkspacePath(workspacePath, pathForSelectedProject)) {
       workspaceTargetPathRef.current = pathForSelectedProject;
       setWorkspacePath(pathForSelectedProject);
     }
@@ -2958,30 +2770,20 @@ export function App() {
   const projectLabelById = new Map<string, string>([
     [
       DEFAULT_WORKSPACE_PROJECT_ID,
-      defaultWorkspacePath
-        ? workspaceLabelForPath(defaultWorkspacePath)
-        : "awaken",
+      defaultWorkspacePath ? workspaceLabelForPath(defaultWorkspacePath) : "awaken",
     ],
-    ...projectsFromWorkspace.map(
-      (project) => [project.id, project.label] as const,
-    ),
+    ...projectsFromWorkspace.map((project) => [project.id, project.label] as const),
   ]);
   const removedProjectIdSet = new Set(removedProjectIds);
   const workspaceLabelProjectId = activeThreadProjectId ?? selectedProjectId;
   useEffect(() => {
     dispatchFileWorkspaceTabs({ type: "reset" });
   }, [workspaceLabelProjectId]);
-  const workspaceLabelPath =
-    activeThreadWorkspacePath ?? pathForSelectedProject;
-  const activeProjectLabel =
-    conversationScope
-      ? "选择项目"
-      : (workspaceLabelProjectId
-          ? projectLabelById.get(workspaceLabelProjectId)
-          : undefined) ??
-        (workspaceLabelPath
-          ? workspaceLabelForPath(workspaceLabelPath)
-          : "awaken");
+  const workspaceLabelPath = activeThreadWorkspacePath ?? pathForSelectedProject;
+  const activeProjectLabel = conversationScope
+    ? "选择项目"
+    : ((workspaceLabelProjectId ? projectLabelById.get(workspaceLabelProjectId) : undefined) ??
+      (workspaceLabelPath ? workspaceLabelForPath(workspaceLabelPath) : "awaken"));
   const contextMeta = contextUsageMeta(
     runtimeState.inspectorSummary.contextWindow,
     selectedModelProfile,
@@ -2995,9 +2797,7 @@ export function App() {
   function closeContextUsagePanel(returnFocus: boolean): void {
     setContextUsagePanelOpen(false);
     if (returnFocus && typeof window !== "undefined") {
-      window.requestAnimationFrame(() =>
-        contextUsageTriggerRef.current?.focus(),
-      );
+      window.requestAnimationFrame(() => contextUsageTriggerRef.current?.focus());
     }
   }
 
@@ -3109,10 +2909,7 @@ export function App() {
     return project?.backendProjectId;
   }
 
-  function requestProjectDelete(
-    projectId: string,
-    action: ProjectDeleteAction,
-  ): void {
+  function requestProjectDelete(projectId: string, action: ProjectDeleteAction): void {
     const backendProjectId = backendProjectIdFor(projectId);
     if (!backendProjectId) {
       setNotice("项目正在初始化，请稍后重试。");
@@ -3235,24 +3032,19 @@ export function App() {
   }
 
   const conversationThreads = runtimeState.threads.filter(
-    (thread) =>
-      projectIdForThread(thread, effectiveDefaultWorkspacePath) === undefined,
+    (thread) => projectIdForThread(thread, effectiveDefaultWorkspacePath) === undefined,
   );
   const conversationItems = threadItems(conversationThreads);
 
-  const defaultProjectThreads = threadItemsForProject(
-    DEFAULT_WORKSPACE_PROJECT_ID,
-  );
+  const defaultProjectThreads = threadItemsForProject(DEFAULT_WORKSPACE_PROJECT_ID);
   const unorderedRepositoryProjects: ProjectItem[] = [
-    ...(removedProjectIdSet.has(DEFAULT_WORKSPACE_PROJECT_ID) ||
-    !hasDefaultWorkspaceProject
+    ...(removedProjectIdSet.has(DEFAULT_WORKSPACE_PROJECT_ID) || !hasDefaultWorkspaceProject
       ? []
       : [
           {
             id: DEFAULT_WORKSPACE_PROJECT_ID,
             kind: "project" as const,
-            label:
-              projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
+            label: projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
             path: defaultWorkspacePath,
             action: projectAction(
               DEFAULT_WORKSPACE_PROJECT_ID,
@@ -3264,17 +3056,11 @@ export function App() {
               projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
               defaultProjectThreads.length,
             ),
-            children:
-              defaultProjectThreads.length > 0
-                ? defaultProjectThreads
-                : undefined,
+            children: defaultProjectThreads.length > 0 ? defaultProjectThreads : undefined,
           },
         ]),
     ...projectsFromWorkspace
-      .filter(
-        (project) =>
-          !isSameWorkspacePath(project.path, effectiveDefaultWorkspacePath),
-      )
+      .filter((project) => !isSameWorkspacePath(project.path, effectiveDefaultWorkspacePath))
       .map((project) => {
         const threads = threadItemsForProject(project.id);
         return {
@@ -3284,11 +3070,7 @@ export function App() {
           path: project.path,
           action: projectAction(project.id, project.label),
           menuItems: projectMenuItems(project.id),
-          hoverCard: projectHoverCard(
-            project.id,
-            project.label,
-            threads.length,
-          ),
+          hoverCard: projectHoverCard(project.id, project.label, threads.length),
           children: threads.length > 0 ? threads : undefined,
         };
       }),
@@ -3308,9 +3090,7 @@ export function App() {
   ];
   const allProjectsExpanded =
     repositoryProjects.length > 0 &&
-    repositoryProjects.every((project) =>
-      expandedProjectIds.includes(project.id),
-    );
+    repositoryProjects.every((project) => expandedProjectIds.includes(project.id));
   const composerProjectPicker = {
     label: "选择项目",
     placeholder: "选择项目",
@@ -3347,35 +3127,25 @@ export function App() {
   const activeProjectId = runtimeState.activeThreadId
     ? `thread:${runtimeState.activeThreadId}`
     : selectedProjectId;
-  const fileWorkspaceExpandedActive =
-    fileWorkspaceOpen && fileWorkspaceExpanded;
+  const fileWorkspaceExpandedActive = fileWorkspaceOpen && fileWorkspaceExpanded;
   const fileWorkspaceSurfaceActive =
     fileWorkspaceExpandedActive && expandedWorkspaceSurface === "file";
-  const expandedFileComposerCompletionKeyValue =
-    expandedFileComposerCompletionKey({
-      trackedRun: expandedFileComposerTrackedRun,
-      currentThreadId:
-        runtimeState.activeThreadId ?? runtimeState.threadId ?? undefined,
-      currentRunId: runtimeState.runId ?? undefined,
-      status: runtimeState.status,
-      completedAtMs: runtimeState.runCompletedAtMs,
-    });
-  const expandedFileComposerCompleted = Boolean(
-    expandedFileComposerCompletionKeyValue,
-  );
+  const expandedFileComposerCompletionKeyValue = expandedFileComposerCompletionKey({
+    trackedRun: expandedFileComposerTrackedRun,
+    currentThreadId: runtimeState.activeThreadId ?? runtimeState.threadId ?? undefined,
+    currentRunId: runtimeState.runId ?? undefined,
+    status: runtimeState.status,
+    completedAtMs: runtimeState.runCompletedAtMs,
+  });
+  const expandedFileComposerCompleted = Boolean(expandedFileComposerCompletionKeyValue);
   const expandedFileComposerElapsedMs =
     expandedFileComposerCompletionKeyValue &&
     typeof runtimeState.runStartedAtMs === "number" &&
     typeof runtimeState.runCompletedAtMs === "number"
-      ? Math.max(
-          0,
-          runtimeState.runCompletedAtMs - runtimeState.runStartedAtMs,
-        )
+      ? Math.max(0, runtimeState.runCompletedAtMs - runtimeState.runStartedAtMs)
       : undefined;
   const expandedFileComposerForceFull = Boolean(
-    composerRuntimePanels.length > 0 ||
-      activeUserQuestion ||
-      activeExternalInteraction,
+    composerRuntimePanels.length > 0 || activeUserQuestion || activeExternalInteraction,
   );
   const expandedFileComposerHasDraft = hasExpandedFileComposerDraft({
     effectiveText: trimmedEffectiveComposerValue,
@@ -3433,8 +3203,7 @@ export function App() {
       bottomSafeArea: composerBarSafeAreaPx,
     }),
   });
-  const showTurnMarkerRail =
-    !fileWorkspaceSurfaceActive && turnMarkerDisplay.mode !== "hidden";
+  const showTurnMarkerRail = !fileWorkspaceSurfaceActive && turnMarkerDisplay.mode !== "hidden";
   const activeNavSection = workbenchNavSectionForNavId(activeNavId);
   const activeExtensionSection: ExtensionSection | undefined =
     activeNavSection === "connectors" || activeNavSection === "skills"
@@ -3454,10 +3223,7 @@ export function App() {
           terminalSeenRef.current = true;
           localStorage.removeItem("awaken:runId");
         }
-        if (
-          event.type === "RUN_STATUS_CHANGED" &&
-          event.status === "cancelled"
-        ) {
+        if (event.type === "RUN_STATUS_CHANGED" && event.status === "cancelled") {
           localStorage.removeItem("awaken:runId");
         }
         dispatch({ type: "run/event", event, receivedAtMs });
@@ -3526,8 +3292,7 @@ export function App() {
         );
         for (const task of assignedTasks.slice().reverse()) {
           const event = dreamTaskReceiptEvent(task);
-          if (event)
-            dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
+          if (event) dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
         }
       })
       .catch(() => {
@@ -3581,6 +3346,82 @@ export function App() {
     return latestRun.status;
   }
 
+  async function handleAddProjectEntryToTask(
+    request: ProjectEntryActionRequest,
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
+    if (isBusy) {
+      return { ok: false, message: "任务执行中，结束后再添加文件上下文。" };
+    }
+    const result = await runtimeClient.resolveProjectEntryForTask(request);
+    if (!result.ok) {
+      setNotice(result.message);
+      return { ok: false, message: result.message };
+    }
+
+    const existingToken = composerTokens.find(
+      (token) =>
+        token.type === "file" &&
+        token.payload?.path === result.entry.absolutePath &&
+        token.payload?.projectId === result.entry.projectId &&
+        token.payload?.folderPath === result.entry.folderPath,
+    );
+    if (existingToken) {
+      const offset = composerTokenEndOffset(
+        composerTokens,
+        composerTokenLeadingTexts,
+        existingToken.id,
+      );
+      setExpandedFileComposerTrackedRun(undefined);
+      setExpandedFileComposerIdleMode("full");
+      if (offset !== undefined) {
+        composerInputSelectionRef.current = { anchor: offset, focus: offset };
+      }
+      requestComposerFocus(offset);
+      return { ok: true };
+    }
+
+    const payload: ProjectPathComposerTokenPayload = {
+      path: result.entry.absolutePath,
+      entryKind: result.entry.kind,
+      projectId: result.entry.projectId,
+      folderPath: result.entry.folderPath,
+      relativePath: result.entry.relativePath,
+    };
+    const token: ComposerToken = {
+      id: `project-path:${window.crypto.randomUUID()}`,
+      type: "file",
+      label: result.entry.displayName,
+      payload: payload as unknown as Record<string, unknown>,
+    };
+    const draftLength = composerStructuredDraftLength(
+      composerTokens,
+      composerTokenLeadingTexts,
+      composerValue,
+    );
+    const offset = composerInputSelectionRef.current?.focus ?? draftLength;
+    const nextDraft = insertComposerTokenAtOffset({
+      tokens: composerTokens,
+      placements: composerTokenPlacements,
+      leadingTexts: composerTokenLeadingTexts,
+      value: composerValue,
+      offset,
+      token,
+    });
+    setComposerTokens(nextDraft.tokens);
+    setComposerTokenPlacements(nextDraft.placements);
+    setComposerTokenLeadingTexts(nextDraft.leadingTexts);
+    setComposerValue(nextDraft.value);
+    setExpandedFileComposerTrackedRun(undefined);
+    setExpandedFileComposerIdleMode("full");
+    composerInputSelectionRef.current = {
+      anchor: nextDraft.focusOffset,
+      focus: nextDraft.focusOffset,
+    };
+    requestComposerFocus(nextDraft.focusOffset);
+    setNotice(null);
+    return { ok: true };
+  }
+
   function handleSlashActionSelect(actionId: string): void {
     const action = filteredSlashActions.find((item) => item.id === actionId);
     if (!action || action.disabled) {
@@ -3591,8 +3432,7 @@ export function App() {
       return;
     }
     const currentSlashTrigger = slashTriggerFromComposerValue(composerValue);
-    const placement =
-      composerTokenPlacementForSlashTrigger(currentSlashTrigger);
+    const placement = composerTokenPlacementForSlashTrigger(currentSlashTrigger);
     const leadingText =
       placement === "after" && currentSlashTrigger
         ? composerValue.slice(0, currentSlashTrigger.start)
@@ -3601,14 +3441,10 @@ export function App() {
     // composerTokenLeadingTexts map only mirrors it for composer editing.
     const tokenWithPlacement = leadingText ? { ...token, leadingText } : token;
     setComposerTokens((current) =>
-      current.some((item) => item.id === token.id)
-        ? current
-        : [...current, tokenWithPlacement],
+      current.some((item) => item.id === token.id) ? current : [...current, tokenWithPlacement],
     );
     setComposerTokenPlacements((current) =>
-      current[token.id] === placement
-        ? current
-        : { ...current, [token.id]: placement },
+      current[token.id] === placement ? current : { ...current, [token.id]: placement },
     );
     setComposerTokenLeadingTexts((current) => {
       if (!leadingText) {
@@ -3619,9 +3455,7 @@ export function App() {
         delete next[token.id];
         return next;
       }
-      return current[token.id] === leadingText
-        ? current
-        : { ...current, [token.id]: leadingText };
+      return current[token.id] === leadingText ? current : { ...current, [token.id]: leadingText };
     });
     setComposerValue((current) => {
       const trigger = slashTriggerFromComposerValue(current);
@@ -3637,12 +3471,9 @@ export function App() {
   }
 
   function handleRemoveComposerToken(tokenId: string): void {
-    const removedTokenIndex = composerTokens.findIndex(
-      (item) => item.id === tokenId,
-    );
+    const removedTokenIndex = composerTokens.findIndex((item) => item.id === tokenId);
     const removedToken = composerTokens[removedTokenIndex];
-    const leadingText =
-      removedToken?.leadingText ?? composerTokenLeadingTexts[tokenId] ?? "";
+    const leadingText = removedToken?.leadingText ?? composerTokenLeadingTexts[tokenId] ?? "";
     const nextToken = composerTokens[removedTokenIndex + 1];
     if (leadingText && nextToken) {
       const nextLeadingText =
@@ -3652,9 +3483,7 @@ export function App() {
         current
           .filter((token) => token.id !== tokenId)
           .map((token) =>
-            token.id === nextToken.id
-              ? { ...token, leadingText: mergedLeadingText }
-              : token,
+            token.id === nextToken.id ? { ...token, leadingText: mergedLeadingText } : token,
           ),
       );
       setComposerTokenLeadingTexts((current) => {
@@ -3664,13 +3493,9 @@ export function App() {
       });
     } else if (leadingText) {
       setComposerValue((current) => `${leadingText}${current}`);
-      setComposerTokens((current) =>
-        current.filter((token) => token.id !== tokenId),
-      );
+      setComposerTokens((current) => current.filter((token) => token.id !== tokenId));
     } else {
-      setComposerTokens((current) =>
-        current.filter((token) => token.id !== tokenId),
-      );
+      setComposerTokens((current) => current.filter((token) => token.id !== tokenId));
     }
     setComposerTokenPlacements((current) => {
       if (!(tokenId in current)) {
@@ -3693,9 +3518,7 @@ export function App() {
     requestComposerFocus();
   }
 
-  function handleComposerStructuredInputChange(
-    nextValue: ComposerBarStructuredInputValue,
-  ): void {
+  function handleComposerStructuredInputChange(nextValue: ComposerBarStructuredInputValue): void {
     const nextDraft = reconcileComposerStructuredInput(
       composerTokens,
       composerTokenPlacements,
@@ -3715,9 +3538,7 @@ export function App() {
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      setComposerValue((current) =>
-        clearSlashTriggerFromComposerValue(current),
-      );
+      setComposerValue((current) => clearSlashTriggerFromComposerValue(current));
       setSlashActiveActionId(undefined);
       return;
     }
@@ -3730,36 +3551,26 @@ export function App() {
       return;
     }
     event.preventDefault();
-    const selectableActions = filteredSlashActions.filter(
-      (action) => !action.disabled,
-    );
+    const selectableActions = filteredSlashActions.filter((action) => !action.disabled);
     if (selectableActions.length === 0) {
       return;
     }
     const activeIndex = Math.max(
       0,
-      selectableActions.findIndex(
-        (action) => action.id === slashActiveActionId,
-      ),
+      selectableActions.findIndex((action) => action.id === slashActiveActionId),
     );
     if (event.key === "ArrowDown") {
-      setSlashActiveActionId(
-        selectableActions[(activeIndex + 1) % selectableActions.length]?.id,
-      );
+      setSlashActiveActionId(selectableActions[(activeIndex + 1) % selectableActions.length]?.id);
       return;
     }
     if (event.key === "ArrowUp") {
       setSlashActiveActionId(
-        selectableActions[
-          (activeIndex - 1 + selectableActions.length) %
-            selectableActions.length
-        ]?.id,
+        selectableActions[(activeIndex - 1 + selectableActions.length) % selectableActions.length]
+          ?.id,
       );
       return;
     }
-    handleSlashActionSelect(
-      slashActiveActionId ?? selectableActions[0]?.id ?? "",
-    );
+    handleSlashActionSelect(slashActiveActionId ?? selectableActions[0]?.id ?? "");
   }
 
   async function handleSubmitWithPrompt(options?: {
@@ -3767,9 +3578,7 @@ export function App() {
     forceNewThread?: boolean;
   }): Promise<void> {
     if (!desktopReady) {
-      setNotice(
-        desktopNeedsRestart ? "Awaken needs restart" : "Awaken is starting",
-      );
+      setNotice(desktopNeedsRestart ? "Awaken needs restart" : "Awaken is starting");
       return;
     }
     const prompt = (options?.prompt ?? trimmedEffectiveComposerValue).trim();
@@ -3789,11 +3598,7 @@ export function App() {
       draftComposerTokenLeadingTexts,
     );
     const runInputAttachments = draftAttachments.map(toRunInputAttachment);
-    if (
-      !prompt &&
-      runInputAttachments.length === 0 &&
-      draftComposerTokens.length === 0
-    ) {
+    if (!prompt && runInputAttachments.length === 0 && draftComposerTokens.length === 0) {
       setNotice("请输入内容或添加附件");
       return;
     }
@@ -3847,14 +3652,13 @@ export function App() {
     setComposerTokenLeadingTexts({});
 
     try {
-      const { projectId: runProjectId, projectName: runProjectName } =
-        resolveRunProjectForRun({
-          workspaceRoot,
-          selectedProjectId,
-          defaultWorkspacePath,
-          effectiveDefaultWorkspacePath,
-          projectsFromWorkspace,
-        });
+      const { projectId: runProjectId, projectName: runProjectName } = resolveRunProjectForRun({
+        workspaceRoot,
+        selectedProjectId,
+        defaultWorkspacePath,
+        effectiveDefaultWorkspacePath,
+        projectsFromWorkspace,
+      });
       const runRoots = resolveRunRootsForRun({
         workspaceRoot,
         projectsFromWorkspace,
@@ -3874,16 +3678,12 @@ export function App() {
         input: prompt,
         attachments: forceNewThread ? [] : runInputAttachments,
         composerTokens: forceNewThread ? [] : draftComposerTokens,
-        threadId: forceNewThread
-          ? undefined
-          : runtimeState.activeThreadId || undefined,
+        threadId: forceNewThread ? undefined : runtimeState.activeThreadId || undefined,
         workspace: {
           // projectId is what lets Core place a folder-less run in that
           // project's own session workspace rather than guess an identity from
           // the path. With no folder there is no root to declare either.
-          projectId: runProjectId
-            ? backendProjectIdFor(runProjectId)
-            : undefined,
+          projectId: runProjectId ? backendProjectIdFor(runProjectId) : undefined,
           // The agent is told which project it is in, so it can answer about the
           // folder group as a whole instead of only seeing its cwd.
           projectName: runProjectName,
@@ -3908,9 +3708,7 @@ export function App() {
       }
       if (runProjectId === DEFAULT_WORKSPACE_PROJECT_ID) {
         setRemovedProjectIds((current) =>
-          current.filter(
-            (projectId) => projectId !== DEFAULT_WORKSPACE_PROJECT_ID,
-          ),
+          current.filter((projectId) => projectId !== DEFAULT_WORKSPACE_PROJECT_ID),
         );
       }
       dispatch({ type: "run/created", run });
@@ -3927,14 +3725,10 @@ export function App() {
       }
       void refreshThreads();
       localStorage.setItem("awaken:runId", run.runId);
-      const unsubscribe = await runtimeClient.subscribeRun(
-        run.runId,
-        createSubscribeHandlers(),
-      );
+      const unsubscribe = await runtimeClient.subscribeRun(run.runId, createSubscribeHandlers());
       unsubscribeRef.current = unsubscribe;
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to create run";
+      const message = error instanceof Error ? error.message : "Failed to create run";
       setRunCreateIssue(desktopOperationIssueFromError(error));
       restoreComposerValue(draftComposerValue);
       setComposerAttachments(draftAttachments);
@@ -3991,16 +3785,13 @@ export function App() {
     try {
       await replayThreadTranscript(threadId, loadSeq);
     } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : "Failed to load thread",
-      );
+      setNotice(error instanceof Error ? error.message : "Failed to load thread");
     }
   }
 
   function threadsForProject(projectId: string): ThreadItem[] {
     return runtimeState.threads.filter(
-      (thread) =>
-        projectIdForThread(thread, effectiveDefaultWorkspacePath) === projectId,
+      (thread) => projectIdForThread(thread, effectiveDefaultWorkspacePath) === projectId,
     );
   }
 
@@ -4010,10 +3801,7 @@ export function App() {
     if (!thread) {
       return;
     }
-    const nextProjectId = projectIdForThread(
-      thread,
-      effectiveDefaultWorkspacePath,
-    );
+    const nextProjectId = projectIdForThread(thread, effectiveDefaultWorkspacePath);
     if (!nextProjectId) {
       setConversationScope(true);
       setSelectedProjectId(undefined);
@@ -4026,11 +3814,8 @@ export function App() {
     setSelectedProjectId(nextProjectId);
     const projectHasNoFolders =
       nextProjectId !== DEFAULT_WORKSPACE_PROJECT_ID &&
-      projectsFromWorkspace.find((project) => project.id === nextProjectId)
-        ?.folders.length === 0;
-    const nextWorkspacePath = projectHasNoFolders
-      ? ""
-      : (thread.workspaceRoot ?? "");
+      projectsFromWorkspace.find((project) => project.id === nextProjectId)?.folders.length === 0;
+    const nextWorkspacePath = projectHasNoFolders ? "" : (thread.workspaceRoot ?? "");
     workspaceTargetPathRef.current = nextWorkspacePath;
     setWorkspacePath(nextWorkspacePath);
     setExpandedProjectIds((current) =>
@@ -4038,9 +3823,7 @@ export function App() {
     );
   }
 
-  async function refreshAfterThreadMutation(
-    removedThreadIds: string[] = [],
-  ): Promise<void> {
+  async function refreshAfterThreadMutation(removedThreadIds: string[] = []): Promise<void> {
     if (removedThreadIds.includes(runtimeState.activeThreadId ?? "")) {
       resetActiveThreadContext();
     }
@@ -4059,15 +3842,9 @@ export function App() {
     try {
       const result =
         pending.action === "detach"
-          ? await runtimeClient.detachProject(
-              pending.backendProjectId,
-              idempotencyKey,
-            )
+          ? await runtimeClient.detachProject(pending.backendProjectId, idempotencyKey)
           : pending.action === "delete_history"
-            ? await runtimeClient.deleteProjectThreads(
-                pending.backendProjectId,
-                idempotencyKey,
-              )
+            ? await runtimeClient.deleteProjectThreads(pending.backendProjectId, idempotencyKey)
             : await runtimeClient.trashProjectFolder(
                 pending.backendProjectId,
                 pending.folderPath ?? "",
@@ -4102,9 +3879,7 @@ export function App() {
             wasExpanded: expandedProjectIds.includes(pending.projectId),
           }),
         );
-        if (
-          isSameWorkspacePath(activeThreadWorkspacePath, pending.folderPath)
-        ) {
+        if (isSameWorkspacePath(activeThreadWorkspacePath, pending.folderPath)) {
           resetActiveThreadContext();
         }
         setPendingProjectDelete(null);
@@ -4115,10 +3890,7 @@ export function App() {
         ]);
         for (const refreshResult of refreshResults) {
           if (refreshResult.status === "rejected") {
-            console.warn(
-              "project_operation_initial_refresh_failed",
-              refreshResult.reason,
-            );
+            console.warn("project_operation_initial_refresh_failed", refreshResult.reason);
           }
         }
         return;
@@ -4133,9 +3905,7 @@ export function App() {
       }
       await Promise.all([refreshProjects(), loadThreadsIntoState()]);
       setExpandedProjectIds((current) =>
-        pending.action === "detach"
-          ? current.filter((id) => id !== pending.projectId)
-          : current,
+        pending.action === "detach" ? current.filter((id) => id !== pending.projectId) : current,
       );
       setPendingProjectDelete(null);
       setNotice(
@@ -4159,9 +3929,7 @@ export function App() {
       return;
     }
 
-    const thread = runtimeState.threads.find(
-      (item) => item.threadId === threadId,
-    );
+    const thread = runtimeState.threads.find((item) => item.threadId === threadId);
     if (!thread) {
       setNotice("会话不存在");
       return;
@@ -4183,9 +3951,7 @@ export function App() {
       return;
     }
 
-    const thread = runtimeState.threads.find(
-      (item) => item.threadId === threadId,
-    );
+    const thread = runtimeState.threads.find((item) => item.threadId === threadId);
     if (!thread || nextLabel === thread.label) {
       setRenameDialogOpen(false);
       setRenamingThreadId(null);
@@ -4195,10 +3961,7 @@ export function App() {
 
     setRenameSubmitting(true);
     try {
-      const updatedThread = await runtimeClient.renameThread(
-        threadId,
-        nextLabel,
-      );
+      const updatedThread = await runtimeClient.renameThread(threadId, nextLabel);
       dispatch({ type: "run/threadRenamed", thread: updatedThread });
       setNotice("已重命名会话");
     } catch (error) {
@@ -4222,9 +3985,7 @@ export function App() {
       return;
     }
 
-    const thread = runtimeState.threads.find(
-      (item) => item.threadId === threadId,
-    );
+    const thread = runtimeState.threads.find((item) => item.threadId === threadId);
     if (!thread) {
       setNotice("会话不存在");
       return;
@@ -4262,10 +4023,7 @@ export function App() {
         : projectsFromWorkspace.find((project) => project.id === id)?.path;
     if (
       (runtimeState.activeThreadId && activeThreadProjectId !== id) ||
-      shouldResetActiveThreadForWorkspaceChange(
-        activeThreadWorkspacePath,
-        projectPath,
-      )
+      shouldResetActiveThreadForWorkspaceChange(activeThreadWorkspacePath, projectPath)
     ) {
       resetActiveThreadContext();
     }
@@ -4304,9 +4062,7 @@ export function App() {
     } catch (error) {
       setProjectOrderIds(previousOrder);
       setNotice(
-        error instanceof Error
-          ? error.message
-          : "项目顺序暂时未保存，已恢复原顺序，请稍后重试。",
+        error instanceof Error ? error.message : "项目顺序暂时未保存，已恢复原顺序，请稍后重试。",
       );
       await refreshProjects();
     } finally {
@@ -4328,10 +4084,7 @@ export function App() {
     if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
       return defaultProjectFolders;
     }
-    return (
-      projectsFromWorkspace.find((project) => project.id === projectId)
-        ?.folders ?? []
-    );
+    return projectsFromWorkspace.find((project) => project.id === projectId)?.folders ?? [];
   }
 
   /** 目标项目之外，所有已经占用了某个目录的项目。 */
@@ -4339,9 +4092,7 @@ export function App() {
   async function pickProjectFolders(
     excludedPaths: string[],
   ): Promise<{ paths: string[]; skipped: string[] }> {
-    const result = await runtimeClient.pickProjectFolders(
-      workspacePath || defaultWorkspacePath,
-    );
+    const result = await runtimeClient.pickProjectFolders(workspacePath || defaultWorkspacePath);
     if (result.canceled) {
       if (result.error) {
         setNotice(result.error);
@@ -4355,9 +4106,7 @@ export function App() {
       if (validation.valid) {
         readable.push(candidate);
       } else {
-        skipped.push(
-          `“${workspaceLabelForPath(candidate)}”：${validation.error}`,
-        );
+        skipped.push(`“${workspaceLabelForPath(candidate)}”：${validation.error}`);
       }
     }
     const partition = partitionPickedProjectFolders({
@@ -4387,9 +4136,7 @@ export function App() {
       setDraftProjectFolders((current) => [...current, ...paths]);
       setDraftPrimaryFolder((current) => current || paths[0]);
     } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : "Failed to select folder",
-      );
+      setNotice(error instanceof Error ? error.message : "Failed to select folder");
     } finally {
       setPickingWorkspace(false);
     }
@@ -4397,9 +4144,7 @@ export function App() {
 
   function handleRemoveDraftProjectFolder(path: string): void {
     setDraftProjectFolders((current) => {
-      const next = current.filter(
-        (candidate) => !isSameWorkspacePath(candidate, path),
-      );
+      const next = current.filter((candidate) => !isSameWorkspacePath(candidate, path));
       setDraftPrimaryFolder((primary) =>
         isSameWorkspacePath(primary, path) ? (next[0] ?? "") : primary,
       );
@@ -4422,15 +4167,11 @@ export function App() {
       // a sensible label, and a project with neither is named by the backend.
       const displayName =
         draftProjectName.trim() ||
-        (draftPrimaryFolder
-          ? workspaceLabelForPath(draftPrimaryFolder)
-          : undefined);
+        (draftPrimaryFolder ? workspaceLabelForPath(draftPrimaryFolder) : undefined);
       const result = await runtimeClient.createProject(folders, displayName);
       if (!result.ok) {
         setNotice(
-          result.code === "PROJECT_OPERATION_CONFLICT"
-            ? "该项目正在移除中"
-            : result.message,
+          result.code === "PROJECT_OPERATION_CONFLICT" ? "该项目正在移除中" : result.message,
         );
         return;
       }
@@ -4444,10 +4185,7 @@ export function App() {
         : project.projectId;
       await refreshProjects();
       if (
-        shouldResetActiveThreadForWorkspaceChange(
-          activeThreadWorkspacePath,
-          project.workspaceRoot,
-        )
+        shouldResetActiveThreadForWorkspaceChange(activeThreadWorkspacePath, project.workspaceRoot)
       ) {
         resetActiveThreadContext();
       }
@@ -4466,9 +4204,7 @@ export function App() {
       setDraftPrimaryFolder("");
       setDraftProjectName("");
     } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : "Failed to create project",
-      );
+      setNotice(error instanceof Error ? error.message : "Failed to create project");
     } finally {
       setCreateProjectSubmitting(false);
     }
@@ -4504,9 +4240,7 @@ export function App() {
       await refreshProjects();
       setNotice(successNotice);
     } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : "项目文件夹操作暂时失败。",
-      );
+      setNotice(error instanceof Error ? error.message : "项目文件夹操作暂时失败。");
       await refreshProjects().catch(() => []);
     } finally {
       setProjectFolderBusyPath(undefined);
@@ -4528,19 +4262,14 @@ export function App() {
       const label = workspaceLabelForPath(path);
       setProjectFolderBusyPath(path);
       try {
-        const result = await runtimeClient.attachProjectFolder(
-          backendProjectId,
-          path,
-        );
+        const result = await runtimeClient.attachProjectFolder(backendProjectId, path);
         if (result.ok) {
           attached.push(label);
         } else {
           failures.push(`“${label}”：${result.message}`);
         }
       } catch (error) {
-        failures.push(
-          `“${label}”：${error instanceof Error ? error.message : "加入失败"}`,
-        );
+        failures.push(`“${label}”：${error instanceof Error ? error.message : "加入失败"}`);
       }
     }
     setProjectFolderBusyPath(undefined);
@@ -4575,18 +4304,13 @@ export function App() {
       }
       await attachProjectFolders(backendProjectId, paths, skipped);
     } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : "Failed to select folder",
-      );
+      setNotice(error instanceof Error ? error.message : "Failed to select folder");
     } finally {
       setPickingWorkspace(false);
     }
   }
 
-  async function handleSetPrimaryProjectFolder(
-    projectId: string,
-    path: string,
-  ): Promise<void> {
+  async function handleSetPrimaryProjectFolder(projectId: string, path: string): Promise<void> {
     await runProjectFolderMutation(
       projectId,
       path,
@@ -4595,10 +4319,7 @@ export function App() {
     );
   }
 
-  async function handleDetachProjectFolder(
-    projectId: string,
-    path: string,
-  ): Promise<void> {
+  async function handleDetachProjectFolder(projectId: string, path: string): Promise<void> {
     await runProjectFolderMutation(
       projectId,
       path,
@@ -4670,17 +4391,12 @@ export function App() {
     try {
       const run = await runtimeClient.cancelRun(runtimeState.runId);
       dispatch({ type: "run/cancelSync", run });
-      const terminalStatuses: RuntimeRunStatus[] = [
-        "finished",
-        "error",
-        "cancelled",
-      ];
+      const terminalStatuses: RuntimeRunStatus[] = ["finished", "error", "cancelled"];
       if (terminalStatuses.includes(run.status)) {
         localStorage.removeItem("awaken:runId");
       }
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to cancel run";
+      const message = error instanceof Error ? error.message : "Failed to cancel run";
       if (message.includes("RUN_NOT_FOUND")) {
         // The run no longer exists on the server (e.g. runtime restarted or
         // the run already terminated). Reset the local runtime state so the
@@ -4712,17 +4428,9 @@ export function App() {
     setNotice(null);
     setAnsweringUserQuestionId(activeUserQuestion.id);
     try {
-      await runtimeClient.answerUserQuestion(
-        runtimeState.runId,
-        activeUserQuestion.id,
-        trimmed,
-      );
+      await runtimeClient.answerUserQuestion(runtimeState.runId, activeUserQuestion.id, trimmed);
     } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Failed to answer user question",
-      );
+      setNotice(error instanceof Error ? error.message : "Failed to answer user question");
     } finally {
       setAnsweringUserQuestionId(null);
     }
@@ -4882,9 +4590,7 @@ export function App() {
     if (fileWorkspaceOpen) {
       handleCloseFileWorkspace();
     }
-    setSelectedSubagentTaskId(
-      taskId ?? selectedSubagent?.taskId ?? subagentTasks[0]?.taskId,
-    );
+    setSelectedSubagentTaskId(taskId ?? selectedSubagent?.taskId ?? subagentTasks[0]?.taskId);
     setInspectorCollapsed(false);
     if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
       inspectorCollapsedBeforeResponsiveRef.current = false;
@@ -4935,9 +4641,7 @@ export function App() {
         }
         return;
       }
-      const nextAttachments = result.files.map(
-        composerDraftAttachmentFromPickedFile,
-      );
+      const nextAttachments = result.files.map(composerDraftAttachmentFromPickedFile);
       setComposerAttachments((current) => [...current, ...nextAttachments]);
       if (result.errors?.length) {
         setNotice(result.errors.slice(0, 3).join("；"));
@@ -4962,22 +4666,16 @@ export function App() {
       setNotice("仅支持粘贴 PNG、JPEG 或 WebP 图片");
       return;
     }
-    const oversizedFile = files.find(
-      (file) => file.size > MAX_COMPOSER_IMAGE_BYTES,
-    );
+    const oversizedFile = files.find((file) => file.size > MAX_COMPOSER_IMAGE_BYTES);
     if (oversizedFile) {
-      setNotice(
-        `单张图片不能超过 ${MAX_COMPOSER_IMAGE_BYTES / (1024 * 1024)} MiB`,
-      );
+      setNotice(`单张图片不能超过 ${MAX_COMPOSER_IMAGE_BYTES / (1024 * 1024)} MiB`);
       return;
     }
 
     try {
       const startIndex = composerAttachments.length;
       const nextAttachments = await Promise.all(
-        files.map((file, index) =>
-          readComposerDraftImageAttachment(file, startIndex + index),
-        ),
+        files.map((file, index) => readComposerDraftImageAttachment(file, startIndex + index)),
       );
       setComposerAttachments((current) => [...current, ...nextAttachments]);
     } catch (error) {
@@ -4992,9 +4690,7 @@ export function App() {
     setNotice(null);
   }
 
-  function handleSidebarResizeStart(
-    event: ReactPointerEvent<HTMLDivElement>,
-  ): void {
+  function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>): void {
     event.preventDefault();
     const target = event.currentTarget;
     target.setPointerCapture?.(event.pointerId);
@@ -5020,10 +4716,7 @@ export function App() {
       } catch {
         // Pointer capture may already be released if the drag ends outside the window.
       }
-      document.body.classList.remove(
-        "is-layout-resizing",
-        "is-sidebar-resizing",
-      );
+      document.body.classList.remove("is-layout-resizing", "is-sidebar-resizing");
     }
 
     document.body.classList.add("is-layout-resizing", "is-sidebar-resizing");
@@ -5032,9 +4725,7 @@ export function App() {
     window.addEventListener("pointercancel", handlePointerUp, { once: true });
   }
 
-  function handleInspectorResizeStart(
-    event: ReactPointerEvent<HTMLDivElement>,
-  ): void {
+  function handleInspectorResizeStart(event: ReactPointerEvent<HTMLDivElement>): void {
     event.preventDefault();
     const target = event.currentTarget;
     target.setPointerCapture?.(event.pointerId);
@@ -5060,10 +4751,7 @@ export function App() {
       } catch {
         // Pointer capture may already be released if the drag ends outside the window.
       }
-      document.body.classList.remove(
-        "is-layout-resizing",
-        "is-inspector-resizing",
-      );
+      document.body.classList.remove("is-layout-resizing", "is-inspector-resizing");
     }
 
     document.body.classList.add("is-layout-resizing", "is-inspector-resizing");
@@ -5072,22 +4760,16 @@ export function App() {
     window.addEventListener("pointercancel", handlePointerUp, { once: true });
   }
 
-  function handleSidebarResizeKeyDown(
-    event: ReactKeyboardEvent<HTMLDivElement>,
-  ): void {
+  function handleSidebarResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
       return;
     }
     event.preventDefault();
     const delta = event.key === "ArrowRight" ? LAYOUT_STEP : -LAYOUT_STEP;
-    setSidebarWidth((width) =>
-      clampNumber(width + delta, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH),
-    );
+    setSidebarWidth((width) => clampNumber(width + delta, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH));
   }
 
-  function handleInspectorResizeKeyDown(
-    event: ReactKeyboardEvent<HTMLDivElement>,
-  ): void {
+  function handleInspectorResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
       return;
     }
@@ -5138,16 +4820,12 @@ export function App() {
           key={key}
           className={`compact-boundary compact-boundary-${item.status}`}
           role="separator"
-          aria-label={
-            item.detail ? `${item.title}: ${item.detail}` : item.title
-          }
+          aria-label={item.detail ? `${item.title}: ${item.detail}` : item.title}
         >
           <span className="compact-boundary-line" aria-hidden="true" />
           <span className="compact-boundary-copy">
             <span className="compact-boundary-title">{item.title}</span>
-            {item.detail ? (
-              <span className="compact-boundary-detail">{item.detail}</span>
-            ) : null}
+            {item.detail ? <span className="compact-boundary-detail">{item.detail}</span> : null}
           </span>
           <span className="compact-boundary-line" aria-hidden="true" />
         </div>
@@ -5158,9 +4836,7 @@ export function App() {
         const id = action.id.startsWith("explore:")
           ? action.id.slice("explore:".length)
           : rawToolId(action.id);
-        const tool = runtimeState.toolResults.find(
-          (record) => record.id === id,
-        );
+        const tool = runtimeState.toolResults.find((record) => record.id === id);
         return {
           ...action,
           detail: toolTraceDetail(tool, action.detail),
@@ -5169,9 +4845,7 @@ export function App() {
       return <ToolTraceGroup key={key} actions={actions} />;
     }
     if (item.kind === "tool") {
-      const tool = runtimeState.toolResults.find(
-        (record) => record.id === rawToolId(item.id),
-      );
+      const tool = runtimeState.toolResults.find((record) => record.id === rawToolId(item.id));
       return (
         <ToolTraceLine
           key={key}
@@ -5213,12 +4887,7 @@ export function App() {
     }
     if (item.kind === "memoryReceipt") {
       return (
-        <ToolTraceLine
-          key={key}
-          title={item.title}
-          detail={item.detail}
-          status={item.status}
-        />
+        <ToolTraceLine key={key} title={item.title} detail={item.detail} status={item.status} />
       );
     }
     if (item.kind === "acpSession") {
@@ -5298,16 +4967,10 @@ export function App() {
     return null;
   }
 
-  function renderTurnBodySegment(
-    turnId: string,
-    segment: NarrativeTurnBodySegment,
-  ) {
+  function renderTurnBodySegment(turnId: string, segment: NarrativeTurnBodySegment) {
     if (segment.kind === "items") {
       return segment.items.map((item, itemIndex) =>
-        renderNarrativeItem(
-          item,
-          `${turnId}:${segment.id}:${item.id}:${itemIndex}`,
-        ),
+        renderNarrativeItem(item, `${turnId}:${segment.id}:${item.id}:${itemIndex}`),
       );
     }
 
@@ -5319,11 +4982,7 @@ export function App() {
         }`}
       >
         <Disclosure
-          title={
-            <span className="execution-process-disclosure-title">
-              {segment.title}
-            </span>
-          }
+          title={<span className="execution-process-disclosure-title">{segment.title}</span>}
           open={segment.open}
           onOpenChange={(open) => {
             setExecutionProcessOpenByTurnId((current) => ({
@@ -5334,10 +4993,7 @@ export function App() {
         >
           <div className="execution-process-disclosure-body">
             {segment.items.map((item, itemIndex) =>
-              renderNarrativeItem(
-                item,
-                `${turnId}:${segment.id}:${item.id}:${itemIndex}`,
-              ),
+              renderNarrativeItem(item, `${turnId}:${segment.id}:${item.id}:${itemIndex}`),
             )}
           </div>
         </Disclosure>
@@ -5367,9 +5023,7 @@ export function App() {
       .join(" ");
   }
 
-  function acpDisplayStatusToToolStatus(
-    status: ACPDisplayStatus,
-  ): ToolDisplayState {
+  function acpDisplayStatusToToolStatus(status: ACPDisplayStatus): ToolDisplayState {
     switch (status) {
       case "started":
       case "active":
@@ -5401,9 +5055,7 @@ export function App() {
         isPrimary: folder.isPrimary,
       }))
     : [];
-  const activeFileWorkspaceTabCandidate = activeProjectFileTab(
-    fileWorkspaceTabsState,
-  );
+  const activeFileWorkspaceTabCandidate = activeProjectFileTab(fileWorkspaceTabsState);
   const activeFileWorkspaceTab =
     activeFileWorkspaceTabCandidate?.projectId === fileWorkspaceProjectId
       ? activeFileWorkspaceTabCandidate
@@ -5421,10 +5073,8 @@ export function App() {
 
   function renderExternalActionGate() {
     if (activeExternalInteraction) {
-      const resolving =
-        resolvingExternalInteractionId === activeExternalInteraction.id;
-      const isACPPermission =
-        activeExternalInteraction.kind === "acp-permission";
+      const resolving = resolvingExternalInteractionId === activeExternalInteraction.id;
+      const isACPPermission = activeExternalInteraction.kind === "acp-permission";
       return (
         <ExternalActionGate
           compact
@@ -5562,9 +5212,7 @@ export function App() {
                 ...projectsFromWorkspace,
                 {
                   id: DEFAULT_WORKSPACE_PROJECT_ID,
-                  label:
-                    projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ??
-                    "awaken",
+                  label: projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
                   folders: defaultProjectFolders,
                 },
               ],
@@ -5624,36 +5272,22 @@ export function App() {
             <WorkbenchChrome
               platform={platform}
               sidebarCollapsed={sidebarCollapsed}
-              onToggleSidebar={() =>
-                setSidebarCollapsed((collapsed) => !collapsed)
-              }
+              onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
               onNewTask={handleNewTask}
               center={
                 fileWorkspaceExpandedActive && inspectorPresentation.available ? (
-                  <div
-                    className="workbench-conversation-tabs"
-                    role="tablist"
-                    aria-label="当前会话"
-                  >
+                  <div className="workbench-conversation-tabs" role="tablist" aria-label="当前会话">
                     <button
                       type="button"
                       className={`workbench-conversation-tab${
-                        expandedWorkspaceSurface === "conversation"
-                          ? " is-active"
-                          : ""
+                        expandedWorkspaceSurface === "conversation" ? " is-active" : ""
                       }`}
                       role="tab"
-                      aria-selected={
-                        expandedWorkspaceSurface === "conversation"
-                      }
+                      aria-selected={expandedWorkspaceSurface === "conversation"}
                       title={currentConversationLabel}
                       onClick={handleShowConversationSurface}
                     >
-                      <MessageSquare
-                        size={16}
-                        strokeWidth={1.8}
-                        aria-hidden="true"
-                      />
+                      <MessageSquare size={16} strokeWidth={1.8} aria-hidden="true" />
                       <span>{currentConversationLabel}</span>
                     </button>
                   </div>
@@ -5662,16 +5296,11 @@ export function App() {
               right={
                 fileWorkspaceOpen && inspectorPresentation.available ? (
                   <div className="workbench-chrome-file-mode">
-                    <div
-                      className="project-files-tabs"
-                      role="tablist"
-                      aria-label="打开的文件"
-                    >
+                    <div className="project-files-tabs" role="tablist" aria-label="打开的文件">
                       {visibleFileWorkspaceTabs.length > 0 ? (
                         visibleFileWorkspaceTabs.map((tab) => {
                           const active =
-                            fileWorkspaceTabsAreActive &&
-                            tab.id === activeFileWorkspaceTab?.id;
+                            fileWorkspaceTabsAreActive && tab.id === activeFileWorkspaceTab?.id;
                           const iconKind = projectFileIconKind({
                             kind: "file",
                             name: tab.name,
@@ -5679,9 +5308,7 @@ export function App() {
                           return (
                             <div
                               key={tab.id}
-                              className={`project-files-tab${
-                                active ? " is-active" : ""
-                              }`}
+                              className={`project-files-tab${active ? " is-active" : ""}`}
                               role="presentation"
                             >
                               <button
@@ -5696,15 +5323,9 @@ export function App() {
                                   className="project-files-tab__file-icon"
                                   data-file-icon={iconKind}
                                 >
-                                  <ProjectFileIcon
-                                    kind={iconKind}
-                                    size={16}
-                                    strokeWidth={1.8}
-                                  />
+                                  <ProjectFileIcon kind={iconKind} size={16} strokeWidth={1.8} />
                                 </span>
-                                <span className="project-files-tab__label">
-                                  {tab.name}
-                                </span>
+                                <span className="project-files-tab__label">{tab.name}</span>
                               </button>
                               <button
                                 type="button"
@@ -5732,15 +5353,9 @@ export function App() {
                             aria-selected={fileWorkspaceTabsAreActive}
                             onClick={handleShowFileWorkspaceSurface}
                           >
-                            <FileIcon
-                              size={16}
-                              strokeWidth={1.8}
-                              aria-hidden="true"
-                            />
+                            <FileIcon size={16} strokeWidth={1.8} aria-hidden="true" />
                             <span className="project-files-tab__label">
-                              {fileWorkspaceMode === "browser"
-                                ? "浏览器"
-                                : "打开文件"}
+                              {fileWorkspaceMode === "browser" ? "浏览器" : "打开文件"}
                             </span>
                           </button>
                           <button
@@ -5769,11 +5384,7 @@ export function App() {
                     <button
                       type="button"
                       className="workbench-chrome-icon workbench-chrome-panel-toggle"
-                      aria-label={
-                        inspectorCollapsed
-                          ? "Expand inspector"
-                          : "Collapse inspector"
-                      }
+                      aria-label={inspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
                       onClick={handleToggleInspectorCollapsed}
                     >
                       {inspectorCollapsed ? (
@@ -5786,19 +5397,13 @@ export function App() {
                 ) : (
                   <div className="workbench-chrome-status">
                     {topbarStatusLabel ? (
-                      <span className="workbench-chrome-state">
-                        {topbarStatusLabel}
-                      </span>
+                      <span className="workbench-chrome-state">{topbarStatusLabel}</span>
                     ) : null}
                     {inspectorPresentation.available ? (
                       <button
                         type="button"
                         className="workbench-chrome-icon workbench-chrome-panel-toggle"
-                        aria-label={
-                          inspectorCollapsed
-                            ? "Expand inspector"
-                            : "Collapse inspector"
-                        }
+                        aria-label={inspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
                         onClick={handleToggleInspectorCollapsed}
                       >
                         {inspectorCollapsed ? (
@@ -5830,11 +5435,7 @@ export function App() {
                 projectSectionActions={
                   <span className="sidebar-section-actions">
                     <SidebarSectionAction
-                      label={
-                        allProjectsExpanded
-                          ? "收起全部项目"
-                          : "展开全部项目"
-                      }
+                      label={allProjectsExpanded ? "收起全部项目" : "展开全部项目"}
                       onClick={() =>
                         setExpandedProjectIds(
                           allProjectsExpanded
@@ -5849,10 +5450,7 @@ export function App() {
                         <ChevronsUpDown size={13} strokeWidth={1.85} />
                       )}
                     </SidebarSectionAction>
-                    <SidebarSectionAction
-                      label="创建项目"
-                      onClick={handleOpenCreateProject}
-                    >
+                    <SidebarSectionAction label="创建项目" onClick={handleOpenCreateProject}>
                       <FolderPlus size={13} strokeWidth={1.85} />
                     </SidebarSectionAction>
                   </span>
@@ -5862,14 +5460,8 @@ export function App() {
                 conversationSectionActions={
                   <span className="sidebar-section-actions">
                     <SidebarSectionAction
-                      label={
-                        conversationSectionExpanded
-                          ? "收起对话"
-                          : "展开对话"
-                      }
-                      onClick={() =>
-                        setConversationSectionExpanded((expanded) => !expanded)
-                      }
+                      label={conversationSectionExpanded ? "收起对话" : "展开对话"}
+                      onClick={() => setConversationSectionExpanded((expanded) => !expanded)}
                     >
                       {conversationSectionExpanded ? (
                         <ChevronsDownUp size={13} strokeWidth={1.85} />
@@ -5877,10 +5469,7 @@ export function App() {
                         <ChevronsUpDown size={13} strokeWidth={1.85} />
                       )}
                     </SidebarSectionAction>
-                    <SidebarSectionAction
-                      label="新增对话"
-                      onClick={handleNewTask}
-                    >
+                    <SidebarSectionAction label="新增对话" onClick={handleNewTask}>
                       <MessageCirclePlus size={13} strokeWidth={1.85} />
                     </SidebarSectionAction>
                   </span>
@@ -5893,9 +5482,7 @@ export function App() {
                 onReorderProjects={(ids) => {
                   void handleReorderProjects(ids);
                 }}
-                projectReorderDisabled={
-                  !desktopReady || projectReorderSubmitting
-                }
+                projectReorderDisabled={!desktopReady || projectReorderSubmitting}
                 onExpandedChange={setExpandedProjectIds}
                 onNewTask={handleNewTask}
                 onProfileClick={() => setProfilePopoverOpen(true)}
@@ -5934,14 +5521,8 @@ export function App() {
                   stage={
                     <RunStage
                       contentInactive={fileWorkspaceSurfaceActive}
-                      scrollRef={
-                        showCenterComposer
-                          ? undefined
-                          : setRunStageScrollElement
-                      }
-                      onScroll={
-                        showCenterComposer ? undefined : handleRunStageScroll
-                      }
+                      scrollRef={showCenterComposer ? undefined : setRunStageScrollElement}
+                      onScroll={showCenterComposer ? undefined : handleRunStageScroll}
                       overlay={
                         <>
                           {renderNoticeToast()}
@@ -5963,26 +5544,18 @@ export function App() {
                                       : ""
                                   }`}
                                   aria-current={
-                                    marker.id === activeWorkbenchTurnId
-                                      ? "true"
-                                      : undefined
+                                    marker.id === activeWorkbenchTurnId ? "true" : undefined
                                   }
                                   aria-label={`跳转到第 ${marker.index + 1} 条消息`}
                                   title={`第 ${marker.index + 1} 条消息`}
-                                  onClick={() =>
-                                    handleTurnMarkerClick(marker.id)
-                                  }
+                                  onClick={() => handleTurnMarkerClick(marker.id)}
                                 >
-                                  <span
-                                    className="turn-marker-bar"
-                                    aria-hidden="true"
-                                  />
+                                  <span className="turn-marker-bar" aria-hidden="true" />
                                 </button>
                               ))}
                             </nav>
                           ) : null}
-                          {!fileWorkspaceSurfaceActive &&
-                          returnToLatestVisible ? (
+                          {!fileWorkspaceSurfaceActive && returnToLatestVisible ? (
                             <div
                               className="return-to-latest-overlay"
                               style={{ bottom: returnToLatestBottomPx }}
@@ -5994,11 +5567,7 @@ export function App() {
                                 title="回到最新输出"
                                 onClick={handleReturnToLatestClick}
                               >
-                                <ChevronDown
-                                  size={16}
-                                  strokeWidth={2.1}
-                                  aria-hidden="true"
-                                />
+                                <ChevronDown size={16} strokeWidth={2.1} aria-hidden="true" />
                               </button>
                             </div>
                           ) : null}
@@ -6035,16 +5604,10 @@ export function App() {
                                 idleMode={expandedFileComposerIdleMode}
                                 running={isBusy}
                                 completed={expandedFileComposerCompleted}
-                                completedElapsedMs={
-                                  expandedFileComposerElapsedMs
-                                }
+                                completedElapsedMs={expandedFileComposerElapsedMs}
                                 forceFull={expandedFileComposerForceFull}
-                                onShowCompact={() =>
-                                  setExpandedFileComposerIdleMode("compact")
-                                }
-                                onShowFull={
-                                  handleShowExpandedFileComposerFull
-                                }
+                                onShowCompact={() => setExpandedFileComposerIdleMode("compact")}
+                                onShowFull={handleShowExpandedFileComposerFull}
                                 onStop={() => {
                                   void handleComposerSubmit();
                                 }}
@@ -6052,34 +5615,28 @@ export function App() {
                                 <ComposerBar
                                   value={composerValue}
                                   onChange={setComposerValue}
-                                  onStructuredInputChange={
-                                    handleComposerStructuredInputChange
-                                  }
+                                  onStructuredInputChange={handleComposerStructuredInputChange}
                                   onSubmit={() => {
                                     void handleComposerSubmit();
                                   }}
                                   onAddContext={handleAddContext}
-                                  placeholder={
-                                    fileWorkspaceSurfaceActive
-                                      ? "输入后续任务…"
-                                      : ""
-                                  }
+                                  placeholder={fileWorkspaceSurfaceActive ? "输入后续任务…" : ""}
                                   disabled={composerBarState.disabled}
                                   isReady={composerBarState.isReady}
                                   submitMode={composerBarState.submitMode}
-                                  submitDisabled={
-                                    composerBarState.submitDisabled
-                                  }
+                                  submitDisabled={composerBarState.submitDisabled}
                                   variant="dock"
                                   metaItems={dockComposerMetaItems}
                                   focusRequest={composerFocusRequest}
+                                  focusOffset={composerFocusOffset}
+                                  onInputSelectionChange={(selection) => {
+                                    composerInputSelectionRef.current = selection;
+                                  }}
                                   attachments={composerBarAttachments}
                                   tokens={composerBarTokens}
                                   slashPalette={composerBarSlashPalette}
                                   onInputKeyDown={handleComposerInputKeyDown}
-                                  onRemoveAttachment={
-                                    handleRemoveComposerAttachment
-                                  }
+                                  onRemoveAttachment={handleRemoveComposerAttachment}
                                   onRemoveToken={handleRemoveComposerToken}
                                   onPasteImages={(files) => {
                                     void handlePasteImages(files);
@@ -6100,9 +5657,7 @@ export function App() {
                           <ComposerBar
                             value={composerValue}
                             onChange={setComposerValue}
-                            onStructuredInputChange={
-                              handleComposerStructuredInputChange
-                            }
+                            onStructuredInputChange={handleComposerStructuredInputChange}
                             onSubmit={() => {
                               void handleComposerSubmit();
                             }}
@@ -6116,6 +5671,10 @@ export function App() {
                             metaItems={composerMetaItems}
                             projectPicker={composerProjectPicker}
                             focusRequest={composerFocusRequest}
+                            focusOffset={composerFocusOffset}
+                            onInputSelectionChange={(selection) => {
+                              composerInputSelectionRef.current = selection;
+                            }}
                             attachments={composerBarAttachments}
                             tokens={composerBarTokens}
                             slashPalette={composerBarSlashPalette}
@@ -6132,23 +5691,16 @@ export function App() {
                       {showCenterComposer ? null : (
                         <ExecutionFeed>
                           {narrativeSections.leadItems.map((item, index) =>
-                            renderNarrativeItem(
-                              item,
-                              `lead:${item.id}:${index}`,
-                            ),
+                            renderNarrativeItem(item, `lead:${item.id}:${index}`),
                           )}
                           {narrativeSections.turns.map((turn, index) => {
                             const isLatestPrompt = turn.id === latestPromptId;
-                            const isActiveTurn =
-                              turn.id === activeWorkbenchTurnId;
-                            const turnBodySegments =
-                              projectNarrativeTurnBodySegments({
-                                turnId: turn.id,
-                                items: turn.items,
-                                executionProcessOpen:
-                                  executionProcessOpenByTurnId[turn.id] ===
-                                  true,
-                              });
+                            const isActiveTurn = turn.id === activeWorkbenchTurnId;
+                            const turnBodySegments = projectNarrativeTurnBodySegments({
+                              turnId: turn.id,
+                              items: turn.items,
+                              executionProcessOpen: executionProcessOpenByTurnId[turn.id] === true,
+                            });
                             const turnStyle =
                               isLatestPrompt && latestTurnMinHeightPx > 0
                                 ? ({
@@ -6161,14 +5713,8 @@ export function App() {
                                 key={`${turn.id}:${index}`}
                                 data-execution-turn-id={turn.id}
                                 className={`execution-turn-section${
-                                  isLatestPrompt
-                                    ? " execution-turn-section-latest"
-                                    : ""
-                                }${
-                                  isActiveTurn
-                                    ? " execution-turn-section-active"
-                                    : ""
-                                }`}
+                                  isLatestPrompt ? " execution-turn-section-latest" : ""
+                                }${isActiveTurn ? " execution-turn-section-active" : ""}`}
                                 style={turnStyle}
                                 aria-label={`Turn ${index + 1}`}
                               >
@@ -6179,26 +5725,15 @@ export function App() {
                                         turn.prompt.text,
                                         turn.prompt.tokens,
                                       )}
-                                      tokens={promptTokenViews(
-                                        turn.prompt.tokens,
-                                      )}
+                                      tokens={promptTokenViews(turn.prompt.tokens)}
                                       copyText={turn.prompt.text}
-                                      attachments={promptAttachmentViews(
-                                        turn.prompt.attachments,
-                                      )}
-                                      expanded={
-                                        promptBubbleModeByTurnId[turn.id] ===
-                                        "expanded"
-                                      }
+                                      attachments={promptAttachmentViews(turn.prompt.attachments)}
+                                      expanded={promptBubbleModeByTurnId[turn.id] === "expanded"}
                                       onExpandedChange={(expanded) => {
-                                        setPromptBubbleModeByTurnId(
-                                          (current) => ({
-                                            ...current,
-                                            [turn.id]: expanded
-                                              ? "expanded"
-                                              : "collapsed",
-                                          }),
-                                        );
+                                        setPromptBubbleModeByTurnId((current) => ({
+                                          ...current,
+                                          [turn.id]: expanded ? "expanded" : "collapsed",
+                                        }));
                                       }}
                                     />
                                   </div>
@@ -6229,18 +5764,14 @@ export function App() {
                         onWorkspaceModeChange={setFileWorkspaceMode}
                         onOpenTab={handleOpenProjectFileTab}
                         onExpand={handleExpandFileWorkspace}
-                        onPreviewPrimaryClick={
-                          handleExpandedFilePreviewPrimaryClick
-                        }
+                        onPreviewPrimaryClick={handleExpandedFilePreviewPrimaryClick}
+                        addTaskDisabled={isBusy}
+                        onAddTaskContext={handleAddProjectEntryToTask}
                       />
                     ) : (
                       <InspectorRail
-                        ariaLabel={
-                          selectedSubagentTaskId ? "子任务" : "文件"
-                        }
-                        activeId={
-                          selectedSubagentTaskId ? "subagents" : undefined
-                        }
+                        ariaLabel={selectedSubagentTaskId ? "子任务" : "文件"}
+                        activeId={selectedSubagentTaskId ? "subagents" : undefined}
                         items={[
                           ...INSPECTOR_FILE_ITEMS,
                           ...(subagentTasks.length
@@ -6248,19 +5779,11 @@ export function App() {
                                 {
                                   id: "subagents",
                                   label: "子任务",
-                                  badge:
-                                    runningSubagentCount ||
-                                    subagentTasks.length,
+                                  badge: runningSubagentCount || subagentTasks.length,
                                   tone: runningSubagentCount
                                     ? ("warning" as const)
                                     : ("neutral" as const),
-                                  icon: (
-                                    <Workflow
-                                      size={16}
-                                      strokeWidth={1.8}
-                                      aria-hidden="true"
-                                    />
-                                  ),
+                                  icon: <Workflow size={16} strokeWidth={1.8} aria-hidden="true" />,
                                 },
                               ]
                             : []),
@@ -6300,9 +5823,7 @@ export function App() {
                                       ? "is-active"
                                       : undefined
                                   }
-                                  onClick={() =>
-                                    setSelectedSubagentTaskId(task.taskId)
-                                  }
+                                  onClick={() => setSelectedSubagentTaskId(task.taskId)}
                                 >
                                   {task.description}
                                 </button>
@@ -6329,24 +5850,14 @@ export function App() {
                                 <p>{selectedSubagent.errorCode}</p>
                               </section>
                             ) : null}
-                            {["queued", "running"].includes(
-                              selectedSubagent.status,
-                            ) ? (
+                            {["queued", "running"].includes(selectedSubagent.status) ? (
                               <Button
                                 variant="default"
                                 size="sm"
-                                disabled={
-                                  cancellingSubagentTaskId ===
-                                  selectedSubagent.taskId
-                                }
-                                onClick={() =>
-                                  void handleCancelSubagent(
-                                    selectedSubagent.taskId,
-                                  )
-                                }
+                                disabled={cancellingSubagentTaskId === selectedSubagent.taskId}
+                                onClick={() => void handleCancelSubagent(selectedSubagent.taskId)}
                               >
-                                {cancellingSubagentTaskId ===
-                                selectedSubagent.taskId
+                                {cancellingSubagentTaskId === selectedSubagent.taskId
                                   ? "正在取消…"
                                   : "取消子任务"}
                               </Button>
@@ -6457,9 +5968,7 @@ export function App() {
       >
         <div className="create-project-dialog-body">
           <ProjectFoldersEditor
-            folders={
-              editingProjectId ? projectFolderRows(editingProjectId) : []
-            }
+            folders={editingProjectId ? projectFolderRows(editingProjectId) : []}
             addDisabled={pickingWorkspace || Boolean(projectFolderBusyPath)}
             busyPath={projectFolderBusyPath}
             emptyHint="这个项目还没有文件夹。"

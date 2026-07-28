@@ -1,41 +1,41 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
 import {
+  AppWindow,
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   FileText,
   Folder,
   FolderOpen,
   Globe2,
   Maximize2,
+  Plus,
   Search,
 } from "lucide-react";
-import {
-  AwakenPopover as Popover,
-  AwakenTooltip as Tooltip,
-} from "@awaken/design-system";
-import type { ProjectDirectoryEntry } from "../shared/runtime";
+import { AwakenPopover as Popover, AwakenTooltip as Tooltip } from "@awaken/design-system";
+import type {
+  ProjectDirectoryEntry,
+  ProjectEntryActionRequest,
+  ProjectEntryOpenApplication,
+} from "../shared/runtime";
+import cursorLogo from "./assets/open-with/cursor.png";
+import microsoftOfficeLogo from "./assets/open-with/microsoft-office.png";
+import traeLogo from "./assets/open-with/trae.png";
+import vscodeLogo from "./assets/open-with/vscode.png";
+import wpsOfficeLogo from "./assets/open-with/wps-office.png";
+import xcodeLogo from "./assets/open-with/xcode.png";
 import type { RuntimeClient } from "./runtime/client";
-import FilePreviewHost, {
-  type ProjectFileWorkspaceMode,
-} from "./file-preview/FilePreviewHost";
-import {
-  projectFileTabId,
-  type ProjectFileWorkspaceTab,
-} from "./projectFileTabs";
-import {
-  projectFileIconKind,
-  projectFileTreeRows,
-  type ProjectFileTreeRow,
-} from "./projectFiles";
-import ProjectFileIcon, {
-  type ProjectFileVisualIconKind,
-} from "./ProjectFileIcon";
+import FilePreviewHost, { type ProjectFileWorkspaceMode } from "./file-preview/FilePreviewHost";
+import { projectFileTabId, type ProjectFileWorkspaceTab } from "./projectFileTabs";
+import { projectFileIconKind, projectFileTreeRows, type ProjectFileTreeRow } from "./projectFiles";
+import ProjectFileIcon, { type ProjectFileVisualIconKind } from "./ProjectFileIcon";
 import "./styles/project-files.css";
 
 export type ProjectFilesFolder = {
@@ -48,6 +48,8 @@ export type ProjectFilesWorkspaceProps = {
   runtimeClient: Pick<
     RuntimeClient,
     | "listProjectDirectory"
+    | "copyProjectEntryPath"
+    | "openProjectEntryWith"
     | "startProjectFilePreview"
     | "closeProjectFilePreview"
     | "openProjectFileExternally"
@@ -63,6 +65,10 @@ export type ProjectFilesWorkspaceProps = {
   onOpenTab?: (tab: ProjectFileWorkspaceTab) => void;
   onExpand?: () => void;
   onPreviewPrimaryClick?: () => void;
+  addTaskDisabled?: boolean;
+  onAddTaskContext?: (
+    request: ProjectEntryActionRequest,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
 };
 
 const MIN_FILE_LIST_WIDTH = 240;
@@ -75,6 +81,9 @@ const MINIMUM_WIDTH_FLING_SAMPLE_WINDOW = 140;
 const MINIMUM_WIDTH_FLING_DISTANCE = 120;
 const MINIMUM_WIDTH_FLING_VELOCITY = 1.2;
 const PREVIEW_PRIMARY_CLICK_DISTANCE = 6;
+const CONTEXT_MENU_MARGIN = 8;
+const CONTEXT_SUBMENU_GAP = 6;
+const CONTEXT_SUBMENU_DEFAULT_TOP = -7;
 
 type PreviewPrimaryPointerGesture = {
   pointerId: number;
@@ -83,8 +92,100 @@ type PreviewPrimaryPointerGesture = {
   moved: boolean;
 };
 
+type ProjectEntryContextMenuState = {
+  request: ProjectEntryActionRequest;
+  name: string;
+  x: number;
+  y: number;
+  openWithMenuOpen: boolean;
+  submenuSide: "left" | "right";
+  submenuTop: number;
+};
+
+type FloatingRect = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
+type FloatingSize = {
+  width: number;
+  height: number;
+};
+
+type FloatingViewport = {
+  width: number;
+  height: number;
+};
+
+type ProjectFilesContextStatus = {
+  message: string;
+  tone: "info" | "error";
+};
+
+const PROJECT_ENTRY_OPEN_APPLICATIONS: ReadonlyArray<{
+  id: ProjectEntryOpenApplication;
+  label: string;
+  icon: string;
+}> = [
+  { id: "wps", label: "WPS Office", icon: wpsOfficeLogo },
+  { id: "office", label: "Microsoft Office", icon: microsoftOfficeLogo },
+  { id: "vscode", label: "VS Code", icon: vscodeLogo },
+  { id: "cursor", label: "Cursor", icon: cursorLogo },
+  { id: "trae", label: "TRAE", icon: traeLogo },
+  { id: "xcode", label: "Xcode", icon: xcodeLogo },
+];
+
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+export function projectFilesMenuViewportOffset(
+  rect: FloatingRect,
+  viewport: FloatingViewport,
+  margin = CONTEXT_MENU_MARGIN,
+): { x: number; y: number } {
+  const availableRight = viewport.width - margin;
+  const availableBottom = viewport.height - margin;
+  const rectWidth = rect.right - rect.left;
+  const rectHeight = rect.bottom - rect.top;
+  const availableWidth = Math.max(0, viewport.width - margin * 2);
+  const availableHeight = Math.max(0, viewport.height - margin * 2);
+  return {
+    x:
+      rectWidth > availableWidth || rect.left < margin
+        ? margin - rect.left
+        : rect.right > availableRight
+          ? availableRight - rect.right
+          : 0,
+    y:
+      rectHeight > availableHeight || rect.top < margin
+        ? margin - rect.top
+        : rect.bottom > availableBottom
+          ? availableBottom - rect.bottom
+          : 0,
+  };
+}
+
+export function projectFilesSubmenuPlacement(
+  anchor: Pick<FloatingRect, "left" | "right" | "top">,
+  submenu: FloatingSize,
+  viewport: FloatingViewport,
+  margin = CONTEXT_MENU_MARGIN,
+  gap = CONTEXT_SUBMENU_GAP,
+): { side: "left" | "right"; top: number } {
+  const spaceRight = viewport.width - margin - anchor.right;
+  const spaceLeft = anchor.left - margin;
+  const side =
+    spaceRight >= submenu.width + gap || spaceRight >= spaceLeft ? "right" : "left";
+  const preferredTop = anchor.top + CONTEXT_SUBMENU_DEFAULT_TOP;
+  const maximumTop = Math.max(margin, viewport.height - submenu.height - margin);
+  const viewportTop = clamp(preferredTop, margin, maximumTop);
+  return {
+    side,
+    top: viewportTop - anchor.top,
+  };
 }
 
 type PointerSample = {
@@ -95,14 +196,11 @@ type PointerSample = {
 function isMinimumWidthRightwardFling(samples: PointerSample[]): boolean {
   const finish = samples[samples.length - 1];
   if (!finish || samples.length < 2) return false;
-  const start = samples.reduce((leftmost, sample) =>
-    sample.x < leftmost.x ? sample : leftmost,
-  );
+  const start = samples.reduce((leftmost, sample) => (sample.x < leftmost.x ? sample : leftmost));
   const distance = finish.x - start.x;
   const duration = Math.max(1, finish.time - start.time);
   return (
-    distance >= MINIMUM_WIDTH_FLING_DISTANCE &&
-    distance / duration >= MINIMUM_WIDTH_FLING_VELOCITY
+    distance >= MINIMUM_WIDTH_FLING_DISTANCE && distance / duration >= MINIMUM_WIDTH_FLING_VELOCITY
   );
 }
 
@@ -127,31 +225,32 @@ export function ProjectFilesWorkspace({
   onOpenTab,
   onExpand,
   onPreviewPrimaryClick,
+  addTaskDisabled = false,
+  onAddTaskContext,
 }: ProjectFilesWorkspaceProps) {
   const workspaceBodyRef = useRef<HTMLDivElement>(null);
   const fileNavigatorRef = useRef<HTMLElement>(null);
   const [fileListExpanded, setFileListExpanded] = useState(true);
   const [fileListWidth, setFileListWidth] = useState<number>();
   const [folderMenuOpen, setFolderMenuOpen] = useState(false);
-  const [selectedFolderPath, setSelectedFolderPath] = useState(() =>
-    preferredFolderPath(folders),
-  );
+  const [selectedFolderPath, setSelectedFolderPath] = useState(() => preferredFolderPath(folders));
   const [filter, setFilter] = useState("");
-  const [listings, setListings] = useState<
-    Record<string, ProjectDirectoryEntry[]>
-  >({});
+  const [listings, setListings] = useState<Record<string, ProjectDirectoryEntry[]>>({});
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
-  const [workspaceMode, setWorkspaceMode] = useState<ProjectFileWorkspaceMode>(
-    initialMode,
-  );
+  const [workspaceMode, setWorkspaceMode] = useState<ProjectFileWorkspaceMode>(initialMode);
   const [errorMessage, setErrorMessage] = useState<string>();
+  const [contextStatus, setContextStatus] = useState<ProjectFilesContextStatus>();
+  const [contextMenu, setContextMenu] = useState<ProjectEntryContextMenuState>();
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const contextOpenWithRef = useRef<HTMLDivElement>(null);
+  const contextSubmenuRef = useRef<HTMLDivElement>(null);
   const requestGenerationRef = useRef(0);
-  const previewPrimaryPointerGestureRef =
-    useRef<PreviewPrimaryPointerGesture | undefined>(undefined);
+  const previewPrimaryPointerGestureRef = useRef<PreviewPrimaryPointerGesture | undefined>(
+    undefined,
+  );
 
-  const selectedFolder =
-    folders.find((folder) => folder.path === selectedFolderPath) ?? folders[0];
+  const selectedFolder = folders.find((folder) => folder.path === selectedFolderPath) ?? folders[0];
 
   const changeWorkspaceMode = useCallback(
     (mode: ProjectFileWorkspaceMode): void => {
@@ -171,6 +270,87 @@ export function ProjectFilesWorkspace({
     }
     setSelectedFolderPath(preferredFolderPath(folders));
   }, [folders, selectedFolderPath]);
+
+  useEffect(() => {
+    setContextMenu(undefined);
+  }, [projectId, selectedFolderPath]);
+
+  useEffect(() => {
+    if (!contextStatus) return;
+    const timeout = window.setTimeout(() => setContextStatus(undefined), 2_200);
+    return () => window.clearTimeout(timeout);
+  }, [contextStatus]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = (): void => setContextMenu(undefined);
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (!contextMenuRef.current?.contains(event.target as Node)) close();
+    };
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") close();
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("blur", close);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("resize", close);
+    };
+  }, [contextMenu]);
+
+  useLayoutEffect(() => {
+    const menu = contextMenuRef.current;
+    if (!contextMenu || !menu) return;
+    const rect = menu.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    const offset = projectFilesMenuViewportOffset(rect, {
+      width: window.innerWidth,
+      height: window.innerHeight,
+    });
+    if (offset.x === 0 && offset.y === 0) return;
+    setContextMenu((current) =>
+      current
+        ? {
+            ...current,
+            x: current.x + offset.x,
+            y: current.y + offset.y,
+          }
+        : current,
+    );
+  }, [contextMenu]);
+
+  useLayoutEffect(() => {
+    const anchor = contextOpenWithRef.current;
+    const submenu = contextSubmenuRef.current;
+    if (!contextMenu?.openWithMenuOpen || !anchor || !submenu) return;
+    const anchorRect = anchor.getBoundingClientRect();
+    const submenuRect = submenu.getBoundingClientRect();
+    if (submenuRect.width === 0 || submenuRect.height === 0) return;
+    const placement = projectFilesSubmenuPlacement(
+      anchorRect,
+      { width: submenuRect.width, height: submenuRect.height },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    if (
+      placement.side === contextMenu.submenuSide &&
+      placement.top === contextMenu.submenuTop
+    ) {
+      return;
+    }
+    setContextMenu((current) =>
+      current
+        ? {
+            ...current,
+            submenuSide: placement.side,
+            submenuTop: placement.top,
+          }
+        : current,
+    );
+  }, [contextMenu]);
 
   useEffect(() => {
     const generation = requestGenerationRef.current + 1;
@@ -270,8 +450,7 @@ export function ProjectFilesWorkspace({
         MIN_FILE_LIST_WIDTH,
         Math.min(
           MAX_FILE_LIST_WIDTH,
-          (bodyWidth ?? DEFAULT_FILE_WORKSPACE_WIDTH) -
-            MIN_FILE_PREVIEW_WIDTH,
+          (bodyWidth ?? DEFAULT_FILE_WORKSPACE_WIDTH) - MIN_FILE_PREVIEW_WIDTH,
         ),
       ),
     };
@@ -279,14 +458,11 @@ export function ProjectFilesWorkspace({
 
   function currentFileListWidth(): number {
     if (fileListWidth !== undefined) return fileListWidth;
-    const measuredWidth =
-      fileNavigatorRef.current?.getBoundingClientRect().width ?? 0;
+    const measuredWidth = fileNavigatorRef.current?.getBoundingClientRect().width ?? 0;
     return measuredWidth > 0 ? measuredWidth : DEFAULT_FILE_LIST_WIDTH;
   }
 
-  function handleFileListResizeStart(
-    event: ReactPointerEvent<HTMLDivElement>,
-  ): void {
+  function handleFileListResizeStart(event: ReactPointerEvent<HTMLDivElement>): void {
     if (!fileListExpanded || !workspaceBodyRef.current) return;
     event.preventDefault();
     const target = event.currentTarget;
@@ -295,39 +471,26 @@ export function ProjectFilesWorkspace({
     const bodyRight = workspaceBodyRef.current.getBoundingClientRect().right;
     const { minimum, maximum } = fileListWidthBounds();
     let minimumWidthSamples: PointerSample[] =
-      currentFileListWidth() <= minimum
-        ? [{ x: event.clientX, time: event.timeStamp }]
-        : [];
+      currentFileListWidth() <= minimum ? [{ x: event.clientX, time: event.timeStamp }] : [];
 
-    function recordMinimumWidthSample(
-      clientX: number,
-      timeStamp: number,
-    ): boolean {
+    function recordMinimumWidthSample(clientX: number, timeStamp: number): boolean {
       minimumWidthSamples.push({ x: clientX, time: timeStamp });
       const cutoff = timeStamp - MINIMUM_WIDTH_FLING_SAMPLE_WINDOW;
-      minimumWidthSamples = minimumWidthSamples.filter(
-        (sample) => sample.time >= cutoff,
-      );
+      minimumWidthSamples = minimumWidthSamples.filter((sample) => sample.time >= cutoff);
       return isMinimumWidthRightwardFling(minimumWidthSamples);
     }
 
     function handlePointerMove(moveEvent: PointerEvent): void {
       if (moveEvent.pointerId !== pointerId) return;
       moveEvent.preventDefault();
-      const nextWidth = clamp(
-        bodyRight - moveEvent.clientX,
-        minimum,
-        maximum,
-      );
+      const nextWidth = clamp(bodyRight - moveEvent.clientX, minimum, maximum);
       setFileListWidth(nextWidth);
       if (nextWidth > minimum) {
         minimumWidthSamples = [];
         return;
       }
       if (minimumWidthSamples.length === 0) {
-        minimumWidthSamples = [
-          { x: moveEvent.clientX, time: moveEvent.timeStamp },
-        ];
+        minimumWidthSamples = [{ x: moveEvent.clientX, time: moveEvent.timeStamp }];
         return;
       }
       if (recordMinimumWidthSample(moveEvent.clientX, moveEvent.timeStamp)) {
@@ -364,19 +527,12 @@ export function ProjectFilesWorkspace({
     window.addEventListener("pointercancel", handlePointerCancel);
   }
 
-  function handleFileListResizeKeyDown(
-    event: ReactKeyboardEvent<HTMLDivElement>,
-  ): void {
+  function handleFileListResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
     const { minimum, maximum } = fileListWidthBounds();
-    const delta =
-      event.key === "ArrowLeft"
-        ? FILE_LIST_RESIZE_STEP
-        : -FILE_LIST_RESIZE_STEP;
-    setFileListWidth(
-      clamp(currentFileListWidth() + delta, minimum, maximum),
-    );
+    const delta = event.key === "ArrowLeft" ? FILE_LIST_RESIZE_STEP : -FILE_LIST_RESIZE_STEP;
+    setFileListWidth(clamp(currentFileListWidth() + delta, minimum, maximum));
   }
 
   const rows = useMemo(
@@ -393,11 +549,7 @@ export function ProjectFilesWorkspace({
     [activeTab, expandedPaths, filter, listings, selectedFolder?.path],
   );
 
-  const emptyTitle = !projectId
-    ? "选择项目"
-    : folders.length === 0
-      ? "项目没有文件夹"
-      : "打开文件";
+  const emptyTitle = !projectId ? "选择项目" : folders.length === 0 ? "项目没有文件夹" : "打开文件";
   const emptyDescription = !projectId
     ? "先从左侧选择一个项目"
     : folders.length === 0
@@ -415,14 +567,8 @@ export function ProjectFilesWorkspace({
     );
   }
 
-  function handlePreviewPointerDown(
-    event: ReactPointerEvent<HTMLDivElement>,
-  ): void {
-    if (
-      event.button !== 0 ||
-      !onPreviewPrimaryClick ||
-      isInteractivePreviewTarget(event.target)
-    ) {
+  function handlePreviewPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
+    if (event.button !== 0 || !onPreviewPrimaryClick || isInteractivePreviewTarget(event.target)) {
       return;
     }
     previewPrimaryPointerGestureRef.current = {
@@ -433,9 +579,7 @@ export function ProjectFilesWorkspace({
     };
   }
 
-  function handlePreviewPointerMove(
-    event: ReactPointerEvent<HTMLDivElement>,
-  ): void {
+  function handlePreviewPointerMove(event: ReactPointerEvent<HTMLDivElement>): void {
     const gesture = previewPrimaryPointerGestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId || gesture.moved) {
       return;
@@ -450,9 +594,7 @@ export function ProjectFilesWorkspace({
     }
   }
 
-  function handlePreviewPointerUp(
-    event: ReactPointerEvent<HTMLDivElement>,
-  ): void {
+  function handlePreviewPointerUp(event: ReactPointerEvent<HTMLDivElement>): void {
     const gesture = previewPrimaryPointerGestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     previewPrimaryPointerGestureRef.current = undefined;
@@ -461,11 +603,96 @@ export function ProjectFilesWorkspace({
     }
   }
 
-  function handlePreviewPointerCancel(
-    event: ReactPointerEvent<HTMLDivElement>,
-  ): void {
+  function handlePreviewPointerCancel(event: ReactPointerEvent<HTMLDivElement>): void {
     if (previewPrimaryPointerGestureRef.current?.pointerId === event.pointerId) {
       previewPrimaryPointerGestureRef.current = undefined;
+    }
+  }
+
+  function showProjectEntryContextMenu(
+    event: ReactMouseEvent<HTMLButtonElement>,
+    row: ProjectFileTreeRow,
+  ): void {
+    if (!projectId || !selectedFolder?.path || row.kind === "symlink") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const menuWidth = 224;
+    const menuHeight = 152;
+    setContextMenu({
+      request: {
+        projectId,
+        folderPath: selectedFolder.path,
+        relativePath: row.relativePath,
+        kind: row.kind,
+      },
+      name: row.name,
+      x: clamp(
+        event.clientX,
+        CONTEXT_MENU_MARGIN,
+        Math.max(CONTEXT_MENU_MARGIN, window.innerWidth - menuWidth - CONTEXT_MENU_MARGIN),
+      ),
+      y: clamp(
+        event.clientY,
+        CONTEXT_MENU_MARGIN,
+        Math.max(CONTEXT_MENU_MARGIN, window.innerHeight - menuHeight - CONTEXT_MENU_MARGIN),
+      ),
+      openWithMenuOpen: false,
+      submenuSide: "right",
+      submenuTop: CONTEXT_SUBMENU_DEFAULT_TOP,
+    });
+  }
+
+  async function addContextMenuEntryToTask(): Promise<void> {
+    const current = contextMenu;
+    setContextMenu(undefined);
+    if (!current || !onAddTaskContext || addTaskDisabled) return;
+    try {
+      const result = await onAddTaskContext(current.request);
+      setContextStatus({
+        message: result.ok ? `已添加到任务：${current.name}` : result.message,
+        tone: result.ok ? "info" : "error",
+      });
+    } catch {
+      setContextStatus({ message: "暂时无法把这个条目添加到任务。", tone: "error" });
+    }
+  }
+
+  async function copyContextMenuEntryPath(): Promise<void> {
+    const current = contextMenu;
+    setContextMenu(undefined);
+    if (!current) return;
+    try {
+      const result = await runtimeClient.copyProjectEntryPath(current.request);
+      setContextStatus({
+        message: result.ok ? "已复制路径" : result.message,
+        tone: result.ok ? "info" : "error",
+      });
+    } catch {
+      setContextStatus({ message: "暂时无法复制这个路径。", tone: "error" });
+    }
+  }
+
+  async function openContextMenuEntryWith(
+    application: ProjectEntryOpenApplication,
+    label: string,
+  ): Promise<void> {
+    const current = contextMenu;
+    setContextMenu(undefined);
+    if (!current) return;
+    try {
+      const result = await runtimeClient.openProjectEntryWith({
+        ...current.request,
+        application,
+      });
+      setContextStatus({
+        message: result.ok ? `已用 ${label} 打开` : result.message,
+        tone: result.ok ? "info" : "error",
+      });
+    } catch {
+      setContextStatus({
+        message: `暂时无法用 ${label} 打开这个条目。`,
+        tone: "error",
+      });
     }
   }
 
@@ -507,9 +734,7 @@ export function ProjectFilesWorkspace({
           ) : null}
           <button
             type="button"
-            className={`project-files-pathbar__icon${
-              fileListExpanded ? " is-expanded" : ""
-            }`}
+            className={`project-files-pathbar__icon${fileListExpanded ? " is-expanded" : ""}`}
             aria-label={fileListExpanded ? "收起文件列表" : "展开文件列表"}
             aria-expanded={fileListExpanded}
             aria-controls="awaken-project-files-navigator"
@@ -560,6 +785,17 @@ export function ProjectFilesWorkspace({
               <span>{emptyDescription}</span>
             </div>
           )}
+          {contextStatus ? (
+            <div
+              className={`project-files-context-status${
+                contextStatus.tone === "error" ? " is-error" : ""
+              }`}
+              role={contextStatus.tone === "error" ? "alert" : "status"}
+              aria-live={contextStatus.tone === "error" ? "assertive" : "polite"}
+            >
+              {contextStatus.message}
+            </div>
+          ) : null}
         </div>
 
         <div
@@ -569,9 +805,7 @@ export function ProjectFilesWorkspace({
           aria-orientation="vertical"
           aria-valuemin={MIN_FILE_LIST_WIDTH}
           aria-valuemax={Math.round(fileListWidthBounds().maximum)}
-          aria-valuenow={Math.round(
-            fileListWidth ?? DEFAULT_FILE_LIST_WIDTH,
-          )}
+          aria-valuenow={Math.round(fileListWidth ?? DEFAULT_FILE_LIST_WIDTH)}
           aria-hidden={!fileListExpanded}
           tabIndex={fileListExpanded ? 0 : -1}
           onPointerDown={handleFileListResizeStart}
@@ -613,9 +847,7 @@ export function ProjectFilesWorkspace({
                       <button
                         key={folder.path}
                         type="button"
-                        className={`project-files-folder-option${
-                          selected ? " is-selected" : ""
-                        }`}
+                        className={`project-files-folder-option${selected ? " is-selected" : ""}`}
                         role="option"
                         aria-selected={selected}
                         onClick={() => {
@@ -627,9 +859,7 @@ export function ProjectFilesWorkspace({
                         <span>
                           <strong>{folder.label}</strong>
                         </span>
-                        {selected ? (
-                          <Check size={16} strokeWidth={1.9} aria-hidden="true" />
-                        ) : null}
+                        {selected ? <Check size={16} strokeWidth={1.9} aria-hidden="true" /> : null}
                       </button>
                     );
                   })}
@@ -654,9 +884,7 @@ export function ProjectFilesWorkspace({
             {loadingPaths.has("") ? (
               <div className="project-files-tree-state">正在读取文件…</div>
             ) : errorMessage && !listings[""] ? (
-              <div className="project-files-tree-state is-error">
-                {errorMessage}
-              </div>
+              <div className="project-files-tree-state is-error">{errorMessage}</div>
             ) : selectedFolder && rows.length === 0 ? (
               <div className="project-files-tree-state">
                 {filter ? "没有匹配的文件" : "此文件夹为空"}
@@ -673,21 +901,18 @@ export function ProjectFilesWorkspace({
                       type="button"
                       className={`project-files-tree-row${
                         row.selected ? " is-selected" : ""
-                      }${row.depth > 0 ? " is-nested" : ""}${
-                        loading ? " is-loading" : ""
-                      }`}
+                      }${row.depth > 0 ? " is-nested" : ""}${loading ? " is-loading" : ""}`}
                       style={{ "--project-file-depth": row.depth } as CSSProperties}
                       role="treeitem"
                       aria-level={row.depth + 1}
                       aria-expanded={directory ? row.expanded : undefined}
                       aria-busy={loading || undefined}
+                      onContextMenu={(event) => showProjectEntryContextMenu(event, row)}
                       onClick={() => {
                         if (directory) {
                           toggleDirectory(row.relativePath);
                         } else {
-                          const mode = /\.html?$/i.test(row.name)
-                            ? "browser"
-                            : "files";
+                          const mode = /\.html?$/i.test(row.name) ? "browser" : "files";
                           if (projectId && selectedFolder?.path) {
                             onOpenTab?.({
                               id: projectFileTabId(
@@ -708,29 +933,16 @@ export function ProjectFilesWorkspace({
                     >
                       <span className="project-files-tree-row__chevron">
                         {directory ? (
-                          <ChevronRight
-                            size={15}
-                            strokeWidth={2}
-                            aria-hidden="true"
-                          />
+                          <ChevronRight size={15} strokeWidth={2} aria-hidden="true" />
                         ) : null}
                       </span>
-                      <span
-                        className="project-files-tree-row__icon"
-                        data-file-icon={iconKind}
-                      >
+                      <span className="project-files-tree-row__icon" data-file-icon={iconKind}>
                         <ProjectFileIcon
                           kind={iconKind}
-                          size={
-                            iconKind === "folder" || iconKind === "folder-open"
-                              ? 16
-                              : 15
-                          }
+                          size={iconKind === "folder" || iconKind === "folder-open" ? 16 : 15}
                         />
                       </span>
-                      <span className="project-files-tree-row__label">
-                        {row.name}
-                      </span>
+                      <span className="project-files-tree-row__label">{row.name}</span>
                     </button>
                   );
                 })}
@@ -742,6 +954,105 @@ export function ProjectFilesWorkspace({
           </div>
         </aside>
       </div>
+      {contextMenu ? (
+        <div
+          ref={contextMenuRef}
+          className="project-files-context-menu"
+          role="menu"
+          aria-label={`${contextMenu.name} 操作`}
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            disabled={addTaskDisabled || !onAddTaskContext}
+            onClick={() => void addContextMenuEntryToTask()}
+          >
+            <Plus size={16} strokeWidth={1.9} aria-hidden="true" />
+            <span>添加任务</span>
+          </button>
+          <button type="button" role="menuitem" onClick={() => void copyContextMenuEntryPath()}>
+            <Copy size={15} strokeWidth={1.9} aria-hidden="true" />
+            <span>复制路径</span>
+          </button>
+          <div className="project-files-context-menu__separator" role="separator" />
+          <div
+            ref={contextOpenWithRef}
+            className="project-files-context-menu__open-with"
+            onMouseEnter={() =>
+              setContextMenu((current) =>
+                current ? { ...current, openWithMenuOpen: true } : current,
+              )
+            }
+          >
+            <button
+              type="button"
+              role="menuitem"
+              aria-haspopup="menu"
+              aria-expanded={contextMenu.openWithMenuOpen}
+              onFocus={() =>
+                setContextMenu((current) =>
+                  current ? { ...current, openWithMenuOpen: true } : current,
+                )
+              }
+              onClick={() =>
+                setContextMenu((current) =>
+                  current
+                    ? {
+                        ...current,
+                        openWithMenuOpen: true,
+                      }
+                    : current,
+                )
+              }
+            >
+              <AppWindow size={15} strokeWidth={1.8} aria-hidden="true" />
+              <span>打开方式</span>
+              <ChevronRight
+                className="project-files-context-menu__submenu-chevron"
+                size={15}
+                strokeWidth={2}
+                aria-hidden="true"
+              />
+            </button>
+            {contextMenu.openWithMenuOpen ? (
+              <div
+                ref={contextSubmenuRef}
+                className={`project-files-context-submenu${
+                  contextMenu.submenuSide === "left" ? " is-left" : ""
+                }`}
+                role="menu"
+                aria-label="选择打开应用"
+                style={{ top: contextMenu.submenuTop }}
+              >
+                {PROJECT_ENTRY_OPEN_APPLICATIONS.map((application) => {
+                  const officeApplication = application.id === "wps" || application.id === "office";
+                  return (
+                    <button
+                      key={application.id}
+                      type="button"
+                      role="menuitem"
+                      disabled={contextMenu.request.kind === "directory" && officeApplication}
+                      onClick={() =>
+                        void openContextMenuEntryWith(application.id, application.label)
+                      }
+                    >
+                      <img
+                        className="project-files-context-submenu__application-icon"
+                        src={application.icon}
+                        alt=""
+                        aria-hidden="true"
+                        draggable={false}
+                      />
+                      <span>{application.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

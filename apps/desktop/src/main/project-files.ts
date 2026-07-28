@@ -4,15 +4,15 @@ import type {
   ProjectDirectoryEntry,
   ProjectDirectoryListRequest,
   ProjectDirectoryListResult,
+  ProjectEntryActionErrorCode,
+  ProjectEntryActionRequest,
+  ProjectEntryKind,
   ProjectFilePreviewActionRequest,
   ProjectFilePreviewErrorCode,
   RuntimeProject,
 } from "../shared/runtime.js";
 
-export type ProjectDirectoryScope = Pick<
-  RuntimeProject,
-  "projectId" | "state" | "folders"
->;
+export type ProjectDirectoryScope = Pick<RuntimeProject, "projectId" | "state" | "folders">;
 
 function portableRelativePath(parts: string[]): string {
   return parts.join("/");
@@ -23,11 +23,7 @@ function relativePathParts(relativePath: string | undefined): string[] | null {
   if (!candidate || candidate === ".") {
     return [];
   }
-  if (
-    candidate.includes("\0") ||
-    path.isAbsolute(candidate) ||
-    /^[A-Za-z]:[\\/]/.test(candidate)
-  ) {
+  if (candidate.includes("\0") || path.isAbsolute(candidate) || /^[A-Za-z]:[\\/]/.test(candidate)) {
     return null;
   }
   const parts = candidate.replaceAll("\\", "/").split("/");
@@ -41,9 +37,7 @@ function isPathInside(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
   return (
     relative === "" ||
-    (!relative.startsWith(`..${path.sep}`) &&
-      relative !== ".." &&
-      !path.isAbsolute(relative))
+    (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))
   );
 }
 
@@ -61,6 +55,18 @@ export type ResolvedProjectFile = {
   displayName: string;
 };
 
+export type ResolvedProjectEntry = ResolvedProjectFile & {
+  kind: ProjectEntryKind;
+};
+
+export type ResolveProjectEntryResult =
+  | { ok: true; entry: ResolvedProjectEntry }
+  | {
+      ok: false;
+      code: ProjectEntryActionErrorCode;
+      message: string;
+    };
+
 export type ResolveProjectFileResult =
   | { ok: true; file: ResolvedProjectFile }
   | {
@@ -69,15 +75,35 @@ export type ResolveProjectFileResult =
       message: string;
     };
 
+function previewErrorCodeFromEntryError(
+  code: ProjectEntryActionErrorCode,
+): ProjectFilePreviewErrorCode {
+  switch (code) {
+    case "ENTRY_NOT_FOUND":
+    case "ENTRY_TYPE_MISMATCH":
+      return "FILE_NOT_FOUND";
+    case "ENTRY_UNREADABLE":
+      return "FILE_UNREADABLE";
+    case "INVALID_REQUEST":
+    case "UNAUTHORIZED":
+    case "PROJECT_NOT_FOUND":
+    case "FOLDER_NOT_ATTACHED":
+    case "PATH_OUTSIDE_PROJECT":
+      return code;
+    default:
+      return "FILE_UNREADABLE";
+  }
+}
+
 /**
- * Resolves one regular file through the same active-project and attached-folder
- * authority as the directory tree. A symlink is never a preview capability,
- * even when its current target happens to remain inside the project folder.
+ * Resolves one file or directory through the active-project attachment
+ * authority. Renderer identity is only a request hint: Main rechecks lexical
+ * containment, realpath containment, symlinks, existence, and the actual kind.
  */
-export async function resolveProjectFile(
+export async function resolveProjectEntry(
   projects: ProjectDirectoryScope[],
-  request: ProjectFilePreviewActionRequest,
-): Promise<ResolveProjectFileResult> {
+  request: ProjectEntryActionRequest,
+): Promise<ResolveProjectEntryResult> {
   if (
     !request ||
     typeof request.projectId !== "string" ||
@@ -85,18 +111,18 @@ export async function resolveProjectFile(
     typeof request.folderPath !== "string" ||
     !request.folderPath.trim() ||
     typeof request.relativePath !== "string" ||
-    !request.relativePath.trim()
+    !request.relativePath.trim() ||
+    (request.kind !== "file" && request.kind !== "directory")
   ) {
     return {
       ok: false,
       code: "INVALID_REQUEST",
-      message: "文件预览请求无效。",
+      message: "文件操作请求无效。",
     };
   }
 
   const project = projects.find(
-    (candidate) =>
-      candidate.projectId === request.projectId && candidate.state === "active",
+    (candidate) => candidate.projectId === request.projectId && candidate.state === "active",
   );
   if (!project) {
     return {
@@ -122,7 +148,7 @@ export async function resolveProjectFile(
     return {
       ok: false,
       code: "PATH_OUTSIDE_PROJECT",
-      message: "只能查看当前项目文件夹内的文件。",
+      message: "只能操作当前项目文件夹内的文件或目录。",
     };
   }
 
@@ -133,7 +159,7 @@ export async function resolveProjectFile(
       return {
         ok: false,
         code: "PATH_OUTSIDE_PROJECT",
-        message: "只能查看当前项目文件夹内的文件。",
+        message: "只能操作当前项目文件夹内的文件或目录。",
       };
     }
 
@@ -142,23 +168,37 @@ export async function resolveProjectFile(
       fs.realpath(absolutePath),
       fs.lstat(absolutePath),
     ]);
-    if (
-      lexicalStat.isSymbolicLink() ||
-      !lexicalStat.isFile() ||
-      !isPathInside(realRoot, realPath)
-    ) {
+    if (lexicalStat.isSymbolicLink() || !isPathInside(realRoot, realPath)) {
       return {
         ok: false,
-        code: lexicalStat.isFile() ? "PATH_OUTSIDE_PROJECT" : "FILE_NOT_FOUND",
-        message: lexicalStat.isFile()
-          ? "只能查看当前项目文件夹内的文件。"
-          : "所选项目文件不存在。",
+        code: "PATH_OUTSIDE_PROJECT",
+        message: "只能操作当前项目文件夹内的文件或目录。",
+      };
+    }
+
+    const actualKind: ProjectEntryKind | undefined = lexicalStat.isDirectory()
+      ? "directory"
+      : lexicalStat.isFile()
+        ? "file"
+        : undefined;
+    if (!actualKind) {
+      return {
+        ok: false,
+        code: "ENTRY_NOT_FOUND",
+        message: "所选项目文件或目录不存在。",
+      };
+    }
+    if (actualKind !== request.kind) {
+      return {
+        ok: false,
+        code: "ENTRY_TYPE_MISMATCH",
+        message: "所选项目条目的类型已经发生变化，请刷新后重试。",
       };
     }
 
     return {
       ok: true,
-      file: {
+      entry: {
         projectId: project.projectId,
         registeredRoot,
         realRoot,
@@ -166,25 +206,45 @@ export async function resolveProjectFile(
         realPath,
         relativePath: portableRelativePath(parts),
         displayName: parts[parts.length - 1] ?? request.relativePath,
+        kind: actualKind,
       },
     };
   } catch (error) {
-    const code =
+    const missing =
       typeof error === "object" &&
       error !== null &&
       "code" in error &&
-      (error.code === "ENOENT" || error.code === "ENOTDIR")
-        ? "FILE_NOT_FOUND"
-        : "FILE_UNREADABLE";
+      (error.code === "ENOENT" || error.code === "ENOTDIR");
     return {
       ok: false,
-      code,
-      message:
-        code === "FILE_NOT_FOUND"
-          ? "所选项目文件不存在。"
-          : "这个文件暂时无法读取。",
+      code: missing ? "ENTRY_NOT_FOUND" : "ENTRY_UNREADABLE",
+      message: missing ? "所选项目文件或目录不存在。" : "这个项目文件或目录暂时无法读取。",
     };
   }
+}
+
+/**
+ * Resolves one regular file through the same active-project and attached-folder
+ * authority as the directory tree. A symlink is never a preview capability,
+ * even when its current target happens to remain inside the project folder.
+ */
+export async function resolveProjectFile(
+  projects: ProjectDirectoryScope[],
+  request: ProjectFilePreviewActionRequest,
+): Promise<ResolveProjectFileResult> {
+  const result = await resolveProjectEntry(projects, {
+    ...request,
+    kind: "file",
+  });
+  if (!result.ok) {
+    return {
+      ok: false,
+      code: previewErrorCodeFromEntryError(result.code),
+      message: result.message,
+    };
+  }
+  const { kind: _kind, ...file } = result.entry;
+  return { ok: true, file };
 }
 
 function entryKind(entry: {
@@ -196,10 +256,7 @@ function entryKind(entry: {
   return "file";
 }
 
-function sortEntries(
-  left: ProjectDirectoryEntry,
-  right: ProjectDirectoryEntry,
-): number {
+function sortEntries(left: ProjectDirectoryEntry, right: ProjectDirectoryEntry): number {
   if (left.kind === "directory" && right.kind !== "directory") return -1;
   if (left.kind !== "directory" && right.kind === "directory") return 1;
   return left.name.localeCompare(right.name, undefined, {
@@ -223,8 +280,7 @@ export async function listProjectDirectory(
     !request.projectId.trim() ||
     typeof request.folderPath !== "string" ||
     !request.folderPath.trim() ||
-    (request.relativePath !== undefined &&
-      typeof request.relativePath !== "string")
+    (request.relativePath !== undefined && typeof request.relativePath !== "string")
   ) {
     return {
       ok: false,
@@ -234,8 +290,7 @@ export async function listProjectDirectory(
   }
 
   const project = projects.find(
-    (candidate) =>
-      candidate.projectId === request.projectId && candidate.state === "active",
+    (candidate) => candidate.projectId === request.projectId && candidate.state === "active",
   );
   if (!project) {
     return {

@@ -32,8 +32,14 @@ function createMockRuntimeClient(): RuntimeClient {
       baseUrlHost: "127.0.0.1:19001",
     })),
     listConnectors: vi.fn(async () => []),
-    connectConnector: vi.fn(async () => ({ connectorId: "", connectorState: "connected" })),
-    disconnectConnector: vi.fn(async () => ({ connectorId: "", connectorState: "disconnected" })),
+    connectConnector: vi.fn(async () => ({
+      connectorId: "",
+      connectorState: "connected",
+    })),
+    disconnectConnector: vi.fn(async () => ({
+      connectorId: "",
+      connectorState: "disconnected",
+    })),
     listCliConnectors: vi.fn(async () => []),
     installCliConnector: vi.fn(),
     refreshCliConnector: vi.fn(),
@@ -47,17 +53,36 @@ function createMockRuntimeClient(): RuntimeClient {
     subscribeCliConnectorState: vi.fn(() => () => {}),
     listMcpServers: vi.fn(async () => []),
     configureMcpServers: vi.fn(async () => ({ serverNames: [], message: "" })),
-    getMcpServerConfig: vi.fn(async () => ({ name: "", configText: "", scope: "" })),
-    updateMcpServerConfig: vi.fn(async () => ({ serverNames: [], message: "" })),
+    getMcpServerConfig: vi.fn(async () => ({
+      name: "",
+      configText: "",
+      scope: "",
+    })),
+    updateMcpServerConfig: vi.fn(async () => ({
+      serverNames: [],
+      message: "",
+    })),
     getRuntimeLogs: vi.fn(async () => []),
     disableMcpServer: vi.fn(async () => undefined),
     enableMcpServer: vi.fn(async () => undefined),
     deleteMcpServer: vi.fn(async () => undefined),
     listMcpTools: vi.fn(async () => []),
     listSkills: vi.fn(async () => []),
-    getSkillPreview: vi.fn(async () => ({ frontmatterRaw: "", bodyMarkdown: "" })),
-    installSkill: vi.fn(async () => ({ skill: {} as never, path: "", message: "" })),
-    deleteSkill: vi.fn(async () => ({ id: "", sourceOrigin: "user", originalPath: "", message: "" })),
+    getSkillPreview: vi.fn(async () => ({
+      frontmatterRaw: "",
+      bodyMarkdown: "",
+    })),
+    installSkill: vi.fn(async () => ({
+      skill: {} as never,
+      path: "",
+      message: "",
+    })),
+    deleteSkill: vi.fn(async () => ({
+      id: "",
+      sourceOrigin: "user",
+      originalPath: "",
+      message: "",
+    })),
     disableSkill: vi.fn(async () => undefined),
     enableSkill: vi.fn(async () => undefined),
     listModelProviders: vi.fn(async () => []),
@@ -102,7 +127,13 @@ function createMockRuntimeClient(): RuntimeClient {
     })),
     getThreadTranscript: vi.fn(async () => ({ thread: {} as never, runs: [] })),
     listThreads: vi.fn(async () => []),
-    renameThread: vi.fn(async () => ({ threadId: "", label: "", workspace: {} as never, createdAt: "", updatedAt: "" })),
+    renameThread: vi.fn(async () => ({
+      threadId: "",
+      label: "",
+      workspace: {} as never,
+      createdAt: "",
+      updatedAt: "",
+    })),
     deleteThread: vi.fn(async () => ({ ok: true as const })),
     listProjects: vi.fn(async () => []),
     listProjectDirectory: vi.fn(async () => ({
@@ -110,6 +141,13 @@ function createMockRuntimeClient(): RuntimeClient {
       relativePath: "",
       entries: [],
     })),
+    resolveProjectEntryForTask: vi.fn(async () => ({
+      ok: false as const,
+      code: "ENTRY_NOT_FOUND" as const,
+      message: "not found",
+    })),
+    copyProjectEntryPath: vi.fn(async () => ({ ok: true as const })),
+    openProjectEntryWith: vi.fn(async () => ({ ok: true as const })),
     startProjectFilePreview: vi.fn(async () => ({
       ok: false as const,
       code: "UNSUPPORTED_FILE_TYPE" as const,
@@ -119,16 +157,16 @@ function createMockRuntimeClient(): RuntimeClient {
     onProjectFilePreviewInteraction: vi.fn(() => () => {}),
     openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
     revealProjectFile: vi.fn(async () => ({ ok: true as const })),
-    upsertProject: vi.fn(async () => ({} as never)),
-    reorderProjects: vi.fn(async () => ({} as never)),
-    detachProject: vi.fn(async () => ({} as never)),
-    deleteProjectThreads: vi.fn(async () => ({} as never)),
-    createProject: vi.fn(async () => ({} as never)),
-    attachProjectFolder: vi.fn(async () => ({} as never)),
-    detachProjectFolder: vi.fn(async () => ({} as never)),
-    setPrimaryProjectFolder: vi.fn(async () => ({} as never)),
-    trashProjectFolder: vi.fn(async () => ({} as never)),
-    getProjectOperation: vi.fn(async () => ({} as never)),
+    upsertProject: vi.fn(async () => ({}) as never),
+    reorderProjects: vi.fn(async () => ({}) as never),
+    detachProject: vi.fn(async () => ({}) as never),
+    deleteProjectThreads: vi.fn(async () => ({}) as never),
+    createProject: vi.fn(async () => ({}) as never),
+    attachProjectFolder: vi.fn(async () => ({}) as never),
+    detachProjectFolder: vi.fn(async () => ({}) as never),
+    setPrimaryProjectFolder: vi.fn(async () => ({}) as never),
+    trashProjectFolder: vi.fn(async () => ({}) as never),
+    getProjectOperation: vi.fn(async () => ({}) as never),
     openArtifact: vi.fn(async () => ({ ok: true as const })),
     revealPath: vi.fn(async () => ({ ok: true as const })),
     revealArtifact: vi.fn(async () => ({ ok: true as const })),
@@ -227,23 +265,63 @@ function createMockRuntimeClient(): RuntimeClient {
     openAwakenPetsDirectory: vi.fn(async () => undefined),
     openCodexPetsDirectory: vi.fn(async () => undefined),
     listMemories: vi.fn(async () => []),
-    getMemory: vi.fn(async () => { throw new Error("not found"); }),
+    getMemory: vi.fn(async () => {
+      throw new Error("not found");
+    }),
     deleteMemory: vi.fn(async () => undefined),
-    getMemorySettings: vi.fn(async () => ({ revision: 0, value: { enabled: true, automaticRecall: true, proactiveMemory: true, autoDream: false } })),
-    updateMemorySettings: vi.fn(async () => ({ revision: 1, value: { enabled: true, automaticRecall: true, proactiveMemory: true, autoDream: false } })),
-    startMemoryDream: vi.fn(async () => ({ taskId: "dream", status: "queued" as const, scopes: ["user" as const], createdAt: new Date(0).toISOString() })),
-    getMemoryDream: vi.fn(async () => ({ taskId: "dream", status: "completed" as const, scopes: ["user" as const], createdAt: new Date(0).toISOString() })),
+    getMemorySettings: vi.fn(async () => ({
+      revision: 0,
+      value: {
+        enabled: true,
+        automaticRecall: true,
+        proactiveMemory: true,
+        autoDream: false,
+      },
+    })),
+    updateMemorySettings: vi.fn(async () => ({
+      revision: 1,
+      value: {
+        enabled: true,
+        automaticRecall: true,
+        proactiveMemory: true,
+        autoDream: false,
+      },
+    })),
+    startMemoryDream: vi.fn(async () => ({
+      taskId: "dream",
+      status: "queued" as const,
+      scopes: ["user" as const],
+      createdAt: new Date(0).toISOString(),
+    })),
+    getMemoryDream: vi.fn(async () => ({
+      taskId: "dream",
+      status: "completed" as const,
+      scopes: ["user" as const],
+      createdAt: new Date(0).toISOString(),
+    })),
     listMemoryDreams: vi.fn(async () => []),
     cancelMemoryDream: vi.fn(async () => undefined),
     onMemoryDreamReceipt: vi.fn(() => () => {}),
     listScheduledTasks: vi.fn(async () => []),
-    getScheduledTask: vi.fn(async () => { throw new Error("not found"); }),
-    createScheduledTask: vi.fn(async () => { throw new Error("not implemented"); }),
-    patchScheduledTask: vi.fn(async () => { throw new Error("not implemented"); }),
+    getScheduledTask: vi.fn(async () => {
+      throw new Error("not found");
+    }),
+    createScheduledTask: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    patchScheduledTask: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
     deleteScheduledTask: vi.fn(async () => undefined),
-    pauseScheduledTask: vi.fn(async () => { throw new Error("not implemented"); }),
-    resumeScheduledTask: vi.fn(async () => { throw new Error("not implemented"); }),
-    runScheduledTaskNow: vi.fn(async () => { throw new Error("not implemented"); }),
+    pauseScheduledTask: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    resumeScheduledTask: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    runScheduledTaskNow: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
     cancelScheduledTaskExecution: vi.fn(async () => undefined),
     listScheduledTaskExecutions: vi.fn(async () => []),
     getSystemTimezone: vi.fn(async () => "UTC"),
@@ -255,9 +333,7 @@ function createMockRuntimeClient(): RuntimeClient {
 describe("PetsSettingsPanel", () => {
   it("renders the pets settings shell", async () => {
     const client = createMockRuntimeClient();
-    const html = renderToString(
-      React.createElement(PetsSettingsPanel, { runtimeClient: client }),
-    );
+    const html = renderToString(React.createElement(PetsSettingsPanel, { runtimeClient: client }));
 
     expect(html).toContain("宠物");
     expect(html).toContain("唤醒宠物");

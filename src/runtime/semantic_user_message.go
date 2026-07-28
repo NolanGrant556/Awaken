@@ -26,6 +26,21 @@ func semanticComposerTokensForRun(tokens []ComposerToken) []agentcore.SemanticCo
 		if value := strings.TrimSpace(token.Payload.RootDir); value != "" {
 			payload["rootDir"] = value
 		}
+		if value := strings.TrimSpace(token.Payload.Path); value != "" {
+			payload["path"] = value
+		}
+		if value := strings.TrimSpace(token.Payload.EntryKind); value != "" {
+			payload["entryKind"] = value
+		}
+		if value := strings.TrimSpace(token.Payload.ProjectID); value != "" {
+			payload["projectId"] = value
+		}
+		if value := strings.TrimSpace(token.Payload.FolderPath); value != "" {
+			payload["folderPath"] = value
+		}
+		if value := strings.TrimSpace(token.Payload.RelativePath); value != "" {
+			payload["relativePath"] = value
+		}
 		if len(payload) == 0 {
 			payload = nil
 		}

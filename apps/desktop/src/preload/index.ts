@@ -41,6 +41,10 @@ import {
   type ProjectFolderSelection,
   type ProjectDirectoryListRequest,
   type ProjectDirectoryListResult,
+  type ProjectEntryActionRequest,
+  type ProjectEntryActionResult,
+  type ProjectEntryOpenWithRequest,
+  type ProjectEntryResolveResult,
   type ProjectFilePreviewActionRequest,
   type ProjectFilePreviewActionResult,
   type ProjectFilePreviewCloseRequest,
@@ -151,19 +155,13 @@ const bridge: AwakenBridge = {
   onSelectAllRequested: (callback) => {
     const handler = () => callback();
     ipcRenderer.on(DESKTOP_SELECT_ALL_REQUESTED_CHANNEL, handler);
-    return () =>
-      ipcRenderer.removeListener(DESKTOP_SELECT_ALL_REQUESTED_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(DESKTOP_SELECT_ALL_REQUESTED_CHANNEL, handler);
   },
-  relaunchDesktop: () =>
-    ipcRenderer.invoke("awaken:relaunch-desktop") as Promise<void>,
-  getSearchSettings: () =>
-    ipcRenderer.invoke("awaken:get-search-settings"),
-  saveSearchSettings: (request) =>
-    ipcRenderer.invoke("awaken:save-search-settings", request),
-  testSearchProvider: (request) =>
-    ipcRenderer.invoke("awaken:test-search-provider", request),
-  getACPRunners: () =>
-    ipcRenderer.invoke("awaken:get-acp-runners") as Promise<ACPRunnersSettings>,
+  relaunchDesktop: () => ipcRenderer.invoke("awaken:relaunch-desktop") as Promise<void>,
+  getSearchSettings: () => ipcRenderer.invoke("awaken:get-search-settings"),
+  saveSearchSettings: (request) => ipcRenderer.invoke("awaken:save-search-settings", request),
+  testSearchProvider: (request) => ipcRenderer.invoke("awaken:test-search-provider", request),
+  getACPRunners: () => ipcRenderer.invoke("awaken:get-acp-runners") as Promise<ACPRunnersSettings>,
   createACPRunner: (request: ACPRunnerCreateRequest) =>
     ipcRenderer.invoke("awaken:create-acp-runner", request) as Promise<ACPRunnerView>,
   updateACPRunner: (runnerId: string, request: ACPRunnerUpdateRequest) =>
@@ -177,7 +175,12 @@ const bridge: AwakenBridge = {
   getMemory: (memoryId: string, projectId?: string) =>
     ipcRenderer.invoke("awaken:get-memory", memoryId, projectId) as Promise<RuntimeMemory>,
   deleteMemory: (memoryId: string, expectedRevision: number, projectId?: string) =>
-    ipcRenderer.invoke("awaken:delete-memory", memoryId, expectedRevision, projectId) as Promise<void>,
+    ipcRenderer.invoke(
+      "awaken:delete-memory",
+      memoryId,
+      expectedRevision,
+      projectId,
+    ) as Promise<void>,
   getMemorySettings: () =>
     ipcRenderer.invoke("awaken:get-memory-settings") as Promise<MemorySettingsDocument>,
   updateMemorySettings: (request: MemorySettingsPatch) =>
@@ -194,12 +197,13 @@ const bridge: AwakenBridge = {
     memoryDreamReceiptHandlers.add(handler);
     return () => memoryDreamReceiptHandlers.delete(handler);
   },
-  getRun: (runId: string) =>
-    ipcRenderer.invoke("awaken:get-run", runId) as Promise<RuntimeRun>,
+  getRun: (runId: string) => ipcRenderer.invoke("awaken:get-run", runId) as Promise<RuntimeRun>,
   getThreadTranscript: (threadId: string) =>
-    ipcRenderer.invoke("awaken:get-thread-transcript", threadId) as Promise<RuntimeThreadTranscript>,
-  listThreads: () =>
-    ipcRenderer.invoke("awaken:list-threads") as Promise<RuntimeThread[]>,
+    ipcRenderer.invoke(
+      "awaken:get-thread-transcript",
+      threadId,
+    ) as Promise<RuntimeThreadTranscript>,
+  listThreads: () => ipcRenderer.invoke("awaken:list-threads") as Promise<RuntimeThread[]>,
   renameThread: (threadId: string, label: string) =>
     ipcRenderer.invoke("awaken:rename-thread", threadId, label) as Promise<RuntimeThread>,
   deleteThread: (threadId: string) =>
@@ -211,6 +215,21 @@ const bridge: AwakenBridge = {
       "awaken:list-project-directory",
       request,
     ) as Promise<ProjectDirectoryListResult>,
+  resolveProjectEntryForTask: (request: ProjectEntryActionRequest) =>
+    ipcRenderer.invoke(
+      "awaken:resolve-project-entry-for-task",
+      request,
+    ) as Promise<ProjectEntryResolveResult>,
+  copyProjectEntryPath: (request: ProjectEntryActionRequest) =>
+    ipcRenderer.invoke(
+      "awaken:copy-project-entry-path",
+      request,
+    ) as Promise<ProjectEntryActionResult>,
+  openProjectEntryWith: (request: ProjectEntryOpenWithRequest) =>
+    ipcRenderer.invoke(
+      "awaken:open-project-entry-with",
+      request,
+    ) as Promise<ProjectEntryActionResult>,
   startProjectFilePreview: (request: ProjectFilePreviewStartRequest) =>
     ipcRenderer.invoke(
       "awaken:start-project-file-preview",
@@ -219,16 +238,10 @@ const bridge: AwakenBridge = {
   closeProjectFilePreview: (request: ProjectFilePreviewCloseRequest) =>
     ipcRenderer.invoke("awaken:close-project-file-preview", request) as Promise<void>,
   onProjectFilePreviewInteraction: (callback) => {
-    const handler = (
-      _event: IpcRendererEvent,
-      interaction: ProjectFilePreviewInteraction,
-    ) => callback(interaction);
+    const handler = (_event: IpcRendererEvent, interaction: ProjectFilePreviewInteraction) =>
+      callback(interaction);
     ipcRenderer.on(PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL, handler);
-    return () =>
-      ipcRenderer.removeListener(
-        PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL,
-        handler,
-      );
+    return () => ipcRenderer.removeListener(PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL, handler);
   },
   openProjectFileExternally: (request: ProjectFilePreviewActionRequest) =>
     ipcRenderer.invoke(
@@ -298,9 +311,7 @@ const bridge: AwakenBridge = {
   revealArtifact: (request: ArtifactOpenRequest) =>
     ipcRenderer.invoke("awaken:reveal-artifact", request) as Promise<ArtifactOpenResult>,
   startRun: (request: StartRunRequest) =>
-    ipcRenderer.invoke("awaken:start-run", request) as Promise<
-      DesktopOperationResult<RuntimeRun>
-    >,
+    ipcRenderer.invoke("awaken:start-run", request) as Promise<DesktopOperationResult<RuntimeRun>>,
   cancelRun: (runId: string) =>
     ipcRenderer.invoke("awaken:cancel-run", runId) as Promise<RuntimeRun>,
   cancelSubagent: (runId: string, taskId: string, reason?: string) =>
@@ -361,14 +372,18 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:get-desktop-preferences") as Promise<DesktopPreferences>,
   saveDesktopPreferences: (request: DesktopPreferencesSaveRequest) =>
     ipcRenderer.invoke("awaken:save-desktop-preferences", request) as Promise<DesktopPreferences>,
-  getRuntimeInfo: () =>
-    ipcRenderer.invoke("awaken:get-runtime-info") as Promise<RuntimeInfo>,
-  listConnectors: () =>
-    ipcRenderer.invoke("awaken:list-connectors") as Promise<RuntimeConnector[]>,
+  getRuntimeInfo: () => ipcRenderer.invoke("awaken:get-runtime-info") as Promise<RuntimeInfo>,
+  listConnectors: () => ipcRenderer.invoke("awaken:list-connectors") as Promise<RuntimeConnector[]>,
   connectConnector: (connectorId: string) =>
-    ipcRenderer.invoke("awaken:connect-connector", connectorId) as Promise<RuntimeConnectorActionResponse>,
+    ipcRenderer.invoke(
+      "awaken:connect-connector",
+      connectorId,
+    ) as Promise<RuntimeConnectorActionResponse>,
   disconnectConnector: (connectorId: string) =>
-    ipcRenderer.invoke("awaken:disconnect-connector", connectorId) as Promise<RuntimeConnectorActionResponse>,
+    ipcRenderer.invoke(
+      "awaken:disconnect-connector",
+      connectorId,
+    ) as Promise<RuntimeConnectorActionResponse>,
   listCliConnectors: () =>
     ipcRenderer.invoke("awaken:list-cli-connectors") as Promise<CliConnectorView[]>,
   refreshCliConnector: (providerId: CliProviderId) =>
@@ -384,7 +399,11 @@ const bridge: AwakenBridge = {
   retryCliAuth: (providerId: CliProviderId) =>
     ipcRenderer.invoke("awaken:retry-cli-auth", providerId) as Promise<CliConnectorView>,
   setCliConnectorActivation: (providerId: CliProviderId, activation: CliActivation) =>
-    ipcRenderer.invoke("awaken:set-cli-activation", providerId, activation) as Promise<CliConnectorView>,
+    ipcRenderer.invoke(
+      "awaken:set-cli-activation",
+      providerId,
+      activation,
+    ) as Promise<CliConnectorView>,
   logoutCliConnector: (providerId: CliProviderId) =>
     ipcRenderer.invoke("awaken:logout-cli-connector", providerId) as Promise<CliConnectorView>,
   uninstallManagedCli: (providerId: CliProviderId) =>
@@ -396,21 +415,29 @@ const bridge: AwakenBridge = {
   listMcpServers: () =>
     ipcRenderer.invoke("awaken:list-mcp-servers") as Promise<RuntimeMcpServer[]>,
   configureMcpServers: (request: ConfigureMcpServersRequest) =>
-    ipcRenderer.invoke("awaken:configure-mcp-servers", request) as Promise<ConfigureMcpServersResponse>,
+    ipcRenderer.invoke(
+      "awaken:configure-mcp-servers",
+      request,
+    ) as Promise<ConfigureMcpServersResponse>,
   getMcpServerConfig: (name: string) =>
-    ipcRenderer.invoke("awaken:get-mcp-server-config", name) as Promise<RuntimeMcpServerConfigResponse>,
+    ipcRenderer.invoke(
+      "awaken:get-mcp-server-config",
+      name,
+    ) as Promise<RuntimeMcpServerConfigResponse>,
   updateMcpServerConfig: (name: string, request: UpdateMcpServerConfigRequest) =>
-    ipcRenderer.invoke("awaken:update-mcp-server-config", name, request) as Promise<ConfigureMcpServersResponse>,
-  getRuntimeLogs: () =>
-    ipcRenderer.invoke("awaken:get-runtime-logs") as Promise<RuntimeLogEntry[]>,
+    ipcRenderer.invoke(
+      "awaken:update-mcp-server-config",
+      name,
+      request,
+    ) as Promise<ConfigureMcpServersResponse>,
+  getRuntimeLogs: () => ipcRenderer.invoke("awaken:get-runtime-logs") as Promise<RuntimeLogEntry[]>,
   disableMcpServer: (name: string) =>
     ipcRenderer.invoke("awaken:disable-mcp-server", name) as Promise<void>,
   enableMcpServer: (name: string) =>
     ipcRenderer.invoke("awaken:enable-mcp-server", name) as Promise<void>,
   deleteMcpServer: (name: string) =>
     ipcRenderer.invoke("awaken:delete-mcp-server", name) as Promise<void>,
-  listMcpTools: () =>
-    ipcRenderer.invoke("awaken:list-mcp-tools") as Promise<RuntimeToolInfo[]>,
+  listMcpTools: () => ipcRenderer.invoke("awaken:list-mcp-tools") as Promise<RuntimeToolInfo[]>,
   listSkills: (projectRoots?: SkillProjectRoots) =>
     ipcRenderer.invoke("awaken:list-skills", projectRoots) as Promise<RuntimeSkill[]>,
   getSkillPreview: (request: GetSkillPreviewRequest) =>
@@ -419,10 +446,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:install-skill", request) as Promise<InstallSkillResponse>,
   deleteSkill: (request: DeleteSkillRequest) =>
     ipcRenderer.invoke("awaken:delete-skill", request) as Promise<DeleteSkillResponse>,
-  disableSkill: (id: string) =>
-    ipcRenderer.invoke("awaken:disable-skill", id) as Promise<void>,
-  enableSkill: (id: string) =>
-    ipcRenderer.invoke("awaken:enable-skill", id) as Promise<void>,
+  disableSkill: (id: string) => ipcRenderer.invoke("awaken:disable-skill", id) as Promise<void>,
+  enableSkill: (id: string) => ipcRenderer.invoke("awaken:enable-skill", id) as Promise<void>,
   listModelProviders: () =>
     ipcRenderer.invoke("awaken:list-model-providers") as Promise<ModelProvider[]>,
   listModelProfiles: () =>
@@ -434,7 +459,10 @@ const bridge: AwakenBridge = {
   deleteModelProfile: (profileId: string) =>
     ipcRenderer.invoke("awaken:delete-model-profile", profileId) as Promise<void>,
   setDefaultModelProfile: (profileId: string) =>
-    ipcRenderer.invoke("awaken:set-default-model-profile", profileId) as Promise<RuntimeModelProfileSummary>,
+    ipcRenderer.invoke(
+      "awaken:set-default-model-profile",
+      profileId,
+    ) as Promise<RuntimeModelProfileSummary>,
   testModelProfile: (request: ModelProfileSaveRequest) =>
     ipcRenderer.invoke("awaken:test-model-profile", request) as Promise<
       DesktopOperationResult<ModelProfileTestResult>
@@ -448,7 +476,10 @@ const bridge: AwakenBridge = {
   pickDirectory: (defaultPath?: string) =>
     ipcRenderer.invoke("awaken:pick-directory", defaultPath) as Promise<WorkspacePickResult>,
   pickProjectFolders: (defaultPath?: string) =>
-    ipcRenderer.invoke("awaken:pick-project-folders", defaultPath) as Promise<ProjectFoldersPickResult>,
+    ipcRenderer.invoke(
+      "awaken:pick-project-folders",
+      defaultPath,
+    ) as Promise<ProjectFoldersPickResult>,
   validateWorkspace: (path: string) =>
     ipcRenderer.invoke("awaken:validate-workspace", path) as Promise<WorkspaceValidationResult>,
   getSupervisorStatus: () =>
@@ -496,8 +527,7 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:list-scheduled-task-executions", taskId) as Promise<
       ScheduledTaskExecution[]
     >,
-  getSystemTimezone: () =>
-    ipcRenderer.invoke("awaken:get-system-timezone") as Promise<string>,
+  getSystemTimezone: () => ipcRenderer.invoke("awaken:get-system-timezone") as Promise<string>,
   subscribeScheduledTaskEvents: (handler) => {
     scheduledTaskEventHandlers.add(handler);
     return () => scheduledTaskEventHandlers.delete(handler);
@@ -506,16 +536,16 @@ const bridge: AwakenBridge = {
     scheduledTaskThreadActivationHandlers.add(handler);
     return () => scheduledTaskThreadActivationHandlers.delete(handler);
   },
-  listPets: () =>
-    ipcRenderer.invoke(PET_IPC_CHANNELS.listPets) as Promise<PetSummary[]>,
-  getPetSettings: () =>
-    ipcRenderer.invoke(PET_IPC_CHANNELS.getPetSettings) as Promise<PetSettings>,
+  listPets: () => ipcRenderer.invoke(PET_IPC_CHANNELS.listPets) as Promise<PetSummary[]>,
+  getPetSettings: () => ipcRenderer.invoke(PET_IPC_CHANNELS.getPetSettings) as Promise<PetSettings>,
   selectPet: (petId: string) =>
     ipcRenderer.invoke(PET_IPC_CHANNELS.selectPet, petId) as Promise<PetSettings>,
   refreshCodexPets: () =>
     ipcRenderer.invoke(PET_IPC_CHANNELS.refreshCodexPets) as Promise<PetImportReport>,
   createPet: () =>
-    ipcRenderer.invoke(PET_IPC_CHANNELS.createPet) as Promise<{ threadId: string }>,
+    ipcRenderer.invoke(PET_IPC_CHANNELS.createPet) as Promise<{
+      threadId: string;
+    }>,
   setPetOverlayOpen: (open: boolean) =>
     ipcRenderer.invoke(PET_IPC_CHANNELS.setPetOverlayOpen, open) as Promise<PetSettings>,
   setPetImportPreferences: (input: { importCodexPets?: boolean }) =>
@@ -531,8 +561,7 @@ const bridge: AwakenBridge = {
   onPetThreadActivationRequested: (callback: (threadId: string) => void) => {
     const handler = (_event: IpcRendererEvent, threadId: string) => callback(threadId);
     ipcRenderer.on(PET_IPC_CHANNELS.petThreadActivationRequested, handler);
-    return () =>
-      ipcRenderer.removeListener(PET_IPC_CHANNELS.petThreadActivationRequested, handler);
+    return () => ipcRenderer.removeListener(PET_IPC_CHANNELS.petThreadActivationRequested, handler);
   },
   openAwakenPetsDirectory: () =>
     ipcRenderer.invoke(PET_IPC_CHANNELS.openAwakenPetsDirectory) as Promise<void>,

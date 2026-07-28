@@ -12,9 +12,11 @@ import (
 )
 
 const (
-	threadTitleGenerationTimeout = 8 * time.Second
-	threadTitleMaxTokens         = 48
-	threadTitleMaxRuneLength     = 24
+	threadTitleGenerationTimeout        = 8 * time.Second
+	threadTitleForcedReasoningTimeout   = 45 * time.Second
+	threadTitleMaxTokens                = 48
+	threadTitleForcedReasoningMaxTokens = 512
+	threadTitleMaxRuneLength            = 24
 )
 
 func buildThreadTitlePrompt(firstUserMessage string, attachments []RunInputAttachment, composerTokens []ComposerToken, modelProfile *ModelProfileConfig) string {
@@ -188,7 +190,7 @@ func generateThreadTitleWithProfile(
 		SystemPrompt:     "You generate very short chat session titles. Output only the title text. No quotes, periods, newlines, or explanations.",
 		UserPrompt:       prompt,
 		Model:            cfg.Model,
-		MaxTokens:        threadTitleMaxTokens,
+		MaxTokens:        threadTitleMaxTokensForProfile(profile),
 		DisableReasoning: true,
 		Purpose:          llm.RequestPurposeThreadTitle,
 		AffinityScopeID:  authority.ThreadID,
@@ -203,6 +205,33 @@ func generateThreadTitleWithProfile(
 		return "", llm.ErrEmptyResponse
 	}
 	return cleanGeneratedThreadTitle(resp.Content), nil
+}
+
+func threadTitleMaxTokensForProfile(profile *ModelProfileConfig) int {
+	if profile == nil {
+		return threadTitleMaxTokens
+	}
+	switch strings.ToLower(strings.TrimSpace(profile.ModelID)) {
+	case "kimi-for-coding", "kimi-for-coding-highspeed":
+		// These Kimi aliases always spend output tokens on reasoning before
+		// emitting content. A 48-token title budget can therefore return HTTP
+		// 200 with an empty content field even though the main run succeeds.
+		return threadTitleForcedReasoningMaxTokens
+	default:
+		return threadTitleMaxTokens
+	}
+}
+
+func threadTitleGenerationTimeoutForProfile(profile *ModelProfileConfig) time.Duration {
+	if profile == nil {
+		return threadTitleGenerationTimeout
+	}
+	switch strings.ToLower(strings.TrimSpace(profile.ModelID)) {
+	case "kimi-for-coding", "kimi-for-coding-highspeed":
+		return threadTitleForcedReasoningTimeout
+	default:
+		return threadTitleGenerationTimeout
+	}
 }
 
 func localThreadTitle(firstUserMessage string, attachments []RunInputAttachment, composerTokens []ComposerToken) string {

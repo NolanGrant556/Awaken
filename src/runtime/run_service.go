@@ -1049,7 +1049,7 @@ func (s *RunService) scheduleThreadTitleGeneration(ctx context.Context, threadID
 		if !s.shouldAttemptGeneratedThreadTitle(threadID, seedRunID) {
 			return
 		}
-		titleCtx, cancel := context.WithTimeout(ctx, threadTitleGenerationTimeout)
+		titleCtx, cancel := context.WithTimeout(ctx, threadTitleGenerationTimeoutForProfile(profile))
 		title, err := generateThreadTitleWithProfileFn(titleCtx, profile, prompt, authority, attempt-1)
 		cancel()
 		title = validGeneratedThreadTitle(title, firstUserMessage)

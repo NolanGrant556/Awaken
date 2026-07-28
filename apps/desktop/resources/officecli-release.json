@@ -1,0 +1,24 @@
+{
+  "version": "1.0.142",
+  "license": "Apache-2.0",
+  "releaseBaseUrl": "https://github.com/iOfficeAI/OfficeCLI/releases/download/v1.0.142",
+  "sourceBaseUrl": "https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/v1.0.142",
+  "targets": {
+    "darwin-arm64": {
+      "asset": "officecli-mac-arm64",
+      "sha256": "684ce214bb8d750003d521eea044a9199bcbdb870817dba5d3191b35715ea38c"
+    },
+    "darwin-x64": {
+      "asset": "officecli-mac-x64",
+      "sha256": "d2d27d8203ec8fc178a6a55eb4ce0ca63696e4ceddb7f85eab359da77f343a91"
+    },
+    "win32-arm64": {
+      "asset": "officecli-win-arm64.exe",
+      "sha256": "0926428513e15f2d1c6eb726a07b141f7f31d60360226daa7526e518213d3578"
+    },
+    "win32-x64": {
+      "asset": "officecli-win-x64.exe",
+      "sha256": "676e0acee691288968a31b9832299ad05599e83140e801c382b6fc4509622fe2"
+    }
+  }
+}

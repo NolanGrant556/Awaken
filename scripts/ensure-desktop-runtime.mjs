@@ -71,13 +71,33 @@ const reason = buildReason();
 
 if (!reason) {
   console.log(`[ensure-desktop-runtime] found current ${binaryPath}`);
-  process.exit(0);
+} else {
+  console.log(`[ensure-desktop-runtime] ${reason}; building awaken-core for ${target}`);
+
+  try {
+    execFileSync("node", ["scripts/build-binary.mjs"], {
+      cwd: root,
+      env: {
+        ...process.env,
+        AWAKEN_BINARY_TARGETS: target,
+      },
+      stdio: "inherit",
+    });
+  } catch {
+    console.error(
+      `[ensure-desktop-runtime] failed to build awaken-core. Run npm run build:binary for full output.`,
+    );
+    process.exit(1);
+  }
+
+  if (!hasExecutableBinary()) {
+    console.error(`[ensure-desktop-runtime] build finished but ${binaryPath} is still missing.`);
+    process.exit(1);
+  }
 }
 
-console.log(`[ensure-desktop-runtime] ${reason}; building awaken-core for ${target}`);
-
 try {
-  execFileSync("node", ["scripts/build-binary.mjs"], {
+  execFileSync("node", ["scripts/prepare-officecli.mjs", `--targets=${target}`], {
     cwd: root,
     env: {
       ...process.env,
@@ -87,12 +107,7 @@ try {
   });
 } catch {
   console.error(
-    `[ensure-desktop-runtime] failed to build awaken-core. Run npm run build:binary for full output.`,
+    `[ensure-desktop-runtime] failed to prepare OfficeCLI. Run npm run prepare:officecli for full output.`,
   );
-  process.exit(1);
-}
-
-if (!hasExecutableBinary()) {
-  console.error(`[ensure-desktop-runtime] build finished but ${binaryPath} is still missing.`);
   process.exit(1);
 }

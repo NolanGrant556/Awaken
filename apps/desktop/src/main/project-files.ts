@@ -4,10 +4,12 @@ import type {
   ProjectDirectoryEntry,
   ProjectDirectoryListRequest,
   ProjectDirectoryListResult,
+  ProjectFilePreviewActionRequest,
+  ProjectFilePreviewErrorCode,
   RuntimeProject,
 } from "../shared/runtime.js";
 
-type ProjectDirectoryScope = Pick<
+export type ProjectDirectoryScope = Pick<
   RuntimeProject,
   "projectId" | "state" | "folders"
 >;
@@ -47,6 +49,142 @@ function isPathInside(root: string, candidate: string): boolean {
 
 function sameResolvedPath(left: string, right: string): boolean {
   return path.resolve(left) === path.resolve(right);
+}
+
+export type ResolvedProjectFile = {
+  projectId: string;
+  registeredRoot: string;
+  realRoot: string;
+  absolutePath: string;
+  realPath: string;
+  relativePath: string;
+  displayName: string;
+};
+
+export type ResolveProjectFileResult =
+  | { ok: true; file: ResolvedProjectFile }
+  | {
+      ok: false;
+      code: ProjectFilePreviewErrorCode;
+      message: string;
+    };
+
+/**
+ * Resolves one regular file through the same active-project and attached-folder
+ * authority as the directory tree. A symlink is never a preview capability,
+ * even when its current target happens to remain inside the project folder.
+ */
+export async function resolveProjectFile(
+  projects: ProjectDirectoryScope[],
+  request: ProjectFilePreviewActionRequest,
+): Promise<ResolveProjectFileResult> {
+  if (
+    !request ||
+    typeof request.projectId !== "string" ||
+    !request.projectId.trim() ||
+    typeof request.folderPath !== "string" ||
+    !request.folderPath.trim() ||
+    typeof request.relativePath !== "string" ||
+    !request.relativePath.trim()
+  ) {
+    return {
+      ok: false,
+      code: "INVALID_REQUEST",
+      message: "文件预览请求无效。",
+    };
+  }
+
+  const project = projects.find(
+    (candidate) =>
+      candidate.projectId === request.projectId && candidate.state === "active",
+  );
+  if (!project) {
+    return {
+      ok: false,
+      code: "PROJECT_NOT_FOUND",
+      message: "当前项目不存在或已被移除。",
+    };
+  }
+
+  const folder = project.folders.find((candidate) =>
+    sameResolvedPath(candidate.path, request.folderPath),
+  );
+  if (!folder) {
+    return {
+      ok: false,
+      code: "FOLDER_NOT_ATTACHED",
+      message: "这个文件夹不属于当前项目。",
+    };
+  }
+
+  const parts = relativePathParts(request.relativePath);
+  if (!parts || parts.length === 0) {
+    return {
+      ok: false,
+      code: "PATH_OUTSIDE_PROJECT",
+      message: "只能查看当前项目文件夹内的文件。",
+    };
+  }
+
+  try {
+    const registeredRoot = path.resolve(folder.path);
+    const absolutePath = path.resolve(registeredRoot, ...parts);
+    if (!isPathInside(registeredRoot, absolutePath)) {
+      return {
+        ok: false,
+        code: "PATH_OUTSIDE_PROJECT",
+        message: "只能查看当前项目文件夹内的文件。",
+      };
+    }
+
+    const [realRoot, realPath, lexicalStat] = await Promise.all([
+      fs.realpath(registeredRoot),
+      fs.realpath(absolutePath),
+      fs.lstat(absolutePath),
+    ]);
+    if (
+      lexicalStat.isSymbolicLink() ||
+      !lexicalStat.isFile() ||
+      !isPathInside(realRoot, realPath)
+    ) {
+      return {
+        ok: false,
+        code: lexicalStat.isFile() ? "PATH_OUTSIDE_PROJECT" : "FILE_NOT_FOUND",
+        message: lexicalStat.isFile()
+          ? "只能查看当前项目文件夹内的文件。"
+          : "所选项目文件不存在。",
+      };
+    }
+
+    return {
+      ok: true,
+      file: {
+        projectId: project.projectId,
+        registeredRoot,
+        realRoot,
+        absolutePath,
+        realPath,
+        relativePath: portableRelativePath(parts),
+        displayName: parts[parts.length - 1] ?? request.relativePath,
+      },
+    };
+  } catch (error) {
+    const code =
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error.code === "ENOENT" || error.code === "ENOTDIR")
+        ? "FILE_NOT_FOUND"
+        : "FILE_UNREADABLE";
+    return {
+      ok: false,
+      code,
+      message:
+        code === "FILE_NOT_FOUND"
+          ? "所选项目文件不存在。"
+          : "这个文件暂时无法读取。",
+    };
+  }
 }
 
 function entryKind(entry: {

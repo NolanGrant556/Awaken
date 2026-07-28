@@ -135,6 +135,14 @@ function stubElectronBridge(): void {
         relativePath: "",
         entries: [],
       })),
+      startProjectFilePreview: vi.fn(async () => ({
+        ok: false as const,
+        code: "UNSUPPORTED_FILE_TYPE" as const,
+        message: "unsupported",
+      })),
+      closeProjectFilePreview: vi.fn(async () => undefined),
+      openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
+      revealProjectFile: vi.fn(async () => ({ ok: true as const })),
       upsertProject: vi.fn(),
       reorderProjects: vi.fn(),
       detachProject: vi.fn(),
@@ -2506,7 +2514,7 @@ describe("App workbench presentation", () => {
     expect(html).not.toContain("右侧栏待开发");
     expect(html).not.toContain(">审阅<");
     expect(html).not.toContain(">终端<");
-    expect(html).not.toContain(">浏览器<");
+    expect(html).toContain(">浏览器<");
     expect(html).not.toContain(">侧边任务<");
     expect(html).toContain("desktop-root-inspector-expanded");
     expect(html).toContain('aria-label="Collapse inspector"');

@@ -19,6 +19,11 @@ extraResources:
   - from: resources/cli-connectors
     to: cli-connectors
     filter: ["**/*"]
+  - from: resources/officecli-release.json
+    to: officecli-release.json
+  - from: resources/licenses
+    to: licenses
+    filter: ["**/*"]
   - from: resources/bin/${platform}-${arch}
     to: bin/${platform}-${arch}
     filter: ["**/*"]

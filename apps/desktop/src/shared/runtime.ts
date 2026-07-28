@@ -292,6 +292,101 @@ export type ProjectDirectoryListResult =
       message: string;
     };
 
+export type ProjectFilePreviewKind =
+  | "office"
+  | "markdown"
+  | "code"
+  | "pdf"
+  | "image"
+  | "html";
+
+export type ProjectFilePreviewStartRequest = {
+  /** Renderer-generated identity used to cancel work before a preview handle exists. */
+  requestId: string;
+  projectId: string;
+  folderPath: string;
+  /** Project-folder-relative path using forward slashes on every platform. */
+  relativePath: string;
+};
+
+export type ProjectFilePreviewTextHandle = {
+  previewId: string;
+  requestId: string;
+  kind: "markdown" | "code";
+  transport: "text";
+  displayName: string;
+  relativePath: string;
+  byteLength: number;
+  content: string;
+  language?: string;
+};
+
+export type ProjectFilePreviewUrlHandle = {
+  previewId: string;
+  requestId: string;
+  kind: "office" | "pdf" | "image" | "html";
+  transport: "url";
+  displayName: string;
+  relativePath: string;
+  byteLength: number;
+  src: string;
+  /** Only webview-backed previews receive an isolated, non-persistent partition. */
+  partition?: string;
+};
+
+export type ProjectFilePreviewHandle =
+  | ProjectFilePreviewTextHandle
+  | ProjectFilePreviewUrlHandle;
+
+export type ProjectFilePreviewErrorCode =
+  | "INVALID_REQUEST"
+  | "UNAUTHORIZED"
+  | "PROJECT_NOT_FOUND"
+  | "FOLDER_NOT_ATTACHED"
+  | "PATH_OUTSIDE_PROJECT"
+  | "FILE_NOT_FOUND"
+  | "FILE_UNREADABLE"
+  | "UNSUPPORTED_FILE_TYPE"
+  | "FILE_TOO_LARGE"
+  | "IMAGE_TOO_LARGE"
+  | "TEXT_BINARY_CONTENT"
+  | "OFFICECLI_UNAVAILABLE"
+  | "OFFICECLI_VERSION_MISMATCH"
+  | "OFFICE_RENDER_FAILED"
+  | "OFFICE_RENDER_TIMEOUT"
+  | "PREVIEW_CANCELLED"
+  | "PREVIEW_RESOURCE_LIMIT"
+  | "PREVIEW_UNAVAILABLE";
+
+export type ProjectFilePreviewStartResult =
+  | { ok: true; preview: ProjectFilePreviewHandle }
+  | {
+      ok: false;
+      code: ProjectFilePreviewErrorCode;
+      message: string;
+      byteLength?: number;
+      limitBytes?: number;
+    };
+
+export type ProjectFilePreviewCloseRequest = {
+  previewId?: string;
+  requestId?: string;
+};
+
+export type ProjectFilePreviewActionRequest = {
+  projectId: string;
+  folderPath: string;
+  relativePath: string;
+};
+
+export type ProjectFilePreviewActionResult =
+  | { ok: true }
+  | {
+      ok: false;
+      code: ProjectFilePreviewErrorCode;
+      message: string;
+    };
+
 /** Folder list submitted when creating a project. An empty list is legal: the
  * project exists under its own name and binds folders later, if ever. */
 export type ProjectFolderSelection = {
@@ -1444,6 +1539,18 @@ export type AwakenBridge = {
   listProjectDirectory: (
     request: ProjectDirectoryListRequest,
   ) => Promise<ProjectDirectoryListResult>;
+  startProjectFilePreview: (
+    request: ProjectFilePreviewStartRequest,
+  ) => Promise<ProjectFilePreviewStartResult>;
+  closeProjectFilePreview: (
+    request: ProjectFilePreviewCloseRequest,
+  ) => Promise<void>;
+  openProjectFileExternally: (
+    request: ProjectFilePreviewActionRequest,
+  ) => Promise<ProjectFilePreviewActionResult>;
+  revealProjectFile: (
+    request: ProjectFilePreviewActionRequest,
+  ) => Promise<ProjectFilePreviewActionResult>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
   createProject: (
     folders: ProjectFolderSelection[],

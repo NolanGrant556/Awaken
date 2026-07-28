@@ -36,7 +36,7 @@ roots 要生效，模型必须知道它们存在。scope 通过 `workspace.proje
 - home、根目录、credential、SSH、Git 配置等敏感位置有独立 hard gate；
 - recoverable delete 额外拒绝 symlink、特殊文件、根/受保护路径。
 
-Desktop 右侧项目文件树使用另一条更窄的只读边界，不继承“工具可读任意绝对路径”的 Agent 语义。Renderer 只能请求当前 active `projectId` 已绑定文件夹中的一个相对目录；Electron Main 每次从 Core 刷新项目事实，核对精确 folder membership，并同时执行 lexical containment 与 realpath containment。目录 symlink 可以作为叶子显示，但不能继续遍历；未绑定文件夹、`..`、绝对路径和 symlink escape 全部 fail closed。该 bridge 只返回目录项元数据，不提供任意文件读取。
+Desktop 右侧项目文件树与预览使用另一条更窄的只读边界，不继承“工具可读任意绝对路径”的 Agent 语义。Renderer 只能请求当前 active `projectId` 已绑定文件夹中的一个相对目录或文件；Electron Main 每次从 Core 刷新项目事实，核对精确 folder membership，并同时执行 lexical containment 与 realpath containment。目录 symlink 可以作为叶子显示，但不能继续遍历或预览；未绑定文件夹、`..`、绝对路径和 symlink escape 全部 fail closed。目录 bridge 只返回目录项元数据；文本预览使用有界 typed IPC，二进制/HTML 预览使用 Main-owned 短生命周 opaque handle 和受控协议，不提供任意 `readFile(path)`。
 
 WorkspaceRoot 是 typed 文件/Artifact/provider 的默认 run 范围，不是当前登录用户 `Bash` 的操作系统边界。Bash 可通过 thread cwd 进入 workspace 外目录，也可读写 Skill root/用户 cache；Outcome 只证明进程事实，不声称这些副作用经过 TaskScope 观测或提交。外部 provider 的远程资源不伪装成本地路径；其 scope 由 provider manifest 与 typed input/output 契约表达。
 
@@ -79,7 +79,7 @@ WorkspaceRoot 是 typed 文件/Artifact/provider 的默认 run 范围，不是�
 - `src/prompt/system_prompt.go`、`runtime.go`、`templates/default_system.md`：项目名、文件夹组与作业范围约定的模型可见渲染。
 - `src/agentcore/request_builder.go`：`projectFolderObservations`，把 scope 的 readable roots 投影成模型侧文件夹组。
 - `apps/desktop/src/renderer/App.tsx`：`resolveRunProjectForRun` 决定每次 run 下发的 `project_id` 与 `project_name`，`resolveRunRootsForRun` 决定下发的 roots。两者都按「cwd 所属项目的任意文件夹」匹配，新建项目与改动文件夹组后由 `refreshProjects` 刷新的项目列表直接生效。同一个文件夹可以属于多个项目，所以路径不足以确定身份：优先采信侧栏当前选中的项目，只有它并不持有这个根时才回退到按路径查找，roots 必须取自被判定的那个项目，否则模型会看到另一个项目的文件夹组。
-- `apps/desktop/src/main/project-files.ts`：右侧项目文件树的 project/folder membership、relative path、lexical containment 与 realpath containment 只读门禁。
+- `apps/desktop/src/main/project-files.ts`：右侧项目文件树/预览的 project/folder membership、relative path、lexical containment 与 realpath containment 只读门禁；`project-file-preview-manager.ts` 只消费该解析结果并管理 opaque preview 生命周期。
 - 各 typed tool：输入 schema 与具体路径类型。
 - `src/tool/execution_broker.go`、`execution_broker_workspace.go`：dependency/git/MCP Artifact 的 canonical roots 与提交前全量 delta 门禁。
 - `src/tool/trash`：平台 recoverable-delete adapter。

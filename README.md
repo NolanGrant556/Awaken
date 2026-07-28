@@ -10,7 +10,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 
 - 左侧栏负责项目与线程入口；
 - 中间工作区负责输入、运行叙事、状态反馈和最终交付物；
-- 右侧 Inspector 当前提供项目文件工作区入口、文件夹组选择、筛选和只读目录树；文件内容预览与其他详情面板尚未接通；
+- 右侧 Inspector 当前提供项目文件工作区，以及当前 thread 存在原生 Subagent 记录时的子任务详情、状态、活动、结果、错误与单任务取消；文件内容预览和通用工具详情尚未接通；
 - Settings 承载模型、搜索、长期记忆、外观、桌面宠物和 ACP runner 等配置面；
 - Desktop 负责启动、监督和关闭本地 `awaken-core`，用户不需要单独运行 Core；
 - `Awaken Design System` 是纯 UI 组件包和 Gallery，不拥有产品状态、后端策略或运行时协议。
@@ -22,7 +22,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | 功能域 | 当前能力摘要 | 权威入口 |
 | --- | --- | --- |
 | 桌面工作台 | 项目与线程导航、Workbench 输入和运行叙事、附件、交付物、外观、宠物与 Desktop 生命周期 | [01 桌面工作台](docs/01_桌面工作台/索引.md) |
-| 主智能体闭环 | thread/run、多轮上下文、压缩、主动提问、取消和失败终止 | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
+| 主智能体闭环 | thread/run、多轮上下文、压缩、主动提问、取消和失败终止；原生只读 Subagent 支持 explore/review、每 run 8 个任务/4 并发、status/wait/cancel、耐久事件与 Desktop 任务组/Inspector | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
 | 运行时与本地服务 | Desktop 托管本地服务、SemanticJournal、工具媒体 blob、当前用户执行环境观察与历史回放 | [03 运行时与本地服务](docs/03_运行时与本地服务/索引.md) |
 | 工具、权限与安全执行 | 七个模型基础工具、provider/capability/dependency、每 run 可用性快照、零审批、TaskScope/Trash，以及保留工具的窄 broker 合同 | [04 工具、权限与安全执行](docs/04_工具权限与审批/索引.md) |
 | 模型与供应商 | 模型 profile、能力与余额、调用链、安全凭据存储及故障恢复 | [05 模型与供应商配置](docs/05_模型与供应商配置/索引.md) |

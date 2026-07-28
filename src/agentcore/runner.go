@@ -16,7 +16,9 @@ import (
 	"awaken/src/llm"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
+	"awaken/src/subagentruntime"
 	"awaken/src/tool"
+	"awaken/src/tool/profile"
 )
 
 const (
@@ -41,6 +43,7 @@ type Runner struct {
 	contextGovernor      *contextGovernor
 	streamLLMFunc        func(stdcontext.Context, *runEventEmitter) (*llm.Response, error)
 	suppressRunLifecycle bool
+	subagentController   subagentruntime.Controller
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
@@ -147,6 +150,8 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	events.suppressRunLifecycle = r.suppressRunLifecycle
 	if r.config.SubagentOrigin != nil {
 		events.agentID = r.config.SubagentOrigin.AgentID
+		events.parentAgentID = r.config.SubagentOrigin.ParentAgentID
+		events.subagentTaskID = r.config.SubagentTaskID
 	}
 	defer func() {
 		if err := events.persistenceFailure(); err != nil {
@@ -161,6 +166,25 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	}
 	events.recorder = r.recorder
 	events.sessionID = r.sessionID
+	if r.config.SubagentOrigin == nil {
+		r.subagentController = r.config.SubagentController
+		if r.subagentController == nil && r.recorder != nil {
+			r.subagentController = subagentruntime.NewManager(ctx, subagentruntime.Config{
+				MaxTasks: 8, MaxConcurrent: 4,
+				Starter: func(childCtx stdcontext.Context, request subagentruntime.StartRequest) (string, error) {
+					return r.startNativeChild(childCtx, request, events.sink)
+				},
+				Persist: r.persistSubagentEvent,
+			})
+		}
+		if r.subagentController != nil {
+			events.beforeTerminal = func(terminalCtx stdcontext.Context) {
+				barrierCtx, cancel := stdcontext.WithTimeout(stdcontext.Background(), 5*time.Second)
+				defer cancel()
+				_ = r.subagentController.Close(barrierCtx)
+			}
+		}
+	}
 	r.toolRuntime = NewToolRuntimeWithConfig(sink, toolRuntimeConfigFromAgentConfig(r.config))
 	// The run identity is host-owned and becomes final only after the emitter
 	// adopts a caller-supplied ID or generates one. Bind that exact identity to
@@ -854,6 +878,9 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 			r.toolRuntime.sink = buffer
 		}
 		executionCtx := runCtx
+		if r.subagentController != nil && r.config.SubagentOrigin == nil {
+			executionCtx = subagentruntime.WithController(executionCtx, r.subagentController)
+		}
 		var activationPlan *skillruntime.SkillActivationPlan
 		if isSkillInvocationToolName(call.Function.Name) {
 			executionCtx = skillruntime.WithActivationScope(
@@ -1156,6 +1183,100 @@ func (r *Runner) startSkillChild(
 	return skillruntime.SkillForkResult{ChildID: childID, Content: content}, nil
 }
 
+func (r *Runner) startNativeChild(
+	ctx stdcontext.Context,
+	request subagentruntime.StartRequest,
+	sink EventSink,
+) (string, error) {
+	if r == nil || r.config.SubagentOrigin != nil {
+		return "", &subagentruntime.Error{Code: subagentruntime.ErrorBoundaryViolation, Message: "only the root runner may start native subagents"}
+	}
+	if requested := strings.TrimSpace(request.Task.ModelProfileID); requested != "" &&
+		requested != strings.TrimSpace(r.config.ModelConfig.ProfileID) {
+		return "", &subagentruntime.Error{Code: subagentruntime.ErrorInvalidInput, Message: "model_profile_id must match the current run in phase 1"}
+	}
+	readOnly := profile.WorkspaceReadOnly()
+	parentConfig := r.config
+	if parentConfig.ExecutionProfile == nil {
+		effectiveParent := parentConfig.EffectiveProfile()
+		parentConfig.ExecutionProfile = &effectiveParent
+	}
+	childConfig, err := CreateSubagent(parentConfig, SpawnConfig{
+		AgentID: request.Task.AgentID, ParentAgentID: "root", RequestedProfile: &readOnly,
+	})
+	if err != nil {
+		return "", &subagentruntime.Error{Code: subagentruntime.ErrorBoundaryViolation, Message: err.Error()}
+	}
+	childConfig.SubagentTaskID = request.Task.TaskID
+	childConfig.SubagentController = nil
+	childConfig.MaxThoughts = minPositive(childConfig.MaxThoughts, 32)
+	childConfig.MaxToolExecutions = minPositive(childConfig.MaxToolExecutions, 128)
+	childConfig.ToolExposure.ExtraHidden = appendUniqueStrings(
+		childConfig.ToolExposure.ExtraHidden,
+		"subagent", "ask_user", "delegate_external_agent", "configure_acp_runner",
+	)
+	role := "codebase explorer"
+	if request.Task.AgentType == "review" {
+		role = "independent reviewer"
+	}
+	childConfig.SystemPrompt = strings.TrimSpace(childConfig.SystemPrompt) + "\n\n" +
+		"You are a local Awaken Subagent acting as an " + role + ". " +
+		"Work only on the assigned task. You are strictly read-only, cannot ask the user questions, " +
+		"cannot delegate to another agent, and must return a concise factual handoff to the parent Agent."
+
+	conversation := context.NewConversation(nil)
+	conversation.UserInput(request.Prompt)
+	childRunner := NewRunner(childConfig, conversation, NewRequestBuilder(childConfig))
+	childRunner.threadID = r.threadID
+	childRunner.runID = r.runID
+	childRunner.sessionID = r.sessionID
+	childRunner.recorder = r.recorder
+	childRunner.suppressRunLifecycle = true
+	childRunner.streamLLMFunc = r.streamLLMFunc
+	return childRunner.RunStreamWithEvents(ctx, sink)
+}
+
+func (r *Runner) persistSubagentEvent(ctx stdcontext.Context, event subagentruntime.PersistEvent) error {
+	if r == nil || r.recorder == nil {
+		return ErrPersistenceUnavailable
+	}
+	kind := SemanticKind(event.Kind)
+	switch kind {
+	case SemanticKindSubagentSpawned, SemanticKindSubagentStatusChanged, SemanticKindSubagentTerminal:
+	default:
+		return fmt.Errorf("unsupported subagent semantic kind %q", event.Kind)
+	}
+	record := NewSemanticRecord(
+		kind, r.threadID, r.runID, event.Snapshot.TurnID,
+		event.Snapshot.ParentToolCallID, r.sessionID, semanticPayload(event.Snapshot),
+	)
+	persistCtx, cancel := durablePersistenceContext(ctx)
+	defer cancel()
+	if err := r.recorder.Append(persistCtx, record); err != nil {
+		return err
+	}
+	return r.recorder.Flush(persistCtx)
+}
+
+func minPositive(value, limit int) int {
+	if value <= 0 || value > limit {
+		return limit
+	}
+	return value
+}
+
+func appendUniqueStrings(values []string, additions ...string) []string {
+	seen := make(map[string]bool, len(values)+len(additions))
+	result := make([]string, 0, len(values)+len(additions))
+	for _, value := range append(append([]string(nil), values...), additions...) {
+		if value = strings.TrimSpace(value); value != "" && !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
 func isSkillInvocationToolName(name string) bool {
 	name = strings.TrimSpace(name)
 	return name == skillruntime.CatalogToolName
@@ -1386,6 +1507,9 @@ type runEventEmitter struct {
 	persistenceErr        error
 	suppressRunLifecycle  bool
 	agentID               string
+	parentAgentID         string
+	subagentTaskID        string
+	beforeTerminal        func(stdcontext.Context)
 	auxiliaryRequestIndex int
 }
 
@@ -1506,11 +1630,17 @@ func (e *runEventEmitter) withAgentIdentity(record SemanticRecord) SemanticRecor
 	if e == nil || strings.TrimSpace(e.agentID) == "" {
 		return record
 	}
-	copyPayload := make(map[string]any, len(record.Payload)+1)
+	copyPayload := make(map[string]any, len(record.Payload)+3)
 	for key, value := range record.Payload {
 		copyPayload[key] = value
 	}
 	copyPayload["agent_id"] = e.agentID
+	if strings.TrimSpace(e.parentAgentID) != "" {
+		copyPayload["parent_agent_id"] = e.parentAgentID
+	}
+	if strings.TrimSpace(e.subagentTaskID) != "" {
+		copyPayload["subagent_task_id"] = e.subagentTaskID
+	}
 	record.Payload = copyPayload
 	return record
 }
@@ -1639,6 +1769,7 @@ func (e *runEventEmitter) runFinished(ctx stdcontext.Context, content string, st
 	if e.suppressRunLifecycle {
 		return
 	}
+	e.runTerminalBarrier(ctx)
 	reason := firstTerminalReason(reasons, TerminalReasonCompleted)
 	event := AwakenEvent{
 		Type:           RunFinishedEventType,
@@ -1677,6 +1808,7 @@ func (e *runEventEmitter) runErrored(ctx stdcontext.Context, err error, reasons 
 	if e.suppressRunLifecycle {
 		return
 	}
+	e.runTerminalBarrier(ctx)
 	event := AwakenEvent{
 		Type:           RunErrorEventType,
 		Error:          err.Error(),
@@ -1718,6 +1850,15 @@ func (e *runEventEmitter) runErrored(ctx stdcontext.Context, err error, reasons 
 		return
 	}
 	e.sink.Emit(event)
+}
+
+func (e *runEventEmitter) runTerminalBarrier(ctx stdcontext.Context) {
+	if e == nil || e.beforeTerminal == nil {
+		return
+	}
+	barrier := e.beforeTerminal
+	e.beforeTerminal = nil
+	barrier(ctx)
 }
 
 func (e *runEventEmitter) onLLMDelta(content string, isThinking bool) {

@@ -11,6 +11,7 @@ import type {
   RunAction,
   RunNarrativeItem,
   RunNarrativeState,
+  SubagentNarrativeTask,
 } from "./types";
 
 const MAX_SEEN_EVENTS = 1000;
@@ -334,6 +335,10 @@ export function projectAguiEventToNarrative(
       // Permission gates are handled by the runtime reducer; the narrative only
       // needs to avoid treating these as unknown events.
       return base;
+    case "AWAKEN_SUBAGENT_CHANGED":
+    case "AWAKEN_SUBAGENT_ACTIVITY":
+    case "AWAKEN_SUBAGENT_MESSAGE_QUEUED":
+      return upsertSubagentGroup(base, event);
     case "RUN_FINISHED":
       return markLatestAnswerFinal(commitActive(base, "done"), event);
     case "RUN_ERROR":
@@ -561,6 +566,25 @@ function eventKey(event: AguiEvent): string | undefined {
     return undefined;
   }
 
+  if (
+    event.type === "AWAKEN_SUBAGENT_CHANGED" ||
+    event.type === "AWAKEN_SUBAGENT_ACTIVITY" ||
+    event.type === "AWAKEN_SUBAGENT_MESSAGE_QUEUED"
+  ) {
+    const taskId = event.subagentTaskId || "task";
+    const content = [
+      event.subagentStatus,
+      event.subagentActivity,
+      event.subagentResultPreview,
+      event.subagentErrorCode,
+      event.toolCallId,
+      event.messageId,
+    ]
+      .filter(Boolean)
+      .join(":");
+    return `${event.type}:${eventScope(event)}:${taskId}:${content}`;
+  }
+
   const id =
     event.messageId ||
     event.toolCallId ||
@@ -591,6 +615,45 @@ function upsertCommitted(
   const updated = items.slice();
   updated[index] = item;
   return updated;
+}
+
+function upsertSubagentGroup(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
+  const taskId = event.subagentTaskId?.trim();
+  if (!taskId) return state;
+  const id = `subagents:${eventScope(event)}`;
+  const existing = state.committedItems.find(
+    (item): item is Extract<RunNarrativeItem, { kind: "subagentGroup" }> =>
+      item.kind === "subagentGroup" && item.id === id,
+  );
+  const previous = existing?.tasks.find((task) => task.taskId === taskId);
+  const task: SubagentNarrativeTask = {
+    taskId,
+    description: event.subagentDescription?.trim() || previous?.description || "未命名子任务",
+    agentType: event.subagentAgentType ?? previous?.agentType ?? "explore",
+    status: event.subagentStatus ?? previous?.status ?? "running",
+    activity:
+      event.subagentActivity?.trim() ||
+      event.toolCallName?.trim() ||
+      previous?.activity,
+    resultPreview:
+      event.subagentResultPreview?.trim() || previous?.resultPreview,
+    errorCode: event.subagentErrorCode ?? previous?.errorCode,
+  };
+  const tasks = existing ? existing.tasks.slice() : [];
+  const index = tasks.findIndex((candidate) => candidate.taskId === taskId);
+  if (index >= 0) tasks[index] = task;
+  else tasks.push(task);
+  return {
+    ...state,
+    committedItems: upsertCommitted(state.committedItems, {
+      kind: "subagentGroup",
+      id,
+      tasks,
+    }),
+  };
 }
 
 function commitActive(
@@ -712,6 +775,7 @@ function applyStatus(
       return status === "done" ? { ...item, status } : item;
     case "compactBoundary":
     case "deliverables":
+    case "subagentGroup":
       return item;
     case "tool":
     case "memoryReceipt":

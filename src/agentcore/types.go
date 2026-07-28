@@ -6,6 +6,7 @@ import (
 	"awaken/src/agentcore/subagent"
 	"awaken/src/context"
 	"awaken/src/prompt"
+	"awaken/src/subagentruntime"
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
 )
@@ -68,6 +69,12 @@ type AgentConfig struct {
 	// It is propagated into every ExecutionIntent this agent issues so
 	// the decision layer can attribute the call. nil for the root agent.
 	SubagentOrigin *profile.SubagentOrigin
+	// SubagentTaskID binds native child records to the host-owned task identity.
+	// It is empty for the root Agent and legacy Skill fork children.
+	SubagentTaskID string
+	// SubagentController is run-scoped and is only exposed to the root runner.
+	// It is never copied into child configs.
+	SubagentController subagentruntime.Controller
 	// ToolSessionState is mutable thread-local file/cwd state. It is never
 	// journaled and must not be shared with child agents.
 	ToolSessionState *tool.ToolSessionState

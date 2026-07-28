@@ -4,7 +4,9 @@
 
 inline 激活把调用时读取的 Skill 正文和包根加入当前 run 的上下文块。它继承父 run 已固定的模型、工具可用性快照、环境快照、TaskScope 与取消边界；Skill 元数据不能扩大或收窄这些边界。环境快照中的 source/root 只用于记录本地发现来源，不代替调用时的锚定资源读取。
 
-bundled `code-search` 当前固定使用 inline 主上下文。虽然 Core 已有 child-agent fork 基础设施，但该 Skill 在 subagent 产品入口和真实 Desktop 验收完整前不迁移为 fork；后续迁移必须同时复核父子上下文隔离、工具继承、来源回传和取消行为。
+bundled `code-search` 当前固定使用 inline 主上下文。原生 Subagent 已有独立的只读任务运行时和 Desktop 入口，但尚未把 Skill fork 迁移到同一 manager；该 Skill 在统一底座和对应真实 Desktop 验收完成前不迁移为 fork，后续迁移必须同时复核父子上下文隔离、工具继承、来源回传和取消行为。
+
+正式原生 Subagent 的任务注册、并发、控制、持久事件和 Desktop UI 合同由 [原生 Subagent 产品与架构契约](../02_主智能体闭环/原生Subagent产品与架构契约.md) 拥有。Skill fork 当前仍保持同步专用链路，不能把两个生命周期或事件 family 混写为同一能力。
 
 ## 2. Fork
 

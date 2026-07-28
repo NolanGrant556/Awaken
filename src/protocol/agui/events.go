@@ -61,6 +61,9 @@ const (
 	EventAwakenMemoryRejected               EventType = "AWAKEN_MEMORY_REJECTED"
 	EventAwakenContextSnapshot              EventType = "AWAKEN_CONTEXT_SNAPSHOT"
 	EventAwakenModelUsage                   EventType = "AWAKEN_MODEL_USAGE"
+	EventAwakenSubagentChanged              EventType = "AWAKEN_SUBAGENT_CHANGED"
+	EventAwakenSubagentActivity             EventType = "AWAKEN_SUBAGENT_ACTIVITY"
+	EventAwakenSubagentMessageQueued        EventType = "AWAKEN_SUBAGENT_MESSAGE_QUEUED"
 	EventAwakenACPSessionChanged            EventType = "AWAKEN_ACP_SESSION_CHANGED"
 	EventAwakenACPTurnChanged               EventType = "AWAKEN_ACP_TURN_CHANGED"
 	EventAwakenACPToolChanged               EventType = "AWAKEN_ACP_TOOL_CHANGED"
@@ -331,6 +334,26 @@ type Event struct {
 	InteractionQRImageURL      string           `json:"interactionQrImageUrl,omitempty"`
 	InteractionProvider        string           `json:"interactionProvider,omitempty"`
 	InteractionRecoveries      []string         `json:"interactionRecoveries,omitempty"`
+	// Native run-scoped Subagent fields.
+	SubagentTaskID           string `json:"subagentTaskId,omitempty"`
+	SubagentAgentID          string `json:"subagentAgentId,omitempty"`
+	SubagentParentAgentID    string `json:"subagentParentAgentId,omitempty"`
+	SubagentParentToolCallID string `json:"subagentParentToolCallId,omitempty"`
+	SubagentAgentType        string `json:"subagentAgentType,omitempty"`
+	SubagentDescription      string `json:"subagentDescription,omitempty"`
+	SubagentStatus           string `json:"subagentStatus,omitempty"`
+	SubagentWorkspaceMode    string `json:"subagentWorkspaceMode,omitempty"`
+	SubagentModelProfileID   string `json:"subagentModelProfileId,omitempty"`
+	SubagentActivity         string `json:"subagentActivity,omitempty"`
+	SubagentToolUseCount     int    `json:"subagentToolUseCount,omitempty"`
+	SubagentEstimatedTokens  int    `json:"subagentEstimatedTokens,omitempty"`
+	SubagentResultPreview    string `json:"subagentResultPreview,omitempty"`
+	SubagentErrorCode        string `json:"subagentErrorCode,omitempty"`
+	SubagentErrorMessage     string `json:"subagentErrorMessage,omitempty"`
+	SubagentSideEffectState  string `json:"subagentSideEffectState,omitempty"`
+	SubagentCreatedAt        string `json:"subagentCreatedAt,omitempty"`
+	SubagentStartedAt        string `json:"subagentStartedAt,omitempty"`
+	SubagentFinishedAt       string `json:"subagentFinishedAt,omitempty"`
 	// ACP fields surfaced on AWAKEN_ACP_* events.
 	ACPSessionID            string                `json:"acpSessionId,omitempty"`
 	ACPRunnerID             string                `json:"acpRunnerId,omitempty"`

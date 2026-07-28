@@ -41,9 +41,7 @@ describe("AwakenComposerBar unified token editing", () => {
     leadingText: "你使用这个技能 ",
   };
 
-  function renderComposer(
-    overrides: Partial<ComponentProps<typeof AwakenComposerBar>> = {},
-  ) {
+  function renderComposer(overrides: Partial<ComponentProps<typeof AwakenComposerBar>> = {}) {
     const props: ComponentProps<typeof AwakenComposerBar> = {
       value: "",
       onChange: vi.fn(),
@@ -123,10 +121,7 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(token?.getAttribute("contenteditable")).toBe("false");
     expect(token?.textContent).toContain("Documents");
     expect(editor.textContent).toContain("你使用这个技能 ");
-    expect(textNodes(editor).map((node) => node.data)).toEqual([
-      "你使用这个技能 ",
-      "写",
-    ]);
+    expect(textNodes(editor).map((node) => node.data)).toEqual(["你使用这个技能 ", "写"]);
     expect(host.querySelector("textarea")).toBeNull();
   });
 
@@ -284,18 +279,11 @@ describe("AwakenComposerBar unified token editing", () => {
     firstLine.textContent = "第一行";
     const secondLine = document.createElement("div");
     secondLine.textContent = "第二行";
-    editor.replaceChildren(
-      document.createTextNode("前文 "),
-      token,
-      firstLine,
-      secondLine,
-    );
+    editor.replaceChildren(document.createTextNode("前文 "), token, firstLine, secondLine);
     dispatchInput(editor);
 
     expect(onStructuredInputChange).toHaveBeenLastCalledWith({
-      tokens: [
-        { id: "skill:documents:user", leadingText: "前文 " },
-      ],
+      tokens: [{ id: "skill:documents:user", leadingText: "前文 " }],
       value: "\n第一行\n第二行",
     });
   });
@@ -317,10 +305,7 @@ describe("AwakenComposerBar unified token editing", () => {
       editor.dispatchEvent(copyEvent);
     });
 
-    expect(setData).toHaveBeenCalledWith(
-      "text/plain",
-      "你使用这个技能 后文",
-    );
+    expect(setData).toHaveBeenCalledWith("text/plain", "你使用这个技能 后文");
   });
 
   it("does not reconcile controlled children while IME composition is active", async () => {
@@ -359,9 +344,7 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(onSubmit).not.toHaveBeenCalled();
 
     await act(async () => {
-      editor.dispatchEvent(
-        new CompositionEvent("compositionend", { bubbles: true, data: "写" }),
-      );
+      editor.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "写" }));
       await Promise.resolve();
     });
     expect(onStructuredInputChange).toHaveBeenLastCalledWith({
@@ -404,13 +387,106 @@ describe("AwakenComposerBar unified token editing", () => {
       ],
     });
 
-    expect(editor.querySelector("[data-composer-token-id]")?.textContent).toContain(
-      "docx",
+    expect(editor.querySelector("[data-composer-token-id]")?.textContent).toContain("docx");
+    expect(textNodes(editor).map((node) => node.data)).toEqual(["新前文 ", "新尾文"]);
+  });
+
+  it("renders project paths as ordinary atomic name tokens and focuses the requested logical offset", () => {
+    const onInputSelectionChange = vi.fn();
+    const { editor } = renderComposer({
+      value: "后文",
+      focusRequest: 1,
+      focusOffset: 4,
+      onInputSelectionChange,
+      tokens: [
+        {
+          id: "project-path:brief",
+          type: "file",
+          label: "brief.md",
+          leadingText: "前文",
+        },
+      ],
+    });
+
+    const token = editor.querySelector<HTMLElement>(
+      '[data-composer-token-id="project-path:brief"]',
     );
-    expect(textNodes(editor).map((node) => node.data)).toEqual([
-      "新前文 ",
-      "新尾文",
-    ]);
+    expect(token?.textContent).toContain("brief.md");
+    expect(editor.textContent).not.toContain("/workspace/docs/brief.md");
+    expect(token?.getAttribute("contenteditable")).toBe("false");
+    expect(onInputSelectionChange).toHaveBeenCalledWith({
+      anchor: 4,
+      focus: 4,
+    });
+  });
+
+  it("does not reposition the inline caret when only the selection callback identity changes", () => {
+    const { editor, rerender } = renderComposer({
+      value: "后文",
+      focusRequest: 1,
+      focusOffset: 1,
+      onInputSelectionChange: vi.fn(),
+    });
+    const trailingText = lastTextNode(editor);
+    editor.focus();
+    collapseSelection(trailingText, trailingText.data.length);
+
+    rerender({ onInputSelectionChange: vi.fn() });
+
+    const selection = window.getSelection();
+    expect(selection?.anchorNode).toBe(trailingText);
+    expect(selection?.anchorOffset).toBe(trailingText.data.length);
+  });
+
+  it("does not reset a textarea caret on controlled rerenders with the same focus request", () => {
+    const firstProps: ComponentProps<typeof AwakenComposerBar> = {
+      value: "P",
+      onChange: vi.fn(),
+      onSubmit: vi.fn(),
+      tokens: [],
+      focusRequest: 1,
+      focusOffset: 1,
+      onInputSelectionChange: vi.fn(),
+    };
+    root ??= createRoot(host);
+    act(() => root?.render(<AwakenComposerBar {...firstProps} />));
+    const textarea = host.querySelector<HTMLTextAreaElement>("textarea");
+    expect(textarea).not.toBeNull();
+    textarea!.focus();
+    textarea!.value = "Pl";
+    textarea!.setSelectionRange(2, 2);
+
+    act(() =>
+      root?.render(
+        <AwakenComposerBar {...firstProps} value="Pl" onInputSelectionChange={vi.fn()} />,
+      ),
+    );
+
+    expect(textarea?.selectionStart).toBe(2);
+    expect(textarea?.selectionEnd).toBe(2);
+  });
+
+  it("reports the last textarea caret when native focus leaves for a context menu", () => {
+    const onInputSelectionChange = vi.fn();
+    const props: ComponentProps<typeof AwakenComposerBar> = {
+      value: "Please analyze and summarize",
+      onChange: vi.fn(),
+      onSubmit: vi.fn(),
+      tokens: [],
+      onInputSelectionChange,
+    };
+    root ??= createRoot(host);
+    act(() => root?.render(<AwakenComposerBar {...props} />));
+    const textarea = host.querySelector<HTMLTextAreaElement>("textarea")!;
+    textarea.focus();
+    textarea.setSelectionRange(14, 14);
+
+    act(() => textarea.blur());
+
+    expect(onInputSelectionChange).toHaveBeenLastCalledWith({
+      anchor: 14,
+      focus: 14,
+    });
   });
 
   it("keeps the trailing segment editable after a second slash token is selected", () => {
@@ -511,12 +587,8 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(trigger?.textContent).toContain("Awaken");
     expect(trigger?.querySelector("button")).toBeNull();
 
-    const clearProject = host.querySelector<HTMLButtonElement>(
-      ".composer-bar-project-clear",
-    );
-    expect(clearProject?.getAttribute("aria-label")).toBe(
-      "取消选择项目：Awaken",
-    );
+    const clearProject = host.querySelector<HTMLButtonElement>(".composer-bar-project-clear");
+    expect(clearProject?.getAttribute("aria-label")).toBe("取消选择项目：Awaken");
     act(() => {
       clearProject?.click();
     });
@@ -542,9 +614,7 @@ describe("AwakenComposerBar unified token editing", () => {
       trigger?.click();
     });
     const createAction = Array.from(
-      document.querySelectorAll<HTMLButtonElement>(
-        '.composer-bar-project-create[role="menuitem"]',
-      ),
+      document.querySelectorAll<HTMLButtonElement>('.composer-bar-project-create[role="menuitem"]'),
     ).find((button) => button.textContent?.includes("创建项目"));
     expect(createAction?.textContent).toContain("可选择一个或多个文件夹");
     act(() => {
@@ -574,15 +644,9 @@ describe("AwakenComposerBar unified token editing", () => {
     const trigger = host.querySelector<HTMLButtonElement>(
       '.composer-bar-project-trigger[aria-haspopup="menu"]',
     );
-    expect(trigger?.getAttribute("aria-label")).toBe(
-      "选择项目，当前：选择项目",
-    );
-    expect(trigger?.firstElementChild?.classList).toContain(
-      "composer-bar-project-trigger-label",
-    );
-    expect(trigger?.classList.contains("composer-bar-project-trigger-no-icon")).toBe(
-      true,
-    );
+    expect(trigger?.getAttribute("aria-label")).toBe("选择项目，当前：选择项目");
+    expect(trigger?.firstElementChild?.classList).toContain("composer-bar-project-trigger-label");
+    expect(trigger?.classList.contains("composer-bar-project-trigger-no-icon")).toBe(true);
 
     act(() => {
       trigger?.click();
@@ -592,18 +656,12 @@ describe("AwakenComposerBar unified token editing", () => {
         '.composer-bar-project-option[role="menuitemradio"]',
       ),
     );
-    const globalOption = options.find((option) =>
-      option.textContent?.includes("选择项目"),
-    );
-    const projectOption = options.find((option) =>
-      option.textContent?.includes("ERP 项目"),
-    );
+    const globalOption = options.find((option) => option.textContent?.includes("选择项目"));
+    const projectOption = options.find((option) => option.textContent?.includes("ERP 项目"));
     expect(globalOption?.firstElementChild?.classList).toContain(
       "composer-bar-project-option-label",
     );
-    expect(
-      globalOption?.classList.contains("composer-bar-project-option-no-icon"),
-    ).toBe(true);
+    expect(globalOption?.classList.contains("composer-bar-project-option-no-icon")).toBe(true);
     expect(projectOption?.firstElementChild?.tagName).toBe("svg");
   });
 

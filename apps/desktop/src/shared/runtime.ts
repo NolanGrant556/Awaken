@@ -1,20 +1,12 @@
 import type { AguiEvent } from "./agui.js";
 import type { ProjectFilePreviewInteraction } from "./project-file-preview-interaction.js";
-import type {
-  PetActivitySnapshot,
-  PetBridge,
-} from "./pets.js";
+import type { PetActivitySnapshot, PetBridge } from "./pets.js";
 
 export type DesktopPlatform = "macos" | "windows" | "linux";
 
-export type DesktopOperationIssueCode =
-  | "credential_unreadable"
-  | "operation_failed";
+export type DesktopOperationIssueCode = "credential_unreadable" | "operation_failed";
 
-export type DesktopOperationRecoveryAction =
-  | "retry"
-  | "relaunch"
-  | "reenter";
+export type DesktopOperationRecoveryAction = "retry" | "relaunch" | "reenter";
 
 export type DesktopOperationIssue = {
   code: DesktopOperationIssueCode;
@@ -24,8 +16,7 @@ export type DesktopOperationIssue = {
 };
 
 export type DesktopOperationResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; issue: DesktopOperationIssue };
+  { ok: true; value: T } | { ok: false; issue: DesktopOperationIssue };
 
 export type AwakenTheme = "light" | "dark";
 export type AwakenThemePreference = "system" | AwakenTheme;
@@ -81,12 +72,7 @@ export type MemorySettingsPatch = Partial<MemorySettings> & {
 };
 
 export type MemoryDreamStatus =
-  | "queued"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "interrupted";
+  "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
 
 export type MemoryDreamTask = {
   taskId: string;
@@ -94,7 +80,17 @@ export type MemoryDreamTask = {
   phase?: string;
   projectId?: string;
   scopes: MemoryScope[];
-  reports?: Partial<Record<MemoryScope, { updated: number; superseded: number; conflicts: number; skipped: number }>>;
+  reports?: Partial<
+    Record<
+      MemoryScope,
+      {
+        updated: number;
+        superseded: number;
+        conflicts: number;
+        skipped: number;
+      }
+    >
+  >;
   errorCode?: string;
   errorMessage?: string;
   createdAt: string;
@@ -102,12 +98,7 @@ export type MemoryDreamTask = {
   finishedAt?: string;
 };
 
-export type RuntimeRunStatus =
-  | "running"
-  | "cancelling"
-  | "finished"
-  | "error"
-  | "cancelled";
+export type RuntimeRunStatus = "running" | "cancelling" | "finished" | "error" | "cancelled";
 
 export type ThreadTitleSource = "first_user" | "local" | "llm" | "manual";
 
@@ -293,13 +284,62 @@ export type ProjectDirectoryListResult =
       message: string;
     };
 
-export type ProjectFilePreviewKind =
-  | "office"
-  | "markdown"
-  | "code"
-  | "pdf"
-  | "image"
-  | "html";
+export type ProjectEntryKind = "directory" | "file";
+
+export type ProjectEntryActionRequest = {
+  projectId: string;
+  folderPath: string;
+  /** Project-folder-relative path using forward slashes on every platform. */
+  relativePath: string;
+  kind: ProjectEntryKind;
+};
+
+export type ProjectEntryActionErrorCode =
+  | "INVALID_REQUEST"
+  | "UNAUTHORIZED"
+  | "PROJECT_NOT_FOUND"
+  | "FOLDER_NOT_ATTACHED"
+  | "PATH_OUTSIDE_PROJECT"
+  | "ENTRY_NOT_FOUND"
+  | "ENTRY_UNREADABLE"
+  | "ENTRY_TYPE_MISMATCH"
+  | "UNSUPPORTED_PLATFORM"
+  | "UNSUPPORTED_APPLICATION"
+  | "APPLICATION_UNAVAILABLE"
+  | "APPLICATION_OPEN_FAILED";
+
+export type ProjectEntryReference = {
+  projectId: string;
+  folderPath: string;
+  absolutePath: string;
+  relativePath: string;
+  displayName: string;
+  kind: ProjectEntryKind;
+};
+
+export type ProjectEntryResolveResult =
+  | { ok: true; entry: ProjectEntryReference }
+  | {
+      ok: false;
+      code: ProjectEntryActionErrorCode;
+      message: string;
+    };
+
+export type ProjectEntryActionResult =
+  | { ok: true }
+  | {
+      ok: false;
+      code: ProjectEntryActionErrorCode;
+      message: string;
+    };
+
+export type ProjectEntryOpenApplication = "wps" | "office" | "vscode" | "cursor" | "trae" | "xcode";
+
+export type ProjectEntryOpenWithRequest = ProjectEntryActionRequest & {
+  application: ProjectEntryOpenApplication;
+};
+
+export type ProjectFilePreviewKind = "office" | "markdown" | "code" | "pdf" | "image" | "html";
 
 export type ProjectFilePreviewStartRequest = {
   /** Renderer-generated identity used to cancel work before a preview handle exists. */
@@ -335,9 +375,7 @@ export type ProjectFilePreviewUrlHandle = {
   partition?: string;
 };
 
-export type ProjectFilePreviewHandle =
-  | ProjectFilePreviewTextHandle
-  | ProjectFilePreviewUrlHandle;
+export type ProjectFilePreviewHandle = ProjectFilePreviewTextHandle | ProjectFilePreviewUrlHandle;
 
 export type ProjectFilePreviewErrorCode =
   | "INVALID_REQUEST"
@@ -396,17 +434,10 @@ export type ProjectFolderSelection = {
 };
 
 export type RuntimeProjectOperationAction =
-  | "detach"
-  | "delete_history"
-  | "trash_and_purge"
-  | "delete_thread";
+  "detach" | "delete_history" | "trash_and_purge" | "delete_thread";
 
 export type RuntimeProjectOperationStatus =
-  | "accepted"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "blocked";
+  "accepted" | "running" | "succeeded" | "failed" | "blocked";
 
 export type RuntimeProjectOperationWire = {
   operation_id: string;
@@ -459,16 +490,12 @@ export type ProjectMutationResult =
   | { ok: false; code: string; message: string; operationId?: string };
 
 export type UpsertProjectResult =
-  | { ok: true; project: RuntimeProject }
-  | { ok: false; code: string; message: string };
+  { ok: true; project: RuntimeProject } | { ok: false; code: string; message: string };
 
 export type ProjectReorderResult =
-  | { ok: true; projects: RuntimeProject[] }
-  | { ok: false; code: string; message: string };
+  { ok: true; projects: RuntimeProject[] } | { ok: false; code: string; message: string };
 
-export type ThreadDeleteResult =
-  | { ok: true }
-  | { ok: false; code: string; message: string };
+export type ThreadDeleteResult = { ok: true } | { ok: false; code: string; message: string };
 
 export type RenameThreadRequest = {
   label: string;
@@ -519,11 +546,7 @@ export type RuntimeInfo = {
 };
 
 export type RuntimeConnectorState =
-  | "disconnected"
-  | "pending"
-  | "connected"
-  | "needs-auth"
-  | "failed";
+  "disconnected" | "pending" | "connected" | "needs-auth" | "failed";
 
 export type RuntimeConnectorKind = "mcp" | "cli";
 
@@ -532,8 +555,10 @@ export type CliActivation = "enabled" | "disabled";
 export type CliInstallState = "missing" | "installing" | "installed" | "unsupported" | "failed";
 export type CliExecutableState = "unknown" | "missing" | "available" | "invalid";
 export type CliConfigurationState = "unknown" | "required" | "ready" | "failed";
-export type CliAuthenticationState = "unknown" | "required" | "in_progress" | "authorized" | "failed";
-export type CliOverallState = "disabled" | "not_ready" | "action_required" | "working" | "ready" | "failed";
+export type CliAuthenticationState =
+  "unknown" | "required" | "in_progress" | "authorized" | "failed";
+export type CliOverallState =
+  "disabled" | "not_ready" | "action_required" | "working" | "ready" | "failed";
 export type CliInstallOwnership = "awaken-managed" | "user-managed" | "system-managed";
 
 export type CliInstallPhase =
@@ -582,12 +607,7 @@ export type CliConnectorReadiness = {
 };
 
 export type CliAuthPhase =
-  | "starting"
-  | "waiting_user"
-  | "confirming"
-  | "authorized"
-  | "failed"
-  | "cancelled";
+  "starting" | "waiting_user" | "confirming" | "authorized" | "failed" | "cancelled";
 
 export type CliAuthSessionView = {
   id: string;
@@ -633,12 +653,7 @@ export type RuntimeConnectorActionResponse = {
   message?: string;
 };
 
-export type RuntimeMcpServerState =
-  | "pending"
-  | "connected"
-  | "failed"
-  | "needs-auth"
-  | "disabled";
+export type RuntimeMcpServerState = "pending" | "connected" | "failed" | "needs-auth" | "disabled";
 
 export type RuntimeMcpServer = {
   name: string;
@@ -685,11 +700,7 @@ export type RuntimeToolInfo = {
   readOnly: boolean;
 };
 
-export type RuntimeSkillState =
-  | "loaded"
-  | "invalid"
-  | "shadowed"
-  | "disabled_by_policy";
+export type RuntimeSkillState = "loaded" | "invalid" | "shadowed" | "disabled_by_policy";
 
 export type RuntimeSkillDiagnostic =
   | string
@@ -731,6 +742,14 @@ export type SkillComposerTokenPayload = {
   sourceOrigin: "project" | "user" | string;
   skillFilePath: string;
   rootDir?: string;
+};
+
+export type ProjectPathComposerTokenPayload = {
+  path: string;
+  entryKind: ProjectEntryKind;
+  projectId: string;
+  folderPath: string;
+  relativePath: string;
 };
 
 export type ComposerToken = {
@@ -883,11 +902,7 @@ export type ModelProfileAdvanced = {
   supportsVideo?: boolean;
 };
 
-export type ModelCredentialStatus =
-  | "ready"
-  | "missing_key"
-  | "disabled"
-  | "unreadable";
+export type ModelCredentialStatus = "ready" | "missing_key" | "disabled" | "unreadable";
 
 export type RuntimeModelProfileSummaryWire = {
   id: string;
@@ -944,11 +959,7 @@ export type ModelProfileTestResult = {
 };
 
 export type ModelBalanceStatusWire =
-  | "available"
-  | "unavailable"
-  | "missing_key"
-  | "error"
-  | "unsupported";
+  "available" | "unavailable" | "missing_key" | "error" | "unsupported";
 
 export type ModelBalanceAmountWire = {
   currency: string;
@@ -986,11 +997,7 @@ export type ModelProfileBalancesResultWire = {
 };
 
 export type ModelBalanceStatus =
-  | "available"
-  | "unavailable"
-  | "missing_key"
-  | "error"
-  | "unsupported";
+  "available" | "unavailable" | "missing_key" | "error" | "unsupported";
 
 export type ModelBalanceAmount = {
   currency: string;
@@ -1133,19 +1140,15 @@ export type ModelProfileRunConfig = {
 };
 
 export type WorkspacePickResult =
-  | { canceled: true; error?: string }
-  | { canceled: false; path: string };
+  { canceled: true; error?: string } | { canceled: false; path: string };
 
 /** Result of picking project folders. The picker allows several directories at
  * once, so `errors` reports the ones that could not be read while `paths` still
  * carries whatever was readable. */
 export type ProjectFoldersPickResult =
-  | { canceled: true; error?: string }
-  | { canceled: false; paths: string[]; errors?: string[] };
+  { canceled: true; error?: string } | { canceled: false; paths: string[]; errors?: string[] };
 
-export type WorkspaceValidationResult =
-  | { valid: true }
-  | { valid: false; error: string };
+export type WorkspaceValidationResult = { valid: true } | { valid: false; error: string };
 
 export type UserQuestionAnswer = {
   questionId: string;
@@ -1171,8 +1174,7 @@ export type ArtifactOpenErrorCode =
   | "open_failed";
 
 export type ArtifactOpenResult =
-  | { ok: true }
-  | { ok: false; code: ArtifactOpenErrorCode; message: string };
+  { ok: true } | { ok: false; code: ArtifactOpenErrorCode; message: string };
 
 export type RunStreamHandlers = {
   onEvent: (event: AguiEvent) => void;
@@ -1392,13 +1394,7 @@ export type ScheduledTask = {
 export type ScheduledTaskExecutionTrigger = "scheduled" | "manual" | "misfire";
 
 export type ScheduledTaskExecutionStatus =
-  | "queued"
-  | "running"
-  | "success"
-  | "error"
-  | "skipped"
-  | "cancelled"
-  | "interrupted";
+  "queued" | "running" | "success" | "error" | "skipped" | "cancelled" | "interrupted";
 
 export type ScheduledTaskExecutionWire = {
   execution_id: string;
@@ -1431,10 +1427,7 @@ export type ScheduledTaskExecution = {
 };
 
 export type ScheduledTaskEventType =
-  | "execution_started"
-  | "execution_finished"
-  | "notice"
-  | "task_changed";
+  "execution_started" | "execution_finished" | "notice" | "task_changed";
 
 export type ScheduledTaskEventWire = {
   type: ScheduledTaskEventType;
@@ -1515,20 +1508,11 @@ export type AwakenBridge = {
   onSelectAllRequested: (callback: () => void) => () => void;
   relaunchDesktop: () => Promise<void>;
   getSearchSettings: () => Promise<SearchSettings>;
-  saveSearchSettings: (
-    request: SearchSettingsSaveRequest,
-  ) => Promise<SearchSettingsSaveResult>;
-  testSearchProvider: (
-    request: SearchProviderTestRequest,
-  ) => Promise<SearchProviderTestResult>;
+  saveSearchSettings: (request: SearchSettingsSaveRequest) => Promise<SearchSettingsSaveResult>;
+  testSearchProvider: (request: SearchProviderTestRequest) => Promise<SearchProviderTestResult>;
   getACPRunners: () => Promise<ACPRunnersSettings>;
-  createACPRunner: (
-    request: ACPRunnerCreateRequest,
-  ) => Promise<ACPRunnerView>;
-  updateACPRunner: (
-    runnerId: string,
-    request: ACPRunnerUpdateRequest,
-  ) => Promise<ACPRunnerView>;
+  createACPRunner: (request: ACPRunnerCreateRequest) => Promise<ACPRunnerView>;
+  updateACPRunner: (runnerId: string, request: ACPRunnerUpdateRequest) => Promise<ACPRunnerView>;
   deleteACPRunner: (runnerId: string) => Promise<void>;
   probeACPRunner: (runnerId: string) => Promise<ACPRunnerProbeResult>;
   getRun: (runId: string) => Promise<RuntimeRun>;
@@ -1540,12 +1524,15 @@ export type AwakenBridge = {
   listProjectDirectory: (
     request: ProjectDirectoryListRequest,
   ) => Promise<ProjectDirectoryListResult>;
+  resolveProjectEntryForTask: (
+    request: ProjectEntryActionRequest,
+  ) => Promise<ProjectEntryResolveResult>;
+  copyProjectEntryPath: (request: ProjectEntryActionRequest) => Promise<ProjectEntryActionResult>;
+  openProjectEntryWith: (request: ProjectEntryOpenWithRequest) => Promise<ProjectEntryActionResult>;
   startProjectFilePreview: (
     request: ProjectFilePreviewStartRequest,
   ) => Promise<ProjectFilePreviewStartResult>;
-  closeProjectFilePreview: (
-    request: ProjectFilePreviewCloseRequest,
-  ) => Promise<void>;
+  closeProjectFilePreview: (request: ProjectFilePreviewCloseRequest) => Promise<void>;
   onProjectFilePreviewInteraction: (
     handler: (interaction: ProjectFilePreviewInteraction) => void,
   ) => () => void;
@@ -1565,7 +1552,10 @@ export type AwakenBridge = {
   setPrimaryProjectFolder: (projectId: string, path: string) => Promise<UpsertProjectResult>;
   reorderProjects: (projectIds: string[]) => Promise<ProjectReorderResult>;
   detachProject: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
-  deleteProjectThreads: (projectId: string, idempotencyKey: string) => Promise<ProjectMutationResult>;
+  deleteProjectThreads: (
+    projectId: string,
+    idempotencyKey: string,
+  ) => Promise<ProjectMutationResult>;
   trashProjectFolder: (
     projectId: string,
     path: string,
@@ -1575,20 +1565,10 @@ export type AwakenBridge = {
   openArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
   revealPath: (target: string) => Promise<{ ok: boolean; message?: string }>;
   revealArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
-  startRun: (
-    request: StartRunRequest,
-  ) => Promise<DesktopOperationResult<RuntimeRun>>;
+  startRun: (request: StartRunRequest) => Promise<DesktopOperationResult<RuntimeRun>>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
-  cancelSubagent?: (
-    runId: string,
-    taskId: string,
-    reason?: string,
-  ) => Promise<void>;
-  answerUserQuestion: (
-    runId: string,
-    questionId: string,
-    answer: string,
-  ) => Promise<void>;
+  cancelSubagent?: (runId: string, taskId: string, reason?: string) => Promise<void>;
+  answerUserQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
   resolveExternalInteraction: (
     runId: string,
     interactionId: string,
@@ -1600,11 +1580,7 @@ export type AwakenBridge = {
     optionId: string,
     cancelled: boolean,
   ) => Promise<void>;
-  subscribeRun: (
-    runId: string,
-    handlers: RunStreamHandlers,
-    afterSeq?: number,
-  ) => Promise<string>;
+  subscribeRun: (runId: string, handlers: RunStreamHandlers, afterSeq?: number) => Promise<string>;
   unsubscribeRun: (subscriptionId: string) => void;
   getDesktopPreferences: () => Promise<DesktopPreferences>;
   saveDesktopPreferences: (request: DesktopPreferencesSaveRequest) => Promise<DesktopPreferences>;
@@ -1629,14 +1605,22 @@ export type AwakenBridge = {
   startCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
   cancelCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
   retryCliAuth: (providerId: CliProviderId) => Promise<CliConnectorView>;
-  setCliConnectorActivation: (providerId: CliProviderId, activation: CliActivation) => Promise<CliConnectorView>;
+  setCliConnectorActivation: (
+    providerId: CliProviderId,
+    activation: CliActivation,
+  ) => Promise<CliConnectorView>;
   logoutCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
   uninstallManagedCli: (providerId: CliProviderId) => Promise<CliConnectorView>;
   subscribeCliConnectorState: (handler: CliConnectorStateHandler) => () => void;
   listMcpServers: () => Promise<RuntimeMcpServer[]>;
-  configureMcpServers: (request: ConfigureMcpServersRequest) => Promise<ConfigureMcpServersResponse>;
+  configureMcpServers: (
+    request: ConfigureMcpServersRequest,
+  ) => Promise<ConfigureMcpServersResponse>;
   getMcpServerConfig: (name: string) => Promise<RuntimeMcpServerConfigResponse>;
-  updateMcpServerConfig: (name: string, request: UpdateMcpServerConfigRequest) => Promise<ConfigureMcpServersResponse>;
+  updateMcpServerConfig: (
+    name: string,
+    request: UpdateMcpServerConfigRequest,
+  ) => Promise<ConfigureMcpServersResponse>;
   disableMcpServer: (name: string) => Promise<void>;
   enableMcpServer: (name: string) => Promise<void>;
   deleteMcpServer: (name: string) => Promise<void>;
@@ -1671,7 +1655,11 @@ export type AwakenBridge = {
   getScheduledTask: (taskId: string) => Promise<ScheduledTask>;
   createScheduledTask: (input: ScheduledTaskCreateInput) => Promise<ScheduledTask>;
   patchScheduledTask: (taskId: string, input: ScheduledTaskPatchInput) => Promise<ScheduledTask>;
-  deleteScheduledTask: (taskId: string, expectedVersion: number, idempotencyKey: string) => Promise<void>;
+  deleteScheduledTask: (
+    taskId: string,
+    expectedVersion: number,
+    idempotencyKey: string,
+  ) => Promise<void>;
   pauseScheduledTask: (taskId: string, expectedVersion: number) => Promise<ScheduledTask>;
   resumeScheduledTask: (taskId: string, expectedVersion: number) => Promise<ScheduledTask>;
   runScheduledTaskNow: (taskId: string, idempotencyKey: string) => Promise<ScheduledTaskExecution>;
@@ -1738,7 +1726,11 @@ export function normalizeRuntimeProject(project: RuntimeProjectWire): RuntimePro
     isPrimary: Boolean(folder.is_primary),
   }));
   if (folders.length === 0 && project.workspace_root) {
-    folders.push({ path: project.workspace_root, role: "user", isPrimary: true });
+    folders.push({
+      path: project.workspace_root,
+      role: "user",
+      isPrimary: true,
+    });
   }
   return {
     projectId: project.project_id,
@@ -1830,7 +1822,9 @@ export function normalizeStartRunRequest(request: StartRunRequest): StartRunRequ
       request_id: request.client.requestId,
       entrypoint: request.client.entrypoint,
     },
-    model_profile: request.modelProfile ? normalizeModelProfileRunConfig(request.modelProfile) : undefined,
+    model_profile: request.modelProfile
+      ? normalizeModelProfileRunConfig(request.modelProfile)
+      : undefined,
   };
 }
 
@@ -1965,9 +1959,7 @@ export function normalizeRunInputAttachment(
   };
 }
 
-export function toRunInputAttachmentWire(
-  attachment: RunInputAttachment,
-): RunInputAttachmentWire {
+export function toRunInputAttachmentWire(attachment: RunInputAttachment): RunInputAttachmentWire {
   return {
     id: attachment.id,
     kind: attachment.kind,
@@ -1981,15 +1973,11 @@ export function toRunInputAttachmentWire(
   };
 }
 
-export function normalizeModelBalanceStatus(
-  status: ModelBalanceStatusWire,
-): ModelBalanceStatus {
+export function normalizeModelBalanceStatus(status: ModelBalanceStatusWire): ModelBalanceStatus {
   return status;
 }
 
-export function normalizeModelBalanceAmount(
-  amount: ModelBalanceAmountWire,
-): ModelBalanceAmount {
+export function normalizeModelBalanceAmount(amount: ModelBalanceAmountWire): ModelBalanceAmount {
   return {
     currency: amount.currency,
     total: amount.total,
@@ -1998,9 +1986,7 @@ export function normalizeModelBalanceAmount(
   };
 }
 
-export function normalizeModelBalanceQuota(
-  quota: ModelBalanceQuotaWire,
-): ModelBalanceQuota {
+export function normalizeModelBalanceQuota(quota: ModelBalanceQuotaWire): ModelBalanceQuota {
   return {
     name: quota.name,
     limit: quota.limit,
@@ -2010,9 +1996,7 @@ export function normalizeModelBalanceQuota(
   };
 }
 
-export function normalizeModelBalanceDetail(
-  detail: ModelBalanceDetailWire,
-): ModelBalanceDetail {
+export function normalizeModelBalanceDetail(detail: ModelBalanceDetailWire): ModelBalanceDetail {
   if (detail.kind === "amount") {
     return {
       kind: "amount",
@@ -2115,9 +2099,7 @@ export function toScheduledTaskScheduleWire(
       timezone: schedule.timezone,
       run_at: schedule.runAt,
       repeat_every_days: schedule.repeatEveryDays,
-      repeat_end: schedule.repeatEnd
-        ? toScheduledTaskRepeatEndWire(schedule.repeatEnd)
-        : undefined,
+      repeat_end: schedule.repeatEnd ? toScheduledTaskRepeatEndWire(schedule.repeatEnd) : undefined,
     };
   }
   return {
@@ -2220,9 +2202,7 @@ export function normalizeScheduledTaskExecution(
   };
 }
 
-export function normalizeScheduledTaskEvent(
-  event: ScheduledTaskEventWire,
-): ScheduledTaskEvent {
+export function normalizeScheduledTaskEvent(event: ScheduledTaskEventWire): ScheduledTaskEvent {
   return {
     type: event.type,
     taskId: event.task_id,
@@ -2252,21 +2232,15 @@ export function toScheduledTaskCreateWire(
   };
 }
 
-export function toScheduledTaskPatchWire(
-  input: ScheduledTaskPatchInput,
-): ScheduledTaskPatchWire {
+export function toScheduledTaskPatchWire(input: ScheduledTaskPatchInput): ScheduledTaskPatchWire {
   return {
     expected_version: input.expectedVersion,
     name: input.name,
     enabled: input.enabled,
     project_id: input.projectId,
     schedule: input.schedule ? toScheduledTaskScheduleWire(input.schedule) : undefined,
-    action: input.action
-      ? { kind: input.action.kind, content: input.action.content }
-      : undefined,
-    execution: input.execution
-      ? toScheduledTaskExecutionOptionsWire(input.execution)
-      : undefined,
+    action: input.action ? { kind: input.action.kind, content: input.action.content } : undefined,
+    execution: input.execution ? toScheduledTaskExecutionOptionsWire(input.execution) : undefined,
     template_origin: input.templateOrigin
       ? toScheduledTaskTemplateOriginWire(input.templateOrigin)
       : undefined,

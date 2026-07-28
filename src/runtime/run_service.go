@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
@@ -135,6 +136,11 @@ type ComposerTokenPayload struct {
 	SourceOrigin  string `json:"sourceOrigin,omitempty"`
 	SkillFilePath string `json:"skillFilePath,omitempty"`
 	RootDir       string `json:"rootDir,omitempty"`
+	Path          string `json:"path,omitempty"`
+	EntryKind     string `json:"entryKind,omitempty"`
+	ProjectID     string `json:"projectId,omitempty"`
+	FolderPath    string `json:"folderPath,omitempty"`
+	RelativePath  string `json:"relativePath,omitempty"`
 }
 
 type ModelProfileConfig struct {
@@ -625,6 +631,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 
 	workspace, err := normalizeWorkspaceForThread(req.Workspace, threadID)
 	if err != nil {
+		return Run{}, err
+	}
+	if err := validateComposerFileTokens(req.ComposerTokens, workspace); err != nil {
 		return Run{}, err
 	}
 	s.projectMutationMu.RLock()
@@ -2070,11 +2079,124 @@ func cloneAgentComposerSkillSelection(value *agentcore.ComposerSkillSelectionCon
 }
 
 func effectiveInputForComposerTokens(input string, tokens []ComposerToken) string {
-	_ = tokens
-	// Explicit Skill identity enters the host-generated system context. The
-	// model-facing user message remains byte-for-byte the accepted input,
-	// including the empty string for a token-only turn.
-	return input
+	hasFileToken := false
+	visiblePrefix := strings.Builder{}
+	filePaths := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		visiblePrefix.WriteString(token.LeadingText)
+		if strings.EqualFold(strings.TrimSpace(token.Type), "file") {
+			hasFileToken = true
+			filePaths = append(filePaths, strings.TrimSpace(token.Payload.Path))
+		}
+	}
+	if !hasFileToken {
+		// Explicit Skill identity enters the host-generated system context. The
+		// model-facing user message remains byte-for-byte the accepted input.
+		return input
+	}
+
+	prefix := visiblePrefix.String()
+	prefixCandidates := []string{
+		prefix,
+		strings.TrimRightFunc(prefix, unicode.IsSpace),
+		strings.TrimLeftFunc(prefix, unicode.IsSpace),
+		strings.TrimSpace(prefix),
+	}
+	tail := ""
+	matched := false
+	for _, candidate := range prefixCandidates {
+		if strings.HasPrefix(input, candidate) {
+			tail = strings.TrimPrefix(input, candidate)
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		// A malformed or older client must not make validated references vanish
+		// from the model input. Keep its display text and append the references.
+		return strings.TrimSpace(strings.Join(append([]string{input}, filePaths...), "\n"))
+	}
+
+	effective := strings.Builder{}
+	for _, token := range tokens {
+		effective.WriteString(token.LeadingText)
+		if strings.EqualFold(strings.TrimSpace(token.Type), "file") {
+			effective.WriteString(strings.TrimSpace(token.Payload.Path))
+		}
+	}
+	effective.WriteString(tail)
+	return strings.TrimSpace(effective.String())
+}
+
+func validateComposerFileTokens(tokens []ComposerToken, workspace WorkspaceConfig) error {
+	for _, token := range tokens {
+		if !strings.EqualFold(strings.TrimSpace(token.Type), "file") {
+			continue
+		}
+		if err := validateComposerFileToken(token, workspace); err != nil {
+			return fmt.Errorf("%w: composer file token %q: %v", ErrInvalidInput, token.ID, err)
+		}
+	}
+	return nil
+}
+
+func validateComposerFileToken(token ComposerToken, workspace WorkspaceConfig) error {
+	target := strings.TrimSpace(token.Payload.Path)
+	folder := strings.TrimSpace(token.Payload.FolderPath)
+	relative := strings.TrimSpace(token.Payload.RelativePath)
+	kind := strings.ToLower(strings.TrimSpace(token.Payload.EntryKind))
+	if target == "" || folder == "" || relative == "" {
+		return errors.New("path identity is incomplete")
+	}
+	if !filepath.IsAbs(target) || !filepath.IsAbs(folder) {
+		return errors.New("paths must be absolute")
+	}
+	target = filepath.Clean(target)
+	folder = filepath.Clean(folder)
+	if kind != "file" && kind != "directory" {
+		return errors.New("entry kind is invalid")
+	}
+	if strings.TrimSpace(token.Payload.ProjectID) != strings.TrimSpace(workspace.ProjectID) {
+		return errors.New("project identity no longer matches the run")
+	}
+	cleanRelative := filepath.Clean(relative)
+	if filepath.IsAbs(relative) || cleanRelative == "." || cleanRelative == ".." {
+		return errors.New("relative path is invalid")
+	}
+	if filepath.Clean(filepath.Join(folder, cleanRelative)) != target || !tool.PathWithinRoot(target, folder) {
+		return errors.New("path is outside its attached folder")
+	}
+
+	readableRoot := ""
+	for _, root := range workspace.ReadableRoots {
+		if tool.PathWithinRoot(folder, root) && tool.PathWithinRoot(root, folder) {
+			readableRoot = filepath.Clean(root)
+			break
+		}
+	}
+	if readableRoot == "" {
+		return errors.New("folder is not an active readable root")
+	}
+
+	info, err := os.Lstat(target)
+	if err != nil {
+		return errors.New("entry is unavailable")
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("symbolic links cannot be added")
+	}
+	if (kind == "directory") != info.IsDir() {
+		return errors.New("entry kind no longer matches")
+	}
+	realTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return errors.New("entry real path is unavailable")
+	}
+	realRoot, err := filepath.EvalSymlinks(readableRoot)
+	if err != nil || !tool.PathWithinRoot(realTarget, realRoot) {
+		return errors.New("entry real path is outside the readable root")
+	}
+	return nil
 }
 
 func skillComposerTokens(tokens []ComposerToken) []ComposerToken {
@@ -2091,7 +2213,7 @@ func threadLabelForInputAndTokens(input string, attachments []RunInputAttachment
 	if strings.TrimSpace(input) != "" || len(attachments) > 0 {
 		return threadLabelForInput(input, attachments)
 	}
-	for _, token := range skillComposerTokens(tokens) {
+	for _, token := range tokens {
 		if label := trimThreadLabel(strings.TrimSpace(token.Label)); label != "" {
 			return label
 		}

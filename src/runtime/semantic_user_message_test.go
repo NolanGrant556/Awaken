@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -190,6 +191,32 @@ func TestSemanticComposerTokensForRunKeepsLeadingText(t *testing.T) {
 	}})
 	if len(tokens) != 1 || tokens[0].LeadingText != "然后使用 " {
 		t.Fatalf("leadingText not carried into semantic token: %+v", tokens)
+	}
+}
+
+func TestSemanticComposerTokensForRunKeepsProjectPathIdentity(t *testing.T) {
+	tokens := semanticComposerTokensForRun([]ComposerToken{{
+		ID: "file:brief", Type: "file", Label: "brief.md",
+		Payload: ComposerTokenPayload{
+			Path:         "/workspace/docs/brief.md",
+			EntryKind:    "file",
+			ProjectID:    "project-1",
+			FolderPath:   "/workspace",
+			RelativePath: "docs/brief.md",
+		},
+	}})
+	if len(tokens) != 1 {
+		t.Fatalf("expected one semantic token, got %+v", tokens)
+	}
+	want := map[string]any{
+		"path":         "/workspace/docs/brief.md",
+		"entryKind":    "file",
+		"projectId":    "project-1",
+		"folderPath":   "/workspace",
+		"relativePath": "docs/brief.md",
+	}
+	if !reflect.DeepEqual(tokens[0].Payload, want) {
+		t.Fatalf("project path identity changed: got %+v want %+v", tokens[0].Payload, want)
 	}
 }
 

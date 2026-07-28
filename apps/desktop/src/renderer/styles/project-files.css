@@ -6,12 +6,149 @@
 
 .project-files-workspace {
   container-type: inline-size;
+  position: relative;
   display: grid;
   grid-template-rows: 56px minmax(0, 1fr);
   height: 100%;
   min-width: 0;
   min-height: 0;
   background: var(--aw-bg-main);
+}
+
+.project-files-context-menu,
+.project-files-context-submenu {
+  box-sizing: border-box;
+  display: grid;
+  width: 224px;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--aw-border-main) 88%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--aw-surface-panel) 94%, transparent);
+  box-shadow: var(--aw-shadow-popover);
+  color: var(--aw-text-primary);
+  -webkit-backdrop-filter: blur(18px) saturate(1.15);
+  backdrop-filter: blur(18px) saturate(1.15);
+}
+
+.project-files-context-menu {
+  position: fixed;
+  z-index: 1200;
+}
+
+.project-files-context-menu button,
+.project-files-context-submenu button {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--aw-text-primary);
+  font: inherit;
+  font-size: var(--aw-font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-files-context-menu button:hover:not(:disabled),
+.project-files-context-menu button:focus-visible,
+.project-files-context-submenu button:hover:not(:disabled),
+.project-files-context-submenu button:focus-visible {
+  outline: 0;
+  background: var(--aw-bg-fill-light);
+}
+
+.project-files-context-menu button:disabled,
+.project-files-context-submenu button:disabled {
+  color: var(--aw-text-disabled);
+  cursor: default;
+}
+
+.project-files-context-menu button > span,
+.project-files-context-submenu button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-files-context-menu__separator {
+  height: 1px;
+  margin: 6px 7px;
+  background: var(--aw-border-light);
+}
+
+.project-files-context-menu__open-with {
+  position: relative;
+}
+
+.project-files-context-menu__open-with > button {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  width: 100%;
+}
+
+.project-files-context-menu__submenu-chevron {
+  color: var(--aw-text-tertiary);
+}
+
+.project-files-context-submenu {
+  position: absolute;
+  z-index: 1;
+  top: -7px;
+  left: calc(100% + 6px);
+}
+
+.project-files-context-submenu.is-left {
+  right: calc(100% + 6px);
+  left: auto;
+}
+
+.project-files-context-submenu button {
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.project-files-context-submenu__application-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.project-files-context-submenu button:disabled .project-files-context-submenu__application-icon {
+  opacity: 0.42;
+  filter: grayscale(0.2);
+}
+
+.project-files-context-status {
+  position: absolute;
+  z-index: 8;
+  top: clamp(96px, 24%, 220px);
+  left: 50%;
+  width: max-content;
+  max-width: min(320px, calc(100% - 32px));
+  padding: 7px 12px;
+  transform: translateX(-50%);
+  border: 1px solid var(--aw-border-main);
+  border-radius: 10px;
+  background: var(--aw-surface-raised);
+  box-shadow: var(--aw-shadow-raised);
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+  pointer-events: none;
+}
+
+.project-files-context-status.is-error {
+  border-color: var(--aw-error-soft-border);
+  background: var(--aw-error-soft-bg);
+  color: var(--aw-status-danger-text);
 }
 
 .project-files-pathbar {
@@ -89,11 +226,7 @@
   grid-template-areas: "preview divider navigator";
   grid-template-columns:
     minmax(0, 1fr) 1px
-    clamp(
-      240px,
-      var(--project-file-list-width, 240px),
-      min(400px, calc(100cqw - 1px))
-    );
+    clamp(240px, var(--project-file-list-width, 240px), min(400px, calc(100cqw - 1px)));
   min-width: 0;
   min-height: 0;
   transition: grid-template-columns 170ms ease;
@@ -172,12 +305,10 @@
   background: var(--aw-bg-main);
   opacity: 1;
   visibility: visible;
-  transition:
-    opacity 120ms ease;
+  transition: opacity 120ms ease;
 }
 
-.project-files-workspace__body.is-file-list-collapsed
-  .project-files-navigator {
+.project-files-workspace__body.is-file-list-collapsed .project-files-navigator {
   width: 0;
   min-width: 0;
   opacity: 0;
@@ -219,8 +350,7 @@ body.is-project-file-list-resizing .project-files-divider::after {
   background: var(--aw-border-control-hover);
 }
 
-.project-files-workspace__body.is-file-list-collapsed
-  .project-files-divider {
+.project-files-workspace__body.is-file-list-collapsed .project-files-divider {
   visibility: hidden;
   pointer-events: none;
 }
@@ -380,8 +510,7 @@ body.is-project-file-list-resizing .project-files-workspace__body {
   min-height: 0;
   padding: 2px 7px 10px;
   overflow: auto;
-  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent)
-    transparent;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent) transparent;
   scrollbar-width: thin;
 }
 
@@ -414,13 +543,10 @@ body.is-project-file-list-resizing .project-files-workspace__body {
 
 .project-files-tree-row.is-nested {
   transform-origin: top left;
-  animation: project-files-tree-row-reveal 170ms cubic-bezier(0.2, 0.75, 0.25, 1)
-    both;
+  animation: project-files-tree-row-reveal 170ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
 }
 
-.project-files-tree-row[aria-expanded="true"]
-  .project-files-tree-row__chevron
-  svg {
+.project-files-tree-row[aria-expanded="true"] .project-files-tree-row__chevron svg {
   transform: rotate(90deg);
 }
 
@@ -873,11 +999,16 @@ body.is-project-file-list-resizing .project-files-workspace__body {
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  background-image: linear-gradient(45deg, var(--aw-bg-fill-light) 25%, transparent 25%),
+  background-image:
+    linear-gradient(45deg, var(--aw-bg-fill-light) 25%, transparent 25%),
     linear-gradient(-45deg, var(--aw-bg-fill-light) 25%, transparent 25%),
     linear-gradient(45deg, transparent 75%, var(--aw-bg-fill-light) 75%),
     linear-gradient(-45deg, transparent 75%, var(--aw-bg-fill-light) 75%);
-  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
   background-size: 16px 16px;
 }
 

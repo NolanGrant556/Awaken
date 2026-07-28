@@ -13,7 +13,14 @@ export type AwakenComposerInputProps = {
   maxRows?: number;
   disabled?: boolean;
   focusRequest?: number;
+  focusOffset?: number;
+  onSelectionChange?: (selection: ComposerInputSelection) => void;
   onPasteImages?: (files: File[]) => void;
+};
+
+export type ComposerInputSelection = {
+  anchor: number;
+  focus: number;
 };
 
 export function pastedImageFilesFromClipboardData(
@@ -68,6 +75,8 @@ export function AwakenComposerInput({
   maxRows = 6,
   disabled,
   focusRequest = 0,
+  focusOffset,
+  onSelectionChange,
   onPasteImages,
 }: AwakenComposerInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -76,7 +85,7 @@ export function AwakenComposerInput({
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       onChange(e.target.value);
     },
-    [onChange]
+    [onChange],
   );
 
   const handleKeyDown = useCallback(
@@ -98,7 +107,7 @@ export function AwakenComposerInput({
       e.preventDefault();
       onSubmit?.();
     },
-    [onKeyDown, onSubmit]
+    [onKeyDown, onSubmit],
   );
 
   const handlePaste = useCallback(
@@ -115,6 +124,15 @@ export function AwakenComposerInput({
     },
     [onPasteImages],
   );
+
+  const emitSelection = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    onSelectionChange?.({
+      anchor: textarea.selectionStart ?? textarea.value.length,
+      focus: textarea.selectionEnd ?? textarea.value.length,
+    });
+  }, [onSelectionChange]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -134,8 +152,16 @@ export function AwakenComposerInput({
     if (!textarea || disabled || focusRequest <= 0) return;
 
     textarea.focus({ preventScroll: true });
-    const cursorPosition = textarea.value.length;
+    const cursorPosition = Math.max(
+      0,
+      Math.min(focusOffset ?? textarea.value.length, textarea.value.length),
+    );
     textarea.setSelectionRange(cursorPosition, cursorPosition);
+    onSelectionChange?.({ anchor: cursorPosition, focus: cursorPosition });
+    // focusOffset and the callback belong to this focusRequest snapshot. A
+    // controlled parent may recreate the callback on every keystroke; that
+    // must not reposition the caret until it explicitly increments request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [disabled, focusRequest]);
 
   return (
@@ -143,6 +169,8 @@ export function AwakenComposerInput({
       ref={textareaRef}
       value={value}
       onChange={handleChange}
+      onSelect={emitSelection}
+      onBlur={emitSelection}
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
       placeholder={placeholder}

@@ -38,14 +38,12 @@ type ComposerInlineInputStyle = CSSProperties & {
   "--composer-inline-input-max-height": string;
 };
 
-type ComposerInlineSelection = {
+export type ComposerInlineSelection = {
   anchor: number;
   focus: number;
 };
 
-type ComposerInlinePart =
-  | { type: "text"; value: string }
-  | { type: "token"; id: string };
+type ComposerInlinePart = { type: "text"; value: string } | { type: "token"; id: string };
 
 export type AwakenComposerInlineInputProps = {
   value: string;
@@ -60,6 +58,8 @@ export type AwakenComposerInlineInputProps = {
   maxRows?: number;
   disabled?: boolean;
   focusRequest?: number;
+  focusOffset?: number;
+  onSelectionChange?: (selection: ComposerInlineSelection) => void;
   onPasteImages?: (files: File[]) => void;
 };
 
@@ -121,20 +121,13 @@ function composerInlineParts(root: Node): ComposerInlinePart[] {
   function visitChildren(parent: Node): void {
     const children = Array.from(parent.childNodes);
     children.forEach((child, index) => {
-      const element = child.nodeType === Node.ELEMENT_NODE
-        ? (child as HTMLElement)
-        : undefined;
+      const element = child.nodeType === Node.ELEMENT_NODE ? (child as HTMLElement) : undefined;
       const isBlock = Boolean(element && BLOCK_TAG_NAMES.has(element.tagName));
       if (isBlock && hasOutput && !outputEndsWithNewline) {
         appendText("\n");
       }
       visit(child);
-      if (
-        isBlock &&
-        index < children.length - 1 &&
-        hasOutput &&
-        !outputEndsWithNewline
-      ) {
+      if (isBlock && index < children.length - 1 && hasOutput && !outputEndsWithNewline) {
         appendText("\n");
       }
     });
@@ -180,10 +173,7 @@ function structuredValueFromParts(
       pendingText += part.value;
       continue;
     }
-    if (
-      seenTokenIds.has(part.id) ||
-      (allowedTokenIds && !allowedTokenIds.has(part.id))
-    ) {
+    if (seenTokenIds.has(part.id) || (allowedTokenIds && !allowedTokenIds.has(part.id))) {
       continue;
     }
     seenTokenIds.add(part.id);
@@ -198,10 +188,7 @@ export function composerInlineInputStructuredValue(
   element: HTMLElement,
   allowedTokenIds?: ReadonlySet<string>,
 ): ComposerInlineStructuredValue {
-  return structuredValueFromParts(
-    composerInlineParts(element),
-    allowedTokenIds,
-  );
+  return structuredValueFromParts(composerInlineParts(element), allowedTokenIds);
 }
 
 function structuredValueForProps(
@@ -233,9 +220,7 @@ function structuredValuesEqual(
 }
 
 function tokenRenderSignature(tokens: ComposerInlineToken[]): string {
-  return JSON.stringify(
-    tokens.map(({ id, type, label, title }) => [id, type, label, title ?? ""]),
-  );
+  return JSON.stringify(tokens.map(({ id, type, label, title }) => [id, type, label, title ?? ""]));
 }
 
 function appendPackageIcon(document: Document, token: HTMLElement): void {
@@ -264,10 +249,7 @@ function appendPackageIcon(document: Document, token: HTMLElement): void {
   token.append(svg);
 }
 
-function composerTokenElement(
-  document: Document,
-  token: ComposerInlineToken,
-): HTMLElement {
+function composerTokenElement(document: Document, token: ComposerInlineToken): HTMLElement {
   const element = document.createElement("span");
   element.className = `composer-bar-token composer-bar-token-${token.type}`;
   element.setAttribute(COMPOSER_TOKEN_ATTRIBUTE, token.id);
@@ -305,10 +287,7 @@ function rebuildComposerInlineInput(
 function structuredValueLength(value: ComposerInlineStructuredValue): number {
   return (
     value.value.length +
-    value.tokens.reduce(
-      (length, token) => length + token.leadingText.length + 1,
-      0,
-    )
+    value.tokens.reduce((length, token) => length + token.leadingText.length + 1, 0)
   );
 }
 
@@ -321,15 +300,12 @@ function composerInlineSelectionOffset(
   range.selectNodeContents(element);
   range.setEnd(container, offset);
   return composerInlineParts(range.cloneContents()).reduce(
-    (length, part) =>
-      length + (part.type === "text" ? part.value.length : 1),
+    (length, part) => length + (part.type === "text" ? part.value.length : 1),
     0,
   );
 }
 
-export function composerInlineInputSelection(
-  element: HTMLElement,
-): ComposerInlineSelection | null {
+export function composerInlineInputSelection(element: HTMLElement): ComposerInlineSelection | null {
   const selection = element.ownerDocument.defaultView?.getSelection();
   if (
     !selection?.rangeCount ||
@@ -341,16 +317,8 @@ export function composerInlineInputSelection(
     return null;
   }
   return {
-    anchor: composerInlineSelectionOffset(
-      element,
-      selection.anchorNode,
-      selection.anchorOffset,
-    ),
-    focus: composerInlineSelectionOffset(
-      element,
-      selection.focusNode,
-      selection.focusOffset,
-    ),
+    anchor: composerInlineSelectionOffset(element, selection.anchorNode, selection.anchorOffset),
+    focus: composerInlineSelectionOffset(element, selection.focusNode, selection.focusOffset),
   };
 }
 
@@ -393,29 +361,22 @@ function restoreComposerInlineSelection(
   }
   const value = composerInlineInputStructuredValue(element);
   const maxOffset = structuredValueLength(value);
-  const anchor = composerInlinePointForOffset(
-    element,
-    Math.min(selectionValue.anchor, maxOffset),
-  );
-  const focus = composerInlinePointForOffset(
-    element,
-    Math.min(selectionValue.focus, maxOffset),
-  );
+  const anchor = composerInlinePointForOffset(element, Math.min(selectionValue.anchor, maxOffset));
+  const focus = composerInlinePointForOffset(element, Math.min(selectionValue.focus, maxOffset));
   selection.removeAllRanges();
-  selection.setBaseAndExtent(
-    anchor.node,
-    anchor.offset,
-    focus.node,
-    focus.offset,
-  );
+  selection.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
 }
 
-function focusInlineInputAtEnd(element: HTMLElement): void {
+function focusInlineInputAtOffset(
+  element: HTMLElement,
+  requestedOffset?: number,
+): ComposerInlineSelection {
   element.focus({ preventScroll: true });
-  const length = structuredValueLength(
-    composerInlineInputStructuredValue(element),
-  );
-  restoreComposerInlineSelection(element, { anchor: length, focus: length });
+  const length = structuredValueLength(composerInlineInputStructuredValue(element));
+  const offset = Math.max(0, Math.min(requestedOffset ?? length, length));
+  const selection = { anchor: offset, focus: offset };
+  restoreComposerInlineSelection(element, selection);
+  return selection;
 }
 
 function tokenRanges(value: ComposerInlineStructuredValue): Array<{
@@ -433,9 +394,7 @@ function tokenRanges(value: ComposerInlineStructuredValue): Array<{
   return ranges;
 }
 
-function partsForStructuredValue(
-  value: ComposerInlineStructuredValue,
-): ComposerInlinePart[] {
+function partsForStructuredValue(value: ComposerInlineStructuredValue): ComposerInlinePart[] {
   const parts: ComposerInlinePart[] = [];
   for (const token of value.tokens) {
     parts.push({ type: "text", value: token.leadingText });
@@ -519,6 +478,8 @@ export function AwakenComposerInlineInput({
   maxRows = 6,
   disabled,
   focusRequest = 0,
+  focusOffset,
+  onSelectionChange,
   onPasteImages,
 }: AwakenComposerInlineInputProps) {
   const editorRef = useRef<HTMLDivElement>(null);
@@ -531,6 +492,14 @@ export function AwakenComposerInlineInput({
     "--composer-inline-input-min-height": `${minRows * 20}px`,
     "--composer-inline-input-max-height": `${maxRows * 20}px`,
   };
+
+  const emitSelection = useCallback(() => {
+    const editor = editorRef.current;
+    const selection = editor ? composerInlineInputSelection(editor) : null;
+    if (selection) {
+      onSelectionChange?.(selection);
+    }
+  }, [onSelectionChange]);
 
   useLayoutEffect(() => {
     const editor = editorRef.current;
@@ -561,8 +530,25 @@ export function AwakenComposerInlineInput({
     if (!editor || disabled || focusRequest <= 0) {
       return;
     }
-    focusInlineInputAtEnd(editor);
+    const selection = focusInlineInputAtOffset(editor, focusOffset);
+    onSelectionChange?.(selection);
+    // A new request is the only command to reposition the logical caret.
+    // Callback identity and draft rerenders must leave the live selection in
+    // browser ownership.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [disabled, focusRequest]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || disabled || !onSelectionChange) {
+      return;
+    }
+    const handleSelectionChange = (): void => emitSelection();
+    editor.ownerDocument.addEventListener("selectionchange", handleSelectionChange);
+    return () => {
+      editor.ownerDocument.removeEventListener("selectionchange", handleSelectionChange);
+    };
+  }, [disabled, emitSelection, onSelectionChange]);
 
   const emitStructuredValue = useCallback(() => {
     const editor = editorRef.current;
@@ -609,8 +595,7 @@ export function AwakenComposerInlineInput({
         .map((token) => ({
           ...token,
           leadingText:
-            nextValue.tokens.find((segment) => segment.id === token.id)
-              ?.leadingText ?? "",
+            nextValue.tokens.find((segment) => segment.id === token.id)?.leadingText ?? "",
         }));
       rebuildComposerInlineInput(editor, nextTokens, nextValue);
       renderedTokenSignatureRef.current = tokenRenderSignature(nextTokens);
@@ -640,11 +625,7 @@ export function AwakenComposerInlineInput({
 
       const editor = editorRef.current;
       const selection = editor ? composerInlineInputSelection(editor) : null;
-      if (
-        editor &&
-        selection &&
-        (event.key === "Backspace" || event.key === "Delete")
-      ) {
+      if (editor && selection && (event.key === "Backspace" || event.key === "Delete")) {
         const currentValue = composerInlineInputStructuredValue(
           editor,
           new Set(tokens.map((token) => token.id)),
@@ -656,9 +637,7 @@ export function AwakenComposerInlineInput({
 
         if (start === end) {
           const adjacentToken = tokenRanges(currentValue).find((range) =>
-            event.key === "Backspace"
-              ? range.end === start
-              : range.start === start,
+            event.key === "Backspace" ? range.end === start : range.start === start,
           );
           if (adjacentToken) {
             deleteStart = adjacentToken.start;
@@ -715,9 +694,7 @@ export function AwakenComposerInlineInput({
       let end = Math.max(selection.anchor, selection.focus);
       if (start === end) {
         const adjacentToken = tokenRanges(currentValue).find((range) =>
-          nativeEvent.inputType.endsWith("Backward")
-            ? range.end === start
-            : range.start === start,
+          nativeEvent.inputType.endsWith("Backward") ? range.end === start : range.start === start,
         );
         if (adjacentToken) {
           start = adjacentToken.start;
@@ -759,11 +736,7 @@ export function AwakenComposerInlineInput({
       );
       event.clipboardData.setData(
         "text/plain",
-        composerInlinePlainTextForRange(
-          currentValue,
-          selection.anchor,
-          selection.focus,
-        ),
+        composerInlinePlainTextForRange(currentValue, selection.anchor, selection.focus),
       );
       event.preventDefault();
     },
@@ -774,12 +747,7 @@ export function AwakenComposerInlineInput({
     (event: ReactClipboardEvent<HTMLDivElement>) => {
       const editor = editorRef.current;
       const selection = editor ? composerInlineInputSelection(editor) : null;
-      if (
-        !editor ||
-        !selection ||
-        selection.anchor === selection.focus ||
-        !onStructuredChange
-      ) {
+      if (!editor || !selection || selection.anchor === selection.focus || !onStructuredChange) {
         return;
       }
       const currentValue = composerInlineInputStructuredValue(
@@ -788,11 +756,7 @@ export function AwakenComposerInlineInput({
       );
       event.clipboardData.setData(
         "text/plain",
-        composerInlinePlainTextForRange(
-          currentValue,
-          selection.anchor,
-          selection.focus,
-        ),
+        composerInlinePlainTextForRange(currentValue, selection.anchor, selection.focus),
       );
       event.preventDefault();
       const start = Math.min(selection.anchor, selection.focus);
@@ -804,8 +768,7 @@ export function AwakenComposerInlineInput({
         .map((token) => ({
           ...token,
           leadingText:
-            nextValue.tokens.find((segment) => segment.id === token.id)
-              ?.leadingText ?? "",
+            nextValue.tokens.find((segment) => segment.id === token.id)?.leadingText ?? "",
         }));
       rebuildComposerInlineInput(editor, nextTokens, nextValue);
       renderedTokenSignatureRef.current = tokenRenderSignature(nextTokens);

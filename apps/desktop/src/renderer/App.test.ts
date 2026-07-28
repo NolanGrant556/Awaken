@@ -16,9 +16,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   App,
   composerMetaItemsForFileWorkspaceSurface,
+  composerStructuredDraftLength,
   contextUsageMeta,
   contextUsagePanelData,
   isUserQuestionSelectionAnswered,
+  insertComposerTokenAtOffset,
   nextUserQuestionPromptIndex,
   nextSubagentInspectorTaskId,
   promptNarrativeTokensForComposer,
@@ -139,6 +141,13 @@ function stubElectronBridge(): void {
         relativePath: "",
         entries: [],
       })),
+      resolveProjectEntryForTask: vi.fn(async () => ({
+        ok: false as const,
+        code: "ENTRY_NOT_FOUND" as const,
+        message: "not found",
+      })),
+      copyProjectEntryPath: vi.fn(async () => ({ ok: true as const })),
+      openProjectEntryWith: vi.fn(async () => ({ ok: true as const })),
       startProjectFilePreview: vi.fn(async () => ({
         ok: false as const,
         code: "UNSUPPORTED_FILE_TYPE" as const,
@@ -315,13 +324,25 @@ function stubElectronBridge(): void {
       cancelMemoryDream: vi.fn(async () => undefined),
       onMemoryDreamReceipt: vi.fn(() => () => {}),
       listScheduledTasks: vi.fn(async () => []),
-      getScheduledTask: vi.fn(async () => { throw new Error("not found"); }),
-      createScheduledTask: vi.fn(async () => { throw new Error("not implemented"); }),
-      patchScheduledTask: vi.fn(async () => { throw new Error("not implemented"); }),
+      getScheduledTask: vi.fn(async () => {
+        throw new Error("not found");
+      }),
+      createScheduledTask: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
+      patchScheduledTask: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
       deleteScheduledTask: vi.fn(async () => undefined),
-      pauseScheduledTask: vi.fn(async () => { throw new Error("not implemented"); }),
-      resumeScheduledTask: vi.fn(async () => { throw new Error("not implemented"); }),
-      runScheduledTaskNow: vi.fn(async () => { throw new Error("not implemented"); }),
+      pauseScheduledTask: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
+      resumeScheduledTask: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
+      runScheduledTaskNow: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
       cancelScheduledTaskExecution: vi.fn(async () => undefined),
       listScheduledTaskExecutions: vi.fn(async () => []),
       getSystemTimezone: vi.fn(async () => "UTC"),
@@ -333,24 +354,17 @@ function stubElectronBridge(): void {
 
 describe("shouldResetActiveThreadForWorkspaceChange", () => {
   it("returns false when no active thread workspace exists", () => {
-    expect(
-      shouldResetActiveThreadForWorkspaceChange(undefined, "/tmp/project"),
-    ).toBe(false);
+    expect(shouldResetActiveThreadForWorkspaceChange(undefined, "/tmp/project")).toBe(false);
   });
 
   it("returns false when switching within the same workspace", () => {
-    expect(
-      shouldResetActiveThreadForWorkspaceChange("/tmp/project", "/tmp/project"),
-    ).toBe(false);
+    expect(shouldResetActiveThreadForWorkspaceChange("/tmp/project", "/tmp/project")).toBe(false);
   });
 
   it("returns true when switching to a different workspace", () => {
-    expect(
-      shouldResetActiveThreadForWorkspaceChange(
-        "/tmp/project-a",
-        "/tmp/project-b",
-      ),
-    ).toBe(true);
+    expect(shouldResetActiveThreadForWorkspaceChange("/tmp/project-a", "/tmp/project-b")).toBe(
+      true,
+    );
   });
 });
 
@@ -362,9 +376,12 @@ describe("project ordering", () => {
       "a",
       "d",
     ]);
-    expect(reorderProjectIds(["a", "b", "c", "d"], "d", "b", "before")).toEqual(
-      ["a", "d", "b", "c"],
-    );
+    expect(reorderProjectIds(["a", "b", "c", "d"], "d", "b", "before")).toEqual([
+      "a",
+      "d",
+      "b",
+      "c",
+    ]);
   });
 
   it("keeps the order stable for an invalid or self target", () => {
@@ -812,12 +829,8 @@ describe("sharedFolderTrashWarning", () => {
 describe("AwakenComposerInput keyboard behavior", () => {
   it("submits with Enter and keeps Shift+Enter for new lines", () => {
     expect(shouldSubmitComposerInputKey({ key: "Enter" })).toBe(true);
-    expect(shouldSubmitComposerInputKey({ key: "Enter", shiftKey: true })).toBe(
-      false,
-    );
-    expect(
-      shouldSubmitComposerInputKey({ key: "Enter", isComposing: true }),
-    ).toBe(false);
+    expect(shouldSubmitComposerInputKey({ key: "Enter", shiftKey: true })).toBe(false);
+    expect(shouldSubmitComposerInputKey({ key: "Enter", isComposing: true })).toBe(false);
     expect(shouldSubmitComposerInputKey({ key: "a" })).toBe(false);
   });
 
@@ -910,38 +923,27 @@ describe("Composer Slash Palette helpers", () => {
 
     const actions = skillSlashActionsFromSkills(skills);
 
-    expect(actions.map((action) => action.label)).toEqual([
-      "Daily Followup",
-      "mcp-skill",
-    ]);
+    expect(actions.map((action) => action.label)).toEqual(["Daily Followup", "mcp-skill"]);
     expect(actions.every((action) => !action.disabled)).toBe(true);
     expect(filterSlashActions(actions, "powerpoint")).toHaveLength(0);
     expect(filterSlashActions(actions, "mcp provided")).toHaveLength(1);
-    expect(filterSlashActions(actions, "follow-up")[0]?.id).toContain(
-      "daily-followup",
-    );
+    expect(filterSlashActions(actions, "follow-up")[0]?.id).toContain("daily-followup");
   });
 
   it("clears only the trailing slash trigger and preserves natural text", () => {
     expect(clearSlashTriggerFromComposerValue("/daily")).toBe("");
     expect(clearSlashTriggerFromComposerValue("hello /daily")).toBe("hello ");
     expect(clearSlashTriggerFromComposerValue("hello /")).toBe("hello ");
-    expect(clearSlashTriggerFromComposerValue("hello/daily")).toBe(
-      "hello/daily",
-    );
+    expect(clearSlashTriggerFromComposerValue("hello/daily")).toBe("hello/daily");
   });
 
   it("places tokens based on where the slash trigger was typed", () => {
-    expect(
-      composerTokenPlacementForSlashTrigger(
-        slashTriggerFromComposerValue("/doc"),
-      ),
-    ).toBe("before");
-    expect(
-      composerTokenPlacementForSlashTrigger(
-        slashTriggerFromComposerValue("hello /doc"),
-      ),
-    ).toBe("after");
+    expect(composerTokenPlacementForSlashTrigger(slashTriggerFromComposerValue("/doc"))).toBe(
+      "before",
+    );
+    expect(composerTokenPlacementForSlashTrigger(slashTriggerFromComposerValue("hello /doc"))).toBe(
+      "after",
+    );
   });
 
   it("selects adjacent tokens for keyboard deletion", () => {
@@ -1027,11 +1029,7 @@ describe("Composer Slash Palette helpers", () => {
       { workspaceRootForRun: "/workspace" },
     );
 
-    expect(actions.map((action) => action.type)).toEqual([
-      "file",
-      "skill",
-      "skill",
-    ]);
+    expect(actions.map((action) => action.type)).toEqual(["file", "skill", "skill"]);
     expect(actions[0]?.label).toBe("brief.md");
   });
 
@@ -1090,16 +1088,10 @@ describe("composer lifecycle presentation", () => {
 
 describe("assistant answer footer contract", () => {
   it("shows final answer actions only for completed final answers", () => {
-    expect(
-      shouldShowAssistantAnswerFooter({ status: "done", isFinal: true }),
-    ).toBe(true);
+    expect(shouldShowAssistantAnswerFooter({ status: "done", isFinal: true })).toBe(true);
     expect(shouldShowAssistantAnswerFooter({ status: "done" })).toBe(false);
-    expect(
-      shouldShowAssistantAnswerFooter({ status: "active", isFinal: true }),
-    ).toBe(false);
-    expect(
-      shouldShowAssistantAnswerFooter({ status: "error", isFinal: true }),
-    ).toBe(false);
+    expect(shouldShowAssistantAnswerFooter({ status: "active", isFinal: true })).toBe(false);
+    expect(shouldShowAssistantAnswerFooter({ status: "error", isFinal: true })).toBe(false);
   });
 });
 
@@ -1370,12 +1362,8 @@ describe("AwakenComposerBar layout contract", () => {
   });
 
   it("limits slash palette height to the space above the composer", () => {
-    expect(
-      slashPaletteStyleForAnchor(160, 700)["--composer-bar-slash-max-height"],
-    ).toBe("146px");
-    expect(
-      slashPaletteStyleForAnchor(520, 700)["--composer-bar-slash-max-height"],
-    ).toBe("210px");
+    expect(slashPaletteStyleForAnchor(160, 700)["--composer-bar-slash-max-height"]).toBe("146px");
+    expect(slashPaletteStyleForAnchor(520, 700)["--composer-bar-slash-max-height"]).toBe("210px");
   });
 });
 
@@ -1467,10 +1455,7 @@ describe("context usage presentation", () => {
       { id: "conversation", label: "对话", estimatedTokens: 10_500 },
     ]);
     expect(
-      data?.contributions?.reduce(
-        (sum, contribution) => sum + contribution.estimatedTokens,
-        0,
-      ),
+      data?.contributions?.reduce((sum, contribution) => sum + contribution.estimatedTokens, 0),
     ).toBe(28_000);
   });
 
@@ -1493,9 +1478,7 @@ describe("context usage presentation", () => {
         warningThresholdTokens: 95_000,
         autoCompactThresholdTokens: 100_800,
         compactTargetTokens: 40_000,
-        contributions: [
-          { kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 },
-        ],
+        contributions: [{ kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 }],
         generatedAt: "2026-07-19T00:00:02Z",
       },
       latestModelUsage: {
@@ -1535,9 +1518,7 @@ describe("context usage presentation", () => {
         warningThresholdTokens: 95_000,
         autoCompactThresholdTokens: 100_800,
         compactTargetTokens: 40_000,
-        contributions: [
-          { kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 },
-        ],
+        contributions: [{ kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 }],
         generatedAt: "2026-07-19T00:00:02Z",
       },
       latestModelUsage: {
@@ -1577,9 +1558,7 @@ describe("context usage presentation", () => {
           warningThresholdTokens: 95_000,
           autoCompactThresholdTokens: 100_800,
           compactTargetTokens: 40_000,
-          contributions: [
-            { kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 },
-          ],
+          contributions: [{ kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 }],
           generatedAt: "2026-07-19T00:00:02Z",
         },
         latestModelUsage: {
@@ -1976,13 +1955,9 @@ describe("AwakenUserPromptBlock layout contract", () => {
 
     expect(html).toContain("execution-prompt-bubble-token");
     expect(html).toContain("deep-research");
-    expect(html.indexOf("你好，你看到这个 skill 不?")).toBeLessThan(
-      html.indexOf("deep-research"),
-    );
+    expect(html.indexOf("你好，你看到这个 skill 不?")).toBeLessThan(html.indexOf("deep-research"));
     expect(html.indexOf("deep-research")).toBeLessThan(html.indexOf("请继续"));
-    const promptStart = html.indexOf(
-      '<p class="execution-prompt-bubble-text">',
-    );
+    const promptStart = html.indexOf('<p class="execution-prompt-bubble-text">');
     const promptEnd = html.indexOf("</p>", promptStart);
     const inlinePrompt = html.slice(promptStart, promptEnd);
     expect(inlinePrompt).toContain("你好，你看到这个 skill 不?");
@@ -2006,9 +1981,7 @@ describe("AwakenUserPromptBlock layout contract", () => {
       }),
     );
 
-    expect(html.indexOf("deep-research")).toBeLessThan(
-      html.indexOf("你好，你看到这个 skill 不?"),
-    );
+    expect(html.indexOf("deep-research")).toBeLessThan(html.indexOf("你好，你看到这个 skill 不?"));
   });
 
   it("allows the expanded state to be controlled by the parent renderer", () => {
@@ -2094,9 +2067,7 @@ describe("AwakenUserPromptBlock layout contract", () => {
         expanded: true,
       }),
     );
-    expect(expandedHtml).not.toContain(
-      "execution-prompt-bubble-attachment-more",
-    );
+    expect(expandedHtml).not.toContain("execution-prompt-bubble-attachment-more");
     expect(expandedHtml).toContain("file-5.xlsx");
   });
 
@@ -2141,14 +2112,65 @@ describe("prompt token text projection", () => {
       },
     ];
 
-    expect(promptTextAfterTokenLeadingText("请使用  这个技能写", tokens)).toBe(
-      " 这个技能写",
-    );
+    expect(promptTextAfterTokenLeadingText("请使用  这个技能写", tokens)).toBe(" 这个技能写");
     expect(promptTextAfterTokenLeadingText("请使用", tokens)).toBe("");
   });
 });
 
 describe("structured Composer draft reconciliation", () => {
+  it("inserts a hidden-path token at the current inline text position", () => {
+    const token = {
+      id: "file:brief",
+      type: "file" as const,
+      label: "brief.md",
+      payload: { path: "/workspace/docs/brief.md" },
+    };
+    const result = insertComposerTokenAtOffset({
+      tokens: [],
+      placements: {},
+      leadingTexts: {},
+      value: "请分析然后总结",
+      offset: 3,
+      token,
+    });
+
+    expect(result).toEqual({
+      tokens: [{ ...token, leadingText: "请分析" }],
+      placements: { "file:brief": "after" },
+      leadingTexts: { "file:brief": "请分析" },
+      value: "然后总结",
+      focusOffset: 4,
+    });
+    expect(composerStructuredDraftLength(result.tokens, result.leadingTexts, result.value)).toBe(8);
+  });
+
+  it("preserves existing Skill token order when inserting a file token between text segments", () => {
+    const skillToken = {
+      id: "skill:docx:user",
+      type: "skill" as const,
+      label: "docx",
+      leadingText: "用 ",
+    };
+    const fileToken = {
+      id: "file:brief",
+      type: "file" as const,
+      label: "brief.md",
+      payload: { path: "/workspace/brief.md" },
+    };
+    const result = insertComposerTokenAtOffset({
+      tokens: [skillToken],
+      placements: { [skillToken.id]: "after" },
+      leadingTexts: { [skillToken.id]: "用 " },
+      value: "处理材料",
+      offset: 5,
+      token: fileToken,
+    });
+
+    expect(result.tokens).toEqual([skillToken, { ...fileToken, leadingText: "处理" }]);
+    expect(result.value).toBe("材料");
+    expect(result.focusOffset).toBe(6);
+  });
+
   it("maps editable prefix segments and tail text back to durable Desktop state", () => {
     const tokens = [
       {
@@ -2273,9 +2295,7 @@ describe("prompt attachment view models", () => {
       detail: "PDF · 24 KB",
       extension: "PDF",
     });
-    expect(views[0]?.tooltip).toContain(
-      "路径: .../nolangrant/Desktop/specification.pdf",
-    );
+    expect(views[0]?.tooltip).toContain("路径: .../nolangrant/Desktop/specification.pdf");
   });
 });
 
@@ -2287,12 +2307,9 @@ describe("project workspace helpers", () => {
     [{ status: "succeeded", phase: "completed" }, "succeeded"],
     [{ status: "failed", phase: "failed" }, "failed"],
     [{ status: "blocked", phase: "cancelled" }, "failed"],
-  ] as const)(
-    "classifies durable project operation %o as %s",
-    (operation, expected) => {
-      expect(projectOperationReconciliationState(operation)).toBe(expected);
-    },
-  );
+  ] as const)("classifies durable project operation %o as %s", (operation, expected) => {
+    expect(projectOperationReconciliationState(operation)).toBe(expected);
+  });
 
   it("reconciles a folder trash operation by whether the folder is still attached", () => {
     const stillAttached = {
@@ -2311,30 +2328,12 @@ describe("project workspace helpers", () => {
         "/tmp/secondary",
       ),
     ).toBe(false);
-    expect(
-      canReconcileTrackedTrashOperation(
-        "failed",
-        stillAttached,
-        "/tmp/secondary",
-      ),
-    ).toBe(true);
-    expect(
-      canReconcileTrackedTrashOperation("failed", detached, "/tmp/secondary"),
-    ).toBe(false);
-    expect(
-      canReconcileTrackedTrashOperation(
-        "succeeded",
-        stillAttached,
-        "/tmp/secondary",
-      ),
-    ).toBe(false);
-    expect(
-      canReconcileTrackedTrashOperation(
-        "succeeded",
-        detached,
-        "/tmp/secondary",
-      ),
-    ).toBe(true);
+    expect(canReconcileTrackedTrashOperation("failed", stillAttached, "/tmp/secondary")).toBe(true);
+    expect(canReconcileTrackedTrashOperation("failed", detached, "/tmp/secondary")).toBe(false);
+    expect(canReconcileTrackedTrashOperation("succeeded", stillAttached, "/tmp/secondary")).toBe(
+      false,
+    );
+    expect(canReconcileTrackedTrashOperation("succeeded", detached, "/tmp/secondary")).toBe(true);
   });
 
   it("persists valid trash trackers, removes malformed entries, and replaces duplicates", () => {
@@ -2347,15 +2346,11 @@ describe("project workspace helpers", () => {
       wasExpanded: true,
     };
     expect(
-      parseTrackedTrashOperations(
-        JSON.stringify([tracked, { operationId: "broken" }, tracked]),
-      ),
+      parseTrackedTrashOperations(JSON.stringify([tracked, { operationId: "broken" }, tracked])),
     ).toEqual([tracked]);
     expect(parseTrackedTrashOperations("not-json")).toEqual([]);
     expect(
-      parseTrackedTrashOperations(
-        JSON.stringify([{ ...tracked, folderPath: undefined }]),
-      ),
+      parseTrackedTrashOperations(JSON.stringify([{ ...tracked, folderPath: undefined }])),
     ).toEqual([]);
     expect(
       upsertTrackedTrashOperation([tracked], {
@@ -2373,9 +2368,7 @@ describe("project workspace helpers", () => {
   });
 
   it("normalizes workspace paths and labels them by folder name", () => {
-    expect(normalizeWorkspacePath("/Users/nolangrant/Awaken/")).toBe(
-      "/Users/nolangrant/Awaken",
-    );
+    expect(normalizeWorkspacePath("/Users/nolangrant/Awaken/")).toBe("/Users/nolangrant/Awaken");
     expect(workspaceLabelForPath("/Users/nolangrant/Awaken/")).toBe("Awaken");
   });
 
@@ -2391,16 +2384,10 @@ describe("project workspace helpers", () => {
       ),
     ).toBe("project_123");
     expect(
-      projectIdForThread(
-        { threadId: "thread-1", workspaceRoot: "/tmp/demo" },
-        "/tmp/default",
-      ),
+      projectIdForThread({ threadId: "thread-1", workspaceRoot: "/tmp/demo" }, "/tmp/default"),
     ).toBeUndefined();
     expect(
-      projectIdForThread(
-        { threadId: "thread-1", workspaceRoot: "/tmp/default" },
-        "/tmp/default",
-      ),
+      projectIdForThread({ threadId: "thread-1", workspaceRoot: "/tmp/default" }, "/tmp/default"),
     ).toBe(DEFAULT_WORKSPACE_PROJECT_ID);
   });
 
@@ -2557,12 +2544,10 @@ describe("App workbench presentation", () => {
       { id: "context", label: "上下文窗口", value: "61k / 246k" },
     ];
 
-    expect(
-      composerMetaItemsForFileWorkspaceSurface(metaItems, true),
-    ).toEqual([{ id: "model", label: "kimi-for-coding" }]);
-    expect(
-      composerMetaItemsForFileWorkspaceSurface(metaItems, false),
-    ).toBe(metaItems);
+    expect(composerMetaItemsForFileWorkspaceSurface(metaItems, true)).toEqual([
+      { id: "model", label: "kimi-for-coding" },
+    ]);
+    expect(composerMetaItemsForFileWorkspaceSurface(metaItems, false)).toBe(metaItems);
   });
 
   it("renders idle as a blank execution stage with the light shell", () => {
@@ -2749,10 +2734,7 @@ describe("App workbench presentation", () => {
   });
 
   it("adapts turn marker density to the available rail height", () => {
-    const eightTurns = Array.from(
-      { length: 8 },
-      (_, index) => `turn-${index + 1}`,
-    );
+    const eightTurns = Array.from({ length: 8 }, (_, index) => `turn-${index + 1}`);
     expect(
       turnMarkerRailDisplay({
         showCenterComposer: false,
@@ -2765,10 +2747,7 @@ describe("App workbench presentation", () => {
       items: eightTurns.map((id, index) => ({ id, index })),
     });
 
-    const twentyTurns = Array.from(
-      { length: 20 },
-      (_, index) => `turn-${index + 1}`,
-    );
+    const twentyTurns = Array.from({ length: 20 }, (_, index) => `turn-${index + 1}`);
     const compactDisplay = turnMarkerRailDisplay({
       showCenterComposer: false,
       turnIds: twentyTurns,
@@ -2780,10 +2759,7 @@ describe("App workbench presentation", () => {
   });
 
   it("samples dense turn markers around the active turn without dropping endpoints", () => {
-    const fortyTurns = Array.from(
-      { length: 40 },
-      (_, index) => `turn-${index + 1}`,
-    );
+    const fortyTurns = Array.from({ length: 40 }, (_, index) => `turn-${index + 1}`);
     const display = turnMarkerRailDisplay({
       showCenterComposer: false,
       turnIds: fortyTurns,
@@ -2795,13 +2771,7 @@ describe("App workbench presentation", () => {
     expect(display.mode).toBe("summary");
     expect(display.items.length).toBeLessThanOrEqual(8);
     expect(display.items.map((item) => item.id)).toEqual(
-      expect.arrayContaining([
-        "turn-1",
-        "turn-19",
-        "turn-20",
-        "turn-21",
-        "turn-40",
-      ]),
+      expect.arrayContaining(["turn-1", "turn-19", "turn-20", "turn-21", "turn-40"]),
     );
   });
 
@@ -3389,12 +3359,8 @@ describe("App workbench presentation", () => {
         isAtScrollBottom: false,
       }),
     ).toBe(false);
-    expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: 12 })).toBe(
-      true,
-    );
-    expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: -12 })).toBe(
-      false,
-    );
+    expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: 12 })).toBe(true);
+    expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: -12 })).toBe(false);
     expect(
       shouldPauseLatestOutputFollowForTouchMove({
         startY: 100,

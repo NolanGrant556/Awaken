@@ -7,15 +7,8 @@ import type {
   ReactNode,
   Ref,
 } from "react";
-import {
-  Check,
-  ChevronDown,
-  FileText,
-  Folder,
-  FolderPlus,
-  X,
-} from "lucide-react";
-import { AwakenComposerInput } from "../AwakenComposerInput";
+import { Check, ChevronDown, FileText, Folder, FolderPlus, X } from "lucide-react";
+import { AwakenComposerInput, type ComposerInputSelection } from "../AwakenComposerInput";
 import { AwakenContextButton } from "../AwakenContextButton";
 import { AwakenDropdown } from "../AwakenDropdown";
 import { AwakenSendButton } from "../AwakenSendButton";
@@ -105,6 +98,7 @@ export type ComposerBarToken = {
 };
 
 export type ComposerBarStructuredInputValue = ComposerInlineStructuredValue;
+export type ComposerBarInputSelection = ComposerInputSelection;
 
 export type ComposerBarSlashAction = {
   id: string;
@@ -171,10 +165,7 @@ export function slashPreviewStyleForAnchor(
   if (left + width > viewport.width - margin) {
     left = rect.left - width - gap;
   }
-  left = Math.min(
-    Math.max(margin, left),
-    Math.max(margin, viewport.width - width - margin),
-  );
+  left = Math.min(Math.max(margin, left), Math.max(margin, viewport.width - width - margin));
 
   let top = rect.top - 2;
   if (top + heightEstimate > viewport.height - margin) {
@@ -195,10 +186,7 @@ export function slashPaletteStyleForAnchor(
 ): SlashPaletteStyle {
   const margin = 8;
   const gap = 6;
-  const maxHeight = Math.max(
-    88,
-    Math.min(210, Math.floor(anchorTop - margin - gap)),
-  );
+  const maxHeight = Math.max(88, Math.min(210, Math.floor(anchorTop - margin - gap)));
 
   return { "--composer-bar-slash-max-height": `${maxHeight}px` };
 }
@@ -220,6 +208,8 @@ export type AwakenComposerBarProps = {
   metaItems?: ComposerBarMetaItem[];
   projectPicker?: ComposerBarProjectPicker;
   focusRequest?: number;
+  focusOffset?: number;
+  onInputSelectionChange?: (selection: ComposerBarInputSelection) => void;
   submitDisabled?: boolean;
   attachments?: ComposerBarAttachment[];
   attachmentWarning?: ReactNode;
@@ -249,6 +239,8 @@ export function AwakenComposerBar({
   metaItems = [],
   projectPicker,
   focusRequest = 0,
+  focusOffset,
+  onInputSelectionChange,
   submitDisabled = false,
   attachments = [],
   attachmentWarning,
@@ -261,21 +253,16 @@ export function AwakenComposerBar({
   const canSubmit = submitMode === "stop" || (!disabled && !submitDisabled);
   const [openMetaMenuId, setOpenMetaMenuId] = useState<string | null>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
-  const [slashPreviewState, setSlashPreviewState] =
-    useState<SlashPreviewState | null>(null);
-  const [slashPaletteStyle, setSlashPaletteStyle] =
-    useState<SlashPaletteStyle>({});
+  const [slashPreviewState, setSlashPreviewState] = useState<SlashPreviewState | null>(null);
+  const [slashPaletteStyle, setSlashPaletteStyle] = useState<SlashPaletteStyle>({});
   const modelMetaRef = useRef<HTMLDivElement | null>(null);
   const inputWrapRef = useRef<HTMLDivElement | null>(null);
   const slashPaletteRef = useRef<HTMLDivElement | null>(null);
   const modelMetaItem = metaItems.find((item) => item.id === "model");
-  const selectedProjectOption = projectPicker?.options.find(
-    (option) => option.selected,
-  );
+  const selectedProjectOption = projectPicker?.options.find((option) => option.selected);
   const showProjectPicker = variant === "center" && Boolean(projectPicker);
   const topMetaItems: ComposerBarMetaItem[] = [];
-  const bottomMetaItems =
-    variant === "dock" ? metaItems.filter((item) => item.id !== "model") : [];
+  const bottomMetaItems = variant === "dock" ? metaItems.filter((item) => item.id !== "model") : [];
   const slashActions = slashPalette?.actions ?? [];
   const slashPreviewAction = slashActions.find(
     (action) => action.id === slashPreviewState?.actionId,
@@ -346,17 +333,14 @@ export function AwakenComposerBar({
   }, [slashPalette?.open, slashActions.length, value, tokens.length]);
 
   function renderMetaItem(item: ComposerBarMetaItem) {
-    const hasProgress =
-      typeof item.progress === "number" && Number.isFinite(item.progress);
+    const hasProgress = typeof item.progress === "number" && Number.isFinite(item.progress);
     const progressPercent = hasProgress
       ? Math.max(0, Math.min(100, Math.round((item.progress ?? 0) * 100)))
       : undefined;
 
     const content = (
       <>
-        {item.icon ? (
-          <span className="composer-bar-meta-icon">{item.icon}</span>
-        ) : null}
+        {item.icon ? <span className="composer-bar-meta-icon">{item.icon}</span> : null}
         <span className="composer-bar-meta-label">{item.label}</span>
         {hasProgress ? (
           <span
@@ -378,9 +362,7 @@ export function AwakenComposerBar({
             />
           </span>
         ) : null}
-        {item.value ? (
-          <span className="composer-bar-meta-value">{item.value}</span>
-        ) : null}
+        {item.value ? <span className="composer-bar-meta-value">{item.value}</span> : null}
       </>
     );
     const className = `composer-bar-meta-item${
@@ -424,9 +406,7 @@ export function AwakenComposerBar({
     const isInteractive = !item.disabled && (hasMenu || item.onClick);
     const triggerContent = (
       <>
-        {item.icon ? (
-          <span className="composer-bar-model-trigger-icon">{item.icon}</span>
-        ) : null}
+        {item.icon ? <span className="composer-bar-model-trigger-icon">{item.icon}</span> : null}
         <span className="composer-bar-model-trigger-label">{item.label}</span>
         {hasMenu ? (
           <ChevronDown
@@ -451,9 +431,7 @@ export function AwakenComposerBar({
             aria-expanded={hasMenu ? isMenuOpen : undefined}
             onClick={() => {
               if (hasMenu) {
-                setOpenMetaMenuId((current) =>
-                  current === item.id ? null : item.id,
-                );
+                setOpenMetaMenuId((current) => (current === item.id ? null : item.id));
                 return;
               }
               item.onClick?.();
@@ -467,11 +445,7 @@ export function AwakenComposerBar({
           </span>
         )}
         {hasMenu && isMenuOpen ? (
-          <div
-            className="composer-bar-model-menu"
-            role="listbox"
-            aria-label="选择模型"
-          >
+          <div className="composer-bar-model-menu" role="listbox" aria-label="选择模型">
             <div className="composer-bar-model-menu-scroll">
               {item.menuItems?.map((option) => (
                 <button
@@ -489,13 +463,9 @@ export function AwakenComposerBar({
                   }}
                 >
                   {option.icon ? (
-                    <span className="composer-bar-model-option-icon">
-                      {option.icon}
-                    </span>
+                    <span className="composer-bar-model-option-icon">{option.icon}</span>
                   ) : null}
-                  <span className="composer-bar-model-option-label">
-                    {option.label}
-                  </span>
+                  <span className="composer-bar-model-option-label">{option.label}</span>
                   {option.selected ? (
                     <Check
                       className="composer-bar-model-option-check"
@@ -535,8 +505,7 @@ export function AwakenComposerBar({
       return null;
     }
 
-    const triggerLabel =
-      selectedProjectOption?.label ?? projectPicker.placeholder ?? "选择项目";
+    const triggerLabel = selectedProjectOption?.label ?? projectPicker.placeholder ?? "选择项目";
     const pickerLabel = projectPicker.label ?? "选择项目";
     const selectedProjectIcon =
       selectedProjectOption?.icon === null
@@ -545,9 +514,7 @@ export function AwakenComposerBar({
             <Folder size={17} strokeWidth={1.85} aria-hidden="true" />
           ));
     const showClearAction = Boolean(
-      projectPicker.clearAction &&
-        selectedProjectOption &&
-        selectedProjectIcon !== null,
+      projectPicker.clearAction && selectedProjectOption && selectedProjectIcon !== null,
     );
 
     return (
@@ -560,9 +527,7 @@ export function AwakenComposerBar({
           trigger={
             <div
               className={`composer-bar-project-trigger-group${
-                showClearAction
-                  ? " composer-bar-project-trigger-group-clearable"
-                  : ""
+                showClearAction ? " composer-bar-project-trigger-group-clearable" : ""
               }`}
             >
               {showClearAction ? (
@@ -571,9 +536,7 @@ export function AwakenComposerBar({
                   className="composer-bar-project-clear"
                   aria-label={`${projectPicker.clearAction?.label}：${triggerLabel}`}
                   title={projectPicker.clearAction?.label}
-                  disabled={
-                    projectPicker.disabled || projectPicker.clearAction?.disabled
-                  }
+                  disabled={projectPicker.disabled || projectPicker.clearAction?.disabled}
                   onClick={(event) => {
                     event.stopPropagation();
                     setProjectMenuOpen(false);
@@ -586,9 +549,7 @@ export function AwakenComposerBar({
               <button
                 type="button"
                 className={`composer-bar-project-trigger${
-                  selectedProjectIcon === null
-                    ? " composer-bar-project-trigger-no-icon"
-                    : ""
+                  selectedProjectIcon === null ? " composer-bar-project-trigger-no-icon" : ""
                 }`}
                 aria-label={`${pickerLabel}，当前：${triggerLabel}`}
                 aria-haspopup="menu"
@@ -596,13 +557,9 @@ export function AwakenComposerBar({
                 disabled={projectPicker.disabled}
               >
                 {selectedProjectIcon !== null ? (
-                  <span className="composer-bar-project-trigger-icon">
-                    {selectedProjectIcon}
-                  </span>
+                  <span className="composer-bar-project-trigger-icon">{selectedProjectIcon}</span>
                 ) : null}
-                <span className="composer-bar-project-trigger-label">
-                  {triggerLabel}
-                </span>
+                <span className="composer-bar-project-trigger-label">{triggerLabel}</span>
                 <ChevronDown
                   className="composer-bar-project-trigger-chevron"
                   size={14}
@@ -621,27 +578,15 @@ export function AwakenComposerBar({
                   const optionIcon =
                     option.icon === null
                       ? null
-                      : (option.icon ?? (
-                          <Folder
-                            size={16}
-                            strokeWidth={1.8}
-                            aria-hidden="true"
-                          />
-                        ));
+                      : (option.icon ?? <Folder size={16} strokeWidth={1.8} aria-hidden="true" />);
 
                   return (
                     <button
                       key={option.id}
                       type="button"
                       className={`composer-bar-project-option${
-                        option.selected
-                          ? " composer-bar-project-option-selected"
-                          : ""
-                      }${
-                        optionIcon === null
-                          ? " composer-bar-project-option-no-icon"
-                          : ""
-                      }`}
+                        option.selected ? " composer-bar-project-option-selected" : ""
+                      }${optionIcon === null ? " composer-bar-project-option-no-icon" : ""}`}
                       role="menuitemradio"
                       aria-checked={option.selected ?? false}
                       disabled={option.disabled}
@@ -651,9 +596,7 @@ export function AwakenComposerBar({
                       }}
                     >
                       {optionIcon}
-                      <span className="composer-bar-project-option-label">
-                        {option.label}
-                      </span>
+                      <span className="composer-bar-project-option-label">{option.label}</span>
                       {option.selected ? (
                         <Check size={15} strokeWidth={2} aria-hidden="true" />
                       ) : (
@@ -702,9 +645,9 @@ export function AwakenComposerBar({
 
   function renderAttachment(attachment: ComposerBarAttachment) {
     const label = attachment.label ?? attachment.alt;
-    const title = attachment.tooltip ?? [label, attachment.mimeType, attachment.detail]
-      .filter(Boolean)
-      .join("\n");
+    const title =
+      attachment.tooltip ??
+      [label, attachment.mimeType, attachment.detail].filter(Boolean).join("\n");
 
     return (
       <div
@@ -724,9 +667,7 @@ export function AwakenComposerBar({
             />
             <span className="composer-bar-file-card-name">{label}</span>
             {attachment.extension ? (
-              <span className="composer-bar-file-card-extension">
-                {attachment.extension}
-              </span>
+              <span className="composer-bar-file-card-extension">{attachment.extension}</span>
             ) : null}
           </div>
         )}
@@ -765,9 +706,7 @@ export function AwakenComposerBar({
       style: slashPreviewStyleForAnchor(
         { left: rect.left, right: rect.right, top: rect.top },
         { width: window.innerWidth, height: window.innerHeight },
-        paletteRect
-          ? { left: paletteRect.left, top: paletteRect.top }
-          : undefined,
+        paletteRect ? { left: paletteRect.left, top: paletteRect.top } : undefined,
       ),
     });
   }
@@ -777,11 +716,7 @@ export function AwakenComposerBar({
       return null;
     }
     return (
-      <div
-        className="composer-bar-slash-palette"
-        ref={slashPaletteRef}
-        style={slashPaletteStyle}
-      >
+      <div className="composer-bar-slash-palette" ref={slashPaletteRef} style={slashPaletteStyle}>
         <div
           className="composer-bar-slash-list"
           role="listbox"
@@ -793,10 +728,7 @@ export function AwakenComposerBar({
               加载中...
             </div>
           ) : slashPalette.error ? (
-            <div
-              className="composer-bar-slash-empty composer-bar-slash-empty-error"
-              role="status"
-            >
+            <div className="composer-bar-slash-empty composer-bar-slash-empty-error" role="status">
               {slashPalette.error}
             </div>
           ) : slashActions.length === 0 ? (
@@ -828,15 +760,10 @@ export function AwakenComposerBar({
                   }}
                 >
                   <span className="composer-bar-slash-option-main">
-                    <span
-                      className="composer-bar-slash-option-icon"
-                      aria-hidden="true"
-                    >
+                    <span className="composer-bar-slash-option-icon" aria-hidden="true">
                       {action.icon}
                     </span>
-                    <span className="composer-bar-slash-option-label">
-                      {action.label}
-                    </span>
+                    <span className="composer-bar-slash-option-label">{action.label}</span>
                   </span>
                 </button>
               );
@@ -855,9 +782,7 @@ export function AwakenComposerBar({
               </span>
             ) : null}
             {slashPreviewPath ? (
-              <span className="composer-bar-slash-preview-path">
-                {slashPreviewPath}
-              </span>
+              <span className="composer-bar-slash-preview-path">{slashPreviewPath}</span>
             ) : null}
           </div>
         ) : null}
@@ -879,17 +804,11 @@ export function AwakenComposerBar({
       <div className="composer-bar-surface">
         <div className="composer-bar-input-row">
           {attachments.length > 0 ? (
-            <div
-              className="composer-bar-attachments"
-              aria-label="附件"
-            >
+            <div className="composer-bar-attachments" aria-label="附件">
               {attachments.map((attachment) => renderAttachment(attachment))}
             </div>
           ) : null}
-          <div
-            className="composer-bar-input-wrap"
-            ref={inputWrapRef}
-          >
+          <div className="composer-bar-input-wrap" ref={inputWrapRef}>
             {renderSlashPalette()}
             {tokens.length > 0 ? (
               <AwakenComposerInlineInput
@@ -903,6 +822,8 @@ export function AwakenComposerBar({
                 placeholder={placeholder}
                 disabled={disabled}
                 focusRequest={focusRequest}
+                focusOffset={focusOffset}
+                onSelectionChange={onInputSelectionChange}
                 minRows={variant === "dock" ? 1 : 3}
                 maxRows={variant === "dock" ? 8 : 6}
                 onPasteImages={onPasteImages}
@@ -916,6 +837,8 @@ export function AwakenComposerBar({
                 placeholder={placeholder}
                 disabled={disabled}
                 focusRequest={focusRequest}
+                focusOffset={focusOffset}
+                onSelectionChange={onInputSelectionChange}
                 minRows={variant === "dock" ? 1 : 3}
                 maxRows={variant === "dock" ? 8 : 6}
                 onPasteImages={onPasteImages}

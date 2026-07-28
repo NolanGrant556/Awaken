@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RuntimeProject } from "../shared/runtime.js";
-import { listProjectDirectory, resolveProjectFile } from "./project-files.js";
+import { listProjectDirectory, resolveProjectEntry, resolveProjectFile } from "./project-files.js";
 
 const temporaryRoots: string[] = [];
 
@@ -28,9 +28,7 @@ function project(folderPath: string): RuntimeProject {
 
 afterEach(async () => {
   await Promise.all(
-    temporaryRoots.splice(0).map((root) =>
-      fs.rm(root, { recursive: true, force: true }),
-    ),
+    temporaryRoots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })),
   );
 });
 
@@ -69,9 +67,7 @@ describe("project file directory listing", () => {
     expect(result).toMatchObject({
       ok: true,
       relativePath: "src",
-      entries: [
-        { name: "index.ts", relativePath: "src/index.ts", kind: "file" },
-      ],
+      entries: [{ name: "index.ts", relativePath: "src/index.ts", kind: "file" }],
     });
   });
 
@@ -139,6 +135,64 @@ describe("project file directory listing", () => {
         projectId: "project-1",
         folderPath: root,
         relativePath: "secret-link.txt",
+      }),
+    ).resolves.toMatchObject({ ok: false });
+  });
+
+  it("resolves validated file and directory references for project entry actions", async () => {
+    const root = await temporaryRoot();
+    await fs.mkdir(path.join(root, "docs"));
+    await fs.writeFile(path.join(root, "docs", "brief.md"), "brief\n");
+
+    await expect(
+      resolveProjectEntry([project(root)], {
+        projectId: "project-1",
+        folderPath: root,
+        relativePath: "docs",
+        kind: "directory",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      entry: {
+        absolutePath: path.join(root, "docs"),
+        displayName: "docs",
+        kind: "directory",
+      },
+    });
+    await expect(
+      resolveProjectEntry([project(root)], {
+        projectId: "project-1",
+        folderPath: root,
+        relativePath: "docs/brief.md",
+        kind: "file",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      entry: { displayName: "brief.md", kind: "file" },
+    });
+  });
+
+  it("rejects entry action requests for mismatched kinds and symbolic links", async () => {
+    const root = await temporaryRoot();
+    const outside = await temporaryRoot();
+    await fs.mkdir(path.join(root, "docs"));
+    await fs.writeFile(path.join(outside, "secret.txt"), "secret\n");
+    await fs.symlink(path.join(outside, "secret.txt"), path.join(root, "secret-link.txt"));
+
+    await expect(
+      resolveProjectEntry([project(root)], {
+        projectId: "project-1",
+        folderPath: root,
+        relativePath: "docs",
+        kind: "file",
+      }),
+    ).resolves.toMatchObject({ ok: false, code: "ENTRY_TYPE_MISMATCH" });
+    await expect(
+      resolveProjectEntry([project(root)], {
+        projectId: "project-1",
+        folderPath: root,
+        relativePath: "secret-link.txt",
+        kind: "file",
       }),
     ).resolves.toMatchObject({ ok: false });
   });

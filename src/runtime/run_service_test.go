@@ -496,6 +496,89 @@ func TestEffectiveInputForComposerSkillTokensKeepsEmptyInput(t *testing.T) {
 	}
 }
 
+func TestEffectiveInputForComposerFileTokensRestoresHiddenPathsInline(t *testing.T) {
+	tokens := []ComposerToken{
+		{
+			ID:          "skill:docx:user",
+			Type:        "skill",
+			Label:       "docx",
+			LeadingText: "请用 ",
+			Payload:     ComposerTokenPayload{SkillID: "docx"},
+		},
+		{
+			ID:          "file:brief",
+			Type:        "file",
+			Label:       "brief.md",
+			LeadingText: " 分析 ",
+			Payload:     ComposerTokenPayload{Path: "/workspace/docs/brief.md"},
+		},
+	}
+
+	if got := effectiveInputForComposerTokens("请用  分析 后总结", tokens); got != "请用  分析 /workspace/docs/brief.md后总结" {
+		t.Fatalf("hidden path was not restored at its inline position: %q", got)
+	}
+	if got := effectiveInputForComposerTokens("", []ComposerToken{{
+		ID: "file:docs", Type: "file", Label: "docs", Payload: ComposerTokenPayload{Path: "/workspace/docs"},
+	}}); got != "/workspace/docs" {
+		t.Fatalf("token-only file reference changed: %q", got)
+	}
+}
+
+func TestValidateComposerFileTokensUsesCurrentReadableRootAndRealPath(t *testing.T) {
+	root := t.TempDir()
+	docs := filepath.Join(root, "docs")
+	if err := os.Mkdir(docs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	brief := filepath.Join(docs, "brief.md")
+	if err := os.WriteFile(brief, []byte("brief\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspace := WorkspaceConfig{ProjectID: "project-1", ReadableRoots: []string{root}}
+	fileToken := ComposerToken{
+		ID: "file:brief", Type: "file", Label: "brief.md",
+		Payload: ComposerTokenPayload{
+			Path: brief, EntryKind: "file", ProjectID: "project-1", FolderPath: root, RelativePath: "docs/brief.md",
+		},
+	}
+	directoryToken := ComposerToken{
+		ID: "file:docs", Type: "file", Label: "docs",
+		Payload: ComposerTokenPayload{
+			Path: docs, EntryKind: "directory", ProjectID: "project-1", FolderPath: root, RelativePath: "docs",
+		},
+	}
+	if err := validateComposerFileTokens([]ComposerToken{fileToken, directoryToken}, workspace); err != nil {
+		t.Fatalf("valid project entries were rejected: %v", err)
+	}
+
+	stale := fileToken
+	stale.Payload.ProjectID = "project-2"
+	if err := validateComposerFileTokens([]ComposerToken{stale}, workspace); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected stale project token to be rejected, got %v", err)
+	}
+	mismatchedKind := fileToken
+	mismatchedKind.Payload.EntryKind = "directory"
+	if err := validateComposerFileTokens([]ComposerToken{mismatchedKind}, workspace); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected mismatched entry kind to be rejected, got %v", err)
+	}
+
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	symlink := filepath.Join(root, "secret-link.txt")
+	if err := os.Symlink(secret, symlink); err != nil {
+		t.Fatal(err)
+	}
+	symlinkToken := fileToken
+	symlinkToken.Payload.Path = symlink
+	symlinkToken.Payload.RelativePath = "secret-link.txt"
+	if err := validateComposerFileTokens([]ComposerToken{symlinkToken}, workspace); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected symbolic link token to be rejected, got %v", err)
+	}
+}
+
 func TestComposerSkillTokenOnlyRequestIsValidAndLabelsThreadFromToken(t *testing.T) {
 	token := ComposerToken{
 		ID:    "skill:pptx:user",

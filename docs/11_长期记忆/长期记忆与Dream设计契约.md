@@ -6,7 +6,7 @@
 
 **当前支持：** Core 已实现 user/project Markdown topic、`MEMORY.md` 索引、受控 `memory` 工具、host 注入来源 identity、revision/敏感内容/重复门禁、请求构建期索引注入、复用当前 profile 的凭据/endpoint 并按 provider 辅助模型策略执行非阻塞 selector、最多 5 条有界主题召回和 compact 后预算复位。主动记忆默认开启，由主模型在正常任务推理中决定是否调用工具。Memory 调用与 recall 进入 SemanticJournal/AG-UI 前转为无正文 receipt；Workbench 已投影 recall/mutation 紧凑回执。Desktop Settings 使用覆盖内容窗口的全窗口左右分栏，并已提供四个开关、按用户/项目集合浏览主题、正文与来源查看、revision 删除、手动 Dream 和取消；记忆分区由 `MemorySettingsPanel` 通过 `AwakenMemoryLightFlowLayout` 组合纯装饰 `AwakenMemoryLightFlow` 与现有 `AwakenMemorySettings`，Gallery 与 Desktop 共用该 UI 布局且不增加设置项、业务状态或 Memory 请求。Settings 不提供搜索或筛选入口，不影响 Core 内部的 selector、受控 `memory` search 或召回能力。Auto Dream 已接入持久化活动计数、24 小时、5 分钟 idle、active-run gate 和新 run 取消；不提供人工创建、编辑或 supersede。Dream task/report 已原子持久化，其独立 authority 同时保存 `memory_maintenance` request/usage；Core 重启会把未完成 task 和没有终态 usage 的请求恢复为 `interrupted`/`usage_unknown`。Desktop 对 live 终态回执保存纯展示用的 `taskId -> threadId` 绑定，任务列表只把已绑定回执重放到原线程，无绑定的历史任务只在 Settings 中可见；scope lock 定期 heartbeat，批量 Apply 使用 staged transaction、活动 marker、失败关闭读取和 crash rollback，主题与 `MEMORY.md` 不会以半套状态参与召回。
 
-**当前不支持：** 当前产品尚无正式 subagent/child Agent 能力，因此不实现 child recall 继承。待 subagent 域建立正式 parent/child identity、workspace 与权限边界后，本域必须实现 5.3 的 `MemoryRecallSnapshot` 继承门禁，不能让 child 自行扩大 user/project scope。
+**当前不支持：** 原生 Subagent 已建立正式 parent/child identity、只读 workspace 与权限边界，但尚未实现 child recall 继承。本域仍必须实现 5.3 的 `MemoryRecallSnapshot` 继承门禁，不能让 child 自行扩大 user/project scope。
 
 **当前验收边界：** Settings 的集合浏览/正文查看/详情清空、开关持久化和手动 Dream，以及未来持续称呼指令触发真实 selector、search/update、completion receipt 与简短收尾，已完成当前 macOS Desktop 验收；Workbench 回执、Dream 重启恢复、heartbeat 与 crash recovery 已有自动化，真实 Desktop 中断恢复和跨平台基线仍待验收。
 
@@ -161,7 +161,7 @@ source_record_id: record_...
 
 ## 5. 召回合同
 
-5.1 与 5.2 的请求期索引、递归候选扫描、主模型 selector、最近成功工具名、非阻塞预取、allowlist、自动注入和 session accounting 当前已接入主 run；compact 成功会复位召回预算。5.3 是正式 subagent 能力落地后的强制后置项，当前没有 child runtime，因此尚未实现；当前也尚未把显式 `memory get/update` 接触记录并入自动召回去重集合。
+5.1 与 5.2 的请求期索引、递归候选扫描、主模型 selector、最近成功工具名、非阻塞预取、allowlist、自动注入和 session accounting 当前已接入主 run；compact 成功会复位召回预算。5.3 是原生 Subagent 的强制后置项；当前已有 child runtime，但尚未接入父 recall snapshot。当前也尚未把显式 `memory get/update` 接触记录并入自动召回去重集合。
 
 ### 5.1 常驻索引
 
@@ -195,7 +195,7 @@ run 建立时读取允许 scope 的 `MEMORY.md`，按合计预算形成 host-own
 
 ### 5.3 Run 与 child Agent
 
-本节当前不运行。正式 subagent 完成后，subagent 域必须先提供不可伪造的 parent/child identity、父 `MemoryRecallSnapshot`、canonical workspace 和权限快照，本域再按以下约束接入；不得以“child 自己再跑一次 selector”代替继承。
+本节当前不运行。Subagent 域已提供不可伪造的 parent/child identity、canonical workspace 和权限快照，但尚未提供父 `MemoryRecallSnapshot`；补齐后本域再按以下约束接入，不得以“child 自己再跑一次 selector”代替继承。
 
 - 第一次成功召回形成 run-scoped `MemoryRecallSnapshot`；同一 run 不因磁盘变化替换已注入内容；
 - run 内后续 turn 可追加新的 recall receipts，但不得无界重复同一文件；

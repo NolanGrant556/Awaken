@@ -22,6 +22,7 @@ import (
 	"awaken/src/desktopdata"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
+	"awaken/src/subagentruntime"
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
 	bashtool "awaken/src/tools/bash"
@@ -746,6 +747,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			if err := s.bindAgentRecorder(agent, session, threadID, runID, req.Client.SessionID, threadSnapshot.Label); err != nil {
 				return rollbackStart(err, false)
 			}
+			s.bindSubagentController(ctx, agent, session)
 			if err := s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel); err != nil {
 				return rollbackStart(err, true)
 			}
@@ -835,6 +837,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if err := s.bindAgentRecorder(agent, session, threadID, runID, req.Client.SessionID, threadSnapshot.Label); err != nil {
 		return rollbackStart(err, false)
 	}
+	s.bindSubagentController(ctx, agent, session)
 	createThreadErr := s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel)
 	if createThreadErr != nil {
 		return rollbackStart(createThreadErr, true)
@@ -968,6 +971,50 @@ func (s *RunService) bindAgentRecorder(agent *agentcore.Agent, session *Session,
 		session.SetSemanticRecorder(recorder)
 	}
 	return nil
+}
+
+func (s *RunService) bindSubagentController(ctx context.Context, agent *agentcore.Agent, session *Session) {
+	if agent == nil || session == nil {
+		return
+	}
+	controller := subagentruntime.NewManager(ctx, subagentruntime.Config{
+		MaxTasks: 8, MaxConcurrent: 4,
+		Starter: func(childCtx context.Context, request subagentruntime.StartRequest) (string, error) {
+			return agent.RunNativeSubagent(childCtx, request, sessionEventSink{session: session})
+		},
+		Persist: func(persistCtx context.Context, event subagentruntime.PersistEvent) error {
+			recorder := session.semanticRecorderSnapshot()
+			if recorder == nil {
+				return agentcore.ErrPersistenceUnavailable
+			}
+			snapshot := event.Snapshot
+			record := agentcore.NewSemanticRecord(
+				agentcore.SemanticKind(event.Kind), snapshot.ThreadID, snapshot.RunID,
+				snapshot.TurnID, snapshot.ParentToolCallID, "", subagentSemanticPayload(snapshot),
+			)
+			if err := recorder.Append(persistCtx, record); err != nil {
+				return err
+			}
+			return recorder.Flush(persistCtx)
+		},
+	})
+	session.SetSubagentController(controller)
+	agent.SetSubagentController(controller)
+}
+
+func subagentSemanticPayload(snapshot subagentruntime.TaskSnapshot) map[string]any {
+	return map[string]any{
+		"task_id": snapshot.TaskID, "agent_id": snapshot.AgentID,
+		"parent_agent_id": snapshot.ParentAgentID, "parent_tool_call_id": snapshot.ParentToolCallID,
+		"thread_id": snapshot.ThreadID, "run_id": snapshot.RunID, "turn_id": snapshot.TurnID,
+		"description": snapshot.Description, "agent_type": snapshot.AgentType,
+		"workspace_mode": snapshot.WorkspaceMode, "model_profile_id": snapshot.ModelProfileID,
+		"status": string(snapshot.Status), "current_activity": snapshot.CurrentActivity,
+		"tool_use_count": snapshot.ToolUseCount, "estimated_tokens": snapshot.EstimatedTokens,
+		"result_preview": snapshot.ResultPreview, "error_code": snapshot.ErrorCode,
+		"error_message": snapshot.ErrorMessage, "side_effect_state": snapshot.SideEffectState,
+		"created_at": snapshot.CreatedAt, "started_at": snapshot.StartedAt, "finished_at": snapshot.FinishedAt,
+	}
 }
 
 func (s *RunService) createAgent(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
@@ -1571,6 +1618,42 @@ func (s *RunService) CancelRun(runID string) (Run, error) {
 	run := session.RequestCancel()
 	bashtool.CancelThreadTasks(run.ThreadID)
 	return run, nil
+}
+
+func (s *RunService) ListSubagents(runID string) ([]subagentruntime.TaskSnapshot, error) {
+	session, err := s.session(runID)
+	if err != nil {
+		return nil, err
+	}
+	controller := session.SubagentController()
+	if controller == nil {
+		return []subagentruntime.TaskSnapshot{}, nil
+	}
+	return controller.List(), nil
+}
+
+func (s *RunService) GetSubagent(runID, taskID string) (subagentruntime.TaskSnapshot, error) {
+	session, err := s.session(runID)
+	if err != nil {
+		return subagentruntime.TaskSnapshot{}, err
+	}
+	controller := session.SubagentController()
+	if controller == nil {
+		return subagentruntime.TaskSnapshot{}, &subagentruntime.Error{Code: subagentruntime.ErrorNotFound, Message: "subagent task not found"}
+	}
+	return controller.Status(taskID)
+}
+
+func (s *RunService) CancelSubagent(ctx context.Context, runID, taskID, reason string) (subagentruntime.TaskSnapshot, error) {
+	session, err := s.session(runID)
+	if err != nil {
+		return subagentruntime.TaskSnapshot{}, err
+	}
+	controller := session.SubagentController()
+	if controller == nil {
+		return subagentruntime.TaskSnapshot{}, &subagentruntime.Error{Code: subagentruntime.ErrorNotFound, Message: "subagent task not found"}
+	}
+	return controller.Cancel(ctx, taskID, reason)
 }
 
 func (s *RunService) ResolveUserQuestion(runID, questionID, answer string) error {

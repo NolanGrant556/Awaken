@@ -13,6 +13,7 @@ import (
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 	"awaken/src/skills"
+	"awaken/src/subagentruntime"
 )
 
 type runHandlers struct {
@@ -407,6 +408,67 @@ func (h runHandlers) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, run)
+}
+
+func (h runHandlers) handleListSubagents(w http.ResponseWriter, r *http.Request) {
+	tasks, err := h.runService.ListSubagents(r.PathValue("run_id"))
+	if err != nil {
+		h.writeSubagentError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
+}
+
+func (h runHandlers) handleGetSubagent(w http.ResponseWriter, r *http.Request) {
+	task, err := h.runService.GetSubagent(r.PathValue("run_id"), r.PathValue("task_id"))
+	if err != nil {
+		h.writeSubagentError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"task": task})
+}
+
+func (h runHandlers) handleMessageSubagent(w http.ResponseWriter, r *http.Request) {
+	writeErrorJSON(w, http.StatusConflict, subagentruntime.ErrorNotRunning, "subagent messages are not available in phase 1")
+}
+
+func (h runHandlers) handleCancelSubagent(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Reason string `json:"reason"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decodeJSON(r, &request); err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, subagentruntime.ErrorInvalidInput, err.Error())
+			return
+		}
+	}
+	task, err := h.runService.CancelSubagent(r.Context(), r.PathValue("run_id"), r.PathValue("task_id"), request.Reason)
+	if err != nil {
+		h.writeSubagentError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"task": task})
+}
+
+func (h runHandlers) writeSubagentError(w http.ResponseWriter, err error) {
+	if errors.Is(err, awruntime.ErrRunNotFound) {
+		writeErrorJSON(w, http.StatusNotFound, "RUN_NOT_FOUND", err.Error())
+		return
+	}
+	code := subagentruntime.ErrorCode(err)
+	switch code {
+	case subagentruntime.ErrorNotFound:
+		writeErrorJSON(w, http.StatusNotFound, code, err.Error())
+	case subagentruntime.ErrorInvalidInput:
+		writeErrorJSON(w, http.StatusBadRequest, code, err.Error())
+	case subagentruntime.ErrorNotRunning:
+		writeErrorJSON(w, http.StatusConflict, code, err.Error())
+	default:
+		if code == "" {
+			code = "SUBAGENT_CONTROL_FAILED"
+		}
+		writeErrorJSON(w, http.StatusInternalServerError, code, err.Error())
+	}
 }
 
 func (h runHandlers) handleAnswerUserQuestion(w http.ResponseWriter, r *http.Request) {

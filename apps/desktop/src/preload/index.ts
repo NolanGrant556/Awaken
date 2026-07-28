@@ -265,6 +265,12 @@ const bridge: AwakenBridge = {
     >,
   cancelRun: (runId: string) =>
     ipcRenderer.invoke("awaken:cancel-run", runId) as Promise<RuntimeRun>,
+  cancelSubagent: (runId: string, taskId: string, reason?: string) =>
+    ipcRenderer.invoke("awaken:cancel-subagent", {
+      runId,
+      taskId,
+      reason,
+    }) as Promise<void>,
   answerUserQuestion: (runId: string, questionId: string, answer: string) =>
     ipcRenderer.invoke("awaken:answer-user-question", {
       runId,

@@ -62,6 +62,9 @@ export type AguiEventType =
   | "AWAKEN_MEMORY_REJECTED"
   | "AWAKEN_CONTEXT_SNAPSHOT"
   | "AWAKEN_MODEL_USAGE"
+  | "AWAKEN_SUBAGENT_CHANGED"
+  | "AWAKEN_SUBAGENT_ACTIVITY"
+  | "AWAKEN_SUBAGENT_MESSAGE_QUEUED"
   | "AWAKEN_MEMORY_DREAM_COMPLETED"
   | "AWAKEN_MEMORY_DREAM_FAILED"
   | "AWAKEN_MEMORY_DREAM_CANCELLED"
@@ -353,6 +356,25 @@ export type AguiEvent = {
   interactionQrImageUrl?: string;
   interactionProvider?: string;
   interactionRecoveries?: string[];
+  subagentTaskId?: string;
+  subagentAgentId?: string;
+  subagentParentAgentId?: string;
+  subagentParentToolCallId?: string;
+  subagentAgentType?: "explore" | "review" | "general";
+  subagentDescription?: string;
+  subagentStatus?: "queued" | "running" | "completed" | "failed" | "cancelling" | "cancelled" | "interrupted";
+  subagentWorkspaceMode?: string;
+  subagentModelProfileId?: string;
+  subagentActivity?: string;
+  subagentToolUseCount?: number;
+  subagentEstimatedTokens?: number;
+  subagentResultPreview?: string;
+  subagentErrorCode?: string;
+  subagentErrorMessage?: string;
+  subagentSideEffectState?: string;
+  subagentCreatedAt?: string;
+  subagentStartedAt?: string;
+  subagentFinishedAt?: string;
   // ACP fields surfaced on AWAKEN_ACP_* events.
   acpSessionId?: string;
   acpRunnerId?: string;

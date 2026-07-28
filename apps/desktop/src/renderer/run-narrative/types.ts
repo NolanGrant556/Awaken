@@ -82,6 +82,16 @@ export type ACPDisplayStatus =
   | "closed"
   | "started";
 
+export type SubagentNarrativeTask = {
+  taskId: string;
+  description: string;
+  agentType: "explore" | "review" | "general";
+  status: "queued" | "running" | "completed" | "failed" | "cancelling" | "cancelled" | "interrupted";
+  activity?: string;
+  resultPreview?: string;
+  errorCode?: string;
+};
+
 export type RunNarrativeItem =
   | {
       kind: "prompt";
@@ -113,6 +123,11 @@ export type RunNarrativeItem =
       title: string;
       detail?: string;
       status: ACPDisplayStatus;
+    }
+  | {
+      kind: "subagentGroup";
+      id: string;
+      tasks: SubagentNarrativeTask[];
     }
   | {
       kind: "deliverables";

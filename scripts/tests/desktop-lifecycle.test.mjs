@@ -11,6 +11,11 @@ import {
   parsePsRows,
 } from "../desktop-lifecycle-common.mjs";
 import { cleanDesktopPackageOutputs } from "../clean-desktop-package.mjs";
+import {
+  officeCliBinaryName,
+  officeCliTarget,
+  readOfficeCliManifest,
+} from "../prepare-officecli.mjs";
 
 const tempRoots = [];
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -180,5 +185,56 @@ describe("desktop package staging", () => {
     assert.match(config, /resources\/bin\/\$\{platform\}-\$\{arch\}/);
     assert.doesNotMatch(config, /^\s*- from: resources\/bin\s*$/m);
     assert.match(config, /^\s*- from: resources\/system-skills\s*$/m);
+    assert.match(config, /^\s*- from: resources\/officecli-release\.json\s*$/m);
+    assert.match(config, /^\s*- from: resources\/licenses\s*$/m);
+  });
+
+  it("pins one verified OfficeCLI asset per supported product target", () => {
+    const manifest = readOfficeCliManifest();
+    assert.deepEqual(Object.keys(manifest.targets).sort(), [
+      "darwin-arm64",
+      "darwin-x64",
+      "win32-arm64",
+      "win32-x64",
+    ]);
+    for (const entry of Object.values(manifest.targets)) {
+      assert.match(entry.sha256, /^[a-f0-9]{64}$/);
+      assert.equal(typeof entry.asset, "string");
+    }
+    assert.equal(officeCliTarget("darwin", "arm64"), "darwin-arm64");
+    assert.equal(officeCliTarget("win32", "x64"), "win32-x64");
+    assert.equal(officeCliBinaryName("darwin-arm64"), "officecli");
+    assert.equal(officeCliBinaryName("win32-x64"), "officecli.exe");
+
+    const desktopPackage = JSON.parse(
+      readFileSync(join(repoRoot, "apps", "desktop", "package.json"), "utf8"),
+    );
+    assert.match(
+      desktopPackage.scripts.dist,
+      /clean:package && npm run build:binary && npm run prepare:officecli && npm run build/,
+    );
+    const ensureSource = readFileSync(
+      join(repoRoot, "scripts", "ensure-desktop-runtime.mjs"),
+      "utf8",
+    );
+    assert.match(ensureSource, /scripts\/prepare-officecli\.mjs/);
+
+    for (const name of ["LICENSE", "NOTICE", "THIRD-PARTY-NOTICES.txt"]) {
+      assert.equal(
+        existsSync(
+          join(
+            repoRoot,
+            "apps",
+            "desktop",
+            "resources",
+            "licenses",
+            "officecli",
+            manifest.version,
+            name,
+          ),
+        ),
+        true,
+      );
+    }
   });
 });

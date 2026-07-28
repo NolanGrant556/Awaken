@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RuntimeProject } from "../shared/runtime.js";
-import { listProjectDirectory } from "./project-files.js";
+import { listProjectDirectory, resolveProjectFile } from "./project-files.js";
 
 const temporaryRoots: string[] = [];
 
@@ -108,5 +108,38 @@ describe("project file directory listing", () => {
         relativePath: "outside-link",
       }),
     ).resolves.toMatchObject({ ok: false, code: "PATH_OUTSIDE_PROJECT" });
+  });
+
+  it("resolves only regular files inside the currently attached project folder", async () => {
+    const root = await temporaryRoot();
+    const outside = await temporaryRoot();
+    await fs.writeFile(path.join(root, "inside.txt"), "inside\n");
+    await fs.writeFile(path.join(outside, "secret.txt"), "secret\n");
+    await fs.symlink(path.join(outside, "secret.txt"), path.join(root, "secret-link.txt"));
+
+    await expect(
+      resolveProjectFile([project(root)], {
+        projectId: "project-1",
+        folderPath: root,
+        relativePath: "inside.txt",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      file: { relativePath: "inside.txt", displayName: "inside.txt" },
+    });
+    await expect(
+      resolveProjectFile([project(root)], {
+        projectId: "project-1",
+        folderPath: root,
+        relativePath: "../secret.txt",
+      }),
+    ).resolves.toMatchObject({ ok: false, code: "PATH_OUTSIDE_PROJECT" });
+    await expect(
+      resolveProjectFile([project(root)], {
+        projectId: "project-1",
+        folderPath: root,
+        relativePath: "secret-link.txt",
+      }),
+    ).resolves.toMatchObject({ ok: false });
   });
 });

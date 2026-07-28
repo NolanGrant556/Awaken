@@ -14,6 +14,7 @@ import {
   File as FileIcon,
   Folder,
   FolderPlus,
+  Globe2,
   MessageCirclePlus,
   Monitor,
   PanelRightClose,
@@ -133,6 +134,15 @@ import { ExtensionsView, type ExtensionSection } from "./ExtensionsView";
 import { ScheduledTasksView } from "./ScheduledTasksView";
 import { ExternalActionGate } from "./ExternalActionGate";
 import { ProjectFilesWorkspace } from "./ProjectFilesWorkspace";
+import ProjectFileIcon from "./ProjectFileIcon";
+import type { ProjectFileWorkspaceMode } from "./file-preview/FilePreviewHost";
+import {
+  activeProjectFileTab,
+  createProjectFileTabsState,
+  projectFileTabsReducer,
+  type ProjectFileWorkspaceTab,
+} from "./projectFileTabs";
+import { projectFileIconKind } from "./projectFiles";
 import {
   assignDreamReceiptToThread,
   dreamTasksForThreadReplay,
@@ -1395,6 +1405,12 @@ const INSPECTOR_FILE_ITEMS = [
     tone: "neutral" as const,
     icon: <Folder size={16} strokeWidth={1.8} aria-hidden="true" />,
   },
+  {
+    id: "browser",
+    label: "浏览器",
+    tone: "neutral" as const,
+    icon: <Globe2 size={16} strokeWidth={1.8} aria-hidden="true" />,
+  },
 ];
 const STORED_THEME_KEY = "awaken:appearance:theme";
 const DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY =
@@ -1716,6 +1732,13 @@ export function App() {
     readStoredBoolean("awaken:layout:inspectorCollapsed", false),
   );
   const [fileWorkspaceOpen, setFileWorkspaceOpen] = useState(false);
+  const [fileWorkspaceMode, setFileWorkspaceMode] =
+    useState<ProjectFileWorkspaceMode>("files");
+  const [fileWorkspaceTabsState, dispatchFileWorkspaceTabs] = useReducer(
+    projectFileTabsReducer,
+    undefined,
+    createProjectFileTabsState,
+  );
   const [promptBubbleModeByTurnId, setPromptBubbleModeByTurnId] = useState<
     Record<string, "collapsed" | "expanded">
   >({});
@@ -2855,6 +2878,9 @@ export function App() {
   ]);
   const removedProjectIdSet = new Set(removedProjectIds);
   const workspaceLabelProjectId = activeThreadProjectId ?? selectedProjectId;
+  useEffect(() => {
+    dispatchFileWorkspaceTabs({ type: "reset" });
+  }, [workspaceLabelProjectId]);
   const workspaceLabelPath =
     activeThreadWorkspacePath ?? pathForSelectedProject;
   const activeProjectLabel =
@@ -4601,11 +4627,12 @@ export function App() {
     });
   }
 
-  function handleOpenFileWorkspace(): void {
+  function handleOpenFileWorkspace(mode: ProjectFileWorkspaceMode = "files"): void {
     if (!fileWorkspaceOpen) {
       inspectorWidthBeforeFileWorkspaceRef.current = inspectorWidth;
     }
     setFileWorkspaceOpen(true);
+    setFileWorkspaceMode(mode);
     setInspectorWidth(FILE_WORKSPACE_INSPECTOR_WIDTH);
     setInspectorCollapsed(false);
     if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
@@ -4615,11 +4642,31 @@ export function App() {
 
   function handleCloseFileWorkspace(): void {
     setFileWorkspaceOpen(false);
+    dispatchFileWorkspaceTabs({ type: "reset" });
     const previousWidth = inspectorWidthBeforeFileWorkspaceRef.current;
     inspectorWidthBeforeFileWorkspaceRef.current = null;
     if (previousWidth !== null) {
       setInspectorWidth(previousWidth);
     }
+  }
+
+  function handleOpenProjectFileTab(tab: ProjectFileWorkspaceTab): void {
+    dispatchFileWorkspaceTabs({ type: "open", tab });
+    setFileWorkspaceMode(tab.mode);
+  }
+
+  function handleActivateProjectFileTab(tab: ProjectFileWorkspaceTab): void {
+    dispatchFileWorkspaceTabs({ type: "activate", tabId: tab.id });
+    setFileWorkspaceMode(tab.mode);
+  }
+
+  function handleCloseProjectFileTab(tabId: string): void {
+    const nextState = projectFileTabsReducer(fileWorkspaceTabsState, {
+      type: "close",
+      tabId,
+    });
+    dispatchFileWorkspaceTabs({ type: "close", tabId });
+    setFileWorkspaceMode(activeProjectFileTab(nextState)?.mode ?? "files");
   }
 
   async function handleAddContext(): Promise<void> {
@@ -5091,6 +5138,16 @@ export function App() {
         isPrimary: folder.isPrimary,
       }))
     : [];
+  const activeFileWorkspaceTabCandidate = activeProjectFileTab(
+    fileWorkspaceTabsState,
+  );
+  const activeFileWorkspaceTab =
+    activeFileWorkspaceTabCandidate?.projectId === fileWorkspaceProjectId
+      ? activeFileWorkspaceTabCandidate
+      : undefined;
+  const visibleFileWorkspaceTabs = fileWorkspaceTabsState.tabs.filter(
+    (tab) => tab.projectId === fileWorkspaceProjectId,
+  );
   const layoutStyle = {
     "--aw-sidebar-width": `${sidebarWidth}px`,
     "--aw-inspector-width": `${inspectorWidth}px`,
@@ -5306,20 +5363,85 @@ export function App() {
                 fileWorkspaceOpen && inspectorPresentation.available ? (
                   <div className="workbench-chrome-file-mode">
                     <div
-                      className="project-files-tab"
-                      role="tab"
-                      aria-selected="true"
+                      className="project-files-tabs"
+                      role="tablist"
+                      aria-label="打开的文件"
                     >
-                      <FileIcon size={16} strokeWidth={1.8} aria-hidden="true" />
-                      <span className="project-files-tab__label">打开文件</span>
-                      <button
-                        type="button"
-                        className="project-files-tab__close"
-                        aria-label="关闭文件视图"
-                        onClick={handleCloseFileWorkspace}
-                      >
-                        <X size={15} strokeWidth={1.9} />
-                      </button>
+                      {visibleFileWorkspaceTabs.length > 0 ? (
+                        visibleFileWorkspaceTabs.map((tab) => {
+                          const active = tab.id === activeFileWorkspaceTab?.id;
+                          const iconKind = projectFileIconKind({
+                            kind: "file",
+                            name: tab.name,
+                          });
+                          return (
+                            <div
+                              key={tab.id}
+                              className={`project-files-tab${
+                                active ? " is-active" : ""
+                              }`}
+                              role="presentation"
+                            >
+                              <button
+                                type="button"
+                                className="project-files-tab__activate"
+                                role="tab"
+                                aria-selected={active}
+                                title={tab.name}
+                                onClick={() => handleActivateProjectFileTab(tab)}
+                              >
+                                <span
+                                  className="project-files-tab__file-icon"
+                                  data-file-icon={iconKind}
+                                >
+                                  <ProjectFileIcon
+                                    kind={iconKind}
+                                    size={16}
+                                    strokeWidth={1.8}
+                                  />
+                                </span>
+                                <span className="project-files-tab__label">
+                                  {tab.name}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                className="project-files-tab__close"
+                                aria-label={`关闭 ${tab.name}`}
+                                title={`关闭 ${tab.name}`}
+                                onClick={() => handleCloseProjectFileTab(tab.id)}
+                              >
+                                <X size={15} strokeWidth={1.9} />
+                              </button>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div
+                          className="project-files-tab is-active is-placeholder"
+                          role="tab"
+                          aria-selected="true"
+                        >
+                          <FileIcon
+                            size={16}
+                            strokeWidth={1.8}
+                            aria-hidden="true"
+                          />
+                          <span className="project-files-tab__label">
+                            {fileWorkspaceMode === "browser"
+                              ? "浏览器"
+                              : "打开文件"}
+                          </span>
+                          <button
+                            type="button"
+                            className="project-files-tab__close"
+                            aria-label="关闭文件视图"
+                            onClick={handleCloseFileWorkspace}
+                          >
+                            <X size={15} strokeWidth={1.9} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                     <button
                       type="button"
@@ -5744,6 +5866,10 @@ export function App() {
                         projectId={fileWorkspaceProjectId}
                         projectLabel={fileWorkspaceProjectLabel}
                         folders={fileWorkspaceFolders}
+                        initialMode={fileWorkspaceMode}
+                        activeTab={activeFileWorkspaceTab}
+                        onWorkspaceModeChange={setFileWorkspaceMode}
+                        onOpenTab={handleOpenProjectFileTab}
                       />
                     ) : (
                       <InspectorRail
@@ -5751,7 +5877,9 @@ export function App() {
                         items={INSPECTOR_FILE_ITEMS}
                         onSelect={(id) => {
                           if (id === "files") {
-                            handleOpenFileWorkspace();
+                            handleOpenFileWorkspace("files");
+                          } else if (id === "browser") {
+                            handleOpenFileWorkspace("browser");
                           }
                         }}
                       />

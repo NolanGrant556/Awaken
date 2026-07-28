@@ -13,6 +13,7 @@ import {
   powerMonitor,
   protocol,
   screen as electronScreen,
+  session,
   shell,
   webContents,
   type IpcMainEvent,
@@ -68,6 +69,11 @@ import {
   type PickedAttachmentFile,
   type ProjectDirectoryListRequest,
   type ProjectDirectoryListResult,
+  type ProjectFilePreviewActionRequest,
+  type ProjectFilePreviewActionResult,
+  type ProjectFilePreviewCloseRequest,
+  type ProjectFilePreviewStartRequest,
+  type ProjectFilePreviewStartResult,
   type ProjectMutationResult,
   type ProjectReorderResult,
   type RuntimeConnector,
@@ -144,6 +150,7 @@ import {
 import { CliConnectorManager } from "./cli-connectors/manager.js";
 import { MemoryDreamSchedulerStore } from "./memory-dream-scheduler-store.js";
 import { listProjectDirectory } from "./project-files.js";
+import { ProjectFilePreviewManager } from "./project-file-preview-manager.js";
 import {
   scheduledTaskNotificationContent,
   startScheduledTaskEventStream,
@@ -188,6 +195,16 @@ protocol.registerSchemesAsPrivileged([
       corsEnabled: true,
     },
   },
+  {
+    scheme: "awaken-preview",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
 ]);
 
 let supervisor: RuntimeSupervisor | null = null;
@@ -203,6 +220,7 @@ let isQuitting = false;
 let projectTrashWorkerTimer: NodeJS.Timeout | null = null;
 let projectTrashWorkerRunning = false;
 let memoryDreamSchedulerStore: MemoryDreamSchedulerStore | null = null;
+let projectFilePreviewManager: ProjectFilePreviewManager | null = null;
 let memoryDreamSchedulerTimer: NodeJS.Timeout | null = null;
 let automaticDreamRunning = false;
 const activeDreamTaskIds = new Set<string>();
@@ -897,6 +915,7 @@ function createMainWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webviewTag: true,
     },
   });
   mainWindowRef = mainWindow;
@@ -912,6 +931,18 @@ function createMainWindow(): BrowserWindow {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  mainWindow.webContents.on(
+    "will-attach-webview",
+    (event, webPreferences, params) => {
+      if (!projectFilePreviewManager?.authorizeWebview(webPreferences, params)) {
+        event.preventDefault();
+      }
+    },
+  );
+  mainWindow.webContents.on("did-attach-webview", (_event, guest) => {
+    projectFilePreviewManager?.attachGuest(guest);
   });
 
   const webContentsId = mainWindow.webContents.id;
@@ -961,6 +992,7 @@ function createMainWindow(): BrowserWindow {
       fallbackShowTimer = undefined;
     }
     cleanupWindowSubscriptions(webContentsId);
+    projectFilePreviewManager?.releaseAll();
   });
 
   mainWindow.on("close", () => {
@@ -2029,6 +2061,92 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  "awaken:start-project-file-preview",
+  async (
+    event,
+    request: ProjectFilePreviewStartRequest,
+  ): Promise<ProjectFilePreviewStartResult> => {
+    if (
+      !mainWindowRef ||
+      mainWindowRef.isDestroyed() ||
+      event.sender.id !== mainWindowRef.webContents.id
+    ) {
+      return {
+        ok: false,
+        code: "UNAUTHORIZED",
+        message: "文件预览请求来源无效。",
+      };
+    }
+    if (!projectFilePreviewManager) {
+      return {
+        ok: false,
+        code: "PREVIEW_UNAVAILABLE",
+        message: "文件预览服务尚未就绪。",
+      };
+    }
+    return projectFilePreviewManager.start(request);
+  },
+);
+
+ipcMain.handle(
+  "awaken:close-project-file-preview",
+  async (event, request: ProjectFilePreviewCloseRequest): Promise<void> => {
+    if (
+      !mainWindowRef ||
+      mainWindowRef.isDestroyed() ||
+      event.sender.id !== mainWindowRef.webContents.id
+    ) {
+      return;
+    }
+    projectFilePreviewManager?.cancel(request);
+  },
+);
+
+ipcMain.handle(
+  "awaken:open-project-file-externally",
+  async (
+    event,
+    request: ProjectFilePreviewActionRequest,
+  ): Promise<ProjectFilePreviewActionResult> => {
+    if (
+      !mainWindowRef ||
+      mainWindowRef.isDestroyed() ||
+      event.sender.id !== mainWindowRef.webContents.id ||
+      !projectFilePreviewManager
+    ) {
+      return {
+        ok: false,
+        code: "UNAUTHORIZED",
+        message: "文件打开请求来源无效。",
+      };
+    }
+    return projectFilePreviewManager.openExternally(request);
+  },
+);
+
+ipcMain.handle(
+  "awaken:reveal-project-file",
+  async (
+    event,
+    request: ProjectFilePreviewActionRequest,
+  ): Promise<ProjectFilePreviewActionResult> => {
+    if (
+      !mainWindowRef ||
+      mainWindowRef.isDestroyed() ||
+      event.sender.id !== mainWindowRef.webContents.id ||
+      !projectFilePreviewManager
+    ) {
+      return {
+        ok: false,
+        code: "UNAUTHORIZED",
+        message: "文件定位请求来源无效。",
+      };
+    }
+    return projectFilePreviewManager.reveal(request);
+  },
+);
+
+ipcMain.handle(
   "awaken:upsert-project",
   async (
     _event,
@@ -2724,6 +2842,41 @@ app.whenReady().then(async () => {
   registerPetIpcHandlers();
   registerScheduledTaskIpcHandlers();
 
+  projectFilePreviewManager = new ProjectFilePreviewManager({
+    getProjects: async () => {
+      const projects = await requestRuntimeDomain<RuntimeProjectWire[]>(
+        "/v1/projects?include_removed=false",
+        { method: "GET" },
+      );
+      return projects.map(normalizeRuntimeProject);
+    },
+    runtimePaths: {
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      appPath: app.getAppPath(),
+      cachePath: join(app.getPath("userData"), "cache"),
+    },
+    defaultSession: session.defaultSession,
+    sessionFromPartition: (partition) =>
+      session.fromPartition(partition, { cache: false }),
+    openExternal: (url) => shell.openExternal(url),
+    openPath: (filePath) => shell.openPath(filePath),
+    showItemInFolder: (filePath) => shell.showItemInFolder(filePath),
+    savePdfAs: async (fileName) => {
+      const options = {
+        title: "保存 PDF",
+        defaultPath: join(app.getPath("downloads"), fileName),
+        filters: [{ name: "PDF", extensions: ["pdf"] }],
+      };
+      const result =
+        mainWindowRef && !mainWindowRef.isDestroyed()
+          ? await dialog.showSaveDialog(mainWindowRef, options)
+          : await dialog.showSaveDialog(options);
+      return result.canceled ? undefined : result.filePath;
+    },
+  });
+  projectFilePreviewManager.initialize();
+
   supervisor = new RuntimeSupervisor(
     {},
     {
@@ -2807,6 +2960,8 @@ app.on("before-quit", (event) => {
     subscription.controller.abort();
   }
   subscriptions.clear();
+  projectFilePreviewManager?.dispose();
+  projectFilePreviewManager = null;
   void (async () => {
     try {
       if (supervisor) {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -8,32 +8,30 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  File,
-  FileArchive,
-  FileAudio2,
-  FileCode2,
-  FileImage,
-  FileJson2,
-  FileSpreadsheet,
   FileText,
-  FileType,
-  FileType2,
-  FileVideo2,
   Folder,
   FolderOpen,
-  Link2,
-  Presentation,
+  Globe2,
   Search,
 } from "lucide-react";
 import { AwakenPopover as Popover } from "@awaken/design-system";
 import type { ProjectDirectoryEntry } from "../shared/runtime";
 import type { RuntimeClient } from "./runtime/client";
+import FilePreviewHost, {
+  type ProjectFileWorkspaceMode,
+} from "./file-preview/FilePreviewHost";
+import {
+  projectFileTabId,
+  type ProjectFileWorkspaceTab,
+} from "./projectFileTabs";
 import {
   projectFileIconKind,
   projectFileTreeRows,
-  type ProjectFileIconKind,
   type ProjectFileTreeRow,
 } from "./projectFiles";
+import ProjectFileIcon, {
+  type ProjectFileVisualIconKind,
+} from "./ProjectFileIcon";
 import "./styles/project-files.css";
 
 export type ProjectFilesFolder = {
@@ -43,10 +41,21 @@ export type ProjectFilesFolder = {
 };
 
 export type ProjectFilesWorkspaceProps = {
-  runtimeClient: Pick<RuntimeClient, "listProjectDirectory">;
+  runtimeClient: Pick<
+    RuntimeClient,
+    | "listProjectDirectory"
+    | "startProjectFilePreview"
+    | "closeProjectFilePreview"
+    | "openProjectFileExternally"
+    | "revealProjectFile"
+  >;
   projectId?: string;
   projectLabel?: string;
   folders: ProjectFilesFolder[];
+  initialMode?: ProjectFileWorkspaceMode;
+  activeTab?: ProjectFileWorkspaceTab;
+  onWorkspaceModeChange?: (mode: ProjectFileWorkspaceMode) => void;
+  onOpenTab?: (tab: ProjectFileWorkspaceTab) => void;
 };
 
 const MIN_FILE_LIST_WIDTH = 240;
@@ -86,58 +95,9 @@ function preferredFolderPath(folders: ProjectFilesFolder[]): string {
   return folders.find((folder) => folder.isPrimary)?.path ?? folders[0]?.path ?? "";
 }
 
-type ProjectFileRowIconKind = ProjectFileIconKind | "folder-open";
-
-function rowIconKind(entry: ProjectFileTreeRow): ProjectFileRowIconKind {
+function rowIconKind(entry: ProjectFileTreeRow): ProjectFileVisualIconKind {
   if (entry.kind === "directory" && entry.expanded) return "folder-open";
   return projectFileIconKind(entry);
-}
-
-function entryIcon(entry: ProjectFileTreeRow) {
-  const kind = rowIconKind(entry);
-  if (kind === "folder-open") {
-    return <FolderOpen size={16} strokeWidth={1.75} aria-hidden="true" />;
-  }
-  if (kind === "folder") {
-    return <Folder size={16} strokeWidth={1.75} aria-hidden="true" />;
-  }
-  if (kind === "symlink") {
-    return <Link2 size={15} strokeWidth={1.75} aria-hidden="true" />;
-  }
-  if (kind === "excel") {
-    return <FileSpreadsheet size={15} strokeWidth={1.75} aria-hidden="true" />;
-  }
-  if (kind === "word" || kind === "text") {
-    return <FileText size={15} strokeWidth={1.75} aria-hidden="true" />;
-  }
-  if (kind === "powerpoint") {
-    return <Presentation size={15} strokeWidth={1.75} aria-hidden="true" />;
-  }
-  if (kind === "pdf") {
-    return <FileType2 size={15} strokeWidth={1.75} aria-hidden="true" />;
-  }
-  if (kind === "markdown") {
-    return <FileType size={15} strokeWidth={1.75} aria-hidden="true" />;
-  }
-  if (kind === "code") {
-    return <FileCode2 size={15} strokeWidth={1.75} aria-hidden="true" />;
-  }
-  if (kind === "data") {
-    return <FileJson2 size={15} strokeWidth={1.75} aria-hidden="true" />;
-  }
-  if (kind === "image") {
-    return <FileImage size={15} strokeWidth={1.75} aria-hidden="true" />;
-  }
-  if (kind === "archive") {
-    return <FileArchive size={15} strokeWidth={1.75} aria-hidden="true" />;
-  }
-  if (kind === "audio") {
-    return <FileAudio2 size={15} strokeWidth={1.75} aria-hidden="true" />;
-  }
-  if (kind === "video") {
-    return <FileVideo2 size={15} strokeWidth={1.75} aria-hidden="true" />;
-  }
-  return <File size={15} strokeWidth={1.75} aria-hidden="true" />;
 }
 
 export function ProjectFilesWorkspace({
@@ -145,6 +105,10 @@ export function ProjectFilesWorkspace({
   projectId,
   projectLabel,
   folders,
+  initialMode = "files",
+  activeTab,
+  onWorkspaceModeChange,
+  onOpenTab,
 }: ProjectFilesWorkspaceProps) {
   const workspaceBodyRef = useRef<HTMLDivElement>(null);
   const fileNavigatorRef = useRef<HTMLElement>(null);
@@ -160,12 +124,26 @@ export function ProjectFilesWorkspace({
   >({});
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set());
-  const [selectedFilePath, setSelectedFilePath] = useState<string>();
+  const [workspaceMode, setWorkspaceMode] = useState<ProjectFileWorkspaceMode>(
+    initialMode,
+  );
   const [errorMessage, setErrorMessage] = useState<string>();
   const requestGenerationRef = useRef(0);
 
   const selectedFolder =
     folders.find((folder) => folder.path === selectedFolderPath) ?? folders[0];
+
+  const changeWorkspaceMode = useCallback(
+    (mode: ProjectFileWorkspaceMode): void => {
+      setWorkspaceMode(mode);
+      onWorkspaceModeChange?.(mode);
+    },
+    [onWorkspaceModeChange],
+  );
+
+  useEffect(() => {
+    setWorkspaceMode(initialMode);
+  }, [initialMode]);
 
   useEffect(() => {
     if (folders.some((folder) => folder.path === selectedFolderPath)) {
@@ -180,7 +158,6 @@ export function ProjectFilesWorkspace({
     setListings({});
     setExpandedPaths(new Set());
     setLoadingPaths(new Set());
-    setSelectedFilePath(undefined);
     setErrorMessage(undefined);
 
     if (!projectId || !selectedFolder?.path) {
@@ -387,10 +364,13 @@ export function ProjectFilesWorkspace({
       projectFileTreeRows({
         listings,
         expandedPaths,
-        selectedPath: selectedFilePath,
+        selectedPath:
+          activeTab?.folderPath === selectedFolder?.path
+            ? activeTab.relativePath
+            : undefined,
         filter,
       }),
-    [expandedPaths, filter, listings, selectedFilePath],
+    [activeTab, expandedPaths, filter, listings, selectedFolder?.path],
   );
 
   const emptyTitle = !projectId
@@ -407,7 +387,26 @@ export function ProjectFilesWorkspace({
   return (
     <section className="project-files-workspace" aria-label="项目文件">
       <header className="project-files-pathbar">
-        <span className="project-files-pathbar__path">/</span>
+        <div className="project-files-mode-switch" role="tablist" aria-label="文件工作区">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspaceMode === "files"}
+            onClick={() => changeWorkspaceMode("files")}
+          >
+            <FileText size={15} strokeWidth={1.8} aria-hidden="true" />
+            文件
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspaceMode === "browser"}
+            onClick={() => changeWorkspaceMode("browser")}
+          >
+            <Globe2 size={15} strokeWidth={1.8} aria-hidden="true" />
+            浏览器
+          </button>
+        </div>
         <button
           type="button"
           className={`project-files-pathbar__icon${
@@ -438,10 +437,23 @@ export function ProjectFilesWorkspace({
               } as CSSProperties)
         }
       >
-        <div className="project-files-preview-empty">
-          <FolderOpen size={42} strokeWidth={1.6} aria-hidden="true" />
-          <strong>{emptyTitle}</strong>
-          <span>{emptyDescription}</span>
+        <div className="project-files-preview">
+          {activeTab || workspaceMode === "browser" ? (
+            <FilePreviewHost
+              runtimeClient={runtimeClient}
+              projectId={projectId}
+              folderPath={activeTab?.folderPath}
+              selection={activeTab}
+              mode={workspaceMode}
+              onModeChange={changeWorkspaceMode}
+            />
+          ) : (
+            <div className="project-files-preview-empty is-centered">
+              <FolderOpen size={42} strokeWidth={1.6} aria-hidden="true" />
+              <strong>{emptyTitle}</strong>
+              <span>{emptyDescription}</span>
+            </div>
+          )}
         </div>
 
         <div
@@ -567,7 +579,24 @@ export function ProjectFilesWorkspace({
                         if (directory) {
                           toggleDirectory(row.relativePath);
                         } else {
-                          setSelectedFilePath(row.relativePath);
+                          const mode = /\.html?$/i.test(row.name)
+                            ? "browser"
+                            : "files";
+                          if (projectId && selectedFolder?.path) {
+                            onOpenTab?.({
+                              id: projectFileTabId(
+                                projectId,
+                                selectedFolder.path,
+                                row.relativePath,
+                              ),
+                              projectId,
+                              folderPath: selectedFolder.path,
+                              name: row.name,
+                              relativePath: row.relativePath,
+                              mode,
+                            });
+                          }
+                          changeWorkspaceMode(mode);
                         }
                       }}
                     >
@@ -584,7 +613,14 @@ export function ProjectFilesWorkspace({
                         className="project-files-tree-row__icon"
                         data-file-icon={iconKind}
                       >
-                        {entryIcon(row)}
+                        <ProjectFileIcon
+                          kind={iconKind}
+                          size={
+                            iconKind === "folder" || iconKind === "folder-open"
+                              ? 16
+                              : 15
+                          }
+                        />
                       </span>
                       <span className="project-files-tree-row__label">
                         {row.name}

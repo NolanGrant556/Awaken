@@ -38,6 +38,11 @@ import {
   type ProjectFolderSelection,
   type ProjectDirectoryListRequest,
   type ProjectDirectoryListResult,
+  type ProjectFilePreviewActionRequest,
+  type ProjectFilePreviewActionResult,
+  type ProjectFilePreviewCloseRequest,
+  type ProjectFilePreviewStartRequest,
+  type ProjectFilePreviewStartResult,
   type ProjectMutationResult,
   type ProjectReorderResult,
   type RuntimeConnector,
@@ -207,6 +212,18 @@ export type RuntimeClient = {
   listProjectDirectory: (
     request: ProjectDirectoryListRequest,
   ) => Promise<ProjectDirectoryListResult>;
+  startProjectFilePreview: (
+    request: ProjectFilePreviewStartRequest,
+  ) => Promise<ProjectFilePreviewStartResult>;
+  closeProjectFilePreview: (
+    request: ProjectFilePreviewCloseRequest,
+  ) => Promise<void>;
+  openProjectFileExternally: (
+    request: ProjectFilePreviewActionRequest,
+  ) => Promise<ProjectFilePreviewActionResult>;
+  revealProjectFile: (
+    request: ProjectFilePreviewActionRequest,
+  ) => Promise<ProjectFilePreviewActionResult>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
   createProject: (
     folders: ProjectFolderSelection[],
@@ -375,6 +392,11 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     deleteThread: (threadId) => bridge.deleteThread(threadId),
     listProjects: (includeRemoved) => bridge.listProjects(includeRemoved),
     listProjectDirectory: (request) => bridge.listProjectDirectory(request),
+    startProjectFilePreview: (request) => bridge.startProjectFilePreview(request),
+    closeProjectFilePreview: (request) => bridge.closeProjectFilePreview(request),
+    openProjectFileExternally: (request) =>
+      bridge.openProjectFileExternally(request),
+    revealProjectFile: (request) => bridge.revealProjectFile(request),
     upsertProject: (workspaceRoot, displayName) =>
       bridge.upsertProject(workspaceRoot, displayName),
     createProject: (folders, displayName) => bridge.createProject(folders, displayName),

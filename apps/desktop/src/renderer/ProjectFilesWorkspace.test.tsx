@@ -22,6 +22,19 @@ function dispatchTimedPointerEvent(
   target.dispatchEvent(event);
 }
 
+function previewRuntimeClient() {
+  return {
+    startProjectFilePreview: vi.fn(async () => ({
+      ok: false as const,
+      code: "UNSUPPORTED_FILE_TYPE" as const,
+      message: "unsupported",
+    })),
+    closeProjectFilePreview: vi.fn(async () => undefined),
+    openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
+    revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+  };
+}
+
 describe("ProjectFilesWorkspace", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -46,7 +59,7 @@ describe("ProjectFilesWorkspace", () => {
     await act(async () => {
       root.render(
         <ProjectFilesWorkspace
-          runtimeClient={{ listProjectDirectory }}
+          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
           projectId="project-1"
           projectLabel="Awaken"
           folders={[
@@ -66,6 +79,9 @@ describe("ProjectFilesWorkspace", () => {
     const divider = container.querySelector<HTMLElement>(
       '[aria-label="调整文件列表宽度"]',
     );
+    expect(
+      container.querySelector(".project-files-preview-empty.is-centered")?.textContent,
+    ).toContain("打开文件");
     body!.getBoundingClientRect = () =>
       ({ left: 0, right: 720, top: 0, bottom: 600, width: 720, height: 600 }) as DOMRect;
     navigator!.getBoundingClientRect = () =>
@@ -132,7 +148,7 @@ describe("ProjectFilesWorkspace", () => {
     await act(async () => {
       root.render(
         <ProjectFilesWorkspace
-          runtimeClient={{ listProjectDirectory }}
+          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
           projectId="project-1"
           projectLabel="Awaken"
           folders={[
@@ -251,7 +267,7 @@ describe("ProjectFilesWorkspace", () => {
     await act(async () => {
       root.render(
         <ProjectFilesWorkspace
-          runtimeClient={{ listProjectDirectory }}
+          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
           projectId="project-1"
           projectLabel="Awaken"
           folders={[
@@ -303,5 +319,60 @@ describe("ProjectFilesWorkspace", () => {
       folderPath: "/workspace/docs",
     });
     expect(container.textContent).toContain("brief.md");
+  });
+
+  it("reports file selections as project-scoped tabs with the matching mode", async () => {
+    const listProjectDirectory = vi.fn(async () => ({
+      ok: true as const,
+      relativePath: "",
+      entries: [
+        { name: "README.md", relativePath: "README.md", kind: "file" as const },
+        { name: "index.html", relativePath: "site/index.html", kind: "file" as const },
+      ],
+    }));
+    const onOpenTab = vi.fn();
+    const onWorkspaceModeChange = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <ProjectFilesWorkspace
+          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
+          projectId="project-1"
+          projectLabel="Awaken"
+          folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
+          onOpenTab={onOpenTab}
+          onWorkspaceModeChange={onWorkspaceModeChange}
+        />,
+      );
+    });
+    await settle();
+
+    const rows = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[role="treeitem"]'),
+    );
+    await act(async () => rows.find((row) => row.textContent?.includes("README.md"))?.click());
+    await act(async () => rows.find((row) => row.textContent?.includes("index.html"))?.click());
+
+    expect(onOpenTab).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        projectId: "project-1",
+        folderPath: "/workspace/app",
+        name: "README.md",
+        relativePath: "README.md",
+        mode: "files",
+      }),
+    );
+    expect(onOpenTab).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        projectId: "project-1",
+        folderPath: "/workspace/app",
+        name: "index.html",
+        relativePath: "site/index.html",
+        mode: "browser",
+      }),
+    );
+    expect(onWorkspaceModeChange.mock.calls).toEqual([["files"], ["browser"]]);
   });
 });

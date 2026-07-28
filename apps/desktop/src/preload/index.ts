@@ -37,6 +37,11 @@ import {
   type ProjectFolderSelection,
   type ProjectDirectoryListRequest,
   type ProjectDirectoryListResult,
+  type ProjectFilePreviewActionRequest,
+  type ProjectFilePreviewActionResult,
+  type ProjectFilePreviewCloseRequest,
+  type ProjectFilePreviewStartRequest,
+  type ProjectFilePreviewStartResult,
   type ProjectMutationResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
@@ -202,6 +207,23 @@ const bridge: AwakenBridge = {
       "awaken:list-project-directory",
       request,
     ) as Promise<ProjectDirectoryListResult>,
+  startProjectFilePreview: (request: ProjectFilePreviewStartRequest) =>
+    ipcRenderer.invoke(
+      "awaken:start-project-file-preview",
+      request,
+    ) as Promise<ProjectFilePreviewStartResult>,
+  closeProjectFilePreview: (request: ProjectFilePreviewCloseRequest) =>
+    ipcRenderer.invoke("awaken:close-project-file-preview", request) as Promise<void>,
+  openProjectFileExternally: (request: ProjectFilePreviewActionRequest) =>
+    ipcRenderer.invoke(
+      "awaken:open-project-file-externally",
+      request,
+    ) as Promise<ProjectFilePreviewActionResult>,
+  revealProjectFile: (request: ProjectFilePreviewActionRequest) =>
+    ipcRenderer.invoke(
+      "awaken:reveal-project-file",
+      request,
+    ) as Promise<ProjectFilePreviewActionResult>,
   upsertProject: (workspaceRoot: string, displayName?: string) =>
     ipcRenderer.invoke("awaken:upsert-project", {
       workspaceRoot,

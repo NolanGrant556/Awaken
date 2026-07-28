@@ -177,6 +177,10 @@ describe("FilePreviewHost", () => {
   });
 
   it("keeps an Office webview mounted while switching between browser and files", async () => {
+    let interactionHandler:
+      | ((interaction: { previewId: string; type: "primary-click" }) => void)
+      | undefined;
+    const unsubscribeInteraction = vi.fn();
     const runtimeClient = {
       startProjectFilePreview: vi.fn(async (request) => ({
         ok: true as const,
@@ -193,10 +197,15 @@ describe("FilePreviewHost", () => {
         },
       })),
       closeProjectFilePreview: vi.fn(async () => undefined),
+      onProjectFilePreviewInteraction: vi.fn((handler) => {
+        interactionHandler = handler;
+        return unsubscribeInteraction;
+      }),
       openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
       revealProjectFile: vi.fn(async () => ({ ok: true as const })),
     };
     const onModeChange = vi.fn();
+    const onPreviewPrimaryClick = vi.fn();
     const selection = { name: "台账.xlsx", relativePath: "台账.xlsx" };
     const render = (mode: "files" | "browser") => (
       <FilePreviewHost
@@ -206,12 +215,20 @@ describe("FilePreviewHost", () => {
         selection={selection}
         mode={mode}
         onModeChange={onModeChange}
+        onPreviewPrimaryClick={onPreviewPrimaryClick}
       />
     );
 
     await act(async () => root.render(render("files")));
     await settleUntil(() => container.querySelector("webview") !== null);
     const webview = container.querySelector("webview");
+    expect(runtimeClient.onProjectFilePreviewInteraction).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      interactionHandler?.({ previewId: "another-preview", type: "primary-click" });
+      interactionHandler?.({ previewId: "preview-office", type: "primary-click" });
+    });
+    expect(onPreviewPrimaryClick).toHaveBeenCalledOnce();
 
     await act(async () => root.render(render("browser")));
     expect(container.querySelector("webview")).toBe(webview);

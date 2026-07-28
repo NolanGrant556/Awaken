@@ -27,13 +27,15 @@ export type FilePreviewHostProps = {
     | "closeProjectFilePreview"
     | "openProjectFileExternally"
     | "revealProjectFile"
-  >;
+  > &
+    Partial<Pick<RuntimeClient, "onProjectFilePreviewInteraction">>;
   projectId?: string;
   folderPath?: string;
   selection?: ProjectFileSelection;
   mode: ProjectFileWorkspaceMode;
   onModeChange: (mode: ProjectFileWorkspaceMode) => void;
   onPreviewLabelChange?: (label: string) => void;
+  onPreviewPrimaryClick?: () => void;
 };
 
 type PreviewState =
@@ -55,6 +57,7 @@ export default function FilePreviewHost({
   mode,
   onModeChange,
   onPreviewLabelChange,
+  onPreviewPrimaryClick,
 }: FilePreviewHostProps) {
   const [state, setState] = useState<PreviewState>({ status: "idle" });
   const [retryGeneration, setRetryGeneration] = useState(0);
@@ -136,6 +139,24 @@ export default function FilePreviewHost({
     },
     [closeActivePreview],
   );
+
+  useEffect(() => {
+    if (
+      state.status !== "ready" ||
+      state.preview.kind !== "office" ||
+      !onPreviewPrimaryClick
+    ) {
+      return;
+    }
+    return runtimeClient.onProjectFilePreviewInteraction?.((interaction) => {
+      if (
+        interaction.previewId === state.preview.previewId &&
+        interaction.type === "primary-click"
+      ) {
+        onPreviewPrimaryClick();
+      }
+    });
+  }, [onPreviewPrimaryClick, runtimeClient, state]);
 
   const actionRequest: ProjectFilePreviewActionRequest | undefined =
     projectId && folderPath && selection

@@ -69,6 +69,7 @@ function createManager(root: string) {
   const defaultSession = fakeSession();
   const previewSessions = new Map<string, FakeSession>();
   const openExternal = vi.fn(async () => undefined);
+  const onPreviewInteraction = vi.fn();
   const manager = new ProjectFilePreviewManager({
     getProjects: async () => [project(root)],
     runtimePaths: {
@@ -87,9 +88,16 @@ function createManager(root: string) {
     openPath: vi.fn(async () => ""),
     showItemInFolder: vi.fn(),
     savePdfAs: vi.fn(async () => undefined),
+    onPreviewInteraction,
   });
   manager.initialize();
-  return { manager, defaultSession, previewSessions, openExternal };
+  return {
+    manager,
+    defaultSession,
+    previewSessions,
+    openExternal,
+    onPreviewInteraction,
+  };
 }
 
 afterEach(async () => {
@@ -219,7 +227,12 @@ describe("ProjectFilePreviewManager", () => {
     const root = await temporaryRoot();
     await fs.mkdir(path.join(root, "site"));
     await fs.writeFile(path.join(root, "site", "index.html"), "<h1>Local</h1>");
-    const { manager, previewSessions, openExternal } = createManager(root);
+    const {
+      manager,
+      previewSessions,
+      openExternal,
+      onPreviewInteraction,
+    } = createManager(root);
     const result = await manager.start({
       requestId: "request-secure-html",
       projectId: "project-1",
@@ -281,6 +294,31 @@ describe("ProjectFilePreviewManager", () => {
     willNavigate?.({ preventDefault }, "https://example.com/");
     expect(preventDefault).toHaveBeenCalledOnce();
     expect(openExternal).toHaveBeenCalledWith("https://example.com/");
+
+    const beforeMouseEvent = on.mock.calls.find(
+      ([eventName]) => eventName === "before-mouse-event",
+    )?.[1] as
+      | ((
+          event: unknown,
+          mouse: {
+            type: "mouseDown" | "mouseMove" | "mouseUp";
+            button?: "left";
+            x: number;
+            y: number;
+          },
+        ) => void)
+      | undefined;
+    beforeMouseEvent?.({}, { type: "mouseDown", button: "left", x: 10, y: 10 });
+    beforeMouseEvent?.({}, { type: "mouseMove", x: 30, y: 10 });
+    beforeMouseEvent?.({}, { type: "mouseUp", button: "left", x: 30, y: 10 });
+    expect(onPreviewInteraction).not.toHaveBeenCalled();
+
+    beforeMouseEvent?.({}, { type: "mouseDown", button: "left", x: 10, y: 10 });
+    beforeMouseEvent?.({}, { type: "mouseUp", button: "left", x: 12, y: 11 });
+    expect(onPreviewInteraction).toHaveBeenCalledWith({
+      previewId: result.preview.previewId,
+      type: "primary-click",
+    });
     manager.dispose();
   });
 });

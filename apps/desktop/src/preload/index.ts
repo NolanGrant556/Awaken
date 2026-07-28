@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { AguiEvent } from "../shared/agui.js";
 import { DESKTOP_SELECT_ALL_REQUESTED_CHANNEL } from "../shared/desktop-selection.js";
 import {
+  PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL,
+  type ProjectFilePreviewInteraction,
+} from "../shared/project-file-preview-interaction.js";
+import {
   type ACPRunnerCreateRequest,
   type ACPRunnerProbeResult,
   type ACPRunnersSettings,
@@ -214,6 +218,18 @@ const bridge: AwakenBridge = {
     ) as Promise<ProjectFilePreviewStartResult>,
   closeProjectFilePreview: (request: ProjectFilePreviewCloseRequest) =>
     ipcRenderer.invoke("awaken:close-project-file-preview", request) as Promise<void>,
+  onProjectFilePreviewInteraction: (callback) => {
+    const handler = (
+      _event: IpcRendererEvent,
+      interaction: ProjectFilePreviewInteraction,
+    ) => callback(interaction);
+    ipcRenderer.on(PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL, handler);
+    return () =>
+      ipcRenderer.removeListener(
+        PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL,
+        handler,
+      );
+  },
   openProjectFileExternally: (request: ProjectFilePreviewActionRequest) =>
     ipcRenderer.invoke(
       "awaken:open-project-file-externally",

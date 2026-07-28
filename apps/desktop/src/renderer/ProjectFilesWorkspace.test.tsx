@@ -22,6 +22,23 @@ function dispatchTimedPointerEvent(
   target.dispatchEvent(event);
 }
 
+function dispatchPreviewPointerEvent(
+  target: EventTarget,
+  type: "pointerdown" | "pointermove" | "pointerup",
+  options: { clientX: number; clientY?: number; pointerId?: number },
+): void {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    button: 0,
+    clientX: options.clientX,
+    clientY: options.clientY ?? 0,
+  });
+  Object.defineProperty(event, "pointerId", {
+    value: options.pointerId ?? 1,
+  });
+  target.dispatchEvent(event);
+}
+
 function previewRuntimeClient() {
   return {
     startProjectFilePreview: vi.fn(async () => ({
@@ -158,6 +175,112 @@ describe("ProjectFilesWorkspace", () => {
       "388px",
     );
     expect(container.textContent).toContain("README.md");
+  });
+
+  it("requests the expanded panel from the pathbar without replacing the file-list control", async () => {
+    const onExpand = vi.fn();
+    const listProjectDirectory = vi.fn(async () => ({
+      ok: true as const,
+      relativePath: "",
+      entries: [],
+    }));
+
+    await act(async () => {
+      root.render(
+        <ProjectFilesWorkspace
+          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
+          projectId="project-1"
+          folders={[
+            { path: "/workspace/app", label: "App", isPrimary: true },
+          ]}
+          onExpand={onExpand}
+        />,
+      );
+    });
+    await settle();
+
+    const expand = container.querySelector<HTMLButtonElement>(
+      '[aria-label="展开面板"]',
+    );
+    expect(expand).not.toBeNull();
+    expect(
+      container.querySelector('[aria-label="收起文件列表"]'),
+    ).not.toBeNull();
+
+    await act(async () => expand?.click());
+    expect(onExpand).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      root.render(
+        <ProjectFilesWorkspace
+          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
+          projectId="project-1"
+          folders={[
+            { path: "/workspace/app", label: "App", isPrimary: true },
+          ]}
+          expanded
+          onExpand={onExpand}
+        />,
+      );
+    });
+    expect(
+      container.querySelector('[aria-label="展开面板"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[aria-label="收起文件列表"]'),
+    ).not.toBeNull();
+  });
+
+  it("reports a primary click but preserves drag selection in the document preview", async () => {
+    const onPreviewPrimaryClick = vi.fn();
+    const listProjectDirectory = vi.fn(async () => ({
+      ok: true as const,
+      relativePath: "",
+      entries: [],
+    }));
+
+    await act(async () => {
+      root.render(
+        <ProjectFilesWorkspace
+          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
+          projectId="project-1"
+          folders={[
+            { path: "/workspace/app", label: "App", isPrimary: true },
+          ]}
+          expanded
+          onPreviewPrimaryClick={onPreviewPrimaryClick}
+        />,
+      );
+    });
+    await settle();
+
+    const preview = container.querySelector<HTMLElement>(
+      ".project-files-preview",
+    );
+    await act(async () => {
+      if (!preview) return;
+      dispatchPreviewPointerEvent(preview, "pointerdown", { clientX: 20 });
+      dispatchPreviewPointerEvent(preview, "pointerup", { clientX: 22 });
+    });
+    expect(onPreviewPrimaryClick).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      if (!preview) return;
+      dispatchPreviewPointerEvent(preview, "pointerdown", { clientX: 20 });
+      dispatchPreviewPointerEvent(preview, "pointermove", { clientX: 60 });
+      dispatchPreviewPointerEvent(preview, "pointerup", { clientX: 60 });
+    });
+    expect(onPreviewPrimaryClick).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      const button = container.querySelector<HTMLButtonElement>(
+        '[aria-label="收起文件列表"]',
+      );
+      if (!button) return;
+      dispatchPreviewPointerEvent(button, "pointerdown", { clientX: 20 });
+      dispatchPreviewPointerEvent(button, "pointerup", { clientX: 20 });
+    });
+    expect(onPreviewPrimaryClick).toHaveBeenCalledTimes(1);
   });
 
   it("only collapses after a forceful rightward fling from minimum width", async () => {

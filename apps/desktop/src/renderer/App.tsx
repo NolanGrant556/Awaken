@@ -15,7 +15,9 @@ import {
   Folder,
   FolderPlus,
   Globe2,
+  MessageSquare,
   MessageCirclePlus,
+  Minimize2,
   Monitor,
   PanelRightClose,
   PanelRightOpen,
@@ -43,6 +45,7 @@ import {
   AwakenSidebarSectionAction as SidebarSectionAction,
   AwakenTaskWelcome as TaskWelcome,
   AwakenThoughtTrace as ThoughtTrace,
+  AwakenTooltip as Tooltip,
   AwakenToolTraceGroup as ToolTraceGroup,
   AwakenToolTraceLine as ToolTraceLine,
   AwakenUserPromptBlock as UserPromptBlock,
@@ -136,6 +139,14 @@ import { ProfileBalancePopover } from "./ProfileBalancePopover";
 import { ExtensionsView, type ExtensionSection } from "./ExtensionsView";
 import { ScheduledTasksView } from "./ScheduledTasksView";
 import { ExternalActionGate } from "./ExternalActionGate";
+import {
+  ExpandedFileComposer,
+  expandedFileComposerCompletionKey,
+  hasExpandedFileComposerDraft,
+  shouldCollapseExpandedFileComposer,
+  type ExpandedFileComposerTrackedRun,
+  type ExpandedFileComposerIdleMode,
+} from "./ExpandedFileComposer";
 import { ProjectFilesWorkspace } from "./ProjectFilesWorkspace";
 import ProjectFileIcon from "./ProjectFileIcon";
 import type { ProjectFileWorkspaceMode } from "./file-preview/FilePreviewHost";
@@ -208,6 +219,45 @@ export type WorkbenchInspectorPresentation = {
     | "desktop-root-inspector-collapsed"
     | "desktop-root-inspector-hidden";
 };
+
+export type ExpandedWorkspaceSurface = "conversation" | "file";
+
+export function shouldUseCenterComposerWithFileWorkspace({
+  standardCenterComposer,
+  fileWorkspaceOpen,
+  fileWorkspaceExpanded,
+  expandedWorkspaceSurface,
+}: {
+  standardCenterComposer: boolean;
+  fileWorkspaceOpen: boolean;
+  fileWorkspaceExpanded: boolean;
+  expandedWorkspaceSurface: ExpandedWorkspaceSurface;
+}): boolean {
+  return !(
+    fileWorkspaceOpen &&
+    fileWorkspaceExpanded &&
+    expandedWorkspaceSurface === "file"
+  ) && standardCenterComposer;
+}
+
+export function shouldEnableInspectorResizeHandle({
+  inspectorAvailable,
+  fileWorkspaceExpanded,
+}: {
+  inspectorAvailable: boolean;
+  fileWorkspaceExpanded: boolean;
+}): boolean {
+  return inspectorAvailable && !fileWorkspaceExpanded;
+}
+
+export function composerMetaItemsForFileWorkspaceSurface(
+  metaItems: ComposerBarMetaItem[],
+  fileWorkspaceSurfaceActive: boolean,
+): ComposerBarMetaItem[] {
+  return fileWorkspaceSurfaceActive
+    ? metaItems.filter((item) => item.id === "model")
+    : metaItems;
+}
 
 export type WorkbenchNavSection = ExtensionSection | "scheduled-tasks";
 
@@ -1742,6 +1792,14 @@ export function App() {
     readStoredBoolean("awaken:layout:inspectorCollapsed", false),
   );
   const [fileWorkspaceOpen, setFileWorkspaceOpen] = useState(false);
+  const [fileWorkspaceExpanded, setFileWorkspaceExpanded] = useState(false);
+  const [expandedWorkspaceSurface, setExpandedWorkspaceSurface] = useState<
+    ExpandedWorkspaceSurface
+  >("file");
+  const [expandedFileComposerIdleMode, setExpandedFileComposerIdleMode] =
+    useState<ExpandedFileComposerIdleMode>("full");
+  const [expandedFileComposerTrackedRun, setExpandedFileComposerTrackedRun] =
+    useState<ExpandedFileComposerTrackedRun>();
   const [fileWorkspaceMode, setFileWorkspaceMode] =
     useState<ProjectFileWorkspaceMode>("files");
   const [fileWorkspaceTabsState, dispatchFileWorkspaceTabs] = useReducer(
@@ -3289,12 +3347,56 @@ export function App() {
   const activeProjectId = runtimeState.activeThreadId
     ? `thread:${runtimeState.activeThreadId}`
     : selectedProjectId;
-  const showCenterComposer = shouldUseCenterComposer({
-    hasNarrative: visibleNarrativeItems.length > 0,
-    hasRun: Boolean(runtimeState.runId),
-    hasNotice: Boolean(notice),
-    hasError: Boolean(runtimeState.errorMessage),
-    needsRestart: desktopNeedsRestart,
+  const fileWorkspaceExpandedActive =
+    fileWorkspaceOpen && fileWorkspaceExpanded;
+  const fileWorkspaceSurfaceActive =
+    fileWorkspaceExpandedActive && expandedWorkspaceSurface === "file";
+  const expandedFileComposerCompletionKeyValue =
+    expandedFileComposerCompletionKey({
+      trackedRun: expandedFileComposerTrackedRun,
+      currentThreadId:
+        runtimeState.activeThreadId ?? runtimeState.threadId ?? undefined,
+      currentRunId: runtimeState.runId ?? undefined,
+      status: runtimeState.status,
+      completedAtMs: runtimeState.runCompletedAtMs,
+    });
+  const expandedFileComposerCompleted = Boolean(
+    expandedFileComposerCompletionKeyValue,
+  );
+  const expandedFileComposerElapsedMs =
+    expandedFileComposerCompletionKeyValue &&
+    typeof runtimeState.runStartedAtMs === "number" &&
+    typeof runtimeState.runCompletedAtMs === "number"
+      ? Math.max(
+          0,
+          runtimeState.runCompletedAtMs - runtimeState.runStartedAtMs,
+        )
+      : undefined;
+  const expandedFileComposerForceFull = Boolean(
+    composerRuntimePanels.length > 0 ||
+      activeUserQuestion ||
+      activeExternalInteraction,
+  );
+  const expandedFileComposerHasDraft = hasExpandedFileComposerDraft({
+    effectiveText: trimmedEffectiveComposerValue,
+    attachmentCount: composerAttachments.length,
+    tokenCount: composerTokens.length,
+  });
+  const dockComposerMetaItems = composerMetaItemsForFileWorkspaceSurface(
+    composerMetaItems,
+    fileWorkspaceSurfaceActive,
+  );
+  const showCenterComposer = shouldUseCenterComposerWithFileWorkspace({
+    standardCenterComposer: shouldUseCenterComposer({
+      hasNarrative: visibleNarrativeItems.length > 0,
+      hasRun: Boolean(runtimeState.runId),
+      hasNotice: Boolean(notice),
+      hasError: Boolean(runtimeState.errorMessage),
+      needsRestart: desktopNeedsRestart,
+    }),
+    fileWorkspaceOpen,
+    fileWorkspaceExpanded,
+    expandedWorkspaceSurface,
   });
   const {
     activeWorkbenchTurnId,
@@ -3331,7 +3433,8 @@ export function App() {
       bottomSafeArea: composerBarSafeAreaPx,
     }),
   });
-  const showTurnMarkerRail = turnMarkerDisplay.mode !== "hidden";
+  const showTurnMarkerRail =
+    !fileWorkspaceSurfaceActive && turnMarkerDisplay.mode !== "hidden";
   const activeNavSection = workbenchNavSectionForNavId(activeNavId);
   const activeExtensionSection: ExtensionSection | undefined =
     activeNavSection === "connectors" || activeNavSection === "skills"
@@ -3721,6 +3824,8 @@ export function App() {
         return;
       }
     }
+    const trackExpandedFileRun = fileWorkspaceSurfaceActive;
+    setExpandedFileComposerTrackedRun(undefined);
     unsubscribeRef.current?.();
     unsubscribeRef.current = null;
     threadLoadSeqRef.current += 1;
@@ -3795,6 +3900,12 @@ export function App() {
         },
       };
       const run = await runtimeClient.startRun(startRunRequest);
+      if (trackExpandedFileRun) {
+        setExpandedFileComposerTrackedRun({
+          threadId: run.threadId,
+          runId: run.runId,
+        });
+      }
       if (runProjectId === DEFAULT_WORKSPACE_PROJECT_ID) {
         setRemovedProjectIds((current) =>
           current.filter(
@@ -4652,6 +4763,11 @@ export function App() {
   }
 
   function handleToggleInspectorCollapsed(): void {
+    if (fileWorkspaceExpanded) {
+      setFileWorkspaceExpanded(false);
+      setExpandedWorkspaceSurface("file");
+      setExpandedFileComposerIdleMode("full");
+    }
     setInspectorCollapsed((collapsed) => {
       const nextCollapsed = !collapsed;
       if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
@@ -4667,6 +4783,7 @@ export function App() {
       inspectorWidthBeforeFileWorkspaceRef.current = inspectorWidth;
     }
     setFileWorkspaceOpen(true);
+    setExpandedWorkspaceSurface("file");
     setFileWorkspaceMode(mode);
     setInspectorWidth(FILE_WORKSPACE_INSPECTOR_WIDTH);
     setInspectorCollapsed(false);
@@ -4675,8 +4792,63 @@ export function App() {
     }
   }
 
+  function handleExpandFileWorkspace(): void {
+    setFileWorkspaceExpanded(true);
+    setExpandedWorkspaceSurface("file");
+    setExpandedFileComposerIdleMode("full");
+    setContextUsagePanelOpen(false);
+    setInspectorCollapsed(false);
+    if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
+      inspectorCollapsedBeforeResponsiveRef.current = false;
+    }
+  }
+
+  function handleContractFileWorkspace(): void {
+    setFileWorkspaceExpanded(false);
+    setExpandedWorkspaceSurface("file");
+    setExpandedFileComposerIdleMode("full");
+    setExpandedFileComposerTrackedRun(undefined);
+  }
+
+  function handleShowConversationSurface(): void {
+    setExpandedWorkspaceSurface("conversation");
+  }
+
+  function handleShowFileWorkspaceSurface(): void {
+    if (fileWorkspaceExpanded) {
+      setContextUsagePanelOpen(false);
+      setExpandedWorkspaceSurface("file");
+      setExpandedFileComposerIdleMode("full");
+    }
+  }
+
+  function handleShowExpandedFileComposerFull(): void {
+    setExpandedFileComposerTrackedRun(undefined);
+    setExpandedFileComposerIdleMode("full");
+    requestComposerFocus();
+  }
+
+  function handleExpandedFilePreviewPrimaryClick(): void {
+    if (
+      !shouldCollapseExpandedFileComposer({
+        active: fileWorkspaceSurfaceActive,
+        busy: isBusy,
+        forceFull: expandedFileComposerForceFull,
+        hasDraft: expandedFileComposerHasDraft,
+      })
+    ) {
+      return;
+    }
+    setExpandedFileComposerTrackedRun(undefined);
+    setExpandedFileComposerIdleMode("rail");
+  }
+
   function handleCloseFileWorkspace(): void {
     setFileWorkspaceOpen(false);
+    setFileWorkspaceExpanded(false);
+    setExpandedWorkspaceSurface("file");
+    setExpandedFileComposerIdleMode("full");
+    setExpandedFileComposerTrackedRun(undefined);
     dispatchFileWorkspaceTabs({ type: "reset" });
     const previousWidth = inspectorWidthBeforeFileWorkspaceRef.current;
     inspectorWidthBeforeFileWorkspaceRef.current = null;
@@ -4688,11 +4860,13 @@ export function App() {
   function handleOpenProjectFileTab(tab: ProjectFileWorkspaceTab): void {
     dispatchFileWorkspaceTabs({ type: "open", tab });
     setFileWorkspaceMode(tab.mode);
+    handleShowFileWorkspaceSurface();
   }
 
   function handleActivateProjectFileTab(tab: ProjectFileWorkspaceTab): void {
     dispatchFileWorkspaceTabs({ type: "activate", tabId: tab.id });
     setFileWorkspaceMode(tab.mode);
+    handleShowFileWorkspaceSurface();
   }
 
   function handleCloseProjectFileTab(tabId: string): void {
@@ -5237,6 +5411,9 @@ export function App() {
   const visibleFileWorkspaceTabs = fileWorkspaceTabsState.tabs.filter(
     (tab) => tab.projectId === fileWorkspaceProjectId,
   );
+  const fileWorkspaceTabsAreActive =
+    !fileWorkspaceExpandedActive || expandedWorkspaceSurface === "file";
+  const currentConversationLabel = activeThread?.label?.trim() || "New Agent";
   const layoutStyle = {
     "--aw-sidebar-width": `${sidebarWidth}px`,
     "--aw-inspector-width": `${inspectorWidth}px`,
@@ -5426,7 +5603,10 @@ export function App() {
           }}
           inspectorCollapsed={inspectorPresentation.effectiveCollapsed}
           inspectorResizeHandleProps={
-            inspectorPresentation.available
+            shouldEnableInspectorResizeHandle({
+              inspectorAvailable: inspectorPresentation.available,
+              fileWorkspaceExpanded: fileWorkspaceExpandedActive,
+            })
               ? {
                   role: "separator",
                   "aria-label": "Resize inspector",
@@ -5448,6 +5628,37 @@ export function App() {
                 setSidebarCollapsed((collapsed) => !collapsed)
               }
               onNewTask={handleNewTask}
+              center={
+                fileWorkspaceExpandedActive && inspectorPresentation.available ? (
+                  <div
+                    className="workbench-conversation-tabs"
+                    role="tablist"
+                    aria-label="当前会话"
+                  >
+                    <button
+                      type="button"
+                      className={`workbench-conversation-tab${
+                        expandedWorkspaceSurface === "conversation"
+                          ? " is-active"
+                          : ""
+                      }`}
+                      role="tab"
+                      aria-selected={
+                        expandedWorkspaceSurface === "conversation"
+                      }
+                      title={currentConversationLabel}
+                      onClick={handleShowConversationSurface}
+                    >
+                      <MessageSquare
+                        size={16}
+                        strokeWidth={1.8}
+                        aria-hidden="true"
+                      />
+                      <span>{currentConversationLabel}</span>
+                    </button>
+                  </div>
+                ) : undefined
+              }
               right={
                 fileWorkspaceOpen && inspectorPresentation.available ? (
                   <div className="workbench-chrome-file-mode">
@@ -5458,7 +5669,9 @@ export function App() {
                     >
                       {visibleFileWorkspaceTabs.length > 0 ? (
                         visibleFileWorkspaceTabs.map((tab) => {
-                          const active = tab.id === activeFileWorkspaceTab?.id;
+                          const active =
+                            fileWorkspaceTabsAreActive &&
+                            tab.id === activeFileWorkspaceTab?.id;
                           const iconKind = projectFileIconKind({
                             kind: "file",
                             name: tab.name,
@@ -5507,20 +5720,29 @@ export function App() {
                         })
                       ) : (
                         <div
-                          className="project-files-tab is-active is-placeholder"
-                          role="tab"
-                          aria-selected="true"
+                          className={`project-files-tab is-placeholder${
+                            fileWorkspaceTabsAreActive ? " is-active" : ""
+                          }`}
+                          role="presentation"
                         >
-                          <FileIcon
-                            size={16}
-                            strokeWidth={1.8}
-                            aria-hidden="true"
-                          />
-                          <span className="project-files-tab__label">
-                            {fileWorkspaceMode === "browser"
-                              ? "浏览器"
-                              : "打开文件"}
-                          </span>
+                          <button
+                            type="button"
+                            className="project-files-tab__activate"
+                            role="tab"
+                            aria-selected={fileWorkspaceTabsAreActive}
+                            onClick={handleShowFileWorkspaceSurface}
+                          >
+                            <FileIcon
+                              size={16}
+                              strokeWidth={1.8}
+                              aria-hidden="true"
+                            />
+                            <span className="project-files-tab__label">
+                              {fileWorkspaceMode === "browser"
+                                ? "浏览器"
+                                : "打开文件"}
+                            </span>
+                          </button>
                           <button
                             type="button"
                             className="project-files-tab__close"
@@ -5532,6 +5754,18 @@ export function App() {
                         </div>
                       )}
                     </div>
+                    {fileWorkspaceExpandedActive ? (
+                      <Tooltip label="收起面板" placement="bottom">
+                        <button
+                          type="button"
+                          className="workbench-chrome-icon workbench-chrome-expand-toggle"
+                          aria-label="收起面板"
+                          onClick={handleContractFileWorkspace}
+                        >
+                          <Minimize2 size={14} strokeWidth={1.9} />
+                        </button>
+                      </Tooltip>
+                    ) : null}
                     <button
                       type="button"
                       className="workbench-chrome-icon workbench-chrome-panel-toggle"
@@ -5693,8 +5927,13 @@ export function App() {
               ) : (
                 <WorkbenchShell
                   inspectorCollapsed={inspectorCollapsed}
+                  inspectorExpanded={fileWorkspaceExpandedActive}
+                  inspectorSurfaceActive={
+                    !fileWorkspaceExpandedActive || fileWorkspaceSurfaceActive
+                  }
                   stage={
                     <RunStage
+                      contentInactive={fileWorkspaceSurfaceActive}
                       scrollRef={
                         showCenterComposer
                           ? undefined
@@ -5742,7 +5981,8 @@ export function App() {
                               ))}
                             </nav>
                           ) : null}
-                          {returnToLatestVisible ? (
+                          {!fileWorkspaceSurfaceActive &&
+                          returnToLatestVisible ? (
                             <div
                               className="return-to-latest-overlay"
                               style={{ bottom: returnToLatestBottomPx }}
@@ -5762,7 +6002,9 @@ export function App() {
                               </button>
                             </div>
                           ) : null}
-                          {contextUsagePanelOpen && contextPanelData ? (
+                          {!fileWorkspaceSurfaceActive &&
+                          contextUsagePanelOpen &&
+                          contextPanelData ? (
                             <div
                               className="context-usage-overlay"
                               style={{
@@ -5788,36 +6030,62 @@ export function App() {
                               {renderComposerRuntimePanels()}
                               {renderUserQuestionPrompt()}
                               {renderExternalActionGate()}
-                              <ComposerBar
-                                value={composerValue}
-                                onChange={setComposerValue}
-                                onStructuredInputChange={
-                                  handleComposerStructuredInputChange
+                              <ExpandedFileComposer
+                                active={fileWorkspaceSurfaceActive}
+                                idleMode={expandedFileComposerIdleMode}
+                                running={isBusy}
+                                completed={expandedFileComposerCompleted}
+                                completedElapsedMs={
+                                  expandedFileComposerElapsedMs
                                 }
-                                onSubmit={() => {
+                                forceFull={expandedFileComposerForceFull}
+                                onShowCompact={() =>
+                                  setExpandedFileComposerIdleMode("compact")
+                                }
+                                onShowFull={
+                                  handleShowExpandedFileComposerFull
+                                }
+                                onStop={() => {
                                   void handleComposerSubmit();
                                 }}
-                                onAddContext={handleAddContext}
-                                placeholder=""
-                                disabled={composerBarState.disabled}
-                                isReady={composerBarState.isReady}
-                                submitMode={composerBarState.submitMode}
-                                submitDisabled={composerBarState.submitDisabled}
-                                variant="dock"
-                                metaItems={composerMetaItems}
-                                focusRequest={composerFocusRequest}
-                                attachments={composerBarAttachments}
-                                tokens={composerBarTokens}
-                                slashPalette={composerBarSlashPalette}
-                                onInputKeyDown={handleComposerInputKeyDown}
-                                onRemoveAttachment={
-                                  handleRemoveComposerAttachment
-                                }
-                                onRemoveToken={handleRemoveComposerToken}
-                                onPasteImages={(files) => {
-                                  void handlePasteImages(files);
-                                }}
-                              />
+                              >
+                                <ComposerBar
+                                  value={composerValue}
+                                  onChange={setComposerValue}
+                                  onStructuredInputChange={
+                                    handleComposerStructuredInputChange
+                                  }
+                                  onSubmit={() => {
+                                    void handleComposerSubmit();
+                                  }}
+                                  onAddContext={handleAddContext}
+                                  placeholder={
+                                    fileWorkspaceSurfaceActive
+                                      ? "输入后续任务…"
+                                      : ""
+                                  }
+                                  disabled={composerBarState.disabled}
+                                  isReady={composerBarState.isReady}
+                                  submitMode={composerBarState.submitMode}
+                                  submitDisabled={
+                                    composerBarState.submitDisabled
+                                  }
+                                  variant="dock"
+                                  metaItems={dockComposerMetaItems}
+                                  focusRequest={composerFocusRequest}
+                                  attachments={composerBarAttachments}
+                                  tokens={composerBarTokens}
+                                  slashPalette={composerBarSlashPalette}
+                                  onInputKeyDown={handleComposerInputKeyDown}
+                                  onRemoveAttachment={
+                                    handleRemoveComposerAttachment
+                                  }
+                                  onRemoveToken={handleRemoveComposerToken}
+                                  onPasteImages={(files) => {
+                                    void handlePasteImages(files);
+                                  }}
+                                />
+                              </ExpandedFileComposer>
                             </div>
                           </ComposerDock>
                         )
@@ -5957,8 +6225,13 @@ export function App() {
                         folders={fileWorkspaceFolders}
                         initialMode={fileWorkspaceMode}
                         activeTab={activeFileWorkspaceTab}
+                        expanded={fileWorkspaceExpandedActive}
                         onWorkspaceModeChange={setFileWorkspaceMode}
                         onOpenTab={handleOpenProjectFileTab}
+                        onExpand={handleExpandFileWorkspace}
+                        onPreviewPrimaryClick={
+                          handleExpandedFilePreviewPrimaryClick
+                        }
                       />
                     ) : (
                       <InspectorRail

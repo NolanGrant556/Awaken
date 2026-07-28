@@ -365,7 +365,7 @@ export function ProjectFilesWorkspace({
         listings,
         expandedPaths,
         selectedPath:
-          activeTab?.folderPath === selectedFolder?.path
+          activeTab && activeTab.folderPath === selectedFolder?.path
             ? activeTab.relativePath
             : undefined,
         filter,

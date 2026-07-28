@@ -19,6 +19,7 @@ import {
   contextUsagePanelData,
   isUserQuestionSelectionAnswered,
   nextUserQuestionPromptIndex,
+  nextSubagentInspectorTaskId,
   promptNarrativeTokensForComposer,
   promptTextAfterTokenLeadingText,
   promptTokenViews,
@@ -2569,6 +2570,11 @@ describe("App workbench presentation", () => {
       effectiveCollapsed: true,
       rootClassName: "desktop-root-inspector-hidden",
     });
+  });
+
+  it("toggles the subagent inspector detail without changing task identity", () => {
+    expect(nextSubagentInspectorTaskId(undefined, "task-1")).toBe("task-1");
+    expect(nextSubagentInspectorTaskId("task-1", "task-1")).toBeUndefined();
   });
 
   it("uses the dock composer only after a run exists or narrative appears", () => {

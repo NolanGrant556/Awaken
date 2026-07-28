@@ -245,6 +245,13 @@ export function workbenchInspectorPresentation(
   };
 }
 
+export function nextSubagentInspectorTaskId(
+  currentTaskId: string | undefined,
+  fallbackTaskId: string | undefined,
+): string | undefined {
+  return currentTaskId ? undefined : fallbackTaskId;
+}
+
 const emptyUserQuestionSelection = (): UserQuestionSelection => ({
   selected: [],
   otherText: "",
@@ -4704,7 +4711,22 @@ export function App() {
     setSelectedSubagentTaskId(
       taskId ?? selectedSubagent?.taskId ?? subagentTasks[0]?.taskId,
     );
-    setInspectorWidth((width) => Math.max(width, 420));
+    setInspectorCollapsed(false);
+    if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
+      inspectorCollapsedBeforeResponsiveRef.current = false;
+    }
+  }
+
+  function handleToggleSubagentInspector(): void {
+    if (fileWorkspaceOpen) {
+      handleCloseFileWorkspace();
+    }
+    setSelectedSubagentTaskId((currentTaskId) =>
+      nextSubagentInspectorTaskId(
+        currentTaskId,
+        selectedSubagent?.taskId ?? subagentTasks[0]?.taskId,
+      ),
+    );
     setInspectorCollapsed(false);
     if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
       inspectorCollapsedBeforeResponsiveRef.current = false;
@@ -5976,7 +5998,7 @@ export function App() {
                           } else if (id === "browser") {
                             handleOpenFileWorkspace("browser");
                           } else if (id === "subagents") {
-                            handleOpenSubagent();
+                            handleToggleSubagentInspector();
                           }
                         }}
                       >

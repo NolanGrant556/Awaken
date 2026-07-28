@@ -47,6 +47,28 @@ describe("ProjectFilesWorkspace", () => {
     root = createRoot(container);
   });
 
+  it("renders the browser empty state without a project or active file tab", async () => {
+    await act(async () => {
+      root.render(
+        <ProjectFilesWorkspace
+          runtimeClient={{
+            listProjectDirectory: vi.fn(),
+            ...previewRuntimeClient(),
+          }}
+          folders={[]}
+          initialMode="browser"
+        />,
+      );
+    });
+    await settle();
+
+    expect(container.textContent).toContain("浏览器");
+    expect(container.textContent).toContain("预览 Html 文件");
+    expect(
+      container.querySelector(".project-files-preview-empty.is-centered"),
+    ).not.toBeNull();
+  });
+
   it("toggles the complete file list from the pathbar folder button", async () => {
     const listProjectDirectory = vi.fn(async () => ({
       ok: true as const,

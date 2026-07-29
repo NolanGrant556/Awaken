@@ -3,8 +3,8 @@ package skills
 import (
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -458,26 +458,90 @@ Body.
 	}
 }
 
-func TestSkillRegistryOnChange(t *testing.T) {
+func TestSkillRegistryOnChangeTracksCatalogAndRuntimeBindingChanges(t *testing.T) {
 	reg := NewSkillRegistry(nil)
-	var called atomic.Bool
+	changes := make(chan struct{}, 4)
 	reg.SetOnChange(func() {
-		called.Store(true)
+		changes <- struct{}{}
 	})
 
 	userDir := t.TempDir()
-	writeTestSkillPackage(t, userDir, "x", `---
+	initial := `---
 name: X
 description: x
 ---
 Body.
-`)
-	reg.LoadFromSources(map[SourceOrigin]string{SourceUser: userDir})
+`
+	writeTestSkillPackage(t, userDir, "x", initial)
+	dirs := map[SourceOrigin]string{SourceUser: userDir}
+	reg.LoadFromSources(dirs)
+	expectSkillRegistryChange(t, changes)
+	initialFingerprint := reg.ToolStateFingerprint()
 
-	// onChange runs in a goroutine, give it a moment.
-	if !called.Load() {
-		// Retry the callback manually.
-		reg.FireOnChange()
+	reg.ReloadLocalSources(dirs)
+	expectNoSkillRegistryChange(t, changes)
+	if reg.ToolStateFingerprint() != initialFingerprint {
+		t.Fatal("same-source same-content reload changed the published fingerprint")
+	}
+
+	reg.MarkInvoked("x", time.Now())
+	expectNoSkillRegistryChange(t, changes)
+	if reg.ToolStateFingerprint() != initialFingerprint {
+		t.Fatal("recent-use metadata changed the model/runtime fingerprint")
+	}
+	reg.SetConnectorAvailable("unused-connector", true)
+	expectNoSkillRegistryChange(t, changes)
+	if reg.ToolStateFingerprint() != initialFingerprint {
+		t.Fatal("readiness diagnostics changed the model/runtime fingerprint")
+	}
+
+	catalogChanged := `---
+name: X
+description: changed catalog description
+---
+Body.
+`
+	if err := os.WriteFile(filepath.Join(userDir, "x", "SKILL.md"), []byte(catalogChanged), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reg.ReloadLocalSources(dirs)
+	expectSkillRegistryChange(t, changes)
+	catalogFingerprint := reg.ToolStateFingerprint()
+	if catalogFingerprint == initialFingerprint {
+		t.Fatal("catalog change retained the old published fingerprint")
+	}
+
+	bodyChanged := `---
+name: X
+description: changed catalog description
+---
+Different runtime instructions.
+`
+	if err := os.WriteFile(filepath.Join(userDir, "x", "SKILL.md"), []byte(bodyChanged), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reg.ReloadLocalSources(dirs)
+	expectSkillRegistryChange(t, changes)
+	if reg.ToolStateFingerprint() == catalogFingerprint {
+		t.Fatal("SKILL.md body change did not update the invocation binding fingerprint")
+	}
+}
+
+func expectSkillRegistryChange(t *testing.T, changes <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-changes:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Skill registry change")
+	}
+}
+
+func expectNoSkillRegistryChange(t *testing.T, changes <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-changes:
+		t.Fatal("unexpected Skill registry change")
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 

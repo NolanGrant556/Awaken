@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"sync"
@@ -85,6 +86,36 @@ func RegisterToolForceWithMode(t Tool, mode DefinitionValidationMode) error {
 	version := nextRegistryVersionLocked()
 	toolRegistry[t.Name()] = registeredToolFromResolution(t, report, version)
 	return nil
+}
+
+// RegisterToolForceIfChanged preserves force-registration semantics for a
+// missing or genuinely changed binding while making an identical refresh a
+// no-op. The returned bool reports whether the registry generation and
+// RegistrationID changed.
+func RegisterToolForceIfChanged(t Tool) (bool, error) {
+	return RegisterToolForceIfChangedWithMode(t, DefinitionValidationCompat)
+}
+
+// RegisterToolForceIfChangedWithMode is the validation-mode variant of
+// RegisterToolForceIfChanged. RegistrationID remains the execution pin: a
+// different runtime instance or resolved contract receives a new identity,
+// while the same runtime and immutable definition retain the existing one.
+func RegisterToolForceIfChangedWithMode(t Tool, mode DefinitionValidationMode) (bool, error) {
+	if err := ValidateToolWithMode(t, mode); err != nil {
+		return false, err
+	}
+	report := ResolveDefinitionReport(t)
+	candidate := registeredToolFromResolution(t, report, 0)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if existing, ok := toolRegistry[t.Name()]; ok && sameRegisteredToolBinding(existing, candidate) {
+		return false, nil
+	}
+	version := nextRegistryVersionLocked()
+	candidate.RegistrationID = fmt.Sprintf("toolreg_%016x", version)
+	toolRegistry[t.Name()] = candidate
+	return true, nil
 }
 
 func MustRegisterTool(tool Tool) {
@@ -272,6 +303,28 @@ func cloneRegisteredTool(registered RegisteredTool) RegisteredTool {
 	registered.Warnings = append([]string(nil), registered.Warnings...)
 	registered.Provider = cloneProviderManifest(registered.Provider)
 	return registered
+}
+
+func sameRegisteredToolBinding(existing, candidate RegisteredTool) bool {
+	return sameToolRuntime(existing.Runtime, candidate.Runtime) &&
+		reflect.DeepEqual(existing.Definition, candidate.Definition) &&
+		existing.Origin == candidate.Origin &&
+		existing.Quality == candidate.Quality &&
+		reflect.DeepEqual(existing.Warnings, candidate.Warnings) &&
+		existing.PreserveInputObject == candidate.PreserveInputObject &&
+		reflect.DeepEqual(existing.Provider, candidate.Provider)
+}
+
+func sameToolRuntime(existing, candidate Tool) bool {
+	if existing == nil || candidate == nil {
+		return existing == nil && candidate == nil
+	}
+	existingValue := reflect.ValueOf(existing)
+	candidateValue := reflect.ValueOf(candidate)
+	if existingValue.Type() != candidateValue.Type() || !existingValue.Type().Comparable() {
+		return false
+	}
+	return existingValue.Interface() == candidateValue.Interface()
 }
 
 func nextRegistryVersionLocked() uint64 {

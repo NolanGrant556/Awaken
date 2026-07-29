@@ -1,5 +1,188 @@
 @import "../../tokens/components.css";
 
+.aw-model-settings-page {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+}
+
+.aw-model-settings-page__content {
+  box-sizing: border-box;
+  width: min(calc(100% - 36px), var(--model-settings-content-width, 1120px));
+  margin: 0 0 0 18px;
+  padding: 24px 0 36px;
+}
+
+.aw-model-orbit {
+  position: relative;
+  box-sizing: border-box;
+  height: 168px;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse at 74% 112%, rgba(112, 92, 232, 0.14), transparent 34%),
+    radial-gradient(ellipse at 86% 18%, rgba(105, 164, 255, 0.1), transparent 38%),
+    var(--aw-surface-raised);
+}
+
+.aw-model-orbit--dark {
+  background:
+    radial-gradient(ellipse at 74% 112%, rgba(125, 105, 255, 0.13), transparent 36%),
+    radial-gradient(ellipse at 86% 18%, rgba(67, 126, 225, 0.08), transparent 40%),
+    var(--aw-surface-raised);
+}
+
+.aw-model-orbit::after {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: linear-gradient(90deg, var(--aw-surface-raised) 0%, transparent 34%, transparent 100%);
+  pointer-events: none;
+  content: "";
+}
+
+.aw-model-orbit__title {
+  position: absolute;
+  bottom: 18px;
+  left: 28px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin: 0;
+  color: var(--aw-text-primary);
+  font-size: 30px;
+  font-weight: var(--aw-font-weight-heavy);
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.aw-model-orbit__visual {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.aw-model-orbit__ring {
+  position: absolute;
+  bottom: 0;
+  left: 75%;
+  border: 1px solid color-mix(in srgb, var(--aw-text-tertiary) 20%, transparent);
+  border-radius: 50%;
+  transform: translate(-50%, 50%);
+}
+
+.aw-model-orbit__ring--inner {
+  width: 210px;
+  height: 210px;
+}
+
+.aw-model-orbit__ring--middle {
+  width: 320px;
+  height: 320px;
+}
+
+.aw-model-orbit__ring--outer {
+  width: 430px;
+  height: 430px;
+}
+
+.aw-model-orbit__node {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  display: flex;
+  width: 38px;
+  height: 50%;
+  margin-left: -19px;
+  align-items: flex-start;
+  justify-content: center;
+  transform-origin: center bottom;
+  animation-duration: 16s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.aw-model-orbit__ring--middle .aw-model-orbit__node {
+  animation-duration: 20s;
+}
+
+.aw-model-orbit__ring--outer .aw-model-orbit__node {
+  animation-duration: 24s;
+}
+
+.aw-model-orbit__node--cw {
+  animation-name: aw-model-orbit-drift-cw;
+}
+
+.aw-model-orbit__node--ccw {
+  animation-name: aw-model-orbit-drift-ccw;
+}
+
+.aw-model-orbit__logo {
+  width: 38px;
+  height: 38px;
+  margin-top: -19px;
+  border-radius: 50%;
+  background: var(--aw-surface-raised);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--aw-text-primary) 9%, transparent);
+  animation-duration: inherit;
+  animation-timing-function: inherit;
+  animation-iteration-count: inherit;
+}
+
+.aw-model-orbit__logo--cw {
+  animation-name: aw-model-orbit-counter-cw;
+}
+
+.aw-model-orbit__logo--ccw {
+  animation-name: aw-model-orbit-counter-ccw;
+}
+
+.aw-model-orbit__logo .aw-provider-logo {
+  border-color: color-mix(in srgb, var(--aw-border-main) 66%, transparent);
+  border-radius: 50%;
+  box-shadow: none;
+}
+
+.aw-model-orbit__sphere {
+  position: absolute;
+  bottom: 0;
+  left: 75%;
+  width: 150px;
+  height: 150px;
+  transform: translate(-50%, 50%);
+}
+
+.aw-model-orbit__sphere-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@keyframes aw-model-orbit-drift-cw {
+  from { transform: rotate(var(--aw-model-orbit-angle)); }
+  to { transform: rotate(calc(var(--aw-model-orbit-angle) + 360deg)); }
+}
+
+@keyframes aw-model-orbit-drift-ccw {
+  from { transform: rotate(var(--aw-model-orbit-angle)); }
+  to { transform: rotate(calc(var(--aw-model-orbit-angle) - 360deg)); }
+}
+
+@keyframes aw-model-orbit-counter-cw {
+  from { transform: rotate(var(--aw-model-orbit-counter-angle)); }
+  to { transform: rotate(calc(var(--aw-model-orbit-counter-angle) - 360deg)); }
+}
+
+@keyframes aw-model-orbit-counter-ccw {
+  from { transform: rotate(var(--aw-model-orbit-counter-angle)); }
+  to { transform: rotate(calc(var(--aw-model-orbit-counter-angle) + 360deg)); }
+}
+
 .aw-model-settings {
   display: grid;
   grid-template-columns: 124px minmax(0, 1fr);
@@ -81,6 +264,11 @@
 }
 
 @media (max-width: 980px) {
+  .aw-model-settings-page__content {
+    width: min(calc(100% - 32px), var(--model-settings-content-width, 1120px));
+    margin-inline: auto;
+  }
+
   .aw-model-settings {
     grid-template-columns: 1fr;
     gap: 16px;
@@ -101,8 +289,31 @@
 }
 
 @media (max-width: 720px) {
+  .aw-model-orbit {
+    height: 144px;
+  }
+
+  .aw-model-orbit__title {
+    bottom: 16px;
+    left: 24px;
+    gap: 10px;
+    font-size: 28px;
+  }
+
+  .aw-model-orbit__visual {
+    transform: scale(0.86);
+    transform-origin: 75% 100%;
+  }
+
   .aw-model-settings__header {
     align-items: stretch;
     flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-model-orbit__node,
+  .aw-model-orbit__logo {
+    animation-play-state: paused;
   }
 }

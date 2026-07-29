@@ -4,6 +4,7 @@ import {
   AwakenSettingsTabs,
   type AwakenSettingsTabItem,
 } from "../AwakenSettingsTabs";
+import { AwakenModelOrbitHero } from "./AwakenModelOrbitHero";
 
 export type AwakenModelSettingsProps = {
   tabs: AwakenSettingsTabItem[];
@@ -11,6 +12,8 @@ export type AwakenModelSettingsProps = {
   views: AwakenSettingsTabItem[];
   activeViewId: string;
   title: string;
+  pageTitle?: string;
+  theme?: "light" | "dark";
   description?: ReactNode;
   message?: ReactNode;
   children: ReactNode;
@@ -24,6 +27,8 @@ export function AwakenModelSettings({
   views,
   activeViewId,
   title,
+  pageTitle = "模型",
+  theme = "light",
   description,
   message,
   children,
@@ -31,30 +36,35 @@ export function AwakenModelSettings({
   onSelectView,
 }: AwakenModelSettingsProps) {
   return (
-    <section className="aw-model-settings" aria-label="模型">
-      <aside className="aw-model-settings__rail" aria-label="模型接入类型">
-        <AwakenSettingsTabs
-          items={tabs}
-          activeId={activeTabId}
-          ariaLabel="模型接入类型"
-          onSelect={onSelectTab}
-        />
-      </aside>
-      <div className="aw-model-settings__workspace">
-        <header className="aw-model-settings__header">
-          <div className="aw-model-settings__heading">
-            <h2>{title}</h2>
-            {description ? <p>{description}</p> : null}
+    <section className="aw-model-settings-page" aria-label="模型">
+      <AwakenModelOrbitHero theme={theme} title={pageTitle} />
+      <div className="aw-model-settings-page__content">
+        <div className="aw-model-settings">
+          <aside className="aw-model-settings__rail" aria-label="模型接入类型">
+            <AwakenSettingsTabs
+              items={tabs}
+              activeId={activeTabId}
+              ariaLabel="模型接入类型"
+              onSelect={onSelectTab}
+            />
+          </aside>
+          <div className="aw-model-settings__workspace">
+            <header className="aw-model-settings__header">
+              <div className="aw-model-settings__heading">
+                <h2>{title}</h2>
+                {description ? <p>{description}</p> : null}
+              </div>
+              <AwakenSettingsTabs
+                items={views}
+                activeId={activeViewId}
+                ariaLabel={`${title}设置内容`}
+                onSelect={onSelectView}
+              />
+            </header>
+            {message ? <div className="model-settings-message">{message}</div> : null}
+            <div className="aw-model-settings__content">{children}</div>
           </div>
-          <AwakenSettingsTabs
-            items={views}
-            activeId={activeViewId}
-            ariaLabel={`${title}设置内容`}
-            onSelect={onSelectView}
-          />
-        </header>
-        {message ? <div className="model-settings-message">{message}</div> : null}
-        <div className="aw-model-settings__content">{children}</div>
+        </div>
       </div>
     </section>
   );

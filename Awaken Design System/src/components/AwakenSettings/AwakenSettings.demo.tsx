@@ -147,6 +147,7 @@ export function AwakenSettingsDemo() {
   } else {
     content = (
       <AwakenModelSettings
+        theme={previewTheme}
         tabs={modelAccessTabs}
         activeTabId={activeModelTabId}
         views={apiModelViews}
@@ -218,7 +219,7 @@ export function AwakenSettingsDemo() {
       <div className="aw-settings-demo__preview">
         <AwakenSettings
           presentation="embedded"
-          contentLayout={activeSectionId === "memory" ? "full-bleed" : "standard"}
+          contentLayout={activeSectionId === "memory" || activeSectionId === "models" ? "full-bleed" : "standard"}
           navItems={AwakenSettingsNavItems}
           activeSectionId={activeSectionId}
           sectionTitle={sectionTitles[activeSectionId] ?? "设置"}

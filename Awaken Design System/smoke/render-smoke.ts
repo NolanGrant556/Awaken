@@ -56,6 +56,24 @@ if (!productionCss.includes(".aw-memory-light-flow-layout")) {
   throw new Error("Production CSS is missing the shared AwakenMemoryLightFlow layout");
 }
 
+if (!productionCss.includes(".aw-model-orbit")) {
+  throw new Error("Production CSS is missing the shared model orbit header");
+}
+
+const modelOrbitKeyframes = [
+  "aw-model-orbit-drift-cw",
+  "aw-model-orbit-drift-ccw",
+  "aw-model-orbit-counter-cw",
+  "aw-model-orbit-counter-ccw",
+];
+
+if (
+  modelOrbitKeyframes.some((keyframe) => !productionCss.includes(keyframe)) ||
+  (productionCss.match(/360deg/g)?.length ?? 0) < modelOrbitKeyframes.length
+) {
+  throw new Error("Production CSS must preserve the complete 360-degree model orbit animations");
+}
+
 if (productionCss.includes("记忆控制")) {
   throw new Error("AwakenMemoryLightFlow layout must not inject a secondary memory-control heading");
 }

@@ -16,10 +16,20 @@ import {
 } from "../AwakenSearchSettings";
 import { AwakenSearchSettingsSample } from "../AwakenSearchSettings/AwakenSearchSettings.states";
 import { AwakenSettingsNavItems } from "../AwakenSettingsNav";
-import { AwakenSettingsProviderCard } from "../AwakenSettingsProviderCard";
-import { AwakenModelSettingsTabs } from "../AwakenSettingsTabs";
+import { AwakenSettingsProviderCard, AwakenSettingsProviderModal } from "../AwakenSettingsProviderCard";
 import type { AwakenThemeChoiceValue } from "../AwakenThemeChoiceGroup";
 import { AwakenSettings } from "./AwakenSettings";
+
+const modelAccessTabs = [
+  { id: "coding_plan", label: "Coding Plan" },
+  { id: "api", label: "API" },
+  { id: "agent_plan", label: "Agent Plan" },
+];
+
+const apiModelViews = [
+  { id: "connections", label: "配置 API Key" },
+  { id: "llm", label: "LLM 设置" },
+];
 
 const sectionTitles: Record<string, string> = {
   models: "模型",
@@ -33,6 +43,7 @@ const sectionTitles: Record<string, string> = {
 const configuredModel = {
   id: "deepseek",
   displayName: "DeepSeek",
+  brand: "deepseek" as const,
   modelId: "deepseek-v4-pro",
   enabled: true,
   contextWindow: 128_000,
@@ -52,7 +63,8 @@ const configuredModel = {
 export function AwakenSettingsDemo() {
   const [previewTheme, setPreviewTheme] = useState<"light" | "dark">("light");
   const [activeSectionId, setActiveSectionId] = useState("memory");
-  const [activeModelTabId, setActiveModelTabId] = useState("configure");
+  const [activeModelTabId, setActiveModelTabId] = useState("api");
+  const [activeModelViewId, setActiveModelViewId] = useState("connections");
   const [themeChoice, setThemeChoice] = useState<AwakenThemeChoiceValue>("system");
   const [searchProviders, setSearchProviders] = useState<AwakenSearchProviderItem[]>(
     AwakenSearchSettingsSample.providers,
@@ -64,6 +76,7 @@ export function AwakenSettingsDemo() {
   const [baseURL, setBaseURL] = useState("https://api.deepseek.com");
   const [apiKey, setApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
+  const [providerOpen, setProviderOpen] = useState(false);
   const [lastAction, setLastAction] = useState("当前预览与 Desktop 使用同一套设置页组件。");
   const originalThemeRef = useRef<string | null>(null);
 
@@ -134,15 +147,36 @@ export function AwakenSettingsDemo() {
   } else {
     content = (
       <AwakenModelSettings
-        tabs={AwakenModelSettingsTabs}
+        tabs={modelAccessTabs}
         activeTabId={activeModelTabId}
+        views={apiModelViews}
+        activeViewId={activeModelViewId}
+        title="API"
+        description="管理供应商 API Key 与按量调用的模型。"
         onSelectTab={setActiveModelTabId}
+        onSelectView={setActiveModelViewId}
       >
-        {activeModelTabId === "configure" ? (
-          <section className="model-provider-list" aria-label="模型配置">
-            <AwakenSettingsProviderCard name="DeepSeek" defaultExpanded>
+        {activeModelViewId === "connections" ? (
+          <>
+            <section className="model-provider-list" aria-label="模型配置">
+              <AwakenSettingsProviderCard
+                name="DeepSeek"
+                brand="deepseek"
+                selected={providerOpen}
+                onSelect={() => setProviderOpen(true)}
+              />
+            </section>
+            <AwakenSettingsProviderModal
+              open={providerOpen}
+              name="DeepSeek"
+              brand="deepseek"
+              status="connected"
+              caption="已配置 deepseek-v4-pro"
+              onClose={() => setProviderOpen(false)}
+            >
               <AwakenModelProviderForm
                 providerId="deepseek"
+                presentation="modal"
                 modelMode="select"
                 models={["deepseek-v4-pro", "deepseek-v4-flash"]}
                 modelId={modelId}
@@ -156,10 +190,11 @@ export function AwakenSettingsDemo() {
                 onApiKeyChange={setApiKey}
                 onShowApiKeyChange={setShowApiKey}
                 onTest={() => setLastAction("已模拟测试 DeepSeek 连接。")}
+                onCancel={() => setProviderOpen(false)}
                 onSubmit={() => setLastAction("已模拟提交 DeepSeek 模型配置。")}
               />
-            </AwakenSettingsProviderCard>
-          </section>
+            </AwakenSettingsProviderModal>
+          </>
         ) : (
           <AwakenConfiguredModels models={[configuredModel]} />
         )}

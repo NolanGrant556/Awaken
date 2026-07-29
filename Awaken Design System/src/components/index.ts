@@ -10,6 +10,7 @@ export * from "./AwakenComposerBar";
 export * from "./AwakenComposerDock";
 export * from "./AwakenComposerInput";
 export * from "./AwakenConfiguredModels";
+export * from "./AwakenProviderLogo";
 export * from "./AwakenCliConnectorDetailDialog";
 export * from "./AwakenConnectorBrandIcon";
 export * from "./AwakenConnectorCard";

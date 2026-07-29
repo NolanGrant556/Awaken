@@ -10,19 +10,25 @@ import {
   AwakenConfiguredModels,
   AwakenModelSettings,
   AwakenModelProviderForm,
+  type AwakenProviderBrand,
+  type AwakenProviderConnectionStatus,
   AwakenSettings,
   AwakenSettingsNavItems,
   AwakenSettingsProviderCard,
+  AwakenSettingsProviderModal,
 } from "@awaken/design-system";
 import { calculateAutoCompactThreshold } from "../../shared/runtime";
 import type {
+  AgentPlanAccount,
   AwakenTheme,
   AwakenThemePreference,
+  ModelAccessType,
   ModelProfileSaveRequest,
   ModelProvider,
   RuntimeModelProfileSummary,
 } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
+import { providerBrandForId } from "../model-provider-brand";
 import { PetsSettingsPanel } from "./PetsSettingsPanel";
 import { SearchSettingsPanel } from "./SearchSettingsPanel";
 import { MemorySettingsPanel } from "./MemorySettingsPanel";
@@ -44,13 +50,40 @@ export type DraftState = {
   requiresApiKey?: boolean;
 };
 
-type ModelSettingsSection = "configure" | "configured";
+type ModelSettingsSection = ModelAccessType;
+type ModelSettingsView = "connections" | "llm";
 type SettingsDialogSection = "models" | "search" | "memory" | "appearance" | "pets" | "acp";
+type ModelConnectionTestFeedback = {
+  tone: "success" | "error";
+  message: string;
+};
 
 const MODEL_SETTINGS_TABS = [
-  { id: "configure", label: "模型配置" },
-  { id: "configured", label: "已配置模型" },
+  { id: "coding_plan", label: "Coding Plan" },
+  { id: "api", label: "API" },
+  { id: "agent_plan", label: "Agent Plan" },
 ];
+
+const MODEL_SETTINGS_COPY: Record<
+  ModelSettingsSection,
+  { title: string; description: string; connectionLabel: string }
+> = {
+  coding_plan: {
+    title: "Coding Plan",
+    description: "管理套餐凭据与通过 Coding Plan 调用的模型。",
+    connectionLabel: "配置 Token",
+  },
+  api: {
+    title: "API",
+    description: "管理供应商 API Key 与按量调用的模型。",
+    connectionLabel: "配置 API Key",
+  },
+  agent_plan: {
+    title: "Agent Plan",
+    description: "管理 Agent Plan 账户以及套餐主模型。",
+    connectionLabel: "配置账户",
+  },
+};
 
 const SETTINGS_SECTION_TITLES: Record<SettingsDialogSection, string> = {
   models: "模型",
@@ -78,6 +111,23 @@ const MAX_TOKENS_DEFAULT = 8192;
 const MAX_TOKENS_MIN = 256;
 const MAX_TOKENS_MAX = 1_000_000;
 const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";
+
+function providerBrand(provider: ModelProvider): AwakenProviderBrand | undefined {
+  return providerBrandForId(provider.id);
+}
+
+function providerConnectionStatus(
+  providerProfiles: RuntimeModelProfileSummary[],
+  hasAgentPlanKey = false,
+): AwakenProviderConnectionStatus {
+  if (providerProfiles.some((profile) => profile.profileStatus === "ready")) {
+    return "connected";
+  }
+  if (providerProfiles.length > 0 || hasAgentPlanKey) {
+    return "attention";
+  }
+  return "unconfigured";
+}
 
 function credentialStatusLabel(
   status: RuntimeModelProfileSummary["profileStatus"],
@@ -232,6 +282,11 @@ function advancedWithModelCapability(
       overwrite || advanced?.supportsVideo === undefined
         ? capability.supportsVideo
         : advanced.supportsVideo,
+    supportsTools: capability.supportsTools ?? advanced?.supportsTools,
+    defaultReasoningEffort:
+      overwrite || advanced?.defaultReasoningEffort === undefined
+        ? capability.reasoningEffort?.defaultLevel
+        : advanced.defaultReasoningEffort,
   };
 }
 
@@ -306,7 +361,7 @@ function draftFromProvider(provider: ModelProvider): DraftState {
     authScheme: provider.authScheme,
     enabled: true,
     isDefault: true,
-    endpointId: provider.endpointModel ? provider.defaultModel : "",
+    endpointId: "",
     advanced,
   };
 }
@@ -381,9 +436,7 @@ export function toSaveRequest(
   provider: ModelProvider,
 ): ModelProfileSaveRequest {
   const endpointId = draft.endpointId.trim();
-  const modelId = provider.endpointModel
-    ? endpointId || draft.modelId
-    : draft.modelId;
+  const modelId = draft.modelId;
   const advanced = advancedWithModelCapability(
     provider,
     modelId,
@@ -421,15 +474,18 @@ export function DesktopSettingsDialog({
   onProfilesChanged,
   currentProjectId,
   initialSection = "models",
-  initialModelSection = "configure",
+  initialModelSection = "coding_plan",
 }: DesktopSettingsDialogProps) {
   const [providers, setProviders] = useState<ModelProvider[]>([]);
   const [profiles, setProfiles] = useState<RuntimeModelProfileSummary[]>([]);
+  const [agentPlanAccount, setAgentPlanAccount] = useState<AgentPlanAccount | null>(null);
   const [configuredDrafts, setConfiguredDrafts] = useState<
     Record<string, ConfiguredProfileDraft>
   >({});
   const [activeSection, setActiveSection] =
-    useState<ModelSettingsSection>("configure");
+    useState<ModelSettingsSection>("coding_plan");
+  const [activeModelView, setActiveModelView] =
+    useState<ModelSettingsView>("connections");
   const [activeSettingsSection, setActiveSettingsSection] =
     useState<SettingsDialogSection>(initialSection);
   const [expandedProviderId, setExpandedProviderId] = useState<string | null>(
@@ -442,12 +498,18 @@ export function DesktopSettingsDialog({
     null,
   );
   const [testing, setTesting] = useState(false);
+  const [testFeedback, setTestFeedback] =
+    useState<ModelConnectionTestFeedback | null>(null);
+  const [testingReasoning, setTestingReasoning] = useState(false);
+  const [refreshingAgentPlan, setRefreshingAgentPlan] = useState(false);
+  const [deletingAgentPlan, setDeletingAgentPlan] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const settingsRootRef = useRef<HTMLElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const expandedProviderIdRef = useRef<string | null>(null);
 
   const providerById = useMemo(() => {
     return new Map(providers.map((provider) => [provider.id, provider]));
@@ -463,16 +525,49 @@ export function DesktopSettingsDialog({
     return groupedProfiles;
   }, [profiles]);
 
+  const activeProviders = useMemo(
+    () =>
+      providers.filter(
+        (provider) =>
+          (provider.accessType ?? (provider.codingPreset ? "coding_plan" : "api")) ===
+          activeSection,
+      ),
+    [activeSection, providers],
+  );
+
+  const activeProfiles = useMemo(
+    () =>
+      profiles.filter((profile) => {
+        const provider = providerById.get(profile.providerId);
+        return (
+          (profile.accessType ??
+            provider?.accessType ??
+            (provider?.codingPreset ? "coding_plan" : "api")) === activeSection
+        );
+      }),
+    [activeSection, profiles, providerById],
+  );
+
   const loadModelSettings = useCallback(async () => {
     setMessage(null);
     try {
-      const [nextProviders, nextProfiles] = await Promise.all([
+      const [nextProviders, nextProfiles, agentPlanAccountResult] = await Promise.all([
         runtimeClient.listModelProviders(),
         runtimeClient.listModelProfiles(),
+        runtimeClient.getAgentPlanAccount().then(
+          (value) => ({ value, error: null }),
+          (error: unknown) => ({ value: null, error }),
+        ),
       ]);
       setProviders(nextProviders);
       setProfiles(nextProfiles);
-      setMessage(credentialRecoveryMessage(nextProfiles));
+      setAgentPlanAccount(agentPlanAccountResult.value);
+      const accountErrorMessage = agentPlanAccountResult.error
+        ? agentPlanAccountResult.error instanceof Error
+          ? agentPlanAccountResult.error.message
+          : "无法读取 Agent Plan 账户配置"
+        : null;
+      setMessage(accountErrorMessage ?? credentialRecoveryMessage(nextProfiles));
       setConfiguredDrafts(
         configuredDraftsFromProfiles(nextProfiles, nextProviders),
       );
@@ -482,7 +577,7 @@ export function DesktopSettingsDialog({
         const refreshedProfiles = await runtimeClient.listModelProfiles();
         setProviders(syncedProviders);
         setProfiles(refreshedProfiles);
-        setMessage(credentialRecoveryMessage(refreshedProfiles));
+        setMessage(accountErrorMessage ?? credentialRecoveryMessage(refreshedProfiles));
         setConfiguredDrafts(
           configuredDraftsFromProfiles(refreshedProfiles, syncedProviders),
         );
@@ -513,15 +608,22 @@ export function DesktopSettingsDialog({
     setExpandedProviderId(null);
     setDraft(null);
     setShowApiKey(false);
+    setTestFeedback(null);
   }
+
+  useEffect(() => {
+    expandedProviderIdRef.current = expandedProviderId;
+  }, [expandedProviderId]);
 
   useEffect(() => {
     if (!open) {
       setExpandedProviderId(null);
       setDraft(null);
       setActiveSection(initialModelSection);
+      setActiveModelView("connections");
       setActiveSettingsSection(initialSection);
       setShowApiKey(false);
+      setTestFeedback(null);
       setDeletingProfileId(null);
       setToastMessage(null);
       if (toastTimerRef.current !== null) {
@@ -545,6 +647,13 @@ export function DesktopSettingsDialog({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
+      if (expandedProviderIdRef.current !== null) {
+        setExpandedProviderId(null);
+        setDraft(null);
+        setShowApiKey(false);
+        expandedProviderIdRef.current = null;
+        return;
+      }
       onOpenChange(false);
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -594,6 +703,7 @@ export function DesktopSettingsDialog({
     setExpandedProviderId(provider.id);
     setDraft(createDraftForProvider(provider));
     setShowApiKey(false);
+    setTestFeedback(null);
     setMessage(null);
   }
 
@@ -603,10 +713,12 @@ export function DesktopSettingsDialog({
       setMessage("无法找到该模型供应商，请刷新后重试。");
       return;
     }
-    setActiveSection("configure");
+    setActiveSection(provider.accessType ?? (provider.codingPreset ? "coding_plan" : "api"));
+    setActiveModelView("connections");
     setExpandedProviderId(provider.id);
     setDraft(draftFromExistingProfile(profile, provider));
     setShowApiKey(false);
+    setTestFeedback(null);
     setMessage(
       profile.profileStatus === "unreadable"
         ? "请重新输入 API key。保存成功后会更新 ~/.awaken/.env 中该配置对应的变量。"
@@ -623,6 +735,7 @@ export function DesktopSettingsDialog({
       return;
     }
     setSaving(true);
+    setTestFeedback(null);
     setMessage(null);
     try {
       await runtimeClient.saveModelProfile(toSaveRequest(draft, provider));
@@ -649,24 +762,78 @@ export function DesktopSettingsDialog({
     const provider = providerById.get(draft.providerId);
     if (!provider) return;
     setTesting(true);
+    setTestFeedback(null);
     setMessage(null);
     try {
       const result = await runtimeClient.testModelProfile(
         toSaveRequest(draft, provider),
       );
-      showToast(result.message);
+      setTestFeedback({
+        tone: result.ok ? "success" : "error",
+        message: result.message,
+      });
     } catch (error) {
-      showToast(
-        error instanceof Error
+      setTestFeedback({
+        tone: "error",
+        message: error instanceof Error
           ? error.message
           : "连接测试失败：测试请求未完成。",
-      );
+      });
     } finally {
       setTesting(false);
     }
   }
 
-  const configuredHasChanges = profiles.some((profile) => {
+  async function testDraftReasoning(): Promise<void> {
+    if (!draft) return;
+    const provider = providerById.get(draft.providerId);
+    if (!provider) return;
+    setTestingReasoning(true);
+    setMessage(null);
+    try {
+      const result = await runtimeClient.testAgentPlanReasoningCapability(
+        toSaveRequest(draft, provider),
+      );
+      showToast(result.message);
+      await loadModelSettings();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "effort 验证失败");
+    } finally {
+      setTestingReasoning(false);
+    }
+  }
+
+  async function refreshAgentPlanModels(): Promise<void> {
+    setRefreshingAgentPlan(true);
+    setMessage(null);
+    try {
+      const account = await runtimeClient.refreshAgentPlanModels();
+      setAgentPlanAccount(account);
+      await loadModelSettings();
+      showToast(`Agent Plan 模型目录已刷新（${account.modelIds.length} 个）`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "刷新 Agent Plan 模型目录失败");
+    } finally {
+      setRefreshingAgentPlan(false);
+    }
+  }
+
+  async function deleteAgentPlanAccount(): Promise<void> {
+    if (!window.confirm("删除火山 Agent Plan 账户及其 API Key？")) return;
+    setDeletingAgentPlan(true);
+    setMessage(null);
+    try {
+      await runtimeClient.deleteAgentPlanAccount();
+      await loadModelSettings();
+      showToast("Agent Plan 账户已删除");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "删除 Agent Plan 账户失败");
+    } finally {
+      setDeletingAgentPlan(false);
+    }
+  }
+
+  const configuredHasChanges = activeProfiles.some((profile) => {
     const next = configuredDrafts[profile.id];
     if (!next) return false;
     return (
@@ -695,7 +862,10 @@ export function DesktopSettingsDialog({
   }
 
   function resetConfiguredDrafts(): void {
-    setConfiguredDrafts(configuredDraftsFromProfiles(profiles, providers));
+    setConfiguredDrafts((current) => ({
+      ...current,
+      ...configuredDraftsFromProfiles(activeProfiles, providers),
+    }));
     setMessage(null);
   }
 
@@ -812,7 +982,7 @@ export function DesktopSettingsDialog({
   }
 
   async function saveConfiguredDrafts(): Promise<void> {
-    const changedProfiles = profiles.filter((profile) => {
+    const changedProfiles = activeProfiles.filter((profile) => {
       const next = configuredDrafts[profile.id];
       if (!next) return false;
       return (
@@ -848,7 +1018,7 @@ export function DesktopSettingsDialog({
       }
       await loadModelSettings();
       onProfilesChanged();
-      showToast("已配置模型已保存");
+      showToast("LLM 设置已保存");
     } catch (error) {
       setMessage(
         error instanceof Error
@@ -894,12 +1064,31 @@ export function DesktopSettingsDialog({
     }
   }
 
+  const selectedProvider = expandedProviderId
+    ? activeProviders.find((provider) => provider.id === expandedProviderId) ?? null
+    : null;
+  const selectedProviderProfiles = selectedProvider
+    ? profilesByProviderId.get(selectedProvider.id) ?? []
+    : [];
+  const selectedProviderDraft = selectedProvider
+    ? draft?.providerId === selectedProvider.id
+      ? draft
+      : createDraftForProvider(selectedProvider)
+    : null;
+  const selectedProviderStatus = selectedProvider
+    ? providerConnectionStatus(
+        selectedProviderProfiles,
+        selectedProvider.accessType === "agent_plan" && agentPlanAccount?.hasKey === true,
+      )
+    : "unconfigured";
+
   if (!open) return null;
 
   return (
       <AwakenSettings
         rootRef={settingsRootRef}
         presentation="screen"
+        className={activeSettingsSection === "models" ? "aw-settings-shell--models" : undefined}
         contentLayout={activeSettingsSection === "memory" ? "full-bleed" : "standard"}
         navItems={AwakenSettingsNavItems}
         activeSectionId={activeSettingsSection}
@@ -931,107 +1120,152 @@ export function DesktopSettingsDialog({
             <AwakenModelSettings
               tabs={MODEL_SETTINGS_TABS}
               activeTabId={activeSection}
+              views={[
+                { id: "connections", label: MODEL_SETTINGS_COPY[activeSection].connectionLabel },
+                { id: "llm", label: "LLM 设置" },
+              ]}
+              activeViewId={activeModelView}
+              title={MODEL_SETTINGS_COPY[activeSection].title}
+              description={MODEL_SETTINGS_COPY[activeSection].description}
               message={message}
-              onSelectTab={(section) => setActiveSection(section as ModelSettingsSection)}
+              onSelectTab={(section) => {
+                collapseProviderEditor();
+                setActiveSection(section as ModelSettingsSection);
+                setMessage(null);
+              }}
+              onSelectView={(view) => {
+                collapseProviderEditor();
+                setActiveModelView(view as ModelSettingsView);
+                setMessage(null);
+              }}
             >
-            {activeSection === "configure" ? (
-            <section className="model-provider-list" aria-label="模型配置">
-              {providers.map((provider) => {
-                const isExpanded = expandedProviderId === provider.id;
-                const providerProfiles =
-                  profilesByProviderId.get(provider.id) ?? [];
-                const configuredModelList = providerProfiles
-                  .map((profile) => profile.modelId)
-                  .join(" / ");
-                const providerDraft =
-                  draft?.providerId === provider.id
-                    ? draft
-                    : createDraftForProvider(provider);
-                return (
-                  <AwakenSettingsProviderCard
-                    key={provider.id}
-                    name={provider.displayName}
-                    expanded={isExpanded}
-                    onExpandedChange={() => selectProvider(provider)}
-                  >
+            {activeModelView === "connections" ? (
+            <>
+              <section className="model-provider-list" aria-label="连接配置">
+                {activeProviders.map((provider) => (
+                    <AwakenSettingsProviderCard
+                      key={provider.id}
+                      name={provider.displayName}
+                      brand={providerBrand(provider)}
+                      selected={expandedProviderId === provider.id}
+                      onSelect={() => selectProvider(provider)}
+                    />
+                ))}
+              </section>
+              {selectedProvider && selectedProviderDraft ? (
+                <AwakenSettingsProviderModal
+                  open
+                  name={selectedProvider.displayName}
+                  brand={providerBrand(selectedProvider)}
+                  status={selectedProviderStatus}
+                  onClose={collapseProviderEditor}
+                >
                     <AwakenModelProviderForm
-                      providerId={provider.id}
-                      modelMode={provider.allowCustomModel ? "custom" : provider.endpointModel ? "endpoint" : "select"}
-                      models={provider.models}
-                      modelId={provider.endpointModel ? providerDraft.endpointId || providerDraft.modelId : providerDraft.modelId}
-                      baseURL={providerDraft.baseURL}
-                      apiKey={providerDraft.apiKey}
-                      apiKeyPlaceholder={`输入 ${provider.keyEnvName}`}
-                      apiDocsURL={provider.apiDocsURL}
+                      providerId={selectedProvider.id}
+                      presentation="modal"
+                      modelMode={selectedProvider.allowCustomModel ? "custom" : selectedProvider.endpointModel ? "endpoint" : "select"}
+                      models={selectedProvider.models}
+                      modelId={selectedProvider.endpointModel ? selectedProviderDraft.endpointId || selectedProviderDraft.modelId : selectedProviderDraft.modelId}
+                      baseURL={selectedProviderDraft.baseURL}
+                      baseURLReadOnly={
+                        selectedProvider.accessType === "agent_plan" || selectedProvider.id === "qwen-token-plan"
+                      }
+                      apiKey={selectedProviderDraft.apiKey}
+                      apiKeyPlaceholder={`输入 ${selectedProvider.keyEnvName}`}
+                      apiDocsURL={selectedProvider.apiDocsURL}
                       templateNote={
-                        configuredModelList
-                          ? providerDraft.profileId
-                            ? `正在更新已配置模型：${providerDraft.modelId}。新的全局 API key 只有安全保存成功后才会替换原凭据。`
-                            : `已配置模型：${configuredModelList}。当前提交会新增模型配置；同厂商同模型 ID 会提示失败。`
-                          : null
+                        selectedProvider.endpointModel
+                            ? `运行时模型必须填写控制台创建的 ep-* 推理接入点；模型族为 ${selectedProvider.defaultModel}。`
+                            : selectedProvider.accessType === "agent_plan"
+                              ? "首期使用固定单账户；保存 Key 后会从套餐 /models 刷新精确模型 ID，失败时保留 ark-code-latest 与自定义输入。"
+                              : null
                       }
                       showApiKey={showApiKey}
-                      editableCapabilities={providerHasEditableCapabilities(provider)}
-                      supportsVision={providerDraft.advanced?.supportsVision === true}
-                      supportsNativePDF={providerDraft.advanced?.supportsNativePDF === true}
-                      supportsVideo={providerDraft.advanced?.supportsVideo === true}
+                      editableCapabilities={providerHasEditableCapabilities(selectedProvider)}
+                      supportsVision={selectedProviderDraft.advanced?.supportsVision === true}
+                      supportsNativePDF={selectedProviderDraft.advanced?.supportsNativePDF === true}
+                      supportsVideo={selectedProviderDraft.advanced?.supportsVideo === true}
                       saving={saving}
                       testing={testing}
-                      onModelChange={(nextModelId) =>
+                      testFeedback={testFeedback}
+                      testingReasoning={testingReasoning}
+                      showReasoningTest={selectedProvider.accessType === "agent_plan" && selectedProviderDraft.modelId !== "ark-code-latest"}
+                      showAccountActions={selectedProvider.accessType === "agent_plan"}
+                      accountStatus={
+                        selectedProvider.accessType === "agent_plan"
+                          ? agentPlanAccount?.hasKey
+                            ? `${agentPlanAccount.maskedKey ?? "已保存 Key"} · revision ${agentPlanAccount.credentialRevision}`
+                            : "尚未保存 Agent Plan Key"
+                          : undefined
+                      }
+                      refreshingAccount={refreshingAgentPlan}
+                      deletingAccount={deletingAgentPlan}
+                      onModelChange={(nextModelId) => {
+                        setTestFeedback(null);
                         setDraft({
-                          ...providerDraft,
-                          endpointId: provider.endpointModel ? nextModelId : providerDraft.endpointId,
-                          modelId: nextModelId,
+                          ...selectedProviderDraft,
+                          endpointId: selectedProvider.endpointModel ? nextModelId : selectedProviderDraft.endpointId,
+                          modelId: selectedProvider.endpointModel ? selectedProvider.defaultModel : nextModelId,
                           advanced: advancedWithModelCapability(
-                            provider,
+                            selectedProvider,
                             nextModelId,
-                            providerDraft.advanced,
+                            selectedProviderDraft.advanced,
                             true,
                           ),
-                        })
-                      }
-                      onBaseURLChange={(baseURL) => setDraft({ ...providerDraft, baseURL })}
-                      onApiKeyChange={(apiKey) => setDraft({ ...providerDraft, apiKey })}
+                        });
+                      }}
+                      onBaseURLChange={(baseURL) => {
+                        setTestFeedback(null);
+                        setDraft({ ...selectedProviderDraft, baseURL });
+                      }}
+                      onApiKeyChange={(apiKey) => {
+                        setTestFeedback(null);
+                        setDraft({ ...selectedProviderDraft, apiKey });
+                      }}
                       onShowApiKeyChange={setShowApiKey}
                       onCapabilityChange={(capability, checked) => {
+                        setTestFeedback(null);
                         if (capability === "supportsVision") {
                           setDraft({
-                            ...providerDraft,
+                            ...selectedProviderDraft,
                             advanced: {
-                              ...providerDraft.advanced,
+                              ...selectedProviderDraft.advanced,
                               supportsVision: checked,
-                              supportsVideo: checked ? (providerDraft.advanced?.supportsVideo ?? false) : false,
+                              supportsVideo: checked ? (selectedProviderDraft.advanced?.supportsVideo ?? false) : false,
                             },
                           });
                         } else if (capability === "supportsVideo") {
                           setDraft({
-                            ...providerDraft,
+                            ...selectedProviderDraft,
                             advanced: {
-                              ...providerDraft.advanced,
-                              supportsVision: checked ? true : (providerDraft.advanced?.supportsVision ?? false),
+                              ...selectedProviderDraft.advanced,
+                              supportsVision: checked ? true : (selectedProviderDraft.advanced?.supportsVision ?? false),
                               supportsVideo: checked,
                             },
                           });
                         } else {
                           setDraft({
-                            ...providerDraft,
+                            ...selectedProviderDraft,
                             advanced: {
-                              ...providerDraft.advanced,
+                              ...selectedProviderDraft.advanced,
                               supportsNativePDF: checked,
                             },
                           });
                         }
                       }}
                       onTest={() => void testDraft()}
+                      onTestReasoning={() => void testDraftReasoning()}
+                      onRefreshAccount={() => void refreshAgentPlanModels()}
+                      onDeleteAccount={() => void deleteAgentPlanAccount()}
+                      onCancel={collapseProviderEditor}
                       onSubmit={() => void saveDraft()}
                     />
-                  </AwakenSettingsProviderCard>
-                );
-              })}
-            </section>
+                </AwakenSettingsProviderModal>
+              ) : null}
+            </>
             ) : (
             <AwakenConfiguredModels
-              models={profiles.map((profile) => {
+              models={activeProfiles.map((profile) => {
                 const contextWindowMax = contextWindowMaxForProfile(profile, providers);
                 const effectiveAnchor = contextWindowAnchor(contextWindowMax);
                 const profileDraft = configuredDrafts[profile.id] ?? {
@@ -1044,7 +1278,11 @@ export function DesktopSettingsDialog({
                 return {
                   id: profile.id,
                   displayName: profile.displayName,
+                  brand: providerById.get(profile.providerId)
+                    ? providerBrand(providerById.get(profile.providerId)!)
+                    : undefined,
                   modelId: profile.modelId,
+                  isDefault: profile.isDefault,
                   credentialStatus: credentialStatusLabel(profile.profileStatus),
                   credentialTone: profile.profileStatus === "unreadable" ? "unreadable" as const : "default" as const,
                   enabled: profileDraft.enabled,
@@ -1078,6 +1316,19 @@ export function DesktopSettingsDialog({
               }
               onMaxTokensInputChange={updateConfiguredMaxTokensInput}
               onMaxTokensInputCommit={commitConfiguredMaxTokensInput}
+              onSetDefault={(profileId) => {
+                void (async () => {
+                  setMessage(null);
+                  try {
+                    await runtimeClient.setDefaultModelProfile(profileId);
+                    await loadModelSettings();
+                    onProfilesChanged();
+                    showToast("默认模型已更新；仅影响新会话初值");
+                  } catch (error) {
+                    setMessage(error instanceof Error ? error.message : "更新默认模型失败");
+                  }
+                })();
+              }}
               onReset={resetConfiguredDrafts}
               onSave={() => void saveConfiguredDrafts()}
               onUpdateApiKey={(profileId) => {

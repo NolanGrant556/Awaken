@@ -1,9 +1,10 @@
 @import "../../tokens/components.css";
 
 .aw-settings-shell {
-  --aw-settings-sidebar-width: 236px;
-  --aw-settings-window-top: 58px;
-  --model-settings-content-width: 1240px;
+  --aw-settings-sidebar-width: 212px;
+  --aw-settings-window-top: 44px;
+  --aw-settings-page-inline-gutter: 56px;
+  --model-settings-content-width: 1120px;
   position: relative;
   isolation: isolate;
   display: grid;
@@ -42,7 +43,7 @@
 }
 
 .aw-settings-shell--embedded {
-  --aw-settings-window-top: 28px;
+  --aw-settings-window-top: 24px;
   min-height: 680px;
   border: 1px solid var(--aw-border-main);
   background: var(--aw-bg-white);
@@ -51,10 +52,10 @@
 .aw-settings-sidebar {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 22px;
+  gap: 16px;
   min-width: 0;
   min-height: 0;
-  padding: var(--aw-settings-window-top) 16px 24px;
+  padding: var(--aw-settings-window-top) 12px 20px;
   overflow: hidden;
   background: var(--aw-bg-nav);
   border-right: 1px solid var(--aw-border-light);
@@ -62,23 +63,23 @@
 
 .aw-settings-sidebar__head {
   display: grid;
-  gap: 24px;
+  gap: 18px;
   min-width: 0;
 }
 
 .aw-settings-back {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   width: fit-content;
-  min-height: 34px;
-  padding: 0 8px;
+  min-height: 30px;
+  padding: 0 6px;
   border: 0;
   border-radius: var(--aw-radius-control);
   background: transparent;
   color: var(--aw-text-secondary);
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: var(--aw-font-weight-semibold);
   cursor: pointer;
 }
@@ -95,9 +96,9 @@
 }
 
 .aw-settings-sidebar__title {
-  padding: 0 10px;
+  padding: 0 8px;
   color: var(--aw-text-tertiary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: var(--aw-font-weight-heavy);
   line-height: 1.3;
   letter-spacing: 0.04em;
@@ -130,27 +131,33 @@
 .aw-settings-page {
   display: grid;
   align-content: start;
-  gap: 18px;
+  gap: 14px;
   box-sizing: border-box;
-  width: min(calc(100% - 72px), var(--model-settings-content-width));
+  width: min(calc(100% - var(--aw-settings-page-inline-gutter)), var(--model-settings-content-width));
   min-width: 0;
   min-height: 100%;
   margin: 0 auto;
-  padding: var(--aw-settings-window-top) 0 48px;
+  padding: var(--aw-settings-window-top) 0 36px;
+}
+
+.aw-settings-shell--models .aw-settings-page {
+  width: min(calc(100% - 36px), var(--model-settings-content-width));
+  max-width: var(--model-settings-content-width);
+  margin: 0 0 0 18px;
 }
 
 .aw-settings-page__header {
   display: grid;
-  gap: 18px;
+  gap: 12px;
   min-width: 0;
-  padding-bottom: 18px;
+  padding-bottom: 14px;
   border-bottom: 1px solid var(--aw-border-light);
 }
 
 .aw-settings-page__title {
   margin: 0;
   color: var(--aw-text-primary);
-  font-size: 30px;
+  font-size: 26px;
   font-weight: var(--aw-font-weight-heavy);
   line-height: 1.15;
   letter-spacing: -0.03em;
@@ -204,13 +211,15 @@
 }
 
 @media (max-width: 900px) {
-  .aw-settings-shell { --aw-settings-sidebar-width: 196px; }
-  .aw-settings-page { width: min(calc(100% - 48px), var(--model-settings-content-width)); }
+  .aw-settings-shell {
+    --aw-settings-sidebar-width: 184px;
+    --aw-settings-page-inline-gutter: 40px;
+  }
 }
 
 @media (max-width: 680px) {
-  .aw-settings-shell { --aw-settings-sidebar-width: 156px; }
+  .aw-settings-shell { --aw-settings-sidebar-width: 148px; }
   .aw-settings-sidebar { padding-inline: 10px; }
-  .aw-settings-page { width: calc(100% - 32px); }
+  .aw-settings-shell { --aw-settings-page-inline-gutter: 32px; }
   .aw-settings-back { padding-inline: 6px; }
 }

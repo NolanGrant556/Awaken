@@ -32,6 +32,15 @@ function InteractiveComposerDemoState(props: ComposerDemoStateProps) {
     modelItem?.menuItems?.[0]?.id ??
     null;
   const [selectedModelId, setSelectedModelId] = useState(initialModelId);
+  const [effortByModelId, setEffortByModelId] = useState<
+    Record<string, "low" | "high" | "max">
+  >(() =>
+    Object.fromEntries(
+      modelItem?.menuItems?.flatMap((option) =>
+        option.effort ? [[option.id, option.effort.selectedLevel]] : [],
+      ) ?? [],
+    ),
+  );
   const initialProjectId =
     props.projectPicker?.options.find((option) => option.selected)?.id ?? null;
   const [selectedProjectId, setSelectedProjectId] = useState(initialProjectId);
@@ -47,7 +56,9 @@ function InteractiveComposerDemoState(props: ComposerDemoStateProps) {
           item.menuItems[0];
         return {
           ...item,
-          label: selectedModel.label,
+          label: selectedModel.effort
+            ? `${selectedModel.label} · ${effortByModelId[selectedModel.id] ?? selectedModel.effort.selectedLevel}`
+            : selectedModel.label,
           menuItems: item.menuItems.map((option) => ({
             ...option,
             selected: option.id === selectedModel.id,
@@ -55,10 +66,25 @@ function InteractiveComposerDemoState(props: ComposerDemoStateProps) {
               option.onSelect?.();
               setSelectedModelId(option.id);
             },
+            effort: option.effort
+              ? {
+                  ...option.effort,
+                  selectedLevel:
+                    effortByModelId[option.id] ?? option.effort.selectedLevel,
+                  onChange: (level: "low" | "high" | "max") => {
+                    option.effort?.onChange(level);
+                    setSelectedModelId(option.id);
+                    setEffortByModelId((current) => ({
+                      ...current,
+                      [option.id]: level,
+                    }));
+                  },
+                }
+              : undefined,
           })),
         };
       }),
-    [props.metaItems, selectedModelId],
+    [effortByModelId, props.metaItems, selectedModelId],
   );
   const interactiveProjectPicker = useMemo(() => {
     if (!props.projectPicker) {

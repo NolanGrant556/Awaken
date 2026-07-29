@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import {
   drawAwakenMemoryLightFlow,
   type AwakenMemoryLightFlowTheme,
+  type AwakenMemoryLightFlowTone,
+  type AwakenMemoryLightFlowVariant,
 } from "./AwakenMemoryLightFlow.model";
 import "./AwakenMemoryLightFlow.css";
 
@@ -11,12 +13,16 @@ const MAX_DEVICE_PIXEL_RATIO = 1.25;
 
 export type AwakenMemoryLightFlowProps = {
   theme?: AwakenMemoryLightFlowTheme;
+  tone?: AwakenMemoryLightFlowTone;
+  variant?: AwakenMemoryLightFlowVariant;
   className?: string;
   ariaLabel?: string;
 };
 
 export function AwakenMemoryLightFlow({
   theme = "light",
+  tone = "memory",
+  variant = "ambient",
   className,
   ariaLabel,
 }: AwakenMemoryLightFlowProps) {
@@ -24,12 +30,16 @@ export function AwakenMemoryLightFlow({
   const rootClassName = [
     "aw-memory-light-flow",
     `aw-memory-light-flow--${theme}`,
+    `aw-memory-light-flow--tone-${tone}`,
+    `aw-memory-light-flow--${variant}`,
     className,
   ].filter(Boolean).join(" ");
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return undefined;
+    if (!canvas || typeof window.CanvasRenderingContext2D === "undefined") {
+      return undefined;
+    }
 
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) return undefined;
@@ -55,6 +65,7 @@ export function AwakenMemoryLightFlow({
         cssHeight,
         elapsedMilliseconds,
         theme,
+        { tone, variant },
       );
     };
 
@@ -141,7 +152,7 @@ export function AwakenMemoryLightFlow({
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("resize", resize);
     };
-  }, [theme]);
+  }, [theme, tone, variant]);
 
   return (
     <div

@@ -5,6 +5,7 @@ export type AwakenThemeChoiceValue = "system" | "light" | "dark";
 
 export type AwakenThemeChoiceGroupProps = {
   value: AwakenThemeChoiceValue;
+  size?: "default" | "compact";
   disabled?: boolean;
   onValueChange?: (value: AwakenThemeChoiceValue) => void;
 };
@@ -15,9 +16,18 @@ const choices = [
   { value: "dark", label: "黑色", Icon: Moon },
 ] as const;
 
-export function AwakenThemeChoiceGroup({ value, disabled = false, onValueChange }: AwakenThemeChoiceGroupProps) {
+export function AwakenThemeChoiceGroup({
+  value,
+  size = "default",
+  disabled = false,
+  onValueChange,
+}: AwakenThemeChoiceGroupProps) {
   return (
-    <div className="theme-choice-group" role="radiogroup" aria-label="主题">
+    <div
+      className={`theme-choice-group theme-choice-group--${size}`}
+      role="radiogroup"
+      aria-label="主题"
+    >
       {choices.map(({ value: choiceValue, label, Icon }) => {
         const selected = choiceValue === value;
         return (

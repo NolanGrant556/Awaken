@@ -12,7 +12,11 @@ import {
   Settings,
   Wallet,
 } from "lucide-react";
-import { AwakenButton as Button } from "@awaken/design-system";
+import {
+  AwakenButton as Button,
+  AwakenThemeChoiceGroup,
+  type AwakenThemeChoiceValue,
+} from "@awaken/design-system";
 import type {
   ModelBalanceAmount,
   ModelBalanceQuota,
@@ -24,6 +28,9 @@ type ProfileBalancePopoverProps = {
   open: boolean;
   anchorRef: React.RefObject<HTMLElement | null>;
   runtimeClient: RuntimeClient;
+  themePreference: AwakenThemeChoiceValue;
+  themeSaving: boolean;
+  onThemePreferenceChange: (theme: AwakenThemeChoiceValue) => void;
   onOpenSettings: () => void;
   onClose: () => void;
 };
@@ -136,6 +143,9 @@ export function ProfileBalancePopover({
   open,
   anchorRef,
   runtimeClient,
+  themePreference,
+  themeSaving,
+  onThemePreferenceChange,
   onOpenSettings,
   onClose,
 }: ProfileBalancePopoverProps) {
@@ -340,6 +350,12 @@ export function ProfileBalancePopover({
       </div>
 
       <div className="profile-balance-footer">
+        <AwakenThemeChoiceGroup
+          value={themePreference}
+          size="compact"
+          disabled={themeSaving}
+          onValueChange={onThemePreferenceChange}
+        />
         <Button
           variant="default"
           size="md"

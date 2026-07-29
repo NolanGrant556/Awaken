@@ -6,6 +6,7 @@ import {
   AwakenProfileBalancePanel,
   type AwakenProfileBalance,
 } from "../AwakenProfileBalancePanel";
+import type { AwakenThemeChoiceValue } from "../AwakenThemeChoiceGroup";
 
 export type AwakenAccountProps = {
   name: string;
@@ -19,12 +20,15 @@ export type AwakenAccountProps = {
   defaultOpen?: boolean;
   selectedProfileId?: string | null;
   defaultSelectedProfileId?: string | null;
+  themePreference: AwakenThemeChoiceValue;
+  themeSaving?: boolean;
   placement?: "top-start" | "top-end" | "bottom-start" | "bottom-end";
   panelId?: string;
   className?: string;
   style?: CSSProperties;
   onOpenChange?: (open: boolean) => void;
   onSelectedProfileIdChange?: (profileId: string) => void;
+  onThemePreferenceChange?: (theme: AwakenThemeChoiceValue) => void;
   onOpenSettings?: () => void;
 };
 
@@ -40,12 +44,15 @@ export function AwakenAccount({
   defaultOpen = false,
   selectedProfileId,
   defaultSelectedProfileId,
+  themePreference,
+  themeSaving = false,
   placement = "top-start",
   panelId,
   className,
   style,
   onOpenChange,
   onSelectedProfileIdChange,
+  onThemePreferenceChange,
   onOpenSettings,
 }: AwakenAccountProps) {
   const generatedId = useId().replaceAll(":", "");
@@ -92,8 +99,11 @@ export function AwakenAccount({
             error={error}
             selectedProfileId={selectedProfileId}
             defaultSelectedProfileId={defaultSelectedProfileId}
+            themePreference={themePreference}
+            themeSaving={themeSaving}
             role="region"
             onSelectedProfileIdChange={onSelectedProfileIdChange}
+            onThemePreferenceChange={onThemePreferenceChange}
             onOpenSettings={openSettings}
           />
         }

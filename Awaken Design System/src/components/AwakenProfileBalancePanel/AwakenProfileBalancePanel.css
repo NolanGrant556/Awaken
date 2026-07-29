@@ -261,6 +261,8 @@
 }
 
 .aw-profile-balance-panel__footer {
+  display: grid;
+  gap: 8px;
   padding: 10px 12px 12px;
   border-top: 1px solid var(--aw-border-light);
 }

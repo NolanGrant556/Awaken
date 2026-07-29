@@ -6271,6 +6271,11 @@ export function App() {
         open={profilePopoverOpen}
         anchorRef={profileButtonRef}
         runtimeClient={runtimeClient}
+        themePreference={appearanceThemePreference}
+        themeSaving={appearanceSaving}
+        onThemePreferenceChange={(theme) => {
+          void handleAppearanceThemeChange(theme);
+        }}
         onOpenSettings={() => {
           setProfilePopoverOpen(false);
           setModelSettingsInitialModelSection("api");

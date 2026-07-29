@@ -1,6 +1,11 @@
 import type { AwakenProfileBalancePanelProps } from "./AwakenProfileBalancePanel";
 
 const noop = () => {};
+const sharedControls = {
+  themePreference: "light" as const,
+  onThemePreferenceChange: noop,
+  onOpenSettings: noop,
+};
 
 export const AwakenProfileBalanceSamples: NonNullable<
   AwakenProfileBalancePanelProps["balances"]
@@ -39,21 +44,21 @@ export const AwakenProfileBalancePanelStates: AwakenProfileBalancePanelState[] =
   {
     id: "available",
     label: "可用额度",
-    props: { balances: AwakenProfileBalanceSamples, onOpenSettings: noop },
+    props: { ...sharedControls, balances: AwakenProfileBalanceSamples },
   },
   {
     id: "loading",
     label: "查询中",
-    props: { loading: true, onOpenSettings: noop },
+    props: { ...sharedControls, loading: true },
   },
   {
     id: "empty",
     label: "暂无可查询模型",
-    props: { balances: [], onOpenSettings: noop },
+    props: { ...sharedControls, balances: [] },
   },
   {
     id: "error",
     label: "查询失败",
-    props: { error: "暂时无法读取模型额度", onOpenSettings: noop },
+    props: { ...sharedControls, error: "暂时无法读取模型额度" },
   },
 ];

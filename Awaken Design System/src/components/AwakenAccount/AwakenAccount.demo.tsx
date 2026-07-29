@@ -10,7 +10,7 @@ import {
 import { AwakenAccount } from "./AwakenAccount";
 
 export function AwakenAccountDemo() {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [themePreference, setThemePreference] = useState<"system" | "light" | "dark">("light");
   const [accountOpen, setAccountOpen] = useState(true);
   const [panelStateId, setPanelStateId] = useState("available");
   const [lastAction, setLastAction] = useState("点击 Nolan 可展开或收起账户额度面板。");
@@ -24,8 +24,8 @@ export function AwakenAccountDemo() {
     if (originalThemeRef.current === null) {
       originalThemeRef.current = root.getAttribute("data-aw-theme") ?? "";
     }
-    root.setAttribute("data-aw-theme", theme);
-  }, [theme]);
+    root.setAttribute("data-aw-theme", themePreference === "dark" ? "dark" : "light");
+  }, [themePreference]);
 
   useEffect(() => () => {
     if (originalThemeRef.current) {
@@ -47,17 +47,17 @@ export function AwakenAccountDemo() {
         <div className="aw-account-demo__theme-toggle" role="group" aria-label="主题预览">
           <AwakenButton
             size="sm"
-            variant={theme === "light" ? "default" : "ghost"}
-            aria-pressed={theme === "light"}
-            onClick={() => setTheme("light")}
+            variant={themePreference === "light" ? "default" : "ghost"}
+            aria-pressed={themePreference === "light"}
+            onClick={() => setThemePreference("light")}
           >
             浅色
           </AwakenButton>
           <AwakenButton
             size="sm"
-            variant={theme === "dark" ? "default" : "ghost"}
-            aria-pressed={theme === "dark"}
-            onClick={() => setTheme("dark")}
+            variant={themePreference === "dark" ? "default" : "ghost"}
+            aria-pressed={themePreference === "dark"}
+            onClick={() => setThemePreference("dark")}
           >
             暗色
           </AwakenButton>
@@ -74,11 +74,13 @@ export function AwakenAccountDemo() {
             name="Nolan"
             avatarFallback="AW"
             balances={AwakenProfileBalanceSamples}
+            themePreference={themePreference}
             open={accountOpen}
             onOpenChange={(open) => {
               setAccountOpen(open);
               setLastAction(open ? "已展开账户额度面板。" : "已收起账户额度面板。");
             }}
+            onThemePreferenceChange={setThemePreference}
             onOpenSettings={() => {
               setLastAction("已触发进入设置回调（Gallery 模拟）。");
             }}
@@ -132,6 +134,8 @@ export function AwakenAccountDemo() {
               <AwakenProfileBalancePanel
                 id="awaken-account-demo-panel"
                 {...panelState.props}
+                themePreference={themePreference}
+                onThemePreferenceChange={setThemePreference}
                 onOpenSettings={() => setLastAction("已触发进入设置回调（Gallery 模拟）。")}
               />
             </div>

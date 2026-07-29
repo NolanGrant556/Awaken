@@ -39,6 +39,9 @@ describe("ProfileBalancePopover", () => {
         open={false}
         anchorRef={anchorRef}
         runtimeClient={createMockClient()}
+        themePreference="light"
+        themeSaving={false}
+        onThemePreferenceChange={() => {}}
         onOpenSettings={() => {}}
         onClose={() => {}}
       />,
@@ -53,11 +56,19 @@ describe("ProfileBalancePopover", () => {
         open
         anchorRef={anchorRef}
         runtimeClient={createMockClient()}
+        themePreference="system"
+        themeSaving={false}
+        onThemePreferenceChange={() => {}}
         onOpenSettings={() => {}}
         onClose={() => {}}
       />,
     );
     expect(html).toContain("没有已启用且有 API key 的模型");
+    expect(html).toContain("跟随系统");
+    expect(html).toContain("浅色");
+    expect(html).toContain("黑色");
+    expect(html).toContain("theme-choice-group--compact");
+    expect(html).toContain('aria-checked="true"');
     expect(html).toContain("设置");
   });
 

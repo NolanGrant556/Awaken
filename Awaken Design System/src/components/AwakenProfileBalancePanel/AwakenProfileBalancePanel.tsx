@@ -2,6 +2,10 @@ import "./AwakenProfileBalancePanel.css";
 import { useState, type AriaRole, type CSSProperties, type ReactNode } from "react";
 import { AlertCircle, ChevronRight, Loader2, Settings, Wallet } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
+import {
+  AwakenThemeChoiceGroup,
+  type AwakenThemeChoiceValue,
+} from "../AwakenThemeChoiceGroup";
 
 export type AwakenProfileBalanceStatus =
   | "available"
@@ -48,12 +52,15 @@ export type AwakenProfileBalancePanelProps = {
   error?: string | null;
   selectedProfileId?: string | null;
   defaultSelectedProfileId?: string | null;
+  themePreference: AwakenThemeChoiceValue;
+  themeSaving?: boolean;
   settingsLabel?: ReactNode;
   ariaLabel?: string;
   role?: AriaRole;
   className?: string;
   style?: CSSProperties;
   onSelectedProfileIdChange?: (profileId: string) => void;
+  onThemePreferenceChange?: (theme: AwakenThemeChoiceValue) => void;
   onOpenSettings?: () => void;
 };
 
@@ -161,12 +168,15 @@ export function AwakenProfileBalancePanel({
   error = null,
   selectedProfileId,
   defaultSelectedProfileId,
+  themePreference,
+  themeSaving = false,
   settingsLabel = "设置",
   ariaLabel = "模型余额",
   role = "dialog",
   className,
   style,
   onSelectedProfileIdChange,
+  onThemePreferenceChange,
   onOpenSettings,
 }: AwakenProfileBalancePanelProps) {
   const [internalSelectedProfileId, setInternalSelectedProfileId] = useState<string | null>(
@@ -292,6 +302,12 @@ export function AwakenProfileBalancePanel({
       </div>
 
       <div className="aw-profile-balance-panel__footer">
+        <AwakenThemeChoiceGroup
+          value={themePreference}
+          size="compact"
+          disabled={themeSaving}
+          onValueChange={onThemePreferenceChange}
+        />
         <AwakenButton
           variant="default"
           size="md"

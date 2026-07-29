@@ -40,6 +40,7 @@ import {
   AwakenInspectorRail as InspectorRail,
   AwakenSubagentGroup as SubagentGroup,
   AwakenProjectFoldersEditor as ProjectFoldersEditor,
+  AwakenProviderLogo,
   AwakenSelectableCard as SelectableCard,
   AwakenSidebar as Sidebar,
   AwakenSidebarSectionAction as SidebarSectionAction,
@@ -64,6 +65,7 @@ import {
   type ProjectHoverCard,
   type ProjectItem,
 } from "@awaken/design-system";
+import { providerBrandForId } from "./model-provider-brand";
 import {
   createRuntimeClient,
   desktopOperationIssueFromError,
@@ -78,6 +80,8 @@ import type {
   ProjectEntryActionRequest,
   ProjectPathComposerTokenPayload,
   RuntimeInfo,
+  ModelProvider,
+  ReasoningEffortLevel,
   RuntimeProject,
   RunInputAttachment,
   RuntimeModelProfileSummary,
@@ -1113,7 +1117,11 @@ type RuntimeModelIdentity = {
   providerId?: string;
   credentialRevision?: number;
   modelId?: string;
+  capabilityModelId?: string;
+  endpointSelector?: string;
+  modelSelectorKind?: "model" | "endpoint";
   protocol?: string;
+  reasoningEffort?: ReasoningEffortLevel;
 };
 
 function normalizedTokenCount(value: number | undefined): number | undefined {
@@ -1179,13 +1187,38 @@ function usageMatchesSnapshot(
         currentModel.credentialRevision !== undefined &&
         usage.credentialRevision !== currentModel.credentialRevision) ||
       (usage.modelId && currentModel.modelId && usage.modelId !== currentModel.modelId) ||
+      (usage.capabilityModelId &&
+        currentModel.capabilityModelId &&
+        usage.capabilityModelId !== currentModel.capabilityModelId) ||
+      (usage.endpointSelector &&
+        currentModel.endpointSelector &&
+        usage.endpointSelector !== currentModel.endpointSelector) ||
+      (usage.modelSelectorKind &&
+        currentModel.modelSelectorKind &&
+        usage.modelSelectorKind !== currentModel.modelSelectorKind) ||
       (usage.protocolFamily &&
         currentModel.protocol &&
-        usage.protocolFamily !== currentModel.protocol))
+        usage.protocolFamily !== currentModel.protocol) ||
+      (usage.reasoningPolicy &&
+        currentModel.reasoningEffort &&
+        usage.reasoningPolicy !== currentModel.reasoningEffort))
   ) {
     return false;
   }
   if (usage.modelId && snapshot.modelId && usage.modelId !== snapshot.modelId) {
+    return false;
+  }
+  if (
+    (usage.capabilityModelId &&
+      snapshot.capabilityModelId &&
+      usage.capabilityModelId !== snapshot.capabilityModelId) ||
+    (usage.endpointSelector &&
+      snapshot.endpointSelector &&
+      usage.endpointSelector !== snapshot.endpointSelector) ||
+    (usage.modelSelectorKind &&
+      snapshot.modelSelectorKind &&
+      usage.modelSelectorKind !== snapshot.modelSelectorKind)
+  ) {
     return false;
   }
   if (
@@ -1401,8 +1434,39 @@ function modelProfileLabel(profile: RuntimeModelProfileSummary): string {
   return profile.modelId || profile.displayName;
 }
 
-function modelProfileIcon(profile: RuntimeModelProfileSummary): string {
-  return profile.displayName.trim().slice(0, 1) || "M";
+export function modelPreferenceChangeForOption(
+  profileId: string,
+  selectedProfileId: string,
+  reasoningEffort?: ReasoningEffortLevel,
+): { modelProfileId: string; reasoningEffort?: ReasoningEffortLevel } | undefined {
+  if (profileId === selectedProfileId) return undefined;
+  return { modelProfileId: profileId, reasoningEffort };
+}
+
+export function modelPreferenceRecoveryKey(
+  threadId: string | undefined,
+  persistedModelProfileId: string | undefined,
+  selectedModelProfileId: string | undefined,
+  persistedReasoningEffort: ReasoningEffortLevel | undefined,
+  selectedReasoningEffort: ReasoningEffortLevel | undefined,
+): string {
+  if (!threadId || !selectedModelProfileId) return "";
+
+  const persistedModelIsUnavailable =
+    persistedModelProfileId !== undefined && persistedModelProfileId !== selectedModelProfileId;
+  const persistedEffortIsUnavailable =
+    persistedReasoningEffort !== undefined &&
+    persistedReasoningEffort !== selectedReasoningEffort;
+  if (!persistedModelIsUnavailable && !persistedEffortIsUnavailable) return "";
+
+  return `${threadId}:${persistedModelProfileId ?? ""}:${persistedReasoningEffort ?? ""}`;
+}
+
+function modelProfileIcon(profile: RuntimeModelProfileSummary) {
+  const brand = providerBrandForId(profile.providerId);
+  return brand ? (
+    <AwakenProviderLogo brand={brand} name={profile.displayName} />
+  ) : profile.displayName.trim().slice(0, 1) || "M";
 }
 
 function firstContentLine(value?: string): string | undefined {
@@ -1635,10 +1699,16 @@ export function App() {
   const [answeringUserQuestionId, setAnsweringUserQuestionId] = useState<string | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
   const [modelProfiles, setModelProfiles] = useState<RuntimeModelProfileSummary[]>([]);
+  const [modelProviders, setModelProviders] = useState<ModelProvider[]>([]);
+  const [newThreadModelPreference, setNewThreadModelPreference] = useState<{
+    selectedModelProfileId?: string;
+    reasoningEffortByProfile: Record<string, ReasoningEffortLevel>;
+  }>({ reasoningEffortByProfile: {} });
+  const recoveredModelPreferenceRef = useRef<string>("");
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [modelSettingsInitialModelSection, setModelSettingsInitialModelSection] = useState<
-    "configure" | "configured"
-  >("configure");
+    "coding_plan" | "api" | "agent_plan"
+  >("coding_plan");
   const [runCreateIssue, setRunCreateIssue] = useState<DesktopOperationIssue | null>(null);
   const [appearanceThemePreference, setAppearanceThemePreference] =
     useState<AwakenThemePreference>(readStoredThemePreference);
@@ -1926,21 +1996,25 @@ export function App() {
       if (runtimeState.supervisorStatus !== "running") {
         setRuntimeInfo(null);
         setModelProfiles([]);
+        setModelProviders([]);
         return;
       }
       try {
-        const [info, profiles] = await Promise.all([
+        const [info, profiles, providers] = await Promise.all([
           runtimeClient.getRuntimeInfo(),
           runtimeClient.listModelProfiles().catch(() => []),
+          runtimeClient.listModelProviders().catch(() => []),
         ]);
         if (!cancelled) {
           setRuntimeInfo(info);
           setModelProfiles(profiles);
+          setModelProviders(providers);
         }
       } catch {
         if (!cancelled) {
           setRuntimeInfo(null);
           setModelProfiles([]);
+          setModelProviders([]);
         }
       }
     }
@@ -2310,18 +2384,22 @@ export function App() {
     if (runtimeState.supervisorStatus !== "running") {
       setRuntimeInfo(null);
       setModelProfiles([]);
+      setModelProviders([]);
       return;
     }
     try {
-      const [info, profiles] = await Promise.all([
+      const [info, profiles, providers] = await Promise.all([
         runtimeClient.getRuntimeInfo(),
         runtimeClient.listModelProfiles().catch(() => []),
+        runtimeClient.listModelProviders().catch(() => []),
       ]);
       setRuntimeInfo(info);
       setModelProfiles(profiles);
+      setModelProviders(providers);
     } catch {
       setRuntimeInfo(null);
       setModelProfiles([]);
+      setModelProviders([]);
     }
   }
 
@@ -2404,11 +2482,28 @@ export function App() {
     });
   }
 
-  async function handleSelectModelProfile(profileId: string): Promise<void> {
+  async function handleApplyModelPreference(
+    profileId: string,
+    reasoningEffort?: ReasoningEffortLevel,
+  ): Promise<void> {
+    if (isBusy) return;
     try {
       setNotice(null);
-      await runtimeClient.setDefaultModelProfile(profileId);
-      await refreshRuntimeInfoNow();
+      if (activeThread?.threadId) {
+        await runtimeClient.updateThreadModelPreference(activeThread.threadId, {
+          modelProfileId: profileId,
+          reasoningEffort,
+        });
+        await refreshThreads();
+      } else {
+        setNewThreadModelPreference((current) => ({
+          selectedModelProfileId: profileId,
+          reasoningEffortByProfile: {
+            ...current.reasoningEffortByProfile,
+            ...(reasoningEffort ? { [profileId]: reasoningEffort } : {}),
+          },
+        }));
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to switch model");
     }
@@ -2538,24 +2633,61 @@ export function App() {
     threadLoadSeqRef.current += 1;
     terminalSeenRef.current = false;
     setNotice(null);
+    setNewThreadModelPreference({ reasoningEffortByProfile: {} });
     localStorage.removeItem("awaken:runId");
     prepareForNewTask();
     dispatch({ type: "run/reset" });
   }
 
   const enabledModelProfiles = modelProfiles.filter((profile) => profile.enabled);
+  const activeThread = runtimeState.activeThreadId
+    ? runtimeState.threads.find((thread) => thread.threadId === runtimeState.activeThreadId)
+    : undefined;
+  const requestedModelProfileId =
+    activeThread?.selectedModelProfileId ?? newThreadModelPreference.selectedModelProfileId;
   const selectedModelProfile =
+    enabledModelProfiles.find((profile) => profile.id === requestedModelProfileId) ??
     enabledModelProfiles.find((profile) => profile.id === runtimeInfo?.modelProfile?.id) ??
     enabledModelProfiles.find((profile) => profile.isDefault) ??
     enabledModelProfiles[0];
+  const selectedModelProvider = selectedModelProfile
+    ? modelProviders.find((provider) => provider.id === selectedModelProfile.providerId)
+    : undefined;
+  const selectedReasoningCapability = selectedModelProfile
+    ? selectedModelProfile.effectiveCapability?.reasoningEffort ??
+      selectedModelProvider?.modelCapabilities[selectedModelProfile.modelId]?.reasoningEffort
+    : undefined;
+  const persistedThreadReasoningEffort = selectedModelProfile
+    ? activeThread?.reasoningEffortByProfile?.[selectedModelProfile.id]
+    : undefined;
+  const storedReasoningEffort = selectedModelProfile
+    ? persistedThreadReasoningEffort ??
+      newThreadModelPreference.reasoningEffortByProfile[selectedModelProfile.id] ??
+      selectedModelProfile.advanced?.defaultReasoningEffort
+    : undefined;
+  const selectedReasoningEffort =
+    storedReasoningEffort && selectedReasoningCapability?.levels.includes(storedReasoningEffort)
+      ? storedReasoningEffort
+      : selectedReasoningCapability?.defaultLevel;
+  const recoveredPreferenceKey = modelPreferenceRecoveryKey(
+    activeThread?.threadId,
+    activeThread?.selectedModelProfileId,
+    selectedModelProfile?.id,
+    persistedThreadReasoningEffort,
+    selectedReasoningEffort,
+  );
+  useEffect(() => {
+    if (!recoveredPreferenceKey || recoveredModelPreferenceRef.current === recoveredPreferenceKey) {
+      return;
+    }
+    recoveredModelPreferenceRef.current = recoveredPreferenceKey;
+    setNotice("原会话的模型或 effort 已失效，已恢复为当前可用默认值。");
+  }, [recoveredPreferenceKey]);
   const defaultWorkspacePath = runtimeInfo?.defaultWorkspace ?? workspacePath;
   const effectiveDefaultWorkspacePath = defaultProjectRemoved ? undefined : defaultWorkspacePath;
   // Without a user-selected workspace there is no implicit default project;
   // 项目工作区 shows a true empty state until the user opens/adds a project.
   const hasDefaultWorkspaceProject = Boolean(effectiveDefaultWorkspacePath?.trim());
-  const activeThread = runtimeState.activeThreadId
-    ? runtimeState.threads.find((thread) => thread.threadId === runtimeState.activeThreadId)
-    : undefined;
   const activeThreadWorkspacePath = activeThread?.workspaceRoot;
   const activeThreadProjectId = activeThread
     ? projectIdForThread(activeThread, effectiveDefaultWorkspacePath)
@@ -2784,13 +2916,24 @@ export function App() {
     ? "选择项目"
     : ((workspaceLabelProjectId ? projectLabelById.get(workspaceLabelProjectId) : undefined) ??
       (workspaceLabelPath ? workspaceLabelForPath(workspaceLabelPath) : "awaken"));
+  const selectedEndpointSelector = selectedModelProfile?.advanced?.endpointId?.trim();
+  const selectedRuntimeModelIdentity = selectedModelProfile
+    ? {
+        ...selectedModelProfile,
+        modelId: selectedEndpointSelector || selectedModelProfile.modelId,
+        capabilityModelId: selectedModelProfile.modelId,
+        endpointSelector: selectedEndpointSelector,
+        modelSelectorKind: selectedEndpointSelector ? ("endpoint" as const) : ("model" as const),
+        reasoningEffort: selectedReasoningEffort,
+      }
+    : undefined;
   const contextMeta = contextUsageMeta(
     runtimeState.inspectorSummary.contextWindow,
-    selectedModelProfile,
+    selectedRuntimeModelIdentity,
   );
   const contextPanelData = contextUsagePanelData(
     runtimeState.inspectorSummary.contextWindow,
-    selectedModelProfile,
+    selectedRuntimeModelIdentity,
   );
   const contextUsagePanelId = "awaken-context-usage-panel";
 
@@ -2843,23 +2986,61 @@ export function App() {
     enabledModelProfiles.length > 0 && selectedModelProfile
       ? {
           id: "model",
-          label: modelProfileLabel(selectedModelProfile),
-          menuItems: enabledModelProfiles.map((profile) => ({
-            id: profile.id,
-            label: modelProfileLabel(profile),
-            icon: modelProfileIcon(profile),
-            selected: profile.id === selectedModelProfile.id,
-            onSelect: () => {
-              if (profile.id !== selectedModelProfile.id) {
-                void handleSelectModelProfile(profile.id);
-              }
-            },
-          })),
+          label: `${modelProfileLabel(selectedModelProfile)}${selectedReasoningEffort ? ` · ${selectedReasoningEffort}` : ""}`,
+          icon: modelProfileIcon(selectedModelProfile),
+          disabled: isBusy,
+          menuItems: enabledModelProfiles.map((profile) => {
+            const provider = modelProviders.find((item) => item.id === profile.providerId);
+            const capability =
+              profile.effectiveCapability?.reasoningEffort ??
+              provider?.modelCapabilities[profile.modelId]?.reasoningEffort;
+            const storedEffort =
+              activeThread?.reasoningEffortByProfile?.[profile.id] ??
+              newThreadModelPreference.reasoningEffortByProfile[profile.id] ??
+              profile.advanced?.defaultReasoningEffort;
+            const effectiveEffort =
+              storedEffort && capability?.levels.includes(storedEffort)
+                ? storedEffort
+                : capability?.defaultLevel;
+            return {
+              id: profile.id,
+              label: modelProfileLabel(profile),
+              icon: modelProfileIcon(profile),
+              selected: profile.id === selectedModelProfile.id,
+              disabled: isBusy,
+              onSelect: () => {
+                const change = modelPreferenceChangeForOption(
+                  profile.id,
+                  selectedModelProfile.id,
+                  effectiveEffort,
+                );
+                if (change) {
+                  void handleApplyModelPreference(
+                    change.modelProfileId,
+                    change.reasoningEffort,
+                  );
+                }
+              },
+              effort:
+                capability && effectiveEffort
+                  ? {
+                      levels: capability.levels,
+                      selectedLevel: effectiveEffort,
+                      note: activeThread?.runId
+                        ? "切换模型或推理强度会重建对话缓存，下次发送消息时生效。"
+                        : undefined,
+                      onChange: (level: ReasoningEffortLevel) => {
+                        void handleApplyModelPreference(profile.id, level);
+                      },
+                    }
+                  : undefined,
+            };
+          }),
           menuFooterAction: {
             label: "添加模型",
             icon: <Settings size={16} strokeWidth={1.9} />,
             onClick: () => {
-              setModelSettingsInitialModelSection("configure");
+              setModelSettingsInitialModelSection("coding_plan");
               setModelSettingsOpen(true);
             },
           },
@@ -3679,6 +3860,8 @@ export function App() {
         attachments: forceNewThread ? [] : runInputAttachments,
         composerTokens: forceNewThread ? [] : draftComposerTokens,
         threadId: forceNewThread ? undefined : runtimeState.activeThreadId || undefined,
+        modelProfileId: selectedModelProfile?.id,
+        reasoningEffort: selectedReasoningEffort,
         workspace: {
           // projectId is what lets Core place a folder-less run in that
           // project's own session workspace rather than guess an identity from
@@ -5164,7 +5347,7 @@ export function App() {
                     variant="primary"
                     size="sm"
                     onClick={() => {
-                      setModelSettingsInitialModelSection("configured");
+                      setModelSettingsInitialModelSection("api");
                       setModelSettingsOpen(true);
                     }}
                   >
@@ -6090,7 +6273,7 @@ export function App() {
         runtimeClient={runtimeClient}
         onOpenSettings={() => {
           setProfilePopoverOpen(false);
-          setModelSettingsInitialModelSection("configured");
+          setModelSettingsInitialModelSection("api");
           setModelSettingsOpen(true);
         }}
         onClose={() => setProfilePopoverOpen(false)}

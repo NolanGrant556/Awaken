@@ -681,4 +681,541 @@ describe("AwakenComposerBar unified token editing", () => {
 
     expect(host.querySelector(".composer-bar-project-shelf")).toBeNull();
   });
+
+  it("renders the selected model logo in the composer trigger", () => {
+    renderComposer({
+      metaItems: [
+        {
+          id: "model",
+          label: "kimi-for-coding",
+          icon: <span data-testid="selected-model-logo">K</span>,
+          menuItems: [{ id: "profile-kimi", label: "kimi-for-coding", selected: true }],
+        },
+      ],
+    });
+
+    const trigger = host.querySelector<HTMLButtonElement>(".composer-bar-model-trigger");
+    expect(trigger?.querySelector(".composer-bar-model-trigger-icon")).not.toBeNull();
+    expect(trigger?.querySelector('[data-testid="selected-model-logo"]')).not.toBeNull();
+  });
+
+  it("stretches the model trigger itself in both center and dock composers", () => {
+    const metaItems = [
+      {
+        id: "model",
+        label: "k3 · high",
+        menuItems: [{ id: "profile-k3", label: "k3", selected: true }],
+      },
+    ];
+    const { rerender } = renderComposer({ variant: "center", metaItems });
+    const trigger = host.querySelector<HTMLButtonElement>(".composer-bar-model-trigger")!;
+    const bounds = vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 136,
+      bottom: 32,
+      width: 136,
+      height: 32,
+      toJSON: () => ({}),
+    });
+
+    act(() => trigger.click());
+    expect(trigger.classList).toContain("composer-bar-model-trigger-open");
+    expect(trigger.style.getPropertyValue("--composer-model-trigger-collapsed-width")).toBe(
+      "136px",
+    );
+    expect(host.querySelector(".composer-bar-model-menu")?.className).toBe(
+      "composer-bar-model-menu",
+    );
+
+    act(() => trigger.click());
+    rerender({ variant: "dock" });
+    bounds.mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 118,
+      bottom: 27,
+      width: 118,
+      height: 27,
+      toJSON: () => ({}),
+    });
+    act(() => trigger.click());
+    expect(host.querySelector(".composer-bar-dock")).not.toBeNull();
+    expect(trigger.classList).toContain("composer-bar-model-trigger-open");
+    expect(trigger.style.getPropertyValue("--composer-model-trigger-collapsed-width")).toBe(
+      "118px",
+    );
+  });
+
+  it("opens an effort secondary panel and immediately changes a two-level control", () => {
+    const onChange = vi.fn();
+    renderComposer({
+      metaItems: [
+        {
+          id: "model",
+          label: "GLM-5.2 · high",
+          menuItems: [
+            {
+              id: "profile-glm",
+              label: "GLM-5.2",
+              icon: <span data-testid="effort-model-logo">GLM</span>,
+              selected: true,
+              effort: {
+                levels: ["high", "max"],
+                selectedLevel: "high",
+                onChange,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const trigger = host.querySelector<HTMLButtonElement>(".composer-bar-model-trigger");
+    act(() => trigger?.click());
+    const option = host.querySelector<HTMLButtonElement>(".composer-bar-model-option");
+    act(() => option?.click());
+
+    const panel = host.querySelector<HTMLElement>(".composer-bar-model-effort-panel");
+    const slider = host.querySelector<HTMLElement>(".composer-bar-model-effort-slider");
+    expect(panel?.getAttribute("aria-label")).toContain("GLM-5.2");
+    expect(
+      panel?.querySelector(".composer-bar-model-effort-icon [data-testid='effort-model-logo']"),
+    ).not.toBeNull();
+    expect(slider?.getAttribute("role")).toBe("slider");
+    expect(slider?.getAttribute("aria-valuemax")).toBe("1");
+    expect(slider?.getAttribute("aria-valuetext")).toBe("high");
+    expect(slider?.dataset.effort).toBe("high");
+    expect(slider?.textContent).not.toContain("Effort");
+    expect(slider?.textContent?.trim()).toBe("");
+    expect(slider?.querySelector(".composer-bar-model-effort-value")).toBeNull();
+    expect(slider?.querySelectorAll(".composer-bar-model-effort-detent")).toHaveLength(1);
+    expect(
+      Array.from(slider?.querySelectorAll(".composer-bar-model-effort-detent") ?? []).map(
+        (detent) => detent.getAttribute("data-level"),
+      ),
+    ).toEqual(["max"]);
+    expect(
+      slider
+        ?.querySelector<HTMLElement>(".composer-bar-model-effort-detent[data-level='max']")
+        ?.style.getPropertyValue("--composer-effort-detent-progress"),
+    ).toBe("92%");
+    expect(
+      Array.from(slider?.querySelectorAll(".composer-bar-model-effort-detent") ?? []).map(
+        (detent) => detent.getAttribute("data-reached"),
+      ),
+    ).toEqual(["false"]);
+    const effortFlow = slider?.querySelector(".composer-bar-model-effort-flow");
+    expect(effortFlow?.classList).toContain("aw-memory-light-flow--compact");
+    expect(effortFlow?.classList).toContain("aw-memory-light-flow--tone-effort");
+    expect(slider?.style.getPropertyValue("--composer-effort-selected-progress")).toBe(
+      "0%",
+    );
+    expect(slider?.querySelector(".composer-bar-model-effort-thumb")).not.toBeNull();
+
+    act(() => {
+      slider?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+      );
+    });
+    expect(slider?.getAttribute("aria-valuetext")).toBe("max");
+    expect(slider?.dataset.effort).toBe("max");
+    expect(slider?.textContent?.trim()).toBe("");
+    expect(effortFlow?.classList).toContain("aw-memory-light-flow--tone-danger");
+    expect(slider?.style.getPropertyValue("--composer-effort-selected-progress")).toBe(
+      "100%",
+    );
+    expect(
+      Array.from(slider?.querySelectorAll(".composer-bar-model-effort-detent") ?? []).map(
+        (detent) => detent.getAttribute("data-reached"),
+      ),
+    ).toEqual(["true"]);
+    expect(onChange).toHaveBeenCalledWith("max");
+
+    act(() => {
+      slider?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Home", bubbles: true }),
+      );
+    });
+    expect(slider?.getAttribute("aria-valuetext")).toBe("high");
+    expect(effortFlow?.classList).toContain("aw-memory-light-flow--tone-effort");
+    expect(slider?.style.getPropertyValue("--composer-effort-selected-progress")).toBe(
+      "0%",
+    );
+    expect(onChange).toHaveBeenLastCalledWith("high");
+
+    act(() => {
+      slider?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "End", bubbles: true }),
+      );
+    });
+    expect(slider?.getAttribute("aria-valuetext")).toBe("max");
+    expect(effortFlow?.classList).toContain("aw-memory-light-flow--tone-danger");
+    expect(slider?.style.getPropertyValue("--composer-effort-selected-progress")).toBe(
+      "100%",
+    );
+    expect(onChange).toHaveBeenLastCalledWith("max");
+    expect(host.querySelector(".composer-bar-model-effort-apply")).toBeNull();
+    expect(host.querySelector(".composer-bar-model-effort-panel")).not.toBeNull();
+
+    act(() => trigger?.click());
+    expect(host.querySelector(".composer-bar-model-effort-flow")).toBeNull();
+  });
+
+  it("selects an effort-capable target model before opening its secondary panel", () => {
+    const callOrder: string[] = [];
+    renderComposer({
+      metaItems: [
+        {
+          id: "model",
+          label: "current · high",
+          menuItems: [
+            {
+              id: "profile-target",
+              label: "target",
+              onSelect: () => callOrder.push("select-target"),
+              effort: {
+                levels: ["low", "high", "max"],
+                selectedLevel: "high",
+                onChange: (level) => callOrder.push(`effort-${level}`),
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    act(() => host.querySelector<HTMLButtonElement>(".composer-bar-model-trigger")?.click());
+    act(() => host.querySelector<HTMLButtonElement>(".composer-bar-model-option")?.click());
+
+    expect(callOrder).toEqual(["select-target"]);
+    expect(host.querySelector(".composer-bar-model-effort-panel")).not.toBeNull();
+    expect(
+      host.querySelector(".composer-bar-model-effort-slider")?.getAttribute("aria-valuetext"),
+    ).toBe("high");
+  });
+
+  it("keeps a two-level max detent inside the right-end value zone", () => {
+    const onChange = vi.fn();
+    renderComposer({
+      metaItems: [
+        {
+          id: "model",
+          label: "GLM-5.2 · high",
+          menuItems: [
+            {
+              id: "profile-glm",
+              label: "GLM-5.2",
+              effort: {
+                levels: ["high", "max"],
+                selectedLevel: "high",
+                onChange,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    act(() => host.querySelector<HTMLButtonElement>(".composer-bar-model-trigger")?.click());
+    act(() => host.querySelector<HTMLButtonElement>(".composer-bar-model-option")?.click());
+    const slider = host.querySelector<HTMLElement>(".composer-bar-model-effort-slider");
+    vi.spyOn(slider!, "getBoundingClientRect").mockReturnValue({
+      x: 100,
+      y: 0,
+      left: 100,
+      top: 0,
+      right: 300,
+      bottom: 32,
+      width: 200,
+      height: 32,
+      toJSON: () => ({}),
+    });
+
+    act(() => {
+      slider?.dispatchEvent(
+        new MouseEvent("pointerdown", { bubbles: true, clientX: 240 }),
+      );
+      slider?.dispatchEvent(
+        new MouseEvent("pointermove", { bubbles: true, clientX: 268 }),
+      );
+    });
+    expect(slider?.getAttribute("aria-valuetext")).toBe("high");
+    expect(onChange).not.toHaveBeenCalled();
+
+    act(() => {
+      slider?.dispatchEvent(
+        new MouseEvent("pointermove", { bubbles: true, clientX: 284 }),
+      );
+      slider?.dispatchEvent(
+        new MouseEvent("pointerup", { bubbles: true, clientX: 284 }),
+      );
+    });
+    expect(slider?.getAttribute("aria-valuetext")).toBe("max");
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith("max");
+  });
+
+  it("snaps the effort slider to discrete levels while dragging", () => {
+    const onChange = vi.fn();
+    renderComposer({
+      metaItems: [
+        {
+          id: "model",
+          label: "k3 · low",
+          menuItems: [
+            {
+              id: "profile-k3",
+              label: "k3",
+              effort: {
+                levels: ["low", "high", "max"],
+                selectedLevel: "low",
+                onChange,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    act(() => host.querySelector<HTMLButtonElement>(".composer-bar-model-trigger")?.click());
+    act(() => host.querySelector<HTMLButtonElement>(".composer-bar-model-option")?.click());
+    const slider = host.querySelector<HTMLElement>(".composer-bar-model-effort-slider");
+    expect(slider?.querySelectorAll(".composer-bar-model-effort-detent")).toHaveLength(2);
+    expect(
+      Array.from(slider?.querySelectorAll(".composer-bar-model-effort-detent") ?? []).map(
+        (detent) => detent.getAttribute("data-level"),
+      ),
+    ).toEqual(["high", "max"]);
+    expect(
+      Array.from(
+        slider?.querySelectorAll<HTMLElement>(".composer-bar-model-effort-detent") ?? [],
+      ).map((detent) => detent.style.getPropertyValue("--composer-effort-detent-progress")),
+    ).toEqual(["50%", "92%"]);
+    expect(slider?.style.getPropertyValue("--composer-effort-selected-progress")).toBe(
+      "0%",
+    );
+    vi.spyOn(slider!, "getBoundingClientRect").mockReturnValue({
+      x: 100,
+      y: 0,
+      left: 100,
+      top: 0,
+      right: 458,
+      bottom: 32,
+      width: 358,
+      height: 32,
+      toJSON: () => ({}),
+    });
+    const setPointerCapture = vi.fn();
+    const releasePointerCapture = vi.fn();
+    Object.defineProperties(slider!, {
+      setPointerCapture: { configurable: true, value: setPointerCapture },
+      hasPointerCapture: { configurable: true, value: () => true },
+      releasePointerCapture: { configurable: true, value: releasePointerCapture },
+    });
+
+    act(() => {
+      slider?.dispatchEvent(
+        new MouseEvent("pointermove", { bubbles: true, clientX: 455 }),
+      );
+    });
+    expect(slider?.getAttribute("aria-valuetext")).toBe("low");
+    expect(slider?.dataset.dragging).toBeUndefined();
+    expect(onChange).not.toHaveBeenCalled();
+
+    act(() => {
+      const pointerDown = new MouseEvent("pointerdown", { bubbles: true, clientX: 300 });
+      Object.defineProperty(pointerDown, "pointerId", { value: 7 });
+      slider?.dispatchEvent(pointerDown);
+    });
+    expect(slider?.getAttribute("aria-valuetext")).toBe("high");
+    expect(slider?.dataset.dragging).toBe("true");
+    expect(slider?.style.getPropertyValue("--composer-effort-drag-progress")).not.toBe("");
+    expect(slider?.style.getPropertyValue("--composer-effort-selected-progress")).toBe(
+      "50%",
+    );
+    expect(
+      Array.from(slider?.querySelectorAll(".composer-bar-model-effort-detent") ?? []).map(
+        (detent) => detent.getAttribute("data-reached"),
+      ),
+    ).toEqual(["true", "false"]);
+    expect(onChange).toHaveBeenLastCalledWith("high");
+    expect(setPointerCapture).toHaveBeenCalledWith(7);
+
+    act(() => {
+      slider?.dispatchEvent(
+        new MouseEvent("pointermove", { bubbles: true, clientX: 304 }),
+      );
+    });
+    expect(slider?.getAttribute("aria-valuetext")).toBe("high");
+    expect(onChange.mock.calls.map(([level]) => level)).toEqual(["high"]);
+
+    act(() => {
+      slider?.dispatchEvent(
+        new MouseEvent("pointermove", { bubbles: true, clientX: 395 }),
+      );
+    });
+    expect(slider?.getAttribute("aria-valuetext")).toBe("high");
+    expect(onChange.mock.calls.map(([level]) => level)).toEqual(["high"]);
+
+    act(() => {
+      slider?.dispatchEvent(
+        new MouseEvent("pointermove", { bubbles: true, clientX: 432 }),
+      );
+      const pointerUp = new MouseEvent("pointerup", { bubbles: true, clientX: 432 });
+      Object.defineProperty(pointerUp, "pointerId", { value: 7 });
+      slider?.dispatchEvent(pointerUp);
+    });
+    expect(slider?.getAttribute("aria-valuetext")).toBe("max");
+    expect(slider?.dataset.dragging).toBeUndefined();
+    expect(slider?.style.getPropertyValue("--composer-effort-drag-progress")).toBe("");
+    expect(slider?.style.getPropertyValue("--composer-effort-selected-progress")).toBe(
+      "100%",
+    );
+    expect(
+      slider?.querySelector(".composer-bar-model-effort-flow")?.classList,
+    ).toContain("aw-memory-light-flow--tone-danger");
+    expect(
+      Array.from(slider?.querySelectorAll(".composer-bar-model-effort-detent") ?? []).map(
+        (detent) => detent.getAttribute("data-reached"),
+      ),
+    ).toEqual(["true", "true"]);
+    expect(onChange.mock.calls.map(([level]) => level)).toEqual(["high", "max"]);
+    expect(slider?.textContent?.trim()).toBe("");
+    expect(releasePointerCapture).toHaveBeenCalledWith(7);
+
+    act(() => {
+      slider?.dispatchEvent(
+        new MouseEvent("pointermove", { bubbles: true, clientX: 110 }),
+      );
+    });
+    expect(slider?.getAttribute("aria-valuetext")).toBe("max");
+    expect(onChange.mock.calls.map(([level]) => level)).toEqual(["high", "max"]);
+
+    act(() => {
+      const pointerDown = new MouseEvent("pointerdown", {
+        bubbles: true,
+        clientX: 300,
+      });
+      Object.defineProperty(pointerDown, "pointerId", { value: 8 });
+      slider?.dispatchEvent(pointerDown);
+      slider?.dispatchEvent(
+        new MouseEvent("pointermove", { bubbles: true, clientX: 110 }),
+      );
+      const pointerCancel = new MouseEvent("pointercancel", { bubbles: true });
+      Object.defineProperty(pointerCancel, "pointerId", { value: 8 });
+      slider?.dispatchEvent(pointerCancel);
+    });
+    expect(slider?.dataset.dragging).toBeUndefined();
+    expect(slider?.getAttribute("aria-valuetext")).toBe("low");
+    expect(releasePointerCapture).toHaveBeenCalledWith(8);
+
+    act(() => {
+      slider?.dispatchEvent(
+        new MouseEvent("pointermove", { bubbles: true, clientX: 455 }),
+      );
+    });
+    expect(slider?.getAttribute("aria-valuetext")).toBe("low");
+    expect(onChange.mock.calls.map(([level]) => level)).toEqual([
+      "high",
+      "max",
+      "high",
+      "low",
+    ]);
+  });
+
+  it("clears an interrupted effort drag before the secondary panel reopens", () => {
+    const onChange = vi.fn();
+    renderComposer({
+      metaItems: [
+        {
+          id: "model",
+          label: "k3 · low",
+          menuItems: [
+            {
+              id: "profile-k3",
+              label: "k3",
+              effort: {
+                levels: ["low", "high", "max"],
+                selectedLevel: "low",
+                onChange,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const trigger = host.querySelector<HTMLButtonElement>(".composer-bar-model-trigger");
+    act(() => trigger?.click());
+    act(() => host.querySelector<HTMLButtonElement>(".composer-bar-model-option")?.click());
+    const firstSlider = host.querySelector<HTMLElement>(".composer-bar-model-effort-slider");
+    vi.spyOn(firstSlider!, "getBoundingClientRect").mockReturnValue({
+      x: 100,
+      y: 0,
+      left: 100,
+      top: 0,
+      right: 458,
+      bottom: 32,
+      width: 358,
+      height: 32,
+      toJSON: () => ({}),
+    });
+
+    act(() => {
+      firstSlider?.dispatchEvent(
+        new MouseEvent("pointerdown", { bubbles: true, clientX: 300 }),
+      );
+    });
+    expect(firstSlider?.dataset.dragging).toBe("true");
+    expect(onChange).toHaveBeenCalledWith("high");
+
+    act(() => trigger?.click());
+    expect(host.querySelector(".composer-bar-model-effort-slider")).toBeNull();
+    act(() => trigger?.click());
+    act(() => host.querySelector<HTMLButtonElement>(".composer-bar-model-option")?.click());
+    const reopenedSlider = host.querySelector<HTMLElement>(".composer-bar-model-effort-slider");
+    vi.spyOn(reopenedSlider!, "getBoundingClientRect").mockReturnValue({
+      x: 100,
+      y: 0,
+      left: 100,
+      top: 0,
+      right: 458,
+      bottom: 32,
+      width: 358,
+      height: 32,
+      toJSON: () => ({}),
+    });
+
+    act(() => {
+      reopenedSlider?.dispatchEvent(
+        new MouseEvent("pointermove", { bubbles: true, clientX: 395 }),
+      );
+    });
+    expect(reopenedSlider?.getAttribute("aria-valuetext")).toBe("low");
+    expect(reopenedSlider?.dataset.dragging).toBeUndefined();
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("selects a model without rendering an effort placeholder", () => {
+    const onSelect = vi.fn();
+    renderComposer({
+      metaItems: [
+        {
+          id: "model",
+          label: "MiniMax-M3",
+          menuItems: [{ id: "profile-minimax", label: "MiniMax-M3", onSelect }],
+        },
+      ],
+    });
+
+    act(() => host.querySelector<HTMLButtonElement>(".composer-bar-model-trigger")?.click());
+    act(() => host.querySelector<HTMLButtonElement>(".composer-bar-model-option")?.click());
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(host.querySelector(".composer-bar-model-effort-panel")).toBeNull();
+  });
 });

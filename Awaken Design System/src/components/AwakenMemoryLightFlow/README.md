@@ -1,10 +1,10 @@
 # AwakenMemoryLightFlow
 
-`AwakenMemoryLightFlow` 是一个独立、纯装饰性的记忆页环境背景。它参考横向光流地形，以 Canvas 绘制细丝、短颗粒、薄雾和少量锐利高光，不展示业务文字、数据、状态或可操作控件。`AwakenMemoryLightFlowLayout` 是正式的 UI-only 组合布局，统一承载光流页头、标题和现有 `AwakenMemorySettings` 内容。
+`AwakenMemoryLightFlow` 是一个独立、纯装饰性的横向光流 primitive。它以 Canvas 绘制细丝、短颗粒、薄雾和少量锐利高光，不展示业务文字、数据、状态或可操作控件；记忆页头是它的主要消费方，Composer 推理强度轨道只复用其紧凑绘制变体。`AwakenMemoryLightFlowLayout` 是记忆页正式的 UI-only 组合布局，统一承载光流页头、标题和现有 `AwakenMemorySettings` 内容。
 
 ## 边界
 
-- 组件只接收 `theme`、`className` 和可选无障碍标签。
+- 组件只接收 `theme`、`tone`、`variant`、`className` 和可选无障碍标签；默认 `memory + ambient` 保持记忆页视觉，`compact` 为小尺寸容器降低细丝与颗粒数量，并提高线宽、亮度和局部辉光以保持可读动势。
 - 不读取 Memory、Electron、runtime、store、文件系统或网络。
 - 不触发回调，不改变记忆设置状态，也不代表运行、焦点或选中状态。
 - Gallery 与真实 Desktop 都通过 `AwakenMemoryLightFlowLayout` 组合现有 `AwakenMemorySettings`，两端共用相同的脑形图标标题、标题位置、页头高度、开关清单与记忆管理布局；脑形图标复用左侧“记忆”导航的 `Brain` 图形，只作装饰且不进入可访问名称。
@@ -12,6 +12,7 @@
 - 记忆组合根节点承接完整纵向滚动并隐藏会占用额外 gutter 的原生滚动条；光流页头属于同一滚动内容并随页面移动。无轨道细滑块只绘制在页头下方的白色记忆视口右缘，高度限制在 44–72px，并按完整 `scrollHeight` 映射位置，不会缩短滚轮、触控板或触摸滚动的真实范围。Gallery 与 Desktop 使用同一实现。
 - 真实消费只传入当前生效的 `light` / `dark` 主题，不增加记忆开关、外观偏好或业务回调。
 - `AwakenMemoryLightFlowLayout` 只组合 children，不持有 Memory 数据或回调；真实 `MemorySettingsPanel` 仍拥有全部数据加载和副作用。
+- Composer 推理强度轨道仅复用同一 Canvas 生命周期与光流绘制器：普通档使用 `effort` 色调，最右 `max` 使用 `danger` 红色色调；档位状态和交互仍由 `AwakenComposerBar` 持有。
 - Gallery 通过“记忆设置”页面 Demo 观测该组合，不为光流 primitive 注册重复的顶层入口。
 - Gallery 场景使用随窗口变化的固定高度视口；超出的现有记忆内容由场景内部滚轮浏览，不会继续撑长整个 Gallery 页面，也不会显示滚动条轨道。
 - Gallery 借鉴纵向设置页的排版方法，把 Awaken 现有四个开关组织成单列清单；新增演示项只会向下追加，不会重新排列已有项目。

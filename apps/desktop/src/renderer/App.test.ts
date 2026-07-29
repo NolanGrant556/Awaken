@@ -21,6 +21,8 @@ import {
   contextUsagePanelData,
   isUserQuestionSelectionAnswered,
   insertComposerTokenAtOffset,
+  modelPreferenceChangeForOption,
+  modelPreferenceRecoveryKey,
   nextUserQuestionPromptIndex,
   nextSubagentInspectorTaskId,
   promptNarrativeTokensForComposer,
@@ -134,6 +136,7 @@ function stubElectronBridge(): void {
       getThreadTranscript: vi.fn(),
       listThreads: vi.fn(async () => []),
       renameThread: vi.fn(),
+      updateThreadModelPreference: vi.fn(),
       deleteThread: vi.fn(async () => ({ ok: true as const })),
       listProjects: vi.fn(async () => []),
       listProjectDirectory: vi.fn(async () => ({
@@ -214,12 +217,26 @@ function stubElectronBridge(): void {
       enableSkill: vi.fn(),
       listModelProviders: vi.fn(async () => []),
       listModelProfiles: vi.fn(async () => []),
+      getAgentPlanAccount: vi.fn(async () => ({
+        accountId: "volcengine-agent-plan-default" as const,
+        providerId: "volcengine-agent-plan" as const,
+        hasKey: false,
+        credentialRevision: 1,
+        modelIds: ["ark-code-latest"],
+      })),
+      saveAgentPlanAccount: vi.fn(),
+      refreshAgentPlanModels: vi.fn(),
+      deleteAgentPlanAccount: vi.fn(async () => undefined),
       saveModelProfile: vi.fn(),
       deleteModelProfile: vi.fn(),
       setDefaultModelProfile: vi.fn(),
       testModelProfile: vi.fn(async () => ({
         ok: true as const,
         value: { ok: true, message: "ok" },
+      })),
+      testAgentPlanReasoningCapability: vi.fn(async () => ({
+        ok: true as const,
+        value: { ok: false, message: "" },
       })),
       syncModelCapabilities: vi.fn(async () => []),
       getModelProfileBalances: vi.fn(async () => ({ balances: [] })),
@@ -1590,6 +1607,109 @@ describe("context usage presentation", () => {
     expect(data?.estimatedInputTokens).toBe(24_000);
   });
 
+  it("does not reuse provider usage after the reasoning effort changes", () => {
+    const data = contextUsagePanelData(
+      {
+        eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+        snapshot: {
+          schemaVersion: 4,
+          snapshotId: "ctx-effort-max",
+          estimatorId: "awaken_leaf_v4",
+          basis: "current_projection",
+          modelId: "shared-model",
+          protocolFamily: "openai_chat",
+          modelWindowTokens: 128_000,
+          outputReserveTokens: 16_000,
+          effectiveInputWindowTokens: 112_000,
+          estimatedInputTokens: 24_000,
+          warningThresholdTokens: 95_000,
+          autoCompactThresholdTokens: 100_800,
+          compactTargetTokens: 40_000,
+          contributions: [{ kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 }],
+          generatedAt: "2026-07-19T00:00:02Z",
+        },
+        latestModelUsage: {
+          schemaVersion: 1,
+          requestId: "req-effort-high",
+          purpose: "agent_turn",
+          modelId: "shared-model",
+          protocolFamily: "openai_chat",
+          reasoningPolicy: "high",
+          totalTokens: 99_000,
+          usageComplete: true,
+          latencyMs: 20,
+          status: "succeeded",
+          completedAt: "2026-07-19T00:00:01Z",
+        },
+      },
+      {
+        id: "profile-a",
+        providerId: "provider-a",
+        credentialRevision: 1,
+        modelId: "shared-model",
+        protocol: "openai_chat",
+        reasoningEffort: "max",
+      },
+    );
+
+    expect(data?.estimatedInputTokens).toBe(24_000);
+  });
+
+  it("matches endpoint transport usage through a separate capability model identity", () => {
+    const data = contextUsagePanelData(
+      {
+        eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+        snapshot: {
+          schemaVersion: 4,
+          snapshotId: "ctx-doubao-endpoint",
+          estimatorId: "awaken_leaf_v4",
+          basis: "current_projection",
+          modelId: "ep-doubao-test",
+          capabilityModelId: "doubao-seed-2.1-pro",
+          endpointSelector: "ep-doubao-test",
+          modelSelectorKind: "endpoint",
+          protocolFamily: "openai_chat",
+          modelWindowTokens: 128_000,
+          outputReserveTokens: 16_000,
+          effectiveInputWindowTokens: 112_000,
+          estimatedInputTokens: 24_000,
+          warningThresholdTokens: 95_000,
+          autoCompactThresholdTokens: 100_800,
+          compactTargetTokens: 40_000,
+          contributions: [{ kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 }],
+          generatedAt: "2026-07-19T00:00:02Z",
+        },
+        latestModelUsage: {
+          schemaVersion: 1,
+          requestId: "req-doubao-endpoint",
+          purpose: "agent_turn",
+          modelId: "ep-doubao-test",
+          capabilityModelId: "doubao-seed-2.1-pro",
+          endpointSelector: "ep-doubao-test",
+          modelSelectorKind: "endpoint",
+          protocolFamily: "openai_chat",
+          totalTokens: 28_000,
+          usageComplete: true,
+          latencyMs: 20,
+          status: "succeeded",
+          completedAt: "2026-07-19T00:00:01Z",
+        },
+      },
+      {
+        id: "profile-doubao",
+        providerId: "doubao",
+        credentialRevision: 1,
+        modelId: "ep-doubao-test",
+        capabilityModelId: "doubao-seed-2.1-pro",
+        endpointSelector: "ep-doubao-test",
+        modelSelectorKind: "endpoint",
+        protocol: "openai_chat",
+      },
+    );
+
+    expect(data?.estimatedInputTokens).toBe(28_000);
+  });
+
   it("projects typed breakdowns without exposing model-call accounting in the panel", () => {
     const data = contextUsagePanelData({
       eventType: "AWAKEN_CONTEXT_SNAPSHOT",
@@ -2548,6 +2668,51 @@ describe("App workbench presentation", () => {
       { id: "model", label: "kimi-for-coding" },
     ]);
     expect(composerMetaItemsForFileWorkspaceSurface(metaItems, false)).toBe(metaItems);
+  });
+
+  it("selects the target model even when its effort equals the current model effort", () => {
+    expect(
+      modelPreferenceChangeForOption("profile-target", "profile-current", "high"),
+    ).toEqual({
+      modelProfileId: "profile-target",
+      reasoningEffort: "high",
+    });
+    expect(
+      modelPreferenceChangeForOption("profile-current", "profile-current", "high"),
+    ).toBeUndefined();
+  });
+
+  it("does not recover a model preference while a new thread is awaiting metadata", () => {
+    expect(
+      modelPreferenceRecoveryKey(
+        "thread-new",
+        undefined,
+        "profile-default",
+        undefined,
+        "high",
+      ),
+    ).toBe("");
+  });
+
+  it("recovers only explicit unavailable model or effort preferences", () => {
+    expect(
+      modelPreferenceRecoveryKey(
+        "thread-existing",
+        "profile-deleted",
+        "profile-default",
+        "high",
+        "high",
+      ),
+    ).toBe("thread-existing:profile-deleted:high");
+    expect(
+      modelPreferenceRecoveryKey(
+        "thread-existing",
+        "profile-default",
+        "profile-default",
+        "max",
+        "high",
+      ),
+    ).toBe("thread-existing:profile-default:max");
   });
 
   it("renders idle as a blank execution stage with the light shell", () => {

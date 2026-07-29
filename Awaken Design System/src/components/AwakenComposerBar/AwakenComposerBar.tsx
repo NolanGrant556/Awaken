@@ -4,19 +4,25 @@ import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
   ReactNode,
   Ref,
 } from "react";
-import { Check, ChevronDown, FileText, Folder, FolderPlus, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, FileText, Folder, FolderPlus, X } from "lucide-react";
 import { AwakenComposerInput, type ComposerInputSelection } from "../AwakenComposerInput";
 import { AwakenContextButton } from "../AwakenContextButton";
 import { AwakenDropdown } from "../AwakenDropdown";
+import { AwakenMemoryLightFlow } from "../AwakenMemoryLightFlow";
 import { AwakenSendButton } from "../AwakenSendButton";
 import {
   AwakenComposerInlineInput,
   type ComposerInlineInputElement,
   type ComposerInlineStructuredValue,
 } from "./AwakenComposerInlineInput";
+const COMPOSER_EFFORT_TRACK_INSET_PX = 14;
+const COMPOSER_EFFORT_DETENT_EDGE_PROGRESS = 0.08;
+const COMPOSER_EFFORT_MAX_ZONE_MIN_PROGRESS = 0.92;
+const COMPOSER_EFFORT_HYSTERESIS_PX = 8;
 
 export type ComposerBarMetaMenuItem = {
   id: string;
@@ -25,6 +31,12 @@ export type ComposerBarMetaMenuItem = {
   selected?: boolean;
   disabled?: boolean;
   onSelect?: () => void;
+  effort?: {
+    levels: Array<"low" | "high" | "max">;
+    selectedLevel: "low" | "high" | "max";
+    note?: string;
+    onChange: (level: "low" | "high" | "max") => void;
+  };
 };
 
 export type ComposerBarMetaAction = {
@@ -252,6 +264,10 @@ export function AwakenComposerBar({
 }: AwakenComposerBarProps) {
   const canSubmit = submitMode === "stop" || (!disabled && !submitDisabled);
   const [openMetaMenuId, setOpenMetaMenuId] = useState<string | null>(null);
+  const [activeModelOptionId, setActiveModelOptionId] = useState<string | null>(null);
+  const [pendingModelEffort, setPendingModelEffort] = useState<"low" | "high" | "max" | null>(null);
+  const modelEffortDraggingRef = useRef(false);
+  const modelEffortValueRef = useRef<"low" | "high" | "max" | null>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [slashPreviewState, setSlashPreviewState] = useState<SlashPreviewState | null>(null);
   const [slashPaletteStyle, setSlashPaletteStyle] = useState<SlashPaletteStyle>({});
@@ -284,12 +300,14 @@ export function AwakenComposerBar({
     function handlePointerDown(event: MouseEvent): void {
       if (!modelMetaRef.current?.contains(event.target as Node)) {
         setOpenMetaMenuId(null);
+        setActiveModelOptionId(null);
       }
     }
 
     function handleKeyDown(event: KeyboardEvent): void {
       if (event.key === "Escape") {
         setOpenMetaMenuId(null);
+        setActiveModelOptionId(null);
       }
     }
 
@@ -306,6 +324,11 @@ export function AwakenComposerBar({
       setProjectMenuOpen(false);
     }
   }, [showProjectPicker]);
+
+  useEffect(() => {
+    if (openMetaMenuId && activeModelOptionId) return;
+    modelEffortDraggingRef.current = false;
+  }, [activeModelOptionId, openMetaMenuId]);
 
   useEffect(() => {
     if (!slashPalette?.open) {
@@ -404,6 +427,148 @@ export function AwakenComposerBar({
     const hasMenu = Boolean(item.menuItems?.length);
     const isMenuOpen = openMetaMenuId === item.id;
     const isInteractive = !item.disabled && (hasMenu || item.onClick);
+    const activeModelOption = item.menuItems?.find((option) => option.id === activeModelOptionId);
+    const activeEffortLevels = activeModelOption?.effort?.levels ?? [];
+    const pendingEffortIndex = pendingModelEffort
+      ? activeEffortLevels.indexOf(pendingModelEffort)
+      : -1;
+    const effortProgressAtIndex = (index: number): number => {
+      if (activeEffortLevels.length <= 1) return 0.5;
+      return index / (activeEffortLevels.length - 1);
+    };
+    const effortDetentProgressAtIndex = (index: number): number => {
+      if (index === activeEffortLevels.length - 1 && activeEffortLevels.length > 1) {
+        return 1 - COMPOSER_EFFORT_DETENT_EDGE_PROGRESS;
+      }
+      return effortProgressAtIndex(index);
+    };
+    const pendingEffortProgress = pendingEffortIndex >= 0
+      ? effortProgressAtIndex(pendingEffortIndex)
+      : 0;
+
+    function effortPointerInput(event: ReactPointerEvent<HTMLDivElement>): {
+      progress: number;
+      width: number;
+    } {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const activeWidth = Math.max(1, rect.width - COMPOSER_EFFORT_TRACK_INSET_PX * 2);
+      const pointerX = Math.max(
+        0,
+        Math.min(
+          activeWidth,
+          event.clientX - rect.left - COMPOSER_EFFORT_TRACK_INSET_PX,
+        ),
+      );
+      return {
+        progress: pointerX / activeWidth,
+        width: activeWidth,
+      };
+    }
+
+    function setEffortDragProgress(element: HTMLDivElement, progress: number): void {
+      element.style.setProperty(
+        "--composer-effort-drag-progress",
+        `${Math.max(0, Math.min(1, progress)) * 100}%`,
+      );
+    }
+
+    function changeEffortAtIndex(nextIndex: number): void {
+      const nextLevel = activeEffortLevels[nextIndex];
+      if (!nextLevel || modelEffortValueRef.current === nextLevel) return;
+      modelEffortValueRef.current = nextLevel;
+      setPendingModelEffort(nextLevel);
+      activeModelOption?.effort?.onChange(nextLevel);
+    }
+
+    function selectEffortAtProgress(
+      pointerProgress: number,
+      activeWidth: number,
+      options: { useHysteresis: boolean },
+    ): number | null {
+      if (activeEffortLevels.length === 0) return null;
+      const detentBoundary = (leftIndex: number) => {
+        const midpoint = (
+          effortProgressAtIndex(leftIndex) + effortProgressAtIndex(leftIndex + 1)
+        ) / 2;
+        if (activeEffortLevels[leftIndex + 1] === "max") {
+          return Math.max(COMPOSER_EFFORT_MAX_ZONE_MIN_PROGRESS, midpoint);
+        }
+        return midpoint;
+      };
+      const effortDetentHysteresis = Math.min(
+        0.06,
+        COMPOSER_EFFORT_HYSTERESIS_PX / Math.max(1, activeWidth),
+      );
+      let directIndex = 0;
+      while (
+        directIndex < activeEffortLevels.length - 1 &&
+        pointerProgress >= detentBoundary(directIndex)
+      ) {
+        directIndex += 1;
+      }
+      const currentIndex = modelEffortValueRef.current
+        ? activeEffortLevels.indexOf(modelEffortValueRef.current)
+        : -1;
+      let nextIndex = directIndex;
+      if (options.useHysteresis && currentIndex >= 0) {
+        nextIndex = currentIndex;
+        while (
+          nextIndex < activeEffortLevels.length - 1 &&
+          pointerProgress >=
+            detentBoundary(nextIndex) + effortDetentHysteresis
+        ) {
+          nextIndex += 1;
+        }
+        while (
+          nextIndex > 0 &&
+          pointerProgress <
+            detentBoundary(nextIndex - 1) - effortDetentHysteresis
+        ) {
+          nextIndex -= 1;
+        }
+      }
+      changeEffortAtIndex(nextIndex);
+      return nextIndex;
+    }
+
+    function stopEffortDragging(
+      event: ReactPointerEvent<HTMLDivElement>,
+      options: { commit: boolean },
+    ): void {
+      if (!modelEffortDraggingRef.current) return;
+      if (options.commit) {
+        const input = effortPointerInput(event);
+        selectEffortAtProgress(input.progress, input.width, { useHysteresis: true });
+      }
+      modelEffortDraggingRef.current = false;
+      delete event.currentTarget.dataset.dragging;
+      event.currentTarget.style.removeProperty("--composer-effort-drag-progress");
+      if (
+        Number.isFinite(event.pointerId) &&
+        event.currentTarget.hasPointerCapture?.(event.pointerId)
+      ) {
+        event.currentTarget.releasePointerCapture?.(event.pointerId);
+      }
+    }
+
+    function handleEffortSliderKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+      delete event.currentTarget.dataset.pointerFocus;
+      if (activeEffortLevels.length === 0) return;
+      const currentIndex = pendingEffortIndex >= 0 ? pendingEffortIndex : 0;
+      let nextIndex: number | undefined;
+      if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+        nextIndex = Math.max(0, currentIndex - 1);
+      } else if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+        nextIndex = Math.min(activeEffortLevels.length - 1, currentIndex + 1);
+      } else if (event.key === "Home") {
+        nextIndex = 0;
+      } else if (event.key === "End") {
+        nextIndex = activeEffortLevels.length - 1;
+      }
+      if (nextIndex === undefined) return;
+      event.preventDefault();
+      changeEffortAtIndex(nextIndex);
+    }
     const triggerContent = (
       <>
         {item.icon ? <span className="composer-bar-model-trigger-icon">{item.icon}</span> : null}
@@ -429,9 +594,19 @@ export function AwakenComposerBar({
             }`}
             aria-haspopup={hasMenu ? "listbox" : undefined}
             aria-expanded={hasMenu ? isMenuOpen : undefined}
-            onClick={() => {
+            onClick={(event) => {
               if (hasMenu) {
-                setOpenMetaMenuId((current) => (current === item.id ? null : item.id));
+                if (!isMenuOpen) {
+                  event.currentTarget.style.setProperty(
+                    "--composer-model-trigger-collapsed-width",
+                    `${event.currentTarget.getBoundingClientRect().width}px`,
+                  );
+                }
+                setOpenMetaMenuId((current) => {
+                  const next = current === item.id ? null : item.id;
+                  if (!next) setActiveModelOptionId(null);
+                  return next;
+                });
                 return;
               }
               item.onClick?.();
@@ -446,6 +621,113 @@ export function AwakenComposerBar({
         )}
         {hasMenu && isMenuOpen ? (
           <div className="composer-bar-model-menu" role="listbox" aria-label="选择模型">
+            {activeModelOption?.effort ? (
+              <div className="composer-bar-model-effort-panel" role="dialog" aria-label={`${activeModelOption.label} 推理强度`}>
+                <button
+                  type="button"
+                  className="composer-bar-model-effort-back"
+                  onClick={() => setActiveModelOptionId(null)}
+                  aria-label="返回模型列表"
+                >
+                  <ChevronLeft size={15} aria-hidden="true" />
+                  {activeModelOption.icon ? (
+                    <span className="composer-bar-model-option-icon composer-bar-model-effort-icon">
+                      {activeModelOption.icon}
+                    </span>
+                  ) : null}
+                  <span>{activeModelOption.label}</span>
+                </button>
+                <div
+                  className="composer-bar-model-effort-slider"
+                  role="slider"
+                  tabIndex={0}
+                  aria-label="推理强度"
+                  aria-orientation="horizontal"
+                  aria-valuemin={0}
+                  aria-valuemax={Math.max(0, activeEffortLevels.length - 1)}
+                  aria-valuenow={Math.max(0, pendingEffortIndex)}
+                  aria-valuetext={pendingModelEffort ?? undefined}
+                  data-effort={pendingModelEffort ?? undefined}
+                  style={
+                    {
+                      "--composer-effort-track-inset": `${COMPOSER_EFFORT_TRACK_INSET_PX}px`,
+                      "--composer-effort-selected-progress": `${pendingEffortProgress * 100}%`,
+                    } as CSSProperties
+                  }
+                  onKeyDown={handleEffortSliderKeyDown}
+                  onBlur={(event) => {
+                    delete event.currentTarget.dataset.pointerFocus;
+                  }}
+                  onPointerMove={(event) => {
+                    if (modelEffortDraggingRef.current) {
+                      const input = effortPointerInput(event);
+                      setEffortDragProgress(event.currentTarget, input.progress);
+                      selectEffortAtProgress(input.progress, input.width, {
+                        useHysteresis: true,
+                      });
+                    }
+                  }}
+                  onPointerDown={(event) => {
+                    if (event.button !== 0 || event.isPrimary === false) return;
+                    event.preventDefault();
+                    modelEffortDraggingRef.current = true;
+                    event.currentTarget.dataset.dragging = "true";
+                    event.currentTarget.dataset.pointerFocus = "true";
+                    if (Number.isFinite(event.pointerId)) {
+                      event.currentTarget.setPointerCapture?.(event.pointerId);
+                    }
+                    const input = effortPointerInput(event);
+                    setEffortDragProgress(event.currentTarget, input.progress);
+                    selectEffortAtProgress(input.progress, input.width, {
+                      useHysteresis: false,
+                    });
+                    event.currentTarget.focus();
+                  }}
+                  onPointerUp={(event) => stopEffortDragging(event, { commit: true })}
+                  onPointerCancel={(event) => stopEffortDragging(event, { commit: false })}
+                  onLostPointerCapture={(event) =>
+                    stopEffortDragging(event, { commit: false })
+                  }
+                >
+                  {pendingModelEffort ? (
+                    <span className="composer-bar-model-effort-track" aria-hidden="true">
+                      <AwakenMemoryLightFlow
+                        className="composer-bar-model-effort-flow"
+                        theme="dark"
+                        tone={pendingModelEffort === "max" ? "danger" : "effort"}
+                        variant="compact"
+                      />
+                      <span className="composer-bar-model-effort-detents">
+                        {activeEffortLevels.slice(1).map((level, offset) => {
+                          const index = offset + 1;
+                          return (
+                            <span
+                              key={level}
+                              className="composer-bar-model-effort-detent"
+                              data-level={level}
+                              data-reached={index <= pendingEffortIndex ? "true" : "false"}
+                              style={
+                                {
+                                  "--composer-effort-detent-progress": `${
+                                    effortDetentProgressAtIndex(index) * 100
+                                  }%`,
+                                } as CSSProperties
+                              }
+                            />
+                          );
+                        })}
+                      </span>
+                    </span>
+                  ) : null}
+                  <span className="composer-bar-model-effort-thumb-rail" aria-hidden="true">
+                    <span className="composer-bar-model-effort-thumb" />
+                  </span>
+                </div>
+                {activeModelOption.effort.note ? (
+                  <p className="composer-bar-model-effort-note">{activeModelOption.effort.note}</p>
+                ) : null}
+              </div>
+            ) : (
             <div className="composer-bar-model-menu-scroll">
               {item.menuItems?.map((option) => (
                 <button
@@ -458,6 +740,13 @@ export function AwakenComposerBar({
                   aria-selected={Boolean(option.selected)}
                   disabled={option.disabled}
                   onClick={() => {
+                    if (option.effort) {
+                      option.onSelect?.();
+                      setActiveModelOptionId(option.id);
+                      setPendingModelEffort(option.effort.selectedLevel);
+                      modelEffortValueRef.current = option.effort.selectedLevel;
+                      return;
+                    }
                     option.onSelect?.();
                     setOpenMetaMenuId(null);
                   }}
@@ -477,7 +766,8 @@ export function AwakenComposerBar({
                 </button>
               ))}
             </div>
-            {item.menuFooterAction ? (
+            )}
+            {!activeModelOption && item.menuFooterAction ? (
               <button
                 type="button"
                 className="composer-bar-model-menu-action"

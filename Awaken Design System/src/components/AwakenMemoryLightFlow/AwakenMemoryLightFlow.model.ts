@@ -1,4 +1,6 @@
 export type AwakenMemoryLightFlowTheme = "light" | "dark";
+export type AwakenMemoryLightFlowTone = "memory" | "effort" | "danger";
+export type AwakenMemoryLightFlowVariant = "ambient" | "compact";
 
 type LightFlowPalette = {
   backgroundTop: string;
@@ -42,6 +44,7 @@ type ParticleDefinition = {
 
 type LightFlowRenderCache = {
   theme: AwakenMemoryLightFlowTheme;
+  tone: AwakenMemoryLightFlowTone;
   width: number;
   height: number;
   pixelWidth: number;
@@ -72,6 +75,31 @@ const palettes: Record<AwakenMemoryLightFlowTheme, LightFlowPalette> = {
     filamentOpacity: 0.3,
     particleOpacity: 0.32,
     glowOpacity: 0.38,
+  },
+};
+
+const effortPalettes: Record<Exclude<AwakenMemoryLightFlowTone, "memory">, LightFlowPalette> = {
+  effort: {
+    backgroundTop: "#18a66d",
+    backgroundBottom: "#0b7654",
+    filament: [184, 255, 226],
+    accent: [104, 246, 188],
+    highlight: [248, 255, 252],
+    haze: [71, 229, 160],
+    filamentOpacity: 0.9,
+    particleOpacity: 0.78,
+    glowOpacity: 0.82,
+  },
+  danger: {
+    backgroundTop: "#ef625b",
+    backgroundBottom: "#b92338",
+    filament: [255, 207, 205],
+    accent: [255, 142, 131],
+    highlight: [255, 250, 248],
+    haze: [255, 92, 87],
+    filamentOpacity: 0.92,
+    particleOpacity: 0.82,
+    glowOpacity: 0.86,
   },
 };
 
@@ -133,12 +161,14 @@ function getRenderCache(
   width: number,
   height: number,
   theme: AwakenMemoryLightFlowTheme,
+  tone: AwakenMemoryLightFlowTone,
   palette: LightFlowPalette,
 ): LightFlowRenderCache {
   const cached = renderCaches.get(context);
   if (
     cached
     && cached.theme === theme
+    && cached.tone === tone
     && cached.width === width
     && cached.height === height
     && cached.pixelWidth === context.canvas.width
@@ -169,6 +199,7 @@ function getRenderCache(
 
   const nextCache = {
     theme,
+    tone,
     width,
     height,
     pixelWidth: context.canvas.width,
@@ -229,9 +260,15 @@ function drawFilamentField(
   height: number,
   time: number,
   filamentGradients: readonly CanvasGradient[],
+  variant: AwakenMemoryLightFlowVariant,
 ): void {
-  const count = Math.max(72, Math.min(FILAMENT_DEFINITIONS.length, Math.round(height * 0.62)));
-  const steps = Math.max(96, Math.min(180, Math.round(width / 7)));
+  const compact = variant === "compact";
+  const count = compact
+    ? Math.max(18, Math.min(34, Math.round(height * 0.9)))
+    : Math.max(72, Math.min(FILAMENT_DEFINITIONS.length, Math.round(height * 0.62)));
+  const steps = compact
+    ? Math.max(48, Math.min(104, Math.round(width / 5)))
+    : Math.max(96, Math.min(180, Math.round(width / 7)));
 
   for (let index = 0; index < count; index += 1) {
     const definition = FILAMENT_DEFINITIONS[index];
@@ -245,7 +282,7 @@ function drawFilamentField(
     }
 
     context.strokeStyle = filamentGradients[index];
-    context.lineWidth = definition.lineWidth;
+    context.lineWidth = definition.lineWidth * (compact ? 3 : 1);
     context.stroke();
   }
 }
@@ -256,11 +293,14 @@ function drawParticleField(
   height: number,
   time: number,
   palette: LightFlowPalette,
+  variant: AwakenMemoryLightFlowVariant,
 ): void {
-  const particleCount = Math.max(
-    150,
-    Math.min(PARTICLE_DEFINITIONS.length, Math.round((width * height) / 920)),
-  );
+  const particleCount = variant === "compact"
+    ? Math.max(28, Math.min(84, Math.round((width * height) / 180)))
+    : Math.max(
+        150,
+        Math.min(PARTICLE_DEFINITIONS.length, Math.round((width * height) / 920)),
+      );
 
   for (let index = 0; index < particleCount; index += 1) {
     const definition = PARTICLE_DEFINITIONS[index];
@@ -288,9 +328,16 @@ export function drawAwakenMemoryLightFlow(
   height: number,
   elapsedMilliseconds: number,
   theme: AwakenMemoryLightFlowTheme,
+  options: {
+    tone?: AwakenMemoryLightFlowTone;
+    variant?: AwakenMemoryLightFlowVariant;
+  } = {},
 ): void {
-  const palette = palettes[theme];
-  const cache = getRenderCache(context, width, height, theme, palette);
+  const tone = options.tone ?? "memory";
+  const variant = options.variant ?? "ambient";
+  const compactGlowScale = variant === "compact" ? 1.48 : 1;
+  const palette = tone === "memory" ? palettes[theme] : effortPalettes[tone];
+  const cache = getRenderCache(context, width, height, theme, tone, palette);
   const time = elapsedMilliseconds / 1000;
   context.clearRect(0, 0, width, height);
 
@@ -298,13 +345,37 @@ export function drawAwakenMemoryLightFlow(
   context.fillRect(0, 0, width, height);
 
   const ambientFlowX = (((time * 0.075) % 1.5) - 0.25) * width;
-  drawEllipticalGlow(context, ambientFlowX, height * 0.46, width * 0.42, height * 0.7, palette.haze, palette.glowOpacity * 0.34);
-  drawEllipticalGlow(context, width * 0.28, height * 0.5, width * 0.34, height * 0.78, palette.haze, palette.glowOpacity * 0.16);
-  drawEllipticalGlow(context, width * 0.84, height * 0.42, width * 0.3, height * 0.68, palette.accent, palette.glowOpacity * 0.2);
+  drawEllipticalGlow(
+    context,
+    ambientFlowX,
+    height * 0.46,
+    width * 0.42,
+    height * 0.7,
+    palette.haze,
+    palette.glowOpacity * 0.34 * compactGlowScale,
+  );
+  drawEllipticalGlow(
+    context,
+    width * 0.28,
+    height * 0.5,
+    width * 0.34,
+    height * 0.78,
+    palette.haze,
+    palette.glowOpacity * 0.16 * compactGlowScale,
+  );
+  drawEllipticalGlow(
+    context,
+    width * 0.84,
+    height * 0.42,
+    width * 0.3,
+    height * 0.68,
+    palette.accent,
+    palette.glowOpacity * 0.2 * compactGlowScale,
+  );
 
   context.save();
   context.globalCompositeOperation = theme === "dark" ? "screen" : "source-over";
-  drawFilamentField(context, width, height, time, cache.filamentGradients);
-  drawParticleField(context, width, height, time, palette);
+  drawFilamentField(context, width, height, time, cache.filamentGradients, variant);
+  drawParticleField(context, width, height, time, palette, variant);
   context.restore();
 }

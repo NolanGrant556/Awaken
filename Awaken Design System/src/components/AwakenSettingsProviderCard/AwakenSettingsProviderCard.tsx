@@ -1,51 +1,156 @@
 import "./AwakenSettingsProviderCard.css";
-import { useState, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { ArrowUpRight, X } from "lucide-react";
+import {
+  AwakenProviderLogo,
+  type AwakenProviderBrand,
+} from "../AwakenProviderLogo";
+
+export type AwakenProviderConnectionStatus =
+  | "connected"
+  | "attention"
+  | "unconfigured";
+
+const CONNECTION_STATUS_LABELS: Record<AwakenProviderConnectionStatus, string> = {
+  connected: "已连接",
+  attention: "需要处理",
+  unconfigured: "尚未配置",
+};
 
 export type AwakenSettingsProviderCardProps = {
   name: string;
-  iconLabel?: string;
-  expanded?: boolean;
-  defaultExpanded?: boolean;
+  brand?: AwakenProviderBrand;
+  selected?: boolean;
   disabled?: boolean;
-  children?: ReactNode;
-  onExpandedChange?: (expanded: boolean) => void;
+  onSelect?: () => void;
 };
 
 export function AwakenSettingsProviderCard({
   name,
-  iconLabel,
-  expanded,
-  defaultExpanded = false,
+  brand,
+  selected = false,
   disabled = false,
-  children,
-  onExpandedChange,
+  onSelect,
 }: AwakenSettingsProviderCardProps) {
-  const [internalExpanded, setInternalExpanded] = useState(defaultExpanded);
-  const isControlled = expanded !== undefined;
-  const isExpanded = isControlled ? expanded : internalExpanded;
+  return (
+    <button
+      type="button"
+      className="model-provider-card"
+      data-provider-brand={brand}
+      aria-pressed={selected}
+      disabled={disabled}
+      onClick={onSelect}
+    >
+      <span className="model-provider-card__logo">
+        {brand ? (
+          <AwakenProviderLogo brand={brand} name={name} />
+        ) : (
+          <span className="model-provider-logo-fallback">{name.trim().slice(0, 1) || "M"}</span>
+        )}
+      </span>
+      <span className="model-provider-card__copy">
+        <strong>{name}</strong>
+      </span>
+      <span className="model-provider-card__action">
+        配置
+        <ArrowUpRight size={15} strokeWidth={1.9} aria-hidden="true" />
+      </span>
+    </button>
+  );
+}
 
-  function toggle(): void {
-    if (disabled) return;
-    const nextExpanded = !isExpanded;
-    if (!isControlled) setInternalExpanded(nextExpanded);
-    onExpandedChange?.(nextExpanded);
-  }
+export type AwakenSettingsProviderModalProps = {
+  open: boolean;
+  name: string;
+  brand?: AwakenProviderBrand;
+  status?: AwakenProviderConnectionStatus;
+  caption?: ReactNode;
+  children: ReactNode;
+  onClose: () => void;
+};
+
+export function AwakenSettingsProviderModal({
+  open,
+  name,
+  brand,
+  status = "unconfigured",
+  caption,
+  children,
+  onClose,
+}: AwakenSettingsProviderModalProps) {
+  const modalRef = useRef<HTMLElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const frame = window.requestAnimationFrame(() => modalRef.current?.focus());
+    return () => {
+      window.cancelAnimationFrame(frame);
+      restoreFocusRef.current?.focus();
+      restoreFocusRef.current = null;
+    };
+  }, [open]);
+
+  if (!open) return null;
 
   return (
-    <div className="model-provider-card">
+    <div
+      className="model-provider-modal-layer"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }}
+    >
       <button
         type="button"
-        className="model-provider-toggle"
-        aria-expanded={isExpanded}
-        disabled={disabled}
-        onClick={toggle}
+        className="model-provider-modal-backdrop"
+        aria-label="关闭供应商配置"
+        onClick={onClose}
+      />
+      <section
+        ref={modalRef}
+        className="model-provider-modal"
+        data-provider-brand={brand}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`配置 ${name}`}
+        tabIndex={-1}
       >
-        <span className="model-provider-icon">{iconLabel ?? name.slice(0, 1)}</span>
-        <span className="model-provider-title"><strong>{name}</strong></span>
-        <ChevronDown className="model-provider-chevron" size={15} strokeWidth={1.9} aria-hidden="true" />
-      </button>
-      {isExpanded ? <div className="model-provider-form">{children}</div> : null}
+        <header className="model-provider-modal__header">
+          <span className="model-provider-modal__wash" aria-hidden="true" />
+          <span className="model-provider-modal__logo">
+            {brand ? (
+              <AwakenProviderLogo brand={brand} name={name} />
+            ) : (
+              <span className="model-provider-logo-fallback">{name.trim().slice(0, 1) || "M"}</span>
+            )}
+          </span>
+          <span className="model-provider-modal__heading">
+            <strong>{name}</strong>
+            <span className={`model-provider-modal__status model-provider-modal__status--${status}`}>
+              <span aria-hidden="true" />
+              {CONNECTION_STATUS_LABELS[status]}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="model-provider-modal__close"
+            aria-label="关闭配置面板"
+            onClick={onClose}
+          >
+            <X size={18} strokeWidth={1.9} aria-hidden="true" />
+          </button>
+          {caption ? <div className="model-provider-modal__caption">{caption}</div> : null}
+        </header>
+        <div className="model-provider-modal__body model-provider-form">
+          {children}
+        </div>
+      </section>
     </div>
   );
 }

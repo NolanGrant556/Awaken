@@ -45,6 +45,41 @@ const modelMetaItem: ComposerBarMetaItem = {
   },
 };
 
+const effortModelMetaItem: ComposerBarMetaItem = {
+  id: "model",
+  label: "k3 · max",
+  icon: "K",
+  menuItems: [
+    {
+      id: "kimi-k3",
+      label: "k3",
+      icon: "K",
+      selected: true,
+      effort: {
+        levels: ["low", "high", "max"],
+        selectedLevel: "max",
+        onChange: noop,
+      },
+    },
+    {
+      id: "glm-5.2",
+      label: "GLM-5.2",
+      icon: "G",
+      effort: {
+        levels: ["high", "max"],
+        selectedLevel: "high",
+        onChange: noop,
+      },
+    },
+    {
+      id: "minimax-m3",
+      label: "MiniMax-M3",
+      icon: "M",
+      onSelect: noop,
+    },
+  ],
+};
+
 const composerMetaItems: ComposerBarMetaItem[] = [
   modelMetaItem,
   { id: "repo", label: "Awaken" },
@@ -112,6 +147,15 @@ export const AwakenComposerBarStates: AwakenComposerBarState[] = [
       submitMode: "stop",
       variant: "dock",
       metaItems: [{ id: "status", label: "运行中" }],
+    } as unknown as Partial<ComponentProps<typeof AwakenComposerBar>>,
+  },
+  {
+    id: "reasoning-effort",
+    label: "推理强度光流调节",
+    props: {
+      value: "",
+      variant: "dock",
+      metaItems: [effortModelMetaItem],
     } as unknown as Partial<ComponentProps<typeof AwakenComposerBar>>,
   },
   {

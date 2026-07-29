@@ -1,0 +1,38 @@
+@import "../../tokens/components.css";
+
+.aw-provider-logo {
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--aw-border-main) 74%, transparent);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--aw-surface-raised) 94%, white 6%);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--aw-text-primary) 8%, transparent);
+}
+
+.aw-provider-logo img {
+  display: block;
+  width: 72%;
+  height: 72%;
+  object-fit: contain;
+}
+
+.aw-provider-logo[data-provider-brand="kimi"] img {
+  width: 100%;
+  height: 100%;
+}
+
+.aw-provider-logo[data-provider-brand="doubao"] img,
+.aw-provider-logo[data-provider-brand="deepseek"] img,
+.aw-provider-logo[data-provider-brand="volcengine"] img {
+  width: 78%;
+  height: 78%;
+}
+
+:where([data-theme="dark"], [data-aw-theme="dark"], .dark)
+  .aw-provider-logo[data-provider-brand="glm"] img {
+  filter: invert(1);
+}

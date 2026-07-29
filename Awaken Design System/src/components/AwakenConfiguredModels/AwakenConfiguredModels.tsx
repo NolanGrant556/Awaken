@@ -1,12 +1,18 @@
 import "./AwakenConfiguredModels.css";
 import type { CSSProperties } from "react";
 import { AwakenButton } from "../AwakenButton";
+import {
+  AwakenProviderLogo,
+  type AwakenProviderBrand,
+} from "../AwakenProviderLogo";
 import { AwakenSettingsSwitch } from "../AwakenSettingsSwitch";
 
 export type AwakenConfiguredModelItem = {
   id: string;
   displayName: string;
+  brand?: AwakenProviderBrand;
   modelId: string;
+  isDefault?: boolean;
   credentialStatus?: string | null;
   credentialTone?: "default" | "unreadable";
   enabled: boolean;
@@ -38,6 +44,7 @@ export type AwakenConfiguredModelsProps = {
   onContextAnchorSelect?: (id: string) => void;
   onMaxTokensInputChange?: (id: string, value: string) => void;
   onMaxTokensInputCommit?: (id: string) => void;
+  onSetDefault?: (id: string) => void;
   onReset?: () => void;
   onSave?: () => void;
   onUpdateApiKey?: (id: string) => void;
@@ -57,36 +64,40 @@ export function AwakenConfiguredModels({
   onContextAnchorSelect,
   onMaxTokensInputChange,
   onMaxTokensInputCommit,
+  onSetDefault,
   onReset,
   onSave,
   onUpdateApiKey,
   onDelete,
 }: AwakenConfiguredModelsProps) {
   return (
-    <section className="configured-models" aria-label="已配置模型">
-      <div className="configured-models-table">
-        <div className="configured-models-row configured-models-head">
-          <span>模型名称</span>
-          <span>启用状态</span>
-          <span>上下文长度</span>
-          <span>自动压缩阈值</span>
-          <span>输出上限</span>
-          <span aria-hidden="true" />
+    <section className="configured-models" aria-label="LLM 设置">
+      {models.length === 0 ? (
+        <div className="configured-models-empty">
+          <strong>暂无已配置模型</strong>
+          <span>请先完成连接配置，再添加这一接入类型的模型。</span>
         </div>
-        {models.length === 0 ? (
-          <div className="configured-models-empty">暂无已配置模型</div>
-        ) : models.map((model) => {
+      ) : (
+        <div className="configured-model-cards">
+          {models.map((model) => {
           const contextStyle = {
             "--context-fill": `${model.contextFill}%`,
             "--context-anchor": `${model.contextAnchor}%`,
           } as CSSProperties;
           const anyDeleteBusy = Boolean(deletingModelId);
           return (
-            <div className="configured-models-row" key={model.id}>
-              <div className="configured-model-name">
-                <span className="configured-model-icon">{model.displayName.slice(0, 1)}</span>
+            <article className="configured-model-card" key={model.id}>
+              <header className="configured-model-card__header">
+                <div className="configured-model-name">
+                <span className="configured-model-icon">
+                  {model.brand ? (
+                    <AwakenProviderLogo brand={model.brand} name={model.displayName} />
+                  ) : model.displayName.slice(0, 1)}
+                </span>
                 <span className="configured-model-copy">
-                  <strong>{model.modelId}</strong>
+                  <strong title={`${model.displayName}：${model.modelId}`}>
+                    {model.displayName}：{model.modelId}
+                  </strong>
                   {model.credentialStatus ? (
                     <span className={`configured-model-credential-status${model.credentialTone === "unreadable" ? " configured-model-credential-status-unreadable" : ""}`}>
                       {model.credentialStatus}
@@ -94,64 +105,100 @@ export function AwakenConfiguredModels({
                   ) : null}
                 </span>
               </div>
-              <AwakenSettingsSwitch variant="control" label={`${model.modelId} 启用状态`} checked={model.enabled} onCheckedChange={(checked) => onEnabledChange?.(model.id, checked)} />
-              <div className="configured-context" style={contextStyle}>
-                <div className="configured-context-main">
-                  <input
-                    className="configured-context-range"
-                    type="range"
-                    min={model.contextWindowMin}
-                    max={model.contextWindowMax}
-                    step={model.contextWindowStep ?? 1}
-                    value={model.contextWindow}
-                    onChange={(event) => onContextRangeChange?.(model.id, Number(event.target.value))}
-                    onPointerUp={() => onContextRangeCommit?.(model.id)}
-                    onKeyUp={() => onContextRangeCommit?.(model.id)}
-                    onBlur={() => onContextRangeCommit?.(model.id)}
-                    aria-label={`${model.modelId} 上下文长度`}
-                  />
-                  <input
-                    className="configured-context-input"
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={model.contextWindowInput}
-                    onChange={(event) => onContextInputChange?.(model.id, event.target.value)}
-                    onBlur={() => onContextInputCommit?.(model.id)}
-                    aria-label={`${model.modelId} 精确上下文长度`}
-                  />
-                </div>
-                <div className="configured-context-scale">
-                  <span className="configured-context-scale-label configured-context-scale-start">{model.contextStartLabel ?? "8K"}</span>
-                  <button type="button" className="configured-context-anchor" onClick={() => onContextAnchorSelect?.(model.id)} aria-label={`${model.modelId} 设置上下文长度为 ${model.contextAnchorValue}`}>
-                    {model.contextAnchorLabel}
+                <div className="configured-model-card__controls">
+                  <button
+                    type="button"
+                    className={`configured-model-default${model.isDefault ? " is-default" : ""}`}
+                    disabled={model.isDefault || hasChanges || saving || anyDeleteBusy}
+                    onClick={() => onSetDefault?.(model.id)}
+                  >
+                    {model.isDefault ? "默认模型" : "设为默认"}
                   </button>
-                  <span className="configured-context-scale-label configured-context-scale-end">{model.contextEndLabel}</span>
+                  <AwakenSettingsSwitch
+                    variant="control"
+                    label={`${model.modelId} 启用状态`}
+                    checked={model.enabled}
+                    onCheckedChange={(checked) => onEnabledChange?.(model.id, checked)}
+                  />
                 </div>
-              </div>
-              <span className="configured-compression-value">{model.compressionValue}</span>
-              <input
-                className="configured-token-input"
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={model.maxTokensInput}
-                onChange={(event) => onMaxTokensInputChange?.(model.id, event.target.value)}
-                onBlur={() => onMaxTokensInputCommit?.(model.id)}
-                aria-label={`${model.modelId} 输出 token 上限`}
-              />
-              <div className="configured-models-actions">
-                <div className="configured-models-save-actions">
-                  <AwakenButton variant="default" size="md" disabled={!hasChanges || saving || anyDeleteBusy} onClick={onReset}>取消</AwakenButton>
-                  <AwakenButton variant="primary" size="md" loading={saving} disabled={!hasChanges || anyDeleteBusy} onClick={onSave}>保存</AwakenButton>
+              </header>
+              <details className="configured-model-card__details">
+                <summary>
+                  <span>LLM 参数</span>
+                  <span>{model.contextWindowInput} context · {model.maxTokensInput} output</span>
+                </summary>
+                <div className="configured-model-card__body">
+                  <div className="configured-parameter configured-parameter--context">
+                    <span className="configured-parameter__label">上下文长度</span>
+                    <div className="configured-context" style={contextStyle}>
+                      <div className="configured-context-main">
+                        <input
+                          className="configured-context-range"
+                          type="range"
+                          min={model.contextWindowMin}
+                          max={model.contextWindowMax}
+                          step={model.contextWindowStep ?? 1}
+                          value={model.contextWindow}
+                          onChange={(event) => onContextRangeChange?.(model.id, Number(event.target.value))}
+                          onPointerUp={() => onContextRangeCommit?.(model.id)}
+                          onKeyUp={() => onContextRangeCommit?.(model.id)}
+                          onBlur={() => onContextRangeCommit?.(model.id)}
+                          aria-label={`${model.modelId} 上下文长度`}
+                        />
+                        <input
+                          className="configured-context-input"
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={model.contextWindowInput}
+                          onChange={(event) => onContextInputChange?.(model.id, event.target.value)}
+                          onBlur={() => onContextInputCommit?.(model.id)}
+                          aria-label={`${model.modelId} 精确上下文长度`}
+                        />
+                      </div>
+                      <div className="configured-context-scale">
+                        <span className="configured-context-scale-label configured-context-scale-start">{model.contextStartLabel ?? "8K"}</span>
+                        <button type="button" className="configured-context-anchor" onClick={() => onContextAnchorSelect?.(model.id)} aria-label={`${model.modelId} 设置上下文长度为 ${model.contextAnchorValue}`}>
+                          {model.contextAnchorLabel}
+                        </button>
+                        <span className="configured-context-scale-label configured-context-scale-end">{model.contextEndLabel}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="configured-parameter configured-parameter--compression">
+                    <span className="configured-parameter__label">自动压缩阈值</span>
+                    <strong className="configured-compression-value">{model.compressionValue}</strong>
+                  </div>
+                  <label className="configured-parameter">
+                    <span className="configured-parameter__label">输出上限</span>
+                    <input
+                      className="configured-token-input"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={model.maxTokensInput}
+                      onChange={(event) => onMaxTokensInputChange?.(model.id, event.target.value)}
+                      onBlur={() => onMaxTokensInputCommit?.(model.id)}
+                      aria-label={`${model.modelId} 输出 token 上限`}
+                    />
+                  </label>
                 </div>
-                <AwakenButton variant="default" size="md" disabled={saving || anyDeleteBusy} onClick={() => onUpdateApiKey?.(model.id)}>更新 API key</AwakenButton>
-                <AwakenButton className="configured-models-delete" variant="default" size="md" loading={deletingModelId === model.id} disabled={saving || anyDeleteBusy} onClick={() => onDelete?.(model.id)}>删除</AwakenButton>
-              </div>
-            </div>
+                <footer className="configured-model-card__footer">
+                  <div className="configured-models-save-actions">
+                    <AwakenButton variant="default" size="sm" disabled={!hasChanges || saving || anyDeleteBusy} onClick={onReset}>取消修改</AwakenButton>
+                    <AwakenButton variant="primary" size="sm" loading={saving} disabled={!hasChanges || anyDeleteBusy} onClick={onSave}>保存 LLM 设置</AwakenButton>
+                  </div>
+                  <div className="configured-models-actions">
+                    <AwakenButton variant="default" size="sm" disabled={saving || anyDeleteBusy} onClick={() => onUpdateApiKey?.(model.id)}>连接设置</AwakenButton>
+                    <AwakenButton className="configured-models-delete" variant="default" size="sm" loading={deletingModelId === model.id} disabled={saving || anyDeleteBusy} onClick={() => onDelete?.(model.id)}>删除模型</AwakenButton>
+                  </div>
+                </footer>
+              </details>
+            </article>
           );
         })}
-      </div>
+        </div>
+      )}
     </section>
   );
 }

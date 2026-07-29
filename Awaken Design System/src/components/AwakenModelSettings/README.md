@@ -1,3 +1,5 @@
 # AwakenModelSettings
 
-模型设置页的 UI-only 页面组件。左侧以窄轨承载 Coding Plan、API、Agent Plan 接入类型导航，右侧使用紧凑页头承载连接配置与 LLM 设置二级入口、当前类型说明、页面消息和内容容器；模型工作区限制最大阅读宽度，不随超宽窗口无限拉伸。连接配置使用固定三列、统一高度的紧凑卡片，只展示官方 Logo、名称和“配置”动作；选择后由 `AwakenSettingsProviderModal` 在屏幕中央承载配置表单与连接状态。供应商读取、凭据、连接测试、保存、重复模型 Toast、删除和运行时能力同步仍由 Desktop consumer 负责。
+模型设置页的 UI-only 页面组件。顶部使用与记忆页一致的 168px 页头，左侧保留 CPU 图形与“模型”标题，右侧以三层圆形轨道、粒子半球和 Kimi、MiniMax、GLM、Qwen、Doubao Ark、DeepSeek 六个本地官方 Logo 表达模型生态；Logo 沿各自轨道连续完成 360 度公转，内外层使用不同速度与方向，Logo 自身保持正向。轨道下半部超出页头时 Logo 会自然隐藏并在后续公转中重新出现；动画尊重 reduced-motion，不承担连接状态或选择语义。浅色与深色背景均使用 Design System 语义表面和细边界，不由 Desktop 重绘。
+
+页头下方左侧以窄轨承载 Coding Plan、API、Agent Plan 接入类型导航，右侧使用紧凑页头承载连接配置与 LLM 设置二级入口、当前类型说明、页面消息和内容容器；模型工作区限制最大阅读宽度，不随超宽窗口无限拉伸。连接配置使用固定三列、统一高度的紧凑卡片，只展示官方 Logo、名称和“配置”动作；选择后由 `AwakenSettingsProviderModal` 在屏幕中央承载配置表单与连接状态。供应商读取、凭据、连接测试、保存、重复模型 Toast、删除和运行时能力同步仍由 Desktop consumer 负责。

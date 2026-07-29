@@ -37,6 +37,10 @@ describe("DesktopSettingsDialog", () => {
 
     expect(html).toContain("aw-settings-shell--screen");
     expect(html).toContain("aw-settings-shell--models");
+    expect(html).toContain("aw-settings-shell--full-bleed");
+    expect(html).toContain("aw-model-orbit--light");
+    expect(html).toContain("aw-model-orbit__sphere-canvas");
+    expect(html.match(/aw-model-orbit__logo aw-model-orbit__logo--/g)).toHaveLength(6);
     expect(html).toContain("aw-settings-sidebar");
     expect(html).toContain("返回应用");
     expect(html).toContain('role="dialog"');

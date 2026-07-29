@@ -1089,7 +1089,7 @@ export function DesktopSettingsDialog({
         rootRef={settingsRootRef}
         presentation="screen"
         className={activeSettingsSection === "models" ? "aw-settings-shell--models" : undefined}
-        contentLayout={activeSettingsSection === "memory" ? "full-bleed" : "standard"}
+        contentLayout={activeSettingsSection === "memory" || activeSettingsSection === "models" ? "full-bleed" : "standard"}
         navItems={AwakenSettingsNavItems}
         activeSectionId={activeSettingsSection}
         sectionTitle={SETTINGS_SECTION_TITLES[activeSettingsSection]}
@@ -1118,6 +1118,7 @@ export function DesktopSettingsDialog({
             <ACPSettingsPanel runtimeClient={runtimeClient} />
           ) : (
             <AwakenModelSettings
+              theme={theme}
               tabs={MODEL_SETTINGS_TABS}
               activeTabId={activeSection}
               views={[

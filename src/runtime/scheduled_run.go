@@ -301,6 +301,9 @@ func ModelProfileConfigFromResolved(profile modelprofile.ResolvedProfile) *Model
 		ProviderID:         profile.ProviderID,
 		DisplayName:        profile.DisplayName,
 		ModelID:            profile.ModelID,
+		CapabilityModelID:  profile.CapabilityModelID,
+		EndpointSelector:   profile.EndpointSelector,
+		ModelSelectorKind:  profile.ModelSelectorKind,
 		BaseURL:            profile.BaseURL,
 		Protocol:           profile.Protocol,
 		AuthScheme:         profile.AuthScheme,
@@ -312,5 +315,7 @@ func ModelProfileConfigFromResolved(profile modelprofile.ResolvedProfile) *Model
 		SupportsVision:     profile.SupportsVision,
 		SupportsNativePDF:  profile.SupportsNativePDF,
 		SupportsVideo:      profile.SupportsVideo,
+		SupportsTools:      profile.SupportsTools,
+		ReasoningEffort:    profile.ReasoningEffort,
 	}
 }

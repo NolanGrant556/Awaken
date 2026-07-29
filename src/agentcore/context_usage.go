@@ -66,6 +66,9 @@ type ContextUsageSnapshot struct {
 	RequestID                  string                     `json:"request_id,omitempty"`
 	RequestSequence            int                        `json:"request_sequence,omitempty"`
 	ModelID                    string                     `json:"model_id,omitempty"`
+	CapabilityModelID          string                     `json:"capability_model_id,omitempty"`
+	EndpointSelector           string                     `json:"endpoint_selector,omitempty"`
+	ModelSelectorKind          string                     `json:"model_selector_kind,omitempty"`
 	ProtocolFamily             string                     `json:"protocol_family,omitempty"`
 	ContextEpochID             string                     `json:"context_epoch_id,omitempty"`
 	ContextEpochBoundaryReason string                     `json:"context_epoch_boundary_reason,omitempty"`
@@ -100,8 +103,12 @@ type ModelUsageRecord struct {
 	ProfileID           string           `json:"profile_id,omitempty"`
 	CredentialRevision  uint64           `json:"credential_revision,omitempty"`
 	ModelID             string           `json:"model_id,omitempty"`
+	CapabilityModelID   string           `json:"capability_model_id,omitempty"`
+	EndpointSelector    string           `json:"endpoint_selector,omitempty"`
+	ModelSelectorKind   string           `json:"model_selector_kind,omitempty"`
 	ProtocolFamily      string           `json:"protocol_family,omitempty"`
 	EndpointContractID  string           `json:"endpoint_contract_id,omitempty"`
+	ReasoningPolicy     string           `json:"reasoning_policy,omitempty"`
 	CacheMode           string           `json:"cache_mode,omitempty"`
 	CacheKeyApplied     bool             `json:"cache_key_applied"`
 	ContextEpochID      string           `json:"context_epoch_id,omitempty"`
@@ -247,7 +254,9 @@ func buildContextUsageSnapshot(req LLMRequest, basis, requestID, protocol, shape
 	}
 	return ContextUsageSnapshot{
 		SchemaVersion: 4, SnapshotID: "ctx_" + hex.EncodeToString(digest[:12]), EstimatorID: contextEstimatorID,
-		Basis: basis, RequestID: requestID, ModelID: req.Model, ProtocolFamily: protocol, ContextEpochID: contextEpochID,
+		Basis: basis, RequestID: requestID, ModelID: req.Model, CapabilityModelID: req.CapabilityModelID,
+		EndpointSelector: req.EndpointSelector, ModelSelectorKind: req.ModelSelectorKind,
+		ProtocolFamily: protocol, ContextEpochID: contextEpochID,
 		ContextEpochBoundaryReason: contextEpochBoundaryReason, RequestShapeDigest: shapeDigest,
 		ModelWindowTokens: state.ModelWindow, OutputReserveTokens: state.OutputReserve,
 		EffectiveInputWindowTokens: state.EffectiveWindow, EstimatedInputTokens: total,

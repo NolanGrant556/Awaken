@@ -121,10 +121,13 @@ import {
   toScheduledTaskPatchWire,
   type StartRunRequest,
   type ThreadDeleteResult,
+  type ThreadModelPreferenceRequest,
   type UpdateMcpServerConfigRequest,
   type UpsertProjectResult,
   type ProjectFolderSelection,
   type ProjectFoldersPickResult,
+  type AgentPlanAccountSaveRequest,
+  normalizeAgentPlanAccount,
 } from "../shared/runtime.js";
 import { updateMainWindowBackground, windowBackgroundColor } from "./window-background.js";
 import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
@@ -1935,6 +1938,32 @@ ipcMain.handle("awaken:list-model-profiles", async () => {
   return profiles.map(normalizeModelProfileSummary);
 });
 
+ipcMain.handle("awaken:get-agent-plan-account", async () => {
+  if (!modelProfileStore) throw new Error("Model profile store unavailable");
+  return normalizeAgentPlanAccount(await modelProfileStore.getAgentPlanAccount());
+});
+
+ipcMain.handle(
+  "awaken:save-agent-plan-account",
+  async (_event, request: AgentPlanAccountSaveRequest) =>
+    runDesktopOperation(async () => {
+      if (!modelProfileStore) throw new Error("Model profile store unavailable");
+      return normalizeAgentPlanAccount(await modelProfileStore.saveAgentPlanAccount(request));
+    }),
+);
+
+ipcMain.handle("awaken:refresh-agent-plan-models", async () =>
+  runDesktopOperation(async () => {
+    if (!modelProfileStore) throw new Error("Model profile store unavailable");
+    return normalizeAgentPlanAccount(await modelProfileStore.refreshAgentPlanModels());
+  }),
+);
+
+ipcMain.handle("awaken:delete-agent-plan-account", async () => {
+  if (!modelProfileStore) throw new Error("Model profile store unavailable");
+  await modelProfileStore.deleteAgentPlanAccount();
+});
+
 ipcMain.handle("awaken:save-model-profile", async (_event, request: ModelProfileSaveRequest) => {
   return runDesktopOperation(async () => {
     if (!modelProfileStore) {
@@ -1966,6 +1995,15 @@ ipcMain.handle("awaken:test-model-profile", async (_event, request: ModelProfile
     return modelProfileStore.testProfile(request);
   });
 });
+
+ipcMain.handle(
+  "awaken:test-agent-plan-reasoning-capability",
+  async (_event, request: ModelProfileSaveRequest) =>
+    runDesktopOperation(async () => {
+      if (!modelProfileStore) throw new Error("Model profile store unavailable");
+      return modelProfileStore.testAgentPlanReasoningCapability(request);
+    }),
+);
 
 ipcMain.handle("awaken:sync-model-capabilities", async () => {
   if (!modelProfileStore) {
@@ -2110,7 +2148,35 @@ ipcMain.handle("awaken:get-run", async (_event, runId: string) => {
 ipcMain.handle("awaken:get-thread-transcript", async (_event, threadId: string) => {
   let profile: Awaited<ReturnType<ModelProfileStore["resolveDefaultRunProfile"]>>;
   try {
-    profile = await modelProfileStore?.resolveDefaultRunProfile();
+    const [threads, profiles] = await Promise.all([
+      requestRuntime<RuntimeThreadWire[]>("/v1/threads", { method: "GET" }),
+      modelProfileStore?.listProfiles() ?? Promise.resolve([]),
+    ]);
+    const thread = threads.find((candidate) => candidate.thread_id === threadId);
+    const selectedProfileId = thread?.selected_model_profile_id?.trim();
+    const selectedProfile = selectedProfileId
+      ? profiles.find((candidate) => candidate.id === selectedProfileId && candidate.enabled)
+      : undefined;
+    const selectedEffort = selectedProfileId
+      ? thread?.reasoning_effort_by_profile?.[selectedProfileId]
+      : undefined;
+
+    if (selectedProfile) {
+      try {
+        profile = await modelProfileStore?.resolveRunProfile(
+          selectedProfile.id,
+          selectedEffort,
+        );
+      } catch {
+        // A saved thread preference may become unavailable after its key is
+        // removed or its account metadata becomes unreadable. Rebuild with the
+        // current ready default only in that case; never let a broken default
+        // hide a still-runnable thread-specific profile.
+        profile = await modelProfileStore?.resolveDefaultRunProfile();
+      }
+    } else {
+      profile = await modelProfileStore?.resolveDefaultRunProfile();
+    }
   } catch {
     // Transcript history remains readable when credentials are unavailable.
     // A current projection will be generated once a runnable profile exists.
@@ -2157,6 +2223,44 @@ ipcMain.handle("awaken:rename-thread", async (_event, threadId: string, label: s
 
   return normalizeRuntimeThread(thread);
 });
+
+ipcMain.handle(
+  "awaken:update-thread-model-preference",
+  async (_event, threadId: string, request: ThreadModelPreferenceRequest) => {
+    if (!modelProfileStore) {
+      throw new Error("Model profile store unavailable");
+    }
+    if (request.reasoningEffort) {
+      const capability = await modelProfileStore.reasoningCapabilityForProfile(
+        request.modelProfileId,
+      );
+      if (!capability?.levels.includes(request.reasoningEffort)) {
+        throw new Error(
+          `所选模型不支持推理强度 ${request.reasoningEffort}，未更新会话偏好。`,
+        );
+      }
+    }
+    // Resolve the same exact-scope run profile used by the next request. This
+    // validates existence, enabled/readable credential state and the selected
+    // effort without consulting provider-global catalog metadata.
+    await modelProfileStore.resolveRunProfile(
+      request.modelProfileId,
+      request.reasoningEffort,
+    );
+    const thread = await requestRuntime<RuntimeThreadWire>(
+      `/v1/threads/${encodeURIComponent(threadId)}/model-preference`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model_profile_id: request.modelProfileId,
+          reasoning_effort: request.reasoningEffort,
+        }),
+      },
+    );
+    return normalizeRuntimeThread(thread);
+  },
+);
 
 ipcMain.handle(
   "awaken:delete-thread",
@@ -2708,11 +2812,18 @@ ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
   return runDesktopOperation(async () => {
     await cancelActiveDreams();
     const body = normalizeStartRunRequest(request);
-    const defaultProfile = await modelProfileStore?.resolveDefaultRunProfile();
-    if (!defaultProfile) {
+    const selectedProfile = await modelProfileStore?.resolveRunProfile(
+      request.modelProfileId,
+      request.reasoningEffort,
+    );
+    if (!selectedProfile) {
       throw new Error("请先在设置 > 模型中配置可用模型。");
     }
-    body.model_profile = normalizeModelProfileRunConfig(defaultProfile);
+    body.model_profile = normalizeModelProfileRunConfig(selectedProfile);
+    // Renderer selection hints terminate at Main. Core receives only the
+    // fully resolved, credential-bearing model_profile assembled here.
+    body.model_profile_id = undefined;
+    body.reasoning_effort = undefined;
     const run = await requestRuntime("/v1/runs", {
       method: "POST",
       headers: {

@@ -478,7 +478,9 @@ func mapContextUsageSnapshot(snapshot *agentcore.ContextUsageSnapshot) *ContextU
 	mapped := &ContextUsageSnapshot{
 		SchemaVersion: snapshot.SchemaVersion, SnapshotID: snapshot.SnapshotID, EstimatorID: snapshot.EstimatorID,
 		Basis: snapshot.Basis, RequestID: snapshot.RequestID, ModelID: snapshot.ModelID,
-		ProtocolFamily: snapshot.ProtocolFamily, ContextEpochID: snapshot.ContextEpochID,
+		CapabilityModelID: snapshot.CapabilityModelID, EndpointSelector: snapshot.EndpointSelector,
+		ModelSelectorKind: snapshot.ModelSelectorKind,
+		ProtocolFamily:    snapshot.ProtocolFamily, ContextEpochID: snapshot.ContextEpochID,
 		ContextEpochBoundaryReason: snapshot.ContextEpochBoundaryReason, RequestShapeDigest: snapshot.RequestShapeDigest,
 		ModelWindowTokens: snapshot.ModelWindowTokens, OutputReserveTokens: snapshot.OutputReserveTokens,
 		EffectiveInputWindowTokens: snapshot.EffectiveInputWindowTokens, EstimatedInputTokens: snapshot.EstimatedInputTokens,
@@ -500,8 +502,10 @@ func mapModelUsageRecord(usage *agentcore.ModelUsageRecord) *ModelUsageRecord {
 	return &ModelUsageRecord{
 		SchemaVersion: usage.SchemaVersion, RequestID: usage.RequestID, Purpose: usage.Purpose,
 		ProviderID: usage.ProviderID, ProfileID: usage.ProfileID, CredentialRevision: usage.CredentialRevision,
-		ModelID: usage.ModelID, ProtocolFamily: usage.ProtocolFamily, EndpointContractID: usage.EndpointContractID,
-		CacheMode: usage.CacheMode, CacheKeyApplied: usage.CacheKeyApplied,
+		ModelID: usage.ModelID, CapabilityModelID: usage.CapabilityModelID, EndpointSelector: usage.EndpointSelector,
+		ModelSelectorKind: usage.ModelSelectorKind, ProtocolFamily: usage.ProtocolFamily, EndpointContractID: usage.EndpointContractID,
+		ReasoningPolicy: usage.ReasoningPolicy,
+		CacheMode:       usage.CacheMode, CacheKeyApplied: usage.CacheKeyApplied,
 		ContextEpochID: usage.ContextEpochID, PrefixDigest: usage.PrefixDigest, InvalidationReason: usage.InvalidationReason,
 		RetryIndex: usage.RetryIndex, AuxiliaryFallback: usage.AuxiliaryFallback,
 		InputTokens: cloneIntPointer(usage.InputTokens), CachedInputTokens: cloneIntPointer(usage.CachedInputTokens),

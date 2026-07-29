@@ -164,14 +164,20 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	})
 	mux.HandleFunc("GET /v1/model-providers", handleModelProviders)
 	if cfg.runService != nil {
+		var modelProfileStore ACPModelProfileStore
+		if cfg.control != nil {
+			modelProfileStore = cfg.control.ModelProfileStore
+		}
 		handlers := runHandlers{
 			runService:             cfg.runService,
 			skillRegistry:          cfg.skillRegistry,
 			syncSkillsForWorkspace: cfg.syncSkillsForWorkspace,
 			acpManager:             cfg.acpManager,
+			modelProfileStore:      modelProfileStore,
 		}
 		mux.HandleFunc("GET /v1/threads", handlers.handleListThreads)
 		mux.HandleFunc("PATCH /v1/threads/{thread_id}", handlers.handleRenameThread)
+		mux.HandleFunc("PATCH /v1/threads/{thread_id}/model-preference", handlers.handleUpdateThreadModelPreference)
 		mux.HandleFunc("DELETE /v1/threads/{thread_id}", handlers.handleDeleteThread)
 		mux.HandleFunc("GET /v1/threads/{thread_id}/transcript", handlers.handleGetThreadTranscript)
 		mux.HandleFunc("POST /v1/threads/{thread_id}/context-snapshot", handlers.handleRefreshThreadContextSnapshot)

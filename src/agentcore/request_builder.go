@@ -161,6 +161,9 @@ func (rb *RequestBuilder) BuildLLMRequestFromEnvelope(envelope ContextEnvelope) 
 		Tools:              cloneToolDefinitions(envelope.ToolSchemas),
 		AttributedTools:    cloneAttributedToolSchemas(envelope.AttributedTools),
 		Model:              envelope.Model,
+		CapabilityModelID:  rb.config.ModelConfig.CapabilityModelID,
+		EndpointSelector:   rb.config.ModelConfig.EndpointSelector,
+		ModelSelectorKind:  rb.config.ModelConfig.ModelSelectorKind,
 		Temperature:        envelope.Temperature,
 		MaxTokens:          envelope.MaxTokens,
 		ContextWindowState: envelope.ContextWindowState,
@@ -300,6 +303,10 @@ func (rb *RequestBuilder) attributeToolSchemas(schemas []tool.ToolSchema) []Attr
 }
 
 func (rb *RequestBuilder) getTools() []tool.ToolSchema {
+	toolStatus := strings.TrimSpace(rb.config.ModelConfig.Capabilities.SupportsTools)
+	if toolStatus != "" && toolStatus != "ready" {
+		return nil
+	}
 	if rb.config.ToolAvailabilitySnapshot != nil {
 		entries := rb.config.ToolAvailabilitySnapshot.Entries()
 		definitions := make([]tool.ToolSchema, 0, len(entries))

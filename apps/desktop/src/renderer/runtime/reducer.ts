@@ -196,6 +196,8 @@ export type ThreadItem = {
   titleSeedRunId?: string;
   runId?: string;
   activeRunId?: string;
+  selectedModelProfileId?: string;
+  reasoningEffortByProfile?: Record<string, import("../../shared/runtime").ReasoningEffortLevel>;
   workspaceRoot?: string;
   runStatus?: RuntimeRunStatus;
   artifactCount?: number;
@@ -441,6 +443,8 @@ export function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
     label: thread.label || "Untitled thread",
     runId: thread.runId,
     activeRunId: thread.activeRunId,
+    selectedModelProfileId: thread.selectedModelProfileId,
+    reasoningEffortByProfile: thread.reasoningEffortByProfile,
     workspaceRoot: thread.workspace.workspaceRoot,
     runStatus: thread.activeRunId ? "running" : undefined,
     artifactCount: 0,

@@ -110,6 +110,9 @@ type ContextUsageSnapshot struct {
 	Basis                      string                     `json:"basis"`
 	RequestID                  string                     `json:"requestId,omitempty"`
 	ModelID                    string                     `json:"modelId,omitempty"`
+	CapabilityModelID          string                     `json:"capabilityModelId,omitempty"`
+	EndpointSelector           string                     `json:"endpointSelector,omitempty"`
+	ModelSelectorKind          string                     `json:"modelSelectorKind,omitempty"`
 	ProtocolFamily             string                     `json:"protocolFamily,omitempty"`
 	ContextEpochID             string                     `json:"contextEpochId,omitempty"`
 	ContextEpochBoundaryReason string                     `json:"contextEpochBoundaryReason,omitempty"`
@@ -133,8 +136,12 @@ type ModelUsageRecord struct {
 	ProfileID           string           `json:"profileId,omitempty"`
 	CredentialRevision  uint64           `json:"credentialRevision,omitempty"`
 	ModelID             string           `json:"modelId,omitempty"`
+	CapabilityModelID   string           `json:"capabilityModelId,omitempty"`
+	EndpointSelector    string           `json:"endpointSelector,omitempty"`
+	ModelSelectorKind   string           `json:"modelSelectorKind,omitempty"`
 	ProtocolFamily      string           `json:"protocolFamily,omitempty"`
 	EndpointContractID  string           `json:"endpointContractId,omitempty"`
+	ReasoningPolicy     string           `json:"reasoningPolicy,omitempty"`
 	CacheMode           string           `json:"cacheMode,omitempty"`
 	CacheKeyApplied     bool             `json:"cacheKeyApplied"`
 	ContextEpochID      string           `json:"contextEpochId,omitempty"`

@@ -73,9 +73,13 @@ type contextEpochSidecar struct {
 	ProfileID              string                       `json:"profile_id"`
 	CredentialRevision     uint64                       `json:"credential_revision"`
 	ModelID                string                       `json:"model_id"`
+	CapabilityModelID      string                       `json:"capability_model_id,omitempty"`
+	EndpointSelector       string                       `json:"endpoint_selector,omitempty"`
+	ModelSelectorKind      string                       `json:"model_selector_kind,omitempty"`
 	ProtocolFamily         string                       `json:"protocol_family"`
 	EndpointContractID     string                       `json:"endpoint_contract_id"`
 	NormalizedBaseURL      string                       `json:"normalized_base_url"`
+	ReasoningPolicy        string                       `json:"reasoning_policy"`
 	CompactBoundaryID      string                       `json:"compact_boundary_id,omitempty"`
 	CreationBoundaryReason string                       `json:"creation_boundary_reason,omitempty"`
 	SourceSnapshots        []contextEpochSourceSnapshot `json:"source_snapshots"`
@@ -155,7 +159,9 @@ func newContextEpoch(candidate agentcore.ContextEpochCandidate, sequence uint64)
 	epochSeed := strings.Join([]string{
 		candidate.ThreadID, fmt.Sprint(sequence), baselineDigest, candidate.ProviderID,
 		candidate.ProfileID, fmt.Sprint(credentialRevision), candidate.ModelID,
+		candidate.CapabilityModelID, candidate.EndpointSelector, candidate.ModelSelectorKind,
 		candidate.ProtocolFamily, candidate.EndpointContractID, candidate.NormalizedBaseURL,
+		candidate.ReasoningPolicy,
 		candidate.CompactBoundaryID,
 	}, "\x00")
 	epochHash := sha256.Sum256([]byte(epochSeed))
@@ -165,7 +171,10 @@ func newContextEpoch(candidate agentcore.ContextEpochCandidate, sequence uint64)
 		BaselineDigest: baselineDigest, PromptSchemaVersion: candidate.PromptSchemaVersion,
 		WorkspaceRoot: candidate.WorkspaceRoot, ProviderID: candidate.ProviderID, ProfileID: candidate.ProfileID,
 		CredentialRevision: credentialRevision, ModelID: candidate.ModelID, ProtocolFamily: candidate.ProtocolFamily,
+		CapabilityModelID: candidate.CapabilityModelID, EndpointSelector: candidate.EndpointSelector,
+		ModelSelectorKind:  candidate.ModelSelectorKind,
 		EndpointContractID: candidate.EndpointContractID, NormalizedBaseURL: candidate.NormalizedBaseURL,
+		ReasoningPolicy:   candidate.ReasoningPolicy,
 		CompactBoundaryID: candidate.CompactBoundaryID,
 	}
 	for _, source := range canonicalEpochSources(candidate.Sources) {
@@ -202,10 +211,15 @@ func contextEpochBoundaryReason(current contextEpochSidecar, candidate agentcore
 		return "workspace_moved"
 	case current.ProviderID != candidate.ProviderID || current.ProfileID != candidate.ProfileID || current.CredentialRevision != revision:
 		return "provider_credential_changed"
-	case current.ModelID != candidate.ModelID:
+	case current.ModelID != candidate.ModelID ||
+		current.CapabilityModelID != candidate.CapabilityModelID ||
+		current.EndpointSelector != candidate.EndpointSelector ||
+		current.ModelSelectorKind != candidate.ModelSelectorKind:
 		return "model_changed"
 	case current.ProtocolFamily != candidate.ProtocolFamily || current.EndpointContractID != candidate.EndpointContractID || current.NormalizedBaseURL != candidate.NormalizedBaseURL:
 		return "provider_authority_incompatible"
+	case current.ReasoningPolicy != candidate.ReasoningPolicy:
+		return "reasoning_policy_changed"
 	case current.CompactBoundaryID != candidate.CompactBoundaryID:
 		return "compact_succeeded"
 	default:
@@ -407,15 +421,19 @@ func readCurrentContextEpoch(dir string) (contextEpochSidecar, error) {
 	if err := filestore.ReadJSON(filepath.Join(dir, "current.json"), &pointer); err != nil {
 		return contextEpochSidecar{}, err
 	}
-	if pointer.SchemaVersion != agentcore.ContextEpochSchemaVersion || strings.TrimSpace(pointer.EpochID) == "" || strings.Contains(pointer.EpochID, string(filepath.Separator)) || strings.Contains(pointer.EpochID, "..") {
+	if !supportedContextEpochSchemaVersion(pointer.SchemaVersion) || strings.TrimSpace(pointer.EpochID) == "" || strings.Contains(pointer.EpochID, string(filepath.Separator)) || strings.Contains(pointer.EpochID, "..") {
 		return contextEpochSidecar{}, errors.New("invalid context epoch pointer")
 	}
 	var epoch contextEpochSidecar
 	if err := filestore.ReadJSON(filepath.Join(dir, pointer.EpochID+".json"), &epoch); err != nil {
 		return contextEpochSidecar{}, err
 	}
-	if epoch.EpochID != pointer.EpochID || epoch.SchemaVersion != agentcore.ContextEpochSchemaVersion {
+	if epoch.EpochID != pointer.EpochID || epoch.SchemaVersion != pointer.SchemaVersion || !supportedContextEpochSchemaVersion(epoch.SchemaVersion) {
 		return contextEpochSidecar{}, errors.New("context epoch sidecar identity mismatch")
 	}
 	return epoch, nil
+}
+
+func supportedContextEpochSchemaVersion(version int) bool {
+	return version == 1 || version == agentcore.ContextEpochSchemaVersion
 }

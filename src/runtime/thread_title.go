@@ -175,14 +175,17 @@ func generateThreadTitleWithProfile(
 	}
 
 	mainCfg := llm.Config{
-		APIKey:        profile.APIKey,
-		BaseURL:       profile.BaseURL,
-		Model:         profile.ModelID,
-		Protocol:      llm.Protocol(profile.Protocol),
-		Temperature:   profile.Temperature,
-		MaxTokens:     profile.MaxTokens,
-		AuthScheme:    profile.AuthScheme,
-		ContextWindow: profile.ContextWindow,
+		APIKey:             profile.APIKey,
+		BaseURL:            profile.BaseURL,
+		Model:              profile.ModelID,
+		Protocol:           llm.Protocol(profile.Protocol),
+		ProviderID:         profile.ProviderID,
+		ProfileID:          profile.ProfileID,
+		CredentialRevision: profile.CredentialRevision,
+		Temperature:        profile.Temperature,
+		MaxTokens:          profile.MaxTokens,
+		AuthScheme:         profile.AuthScheme,
+		ContextWindow:      profile.ContextWindow,
 	}
 	cfg, auxiliaryFallback := llm.AuxiliaryConfig(mainCfg)
 
@@ -211,27 +214,42 @@ func threadTitleMaxTokensForProfile(profile *ModelProfileConfig) int {
 	if profile == nil {
 		return threadTitleMaxTokens
 	}
-	switch strings.ToLower(strings.TrimSpace(profile.ModelID)) {
+	modelID := strings.ToLower(strings.TrimSpace(profile.ModelID))
+	providerID := strings.ToLower(strings.TrimSpace(profile.ProviderID))
+	switch modelID {
 	case "kimi-for-coding", "kimi-for-coding-highspeed":
 		// These Kimi aliases always spend output tokens on reasoning before
 		// emitting content. A 48-token title budget can therefore return HTTP
 		// 200 with an empty content field even though the main run succeeds.
 		return threadTitleForcedReasoningMaxTokens
+	case "k3", "k3-256k":
+		// Kimi Coding Plan routes these primary aliases to the same forced-
+		// reasoning auxiliary title model. Budget by the effective auxiliary
+		// contract, not only by the primary profile's model spelling.
+		if providerID == "kimi-coding-plan" {
+			return threadTitleForcedReasoningMaxTokens
+		}
 	default:
-		return threadTitleMaxTokens
 	}
+	return threadTitleMaxTokens
 }
 
 func threadTitleGenerationTimeoutForProfile(profile *ModelProfileConfig) time.Duration {
 	if profile == nil {
 		return threadTitleGenerationTimeout
 	}
-	switch strings.ToLower(strings.TrimSpace(profile.ModelID)) {
+	modelID := strings.ToLower(strings.TrimSpace(profile.ModelID))
+	providerID := strings.ToLower(strings.TrimSpace(profile.ProviderID))
+	switch modelID {
 	case "kimi-for-coding", "kimi-for-coding-highspeed":
 		return threadTitleForcedReasoningTimeout
+	case "k3", "k3-256k":
+		if providerID == "kimi-coding-plan" {
+			return threadTitleForcedReasoningTimeout
+		}
 	default:
-		return threadTitleGenerationTimeout
 	}
+	return threadTitleGenerationTimeout
 }
 
 func localThreadTitle(firstUserMessage string, attachments []RunInputAttachment, composerTokens []ComposerToken) string {

@@ -3,6 +3,7 @@ import type {
   DesktopOperationResult,
 } from "../shared/runtime.js";
 import { AwakenEnvStoreError } from "./awaken-env-store.js";
+import { AgentPlanAccountStoreError } from "./agent-plan-account-store.js";
 
 const SAFE_OPERATION_MESSAGES = new Set([
   "模型配置重复，添加失败",
@@ -12,7 +13,10 @@ const SAFE_OPERATION_MESSAGES = new Set([
 ]);
 
 export function desktopOperationIssue(error: unknown): DesktopOperationIssue {
-  if (error instanceof AwakenEnvStoreError && error.code === "unreadable") {
+  if (
+    (error instanceof AwakenEnvStoreError || error instanceof AgentPlanAccountStoreError) &&
+    error.code === "unreadable"
+  ) {
     return {
       code: "credential_unreadable",
       message: error.message,

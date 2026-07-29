@@ -786,7 +786,9 @@ func awakenEventFromAGUI(frame Event) agentcore.AwakenEvent {
 func contextUsageSnapshotFromWire(value *ContextUsageSnapshot) agentcore.ContextUsageSnapshot {
 	snapshot := agentcore.ContextUsageSnapshot{
 		SchemaVersion: value.SchemaVersion, SnapshotID: value.SnapshotID, EstimatorID: value.EstimatorID,
-		Basis: value.Basis, RequestID: value.RequestID, ModelID: value.ModelID, ProtocolFamily: value.ProtocolFamily,
+		Basis: value.Basis, RequestID: value.RequestID, ModelID: value.ModelID,
+		CapabilityModelID: value.CapabilityModelID, EndpointSelector: value.EndpointSelector,
+		ModelSelectorKind: value.ModelSelectorKind, ProtocolFamily: value.ProtocolFamily,
 		ContextEpochID: value.ContextEpochID, ContextEpochBoundaryReason: value.ContextEpochBoundaryReason,
 		RequestShapeDigest: value.RequestShapeDigest, ModelWindowTokens: value.ModelWindowTokens,
 		OutputReserveTokens: value.OutputReserveTokens, EffectiveInputWindowTokens: value.EffectiveInputWindowTokens,
@@ -807,8 +809,10 @@ func modelUsageRecordFromWire(value *ModelUsageRecord) agentcore.ModelUsageRecor
 	usage := agentcore.ModelUsageRecord{
 		SchemaVersion: value.SchemaVersion, RequestID: value.RequestID, Purpose: value.Purpose,
 		ProviderID: value.ProviderID, ProfileID: value.ProfileID, CredentialRevision: value.CredentialRevision,
-		ModelID: value.ModelID, ProtocolFamily: value.ProtocolFamily, EndpointContractID: value.EndpointContractID,
-		CacheMode: value.CacheMode, CacheKeyApplied: value.CacheKeyApplied,
+		ModelID: value.ModelID, CapabilityModelID: value.CapabilityModelID, EndpointSelector: value.EndpointSelector,
+		ModelSelectorKind: value.ModelSelectorKind, ProtocolFamily: value.ProtocolFamily, EndpointContractID: value.EndpointContractID,
+		ReasoningPolicy: value.ReasoningPolicy,
+		CacheMode:       value.CacheMode, CacheKeyApplied: value.CacheKeyApplied,
 		ContextEpochID: value.ContextEpochID, PrefixDigest: value.PrefixDigest, InvalidationReason: value.InvalidationReason,
 		RetryIndex: value.RetryIndex, AuxiliaryFallback: value.AuxiliaryFallback,
 		InputTokens: cloneIntPointer(value.InputTokens), CachedInputTokens: cloneIntPointer(value.CachedInputTokens),

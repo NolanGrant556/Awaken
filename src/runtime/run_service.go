@@ -30,19 +30,20 @@ import (
 )
 
 var (
-	ErrInvalidInput                = errors.New("input is required")
-	ErrRunNotFound                 = errors.New("run not found")
-	ErrRunTerminal                 = errors.New("run is already finished")
-	ErrRunCancelling               = errors.New("run is being cancelled")
-	ErrThreadNotFound              = errors.New("thread not found")
-	ErrThreadWorkspaceMismatch     = errors.New("thread workspace mismatch")
-	ErrThreadBusy                  = errors.New("thread already has an active run")
-	ErrThreadLabelInvalid          = errors.New("thread label is required")
-	ErrMissingModelProfile         = errors.New("model profile is required")
-	ErrUnsupportedInputAttachment  = errors.New("model does not support image input")
-	ErrUserQuestionNotFound        = errors.New("user question not found")
-	ErrExternalInteractionNotFound = errors.New("external interaction not found")
-	ErrPersistenceUnavailable      = agentcore.ErrPersistenceUnavailable
+	ErrInvalidInput                 = errors.New("input is required")
+	ErrRunNotFound                  = errors.New("run not found")
+	ErrRunTerminal                  = errors.New("run is already finished")
+	ErrRunCancelling                = errors.New("run is being cancelled")
+	ErrThreadNotFound               = errors.New("thread not found")
+	ErrThreadWorkspaceMismatch      = errors.New("thread workspace mismatch")
+	ErrThreadBusy                   = errors.New("thread already has an active run")
+	ErrThreadLabelInvalid           = errors.New("thread label is required")
+	ErrThreadModelPreferenceInvalid = errors.New("thread model preference is invalid")
+	ErrMissingModelProfile          = errors.New("model profile is required")
+	ErrUnsupportedInputAttachment   = errors.New("model does not support image input")
+	ErrUserQuestionNotFound         = errors.New("user question not found")
+	ErrExternalInteractionNotFound  = errors.New("external interaction not found")
+	ErrPersistenceUnavailable       = agentcore.ErrPersistenceUnavailable
 )
 
 const maxRetainedThreads = 100
@@ -148,6 +149,9 @@ type ModelProfileConfig struct {
 	ProviderID         string  `json:"provider_id,omitempty"`
 	DisplayName        string  `json:"display_name,omitempty"`
 	ModelID            string  `json:"model_id,omitempty"`
+	CapabilityModelID  string  `json:"capability_model_id,omitempty"`
+	EndpointSelector   string  `json:"endpoint_selector,omitempty"`
+	ModelSelectorKind  string  `json:"model_selector_kind,omitempty"`
 	BaseURL            string  `json:"base_url,omitempty"`
 	Protocol           string  `json:"protocol,omitempty"`
 	AuthScheme         string  `json:"auth_scheme,omitempty"`
@@ -160,6 +164,8 @@ type ModelProfileConfig struct {
 	SupportsVision     bool    `json:"supports_vision,omitempty"`
 	SupportsNativePDF  bool    `json:"supports_native_pdf,omitempty"`
 	SupportsVideo      bool    `json:"supports_video,omitempty"`
+	SupportsTools      string  `json:"supports_tools,omitempty"`
+	ReasoningEffort    string  `json:"reasoning_effort,omitempty"`
 }
 
 type Executor interface {
@@ -251,26 +257,28 @@ func (s *RunService) restoreSkillInvocationHistory(activator *skillruntime.Activ
 // Thread holds the reusable Agent and metadata for a multi-turn conversation.
 // Runs with the same thread_id reuse the same Agent and Conversation.
 type Thread struct {
-	threadID          string
-	projectID         string
-	agent             *agentcore.Agent
-	workspace         WorkspaceConfig
-	label             string
-	titleSource       ThreadTitleSource
-	titleStatus       ThreadTitleStatus
-	titleUpdatedAt    time.Time
-	titleSeedRunID    string
-	latestRunID       string
-	activeRunID       string
-	runIDs            []string
-	modelProfileKey   string
-	createdAt         time.Time
-	updatedAt         time.Time
-	deletionRequested bool
-	source            string
-	clientName        string
-	clientVersion     string
-	acpSessionID      string
+	threadID                 string
+	projectID                string
+	agent                    *agentcore.Agent
+	workspace                WorkspaceConfig
+	label                    string
+	titleSource              ThreadTitleSource
+	titleStatus              ThreadTitleStatus
+	titleUpdatedAt           time.Time
+	titleSeedRunID           string
+	latestRunID              string
+	activeRunID              string
+	runIDs                   []string
+	modelProfileKey          string
+	selectedModelProfileID   string
+	reasoningEffortByProfile map[string]string
+	createdAt                time.Time
+	updatedAt                time.Time
+	deletionRequested        bool
+	source                   string
+	clientName               string
+	clientVersion            string
+	acpSessionID             string
 }
 
 type ThreadTitleSource string
@@ -295,22 +303,24 @@ const (
 )
 
 type ThreadSnapshot struct {
-	ThreadID       string            `json:"thread_id"`
-	ProjectID      string            `json:"project_id,omitempty"`
-	Label          string            `json:"label"`
-	TitleSource    ThreadTitleSource `json:"title_source,omitempty"`
-	TitleStatus    ThreadTitleStatus `json:"title_status,omitempty"`
-	TitleUpdatedAt time.Time         `json:"title_updated_at,omitempty"`
-	TitleSeedRunID string            `json:"title_seed_run_id,omitempty"`
-	RunID          string            `json:"run_id,omitempty"`
-	ActiveRunID    string            `json:"active_run_id,omitempty"`
-	Workspace      WorkspaceConfig   `json:"workspace"`
-	CreatedAt      time.Time         `json:"created_at"`
-	UpdatedAt      time.Time         `json:"updated_at"`
-	Source         string            `json:"source,omitempty"`
-	ClientName     string            `json:"client_name,omitempty"`
-	ClientVersion  string            `json:"client_version,omitempty"`
-	ACPSessionID   string            `json:"acp_session_id,omitempty"`
+	ThreadID                 string            `json:"thread_id"`
+	ProjectID                string            `json:"project_id,omitempty"`
+	Label                    string            `json:"label"`
+	TitleSource              ThreadTitleSource `json:"title_source,omitempty"`
+	TitleStatus              ThreadTitleStatus `json:"title_status,omitempty"`
+	TitleUpdatedAt           time.Time         `json:"title_updated_at,omitempty"`
+	TitleSeedRunID           string            `json:"title_seed_run_id,omitempty"`
+	RunID                    string            `json:"run_id,omitempty"`
+	ActiveRunID              string            `json:"active_run_id,omitempty"`
+	Workspace                WorkspaceConfig   `json:"workspace"`
+	CreatedAt                time.Time         `json:"created_at"`
+	UpdatedAt                time.Time         `json:"updated_at"`
+	Source                   string            `json:"source,omitempty"`
+	ClientName               string            `json:"client_name,omitempty"`
+	ClientVersion            string            `json:"client_version,omitempty"`
+	ACPSessionID             string            `json:"acp_session_id,omitempty"`
+	SelectedModelProfileID   string            `json:"selected_model_profile_id,omitempty"`
+	ReasoningEffortByProfile map[string]string `json:"reasoning_effort_by_profile,omitempty"`
 }
 
 type ThreadTranscriptRun struct {
@@ -685,6 +695,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	threadLabel := threadLabelForInputAndTokens(trimmed, persistedAttachments, req.ComposerTokens)
 	ctx, cancel := context.WithCancel(context.Background())
 	session := NewSession(runID, threadID, trimmed, persistedAttachments, req.ComposerTokens, cancel)
+	if req.ModelProfile != nil {
+		session.SetModelSelection(req.ModelProfile.ProfileID, req.ModelProfile.ReasoningEffort)
+	}
 	var threadSnapshot ThreadSnapshot
 	shouldGenerateThreadTitle := false
 	var previousThread *Thread
@@ -734,22 +747,25 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				// a later manual/generated rename after restart.
 				// thread label is only the creation-time fallback and must not overwrite
 				// a later manual/generated rename after restart.
-				label:           firstNonEmpty(restoredMeta.Snapshot.Label, restored.Label),
-				titleSource:     restoredMeta.Snapshot.TitleSource,
-				titleStatus:     restoredMeta.Snapshot.TitleStatus,
-				titleUpdatedAt:  restoredMeta.Snapshot.TitleUpdatedAt,
-				titleSeedRunID:  restoredMeta.Snapshot.TitleSeedRunID,
-				latestRunID:     runID,
-				activeRunID:     runID,
-				runIDs:          runIDs,
-				modelProfileKey: modelProfileKey,
-				createdAt:       firstNonZeroTime(restored.CreatedAt, restoredMeta.Snapshot.CreatedAt, now),
-				updatedAt:       now,
-				source:          restoredMeta.Snapshot.Source,
-				clientName:      restoredMeta.Snapshot.ClientName,
-				clientVersion:   restoredMeta.Snapshot.ClientVersion,
-				acpSessionID:    restoredMeta.Snapshot.ACPSessionID,
+				label:                    firstNonEmpty(restoredMeta.Snapshot.Label, restored.Label),
+				titleSource:              restoredMeta.Snapshot.TitleSource,
+				titleStatus:              restoredMeta.Snapshot.TitleStatus,
+				titleUpdatedAt:           restoredMeta.Snapshot.TitleUpdatedAt,
+				titleSeedRunID:           restoredMeta.Snapshot.TitleSeedRunID,
+				latestRunID:              runID,
+				activeRunID:              runID,
+				runIDs:                   runIDs,
+				modelProfileKey:          modelProfileKey,
+				selectedModelProfileID:   restoredMeta.Snapshot.SelectedModelProfileID,
+				reasoningEffortByProfile: cloneStringMap(restoredMeta.Snapshot.ReasoningEffortByProfile),
+				createdAt:                firstNonZeroTime(restored.CreatedAt, restoredMeta.Snapshot.CreatedAt, now),
+				updatedAt:                now,
+				source:                   restoredMeta.Snapshot.Source,
+				clientName:               restoredMeta.Snapshot.ClientName,
+				clientVersion:            restoredMeta.Snapshot.ClientVersion,
+				acpSessionID:             restoredMeta.Snapshot.ACPSessionID,
 			}
+			applyThreadModelPreference(s.threads[threadID], req.ModelProfile)
 			s.sessions[runID] = session
 			threadSnapshot = s.threads[threadID].snapshot()
 			s.mu.Unlock()
@@ -801,6 +817,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		thread.latestRunID = runID
 		thread.runIDs = append(thread.runIDs, runID)
 		thread.updatedAt = now
+		applyThreadModelPreference(thread, req.ModelProfile)
 		threadSnapshot = thread.snapshot()
 	} else {
 		agent = s.createAgent(workspace, threadID, req.ModelProfile)
@@ -817,25 +834,27 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			shouldGenerateThreadTitle = true
 		}
 		s.threads[threadID] = &Thread{
-			threadID:        threadID,
-			projectID:       scopeProjectID(workspace),
-			agent:           agent,
-			workspace:       workspace,
-			label:           threadLabel,
-			titleSource:     titleSource,
-			titleStatus:     titleStatus,
-			titleSeedRunID:  runID,
-			titleUpdatedAt:  now,
-			latestRunID:     runID,
-			activeRunID:     runID,
-			runIDs:          []string{runID},
-			modelProfileKey: modelProfileKey,
-			createdAt:       now,
-			updatedAt:       now,
-			source:          req.Client.Source,
-			clientName:      req.Client.ClientName,
-			clientVersion:   req.Client.ClientVersion,
-			acpSessionID:    req.Client.SessionID,
+			threadID:                 threadID,
+			projectID:                scopeProjectID(workspace),
+			agent:                    agent,
+			workspace:                workspace,
+			label:                    threadLabel,
+			titleSource:              titleSource,
+			titleStatus:              titleStatus,
+			titleSeedRunID:           runID,
+			titleUpdatedAt:           now,
+			latestRunID:              runID,
+			activeRunID:              runID,
+			runIDs:                   []string{runID},
+			modelProfileKey:          modelProfileKey,
+			selectedModelProfileID:   profileID(req.ModelProfile),
+			reasoningEffortByProfile: reasoningEffortMap(req.ModelProfile),
+			createdAt:                now,
+			updatedAt:                now,
+			source:                   req.Client.Source,
+			clientName:               req.Client.ClientName,
+			clientVersion:            req.Client.ClientVersion,
+			acpSessionID:             req.Client.SessionID,
 		}
 		s.pruneInactiveThreadsLocked()
 		threadSnapshot = s.threads[threadID].snapshot()
@@ -874,6 +893,7 @@ func cloneThread(thread *Thread) *Thread {
 	}
 	cloned := *thread
 	cloned.runIDs = append([]string(nil), thread.runIDs...)
+	cloned.reasoningEffortByProfile = cloneStringMap(thread.reasoningEffortByProfile)
 	return &cloned
 }
 
@@ -1242,6 +1262,9 @@ func modelProfileCacheKey(profile *ModelProfileConfig) string {
 		profile.ProfileID,
 		profile.ProviderID,
 		profile.ModelID,
+		profile.CapabilityModelID,
+		profile.EndpointSelector,
+		profile.ModelSelectorKind,
 		profile.BaseURL,
 		profile.Protocol,
 		profile.AuthScheme,
@@ -1253,8 +1276,50 @@ func modelProfileCacheKey(profile *ModelProfileConfig) string {
 		strconv.FormatBool(profile.SupportsVision),
 		strconv.FormatBool(profile.SupportsNativePDF),
 		strconv.FormatBool(profile.SupportsVideo),
+		profile.SupportsTools,
+		profile.ReasoningEffort,
 	}
 	return strings.Join(parts, "\x00")
+}
+
+func profileID(profile *ModelProfileConfig) string {
+	if profile == nil {
+		return ""
+	}
+	return strings.TrimSpace(profile.ProfileID)
+}
+
+func reasoningEffortMap(profile *ModelProfileConfig) map[string]string {
+	if profile == nil || strings.TrimSpace(profile.ProfileID) == "" || strings.TrimSpace(profile.ReasoningEffort) == "" {
+		return nil
+	}
+	return map[string]string{strings.TrimSpace(profile.ProfileID): strings.TrimSpace(profile.ReasoningEffort)}
+}
+
+func applyThreadModelPreference(thread *Thread, profile *ModelProfileConfig) {
+	if thread == nil || profile == nil || strings.TrimSpace(profile.ProfileID) == "" {
+		return
+	}
+	thread.selectedModelProfileID = strings.TrimSpace(profile.ProfileID)
+	if thread.reasoningEffortByProfile == nil {
+		thread.reasoningEffortByProfile = make(map[string]string)
+	}
+	if effort := strings.TrimSpace(profile.ReasoningEffort); effort != "" {
+		thread.reasoningEffortByProfile[thread.selectedModelProfileID] = effort
+	} else {
+		delete(thread.reasoningEffortByProfile, thread.selectedModelProfileID)
+	}
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func hashSecret(value string) string {
@@ -1327,6 +1392,73 @@ func (s *RunService) RenameThread(threadID, label string) (ThreadSnapshot, error
 	}
 	s.mu.Unlock()
 	return s.threadStore.RenameThread(threadID, normalizedLabel, now)
+}
+
+func (s *RunService) UpdateThreadModelPreference(threadID, profileID, reasoningEffort string) (ThreadSnapshot, error) {
+	threadID = strings.TrimSpace(threadID)
+	profileID = strings.TrimSpace(profileID)
+	reasoningEffort = strings.TrimSpace(reasoningEffort)
+	if threadID == "" {
+		return ThreadSnapshot{}, ErrThreadNotFound
+	}
+	if profileID == "" || (reasoningEffort != "" && reasoningEffort != "low" && reasoningEffort != "high" && reasoningEffort != "max") {
+		return ThreadSnapshot{}, ErrThreadModelPreferenceInvalid
+	}
+	now := time.Now().UTC()
+
+	s.mu.Lock()
+	if thread, ok := s.threads[threadID]; ok {
+		if thread.deletionRequested {
+			s.mu.Unlock()
+			return ThreadSnapshot{}, ErrThreadNotFound
+		}
+		if thread.activeRunID != "" {
+			s.mu.Unlock()
+			return ThreadSnapshot{}, ErrThreadBusy
+		}
+		previous := cloneThread(thread)
+		thread.selectedModelProfileID = profileID
+		if thread.reasoningEffortByProfile == nil {
+			thread.reasoningEffortByProfile = make(map[string]string)
+		}
+		if reasoningEffort == "" {
+			delete(thread.reasoningEffortByProfile, profileID)
+		} else {
+			thread.reasoningEffortByProfile[profileID] = reasoningEffort
+		}
+		thread.updatedAt = now
+		snapshot := thread.snapshot()
+		profileKey := thread.modelProfileKey
+		preview := thread.label
+		s.mu.Unlock()
+		if err := s.threadStore.CreateThread(snapshot, profileKey, preview); err != nil {
+			s.mu.Lock()
+			s.threads[threadID] = previous
+			s.mu.Unlock()
+			return ThreadSnapshot{}, err
+		}
+		return snapshot, nil
+	}
+	s.mu.Unlock()
+
+	record, _, err := s.threadStore.RestoreThread(threadID)
+	if err != nil {
+		return ThreadSnapshot{}, err
+	}
+	record.Snapshot.SelectedModelProfileID = profileID
+	if record.Snapshot.ReasoningEffortByProfile == nil {
+		record.Snapshot.ReasoningEffortByProfile = make(map[string]string)
+	}
+	if reasoningEffort == "" {
+		delete(record.Snapshot.ReasoningEffortByProfile, profileID)
+	} else {
+		record.Snapshot.ReasoningEffortByProfile[profileID] = reasoningEffort
+	}
+	record.Snapshot.UpdatedAt = now
+	if err := s.threadStore.CreateThread(record.Snapshot, record.ModelProfileKey, record.Preview); err != nil {
+		return ThreadSnapshot{}, err
+	}
+	return record.Snapshot, nil
 }
 
 func (s *RunService) FlushTranscripts() error {
@@ -2301,22 +2433,24 @@ func newRuntimeID(prefix string) string {
 
 func (t *Thread) snapshot() ThreadSnapshot {
 	return ThreadSnapshot{
-		ThreadID:       t.threadID,
-		ProjectID:      t.projectID,
-		Label:          t.label,
-		TitleSource:    t.titleSource,
-		TitleStatus:    t.titleStatus,
-		TitleUpdatedAt: t.titleUpdatedAt,
-		TitleSeedRunID: t.titleSeedRunID,
-		RunID:          t.latestRunID,
-		ActiveRunID:    t.activeRunID,
-		Workspace:      t.workspace,
-		CreatedAt:      t.createdAt,
-		UpdatedAt:      t.updatedAt,
-		Source:         t.source,
-		ClientName:     t.clientName,
-		ClientVersion:  t.clientVersion,
-		ACPSessionID:   t.acpSessionID,
+		ThreadID:                 t.threadID,
+		ProjectID:                t.projectID,
+		Label:                    t.label,
+		TitleSource:              t.titleSource,
+		TitleStatus:              t.titleStatus,
+		TitleUpdatedAt:           t.titleUpdatedAt,
+		TitleSeedRunID:           t.titleSeedRunID,
+		RunID:                    t.latestRunID,
+		ActiveRunID:              t.activeRunID,
+		Workspace:                t.workspace,
+		CreatedAt:                t.createdAt,
+		UpdatedAt:                t.updatedAt,
+		Source:                   t.source,
+		ClientName:               t.clientName,
+		ClientVersion:            t.clientVersion,
+		ACPSessionID:             t.acpSessionID,
+		SelectedModelProfileID:   t.selectedModelProfileID,
+		ReasoningEffortByProfile: cloneStringMap(t.reasoningEffortByProfile),
 	}
 }
 

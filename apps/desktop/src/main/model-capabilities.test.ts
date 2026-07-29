@@ -2,12 +2,31 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   capabilityForModel,
   normalizeAdvancedWithModelCapability,
+  resolveReasoningEffort,
   setCapabilityOverrides,
+  validateReasoningEffort,
 } from "./model-capabilities.js";
+import type { CapabilityResolution } from "./model-capability-sync.js";
+
+function resolution(overrides: Partial<CapabilityResolution["scope"]> = {}): CapabilityResolution {
+  return {
+    scope: {
+      provider_id: "kimi-coding-plan",
+      normalized_base_url: "https://api.kimi.com/coding/v1",
+      protocol_family: "openai_chat",
+      profile_id: "profile-1",
+      credential_revision: 1,
+      selector_kind: "model",
+      endpoint_contract_id: "openai_chat_completions_v1",
+      ...overrides,
+    },
+    selector: "k3",
+  };
+}
 
 describe("model capabilities", () => {
   afterEach(() => {
-    setCapabilityOverrides({});
+    setCapabilityOverrides([]);
   });
 
   it("knows DeepSeek V4 context and output limits", () => {
@@ -52,19 +71,40 @@ describe("model capabilities", () => {
   });
 
   it("merges dynamic Kimi metadata without dropping static output and media capabilities", () => {
-    setCapabilityOverrides({
-      "kimi-coding-plan": {
-        k3: { context_window: 1024 * 1024 },
-      },
-    });
+    const exact = resolution();
+    setCapabilityOverrides([{ scope: exact.scope, models: {
+      k3: { context_window: 1024 * 1024 },
+    } }]);
 
-    expect(capabilityForModel("kimi-coding-plan", "k3")).toMatchObject({
+    expect(capabilityForModel("kimi-coding-plan", "k3", exact)).toMatchObject({
       context_window: 1024 * 1024,
       max_output_tokens: 32 * 1024,
       default_temperature: 1,
       supports_vision: true,
       supports_video: true,
+      supports_tools: "ready",
     });
+  });
+
+  it("defaults every configured model to tool-capable without a probe override", () => {
+    const exact = resolution({ provider_id: "volcengine-agent-plan", profile_id: "agent-profile" });
+    exact.selector = "custom-model";
+    setCapabilityOverrides([{ scope: exact.scope, models: {
+      "custom-model": { supports_tools: "unsupported" },
+    } }]);
+
+    expect(capabilityForModel("minimax", "MiniMax-M3")?.supports_tools).toBe("ready");
+    expect(capabilityForModel("volcengine-agent-plan", "custom-model")).toBeUndefined();
+    expect(
+      capabilityForModel("volcengine-agent-plan", "custom-model", exact)?.supports_tools,
+    ).toBe("ready");
+    expect(
+      normalizeAdvancedWithModelCapability(
+        { supportsTools: "unknown" },
+        "qwen",
+        "custom-model",
+      ).supportsTools,
+    ).toBe("ready");
   });
 
   it("knows Volcengine Coding Plan model limits", () => {
@@ -92,7 +132,7 @@ describe("model capabilities", () => {
       normalizeAdvancedWithModelCapability(undefined, "kimi-cn", "kimi-k2.6"),
     ).toMatchObject({
       contextWindow: 256 * 1024,
-      maxTokens: 256 * 1024,
+      maxTokens: 32 * 1024,
       supportsVision: true,
       supportsVideo: true,
     });
@@ -149,5 +189,61 @@ describe("model capabilities", () => {
       supportsVision: true,
       supportsVideo: true,
     });
+  });
+
+  it("uses the configured default output budget instead of the hard model ceiling", () => {
+    expect(
+      normalizeAdvancedWithModelCapability(undefined, "kimi-cn", "kimi-k3"),
+    ).toMatchObject({
+      maxTokens: 32 * 1024,
+    });
+  });
+
+  it("exposes only confirmed Awaken effort levels", () => {
+    expect(capabilityForModel("kimi-cn", "kimi-k3")?.reasoning_effort).toEqual({
+      levels: ["low", "high", "max"],
+      default_level: "max",
+    });
+    expect(capabilityForModel("glm", "glm-5.2")?.reasoning_effort).toEqual({
+      levels: ["high", "max"],
+      default_level: "high",
+    });
+    expect(capabilityForModel("qwen-token-plan", "qwen3.8-max-preview")?.reasoning_effort)
+      .toEqual({ levels: ["low", "high", "max"], default_level: "max" });
+    expect(capabilityForModel("minimax", "MiniMax-M3")?.reasoning_effort).toBeUndefined();
+    expect(capabilityForModel("qwen", "qwen3.7-max")?.reasoning_effort).toBeUndefined();
+    expect(capabilityForModel("volcengine-agent-plan", "ark-code-latest")?.reasoning_effort)
+      .toBeUndefined();
+  });
+
+  it("falls back from stale effort to profile and capability defaults", () => {
+    expect(resolveReasoningEffort("glm", "glm-5.2", "low", "max")).toBe("max");
+    expect(resolveReasoningEffort("glm", "glm-5.2", "low", "low")).toBe("high");
+    expect(resolveReasoningEffort("minimax", "MiniMax-M3", "max", "max")).toBeUndefined();
+  });
+
+  it("rejects unsupported profile defaults", () => {
+    expect(() => validateReasoningEffort("glm", "glm-5.2", "low")).toThrow(
+      "当前模型不支持推理强度 low",
+    );
+    expect(() => validateReasoningEffort("qwen", "qwen3.7-max", "max")).toThrow();
+  });
+
+  it("does not infer Doubao reasoning capability from an opaque endpoint selector", () => {
+    expect(capabilityForModel("doubao", "ep-arbitrary")?.reasoning_effort).toBeUndefined();
+    expect(capabilityForModel("doubao", "doubao-seed-2.1-pro")?.reasoning_effort).toEqual({
+      levels: ["low", "high", "max"],
+      default_level: "high",
+    });
+  });
+
+  it("does not reuse official dynamic metadata for a custom base URL", () => {
+    const official = resolution();
+    const custom = resolution({ normalized_base_url: "https://proxy.example.test/v1" });
+    setCapabilityOverrides([{ scope: official.scope, models: {
+      k3: { context_window: 64_000 },
+    } }]);
+    expect(capabilityForModel("kimi-coding-plan", "k3", official)?.context_window).toBe(64_000);
+    expect(capabilityForModel("kimi-coding-plan", "k3", custom)?.context_window).toBe(1024 * 1024);
   });
 });

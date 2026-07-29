@@ -4,6 +4,8 @@ import path from "node:path";
 
 const PROFILE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const ENV_KEY_PREFIX = "AWAKEN_API_KEY_";
+const AGENT_PLAN_ENV_KEY_PREFIX = "AWAKEN_AGENT_PLAN_API_KEY_";
+const mutationQueuesByPath = new Map<string, Promise<void>>();
 
 export type AwakenEnvStoreErrorCode =
   | "invalid_profile_id"
@@ -29,6 +31,17 @@ function keyForProfile(profileId: string): string {
     );
   }
   return `${ENV_KEY_PREFIX}${normalized}`;
+}
+
+function keyForAgentPlanAccount(accountId: string): string {
+  const normalized = accountId.trim();
+  if (!PROFILE_ID_PATTERN.test(normalized)) {
+    throw new AwakenEnvStoreError(
+      "invalid_profile_id",
+      "Agent Plan 账户 ID 无效，无法访问 API key。",
+    );
+  }
+  return `${AGENT_PLAN_ENV_KEY_PREFIX}${normalized}`;
 }
 
 function decodeValue(raw: string): string {
@@ -74,17 +87,14 @@ function serializeEnv(entries: Map<string, string>): string {
 
 export class AwakenEnvStore {
   private readonly filePath: string;
-  private mutationQueue: Promise<void> = Promise.resolve();
 
   constructor(awakenHome: string) {
-    this.filePath = path.join(awakenHome, ".env");
+    this.filePath = path.resolve(awakenHome, ".env");
   }
 
   async getKey(profileId: string): Promise<string> {
     const key = keyForProfile(profileId);
-    await this.mutationQueue;
-    const entries = await this.readEntries();
-    return entries.get(key) ?? "";
+    return this.getValue(key);
   }
 
   async setKey(profileId: string, value: string): Promise<void> {
@@ -98,6 +108,40 @@ export class AwakenEnvStore {
 
   async deleteKey(profileId: string): Promise<void> {
     const key = keyForProfile(profileId);
+    await this.withMutation(async () => {
+      const entries = await this.readEntries();
+      if (!entries.delete(key)) return;
+      await this.writeEntries(entries);
+    });
+  }
+
+  async getAgentPlanKey(accountId: string): Promise<string> {
+    return this.getValue(keyForAgentPlanAccount(accountId));
+  }
+
+  async setAgentPlanKey(accountId: string, value: string): Promise<void> {
+    return this.setValue(keyForAgentPlanAccount(accountId), value);
+  }
+
+  async deleteAgentPlanKey(accountId: string): Promise<void> {
+    return this.deleteValue(keyForAgentPlanAccount(accountId));
+  }
+
+  private async getValue(key: string): Promise<string> {
+    await (mutationQueuesByPath.get(this.filePath) ?? Promise.resolve());
+    const entries = await this.readEntries();
+    return entries.get(key) ?? "";
+  }
+
+  private async setValue(key: string, value: string): Promise<void> {
+    await this.withMutation(async () => {
+      const entries = await this.readEntries();
+      entries.set(key, value);
+      await this.writeEntries(entries);
+    });
+  }
+
+  private async deleteValue(key: string): Promise<void> {
     await this.withMutation(async () => {
       const entries = await this.readEntries();
       if (!entries.delete(key)) return;
@@ -140,16 +184,20 @@ export class AwakenEnvStore {
   }
 
   private async withMutation<T>(operation: () => Promise<T>): Promise<T> {
-    const previous = this.mutationQueue;
+    const previous = mutationQueuesByPath.get(this.filePath) ?? Promise.resolve();
     let release: (() => void) | undefined;
-    this.mutationQueue = new Promise<void>((resolve) => {
+    const current = new Promise<void>((resolve) => {
       release = resolve;
     });
+    mutationQueuesByPath.set(this.filePath, current);
     await previous;
     try {
       return await operation();
     } finally {
       release?.();
+      if (mutationQueuesByPath.get(this.filePath) === current) {
+        mutationQueuesByPath.delete(this.filePath);
+      }
     }
   }
 }

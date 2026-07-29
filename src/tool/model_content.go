@@ -11,6 +11,10 @@ import (
 type ModelCapabilities struct {
 	SupportsVision    bool `json:"supports_vision"`
 	SupportsNativePDF bool `json:"supports_native_pdf"`
+	// SupportsTools remains a protocol compatibility field. Current Desktop
+	// profiles normalize it to "ready"; non-Desktop callers may still use an
+	// explicit non-ready value to suppress model-visible tool schemas.
+	SupportsTools string `json:"supports_tools,omitempty"`
 }
 
 // ModelContentPart describes non-text content returned by a tool. DataBase64

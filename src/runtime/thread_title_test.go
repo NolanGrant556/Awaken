@@ -432,7 +432,8 @@ func TestGenerateThreadTitleRecordsPurposeAndTerminalUsage(t *testing.T) {
 	}
 	defer journal.Close()
 	_, err = generateThreadTitleWithProfile(context.Background(), &ModelProfileConfig{
-		APIKey: "test", BaseURL: server.URL, ModelID: "mock", ProviderID: "custom", Protocol: "openai_chat",
+		APIKey: "test", BaseURL: server.URL, ModelID: "kimi-k3", ProviderID: "kimi-cn", ProfileID: "profile-title",
+		CredentialRevision: 7, Protocol: "openai_chat",
 	}, "prompt", agentcore.ModelCallAuthority{ThreadID: "thread-title-usage", RunID: "run-title", Recorder: journal}, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -456,6 +457,9 @@ func TestGenerateThreadTitleRecordsPurposeAndTerminalUsage(t *testing.T) {
 	}
 	if requestID == "" || usage.RequestID != requestID || usage.Purpose != "thread_title" || usage.InputTokens == nil || *usage.InputTokens != 20 {
 		t.Fatalf("request=%q usage=%+v", requestID, usage)
+	}
+	if usage.ProviderID != "kimi-cn" || usage.ProfileID != "profile-title" || usage.CredentialRevision != 7 || usage.ModelID != "kimi-k2.6" {
+		t.Fatalf("thread-title auxiliary config lost provider/profile/credential identity: %+v", usage)
 	}
 }
 
@@ -616,6 +620,15 @@ func TestThreadTitleMaxTokensForProfileKeepsCompactDefault(t *testing.T) {
 	}
 	if got := threadTitleGenerationTimeoutForProfile(&ModelProfileConfig{ModelID: "kimi-for-coding"}); got != threadTitleForcedReasoningTimeout {
 		t.Fatalf("expected Kimi forced-reasoning timeout %s, got %s", threadTitleForcedReasoningTimeout, got)
+	}
+	for _, modelID := range []string{"k3", "k3-256k"} {
+		profile := &ModelProfileConfig{ProviderID: "kimi-coding-plan", ModelID: modelID}
+		if got := threadTitleMaxTokensForProfile(profile); got != threadTitleForcedReasoningMaxTokens {
+			t.Fatalf("expected Kimi Coding Plan %s title budget %d, got %d", modelID, threadTitleForcedReasoningMaxTokens, got)
+		}
+		if got := threadTitleGenerationTimeoutForProfile(profile); got != threadTitleForcedReasoningTimeout {
+			t.Fatalf("expected Kimi Coding Plan %s title timeout %s, got %s", modelID, threadTitleForcedReasoningTimeout, got)
+		}
 	}
 }
 

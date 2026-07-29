@@ -41,6 +41,8 @@ func InvokePrepared(ctx stdctx.Context, cfg Config, prepared PreparedRequest) (*
 		return newAnthropicTransport().invokePrepared(ctx, cfg, prepared)
 	case ProtocolOpenAIChat:
 		return newOpenAITransport().invokePrepared(ctx, cfg, prepared)
+	case ProtocolMiniMaxChat:
+		return newOpenAITransport().invokePrepared(ctx, cfg, prepared)
 	default:
 		return nil, fmt.Errorf("unsupported prepared protocol %q", prepared.Protocol)
 	}
@@ -54,6 +56,8 @@ func StreamPreparedWithObserver(ctx stdctx.Context, cfg Config, prepared Prepare
 	case ProtocolAnthropicMessages:
 		return newAnthropicTransport().streamPrepared(ctx, cfg, prepared, observer)
 	case ProtocolOpenAIChat:
+		return newOpenAITransport().streamPrepared(ctx, cfg, prepared, observer)
+	case ProtocolMiniMaxChat:
 		return newOpenAITransport().streamPrepared(ctx, cfg, prepared, observer)
 	default:
 		return nil, fmt.Errorf("unsupported prepared protocol %q", prepared.Protocol)

@@ -16,6 +16,7 @@ type Protocol string
 const (
 	ProtocolOpenAIChat        Protocol = "openai_chat"
 	ProtocolAnthropicMessages Protocol = "anthropic_messages"
+	ProtocolMiniMaxChat       Protocol = "minimax_chat"
 )
 
 // Config 是 LLM 配置
@@ -23,6 +24,9 @@ type Config struct {
 	APIKey                string
 	BaseURL               string
 	Model                 string
+	CapabilityModelID     string
+	EndpointSelector      string
+	ModelSelectorKind     string
 	Protocol              Protocol
 	ProviderID            string
 	ProfileID             string
@@ -32,6 +36,7 @@ type Config struct {
 	AuthScheme            string
 	ContextWindow         int
 	AutoCompactTokenLimit int
+	ReasoningEffort       string
 }
 
 type RequestPurpose string
@@ -183,6 +188,8 @@ func resolveProtocol(cfg Config) Protocol {
 			return ProtocolOpenAIChat
 		case ProtocolAnthropicMessages:
 			return ProtocolAnthropicMessages
+		case ProtocolMiniMaxChat:
+			return ProtocolMiniMaxChat
 		}
 	}
 
@@ -194,6 +201,8 @@ func resolveProtocol(cfg Config) Protocol {
 			return ProtocolOpenAIChat
 		case "anthropic_messages":
 			return ProtocolAnthropicMessages
+		case "minimax_chat":
+			return ProtocolMiniMaxChat
 		}
 	}
 

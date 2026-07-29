@@ -1,61 +1,201 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { ModelCapabilityWire } from "../shared/runtime.js";
 
 const OVERRIDES_FILE = "model-capabilities.json";
+const mutationQueuesByPath = new Map<string, Promise<void>>();
 
 export type ProviderCapabilityOverrides = Record<string, ModelCapabilityWire>;
 
-type CapabilityOverridesFile = {
-  version: 1;
-  providers: Record<string, ProviderCapabilityOverrides>;
+export type CapabilitySelectorKind = "model" | "endpoint";
+
+export type CapabilityCacheScope = {
+  provider_id: string;
+  normalized_base_url: string;
+  protocol_family: string;
+  profile_id: string;
+  credential_revision: number;
+  selector_kind: CapabilitySelectorKind;
+  endpoint_contract_id: string;
 };
+
+export type ScopedCapabilityOverrides = {
+  scope: CapabilityCacheScope;
+  models: ProviderCapabilityOverrides;
+};
+
+export type CapabilityResolution = {
+  scope: CapabilityCacheScope;
+  selector: string;
+};
+
+type CapabilityOverridesFile = {
+  version: 2;
+  scopes: ScopedCapabilityOverrides[];
+};
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isValidScope(value: unknown): value is CapabilityCacheScope {
+  if (typeof value !== "object" || value === null) return false;
+  const scope = value as Partial<CapabilityCacheScope>;
+  return (
+    isString(scope.provider_id) &&
+    isString(scope.normalized_base_url) &&
+    isString(scope.protocol_family) &&
+    isString(scope.profile_id) &&
+    typeof scope.credential_revision === "number" &&
+    Number.isInteger(scope.credential_revision) &&
+    scope.credential_revision >= 1 &&
+    (scope.selector_kind === "model" || scope.selector_kind === "endpoint") &&
+    isString(scope.endpoint_contract_id)
+  );
+}
 
 function isValidOverridesFile(value: unknown): value is CapabilityOverridesFile {
   if (typeof value !== "object" || value === null) return false;
   const file = value as Partial<CapabilityOverridesFile>;
-  if (file.version !== 1) return false;
-  if (typeof file.providers !== "object" || file.providers === null) return false;
-  return true;
+  if (file.version !== 2 || !Array.isArray(file.scopes)) return false;
+  return file.scopes.every(
+    (entry) =>
+      typeof entry === "object" &&
+      entry !== null &&
+      isValidScope((entry as Partial<ScopedCapabilityOverrides>).scope) &&
+      typeof (entry as Partial<ScopedCapabilityOverrides>).models === "object" &&
+      (entry as Partial<ScopedCapabilityOverrides>).models !== null,
+  );
+}
+
+export function normalizeCapabilityBaseURL(value: string): string {
+  const trimmed = value.trim().replace(/\/+$/, "");
+  try {
+    const parsed = new URL(trimmed);
+    parsed.protocol = parsed.protocol.toLowerCase();
+    parsed.hostname = parsed.hostname.toLowerCase();
+    parsed.search = "";
+    parsed.hash = "";
+    parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+    return parsed.toString().replace(/\/+$/, "");
+  } catch {
+    return trimmed;
+  }
+}
+
+export function capabilityEndpointContract(protocol: string): string {
+  switch (protocol.trim().toLowerCase()) {
+    case "minimax_chat":
+      return "minimax_chatcompletion_v2";
+    case "anthropic_messages":
+      return "anthropic_messages_v1";
+    default:
+      return "openai_chat_completions_v1";
+  }
+}
+
+export function capabilityScopeKey(scope: CapabilityCacheScope): string {
+  return JSON.stringify([
+    scope.provider_id.trim().toLowerCase(),
+    normalizeCapabilityBaseURL(scope.normalized_base_url),
+    scope.protocol_family.trim().toLowerCase(),
+    scope.profile_id.trim(),
+    Math.max(1, Math.floor(scope.credential_revision)),
+    scope.selector_kind,
+    scope.endpoint_contract_id.trim().toLowerCase(),
+  ]);
 }
 
 export async function loadCapabilityOverrides(
   cacheDir: string,
-): Promise<Record<string, ProviderCapabilityOverrides>> {
+): Promise<ScopedCapabilityOverrides[]> {
+  const filePath = path.resolve(cacheDir, OVERRIDES_FILE);
+  await (mutationQueuesByPath.get(filePath) ?? Promise.resolve());
+  return readCapabilityOverrides(filePath);
+}
+
+async function readCapabilityOverrides(
+  filePath: string,
+): Promise<ScopedCapabilityOverrides[]> {
   try {
-    const filePath = path.join(cacheDir, OVERRIDES_FILE);
     const raw = await fs.readFile(filePath, "utf8");
     const parsed = JSON.parse(raw) as unknown;
     if (isValidOverridesFile(parsed)) {
-      return parsed.providers;
+      return parsed.scopes;
     }
+    // Version 1 was provider-wide and cannot prove endpoint/profile authority.
+    // Ignore it as a cold cache instead of applying it to an unrelated scope.
   } catch {
-    // Ignore missing or corrupted override file.
+    // Ignore missing or corrupted override files.
   }
-  return {};
+  return [];
 }
 
 export async function saveCapabilityOverrides(
   cacheDir: string,
-  providers: Record<string, ProviderCapabilityOverrides>,
-): Promise<void> {
-  const filePath = path.join(cacheDir, OVERRIDES_FILE);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.${process.pid}.tmp`;
-  const file: CapabilityOverridesFile = { version: 1, providers };
-  await fs.writeFile(tempPath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
-  await fs.rename(tempPath, filePath);
+  scopes: ScopedCapabilityOverrides[],
+): Promise<ScopedCapabilityOverrides[]> {
+  const filePath = path.resolve(cacheDir, OVERRIDES_FILE);
+  return withPathMutation(filePath, async () => {
+    const merged = mergeCapabilityOverrides(
+      await readCapabilityOverrides(filePath),
+      scopes,
+    );
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+    const file: CapabilityOverridesFile = { version: 2, scopes: merged };
+    try {
+      await fs.writeFile(tempPath, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+      await fs.rename(tempPath, filePath);
+    } finally {
+      await fs.rm(tempPath, { force: true }).catch(() => undefined);
+    }
+    return merged;
+  });
+}
+
+async function withPathMutation<T>(
+  filePath: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = mutationQueuesByPath.get(filePath) ?? Promise.resolve();
+  let release: (() => void) | undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  mutationQueuesByPath.set(filePath, current);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release?.();
+    if (mutationQueuesByPath.get(filePath) === current) {
+      mutationQueuesByPath.delete(filePath);
+    }
+  }
 }
 
 export function mergeCapabilityOverrides(
-  base: Record<string, ProviderCapabilityOverrides>,
-  incoming: Record<string, ProviderCapabilityOverrides>,
-): Record<string, ProviderCapabilityOverrides> {
-  const merged: Record<string, ProviderCapabilityOverrides> = {};
-  for (const providerId of new Set([...Object.keys(base), ...Object.keys(incoming)])) {
-    merged[providerId] = { ...base[providerId], ...incoming[providerId] };
+  base: ScopedCapabilityOverrides[],
+  incoming: ScopedCapabilityOverrides[],
+): ScopedCapabilityOverrides[] {
+  const merged = new Map<string, ScopedCapabilityOverrides>();
+  for (const entry of [...base, ...incoming]) {
+    const key = capabilityScopeKey(entry.scope);
+    const existing = merged.get(key);
+    const models: ProviderCapabilityOverrides = { ...(existing?.models ?? {}) };
+    for (const [selector, capability] of Object.entries(entry.models)) {
+      models[selector] = {
+        ...models[selector],
+        ...capability,
+      };
+    }
+    merged.set(key, { scope: { ...entry.scope }, models });
   }
-  return merged;
+  return [...merged.values()].sort((left, right) =>
+    capabilityScopeKey(left.scope).localeCompare(capabilityScopeKey(right.scope)),
+  );
 }
 
 function extractNumber(value: unknown): number | undefined {

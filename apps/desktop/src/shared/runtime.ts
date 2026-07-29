@@ -159,6 +159,8 @@ export type RuntimeRunWire = {
   created_at: string;
   updated_at: string;
   finished_at?: string | null;
+  model_profile_id?: string;
+  reasoning_effort?: ReasoningEffortLevel;
 };
 
 export type RuntimeRun = {
@@ -174,6 +176,8 @@ export type RuntimeRun = {
   createdAt: string;
   updatedAt: string;
   finishedAt?: string;
+  modelProfileId?: string;
+  reasoningEffort?: ReasoningEffortLevel;
 };
 
 export type RuntimeThreadWire = {
@@ -186,6 +190,8 @@ export type RuntimeThreadWire = {
   title_seed_run_id?: string;
   run_id?: string;
   active_run_id?: string;
+  selected_model_profile_id?: string;
+  reasoning_effort_by_profile?: Record<string, ReasoningEffortLevel>;
   workspace: WorkspaceConfigWire;
   created_at: string;
   updated_at: string;
@@ -201,6 +207,8 @@ export type RuntimeThread = {
   titleSeedRunId?: string;
   runId?: string;
   activeRunId?: string;
+  selectedModelProfileId?: string;
+  reasoningEffortByProfile?: Record<string, ReasoningEffortLevel>;
   workspace: WorkspaceConfig;
   createdAt: string;
   updatedAt: string;
@@ -813,6 +821,7 @@ export type ModelProviderWire = {
   models: string[];
   docs_url: string;
   api_docs_url: string;
+  access_type?: ModelAccessType;
   coding_preset?: boolean;
   endpoint_model?: boolean;
   allow_custom_model?: boolean;
@@ -827,7 +836,27 @@ export type ModelCapabilityWire = {
   supports_vision?: boolean;
   supports_native_pdf?: boolean;
   supports_video?: boolean;
+  supports_tools?: ModelToolCapabilityStatus;
+  reasoning_effort?: ReasoningEffortCapabilityWire;
 };
+
+export type ModelAccessType = "coding_plan" | "api" | "agent_plan";
+
+export type ModelSelectorKind = "model" | "endpoint";
+
+export type ReasoningEffortLevel = "low" | "high" | "max";
+
+export type ReasoningEffortCapabilityWire = {
+  levels: ReasoningEffortLevel[];
+  default_level: ReasoningEffortLevel;
+};
+
+export type ReasoningEffortCapability = {
+  levels: ReasoningEffortLevel[];
+  defaultLevel: ReasoningEffortLevel;
+};
+
+export type ModelToolCapabilityStatus = "ready" | "unsupported" | "unknown";
 
 export type ModelProvider = {
   id: string;
@@ -840,6 +869,7 @@ export type ModelProvider = {
   models: string[];
   docsURL: string;
   apiDocsURL: string;
+  accessType?: ModelAccessType;
   codingPreset: boolean;
   endpointModel: boolean;
   allowCustomModel: boolean;
@@ -854,6 +884,8 @@ export type ModelCapability = {
   supportsVision?: boolean;
   supportsNativePDF?: boolean;
   supportsVideo?: boolean;
+  supportsTools?: ModelToolCapabilityStatus;
+  reasoningEffort?: ReasoningEffortCapability;
 };
 
 export const DEFAULT_CONTEXT_OUTPUT_RESERVE = 16_000;
@@ -889,6 +921,8 @@ export type ModelProfileAdvancedWire = {
   supports_vision?: boolean;
   supports_native_pdf?: boolean;
   supports_video?: boolean;
+  supports_tools?: ModelToolCapabilityStatus;
+  default_reasoning_effort?: ReasoningEffortLevel;
 };
 
 export type ModelProfileAdvanced = {
@@ -900,7 +934,25 @@ export type ModelProfileAdvanced = {
   supportsVision?: boolean;
   supportsNativePDF?: boolean;
   supportsVideo?: boolean;
+  supportsTools?: ModelToolCapabilityStatus;
+  defaultReasoningEffort?: ReasoningEffortLevel;
 };
+
+export type ModelCredentialReferenceWire =
+  | { kind: "profile_secret"; profile_id: string }
+  | {
+      kind: "provider_account";
+      provider_id: "volcengine-agent-plan";
+      account_id: string;
+    };
+
+export type ModelCredentialReference =
+  | { kind: "profile_secret"; profileId: string }
+  | {
+      kind: "provider_account";
+      providerId: "volcengine-agent-plan";
+      accountId: string;
+    };
 
 export type ModelCredentialStatus = "ready" | "missing_key" | "disabled" | "unreadable";
 
@@ -918,7 +970,10 @@ export type RuntimeModelProfileSummaryWire = {
   is_default: boolean;
   profile_status: ModelCredentialStatus;
   credential_revision?: number;
+  access_type?: ModelAccessType;
+  credential_reference?: ModelCredentialReferenceWire;
   advanced?: ModelProfileAdvancedWire;
+  effective_capability?: ModelCapabilityWire;
 };
 
 export type RuntimeModelProfileSummary = {
@@ -926,6 +981,8 @@ export type RuntimeModelProfileSummary = {
   providerId: string;
   displayName: string;
   credentialRevision?: number;
+  accessType?: ModelAccessType;
+  credentialReference?: ModelCredentialReference;
   modelId: string;
   baseURL: string;
   protocol: string;
@@ -936,6 +993,7 @@ export type RuntimeModelProfileSummary = {
   isDefault: boolean;
   profileStatus: ModelCredentialStatus;
   advanced?: ModelProfileAdvanced;
+  effectiveCapability?: ModelCapability;
 };
 
 export type ModelProfileSaveRequest = {
@@ -951,12 +1009,55 @@ export type ModelProfileSaveRequest = {
   enabled?: boolean;
   isDefault?: boolean;
   advanced?: ModelProfileAdvanced;
+  credentialReference?: ModelCredentialReference;
 };
 
 export type ModelProfileTestResult = {
   ok: boolean;
   message: string;
 };
+
+export type ModelReasoningCapabilityTestResult = ModelProfileTestResult & {
+  reasoningEffort?: ReasoningEffortCapability;
+};
+
+export const VOLCENGINE_AGENT_PLAN_ACCOUNT_ID = "volcengine-agent-plan-default";
+
+export type AgentPlanAccountWire = {
+  account_id: typeof VOLCENGINE_AGENT_PLAN_ACCOUNT_ID;
+  provider_id: "volcengine-agent-plan";
+  has_key: boolean;
+  masked_key?: string;
+  credential_revision: number;
+  model_ids: string[];
+  catalog_updated_at?: string;
+};
+
+export type AgentPlanAccount = {
+  accountId: typeof VOLCENGINE_AGENT_PLAN_ACCOUNT_ID;
+  providerId: "volcengine-agent-plan";
+  hasKey: boolean;
+  maskedKey?: string;
+  credentialRevision: number;
+  modelIds: string[];
+  catalogUpdatedAt?: string;
+};
+
+export type AgentPlanAccountSaveRequest = {
+  apiKey?: string;
+};
+
+export function normalizeAgentPlanAccount(account: AgentPlanAccountWire): AgentPlanAccount {
+  return {
+    accountId: account.account_id,
+    providerId: account.provider_id,
+    hasKey: account.has_key,
+    maskedKey: account.masked_key,
+    credentialRevision: account.credential_revision,
+    modelIds: [...account.model_ids],
+    catalogUpdatedAt: account.catalog_updated_at,
+  };
+}
 
 export type ModelBalanceStatusWire =
   "available" | "unavailable" | "missing_key" | "error" | "unsupported";
@@ -1088,6 +1189,8 @@ export type StartRunRequestWire = {
   thread_id?: string;
   workspace: WorkspaceConfigWire;
   client: ClientInfoWire;
+  model_profile_id?: string;
+  reasoning_effort?: ReasoningEffortLevel;
   model_profile?: ModelProfileRunConfigWire;
 };
 
@@ -1098,7 +1201,15 @@ export type StartRunRequest = {
   threadId?: string;
   workspace: WorkspaceConfig;
   client: ClientInfo;
+  modelProfileId?: string;
+  reasoningEffort?: ReasoningEffortLevel;
+  /** Main-process/Core internal field. Renderer callers must use modelProfileId. */
   modelProfile?: ModelProfileRunConfig;
+};
+
+export type ThreadModelPreferenceRequest = {
+  modelProfileId: string;
+  reasoningEffort?: ReasoningEffortLevel;
 };
 
 export type ModelProfileRunConfigWire = {
@@ -1106,6 +1217,9 @@ export type ModelProfileRunConfigWire = {
   provider_id?: string;
   display_name?: string;
   model_id?: string;
+  capability_model_id?: string;
+  endpoint_selector?: string;
+  model_selector_kind?: ModelSelectorKind;
   base_url?: string;
   protocol?: string;
   auth_scheme?: string;
@@ -1118,6 +1232,8 @@ export type ModelProfileRunConfigWire = {
   supports_vision?: boolean;
   supports_native_pdf?: boolean;
   supports_video?: boolean;
+  supports_tools?: ModelToolCapabilityStatus;
+  reasoning_effort?: ReasoningEffortLevel;
 };
 
 export type ModelProfileRunConfig = {
@@ -1125,6 +1241,9 @@ export type ModelProfileRunConfig = {
   providerId?: string;
   displayName?: string;
   modelId?: string;
+  capabilityModelId?: string;
+  endpointSelector?: string;
+  modelSelectorKind?: ModelSelectorKind;
   baseURL?: string;
   protocol?: string;
   authScheme?: string;
@@ -1137,6 +1256,8 @@ export type ModelProfileRunConfig = {
   supportsVision?: boolean;
   supportsNativePDF?: boolean;
   supportsVideo?: boolean;
+  supportsTools?: ModelToolCapabilityStatus;
+  reasoningEffort?: ReasoningEffortLevel;
 };
 
 export type WorkspacePickResult =
@@ -1519,6 +1640,10 @@ export type AwakenBridge = {
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
   listThreads: () => Promise<RuntimeThread[]>;
   renameThread: (threadId: string, label: string) => Promise<RuntimeThread>;
+  updateThreadModelPreference: (
+    threadId: string,
+    request: ThreadModelPreferenceRequest,
+  ) => Promise<RuntimeThread>;
   deleteThread: (threadId: string) => Promise<ThreadDeleteResult>;
   listProjects: (includeRemoved?: boolean) => Promise<RuntimeProject[]>;
   listProjectDirectory: (
@@ -1634,6 +1759,12 @@ export type AwakenBridge = {
   enableSkill: (id: string) => Promise<void>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
+  getAgentPlanAccount: () => Promise<AgentPlanAccount>;
+  saveAgentPlanAccount: (
+    request: AgentPlanAccountSaveRequest,
+  ) => Promise<DesktopOperationResult<AgentPlanAccount>>;
+  refreshAgentPlanModels: () => Promise<DesktopOperationResult<AgentPlanAccount>>;
+  deleteAgentPlanAccount: () => Promise<void>;
   saveModelProfile: (
     request: ModelProfileSaveRequest,
   ) => Promise<DesktopOperationResult<RuntimeModelProfileSummary>>;
@@ -1642,6 +1773,9 @@ export type AwakenBridge = {
   testModelProfile: (
     request: ModelProfileSaveRequest,
   ) => Promise<DesktopOperationResult<ModelProfileTestResult>>;
+  testAgentPlanReasoningCapability: (
+    request: ModelProfileSaveRequest,
+  ) => Promise<DesktopOperationResult<ModelReasoningCapabilityTestResult>>;
   syncModelCapabilities: () => Promise<ModelProvider[]>;
   getModelProfileBalances: () => Promise<ModelProfileBalancesResult>;
   pickAttachments: (defaultPath?: string) => Promise<AttachmentPickResult>;
@@ -1687,6 +1821,8 @@ export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
     createdAt: run.created_at,
     updatedAt: run.updated_at,
     finishedAt: run.finished_at ?? undefined,
+    modelProfileId: run.model_profile_id || undefined,
+    reasoningEffort: run.reasoning_effort || undefined,
   };
 }
 
@@ -1701,6 +1837,8 @@ export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread
     titleSeedRunId: thread.title_seed_run_id || undefined,
     runId: thread.run_id || undefined,
     activeRunId: thread.active_run_id || undefined,
+    selectedModelProfileId: thread.selected_model_profile_id || undefined,
+    reasoningEffortByProfile: thread.reasoning_effort_by_profile ?? {},
     workspace: {
       workspaceRoot: thread.workspace.workspace_root,
       readableRoots: thread.workspace.readable_roots ?? [],
@@ -1822,6 +1960,8 @@ export function normalizeStartRunRequest(request: StartRunRequest): StartRunRequ
       request_id: request.client.requestId,
       entrypoint: request.client.entrypoint,
     },
+    model_profile_id: request.modelProfileId,
+    reasoning_effort: request.reasoningEffort,
     model_profile: request.modelProfile
       ? normalizeModelProfileRunConfig(request.modelProfile)
       : undefined,
@@ -1840,6 +1980,7 @@ export function normalizeModelProvider(provider: ModelProviderWire): ModelProvid
     models: provider.models,
     docsURL: provider.docs_url,
     apiDocsURL: provider.api_docs_url,
+    accessType: provider.access_type ?? (provider.coding_preset ? "coding_plan" : "api"),
     codingPreset: Boolean(provider.coding_preset),
     endpointModel: Boolean(provider.endpoint_model),
     allowCustomModel: Boolean(provider.allow_custom_model),
@@ -1854,17 +1995,30 @@ export function normalizeModelCapabilities(
   return Object.fromEntries(
     Object.entries(capabilities).map(([modelId, capability]) => [
       modelId,
-      {
-        contextWindow: capability.context_window,
-        maxOutputTokens: capability.max_output_tokens,
-        defaultMaxTokens: capability.default_max_tokens,
-        defaultTemperature: capability.default_temperature,
-        supportsVision: capability.supports_vision,
-        supportsNativePDF: capability.supports_native_pdf,
-        supportsVideo: capability.supports_video,
-      },
+      normalizeModelCapability(capability),
     ]),
   );
+}
+
+export function normalizeModelCapability(
+  capability: ModelCapabilityWire,
+): ModelCapability {
+  return {
+    contextWindow: capability.context_window,
+    maxOutputTokens: capability.max_output_tokens,
+    defaultMaxTokens: capability.default_max_tokens,
+    defaultTemperature: capability.default_temperature,
+    supportsVision: capability.supports_vision,
+    supportsNativePDF: capability.supports_native_pdf,
+    supportsVideo: capability.supports_video,
+    supportsTools: capability.supports_tools,
+    reasoningEffort: capability.reasoning_effort
+      ? {
+          levels: [...capability.reasoning_effort.levels],
+          defaultLevel: capability.reasoning_effort.default_level,
+        }
+      : undefined,
+  };
 }
 
 export function normalizeModelProfileAdvanced(
@@ -1880,6 +2034,8 @@ export function normalizeModelProfileAdvanced(
     supportsVision: advanced.supports_vision,
     supportsNativePDF: advanced.supports_native_pdf,
     supportsVideo: advanced.supports_video,
+    supportsTools: advanced.supports_tools,
+    defaultReasoningEffort: advanced.default_reasoning_effort,
   };
 }
 
@@ -1896,6 +2052,8 @@ export function toModelProfileAdvancedWire(
     supports_vision: advanced.supportsVision,
     supports_native_pdf: advanced.supportsNativePDF,
     supports_video: advanced.supportsVideo,
+    supports_tools: advanced.supportsTools,
+    default_reasoning_effort: advanced.defaultReasoningEffort,
   };
 }
 
@@ -1907,6 +2065,19 @@ export function normalizeModelProfileSummary(
     providerId: profile.provider_id,
     displayName: profile.display_name,
     credentialRevision: profile.credential_revision ?? 1,
+    accessType: profile.access_type ?? "api",
+    credentialReference: profile.credential_reference
+      ? profile.credential_reference.kind === "provider_account"
+        ? {
+            kind: "provider_account",
+            providerId: profile.credential_reference.provider_id,
+            accountId: profile.credential_reference.account_id,
+          }
+        : {
+            kind: "profile_secret",
+            profileId: profile.credential_reference.profile_id,
+          }
+      : undefined,
     modelId: profile.model_id,
     baseURL: profile.base_url,
     protocol: profile.protocol,
@@ -1917,6 +2088,9 @@ export function normalizeModelProfileSummary(
     isDefault: profile.is_default,
     profileStatus: profile.profile_status,
     advanced: normalizeModelProfileAdvanced(profile.advanced),
+    effectiveCapability: profile.effective_capability
+      ? normalizeModelCapability(profile.effective_capability)
+      : undefined,
   };
 }
 
@@ -1928,6 +2102,9 @@ export function normalizeModelProfileRunConfig(
     provider_id: profile.providerId,
     display_name: profile.displayName,
     model_id: profile.modelId,
+    capability_model_id: profile.capabilityModelId,
+    endpoint_selector: profile.endpointSelector,
+    model_selector_kind: profile.modelSelectorKind,
     base_url: profile.baseURL,
     protocol: profile.protocol,
     auth_scheme: profile.authScheme,
@@ -1940,6 +2117,8 @@ export function normalizeModelProfileRunConfig(
     supports_vision: profile.supportsVision,
     supports_native_pdf: profile.supportsNativePDF,
     supports_video: profile.supportsVideo,
+    supports_tools: profile.supportsTools,
+    reasoning_effort: profile.reasoningEffort,
   };
 }
 

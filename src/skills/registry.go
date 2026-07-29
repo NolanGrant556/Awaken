@@ -1,9 +1,12 @@
 package skills
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -24,6 +27,11 @@ type SkillRegistry struct {
 	disabledByPolicy  map[string]string
 	disabledStorePath string
 	lastInvoked       map[string]time.Time
+	// toolStateFingerprint is the last model-visible Catalog and invocation
+	// binding state published through onChange. Keeping the previous digest is
+	// important: by the time a reload starts, an edited SKILL.md has already
+	// replaced the bytes reachable through the old registry paths.
+	toolStateFingerprint string
 }
 
 // Logger is the minimal logging surface consumed by the skills package.
@@ -43,7 +51,7 @@ func NewSkillRegistry(logger Logger) *SkillRegistry {
 	if logger == nil {
 		logger = noopLogger{}
 	}
-	return &SkillRegistry{
+	registry := &SkillRegistry{
 		skills:           make(map[string]*SkillDefinition),
 		logger:           logger,
 		connectors:       make(map[string]bool),
@@ -51,10 +59,13 @@ func NewSkillRegistry(logger Logger) *SkillRegistry {
 		disabledByPolicy: make(map[string]string),
 		lastInvoked:      make(map[string]time.Time),
 	}
+	registry.toolStateFingerprint = registry.computeToolStateFingerprintLocked()
+	return registry
 }
 
-// SetOnChange registers a callback invoked whenever the skill set changes
-// (load, connector status change, etc.). Only one callback is supported.
+// SetOnChange registers a callback invoked when the model-visible Skill
+// Catalog or one of its invocation bindings changes. Only one callback is
+// supported; presentation-only metadata does not publish through this hook.
 func (r *SkillRegistry) SetOnChange(fn func()) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -68,7 +79,7 @@ func (r *SkillRegistry) LoadFromSources(dirs map[SourceOrigin]string) {
 	defer r.mu.Unlock()
 
 	r.replaceLocalSourcesLocked(dirs)
-	r.fireOnChangeLocked()
+	r.fireOnToolStateChangeLocked()
 }
 
 // ReloadLocalSources reloads user and project skills from disk while keeping
@@ -78,7 +89,7 @@ func (r *SkillRegistry) ReloadLocalSources(dirs map[SourceOrigin]string) {
 	defer r.mu.Unlock()
 
 	r.replaceLocalSourcesLocked(dirs)
-	r.fireOnChangeLocked()
+	r.fireOnToolStateChangeLocked()
 }
 
 // PreviewLocalSources returns the skill set that would be produced by loading
@@ -183,7 +194,6 @@ func (r *SkillRegistry) MarkInvoked(id string, invokedAt time.Time) {
 			def.LastInvokedAt = &copy
 		}
 	}
-	r.fireOnChangeLocked()
 	r.mu.Unlock()
 }
 
@@ -195,6 +205,18 @@ func (r *SkillRegistry) LastInvokedAt(id string) (time.Time, bool) {
 	defer r.mu.RUnlock()
 	value, ok := r.lastInvoked[strings.TrimSpace(id)]
 	return value, ok
+}
+
+// ToolStateFingerprint returns the currently published model-visible Catalog
+// and invocation-binding identity. It is intentionally opaque; consumers use
+// it only to coalesce callbacks that observe the same final registry state.
+func (r *SkillRegistry) ToolStateFingerprint() string {
+	if r == nil {
+		return ""
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.toolStateFingerprint
 }
 
 // SetConnectorAvailable updates the availability status of a single
@@ -209,7 +231,7 @@ func (r *SkillRegistry) SetConnectorAvailable(name string, available bool) {
 		delete(r.connectors, name)
 	}
 	r.reevaluateAvailabilityLocked()
-	r.fireOnChangeLocked()
+	r.fireOnToolStateChangeLocked()
 }
 
 // SetMcpServerAvailable updates the availability status of a single MCP
@@ -225,7 +247,7 @@ func (r *SkillRegistry) SetMcpServerAvailable(name string, available bool) {
 		delete(r.mcpServers, name)
 	}
 	r.reevaluateAvailabilityLocked()
-	r.fireOnChangeLocked()
+	r.fireOnToolStateChangeLocked()
 }
 
 // reevaluateAvailabilityLocked recalculates package policy state. Connector,
@@ -293,7 +315,7 @@ func (r *SkillRegistry) SetDisabledByPolicy(id string, disabled bool, reason str
 		delete(r.disabledByPolicy, id)
 	}
 	r.reevaluateAvailabilityLocked()
-	r.fireOnChangeLocked()
+	r.fireOnToolStateChangeLocked()
 	r.persistDisabledLocked()
 }
 
@@ -453,7 +475,7 @@ func (r *SkillRegistry) RegisterSkill(def *SkillDefinition) {
 	}
 	r.skills[def.ID] = next
 	r.reevaluateAvailabilityLocked()
-	r.fireOnChangeLocked()
+	r.fireOnToolStateChangeLocked()
 }
 
 // UnregisterSkill removes a single skill by ID. Used by the MCP bridge
@@ -464,7 +486,7 @@ func (r *SkillRegistry) UnregisterSkill(id string) {
 
 	delete(r.skills, id)
 	deleteShadowedEntries(r.skills, id)
-	r.fireOnChangeLocked()
+	r.fireOnToolStateChangeLocked()
 }
 
 // UnregisterSkillsByPrefix removes all skills whose ID starts with the
@@ -479,7 +501,7 @@ func (r *SkillRegistry) UnregisterSkillsByPrefix(prefix string) {
 			delete(r.skills, id)
 		}
 	}
-	r.fireOnChangeLocked()
+	r.fireOnToolStateChangeLocked()
 }
 
 // FireOnChange manually triggers the registered onChange callback.
@@ -495,6 +517,134 @@ func (r *SkillRegistry) FireOnChange() {
 func (r *SkillRegistry) fireOnChangeLocked() {
 	if r.onChange != nil {
 		go r.onChange()
+	}
+}
+
+// fireOnToolStateChangeLocked publishes only changes that can alter the
+// model-facing Skill schema/catalog or the runtime binding used by a model
+// invocation. UI-only metadata such as LastInvokedAt and readiness diagnostics
+// deliberately does not churn the process tool registry.
+func (r *SkillRegistry) fireOnToolStateChangeLocked() {
+	next := r.computeToolStateFingerprintLocked()
+	if next == r.toolStateFingerprint {
+		return
+	}
+	r.toolStateFingerprint = next
+	r.fireOnChangeLocked()
+}
+
+type skillToolState struct {
+	ID                        string
+	Description               string
+	WhenToUse                 string
+	Source                    SourceOrigin
+	ProjectPath               string
+	Version                   string
+	RequiredTools             []string
+	RequiredCapabilities      []string
+	RequiredRuntimeComponents []string
+	Arguments                 []SkillArgument
+	DisableModelInvocation    bool
+	Model                     string
+	Effort                    string
+	Context                   ContextMode
+	Agent                     string
+	ToolHints                 []ToolHint
+	RootDir                   string
+	ResolvedRootDir           string
+	SkillFilePath             string
+	Body                      string
+	SkillBodySHA256           string
+	McpBinding                *McpBinding
+	BodyFetcherIdentity       string
+}
+
+func (r *SkillRegistry) computeToolStateFingerprintLocked() string {
+	states := make([]skillToolState, 0, len(r.skills))
+	for key, def := range r.skills {
+		if def == nil || isShadowedMapKey(key) || def.State != StateLoaded || def.DisableModelInvocation {
+			continue
+		}
+		states = append(states, skillToolState{
+			ID:                        def.ID,
+			Description:               normalizeCatalogText(def.Description),
+			WhenToUse:                 normalizeCatalogText(def.WhenToUse),
+			Source:                    def.Source,
+			ProjectPath:               strings.TrimSpace(def.ProjectPath),
+			Version:                   strings.TrimSpace(def.Version),
+			RequiredTools:             append([]string(nil), def.RequiredTools...),
+			RequiredCapabilities:      append([]string(nil), def.RequiredCapabilities...),
+			RequiredRuntimeComponents: append([]string(nil), def.RequiredRuntimeComponents...),
+			Arguments:                 append([]SkillArgument(nil), def.Arguments...),
+			DisableModelInvocation:    def.DisableModelInvocation,
+			Model:                     def.Model,
+			Effort:                    def.Effort,
+			Context:                   def.Context,
+			Agent:                     def.Agent,
+			ToolHints:                 append([]ToolHint(nil), def.ToolHints...),
+			RootDir:                   filepath.Clean(def.RootDir),
+			ResolvedRootDir:           filepath.Clean(def.ResolvedRootDir),
+			SkillFilePath:             filepath.Clean(def.SkillFilePath),
+			Body:                      def.Body,
+			SkillBodySHA256:           skillBodyDigest(def.SkillFilePath),
+			McpBinding:                cloneMcpBinding(def.McpBinding),
+			BodyFetcherIdentity:       bodyFetcherIdentity(def.BodyFetcher),
+		})
+	}
+	sort.Slice(states, func(i, j int) bool { return states[i].ID < states[j].ID })
+	encoded, err := json.Marshal(states)
+	if err != nil {
+		// All fields above are deliberately JSON-safe. Retaining a deterministic
+		// fallback keeps a future incompatible field from turning every reload
+		// into a false change storm.
+		return fmt.Sprintf("skill_tool_state_error:%T:%v", states, err)
+	}
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("%x", digest[:])
+}
+
+func normalizeCatalogText(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func skillBodyDigest(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "error:" + err.Error()
+	}
+	parsed, err := ParseFrontmatter(string(raw))
+	if err != nil {
+		return "error:" + err.Error()
+	}
+	digest := sha256.Sum256([]byte(parsed.Body))
+	return fmt.Sprintf("%x", digest[:])
+}
+
+func cloneMcpBinding(binding *McpBinding) *McpBinding {
+	if binding == nil {
+		return nil
+	}
+	clone := *binding
+	return &clone
+}
+
+func bodyFetcherIdentity(fetcher McpBodyFetcher) string {
+	if fetcher == nil {
+		return ""
+	}
+	value := reflect.ValueOf(fetcher)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
+		if value.IsNil() {
+			return fmt.Sprintf("%T:nil", fetcher)
+		}
+		return fmt.Sprintf("%T:%x", fetcher, value.Pointer())
+	default:
+		return fmt.Sprintf("%T:%v", fetcher, fetcher)
 	}
 }
 

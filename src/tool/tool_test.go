@@ -115,6 +115,51 @@ func TestRegisterToolForceReplacesExisting(t *testing.T) {
 	UnregisterTool("catalog_force_tool")
 }
 
+func TestRegisterToolForceIfChangedPreservesIdentityForNoOpRefresh(t *testing.T) {
+	const name = "catalog_force_if_changed_tool"
+	t.Cleanup(func() { UnregisterTool(name) })
+	runtime := &catalogTestTool{name: name}
+	if err := RegisterToolForce(runtime); err != nil {
+		t.Fatalf("initial register failed: %v", err)
+	}
+	before, err := GetRegisteredTool(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeVersion := RegistryVersion()
+
+	changed, err := RegisterToolForceIfChanged(runtime)
+	if err != nil {
+		t.Fatalf("idempotent refresh failed: %v", err)
+	}
+	if changed {
+		t.Fatal("identical runtime and definition unexpectedly replaced registration")
+	}
+	after, err := GetRegisteredTool(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.RegistrationID != before.RegistrationID || RegistryVersion() != beforeVersion {
+		t.Fatalf("no-op refresh churned registry identity: before=%s after=%s versions=%d/%d", before.RegistrationID, after.RegistrationID, beforeVersion, RegistryVersion())
+	}
+
+	replacement := &catalogTestTool{name: name}
+	changed, err = RegisterToolForceIfChanged(replacement)
+	if err != nil {
+		t.Fatalf("runtime replacement failed: %v", err)
+	}
+	if !changed {
+		t.Fatal("distinct runtime binding was treated as a no-op")
+	}
+	replaced, err := GetRegisteredTool(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaced.RegistrationID == before.RegistrationID || replaced.Runtime != replacement {
+		t.Fatalf("runtime replacement did not receive a new execution pin: before=%+v after=%+v", before, replaced)
+	}
+}
+
 // TestUnregisterToolsByPrefix verifies bulk removal by prefix. Used by the
 // MCP manager to clear all tools from a single server in one call.
 func TestUnregisterToolsByPrefix(t *testing.T) {

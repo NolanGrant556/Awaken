@@ -3300,7 +3300,6 @@ export function App() {
         },
     createAction: {
       label: "创建项目",
-      description: "可选择一个或多个文件夹",
       disabled: !desktopReady || createProjectSubmitting,
       onClick: handleOpenCreateProject,
     },

@@ -73,7 +73,6 @@ export type ComposerBarProjectOption = {
 
 export type ComposerBarProjectAction = {
   label: string;
-  description?: string;
   disabled?: boolean;
   onClick: () => void;
 };
@@ -919,11 +918,6 @@ export function AwakenComposerBar({
                   <span className="composer-bar-project-create-label">
                     {projectPicker.createAction.label}
                   </span>
-                  {projectPicker.createAction.description ? (
-                    <span className="composer-bar-project-create-description">
-                      {projectPicker.createAction.description}
-                    </span>
-                  ) : null}
                 </span>
               </button>
             ) : null}

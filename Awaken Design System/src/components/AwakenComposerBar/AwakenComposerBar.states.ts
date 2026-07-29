@@ -132,7 +132,6 @@ export const AwakenComposerBarStates: AwakenComposerBarState[] = [
         },
         createAction: {
           label: "创建项目",
-          description: "可选择一个或多个文件夹",
           onClick: noop,
         },
       },

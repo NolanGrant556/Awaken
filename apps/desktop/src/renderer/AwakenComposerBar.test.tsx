@@ -575,7 +575,6 @@ describe("AwakenComposerBar unified token editing", () => {
         },
         createAction: {
           label: "创建项目",
-          description: "可选择一个或多个文件夹",
           onClick: onCreateProject,
         },
       },
@@ -616,7 +615,7 @@ describe("AwakenComposerBar unified token editing", () => {
     const createAction = Array.from(
       document.querySelectorAll<HTMLButtonElement>('.composer-bar-project-create[role="menuitem"]'),
     ).find((button) => button.textContent?.includes("创建项目"));
-    expect(createAction?.textContent).toContain("可选择一个或多个文件夹");
+    expect(createAction?.textContent).toBe("创建项目");
     act(() => {
       createAction?.click();
     });

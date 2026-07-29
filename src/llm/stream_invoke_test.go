@@ -164,19 +164,18 @@ func TestStreamIdleTimeoutForRequestOverride(t *testing.T) {
 
 func TestStreamInvokeOpenAIDisableReasoningWithThinkingTypeDisabledProviders(t *testing.T) {
 	cases := []struct {
-		name    string
-		baseURL string
-		model   string
+		name       string
+		providerID string
+		baseURL    string
+		model      string
 	}{
-		{name: "deepseek", baseURL: "https://api.deepseek.com", model: "deepseek-v4-pro"},
-		{name: "kimi cn", baseURL: "https://api.moonshot.cn/v1", model: "kimi-k2.6"},
-		{name: "kimi k3", baseURL: "https://api.kimi.com/coding/v1", model: "k3"},
-		{name: "volcengine ark", baseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", model: "ark-code-latest"},
+		{name: "deepseek", providerID: "deepseek", baseURL: "https://api.deepseek.com", model: "deepseek-v4-pro"},
+		{name: "kimi cn", providerID: "kimi-cn", baseURL: "https://api.moonshot.cn/v1", model: "kimi-k2.6"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			chatReq := openaiChatRequest{Model: tc.model}
-			applyOpenAIReasoningControls(&chatReq, Config{BaseURL: tc.baseURL, Model: tc.model}, Request{DisableReasoning: true})
+			applyOpenAIReasoningControls(&chatReq, Config{ProviderID: tc.providerID, BaseURL: tc.baseURL, Protocol: ProtocolOpenAIChat, Model: tc.model}, Request{DisableReasoning: true})
 			if chatReq.Thinking == nil {
 				t.Fatalf("expected %s to use thinking.type disabled", tc.name)
 			}
@@ -234,10 +233,10 @@ func TestStreamInvokeOpenAICompactSummaryAppliesProviderTemperaturePolicy(t *tes
 	}{
 		{name: "kimi coding standard always thinking", model: "kimi-for-coding", wantTemperature: 1.0, wantNoThinking: true},
 		{name: "kimi coding highspeed always thinking", model: "kimi-for-coding-highspeed", wantTemperature: 1.0, wantNoThinking: true},
-		{name: "kimi k2.6 instant", model: "kimi-k2.6", wantTemperature: 0.6, wantThinkingType: "disabled"},
+		{name: "kimi k2.6 instant", model: "kimi-k2.6", wantTemperature: 0.6, wantNoThinking: true},
 		{name: "kimi k2.7 always thinking", model: "kimi-k2.7-code", wantTemperature: 1.0, wantNoThinking: true},
-		{name: "deepseek deterministic compact", model: "deepseek-v4-pro", wantTemperature: 0.0, wantThinkingType: "disabled"},
-		{name: "ark deterministic compact", model: "ark-code-latest", wantTemperature: 0.1, wantThinkingType: "disabled"},
+		{name: "deepseek deterministic compact", model: "deepseek-v4-pro", wantTemperature: 0.0, wantNoThinking: true},
+		{name: "ark deterministic compact", model: "ark-code-latest", wantTemperature: 0.1, wantNoThinking: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -294,7 +293,7 @@ func TestStreamInvokeOpenAIKimiK27DisableReasoningIsSuppressed(t *testing.T) {
 	}
 	for _, model := range models {
 		chatReq := openaiChatRequest{Model: model}
-		applyOpenAIReasoningControls(&chatReq, Config{BaseURL: "https://api.kimi.com/coding/v1", Model: model}, Request{DisableReasoning: true})
+		applyOpenAIReasoningControls(&chatReq, Config{ProviderID: "kimi-coding-plan", BaseURL: "https://api.kimi.com/coding/v1", Protocol: ProtocolOpenAIChat, Model: model}, Request{DisableReasoning: true})
 		if chatReq.Thinking != nil {
 			t.Fatalf("Kimi K2.7 Code model %q rejects thinking.disabled, got %+v", model, chatReq.Thinking)
 		}

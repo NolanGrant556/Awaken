@@ -129,6 +129,9 @@ export type AguiContextUsageSnapshot = {
   basis: "current_projection" | "sent_request";
   requestId?: string;
   modelId?: string;
+  capabilityModelId?: string;
+  endpointSelector?: string;
+  modelSelectorKind?: "model" | "endpoint";
   protocolFamily?: string;
   contextEpochId?: string;
   contextEpochBoundaryReason?: string;
@@ -152,8 +155,12 @@ export type AguiModelUsageRecord = {
   profileId?: string;
   credentialRevision?: number;
   modelId?: string;
+  capabilityModelId?: string;
+  endpointSelector?: string;
+  modelSelectorKind?: "model" | "endpoint";
   protocolFamily?: string;
   endpointContractId?: string;
+  reasoningPolicy?: string;
   cacheMode?: string;
   cacheKeyApplied?: boolean;
   contextEpochId?: string;

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -21,6 +22,7 @@ type runHandlers struct {
 	skillRegistry          *skills.SkillRegistry
 	syncSkillsForWorkspace func(awruntime.WorkspaceConfig)
 	acpManager             *acp.Manager
+	modelProfileStore      ACPModelProfileStore
 }
 
 // Keep the local name for the SSE cursor conversion below while sharing the
@@ -37,6 +39,11 @@ func frameSeq(runtimeSeq uint64, frameIndex int) uint64 {
 
 type renameThreadRequest struct {
 	Label string `json:"label"`
+}
+
+type threadModelPreferenceRequest struct {
+	ModelProfileID  string `json:"model_profile_id"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 type answerUserQuestionRequest struct {
@@ -138,6 +145,47 @@ func (h runHandlers) handleRenameThread(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	writeJSON(w, http.StatusOK, thread)
+}
+
+func (h runHandlers) handleUpdateThreadModelPreference(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	var req threadModelPreferenceRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	if h.modelProfileStore == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "MODEL_PROFILE_UNAVAILABLE", "model profile validation is unavailable")
+		return
+	}
+	if strings.TrimSpace(req.ModelProfileID) == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_MODEL_PREFERENCE", "model profile id is required")
+		return
+	}
+	profile, resolveErr := h.modelProfileStore.Resolve(req.ModelProfileID)
+	if resolveErr != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_MODEL_PREFERENCE", "the selected model profile is unavailable")
+		return
+	}
+	if effort := strings.TrimSpace(req.ReasoningEffort); effort != "" && !slices.Contains(profile.ReasoningEffortLevels, effort) {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_MODEL_PREFERENCE", "the selected reasoning effort is unsupported")
+		return
+	}
+	thread, err := h.runService.UpdateThreadModelPreference(threadID, req.ModelProfileID, req.ReasoningEffort)
+	if err != nil {
+		switch {
+		case errors.Is(err, awruntime.ErrThreadNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrThreadBusy):
+			writeErrorJSON(w, http.StatusConflict, "THREAD_BUSY", err.Error())
+		case errors.Is(err, awruntime.ErrThreadModelPreferenceInvalid):
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_MODEL_PREFERENCE", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update thread model preference")
+		}
+		return
+	}
 	writeJSON(w, http.StatusOK, thread)
 }
 

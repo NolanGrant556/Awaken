@@ -11,6 +11,8 @@ import {
   type ACPRunnersSettings,
   type ACPRunnerUpdateRequest,
   type ACPRunnerView,
+  type AgentPlanAccount,
+  type AgentPlanAccountSaveRequest,
   type AttachmentPickResult,
   type ArtifactOpenRequest,
   type ArtifactOpenResult,
@@ -31,6 +33,7 @@ import {
   type InstallSkillRequest,
   type InstallSkillResponse,
   type ModelProfileBalancesResult,
+  type ModelReasoningCapabilityTestResult,
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
   type ModelProvider,
@@ -78,6 +81,7 @@ import {
   type StartRunRequest,
   type SupervisorStatusInfo,
   type ThreadDeleteResult,
+  type ThreadModelPreferenceRequest,
   type UpdateMcpServerConfigRequest,
   type ProjectFoldersPickResult,
   type UpsertProjectResult,
@@ -206,6 +210,12 @@ const bridge: AwakenBridge = {
   listThreads: () => ipcRenderer.invoke("awaken:list-threads") as Promise<RuntimeThread[]>,
   renameThread: (threadId: string, label: string) =>
     ipcRenderer.invoke("awaken:rename-thread", threadId, label) as Promise<RuntimeThread>,
+  updateThreadModelPreference: (threadId: string, request: ThreadModelPreferenceRequest) =>
+    ipcRenderer.invoke(
+      "awaken:update-thread-model-preference",
+      threadId,
+      request,
+    ) as Promise<RuntimeThread>,
   deleteThread: (threadId: string) =>
     ipcRenderer.invoke("awaken:delete-thread", threadId) as Promise<ThreadDeleteResult>,
   listProjects: (includeRemoved = false) =>
@@ -452,6 +462,18 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:list-model-providers") as Promise<ModelProvider[]>,
   listModelProfiles: () =>
     ipcRenderer.invoke("awaken:list-model-profiles") as Promise<RuntimeModelProfileSummary[]>,
+  getAgentPlanAccount: () =>
+    ipcRenderer.invoke("awaken:get-agent-plan-account") as Promise<AgentPlanAccount>,
+  saveAgentPlanAccount: (request: AgentPlanAccountSaveRequest) =>
+    ipcRenderer.invoke("awaken:save-agent-plan-account", request) as Promise<
+      DesktopOperationResult<AgentPlanAccount>
+    >,
+  refreshAgentPlanModels: () =>
+    ipcRenderer.invoke("awaken:refresh-agent-plan-models") as Promise<
+      DesktopOperationResult<AgentPlanAccount>
+    >,
+  deleteAgentPlanAccount: () =>
+    ipcRenderer.invoke("awaken:delete-agent-plan-account") as Promise<void>,
   saveModelProfile: (request: ModelProfileSaveRequest) =>
     ipcRenderer.invoke("awaken:save-model-profile", request) as Promise<
       DesktopOperationResult<RuntimeModelProfileSummary>
@@ -466,6 +488,10 @@ const bridge: AwakenBridge = {
   testModelProfile: (request: ModelProfileSaveRequest) =>
     ipcRenderer.invoke("awaken:test-model-profile", request) as Promise<
       DesktopOperationResult<ModelProfileTestResult>
+    >,
+  testAgentPlanReasoningCapability: (request: ModelProfileSaveRequest) =>
+    ipcRenderer.invoke("awaken:test-agent-plan-reasoning-capability", request) as Promise<
+      DesktopOperationResult<ModelReasoningCapabilityTestResult>
     >,
   syncModelCapabilities: () =>
     ipcRenderer.invoke("awaken:sync-model-capabilities") as Promise<ModelProvider[]>,

@@ -5,6 +5,7 @@ import {
   runDesktopOperation,
 } from "./desktop-operation.js";
 import { AwakenEnvStoreError } from "./awaken-env-store.js";
+import { AgentPlanAccountStoreError } from "./agent-plan-account-store.js";
 
 describe("desktop operation result boundary", () => {
   it("routes an unreadable .env to retry or API key re-entry", () => {
@@ -30,6 +31,19 @@ describe("desktop operation result boundary", () => {
       message: "Awaken 操作未完成，请稍后重试。",
       retryable: true,
       actions: ["retry"],
+    });
+  });
+
+  it("routes unreadable Agent Plan account metadata to the credential recovery flow", () => {
+    expect(
+      desktopOperationIssue(
+        new AgentPlanAccountStoreError("unreadable", "Agent Plan 账户元数据不可读。"),
+      ),
+    ).toEqual({
+      code: "credential_unreadable",
+      message: "Agent Plan 账户元数据不可读。",
+      retryable: true,
+      actions: ["retry", "reenter"],
     });
   });
 

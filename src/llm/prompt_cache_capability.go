@@ -176,11 +176,3 @@ func usageNormalizerID(cfg Config) string {
 	}
 	return "openai_usage_probe_v1"
 }
-
-func vendorPrivateFieldsAllowed(cfg Config) bool {
-	if strings.TrimSpace(cfg.ProviderID) == "" {
-		return true
-	}
-	_, ok := ResolvePromptCacheCapability(cfg)
-	return ok
-}

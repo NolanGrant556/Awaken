@@ -137,7 +137,9 @@ func contextProjectionRequest(envelope ContextEnvelope, state ContextWindowState
 	req := LLMRequest{
 		SystemPrompt: envelopeProjectedSystemPrompt(envelope), PromptSections: promptSectionsFromEnvelope(envelope),
 		Messages: envelope.Messages, Tools: envelope.ToolSchemas, AttributedTools: envelope.AttributedTools,
-		Model: envelope.Model, ContextWindowState: state,
+		Model: envelope.Model, CapabilityModelID: envelope.CompactModelConfig.CapabilityModelID,
+		EndpointSelector: envelope.CompactModelConfig.EndpointSelector, ModelSelectorKind: envelope.CompactModelConfig.ModelSelectorKind,
+		ContextWindowState: state,
 	}
 	if len(req.AttributedTools) == 0 {
 		for _, schema := range envelope.ToolSchemas {

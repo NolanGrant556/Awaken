@@ -376,6 +376,9 @@ func modelConfigFromProfile(profile *runtime.ModelProfileConfig) agentcore.Model
 		APIKey:             profile.APIKey,
 		BaseURL:            profile.BaseURL,
 		Model:              profile.ModelID,
+		CapabilityModelID:  profile.CapabilityModelID,
+		EndpointSelector:   profile.EndpointSelector,
+		ModelSelectorKind:  profile.ModelSelectorKind,
 		Protocol:           profile.Protocol,
 		ProviderID:         profile.ProviderID,
 		ProfileID:          profile.ProfileID,
@@ -384,9 +387,11 @@ func modelConfigFromProfile(profile *runtime.ModelProfileConfig) agentcore.Model
 		MaxTokens:          profile.MaxTokens,
 		AuthScheme:         profile.AuthScheme,
 		ContextWindow:      profile.ContextWindow,
+		ReasoningEffort:    profile.ReasoningEffort,
 		Capabilities: tool.ModelCapabilities{
 			SupportsVision:    profile.SupportsVision,
 			SupportsNativePDF: profile.SupportsNativePDF,
+			SupportsTools:     profile.SupportsTools,
 		},
 	}
 }

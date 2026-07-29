@@ -87,6 +87,28 @@ function createMockRuntimeClient(): RuntimeClient {
     enableSkill: vi.fn(async () => undefined),
     listModelProviders: vi.fn(async () => []),
     listModelProfiles: vi.fn(async () => []),
+    getAgentPlanAccount: vi.fn(async () => ({
+      accountId: "volcengine-agent-plan-default" as const,
+      providerId: "volcengine-agent-plan" as const,
+      hasKey: false,
+      credentialRevision: 1,
+      modelIds: ["ark-code-latest"],
+    })),
+    saveAgentPlanAccount: vi.fn(async () => ({
+      accountId: "volcengine-agent-plan-default" as const,
+      providerId: "volcengine-agent-plan" as const,
+      hasKey: true,
+      credentialRevision: 1,
+      modelIds: ["ark-code-latest"],
+    })),
+    refreshAgentPlanModels: vi.fn(async () => ({
+      accountId: "volcengine-agent-plan-default" as const,
+      providerId: "volcengine-agent-plan" as const,
+      hasKey: true,
+      credentialRevision: 1,
+      modelIds: ["ark-code-latest"],
+    })),
+    deleteAgentPlanAccount: vi.fn(async () => undefined),
     saveModelProfile: vi.fn(async () => ({
       id: "",
       providerId: "",
@@ -115,6 +137,7 @@ function createMockRuntimeClient(): RuntimeClient {
       profileStatus: "ready" as const,
     })),
     testModelProfile: vi.fn(async () => ({ ok: true, message: "" })),
+    testAgentPlanReasoningCapability: vi.fn(async () => ({ ok: false, message: "" })),
     syncModelCapabilities: vi.fn(async () => []),
     getModelProfileBalances: vi.fn(async () => ({ balances: [] })),
     getRun: vi.fn(async () => ({
@@ -134,6 +157,9 @@ function createMockRuntimeClient(): RuntimeClient {
       createdAt: "",
       updatedAt: "",
     })),
+    updateThreadModelPreference: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
     deleteThread: vi.fn(async () => ({ ok: true as const })),
     listProjects: vi.fn(async () => []),
     listProjectDirectory: vi.fn(async () => ({

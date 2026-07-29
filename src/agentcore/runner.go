@@ -452,6 +452,7 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		Tools: llmReq.Tools, Model: llmReq.Model, Temperature: llmReq.Temperature,
 		MaxTokens: llmReq.MaxTokens, Purpose: llm.RequestPurposeAgentTurn,
 		AffinityScopeID: r.threadID,
+		ReasoningPolicy: r.config.ModelConfig.ReasoningEffort,
 	}
 	prepared, err := llm.PrepareRequest(config, request, true)
 	if err != nil {
@@ -528,6 +529,9 @@ func (r *Runner) transportConfig(llmReq LLMRequest) llm.Config {
 		APIKey:             r.config.ModelConfig.APIKey,
 		BaseURL:            r.config.ModelConfig.BaseURL,
 		Model:              llmReq.Model,
+		CapabilityModelID:  r.config.ModelConfig.CapabilityModelID,
+		EndpointSelector:   r.config.ModelConfig.EndpointSelector,
+		ModelSelectorKind:  r.config.ModelConfig.ModelSelectorKind,
 		Protocol:           llm.Protocol(r.config.ModelConfig.Protocol),
 		ProviderID:         r.config.ModelConfig.ProviderID,
 		ProfileID:          r.config.ModelConfig.ProfileID,
@@ -535,6 +539,7 @@ func (r *Runner) transportConfig(llmReq LLMRequest) llm.Config {
 		Temperature:        llmReq.Temperature,
 		MaxTokens:          llmReq.MaxTokens,
 		AuthScheme:         r.config.ModelConfig.AuthScheme,
+		ReasoningEffort:    r.config.ModelConfig.ReasoningEffort,
 	}
 }
 
@@ -543,11 +548,23 @@ func modelUsageRecord(requestID, model, protocol string, config llm.Config, purp
 	if credentialRevision == 0 {
 		credentialRevision = 1
 	}
+	selectorKind := strings.ToLower(strings.TrimSpace(config.ModelSelectorKind))
+	capabilityModelID := strings.TrimSpace(config.CapabilityModelID)
+	if capabilityModelID == "" && selectorKind != "endpoint" {
+		capabilityModelID = model
+	}
+	endpointSelector := strings.TrimSpace(config.EndpointSelector)
+	if endpointSelector == "" && selectorKind == "endpoint" {
+		endpointSelector = model
+	}
 	record := ModelUsageRecord{
 		SchemaVersion: 1, RequestID: requestID, Purpose: string(purpose),
 		ProviderID: config.ProviderID, ProfileID: config.ProfileID, CredentialRevision: credentialRevision,
 		ModelID: model, ProtocolFamily: protocol, EndpointContractID: prepared.Cache.EndpointContract,
-		CacheMode: string(prepared.Cache.Mode), CacheKeyApplied: prepared.Cache.KeyApplied,
+		CapabilityModelID: capabilityModelID, EndpointSelector: endpointSelector,
+		ModelSelectorKind: selectorKind,
+		ReasoningPolicy:   normalizedModelUsageReasoningPolicy(config, purpose),
+		CacheMode:         string(prepared.Cache.Mode), CacheKeyApplied: prepared.Cache.KeyApplied,
 		LatencyMS: time.Since(started).Milliseconds(),
 		Status:    ModelUsageSucceeded, CompletedAt: time.Now().UTC(),
 	}
@@ -575,6 +592,17 @@ func modelUsageRecord(requestID, model, protocol string, config llm.Config, purp
 	}
 	applyPricing(&record)
 	return record
+}
+
+func normalizedModelUsageReasoningPolicy(config llm.Config, purpose llm.RequestPurpose) string {
+	if purpose != llm.RequestPurposeAgentTurn {
+		return ""
+	}
+	value := strings.ToLower(strings.TrimSpace(config.ReasoningEffort))
+	if value == "" {
+		return "provider_default"
+	}
+	return value
 }
 
 // BuildModelUsageRecord is shared by non-thread authorities such as DreamTask.

@@ -2,6 +2,10 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type {
+  AgentPlanAccountSaveRequest,
+  AgentPlanAccountWire,
+  ModelReasoningCapabilityTestResult,
+  ModelCredentialReference,
   ModelProfileAdvanced,
   ModelProfileBalanceWire,
   ModelProfileSaveRequest,
@@ -9,19 +13,28 @@ import type {
   ModelProviderWire,
   RuntimeModelProfileSummaryWire,
   ModelProfileRunConfig,
+  ReasoningEffortCapabilityWire,
+  ReasoningEffortLevel,
 } from "../shared/runtime.js";
+import { VOLCENGINE_AGENT_PLAN_ACCOUNT_ID } from "../shared/runtime.js";
 import {
+  capabilityForModel,
   normalizeAdvancedWithModelCapability,
+  reasoningEffortCapability,
+  resolveReasoningEffort,
   setCapabilityOverrides,
+  validateReasoningEffort,
   withModelCapabilities,
 } from "./model-capabilities.js";
 import {
+  capabilityEndpointContract,
   fetchProviderCapabilities,
   loadCapabilityOverrides,
-  mergeCapabilityOverrides,
+  normalizeCapabilityBaseURL,
   parseProviderCapabilities,
   saveCapabilityOverrides,
-  type ProviderCapabilityOverrides,
+  type CapabilityResolution,
+  type ScopedCapabilityOverrides,
 } from "./model-capability-sync.js";
 import {
   fetchDeepSeekBalance,
@@ -32,45 +45,15 @@ import {
   AwakenEnvStore,
   AwakenEnvStoreError,
 } from "./awaken-env-store.js";
+import { AgentPlanAccountStore } from "./agent-plan-account-store.js";
 
 const MODEL_PROFILES_FILE = "models.json";
 const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";
 const CAPABILITY_SYNC_TIMEOUT_MS = 8_000;
 const BALANCE_FETCH_TIMEOUT_MS = 8_000;
+const AGENT_PLAN_EFFORT_PROBE_TIMEOUT_MS = 8_000;
 
 export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
-  {
-    id: "deepseek",
-    display_name: "DeepSeek",
-    base_url: "https://api.deepseek.com",
-    protocol: "openai_chat",
-    auth_scheme: "bearer",
-    key_env_name: "DEEPSEEK_API_KEY",
-    default_model: "deepseek-v4-pro",
-    models: ["deepseek-v4-pro", "deepseek-v4-flash"],
-    docs_url: "https://api-docs.deepseek.com/",
-    api_docs_url: "https://platform.deepseek.com/api_keys",
-  },
-  {
-    id: "kimi-cn",
-    display_name: "Kimi CN",
-    base_url: "https://api.moonshot.cn/v1",
-    protocol: "openai_chat",
-    auth_scheme: "bearer",
-    key_env_name: "MOONSHOT_API_KEY",
-    default_model: "kimi-k2.6",
-    models: [
-      "kimi-k2.6",
-      "kimi-k2.7-code",
-      "kimi-k2.7-code-highspeed",
-      "kimi-k2.5",
-      "moonshot-v1-128k",
-      "moonshot-v1-32k",
-      "moonshot-v1-8k",
-    ],
-    docs_url: "https://platform.kimi.com/docs",
-    api_docs_url: "https://platform.kimi.com/console/api-keys",
-  },
   {
     id: "kimi-coding-plan",
     display_name: "Kimi Coding Plan",
@@ -78,10 +61,11 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
     protocol: "openai_chat",
     auth_scheme: "bearer",
     key_env_name: "KIMI_CODE_API_KEY",
-    default_model: "kimi-for-coding",
-    models: ["k3", "kimi-for-coding", "kimi-for-coding-highspeed"],
+    default_model: "k3",
+    models: ["k3", "k3-256k", "kimi-for-coding", "kimi-for-coding-highspeed"],
     docs_url: "https://www.kimi.com/code/docs/kimi-code/models.html",
     api_docs_url: "https://www.kimi.com/code/console",
+    access_type: "coding_plan",
     coding_preset: true,
   },
   {
@@ -113,6 +97,116 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
     ],
     docs_url: "https://www.volcengine.com/docs/82379/2188958",
     api_docs_url: "https://www.volcengine.com/docs/82379/1541594",
+    access_type: "coding_plan",
+    coding_preset: true,
+    allow_custom_model: true,
+  },
+  {
+    id: "qwen-token-plan",
+    display_name: "Qwen Token Plan",
+    base_url: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    protocol: "openai_chat",
+    auth_scheme: "bearer",
+    key_env_name: "DASHSCOPE_TOKEN_PLAN_API_KEY",
+    default_model: "qwen3.8-max-preview",
+    models: ["qwen3.8-max-preview"],
+    docs_url: "https://help.aliyun.com/zh/model-studio/token-plan",
+    api_docs_url: "https://bailian.console.aliyun.com/",
+    access_type: "coding_plan",
+    coding_preset: true,
+  },
+  {
+    id: "kimi-cn",
+    display_name: "Kimi",
+    base_url: "https://api.moonshot.cn/v1",
+    protocol: "openai_chat",
+    auth_scheme: "bearer",
+    key_env_name: "MOONSHOT_API_KEY",
+    default_model: "kimi-k3",
+    models: ["kimi-k3"],
+    docs_url: "https://platform.kimi.com/docs",
+    api_docs_url: "https://platform.kimi.com/console/api-keys",
+    access_type: "api",
+  },
+  {
+    id: "minimax",
+    display_name: "MiniMax",
+    base_url: "https://api.minimax.io/v1",
+    protocol: "minimax_chat",
+    auth_scheme: "bearer",
+    key_env_name: "MINIMAX_API_KEY",
+    default_model: "MiniMax-M3",
+    models: ["MiniMax-M3"],
+    docs_url: "https://www.minimax.io/models/text/m3",
+    api_docs_url: "https://platform.minimax.io/user-center/basic-information/interface-key",
+    access_type: "api",
+  },
+  {
+    id: "glm",
+    display_name: "GLM",
+    base_url: "https://open.bigmodel.cn/api/paas/v4",
+    protocol: "openai_chat",
+    auth_scheme: "bearer",
+    key_env_name: "ZHIPU_API_KEY",
+    default_model: "glm-5.2",
+    models: ["glm-5.2"],
+    docs_url: "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2",
+    api_docs_url: "https://open.bigmodel.cn/usercenter/apikeys",
+    access_type: "api",
+  },
+  {
+    id: "qwen",
+    display_name: "Qwen",
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    protocol: "openai_chat",
+    auth_scheme: "bearer",
+    key_env_name: "DASHSCOPE_API_KEY",
+    default_model: "qwen3.7-max",
+    models: ["qwen3.7-max"],
+    docs_url: "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions",
+    api_docs_url: "https://bailian.console.aliyun.com/",
+    access_type: "api",
+    allow_custom_model: true,
+  },
+  {
+    id: "doubao",
+    display_name: "Doubao Ark",
+    base_url: "https://ark.cn-beijing.volces.com/api/v3",
+    protocol: "openai_chat",
+    auth_scheme: "bearer",
+    key_env_name: "ARK_API_KEY",
+    default_model: "doubao-seed-2.1-pro",
+    models: ["doubao-seed-2.1-pro"],
+    docs_url: "https://www.volcengine.com/product/doubao",
+    api_docs_url: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+    access_type: "api",
+    endpoint_model: true,
+  },
+  {
+    id: "deepseek",
+    display_name: "DeepSeek",
+    base_url: "https://api.deepseek.com",
+    protocol: "openai_chat",
+    auth_scheme: "bearer",
+    key_env_name: "DEEPSEEK_API_KEY",
+    default_model: "deepseek-v4-pro",
+    models: ["deepseek-v4-pro", "deepseek-v4-flash"],
+    docs_url: "https://api-docs.deepseek.com/",
+    api_docs_url: "https://platform.deepseek.com/api_keys",
+    access_type: "api",
+  },
+  {
+    id: "volcengine-agent-plan",
+    display_name: "火山 Agent Plan",
+    base_url: "https://ark.cn-beijing.volces.com/api/plan/v3",
+    protocol: "openai_chat",
+    auth_scheme: "bearer",
+    key_env_name: "AWAKEN_AGENT_PLAN_API_KEY",
+    default_model: "ark-code-latest",
+    models: ["ark-code-latest"],
+    docs_url: "https://www.volcengine.com/docs/82379",
+    api_docs_url: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+    access_type: "agent_plan",
     allow_custom_model: true,
   },
 ];
@@ -130,10 +224,11 @@ type StoredModelProfile = {
   advanced?: ModelProfileAdvanced;
   keyLast4?: string;
   credentialRevision?: number;
+  credentialReference?: ModelCredentialReference;
 };
 
 type StoreFile = {
-  version: 1;
+  version: 1 | 2;
   profiles: StoredModelProfile[];
 };
 
@@ -154,7 +249,9 @@ function trimTrailingSlash(value: string): string {
 function normalizeProviderModelId(provider: ModelProviderWire | undefined, modelId: string): string {
   const trimmed = modelId.trim();
   if (!provider) return trimmed;
-  if (provider.endpoint_model) return trimmed || provider.default_model;
+  if (provider.endpoint_model) {
+    return provider.models.includes(trimmed) ? trimmed : provider.default_model;
+  }
   if (provider.allow_custom_model) return trimmed || provider.default_model;
   if (trimmed && provider.models.includes(trimmed)) return trimmed;
   return provider.default_model;
@@ -171,7 +268,30 @@ function normalizeProviderBaseURL(
   if (provider?.id === "volcengine" && normalized === "https://ark.cn-beijing.volces.com/api/v3") {
     return "https://ark.cn-beijing.volces.com/api/coding/v3";
   }
+  if (provider?.id === "volcengine-agent-plan") return provider.base_url;
   return normalized;
+}
+
+function capabilityResolutionForIdentity(
+  provider: ModelProviderWire,
+  profileId: string,
+  credentialRevision: number,
+  baseURL: string,
+  protocol: string,
+  selector: string,
+): CapabilityResolution {
+  return {
+    scope: {
+      provider_id: provider.id,
+      normalized_base_url: normalizeCapabilityBaseURL(baseURL),
+      protocol_family: protocol.trim().toLowerCase(),
+      profile_id: profileId.trim(),
+      credential_revision: Math.max(1, Math.floor(credentialRevision)),
+      selector_kind: provider.endpoint_model ? "endpoint" : "model",
+      endpoint_contract_id: capabilityEndpointContract(protocol),
+    },
+    selector: selector.trim(),
+  };
 }
 
 const BALANCE_SUPPORTED_PROVIDERS = new Set<string>(["deepseek", "kimi-coding-plan"]);
@@ -279,7 +399,11 @@ async function testModelEndpoint(
   signal: AbortSignal,
 ): Promise<Response> {
 	const body = connectionTestBody(provider, modelId);
-  return fetch(`${baseURL}/chat/completions`, {
+  const endpoint =
+    provider.protocol === "minimax_chat"
+      ? `${baseURL}/text/chatcompletion_v2`
+      : `${baseURL}/chat/completions`;
+  return fetch(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -298,6 +422,44 @@ function connectionTestBody(provider: ModelProviderWire, modelId: string): strin
     max_tokens: 1,
     stream: false,
   });
+}
+
+type AgentPlanReasoningCandidate = {
+  levels: readonly ReasoningEffortLevel[];
+  defaultLevel: ReasoningEffortLevel;
+  nativeByLevel: Readonly<Record<ReasoningEffortLevel, string>>;
+};
+
+function agentPlanReasoningCandidate(modelId: string): AgentPlanReasoningCandidate | undefined {
+  switch (modelId) {
+    case "kimi-k3":
+      return {
+        levels: ["low", "high", "max"],
+        defaultLevel: "max",
+        nativeByLevel: { low: "low", high: "high", max: "max" },
+      };
+    case "glm-5.2":
+    case "deepseek-v4-pro":
+      return {
+        levels: ["high", "max"],
+        defaultLevel: "high",
+        nativeByLevel: { low: "low", high: "high", max: "max" },
+      };
+    case "qwen3.8-max-preview":
+      return {
+        levels: ["low", "high", "max"],
+        defaultLevel: "max",
+        nativeByLevel: { low: "low", high: "medium", max: "xhigh" },
+      };
+    case "doubao-seed-2.1-pro":
+      return {
+        levels: ["low", "high", "max"],
+        defaultLevel: "high",
+        nativeByLevel: { low: "low", high: "medium", max: "high" },
+      };
+    default:
+      return undefined;
+  }
 }
 
 function providerTestSuccessMessage(provider: ModelProviderWire): string {
@@ -412,6 +574,8 @@ function toSummary(
   profile: StoredModelProfile,
   hasKey: boolean,
   observedState?: "unreadable",
+  credentialRevision?: number,
+  resolution?: CapabilityResolution,
 ): RuntimeModelProfileSummaryWire {
   const provider = providerById(profile.providerId);
   const modelId = normalizeProviderModelId(provider, profile.modelId);
@@ -419,7 +583,8 @@ function toSummary(
   const advanced = normalizeAdvancedWithModelCapability(
     profile.advanced,
     profile.providerId,
-    provider?.endpoint_model ? profile.advanced?.endpointId?.trim() || modelId : modelId,
+    modelId,
+    resolution,
   );
   return {
     id: profile.id,
@@ -434,6 +599,18 @@ function toSummary(
     enabled: profile.enabled,
     is_default: profile.isDefault,
     profile_status: profileStatus(profile, hasKey, observedState),
+    access_type: provider?.access_type ?? (provider?.coding_preset ? "coding_plan" : "api"),
+    credential_reference:
+      profile.credentialReference?.kind === "provider_account"
+        ? {
+            kind: "provider_account",
+            provider_id: profile.credentialReference.providerId,
+            account_id: profile.credentialReference.accountId,
+          }
+        : {
+            kind: "profile_secret",
+            profile_id: profile.id,
+          },
     advanced: {
       temperature: advanced.temperature,
       max_tokens: advanced.maxTokens,
@@ -443,8 +620,15 @@ function toSummary(
       supports_vision: advanced.supportsVision,
       supports_native_pdf: advanced.supportsNativePDF,
       supports_video: advanced.supportsVideo,
+      supports_tools: advanced.supportsTools,
+      default_reasoning_effort: advanced.defaultReasoningEffort,
     },
-    credential_revision: profile.credentialRevision ?? 1,
+    credential_revision: credentialRevision ?? profile.credentialRevision ?? 1,
+    effective_capability: capabilityForModel(
+      profile.providerId,
+      modelId,
+      resolution,
+    ),
   };
 }
 
@@ -505,6 +689,10 @@ function normalizeStoredProfile(profile: StoredModelProfile): StoredModelProfile
       profile.credentialRevision >= 1
         ? Math.floor(profile.credentialRevision)
         : 1,
+    credentialReference:
+      profile.credentialReference?.kind === "provider_account"
+        ? profile.credentialReference
+        : { kind: "profile_secret", profileId: profile.id },
   };
 }
 
@@ -532,58 +720,84 @@ export class ModelProfileStore {
   private cacheDir: string;
   private usageDir: string;
   private envStore: ModelProfileKeyStore;
+  private agentPlanAccountStore: AgentPlanAccountStore;
+  private agentPlanModelIds = ["ark-code-latest"];
   private observedCredentialStates = new Map<string, "unreadable">();
   private mutationQueue: Promise<void> = Promise.resolve();
-  private capabilityOverrides: Record<string, ProviderCapabilityOverrides> = {};
+  private capabilityOverrides: ScopedCapabilityOverrides[] = [];
 
   constructor(
     awakenHome: string,
     envStore: ModelProfileKeyStore = new AwakenEnvStore(awakenHome),
+    agentPlanAccountStore: AgentPlanAccountStore = new AgentPlanAccountStore(awakenHome),
   ) {
     this.filePath = path.join(awakenHome, "config", MODEL_PROFILES_FILE);
     this.cacheDir = path.join(awakenHome, "cache");
     this.usageDir = path.join(awakenHome, "usage", "model-profiles");
     this.envStore = envStore;
+    this.agentPlanAccountStore = agentPlanAccountStore;
   }
 
   async initialize(): Promise<void> {
     this.capabilityOverrides = await loadCapabilityOverrides(this.cacheDir);
     setCapabilityOverrides(this.capabilityOverrides);
+    try {
+      const account = await this.agentPlanAccountStore.getAccount();
+      this.agentPlanModelIds = [...account.model_ids];
+    } catch {
+      this.agentPlanModelIds = ["ark-code-latest"];
+    }
   }
 
-  async syncCapabilities(): Promise<Record<string, ProviderCapabilityOverrides>> {
+  async syncCapabilities(): Promise<ScopedCapabilityOverrides[]> {
     const store = await this.readStore();
-    const candidates = new Map<
-      string,
-      { baseURL: string; apiKey: string }
-    >();
+    const candidates: Array<{
+      baseURL: string;
+      apiKey: string;
+      resolution: CapabilityResolution;
+    }> = [];
 
     for (const profile of store.profiles) {
       if (!profile.enabled) continue;
-      if (candidates.has(profile.providerId)) continue;
       const provider = providerById(profile.providerId);
       if (!provider) continue;
-      let apiKey = "";
+      let credential: { apiKey: string; credentialRevision?: number };
       try {
-        apiKey = await this.readProfileKey(profile);
+        credential = await this.readProfileCredential(profile);
       } catch {
         continue;
       }
-      if (!apiKey) continue;
-      candidates.set(profile.providerId, {
-        baseURL: normalizeProviderBaseURL(provider, profile.baseURL),
-        apiKey,
+      if (!credential.apiKey) continue;
+      const baseURL = normalizeProviderBaseURL(provider, profile.baseURL);
+      const capabilityModelId = normalizeProviderModelId(provider, profile.modelId);
+      const selector = provider.endpoint_model
+        ? profile.advanced?.endpointId?.trim() || ""
+        : capabilityModelId;
+      if (!selector) continue;
+      const credentialRevision =
+        credential.credentialRevision ?? profile.credentialRevision ?? 1;
+      candidates.push({
+        baseURL,
+        apiKey: credential.apiKey,
+        resolution: capabilityResolutionForIdentity(
+          provider,
+          profile.id,
+          credentialRevision,
+          baseURL,
+          profile.protocol || provider.protocol,
+          selector,
+        ),
       });
     }
 
-    const fetched: Record<string, ProviderCapabilityOverrides> = {};
+    const fetched: ScopedCapabilityOverrides[] = [];
     await Promise.allSettled(
-      Array.from(candidates.entries()).map(async ([providerId, { baseURL, apiKey }]) => {
+      candidates.map(async ({ baseURL, apiKey, resolution }) => {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), CAPABILITY_SYNC_TIMEOUT_MS);
         try {
           const overrides = await fetchProviderCapabilities(baseURL, apiKey, controller.signal);
-          fetched[providerId] = overrides;
+          fetched.push({ scope: resolution.scope, models: overrides });
         } catch {
           // Ignore per-provider fetch failures; keep existing overrides.
         } finally {
@@ -592,9 +806,11 @@ export class ModelProfileStore {
       }),
     );
 
-    this.capabilityOverrides = mergeCapabilityOverrides(this.capabilityOverrides, fetched);
+    this.capabilityOverrides = await saveCapabilityOverrides(
+      this.cacheDir,
+      fetched,
+    );
     setCapabilityOverrides(this.capabilityOverrides);
-    await saveCapabilityOverrides(this.cacheDir, this.capabilityOverrides);
     return this.capabilityOverrides;
   }
 
@@ -602,9 +818,37 @@ export class ModelProfileStore {
     return BUILTIN_MODEL_PROVIDERS.map((provider) =>
       withModelCapabilities({
         ...provider,
-        models: [...provider.models],
+        models:
+          provider.id === "volcengine-agent-plan"
+            ? [...this.agentPlanModelIds]
+            : [...provider.models],
       }),
     );
+  }
+
+  async getAgentPlanAccount(): Promise<AgentPlanAccountWire> {
+    return this.agentPlanAccountStore.getAccount();
+  }
+
+  async saveAgentPlanAccount(request: AgentPlanAccountSaveRequest): Promise<AgentPlanAccountWire> {
+    const account = await this.agentPlanAccountStore.saveAccount(request);
+    this.agentPlanModelIds = [...account.model_ids];
+    return account;
+  }
+
+  async refreshAgentPlanModels(): Promise<AgentPlanAccountWire> {
+    const account = await this.agentPlanAccountStore.refreshModelCatalog();
+    this.agentPlanModelIds = [...account.model_ids];
+    return account;
+  }
+
+  async deleteAgentPlanAccount(): Promise<void> {
+    const store = await this.readStore();
+    const referenced = store.profiles.some(
+      (profile) => profile.credentialReference?.kind === "provider_account",
+    );
+    await this.agentPlanAccountStore.deleteAccount(referenced);
+    this.agentPlanModelIds = ["ark-code-latest"];
   }
 
   async listProfiles(): Promise<RuntimeModelProfileSummaryWire[]> {
@@ -648,11 +892,45 @@ export class ModelProfileStore {
     if (duplicateProfile) {
       throw new Error(DUPLICATE_MODEL_PROFILE_ERROR);
     }
+    const sourceAdvanced =
+      request.advanced ?? existing?.advanced ?? templateProfile?.advanced;
+    let capabilityCredentialRevision = existing?.credentialRevision ?? 1;
+    if (provider.id === "volcengine-agent-plan") {
+      try {
+        capabilityCredentialRevision = (
+          await this.agentPlanAccountStore.getAccount()
+        ).credential_revision;
+      } catch {
+        capabilityCredentialRevision = 1;
+      }
+    }
+    const capabilityResolution = existing
+      ? capabilityResolutionForIdentity(
+          provider,
+          existing.id,
+          capabilityCredentialRevision,
+          baseURL,
+          request.protocol?.trim() || existing.protocol || provider.protocol,
+          provider.endpoint_model
+            ? sourceAdvanced?.endpointId?.trim() || ""
+            : modelId,
+        )
+      : undefined;
     const advanced = normalizeAdvancedWithModelCapability(
-      request.advanced ?? existing?.advanced ?? templateProfile?.advanced,
+      sourceAdvanced,
       provider.id,
-      provider.endpoint_model ? request.advanced?.endpointId?.trim() || modelId : modelId,
+      modelId,
+      capabilityResolution,
     );
+    validateReasoningEffort(
+      provider.id,
+      modelId,
+      request.advanced?.defaultReasoningEffort,
+      capabilityResolution,
+    );
+    if (provider.endpoint_model && !/^ep-[A-Za-z0-9_-]+$/.test(advanced.endpointId?.trim() ?? "")) {
+      throw new Error("Doubao Ark 需要填写 ep-* 推理接入点。");
+    }
     const profile: StoredModelProfile = {
       id: existing?.id ?? randomUUID(),
       providerId: provider.id,
@@ -666,16 +944,35 @@ export class ModelProfileStore {
       advanced,
       keyLast4: existing?.keyLast4,
       credentialRevision: existing?.credentialRevision ?? 1,
+      credentialReference:
+        provider.id === "volcengine-agent-plan"
+          ? {
+              kind: "provider_account",
+              providerId: "volcengine-agent-plan",
+              accountId: VOLCENGINE_AGENT_PLAN_ACCOUNT_ID,
+            }
+          : { kind: "profile_secret", profileId: existing?.id ?? "" },
     };
+    if (profile.credentialReference?.kind === "profile_secret") {
+      profile.credentialReference = { kind: "profile_secret", profileId: profile.id };
+    }
 
+    const agentPlanKeyToPersist =
+      provider.id === "volcengine-agent-plan" && request.apiKey?.trim()
+        ? request.apiKey.trim()
+        : undefined;
     let apiKeyToPersist: string | undefined;
-    if (request.apiKey !== undefined && request.apiKey.trim() !== "") {
+    if (
+      provider.id !== "volcengine-agent-plan" &&
+      request.apiKey !== undefined &&
+      request.apiKey.trim() !== ""
+    ) {
       apiKeyToPersist = request.apiKey.trim();
     } else if (!existing && templateProfile) {
       const templateKey = await this.readProfileKey(templateProfile);
       if (templateKey) apiKeyToPersist = templateKey;
     }
-    if (apiKeyToPersist !== undefined) {
+    if (apiKeyToPersist !== undefined && provider.id !== "volcengine-agent-plan") {
       profile.keyLast4 = apiKeyToPersist.slice(-4);
     }
 
@@ -700,7 +997,13 @@ export class ModelProfileStore {
     }
 
     this.ensureSingleDefault(store, profile.id);
-    if (apiKeyToPersist !== undefined) {
+    if (agentPlanKeyToPersist !== undefined) {
+      const account = await this.agentPlanAccountStore.saveAccountWithCompensation(
+        { apiKey: agentPlanKeyToPersist },
+        () => this.writeStore(store),
+      );
+      this.agentPlanModelIds = [...account.model_ids];
+    } else if (apiKeyToPersist !== undefined) {
       await this.envStore.setKey(profile.id, apiKeyToPersist);
       try {
         await this.writeStore(store);
@@ -752,28 +1055,57 @@ export class ModelProfileStore {
   }
 
   async resolveDefaultRunProfile(): Promise<ModelProfileRunConfig | undefined> {
+    return this.resolveRunProfile();
+  }
+
+  async resolveRunProfile(
+    profileId?: string,
+    requestedEffort?: import("../shared/runtime.js").ReasoningEffortLevel,
+  ): Promise<ModelProfileRunConfig | undefined> {
     const store = await this.readStore();
     const profile =
+      store.profiles.find((entry) => entry.id === profileId && entry.enabled) ??
       store.profiles.find((entry) => entry.isDefault && entry.enabled) ??
       store.profiles.find((entry) => entry.enabled);
     if (!profile) return undefined;
     const provider = providerById(profile.providerId);
-    const modelId = normalizeProviderModelId(provider, profile.modelId);
+    const capabilityModelId = normalizeProviderModelId(provider, profile.modelId);
     const baseURL = normalizeProviderBaseURL(provider, profile.baseURL);
-    const advanced = normalizeAdvancedWithModelCapability(
-      profile.advanced,
-      profile.providerId,
-      provider?.endpoint_model ? profile.advanced?.endpointId?.trim() || modelId : modelId,
-    );
-    const apiKey = await this.readProfileKey(profile);
+    const credential = await this.readProfileCredential(profile);
+    const apiKey = credential.apiKey;
     if (!apiKey) {
       throw new Error("请先在设置 > 模型中配置 API key。");
     }
+    const credentialRevision =
+      credential.credentialRevision ?? profile.credentialRevision ?? 1;
+    const endpointSelector = provider?.endpoint_model
+      ? profile.advanced?.endpointId?.trim() || ""
+      : undefined;
+    const modelId = endpointSelector || capabilityModelId;
+    const capabilityResolution = provider
+      ? capabilityResolutionForIdentity(
+          provider,
+          profile.id,
+          credentialRevision,
+          baseURL,
+          profile.protocol || provider.protocol,
+          modelId,
+        )
+      : undefined;
+    const advanced = normalizeAdvancedWithModelCapability(
+      profile.advanced,
+      profile.providerId,
+      capabilityModelId,
+      capabilityResolution,
+    );
     return {
       profileId: profile.id,
       providerId: profile.providerId,
       displayName: profile.displayName,
-      modelId: provider?.endpoint_model ? advanced.endpointId?.trim() || modelId : modelId,
+      modelId,
+      capabilityModelId,
+      endpointSelector,
+      modelSelectorKind: provider?.endpoint_model ? "endpoint" : "model",
       baseURL,
       protocol: profile.protocol,
       authScheme: profile.authScheme,
@@ -782,11 +1114,52 @@ export class ModelProfileStore {
       maxTokens: advanced.maxTokens,
       contextWindow: advanced.contextWindow,
       promptCacheKey: advanced.promptCacheKey,
-      credentialRevision: profile.credentialRevision ?? 1,
+      credentialRevision,
       supportsVision: advanced.supportsVision,
       supportsNativePDF: advanced.supportsNativePDF,
       supportsVideo: advanced.supportsVideo,
+      supportsTools: advanced.supportsTools,
+      reasoningEffort: resolveReasoningEffort(
+        profile.providerId,
+        capabilityModelId,
+        requestedEffort,
+        advanced.defaultReasoningEffort,
+        capabilityResolution,
+      ),
     };
+  }
+
+  async reasoningCapabilityForProfile(
+    profileId: string,
+  ): Promise<ReasoningEffortCapabilityWire | undefined> {
+    const store = await this.readStore();
+    const profile = store.profiles.find(
+      (entry) => entry.id === profileId && entry.enabled,
+    );
+    if (!profile) return undefined;
+    const provider = providerById(profile.providerId);
+    if (!provider) return undefined;
+    const capabilityModelId = normalizeProviderModelId(provider, profile.modelId);
+    const baseURL = normalizeProviderBaseURL(provider, profile.baseURL);
+    const credential = await this.readProfileCredential(profile);
+    const credentialRevision =
+      credential.credentialRevision ?? profile.credentialRevision ?? 1;
+    const selector = provider.endpoint_model
+      ? profile.advanced?.endpointId?.trim() || ""
+      : capabilityModelId;
+    if (!selector) return undefined;
+    return reasoningEffortCapability(
+      profile.providerId,
+      capabilityModelId,
+      capabilityResolutionForIdentity(
+        provider,
+        profile.id,
+        credentialRevision,
+        baseURL,
+        profile.protocol || provider.protocol,
+        selector,
+      ),
+    );
   }
 
   async defaultProfileSummary(): Promise<RuntimeModelProfileSummaryWire | undefined> {
@@ -833,8 +1206,13 @@ export class ModelProfileStore {
     if (!provider) {
       return { ok: false, message: "连接测试失败：未知模型供应商。" };
     }
+    const agentPlanKey =
+      provider.id === "volcengine-agent-plan"
+        ? (await this.agentPlanAccountStore.resolveKey()).apiKey
+        : "";
     const apiKey =
       request.apiKey?.trim() ||
+      agentPlanKey ||
       (request.id
         ? await this.apiKeyForProfile(request.id)
         : request.templateProfileId
@@ -844,7 +1222,9 @@ export class ModelProfileStore {
       return { ok: false, message: "连接测试失败：请先填写 API key。" };
     }
     const baseURL = normalizeProviderBaseURL(provider, request.baseURL);
-    const modelId = normalizeProviderModelId(provider, request.modelId);
+    const modelId = provider.endpoint_model
+      ? request.advanced?.endpointId?.trim() || ""
+      : normalizeProviderModelId(provider, request.modelId);
     const requestId = `connection_${randomUUID().replaceAll("-", "")}`;
     const requestBody = connectionTestBody(provider, modelId);
     const requestShapeDigest = createHash("sha256").update(requestBody).digest("hex");
@@ -906,12 +1286,19 @@ export class ModelProfileStore {
         ) {
           try {
             const overrides = parseProviderCapabilities(parsedBody);
-            this.capabilityOverrides = mergeCapabilityOverrides(
-              this.capabilityOverrides,
-              { [provider.id]: overrides },
+            const resolution = await this.capabilityResolutionForRequest(
+              request,
+              provider,
+              baseURL,
+              modelId,
             );
-            setCapabilityOverrides(this.capabilityOverrides);
-            await saveCapabilityOverrides(this.cacheDir, this.capabilityOverrides);
+            if (resolution) {
+              this.capabilityOverrides = await saveCapabilityOverrides(
+                this.cacheDir,
+                [{ scope: resolution.scope, models: overrides }],
+              );
+              setCapabilityOverrides(this.capabilityOverrides);
+            }
           } catch {
             // A successful connection test does not depend on capability parsing.
           }
@@ -941,6 +1328,89 @@ export class ModelProfileStore {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async testAgentPlanReasoningCapability(
+    request: ModelProfileSaveRequest,
+  ): Promise<ModelReasoningCapabilityTestResult> {
+    if (request.providerId !== "volcengine-agent-plan") {
+      return { ok: false, message: "推理强度验证仅用于 Agent Plan 精确模型 ID。" };
+    }
+    const modelId = request.modelId.trim();
+    const candidate = agentPlanReasoningCandidate(modelId);
+    if (!candidate || modelId === "ark-code-latest") {
+      return { ok: false, message: "该模型 ID 未命中已知能力矩阵，推理强度保持 hidden。" };
+    }
+    const apiKey = request.apiKey?.trim() || (await this.agentPlanAccountStore.resolveKey()).apiKey;
+    if (!apiKey) return { ok: false, message: "请先保存 Agent Plan API key。" };
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      AGENT_PLAN_EFFORT_PROBE_TIMEOUT_MS,
+    );
+    try {
+      for (const level of candidate.levels) {
+        const response = await fetch(
+          "https://ark.cn-beijing.volces.com/api/plan/v3/chat/completions",
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: modelId,
+              messages: [{ role: "user", content: "ping" }],
+              reasoning_effort: candidate.nativeByLevel[level],
+              max_tokens: 1,
+              stream: false,
+            }),
+            signal: controller.signal,
+          },
+        );
+        if (!response.ok) {
+          return {
+            ok: false,
+            message: `套餐端点未接受 ${level} 档 effort 参数（HTTP ${response.status}），完整矩阵继续隐藏。`,
+          };
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        return {
+          ok: false,
+          message: "Agent Plan 推理强度验证超时：完整矩阵继续隐藏。",
+        };
+      }
+      return {
+        ok: false,
+        message: "Agent Plan 推理强度验证失败：完整矩阵继续隐藏。",
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+    const reasoningEffort = { levels: [...candidate.levels], defaultLevel: candidate.defaultLevel };
+    const resolution = await this.capabilityResolutionForRequest(
+      request,
+      providerById("volcengine-agent-plan")!,
+      "https://ark.cn-beijing.volces.com/api/plan/v3",
+      modelId,
+    );
+    if (resolution) {
+      this.capabilityOverrides = await saveCapabilityOverrides(
+        this.cacheDir,
+        [{
+          scope: resolution.scope,
+          models: {
+            [modelId]: {
+              reasoning_effort: {
+                levels: [...candidate.levels],
+                default_level: candidate.defaultLevel,
+              },
+            },
+          },
+        }],
+      );
+      setCapabilityOverrides(this.capabilityOverrides);
+    }
+    return { ok: true, message: "Agent Plan 推理强度验证通过；本次验证可能产生少量模型消耗。", reasoningEffort };
   }
 
   async fetchBalances(signal?: AbortSignal): Promise<ModelProfileBalanceWire[]> {
@@ -1090,11 +1560,52 @@ export class ModelProfileStore {
     return profile ? this.readProfileKey(profile) : "";
   }
 
+  private async capabilityResolutionForRequest(
+    request: ModelProfileSaveRequest,
+    provider: ModelProviderWire,
+    baseURL: string,
+    selector: string,
+  ): Promise<CapabilityResolution | undefined> {
+    const profileId = request.id?.trim() || request.templateProfileId?.trim();
+    if (!profileId || !selector.trim()) return undefined;
+    const store = await this.readStore();
+    const stored = store.profiles.find((entry) => entry.id === profileId);
+    let credentialRevision = stored?.credentialRevision ?? 1;
+    if (provider.id === "volcengine-agent-plan") {
+      try {
+        credentialRevision = (
+          await this.agentPlanAccountStore.getAccount()
+        ).credential_revision;
+      } catch {
+        credentialRevision = 1;
+      }
+    }
+    return capabilityResolutionForIdentity(
+      provider,
+      profileId,
+      credentialRevision,
+      baseURL,
+      request.protocol?.trim() || stored?.protocol || provider.protocol,
+      selector,
+    );
+  }
+
   private async readProfileKey(profile: StoredModelProfile): Promise<string> {
+    return (await this.readProfileCredential(profile)).apiKey;
+  }
+
+  private async readProfileCredential(
+    profile: StoredModelProfile,
+  ): Promise<{ apiKey: string; credentialRevision?: number }> {
     try {
+      if (profile.credentialReference?.kind === "provider_account") {
+        const resolved = await this.agentPlanAccountStore.resolveKey();
+        this.observedCredentialStates.delete(profile.id);
+        return resolved;
+      }
       const apiKey = await this.envStore.getKey(profile.id);
       this.observedCredentialStates.delete(profile.id);
-      return apiKey;
+      return { apiKey };
     } catch (error) {
       this.observedCredentialStates.set(profile.id, "unreadable");
       throw new AwakenEnvStoreError(
@@ -1115,16 +1626,39 @@ export class ModelProfileStore {
 
   private async toSummary(profile: StoredModelProfile): Promise<RuntimeModelProfileSummaryWire> {
     let apiKey = "";
+    let credentialRevision: number | undefined;
     try {
-      apiKey = await this.readProfileKey(profile);
+      const credential = await this.readProfileCredential(profile);
+      apiKey = credential.apiKey;
+      credentialRevision = credential.credentialRevision;
     } catch {
       // Listing remains available when .env is unreadable so Settings can
       // identify the affected profile and ask the user to re-enter its key.
     }
+    const effectiveCredentialRevision =
+      credentialRevision ?? profile.credentialRevision ?? 1;
+    const provider = providerById(profile.providerId);
+    const capabilityModelId = normalizeProviderModelId(provider, profile.modelId);
+    const baseURL = normalizeProviderBaseURL(provider, profile.baseURL);
+    const selector = provider?.endpoint_model
+      ? profile.advanced?.endpointId?.trim() || ""
+      : capabilityModelId;
+    const resolution = provider && selector
+      ? capabilityResolutionForIdentity(
+          provider,
+          profile.id,
+          effectiveCredentialRevision,
+          baseURL,
+          profile.protocol || provider.protocol,
+          selector,
+        )
+      : undefined;
     return toSummary(
       profile,
       apiKey !== "",
       this.observedCredentialStates.get(profile.id),
+      effectiveCredentialRevision,
+      resolution,
     );
   }
 
@@ -1153,13 +1687,13 @@ export class ModelProfileStore {
       const raw = await fs.readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw) as Partial<StoreFile>;
       const store: StoreFile = {
-        version: 1,
+        version: parsed.version === 2 ? 2 : 1,
         profiles: Array.isArray(parsed.profiles) ? parsed.profiles : [],
       };
       return this.normalizeStore(store);
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
-        return { version: 1, profiles: [] };
+        return { version: 2, profiles: [] };
       }
       throw error;
     }
@@ -1193,7 +1727,7 @@ export class ModelProfileStore {
 
   private normalizeStore(store: StoreFile): StoreFile {
     const normalizedStore: StoreFile = {
-      version: 1,
+      version: 2,
       profiles: dedupeStoredProfiles(store.profiles.map(normalizeStoredProfile)),
     };
     const preferredProfileId =

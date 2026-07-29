@@ -2,13 +2,19 @@ import type {
   ModelCapabilityWire,
   ModelProfileAdvanced,
   ModelProviderWire,
+  ReasoningEffortCapabilityWire,
+  ReasoningEffortLevel,
 } from "../shared/runtime.js";
-import type { ProviderCapabilityOverrides } from "./model-capability-sync.js";
+import {
+  capabilityScopeKey,
+  type CapabilityResolution,
+  type ScopedCapabilityOverrides,
+} from "./model-capability-sync.js";
 
-let dynamicCapabilityOverrides: Record<string, ProviderCapabilityOverrides> = {};
+let dynamicCapabilityOverrides: ScopedCapabilityOverrides[] = [];
 
 export function setCapabilityOverrides(
-  overrides: Record<string, ProviderCapabilityOverrides>,
+  overrides: ScopedCapabilityOverrides[],
 ): void {
   dynamicCapabilityOverrides = overrides;
 }
@@ -27,6 +33,8 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       default_max_tokens: DEFAULT_MAX_TOKENS,
       supports_vision: false,
       supports_video: false,
+      supports_tools: "ready",
+      reasoning_effort: { levels: ["high", "max"], default_level: "high" },
     },
     "deepseek-v4-flash": {
       context_window: 1_000_000,
@@ -34,9 +42,19 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       default_max_tokens: DEFAULT_MAX_TOKENS,
       supports_vision: false,
       supports_video: false,
+      supports_tools: "ready",
     },
   },
   "kimi-cn": {
+    "kimi-k3": {
+      context_window: 1024 * 1024,
+      max_output_tokens: 256 * 1024,
+      default_max_tokens: 32 * 1024,
+      supports_vision: true,
+      supports_video: true,
+      supports_tools: "ready",
+      reasoning_effort: { levels: ["low", "high", "max"], default_level: "max" },
+    },
     "kimi-k2.7-code": {
       context_window: 256 * 1024,
       max_output_tokens: 256 * 1024,
@@ -95,6 +113,18 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       default_temperature: 1,
       supports_vision: true,
       supports_video: true,
+      supports_tools: "ready",
+      reasoning_effort: { levels: ["low", "high", "max"], default_level: "high" },
+    },
+    "k3-256k": {
+      context_window: 256 * 1024,
+      max_output_tokens: 32 * 1024,
+      default_max_tokens: 32 * 1024,
+      default_temperature: 1,
+      supports_vision: true,
+      supports_video: true,
+      supports_tools: "ready",
+      reasoning_effort: { levels: ["low", "high", "max"], default_level: "high" },
     },
     "kimi-for-coding": {
       context_window: 256 * 1024,
@@ -120,6 +150,7 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       default_max_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
       supports_vision: true,
       supports_video: false,
+      supports_tools: "ready",
     },
     "doubao-seed-code": {
       context_window: VOLCENGINE_CODING_PLAN_CONTEXT_WINDOW,
@@ -234,14 +265,134 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       supports_video: true,
     },
   },
+  minimax: {
+    "MiniMax-M3": {
+      context_window: 256_000,
+      max_output_tokens: 128_000,
+      default_max_tokens: 32_000,
+      supports_vision: true,
+      supports_video: true,
+      supports_tools: "ready",
+    },
+  },
+  glm: {
+    "glm-5.2": {
+      context_window: 256_000,
+      max_output_tokens: 128_000,
+      default_max_tokens: 32_000,
+      supports_vision: false,
+      supports_video: false,
+      supports_tools: "ready",
+      reasoning_effort: { levels: ["high", "max"], default_level: "high" },
+    },
+  },
+  qwen: {
+    "qwen3.7-max": {
+      context_window: 256_000,
+      max_output_tokens: 64_000,
+      default_max_tokens: 32_000,
+      supports_vision: true,
+      supports_video: true,
+      supports_tools: "ready",
+    },
+  },
+  "qwen-token-plan": {
+    "qwen3.8-max-preview": {
+      context_window: 1024 * 1024,
+      max_output_tokens: 64_000,
+      default_max_tokens: 32_000,
+      supports_vision: true,
+      supports_video: true,
+      supports_tools: "ready",
+      reasoning_effort: { levels: ["low", "high", "max"], default_level: "max" },
+    },
+  },
+  doubao: {
+    "doubao-seed-2.1-pro": {
+      context_window: 256_000,
+      max_output_tokens: 128_000,
+      default_max_tokens: 32_000,
+      supports_vision: true,
+      supports_video: true,
+      supports_tools: "ready",
+      reasoning_effort: { levels: ["low", "high", "max"], default_level: "high" },
+    },
+  },
+  "volcengine-agent-plan": {
+    "ark-code-latest": {
+      context_window: VOLCENGINE_CODING_PLAN_CONTEXT_WINDOW,
+      max_output_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+      default_max_tokens: VOLCENGINE_CODING_PLAN_STANDARD_OUTPUT,
+      supports_vision: true,
+      supports_video: false,
+      supports_tools: "ready",
+    },
+  },
 };
 
-export function capabilitiesForProvider(providerId: string): Record<string, ModelCapabilityWire> {
+export function reasoningEffortCapability(
+  providerId: string,
+  modelId: string,
+  resolution?: CapabilityResolution,
+): ReasoningEffortCapabilityWire | undefined {
+  return capabilityForModel(providerId, modelId, resolution)?.reasoning_effort;
+}
+
+export function validateReasoningEffort(
+  providerId: string,
+  modelId: string,
+  effort: ReasoningEffortLevel | undefined,
+  resolution?: CapabilityResolution,
+): void {
+  if (!effort) return;
+  const capability = reasoningEffortCapability(providerId, modelId, resolution);
+  if (!capability?.levels.includes(effort)) {
+    throw new Error(`当前模型不支持推理强度 ${effort}`);
+  }
+}
+
+export function resolveReasoningEffort(
+  providerId: string,
+  modelId: string,
+  requested: ReasoningEffortLevel | undefined,
+  profileDefault: ReasoningEffortLevel | undefined,
+  resolution?: CapabilityResolution,
+): ReasoningEffortLevel | undefined {
+  const capability = reasoningEffortCapability(providerId, modelId, resolution);
+  if (!capability) return undefined;
+  if (requested && capability.levels.includes(requested)) return requested;
+  if (profileDefault && capability.levels.includes(profileDefault)) return profileDefault;
+  return capability.default_level;
+}
+
+function dynamicCapabilityForResolution(
+  resolution: CapabilityResolution | undefined,
+): ModelCapabilityWire | undefined {
+  if (!resolution) return undefined;
+  const key = capabilityScopeKey(resolution.scope);
+  return dynamicCapabilityOverrides.find(
+    (entry) => capabilityScopeKey(entry.scope) === key,
+  )?.models[resolution.selector];
+}
+
+export function capabilitiesForProvider(
+  providerId: string,
+  resolution?: CapabilityResolution,
+): Record<string, ModelCapabilityWire> {
   const builtin = MODEL_CAPABILITIES[providerId] ?? {};
-  const dynamic = dynamicCapabilityOverrides[providerId] ?? {};
+  const dynamic = resolution
+    ? { [resolution.selector]: dynamicCapabilityForResolution(resolution) ?? {} }
+    : {};
   return Object.fromEntries(
     Array.from(new Set([...Object.keys(builtin), ...Object.keys(dynamic)])).map(
-      (modelId) => [modelId, { ...builtin[modelId], ...dynamic[modelId] }],
+      (modelId) => [
+        modelId,
+        {
+          ...builtin[modelId],
+          ...dynamic[modelId],
+          supports_tools: "ready",
+        },
+      ],
     ),
   );
 }
@@ -249,16 +400,21 @@ export function capabilitiesForProvider(providerId: string): Record<string, Mode
 export function capabilityForModel(
   providerId: string,
   modelId: string,
+  resolution?: CapabilityResolution,
 ): ModelCapabilityWire | undefined {
-  return capabilitiesForProvider(providerId)[modelId];
+  const builtin = MODEL_CAPABILITIES[providerId]?.[modelId];
+  const dynamic = dynamicCapabilityForResolution(resolution);
+  if (!builtin && !dynamic) return undefined;
+  return { ...builtin, ...dynamic, supports_tools: "ready" };
 }
 
 export function normalizeAdvancedWithModelCapability(
   advanced: ModelProfileAdvanced | undefined,
   providerId: string,
   modelId: string,
+  resolution?: CapabilityResolution,
 ): ModelProfileAdvanced {
-  const capability = capabilityForModel(providerId, modelId);
+  const capability = capabilityForModel(providerId, modelId, resolution);
   const providerDefault =
     providerId === "volcengine"
       ? {
@@ -270,7 +426,7 @@ export function normalizeAdvancedWithModelCapability(
           maxTokens: DEFAULT_MAX_TOKENS,
         };
   const inferredMaxTokens =
-    capability?.max_output_tokens ?? capability?.default_max_tokens ?? providerDefault.maxTokens;
+    capability?.default_max_tokens ?? capability?.max_output_tokens ?? providerDefault.maxTokens;
   const requestedMaxTokens = advanced?.maxTokens ?? inferredMaxTokens;
   const requestedContextWindow =
     advanced?.contextWindow ?? capability?.context_window ?? providerDefault.contextWindow;
@@ -281,6 +437,14 @@ export function normalizeAdvancedWithModelCapability(
     supportsNativePDF:
       advanced?.supportsNativePDF ?? capability?.supports_native_pdf ?? false,
     supportsVideo: advanced?.supportsVideo ?? capability?.supports_video,
+    supportsTools: "ready",
+    defaultReasoningEffort: resolveReasoningEffort(
+      providerId,
+      modelId,
+      undefined,
+      advanced?.defaultReasoningEffort,
+      resolution,
+    ),
     maxTokens:
       capability?.max_output_tokens !== undefined
         ? Math.min(requestedMaxTokens, capability.max_output_tokens)

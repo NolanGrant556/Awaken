@@ -11,7 +11,10 @@ import (
 	"awaken/src/tool"
 )
 
-const ContextEpochSchemaVersion = 1
+// ContextEpochSchemaVersion 3 keeps capability-family identity separate from
+// the transport selector (for example doubao-seed-2.1-pro vs ep-*). Runtime
+// rotates older sidecars once at a safe cold boundary.
+const ContextEpochSchemaVersion = 3
 
 type ContextEpochSourceState string
 
@@ -42,9 +45,13 @@ type ContextEpochCandidate struct {
 	ProfileID           string
 	CredentialRevision  uint64
 	ModelID             string
+	CapabilityModelID   string
+	EndpointSelector    string
+	ModelSelectorKind   string
 	ProtocolFamily      string
 	EndpointContractID  string
 	NormalizedBaseURL   string
+	ReasoningPolicy     string
 	PromptSchemaVersion string
 	CompactBoundaryID   string
 	ExactSystemPrompt   string
@@ -74,10 +81,21 @@ type ContextEpochStore interface {
 }
 
 func contextEpochCandidate(threadID string, config ModelConfig, req LLMRequest, endpointContractID, normalizedBaseURL string) ContextEpochCandidate {
+	capabilityModelID := strings.TrimSpace(config.CapabilityModelID)
+	if capabilityModelID == "" && !strings.EqualFold(strings.TrimSpace(config.ModelSelectorKind), "endpoint") {
+		capabilityModelID = req.Model
+	}
+	endpointSelector := strings.TrimSpace(config.EndpointSelector)
+	if endpointSelector == "" && strings.EqualFold(strings.TrimSpace(config.ModelSelectorKind), "endpoint") {
+		endpointSelector = req.Model
+	}
 	candidate := ContextEpochCandidate{
 		ThreadID: threadID, WorkspaceRoot: configWorkspaceRoot(req), ProviderID: config.ProviderID,
 		ProfileID: config.ProfileID, CredentialRevision: config.CredentialRevision, ModelID: req.Model,
-		ProtocolFamily: config.Protocol, EndpointContractID: endpointContractID, NormalizedBaseURL: normalizedBaseURL,
+		CapabilityModelID: capabilityModelID, EndpointSelector: endpointSelector,
+		ModelSelectorKind: strings.ToLower(strings.TrimSpace(config.ModelSelectorKind)),
+		ProtocolFamily:    config.Protocol, EndpointContractID: endpointContractID, NormalizedBaseURL: normalizedBaseURL,
+		ReasoningPolicy:     normalizeContextEpochReasoningPolicy(config.ReasoningEffort),
 		PromptSchemaVersion: "awaken_prompt_v1", ExactSystemPrompt: req.SystemPrompt,
 		Sources: cloneContextEpochSourceCandidates(req.EpochSources),
 	}
@@ -136,16 +154,33 @@ func contextEpochToolSortKey(value ContextEpochToolCandidate) string {
 	if rank == "" {
 		rank = "90"
 	}
-	return strings.Join([]string{rank, value.Schema.Function.Name, string(value.Provenance.ProviderID), value.Provenance.RegistrationID}, "\x00")
+	// RegistrationID is host/runtime identity and never reaches the model. A
+	// reconnect can legitimately replace it while leaving the exact provider
+	// tool schema unchanged, so it must not perturb the canonical wire order.
+	return strings.Join([]string{rank, value.Schema.Function.Name, string(value.Provenance.ProviderID)}, "\x00")
 }
 
 func ContextEpochToolDigest(value ContextEpochToolCandidate) string {
+	// Keep the model-visible schema and stable provenance classification, but
+	// deliberately exclude RegistrationID. The latter is used only to route a
+	// call back to the current host registration and is not part of the model's
+	// cache identity.
 	encoded, _ := json.Marshal(struct {
-		Schema     tool.ToolSchema
-		Provenance ToolSchemaProvenance
-	}{value.Schema, value.Provenance})
+		Schema       tool.ToolSchema
+		Origin       tool.ToolSource
+		ProviderID   tool.ProviderID
+		SkillCatalog string
+	}{value.Schema, value.Provenance.Origin, value.Provenance.ProviderID, value.Provenance.SkillCatalog})
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:])
+}
+
+func normalizeContextEpochReasoningPolicy(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "provider_default"
+	}
+	return value
 }
 
 func ContextEpochSourceDigest(content string) string {

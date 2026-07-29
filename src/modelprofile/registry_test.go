@@ -4,7 +4,10 @@ import "testing"
 
 func TestBuiltinProvidersIncludeRequiredDefaults(t *testing.T) {
 	providers := BuiltinProviders()
-	want := []string{"deepseek", "kimi-cn", "kimi-coding-plan", "volcengine"}
+	want := []string{
+		"deepseek", "kimi-cn", "kimi-coding-plan", "volcengine", "qwen-token-plan",
+		"minimax", "glm", "qwen", "doubao", "volcengine-agent-plan",
+	}
 	if len(providers) != len(want) {
 		t.Fatalf("expected %d providers, got %d", len(want), len(providers))
 	}
@@ -12,9 +15,6 @@ func TestBuiltinProvidersIncludeRequiredDefaults(t *testing.T) {
 	seen := map[string]Provider{}
 	for _, provider := range providers {
 		seen[provider.ID] = provider
-		if provider.ID == "doubao" {
-			t.Fatal("doubao must not be exposed as a separate built-in provider")
-		}
 	}
 	for _, id := range want {
 		provider, ok := seen[id]
@@ -27,15 +27,20 @@ func TestBuiltinProvidersIncludeRequiredDefaults(t *testing.T) {
 		if provider.BaseURL == "" {
 			t.Fatalf("provider %q is missing base URL", id)
 		}
+		for modelID, capability := range provider.ModelCapabilities {
+			if capability.SupportsTools != "ready" {
+				t.Fatalf("provider %q model %q must default to tools ready, got %q", id, modelID, capability.SupportsTools)
+			}
+		}
 	}
 	kimiCode := seen["kimi-coding-plan"]
 	if kimiCode.BaseURL != "https://api.kimi.com/coding/v1" {
 		t.Fatalf("expected Kimi Code base URL, got %q", kimiCode.BaseURL)
 	}
-	if kimiCode.DefaultModel != "kimi-for-coding" {
-		t.Fatalf("expected kimi-for-coding default model, got %q", kimiCode.DefaultModel)
+	if kimiCode.DefaultModel != "k3" {
+		t.Fatalf("expected k3 default model, got %q", kimiCode.DefaultModel)
 	}
-	wantKimiModels := []string{"k3", "kimi-for-coding", "kimi-for-coding-highspeed"}
+	wantKimiModels := []string{"k3", "k3-256k", "kimi-for-coding", "kimi-for-coding-highspeed"}
 	if len(kimiCode.Models) != len(wantKimiModels) {
 		t.Fatalf("expected Kimi Code models %v, got %v", wantKimiModels, kimiCode.Models)
 	}
@@ -89,7 +94,7 @@ func TestProviderByID(t *testing.T) {
 	if provider.DisplayName != "火山 Coding Plan" {
 		t.Fatalf("unexpected display name %q", provider.DisplayName)
 	}
-	if _, ok := ProviderByID("doubao"); ok {
-		t.Fatal("doubao must not resolve as a provider")
+	if provider, ok := ProviderByID("doubao"); !ok || !provider.EndpointModel {
+		t.Fatal("doubao must resolve as an endpoint-model provider")
 	}
 }

@@ -169,6 +169,9 @@ type ModelConfig struct {
 	APIKey                string
 	BaseURL               string
 	Model                 string
+	CapabilityModelID     string
+	EndpointSelector      string
+	ModelSelectorKind     string
 	Protocol              string
 	ProviderID            string
 	ProfileID             string
@@ -179,6 +182,7 @@ type ModelConfig struct {
 	ContextWindow         int
 	AutoCompactTokenLimit int
 	Capabilities          tool.ModelCapabilities
+	ReasoningEffort       string
 }
 
 type LLMRequest struct {
@@ -188,6 +192,9 @@ type LLMRequest struct {
 	Tools              []tool.ToolSchema
 	AttributedTools    []AttributedToolSchema
 	Model              string
+	CapabilityModelID  string
+	EndpointSelector   string
+	ModelSelectorKind  string
 	Temperature        float64
 	MaxTokens          int
 	ContextWindowState ContextWindowState

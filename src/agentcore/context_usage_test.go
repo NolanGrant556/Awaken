@@ -3,8 +3,10 @@ package agentcore
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	convcontext "awaken/src/context"
+	"awaken/src/llm"
 	"awaken/src/tool"
 )
 
@@ -20,8 +22,11 @@ func TestContextUsageSnapshotClassifiesTypedSourcesWithoutDebugDuplication(t *te
 		Function: tool.ToolFunctionSchema{Name: "builtin_test", Description: "builtin", Parameters: tool.ToolParametersSchema{Type: "object"}},
 	}}
 	builder := NewRequestBuilder(AgentConfig{
-		SystemPrompt:          "base instructions\n{{.RuntimeInfo}}",
-		ModelConfig:           ModelConfig{Model: "test-model", ContextWindow: 128000},
+		SystemPrompt: "base instructions\n{{.RuntimeInfo}}",
+		ModelConfig: ModelConfig{
+			Model: "ep-test", CapabilityModelID: "doubao-seed-2.1-pro",
+			EndpointSelector: "ep-test", ModelSelectorKind: "endpoint", ContextWindow: 128000,
+		},
 		MemoryContextProvider: func() (string, error) { return memory, nil },
 		SkillContextBlocks:    []ContextBlock{{ID: "skill", Content: skillBody}},
 	})
@@ -55,6 +60,9 @@ func TestContextUsageSnapshotClassifiesTypedSourcesWithoutDebugDuplication(t *te
 	}
 	if snapshot.SchemaVersion != 4 || snapshot.EstimatorID != "awaken_leaf_v4" {
 		t.Fatalf("expected v4 context estimator, got schema=%d estimator=%s", snapshot.SchemaVersion, snapshot.EstimatorID)
+	}
+	if snapshot.ModelID != "ep-test" || snapshot.CapabilityModelID != "doubao-seed-2.1-pro" || snapshot.EndpointSelector != "ep-test" || snapshot.ModelSelectorKind != "endpoint" {
+		t.Fatalf("context snapshot lost capability/endpoint identity: %+v", snapshot)
 	}
 }
 
@@ -124,5 +132,38 @@ func TestContextUsageSnapshotUsesToolProvenanceAndBalancesPreparedOverhead(t *te
 	}
 	if snapshot.ContextEpochBoundaryReason != "tool_schema_changed" {
 		t.Fatalf("context snapshot lost epoch boundary reason: %+v", snapshot)
+	}
+}
+
+func TestReasoningPolicyEntersEpochAndModelUsageIdentity(t *testing.T) {
+	candidate := contextEpochCandidate("thread", ModelConfig{
+		ProviderID: "doubao", ProfileID: "profile", ReasoningEffort: " MAX ",
+		CapabilityModelID: "doubao-seed-2.1-pro", EndpointSelector: "ep-test", ModelSelectorKind: "endpoint",
+	}, LLMRequest{Model: "ep-test"}, "openai_chat_completions_v1", "https://ark.cn-beijing.volces.com/api/v3")
+	if candidate.ReasoningPolicy != "max" {
+		t.Fatalf("context epoch reasoning policy = %q", candidate.ReasoningPolicy)
+	}
+	if candidate.ModelID != "ep-test" || candidate.CapabilityModelID != "doubao-seed-2.1-pro" || candidate.EndpointSelector != "ep-test" || candidate.ModelSelectorKind != "endpoint" {
+		t.Fatalf("context epoch lost capability/endpoint identity: %+v", candidate)
+	}
+
+	usage := modelUsageRecord(
+		"request", "ep-test", "openai_chat",
+		llm.Config{ProviderID: "doubao", ProfileID: "profile", CapabilityModelID: "doubao-seed-2.1-pro", EndpointSelector: "ep-test", ModelSelectorKind: "endpoint", ReasoningEffort: " MAX "},
+		llm.RequestPurposeAgentTurn, llm.PreparedRequest{}, time.Now(), nil, nil, nil,
+	)
+	if usage.ReasoningPolicy != "max" {
+		t.Fatalf("agent usage reasoning policy = %q", usage.ReasoningPolicy)
+	}
+	if usage.ModelID != "ep-test" || usage.CapabilityModelID != "doubao-seed-2.1-pro" || usage.EndpointSelector != "ep-test" || usage.ModelSelectorKind != "endpoint" {
+		t.Fatalf("model usage lost capability/endpoint identity: %+v", usage)
+	}
+	auxiliary := modelUsageRecord(
+		"title", "kimi-k2.6", "openai_chat",
+		llm.Config{ProviderID: "kimi-cn", ProfileID: "profile", ReasoningEffort: "max"},
+		llm.RequestPurposeThreadTitle, llm.PreparedRequest{}, time.Now(), nil, nil, nil,
+	)
+	if auxiliary.ReasoningPolicy != "" {
+		t.Fatalf("auxiliary usage inherited agent reasoning policy: %+v", auxiliary)
 	}
 }

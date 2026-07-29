@@ -26,6 +26,7 @@ import (
 	"awaken/src/filestore"
 	"awaken/src/llm"
 	"awaken/src/mcpclient"
+	"awaken/src/modelprofile"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 	"awaken/src/skills"
@@ -37,6 +38,27 @@ import (
 
 type serverSkillTrashAdapter struct {
 	dir string
+}
+
+type threadPreferenceProfileStore struct{}
+
+func (threadPreferenceProfileStore) ListReady() (modelprofile.ProfileCatalog, error) {
+	return modelprofile.ProfileCatalog{
+		DefaultProfileID: "profile-kimi",
+		Profiles: []modelprofile.ProfileSummary{{
+			ID: "profile-kimi", ProviderID: "kimi-cn", DisplayName: "Kimi", ModelID: "kimi-k3", IsDefault: true,
+		}},
+	}, nil
+}
+
+func (threadPreferenceProfileStore) Resolve(profileID string) (modelprofile.ResolvedProfile, error) {
+	if profileID != "profile-kimi" {
+		return modelprofile.ResolvedProfile{}, modelprofile.ErrProfileUnavailable
+	}
+	return modelprofile.ResolvedProfile{
+		ProfileSummary:        modelprofile.ProfileSummary{ID: profileID, ProviderID: "kimi-cn", DisplayName: "Kimi", ModelID: "kimi-k3"},
+		ReasoningEffortLevels: []string{"high", "max"},
+	}, nil
 }
 
 func (a serverSkillTrashAdapter) TrashPath(source string) (trash.TrashResult, error) {
@@ -175,9 +197,6 @@ func TestModelProvidersEndpoint(t *testing.T) {
 	seen := map[string]bool{}
 	for _, provider := range providers {
 		seen[provider.ID] = true
-		if provider.ID == "doubao" || provider.DisplayName == "Doubao" {
-			t.Fatal("doubao must not be exposed as a separate provider")
-		}
 		if provider.ID == "deepseek" {
 			if got := provider.ModelCapabilities["deepseek-v4-pro"].ContextWindow; got != 1000000 {
 				t.Fatalf("expected deepseek-v4-pro context window metadata, got %d", got)
@@ -187,11 +206,11 @@ func TestModelProvidersEndpoint(t *testing.T) {
 			}
 		}
 		if provider.ID == "kimi-cn" {
-			if got := provider.ModelCapabilities["kimi-k2.6"].ContextWindow; got != 256*1024 {
-				t.Fatalf("expected kimi-k2.6 context window metadata, got %d", got)
+			if got := provider.ModelCapabilities["kimi-k3"].ContextWindow; got != 1024*1024 {
+				t.Fatalf("expected kimi-k3 context window metadata, got %d", got)
 			}
-			if got := provider.ModelCapabilities["kimi-k2.6"].DefaultMaxTokens; got != 32*1024 {
-				t.Fatalf("expected kimi-k2.6 default output metadata, got %d", got)
+			if got := provider.ModelCapabilities["kimi-k3"].DefaultMaxTokens; got != 32*1024 {
+				t.Fatalf("expected kimi-k3 default output metadata, got %d", got)
 			}
 		}
 	}
@@ -741,7 +760,10 @@ func TestRenameAndDeleteThreadEndpoints(t *testing.T) {
 		})
 	})
 
-	ts := httptest.NewServer(NewRouter(runService, nil))
+	ts := httptest.NewServer(newRouterInternal(routerConfig{
+		runService: runService,
+		control:    &ControlConfig{ModelProfileStore: threadPreferenceProfileStore{}},
+	}))
 	defer ts.Close()
 
 	createBody := fmt.Sprintf(`{"input":"thread to rename","workspace":{"workspace_root":%q}}`, workspaceRoot)
@@ -782,6 +804,63 @@ func TestRenameAndDeleteThreadEndpoints(t *testing.T) {
 	}
 	if renamed.Label != "Renamed from API" {
 		t.Fatalf("expected renamed label, got %q", renamed.Label)
+	}
+
+	preferenceReq, err := http.NewRequest(
+		http.MethodPatch,
+		ts.URL+"/v1/threads/"+created.ThreadID+"/model-preference",
+		strings.NewReader(`{"model_profile_id":"profile-kimi","reasoning_effort":"max"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preferenceReq.Header.Set("Content-Type", "application/json")
+	preferenceResp, err := http.DefaultClient.Do(preferenceReq)
+	if err != nil {
+		t.Fatalf("PATCH model preference failed: %v", err)
+	}
+	defer preferenceResp.Body.Close()
+	if preferenceResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from model preference, got %d", preferenceResp.StatusCode)
+	}
+	var preferred awruntime.ThreadSnapshot
+	if err := json.NewDecoder(preferenceResp.Body).Decode(&preferred); err != nil {
+		t.Fatal(err)
+	}
+	if preferred.SelectedModelProfileID != "profile-kimi" || preferred.ReasoningEffortByProfile["profile-kimi"] != "max" {
+		t.Fatalf("unexpected model preference: %+v", preferred)
+	}
+
+	for _, invalid := range []struct {
+		name string
+		body string
+	}{
+		{name: "unknown profile", body: `{"model_profile_id":"profile-deleted","reasoning_effort":"max"}`},
+		{name: "unsupported effort", body: `{"model_profile_id":"profile-kimi","reasoning_effort":"low"}`},
+	} {
+		t.Run(invalid.name, func(t *testing.T) {
+			req, reqErr := http.NewRequest(
+				http.MethodPatch,
+				ts.URL+"/v1/threads/"+created.ThreadID+"/model-preference",
+				strings.NewReader(invalid.body),
+			)
+			if reqErr != nil {
+				t.Fatal(reqErr)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			response, requestErr := http.DefaultClient.Do(req)
+			if requestErr != nil {
+				t.Fatal(requestErr)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusBadRequest {
+				t.Fatalf("expected invalid preference to return 400, got %d", response.StatusCode)
+			}
+		})
+	}
+	currentThreads := runService.ListThreads()
+	if len(currentThreads) != 1 || currentThreads[0].SelectedModelProfileID != "profile-kimi" || currentThreads[0].ReasoningEffortByProfile["profile-kimi"] != "max" {
+		t.Fatalf("invalid preferences mutated thread metadata: %+v", currentThreads)
 	}
 
 	deleteReq, err := http.NewRequest(http.MethodDelete, ts.URL+"/v1/threads/"+created.ThreadID, nil)

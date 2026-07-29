@@ -43,6 +43,8 @@ type Run struct {
 	CreatedAt        time.Time            `json:"created_at"`
 	UpdatedAt        time.Time            `json:"updated_at"`
 	FinishedAt       *time.Time           `json:"finished_at,omitempty"`
+	ModelProfileID   string               `json:"model_profile_id,omitempty"`
+	ReasoningEffort  string               `json:"reasoning_effort,omitempty"`
 }
 
 type Event struct {
@@ -117,6 +119,16 @@ func NewSession(runID, threadID, input string, attachments []RunInputAttachment,
 		userQuestions:        make(map[string]*pendingUserQuestion),
 		externalInteractions: make(map[string]*pendingExternalInteraction),
 	}
+}
+
+func (s *Session) SetModelSelection(profileID, reasoningEffort string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.run.ModelProfileID = strings.TrimSpace(profileID)
+	s.run.ReasoningEffort = strings.TrimSpace(reasoningEffort)
+	s.mu.Unlock()
 }
 
 func (s *Session) SetSemanticRecorder(recorder agentcore.SemanticRecorder) {

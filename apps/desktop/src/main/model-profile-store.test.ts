@@ -30,7 +30,191 @@ afterEach(async () => {
 });
 
 describe("ModelProfileStore", () => {
-  it("exposes all three current Kimi Coding Plan model IDs", () => {
+  it("groups the ten entries into Coding Plan, API, and Agent Plan", () => {
+    const providers = new ModelProfileStore(configDir).listProviders();
+    expect(providers.filter((provider) => provider.access_type === "coding_plan").map((provider) => provider.id))
+      .toEqual(["kimi-coding-plan", "volcengine", "qwen-token-plan"]);
+    expect(providers.filter((provider) => provider.access_type === "api").map((provider) => provider.id))
+      .toEqual(["kimi-cn", "minimax", "glm", "qwen", "doubao", "deepseek"]);
+    expect(providers.filter((provider) => provider.access_type === "agent_plan").map((provider) => provider.id))
+      .toEqual(["volcengine-agent-plan"]);
+  });
+
+  it("resolves the requested enabled profile instead of forcing the global default", async () => {
+    const store = new ModelProfileStore(configDir);
+    const first = await store.saveProfile({
+      providerId: "glm",
+      modelId: "glm-5.2",
+      apiKey: "glm-key",
+      isDefault: true,
+      advanced: { defaultReasoningEffort: "high" },
+    });
+    const second = await store.saveProfile({
+      providerId: "kimi-cn",
+      modelId: "kimi-k3",
+      apiKey: "kimi-key",
+      isDefault: false,
+      advanced: { defaultReasoningEffort: "max" },
+    });
+
+    expect((await store.resolveDefaultRunProfile())?.profileId).toBe(first.id);
+    expect(await store.resolveRunProfile(second.id, "low")).toMatchObject({
+      profileId: second.id,
+      providerId: "kimi-cn",
+      modelId: "kimi-k3",
+      reasoningEffort: "low",
+    });
+    expect((await store.resolveRunProfile(first.id, "low"))?.reasoningEffort).toBe("high");
+  });
+
+  it("treats configured models as tool-capable without a separate probe", async () => {
+    const store = new ModelProfileStore(configDir);
+    const profile = await store.saveProfile({
+      providerId: "qwen",
+      modelId: "custom-tool-model",
+      apiKey: "test-key",
+      advanced: { supportsTools: "unsupported" },
+    });
+
+    expect(
+      store.listProviders().find((provider) => provider.id === "minimax")
+        ?.model_capabilities?.["MiniMax-M3"]?.supports_tools,
+    ).toBe("ready");
+    await expect(store.resolveRunProfile(profile.id)).resolves.toMatchObject({
+      supportsTools: "ready",
+    });
+  });
+
+  it("reveals Agent Plan effort only after an exact model accepts the controlled parameter", async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: url.endsWith("/models") ? [{ id: "glm-5.2" }] : [] }),
+      }) as Response
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new ModelProfileStore(configDir);
+    await store.saveAgentPlanAccount({ apiKey: "test-key" });
+    const profile = await store.saveProfile({
+      providerId: "volcengine-agent-plan",
+      modelId: "glm-5.2",
+    });
+
+    await expect(store.testAgentPlanReasoningCapability({
+      id: profile.id,
+      providerId: "volcengine-agent-plan",
+      modelId: "glm-5.2",
+      baseURL: "https://ignored.example/v1",
+      apiKey: "test-key",
+    })).resolves.toMatchObject({
+      ok: true,
+      reasoningEffort: { levels: ["high", "max"], defaultLevel: "high" },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(
+      fetchMock.mock.calls.filter(([, init]) => init?.body).map(([, init]) =>
+        JSON.parse((init as RequestInit).body as string),
+      ),
+    ).toEqual([
+      expect.objectContaining({ reasoning_effort: "high" }),
+      expect.objectContaining({ reasoning_effort: "max" }),
+    ]);
+    expect(
+      fetchMock.mock.calls.every(([, init]) => (init as RequestInit).signal instanceof AbortSignal),
+    ).toBe(true);
+    expect(store.listProviders().find((provider) => provider.id === "volcengine-agent-plan")
+      ?.model_capabilities?.["glm-5.2"]?.reasoning_effort).toBeUndefined();
+    await expect(store.reasoningCapabilityForProfile(profile.id)).resolves.toEqual({
+      levels: ["high", "max"], default_level: "high",
+    });
+    await expect(store.listProfiles()).resolves.toEqual([
+      expect.objectContaining({
+        id: profile.id,
+        effective_capability: expect.objectContaining({
+          reasoning_effort: { levels: ["high", "max"], default_level: "high" },
+        }),
+      }),
+    ]);
+  });
+
+  it("does not persist a partial Agent Plan effort matrix when any level fails", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
+      .mockResolvedValueOnce({ ok: false, status: 422 } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new ModelProfileStore(configDir);
+
+    await expect(store.testAgentPlanReasoningCapability({
+      providerId: "volcengine-agent-plan",
+      modelId: "qwen3.8-max-preview",
+      apiKey: "test-key",
+    })).resolves.toMatchObject({ ok: false });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      fetchMock.mock.calls.map(([, init]) =>
+        JSON.parse((init as RequestInit).body as string).reasoning_effort,
+      ),
+    ).toEqual(["low", "medium"]);
+    expect(
+      store.listProviders().find((provider) => provider.id === "volcengine-agent-plan")
+        ?.model_capabilities?.["qwen3.8-max-preview"]?.reasoning_effort,
+    ).toBeUndefined();
+    await expect(
+      readFile(join(configDir, "cache", "model-capabilities.json"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("applies one total timeout to the complete Agent Plan effort probe", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+            });
+          }),
+        ),
+      );
+      const store = new ModelProfileStore(configDir);
+      const resultPromise = store.testAgentPlanReasoningCapability({
+        providerId: "volcengine-agent-plan",
+        modelId: "doubao-seed-2.1-pro",
+        apiKey: "test-key",
+      });
+
+      await vi.advanceTimersByTimeAsync(8_000);
+      await expect(resultPromise).resolves.toEqual({
+        ok: false,
+        message: "Agent Plan 推理强度验证超时：完整矩阵继续隐藏。",
+      });
+      await expect(
+        readFile(join(configDir, "cache", "model-capabilities.json"), "utf8"),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps ark-code-latest effort hidden", async () => {
+    const store = new ModelProfileStore(configDir);
+    await expect(store.testAgentPlanReasoningCapability({
+      providerId: "volcengine-agent-plan",
+      modelId: "ark-code-latest",
+      apiKey: "test-key",
+    })).resolves.toMatchObject({ ok: false });
+    expect(
+      store.listProviders().find((provider) => provider.id === "volcengine-agent-plan")
+        ?.model_capabilities?.["ark-code-latest"]?.reasoning_effort,
+    ).toBeUndefined();
+  });
+
+  it("exposes all current Kimi Coding Plan model IDs", () => {
     const store = new ModelProfileStore(configDir);
     const kimi = store
       .listProviders()
@@ -38,8 +222,8 @@ describe("ModelProfileStore", () => {
 
     expect(kimi).toMatchObject({
       base_url: "https://api.kimi.com/coding/v1",
-      default_model: "kimi-for-coding",
-      models: ["k3", "kimi-for-coding", "kimi-for-coding-highspeed"],
+      default_model: "k3",
+      models: ["k3", "k3-256k", "kimi-for-coding", "kimi-for-coding-highspeed"],
       docs_url: "https://www.kimi.com/code/docs/kimi-code/models.html",
     });
   });
@@ -109,7 +293,7 @@ describe("ModelProfileStore", () => {
     });
   });
 
-  it("stores provider capability overrides under ~/.awaken/cache", async () => {
+  it("does not treat a profileless connection-test body as scoped capability metadata", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
@@ -134,10 +318,9 @@ describe("ModelProfileStore", () => {
       isDefault: true,
     })).resolves.toMatchObject({ ok: true });
 
-    const cached = JSON.parse(
-      await readFile(join(configDir, "cache", "model-capabilities.json"), "utf8"),
-    ) as { providers: Record<string, Record<string, { context_window?: number }>> };
-    expect(cached.providers.deepseek?.["deepseek-v4-pro"]?.context_window).toBe(256_000);
+    await expect(
+      readFile(join(configDir, "cache", "model-capabilities.json"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("normalizes the Kimi Code base URL before testing", async () => {
@@ -624,6 +807,83 @@ describe("ModelProfileStore", () => {
         profile_status: "unreadable",
       }),
     ]);
+  });
+
+  it("projects an Agent Plan profile as unreadable when account metadata is corrupt", async () => {
+    await mkdir(join(configDir, "config"), { recursive: true });
+    await writeFile(
+      join(configDir, "config", "agent-plan-account.json"),
+      "{not-json",
+      "utf8",
+    );
+    const store = new ModelProfileStore(configDir);
+
+    const saved = await store.saveProfile({
+      providerId: "volcengine-agent-plan",
+      modelId: "glm-5.2",
+      enabled: true,
+      isDefault: true,
+    });
+
+    expect(saved).toMatchObject({
+      has_key: false,
+      profile_status: "unreadable",
+    });
+    await expect(store.resolveRunProfile(saved.id)).rejects.toMatchObject({
+      name: "AwakenEnvStoreError",
+      code: "unreadable",
+    });
+    await expect(store.listProfiles()).resolves.toEqual([
+      expect.objectContaining({
+        id: saved.id,
+        profile_status: "unreadable",
+      }),
+    ]);
+  });
+
+  it("restores Agent Plan key, metadata, revision, and catalog when combined profile save fails", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const authorization = new Headers(init?.headers).get("Authorization") ?? "";
+      if (authorization.includes("new-secret")) {
+        await rm(modelsPath(), { force: true });
+        await mkdir(modelsPath());
+        return new Response(JSON.stringify({ data: [{ id: "new-model" }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ data: [{ id: "old-model" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const store = new ModelProfileStore(configDir);
+    await store.saveAgentPlanAccount({ apiKey: "old-secret" });
+    await writeModels(JSON.stringify({ version: 2, profiles: [] }));
+    const metadataPath = join(configDir, "config", "agent-plan-account.json");
+    const envPath = join(configDir, ".env");
+    const previousMetadataRaw = await readFile(metadataPath, "utf8");
+    const previousEnv = await readFile(envPath, "utf8");
+
+    await expect(store.saveProfile({
+      providerId: "volcengine-agent-plan",
+      modelId: "glm-5.2",
+      apiKey: "new-secret",
+      enabled: true,
+      isDefault: true,
+    })).rejects.toBeInstanceOf(Error);
+
+    expect(await readFile(metadataPath, "utf8")).toBe(previousMetadataRaw);
+    expect(await readFile(envPath, "utf8")).toBe(previousEnv);
+    await expect(store.getAgentPlanAccount()).resolves.toMatchObject({
+      masked_key: "•••• cret",
+      credential_revision: 1,
+      model_ids: ["ark-code-latest", "old-model"],
+    });
+    expect(
+      store.listProviders().find((provider) => provider.id === "volcengine-agent-plan")?.models,
+    ).toEqual(["ark-code-latest", "old-model"]);
   });
 
   it("normalizes an existing Volcengine Coding Plan profile to the coding gateway", async () => {

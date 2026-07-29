@@ -5,6 +5,8 @@ import {
   type ACPRunnersSettings,
   type ACPRunnerUpdateRequest,
   type ACPRunnerView,
+  type AgentPlanAccount,
+  type AgentPlanAccountSaveRequest,
   type AttachmentPickResult,
   type ArtifactOpenRequest,
   type ArtifactOpenResult,
@@ -27,6 +29,7 @@ import {
   type InstallSkillRequest,
   type InstallSkillResponse,
   type ModelProfileBalancesResult,
+  type ModelReasoningCapabilityTestResult,
   type UserQuestionAnswer,
   type ModelProfileSaveRequest,
   type ModelProfileTestResult,
@@ -79,6 +82,7 @@ import {
   type StartRunRequest,
   type SupervisorStatusInfo,
   type ThreadDeleteResult,
+  type ThreadModelPreferenceRequest,
   type UpdateMcpServerConfigRequest,
   type ProjectFoldersPickResult,
   type UpsertProjectResult,
@@ -204,16 +208,25 @@ export type RuntimeClient = {
   enableSkill: (id: string) => Promise<void>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
+  getAgentPlanAccount: () => Promise<AgentPlanAccount>;
+  saveAgentPlanAccount: (request: AgentPlanAccountSaveRequest) => Promise<AgentPlanAccount>;
+  refreshAgentPlanModels: () => Promise<AgentPlanAccount>;
+  deleteAgentPlanAccount: () => Promise<void>;
   saveModelProfile: (request: ModelProfileSaveRequest) => Promise<RuntimeModelProfileSummary>;
   deleteModelProfile: (profileId: string) => Promise<void>;
   setDefaultModelProfile: (profileId: string) => Promise<RuntimeModelProfileSummary>;
   testModelProfile: (request: ModelProfileSaveRequest) => Promise<ModelProfileTestResult>;
+  testAgentPlanReasoningCapability: (request: ModelProfileSaveRequest) => Promise<ModelReasoningCapabilityTestResult>;
   syncModelCapabilities: () => Promise<ModelProvider[]>;
   getModelProfileBalances: () => Promise<ModelProfileBalancesResult>;
   getRun: (runId: string) => Promise<RuntimeRun>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
   listThreads: () => Promise<RuntimeThread[]>;
   renameThread: (threadId: string, label: string) => Promise<RuntimeThread>;
+  updateThreadModelPreference: (
+    threadId: string,
+    request: ThreadModelPreferenceRequest,
+  ) => Promise<RuntimeThread>;
   deleteThread: (threadId: string) => Promise<ThreadDeleteResult>;
   listProjects: (includeRemoved?: boolean) => Promise<RuntimeProject[]>;
   listProjectDirectory: (
@@ -395,16 +408,26 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     enableSkill: (id) => bridge.enableSkill(id),
     listModelProviders: () => bridge.listModelProviders(),
     listModelProfiles: () => bridge.listModelProfiles(),
+    getAgentPlanAccount: () => bridge.getAgentPlanAccount(),
+    saveAgentPlanAccount: (request) =>
+      unwrapDesktopOperation(bridge.saveAgentPlanAccount(request)),
+    refreshAgentPlanModels: () =>
+      unwrapDesktopOperation(bridge.refreshAgentPlanModels()),
+    deleteAgentPlanAccount: () => bridge.deleteAgentPlanAccount(),
     saveModelProfile: (request) => unwrapDesktopOperation(bridge.saveModelProfile(request)),
     deleteModelProfile: (profileId) => bridge.deleteModelProfile(profileId),
     setDefaultModelProfile: (profileId) => bridge.setDefaultModelProfile(profileId),
     testModelProfile: (request) => unwrapDesktopOperation(bridge.testModelProfile(request)),
+    testAgentPlanReasoningCapability: (request) =>
+      unwrapDesktopOperation(bridge.testAgentPlanReasoningCapability(request)),
     syncModelCapabilities: () => bridge.syncModelCapabilities(),
     getModelProfileBalances: () => bridge.getModelProfileBalances(),
     getRun: (runId) => bridge.getRun(runId),
     getThreadTranscript: (threadId) => bridge.getThreadTranscript(threadId),
     listThreads: () => bridge.listThreads(),
     renameThread: (threadId, label) => bridge.renameThread(threadId, label),
+    updateThreadModelPreference: (threadId, request) =>
+      bridge.updateThreadModelPreference(threadId, request),
     deleteThread: (threadId) => bridge.deleteThread(threadId),
     listProjects: (includeRemoved) => bridge.listProjects(includeRemoved),
     listProjectDirectory: (request) => bridge.listProjectDirectory(request),

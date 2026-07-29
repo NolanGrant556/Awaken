@@ -1,13 +1,13 @@
 # 火山 Agent Plan 配置与工具编排开发设计
 
-> 文档性质：实施草案，不是当前能力说明。本文描述的是待实现目标；当前支持、不支持和真实验收仍以 `docs/` 各功能域权威文档为准。实现完成后，改变的事实必须迁入对应权威文档，本草案不能成为第二套长期规范。
+> 文档性质：后续工具服务实施草案，不是当前能力说明。模型配置阶段已经落入当前代码和 `docs/05_模型与供应商配置/模型配置与调用.md`：三类模型入口、火山 Agent Plan 单账户/profile、动态模型目录、默认工具调用能力和会话级 reasoning effort 已实现。本文其余图片、视频、搜索和媒体编排仍是待实现目标；当前支持、不支持和真实验收只以 `docs/` 各功能域权威文档为准。
 
 ## 1. 目标
 
-在 Awaken 中接入火山 Agent Plan 的两类首期能力：
+本设计把火山 Agent Plan 分为两个独立阶段：
 
-1. **模型供应商**：用户可以在“设置 > 模型”中配置“火山 Agent Plan”，选择套餐内支持的火山、Kimi、DeepSeek、GLM、MiniMax 等模型作为当前主模型。
-2. **独立工具服务**：用户可以通过独立的“火山 Agent Plan API”配置入口启用 Seedream 图片能力，以及 Seedance 视频生成、编辑、延长和多模态参考能力。当前选择的任何支持工具调用的主模型都可以编排这些工具，不要求主模型来自火山 Agent Plan。
+1. **当前模型供应商阶段**：用户可以在“设置 > 模型 > Agent Plan”配置火山 Agent Plan 单账户和主模型。模型 ID 来自套餐 `/models`，不把营销名称当可调用 ID。
+2. **待实现独立工具服务阶段**：用户通过独立的“火山 Agent Plan API”配置入口启用 Seedream、Seedance 等工具能力。当前选择的任何支持工具调用的主模型都可以编排这些工具，不要求主模型来自火山 Agent Plan。
 
 用户只需要描述目标。当前主模型负责理解需求、拆解步骤、依据本次工具 schema 与 Provider 能力矩阵编写提示词和业务参数、检查结果并决定是否继续调用；Awaken 负责把 typed arguments 转换为供应商私有 API 请求、安全执行、持久化过程、恢复任务和交付媒体文件。
 
@@ -31,7 +31,7 @@ K3 只是主模型示例，不是架构绑定对象。以下两种运行方式�
 
 前提只有两个：
 
-- 当前模型 profile 已被证明支持稳定的 Function Calling；
+- 当前模型 profile 按模型目录默认支持工具调用；
 - 火山 Agent Plan 工具服务已配置且对应能力在本次 run 中 ready。
 
 不得以 `providerId === "volcengine-agent-plan"` 作为暴露工具的条件，也不得把生图、生视频状态写进某个聊天模型的输入能力字段。
@@ -103,13 +103,13 @@ credentialSource: AgentPlanAccount
 - Base URL 默认固定，普通设置不允许改成普通方舟或 Coding Plan 地址；
 - 模型目录展示套餐当前支持的火山及第三方模型名称，不用 K3 代表整个套餐；
 - `ark-code-latest` 可以作为自动选择项，精确模型作为高级选择；
-- 每个模型必须有 `supportsTools=ready|unsupported|unknown` 状态；
-- 连接测试只证明聊天端点可达，工具调用能力必须用最小 Function Calling probe 单独验证；
+- 每个当前模型默认以 `supportsTools=ready` 消费工具 schema；存量状态字段仅作协议兼容；
+- 连接测试是设置页唯一的模型连通性验证，不增加独立 Function Calling probe；
 - Renderer 不读取 Agent Plan API Key 明文。
 
 用户选择此处的模型时，该模型是本次 run 的主模型，但不会因为来自 Agent Plan 就自动获得尚未配置的工具权限。
 
-官方把 `/api/plan/v3` 定义为 OpenAI-compatible AI 工具接入面，但未点名 Awaken。产品和文档只能表述为“基于官方兼容协议接入”，不能宣称“火山官方已适配或认证 Awaken”。Function Calling 的通用方舟文档也不能单独证明 Agent Plan 中每一个套餐模型都稳定支持工具调用，因此必须保留逐 profile probe。
+官方把 `/api/plan/v3` 定义为 OpenAI-compatible AI 工具接入面，但未点名 Awaken。产品和文档只能表述为“基于官方兼容协议接入”，不能宣称“火山官方已适配或认证 Awaken”。当前产品对目录中的主模型采用默认支持工具调用的统一语义，不向用户暴露逐 profile 工具验证。
 
 ### 3.2 设置 > 工具服务 > 火山 Agent Plan API
 
@@ -919,7 +919,7 @@ AwakenMediaGeneration
 
 - 新增 Agent Plan account store、credential resolver、原子写入和恢复状态；
 - 在模型 catalog 中新增 `volcengine-agent-plan`，并与 Go registry 保持 parity；
-- 新增保存、删除、测试账户和逐能力 probe 的 typed IPC；
+- 新增保存、删除、测试账户和工具服务能力状态的 typed IPC；
 - 新增 Tool Provider 设置与 active-run 修改门禁；
 - API Key 永不返回 Renderer；
 - 新增窄 `ready_media_preview` 授权、短生命周期媒体 handle 和 MP4 byte range；
@@ -961,7 +961,7 @@ AwakenMediaGeneration
 - 增加 `supportsTools` 的静态目录、动态覆盖、持久化和 Desktop -> Core 传播；
 - Agent Plan 文本请求继续使用 OpenAI-compatible transport；
 - 为 `/api/plan/v3` 增加精确 provider/request policy、usage identity 和错误分类；
-- Function Calling probe 使用最小无副作用工具，不能用普通聊天连接测试代替；
+- 模型工具调用能力按目录默认启用；设置页不提供独立 probe，普通连接测试只负责端点、凭据和模型可达性；
 - 不支持工具的模型可以继续纯聊天，但 run snapshot 不向其暴露 Agent Plan 工具；
 - RequestBuilder 从耐久媒体索引注入紧凑 `MediaContextManifest`，并只对当前任务引用的图片执行按需 `model_content` 水合；
 - 模型支持视觉、图片可授权读取和本轮确有视觉任务必须同时成立，不能把 Artifact 存在误判为模型已经看见；
@@ -1067,11 +1067,11 @@ DELETE https://ark.cn-beijing.volces.com/api/plan/v3/contents/generations/tasks/
 
 ## 12. 实施顺序
 
-### 阶段一：账户、模型与工具能力合同
+### 阶段一：账户、模型与工具能力合同（模型配置部分已落地）
 
-- 建立 `AgentPlanAccount` 与独立 API 配置入口；
-- 新增火山 Agent Plan 模型 provider；
-- 补齐 `supportsTools` 和 Function Calling probe；
+- 已建立固定单账户 `AgentPlanAccount`，当前入口位于“设置 > 模型 > Agent Plan”；独立工具服务配置页仍待实现；
+- 已新增火山 Agent Plan 模型 provider、动态 `/models` 目录、固定 endpoint 和 provider account credential reference；
+- 已补齐模型侧默认 `supportsTools`；工具服务侧 capability snapshot 仍待实现；
 - 建立 provider-neutral media capability/tool definitions，以及按 Provider/生成模型物化的参数能力矩阵；
 - 明确设置页只管理账户、连接状态和能力启停，创作参数只进入模型可见 tool schema，不增加 Awaken 侧额度限制；
 - 完成 TS/Go catalog parity。
@@ -1105,7 +1105,7 @@ DELETE https://ark.cn-beijing.volces.com/api/plan/v3/contents/generations/tasks/
 - Renderer 永远得不到 API Key；
 - TypeScript catalog、Go registry、capability merge 和 `supportsTools` parity；
 - `CapabilityReadiness -> CapabilityDisplayState -> RunToolAvailabilitySnapshot` 映射覆盖全部状态，`ready_unverified` 可暴露工具、`denied/unavailable/disabled/needs_auth/unknown` 不暴露；
-- Agent Plan chat endpoint、Function Calling probe 和错误归一化；
+- Agent Plan chat endpoint、默认工具能力和错误归一化；
 - tool schema 与执行 Provider 来自同一 run snapshot；
 - 主模型无法通过参数覆盖 Provider、endpoint、credential 或保存路径；
 - 用户明确给出的尺寸、比例和时长约束进入 tool arguments；用户未指定时由主模型选择，不依赖 Renderer 默认值；
@@ -1181,11 +1181,9 @@ Gallery、mock、普通连接测试、直接调用 Provider API 和旧截图只�
 
 ## 14. 当前明确不支持与非目标
 
-在代码和验收落地前，下列首期目标都必须标记为目标设计而非当前能力：
+下列内容仍必须标记为目标设计而非当前能力：
 
-- 火山 Agent Plan 模型 provider；
 - 独立 Agent Plan Tool Provider 配置；
-- `supportsTools` 统一能力；
 - 内建图片与视频工具；
 - 图片/视频 Artifact 与 Workbench 媒体交付；
 - thread 媒体工作集、稳定人类可见编号、不可变版本图、历史回选与分支继续编辑；

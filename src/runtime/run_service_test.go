@@ -126,6 +126,7 @@ func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
 					Temperature:        profile.Temperature,
 					MaxTokens:          profile.MaxTokens,
 					ContextWindow:      profile.ContextWindow,
+					ReasoningEffort:    profile.ReasoningEffort,
 				}
 			}
 			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
@@ -158,6 +159,7 @@ func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
 			APIKey:             "secret-a",
 			CredentialRevision: 1,
 			ContextWindow:      400000,
+			ReasoningEffort:    "max",
 		},
 	})
 	if err != nil {
@@ -167,6 +169,9 @@ func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
 	if firstCfg.Model != "deepseek-v4-pro" || firstCfg.ProviderID != "deepseek" || firstCfg.ProfileID != "profile-a" || firstCfg.CredentialRevision != 1 || firstCfg.APIKey != "secret-a" || firstCfg.ContextWindow != 400000 {
 		t.Fatalf("unexpected first model config: %+v", firstCfg)
 	}
+	if first.ModelProfileID != "profile-a" || first.ReasoningEffort != "max" {
+		t.Fatalf("run snapshot did not pin model preference: %+v", first)
+	}
 	waitForRunStatus(t, service, first.RunID, "finished")
 	waitForThreadIdle(t, service, first.ThreadID)
 
@@ -175,14 +180,15 @@ func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
 		ThreadID:  first.ThreadID,
 		Workspace: WorkspaceConfig{WorkspaceRoot: workspace},
 		ModelProfile: &ModelProfileConfig{
-			ProfileID:     "profile-b",
-			ProviderID:    "kimi-cn",
-			ModelID:       "kimi-k2.6",
-			BaseURL:       "https://api.moonshot.cn/v1",
-			Protocol:      "openai_chat",
-			AuthScheme:    "bearer",
-			APIKey:        "secret-b",
-			ContextWindow: 500000,
+			ProfileID:       "profile-b",
+			ProviderID:      "kimi-cn",
+			ModelID:         "kimi-k2.6",
+			BaseURL:         "https://api.moonshot.cn/v1",
+			Protocol:        "openai_chat",
+			AuthScheme:      "bearer",
+			APIKey:          "secret-b",
+			ContextWindow:   500000,
+			ReasoningEffort: "high",
 		},
 	})
 	if err != nil {
@@ -193,6 +199,10 @@ func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
 		t.Fatalf("expected reconfigured model config, got %+v", secondCfg)
 	}
 	waitForThreadIdle(t, service, first.ThreadID)
+	threads := service.ListThreads()
+	if len(threads) != 1 || threads[0].SelectedModelProfileID != "profile-b" || threads[0].ReasoningEffortByProfile["profile-b"] != "high" {
+		t.Fatalf("thread preference not persisted: %+v", threads)
+	}
 
 	_, err = service.StartRun(StartRunRequest{
 		Input:     "third",
@@ -632,6 +642,15 @@ func TestModelProfileCacheKeyIncludesNativePDFCapability(t *testing.T) {
 	withPDF.SupportsNativePDF = true
 	if modelProfileCacheKey(base) == modelProfileCacheKey(&withPDF) {
 		t.Fatal("supports_native_pdf must participate in the profile cache key")
+	}
+}
+
+func TestModelProfileCacheKeyIncludesReasoningEffort(t *testing.T) {
+	base := &ModelProfileConfig{ProfileID: "profile", ModelID: "model", ReasoningEffort: "high"}
+	changed := *base
+	changed.ReasoningEffort = "max"
+	if modelProfileCacheKey(base) == modelProfileCacheKey(&changed) {
+		t.Fatal("reasoning effort must participate in the profile cache key")
 	}
 }
 
@@ -1559,6 +1578,12 @@ func TestListThreadsRestoresDurableThreadsAfterRestart(t *testing.T) {
 	firstRun, err := firstService.StartRun(StartRunRequest{
 		Input:     "hello restart",
 		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		ModelProfile: &ModelProfileConfig{
+			ProfileID:       "profile-restart",
+			ProviderID:      "kimi-cn",
+			ModelID:         "kimi-k3",
+			ReasoningEffort: "max",
+		},
 	})
 	if err != nil {
 		t.Fatalf("StartRun returned error: %v", err)
@@ -1586,6 +1611,9 @@ func TestListThreadsRestoresDurableThreadsAfterRestart(t *testing.T) {
 	}
 	if threads[0].Label != "hello restart" {
 		t.Fatalf("expected restored label from first input, got %q", threads[0].Label)
+	}
+	if threads[0].SelectedModelProfileID != "profile-restart" || threads[0].ReasoningEffortByProfile["profile-restart"] != "max" {
+		t.Fatalf("expected restored thread model preference, got %+v", threads[0])
 	}
 }
 

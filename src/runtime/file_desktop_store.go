@@ -133,25 +133,27 @@ type fileLifecycleMutation struct {
 }
 
 type fileSessionMetadata struct {
-	SchemaVersion     int    `json:"schema_version"`
-	ThreadID          string `json:"thread_id"`
-	Title             string `json:"title"`
-	TitleSource       string `json:"title_source,omitempty"`
-	TitleStatus       string `json:"title_status,omitempty"`
-	TitleUpdatedAt    string `json:"title_updated_at,omitempty"`
-	TitleSeedRunID    string `json:"title_seed_run_id,omitempty"`
-	WorkspaceRoot     string `json:"workspace_root"`
-	ProjectID         string `json:"project_id,omitempty"`
-	ScopeID           string `json:"scope_id,omitempty"`
-	LatestRunID       string `json:"latest_run_id,omitempty"`
-	CreatedAt         string `json:"created_at"`
-	UpdatedAt         string `json:"updated_at"`
-	Archived          bool   `json:"archived,omitempty"`
-	Deleted           bool   `json:"deleted,omitempty"`
-	DeletedAt         string `json:"deleted_at,omitempty"`
-	DeleteOperationID string `json:"delete_operation_id,omitempty"`
-	Preview           string `json:"preview,omitempty"`
-	ModelProfileKey   string `json:"model_profile_key,omitempty"`
+	SchemaVersion            int               `json:"schema_version"`
+	ThreadID                 string            `json:"thread_id"`
+	Title                    string            `json:"title"`
+	TitleSource              string            `json:"title_source,omitempty"`
+	TitleStatus              string            `json:"title_status,omitempty"`
+	TitleUpdatedAt           string            `json:"title_updated_at,omitempty"`
+	TitleSeedRunID           string            `json:"title_seed_run_id,omitempty"`
+	WorkspaceRoot            string            `json:"workspace_root"`
+	ProjectID                string            `json:"project_id,omitempty"`
+	ScopeID                  string            `json:"scope_id,omitempty"`
+	LatestRunID              string            `json:"latest_run_id,omitempty"`
+	CreatedAt                string            `json:"created_at"`
+	UpdatedAt                string            `json:"updated_at"`
+	Archived                 bool              `json:"archived,omitempty"`
+	Deleted                  bool              `json:"deleted,omitempty"`
+	DeletedAt                string            `json:"deleted_at,omitempty"`
+	DeleteOperationID        string            `json:"delete_operation_id,omitempty"`
+	Preview                  string            `json:"preview,omitempty"`
+	ModelProfileKey          string            `json:"model_profile_key,omitempty"`
+	SelectedModelProfileID   string            `json:"selected_model_profile_id,omitempty"`
+	ReasoningEffortByProfile map[string]string `json:"reasoning_effort_by_profile,omitempty"`
 	// Source records the thread origin ("" for regular Desktop threads,
 	// "scheduled_task" for scheduled-task dedicated threads).
 	Source    string          `json:"source,omitempty"`
@@ -473,18 +475,20 @@ func storedRecordFromSessionMetadata(meta fileSessionMetadata) storedThreadRecor
 	}
 	return storedThreadRecord{
 		Snapshot: ThreadSnapshot{
-			ThreadID:       meta.ThreadID,
-			ProjectID:      meta.ProjectID,
-			Label:          trimThreadLabel(meta.Title),
-			TitleSource:    source,
-			TitleStatus:    status,
-			TitleUpdatedAt: parseStoredTime(meta.TitleUpdatedAt),
-			TitleSeedRunID: strings.TrimSpace(meta.TitleSeedRunID),
-			RunID:          meta.LatestRunID,
-			Workspace:      workspace,
-			CreatedAt:      parseStoredTime(meta.CreatedAt),
-			UpdatedAt:      parseStoredTime(meta.UpdatedAt),
-			Source:         strings.TrimSpace(meta.Source),
+			ThreadID:                 meta.ThreadID,
+			ProjectID:                meta.ProjectID,
+			Label:                    trimThreadLabel(meta.Title),
+			TitleSource:              source,
+			TitleStatus:              status,
+			TitleUpdatedAt:           parseStoredTime(meta.TitleUpdatedAt),
+			TitleSeedRunID:           strings.TrimSpace(meta.TitleSeedRunID),
+			RunID:                    meta.LatestRunID,
+			Workspace:                workspace,
+			CreatedAt:                parseStoredTime(meta.CreatedAt),
+			UpdatedAt:                parseStoredTime(meta.UpdatedAt),
+			Source:                   strings.TrimSpace(meta.Source),
+			SelectedModelProfileID:   strings.TrimSpace(meta.SelectedModelProfileID),
+			ReasoningEffortByProfile: cloneStringMap(meta.ReasoningEffortByProfile),
 		},
 		ModelProfileKey: meta.ModelProfileKey,
 		Preview:         meta.Preview,
@@ -531,23 +535,25 @@ func (s *FileDesktopStore) upsertThread(snapshot ThreadSnapshot, modelProfileKey
 	existing, err := s.readSessionMetadata(snapshot.ThreadID)
 	if os.IsNotExist(err) {
 		meta := fileSessionMetadata{
-			SchemaVersion:   1,
-			ThreadID:        snapshot.ThreadID,
-			Title:           incomingTitle,
-			TitleSource:     incomingSource,
-			TitleStatus:     incomingStatus,
-			TitleUpdatedAt:  incomingTitleUpdated,
-			TitleSeedRunID:  incomingSeed,
-			WorkspaceRoot:   snapshot.Workspace.WorkspaceRoot,
-			ProjectID:       projectID,
-			ScopeID:         snapshot.Workspace.ScopeID,
-			LatestRunID:     snapshot.RunID,
-			CreatedAt:       formatStoredTime(snapshot.CreatedAt),
-			UpdatedAt:       formatStoredTime(snapshot.UpdatedAt),
-			Preview:         strings.TrimSpace(preview),
-			ModelProfileKey: strings.TrimSpace(modelProfileKey),
-			Source:          strings.TrimSpace(snapshot.Source),
-			Workspace:       snapshot.Workspace,
+			SchemaVersion:            1,
+			ThreadID:                 snapshot.ThreadID,
+			Title:                    incomingTitle,
+			TitleSource:              incomingSource,
+			TitleStatus:              incomingStatus,
+			TitleUpdatedAt:           incomingTitleUpdated,
+			TitleSeedRunID:           incomingSeed,
+			WorkspaceRoot:            snapshot.Workspace.WorkspaceRoot,
+			ProjectID:                projectID,
+			ScopeID:                  snapshot.Workspace.ScopeID,
+			LatestRunID:              snapshot.RunID,
+			CreatedAt:                formatStoredTime(snapshot.CreatedAt),
+			UpdatedAt:                formatStoredTime(snapshot.UpdatedAt),
+			Preview:                  strings.TrimSpace(preview),
+			ModelProfileKey:          strings.TrimSpace(modelProfileKey),
+			SelectedModelProfileID:   strings.TrimSpace(snapshot.SelectedModelProfileID),
+			ReasoningEffortByProfile: cloneStringMap(snapshot.ReasoningEffortByProfile),
+			Source:                   strings.TrimSpace(snapshot.Source),
+			Workspace:                snapshot.Workspace,
 		}
 		return s.writeSessionMetadata(meta)
 	}
@@ -591,6 +597,8 @@ func (s *FileDesktopStore) upsertThread(snapshot ThreadSnapshot, modelProfileKey
 	if strings.TrimSpace(modelProfileKey) != "" {
 		next.ModelProfileKey = strings.TrimSpace(modelProfileKey)
 	}
+	next.SelectedModelProfileID = strings.TrimSpace(snapshot.SelectedModelProfileID)
+	next.ReasoningEffortByProfile = cloneStringMap(snapshot.ReasoningEffortByProfile)
 	if source := strings.TrimSpace(snapshot.Source); source != "" {
 		next.Source = source
 	}

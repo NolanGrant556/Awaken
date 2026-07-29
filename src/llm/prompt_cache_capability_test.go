@@ -114,9 +114,8 @@ func TestPrepareOpenAIPromptCacheRequestContracts(t *testing.T) {
 			cfg: Config{APIKey: "test", ProviderID: "kimi-cn", ProfileID: "p1", BaseURL: "https://proxy.example/v1", Protocol: ProtocolOpenAIChat, Model: "kimi-k2.6"},
 		},
 		{
-			name: "legacy unidentified endpoint keeps reasoning compatibility", stream: true, disableReasoning: true,
-			cfg:               Config{APIKey: "test", BaseURL: "https://proxy.example/deepseek", Protocol: ProtocolOpenAIChat, Model: "deepseek-chat"},
-			wantThinkingField: true,
+			name: "unidentified custom endpoint fails closed", stream: true, disableReasoning: true,
+			cfg: Config{APIKey: "test", BaseURL: "https://proxy.example/deepseek", Protocol: ProtocolOpenAIChat, Model: "deepseek-chat"},
 		},
 	}
 	for _, tt := range tests {

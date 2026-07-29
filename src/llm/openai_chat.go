@@ -24,17 +24,18 @@ func newOpenAITransport() *openaiTransport {
 // --- 请求结构 ---
 
 type openaiChatRequest struct {
-	Model          string                   `json:"model"`
-	Messages       []openaiChatMessage      `json:"messages"`
-	Temperature    *float64                 `json:"temperature,omitempty"`
-	MaxTokens      int                      `json:"max_tokens,omitempty"`
-	Stream         bool                     `json:"stream,omitempty"`
-	Thinking       *openaiThinkingConfig    `json:"thinking,omitempty"`
-	EnableThinking *bool                    `json:"enable_thinking,omitempty"`
-	Reasoning      *openaiReasoningConfig   `json:"reasoning,omitempty"`
-	StreamOptions  *openaiStreamOptions     `json:"stream_options,omitempty"`
-	PromptCacheKey string                   `json:"prompt_cache_key,omitempty"`
-	Tools          []map[string]interface{} `json:"tools,omitempty"`
+	Model           string                   `json:"model"`
+	Messages        []openaiChatMessage      `json:"messages"`
+	Temperature     *float64                 `json:"temperature,omitempty"`
+	MaxTokens       int                      `json:"max_tokens,omitempty"`
+	Stream          bool                     `json:"stream,omitempty"`
+	Thinking        *openaiThinkingConfig    `json:"thinking,omitempty"`
+	EnableThinking  *bool                    `json:"enable_thinking,omitempty"`
+	Reasoning       *openaiReasoningConfig   `json:"reasoning,omitempty"`
+	ReasoningEffort string                   `json:"reasoning_effort,omitempty"`
+	StreamOptions   *openaiStreamOptions     `json:"stream_options,omitempty"`
+	PromptCacheKey  string                   `json:"prompt_cache_key,omitempty"`
+	Tools           []map[string]interface{} `json:"tools,omitempty"`
 }
 
 type openaiStreamOptions struct {
@@ -135,7 +136,11 @@ func (t *openaiTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*
 }
 
 func prepareOpenAIRequest(cfg Config, req Request, stream bool) (PreparedRequest, error) {
+	protocol := resolveProtocol(cfg)
 	url := cfg.BaseURL + "/chat/completions"
+	if protocol == ProtocolMiniMaxChat {
+		url = cfg.BaseURL + "/text/chatcompletion_v2"
+	}
 	req = applyRequestPolicy(cfg, req)
 	cacheMetadata, affinityKey := promptCacheMetadata(cfg, req)
 
@@ -147,6 +152,7 @@ func prepareOpenAIRequest(cfg Config, req Request, stream bool) (PreparedRequest
 		Stream:      stream,
 	}
 	applyOpenAIReasoningControls(&chatReq, cfg, req)
+	chatReq.ReasoningEffort = nativeReasoningEffort(cfg, req)
 	if affinityKey != "" {
 		chatReq.PromptCacheKey = affinityKey
 		if stream {
@@ -162,7 +168,7 @@ func prepareOpenAIRequest(cfg Config, req Request, stream bool) (PreparedRequest
 	if err != nil {
 		return PreparedRequest{}, fmt.Errorf("failed to marshal request: %w", err)
 	}
-	prepared := newPreparedRequest(req, ProtocolOpenAIChat, url, body, stream)
+	prepared := newPreparedRequest(req, protocol, url, body, stream)
 	prepared.Cache = cacheMetadata
 	return prepared, nil
 }
@@ -480,33 +486,19 @@ func applyOpenAIReasoningControls(chatReq *openaiChatRequest, cfg Config, req Re
 	if !req.DisableReasoning {
 		return
 	}
-	if !vendorPrivateFieldsAllowed(cfg) {
-		return
-	}
 	if isKimiK27Code(strings.ToLower(resolveModel(cfg, req))) {
 		return
 	}
-	providerKey := strings.ToLower(strings.Join([]string{
-		cfg.BaseURL,
-		cfg.Model,
-		req.Model,
-	}, " "))
-	switch {
-	case strings.Contains(providerKey, "deepseek") ||
-		strings.Contains(providerKey, "kimi") ||
-		strings.Contains(providerKey, "moonshot") ||
-		strings.Contains(providerKey, "volces") ||
-		strings.Contains(providerKey, "volcengine") ||
-		strings.Contains(providerKey, "byteplus") ||
-		strings.Contains(providerKey, "ark"):
+	capability, ok := ResolveReasoningControlCapability(cfg, req)
+	if !ok {
+		return
+	}
+	switch capability.WireStrategy {
+	case ReasoningControlThinkingType:
 		chatReq.Thinking = &openaiThinkingConfig{Type: "disabled"}
-	case strings.Contains(providerKey, "dashscope") ||
-		strings.Contains(providerKey, "aliyuncs") ||
-		strings.Contains(providerKey, "qwen"):
+	case ReasoningControlEnableThinking:
 		disabled := false
 		chatReq.EnableThinking = &disabled
-	case strings.Contains(providerKey, "openrouter"):
-		chatReq.Reasoning = &openaiReasoningConfig{Enabled: false}
 	}
 }
 

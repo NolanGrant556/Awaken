@@ -6,6 +6,7 @@ import {
   normalizeModelProfileSummary,
   normalizeModelProvider,
   normalizeRuntimeRun,
+  normalizeRuntimeThread,
   normalizeStartRunRequest,
 } from "./runtime.js";
 
@@ -82,6 +83,36 @@ describe("runtime shared model provider normalization", () => {
 });
 
 describe("runtime shared start run normalization", () => {
+  it("normalizes durable thread and run model selections", () => {
+    expect(normalizeRuntimeThread({
+      thread_id: "thread-model",
+      label: "model thread",
+      workspace: { workspace_root: "/tmp", writable_roots: ["/tmp"] },
+      selected_model_profile_id: "profile-kimi",
+      reasoning_effort_by_profile: { "profile-kimi": "max" },
+      created_at: "2026-07-29T00:00:00Z",
+      updated_at: "2026-07-29T00:00:00Z",
+    })).toMatchObject({
+      selectedModelProfileId: "profile-kimi",
+      reasoningEffortByProfile: { "profile-kimi": "max" },
+    });
+
+    expect(normalizeRuntimeRun({
+      run_id: "run-model",
+      thread_id: "thread-model",
+      input: "hello",
+      status: "finished",
+      cancel_requested: false,
+      model_profile_id: "profile-kimi",
+      reasoning_effort: "max",
+      created_at: "2026-07-29T00:00:00Z",
+      updated_at: "2026-07-29T00:00:00Z",
+    })).toMatchObject({
+      modelProfileId: "profile-kimi",
+      reasoningEffort: "max",
+    });
+  });
+
   it("normalizes composer tokens returned on runtime runs", () => {
     expect(
       normalizeRuntimeRun({
@@ -167,10 +198,16 @@ describe("runtime shared start run normalization", () => {
         requestId: "request-2",
         entrypoint: "desktop",
       },
+      modelProfileId: "profile-kimi",
+      reasoningEffort: "max",
     });
     expect(wire.composer_tokens?.[0]?.leadingText).toBe(
       "现在我需要你帮我分析现有的财务数据风险，然后使用 ",
     );
+    expect(wire).toMatchObject({
+      model_profile_id: "profile-kimi",
+      reasoning_effort: "max",
+    });
   });
 
   it("sends the project name so the agent can name where it is working", () => {

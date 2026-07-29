@@ -34,6 +34,23 @@ describe("AwakenEnvStore", () => {
     expect(raw).not.toContain(".tmp");
   });
 
+  it("serializes mutations by env path across independent store instances", async () => {
+    const stores = Array.from({ length: 16 }, () => new AwakenEnvStore(awakenHome));
+
+    await Promise.all(
+      stores.map((store, index) => store.setKey(`profile-${index}`, `secret-${index}`)),
+    );
+
+    const reader = new AwakenEnvStore(awakenHome);
+    await Promise.all(
+      stores.map((_, index) =>
+        expect(reader.getKey(`profile-${index}`)).resolves.toBe(`secret-${index}`),
+      ),
+    );
+    const raw = await readFile(join(awakenHome, ".env"), "utf8");
+    expect(raw.match(/^AWAKEN_API_KEY_profile-/gmu)).toHaveLength(stores.length);
+  });
+
   it("preserves unrelated variables and deletes only the selected profile key", async () => {
     await writeFile(join(awakenHome, ".env"), 'UNRELATED="keep"\n', "utf8");
     const store = new AwakenEnvStore(awakenHome);

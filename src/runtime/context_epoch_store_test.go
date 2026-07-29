@@ -229,12 +229,109 @@ func TestContextEpochDynamicToolsAppendByFirstDiscoveryAndUnsafeChangesRotate(t 
 	}
 }
 
+func TestContextEpochIgnoresHostOnlyToolRegistrationIdentity(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	store := NewContextEpochStore()
+	candidate := testContextEpochCandidate()
+	first, err := store.Project(context.Background(), candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	changed := candidate
+	changed.Tools = append([]agentcore.ContextEpochToolCandidate(nil), candidate.Tools...)
+	for index := range changed.Tools {
+		changed.Tools[index].Provenance.RegistrationID = "reconnected-registration-" + changed.Tools[index].Schema.Function.Name
+		if agentcore.ContextEpochToolDigest(changed.Tools[index]) != agentcore.ContextEpochToolDigest(candidate.Tools[index]) {
+			t.Fatalf("registration-only change affected tool digest for %q", changed.Tools[index].Schema.Function.Name)
+		}
+	}
+	second, err := store.Project(context.Background(), changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Receipt.EpochID != first.Receipt.EpochID || second.Receipt.State != "unchanged" || second.Receipt.BoundaryReason != "" {
+		t.Fatalf("registration-only reconnect changed provider epoch: first=%+v second=%+v", first.Receipt, second.Receipt)
+	}
+	if got := contextEpochToolNames(second.Tools); strings.Join(got, ",") != "alpha,beta,mcp-zulu" {
+		t.Fatalf("registration-only reconnect changed canonical tool order: %v", got)
+	}
+}
+
+func TestContextEpochReasoningPolicyChangeIsExplicitColdBoundary(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	store := NewContextEpochStore()
+	candidate := testContextEpochCandidate()
+	first, err := store.Project(context.Background(), candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	changed := candidate
+	changed.ReasoningPolicy = "max"
+	second, err := store.Project(context.Background(), changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Receipt.EpochID == first.Receipt.EpochID || second.Receipt.State != "rotated" || second.Receipt.BoundaryReason != "reasoning_policy_changed" {
+		t.Fatalf("reasoning policy change did not create explicit cold boundary: first=%+v second=%+v", first.Receipt, second.Receipt)
+	}
+	if second.Receipt.CreationBoundaryReason != "reasoning_policy_changed" {
+		t.Fatalf("reasoning cold boundary was not retained: %+v", second.Receipt)
+	}
+}
+
+func TestContextEpochV1SidecarMigratesThroughSafeColdBoundary(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	store := NewContextEpochStore()
+	candidate := testContextEpochCandidate()
+	first, err := store.Project(context.Background(), candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(activeSessionsDir(), safeTranscriptFileName(candidate.ThreadID), "context", "epochs")
+	epoch, err := readCurrentContextEpoch(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch.SchemaVersion = 1
+	encodedEpoch, err := json.MarshalIndent(epoch, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, epoch.EpochID+".json"), append(encodedEpoch, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	encodedPointer, err := json.MarshalIndent(contextEpochPointer{SchemaVersion: 1, EpochID: epoch.EpochID}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "current.json"), append(encodedPointer, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	migrated, err := store.Project(context.Background(), candidate)
+	if err != nil {
+		t.Fatalf("v1 migration failed: %v", err)
+	}
+	if migrated.Receipt.EpochID == first.Receipt.EpochID || migrated.Receipt.BoundaryReason != "prompt_schema_incompatible" {
+		t.Fatalf("v1 epoch was not safely rotated: first=%+v migrated=%+v", first.Receipt, migrated.Receipt)
+	}
+	current, err := readCurrentContextEpoch(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.SchemaVersion != agentcore.ContextEpochSchemaVersion || current.ReasoningPolicy != candidate.ReasoningPolicy {
+		t.Fatalf("migration did not persist current schema/identity: %+v", current)
+	}
+}
+
 func testContextEpochCandidate() agentcore.ContextEpochCandidate {
 	return agentcore.ContextEpochCandidate{
 		ThreadID: "thread-epoch", WorkspaceRoot: "/workspace", ProviderID: "kimi-coding-plan",
 		ProfileID: "profile-1", CredentialRevision: 1, ModelID: "kimi-for-coding",
 		ProtocolFamily: "openai_chat", EndpointContractID: "openai_chat_completions_v1",
-		NormalizedBaseURL: "https://api.kimi.com/coding/v1", PromptSchemaVersion: "awaken_prompt_v1",
+		NormalizedBaseURL: "https://api.kimi.com/coding/v1", ReasoningPolicy: "high", PromptSchemaVersion: "awaken_prompt_v1",
 		ExactSystemPrompt: "BASE\nRUNTIME=2026-07-19",
 		Sources: []agentcore.ContextEpochSourceCandidate{
 			{SourceKey: "system_prompt", Kind: agentcore.ContextContributionSystemPrompt, Content: "BASE", State: agentcore.ContextEpochSourceUpdated},

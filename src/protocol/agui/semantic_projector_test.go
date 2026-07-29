@@ -393,7 +393,7 @@ func TestProjectSemanticContextSnapshotAndModelUsageForLiveReplay(t *testing.T) 
 	}
 	usage := agentcore.ModelUsageRecord{
 		SchemaVersion: 1, RequestID: "req_1", Purpose: "agent_turn", ModelID: "model",
-		ProtocolFamily: "openai_chat", InputTokens: intPtr(40), OutputTokens: intPtr(2), TotalTokens: intPtr(42),
+		ProtocolFamily: "openai_chat", ReasoningPolicy: "max", InputTokens: intPtr(40), OutputTokens: intPtr(2), TotalTokens: intPtr(42),
 		UsageComplete: true, RetryIndex: 2, AuxiliaryFallback: true, CalculatedCostUSD: floatPtr(0.125), Currency: "USD",
 		PricingSnapshot: &agentcore.PricingSnapshot{SnapshotID: "price_1", ProviderID: "deepseek", ModelID: "model", Currency: "USD", UnitTokens: 1_000_000, EffectiveDate: "2026-07-19", SourceURL: "https://example.test/pricing"},
 		LatencyMS:       25, Status: agentcore.ModelUsageSucceeded, CompletedAt: now,
@@ -416,6 +416,12 @@ func TestProjectSemanticContextSnapshotAndModelUsageForLiveReplay(t *testing.T) 
 	}
 	if frames[1].ModelUsage == nil || frames[1].ModelUsage.RequestID != "req_1" || frames[1].ModelUsage.InputTokens == nil || *frames[1].ModelUsage.InputTokens != 40 {
 		t.Fatalf("model usage was lost: %+v", frames[1])
+	}
+	if frames[1].ModelUsage.ReasoningPolicy != "max" {
+		t.Fatalf("model usage reasoning policy was lost: %+v", frames[1].ModelUsage)
+	}
+	if roundTrip := modelUsageRecordFromWire(frames[1].ModelUsage); roundTrip.ReasoningPolicy != "max" {
+		t.Fatalf("wire-to-semantic reasoning policy was lost: %+v", roundTrip)
 	}
 	if frames[1].ModelUsage.RetryIndex != 2 || !frames[1].ModelUsage.AuxiliaryFallback || frames[1].ModelUsage.CalculatedCostUSD == nil || frames[1].ModelUsage.PricingSnapshot == nil {
 		t.Fatalf("pricing/retry fields were lost: %+v", frames[1].ModelUsage)

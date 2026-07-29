@@ -344,15 +344,6 @@
   line-height: var(--aw-line-height-sm);
 }
 
-.composer-bar-project-create-description {
-  overflow: hidden;
-  color: var(--aw-text-tertiary);
-  font-size: var(--aw-font-size-xs);
-  line-height: var(--aw-line-height-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 @media (max-width: 640px) {
   .composer-bar-project-shelf {
     width: calc(100% - 18px);

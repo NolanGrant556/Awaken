@@ -1,6 +1,6 @@
 import "./AwakenMediaGenerationCard.css";
-import { LoaderCircle } from "lucide-react";
-import { useMemo } from "react";
+import { ChevronRight, LoaderCircle } from "lucide-react";
+import { useId, useMemo, useState } from "react";
 import {
   AwakenMediaItemCard,
   type AwakenMediaItemKind,
@@ -34,6 +34,7 @@ export type AwakenMediaGenerationCardProps = {
   /** Single-source compatibility for simple Gallery consumers. */
   src?: string;
   alt?: string;
+  defaultOpen?: boolean;
   onPreview?: () => void;
   onOpen?: () => void;
 };
@@ -66,9 +67,11 @@ export function AwakenMediaGenerationCard({
   sources,
   src,
   alt,
+  defaultOpen,
   onPreview,
   onOpen,
 }: AwakenMediaGenerationCardProps) {
+  const bodyId = useId();
   const mediaSources = useMemo<AwakenMediaGenerationSource[]>(() => {
     if (sources && sources.length > 0) return sources.slice(0, 15);
     if (!src) return [];
@@ -89,6 +92,11 @@ export function AwakenMediaGenerationCard({
     status === "queued" ||
     status === "generating" ||
     status === "downloading";
+  const autoExpanded = transient || status !== "ready";
+  const [manualExpanded, setManualExpanded] = useState<boolean | null>(
+    defaultOpen ?? null,
+  );
+  const expanded = manualExpanded ?? autoExpanded;
   const summary = ready
     ? kind === "image"
       ? `已生成 ${mediaSources.length} 张图片`
@@ -99,12 +107,18 @@ export function AwakenMediaGenerationCard({
 
   return (
     <section
-      className="aw-media-generation"
+      className={`aw-media-generation${expanded ? " aw-media-generation-open" : ""}`}
       data-status={status}
       data-count={slotCount}
       aria-label={`${label}，${statusLabel[status]}`}
     >
-      <div className="aw-media-generation-summary">
+      <button
+        type="button"
+        className="aw-media-generation-summary"
+        aria-expanded={expanded}
+        aria-controls={bodyId}
+        onClick={() => setManualExpanded((current) => !(current ?? autoExpanded))}
+      >
         <span className="aw-media-generation-summary-copy">
           <strong>{label}</strong>
           <span>{summary}</span>
@@ -115,35 +129,46 @@ export function AwakenMediaGenerationCard({
             <LoaderCircle size={16} strokeWidth={1.9} aria-hidden="true" />
           </span>
         ) : null}
-      </div>
+        <span className="aw-media-generation-chevron" aria-hidden="true">
+          <ChevronRight size={13} strokeWidth={1.8} />
+        </span>
+      </button>
 
-      <div className="aw-media-generation-grid" aria-label={`${slotCount} 个独立媒体项目`}>
-        {Array.from({ length: slotCount }, (_, slotIndex) => {
-          const itemNumber = slotIndex + 1;
-          const source = mediaSources.find(
-            (candidate, sourceIndex) =>
-              (candidate.index ?? sourceIndex + 1) === itemNumber,
-          );
-          const itemStatus: AwakenMediaItemStatus =
-            source?.status ?? (status === "partial" ? "error" : status);
-          return (
-            <AwakenMediaItemCard
-              key={source?.id || `slot-${itemNumber}`}
-              kind={kind}
-              status={itemStatus}
-              title={kind === "image" ? `图片 ${itemNumber}` : "视频"}
-              detail={
-                source?.detail ||
-                (itemStatus === "ready" ? "点击预览" : statusLabel[itemStatus])
-              }
-              src={source?.src}
-              alt={source?.alt || `${label} ${itemNumber}`}
-              index={slotCount > 1 ? itemNumber : undefined}
-              aspectRatio={source?.aspectRatio ?? requestedAspectRatio}
-              onPreview={source?.onPreview ?? source?.onOpen}
-            />
-          );
-        })}
+      <div
+        id={bodyId}
+        className="aw-media-generation-disclosure"
+        data-expanded={expanded ? "true" : "false"}
+        aria-hidden={!expanded}
+        inert={!expanded}
+      >
+        <div className="aw-media-generation-grid" aria-label={`${slotCount} 个独立媒体项目`}>
+          {Array.from({ length: slotCount }, (_, slotIndex) => {
+            const itemNumber = slotIndex + 1;
+            const source = mediaSources.find(
+              (candidate, sourceIndex) =>
+                (candidate.index ?? sourceIndex + 1) === itemNumber,
+            );
+            const itemStatus: AwakenMediaItemStatus =
+              source?.status ?? (status === "partial" ? "error" : status);
+            return (
+              <AwakenMediaItemCard
+                key={source?.id || `slot-${itemNumber}`}
+                kind={kind}
+                status={itemStatus}
+                title={kind === "image" ? `图片 ${itemNumber}` : "视频"}
+                detail={
+                  source?.detail ||
+                  (itemStatus === "ready" ? "点击预览" : statusLabel[itemStatus])
+                }
+                src={source?.src}
+                alt={source?.alt || `${label} ${itemNumber}`}
+                index={slotCount > 1 ? itemNumber : undefined}
+                aspectRatio={source?.aspectRatio ?? requestedAspectRatio}
+                onPreview={source?.onPreview ?? source?.onOpen}
+              />
+            );
+          })}
+        </div>
       </div>
     </section>
   );

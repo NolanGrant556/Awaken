@@ -1,17 +1,48 @@
 .aw-media-generation {
   display: grid;
-  gap: var(--aw-space-3);
   width: 100%;
   max-width: 760px;
   min-width: 0;
 }
 
 .aw-media-generation-summary {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, auto) auto 16px;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--aw-space-4);
+  justify-self: start;
+  gap: var(--aw-space-2);
+  width: fit-content;
+  max-width: 100%;
   min-width: 0;
+  min-height: 28px;
+  padding: 3px 6px 3px 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--aw-text-subtle);
+  text-align: left;
+  cursor: pointer;
+  transition: color 140ms ease;
+}
+
+.aw-media-generation-summary:hover,
+.aw-media-generation-summary:focus-visible {
+  background: transparent;
+  color: var(--aw-text-primary);
+}
+
+.aw-media-generation-chevron {
+  display: grid;
+  place-items: center;
+  color: inherit;
+}
+
+.aw-media-generation-chevron svg {
+  transition: transform 300ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.aw-media-generation-open .aw-media-generation-chevron svg {
+  transform: rotate(90deg);
 }
 
 .aw-media-generation-summary-copy {
@@ -30,7 +61,7 @@
 
 .aw-media-generation-summary-copy strong {
   flex: 0 0 auto;
-  color: var(--aw-text-primary);
+  color: inherit;
   font-size: var(--aw-font-size-sm);
   line-height: var(--aw-line-height-sm);
   font-weight: var(--aw-font-weight-semibold);
@@ -38,7 +69,7 @@
 
 .aw-media-generation-summary-copy span,
 .aw-media-generation-summary-progress {
-  color: var(--aw-text-subtle);
+  color: inherit;
   font-size: var(--aw-font-size-xs);
   line-height: var(--aw-line-height-xs);
 }
@@ -56,13 +87,30 @@
   animation: spin 1s linear infinite;
 }
 
+.aw-media-generation-disclosure {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 360ms cubic-bezier(0.23, 1, 0.32, 1),
+    opacity 240ms ease;
+}
+
+.aw-media-generation-disclosure[data-expanded="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
 .aw-media-generation-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(128px, 144px));
   align-items: start;
   gap: 8px;
   width: 100%;
+  min-height: 0;
   min-width: 0;
+  padding: var(--aw-space-2) 0 1px;
+  overflow: hidden;
 }
 
 @media (max-width: 360px) {
@@ -74,5 +122,10 @@
 @media (prefers-reduced-motion: reduce) {
   .aw-media-generation-summary-progress svg {
     animation: none;
+  }
+
+  .aw-media-generation-chevron svg,
+  .aw-media-generation-disclosure {
+    transition: none;
   }
 }

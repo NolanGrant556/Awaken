@@ -360,6 +360,74 @@ describe("projectAguiEventToNarrative", () => {
     });
   });
 
+  it("projects an invoked Skill as one replay-stable trace row", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_SKILL_DISCOVERED",
+      runId: "run-skill",
+      skillId: "documents",
+    });
+    expect(state.committedItems).toHaveLength(0);
+
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_SKILL_INVOKED",
+      runId: "run-skill",
+      skillId: "documents",
+      skillVersion: "1.2.0",
+      skillSource: "project",
+    });
+    expect(state.committedItems).toContainEqual({
+      kind: "skill",
+      id: "skill:run-skill:documents",
+      title: "documents",
+      detail: "project · v1.2.0",
+      output: undefined,
+      status: "active",
+    });
+
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_SKILL_EXECUTION_CONTEXT",
+      runId: "run-skill",
+      skillId: "documents",
+      skillVersion: "1.2.0",
+      skillSource: "project",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_SKILL_CONTENT_LOADED",
+      runId: "run-skill",
+      skillId: "documents",
+      skillVersion: "1.2.0",
+      skillSource: "project",
+      skillResource: "references/layout.md",
+    });
+
+    const skills = state.committedItems.filter((item) => item.kind === "skill");
+    expect(skills).toHaveLength(1);
+    expect(skills[0]).toMatchObject({
+      status: "done",
+      output: "已加载资源：references/layout.md",
+    });
+  });
+
+  it("keeps Skill load failures visible as an expandable error trace", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_SKILL_FAILED_TO_LOAD",
+      runId: "run-skill-failed",
+      skillId: "broken-skill",
+      skillDiagnostics: ["SKILL.md is missing"],
+    });
+
+    expect(state.committedItems).toContainEqual({
+      kind: "skill",
+      id: "skill:run-skill-failed:broken-skill",
+      title: "broken-skill",
+      detail: undefined,
+      output: "SKILL.md is missing",
+      status: "error",
+    });
+  });
+
   it("surfaces tool recovery required and retry blocked notices", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(state, {

@@ -42,6 +42,7 @@ import {
   shouldUseCenterComposerWithFileWorkspace,
   shouldResetActiveThreadForWorkspaceChange,
   shouldShowSidebarThreadSpinner,
+  toolTracePresentation,
   workbenchInspectorPresentation,
   UserQuestionPrompt,
 } from "./App";
@@ -123,6 +124,58 @@ describe("media reveal platform copy", () => {
     expect(mediaRevealLabelForPlatform("macos")).toBe("在 Finder 中显示");
     expect(mediaRevealLabelForPlatform("windows")).toBe("在文件资源管理器中显示");
     expect(mediaRevealLabelForPlatform("linux")).toBe("在文件管理器中显示");
+  });
+});
+
+describe("tool trace presentation", () => {
+  it("keeps replay-only tool details in a nested output card", () => {
+    expect(toolTracePresentation(undefined, "legacy result\nsecond line")).toEqual({
+      detail: "legacy result",
+      output: "legacy result\nsecond line",
+      outputLabel: "工具输出",
+      kind: "tool",
+    });
+  });
+
+  it("uses typed provider source for MCP rows instead of guessing from names", () => {
+    expect(
+      toolTracePresentation({
+        content: "created issue #42",
+        status: "done",
+        providerId: "connector:github:create_issue",
+        providerSource: "connector",
+      }),
+    ).toMatchObject({
+      kind: "mcp",
+      detail: "github:create_issue",
+      output: "created issue #42",
+      outputLabel: "MCP 输出",
+    });
+    expect(
+      toolTracePresentation({
+        content: "legacy output",
+        status: "done",
+        providerId: "connector:unknown",
+      }).kind,
+    ).toBe("tool");
+  });
+
+  it("projects command streams as bounded terminal output cards", () => {
+    expect(
+      toolTracePresentation({
+        content: "command succeeded",
+        commandOutput: "4 tests passed\n",
+        commandOutputTruncated: true,
+        status: "done",
+        providerSource: "builtin",
+      }),
+    ).toMatchObject({
+      kind: "terminal",
+      detail: "command succeeded",
+      output: "4 tests passed",
+      outputLabel: "终端输出",
+      outputTruncated: true,
+    });
   });
 });
 
@@ -3242,51 +3295,159 @@ describe("App workbench presentation", () => {
     ]);
   });
 
-  it("keeps a ready media result outside the collapsed execution process", () => {
-    const thinking = {
-      kind: "thinking",
-      id: "thinking:media",
-      text: "准备提示词",
-      status: "done",
-    } as const;
-    const media: Extract<RunNarrativeItem, { kind: "mediaGeneration" }> = {
-      kind: "mediaGeneration",
-      id: "media:run-1:call-1",
-      toolCallId: "call-1",
-      runId: "run-1",
-      mediaKind: "image",
-      title: "图片生成",
-      detail: "图片已生成",
-      status: "ready",
-      artifactPaths: ["output/generated-media/image.png"],
-    };
-    const answer = {
-      kind: "answer",
-      id: "answer:media",
-      markdown: "图片已经完成。",
-      status: "done",
-      isFinal: true,
-    } as const;
+  it.each(["image", "video"] as const)(
+    "folds a ready %s result and every surrounding process item into execution process",
+    (mediaKind) => {
+      const thinking = {
+        kind: "thinking",
+        id: "thinking:media",
+        text: "准备提示词",
+        status: "done",
+      } as const;
+      const media: Extract<RunNarrativeItem, { kind: "mediaGeneration" }> = {
+        kind: "mediaGeneration",
+        id: "media:run-1:call-1",
+        toolCallId: "call-1",
+        runId: "run-1",
+        mediaKind,
+        title: mediaKind === "image" ? "图片生成" : "视频生成",
+        detail: mediaKind === "image" ? "图片已生成" : "视频已生成",
+        status: "ready",
+        artifactPaths: [
+          mediaKind === "image"
+            ? "output/generated-media/image.png"
+            : "output/generated-media/video.mp4",
+        ],
+      };
+      const postMediaThinking = {
+        kind: "thinking",
+        id: "thinking:publish",
+        text: "准备发布媒体交付物",
+        status: "done",
+      } as const;
+      const interimAnswer = {
+        kind: "answer",
+        id: "answer:publish",
+        markdown: "媒体已生成，让我发布交付物。",
+        status: "done",
+      } as const;
+      const publishTool = {
+        kind: "tool",
+        id: "tool:publish",
+        title: "artifact_publish",
+        status: "done",
+      } as const;
+      const readGroup: Extract<RunNarrativeItem, { kind: "exploring" }> = {
+        kind: "exploring",
+        id: "exploring:read",
+        actions: [],
+        status: "done",
+      };
+      const answer = {
+        kind: "answer",
+        id: "answer:media",
+        markdown: "图片已经完成。",
+        status: "done",
+        isFinal: true,
+      } as const;
 
-    expect(projectNarrativeTurnBodySegments({
-      turnId: "prompt:media",
-      items: [thinking, media, answer],
-      executionProcessOpen: false,
-    })).toEqual([
-      {
+      expect(projectNarrativeTurnBodySegments({
+        turnId: "prompt:media",
+        items: [
+          thinking,
+          media,
+          postMediaThinking,
+          interimAnswer,
+          publishTool,
+          readGroup,
+          answer,
+        ],
+        executionProcessOpen: false,
+      })).toEqual([
+        {
+          kind: "executionProcess",
+          id: "execution-process:prompt:media",
+          title: "执行过程",
+          items: [
+            thinking,
+            media,
+            postMediaThinking,
+            interimAnswer,
+            publishTool,
+            readGroup,
+          ],
+          open: false,
+        },
+        {
+          kind: "items",
+          id: "answer-and-after:prompt:media",
+          items: [answer],
+        },
+      ]);
+    },
+  );
+
+  it.each(["partial", "unknown", "error", "cancelled"] as const)(
+    "folds a %s media result into execution process",
+    (status) => {
+      const thinking = {
+        kind: "thinking",
+        id: `thinking:${status}`,
+        text: "等待媒体结果",
+        status: "done",
+      } as const;
+      const media: Extract<RunNarrativeItem, { kind: "mediaGeneration" }> = {
+        kind: "mediaGeneration",
+        id: `media:run-1:${status}`,
+        toolCallId: `call-${status}`,
+        runId: "run-1",
+        mediaKind: "image",
+        title: "图片生成",
+        status,
+        artifactPaths: [],
+      };
+      const answer = {
+        kind: "answer",
+        id: `answer:${status}`,
+        markdown: "媒体任务已结束。",
+        status: "done",
+        isFinal: true,
+      } as const;
+
+      const segments = projectNarrativeTurnBodySegments({
+        turnId: `prompt:${status}`,
+        items: [
+          thinking,
+          media,
+          {
+            kind: "thinking",
+            id: `thinking:after-${status}`,
+            text: "收尾媒体任务",
+            status: "done",
+          },
+          answer,
+        ],
+        executionProcessOpen: false,
+      });
+      expect(segments[0]).toMatchObject({
         kind: "executionProcess",
-        id: "execution-process:prompt:media",
-        title: "执行过程",
-        items: [thinking],
-        open: false,
-      },
-      {
+        items: [
+          thinking,
+          media,
+          {
+            kind: "thinking",
+            id: `thinking:after-${status}`,
+            text: "收尾媒体任务",
+            status: "done",
+          },
+        ],
+      });
+      expect(segments[1]).toMatchObject({
         kind: "items",
-        id: "answer-and-after:prompt:media",
-        items: [media, answer],
-      },
-    ]);
-  });
+        items: [answer],
+      });
+    },
+  );
 
   it("keeps execution-process items visible when the disclosure is expanded", () => {
     const thinking = {

@@ -48,7 +48,7 @@ body { margin: 0; min-width: 1024px; overflow-y: hidden; overflow-x: auto; color
 
 .ads-workbench-scene { position: relative; height: 540px; min-width: 0; overflow: hidden; border: 1px solid var(--aw-border-main); border-radius: var(--aw-radius-panel); background: var(--aw-surface-work); }
 .ads-workbench-scene .aw-run-stage { height: 100%; border-right: 0; }
-.ads-workbench-scene .aw-run-stage-scroll { padding: 54px 22px 188px; scrollbar-gutter: stable; }
+.ads-workbench-scene .aw-run-stage-scroll { padding: 54px 22px 188px; scrollbar-gutter: stable both-edges; }
 .ads-workbench-scene .execution-feed { --aw-turn-content-width: 680px; }
 .ads-workbench-scene--composer .aw-run-stage { --aw-composer-content-inset: 172px; --aw-output-gap: 188px; }
 .ads-workbench-scene--feed { height: 690px; }

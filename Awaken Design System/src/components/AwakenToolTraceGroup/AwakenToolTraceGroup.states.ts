@@ -15,9 +15,9 @@ export const AwakenToolTraceGroupStates: AwakenToolTraceGroupState[] = [
     label: "只读探索工具",
     props: {
       actions: [
-        { id: "read-app", title: "Read apps/desktop/src/renderer/App.tsx", detail: "Tool returned content", status: "done" },
-        { id: "glob-components", title: "List **/AwakenToolTrace*.tsx", detail: "Tool invocation started", status: "active" },
-        { id: "grep-usage", title: "Search \"ToolTrace\" in apps/desktop", detail: "Tool returned matches", status: "done" },
+        { id: "read-app", title: "Read App.tsx", detail: "apps/desktop/src/renderer", output: "Loaded 140 lines", status: "done" },
+        { id: "glob-components", title: "List AwakenToolTrace components", detail: "rg --files", output: "Searching…", kind: "terminal", status: "active" },
+        { id: "grep-usage", title: "Search ToolTrace usage", detail: "12 matches", output: "apps/desktop/src/renderer/App.tsx", status: "done" },
       ],
       label: undefined,
       onSelectAction: noop,

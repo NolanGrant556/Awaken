@@ -331,6 +331,7 @@ export type AguiEvent = {
   environmentSnapshotId?: string;
   toolAvailabilitySnapshotId?: string;
   providerId?: string;
+  providerSource?: string;
   capability?: string;
   capabilities?: string[];
   readiness?: string;

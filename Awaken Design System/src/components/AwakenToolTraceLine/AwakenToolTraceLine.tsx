@@ -2,11 +2,16 @@ import "./AwakenToolTraceLine.css";
 import {
   AlertCircle,
   Ban,
+  BookOpenText,
   Check,
+  ChevronRight,
   CircleSlash,
   LoaderCircle,
   OctagonX,
+  PlugZap,
   ShieldOff,
+  TerminalSquare,
+  Wrench,
 } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 
@@ -20,18 +25,26 @@ export type ToolTraceStatus =
   | "blocked"
   | "unsupported";
 
+export type ToolTraceKind = "tool" | "mcp" | "skill" | "terminal";
+
 export type AwakenToolTraceLineProps = {
   title: string;
+  /** Compact one-line context shown beside the title. */
   detail?: string;
+  /** Bounded command or tool result rendered in the nested output card. */
+  output?: string;
+  outputLabel?: string;
+  outputTruncated?: boolean;
   status?: ToolTraceStatus;
+  kind?: ToolTraceKind;
   icon?: ReactNode;
+  defaultOpen?: boolean;
+  /** Disable the mount animation when a consumer reveals already-finished history. */
+  animateEntry?: boolean;
   onSelect?: () => void;
 };
 
-const COLLAPSIBLE_DETAIL_CHAR_LIMIT = 420;
-const COLLAPSIBLE_DETAIL_LINE_LIMIT = 6;
-
-function statusIcon(status: ToolTraceStatus) {
+function statusIcon(status: ToolTraceStatus, kind: ToolTraceKind) {
   switch (status) {
     case "active":
       return <LoaderCircle size={14} strokeWidth={2.1} aria-hidden="true" />;
@@ -48,110 +61,115 @@ function statusIcon(status: ToolTraceStatus) {
     case "unsupported":
       return <AlertCircle size={14} strokeWidth={2.1} aria-hidden="true" />;
     default:
-      return <Check size={14} strokeWidth={2.25} aria-hidden="true" />;
+      if (kind === "mcp") return <PlugZap size={14} strokeWidth={1.9} aria-hidden="true" />;
+      if (kind === "skill") return <BookOpenText size={14} strokeWidth={1.9} aria-hidden="true" />;
+      if (kind === "terminal") return <TerminalSquare size={14} strokeWidth={1.9} aria-hidden="true" />;
+      return <Wrench size={14} strokeWidth={1.9} aria-hidden="true" />;
   }
 }
 
-function shouldCollapseDetail(detail?: string): boolean {
-  if (!detail) {
-    return false;
-  }
-  return (
-    detail.length > COLLAPSIBLE_DETAIL_CHAR_LIMIT ||
-    detail.split(/\r\n|\r|\n/).length > COLLAPSIBLE_DETAIL_LINE_LIMIT
-  );
+function kindLabel(kind: ToolTraceKind): string | undefined {
+  if (kind === "mcp") return "MCP";
+  if (kind === "skill") return "Skill";
+  if (kind === "terminal") return "Terminal";
+  return undefined;
 }
 
 export function AwakenToolTraceLine({
   title,
   detail,
+  output,
+  outputLabel,
+  outputTruncated = false,
   status = "done",
+  kind = "tool",
   icon,
+  defaultOpen,
+  animateEntry = true,
   onSelect,
 }: AwakenToolTraceLineProps) {
-  const interactive = Boolean(onSelect);
-  const [detailExpanded, setDetailExpanded] = useState(false);
-  const detailId = useId();
-  const collapsibleDetail = shouldCollapseDetail(detail);
-  const lineClassName = `tool-trace-line tool-trace-line-${status}${
-    collapsibleDetail ? " tool-trace-line-has-collapsible-detail" : ""
+  const outputId = useId();
+  const hasOutput = Boolean(output);
+  const autoExpanded = status === "active" && hasOutput;
+  const [manualExpanded, setManualExpanded] = useState<boolean | null>(
+    defaultOpen ?? null,
+  );
+  const expanded = hasOutput && (manualExpanded ?? autoExpanded);
+  const interactive = hasOutput || Boolean(onSelect);
+  const category = kindLabel(kind);
+  const lineClassName = `tool-trace-line tool-trace-line-${status} tool-trace-line-${kind}${
+    expanded ? " tool-trace-line-open" : ""
   }`;
-  const copyClassName = `tool-trace-line-copy${
-    collapsibleDetail ? " tool-trace-line-copy-long" : ""
-  }`;
 
-  const detailContent = detail ? (
-    <span
-      id={collapsibleDetail ? detailId : undefined}
-      className={`tool-trace-line-detail${
-        collapsibleDetail ? " tool-trace-line-detail-long" : ""
-      }${
-        collapsibleDetail && !detailExpanded
-          ? " tool-trace-line-detail-collapsed"
-          : ""
-      }`}
-    >
-      {detail}
-    </span>
-  ) : null;
+  function activate() {
+    if (hasOutput) {
+      setManualExpanded((current) => !(current ?? autoExpanded));
+    }
+    onSelect?.();
+  }
 
-  const detailToggle = collapsibleDetail ? (
-    <button
-      type="button"
-      className="tool-trace-line-detail-toggle"
-      aria-expanded={detailExpanded}
-      aria-controls={detailId}
-      onClick={() => setDetailExpanded((expanded) => !expanded)}
-    >
-      {detailExpanded ? "收起返回" : "展开完整返回"}
-    </button>
-  ) : null;
-
-  const content = (
+  const rowContent = (
     <>
-      <span className="tool-trace-line-icon">{icon ?? statusIcon(status)}</span>
-      <span className={copyClassName}>
+      <span className="tool-trace-line-icon">{icon ?? statusIcon(status, kind)}</span>
+      <span className="tool-trace-line-copy">
         <span className="tool-trace-line-title">{title}</span>
-        {detailContent}
-        {detailToggle}
+        {category ? <span className="tool-trace-line-kind">{category}</span> : null}
+        {detail ? <span className="tool-trace-line-detail">{detail}</span> : null}
       </span>
+      {status === "done" ? (
+        <span className="tool-trace-line-status" aria-label="已完成">
+          <Check size={12} strokeWidth={2.2} aria-hidden="true" />
+        </span>
+      ) : null}
+      {hasOutput ? (
+        <span className="tool-trace-line-chevron" aria-hidden="true">
+          <ChevronRight size={13} strokeWidth={1.8} />
+        </span>
+      ) : null}
     </>
   );
 
-  if (interactive && !collapsibleDetail) {
-    return (
-      <button
-        type="button"
-        className={lineClassName}
-        onClick={onSelect}
-      >
-        {content}
-      </button>
-    );
-  }
-
-  if (interactive) {
-    return (
-      <div className={lineClassName} role="group">
-        <span className="tool-trace-line-icon">{icon ?? statusIcon(status)}</span>
-        <span className={copyClassName}>
-          <button
-            type="button"
-            className="tool-trace-line-title-button"
-            onClick={onSelect}
-          >
-            <span className="tool-trace-line-title">{title}</span>
-          </button>
-          {detailContent}
-          {detailToggle}
-        </span>
-      </div>
-    );
-  }
-
   return (
-    <div className={lineClassName} role="group">
-      {content}
-    </div>
+    <article
+      className="tool-trace-item"
+      data-status={status}
+      data-kind={kind}
+      data-animate-entry={animateEntry ? "true" : "false"}
+    >
+      {interactive ? (
+        <button
+          type="button"
+          className={lineClassName}
+          onClick={activate}
+          aria-expanded={hasOutput ? expanded : undefined}
+          aria-controls={hasOutput ? outputId : undefined}
+        >
+          {rowContent}
+        </button>
+      ) : (
+        <div className={lineClassName} role="group">
+          {rowContent}
+        </div>
+      )}
+      {hasOutput ? (
+        <div
+          id={outputId}
+          className="tool-trace-output-disclosure"
+          data-expanded={expanded ? "true" : "false"}
+          aria-hidden={!expanded}
+          inert={!expanded}
+        >
+          <div className="tool-trace-output-rail">
+            <section className="tool-trace-output-card" aria-label={outputLabel || "工具输出"}>
+              <div className="tool-trace-output-heading">
+                <span>{outputLabel || (kind === "terminal" ? "终端输出" : "工具输出")}</span>
+                {outputTruncated ? <span>内容已截断</span> : null}
+              </div>
+              <pre>{output}</pre>
+            </section>
+          </div>
+        </div>
+      ) : null}
+    </article>
   );
 }

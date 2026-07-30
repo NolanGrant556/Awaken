@@ -62,6 +62,7 @@ type ToolResultRecord = {
   environmentSnapshotId?: string;
   toolAvailabilitySnapshotId?: string;
   providerId?: string;
+  providerSource?: string;
   capability?: string;
   capabilities?: string[];
   readiness?: string;
@@ -2279,6 +2280,9 @@ export function reduceRuntimeState(
               : {}),
             ...(action.event.providerId !== undefined
               ? { providerId: action.event.providerId }
+              : {}),
+            ...(action.event.providerSource !== undefined
+              ? { providerSource: action.event.providerSource }
               : {}),
             ...(action.event.capability !== undefined
               ? { capability: action.event.capability }

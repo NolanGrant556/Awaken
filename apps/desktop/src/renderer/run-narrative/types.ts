@@ -124,6 +124,14 @@ export type RunNarrativeItem =
   | { kind: "exploring"; id: string; actions: RunAction[]; status: "active" | "done" }
   | { kind: "tool"; id: string; title: string; detail?: string; status: ToolDisplayState; toolStatus?: string }
   | {
+      kind: "skill";
+      id: string;
+      title: string;
+      detail?: string;
+      output?: string;
+      status: "active" | "done" | "error";
+    }
+  | {
       kind: "mediaGeneration";
       id: string;
       toolCallId: string;

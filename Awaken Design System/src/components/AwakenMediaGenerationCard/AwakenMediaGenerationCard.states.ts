@@ -30,7 +30,7 @@ export const AwakenMediaGenerationCardStates: AwakenMediaGenerationCardState[] =
   {
     id: "image-ready",
     name: "图片已生成",
-    description: "成品在同一张独立卡片内覆盖加载状态。",
+    description: "完成后默认折叠为一行摘要，点击后查看成品卡片。",
     props: {
       kind: "image",
       status: "ready",
@@ -42,7 +42,7 @@ export const AwakenMediaGenerationCardStates: AwakenMediaGenerationCardState[] =
   {
     id: "image-group-ready",
     name: "组图已生成",
-    description: "一个 tool call 的多张结果拆成相互独立的小卡片。",
+    description: "一个 tool call 的多张结果完成后默认折叠，展开后仍是独立小卡片。",
     props: {
       kind: "image",
       status: "ready",

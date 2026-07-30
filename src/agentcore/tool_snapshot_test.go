@@ -130,7 +130,7 @@ func TestRunToolSnapshotPinsDefinitionAndExecutable(t *testing.T) {
 	if result.Outcome.Diagnostic["tool_snapshot_id"] != pinned.SnapshotID || result.Outcome.Diagnostic["environment_snapshot_id"] != environment.SnapshotID {
 		t.Fatalf("snapshot identities missing from outcome: %+v", result.Outcome.Diagnostic)
 	}
-	if result.Outcome.Diagnostic["provider_id"] != tool.ProviderID("test:"+name+":v1") || result.Outcome.Diagnostic["provider_readiness"] != tool.ProviderReady {
+	if result.Outcome.Diagnostic["provider_id"] != tool.ProviderID("test:"+name+":v1") || result.Outcome.Diagnostic["provider_source"] != tool.SourcePlugin || result.Outcome.Diagnostic["provider_readiness"] != tool.ProviderReady {
 		t.Fatalf("selected provider facts missing from outcome: %+v", result.Outcome.Diagnostic)
 	}
 }

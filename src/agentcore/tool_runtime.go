@@ -126,6 +126,7 @@ type ToolExecutionResult struct {
 	ToolSnapshotID         string
 	EnvironmentSnapshotID  string
 	ProviderID             tool.ProviderID
+	ProviderSource         tool.ToolSource
 	ProviderCapabilities   []tool.Capability
 	ProviderReadiness      tool.ProviderReadiness
 	ProviderDependencies   []tool.DependencyRequirement
@@ -382,6 +383,7 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	result.outcomeContext.OutputSchema = def.OutputSchema
 	result.outcomeContext.StrictOutputSchema = definitionQuality == tool.DefinitionQualityStrict
 	result.ProviderID = provider.ProviderID
+	result.ProviderSource = provider.Source
 	result.ProviderCapabilities = append([]tool.Capability(nil), provider.Capabilities...)
 	result.ProviderReadiness = readiness.Readiness
 	result.ProviderDependencies = append([]tool.DependencyRequirement(nil), provider.Dependencies...)

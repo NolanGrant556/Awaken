@@ -5,6 +5,7 @@ import {
   AwakenDeliverableCard as DeliverableCard,
   AwakenDeliverableList as DeliverableList,
   AwakenMediaGenerationCard as MediaGenerationCard,
+  AwakenMediaPreviewOverlay as MediaPreviewOverlay,
   type AwakenDeliverableListItem,
 } from "@awaken/design-system";
 
@@ -40,13 +41,15 @@ describe("final deliverable list", () => {
     expect(html).toContain("在 Finder/资源管理器中显示");
   });
 
-  it("renders image and video delivery cards with inline media surfaces", () => {
+  it("renders image and video delivery cards as independent compact media items", () => {
     const imageHtml = renderToString(
       React.createElement(DeliverableCard, {
         title: "主视觉.png",
         extension: "png",
         fileType: "image",
         previewSrc: "awaken-artifact://media/image/main.png",
+        previewAspectRatio: 16 / 9,
+        onPreview: () => undefined,
         onOpen: () => undefined,
       }),
     );
@@ -56,19 +59,21 @@ describe("final deliverable list", () => {
         extension: "mp4",
         fileType: "video",
         previewSrc: "awaken-artifact://media/video/main.mp4",
+        onPreview: () => undefined,
         onOpen: () => undefined,
       }),
     );
 
-    expect(imageHtml).toContain("aw-deliverable-card-media-preview");
+    expect(imageHtml).toContain("aw-media-item-card-surface");
+    expect(imageHtml).toContain("--aw-media-item-aspect:1.7777777777777777");
     expect(imageHtml).toContain("<img");
     expect(imageHtml).toContain("主视觉.png");
     expect(videoHtml).toContain("<video");
-    expect(videoHtml).toContain("controls");
+    expect(videoHtml).not.toContain("controls");
     expect(videoHtml).toContain("成片.mp4");
   });
 
-  it("renders a 15-image generation batch inside one compact gallery", () => {
+  it("renders a 15-image generation batch as 15 independent compact cards", () => {
     const html = renderToString(
       React.createElement(MediaGenerationCard, {
         kind: "image",
@@ -81,10 +86,40 @@ describe("final deliverable list", () => {
       }),
     );
 
-    expect(html).toContain('data-group="true"');
+    expect(html).toContain('data-count="15"');
     expect(html).toContain("已生成 15 张图片");
-    expect(html).toContain("--aw-media-gallery-columns:5");
-    expect((html.match(/class="aw-media-generation-card-item"/g) ?? [])).toHaveLength(15);
+    expect((html.match(/class="aw-media-item-card aw-media-item-card-image"/g) ?? [])).toHaveLength(15);
+    expect(html).not.toContain("aw-media-generation-card-viewport");
+  });
+
+  it("renders 15 independent placeholder cards while a group request is running", () => {
+    const html = renderToString(
+      React.createElement(MediaGenerationCard, {
+        kind: "image",
+        status: "generating",
+        requestedCount: 15,
+      }),
+    );
+
+    expect(html).toContain('data-count="15"');
+    expect(html).toContain("最多 15 张");
+    expect((html.match(/class="aw-media-item-card aw-media-item-card-image"/g) ?? [])).toHaveLength(15);
+    expect((html.match(/aw-media-item-card-loading-grid/g) ?? [])).toHaveLength(15);
+  });
+
+  it("keeps 15 independent terminal cards after a group request fails", () => {
+    const html = renderToString(
+      React.createElement(MediaGenerationCard, {
+        kind: "image",
+        status: "error",
+        requestedCount: 15,
+        detail: "图片视频生成服务请求失败。",
+      }),
+    );
+
+    expect(html).toContain('data-count="15"');
+    expect((html.match(/class="aw-media-item-card aw-media-item-card-image"/g) ?? [])).toHaveLength(15);
+    expect((html.match(/aw-media-item-card-terminal/g) ?? [])).toHaveLength(15);
   });
 
   it("lays out media deliverables as compact grid items while documents stay full width", () => {
@@ -104,6 +139,54 @@ describe("final deliverable list", () => {
 
     expect((html.match(/aw-deliverable-list-item-image/g) ?? [])).toHaveLength(15);
     expect(html).toContain("aw-deliverable-list-item-excel");
+  });
+
+  it("keeps every media deliverable visible while document expansion remains capped", () => {
+    const mediaItems: AwakenDeliverableListItem[] = Array.from({ length: 15 }, (_, index) => ({
+      id: `image-${index + 1}`,
+      title: `图片-${index + 1}.png`,
+      extension: "png",
+      fileType: "image",
+      previewSrc: `awaken-artifact://media/image/${index + 1}.png`,
+      onPreview: () => undefined,
+    }));
+    const html = renderToString(
+      React.createElement(DeliverableList, {
+        items: [...mediaItems, ...items(4)],
+      }),
+    );
+
+    expect((html.match(/aw-deliverable-list-item-image/g) ?? [])).toHaveLength(15);
+    expect((html.match(/aw-deliverable-list-item-excel/g) ?? [])).toHaveLength(3);
+    expect(html).toContain("展开其余 1 个交付文件");
+  });
+
+  it("renders the in-stage media preview with platform actions and navigation", () => {
+    const html = renderToString(
+      React.createElement(MediaPreviewOverlay, {
+        item: {
+          id: "image-2",
+          kind: "image",
+          title: "图片-2.png",
+          src: "awaken-artifact://media/image/2.png",
+        },
+        position: 1,
+        count: 15,
+        onClose: () => undefined,
+        onPrevious: () => undefined,
+        onNext: () => undefined,
+        onOpenExternal: () => undefined,
+        onReveal: () => undefined,
+        revealLabel: "在文件资源管理器中显示",
+      }),
+    );
+
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain(">2<!-- --> / <!-- -->15</span>");
+    expect(html).toContain("适应窗口");
+    expect(html).toContain("原始尺寸");
+    expect(html).toContain("使用本地应用打开");
+    expect(html).toContain("在文件资源管理器中显示");
   });
 
   it.each([0, 1, 3])("renders %i files without an expand control", (count) => {

@@ -38,6 +38,7 @@ import {
   AwakenDeliverableList as DeliverableList,
   AwakenExecutionFeed as ExecutionFeed,
   AwakenMediaGenerationCard as MediaGenerationCard,
+  AwakenMediaPreviewOverlay as MediaPreviewOverlay,
   AwakenInspectorRail as InspectorRail,
   AwakenSubagentGroup as SubagentGroup,
   AwakenProjectFoldersEditor as ProjectFoldersEditor,
@@ -60,6 +61,7 @@ import {
   type ComposerBarMetaItem,
   type ComposerBarStructuredInputValue,
   type AwakenContextUsagePanelProps,
+  type AwakenMediaPreviewItem,
   type NavItem,
   type PlatformKind,
   type ProjectFolderRow,
@@ -89,6 +91,7 @@ import type {
   RuntimeRunStatus,
   RuntimeThread,
   StartRunRequest,
+  ArtifactOpenRequest,
   UpsertProjectResult,
 } from "../shared/runtime";
 import type { AguiEvent } from "../shared/agui";
@@ -200,6 +203,41 @@ type UserQuestionPromptProps = {
   onSubmit: (answer: string) => void;
 };
 
+type MediaArtifactPreviewItem = AwakenMediaPreviewItem & {
+  request: ArtifactOpenRequest;
+};
+
+type MediaArtifactPreviewState = {
+  items: MediaArtifactPreviewItem[];
+  activeId: string;
+};
+
+type MediaArtifactRecordRef = {
+  id: string;
+  path?: string;
+};
+
+export function mediaArtifactRequestForPath(
+  threadId: string,
+  runId: string,
+  artifactPath: string,
+  artifact?: MediaArtifactRecordRef,
+): ArtifactOpenRequest {
+  if (artifact) {
+    return { threadId, runId, artifactId: artifact.id };
+  }
+  return {
+    threadId,
+    runId,
+    artifactId: `legacy-media:${artifactPath}`,
+    artifactPath,
+  };
+}
+
+function artifactMediaSourceKey(request: ArtifactOpenRequest): string {
+  return `${request.threadId}:${request.runId}:${request.artifactId}`;
+}
+
 export type UserQuestionSelection = {
   selected: string[];
   otherText: string;
@@ -229,6 +267,12 @@ export type WorkbenchInspectorPresentation = {
 };
 
 export type ExpandedWorkspaceSurface = "conversation" | "file";
+
+export function mediaRevealLabelForPlatform(platform: PlatformKind): string {
+  if (platform === "macos") return "在 Finder 中显示";
+  if (platform === "windows") return "在文件资源管理器中显示";
+  return "在文件管理器中显示";
+}
 
 export function shouldUseCenterComposerWithFileWorkspace({
   standardCenterComposer,
@@ -1697,6 +1741,7 @@ export function App() {
     string | null
   >(null);
   const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<MediaArtifactPreviewState | null>(null);
   const [artifactMediaSources, setArtifactMediaSources] = useState<Record<string, string | null>>({});
   const artifactMediaSourcesRef = useRef<Record<string, string | null>>({});
   const artifactMediaSourcePendingRef = useRef<Set<string>>(new Set());
@@ -1860,12 +1905,20 @@ export function App() {
     );
     const requests = new Map<string, { threadId: string; runId: string; artifactId: string }>();
     for (const item of visibleNarrativeItems) {
-      if (item.kind === "mediaGeneration" && item.status === "ready" && item.runId) {
-        for (const artifactPath of item.artifactPaths) {
+      if (
+        item.kind === "mediaGeneration" &&
+        (item.status === "ready" || item.status === "partial") &&
+        item.runId
+      ) {
+        const readyPaths = item.mediaItems?.length
+          ? item.mediaItems.flatMap((mediaItem) =>
+              mediaItem.status === "ready" && mediaItem.path ? [mediaItem.path] : [],
+            )
+          : item.artifactPaths;
+        for (const artifactPath of readyPaths) {
           const artifact = byPath.get(artifactPath.replace(/\\/g, "/").toLowerCase());
-          if (!artifact) continue;
-          const key = `${threadId}:${item.runId}:${artifact.id}`;
-          requests.set(key, { threadId, runId: item.runId, artifactId: artifact.id });
+          const request = mediaArtifactRequestForPath(threadId, item.runId, artifactPath, artifact);
+          requests.set(artifactMediaSourceKey(request), request);
         }
       }
       if (item.kind === "deliverables") {
@@ -1884,6 +1937,7 @@ export function App() {
     artifactMediaSourcePendingRef.current.clear();
     artifactMediaSourcesRef.current = {};
     setArtifactMediaSources({});
+    setMediaPreview(null);
   }, [runtimeState.activeThreadId]);
 
   useEffect(() => {
@@ -5035,6 +5089,29 @@ export function App() {
     );
   }
 
+  function openMediaPreview(items: MediaArtifactPreviewItem[], activeId: string): void {
+    if (items.length === 0) return;
+    setMediaPreview({ items, activeId });
+    setContextUsagePanelOpen(false);
+  }
+
+  async function openArtifactExternally(request: ArtifactOpenRequest): Promise<void> {
+    setOpeningArtifactId(request.artifactId);
+    try {
+      const result = await runtimeClient.openArtifact(request);
+      if (!result.ok) setNotice(result.message);
+    } finally {
+      setOpeningArtifactId((current) =>
+        current === request.artifactId ? null : current,
+      );
+    }
+  }
+
+  async function revealArtifact(request: ArtifactOpenRequest): Promise<void> {
+    const result = await runtimeClient.revealArtifact(request);
+    if (!result.ok) setNotice(result.message);
+  }
+
   function renderNarrativeItem(item: RunNarrativeItem, key: string) {
     if (item.kind === "planning" || item.kind === "thinking") {
       return (
@@ -5117,34 +5194,70 @@ export function App() {
           .filter((candidate) => Boolean(candidate.path))
           .map((candidate) => [candidate.path!.replace(/\\/g, "/").toLowerCase(), candidate]),
       );
-      const mediaSources = item.artifactPaths.map((artifactPath, index) => {
-        const artifact = artifactsByPath.get(artifactPath.replace(/\\/g, "/").toLowerCase());
-        const sourceKey =
-          threadId && item.runId && artifact
-            ? `${threadId}:${item.runId}:${artifact.id}`
+      const resultItems =
+        item.mediaItems && item.mediaItems.length > 0
+          ? item.mediaItems
+          : item.artifactPaths.map((path, index) => ({
+              index: index + 1,
+              status: "ready" as const,
+              path,
+            }));
+      const mediaEntries = resultItems.map((resultItem) => {
+        const artifactPath = resultItem.path || "";
+        const artifact = artifactPath
+          ? artifactsByPath.get(artifactPath.replace(/\\/g, "/").toLowerCase())
+          : undefined;
+        const request =
+          threadId && item.runId && artifactPath
+            ? mediaArtifactRequestForPath(threadId, item.runId, artifactPath, artifact)
             : undefined;
+        const sourceKey = request ? artifactMediaSourceKey(request) : undefined;
+        const sourceState = sourceKey ? artifactMediaSources[sourceKey] : undefined;
+        const sourceFailed = sourceState === null;
         return {
-          id: artifact?.id || artifactPath || `media-${index + 1}`,
-          src: sourceKey ? artifactMediaSources[sourceKey] ?? undefined : undefined,
-          alt: artifact?.title || `${item.title} ${index + 1}`,
-          onOpen:
-            threadId && item.runId && artifact
-              ? async () => {
-                  setOpeningArtifactId(artifact.id);
-                  try {
-                    const result = await runtimeClient.openArtifact({
-                      threadId,
-                      runId: item.runId!,
-                      artifactId: artifact.id,
-                    });
-                    if (!result.ok) setNotice(result.message);
-                  } finally {
-                    setOpeningArtifactId((current) => current === artifact.id ? null : current);
-                  }
-                }
-              : undefined,
+          id: artifact?.id || request?.artifactId || `media-${resultItem.index}`,
+          index: resultItem.index,
+          status:
+            resultItem.status === "ready" && sourceFailed
+              ? ("error" as const)
+              : resultItem.status,
+          sourceUnavailable: resultItem.status === "ready" && sourceFailed,
+          src: typeof sourceState === "string" ? sourceState : undefined,
+          title: artifact?.title || `${item.title} ${resultItem.index}`,
+          request,
         };
       });
+      const previewItems: MediaArtifactPreviewItem[] = mediaEntries.flatMap((entry) =>
+        entry.src && entry.request
+          ? [{
+              id: entry.id,
+              kind: item.mediaKind,
+              title: entry.title,
+              src: entry.src,
+              alt: entry.title,
+              request: entry.request,
+            }]
+          : [],
+      );
+      const mediaSources = mediaEntries.map((entry) => ({
+        id: entry.id,
+        index: entry.index,
+        status: entry.status,
+        detail:
+          entry.sourceUnavailable
+            ? "预览不可用"
+            : entry.status === "ready"
+            ? "点击预览"
+            : entry.status === "unknown"
+              ? "状态待确认"
+              : "生成失败",
+        src: entry.src,
+        alt: entry.title,
+        onPreview:
+          entry.src && entry.request
+            ? () => openMediaPreview(previewItems, entry.id)
+            : undefined,
+      }));
       return (
         <MediaGenerationCard
           key={key}
@@ -5153,6 +5266,7 @@ export function App() {
           title={item.title}
           detail={item.detail}
           requestedCount={item.requestedCount}
+          requestedAspectRatio={item.requestedAspectRatio}
           sources={mediaSources}
         />
       );
@@ -5217,6 +5331,27 @@ export function App() {
     }
     if (item.kind === "deliverables") {
       const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;
+      const previewItems: MediaArtifactPreviewItem[] = threadId
+        ? item.files.flatMap((file) => {
+            if (file.fileType !== "image" && file.fileType !== "video") return [];
+            const src = artifactMediaSources[
+              `${threadId}:${file.runId}:${file.artifactId}`
+            ] ?? undefined;
+            if (!src) return [];
+            return [{
+              id: file.artifactId,
+              kind: file.fileType,
+              title: file.title,
+              src,
+              alt: file.title,
+              request: {
+                threadId,
+                runId: file.runId,
+                artifactId: file.artifactId,
+              },
+            }];
+          })
+        : [];
       return (
         <DeliverableList
           key={key}
@@ -5230,39 +5365,33 @@ export function App() {
               file.fileType === "image" || file.fileType === "video"
                 ? artifactMediaSources[`${threadId}:${file.runId}:${file.artifactId}`] ?? undefined
                 : undefined,
+            onPreview:
+              file.fileType === "image" || file.fileType === "video"
+                ? () => openMediaPreview(previewItems, file.artifactId)
+                : undefined,
             opening: openingArtifactId === file.artifactId,
             disabled: !threadId,
             onOpen: threadId
-              ? async () => {
-                  setOpeningArtifactId(file.artifactId);
-                  try {
-                    const result = await runtimeClient.openArtifact({
-                      threadId,
-                      runId: file.runId,
-                      artifactId: file.artifactId,
-                    });
-                    if (!result.ok) {
-                      setNotice(result.message);
-                    }
-                  } finally {
-                    setOpeningArtifactId((current) =>
-                      current === file.artifactId ? null : current,
-                    );
-                  }
-                }
+              ? () => openArtifactExternally({
+                  threadId,
+                  runId: file.runId,
+                  artifactId: file.artifactId,
+                })
               : undefined,
             onReveal: threadId
-              ? async () => {
-                  const result = await runtimeClient.revealArtifact({
-                    threadId,
-                    runId: file.runId,
-                    artifactId: file.artifactId,
-                  });
-                  if (!result.ok) {
-                    setNotice(result.message);
-                  }
-                }
+              ? () => revealArtifact({
+                  threadId,
+                  runId: file.runId,
+                  artifactId: file.artifactId,
+                })
               : undefined,
+            localOpenLabel: "使用本地应用打开",
+            revealLabel:
+              platform === "macos"
+                ? "在 Finder 中显示"
+                : platform === "windows"
+                  ? "在文件资源管理器中显示"
+                  : "在文件管理器中显示",
           }))}
         />
       );
@@ -5347,6 +5476,14 @@ export function App() {
   }
 
   const platform = runtimeClient.platform as PlatformKind;
+  const mediaRevealLabel = mediaRevealLabelForPlatform(platform);
+  const activeMediaPreviewIndex = mediaPreview
+    ? Math.max(0, mediaPreview.items.findIndex((item) => item.id === mediaPreview.activeId))
+    : -1;
+  const activeMediaPreviewItem =
+    mediaPreview && activeMediaPreviewIndex >= 0
+      ? mediaPreview.items[activeMediaPreviewIndex]
+      : undefined;
   const composerBarAttachments = composerAttachmentViews(composerAttachments);
   const fileWorkspaceProjectId = workspaceLabelProjectId
     ? backendProjectIdFor(workspaceLabelProjectId)
@@ -5826,7 +5963,7 @@ export function App() {
                   }
                   stage={
                     <RunStage
-                      contentInactive={fileWorkspaceSurfaceActive}
+                      contentInactive={fileWorkspaceSurfaceActive || Boolean(activeMediaPreviewItem)}
                       scrollRef={showCenterComposer ? undefined : setRunStageScrollElement}
                       onScroll={showCenterComposer ? undefined : handleRunStageScroll}
                       overlay={
@@ -5896,11 +6033,66 @@ export function App() {
                               />
                             </div>
                           ) : null}
+                          {activeMediaPreviewItem && mediaPreview ? (
+                            <MediaPreviewOverlay
+                              item={activeMediaPreviewItem}
+                              position={activeMediaPreviewIndex}
+                              count={mediaPreview.items.length}
+                              openingExternal={
+                                openingArtifactId === activeMediaPreviewItem.request.artifactId
+                              }
+                              localOpenLabel="使用本地应用打开"
+                              revealLabel={mediaRevealLabel}
+                              onClose={() => setMediaPreview(null)}
+                              onPrevious={
+                                mediaPreview.items.length > 1
+                                  ? () => {
+                                      const previousIndex =
+                                        (activeMediaPreviewIndex - 1 + mediaPreview.items.length) %
+                                        mediaPreview.items.length;
+                                      setMediaPreview((current) =>
+                                        current
+                                          ? {
+                                              ...current,
+                                              activeId: current.items[previousIndex]?.id ?? current.activeId,
+                                            }
+                                          : current,
+                                      );
+                                    }
+                                  : undefined
+                              }
+                              onNext={
+                                mediaPreview.items.length > 1
+                                  ? () => {
+                                      const nextIndex =
+                                        (activeMediaPreviewIndex + 1) % mediaPreview.items.length;
+                                      setMediaPreview((current) =>
+                                        current
+                                          ? {
+                                              ...current,
+                                              activeId: current.items[nextIndex]?.id ?? current.activeId,
+                                            }
+                                          : current,
+                                      );
+                                    }
+                                  : undefined
+                              }
+                              onOpenExternal={() => {
+                                void openArtifactExternally(activeMediaPreviewItem.request);
+                              }}
+                              onReveal={() => {
+                                void revealArtifact(activeMediaPreviewItem.request);
+                              }}
+                            />
+                          ) : null}
                         </>
                       }
                       composer={
                         showCenterComposer ? undefined : (
-                          <ComposerDock ref={setComposerDockElement}>
+                          <ComposerDock
+                            ref={setComposerDockElement}
+                            interactionInactive={Boolean(activeMediaPreviewItem)}
+                          >
                             <div className="composer-dock-stack">
                               {renderComposerRuntimePanels()}
                               {renderUserQuestionPrompt()}

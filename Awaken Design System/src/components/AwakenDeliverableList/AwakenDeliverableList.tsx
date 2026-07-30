@@ -27,9 +27,22 @@ export function AwakenDeliverableList({
 }: AwakenDeliverableListProps) {
   const [expanded, setExpanded] = useState(false);
   const listId = useId();
-  const hasMore = items.length > initiallyVisibleCount;
-  const visibleItems = expanded || !hasMore ? items : items.slice(0, initiallyVisibleCount);
-  const hiddenCount = Math.max(0, items.length - initiallyVisibleCount);
+  const documentItems = items.filter(
+    (item) => item.fileType !== "image" && item.fileType !== "video",
+  );
+  const hasMore = documentItems.length > initiallyVisibleCount;
+  const visibleDocumentIds = new Set(
+    (expanded || !hasMore ? documentItems : documentItems.slice(0, initiallyVisibleCount)).map(
+      (item) => item.id,
+    ),
+  );
+  const visibleItems = items.filter(
+    (item) =>
+      item.fileType === "image" ||
+      item.fileType === "video" ||
+      visibleDocumentIds.has(item.id),
+  );
+  const hiddenCount = Math.max(0, documentItems.length - initiallyVisibleCount);
 
   if (items.length === 0) {
     return null;

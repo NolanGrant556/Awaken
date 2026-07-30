@@ -48,12 +48,13 @@ export const AwakenDeliverableCardStates: AwakenDeliverableCardState[] = [
   {
     id: "image-ready",
     name: "图片已就绪",
-    description: "最终交付图片在卡片中直接预览。",
+    description: "最终交付图片使用独立紧凑卡片，单击进入预览。",
     props: {
       title: "生成的主视觉.png",
       extension: "png",
       fileType: "image",
       previewSrc: "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='675'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23a9c7ff'/%3E%3Cstop offset='1' stop-color='%232b1f55'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='1200' height='675' fill='url(%23g)'/%3E%3C/svg%3E",
+      onPreview: () => undefined,
       onOpen: () => undefined,
       onReveal: () => undefined,
     },
@@ -61,11 +62,12 @@ export const AwakenDeliverableCardStates: AwakenDeliverableCardState[] = [
   {
     id: "video-ready",
     name: "视频已就绪",
-    description: "视频交付卡保留原生播放控件和系统打开入口。",
+    description: "视频交付卡显示播放入口，完整控件位于放大预览中。",
     props: {
       title: "生成的视频.mp4",
       extension: "mp4",
       fileType: "video",
+      onPreview: () => undefined,
       onOpen: () => undefined,
       onReveal: () => undefined,
     },

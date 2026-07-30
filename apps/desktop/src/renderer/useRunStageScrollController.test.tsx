@@ -132,6 +132,7 @@ describe("useRunStageScrollController prompt anchor timing", () => {
   let resizeObserverRecords: ResizeObserverRecord[];
   let scrollToMock: ReturnType<typeof vi.fn>;
   let originalScrollToDescriptor: PropertyDescriptor | undefined;
+  let followUpPromptOffset: number;
 
   beforeEach(() => {
     (
@@ -144,6 +145,7 @@ describe("useRunStageScrollController prompt anchor timing", () => {
     document.body.append(host);
     animationFrameCallbacks = [];
     resizeObserverRecords = [];
+    followUpPromptOffset = FOLLOW_UP_PROMPT_OFFSET;
 
     vi.stubGlobal(
       "ResizeObserver",
@@ -207,7 +209,7 @@ describe("useRunStageScrollController prompt anchor timing", () => {
         if (turn && runStage) {
           const promptOffset =
             turn.dataset.executionTurnId === FOLLOW_UP_PROMPT_ID
-              ? FOLLOW_UP_PROMPT_OFFSET
+              ? followUpPromptOffset
               : 0;
           return domRect(
             RUN_STAGE_TOP + promptOffset - runStage.scrollTop,
@@ -304,6 +306,62 @@ describe("useRunStageScrollController prompt anchor timing", () => {
     ).toBe(RUN_STAGE_TOP);
   });
 
+  it("keeps the follow-up prompt anchored when an earlier media turn changes height", () => {
+    const harnessRef = createRef<ControllerHarnessHandle>();
+    root = createRoot(host);
+    act(() => {
+      root?.render(<ControllerHarness ref={harnessRef} />);
+    });
+
+    const runStage = host.querySelector<HTMLElement>("[data-run-stage]");
+    expect(runStage).not.toBeNull();
+    Object.defineProperties(runStage, {
+      clientHeight: { configurable: true, value: RUN_STAGE_HEIGHT },
+      scrollHeight: { configurable: true, value: RUN_STAGE_SCROLL_HEIGHT },
+    });
+    runStage!.scrollTop = INITIAL_SCROLL_TOP;
+    act(() => {
+      harnessRef.current?.submitFollowUp();
+    });
+
+    scrollToMock.mockClear();
+    followUpPromptOffset += 180;
+    Object.defineProperty(runStage, "scrollHeight", {
+      configurable: true,
+      value: RUN_STAGE_SCROLL_HEIGHT + 180,
+    });
+    expect(runStage?.scrollTop).toBe(FOLLOW_UP_PROMPT_OFFSET);
+    expect(
+      runStage
+        ?.querySelector<HTMLElement>(
+          `[data-execution-turn-id="${FOLLOW_UP_PROMPT_ID}"] .execution-turn-header`,
+        )
+        ?.getBoundingClientRect().top,
+    ).toBe(RUN_STAGE_TOP + 180);
+    const earlierTurn = runStage?.querySelector(
+      `[data-execution-turn-id="${FIRST_PROMPT_ID}"]`,
+    );
+    const record = [...resizeObserverRecords].reverse().find((entry) =>
+      entry.targets.includes(earlierTurn as Element),
+    );
+    expect(record).toBeDefined();
+    act(() => {
+      record?.callback([], {} as ResizeObserver);
+    });
+
+    expect(scrollToMock).toHaveBeenCalledWith({
+      top: FOLLOW_UP_PROMPT_OFFSET + 180,
+      behavior: "auto",
+    });
+    expect(
+      runStage
+        ?.querySelector<HTMLElement>(
+          `[data-execution-turn-id="${FOLLOW_UP_PROMPT_ID}"] .execution-turn-header`,
+        )
+        ?.getBoundingClientRect().top,
+    ).toBe(RUN_STAGE_TOP);
+  });
+
   describe("streaming layout follow", () => {
     function defineRunStageScrollGeometry(
       element: HTMLElement,
@@ -322,12 +380,15 @@ describe("useRunStageScrollController prompt anchor timing", () => {
       }
     }
 
-    function triggerLatestTurnResizeObserver(runStage: HTMLElement): void {
-      const followUpTurn = runStage.querySelector(
-        `[data-execution-turn-id="${FOLLOW_UP_PROMPT_ID}"]`,
+    function triggerTurnResizeObserver(
+      runStage: HTMLElement,
+      turnId: string,
+    ): void {
+      const observedTurn = runStage.querySelector(
+        `[data-execution-turn-id="${turnId}"]`,
       );
-      const record = resizeObserverRecords.find((entry) =>
-        entry.targets.includes(followUpTurn as Element),
+      const record = [...resizeObserverRecords].reverse().find((entry) =>
+        entry.targets.includes(observedTurn as Element),
       );
       expect(record).toBeDefined();
       record?.callback([], {} as ResizeObserver);
@@ -366,7 +427,7 @@ describe("useRunStageScrollController prompt anchor timing", () => {
       // mermaid 渲染、SVG/图片注入等异步增高，触发布局 observer。
       defineRunStageScrollGeometry(runStage, 2_400);
       act(() => {
-        triggerLatestTurnResizeObserver(runStage);
+        triggerTurnResizeObserver(runStage, FOLLOW_UP_PROMPT_ID);
       });
 
       expect(scrollToMock).toHaveBeenCalledWith({
@@ -389,11 +450,39 @@ describe("useRunStageScrollController prompt anchor timing", () => {
       scrollToMock.mockClear();
       defineRunStageScrollGeometry(runStage, 3_000);
       act(() => {
-        triggerLatestTurnResizeObserver(runStage);
+        triggerTurnResizeObserver(runStage, FOLLOW_UP_PROMPT_ID);
       });
 
       expect(scrollToMock).not.toHaveBeenCalled();
       expect(runStage.dataset.returnToLatestVisible).toBe("true");
+    });
+
+    it("keeps the latest tail stable when an earlier media turn resizes while following", () => {
+      const { runStage } = renderFollowingController();
+      const promptTopBefore = runStage
+        .querySelector<HTMLElement>(
+          `[data-execution-turn-id="${FOLLOW_UP_PROMPT_ID}"] .execution-turn-header`,
+        )
+        ?.getBoundingClientRect().top;
+
+      scrollToMock.mockClear();
+      followUpPromptOffset += 220;
+      defineRunStageScrollGeometry(runStage, RUN_STAGE_SCROLL_HEIGHT + 220);
+      act(() => {
+        triggerTurnResizeObserver(runStage, FIRST_PROMPT_ID);
+      });
+
+      expect(scrollToMock).toHaveBeenCalledWith({
+        top: RUN_STAGE_SCROLL_HEIGHT + 220 - RUN_STAGE_HEIGHT,
+        behavior: "auto",
+      });
+      expect(
+        runStage
+          .querySelector<HTMLElement>(
+            `[data-execution-turn-id="${FOLLOW_UP_PROMPT_ID}"] .execution-turn-header`,
+          )
+          ?.getBoundingClientRect().top,
+      ).toBe(promptTopBefore);
     });
 
     it("ignores passive scroll clamping at the bottom but still pauses for a real upward scroll", () => {

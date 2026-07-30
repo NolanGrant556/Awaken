@@ -692,6 +692,112 @@ describe("projectAguiEventToNarrative", () => {
     });
   });
 
+  it("preserves per-item partial group results for independent cards", () => {
+    let state = createInitialRunNarrativeState();
+    const base = {
+      runId: "run-partial-group",
+      toolCallId: "call-partial-group",
+      toolCallName: "image_generate",
+    };
+    state = projectAguiEventToNarrative(state, { type: "TOOL_CALL_START", ...base });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_ARGS",
+      ...base,
+      delta: JSON.stringify({ prompt: "三张", mode: "group", max_images: 3 }),
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_RESULT",
+      ...base,
+      toolStatus: "failed",
+      transportStatus: "completed",
+      content: JSON.stringify({
+        generation_status: "partial",
+        requested_count: 3,
+        paths: ["output/1.png", "output/3.png"],
+        items: [
+          { index: 1, status: "ready", path: "output/1.png" },
+          { index: 2, status: "error" },
+          { index: 3, status: "ready", path: "output/3.png" },
+        ],
+      }),
+    });
+    expect(state.committedItems[0]).toMatchObject({
+      kind: "mediaGeneration",
+      status: "partial",
+      requestedCount: 3,
+      artifactPaths: ["output/1.png", "output/3.png"],
+      mediaItems: [
+        { index: 1, status: "ready", path: "output/1.png" },
+        { index: 2, status: "error" },
+        { index: 3, status: "ready", path: "output/3.png" },
+      ],
+    });
+  });
+
+  it("keeps a submitted video task as unknown with its resumable task id", () => {
+    let state = createInitialRunNarrativeState();
+    const base = {
+      runId: "run-video-unknown",
+      toolCallId: "call-video-unknown",
+      toolCallName: "video_generate",
+    };
+    state = projectAguiEventToNarrative(state, { type: "TOOL_CALL_START", ...base });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_COMMAND_OUTPUT",
+      ...base,
+      commandStream: "media_status",
+      delta: '{"stage":"queued","message":"视频任务已提交","task_id":"cgt-1"}\n',
+    });
+    expect(state.activeItem).toMatchObject({ taskId: "cgt-1", status: "queued" });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_RESULT",
+      ...base,
+      toolStatus: "failed",
+      transportStatus: "unknown",
+      content: JSON.stringify({
+        generation_status: "unknown",
+        task_id: "cgt-1",
+        requested_count: 1,
+        paths: [],
+        items: [{ index: 1, status: "unknown" }],
+      }),
+    });
+    expect(state.committedItems[0]).toMatchObject({
+      kind: "mediaGeneration",
+      status: "unknown",
+      taskId: "cgt-1",
+      mediaItems: [{ index: 1, status: "unknown" }],
+    });
+  });
+
+  it("projects an image POST timeout as unknown instead of fifteen failed cards", () => {
+    let state = createInitialRunNarrativeState();
+    const base = {
+      runId: "run-image-unknown",
+      toolCallId: "call-image-unknown",
+      toolCallName: "image_generate",
+    };
+    state = projectAguiEventToNarrative(state, { type: "TOOL_CALL_START", ...base });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_ARGS",
+      ...base,
+      delta: JSON.stringify({ prompt: "十五张", mode: "group", max_images: 15 }),
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_RESULT",
+      ...base,
+      toolStatus: "failed",
+      transportStatus: "unknown",
+      content: "图片请求结果未知",
+    });
+    expect(state.committedItems[0]).toMatchObject({
+      kind: "mediaGeneration",
+      status: "unknown",
+      requestedCount: 15,
+      artifactPaths: [],
+    });
+  });
+
   it("keeps the requested group-image limit and the actual ready artifact count", () => {
     let state = createInitialRunNarrativeState();
     const base = {
@@ -703,11 +809,17 @@ describe("projectAguiEventToNarrative", () => {
     state = projectAguiEventToNarrative(state, {
       type: "TOOL_CALL_ARGS",
       ...base,
-      delta: JSON.stringify({ prompt: "一组连贯产品图", mode: "group", max_images: 12 }),
+      delta: JSON.stringify({
+        prompt: "一组连贯产品图",
+        mode: "group",
+        max_images: 12,
+        size: "2048x1024",
+      }),
     });
     expect(state.activeItem).toMatchObject({
       kind: "mediaGeneration",
       requestedCount: 12,
+      requestedAspectRatio: 2,
       detail: "一组连贯产品图",
     });
 
@@ -725,8 +837,29 @@ describe("projectAguiEventToNarrative", () => {
       kind: "mediaGeneration",
       status: "ready",
       requestedCount: 12,
+      requestedAspectRatio: 2,
       detail: "已生成 3 张图片",
       artifactPaths: ["output/1.png", "output/2.png", "output/3.png"],
+    });
+  });
+
+  it("projects a requested video ratio for its independent loading card", () => {
+    let state = createInitialRunNarrativeState();
+    const base = {
+      runId: "run-video-ratio",
+      toolCallId: "call-video-ratio",
+      toolCallName: "video_generate",
+    };
+    state = projectAguiEventToNarrative(state, { type: "TOOL_CALL_START", ...base });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_ARGS",
+      ...base,
+      delta: JSON.stringify({ prompt: "竖版视频", ratio: "9:16" }),
+    });
+
+    expect(state.activeItem).toMatchObject({
+      kind: "mediaGeneration",
+      requestedAspectRatio: 9 / 16,
     });
   });
 

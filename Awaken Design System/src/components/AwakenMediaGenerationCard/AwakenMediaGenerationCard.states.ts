@@ -18,8 +18,8 @@ export const AwakenMediaGenerationCardStates: AwakenMediaGenerationCardState[] =
   {
     id: "image-generating",
     name: "图片生成中",
-    description: "紧凑固定画幅内显示网格节奏，不改变对话流高度。",
-    props: { kind: "image", status: "generating", title: "正在生成图片", requestedCount: 12 },
+    description: "15 个结果分别使用独立紧凑卡片，完成后逐项由真实媒体覆盖。",
+    props: { kind: "image", status: "generating", title: "正在生成图片", requestedCount: 15 },
   },
   {
     id: "video-queued",
@@ -30,7 +30,7 @@ export const AwakenMediaGenerationCardStates: AwakenMediaGenerationCardState[] =
   {
     id: "image-ready",
     name: "图片已生成",
-    description: "成品在原容器内覆盖加载网格。",
+    description: "成品在同一张独立卡片内覆盖加载状态。",
     props: {
       kind: "image",
       status: "ready",
@@ -42,7 +42,7 @@ export const AwakenMediaGenerationCardStates: AwakenMediaGenerationCardState[] =
   {
     id: "image-group-ready",
     name: "组图已生成",
-    description: "一个 tool call 的多张结果在同一卡片内自适应排列。",
+    description: "一个 tool call 的多张结果拆成相互独立的小卡片。",
     props: {
       kind: "image",
       status: "ready",

@@ -1381,6 +1381,12 @@ export type ArtifactOpenRequest = {
   threadId: string;
   runId: string;
   artifactId: string;
+  /**
+   * Compatibility locator for media paths recorded by image/video tool results
+   * before the runtime emitted first-class Artifact events. Electron Main must
+   * verify the exact path against the durable run transcript before use.
+   */
+  artifactPath?: string;
 };
 
 export type ArtifactOpenErrorCode =

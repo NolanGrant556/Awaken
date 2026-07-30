@@ -4,7 +4,7 @@
 
 ## 用途
 
-`AwakenComposerDock` 用于承载固定在工作台底部的 composer 内容，提供停靠容器和边界样式。它适合 Run Workbench 的底部输入区；父级负责决定何时显示、传入 `AwakenComposerBar` 或其他 children，子级 composer 负责输入和提交交互，本组件只负责容器位置与外观。
+`AwakenComposerDock` 用于承载固定在工作台底部的 composer 内容，提供停靠容器和边界样式。它适合 Run Workbench 的底部输入区；父级负责决定何时显示、传入 `AwakenComposerBar` 或其他 children，子级 composer 负责输入和提交交互，本组件只负责容器位置与外观。中间区域显示模态 overlay 时，consumer 可用 `interactionInactive` 在不改变布局测量的情况下暂时移出交互与无障碍树。
 
 ## 文件
 

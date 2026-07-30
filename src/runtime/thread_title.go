@@ -211,45 +211,45 @@ func generateThreadTitleWithProfile(
 }
 
 func threadTitleMaxTokensForProfile(profile *ModelProfileConfig) int {
-	if profile == nil {
-		return threadTitleMaxTokens
-	}
-	modelID := strings.ToLower(strings.TrimSpace(profile.ModelID))
-	providerID := strings.ToLower(strings.TrimSpace(profile.ProviderID))
-	switch modelID {
-	case "kimi-for-coding", "kimi-for-coding-highspeed":
-		// These Kimi aliases always spend output tokens on reasoning before
-		// emitting content. A 48-token title budget can therefore return HTTP
-		// 200 with an empty content field even though the main run succeeds.
+	if threadTitleUsesForcedReasoningBudget(profile) {
 		return threadTitleForcedReasoningMaxTokens
-	case "k3", "k3-256k":
-		// Kimi Coding Plan routes these primary aliases to the same forced-
-		// reasoning auxiliary title model. Budget by the effective auxiliary
-		// contract, not only by the primary profile's model spelling.
-		if providerID == "kimi-coding-plan" {
-			return threadTitleForcedReasoningMaxTokens
-		}
-	default:
 	}
 	return threadTitleMaxTokens
 }
 
 func threadTitleGenerationTimeoutForProfile(profile *ModelProfileConfig) time.Duration {
+	if threadTitleUsesForcedReasoningBudget(profile) {
+		return threadTitleForcedReasoningTimeout
+	}
+	return threadTitleGenerationTimeout
+}
+
+func threadTitleUsesForcedReasoningBudget(profile *ModelProfileConfig) bool {
 	if profile == nil {
-		return threadTitleGenerationTimeout
+		return false
 	}
 	modelID := strings.ToLower(strings.TrimSpace(profile.ModelID))
 	providerID := strings.ToLower(strings.TrimSpace(profile.ProviderID))
 	switch modelID {
 	case "kimi-for-coding", "kimi-for-coding-highspeed":
-		return threadTitleForcedReasoningTimeout
+		// These Kimi aliases spend output tokens on reasoning before emitting
+		// content. A compact title budget can therefore return HTTP 200 with an
+		// empty content field even though the main run succeeds.
+		return true
 	case "k3", "k3-256k":
-		if providerID == "kimi-coding-plan" {
-			return threadTitleForcedReasoningTimeout
-		}
+		// Kimi Coding Plan routes these primary aliases to the same forced-
+		// reasoning auxiliary title model. Budget by the effective auxiliary
+		// contract, not only by the primary profile's model spelling.
+		return providerID == "kimi-coding-plan"
+	case "ark-code-latest":
+		// Agent Plan currently ignores DisableReasoning for this auxiliary
+		// request and accounts reasoning inside max_tokens. The compact 48-token
+		// budget has been observed to spend 45 tokens on reasoning and emit no
+		// title, so it needs the same bounded forced-reasoning policy.
+		return providerID == "volcengine-agent-plan" || providerID == "volcengine"
 	default:
+		return false
 	}
-	return threadTitleGenerationTimeout
 }
 
 func localThreadTitle(firstUserMessage string, attachments []RunInputAttachment, composerTokens []ComposerToken) string {

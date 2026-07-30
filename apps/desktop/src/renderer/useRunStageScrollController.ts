@@ -912,14 +912,24 @@ export function useRunStageScrollController({
 
     const resizeObserver = new ResizeObserver(() => {
       measureLatestTurnMinHeight(latestPromptId);
-      // 异步高度变化（mermaid 占位坍缩、SVG/图片注入）发生时，following 状态下
-      // 在同一帧 re-pin 到 native tail；RO 回调先于 paint，校正不可见。
+      // 异步高度变化（旧轮次媒体切换真实比例、mermaid 占位坍缩、SVG/图片注入）
+      // 发生时，在同一帧守住 pending prompt anchor 或 native tail；RO 回调先于
+      // paint，校正不可见。
       // 暂停、pending anchor 和非 follow 的程序滚动期间不介入，避免与用户意图
       // 或进行中的 anchor/marker 滚动冲突。
       const state = interactionStateRef.current;
       const hasConflictingProgrammaticScroll =
         state.programmaticScrollReason !== "none" &&
-        state.programmaticScrollReason !== "follow_latest";
+        state.programmaticScrollReason !== "follow_latest" &&
+        state.programmaticScrollReason !== "anchor_prompt";
+      if (
+        state.followMode === "anchoring" &&
+        !state.pendingPromptAnchorTurnId &&
+        !hasConflictingProgrammaticScroll
+      ) {
+        scrollPromptToAnchor(latestPromptId, "anchor_prompt");
+        return;
+      }
       if (
         state.followMode === "following_latest" &&
         !state.pendingPromptAnchorTurnId &&
@@ -929,7 +939,9 @@ export function useRunStageScrollController({
       }
     });
     resizeObserver.observe(element);
-    resizeObserver.observe(turn);
+    for (const observedTurn of turnElements(element)) {
+      resizeObserver.observe(observedTurn);
+    }
 
     return () => {
       resizeObserver.disconnect();

@@ -101,6 +101,64 @@ describe("artifact open authorization", () => {
     expect(opened).toBe(await fs.realpath(file));
   });
 
+  it("authorizes legacy media paths only when a ready tool result recorded the exact path", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "awaken-legacy-media-open-"));
+    temporaryRoots.push(root);
+    const output = path.join(root, "output");
+    await fs.mkdir(output);
+    const file = path.join(output, "generated.png");
+    await fs.writeFile(file, "png");
+    const transcript: RuntimeThreadTranscript = {
+      thread: {
+        threadId: "thread-media",
+        label: "media",
+        workspace: { workspaceRoot: root, writableRoots: [root], outputRoots: [output] },
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+      },
+      runs: [{
+        run: {
+          runId: "run-media",
+          threadId: "thread-media",
+          status: "error",
+          cancelRequested: false,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+        },
+        events: [{
+          type: "TOOL_CALL_RESULT",
+          toolCallName: "image_generate",
+          content: JSON.stringify({
+            generation_status: "partial",
+            paths: ["output/generated.png"],
+            items: [{ index: 1, status: "ready", path: "output/generated.png" }],
+          }),
+        }],
+      }],
+    };
+    const request = {
+      threadId: "thread-media",
+      runId: "run-media",
+      artifactId: "legacy-media:output/generated.png",
+      artifactPath: "output/generated.png",
+    };
+
+    await expect(resolveArtifactMediaTarget(transcript, request)).resolves.toMatchObject({
+      ok: true,
+      path: await fs.realpath(file),
+      mimeType: "image/png",
+    });
+    await expect(resolveArtifactTarget(transcript, request)).resolves.toEqual({
+      ok: true,
+      path: await fs.realpath(file),
+    });
+
+    await expect(resolveArtifactMediaTarget(transcript, {
+      ...request,
+      artifactPath: "output/unrecorded.png",
+    })).resolves.toMatchObject({ ok: false, result: { code: "artifact_not_recorded" } });
+  });
+
   it("folds partial artifact updates before authorizing the durable record", async () => {
     const { file, transcript } = await fixture();
     transcript.runs[0].events = [

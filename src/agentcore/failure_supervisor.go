@@ -36,7 +36,8 @@ const (
 	// StatusStrategyChangeRequired marks a recoverable tool result whose exact
 	// call must not be replayed; the agent must change tool, arguments, or
 	// implementation path. The run continues.
-	StatusStrategyChangeRequired = "strategy_change_required"
+	StatusStrategyChangeRequired            = "strategy_change_required"
+	StatusExternalStateConfirmationRequired = "external_state_confirmation_required"
 )
 
 // FailureSupervisor enforces hard budgets and recovery policy for repeated
@@ -78,30 +79,32 @@ type classFailureMeta struct {
 
 // RecoveryDirective is injected into the next model turn after repeated failures.
 type RecoveryDirective struct {
-	Required         bool
-	ToolName         string
-	ResourceKey      string
-	ResourceRevision string
-	ErrorCode        string
-	Fingerprint      string
-	AttemptCount     int
-	RecoveryOptions  []string
-	Message          string
+	Required                          bool
+	ToolName                          string
+	ResourceKey                       string
+	ResourceRevision                  string
+	ErrorCode                         string
+	Fingerprint                       string
+	AttemptCount                      int
+	RecoveryOptions                   []string
+	Message                           string
+	ExternalStateConfirmationRequired bool
 }
 
 // BeforeCallDecision is returned before a real tool execution.
 type BeforeCallDecision struct {
-	Allow            bool
-	Block            bool
-	ErrorCode        string
-	ErrorMessage     string
-	RecoveryOptions  []string
-	TerminateTurn    bool
-	TerminateRun     bool
-	TerminalReason   TerminalReason
-	CallSignature    string
-	AttemptCount     int
-	RecoveryRequired bool
+	Allow                             bool
+	Block                             bool
+	ErrorCode                         string
+	ErrorMessage                      string
+	RecoveryOptions                   []string
+	TerminateTurn                     bool
+	TerminateRun                      bool
+	TerminalReason                    TerminalReason
+	CallSignature                     string
+	AttemptCount                      int
+	RecoveryRequired                  bool
+	ExternalStateConfirmationRequired bool
 }
 
 // AfterOutcomeDecision is returned after a real tool outcome is observed.
@@ -206,6 +209,20 @@ func (s *FailureSupervisor) BeforeCall(call context.ToolCall) BeforeCallDecision
 		decision.ErrorCode = ErrorCodeRepeatedFailure
 		decision.ErrorMessage = fmt.Sprintf("tool execution budget exceeded (%d)", s.maxToolExecutions)
 		decision.RecoveryOptions = []string{"stop_and_summarize", "change_strategy"}
+		return decision
+	}
+
+	if s.pendingRecovery != nil && s.pendingRecovery.ExternalStateConfirmationRequired && s.pendingRecovery.ToolName == toolName {
+		decision.Allow = false
+		decision.Block = true
+		decision.ErrorCode = firstNonEmptyString(s.pendingRecovery.ErrorCode, ErrorCodeToolRetryBlocked)
+		decision.ErrorMessage = firstNonEmptyString(
+			s.pendingRecovery.Message,
+			fmt.Sprintf("blocked %s until the user confirms external provider state", toolName),
+		)
+		decision.RecoveryOptions = append([]string(nil), s.pendingRecovery.RecoveryOptions...)
+		decision.RecoveryRequired = true
+		decision.ExternalStateConfirmationRequired = true
 		return decision
 	}
 
@@ -334,6 +351,28 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 		s.sameFingerprintStreak = 1
 	}
 
+	if outcomeRequiresExternalStateConfirmation(outcome) {
+		decision.RecoveryRequired = true
+		directive := &RecoveryDirective{
+			Required:                          true,
+			ToolName:                          toolName,
+			ResourceKey:                       resourceKey,
+			ResourceRevision:                  revision,
+			ErrorCode:                         errorCode,
+			Fingerprint:                       fingerprint,
+			AttemptCount:                      s.callAttempts[signature],
+			RecoveryOptions:                   decision.RecoveryOptions,
+			ExternalStateConfirmationRequired: true,
+			Message: fmt.Sprintf(
+				"%s: tool=%s error_code=%s; do not submit another %s call until the user confirms provider state",
+				StatusExternalStateConfirmationRequired, toolName, errorCode, toolName,
+			),
+		}
+		s.pendingRecovery = directive
+		decision.Directive = directive
+		return decision
+	}
+
 	if s.sameFingerprintStreak >= 2 {
 		decision.RecoveryRequired = true
 		directive := &RecoveryDirective{
@@ -416,6 +455,14 @@ func strategyChangeNextActions() []string {
 	}
 }
 
+func outcomeRequiresExternalStateConfirmation(outcome tool.ExecutionOutcome) bool {
+	if outcome.Diagnostic == nil {
+		return false
+	}
+	required, _ := outcome.Diagnostic["requires_external_state_confirmation"].(bool)
+	return required
+}
+
 func recoveryDirectiveSatisfied(
 	directive *RecoveryDirective,
 	toolName, resourceKey, resourceRevision string,
@@ -478,10 +525,17 @@ func SyntheticBlockedResult(call context.ToolCall, decision BeforeCallDecision) 
 	if msg == "" {
 		msg = "tool retry blocked by FailureSupervisor"
 	}
+	status := StatusStrategyChangeRequired
 	nextActions := mergeUniqueStrings(decision.RecoveryOptions, strategyChangeNextActions())
+	modelRetryable := true
+	if decision.ExternalStateConfirmationRequired {
+		status = StatusExternalStateConfirmationRequired
+		nextActions = append([]string(nil), decision.RecoveryOptions...)
+		modelRetryable = false
+	}
 	guidance, _ := json.Marshal(map[string]any{
-		"status":              StatusStrategyChangeRequired,
-		"retryable":           true,
+		"status":              status,
+		"retryable":           modelRetryable,
 		"same_call_retryable": false,
 		"next_actions":        nextActions,
 	})
@@ -498,13 +552,14 @@ func SyntheticBlockedResult(call context.ToolCall, decision BeforeCallDecision) 
 		Retryable:       false,
 		RecoveryOptions: nextActions,
 		Diagnostic: map[string]any{
-			"blocked":             true,
-			"status":              StatusStrategyChangeRequired,
-			"same_call_retryable": false,
-			"retryable":           true,
-			"call_signature":      decision.CallSignature,
-			"attempt_count":       decision.AttemptCount,
-			"recovery_required":   decision.RecoveryRequired,
+			"blocked":                              true,
+			"status":                               status,
+			"same_call_retryable":                  false,
+			"retryable":                            modelRetryable,
+			"call_signature":                       decision.CallSignature,
+			"attempt_count":                        decision.AttemptCount,
+			"recovery_required":                    decision.RecoveryRequired,
+			"requires_external_state_confirmation": decision.ExternalStateConfirmationRequired,
 		},
 		StartedAt:  now,
 		FinishedAt: now,

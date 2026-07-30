@@ -1,13 +1,20 @@
 package mediagenerate
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"image"
+	"image/png"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +23,14 @@ import (
 
 type mediaStatusObserver struct {
 	outputs []tool.CommandOutput
+}
+
+type failingRoundTripper struct {
+	err error
+}
+
+func (transport failingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, transport.err
 }
 
 func (observer *mediaStatusObserver) OnCommandOutput(output tool.CommandOutput) {
@@ -63,6 +78,12 @@ func TestDefinitionPinsProviderWithoutExposingModelArgument(t *testing.T) {
 	for _, field := range []string{"kind", "model_id", "task_id", "paths", "provider"} {
 		if _, exists := definition.OutputSchema.Properties[field]; !exists {
 			t.Fatalf("media output schema missing %q: %+v", field, definition.OutputSchema.Properties)
+		}
+	}
+	videoDefinition := newMediaTool(testConfiguration("video")).Definition()
+	for _, field := range []string{"source_image_path", "source_role", "task_id"} {
+		if _, exists := videoDefinition.InputSchema.Properties[field]; !exists {
+			t.Fatalf("video input schema missing %q: %+v", field, videoDefinition.InputSchema.Properties)
 		}
 	}
 }
@@ -234,6 +255,96 @@ func TestInvalidImageGroupCombinationDoesNotCallProvider(t *testing.T) {
 	}
 }
 
+func TestImageTransportFailureKeepsSafeDiagnosticAndFailedTransport(t *testing.T) {
+	configuration := testConfiguration("image")
+	configuration.BaseURL = "https://media.invalid"
+	media := newMediaTool(configuration)
+	media.client = &http.Client{Transport: failingRoundTripper{err: &net.DNSError{Err: "no such host", Name: "media.invalid"}}}
+
+	outcome, err := media.ExecuteOutcome(context.Background(), `{"prompt":"group","mode":"group","max_images":15}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !outcome.IsError() || outcome.ErrorCode != "media_generate_upstream_failed" {
+		t.Fatalf("expected upstream failure, got %+v", outcome)
+	}
+	if outcome.TransportStatus != tool.TransportFailed {
+		t.Fatalf("expected failed transport, got %q", outcome.TransportStatus)
+	}
+	if outcome.Diagnostic["transport_failure_kind"] != "dns" {
+		t.Fatalf("expected safe dns diagnostic, got %+v", outcome.Diagnostic)
+	}
+	normalized := outcome.Normalize(tool.OutcomeNormalizationContext{
+		OperationType: media.Name(), DeclaredSideEffects: media.Definition().SideEffects,
+	})
+	if normalized.TransportStatus != tool.TransportFailed ||
+		normalized.Operation == nil || normalized.Operation.SideEffectState != tool.OutcomeSideEffectUnknown {
+		t.Fatalf("transport failure lost canonical unknown-side-effect semantics: %+v", normalized)
+	}
+	encoded, _ := json.Marshal(outcome)
+	if strings.Contains(string(encoded), "secret-test-key") {
+		t.Fatalf("transport diagnostic leaked credential: %s", encoded)
+	}
+}
+
+func TestImageCreateTimeoutIsUnknownAndNotBlindlyRetryable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		time.Sleep(30 * time.Millisecond)
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"data":[]}`))
+	}))
+	defer server.Close()
+	configuration := testConfiguration("image")
+	configuration.BaseURL = server.URL
+	media := newMediaTool(configuration)
+	media.client = server.Client()
+	media.imageTimeout = 5 * time.Millisecond
+	outcome, err := media.ExecuteOutcome(context.Background(), `{"prompt":"slow group","mode":"group","max_images":15}`, nil)
+	if err != nil || !outcome.IsError() {
+		t.Fatalf("expected typed timeout outcome, err=%v outcome=%+v", err, outcome)
+	}
+	if outcome.TransportStatus != tool.TransportUnknown || outcome.Retryable || outcome.Diagnostic["transport_failure_kind"] != "timeout" {
+		t.Fatalf("image create timeout must be unknown and non-retryable: %+v", outcome)
+	}
+}
+
+func TestImageGroupPreservesReadyArtifactsWhenSiblingDownloadFails(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/images/generations":
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = response.Write([]byte(`{"data":[{"url":"` + server.URL + `/ok.png"},{"url":"` + server.URL + `/missing.png"}]}`))
+		case "/ok.png":
+			response.Header().Set("Content-Type", "image/png")
+			_, _ = response.Write([]byte("\x89PNG\r\n\x1a\nready"))
+		case "/missing.png":
+			http.Error(response, "missing", http.StatusBadGateway)
+		}
+	}))
+	defer server.Close()
+	configuration := testConfiguration("image")
+	configuration.BaseURL = server.URL
+	media := newMediaTool(configuration)
+	media.client = server.Client()
+	workspace := t.TempDir()
+	permission := tool.NewTaskScopePermissionContext("scope", workspace, []string{workspace}, []string{workspace}, []string{workspace}, nil, nil, "")
+	ctx := tool.ContextWithPermissionContext(context.Background(), permission)
+	outcome, err := media.ExecuteOutcome(ctx, `{"prompt":"two","mode":"group","max_images":2}`, nil)
+	if err != nil || !outcome.IsError() || outcome.ErrorCode != "media_generate_partial" {
+		t.Fatalf("expected typed partial outcome, err=%v outcome=%+v", err, outcome)
+	}
+	if len(outcome.Artifacts) != 1 || len(outcome.AffectedPaths) != 1 || outcome.Operation == nil || outcome.Operation.SideEffectState != tool.OutcomeSideEffectPartial {
+		t.Fatalf("partial outcome lost ready artifact: %+v", outcome)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, filepath.FromSlash(outcome.Artifacts[0].Path))); err != nil {
+		t.Fatalf("ready partial artifact was removed: %v", err)
+	}
+	if !strings.Contains(outcome.Content, `"generation_status":"partial"`) || !strings.Contains(outcome.Content, `"status":"error"`) {
+		t.Fatalf("partial per-item result missing: %s", outcome.Content)
+	}
+}
+
 func TestRejectsProviderControlFlagsInsidePrompt(t *testing.T) {
 	media := newMediaTool(testConfiguration("video"))
 	outcome, err := media.ExecuteOutcome(context.Background(), `{"prompt":"make it cinematic --model another-model","ratio":"16:9"}`, nil)
@@ -304,6 +415,228 @@ func TestVideoGeneratePollsTerminalTaskAndPublishesMP4(t *testing.T) {
 	}
 	if providerRequest["model"] != "doubao-seedance-test" || providerRequest["ratio"] != "16:9" || providerRequest["duration"] != float64(5) {
 		t.Fatalf("unexpected video provider request: %+v", providerRequest)
+	}
+}
+
+func TestVideoGenerateUsesReadyImageArtifactAsFirstFrame(t *testing.T) {
+	var server *httptest.Server
+	var providerRequest map[string]any
+	server = httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/contents/generations/tasks":
+			if err := json.NewDecoder(request.Body).Decode(&providerRequest); err != nil {
+				t.Fatal(err)
+			}
+			_, _ = response.Write([]byte(`{"id":"cgt-image"}`))
+		case "/contents/generations/tasks/cgt-image":
+			_, _ = response.Write([]byte(`{"status":"succeeded","content":{"video_url":"` + server.URL + `/result.mp4"}}`))
+		case "/result.mp4":
+			response.Header().Set("Content-Type", "video/mp4")
+			_, _ = response.Write([]byte("\x00\x00\x00\x18ftypmp42video"))
+		}
+	}))
+	defer server.Close()
+	workspace := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspace, "output"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "output", "source.png"), []byte("\x89PNG\r\n\x1a\nsource"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	configuration := testConfiguration("video")
+	configuration.BaseURL = server.URL
+	media := newMediaTool(configuration)
+	media.client = server.Client()
+	media.pollInterval = time.Millisecond
+	permission := tool.NewTaskScopePermissionContext("scope", workspace, []string{workspace}, []string{workspace}, []string{workspace}, nil, nil, "")
+	ctx := tool.ContextWithPermissionContext(context.Background(), permission)
+	outcome, err := media.ExecuteOutcome(ctx, `{"prompt":"make it move","source_image_path":"output/source.png","source_role":"first_frame"}`, nil)
+	if err != nil || outcome.IsError() {
+		t.Fatalf("image-to-video failed, err=%v outcome=%+v", err, outcome)
+	}
+	content, ok := providerRequest["content"].([]any)
+	if !ok || len(content) != 2 {
+		t.Fatalf("video request did not include source image: %+v", providerRequest)
+	}
+	imagePart, _ := content[1].(map[string]any)
+	imageURL, _ := imagePart["image_url"].(map[string]any)
+	if _, hasRole := imagePart["role"]; hasRole || !strings.HasPrefix(fmt.Sprint(imageURL["url"]), "data:image/png;base64,") {
+		t.Fatalf("unexpected image-to-video content: %+v", imagePart)
+	}
+}
+
+func TestLargeVideoSourceImageIsCompactedBeforeInlineUpload(t *testing.T) {
+	workspace := t.TempDir()
+	outputDir := filepath.Join(workspace, "output")
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	input := image.NewNRGBA(image.Rect(0, 0, 1024, 1024))
+	state := uint32(1)
+	for index := range input.Pix {
+		state = state*1664525 + 1013904223
+		input.Pix[index] = byte(state >> 24)
+	}
+	var raw bytes.Buffer
+	if err := png.Encode(&raw, input); err != nil {
+		t.Fatal(err)
+	}
+	if raw.Len() <= maximumInlineVideoImageBytes {
+		t.Fatalf("test fixture did not exceed inline threshold: %d", raw.Len())
+	}
+	if err := os.WriteFile(filepath.Join(outputDir, "large.png"), raw.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	permission := tool.NewTaskScopePermissionContext("scope", workspace, []string{workspace}, []string{workspace}, []string{workspace}, nil, nil, "")
+	dataURL, err := sourceImageDataURL(permission, "output/large.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(dataURL, "data:image/jpeg;base64,") {
+		t.Fatalf("expected compact JPEG data URL, got prefix %q", dataURL[:min(len(dataURL), 40)])
+	}
+	encoded := strings.TrimPrefix(dataURL, "data:image/jpeg;base64,")
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded) > maximumInlineVideoImageBytes {
+		t.Fatalf("compacted video input is still too large: %d", len(decoded))
+	}
+}
+
+func TestVideoCreateTimeoutRequiresExternalStateConfirmation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		time.Sleep(30 * time.Millisecond)
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"id":"late-task"}`))
+	}))
+	defer server.Close()
+	configuration := testConfiguration("video")
+	configuration.BaseURL = server.URL
+	media := newMediaTool(configuration)
+	media.client = server.Client()
+	media.videoCreateTimeout = 5 * time.Millisecond
+	outcome, err := media.ExecuteOutcome(context.Background(), `{"prompt":"slow task"}`, nil)
+	if err != nil || !outcome.IsError() {
+		t.Fatalf("expected typed create timeout, err=%v outcome=%+v", err, outcome)
+	}
+	if outcome.ErrorCode != "media_generate_create_unknown" || outcome.TransportStatus != tool.TransportUnknown ||
+		outcome.SemanticStatus != tool.SemanticUnknown || outcome.Retryable ||
+		outcome.Diagnostic["requires_external_state_confirmation"] != true {
+		t.Fatalf("video create timeout must require external confirmation: %+v", outcome)
+	}
+	if outcome.Operation == nil || outcome.Operation.SideEffectState != tool.OutcomeSideEffectUnknown {
+		t.Fatalf("video create timeout lost unknown side effect: %+v", outcome.Operation)
+	}
+}
+
+func TestVideoResumeUsesExistingTaskAndPollTimeoutReturnsUnknown(t *testing.T) {
+	createCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodPost {
+			createCalls++
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write([]byte(`{"status":"running"}`))
+	}))
+	defer server.Close()
+	configuration := testConfiguration("video")
+	configuration.BaseURL = server.URL
+	media := newMediaTool(configuration)
+	media.client = server.Client()
+	media.pollInterval = time.Millisecond
+	media.pollTimeout = 5 * time.Millisecond
+	observer := &mediaStatusObserver{}
+	outcome, err := media.ExecuteOutcome(context.Background(), `{"prompt":"continue","task_id":"cgt-existing"}`, observer)
+	if err != nil || !outcome.IsError() || outcome.ErrorCode != "media_generate_task_pending" {
+		t.Fatalf("expected pending video outcome, err=%v outcome=%+v", err, outcome)
+	}
+	if createCalls != 0 || outcome.TransportStatus != tool.TransportUnknown || outcome.Retryable || !strings.Contains(outcome.Content, `"task_id":"cgt-existing"`) {
+		t.Fatalf("resume must not create or hide task identity: calls=%d outcome=%+v", createCalls, outcome)
+	}
+	if len(observer.outputs) == 0 || !strings.Contains(observer.outputs[0].Delta, `"task_id":"cgt-existing"`) {
+		t.Fatalf("task identity missing from durable media status: %+v", observer.outputs)
+	}
+}
+
+func TestVideoSameRequestAfterRestartReusesDurablePendingTask(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	createCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		if request.Method == http.MethodPost {
+			createCalls++
+			_, _ = response.Write([]byte(`{"id":"cgt-durable"}`))
+			return
+		}
+		_, _ = response.Write([]byte(`{"status":"running"}`))
+	}))
+	defer server.Close()
+	workspace := t.TempDir()
+	permission := tool.NewTaskScopePermissionContext("scope", workspace, []string{workspace}, []string{workspace}, []string{workspace}, nil, nil, "")
+	ctx := tool.ContextWithPermissionContext(context.Background(), permission)
+	configuration := testConfiguration("video")
+	configuration.BaseURL = server.URL
+	for attempt := 0; attempt < 2; attempt++ {
+		media := newMediaTool(configuration)
+		media.client = server.Client()
+		media.pollInterval = time.Millisecond
+		media.pollTimeout = 4 * time.Millisecond
+		outcome, err := media.ExecuteOutcome(ctx, `{"prompt":"same durable task","duration":5}`, nil)
+		if err != nil || outcome.ErrorCode != "media_generate_task_pending" || !strings.Contains(outcome.Content, `"task_id":"cgt-durable"`) {
+			t.Fatalf("attempt %d did not preserve pending task: err=%v outcome=%+v", attempt, err, outcome)
+		}
+	}
+	if createCalls != 1 {
+		t.Fatalf("same request after restart created %d provider tasks; expected one", createCalls)
+	}
+}
+
+func TestConcurrentSameVideoRequestCreatesOneProviderTask(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	var createCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		if request.Method == http.MethodPost {
+			createCalls.Add(1)
+			time.Sleep(10 * time.Millisecond)
+			_, _ = response.Write([]byte(`{"id":"cgt-concurrent"}`))
+			return
+		}
+		_, _ = response.Write([]byte(`{"status":"running"}`))
+	}))
+	defer server.Close()
+
+	workspace := t.TempDir()
+	permission := tool.NewTaskScopePermissionContext("scope", workspace, []string{workspace}, []string{workspace}, []string{workspace}, nil, nil, "")
+	ctx := tool.ContextWithPermissionContext(context.Background(), permission)
+	configuration := testConfiguration("video")
+	configuration.BaseURL = server.URL
+	media := newMediaTool(configuration)
+	media.client = server.Client()
+	media.pollInterval = time.Millisecond
+	media.pollTimeout = 4 * time.Millisecond
+
+	type result struct {
+		outcome tool.ExecutionOutcome
+		err     error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			outcome, err := media.ExecuteOutcome(ctx, `{"prompt":"same concurrent task","duration":5}`, nil)
+			results <- result{outcome: outcome, err: err}
+		}()
+	}
+	for range 2 {
+		got := <-results
+		if got.err != nil || got.outcome.ErrorCode != "media_generate_task_pending" || !strings.Contains(got.outcome.Content, `"task_id":"cgt-concurrent"`) {
+			t.Fatalf("concurrent request lost resumable task: err=%v outcome=%+v", got.err, got.outcome)
+		}
+	}
+	if got := createCalls.Load(); got != 1 {
+		t.Fatalf("concurrent same request created %d provider tasks; expected one", got)
 	}
 }
 

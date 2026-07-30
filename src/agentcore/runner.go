@@ -26,6 +26,7 @@ const (
 	maxOutputContinuationAttempts     = 1
 	maxOutputContinuationPromptPrefix = "请继续上一条回答，从中断处继续，不要重复已经输出的内容。"
 	toolResultOffloadThresholdBytes   = 32 * 1024
+	maxTransientLLMRetries            = 2
 )
 
 var ErrPersistenceFailed = errors.New("persistence_error")
@@ -42,6 +43,7 @@ type Runner struct {
 	recorder             SemanticRecorder
 	contextGovernor      *contextGovernor
 	streamLLMFunc        func(stdcontext.Context, *runEventEmitter) (*llm.Response, error)
+	llmRetrySleep        func(stdcontext.Context, time.Duration) error
 	suppressRunLifecycle bool
 	subagentController   subagentruntime.Controller
 }
@@ -223,7 +225,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		if r.streamLLMFunc != nil {
 			streamLLM = r.streamLLMFunc
 		}
-		response, err := streamLLM(ctx, events)
+		response, err := r.streamLLMWithTransientRetry(ctx, events, streamLLM)
 		if err != nil {
 			if ctx.Err() != nil {
 				r.injectSyntheticToolResultsForCancel()
@@ -331,6 +333,49 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	err := maxThoughtsError(maxThoughts)
 	events.runErrored(ctx, err, TerminalReasonMaxTurns)
 	return "", err
+}
+
+func (r *Runner) streamLLMWithTransientRetry(
+	ctx stdcontext.Context,
+	events *runEventEmitter,
+	stream func(stdcontext.Context, *runEventEmitter) (*llm.Response, error),
+) (*llm.Response, error) {
+	for retry := 0; ; retry++ {
+		response, err := stream(ctx, events)
+		if err == nil || retry >= maxTransientLLMRetries || !llm.IsTransientRequestError(err) {
+			return response, err
+		}
+		delay, ok := llm.RequestRetryAfter(err)
+		if !ok {
+			delay = time.Duration(retry+1) * time.Second
+		}
+		// Provider Retry-After values can be unexpectedly large. Keep a bounded
+		// in-turn retry and return control to the user after that boundary.
+		if delay > 30*time.Second {
+			delay = 30 * time.Second
+		}
+		sleep := r.llmRetrySleep
+		if sleep == nil {
+			sleep = sleepWithContext
+		}
+		if err := sleep(ctx, delay); err != nil {
+			return nil, err
+		}
+	}
+}
+
+func sleepWithContext(ctx stdcontext.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (r *Runner) injectSyntheticToolResultsForCancel() {
@@ -1204,6 +1249,7 @@ func (r *Runner) startSkillChild(
 	childRunner.recorder = r.recorder
 	childRunner.suppressRunLifecycle = true
 	childRunner.streamLLMFunc = r.streamLLMFunc
+	childRunner.llmRetrySleep = r.llmRetrySleep
 	content, err := childRunner.RunStreamWithEvents(ctx, sink)
 	if err != nil {
 		return skillruntime.SkillForkResult{ChildID: childID}, err
@@ -1261,6 +1307,7 @@ func (r *Runner) startNativeChild(
 	childRunner.recorder = r.recorder
 	childRunner.suppressRunLifecycle = true
 	childRunner.streamLLMFunc = r.streamLLMFunc
+	childRunner.llmRetrySleep = r.llmRetrySleep
 	return childRunner.RunStreamWithEvents(ctx, sink)
 }
 

@@ -95,6 +95,43 @@ func TestSyntheticBlockedResultRequiresStrategyChange(t *testing.T) {
 	}
 }
 
+func TestFailureSupervisorBlocksChangedArgumentsAfterUnknownExternalCreation(t *testing.T) {
+	s := NewFailureSupervisor("/tmp/ws", 8, 32)
+	first := convcontext.ToolCall{ID: "video-1", Function: convcontext.FunctionCall{Name: "video_generate", Arguments: `{"prompt":"first","duration":5}`}}
+	before := s.BeforeCall(first)
+	if !before.Allow {
+		t.Fatalf("first video call blocked: %+v", before)
+	}
+	s.NoteRealExecution(before.CallSignature)
+	outcome := tool.FailedOutcome("create state unknown", "media_generate_create_unknown", tool.ErrorCategoryRuntime, false)
+	outcome.TransportStatus = tool.TransportUnknown
+	outcome.SemanticStatus = tool.SemanticUnknown
+	outcome.Operation = &tool.OperationDescriptor{Type: "video_generate", SideEffectState: tool.OutcomeSideEffectUnknown}
+	outcome.RecoveryOptions = []string{"check_provider_console", "do_not_resubmit"}
+	outcome.Diagnostic = map[string]any{"requires_external_state_confirmation": true}
+	after := s.AfterOutcome(first, outcome)
+	if !after.RecoveryRequired || after.Directive == nil || !after.Directive.ExternalStateConfirmationRequired {
+		t.Fatalf("unknown creation did not install external-state barrier: %+v", after)
+	}
+
+	changed := convcontext.ToolCall{ID: "video-2", Function: convcontext.FunctionCall{Name: "video_generate", Arguments: `{"prompt":"changed","duration":10}`}}
+	blocked := s.BeforeCall(changed)
+	if !blocked.Block || blocked.Allow || !blocked.ExternalStateConfirmationRequired {
+		t.Fatalf("changed video submission was not blocked: %+v", blocked)
+	}
+	result := SyntheticBlockedResult(changed, blocked)
+	if !strings.Contains(result.Content, StatusExternalStateConfirmationRequired) ||
+		strings.Contains(result.Content, StatusStrategyChangeRequired) ||
+		result.Outcome.Diagnostic["retryable"] != false {
+		t.Fatalf("external-state block gave unsafe retry guidance: %+v", result)
+	}
+
+	unrelated := convcontext.ToolCall{ID: "read-1", Function: convcontext.FunctionCall{Name: "Read", Arguments: `{"file_path":"a"}`}}
+	if decision := s.BeforeCall(unrelated); decision.Block {
+		t.Fatalf("external-state barrier blocked unrelated tool: %+v", decision)
+	}
+}
+
 func TestRecoveryOptionsUseCanonicalToolNames(t *testing.T) {
 	options := RecoveryOptionsForError("file_changed_since_read")
 	joined := strings.Join(options, " ")

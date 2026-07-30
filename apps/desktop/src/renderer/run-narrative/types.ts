@@ -60,8 +60,16 @@ export type MediaGenerationStatus =
   | "generating"
   | "downloading"
   | "ready"
+  | "partial"
+  | "unknown"
   | "error"
   | "cancelled";
+
+export type MediaGenerationItem = {
+  index: number;
+  status: "ready" | "error" | "unknown";
+  path?: string;
+};
 
 export type CompactBoundaryStatus = "started" | "finished" | "failed";
 
@@ -125,6 +133,9 @@ export type RunNarrativeItem =
       detail?: string;
       status: MediaGenerationStatus;
       requestedCount?: number;
+      requestedAspectRatio?: number;
+      taskId?: string;
+      mediaItems?: MediaGenerationItem[];
       artifactPaths: string[];
     }
   | { kind: "fileChange"; id: string; files: ChangedFile[]; status: "active" | "done" }

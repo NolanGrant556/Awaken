@@ -7,6 +7,7 @@ import {
 import type {
   ACPDisplayStatus,
   CompactBoundaryItem,
+  MediaGenerationItem,
   MediaGenerationStatus,
   PromptNarrativeToken,
   RunAction,
@@ -141,7 +142,7 @@ export function projectAguiEventToNarrative(
     case "TOOL_CALL_ARGS_DELTA": {
       if (isMediaToolEvent(event)) {
         const parameters = mediaParametersFromArgs(event.delta);
-        return activateMediaGeneration(base, event, "preparing", parameters.detail, parameters.requestedCount);
+        return activateMediaGeneration(base, event, "preparing", parameters.detail, parameters.requestedCount, parameters.requestedAspectRatio);
       }
       if (isReadOnlyToolEvent(event)) {
         return updateExploringAction(
@@ -160,7 +161,7 @@ export function projectAguiEventToNarrative(
     case "TOOL_CALL_ARGS": {
       if (isMediaToolEvent(event)) {
         const parameters = mediaParametersFromArgs(event.delta);
-        return activateMediaGeneration(base, event, "preparing", parameters.detail, parameters.requestedCount);
+        return activateMediaGeneration(base, event, "preparing", parameters.detail, parameters.requestedCount, parameters.requestedAspectRatio);
       }
       if (isReadOnlyToolEvent(event)) {
         return updateExploringAction(base, event, "active", event.delta || "Streaming tool arguments");
@@ -185,7 +186,16 @@ export function projectAguiEventToNarrative(
     case "AWAKEN_COMMAND_OUTPUT":
       if (isMediaToolEvent(event) && event.commandStream === "media_status") {
         const update = mediaStatusFromCommandOutput(event.delta);
-        return activateMediaGeneration(base, event, update.status, update.detail);
+        return activateMediaGeneration(
+          base,
+          event,
+          update.status,
+          update.detail,
+          undefined,
+          undefined,
+          update.taskId,
+          update.mediaItems,
+        );
       }
       return base;
     case "AWAKEN_TOOL_PERMISSION_DECIDED": {
@@ -1094,6 +1104,7 @@ function mediaKind(event: AguiEvent): "image" | "video" {
 function mediaParametersFromArgs(value?: string): {
   detail?: string;
   requestedCount?: number;
+  requestedAspectRatio?: number;
 } {
   const trimmed = value?.trim();
   if (!trimmed || !trimmed.startsWith("{")) return {};
@@ -1102,6 +1113,8 @@ function mediaParametersFromArgs(value?: string): {
       prompt?: unknown;
       mode?: unknown;
       max_images?: unknown;
+      size?: unknown;
+      ratio?: unknown;
     };
     const prompt = typeof parsed.prompt === "string" ? parsed.prompt.trim() : "";
     const requestedCount =
@@ -1112,9 +1125,21 @@ function mediaParametersFromArgs(value?: string): {
       parsed.max_images <= 15
         ? parsed.max_images
         : undefined;
+    const ratioValue = typeof parsed.ratio === "string"
+      ? parsed.ratio
+      : typeof parsed.size === "string"
+        ? parsed.size
+        : "";
+    const ratioMatch = ratioValue.trim().match(/^(\d+(?:\.\d+)?)\s*[:x×]\s*(\d+(?:\.\d+)?)$/i);
+    const requestedAspectRatio = ratioMatch
+      ? Number(ratioMatch[1]) / Number(ratioMatch[2])
+      : undefined;
     return {
       ...(prompt ? { detail: prompt.length > 96 ? `${prompt.slice(0, 93)}...` : prompt } : {}),
       ...(requestedCount ? { requestedCount } : {}),
+      ...(requestedAspectRatio && Number.isFinite(requestedAspectRatio)
+        ? { requestedAspectRatio }
+        : {}),
     };
   } catch {
     return {};
@@ -1122,6 +1147,7 @@ function mediaParametersFromArgs(value?: string): {
 }
 
 function mediaStatusFromProgress(event: AguiEvent): MediaGenerationStatus {
+  if (event.transportStatus === "unknown") return "unknown";
   switch (event.toolProgressStage) {
     case "failed":
     case "needs_auth":
@@ -1136,26 +1162,65 @@ function mediaStatusFromProgress(event: AguiEvent): MediaGenerationStatus {
 function mediaStatusFromCommandOutput(value?: string): {
   status: MediaGenerationStatus;
   detail?: string;
+  taskId?: string;
+  mediaItems?: MediaGenerationItem[];
 } {
   const line = value?.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? "";
   try {
-    const parsed = JSON.parse(line) as { stage?: unknown; message?: unknown };
+    const parsed = JSON.parse(line) as {
+      stage?: unknown;
+      message?: unknown;
+      task_id?: unknown;
+      items?: unknown;
+    };
     const stage = typeof parsed.stage === "string" ? parsed.stage : "generating";
     const status: MediaGenerationStatus =
       stage === "queued" || stage === "downloading" || stage === "ready"
         ? stage
-        : stage === "cancelled"
-          ? "cancelled"
-          : stage === "error"
-            ? "error"
-            : "generating";
+        : stage === "partial"
+          ? "partial"
+          : stage === "unknown"
+            ? "unknown"
+            : stage === "cancelled"
+              ? "cancelled"
+              : stage === "error"
+                ? "error"
+                : "generating";
+    const mediaItems = parseMediaItems(parsed.items);
     return {
       status,
       detail: typeof parsed.message === "string" ? parsed.message : undefined,
+      ...(typeof parsed.task_id === "string" ? { taskId: parsed.task_id } : {}),
+      ...(mediaItems.length > 0 ? { mediaItems } : {}),
     };
   } catch {
     return { status: "generating", detail: line || undefined };
   }
+}
+
+function validMediaCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 15
+    ? value
+    : undefined;
+}
+
+function parseMediaItems(value: unknown): MediaGenerationItem[] {
+  if (!Array.isArray(value)) return [];
+  const items: MediaGenerationItem[] = [];
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const item = candidate as { index?: unknown; status?: unknown; path?: unknown };
+    const index = validMediaCount(item.index);
+    if (!index || (item.status !== "ready" && item.status !== "error" && item.status !== "unknown")) {
+      continue;
+    }
+    items.push({
+      index,
+      status: item.status,
+      ...(typeof item.path === "string" && item.path ? { path: item.path } : {}),
+    });
+  }
+  return items.sort((left, right) => left.index - right.index);
 }
 
 function activateMediaGeneration(
@@ -1164,6 +1229,9 @@ function activateMediaGeneration(
   status: MediaGenerationStatus,
   detail?: string,
   requestedCount?: number,
+  requestedAspectRatio?: number,
+  taskId?: string,
+  mediaItems?: MediaGenerationItem[],
 ): RunNarrativeState {
   const id = mediaGenerationId(event);
   const existing =
@@ -1192,6 +1260,13 @@ function activateMediaGeneration(
       ...((requestedCount ?? existing?.requestedCount)
         ? { requestedCount: requestedCount ?? existing?.requestedCount }
         : {}),
+      ...((requestedAspectRatio ?? existing?.requestedAspectRatio)
+        ? { requestedAspectRatio: requestedAspectRatio ?? existing?.requestedAspectRatio }
+        : {}),
+      ...((taskId ?? existing?.taskId) ? { taskId: taskId ?? existing?.taskId } : {}),
+      ...((mediaItems ?? existing?.mediaItems)
+        ? { mediaItems: mediaItems ?? existing?.mediaItems }
+        : {}),
       artifactPaths: existing?.artifactPaths ?? [],
     },
   );
@@ -1212,23 +1287,43 @@ function commitMediaGeneration(
         );
   let paths: string[] = [];
   let payloadSucceeded = false;
+  let payloadStatus: string | undefined;
+  let payloadItems: MediaGenerationItem[] = [];
+  let payloadRequestedCount: number | undefined;
+  let payloadTaskId: string | undefined;
   try {
-    const payload = JSON.parse(event.content ?? "{}") as { status?: unknown; paths?: unknown };
+    const payload = JSON.parse(event.content ?? "{}") as {
+      status?: unknown;
+      generation_status?: unknown;
+      paths?: unknown;
+      items?: unknown;
+      requested_count?: unknown;
+      task_id?: unknown;
+    };
     paths = Array.isArray(payload.paths)
       ? payload.paths.filter((value): value is string => typeof value === "string" && value.length > 0)
       : [];
-    payloadSucceeded = payload.status === "succeeded" && paths.length > 0;
+    const generationStatus = payload.generation_status ?? payload.status;
+    payloadSucceeded = generationStatus === "succeeded" && paths.length > 0;
+    payloadStatus = typeof generationStatus === "string" ? generationStatus : undefined;
+    payloadItems = parseMediaItems(payload.items);
+    payloadRequestedCount = validMediaCount(payload.requested_count);
+    payloadTaskId = typeof payload.task_id === "string" ? payload.task_id : undefined;
   } catch {
     // Structured result parsing is best-effort; canonical toolStatus remains authoritative otherwise.
   }
   const displayStatus = toolDisplayStateFromStatus(event.toolStatus);
   const status: MediaGenerationStatus = payloadSucceeded
     ? "ready"
-    : displayStatus === "cancelled" || displayStatus === "interrupted"
-      ? "cancelled"
-      : displayStatus === "done"
-        ? "ready"
-        : "error";
+    : payloadStatus === "partial" && paths.length > 0
+      ? "partial"
+      : payloadStatus === "unknown" || event.transportStatus === "unknown"
+        ? "unknown"
+        : displayStatus === "cancelled" || displayStatus === "interrupted"
+          ? "cancelled"
+          : displayStatus === "done"
+            ? "ready"
+            : "error";
   const kind = mediaKind(event);
   const item: RunNarrativeItem = {
     kind: "mediaGeneration",
@@ -1242,9 +1337,22 @@ function commitMediaGeneration(
         ? kind === "image"
           ? `已生成 ${paths.length || existing?.artifactPaths.length || 1} 张图片`
           : "视频已生成"
-        : diagnosticReason || event.content || existing?.detail,
+        : status === "partial"
+          ? `已生成 ${paths.length} 张图片，部分结果未完成`
+          : status === "unknown"
+            ? "任务已提交，当前状态待确认"
+            : diagnosticReason || event.content || existing?.detail,
     status,
-    ...(existing?.requestedCount ? { requestedCount: existing.requestedCount } : {}),
+    ...((payloadRequestedCount ?? existing?.requestedCount)
+      ? { requestedCount: payloadRequestedCount ?? existing?.requestedCount }
+      : {}),
+    ...(existing?.requestedAspectRatio
+      ? { requestedAspectRatio: existing.requestedAspectRatio }
+      : {}),
+    ...((payloadTaskId ?? existing?.taskId) ? { taskId: payloadTaskId ?? existing?.taskId } : {}),
+    ...((payloadItems.length > 0 || existing?.mediaItems)
+      ? { mediaItems: payloadItems.length > 0 ? payloadItems : existing?.mediaItems }
+      : {}),
     artifactPaths: paths.length > 0 ? paths : existing?.artifactPaths ?? [],
   };
   return {
@@ -1340,7 +1448,7 @@ function readOnlyActionTitle(event: AguiEvent): string {
   const args = parseToolArgs(event.delta);
   switch (event.toolCallName) {
     case "Read": {
-	  const path = stringArg(args, "file_path") ?? "file";
+      const path = stringArg(args, "file_path") ?? "file";
       const offset = numberArg(args, "offset");
       const limit = numberArg(args, "limit");
       const range =
@@ -1353,7 +1461,7 @@ function readOnlyActionTitle(event: AguiEvent): string {
     }
     case "Glob": {
       const pattern = stringArg(args, "pattern");
-	  const root = stringArg(args, "path");
+      const root = stringArg(args, "path");
       if (pattern && root) {
         return `List ${pattern} in ${root}`;
       }
@@ -1362,9 +1470,9 @@ function readOnlyActionTitle(event: AguiEvent): string {
       }
       return "List files";
     }
-	case "Grep": {
-	  const query = stringArg(args, "pattern");
-	  const include = stringArg(args, "path") ?? stringArg(args, "glob");
+    case "Grep": {
+      const query = stringArg(args, "pattern");
+      const include = stringArg(args, "path") ?? stringArg(args, "glob");
       if (query && include) {
         return `Search "${query}" in ${include}`;
       }
@@ -1373,10 +1481,10 @@ function readOnlyActionTitle(event: AguiEvent): string {
       }
       return "Search files";
     }
-	case "WebSearch": {
-	  const query = stringArg(args, "query");
-	  return query ? `Search web for "${query}"` : "Search web";
-	}
+    case "WebSearch": {
+      const query = stringArg(args, "query");
+      return query ? `Search web for "${query}"` : "Search web";
+    }
     default:
       return event.toolCallName || "Explore project";
   }

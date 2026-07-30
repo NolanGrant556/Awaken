@@ -295,6 +295,14 @@ func (rt *ToolRuntime) finalizeExecutedToolResult(
 	}
 	result = finalizeToolResult(result)
 	if result.IsError || result.Outcome.IsError() {
+		// A typed partial outcome may contain files that were already verified
+		// and durably written before a later sibling result failed. Publish only
+		// those ready artifacts when the provider transport itself completed;
+		// transport/implementation failures and schema failures remain fail-closed.
+		if publishablePartialArtifacts(result.Outcome) {
+			result.Outcome.Artifacts = rt.emitArtifactDescriptors(result, result.Outcome.Artifacts, nil)
+			result = finalizeToolResult(result)
+		}
 		rt.emitToolProgress(result, "failed", firstNonEmpty(result.Outcome.ErrorMessage, result.ErrorCode, "tool failed"), 100)
 		rt.writeAudit(definition, result, permission, decisionSource, auditOutcomeLabel(result), terminalAuditError(result))
 		return result
@@ -303,10 +311,27 @@ func (rt *ToolRuntime) finalizeExecutedToolResult(
 	// Output verification has succeeded. Only now may the runtime publish a
 	// completion signal or ask the tool to publish user-facing artifacts.
 	rt.emitToolProgress(result, "completed", "", 100)
-	result.Outcome.Artifacts = append(result.Outcome.Artifacts, rt.emitArtifacts(result, selectedTool, input, output)...)
+	seenArtifacts := map[string]bool{}
+	outcomeArtifacts := rt.emitArtifactDescriptors(result, result.Outcome.Artifacts, seenArtifacts)
+	producedArtifacts := rt.emitArtifacts(result, selectedTool, input, output, seenArtifacts)
+	outcomeArtifacts = append(outcomeArtifacts, producedArtifacts...)
+	result.Outcome.Artifacts = outcomeArtifacts
 	result = finalizeToolResult(result)
 	rt.writeAudit(definition, result, permission, decisionSource, auditOutcomeLabel(result), "")
 	return result
+}
+
+func publishablePartialArtifacts(outcome tool.ExecutionOutcome) bool {
+	if outcome.TransportStatus != tool.TransportCompleted || outcome.Operation == nil ||
+		outcome.Operation.SideEffectState != tool.OutcomeSideEffectPartial || len(outcome.Artifacts) == 0 {
+		return false
+	}
+	for _, artifact := range outcome.Artifacts {
+		if normalizeArtifactStatus(artifact.Status) != ArtifactStatusReady || strings.TrimSpace(artifact.Path) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func terminalAuditError(result ToolExecutionResult) string {

@@ -3,10 +3,17 @@ package mediagenerate
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/jpeg"
+	_ "image/png"
 	"io"
 	"net"
 	"net/http"
@@ -16,6 +23,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"awaken/src/tool"
@@ -24,19 +32,32 @@ import (
 )
 
 const (
-	imageToolName     = "image_generate"
-	videoToolName     = "video_generate"
-	maximumJSONBytes  = 4 * 1024 * 1024
-	maximumMediaBytes = 128 * 1024 * 1024
+	imageToolName          = "image_generate"
+	videoToolName          = "video_generate"
+	maximumJSONBytes       = 4 * 1024 * 1024
+	maximumMediaBytes      = 128 * 1024 * 1024
+	maximumInputImageBytes = 30 * 1024 * 1024
+	// Keep inline video reference images comfortably below typical gateway
+	// body limits after Base64 expansion. The original Artifact is untouched.
+	maximumInlineVideoImageBytes = 2 * 1024 * 1024
+	maximumVideoImageBytes       = 4 * 1024 * 1024
 )
 
 var providerControlFlag = regexp.MustCompile(`(?i)(?:^|\s)--(?:ratio|dur|duration|resolution|generate_audio|watermark|model)(?:\s|=|$)`)
 
+var errUnsafeMediaRedirect = errors.New("unsafe media redirect")
+
+var videoTaskSubmissionMu sync.Mutex
+
 type mediaTool struct {
-	configuration runtimeConfiguration
-	client        *http.Client
-	pollInterval  time.Duration
-	pollTimeout   time.Duration
+	configuration      runtimeConfiguration
+	client             *http.Client
+	requestTimeout     time.Duration
+	videoCreateTimeout time.Duration
+	imageTimeout       time.Duration
+	downloadTimeout    time.Duration
+	pollInterval       time.Duration
+	pollTimeout        time.Duration
 }
 
 type imageInput struct {
@@ -49,40 +70,66 @@ type imageInput struct {
 }
 
 type videoInput struct {
-	Prompt        string `json:"prompt"`
-	Ratio         string `json:"ratio,omitempty"`
-	Resolution    string `json:"resolution,omitempty"`
-	Duration      int    `json:"duration,omitempty"`
-	GenerateAudio *bool  `json:"generate_audio,omitempty"`
-	Watermark     *bool  `json:"watermark,omitempty"`
+	Prompt          string `json:"prompt"`
+	SourceImagePath string `json:"source_image_path,omitempty"`
+	SourceRole      string `json:"source_role,omitempty"`
+	TaskID          string `json:"task_id,omitempty"`
+	Ratio           string `json:"ratio,omitempty"`
+	Resolution      string `json:"resolution,omitempty"`
+	Duration        int    `json:"duration,omitempty"`
+	GenerateAudio   *bool  `json:"generate_audio,omitempty"`
+	Watermark       *bool  `json:"watermark,omitempty"`
+}
+
+type generatedItem struct {
+	Index  int    `json:"index"`
+	Status string `json:"status"`
+	Path   string `json:"path,omitempty"`
 }
 
 type generatedResult struct {
-	Status   string   `json:"status"`
-	Kind     string   `json:"kind"`
-	ModelID  string   `json:"model_id"`
-	TaskID   string   `json:"task_id,omitempty"`
-	Paths    []string `json:"paths"`
-	Provider string   `json:"provider"`
+	Status         string          `json:"generation_status"`
+	Kind           string          `json:"kind"`
+	ModelID        string          `json:"model_id"`
+	TaskID         string          `json:"task_id,omitempty"`
+	Paths          []string        `json:"paths"`
+	Items          []generatedItem `json:"items,omitempty"`
+	RequestedCount int             `json:"requested_count,omitempty"`
+	FailedCount    int             `json:"failed_count,omitempty"`
+	Provider       string          `json:"provider"`
+}
+
+type videoTaskRecord struct {
+	Version     int       `json:"version"`
+	Fingerprint string    `json:"fingerprint"`
+	TaskID      string    `json:"task_id"`
+	AccountID   string    `json:"account_id"`
+	ModelID     string    `json:"model_id"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func newMediaTool(configuration runtimeConfiguration) *mediaTool {
 	return &mediaTool{
 		configuration: configuration,
 		client: &http.Client{
-			Timeout: 2 * time.Minute,
 			CheckRedirect: func(request *http.Request, via []*http.Request) error {
 				if len(via) >= 5 {
 					return errors.New("too many media redirects")
 				}
 				if !isAllowedRemoteURL(request.URL.String()) {
-					return errors.New("unsafe media redirect")
+					return errUnsafeMediaRedirect
 				}
 				return nil
 			},
 		},
-		pollInterval: 3 * time.Second,
-		pollTimeout:  15 * time.Minute,
+		requestTimeout:     45 * time.Second,
+		videoCreateTimeout: 45 * time.Second,
+		imageTimeout:       10 * time.Minute,
+		downloadTimeout:    2 * time.Minute,
+		pollInterval:       3 * time.Second,
+		pollTimeout:        15 * time.Minute,
 	}
 }
 
@@ -97,7 +144,7 @@ func (t *mediaTool) Description() string {
 	if t.configuration.ModelKind == "image" {
 		return "根据用户目标生成图片并保存为本地交付物；生成模型已由设置固定，调用参数不得覆盖模型或凭据"
 	}
-	return "根据用户目标创建视频生成任务，等待真实终态并保存为本地 MP4 交付物；生成模型已由设置固定"
+	return "根据用户目标创建视频任务并保存本地 MP4；用户要求让已生成图片动起来时，必须把该 ready 图片 Artifact 的路径传入 source_image_path；任务已有 task_id 时必须续查原任务，不能重复创建计费任务"
 }
 
 func (t *mediaTool) Parameters() []tool.ToolParameter {
@@ -112,6 +159,9 @@ func (t *mediaTool) Parameters() []tool.ToolParameter {
 		)
 	}
 	return append(parameters,
+		tool.ToolParameter{Name: "source_image_path", Description: "可选；要作为视频首帧或参考图的 ready 图片 Artifact 路径", Type: "string"},
+		tool.ToolParameter{Name: "source_role", Description: "图片作用：first_frame 或 reference_image", Type: "string"},
+		tool.ToolParameter{Name: "task_id", Description: "可选；续查已经提交的视频任务，设置后不会创建新任务", Type: "string"},
 		tool.ToolParameter{Name: "ratio", Description: "视频宽高比", Type: "string"},
 		tool.ToolParameter{Name: "resolution", Description: "视频分辨率", Type: "string"},
 		tool.ToolParameter{Name: "duration", Description: "视频时长（秒）", Type: "integer"},
@@ -131,6 +181,9 @@ func (t *mediaTool) InputSchema() tool.ToolParametersSchema {
 		properties["output_format"] = tool.ToolParam{Type: "string", Description: "图片输出格式", Enum: []any{"png", "jpeg"}}
 		properties["watermark"] = tool.ToolParam{Type: "boolean", Description: "是否包含水印"}
 	} else {
+		properties["source_image_path"] = tool.ToolParam{Type: "string", Description: "ready 图片 Artifact 的工作区路径；当用户要求让上一张图片动起来时必须设置"}
+		properties["source_role"] = tool.ToolParam{Type: "string", Description: "图片作为视频首帧或参考图", Enum: []any{"first_frame", "reference_image"}}
+		properties["task_id"] = tool.ToolParam{Type: "string", Description: "续查已经提交的视频任务；设置后不再创建新任务"}
 		properties["ratio"] = tool.ToolParam{Type: "string", Description: "视频宽高比", Enum: []any{"adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}}
 		properties["resolution"] = tool.ToolParam{Type: "string", Description: "视频分辨率", Enum: []any{"480p", "720p", "1080p"}}
 		properties["duration"] = tool.ToolParam{Type: "integer", Description: "视频时长（秒）"}
@@ -167,11 +220,23 @@ func (t *mediaTool) Definition() tool.ToolDefinition {
 		Purpose:   "让当前主 Agent 通过已配置的火山 Agent Plan 生成媒体文件；模型选择和凭据由 Host 固定。",
 		WhenToUse: []string{when}, WhenNotToUse: []string{notWhen},
 		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
-			"kind":     {Type: "string", Description: "生成的媒体类型"},
-			"model_id": {Type: "string", Description: "Host 配置固定的实际生成模型"},
-			"task_id":  {Type: "string", Description: "异步视频任务 ID（图片为空）"},
-			"paths":    {Type: "array", Description: "已验证并保存的本地媒体路径", Items: &tool.ToolParam{Type: "string", Description: "本地媒体路径"}},
-			"provider": {Type: "string", Description: "实际执行生成任务的供应商"},
+			"generation_status": {Type: "string", Description: "succeeded、partial、failed 或 unknown"},
+			"kind":              {Type: "string", Description: "生成的媒体类型"},
+			"model_id":          {Type: "string", Description: "Host 配置固定的实际生成模型"},
+			"task_id":           {Type: "string", Description: "异步视频任务 ID（图片为空）"},
+			"paths":             {Type: "array", Description: "已验证并保存的本地媒体路径", Items: &tool.ToolParam{Type: "string", Description: "本地媒体路径"}},
+			"items": {Type: "array", Description: "每个独立媒体结果的索引、状态与路径", Items: &tool.ToolParam{
+				Type: "object", Description: "独立媒体结果",
+				Properties: map[string]tool.ToolParam{
+					"index":  {Type: "integer", Description: "从 1 开始的结果序号"},
+					"status": {Type: "string", Description: "ready、error 或 unknown"},
+					"path":   {Type: "string", Description: "ready 结果的本地路径"},
+				},
+				AdditionalProperties: tool.BoolPtr(false),
+			}},
+			"requested_count": {Type: "integer", Description: "本次请求的媒体数量"},
+			"failed_count":    {Type: "integer", Description: "未能保存的媒体数量"},
+			"provider":        {Type: "string", Description: "实际执行生成任务的供应商"},
 		}},
 		SideEffects: []tool.ToolSideEffect{
 			{Kind: tool.SideEffectNetwork, Resources: []string{"volcengine Agent Plan generation API"}, Description: "调用外部生成服务，可能消耗套餐额度或产生费用。", Reversibility: tool.ReversibilityIrreversible},
@@ -183,7 +248,11 @@ func (t *mediaTool) Definition() tool.ToolDefinition {
 			{Code: "media_generate_authorization_failed", Cause: "Agent Plan 凭据或套餐授权失败", Retryable: false, Recovery: []string{"在 Agent Plan 配置账户中检查凭据"}},
 			{Code: "media_generate_rate_limited", Cause: "上游额度或并发限制", Retryable: true, Recovery: []string{"稍后重试"}},
 			{Code: "media_generate_upstream_failed", Cause: "供应商请求或任务失败", Retryable: true, Recovery: []string{"检查参数或稍后重试"}},
+			{Code: "media_generate_create_unknown", Cause: "视频任务提交没有返回任务 ID，供应商侧创建状态未知", Retryable: false, Recovery: []string{"检查火山控制台中的视频任务", "确认没有任务后再由用户明确重新创建"}},
 			{Code: "media_generate_download_failed", Cause: "结果文件无法验证或下载", Retryable: true, Recovery: []string{"重试生成或检查网络"}},
+			{Code: "media_generate_partial", Cause: "组图中仅部分结果成功保存", Retryable: false, Recovery: []string{"先使用已生成的图片，再明确补做缺失图片"}},
+			{Code: "media_generate_task_pending", Cause: "视频任务已提交，但本次运行未能确认终态", Retryable: false, Recovery: []string{"使用原 task_id 续查，禁止重新创建任务"}},
+			{Code: "media_generate_task_persistence_failed", Cause: "视频任务已创建，但本地任务 ID 未能可靠保存", Retryable: false, Recovery: []string{"保留当前 task_id 并续查，禁止重新创建任务"}},
 		},
 		Annotations: tool.ToolAnnotations{
 			ReadOnly: false, Destructive: false, OpenWorld: false, ServerName: providerID,
@@ -211,6 +280,19 @@ func (t *mediaTool) CheckPermission(_ context.Context, input string, permissionC
 	}
 	if _, err := permissionContext.ResolveOutputMutationPathChecked(filepath.Join("output", "generated-media", "probe")); err != nil {
 		return tool.DenyPermission(err.Error())
+	}
+	if t.configuration.ModelKind == "video" {
+		var parameters videoInput
+		_ = json.Unmarshal([]byte(input), &parameters)
+		if strings.TrimSpace(parameters.SourceImagePath) != "" {
+			resolved, err := permissionContext.ResolveReadablePathChecked(parameters.SourceImagePath)
+			if err != nil {
+				return tool.DenyPermission(err.Error())
+			}
+			if _, err := os.Stat(resolved); err != nil {
+				return tool.DenyPermission("source_image_path 必须指向可读取的 ready 图片 Artifact")
+			}
+		}
 	}
 	return tool.AllowPermission()
 }
@@ -241,7 +323,22 @@ func (t *mediaTool) ExecuteOutcome(ctx context.Context, input string, observer t
 		result, artifacts, err = t.generateVideo(ctx, input, permissionContext, observer)
 	}
 	if err != nil {
-		return classifyFailure(err).WithTiming(started, time.Now().UTC()), nil
+		outcome := classifyFailure(err)
+		if result.Status != "" {
+			if encoded, encodeErr := json.Marshal(result); encodeErr == nil {
+				outcome.Content = string(encoded)
+			}
+			outcome.Artifacts = artifacts
+			outcome.AffectedPaths = append([]string(nil), result.Paths...)
+			outcome.Details = generatedResultDetails(result)
+			if len(artifacts) > 0 {
+				outcome.TransportStatus = tool.TransportCompleted
+				outcome.Retryable = false
+				outcome.Summary = fmt.Sprintf("已保存 %d 个媒体文件，%d 个结果未完成", len(result.Paths), result.FailedCount)
+				outcome.Operation = &tool.OperationDescriptor{Type: t.Name(), SideEffectState: tool.OutcomeSideEffectPartial}
+			}
+		}
+		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil {
@@ -251,11 +348,7 @@ func (t *mediaTool) ExecuteOutcome(ctx context.Context, input string, observer t
 	outcome.Artifacts = artifacts
 	outcome.AffectedPaths = append([]string(nil), result.Paths...)
 	outcome.Summary = fmt.Sprintf("已生成 %d 个%s文件", len(result.Paths), result.Kind)
-	outcome.Details = map[string]any{
-		"kind": result.Kind, "provider": result.Provider, "model_id": result.ModelID,
-		"task_id": result.TaskID,
-		"paths":   result.Paths,
-	}
+	outcome.Details = generatedResultDetails(result)
 	return outcome.WithTiming(started, time.Now().UTC()), nil
 }
 
@@ -303,6 +396,15 @@ func (t *mediaTool) validateInput(input string) error {
 	if value.Duration < 0 || value.Duration > 60 {
 		return errors.New("duration 必须在 1 到 60 秒之间")
 	}
+	if value.SourceRole != "" && value.SourceRole != "first_frame" && value.SourceRole != "reference_image" {
+		return errors.New("source_role 只支持 first_frame 或 reference_image")
+	}
+	if value.SourceRole != "" && strings.TrimSpace(value.SourceImagePath) == "" {
+		return errors.New("source_role 只能与 source_image_path 一起设置")
+	}
+	if strings.TrimSpace(value.TaskID) != "" && strings.TrimSpace(value.SourceImagePath) != "" {
+		return errors.New("续查 task_id 时不能重新设置 source_image_path")
+	}
 	return nil
 }
 
@@ -342,7 +444,9 @@ func (t *mediaTool) generateImage(ctx context.Context, input string, permissionC
 		generatingMessage = fmt.Sprintf("正在生成最多 %d 张图片", parameters.MaxImages)
 	}
 	emitMediaStatus(observer, "generating", generatingMessage)
-	if err := t.requestJSON(ctx, http.MethodPost, "/images/generations", body, &response); err != nil {
+	requestCtx, cancel := withOptionalTimeout(ctx, t.imageTimeout)
+	defer cancel()
+	if err := t.requestJSON(requestCtx, http.MethodPost, "/images/generations", body, &response); err != nil {
 		return generatedResult{}, nil, err
 	}
 	if len(response.Data) == 0 {
@@ -353,71 +457,118 @@ func (t *mediaTool) generateImage(ctx context.Context, input string, permissionC
 	}
 	paths := make([]string, 0, len(response.Data))
 	artifacts := make([]tool.ArtifactDescriptor, 0, len(response.Data))
-	writtenPaths := make([]string, 0, len(response.Data))
-	cleanupWritten := func() {
-		for _, writtenPath := range writtenPaths {
-			_ = os.Remove(writtenPath)
-		}
-	}
+	items := make([]generatedItem, 0, len(response.Data))
+	failedCount := 0
+	var firstFailure error
 	emitMediaStatus(observer, "downloading", fmt.Sprintf("正在载入 %d 张图片", len(response.Data)))
 	for index, item := range response.Data {
 		data, contentType, err := t.resolveImageBytes(ctx, item.URL, item.B64JSON)
 		if err != nil {
-			cleanupWritten()
-			return generatedResult{}, nil, err
+			failedCount++
+			items = append(items, generatedItem{Index: index + 1, Status: "error"})
+			if firstFailure == nil {
+				firstFailure = err
+			}
+			continue
 		}
 		contentType, err = validateMediaBytes("image", data, contentType)
 		if err != nil {
-			cleanupWritten()
-			return generatedResult{}, nil, err
+			failedCount++
+			items = append(items, generatedItem{Index: index + 1, Status: "error"})
+			if firstFailure == nil {
+				firstFailure = err
+			}
+			continue
 		}
 		extension := extensionForContentType(contentType, ".jpg")
-		resolvedPath, displayPath, err := writeMediaFile(permissionContext, "image", extension, data)
+		_, displayPath, err := writeMediaFile(permissionContext, "image", extension, data)
 		if err != nil {
-			cleanupWritten()
-			return generatedResult{}, nil, err
+			failedCount++
+			items = append(items, generatedItem{Index: index + 1, Status: "error"})
+			if firstFailure == nil {
+				firstFailure = err
+			}
+			continue
 		}
-		writtenPaths = append(writtenPaths, resolvedPath)
 		paths = append(paths, displayPath)
+		items = append(items, generatedItem{Index: index + 1, Status: "ready", Path: displayPath})
 		artifacts = append(artifacts, mediaArtifact(t.Name(), "image", displayPath, index+1))
 	}
+	result := generatedResult{
+		Status: "succeeded", Kind: "image", ModelID: t.configuration.ModelID,
+		Paths: paths, Items: items, RequestedCount: resultLimit, FailedCount: failedCount, Provider: providerID,
+	}
+	if failedCount > 0 {
+		result.Status = "partial"
+		message := fmt.Sprintf("已保存 %d 张图片，%d 张载入失败。", len(paths), failedCount)
+		emitMediaStatusDetails(observer, "partial", message, map[string]any{"items": items})
+		return result, artifacts, &providerError{
+			code: "media_generate_partial", message: message, retryable: false,
+			transportStatus: tool.TransportCompleted, cause: firstFailure,
+		}
+	}
 	emitMediaStatus(observer, "ready", fmt.Sprintf("已生成 %d 张图片", len(paths)))
-	return generatedResult{Status: "succeeded", Kind: "image", ModelID: t.configuration.ModelID, Paths: paths, Provider: providerID}, artifacts, nil
+	return result, artifacts, nil
 }
 
 func (t *mediaTool) generateVideo(ctx context.Context, input string, permissionContext tool.PermissionContext, observer tool.ToolObserver) (generatedResult, []tool.ArtifactDescriptor, error) {
 	var parameters videoInput
 	_ = json.Unmarshal([]byte(input), &parameters)
-	body := map[string]any{
-		"model":   t.configuration.ModelID,
-		"content": []map[string]any{{"type": "text", "text": strings.TrimSpace(parameters.Prompt)}},
+	taskID := strings.TrimSpace(parameters.TaskID)
+	taskFingerprint := ""
+	if taskID == "" {
+		content := []map[string]any{{"type": "text", "text": strings.TrimSpace(parameters.Prompt)}}
+		if strings.TrimSpace(parameters.SourceImagePath) != "" {
+			imageURL, err := sourceImageDataURL(permissionContext, parameters.SourceImagePath)
+			if err != nil {
+				return generatedResult{}, nil, &providerError{code: "media_generate_invalid_input", message: err.Error(), retryable: false, transportStatus: tool.TransportNotStarted, cause: err}
+			}
+			role := strings.TrimSpace(parameters.SourceRole)
+			if role == "" {
+				role = "first_frame"
+			}
+			imagePart := map[string]any{
+				"type": "image_url", "image_url": map[string]any{"url": imageURL},
+			}
+			// The official first-frame example omits role. Seedance only needs an
+			// explicit role for reference-image semantics.
+			if role == "reference_image" {
+				imagePart["role"] = role
+			}
+			content = append(content, imagePart)
+		}
+		body := map[string]any{
+			"model":   t.configuration.ModelID,
+			"content": content,
+		}
+		if parameters.Ratio != "" {
+			body["ratio"] = parameters.Ratio
+		}
+		if parameters.Resolution != "" {
+			body["resolution"] = parameters.Resolution
+		}
+		if parameters.Duration > 0 {
+			body["duration"] = parameters.Duration
+		}
+		if parameters.GenerateAudio != nil {
+			body["generate_audio"] = *parameters.GenerateAudio
+		}
+		if parameters.Watermark != nil {
+			body["watermark"] = *parameters.Watermark
+		}
+		taskFingerprint = t.videoTaskFingerprint(permissionContext, body)
+		var err error
+		taskID, err = t.resolveOrCreateVideoTask(ctx, taskFingerprint, body, observer)
+		if err != nil {
+			var provider *providerError
+			if errors.As(err, &provider) && provider.taskID != "" {
+				return pendingVideoResult(t.configuration.ModelID, provider.taskID, provider.taskStatus), nil, err
+			}
+			return generatedResult{}, nil, err
+		}
+	} else {
+		emitMediaStatusDetails(observer, "queued", "正在续查已有视频任务", map[string]any{"task_id": taskID})
 	}
-	if parameters.Ratio != "" {
-		body["ratio"] = parameters.Ratio
-	}
-	if parameters.Resolution != "" {
-		body["resolution"] = parameters.Resolution
-	}
-	if parameters.Duration > 0 {
-		body["duration"] = parameters.Duration
-	}
-	if parameters.GenerateAudio != nil {
-		body["generate_audio"] = *parameters.GenerateAudio
-	}
-	if parameters.Watermark != nil {
-		body["watermark"] = *parameters.Watermark
-	}
-	var created struct {
-		ID string `json:"id"`
-	}
-	if err := t.requestJSON(ctx, http.MethodPost, "/contents/generations/tasks", body, &created); err != nil {
-		return generatedResult{}, nil, err
-	}
-	created.ID = strings.TrimSpace(created.ID)
-	if created.ID == "" {
-		return generatedResult{}, nil, &providerError{code: "media_generate_upstream_failed", message: "视频生成服务没有返回任务 ID。", retryable: true}
-	}
-	emitMediaStatus(observer, "queued", "视频任务已提交")
 	pollCtx, cancel := context.WithTimeout(ctx, t.pollTimeout)
 	defer cancel()
 	lastProviderStatus := ""
@@ -432,17 +583,25 @@ func (t *mediaTool) generateVideo(ctx context.Context, input string, permissionC
 				VideoURL string `json:"video_url"`
 			} `json:"content"`
 		}
-		if err := t.requestJSON(pollCtx, http.MethodGet, "/contents/generations/tasks/"+url.PathEscape(created.ID), nil, &task); err != nil {
+		requestCtx, requestCancel := withOptionalTimeout(pollCtx, t.requestTimeout)
+		err := t.requestJSON(requestCtx, http.MethodGet, "/contents/generations/tasks/"+url.PathEscape(taskID), nil, &task)
+		requestCancel()
+		if err != nil {
+			if pollCtx.Err() != nil {
+				_ = t.persistVideoTask(taskFingerprint, taskID, "unknown")
+				return pendingVideoResult(t.configuration.ModelID, taskID, lastProviderStatus), nil, pendingVideoError(taskID, lastProviderStatus, pollCtx.Err())
+			}
 			return generatedResult{}, nil, err
 		}
 		providerStatus := strings.ToLower(strings.TrimSpace(task.Status))
 		if providerStatus != "" && providerStatus != lastProviderStatus {
 			lastProviderStatus = providerStatus
+			_ = t.persistVideoTask(taskFingerprint, taskID, providerStatus)
 			switch providerStatus {
 			case "queued":
-				emitMediaStatus(observer, "queued", "视频任务正在排队")
+				emitMediaStatusDetails(observer, "queued", "视频任务正在排队", map[string]any{"task_id": taskID, "provider_status": providerStatus})
 			case "running", "processing":
-				emitMediaStatus(observer, "generating", "正在生成视频")
+				emitMediaStatusDetails(observer, "generating", "正在生成视频", map[string]any{"task_id": taskID, "provider_status": providerStatus})
 			}
 		}
 		switch providerStatus {
@@ -462,28 +621,39 @@ func (t *mediaTool) generateVideo(ctx context.Context, input string, permissionC
 				return generatedResult{}, nil, err
 			}
 			artifact := mediaArtifact(t.Name(), "video", displayPath, 1)
-			emitMediaStatus(observer, "ready", "视频已生成")
-			return generatedResult{Status: "succeeded", Kind: "video", ModelID: t.configuration.ModelID, TaskID: created.ID, Paths: []string{displayPath}, Provider: providerID}, []tool.ArtifactDescriptor{artifact}, nil
+			_ = t.persistVideoTask(taskFingerprint, taskID, "succeeded")
+			emitMediaStatusDetails(observer, "ready", "视频已生成", map[string]any{"task_id": taskID, "provider_status": providerStatus})
+			return generatedResult{Status: "succeeded", Kind: "video", ModelID: t.configuration.ModelID, TaskID: taskID, Paths: []string{displayPath}, Items: []generatedItem{{Index: 1, Status: "ready", Path: displayPath}}, RequestedCount: 1, Provider: providerID}, []tool.ArtifactDescriptor{artifact}, nil
 		case "failed", "cancelled":
+			_ = t.persistVideoTask(taskFingerprint, taskID, providerStatus)
 			message := strings.TrimSpace(task.Error.Message)
 			if message == "" {
 				message = "视频生成任务未成功完成。"
 			}
-			return generatedResult{}, nil, &providerError{code: "media_generate_upstream_failed", message: message, retryable: task.Status == "failed"}
+			return generatedResult{Status: "failed", Kind: "video", ModelID: t.configuration.ModelID, TaskID: taskID, Items: []generatedItem{{Index: 1, Status: "error"}}, RequestedCount: 1, FailedCount: 1, Provider: providerID}, nil, &providerError{code: "media_generate_upstream_failed", message: message, retryable: false, taskID: taskID, taskStatus: providerStatus}
 		}
 		select {
 		case <-pollCtx.Done():
-			return generatedResult{}, nil, &providerError{code: "media_generate_upstream_failed", message: "视频生成任务等待已中断或超时。", retryable: true, cause: pollCtx.Err()}
+			_ = t.persistVideoTask(taskFingerprint, taskID, "unknown")
+			return pendingVideoResult(t.configuration.ModelID, taskID, lastProviderStatus), nil, pendingVideoError(taskID, lastProviderStatus, pollCtx.Err())
 		case <-time.After(t.pollInterval):
 		}
 	}
 }
 
 func emitMediaStatus(observer tool.ToolObserver, stage, message string) {
+	emitMediaStatusDetails(observer, stage, message, nil)
+}
+
+func emitMediaStatusDetails(observer tool.ToolObserver, stage, message string, details map[string]any) {
 	if observer == nil {
 		return
 	}
-	payload, err := json.Marshal(map[string]string{"stage": stage, "message": message})
+	payloadValue := map[string]any{"stage": stage, "message": message}
+	for key, value := range details {
+		payloadValue[key] = value
+	}
+	payload, err := json.Marshal(payloadValue)
 	if err != nil {
 		return
 	}
@@ -494,11 +664,16 @@ func emitMediaStatus(observer tool.ToolObserver, stage, message string) {
 }
 
 type providerError struct {
-	code       string
-	message    string
-	retryable  bool
-	statusCode int
-	cause      error
+	code                              string
+	message                           string
+	retryable                         bool
+	statusCode                        int
+	transportStatus                   tool.TransportStatus
+	transportFailureKind              string
+	cause                             error
+	taskID                            string
+	taskStatus                        string
+	externalStateConfirmationRequired bool
 }
 
 func (e *providerError) Error() string { return e.message }
@@ -521,12 +696,14 @@ func (t *mediaTool) requestJSON(ctx context.Context, method, suffix string, body
 	request.Header.Set("Content-Type", "application/json")
 	response, err := t.client.Do(request)
 	if err != nil {
-		return &providerError{code: "media_generate_upstream_failed", message: "图片视频生成服务请求失败。", retryable: true, cause: err}
+		return mediaTransportError("media_generate_upstream_failed", method, err)
 	}
 	defer response.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maximumJSONBytes+1))
 	if err != nil {
-		return &providerError{code: "media_generate_upstream_failed", message: "无法读取图片视频生成服务响应。", retryable: true, cause: err}
+		failure := mediaTransportError("media_generate_upstream_failed", method, err)
+		failure.message = "图片视频生成服务连接在响应完成前中断，请稍后重试。"
+		return failure
 	}
 	if len(raw) > maximumJSONBytes {
 		return &providerError{code: "media_generate_upstream_failed", message: "图片视频生成服务响应过大。", retryable: true}
@@ -581,13 +758,21 @@ func (t *mediaTool) download(ctx context.Context, remoteURL string) ([]byte, str
 	if !isAllowedRemoteURL(remoteURL) {
 		return nil, "", &providerError{code: "media_generate_download_failed", message: "供应商返回了不安全的媒体地址。", retryable: true}
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, remoteURL, nil)
+	downloadCtx, cancel := withOptionalTimeout(ctx, t.downloadTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(downloadCtx, http.MethodGet, remoteURL, nil)
 	if err != nil {
 		return nil, "", err
 	}
 	response, err := t.client.Do(request)
 	if err != nil {
-		return nil, "", &providerError{code: "media_generate_download_failed", message: "生成媒体下载失败。", retryable: true, cause: err}
+		failure := mediaTransportError("media_generate_download_failed", http.MethodGet, err)
+		if failure.transportFailureKind == "unsafe_redirect" {
+			failure.message = "生成媒体下载失败：供应商返回了不安全的跳转地址。"
+		} else {
+			failure.message = "生成媒体下载失败：连接中断，请检查网络后重试。"
+		}
+		return nil, "", failure
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
@@ -688,6 +873,213 @@ func mediaArtifact(producer, kind, displayPath string, ordinal int) tool.Artifac
 	}
 }
 
+func generatedResultDetails(result generatedResult) map[string]any {
+	return map[string]any{
+		"generation_status": result.Status, "kind": result.Kind, "provider": result.Provider,
+		"model_id": result.ModelID, "task_id": result.TaskID, "paths": result.Paths,
+		"items": result.Items, "requested_count": result.RequestedCount, "failed_count": result.FailedCount,
+	}
+}
+
+func (t *mediaTool) resolveOrCreateVideoTask(ctx context.Context, fingerprint string, body map[string]any, observer tool.ToolObserver) (string, error) {
+	videoTaskSubmissionMu.Lock()
+	defer videoTaskSubmissionMu.Unlock()
+
+	if recovered, ok := t.loadPendingVideoTask(fingerprint); ok {
+		emitMediaStatusDetails(observer, "queued", "正在恢复上次提交的视频任务", map[string]any{
+			"task_id": recovered.TaskID, "provider_status": recovered.Status,
+		})
+		return recovered.TaskID, nil
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	emitMediaStatus(observer, "queued", "正在提交视频任务")
+	requestCtx, cancel := withOptionalTimeout(ctx, t.videoCreateTimeout)
+	err := t.requestJSON(requestCtx, http.MethodPost, "/contents/generations/tasks", body, &created)
+	cancel()
+	if err != nil {
+		var provider *providerError
+		if errors.As(err, &provider) && provider.transportStatus == tool.TransportUnknown {
+			provider.code = "media_generate_create_unknown"
+			provider.message = "视频任务提交请求超时，且供应商没有返回任务 ID；Awaken 无法确认任务是否创建，本轮不会自动重试。请先在火山控制台确认任务状态。"
+			provider.retryable = false
+			provider.externalStateConfirmationRequired = true
+		}
+		return "", err
+	}
+	taskID := strings.TrimSpace(created.ID)
+	if taskID == "" {
+		return "", &providerError{code: "media_generate_upstream_failed", message: "视频生成服务没有返回任务 ID。", retryable: true}
+	}
+	emitMediaStatusDetails(observer, "queued", "视频任务已提交", map[string]any{
+		"task_id": taskID, "provider_status": "queued",
+	})
+	if err := t.persistVideoTask(fingerprint, taskID, "queued"); err != nil {
+		return "", &providerError{
+			code:      "media_generate_task_persistence_failed",
+			message:   "视频任务已提交，但本地未能可靠保存任务 ID；请保留当前 task_id 续查，勿重新创建任务。",
+			retryable: false, transportStatus: tool.TransportUnknown,
+			transportFailureKind: "task_persistence", cause: err, taskID: taskID, taskStatus: "queued",
+		}
+	}
+	return taskID, nil
+}
+
+func withOptionalTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
+func sourceImageDataURL(permissionContext tool.PermissionContext, displayPath string) (string, error) {
+	resolved, err := permissionContext.ResolveReadablePathChecked(displayPath)
+	if err != nil {
+		return "", fmt.Errorf("无法读取 source_image_path：%w", err)
+	}
+	file, err := os.Open(resolved)
+	if err != nil {
+		return "", errors.New("source_image_path 必须指向可读取的 ready 图片 Artifact")
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maximumInputImageBytes+1))
+	if err != nil || len(data) == 0 || len(data) > maximumInputImageBytes {
+		return "", errors.New("source_image_path 图片为空、过大或无法读取")
+	}
+	contentType, err := validateMediaBytes("image", data, "")
+	if err != nil {
+		return "", errors.New("source_image_path 只支持 PNG 或 JPEG 图片")
+	}
+	if len(data) > maximumInlineVideoImageBytes {
+		data, contentType, err = compactVideoInputImage(data)
+		if err != nil {
+			return "", err
+		}
+	}
+	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
+}
+
+func compactVideoInputImage(data []byte) ([]byte, string, error) {
+	decoded, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, "", errors.New("source_image_path 图片无法为视频输入重新编码")
+	}
+	bounds := decoded.Bounds()
+	if bounds.Empty() {
+		return nil, "", errors.New("source_image_path 图片尺寸无效")
+	}
+	canvas := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
+	draw.Draw(canvas, canvas.Bounds(), &image.Uniform{C: color.White}, image.Point{}, draw.Src)
+	draw.Draw(canvas, canvas.Bounds(), decoded, bounds.Min, draw.Over)
+
+	for _, quality := range []int{88, 80, 72, 64} {
+		var encoded bytes.Buffer
+		if err := jpeg.Encode(&encoded, canvas, &jpeg.Options{Quality: quality}); err != nil {
+			return nil, "", errors.New("source_image_path 图片无法为视频输入重新编码")
+		}
+		if encoded.Len() <= maximumInlineVideoImageBytes {
+			return encoded.Bytes(), "image/jpeg", nil
+		}
+		if quality == 64 && encoded.Len() <= maximumVideoImageBytes {
+			return encoded.Bytes(), "image/jpeg", nil
+		}
+	}
+	return nil, "", errors.New("source_image_path 图片重新编码后仍过大，请先缩小图片再生成视频")
+}
+
+func (t *mediaTool) videoTaskFingerprint(permissionContext tool.PermissionContext, body map[string]any) string {
+	encoded, _ := json.Marshal(body)
+	digest := sha256.Sum256([]byte(strings.Join([]string{
+		t.configuration.AccountID,
+		t.configuration.ModelID,
+		permissionContext.Normalize().WorkspaceRoot,
+		string(encoded),
+	}, "\x00")))
+	return hex.EncodeToString(digest[:])
+}
+
+func videoTaskPath(fingerprint string) string {
+	root := strings.TrimSpace(os.Getenv("AWAKEN_HOME"))
+	if root == "" || len(fingerprint) != sha256.Size*2 {
+		return ""
+	}
+	return filepath.Join(root, "state", "media-tasks", fingerprint+".json")
+}
+
+func (t *mediaTool) loadPendingVideoTask(fingerprint string) (videoTaskRecord, bool) {
+	path := videoTaskPath(fingerprint)
+	if path == "" {
+		return videoTaskRecord{}, false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return videoTaskRecord{}, false
+	}
+	var record videoTaskRecord
+	if json.Unmarshal(raw, &record) != nil || record.Version != 1 || record.Fingerprint != fingerprint ||
+		record.AccountID != t.configuration.AccountID || record.ModelID != t.configuration.ModelID ||
+		strings.TrimSpace(record.TaskID) == "" || time.Since(record.UpdatedAt) > 7*24*time.Hour {
+		return videoTaskRecord{}, false
+	}
+	switch strings.ToLower(strings.TrimSpace(record.Status)) {
+	case "queued", "running", "processing", "unknown":
+		return record, true
+	default:
+		return videoTaskRecord{}, false
+	}
+}
+
+func (t *mediaTool) persistVideoTask(fingerprint, taskID, status string) error {
+	path := videoTaskPath(fingerprint)
+	if path == "" || strings.TrimSpace(taskID) == "" {
+		return nil
+	}
+	now := time.Now().UTC()
+	createdAt := now
+	if raw, err := os.ReadFile(path); err == nil {
+		var existing videoTaskRecord
+		if json.Unmarshal(raw, &existing) == nil && !existing.CreatedAt.IsZero() {
+			createdAt = existing.CreatedAt
+		}
+	}
+	record := videoTaskRecord{
+		Version: 1, Fingerprint: fingerprint, TaskID: strings.TrimSpace(taskID),
+		AccountID: t.configuration.AccountID, ModelID: t.configuration.ModelID,
+		Status: strings.ToLower(strings.TrimSpace(status)), CreatedAt: createdAt, UpdatedAt: now,
+	}
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	temporary := path + ".tmp-" + uuid.NewString()
+	if err := os.WriteFile(temporary, encoded, 0o600); err != nil {
+		return err
+	}
+	defer os.Remove(temporary)
+	return os.Rename(temporary, path)
+}
+
+func pendingVideoResult(modelID, taskID, _ string) generatedResult {
+	return generatedResult{
+		Status: "unknown", Kind: "video", ModelID: modelID, TaskID: taskID,
+		Items: []generatedItem{{Index: 1, Status: "unknown"}}, RequestedCount: 1, Provider: providerID,
+	}
+}
+
+func pendingVideoError(taskID, providerStatus string, cause error) *providerError {
+	message := "视频任务已提交，但本次运行未能确认最终状态；请使用原 task_id 续查，勿重新创建任务。"
+	return &providerError{
+		code: "media_generate_task_pending", message: message, retryable: false,
+		transportStatus: tool.TransportUnknown, transportFailureKind: "poll_timeout",
+		cause: cause, taskID: taskID, taskStatus: providerStatus,
+	}
+}
+
 func classifyFailure(err error) tool.ExecutionOutcome {
 	var provider *providerError
 	if errors.As(err, &provider) {
@@ -697,14 +1089,113 @@ func classifyFailure(err error) tool.ExecutionOutcome {
 			category = tool.ErrorCategoryAuthorization
 			status = tool.OutcomeNeedsAuth
 		}
+		if provider.code == "media_generate_invalid_input" {
+			category = tool.ErrorCategoryValidation
+		}
 		outcome := mediaFailure(provider.message, provider.code, category, provider.retryable)
 		outcome.Status = status
+		if provider.code == "media_generate_task_pending" || provider.code == "media_generate_task_persistence_failed" {
+			outcome.SemanticStatus = tool.SemanticUnknown
+			outcome.Operation = &tool.OperationDescriptor{Type: videoToolName, Target: provider.taskID, SideEffectState: tool.OutcomeSideEffectUnknown}
+			outcome.RecoveryOptions = []string{"使用原 task_id 续查视频任务", "不要重复创建视频任务"}
+		} else if provider.code == "media_generate_create_unknown" {
+			outcome.SemanticStatus = tool.SemanticUnknown
+			outcome.Operation = &tool.OperationDescriptor{Type: videoToolName, SideEffectState: tool.OutcomeSideEffectUnknown}
+			outcome.RecoveryOptions = []string{"检查火山控制台中的视频任务", "确认没有任务后再由用户明确重新创建", "不要自动更换参数重试"}
+		}
+		if provider.transportStatus != "" {
+			outcome.TransportStatus = provider.transportStatus
+		}
+		diagnostic := map[string]any{}
 		if provider.statusCode != 0 {
-			outcome.Diagnostic = map[string]any{"http_status": provider.statusCode}
+			diagnostic["http_status"] = provider.statusCode
+		}
+		if provider.transportFailureKind != "" {
+			diagnostic["transport_failure_kind"] = provider.transportFailureKind
+		}
+		if provider.taskID != "" {
+			diagnostic["task_id"] = provider.taskID
+		}
+		if provider.taskStatus != "" {
+			diagnostic["provider_status"] = provider.taskStatus
+		}
+		if provider.externalStateConfirmationRequired {
+			diagnostic["requires_external_state_confirmation"] = true
+		}
+		if len(diagnostic) > 0 {
+			outcome.Diagnostic = diagnostic
 		}
 		return outcome
 	}
 	return mediaFailure("图片视频生成工具执行失败。", "media_generate_upstream_failed", tool.ErrorCategoryTool, true)
+}
+
+func mediaTransportError(code, method string, err error) *providerError {
+	kind := safeTransportFailureKind(err)
+	message := "图片视频生成服务网络请求失败，请检查网络后重试。"
+	switch kind {
+	case "timeout":
+		message = "图片视频生成服务响应超时，请稍后重试。"
+	case "dns":
+		message = "无法连接图片视频生成服务，请检查网络后重试。"
+	case "connection_closed", "network_read", "network_write":
+		message = "图片视频生成服务连接中断，请稍后重试。"
+	case "cancelled":
+		message = "图片视频生成请求已停止。"
+	case "unsafe_redirect":
+		message = "图片视频生成服务返回了不安全的跳转地址。"
+	}
+	status := tool.TransportFailed
+	if kind == "cancelled" {
+		status = tool.TransportCancelled
+	} else if kind == "timeout" && method != http.MethodGet {
+		// A timed-out create request may already have consumed quota upstream.
+		// Treat it as unknown and block blind replay.
+		status = tool.TransportUnknown
+	}
+	retryable := kind != "cancelled" && kind != "unsafe_redirect"
+	if status == tool.TransportUnknown {
+		retryable = false
+	}
+	return &providerError{
+		code: code, message: message, retryable: retryable,
+		transportStatus: status, transportFailureKind: kind, cause: err,
+	}
+}
+
+func safeTransportFailureKind(err error) string {
+	if errors.Is(err, context.Canceled) {
+		return "cancelled"
+	}
+	if errors.Is(err, errUnsafeMediaRedirect) {
+		return "unsafe_redirect"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	var dnsError *net.DNSError
+	if errors.As(err, &dnsError) {
+		return "dns"
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return "timeout"
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) {
+		return "connection_closed"
+	}
+	var operationError *net.OpError
+	if errors.As(err, &operationError) {
+		switch strings.ToLower(strings.TrimSpace(operationError.Op)) {
+		case "dial":
+			return "network_dial"
+		case "read":
+			return "network_read"
+		case "write":
+			return "network_write"
+		}
+	}
+	return "network"
 }
 
 func mediaFailure(message, code string, category tool.ErrorCategory, retryable bool) tool.ExecutionOutcome {

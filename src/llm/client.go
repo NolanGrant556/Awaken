@@ -360,10 +360,33 @@ func providerRequestID(resp *http.Response) string {
 func requestFailedError(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxProviderErrorBodyBytes+1))
 	detail := sanitizeProviderErrorDetail(body)
-	if detail != "" {
-		return fmt.Errorf("%w: status %d: %s", ErrRequestFailed, resp.StatusCode, detail)
+	return &RequestError{
+		StatusCode: resp.StatusCode,
+		RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		Detail:     detail,
 	}
-	return fmt.Errorf("%w: status %d", ErrRequestFailed, resp.StatusCode)
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	when, err := http.ParseTime(value)
+	if err != nil {
+		return 0
+	}
+	delay := when.Sub(now)
+	if delay <= 0 {
+		return 0
+	}
+	return delay
 }
 
 func sanitizeProviderErrorDetail(body []byte) string {

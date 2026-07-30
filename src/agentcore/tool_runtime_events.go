@@ -34,14 +34,26 @@ func (rt *ToolRuntime) emitArtifacts(
 	selectedTool tool.Tool,
 	input string,
 	output string,
+	skip map[string]bool,
 ) []tool.ArtifactDescriptor {
 	producingTool, ok := selectedTool.(tool.ArtifactProducingTool)
 	if !ok {
 		return nil
 	}
+	return rt.emitArtifactDescriptors(result, producingTool.Artifacts(input, output, rt.permissionContext), skip)
+}
 
+func (rt *ToolRuntime) emitArtifactDescriptors(
+	result ToolExecutionResult,
+	descriptors []tool.ArtifactDescriptor,
+	skip map[string]bool,
+) []tool.ArtifactDescriptor {
 	var artifacts []tool.ArtifactDescriptor
-	for _, artifact := range producingTool.Artifacts(input, output, rt.permissionContext) {
+	for _, artifact := range descriptors {
+		key := artifactEventKey(artifact)
+		if key != "" && skip[key] {
+			continue
+		}
 		eventType := ArtifactUpdatedEventType
 		if artifact.Action == tool.ArtifactActionCreated || artifact.Action == tool.ArtifactActionPublished {
 			eventType = ArtifactCreatedEventType
@@ -62,6 +74,9 @@ func (rt *ToolRuntime) emitArtifacts(
 		artifact.Path = strings.TrimSpace(artifact.Path)
 		artifact.Status = string(normalizeArtifactStatus(artifact.Status))
 		artifacts = append(artifacts, artifact)
+		if key = artifactEventKey(artifact); key != "" && skip != nil {
+			skip[key] = true
+		}
 		rt.sink.Emit(AwakenEvent{
 			Type:                    eventType,
 			Timestamp:               timeNowUTC(),
@@ -80,6 +95,16 @@ func (rt *ToolRuntime) emitArtifacts(
 		})
 	}
 	return artifacts
+}
+
+func artifactEventKey(artifact tool.ArtifactDescriptor) string {
+	if id := strings.TrimSpace(artifact.ID); id != "" {
+		return "id:" + id
+	}
+	if path := strings.TrimSpace(artifact.Path); path != "" {
+		return "path:" + path
+	}
+	return ""
 }
 
 func (rt *ToolRuntime) emitCommandOutput(result ToolExecutionResult, output tool.CommandOutput) {

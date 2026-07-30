@@ -23,6 +23,8 @@ import {
   insertComposerTokenAtOffset,
   modelPreferenceChangeForOption,
   modelPreferenceRecoveryKey,
+  mediaRevealLabelForPlatform,
+  mediaArtifactRequestForPath,
   nextUserQuestionPromptIndex,
   nextSubagentInspectorTaskId,
   promptNarrativeTokensForComposer,
@@ -112,6 +114,42 @@ function userFolders(...paths: string[]): WorkspaceProjectFolder[] {
     isPrimary: index === 0,
   }));
 }
+
+describe("media reveal platform copy", () => {
+  it("uses the native file manager name on macOS and Windows", () => {
+    expect(mediaRevealLabelForPlatform("macos")).toBe("在 Finder 中显示");
+    expect(mediaRevealLabelForPlatform("windows")).toBe("在文件资源管理器中显示");
+    expect(mediaRevealLabelForPlatform("linux")).toBe("在文件管理器中显示");
+  });
+});
+
+describe("media artifact request compatibility", () => {
+  it("uses a transcript-verified path locator when a legacy run has no Artifact event", () => {
+    expect(
+      mediaArtifactRequestForPath(
+        "thread-1",
+        "run-1",
+        "output/generated-media/image.png",
+      ),
+    ).toEqual({
+      threadId: "thread-1",
+      runId: "run-1",
+      artifactId: "legacy-media:output/generated-media/image.png",
+      artifactPath: "output/generated-media/image.png",
+    });
+  });
+
+  it("prefers the durable Artifact identity when it is available", () => {
+    expect(
+      mediaArtifactRequestForPath(
+        "thread-1",
+        "run-1",
+        "output/generated-media/image.png",
+        { id: "artifact-1", path: "output/generated-media/image.png" },
+      ),
+    ).toEqual({ threadId: "thread-1", runId: "run-1", artifactId: "artifact-1" });
+  });
+});
 
 function stubElectronBridge(): void {
   vi.stubGlobal("window", {

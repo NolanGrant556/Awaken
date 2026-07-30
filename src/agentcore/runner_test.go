@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	convcontext "awaken/src/context"
 	"awaken/src/llm"
@@ -2210,6 +2211,31 @@ func TestRunEventEmitterRunErroredSetsRequestFailedCode(t *testing.T) {
 	}
 	if !strings.Contains(gotEvents[0].Error, llm.ErrRequestFailed.Error()) {
 		t.Fatalf("expected error text to contain %q, got %q", llm.ErrRequestFailed.Error(), gotEvents[0].Error)
+	}
+}
+
+func TestRunnerRetriesTransientLLMStatusWithoutRetryingPermanentFailure(t *testing.T) {
+	runner := NewRunner(testAgentConfig("http://unused", 2), convcontext.NewConversation(nil), nil)
+	runner.llmRetrySleep = func(context.Context, time.Duration) error { return nil }
+	calls := 0
+	response, err := runner.streamLLMWithTransientRetry(context.Background(), nil, func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		calls++
+		if calls < 3 {
+			return nil, &llm.RequestError{StatusCode: http.StatusTooManyRequests, RetryAfter: time.Millisecond}
+		}
+		return &llm.Response{Content: "recovered"}, nil
+	})
+	if err != nil || response == nil || response.Content != "recovered" || calls != 3 {
+		t.Fatalf("expected two bounded retries then success, calls=%d response=%+v err=%v", calls, response, err)
+	}
+
+	calls = 0
+	_, err = runner.streamLLMWithTransientRetry(context.Background(), nil, func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		calls++
+		return nil, &llm.RequestError{StatusCode: http.StatusUnauthorized}
+	})
+	if err == nil || calls != 1 {
+		t.Fatalf("permanent provider failure must not retry, calls=%d err=%v", calls, err)
 	}
 }
 

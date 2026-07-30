@@ -121,6 +121,78 @@ function foldedArtifactEvent(
   return folded;
 }
 
+function mediaArtifactEventFromToolResult(
+  events: AguiEvent[],
+  artifactPath?: string,
+): AguiEvent | undefined {
+  const requestedPath = artifactPath?.trim();
+  if (!requestedPath) return undefined;
+
+  for (const event of events) {
+    if (
+      event.type !== "TOOL_CALL_RESULT" ||
+      (event.toolCallName !== "image_generate" && event.toolCallName !== "video_generate")
+    ) {
+      continue;
+    }
+    let payload: {
+      status?: unknown;
+      generation_status?: unknown;
+      paths?: unknown;
+      items?: unknown;
+    };
+    try {
+      payload = JSON.parse(event.content ?? "{}") as typeof payload;
+    } catch {
+      continue;
+    }
+    const status = payload.generation_status ?? payload.status;
+    if (status !== "succeeded" && status !== "partial") continue;
+
+    const readyPaths = new Set<string>();
+    if (Array.isArray(payload.items)) {
+      for (const candidate of payload.items) {
+        if (!candidate || typeof candidate !== "object") continue;
+        const item = candidate as { status?: unknown; path?: unknown };
+        if (item.status === "ready" && typeof item.path === "string" && item.path.trim()) {
+          readyPaths.add(item.path.trim());
+        }
+      }
+    }
+    if (Array.isArray(payload.paths)) {
+      for (const candidate of payload.paths) {
+        if (typeof candidate === "string" && candidate.trim()) readyPaths.add(candidate.trim());
+      }
+    }
+    if (!readyPaths.has(requestedPath)) continue;
+
+    const kind = event.toolCallName === "video_generate" ? "video" : "image";
+    return {
+      type: "AWAKEN_ARTIFACT_CREATED",
+      artifactId: `legacy-media:${requestedPath}`,
+      artifactPath: requestedPath,
+      artifactTitle: path.basename(requestedPath),
+      artifactKind: kind,
+      artifactStatus: "ready",
+      artifactRole: "deliverable",
+      artifactContractVersion: 2,
+      artifactProducer: event.toolCallName,
+      toolCallName: event.toolCallName,
+    };
+  }
+  return undefined;
+}
+
+function recordedArtifactEvent(
+  events: AguiEvent[],
+  request: ArtifactOpenRequest,
+): AguiEvent | undefined {
+  return (
+    foldedArtifactEvent(events, request.artifactId) ??
+    mediaArtifactEventFromToolResult(events, request.artifactPath)
+  );
+}
+
 export async function resolveArtifactTarget(
   transcript: RuntimeThreadTranscript,
   request: ArtifactOpenRequest,
@@ -144,7 +216,7 @@ export async function resolveArtifactTarget(
       result: failed("run_not_terminal", "任务尚未结束，暂时不能打开交付文件。"),
     };
   }
-  const event = foldedArtifactEvent(runEntry.events, request.artifactId);
+  const event = recordedArtifactEvent(runEntry.events, request);
   if (!event || !event.artifactPath) {
     return {
       ok: false,
@@ -242,7 +314,7 @@ export async function resolveArtifactMediaTarget(
   if (!runEntry) {
     return { ok: false, result: failed("artifact_not_recorded", "没有找到这个任务的媒体交付物记录。") };
   }
-  const event = foldedArtifactEvent(runEntry.events, request.artifactId);
+  const event = recordedArtifactEvent(runEntry.events, request);
   if (!event || !event.artifactPath) {
     return { ok: false, result: failed("artifact_not_recorded", "没有找到这个媒体交付物记录。") };
   }

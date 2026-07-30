@@ -630,6 +630,18 @@ func TestThreadTitleMaxTokensForProfileKeepsCompactDefault(t *testing.T) {
 			t.Fatalf("expected Kimi Coding Plan %s title timeout %s, got %s", modelID, threadTitleForcedReasoningTimeout, got)
 		}
 	}
+	for _, providerID := range []string{"volcengine-agent-plan", "volcengine"} {
+		profile := &ModelProfileConfig{ProviderID: providerID, ModelID: "ark-code-latest"}
+		if got := threadTitleMaxTokensForProfile(profile); got != threadTitleForcedReasoningMaxTokens {
+			t.Fatalf("expected %s ark-code-latest title budget %d, got %d", providerID, threadTitleForcedReasoningMaxTokens, got)
+		}
+		if got := threadTitleGenerationTimeoutForProfile(profile); got != threadTitleForcedReasoningTimeout {
+			t.Fatalf("expected %s ark-code-latest title timeout %s, got %s", providerID, threadTitleForcedReasoningTimeout, got)
+		}
+	}
+	if got := threadTitleMaxTokensForProfile(&ModelProfileConfig{ProviderID: "openai", ModelID: "ark-code-latest"}); got != threadTitleMaxTokens {
+		t.Fatalf("unexpected forced-reasoning budget for unrelated ark-code-latest provider: %d", got)
+	}
 }
 
 func newProfileTitleTestService() *RunService {

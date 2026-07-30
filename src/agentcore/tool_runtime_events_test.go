@@ -351,6 +351,41 @@ func TestToolRuntimeEmitsCommandOutputFromObservableTool(t *testing.T) {
 	}
 }
 
+func TestToolRuntimePublishesVerifiedArtifactsFromTypedPartialOutcome(t *testing.T) {
+	toolName := "runtime_partial_artifact_tool"
+	outcome := tool.FailedOutcome("one sibling failed", "media_generate_partial", tool.ErrorCategoryRuntime, false)
+	outcome.TransportStatus = tool.TransportCompleted
+	outcome.Artifacts = []tool.ArtifactDescriptor{{
+		ContractVersion: tool.ArtifactContractVersion,
+		Role:            tool.ArtifactRoleDeliverable, Producer: toolName, Action: tool.ArtifactActionCreated,
+		ID: "partial-ready", Title: "Ready image", Kind: "image", Path: "output/ready.png", Status: "ready",
+	}}
+	outcome.Operation = &tool.OperationDescriptor{Type: toolName, SideEffectState: tool.OutcomeSideEffectPartial}
+	mustRegisterRuntimeTool(t, runtimeOutcomeTestTool{
+		runtimeTestTool: runtimeTestTool{name: toolName, permission: tool.AllowPermission()},
+		outcome:         outcome,
+	})
+
+	var events []AwakenEvent
+	result := NewToolRuntime(EventSinkFunc(func(event AwakenEvent) {
+		events = append(events, event)
+	})).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_partial_artifact", Function: convcontext.FunctionCall{Name: toolName, Arguments: `{}`},
+	})
+	if !result.IsError || len(result.Outcome.Artifacts) != 1 {
+		t.Fatalf("typed partial outcome lost artifact: %+v", result)
+	}
+	created := 0
+	for _, event := range events {
+		if event.Type == ArtifactCreatedEventType && event.ArtifactID == "partial-ready" {
+			created++
+		}
+	}
+	if created != 1 {
+		t.Fatalf("expected exactly one durable-ready artifact event, got %d: %+v", created, events)
+	}
+}
+
 func TestToolRuntimeExecutesWriteWithoutApproval(t *testing.T) {
 	root := t.TempDir()
 

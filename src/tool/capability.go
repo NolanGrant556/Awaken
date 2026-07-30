@@ -32,6 +32,9 @@ const (
 	CapabilityDependencyInstall  Capability = "dependency.install"
 	CapabilityGitRemoteRead      Capability = "git.remote_read"
 	CapabilityGitClone           Capability = "git.clone"
+	CapabilityComputerObserve    Capability = "computer.observe"
+	CapabilityComputerAct        Capability = "computer.act"
+	CapabilityComputerVerify     Capability = "computer.verify"
 )
 
 // NormalizeCapabilities removes empty/duplicate values and returns a stable

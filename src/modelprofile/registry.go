@@ -21,15 +21,16 @@ type Provider struct {
 }
 
 type ModelCapability struct {
-	ContextWindow      int                        `json:"context_window,omitempty"`
-	MaxOutputTokens    int                        `json:"max_output_tokens,omitempty"`
-	DefaultMaxTokens   int                        `json:"default_max_tokens,omitempty"`
-	DefaultTemperature float64                    `json:"default_temperature,omitempty"`
-	SupportsVision     bool                       `json:"supports_vision,omitempty"`
-	SupportsNativePDF  bool                       `json:"supports_native_pdf,omitempty"`
-	SupportsVideo      bool                       `json:"supports_video,omitempty"`
-	SupportsTools      string                     `json:"supports_tools,omitempty"`
-	ReasoningEffort    *ReasoningEffortCapability `json:"reasoning_effort,omitempty"`
+	ContextWindow       int                        `json:"context_window,omitempty"`
+	MaxOutputTokens     int                        `json:"max_output_tokens,omitempty"`
+	DefaultMaxTokens    int                        `json:"default_max_tokens,omitempty"`
+	DefaultTemperature  float64                    `json:"default_temperature,omitempty"`
+	SupportsVision      bool                       `json:"supports_vision,omitempty"`
+	SupportsNativePDF   bool                       `json:"supports_native_pdf,omitempty"`
+	SupportsVideo       bool                       `json:"supports_video,omitempty"`
+	SupportsTools       string                     `json:"supports_tools,omitempty"`
+	SupportsComputerUse bool                       `json:"supports_computer_use,omitempty"`
+	ReasoningEffort     *ReasoningEffortCapability `json:"reasoning_effort,omitempty"`
 }
 
 type ReasoningEffortCapability struct {

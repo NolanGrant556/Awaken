@@ -1414,6 +1414,52 @@ export type SupervisorStatusInfo = {
   status: SupervisorStatus;
 };
 
+export type ComputerHostStatus = {
+  available: boolean;
+  healthy: boolean;
+  version?: string;
+  protocol_version?: number;
+  os?: string;
+  tcc_screen_recording: boolean;
+  tcc_accessibility: boolean;
+  node_path?: string;
+  host_script_path?: string;
+  message?: string;
+};
+
+export type ComputerSettings = {
+  enabled: boolean;
+  allow_background_window_actions: boolean;
+};
+
+export type ComputerSettingsDocument = {
+  revision: number;
+  value: ComputerSettings;
+};
+
+export type ComputerSettingsPatch = {
+  enabled?: boolean;
+  allow_background_window_actions?: boolean;
+};
+
+export type ComputerSettingsSaveRequest = {
+  expected_revision: number;
+} & ComputerSettingsPatch;
+
+export type ComputerRuntimeSetupResult = {
+  node_ready: boolean;
+  cua_host_ready: boolean;
+  message?: string;
+};
+
+export type ComputerPermission = "screen_recording" | "accessibility";
+export type ComputerPermissionStatus =
+  | "not-determined"
+  | "granted"
+  | "denied"
+  | "restricted"
+  | "unknown";
+
 export type SearchProviderId = "exa" | "tavily";
 
 export type SearchSettings = {
@@ -1815,6 +1861,27 @@ export type AwakenBridge = {
     optionId: string,
     cancelled: boolean,
   ) => Promise<void>;
+  resolveComputerReview: (
+    runId: string,
+    reviewId: string,
+    decision: "approved_once" | "denied",
+  ) => Promise<void>;
+  computerSessionControl: (
+    runId: string,
+    action: "takeover" | "return" | "pause" | "terminate",
+  ) => Promise<void>;
+  getComputerHostStatus: () => Promise<ComputerHostStatus>;
+  getComputerSettings: () => Promise<ComputerSettingsDocument>;
+  saveComputerSettings: (
+    request: ComputerSettingsSaveRequest,
+  ) => Promise<ComputerSettingsDocument>;
+  prepareComputerRuntime: () => Promise<ComputerRuntimeSetupResult>;
+  getComputerPermissionStatus: (
+    permission: ComputerPermission,
+  ) => Promise<ComputerPermissionStatus>;
+  requestComputerPermission: (
+    permission: ComputerPermission,
+  ) => Promise<ComputerPermissionStatus>;
   subscribeRun: (runId: string, handlers: RunStreamHandlers, afterSeq?: number) => Promise<string>;
   unsubscribeRun: (subscriptionId: string) => void;
   getDesktopPreferences: () => Promise<DesktopPreferences>;

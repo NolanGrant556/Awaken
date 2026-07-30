@@ -15,6 +15,10 @@ type ModelCapabilities struct {
 	// profiles normalize it to "ready"; non-Desktop callers may still use an
 	// explicit non-ready value to suppress model-visible tool schemas.
 	SupportsTools string `json:"supports_tools,omitempty"`
+	// SupportsComputerUse indicates the model profile is allowed to use the
+	// computer_observe/act/verify lane. It is host-owned and does not by itself
+	// guarantee a CUA Host is available.
+	SupportsComputerUse bool `json:"supports_computer_use"`
 }
 
 // ModelContentPart describes non-text content returned by a tool. DataBase64

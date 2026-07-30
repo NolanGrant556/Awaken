@@ -97,6 +97,130 @@ export class RuntimeControlClient {
     }
   }
 
+  async resolveComputerReview(
+    runId: string,
+    reviewId: string,
+    decision: "approved_once" | "denied",
+  ): Promise<void> {
+    const resp = await fetch(
+      `${this.baseUrl}/v1/control/computer/runs/${encodeURIComponent(runId)}/reviews/${encodeURIComponent(reviewId)}/resolve`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ decision, actor: "desktop-user" }),
+      },
+    );
+    if (!resp.ok) {
+      throw new Error(`resolve computer review failed: ${resp.status}`);
+    }
+  }
+
+  async computerSessionControl(
+    runId: string,
+    action: "takeover" | "return" | "pause" | "terminate",
+  ): Promise<void> {
+    const resp = await fetch(
+      `${this.baseUrl}/v1/control/computer/sessions/${encodeURIComponent(runId)}/${action}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+        },
+      },
+    );
+    if (!resp.ok) {
+      throw new Error(`computer session control ${action} failed: ${resp.status}`);
+    }
+  }
+
+  async getComputerHostStatus(): Promise<{
+    available: boolean;
+    healthy: boolean;
+    version?: string;
+    protocol_version?: number;
+    os?: string;
+    tcc_screen_recording: boolean;
+    tcc_accessibility: boolean;
+    node_path?: string;
+    host_script_path?: string;
+    message?: string;
+  }> {
+    const resp = await fetch(`${this.baseUrl}/v1/control/computer/status`, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (!resp.ok) {
+      throw new Error(`get computer host status failed: ${resp.status}`);
+    }
+    return (await resp.json()) as {
+      available: boolean;
+      healthy: boolean;
+      version?: string;
+      protocol_version?: number;
+      os?: string;
+      tcc_screen_recording: boolean;
+      tcc_accessibility: boolean;
+      node_path?: string;
+      host_script_path?: string;
+      message?: string;
+    };
+  }
+
+  async getComputerSettings(): Promise<{
+    revision: number;
+    value: {
+      enabled: boolean;
+      allow_background_window_actions: boolean;
+    };
+  }> {
+    const resp = await fetch(`${this.baseUrl}/v1/computer/settings`, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (!resp.ok) {
+      throw new Error(`get computer settings failed: ${resp.status}`);
+    }
+    return (await resp.json()) as {
+      revision: number;
+      value: {
+        enabled: boolean;
+        allow_background_window_actions: boolean;
+      };
+    };
+  }
+
+  async saveComputerSettings(request: {
+    expected_revision: number;
+    enabled?: boolean;
+    allow_background_window_actions?: boolean;
+  }): Promise<{
+    revision: number;
+    value: {
+      enabled: boolean;
+      allow_background_window_actions: boolean;
+    };
+  }> {
+    const resp = await fetch(`${this.baseUrl}/v1/computer/settings`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(request),
+    });
+    if (!resp.ok) {
+      throw new Error(`save computer settings failed: ${resp.status}`);
+    }
+    return (await resp.json()) as {
+      revision: number;
+      value: {
+        enabled: boolean;
+        allow_background_window_actions: boolean;
+      };
+    };
+  }
+
   private startHeartbeat(intervalMs: number): void {
     this.stopHeartbeat();
     this.heartbeatTimer = setInterval(async () => {

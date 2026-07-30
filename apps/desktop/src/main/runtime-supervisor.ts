@@ -587,6 +587,10 @@ export class RuntimeSupervisor {
     return { ...this.statusInfo };
   }
 
+  getControlClient(): RuntimeControlClient | null {
+    return this.controlClient;
+  }
+
   getLogs(): RuntimeLogEntry[] {
     return [...this.logs];
   }

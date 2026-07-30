@@ -72,6 +72,20 @@ flowchart TD
 
 选择专用 Host 而不是把 CUA native runtime 直接装入 Electron Renderer，是为了稳定 TCC 身份、隔离 native crash、限制调用面并在输入注入处执行 fence/precondition 检查。实现 POC 可以比较“Electron Main 内嵌”和“签名 helper”两种托管方式，但发布形态必须满足上述身份、隔离和原子检查不变量；不得退化为用户手工启动的无认证 daemon。
 
+### 4.2 当前 interim 实现
+
+Phase 4 的当前实现把 CUA Host 作为 Core（`cmd/awaken-core`）管理的 Node.js 子进程：
+
+- `src/computer/cua/host_manager.go` 在 awaken-core 生命周期内持有单一 `HostManager`；
+- 启动时自动发现 host 脚本（`AWAKEN_CUA_HOST_SCRIPT`、bundled resources、`apps/desktop/resources/cua-driver`、PoC workspace），不再要求 `AWAKEN_CUA_ENABLED`；
+- CUA Host 脚本与 `package.json` 已迁入 `apps/desktop/resources/cua-driver`，`scripts/prepare-cua-driver.mjs` 在构建/开发准备阶段为该目录安装 `@trycua/cua-driver` 依赖；
+- Node runtime 由 `scripts/prepare-node-runtime.mjs` 按目标平台下载并解压到 `apps/desktop/resources/bin/<target>/node`，`HostManager.resolveNodePath` 优先发现 bundled Node，不再要求目标机器已安装 Node.js；
+- `RunService.StartRun` 通过 `computerDriverFactory` 获取 driver；Host 不可用时回退到 `NewUnavailableDriver()`；
+- 后台健康检查与失败重启由 Core 负责，应用关闭时 `HostManager.Close()` 停止子进程；
+- Desktop Main 当前不直接管理 Host 子进程，只通过现有 `/v1/control/computer/*` 控制面转发用户 review/handoff 决定。
+
+这是向 4.1 首选形态迁移的 interim 步骤：Core 直接 spawn Node host 并把 Host 脚本放入产品资源目录，简化了开发验证与资源分发；但生产发布仍需把 Node runtime 与 Host 一起打包签名，并最终由 Desktop Main 管理 TCC/生命周期，把 Core-Host IPC 约束为 Awaken 自有最小合同。
+
 ### 4.2 不采用的形态
 
 - 不要求用户全局安装 `/Applications/CuaDriver.app` 才能使用 Awaken 核心能力；
@@ -94,23 +108,24 @@ CUA 的 permission mode 和低层 policy 按 Host/Driver generation 固定，模
 | `src/runtime` | 为 root run 创建/恢复/关闭 `ComputerBinding`，将语义记录纳入正式 session |
 | `src/server` | 实现状态契约定义的 review/takeover/session 控制 route 和安全契约定义的鉴权；不得承载 raw Driver API |
 | `src/protocol/agui` | 从 SemanticJournal 投影 Computer live/replay 事件 |
-| `apps/desktop/src/main` | Host lifecycle、TCC/readiness、control token 调用和 Renderer 隔离 |
+| `src/computer/cua` | CUA SDK 适配层、HostClient JSON-RPC 和 `HostManager`（当前 interim 由 Core 持有） |
+| `apps/desktop/src/main` | 目标：Host lifecycle、TCC/readiness、control token 调用和 Renderer 隔离；当前还由 `ComputerOverlayManager` 独立订阅 run event、管理跨应用置顶提示与自身可见性恢复，并从专用 overlay IPC 终止 Computer Use 而不取消 run；不得借用 `PetWindowManager` 的窗口、IPC 或状态 |
 | `apps/desktop/src/shared` | Main/Renderer 共享的判别联合与 typed IPC contract |
-| `apps/desktop/src/renderer` | 状态、画面、review、takeover 和只读 replay 的消费，不拥有 policy |
+| `apps/desktop/src/renderer` | 主窗口只消费 review、takeover 和只读 replay，不拥有 policy，也不拥有跨应用 Computer 调用提示 |
 | `AwakenComputerHost` | 验证调用身份/fence/precondition，适配 CUA 并注入输入 |
 
 `executors.Router` 必须改为可注入 Computer executor，不能继续在 `ToolRuntime` 内用不可替换的默认实例掩盖 run binding。
 
-进程级构造和 run 注入顺序固定为：
+进程级构造和 run 注入顺序当前实现为：
 
-1. `cmd/awaken-core/main.go` 构造唯一 `computer.Service`，持有 DriverFactory、policy、media/state store 和资源 lease/fence manager；
-2. 同一个 service 注入 `RunService` 与 server control handlers，handler 或 Tool 不能临时创建 Driver；
-3. `RunService.StartRun` 先建立 run/thread/recorder，再创建只属于当前 root run 的 `ComputerBinding`；
-4. binding 的 CUA readiness、policy ceiling、model capability 和媒体 readiness 进入同一份 pinned tool snapshot；
-5. Agent 设置 run identity 后，用已注入的 `ComputerExecutor` 构造 ToolRuntime/Router；
-6. cancel、terminal 和 Core shutdown 都 revoke binding、quiesce Host、提升 fence 并释放资源 lease。
+1. `cmd/awaken-core/main.go` 构造 `MediaVault`（`computerMediaVault`）和 `HostManager`（`cuaHostManager`），并通过 `buildCUADriverFactory` 把二者绑定为 run-bound Driver factory；
+2. `RunService.SetComputerDriverFactory` 与 `RunService.SetComputerMediaVault` 把 factory 和 vault 注入 runtime；
+3. `RunService.StartRun` 在模型声明 `SupportsComputerUse` 与 `SupportsVision` 时创建 `ComputerBinding` 与 `computer.Runtime`，调用 factory 获取 driver（CUA Host 不可用时回退到 `NewUnavailableDriver`）；
+4. `Runtime` 绑定 session recorder，Computer 事实写入 `SemanticJournal`；
+5. Agent 的 `ToolRuntime` 通过注入的 `ComputerExecutor` 处理 `computer_*` 工具；
+6. run cancel/terminal 和 Core shutdown 关闭 `ComputerRuntime`（revoke binding、quiesce Host、提升 fence、释放 lease、`PurgeSession`），并调用 `HostManager.Close()` 停止共享 Host。
 
-当前 `src/runtime/run_service.go` 的 run 启动顺序和 `ToolRuntime` 内部硬编码的 `executors.NewRouter()` 都需要在实现时调整。binding 与 tool snapshot 必须属于同一 run generation，不能先固定 snapshot 再晚绑定 Computer。
+目标形态（4.1）应把第 1 步中的 Host 管理从 Core 移到 Desktop Main，Core 只通过 Awaken 自有 IPC 调用 Main 托管的 Host。当前 interim 实现允许 Core 直接 spawn Node host，作为向目标形态迁移的中间状态。
 
 ## 6. `ComputerDriver` 与 Host 合同
 
@@ -136,7 +151,8 @@ CloseSession(session, reason)
 - 任一复验失败都必须在发送鼠标/键盘事件前 fail closed；
 - `Quiesce` 返回后不得再有旧 epoch 输入在途；
 - `Resume` 必须要求 fresh observation；
-- Host crash、IPC timeout 或 response 丢失不能被包装成明确失败，必须返回 `unknown_outcome`。
+- Host crash、IPC timeout 或 response 丢失不能被包装成明确失败，必须返回 `unknown_outcome`；
+- CUA opaque session 自然到期时，下一次只读 `Observe` 可以关闭旧 session、重新建立同 scope session 并重试一次；任何可能已经注入输入的 `PerformChecked` 都不得自动重放。
 
 CUA 上游若没有单个原子 primitive，`CUADriverAdapter` 必须在 Host 内把复验与最后一次输入调用放进同一串行 critical section。仅在 Core 检查后再通过网络调用 CUA 存在 TOCTOU，不满足发布要求。
 
@@ -144,8 +160,8 @@ CUA 上游若没有单个原子 primitive，`CUADriverAdapter` 必须在 Host �
 
 ### 7.1 Capture scope
 
-- 默认使用 CUA `WINDOW`，保留 window-local 坐标和可用的 background delivery；
-- `DESKTOP` 是显式升级，属于 foreground-only、屏幕绝对坐标路径，必须经过 policy；
+- 当前 CUA typed desktop-state、pointer 与 keyboard API 要求 desktop session，因此默认使用 `DESKTOP`，采用屏幕点坐标；Host 返回系统屏幕点、原始截图物理像素和 backing scale，adapter 在进入模型媒体链前把截图降采样到屏幕点尺寸，Host 在输入注入时再按同一 scale 换回物理像素；
+- `WINDOW` 保留为显式 scope；只有 Host 能建立并证明窗口隔离时才能使用 window-local 坐标或 background delivery，否则必须明确失败；
 - `AUTO` 只可用于探测/兼容，正式 session 建立后必须记录解析出的不可变 scope；
 - macOS 无 Screen Recording 时可降级为 accessibility/tree-only 观察，但不得伪造截图已获取；缺少 Accessibility 时禁止动作。
 
@@ -182,13 +198,13 @@ Computer readiness 必须在 run 创建时进入 `ExecutionEnvironmentSnapshot` 
 
 任何硬依赖不满足时，三个 Computer 工具都不得暴露。运行中 Host 崩溃只能把当前 binding 标为不可用并进入恢复，不能从全局 registry 偷换 Driver 或临时开启原始 MCP。
 
-当前模型能力只有 vision/native-PDF 等媒体位，尚无统一 `supports_tools`。实现必须把该能力贯穿 Go model profile、用户配置、Desktop capability sync、run config 和 profile cache key；不能只根据 vision=true 推断模型可调用 Computer 工具。
+当前模型能力只有 vision/native-PDF 等媒体位，尚无统一 `supports_tools`。`SupportsComputerUse` 已进入 Go model profile，但 Desktop capability sync 与编辑面仍未闭环；interim Runtime 使用全局开关、vision 与真实 Driver health 共同门控，不能据此宣称任意 vision 模型已经过 Computer conformance。目标实现仍须把显式能力贯穿用户配置、Desktop capability sync、run config 和 profile cache key。
 
 ## 9. 媒体与 Provider
 
 截图必须复用 `ExecutionOutcome.ModelContent -> ToolResultStore -> context.Message.ModelContent -> provider adapter`。不得引入 Computer 私有 Base64 message 通道。
 
-目标实现扩展现有媒体存储的 `computer` policy namespace，提供加密、按 session/thread 访问、保留期、删除和访问审计；Journal 只记录 `storage_key`、MIME、尺寸、hash、redaction 和 policy metadata。模型不支持图像或媒体策略未 ready 时，Computer 工具不暴露，不能只发送未经验证的 OCR 文本假装等价。
+目标实现扩展现有媒体存储的 `computer` policy namespace，提供按 session/thread 访问、摘要校验、保留期、删除和访问审计；Journal 只记录 `storage_key`、MIME、尺寸、hash、redaction 和 policy metadata。当前模型媒体最终由通用 `ToolResultStore` 持久化，故不对 Computer 前置副本单独声称 at-rest 加密；未来若采用加密，必须统一覆盖整条持久化/水合链并使用 OS keychain 管理密钥。模型不支持图像或媒体策略未 ready 时，Computer 工具不暴露。
 
 ## 10. 依赖、更新与发布
 

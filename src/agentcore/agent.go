@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"awaken/src/computer"
 	"awaken/src/context"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
@@ -98,6 +99,18 @@ func (a *Agent) Reconfigure(config AgentConfig) {
 	a.reqBuilder = NewRequestBuilder(config)
 }
 
+// SetComputerRuntime binds a run-scoped Computer runtime to the agent. The next
+// environment probe will mark ComputerEnabled=true and the runner will wire the
+// ComputerExecutor into the ToolRuntime.
+func (a *Agent) SetComputerRuntime(runtime *computer.Runtime) {
+	if a == nil {
+		return
+	}
+	cfg := a.config
+	cfg.ComputerRuntime = runtime
+	a.Reconfigure(cfg)
+}
+
 // RefreshRunAvailability captures the user-machine environment and the exact
 // tool catalog once for the next run. The two snapshots remain fixed until the
 // next explicit refresh, even if MCP/Connector registrations change mid-run.
@@ -121,12 +134,25 @@ func (a *Agent) RefreshRunAvailabilityWithReason(ctx stdcontext.Context, reason 
 		TemporaryWorkRoot: permissionContext.TemporaryWorkRoot,
 		RefreshReason:     reason,
 		ProbeVersions:     true,
+		ComputerEnabled:   cfg.ComputerRuntime != nil && cfg.ComputerRuntime.Ready(ctx),
 	})
 	environment := hostEnvironment.Snapshot
+	if environment.ComputerEnabled {
+		cfg.ToolExposure.ExtraHidden = appendUniqueToolName(cfg.ToolExposure.ExtraHidden, "Bash")
+	}
 	snapshot := tool.NewRunToolAvailabilitySnapshot(environment)
 	cfg.ExecutionEnvironmentSnapshot = &environment
 	cfg.ToolAvailabilitySnapshot = &snapshot
 	a.Reconfigure(cfg)
+}
+
+func appendUniqueToolName(names []string, name string) []string {
+	for _, existing := range names {
+		if strings.EqualFold(strings.TrimSpace(existing), name) {
+			return names
+		}
+	}
+	return append(names, name)
 }
 
 func localSkillRootObservations(workspace WorkspaceConfig) []tool.SkillRootObservation {

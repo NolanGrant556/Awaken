@@ -28,6 +28,7 @@ import { SearchSettingsPanel } from "./SearchSettingsPanel";
 import { MemorySettingsPanel } from "./MemorySettingsPanel";
 import { ACPSettingsPanel } from "./ACPSettingsPanel";
 import { AgentPlanMediaToolsPanel } from "./AgentPlanMediaToolsPanel";
+import { ComputerSettingsPanel } from "./ComputerSettingsPanel";
 
 export type DraftState = {
   profileId?: string;
@@ -48,7 +49,13 @@ export type DraftState = {
 type ModelSettingsSection = ModelAccessType;
 type ModelSettingsView = "connections" | "llm";
 type SettingsDialogSection =
-  "models" | "search" | "memory" | "appearance" | "pets" | "acp";
+  | "models"
+  | "search"
+  | "memory"
+  | "appearance"
+  | "pets"
+  | "computer"
+  | "acp";
 type ModelConnectionTestFeedback = {
   tone: "success" | "error";
   message: string;
@@ -87,6 +94,7 @@ const SETTINGS_SECTION_TITLES: Record<SettingsDialogSection, string> = {
   memory: "记忆",
   appearance: "外观",
   pets: "宠物",
+  computer: "计算机操作",
   acp: "外部 Agent / ACP",
 };
 
@@ -1141,6 +1149,8 @@ export function DesktopSettingsDialog({
         />
       ) : activeSettingsSection === "pets" ? (
         <PetsSettingsPanel runtimeClient={runtimeClient} />
+      ) : activeSettingsSection === "computer" ? (
+        <ComputerSettingsPanel runtimeClient={runtimeClient} />
       ) : activeSettingsSection === "acp" ? (
         <ACPSettingsPanel runtimeClient={runtimeClient} />
       ) : (

@@ -4,6 +4,7 @@ export { AwakenAppShellDemo } from "../src/components/AwakenAppShell/AwakenAppSh
 export { AwakenAssistantMessageDemo } from "../src/components/AwakenAssistantMessage/AwakenAssistantMessage.demo";
 export { AwakenAvatarDemo } from "../src/components/AwakenAvatar/AwakenAvatar.demo";
 export { AwakenCliConnectorDetailDialogDemo } from "../src/components/AwakenCliConnectorDetailDialog/AwakenCliConnectorDetailDialog.demo";
+export { AwakenComputerSettingsDemo } from "../src/components/AwakenComputerSettings/AwakenComputerSettings.demo";
 export { AwakenComposerBarDemo } from "../src/components/AwakenComposerBar/AwakenComposerBar.demo";
 export { AwakenComposerDockDemo } from "../src/components/AwakenComposerDock/AwakenComposerDock.demo";
 export { AwakenConnectorBrandIconDemo } from "../src/components/AwakenConnectorBrandIcon/AwakenConnectorBrandIcon.demo";

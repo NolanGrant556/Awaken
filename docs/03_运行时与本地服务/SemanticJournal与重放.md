@@ -12,6 +12,12 @@ runtime_notice, recovery_decision, context_compacted, turn_boundary,
 run_terminal, persistence_warning, memory_recalled, memory_mutated,
 context_snapshot, model_request, model_usage, context_epoch,
 provider_opaque_state
+computer_session_opened, computer_state_changed,
+computer_observation_captured, computer_action_prepared,
+computer_review_requested, computer_review_resolved,
+computer_action_started, computer_action_completed,
+computer_control_transfer_started, computer_control_transfer_completed,
+computer_session_closed, computer_media_accessed
 ```
 
 `permission_decision` 是工具自动策略或 transform 的记录，不代表通用 Approval 能力。
@@ -25,6 +31,7 @@ provider_opaque_state
 - 有副作用工具必须在 transport 前耐久 `tool_call` 和 decision；
 - Skill 成功激活在正文进入执行上下文或 child 启动前写 `skill_activated`/`resource_receipt`；失败不写伪 activation；
 - observed changes、artifacts 与 canonical `tool_result` 成批写入；
+- Computer session/observation/action/review/control/media-access 事实由 run-bound recorder 写入同一 Journal；review requested/resolved 与 action started 在 UI 展示或 Driver perform 前 append 并 flush，写入失败必须阻止对应展示或输入；
 - 上下文压缩结果在替换内存消息前写并 flush `context_compacted`；
 - 每次 thread-bound 模型调用在 transport 前写并 flush 脱敏 `model_request`，结束后以同一 request ID 写 `model_usage`；对话状态变化后写当前下一请求的 `context_snapshot`；
 - 统一 LLM observer 发出的可展示 reasoning 在该段结束时 append `reasoning_summary`，再发布其 canonical live record；该记录只含展示正文、reasoning role 与稳定 message ID，并随 run terminal 的 flush 进入稳定存储；

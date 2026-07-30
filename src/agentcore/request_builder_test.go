@@ -14,6 +14,7 @@ import (
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
 	"awaken/src/tool"
+	_ "awaken/src/tools/computer"
 	_ "awaken/src/tools/edit"
 	_ "awaken/src/tools/write"
 )
@@ -306,6 +307,40 @@ func TestRequestBuilderUsesRegisteredTools(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected registered tool %s in request tools", toolName)
+}
+
+func TestRequestBuilderExposesComputerToolsOnlyForReadyRunSnapshot(t *testing.T) {
+	names := func(request LLMRequest) map[string]bool {
+		got := make(map[string]bool, len(request.Tools))
+		for _, schema := range request.Tools {
+			got[schema.Function.Name] = true
+		}
+		return got
+	}
+	assertComputerVisibility := func(t *testing.T, got map[string]bool, want bool) {
+		t.Helper()
+		for _, name := range []string{"computer_observe", "computer_act", "computer_verify"} {
+			if got[name] != want {
+				t.Fatalf("computer tool %q visible=%v, want %v", name, got[name], want)
+			}
+		}
+	}
+
+	disabledEnvironment := tool.ExecutionEnvironmentSnapshot{SnapshotID: "computer-disabled"}
+	disabledSnapshot := tool.NewRunToolAvailabilitySnapshot(disabledEnvironment)
+	disabled := NewRequestBuilder(AgentConfig{
+		ExecutionEnvironmentSnapshot: &disabledEnvironment,
+		ToolAvailabilitySnapshot:     &disabledSnapshot,
+	}).Build(convcontext.New(), nil)
+	assertComputerVisibility(t, names(disabled), false)
+
+	enabledEnvironment := tool.ExecutionEnvironmentSnapshot{SnapshotID: "computer-enabled", ComputerEnabled: true}
+	enabledSnapshot := tool.NewRunToolAvailabilitySnapshot(enabledEnvironment)
+	enabled := NewRequestBuilder(AgentConfig{
+		ExecutionEnvironmentSnapshot: &enabledEnvironment,
+		ToolAvailabilitySnapshot:     &enabledSnapshot,
+	}).Build(convcontext.New(), nil)
+	assertComputerVisibility(t, names(enabled), true)
 }
 
 func TestRequestBuilderCompilesDefinitionV2WithoutSkillPoolNarrowing(t *testing.T) {

@@ -72,8 +72,14 @@ const (
 	// EventAwakenScheduledNotice is the host-owned fixed-reminder fact of a
 	// scheduled task (contract docs/12_定时任务/定时任务设计契约.md §9.4/§10).
 	// It is a replayable in-thread fact, never a user or assistant message.
-	EventAwakenScheduledNotice EventType = "AWAKEN_SCHEDULED_NOTICE"
-	EventAwakenUnknown         EventType = "AWAKEN_UNKNOWN_EVENT"
+	EventAwakenScheduledNotice         EventType = "AWAKEN_SCHEDULED_NOTICE"
+	EventAwakenComputerReviewRequested EventType = "AWAKEN_COMPUTER_REVIEW_REQUESTED"
+	EventAwakenComputerReviewResolved  EventType = "AWAKEN_COMPUTER_REVIEW_RESOLVED"
+	EventAwakenComputerSessionChanged  EventType = "AWAKEN_COMPUTER_SESSION_CHANGED"
+	EventAwakenComputerVerification    EventType = "AWAKEN_COMPUTER_VERIFICATION_COMPLETED"
+	EventAwakenComputerHandoffStarted  EventType = "AWAKEN_COMPUTER_HANDOFF_STARTED"
+	EventAwakenComputerHandoffEnded    EventType = "AWAKEN_COMPUTER_HANDOFF_ENDED"
+	EventAwakenUnknown                 EventType = "AWAKEN_UNKNOWN_EVENT"
 )
 
 type RunOutcome struct {
@@ -388,4 +394,19 @@ type Event struct {
 	Outcome       *RunOutcome `json:"outcome,omitempty"`
 	RawType       string      `json:"rawType,omitempty"`
 	RawEvent      any         `json:"rawEvent,omitempty"`
+	// Computer Use review/handoff fields, surfaced on AWAKEN_COMPUTER_* events.
+	ComputerReviewID           string   `json:"computerReviewId,omitempty"`
+	ComputerActionID           string   `json:"computerActionId,omitempty"`
+	ComputerActionDigest       string   `json:"computerActionDigest,omitempty"`
+	ComputerTargetSummary      string   `json:"computerTargetSummary,omitempty"`
+	ComputerEffectSummary      string   `json:"computerEffectSummary,omitempty"`
+	ComputerRisk               string   `json:"computerRisk,omitempty"`
+	ComputerSessionID          string   `json:"computerSessionId,omitempty"`
+	ComputerSessionState       string   `json:"computerSessionState,omitempty"`
+	ComputerVerificationStatus string   `json:"computerVerificationStatus,omitempty"`
+	ComputerObservationID      string   `json:"computerObservationId,omitempty"`
+	ComputerDecision           string   `json:"computerDecision,omitempty"`
+	ComputerActor              string   `json:"computerActor,omitempty"`
+	ComputerHandoff            bool     `json:"computerHandoff,omitempty"`
+	ComputerEvidenceRefs       []string `json:"computerEvidenceRefs,omitempty"`
 }

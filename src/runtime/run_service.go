@@ -19,6 +19,7 @@ import (
 	"unicode"
 
 	"awaken/src/agentcore"
+	"awaken/src/computer"
 	convcontext "awaken/src/context"
 	"awaken/src/desktopdata"
 	"awaken/src/skillruntime"
@@ -145,27 +146,28 @@ type ComposerTokenPayload struct {
 }
 
 type ModelProfileConfig struct {
-	ProfileID          string  `json:"profile_id,omitempty"`
-	ProviderID         string  `json:"provider_id,omitempty"`
-	DisplayName        string  `json:"display_name,omitempty"`
-	ModelID            string  `json:"model_id,omitempty"`
-	CapabilityModelID  string  `json:"capability_model_id,omitempty"`
-	EndpointSelector   string  `json:"endpoint_selector,omitempty"`
-	ModelSelectorKind  string  `json:"model_selector_kind,omitempty"`
-	BaseURL            string  `json:"base_url,omitempty"`
-	Protocol           string  `json:"protocol,omitempty"`
-	AuthScheme         string  `json:"auth_scheme,omitempty"`
-	APIKey             string  `json:"api_key,omitempty"`
-	Temperature        float64 `json:"temperature,omitempty"`
-	MaxTokens          int     `json:"max_tokens,omitempty"`
-	ContextWindow      int     `json:"context_window,omitempty"`
-	PromptCacheKey     string  `json:"prompt_cache_key,omitempty"`
-	CredentialRevision uint64  `json:"credential_revision,omitempty"`
-	SupportsVision     bool    `json:"supports_vision,omitempty"`
-	SupportsNativePDF  bool    `json:"supports_native_pdf,omitempty"`
-	SupportsVideo      bool    `json:"supports_video,omitempty"`
-	SupportsTools      string  `json:"supports_tools,omitempty"`
-	ReasoningEffort    string  `json:"reasoning_effort,omitempty"`
+	ProfileID           string  `json:"profile_id,omitempty"`
+	ProviderID          string  `json:"provider_id,omitempty"`
+	DisplayName         string  `json:"display_name,omitempty"`
+	ModelID             string  `json:"model_id,omitempty"`
+	CapabilityModelID   string  `json:"capability_model_id,omitempty"`
+	EndpointSelector    string  `json:"endpoint_selector,omitempty"`
+	ModelSelectorKind   string  `json:"model_selector_kind,omitempty"`
+	BaseURL             string  `json:"base_url,omitempty"`
+	Protocol            string  `json:"protocol,omitempty"`
+	AuthScheme          string  `json:"auth_scheme,omitempty"`
+	APIKey              string  `json:"api_key,omitempty"`
+	Temperature         float64 `json:"temperature,omitempty"`
+	MaxTokens           int     `json:"max_tokens,omitempty"`
+	ContextWindow       int     `json:"context_window,omitempty"`
+	PromptCacheKey      string  `json:"prompt_cache_key,omitempty"`
+	CredentialRevision  uint64  `json:"credential_revision,omitempty"`
+	SupportsVision      bool    `json:"supports_vision,omitempty"`
+	SupportsNativePDF   bool    `json:"supports_native_pdf,omitempty"`
+	SupportsVideo       bool    `json:"supports_video,omitempty"`
+	SupportsTools       string  `json:"supports_tools,omitempty"`
+	SupportsComputerUse bool    `json:"supports_computer_use,omitempty"`
+	ReasoningEffort     string  `json:"reasoning_effort,omitempty"`
 }
 
 type Executor interface {
@@ -200,6 +202,23 @@ type RunService struct {
 	journals          *journalManager
 	allowNoopRecorder bool
 	skillActivator    *skillruntime.Activator
+	// computerDriverFactory creates a real Computer driver when local CUA is
+	// enabled. If nil or it returns an error, RunService falls back to the
+	// unavailable driver so run startup is not blocked.
+	computerDriverFactory func(computer.Binding) (computer.Driver, error)
+	// computerMediaVault isolates and bounds the lifetime of Computer media.
+	// The historical field name is retained while the store API is migrated.
+	computerMediaVault computer.MediaVault
+	// computerHostProbe probes the global Computer Host sidecar for settings
+	// and readiness checks that are not tied to a run.
+	computerHostProbe computer.HostProbe
+	// computerSettings holds user-configurable Computer Use preferences. It
+	// gates whether runs can create a ComputerBinding and what policy defaults
+	// apply.
+	computerSettings computer.Settings
+	// computerLeaseManager is shared by every run so a physical desktop can
+	// have only one active Computer controller at a time.
+	computerLeaseManager *computer.LeaseManager
 }
 
 // drainRunWorkers blocks until every launched run goroutine has fully
@@ -222,6 +241,74 @@ func (s *RunService) SetSkillActivator(activator *skillruntime.Activator) {
 	s.skillActivator = activator
 	s.mu.Unlock()
 	s.restoreSkillInvocationHistory(activator)
+}
+
+// SetComputerDriverFactory registers a factory that creates the run-bound
+// Computer driver. A nil factory or a factory error causes RunService to keep
+// using the unavailable driver.
+func (s *RunService) SetComputerDriverFactory(factory func(computer.Binding) (computer.Driver, error)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.computerDriverFactory = factory
+}
+
+// SetComputerMediaVault registers the session media store used by run-bound
+// Computer runtimes.
+func (s *RunService) SetComputerMediaVault(vault computer.MediaVault) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.computerMediaVault = vault
+}
+
+// SetComputerHostProbe registers a global probe for Computer Host availability.
+func (s *RunService) SetComputerHostProbe(probe computer.HostProbe) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.computerHostProbe = probe
+}
+
+// SetComputerSettings registers user-configurable Computer Use preferences.
+func (s *RunService) SetComputerSettings(settings computer.Settings) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.computerSettings = settings
+}
+
+// ComputerSettings returns the current Computer Use user settings.
+func (s *RunService) ComputerSettings() computer.Settings {
+	if s == nil {
+		return computer.DefaultSettings()
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.computerSettings
+}
+
+// ComputerHostStatus probes the global Computer Host sidecar. It returns an
+// unavailable status when no probe is registered.
+func (s *RunService) ComputerHostStatus(ctx context.Context) (computer.HostStatus, error) {
+	if s == nil {
+		return computer.HostStatus{Available: false, Message: "run service not initialized"}, nil
+	}
+	s.mu.RLock()
+	probe := s.computerHostProbe
+	s.mu.RUnlock()
+	if probe == nil {
+		return computer.HostStatus{Available: false, Message: "computer host probe not configured"}, nil
+	}
+	return probe.Probe(ctx)
 }
 
 func (s *RunService) restoreSkillInvocationHistory(activator *skillruntime.Activator) {
@@ -347,13 +434,14 @@ func NewRunService(
 		return transcriptPath(threadID)
 	}
 	service := &RunService{
-		sessions:      make(map[string]*Session),
-		threads:       make(map[string]*Thread),
-		projectFences: make(map[string]map[string]struct{}),
-		newAgent:      newAgent,
-		newExecutor:   newExecutor,
-		threadStore:   store,
-		journals:      newJournalManager(pathFn),
+		sessions:             make(map[string]*Session),
+		threads:              make(map[string]*Thread),
+		projectFences:        make(map[string]map[string]struct{}),
+		newAgent:             newAgent,
+		newExecutor:          newExecutor,
+		threadStore:          store,
+		journals:             newJournalManager(pathFn),
+		computerLeaseManager: computer.NewLeaseManager(),
 	}
 	// Project lifecycle is available whenever the thread store also satisfies
 	// the domain repository contract; no concrete storage type checks.
@@ -702,6 +790,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	shouldGenerateThreadTitle := false
 	var previousThread *Thread
 	rollbackStart := func(cause error, metadataMayBeTouched bool) (Run, error) {
+		if cr := session.ComputerRuntime(); cr != nil {
+			_ = cr.Close(context.Background(), "start_rollback")
+		}
 		rollbackErr := s.rollbackFailedStartRun(
 			threadID,
 			runID,
@@ -862,8 +953,62 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	s.sessions[runID] = session
 	s.mu.Unlock()
 
+	s.mu.RLock()
+	computerSettings := s.computerSettings
+	computerDriverFactory := s.computerDriverFactory
+	computerMediaVault := s.computerMediaVault
+	computerLeaseManager := s.computerLeaseManager
+	s.mu.RUnlock()
+	if agent != nil && req.ModelProfile != nil && req.ModelProfile.SupportsVision && computerSettings.Enabled {
+		policy, policyErr := computer.NewPolicySnapshot(computer.PolicyFromSettings(computerSettings))
+		if policyErr != nil {
+			return rollbackStart(fmt.Errorf("create computer policy snapshot: %w", policyErr), false)
+		}
+		bind, bindErr := computer.NewBinding(runID, threadID, runID, "host://local/desktop", policy)
+		if bindErr != nil {
+			return rollbackStart(fmt.Errorf("create computer binding: %w", bindErr), false)
+		}
+		var driver computer.Driver = computer.NewUnavailableDriver()
+		if computerDriverFactory != nil {
+			if cuaDriver, driverErr := computerDriverFactory(bind); driverErr != nil {
+				log.Printf("[cua] failed to create CUA driver, falling back to unavailable: %v", driverErr)
+			} else {
+				driver = cuaDriver
+			}
+		}
+		runtime := computer.NewRuntimeWithLeaseManager(bind, driver, computerLeaseManager)
+		runtime.SetMediaVault(computerMediaVault)
+		session.SetComputerRuntime(runtime)
+		agent.SetComputerRuntime(runtime)
+	}
+
 	if err := s.bindAgentRecorder(agent, session, threadID, runID, req.Client.SessionID, threadSnapshot.Label); err != nil {
 		return rollbackStart(err, false)
+	}
+	if cr := session.ComputerRuntime(); cr != nil {
+		cr.SetRecordFact(func(ctx context.Context, kind string, payload map[string]any) (string, error) {
+			recorder := session.semanticRecorderSnapshot()
+			if recorder == nil {
+				return "", agentcore.ErrPersistenceUnavailable
+			}
+			record := agentcore.NewSemanticRecord(agentcore.SemanticKind(kind), threadID, runID, "", "", req.Client.SessionID, payload)
+			if durable, ok := recorder.(interface {
+				AppendFlushed(context.Context, agentcore.SemanticRecord) (agentcore.SemanticRecord, error)
+			}); ok {
+				assigned, err := durable.AppendFlushed(ctx, record)
+				if err != nil {
+					return "", err
+				}
+				return assigned.RecordID, nil
+			}
+			if err := recorder.Append(ctx, record); err != nil {
+				return "", err
+			}
+			if err := recorder.Flush(ctx); err != nil {
+				return "", err
+			}
+			return record.RecordID, nil
+		})
 	}
 	s.bindSubagentController(ctx, agent, session)
 	createThreadErr := s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel)
@@ -1843,6 +1988,9 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 		}
 		restoreAgentDisplayInput(agent, input, displayInput)
 		s.flushAgentTranscript(session, agent)
+		if cr := session.ComputerRuntime(); cr != nil {
+			_ = cr.Close(context.Background(), "run_ended")
+		}
 		s.clearActiveRun(snapshot.ThreadID, snapshot.RunID)
 		s.onRunTerminal(snapshot.ThreadID)
 	}()
@@ -2422,6 +2570,18 @@ func (s *RunService) session(runID string) (*Session, error) {
 		return nil, ErrRunNotFound
 	}
 	return session, nil
+}
+
+// ComputerRuntime returns the run-bound Computer runtime for a run, if any.
+func (s *RunService) ComputerRuntime(runID string) (*computer.Runtime, error) {
+	session, err := s.session(runID)
+	if err != nil {
+		return nil, err
+	}
+	if cr := session.ComputerRuntime(); cr != nil {
+		return cr, nil
+	}
+	return nil, fmt.Errorf("run %s has no computer runtime", runID)
 }
 
 var runtimeIDCounter uint64

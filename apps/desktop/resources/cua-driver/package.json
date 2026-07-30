@@ -1,0 +1,11 @@
+{
+  "name": "awaken-cua-host",
+  "version": "1.0.0",
+  "description": "Awaken CUA Host sidecar - references the CUA driver SDK and exposes a minimal JSON-RPC surface for the Awaken Core computer.Driver adapter.",
+  "type": "module",
+  "main": "host.mjs",
+  "scripts": {},
+  "dependencies": {
+    "@trycua/cua-driver": "0.12.5"
+  }
+}

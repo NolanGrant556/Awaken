@@ -46,11 +46,11 @@ type ToolRuntime struct {
 	subagentOrigin *profile.SubagentOrigin
 	// router maps an ExecutionIntent + ExecutionProfile to the appropriate
 	// ToolExecutor (FileOperationExecutor / BashExecutor / McpExecutor /
-	// GuardianExecutor). Task 11 of "零审批自动执行策略": the Router sits
-	// between the auto policy decision and the raw tool execution, adding
-	// executor-specific enforcement (boundary checks, sandbox consultation,
-	// risk annotation checks, read-only enforcement). When nil, Execute
-	// falls back to the legacy executeTool path.
+	// GuardianExecutor / ComputerExecutor). Task 11 of "零审批自动执行策略":
+	// the Router sits between the auto policy decision and the raw tool
+	// execution, adding executor-specific enforcement (boundary checks,
+	// sandbox consultation, risk annotation checks, read-only enforcement).
+	// When nil, Execute falls back to the legacy executeTool path.
 	router            *executors.Router
 	threadID          string
 	modelCapabilities tool.ModelCapabilities
@@ -80,6 +80,10 @@ type ToolRuntimeConfig struct {
 	ModelCapabilities tool.ModelCapabilities
 	ToolSessionState  *tool.ToolSessionState
 	ModelContentStore tool.ModelContentStore
+	// ComputerExecutor, when set, is wired into the Router so that
+	// computer_lane tools are dispatched to the run-bound Computer runtime.
+	// If nil, computer_lane calls fail closed with a needs-runtime outcome.
+	ComputerExecutor *executors.ComputerExecutor
 }
 
 type ToolExecutionResult struct {
@@ -171,6 +175,10 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 		clone := config.ExecutionEnvironmentSnapshot.Clone()
 		pinnedEnvironment = &clone
 	}
+	router := executors.NewRouter()
+	if config.ComputerExecutor != nil {
+		router = router.WithComputerExecutor(config.ComputerExecutor)
+	}
 	return &ToolRuntime{
 		sink:              normalizeEventSink(sink),
 		permissionContext: config.PermissionContext.Normalize(),
@@ -183,7 +191,7 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 		profile:           execProfile,
 		subagentBoundary:  config.SubagentBoundary,
 		subagentOrigin:    config.SubagentOrigin,
-		router:            executors.NewRouter(),
+		router:            router,
 		modelCapabilities: config.ModelCapabilities,
 		toolSessionState:  config.ToolSessionState,
 		modelContentStore: config.ModelContentStore,

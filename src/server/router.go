@@ -6,6 +6,7 @@ import (
 
 	"awaken/src/acp"
 	"awaken/src/agentcore"
+	"awaken/src/computer"
 	"awaken/src/connectors"
 	"awaken/src/mcpclient"
 	"awaken/src/memory"
@@ -239,6 +240,14 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("GET /v1/memory/settings", settingsH.handleGet)
 		mux.HandleFunc("PATCH /v1/memory/settings", settingsH.handleUpdate)
 	}
+	if computerSettingsStore, err := computer.NewSettingsStore(); err == nil {
+		computerSettingsH := computerSettingsHandlers{store: computerSettingsStore}
+		if cfg.runService != nil {
+			computerSettingsH.onUpdated = cfg.runService.SetComputerSettings
+		}
+		mux.HandleFunc("GET /v1/computer/settings", computerSettingsH.handleGet)
+		mux.HandleFunc("PATCH /v1/computer/settings", computerSettingsH.handleUpdate)
+	}
 	dreamH := memoryDreamHandlers{memoryHandlers: memoryH, runner: memory.NewDreamRunner()}
 	mux.HandleFunc("POST /v1/memory/dream", dreamH.handleStart)
 	mux.HandleFunc("GET /v1/memory/dream", dreamH.handleList)
@@ -334,6 +343,25 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 			}
 		}
 		auth := ControlTokenMiddleware(cfg.control.Identity.ControlToken)
+		if cfg.runService != nil {
+			computerCtrl := computerControlHandlers{runService: cfg.runService}
+			controlMux.HandleFunc("GET /v1/control/computer/sessions/{run_id}", computerCtrl.handleGetComputerSession)
+			controlMux.HandleFunc("POST /v1/control/computer/sessions/{run_id}/pause", func(w http.ResponseWriter, r *http.Request) {
+				computerCtrl.handleComputerSessionControl(w, r, "pause")
+			})
+			controlMux.HandleFunc("POST /v1/control/computer/sessions/{run_id}/takeover", func(w http.ResponseWriter, r *http.Request) {
+				computerCtrl.handleComputerSessionControl(w, r, "takeover")
+			})
+			controlMux.HandleFunc("POST /v1/control/computer/sessions/{run_id}/return", func(w http.ResponseWriter, r *http.Request) {
+				computerCtrl.handleComputerSessionControl(w, r, "return")
+			})
+			controlMux.HandleFunc("POST /v1/control/computer/sessions/{run_id}/terminate", func(w http.ResponseWriter, r *http.Request) {
+				computerCtrl.handleComputerSessionControl(w, r, "terminate")
+			})
+			controlMux.HandleFunc("POST /v1/control/computer/reviews/{review_id}/resolve", computerCtrl.handleResolveComputerReview)
+			controlMux.HandleFunc("POST /v1/control/computer/runs/{run_id}/reviews/{review_id}/resolve", computerCtrl.handleResolveComputerReview)
+			controlMux.HandleFunc("GET /v1/control/computer/status", computerCtrl.handleGetComputerHostStatus)
+		}
 		mux.Handle("/v1/control/", auth(controlMux))
 	}
 	// POST /v1/skills/{id}/execute reserved for follow-up

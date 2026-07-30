@@ -1,5 +1,5 @@
 import { createElement, type ReactNode } from "react";
-import { Wrench } from "lucide-react";
+import { MonitorCog, Wrench } from "lucide-react";
 import type {
   ComposerToken,
   RuntimeSkill,
@@ -29,6 +29,7 @@ export type SlashAction = {
   };
   payload: unknown;
   composerToken?: ComposerToken;
+  composerText?: string;
 };
 
 export type SlashProviderContext = {
@@ -83,6 +84,14 @@ export function clearSlashTriggerFromComposerValue(value: string): string {
     return value;
   }
   return `${value.slice(0, trigger.start)}${value.slice(trigger.end)}`;
+}
+
+export function replaceSlashTriggerWithText(value: string, text: string): string {
+  const trigger = slashTriggerFromComposerValue(value);
+  if (!trigger) {
+    return value;
+  }
+  return `${value.slice(0, trigger.start)}${text}${value.slice(trigger.end)}`;
 }
 
 export function composerTokenIdForKeyboardDelete({
@@ -180,6 +189,34 @@ export function skillSlashProvider(
     async getActions({ workspaceRootForRun }) {
       const skills = await listSkills(workspaceRootForRun);
       return skillSlashActionsFromSkills(skills);
+    },
+  };
+}
+
+export const COMPUTER_USE_SLASH_PROMPT =
+  "请优先使用 Computer Use 观察并操作本机图形界面完成以下任务：";
+
+export function computerUseSlashProvider(): SlashProvider {
+  return {
+    id: "computer-use",
+    label: "Computer Use",
+    getActions() {
+      return [
+        {
+          id: "prompt:computer-use",
+          type: "prompt",
+          label: "Computer Use",
+          description: "引导模型观察并操作本机图形界面",
+          keywords: ["computer", "computer use", "计算机", "电脑", "GUI", "桌面"],
+          icon: createElement(MonitorCog, { size: 13, strokeWidth: 1.85 }),
+          preview: {
+            description:
+              "插入一段明确指令，让具备视觉能力且运行环境就绪的模型优先调用 computer_observe、computer_act 和 computer_verify。",
+          },
+          payload: { prompt: COMPUTER_USE_SLASH_PROMPT },
+          composerText: `${COMPUTER_USE_SLASH_PROMPT} `,
+        },
+      ];
     },
   };
 }

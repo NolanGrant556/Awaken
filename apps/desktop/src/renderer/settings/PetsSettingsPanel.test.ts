@@ -233,6 +233,36 @@ function createMockRuntimeClient(): RuntimeClient {
     answerUserQuestion: vi.fn(async () => undefined),
     resolveExternalInteraction: vi.fn(async () => undefined),
     resolveACPPermission: vi.fn(async () => undefined),
+    resolveComputerReview: vi.fn(async () => undefined),
+    computerSessionControl: vi.fn(async () => undefined),
+    getComputerHostStatus: vi.fn(async () => ({
+      available: false,
+      healthy: false,
+      tcc_screen_recording: false,
+      tcc_accessibility: false,
+      message: "not configured",
+    })),
+    getComputerSettings: vi.fn(async () => ({
+      revision: 0,
+      value: {
+        enabled: false,
+        allow_background_window_actions: false,
+      },
+    })),
+    saveComputerSettings: vi.fn(async () => ({
+      revision: 1,
+      value: {
+        enabled: false,
+        allow_background_window_actions: false,
+      },
+    })),
+    prepareComputerRuntime: vi.fn(async () => ({
+      node_ready: false,
+      cua_host_ready: false,
+      message: "not configured",
+    })),
+    getComputerPermissionStatus: vi.fn(async () => "unknown" as const),
+    requestComputerPermission: vi.fn(async () => "unknown" as const),
     getDesktopPreferences: vi.fn(async () => ({ theme: "light" as const })),
     saveDesktopPreferences: vi.fn(async () => ({ theme: "light" as const })),
     subscribeRun: vi.fn(async () => () => {}),

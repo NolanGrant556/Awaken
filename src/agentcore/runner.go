@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"awaken/src/agentcore/executors"
 	"awaken/src/context"
 	"awaken/src/internal/outputlimit"
 	"awaken/src/llm"
@@ -373,7 +374,7 @@ func (r *Runner) injectSyntheticToolResultsForCancel() {
 }
 
 func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
-	return ToolRuntimeConfig{
+	cfg := ToolRuntimeConfig{
 		PermissionContext:            permissionContextFromTaskScope(config.Workspace),
 		AutoToolPolicy:               config.AutoToolPolicy,
 		Profile:                      config.ExecutionProfile,
@@ -385,6 +386,10 @@ func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 		ToolSessionState:             config.ToolSessionState,
 		ModelContentStore:            config.ModelContentStore,
 	}
+	if config.ComputerRuntime != nil {
+		cfg.ComputerExecutor = executors.NewComputerExecutor(config.ComputerRuntime)
+	}
+	return cfg
 }
 
 func (r *Runner) buildLLMRequest() (LLMRequest, error) {

@@ -1,0 +1,246 @@
+import { execFile } from "node:child_process";
+import { accessSync, constants, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { app, shell, systemPreferences } from "electron";
+
+export type ComputerRuntimeSetupResult = {
+  nodeReady: boolean;
+  cuaHostReady: boolean;
+  message?: string;
+};
+
+export type ComputerPermission = "screen_recording" | "accessibility";
+export type ComputerPermissionStatus =
+  | "not-determined"
+  | "granted"
+  | "denied"
+  | "restricted"
+  | "unknown";
+
+const target = `${process.platform}-${process.arch}`;
+
+function findRepoRoot(): string | null {
+  const appPath = app.getAppPath();
+  // Development: appPath is apps/desktop
+  const devRoot = dirname(dirname(appPath));
+  if (existsSync(join(devRoot, "scripts", "prepare-node-runtime.mjs"))) {
+    return devRoot;
+  }
+  // Packaged app does not ship scripts; runtime should already be bundled.
+  return null;
+}
+
+function nodeBinaryPath(root: string): string {
+  const relativeBinaryDir = target.startsWith("win32-") ? [] : ["bin"];
+  return join(
+    root,
+    "apps",
+    "desktop",
+    "resources",
+    "bin",
+    target,
+    "node",
+    ...relativeBinaryDir,
+    target.startsWith("win32-") ? "node.exe" : "node",
+  );
+}
+
+function cuaHostScriptPath(root: string): string {
+  return join(root, "apps", "desktop", "resources", "cua-driver", "host.mjs");
+}
+
+function cuaHostNodeModulesPath(root: string): string {
+  return join(
+    root,
+    "apps",
+    "desktop",
+    "resources",
+    "cua-driver",
+    "node_modules",
+    ".package-lock.json",
+  );
+}
+
+function canExecute(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runScript(
+  scriptPath: string,
+  args: string[] = [],
+  options: { cwd?: string; nodePath?: string } = {},
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!existsSync(scriptPath)) {
+      reject(new Error(`setup script not found: ${scriptPath}`));
+      return;
+    }
+
+    // Prefer the bundled Node runtime so we do not depend on system Node.
+    // Fall back to process.env.NODE (if set) or the system `node` binary.
+    const nodePath = options.nodePath ?? process.env.NODE ?? "node";
+
+    execFile(
+      nodePath,
+      [scriptPath, ...args],
+      {
+        cwd: options.cwd,
+        env: { ...process.env, AWAKEN_BINARY_TARGETS: target },
+      },
+      (error) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      },
+    );
+  });
+}
+
+export async function prepareComputerRuntime(): Promise<ComputerRuntimeSetupResult> {
+  const root = findRepoRoot();
+  if (!root) {
+    // Packaged mode: scripts are not shipped; rely on bundled resources.
+    const packagedRoot = dirname(dirname(app.getAppPath()));
+    const nodePath = nodeBinaryPath(packagedRoot);
+    const hostScriptPath = cuaHostScriptPath(packagedRoot);
+    const hostModulesPath = cuaHostNodeModulesPath(packagedRoot);
+    const nodeReady = existsSync(nodePath) && canExecute(nodePath);
+    const cuaHostReady = existsSync(hostScriptPath) && existsSync(hostModulesPath);
+    if (!nodeReady || !cuaHostReady) {
+      return {
+        nodeReady,
+        cuaHostReady,
+        message:
+          "打包应用缺少 bundled Node runtime 或 CUA Host，请重新构建或运行 node scripts/ensure-desktop-runtime.mjs。",
+      };
+    }
+    return { nodeReady, cuaHostReady };
+  }
+
+  const nodePath = nodeBinaryPath(root);
+  const hostScriptPath = cuaHostScriptPath(root);
+  const hostModulesPath = cuaHostNodeModulesPath(root);
+
+  let nodeReady = existsSync(nodePath) && canExecute(nodePath);
+  let cuaHostReady = existsSync(hostScriptPath) && existsSync(hostModulesPath);
+
+  if (nodeReady && cuaHostReady) {
+    return { nodeReady, cuaHostReady };
+  }
+
+  // Prepare Node runtime first using whatever Node is available on this machine.
+  try {
+    if (!nodeReady) {
+      await runScript(join(root, "scripts", "prepare-node-runtime.mjs"), [
+        `--targets=${target}`,
+      ]);
+      nodeReady = existsSync(nodePath) && canExecute(nodePath);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      nodeReady,
+      cuaHostReady,
+      message: `Node runtime 准备失败: ${message}`,
+    };
+  }
+
+  // Now use the freshly prepared Node runtime to install CUA driver deps.
+  try {
+    if (!cuaHostReady) {
+      await runScript(join(root, "scripts", "prepare-cua-driver.mjs"), [], {
+        cwd: root,
+        nodePath,
+      });
+      cuaHostReady = existsSync(hostScriptPath) && existsSync(hostModulesPath);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      nodeReady,
+      cuaHostReady,
+      message: `CUA Host 准备失败: ${message}`,
+    };
+  }
+
+  return { nodeReady, cuaHostReady };
+}
+
+function normalizeMediaAccessStatus(
+  status: string | undefined,
+): ComputerPermissionStatus {
+  switch (status) {
+    case "not-determined":
+      return "not-determined";
+    case "granted":
+      return "granted";
+    case "denied":
+      return "denied";
+    case "restricted":
+      return "restricted";
+    default:
+      return "unknown";
+  }
+}
+
+export function getComputerPermissionStatus(
+  permission: ComputerPermission,
+): ComputerPermissionStatus {
+  if (permission === "screen_recording") {
+    if (process.platform !== "darwin") {
+      // Electron only exposes screen capture media access on macOS.
+      return "unknown";
+    }
+    // getMediaAccessStatus also accepts "screen" at runtime on macOS even
+    // though the bundled type declarations only list "microphone" | "camera".
+    const status = systemPreferences.getMediaAccessStatus("screen" as "camera");
+    return normalizeMediaAccessStatus(status);
+  }
+
+  if (permission === "accessibility") {
+    if (process.platform !== "darwin") {
+      return "unknown";
+    }
+    // macOS does not provide a public API to query accessibility permission
+    // from a non-accessibility process. We treat it as unknown and rely on
+    // the user granting it through System Settings.
+    return "unknown";
+  }
+
+  return "unknown";
+}
+
+export async function requestComputerPermission(
+  permission: ComputerPermission,
+): Promise<ComputerPermissionStatus> {
+  if (permission === "screen_recording") {
+    if (process.platform !== "darwin") {
+      return "unknown";
+    }
+    // Electron's type declarations restrict askForMediaAccess to "microphone" |
+    // "camera", but macOS 10.15+ also supports "screen" for screen recording.
+    const granted = await systemPreferences.askForMediaAccess("screen" as "camera");
+    return granted ? "granted" : "denied";
+  }
+
+  if (permission === "accessibility") {
+    if (process.platform !== "darwin") {
+      return "unknown";
+    }
+    // Open System Settings at the Accessibility pane so the user can enable
+    // Awaken manually. There is no programmatic request API.
+    await shell.openExternal(
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+    );
+    return "not-determined";
+  }
+
+  return "unknown";
+}

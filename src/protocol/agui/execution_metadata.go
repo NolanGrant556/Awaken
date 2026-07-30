@@ -19,6 +19,9 @@ func applyExecutionMetadata(dst *Event, payload map[string]any) {
 	if value := firstStringValue(payload, "provider_id", "providerId"); value != "" {
 		dst.ProviderID = value
 	}
+	if value := firstStringValue(payload, "provider_source", "providerSource"); value != "" {
+		dst.ProviderSource = value
+	}
 	if value := firstStringValue(payload, "capability"); value != "" {
 		dst.Capability = value
 	}

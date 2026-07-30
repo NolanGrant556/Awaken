@@ -353,6 +353,13 @@ export function projectAguiEventToNarrative(
     case "AWAKEN_ARTIFACT_CREATED":
     case "AWAKEN_ARTIFACT_UPDATED":
       return base;
+    case "AWAKEN_SKILL_DISCOVERED":
+      return base;
+    case "AWAKEN_SKILL_INVOKED":
+    case "AWAKEN_SKILL_CONTENT_LOADED":
+    case "AWAKEN_SKILL_EXECUTION_CONTEXT":
+    case "AWAKEN_SKILL_FAILED_TO_LOAD":
+      return commitSkillTrace(base, event);
     case "AWAKEN_COMPACT_STARTED":
     case "AWAKEN_COMPACT_FINISHED":
     case "AWAKEN_COMPACT_FAILED":
@@ -408,6 +415,38 @@ export function projectAguiEventToNarrative(
     default:
       return base;
   }
+}
+
+function commitSkillTrace(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+  const skillId = event.skillId?.trim() || "unknown-skill";
+  const failed = event.type === "AWAKEN_SKILL_FAILED_TO_LOAD";
+  const done =
+    event.type === "AWAKEN_SKILL_EXECUTION_CONTEXT" ||
+    event.type === "AWAKEN_SKILL_CONTENT_LOADED";
+  const source = event.skillSource?.trim();
+  const version = event.skillVersion?.trim();
+  const detail = [source, version ? `v${version}` : ""].filter(Boolean).join(" · ");
+  const output = [
+    event.type === "AWAKEN_SKILL_CONTENT_LOADED" && event.skillResource
+      ? `已加载资源：${event.skillResource}`
+      : "",
+    event.skillStatus || "",
+    ...(event.skillDiagnostics ?? []),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const item: RunNarrativeItem = {
+    kind: "skill",
+    id: `skill:${eventScope(event)}:${skillId}`,
+    title: skillId,
+    detail: detail || undefined,
+    output: output || undefined,
+    status: failed ? "error" : done ? "done" : "active",
+  };
+  return {
+    ...state,
+    committedItems: upsertCommitted(state.committedItems, item),
+  };
 }
 
 function commitScheduledNotice(
@@ -838,6 +877,7 @@ function applyStatus(
     case "mediaGeneration":
       return status === "error" ? { ...item, status: "error" } : item;
     case "tool":
+    case "skill":
     case "memoryReceipt":
     case "acpSession":
     case "acpTool":

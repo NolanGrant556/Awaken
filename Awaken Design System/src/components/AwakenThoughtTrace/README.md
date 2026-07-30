@@ -4,9 +4,9 @@
 
 ## 用途
 
-`AwakenThoughtTrace` 用于在执行流中展示并折叠单段模型思考轨迹，支持进行中、完成和错误状态，也可以带持续时间标签。进行中以 `AwakenThinkingOrbStatus` 的 20px 行内规格作为 summary，显示思考球、`Thinking` 文字和三点节奏动效，不使用胶囊表面；完成或错误后移除仅属于运行状态的粒子球，改用 20px 对齐盒内的 12px Chevron 表达可展开的历史入口。状态文字使用 12px 层级，reasoning 正文始终从状态文字起点对齐。父级负责编排顺序、传入文本、状态和当前主题，本组件不读取 runtime。
+`AwakenThoughtTrace` 用于在执行流中展示并折叠单段模型思考轨迹，支持进行中、完成和错误状态，也可以带持续时间标签。进行中以 `AwakenThinkingOrbStatus` 的 20px 行内规格作为 summary，显示思考球、`Thinking` 文字和三点节奏动效，不使用胶囊表面；完成或错误后移除仅属于运行状态的粒子球，改用位于文字右侧的 12px Chevron 表达可展开的历史入口。标题触发区按内容宽度收紧并始终透明，默认使用统一浅色文字与 Chevron，悬停或键盘聚焦时只提亮前景色；正文从同一左边缘向下展开，不增加连接线或子级缩进，并使用 `grid-template-rows` 过渡。父级负责编排顺序、传入文本、状态和当前主题，本组件不读取 runtime。
 
-Awaken Desktop 在 run 尚未产生首个可见输出时传入空文本和 `active`，因此只显示动态 Thinking 状态行；收到 runtime 明确提供的 reasoning summary 后，文本在同一组件下方流式展开。`done` 默认显示带 Chevron 的 `Thought` 历史入口，展开时 Chevron 向下、折叠时向右；最终回答出现后仍由 Desktop 的“执行过程”外层 disclosure 收起。`error`、自定义 `label` 和 `durationLabel` 属于通用组件 API。
+Awaken Desktop 在 run 尚未产生首个可见输出时传入空文本和 `active`，因此只显示动态 Thinking 状态行；收到 runtime 明确提供的 reasoning summary 后，文本在同一组件下方流式展开。`active` 自动展开，`done` 默认折叠成带 Chevron 的 `Thought` 历史入口，用户点击后的选择优先于自动状态；最终回答出现后仍由 Desktop 的“执行过程”外层 disclosure 收起。`error`、自定义 `label`、`durationLabel` 和 `defaultOpen` 属于通用组件 API。
 
 ## 文件
 

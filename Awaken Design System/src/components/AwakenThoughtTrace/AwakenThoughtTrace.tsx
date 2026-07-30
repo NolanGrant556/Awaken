@@ -1,5 +1,6 @@
 import "./AwakenThoughtTrace.css";
 import { ChevronRight } from "lucide-react";
+import { useId, useState } from "react";
 import {
   AwakenThinkingOrbStatus,
   type AwakenThinkingOrbTheme,
@@ -21,9 +22,15 @@ export function AwakenThoughtTrace({
   status = "active",
   label,
   durationLabel,
-  defaultOpen = true,
+  defaultOpen,
   theme = "auto",
 }: AwakenThoughtTraceProps) {
+  const bodyId = useId();
+  const [manualExpanded, setManualExpanded] = useState<boolean | null>(
+    defaultOpen ?? null,
+  );
+  const autoExpanded = status === "active";
+  const expanded = manualExpanded ?? autoExpanded;
   const statusLabel =
     label ??
     (status === "active"
@@ -34,8 +41,19 @@ export function AwakenThoughtTrace({
   const heading = durationLabel ? `${statusLabel} ${durationLabel}` : statusLabel;
 
   return (
-    <details className={`thought-trace thought-trace-${status}`} open={defaultOpen}>
-      <summary className="thought-trace-heading">
+    <section
+      className={`thought-trace thought-trace-${status}${
+        expanded ? " thought-trace-open" : ""
+      }`}
+      data-state={status}
+    >
+      <button
+        type="button"
+        className="thought-trace-heading"
+        aria-expanded={expanded}
+        aria-controls={bodyId}
+        onClick={() => setManualExpanded((current) => !(current ?? autoExpanded))}
+      >
         {status === "active" ? (
           <AwakenThinkingOrbStatus
             className="thought-trace-status"
@@ -48,14 +66,24 @@ export function AwakenThoughtTrace({
           />
         ) : (
           <span className="thought-trace-disclosure">
-            <span className="thought-trace-disclosure-icon" aria-hidden="true">
-              <ChevronRight size={12} strokeWidth={1.8} />
-            </span>
             <span className="thought-trace-disclosure-label">{heading}</span>
           </span>
         )}
-      </summary>
-      {text ? <p>{text}</p> : null}
-    </details>
+        <span className="thought-trace-disclosure-icon" aria-hidden="true">
+          <ChevronRight size={12} strokeWidth={1.8} />
+        </span>
+      </button>
+      <div
+        id={bodyId}
+        className="thought-trace-body"
+        data-expanded={expanded ? "true" : "false"}
+        aria-hidden={!expanded}
+        inert={!expanded}
+      >
+        <div className="thought-trace-body-inner">
+          {text ? <p>{text}</p> : null}
+        </div>
+      </div>
+    </section>
   );
 }

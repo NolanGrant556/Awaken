@@ -34,69 +34,29 @@ export function AwakenDisclosure({
 
   return (
     <div
-      style={{
-        display: "grid",
-        gap: open ? "8px" : 0,
-        minWidth: 0,
-      }}
+      className={`aw-disclosure${open ? " aw-disclosure-open" : ""}`}
     >
       <button
         type="button"
+        className="aw-disclosure-trigger"
         aria-expanded={open}
         aria-controls={panelId}
         onClick={toggleOpen}
-        style={{
-          display: "grid",
-          gridTemplateColumns: "auto minmax(0, 1fr) auto",
-          alignItems: "center",
-          gap: "8px",
-          width: "100%",
-          minWidth: 0,
-          padding: 0,
-          border: 0,
-          background: "transparent",
-          color: "inherit",
-          cursor: "pointer",
-          textAlign: "left",
-        }}
       >
-        <ChevronRight
-          size={15}
-          strokeWidth={2}
-          style={{
-            flex: "0 0 auto",
-            color: "var(--aw-text-subtle)",
-            transform: open ? "rotate(90deg)" : "rotate(0deg)",
-            transition: "transform 140ms ease",
-          }}
-        />
-        <strong
-          style={{
-            minWidth: 0,
-            color: "var(--aw-text-primary)",
-            fontSize: "var(--aw-font-size-sm)",
-            lineHeight: "var(--aw-line-height-sm)",
-            overflowWrap: "anywhere",
-          }}
-        >
+        <strong className="aw-disclosure-title">
           {title}
         </strong>
         {meta ? (
-          <span
-            style={{
-              flex: "0 0 auto",
-              color: "var(--aw-text-subtle)",
-              fontSize: "var(--aw-font-size-xs)",
-              lineHeight: "var(--aw-line-height-xs)",
-              whiteSpace: "nowrap",
-            }}
-          >
+          <span className="aw-disclosure-meta">
             {meta}
           </span>
         ) : null}
+        <span className="aw-disclosure-chevron" aria-hidden="true">
+          <ChevronRight size={15} strokeWidth={2} />
+        </span>
       </button>
       {open ? (
-        <div id={panelId} style={{ minWidth: 0 }}>
+        <div id={panelId} className="aw-disclosure-panel">
           {children}
         </div>
       ) : null}

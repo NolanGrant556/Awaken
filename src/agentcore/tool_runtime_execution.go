@@ -197,6 +197,7 @@ func (rt *ToolRuntime) executeTransformedTool(
 	result.outcomeContext.OutputSchema = transformedDef.OutputSchema
 	result.outcomeContext.StrictOutputSchema = transformedQuality == tool.DefinitionQualityStrict
 	result.ProviderID = provider.ProviderID
+	result.ProviderSource = provider.Source
 	result.ProviderCapabilities = append([]tool.Capability(nil), provider.Capabilities...)
 	result.ProviderReadiness = readiness.Readiness
 	result.ProviderDependencies = append([]tool.DependencyRequirement(nil), provider.Dependencies...)

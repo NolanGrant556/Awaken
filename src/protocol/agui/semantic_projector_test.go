@@ -387,6 +387,7 @@ func TestProjectSemanticToolExecutionMetadata(t *testing.T) {
 				"environment_snapshot_id": "env-1",
 				"tool_snapshot_id":        "tools-1",
 				"provider_id":             "builtin.presentation_render",
+				"provider_source":         "builtin",
 				"capabilities":            []string{"presentation.render", "artifact.preview"},
 				"provider_readiness":      "ready",
 				"dependency":              map[string]any{"name": "libreoffice", "kind": "executable"},
@@ -401,7 +402,7 @@ func TestProjectSemanticToolExecutionMetadata(t *testing.T) {
 		t.Fatalf("expected one tool result frame, got %+v", frames)
 	}
 	frame := frames[0]
-	if frame.EnvironmentSnapshotID != "env-1" || frame.ToolAvailabilitySnapshotID != "tools-1" || frame.ProviderID != "builtin.presentation_render" || frame.Capability != "presentation.render" || len(frame.Capabilities) != 2 || frame.Readiness != "ready" || frame.SideEffectState != "applied" {
+	if frame.EnvironmentSnapshotID != "env-1" || frame.ToolAvailabilitySnapshotID != "tools-1" || frame.ProviderID != "builtin.presentation_render" || frame.ProviderSource != "builtin" || frame.Capability != "presentation.render" || len(frame.Capabilities) != 2 || frame.Readiness != "ready" || frame.SideEffectState != "applied" {
 		t.Fatalf("execution metadata lost: %+v", frame)
 	}
 	if frame.Dependency["name"] != "libreoffice" || len(frame.Dependencies) != 1 {

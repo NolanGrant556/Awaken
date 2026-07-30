@@ -314,6 +314,7 @@ type Event struct {
 	EnvironmentSnapshotID      string           `json:"environmentSnapshotId,omitempty"`
 	ToolAvailabilitySnapshotID string           `json:"toolAvailabilitySnapshotId,omitempty"`
 	ProviderID                 string           `json:"providerId,omitempty"`
+	ProviderSource             string           `json:"providerSource,omitempty"`
 	Capability                 string           `json:"capability,omitempty"`
 	Capabilities               []string         `json:"capabilities,omitempty"`
 	Readiness                  string           `json:"readiness,omitempty"`

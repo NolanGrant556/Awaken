@@ -1527,6 +1527,52 @@ function firstContentLine(value?: string): string | undefined {
     .find(Boolean);
 }
 
+type ToolTraceRecordView = {
+  content?: string;
+  commandOutput?: string;
+  commandOutputTruncated?: boolean;
+  status?: ToolDisplayState;
+  providerId?: string;
+  providerSource?: string;
+};
+
+export function toolTracePresentation(
+  tool: ToolTraceRecordView | undefined,
+  fallback?: string,
+) {
+  if (!tool) {
+    const output = fallback?.trim() || undefined;
+    return {
+      detail: firstContentLine(fallback),
+      output,
+      outputLabel: "工具输出",
+      kind: "tool" as const,
+    };
+  }
+  const commandOutput = tool.commandOutput?.trim();
+  const result = tool.content?.trim();
+  const active = !tool.status || tool.status === "active";
+  const output = active
+    ? commandOutput || undefined
+    : commandOutput || result || undefined;
+  const providerSource = tool.providerSource?.trim().toLowerCase() || "";
+  const mcpProvider = providerSource === "mcp" || providerSource === "connector";
+  const kind = commandOutput ? "terminal" : mcpProvider ? "mcp" : "tool";
+  const providerLabel = mcpProvider
+    ? tool.providerId?.replace(/^(mcp|connector):/i, "")
+    : undefined;
+  const progress = active
+    ? firstContentLine(fallback) || firstContentLine(commandOutput) || firstContentLine(result)
+    : firstContentLine(result) || firstContentLine(commandOutput) || firstContentLine(fallback);
+  return {
+    detail: providerLabel || progress,
+    output,
+    outputLabel: kind === "terminal" ? "终端输出" : mcpProvider ? "MCP 输出" : "工具输出",
+    outputTruncated: tool.commandOutputTruncated,
+    kind: kind as "tool" | "mcp" | "terminal",
+  };
+}
+
 function composerThreadLabel(
   prompt: string,
   attachments: Array<{ displayName?: string }>,
@@ -5173,7 +5219,11 @@ export function App() {
     if (!result.ok) setNotice(result.message);
   }
 
-  function renderNarrativeItem(item: RunNarrativeItem, key: string) {
+  function renderNarrativeItem(
+    item: RunNarrativeItem,
+    key: string,
+    animateToolEntry = true,
+  ) {
     if (item.kind === "planning" || item.kind === "thinking") {
       return (
         <ThoughtTrace
@@ -5232,10 +5282,16 @@ export function App() {
         const tool = runtimeState.toolResults.find((record) => record.id === id);
         return {
           ...action,
-          detail: toolTraceDetail(tool, action.detail),
+          ...toolTracePresentation(tool, action.detail),
         };
       });
-      return <ToolTraceGroup key={key} actions={actions} />;
+      return (
+        <ToolTraceGroup
+          key={key}
+          actions={actions}
+          animateItems={animateToolEntry}
+        />
+      );
     }
     if (item.kind === "tool") {
       const tool = runtimeState.toolResults.find((record) => record.id === rawToolId(item.id));
@@ -5243,8 +5299,23 @@ export function App() {
         <ToolTraceLine
           key={key}
           title={item.title}
-          detail={toolTraceDetail(tool, item.detail)}
+          {...toolTracePresentation(tool, item.detail)}
           status={item.status}
+          animateEntry={animateToolEntry}
+        />
+      );
+    }
+    if (item.kind === "skill") {
+      return (
+        <ToolTraceLine
+          key={key}
+          title={item.title}
+          detail={item.detail}
+          output={item.output}
+          outputLabel="Skill 输出"
+          status={item.status}
+          kind="skill"
+          animateEntry={animateToolEntry}
         />
       );
     }
@@ -5364,7 +5435,13 @@ export function App() {
     }
     if (item.kind === "memoryReceipt") {
       return (
-        <ToolTraceLine key={key} title={item.title} detail={item.detail} status={item.status} />
+        <ToolTraceLine
+          key={key}
+          title={item.title}
+          detail={item.detail}
+          status={item.status}
+          animateEntry={animateToolEntry}
+        />
       );
     }
     if (item.kind === "acpSession") {
@@ -5377,6 +5454,7 @@ export function App() {
           title={title}
           detail={item.sessionId}
           status={acpDisplayStatusToToolStatus(item.status)}
+          animateEntry={animateToolEntry}
         />
       );
     }
@@ -5387,6 +5465,7 @@ export function App() {
           title={item.title}
           detail={item.detail}
           status={acpDisplayStatusToToolStatus(item.status)}
+          animateEntry={animateToolEntry}
         />
       );
     }
@@ -5489,27 +5568,16 @@ export function App() {
         >
           <div className="execution-process-disclosure-body">
             {segment.items.map((item, itemIndex) =>
-              renderNarrativeItem(item, `${turnId}:${segment.id}:${item.id}:${itemIndex}`),
+              renderNarrativeItem(
+                item,
+                `${turnId}:${segment.id}:${item.id}:${itemIndex}`,
+                false,
+              ),
             )}
           </div>
         </Disclosure>
       </div>,
     ];
-  }
-
-  function toolTraceDetail(
-    tool: (typeof runtimeState.toolResults)[number] | undefined,
-    fallback?: string,
-  ): string | undefined {
-    if (!tool) {
-      return fallback;
-    }
-    const output = firstContentLine(tool.commandOutput);
-    const result = firstContentLine(tool.content);
-    if (tool.status && tool.status !== "active") {
-      return result || output || fallback;
-    }
-    return output || fallback || result;
   }
 
   function acpRunnerLabel(runnerId: string): string {

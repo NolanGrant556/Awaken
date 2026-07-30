@@ -1,3 +1,78 @@
 @import "../../tokens/components.css";
 
-/* AwakenDisclosure currently uses shared Awaken Design System tokens and component classes. */
+.aw-disclosure {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
+.aw-disclosure-open {
+  gap: 8px;
+}
+
+.aw-disclosure-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--aw-text-subtle);
+  cursor: pointer;
+  text-align: left;
+  transition: color 140ms ease;
+}
+
+.aw-disclosure-trigger:hover,
+.aw-disclosure-trigger:focus-visible {
+  color: var(--aw-text-primary);
+}
+
+.aw-disclosure-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: inherit;
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+  overflow-wrap: anywhere;
+}
+
+.aw-disclosure-meta {
+  flex: 0 0 auto;
+  color: inherit;
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+  white-space: nowrap;
+}
+
+.aw-disclosure-chevron {
+  display: grid;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  color: inherit;
+}
+
+.aw-disclosure-chevron svg {
+  display: block;
+  transition: transform 140ms ease;
+}
+
+.aw-disclosure-open .aw-disclosure-chevron svg {
+  transform: rotate(90deg);
+}
+
+.aw-disclosure-panel {
+  min-width: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-disclosure-chevron svg {
+    transition: none;
+  }
+}

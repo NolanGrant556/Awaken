@@ -9,7 +9,7 @@ export function AwakenMediaGenerationCardDemo() {
     <section className="ads-component-demo" aria-label="媒体生成卡片演示">
       <header className="ads-component-demo-header">
         <h2>媒体生成卡片 <code>AwakenMediaGenerationCard</code></h2>
-        <p>每张图片或每个视频都是独立紧凑卡片，并按媒体真实宽高比展示。</p>
+        <p>生成中展开独立紧凑卡片；完成后折叠为一行摘要，点击后按媒体真实宽高比查看。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenMediaGenerationCardStates.map((state) => (

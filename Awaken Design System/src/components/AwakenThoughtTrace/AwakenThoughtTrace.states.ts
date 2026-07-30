@@ -26,20 +26,20 @@ export const AwakenThoughtTraceStates: AwakenThoughtTraceState[] = [
     } as unknown as Partial<ComponentProps<typeof AwakenThoughtTrace>>,
   },
   {
-    id: "done-open",
-    label: "已完成（Desktop 默认）",
+    id: "done-collapsed",
+    label: "已完成（默认折叠）",
     props: {
       text: "The reasoning summary has completed and remains available in the execution narrative.",
       status: "done",
     } as unknown as Partial<ComponentProps<typeof AwakenThoughtTrace>>,
   },
   {
-    id: "done-collapsed",
-    label: "用户手动折叠",
+    id: "done-manual-open",
+    label: "用户手动展开",
     props: {
-      text: "The completed reasoning summary is hidden until the user expands it again.",
+      text: "The completed reasoning summary remains available after the user expands it.",
       status: "done",
-      defaultOpen: false,
+      defaultOpen: true,
     } as unknown as Partial<ComponentProps<typeof AwakenThoughtTrace>>,
   },
   {

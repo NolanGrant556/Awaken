@@ -118,6 +118,7 @@ func TestMapEventToolResult(t *testing.T) {
 			"environment_snapshot_id": "env-1",
 			"tool_snapshot_id":        "tools-1",
 			"provider_id":             tool.ProviderID("builtin:bash"),
+			"provider_source":         tool.SourceBuiltin,
 			"capabilities":            []tool.Capability{"process.execute"},
 			"provider_readiness":      tool.ProviderReadiness("ready"),
 			"dependency_observations": []map[string]any{{"name": "zsh", "kind": "executable"}},
@@ -151,7 +152,7 @@ func TestMapEventToolResult(t *testing.T) {
 	if events[0].Diagnostic["reason"] != "no_match" {
 		t.Fatalf("unexpected diagnostic: %+v", events[0].Diagnostic)
 	}
-	if events[0].EnvironmentSnapshotID != "env-1" || events[0].ToolAvailabilitySnapshotID != "tools-1" || events[0].ProviderID != "builtin:bash" || events[0].Capability != "process.execute" || len(events[0].Capabilities) != 1 || events[0].Readiness != "ready" || len(events[0].Dependencies) != 1 {
+	if events[0].EnvironmentSnapshotID != "env-1" || events[0].ToolAvailabilitySnapshotID != "tools-1" || events[0].ProviderID != "builtin:bash" || events[0].ProviderSource != "builtin" || events[0].Capability != "process.execute" || len(events[0].Capabilities) != 1 || events[0].Readiness != "ready" || len(events[0].Dependencies) != 1 {
 		t.Fatalf("unexpected execution metadata: %+v", events[0])
 	}
 }
@@ -539,8 +540,8 @@ func TestMapEventArtifactUpdated(t *testing.T) {
 
 func TestMapEventACPSessionLifecycle(t *testing.T) {
 	cases := []struct {
-		agentcoreType agentcore.AwakenEventType
-		expectedType  EventType
+		agentcoreType  agentcore.AwakenEventType
+		expectedType   EventType
 		expectedStatus string
 	}{
 		{agentcore.ACPSessionStartedEventType, EventAwakenACPSessionChanged, "started"},

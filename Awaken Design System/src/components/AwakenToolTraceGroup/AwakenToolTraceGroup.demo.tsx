@@ -29,6 +29,7 @@ export function AwakenToolTraceGroupDemo() {
             <AwakenDisclosure title="执行过程" defaultOpen={false}>
               <GroupComponent
                 {...(AwakenToolTraceGroupStates[0].props as Record<string, unknown>)}
+                animateItems={false}
               />
             </AwakenDisclosure>
           </div>
@@ -39,6 +40,7 @@ export function AwakenToolTraceGroupDemo() {
             <AwakenDisclosure title="执行过程" defaultOpen>
               <GroupComponent
                 {...(AwakenToolTraceGroupStates[0].props as Record<string, unknown>)}
+                animateItems={false}
               />
             </AwakenDisclosure>
           </div>

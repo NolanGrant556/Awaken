@@ -44,6 +44,9 @@ func finalizeToolResult(result ToolExecutionResult) ToolExecutionResult {
 	if result.ProviderID != "" {
 		result.Outcome.Diagnostic["provider_id"] = result.ProviderID
 	}
+	if result.ProviderSource != "" {
+		result.Outcome.Diagnostic["provider_source"] = result.ProviderSource
+	}
 	if len(result.ProviderCapabilities) > 0 {
 		result.Outcome.Diagnostic["capabilities"] = append([]tool.Capability(nil), result.ProviderCapabilities...)
 	}
@@ -182,6 +185,7 @@ func (rt *ToolRuntime) providerReadinessResult(
 	}
 	details := map[string]any{
 		"provider_id":                provider.ProviderID,
+		"provider_source":            provider.Source,
 		"provider_readiness":         readiness.Readiness,
 		"readiness_reason":           readiness.Reason,
 		"dependency_requirements":    provider.Dependencies,

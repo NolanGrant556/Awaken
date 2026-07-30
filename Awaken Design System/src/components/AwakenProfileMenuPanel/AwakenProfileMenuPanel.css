@@ -1,0 +1,68 @@
+@import "../../tokens/components.css";
+
+.aw-profile-menu-panel {
+  position: relative;
+  width: 280px;
+  overflow: visible;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-panel);
+  box-shadow: var(--aw-shadow-popover);
+}
+
+.aw-profile-menu-panel__footer {
+  display: grid;
+  gap: var(--aw-space-2);
+  padding: var(--aw-space-4);
+}
+
+.aw-profile-menu-panel__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--aw-radius-sm);
+  background: transparent;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: var(--aw-line-height-base);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--aw-transition-fast), color var(--aw-transition-fast);
+}
+
+.aw-profile-menu-panel__appearance {
+  position: relative;
+}
+
+.aw-profile-menu-panel__action-chevron {
+  margin-left: auto;
+  color: var(--aw-text-tertiary);
+}
+
+.aw-profile-menu-panel__appearance-popover {
+  position: absolute;
+  top: 0;
+  left: calc(100% + var(--aw-space-3));
+  z-index: 1;
+  overflow: hidden;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-surface-panel);
+  box-shadow: var(--aw-shadow-popover);
+}
+
+.aw-profile-menu-panel__action:hover,
+.aw-profile-menu-panel__action:focus-visible {
+  background: var(--aw-bg-fill-light);
+}
+
+.aw-profile-menu-panel__action:focus-visible {
+  outline: 2px solid var(--aw-focus-ring);
+  outline-offset: 1px;
+}

@@ -13,3 +13,5 @@
 | `volcengine.svg` | 火山引擎 | [theSVG Volcengine](https://thesvg.org/icon/volcengine)，并与[火山引擎官方图标](https://portal.volccdn.com/obj/volcfe/misc/favicon.png)核对 |
 
 SVG 来源为 MIT 授权的品牌图标资源；Kimi 图标来自用户本机安装的官方 App，品牌标识本身仍归各自权利人所有。Kimi API 与 Kimi Coding Plan 共用 Kimi Logo，Qwen API 与 Qwen Token Plan 共用 Qwen Logo，火山 Coding Plan、Doubao Ark API 与火山 Agent Plan 分别使用其产品对应 Logo。
+
+新增 LLM provider 时，需要同时补齐本目录品牌资源、`AwakenProviderBrand` / `PROVIDER_LOGOS` 和 Desktop 的 `model-provider-brand.ts` 映射。模型设置、Composer 与用量窗口共同消费这套映射；未知 provider 只显示首字母兜底，不在任一 consumer 内另建 Logo 规则。

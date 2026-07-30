@@ -1,0 +1,25 @@
+@import "../../tokens/components.css";
+
+.aw-dialog.aw-profile-usage-dialog {
+  width: min(780px, calc(100vw - 48px));
+  max-height: min(680px, calc(100vh - 48px));
+}
+
+.aw-profile-usage-dialog__body {
+  padding: var(--aw-space-4) var(--aw-space-8) var(--aw-space-8);
+  overflow: hidden;
+}
+
+.aw-profile-usage-dialog__panel {
+  min-height: min(440px, calc(100vh - 160px));
+}
+
+@media (max-width: 720px) {
+  .aw-dialog.aw-profile-usage-dialog {
+    width: calc(100vw - 24px);
+  }
+
+  .aw-profile-usage-dialog__body {
+    padding: var(--aw-space-4);
+  }
+}

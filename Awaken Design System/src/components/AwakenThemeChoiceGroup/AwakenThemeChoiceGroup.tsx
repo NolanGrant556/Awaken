@@ -5,7 +5,7 @@ export type AwakenThemeChoiceValue = "system" | "light" | "dark";
 
 export type AwakenThemeChoiceGroupProps = {
   value: AwakenThemeChoiceValue;
-  size?: "default" | "compact";
+  size?: "default" | "compact" | "menu";
   disabled?: boolean;
   onValueChange?: (value: AwakenThemeChoiceValue) => void;
 };

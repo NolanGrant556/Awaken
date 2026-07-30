@@ -7,13 +7,14 @@ import {
   AwakenProfileBalancePanelStates,
   AwakenProfileBalanceSamples,
 } from "../AwakenProfileBalancePanel";
+import { AwakenProfileMenuPanel } from "../AwakenProfileMenuPanel";
 import { AwakenAccount } from "./AwakenAccount";
 
 export function AwakenAccountDemo() {
   const [themePreference, setThemePreference] = useState<"system" | "light" | "dark">("light");
   const [accountOpen, setAccountOpen] = useState(true);
   const [panelStateId, setPanelStateId] = useState("available");
-  const [lastAction, setLastAction] = useState("点击 Nolan 可展开或收起账户额度面板。");
+  const [lastAction, setLastAction] = useState("点击 Nolan 可展开个人菜单，再进入独立用量窗口。");
   const originalThemeRef = useRef<string | null>(null);
   const panelState =
     AwakenProfileBalancePanelStates.find((state) => state.id === panelStateId) ??
@@ -39,7 +40,7 @@ export function AwakenAccountDemo() {
     <section className="ads-component-demo aw-account-demo" aria-label="「账户」组件库 AwakenAccount 演示">
       <header className="ads-component-demo-header">
         <h2>「账户」组件库 <code>AwakenAccount + AwakenPopover</code></h2>
-        <p>集中管理左下角个人入口、真实账户弹出层、模型额度面板与设置动作，不归属于左侧栏组件目录。</p>
+        <p>集中管理左下角个人入口、个人菜单、独立用量窗口与设置动作，不归属于左侧栏组件目录。</p>
       </header>
 
       <div className="aw-account-demo__controls">
@@ -67,7 +68,7 @@ export function AwakenAccountDemo() {
       <section className="aw-account-demo__composition" aria-labelledby="aw-account-composition-title">
         <header className="aw-account-demo__section-heading">
           <h3 id="aw-account-composition-title">完整组合</h3>
-          <p><code>AwakenAccount</code> 通过 <code>AwakenPopover</code> 组合个人入口、额度查询结果和设置动作；点击 Nolan 可验证打开与关闭。</p>
+          <p><code>AwakenAccount</code> 先展开个人菜单，再由“查询用量”打开左侧 API、右侧用量的独立窗口。</p>
         </header>
         <div className="aw-account-demo__composition-canvas">
           <AwakenAccount
@@ -78,7 +79,10 @@ export function AwakenAccountDemo() {
             open={accountOpen}
             onOpenChange={(open) => {
               setAccountOpen(open);
-              setLastAction(open ? "已展开账户额度面板。" : "已收起账户额度面板。");
+              setLastAction(open ? "已展开个人菜单。" : "已收起个人菜单。");
+            }}
+            onUsageOpenChange={(open) => {
+              setLastAction(open ? "已打开用量窗口。" : "已关闭用量窗口。");
             }}
             onThemePreferenceChange={setThemePreference}
             onOpenSettings={() => {
@@ -91,7 +95,7 @@ export function AwakenAccountDemo() {
       <section className="aw-account-demo__parts" aria-labelledby="aw-account-parts-title">
         <header className="aw-account-demo__section-heading">
           <h3 id="aw-account-parts-title">可独立组合的小组件</h3>
-          <p>个人入口负责触发，额度面板负责展示数据与设置动作。</p>
+          <p>个人入口负责触发，快捷面板负责入口，双栏面板负责展示用量。</p>
         </header>
         <div className="aw-account-demo__part-list">
           <article className="aw-account-demo__part">
@@ -113,9 +117,25 @@ export function AwakenAccountDemo() {
 
           <article className="aw-account-demo__part">
             <header>
-              <h4>额度与设置面板</h4>
+              <h4>个人快捷面板</h4>
+              <code>AwakenProfileMenuPanel</code>
+              <p>左对齐展示“外观”“查询用量”“设置”，外观选项在右侧小窗中展开。</p>
+            </header>
+            <div className="aw-account-demo__panel-canvas">
+              <AwakenProfileMenuPanel
+                themePreference={themePreference}
+                onThemePreferenceChange={setThemePreference}
+                onOpenUsage={() => setLastAction("已触发查询用量回调（Gallery 模拟）。")}
+                onOpenSettings={() => setLastAction("已触发进入设置回调（Gallery 模拟）。")}
+              />
+            </div>
+          </article>
+
+          <article className="aw-account-demo__part">
+            <header>
+              <h4>用量窗口内容</h4>
               <code>AwakenProfileBalancePanel</code>
-              <p>覆盖可用、加载、空状态和错误状态，设置动作由 consumer 处理。</p>
+              <p>覆盖可用、加载、空状态和错误状态，左右栏均由同一组件负责。</p>
             </header>
             <div className="aw-account-demo__panel-canvas">
               <div className="aw-account-demo__state-toggle" role="group" aria-label="额度面板状态">
@@ -134,8 +154,6 @@ export function AwakenAccountDemo() {
               <AwakenProfileBalancePanel
                 id="awaken-account-demo-panel"
                 {...panelState.props}
-                themePreference={themePreference}
-                onThemePreferenceChange={setThemePreference}
                 onOpenSettings={() => setLastAction("已触发进入设置回调（Gallery 模拟）。")}
               />
             </div>

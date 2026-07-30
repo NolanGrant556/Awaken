@@ -664,6 +664,11 @@ const deliverableExtensionTypes = new Map<string, DeliverableFileType>([
   ["pdf", "pdf"],
   ["ppt", "powerpoint"],
   ["pptx", "powerpoint"],
+  ["png", "image"],
+  ["jpg", "image"],
+  ["jpeg", "image"],
+  ["webp", "image"],
+  ["mp4", "video"],
 ]);
 
 function deliverableFileType(path: string): {

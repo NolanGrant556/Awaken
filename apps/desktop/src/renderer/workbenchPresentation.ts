@@ -380,8 +380,19 @@ export function projectNarrativeTurnBodySegments({
     ];
   }
 
-  const executionProcessItems = items.slice(0, firstAnswerIndex);
-  const answerAndAfterItems = items.slice(firstAnswerIndex);
+  const firstPersistentMediaIndex = items.findIndex(
+    (item, index) =>
+      index < firstAnswerIndex &&
+      item.kind === "mediaGeneration" &&
+      (item.status === "ready" || item.status === "error" || item.status === "cancelled"),
+  );
+  const outputStartIndex =
+    firstPersistentMediaIndex >= 0 ? firstPersistentMediaIndex : firstAnswerIndex;
+  const executionProcessItems = items.slice(0, outputStartIndex);
+  const answerAndAfterItems = items.slice(outputStartIndex);
+  if (executionProcessItems.length === 0) {
+    return [{ kind: "items", id: `turn-items:${turnId}`, items }];
+  }
   const segments: NarrativeTurnBodySegment[] = [
     {
       kind: "executionProcess",

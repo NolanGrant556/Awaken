@@ -7,6 +7,7 @@ import {
 import type {
   ACPDisplayStatus,
   CompactBoundaryItem,
+  MediaGenerationStatus,
   PromptNarrativeToken,
   RunAction,
   RunNarrativeItem,
@@ -16,6 +17,7 @@ import type {
 
 const MAX_SEEN_EVENTS = 1000;
 const READ_ONLY_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "WebSearch"]);
+const MEDIA_TOOL_NAMES = new Set(["image_generate", "video_generate"]);
 
 export function createInitialRunNarrativeState(): RunNarrativeState {
   return {
@@ -129,11 +131,18 @@ export function projectAguiEventToNarrative(
     case "TEXT_MESSAGE_END":
       return commitMatchingActiveAnswer(base, event, "done");
     case "TOOL_CALL_START":
+      if (isMediaToolEvent(event)) {
+        return activateMediaGeneration(base, event, "preparing");
+      }
       if (isReadOnlyToolEvent(event)) {
         return updateExploringAction(base, event, "active", "Tool invocation started");
       }
       return activateTool(base, event, "Tool invocation started");
-    case "TOOL_CALL_ARGS_DELTA":
+    case "TOOL_CALL_ARGS_DELTA": {
+      if (isMediaToolEvent(event)) {
+        const parameters = mediaParametersFromArgs(event.delta);
+        return activateMediaGeneration(base, event, "preparing", parameters.detail, parameters.requestedCount);
+      }
       if (isReadOnlyToolEvent(event)) {
         return updateExploringAction(
           base,
@@ -147,18 +156,38 @@ export function projectAguiEventToNarrative(
         event,
         event.delta ? `Preparing arguments: ${event.delta}` : "Preparing tool arguments",
       );
-    case "TOOL_CALL_ARGS":
+    }
+    case "TOOL_CALL_ARGS": {
+      if (isMediaToolEvent(event)) {
+        const parameters = mediaParametersFromArgs(event.delta);
+        return activateMediaGeneration(base, event, "preparing", parameters.detail, parameters.requestedCount);
+      }
       if (isReadOnlyToolEvent(event)) {
         return updateExploringAction(base, event, "active", event.delta || "Streaming tool arguments");
       }
       return activateTool(base, event, event.delta || "Streaming tool arguments");
+    }
     case "TOOL_PROGRESS": {
       const progress = event.progress || event.message || "Tool is running";
+      if (isMediaToolEvent(event)) {
+        return activateMediaGeneration(
+          base,
+          event,
+          mediaStatusFromProgress(event),
+          progress === "Tool is running" ? undefined : progress,
+        );
+      }
       if (isReadOnlyToolEvent(event)) {
         return updateExploringAction(base, event, "active", progress);
       }
       return activateTool(base, event, progress);
     }
+    case "AWAKEN_COMMAND_OUTPUT":
+      if (isMediaToolEvent(event) && event.commandStream === "media_status") {
+        const update = mediaStatusFromCommandOutput(event.delta);
+        return activateMediaGeneration(base, event, update.status, update.detail);
+      }
+      return base;
     case "AWAKEN_TOOL_PERMISSION_DECIDED": {
       // Task 16 unified observability: surface the profile summary, transform
       // rewrite, deny reason, trash notification, and guardian violation in
@@ -176,6 +205,9 @@ export function projectAguiEventToNarrative(
       return activateTool(base, event, detail);
     }
     case "TOOL_CALL_END":
+      if (isMediaToolEvent(event)) {
+        return base;
+      }
       if (isReadOnlyToolEvent(event)) {
         return updateExploringAction(base, event, "active", "Tool call ready");
       }
@@ -194,6 +226,9 @@ export function projectAguiEventToNarrative(
         typeof event.diagnostic?.reason === "string"
           ? event.diagnostic.reason
           : "";
+      if (isMediaToolEvent(event)) {
+        return commitMediaGeneration(base, event, diagnosticReason);
+      }
       if (isReadOnlyToolEvent(event)) {
         const summary = summarizeToolResult(event.content);
         const detail = [
@@ -678,7 +713,20 @@ function commitRunCancelledHint(
 ): RunNarrativeState {
   // Settle whatever is currently streaming (answer, tool trace, etc.) so the
   // cancellation hint can be appended after all committed items.
-  const settledState = state.activeItem ? commitActive(state, "done") : state;
+  const settledState =
+    state.activeItem?.kind === "mediaGeneration"
+      ? {
+          ...state,
+          committedItems: upsertCommitted(state.committedItems, {
+            ...state.activeItem,
+            status: "cancelled" as const,
+            detail: "生成已停止",
+          }),
+          activeItem: undefined,
+        }
+      : state.activeItem
+        ? commitActive(state, "done")
+        : state;
   const hint: RunNarrativeItem = {
     kind: "hint",
     id: `hint:run-cancelled:${eventScope(event)}`,
@@ -777,6 +825,8 @@ function applyStatus(
     case "deliverables":
     case "subagentGroup":
       return item;
+    case "mediaGeneration":
+      return status === "error" ? { ...item, status: "error" } : item;
     case "tool":
     case "memoryReceipt":
     case "acpSession":
@@ -851,6 +901,10 @@ function narrativeErrorMessage(event: AguiEvent): string {
 
 function toolId(event: AguiEvent): string {
   return `tool:${eventScopedId(event, event.toolCallId ?? event.toolCallName)}`;
+}
+
+function mediaGenerationId(event: AguiEvent): string {
+  return `media:${eventScopedId(event, event.toolCallId ?? event.toolCallName)}`;
 }
 
 function exploringActionId(event: AguiEvent): string {
@@ -1027,6 +1081,178 @@ function commitCompactBoundary(state: RunNarrativeState, event: AguiEvent): RunN
 
 function isReadOnlyToolEvent(event: AguiEvent): boolean {
   return READ_ONLY_TOOL_NAMES.has(event.toolCallName ?? "");
+}
+
+function isMediaToolEvent(event: AguiEvent): boolean {
+  return MEDIA_TOOL_NAMES.has(event.toolCallName ?? "");
+}
+
+function mediaKind(event: AguiEvent): "image" | "video" {
+  return event.toolCallName === "video_generate" ? "video" : "image";
+}
+
+function mediaParametersFromArgs(value?: string): {
+  detail?: string;
+  requestedCount?: number;
+} {
+  const trimmed = value?.trim();
+  if (!trimmed || !trimmed.startsWith("{")) return {};
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      prompt?: unknown;
+      mode?: unknown;
+      max_images?: unknown;
+    };
+    const prompt = typeof parsed.prompt === "string" ? parsed.prompt.trim() : "";
+    const requestedCount =
+      parsed.mode === "group" &&
+      typeof parsed.max_images === "number" &&
+      Number.isInteger(parsed.max_images) &&
+      parsed.max_images >= 1 &&
+      parsed.max_images <= 15
+        ? parsed.max_images
+        : undefined;
+    return {
+      ...(prompt ? { detail: prompt.length > 96 ? `${prompt.slice(0, 93)}...` : prompt } : {}),
+      ...(requestedCount ? { requestedCount } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function mediaStatusFromProgress(event: AguiEvent): MediaGenerationStatus {
+  switch (event.toolProgressStage) {
+    case "failed":
+    case "needs_auth":
+    case "needs_runtime":
+    case "unsupported":
+      return "error";
+    default:
+      return "generating";
+  }
+}
+
+function mediaStatusFromCommandOutput(value?: string): {
+  status: MediaGenerationStatus;
+  detail?: string;
+} {
+  const line = value?.trim().split(/\r?\n/).filter(Boolean).at(-1) ?? "";
+  try {
+    const parsed = JSON.parse(line) as { stage?: unknown; message?: unknown };
+    const stage = typeof parsed.stage === "string" ? parsed.stage : "generating";
+    const status: MediaGenerationStatus =
+      stage === "queued" || stage === "downloading" || stage === "ready"
+        ? stage
+        : stage === "cancelled"
+          ? "cancelled"
+          : stage === "error"
+            ? "error"
+            : "generating";
+    return {
+      status,
+      detail: typeof parsed.message === "string" ? parsed.message : undefined,
+    };
+  } catch {
+    return { status: "generating", detail: line || undefined };
+  }
+}
+
+function activateMediaGeneration(
+  state: RunNarrativeState,
+  event: AguiEvent,
+  status: MediaGenerationStatus,
+  detail?: string,
+  requestedCount?: number,
+): RunNarrativeState {
+  const id = mediaGenerationId(event);
+  const existing =
+    state.activeItem?.id === id && state.activeItem.kind === "mediaGeneration"
+      ? state.activeItem
+      : state.committedItems.find(
+          (item): item is Extract<RunNarrativeItem, { kind: "mediaGeneration" }> =>
+            item.id === id && item.kind === "mediaGeneration",
+        );
+  const kind = mediaKind(event);
+  return setActive(
+    {
+      ...state,
+      committedItems: state.committedItems.filter((item) => item.id !== id),
+      inspectorSelection: { kind: "tool", id: toolId(event) },
+    },
+    {
+      kind: "mediaGeneration",
+      id,
+      toolCallId: event.toolCallId ?? existing?.toolCallId ?? "media",
+      runId: event.runId ?? existing?.runId,
+      mediaKind: kind,
+      title: kind === "image" ? "图片生成" : "视频生成",
+      detail: detail || existing?.detail,
+      status,
+      ...((requestedCount ?? existing?.requestedCount)
+        ? { requestedCount: requestedCount ?? existing?.requestedCount }
+        : {}),
+      artifactPaths: existing?.artifactPaths ?? [],
+    },
+  );
+}
+
+function commitMediaGeneration(
+  state: RunNarrativeState,
+  event: AguiEvent,
+  diagnosticReason?: string,
+): RunNarrativeState {
+  const id = mediaGenerationId(event);
+  const existing =
+    state.activeItem?.id === id && state.activeItem.kind === "mediaGeneration"
+      ? state.activeItem
+      : state.committedItems.find(
+          (item): item is Extract<RunNarrativeItem, { kind: "mediaGeneration" }> =>
+            item.id === id && item.kind === "mediaGeneration",
+        );
+  let paths: string[] = [];
+  let payloadSucceeded = false;
+  try {
+    const payload = JSON.parse(event.content ?? "{}") as { status?: unknown; paths?: unknown };
+    paths = Array.isArray(payload.paths)
+      ? payload.paths.filter((value): value is string => typeof value === "string" && value.length > 0)
+      : [];
+    payloadSucceeded = payload.status === "succeeded" && paths.length > 0;
+  } catch {
+    // Structured result parsing is best-effort; canonical toolStatus remains authoritative otherwise.
+  }
+  const displayStatus = toolDisplayStateFromStatus(event.toolStatus);
+  const status: MediaGenerationStatus = payloadSucceeded
+    ? "ready"
+    : displayStatus === "cancelled" || displayStatus === "interrupted"
+      ? "cancelled"
+      : displayStatus === "done"
+        ? "ready"
+        : "error";
+  const kind = mediaKind(event);
+  const item: RunNarrativeItem = {
+    kind: "mediaGeneration",
+    id,
+    toolCallId: event.toolCallId ?? existing?.toolCallId ?? "media",
+    runId: event.runId ?? existing?.runId,
+    mediaKind: kind,
+    title: kind === "image" ? "图片生成" : "视频生成",
+    detail:
+      status === "ready"
+        ? kind === "image"
+          ? `已生成 ${paths.length || existing?.artifactPaths.length || 1} 张图片`
+          : "视频已生成"
+        : diagnosticReason || event.content || existing?.detail,
+    status,
+    ...(existing?.requestedCount ? { requestedCount: existing.requestedCount } : {}),
+    artifactPaths: paths.length > 0 ? paths : existing?.artifactPaths ?? [],
+  };
+  return {
+    ...state,
+    committedItems: upsertCommitted(state.committedItems, item),
+    activeItem: state.activeItem?.id === id ? undefined : state.activeItem,
+    inspectorSelection: { kind: "tool", id: toolId(event) },
+  };
 }
 
 // toolDecisionDetail builds a human-readable detail line for the

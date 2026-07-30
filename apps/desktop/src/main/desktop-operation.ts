@@ -10,6 +10,8 @@ const SAFE_OPERATION_MESSAGES = new Set([
   "未知模型供应商",
   "请先在设置 > 模型中配置 API key。",
   "请先在设置 > 模型中配置可用模型。",
+  "当前有任务正在运行，请结束任务后重试。",
+  "Agent Plan 账户已保存，但 Core 重启失败。请重启 Awaken 后再使用生成工具。",
 ]);
 
 export function desktopOperationIssue(error: unknown): DesktopOperationIssue {

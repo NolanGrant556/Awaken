@@ -7,9 +7,14 @@ import {
   type ACPRunnerView,
   type AgentPlanAccount,
   type AgentPlanAccountSaveRequest,
+  type AgentPlanMediaCapability,
+  type AgentPlanMediaToolSaveRequest,
+  type AgentPlanMediaTools,
+  type AgentPlanMediaToolsSaveResult,
   type AttachmentPickResult,
   type ArtifactOpenRequest,
   type ArtifactOpenResult,
+  type ArtifactMediaSourceResult,
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
@@ -212,7 +217,16 @@ export type RuntimeClient = {
   saveAgentPlanAccount: (request: AgentPlanAccountSaveRequest) => Promise<AgentPlanAccount>;
   refreshAgentPlanModels: () => Promise<AgentPlanAccount>;
   deleteAgentPlanAccount: () => Promise<void>;
-  saveModelProfile: (request: ModelProfileSaveRequest) => Promise<RuntimeModelProfileSummary>;
+  getAgentPlanMediaTools: () => Promise<AgentPlanMediaTools>;
+  saveAgentPlanMediaTool: (
+    request: AgentPlanMediaToolSaveRequest,
+  ) => Promise<AgentPlanMediaToolsSaveResult>;
+  deleteAgentPlanMediaTool: (
+    capability: AgentPlanMediaCapability,
+  ) => Promise<AgentPlanMediaToolsSaveResult>;
+  saveModelProfile: (
+    request: ModelProfileSaveRequest,
+  ) => Promise<RuntimeModelProfileSummary>;
   deleteModelProfile: (profileId: string) => Promise<void>;
   setDefaultModelProfile: (profileId: string) => Promise<RuntimeModelProfileSummary>;
   testModelProfile: (request: ModelProfileSaveRequest) => Promise<ModelProfileTestResult>;
@@ -271,6 +285,7 @@ export type RuntimeClient = {
   ) => Promise<ProjectMutationResult>;
   getProjectOperation: (operationId: string) => Promise<RuntimeProjectOperation>;
   openArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
+  getArtifactMediaSource: (request: ArtifactOpenRequest) => Promise<ArtifactMediaSourceResult>;
   revealPath: (target: string) => Promise<{ ok: boolean; message?: string }>;
   revealArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
@@ -414,7 +429,12 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     refreshAgentPlanModels: () =>
       unwrapDesktopOperation(bridge.refreshAgentPlanModels()),
     deleteAgentPlanAccount: () => bridge.deleteAgentPlanAccount(),
-    saveModelProfile: (request) => unwrapDesktopOperation(bridge.saveModelProfile(request)),
+    getAgentPlanMediaTools: () => bridge.getAgentPlanMediaTools(),
+    saveAgentPlanMediaTool: (request) => bridge.saveAgentPlanMediaTool(request),
+    deleteAgentPlanMediaTool: (capability) =>
+      bridge.deleteAgentPlanMediaTool(capability),
+    saveModelProfile: (request) =>
+      unwrapDesktopOperation(bridge.saveModelProfile(request)),
     deleteModelProfile: (profileId) => bridge.deleteModelProfile(profileId),
     setDefaultModelProfile: (profileId) => bridge.setDefaultModelProfile(profileId),
     testModelProfile: (request) => unwrapDesktopOperation(bridge.testModelProfile(request)),
@@ -452,6 +472,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
       bridge.trashProjectFolder(projectId, path, idempotencyKey),
     getProjectOperation: (operationId) => bridge.getProjectOperation(operationId),
     openArtifact: (request) => bridge.openArtifact(request),
+    getArtifactMediaSource: (request) => bridge.getArtifactMediaSource(request),
     revealPath: (target) => bridge.revealPath(target),
     revealArtifact: (request) => bridge.revealArtifact(request),
     startRun: (request) => unwrapDesktopOperation(bridge.startRun(request)),

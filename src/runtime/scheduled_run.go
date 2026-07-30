@@ -22,13 +22,14 @@ const ScheduledClientSource = "scheduled_task"
 // ScheduledRunRequest is the host-only input for an unattended scheduled
 // Agent execution.
 type ScheduledRunRequest struct {
-	TaskID       string
-	ExecutionID  string
-	TaskName     string
-	Prompt       string
-	ThreadID     string // empty creates the task's dedicated thread
-	Workspace    WorkspaceConfig
-	ModelProfile *ModelProfileConfig
+	TaskID         string
+	ExecutionID    string
+	TaskName       string
+	Prompt         string
+	ComposerTokens []ComposerToken
+	ThreadID       string // empty creates the task's dedicated thread
+	Workspace      WorkspaceConfig
+	ModelProfile   *ModelProfileConfig
 }
 
 // StartScheduledRun starts an unattended Agent run for a scheduled task on
@@ -41,8 +42,9 @@ type ScheduledRunRequest struct {
 // return ErrThreadBusy, which the caller records as skipped/TASK_THREAD_BUSY.
 func (s *RunService) StartScheduledRun(req ScheduledRunRequest) (Run, error) {
 	return s.StartRun(StartRunRequest{
-		Input:     req.Prompt,
-		Workspace: req.Workspace,
+		Input:          req.Prompt,
+		ComposerTokens: cloneComposerTokens(req.ComposerTokens),
+		Workspace:      req.Workspace,
 		Client: ClientInfo{
 			EntryPoint: ScheduledClientSource,
 			Source:     ScheduledClientSource,

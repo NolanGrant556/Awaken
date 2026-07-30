@@ -4,7 +4,9 @@
 
 ## 用途
 
-`AwakenComposerBar` 用于提供紧凑任务输入栏，可作为中心入口或底部 dock 输入栏使用，并展示 repo/model/status 等元信息。它适合运行中的追加输入、首屏快速开始和停靠 composer；父级负责受控输入、结构化 token、metaItems、提交/停止和添加上下文动作，本组件负责选择原生 `AwakenComposerInput` 或统一 plaintext token editor，并布局由 `AwakenIconButton` 实现的 `AwakenContextButton`、`AwakenSendButton` 和两者的 `AwakenTooltip`。
+`AwakenComposerBar` 用于提供紧凑任务输入栏，可作为中心入口、底部 dock 输入栏或表单内嵌 prompt 编辑器使用，并展示 repo/model/status 等元信息。它适合运行中的追加输入、首屏快速开始、停靠 composer 和需要复用 Slash/token 编辑语义的受控表单；父级负责受控输入、结构化 token、metaItems、提交/停止和添加上下文动作，本组件负责选择原生 `AwakenComposerInput` 或统一 plaintext token editor，并布局由 `AwakenIconButton` 实现的 `AwakenContextButton`、`AwakenSendButton` 和两者的 `AwakenTooltip`。
+
+`variant="embedded"` 只渲染输入 surface，不渲染上下文与发送工具栏；`submitOnEnter={false}` 保留普通多行编辑，`inputAriaLabel` 由宿主表单提供准确名称。内嵌形态仍复用同一 `slashPalette`、结构化 token 和 `onStructuredInputChange`，不建立第二套 Slash UI 或 token DOM。
 
 当前 Desktop 的 `center` 与 `dock` 形态共享同一个受控模型选择入口：父级通过 `metaItems` 传入当前模型、可选模型、供应商 Logo、选中回调和“添加模型”动作，组件负责列表的展开、收起、选中标记及键盘关闭；支持推理强度的模型进入二级面板后继续复用同一枚 Logo，并用一条可拖动、可键盘操作的 Codex 式离散轨道选择档位。轨道不显示 `Effort`、提交按钮或档位文字；最低档直接落在轨道左端且不重复画圆点，其余档位圆点始终保留在中性轨道层，最高档提示点在右端内侧留出间距，而选中最高档后的白色滑块仍到达轨道右端。彩色光流从上层覆盖已经过的点，白色圆形滑块再覆盖当前点，只有滑块右侧尚未选择的中性灰点露出。往回拖时光流裁切边界后退，被覆盖的档位点会自然重新出现，不通过隐藏节点模拟。光流直接复用 `AwakenMemoryLightFlow` 的紧凑绘制变体，并单独增强细丝线宽、亮度和局部辉光；普通档为绿色，最右 `max` 档为红色，轨道本身不保存模型配置。拖动期间滑块与填充边界精确跟随指针，松手、取消或键盘选择后收敛到所选档位；`max` 仍只在指针进入最右区域并跨过像素回差后触发，避免提前变红。点击、拖动或 Arrow/Home/End 只能落在 capability 真实存在的档位并立即回调；单纯悬停或移动不变更档位。Gallery 提供三档、两档和无档位 mock，但不读取或保存真实模型配置。
 

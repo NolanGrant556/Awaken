@@ -5,6 +5,7 @@ import {
   type AwakenScheduledTaskProfileOption,
   type AwakenScheduledTaskProjectOption,
 } from "./AwakenScheduledTaskEditorDialog";
+import type { ComposerBarToken } from "../AwakenComposerBar";
 
 export const AwakenScheduledTaskEditorDemoProjects: AwakenScheduledTaskProjectOption[] = [
   { projectId: "project_awaken", name: "Awaken" },
@@ -32,6 +33,7 @@ export type AwakenScheduledTaskEditorDialogDemoState = {
   value: AwakenScheduledTaskDraft;
   errorMessage?: string;
   fieldErrors?: Partial<Record<AwakenScheduledTaskDraftField, string>>;
+  composerTokens?: ComposerBarToken[];
 };
 
 const createCronDraft: AwakenScheduledTaskDraft = {
@@ -89,6 +91,14 @@ export const AwakenScheduledTaskEditorDialogStates: AwakenScheduledTaskEditorDia
     caption: "创建 · 循环任务（每周五 08:30）",
     mode: "create",
     value: createWeeklyDraft,
+    composerTokens: [
+      {
+        id: "skill:weekly-summary:project",
+        type: "skill",
+        label: "weekly-summary",
+        title: "/Awaken/.awaken/skills/weekly-summary/SKILL.md",
+      },
+    ],
   },
   {
     id: "edit-calendar",

@@ -40,7 +40,9 @@ export type DeliverableFileType =
   | "markdown"
   | "excel"
   | "pdf"
-  | "powerpoint";
+  | "powerpoint"
+  | "image"
+  | "video";
 
 export type DeliverableFile = {
   artifactId: string;
@@ -51,6 +53,15 @@ export type DeliverableFile = {
   extension: string;
   legacy: boolean;
 };
+
+export type MediaGenerationStatus =
+  | "preparing"
+  | "queued"
+  | "generating"
+  | "downloading"
+  | "ready"
+  | "error"
+  | "cancelled";
 
 export type CompactBoundaryStatus = "started" | "finished" | "failed";
 
@@ -104,6 +115,18 @@ export type RunNarrativeItem =
   | { kind: "thinking"; id: string; text: string; status: "active" | "done" }
   | { kind: "exploring"; id: string; actions: RunAction[]; status: "active" | "done" }
   | { kind: "tool"; id: string; title: string; detail?: string; status: ToolDisplayState; toolStatus?: string }
+  | {
+      kind: "mediaGeneration";
+      id: string;
+      toolCallId: string;
+      runId?: string;
+      mediaKind: "image" | "video";
+      title: string;
+      detail?: string;
+      status: MediaGenerationStatus;
+      requestedCount?: number;
+      artifactPaths: string[];
+    }
   | { kind: "fileChange"; id: string; files: ChangedFile[]; status: "active" | "done" }
   | { kind: "memoryReceipt"; id: string; title: string; detail?: string; status: "done" | "error" }
   | {

@@ -40,7 +40,9 @@ describe("DesktopSettingsDialog", () => {
     expect(html).toContain("aw-settings-shell--full-bleed");
     expect(html).toContain("aw-model-orbit--light");
     expect(html).toContain("aw-model-orbit__sphere-canvas");
-    expect(html.match(/aw-model-orbit__logo aw-model-orbit__logo--/g)).toHaveLength(6);
+    expect(
+      html.match(/aw-model-orbit__logo aw-model-orbit__logo--/g),
+    ).toHaveLength(6);
     expect(html).toContain("aw-settings-sidebar");
     expect(html).toContain("返回应用");
     expect(html).toContain('role="dialog"');
@@ -48,6 +50,7 @@ describe("DesktopSettingsDialog", () => {
     expect(html).toContain("Coding Plan");
     expect(html).toContain("API");
     expect(html).toContain("Agent Plan");
+    expect(html).not.toContain("图片视频工具");
     expect(html).toContain("aw-model-settings__rail");
     expect(html).toContain("配置 Token");
     expect(html).toContain("LLM 设置");
@@ -113,7 +116,7 @@ describe("LLM settings cards", () => {
     expect(html).not.toContain("Function Calling");
     expect(html).not.toContain("configured-model-access-type");
     expect(html).not.toContain("默认推理强度");
-    expect(html).not.toContain('aria-pressed');
+    expect(html).not.toContain("aria-pressed");
   });
 });
 
@@ -135,30 +138,27 @@ describe("provider connection cards", () => {
           brand: "deepseek",
           selected: true,
         }),
-        React.createElement(
-          AwakenSettingsProviderModal,
-          {
-            open: true,
-            name: "DeepSeek",
-            brand: "deepseek",
-            status: "connected",
-            onClose: vi.fn(),
-            children: React.createElement(AwakenModelProviderForm, {
-              providerId: "deepseek",
-              presentation: "modal",
-              modelMode: "select",
-              models: ["deepseek-v4-pro"],
-              modelId: "deepseek-v4-pro",
-              baseURL: "https://api.deepseek.com",
-              apiKey: "",
-              apiKeyPlaceholder: "输入 DEEPSEEK_API_KEY",
-              apiDocsURL: "https://platform.deepseek.com/api_keys",
-              onModelChange: vi.fn(),
-              onBaseURLChange: vi.fn(),
-              onApiKeyChange: vi.fn(),
-            }),
-          },
-        ),
+        React.createElement(AwakenSettingsProviderModal, {
+          open: true,
+          name: "DeepSeek",
+          brand: "deepseek",
+          status: "connected",
+          onClose: vi.fn(),
+          children: React.createElement(AwakenModelProviderForm, {
+            providerId: "deepseek",
+            presentation: "modal",
+            modelMode: "select",
+            models: ["deepseek-v4-pro"],
+            modelId: "deepseek-v4-pro",
+            baseURL: "https://api.deepseek.com",
+            apiKey: "",
+            apiKeyPlaceholder: "输入 DEEPSEEK_API_KEY",
+            apiDocsURL: "https://platform.deepseek.com/api_keys",
+            onModelChange: vi.fn(),
+            onBaseURLChange: vi.fn(),
+            onApiKeyChange: vi.fn(),
+          }),
+        }),
       ),
     );
 

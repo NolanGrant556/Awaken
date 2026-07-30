@@ -2,6 +2,7 @@ package scheduledtask
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -144,6 +145,56 @@ func TestValidateAction(t *testing.T) {
 	}
 	task.Action.Kind = "webhook"
 	mustInvalid(t, v.ValidateTask(task), "action.kind")
+}
+
+func TestValidateAgentComposerTokens(t *testing.T) {
+	v := validatorAt(time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC))
+	token := ComposerToken{
+		ID:          "skill:daily-report:project",
+		Type:        "skill",
+		LeadingText: "请使用 ",
+		Label:       "daily-report",
+		Payload: ComposerTokenPayload{
+			SkillID:      "daily-report",
+			SourceOrigin: "project",
+		},
+	}
+
+	task := validTask()
+	task.Action = Action{Kind: ActionKindAgent, ComposerTokens: []ComposerToken{token}}
+	if err := v.ValidateTask(task); err != nil {
+		t.Fatalf("token-only Agent action rejected: %v", err)
+	}
+	if got := task.Action.EffectivePrompt(); got != "请使用" {
+		t.Fatalf("effective prompt = %q, want %q", got, "请使用")
+	}
+
+	task.Action.Kind = ActionKindReminder
+	mustInvalid(t, v.ValidateTask(task), "action.composer_tokens")
+
+	task.Action = Action{
+		Kind: ActionKindAgent,
+		ComposerTokens: []ComposerToken{{
+			ID: "file:brief", Type: "file", Label: "brief",
+			Payload: ComposerTokenPayload{SkillID: "daily-report"},
+		}},
+	}
+	mustInvalid(t, v.ValidateTask(task), "action.composer_tokens")
+
+	task.Action = Action{
+		Kind:           ActionKindAgent,
+		ComposerTokens: []ComposerToken{token, token},
+	}
+	mustInvalid(t, v.ValidateTask(task), "action.composer_tokens")
+
+	tooMany := make([]ComposerToken, MaxComposerTokens+1)
+	for index := range tooMany {
+		tooMany[index] = token
+		tooMany[index].ID = fmt.Sprintf("skill:daily-report-%d:project", index)
+		tooMany[index].Payload.SkillID = fmt.Sprintf("daily-report-%d", index)
+	}
+	task.Action = Action{Kind: ActionKindAgent, ComposerTokens: tooMany}
+	mustInvalid(t, v.ValidateTask(task), "action.composer_tokens")
 }
 
 func TestValidateCalendarSchedule(t *testing.T) {

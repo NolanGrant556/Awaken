@@ -13,9 +13,14 @@ import {
   type ACPRunnerView,
   type AgentPlanAccount,
   type AgentPlanAccountSaveRequest,
+  type AgentPlanMediaCapability,
+  type AgentPlanMediaToolSaveRequest,
+  type AgentPlanMediaTools,
+  type AgentPlanMediaToolsSaveResult,
   type AttachmentPickResult,
   type ArtifactOpenRequest,
   type ArtifactOpenResult,
+  type ArtifactMediaSourceResult,
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
@@ -313,6 +318,8 @@ const bridge: AwakenBridge = {
     ) as Promise<RuntimeProjectOperation>,
   openArtifact: (request: ArtifactOpenRequest) =>
     ipcRenderer.invoke("awaken:open-artifact", request) as Promise<ArtifactOpenResult>,
+  getArtifactMediaSource: (request: ArtifactOpenRequest) =>
+    ipcRenderer.invoke("awaken:get-artifact-media-source", request) as Promise<ArtifactMediaSourceResult>,
   revealPath: (target: string) =>
     ipcRenderer.invoke("awaken:reveal-path", target) as Promise<{
       ok: boolean;
@@ -474,6 +481,20 @@ const bridge: AwakenBridge = {
     >,
   deleteAgentPlanAccount: () =>
     ipcRenderer.invoke("awaken:delete-agent-plan-account") as Promise<void>,
+  getAgentPlanMediaTools: () =>
+    ipcRenderer.invoke(
+      "awaken:get-agent-plan-media-tools",
+    ) as Promise<AgentPlanMediaTools>,
+  saveAgentPlanMediaTool: (request: AgentPlanMediaToolSaveRequest) =>
+    ipcRenderer.invoke(
+      "awaken:save-agent-plan-media-tool",
+      request,
+    ) as Promise<AgentPlanMediaToolsSaveResult>,
+  deleteAgentPlanMediaTool: (capability: AgentPlanMediaCapability) =>
+    ipcRenderer.invoke(
+      "awaken:delete-agent-plan-media-tool",
+      capability,
+    ) as Promise<AgentPlanMediaToolsSaveResult>,
   saveModelProfile: (request: ModelProfileSaveRequest) =>
     ipcRenderer.invoke("awaken:save-model-profile", request) as Promise<
       DesktopOperationResult<RuntimeModelProfileSummary>

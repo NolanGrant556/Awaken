@@ -181,6 +181,37 @@
   resize: vertical;
 }
 
+.aw-scheduled-task-editor__agent-composer .composer-bar-embedded {
+  gap: 0;
+}
+
+.aw-scheduled-task-editor__agent-composer .composer-bar-surface {
+  grid-template-rows: minmax(132px, auto);
+  align-content: stretch;
+  min-height: 132px;
+  padding: 10px 11px;
+  border-color: var(--aw-border-control);
+  border-radius: 9px;
+  background: var(--aw-bg-white);
+  box-shadow: none;
+}
+
+.aw-scheduled-task-editor__agent-composer .composer-bar-surface:hover {
+  border-color: var(--aw-border-control-hover);
+  background: var(--aw-surface-hover);
+}
+
+.aw-scheduled-task-editor__agent-composer .composer-bar-surface:focus-within {
+  border-color: var(--aw-border-active);
+  background: var(--aw-bg-white);
+  box-shadow: var(--aw-shadow-focus);
+}
+
+.aw-scheduled-task-editor__agent-composer .composer-bar-input-row,
+.aw-scheduled-task-editor__agent-composer .composer-bar-input-wrap {
+  min-height: 100%;
+}
+
 .aw-scheduled-task-editor__switch-row {
   display: flex;
   align-items: center;

@@ -440,6 +440,49 @@ describe("scheduled task wire normalization", () => {
     expect(task.templateOrigin).toBeUndefined();
   });
 
+  it("normalizes scheduled Agent composer tokens without flattening their identity", () => {
+    const task = normalizeScheduledTask({
+      task_id: "sched_skill",
+      version: 1,
+      name: "Skill 日报",
+      enabled: true,
+      project_id: "project-1",
+      schedule: { kind: "cron", cron: "0 9 * * *", timezone: "UTC" },
+      action: {
+        kind: "agent",
+        content: "生成日报",
+        composer_tokens: [
+          {
+            id: "skill:daily-report:project",
+            type: "skill",
+            label: "daily-report",
+            leadingText: "请使用 ",
+            payload: {
+              skillId: "daily-report",
+              sourceOrigin: "project",
+              skillFilePath: "/workspace/.awaken/skills/daily-report/SKILL.md",
+              rootDir: "/workspace/.awaken/skills/daily-report",
+            },
+          },
+        ],
+      },
+      execution: { profile_id: "", timeout_seconds: 600, misfire_grace_seconds: 600 },
+      state: "enabled",
+      next_run_at: null,
+      last_execution: null,
+      created_at: "2026-07-01T00:00:00Z",
+      updated_at: "2026-07-01T00:00:00Z",
+    });
+
+    expect(task.action.composerTokens).toEqual([
+      expect.objectContaining({
+        id: "skill:daily-report:project",
+        leadingText: "请使用 ",
+        payload: expect.objectContaining({ skillId: "daily-report", sourceOrigin: "project" }),
+      }),
+    ]);
+  });
+
   it("normalizes executions and treats the Go zero time as absent", () => {
     const queued: ScheduledTaskExecutionWire = {
       execution_id: "exec_1",
@@ -542,7 +585,18 @@ describe("scheduled task wire normalization", () => {
           repeatEveryDays: 1,
           repeatEnd: { kind: "count", count: 30 },
         },
-        action: { kind: "agent", content: "写日报" },
+        action: {
+          kind: "agent",
+          content: "写日报",
+          composerTokens: [
+            {
+              id: "skill:daily-report:project",
+              type: "skill",
+              label: "daily-report",
+              payload: { skillId: "daily-report", sourceOrigin: "project" },
+            },
+          ],
+        },
         execution: { profileId: "profile-1", timeoutSeconds: 1200, misfireGraceSeconds: 600 },
         templateOrigin: { templateId: "daily-report", source: "builtin" },
       }),
@@ -557,7 +611,18 @@ describe("scheduled task wire normalization", () => {
         repeat_every_days: 1,
         repeat_end: { kind: "count", count: 30, until: undefined },
       },
-      action: { kind: "agent", content: "写日报" },
+      action: {
+        kind: "agent",
+        content: "写日报",
+        composer_tokens: [
+          {
+            id: "skill:daily-report:project",
+            type: "skill",
+            label: "daily-report",
+            payload: { skillId: "daily-report", sourceOrigin: "project" },
+          },
+        ],
+      },
       execution: { profile_id: "profile-1", timeout_seconds: 1200, misfire_grace_seconds: 600 },
       template_origin: { template_id: "daily-report", source: "builtin" },
     });
@@ -569,6 +634,18 @@ describe("scheduled task wire normalization", () => {
         expectedVersion: 4,
         name: "改名",
         schedule: { kind: "cron", cron: "30 8 * * *", timezone: "UTC" },
+        action: {
+          kind: "agent",
+          content: "复盘",
+          composerTokens: [
+            {
+              id: "skill:weekly-review:user",
+              type: "skill",
+              label: "weekly-review",
+              payload: { skillId: "weekly-review", sourceOrigin: "user" },
+            },
+          ],
+        },
       }),
     ).toEqual({
       expected_version: 4,
@@ -576,7 +653,18 @@ describe("scheduled task wire normalization", () => {
       enabled: undefined,
       project_id: undefined,
       schedule: { kind: "cron", cron: "30 8 * * *", timezone: "UTC" },
-      action: undefined,
+      action: {
+        kind: "agent",
+        content: "复盘",
+        composer_tokens: [
+          {
+            id: "skill:weekly-review:user",
+            type: "skill",
+            label: "weekly-review",
+            payload: { skillId: "weekly-review", sourceOrigin: "user" },
+          },
+        ],
+      },
       execution: undefined,
       template_origin: undefined,
     });

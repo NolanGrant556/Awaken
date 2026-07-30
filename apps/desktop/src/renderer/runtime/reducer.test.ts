@@ -1569,6 +1569,46 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
+  it("projects ready image and video artifacts into final deliverables", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Create media" },
+      runEvent({
+        type: "AWAKEN_ARTIFACT_CREATED",
+        seq: 1,
+        artifactId: "image-1",
+        artifactTitle: "主视觉.png",
+        artifactKind: "image",
+        artifactPath: "output/generated-media/image.png",
+        artifactStatus: "ready",
+        artifactRole: "deliverable",
+        artifactContractVersion: 2,
+        artifactProducer: "image_generate",
+      }),
+      runEvent({
+        type: "AWAKEN_ARTIFACT_CREATED",
+        seq: 2,
+        artifactId: "video-1",
+        artifactTitle: "成片.mp4",
+        artifactKind: "video",
+        artifactPath: "output/generated-media/video.mp4",
+        artifactStatus: "ready",
+        artifactRole: "deliverable",
+        artifactContractVersion: 2,
+        artifactProducer: "video_generate",
+      }),
+      runEvent({ type: "RUN_FINISHED", seq: 3, result: "done" }),
+    ]);
+
+    expect(
+      state.narrative.committedItems.find((item) => item.kind === "deliverables"),
+    ).toMatchObject({
+      files: [
+        { artifactId: "image-1", fileType: "image", extension: "png" },
+        { artifactId: "video-1", fileType: "video", extension: "mp4" },
+      ],
+    });
+  });
+
   it("renders every created or modified document and excludes deleted documents", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Create and update reports" },

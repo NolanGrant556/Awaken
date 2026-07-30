@@ -160,6 +160,70 @@ type storedAgentPlanAccount struct {
 	Version            int    `json:"version"`
 	AccountID          string `json:"accountId"`
 	CredentialRevision uint64 `json:"credentialRevision"`
+	Catalog            []struct {
+		ID   string `json:"id"`
+		Kind string `json:"kind"`
+	} `json:"catalog"`
+}
+
+// AgentPlanCredential is the Core-only credential view for provider tools.
+// It is never serialized into tool arguments, outcomes, or renderer payloads.
+type AgentPlanCredential struct {
+	APIKey             string
+	CredentialRevision uint64
+}
+
+// ResolveAgentPlanCredential reads the Desktop-owned provider account without
+// accepting a secret from a run request. The fixed account id remains part of
+// the key name so future accounts do not silently share credentials.
+func ResolveAgentPlanCredential(root, accountID string) (AgentPlanCredential, error) {
+	root = strings.TrimSpace(root)
+	accountID = strings.TrimSpace(accountID)
+	if root == "" || accountID == "" || !profileIDPattern.MatchString(accountID) {
+		return AgentPlanCredential{}, ErrProfileUnavailable
+	}
+	account, err := readAgentPlanAccount(filepath.Join(root, "config", "agent-plan-account.json"))
+	if err != nil {
+		return AgentPlanCredential{}, fmt.Errorf("read Agent Plan account: %w", err)
+	}
+	if strings.TrimSpace(account.AccountID) != accountID || account.CredentialRevision == 0 {
+		return AgentPlanCredential{}, ErrProfileUnavailable
+	}
+	env, err := readEnvFile(filepath.Join(root, ".env"))
+	if err != nil {
+		return AgentPlanCredential{}, fmt.Errorf("read Agent Plan credential: %w", err)
+	}
+	apiKey := strings.TrimSpace(env["AWAKEN_AGENT_PLAN_API_KEY_"+accountID])
+	if apiKey == "" {
+		return AgentPlanCredential{}, ErrProfileUnavailable
+	}
+	return AgentPlanCredential{APIKey: apiKey, CredentialRevision: account.CredentialRevision}, nil
+}
+
+// ResolveAgentPlanModelKind returns the Main-classified catalog kind used as a
+// defense-in-depth check by Core provider tools. Unknown or absent entries fail
+// closed instead of letting a hand-edited media configuration select a model.
+func ResolveAgentPlanModelKind(root, accountID, modelID string) (string, error) {
+	root = strings.TrimSpace(root)
+	accountID = strings.TrimSpace(accountID)
+	modelID = strings.TrimSpace(modelID)
+	if root == "" || accountID == "" || modelID == "" || !profileIDPattern.MatchString(accountID) {
+		return "", ErrProfileUnavailable
+	}
+	account, err := readAgentPlanAccount(filepath.Join(root, "config", "agent-plan-account.json"))
+	if err != nil || strings.TrimSpace(account.AccountID) != accountID {
+		return "", ErrProfileUnavailable
+	}
+	for _, entry := range account.Catalog {
+		if strings.TrimSpace(entry.ID) == modelID {
+			kind := strings.TrimSpace(entry.Kind)
+			if kind == "" {
+				return "", ErrProfileUnavailable
+			}
+			return kind, nil
+		}
+	}
+	return "", ErrProfileUnavailable
 }
 
 type capabilityCacheFile struct {
@@ -252,7 +316,15 @@ func (s *UserStore) loadReady() ([]ResolvedProfile, error) {
 				accountID = "volcengine-agent-plan-default"
 			}
 			keyName = "AWAKEN_AGENT_PLAN_API_KEY_" + accountID
-			if account, accountErr := readAgentPlanAccount(filepath.Join(s.root, "config", "agent-plan-account.json")); accountErr == nil && account.CredentialRevision > 0 {
+			account, accountErr := readAgentPlanAccount(filepath.Join(s.root, "config", "agent-plan-account.json"))
+			if accountErr != nil {
+				if stored.ProviderID == "volcengine-agent-plan" {
+					continue
+				}
+			} else if account.CredentialRevision > 0 {
+				if stored.ProviderID == "volcengine-agent-plan" && !agentPlanAccountAllowsLLM(account, stored.ModelID) {
+					continue
+				}
 				effectiveRevision = account.CredentialRevision
 			}
 		}
@@ -553,6 +625,19 @@ func readAgentPlanAccount(path string) (storedAgentPlanAccount, error) {
 		return storedAgentPlanAccount{}, err
 	}
 	return account, nil
+}
+
+func agentPlanAccountAllowsLLM(account storedAgentPlanAccount, modelID string) bool {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "ark-code-latest" {
+		return true
+	}
+	for _, entry := range account.Catalog {
+		if strings.TrimSpace(entry.ID) == modelID {
+			return strings.TrimSpace(entry.Kind) == "llm"
+		}
+	}
+	return false
 }
 
 func readEnvFile(path string) (map[string]string, error) {

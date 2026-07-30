@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   RuntimeModelProfileSummary,
   RuntimeProject,
+  RuntimeSkill,
   ScheduledTask,
   ScheduledTaskEvent,
 } from "../shared/runtime";
@@ -35,6 +36,20 @@ const readyProfile: RuntimeModelProfileSummary = {
   enabled: true,
   isDefault: true,
   profileStatus: "ready",
+};
+
+const dailyReportSkill: RuntimeSkill = {
+  id: "daily-report",
+  catalogEntryId: "catalog-daily-report",
+  name: "daily-report",
+  displayName: "日报 Skill",
+  description: "生成项目日报",
+  state: "loaded",
+  sourceOrigin: "project",
+  rootDir: "/workspace/alpha/.awaken/skills/daily-report",
+  skillFilePath: "/workspace/alpha/.awaken/skills/daily-report/SKILL.md",
+  projectPath: "/workspace/alpha",
+  context: "inline",
 };
 
 function cronTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
@@ -289,6 +304,61 @@ describe("ScheduledTasksView", () => {
         projectId: "project-1",
         action: { kind: "reminder", content: "记得喝水" },
         schedule: { kind: "cron", cron: "0 9 * * *", timezone: "Asia/Shanghai" },
+      }),
+    );
+  });
+
+  it("uses the home Composer slash menu and persists the selected Skill token", async () => {
+    const created = cronTask({ taskId: "task-skill" });
+    const createScheduledTask = vi.fn(async () => created);
+    const listSkills = vi.fn(async () => [dailyReportSkill]);
+    await renderView(
+      createRuntimeClientMock({ createScheduledTask, listSkills }),
+    );
+
+    await click(buttonByText("创建任务"));
+    await setFieldValue(
+      document.querySelector<HTMLInputElement>('input[aria-label="任务名称"]'),
+      "自动日报",
+    );
+    await click(buttonByAriaLabel("运行项目"));
+    await click(document.querySelector<HTMLButtonElement>('button[role="option"]'));
+    await click(buttonByText("Agent"));
+
+    const prompt = document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Agent prompt"]',
+    );
+    await setFieldValue(prompt, "/daily");
+
+    expect(listSkills).toHaveBeenCalledWith(["/workspace/alpha"]);
+    expect(document.querySelector('[aria-label="Slash actions"]')).toBeTruthy();
+    await click(buttonByText("日报 Skill"));
+
+    expect(document.querySelector('[data-composer-token-id="skill:daily-report:project"]'))
+      .toBeTruthy();
+    await click(buttonByText("保存任务"));
+
+    expect(createScheduledTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "自动日报",
+        projectId: "project-1",
+        action: {
+          kind: "agent",
+          content: "",
+          composerTokens: [
+            {
+              id: "skill:daily-report:project",
+              type: "skill",
+              label: "日报 Skill",
+              payload: {
+                skillId: "daily-report",
+                sourceOrigin: "project",
+                skillFilePath: "/workspace/alpha/.awaken/skills/daily-report/SKILL.md",
+                rootDir: "/workspace/alpha/.awaken/skills/daily-report",
+              },
+            },
+          ],
+        },
       }),
     );
   });

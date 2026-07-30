@@ -170,7 +170,13 @@ function stubElectronBridge(): void {
       setPrimaryProjectFolder: vi.fn(),
       trashProjectFolder: vi.fn(),
       getProjectOperation: vi.fn(),
-      openArtifact: vi.fn(async () => ({ ok: true as const })),
+    openArtifact: vi.fn(async () => ({ ok: true as const })),
+    getArtifactMediaSource: vi.fn(async () => ({
+      ok: true as const,
+      src: "awaken-artifact://media/test/artifact.png",
+      mimeType: "image/png",
+      byteLength: 128,
+    })),
       revealPath: vi.fn(async () => ({ ok: true as const })),
       revealArtifact: vi.fn(async () => ({ ok: true as const })),
       startRun: vi.fn(),
@@ -223,10 +229,20 @@ function stubElectronBridge(): void {
         hasKey: false,
         credentialRevision: 1,
         modelIds: ["ark-code-latest"],
+        catalog: [{ id: "ark-code-latest", kind: "llm" as const }],
       })),
       saveAgentPlanAccount: vi.fn(),
       refreshAgentPlanModels: vi.fn(),
       deleteAgentPlanAccount: vi.fn(async () => undefined),
+      getAgentPlanMediaTools: vi.fn(async () => ({ configurations: [] })),
+      saveAgentPlanMediaTool: vi.fn(async () => ({
+        settings: { configurations: [] },
+        restartStatus: "restarted" as const,
+      })),
+      deleteAgentPlanMediaTool: vi.fn(async () => ({
+        settings: { configurations: [] },
+        restartStatus: "restarted" as const,
+      })),
       saveModelProfile: vi.fn(),
       deleteModelProfile: vi.fn(),
       setDefaultModelProfile: vi.fn(),
@@ -3134,6 +3150,52 @@ describe("App workbench presentation", () => {
         kind: "items",
         id: "answer-and-after:prompt:thread-1:1",
         items: [finalAnswer],
+      },
+    ]);
+  });
+
+  it("keeps a ready media result outside the collapsed execution process", () => {
+    const thinking = {
+      kind: "thinking",
+      id: "thinking:media",
+      text: "准备提示词",
+      status: "done",
+    } as const;
+    const media: Extract<RunNarrativeItem, { kind: "mediaGeneration" }> = {
+      kind: "mediaGeneration",
+      id: "media:run-1:call-1",
+      toolCallId: "call-1",
+      runId: "run-1",
+      mediaKind: "image",
+      title: "图片生成",
+      detail: "图片已生成",
+      status: "ready",
+      artifactPaths: ["output/generated-media/image.png"],
+    };
+    const answer = {
+      kind: "answer",
+      id: "answer:media",
+      markdown: "图片已经完成。",
+      status: "done",
+      isFinal: true,
+    } as const;
+
+    expect(projectNarrativeTurnBodySegments({
+      turnId: "prompt:media",
+      items: [thinking, media, answer],
+      executionProcessOpen: false,
+    })).toEqual([
+      {
+        kind: "executionProcess",
+        id: "execution-process:prompt:media",
+        title: "执行过程",
+        items: [thinking],
+        open: false,
+      },
+      {
+        kind: "items",
+        id: "answer-and-after:prompt:media",
+        items: [media, answer],
       },
     ]);
   });

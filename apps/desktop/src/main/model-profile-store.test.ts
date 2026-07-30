@@ -1,4 +1,12 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -32,12 +40,21 @@ afterEach(async () => {
 describe("ModelProfileStore", () => {
   it("groups the ten entries into Coding Plan, API, and Agent Plan", () => {
     const providers = new ModelProfileStore(configDir).listProviders();
-    expect(providers.filter((provider) => provider.access_type === "coding_plan").map((provider) => provider.id))
-      .toEqual(["kimi-coding-plan", "volcengine", "qwen-token-plan"]);
-    expect(providers.filter((provider) => provider.access_type === "api").map((provider) => provider.id))
-      .toEqual(["kimi-cn", "minimax", "glm", "qwen", "doubao", "deepseek"]);
-    expect(providers.filter((provider) => provider.access_type === "agent_plan").map((provider) => provider.id))
-      .toEqual(["volcengine-agent-plan"]);
+    expect(
+      providers
+        .filter((provider) => provider.access_type === "coding_plan")
+        .map((provider) => provider.id),
+    ).toEqual(["kimi-coding-plan", "volcengine", "qwen-token-plan"]);
+    expect(
+      providers
+        .filter((provider) => provider.access_type === "api")
+        .map((provider) => provider.id),
+    ).toEqual(["kimi-cn", "minimax", "glm", "qwen", "doubao", "deepseek"]);
+    expect(
+      providers
+        .filter((provider) => provider.access_type === "agent_plan")
+        .map((provider) => provider.id),
+    ).toEqual(["volcengine-agent-plan"]);
   });
 
   it("resolves the requested enabled profile instead of forcing the global default", async () => {
@@ -64,7 +81,9 @@ describe("ModelProfileStore", () => {
       modelId: "kimi-k3",
       reasoningEffort: "low",
     });
-    expect((await store.resolveRunProfile(first.id, "low"))?.reasoningEffort).toBe("high");
+    expect(
+      (await store.resolveRunProfile(first.id, "low"))?.reasoningEffort,
+    ).toBe("high");
   });
 
   it("treats configured models as tool-capable without a separate probe", async () => {
@@ -86,12 +105,15 @@ describe("ModelProfileStore", () => {
   });
 
   it("reveals Agent Plan effort only after an exact model accepts the controlled parameter", async () => {
-    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) =>
-      ({
-        ok: true,
-        status: 200,
-        json: async () => ({ data: url.endsWith("/models") ? [{ id: "glm-5.2" }] : [] }),
-      }) as Response
+    const fetchMock = vi.fn(
+      async (url: string, _init?: RequestInit) =>
+        ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: url.endsWith("/models") ? [{ id: "glm-5.2" }] : [],
+          }),
+        }) as Response,
     );
     vi.stubGlobal("fetch", fetchMock);
     const store = new ModelProfileStore(configDir);
@@ -101,33 +123,44 @@ describe("ModelProfileStore", () => {
       modelId: "glm-5.2",
     });
 
-    await expect(store.testAgentPlanReasoningCapability({
-      id: profile.id,
-      providerId: "volcengine-agent-plan",
-      modelId: "glm-5.2",
-      baseURL: "https://ignored.example/v1",
-      apiKey: "test-key",
-    })).resolves.toMatchObject({
+    await expect(
+      store.testAgentPlanReasoningCapability({
+        id: profile.id,
+        providerId: "volcengine-agent-plan",
+        modelId: "glm-5.2",
+        baseURL: "https://ignored.example/v1",
+        apiKey: "test-key",
+      }),
+    ).resolves.toMatchObject({
       ok: true,
       reasoningEffort: { levels: ["high", "max"], defaultLevel: "high" },
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(
-      fetchMock.mock.calls.filter(([, init]) => init?.body).map(([, init]) =>
-        JSON.parse((init as RequestInit).body as string),
-      ),
+      fetchMock.mock.calls
+        .filter(([, init]) => init?.body)
+        .map(([, init]) => JSON.parse((init as RequestInit).body as string)),
     ).toEqual([
       expect.objectContaining({ reasoning_effort: "high" }),
       expect.objectContaining({ reasoning_effort: "max" }),
     ]);
     expect(
-      fetchMock.mock.calls.every(([, init]) => (init as RequestInit).signal instanceof AbortSignal),
+      fetchMock.mock.calls.every(
+        ([, init]) => (init as RequestInit).signal instanceof AbortSignal,
+      ),
     ).toBe(true);
-    expect(store.listProviders().find((provider) => provider.id === "volcengine-agent-plan")
-      ?.model_capabilities?.["glm-5.2"]?.reasoning_effort).toBeUndefined();
-    await expect(store.reasoningCapabilityForProfile(profile.id)).resolves.toEqual({
-      levels: ["high", "max"], default_level: "high",
+    expect(
+      store
+        .listProviders()
+        .find((provider) => provider.id === "volcengine-agent-plan")
+        ?.model_capabilities?.["glm-5.2"]?.reasoning_effort,
+    ).toBeUndefined();
+    await expect(
+      store.reasoningCapabilityForProfile(profile.id),
+    ).resolves.toEqual({
+      levels: ["high", "max"],
+      default_level: "high",
     });
     await expect(store.listProfiles()).resolves.toEqual([
       expect.objectContaining({
@@ -147,20 +180,25 @@ describe("ModelProfileStore", () => {
     vi.stubGlobal("fetch", fetchMock);
     const store = new ModelProfileStore(configDir);
 
-    await expect(store.testAgentPlanReasoningCapability({
-      providerId: "volcengine-agent-plan",
-      modelId: "qwen3.8-max-preview",
-      apiKey: "test-key",
-    })).resolves.toMatchObject({ ok: false });
+    await expect(
+      store.testAgentPlanReasoningCapability({
+        providerId: "volcengine-agent-plan",
+        modelId: "qwen3.8-max-preview",
+        apiKey: "test-key",
+      }),
+    ).resolves.toMatchObject({ ok: false });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(
-      fetchMock.mock.calls.map(([, init]) =>
-        JSON.parse((init as RequestInit).body as string).reasoning_effort,
+      fetchMock.mock.calls.map(
+        ([, init]) =>
+          JSON.parse((init as RequestInit).body as string).reasoning_effort,
       ),
     ).toEqual(["low", "medium"]);
     expect(
-      store.listProviders().find((provider) => provider.id === "volcengine-agent-plan")
+      store
+        .listProviders()
+        .find((provider) => provider.id === "volcengine-agent-plan")
         ?.model_capabilities?.["qwen3.8-max-preview"]?.reasoning_effort,
     ).toBeUndefined();
     await expect(
@@ -173,12 +211,15 @@ describe("ModelProfileStore", () => {
     try {
       vi.stubGlobal(
         "fetch",
-        vi.fn((_url: string, init?: RequestInit) =>
-          new Promise<Response>((_resolve, reject) => {
-            init?.signal?.addEventListener("abort", () => {
-              reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
-            });
-          }),
+        vi.fn(
+          (_url: string, init?: RequestInit) =>
+            new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener("abort", () => {
+                reject(
+                  Object.assign(new Error("aborted"), { name: "AbortError" }),
+                );
+              });
+            }),
         ),
       );
       const store = new ModelProfileStore(configDir);
@@ -203,13 +244,17 @@ describe("ModelProfileStore", () => {
 
   it("keeps ark-code-latest effort hidden", async () => {
     const store = new ModelProfileStore(configDir);
-    await expect(store.testAgentPlanReasoningCapability({
-      providerId: "volcengine-agent-plan",
-      modelId: "ark-code-latest",
-      apiKey: "test-key",
-    })).resolves.toMatchObject({ ok: false });
+    await expect(
+      store.testAgentPlanReasoningCapability({
+        providerId: "volcengine-agent-plan",
+        modelId: "ark-code-latest",
+        apiKey: "test-key",
+      }),
+    ).resolves.toMatchObject({ ok: false });
     expect(
-      store.listProviders().find((provider) => provider.id === "volcengine-agent-plan")
+      store
+        .listProviders()
+        .find((provider) => provider.id === "volcengine-agent-plan")
         ?.model_capabilities?.["ark-code-latest"]?.reasoning_effort,
     ).toBeUndefined();
   });
@@ -230,7 +275,9 @@ describe("ModelProfileStore", () => {
 
   it("exposes Volcengine Coding Plan models as suggestions while allowing custom IDs", () => {
     const store = new ModelProfileStore(configDir);
-    const volcengine = store.listProviders().find((provider) => provider.id === "volcengine");
+    const volcengine = store
+      .listProviders()
+      .find((provider) => provider.id === "volcengine");
 
     expect(volcengine).toMatchObject({
       display_name: "火山 Coding Plan",
@@ -238,7 +285,12 @@ describe("ModelProfileStore", () => {
       allow_custom_model: true,
     });
     expect(volcengine?.models).toEqual(
-      expect.arrayContaining(["deepseek-v4-pro", "glm-5.2", "kimi-k2.7-code", "minimax-m3"]),
+      expect.arrayContaining([
+        "deepseek-v4-pro",
+        "glm-5.2",
+        "kimi-k2.7-code",
+        "minimax-m3",
+      ]),
     );
   });
 
@@ -296,27 +348,32 @@ describe("ModelProfileStore", () => {
   it("does not treat a profileless connection-test body as scoped capability metadata", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          data: [{ id: "deepseek-v4-pro", context_window: 256_000 }],
-        }),
-      }) as Response),
+      vi.fn(
+        async () =>
+          ({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: [{ id: "deepseek-v4-pro", context_window: 256_000 }],
+            }),
+          }) as Response,
+      ),
     );
     const store = new ModelProfileStore(configDir);
 
-    await expect(store.testProfile({
-      providerId: "deepseek",
-      displayName: "DeepSeek",
-      modelId: "deepseek-v4-pro",
-      baseURL: "https://api.deepseek.com",
-      protocol: "openai_chat",
-      authScheme: "bearer",
-      apiKey: "test-key",
-      enabled: true,
-      isDefault: true,
-    })).resolves.toMatchObject({ ok: true });
+    await expect(
+      store.testProfile({
+        providerId: "deepseek",
+        displayName: "DeepSeek",
+        modelId: "deepseek-v4-pro",
+        baseURL: "https://api.deepseek.com",
+        protocol: "openai_chat",
+        authScheme: "bearer",
+        apiKey: "test-key",
+        enabled: true,
+        isDefault: true,
+      }),
+    ).resolves.toMatchObject({ ok: true });
 
     await expect(
       readFile(join(configDir, "cache", "model-capabilities.json"), "utf8"),
@@ -324,7 +381,9 @@ describe("ModelProfileStore", () => {
   });
 
   it("normalizes the Kimi Code base URL before testing", async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
+    const fetchMock = vi.fn(
+      async () => ({ ok: true, status: 200 }) as Response,
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const store = new ModelProfileStore(configDir);
@@ -356,35 +415,55 @@ describe("ModelProfileStore", () => {
   it("writes connection-test request and nullable usage to an independent profile JSONL", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        status: 200,
-        headers: { get: (name: string) => name === "x-request-id" ? "provider-req-1" : null },
-        json: async () => ({
-          usage: { prompt_tokens: 20, cached_tokens: 5, completion_tokens: 1, total_tokens: 21 },
-        }),
-      }) as Response),
+      vi.fn(
+        async () =>
+          ({
+            ok: true,
+            status: 200,
+            headers: {
+              get: (name: string) =>
+                name === "x-request-id" ? "provider-req-1" : null,
+            },
+            json: async () => ({
+              usage: {
+                prompt_tokens: 20,
+                cached_tokens: 5,
+                completion_tokens: 1,
+                total_tokens: 21,
+              },
+            }),
+          }) as Response,
+      ),
     );
     const store = new ModelProfileStore(configDir);
-    await expect(store.testProfile({
-      id: "profile-usage",
-      providerId: "deepseek",
-      displayName: "DeepSeek",
-      modelId: "deepseek-v4-pro",
-      baseURL: "https://api.deepseek.com",
-      protocol: "openai_chat",
-      authScheme: "bearer",
-      apiKey: "secret-key-not-for-ledger",
-      enabled: true,
-      isDefault: true,
-    })).resolves.toMatchObject({ ok: true });
+    await expect(
+      store.testProfile({
+        id: "profile-usage",
+        providerId: "deepseek",
+        displayName: "DeepSeek",
+        modelId: "deepseek-v4-pro",
+        baseURL: "https://api.deepseek.com",
+        protocol: "openai_chat",
+        authScheme: "bearer",
+        apiKey: "secret-key-not-for-ledger",
+        enabled: true,
+        isDefault: true,
+      }),
+    ).resolves.toMatchObject({ ok: true });
 
     const usageRoot = join(configDir, "usage", "model-profiles");
     expect(await readdir(usageRoot)).toEqual(["profile-usage.jsonl"]);
     const text = await readFile(join(usageRoot, "profile-usage.jsonl"), "utf8");
-    const records = text.trim().split("\n").map((line) => JSON.parse(line));
+    const records = text
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
     expect(records).toHaveLength(2);
-    expect(records[0]).toMatchObject({ kind: "model_request", purpose: "connection_test", max_output_tokens: 1 });
+    expect(records[0]).toMatchObject({
+      kind: "model_request",
+      purpose: "connection_test",
+      max_output_tokens: 1,
+    });
     expect(records[1]).toMatchObject({
       kind: "model_usage",
       request_id: records[0].request_id,
@@ -396,11 +475,15 @@ describe("ModelProfileStore", () => {
       pricing_snapshot: { effective_date: "2026-07-19" },
     });
     expect(text).not.toContain("secret-key-not-for-ledger");
-    expect((await stat(join(usageRoot, "profile-usage.jsonl"))).mode & 0o777).toBe(0o600);
+    expect(
+      (await stat(join(usageRoot, "profile-usage.jsonl"))).mode & 0o777,
+    ).toBe(0o600);
   });
 
   it("tests the selected K3 model ID", async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
+    const fetchMock = vi.fn(
+      async () => ({ ok: true, status: 200 }) as Response,
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const store = new ModelProfileStore(configDir);
@@ -427,7 +510,9 @@ describe("ModelProfileStore", () => {
   });
 
   it("normalizes Volcengine Coding Plan base URL and model before testing", async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
+    const fetchMock = vi.fn(
+      async () => ({ ok: true, status: 200 }) as Response,
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const store = new ModelProfileStore(configDir);
@@ -794,9 +879,14 @@ describe("ModelProfileStore", () => {
       setKey: async () => undefined,
       deleteKey: async () => undefined,
     };
-    const unreadableStore = new ModelProfileStore(configDir, unreadableKeyStore);
+    const unreadableStore = new ModelProfileStore(
+      configDir,
+      unreadableKeyStore,
+    );
 
-    await expect(unreadableStore.resolveDefaultRunProfile()).rejects.toMatchObject({
+    await expect(
+      unreadableStore.resolveDefaultRunProfile(),
+    ).rejects.toMatchObject({
       name: "AwakenEnvStoreError",
       code: "unreadable",
     });
@@ -820,7 +910,7 @@ describe("ModelProfileStore", () => {
 
     const saved = await store.saveProfile({
       providerId: "volcengine-agent-plan",
-      modelId: "glm-5.2",
+      modelId: "ark-code-latest",
       enabled: true,
       isDefault: true,
     });
@@ -843,16 +933,17 @@ describe("ModelProfileStore", () => {
 
   it("restores Agent Plan key, metadata, revision, and catalog when combined profile save fails", async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      const authorization = new Headers(init?.headers).get("Authorization") ?? "";
+      const authorization =
+        new Headers(init?.headers).get("Authorization") ?? "";
       if (authorization.includes("new-secret")) {
         await rm(modelsPath(), { force: true });
         await mkdir(modelsPath());
-        return new Response(JSON.stringify({ data: [{ id: "new-model" }] }), {
+        return new Response(JSON.stringify({ data: [{ id: "glm-new" }] }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
       }
-      return new Response(JSON.stringify({ data: [{ id: "old-model" }] }), {
+      return new Response(JSON.stringify({ data: [{ id: "glm-old" }] }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
@@ -866,24 +957,33 @@ describe("ModelProfileStore", () => {
     const previousMetadataRaw = await readFile(metadataPath, "utf8");
     const previousEnv = await readFile(envPath, "utf8");
 
-    await expect(store.saveProfile({
-      providerId: "volcengine-agent-plan",
-      modelId: "glm-5.2",
-      apiKey: "new-secret",
-      enabled: true,
-      isDefault: true,
-    })).rejects.toBeInstanceOf(Error);
+    await expect(
+      store.saveProfile({
+        providerId: "volcengine-agent-plan",
+        modelId: "glm-old",
+        apiKey: "new-secret",
+        enabled: true,
+        isDefault: true,
+      }),
+    ).rejects.toBeInstanceOf(Error);
 
     expect(await readFile(metadataPath, "utf8")).toBe(previousMetadataRaw);
     expect(await readFile(envPath, "utf8")).toBe(previousEnv);
     await expect(store.getAgentPlanAccount()).resolves.toMatchObject({
       masked_key: "•••• cret",
       credential_revision: 1,
-      model_ids: ["ark-code-latest", "old-model"],
+      model_ids: expect.arrayContaining([
+        "ark-code-latest",
+        "glm-old",
+        "doubao-seedream-5.0-lite",
+        "doubao-seedance-2.0",
+      ]),
     });
     expect(
-      store.listProviders().find((provider) => provider.id === "volcengine-agent-plan")?.models,
-    ).toEqual(["ark-code-latest", "old-model"]);
+      store
+        .listProviders()
+        .find((provider) => provider.id === "volcengine-agent-plan")?.models,
+    ).toEqual(["ark-code-latest", "glm-old"]);
   });
 
   it("normalizes an existing Volcengine Coding Plan profile to the coding gateway", async () => {
@@ -1058,7 +1158,9 @@ describe("ModelProfileStore", () => {
 
     expect(addedProfile.id).not.toBe(templateProfile.id);
     expect(profiles).toHaveLength(2);
-    expect(profiles.find((profile) => profile.id === addedProfile.id)).toMatchObject({
+    expect(
+      profiles.find((profile) => profile.id === addedProfile.id),
+    ).toMatchObject({
       model_id: "deepseek-v4-flash",
       has_key: true,
       masked_key: "•••• -key",
@@ -1067,7 +1169,9 @@ describe("ModelProfileStore", () => {
   });
 
   it("reuses the template profile key during connection testing", async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
+    const fetchMock = vi.fn(
+      async () => ({ ok: true, status: 200 }) as Response,
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const store = new ModelProfileStore(configDir);

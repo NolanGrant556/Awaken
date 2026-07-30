@@ -28,6 +28,24 @@ const deepSeekProvider: ModelProvider = {
   modelCapabilities: {},
 };
 
+const agentPlanProvider: ModelProvider = {
+  id: "volcengine-agent-plan",
+  displayName: "火山 Agent Plan",
+  baseURL: "https://ark.cn-beijing.volces.com/api/v3",
+  protocol: "openai_chat",
+  authScheme: "bearer",
+  keyEnvName: "ARK_API_KEY",
+  defaultModel: "ark-code-latest",
+  models: ["ark-code-latest"],
+  docsURL: "https://www.volcengine.com/docs/82379",
+  apiDocsURL: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+  accessType: "agent_plan",
+  codingPreset: false,
+  endpointModel: false,
+  allowCustomModel: false,
+  modelCapabilities: {},
+};
+
 function runtimeClientWithTest(
   testModelProfile: RuntimeClient["testModelProfile"],
 ): RuntimeClient {
@@ -47,7 +65,9 @@ async function settle(): Promise<void> {
 }
 
 function providerButton(): HTMLButtonElement | undefined {
-  return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+  return Array.from(
+    document.querySelectorAll<HTMLButtonElement>("button"),
+  ).find(
     (button) =>
       button.classList.contains("model-provider-card") &&
       button.textContent?.includes("DeepSeek"),
@@ -65,14 +85,13 @@ describe("DesktopSettingsDialog model connection feedback", () => {
   let root: Root;
 
   beforeEach(() => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    vi.stubGlobal(
-      "requestAnimationFrame",
-      (callback: FrameRequestCallback) => {
-        callback(0);
-        return 1;
-      },
-    );
+    (
+      globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     container = document.createElement("div");
     document.body.append(container);
@@ -119,9 +138,7 @@ describe("DesktopSettingsDialog model connection feedback", () => {
 
     await act(async () => button?.click());
     expect(button?.disabled).toBe(true);
-    expect(
-      document.querySelector(".model-provider-test-feedback"),
-    ).toBeNull();
+    expect(document.querySelector(".model-provider-test-feedback")).toBeNull();
 
     await act(async () => {
       resolveTest?.({
@@ -132,7 +149,9 @@ describe("DesktopSettingsDialog model connection feedback", () => {
 
     const feedback = document.querySelector(".model-provider-test-feedback");
     expect(feedback?.textContent).toContain("连接测试通过");
-    expect(feedback?.classList.contains("model-provider-test-feedback--success")).toBe(true);
+    expect(
+      feedback?.classList.contains("model-provider-test-feedback--success"),
+    ).toBe(true);
     expect(feedback?.getAttribute("role")).toBe("status");
     expect(testButton()?.disabled).toBe(false);
   });
@@ -166,8 +185,65 @@ describe("DesktopSettingsDialog model connection feedback", () => {
 
     const feedback = document.querySelector(".model-provider-test-feedback");
     expect(feedback?.textContent).toContain("连接测试失败");
-    expect(feedback?.classList.contains("model-provider-test-feedback--error")).toBe(true);
+    expect(
+      feedback?.classList.contains("model-provider-test-feedback--error"),
+    ).toBe(true);
     expect(feedback?.getAttribute("role")).toBe("alert");
     expect(document.querySelector(".aw-settings-toast")).toBeNull();
+  });
+
+  it("keeps image and video tools inside the Agent Plan model page", async () => {
+    const runtimeClient = {
+      listModelProviders: vi.fn(async () => [agentPlanProvider]),
+      listModelProfiles: vi.fn(async () => []),
+      getAgentPlanAccount: vi.fn(async () => ({
+        accountId: "volcengine-agent-plan-default",
+        providerId: "volcengine-agent-plan",
+        hasKey: true,
+        credentialRevision: 1,
+        modelIds: [
+          "ark-code-latest",
+          "doubao-seedream-test",
+          "doubao-seedance-test",
+        ],
+        catalog: [
+          { id: "ark-code-latest", kind: "llm" as const },
+          { id: "doubao-seedream-test", kind: "image" as const },
+          { id: "doubao-seedance-test", kind: "video" as const },
+        ],
+      })),
+      getAgentPlanMediaTools: vi.fn(async () => ({ configurations: [] })),
+      syncModelCapabilities: vi.fn(async () => [agentPlanProvider]),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <DesktopSettingsDialog
+          open
+          runtimeClient={runtimeClient}
+          theme="light"
+          themePreference="system"
+          themeSaving={false}
+          themeMessage={null}
+          onThemePreferenceChange={vi.fn()}
+          onOpenChange={vi.fn()}
+          onProfilesChanged={vi.fn()}
+          initialModelSection="agent_plan"
+        />,
+      );
+    });
+    await settle();
+
+    expect(container.textContent).not.toContain("图片视频工具");
+    const modelToolsButton = Array.from(
+      container.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent?.trim() === "模型与工具");
+    await act(async () => modelToolsButton?.click());
+    await settle();
+
+    expect(container.textContent).toContain("图片与视频工具");
+    expect(container.textContent).toContain("火山 Agent Plan：图片生成");
+    expect(container.textContent).toContain("火山 Agent Plan：视频生成");
+    expect(container.textContent).not.toContain("已配置工具");
   });
 });

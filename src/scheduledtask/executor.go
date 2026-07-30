@@ -213,6 +213,28 @@ func (e *RunServiceExecutor) resolveProfile(profileID string) (*runtime.ModelPro
 	return runtime.ModelProfileConfigFromResolved(resolved), nil
 }
 
+func runtimeComposerTokens(tokens []ComposerToken) []runtime.ComposerToken {
+	if len(tokens) == 0 {
+		return nil
+	}
+	converted := make([]runtime.ComposerToken, 0, len(tokens))
+	for _, token := range tokens {
+		converted = append(converted, runtime.ComposerToken{
+			ID:          token.ID,
+			Type:        token.Type,
+			LeadingText: token.LeadingText,
+			Label:       token.Label,
+			Payload: runtime.ComposerTokenPayload{
+				SkillID:       token.Payload.SkillID,
+				SourceOrigin:  token.Payload.SourceOrigin,
+				SkillFilePath: token.Payload.SkillFilePath,
+				RootDir:       token.Payload.RootDir,
+			},
+		})
+	}
+	return converted
+}
+
 // ExecuteAgent implements Executor.ExecuteAgent.
 func (e *RunServiceExecutor) ExecuteAgent(ctx context.Context, task Task, exec Execution) (string, string, *ExecError) {
 	workspace, execErr := e.resolveWorkspace(task.ProjectID)
@@ -224,13 +246,14 @@ func (e *RunServiceExecutor) ExecuteAgent(ctx context.Context, task Task, exec E
 		return "", "", execErr
 	}
 	request := runtime.ScheduledRunRequest{
-		TaskID:       task.TaskID,
-		ExecutionID:  exec.ExecutionID,
-		TaskName:     task.Name,
-		Prompt:       task.Action.Content,
-		ThreadID:     task.ThreadID,
-		Workspace:    workspace,
-		ModelProfile: profile,
+		TaskID:         task.TaskID,
+		ExecutionID:    exec.ExecutionID,
+		TaskName:       task.Name,
+		Prompt:         task.Action.EffectivePrompt(),
+		ComposerTokens: runtimeComposerTokens(task.Action.ComposerTokens),
+		ThreadID:       task.ThreadID,
+		Workspace:      workspace,
+		ModelProfile:   profile,
 	}
 	run, err := e.RunService.StartScheduledRun(request)
 	if errors.Is(err, runtime.ErrThreadNotFound) && strings.TrimSpace(task.ThreadID) != "" {

@@ -1,15 +1,17 @@
 # 火山 Agent Plan 配置与工具编排开发设计
 
-> 文档性质：后续工具服务实施草案，不是当前能力说明。模型配置阶段已经落入当前代码和 `docs/05_模型与供应商配置/模型配置与调用.md`：三类模型入口、火山 Agent Plan 单账户/profile、动态模型目录、默认工具调用能力和会话级 reasoning effort 已实现。本文其余图片、视频、搜索和媒体编排仍是待实现目标；当前支持、不支持和真实验收只以 `docs/` 各功能域权威文档为准。
+> 文档性质：目标设计与分期实施说明，不是当前能力的唯一权威。当前代码已经完成第一阶段基础闭环，并落地第二阶段的一部分：Main 用版本化官方精确清单并兼容可用的 Agent Plan `/models` 响应，对目录做 `llm/image/video/unsupported/unknown` 分类；主模型与图片/视频模型双向过滤；模型设置在 Agent Plan 的“模型与工具”中统一展示主模型与生成工具；图片和视频各保存一个精确模型；配置变更在无 active run 时重启 Core；Core 按账户、凭据、catalog kind 与 enabled 状态条件注册 `image_generate` / `video_generate`，并提供文本单图、非流式 1–15 张组图、文本生视频和本地结果保存。组图每个实际结果发布为独立 Artifact，Workbench 已有紧凑过程卡、组图内嵌网格和终态媒体交付卡。高级媒体编排仍按本文后续阶段推进。当前支持、不支持和真实验收只以 `docs/` 各功能域权威文档为准。
+
+阅读约定：明确标记“当前已经实现”的内容才是本轮代码事实；“必须、不得、需要、目标行为”仍表示已确认但尚未全部实现的目标合同，不能作为当前产品已经支持或验收通过的证据。
 
 ## 1. 目标
 
-本设计把火山 Agent Plan 分为两个独立阶段：
+本设计把同一个火山 Agent Plan 账户下的两类能力放在一个产品入口中管理，但运行身份互不混用：
 
-1. **当前模型供应商阶段**：用户可以在“设置 > 模型 > Agent Plan”配置火山 Agent Plan 单账户和主模型。模型 ID 来自套餐 `/models`，不把营销名称当可调用 ID。
-2. **待实现独立工具服务阶段**：用户通过独立的“火山 Agent Plan API”配置入口启用 Seedream、Seedance 等工具能力。当前选择的任何支持工具调用的主模型都可以编排这些工具，不要求主模型来自火山 Agent Plan。
+1. **Agent Plan 主模型**：“设置 > 模型 > Agent Plan”中的主模型只展示可以作为 Awaken 主 Agent 的对话/推理模型，包括套餐中的火山及第三方模型（例如 GLM）；图片和视频生成模型不得成为 Composer 可选主模型。
+2. **图片与视频生成工具**：同一 Agent Plan 的“模型与工具”页面同时提供图片和视频两张紧凑工具卡；这里只展示相应类型的生成模型，每项只单选一个精确模型，保存并启用后激活对应工具注册。
 
-用户只需要描述目标。当前主模型负责理解需求、拆解步骤、依据本次工具 schema 与 Provider 能力矩阵编写提示词和业务参数、检查结果并决定是否继续调用；Awaken 负责把 typed arguments 转换为供应商私有 API 请求、安全执行、持久化过程、恢复任务和交付媒体文件。
+用户配置工具后不需要在会话中再次选择图片或视频模型，只需直接在输入框描述目标。当前主模型负责理解需求、拆解步骤、选择稳定工具、依据本次工具 schema 编写提示词和业务参数、检查结果并决定是否继续调用；Awaken 使用工具配置已经固定的生成模型，把 typed arguments 转换为供应商私有 API 请求、安全执行、持久化过程、恢复任务和交付媒体文件。
 
 首期明确不接入 TTS、ASR、豆包搜索、专业数据集、Embedding、OpenViking、Supabase 和 Agent Evolve。它们仍属于 Agent Plan 套餐能力，但不进入本次 LLM、图片与视频闭环。
 
@@ -32,26 +34,26 @@ K3 只是主模型示例，不是架构绑定对象。以下两种运行方式�
 前提只有两个：
 
 - 当前模型 profile 按模型目录默认支持工具调用；
-- 火山 Agent Plan 工具服务已配置且对应能力在本次 run 中 ready。
+- 至少一个与所需 capability 匹配的火山 Agent Plan 图片/视频工具配置已经启用，并在本次 run 中 ready。
 
 不得以 `providerId === "volcengine-agent-plan"` 作为暴露工具的条件，也不得把生图、生视频状态写进某个聊天模型的输入能力字段。
 
 ### 2.2 一个账户，两种消费方式
 
-新增独立的 `AgentPlanAccount`，统一拥有 Agent Plan API Key 和非敏感连接状态：
+复用当前已经存在的 `AgentPlanAccount`，统一拥有 Agent Plan API Key 和非敏感连接状态：
 
 - 火山 Agent Plan 模型 profile 可以引用该账户进行聊天模型调用；
-- 火山 Agent Plan Tool Provider 引用同一账户调用图片和视频 API；
+- 每个火山 Agent Plan 图片/视频工具配置引用同一账户调用对应 API；
 - Key 只保存一次，模型 profile 和工具配置只保存 `accountId`；
-- 删除某个模型 profile 不得删除仍被工具服务使用的账户凭据；
+- 删除某个模型 profile 不得删除仍被图片/视频工具配置使用的账户凭据；
 - 轮换账户 Key 时，引用该账户的模型与工具 credential revision 同步失效并重新建立 request identity。
 
 ### 2.3 稳定工具名与具体 Provider 分离
 
 模型看到的是与供应商无关的稳定工具名；火山 Agent Plan 只是这些能力的一个具体 Provider：
 
-| 模型可见工具 | Capability | 火山实现 Provider |
-| --- | --- | --- |
+| 模型可见工具     | Capability             | 火山实现 Provider                |
+| ---------------- | ---------------------- | -------------------------------- |
 | `image_generate` | `media.image.generate` | `volcengine-agent-plan/seedream` |
 | `video_generate` | `media.video.generate` | `volcengine-agent-plan/seedance` |
 
@@ -78,15 +80,54 @@ ProviderToolCapabilitySet
 └── media.video.generate
 ```
 
-`supportsTools` 决定当前模型能否消费工具 schema；`ProviderToolCapabilitySet` 决定本次 run 有哪些可执行工具。两者都满足时，工具才进入 `RunToolAvailabilitySnapshot`。
+`supportsTools` 决定当前主模型能否消费工具 schema；`ProviderToolCapabilitySet` 决定本次 run 有哪些可执行工具。两者都满足时，工具才进入 `RunToolAvailabilitySnapshot`。图片/视频工具配置中的 `modelId` 属于 Provider 执行身份，不属于 `ModelProfileCapabilities`，也不进入 Composer 模型选择器。
 
 `entitlement=unknown` 不是拒绝。官方没有统一无消耗发现 API，因此当 `localEnabled && credentialReady && providerReachable && runtimeReady` 且 entitlement 不是 `denied` 时，工具可以以“本地已就绪、套餐权限待首次调用确认”的状态进入 snapshot；首次真实成功或明确拒绝再把 entitlement 更新为 `ready/denied`。否则如果要求 entitlement 必须先为 `ready` 才暴露工具，就会形成“必须真实调用才能确认、但确认前又不能调用”的死锁。
+
+### 2.5 同一目录必须由 Main 分类后再进入两个入口
+
+Agent Plan 当前没有可用的 `/models` 目录接口；该路径返回 `404`。Electron Main 以版本化官方精确模型清单作为稳定来源，并保留对未来上游目录响应的兼容，但无论来源为何，都必须先归一为带类型的目录项，不能把原始清单直接等同于任何一个 UI 下拉列表：
+
+```ts
+type AgentPlanCatalogEntry = {
+  id: string;
+  kind: "llm" | "image" | "video" | "unsupported" | "unknown";
+  displayName?: string;
+  classificationSource:
+    "provider_metadata" | "host_registry" | "validated_chat" | "unclassified";
+  capabilityRevision: string;
+};
+```
+
+固定分流规则：
+
+- Agent Plan 主模型下拉只接收 `kind=llm`；GLM 等第三方对话/推理模型可以出现，`image/video` 必须被过滤；
+- “模型与工具”中的图片/视频工具卡分别只接收 `kind=image|video`；`llm` 不得出现；
+- Renderer 不按模型名称、前缀或营销文案自行猜类型，只消费 Main 返回的已分类视图；
+- 上游提供可信类型 metadata 时优先使用；缺失时只允许 exact model ID 命中版本化 host capability registry；
+- `unknown/unsupported` 默认不进入两个选择器。Agent Plan 主模型的自定义 ID 只有在显式聊天连接验证成功后才能记为 `validated_chat`；生成工具首期不提供任意自定义 ID 输入；
+- `ark-code-latest` 继续作为已知主模型自动路由项，不进入生成工具选择。
+
+当前 `AgentPlanAccount.modelIds: string[]` 只证明模型 ID 已进入账户目录，不能证明分流或当前套餐授权已经完成。实现本节时必须迁移为结构化目录或增加等价的 Main-owned 分类缓存，并保留旧数据读取兼容；内置媒体模型的套餐权限在首次真实调用时确认。
+
+### 2.6 每项媒体工具配置只绑定一个模型
+
+图片和视频分别配置，单次配置表单不允许多选：
+
+- 一项图片配置只绑定一个 `kind=image` 的精确模型并提供 `media.image.generate`；
+- 一项视频配置只绑定一个 `kind=video` 的精确模型并提供 `media.video.generate`；
+- 首期同一账户、同一 capability 最多一个 enabled 配置；用户可以同时拥有一个图片配置和一个视频配置；
+- 更换模型是编辑该 capability 的配置，不把多个生成模型塞进一次 tool call，也不让主 Agent 临时越过设置选择其他模型；
+- 保存且启用后，Host 用 `configurationId + modelId + credentialRevision + capabilityRevision` 建立 Provider identity；禁用、删除、换模型或换 Key 都使后续 run 使用新的 availability identity；
+- 已经开始的 run 保持 immutable snapshot。配置变更从下一次输入产生的新 run 生效，不在运行中偷偷替换 Provider。
+
+“激活工具注册”表示 ProviderManifest/readiness/capability resolver 和 run snapshot 全链路生效，不是 Renderer 只显示一张“已启用”卡片。只有配置类型正确、账户凭据就绪、本地 runtime 就绪且 readiness 为 `ready_unverified/ready` 时，稳定工具才进入新 run；配置保存失败或模型类型不匹配时不得注册。
 
 ## 3. 用户入口
 
 ### 3.1 设置 > 模型 > 火山 Agent Plan
 
-新增模型供应商：
+当前已经实现的模型供应商定义：
 
 ```text
 providerId: volcengine-agent-plan
@@ -101,7 +142,8 @@ credentialSource: AgentPlanAccount
 
 - 与现有“火山 Coding Plan”并存，不能改写或迁移现有 `volcengine` profile；
 - Base URL 默认固定，普通设置不允许改成普通方舟或 Coding Plan 地址；
-- 模型目录展示套餐当前支持的火山及第三方模型名称，不用 K3 代表整个套餐；
+- 模型目录展示套餐当前支持的火山及第三方对话/推理模型，不用 K3 代表整个套餐；例如分类为 `llm` 的 GLM 可以作为主模型；
+- 已分类为 `image` 或 `video` 的模型即使来自同一个 `/models` 响应，也必须从主模型选择和主模型设置卡片中排除；
 - `ark-code-latest` 可以作为自动选择项，精确模型作为高级选择；
 - 每个当前模型默认以 `supportsTools=ready` 消费工具 schema；存量状态字段仅作协议兼容；
 - 连接测试是设置页唯一的模型连通性验证，不增加独立 Function Calling probe；
@@ -111,37 +153,53 @@ credentialSource: AgentPlanAccount
 
 官方把 `/api/plan/v3` 定义为 OpenAI-compatible AI 工具接入面，但未点名 Awaken。产品和文档只能表述为“基于官方兼容协议接入”，不能宣称“火山官方已适配或认证 Awaken”。当前产品对目录中的主模型采用默认支持工具调用的统一语义，不向用户暴露逐 profile 工具验证。
 
-### 3.2 设置 > 工具服务 > 火山 Agent Plan API
+### 3.2 设置 > 模型 > Agent Plan > 模型与工具
 
-新增独立 API 配置入口，不嵌套在某一个模型 profile 下：
+模型配置左侧只保留 `Coding Plan / API / Agent Plan` 三种 `ModelAccessType`。Agent Plan 右侧使用“配置账户 / 模型与工具”两页：
 
 ```text
-火山 Agent Plan API
-├── 账户名称
-├── Agent Plan API Key
-├── 地域与固定端点
-├── 连接状态
-├── 上游能力状态（可能未知）
-└── 能力启用状态
+设置 > 模型
+├── Coding Plan
+├── API
+└── Agent Plan
+    ├── 配置账户
+    │   └── 火山 Agent Plan（API Key 与主模型）
+    └── 模型与工具
+        ├── 已配置主模型
+        ├── 图片生成（模型单选）
+        └── 视频生成（模型单选）
 ```
 
-能力页只配置账户连接和“是否允许模型使用”，不要求用户在任务前选择“生图模式”或“视频模式”，也不提供尺寸、比例、时长等生成参数控件。每次调用的创作参数优先由主模型根据用户需求、项目上下文和目标媒介决定；只有字段可选且用户与主模型都未决定时，Provider 才可使用官方默认值。
+产品规则：
+
+- API Key 只在“配置账户”的火山 Agent Plan 表单中保存一次；“模型与工具”不重复展示 Key 输入、脱敏值、供应商卡片或二次弹窗。未配置账户时只提供一个“配置账户”动作；
+- 图片和视频工具直接与主模型卡片展示在同一页，不再增加“工具配置 / 已配置工具”二级页面；
+- 两张工具卡只展示匹配 `kind=image|video` 的目录项，不展示 GLM、Kimi、DeepSeek 等 `llm` 模型；
+- 用户每次只选择一个精确模型。图片和视频分别保存，首期每类最多一个 enabled 配置；
+- 保存成功即默认启用相应配置，并触发 Provider readiness 刷新与后续 run 的工具注册；用户可以随后禁用、编辑模型或删除配置；
+- 图片/视频工具配置不是 `ModelProfile`，不出现在主模型卡片、Composer 当前模型按钮、模型选择器、默认主模型或 reasoning effort 设置中；
+- 设置 UI 不堆叠小字说明；使用“配置账户 / 模型与工具”、图片/视频标题、模型字段和启用开关表达操作。无需选择媒体模型的使用规则由本页结构、保存反馈和产品帮助统一说明。
+
+能力页只配置账户连接、精确生成模型和“是否允许主 Agent 使用”，不要求用户在任务前选择“生图模式”或“视频模式”，也不提供尺寸、比例、时长等创作参数控件。每次调用的创作参数优先由主模型根据用户需求、项目上下文和目标媒介决定；只有字段可选且用户与主模型都未决定时，Provider 才可使用官方默认值。
 
 Awaken 不提供 Agent Plan 专属的调用次数、费用或余额上限，也不根据本地估算提前拦截调用。未开启超额后付费时，套餐额度耗尽由火山返回真实错误；已开启超额后付费时，火山会按官方规则自动转为后付费，Awaken 不得因为本地估算而阻断。余额、计费状态和上游限流均以火山 API 的真实响应为准，Provider 将其归一为结构化错误并返回主模型与 Workbench。Agent Core 自身用于防止无限工具循环的统一 run/tool budget 属于全局失败监督，不是 Agent Plan 配置项，也不能展示为火山账户余额或套餐限制。
 
-每项能力展示以下状态：
+Host 为每项已配置工具维护以下状态；当前精简设置 UI 只显示启停开关，操作或真实调用失败时再给出对应错误与恢复动作：
 
 ```ts
 type CapabilityReadiness = {
-  localEnabled: boolean
-  credentialReady: boolean
-  providerReachable: boolean
-  entitlement: "unknown" | "ready" | "denied"
-  runtimeReady: boolean
-  lastCheckedAt?: string
-  lastError?: TypedProviderError
-  recoveryAction?: string
-}
+  configurationId: string;
+  modelId: string;
+  capability: "media.image.generate" | "media.video.generate";
+  localEnabled: boolean;
+  credentialReady: boolean;
+  providerReachable: boolean;
+  entitlement: "unknown" | "ready" | "denied";
+  runtimeReady: boolean;
+  lastCheckedAt?: string;
+  lastError?: TypedProviderError;
+  recoveryAction?: string;
+};
 ```
 
 Renderer 不自行组合字段，统一使用 host 派生状态：
@@ -154,30 +212,31 @@ type CapabilityDisplayState =
   | "ready_unverified"
   | "ready"
   | "denied"
-  | "unavailable"
+  | "unavailable";
 ```
 
 派生优先级固定为：本地关闭为 `disabled`；凭据未就绪为 `needs_auth`；entitlement 明确拒绝为 `denied`；本地 runtime 缺失，或已经检查且 Provider 不可达为 `unavailable`；尚未执行连接检查为 `unknown`；连接与 runtime 已就绪但 entitlement 未经真实调用证明为 `ready_unverified`；entitlement 已证明为 `ready`。只有 `ready_unverified/ready` 进入模型工具快照。
 
 火山控制台中的套餐开通状态不能被 Awaken 本地开关冒充。本地开关仅表示是否允许 Awaken 暴露该能力。官方当前没有给出统一、无消耗的套餐能力发现 API，因此连接成功后仍应保持 `entitlement=unknown`；只有受控能力探测、首次真实调用或明确的上游拒绝才能转为 `ready` 或 `denied`。可能产生 AFP 消耗的探测必须明确告知且不能伪装成普通连接测试。官方页面对部分套餐的图片权益还存在相互不一致的描述，Awaken 不硬编码套餐等级与能力关系。
 
-### 3.3 创作参数不进入设置 UI
+### 3.3 生成模型进入 Agent Plan 工具卡，创作参数不进入设置 UI
 
-Agent Plan 设置页不提供“高级生成参数”面板，以下内容都属于单次 tool call，而不是账户级用户配置：
+Agent Plan 的生成工具卡只保存所选的一个精确生成模型，不提供“高级生成参数”面板。以下内容属于单次 tool call，而不是账户级配置：
 
-- 图片生成模型、比例、分辨率、随机种子和生成数量；
-- 视频生成模型、时长、比例、分辨率、参考素材、是否包含 MP4 同步音轨和是否返回尾帧。
+- 图片比例、分辨率、随机种子和生成数量；
+- 视频时长、比例、分辨率、参考素材、是否包含 MP4 同步音轨和是否返回尾帧。
 
 参数责任固定为：
 
-| 责任方 | 负责内容 |
-| --- | --- |
-| 用户 | 用自然语言描述目标；可以明确说“10 秒、竖屏、2K”，但不需要填写参数表单 |
-| 当前主模型 | 结合用户明确约束、项目上下文和目标媒介，选择生成模型与素材，编写提示词，并生成本次调用的尺寸、比例、时长等工具参数 |
-| ToolRuntime / Provider | 按本次 run 固定的能力矩阵校验、转换并调用 API；参数不受支持时返回结构化错误，让主模型修正后重试 |
-| Host 配置 | 只拥有凭据、端点、能力启停和多 Provider 偏好，不拥有创作默认值或 Agent Plan 调用/费用上限 |
+| 责任方                 | 负责内容                                                                                                                                                                          |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 用户                   | 用自然语言描述目标；可以明确说“10 秒、竖屏、2K”，但不需要填写参数表单                                                                                                             |
+| Agent Plan 生成工具配置 | 固定 Provider、账户、图片/视频 capability 和一个精确生成模型                                                                                                                      |
+| 当前主模型             | 结合用户明确约束、项目上下文和目标媒介，选择 `image_generate` 或 `video_generate`、选择素材、编写提示词，并生成本次调用的尺寸、比例、时长等工具参数；不选择或覆盖配置中的生成模型 |
+| ToolRuntime / Provider | 按本次 run 固定的模型与能力矩阵校验、转换并调用 API；参数不受支持时返回结构化错误，让主模型修正后重试                                                                             |
+| Host 配置              | 拥有凭据、端点、模型绑定、能力启停和多 Provider 偏好，不拥有创作默认值或 Agent Plan 调用/费用上限                                                                                 |
 
-同一个稳定工具在不同 Provider、模型版本下可能有不同的允许值。`RunToolAvailabilitySnapshot` 必须把实际可用生成模型和参数约束物化到本次工具 schema 中；只有无法用 JSON Schema 结构化表达的补充限制才进入工具说明。主模型只能从该范围选择。不得为了复用一套 UI 默认值而把所有模型裁成最低共同能力，也不得对不兼容参数静默降级。
+同一个稳定工具在不同 Provider、模型版本下可能有不同的允许值。`RunToolAvailabilitySnapshot` 必须绑定实际启用的工具配置和精确生成模型，并把该模型的参数约束物化到本次工具 schema 中；`generation_model` 不进入模型可见 arguments。只有无法用 JSON Schema 结构化表达的补充限制才进入工具说明。不得为了复用一套 UI 默认值而把所有模型裁成最低共同能力，也不得对不兼容参数静默降级。
 
 用户没有指定参数时，由主模型做创作判断；Provider 只可在可选字段缺失时使用官方默认值。用户已经给出硬约束而上游不支持时，必须准确返回冲突，不能悄悄改成别的尺寸或时长。
 
@@ -185,47 +244,61 @@ Agent Plan 设置页不提供“高级生成参数”面板，以下内容都属
 
 ### 4.1 非敏感账户配置
 
-建议新增独立 store，而不是在每个模型 profile 中复制 Agent Plan Key：
+当前已经存在单账户 store 和固定账户 ID。目标是在保留旧 `modelIds: string[]` 读取兼容的前提下增加结构化目录，并新增独立媒体工具配置 store，而不是在每个模型 profile 或工具配置中复制 Agent Plan Key：
 
 ```ts
 type AgentPlanAccount = {
-  id: string
-  displayName: string
-  enabled: boolean
-  region: "cn-beijing"
-  inferenceBaseURL: "https://ark.cn-beijing.volces.com/api/plan/v3"
-  hasKey: boolean
-  keyLast4?: string
-  credentialRevision: number
-  capabilities: Record<string, CapabilityReadiness>
-}
+  accountId: "volcengine-agent-plan-default";
+  providerId: "volcengine-agent-plan";
+  hasKey: boolean;
+  maskedKey?: string;
+  credentialRevision: number;
+  catalog: AgentPlanCatalogEntry[];
+  catalogUpdatedAt?: string;
+};
+
+type AgentPlanMediaToolConfiguration = {
+  id: string;
+  providerId: "volcengine-agent-plan";
+  accountId: "volcengine-agent-plan-default";
+  capability: "media.image.generate" | "media.video.generate";
+  modelId: string;
+  modelKind: "image" | "video";
+  enabled: boolean;
+  configurationRevision: number;
+  readiness: CapabilityReadiness;
+};
 ```
 
-非敏感 metadata 原子保存在 `~/.awaken/config/` 下的独立 versioned JSON。具体文件名由实现阶段确定，但 owner 必须是 Electron Main；Renderer 只能接收脱敏 summary。
+`~/.awaken/config/agent-plan-account.json` 继续作为账户与目录 metadata owner；新的媒体工具配置使用 Electron Main 拥有的独立 versioned JSON。两者都必须原子写入并恢复，Renderer 只能接收脱敏 summary。配置必须满足 `modelKind` 与 `capability` 一致、同一账户同一 capability 最多一个 enabled 记录；重复保存同一模型是幂等更新，不得重复注册工具。
 
 ### 4.2 Secret owner
 
 - Agent Plan API Key 由 Main 的 credential store 写入，文件权限、原子替换、恢复状态与现有模型 Key 契约保持一致；
-- 模型 profile 保存 `accountId`，不保存或复制 Key；
+- 模型 profile 与媒体工具配置都只保存 `accountId`，不保存或复制 Key；
 - Core/headless 只通过受控 resolver 按 `accountId + credentialRevision` 读取；
 - Key 不进入 Renderer、run body、SemanticJournal、AG-UI、工具参数、日志或 Artifact metadata；
 - `AgentPlanAccount` 首期只保存 Agent Plan 专属 API Key。后置能力未来需要的其他凭据不得写入或复用本账户 Secret。
 
-### 4.3 Profile 引用
+### 4.3 Profile 与工具配置引用
 
-目标模型 profile 增加稳定凭据引用：
+当前模型 profile 已经使用以下稳定凭据引用；媒体工具配置必须复用同一 `provider_account` 语义：
 
 ```ts
 type CredentialReference =
   | { kind: "profile_secret"; profileId: string }
-  | { kind: "provider_account"; providerId: "volcengine-agent-plan"; accountId: string }
+  | {
+      kind: "provider_account";
+      providerId: "volcengine-agent-plan";
+      accountId: string;
+    };
 ```
 
-存量 profile 继续使用 `profile_secret`。只对新建的 Agent Plan profile 使用 `provider_account`，避免破坏现有模型凭据和 ACP selector。
+存量 profile 继续使用 `profile_secret`。Agent Plan profile 和媒体工具配置都使用 `provider_account`，避免破坏现有模型凭据和 ACP selector。删除账户时必须同时检查模型 profile 与媒体工具配置引用；只要任一 enabled/disabled 配置仍引用该账户就拒绝删除，不能让生成工具留下失效的悬空引用。
 
 ## 5. 工具输入与主模型职责
 
-图片和视频的尺寸、比例、时长、数量等必须出现在模型可见的工具 schema 中，而不是出现在 Renderer 设置表单中。官方 Function Calling 会让主模型生成函数 `arguments`；Awaken 再以 typed adapter 将这些业务参数转换为具体 API 字段或控制参数。
+图片和视频的尺寸、比例、时长、数量等必须出现在模型可见的工具 schema 中，而不是出现在 Renderer 设置表单中。生成模型已经由 Agent Plan 生成工具配置固定，不出现在模型可见的 `arguments`。官方 Function Calling 会让主模型生成其余业务参数；Awaken 再以 typed adapter 将这些参数转换为具体 API 字段或控制参数。
 
 参数选择优先级为：
 
@@ -233,7 +306,7 @@ type CredentialReference =
 2. 主模型根据用途、目标平台、已有素材和前后步骤做出的判断；
 3. 仅当字段为可选且前两层均未决定时，Provider 才可使用官方默认值。
 
-工具 schema 由本次 run 的 Provider snapshot 生成或收窄。它必须描述允许的生成模型、枚举、数值范围、字段组合和参考素材限制，使支持工具调用的主模型能够直接作出合法选择。
+工具 schema 由本次 run 已固定的 Provider configuration snapshot 生成或收窄。它必须描述所配置生成模型允许的枚举、数值范围、字段组合和参考素材限制，使支持工具调用的主模型能够直接作出合法参数选择；schema 不提供切换生成模型、Provider、账户或 endpoint 的字段。
 
 ### 5.1 图片生成
 
@@ -241,7 +314,6 @@ type CredentialReference =
 
 ```json
 {
-  "generation_model": "本次工具 schema 允许的图片模型",
   "operation": "edit",
   "prompt": "由主模型结合用户需求、项目资料和历史结果编写的完整生成提示词",
   "mode": "single",
@@ -255,7 +327,7 @@ type CredentialReference =
 }
 ```
 
-以上是主模型产生的 tool arguments，不是 UI 表单值。主模型负责判断是否需要生成、选择 schema 允许的生成模型、编写提示词、选择尺寸/比例/数量和参考素材，并在拿到结果后决定接受、重试或继续生成视频。Provider 负责把语义参数映射为火山图片 API 的 `model`、`prompt`、`image`、`size`、`output_format`、`sequential_image_generation`、`sequential_image_generation_options`、`tools` 和 `watermark` 等字段，同时执行参数白名单、字段组合、输入文件、超时、下载和结果真实性校验。
+以上是主模型产生的 tool arguments，不是 UI 表单值。主模型负责判断是否需要生成、编写提示词、选择尺寸/比例/数量和参考素材，并在拿到结果后决定接受、重试或继续生成视频。Provider 从 immutable configuration snapshot 取得图片模型 ID，并把它与语义参数一起映射为火山图片 API 的 `model`、`prompt`、`image`、`size`、`output_format`、`sequential_image_generation`、`sequential_image_generation_options`、`tools` 和 `watermark` 等字段，同时执行参数白名单、字段组合、输入文件、超时、下载和结果真实性校验。
 
 图片参数必须遵守以下合同：
 
@@ -289,15 +361,12 @@ type CredentialReference =
 
 ```json
 {
-  "generation_model": "本次工具 schema 允许的视频模型",
   "operation": "generate",
   "prompt": "由主模型编写的视频提示词与镜头要求",
   "duration_seconds": 10,
   "aspect_ratio": "9:16",
   "resolution": "1080p",
-  "references": [
-    {"artifact_id": "artifact-id", "role": "first_frame"}
-  ],
+  "references": [{ "artifact_id": "artifact-id", "role": "first_frame" }],
   "generate_audio": true,
   "return_last_frame": false,
   "watermark": false,
@@ -337,12 +406,12 @@ Provider adapter 必须优先使用官方当前推荐的强校验请求体字段
 
 取消语义必须与官方限制一致：
 
-| 上游状态 | 上游 DELETE 语义 | Awaken 行为 |
-| --- | --- | --- |
-| `queued` | 取消排队，转为 `cancelled` | 可以展示“已取消生成” |
-| `running` | 不支持 | 只能停止本地等待；任务继续由后台 job monitor 查询 |
-| `succeeded` / `failed` / `expired` | 删除上游任务记录 | 默认不调用，避免丢失恢复依据 |
-| `cancelled` | 不支持 | 保留已观察事实 |
+| 上游状态                           | 上游 DELETE 语义           | Awaken 行为                                       |
+| ---------------------------------- | -------------------------- | ------------------------------------------------- |
+| `queued`                           | 取消排队，转为 `cancelled` | 可以展示“已取消生成”                              |
+| `running`                          | 不支持                     | 只能停止本地等待；任务继续由后台 job monitor 查询 |
+| `succeeded` / `failed` / `expired` | 删除上游任务记录           | 默认不调用，避免丢失恢复依据                      |
+| `cancelled`                        | 不支持                     | 保留已观察事实                                    |
 
 成功返回的 `video_url` 官方有效期为 24 小时。Provider 必须在成功后立即下载和转存；signed URL 不得成为长期 Artifact 地址，也不得写入长期模型上下文、日志或最终回答。
 
@@ -429,36 +498,36 @@ sequenceDiagram
 
 1. Desktop 解析当前模型 profile；
 2. Core 验证 `supportsTools`；
-3. Tool Catalog 根据本地设置、账户 readiness 和策略建立 immutable run snapshot；
-4. RequestBuilder 只暴露 snapshot 中 ready 且允许的稳定工具 schema；
+3. Tool Catalog 根据已启用的单模型媒体工具配置、账户 readiness 和策略建立 immutable run snapshot；
+4. RequestBuilder 只暴露 snapshot 中 ready 且允许的稳定工具 schema；schema 已按配置中的精确生成模型收窄，但不暴露模型切换字段；
 5. 主模型依据用户约束和 snapshot 中的工具 schema 产生 Function Calling 与本次创作参数；
-6. ToolRuntime 从同一 snapshot 取得固定 Provider 实例，校验参数兼容性并执行；
+6. ToolRuntime 从同一 snapshot 取得固定 Provider 配置、生成模型和实例，校验参数兼容性并执行；
 7. ToolRuntime 创建稳定媒体 narrative item；同步工具直接执行，流式工具由 runtime 汇总，异步工具进入 durable wait；
 8. 真实阶段持续幂等更新同一媒体槽位，但不把每次无变化轮询反复发送给主模型；
 9. canonical Outcome、任务和 Artifact 先耐久化，媒体 bytes 完成安全加载后在原槽位显示；
 10. ToolRuntime 使用原 `tool_call_id` 把唯一终态结果交回主模型；
 11. 主模型基于真实结果继续下一步，直到生成最终回答；同一媒体 Artifact 不在 turn 尾部重复追加通用交付物卡片。
 
-主模型只提交业务参数，不能提交或覆盖 `provider_id`、base URL、API Key、HTTP header、超时上限、文件保存绝对路径或任务恢复 identity。
+主模型只提交业务参数，不能提交或覆盖 `provider_id`、`generation_model`、base URL、API Key、HTTP header、超时上限、文件保存绝对路径或任务恢复 identity。
 
 ### 6.1 两条反馈通道
 
 工具执行必须同时服务 Workbench 和主模型，但两者接收的信息粒度不同：
 
-| 消费方 | 接收内容 | 不接收内容 |
-| --- | --- | --- |
-| Workbench | 排队、运行、流式 chunk、partial item、下载、校验、发布、耗时和恢复动作 | API Key、Authorization、原始敏感响应 |
-| 主模型 | 最终/部分结果、Artifact identity、失败原因、用量、实际参数、观察到的阶段摘要和下一步建议 | 每次无变化轮询、原始 HTTP body、signed URL、秘密和虚假百分比 |
+| 消费方    | 接收内容                                                                                 | 不接收内容                                                   |
+| --------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Workbench | 排队、运行、流式 chunk、partial item、下载、校验、发布、耗时和恢复动作                   | API Key、Authorization、原始敏感响应                         |
+| 主模型    | 最终/部分结果、Artifact identity、失败原因、用量、实际参数、观察到的阶段摘要和下一步建议 | 每次无变化轮询、原始 HTTP body、signed URL、秘密和虚假百分比 |
 
 主模型需要知道工具发生了什么，但不需要参与 provider 轮询。重复把 `running` 发送给主模型会浪费 token、污染上下文，并可能诱发重复创建任务。
 
 ### 6.2 工具执行类型
 
-| 类型 | 示例 | Runtime 行为 | 返回主模型时机 |
-| --- | --- | --- | --- |
-| 同步 | 非流式图片 | 等待单次请求完成 | 成功或失败后立即返回 |
-| 流式 | 图片 SSE | 消费流并投影 partial item | 汇总完成或失败后返回一次 |
-| 异步 | 视频生成 | 创建外部任务，持久化后轮询/恢复 | 上游进入终态且 Artifact/Outcome 已持久化后 |
+| 类型 | 示例       | Runtime 行为                    | 返回主模型时机                             |
+| ---- | ---------- | ------------------------------- | ------------------------------------------ |
+| 同步 | 非流式图片 | 等待单次请求完成                | 成功或失败后立即返回                       |
+| 流式 | 图片 SSE   | 消费流并投影 partial item       | 汇总完成或失败后返回一次                   |
+| 异步 | 视频生成   | 创建外部任务，持久化后轮询/恢复 | 上游进入终态且 Artifact/Outcome 已持久化后 |
 
 ### 6.3 Deferred Tool Execution
 
@@ -466,21 +535,22 @@ sequenceDiagram
 
 ```ts
 type DeferredToolExecution = {
-  id: string
-  threadId: string
-  runId: string
-  toolCallId: string
-  toolSnapshotId: string
-  providerId: string
-  upstreamJobId: string
-  providerStatus: "queued" | "running" | "succeeded" | "failed" | "expired" | "cancelled"
-  waitState: "attached" | "detached" | "interrupted" | "resuming" | "completed"
-  createdAt: string
-  lastObservedAt?: string
-  nextPollAt?: string
-  artifactIds: string[]
-  errorCode?: string
-}
+  id: string;
+  threadId: string;
+  runId: string;
+  toolCallId: string;
+  toolSnapshotId: string;
+  providerId: string;
+  upstreamJobId: string;
+  providerStatus:
+    "queued" | "running" | "succeeded" | "failed" | "expired" | "cancelled";
+  waitState: "attached" | "detached" | "interrupted" | "resuming" | "completed";
+  createdAt: string;
+  lastObservedAt?: string;
+  nextPollAt?: string;
+  artifactIds: string[];
+  errorCode?: string;
+};
 ```
 
 `providerStatus` 与 `waitState` 是两套事实：前者描述火山任务，后者描述 Awaken 是否仍在等待。用户停止本地等待时，不能把仍为 `running` 的上游任务改写成 `cancelled`。
@@ -545,7 +615,7 @@ type DeferredToolExecution = {
 
 ## 7. 媒体结果与 Workbench
 
-当前 Awaken 的新 Artifact 发布链和最终交付物列表主要支持 Office/PDF/Markdown 等文档格式，尚未拥有内建图片和视频生成合同。Agent Plan 实现必须同步扩展，而不能只在最终回答中返回远程 URL。
+当前 Awaken 已把 Agent Plan 图片/视频结果从远程响应收口为本地 ready Artifact，并在 Workbench 中同时提供工具时间位置的内嵌媒体项和 final 后的媒体交付卡。Renderer 仍不能直接使用远程 URL 或本地文件路径。
 
 目标媒体链路：
 
@@ -583,7 +653,7 @@ Workbench 必须继续遵守现有中间区域 ownership 和安全打开边界�
 2. 该项先渲染为具有稳定 identity 和预留几何的媒体占位画布；
 3. 上游成功后仍保持占位画布，依次显示下载、校验和发布等真实本地阶段；
 4. 只有本地 Artifact 已经 `ready`，且 Renderer 已完成图片解码或视频 metadata 加载后，才在同一个 DOM 槽位内把占位层替换为实际媒体；
-5. 替换不创建第二张结果卡、不把媒体移动到另一处，也不在最终回答后重复展示同一个 Artifact；
+5. 替换不在工具时间位置创建第二张内嵌卡，也不把媒体移动到另一处；final 后的通用交付列表可以再投影同一 Artifact 的交付操作卡，但不得重复发布 Artifact；
 6. 主模型的后续说明继续出现在媒体项之后，使用户先看到产物，再看到检查结果、修改建议或下一步。
 
 `image_generate`、`video_generate` 不应先显示一条普通 `ToolTraceLine`，完成后又追加一张媒体卡。它们由专用 `mediaGeneration` narrative item 承担从工具运行到媒体交付的完整可见生命周期；provider、请求 ID 和诊断仍保存在 tool record/Outcome，需要时进入后续 Inspector，不平铺到媒体画布。
@@ -592,11 +662,12 @@ Workbench 必须继续遵守现有中间区域 ownership 和安全打开边界�
 
 ```ts
 type MediaGenerationNarrativeItem = {
-  kind: "mediaGeneration"
-  id: `media:${string}` // 由 runId + toolCallId 稳定生成
-  runId: string
-  toolCallId: string
-  mediaType: "image" | "video"
+  kind: "mediaGeneration";
+  id: `media:${string}`; // 由 runId + toolCallId 稳定生成
+  runId: string;
+  toolCallId: string;
+  mediaType: "image" | "video";
+  requestedCount?: number; // 只是本次组图请求上限，不是实际产物数
   phase:
     | "creating"
     | "queued"
@@ -610,27 +681,27 @@ type MediaGenerationNarrativeItem = {
     | "interrupted"
     | "resuming"
     | "failed"
-    | "cancelled"
-  requestedAspectRatio?: string
-  actualAspectRatio?: string
+    | "cancelled";
+  requestedAspectRatio?: string;
+  actualAspectRatio?: string;
   outputs: Array<{
-    id: string // 上游 item identity 或稳定 output index
-    status: "waiting" | "ready" | "failed"
-    artifactId?: string
-    lineageId?: string
-    threadOrdinal?: number
-    lineageRevisionOrdinal?: number
-    width?: number
-    height?: number
-    durationMs?: number
-    mimeType?: string
-  }>
-  observedStages: string[]
-  canCancelUpstream: boolean
-  canStopWaiting: boolean
-  errorCode?: string
-  recoveryAction?: string
-}
+    id: string; // 上游 item identity 或稳定 output index
+    status: "waiting" | "ready" | "failed";
+    artifactId?: string;
+    lineageId?: string;
+    threadOrdinal?: number;
+    lineageRevisionOrdinal?: number;
+    width?: number;
+    height?: number;
+    durationMs?: number;
+    mimeType?: string;
+  }>;
+  observedStages: string[];
+  canCancelUpstream: boolean;
+  canStopWaiting: boolean;
+  errorCode?: string;
+  recoveryAction?: string;
+};
 ```
 
 该类型表达 Desktop 的目标投影，不允许保存 API Key、上游 signed URL、本地绝对路径或媒体 Base64。具体 semantic event 与 wire 字段实现时必须进入 03/09 域权威；Renderer 不通过工具名称、文案或 HTTP 响应内容猜测阶段。
@@ -653,21 +724,21 @@ type MediaGenerationNarrativeItem = {
 
 真实阶段文案映射：
 
-| Phase | 图片 | 视频 |
-| --- | --- | --- |
-| `creating` | 正在准备图片生成… | 正在创建视频任务… |
-| `queued` | — | 视频排队中… |
-| `running` | 正在生成图片… | 正在生成视频… |
-| `downloading` | 正在下载图片… | 正在下载视频… |
-| `validating` | 正在校验图片… | 正在校验视频… |
-| `publishing` | 正在保存图片… | 正在保存视频… |
-| `partial` | 显示已完成图片，其余继续生成 | — |
-| `ready` | 原位显示图片 | 原位显示视频 |
-| `detached` | — | 视频仍在后台生成 |
-| `interrupted` | 图片状态暂时不可确认 | 视频状态暂时不可确认 |
-| `resuming` | — | 正在恢复视频状态… |
-| `failed` | 图片生成失败 | 视频生成失败 |
-| `cancelled` | 已取消图片生成 | 已取消视频生成 |
+| Phase         | 图片                         | 视频                 |
+| ------------- | ---------------------------- | -------------------- |
+| `creating`    | 正在准备图片生成…            | 正在创建视频任务…    |
+| `queued`      | —                            | 视频排队中…          |
+| `running`     | 正在生成图片…                | 正在生成视频…        |
+| `downloading` | 正在下载图片…                | 正在下载视频…        |
+| `validating`  | 正在校验图片…                | 正在校验视频…        |
+| `publishing`  | 正在保存图片…                | 正在保存视频…        |
+| `partial`     | 显示已完成图片，其余继续生成 | —                    |
+| `ready`       | 原位显示图片                 | 原位显示视频         |
+| `detached`    | —                            | 视频仍在后台生成     |
+| `interrupted` | 图片状态暂时不可确认         | 视频状态暂时不可确认 |
+| `resuming`    | —                            | 正在恢复视频状态…    |
+| `failed`      | 图片生成失败                 | 视频生成失败         |
+| `cancelled`   | 已取消图片生成               | 已取消视频生成       |
 
 文案可以附加结构化 recovery action，但不能直接展示 provider 原始错误、签名 URL、任务 ID 或请求正文。
 
@@ -691,7 +762,7 @@ type MediaGenerationNarrativeItem = {
 - 结果下方最多显示一行真实 metadata，例如 `2048 × 2048 · PNG` 或 `10 秒 · 1080p · MP4`。用户未要求时不平铺 provider/model/request ID 等诊断信息；
 - 图片需要可读的替代文本；工具结果未提供可靠描述时使用“本轮生成的图片”等中性文案，不让 Renderer根据文件名或提示词猜造图像内容。
 
-媒体项本身就是该 Artifact 在 turn 中的交付展示。同一 `artifactId` 不再进入终态通用 `DeliverableList`；若安全媒体 source 或浏览器解码失败，则在同一媒体项内降级为可打开的媒体文件行，并明确区分“生成已成功，但内嵌预览失败”，仍不重复追加另一张卡片。
+媒体项是该 Artifact 在 tool-call 时间位置的过程与结果展示；终态 `DeliverableList` 则是 final 后的集中交付视图。两者可按同一 `artifactId` 投影，但只有一份 canonical Artifact。若安全媒体 source 或浏览器解码失败，内嵌项保留准确失败态；final 后的交付卡仍依据同一 Artifact 提供安全 open/reveal。
 
 ### 7.4 安全媒体 source
 
@@ -706,7 +777,7 @@ type MediaGenerationNarrativeItem = {
 
 现有通用交付物 open/reveal 要求 run 已终态，而内嵌媒体需要在主模型继续编排前显示，因此不能原样复用该终态门槛。实现时新增窄的 `ready_media_preview` 授权：只允许当前主窗口读取当前 thread/run 中由本次 typed media tool 发布且已经 `ready` 的图片/视频 Artifact；它不允许任意活跃 run 文件、不改变通用文档交付物的 terminal-only 规则。媒体在 run 终态前的系统 open/reveal 默认保持禁用；run 终态后再复用既有安全入口，除非 01/04 域另行明确一条同等严格的 active-run 媒体打开合同。
 
-这里的 `deliverable` 是 Artifact 数据角色，不等于一定进入通用 `DeliverableList`。图片/视频仍以 `role=deliverable` 接受路径与打开安全校验，但由 `mediaGeneration` 消费后从通用列表 view model 去重；普通文档继续由 `DeliverableList` 展示。
+这里的 `deliverable` 是 Artifact 数据角色。图片/视频以 `role=deliverable` 接受路径与打开安全校验；`mediaGeneration` 和终态 `DeliverableList` 只是对同一 Artifact 的两个视图，不各自创建结果。
 
 ### 7.5 Narrative、折叠、滚动与重放
 
@@ -721,15 +792,15 @@ type MediaGenerationNarrativeItem = {
 
 `DeferredToolExecution.waitState` 到媒体 UI 的映射固定为：
 
-| durable wait / provider 事实 | 媒体 phase | 用户语义 |
-| --- | --- | --- |
-| `attached` | 保持真实 `queued/running/downloading/...` | 当前 run 正在等待 |
-| `interrupted` | `interrupted` | 当前无法确认任务状态 |
-| `resuming` | `resuming` | 正在用 durable job identity 恢复查询 |
-| `detached` 且上游未终态 | `detached` | 原 run 不再等待，但后台继续查询 |
-| `completed` + Artifact ready | `ready` | 显示本地媒体；`completed` 本身不作为 UI phase |
-| `completed` + provider failed/expired | `failed` | 显示真实失败与 recovery |
-| provider 明确确认取消 | `cancelled` | 显示“已取消生成” |
+| durable wait / provider 事实          | 媒体 phase                                | 用户语义                                      |
+| ------------------------------------- | ----------------------------------------- | --------------------------------------------- |
+| `attached`                            | 保持真实 `queued/running/downloading/...` | 当前 run 正在等待                             |
+| `interrupted`                         | `interrupted`                             | 当前无法确认任务状态                          |
+| `resuming`                            | `resuming`                                | 正在用 durable job identity 恢复查询          |
+| `detached` 且上游未终态               | `detached`                                | 原 run 不再等待，但后台继续查询               |
+| `completed` + Artifact ready          | `ready`                                   | 显示本地媒体；`completed` 本身不作为 UI phase |
+| `completed` + provider failed/expired | `failed`                                  | 显示真实失败与 recovery                       |
+| provider 明确确认取消                 | `cancelled`                               | 显示“已取消生成”                              |
 
 用户取消 run 与上游取消不是同一事实：视频仍为 `queued` 时只有 DELETE 已确认才显示 `cancelled`；视频已为 `running` 时取消 run 或停止等待都显示 `detached`，不能把上游任务伪装成取消；查询链中断但尚未确认后台继续时显示 `interrupted`。图片同步请求只有在 Provider/transport 明确确认未产生外部继续执行的任务时才可显示 `cancelled`，否则按真实失败或未知状态处理。
 
@@ -741,39 +812,39 @@ type MediaGenerationNarrativeItem = {
 
 ```ts
 type MediaWorkingSelection = {
-  artifactId: string
-  lineageId: string
-  selectedAt: string
-  selectedBy: "generation_success" | "user_reference" | "user_action"
-}
+  artifactId: string;
+  lineageId: string;
+  selectedAt: string;
+  selectedBy: "generation_success" | "user_reference" | "user_action";
+};
 
 type ThreadMediaWorkingSet = {
-  threadId: string
+  threadId: string;
   activeByType: {
-    image?: MediaWorkingSelection
-    video?: MediaWorkingSelection
-  }
+    image?: MediaWorkingSelection;
+    video?: MediaWorkingSelection;
+  };
   nextOrdinalByType: {
-    image: number
-    video: number
-  }
-  nextRevisionOrdinalByLineage: Record<string, number>
-}
+    image: number;
+    video: number;
+  };
+  nextRevisionOrdinalByLineage: Record<string, number>;
+};
 
 type MediaRevision = {
-  artifactId: string
-  mediaType: "image" | "video"
-  lineageId: string
-  rootArtifactId: string
-  parentArtifactIds: string[]
-  derivedFromArtifactIds: string[]
-  threadOrdinal: number
-  lineageRevisionOrdinal: number
-  operation: "generate" | "edit" | "extend"
-  sourceTurnId: string
-  sourceToolCallId: string
-  createdAt: string
-}
+  artifactId: string;
+  mediaType: "image" | "video";
+  lineageId: string;
+  rootArtifactId: string;
+  parentArtifactIds: string[];
+  derivedFromArtifactIds: string[];
+  threadOrdinal: number;
+  lineageRevisionOrdinal: number;
+  operation: "generate" | "edit" | "extend";
+  sourceTurnId: string;
+  sourceToolCallId: string;
+  createdAt: string;
+};
 ```
 
 `parentArtifactIds` 表示版本图中的直接父节点；`derivedFromArtifactIds` 还包含本次生成实际使用的额外参考素材。单图编辑沿用源图片的 `lineageId/rootArtifactId`；基于多张参考图进行新的融合创作时，新输出成为新谱系根，同时保留所有参考来源；图片生成视频时建立视频谱系，但在 `derivedFromArtifactIds` 中保留图片来源；视频编辑或延长则继续原视频谱系。
@@ -817,14 +888,14 @@ type MediaRevision = {
 
 常见话语的目标语义为：
 
-| 用户话语 | 解析 | 是否调用生成 Provider |
-| --- | --- | --- |
-| “第八张的时候很好呢” | 选择 thread 中 `image.threadOrdinal=8` | 否 |
-| “还是第一版” | 选择 active lineage 的根版本；没有唯一 active 谱系或语境跨谱系时澄清 | 否 |
-| “基于第八张把颜色改深” | 选择图片 8，再从它创建编辑分支 | 是 |
-| “这张领口再高一点” | 使用明确点击/附件引用；否则使用 active image | 是 |
-| “视频再长 5 秒” | 使用 active video，`operation=extend` | 是 |
-| “第八次生成的那张” | 先解析生成批次；该批次多图时要求用户选具体图片 | 视后续意图而定 |
+| 用户话语               | 解析                                                                 | 是否调用生成 Provider |
+| ---------------------- | -------------------------------------------------------------------- | --------------------- |
+| “第八张的时候很好呢”   | 选择 thread 中 `image.threadOrdinal=8`                               | 否                    |
+| “还是第一版”           | 选择 active lineage 的根版本；没有唯一 active 谱系或语境跨谱系时澄清 | 否                    |
+| “基于第八张把颜色改深” | 选择图片 8，再从它创建编辑分支                                       | 是                    |
+| “这张领口再高一点”     | 使用明确点击/附件引用；否则使用 active image                         | 是                    |
+| “视频再长 5 秒”        | 使用 active video，`operation=extend`                                | 是                    |
+| “第八次生成的那张”     | 先解析生成批次；该批次多图时要求用户选具体图片                       | 视后续意图而定        |
 
 因此，很多轮后用户说“第八张的时候很好呢”，正确闭环是：Core 解析并校验图片 8，`media_select_revision` 把它设为 active，Workbench 轻量提示“已切换到图片 8”，主模型确认即可；这一轮不应创建图片占位、不应消耗 Seedream，也不应复制 Artifact。下一轮用户只说“领口再高一点”时，`image_generate.operation=edit` 的源必须是图片 8，成功结果获得 thread 中下一个从未使用的图片编号，并从图片 8 形成新分支。
 
@@ -838,30 +909,30 @@ Workbench 显示过媒体，不等于主模型在之后每一轮都自动拥有�
 type MediaContextManifest = {
   active?: {
     image?: {
-      artifactId: string
-      label: string
-      lineageId: string
-      threadOrdinal: number
-      lineageRevisionOrdinal: number
-    }
+      artifactId: string;
+      label: string;
+      lineageId: string;
+      threadOrdinal: number;
+      lineageRevisionOrdinal: number;
+    };
     video?: {
-      artifactId: string
-      label: string
-      lineageId: string
-      threadOrdinal: number
-      lineageRevisionOrdinal: number
-    }
-  }
+      artifactId: string;
+      label: string;
+      lineageId: string;
+      threadOrdinal: number;
+      lineageRevisionOrdinal: number;
+    };
+  };
   referencedMedia: Array<{
-    artifactId: string
-    mediaType: "image" | "video"
-    label: string
-    lineageId: string
-    threadOrdinal: number
-    lineageRevisionOrdinal: number
-    metadata: Record<string, unknown>
-  }>
-}
+    artifactId: string;
+    mediaType: "image" | "video";
+    label: string;
+    lineageId: string;
+    threadOrdinal: number;
+    lineageRevisionOrdinal: number;
+    metadata: Record<string, unknown>;
+  }>;
+};
 ```
 
 上下文合同如下：
@@ -917,10 +988,10 @@ AwakenMediaGeneration
 
 ### 8.1 Electron Main
 
-- 新增 Agent Plan account store、credential resolver、原子写入和恢复状态；
-- 在模型 catalog 中新增 `volcengine-agent-plan`，并与 Go registry 保持 parity；
-- 新增保存、删除、测试账户和工具服务能力状态的 typed IPC；
-- 新增 Tool Provider 设置与 active-run 修改门禁；
+- 复用现有 Agent Plan account store、credential resolver、原子写入和恢复状态；
+- 把当前 `/models -> string[]` 扩展为 Main-owned 结构化目录分类，并分别提供 LLM 与图片/视频筛选结果；Renderer 不猜模型类型；
+- 新增媒体工具配置 store，以及读取、保存、启停、换模型、删除和 readiness 状态的 typed IPC；
+- 新增 Tool Provider 配置重载与 active-run immutable snapshot 门禁；
 - API Key 永不返回 Renderer；
 - 新增窄 `ready_media_preview` 授权、短生命周期媒体 handle 和 MP4 byte range；
 - 新增 thread-scoped 媒体编号/版本查询与选择的 typed IPC，只接受当前窗口提交的结构化 media identity，不接受路径、URL 或自由文本 Artifact ID；
@@ -928,7 +999,7 @@ AwakenMediaGeneration
 
 ### 8.2 Preload 与 shared types
 
-- 只暴露脱敏账户 summary、readiness 和操作结果；
+- 只暴露脱敏账户 summary、已分类目录、单模型媒体工具配置、readiness 和操作结果；
 - 增加只接受 `{threadId, runId, artifactId}` 的媒体 source resolve/revoke 类型，不暴露路径、上游 URL 或通用文件读取接口；
 - 增加媒体版本 summary、active selection、候选回选和 selection receipt 类型；Renderer 不能直接写 `activeByType` 或递增编号；
 - 所有错误使用稳定 code、message、recovery action；
@@ -936,18 +1007,20 @@ AwakenMediaGeneration
 
 ### 8.3 Renderer
 
-- “设置 > 模型”增加“火山 Agent Plan”供应商卡片；
-- 新增独立“设置 > 工具服务 > 火山 Agent Plan API”页面；
-- 能力卡只展示 host 派生的 `disabled/needs_auth/unknown/ready_unverified/ready/denied/unavailable`；`ready_unverified` 明确表示“可尝试调用，但套餐权限待真实结果确认”，不能把本地 enabled 写成套餐已开通；
+- 保留现有“设置 > 模型 > Agent Plan > 火山 Agent Plan”供应商卡片，但只展示 `kind=llm` 的主模型；
+- 模型配置左侧只保留三种 `ModelAccessType`；Agent Plan 第二页命名为“模型与工具”，不能把工具配置写进 `ModelProfile`；
+- “模型与工具”在主模型卡片下直接展示图片生成和视频生成卡片，只列出匹配的 `kind=image|video` 模型；图片和视频分别单选配置，首期每类最多一个 enabled 配置；
+- API Key 只在“配置账户”保存；工具卡不重复凭据表单、供应商弹窗、配置状态文案或独立已配置列表；
+- Host 继续派生 `disabled/needs_auth/unknown/ready_unverified/ready/denied/unavailable`，但设置页以开关和操作结果为主；不得把本地 enabled 写成套餐已开通；
 - 不增加图片尺寸/比例/数量、视频时长/比例/分辨率等生成参数控件；这些都由主模型在每次 tool call 中决定；
-- 模型选择器只展示主模型，不增加“图片模型/视频模型”会话模式；
+- Composer 模型选择器只展示主模型，不展示媒体工具配置，也不增加“图片模型/视频模型”会话模式；
 - Workbench 以稳定 `mediaGeneration` narrative item 展示媒体工具阶段，并在本地 Artifact ready 且媒体解码完成后原位替换为图片或视频；
 - 新增 UI-only `AwakenMediaGeneration` 组件族，覆盖占位、单图、组图、视频和失败降级；
 - 每个 ready 媒体显示稳定的“图片 N/视频 N”、谱系版本和来源摘要，并以低干扰状态标出当前工作版本；
 - 提供键盘可达的“设为当前版本”和“基于此继续修改”，但不增加尺寸、时长等创作参数 UI；自然语言仍是默认入口；
 - 历史媒体留在原 turn，新编辑在新 turn 创建槽位；Renderer 不移动、覆盖或重新编号旧媒体；
 - 歧义回选通过带稳定标签和安全缩略图 handle 的 `ask_user` 候选展示，不在前端按最近 DOM 或数组下标猜测；
-- 同一媒体 Artifact 不同时出现在内嵌媒体项和通用终态交付物列表；内嵌加载失败时只在原项降级为可打开文件行；
+- 同一媒体 Artifact 在 tool-call 位置显示内嵌过程/结果，并在 final 后进入终态交付物列表；两者共用同一 artifact identity 和 Main-owned 安全读取边界；
 - 视频只显示上游阶段和本地下载/发布阶段；没有上游百分比时不展示百分比进度条；
 - `running` 视频的“停止等待”和 `queued` 视频的“取消生成”使用不同动作与文案；
 - detached job 完成后展示“让主模型继续处理”入口；
@@ -972,6 +1045,8 @@ AwakenMediaGeneration
 
 - 在 `src/tool` 注册新的 capabilities 和 provider manifests；
 - 在 `src/tools` 增加 provider-neutral typed media tools；
+- 每个火山媒体 Provider 实例绑定一个已启用的 `AgentPlanMediaToolConfiguration`；图片和视频配置分别提供一个 capability，工具 arguments 不接受生成模型选择；
+- 保存/启用配置后重建后续 run 可见的 provider readiness；禁用/删除/换模型只影响新 snapshot，不修改 active run；
 - 每个生产内建工具达到 strict `ToolDefinition` v2；
 - 网络/auth/side effect/readiness/dependency 必须真实声明；
 - Provider transport 负责火山 endpoint、认证 header、模型 ID 映射、重试、限流和错误归一化；
@@ -1011,37 +1086,37 @@ DELETE https://ark.cn-beijing.volces.com/api/plan/v3/contents/generations/tasks/
 
 至少定义以下稳定错误类别：
 
-| 类别 | 用户语义 | 恢复动作 |
-| --- | --- | --- |
-| `credential_missing` | 尚未配置 Agent Plan Key | 打开工具服务设置 |
-| `credential_invalid` | Key 无效或已失效 | 更新 Key 并重新测试 |
-| `model_tools_unsupported` | 当前主模型不能稳定调用工具 | 更换支持工具调用的模型 |
-| `capability_not_entitled` | 当前套餐没有该能力 | 前往火山控制台核对套餐 |
-| `capability_disabled` | Awaken 本地禁用了该能力 | 在工具服务设置启用 |
-| `rate_limited` | 火山 API 返回速率或并发限制 | 按上游 retry 信息等待后重试 |
-| `provider_quota_exhausted` | 未开启超额后付费且火山返回套餐额度耗尽 | 展示真实上游信息，提示等待额度刷新、升级套餐或开启超额后付费 |
-| `provider_billing_unavailable` | 火山返回账户欠费或计费状态不可用 | 展示真实上游信息并提示用户前往火山控制台处理 |
-| `generation_model_unavailable` | 主模型选择的生成模型在本次账户/run 中不可用 | 根据返回的允许模型重新选择 |
-| `generation_parameter_unsupported` | 尺寸、比例、时长或字段组合不被所选生成模型支持 | 保留用户目标，依据允许值修正参数或更换生成模型 |
-| `provider_rejected_input` | 提示词、媒体或参数被拒绝 | 由主模型调整输入后重试 |
-| `media_download_failed` | 上游结果无法安全下载 | 重新查询任务或重试下载 |
-| `media_preview_failed` | 文件已保存，但内嵌图片/视频无法加载 | run 终态后用默认应用打开或重新加载预览 |
-| `media_reference_ambiguous` | 用户的“那张/第一版”等指代对应多个候选 | 展示带编号的候选并让用户确认 |
-| `media_revision_unavailable` | 指定编号存在，但 Artifact 缺失、未 ready 或已不可读取 | 保持当前工作版本，提示重新生成或选择其他版本 |
-| `media_reference_forbidden` | 指定媒体属于其他 thread 或不在当前授权范围 | 拒绝引用并保持当前工作版本 |
-| `media_lineage_corrupt` | 版本父关系、编号索引或 Artifact identity 无法一致重建 | 停止从该版本继续生成，保留证据并提供修复/导出入口 |
-| `job_running_not_cancellable` | 视频已运行，上游不支持取消 | 停止本地等待或继续等待 |
-| `job_expired` | 上游任务超过有效执行时间 | 调整输入后重新创建任务 |
-| `job_interrupted` | 视频查询因退出/网络中断未闭合 | 使用 task ID 恢复查询 |
-| `job_resume_failed` | 重启后无法恢复查询 | 保留 job identity 并提供人工重试 |
-| `job_result_url_expired` | 临时媒体 URL 已过期 | 重新查询任务；无法取得时准确报告缺失 |
-| `artifact_publish_failed` | 结果已生成但未形成可交付文件 | 保留任务 identity 并重新发布 |
+| 类别                               | 用户语义                                              | 恢复动作                                                             |
+| ---------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------- |
+| `credential_missing`               | 尚未配置 Agent Plan Key                               | 打开“Agent Plan > 配置账户”                                          |
+| `credential_invalid`               | Key 无效或已失效                                      | 更新 Key 并重新测试                                                  |
+| `model_tools_unsupported`          | 当前主模型不能稳定调用工具                            | 更换支持工具调用的模型                                               |
+| `capability_not_entitled`          | 当前套餐没有该能力                                    | 前往火山控制台核对套餐                                               |
+| `capability_disabled`              | Awaken 本地禁用了该能力                               | 在“Agent Plan > 模型与工具”中启用对应配置                             |
+| `rate_limited`                     | 火山 API 返回速率或并发限制                           | 按上游 retry 信息等待后重试                                          |
+| `provider_quota_exhausted`         | 未开启超额后付费且火山返回套餐额度耗尽                | 展示真实上游信息，提示等待额度刷新、升级套餐或开启超额后付费         |
+| `provider_billing_unavailable`     | 火山返回账户欠费或计费状态不可用                      | 展示真实上游信息并提示用户前往火山控制台处理                         |
+| `generation_model_unavailable`     | 工具配置绑定的生成模型在本次账户/run 中不可用         | 返回“Agent Plan > 模型与工具”刷新目录或更换配置模型                   |
+| `generation_parameter_unsupported` | 尺寸、比例、时长或字段组合不被已配置模型支持          | 主模型先依据允许值修正参数；硬约束无法满足时提示用户更换工具配置模型 |
+| `provider_rejected_input`          | 提示词、媒体或参数被拒绝                              | 由主模型调整输入后重试                                               |
+| `media_download_failed`            | 上游结果无法安全下载                                  | 重新查询任务或重试下载                                               |
+| `media_preview_failed`             | 文件已保存，但内嵌图片/视频无法加载                   | run 终态后用默认应用打开或重新加载预览                               |
+| `media_reference_ambiguous`        | 用户的“那张/第一版”等指代对应多个候选                 | 展示带编号的候选并让用户确认                                         |
+| `media_revision_unavailable`       | 指定编号存在，但 Artifact 缺失、未 ready 或已不可读取 | 保持当前工作版本，提示重新生成或选择其他版本                         |
+| `media_reference_forbidden`        | 指定媒体属于其他 thread 或不在当前授权范围            | 拒绝引用并保持当前工作版本                                           |
+| `media_lineage_corrupt`            | 版本父关系、编号索引或 Artifact identity 无法一致重建 | 停止从该版本继续生成，保留证据并提供修复/导出入口                    |
+| `job_running_not_cancellable`      | 视频已运行，上游不支持取消                            | 停止本地等待或继续等待                                               |
+| `job_expired`                      | 上游任务超过有效执行时间                              | 调整输入后重新创建任务                                               |
+| `job_interrupted`                  | 视频查询因退出/网络中断未闭合                         | 使用 task ID 恢复查询                                                |
+| `job_resume_failed`                | 重启后无法恢复查询                                    | 保留 job identity 并提供人工重试                                     |
+| `job_result_url_expired`           | 临时媒体 URL 已过期                                   | 重新查询任务；无法取得时准确报告缺失                                 |
+| `artifact_publish_failed`          | 结果已生成但未形成可交付文件                          | 保留任务 identity 并重新发布                                         |
 
 错误信息不得回显 Authorization、签名、完整请求体或包含密钥的 URL。
 
 ## 11. 示例体验
 
-用户当前选择任意支持工具调用的主模型，然后输入：
+用户先在“Agent Plan > 模型与工具”分别单选并启用一个图片模型和一个视频模型。用户随后保持任意支持工具调用的主模型，直接在输入框输入：
 
 > 根据项目里的 AIGLE 2026 新品资料，制作一张户外主题主视觉，再生成 10 秒竖屏宣传视频。
 
@@ -1063,27 +1138,30 @@ DELETE https://ark.cn-beijing.volces.com/api/plan/v3/contents/generations/tasks/
 14. 用户继续说“视频再延长 5 秒”时，`activeByType.video` 精确提供源视频，Seedance 新任务形成下一视频版本；
 15. 主模型根据真实视频 metadata/Artifact 说明已完成内容、使用素材、版本来源和后续可修改项。
 
-整个过程用户始终与当前主模型对话，不需要手动切换生图或视频模式，也不需要重新上传上一轮产物。历史回选、当前工作版本和分支来源由 Awaken 的耐久媒体工作集保证；主模型负责理解意图和编写工具参数，但不靠自己的短期对话记忆维护媒体 identity。
+整个过程用户始终与当前主模型对话，不需要在 Composer 选择已配置的图片/视频模型，不需要手动切换生图或视频模式，也不需要重新上传上一轮产物。历史回选、当前工作版本和分支来源由 Awaken 的耐久媒体工作集保证；主模型负责理解意图和编写工具参数，但不靠自己的短期对话记忆维护媒体 identity。
 
 ## 12. 实施顺序
 
-### 阶段一：账户、模型与工具能力合同（模型配置部分已落地）
+### 阶段一：目录分流、Agent Plan 生成工具配置与基础注册（当前已实现）
 
-- 已建立固定单账户 `AgentPlanAccount`，当前入口位于“设置 > 模型 > Agent Plan”；独立工具服务配置页仍待实现；
-- 已新增火山 Agent Plan 模型 provider、动态 `/models` 目录、固定 endpoint 和 provider account credential reference；
-- 已补齐模型侧默认 `supportsTools`；工具服务侧 capability snapshot 仍待实现；
-- 建立 provider-neutral media capability/tool definitions，以及按 Provider/生成模型物化的参数能力矩阵；
-- 明确设置页只管理账户、连接状态和能力启停，创作参数只进入模型可见 tool schema，不增加 Awaken 侧额度限制；
-- 完成 TS/Go catalog parity。
+- 保留已经落地的固定单账户 `AgentPlanAccount`、火山 Agent Plan 模型 provider、版本化官方精确清单与可选上游目录兼容、固定 endpoint、provider account credential reference 和模型侧默认 `supportsTools`；
+- 把未分类 `modelIds` 升级为 Main-owned 结构化目录：Agent Plan 主模型只接收 `llm`，生成工具卡只接收 `image|video`，unknown fail closed；
+- 模型设置左侧只保留三种接入类型；Agent Plan 使用“配置账户 / 模型与工具”两页，在同一页面管理主模型和图片/视频各一个 enabled 配置；
+- 生成工具卡沿用其他模型卡片的纯色表面、Logo、边框、模型字段和紧凑操作；API Key 只由配置账户页拥有，不再建立供应商弹窗或“已配置工具”页面；
+- 建立媒体工具配置 store、typed IPC、引用保护、配置 revision、readiness 和启停/换模型/删除后的新 run 生效规则；
+- 建立 provider-neutral media capability/tool definitions；Core 不重新猜模型类型，而是读取 Main 持久化的精确 catalog kind 并 fail closed；
+- 以工具配置固定生成模型；创作参数只进入模型可见 tool schema，schema 不包含 `generation_model`，也不增加 Awaken 侧额度限制；
+- 提供文本单图、非流式 1–15 张组图、文本生视频、同步有界视频轮询、结果下载、本地原子保存和 canonical Artifact 事件；单图映射官方 `disabled`，组图映射 `auto + max_images`，不把上限当成精确返回数。当前尚未实现按具体生成模型物化的完整参数能力矩阵。
 
-### 阶段二：图片闭环
+### 阶段二：图片闭环（当前部分实现）
 
-- 实现 `image_generate` 与 Seedream Provider；
-- 支持生成/编辑、单图/组图、源 Artifact、额外参考 Artifact、联网搜索开关、流式结果、输出格式、下载校验和 model_content 回传；
+- 扩展已经存在的基础 `image_generate` 与 Seedream Provider；
+- 当前已实现文本生成、单图/非流式组图、输出格式、逐项下载校验、多 Artifact 发布、紧凑内嵌网格和终态媒体交付卡；
+- 图片编辑、源 Artifact、额外参考 Artifact、联网搜索开关、流式 partial 和 `model_content` 回传仍待实现；
 - 建立 thread 媒体工作集、不可变 `MediaRevision`、稳定人类可见编号、active image、分支来源和幂等重放；
 - 实现 host-local `media_select_revision`、自然语言结构化引用解析、歧义候选与 `MediaContextManifest`；
-- 建立通用 `mediaGeneration` narrative、图片占位/原位替换、组图 partial、Main-owned 媒体 handle 与安全 open/reveal；
-- 扩展图片 Artifact、Workbench 内嵌展示、版本标签、当前工作版本、终态去重和安全打开；
+- 当前已建立 `mediaGeneration` narrative、图片占位/原位替换、终态组图网格、Main-owned 媒体 handle 与安全 open/reveal；流式组图 partial 仍未实现；
+- 当前已扩展图片 Artifact、Workbench 内嵌展示和终态交付；稳定版本标签和当前工作版本仍待实现；
 - 用 Agent Plan 模型和非 Agent Plan 模型各完成一次真实编排。
 
 ### 阶段三：视频闭环
@@ -1095,19 +1173,44 @@ DELETE https://ark.cn-beijing.volces.com/api/plan/v3/contents/generations/tasks/
 - 实现终态 tool result 回灌和 detached job continuation run；
 - 验证多工具串联和失败后的模型自我修正。
 
-实现落地时，本草案中的媒体 UI 事实必须分别迁入其唯一权威，而不是继续把本文件作为当前规范：01 域更新中间区域产品、架构、滚动、叙事、最终交付物和验收；03 域更新媒体 bytes/Artifact/重放；04 域更新媒体工具 Outcome 与发布；09 域更新 semantic event 和 wire 字段。代码、权威文档、自动化与真实 Desktop 证据必须在同一变更集中闭合。
+实现落地时，本草案中的目标事实必须分别迁入其唯一权威，而不是继续把本文件作为当前规范：01 域更新中间区域产品、架构、滚动、叙事、最终交付物和验收；03 域更新媒体 bytes/Artifact/重放；04 域更新媒体工具 Outcome 与发布；05 域更新 Agent Plan 目录分类、“模型与工具”设置入口、账户与配置调用链；09 域更新 semantic event 和 wire 字段。代码、权威文档、自动化与真实 Desktop 证据必须在同一变更集中闭合。
 
-## 13. 自动化与真实 Desktop 验收
+## 13. 分期自动化与真实 Desktop 验收
 
-### 13.1 自动化
+### 13.1 当前基础闭环自动化
+
+- Agent Plan 目录分类覆盖 `llm/image/video/unsupported/unknown`，并证明主模型列表排除图片/视频、生成工具列表排除 GLM 等 LLM；
+- Agent Plan 主模型禁止任意 custom model ID，Core 防御性拒绝 catalog 中的媒体模型作为主模型；
+- 图片和视频配置各自最多保存一个精确模型，跨 kind 保存被拒绝，重复保存幂等，配置文件为 `0600` 且不包含 Key；
+- 账户被任一主模型 profile 或图片/视频配置引用时不能删除；
+- 保存、启停、删除、轮换 Key 或刷新目录在存在媒体配置时均要求无 active run，并在成功后重启 Core；
+- Core 仅在 enabled、固定账户、凭据、capability、model kind 和 Main catalog 全部一致时注册工具；
+- `image_generate` / `video_generate` schema 不暴露模型、账户、endpoint、凭据、绝对保存路径或 timeout；
+- 图片同步执行、视频 create/get 有界轮询、认证/限流/上游/下载错误分类、本地原子保存和 Artifact 事件由 Go 测试覆盖；
+- Desktop 三类接入导航、Agent Plan“模型与工具”、仅媒体模型选项和单模型保存请求由 Renderer 测试覆盖。
+
+### 13.2 当前基础闭环真实 Desktop
+
+1. 打开“设置 > 模型”，确认左侧只有 Coding Plan、API、Agent Plan；Agent Plan 下出现“配置账户 / 模型与工具”；
+2. 无 Key 时确认页面展示账户未配置状态，不伪造 ready；
+3. 使用真实 Agent Plan Key 更新清单，确认 `/models` 404 不会清空内置媒体模型，主模型卡只有 `llm`，图片/视频工具卡只有各自的 `image|video`；
+4. 分别保存一个图片和视频模型，确认成功后 Core 重启，重开设置仍保持配置；
+5. 使用任一支持工具调用的主模型直接输入图片/视频需求，确认无需切换 Composer 模型即可触发稳定工具并在工作区得到本地结果文件；
+6. 禁用或删除配置后开始新 run，确认对应工具不再暴露。
+
+### 13.3 完整目标自动化回归矩阵（含当前基线与后续阶段）
 
 - Agent Plan account metadata/secret 原子写入、权限、轮换、删除引用和损坏恢复；
 - Renderer 永远得不到 API Key；
+- 内置与可选上游目录分类覆盖 `llm/image/video/unsupported/unknown`：Agent Plan 主模型列表不出现图片/视频模型，生成工具列表不出现 GLM 等 LLM，Renderer 不按名字猜类型；
+- 旧 `modelIds` 数据迁移、`/models` 404 使用内置清单、其他目录刷新失败保留缓存与 unknown fail-closed；主模型 custom ID 只有聊天验证成功后才进入 `llm`，媒体工具不接受任意 custom ID；
+- 图片/视频配置均为单选，同一账户同一 capability 最多一个 enabled 配置；重复保存幂等，换模型/换 Key 产生新 identity，账户存在任一工具配置引用时不能删除；
+- 保存并启用配置会让相应稳定工具进入下一 run；禁用/删除后从下一 run 移除，active run 的 immutable snapshot 不变；
 - TypeScript catalog、Go registry、capability merge 和 `supportsTools` parity；
 - `CapabilityReadiness -> CapabilityDisplayState -> RunToolAvailabilitySnapshot` 映射覆盖全部状态，`ready_unverified` 可暴露工具、`denied/unavailable/disabled/needs_auth/unknown` 不暴露；
 - Agent Plan chat endpoint、默认工具能力和错误归一化；
 - tool schema 与执行 Provider 来自同一 run snapshot；
-- 主模型无法通过参数覆盖 Provider、endpoint、credential 或保存路径；
+- 主模型无法通过参数覆盖 Provider、生成模型、endpoint、credential 或保存路径，媒体工具 schema 不含 `generation_model`；
 - 用户明确给出的尺寸、比例和时长约束进入 tool arguments；用户未指定时由主模型选择，不依赖 Renderer 默认值；
 - 不同生成模型的参数枚举、数值范围和字段组合由 run snapshot 收窄，非法组合以结构化错误返回并允许主模型修正；
 - 图片单图/组图、`max_images` 非精确数量语义、参考图与最终图片总数限制、`size` 映射、PNG/JPEG、联网搜索和流式 partial success；
@@ -1140,15 +1243,15 @@ DELETE https://ark.cn-beijing.volces.com/api/plan/v3/contents/generations/tasks/
 - context compaction、切 thread、断线和完整重启后稳定编号、版本图与 active selection 一致，历史图片 8 仍解析到原 Artifact；
 - `git diff --check`、Markdown 链接和示例 JSON 解析。
 
-### 13.2 真实 Desktop
+### 13.4 完整目标真实 Desktop 回归矩阵（含当前基线与后续阶段）
 
 必须使用根 README 的正式入口，在真实 Awaken Desktop 完成：
 
-1. 配置 Agent Plan API，并在重启后保持 credential/runtime ready；没有执行受控探测或真实调用的能力继续显示 entitlement unknown；
-2. 选择火山 Agent Plan 中任一支持工具的模型完成图片生成；
-3. 选择另一个供应商的支持工具模型，调用同一个 Agent Plan 图片工具；
-4. 证明不支持工具的模型不会收到这些 schema，并得到准确提示；
-5. 只输入自然语言目标、不打开任何生成参数面板，完成图片 -> 视频的连续编排；
+1. 在“设置 > 模型 > Agent Plan > 配置账户”刷新真实套餐目录，确认 GLM 等已分类 `llm` 可以配置为主模型，而已分类图片/视频模型不出现在主模型卡片或 Composer 模型选择器；
+2. 打开“Agent Plan > 模型与工具”，确认图片和视频卡只出现各自类型模型；分别单选并保存一个图片模型和一个视频模型，不能多选，也不能选择 `llm`；
+3. 重启 Desktop 后确认账户、两个配置和启用状态保持；未执行受控探测或真实调用时 entitlement 继续为 unknown；
+4. 使用火山 Agent Plan 主模型完成一次图片生成，再选择另一个供应商的支持工具主模型调用同一个 `image_generate`；两次都使用设置中绑定的图片模型，Composer 不出现媒体模型选择；
+5. 证明不支持工具的主模型不会收到这些 schema 并得到准确提示；随后切回支持工具的主模型，只输入自然语言目标、不打开任何生成参数面板，完成图片 -> 视频的连续编排；
 6. 分别验证图片单图、组图和参考图生成，证明返回数量、实际尺寸和输出格式来自真实结果；
 7. 分别验证视频首帧、组合参考和包含同步音轨的 MP4，证明强校验 JSON 字段和模型能力矩阵生效；
 8. 分别验证用户明确指定参数与未指定参数两种任务：前者遵守约束，后者由主模型根据用途选择并在终态结果中报告实际参数；
@@ -1183,9 +1286,7 @@ Gallery、mock、普通连接测试、直接调用 Provider API 和旧截图只�
 
 下列内容仍必须标记为目标设计而非当前能力：
 
-- 独立 Agent Plan Tool Provider 配置；
-- 内建图片与视频工具；
-- 图片/视频 Artifact 与 Workbench 媒体交付；
+- 按每个生成模型动态收窄的完整参数能力矩阵、图片编辑、流式组图 partial 和 Artifact 参考输入；
 - thread 媒体工作集、稳定人类可见编号、不可变版本图、历史回选与分支继续编辑；
 - `media_select_revision`、`MediaContextManifest` 和按需视觉水合；
 - Deferred Tool Execution、视频外部任务重启续查和主模型自动恢复。

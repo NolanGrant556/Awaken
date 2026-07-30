@@ -7,8 +7,21 @@
 
 .aw-deliverable-list-items {
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--aw-space-3);
   min-width: 0;
+}
+
+.aw-deliverable-list-item {
+  min-width: 0;
+}
+
+.aw-deliverable-list-item:not(.aw-deliverable-list-item-image):not(.aw-deliverable-list-item-video) {
+  grid-column: 1 / -1;
+}
+
+.aw-deliverable-list-item-video {
+  grid-column: span 2;
 }
 
 .aw-deliverable-list-notice {
@@ -49,4 +62,20 @@
 .aw-deliverable-list-toggle:hover {
   color: var(--aw-text-primary);
   background: var(--aw-bg-fill-light);
+}
+
+@media (max-width: 680px) {
+  .aw-deliverable-list-items {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 440px) {
+  .aw-deliverable-list-items {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aw-deliverable-list-item-video {
+    grid-column: auto;
+  }
 }

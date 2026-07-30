@@ -26,6 +26,7 @@ const (
 	CapabilityPresentationRender Capability = "presentation.render"
 	CapabilitySpreadsheetCreate  Capability = "spreadsheet.create"
 	CapabilityImageGenerate      Capability = "image.generate"
+	CapabilityVideoGenerate      Capability = "video.generate"
 	CapabilityMessageSend        Capability = "message.send"
 	CapabilityToolDiagnose       Capability = "tool.diagnose"
 	CapabilityDependencyInstall  Capability = "dependency.install"

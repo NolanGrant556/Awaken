@@ -24,6 +24,7 @@ export * from "./AwakenDialog";
 export * from "./AwakenDotmSquare3";
 export * from "./AwakenDropdown";
 export * from "./AwakenExecutionFeed";
+export * from "./AwakenMediaGenerationCard";
 export * from "./AwakenFolder";
 export * from "./AwakenIconButton";
 export * from "./AwakenInspectorRail";

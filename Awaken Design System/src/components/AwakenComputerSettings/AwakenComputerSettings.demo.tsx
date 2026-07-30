@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AwakenSettingsSectionPreview } from "../AwakenSettings/AwakenSettingsSectionPreview";
 import {
   AwakenComputerSettings,
   type AwakenComputerHostStatus,
@@ -25,16 +26,32 @@ export function AwakenComputerSettingsDemo() {
   });
 
   return (
-    <AwakenComputerSettings
-      status={status}
-      settings={settings}
-      onRefresh={() => {
-        // Demo only: real refresh would call the Core status API.
-      }}
-      onSettingsChange={setSettings}
-      onSetupRuntime={() => {
-        // Demo only: real setup would call the Desktop main process API.
-      }}
-    />
+    <section
+      className="ads-component-demo"
+      aria-label="计算机操作设置 AwakenComputerSettings 组件演示"
+    >
+      <header className="ads-component-demo-header">
+        <h2>
+          计算机操作设置 <code>AwakenComputerSettings</code>
+        </h2>
+        <p>展示运行时、系统权限与固定产品策略状态。</p>
+      </header>
+      <AwakenSettingsSectionPreview
+        activeSectionId="computer"
+        sectionTitle="计算机操作"
+      >
+        <AwakenComputerSettings
+          status={status}
+          settings={settings}
+          onRefresh={() => {
+            // Demo only: real refresh would call the Core status API.
+          }}
+          onSettingsChange={setSettings}
+          onSetupRuntime={() => {
+            // Demo only: real setup would call the Desktop main process API.
+          }}
+        />
+      </AwakenSettingsSectionPreview>
+    </section>
   );
 }

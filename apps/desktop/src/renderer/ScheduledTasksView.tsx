@@ -1,7 +1,13 @@
 // 定时任务产品页面（契约 §4.1/§4.4）：列表 + 创建/编辑 + 模板闭环 + 启停/立即执行/删除。
 // 所有 Core payload 组装与错误映射都委托 ./adapter，本组件只做状态编排；
 // 切换本页面不触碰当前项目、活动 thread 或进行中的 run。
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { Plus, RefreshCw } from "lucide-react";
 import {
   AwakenButton,
@@ -11,6 +17,7 @@ import {
   AwakenScheduledTaskList,
   AwakenScheduledTaskTemplateDialog,
   createEmptyAwakenScheduledTaskDraft,
+  type ComposerBarStructuredInputValue,
   type AwakenScheduledTaskDraft,
   type AwakenScheduledTaskDraftField,
   type AwakenScheduledTaskExecutionItem,
@@ -19,9 +26,20 @@ import {
   type AwakenScheduledTaskProjectOption,
 } from "@awaken/design-system";
 import type {
+  ComposerToken,
   RuntimeProject,
   ScheduledTask,
 } from "../shared/runtime";
+import {
+  actionsFromSlashProviders,
+  clearSlashTriggerFromComposerValue,
+  composerTokenFromSlashAction,
+  filterSlashActions,
+  firstSelectableSlashAction,
+  skillSlashProvider,
+  slashTriggerFromComposerValue,
+  type SlashAction,
+} from "./composerSlash";
 import type { RuntimeClient } from "./runtime/client";
 import {
   buildScheduledTaskTemplateCategories,
@@ -59,6 +77,7 @@ type EditorState = {
   busy: boolean;
   errorMessage: string | null;
   fieldErrors: Partial<Record<AwakenScheduledTaskDraftField, string>>;
+  composerTokens: ComposerToken[];
 };
 
 type HistoryState = {
@@ -115,6 +134,27 @@ function projectNameForTask(
   return project.displayName || task.projectId;
 }
 
+function cloneComposerTokens(tokens?: ComposerToken[]): ComposerToken[] {
+  return (tokens ?? []).map((token) => ({
+    ...token,
+    payload: token.payload ? { ...token.payload } : undefined,
+  }));
+}
+
+function skillRootsForProject(project?: RuntimeProject): string[] {
+  if (!project) {
+    return [];
+  }
+  const folderRoots = project.folders
+    .map((folder) => folder.path.trim())
+    .filter(Boolean);
+  if (folderRoots.length > 0) {
+    return folderRoots;
+  }
+  const workspaceRoot = project.workspaceRoot.trim();
+  return workspaceRoot ? [workspaceRoot] : [];
+}
+
 function ConfirmActionDialog({
   state,
   onCancel,
@@ -167,7 +207,15 @@ export function ScheduledTasksView({
   const [templateOpen, setTemplateOpen] = useState(false);
   const [history, setHistory] = useState<HistoryState | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  const [slashActions, setSlashActions] = useState<SlashAction[]>([]);
+  const [slashLoading, setSlashLoading] = useState(false);
+  const [slashError, setSlashError] = useState<string | null>(null);
+  const [slashActiveActionId, setSlashActiveActionId] = useState<string | undefined>();
   const timezones = useMemo(supportedTimezones, []);
+  const slashProviders = useMemo(
+    () => [skillSlashProvider((projectRoots) => runtimeClient.listSkills(projectRoots))],
+    [runtimeClient],
+  );
 
   const refreshTasks = useCallback(async (): Promise<void> => {
     try {
@@ -254,6 +302,113 @@ export function ScheduledTasksView({
     [projects],
   );
 
+  const editorProjectId = editor?.draft.projectId ?? "";
+  const editorActionKind = editor?.draft.actionKind;
+  const editorContent = editor?.draft.content ?? "";
+  const editorProject = useMemo(
+    () => projects.find((project) => project.projectId === editorProjectId),
+    [editorProjectId, projects],
+  );
+  const editorSkillRoots = useMemo(
+    () => skillRootsForProject(editorProject),
+    [editorProject],
+  );
+  const editorSkillRootsKey = editorSkillRoots.join("\u0000");
+  const slashTrigger =
+    editorActionKind === "agent" ? slashTriggerFromComposerValue(editorContent) : null;
+  const slashPaletteOpen = Boolean(editor?.open && slashTrigger && desktopReady);
+  const filteredSlashActions = useMemo(
+    () => filterSlashActions(slashActions, slashTrigger?.query ?? "").slice(0, 24),
+    [slashActions, slashTrigger?.query],
+  );
+  const composerTokens = useMemo(
+    () =>
+      (editor?.composerTokens ?? []).map((token) => ({
+        id: token.id,
+        type: token.type,
+        label: token.label,
+        leadingText: token.leadingText,
+        title:
+          typeof token.payload?.skillFilePath === "string"
+            ? token.payload.skillFilePath
+            : token.label,
+      })),
+    [editor?.composerTokens],
+  );
+  const composerSlashActions = useMemo(
+    () =>
+      filteredSlashActions.map(
+        ({ id, type, label, description, icon, disabled, disabledReason, preview }) => ({
+          id,
+          type,
+          label,
+          description,
+          icon,
+          disabled,
+          disabledReason,
+          preview,
+        }),
+      ),
+    [filteredSlashActions],
+  );
+
+  useEffect(() => {
+    if (!slashPaletteOpen) {
+      setSlashLoading(false);
+      setSlashError(null);
+      setSlashActiveActionId(undefined);
+      return;
+    }
+    if (!editorProject) {
+      setSlashActions([]);
+      setSlashLoading(false);
+      setSlashError("请先选择运行项目");
+      return;
+    }
+
+    let cancelled = false;
+    setSlashActions([]);
+    setSlashLoading(true);
+    setSlashError(null);
+    void actionsFromSlashProviders(slashProviders, {
+      workspaceRootForRun: editorSkillRootsKey ? editorSkillRootsKey.split("\u0000") : [],
+    })
+      .then((actions) => {
+        if (!cancelled) {
+          setSlashActions(actions);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setSlashActions([]);
+          setSlashError(error instanceof Error ? error.message : "斜杠菜单加载失败");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSlashLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    editorProject,
+    editorSkillRootsKey,
+    slashPaletteOpen,
+    slashProviders,
+  ]);
+
+  useEffect(() => {
+    if (!slashPaletteOpen) {
+      return;
+    }
+    if (!filteredSlashActions.some((action) => action.id === slashActiveActionId)) {
+      setSlashActiveActionId(firstSelectableSlashAction(filteredSlashActions)?.id);
+    }
+  }, [filteredSlashActions, slashActiveActionId, slashPaletteOpen]);
+
   function openCreateEditor(draft?: AwakenScheduledTaskDraft): void {
     setEditor({
       open: true,
@@ -263,6 +418,7 @@ export function ScheduledTasksView({
       busy: false,
       errorMessage: null,
       fieldErrors: {},
+      composerTokens: [],
     });
   }
 
@@ -279,6 +435,7 @@ export function ScheduledTasksView({
       busy: false,
       errorMessage: null,
       fieldErrors: {},
+      composerTokens: cloneComposerTokens(task.action.composerTokens),
     });
   }
 
@@ -288,6 +445,166 @@ export function ScheduledTasksView({
     openCreateEditor(buildTemplateDraft(templateId, systemTimezone, new Date()));
   }
 
+  function handleSlashActionSelect(actionId: string): void {
+    const action = filteredSlashActions.find((candidate) => candidate.id === actionId);
+    if (!action || action.disabled) {
+      return;
+    }
+    const token = composerTokenFromSlashAction(action);
+    if (!token) {
+      return;
+    }
+    setEditor((current) => {
+      if (!current || current.draft.actionKind !== "agent") {
+        return current;
+      }
+      const trigger = slashTriggerFromComposerValue(current.draft.content);
+      if (!trigger) {
+        return current;
+      }
+      if (current.composerTokens.some((candidate) => candidate.id === token.id)) {
+        return {
+          ...current,
+          draft: {
+            ...current.draft,
+            content: clearSlashTriggerFromComposerValue(current.draft.content),
+          },
+        };
+      }
+      const leadingText = current.draft.content.slice(0, trigger.start);
+      return {
+        ...current,
+        draft: {
+          ...current.draft,
+          content: current.draft.content.slice(trigger.end),
+        },
+        composerTokens: [
+          ...current.composerTokens,
+          leadingText ? { ...token, leadingText } : token,
+        ],
+      };
+    });
+    setSlashActiveActionId(undefined);
+  }
+
+  function handleComposerStructuredInputChange(
+    nextValue: ComposerBarStructuredInputValue,
+  ): void {
+    setEditor((current) => {
+      if (!current) {
+        return current;
+      }
+      const currentTokens = new Map(
+        current.composerTokens.map((token) => [token.id, token]),
+      );
+      const nextTokens = nextValue.tokens.flatMap((segment) => {
+        const token = currentTokens.get(segment.id);
+        if (!token) {
+          return [];
+        }
+        const nextToken = { ...token };
+        if (segment.leadingText) {
+          nextToken.leadingText = segment.leadingText;
+        } else {
+          delete nextToken.leadingText;
+        }
+        return [nextToken];
+      });
+      return {
+        ...current,
+        draft: { ...current.draft, content: nextValue.value },
+        composerTokens: nextTokens,
+      };
+    });
+  }
+
+  function handleRemoveComposerToken(tokenId: string): void {
+    setEditor((current) => {
+      if (!current) {
+        return current;
+      }
+      const removedIndex = current.composerTokens.findIndex((token) => token.id === tokenId);
+      if (removedIndex < 0) {
+        return current;
+      }
+      const removed = current.composerTokens[removedIndex];
+      const leadingText = removed?.leadingText ?? "";
+      const nextTokens = current.composerTokens.filter((token) => token.id !== tokenId);
+      const following = nextTokens[removedIndex];
+      if (leadingText && following) {
+        nextTokens[removedIndex] = {
+          ...following,
+          leadingText: `${leadingText}${following.leadingText ?? ""}`,
+        };
+        return { ...current, composerTokens: nextTokens };
+      }
+      return {
+        ...current,
+        draft: {
+          ...current.draft,
+          content: leadingText ? `${leadingText}${current.draft.content}` : current.draft.content,
+        },
+        composerTokens: nextTokens,
+      };
+    });
+  }
+
+  function handleComposerInputKeyDown(
+    event: ReactKeyboardEvent<HTMLTextAreaElement | HTMLDivElement>,
+  ): void {
+    if (!slashPaletteOpen) {
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setEditor((current) =>
+        current
+          ? {
+              ...current,
+              draft: {
+                ...current.draft,
+                content: clearSlashTriggerFromComposerValue(current.draft.content),
+              },
+            }
+          : current,
+      );
+      setSlashActiveActionId(undefined);
+      return;
+    }
+    if (
+      event.key !== "ArrowDown" &&
+      event.key !== "ArrowUp" &&
+      event.key !== "Enter" &&
+      event.key !== "Tab"
+    ) {
+      return;
+    }
+    event.preventDefault();
+    const selectableActions = filteredSlashActions.filter((action) => !action.disabled);
+    if (selectableActions.length === 0) {
+      return;
+    }
+    const activeIndex = Math.max(
+      0,
+      selectableActions.findIndex((action) => action.id === slashActiveActionId),
+    );
+    if (event.key === "ArrowDown") {
+      setSlashActiveActionId(
+        selectableActions[(activeIndex + 1) % selectableActions.length]?.id,
+      );
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      setSlashActiveActionId(
+        selectableActions[
+          (activeIndex - 1 + selectableActions.length) % selectableActions.length
+        ]?.id,
+      );
+      return;
+    }
+    handleSlashActionSelect(slashActiveActionId ?? selectableActions[0]?.id ?? "");
+  }
+
   async function handleEditorSubmit(draft: AwakenScheduledTaskDraft): Promise<void> {
     if (!editor || editor.busy) {
       return;
@@ -295,11 +612,13 @@ export function ScheduledTasksView({
     setEditor({ ...editor, busy: true, errorMessage: null, fieldErrors: {} });
     try {
       if (editor.mode === "create") {
-        await runtimeClient.createScheduledTask(draftToCreateInput(draft));
+        await runtimeClient.createScheduledTask(
+          draftToCreateInput(draft, editor.composerTokens),
+        );
       } else if (editor.editingTask) {
         await runtimeClient.patchScheduledTask(
           editor.editingTask.taskId,
-          draftToPatchInput(draft, editor.editingTask.version),
+          draftToPatchInput(draft, editor.editingTask.version, editor.composerTokens),
         );
       }
       setEditor(null);
@@ -539,6 +858,17 @@ export function ScheduledTasksView({
           busy={editor.busy}
           errorMessage={editor.errorMessage}
           fieldErrors={editor.fieldErrors}
+          composerTokens={composerTokens}
+          slashPalette={{
+            open: slashPaletteOpen,
+            actions: composerSlashActions,
+            activeActionId: slashActiveActionId,
+            loading: slashLoading,
+            error: slashError,
+            emptyLabel: "没有匹配项",
+            onSelectAction: handleSlashActionSelect,
+            onActiveActionChange: setSlashActiveActionId,
+          }}
           onOpenChange={(open) => {
             if (!open) {
               setEditor(null);
@@ -547,6 +877,9 @@ export function ScheduledTasksView({
           onValueChange={(draft) =>
             setEditor((current) => (current ? { ...current, draft } : current))
           }
+          onComposerStructuredInputChange={handleComposerStructuredInputChange}
+          onComposerInputKeyDown={handleComposerInputKeyDown}
+          onRemoveComposerToken={handleRemoveComposerToken}
           onSubmit={(draft) => {
             void handleEditorSubmit(draft);
           }}

@@ -12,6 +12,7 @@ import {
   type AwakenScheduledTaskExecutionItem,
 } from "@awaken/design-system";
 import type {
+  ComposerToken,
   ScheduledTask,
   ScheduledTaskActionKind,
   ScheduledTaskCreateInput,
@@ -183,13 +184,29 @@ function scheduleFromDraft(draft: AwakenScheduledTaskDraft): ScheduledTaskSchedu
   return schedule;
 }
 
-export function draftToCreateInput(draft: AwakenScheduledTaskDraft): ScheduledTaskCreateInput {
+export function draftToCreateInput(
+  draft: AwakenScheduledTaskDraft,
+  composerTokens: ComposerToken[] = [],
+): ScheduledTaskCreateInput {
+  const scheduledComposerTokens =
+    draft.actionKind === "agent"
+      ? composerTokens.map((token) => ({
+          ...token,
+          payload: token.payload ? { ...token.payload } : undefined,
+        }))
+      : [];
   return {
     name: draft.name.trim(),
     enabled: draft.enabled,
     projectId: draft.projectId,
     schedule: scheduleFromDraft(draft),
-    action: { kind: draft.actionKind, content: draft.content },
+    action: {
+      kind: draft.actionKind,
+      content: draft.content,
+      ...(scheduledComposerTokens.length > 0
+        ? { composerTokens: scheduledComposerTokens }
+        : {}),
+    },
     execution: {
       profileId: draft.profileId,
       timeoutSeconds: draft.timeoutSeconds,
@@ -209,8 +226,9 @@ export function draftToCreateInput(draft: AwakenScheduledTaskDraft): ScheduledTa
 export function draftToPatchInput(
   draft: AwakenScheduledTaskDraft,
   expectedVersion: number,
+  composerTokens: ComposerToken[] = [],
 ): ScheduledTaskPatchInput {
-  return { expectedVersion, ...draftToCreateInput(draft) };
+  return { expectedVersion, ...draftToCreateInput(draft, composerTokens) };
 }
 
 /** 编辑回显：Core 任务 → 编辑器 draft。 */

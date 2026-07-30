@@ -37,6 +37,7 @@ import {
   AwakenDialog as Dialog,
   AwakenDeliverableList as DeliverableList,
   AwakenExecutionFeed as ExecutionFeed,
+  AwakenMediaGenerationCard as MediaGenerationCard,
   AwakenInspectorRail as InspectorRail,
   AwakenSubagentGroup as SubagentGroup,
   AwakenProjectFoldersEditor as ProjectFoldersEditor,
@@ -1696,6 +1697,10 @@ export function App() {
     string | null
   >(null);
   const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(null);
+  const [artifactMediaSources, setArtifactMediaSources] = useState<Record<string, string | null>>({});
+  const artifactMediaSourcesRef = useRef<Record<string, string | null>>({});
+  const artifactMediaSourcePendingRef = useRef<Set<string>>(new Set());
+  const artifactMediaSourceGenerationRef = useRef(0);
   const [answeringUserQuestionId, setAnsweringUserQuestionId] = useState<string | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
   const [modelProfiles, setModelProfiles] = useState<RuntimeModelProfileSummary[]>([]);
@@ -1845,6 +1850,74 @@ export function App() {
     ];
     return projectVisibleNarrativeItems({ items: narrativeItems, isBusy });
   }, [isBusy, runtimeState.narrative]);
+  const artifactMediaRequests = useMemo(() => {
+    const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;
+    if (!threadId) return [];
+    const byPath = new Map(
+      runtimeState.artifacts
+        .filter((artifact) => artifact.path)
+        .map((artifact) => [artifact.path!.replace(/\\/g, "/").toLowerCase(), artifact]),
+    );
+    const requests = new Map<string, { threadId: string; runId: string; artifactId: string }>();
+    for (const item of visibleNarrativeItems) {
+      if (item.kind === "mediaGeneration" && item.status === "ready" && item.runId) {
+        for (const artifactPath of item.artifactPaths) {
+          const artifact = byPath.get(artifactPath.replace(/\\/g, "/").toLowerCase());
+          if (!artifact) continue;
+          const key = `${threadId}:${item.runId}:${artifact.id}`;
+          requests.set(key, { threadId, runId: item.runId, artifactId: artifact.id });
+        }
+      }
+      if (item.kind === "deliverables") {
+        for (const file of item.files) {
+          if (file.fileType !== "image" && file.fileType !== "video") continue;
+          const key = `${threadId}:${file.runId}:${file.artifactId}`;
+          requests.set(key, { threadId, runId: file.runId, artifactId: file.artifactId });
+        }
+      }
+    }
+    return [...requests.entries()].map(([key, request]) => ({ key, request }));
+  }, [runtimeState.activeThreadId, runtimeState.artifacts, runtimeState.threadId, visibleNarrativeItems]);
+
+  useEffect(() => {
+    artifactMediaSourceGenerationRef.current += 1;
+    artifactMediaSourcePendingRef.current.clear();
+    artifactMediaSourcesRef.current = {};
+    setArtifactMediaSources({});
+  }, [runtimeState.activeThreadId]);
+
+  useEffect(() => {
+    const sourceGeneration = artifactMediaSourceGenerationRef.current;
+    for (const { key, request } of artifactMediaRequests) {
+      if (Object.prototype.hasOwnProperty.call(artifactMediaSourcesRef.current, key)) continue;
+      if (artifactMediaSourcePendingRef.current.has(key)) continue;
+      artifactMediaSourcePendingRef.current.add(key);
+      void runtimeClient
+        .getArtifactMediaSource(request)
+        .then((result) => {
+          artifactMediaSourcePendingRef.current.delete(key);
+          if (sourceGeneration !== artifactMediaSourceGenerationRef.current) return;
+          const nextSource = result.ok ? result.src : null;
+          artifactMediaSourcesRef.current = {
+            ...artifactMediaSourcesRef.current,
+            [key]: nextSource,
+          };
+          setArtifactMediaSources((current) => ({
+            ...current,
+            [key]: nextSource,
+          }));
+        })
+        .catch(() => {
+          artifactMediaSourcePendingRef.current.delete(key);
+          if (sourceGeneration !== artifactMediaSourceGenerationRef.current) return;
+          artifactMediaSourcesRef.current = {
+            ...artifactMediaSourcesRef.current,
+            [key]: null,
+          };
+          setArtifactMediaSources((current) => ({ ...current, [key]: null }));
+        });
+    }
+  }, [artifactMediaRequests, runtimeClient]);
   const subagentTasks = useMemo<SubagentNarrativeTask[]>(() => {
     const byId = new Map<string, SubagentNarrativeTask>();
     for (const item of runtimeState.narrative.committedItems) {
@@ -5037,6 +5110,53 @@ export function App() {
         />
       );
     }
+    if (item.kind === "mediaGeneration") {
+      const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;
+      const artifactsByPath = new Map(
+        runtimeState.artifacts
+          .filter((candidate) => Boolean(candidate.path))
+          .map((candidate) => [candidate.path!.replace(/\\/g, "/").toLowerCase(), candidate]),
+      );
+      const mediaSources = item.artifactPaths.map((artifactPath, index) => {
+        const artifact = artifactsByPath.get(artifactPath.replace(/\\/g, "/").toLowerCase());
+        const sourceKey =
+          threadId && item.runId && artifact
+            ? `${threadId}:${item.runId}:${artifact.id}`
+            : undefined;
+        return {
+          id: artifact?.id || artifactPath || `media-${index + 1}`,
+          src: sourceKey ? artifactMediaSources[sourceKey] ?? undefined : undefined,
+          alt: artifact?.title || `${item.title} ${index + 1}`,
+          onOpen:
+            threadId && item.runId && artifact
+              ? async () => {
+                  setOpeningArtifactId(artifact.id);
+                  try {
+                    const result = await runtimeClient.openArtifact({
+                      threadId,
+                      runId: item.runId!,
+                      artifactId: artifact.id,
+                    });
+                    if (!result.ok) setNotice(result.message);
+                  } finally {
+                    setOpeningArtifactId((current) => current === artifact.id ? null : current);
+                  }
+                }
+              : undefined,
+        };
+      });
+      return (
+        <MediaGenerationCard
+          key={key}
+          kind={item.mediaKind}
+          status={item.status}
+          title={item.title}
+          detail={item.detail}
+          requestedCount={item.requestedCount}
+          sources={mediaSources}
+        />
+      );
+    }
     if (item.kind === "subagentGroup") {
       return (
         <SubagentGroup
@@ -5106,6 +5226,10 @@ export function App() {
             title: file.title,
             extension: file.extension,
             fileType: file.fileType,
+            previewSrc:
+              file.fileType === "image" || file.fileType === "video"
+                ? artifactMediaSources[`${threadId}:${file.runId}:${file.artifactId}`] ?? undefined
+                : undefined,
             opening: openingArtifactId === file.artifactId,
             disabled: !threadId,
             onOpen: threadId

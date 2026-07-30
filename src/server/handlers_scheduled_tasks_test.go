@@ -280,6 +280,43 @@ func TestScheduledTaskCreateListGetWireShape(t *testing.T) {
 	}
 }
 
+func TestScheduledTaskCreatePreservesAgentComposerTokens(t *testing.T) {
+	f := newScheduledTaskFixture(t)
+	body := scheduledTaskRequestBody("")
+	body["action"] = map[string]any{
+		"kind":    "agent",
+		"content": "生成日报",
+		"composer_tokens": []any{map[string]any{
+			"id":          "skill:daily-report:project",
+			"type":        "skill",
+			"leadingText": "请使用 ",
+			"label":       "daily-report",
+			"payload": map[string]any{
+				"skillId":      "daily-report",
+				"sourceOrigin": "project",
+			},
+		}},
+	}
+
+	created := createScheduledTask(t, f.router, body)
+	action, ok := created["action"].(map[string]any)
+	if !ok {
+		t.Fatalf("action response = %#v", created["action"])
+	}
+	tokens, ok := action["composer_tokens"].([]any)
+	if !ok || len(tokens) != 1 {
+		t.Fatalf("composer_tokens response = %#v", action["composer_tokens"])
+	}
+	token := tokens[0].(map[string]any)
+	payload := token["payload"].(map[string]any)
+	if token["id"] != "skill:daily-report:project" ||
+		token["leadingText"] != "请使用 " ||
+		payload["skillId"] != "daily-report" ||
+		payload["sourceOrigin"] != "project" {
+		t.Fatalf("composer token identity changed: %#v", token)
+	}
+}
+
 func TestScheduledTaskCreateValidationAndIdentity(t *testing.T) {
 	f := newScheduledTaskFixture(t)
 

@@ -51,8 +51,10 @@ export type AwakenComposerInlineInputProps = {
   onChange: (value: string) => void;
   onStructuredChange?: (value: ComposerInlineStructuredValue) => void;
   onSubmit?: () => void;
+  submitOnEnter?: boolean;
   onKeyDown?: (event: ReactKeyboardEvent<ComposerInlineInputElement>) => void;
   onRemoveToken?: (tokenId: string) => void;
+  ariaLabel?: string;
   placeholder?: string;
   minRows?: number;
   maxRows?: number;
@@ -471,8 +473,10 @@ export function AwakenComposerInlineInput({
   onChange,
   onStructuredChange,
   onSubmit,
+  submitOnEnter = true,
   onKeyDown,
   onRemoveToken,
+  ariaLabel = "输入任务",
   placeholder = "",
   minRows = 2,
   maxRows = 6,
@@ -658,6 +662,7 @@ export function AwakenComposerInlineInput({
       }
 
       if (
+        !submitOnEnter ||
         !shouldSubmitComposerInputKey({
           key: event.key,
           shiftKey: event.shiftKey,
@@ -669,7 +674,7 @@ export function AwakenComposerInlineInput({
       event.preventDefault();
       onSubmit?.();
     },
-    [applyDeletion, onKeyDown, onSubmit, tokens],
+    [applyDeletion, onKeyDown, onSubmit, submitOnEnter, tokens],
   );
 
   const handleBeforeInput = useCallback(
@@ -790,7 +795,7 @@ export function AwakenComposerInlineInput({
       contentEditable={disabled ? false : "plaintext-only"}
       suppressContentEditableWarning
       role="textbox"
-      aria-label="输入任务"
+      aria-label={ariaLabel}
       aria-multiline="true"
       aria-disabled={disabled || undefined}
       data-placeholder={placeholder}

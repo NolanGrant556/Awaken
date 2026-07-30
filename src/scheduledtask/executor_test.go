@@ -14,6 +14,32 @@ import (
 	"awaken/src/runtime"
 )
 
+func TestRuntimeComposerTokensPreserveScheduledSkillIdentity(t *testing.T) {
+	tokens := []ComposerToken{{
+		ID:          "skill:daily-report:project",
+		Type:        "skill",
+		LeadingText: "请使用 ",
+		Label:       "daily-report",
+		Payload: ComposerTokenPayload{
+			SkillID:       "daily-report",
+			SourceOrigin:  "project",
+			SkillFilePath: "/workspace/.awaken/skills/daily-report/SKILL.md",
+			RootDir:       "/workspace/.awaken/skills/daily-report",
+		},
+	}}
+
+	converted := runtimeComposerTokens(tokens)
+	if len(converted) != 1 {
+		t.Fatalf("converted token count = %d, want 1", len(converted))
+	}
+	if converted[0].ID != tokens[0].ID ||
+		converted[0].LeadingText != tokens[0].LeadingText ||
+		converted[0].Payload.SkillID != tokens[0].Payload.SkillID ||
+		converted[0].Payload.SkillFilePath != tokens[0].Payload.SkillFilePath {
+		t.Fatalf("converted token lost identity: %+v", converted[0])
+	}
+}
+
 // executorProbe captures what the RunService agent factory saw and holds the
 // configurable fake run behaviour.
 type executorProbe struct {

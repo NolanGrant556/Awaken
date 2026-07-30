@@ -2,6 +2,7 @@ package scheduledtask
 
 import (
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -9,13 +10,15 @@ import (
 // Contract §6.3 limits. Core is the only validation owner; Renderer and
 // templates pre-fill but never validate authoritatively.
 const (
-	MaxNameRunes       = 120
-	MaxContentBytes    = 32 * 1024
-	MinTimeoutSeconds  = 30
-	MaxTimeoutSeconds  = 3600
-	MaxMisfireGraceSec = 86400
-	MinRepeatCount     = 1
-	MaxRepeatCount     = 10000
+	MaxNameRunes                  = 120
+	MaxContentBytes               = 32 * 1024
+	MaxComposerTokens             = 24
+	MaxComposerTokenMetadataBytes = 16 * 1024
+	MinTimeoutSeconds             = 30
+	MaxTimeoutSeconds             = 3600
+	MaxMisfireGraceSec            = 86400
+	MinRepeatCount                = 1
+	MaxRepeatCount                = 10000
 )
 
 // ProjectChecker verifies that a project exists and is active. Injected by
@@ -97,19 +100,53 @@ func ValidateName(name string) error {
 	return nil
 }
 
-// ValidateAction enforces a known kind and a non-empty content of at most
-// 32 KiB (bytes).
+// ValidateAction enforces a known kind and a prompt/body of at most 32 KiB.
+// Reminder actions cannot carry Composer tokens. Agent actions may be
+// token-only, matching the home Composer's structured Skill selection.
 func ValidateAction(action Action) error {
 	switch action.Kind {
-	case ActionKindReminder, ActionKindAgent:
+	case ActionKindReminder:
+		if len(action.ComposerTokens) > 0 {
+			return invalid("action.composer_tokens", "must be omitted for reminders")
+		}
+		if len(action.Content) == 0 {
+			return invalid("action.content", "must not be empty")
+		}
+	case ActionKindAgent:
+		if len(action.Content) == 0 && len(action.ComposerTokens) == 0 {
+			return invalid("action.content", "must not be empty without composer tokens")
+		}
 	default:
 		return invalid("action.kind", "must be reminder or agent")
 	}
-	if len(action.Content) == 0 {
-		return invalid("action.content", "must not be empty")
+	if len(action.ComposerTokens) > MaxComposerTokens {
+		return invalid("action.composer_tokens", "must contain at most 24 items")
 	}
-	if len(action.Content) > MaxContentBytes {
+	promptBytes := len(action.Content)
+	metadataBytes := 0
+	seenTokenIDs := make(map[string]struct{}, len(action.ComposerTokens))
+	for _, token := range action.ComposerTokens {
+		if !strings.EqualFold(strings.TrimSpace(token.Type), "skill") {
+			return invalid("action.composer_tokens", "must contain only skill tokens")
+		}
+		tokenID := strings.TrimSpace(token.ID)
+		if tokenID == "" || strings.TrimSpace(token.Payload.SkillID) == "" {
+			return invalid("action.composer_tokens", "skill identity is required")
+		}
+		if _, duplicate := seenTokenIDs[tokenID]; duplicate {
+			return invalid("action.composer_tokens", "token IDs must be unique")
+		}
+		seenTokenIDs[tokenID] = struct{}{}
+		promptBytes += len(token.LeadingText)
+		metadataBytes += len(token.ID) + len(token.Type) + len(token.Label) +
+			len(token.Payload.SkillID) + len(token.Payload.SourceOrigin) +
+			len(token.Payload.SkillFilePath) + len(token.Payload.RootDir)
+	}
+	if promptBytes > MaxContentBytes {
 		return invalid("action.content", "must be at most 32 KiB")
+	}
+	if metadataBytes > MaxComposerTokenMetadataBytes {
+		return invalid("action.composer_tokens", "metadata is too large")
 	}
 	return nil
 }

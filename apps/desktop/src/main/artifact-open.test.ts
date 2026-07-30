@@ -4,7 +4,11 @@ import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { RuntimeThreadTranscript } from "../shared/runtime.js";
-import { openRecordedArtifact, resolveArtifactTarget } from "./artifact-open.js";
+import {
+  openRecordedArtifact,
+  resolveArtifactMediaTarget,
+  resolveArtifactTarget,
+} from "./artifact-open.js";
 
 function symlinksSupported(): boolean {
   const tmp = fsSync.mkdtempSync(
@@ -287,5 +291,41 @@ describe("artifact open authorization", () => {
       code: "no_default_application",
       message: "系统没有为该文件格式设置默认打开应用。",
     });
+  });
+
+  it("authorizes ready media during an active run without exposing arbitrary files", async () => {
+    const { output, transcript } = await fixture();
+    const image = path.join(output, "generated.png");
+    await fs.writeFile(image, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    transcript.runs[0].run.status = "running";
+    transcript.runs[0].events = [{
+      type: "AWAKEN_ARTIFACT_CREATED",
+      artifactId: "media-1",
+      artifactPath: image,
+      artifactTitle: "generated.png",
+      artifactKind: "image",
+      artifactStatus: "ready",
+      artifactRole: "deliverable",
+      artifactContractVersion: 2,
+      artifactProducer: "image_generate",
+    }];
+
+    await expect(resolveArtifactMediaTarget(transcript, {
+      threadId: "thread-1",
+      runId: "run-1",
+      artifactId: "media-1",
+    })).resolves.toMatchObject({
+      ok: true,
+      path: await fs.realpath(image),
+      mimeType: "image/png",
+      byteLength: 4,
+    });
+
+    transcript.runs[0].events[0].artifactKind = "document";
+    await expect(resolveArtifactMediaTarget(transcript, {
+      threadId: "thread-1",
+      runId: "run-1",
+      artifactId: "media-1",
+    })).resolves.toMatchObject({ ok: false, result: { code: "unsupported_type" } });
   });
 });

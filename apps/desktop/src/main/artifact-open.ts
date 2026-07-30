@@ -18,6 +18,19 @@ const supportedExtensions = new Set([
   ".pdf",
   ".ppt",
   ".pptx",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+  ".mp4",
+]);
+
+const mediaExtensionTypes = new Map<string, { kind: "image" | "video"; mimeType: string }>([
+  [".png", { kind: "image", mimeType: "image/png" }],
+  [".jpg", { kind: "image", mimeType: "image/jpeg" }],
+  [".jpeg", { kind: "image", mimeType: "image/jpeg" }],
+  [".webp", { kind: "image", mimeType: "image/webp" }],
+  [".mp4", { kind: "video", mimeType: "video/mp4" }],
 ]);
 
 const terminalStatuses = new Set(["finished", "error", "cancelled"]);
@@ -25,7 +38,7 @@ const terminalStatuses = new Set(["finished", "error", "cancelled"]);
 function failed(
   code: Exclude<ArtifactOpenResult, { ok: true }>["code"],
   message: string,
-): ArtifactOpenResult {
+): Exclude<ArtifactOpenResult, { ok: true }> {
   return { ok: false, code, message };
 }
 
@@ -213,6 +226,81 @@ export async function resolveArtifactTarget(
     };
   }
   return { ok: true, path: realTarget };
+}
+
+export async function resolveArtifactMediaTarget(
+  transcript: RuntimeThreadTranscript,
+  request: ArtifactOpenRequest,
+): Promise<
+  | { ok: true; path: string; mimeType: string; byteLength: number; fileName: string }
+  | { ok: false; result: Exclude<ArtifactOpenResult, { ok: true }> }
+> {
+  if (transcript.thread.threadId !== request.threadId) {
+    return { ok: false, result: failed("artifact_not_recorded", "没有找到这个媒体交付物记录。") };
+  }
+  const runEntry = transcript.runs.find((entry) => entry.run.runId === request.runId);
+  if (!runEntry) {
+    return { ok: false, result: failed("artifact_not_recorded", "没有找到这个任务的媒体交付物记录。") };
+  }
+  const event = foldedArtifactEvent(runEntry.events, request.artifactId);
+  if (!event || !event.artifactPath) {
+    return { ok: false, result: failed("artifact_not_recorded", "没有找到这个媒体交付物记录。") };
+  }
+  const role = event.artifactRole || legacyRole(event);
+  if (role !== "deliverable" || event.artifactStatus !== "ready") {
+    return { ok: false, result: failed("artifact_not_deliverable", "该媒体不是已就绪的最终交付物。") };
+  }
+  const extension = path.extname(event.artifactPath).toLowerCase();
+  const mediaType = mediaExtensionTypes.get(extension);
+  if (!mediaType || event.artifactKind !== mediaType.kind) {
+    return { ok: false, result: failed("unsupported_type", "暂不支持预览这种媒体格式。") };
+  }
+
+  const workspaceRoot = transcript.thread.workspace.workspaceRoot;
+  const candidate = path.isAbsolute(event.artifactPath)
+    ? path.resolve(event.artifactPath)
+    : path.resolve(workspaceRoot, event.artifactPath);
+  let realTarget: string;
+  try {
+    realTarget = await fs.realpath(candidate);
+  } catch {
+    return { ok: false, result: failed("file_not_found", "媒体文件已移动、删除或当前无法访问。") };
+  }
+  if (path.extname(realTarget).toLowerCase() !== extension) {
+    return { ok: false, result: failed("unsupported_type", "媒体文件格式与交付记录不一致。") };
+  }
+  const configuredRoots = transcript.thread.workspace.outputRoots?.length
+    ? transcript.thread.workspace.outputRoots
+    : [workspaceRoot];
+  const realRoots = (
+    await Promise.all(
+      configuredRoots.map(async (root) => {
+        try {
+          return await fs.realpath(path.resolve(root));
+        } catch {
+          return undefined;
+        }
+      }),
+    )
+  ).filter((root): root is string => Boolean(root));
+  if (!realRoots.some((root) => isPathWithin(root, realTarget))) {
+    return { ok: false, result: failed("outside_output_roots", "媒体文件不在当前任务允许的输出目录中。") };
+  }
+  try {
+    const stat = await fs.stat(realTarget);
+    if (!stat.isFile()) {
+      return { ok: false, result: failed("not_a_file", "媒体交付物路径不是普通文件。") };
+    }
+    return {
+      ok: true,
+      path: realTarget,
+      mimeType: mediaType.mimeType,
+      byteLength: stat.size,
+      fileName: path.basename(realTarget),
+    };
+  } catch {
+    return { ok: false, result: failed("file_not_found", "媒体文件已移动、删除或当前无法访问。") };
+  }
 }
 
 export async function openRecordedArtifact(

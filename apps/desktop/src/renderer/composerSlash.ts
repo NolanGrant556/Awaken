@@ -3,6 +3,7 @@ import { Wrench } from "lucide-react";
 import type {
   ComposerToken,
   RuntimeSkill,
+  SkillProjectRoots,
   SkillComposerTokenPayload,
 } from "../shared/runtime";
 
@@ -31,7 +32,7 @@ export type SlashAction = {
 };
 
 export type SlashProviderContext = {
-  workspaceRootForRun: string;
+  workspaceRootForRun: SkillProjectRoots;
 };
 
 export type SlashProvider = {
@@ -171,7 +172,7 @@ export function skillSlashActionsFromSkills(
 }
 
 export function skillSlashProvider(
-  listSkills: (workspaceRootForRun: string) => Promise<RuntimeSkill[]>,
+  listSkills: (workspaceRootForRun: SkillProjectRoots) => Promise<RuntimeSkill[]>,
 ): SlashProvider {
   return {
     id: "skills",

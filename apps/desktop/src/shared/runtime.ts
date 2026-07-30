@@ -1023,6 +1023,21 @@ export type ModelReasoningCapabilityTestResult = ModelProfileTestResult & {
 
 export const VOLCENGINE_AGENT_PLAN_ACCOUNT_ID = "volcengine-agent-plan-default";
 
+export type AgentPlanCatalogKind =
+  "llm" | "image" | "video" | "unsupported" | "unknown";
+
+export type AgentPlanCatalogEntryWire = {
+  id: string;
+  kind: AgentPlanCatalogKind;
+  display_name?: string;
+};
+
+export type AgentPlanCatalogEntry = {
+  id: string;
+  kind: AgentPlanCatalogKind;
+  displayName?: string;
+};
+
 export type AgentPlanAccountWire = {
   account_id: typeof VOLCENGINE_AGENT_PLAN_ACCOUNT_ID;
   provider_id: "volcengine-agent-plan";
@@ -1030,6 +1045,7 @@ export type AgentPlanAccountWire = {
   masked_key?: string;
   credential_revision: number;
   model_ids: string[];
+  catalog: AgentPlanCatalogEntryWire[];
   catalog_updated_at?: string;
 };
 
@@ -1040,6 +1056,7 @@ export type AgentPlanAccount = {
   maskedKey?: string;
   credentialRevision: number;
   modelIds: string[];
+  catalog: AgentPlanCatalogEntry[];
   catalogUpdatedAt?: string;
 };
 
@@ -1055,7 +1072,91 @@ export function normalizeAgentPlanAccount(account: AgentPlanAccountWire): AgentP
     maskedKey: account.masked_key,
     credentialRevision: account.credential_revision,
     modelIds: [...account.model_ids],
+    catalog: account.catalog.map((entry) => ({
+      id: entry.id,
+      kind: entry.kind,
+      displayName: entry.display_name,
+    })),
     catalogUpdatedAt: account.catalog_updated_at,
+  };
+}
+
+export type AgentPlanMediaCapability =
+  "media.image.generate" | "media.video.generate";
+
+export type AgentPlanMediaModelKind = "image" | "video";
+
+export type AgentPlanMediaDisplayState =
+  | "disabled"
+  | "needs_auth"
+  | "unknown"
+  | "ready_unverified"
+  | "ready"
+  | "denied"
+  | "unavailable";
+
+export type AgentPlanMediaToolConfigurationWire = {
+  id: string;
+  provider_id: "volcengine-agent-plan";
+  account_id: typeof VOLCENGINE_AGENT_PLAN_ACCOUNT_ID;
+  capability: AgentPlanMediaCapability;
+  model_id: string;
+  model_kind: AgentPlanMediaModelKind;
+  enabled: boolean;
+  configuration_revision: number;
+  credential_revision: number;
+  display_state: AgentPlanMediaDisplayState;
+};
+
+export type AgentPlanMediaToolConfiguration = {
+  id: string;
+  providerId: "volcengine-agent-plan";
+  accountId: typeof VOLCENGINE_AGENT_PLAN_ACCOUNT_ID;
+  capability: AgentPlanMediaCapability;
+  modelId: string;
+  modelKind: AgentPlanMediaModelKind;
+  enabled: boolean;
+  configurationRevision: number;
+  credentialRevision: number;
+  displayState: AgentPlanMediaDisplayState;
+};
+
+export type AgentPlanMediaToolsWire = {
+  configurations: AgentPlanMediaToolConfigurationWire[];
+};
+
+export type AgentPlanMediaTools = {
+  configurations: AgentPlanMediaToolConfiguration[];
+};
+
+export type AgentPlanMediaToolSaveRequest = {
+  capability: AgentPlanMediaCapability;
+  modelId: string;
+  enabled?: boolean;
+};
+
+export type AgentPlanMediaToolsSaveResult = {
+  settings: AgentPlanMediaTools;
+  restartStatus: "restarted" | "restart_failed";
+  message?: string;
+};
+
+export function normalizeAgentPlanMediaTools(
+  value: AgentPlanMediaToolsWire,
+): AgentPlanMediaTools {
+  return {
+    configurations: value.configurations.map((configuration) => ({
+      id: configuration.id,
+      providerId: configuration.provider_id,
+      accountId: configuration.account_id,
+      capability: configuration.capability,
+      modelId: configuration.model_id,
+      modelKind: configuration.model_kind,
+      enabled: configuration.enabled,
+      configurationRevision: configuration.configuration_revision,
+      credentialRevision: configuration.credential_revision,
+      displayState: configuration.display_state,
+    })),
   };
 }
 
@@ -1297,6 +1398,10 @@ export type ArtifactOpenErrorCode =
 export type ArtifactOpenResult =
   { ok: true } | { ok: false; code: ArtifactOpenErrorCode; message: string };
 
+export type ArtifactMediaSourceResult =
+  | { ok: true; src: string; mimeType: string; byteLength: number }
+  | { ok: false; code: ArtifactOpenErrorCode; message: string };
+
 export type RunStreamHandlers = {
   onEvent: (event: AguiEvent) => void;
   onError?: (message: string) => void;
@@ -1398,11 +1503,13 @@ export type ScheduledTaskActionKind = "reminder" | "agent";
 export type ScheduledTaskActionWire = {
   kind: ScheduledTaskActionKind;
   content: string;
+  composer_tokens?: ComposerToken[];
 };
 
 export type ScheduledTaskAction = {
   kind: ScheduledTaskActionKind;
   content: string;
+  composerTokens?: ComposerToken[];
 };
 
 export type ScheduledTaskExecutionOptionsWire = {
@@ -1688,6 +1795,9 @@ export type AwakenBridge = {
   ) => Promise<ProjectMutationResult>;
   getProjectOperation: (operationId: string) => Promise<RuntimeProjectOperation>;
   openArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
+  getArtifactMediaSource: (
+    request: ArtifactOpenRequest,
+  ) => Promise<ArtifactMediaSourceResult>;
   revealPath: (target: string) => Promise<{ ok: boolean; message?: string }>;
   revealArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
   startRun: (request: StartRunRequest) => Promise<DesktopOperationResult<RuntimeRun>>;
@@ -1765,6 +1875,13 @@ export type AwakenBridge = {
   ) => Promise<DesktopOperationResult<AgentPlanAccount>>;
   refreshAgentPlanModels: () => Promise<DesktopOperationResult<AgentPlanAccount>>;
   deleteAgentPlanAccount: () => Promise<void>;
+  getAgentPlanMediaTools: () => Promise<AgentPlanMediaTools>;
+  saveAgentPlanMediaTool: (
+    request: AgentPlanMediaToolSaveRequest,
+  ) => Promise<AgentPlanMediaToolsSaveResult>;
+  deleteAgentPlanMediaTool: (
+    capability: AgentPlanMediaCapability,
+  ) => Promise<AgentPlanMediaToolsSaveResult>;
   saveModelProfile: (
     request: ModelProfileSaveRequest,
   ) => Promise<DesktopOperationResult<RuntimeModelProfileSummary>>;
@@ -2346,7 +2463,18 @@ export function normalizeScheduledTask(task: ScheduledTaskWire): ScheduledTask {
     projectId: task.project_id,
     threadId: task.thread_id || undefined,
     schedule: normalizeScheduledTaskSchedule(task.schedule),
-    action: { kind: task.action.kind, content: task.action.content },
+    action: {
+      kind: task.action.kind,
+      content: task.action.content,
+      ...(task.action.composer_tokens?.length
+        ? {
+            composerTokens: task.action.composer_tokens.map((token) => ({
+              ...token,
+              payload: token.payload ? { ...token.payload } : undefined,
+            })),
+          }
+        : {}),
+    },
     execution: normalizeScheduledTaskExecutionOptions(task.execution),
     templateOrigin: task.template_origin
       ? normalizeScheduledTaskTemplateOrigin(task.template_origin)
@@ -2403,7 +2531,18 @@ export function toScheduledTaskCreateWire(
     enabled: input.enabled,
     project_id: input.projectId,
     schedule: toScheduledTaskScheduleWire(input.schedule),
-    action: { kind: input.action.kind, content: input.action.content },
+    action: {
+      kind: input.action.kind,
+      content: input.action.content,
+      ...(input.action.composerTokens?.length
+        ? {
+            composer_tokens: input.action.composerTokens.map((token) => ({
+              ...token,
+              payload: token.payload ? { ...token.payload } : undefined,
+            })),
+          }
+        : {}),
+    },
     execution: toScheduledTaskExecutionOptionsWire(input.execution),
     template_origin: input.templateOrigin
       ? toScheduledTaskTemplateOriginWire(input.templateOrigin)
@@ -2418,7 +2557,20 @@ export function toScheduledTaskPatchWire(input: ScheduledTaskPatchInput): Schedu
     enabled: input.enabled,
     project_id: input.projectId,
     schedule: input.schedule ? toScheduledTaskScheduleWire(input.schedule) : undefined,
-    action: input.action ? { kind: input.action.kind, content: input.action.content } : undefined,
+    action: input.action
+      ? {
+          kind: input.action.kind,
+          content: input.action.content,
+          ...(input.action.composerTokens?.length
+            ? {
+                composer_tokens: input.action.composerTokens.map((token) => ({
+                  ...token,
+                  payload: token.payload ? { ...token.payload } : undefined,
+                })),
+              }
+            : {}),
+        }
+      : undefined,
     execution: input.execution ? toScheduledTaskExecutionOptionsWire(input.execution) : undefined,
     template_origin: input.templateOrigin
       ? toScheduledTaskTemplateOriginWire(input.templateOrigin)

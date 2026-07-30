@@ -31,6 +31,7 @@ export function AwakenScheduledTaskEditorDialogDemo() {
             systemTimezone="Asia/Shanghai"
             errorMessage={state.errorMessage ?? null}
             fieldErrors={state.fieldErrors}
+            composerTokens={state.composerTokens}
             onOpenChange={(open) => setOpenStateId(open ? state.id : null)}
             onValueChange={() => undefined}
             onSubmit={() => setOpenStateId(null)}

@@ -98,6 +98,33 @@ func TestUserStoreFailsClosedOnMalformedEnv(t *testing.T) {
 	}
 }
 
+func TestUserStoreRejectsAgentPlanMediaModelAsMainProfile(t *testing.T) {
+	root := t.TempDir()
+	writeUserStoreFixture(t, root, `{
+  "version": 2,
+  "profiles": [
+    {"id":"agent-llm","providerId":"volcengine-agent-plan","modelId":"glm-5.2","enabled":true,"isDefault":true,"credentialReference":{"kind":"provider_account","providerId":"volcengine-agent-plan","accountId":"volcengine-agent-plan-default"}},
+    {"id":"agent-image","providerId":"volcengine-agent-plan","modelId":"doubao-seedream-test","enabled":true,"isDefault":false,"credentialReference":{"kind":"provider_account","providerId":"volcengine-agent-plan","accountId":"volcengine-agent-plan-default"}}
+  ]
+}`, "AWAKEN_AGENT_PLAN_API_KEY_volcengine-agent-plan-default=secret\n")
+	account := `{"version":2,"accountId":"volcengine-agent-plan-default","credentialRevision":2,"catalog":[{"id":"glm-5.2","kind":"llm"},{"id":"doubao-seedream-test","kind":"image"}]}`
+	if err := os.WriteFile(filepath.Join(root, "config", "agent-plan-account.json"), []byte(account), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewUserStore(root)
+	catalog, err := store.ListReady()
+	if err != nil {
+		t.Fatalf("list ready: %v", err)
+	}
+	if len(catalog.Profiles) != 1 || catalog.Profiles[0].ID != "agent-llm" {
+		t.Fatalf("media profile escaped Agent Plan catalog split: %+v", catalog)
+	}
+	if _, err := store.Resolve("agent-image"); !errors.Is(err, ErrProfileUnavailable) {
+		t.Fatalf("expected image model profile to be unavailable, got %v", err)
+	}
+}
+
 func writeUserStoreFixture(t *testing.T, root, models, env string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(root, "config"), 0o700); err != nil {

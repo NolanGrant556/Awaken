@@ -44,7 +44,12 @@ export function AwakenDeliverableList({
       ) : null}
       <div className="aw-deliverable-list-items" id={listId}>
         {visibleItems.map((item) => (
-          <AwakenDeliverableCard key={item.id} {...item} />
+          <div
+            key={item.id}
+            className={`aw-deliverable-list-item aw-deliverable-list-item-${item.fileType}`}
+          >
+            <AwakenDeliverableCard {...item} />
+          </div>
         ))}
       </div>
       {hasMore ? (

@@ -14,6 +14,7 @@ package scheduledtask
 
 import (
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -133,11 +134,47 @@ type Schedule struct {
 	RepeatEnd       *RepeatEnd `json:"repeat_end,omitempty"`
 }
 
-// Action is what the task executes. Content is the fixed reminder body or
-// the agent prompt; it is user business data and stays out of errors/logs.
+// ComposerTokenPayload is the durable identity carried by a user-selected
+// slash action. Scheduled tasks currently persist only Skill tokens, but the
+// shape mirrors runtime.ComposerToken so the host can reuse StartRun's
+// registry/path revalidation instead of trusting Renderer paths.
+type ComposerTokenPayload struct {
+	SkillID       string `json:"skillId,omitempty"`
+	SourceOrigin  string `json:"sourceOrigin,omitempty"`
+	SkillFilePath string `json:"skillFilePath,omitempty"`
+	RootDir       string `json:"rootDir,omitempty"`
+}
+
+// ComposerToken preserves the structured Skill selection and the text that
+// preceded it in the editor. Content stores the remaining trailing text.
+type ComposerToken struct {
+	ID          string               `json:"id"`
+	Type        string               `json:"type"`
+	LeadingText string               `json:"leadingText,omitempty"`
+	Label       string               `json:"label"`
+	Payload     ComposerTokenPayload `json:"payload,omitempty"`
+}
+
+// Action is what the task executes. Reminder content is the fixed body.
+// Agent content is the trailing text after structured composer tokens; the
+// effective prompt is ComposerTokens' leading text followed by Content.
+// All of it is user business data and stays out of errors/logs.
 type Action struct {
-	Kind    ActionKind `json:"kind"`
-	Content string     `json:"content"`
+	Kind           ActionKind      `json:"kind"`
+	Content        string          `json:"content"`
+	ComposerTokens []ComposerToken `json:"composer_tokens,omitempty"`
+}
+
+// EffectivePrompt reconstructs the same visible text accepted by the home
+// Composer while keeping Skill identity structured for deterministic
+// pre-activation. Token-only actions intentionally return an empty prompt.
+func (a Action) EffectivePrompt() string {
+	var prompt strings.Builder
+	for _, token := range a.ComposerTokens {
+		prompt.WriteString(token.LeadingText)
+	}
+	prompt.WriteString(a.Content)
+	return strings.TrimSpace(prompt.String())
 }
 
 // ExecutionOptions holds per-run parameters. ProfileID is an opaque model

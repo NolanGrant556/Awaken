@@ -7,7 +7,9 @@ export type AwakenComposerInputProps = {
   value: string;
   onChange: (value: string) => void;
   onSubmit?: () => void;
+  submitOnEnter?: boolean;
   onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  ariaLabel?: string;
   placeholder?: string;
   minRows?: number;
   maxRows?: number;
@@ -69,7 +71,9 @@ export function AwakenComposerInput({
   value,
   onChange,
   onSubmit,
+  submitOnEnter = true,
   onKeyDown,
+  ariaLabel = "输入任务",
   placeholder = "",
   minRows = 2,
   maxRows = 6,
@@ -95,6 +99,7 @@ export function AwakenComposerInput({
         return;
       }
       if (
+        !submitOnEnter ||
         !shouldSubmitComposerInputKey({
           key: e.key,
           shiftKey: e.shiftKey,
@@ -107,7 +112,7 @@ export function AwakenComposerInput({
       e.preventDefault();
       onSubmit?.();
     },
-    [onKeyDown, onSubmit],
+    [onKeyDown, onSubmit, submitOnEnter],
   );
 
   const handlePaste = useCallback(
@@ -175,7 +180,7 @@ export function AwakenComposerInput({
       onPaste={handlePaste}
       placeholder={placeholder}
       disabled={disabled}
-      aria-label="输入任务"
+      aria-label={ariaLabel}
       rows={minRows}
       style={{
         width: "100%",

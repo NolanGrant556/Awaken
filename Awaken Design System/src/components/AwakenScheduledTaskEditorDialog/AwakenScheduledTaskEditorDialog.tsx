@@ -1,7 +1,19 @@
 import "./AwakenScheduledTaskEditorDialog.css";
-import { useId, type ChangeEvent, type ReactNode } from "react";
+import {
+  useId,
+  type ChangeEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import { CalendarClock, Check, ChevronDown, Clock } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
+import {
+  AwakenComposerBar,
+  type ComposerBarSlashPalette,
+  type ComposerBarStructuredInputValue,
+  type ComposerBarToken,
+} from "../AwakenComposerBar";
+import type { ComposerInlineInputElement } from "../AwakenComposerBar/AwakenComposerInlineInput";
 import { AwakenDialog } from "../AwakenDialog";
 import { AwakenSwitch } from "../AwakenSwitch";
 import { AwakenScheduledTaskDateTimeField } from "./AwakenScheduledTaskDateTimeField";
@@ -83,8 +95,15 @@ export type AwakenScheduledTaskEditorDialogProps = {
   busy?: boolean;
   errorMessage?: string | null;
   fieldErrors?: Partial<Record<AwakenScheduledTaskDraftField, string>>;
+  composerTokens?: ComposerBarToken[];
+  slashPalette?: ComposerBarSlashPalette;
   onOpenChange: (open: boolean) => void;
   onValueChange: (draft: AwakenScheduledTaskDraft) => void;
+  onComposerStructuredInputChange?: (value: ComposerBarStructuredInputValue) => void;
+  onComposerInputKeyDown?: (
+    event: ReactKeyboardEvent<HTMLTextAreaElement | ComposerInlineInputElement>,
+  ) => void;
+  onRemoveComposerToken?: (tokenId: string) => void;
   onSubmit: (draft: AwakenScheduledTaskDraft) => void;
 };
 
@@ -203,8 +222,13 @@ export function AwakenScheduledTaskEditorDialog({
   busy = false,
   errorMessage,
   fieldErrors,
+  composerTokens = [],
+  slashPalette,
   onOpenChange,
   onValueChange,
+  onComposerStructuredInputChange,
+  onComposerInputKeyDown,
+  onRemoveComposerToken,
   onSubmit,
 }: AwakenScheduledTaskEditorDialogProps) {
   const radioGroupName = useId();
@@ -593,15 +617,37 @@ export function AwakenScheduledTaskEditorDialog({
             label={value.actionKind === "reminder" ? "提醒正文" : "Agent prompt"}
             error={fieldErrors?.content}
           >
-            <textarea
-              className="aw-scheduled-task-editor__control aw-scheduled-task-editor__textarea"
-              aria-label={value.actionKind === "reminder" ? "提醒正文" : "Agent prompt"}
-              aria-invalid={fieldErrors?.content ? true : undefined}
-              rows={6}
-              value={value.content}
-              disabled={busy}
-              onChange={(event) => update({ content: event.target.value })}
-            />
+            {value.actionKind === "agent" ? (
+              <div
+                className="aw-scheduled-task-editor__agent-composer"
+                aria-invalid={fieldErrors?.content ? true : undefined}
+              >
+                <AwakenComposerBar
+                  variant="embedded"
+                  value={value.content}
+                  tokens={composerTokens}
+                  slashPalette={slashPalette}
+                  inputAriaLabel="Agent prompt"
+                  placeholder="输入任务，键入 / 选择 Skill"
+                  disabled={busy}
+                  submitOnEnter={false}
+                  onChange={(content) => update({ content })}
+                  onStructuredInputChange={onComposerStructuredInputChange}
+                  onInputKeyDown={onComposerInputKeyDown}
+                  onRemoveToken={onRemoveComposerToken}
+                />
+              </div>
+            ) : (
+              <textarea
+                className="aw-scheduled-task-editor__control aw-scheduled-task-editor__textarea"
+                aria-label="提醒正文"
+                aria-invalid={fieldErrors?.content ? true : undefined}
+                rows={6}
+                value={value.content}
+                disabled={busy}
+                onChange={(event) => update({ content: event.target.value })}
+              />
+            )}
           </EditorField>
         </section>
 

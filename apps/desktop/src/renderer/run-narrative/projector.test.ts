@@ -640,4 +640,133 @@ describe("projectAguiEventToNarrative", () => {
       ],
     });
   });
+
+  it("keeps one media generation item from provider progress through the ready result", () => {
+    let state = createInitialRunNarrativeState();
+    const base = {
+      runId: "run-media",
+      toolCallId: "call-media",
+      toolCallName: "video_generate",
+    };
+    state = projectAguiEventToNarrative(state, { type: "TOOL_CALL_START", ...base });
+    expect(state.activeItem).toMatchObject({
+      kind: "mediaGeneration",
+      id: "media:run-media:call-media",
+      status: "preparing",
+      mediaKind: "video",
+    });
+
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_COMMAND_OUTPUT",
+      ...base,
+      commandStream: "media_status",
+      delta: '{"stage":"queued","message":"视频任务正在排队"}\n',
+    });
+    expect(state.activeItem).toMatchObject({
+      kind: "mediaGeneration",
+      status: "queued",
+      detail: "视频任务正在排队",
+    });
+
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_RESULT",
+      ...base,
+      toolStatus: "succeeded",
+      content: JSON.stringify({
+        status: "succeeded",
+        kind: "video",
+        paths: ["output/generated-media/video.mp4"],
+      }),
+    });
+    expect(state.activeItem).toBeUndefined();
+    expect(state.committedItems).toContainEqual({
+      kind: "mediaGeneration",
+      id: "media:run-media:call-media",
+      toolCallId: "call-media",
+      runId: "run-media",
+      mediaKind: "video",
+      title: "视频生成",
+      detail: "视频已生成",
+      status: "ready",
+      artifactPaths: ["output/generated-media/video.mp4"],
+    });
+  });
+
+  it("keeps the requested group-image limit and the actual ready artifact count", () => {
+    let state = createInitialRunNarrativeState();
+    const base = {
+      runId: "run-image-group",
+      toolCallId: "call-image-group",
+      toolCallName: "image_generate",
+    };
+    state = projectAguiEventToNarrative(state, { type: "TOOL_CALL_START", ...base });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_ARGS",
+      ...base,
+      delta: JSON.stringify({ prompt: "一组连贯产品图", mode: "group", max_images: 12 }),
+    });
+    expect(state.activeItem).toMatchObject({
+      kind: "mediaGeneration",
+      requestedCount: 12,
+      detail: "一组连贯产品图",
+    });
+
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_RESULT",
+      ...base,
+      toolStatus: "succeeded",
+      content: JSON.stringify({
+        status: "succeeded",
+        kind: "image",
+        paths: ["output/1.png", "output/2.png", "output/3.png"],
+      }),
+    });
+    expect(state.committedItems[0]).toMatchObject({
+      kind: "mediaGeneration",
+      status: "ready",
+      requestedCount: 12,
+      detail: "已生成 3 张图片",
+      artifactPaths: ["output/1.png", "output/2.png", "output/3.png"],
+    });
+  });
+
+  it("recovers historical media files whose old output schema marked the tool result failed", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_RESULT",
+      runId: "run-old",
+      toolCallId: "call-old",
+      toolCallName: "image_generate",
+      toolStatus: "failed",
+      content: JSON.stringify({
+        status: "succeeded",
+        kind: "image",
+        paths: ["output/generated-media/legacy.png"],
+      }),
+    });
+    expect(state.committedItems[0]).toMatchObject({
+      kind: "mediaGeneration",
+      status: "ready",
+      artifactPaths: ["output/generated-media/legacy.png"],
+    });
+  });
+
+  it("settles an active media generation card when the run is cancelled", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_START",
+      runId: "run-media-cancelled",
+      toolCallId: "call-media-cancelled",
+      toolCallName: "video_generate",
+    });
+
+    state = projectAguiEventToNarrative(state, runError("RUN_CANCELLED"));
+
+    expect(state.activeItem).toBeUndefined();
+    expect(state.committedItems[0]).toMatchObject({
+      kind: "mediaGeneration",
+      status: "cancelled",
+      detail: "生成已停止",
+    });
+  });
 });

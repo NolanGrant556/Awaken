@@ -147,6 +147,46 @@ func TestStartScheduledRunDedicatedThread(t *testing.T) {
 	}
 }
 
+func TestStartScheduledRunCarriesComposerTokens(t *testing.T) {
+	service, _ := newScheduledTestService(t, t.TempDir(), func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+		return "ok", nil
+	})
+	token := ComposerToken{
+		ID:          "skill:daily-report:project",
+		Type:        "skill",
+		LeadingText: "请使用 ",
+		Label:       "daily-report",
+		Payload: ComposerTokenPayload{
+			SkillID:      "daily-report",
+			SourceOrigin: "project",
+		},
+	}
+
+	run, err := service.StartScheduledRun(ScheduledRunRequest{
+		TaskID:         "sched_skill",
+		ExecutionID:    "exec_skill",
+		TaskName:       "Skill 日报",
+		Prompt:         "请使用 生成日报",
+		ComposerTokens: []ComposerToken{token},
+		Workspace:      WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+		ModelProfile:   scheduledProfile(),
+	})
+	if err != nil {
+		t.Fatalf("StartScheduledRun: %v", err)
+	}
+	if len(run.ComposerTokens) != 1 || run.ComposerTokens[0] != token {
+		t.Fatalf("scheduled composer token changed: %+v", run.ComposerTokens)
+	}
+	// This isolated service intentionally has no Skill activator. The run can
+	// fail asynchronously, but the host-only request must still preserve the
+	// structured token in its durable run snapshot.
+	waitForRunStatus(t, service, run.RunID, RunStatusError)
+	stored, err := service.GetRun(run.RunID)
+	if err != nil || len(stored.ComposerTokens) != 1 || stored.ComposerTokens[0] != token {
+		t.Fatalf("stored scheduled composer token changed: %+v", stored.ComposerTokens)
+	}
+}
+
 func TestStartScheduledRunReanchorsWorkspace(t *testing.T) {
 	service, _ := newScheduledTestService(t, t.TempDir(), func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
 		return "ok", nil

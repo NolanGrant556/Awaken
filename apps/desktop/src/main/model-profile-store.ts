@@ -4,6 +4,9 @@ import path from "node:path";
 import type {
   AgentPlanAccountSaveRequest,
   AgentPlanAccountWire,
+  AgentPlanMediaCapability,
+  AgentPlanMediaToolSaveRequest,
+  AgentPlanMediaToolsWire,
   ModelReasoningCapabilityTestResult,
   ModelCredentialReference,
   ModelProfileAdvanced,
@@ -46,6 +49,7 @@ import {
   AwakenEnvStoreError,
 } from "./awaken-env-store.js";
 import { AgentPlanAccountStore } from "./agent-plan-account-store.js";
+import { AgentPlanMediaToolsStore } from "./agent-plan-media-tools-store.js";
 
 const MODEL_PROFILES_FILE = "models.json";
 const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";
@@ -721,6 +725,7 @@ export class ModelProfileStore {
   private usageDir: string;
   private envStore: ModelProfileKeyStore;
   private agentPlanAccountStore: AgentPlanAccountStore;
+  private agentPlanMediaToolsStore: AgentPlanMediaToolsStore;
   private agentPlanModelIds = ["ark-code-latest"];
   private observedCredentialStates = new Map<string, "unreadable">();
   private mutationQueue: Promise<void> = Promise.resolve();
@@ -729,13 +734,20 @@ export class ModelProfileStore {
   constructor(
     awakenHome: string,
     envStore: ModelProfileKeyStore = new AwakenEnvStore(awakenHome),
-    agentPlanAccountStore: AgentPlanAccountStore = new AgentPlanAccountStore(awakenHome),
+    agentPlanAccountStore: AgentPlanAccountStore = new AgentPlanAccountStore(
+      awakenHome,
+    ),
+    agentPlanMediaToolsStore: AgentPlanMediaToolsStore = new AgentPlanMediaToolsStore(
+      awakenHome,
+      agentPlanAccountStore,
+    ),
   ) {
     this.filePath = path.join(awakenHome, "config", MODEL_PROFILES_FILE);
     this.cacheDir = path.join(awakenHome, "cache");
     this.usageDir = path.join(awakenHome, "usage", "model-profiles");
     this.envStore = envStore;
     this.agentPlanAccountStore = agentPlanAccountStore;
+    this.agentPlanMediaToolsStore = agentPlanMediaToolsStore;
   }
 
   async initialize(): Promise<void> {
@@ -743,7 +755,9 @@ export class ModelProfileStore {
     setCapabilityOverrides(this.capabilityOverrides);
     try {
       const account = await this.agentPlanAccountStore.getAccount();
-      this.agentPlanModelIds = [...account.model_ids];
+      this.agentPlanModelIds = account.catalog
+        .filter((entry) => entry.kind === "llm")
+        .map((entry) => entry.id);
     } catch {
       this.agentPlanModelIds = ["ark-code-latest"];
     }
@@ -822,6 +836,10 @@ export class ModelProfileStore {
           provider.id === "volcengine-agent-plan"
             ? [...this.agentPlanModelIds]
             : [...provider.models],
+        allow_custom_model:
+          provider.id === "volcengine-agent-plan"
+            ? false
+            : provider.allow_custom_model,
       }),
     );
   }
@@ -832,34 +850,74 @@ export class ModelProfileStore {
 
   async saveAgentPlanAccount(request: AgentPlanAccountSaveRequest): Promise<AgentPlanAccountWire> {
     const account = await this.agentPlanAccountStore.saveAccount(request);
-    this.agentPlanModelIds = [...account.model_ids];
+    this.agentPlanModelIds = account.catalog
+      .filter((entry) => entry.kind === "llm")
+      .map((entry) => entry.id);
     return account;
   }
 
   async refreshAgentPlanModels(): Promise<AgentPlanAccountWire> {
     const account = await this.agentPlanAccountStore.refreshModelCatalog();
-    this.agentPlanModelIds = [...account.model_ids];
+    this.agentPlanModelIds = account.catalog
+      .filter((entry) => entry.kind === "llm")
+      .map((entry) => entry.id);
     return account;
+  }
+
+  async getAgentPlanMediaTools(): Promise<AgentPlanMediaToolsWire> {
+    return this.agentPlanMediaToolsStore.snapshot();
+  }
+
+  async saveAgentPlanMediaTool(
+    request: AgentPlanMediaToolSaveRequest,
+  ): Promise<AgentPlanMediaToolsWire> {
+    return this.agentPlanMediaToolsStore.save(request);
+  }
+
+  async deleteAgentPlanMediaTool(
+    capability: AgentPlanMediaCapability,
+  ): Promise<AgentPlanMediaToolsWire> {
+    return this.agentPlanMediaToolsStore.delete(capability);
   }
 
   async deleteAgentPlanAccount(): Promise<void> {
     const store = await this.readStore();
-    const referenced = store.profiles.some(
+    const profileReferenced = store.profiles.some(
       (profile) => profile.credentialReference?.kind === "provider_account",
     );
-    await this.agentPlanAccountStore.deleteAccount(referenced);
+    const toolReferenced =
+      await this.agentPlanMediaToolsStore.hasAccountReferences();
+    await this.agentPlanAccountStore.deleteAccount(
+      profileReferenced || toolReferenced,
+    );
     this.agentPlanModelIds = ["ark-code-latest"];
   }
 
   async listProfiles(): Promise<RuntimeModelProfileSummaryWire[]> {
     const store = await this.readStore();
-    return Promise.all(store.profiles.map((profile) => this.toSummary(profile)));
+    return Promise.all(
+      store.profiles
+        .filter(
+          (profile) =>
+            profile.providerId !== "volcengine-agent-plan" ||
+            this.agentPlanModelIds.includes(profile.modelId.trim()),
+        )
+        .map((profile) => this.toSummary(profile)),
+    );
   }
 
   async saveProfile(request: ModelProfileSaveRequest): Promise<RuntimeModelProfileSummaryWire> {
     const provider = providerById(request.providerId);
     if (!provider) {
       throw new Error("未知模型供应商");
+    }
+    if (
+      provider.id === "volcengine-agent-plan" &&
+      !this.agentPlanModelIds.includes(request.modelId.trim())
+    ) {
+      throw new Error(
+        "Agent Plan 主模型只能选择目录中已分类的对话或推理模型。",
+      );
     }
 
     return this.withStoreMutation(() =>
@@ -998,11 +1056,14 @@ export class ModelProfileStore {
 
     this.ensureSingleDefault(store, profile.id);
     if (agentPlanKeyToPersist !== undefined) {
-      const account = await this.agentPlanAccountStore.saveAccountWithCompensation(
-        { apiKey: agentPlanKeyToPersist },
-        () => this.writeStore(store),
-      );
-      this.agentPlanModelIds = [...account.model_ids];
+      const account =
+        await this.agentPlanAccountStore.saveAccountWithCompensation(
+          { apiKey: agentPlanKeyToPersist },
+          () => this.writeStore(store),
+        );
+      this.agentPlanModelIds = account.catalog
+        .filter((entry) => entry.kind === "llm")
+        .map((entry) => entry.id);
     } else if (apiKeyToPersist !== undefined) {
       await this.envStore.setKey(profile.id, apiKeyToPersist);
       try {

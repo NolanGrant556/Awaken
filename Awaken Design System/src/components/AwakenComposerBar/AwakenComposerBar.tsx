@@ -206,16 +206,18 @@ export type AwakenComposerBarProps = {
   value: string;
   onChange: (value: string) => void;
   onSubmit?: () => void;
+  submitOnEnter?: boolean;
   onInputKeyDown?: (
     event: ReactKeyboardEvent<HTMLTextAreaElement | ComposerInlineInputElement>,
   ) => void;
   onStructuredInputChange?: (value: ComposerBarStructuredInputValue) => void;
+  inputAriaLabel?: string;
   onAddContext?: () => void;
   placeholder?: string;
   disabled?: boolean;
   isReady?: boolean;
   submitMode?: "send" | "stop";
-  variant?: "center" | "dock";
+  variant?: "center" | "dock" | "embedded";
   metaItems?: ComposerBarMetaItem[];
   projectPicker?: ComposerBarProjectPicker;
   focusRequest?: number;
@@ -239,8 +241,10 @@ export function AwakenComposerBar({
   value,
   onChange,
   onSubmit,
+  submitOnEnter = true,
   onInputKeyDown,
   onStructuredInputChange,
+  inputAriaLabel = "输入任务",
   onAddContext,
   placeholder,
   disabled,
@@ -1101,15 +1105,17 @@ export function AwakenComposerBar({
                 onChange={onChange}
                 onStructuredChange={onStructuredInputChange}
                 onSubmit={handleSubmit}
+                submitOnEnter={submitOnEnter}
                 onKeyDown={onInputKeyDown}
                 onRemoveToken={slashPalette?.open ? undefined : onRemoveToken}
+                ariaLabel={inputAriaLabel}
                 placeholder={placeholder}
                 disabled={disabled}
                 focusRequest={focusRequest}
                 focusOffset={focusOffset}
                 onSelectionChange={onInputSelectionChange}
-                minRows={variant === "dock" ? 1 : 3}
-                maxRows={variant === "dock" ? 8 : 6}
+                minRows={variant === "dock" ? 1 : variant === "embedded" ? 6 : 3}
+                maxRows={variant === "dock" ? 8 : variant === "embedded" ? 12 : 6}
                 onPasteImages={onPasteImages}
               />
             ) : (
@@ -1117,14 +1123,16 @@ export function AwakenComposerBar({
                 value={value}
                 onChange={onChange}
                 onSubmit={handleSubmit}
+                submitOnEnter={submitOnEnter}
                 onKeyDown={onInputKeyDown}
+                ariaLabel={inputAriaLabel}
                 placeholder={placeholder}
                 disabled={disabled}
                 focusRequest={focusRequest}
                 focusOffset={focusOffset}
                 onSelectionChange={onInputSelectionChange}
-                minRows={variant === "dock" ? 1 : 3}
-                maxRows={variant === "dock" ? 8 : 6}
+                minRows={variant === "dock" ? 1 : variant === "embedded" ? 6 : 3}
+                maxRows={variant === "dock" ? 8 : variant === "embedded" ? 12 : 6}
                 onPasteImages={onPasteImages}
               />
             )}
@@ -1135,20 +1143,22 @@ export function AwakenComposerBar({
             </div>
           ) : null}
         </div>
-        <div className="composer-bar-toolbar">
-          <div className="composer-bar-context">
-            <AwakenContextButton onClick={onAddContext} disabled={disabled} />
+        {variant !== "embedded" ? (
+          <div className="composer-bar-toolbar">
+            <div className="composer-bar-context">
+              <AwakenContextButton onClick={onAddContext} disabled={disabled} />
+            </div>
+            {modelMetaItem ? renderModelMetaItem(modelMetaItem) : null}
+            <div className="composer-bar-submit">
+              <AwakenSendButton
+                ready={isReady || submitMode === "stop"}
+                onClick={handleSubmit}
+                disabled={submitMode === "stop" ? false : submitDisabled}
+                mode={submitMode}
+              />
+            </div>
           </div>
-          {modelMetaItem ? renderModelMetaItem(modelMetaItem) : null}
-          <div className="composer-bar-submit">
-            <AwakenSendButton
-              ready={isReady || submitMode === "stop"}
-              onClick={handleSubmit}
-              disabled={submitMode === "stop" ? false : submitDisabled}
-              mode={submitMode}
-            />
-          </div>
-        </div>
+        ) : null}
       </div>
       {renderProjectPicker()}
       {bottomMetaItems.length > 0 ? (

@@ -127,7 +127,12 @@ import {
   type ProjectFolderSelection,
   type ProjectFoldersPickResult,
   type AgentPlanAccountSaveRequest,
+  type AgentPlanMediaCapability,
+  type AgentPlanMediaToolSaveRequest,
+  type AgentPlanMediaToolsSaveResult,
+  type AgentPlanMediaToolsWire,
   normalizeAgentPlanAccount,
+  normalizeAgentPlanMediaTools,
 } from "../shared/runtime.js";
 import { updateMainWindowBackground, windowBackgroundColor } from "./window-background.js";
 import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
@@ -156,6 +161,7 @@ import { MemoryDreamSchedulerStore } from "./memory-dream-scheduler-store.js";
 import { openProjectEntryWithApplication } from "./project-entry-actions.js";
 import { listProjectDirectory, resolveProjectEntry } from "./project-files.js";
 import { ProjectFilePreviewManager } from "./project-file-preview-manager.js";
+import { ArtifactMediaManager } from "./artifact-media-manager.js";
 import {
   scheduledTaskNotificationContent,
   startScheduledTaskEventStream,
@@ -205,6 +211,16 @@ protocol.registerSchemesAsPrivileged([
       stream: true,
     },
   },
+  {
+    scheme: "awaken-artifact",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
 ]);
 
 let supervisor: RuntimeSupervisor | null = null;
@@ -221,6 +237,7 @@ let projectTrashWorkerTimer: NodeJS.Timeout | null = null;
 let projectTrashWorkerRunning = false;
 let memoryDreamSchedulerStore: MemoryDreamSchedulerStore | null = null;
 let projectFilePreviewManager: ProjectFilePreviewManager | null = null;
+let artifactMediaManager: ArtifactMediaManager | null = null;
 let memoryDreamSchedulerTimer: NodeJS.Timeout | null = null;
 let automaticDreamRunning = false;
 const activeDreamTaskIds = new Set<string>();
@@ -1938,6 +1955,30 @@ ipcMain.handle("awaken:list-model-profiles", async () => {
   return profiles.map(normalizeModelProfileSummary);
 });
 
+async function ensureNoActiveRunsForSettingsChange(): Promise<void> {
+  const threads = await requestRuntime<RuntimeThreadWire[]>("/v1/threads");
+  if (threads.some((thread) => Boolean(thread.active_run_id))) {
+    throw new Error("当前有任务正在运行，请结束任务后重试。");
+  }
+}
+
+async function hasAgentPlanMediaToolReferences(): Promise<boolean> {
+  if (!modelProfileStore) return false;
+  return (
+    (await modelProfileStore.getAgentPlanMediaTools()).configurations.length > 0
+  );
+}
+
+async function restartCoreForAgentPlanTools(): Promise<void> {
+  if (!supervisor) throw new Error("Core supervisor unavailable");
+  const status = await supervisor.restart();
+  if (status.status !== "running" || !status.runtimeBaseUrl) {
+    throw new Error(
+      "Agent Plan 配置已保存，但 Core 重启失败。请重启 Awaken 后再使用生成工具。",
+    );
+  }
+}
+
 ipcMain.handle("awaken:get-agent-plan-account", async () => {
   if (!modelProfileStore) throw new Error("Model profile store unavailable");
   return normalizeAgentPlanAccount(await modelProfileStore.getAgentPlanAccount());
@@ -1947,15 +1988,28 @@ ipcMain.handle(
   "awaken:save-agent-plan-account",
   async (_event, request: AgentPlanAccountSaveRequest) =>
     runDesktopOperation(async () => {
-      if (!modelProfileStore) throw new Error("Model profile store unavailable");
-      return normalizeAgentPlanAccount(await modelProfileStore.saveAgentPlanAccount(request));
+      if (!modelProfileStore)
+        throw new Error("Model profile store unavailable");
+      const restartTools = await hasAgentPlanMediaToolReferences();
+      if (restartTools) await ensureNoActiveRunsForSettingsChange();
+      const account = normalizeAgentPlanAccount(
+        await modelProfileStore.saveAgentPlanAccount(request),
+      );
+      if (restartTools) await restartCoreForAgentPlanTools();
+      return account;
     }),
 );
 
 ipcMain.handle("awaken:refresh-agent-plan-models", async () =>
   runDesktopOperation(async () => {
     if (!modelProfileStore) throw new Error("Model profile store unavailable");
-    return normalizeAgentPlanAccount(await modelProfileStore.refreshAgentPlanModels());
+    const restartTools = await hasAgentPlanMediaToolReferences();
+    if (restartTools) await ensureNoActiveRunsForSettingsChange();
+    const account = normalizeAgentPlanAccount(
+      await modelProfileStore.refreshAgentPlanModels(),
+    );
+    if (restartTools) await restartCoreForAgentPlanTools();
+    return account;
   }),
 );
 
@@ -1964,14 +2018,78 @@ ipcMain.handle("awaken:delete-agent-plan-account", async () => {
   await modelProfileStore.deleteAgentPlanAccount();
 });
 
-ipcMain.handle("awaken:save-model-profile", async (_event, request: ModelProfileSaveRequest) => {
-  return runDesktopOperation(async () => {
-    if (!modelProfileStore) {
-      throw new Error("Model profile store unavailable");
-    }
-    return normalizeModelProfileSummary(await modelProfileStore.saveProfile(request));
-  });
+ipcMain.handle("awaken:get-agent-plan-media-tools", async () => {
+  if (!modelProfileStore) throw new Error("Model profile store unavailable");
+  return normalizeAgentPlanMediaTools(
+    await modelProfileStore.getAgentPlanMediaTools(),
+  );
 });
+
+async function mutateAgentPlanMediaTools(
+  operation: () => Promise<AgentPlanMediaToolsWire>,
+): Promise<AgentPlanMediaToolsSaveResult> {
+  if (!supervisor) throw new Error("Core supervisor unavailable");
+  await ensureNoActiveRunsForSettingsChange();
+  const settings = normalizeAgentPlanMediaTools(await operation());
+  try {
+    const status = await supervisor.restart();
+    if (status.status !== "running" || !status.runtimeBaseUrl) {
+      return {
+        settings,
+        restartStatus: "restart_failed",
+        message: "生成工具配置已保存，但 Core 重启失败。请稍后重试重启。",
+      };
+    }
+    return { settings, restartStatus: "restarted" };
+  } catch {
+    return {
+      settings,
+      restartStatus: "restart_failed",
+      message: "生成工具配置已保存，但 Core 重启失败。请稍后重试重启。",
+    };
+  }
+}
+
+ipcMain.handle(
+  "awaken:save-agent-plan-media-tool",
+  async (_event, request: AgentPlanMediaToolSaveRequest) => {
+    if (!modelProfileStore) throw new Error("Model profile store unavailable");
+    return mutateAgentPlanMediaTools(() =>
+      modelProfileStore!.saveAgentPlanMediaTool(request),
+    );
+  },
+);
+
+ipcMain.handle(
+  "awaken:delete-agent-plan-media-tool",
+  async (_event, capability: AgentPlanMediaCapability) => {
+    if (!modelProfileStore) throw new Error("Model profile store unavailable");
+    return mutateAgentPlanMediaTools(() =>
+      modelProfileStore!.deleteAgentPlanMediaTool(capability),
+    );
+  },
+);
+
+ipcMain.handle(
+  "awaken:save-model-profile",
+  async (_event, request: ModelProfileSaveRequest) => {
+    return runDesktopOperation(async () => {
+      if (!modelProfileStore) {
+        throw new Error("Model profile store unavailable");
+      }
+      const restartTools =
+        request.providerId === "volcengine-agent-plan" &&
+        Boolean(request.apiKey?.trim()) &&
+        (await hasAgentPlanMediaToolReferences());
+      if (restartTools) await ensureNoActiveRunsForSettingsChange();
+      const profile = normalizeModelProfileSummary(
+        await modelProfileStore.saveProfile(request),
+      );
+      if (restartTools) await restartCoreForAgentPlanTools();
+      return profile;
+    });
+  },
+);
 
 ipcMain.handle("awaken:delete-model-profile", async (_event, profileId: string) => {
   if (!modelProfileStore) {
@@ -2749,6 +2867,27 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  "awaken:get-artifact-media-source",
+  async (event, request: ArtifactOpenRequest) => {
+    if (!mainWindowRef || event.sender.id !== mainWindowRef.webContents.id) {
+      return {
+        ok: false as const,
+        code: "open_failed" as const,
+        message: "无法确认媒体预览请求来自 Awaken 主窗口。",
+      };
+    }
+    if (!artifactMediaManager) {
+      return {
+        ok: false as const,
+        code: "runtime_unavailable" as const,
+        message: "媒体预览服务尚未准备完成。",
+      };
+    }
+    return artifactMediaManager.source(request);
+  },
+);
+
+ipcMain.handle(
   "awaken:reveal-artifact",
   async (event, request: ArtifactOpenRequest): Promise<ArtifactOpenResult> => {
     if (!mainWindowRef || event.sender.id !== mainWindowRef.webContents.id) {
@@ -3238,6 +3377,17 @@ app.whenReady().then(async () => {
     },
   });
   projectFilePreviewManager.initialize();
+  artifactMediaManager = new ArtifactMediaManager({
+    defaultSession: session.defaultSession,
+    getTranscript: async (threadId) => {
+      const transcript = await requestRuntime<RuntimeThreadTranscriptWire>(
+        `/v1/threads/${encodeURIComponent(threadId)}/transcript`,
+        { method: "GET" },
+      );
+      return normalizeRuntimeThreadTranscript(transcript);
+    },
+  });
+  artifactMediaManager.initialize();
 
   supervisor = new RuntimeSupervisor(
     {},
@@ -3324,6 +3474,8 @@ app.on("before-quit", (event) => {
   subscriptions.clear();
   projectFilePreviewManager?.dispose();
   projectFilePreviewManager = null;
+  artifactMediaManager?.dispose();
+  artifactMediaManager = null;
   void (async () => {
     try {
       if (supervisor) {

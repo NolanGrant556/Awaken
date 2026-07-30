@@ -93,6 +93,7 @@ function createMockRuntimeClient(): RuntimeClient {
       hasKey: false,
       credentialRevision: 1,
       modelIds: ["ark-code-latest"],
+      catalog: [{ id: "ark-code-latest", kind: "llm" as const }],
     })),
     saveAgentPlanAccount: vi.fn(async () => ({
       accountId: "volcengine-agent-plan-default" as const,
@@ -100,6 +101,7 @@ function createMockRuntimeClient(): RuntimeClient {
       hasKey: true,
       credentialRevision: 1,
       modelIds: ["ark-code-latest"],
+      catalog: [{ id: "ark-code-latest", kind: "llm" as const }],
     })),
     refreshAgentPlanModels: vi.fn(async () => ({
       accountId: "volcengine-agent-plan-default" as const,
@@ -107,8 +109,18 @@ function createMockRuntimeClient(): RuntimeClient {
       hasKey: true,
       credentialRevision: 1,
       modelIds: ["ark-code-latest"],
+      catalog: [{ id: "ark-code-latest", kind: "llm" as const }],
     })),
     deleteAgentPlanAccount: vi.fn(async () => undefined),
+    getAgentPlanMediaTools: vi.fn(async () => ({ configurations: [] })),
+    saveAgentPlanMediaTool: vi.fn(async () => ({
+      settings: { configurations: [] },
+      restartStatus: "restarted" as const,
+    })),
+    deleteAgentPlanMediaTool: vi.fn(async () => ({
+      settings: { configurations: [] },
+      restartStatus: "restarted" as const,
+    })),
     saveModelProfile: vi.fn(async () => ({
       id: "",
       providerId: "",
@@ -194,6 +206,12 @@ function createMockRuntimeClient(): RuntimeClient {
     trashProjectFolder: vi.fn(async () => ({}) as never),
     getProjectOperation: vi.fn(async () => ({}) as never),
     openArtifact: vi.fn(async () => ({ ok: true as const })),
+    getArtifactMediaSource: vi.fn(async () => ({
+      ok: true as const,
+      src: "awaken-artifact://media/test/artifact.png",
+      mimeType: "image/png",
+      byteLength: 128,
+    })),
     revealPath: vi.fn(async () => ({ ok: true as const })),
     revealArtifact: vi.fn(async () => ({ ok: true as const })),
     startRun: vi.fn(async () => ({

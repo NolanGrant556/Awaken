@@ -5,6 +5,7 @@ import { AwakenAssistantMessageDemo } from "../src/components/AwakenAssistantMes
 import { AwakenAvatarDemo } from "../src/components/AwakenAvatar/AwakenAvatar.demo";
 import { AwakenAppearanceSettingsDemo } from "../src/components/AwakenAppearanceSettings/AwakenAppearanceSettings.demo";
 import { AwakenComposerBarDemo } from "../src/components/AwakenComposerBar/AwakenComposerBar.demo";
+import { AwakenComputerSettingsDemo } from "../src/components/AwakenComputerSettings/AwakenComputerSettings.demo";
 import { AwakenFolderDemo } from "../src/components/AwakenFolder/AwakenFolder.demo";
 import { AwakenConnectorsDemo } from "../src/components/AwakenConnectors/AwakenConnectors.demo";
 import { AwakenMemorySettingsDemo } from "../src/components/AwakenMemorySettings/AwakenMemorySettings.demo";
@@ -65,6 +66,7 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-memory-settings", name: "AwakenMemorySettings", displayName: "记忆设置", demo: AwakenMemorySettingsDemo, category: "settings", aliases: ["awaken-memory-light-flow"] },
   { id: "awaken-appearance-settings", name: "AwakenAppearanceSettings", displayName: "外观设置", demo: AwakenAppearanceSettingsDemo, category: "settings", aliases: ["awaken-theme-choice-group"] },
   { id: "awaken-pets-settings", name: "AwakenPetsSettings", displayName: "宠物设置", demo: AwakenPetsSettingsDemo, category: "settings" },
+  { id: "awaken-computer-settings", name: "AwakenComputerSettings", displayName: "计算机操作设置", demo: AwakenComputerSettingsDemo, category: "settings" },
   {
     id: "awaken-deliverables",
     name: "AwakenDeliverableList",

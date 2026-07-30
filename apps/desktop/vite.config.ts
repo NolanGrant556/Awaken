@@ -23,6 +23,7 @@ export default defineConfig(({ mode }) => {
         input: {
           main: "index.html",
           petOverlay: "pet-overlay.html",
+          computerOverlay: "computer-overlay.html",
         },
       },
     },

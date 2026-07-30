@@ -1,0 +1,37 @@
+{
+  "version": "22.15.0",
+  "license": "MIT",
+  "releaseBaseUrl": "https://nodejs.org/dist/v22.15.0",
+  "targets": {
+    "darwin-arm64": {
+      "asset": "node-v22.15.0-darwin-arm64.tar.gz",
+      "format": "tar.gz",
+      "sha256": "92eb58f54d172ed9dee320b8450f1390db629d4262c936d5c074b25a110fed02"
+    },
+    "darwin-x64": {
+      "asset": "node-v22.15.0-darwin-x64.tar.gz",
+      "format": "tar.gz",
+      "sha256": "f7f42bee60d602783d3a842f0a02a2ecd9cb9d7f6f3088686c79295b0222facf"
+    },
+    "linux-arm64": {
+      "asset": "node-v22.15.0-linux-arm64.tar.gz",
+      "format": "tar.gz",
+      "sha256": "c3582722db988ed1eaefd590b877b86aaace65f68746726c1f8c79d26e5cc7de"
+    },
+    "linux-x64": {
+      "asset": "node-v22.15.0-linux-x64.tar.gz",
+      "format": "tar.gz",
+      "sha256": "29d1c60c5b64ccdb0bc4e5495135e68e08a872e0ae91f45d9ec34fc135a17981"
+    },
+    "win32-arm64": {
+      "asset": "node-v22.15.0-win-arm64.zip",
+      "format": "zip",
+      "sha256": "737cd7046d96575c2d6cd36e0355afba54b79296b0f403ef4b3b1b5852b10ab6"
+    },
+    "win32-x64": {
+      "asset": "node-v22.15.0-win-x64.zip",
+      "format": "zip",
+      "sha256": "06067d4f0d463f90ed803d5eca5b039a05dec5d70fc7b7cc254803a59bd0e27c"
+    }
+  }
+}

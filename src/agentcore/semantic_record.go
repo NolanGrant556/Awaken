@@ -57,6 +57,21 @@ const (
 	// identity, the task name and the fixed content; it is never a user or
 	// assistant message.
 	SemanticKindScheduledNotice SemanticKind = "scheduled_notice"
+
+	// Computer Use semantic kinds (docs/10_计算机操作能力/)
+	SemanticKindComputerSessionOpened            SemanticKind = "computer_session_opened"
+	SemanticKindComputerStateChanged             SemanticKind = "computer_state_changed"
+	SemanticKindComputerObservationCaptured      SemanticKind = "computer_observation_captured"
+	SemanticKindComputerActionPrepared           SemanticKind = "computer_action_prepared"
+	SemanticKindComputerReviewRequested          SemanticKind = "computer_review_requested"
+	SemanticKindComputerReviewResolved           SemanticKind = "computer_review_resolved"
+	SemanticKindComputerActionStarted            SemanticKind = "computer_action_started"
+	SemanticKindComputerActionCompleted          SemanticKind = "computer_action_completed"
+	SemanticKindComputerControlTransferStarted   SemanticKind = "computer_control_transfer_started"
+	SemanticKindComputerControlTransferCompleted SemanticKind = "computer_control_transfer_completed"
+	SemanticKindComputerSessionClosed            SemanticKind = "computer_session_closed"
+	SemanticKindComputerMediaAccessed            SemanticKind = "computer_media_accessed"
+	SemanticKindComputerVerificationCompleted    SemanticKind = "computer_verification_completed"
 )
 
 // SemanticRecord is the canonical durable execution-journal record (schema_version=2).

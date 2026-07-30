@@ -75,6 +75,10 @@ type ExecutionEnvironmentSnapshot struct {
 	WorkspaceEnvironments    []WorkspaceEnvironmentObservation `json:"workspace_environments,omitempty"`
 	Confidence               string                            `json:"confidence"`
 	Warnings                 []string                          `json:"warnings,omitempty"`
+	// ComputerEnabled is set by the runtime when a run is configured with a
+	// Computer binding. It gates whether computer_* tools are exposed in the
+	// pinned tool snapshot. It does not imply a real CUA Host is available.
+	ComputerEnabled          bool                              `json:"computer_enabled,omitempty"`
 }
 
 type VersionProbeFunc func(ctx context.Context, executable string, maxOutputBytes int) (string, error)
@@ -112,6 +116,10 @@ type ExecutionEnvironmentProbeOptions struct {
 	LookPath                      LookPathFunc
 	ProbeVersion                  VersionProbeFunc
 	Now                           func() time.Time
+	// ComputerEnabled is set by the runtime when a run is configured with a
+	// Computer binding. It is propagated into the snapshot so provider readiness
+	// and the pinned tool catalog can gate computer_* tools.
+	ComputerEnabled bool
 }
 
 var defaultEnvironmentExecutables = []string{
@@ -165,6 +173,7 @@ func ProbeExecutionEnvironment(ctx context.Context, options ExecutionEnvironment
 		WorkingDirectory: workingDirectory, WorkspaceRoot: strings.TrimSpace(options.WorkspaceRoot),
 		SkillRoots: skillRoots, TemporaryWorkRoot: temporaryWorkRoot, RefreshReason: refreshReason,
 		Confidence: "observed", Warnings: append(append(pathWarnings, skillRootWarnings...), temporaryWarnings...),
+		ComputerEnabled: options.ComputerEnabled,
 	}
 	snapshot.NativeArchitecture, snapshot.Translation = observePlatformArchitecture(ctx)
 	snapshot.ProxyReferences, snapshot.AuthenticationReferences, snapshot.RuntimeReferences = presentEnvironmentReferenceNames()

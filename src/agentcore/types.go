@@ -4,6 +4,7 @@ import (
 	stdcontext "context"
 
 	"awaken/src/agentcore/subagent"
+	"awaken/src/computer"
 	"awaken/src/context"
 	"awaken/src/prompt"
 	"awaken/src/subagentruntime"
@@ -87,6 +88,10 @@ type AgentConfig struct {
 	// snapshots beneath the owning thread. nil keeps lightweight unit runners
 	// storage-free.
 	ContextEpochStore ContextEpochStore
+	// ComputerRuntime is the run-bound Computer coordinator. When set, the
+	// environment snapshot is probed with ComputerEnabled=true and the
+	// ToolRuntime is wired with a ComputerExecutor. nil disables Computer Use.
+	ComputerRuntime *computer.Runtime
 }
 
 type ToolResultOffloadReceipt struct {

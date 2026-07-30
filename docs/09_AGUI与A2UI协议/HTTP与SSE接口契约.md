@@ -108,6 +108,24 @@ POST   /v1/memory/dream/{task_id}/cancel
 
 Memory list/get/delete 与 Dream routes 始终注册；project scope 只有在 ProjectService 可解析 project/workspace identity 时可用。settings routes 只有 `MemorySettingsStore` 成功建立时注册。正文、revision、scope、Dream task 与恢复语义由 11 域拥有；Renderer 只通过 Main/preload typed bridge 调用，不把任意绝对路径当作授权。
 
+### 3.5 Computer Use 设置与控制
+
+```text
+GET   /v1/computer/settings
+PATCH /v1/computer/settings
+
+GET  /v1/control/computer/status
+GET  /v1/control/computer/sessions/{run_id}
+POST /v1/control/computer/sessions/{run_id}/pause
+POST /v1/control/computer/sessions/{run_id}/takeover
+POST /v1/control/computer/sessions/{run_id}/return
+POST /v1/control/computer/sessions/{run_id}/terminate
+POST /v1/control/computer/runs/{run_id}/reviews/{review_id}/resolve
+POST /v1/control/computer/reviews/{review_id}/resolve
+```
+
+设置 route 在 Computer settings store 可建立时注册；更新会同时写入 store 与 RunService 内存配置，只影响后续 run。`/v1/control/computer/*` 仅在 Runtime control identity 注入时注册，并统一经 bearer control token middleware；Renderer 只能通过 Main 的 typed bridge 调用。业务状态、review 与兼容 route 约束见 [10 计算机操作能力](../10_计算机操作能力/索引.md)。
+
 ## 4. SSE wire
 
 `GET /v1/runs/{run_id}/events` 返回 `text/event-stream`。每个 frame：

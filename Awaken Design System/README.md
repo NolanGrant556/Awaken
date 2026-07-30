@@ -126,7 +126,7 @@ Gallery 左栏按“原子组件”“左侧栏组件”“设置页组件”“
 
 “「账户」组件库”集中展示 `AwakenAccount` 完整组合、`AwakenProfileButton` 个人入口、`AwakenProfileMenuPanel` 快捷面板和 `AwakenProfileUsageDialog` 双栏用量窗口；个人弹层依次左对齐展示“外观”“查询用量”“设置”，默认不显示卡片表面，仅在悬停或键盘聚焦时提供灰色反馈。“外观”在右侧小窗中展开三种主题选择；“查询用量”点击后左侧选择已配置 API / Plan，右侧展示对应余额或配额，详情头不重复显示“用量”标签。`AwakenPopover` 只作为账户与项目菜单等真实组合的浮层能力观测，不再展示虚构的模型、Plan/Act 或权限菜单，原 `awaken-popover` URL 跳转到本组件族。运行时用量请求留在 Desktop，并且只在打开用量窗口后触发；Design System 只接收数据和回调。
 
-“设置页组件”拥有独立顶层目录：`AwakenSettings` 是覆盖 Desktop 内容窗口的左右分栏框架，保留原生窗口 chrome，左侧提供“返回应用”和五个现有分区，右侧由各页面组件独立拥有内容与滚动。模型、搜索、记忆、外观、宠物分别注册 `awaken-model-settings`、`awaken-search-settings`、`awaken-memory-settings`、`awaken-appearance-settings`、`awaken-pets-settings`；旧 `awaken-memory-light-flow` URL 重定向到记忆设置。设置框架不再套 `AwakenDialog`，没有 backdrop、外层圆角卡片、右上角关闭按钮或底部关闭栏。Gallery 只注入 mock 数据；Desktop 的 `DesktopSettingsDialog` 保留运行时读取、保存和副作用，并直接消费这些 UI-only 组件。跨组件族复用的 `AwakenButton` 保留独立源码和公开导出，原 `awaken-button` URL 跳转到设置页框架。
+“设置页组件”拥有独立顶层目录：`AwakenSettings` 是覆盖 Desktop 内容窗口的左右分栏框架，保留原生窗口 chrome，左侧提供“返回应用”和七个现有分区，右侧由各页面组件独立拥有内容与滚动。模型、搜索、记忆、外观、宠物、计算机操作、ACP 分别注册 `awaken-model-settings`、`awaken-search-settings`、`awaken-memory-settings`、`awaken-appearance-settings`、`awaken-pets-settings`、`awaken-computer-settings`；旧 `awaken-memory-light-flow` URL 重定向到记忆设置。设置框架不再套 `AwakenDialog`，没有 backdrop、外层圆角卡片、右上角关闭按钮或底部关闭栏。Gallery 只注入 mock 数据；Desktop 的 `DesktopSettingsDialog` 保留运行时读取、保存和副作用，并直接消费这些 UI-only 组件。跨组件族复用的 `AwakenButton` 保留独立源码和公开导出，原 `awaken-button` URL 跳转到设置页框架。
 
 “「连接器」组件库”集中展示 Desktop 直接消费的 `AwakenConnectors` 完整 MCP/CLI 组合，以及连接器卡片、品牌图标、server 开关、CLI 详情、MCP 配置和 MCP 设置弹窗。Gallery 只注入 mock 状态；连接器目录、MCP server snapshot、CLI readiness、安装/授权、配置保存、日志读取与持久化仍由 Desktop Main/Core/Renderer 对应 owner 负责。
 

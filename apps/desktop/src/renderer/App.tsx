@@ -102,6 +102,8 @@ import {
   type ThreadItem,
   type RuntimeAction,
   type UserQuestionItem,
+  type ComputerReviewItem,
+  type ComputerHandoffItem,
 } from "./runtime/reducer";
 import type {
   ACPDisplayStatus,
@@ -150,6 +152,8 @@ import { ProfileBalancePopover } from "./ProfileBalancePopover";
 import { ExtensionsView, type ExtensionSection } from "./ExtensionsView";
 import { ScheduledTasksView } from "./ScheduledTasksView";
 import { ExternalActionGate } from "./ExternalActionGate";
+import { ComputerReviewGate } from "./ComputerReviewGate";
+import { ComputerHandoffIndicator } from "./ComputerHandoffIndicator";
 import {
   ExpandedFileComposer,
   expandedFileComposerCompletionKey,
@@ -187,10 +191,12 @@ import {
 import {
   actionsFromSlashProviders,
   clearSlashTriggerFromComposerValue,
+  computerUseSlashProvider,
   composerTokenPlacementForSlashTrigger,
   composerTokenFromSlashAction,
   filterSlashActions,
   firstSelectableSlashAction,
+  replaceSlashTriggerWithText,
   skillSlashProvider,
   slashTriggerFromComposerValue,
   type ComposerTokenPlacement,
@@ -1679,7 +1685,10 @@ export function App() {
   const workspaceTargetPathRef = useRef("");
   const runtimeClient = runtimeClientRef.current;
   const slashProviders = useMemo(
-    () => [skillSlashProvider((workspaceRoot) => runtimeClient.listSkills(workspaceRoot))],
+    () => [
+      computerUseSlashProvider(),
+      skillSlashProvider((workspaceRoot) => runtimeClient.listSkills(workspaceRoot)),
+    ],
     [runtimeClient],
   );
 
@@ -1747,6 +1756,8 @@ export function App() {
   const artifactMediaSourcePendingRef = useRef<Set<string>>(new Set());
   const artifactMediaSourceGenerationRef = useRef(0);
   const [answeringUserQuestionId, setAnsweringUserQuestionId] = useState<string | null>(null);
+  const [resolvingComputerReviewId, setResolvingComputerReviewId] = useState<string | null>(null);
+  const [controllingComputerHandoffId, setControllingComputerHandoffId] = useState<string | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
   const [modelProfiles, setModelProfiles] = useState<RuntimeModelProfileSummary[]>([]);
   const [modelProviders, setModelProviders] = useState<ModelProvider[]>([]);
@@ -2703,6 +2714,46 @@ export function App() {
     }
   }
 
+  async function resolveActiveComputerReview(decision: "approved_once" | "denied"): Promise<void> {
+    if (!runtimeState.runId || !activeComputerReview) {
+      return;
+    }
+    if (resolvingComputerReviewId === activeComputerReview.id) {
+      return;
+    }
+    setNotice(null);
+    setResolvingComputerReviewId(activeComputerReview.id);
+    try {
+      await runtimeClient.resolveComputerReview(
+        runtimeState.runId,
+        activeComputerReview.reviewId,
+        decision,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to resolve computer review");
+    } finally {
+      setResolvingComputerReviewId(null);
+    }
+  }
+
+  async function returnComputerControl(): Promise<void> {
+    if (!runtimeState.runId || !activeComputerHandoff) {
+      return;
+    }
+    if (controllingComputerHandoffId === activeComputerHandoff.id) {
+      return;
+    }
+    setNotice(null);
+    setControllingComputerHandoffId(activeComputerHandoff.id);
+    try {
+      await runtimeClient.computerSessionControl(runtimeState.runId, "return");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to return computer control");
+    } finally {
+      setControllingComputerHandoffId(null);
+    }
+  }
+
   useEffect(() => {
     if (!desktopReady) {
       return;
@@ -2973,6 +3024,8 @@ export function App() {
 
   const activeUserQuestion = runtimeState.userQuestions[0];
   const activeExternalInteraction = runtimeState.externalInteractions[0];
+  const activeComputerReview = runtimeState.computerReviews[0];
+  const activeComputerHandoff = runtimeState.computerHandoffs.find((item) => item.active);
   const navItems: NavItem[] = [
     {
       id: "connectors",
@@ -3735,6 +3788,14 @@ export function App() {
       return;
     }
     const token = composerTokenFromSlashAction(action);
+    if (!token && action.composerText) {
+      setComposerValue((current) => {
+        return replaceSlashTriggerWithText(current, action.composerText ?? "");
+      });
+      setSlashActiveActionId(undefined);
+      requestComposerFocus();
+      return;
+    }
     if (!token) {
       return;
     }
@@ -5558,6 +5619,38 @@ export function App() {
     );
   }
 
+  function renderComputerReviewGate() {
+    if (!activeComputerReview) {
+      return null;
+    }
+    const resolving = resolvingComputerReviewId === activeComputerReview.id;
+    return (
+      <ComputerReviewGate
+        review={activeComputerReview}
+        resolving={resolving}
+        onResolve={(decision) => {
+          void resolveActiveComputerReview(decision);
+        }}
+      />
+    );
+  }
+
+  function renderComputerHandoffIndicator() {
+    if (!activeComputerHandoff) {
+      return null;
+    }
+    const busy = controllingComputerHandoffId === activeComputerHandoff.id;
+    return (
+      <ComputerHandoffIndicator
+        handoff={activeComputerHandoff}
+        busy={busy}
+        onReturn={() => {
+          void returnComputerControl();
+        }}
+      />
+    );
+  }
+
   function renderComposerRuntimePanels() {
     if (composerRuntimePanels.length === 0) {
       return null;
@@ -6097,6 +6190,8 @@ export function App() {
                               {renderComposerRuntimePanels()}
                               {renderUserQuestionPrompt()}
                               {renderExternalActionGate()}
+                              {renderComputerReviewGate()}
+                              {renderComputerHandoffIndicator()}
                               <ExpandedFileComposer
                                 active={fileWorkspaceSurfaceActive}
                                 idleMode={expandedFileComposerIdleMode}
@@ -6152,6 +6247,8 @@ export function App() {
                           {renderComposerRuntimePanels()}
                           {renderUserQuestionPrompt()}
                           {renderExternalActionGate()}
+                          {renderComputerReviewGate()}
+                          {renderComputerHandoffIndicator()}
                           <ComposerBar
                             value={composerValue}
                             onChange={setComposerValue}

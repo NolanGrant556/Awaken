@@ -48,10 +48,13 @@ import {
 import {
   actionsFromSlashProviders,
   clearSlashTriggerFromComposerValue,
+  computerUseSlashProvider,
+  COMPUTER_USE_SLASH_PROMPT,
   composerTokenIdForKeyboardDelete,
   composerTokenPlacementForSlashTrigger,
   composerTokenFromSlashAction,
   filterSlashActions,
+  replaceSlashTriggerWithText,
   skillSlashProvider,
   skillSlashActionsFromSkills,
   slashTriggerFromComposerValue,
@@ -419,6 +422,36 @@ function stubElectronBridge(): void {
       getSystemTimezone: vi.fn(async () => "UTC"),
       subscribeScheduledTaskEvents: vi.fn(() => () => {}),
       onScheduledTaskThreadActivation: vi.fn(() => () => {}),
+      resolveComputerReview: vi.fn(async () => undefined),
+      computerSessionControl: vi.fn(async () => undefined),
+      getComputerHostStatus: vi.fn(async () => ({
+        available: false,
+        healthy: false,
+        tcc_screen_recording: false,
+        tcc_accessibility: false,
+        message: "not configured",
+      })),
+      getComputerSettings: vi.fn(async () => ({
+        revision: 0,
+        value: {
+          enabled: false,
+          allow_background_window_actions: false,
+        },
+      })),
+      saveComputerSettings: vi.fn(async () => ({
+        revision: 1,
+        value: {
+          enabled: false,
+          allow_background_window_actions: false,
+        },
+      })),
+      prepareComputerRuntime: vi.fn(async () => ({
+        node_ready: false,
+        cua_host_ready: false,
+        message: "not configured",
+      })),
+      getComputerPermissionStatus: vi.fn(async () => "unknown" as const),
+      requestComputerPermission: vi.fn(async () => "unknown" as const),
     } satisfies AwakenBridge,
   });
 }
@@ -1102,6 +1135,23 @@ describe("Composer Slash Palette helpers", () => {
 
     expect(actions.map((action) => action.type)).toEqual(["file", "skill", "skill"]);
     expect(actions[0]?.label).toBe("brief.md");
+  });
+
+  it("offers Computer Use as a slash prompt and replaces only the active trigger", async () => {
+    const actions = await actionsFromSlashProviders(
+      [computerUseSlashProvider()],
+      { workspaceRootForRun: "/workspace" },
+    );
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      id: "prompt:computer-use",
+      type: "prompt",
+      label: "Computer Use",
+    });
+    expect(filterSlashActions(actions, "电脑")).toHaveLength(1);
+    expect(
+      replaceSlashTriggerWithText("继续 /computer", actions[0]?.composerText ?? ""),
+    ).toBe(`继续 ${COMPUTER_USE_SLASH_PROMPT} `);
   });
 
   it("lets non-skill providers define their own composer token payload", () => {

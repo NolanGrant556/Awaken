@@ -159,9 +159,15 @@ import {
 import { CliConnectorManager } from "./cli-connectors/manager.js";
 import { MemoryDreamSchedulerStore } from "./memory-dream-scheduler-store.js";
 import { openProjectEntryWithApplication } from "./project-entry-actions.js";
+import {
+  getComputerPermissionStatus,
+  prepareComputerRuntime,
+  requestComputerPermission,
+} from "./computer-setup.js";
 import { listProjectDirectory, resolveProjectEntry } from "./project-files.js";
 import { ProjectFilePreviewManager } from "./project-file-preview-manager.js";
 import { ArtifactMediaManager } from "./artifact-media-manager.js";
+import { ComputerOverlayManager } from "./computer-overlay-manager.js";
 import {
   scheduledTaskNotificationContent,
   startScheduledTaskEventStream,
@@ -229,6 +235,7 @@ let modelProfileStore: ModelProfileStore | null = null;
 let searchSettingsStore: SearchSettingsStore | null = null;
 let petStore: PetStore | null = null;
 let petWindowManager: PetWindowManager | null = null;
+let computerOverlayManager: ComputerOverlayManager | null = null;
 let cliConnectorManager: CliConnectorManager | null = null;
 let mainWindowRef: BrowserWindow | null = null;
 let pendingPetThreadId: string | null = null;
@@ -250,6 +257,7 @@ type StreamSubscription = {
 };
 
 const subscriptions = new Map<string, StreamSubscription>();
+const computerRunMonitors = new Map<string, AbortController>();
 const desktopControlToken = randomUUID();
 
 const defaultWindowWidth = 1440;
@@ -792,6 +800,67 @@ function consumeSSEFrame(frame: string, onEvent: (event: AguiEvent) => void): vo
 
   const payload = dataLines.join("\n");
   onEvent(JSON.parse(payload) as AguiEvent);
+}
+
+async function pumpComputerOverlayEvents(
+  body: ReadableStream<Uint8Array>,
+  runId: string,
+  controller: AbortController,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (!controller.signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() ?? "";
+      for (const frame of frames) {
+        if (!frame.trim()) continue;
+        consumeSSEFrame(frame, (event) => computerOverlayManager?.handleRunEvent(event, runId));
+      }
+    }
+    if (buffer.trim() && !controller.signal.aborted) {
+      consumeSSEFrame(buffer, (event) => computerOverlayManager?.handleRunEvent(event, runId));
+    }
+  } finally {
+    reader.releaseLock();
+    computerRunMonitors.delete(runId);
+    computerOverlayManager?.handleRunStreamClosed(runId);
+  }
+}
+
+function ensureComputerRunMonitor(runId: string): void {
+  const normalizedRunId = runId.trim();
+  if (!normalizedRunId || computerRunMonitors.has(normalizedRunId) || !runtimeBaseUrl) return;
+  const controller = new AbortController();
+  computerRunMonitors.set(normalizedRunId, controller);
+  void fetch(runtimeUrl(`/v1/runs/${encodeURIComponent(normalizedRunId)}/events`), {
+    headers: { Accept: "text/event-stream" },
+    signal: controller.signal,
+  })
+    .then(async (response) => {
+      if (!response.ok) throw new Error(await readErrorMessage(response));
+      if (!response.body) throw new Error("Runtime stream body is missing");
+      await pumpComputerOverlayEvents(response.body, normalizedRunId, controller);
+    })
+    .catch((error: unknown) => {
+      computerRunMonitors.delete(normalizedRunId);
+      computerOverlayManager?.handleRunStreamClosed(normalizedRunId);
+      if (!controller.signal.aborted) {
+        console.error("computer_overlay_event_stream_failed", {
+          runId: normalizedRunId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+}
+
+function stopComputerRunMonitors(): void {
+  for (const controller of computerRunMonitors.values()) controller.abort();
+  computerRunMonitors.clear();
 }
 
 async function pumpRunEvents(
@@ -2971,7 +3040,9 @@ ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
       body: JSON.stringify(body),
     });
 
-    return normalizeRuntimeRun(run);
+    const normalizedRun = normalizeRuntimeRun(run);
+    ensureComputerRunMonitor(normalizedRun.runId);
+    return normalizedRun;
   });
 });
 
@@ -3064,6 +3135,93 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  "awaken:resolve-computer-review",
+  async (
+    _event,
+    payload: {
+      runId: string;
+      reviewId: string;
+      decision: "approved_once" | "denied";
+    },
+  ) => {
+    const client = supervisor?.getControlClient();
+    if (!client) {
+      throw new Error("runtime control client is not available");
+    }
+    await client.resolveComputerReview(payload.runId, payload.reviewId, payload.decision);
+  },
+);
+
+ipcMain.handle(
+  "awaken:computer-session-control",
+  async (
+    _event,
+    payload: {
+      runId: string;
+      action: "takeover" | "return" | "pause" | "terminate";
+    },
+  ) => {
+    const client = supervisor?.getControlClient();
+    if (!client) {
+      throw new Error("runtime control client is not available");
+    }
+    await client.computerSessionControl(payload.runId, payload.action);
+  },
+);
+
+ipcMain.handle("awaken:get-computer-host-status", async () => {
+  const client = supervisor?.getControlClient();
+  if (!client) {
+    throw new Error("runtime control client is not available");
+  }
+  return client.getComputerHostStatus();
+});
+
+ipcMain.handle("awaken:get-computer-settings", async () => {
+  const client = supervisor?.getControlClient();
+  if (!client) {
+    throw new Error("runtime control client is not available");
+  }
+  return client.getComputerSettings();
+});
+
+ipcMain.handle(
+  "awaken:save-computer-settings",
+  async (
+    _event,
+    payload: {
+      expected_revision: number;
+      enabled?: boolean;
+      allow_background_window_actions?: boolean;
+    },
+  ) => {
+    const client = supervisor?.getControlClient();
+    if (!client) {
+      throw new Error("runtime control client is not available");
+    }
+    return client.saveComputerSettings(payload);
+  },
+);
+
+ipcMain.handle("awaken:prepare-computer-runtime", async () => {
+  return prepareComputerRuntime();
+});
+
+ipcMain.handle(
+  "awaken:get-computer-permission-status",
+  async (_event, permission: "screen_recording" | "accessibility") => {
+    return getComputerPermissionStatus(permission);
+  },
+);
+
+ipcMain.handle(
+  "awaken:request-computer-permission",
+  async (_event, permission: "screen_recording" | "accessibility") => {
+    return requestComputerPermission(permission);
+  },
+);
+
+ipcMain.handle(
   "awaken:subscribe-run",
   async (
     event,
@@ -3074,6 +3232,7 @@ ipcMain.handle(
       afterSeq?: number;
     },
   ) => {
+    ensureComputerRunMonitor(payload.runId);
     await subscribeToRun(
       event.sender,
       payload.runId,
@@ -3413,6 +3572,16 @@ app.whenReady().then(async () => {
       },
     },
   );
+  computerOverlayManager = new ComputerOverlayManager({
+    stopComputerUse: async (runId) => {
+      const client = supervisor?.getControlClient();
+      if (!client) {
+        throw new Error("Computer Use 控制服务当前不可用。");
+      }
+      await client.computerSessionControl(runId, "terminate");
+    },
+  });
+  computerOverlayManager.initialize();
   supervisor.onStatusChange((info) => {
     if (info.runtimeBaseUrl) {
       runtimeBaseUrl = info.runtimeBaseUrl;
@@ -3422,6 +3591,7 @@ app.whenReady().then(async () => {
     } else if (info.status !== "running") {
       runtimeBaseUrl = null;
       stopScheduledTaskEventStream();
+      stopComputerRunMonitors();
     }
     for (const wc of webContents.getAllWebContents()) {
       if (!wc.isDestroyed()) {
@@ -3466,6 +3636,7 @@ app.on("before-quit", (event) => {
   isQuitting = true;
   stopProjectTrashWorker();
   stopScheduledTaskEventStream();
+  stopComputerRunMonitors();
   if (memoryDreamSchedulerTimer) clearInterval(memoryDreamSchedulerTimer);
   memoryDreamSchedulerTimer = null;
   for (const subscription of subscriptions.values()) {
@@ -3483,6 +3654,7 @@ app.on("before-quit", (event) => {
       }
       await cliConnectorManager?.dispose();
       await petWindowManager?.dispose();
+      await computerOverlayManager?.dispose();
     } catch (err) {
       console.error("[awaken-desktop] supervisor stop failed", err);
     }

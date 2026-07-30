@@ -28,6 +28,12 @@ import {
   type CliConnectorStateEvent,
   type CliConnectorView,
   type CliProviderId,
+  type ComputerHostStatus,
+  type ComputerPermission,
+  type ComputerPermissionStatus,
+  type ComputerRuntimeSetupResult,
+  type ComputerSettingsDocument,
+  type ComputerSettingsSaveRequest,
   type DesktopPreferences,
   type DesktopPreferencesSaveRequest,
   type DesktopOperationResult,
@@ -365,6 +371,29 @@ const bridge: AwakenBridge = {
       optionId,
       cancelled,
     }) as Promise<void>,
+  resolveComputerReview: (runId: string, reviewId: string, decision: "approved_once" | "denied") =>
+    ipcRenderer.invoke("awaken:resolve-computer-review", {
+      runId,
+      reviewId,
+      decision,
+    }) as Promise<void>,
+  computerSessionControl: (runId: string, action: "takeover" | "return" | "pause" | "terminate") =>
+    ipcRenderer.invoke("awaken:computer-session-control", {
+      runId,
+      action,
+    }) as Promise<void>,
+  getComputerHostStatus: () =>
+    ipcRenderer.invoke("awaken:get-computer-host-status") as Promise<ComputerHostStatus>,
+  getComputerSettings: () =>
+    ipcRenderer.invoke("awaken:get-computer-settings") as Promise<ComputerSettingsDocument>,
+  saveComputerSettings: (request: ComputerSettingsSaveRequest) =>
+    ipcRenderer.invoke("awaken:save-computer-settings", request) as Promise<ComputerSettingsDocument>,
+  prepareComputerRuntime: () =>
+    ipcRenderer.invoke("awaken:prepare-computer-runtime") as Promise<ComputerRuntimeSetupResult>,
+  getComputerPermissionStatus: (permission: ComputerPermission) =>
+    ipcRenderer.invoke("awaken:get-computer-permission-status", permission) as Promise<ComputerPermissionStatus>,
+  requestComputerPermission: (permission: ComputerPermission) =>
+    ipcRenderer.invoke("awaken:request-computer-permission", permission) as Promise<ComputerPermissionStatus>,
   subscribeRun: async (runId: string, handlers: RunStreamHandlers, afterCursor?: number) => {
     const subscriptionId = crypto.randomUUID();
     subscriptions.set(subscriptionId, handlers);

@@ -70,6 +70,12 @@ export type AguiEventType =
   | "AWAKEN_MEMORY_DREAM_CANCELLED"
   | "AWAKEN_MEMORY_DREAM_INTERRUPTED"
   | "AWAKEN_SCHEDULED_NOTICE"
+  | "AWAKEN_COMPUTER_REVIEW_REQUESTED"
+  | "AWAKEN_COMPUTER_REVIEW_RESOLVED"
+  | "AWAKEN_COMPUTER_SESSION_CHANGED"
+  | "AWAKEN_COMPUTER_VERIFICATION_COMPLETED"
+  | "AWAKEN_COMPUTER_HANDOFF_STARTED"
+  | "AWAKEN_COMPUTER_HANDOFF_ENDED"
   | "AWAKEN_UNKNOWN_EVENT";
 
 export type AguiMemoryReceipt = {
@@ -401,4 +407,18 @@ export type AguiEvent = {
   outcome?: AguiRunOutcome;
   rawType?: string;
   rawEvent?: Record<string, unknown>;
+  computerReviewId?: string;
+  computerActionId?: string;
+  computerActionDigest?: string;
+  computerTargetSummary?: string;
+  computerEffectSummary?: string;
+  computerRisk?: string;
+  computerSessionId?: string;
+  computerSessionState?: string;
+  computerVerificationStatus?: string;
+  computerObservationId?: string;
+  computerDecision?: string;
+  computerActor?: string;
+  computerHandoff?: boolean;
+  computerEvidenceRefs?: string[];
 };

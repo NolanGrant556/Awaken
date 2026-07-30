@@ -22,6 +22,9 @@ import {
   type CliConnectorStateHandler,
   type CliConnectorView,
   type CliProviderId,
+  type ComputerHostStatus,
+  type ComputerSettingsDocument,
+  type ComputerSettingsSaveRequest,
   type DesktopPreferences,
   type DesktopPreferencesSaveRequest,
   type DesktopOperationIssue,
@@ -303,6 +306,35 @@ export type RuntimeClient = {
     optionId: string,
     cancelled: boolean,
   ) => Promise<void>;
+  resolveComputerReview: (
+    runId: string,
+    reviewId: string,
+    decision: "approved_once" | "denied",
+  ) => Promise<void>;
+  computerSessionControl: (
+    runId: string,
+    action: "takeover" | "return" | "pause" | "terminate",
+  ) => Promise<void>;
+  getComputerHostStatus: () => Promise<ComputerHostStatus>;
+  getComputerSettings: () => Promise<ComputerSettingsDocument>;
+  saveComputerSettings: (
+    request: ComputerSettingsSaveRequest,
+  ) => Promise<ComputerSettingsDocument>;
+  prepareComputerRuntime: () => Promise<{
+    node_ready: boolean;
+    cua_host_ready: boolean;
+    message?: string;
+  }>;
+  getComputerPermissionStatus: (
+    permission: "screen_recording" | "accessibility",
+  ) => Promise<
+    "not-determined" | "granted" | "denied" | "restricted" | "unknown"
+  >;
+  requestComputerPermission: (
+    permission: "screen_recording" | "accessibility",
+  ) => Promise<
+    "not-determined" | "granted" | "denied" | "restricted" | "unknown"
+  >;
   getDesktopPreferences: () => Promise<DesktopPreferences>;
   saveDesktopPreferences: (request: DesktopPreferencesSaveRequest) => Promise<DesktopPreferences>;
   listMemories: (request?: MemoryListRequest) => Promise<RuntimeMemory[]>;
@@ -483,6 +515,16 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     answerUserQuestion: bridge.answerUserQuestion,
     resolveExternalInteraction: bridge.resolveExternalInteraction,
     resolveACPPermission: bridge.resolveACPPermission,
+    resolveComputerReview: bridge.resolveComputerReview,
+    computerSessionControl: bridge.computerSessionControl,
+    getComputerHostStatus: () => bridge.getComputerHostStatus(),
+    getComputerSettings: () => bridge.getComputerSettings(),
+    saveComputerSettings: (request) => bridge.saveComputerSettings(request),
+    prepareComputerRuntime: () => bridge.prepareComputerRuntime(),
+    getComputerPermissionStatus: (permission) =>
+      bridge.getComputerPermissionStatus(permission),
+    requestComputerPermission: (permission) =>
+      bridge.requestComputerPermission(permission),
     getDesktopPreferences: () => bridge.getDesktopPreferences(),
     saveDesktopPreferences: (request) => bridge.saveDesktopPreferences(request),
     listMemories: (request) => bridge.listMemories(request),

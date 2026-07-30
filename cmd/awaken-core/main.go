@@ -19,6 +19,8 @@ import (
 	"awaken/src/acp"
 	"awaken/src/acp/protocol"
 	"awaken/src/agentcore"
+	"awaken/src/computer"
+	"awaken/src/computer/cua"
 	"awaken/src/connectors"
 	"awaken/src/desktopdata"
 	"awaken/src/filestore"
@@ -172,6 +174,67 @@ func main() {
 		},
 	)
 	runService.SetSkillActivator(skillManager.Activator())
+
+	// Load user Computer Use settings once at startup. Defaults are safe and
+	// disable Computer Use until the user explicitly turns it on.
+	var computerSettings computer.Settings
+	if computerSettingsStore, settingsErr := computer.NewSettingsStore(); settingsErr == nil {
+		if doc, docErr := computerSettingsStore.Get(); docErr == nil {
+			computerSettings = doc.Value
+		} else {
+			log.Printf("[computer] failed to read settings, using defaults: %v", docErr)
+			computerSettings = computer.DefaultSettings()
+		}
+	} else {
+		log.Printf("[computer] settings store unavailable, using defaults: %v", settingsErr)
+		computerSettings = computer.DefaultSettings()
+	}
+	runService.SetComputerSettings(computerSettings)
+
+	var computerVault computer.MediaVault
+	if userDataDir != "" {
+		vaultRoot := filepath.Join(userDataDir, "computer-media")
+		vault, vaultErr := computer.NewFileMediaVault(computer.VaultOptions{
+			RootDir: vaultRoot,
+			OnAccess: func(ctx context.Context, sessionID computer.SessionID, ref computer.MediaRef) {
+				log.Printf("[computer] media accessed session=%s key=%s sha256=%s", sessionID, ref.StorageKey, ref.SHA256)
+			},
+			OnDelete: func(ctx context.Context, sessionID computer.SessionID, ref computer.MediaRef, reason string) {
+				log.Printf("[computer] media deleted session=%s key=%s sha256=%s reason=%s", sessionID, ref.StorageKey, ref.SHA256, reason)
+			},
+			Retention: computer.DefaultMediaRetentionOptions(),
+		})
+		if vaultErr != nil {
+			log.Printf("[computer] failed to create session media store: %v", vaultErr)
+		} else {
+			computerVault = vault
+			runService.SetComputerMediaVault(vault)
+			defer vault.Close()
+		}
+	}
+
+	// CUA Host manager: shared across runs, auto-discovers the host script, and
+	// falls back to unavailable driver when the host is not installed.
+	cuaHostManager := cua.NewHostManager(cua.HostManagerOptions{
+		StartupTimeout:  30 * time.Second,
+		HealthInterval:  30 * time.Second,
+		RestartCooldown: 5 * time.Second,
+		OnStateChange: func(available bool, err error) {
+			if available {
+				log.Println("[cua-host-manager] host available")
+			} else {
+				log.Printf("[cua-host-manager] host unavailable: %v", err)
+			}
+		},
+	})
+	defer cuaHostManager.Close()
+
+	if cuaFactory := buildCUADriverFactory(cuaHostManager, computerVault); cuaFactory != nil {
+		runService.SetComputerDriverFactory(cuaFactory)
+	}
+	runService.SetComputerHostProbe(computer.HostProbeFunc(func(ctx context.Context) (computer.HostStatus, error) {
+		return probeCUAHost(ctx, cuaHostManager)
+	}))
 	skillManager.SetOnActivated(func(plan *skillruntime.SkillActivationPlan) {
 		if plan == nil {
 			return
@@ -389,9 +452,10 @@ func modelConfigFromProfile(profile *runtime.ModelProfileConfig) agentcore.Model
 		ContextWindow:      profile.ContextWindow,
 		ReasoningEffort:    profile.ReasoningEffort,
 		Capabilities: tool.ModelCapabilities{
-			SupportsVision:    profile.SupportsVision,
-			SupportsNativePDF: profile.SupportsNativePDF,
-			SupportsTools:     profile.SupportsTools,
+			SupportsVision:      profile.SupportsVision,
+			SupportsNativePDF:   profile.SupportsNativePDF,
+			SupportsTools:       profile.SupportsTools,
+			SupportsComputerUse: profile.SupportsComputerUse,
 		},
 	}
 }
@@ -529,4 +593,71 @@ func resolveDefaultWorkspace() string {
 		log.Fatalf("failed to get working directory: %v", err)
 	}
 	return cwd
+}
+
+// probeCUAHost returns the global availability of the CUA Host sidecar for
+// settings and readiness checks. It reuses the shared HostManager client when
+// already healthy, or attempts a short-lived start when not.
+func probeCUAHost(ctx context.Context, manager *cua.HostManager) (computer.HostStatus, error) {
+	status := computer.HostStatus{Available: false, Healthy: false}
+	if manager == nil {
+		status.Message = "host manager not configured"
+		return status, nil
+	}
+
+	scriptPath, _, err := manager.ResolvedHostPaths()
+	if err != nil {
+		status.Message = err.Error()
+		return status, nil
+	}
+	status.HostScriptPath = scriptPath
+	status.NodePath = manager.ResolvedNodePath()
+
+	probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	client, err := manager.GetClient(probeCtx)
+	if err != nil {
+		status.Message = err.Error()
+		return status, nil
+	}
+
+	healthCtx, healthCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer healthCancel()
+	hr, err := client.Health(healthCtx)
+	if err != nil {
+		status.Message = err.Error()
+		return status, nil
+	}
+
+	status.Available = true
+	status.Healthy = hr.Healthy
+	status.Version = hr.Version
+	status.ProtocolVersion = hr.ProtocolVersion
+	status.OS = hr.OS
+	status.TCCScreenRecording = hr.TCCScreenRecording
+	status.TCCAccessibility = hr.TCCAccessibility
+	status.Message = hr.Message
+	return status, nil
+}
+
+// buildCUADriverFactory returns a factory for the CUA driver backed by the
+// shared host manager. The manager auto-discovers the host script (env var,
+// bundled resources, or PoC workspace) and starts the host on first use. If the
+// host cannot be started, the factory falls back to the unavailable driver so
+// that runs can still start without Computer Use. The legacy AWAKEN_CUA_ENABLED
+// environment variable is no longer required.
+func buildCUADriverFactory(manager *cua.HostManager, vault computer.MediaVault) func(computer.Binding) (computer.Driver, error) {
+	return func(bind computer.Binding) (computer.Driver, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		client, err := manager.GetClient(ctx)
+		if err != nil {
+			log.Printf("[cua] host unavailable, falling back to unavailable driver: %v", err)
+			return computer.NewUnavailableDriver(), nil
+		}
+		return cua.NewDriver(cua.DriverOptions{
+			Host:       client,
+			MediaVault: vault,
+		})
+	}
 }

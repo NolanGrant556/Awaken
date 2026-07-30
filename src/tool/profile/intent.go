@@ -25,6 +25,7 @@ const (
 	ToolKindShellCommand  ToolKind = "shell_command"
 	ToolKindMcpApp        ToolKind = "mcp_app"
 	ToolKindReviewAgent   ToolKind = "review_agent"
+	ToolKindComputer      ToolKind = "computer"
 )
 
 // ExecutionLane is the current top-level routing key used by the executor
@@ -37,6 +38,7 @@ const (
 	LaneConnector    ExecutionLane = "connector_lane"
 	LaneLocalCompute ExecutionLane = "local_compute_lane"
 	LaneSystem       ExecutionLane = "system_lane"
+	LaneComputer     ExecutionLane = "computer_lane"
 )
 
 // NetworkScope grades the network reach of a tool invocation.
@@ -130,10 +132,19 @@ func InferToolKind(toolName string, annotations tool.ToolAnnotations) ToolKind {
 		return ToolKindShellCommand
 	}
 
+	// Computer tools are identified by capability class first, then by name.
+	switch annotations.CapabilityClass {
+	case tool.CapabilityClassComputerObserve, tool.CapabilityClassComputerAct, tool.CapabilityClassComputerVerify:
+		return ToolKindComputer
+	}
+	lower := strings.ToLower(name)
+	if strings.HasPrefix(lower, "computer_") {
+		return ToolKindComputer
+	}
+
 	// Review/guardian tools are identified by name. The spec does not
 	// enumerate them; we match common prefixes so future review-agent
 	// tools (e.g. "review_code", "guardian_check") classify correctly.
-	lower := strings.ToLower(name)
 	if strings.HasPrefix(lower, "review") || strings.HasPrefix(lower, "guardian") {
 		return ToolKindReviewAgent
 	}
@@ -162,6 +173,8 @@ func InferExecutionLane(toolName string, annotations tool.ToolAnnotations) Execu
 		return LaneLocalCompute
 	case tool.CapabilityExternalPublish, tool.CapabilitySystemOperation:
 		return LaneSystem
+	case tool.CapabilityClassComputerObserve, tool.CapabilityClassComputerAct, tool.CapabilityClassComputerVerify:
+		return LaneComputer
 	}
 
 	switch InferToolKind(toolName, annotations) {
@@ -171,6 +184,8 @@ func InferExecutionLane(toolName string, annotations tool.ToolAnnotations) Execu
 		return LaneConnector
 	case ToolKindShellCommand:
 		return LaneSystem
+	case ToolKindComputer:
+		return LaneComputer
 	default:
 		return LaneSystem
 	}
@@ -276,6 +291,12 @@ func inferRequestedAction(toolName string, kind ToolKind, annotations tool.ToolA
 		return ActionExecute
 	case ToolKindReviewAgent:
 		return ActionInspect
+	case ToolKindComputer:
+		// Observe and verify are read/inspect; act is a write against the GUI.
+		if annotations.ReadOnly {
+			return ActionRead
+		}
+		return ActionWrite
 	}
 	return ActionRead
 }

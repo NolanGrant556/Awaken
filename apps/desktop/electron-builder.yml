@@ -27,6 +27,9 @@ extraResources:
   - from: resources/bin/${platform}-${arch}
     to: bin/${platform}-${arch}
     filter: ["**/*"]
+  - from: resources/cua-driver
+    to: cua-driver
+    filter: ["**/*"]
   - from: build/icon.png
     to: icon.png
 mac:

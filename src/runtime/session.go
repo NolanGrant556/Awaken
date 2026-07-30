@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/computer"
 	"awaken/src/subagentruntime"
 )
 
@@ -71,6 +72,7 @@ type Session struct {
 	subagents            subagentruntime.Controller
 	userQuestions        map[string]*pendingUserQuestion
 	externalInteractions map[string]*pendingExternalInteraction
+	computerRuntime      *computer.Runtime
 }
 
 func (s *Session) SetSubagentController(controller subagentruntime.Controller) {
@@ -89,6 +91,24 @@ func (s *Session) SubagentController() subagentruntime.Controller {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.subagents
+}
+
+func (s *Session) SetComputerRuntime(runtime *computer.Runtime) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.computerRuntime = runtime
+	s.mu.Unlock()
+}
+
+func (s *Session) ComputerRuntime() *computer.Runtime {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.computerRuntime
 }
 
 type pendingUserQuestion struct {

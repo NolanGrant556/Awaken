@@ -410,6 +410,15 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		loaded.SkillResourceSize = int64FromAny(payload["size"])
 		loaded.SkillResourceMode = stringFromAny(payload["mode"])
 		return []Event{loaded}
+	case agentcore.SemanticKindComputerReviewRequested,
+		agentcore.SemanticKindComputerReviewResolved,
+		agentcore.SemanticKindComputerSessionOpened,
+		agentcore.SemanticKindComputerStateChanged,
+		agentcore.SemanticKindComputerVerificationCompleted,
+		agentcore.SemanticKindComputerControlTransferStarted,
+		agentcore.SemanticKindComputerControlTransferCompleted,
+		agentcore.SemanticKindComputerSessionClosed:
+		return projectComputerEvent(base, record.Kind, payload)
 	case agentcore.SemanticKindThread,
 		agentcore.SemanticKindFileChange:
 		return nil
@@ -419,6 +428,52 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		unknown.RawType = string(record.Kind)
 		return []Event{unknown}
 	}
+}
+
+func projectComputerEvent(base Event, kind agentcore.SemanticKind, payload map[string]any) []Event {
+	event := base
+	switch kind {
+	case agentcore.SemanticKindComputerReviewRequested:
+		event.Type = EventAwakenComputerReviewRequested
+	case agentcore.SemanticKindComputerReviewResolved:
+		event.Type = EventAwakenComputerReviewResolved
+	case agentcore.SemanticKindComputerSessionOpened:
+		event.Type = EventAwakenComputerSessionChanged
+		event.ComputerSessionState = "ready"
+	case agentcore.SemanticKindComputerStateChanged:
+		event.Type = EventAwakenComputerSessionChanged
+		event.ComputerSessionState = stringFromAny(payload["to_state"])
+	case agentcore.SemanticKindComputerVerificationCompleted:
+		event.Type = EventAwakenComputerVerification
+		event.ComputerVerificationStatus = stringFromAny(payload["status"])
+	case agentcore.SemanticKindComputerControlTransferStarted:
+		event.Type = EventAwakenComputerHandoffStarted
+		event.ComputerSessionState = "taken_over"
+	case agentcore.SemanticKindComputerControlTransferCompleted:
+		event.Type = EventAwakenComputerHandoffEnded
+		event.ComputerSessionState = "ready"
+	case agentcore.SemanticKindComputerSessionClosed:
+		event.Type = EventAwakenComputerSessionChanged
+		event.ComputerSessionState = "closed"
+	}
+	event.ComputerReviewID = stringFromAny(payload["review_id"])
+	event.ComputerActionID = stringFromAny(payload["action_id"])
+	event.ComputerActionDigest = stringFromAny(payload["action_digest"])
+	event.ComputerTargetSummary = stringFromAny(payload["target_summary"])
+	event.ComputerEffectSummary = stringFromAny(payload["effect_summary"])
+	event.ComputerRisk = stringFromAny(payload["risk"])
+	event.ComputerSessionID = stringFromAny(payload["session_id"])
+	event.ComputerObservationID = stringFromAny(payload["observation_id"])
+	event.ComputerDecision = stringFromAny(payload["decision"])
+	event.ComputerActor = stringFromAny(payload["actor"])
+	event.ComputerEvidenceRefs = stringSliceFromAny(payload["evidence_refs"])
+	switch kind {
+	case agentcore.SemanticKindComputerControlTransferStarted:
+		event.ComputerHandoff = true
+	case agentcore.SemanticKindComputerControlTransferCompleted:
+		event.ComputerHandoff = false
+	}
+	return []Event{event}
 }
 
 func applySubagentPayload(dst *Event, payload map[string]any) {

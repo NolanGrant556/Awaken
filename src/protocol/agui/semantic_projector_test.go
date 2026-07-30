@@ -89,6 +89,35 @@ func TestProjectSemanticRecordSuppressesLocalContextAuthorities(t *testing.T) {
 	}
 }
 
+func TestProjectComputerSessionAndVerificationEvents(t *testing.T) {
+	sessionFrames := ProjectSemanticRecord(agentcore.SemanticRecord{
+		Kind: agentcore.SemanticKindComputerStateChanged,
+		Payload: map[string]any{
+			"session_id": "session-1",
+			"to_state":   "paused",
+		},
+	})
+	if len(sessionFrames) != 1 ||
+		sessionFrames[0].Type != EventAwakenComputerSessionChanged ||
+		sessionFrames[0].ComputerSessionState != "paused" {
+		t.Fatalf("unexpected computer session projection: %+v", sessionFrames)
+	}
+
+	verificationFrames := ProjectSemanticRecord(agentcore.SemanticRecord{
+		Kind: agentcore.SemanticKindComputerVerificationCompleted,
+		Payload: map[string]any{
+			"action_id": "action-1",
+			"status":    "verified",
+		},
+	})
+	if len(verificationFrames) != 1 ||
+		verificationFrames[0].Type != EventAwakenComputerVerification ||
+		verificationFrames[0].ComputerActionID != "action-1" ||
+		verificationFrames[0].ComputerVerificationStatus != "verified" {
+		t.Fatalf("unexpected computer verification projection: %+v", verificationFrames)
+	}
+}
+
 func TestProjectReasoningSummaryProducesCompleteLifecycle(t *testing.T) {
 	record := agentcore.SemanticRecord{
 		SchemaVersion: 2,

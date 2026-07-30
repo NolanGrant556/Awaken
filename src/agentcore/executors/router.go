@@ -24,10 +24,12 @@ type Router struct {
 	localCompute ToolExecutor
 	system       ToolExecutor
 	guardian     ToolExecutor
+	computer     ToolExecutor
 }
 
 // NewRouter returns a Router wired with the current lane executors plus the
-// guardian override executor.
+// guardian override executor. Computer lane is not wired by default; use
+// NewRouterWithComputer when a run-bound Computer runtime is available.
 func NewRouter() *Router {
 	return &Router{
 		artifact:     NewArtifactExecutor(),
@@ -35,6 +37,24 @@ func NewRouter() *Router {
 		localCompute: NewLocalComputeExecutor(),
 		system:       NewSystemExecutor(),
 		guardian:     NewGuardianExecutor(),
+		computer:     NewComputerExecutor(nil),
+	}
+}
+
+// WithComputerExecutor returns a new Router derivative that routes
+// computer_lane calls through the given executor. The receiver is left
+// unchanged. A nil executor falls back to the unavailable executor.
+func (r *Router) WithComputerExecutor(executor ToolExecutor) *Router {
+	if executor == nil {
+		executor = NewComputerExecutor(nil)
+	}
+	return &Router{
+		artifact:     r.artifact,
+		connector:    r.connector,
+		localCompute: r.localCompute,
+		system:       r.system,
+		guardian:     r.guardian,
+		computer:     executor,
 	}
 }
 
@@ -64,6 +84,8 @@ func (r *Router) Route(intent profile.ExecutionIntent, execProfile profile.Execu
 		return r.localCompute, nil
 	case profile.LaneSystem:
 		return r.system, nil
+	case profile.LaneComputer:
+		return r.computer, nil
 	default:
 		return nil, fmt.Errorf("unknown execution lane %q for tool %q; cannot route to an executor", lane, intent.ToolName)
 	}
@@ -77,6 +99,8 @@ func legacyLaneForKind(kind profile.ToolKind) profile.ExecutionLane {
 		return profile.LaneConnector
 	case profile.ToolKindShellCommand:
 		return profile.LaneSystem
+	case profile.ToolKindComputer:
+		return profile.LaneComputer
 	default:
 		return ""
 	}

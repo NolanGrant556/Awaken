@@ -189,16 +189,19 @@ type ScopedFile struct {
 type CapabilityClass string
 
 const (
-	CapabilityUnknown         CapabilityClass = "unknown"
-	CapabilityArtifactRead    CapabilityClass = "artifact_read"
-	CapabilityArtifactWrite   CapabilityClass = "artifact_write"
-	CapabilityConnectorRead   CapabilityClass = "connector_read"
-	CapabilityConnectorWrite  CapabilityClass = "connector_write"
-	CapabilityBrowserRead     CapabilityClass = "browser_read"
-	CapabilityBrowserInteract CapabilityClass = "browser_interaction"
-	CapabilityLocalTransform  CapabilityClass = "local_transform"
-	CapabilityExternalPublish CapabilityClass = "external_publish"
-	CapabilitySystemOperation CapabilityClass = "system_operation"
+	CapabilityUnknown            CapabilityClass = "unknown"
+	CapabilityArtifactRead       CapabilityClass = "artifact_read"
+	CapabilityArtifactWrite      CapabilityClass = "artifact_write"
+	CapabilityConnectorRead      CapabilityClass = "connector_read"
+	CapabilityConnectorWrite     CapabilityClass = "connector_write"
+	CapabilityBrowserRead        CapabilityClass = "browser_read"
+	CapabilityBrowserInteract    CapabilityClass = "browser_interaction"
+	CapabilityLocalTransform     CapabilityClass = "local_transform"
+	CapabilityExternalPublish    CapabilityClass = "external_publish"
+	CapabilitySystemOperation    CapabilityClass = "system_operation"
+	CapabilityClassComputerObserve CapabilityClass = "computer_observe"
+	CapabilityClassComputerAct     CapabilityClass = "computer_act"
+	CapabilityClassComputerVerify  CapabilityClass = "computer_verify"
 )
 
 type TrustedOrigin string

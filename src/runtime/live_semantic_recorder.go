@@ -34,6 +34,24 @@ func (r *liveSemanticRecorder) AppendBatch(ctx context.Context, records []agentc
 	return err
 }
 
+// AppendFlushed appends one safety-sensitive record, flushes the underlying
+// journal, and only then publishes it to the live session. Computer review and
+// action-start facts use this path so UI visibility and input injection cannot
+// get ahead of durable truth.
+func (r *liveSemanticRecorder) AppendFlushed(ctx context.Context, record agentcore.SemanticRecord) (agentcore.SemanticRecord, error) {
+	assigned, err := r.base.AppendAssigned(ctx, record)
+	if err != nil {
+		return agentcore.SemanticRecord{}, err
+	}
+	if err := r.base.Flush(ctx); err != nil {
+		return agentcore.SemanticRecord{}, err
+	}
+	if r.session != nil {
+		r.session.RecordSemanticRecords([]agentcore.SemanticRecord{assigned})
+	}
+	return assigned, nil
+}
+
 func (r *liveSemanticRecorder) AppendAssigned(ctx context.Context, record agentcore.SemanticRecord) (agentcore.SemanticRecord, error) {
 	assigned, err := r.base.AppendAssigned(ctx, record)
 	if err != nil {

@@ -1,11 +1,7 @@
 import type { AwakenProfileBalancePanelProps } from "./AwakenProfileBalancePanel";
 
 const noop = () => {};
-const sharedControls = {
-  themePreference: "light" as const,
-  onThemePreferenceChange: noop,
-  onOpenSettings: noop,
-};
+const sharedControls = { onOpenSettings: noop };
 
 export const AwakenProfileBalanceSamples: NonNullable<
   AwakenProfileBalancePanelProps["balances"]
@@ -13,6 +9,7 @@ export const AwakenProfileBalanceSamples: NonNullable<
   {
     profileId: "deepseek-v4-pro",
     providerId: "deepseek",
+    providerBrand: "deepseek",
     modelId: "deepseek-v4-pro",
     displayName: "DeepSeek V4 Pro",
     status: "available",
@@ -24,6 +21,7 @@ export const AwakenProfileBalanceSamples: NonNullable<
   {
     profileId: "kimi",
     providerId: "kimi-coding-plan",
+    providerBrand: "kimi",
     modelId: "kimi-for-coding",
     displayName: "Kimi",
     status: "available",
@@ -31,6 +29,15 @@ export const AwakenProfileBalanceSamples: NonNullable<
       kind: "quota",
       quotas: [{ name: "每周用量", limit: 100, used: 34, remaining: 66 }],
     },
+  },
+  {
+    profileId: "volcengine-agent-plan",
+    providerId: "volcengine-agent-plan",
+    providerBrand: "volcengine",
+    modelId: "ark-code-latest",
+    displayName: "火山 Agent Plan",
+    status: "unsupported",
+    error: "当前供应商暂不支持查询用量",
   },
 ];
 

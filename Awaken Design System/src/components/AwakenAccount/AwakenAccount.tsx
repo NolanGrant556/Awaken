@@ -3,9 +3,10 @@ import { useId, useState, type CSSProperties } from "react";
 import { AwakenPopover } from "../AwakenPopover";
 import { AwakenProfileButton } from "../AwakenProfileButton";
 import {
-  AwakenProfileBalancePanel,
   type AwakenProfileBalance,
 } from "../AwakenProfileBalancePanel";
+import { AwakenProfileMenuPanel } from "../AwakenProfileMenuPanel";
+import { AwakenProfileUsageDialog } from "../AwakenProfileUsageDialog";
 import type { AwakenThemeChoiceValue } from "../AwakenThemeChoiceGroup";
 
 export type AwakenAccountProps = {
@@ -27,6 +28,7 @@ export type AwakenAccountProps = {
   className?: string;
   style?: CSSProperties;
   onOpenChange?: (open: boolean) => void;
+  onUsageOpenChange?: (open: boolean) => void;
   onSelectedProfileIdChange?: (profileId: string) => void;
   onThemePreferenceChange?: (theme: AwakenThemeChoiceValue) => void;
   onOpenSettings?: () => void;
@@ -51,6 +53,7 @@ export function AwakenAccount({
   className,
   style,
   onOpenChange,
+  onUsageOpenChange,
   onSelectedProfileIdChange,
   onThemePreferenceChange,
   onOpenSettings,
@@ -58,6 +61,7 @@ export function AwakenAccount({
   const generatedId = useId().replaceAll(":", "");
   const resolvedPanelId = panelId ?? `awaken-account-panel-${generatedId}`;
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const [usageOpen, setUsageOpen] = useState(false);
   const isControlled = open !== undefined;
   const isOpen = isControlled ? open : internalOpen;
 
@@ -68,7 +72,13 @@ export function AwakenAccount({
 
   function openSettings(): void {
     setOpen(false);
+    setUsageOpen(false);
     onOpenSettings?.();
+  }
+
+  function setUsageDialogOpen(nextOpen: boolean): void {
+    setUsageOpen(nextOpen);
+    onUsageOpenChange?.(nextOpen);
   }
 
   return (
@@ -92,21 +102,30 @@ export function AwakenAccount({
           />
         }
         content={
-          <AwakenProfileBalancePanel
+          <AwakenProfileMenuPanel
             id={resolvedPanelId}
-            balances={balances}
-            loading={loading}
-            error={error}
-            selectedProfileId={selectedProfileId}
-            defaultSelectedProfileId={defaultSelectedProfileId}
             themePreference={themePreference}
             themeSaving={themeSaving}
             role="region"
-            onSelectedProfileIdChange={onSelectedProfileIdChange}
             onThemePreferenceChange={onThemePreferenceChange}
             onOpenSettings={openSettings}
+            onOpenUsage={() => {
+              setOpen(false);
+              setUsageDialogOpen(true);
+            }}
           />
         }
+      />
+      <AwakenProfileUsageDialog
+        open={usageOpen}
+        balances={balances}
+        loading={loading}
+        error={error}
+        selectedProfileId={selectedProfileId}
+        defaultSelectedProfileId={defaultSelectedProfileId}
+        onSelectedProfileIdChange={onSelectedProfileIdChange}
+        onOpenSettings={openSettings}
+        onOpenChange={setUsageDialogOpen}
       />
     </div>
   );

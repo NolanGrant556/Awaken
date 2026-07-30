@@ -1,6 +1,8 @@
-import React from "react";
-import { renderToString } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+// @vitest-environment jsdom
+
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ProfileBalancePopover,
   credentialRecoveryForBalances,
@@ -8,82 +10,162 @@ import {
 import type { RuntimeClient } from "./runtime/client";
 import type { ModelProfileBalance } from "../shared/runtime";
 
-function createMockClient(): RuntimeClient {
-  return {
-    source: "electron",
-    platform: "windows",
-    getModelProfileBalances: vi.fn(async () => ({ balances: [] })),
-  } as unknown as RuntimeClient;
+const mockBalances: ModelProfileBalance[] = [
+  {
+    profileId: "kimi-coding-plan",
+    providerId: "kimi-coding-plan",
+    modelId: "k3",
+    displayName: "Kimi Coding Plan",
+    status: "available",
+    fetchedAt: "2026-01-01T00:00:00.000Z",
+    detail: {
+      kind: "quota",
+      quotas: [{ name: "本周请求", limit: 100, used: 99, remaining: 1 }],
+    },
+  },
+  {
+    profileId: "volcengine-agent-plan",
+    providerId: "volcengine-agent-plan",
+    modelId: "ark-code-latest",
+    displayName: "火山 Agent Plan",
+    status: "unsupported",
+    error: "当前供应商暂不支持查询用量",
+  },
+];
+
+function buttonByText(text: string): HTMLButtonElement | undefined {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+    (button) => button.textContent?.includes(text),
+  );
 }
 
-const mockBalance: ModelProfileBalance = {
-  profileId: "deepseek-1",
-  providerId: "deepseek",
-  modelId: "deepseek-v4-pro",
-  displayName: "DeepSeek",
-  status: "available",
-  fetchedAt: "2026-01-01T00:00:00.000Z",
-  detail: {
-    kind: "amount",
-    amounts: [
-      { currency: "USD", total: 50, granted: 10, toppedUp: 40 },
-    ],
-  },
-};
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
 
 describe("ProfileBalancePopover", () => {
-  it("renders nothing when closed", () => {
-    const anchorRef = { current: null };
-    const html = renderToString(
-      <ProfileBalancePopover
-        open={false}
-        anchorRef={anchorRef}
-        runtimeClient={createMockClient()}
-        themePreference="light"
-        themeSaving={false}
-        onThemePreferenceChange={() => {}}
-        onOpenSettings={() => {}}
-        onClose={() => {}}
-      />,
-    );
-    expect(html).toBe("");
+  let container: HTMLDivElement;
+  let anchor: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement("div");
+    anchor = document.createElement("div");
+    document.body.append(anchor, container);
+    root = createRoot(container);
   });
 
-  it("renders the empty state and in-app settings action when open", () => {
-    const anchorRef = { current: null };
-    const html = renderToString(
-      <ProfileBalancePopover
-        open
-        anchorRef={anchorRef}
-        runtimeClient={createMockClient()}
-        themePreference="system"
-        themeSaving={false}
-        onThemePreferenceChange={() => {}}
-        onOpenSettings={() => {}}
-        onClose={() => {}}
-      />,
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+  });
+
+  it("renders nothing when the personal popover and usage dialog are closed", async () => {
+    await act(async () => {
+      root.render(
+        <ProfileBalancePopover
+          open={false}
+          anchorRef={{ current: anchor }}
+          runtimeClient={{} as RuntimeClient}
+          themePreference="light"
+          themeSaving={false}
+          onThemePreferenceChange={() => {}}
+          onOpenSettings={() => {}}
+          onClose={() => {}}
+        />,
+      );
+    });
+    expect(document.querySelector(".profile-balance-popover")).toBeNull();
+    expect(document.querySelector(".aw-profile-usage-dialog")).toBeNull();
+  });
+
+  it("keeps only the usage entry in the personal popover and defers querying until click", async () => {
+    const getModelProfileBalances = vi.fn(async () => ({ balances: mockBalances }));
+    const onClose = vi.fn();
+    const onThemePreferenceChange = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <ProfileBalancePopover
+          open
+          anchorRef={{ current: anchor }}
+          runtimeClient={{ getModelProfileBalances } as unknown as RuntimeClient}
+          themePreference="system"
+          themeSaving={false}
+          onThemePreferenceChange={onThemePreferenceChange}
+          onOpenSettings={() => {}}
+          onClose={onClose}
+        />,
+      );
+    });
+
+    expect(buttonByText("查询用量")).toBeDefined();
+    const appearanceButton = buttonByText("外观");
+    const usageButton = buttonByText("查询用量");
+    const settingsButton = buttonByText("设置");
+    expect(appearanceButton?.classList.contains("aw-profile-menu-panel__action")).toBe(true);
+    expect(usageButton?.classList.contains("aw-profile-menu-panel__action")).toBe(true);
+    expect(settingsButton?.classList.contains("aw-profile-menu-panel__action")).toBe(true);
+    expect(usageButton?.querySelectorAll("svg")).toHaveLength(1);
+    expect(appearanceButton?.compareDocumentPosition(usageButton as Node) ?? 0).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
     );
-    expect(html).toContain("没有已启用且有 API key 的模型");
-    expect(html).toContain("跟随系统");
-    expect(html).toContain("浅色");
-    expect(html).toContain("黑色");
-    expect(html).toContain("theme-choice-group--compact");
-    expect(html).toContain('aria-checked="true"');
-    expect(html).toContain("设置");
+    expect(usageButton?.compareDocumentPosition(settingsButton as Node) ?? 0).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(document.querySelector('[role="radiogroup"][aria-label="主题"]')).toBeNull();
+    expect(document.querySelector(".profile-balance-popover")?.textContent).not.toContain("剩余用量");
+    expect(getModelProfileBalances).not.toHaveBeenCalled();
+    expect(document.querySelector(".profile-balance-popover")?.textContent).toContain("设置");
+
+    await act(async () => appearanceButton?.click());
+    expect(appearanceButton?.getAttribute("aria-expanded")).toBe("true");
+    expect(document.querySelector('[role="dialog"][aria-label="外观"]')).not.toBeNull();
+    expect(document.querySelector('[role="radiogroup"][aria-label="主题"]')).not.toBeNull();
+    expect(document.querySelector(".profile-balance-popover")?.textContent).toContain("跟随系统");
+    expect(getModelProfileBalances).not.toHaveBeenCalled();
+
+    await act(async () => buttonByText("浅色")?.click());
+    expect(onThemePreferenceChange).toHaveBeenCalledWith("light");
+    expect(appearanceButton?.getAttribute("aria-expanded")).toBe("false");
+    expect(document.querySelector('[role="dialog"][aria-label="外观"]')).toBeNull();
+
+    await act(async () => buttonByText("查询用量")?.click());
+    await settle();
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(getModelProfileBalances).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".aw-profile-usage-dialog")?.textContent).toContain("用量");
+    expect(document.querySelector(".aw-profile-balance-panel__nav")?.textContent).toContain("API / Plan");
+    expect(document.querySelector(".aw-profile-balance-panel__detail")?.textContent).toContain("99%");
+    expect(document.querySelector(".aw-profile-balance-panel__detail-label")).toBeNull();
+    expect(document.querySelector('[data-provider-brand="kimi"]')).not.toBeNull();
+    expect(document.querySelector(".aw-profile-usage-dialog")?.textContent).not.toContain(
+      "k3",
+    );
+    expect(document.querySelector(".aw-profile-usage-dialog")?.textContent).not.toContain(
+      "ark-code-latest",
+    );
+
+    await act(async () => buttonByText("火山 Agent Plan")?.click());
+    expect(document.querySelector('[data-provider-brand="volcengine"]')).not.toBeNull();
+    expect(document.querySelector(".aw-profile-balance-panel__detail")?.textContent).toContain(
+      "当前供应商暂不支持查询用量",
+    );
   });
 
   it("collapses repeated provider failures into one credential recovery state", () => {
     expect(
       credentialRecoveryForBalances([
+        { ...mockBalances[0], status: "error", credentialIssue: "unreadable" },
         {
-          ...mockBalance,
-          status: "error",
-          credentialIssue: "unreadable",
-        },
-        {
-          ...mockBalance,
-          profileId: "kimi-1",
-          providerId: "kimi-coding-plan",
+          ...mockBalances[0],
+          profileId: "deepseek",
+          providerId: "deepseek",
           credentialIssue: "unreadable",
         },
       ]),

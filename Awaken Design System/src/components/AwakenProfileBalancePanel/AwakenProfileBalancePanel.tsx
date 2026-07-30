@@ -1,11 +1,11 @@
 import "./AwakenProfileBalancePanel.css";
-import { useState, type AriaRole, type CSSProperties, type ReactNode } from "react";
-import { AlertCircle, ChevronRight, Loader2, Settings, Wallet } from "lucide-react";
+import { useState, type CSSProperties } from "react";
+import { AlertCircle, Loader2, Wallet } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import {
-  AwakenThemeChoiceGroup,
-  type AwakenThemeChoiceValue,
-} from "../AwakenThemeChoiceGroup";
+  AwakenProviderLogo,
+  type AwakenProviderBrand,
+} from "../AwakenProviderLogo";
 
 export type AwakenProfileBalanceStatus =
   | "available"
@@ -36,6 +36,7 @@ export type AwakenProfileBalanceDetail =
 export type AwakenProfileBalance = {
   profileId: string;
   providerId: string;
+  providerBrand?: AwakenProviderBrand;
   modelId: string;
   displayName?: string;
   status: AwakenProfileBalanceStatus;
@@ -52,41 +53,25 @@ export type AwakenProfileBalancePanelProps = {
   error?: string | null;
   selectedProfileId?: string | null;
   defaultSelectedProfileId?: string | null;
-  themePreference: AwakenThemeChoiceValue;
-  themeSaving?: boolean;
-  settingsLabel?: ReactNode;
   ariaLabel?: string;
-  role?: AriaRole;
   className?: string;
   style?: CSSProperties;
   onSelectedProfileIdChange?: (profileId: string) => void;
-  onThemePreferenceChange?: (theme: AwakenThemeChoiceValue) => void;
   onOpenSettings?: () => void;
 };
 
 function formatCurrencyAmount(amount: AwakenProfileBalanceAmount): string {
-  const { currency, total } = amount;
+  return formatCurrencyValue(amount.currency, amount.total);
+}
+
+function formatCurrencyValue(currency: string, value: number): string {
   const symbol = currency === "USD" ? "$" : currency === "CNY" ? "¥" : "";
-  return `${symbol}${total.toFixed(2)} ${symbol ? "" : currency}`.trim();
+  return `${symbol}${value.toFixed(2)} ${symbol ? "" : currency}`.trim();
 }
 
 function formatUsedPercentage(used: number, limit: number): string {
   if (limit <= 0) return "0%";
   return `${Math.round((used / limit) * 100)}%`;
-}
-
-function formatBalanceSummary(balance: AwakenProfileBalance): string {
-  if (balance.credentialIssue === "unreadable") return "需要重新输入 API key";
-  if (balance.status === "missing_key") return "未配置 key";
-  if (balance.status === "unsupported") return "暂不支持";
-  if (balance.status === "error") return balance.error || "查询失败";
-  if (!balance.detail) return "—";
-  if (balance.detail.kind === "amount") {
-    const primary = balance.detail.amounts[0];
-    return primary ? formatCurrencyAmount(primary) : "—";
-  }
-  const primary = balance.detail.quotas[0];
-  return primary ? formatUsedPercentage(primary.used, primary.limit) : "—";
 }
 
 function formatResetTime(iso: string): string {
@@ -109,29 +94,42 @@ export function getAwakenProfileBalanceCredentialRecovery(
 function BalanceAmountView({ amounts }: { amounts: AwakenProfileBalanceAmount[] }) {
   const primary = amounts[0];
   if (!primary) return <span className="aw-profile-balance-panel__empty-value">—</span>;
+  const breakdown = amounts.length > 1
+    ? amounts.slice(1).map((amount) => ({
+        label: amount.currency,
+        value: formatCurrencyAmount(amount),
+      }))
+    : [
+        typeof primary.granted === "number" && primary.granted > 0
+          ? {
+              label: "赠送额度",
+              value: formatCurrencyValue(primary.currency, primary.granted),
+            }
+          : null,
+        typeof primary.toppedUp === "number" && primary.toppedUp > 0
+          ? {
+              label: "充值余额",
+              value: formatCurrencyValue(primary.currency, primary.toppedUp),
+            }
+          : null,
+      ].filter((item): item is { label: string; value: string } => item !== null);
+
   return (
     <div className="aw-profile-balance-panel__amount">
+      <span className="aw-profile-balance-panel__summary-label">可用余额</span>
       <div className="aw-profile-balance-panel__amount-primary">
         {formatCurrencyAmount(primary)}
       </div>
-      {amounts.length > 1 ? (
-        <div className="aw-profile-balance-panel__amount-secondary">
-          {amounts.map((amount) => (
-            <span key={amount.currency}>
-              {amount.currency}: {formatCurrencyAmount(amount)}
-            </span>
+      {breakdown.length > 0 ? (
+        <div className="aw-profile-balance-panel__amount-breakdown">
+          {breakdown.map((item) => (
+            <div className="aw-profile-balance-panel__amount-metric" key={item.label}>
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+            </div>
           ))}
         </div>
-      ) : (
-        <div className="aw-profile-balance-panel__amount-breakdown">
-          {typeof primary.granted === "number" && primary.granted > 0 ? (
-            <span>赠送 {primary.granted.toFixed(2)}</span>
-          ) : null}
-          {typeof primary.toppedUp === "number" && primary.toppedUp > 0 ? (
-            <span>余额 {primary.toppedUp.toFixed(2)}</span>
-          ) : null}
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -161,6 +159,75 @@ function QuotaView({ quota }: { quota: AwakenProfileBalanceQuota }) {
   );
 }
 
+function BalanceDetail({
+  balance,
+  onOpenSettings,
+}: {
+  balance: AwakenProfileBalance;
+  onOpenSettings?: () => void;
+}) {
+  if (balance.status === "available" && balance.detail) {
+    return balance.detail.kind === "amount" ? (
+      <BalanceAmountView amounts={balance.detail.amounts} />
+    ) : (
+      <div className="aw-profile-balance-panel__quotas">
+        {balance.detail.quotas.map((quota) => (
+          <QuotaView key={quota.name} quota={quota} />
+        ))}
+      </div>
+    );
+  }
+
+  const unreadable = balance.credentialIssue === "unreadable";
+  const message =
+    balance.status === "missing_key"
+      ? "请先配置 API key"
+      : unreadable
+        ? "无法读取模型密钥，请在设置中重新输入。"
+        : balance.status === "unsupported"
+          ? "当前供应商暂不支持查询用量"
+          : balance.error || "用量查询失败";
+
+  return (
+    <div className="aw-profile-balance-panel__detail-empty" role={unreadable ? "alert" : "status"}>
+      <AlertCircle size={20} strokeWidth={1.9} aria-hidden="true" />
+      <span>{message}</span>
+      {unreadable ? (
+        <AwakenButton variant="default" size="sm" onClick={onOpenSettings}>
+          前往设置
+        </AwakenButton>
+      ) : null}
+    </div>
+  );
+}
+
+function BalanceProviderMark({
+  balance,
+  detail = false,
+}: {
+  balance: AwakenProfileBalance;
+  detail?: boolean;
+}) {
+  const name = balance.displayName || balance.modelId || balance.providerId;
+  const className = [
+    "aw-profile-balance-panel__provider-mark",
+    detail ? "aw-profile-balance-panel__provider-mark--detail" : "",
+  ].filter(Boolean).join(" ");
+
+  return balance.providerBrand ? (
+    <span className={className} aria-hidden="true">
+      <AwakenProviderLogo brand={balance.providerBrand} name={name} />
+    </span>
+  ) : (
+    <span
+      className={`${className} aw-profile-balance-panel__provider-mark--fallback`}
+      aria-hidden="true"
+    >
+      {name.trim().slice(0, 1).toUpperCase() || "M"}
+    </span>
+  );
+}
+
 export function AwakenProfileBalancePanel({
   id,
   balances = [],
@@ -168,15 +235,10 @@ export function AwakenProfileBalancePanel({
   error = null,
   selectedProfileId,
   defaultSelectedProfileId,
-  themePreference,
-  themeSaving = false,
-  settingsLabel = "设置",
-  ariaLabel = "模型余额",
-  role = "dialog",
+  ariaLabel = "模型用量",
   className,
   style,
   onSelectedProfileIdChange,
-  onThemePreferenceChange,
   onOpenSettings,
 }: AwakenProfileBalancePanelProps) {
   const [internalSelectedProfileId, setInternalSelectedProfileId] = useState<string | null>(
@@ -188,8 +250,7 @@ export function AwakenProfileBalancePanel({
       : internalSelectedProfileId ?? balances[0]?.profileId ?? null;
   const selectedBalance = balances.find(
     (balance) => balance.profileId === currentSelectedProfileId,
-  );
-  const credentialRecovery = getAwakenProfileBalanceCredentialRecovery(balances);
+  ) ?? balances[0];
 
   function selectProfile(profileId: string): void {
     if (selectedProfileId === undefined) setInternalSelectedProfileId(profileId);
@@ -201,123 +262,82 @@ export function AwakenProfileBalancePanel({
       id={id}
       className={["aw-profile-balance-panel", className ?? ""].filter(Boolean).join(" ")}
       style={style}
-      role={role}
+      role="region"
       aria-label={ariaLabel}
     >
-      <div className="aw-profile-balance-panel__body">
-        {loading ? (
-          <div className="aw-profile-balance-panel__message">
-            <Loader2
-              size={18}
-              strokeWidth={2}
-              className="aw-profile-balance-panel__spin"
-              aria-hidden="true"
-            />
-            <span>正在查询余额…</span>
-          </div>
-        ) : error ? (
-          <div className="aw-profile-balance-panel__message aw-profile-balance-panel__message--stacked">
-            <AlertCircle size={18} strokeWidth={2} aria-hidden="true" />
-            <span>{error}</span>
-          </div>
-        ) : balances.length === 0 ? (
-          <div className="aw-profile-balance-panel__message aw-profile-balance-panel__message--stacked">
-            <Wallet size={18} strokeWidth={2} aria-hidden="true" />
-            <span>没有已启用且有 API key 的模型</span>
-          </div>
-        ) : (
-          <>
-            <div className="aw-profile-balance-panel__section-title">剩余用量</div>
-            {credentialRecovery ? (
-              <div className="aw-profile-balance-panel__recovery" role="alert">
-                <div className="aw-profile-balance-panel__recovery-copy">
-                  <AlertCircle size={18} strokeWidth={2} aria-hidden="true" />
-                  <span>无法读取 ~/.awaken/.env 中的模型密钥，请重新输入。</span>
-                </div>
-                <AwakenButton variant="primary" size="sm" onClick={onOpenSettings}>
-                  在 Awaken 中恢复
-                </AwakenButton>
-              </div>
-            ) : null}
-            <div className="aw-profile-balance-panel__list">
-              {balances.map((balance) => (
-                <button
-                  key={balance.profileId}
-                  type="button"
-                  className={[
-                    "aw-profile-balance-panel__item",
-                    balance.profileId === currentSelectedProfileId
-                      ? "aw-profile-balance-panel__item--active"
-                      : "",
-                  ].filter(Boolean).join(" ")}
-                  aria-pressed={balance.profileId === currentSelectedProfileId}
-                  onClick={() => selectProfile(balance.profileId)}
-                >
-                  <span className="aw-profile-balance-panel__item-icon" aria-hidden="true">
-                    {balance.displayName?.slice(0, 1) || balance.providerId.slice(0, 1).toUpperCase()}
-                  </span>
-                  <span className="aw-profile-balance-panel__item-info">
-                    <span className="aw-profile-balance-panel__item-name">
-                      {balance.displayName || balance.modelId}
+      {loading ? (
+        <div className="aw-profile-balance-panel__message">
+          <Loader2
+            size={20}
+            strokeWidth={1.9}
+            className="aw-profile-balance-panel__spin"
+            aria-hidden="true"
+          />
+          <span>正在查询用量…</span>
+        </div>
+      ) : error ? (
+        <div className="aw-profile-balance-panel__message" role="alert">
+          <AlertCircle size={20} strokeWidth={1.9} aria-hidden="true" />
+          <span>{error}</span>
+        </div>
+      ) : balances.length === 0 ? (
+        <div className="aw-profile-balance-panel__message">
+          <Wallet size={20} strokeWidth={1.9} aria-hidden="true" />
+          <span>没有已启用的模型 API</span>
+        </div>
+      ) : (
+        <>
+          <aside className="aw-profile-balance-panel__nav" aria-label="已配置 API">
+            <div className="aw-profile-balance-panel__nav-title">API / Plan</div>
+            <div className="aw-profile-balance-panel__list" role="tablist" aria-orientation="vertical">
+              {balances.map((balance) => {
+                const active = balance.profileId === selectedBalance?.profileId;
+                return (
+                  <button
+                    key={balance.profileId}
+                    type="button"
+                    className={[
+                      "aw-profile-balance-panel__item",
+                      active ? "aw-profile-balance-panel__item--active" : "",
+                    ].filter(Boolean).join(" ")}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => selectProfile(balance.profileId)}
+                  >
+                    <BalanceProviderMark balance={balance} />
+                    <span className="aw-profile-balance-panel__item-info">
+                      <span className="aw-profile-balance-panel__item-name">
+                        {balance.displayName || balance.modelId}
+                      </span>
                     </span>
-                    <span className="aw-profile-balance-panel__item-summary">
-                      {formatBalanceSummary(balance)}
-                    </span>
-                  </span>
-                  <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />
-                </button>
-              ))}
+                  </button>
+                );
+              })}
             </div>
-
+          </aside>
+          <section
+            className="aw-profile-balance-panel__detail"
+            role="tabpanel"
+            aria-label={selectedBalance?.displayName || selectedBalance?.modelId}
+          >
             {selectedBalance ? (
-              <div className="aw-profile-balance-panel__detail">
-                {selectedBalance.status === "available" && selectedBalance.detail ? (
-                  selectedBalance.detail.kind === "amount" ? (
-                    <BalanceAmountView amounts={selectedBalance.detail.amounts} />
-                  ) : (
-                    <div className="aw-profile-balance-panel__quotas">
-                      {selectedBalance.detail.quotas.map((quota) => (
-                        <QuotaView key={quota.name} quota={quota} />
-                      ))}
+              <>
+                <header className="aw-profile-balance-panel__detail-head">
+                  <div className="aw-profile-balance-panel__detail-identity">
+                    <BalanceProviderMark balance={selectedBalance} detail />
+                    <div className="aw-profile-balance-panel__detail-copy">
+                      <h3>{selectedBalance.displayName || selectedBalance.modelId}</h3>
                     </div>
-                  )
-                ) : (
-                  <div className="aw-profile-balance-panel__detail-empty">
-                    <AlertCircle size={18} strokeWidth={2} aria-hidden="true" />
-                    <span>
-                      {selectedBalance.status === "missing_key"
-                        ? "请先配置 API key"
-                        : selectedBalance.credentialIssue === "unreadable"
-                          ? "请在 Awaken 中重新输入 API key"
-                          : selectedBalance.status === "unsupported"
-                            ? "暂不支持查询该供应商余额"
-                            : selectedBalance.error || "余额查询失败"}
-                    </span>
                   </div>
-                )}
-              </div>
+                </header>
+                <div className="aw-profile-balance-panel__detail-body">
+                  <BalanceDetail balance={selectedBalance} onOpenSettings={onOpenSettings} />
+                </div>
+              </>
             ) : null}
-          </>
-        )}
-      </div>
-
-      <div className="aw-profile-balance-panel__footer">
-        <AwakenThemeChoiceGroup
-          value={themePreference}
-          size="compact"
-          disabled={themeSaving}
-          onValueChange={onThemePreferenceChange}
-        />
-        <AwakenButton
-          variant="default"
-          size="md"
-          className="aw-profile-balance-panel__settings"
-          onClick={onOpenSettings}
-        >
-          <Settings size={15} strokeWidth={1.9} aria-hidden="true" />
-          {settingsLabel}
-        </AwakenButton>
-      </div>
+          </section>
+        </>
+      )}
     </div>
   );
 }

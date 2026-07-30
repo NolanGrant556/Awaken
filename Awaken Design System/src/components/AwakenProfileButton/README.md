@@ -4,7 +4,7 @@
 
 ## 用途
 
-`AwakenProfileButton` 用于在侧边栏底部展示当前用户或本机配置身份，并作为账户/设置菜单的触发器。父级负责传入姓名、副标题、头像和点击后打开的菜单；组件通过 `expanded` 与 `controls` 关联 `AwakenProfileBalancePanel`，自身只负责身份行的头像、文本截断、箭头和交互反馈。
+`AwakenProfileButton` 用于在侧边栏底部展示当前用户或本机配置身份，并作为账户/设置菜单的触发器。父级负责传入姓名、副标题、头像和点击后打开的菜单；组件通过 `expanded` 与 `controls` 关联 `AwakenProfileMenuPanel`，自身只负责身份行的头像、文本截断、箭头和交互反馈。
 
 ## 文件
 

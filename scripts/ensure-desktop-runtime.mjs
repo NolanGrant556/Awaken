@@ -111,3 +111,29 @@ try {
   );
   process.exit(1);
 }
+
+try {
+  execFileSync("node", ["scripts/prepare-node-runtime.mjs"], {
+    cwd: root,
+    env: { ...process.env },
+    stdio: "inherit",
+  });
+} catch {
+  console.error(
+    `[ensure-desktop-runtime] failed to prepare Node runtime. Run node scripts/prepare-node-runtime.mjs for full output.`,
+  );
+  process.exit(1);
+}
+
+try {
+  execFileSync("node", ["scripts/prepare-cua-driver.mjs"], {
+    cwd: root,
+    env: { ...process.env },
+    stdio: "inherit",
+  });
+} catch {
+  console.error(
+    `[ensure-desktop-runtime] failed to prepare CUA driver. Run node scripts/prepare-cua-driver.mjs for full output.`,
+  );
+  process.exit(1);
+}

@@ -9,6 +9,7 @@ const routeBySection: Record<string, string> = {
   memory: "awaken-memory-settings",
   appearance: "awaken-appearance-settings",
   pets: "awaken-pets-settings",
+  computer: "awaken-computer-settings",
 };
 
 export function AwakenSettingsSectionPreview({

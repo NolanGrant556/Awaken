@@ -219,6 +219,9 @@ type ThreadViewState = {
   patchPreviews: PatchPreviewRecord[];
   userQuestions: UserQuestionItem[];
   externalInteractions: ExternalInteractionItem[];
+  computerReviews: ComputerReviewItem[];
+  computerHandoffs: ComputerHandoffItem[];
+  computerSession?: ComputerSessionItem;
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
   inspectorSummary: InspectorSummary;
@@ -244,6 +247,9 @@ export type RuntimeViewState = {
   patchPreviews: PatchPreviewRecord[];
   userQuestions: UserQuestionItem[];
   externalInteractions: ExternalInteractionItem[];
+  computerReviews: ComputerReviewItem[];
+  computerHandoffs: ComputerHandoffItem[];
+  computerSession?: ComputerSessionItem;
   artifacts: ArtifactRecord[];
   turnDiff?: TurnDiffRecord;
   inspectorSummary: InspectorSummary;
@@ -321,6 +327,33 @@ export type ExternalInteractionItem = {
   options?: AguiACPPermissionOption[];
 };
 
+export type ComputerReviewItem = {
+  id: string;
+  runId?: string;
+  reviewId: string;
+  actionId?: string;
+  actionDigest?: string;
+  targetSummary?: string;
+  effectSummary?: string;
+  risk?: string;
+  sessionId?: string;
+  observationId?: string;
+  evidenceRefs?: string[];
+};
+
+export type ComputerHandoffItem = {
+  id: string;
+  runId?: string;
+  sessionId?: string;
+  active: boolean;
+};
+
+export type ComputerSessionItem = {
+  runId?: string;
+  sessionId?: string;
+  state: string;
+};
+
 const initialState: RuntimeViewState = {
   prompt: "",
   promptAttachments: undefined,
@@ -334,6 +367,9 @@ const initialState: RuntimeViewState = {
   patchPreviews: [],
   userQuestions: [],
   externalInteractions: [],
+  computerReviews: [],
+  computerHandoffs: [],
+  computerSession: undefined,
   artifacts: [],
   narrative: createInitialRunNarrativeState(),
   inspectorSummary: createInspectorSummary(),
@@ -359,6 +395,9 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     patchPreviews: state.patchPreviews,
     userQuestions: state.userQuestions,
     externalInteractions: state.externalInteractions,
+    computerReviews: state.computerReviews,
+    computerHandoffs: state.computerHandoffs,
+    computerSession: state.computerSession,
     artifacts: state.artifacts,
     turnDiff: state.turnDiff,
     inspectorSummary: state.inspectorSummary,
@@ -1172,6 +1211,42 @@ function removeExternalInteraction(
   return items.filter((item) => item.id !== interactionId);
 }
 
+function upsertComputerReview(
+  items: ComputerReviewItem[],
+  next: ComputerReviewItem,
+): ComputerReviewItem[] {
+  const index = items.findIndex((item) => item.reviewId === next.reviewId);
+  if (index < 0) {
+    return [...items, next];
+  }
+  const updated = items.slice();
+  updated[index] = next;
+  return updated;
+}
+
+function removeComputerReview(
+  items: ComputerReviewItem[],
+  reviewId?: string,
+): ComputerReviewItem[] {
+  if (!reviewId) {
+    return items;
+  }
+  return items.filter((item) => item.reviewId !== reviewId);
+}
+
+function upsertComputerHandoff(
+  items: ComputerHandoffItem[],
+  next: ComputerHandoffItem,
+): ComputerHandoffItem[] {
+  const index = items.findIndex((item) => item.id === next.id);
+  if (index < 0) {
+    return [...items, next];
+  }
+  const updated = items.slice();
+  updated[index] = next;
+  return updated;
+}
+
 function inferLegacyArtifactRole(input: {
   kind?: string;
   path?: string;
@@ -1383,6 +1458,9 @@ export function reduceRuntimeState(
 		patchPreviews: [],
 		userQuestions: [],
 		externalInteractions: [],
+		computerReviews: [],
+		computerHandoffs: [],
+		computerSession: undefined,
 		artifacts: [],
         turnDiff: undefined,
         // Context usage is thread-scoped next-request state, not run-local
@@ -1806,16 +1884,22 @@ export function reduceRuntimeState(
             nextState.timelineStatus = "running";
             nextState.userQuestions = [];
             nextState.externalInteractions = [];
+            nextState.computerReviews = [];
+            nextState.computerHandoffs = [];
           } else if (status === "cancelled") {
             nextState.phase = "cancelled";
             nextState.timelineStatus = "done";
             nextState.userQuestions = [];
             nextState.externalInteractions = [];
+            nextState.computerReviews = [];
+            nextState.computerHandoffs = [];
           } else if (status === "finished") {
             nextState.phase = "done";
             nextState.timelineStatus = "done";
             nextState.userQuestions = [];
             nextState.externalInteractions = [];
+            nextState.computerReviews = [];
+            nextState.computerHandoffs = [];
             nextState.runCompletedAtMs =
               nextState.runCompletedAtMs ??
               (validTimestamp(action.event.timestamp)
@@ -1826,6 +1910,8 @@ export function reduceRuntimeState(
             nextState.timelineStatus = "error";
             nextState.userQuestions = [];
             nextState.externalInteractions = [];
+            nextState.computerReviews = [];
+            nextState.computerHandoffs = [];
           }
           if (
             status === "cancelled" ||
@@ -1862,7 +1948,9 @@ export function reduceRuntimeState(
           nextState.status = "finished";
           nextState.timelineStatus = "done";
           nextState.userQuestions = [];
-            nextState.externalInteractions = [];
+          nextState.externalInteractions = [];
+          nextState.computerReviews = [];
+          nextState.computerHandoffs = [];
           nextState.runCompletedAtMs =
             nextState.runCompletedAtMs ??
             (validTimestamp(action.event.timestamp)
@@ -2619,6 +2707,111 @@ export function reduceRuntimeState(
           );
           break;
         }
+        case "AWAKEN_COMPUTER_REVIEW_REQUESTED": {
+          if (
+            nextState.status === "finished" ||
+            nextState.status === "error" ||
+            nextState.status === "cancelled"
+          ) {
+            break;
+          }
+          const reviewId = action.event.computerReviewId ?? action.event.toolCallId ?? "computer-review";
+          nextState.computerReviews = upsertComputerReview(nextState.computerReviews, {
+            id: reviewId,
+            runId: action.event.runId ?? nextState.runId,
+            reviewId,
+            actionId: action.event.computerActionId,
+            actionDigest: action.event.computerActionDigest,
+            targetSummary: action.event.computerTargetSummary,
+            effectSummary: action.event.computerEffectSummary,
+            risk: action.event.computerRisk,
+            sessionId: action.event.computerSessionId,
+            observationId: action.event.computerObservationId,
+            evidenceRefs: action.event.computerEvidenceRefs,
+          });
+          records = upsertStep(records, `computer-review:${reviewId}`, {
+            title: "等待计算机操作确认",
+            description: action.event.computerTargetSummary || "Agent 请求执行计算机操作",
+            status: "active",
+            tag: "computer-review",
+          });
+          break;
+        }
+        case "AWAKEN_COMPUTER_REVIEW_RESOLVED": {
+          const reviewId = action.event.computerReviewId ?? action.event.toolCallId ?? "computer-review";
+          nextState.computerReviews = removeComputerReview(nextState.computerReviews, reviewId);
+          records = upsertStep(records, `computer-review:${reviewId}`, {
+            title: "计算机操作已确认",
+            description: `${action.event.computerDecision ?? "resolved"}${action.event.computerActor ? ` by ${action.event.computerActor}` : ""}`,
+            status: "done",
+            tag: "computer-review",
+          });
+          break;
+        }
+        case "AWAKEN_COMPUTER_SESSION_CHANGED": {
+          const sessionState = action.event.computerSessionState ?? "ready";
+          nextState.computerSession =
+            sessionState === "closed"
+              ? undefined
+              : {
+                  runId: action.event.runId ?? nextState.runId,
+                  sessionId: action.event.computerSessionId,
+                  state: sessionState,
+                };
+          break;
+        }
+        case "AWAKEN_COMPUTER_VERIFICATION_COMPLETED": {
+          const actionId = action.event.computerActionId ?? "computer-action";
+          records = upsertStep(records, `computer-verification:${actionId}`, {
+            title: "计算机操作结果验证",
+            description: action.event.computerVerificationStatus ?? "inconclusive",
+            status: "done",
+            tag: "computer-verification",
+          });
+          break;
+        }
+        case "AWAKEN_COMPUTER_HANDOFF_STARTED": {
+          const handoffId = action.event.computerSessionId ?? action.event.runId ?? "computer-handoff";
+          nextState.computerHandoffs = upsertComputerHandoff(nextState.computerHandoffs, {
+            id: handoffId,
+            runId: action.event.runId ?? nextState.runId,
+            sessionId: action.event.computerSessionId,
+            active: true,
+          });
+          nextState.computerSession = {
+            runId: action.event.runId ?? nextState.runId,
+            sessionId: action.event.computerSessionId,
+            state: "taken_over",
+          };
+          records = upsertStep(records, `computer-handoff:${handoffId}`, {
+            title: "用户已接管计算机控制",
+            description: "你可以直接操作系统；交还后 Agent 继续",
+            status: "active",
+            tag: "computer-handoff",
+          });
+          break;
+        }
+        case "AWAKEN_COMPUTER_HANDOFF_ENDED": {
+          const handoffId = action.event.computerSessionId ?? action.event.runId ?? "computer-handoff";
+          nextState.computerHandoffs = upsertComputerHandoff(nextState.computerHandoffs, {
+            id: handoffId,
+            runId: action.event.runId ?? nextState.runId,
+            sessionId: action.event.computerSessionId,
+            active: false,
+          });
+          nextState.computerSession = {
+            runId: action.event.runId ?? nextState.runId,
+            sessionId: action.event.computerSessionId,
+            state: "ready",
+          };
+          records = upsertStep(records, `computer-handoff:${handoffId}`, {
+            title: "计算机控制已交还 Agent",
+            description: "Agent 恢复执行",
+            status: "done",
+            tag: "computer-handoff",
+          });
+          break;
+        }
         case "AWAKEN_ARTIFACT_CREATED":
         case "AWAKEN_ARTIFACT_UPDATED": {
           nextState.artifacts = upsertArtifact(
@@ -2648,6 +2841,8 @@ export function reduceRuntimeState(
             nextState.timelineStatus = "done";
             nextState.userQuestions = [];
             nextState.externalInteractions = [];
+            nextState.computerReviews = [];
+            nextState.computerHandoffs = [];
             records = upsertStep(records, "run-cancelled", {
               title: "Run cancelled",
               description: action.event.message || "Run was cancelled by user",
@@ -2674,6 +2869,8 @@ export function reduceRuntimeState(
             nextState.errorMessage = errorMessage;
             nextState.userQuestions = [];
             nextState.externalInteractions = [];
+            nextState.computerReviews = [];
+            nextState.computerHandoffs = [];
             records = upsertStep(records, "run-error", {
               title: "Run failed",
               description: errorDescription,

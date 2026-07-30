@@ -314,6 +314,9 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 			if entry.Runtime == nil || !tool.IsToolExposed(entry.Definition.Name, rb.toolExposurePolicy()) {
 				continue
 			}
+			if isComputerToolDefinition(entry.Definition) && entry.Readiness.Readiness != tool.ProviderReady {
+				continue
+			}
 			definitions = append(definitions, tool.ToolSchema{
 				Type: "function",
 				Function: tool.ToolFunctionSchema{
@@ -330,6 +333,12 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 
 	for _, t := range tools {
 		definition := requestToolDefinition(t)
+		if isComputerToolDefinition(definition) {
+			environment := rb.config.ExecutionEnvironmentSnapshot
+			if environment == nil || !environment.ComputerEnabled {
+				continue
+			}
+		}
 		definitions = append(definitions, tool.ToolSchema{
 			Type: "function",
 			Function: tool.ToolFunctionSchema{
@@ -340,6 +349,15 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 		})
 	}
 	return definitions
+}
+
+func isComputerToolDefinition(definition tool.ToolDefinition) bool {
+	switch definition.Annotations.CapabilityClass {
+	case tool.CapabilityClassComputerObserve, tool.CapabilityClassComputerAct, tool.CapabilityClassComputerVerify:
+		return true
+	default:
+		return false
+	}
 }
 
 type contextWindowToolDescriptionProvider interface {

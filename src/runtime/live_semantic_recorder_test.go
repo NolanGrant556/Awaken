@@ -133,4 +133,32 @@ func TestLiveSemanticRecorderFlushFailureReplacesUnconfirmedTerminal(t *testing.
 	}
 }
 
+func TestLiveSemanticRecorderAppendFlushedPublishesOnlyAfterFlush(t *testing.T) {
+	session := NewSession("run_computer", "thread_computer", "input", nil, nil, nil)
+	base := &flushRecoveryRecorder{failNext: true}
+	recorder := newLiveSemanticRecorder(base, session)
+	record := agentcore.NewSemanticRecord(
+		agentcore.SemanticKindComputerReviewRequested,
+		"thread_computer",
+		"run_computer",
+		"",
+		"",
+		"",
+		map[string]any{"review_id": "review-1"},
+	)
+	if _, err := recorder.AppendFlushed(context.Background(), record); err == nil {
+		t.Fatal("expected injected flush failure")
+	}
+	if events, _ := session.StreamSnapshot(); len(events) != 0 {
+		t.Fatalf("unflushed Computer review became visible: %+v", events)
+	}
+	if _, err := recorder.AppendFlushed(context.Background(), record); err != nil {
+		t.Fatalf("append flushed review: %v", err)
+	}
+	events, _ := session.StreamSnapshot()
+	if len(events) != 1 || events[0].SemanticRecord.Kind != agentcore.SemanticKindComputerReviewRequested {
+		t.Fatalf("expected one durable Computer review event, got %+v", events)
+	}
+}
+
 var _ agentcore.AssignedSemanticRecorder = (*flushRecoveryRecorder)(nil)

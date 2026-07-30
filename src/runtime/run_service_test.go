@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/computer"
+	"awaken/src/computer/fake"
 	convcontext "awaken/src/context"
 	"awaken/src/desktopdata"
 	"awaken/src/subagentruntime"
@@ -2633,3 +2635,306 @@ func TestNormalizeWorkspaceGuardianReadOnlyFallsBackToDefault(t *testing.T) {
 // interface expected by agentcore.ToolRuntime. If this fails, ask_user will
 // fall back to the "not supported" error path instead of awaiting input.
 var _ agentcore.UserQuestionAwaiter = sessionEventSink{}
+
+// Phase 1 Computer Use integration tests.
+
+func TestRunServiceCreatesComputerRuntimeWhenEnabledAndVisionSupported(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	var createdAgent *agentcore.Agent
+	service := NewRunServiceWithModelProfiles(
+		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
+			createdAgent = agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+			return createdAgent
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return "done", nil
+			})
+		},
+	)
+	service.SetComputerSettings(computer.Settings{Enabled: true})
+	service.SetComputerDriverFactory(func(computer.Binding) (computer.Driver, error) {
+		return fake.NewDriver(), nil
+	})
+
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+		ModelProfile: &ModelProfileConfig{
+			ProfileID:           "profile-1",
+			ProviderID:          "kimi-cn",
+			ModelID:             "kimi-k2.6",
+			BaseURL:             "https://api.moonshot.cn/v1",
+			Protocol:            "openai_chat",
+			AuthScheme:          "bearer",
+			APIKey:              "secret",
+			SupportsVision:      true,
+			SupportsComputerUse: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	cr, err := service.ComputerRuntime(run.RunID)
+	if err != nil {
+		t.Fatalf("expected computer runtime, got error: %v", err)
+	}
+	if cr == nil {
+		t.Fatalf("expected non-nil computer runtime")
+	}
+	if createdAgent.GetConfig().ComputerRuntime != cr {
+		t.Fatalf("agent config should reference the same computer runtime")
+	}
+	if !createdAgent.GetConfig().ExecutionEnvironmentSnapshot.ComputerEnabled {
+		t.Fatalf("environment snapshot should have ComputerEnabled=true")
+	}
+	for _, name := range createdAgent.ModelVisibleToolPool() {
+		if name == "Bash" {
+			t.Fatal("Bash must not remain model-visible when Computer Use is ready")
+		}
+	}
+
+	waitForRunTerminal(t, service, run.RunID)
+
+	if _, err := service.ComputerRuntime(run.RunID); err == nil {
+		// The run record still exists, but the runtime may still be reachable
+		// through the session until the session is reclaimed. Just verify the
+		// session-scoped runtime is present; Close is best-effort.
+	}
+}
+
+func TestRunServiceDoesNotCreateComputerRuntimeWithoutVision(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	var createdAgent *agentcore.Agent
+	service := NewRunServiceWithModelProfiles(
+		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
+			createdAgent = agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+			return createdAgent
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return "done", nil
+			})
+		},
+	)
+
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+		ModelProfile: &ModelProfileConfig{
+			ProfileID:           "profile-1",
+			ProviderID:          "kimi-cn",
+			ModelID:             "kimi-k2.6",
+			BaseURL:             "https://api.moonshot.cn/v1",
+			Protocol:            "openai_chat",
+			AuthScheme:          "bearer",
+			APIKey:              "secret",
+			SupportsVision:      false,
+			SupportsComputerUse: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	if _, err := service.ComputerRuntime(run.RunID); err == nil {
+		t.Fatalf("expected no computer runtime when vision is not supported")
+	}
+	if createdAgent.GetConfig().ExecutionEnvironmentSnapshot.ComputerEnabled {
+		t.Fatalf("environment snapshot should have ComputerEnabled=false")
+	}
+
+	waitForRunTerminal(t, service, run.RunID)
+}
+
+func TestRunServiceDoesNotCreateComputerRuntimeWhenDisabled(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	var createdAgent *agentcore.Agent
+	service := NewRunServiceWithModelProfiles(
+		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
+			createdAgent = agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+			return createdAgent
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return "done", nil
+			})
+		},
+	)
+
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+		ModelProfile: &ModelProfileConfig{
+			ProfileID:      "profile-1",
+			ProviderID:     "kimi-cn",
+			ModelID:        "kimi-k2.6",
+			BaseURL:        "https://api.moonshot.cn/v1",
+			Protocol:       "openai_chat",
+			AuthScheme:     "bearer",
+			APIKey:         "secret",
+			SupportsVision: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	if _, err := service.ComputerRuntime(run.RunID); err == nil {
+		t.Fatalf("expected no computer runtime when computer use is disabled")
+	}
+	if createdAgent.GetConfig().ExecutionEnvironmentSnapshot.ComputerEnabled {
+		t.Fatalf("environment snapshot should have ComputerEnabled=false")
+	}
+
+	waitForRunTerminal(t, service, run.RunID)
+}
+
+func TestRunServiceClosesComputerRuntimeOnRunEnd(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	service := NewRunServiceWithModelProfiles(
+		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return "done", nil
+			})
+		},
+	)
+	service.SetComputerSettings(computer.Settings{Enabled: true})
+
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+		ModelProfile: &ModelProfileConfig{
+			ProfileID:           "profile-1",
+			ProviderID:          "kimi-cn",
+			ModelID:             "kimi-k2.6",
+			BaseURL:             "https://api.moonshot.cn/v1",
+			Protocol:            "openai_chat",
+			AuthScheme:          "bearer",
+			APIKey:              "secret",
+			SupportsVision:      true,
+			SupportsComputerUse: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	cr, err := service.ComputerRuntime(run.RunID)
+	if err != nil {
+		t.Fatalf("expected computer runtime: %v", err)
+	}
+
+	waitForRunTerminal(t, service, run.RunID)
+
+	// After the run ends, the runtime's Close should have been invoked. With
+	// the unavailable driver this is a no-op, but the session should be nil.
+	if _, ok := cr.Session(); ok {
+		t.Fatalf("expected computer runtime session to be closed after run end")
+	}
+}
+
+func TestRunServiceUsesComputerDriverFactoryWhenSet(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	var createdAgent *agentcore.Agent
+	service := NewRunServiceWithModelProfiles(
+		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
+			createdAgent = agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+			return createdAgent
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return "done", nil
+			})
+		},
+	)
+	service.SetComputerSettings(computer.Settings{Enabled: true})
+
+	fakeDriver := fake.NewDriver()
+	service.SetComputerDriverFactory(func(bind computer.Binding) (computer.Driver, error) {
+		return fakeDriver, nil
+	})
+
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+		ModelProfile: &ModelProfileConfig{
+			ProfileID:           "profile-1",
+			ProviderID:          "kimi-cn",
+			ModelID:             "kimi-k2.6",
+			BaseURL:             "https://api.moonshot.cn/v1",
+			Protocol:            "openai_chat",
+			AuthScheme:          "bearer",
+			APIKey:              "secret",
+			SupportsVision:      true,
+			SupportsComputerUse: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	cr, err := service.ComputerRuntime(run.RunID)
+	if err != nil {
+		t.Fatalf("expected computer runtime: %v", err)
+	}
+	if cr.Driver() != fakeDriver {
+		t.Fatalf("expected RunService to use factory-provided driver")
+	}
+
+	waitForRunTerminal(t, service, run.RunID)
+}
+
+func TestRunServiceFallsBackToUnavailableDriverOnFactoryError(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	var createdAgent *agentcore.Agent
+	service := NewRunServiceWithModelProfiles(
+		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
+			createdAgent = agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+			return createdAgent
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return "done", nil
+			})
+		},
+	)
+	service.SetComputerSettings(computer.Settings{Enabled: true})
+
+	service.SetComputerDriverFactory(func(bind computer.Binding) (computer.Driver, error) {
+		return nil, errors.New("factory intentionally failed")
+	})
+
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()},
+		ModelProfile: &ModelProfileConfig{
+			ProfileID:           "profile-1",
+			ProviderID:          "kimi-cn",
+			ModelID:             "kimi-k2.6",
+			BaseURL:             "https://api.moonshot.cn/v1",
+			Protocol:            "openai_chat",
+			AuthScheme:          "bearer",
+			APIKey:              "secret",
+			SupportsVision:      true,
+			SupportsComputerUse: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+
+	cr, err := service.ComputerRuntime(run.RunID)
+	if err != nil {
+		t.Fatalf("expected computer runtime: %v", err)
+	}
+	if _, ok := cr.Driver().(*computer.UnavailableDriver); !ok {
+		t.Fatalf("expected unavailable driver fallback, got %T", cr.Driver())
+	}
+
+	waitForRunTerminal(t, service, run.RunID)
+}

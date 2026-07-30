@@ -48,6 +48,7 @@ type ResolvedProfile struct {
 	SupportsNativePDF     bool
 	SupportsVideo         bool
 	SupportsTools         string
+	SupportsComputerUse   bool
 	ReasoningEffort       string
 	ReasoningEffortLevels []string `json:"-"`
 	CapabilityModelID     string   `json:"-"`
@@ -153,6 +154,7 @@ type storedProfileAdvanced struct {
 	SupportsNativePDF      *bool    `json:"supportsNativePDF"`
 	SupportsVideo          *bool    `json:"supportsVideo"`
 	SupportsTools          string   `json:"supportsTools"`
+	SupportsComputerUse    *bool    `json:"supportsComputerUse"`
 	DefaultReasoningEffort string   `json:"defaultReasoningEffort"`
 }
 
@@ -247,15 +249,16 @@ type capabilityCacheScope struct {
 }
 
 type cachedModelCapability struct {
-	ContextWindow      *int                       `json:"context_window"`
-	MaxOutputTokens    *int                       `json:"max_output_tokens"`
-	DefaultMaxTokens   *int                       `json:"default_max_tokens"`
-	DefaultTemperature *float64                   `json:"default_temperature"`
-	SupportsVision     *bool                      `json:"supports_vision"`
-	SupportsNativePDF  *bool                      `json:"supports_native_pdf"`
-	SupportsVideo      *bool                      `json:"supports_video"`
-	SupportsTools      *string                    `json:"supports_tools"`
-	ReasoningEffort    *ReasoningEffortCapability `json:"reasoning_effort"`
+	ContextWindow       *int                       `json:"context_window"`
+	MaxOutputTokens     *int                       `json:"max_output_tokens"`
+	DefaultMaxTokens    *int                       `json:"default_max_tokens"`
+	DefaultTemperature  *float64                   `json:"default_temperature"`
+	SupportsVision      *bool                      `json:"supports_vision"`
+	SupportsNativePDF   *bool                      `json:"supports_native_pdf"`
+	SupportsVideo       *bool                      `json:"supports_video"`
+	SupportsTools       *string                    `json:"supports_tools"`
+	SupportsComputerUse *bool                      `json:"supports_computer_use"`
+	ReasoningEffort     *ReasoningEffortCapability `json:"reasoning_effort"`
 }
 
 func (s *UserStore) loadReady() ([]ResolvedProfile, error) {
@@ -409,6 +412,7 @@ func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cac
 	supportsNativePDF := false
 	supportsVideo := false
 	supportsTools := "ready"
+	supportsComputerUse := false
 	reasoningEffort := ""
 	var reasoningEffortLevels []string
 	if hasCapability {
@@ -424,6 +428,7 @@ func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cac
 		supportsVision = capability.SupportsVision
 		supportsNativePDF = capability.SupportsNativePDF
 		supportsVideo = capability.SupportsVideo
+		supportsComputerUse = capability.SupportsComputerUse
 		if capability.ReasoningEffort != nil {
 			reasoningEffort = capability.ReasoningEffort.DefaultLevel
 			reasoningEffortLevels = append([]string(nil), capability.ReasoningEffort.Levels...)
@@ -456,6 +461,9 @@ func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cac
 	if hasCapability && capability.ReasoningEffort != nil && slices.Contains(capability.ReasoningEffort.Levels, stored.Advanced.DefaultReasoningEffort) {
 		reasoningEffort = stored.Advanced.DefaultReasoningEffort
 	}
+	if stored.Advanced.SupportsComputerUse != nil {
+		supportsComputerUse = *stored.Advanced.SupportsComputerUse
+	}
 	revision := stored.CredentialRevision
 	if revision < 1 {
 		revision = 1
@@ -479,6 +487,7 @@ func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cac
 		SupportsNativePDF:     supportsNativePDF,
 		SupportsVideo:         supportsVideo,
 		SupportsTools:         supportsTools,
+		SupportsComputerUse:   supportsComputerUse,
 		ReasoningEffort:       reasoningEffort,
 		ReasoningEffortLevels: reasoningEffortLevels,
 		CapabilityModelID:     capabilityModelID,
@@ -524,6 +533,9 @@ func mergeCachedCapability(base ModelCapability, cached *cachedModelCapability) 
 	}
 	if cached.SupportsTools != nil {
 		base.SupportsTools = *cached.SupportsTools
+	}
+	if cached.SupportsComputerUse != nil {
+		base.SupportsComputerUse = *cached.SupportsComputerUse
 	}
 	if cached.ReasoningEffort != nil {
 		base.ReasoningEffort = &ReasoningEffortCapability{

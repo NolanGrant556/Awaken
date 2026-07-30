@@ -15,7 +15,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 - Desktop 负责启动、监督和关闭本地 `awaken-core`，用户不需要单独运行 Core；
 - `Awaken Design System` 是纯 UI 组件包和 Gallery，不拥有产品状态、后端策略或运行时协议。
 
-当前没有 Awaken 原生的操作系统级 Computer Use。仓库保留了一份已确认但尚未实现的设计契约；它不是当前产品能力。
+当前开发构建已接通 Awaken 原生 Computer Use：设置开启且 CUA Host、屏幕录制、辅助功能权限均 ready 时，视觉模型可通过受 session、policy、review、fence 与审计约束的工具观察和操作桌面。正式发布仍以 Computer 域的打包签名与真实 Desktop 准入结果为准。
 
 ## 核心能力地图
 
@@ -31,7 +31,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | 技能 | 多来源 Universal Skill 发现、按需正文/资源、composer 当前选择的 run-scoped 确定性绑定、统一 catalog、inline/真实 child fork、MCP 动态来源与恢复，以及随 App 分发的 word/excel/ppt/pdf/code-search/PDF_Max 内置 Skill 包 | [08 技能](docs/08_技能/索引.md) |
 | ACP Client/Agent | ACP Client（Phase 0–4）：runner 配置、probe 与 Desktop 设置页；`delegate_external_agent` 工具、会话生命周期与权限处理已在 Core 实现；Workbench 嵌套进度与 permission gate UI 已实现。ACP Agent（Phase 5）：`cmd/awaken-acp` 与 `src/acp/agentbridge` 已实现 stdio transport、launcher lease、authenticated control routes、Core 事件投影、模型 profile selector/default fallback 与 cancel/close；Desktop-owned 与 core-only 的真实 stdio prompt 已通过，第三方 client、headless 多进程验收与跨 Core 重启恢复仍是已知缺口 | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
 | AG-UI 与 A2UI | Awaken 自有事件到 AG-UI-compatible wire 的映射；A2UI 仅作参考 | [09 AG-UI 与 A2UI 协议](docs/09_AGUI与A2UI协议/索引.md) |
-| Computer Use | 明确当前不支持的边界，以及实现时必须遵守的目标设计合同 | [10 计算机操作能力](docs/10_计算机操作能力/索引.md) |
+| Computer Use | CUA Host、观察/动作/验证工具、复核、暂停/接管/交还、媒体策略与发布准入 | [10 计算机操作能力](docs/10_计算机操作能力/索引.md) |
 | 长期记忆与 Dream | Markdown Memory、主模型相关性召回、受控工具、无正文事件、Settings 查看/删除、手动/空闲期 Dream、Workbench 紧凑回执与 Dream 重启恢复 | [11 长期记忆](docs/11_长期记忆/索引.md) |
 | 定时任务 | 首版已支持：左侧一级入口、循环/日程任务、10 个内置模板、创建/编辑/启停/删除/立即执行/取消、专属线程、执行历史、Core 内调度器与 misfire 恢复、Agent 与固定提醒两类任务；Desktop 完全退出后不运行 | [12 定时任务](docs/12_定时任务/索引.md) |
 
@@ -150,7 +150,7 @@ Gallery 使用 mock state，只能证明组件渲染，不能替代 Awaken Deskt
 - `src/agentcore` 不依赖 `src/protocol/agui`；内部语义与外部 wire 由协议映射层隔离。
 - Renderer 不拥有后端权限、路径安全、凭据或持久化策略；这些决策必须留在相应 Main/Core owner。
 - Gallery、旧截图、旧验收摘要和绕过 Desktop 的 provider smoke 不能作为真实产品通过证据。
-- `Bash` 以 Desktop 向 `awaken-core` 注入的当前登录用户身份和 login 环境直接执行，不经过 restricted/staging broker，也不声称 workspace 隔离、全部副作用可观测或任意删除可恢复；TaskScope、Trash 与 staging 只属于实际选用的 typed 工具及 `dependency_install`、`git_remote`、MCP Artifact bridge。消息发送不经过 Awaken 人工审核门。
+- `Bash` 以 Desktop 向 `awaken-core` 注入的当前登录用户身份和 login 环境直接执行，不经过 restricted/staging broker，也不声称 workspace 隔离、全部副作用可观测或任意删除可恢复；TaskScope、Trash 与 staging 只属于实际选用的 typed 工具及 `dependency_install`、`git_remote`、MCP Artifact bridge。Computer-ready run 会从模型工具池移除 `Bash`，避免绕过 Computer 的输入、复核与审计边界。消息发送不经过 Awaken 人工审核门。
 - 不得把 A2UI、原生 OS Computer Use、MCP WebSocket、完整 OAuth/401 自动恢复、全平台强制 Shell overlay 等尚未实现或不完整能力写成当前支持。
 - Memory/Dream 的已实现范围、child recall 后置约束和真实 Desktop/跨平台验收缺口只以 [11 长期记忆](docs/11_长期记忆/索引.md) 为准。
 - 不提交 secret、userData、依赖目录或生成产物；不覆盖或清理与当前任务无关的本地改动。

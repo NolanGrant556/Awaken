@@ -14,12 +14,16 @@ import { AwakenContextButton } from "../AwakenContextButton";
 import { AwakenDropdown } from "../AwakenDropdown";
 import { AwakenMemoryLightFlow } from "../AwakenMemoryLightFlow";
 import { AwakenSendButton } from "../AwakenSendButton";
+import { AwakenTooltip } from "../AwakenTooltip";
 import {
   AwakenComposerInlineInput,
   composerInlinePlainTextForRange,
   type ComposerInlineInputElement,
   type ComposerInlineStructuredValue,
 } from "./AwakenComposerInlineInput";
+
+const CONTEXT_RING_RADIUS = 7;
+const CONTEXT_RING_CIRCUMFERENCE = 2 * Math.PI * CONTEXT_RING_RADIUS;
 
 export { composerInlinePlainTextForRange };
 const COMPOSER_EFFORT_TRACK_INSET_PX = 14;
@@ -259,6 +263,92 @@ export function shouldActivateComposerMetaItemKey(key: string): boolean {
   return key === " " || key === "Spacebar";
 }
 
+function ComposerContextUsageMeter({
+  item,
+  progressPercent,
+  ring,
+}: {
+  item: ComposerBarMetaItem;
+  progressPercent: number;
+  ring: ReactNode;
+}) {
+  const [suppressTooltip, setSuppressTooltip] = useState(false);
+  const panelWasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (item.ariaExpanded) {
+      panelWasOpenRef.current = true;
+      setSuppressTooltip(true);
+      return;
+    }
+    if (panelWasOpenRef.current) {
+      setSuppressTooltip(true);
+    }
+  }, [item.ariaExpanded]);
+
+  const accessibleName = item.value ? `${item.label}，${item.value}` : item.label;
+  const tooltipLabel = (
+    <span className="composer-bar-context-tooltip">
+      <span className="composer-bar-context-tooltip-summary">{progressPercent}% 已使用</span>
+      {item.value ? (
+        <span className="composer-bar-context-tooltip-detail">{item.value}</span>
+      ) : null}
+    </span>
+  );
+
+  return (
+    <span
+      className="composer-bar-meta-meter-anchor"
+      onPointerLeave={() => {
+        if (!item.ariaExpanded) {
+          panelWasOpenRef.current = false;
+          setSuppressTooltip(false);
+        }
+      }}
+    >
+      <AwakenTooltip
+        label={tooltipLabel}
+        openOnFocus={false}
+        disabled={Boolean(item.disabled || item.ariaExpanded || suppressTooltip)}
+      >
+        <button
+          ref={item.buttonRef}
+          type="button"
+          className="composer-bar-meta-item composer-bar-meta-item-meter composer-bar-meta-item-button"
+          aria-label={accessibleName}
+          aria-haspopup={item.ariaHaspopup}
+          aria-expanded={item.ariaExpanded}
+          aria-controls={item.ariaControls}
+          disabled={item.disabled}
+          onClick={() => {
+            setSuppressTooltip(true);
+            item.onClick?.();
+          }}
+          onKeyDown={(event) => {
+            if (shouldActivateComposerMetaItemKey(event.key)) {
+              event.preventDefault();
+              setSuppressTooltip(true);
+              item.onClick?.();
+            }
+          }}
+        >
+          <span
+            className="composer-bar-context-meter"
+            role="meter"
+            aria-label={item.label}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progressPercent}
+            aria-valuetext={item.value ?? `${progressPercent}%`}
+          >
+            {ring}
+          </span>
+        </button>
+      </AwakenTooltip>
+    </span>
+  );
+}
+
 export function AwakenComposerBar({
   value,
   onChange,
@@ -395,42 +485,71 @@ export function AwakenComposerBar({
     return () => window.removeEventListener("resize", updateSlashPaletteStyle);
   }, [inputSelection, slashPalette?.open, slashActions.length, value, tokens.length]);
 
+  function renderContextUsageRing(progressPercent: number) {
+    const dashOffset =
+      CONTEXT_RING_CIRCUMFERENCE -
+      (CONTEXT_RING_CIRCUMFERENCE * progressPercent) / 100;
+    return (
+      <svg
+        className="composer-bar-context-ring"
+        viewBox="0 0 20 20"
+        width={18}
+        height={18}
+        aria-hidden="true"
+        focusable="false"
+      >
+        <circle
+          className="composer-bar-context-ring-track"
+          cx="10"
+          cy="10"
+          r={CONTEXT_RING_RADIUS}
+          fill="none"
+          strokeWidth="2.25"
+        />
+        <circle
+          className="composer-bar-context-ring-fill"
+          cx="10"
+          cy="10"
+          r={CONTEXT_RING_RADIUS}
+          fill="none"
+          strokeWidth="2.25"
+          strokeDasharray={CONTEXT_RING_CIRCUMFERENCE}
+          strokeDashoffset={dashOffset}
+          strokeLinecap="round"
+          transform="rotate(-90 10 10)"
+        />
+      </svg>
+    );
+  }
+
   function renderMetaItem(item: ComposerBarMetaItem) {
     const hasProgress = typeof item.progress === "number" && Number.isFinite(item.progress);
     const progressPercent = hasProgress
       ? Math.max(0, Math.min(100, Math.round((item.progress ?? 0) * 100)))
       : undefined;
+    const isContextMeter = hasProgress && progressPercent !== undefined;
+
+    if (isContextMeter) {
+      return (
+        <ComposerContextUsageMeter
+          key={item.id}
+          item={item}
+          progressPercent={progressPercent}
+          ring={renderContextUsageRing(progressPercent)}
+        />
+      );
+    }
 
     const content = (
       <>
         {item.icon ? <span className="composer-bar-meta-icon">{item.icon}</span> : null}
         <span className="composer-bar-meta-label">{item.label}</span>
-        {hasProgress ? (
-          <span
-            className="composer-bar-context-meter"
-            role="meter"
-            aria-label={item.label}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={progressPercent}
-            aria-valuetext={item.value}
-          >
-            <span
-              className="composer-bar-context-meter-fill"
-              style={
-                {
-                  "--composer-bar-context-progress": `${progressPercent}%`,
-                } as CSSProperties
-              }
-            />
-          </span>
-        ) : null}
         {item.value ? <span className="composer-bar-meta-value">{item.value}</span> : null}
       </>
     );
     const className = `composer-bar-meta-item${
-      hasProgress ? " composer-bar-meta-item-meter" : ""
-    }${item.onClick ? " composer-bar-meta-item-button" : ""}`;
+      item.onClick ? " composer-bar-meta-item-button" : ""
+    }`;
 
     if (item.onClick) {
       return (

@@ -15,26 +15,28 @@
 
 .aw-context-usage-panel__header {
   display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--aw-space-5);
-  padding: var(--aw-space-6) var(--aw-space-7) var(--aw-space-4);
+  padding: var(--aw-space-5) var(--aw-space-6) var(--aw-space-3);
 }
 
 .aw-context-usage-panel__title {
   margin: 0;
+  min-width: 0;
   color: var(--aw-text-primary);
-  font-size: var(--aw-font-size-base);
-  font-weight: var(--aw-font-weight-bold);
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-semibold);
   line-height: var(--aw-line-height-base);
 }
 
 .aw-context-usage-panel__close {
   display: inline-grid;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
   place-items: center;
+  margin-right: -2px;
   padding: 0;
   border: 1px solid transparent;
   border-radius: var(--aw-radius-sm);
@@ -60,7 +62,7 @@
 
 .aw-context-usage-panel__scroll {
   min-height: 0;
-  padding: 0 var(--aw-space-7) var(--aw-space-7);
+  padding: 0 var(--aw-space-6) var(--aw-space-6);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -69,33 +71,41 @@
 
 .aw-context-usage-panel__summary {
   display: grid;
-  gap: var(--aw-space-4);
+  gap: var(--aw-space-3);
   padding-bottom: var(--aw-space-5);
 }
 
-.aw-context-usage-panel__summary-copy {
+.aw-context-usage-panel__summary-stats {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--aw-space-5);
+  min-width: 0;
 }
 
-.aw-context-usage-panel__summary-copy .aw-context-usage-panel__title {
-  font-size: var(--aw-font-size-md);
-  line-height: var(--aw-line-height-md);
+.aw-context-usage-panel__summary-percent {
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: var(--aw-line-height-base);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.aw-context-usage-panel__summary-copy span,
+.aw-context-usage-panel__summary-tokens,
 .aw-context-usage-panel__empty {
+  min-width: 0;
   color: var(--aw-text-secondary);
   font-size: var(--aw-font-size-sm);
   line-height: var(--aw-line-height-base);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .aw-context-usage-panel__meter {
   display: flex;
   width: 100%;
-  height: 8px;
+  height: 6px;
   overflow: hidden;
   border-radius: var(--aw-radius-pill);
   background: var(--aw-surface-muted-fill);

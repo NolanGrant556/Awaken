@@ -2379,9 +2379,23 @@ button.tool-trace-line:focus-visible {
   color: var(--aw-text-primary);
 }
 
-.composer-bar-meta-item-meter {
+.composer-bar-meta-meter-anchor {
+  display: inline-flex;
   margin-left: auto;
-  gap: 8px;
+  min-width: 0;
+}
+
+.composer-bar-meta-item-meter {
+  gap: 0;
+  padding: 2px;
+  border-radius: var(--aw-radius-control);
+  color: var(--aw-text-tertiary);
+}
+
+.composer-bar-meta-item-meter:hover,
+.composer-bar-meta-item-meter:focus-visible {
+  color: var(--aw-text-primary);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 12%, transparent);
 }
 
 .composer-bar-meta-icon {
@@ -2398,22 +2412,43 @@ button.tool-trace-line:focus-visible {
   position: relative;
   display: inline-flex;
   flex: 0 0 auto;
-  width: 92px;
-  height: 8px;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent);
-  background: color-mix(in srgb, var(--aw-text-tertiary) 12%, transparent);
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
 }
 
-.composer-bar-context-meter-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: var(--composer-bar-context-progress, 0%);
-  background: repeating-linear-gradient(
-    -62deg,
-    color-mix(in srgb, var(--aw-text-primary) 88%, transparent) 0 4px,
-    color-mix(in srgb, var(--aw-text-primary) 34%, transparent) 4px 8px
-  );
+.composer-bar-context-ring {
+  display: block;
+  overflow: visible;
+}
+
+.composer-bar-context-ring-track {
+  stroke: color-mix(in srgb, var(--aw-text-tertiary) 42%, transparent);
+}
+
+.composer-bar-context-ring-fill {
+  stroke: currentColor;
+  transition: stroke-dashoffset 180ms ease;
+}
+
+.composer-bar-context-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+  text-align: center;
+  font-weight: var(--aw-font-weight-regular);
+}
+
+.composer-bar-context-tooltip-summary {
+  color: var(--aw-text-primary);
+  font-weight: var(--aw-font-weight-semibold);
+}
+
+.composer-bar-context-tooltip-detail {
+  color: var(--aw-text-secondary);
+  font-weight: var(--aw-font-weight-regular);
 }
 
 .composer-bar-context,

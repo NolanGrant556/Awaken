@@ -20,6 +20,8 @@ export type AwakenTooltipProps = {
   children: ReactNode;
   placement?: Placement;
   disabled?: boolean;
+  /** When false, only pointer hover opens the tip; keyboard focus does not. Default true. */
+  openOnFocus?: boolean;
 };
 
 export function AwakenTooltip({
@@ -27,6 +29,7 @@ export function AwakenTooltip({
   children,
   placement = "top",
   disabled = false,
+  openOnFocus = true,
 }: AwakenTooltipProps) {
   const [open, setOpen] = useState(false);
   const isOpen = open && !disabled;
@@ -40,7 +43,7 @@ export function AwakenTooltip({
   });
 
   const hover = useHover(context, { move: false, enabled: !disabled });
-  const focus = useFocus(context, { enabled: !disabled });
+  const focus = useFocus(context, { enabled: !disabled && openOnFocus });
   const dismiss = useDismiss(context, { escapeKey: true });
   const role = useRole(context, { role: "tooltip" });
   const { getReferenceProps, getFloatingProps } = useInteractions([

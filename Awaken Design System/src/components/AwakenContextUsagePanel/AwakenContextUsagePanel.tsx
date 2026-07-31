@@ -155,6 +155,8 @@ export const AwakenContextUsagePanel = forwardRef<
     ? formatCostLabel(latestModelUsage)
     : undefined;
 
+  const usageSummary = `~${formatContextUsageTokens(estimatedInputTokens)} / ${formatContextUsageTokens(effectiveInputWindowTokens)} Token`;
+
   return (
     <div
       id={id}
@@ -165,6 +167,9 @@ export const AwakenContextUsagePanel = forwardRef<
       aria-labelledby={titleId}
     >
       <header className="aw-context-usage-panel__header">
+        <h2 id={titleId} className="aw-context-usage-panel__title">
+          上下文用量
+        </h2>
         <button
           ref={closeButtonRef}
           type="button"
@@ -181,13 +186,12 @@ export const AwakenContextUsagePanel = forwardRef<
           className="aw-context-usage-panel__summary"
           aria-label="当前上下文用量"
         >
-          <div className="aw-context-usage-panel__summary-copy">
-            <h2 id={titleId} className="aw-context-usage-panel__title">
-              上下文用量
-            </h2>
-            <span>
-              {formatContextUsageTokens(estimatedInputTokens)} /{" "}
-              {formatContextUsageTokens(effectiveInputWindowTokens)} Token
+          <div className="aw-context-usage-panel__summary-stats">
+            <span className="aw-context-usage-panel__summary-percent">
+              {usedPercent}% 已使用
+            </span>
+            <span className="aw-context-usage-panel__summary-tokens">
+              {usageSummary}
             </span>
           </div>
           <div

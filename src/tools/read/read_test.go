@@ -68,6 +68,26 @@ func TestReadNativePDFAndInvalidPages(t *testing.T) {
 	}
 }
 
+func TestReadPDFUnsupportedWithoutNativeOrVision(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "sample.pdf"), []byte("%PDF-1.4\n%%EOF\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := (&Tool{}).ExecuteOutcome(readTestContext(root, tool.ModelCapabilities{}), `{"file_path":"sample.pdf"}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.ErrorCode != "model_pdf_unsupported" || outcome.Status != tool.OutcomeUnsupported {
+		t.Fatalf("unsupported=%+v", outcome)
+	}
+	if !strings.Contains(outcome.ErrorMessage, "switch") || !strings.Contains(outcome.ErrorMessage, "Do not load the pdf Skill") {
+		t.Fatalf("message should stop skill/install workaround: %+v", outcome)
+	}
+	if len(outcome.RecoveryOptions) == 0 || outcome.RecoveryOptions[0] != "ask_user_to_switch_to_pdf_or_vision_model" {
+		t.Fatalf("recovery=%v", outcome.RecoveryOptions)
+	}
+}
+
 func TestReadPDFFallsBackToPopplerImages(t *testing.T) {
 	if _, err := exec.LookPath("pdftoppm"); err != nil {
 		t.Skip("pdftoppm unavailable")

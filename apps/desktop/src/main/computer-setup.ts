@@ -2,12 +2,7 @@ import { execFile } from "node:child_process";
 import { accessSync, constants, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { app, shell, systemPreferences } from "electron";
-
-export type ComputerRuntimeSetupResult = {
-  nodeReady: boolean;
-  cuaHostReady: boolean;
-  message?: string;
-};
+import type { ComputerRuntimeSetupResult } from "../shared/runtime.js";
 
 export type ComputerPermission = "screen_recording" | "accessibility";
 export type ComputerPermissionStatus =
@@ -115,13 +110,13 @@ export async function prepareComputerRuntime(): Promise<ComputerRuntimeSetupResu
     const cuaHostReady = existsSync(hostScriptPath) && existsSync(hostModulesPath);
     if (!nodeReady || !cuaHostReady) {
       return {
-        nodeReady,
-        cuaHostReady,
+        node_ready: nodeReady,
+        cua_host_ready: cuaHostReady,
         message:
-          "打包应用缺少 bundled Node runtime 或 CUA Host，请重新构建或运行 node scripts/ensure-desktop-runtime.mjs。",
+          "打包应用缺少 bundled Node runtime 或 CUA Host，请重新安装完整安装包。",
       };
     }
-    return { nodeReady, cuaHostReady };
+    return { node_ready: nodeReady, cua_host_ready: cuaHostReady };
   }
 
   const nodePath = nodeBinaryPath(root);
@@ -132,7 +127,7 @@ export async function prepareComputerRuntime(): Promise<ComputerRuntimeSetupResu
   let cuaHostReady = existsSync(hostScriptPath) && existsSync(hostModulesPath);
 
   if (nodeReady && cuaHostReady) {
-    return { nodeReady, cuaHostReady };
+    return { node_ready: nodeReady, cua_host_ready: cuaHostReady };
   }
 
   // Prepare Node runtime first using whatever Node is available on this machine.
@@ -146,8 +141,8 @@ export async function prepareComputerRuntime(): Promise<ComputerRuntimeSetupResu
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {
-      nodeReady,
-      cuaHostReady,
+      node_ready: nodeReady,
+      cua_host_ready: cuaHostReady,
       message: `Node runtime 准备失败: ${message}`,
     };
   }
@@ -164,13 +159,13 @@ export async function prepareComputerRuntime(): Promise<ComputerRuntimeSetupResu
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {
-      nodeReady,
-      cuaHostReady,
+      node_ready: nodeReady,
+      cua_host_ready: cuaHostReady,
       message: `CUA Host 准备失败: ${message}`,
     };
   }
 
-  return { nodeReady, cuaHostReady };
+  return { node_ready: nodeReady, cua_host_ready: cuaHostReady };
 }
 
 function normalizeMediaAccessStatus(

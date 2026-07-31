@@ -26,3 +26,21 @@ export function isDesktopSelectAllShortcut(
     isAKey
   );
 }
+
+export function isDesktopZoomShortcut(
+  input: DesktopKeyboardInput,
+): boolean {
+  const isPrimaryModifier = input.meta !== input.control;
+  if (input.type !== "keyDown" || !isPrimaryModifier || input.alt) {
+    return false;
+  }
+
+  const key = input.key.toLowerCase();
+  const code = input.code?.toLowerCase();
+  return (
+    ["+", "=", "-", "_", "0"].includes(key) ||
+    ["equal", "minus", "digit0", "numpadadd", "numpadsubtract", "numpad0"].includes(
+      code ?? "",
+    )
+  );
+}

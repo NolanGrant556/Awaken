@@ -30,6 +30,7 @@ import type { AguiEvent } from "../shared/agui.js";
 import {
   DESKTOP_SELECT_ALL_REQUESTED_CHANNEL,
   isDesktopSelectAllShortcut,
+  isDesktopZoomShortcut,
 } from "../shared/desktop-selection.js";
 import { PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL } from "../shared/project-file-preview-interaction.js";
 import {
@@ -168,6 +169,7 @@ import { listProjectDirectory, resolveProjectEntry } from "./project-files.js";
 import { ProjectFilePreviewManager } from "./project-file-preview-manager.js";
 import { ArtifactMediaManager } from "./artifact-media-manager.js";
 import { ComputerOverlayManager } from "./computer-overlay-manager.js";
+import { enforceMainWindowZoom } from "./window-zoom.js";
 import { MACOS_WINDOW_CHROME_GEOMETRY } from "../shared/window-chrome.js";
 import {
   scheduledTaskNotificationContent,
@@ -1021,7 +1023,24 @@ function createMainWindow(): BrowserWindow {
   });
   mainWindowRef = mainWindow;
 
+  const resetMainWindowZoom = () => {
+    void enforceMainWindowZoom(mainWindow.webContents).catch((error) => {
+      console.warn("Failed to enforce the Awaken main-window zoom baseline", error);
+    });
+  };
+  resetMainWindowZoom();
+  mainWindow.webContents.on("did-finish-load", resetMainWindowZoom);
+  mainWindow.webContents.on("zoom-changed", (event) => {
+    event.preventDefault();
+    resetMainWindowZoom();
+  });
+
   mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (isDesktopZoomShortcut(input)) {
+      event.preventDefault();
+      resetMainWindowZoom();
+      return;
+    }
     if (!isDesktopSelectAllShortcut(input)) {
       return;
     }

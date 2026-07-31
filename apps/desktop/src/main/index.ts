@@ -168,6 +168,7 @@ import { listProjectDirectory, resolveProjectEntry } from "./project-files.js";
 import { ProjectFilePreviewManager } from "./project-file-preview-manager.js";
 import { ArtifactMediaManager } from "./artifact-media-manager.js";
 import { ComputerOverlayManager } from "./computer-overlay-manager.js";
+import { MACOS_WINDOW_CHROME_GEOMETRY } from "../shared/window-chrome.js";
 import {
   scheduledTaskNotificationContent,
   startScheduledTaskEventStream,
@@ -1007,7 +1008,7 @@ function createMainWindow(): BrowserWindow {
     ...(process.platform === "darwin"
       ? {
           titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition: { x: 18, y: 14 },
+          trafficLightPosition: MACOS_WINDOW_CHROME_GEOMETRY.trafficLightPosition,
         }
       : {}),
     webPreferences: {

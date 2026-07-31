@@ -10,6 +10,7 @@ import {
   shouldSubmitComposerInputKey,
   shouldActivateComposerMetaItemKey,
   slashPaletteStyleForAnchor,
+  slashPaletteStyleForCaret,
   slashPreviewStyleForAnchor,
 } from "@awaken/design-system";
 import { renderToString } from "react-dom/server";
@@ -22,6 +23,7 @@ import {
   contextUsagePanelData,
   isUserQuestionSelectionAnswered,
   insertComposerTokenAtOffset,
+  replaceComposerActionTriggerWithToken,
   modelPreferenceChangeForOption,
   modelPreferenceRecoveryKey,
   mediaRevealLabelForPlatform,
@@ -52,6 +54,7 @@ import {
   actionsFromSlashProviders,
   clearComposerActionTriggerFromComposerValue,
   clearSlashTriggerFromComposerValue,
+  composerActionTriggerFromDraft,
   composerActionTriggerFromComposerValue,
   computerUseMentionProvider,
   composerTokenIdForKeyboardDelete,
@@ -64,7 +67,13 @@ import {
   slashTriggerFromComposerValue,
 } from "./composerSlash";
 import { composerRuntimePanelsForStatus } from "./useComposerLifecycle";
+import {
+  composerDraftOwnerKey,
+  threadComposerDraftForOwner,
+  updateThreadComposerDraftField,
+} from "./useThreadComposerDraft";
 import { promptAttachmentViews } from "./composerAttachments";
+import { MACOS_WINDOW_CHROME_GEOMETRY } from "../shared/window-chrome";
 import type { RuntimeSkill } from "../shared/runtime";
 import type { RunNarrativeItem } from "./run-narrative";
 import {
@@ -1220,6 +1229,41 @@ describe("Composer Slash Palette helpers", () => {
     expect(filterSlashActions(actions, "follow-up")[0]?.id).toContain("daily-followup");
   });
 
+  it("opens a slash query at the collapsed logical caret and keeps later text outside it", () => {
+    expect(
+      composerActionTriggerFromDraft({
+        value: "hello /daily later",
+        tokens: [],
+        leadingTexts: {},
+        selection: { anchor: 12, focus: 12 },
+      }),
+    ).toEqual({ marker: "/", query: "daily", start: 6, end: 12 });
+    expect(
+      composerActionTriggerFromDraft({
+        value: "hello/daily later",
+        tokens: [],
+        leadingTexts: {},
+        selection: { anchor: 11, focus: 11 },
+      }),
+    ).toBeNull();
+    expect(
+      composerActionTriggerFromDraft({
+        value: " 后文",
+        tokens: [{ id: "skill:existing", leadingText: "前文 /wo" }],
+        leadingTexts: {},
+        selection: { anchor: 6, focus: 6 },
+      }),
+    ).toEqual({ marker: "/", query: "wo", start: 3, end: 6 });
+    expect(
+      composerActionTriggerFromDraft({
+        value: "hello /daily later",
+        tokens: [],
+        leadingTexts: {},
+        selection: { anchor: 6, focus: 12 },
+      }),
+    ).toBeNull();
+  });
+
   it("clears only the trailing slash trigger and preserves natural text", () => {
     expect(clearSlashTriggerFromComposerValue("/daily")).toBe("");
     expect(clearSlashTriggerFromComposerValue("hello /daily")).toBe("hello ");
@@ -1680,6 +1724,23 @@ describe("AwakenComposerBar layout contract", () => {
   it("limits slash palette height to the space above the composer", () => {
     expect(slashPaletteStyleForAnchor(160, 700)["--composer-bar-slash-max-height"]).toBe("146px");
     expect(slashPaletteStyleForAnchor(520, 700)["--composer-bar-slash-max-height"]).toBe("210px");
+  });
+
+  it("anchors the slash palette beside the caret and clamps it inside the viewport", () => {
+    expect(
+      slashPaletteStyleForCaret(
+        { left: 350, top: 400 },
+        { left: 100, right: 1100, bottom: 600 },
+        { width: 1200, height: 700 },
+      ),
+    ).toMatchObject({ left: "250px", bottom: "205px" });
+    expect(
+      slashPaletteStyleForCaret(
+        { left: 1150, top: 400 },
+        { left: 100, right: 1100, bottom: 600 },
+        { width: 1200, height: 700 },
+      ).left,
+    ).toBe("832px");
   });
 });
 
@@ -2609,6 +2670,30 @@ describe("structured Composer draft reconciliation", () => {
     expect(result.focusOffset).toBe(6);
   });
 
+  it("replaces only the slash query at the caret and preserves its surrounding text", () => {
+    const token = {
+      id: "skill:word:user",
+      type: "skill" as const,
+      label: "word",
+    };
+    const result = replaceComposerActionTriggerWithToken({
+      tokens: [],
+      placements: {},
+      leadingTexts: {},
+      value: "hello /word later",
+      trigger: { start: 6, end: 11 },
+      token,
+    });
+
+    expect(result).toEqual({
+      tokens: [{ ...token, leadingText: "hello " }],
+      placements: { "skill:word:user": "after" },
+      leadingTexts: { "skill:word:user": "hello " },
+      value: " later",
+      focusOffset: 7,
+    });
+  });
+
   it("maps editable prefix segments and tail text back to durable Desktop state", () => {
     const tokens = [
       {
@@ -2709,6 +2794,39 @@ describe("structured Composer draft reconciliation", () => {
         "skill:deep-research:user": "已恢复的前文 ",
       },
       value: "尾文",
+    });
+  });
+});
+
+describe("thread-scoped Composer drafts", () => {
+  it("keeps unsent values isolated while switching between running threads", () => {
+    let drafts = {};
+    const threadA = composerDraftOwnerKey("thread-a");
+    const threadB = composerDraftOwnerKey("thread-b");
+
+    drafts = updateThreadComposerDraftField(drafts, threadA, "value", "A 草稿");
+    drafts = updateThreadComposerDraftField(drafts, threadB, "value", "B 草稿");
+    drafts = updateThreadComposerDraftField(drafts, threadB, "selection", {
+      anchor: 4,
+      focus: 4,
+    });
+
+    expect(threadComposerDraftForOwner(drafts, threadA).value).toBe("A 草稿");
+    expect(threadComposerDraftForOwner(drafts, threadB)).toMatchObject({
+      value: "B 草稿",
+      selection: { anchor: 4, focus: 4 },
+    });
+    expect(threadComposerDraftForOwner(drafts, composerDraftOwnerKey()).value).toBe("");
+  });
+});
+
+describe("macOS window chrome geometry", () => {
+  it("shares the verified native and renderer alignment values", () => {
+    expect(MACOS_WINDOW_CHROME_GEOMETRY).toEqual({
+      chromeHeightPx: 44,
+      trafficLightPosition: { x: 18, y: 14 },
+      sidebarSpacerPx: 88,
+      controlTopOffsetPx: 0.75,
     });
   });
 });

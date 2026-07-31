@@ -23,7 +23,78 @@ export type AwakenComposerInputProps = {
 export type ComposerInputSelection = {
   anchor: number;
   focus: number;
+  caretRect?: ComposerInputCaretRect;
 };
+
+export type ComposerInputCaretRect = {
+  left: number;
+  top: number;
+  bottom: number;
+};
+
+export function textareaCaretRect(
+  textarea: HTMLTextAreaElement,
+  offset: number,
+): ComposerInputCaretRect {
+  const ownerDocument = textarea.ownerDocument;
+  const ownerWindow = ownerDocument.defaultView;
+  const textareaRect = textarea.getBoundingClientRect();
+  if (!ownerWindow) {
+    return { left: textareaRect.left, top: textareaRect.top, bottom: textareaRect.bottom };
+  }
+
+  const computed = ownerWindow.getComputedStyle(textarea);
+  const mirror = ownerDocument.createElement("div");
+  const marker = ownerDocument.createElement("span");
+  const copiedProperties = [
+    "borderLeftWidth",
+    "borderRightWidth",
+    "borderTopWidth",
+    "borderBottomWidth",
+    "fontFamily",
+    "fontSize",
+    "fontStyle",
+    "fontWeight",
+    "letterSpacing",
+    "lineHeight",
+    "paddingLeft",
+    "paddingRight",
+    "paddingTop",
+    "paddingBottom",
+    "textAlign",
+    "textIndent",
+    "textTransform",
+    "wordSpacing",
+  ] as const;
+  for (const property of copiedProperties) {
+    mirror.style[property] = computed[property];
+  }
+  Object.assign(mirror.style, {
+    position: "fixed",
+    visibility: "hidden",
+    pointerEvents: "none",
+    boxSizing: computed.boxSizing,
+    whiteSpace: "pre-wrap",
+    overflowWrap: "break-word",
+    overflow: "hidden",
+    width: `${textareaRect.width}px`,
+    minHeight: `${textareaRect.height}px`,
+    left: `${textareaRect.left - textarea.scrollLeft}px`,
+    top: `${textareaRect.top - textarea.scrollTop}px`,
+  });
+  mirror.textContent = textarea.value.slice(0, Math.max(0, Math.min(offset, textarea.value.length)));
+  marker.textContent = "\u200b";
+  mirror.append(marker);
+  ownerDocument.body.append(mirror);
+  const markerRect = marker.getBoundingClientRect();
+  mirror.remove();
+  const lineHeight = Number.parseFloat(computed.lineHeight) || 20;
+  return {
+    left: markerRect.left,
+    top: markerRect.top,
+    bottom: markerRect.top + Math.max(markerRect.height, lineHeight),
+  };
+}
 
 export function pastedImageFilesFromClipboardData(
   clipboardData?: Pick<DataTransfer, "items" | "files"> | null,
@@ -88,8 +159,15 @@ export function AwakenComposerInput({
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       onChange(e.target.value);
+      const anchor = e.target.selectionStart ?? e.target.value.length;
+      const focus = e.target.selectionEnd ?? e.target.value.length;
+      onSelectionChange?.({
+        anchor,
+        focus,
+        caretRect: anchor === focus ? textareaCaretRect(e.target, focus) : undefined,
+      });
     },
-    [onChange],
+    [onChange, onSelectionChange],
   );
 
   const handleKeyDown = useCallback(
@@ -136,6 +214,10 @@ export function AwakenComposerInput({
     onSelectionChange?.({
       anchor: textarea.selectionStart ?? textarea.value.length,
       focus: textarea.selectionEnd ?? textarea.value.length,
+      caretRect:
+        textarea.selectionStart === textarea.selectionEnd
+          ? textareaCaretRect(textarea, textarea.selectionEnd ?? textarea.value.length)
+          : undefined,
     });
   }, [onSelectionChange]);
 
@@ -176,6 +258,7 @@ export function AwakenComposerInput({
       onChange={handleChange}
       onSelect={emitSelection}
       onBlur={emitSelection}
+      onScroll={emitSelection}
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
       placeholder={placeholder}

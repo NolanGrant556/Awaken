@@ -2096,6 +2096,8 @@ button.tool-trace-line:focus-visible {
 }
 
 .composer-bar {
+  container-name: composer-bar-layout;
+  container-type: inline-size;
   display: grid;
   gap: 12px;
   width: 100%;
@@ -2560,6 +2562,28 @@ button.tool-trace-line:focus-visible {
 .composer-bar-dock .composer-bar-model-trigger-chevron {
   width: 12px;
   height: 12px;
+}
+
+@container composer-bar-layout (max-width: 440px) {
+  .composer-bar .composer-bar-toolbar-model {
+    width: 32px;
+    max-width: 32px;
+  }
+
+  .composer-bar .composer-bar-model-trigger,
+  .composer-bar .composer-bar-model-trigger-open {
+    width: 32px;
+    max-width: 32px;
+    padding-inline: 7px;
+    gap: 0;
+    justify-content: center;
+    animation: none;
+  }
+
+  .composer-bar .composer-bar-model-trigger-label,
+  .composer-bar .composer-bar-model-trigger-chevron {
+    display: none;
+  }
 }
 
 .composer-bar-model-menu {

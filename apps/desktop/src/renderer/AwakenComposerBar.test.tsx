@@ -722,6 +722,8 @@ describe("AwakenComposerBar unified token editing", () => {
     const trigger = host.querySelector<HTMLButtonElement>(".composer-bar-model-trigger");
     expect(trigger?.querySelector(".composer-bar-model-trigger-icon")).not.toBeNull();
     expect(trigger?.querySelector('[data-testid="selected-model-logo"]')).not.toBeNull();
+    expect(trigger?.getAttribute("aria-label")).toBe("kimi-for-coding");
+    expect(trigger?.title).toBe("kimi-for-coding");
   });
 
   it("stretches the model trigger itself in both center and dock composers", () => {

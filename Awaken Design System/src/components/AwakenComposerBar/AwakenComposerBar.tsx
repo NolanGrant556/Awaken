@@ -629,6 +629,8 @@ export function AwakenComposerBar({
             className={`composer-bar-model-trigger${
               isMenuOpen ? " composer-bar-model-trigger-open" : ""
             }`}
+            aria-label={item.label}
+            title={item.label}
             aria-haspopup={hasMenu ? "listbox" : undefined}
             aria-expanded={hasMenu ? isMenuOpen : undefined}
             onClick={(event) => {
@@ -652,7 +654,11 @@ export function AwakenComposerBar({
             {triggerContent}
           </button>
         ) : (
-          <span className="composer-bar-model-trigger composer-bar-model-trigger-disabled">
+          <span
+            className="composer-bar-model-trigger composer-bar-model-trigger-disabled"
+            aria-label={item.label}
+            title={item.label}
+          >
             {triggerContent}
           </span>
         )}

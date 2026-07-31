@@ -6,7 +6,7 @@
 
 | 工具 | 当前合同 |
 | --- | --- |
-| `Read` | 文本从 1 开始分页，默认/上限 2000 行；PNG/JPEG/GIF/WebP 进入模型媒体；PDF 不默认猜页码：`pdfinfo` 可知且 ≤10 页时可省略 `pages`（原生整份或 Poppler 渲全部页），>10 页必须传 `pages`；单次最多 20 页，越界页在已知总页数时夹紧忽略；按模型能力走原生 PDF 或 Poppler 144 DPI；Office/Notebook 返回 `unsupported_media` |
+| `Read` | 文本从 1 开始分页，默认/上限 2000 行；PNG/JPEG/GIF/WebP 进入模型媒体；PDF 不默认猜页码：`pdfinfo` 可知且 ≤10 页时可省略 `pages`（原生整份或 Poppler 渲全部页），>10 页必须传 `pages`；单次最多 20 页，越界页在已知总页数时夹紧忽略；原生 PDF 或视觉（Poppler 144 DPI）任一可用时阅读，两者皆无返回 `model_pdf_unsupported` 并要求请用户换模型，不得以 Skill/Bash/装包绕过；Office/Notebook 返回 `unsupported_media` |
 | `Edit` | 既有文本必须在当前 thread 成功 `Read` 且宿主快照未变化；默认要求 `old_string` 唯一匹配，只有 `replace_all=true` 可替换多处 |
 | `Write` | 新文件无需预读并写 UTF-8；覆盖既有文件必须预读且未外部变化；保留可识别的编码/BOM、换行和权限 |
 | `Glob` | 使用 run snapshot 固定的真实 `rg`，默认 hidden/no-ignore、稳定排序；默认每页 100 条、`limit` 最大 1000，以 opaque `cursor/next_cursor` 继续枚举并报告 total/truncated |

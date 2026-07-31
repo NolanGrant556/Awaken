@@ -1,8 +1,8 @@
 ---
 name: PDF_Max
-version: 1.0.0
-description: 使用 Typst 创建高质量 PDF，适合专业报告、论文、简历、数学与代码密集型长文档及精确排版；普通 PDF 加工用 pdf Skill，普通演示文稿用 ppt Skill。
-when_to_use: 用户需要新建专业 PDF、把 Markdown 转成精排 PDF、维护现有 Typst 项目，或明确要求 Typst/PDF 幻灯片时使用。
+version: 1.1.0
+description: 使用 Typst 创建高质量 PDF，适合专业报告、论文、简历、数学与代码密集型长文档及精确排版；普通 PDF 加工用 pdf Skill，普通演示文稿用 ppt Skill。不用于在无原生 PDF/无视觉模型上阅读已有 PDF。
+when_to_use: 用户需要新建专业 PDF、把 Markdown 转成精排 PDF、维护现有 Typst 项目，或明确要求 Typst/PDF 幻灯片时使用。用户只是要读懂/摘要已有 PDF 时不要使用本 Skill。
 user-invocable: true
 ---
 
@@ -13,6 +13,14 @@ user-invocable: true
 - PDF 阅读、抽取、合并、拆分、旋转、填表、OCR、水印和加密：改用 `pdf` Skill；
 - 普通演示稿、路演和可编辑 PPTX：改用 `ppt` Skill；
 - 只有用户明确要求 Typst、PDF 幻灯片或指定 Diatypst/Polylux/Touying 时才在本 Skill 中制作幻灯片。
+
+## 模型能力硬停
+
+**本 Skill 不是阅读工具。**
+
+1. 用户要读懂/摘要/看图已有 PDF：先走 `Read`（或 `pdf` Skill 的阅读硬停）。若返回 `model_pdf_unsupported`，立即停止，请用户切换到支持原生 PDF 或视觉的模型；**禁止**改用本 Skill、安装 Typst、Python 包、Poppler/OCR 或 venv 来绕过。
+2. 本 Skill 只承接**新建/精排生成**类任务。生成路径可以安装/复用 Typst CLI；这不授权用 Typst 去“解读”用户点名的现有 PDF。
+3. 生成后的逐页视觉复核依赖 `Read`：若当前模型无原生 PDF 且无视觉，`Read` 会失败——此时如实报告“编译/签名已通过，但当前模型无法做逐页视觉复核，请换模型后再核”，**不要**为复核去装 pdfplumber/Poppler/OCR。
 
 最终 PDF 必须位于当前任务工作区内，并通过 `artifact_publish` 发布为 Workbench 交付物。
 
@@ -205,11 +213,12 @@ python3 "${AWAKEN_SKILL_DIR}/scripts/generate_pdf.py" \
 生成成功不等于交付完成：
 
 1. 使用 Awaken `Read` 打开最终 PDF；
-2. 逐页检查标题层级、分页、空白页、裁切、表格、图片、公式、代码、链接、页眉页脚和 CJK 缺字；
-3. 发现问题后修改源文件，只重编受影响部分，然后完成一次完整 strict build；
-4. 确认最终 PDF 位于任务工作区；
-5. 调用 `artifact_publish` 发布最终 PDF；
-6. 最终回复区分“编译通过”“文件签名通过”“逐页视觉通过”“Artifact 发布成功”四层事实。
+2. 若 `Read` 返回 `model_pdf_unsupported`：不要装包绕过；可在编译与 PDF 签名校验通过后 `artifact_publish`，并明确告知用户当前模型无法逐页视觉复核、建议换支持 PDF/视觉的模型后再核；
+3. 若 `Read` 成功：逐页检查标题层级、分页、空白页、裁切、表格、图片、公式、代码、链接、页眉页脚和 CJK 缺字；
+4. 发现问题后修改源文件，只重编受影响部分，然后完成一次完整 strict build；
+5. 确认最终 PDF 位于任务工作区；
+6. 调用 `artifact_publish` 发布最终 PDF；
+7. 最终回复区分“编译通过”“文件签名通过”“逐页视觉通过（或因模型能力跳过）”“Artifact 发布成功”四层事实。
 
 ## 8. 完成检查
 
@@ -219,7 +228,8 @@ python3 "${AWAKEN_SKILL_DIR}/scripts/generate_pdf.py" \
 - [ ] 没有待完成标记、示例占位文字或虚构作者
 - [ ] strict build 无 warning
 - [ ] 中文字体来自真实 `typst fonts` 输出
-- [ ] 每一页都经过视觉复核
+- [ ] 每一页都经过视觉复核，或已因 `model_pdf_unsupported` 如实声明跳过并建议换模型
+- [ ] 未用本 Skill 绕过“读懂已有 PDF”类任务
 - [ ] 最终 PDF 位于工作区并已调用 `artifact_publish`
 
 ## 9. 包内资源

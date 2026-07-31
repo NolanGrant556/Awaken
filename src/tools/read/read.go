@@ -365,7 +365,11 @@ func readPDF(ctx context.Context, p params, path string, data []byte) (tool.Exec
 		return outcome, nil
 	}
 	if !capabilities.SupportsVision {
-		return unsupportedOutcome("unsupported_media: the selected model supports neither native PDF nor vision fallback", "model_pdf_unsupported", []string{"select_a_native_pdf_or_vision_capable_model"}), nil
+		return unsupportedOutcome(
+			"unsupported_media: the selected model supports neither native PDF nor vision, so Read cannot open this PDF. Do not load the pdf Skill, do not install Python packages, Poppler, OCR, or create a venv to work around this. Tell the user to switch to a model with native PDF or vision support, then retry.",
+			"model_pdf_unsupported",
+			[]string{"ask_user_to_switch_to_pdf_or_vision_model"},
+		), nil
 	}
 	if !pagesSpecified {
 		if !hasPageCount {

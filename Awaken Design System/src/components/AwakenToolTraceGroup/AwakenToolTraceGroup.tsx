@@ -15,7 +15,10 @@ export type ToolTraceAction = Omit<AwakenToolTraceLineProps, "onSelect"> & {
 export type AwakenToolTraceGroupProps = {
   actions: ToolTraceAction[];
   label?: string;
+  detail?: string;
   defaultOpen?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   /** Disable child mount animations when revealing already-finished history. */
   animateItems?: boolean;
   onSelectAction?: (action: ToolTraceAction) => void;
@@ -24,7 +27,10 @@ export type AwakenToolTraceGroupProps = {
 export function AwakenToolTraceGroup({
   actions,
   label,
+  detail: detailProp,
   defaultOpen,
+  open,
+  onOpenChange,
   animateItems = true,
   onSelectAction,
 }: AwakenToolTraceGroupProps) {
@@ -34,18 +40,26 @@ export function AwakenToolTraceGroup({
   const [manualExpanded, setManualExpanded] = useState<boolean | null>(
     defaultOpen ?? null,
   );
-  const expanded = manualExpanded ?? active;
+  const expanded = open ?? manualExpanded ?? active;
   const summary = label || `${actions.length} 个工具调用`;
-  const detail = active ? "执行中" : failed > 0 ? `${failed} 个异常` : "已完成";
+  const detail = detailProp ?? (active ? "执行中" : failed > 0 ? `${failed} 个异常` : "已完成");
+
+  function toggleOpen() {
+    const nextOpen = !(open ?? manualExpanded ?? active);
+    if (open === undefined) setManualExpanded(nextOpen);
+    onOpenChange?.(nextOpen);
+  }
 
   return (
-    <article className={`tool-trace-group${expanded ? " tool-trace-group-open" : ""}`}>
+    <article
+      className={`tool-trace-group${expanded ? " tool-trace-group-open" : ""}${active ? " tool-trace-group-active" : ""}`}
+    >
       <button
         type="button"
         className="tool-trace-group-heading"
         aria-expanded={expanded}
         aria-controls={bodyId}
-        onClick={() => setManualExpanded((current) => !(current ?? active))}
+        onClick={toggleOpen}
       >
         <span className="tool-trace-group-icon" aria-hidden="true">
           {active ? <LoaderCircle size={14} /> : <Wrench size={14} />}

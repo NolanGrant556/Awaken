@@ -14,12 +14,18 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     id: "active",
     label: "工具执行中",
     props: {
-      title: "shell",
-      detail: "npm test",
-      output: "正在执行测试…",
-      outputLabel: "终端输出",
+      title: "正在运行 npm test",
+      detailCard: {
+        title: "Shell 详情",
+        copyText: "$ npm test\n正在执行测试…",
+        sections: [
+          { label: "命令", content: "npm test", format: "code" },
+          { label: "输出", content: "正在执行测试…", format: "code" },
+        ],
+      },
       kind: "terminal",
       status: "active",
+      onCopyDetail: noop,
       onSelect: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,
   },
@@ -27,10 +33,17 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     id: "done",
     label: "已完成",
     props: {
-      title: "apply_patch",
-      detail: "App.tsx",
-      output: "Done!",
+      title: "编辑 apps/desktop/src/renderer/App.tsx",
+      detailCard: {
+        title: "文件变更",
+        copyText: "apps/desktop/src/renderer/App.tsx\n@@ -1 +1 @@",
+        sections: [
+          { label: "文件", content: "apps/desktop/src/renderer/App.tsx", format: "text" },
+          { label: "变更", content: "@@ -1 +1 @@\n-old\n+new", format: "diff" },
+        ],
+      },
       status: "done",
+      onCopyDetail: noop,
       onSelect: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,
   },
@@ -38,11 +51,18 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     id: "error",
     label: "工具失败",
     props: {
-      title: "skill__dws",
-      detail: "dws",
-      output: "授权已过期，请重新登录。",
+      title: "调用 GitHub create_issue",
+      detail: "github:create_issue",
+      detailCard: {
+        title: "GitHub MCP 详情",
+        copyText: "授权已过期，请重新登录。",
+        sections: [
+          { label: "错误与恢复信息", content: "授权已过期，请重新登录。", format: "text", tone: "danger" },
+        ],
+      },
       kind: "mcp",
       status: "error",
+      onCopyDetail: noop,
       onSelect: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,
   },
@@ -61,8 +81,9 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
     label: "长工具返回",
     props: {
       title: "skill__dws",
-      detail: "dws",
-      output:
+      detailCard: {
+        title: "Skill 详情",
+        copyText:
         `[skill "dws" executed inline]\n\n` +
         `Base directory for this skill: /Users/nolangrant/.awaken/skills/dws\n` +
         `Use skill_resource_read with skill_id "dws" and a relative path to read bundled references, scripts, or assets from this directory.\n\n` +
@@ -74,8 +95,15 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
         `- 不要猜测字段名/参数值，操作前必须先查询确认\n\n` +
         `## 产品总览\n` +
         `aitable、attendance、calendar、chat、contact、devdoc、ding、doc、drive、minutes、oa、report、mail、sheet、todo、wiki。`,
+        sections: [{
+          label: "结果",
+          content: "已加载钉钉全产品 Skill；可用能力包括 aitable、calendar、doc、drive 等。",
+          format: "text",
+        }],
+      },
       status: "done",
       kind: "skill",
+      onCopyDetail: noop,
       onSelect: undefined,
     } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,
   },

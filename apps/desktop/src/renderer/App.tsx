@@ -67,6 +67,8 @@ import {
   type ProjectFolderRow,
   type ProjectHoverCard,
   type ProjectItem,
+  type ToolTraceAction,
+  type ToolTraceDetailCard,
 } from "@awaken/design-system";
 import { providerBrandForId } from "./model-provider-brand";
 import {
@@ -114,6 +116,7 @@ import type {
 import type { ToolDisplayState } from "../shared/toolStatus";
 import { projectPetActivity } from "./pets/pet-activity-projector";
 import {
+  projectNarrativeActivitySegments,
   projectNarrativeTurnBodySegments,
   contextUsagePanelBottomOffset,
   projectVisibleNarrativeItems,
@@ -122,6 +125,7 @@ import {
   turnMarkerRailHeight,
   turnMarkerRailDisplay,
   type NarrativeTurnBodySegment,
+  type NarrativeActivityBatch,
 } from "./workbenchPresentation";
 import { selectAllInFocusedEditor } from "./desktop-selection";
 import { useComposerLifecycle } from "./useComposerLifecycle";
@@ -1527,23 +1531,129 @@ function firstContentLine(value?: string): string | undefined {
     .find(Boolean);
 }
 
+function compactToolContext(value?: string): string | undefined {
+  const line = firstContentLine(value);
+  if (!line || line === "{" || line === "[" || /^[\[{]\s*"/.test(line)) return undefined;
+  return line;
+}
+
 type ToolTraceRecordView = {
+  title?: string;
   content?: string;
+  args?: string;
   commandOutput?: string;
   commandOutputTruncated?: boolean;
   status?: ToolDisplayState;
+  diagnostic?: Record<string, unknown>;
   providerId?: string;
   providerSource?: string;
 };
 
+type ToolTracePatchView = {
+  title?: string;
+  patch: string;
+  summary?: string;
+  affectedPaths: string[];
+  truncated?: boolean;
+};
+
+const SENSITIVE_TOOL_KEY = /(?:password|token|secret|api[_-]?key|authorization|cookie)/i;
+const SHELL_TOOL_TITLE = /(?:bash|shell|terminal|command|命令)/i;
+const READ_TOOL_TITLE = /(?:read|读取|list|列出|search|搜索|grep|glob|find)/i;
+const FILE_TOOL_TITLE = /(?:write|edit|patch|create|delete|move|copy|写入|编辑|修改|创建|删除)/i;
+
+function parseToolArguments(value?: string): unknown {
+  if (!value?.trim()) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function redactSensitiveValue(value: unknown, key = ""): unknown {
+  if (SENSITIVE_TOOL_KEY.test(key)) return "••••";
+  if (Array.isArray(value)) return value.map((entry) => redactSensitiveValue(entry));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([childKey, childValue]) => [
+        childKey,
+        redactSensitiveValue(childValue, childKey),
+      ]),
+    );
+  }
+  return value;
+}
+
+function redactShellText(value: string): string {
+  return value.replace(
+    /\b([A-Z0-9_]*(?:PASSWORD|TOKEN|SECRET|API_KEY|AUTHORIZATION|COOKIE)[A-Z0-9_]*)=(?:"[^"]*"|'[^']*'|[^\s]+)/gi,
+    "$1=••••",
+  );
+}
+
+function argumentRecord(value?: string): Record<string, unknown> | undefined {
+  const parsed = parseToolArguments(value);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : undefined;
+}
+
+function firstStringArgument(
+  args: Record<string, unknown> | undefined,
+  keys: string[],
+): string | undefined {
+  for (const key of keys) {
+    const value = args?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function detailCardFromSections(
+  title: string,
+  sections: ToolTraceDetailCard["sections"],
+): ToolTraceDetailCard | undefined {
+  const visible = sections.filter((section) => section.content.trim());
+  if (visible.length === 0) return undefined;
+  return {
+    title,
+    sections: visible,
+    copyText: visible.map((section) => `${section.label}\n${section.content}`).join("\n\n"),
+  };
+}
+
+function naturalToolTitle(
+  title: string,
+  kind: "tool" | "mcp" | "terminal",
+  args?: Record<string, unknown>,
+): string {
+  if (kind === "terminal") {
+    const command = firstStringArgument(args, ["command", "cmd", "script"]);
+    if (command) return `运行 ${redactShellText(command).replace(/\s+/g, " ").slice(0, 96)}`;
+    return "运行命令";
+  }
+  if (READ_TOOL_TITLE.test(title)) {
+    const target = firstStringArgument(args, ["path", "filePath", "query", "pattern", "url"]);
+    if (target) return `${/search|grep|glob|find|搜索/i.test(title) ? "搜索" : "读取"} ${target}`;
+  }
+  if (FILE_TOOL_TITLE.test(title)) {
+    const target = firstStringArgument(args, ["path", "filePath", "target"]);
+    if (target) return `编辑 ${target}`;
+  }
+  return title.replace(/\s*\{\s*$/, "").trim() || "使用工具";
+}
+
 export function toolTracePresentation(
   tool: ToolTraceRecordView | undefined,
   fallback?: string,
+  options: { title?: string; patch?: ToolTracePatchView } = {},
 ) {
   if (!tool) {
     const output = fallback?.trim() || undefined;
     return {
-      detail: firstContentLine(fallback),
+      ...(options.title ? { title: options.title.replace(/\s*\{\s*$/, "").trim() } : {}),
+      detail: compactToolContext(fallback),
       output,
       outputLabel: "工具输出",
       kind: "tool" as const,
@@ -1557,20 +1667,96 @@ export function toolTracePresentation(
     : commandOutput || result || undefined;
   const providerSource = tool.providerSource?.trim().toLowerCase() || "";
   const mcpProvider = providerSource === "mcp" || providerSource === "connector";
-  const kind = commandOutput ? "terminal" : mcpProvider ? "mcp" : "tool";
+  const sourceTitle = options.title || tool.title || "使用工具";
+  const args = argumentRecord(tool.args);
+  const shellTool = Boolean(commandOutput) || SHELL_TOOL_TITLE.test(sourceTitle);
+  const kind = shellTool ? "terminal" : mcpProvider ? "mcp" : "tool";
   const providerLabel = mcpProvider
     ? tool.providerId?.replace(/^(mcp|connector):/i, "")
     : undefined;
   const progress = active
-    ? firstContentLine(fallback) || firstContentLine(commandOutput) || firstContentLine(result)
-    : firstContentLine(result) || firstContentLine(commandOutput) || firstContentLine(fallback);
+    ? compactToolContext(fallback) || compactToolContext(commandOutput) || compactToolContext(result)
+    : compactToolContext(result) || compactToolContext(commandOutput) || compactToolContext(fallback);
+  const command = shellTool
+    ? firstStringArgument(args, ["command", "cmd", "script"])
+    : undefined;
+  const knownReadableTool = READ_TOOL_TITLE.test(sourceTitle);
+  const knownFileTool = FILE_TOOL_TITLE.test(sourceTitle) || Boolean(options.patch);
+  const sanitizedArgs = args ? redactSensitiveValue(args) : undefined;
+  const argumentContent = sanitizedArgs ? JSON.stringify(sanitizedArgs, null, 2) : "";
+  const errorContent = tool.diagnostic ? JSON.stringify(redactSensitiveValue(tool.diagnostic), null, 2) : "";
+  const sections: ToolTraceDetailCard["sections"] = [];
+
+  if (command) {
+    sections.push({ label: "命令", content: redactShellText(command), format: "code" });
+  } else if ((mcpProvider || knownReadableTool || knownFileTool) && argumentContent) {
+    sections.push({ label: mcpProvider ? "脱敏参数" : "目标与参数", content: argumentContent, format: "json" });
+  }
+  if (options.patch) {
+    if (options.patch.affectedPaths.length > 0) {
+      sections.push({
+        label: "文件",
+        content: options.patch.affectedPaths.join("\n"),
+        format: "text",
+      });
+    }
+    sections.push({ label: "变更", content: options.patch.patch, format: "diff" });
+  }
+  if (commandOutput) {
+    sections.push({ label: "stdout / stderr", content: redactShellText(commandOutput), format: "code" });
+  } else if (result) {
+    sections.push({ label: mcpProvider ? "结果" : knownReadableTool ? "匹配摘要" : "结果", content: result, format: "text" });
+  }
+  if (errorContent) {
+    sections.push({ label: "错误与恢复信息", content: errorContent, format: "json", tone: "danger" });
+  }
+  const detailCard = detailCardFromSections(
+    kind === "terminal" ? "Shell 详情" : mcpProvider ? `${providerLabel || "MCP"} 详情` : "工具详情",
+    sections,
+  );
+
   return {
-    detail: providerLabel || progress,
+    title: naturalToolTitle(sourceTitle, kind, args),
+    detail: providerLabel || (kind === "terminal" && command ? undefined : progress),
     output,
     outputLabel: kind === "terminal" ? "终端输出" : mcpProvider ? "MCP 输出" : "工具输出",
     outputTruncated: tool.commandOutputTruncated,
+    detailCard,
     kind: kind as "tool" | "mcp" | "terminal",
   };
+}
+
+type ActivitySummaryInput = {
+  kind: "tool" | "skill" | "terminal" | "mcp";
+  title: string;
+  status: ToolDisplayState;
+  fileCount?: number;
+};
+
+export function activityBatchSummary(actions: ActivitySummaryInput[]): {
+  label: string;
+  detail: string;
+} {
+  const active = actions.some((action) => action.status === "active");
+  const failed = actions.filter((action) => action.status !== "active" && action.status !== "done").length;
+  const commandCount = actions.filter((action) => action.kind === "terminal").length;
+  const skillActions = actions.filter((action) => action.kind === "skill");
+  const checkedCount = actions.filter((action) => READ_TOOL_TITLE.test(action.title)).length;
+  const editedFiles = actions.reduce((count, action) => count + (action.fileCount || 0), 0);
+  let label: string;
+  if (commandCount === actions.length) {
+    label = active ? `正在运行 ${commandCount} 条命令` : `运行了 ${commandCount} 条命令`;
+  } else if (checkedCount === actions.length) {
+    label = active ? `正在检查 ${checkedCount} 项` : `检查了 ${checkedCount} 项`;
+  } else if (editedFiles > 0 && actions.every((action) => FILE_TOOL_TITLE.test(action.title))) {
+    label = active ? `正在编辑 ${editedFiles} 个文件` : `编辑了 ${editedFiles} 个文件`;
+  } else if (skillActions.length > 0) {
+    const skillName = skillActions[0].title.replace(/^使用\s*/i, "");
+    label = `使用 ${skillName} · ${actions.length - skillActions.length} 个工具`;
+  } else {
+    label = active ? `正在运行 ${actions.length} 个工具` : `使用了 ${actions.length} 个工具`;
+  }
+  return { label, detail: failed > 0 ? `${failed} 个异常` : active ? "执行中" : "已完成" };
 }
 
 function composerThreadLabel(
@@ -1927,6 +2113,12 @@ export function App() {
   const [executionProcessOpenByTurnId, setExecutionProcessOpenByTurnId] = useState<
     Record<string, boolean>
   >({});
+  const [activityBatchOpenById, setActivityBatchOpenById] = useState<
+    Record<string, boolean | undefined>
+  >({});
+  const [toolTraceOpenById, setToolTraceOpenById] = useState<
+    Record<string, boolean | undefined>
+  >({});
   const [composerAttachments, setComposerAttachments] = useState<ComposerDraftAttachment[]>([]);
   const [composerTokens, setComposerTokens] = useState<ComposerToken[]>([]);
   const [composerTokenPlacements, setComposerTokenPlacements] = useState<
@@ -1952,6 +2144,14 @@ export function App() {
     ];
     return projectVisibleNarrativeItems({ items: narrativeItems, isBusy });
   }, [isBusy, runtimeState.narrative]);
+  const toolResultsById = useMemo(
+    () => new Map(runtimeState.toolResults.map((record) => [record.id, record])),
+    [runtimeState.toolResults],
+  );
+  const patchPreviewsById = useMemo(
+    () => new Map(runtimeState.patchPreviews.map((preview) => [preview.id, preview])),
+    [runtimeState.patchPreviews],
+  );
   const artifactMediaRequests = useMemo(() => {
     const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;
     if (!threadId) return [];
@@ -5219,6 +5419,115 @@ export function App() {
     if (!result.ok) setNotice(result.message);
   }
 
+  function updateToolTraceOpen(id: string, open: boolean): void {
+    setToolTraceOpenById((current) => ({ ...current, [id]: open }));
+  }
+
+  function copyToolDetail(copyText: string): void {
+    void navigator.clipboard.writeText(copyText).catch(() => {
+      setNotice("复制失败，请手动选择详情内容。");
+    });
+  }
+
+  function toolTraceActionFor({
+    id,
+    title,
+    detail,
+    status,
+  }: {
+    id: string;
+    title: string;
+    detail?: string;
+    status: ToolDisplayState;
+  }): ToolTraceAction {
+    const toolId = rawToolId(id);
+    const presentation = toolTracePresentation(toolResultsById.get(toolId), detail, {
+      title,
+      patch: patchPreviewsById.get(toolId),
+    });
+    return {
+      id,
+      title: presentation.title || title,
+      detail: presentation.detail,
+      output: presentation.output,
+      outputLabel: presentation.outputLabel,
+      outputTruncated: presentation.outputTruncated,
+      detailCard: presentation.detailCard,
+      kind: presentation.kind,
+      status,
+      open: toolTraceOpenById[id],
+      onOpenChange: (open) => updateToolTraceOpen(id, open),
+      onCopyDetail: copyToolDetail,
+    };
+  }
+
+  function skillTraceAction(item: Extract<RunNarrativeItem, { kind: "skill" }>): ToolTraceAction {
+    const sections: ToolTraceDetailCard["sections"] = [];
+    if (item.detail?.trim()) {
+      sections.push({ label: "名称、来源与版本", content: item.detail.trim(), format: "text" });
+    }
+    if (item.output?.trim()) {
+      sections.push({ label: "结果", content: item.output.trim(), format: "text" });
+    }
+    const detailCard = detailCardFromSections("Skill 详情", sections);
+    return {
+      id: item.id,
+      title: item.title.replace(/\s*\{\s*$/, "").trim(),
+      status: item.status,
+      kind: "skill",
+      detailCard,
+      output: item.output,
+      outputLabel: "Skill 输出",
+      open: toolTraceOpenById[item.id],
+      onOpenChange: (open) => updateToolTraceOpen(item.id, open),
+      onCopyDetail: copyToolDetail,
+    };
+  }
+
+  function actionsForActivityBatch(batch: NarrativeActivityBatch): ToolTraceAction[] {
+    return batch.items.flatMap((item) => {
+      if (item.kind === "exploring") {
+        return item.actions.map((action) => toolTraceActionFor(action));
+      }
+      if (item.kind === "skill") return [skillTraceAction(item)];
+      return [toolTraceActionFor(item)];
+    });
+  }
+
+  function renderNarrativeActivityItems(
+    turnId: string,
+    items: RunNarrativeItem[],
+    animateToolEntry = true,
+  ) {
+    return projectNarrativeActivitySegments({ turnId, items }).map((segment) => {
+      if (segment.kind === "item") {
+        return renderNarrativeItem(segment.item, segment.id, animateToolEntry);
+      }
+      const actions = actionsForActivityBatch(segment);
+      const summary = activityBatchSummary(
+        actions.map((action) => ({
+          kind: action.kind || "tool",
+          title: action.title,
+          status: action.status,
+          fileCount: patchPreviewsById.get(rawToolId(action.id))?.affectedPaths.length,
+        })),
+      );
+      return (
+        <ToolTraceGroup
+          key={segment.id}
+          actions={actions}
+          label={summary.label}
+          detail={summary.detail}
+          open={activityBatchOpenById[segment.id]}
+          onOpenChange={(open) => {
+            setActivityBatchOpenById((current) => ({ ...current, [segment.id]: open }));
+          }}
+          animateItems={animateToolEntry}
+        />
+      );
+    });
+  }
+
   function renderNarrativeItem(
     item: RunNarrativeItem,
     key: string,
@@ -5275,16 +5584,10 @@ export function App() {
       );
     }
     if (item.kind === "exploring") {
-      const actions = item.actions.map((action) => {
-        const id = action.id.startsWith("explore:")
-          ? action.id.slice("explore:".length)
-          : rawToolId(action.id);
-        const tool = runtimeState.toolResults.find((record) => record.id === id);
-        return {
-          ...action,
-          ...toolTracePresentation(tool, action.detail),
-        };
-      });
+      const actions = item.actions.map((action) => toolTraceActionFor(action));
+      if (actions.length === 1) {
+        return <ToolTraceLine key={key} {...actions[0]} animateEntry={animateToolEntry} />;
+      }
       return (
         <ToolTraceGroup
           key={key}
@@ -5294,27 +5597,21 @@ export function App() {
       );
     }
     if (item.kind === "tool") {
-      const tool = runtimeState.toolResults.find((record) => record.id === rawToolId(item.id));
+      const action = toolTraceActionFor(item);
       return (
         <ToolTraceLine
           key={key}
-          title={item.title}
-          {...toolTracePresentation(tool, item.detail)}
-          status={item.status}
+          {...action}
           animateEntry={animateToolEntry}
         />
       );
     }
     if (item.kind === "skill") {
+      const action = skillTraceAction(item);
       return (
         <ToolTraceLine
           key={key}
-          title={item.title}
-          detail={item.detail}
-          output={item.output}
-          outputLabel="Skill 输出"
-          status={item.status}
-          kind="skill"
+          {...action}
           animateEntry={animateToolEntry}
         />
       );
@@ -5544,9 +5841,7 @@ export function App() {
 
   function renderTurnBodySegment(turnId: string, segment: NarrativeTurnBodySegment) {
     if (segment.kind === "items") {
-      return segment.items.map((item, itemIndex) =>
-        renderNarrativeItem(item, `${turnId}:${segment.id}:${item.id}:${itemIndex}`),
-      );
+      return renderNarrativeActivityItems(turnId, segment.items);
     }
 
     return [
@@ -5567,13 +5862,7 @@ export function App() {
           }}
         >
           <div className="execution-process-disclosure-body">
-            {segment.items.map((item, itemIndex) =>
-              renderNarrativeItem(
-                item,
-                `${turnId}:${segment.id}:${item.id}:${itemIndex}`,
-                false,
-              ),
-            )}
+            {renderNarrativeActivityItems(turnId, segment.items, false)}
           </div>
         </Disclosure>
       </div>,

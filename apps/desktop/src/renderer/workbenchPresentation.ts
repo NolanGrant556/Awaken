@@ -1,6 +1,27 @@
 import type { RunNarrativeItem } from "./run-narrative";
 
 type PromptNarrativeItem = Extract<RunNarrativeItem, { kind: "prompt" }>;
+type ActivityNarrativeItem = Extract<
+  RunNarrativeItem,
+  { kind: "exploring" | "tool" | "skill" }
+>;
+
+export type NarrativeActivityBatch = {
+  kind: "activityBatch";
+  id: string;
+  items: ActivityNarrativeItem[];
+  actionCount: number;
+  failedCount: number;
+  status: "active" | "done";
+};
+
+export type NarrativeActivitySegment =
+  | {
+      kind: "item";
+      id: string;
+      item: RunNarrativeItem;
+    }
+  | NarrativeActivityBatch;
 
 export type NarrativeTurnSection = {
   id: string;
@@ -66,6 +87,81 @@ const EXECUTION_PROCESS_SUMMARY_TITLE = "执行过程";
 const TURN_MARKER_REGULAR_SIZE = { itemHeight: 18, gap: 14 };
 const TURN_MARKER_COMPACT_SIZE = { itemHeight: 12, gap: 8 };
 const TURN_MARKER_SUMMARY_SIZE = { itemHeight: 8, gap: 5 };
+
+function isActivityNarrativeItem(item: RunNarrativeItem): item is ActivityNarrativeItem {
+  return item.kind === "exploring" || item.kind === "tool" || item.kind === "skill";
+}
+
+function activityActionCount(item: ActivityNarrativeItem): number {
+  return item.kind === "exploring" ? item.actions.length : 1;
+}
+
+function activityFailedCount(item: ActivityNarrativeItem): number {
+  if (item.kind === "exploring") {
+    return item.actions.filter(
+      (action) => action.status !== "active" && action.status !== "done",
+    ).length;
+  }
+  return item.status !== "active" && item.status !== "done" ? 1 : 0;
+}
+
+function activityIsActive(item: ActivityNarrativeItem): boolean {
+  if (item.status === "active") {
+    return true;
+  }
+  return item.kind === "exploring" && item.actions.some((action) => action.status === "active");
+}
+
+/**
+ * Groups only adjacent tool activity. Any user-visible narrative item is a hard boundary,
+ * so this presentation-only projection cannot change runtime ordering or replay semantics.
+ */
+export function projectNarrativeActivitySegments({
+  turnId,
+  items,
+}: {
+  turnId: string;
+  items: RunNarrativeItem[];
+}): NarrativeActivitySegment[] {
+  const segments: NarrativeActivitySegment[] = [];
+  let pending: ActivityNarrativeItem[] = [];
+
+  const flush = () => {
+    if (pending.length === 0) return;
+
+    const actionCount = pending.reduce((count, item) => count + activityActionCount(item), 0);
+    if (actionCount <= 1) {
+      for (const item of pending) {
+        segments.push({ kind: "item", id: `activity-item:${turnId}:${item.id}`, item });
+      }
+      pending = [];
+      return;
+    }
+
+    const firstItem = pending[0];
+    segments.push({
+      kind: "activityBatch",
+      id: `activity-batch:${turnId}:${firstItem.id}`,
+      items: pending,
+      actionCount,
+      failedCount: pending.reduce((count, item) => count + activityFailedCount(item), 0),
+      status: pending.some(activityIsActive) ? "active" : "done",
+    });
+    pending = [];
+  };
+
+  for (const item of items) {
+    if (isActivityNarrativeItem(item)) {
+      pending.push(item);
+      continue;
+    }
+    flush();
+    segments.push({ kind: "item", id: `narrative-item:${turnId}:${item.id}`, item });
+  }
+  flush();
+
+  return segments;
+}
 
 export function diffLineStats(diff?: string): {
   added: number;

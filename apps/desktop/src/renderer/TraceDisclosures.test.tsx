@@ -10,7 +10,7 @@ import {
   AwakenToolTraceGroup,
   AwakenToolTraceLine,
 } from "@awaken/design-system";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("execution trace disclosures", () => {
   let container: HTMLDivElement;
@@ -44,7 +44,7 @@ describe("execution trace disclosures", () => {
     expect(heading?.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("moves terminal output into a nested card that follows active and terminal defaults", async () => {
+  it("keeps a terminal row compact until the user opens its nested card", async () => {
     await act(async () => {
       root.render(
         <AwakenToolTraceLine
@@ -58,7 +58,7 @@ describe("execution trace disclosures", () => {
       );
     });
     const row = container.querySelector<HTMLButtonElement>("button.tool-trace-line");
-    expect(row?.getAttribute("aria-expanded")).toBe("true");
+    expect(row?.getAttribute("aria-expanded")).toBe("false");
     expect(container.querySelector(".tool-trace-output-card")?.textContent).toContain("running suite");
 
     await act(async () => {
@@ -77,6 +77,52 @@ describe("execution trace disclosures", () => {
 
     await act(async () => row?.click());
     expect(row?.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("renders structured selectable detail sections and invokes the copy callback", async () => {
+    const onCopyDetail = vi.fn();
+    await act(async () => {
+      root.render(
+        <AwakenToolTraceLine
+          title="运行测试"
+          status="done"
+          defaultOpen
+          detailCard={{
+            title: "Shell 详情",
+            copyText: "$ npm test\n4 tests passed",
+            sections: [
+              { label: "命令", content: "npm test", format: "code" },
+              { label: "输出", content: "4 tests passed", format: "text", tone: "success" },
+            ],
+          }}
+          onCopyDetail={onCopyDetail}
+        />,
+      );
+    });
+
+    expect(container.querySelectorAll(".tool-trace-detail-section")).toHaveLength(2);
+    expect(container.querySelector('[data-format="code"]')?.textContent).toContain("npm test");
+    await act(async () => container.querySelector<HTMLButtonElement>(".tool-trace-output-copy")?.click());
+    expect(onCopyDetail).toHaveBeenCalledWith("$ npm test\n4 tests passed");
+  });
+
+  it("supports controlled group state while preserving active automatic behavior when uncontrolled", async () => {
+    const onOpenChange = vi.fn();
+    await act(async () => {
+      root.render(
+        <AwakenToolTraceGroup
+          actions={[{ id: "read", title: "正在读取", status: "active" }]}
+          label="正在检查 1 项"
+          detail="执行中"
+          open={false}
+          onOpenChange={onOpenChange}
+        />,
+      );
+    });
+    const heading = container.querySelector<HTMLButtonElement>(".tool-trace-group-heading");
+    expect(heading?.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => heading?.click());
+    expect(onOpenChange).toHaveBeenCalledWith(true);
   });
 
   it("collapses a finished tool group and ready media while preserving their summary rows", async () => {
@@ -257,6 +303,18 @@ describe("execution trace disclosures", () => {
     );
     expect(componentStyles).toMatch(
       /button\.tool-trace-line:hover,[\s\S]*?background:\s*transparent;[\s\S]*?color:\s*var\(--aw-text-primary\);/,
+    );
+    expect(componentStyles).toMatch(
+      /\.tool-trace-line-chevron\s*\{[\s\S]*?opacity:\s*0;/,
+    );
+    expect(componentStyles).toMatch(
+      /\.tool-trace-line:hover \.tool-trace-line-chevron\[data-visible="available"\],[\s\S]*?\.tool-trace-line:focus-visible[\s\S]*?opacity:\s*1;/,
+    );
+    expect(componentStyles).toMatch(
+      /\.tool-trace-group-active:not\(\.tool-trace-group-open\) \.tool-trace-group-label\s*\{[\s\S]*?animation:\s*tool-trace-shimmer 1\.6s linear infinite;/,
+    );
+    expect(componentStyles).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.tool-trace-group-active:not\(\.tool-trace-group-open\) \.tool-trace-group-label,[\s\S]*?animation:\s*none;/,
     );
     expect(mediaStyles).toMatch(
       /\.aw-media-generation-summary:hover,[\s\S]*?background:\s*transparent;[\s\S]*?color:\s*var\(--aw-text-primary\);/,

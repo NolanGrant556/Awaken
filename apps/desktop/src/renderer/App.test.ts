@@ -43,6 +43,7 @@ import {
   shouldUseCenterComposerWithFileWorkspace,
   shouldResetActiveThreadForWorkspaceChange,
   shouldShowSidebarThreadSpinner,
+  activityBatchSummary,
   toolTracePresentation,
   workbenchInspectorPresentation,
   UserQuestionPrompt,
@@ -91,6 +92,7 @@ import {
   latestTurnMinHeightBottomReserve,
   latestTurnPromptAnchorSlack,
   projectNarrativeTurnBodySegments,
+  projectNarrativeActivitySegments,
   projectVisibleNarrativeItems,
   scrollTopForLatestTurnScrollTail,
   scrollTopForPromptAnchor,
@@ -177,6 +179,122 @@ describe("tool trace presentation", () => {
       outputLabel: "终端输出",
       outputTruncated: true,
     });
+  });
+
+  it("builds typed detail cards and redacts sensitive MCP arguments", () => {
+    const presentation = toolTracePresentation(
+      {
+        title: "create_issue",
+        args: JSON.stringify({ repository: "awaken", token: "private", nested: { apiKey: "secret" } }),
+        content: "created issue #42",
+        status: "done",
+        providerId: "connector:github:create_issue",
+        providerSource: "connector",
+      },
+      undefined,
+      { title: "创建 Issue" },
+    );
+
+    expect(presentation.detailCard?.sections[0]).toMatchObject({
+      label: "脱敏参数",
+      format: "json",
+    });
+    expect(presentation.detailCard?.copyText).toContain('"token": "••••"');
+    expect(presentation.detailCard?.copyText).toContain('"apiKey": "••••"');
+    expect(presentation.detailCard?.copyText).not.toContain("private");
+    expect(presentation.detailCard?.copyText).not.toContain("secret");
+  });
+
+  it("does not expose unknown raw arguments by default", () => {
+    const presentation = toolTracePresentation(
+      {
+        title: "custom_tool",
+        args: JSON.stringify({ opaque: "must-not-render" }),
+        content: "done",
+        status: "done",
+      },
+      undefined,
+      { title: "自定义工具" },
+    );
+
+    expect(presentation.detailCard?.copyText).not.toContain("must-not-render");
+    expect(presentation.detailCard?.sections).toEqual([
+      { label: "结果", content: "done", format: "text" },
+    ]);
+  });
+});
+
+describe("activity batch presentation", () => {
+  const tool = (id: string, title: string, status: "active" | "done" | "error" = "done") =>
+    ({ kind: "tool", id, title, status }) satisfies RunNarrativeItem;
+
+  it("bypasses a singleton and uses stable turn plus first-item identity for a batch", () => {
+    expect(projectNarrativeActivitySegments({ turnId: "turn-1", items: [tool("tool:a", "Read")] })).toEqual([
+      { kind: "item", id: "activity-item:turn-1:tool:a", item: tool("tool:a", "Read") },
+    ]);
+
+    const segments = projectNarrativeActivitySegments({
+      turnId: "turn-1",
+      items: [tool("tool:a", "Read"), tool("tool:b", "Search")],
+    });
+    expect(segments[0]).toMatchObject({
+      kind: "activityBatch",
+      id: "activity-batch:turn-1:tool:a",
+      actionCount: 2,
+      failedCount: 0,
+      status: "done",
+    });
+  });
+
+  it("flattens exploring actions and stops at reasoning, visible copy, gate, media and final boundaries", () => {
+    const exploring: RunNarrativeItem = {
+      kind: "exploring",
+      id: "exploring:1",
+      status: "done",
+      actions: [
+        { id: "explore:a", title: "Read", status: "done" },
+        { id: "explore:b", title: "Search", status: "error" },
+      ],
+    };
+    const boundaries: RunNarrativeItem[] = [
+      { kind: "thinking", id: "thought:1", text: "next", status: "done" },
+      { kind: "answer", id: "answer:1", markdown: "progress", status: "active", isFinal: false },
+      { kind: "hint", id: "hint:1", text: "waiting" },
+      {
+        kind: "mediaGeneration",
+        id: "media:1",
+        toolCallId: "media-tool:1",
+        mediaKind: "image",
+        title: "生成图片",
+        status: "ready",
+        artifactPaths: ["output/image.png"],
+      },
+      { kind: "subagentGroup", id: "subagents:1", tasks: [] },
+      { kind: "answer", id: "answer:2", markdown: "final", status: "done", isFinal: true },
+    ];
+    const segments = projectNarrativeActivitySegments({
+      turnId: "turn-2",
+      items: [exploring, ...boundaries, tool("tool:c", "Bash", "active")],
+    });
+
+    expect(segments[0]).toMatchObject({ kind: "activityBatch", actionCount: 2, failedCount: 1 });
+    expect(segments.slice(1, 7).map((segment) => segment.kind)).toEqual(["item", "item", "item", "item", "item", "item"]);
+    expect(segments[7]).toMatchObject({ kind: "item", item: { id: "tool:c" } });
+  });
+
+  it("creates deterministic command, check, skill and error summaries", () => {
+    expect(activityBatchSummary([
+      { kind: "terminal", title: "运行 git status", status: "done" },
+      { kind: "terminal", title: "运行 npm test", status: "error" },
+    ])).toEqual({ label: "运行了 2 条命令", detail: "1 个异常" });
+    expect(activityBatchSummary([
+      { kind: "tool", title: "读取 README", status: "done" },
+      { kind: "tool", title: "搜索 package.json", status: "done" },
+    ])).toEqual({ label: "检查了 2 项", detail: "已完成" });
+    expect(activityBatchSummary([
+      { kind: "skill", title: "PDF Skill", status: "done" },
+      { kind: "tool", title: "读取文件", status: "active" },
+    ])).toEqual({ label: "使用 PDF Skill · 1 个工具", detail: "执行中" });
   });
 });
 

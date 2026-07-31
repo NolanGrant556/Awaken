@@ -19,6 +19,7 @@ import {
   loadSkillListsForProjects,
   nextMcpConfigTextForMode,
   skillDiagnosticText,
+  withMcpServerToggleState,
 } from "./ExtensionsView";
 
 describe("MCP configuration modes", () => {
@@ -96,6 +97,31 @@ describe("MCP source grouping", () => {
         [server],
       ),
     ).toBeUndefined();
+  });
+
+  it("optimistically toggles a user MCP card without removing it from the list", () => {
+    const servers = [
+      {
+        name: "ai",
+        state: "connected",
+        transport: "http",
+        scope: "user",
+      },
+      {
+        name: "keep",
+        state: "connected",
+        transport: "stdio",
+        scope: "project",
+      },
+    ] satisfies RuntimeMcpServer[];
+
+    const disabled = withMcpServerToggleState(servers, "ai", false);
+    expect(disabled).toHaveLength(2);
+    expect(disabled[0]).toMatchObject({ name: "ai", state: "disabled", errorReason: "" });
+    expect(disabled[1]).toEqual(servers[1]);
+
+    const enabled = withMcpServerToggleState(disabled, "ai", true);
+    expect(enabled[0]).toMatchObject({ name: "ai", state: "pending", errorReason: "" });
   });
 });
 

@@ -242,6 +242,47 @@ func TestManagerRestartWithConfigPreservesSnapshotOrder(t *testing.T) {
 	}
 }
 
+func TestManagerRestartWithConfigKeepsServerVisible(t *testing.T) {
+	disabled := false
+	mgr := NewManager(WithLogger(noopLogger{}))
+	config := ScopedMcpServerConfig{
+		Name:  "user-http",
+		Scope: ScopeUser,
+		Config: McpServerConfig{
+			HTTP:    &HTTPTransportConfig{URL: "https://user.invalid/mcp"},
+			Enabled: &disabled,
+		},
+	}
+	mgr.Start(context.Background(), []ScopedMcpServerConfig{config})
+	t.Cleanup(func() { mgr.Shutdown(context.Background()) })
+
+	done := make(chan struct{})
+	var missing atomic.Bool
+	go func() {
+		defer close(done)
+		deadline := time.Now().Add(500 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			if _, err := mgr.SnapshotServer("user-http"); err != nil {
+				missing.Store(true)
+				return
+			}
+		}
+	}()
+
+	for range 32 {
+		if err := mgr.RestartWithConfig(context.Background(), config); err != nil {
+			t.Fatalf("RestartWithConfig: %v", err)
+		}
+	}
+	<-done
+	if missing.Load() {
+		t.Fatal("RestartWithConfig briefly omitted the server from Snapshot")
+	}
+	if snapshot, err := mgr.SnapshotServer("user-http"); err != nil || snapshot.State != StateDisabled {
+		t.Fatalf("expected disabled server after restarts: snapshot=%+v err=%v", snapshot, err)
+	}
+}
+
 // TestManagerStateMachineWSRejected confirms the WS transport is marked
 // failed rather than attempted.
 func TestManagerStateMachineWSRejected(t *testing.T) {

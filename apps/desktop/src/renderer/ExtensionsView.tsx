@@ -170,6 +170,23 @@ export function findConnectorOwnedMcpServer(
   return servers.find((server) => server.name === serverNames[0]);
 }
 
+export function withMcpServerToggleState(
+  servers: RuntimeMcpServer[],
+  name: string,
+  enabled: boolean,
+): RuntimeMcpServer[] {
+  const nextState: RuntimeMcpServer["state"] = enabled ? "pending" : "disabled";
+  return servers.map((server) =>
+    server.name === name
+      ? {
+          ...server,
+          state: nextState,
+          errorReason: "",
+        }
+      : server,
+  );
+}
+
 function connectorCategoryLabel(category: string): string {
   switch (category) {
     case "docs":
@@ -654,6 +671,8 @@ export function ExtensionsView({
   const projectSkillPreviewScrollRef = useRef<HTMLDivElement>(null);
   const skillSnapshotSignatureRef = useRef("");
   const skillSyncInFlightRef = useRef(false);
+  const refreshGenerationRef = useRef(0);
+  const busyMcpServerNameRef = useRef<string | null>(null);
   const [skillToggleStates, setSkillToggleStates] = useState<Record<string, boolean>>({});
   const [busySkillId, setBusySkillId] = useState<string | null>(null);
   const [pendingSkillDelete, setPendingSkillDelete] =
@@ -685,6 +704,7 @@ export function ExtensionsView({
       setErrorMessage("Awaken runtime 未启动");
       return;
     }
+    const generation = ++refreshGenerationRef.current;
     if (showLoading) {
       setLoading(true);
     }
@@ -694,6 +714,9 @@ export function ExtensionsView({
         runtimeClient.getRuntimeInfo(),
         runtimeClient.listProjects(false),
       ]);
+      if (generation !== refreshGenerationRef.current) {
+        return;
+      }
       const projectRoots = dedupePaths(
         runtimeProjects.flatMap((project) => orderedProjectRoots(project)),
       );
@@ -719,6 +742,9 @@ export function ExtensionsView({
           ? runtimeClient.listSkills(fallbackRoots.length > 0 ? fallbackRoots : undefined)
           : Promise.resolve([]),
       ]);
+      if (generation !== refreshGenerationRef.current) {
+        return;
+      }
       const nextProjectRoot =
         projectRootOverride?.trim() ||
         skillProjectRoot.trim() ||
@@ -733,14 +759,32 @@ export function ExtensionsView({
       }
       setConnectors(nextConnectors);
       setCliConnectors(nextCliConnectors);
-      setMcpServers(nextMcpServers);
+      const busyServerName = busyMcpServerNameRef.current;
+      setMcpServers((current) => {
+        if (!busyServerName) {
+          return nextMcpServers;
+        }
+        const busyCurrent = current.find((server) => server.name === busyServerName);
+        const busyNext = nextMcpServers.find((server) => server.name === busyServerName);
+        if (busyCurrent && !busyNext) {
+          // Keep the card in place while a toggle/restart briefly omits it.
+          return [
+            ...nextMcpServers,
+            busyCurrent,
+          ];
+        }
+        return nextMcpServers;
+      });
       applySkillCatalogSnapshot(
         buildSkillCatalogSnapshot(nextProjectSkillResults, fallbackSkills),
       );
     } catch (error) {
+      if (generation !== refreshGenerationRef.current) {
+        return;
+      }
       setErrorMessage(error instanceof Error ? error.message : "扩展列表加载失败");
     } finally {
-      if (showLoading) {
+      if (showLoading && generation === refreshGenerationRef.current) {
         setLoading(false);
       }
     }
@@ -1114,10 +1158,13 @@ export function ExtensionsView({
   }
 
   async function handleToggleMcpServer(server: RuntimeMcpServer): Promise<void> {
+    const enabling = server.state === "disabled";
+    busyMcpServerNameRef.current = server.name;
     setBusyMcpServerName(server.name);
     setErrorMessage(null);
+    setMcpServers((current) => withMcpServerToggleState(current, server.name, enabling));
     try {
-      if (server.state === "disabled") {
+      if (enabling) {
         await runtimeClient.enableMcpServer(server.name);
         onNotice(`${server.name} 已启用`);
       } else {
@@ -1127,7 +1174,9 @@ export function ExtensionsView({
       await refresh(false);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "MCP server 操作失败");
+      await refresh(false);
     } finally {
+      busyMcpServerNameRef.current = null;
       setBusyMcpServerName(null);
     }
   }

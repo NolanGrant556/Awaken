@@ -71,6 +71,98 @@ describe("media item card behavior", () => {
     expect(card?.style.getPropertyValue("--aw-media-item-aspect")).toBe("0.5625");
   });
 
+  it("treats an already-complete image as loaded without another load event", () => {
+    const completeDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLImageElement.prototype,
+      "complete",
+    );
+    const widthDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLImageElement.prototype,
+      "naturalWidth",
+    );
+    const heightDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLImageElement.prototype,
+      "naturalHeight",
+    );
+    Object.defineProperty(HTMLImageElement.prototype, "complete", {
+      configurable: true,
+      get() {
+        return true;
+      },
+    });
+    Object.defineProperty(HTMLImageElement.prototype, "naturalWidth", {
+      configurable: true,
+      get() {
+        return 640;
+      },
+    });
+    Object.defineProperty(HTMLImageElement.prototype, "naturalHeight", {
+      configurable: true,
+      get() {
+        return 480;
+      },
+    });
+
+    try {
+      act(() => {
+        root.render(
+          <AwakenMediaItemCard
+            kind="image"
+            status="ready"
+            title="缓存图片"
+            src="awaken-artifact://media/image/cached.png"
+            onPreview={() => undefined}
+          />,
+        );
+      });
+
+      const card = host.querySelector<HTMLElement>(".aw-media-item-card");
+      const previewButton = host.querySelector<HTMLButtonElement>(".aw-media-item-card-surface");
+      expect(card?.dataset.loaded).toBe("true");
+      expect(card?.style.getPropertyValue("--aw-media-item-aspect")).toBe(`${640 / 480}`);
+      expect(previewButton?.disabled).toBe(false);
+      expect(host.querySelector(".aw-media-item-card-loading")).toBeNull();
+    } finally {
+      if (completeDescriptor) {
+        Object.defineProperty(HTMLImageElement.prototype, "complete", completeDescriptor);
+      } else {
+        delete (HTMLImageElement.prototype as { complete?: boolean }).complete;
+      }
+      if (widthDescriptor) {
+        Object.defineProperty(HTMLImageElement.prototype, "naturalWidth", widthDescriptor);
+      } else {
+        delete (HTMLImageElement.prototype as { naturalWidth?: number }).naturalWidth;
+      }
+      if (heightDescriptor) {
+        Object.defineProperty(HTMLImageElement.prototype, "naturalHeight", heightDescriptor);
+      } else {
+        delete (HTMLImageElement.prototype as { naturalHeight?: number }).naturalHeight;
+      }
+    }
+  });
+
+  it("notifies the host when media decoding fails", () => {
+    const onMediaError = vi.fn();
+    act(() => {
+      root.render(
+        <AwakenMediaItemCard
+          kind="image"
+          status="ready"
+          title="失效图片"
+          src="awaken-artifact://media/image/expired.png"
+          onMediaError={onMediaError}
+        />,
+      );
+    });
+
+    const image = host.querySelector<HTMLImageElement>("img");
+    act(() => image?.dispatchEvent(new Event("error")));
+    expect(onMediaError).toHaveBeenCalledTimes(1);
+    expect(host.querySelector<HTMLElement>(".aw-media-item-card")?.dataset.loaded).toBe(
+      "false",
+    );
+  });
+
   it("renders partial group results as independent ready and failed cards", () => {
     act(() => {
       root.render(

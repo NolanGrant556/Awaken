@@ -486,6 +486,10 @@ func (m *Manager) Reconnect(ctx context.Context, name string) error {
 // RestartWithConfig stops an existing server (if any), unregisters its tools,
 // and starts a fresh connection loop with the provided config. Used when the
 // operator edits a server's configuration from the UI.
+//
+// The server entry stays in the manager map for the whole rebuild so Snapshot
+// never briefly omits it. Catalog UIs that poll list endpoints must not flash
+// an empty "user installed" group during enable/disable or config restart.
 func (m *Manager) RestartWithConfig(ctx context.Context, scoped ScopedMcpServerConfig) error {
 	m.mu.Lock()
 	server, exists := m.servers[scoped.Name]
@@ -497,8 +501,8 @@ func (m *Manager) RestartWithConfig(ctx context.Context, scoped ScopedMcpServerC
 		}
 		if server.session != nil {
 			_ = server.session.Close()
+			server.session = nil
 		}
-		delete(m.servers, scoped.Name)
 	}
 	m.mu.Unlock()
 
@@ -508,13 +512,11 @@ func (m *Manager) RestartWithConfig(ctx context.Context, scoped ScopedMcpServerC
 			m.onToolsChanged(scoped.Name)
 		}
 		m.emitEvent(ServerEvent{Type: EventDisconnected, ServerName: scoped.Name})
+		m.startOne(ctx, scoped, seq)
+		return nil
 	}
 
-	if exists {
-		m.startOne(ctx, scoped, seq)
-	} else {
-		m.Start(ctx, []ScopedMcpServerConfig{scoped})
-	}
+	m.Start(ctx, []ScopedMcpServerConfig{scoped})
 	return nil
 }
 

@@ -603,9 +603,11 @@ func (h mcpHandlers) handleServerEnable(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// setPersistedServerEnabled updates the effective config owner and rebuilds
-// the manager entry. It returns true when the request has been fully handled;
-// dynamic-only servers return false and keep the existing runtime-only path.
+// setPersistedServerEnabled updates the effective config owner and toggles the
+// live manager entry in place. It returns true when the request has been fully
+// handled; dynamic-only servers return false and keep the existing runtime-only
+// path. Prefer Disable/Enable over RestartWithConfig so catalog Snapshots never
+// drop the server while persisting enabled=false/true.
 func (h mcpHandlers) setPersistedServerEnabled(w http.ResponseWriter, r *http.Request, name string, enabled bool) bool {
 	effective, found, err := h.loadEffectiveServerConfig(name)
 	if err != nil {
@@ -624,7 +626,30 @@ func (h mcpHandlers) setPersistedServerEnabled(w http.ResponseWriter, r *http.Re
 		writeErrorJSON(w, http.StatusInternalServerError, "MCP_CONFIG_WRITE_FAILED", err.Error())
 		return true
 	}
-	if err := h.manager.RestartWithConfig(context.WithoutCancel(r.Context()), mcpclient.ScopedMcpServerConfig{Name: name, Scope: effective.Scope, Config: effective.Config}); err != nil {
+	ctx := context.WithoutCancel(r.Context())
+	if enabled {
+		err = h.manager.Enable(ctx, name)
+	} else {
+		err = h.manager.Disable(name)
+	}
+	if errors.Is(err, mcpclient.ErrServerNotFound) {
+		// Config exists but the runtime entry was lost; rebuild without leaving
+		// a durable gap once the entry is present again.
+		err = h.manager.RestartWithConfig(ctx, mcpclient.ScopedMcpServerConfig{
+			Name:   name,
+			Scope:  effective.Scope,
+			Config: effective.Config,
+		})
+	}
+	if err != nil {
+		if errors.Is(err, mcpclient.ErrServerNotFound) {
+			writeErrorJSON(w, http.StatusNotFound, "SERVER_NOT_FOUND", err.Error())
+			return true
+		}
+		if errors.Is(err, mcpclient.ErrIllegalState) {
+			writeErrorJSON(w, http.StatusConflict, "ILLEGAL_STATE", err.Error())
+			return true
+		}
 		writeErrorJSON(w, http.StatusInternalServerError, "RESTART_FAILED", err.Error())
 		return true
 	}

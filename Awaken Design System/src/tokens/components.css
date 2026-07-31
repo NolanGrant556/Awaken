@@ -1011,6 +1011,14 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   white-space: nowrap;
 }
 
+.tool-trace-group-active:not(.tool-trace-group-open) .tool-trace-group-label {
+  background: linear-gradient(90deg, var(--aw-text-secondary) 25%, var(--aw-text-primary) 48%, var(--aw-text-secondary) 72%);
+  background-size: 240% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: tool-trace-shimmer 1.6s linear infinite;
+}
+
 .tool-trace-group-detail {
   min-width: 0;
   overflow: hidden;
@@ -1062,7 +1070,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 
 .tool-trace-line {
   display: grid;
-  grid-template-columns: 18px minmax(0, auto) auto auto;
+  grid-template-columns: 18px minmax(0, auto) 16px;
   align-items: center;
   justify-self: start;
   width: fit-content;
@@ -1133,17 +1141,13 @@ button.tool-trace-line:focus-visible {
   background-size: 240% 100%;
   background-clip: text;
   color: transparent;
-  animation: tool-trace-shimmer 1.4s linear infinite;
+  animation: tool-trace-shimmer 1.6s linear infinite;
 }
 
-.tool-trace-line-kind,
 .tool-trace-line-detail {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--aw-border-subtle) 78%, transparent);
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--aw-surface-muted) 76%, transparent);
   color: inherit;
   font-size: 11.5px;
   line-height: 17px;
@@ -1151,28 +1155,22 @@ button.tool-trace-line:focus-visible {
   white-space: nowrap;
 }
 
-.tool-trace-line-kind {
-  flex: 0 0 auto;
-  padding: 0 5px;
-  font-weight: var(--aw-font-weight-semibold);
-}
-
 .tool-trace-line-detail {
   max-width: min(52ch, 62%);
-  padding: 0 6px;
-  font-family: var(--aw-font-mono);
-}
-
-.tool-trace-line-status {
-  display: grid;
-  place-items: center;
-  color: var(--aw-status-success);
 }
 
 .tool-trace-line-chevron {
   display: grid;
   place-items: center;
   color: inherit;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.tool-trace-line:hover .tool-trace-line-chevron[data-visible="available"],
+.tool-trace-line:focus-visible .tool-trace-line-chevron[data-visible="available"],
+.tool-trace-line-open .tool-trace-line-chevron[data-visible="available"] {
+  opacity: 1;
 }
 
 .tool-trace-line-chevron svg {
@@ -1207,7 +1205,7 @@ button.tool-trace-line:focus-visible {
   display: grid;
   width: min(760px, 100%);
   min-width: 0;
-  max-height: 260px;
+  max-height: 320px;
   border: 1px solid color-mix(in srgb, var(--aw-border-subtle) 88%, transparent);
   border-radius: 10px;
   background: color-mix(in srgb, var(--aw-surface-muted) 84%, transparent);
@@ -1229,9 +1227,59 @@ button.tool-trace-line:focus-visible {
   line-height: var(--aw-line-height-xs);
 }
 
-.tool-trace-output-heading span:last-child:not(:first-child) {
+.tool-trace-output-heading > span:last-child:not(:first-child) {
   color: var(--aw-status-warning-text);
   font-weight: var(--aw-font-weight-regular);
+}
+
+.tool-trace-output-copy {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.tool-trace-output-copy:hover,
+.tool-trace-output-copy:focus-visible {
+  background: color-mix(in srgb, var(--aw-surface-hover) 82%, transparent);
+  color: var(--aw-text-primary);
+}
+
+.tool-trace-detail-sections {
+  display: grid;
+  min-height: 0;
+  overflow: auto;
+}
+
+.tool-trace-detail-section + .tool-trace-detail-section {
+  border-top: 1px solid color-mix(in srgb, var(--aw-border-subtle) 68%, transparent);
+}
+
+.tool-trace-detail-label {
+  padding: 8px 10px 0;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: var(--aw-line-height-xs);
+}
+
+.tool-trace-detail-section[data-format="text"] pre {
+  font-family: inherit;
+}
+
+.tool-trace-detail-section[data-tone="danger"] pre {
+  color: var(--aw-status-danger);
+}
+
+.tool-trace-detail-section[data-tone="success"] pre {
+  color: var(--aw-status-success);
 }
 
 .tool-trace-output-card pre {
@@ -1273,6 +1321,7 @@ button.tool-trace-line:focus-visible {
 
   .tool-trace-item,
   .tool-trace-line-active .tool-trace-line-title,
+  .tool-trace-group-active:not(.tool-trace-group-open) .tool-trace-group-label,
   .tool-trace-group-icon svg {
     animation: none;
   }

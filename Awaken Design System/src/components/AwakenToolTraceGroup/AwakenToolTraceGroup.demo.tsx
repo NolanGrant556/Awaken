@@ -1,5 +1,6 @@
 import "./AwakenToolTraceGroup.css";
-import type { ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
+import { AwakenButton } from "../AwakenButton/AwakenButton";
 import { AwakenDisclosure } from "../AwakenDisclosure/AwakenDisclosure";
 import { AwakenToolTraceLine } from "../AwakenToolTraceLine/AwakenToolTraceLine";
 import { AwakenToolTraceLineStates } from "../AwakenToolTraceLine/AwakenToolTraceLine.states";
@@ -7,8 +8,22 @@ import { AwakenToolTraceGroup } from "./AwakenToolTraceGroup";
 import { AwakenToolTraceGroupStates } from "./AwakenToolTraceGroup.states";
 
 export function AwakenToolTraceGroupDemo() {
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const originalThemeRef = useRef<string | undefined>(undefined);
   const GroupComponent = AwakenToolTraceGroup as unknown as ComponentType<Record<string, unknown>>;
   const LineComponent = AwakenToolTraceLine as unknown as ComponentType<Record<string, unknown>>;
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (originalThemeRef.current === undefined) {
+      originalThemeRef.current = root.getAttribute("data-aw-theme") ?? "";
+    }
+    root.setAttribute("data-aw-theme", theme);
+    return () => {
+      if (originalThemeRef.current) root.setAttribute("data-aw-theme", originalThemeRef.current);
+      else root.removeAttribute("data-aw-theme");
+    };
+  }, [theme]);
 
   return (
     <section className="ads-component-demo" aria-label="工具轨迹组件库演示">
@@ -17,10 +32,14 @@ export function AwakenToolTraceGroupDemo() {
           工具轨迹 <code>AwakenDisclosure + AwakenToolTraceGroup + AwakenToolTraceLine</code>
         </h2>
         <p>
-          先按真实 Desktop 终态展示“执行过程”如何收纳工具轨迹，再集中观测只读探索
-          工具组与普通单次工具调用。示例标题使用 Desktop 当前投影的工具名或英文只读
-          摘要，不额外翻译成“读取”“运行”等中文动作。
+          先按真实 Desktop 终态展示“执行过程”如何收纳活动批次，再集中观测批次摘要、
+          单次工具与类型化详情卡。活动组 Chevron 常驻，单条工具 Chevron 仅在悬停、
+          键盘聚焦或展开时可见；执行中文字使用从左到右的扫光反馈。
         </p>
+        <div className="ads-component-demo-actions" role="group" aria-label="工具轨迹主题预览">
+          <AwakenButton size="sm" variant={theme === "light" ? "default" : "ghost"} onClick={() => setTheme("light")}>浅色</AwakenButton>
+          <AwakenButton size="sm" variant={theme === "dark" ? "default" : "ghost"} onClick={() => setTheme("dark")}>深色</AwakenButton>
+        </div>
       </header>
       <div className="ads-component-demo-grid">
         <article className="ads-component-demo-state">

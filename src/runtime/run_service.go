@@ -134,6 +134,7 @@ type ComposerToken struct {
 }
 
 type ComposerTokenPayload struct {
+	CapabilityID  string `json:"capabilityId,omitempty"`
 	SkillID       string `json:"skillId,omitempty"`
 	SourceOrigin  string `json:"sourceOrigin,omitempty"`
 	SkillFilePath string `json:"skillFilePath,omitempty"`
@@ -732,6 +733,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		return Run{}, err
 	}
 	if err := validateComposerFileTokens(req.ComposerTokens, workspace); err != nil {
+		return Run{}, err
+	}
+	if err := validateComposerCapabilityTokens(req.ComposerTokens); err != nil {
 		return Run{}, err
 	}
 	s.projectMutationMu.RLock()
@@ -2002,8 +2006,13 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	if agent != nil {
 		agent.SetPendingUserAttachments(inputAttachmentsToContextAttachments(attachments))
 		agent.SetPendingComposerTokens(semanticComposerTokensForRun(snapshot.ComposerTokens))
-		if len(skillComposerTokens(snapshot.ComposerTokens)) > 0 {
-			if err := agent.PrepareUserMessage(ctx, input, sessionEventSink{session: session}); err != nil {
+		if len(snapshot.ComposerTokens) > 0 {
+			if err := agent.PrepareUserMessageWithDisplayInput(
+				ctx,
+				input,
+				displayInput,
+				sessionEventSink{session: session},
+			); err != nil {
 				code := "persistence_error"
 				if errors.Is(err, agentcore.ErrPersistenceUnavailable) {
 					code = "persistence_unavailable"
@@ -2358,18 +2367,39 @@ func cloneAgentComposerSkillSelection(value *agentcore.ComposerSkillSelectionCon
 	}
 }
 
-func effectiveInputForComposerTokens(input string, tokens []ComposerToken) string {
-	hasFileToken := false
-	visiblePrefix := strings.Builder{}
-	filePaths := make([]string, 0, len(tokens))
-	for _, token := range tokens {
-		visiblePrefix.WriteString(token.LeadingText)
-		if strings.EqualFold(strings.TrimSpace(token.Type), "file") {
-			hasFileToken = true
-			filePaths = append(filePaths, strings.TrimSpace(token.Payload.Path))
+const computerUseComposerInstruction = "请优先使用 Computer Use 观察并操作本机图形界面完成以下任务："
+
+func composerTokenModelExpansion(token ComposerToken) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(token.Type)) {
+	case "file":
+		return strings.TrimSpace(token.Payload.Path), true
+	case "capability":
+		if strings.EqualFold(strings.TrimSpace(token.Payload.CapabilityID), "computer-use") {
+			return computerUseComposerInstruction + "\n", true
 		}
 	}
-	if !hasFileToken {
+	return "", false
+}
+
+func effectiveInputForComposerTokens(input string, tokens []ComposerToken) string {
+	hasModelExpansion := false
+	visiblePrefix := strings.Builder{}
+	fallbackInstructions := make([]string, 0, len(tokens))
+	fallbackReferences := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		visiblePrefix.WriteString(token.LeadingText)
+		expansion, expands := composerTokenModelExpansion(token)
+		if !expands {
+			continue
+		}
+		hasModelExpansion = true
+		if strings.EqualFold(strings.TrimSpace(token.Type), "capability") {
+			fallbackInstructions = append(fallbackInstructions, strings.TrimSpace(expansion))
+		} else {
+			fallbackReferences = append(fallbackReferences, strings.TrimSpace(expansion))
+		}
+	}
+	if !hasModelExpansion {
 		// Explicit Skill identity enters the host-generated system context. The
 		// model-facing user message remains byte-for-byte the accepted input.
 		return input
@@ -2392,20 +2422,39 @@ func effectiveInputForComposerTokens(input string, tokens []ComposerToken) strin
 		}
 	}
 	if !matched {
-		// A malformed or older client must not make validated references vanish
-		// from the model input. Keep its display text and append the references.
-		return strings.TrimSpace(strings.Join(append([]string{input}, filePaths...), "\n"))
+		// A malformed or older client must not make validated capabilities or
+		// references vanish from the model input.
+		fallback := append([]string{}, fallbackInstructions...)
+		fallback = append(fallback, input)
+		fallback = append(fallback, fallbackReferences...)
+		return strings.TrimSpace(strings.Join(fallback, "\n"))
 	}
 
 	effective := strings.Builder{}
 	for _, token := range tokens {
 		effective.WriteString(token.LeadingText)
-		if strings.EqualFold(strings.TrimSpace(token.Type), "file") {
-			effective.WriteString(strings.TrimSpace(token.Payload.Path))
+		if expansion, expands := composerTokenModelExpansion(token); expands {
+			effective.WriteString(expansion)
 		}
 	}
 	effective.WriteString(tail)
 	return strings.TrimSpace(effective.String())
+}
+
+func validateComposerCapabilityTokens(tokens []ComposerToken) error {
+	for _, token := range tokens {
+		if !strings.EqualFold(strings.TrimSpace(token.Type), "capability") {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(token.Payload.CapabilityID), "computer-use") {
+			return fmt.Errorf(
+				"%w: composer capability token %q is unsupported",
+				ErrInvalidInput,
+				token.ID,
+			)
+		}
+	}
+	return nil
 }
 
 func validateComposerFileTokens(tokens []ComposerToken, workspace WorkspaceConfig) error {
@@ -2518,6 +2567,25 @@ func restoreAgentDisplayInput(agent *agentcore.Agent, effectiveInput string, dis
 	}
 }
 
+func displayConversationMessagesForRun(
+	run Run,
+	messages []convcontext.Message,
+) []convcontext.Message {
+	effectiveInput := effectiveInputForComposerTokens(run.Input, run.ComposerTokens)
+	if effectiveInput == run.Input {
+		return messages
+	}
+	displayMessages := append([]convcontext.Message(nil), messages...)
+	for i := len(displayMessages) - 1; i >= 0; i-- {
+		if displayMessages[i].Role == convcontext.RoleUser &&
+			displayMessages[i].Content == effectiveInput {
+			displayMessages[i].Content = run.Input
+			break
+		}
+	}
+	return displayMessages
+}
+
 func (s *RunService) flushAgentTranscript(session *Session, agent *agentcore.Agent) error {
 	if session == nil || agent == nil {
 		return nil
@@ -2528,7 +2596,11 @@ func (s *RunService) flushAgentTranscript(session *Session, agent *agentcore.Age
 		return nil
 	}
 	var firstErr error
-	if err := s.threadStore.AppendConversation(snapshot, run, agent.GetConversation().Context.GetMessages()); err != nil && firstErr == nil {
+	displayMessages := displayConversationMessagesForRun(
+		run,
+		agent.GetConversation().Context.GetMessages(),
+	)
+	if err := s.threadStore.AppendConversation(snapshot, run, displayMessages); err != nil && firstErr == nil {
 		firstErr = err
 	}
 	if err := s.threadStore.AppendRunEvents(snapshot, run, session.History(0)); err != nil && firstErr == nil {

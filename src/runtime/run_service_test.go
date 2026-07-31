@@ -508,6 +508,61 @@ func TestEffectiveInputForComposerSkillTokensKeepsEmptyInput(t *testing.T) {
 	}
 }
 
+func TestEffectiveInputForComputerUseCapabilityAddsHiddenInstruction(t *testing.T) {
+	token := ComposerToken{
+		ID:    "capability:computer-use",
+		Type:  "capability",
+		Label: "Computer Use",
+		Payload: ComposerTokenPayload{
+			CapabilityID: "computer-use",
+		},
+	}
+
+	if got := effectiveInputForComposerTokens("打开计算器", []ComposerToken{token}); got != computerUseComposerInstruction+"\n打开计算器" {
+		t.Fatalf("computer use instruction was not added ahead of the user task: %q", got)
+	}
+	token.LeadingText = "请先确认窗口，然后 "
+	if got := effectiveInputForComposerTokens("请先确认窗口，然后 再点击数字 7", []ComposerToken{token}); got != "请先确认窗口，然后 "+computerUseComposerInstruction+"\n再点击数字 7" {
+		t.Fatalf("inline computer use capability changed position: %q", got)
+	}
+}
+
+func TestValidateComposerCapabilityTokensRejectsUnknownCapability(t *testing.T) {
+	err := validateComposerCapabilityTokens([]ComposerToken{{
+		ID:      "capability:unknown",
+		Type:    "capability",
+		Payload: ComposerTokenPayload{CapabilityID: "unknown"},
+	}})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestDisplayConversationMessagesForRunHidesCapabilityInstruction(t *testing.T) {
+	run := Run{
+		Input: "打开计算器",
+		ComposerTokens: []ComposerToken{{
+			ID:      "capability:computer-use",
+			Type:    "capability",
+			Label:   "Computer Use",
+			Payload: ComposerTokenPayload{CapabilityID: "computer-use"},
+		}},
+	}
+	effective := effectiveInputForComposerTokens(run.Input, run.ComposerTokens)
+	modelMessages := []convcontext.Message{
+		{Role: convcontext.RoleUser, Content: effective},
+		{Role: convcontext.RoleAssistant, Content: "正在处理"},
+	}
+
+	displayMessages := displayConversationMessagesForRun(run, modelMessages)
+	if displayMessages[0].Content != run.Input {
+		t.Fatalf("transcript exposed hidden capability instruction: %+v", displayMessages)
+	}
+	if modelMessages[0].Content != effective {
+		t.Fatalf("transcript projection mutated live model context: %+v", modelMessages)
+	}
+}
+
 func TestEffectiveInputForComposerFileTokensRestoresHiddenPathsInline(t *testing.T) {
 	tokens := []ComposerToken{
 		{

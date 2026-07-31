@@ -331,22 +331,33 @@ func recentSuccessfulToolNames(messages []context.Message, limit int) []string {
 	return result
 }
 
-// PrepareUserMessage persists a composer-selected Skill turn before Skill
-// pre-activation. This guarantees that an activation failure never erases the
-// user-authored input from durable history. RunStreamWithEvents consumes the
-// prepared turn exactly once and will not append a duplicate user_message.
+// PrepareUserMessage persists a composer-selected turn before pre-activation.
+// RunStreamWithEvents consumes the prepared turn exactly once and will not
+// append a duplicate user_message.
 func (a *Agent) PrepareUserMessage(ctx stdcontext.Context, userInput string, sink EventSink) error {
+	return a.PrepareUserMessageWithDisplayInput(ctx, userInput, userInput, sink)
+}
+
+// PrepareUserMessageWithDisplayInput keeps host-expanded model input out of the
+// durable user_message while binding the prepared turn to the exact input the
+// model will consume.
+func (a *Agent) PrepareUserMessageWithDisplayInput(
+	ctx stdcontext.Context,
+	modelInput string,
+	displayInput string,
+	sink EventSink,
+) error {
 	if a == nil {
 		return fmt.Errorf("agent unavailable")
 	}
 	attachments := a.consumePendingUserAttachments()
 	composerTokens := a.consumePendingComposerTokens()
-	if err := a.persistUserMessage(ctx, userInput, attachments, composerTokens, sink); err != nil {
+	if err := a.persistUserMessage(ctx, displayInput, attachments, composerTokens, sink); err != nil {
 		a.preparedUserTurn = nil
 		return err
 	}
 	a.preparedUserTurn = &preparedUserTurn{
-		content: userInput, attachments: append([]context.MessageAttachment(nil), attachments...),
+		content: modelInput, attachments: append([]context.MessageAttachment(nil), attachments...),
 		composerTokens: cloneSemanticComposerTokens(composerTokens),
 	}
 	return nil

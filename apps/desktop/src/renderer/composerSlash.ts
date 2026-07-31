@@ -1,6 +1,7 @@
 import { createElement, type ReactNode } from "react";
 import { MonitorCog, Wrench } from "lucide-react";
 import type {
+  ComputerUseComposerTokenPayload,
   ComposerToken,
   RuntimeSkill,
   SkillProjectRoots,
@@ -12,7 +13,8 @@ export type SlashActionType =
   | "file"
   | "workflow"
   | "prompt"
-  | "connector";
+  | "connector"
+  | "capability";
 
 export type SlashAction = {
   id: string;
@@ -50,6 +52,10 @@ export type SlashTrigger = {
   end: number;
 };
 
+export type ComposerActionTrigger = SlashTrigger & {
+  marker: "/" | "@";
+};
+
 export type ComposerTokenPlacement = "before" | "after";
 
 export type ComposerTokenKeyboardDeleteState = {
@@ -62,20 +68,42 @@ export type ComposerTokenKeyboardDeleteState = {
 };
 
 const TRAILING_SLASH_TRIGGER_PATTERN = /(^|\s)\/([^\s]*)$/;
+const TRAILING_MENTION_TRIGGER_PATTERN = /(^|\s)@([^\s]*)$/;
 
-export function slashTriggerFromComposerValue(
+function actionTriggerFromComposerValue(
   value: string,
-): SlashTrigger | null {
-  const match = value.match(TRAILING_SLASH_TRIGGER_PATTERN);
+  marker: ComposerActionTrigger["marker"],
+  pattern: RegExp,
+): ComposerActionTrigger | null {
+  const match = value.match(pattern);
   if (!match || match.index === undefined) {
     return null;
   }
   const leading = match[1] ?? "";
   return {
+    marker,
     query: match[2] ?? "",
     start: match.index + leading.length,
     end: value.length,
   };
+}
+
+export function slashTriggerFromComposerValue(
+  value: string,
+): ComposerActionTrigger | null {
+  return actionTriggerFromComposerValue(value, "/", TRAILING_SLASH_TRIGGER_PATTERN);
+}
+
+export function mentionTriggerFromComposerValue(
+  value: string,
+): ComposerActionTrigger | null {
+  return actionTriggerFromComposerValue(value, "@", TRAILING_MENTION_TRIGGER_PATTERN);
+}
+
+export function composerActionTriggerFromComposerValue(
+  value: string,
+): ComposerActionTrigger | null {
+  return mentionTriggerFromComposerValue(value) ?? slashTriggerFromComposerValue(value);
 }
 
 export function clearSlashTriggerFromComposerValue(value: string): string {
@@ -86,12 +114,12 @@ export function clearSlashTriggerFromComposerValue(value: string): string {
   return `${value.slice(0, trigger.start)}${value.slice(trigger.end)}`;
 }
 
-export function replaceSlashTriggerWithText(value: string, text: string): string {
-  const trigger = slashTriggerFromComposerValue(value);
+export function clearComposerActionTriggerFromComposerValue(value: string): string {
+  const trigger = composerActionTriggerFromComposerValue(value);
   if (!trigger) {
     return value;
   }
-  return `${value.slice(0, trigger.start)}${text}${value.slice(trigger.end)}`;
+  return `${value.slice(0, trigger.start)}${value.slice(trigger.end)}`;
 }
 
 export function composerTokenIdForKeyboardDelete({
@@ -193,28 +221,34 @@ export function skillSlashProvider(
   };
 }
 
-export const COMPUTER_USE_SLASH_PROMPT =
-  "请优先使用 Computer Use 观察并操作本机图形界面完成以下任务：";
-
-export function computerUseSlashProvider(): SlashProvider {
+export function computerUseMentionProvider(): SlashProvider {
+  const payload: ComputerUseComposerTokenPayload = {
+    capabilityId: "computer-use",
+  };
+  const token: ComposerToken = {
+    id: "capability:computer-use",
+    type: "capability",
+    label: "Computer Use",
+    payload: payload as unknown as Record<string, unknown>,
+  };
   return {
     id: "computer-use",
     label: "Computer Use",
     getActions() {
       return [
         {
-          id: "prompt:computer-use",
-          type: "prompt",
+          id: token.id,
+          type: "capability",
           label: "Computer Use",
           description: "引导模型观察并操作本机图形界面",
           keywords: ["computer", "computer use", "计算机", "电脑", "GUI", "桌面"],
           icon: createElement(MonitorCog, { size: 13, strokeWidth: 1.85 }),
           preview: {
             description:
-              "插入一段明确指令，让具备视觉能力且运行环境就绪的模型优先调用 computer_observe、computer_act 和 computer_verify。",
+              "选择 Computer Use 能力；提交时由运行时向模型提供引导，不在用户输入中显示提示词。",
           },
-          payload: { prompt: COMPUTER_USE_SLASH_PROMPT },
-          composerText: `${COMPUTER_USE_SLASH_PROMPT} `,
+          payload,
+          composerToken: token,
         },
       ];
     },

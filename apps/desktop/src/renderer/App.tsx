@@ -194,15 +194,14 @@ import {
 } from "./composerAttachments";
 import {
   actionsFromSlashProviders,
-  clearSlashTriggerFromComposerValue,
-  computerUseSlashProvider,
+  clearComposerActionTriggerFromComposerValue,
+  composerActionTriggerFromComposerValue,
+  computerUseMentionProvider,
   composerTokenPlacementForSlashTrigger,
   composerTokenFromSlashAction,
   filterSlashActions,
   firstSelectableSlashAction,
-  replaceSlashTriggerWithText,
   skillSlashProvider,
-  slashTriggerFromComposerValue,
   type ComposerTokenPlacement,
   type SlashAction,
 } from "./composerSlash";
@@ -1917,12 +1916,10 @@ export function App() {
   const workspaceTargetPathRef = useRef("");
   const runtimeClient = runtimeClientRef.current;
   const slashProviders = useMemo(
-    () => [
-      computerUseSlashProvider(),
-      skillSlashProvider((workspaceRoot) => runtimeClient.listSkills(workspaceRoot)),
-    ],
+    () => [skillSlashProvider((workspaceRoot) => runtimeClient.listSkills(workspaceRoot))],
     [runtimeClient],
   );
+  const mentionProviders = useMemo(() => [computerUseMentionProvider()], []);
 
   const [runtimeState, dispatch] = useReducer(
     reduceRuntimeState,
@@ -3171,11 +3168,14 @@ export function App() {
     [composerTokenLeadingTexts, composerTokens],
   );
   const trimmedEffectiveComposerValue = `${composerInlineTextPrefix}${composerValue}`.trim();
-  const slashTrigger = slashTriggerFromComposerValue(composerValue);
-  const slashPaletteOpen = Boolean(slashTrigger) && desktopReady && isWorkspaceValid && !isBusy;
+  const composerActionTrigger = composerActionTriggerFromComposerValue(composerValue);
+  const activeComposerActionProviders =
+    composerActionTrigger?.marker === "@" ? mentionProviders : slashProviders;
+  const slashPaletteOpen =
+    Boolean(composerActionTrigger) && desktopReady && isWorkspaceValid && !isBusy;
   const filteredSlashActions = useMemo(
-    () => filterSlashActions(slashActions, slashTrigger?.query ?? "").slice(0, 24),
-    [slashActions, slashTrigger?.query],
+    () => filterSlashActions(slashActions, composerActionTrigger?.query ?? "").slice(0, 24),
+    [composerActionTrigger?.query, slashActions],
   );
   const composerBarTokens = useMemo(
     () =>
@@ -3231,7 +3231,7 @@ export function App() {
     setSlashLoading(true);
     setSlashError(null);
     setSlashActions([]);
-    void actionsFromSlashProviders(slashProviders, { workspaceRootForRun })
+    void actionsFromSlashProviders(activeComposerActionProviders, { workspaceRootForRun })
       .then((actions) => {
         if (cancelled) {
           return;
@@ -3243,7 +3243,7 @@ export function App() {
           return;
         }
         setSlashActions([]);
-        setSlashError(error instanceof Error ? error.message : "斜杠菜单加载失败");
+        setSlashError(error instanceof Error ? error.message : "命令菜单加载失败");
       })
       .finally(() => {
         if (!cancelled) {
@@ -3254,7 +3254,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [slashPaletteOpen, slashProviders, workspaceRootForRun]);
+  }, [activeComposerActionProviders, slashPaletteOpen, workspaceRootForRun]);
 
   useEffect(() => {
     if (!slashPaletteOpen) {
@@ -4034,22 +4034,14 @@ export function App() {
       return;
     }
     const token = composerTokenFromSlashAction(action);
-    if (!token && action.composerText) {
-      setComposerValue((current) => {
-        return replaceSlashTriggerWithText(current, action.composerText ?? "");
-      });
-      setSlashActiveActionId(undefined);
-      requestComposerFocus();
-      return;
-    }
     if (!token) {
       return;
     }
-    const currentSlashTrigger = slashTriggerFromComposerValue(composerValue);
-    const placement = composerTokenPlacementForSlashTrigger(currentSlashTrigger);
+    const currentActionTrigger = composerActionTriggerFromComposerValue(composerValue);
+    const placement = composerTokenPlacementForSlashTrigger(currentActionTrigger);
     const leadingText =
-      placement === "after" && currentSlashTrigger
-        ? composerValue.slice(0, currentSlashTrigger.start)
+      placement === "after" && currentActionTrigger
+        ? composerValue.slice(0, currentActionTrigger.start)
         : "";
     // The token itself is the durable owner of its leading text; the
     // composerTokenLeadingTexts map only mirrors it for composer editing.
@@ -4072,13 +4064,13 @@ export function App() {
       return current[token.id] === leadingText ? current : { ...current, [token.id]: leadingText };
     });
     setComposerValue((current) => {
-      const trigger = slashTriggerFromComposerValue(current);
+      const trigger = composerActionTriggerFromComposerValue(current);
       if (!trigger) {
         return current;
       }
       return composerTokenPlacementForSlashTrigger(trigger) === "after"
         ? current.slice(trigger.end)
-        : clearSlashTriggerFromComposerValue(current);
+        : clearComposerActionTriggerFromComposerValue(current);
     });
     setSlashActiveActionId(undefined);
     requestComposerFocus();
@@ -4152,7 +4144,7 @@ export function App() {
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      setComposerValue((current) => clearSlashTriggerFromComposerValue(current));
+      setComposerValue((current) => clearComposerActionTriggerFromComposerValue(current));
       setSlashActiveActionId(undefined);
       return;
     }

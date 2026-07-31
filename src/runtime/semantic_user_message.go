@@ -14,6 +14,9 @@ func semanticComposerTokensForRun(tokens []ComposerToken) []agentcore.SemanticCo
 	converted := make([]agentcore.SemanticComposerToken, 0, len(tokens))
 	for _, token := range tokens {
 		payload := map[string]any{}
+		if value := strings.TrimSpace(token.Payload.CapabilityID); value != "" {
+			payload["capabilityId"] = value
+		}
 		if value := strings.TrimSpace(token.Payload.SkillID); value != "" {
 			payload["skillId"] = value
 		}

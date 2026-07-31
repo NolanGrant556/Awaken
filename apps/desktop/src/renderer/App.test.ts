@@ -50,14 +50,15 @@ import {
 } from "./App";
 import {
   actionsFromSlashProviders,
+  clearComposerActionTriggerFromComposerValue,
   clearSlashTriggerFromComposerValue,
-  computerUseSlashProvider,
-  COMPUTER_USE_SLASH_PROMPT,
+  composerActionTriggerFromComposerValue,
+  computerUseMentionProvider,
   composerTokenIdForKeyboardDelete,
   composerTokenPlacementForSlashTrigger,
   composerTokenFromSlashAction,
   filterSlashActions,
-  replaceSlashTriggerWithText,
+  mentionTriggerFromComposerValue,
   skillSlashProvider,
   skillSlashActionsFromSkills,
   slashTriggerFromComposerValue,
@@ -1196,6 +1197,19 @@ describe("Composer Slash Palette helpers", () => {
     expect(slashTriggerFromComposerValue("hello/")).toBeNull();
     expect(slashTriggerFromComposerValue("hello /daily later")).toBeNull();
     expect(slashTriggerFromComposerValue("daily")).toBeNull();
+    expect(mentionTriggerFromComposerValue("@")).toMatchObject({
+      marker: "@",
+      query: "",
+    });
+    expect(mentionTriggerFromComposerValue("hello @computer")).toMatchObject({
+      marker: "@",
+      query: "computer",
+      start: 6,
+      end: 15,
+    });
+    expect(mentionTriggerFromComposerValue("hello@computer")).toBeNull();
+    expect(composerActionTriggerFromComposerValue("/daily")?.marker).toBe("/");
+    expect(composerActionTriggerFromComposerValue("@computer")?.marker).toBe("@");
 
     const actions = skillSlashActionsFromSkills(skills);
 
@@ -1211,6 +1225,7 @@ describe("Composer Slash Palette helpers", () => {
     expect(clearSlashTriggerFromComposerValue("hello /daily")).toBe("hello ");
     expect(clearSlashTriggerFromComposerValue("hello /")).toBe("hello ");
     expect(clearSlashTriggerFromComposerValue("hello/daily")).toBe("hello/daily");
+    expect(clearComposerActionTriggerFromComposerValue("hello @computer")).toBe("hello ");
   });
 
   it("places tokens based on where the slash trigger was typed", () => {
@@ -1309,21 +1324,29 @@ describe("Composer Slash Palette helpers", () => {
     expect(actions[0]?.label).toBe("brief.md");
   });
 
-  it("offers Computer Use as a slash prompt and replaces only the active trigger", async () => {
+  it("offers Computer Use as a mention capability token without visible prompt text", async () => {
     const actions = await actionsFromSlashProviders(
-      [computerUseSlashProvider()],
+      [computerUseMentionProvider()],
       { workspaceRootForRun: "/workspace" },
     );
     expect(actions).toHaveLength(1);
     expect(actions[0]).toMatchObject({
-      id: "prompt:computer-use",
-      type: "prompt",
+      id: "capability:computer-use",
+      type: "capability",
       label: "Computer Use",
+      composerToken: {
+        id: "capability:computer-use",
+        type: "capability",
+        label: "Computer Use",
+        payload: { capabilityId: "computer-use" },
+      },
     });
     expect(filterSlashActions(actions, "电脑")).toHaveLength(1);
-    expect(
-      replaceSlashTriggerWithText("继续 /computer", actions[0]?.composerText ?? ""),
-    ).toBe(`继续 ${COMPUTER_USE_SLASH_PROMPT} `);
+    expect(actions[0]?.composerText).toBeUndefined();
+    expect(composerTokenFromSlashAction(actions[0]!)).toMatchObject({
+      type: "capability",
+      payload: { capabilityId: "computer-use" },
+    });
   });
 
   it("lets non-skill providers define their own composer token payload", () => {
@@ -2360,6 +2383,25 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(inlinePrompt).toContain("deep-research");
     expect(inlinePrompt).toContain("请继续");
     expect(html).not.toContain("execution-prompt-bubble-token-group");
+  });
+
+  it("renders Computer Use capability tokens with a monitor icon", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "",
+        tokens: [
+          {
+            id: "capability:computer-use",
+            type: "capability",
+            label: "Computer Use",
+          },
+        ],
+      }),
+    );
+
+    expect(html).toContain("execution-prompt-bubble-token-capability");
+    expect(html).toContain("Computer Use");
+    expect(html).toContain("lucide-monitor");
   });
 
   it("renders selected skill tokens before text when no inline position is present", () => {

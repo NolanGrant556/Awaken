@@ -1,4 +1,5 @@
 import path from "node:path";
+import { TextDecoder } from "node:util";
 import type { ProjectFilePreviewKind } from "../shared/runtime.js";
 
 export const MAX_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024;
@@ -60,6 +61,7 @@ const codeExtensions = new Set([
   "log",
   "lua",
   "mjs",
+  "mod",
   "ndjson",
   "php",
   "properties",
@@ -71,6 +73,7 @@ const codeExtensions = new Set([
   "sh",
   "sql",
   "svelte",
+  "sum",
   "swift",
   "text",
   "toml",
@@ -85,6 +88,10 @@ const codeExtensions = new Set([
   "zsh",
 ]);
 const extensionlessCodeFiles = new Set([
+  ".editorconfig",
+  ".gitattributes",
+  ".gitignore",
+  ".npmrc",
   "dockerfile",
   "gemfile",
   "justfile",
@@ -172,6 +179,45 @@ export function languageNameForFile(fileName: string): string {
     default:
       return extension || "text";
   }
+}
+
+/**
+ * Decodes a bounded file as text without silently replacing invalid bytes.
+ * UTF-16 is accepted only when a BOM makes the encoding unambiguous.
+ */
+export function decodeTextPreviewBuffer(buffer: Buffer): string | undefined {
+  let encoding = "utf-8";
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
+    encoding = "utf-16le";
+  } else if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) {
+    encoding = "utf-16be";
+  } else if (buffer.includes(0)) {
+    return undefined;
+  }
+
+  let content: string;
+  try {
+    content = new TextDecoder(encoding, { fatal: true }).decode(buffer);
+  } catch {
+    return undefined;
+  }
+
+  let suspiciousControlCharacters = 0;
+  for (const character of content) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (
+      (codePoint >= 0x00 && codePoint <= 0x08) ||
+      codePoint === 0x0b ||
+      (codePoint >= 0x0e && codePoint <= 0x1f) ||
+      codePoint === 0x7f
+    ) {
+      suspiciousControlCharacters += 1;
+    }
+  }
+  if (suspiciousControlCharacters > Math.floor(content.length * 0.01)) {
+    return undefined;
+  }
+  return content;
 }
 
 const mimeTypes: Record<string, string> = {

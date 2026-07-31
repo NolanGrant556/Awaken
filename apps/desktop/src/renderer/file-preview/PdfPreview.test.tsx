@@ -69,7 +69,9 @@ describe("PdfPreview", () => {
   let root: Root;
 
   beforeEach(() => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    (
+      globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(720);
     container = document.createElement("div");
@@ -105,6 +107,12 @@ describe("PdfPreview", () => {
             byteLength: 128,
             src: "awaken-preview://preview-pdf/document.pdf",
           }}
+          frameProps={{
+            displayName: "manual.pdf",
+            onReload: vi.fn(),
+            onOpenExternal: vi.fn(),
+            onReveal: vi.fn(),
+          }}
           onLoadingChange={onLoadingChange}
           onLoadError={vi.fn()}
         />,
@@ -119,17 +127,33 @@ describe("PdfPreview", () => {
       }),
     );
     expect(pdfMocks.documentProxy.getPage).toHaveBeenCalledWith(1);
-    expect(container.querySelector('canvas[aria-label="PDF 第 1 页，共 3 页"]')).not.toBeNull();
-    expect(container.querySelector('[aria-label="缩放比例"]')?.textContent).toBe("适应宽度");
+    expect(
+      container.querySelector('canvas[aria-label="PDF 第 1 页，共 3 页"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[aria-label="缩放比例"]')?.textContent,
+    ).toBe("适宽");
+    expect(
+      container
+        .querySelector('[aria-label="PDF 查看工具栏"]')
+        ?.closest(".project-file-preview-heading"),
+    ).not.toBeNull();
+    expect(container.querySelector(".project-file-preview-toolbar")).toBeNull();
     expect(onLoadingChange).toHaveBeenLastCalledWith(false);
 
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('[aria-label="下一页"]')?.click();
+      container
+        .querySelector<HTMLButtonElement>('[aria-label="下一页"]')
+        ?.click();
     });
     await settleUntil(() =>
-      pdfMocks.documentProxy.getPage.mock.calls.some(([pageNumber]) => pageNumber === 2),
+      pdfMocks.documentProxy.getPage.mock.calls.some(
+        ([pageNumber]) => pageNumber === 2,
+      ),
     );
 
-    expect(container.querySelector('canvas[aria-label="PDF 第 2 页，共 3 页"]')).not.toBeNull();
+    expect(
+      container.querySelector('canvas[aria-label="PDF 第 2 页，共 3 页"]'),
+    ).not.toBeNull();
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_TEXT_PREVIEW_BYTES,
   classifyPreviewFile,
+  decodeTextPreviewBuffer,
   parseSingleByteRange,
   previewByteLimit,
   rasterDimensions,
@@ -18,11 +19,28 @@ describe("project file preview policy", () => {
       kind: "code",
       language: "typescript",
     });
+    expect(classifyPreviewFile("go.mod")).toMatchObject({
+      kind: "code",
+      language: "mod",
+    });
+    expect(classifyPreviewFile("go.sum")?.kind).toBe("code");
+    expect(classifyPreviewFile(".gitignore")?.kind).toBe("code");
     expect(classifyPreviewFile("manual.pdf")?.kind).toBe("pdf");
     expect(classifyPreviewFile("photo.webp")?.kind).toBe("image");
     expect(classifyPreviewFile("index.html")?.kind).toBe("html");
     expect(classifyPreviewFile("archive.zip")).toBeUndefined();
     expect(previewByteLimit("code")).toBe(MAX_TEXT_PREVIEW_BYTES);
+  });
+
+  it("decodes safe source text and rejects binary or invalid UTF-8 content", () => {
+    expect(decodeTextPreviewBuffer(Buffer.from("module example.com/app\n"))).toBe(
+      "module example.com/app\n",
+    );
+    expect(decodeTextPreviewBuffer(Buffer.from([0x00, 0x01, 0x02]))).toBeUndefined();
+    expect(decodeTextPreviewBuffer(Buffer.from([0xc3, 0x28]))).toBeUndefined();
+    expect(
+      decodeTextPreviewBuffer(Buffer.from([0xff, 0xfe, 0x61, 0x00, 0x62, 0x00])),
+    ).toBe("ab");
   });
 
   it("parses bounded Chromium byte range requests", () => {

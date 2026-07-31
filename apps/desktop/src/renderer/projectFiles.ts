@@ -53,6 +53,7 @@ const fileIconExtensions: ReadonlyArray<
       "less",
       "lua",
       "mjs",
+      "mod",
       "php",
       "py",
       "rb",
@@ -62,6 +63,7 @@ const fileIconExtensions: ReadonlyArray<
       "sh",
       "sql",
       "svelte",
+      "sum",
       "swift",
       "toml",
       "ts",
@@ -88,6 +90,10 @@ const fileIconExtensions: ReadonlyArray<
 ];
 
 const extensionlessCodeFiles = new Set([
+  ".editorconfig",
+  ".gitattributes",
+  ".gitignore",
+  ".npmrc",
   "cmakelists.txt",
   "dockerfile",
   "gemfile",

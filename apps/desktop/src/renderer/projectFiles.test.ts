@@ -45,6 +45,9 @@ describe("project file tree rows", () => {
     expect(kindFor("demo.mp4")).toBe("video");
     expect(kindFor("notes.txt")).toBe("text");
     expect(kindFor("Dockerfile")).toBe("code");
+    expect(kindFor("go.mod")).toBe("code");
+    expect(kindFor("go.sum")).toBe("code");
+    expect(kindFor(".gitignore")).toBe("code");
     expect(kindFor("unknown.bin")).toBe("file");
   });
 

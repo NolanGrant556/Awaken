@@ -1,4 +1,11 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { ExternalLink, FolderSearch2, Globe2, RefreshCw } from "lucide-react";
 import type {
   ProjectFilePreviewActionRequest,
@@ -6,6 +13,7 @@ import type {
 } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
 import ImagePreview from "./ImagePreview";
+import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 import PreviewErrorBoundary from "./PreviewErrorBoundary";
 import WebviewPreview from "./WebviewPreview";
 
@@ -45,8 +53,10 @@ type PreviewState =
   | { status: "error"; requestId: string; message: string };
 
 function previewRequestId(): string {
-  return globalThis.crypto?.randomUUID?.() ??
-    `preview-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `preview-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  );
 }
 
 export default function FilePreviewHost({
@@ -168,7 +178,9 @@ export default function FilePreviewHost({
       : undefined;
 
   function runFallbackAction(
-    action: (request: ProjectFilePreviewActionRequest) => Promise<{ ok: boolean; message?: string }>,
+    action: (
+      request: ProjectFilePreviewActionRequest,
+    ) => Promise<{ ok: boolean; message?: string }>,
   ): void {
     if (!actionRequest) return;
     void action(actionRequest)
@@ -217,13 +229,18 @@ export default function FilePreviewHost({
         <strong>无法预览此文件</strong>
         <span>{state.message}</span>
         <div className="project-file-preview-state__actions">
-          <button type="button" onClick={() => setRetryGeneration((value) => value + 1)}>
+          <button
+            type="button"
+            onClick={() => setRetryGeneration((value) => value + 1)}
+          >
             <RefreshCw size={15} aria-hidden="true" />
             重试
           </button>
           <button
             type="button"
-            onClick={() => runFallbackAction(runtimeClient.openProjectFileExternally)}
+            onClick={() =>
+              runFallbackAction(runtimeClient.openProjectFileExternally)
+            }
           >
             <ExternalLink size={15} aria-hidden="true" />
             使用系统默认应用打开
@@ -241,7 +258,19 @@ export default function FilePreviewHost({
   }
 
   const preview = state.preview;
-  const previewVisible = preview.kind === "html" ? mode === "browser" : mode === "files";
+  const previewVisible =
+    preview.kind === "html" ? mode === "browser" : mode === "files";
+  const frameProps: Omit<
+    PreviewFrameProps,
+    "children" | "formatActions" | "formatLabel"
+  > = {
+    displayName: preview.displayName,
+    loading: guestLoading,
+    onReload: () => setRetryGeneration((value) => value + 1),
+    onOpenExternal: () =>
+      runFallbackAction(runtimeClient.openProjectFileExternally),
+    onReveal: () => runFallbackAction(runtimeClient.revealProjectFile),
+  };
   return (
     <div className="project-file-preview-mode-stack">
       <div
@@ -250,108 +279,90 @@ export default function FilePreviewHost({
         }`}
         aria-hidden={previewVisible ? undefined : true}
       >
-        <div className="project-file-preview-host">
-          <header className="project-file-preview-heading">
-            <div>
-              <strong>{preview.displayName}</strong>
-              <span>{preview.kind.toLocaleUpperCase()}</span>
-            </div>
-            <div className="project-file-preview-heading__actions">
-              <button
-                type="button"
-                aria-label="重新载入"
-                title="重新载入"
-                onClick={() => setRetryGeneration((value) => value + 1)}
+        <PreviewErrorBoundary
+          resetKey={preview.previewId}
+          onError={() =>
+            setState({
+              status: "error",
+              requestId: preview.requestId,
+              message: "预览组件意外停止运行，请重试。",
+            })
+          }
+        >
+          <Suspense
+            fallback={
+              <PreviewFrame
+                {...frameProps}
+                formatLabel={preview.kind.toLocaleUpperCase()}
               >
-                <RefreshCw size={15} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                aria-label="使用系统默认应用打开"
-                title="使用系统默认应用打开"
-                onClick={() => runFallbackAction(runtimeClient.openProjectFileExternally)}
-              >
-                <ExternalLink size={15} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                aria-label="在文件管理器中显示"
-                title="在文件管理器中显示"
-                onClick={() => runFallbackAction(runtimeClient.revealProjectFile)}
-              >
-                <FolderSearch2 size={15} aria-hidden="true" />
-              </button>
-            </div>
-          </header>
-          <div className="project-file-preview-content">
-            <PreviewErrorBoundary
-              resetKey={preview.previewId}
-              onError={() =>
-                setState({
-                  status: "error",
-                  requestId: preview.requestId,
-                  message: "预览组件意外停止运行，请重试。",
-                })
-              }
-            >
-              <Suspense
-                fallback={
-                  <div className="project-file-preview-state" role="status">
-                    <span className="project-file-preview-spinner" aria-hidden="true" />
-                    <span>正在加载查看器…</span>
-                  </div>
+                <div className="project-file-preview-state" role="status">
+                  <span
+                    className="project-file-preview-spinner"
+                    aria-hidden="true"
+                  />
+                  <span>正在加载查看器…</span>
+                </div>
+              </PreviewFrame>
+            }
+          >
+            {preview.transport === "text" && preview.kind === "markdown" ? (
+              <PreviewFrame {...frameProps} formatLabel="Markdown">
+                <MarkdownPreview preview={preview} />
+              </PreviewFrame>
+            ) : preview.transport === "text" && preview.kind === "code" ? (
+              <CodePreview preview={preview} frameProps={frameProps} />
+            ) : preview.transport === "url" && preview.kind === "image" ? (
+              <ImagePreview
+                preview={preview}
+                frameProps={frameProps}
+                onLoadError={() =>
+                  setState({
+                    status: "error",
+                    requestId: preview.requestId,
+                    message: "图片加载失败。",
+                  })
                 }
+              />
+            ) : preview.transport === "url" && preview.kind === "pdf" ? (
+              <PdfPreview
+                preview={preview as Parameters<typeof PdfPreview>[0]["preview"]}
+                frameProps={frameProps}
+                onLoadingChange={setGuestLoading}
+                onLoadError={(message) =>
+                  setState({
+                    status: "error",
+                    requestId: preview.requestId,
+                    message,
+                  })
+                }
+              />
+            ) : preview.transport === "url" && preview.partition ? (
+              <WebviewPreview
+                preview={
+                  preview as Parameters<typeof WebviewPreview>[0]["preview"]
+                }
+                frameProps={frameProps}
+                onLoadingChange={setGuestLoading}
+                onLoadError={(message) =>
+                  setState({
+                    status: "error",
+                    requestId: preview.requestId,
+                    message,
+                  })
+                }
+              />
+            ) : (
+              <PreviewFrame
+                {...frameProps}
+                formatLabel={preview.kind.toLocaleUpperCase()}
               >
-                {preview.transport === "text" && preview.kind === "markdown" ? (
-                  <MarkdownPreview preview={preview} />
-                ) : preview.transport === "text" && preview.kind === "code" ? (
-                  <CodePreview preview={preview} />
-                ) : preview.transport === "url" && preview.kind === "image" ? (
-                  <ImagePreview
-                    preview={preview}
-                    onLoadError={() =>
-                      setState({
-                        status: "error",
-                        requestId: preview.requestId,
-                        message: "图片加载失败。",
-                      })
-                    }
-                  />
-                ) : preview.transport === "url" && preview.kind === "pdf" ? (
-                  <PdfPreview
-                    preview={preview as Parameters<typeof PdfPreview>[0]["preview"]}
-                    onLoadingChange={setGuestLoading}
-                    onLoadError={(message) =>
-                      setState({
-                        status: "error",
-                        requestId: preview.requestId,
-                        message,
-                      })
-                    }
-                  />
-                ) : preview.transport === "url" && preview.partition ? (
-                  <WebviewPreview
-                    preview={preview as Parameters<typeof WebviewPreview>[0]["preview"]}
-                    onLoadingChange={setGuestLoading}
-                    onLoadError={(message) =>
-                      setState({
-                        status: "error",
-                        requestId: preview.requestId,
-                        message,
-                      })
-                    }
-                  />
-                ) : null}
-              </Suspense>
-            </PreviewErrorBoundary>
-            {guestLoading ? (
-              <div className="project-file-preview-loading-overlay" role="status">
-                <span className="project-file-preview-spinner" aria-hidden="true" />
-                正在加载…
-              </div>
-            ) : null}
-          </div>
-        </div>
+                <div className="project-file-preview-state" role="status">
+                  <span>此文件没有可用的预览器。</span>
+                </div>
+              </PreviewFrame>
+            )}
+          </Suspense>
+        </PreviewErrorBoundary>
       </div>
       {!previewVisible ? (
         <div className="project-files-preview-empty is-centered">

@@ -4,7 +4,7 @@
 
 ## 用途
 
-`AwakenComposerBar` 用于提供紧凑任务输入栏，可作为中心入口、底部 dock 输入栏或表单内嵌 prompt 编辑器使用，并展示 repo/model/status 等元信息。它适合运行中的追加输入、首屏快速开始、停靠 composer 和需要复用 Slash/token 编辑语义的受控表单；父级负责受控输入、结构化 token、metaItems、提交/停止和添加上下文动作，本组件负责选择原生 `AwakenComposerInput` 或统一 plaintext token editor，并布局由 `AwakenIconButton` 实现的 `AwakenContextButton`、`AwakenSendButton` 和两者的 `AwakenTooltip`。
+`AwakenComposerBar` 用于提供紧凑任务输入栏，可作为中心入口、底部 dock 输入栏或表单内嵌 prompt 编辑器使用，并展示 repo/model/status 等元信息。它适合运行中的追加输入、首屏快速开始、停靠 composer 和需要复用 Slash/token 编辑语义的受控表单；父级负责受控输入、结构化 token、metaItems、提交/停止和添加上下文动作，本组件负责选择原生 `AwakenComposerInput` 或统一 plaintext token editor，并布局由 `AwakenIconButton` 实现的 `AwakenContextButton`、`AwakenSendButton` 和两者的 `AwakenTooltip`。带 `progress` 的上下文用量入口渲染为圆环占比指示，仅指针 hover 用 `AwakenTooltip` 展示「N% 已使用」与父级传入的 `value`；打开面板期间与关闭后焦点回到入口时不展示 tip，指针离开后再 hover 才出现。点击仍由父级打开 `AwakenContextUsagePanel`，组件本身不拥有用量数据或面板内容。
 
 `variant="embedded"` 只渲染输入 surface，不渲染上下文与发送工具栏；`submitOnEnter={false}` 保留普通多行编辑，`inputAriaLabel` 由宿主表单提供准确名称。内嵌形态仍复用同一 `slashPalette`、结构化 token 和 `onStructuredInputChange`，不建立第二套 Slash UI 或 token DOM。
 

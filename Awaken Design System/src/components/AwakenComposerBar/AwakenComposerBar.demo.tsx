@@ -229,7 +229,7 @@ export function AwakenComposerBarDemo() {
           输入栏 <code>AwakenComposerBar + AwakenComposerDock + AwakenSendButton</code>
         </h2>
         <p>
-          集中观测输入栏组合、底层输入框、添加上下文图标按钮、发送/停止按钮及其工具提示，以及提交后的用户提示。center 空态还展示与侧栏同源的项目低栏，可切换 mock 项目并查看创建入口；运行态中，历史消息与最终输出只在上方滚动，输入栏固定在最底部；有真实快照时可点击“上下文窗口”查看用量浮层。
+          集中观测输入栏组合、底层输入框、添加上下文图标按钮、发送/停止按钮及其工具提示，以及提交后的用户提示。center 空态还展示与侧栏同源的项目低栏，可切换 mock 项目并查看创建入口；运行态中，历史消息与最终输出只在上方滚动，输入栏固定在最底部；有真实快照时可悬停上下文圆环查看用量摘要，或点击打开用量浮层。
         </p>
       </header>
       <div className="ads-component-demo-grid">
@@ -240,7 +240,7 @@ export function AwakenComposerBarDemo() {
               <h3>输出在上方滚动，输入栏固定在最底部</h3>
             </div>
             <p>
-              点击输入栏底部的“上下文窗口”后，
+              点击输入栏底部的上下文圆环后，
               <code>AwakenContextUsagePanel</code> 通过 <code>RunStage.overlay</code>
               出现在输入栏上方，不进入消息流，也不会改变上下顺序。
             </p>

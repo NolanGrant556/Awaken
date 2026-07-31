@@ -1559,8 +1559,10 @@ describe("AwakenComposerBar layout contract", () => {
     expect(html).toContain('aria-haspopup="dialog"');
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('aria-controls="context-panel"');
-    expect(html).toContain("上下文窗口");
-    expect(html).toContain("12K / 112K");
+    expect(html).toContain("composer-bar-context-ring");
+    expect(html).toContain('aria-label="上下文窗口，12K / 112K"');
+    expect(html).not.toContain("composer-bar-context-meter-fill");
+    expect(html).not.toContain('class="composer-bar-meta-label"');
     expect(html).not.toContain("可用输入");
     expect(html).not.toContain("约 12K");
   });
@@ -2154,9 +2156,8 @@ describe("context usage presentation", () => {
     );
     expect(html).toContain("系统提示词");
     expect(html).toContain("上下文用量");
-    expect(html).toContain("24K");
-    expect(html).toContain("112K");
-    expect(html).toContain("Token");
+    expect(html).toContain("已使用");
+    expect(html).toContain("~24K / 112K Token");
     expect(html).not.toContain("上下文用了");
     expect(html).not.toContain("约 24K");
     expect(html).not.toContain("模型总窗口");

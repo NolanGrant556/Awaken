@@ -19,7 +19,9 @@ describe("FilePreviewHost", () => {
   let root: Root;
 
   beforeEach(() => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    (
+      globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -38,7 +40,9 @@ describe("FilePreviewHost", () => {
           runtimeClient={{
             startProjectFilePreview: vi.fn(),
             closeProjectFilePreview: vi.fn(async () => undefined),
-            openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
+            openProjectFileExternally: vi.fn(async () => ({
+              ok: true as const,
+            })),
             revealProjectFile: vi.fn(async () => ({ ok: true as const })),
           }}
           mode="browser"
@@ -47,27 +51,34 @@ describe("FilePreviewHost", () => {
       );
     });
 
-    const emptyState = container.querySelector(".project-files-preview-empty.is-centered");
+    const emptyState = container.querySelector(
+      ".project-files-preview-empty.is-centered",
+    );
     expect(emptyState).not.toBeNull();
     expect(emptyState?.querySelector("strong")?.textContent).toBe("浏览器");
-    expect(emptyState?.querySelector("span")?.textContent).toBe("预览 Html 文件");
+    expect(emptyState?.querySelector("span")?.textContent).toBe(
+      "预览 Html 文件",
+    );
   });
 
   it("loads a sanitized independent Markdown preview and updates the file label", async () => {
-    const startProjectFilePreview = vi.fn(async (request: { requestId: string }) => ({
-      ok: true as const,
-      preview: {
-        previewId: "preview-1",
-        requestId: request.requestId,
-        kind: "markdown" as const,
-        transport: "text" as const,
-        displayName: "README.md",
-        relativePath: "README.md",
-        byteLength: 42,
-        content: "# Title\n\n- [x] done\n\n<script>window.bad = true</script>",
-        language: "markdown",
-      },
-    }));
+    const startProjectFilePreview = vi.fn(
+      async (request: { requestId: string }) => ({
+        ok: true as const,
+        preview: {
+          previewId: "preview-1",
+          requestId: request.requestId,
+          kind: "markdown" as const,
+          transport: "text" as const,
+          displayName: "README.md",
+          relativePath: "README.md",
+          byteLength: 42,
+          content:
+            "# Title\n\n- [x] done\n\n<script>window.bad = true</script>",
+          language: "markdown",
+        },
+      }),
+    );
     const closeProjectFilePreview = vi.fn(async () => undefined);
     const onModeChange = vi.fn();
     const onPreviewLabelChange = vi.fn();
@@ -78,7 +89,9 @@ describe("FilePreviewHost", () => {
           runtimeClient={{
             startProjectFilePreview,
             closeProjectFilePreview,
-            openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
+            openProjectFileExternally: vi.fn(async () => ({
+              ok: true as const,
+            })),
             revealProjectFile: vi.fn(async () => ({ ok: true as const })),
           }}
           projectId="project-1"
@@ -103,10 +116,62 @@ describe("FilePreviewHost", () => {
     );
     expect(onModeChange).toHaveBeenCalledWith("files");
     expect(onPreviewLabelChange).toHaveBeenCalledWith("README.md");
-    expect(container.querySelector(".project-file-markdown-preview")?.textContent).toContain(
-      "Title",
-    );
+    expect(
+      container.querySelector(".project-file-markdown-preview")?.textContent,
+    ).toContain("Title");
     expect(container.querySelector("script")).toBeNull();
+    expect(
+      container.querySelectorAll(".project-file-preview-heading"),
+    ).toHaveLength(1);
+    expect(container.querySelector(".project-file-preview-toolbar")).toBeNull();
+  });
+
+  it("renders code controls in the shared single-line heading without search", async () => {
+    const runtimeClient = {
+      startProjectFilePreview: vi.fn(async (request) => ({
+        ok: true as const,
+        preview: {
+          previewId: "preview-code",
+          requestId: request.requestId,
+          kind: "code" as const,
+          transport: "text" as const,
+          displayName: "agent.go",
+          relativePath: "agent.go",
+          byteLength: 32,
+          content: "package agent\n\nfunc Run() {}",
+          language: "go",
+        },
+      })),
+      closeProjectFilePreview: vi.fn(async () => undefined),
+      openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
+      revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+    };
+
+    await act(async () => {
+      root.render(
+        <FilePreviewHost
+          runtimeClient={runtimeClient}
+          projectId="project-1"
+          folderPath="/workspace"
+          selection={{ name: "agent.go", relativePath: "agent.go" }}
+          mode="files"
+          onModeChange={vi.fn()}
+        />,
+      );
+    });
+    await settleUntil(
+      () => container.querySelector('[aria-label="自动换行"]') !== null,
+    );
+
+    const heading = container.querySelector(".project-file-preview-heading");
+    expect(heading?.textContent).toContain("agent.go");
+    expect(heading?.textContent).toContain("go");
+    expect(heading?.querySelector('[aria-label="自动换行"]')).not.toBeNull();
+    expect(
+      container.querySelectorAll(".project-file-preview-heading"),
+    ).toHaveLength(1);
+    expect(container.querySelector(".project-file-preview-toolbar")).toBeNull();
+    expect(container.textContent).not.toContain("搜索");
   });
 
   it("routes HTML handles to the isolated browser surface", async () => {
@@ -148,9 +213,9 @@ describe("FilePreviewHost", () => {
     expect(onModeChange).toHaveBeenCalledWith("browser");
     const webview = container.querySelector("webview");
     expect(webview).not.toBeNull();
-    expect(webview?.closest(".project-file-preview-mode-stack__preview")?.classList).toContain(
-      "is-hidden",
-    );
+    expect(
+      webview?.closest(".project-file-preview-mode-stack__preview")?.classList,
+    ).toContain("is-hidden");
 
     await act(async () => {
       root.render(
@@ -171,9 +236,15 @@ describe("FilePreviewHost", () => {
     expect(webview?.getAttribute("partition")).toBe(
       "awaken-preview-preview-html",
     );
-    expect(container.querySelector('[aria-label="当前地址"]')?.textContent).toBe(
-      "/site/index.html",
-    );
+    expect(
+      container.querySelector('[aria-label="当前地址"]')?.textContent,
+    ).toBe("/site/index.html");
+    expect(
+      container
+        .querySelector('[aria-label="当前地址"]')
+        ?.closest(".project-file-preview-heading"),
+    ).not.toBeNull();
+    expect(container.querySelector(".project-file-browser-toolbar")).toBeNull();
   });
 
   it("keeps an Office webview mounted while switching between browser and files", async () => {
@@ -222,28 +293,36 @@ describe("FilePreviewHost", () => {
     await act(async () => root.render(render("files")));
     await settleUntil(() => container.querySelector("webview") !== null);
     const webview = container.querySelector("webview");
-    expect(runtimeClient.onProjectFilePreviewInteraction).toHaveBeenCalledOnce();
+    expect(
+      runtimeClient.onProjectFilePreviewInteraction,
+    ).toHaveBeenCalledOnce();
 
     await act(async () => {
-      interactionHandler?.({ previewId: "another-preview", type: "primary-click" });
-      interactionHandler?.({ previewId: "preview-office", type: "primary-click" });
+      interactionHandler?.({
+        previewId: "another-preview",
+        type: "primary-click",
+      });
+      interactionHandler?.({
+        previewId: "preview-office",
+        type: "primary-click",
+      });
     });
     expect(onPreviewPrimaryClick).toHaveBeenCalledOnce();
 
     await act(async () => root.render(render("browser")));
     expect(container.querySelector("webview")).toBe(webview);
-    expect(webview?.closest(".project-file-preview-mode-stack__preview")?.classList).toContain(
-      "is-hidden",
-    );
-    expect(container.querySelector(".project-files-preview-empty")?.textContent).toContain(
-      "浏览器预览 Html 文件",
-    );
+    expect(
+      webview?.closest(".project-file-preview-mode-stack__preview")?.classList,
+    ).toContain("is-hidden");
+    expect(
+      container.querySelector(".project-files-preview-empty")?.textContent,
+    ).toContain("浏览器预览 Html 文件");
 
     await act(async () => root.render(render("files")));
     expect(container.querySelector("webview")).toBe(webview);
-    expect(webview?.closest(".project-file-preview-mode-stack__preview")?.classList).not.toContain(
-      "is-hidden",
-    );
+    expect(
+      webview?.closest(".project-file-preview-mode-stack__preview")?.classList,
+    ).not.toContain("is-hidden");
     expect(runtimeClient.startProjectFilePreview).toHaveBeenCalledTimes(1);
   });
 });

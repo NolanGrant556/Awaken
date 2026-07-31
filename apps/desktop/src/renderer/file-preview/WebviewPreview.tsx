@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { WebviewTag } from "electron";
 import { ArrowLeft, ArrowRight, RefreshCw } from "lucide-react";
 import type { ProjectFilePreviewUrlHandle } from "../../shared/runtime";
+import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 
 type WebviewPreviewHandle = ProjectFilePreviewUrlHandle & {
   kind: "office" | "html";
@@ -12,6 +13,10 @@ export type WebviewPreviewProps = {
   preview: WebviewPreviewHandle;
   onLoadingChange?: (loading: boolean) => void;
   onLoadError: (message: string) => void;
+  frameProps: Omit<
+    PreviewFrameProps,
+    "children" | "formatActions" | "formatLabel"
+  >;
 };
 
 function visibleBrowserAddress(value: string, fallback: string): string {
@@ -28,6 +33,7 @@ export default function WebviewPreview({
   preview,
   onLoadingChange,
   onLoadError,
+  frameProps,
 }: WebviewPreviewProps) {
   const webviewRef = useRef<WebviewTag>(null);
   const domReadyRef = useRef(false);
@@ -48,7 +54,9 @@ export default function WebviewPreview({
       try {
         setCanGoBack(webview.canGoBack());
         setCanGoForward(webview.canGoForward());
-        setAddress(visibleBrowserAddress(webview.getURL(), preview.relativePath));
+        setAddress(
+          visibleBrowserAddress(webview.getURL(), preview.relativePath),
+        );
       } catch {
         // Electron rejects guest methods until dom-ready and after DOM detachment.
       }
@@ -106,45 +114,56 @@ export default function WebviewPreview({
   };
 
   return (
-    <div
-      className={`project-file-webview-preview is-${preview.kind}`}
-      data-preview-kind={preview.kind}
+    <PreviewFrame
+      {...frameProps}
+      formatLabel={preview.kind === "html" ? "HTML" : "Office"}
+      formatActions={
+        preview.kind === "html" ? (
+          <>
+            <button
+              type="button"
+              aria-label="后退"
+              title="后退"
+              disabled={!canGoBack}
+              onClick={() => runGuestAction((webview) => webview.goBack())}
+            >
+              <ArrowLeft size={16} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              aria-label="前进"
+              title="前进"
+              disabled={!canGoForward}
+              onClick={() => runGuestAction((webview) => webview.goForward())}
+            >
+              <ArrowRight size={16} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              aria-label="刷新页面"
+              title="刷新页面"
+              onClick={() => runGuestAction((webview) => webview.reload())}
+            >
+              <RefreshCw size={15} aria-hidden="true" />
+            </button>
+            <output
+              className="project-file-preview-heading__address"
+              aria-label="当前地址"
+            >
+              {address}
+            </output>
+          </>
+        ) : undefined
+      }
     >
-      {preview.kind === "html" ? (
-        <div className="project-file-browser-toolbar">
-          <button
-            type="button"
-            aria-label="后退"
-            disabled={!canGoBack}
-            onClick={() => runGuestAction((webview) => webview.goBack())}
-          >
-            <ArrowLeft size={16} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            aria-label="前进"
-            disabled={!canGoForward}
-            onClick={() => runGuestAction((webview) => webview.goForward())}
-          >
-            <ArrowRight size={16} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            aria-label="刷新"
-            onClick={() => runGuestAction((webview) => webview.reload())}
-          >
-            <RefreshCw size={15} aria-hidden="true" />
-          </button>
-          <output aria-label="当前地址">{address}</output>
-        </div>
-      ) : null}
       <webview
         key={preview.previewId}
         ref={webviewRef}
+        className="project-file-webview-preview__guest"
         src={preview.src}
         partition={preview.partition}
         webpreferences="contextIsolation=yes,nodeIntegration=no,sandbox=yes"
       />
-    </div>
+    </PreviewFrame>
   );
 }

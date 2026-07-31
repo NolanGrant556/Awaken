@@ -141,6 +141,59 @@ describe("ProjectFilePreviewManager", () => {
     manager.dispose();
   });
 
+  it("falls back to a bounded code preview for safe text with unknown extensions", async () => {
+    const root = await temporaryRoot();
+    await fs.writeFile(path.join(root, "go.mod"), "module example.com/app\n\ngo 1.24\n");
+    await fs.writeFile(path.join(root, "build.customlang"), "task build { run() }\n");
+    await fs.writeFile(path.join(root, "binary.customlang"), Buffer.from([0x00, 0x01, 0x02]));
+    const { manager } = createManager(root);
+
+    await expect(
+      manager.start({
+        requestId: "request-go-mod",
+        projectId: "project-1",
+        folderPath: root,
+        relativePath: "go.mod",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      preview: {
+        kind: "code",
+        transport: "text",
+        language: "mod",
+        content: "module example.com/app\n\ngo 1.24\n",
+      },
+    });
+    await expect(
+      manager.start({
+        requestId: "request-custom-source",
+        projectId: "project-1",
+        folderPath: root,
+        relativePath: "build.customlang",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      preview: {
+        kind: "code",
+        transport: "text",
+        language: "customlang",
+        content: "task build { run() }\n",
+      },
+    });
+    await expect(
+      manager.start({
+        requestId: "request-custom-binary",
+        projectId: "project-1",
+        folderPath: root,
+        relativePath: "binary.customlang",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "UNSUPPORTED_FILE_TYPE",
+    });
+    manager.dispose();
+  });
+
   it("streams CORS-enabled PDF ranges to the renderer-side PDF.js viewer", async () => {
     const root = await temporaryRoot();
     await fs.writeFile(path.join(root, "manual.pdf"), Buffer.from("0123456789"));

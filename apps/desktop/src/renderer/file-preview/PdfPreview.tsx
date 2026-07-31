@@ -15,6 +15,7 @@ import {
 } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { ProjectFilePreviewUrlHandle } from "../../shared/runtime";
+import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -26,6 +27,10 @@ export type PdfPreviewProps = {
   preview: PdfPreviewHandle;
   onLoadingChange?: (loading: boolean) => void;
   onLoadError: (message: string) => void;
+  frameProps: Omit<
+    PreviewFrameProps,
+    "children" | "formatActions" | "formatLabel"
+  >;
 };
 
 const MIN_SCALE = 0.25;
@@ -48,6 +53,7 @@ export default function PdfPreview({
   preview,
   onLoadingChange,
   onLoadError,
+  frameProps,
 }: PdfPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -66,7 +72,8 @@ export default function PdfPreview({
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    const updateWidth = () => setViewportWidth(Math.floor(viewport.clientWidth));
+    const updateWidth = () =>
+      setViewportWidth(Math.floor(viewport.clientWidth));
     updateWidth();
     if (typeof ResizeObserver === "undefined") {
       window.addEventListener("resize", updateWidth);
@@ -112,12 +119,15 @@ export default function PdfPreview({
     const canvas = canvasRef.current;
     if (!canvas || !documentProxy) return;
     let active = true;
-    let renderTask: ReturnType<Awaited<ReturnType<PDFDocumentProxy["getPage"]>>["render"]> | undefined;
+    let renderTask:
+      | ReturnType<Awaited<ReturnType<PDFDocumentProxy["getPage"]>>["render"]>
+      | undefined;
     let page: Awaited<ReturnType<PDFDocumentProxy["getPage"]>> | undefined;
     onLoadingChangeRef.current?.(true);
 
-    void documentProxy.getPage(pageNumber).then(
-      (loadedPage) => {
+    void documentProxy
+      .getPage(pageNumber)
+      .then((loadedPage) => {
         if (!active) return;
         page = loadedPage;
         const unitViewport = loadedPage.getViewport({ scale: 1, rotation });
@@ -126,7 +136,10 @@ export default function PdfPreview({
           ? clamp(availableWidth / unitViewport.width, MIN_SCALE, MAX_SCALE)
           : scale;
         const outputScale = clamp(window.devicePixelRatio || 1, 1, 2);
-        const displayViewport = loadedPage.getViewport({ scale: displayScale, rotation });
+        const displayViewport = loadedPage.getViewport({
+          scale: displayScale,
+          rotation,
+        });
         const renderViewport = loadedPage.getViewport({
           scale: displayScale * outputScale,
           rotation,
@@ -138,17 +151,17 @@ export default function PdfPreview({
         canvas.style.height = `${Math.floor(displayViewport.height)}px`;
         renderTask = loadedPage.render({ canvas, viewport: renderViewport });
         return renderTask.promise;
-      },
-    ).then(
-      () => {
-        if (active) onLoadingChangeRef.current?.(false);
-      },
-      (error) => {
-        if (!active || error instanceof RenderingCancelledException) return;
-        onLoadingChangeRef.current?.(false);
-        onLoadErrorRef.current(errorMessage(error));
-      },
-    );
+      })
+      .then(
+        () => {
+          if (active) onLoadingChangeRef.current?.(false);
+        },
+        (error) => {
+          if (!active || error instanceof RenderingCancelledException) return;
+          onLoadingChangeRef.current?.(false);
+          onLoadErrorRef.current(errorMessage(error));
+        },
+      );
 
     return () => {
       active = false;
@@ -168,82 +181,93 @@ export default function PdfPreview({
   };
 
   return (
-    <div className="project-file-pdf-preview">
-      <div className="project-file-preview-toolbar is-pdf" aria-label="PDF 查看工具栏">
-        <div className="project-file-preview-toolbar__actions">
-          <button
-            type="button"
-            aria-label="上一页"
-            title="上一页"
-            disabled={!pageCount || pageNumber <= 1}
-            onClick={() => changePage(pageNumber - 1)}
-          >
-            <ChevronLeft size={16} aria-hidden="true" />
-          </button>
-          <label className="project-file-pdf-preview__page">
-            <input
-              type="number"
-              aria-label="页码"
-              min={1}
-              max={Math.max(1, pageCount)}
-              value={pageNumber}
-              disabled={!pageCount}
-              onChange={(event) => changePage(Number(event.target.value))}
-            />
-            <span>/ {pageCount || "–"}</span>
-          </label>
-          <button
-            type="button"
-            aria-label="下一页"
-            title="下一页"
-            disabled={!pageCount || pageNumber >= pageCount}
-            onClick={() => changePage(pageNumber + 1)}
-          >
-            <ChevronRight size={16} aria-hidden="true" />
-          </button>
+    <PreviewFrame
+      {...frameProps}
+      formatLabel="PDF"
+      formatActions={
+        <div
+          className="project-file-pdf-preview__controls"
+          aria-label="PDF 查看工具栏"
+        >
+          <div className="project-file-preview-heading__control-group">
+            <button
+              type="button"
+              aria-label="上一页"
+              title="上一页"
+              disabled={!pageCount || pageNumber <= 1}
+              onClick={() => changePage(pageNumber - 1)}
+            >
+              <ChevronLeft size={16} aria-hidden="true" />
+            </button>
+            <label className="project-file-pdf-preview__page">
+              <input
+                type="number"
+                aria-label="页码"
+                min={1}
+                max={Math.max(1, pageCount)}
+                value={pageNumber}
+                disabled={!pageCount}
+                onChange={(event) => changePage(Number(event.target.value))}
+              />
+              <span>/ {pageCount || "–"}</span>
+            </label>
+            <button
+              type="button"
+              aria-label="下一页"
+              title="下一页"
+              disabled={!pageCount || pageNumber >= pageCount}
+              onClick={() => changePage(pageNumber + 1)}
+            >
+              <ChevronRight size={16} aria-hidden="true" />
+            </button>
+          </div>
+          <div className="project-file-preview-heading__control-group">
+            <button
+              type="button"
+              aria-label="缩小"
+              title="缩小"
+              onClick={() => changeScale((fitWidth ? 1 : scale) - SCALE_STEP)}
+            >
+              <Minus size={16} aria-hidden="true" />
+            </button>
+            <output aria-label="缩放比例">
+              {fitWidth ? "适宽" : `${Math.round(scale * 100)}%`}
+            </output>
+            <button
+              type="button"
+              aria-label="放大"
+              title="放大"
+              onClick={() => changeScale((fitWidth ? 1 : scale) + SCALE_STEP)}
+            >
+              <Plus size={16} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              aria-label="适应宽度"
+              title="适应宽度"
+              aria-pressed={fitWidth}
+              onClick={() => setFitWidth(true)}
+            >
+              <Scan size={15} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              aria-label="顺时针旋转"
+              title="顺时针旋转"
+              onClick={() => setRotation((value) => (value + 90) % 360)}
+            >
+              <RotateCw size={15} aria-hidden="true" />
+            </button>
+          </div>
         </div>
-        <div className="project-file-preview-toolbar__actions">
-          <button
-            type="button"
-            aria-label="缩小"
-            title="缩小"
-            onClick={() => changeScale((fitWidth ? 1 : scale) - SCALE_STEP)}
-          >
-            <Minus size={16} aria-hidden="true" />
-          </button>
-          <output aria-label="缩放比例">
-            {fitWidth ? "适应宽度" : `${Math.round(scale * 100)}%`}
-          </output>
-          <button
-            type="button"
-            aria-label="放大"
-            title="放大"
-            onClick={() => changeScale((fitWidth ? 1 : scale) + SCALE_STEP)}
-          >
-            <Plus size={16} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            aria-label="适应宽度"
-            title="适应宽度"
-            aria-pressed={fitWidth}
-            onClick={() => setFitWidth(true)}
-          >
-            <Scan size={15} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            aria-label="顺时针旋转"
-            title="顺时针旋转"
-            onClick={() => setRotation((value) => (value + 90) % 360)}
-          >
-            <RotateCw size={15} aria-hidden="true" />
-          </button>
-        </div>
-      </div>
+      }
+    >
       <div ref={viewportRef} className="project-file-pdf-preview__viewport">
-        <canvas ref={canvasRef} aria-label={`PDF 第 ${pageNumber} 页，共 ${pageCount} 页`} />
+        <canvas
+          ref={canvasRef}
+          aria-label={`PDF 第 ${pageNumber} 页，共 ${pageCount} 页`}
+        />
       </div>
-    </div>
+    </PreviewFrame>
   );
 }

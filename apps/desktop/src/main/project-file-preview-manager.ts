@@ -32,7 +32,10 @@ import {
   MAX_PREVIEW_INFLIGHT_REQUESTS,
   MAX_PREVIEW_REQUESTS,
   MAX_PREVIEW_RESPONSE_BYTES,
+  MAX_TEXT_PREVIEW_BYTES,
   classifyPreviewFile,
+  decodeTextPreviewBuffer,
+  languageNameForFile,
   mimeTypeForFile,
   parseSingleByteRange,
   previewByteLimit,
@@ -188,6 +191,27 @@ async function readImageHeader(filePath: string): Promise<Buffer> {
   }
 }
 
+async function readFilePrefix(filePath: string, maxBytes: number): Promise<Buffer> {
+  const file = await fs.open(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(maxBytes);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const { bytesRead } = await file.read(
+        buffer,
+        offset,
+        buffer.length - offset,
+        offset,
+      );
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    return buffer.subarray(0, offset);
+  } finally {
+    await file.close();
+  }
+}
+
 export class ProjectFilePreviewManager {
   private readonly previews = new Map<string, PreviewRecord>();
   private readonly pendingRequests = new Map<string, AbortController>();
@@ -228,15 +252,46 @@ export class ProjectFilePreviewManager {
       }
       const resolved = await resolveProjectFile(projects, request);
       if (!resolved.ok) return previewError(resolved.code, resolved.message);
-      const classification = classifyPreviewFile(resolved.file.displayName);
+      let classification = classifyPreviewFile(resolved.file.displayName);
+      const stat = await fs.stat(resolved.file.realPath);
+      let textBuffer: Buffer | undefined;
+      let textContent: string | undefined;
       if (!classification) {
-        return previewError(
-          "UNSUPPORTED_FILE_TYPE",
-          "Awaken 暂不支持预览这种文件格式。",
+        if (stat.size > MAX_TEXT_PREVIEW_BYTES) {
+          return previewError(
+            "FILE_TOO_LARGE",
+            `文件大小超过当前文本预览上限（${Math.round(MAX_TEXT_PREVIEW_BYTES / 1024 / 1024)} MiB）。`,
+            { byteLength: stat.size, limitBytes: MAX_TEXT_PREVIEW_BYTES },
+          );
+        }
+        textBuffer = await readFilePrefix(
+          resolved.file.realPath,
+          MAX_TEXT_PREVIEW_BYTES + 1,
         );
+        if (textBuffer.length > MAX_TEXT_PREVIEW_BYTES) {
+          return previewError(
+            "FILE_TOO_LARGE",
+            `文件大小超过当前文本预览上限（${Math.round(MAX_TEXT_PREVIEW_BYTES / 1024 / 1024)} MiB）。`,
+            {
+              byteLength: Math.max(stat.size, textBuffer.length),
+              limitBytes: MAX_TEXT_PREVIEW_BYTES,
+            },
+          );
+        }
+        textContent = decodeTextPreviewBuffer(textBuffer);
+        if (textContent === undefined) {
+          return previewError(
+            "UNSUPPORTED_FILE_TYPE",
+            "Awaken 暂不支持预览这种文件格式。",
+          );
+        }
+        classification = {
+          kind: "code",
+          extension: path.extname(resolved.file.displayName).slice(1).toLocaleLowerCase(),
+          language: languageNameForFile(resolved.file.displayName),
+        };
       }
 
-      const stat = await fs.stat(resolved.file.realPath);
       const limit = previewByteLimit(classification.kind);
       if (stat.size > limit) {
         return previewError(
@@ -247,8 +302,19 @@ export class ProjectFilePreviewManager {
       }
 
       if (classification.kind === "markdown" || classification.kind === "code") {
-        const buffer = await fs.readFile(resolved.file.realPath);
-        if (buffer.includes(0)) {
+        const buffer = textBuffer ?? await readFilePrefix(resolved.file.realPath, limit + 1);
+        if (buffer.length > limit) {
+          return previewError(
+            "FILE_TOO_LARGE",
+            `文件大小超过当前预览上限（${Math.round(limit / 1024 / 1024)} MiB）。`,
+            {
+              byteLength: Math.max(stat.size, buffer.length),
+              limitBytes: limit,
+            },
+          );
+        }
+        const content = textContent ?? decodeTextPreviewBuffer(buffer);
+        if (content === undefined) {
           return previewError(
             "TEXT_BINARY_CONTENT",
             "这个文件包含二进制内容，无法作为文本预览。",
@@ -262,7 +328,7 @@ export class ProjectFilePreviewManager {
           displayName: resolved.file.displayName,
           relativePath: resolved.file.relativePath,
           byteLength: stat.size,
-          content: buffer.toString("utf8"),
+          content,
           language: classification.language,
         };
         return { ok: true, preview: handle };

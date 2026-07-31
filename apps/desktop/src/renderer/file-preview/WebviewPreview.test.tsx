@@ -10,7 +10,9 @@ describe("WebviewPreview", () => {
   let root: Root;
 
   beforeEach(() => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    (
+      globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT = true;
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -34,10 +36,20 @@ describe("WebviewPreview", () => {
       src: "awaken-preview://preview-office/report.html",
       partition: "awaken-preview-preview-office",
     };
+    const frameProps = {
+      displayName: preview.displayName,
+      onReload: vi.fn(),
+      onOpenExternal: vi.fn(),
+      onReveal: vi.fn(),
+    };
 
     await act(async () => {
       root.render(
-        <WebviewPreview preview={preview} onLoadError={vi.fn()} />,
+        <WebviewPreview
+          preview={preview}
+          frameProps={frameProps}
+          onLoadError={vi.fn()}
+        />,
       );
     });
 
@@ -53,6 +65,7 @@ describe("WebviewPreview", () => {
       root.render(
         <WebviewPreview
           preview={preview}
+          frameProps={frameProps}
           onLoadingChange={vi.fn()}
           onLoadError={vi.fn()}
         />,

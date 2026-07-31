@@ -1,13 +1,22 @@
 import { useState } from "react";
 import { Maximize2, Minus, Plus, RotateCcw } from "lucide-react";
 import type { ProjectFilePreviewUrlHandle } from "../../shared/runtime";
+import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 
 export type ImagePreviewProps = {
   preview: ProjectFilePreviewUrlHandle;
   onLoadError: () => void;
+  frameProps: Omit<
+    PreviewFrameProps,
+    "children" | "formatActions" | "formatLabel"
+  >;
 };
 
-export default function ImagePreview({ preview, onLoadError }: ImagePreviewProps) {
+export default function ImagePreview({
+  preview,
+  onLoadError,
+  frameProps,
+}: ImagePreviewProps) {
   const [fit, setFit] = useState(true);
   const [scale, setScale] = useState(1);
 
@@ -17,35 +26,53 @@ export default function ImagePreview({ preview, onLoadError }: ImagePreviewProps
   }
 
   return (
-    <div className="project-file-image-preview" data-preview-kind="image">
-      <div className="project-file-preview-toolbar">
-        <span>{Math.round(scale * 100)}%</span>
-        <div className="project-file-preview-toolbar__actions">
-          <button type="button" aria-label="缩小图片" onClick={() => adjustScale(-0.1)}>
+    <PreviewFrame
+      {...frameProps}
+      formatLabel="图片"
+      formatActions={
+        <>
+          <output
+            className="project-file-preview-heading__value"
+            aria-label="图片缩放比例"
+          >
+            {Math.round(scale * 100)}%
+          </output>
+          <button
+            type="button"
+            aria-label="缩小图片"
+            onClick={() => adjustScale(-0.1)}
+          >
             <Minus size={15} aria-hidden="true" />
           </button>
-          <button type="button" aria-label="放大图片" onClick={() => adjustScale(0.1)}>
+          <button
+            type="button"
+            aria-label="放大图片"
+            onClick={() => adjustScale(0.1)}
+          >
             <Plus size={15} aria-hidden="true" />
           </button>
           <button
             type="button"
             aria-pressed={fit}
+            aria-label="适应窗口"
+            title="适应窗口"
             onClick={() => {
               setFit(true);
               setScale(1);
             }}
           >
             <Maximize2 size={15} aria-hidden="true" />
-            适应窗口
           </button>
           <button
             type="button"
+            aria-label="原始尺寸"
+            title="原始尺寸"
             onClick={() => {
               setFit(false);
               setScale(1);
             }}
           >
-            原始尺寸
+            1:1
           </button>
           <button
             type="button"
@@ -57,9 +84,12 @@ export default function ImagePreview({ preview, onLoadError }: ImagePreviewProps
           >
             <RotateCcw size={15} aria-hidden="true" />
           </button>
-        </div>
-      </div>
-      <div className={`project-file-image-preview__canvas${fit ? " is-fit" : ""}`}>
+        </>
+      }
+    >
+      <div
+        className={`project-file-image-preview__canvas${fit ? " is-fit" : ""}`}
+      >
         <img
           src={preview.src}
           alt={preview.displayName}
@@ -67,6 +97,6 @@ export default function ImagePreview({ preview, onLoadError }: ImagePreviewProps
           onError={onLoadError}
         />
       </div>
-    </div>
+    </PreviewFrame>
   );
 }

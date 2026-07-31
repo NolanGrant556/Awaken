@@ -115,7 +115,11 @@ export function AwakenProjectHoverCard({
                     <button
                       type="button"
                       className="aw-project-hover-card__folder"
-                      title={card.revealHint ? `${card.revealHint}${folder.path}` : folder.path}
+                      aria-label={
+                        card.revealHint
+                          ? `${card.revealHint}${folder.label ?? folder.path}`
+                          : folder.label ?? folder.path
+                      }
                       onClick={() => card.onRevealFolder?.(folder.path)}
                     >
                       <span aria-hidden="true">

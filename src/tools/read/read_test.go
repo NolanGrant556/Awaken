@@ -2,6 +2,7 @@ package read
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,22 +73,78 @@ func TestReadPDFFallsBackToPopplerImages(t *testing.T) {
 		t.Skip("pdftoppm unavailable")
 	}
 	root := t.TempDir()
-	pdf := `%PDF-1.1
-1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
-2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
-3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents 4 0 R >> endobj
-4 0 obj << /Length 0 >> stream
-
-endstream endobj
-trailer << /Root 1 0 R >>
-%%EOF
-`
-	if err := os.WriteFile(filepath.Join(root, "fallback.pdf"), []byte(pdf), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeMinimalPDF(t, filepath.Join(root, "fallback.pdf"), 1)
 	outcome, err := (&Tool{}).ExecuteOutcome(readTestContext(root, tool.ModelCapabilities{SupportsVision: true}), `{"file_path":"fallback.pdf","pages":"1"}`, nil)
 	if err != nil || outcome.IsError() || len(outcome.ModelContent) != 1 || outcome.ModelContent[0].Type != "image" || outcome.ModelContent[0].Page != 1 {
 		t.Fatalf("fallback=%+v err=%v", outcome, err)
+	}
+}
+
+func TestReadPDFOmitsDefaultPagesAndClampsOverRange(t *testing.T) {
+	if _, err := exec.LookPath("pdftoppm"); err != nil {
+		t.Skip("pdftoppm unavailable")
+	}
+	if _, err := exec.LookPath("pdfinfo"); err != nil {
+		t.Skip("pdfinfo unavailable")
+	}
+	root := t.TempDir()
+	writeMinimalPDF(t, filepath.Join(root, "one-page.pdf"), 1)
+	ctx := readTestContext(root, tool.ModelCapabilities{SupportsVision: true})
+
+	omitted, err := (&Tool{}).ExecuteOutcome(ctx, `{"file_path":"one-page.pdf"}`, nil)
+	if err != nil || omitted.IsError() || len(omitted.ModelContent) != 1 || omitted.ModelContent[0].Page != 1 {
+		t.Fatalf("omit pages=%+v err=%v", omitted, err)
+	}
+	if route, _ := omitted.Details["route"].(string); route != "poppler" {
+		t.Fatalf("expected poppler route, details=%v", omitted.Details)
+	}
+	if count, _ := omitted.Details["page_count"].(int); count != 1 {
+		t.Fatalf("expected page_count=1, details=%v", omitted.Details)
+	}
+
+	// Fresh state so the second read is not treated as unchanged.
+	ctx = readTestContext(root, tool.ModelCapabilities{SupportsVision: true})
+	clamped, err := (&Tool{}).ExecuteOutcome(ctx, `{"file_path":"one-page.pdf","pages":"1-5"}`, nil)
+	if err != nil || clamped.IsError() || len(clamped.ModelContent) != 1 || clamped.ModelContent[0].Page != 1 {
+		t.Fatalf("clamp pages=%+v err=%v", clamped, err)
+	}
+}
+
+func TestReadPDFRequiresPagesForLongDocuments(t *testing.T) {
+	if _, err := exec.LookPath("pdfinfo"); err != nil {
+		t.Skip("pdfinfo unavailable")
+	}
+	root := t.TempDir()
+	writeMinimalPDF(t, filepath.Join(root, "long.pdf"), 11)
+	outcome, err := (&Tool{}).ExecuteOutcome(readTestContext(root, tool.ModelCapabilities{SupportsNativePDF: true}), `{"file_path":"long.pdf"}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.ErrorCode != "read_pdf_pages_required" || !strings.Contains(outcome.ErrorMessage, "11 pages") {
+		t.Fatalf("long pdf=%+v", outcome)
+	}
+}
+
+func writeMinimalPDF(t *testing.T, path string, pageCount int) {
+	t.Helper()
+	if pageCount < 1 {
+		t.Fatalf("pageCount must be >= 1")
+	}
+	var kids []string
+	var body strings.Builder
+	body.WriteString("%PDF-1.1\n")
+	body.WriteString("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n")
+	for i := 0; i < pageCount; i++ {
+		pageObj := 3 + i*2
+		contentObj := pageObj + 1
+		kids = append(kids, fmt.Sprintf("%d 0 R", pageObj))
+		fmt.Fprintf(&body, "%d 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> /Contents %d 0 R >> endobj\n", pageObj, contentObj)
+		fmt.Fprintf(&body, "%d 0 obj << /Length 0 >> stream\n\nendstream endobj\n", contentObj)
+	}
+	fmt.Fprintf(&body, "2 0 obj << /Type /Pages /Kids [%s] /Count %d >> endobj\n", strings.Join(kids, " "), pageCount)
+	body.WriteString("trailer << /Root 1 0 R >>\n%%EOF\n")
+	if err := os.WriteFile(path, []byte(body.String()), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

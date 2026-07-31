@@ -21,12 +21,12 @@ import (
 )
 
 const (
-	ToolName             = "Read"
-	defaultLineLimit     = 2000
-	maxLineLimit         = 2000
-	defaultPDFLastPage   = 5
-	maxPDFPages          = 20
-	maxModelMediaPayload = 20 * 1024 * 1024
+	ToolName               = "Read"
+	defaultLineLimit       = 2000
+	maxLineLimit           = 2000
+	maxPDFPages            = 20
+	pdfInlinePageThreshold = 10
+	maxModelMediaPayload   = 20 * 1024 * 1024
 )
 
 type Tool struct{}
@@ -41,7 +41,7 @@ type params struct {
 func (t *Tool) Name() string { return ToolName }
 
 func (t *Tool) Description() string {
-	return "Read a text file, supported image, or PDF. A relative path resolves against the primary folder; an absolute path is read wherever it points, including outside the task's folders. Text uses 1-based offset/limit; images and PDFs return model-visible media when the selected model supports it."
+	return "Read a text file, supported image, or PDF. A relative path resolves against the primary folder; an absolute path is read wherever it points, including outside the task's folders. Text uses 1-based offset/limit; images and PDFs return model-visible media when the selected model supports it. For PDFs with more than 10 pages, provide pages (for example 1-5); omit pages for shorter PDFs."
 }
 
 func (t *Tool) Parameters() []tool.ToolParameter {
@@ -49,7 +49,7 @@ func (t *Tool) Parameters() []tool.ToolParameter {
 		{Name: "file_path", Description: "Absolute path or path relative to the workspace.", Type: "string", Required: true},
 		{Name: "offset", Description: "1-based first text line. Defaults to 1.", Type: "integer"},
 		{Name: "limit", Description: "Maximum text lines. Defaults to and is capped at 2000.", Type: "integer"},
-		{Name: "pages", Description: "PDF pages, for example 1-5 or 1,3,7-9. Defaults to 1-5 and allows at most 20 pages.", Type: "string"},
+		{Name: "pages", Description: "Optional PDF page range (for example 1-5 or 1,3,7-9). Required for PDFs with more than 10 pages. Maximum 20 pages per request. Out-of-range pages are ignored when the document page count is known.", Type: "string"},
 	}
 }
 
@@ -72,10 +72,12 @@ func (t *Tool) Definition() tool.ToolDefinition {
 		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectRead, Resources: []string{"task file"}, Description: "Reads file bytes and metadata only.", Reversibility: tool.ReversibilityNotApplicable}},
 		Examples: []tool.ToolExample{
 			{Scenario: "Read text", Input: map[string]any{"file_path": "README.md", "offset": 1, "limit": 200}, Outcome: "Returns numbered text lines and a host snapshot."},
-			{Scenario: "Read PDF pages", Input: map[string]any{"file_path": "report.pdf", "pages": "1-5"}, Outcome: "Returns a native PDF or rendered page images according to model capability."},
+			{Scenario: "Read short PDF", Input: map[string]any{"file_path": "report.pdf"}, Outcome: "Reads the whole short PDF natively, or renders all of its pages for a vision model."},
+			{Scenario: "Read large PDF pages", Input: map[string]any{"file_path": "report.pdf", "pages": "1-5"}, Outcome: "Returns a native PDF or rendered page images according to model capability."},
 		},
 		FailureModes: []tool.ToolFailureMode{
 			{Code: "read_invalid_input", Cause: "Path, text range, or PDF page range is invalid", Retryable: false},
+			{Code: "read_pdf_pages_required", Cause: "A PDF with more than 10 pages was read without pages", Retryable: true},
 			{Code: "unsupported_media", Cause: "The file type or selected model capability is unsupported", Retryable: false},
 			{Code: "read_media_too_large", Cause: "The model media payload exceeds 20 MiB", Retryable: false},
 			{Code: tool.ErrorCodeNeedsRuntime, Cause: "Poppler is required for PDF rendering but unavailable", Retryable: true},
@@ -307,23 +309,77 @@ func readImage(ctx context.Context, path, mimeType string, data []byte) (tool.Ex
 }
 
 func readPDF(ctx context.Context, p params, path string, data []byte) (tool.ExecutionOutcome, error) {
-	pages, err := parsePages(p.Pages)
-	if err != nil {
-		return tool.FailedOutcome(err.Error(), "read_invalid_pages", tool.ErrorCategoryValidation, false), nil
-	}
 	capabilities := tool.ModelCapabilitiesFromContext(ctx)
-	if capabilities.SupportsNativePDF {
+	pageCount, hasPageCount := pdfPageCount(ctx, path)
+	pagesSpecified := strings.TrimSpace(p.Pages) != ""
+
+	var pages []int
+	if pagesSpecified {
+		parsed, err := parsePages(p.Pages)
+		if err != nil {
+			return tool.FailedOutcome(err.Error(), "read_invalid_pages", tool.ErrorCategoryValidation, false), nil
+		}
+		pages = parsed
+		if hasPageCount {
+			pages = clampPages(pages, pageCount)
+			if len(pages) == 0 {
+				return tool.FailedOutcome(
+					fmt.Sprintf("requested PDF pages are outside this %d-page document", pageCount),
+					"read_invalid_pages",
+					tool.ErrorCategoryValidation,
+					false,
+				), nil
+			}
+		}
+	} else if hasPageCount && pageCount > pdfInlinePageThreshold {
+		return tool.FailedOutcome(
+			fmt.Sprintf(
+				"This PDF has %d pages, which is too many to read at once. Use the pages parameter to read specific page ranges (e.g., pages: \"1-5\"). Maximum %d pages per request.",
+				pageCount,
+				maxPDFPages,
+			),
+			"read_pdf_pages_required",
+			tool.ErrorCategoryValidation,
+			true,
+		), nil
+	}
+
+	// Native PDF: omit pages → whole short/unknown-length document (Claude Code style).
+	// Explicit pages still prefer rasterization when vision is available so the model
+	// can limit context; otherwise keep the whole native document.
+	if capabilities.SupportsNativePDF && (!pagesSpecified || !capabilities.SupportsVision) {
 		if len(data) > maxModelMediaPayload {
 			return tool.FailedOutcome("PDF exceeds the 20 MiB model media limit.", "read_media_too_large", tool.ErrorCategoryValidation, false), nil
 		}
 		outcome := tool.SucceededOutcome(fmt.Sprintf("document: %s (%d bytes)", filepath.Base(path), len(data)))
 		outcome.ModelContent = []tool.ModelContentPart{{Type: "file", MimeType: "application/pdf", DisplayName: filepath.Base(path), ByteSize: int64(len(data)), DataBase64: base64.StdEncoding.EncodeToString(data)}}
-		outcome.Details = map[string]any{"type": "document", "route": "native_pdf", "requested_pages": pages}
+		details := map[string]any{"type": "document", "route": "native_pdf"}
+		if pagesSpecified {
+			details["requested_pages"] = pages
+		}
+		if hasPageCount {
+			details["page_count"] = pageCount
+		}
+		outcome.Details = details
 		outcome.Summary = fmt.Sprintf("Read PDF %s with the model's native PDF capability.", filepath.Base(path))
 		return outcome, nil
 	}
 	if !capabilities.SupportsVision {
 		return unsupportedOutcome("unsupported_media: the selected model supports neither native PDF nor vision fallback", "model_pdf_unsupported", []string{"select_a_native_pdf_or_vision_capable_model"}), nil
+	}
+	if !pagesSpecified {
+		if !hasPageCount {
+			return tool.FailedOutcome(
+				fmt.Sprintf(
+					"Cannot determine PDF page count for vision rendering. Use the pages parameter to read specific page ranges (e.g., pages: \"1-5\"). Maximum %d pages per request.",
+					maxPDFPages,
+				),
+				"read_pdf_pages_required",
+				tool.ErrorCategoryValidation,
+				true,
+			), nil
+		}
+		pages = pageRange(1, pageCount)
 	}
 	parts, err := renderPDFPages(ctx, path, pages)
 	if err != nil {
@@ -344,7 +400,11 @@ func readPDF(ctx context.Context, p params, path string, data []byte) (tool.Exec
 	}
 	outcome := tool.SucceededOutcome(fmt.Sprintf("document parts: %s pages %s", filepath.Base(path), formatPages(pages)))
 	outcome.ModelContent = parts
-	outcome.Details = map[string]any{"type": "parts", "route": "poppler", "pages": pages, "total_media_bytes": total}
+	details := map[string]any{"type": "parts", "route": "poppler", "pages": pages, "total_media_bytes": total}
+	if hasPageCount {
+		details["page_count"] = pageCount
+	}
+	outcome.Details = details
 	outcome.Summary = fmt.Sprintf("Rendered %d page(s) from %s for the vision model.", len(parts), filepath.Base(path))
 	return outcome, nil
 }
@@ -352,7 +412,7 @@ func readPDF(ctx context.Context, p params, path string, data []byte) (tool.Exec
 func parsePages(value string) ([]int, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		value = fmt.Sprintf("1-%d", defaultPDFLastPage)
+		return nil, fmt.Errorf("pages must not be empty when provided")
 	}
 	seen := make(map[int]bool)
 	for _, token := range strings.Split(value, ",") {
@@ -390,6 +450,70 @@ func parsePages(value string) ([]int, error) {
 	return pages, nil
 }
 
+func clampPages(pages []int, pageCount int) []int {
+	if pageCount < 1 {
+		return nil
+	}
+	filtered := make([]int, 0, len(pages))
+	for _, page := range pages {
+		if page <= pageCount {
+			filtered = append(filtered, page)
+		}
+	}
+	return filtered
+}
+
+func pageRange(first, last int) []int {
+	if last < first {
+		return nil
+	}
+	pages := make([]int, 0, last-first+1)
+	for page := first; page <= last; page++ {
+		pages = append(pages, page)
+	}
+	return pages
+}
+
+func pdfPageCount(ctx context.Context, path string) (int, bool) {
+	executable := lookupPopplerBinary(ctx, "pdfinfo")
+	if executable == "" {
+		return 0, false
+	}
+	command := exec.CommandContext(ctx, executable, path)
+	if environment, ok := tool.ExecutionEnvironmentSnapshotFromContext(ctx); ok {
+		command.Env = replacePath(os.Environ(), environment.PinnedTransportPATH())
+	}
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "Pages:") {
+			continue
+		}
+		count, convErr := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "Pages:")))
+		if convErr != nil || count < 1 {
+			return 0, false
+		}
+		return count, true
+	}
+	return 0, false
+}
+
+func lookupPopplerBinary(ctx context.Context, name string) string {
+	environment, ok := tool.ExecutionEnvironmentSnapshotFromContext(ctx)
+	if ok {
+		if observed, found := environment.Executable(name); found && strings.TrimSpace(observed.Path) != "" {
+			return observed.Path
+		}
+	}
+	if discovered, err := exec.LookPath(name); err == nil {
+		return discovered
+	}
+	return ""
+}
+
 type runtimeMissingError struct{ name string }
 
 func (e runtimeMissingError) Error() string {
@@ -398,15 +522,7 @@ func (e runtimeMissingError) Error() string {
 func errorsIsRuntimeMissing(err error) bool { _, ok := err.(runtimeMissingError); return ok }
 
 func renderPDFPages(ctx context.Context, path string, pages []int) ([]tool.ModelContentPart, error) {
-	executable := ""
-	environment, ok := tool.ExecutionEnvironmentSnapshotFromContext(ctx)
-	if ok {
-		if observed, found := environment.Executable("pdftoppm"); found && strings.TrimSpace(observed.Path) != "" {
-			executable = observed.Path
-		}
-	} else if discovered, err := exec.LookPath("pdftoppm"); err == nil {
-		executable = discovered
-	}
+	executable := lookupPopplerBinary(ctx, "pdftoppm")
 	if executable == "" {
 		return nil, runtimeMissingError{name: "pdftoppm (Poppler)"}
 	}

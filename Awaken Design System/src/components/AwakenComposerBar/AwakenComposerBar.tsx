@@ -16,9 +16,12 @@ import { AwakenMemoryLightFlow } from "../AwakenMemoryLightFlow";
 import { AwakenSendButton } from "../AwakenSendButton";
 import {
   AwakenComposerInlineInput,
+  composerInlinePlainTextForRange,
   type ComposerInlineInputElement,
   type ComposerInlineStructuredValue,
 } from "./AwakenComposerInlineInput";
+
+export { composerInlinePlainTextForRange };
 const COMPOSER_EFFORT_TRACK_INSET_PX = 14;
 const COMPOSER_EFFORT_DETENT_EDGE_PROGRESS = 0.08;
 const COMPOSER_EFFORT_MAX_ZONE_MIN_PROGRESS = 0.92;

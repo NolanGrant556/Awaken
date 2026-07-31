@@ -5,6 +5,7 @@ import {
   AwakenProjectTree,
   AwakenSidebarSectionAction,
   AwakenUserPromptBlock,
+  buildUserPromptCopyText,
   pastedImageFilesFromClipboardData,
   reorderProjectIds,
   shouldSubmitComposerInputKey,
@@ -2437,7 +2438,7 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).toContain("deep-research");
     expect(html.indexOf("你好，你看到这个 skill 不?")).toBeLessThan(html.indexOf("deep-research"));
     expect(html.indexOf("deep-research")).toBeLessThan(html.indexOf("请继续"));
-    const promptStart = html.indexOf('<p class="execution-prompt-bubble-text">');
+    const promptStart = html.indexOf('class="execution-prompt-bubble-text');
     const promptEnd = html.indexOf("</p>", promptStart);
     const inlinePrompt = html.slice(promptStart, promptEnd);
     expect(inlinePrompt).toContain("你好，你看到这个 skill 不?");
@@ -2580,6 +2581,76 @@ describe("AwakenUserPromptBlock layout contract", () => {
 
     expect(html).toContain("execution-prompt-bubble-toolbar");
     expect(html).toContain("Copy prompt");
+  });
+
+  it("marks prompt text, token labels, and file names as selectable", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "看看这个文件主要是什么内容",
+        tokens: [
+          {
+            id: "file:report",
+            type: "file",
+            label: "2026年上半年经营管理部经营数据.pdf",
+          },
+        ],
+        attachments: [
+          {
+            id: "attachment-1",
+            kind: "file",
+            alt: "notes.docx",
+            label: "notes.docx",
+            extension: "DOCX",
+          },
+        ],
+      }),
+    );
+
+    expect(html).toContain("execution-prompt-bubble-text aw-text-selectable");
+    expect(html).toContain("execution-prompt-bubble-token-label aw-text-selectable");
+    expect(html).toContain("execution-prompt-bubble-file-name aw-text-selectable");
+  });
+
+  it("builds copy text from visible attachment names, token labels, and body", () => {
+    expect(
+      buildUserPromptCopyText({
+        text: "看看这个文件主要是什么内容",
+        tokens: [
+          {
+            id: "file:report",
+            type: "file",
+            label: "2026年上半年经营管理部经营数据.pdf",
+          },
+        ],
+        attachments: [
+          {
+            id: "attachment-1",
+            kind: "file",
+            alt: "notes.docx",
+            label: "notes.docx",
+          },
+        ],
+      }),
+    ).toBe(
+      [
+        "notes.docx",
+        "2026年上半年经营管理部经营数据.pdf 看看这个文件主要是什么内容",
+      ].join("\n"),
+    );
+
+    expect(
+      buildUserPromptCopyText({
+        text: "请继续",
+        tokens: [
+          {
+            id: "skill:docx:user",
+            type: "skill",
+            label: "docx",
+            leadingText: "请使用 ",
+          },
+        ],
+      }),
+    ).toBe("请使用 docx 请继续");
   });
 });
 

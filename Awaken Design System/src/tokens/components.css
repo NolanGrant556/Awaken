@@ -587,6 +587,13 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   overflow: hidden;
 }
 
+.execution-prompt-bubble-select-root {
+  display: grid;
+  gap: var(--execution-prompt-attachment-gap);
+  min-width: 0;
+  max-width: 100%;
+}
+
 .execution-prompt-bubble-text {
   box-sizing: border-box;
   min-width: 0;
@@ -594,6 +601,8 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
   scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 36%, transparent) transparent;
   scrollbar-width: thin;
 }
@@ -638,6 +647,8 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   line-height: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .execution-prompt-bubble-attachments {
@@ -703,6 +714,8 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   line-height: var(--aw-line-height-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .execution-prompt-bubble-file-extension {

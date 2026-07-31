@@ -6845,7 +6845,6 @@ export function App() {
                                         turn.prompt.tokens,
                                       )}
                                       tokens={promptTokenViews(turn.prompt.tokens)}
-                                      copyText={turn.prompt.text}
                                       attachments={promptAttachmentViews(turn.prompt.attachments)}
                                       expanded={promptBubbleModeByTurnId[turn.id] === "expanded"}
                                       onExpandedChange={(expanded) => {

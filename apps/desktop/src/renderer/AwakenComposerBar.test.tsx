@@ -502,10 +502,17 @@ describe("AwakenComposerBar unified token editing", () => {
 
     act(() => textarea.blur());
 
-    expect(onInputSelectionChange).toHaveBeenLastCalledWith({
-      anchor: 14,
-      focus: 14,
-    });
+    expect(onInputSelectionChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        anchor: 14,
+        focus: 14,
+        caretRect: expect.objectContaining({
+          left: expect.any(Number),
+          top: expect.any(Number),
+          bottom: expect.any(Number),
+        }),
+      }),
+    );
   });
 
   it("keeps the trailing segment editable after a second slash token is selected", () => {

@@ -11,6 +11,11 @@ export type AwakenAppShellProps = {
   inspectorCollapsed?: boolean;
   inspectorResizeHandleProps?: HTMLAttributes<HTMLDivElement>;
   platform?: PlatformKind;
+  windowChromeGeometry?: {
+    chromeHeightPx: number;
+    sidebarSpacerPx: number;
+    controlTopOffsetPx: number;
+  };
 };
 
 export function AwakenAppShell({
@@ -22,6 +27,7 @@ export function AwakenAppShell({
   inspectorCollapsed,
   inspectorResizeHandleProps,
   platform,
+  windowChromeGeometry,
 }: AwakenAppShellProps) {
   const sidebarResizeHandleClass = [
     "aw-app-sidebar-resize-handle",
@@ -42,6 +48,13 @@ export function AwakenAppShell({
         sidebarCollapsed ? " aw-app-shell-sidebar-collapsed" : ""
       }`}
       style={{
+        ...(windowChromeGeometry
+          ? {
+              "--aw-chrome-height": `${windowChromeGeometry.chromeHeightPx}px`,
+              "--aw-window-controls-spacer": `${windowChromeGeometry.sidebarSpacerPx}px`,
+              "--aw-window-control-top-offset": `${windowChromeGeometry.controlTopOffsetPx}px`,
+            }
+          : {}),
         display: "grid",
         gridTemplateColumns: sidebarCollapsed
           ? "0px minmax(0, 1fr)"
@@ -53,7 +66,7 @@ export function AwakenAppShell({
         position: "relative",
         background: "var(--aw-bg-main)",
         transition: "grid-template-columns 210ms cubic-bezier(0.2, 0.8, 0.2, 1)",
-      }}
+      } as CSSProperties}
     >
       {chrome ? (
         <div

@@ -129,7 +129,13 @@ import {
 } from "./workbenchPresentation";
 import { selectAllInFocusedEditor } from "./desktop-selection";
 import { useComposerLifecycle } from "./useComposerLifecycle";
+import {
+  composerDraftOwnerKey,
+  useThreadComposerDraft,
+  type ThreadComposerDraft,
+} from "./useThreadComposerDraft";
 import { useRunStageScrollController } from "./useRunStageScrollController";
+import { MACOS_WINDOW_CHROME_GEOMETRY } from "../shared/window-chrome";
 import {
   actionsForThreadTranscript,
   streamCursorForTranscriptRun,
@@ -194,10 +200,8 @@ import {
 } from "./composerAttachments";
 import {
   actionsFromSlashProviders,
-  clearComposerActionTriggerFromComposerValue,
-  composerActionTriggerFromComposerValue,
+  composerActionTriggerFromDraft,
   computerUseMentionProvider,
-  composerTokenPlacementForSlashTrigger,
   composerTokenFromSlashAction,
   filterSlashActions,
   firstSelectableSlashAction,
@@ -551,6 +555,86 @@ export function insertComposerTokenAtOffset(args: {
     value,
     focusOffset: offset + 1,
   };
+}
+
+export function removeComposerTextRange(args: {
+  tokens: ComposerToken[];
+  placements: Record<string, ComposerTokenPlacement>;
+  leadingTexts: Record<string, string>;
+  value: string;
+  start: number;
+  end: number;
+}): {
+  tokens: ComposerToken[];
+  placements: Record<string, ComposerTokenPlacement>;
+  leadingTexts: Record<string, string>;
+  value: string;
+} {
+  const start = Math.max(0, Math.min(args.start, args.end));
+  const end = Math.max(start, args.end);
+  let logicalOffset = 0;
+  const tokens = args.tokens.map((token) => {
+    const leadingText = composerTokenLeadingText(token, args.leadingTexts);
+    const leadingEnd = logicalOffset + leadingText.length;
+    if (start >= logicalOffset && end <= leadingEnd) {
+      const nextLeadingText = `${leadingText.slice(0, start - logicalOffset)}${leadingText.slice(
+        end - logicalOffset,
+      )}`;
+      logicalOffset = leadingEnd + 1;
+      const nextToken = { ...token };
+      if (nextLeadingText) {
+        nextToken.leadingText = nextLeadingText;
+      } else {
+        delete nextToken.leadingText;
+      }
+      return nextToken;
+    }
+    logicalOffset = leadingEnd + 1;
+    return leadingText ? { ...token, leadingText } : { ...token };
+  });
+
+  let value = args.value;
+  const tailEnd = logicalOffset + value.length;
+  if (start >= logicalOffset && end <= tailEnd) {
+    value = `${value.slice(0, start - logicalOffset)}${value.slice(end - logicalOffset)}`;
+  }
+
+  return {
+    tokens,
+    placements: { ...args.placements },
+    leadingTexts: Object.fromEntries(
+      tokens
+        .filter((token) => Boolean(token.leadingText))
+        .map((token) => [token.id, token.leadingText ?? ""]),
+    ),
+    value,
+  };
+}
+
+export function replaceComposerActionTriggerWithToken(args: {
+  tokens: ComposerToken[];
+  placements: Record<string, ComposerTokenPlacement>;
+  leadingTexts: Record<string, string>;
+  value: string;
+  trigger: { start: number; end: number };
+  token: ComposerToken;
+}) {
+  const withoutTrigger = removeComposerTextRange({
+    tokens: args.tokens,
+    placements: args.placements,
+    leadingTexts: args.leadingTexts,
+    value: args.value,
+    start: args.trigger.start,
+    end: args.trigger.end,
+  });
+  if (withoutTrigger.tokens.some((token) => token.id === args.token.id)) {
+    return { ...withoutTrigger, focusOffset: args.trigger.start };
+  }
+  return insertComposerTokenAtOffset({
+    ...withoutTrigger,
+    offset: args.trigger.start,
+    token: args.token,
+  });
 }
 
 export function promptTokenViews(tokens?: PromptNarrativeToken[]) {
@@ -2116,15 +2200,24 @@ export function App() {
   const [toolTraceOpenById, setToolTraceOpenById] = useState<
     Record<string, boolean | undefined>
   >({});
-  const [composerAttachments, setComposerAttachments] = useState<ComposerDraftAttachment[]>([]);
-  const [composerTokens, setComposerTokens] = useState<ComposerToken[]>([]);
-  const [composerTokenPlacements, setComposerTokenPlacements] = useState<
-    Record<string, ComposerTokenPlacement>
-  >({});
-  const [composerTokenLeadingTexts, setComposerTokenLeadingTexts] = useState<
-    Record<string, string>
-  >({});
-  const composerInputSelectionRef = useRef<ComposerBarInputSelection | undefined>(undefined);
+  const composerDraftKey = composerDraftOwnerKey(runtimeState.activeThreadId);
+  const {
+    draft: composerDraft,
+    setValue: setComposerValue,
+    setAttachments: setComposerAttachments,
+    setTokens: setComposerTokens,
+    setTokenPlacements: setComposerTokenPlacements,
+    setTokenLeadingTexts: setComposerTokenLeadingTexts,
+    setSelection: setComposerInputSelection,
+    replaceDraft: replaceComposerDraft,
+    clearDraft: clearThreadComposerDraft,
+  } = useThreadComposerDraft(composerDraftKey);
+  const composerValue = composerDraft.value;
+  const composerAttachments = composerDraft.attachments;
+  const composerTokens = composerDraft.tokens;
+  const composerTokenPlacements = composerDraft.tokenPlacements;
+  const composerTokenLeadingTexts = composerDraft.tokenLeadingTexts;
+  const composerInputSelection = composerDraft.selection;
   const [slashActions, setSlashActions] = useState<SlashAction[]>([]);
   const [slashLoading, setSlashLoading] = useState(false);
   const [slashError, setSlashError] = useState<string | null>(null);
@@ -3140,16 +3233,13 @@ export function App() {
     selectedFolderlessProject ||
     (workspaceRootForRun !== "" && /^([A-Za-z]:[\\/]|\/)/.test(workspaceRootForRun));
   const {
-    composerValue,
-    setComposerValue,
-    clearComposerValue,
-    restoreComposerValue,
     composerFocusRequest,
     composerFocusOffset,
     requestComposerFocus,
     composerBarState,
     composerRuntimePanels,
   } = useComposerLifecycle({
+    composerValue,
     desktopReady,
     desktopStarting,
     desktopNeedsRestart,
@@ -3168,7 +3258,12 @@ export function App() {
     [composerTokenLeadingTexts, composerTokens],
   );
   const trimmedEffectiveComposerValue = `${composerInlineTextPrefix}${composerValue}`.trim();
-  const composerActionTrigger = composerActionTriggerFromComposerValue(composerValue);
+  const composerActionTrigger = composerActionTriggerFromDraft({
+    value: composerValue,
+    tokens: composerTokens,
+    leadingTexts: composerTokenLeadingTexts,
+    selection: composerInputSelection,
+  });
   const activeComposerActionProviders =
     composerActionTrigger?.marker === "@" ? mentionProviders : slashProviders;
   const slashPaletteOpen =
@@ -3980,7 +4075,7 @@ export function App() {
       setExpandedFileComposerTrackedRun(undefined);
       setExpandedFileComposerIdleMode("full");
       if (offset !== undefined) {
-        composerInputSelectionRef.current = { anchor: offset, focus: offset };
+        setComposerInputSelection({ anchor: offset, focus: offset });
       }
       requestComposerFocus(offset);
       return { ok: true };
@@ -4004,7 +4099,7 @@ export function App() {
       composerTokenLeadingTexts,
       composerValue,
     );
-    const offset = composerInputSelectionRef.current?.focus ?? draftLength;
+    const offset = composerInputSelection?.focus ?? draftLength;
     const nextDraft = insertComposerTokenAtOffset({
       tokens: composerTokens,
       placements: composerTokenPlacements,
@@ -4019,10 +4114,10 @@ export function App() {
     setComposerValue(nextDraft.value);
     setExpandedFileComposerTrackedRun(undefined);
     setExpandedFileComposerIdleMode("full");
-    composerInputSelectionRef.current = {
+    setComposerInputSelection({
       anchor: nextDraft.focusOffset,
       focus: nextDraft.focusOffset,
-    };
+    });
     requestComposerFocus(nextDraft.focusOffset);
     setNotice(null);
     return { ok: true };
@@ -4037,43 +4132,27 @@ export function App() {
     if (!token) {
       return;
     }
-    const currentActionTrigger = composerActionTriggerFromComposerValue(composerValue);
-    const placement = composerTokenPlacementForSlashTrigger(currentActionTrigger);
-    const leadingText =
-      placement === "after" && currentActionTrigger
-        ? composerValue.slice(0, currentActionTrigger.start)
-        : "";
-    // The token itself is the durable owner of its leading text; the
-    // composerTokenLeadingTexts map only mirrors it for composer editing.
-    const tokenWithPlacement = leadingText ? { ...token, leadingText } : token;
-    setComposerTokens((current) =>
-      current.some((item) => item.id === token.id) ? current : [...current, tokenWithPlacement],
-    );
-    setComposerTokenPlacements((current) =>
-      current[token.id] === placement ? current : { ...current, [token.id]: placement },
-    );
-    setComposerTokenLeadingTexts((current) => {
-      if (!leadingText) {
-        if (!(token.id in current)) {
-          return current;
-        }
-        const next = { ...current };
-        delete next[token.id];
-        return next;
-      }
-      return current[token.id] === leadingText ? current : { ...current, [token.id]: leadingText };
+    if (!composerActionTrigger) {
+      return;
+    }
+    const nextDraft = replaceComposerActionTriggerWithToken({
+      tokens: composerTokens,
+      placements: composerTokenPlacements,
+      leadingTexts: composerTokenLeadingTexts,
+      value: composerValue,
+      trigger: composerActionTrigger,
+      token,
     });
-    setComposerValue((current) => {
-      const trigger = composerActionTriggerFromComposerValue(current);
-      if (!trigger) {
-        return current;
-      }
-      return composerTokenPlacementForSlashTrigger(trigger) === "after"
-        ? current.slice(trigger.end)
-        : clearComposerActionTriggerFromComposerValue(current);
+    setComposerTokens(nextDraft.tokens);
+    setComposerTokenPlacements(nextDraft.placements);
+    setComposerTokenLeadingTexts(nextDraft.leadingTexts);
+    setComposerValue(nextDraft.value);
+    setComposerInputSelection({
+      anchor: nextDraft.focusOffset,
+      focus: nextDraft.focusOffset,
     });
     setSlashActiveActionId(undefined);
-    requestComposerFocus();
+    requestComposerFocus(nextDraft.focusOffset);
   }
 
   function handleRemoveComposerToken(tokenId: string): void {
@@ -4144,7 +4223,25 @@ export function App() {
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      setComposerValue((current) => clearComposerActionTriggerFromComposerValue(current));
+      if (composerActionTrigger) {
+        const nextDraft = removeComposerTextRange({
+          tokens: composerTokens,
+          placements: composerTokenPlacements,
+          leadingTexts: composerTokenLeadingTexts,
+          value: composerValue,
+          start: composerActionTrigger.start,
+          end: composerActionTrigger.end,
+        });
+        setComposerTokens(nextDraft.tokens);
+        setComposerTokenPlacements(nextDraft.placements);
+        setComposerTokenLeadingTexts(nextDraft.leadingTexts);
+        setComposerValue(nextDraft.value);
+        setComposerInputSelection({
+          anchor: composerActionTrigger.start,
+          focus: composerActionTrigger.start,
+        });
+        requestComposerFocus(composerActionTrigger.start);
+      }
       setSlashActiveActionId(undefined);
       return;
     }
@@ -4199,6 +4296,16 @@ export function App() {
     }));
     const draftComposerTokenPlacements = { ...composerTokenPlacements };
     const draftComposerTokenLeadingTexts = { ...composerTokenLeadingTexts };
+    const draftComposerState: ThreadComposerDraft = {
+      value: draftComposerValue,
+      attachments: draftAttachments,
+      tokens: draftComposerTokens,
+      tokenPlacements: draftComposerTokenPlacements,
+      tokenLeadingTexts: draftComposerTokenLeadingTexts,
+      selection: composerInputSelection
+        ? { anchor: composerInputSelection.anchor, focus: composerInputSelection.focus }
+        : undefined,
+    };
     const draftPromptTokens = promptNarrativeTokensForComposer(
       draftComposerTokens,
       draftComposerTokenLeadingTexts,
@@ -4251,11 +4358,7 @@ export function App() {
       promptTokens: forceNewThread ? [] : draftPromptTokens,
       startedAtMs: Date.now(),
     });
-    clearComposerValue();
-    setComposerAttachments([]);
-    setComposerTokens([]);
-    setComposerTokenPlacements({});
-    setComposerTokenLeadingTexts({});
+    clearThreadComposerDraft();
 
     try {
       const { projectId: runProjectId, projectName: runProjectName } = resolveRunProjectForRun({
@@ -4338,11 +4441,7 @@ export function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create run";
       setRunCreateIssue(desktopOperationIssueFromError(error));
-      restoreComposerValue(draftComposerValue);
-      setComposerAttachments(draftAttachments);
-      setComposerTokens(draftComposerTokens);
-      setComposerTokenPlacements(draftComposerTokenPlacements);
-      setComposerTokenLeadingTexts(draftComposerTokenLeadingTexts);
+      replaceComposerDraft(draftComposerState, composerDraftKey);
       dispatch({ type: "run/createFailed", message });
     }
   }
@@ -5046,11 +5145,7 @@ export function App() {
 
   function resetNewTaskDraft(): void {
     setActiveNavId(undefined);
-    clearComposerValue();
-    setComposerAttachments([]);
-    setComposerTokens([]);
-    setComposerTokenPlacements({});
-    setComposerTokenLeadingTexts({});
+    clearThreadComposerDraft(composerDraftOwnerKey());
     resetActiveThreadContext();
   }
 
@@ -6122,6 +6217,7 @@ export function App() {
       >
         <AppShell
           platform={platform}
+          windowChromeGeometry={platform === "macos" ? MACOS_WINDOW_CHROME_GEOMETRY : undefined}
           sidebarCollapsed={sidebarCollapsed}
           sidebarResizeHandleProps={{
             role: "separator",
@@ -6572,7 +6668,10 @@ export function App() {
                                   focusRequest={composerFocusRequest}
                                   focusOffset={composerFocusOffset}
                                   onInputSelectionChange={(selection) => {
-                                    composerInputSelectionRef.current = selection;
+                                    setComposerInputSelection({
+                                      anchor: selection.anchor,
+                                      focus: selection.focus,
+                                    });
                                   }}
                                   attachments={composerBarAttachments}
                                   tokens={composerBarTokens}
@@ -6617,7 +6716,10 @@ export function App() {
                             focusRequest={composerFocusRequest}
                             focusOffset={composerFocusOffset}
                             onInputSelectionChange={(selection) => {
-                              composerInputSelectionRef.current = selection;
+                              setComposerInputSelection({
+                                anchor: selection.anchor,
+                                focus: selection.focus,
+                              });
                             }}
                             attachments={composerBarAttachments}
                             tokens={composerBarTokens}

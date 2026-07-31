@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
 import type { DesktopOperationIssue, DesktopOperationRecoveryAction } from "../shared/runtime";
 
 export type ComposerSubmitMode = "send" | "stop";
@@ -20,6 +19,7 @@ type ComposerRuntimeStatus = {
 };
 
 type ComposerLifecycleOptions = ComposerRuntimeStatus & {
+  composerValue: string;
   desktopReady: boolean;
   isBusy: boolean;
   isWorkspaceValid: boolean;
@@ -35,11 +35,6 @@ type ComposerBarLifecycleState = {
 };
 
 type ComposerLifecycle = {
-  composerValue: string;
-  setComposerValue: Dispatch<SetStateAction<string>>;
-  clearComposerValue: () => void;
-  restoreComposerValue: (value: string) => void;
-  trimmedComposerValue: string;
   composerFocusRequest: number;
   composerFocusOffset?: number;
   requestComposerFocus: (offset?: number) => void;
@@ -88,6 +83,7 @@ export function composerRuntimePanelsForStatus({
 }
 
 export function useComposerLifecycle({
+  composerValue,
   desktopReady,
   desktopStarting,
   desktopNeedsRestart,
@@ -98,7 +94,6 @@ export function useComposerLifecycle({
   runtimeErrorMessage,
   runtimeOperationIssue,
 }: ComposerLifecycleOptions): ComposerLifecycle {
-  const [composerValue, setComposerValue] = useState("");
   const [composerFocusTarget, setComposerFocusTarget] = useState<{
     request: number;
     offset?: number;
@@ -110,14 +105,6 @@ export function useComposerLifecycle({
       request: current.request + 1,
       offset,
     }));
-  }, []);
-
-  const clearComposerValue = useCallback(() => {
-    setComposerValue("");
-  }, []);
-
-  const restoreComposerValue = useCallback((value: string) => {
-    setComposerValue(value);
   }, []);
 
   const composerBarState = useMemo<ComposerBarLifecycleState>(() => {
@@ -151,11 +138,6 @@ export function useComposerLifecycle({
   );
 
   return {
-    composerValue,
-    setComposerValue,
-    clearComposerValue,
-    restoreComposerValue,
-    trimmedComposerValue,
     composerFocusRequest: composerFocusTarget.request,
     composerFocusOffset: composerFocusTarget.offset,
     requestComposerFocus,

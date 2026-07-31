@@ -9,6 +9,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
+  type ComposerInputCaretRect,
   pastedImageFilesFromClipboardData,
   shouldSubmitComposerInputKey,
 } from "../AwakenComposerInput";
@@ -41,6 +42,7 @@ type ComposerInlineInputStyle = CSSProperties & {
 export type ComposerInlineSelection = {
   anchor: number;
   focus: number;
+  caretRect?: ComposerInputCaretRect;
 };
 
 type ComposerInlinePart = { type: "text"; value: string } | { type: "token"; id: string };
@@ -351,9 +353,31 @@ export function composerInlineInputSelection(element: HTMLElement): ComposerInli
   ) {
     return null;
   }
-  return {
+  const logicalSelection = {
     anchor: composerInlineSelectionOffset(element, selection.anchorNode, selection.anchorOffset),
     focus: composerInlineSelectionOffset(element, selection.focusNode, selection.focusOffset),
+  };
+  if (!selection.isCollapsed) {
+    return logicalSelection;
+  }
+  const range = selection.getRangeAt(0).cloneRange();
+  range.collapse(false);
+  const elementRect = element.getBoundingClientRect();
+  const rangeRects = typeof range.getClientRects === "function" ? range.getClientRects() : undefined;
+  const rect =
+    rangeRects?.[0] ??
+    (typeof range.getBoundingClientRect === "function" ? range.getBoundingClientRect() : elementRect);
+  const lineHeight =
+    Number.parseFloat(
+      element.ownerDocument.defaultView?.getComputedStyle(element).lineHeight ?? "",
+    ) || 20;
+  return {
+    ...logicalSelection,
+    caretRect: {
+      left: rect.left || elementRect.left,
+      top: rect.top || elementRect.top,
+      bottom: rect.bottom || (rect.top || elementRect.top) + lineHeight,
+    },
   };
 }
 
@@ -651,7 +675,8 @@ export function AwakenComposerInlineInput({
     }
     compositionGenerationRef.current += 1;
     emitStructuredValue();
-  }, [emitStructuredValue]);
+    emitSelection();
+  }, [emitSelection, emitStructuredValue]);
 
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -835,6 +860,7 @@ export function AwakenComposerInlineInput({
       tabIndex={disabled ? -1 : 0}
       onBeforeInput={handleBeforeInput}
       onInput={handleInput}
+      onScroll={emitSelection}
       onKeyDown={handleKeyDown}
       onPaste={handlePaste}
       onCopy={handleCopy}

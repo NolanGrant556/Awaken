@@ -202,6 +202,25 @@ export function slashPaletteStyleForAnchor(
   return { "--composer-bar-slash-max-height": `${maxHeight}px` };
 }
 
+export function slashPaletteStyleForCaret(
+  caretRect: { left: number; top: number },
+  inputRect: { left: number; right: number; bottom: number },
+  viewport: { width: number; height: number },
+): SlashPaletteStyle {
+  const margin = 8;
+  const gap = 5;
+  const paletteWidth = Math.min(260, Math.max(0, viewport.width - 24));
+  const viewportLeft = Math.min(
+    Math.max(margin, caretRect.left),
+    Math.max(margin, viewport.width - paletteWidth - margin),
+  );
+  return {
+    ...slashPaletteStyleForAnchor(caretRect.top, viewport.height),
+    left: `${viewportLeft - inputRect.left}px`,
+    bottom: `${Math.max(gap, inputRect.bottom - caretRect.top + gap)}px`,
+  };
+}
+
 export type AwakenComposerBarProps = {
   value: string;
   onChange: (value: string) => void;
@@ -274,6 +293,7 @@ export function AwakenComposerBar({
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [slashPreviewState, setSlashPreviewState] = useState<SlashPreviewState | null>(null);
   const [slashPaletteStyle, setSlashPaletteStyle] = useState<SlashPaletteStyle>({});
+  const [inputSelection, setInputSelection] = useState<ComposerBarInputSelection>();
   const modelMetaRef = useRef<HTMLDivElement | null>(null);
   const inputWrapRef = useRef<HTMLDivElement | null>(null);
   const slashPaletteRef = useRef<HTMLDivElement | null>(null);
@@ -296,6 +316,13 @@ export function AwakenComposerBar({
       onSubmit?.();
     }
   }, [canSubmit, onSubmit]);
+  const handleInputSelectionChange = useCallback(
+    (selection: ComposerBarInputSelection): void => {
+      setInputSelection(selection);
+      onInputSelectionChange?.(selection);
+    },
+    [onInputSelectionChange],
+  );
 
   useEffect(() => {
     if (!openMetaMenuId) return;
@@ -350,13 +377,20 @@ export function AwakenComposerBar({
       if (!rect) {
         return;
       }
-      setSlashPaletteStyle(slashPaletteStyleForAnchor(rect.top, window.innerHeight));
+      setSlashPaletteStyle(
+        inputSelection?.caretRect
+          ? slashPaletteStyleForCaret(inputSelection.caretRect, rect, {
+              width: window.innerWidth,
+              height: window.innerHeight,
+            })
+          : slashPaletteStyleForAnchor(rect.top, window.innerHeight),
+      );
     }
 
     updateSlashPaletteStyle();
     window.addEventListener("resize", updateSlashPaletteStyle);
     return () => window.removeEventListener("resize", updateSlashPaletteStyle);
-  }, [slashPalette?.open, slashActions.length, value, tokens.length]);
+  }, [inputSelection, slashPalette?.open, slashActions.length, value, tokens.length]);
 
   function renderMetaItem(item: ComposerBarMetaItem) {
     const hasProgress = typeof item.progress === "number" && Number.isFinite(item.progress);
@@ -1113,7 +1147,7 @@ export function AwakenComposerBar({
                 disabled={disabled}
                 focusRequest={focusRequest}
                 focusOffset={focusOffset}
-                onSelectionChange={onInputSelectionChange}
+                onSelectionChange={handleInputSelectionChange}
                 minRows={variant === "dock" ? 1 : variant === "embedded" ? 6 : 3}
                 maxRows={variant === "dock" ? 8 : variant === "embedded" ? 12 : 6}
                 onPasteImages={onPasteImages}
@@ -1130,7 +1164,7 @@ export function AwakenComposerBar({
                 disabled={disabled}
                 focusRequest={focusRequest}
                 focusOffset={focusOffset}
-                onSelectionChange={onInputSelectionChange}
+                onSelectionChange={handleInputSelectionChange}
                 minRows={variant === "dock" ? 1 : variant === "embedded" ? 6 : 3}
                 maxRows={variant === "dock" ? 8 : variant === "embedded" ? 12 : 6}
                 onPasteImages={onPasteImages}

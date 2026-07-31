@@ -56,6 +56,13 @@ export type ComposerActionTrigger = SlashTrigger & {
   marker: "/" | "@";
 };
 
+export type ComposerActionTriggerDraft = {
+  value: string;
+  tokens: Array<Pick<ComposerToken, "id" | "leadingText">>;
+  leadingTexts: Record<string, string>;
+  selection?: { anchor: number; focus: number };
+};
+
 export type ComposerTokenPlacement = "before" | "after";
 
 export type ComposerTokenKeyboardDeleteState = {
@@ -104,6 +111,57 @@ export function composerActionTriggerFromComposerValue(
   value: string,
 ): ComposerActionTrigger | null {
   return mentionTriggerFromComposerValue(value) ?? slashTriggerFromComposerValue(value);
+}
+
+function actionTriggerFromTextAtCaret(
+  text: string,
+  caretOffset: number,
+  logicalTextStart: number,
+): ComposerActionTrigger | null {
+  const textBeforeCaret = text.slice(0, Math.max(0, Math.min(caretOffset, text.length)));
+  const trigger =
+    actionTriggerFromComposerValue(textBeforeCaret, "@", TRAILING_MENTION_TRIGGER_PATTERN) ??
+    actionTriggerFromComposerValue(textBeforeCaret, "/", TRAILING_SLASH_TRIGGER_PATTERN);
+  return trigger
+    ? {
+        ...trigger,
+        start: logicalTextStart + trigger.start,
+        end: logicalTextStart + trigger.end,
+      }
+    : null;
+}
+
+export function composerActionTriggerFromDraft({
+  value,
+  tokens,
+  leadingTexts,
+  selection,
+}: ComposerActionTriggerDraft): ComposerActionTrigger | null {
+  const draftLength = tokens.reduce(
+    (length, token) => length + (token.leadingText ?? leadingTexts[token.id] ?? "").length + 1,
+    value.length,
+  );
+  const anchor = selection?.anchor ?? draftLength;
+  const focus = selection?.focus ?? draftLength;
+  if (anchor !== focus) {
+    return null;
+  }
+
+  let logicalOffset = 0;
+  for (const token of tokens) {
+    const leadingText = token.leadingText ?? leadingTexts[token.id] ?? "";
+    const leadingEnd = logicalOffset + leadingText.length;
+    if (focus >= logicalOffset && focus <= leadingEnd) {
+      return actionTriggerFromTextAtCaret(leadingText, focus - logicalOffset, logicalOffset);
+    }
+    logicalOffset = leadingEnd + 1;
+  }
+
+  const tailEnd = logicalOffset + value.length;
+  if (focus < logicalOffset || focus > tailEnd) {
+    return null;
+  }
+  return actionTriggerFromTextAtCaret(value, focus - logicalOffset, logicalOffset);
 }
 
 export function clearSlashTriggerFromComposerValue(value: string): string {

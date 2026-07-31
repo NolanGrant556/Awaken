@@ -252,7 +252,7 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
 }
 
 .workbench-chrome-window-spacer {
-  flex: 0 0 88px;
+  flex: 0 0 var(--aw-window-controls-spacer, 88px);
   height: 1px;
 }
 
@@ -264,7 +264,7 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
 
 .workbench-chrome-icon {
   position: relative;
-  top: 0.75px;
+  top: var(--aw-window-control-top-offset, 0.75px);
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;

@@ -16,7 +16,6 @@ export function AwakenSidebarSectionAction({
     <button
       type="button"
       aria-label={label}
-      title={label}
       {...props}
       className={`aw-sidebar-section-action${props.className ? ` ${props.className}` : ""}`}
     >

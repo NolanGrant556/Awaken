@@ -431,7 +431,7 @@ function ProjectNode({
           onClick={handleClick}
           onPointerDown={isTopLevel ? (event) => onPointerDown?.(event, item) : undefined}
           onKeyDown={isTopLevel ? (event) => onReorderKeyDown?.(event, item.id) : undefined}
-          title={item.path ?? item.label}
+          title={item.hoverCard && isTopLevel ? undefined : item.path ?? item.label}
           aria-current={isActive ? "true" : undefined}
           aria-expanded={isExpandable ? isExpanded : undefined}
           aria-grabbed={isDragging || undefined}

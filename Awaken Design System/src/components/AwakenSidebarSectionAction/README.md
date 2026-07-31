@@ -18,4 +18,4 @@
 
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
 - 通过 props 输入，通过回调输出。
-- `label` 同时作为按钮可访问名称与 Tooltip 文案。
+- `label` 同时作为按钮可访问名称与唯一的自定义 Tooltip 文案；按钮不再叠加原生 `title`，避免持续悬停时出现两层相同提示。

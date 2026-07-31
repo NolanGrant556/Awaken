@@ -3,6 +3,7 @@ import {
   AwakenComposerBar,
   AwakenContextUsagePanel,
   AwakenProjectTree,
+  AwakenSidebarSectionAction,
   AwakenUserPromptBlock,
   pastedImageFilesFromClipboardData,
   reorderProjectIds,
@@ -2696,6 +2697,43 @@ describe("project workspace helpers", () => {
 });
 
 describe("sidebar thread status presentation", () => {
+  it("renders one custom tooltip source for sidebar project actions", () => {
+    const label = "New session in 测试项目";
+    const html = renderToString(
+      React.createElement(AwakenSidebarSectionAction, {
+        label,
+        children: React.createElement("span", null, "+"),
+      }),
+    );
+
+    expect(html).toContain(`aria-label="${label}"`);
+    expect(html).not.toContain(`title="${label}"`);
+  });
+
+  it("does not render a native path tooltip when a project has a hover card", () => {
+    const projectPath = "/Users/nolangrant/Workspace/经营数据汇总";
+    const html = renderToString(
+      React.createElement(AwakenProjectTree, {
+        items: [
+          {
+            id: "project:operations",
+            label: "测试项目",
+            path: projectPath,
+            kind: "project",
+            hoverCard: {
+              title: "测试项目",
+              folders: [{ path: projectPath, label: "经营数据汇总" }],
+            },
+          },
+        ],
+        onSelect: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain("测试项目");
+    expect(html).not.toContain(`title="${projectPath}"`);
+  });
+
   it("shows a spinner only while the thread still has an active run", () => {
     expect(
       shouldShowSidebarThreadSpinner({

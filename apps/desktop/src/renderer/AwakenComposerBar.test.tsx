@@ -2,7 +2,10 @@
 
 import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { AwakenComposerBar } from "@awaken/design-system";
+import {
+  AwakenComposerBar,
+  plainTextFromPromptClipboardRoot,
+} from "@awaken/design-system";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("AwakenComposerBar unified token editing", () => {
@@ -307,7 +310,26 @@ describe("AwakenComposerBar unified token editing", () => {
     });
   });
 
-  it("copies only plaintext and excludes token labels", () => {
+  it("serializes prompt selection without soft-wrap newlines between token and text", () => {
+    const root = document.createElement("div");
+    const token = document.createElement("span");
+    token.className = "execution-prompt-bubble-token";
+    const icon = document.createElement("span");
+    icon.className = "execution-prompt-bubble-token-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = "icon";
+    const label = document.createElement("span");
+    label.className = "execution-prompt-bubble-token-label";
+    label.textContent = "2026年上半年经营管理部经营数据可视化图表.pdf";
+    token.append(icon, label);
+    root.append(token, document.createTextNode("你能看到这个文档吗？"));
+
+    expect(plainTextFromPromptClipboardRoot(root)).toBe(
+      "2026年上半年经营管理部经营数据可视化图表.pdf 你能看到这个文档吗？",
+    );
+  });
+
+  it("copies visible plaintext with token labels and no soft-wrap breaks", () => {
     const { editor } = renderComposer({ value: "后文" });
     const selection = window.getSelection();
     const range = document.createRange();
@@ -324,7 +346,10 @@ describe("AwakenComposerBar unified token editing", () => {
       editor.dispatchEvent(copyEvent);
     });
 
-    expect(setData).toHaveBeenCalledWith("text/plain", "你使用这个技能 后文");
+    expect(setData).toHaveBeenCalledWith(
+      "text/plain",
+      "你使用这个技能 Documents 后文",
+    );
   });
 
   it("does not reconcile controlled children while IME composition is active", async () => {

@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   type ClipboardEvent as ReactClipboardEvent,
   type CSSProperties,
@@ -239,6 +240,7 @@ function appendPackageIcon(document: Document, token: HTMLElement): void {
   svg.setAttribute("stroke-width", "1.9");
   svg.setAttribute("stroke-linecap", "round");
   svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("focusable", "false");
   svg.setAttribute("aria-hidden", "true");
   for (const pathData of [
     "m7.5 4.27 9 5.15",
@@ -265,6 +267,7 @@ function appendComputerIcon(document: Document, token: HTMLElement): void {
   svg.setAttribute("stroke-width", "1.9");
   svg.setAttribute("stroke-linecap", "round");
   svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("focusable", "false");
   svg.setAttribute("aria-hidden", "true");
 
   const rect = document.createElementNS(namespace, "rect");
@@ -501,25 +504,52 @@ function deleteComposerInlineRange(
   return structuredValueFromParts(nextParts);
 }
 
-function composerInlinePlainTextForRange(
+function appendPlainTextSegment(output: string, segment: string): string {
+  if (!segment) {
+    return output;
+  }
+  if (!output) {
+    return segment;
+  }
+  if (/\s$/u.test(output) || /^\s/u.test(segment)) {
+    return `${output}${segment}`;
+  }
+  return `${output} ${segment}`;
+}
+
+/** Visible clipboard text for a logical range: plaintext + token labels, no soft-wrap breaks. */
+export function composerInlinePlainTextForRange(
   value: ComposerInlineStructuredValue,
   requestedStart: number,
   requestedEnd: number,
+  tokenLabels: ReadonlyMap<string, string> = new Map(),
 ): string {
   const start = Math.max(0, Math.min(requestedStart, requestedEnd));
   const end = Math.max(requestedStart, requestedEnd);
   let output = "";
+  let lastWasToken = false;
   let offset = 0;
   for (const part of partsForStructuredValue(value)) {
     const length = part.type === "text" ? part.value.length : 1;
-    if (part.type === "text") {
-      const sliceStart = Math.max(0, start - offset);
-      const sliceEnd = Math.min(length, end - offset);
-      if (sliceEnd > sliceStart) {
-        output += part.value.slice(sliceStart, sliceEnd);
+    const partEnd = offset + length;
+    if (start < partEnd && end > offset) {
+      if (part.type === "text") {
+        const sliceStart = Math.max(0, start - offset);
+        const sliceEnd = Math.min(length, end - offset);
+        if (sliceEnd > sliceStart) {
+          const slice = part.value.slice(sliceStart, sliceEnd);
+          output = lastWasToken ? appendPlainTextSegment(output, slice) : `${output}${slice}`;
+          lastWasToken = false;
+        }
+      } else {
+        const label = tokenLabels.get(part.id) ?? "";
+        if (label) {
+          output = appendPlainTextSegment(output, label);
+          lastWasToken = true;
+        }
       }
     }
-    offset += length;
+    offset = partEnd;
   }
   return output;
 }
@@ -786,6 +816,11 @@ export function AwakenComposerInlineInput({
     [onPasteImages],
   );
 
+  const tokenLabels = useMemo(
+    () => new Map(tokens.map((token) => [token.id, token.label])),
+    [tokens],
+  );
+
   const handleCopy = useCallback(
     (event: ReactClipboardEvent<HTMLDivElement>) => {
       const editor = editorRef.current;
@@ -799,11 +834,16 @@ export function AwakenComposerInlineInput({
       );
       event.clipboardData.setData(
         "text/plain",
-        composerInlinePlainTextForRange(currentValue, selection.anchor, selection.focus),
+        composerInlinePlainTextForRange(
+          currentValue,
+          selection.anchor,
+          selection.focus,
+          tokenLabels,
+        ),
       );
       event.preventDefault();
     },
-    [tokens],
+    [tokenLabels, tokens],
   );
 
   const handleCut = useCallback(
@@ -819,7 +859,12 @@ export function AwakenComposerInlineInput({
       );
       event.clipboardData.setData(
         "text/plain",
-        composerInlinePlainTextForRange(currentValue, selection.anchor, selection.focus),
+        composerInlinePlainTextForRange(
+          currentValue,
+          selection.anchor,
+          selection.focus,
+          tokenLabels,
+        ),
       );
       event.preventDefault();
       const start = Math.min(selection.anchor, selection.focus);
@@ -840,7 +885,7 @@ export function AwakenComposerInlineInput({
       onChange(nextValue.value);
       onStructuredChange(nextValue);
     },
-    [onChange, onStructuredChange, tokens],
+    [onChange, onStructuredChange, tokenLabels, tokens],
   );
 
   return (

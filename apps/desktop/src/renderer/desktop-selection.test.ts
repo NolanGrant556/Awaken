@@ -47,6 +47,38 @@ describe("selectAllInFocusedEditor", () => {
     expect(document.getSelection()?.toString()).toBe("before Skill after");
   });
 
+  it("selects the editing host when focus is inside an atomic token chip", () => {
+    const editor = document.createElement("div");
+    editor.setAttribute("contenteditable", "plaintext-only");
+    editor.tabIndex = 0;
+    const token = document.createElement("span");
+    token.setAttribute("contenteditable", "false");
+    token.tabIndex = -1;
+    token.textContent = "report.pdf";
+    editor.append(token, " 看看这个文件");
+    document.body.append(editor);
+    token.focus();
+
+    expect(selectAllInFocusedEditor(document)).toBe(true);
+    expect(document.activeElement).toBe(editor);
+    expect(document.getSelection()?.toString()).toContain("report.pdf");
+    expect(document.getSelection()?.toString()).toContain("看看这个文件");
+  });
+
+  it("selects a reading select-all root such as a prompt bubble", () => {
+    const bubble = document.createElement("div");
+    bubble.tabIndex = 0;
+    const root = document.createElement("div");
+    root.setAttribute("data-aw-select-all-root", "");
+    root.textContent = "file.pdf 你能看到这个文档吗？";
+    bubble.append(root);
+    document.body.append(bubble);
+    bubble.focus();
+
+    expect(selectAllInFocusedEditor(document)).toBe(true);
+    expect(document.getSelection()?.toString()).toBe("file.pdf 你能看到这个文档吗？");
+  });
+
   it("clears document selection when focus is outside an editor", () => {
     const chrome = document.createElement("button");
     chrome.textContent = "New Agent";

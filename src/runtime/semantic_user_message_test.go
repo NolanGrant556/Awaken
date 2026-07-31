@@ -194,6 +194,18 @@ func TestSemanticComposerTokensForRunKeepsLeadingText(t *testing.T) {
 	}
 }
 
+func TestSemanticComposerTokensForRunKeepsCapabilityIdentity(t *testing.T) {
+	tokens := semanticComposerTokensForRun([]ComposerToken{{
+		ID:      "capability:computer-use",
+		Type:    "capability",
+		Label:   "Computer Use",
+		Payload: ComposerTokenPayload{CapabilityID: "computer-use"},
+	}})
+	if len(tokens) != 1 || tokens[0].Payload["capabilityId"] != "computer-use" {
+		t.Fatalf("capability identity missing from semantic token: %+v", tokens)
+	}
+}
+
 func TestSemanticComposerTokensForRunKeepsProjectPathIdentity(t *testing.T) {
 	tokens := semanticComposerTokensForRun([]ComposerToken{{
 		ID: "file:brief", Type: "file", Label: "brief.md",

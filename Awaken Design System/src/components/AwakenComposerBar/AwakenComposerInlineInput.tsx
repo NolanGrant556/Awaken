@@ -251,6 +251,35 @@ function appendPackageIcon(document: Document, token: HTMLElement): void {
   token.append(svg);
 }
 
+function appendComputerIcon(document: Document, token: HTMLElement): void {
+  const namespace = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(namespace, "svg");
+  svg.setAttribute("class", "composer-bar-token-icon");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.9");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+
+  const rect = document.createElementNS(namespace, "rect");
+  rect.setAttribute("x", "2");
+  rect.setAttribute("y", "3");
+  rect.setAttribute("width", "20");
+  rect.setAttribute("height", "14");
+  rect.setAttribute("rx", "2");
+  svg.append(rect);
+  for (const pathData of ["M8 21h8", "M12 17v4"]) {
+    const path = document.createElementNS(namespace, "path");
+    path.setAttribute("d", pathData);
+    svg.append(path);
+  }
+  token.append(svg);
+}
+
 function composerTokenElement(document: Document, token: ComposerInlineToken): HTMLElement {
   const element = document.createElement("span");
   element.className = `composer-bar-token composer-bar-token-${token.type}`;
@@ -258,7 +287,11 @@ function composerTokenElement(document: Document, token: ComposerInlineToken): H
   element.setAttribute("contenteditable", "false");
   element.setAttribute("draggable", "false");
   element.title = token.title ?? token.label;
-  appendPackageIcon(document, element);
+  if (token.type === "capability") {
+    appendComputerIcon(document, element);
+  } else {
+    appendPackageIcon(document, element);
+  }
 
   const label = document.createElement("span");
   label.className = "composer-bar-token-label";

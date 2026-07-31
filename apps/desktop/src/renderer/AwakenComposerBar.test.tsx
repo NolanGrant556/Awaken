@@ -125,6 +125,25 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(host.querySelector("textarea")).toBeNull();
   });
 
+  it("renders capability tokens as an atomic Computer Use chip with a monitor icon", () => {
+    const { editor } = renderComposer({
+      tokens: [
+        {
+          id: "capability:computer-use",
+          type: "capability",
+          label: "Computer Use",
+        },
+      ],
+    });
+    const token = editor.querySelector<HTMLElement>(
+      '[data-composer-token-id="capability:computer-use"]',
+    );
+
+    expect(token?.textContent).toBe("Computer Use");
+    expect(token?.querySelector("rect")?.getAttribute("width")).toBe("20");
+    expect(token?.querySelectorAll("path")).toHaveLength(2);
+  });
+
   it("maps edits before and after the token back to structured segments", () => {
     const onChange = vi.fn();
     const onStructuredInputChange = vi.fn();

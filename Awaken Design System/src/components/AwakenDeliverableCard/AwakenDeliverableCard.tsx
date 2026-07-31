@@ -28,7 +28,10 @@ export type AwakenDeliverableCardProps = {
   previewSrc?: string;
   previewAlt?: string;
   previewAspectRatio?: number;
+  /** When true, media deliverables show an unavailable terminal state instead of an infinite ready skeleton. */
+  previewUnavailable?: boolean;
   onPreview?: () => void;
+  onMediaError?: () => void;
   onOpen?: () => void;
   onReveal?: () => void;
   localOpenLabel?: string;
@@ -95,7 +98,9 @@ export function AwakenDeliverableCard({
   previewSrc,
   previewAlt,
   previewAspectRatio,
+  previewUnavailable = false,
   onPreview,
+  onMediaError,
   onOpen,
   onReveal,
   localOpenLabel,
@@ -123,18 +128,24 @@ export function AwakenDeliverableCard({
   }, [menuOpen]);
 
   if (fileType === "image" || fileType === "video") {
+    const mediaStatus = previewUnavailable ? "error" : "ready";
     return (
       <AwakenMediaItemCard
         kind={fileType}
-        status="ready"
+        status={mediaStatus}
         title={title}
-        detail={`${fileTypeLabel[fileType]} · ${normalizedExtension}`}
-        src={previewSrc}
+        detail={
+          previewUnavailable
+            ? "预览不可用"
+            : `${fileTypeLabel[fileType]} · ${normalizedExtension}`
+        }
+        src={previewUnavailable ? undefined : previewSrc}
         alt={previewAlt || title}
         aspectRatio={previewAspectRatio}
         disabled={disabled}
         openingExternal={opening}
-        onPreview={onPreview ?? onOpen}
+        onPreview={previewUnavailable ? undefined : onPreview ?? onOpen}
+        onMediaError={onMediaError}
         onOpenExternal={onPreview ? onOpen : undefined}
         onReveal={onReveal}
         localOpenLabel={localOpenLabel}

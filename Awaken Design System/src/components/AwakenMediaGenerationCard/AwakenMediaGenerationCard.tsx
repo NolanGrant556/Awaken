@@ -19,6 +19,7 @@ export type AwakenMediaGenerationSource = {
   alt?: string;
   aspectRatio?: number;
   onPreview?: () => void;
+  onMediaError?: () => void;
   /** Compatibility for consumers that previously used the only click action. */
   onOpen?: () => void;
 };
@@ -165,6 +166,7 @@ export function AwakenMediaGenerationCard({
                 index={slotCount > 1 ? itemNumber : undefined}
                 aspectRatio={source?.aspectRatio ?? requestedAspectRatio}
                 onPreview={source?.onPreview ?? source?.onOpen}
+                onMediaError={source?.onMediaError}
               />
             );
           })}

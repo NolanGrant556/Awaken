@@ -73,6 +73,23 @@ describe("final deliverable list", () => {
     expect(videoHtml).toContain("成片.mp4");
   });
 
+  it("surfaces unavailable media deliverables instead of an infinite ready skeleton", () => {
+    const html = renderToString(
+      React.createElement(DeliverableCard, {
+        title: "失效图.png",
+        extension: "png",
+        fileType: "image",
+        previewUnavailable: true,
+        onOpen: () => undefined,
+        onReveal: () => undefined,
+      }),
+    );
+
+    expect(html).toContain('data-status="error"');
+    expect(html).toContain("预览不可用");
+    expect(html).not.toContain("<img");
+  });
+
   it("renders a 15-image generation batch as 15 independent compact cards", () => {
     const html = renderToString(
       React.createElement(MediaGenerationCard, {

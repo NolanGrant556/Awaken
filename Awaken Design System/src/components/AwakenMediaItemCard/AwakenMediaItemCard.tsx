@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -39,6 +40,8 @@ export type AwakenMediaItemCardProps = {
   disabled?: boolean;
   openingExternal?: boolean;
   onPreview?: () => void;
+  /** Fired when the current media element fails to load; consumers may reissue a source. */
+  onMediaError?: () => void;
   onOpenExternal?: () => void;
   onReveal?: () => void;
   localOpenLabel?: string;
@@ -82,6 +85,7 @@ export function AwakenMediaItemCard({
   disabled = false,
   openingExternal = false,
   onPreview,
+  onMediaError,
   onOpenExternal,
   onReveal,
   localOpenLabel = "使用本地应用打开",
@@ -94,6 +98,8 @@ export function AwakenMediaItemCard({
   );
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDetailsElement>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const ready = status === "ready";
   const transient =
     !ready && status !== "unknown" && status !== "error" && status !== "cancelled";
@@ -104,10 +110,26 @@ export function AwakenMediaItemCard({
     "--aw-media-item-aspect": resolvedRatio ?? positiveRatio(aspectRatio) ?? fallbackRatio,
   } as CSSProperties;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setLoaded(false);
     setResolvedRatio(positiveRatio(aspectRatio));
-  }, [aspectRatio, kind, src]);
+    if (!ready || !src) return;
+    if (kind === "image") {
+      const image = imageRef.current;
+      if (!image?.complete || image.naturalWidth <= 0) return;
+      if (image.naturalHeight > 0) {
+        setResolvedRatio(image.naturalWidth / image.naturalHeight);
+      }
+      setLoaded(true);
+      return;
+    }
+    const video = videoRef.current;
+    if (!video || video.readyState < HTMLMediaElement.HAVE_METADATA) return;
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      setResolvedRatio(video.videoWidth / video.videoHeight);
+    }
+    setLoaded(true);
+  }, [aspectRatio, kind, ready, src]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -141,20 +163,27 @@ export function AwakenMediaItemCard({
     setLoaded(true);
   };
 
+  const handleMediaError = () => {
+    setLoaded(false);
+    onMediaError?.();
+  };
+
   const media = (
     <>
       {ready && src && kind === "image" ? (
         <img
+          ref={imageRef}
           className="aw-media-item-card-media"
           src={src}
           alt={alt || title}
           draggable={false}
           onLoad={handleImageLoad}
-          onError={() => setLoaded(false)}
+          onError={handleMediaError}
         />
       ) : null}
       {ready && src && kind === "video" ? (
         <video
+          ref={videoRef}
           className="aw-media-item-card-media"
           src={src}
           muted
@@ -162,7 +191,7 @@ export function AwakenMediaItemCard({
           preload="metadata"
           aria-label={alt || title}
           onLoadedMetadata={handleVideoMetadata}
-          onError={() => setLoaded(false)}
+          onError={handleMediaError}
         />
       ) : null}
       {!loaded || !ready ? (

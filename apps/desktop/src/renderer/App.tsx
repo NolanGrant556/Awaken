@@ -251,6 +251,8 @@ function artifactMediaSourceKey(request: ArtifactOpenRequest): string {
   return `${request.threadId}:${request.runId}:${request.artifactId}`;
 }
 
+const MAX_ARTIFACT_MEDIA_SOURCE_RETRIES = 2;
+
 export type UserQuestionSelection = {
   selected: string[];
   otherText: string;
@@ -2065,9 +2067,12 @@ export function App() {
   const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(null);
   const [mediaPreview, setMediaPreview] = useState<MediaArtifactPreviewState | null>(null);
   const [artifactMediaSources, setArtifactMediaSources] = useState<Record<string, string | null>>({});
+  const [artifactMediaHydrationEpoch, setArtifactMediaHydrationEpoch] = useState(0);
   const artifactMediaSourcesRef = useRef<Record<string, string | null>>({});
   const artifactMediaSourcePendingRef = useRef<Set<string>>(new Set());
   const artifactMediaSourceGenerationRef = useRef(0);
+  const artifactMediaSourceRetryRef = useRef<Map<string, number>>(new Map());
+  const workbenchMediaSurfaceActiveRef = useRef(true);
   const [answeringUserQuestionId, setAnsweringUserQuestionId] = useState<string | null>(null);
   const [resolvingComputerReviewId, setResolvingComputerReviewId] = useState<string | null>(null);
   const [controllingComputerHandoffId, setControllingComputerHandoffId] = useState<string | null>(null);
@@ -2282,6 +2287,7 @@ export function App() {
   useEffect(() => {
     artifactMediaSourceGenerationRef.current += 1;
     artifactMediaSourcePendingRef.current.clear();
+    artifactMediaSourceRetryRef.current.clear();
     artifactMediaSourcesRef.current = {};
     setArtifactMediaSources({});
     setMediaPreview(null);
@@ -2299,6 +2305,9 @@ export function App() {
           artifactMediaSourcePendingRef.current.delete(key);
           if (sourceGeneration !== artifactMediaSourceGenerationRef.current) return;
           const nextSource = result.ok ? result.src : null;
+          if (result.ok) {
+            artifactMediaSourceRetryRef.current.delete(key);
+          }
           artifactMediaSourcesRef.current = {
             ...artifactMediaSourcesRef.current,
             [key]: nextSource,
@@ -2318,7 +2327,7 @@ export function App() {
           setArtifactMediaSources((current) => ({ ...current, [key]: null }));
         });
     }
-  }, [artifactMediaRequests, runtimeClient]);
+  }, [artifactMediaHydrationEpoch, artifactMediaRequests, runtimeClient]);
   const subagentTasks = useMemo<SubagentNarrativeTask[]>(() => {
     const byId = new Map<string, SubagentNarrativeTask>();
     for (const item of runtimeState.narrative.committedItems) {
@@ -3911,6 +3920,19 @@ export function App() {
       ? activeNavSection
       : undefined;
   const scheduledTasksNavActive = activeNavSection === "scheduled-tasks";
+  const workbenchMediaSurfaceActive =
+    !activeExtensionSection && !scheduledTasksNavActive;
+  useEffect(() => {
+    const wasActive = workbenchMediaSurfaceActiveRef.current;
+    workbenchMediaSurfaceActiveRef.current = workbenchMediaSurfaceActive;
+    if (!workbenchMediaSurfaceActive || wasActive) return;
+    // Skills/Connectors/Scheduled Tasks unmount Workbench; reissue short-lived opaque sources on return.
+    artifactMediaSourcePendingRef.current.clear();
+    artifactMediaSourceRetryRef.current.clear();
+    artifactMediaSourcesRef.current = {};
+    setArtifactMediaSources({});
+    setArtifactMediaHydrationEpoch((value) => value + 1);
+  }, [workbenchMediaSurfaceActive]);
   const inspectorPresentation = workbenchInspectorPresentation(
     activeNavSection,
     inspectorCollapsed,
@@ -5489,6 +5511,25 @@ export function App() {
     setContextUsagePanelOpen(false);
   }
 
+  function refreshArtifactMediaSource(key: string, request: ArtifactOpenRequest): void {
+    const retries = artifactMediaSourceRetryRef.current.get(key) ?? 0;
+    if (retries >= MAX_ARTIFACT_MEDIA_SOURCE_RETRIES) {
+      artifactMediaSourcesRef.current = {
+        ...artifactMediaSourcesRef.current,
+        [key]: null,
+      };
+      setArtifactMediaSources((current) => ({ ...current, [key]: null }));
+      return;
+    }
+    artifactMediaSourceRetryRef.current.set(key, retries + 1);
+    artifactMediaSourcePendingRef.current.delete(key);
+    const nextSources = { ...artifactMediaSourcesRef.current };
+    delete nextSources[key];
+    artifactMediaSourcesRef.current = nextSources;
+    setArtifactMediaSources(nextSources);
+    setArtifactMediaHydrationEpoch((value) => value + 1);
+  }
+
   async function openArtifactExternally(request: ArtifactOpenRequest): Promise<void> {
     setOpeningArtifactId(request.artifactId);
     try {
@@ -5755,25 +5796,34 @@ export function App() {
             }]
           : [],
       );
-      const mediaSources = mediaEntries.map((entry) => ({
-        id: entry.id,
-        index: entry.index,
-        status: entry.status,
-        detail:
-          entry.sourceUnavailable
-            ? "预览不可用"
-            : entry.status === "ready"
-            ? "点击预览"
-            : entry.status === "unknown"
-              ? "状态待确认"
-              : "生成失败",
-        src: entry.src,
-        alt: entry.title,
-        onPreview:
-          entry.src && entry.request
-            ? () => openMediaPreview(previewItems, entry.id)
-            : undefined,
-      }));
+      const mediaSources = mediaEntries.map((entry) => {
+        const sourceKey = entry.request
+          ? artifactMediaSourceKey(entry.request)
+          : undefined;
+        return {
+          id: entry.id,
+          index: entry.index,
+          status: entry.status,
+          detail:
+            entry.sourceUnavailable
+              ? "预览不可用"
+              : entry.status === "ready"
+              ? "点击预览"
+              : entry.status === "unknown"
+                ? "状态待确认"
+                : "生成失败",
+          src: entry.src,
+          alt: entry.title,
+          onPreview:
+            entry.src && entry.request
+              ? () => openMediaPreview(previewItems, entry.id)
+              : undefined,
+          onMediaError:
+            sourceKey && entry.request
+              ? () => refreshArtifactMediaSource(sourceKey, entry.request!)
+              : undefined,
+        };
+      });
       return (
         <MediaGenerationCard
           key={key}
@@ -5880,43 +5930,66 @@ export function App() {
         <DeliverableList
           key={key}
           terminalStatus={item.terminalStatus}
-          items={item.files.map((file) => ({
-            id: file.artifactId,
-            title: file.title,
-            extension: file.extension,
-            fileType: file.fileType,
-            previewSrc:
-              file.fileType === "image" || file.fileType === "video"
-                ? artifactMediaSources[`${threadId}:${file.runId}:${file.artifactId}`] ?? undefined
+          items={item.files.map((file) => {
+            const isMedia = file.fileType === "image" || file.fileType === "video";
+            const mediaRequest =
+              threadId && isMedia
+                ? {
+                    threadId,
+                    runId: file.runId,
+                    artifactId: file.artifactId,
+                  }
+                : undefined;
+            const mediaSourceKey = mediaRequest
+              ? artifactMediaSourceKey(mediaRequest)
+              : undefined;
+            const mediaSourceState =
+              mediaSourceKey !== undefined
+                ? artifactMediaSources[mediaSourceKey]
+                : undefined;
+            return {
+              id: file.artifactId,
+              title: file.title,
+              extension: file.extension,
+              fileType: file.fileType,
+              previewSrc:
+                isMedia && typeof mediaSourceState === "string"
+                  ? mediaSourceState
+                  : undefined,
+              previewUnavailable: isMedia && mediaSourceState === null,
+              onPreview:
+                isMedia && typeof mediaSourceState === "string"
+                  ? () => openMediaPreview(previewItems, file.artifactId)
+                  : undefined,
+              onMediaError:
+                mediaRequest && mediaSourceKey
+                  ? () => refreshArtifactMediaSource(mediaSourceKey, mediaRequest)
+                  : undefined,
+              opening: openingArtifactId === file.artifactId,
+              disabled: !threadId,
+              onOpen: threadId
+                ? () => openArtifactExternally({
+                    threadId,
+                    runId: file.runId,
+                    artifactId: file.artifactId,
+                  })
                 : undefined,
-            onPreview:
-              file.fileType === "image" || file.fileType === "video"
-                ? () => openMediaPreview(previewItems, file.artifactId)
+              onReveal: threadId
+                ? () => revealArtifact({
+                    threadId,
+                    runId: file.runId,
+                    artifactId: file.artifactId,
+                  })
                 : undefined,
-            opening: openingArtifactId === file.artifactId,
-            disabled: !threadId,
-            onOpen: threadId
-              ? () => openArtifactExternally({
-                  threadId,
-                  runId: file.runId,
-                  artifactId: file.artifactId,
-                })
-              : undefined,
-            onReveal: threadId
-              ? () => revealArtifact({
-                  threadId,
-                  runId: file.runId,
-                  artifactId: file.artifactId,
-                })
-              : undefined,
-            localOpenLabel: "使用本地应用打开",
-            revealLabel:
-              platform === "macos"
-                ? "在 Finder 中显示"
-                : platform === "windows"
-                  ? "在文件资源管理器中显示"
-                  : "在文件管理器中显示",
-          }))}
+              localOpenLabel: "使用本地应用打开",
+              revealLabel:
+                platform === "macos"
+                  ? "在 Finder 中显示"
+                  : platform === "windows"
+                    ? "在文件资源管理器中显示"
+                    : "在文件管理器中显示",
+            };
+          })}
         />
       );
     }

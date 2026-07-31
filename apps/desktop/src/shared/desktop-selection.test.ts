@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { isDesktopSelectAllShortcut } from "./desktop-selection.js";
+import {
+  isDesktopSelectAllShortcut,
+  isDesktopZoomShortcut,
+} from "./desktop-selection.js";
 
 function keyboardInput(
   overrides: Partial<Parameters<typeof isDesktopSelectAllShortcut>[0]> = {},
@@ -51,5 +54,19 @@ describe("isDesktopSelectAllShortcut", () => {
         keyboardInput({ control: true, meta: true }),
       ),
     ).toBe(false);
+  });
+});
+
+describe("isDesktopZoomShortcut", () => {
+  it("recognizes macOS and Windows/Linux zoom shortcuts", () => {
+    expect(isDesktopZoomShortcut(keyboardInput({ key: "+", code: "Equal", meta: true, shift: true }))).toBe(true);
+    expect(isDesktopZoomShortcut(keyboardInput({ key: "-", code: "Minus", control: true }))).toBe(true);
+    expect(isDesktopZoomShortcut(keyboardInput({ key: "0", code: "Digit0", meta: true }))).toBe(true);
+  });
+
+  it("does not consume unmodified or unrelated editing shortcuts", () => {
+    expect(isDesktopZoomShortcut(keyboardInput({ key: "+", code: "Equal" }))).toBe(false);
+    expect(isDesktopZoomShortcut(keyboardInput({ key: "a", code: "KeyA", meta: true }))).toBe(false);
+    expect(isDesktopZoomShortcut(keyboardInput({ key: "+", code: "Equal", control: true, alt: true }))).toBe(false);
   });
 });

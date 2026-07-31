@@ -19,5 +19,5 @@
 
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
 - 通过 props 输入，通过回调输出。
-- macOS 状态为原生红绿灯保留独立安全区，顶部控制不得紧贴原生窗口按钮；Design System 在 44px 顶部栏内保持控件居中，Desktop Electron Main 以 `trafficLightPosition: { x: 18, y: 14 }` 对齐原生红绿灯，双方中心点必须处于同一条水平线。
+- macOS 状态为原生红绿灯保留独立安全区，顶部控制不得紧贴原生窗口按钮；Desktop 主窗口固定为 100% 页面缩放，Design System 在 44px 顶部栏内以 `-0.75px` 控制偏移对齐，Electron Main 以 `trafficLightPosition: { x: 18, y: 14 }` 放置原生红绿灯，双方中心点必须处于同一条水平线。
 - 公共 API 变化时同步更新可观测状态。

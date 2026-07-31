@@ -6,7 +6,7 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
-import { FileText, Package } from "lucide-react";
+import { FileText, Monitor, Package } from "lucide-react";
 import { AwakenCopyButton } from "../AwakenCopyButton";
 
 const collapsedAttachmentLimit = 3;
@@ -166,12 +166,13 @@ export function AwakenUserPromptBlock({
     token: NonNullable<AwakenUserPromptBlockProps["tokens"]>[number],
   ) {
     const tokenType = token.type ?? "token";
+    const TokenIcon = tokenType === "capability" ? Monitor : Package;
     return (
       <span
         className={`execution-prompt-bubble-token execution-prompt-bubble-token-${tokenType}`}
         title={token.title ?? token.label}
       >
-        <Package
+        <TokenIcon
           className="execution-prompt-bubble-token-icon"
           size={14}
           strokeWidth={1.9}

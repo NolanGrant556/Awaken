@@ -743,7 +743,13 @@ export type RuntimeSkill = {
 
 export type SkillProjectRoots = string | string[];
 
-export type ComposerTokenType = "skill" | "file" | "workflow" | "prompt" | "connector";
+export type ComposerTokenType =
+  | "skill"
+  | "file"
+  | "workflow"
+  | "prompt"
+  | "connector"
+  | "capability";
 
 export type SkillComposerTokenPayload = {
   skillId: string;
@@ -758,6 +764,10 @@ export type ProjectPathComposerTokenPayload = {
   projectId: string;
   folderPath: string;
   relativePath: string;
+};
+
+export type ComputerUseComposerTokenPayload = {
+  capabilityId: "computer-use";
 };
 
 export type ComposerToken = {

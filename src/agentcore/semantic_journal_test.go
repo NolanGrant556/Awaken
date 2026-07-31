@@ -165,6 +165,55 @@ func TestUserMessagePersistsStructuredAttachmentsAndComposerTokens(t *testing.T)
 	}
 }
 
+func TestPreparedUserMessageSeparatesModelAndDisplayInput(t *testing.T) {
+	server := newRunnerStreamServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		writeRunnerStreamText(t, w, "done")
+	})
+	defer server.Close()
+
+	recorder := &failingRecorder{}
+	agent := NewAgentWithThreadID(testAgentConfig(server.URL, 1), "thread_hidden_capability")
+	agent.SetRunIdentity("run_hidden_capability", "session_hidden_capability")
+	agent.SetSemanticRecorder(recorder)
+	agent.SetPendingComposerTokens([]SemanticComposerToken{{
+		ID:    "capability:computer-use",
+		Type:  "capability",
+		Label: "Computer Use",
+		Payload: map[string]any{
+			"capabilityId": "computer-use",
+		},
+	}})
+
+	const modelInput = "hidden computer instruction\n打开计算器"
+	const displayInput = "打开计算器"
+	if err := agent.PrepareUserMessageWithDisplayInput(
+		context.Background(),
+		modelInput,
+		displayInput,
+		nil,
+	); err != nil {
+		t.Fatalf("PrepareUserMessageWithDisplayInput: %v", err)
+	}
+	if _, err := agent.RunStreamWithEvents(context.Background(), modelInput, nil); err != nil {
+		t.Fatalf("RunStreamWithEvents: %v", err)
+	}
+
+	for _, record := range recorder.records {
+		if record.Kind != SemanticKindUserMessage {
+			continue
+		}
+		if got := record.Payload["content"]; got != displayInput {
+			t.Fatalf("durable user_message exposed model input: %#v", got)
+		}
+		tokens, ok := record.Payload["composer_tokens"].([]SemanticComposerToken)
+		if !ok || len(tokens) != 1 || tokens[0].Payload["capabilityId"] != "computer-use" {
+			t.Fatalf("capability identity missing from durable user_message: %#v", record.Payload)
+		}
+		return
+	}
+	t.Fatal("missing durable user_message")
+}
+
 func TestToolResultBatchPersistsAppliedFileChangeAtomically(t *testing.T) {
 	recorder := &failingRecorder{}
 	events := newRunEventEmitter("thread_file_change", EventSinkFunc(func(AwakenEvent) {}))

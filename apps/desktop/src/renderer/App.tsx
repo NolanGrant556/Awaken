@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -5681,13 +5688,24 @@ export function App() {
     animateToolEntry = true,
   ) {
     if (item.kind === "planning" || item.kind === "thinking") {
-      return (
+      const thoughtTrace = (
         <ThoughtTrace
-          key={key}
           text={item.kind === "planning" ? "" : item.text}
           status={item.kind === "planning" ? "active" : item.status}
+          label={
+            item.kind === "planning" && item.phase === "continuation"
+              ? item.text
+              : undefined
+          }
           theme={appearanceTheme}
         />
+      );
+      return item.kind === "planning" && item.phase === "continuation" ? (
+        <div key={key} className="narrative-model-continuation">
+          {thoughtTrace}
+        </div>
+      ) : (
+        <Fragment key={key}>{thoughtTrace}</Fragment>
       );
     }
     if (item.kind === "answer") {

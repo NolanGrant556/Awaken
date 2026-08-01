@@ -119,7 +119,13 @@ export type RunNarrativeItem =
       attachments?: RunInputAttachment[];
       tokens?: PromptNarrativeToken[];
     }
-  | { kind: "planning"; id: string; text: string; status: "active" | "done" }
+  | {
+      kind: "planning";
+      id: string;
+      text: string;
+      status: "active" | "done";
+      phase?: "continuation";
+    }
   | { kind: "thinking"; id: string; text: string; status: "active" | "done" }
   | { kind: "exploring"; id: string; actions: RunAction[]; status: "active" | "done" }
   | { kind: "tool"; id: string; title: string; detail?: string; status: ToolDisplayState; toolStatus?: string }

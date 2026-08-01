@@ -117,6 +117,8 @@ export function projectAguiEventToNarrative(
   switch (event.type) {
     case "RUN_STARTED":
       return commitActive(base, "done");
+    case "AWAKEN_TURN_STARTED":
+      return activateContinuationPlanning(base, event);
     case "REASONING_START":
     case "REASONING_MESSAGE_START":
       return activateThinking(base, event);
@@ -415,6 +417,32 @@ export function projectAguiEventToNarrative(
     default:
       return base;
   }
+}
+
+const continuationPlanningLabels: Record<string, string> = {
+  tool_result_continuation: "正在分析工具结果",
+  reactive_compact_retry: "正在整理上下文并重试",
+  max_output_continuation: "正在继续生成",
+  xml_fallback_continuation: "正在继续处理工具结果",
+};
+
+function activateContinuationPlanning(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
+  const transitionReason = event.transitionReason ?? "";
+  const label = continuationPlanningLabels[transitionReason];
+  if (!label) {
+    return state;
+  }
+  const turnIdentity = event.turnId ?? String(event.turnCount ?? transitionReason);
+  return setActive(state, {
+    kind: "planning",
+    id: `planning:${eventScopedId(event, turnIdentity)}`,
+    text: label,
+    status: "active",
+    phase: "continuation",
+  });
 }
 
 function commitSkillTrace(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {

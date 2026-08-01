@@ -69,3 +69,15 @@ func TestGlobMissingPinnedRGNeedsRuntime(t *testing.T) {
 		t.Fatalf("outcome=%+v", outcome)
 	}
 }
+
+func TestGlobStillFailsWhenRipgrepRejectsThePattern(t *testing.T) {
+	root := t.TempDir()
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(root, []string{root}))
+	outcome, err := (&Tool{}).ExecuteOutcome(ctx, `{"pattern":"["}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !outcome.IsError() || outcome.ErrorCode != "glob_failed" {
+		t.Fatalf("outcome=%+v", outcome)
+	}
+}

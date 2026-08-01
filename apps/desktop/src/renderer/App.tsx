@@ -213,6 +213,7 @@ import {
 type UserQuestionPromptProps = {
   question: UserQuestionItem;
   disabled?: boolean;
+  onCancel: () => void;
   onSubmit: (answer: string) => void;
 };
 
@@ -681,7 +682,12 @@ export function promptTextAfterTokenLeadingText(
   return remainingText;
 }
 
-export function UserQuestionPrompt({ question, disabled, onSubmit }: UserQuestionPromptProps) {
+export function UserQuestionPrompt({
+  question,
+  disabled,
+  onCancel,
+  onSubmit,
+}: UserQuestionPromptProps) {
   const [answers, setAnswers] = useState<Record<number, UserQuestionSelection>>({});
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const otherInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
@@ -812,13 +818,14 @@ export function UserQuestionPrompt({ question, disabled, onSubmit }: UserQuestio
       className="user-question-card"
       aria-label={`需要回答的问题 ${currentPageIndex + 1} of ${questionCount}`}
     >
-      {activeQuestion.header || hasMultipleQuestions ? (
-        <div className="user-question-card__topbar">
+      <div className="user-question-card__topbar">
+        <div className="user-question-card__heading">
           {activeQuestion.header ? (
             <div className="user-question-card__header">{activeQuestion.header}</div>
-          ) : (
-            <span aria-hidden="true" />
-          )}
+          ) : null}
+          <div className="user-question-card__title">{activeQuestion.question}</div>
+        </div>
+        <div className="user-question-card__topbar-actions">
           {hasMultipleQuestions ? (
             <div className="user-question-card__pager" aria-label="问题切换">
               <button
@@ -846,14 +853,23 @@ export function UserQuestionPrompt({ question, disabled, onSubmit }: UserQuestio
               </button>
             </div>
           ) : null}
+          <button
+            type="button"
+            className="user-question-card__close"
+            aria-label="取消提问"
+            title="取消提问"
+            onClick={onCancel}
+            disabled={disabled}
+          >
+            <X size={20} strokeWidth={1.8} />
+          </button>
         </div>
-      ) : null}
+      </div>
       <div className="user-question-card__body">
         <div
           className="user-question-card__question"
           key={`${currentPageIndex}:${activeQuestion.question}`}
         >
-          <div className="user-question-card__title">{activeQuestion.question}</div>
           <div className="user-question-card__options">
             {options.map((option) => (
               <button
@@ -928,6 +944,9 @@ export function UserQuestionPrompt({ question, disabled, onSubmit }: UserQuestio
             已回答 {answeredCount} / {questionCount}
           </span>
         ) : null}
+        <Button variant="default" size="sm" disabled={disabled} onClick={onCancel}>
+          取消
+        </Button>
         <Button
           variant="primary"
           size="sm"
@@ -6129,6 +6148,9 @@ export function App() {
       <UserQuestionPrompt
         question={activeUserQuestion}
         disabled={answering}
+        onCancel={() => {
+          void handleCancel();
+        }}
         onSubmit={(answer) => {
           void handleAnswerUserQuestion(answer);
         }}
@@ -6710,53 +6732,55 @@ export function App() {
                               {renderExternalActionGate()}
                               {renderComputerReviewGate()}
                               {renderComputerHandoffIndicator()}
-                              <ExpandedFileComposer
-                                active={fileWorkspaceSurfaceActive}
-                                idleMode={expandedFileComposerIdleMode}
-                                running={isBusy}
-                                completed={expandedFileComposerCompleted}
-                                completedElapsedMs={expandedFileComposerElapsedMs}
-                                forceFull={expandedFileComposerForceFull}
-                                onShowCompact={() => setExpandedFileComposerIdleMode("compact")}
-                                onShowFull={handleShowExpandedFileComposerFull}
-                                onStop={() => {
-                                  void handleComposerSubmit();
-                                }}
-                              >
-                                <ComposerBar
-                                  value={composerValue}
-                                  onChange={setComposerValue}
-                                  onStructuredInputChange={handleComposerStructuredInputChange}
-                                  onSubmit={() => {
+                              {activeUserQuestion ? null : (
+                                <ExpandedFileComposer
+                                  active={fileWorkspaceSurfaceActive}
+                                  idleMode={expandedFileComposerIdleMode}
+                                  running={isBusy}
+                                  completed={expandedFileComposerCompleted}
+                                  completedElapsedMs={expandedFileComposerElapsedMs}
+                                  forceFull={expandedFileComposerForceFull}
+                                  onShowCompact={() => setExpandedFileComposerIdleMode("compact")}
+                                  onShowFull={handleShowExpandedFileComposerFull}
+                                  onStop={() => {
                                     void handleComposerSubmit();
                                   }}
-                                  onAddContext={handleAddContext}
-                                  placeholder={fileWorkspaceSurfaceActive ? "输入后续任务…" : ""}
-                                  disabled={composerBarState.disabled}
-                                  isReady={composerBarState.isReady}
-                                  submitMode={composerBarState.submitMode}
-                                  submitDisabled={composerBarState.submitDisabled}
-                                  variant="dock"
-                                  metaItems={dockComposerMetaItems}
-                                  focusRequest={composerFocusRequest}
-                                  focusOffset={composerFocusOffset}
-                                  onInputSelectionChange={(selection) => {
-                                    setComposerInputSelection({
-                                      anchor: selection.anchor,
-                                      focus: selection.focus,
-                                    });
-                                  }}
-                                  attachments={composerBarAttachments}
-                                  tokens={composerBarTokens}
-                                  slashPalette={composerBarSlashPalette}
-                                  onInputKeyDown={handleComposerInputKeyDown}
-                                  onRemoveAttachment={handleRemoveComposerAttachment}
-                                  onRemoveToken={handleRemoveComposerToken}
-                                  onPasteImages={(files) => {
-                                    void handlePasteImages(files);
-                                  }}
-                                />
-                              </ExpandedFileComposer>
+                                >
+                                  <ComposerBar
+                                    value={composerValue}
+                                    onChange={setComposerValue}
+                                    onStructuredInputChange={handleComposerStructuredInputChange}
+                                    onSubmit={() => {
+                                      void handleComposerSubmit();
+                                    }}
+                                    onAddContext={handleAddContext}
+                                    placeholder={fileWorkspaceSurfaceActive ? "输入后续任务…" : ""}
+                                    disabled={composerBarState.disabled}
+                                    isReady={composerBarState.isReady}
+                                    submitMode={composerBarState.submitMode}
+                                    submitDisabled={composerBarState.submitDisabled}
+                                    variant="dock"
+                                    metaItems={dockComposerMetaItems}
+                                    focusRequest={composerFocusRequest}
+                                    focusOffset={composerFocusOffset}
+                                    onInputSelectionChange={(selection) => {
+                                      setComposerInputSelection({
+                                        anchor: selection.anchor,
+                                        focus: selection.focus,
+                                      });
+                                    }}
+                                    attachments={composerBarAttachments}
+                                    tokens={composerBarTokens}
+                                    slashPalette={composerBarSlashPalette}
+                                    onInputKeyDown={handleComposerInputKeyDown}
+                                    onRemoveAttachment={handleRemoveComposerAttachment}
+                                    onRemoveToken={handleRemoveComposerToken}
+                                    onPasteImages={(files) => {
+                                      void handlePasteImages(files);
+                                    }}
+                                  />
+                                </ExpandedFileComposer>
+                              )}
                             </div>
                           </ComposerDock>
                         )
@@ -6770,40 +6794,42 @@ export function App() {
                           {renderExternalActionGate()}
                           {renderComputerReviewGate()}
                           {renderComputerHandoffIndicator()}
-                          <ComposerBar
-                            value={composerValue}
-                            onChange={setComposerValue}
-                            onStructuredInputChange={handleComposerStructuredInputChange}
-                            onSubmit={() => {
-                              void handleComposerSubmit();
-                            }}
-                            onAddContext={handleAddContext}
-                            placeholder=""
-                            disabled={composerBarState.disabled}
-                            isReady={composerBarState.isReady}
-                            submitMode={composerBarState.submitMode}
-                            submitDisabled={composerBarState.submitDisabled}
-                            variant="center"
-                            metaItems={composerMetaItems}
-                            projectPicker={composerProjectPicker}
-                            focusRequest={composerFocusRequest}
-                            focusOffset={composerFocusOffset}
-                            onInputSelectionChange={(selection) => {
-                              setComposerInputSelection({
-                                anchor: selection.anchor,
-                                focus: selection.focus,
-                              });
-                            }}
-                            attachments={composerBarAttachments}
-                            tokens={composerBarTokens}
-                            slashPalette={composerBarSlashPalette}
-                            onInputKeyDown={handleComposerInputKeyDown}
-                            onRemoveAttachment={handleRemoveComposerAttachment}
-                            onRemoveToken={handleRemoveComposerToken}
-                            onPasteImages={(files) => {
-                              void handlePasteImages(files);
-                            }}
-                          />
+                          {activeUserQuestion ? null : (
+                            <ComposerBar
+                              value={composerValue}
+                              onChange={setComposerValue}
+                              onStructuredInputChange={handleComposerStructuredInputChange}
+                              onSubmit={() => {
+                                void handleComposerSubmit();
+                              }}
+                              onAddContext={handleAddContext}
+                              placeholder=""
+                              disabled={composerBarState.disabled}
+                              isReady={composerBarState.isReady}
+                              submitMode={composerBarState.submitMode}
+                              submitDisabled={composerBarState.submitDisabled}
+                              variant="center"
+                              metaItems={composerMetaItems}
+                              projectPicker={composerProjectPicker}
+                              focusRequest={composerFocusRequest}
+                              focusOffset={composerFocusOffset}
+                              onInputSelectionChange={(selection) => {
+                                setComposerInputSelection({
+                                  anchor: selection.anchor,
+                                  focus: selection.focus,
+                                });
+                              }}
+                              attachments={composerBarAttachments}
+                              tokens={composerBarTokens}
+                              slashPalette={composerBarSlashPalette}
+                              onInputKeyDown={handleComposerInputKeyDown}
+                              onRemoveAttachment={handleRemoveComposerAttachment}
+                              onRemoveToken={handleRemoveComposerToken}
+                              onPasteImages={(files) => {
+                                void handlePasteImages(files);
+                              }}
+                            />
+                          )}
                         </div>
                       ) : null}
 

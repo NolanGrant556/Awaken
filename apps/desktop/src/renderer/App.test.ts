@@ -1473,6 +1473,7 @@ describe("UserQuestionPrompt pager contract", () => {
             },
           ],
         },
+        onCancel: vi.fn(),
         onSubmit: vi.fn(),
       }),
     );
@@ -1480,6 +1481,8 @@ describe("UserQuestionPrompt pager contract", () => {
     expect(html).toContain("1 of 2");
     expect(html).toContain("研究深度?");
     expect(html).toContain("standard");
+    expect(html).toContain('aria-label="取消提问"');
+    expect(html).toContain(">取消<");
     expect(html).not.toContain("报告侧重点?");
   });
 

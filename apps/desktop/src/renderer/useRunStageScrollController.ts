@@ -764,7 +764,9 @@ export function useRunStageScrollController({
 
     function currentComposerBarElement(): HTMLElement | undefined {
       const composerBarElement =
-        measuredDockElement.querySelector<HTMLElement>(".composer-bar");
+        measuredDockElement.querySelector<HTMLElement>(
+          ".user-question-card, .composer-bar",
+        );
       return composerBarElement instanceof HTMLElement
         ? composerBarElement
         : undefined;

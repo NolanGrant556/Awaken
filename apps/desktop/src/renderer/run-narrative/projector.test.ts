@@ -61,6 +61,107 @@ function runStatusChanged(
 }
 
 describe("projectAguiEventToNarrative", () => {
+  it("shows a transient model status after a tool-result continuation", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_START",
+      runId: "run-1",
+      toolCallId: "read-1",
+      toolCallName: "Read",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_RESULT",
+      runId: "run-1",
+      toolCallId: "read-1",
+      toolCallName: "Read",
+      toolStatus: "succeeded",
+      content: "document parts ready",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_TURN_STARTED",
+      runId: "run-1",
+      turnId: "turn-2",
+      turnCount: 2,
+      transitionReason: "tool_result_continuation",
+    });
+
+    expect(state.activeItem).toEqual({
+      kind: "planning",
+      id: "planning:run-1:turn-2",
+      text: "正在分析工具结果",
+      status: "active",
+      phase: "continuation",
+    });
+
+    state = projectAguiEventToNarrative(state, {
+      type: "REASONING_START",
+      runId: "run-1",
+      messageId: "reasoning-2",
+    });
+    expect(state.activeItem).toMatchObject({
+      kind: "thinking",
+      id: "thinking:run-1:reasoning-2",
+      status: "active",
+    });
+  });
+
+  it("uses continuation-specific labels and ignores an initial model turn", () => {
+    const transitions = [
+      ["reactive_compact_retry", "正在整理上下文并重试"],
+      ["max_output_continuation", "正在继续生成"],
+      ["xml_fallback_continuation", "正在继续处理工具结果"],
+    ] as const;
+
+    for (const [transitionReason, text] of transitions) {
+      const state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+        type: "AWAKEN_TURN_STARTED",
+        runId: "run-1",
+        turnId: `turn-${transitionReason}`,
+        transitionReason,
+      });
+      expect(state.activeItem).toMatchObject({
+        kind: "planning",
+        text,
+        phase: "continuation",
+      });
+    }
+
+    const initial = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      type: "AWAKEN_TURN_STARTED",
+      runId: "run-1",
+      turnId: "turn-1",
+      transitionReason: "initial",
+    });
+    expect(initial.activeItem).toBeUndefined();
+  });
+
+  it("lets the next answer, tool, or terminal event replace the transient model status", () => {
+    const waitingState = () =>
+      projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+        type: "AWAKEN_TURN_STARTED",
+        runId: "run-1",
+        turnId: "turn-2",
+        transitionReason: "tool_result_continuation",
+      });
+
+    const answering = projectAguiEventToNarrative(waitingState(), textMessageStart());
+    expect(answering.activeItem).toMatchObject({ kind: "answer", status: "active" });
+
+    const usingTool = projectAguiEventToNarrative(waitingState(), {
+      type: "TOOL_CALL_START",
+      runId: "run-1",
+      toolCallId: "tool-2",
+      toolCallName: "Glob",
+    });
+    expect(usingTool.activeItem).toMatchObject({ kind: "exploring", status: "active" });
+
+    const finished = projectAguiEventToNarrative(waitingState(), {
+      type: "RUN_FINISHED",
+      runId: "run-1",
+    });
+    expect(finished.activeItem).toBeUndefined();
+  });
+
   it("keeps all projected text frames that share one semantic record sequence", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(state, {

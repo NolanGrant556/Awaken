@@ -56,6 +56,48 @@ func TestGlobWithoutPathCoversEverySecondaryRoot(t *testing.T) {
 	}
 }
 
+func TestGlobTreatsAnEmptyProjectRootAsNoMatches(t *testing.T) {
+	primary := t.TempDir()
+	secondary := t.TempDir()
+	writeFile(t, primary, "primary.md")
+
+	outcome, err := (&Tool{}).ExecuteOutcome(
+		multiRootContext(t, primary, secondary),
+		`{"pattern":"**/*.md"}`,
+		nil,
+	)
+	if err != nil || outcome.IsError() {
+		t.Fatalf("outcome=%+v err=%v", outcome, err)
+	}
+	expected := filepath.ToSlash(filepath.Join(primary, "primary.md"))
+	if outcome.Content != expected {
+		t.Fatalf("content=%q want=%q", outcome.Content, expected)
+	}
+	if total, ok := outcome.Details["total"].(int); !ok || total != 1 {
+		t.Fatalf("total=%v", outcome.Details["total"])
+	}
+}
+
+func TestGlobReturnsSuccessWhenEveryProjectRootIsEmpty(t *testing.T) {
+	primary := t.TempDir()
+	secondary := t.TempDir()
+
+	outcome, err := (&Tool{}).ExecuteOutcome(
+		multiRootContext(t, primary, secondary),
+		`{"pattern":"**/*.md"}`,
+		nil,
+	)
+	if err != nil || outcome.IsError() {
+		t.Fatalf("outcome=%+v err=%v", outcome, err)
+	}
+	if outcome.Content != "No files matched." {
+		t.Fatalf("content=%q", outcome.Content)
+	}
+	if total, ok := outcome.Details["total"].(int); !ok || total != 0 {
+		t.Fatalf("total=%v", outcome.Details["total"])
+	}
+}
+
 func TestGlobWithExplicitPathStaysOnThatRootAndKeepsRelativePaths(t *testing.T) {
 	primary := t.TempDir()
 	secondary := t.TempDir()

@@ -825,6 +825,26 @@
   background: var(--aw-surface-detail);
 }
 
+.narrative-model-continuation {
+  animation: narrative-model-continuation-enter 140ms ease-out 650ms both;
+}
+
+@keyframes narrative-model-continuation-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .narrative-model-continuation {
+    animation-duration: 1ms;
+  }
+}
+
 .narrative-kind-fileChange {
   border-color: var(--aw-success-soft-border);
   background: var(--aw-success-soft-bg);

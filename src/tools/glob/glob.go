@@ -185,7 +185,10 @@ func globRoot(ctx context.Context, started time.Time, runtime rgexec.Runtime, ro
 		failure := tool.FailedOutcome(scanErr.Error(), "glob_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC())
 		return 0, kept, &failure
 	}
-	if waitErr != nil {
+	// ripgrep uses exit code 1 to report a successful scan with no matches.
+	// That is a normal result for one root, especially when a project contains
+	// multiple folders, so only other non-zero exits are execution failures.
+	if waitErr != nil && (command.ProcessState == nil || command.ProcessState.ExitCode() != 1) {
 		failure := tool.FailedOutcome(strings.TrimSpace(stderr.String()), "glob_failed", tool.ErrorCategoryProcess, true).WithTiming(started, time.Now().UTC())
 		return 0, kept, &failure
 	}

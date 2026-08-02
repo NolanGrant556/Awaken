@@ -22,6 +22,8 @@ type Conversation struct {
 	state             ConversationState
 	activeTurn        *TurnState
 	pendingPermission *PermissionRequest
+	lastErrorCode     string
+	lastErrorMessage  string
 	startedAt         time.Time
 	updatedAt         time.Time
 }
@@ -58,13 +60,15 @@ func (c *Conversation) Summary() SessionSummary {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	s := SessionSummary{
-		ThreadID:      c.Key.ThreadID,
-		RunnerID:      c.Key.RunnerID,
-		ACPSessionID:  c.ACPSessionID,
-		State:         c.state,
-		WorkspaceRoot: c.WorkspaceRoot,
-		StartedAt:     c.startedAt,
-		UpdatedAt:     c.updatedAt,
+		ThreadID:         c.Key.ThreadID,
+		RunnerID:         c.Key.RunnerID,
+		ACPSessionID:     c.ACPSessionID,
+		State:            c.state,
+		WorkspaceRoot:    c.WorkspaceRoot,
+		LastErrorCode:    c.lastErrorCode,
+		LastErrorMessage: c.lastErrorMessage,
+		StartedAt:        c.startedAt,
+		UpdatedAt:        c.updatedAt,
 	}
 	if c.activeTurn != nil {
 		s.ActiveTurnID = c.activeTurn.TurnID
@@ -85,6 +89,13 @@ func (c *Conversation) StartTurn(hostRunID, toolCallID string) (*TurnState, erro
 	defer c.mu.Unlock()
 	if c.activeTurn != nil {
 		return nil, ErrTurnInProgress
+	}
+	if c.state == ConversationStateFailed {
+		message := c.lastErrorMessage
+		if message == "" {
+			message = "ACP transport is not available"
+		}
+		return nil, fmt.Errorf("%s: %s", ErrCodeTransportClosed, message)
 	}
 	if c.state != ConversationStateReady {
 		return nil, fmt.Errorf("%s: conversation is %s", ErrCodeSessionConflict, c.state)
@@ -112,6 +123,43 @@ func (c *Conversation) FinishTurn(result TurnResult) {
 		c.setState(ConversationStateReady)
 	}
 	c.mu.Unlock()
+}
+
+// Fail invalidates the conversation after a terminal transport or process
+// failure. It clears active interaction state, records a safe status summary,
+// and detaches the client so the dead transport cannot be reused. The caller
+// owns closing the returned client outside the conversation lock.
+func (c *Conversation) Fail(errorCode, errorMessage string) Client {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.state == ConversationStateClosed || c.state == ConversationStateClosing || c.state == ConversationStateFailed {
+		return nil
+	}
+	c.activeTurn = nil
+	c.pendingPermission = nil
+	c.lastErrorCode = errorCode
+	c.lastErrorMessage = errorMessage
+	c.setState(ConversationStateFailed)
+	client := c.client
+	c.client = nil
+	return client
+}
+
+// Lifecycle returns the optional process lifecycle surface for this
+// conversation's current client.
+func (c *Conversation) Lifecycle() (ClientLifecycle, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	lifecycle, ok := c.client.(ClientLifecycle)
+	return lifecycle, ok
+}
+
+// Client returns the current protocol client. A failed conversation detaches
+// its client, so callers must treat nil as a closed transport.
+func (c *Conversation) Client() Client {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.client
 }
 
 // SetPendingPermission registers a permission request for this turn.
@@ -176,12 +224,18 @@ func (c *Conversation) Cancel(ctx context.Context) error {
 // Close closes the conversation, its session, and the underlying process.
 func (c *Conversation) Close(ctx context.Context) error {
 	c.mu.Lock()
-	if c.state == ConversationStateClosed || c.state == ConversationStateFailed {
+	if c.state == ConversationStateClosed {
+		c.mu.Unlock()
+		return nil
+	}
+	if c.state == ConversationStateFailed && c.client == nil {
+		c.setState(ConversationStateClosed)
 		c.mu.Unlock()
 		return nil
 	}
 	c.setState(ConversationStateClosing)
 	client := c.client
+	c.client = nil
 	c.mu.Unlock()
 
 	if client == nil {

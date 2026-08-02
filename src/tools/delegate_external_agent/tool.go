@@ -102,15 +102,8 @@ func (t *DelegateExternalAgentTool) Definition() tool.ToolDefinition {
 			"任务涉及当前 workspace 外的敏感路径且未获授权时",
 			"外部 Agent 未安装或未配置时",
 		},
-		InputSchema: t.InputSchema(),
-		OutputSchema: tool.ToolParam{Type: "object", AdditionalProperties: tool.BoolPtr(false), Properties: map[string]tool.ToolParam{
-			"runner_id":        {Type: "string"},
-			"session_state":    {Type: "string"},
-			"acp_stop_reason":  {Type: "string"},
-			"assistant_text":   {Type: "string"},
-			"tool_summary":     {Type: "object", AdditionalProperties: tool.BoolPtr(false), Properties: map[string]tool.ToolParam{"completed": {Type: "integer"}, "failed": {Type: "integer"}, "total": {Type: "integer"}}},
-			"permission_state": {Type: "string"},
-		}},
+		InputSchema:  t.InputSchema(),
+		OutputSchema: delegateOutputSchema(),
 		Examples: []tool.ToolExample{
 			{Scenario: "Start a task with Codex", Input: map[string]any{"action": "start", "runner": "codex", "message": "Refactor the auth module to use OAuth2"}, Outcome: "Starts an ACP session with Codex and returns the turn result summary."},
 			{Scenario: "Send a follow-up message", Input: map[string]any{"action": "message", "runner": "codex", "message": "Also update the tests"}, Outcome: "Continues the existing session and returns the updated turn result."},
@@ -120,7 +113,7 @@ func (t *DelegateExternalAgentTool) Definition() tool.ToolDefinition {
 			{Code: "acp_runner_not_configured", Cause: "The requested runner is not configured or disabled", Retryable: false},
 			{Code: "acp_runner_not_ready", Cause: "The runner command is not available on PATH", Retryable: true},
 			{Code: "acp_session_conflict", Cause: "A session already exists for this thread and runner", Retryable: false},
-			{Code: "acp_transport_closed", Cause: "The ACP transport closed unexpectedly", Retryable: true},
+			{Code: "acp_transport_closed", Cause: "The ACP transport closed unexpectedly; the failed session is invalidated and cannot be reused", Retryable: false, Recovery: []string{"Inspect external side effects, then start a new ACP session."}},
 			{Code: "acp_permission_denied", Cause: "The user denied a permission request from the external agent", Retryable: false},
 			{Code: "acp_turn_timeout", Cause: "The external agent turn exceeded the configured timeout", Retryable: true},
 		},
@@ -231,8 +224,10 @@ func delegateFailureOutcome(err error) tool.ExecutionOutcome {
 	case acp.ErrCodeCapabilityUnsupported:
 		category, retryable = tool.ErrorCategoryDomain, false
 	case acp.ErrCodeRunnerNotReady, acp.ErrCodeStartTimeout, acp.ErrCodeProtocolVersionMismatch,
-		acp.ErrCodeTurnTimeout, acp.ErrCodeTransportClosed, acp.ErrCodeOutputLimitExceeded:
+		acp.ErrCodeTurnTimeout, acp.ErrCodeOutputLimitExceeded:
 		category, retryable = tool.ErrorCategoryRuntime, true
+	case acp.ErrCodeTransportClosed:
+		category, retryable = tool.ErrorCategoryRuntime, false
 	case acp.ErrCodeTurnCancelled:
 		category, retryable = tool.ErrorCategoryDomain, false
 	default:
@@ -248,48 +243,41 @@ func delegateFailureOutcome(err error) tool.ExecutionOutcome {
 	if code == acp.ErrCodeTurnCancelled {
 		outcome.Status = tool.OutcomeCancelled
 	}
+	if code == acp.ErrCodeTransportClosed {
+		outcome.Operation = &tool.OperationDescriptor{Type: ToolName, SideEffectState: tool.OutcomeSideEffectUnknown}
+		outcome.RecoveryOptions = []string{"inspect_external_state", "start_new_acp_session", "do_not_blindly_retry"}
+	}
 	return outcome
 }
 
 func (t *DelegateExternalAgentTool) listRunners() (string, error) {
 	runners := t.Manager.Registry().ListEnabled()
-	items := make([]map[string]any, 0, len(runners))
+	items := make([]runnerOutput, 0, len(runners))
 	for _, r := range runners {
-		items = append(items, map[string]any{
-			"id":              r.ID,
-			"command":         r.Command,
-			"args":            r.Args,
-			"permission_mode": string(r.PermissionMode),
-		})
+		items = append(items, runnerOutputFromConfig(r))
 	}
-	out := map[string]any{"runners": items}
-	b, _ := json.Marshal(out)
-	return string(b), nil
+	return marshalDelegateOutput(listOutput{Action: delegateActionList, Runners: items})
 }
 
 func (t *DelegateExternalAgentTool) status(ctx context.Context, runnerID string) (string, error) {
 	threadID := threadIDFromContext(ctx)
-	out := map[string]any{"thread_id": threadID}
 	if runnerID != "" {
 		if conv, ok := t.Manager.GetConversation(threadID, runnerID); ok {
-			summary := conv.Summary()
-			out["runner_id"] = summary.RunnerID
-			out["session_state"] = string(summary.State)
-			out["acp_session_id"] = summary.ACPSessionID
-			if summary.ActiveTurnID != "" {
-				out["active_turn_id"] = summary.ActiveTurnID
-			}
-			if summary.PendingPermission != nil {
-				out["pending_permission"] = summary.PendingPermission
-			}
-		} else {
-			out["session_state"] = "absent"
+			return marshalDelegateOutput(statusRunnerOutputFromSummary(delegateActionStatus, threadID, runnerID, conv.Summary()))
 		}
-	} else {
-		out["sessions"] = t.Manager.ListSessions()
+		return marshalDelegateOutput(statusRunnerOutput{
+			Action: delegateActionStatus, ThreadID: threadID, RunnerID: runnerID,
+			SessionState: string(acp.ConversationStateAbsent),
+		})
 	}
-	b, _ := json.Marshal(out)
-	return string(b), nil
+	summaries := t.Manager.ListSessions()
+	sessions := make([]sessionOutput, 0, len(summaries))
+	for _, summary := range summaries {
+		if summary.ThreadID == threadID {
+			sessions = append(sessions, sessionOutputFromSummary(summary))
+		}
+	}
+	return marshalDelegateOutput(statusSessionsOutput{Action: delegateActionStatus, ThreadID: threadID, Sessions: sessions})
 }
 
 func (t *DelegateExternalAgentTool) start(ctx context.Context, req delegateInput) (string, error) {
@@ -326,7 +314,7 @@ func (t *DelegateExternalAgentTool) start(ctx context.Context, req delegateInput
 	if err != nil {
 		return "", err
 	}
-	return formatResult(req.Runner, string(conv.State()), result), nil
+	return marshalDelegateOutput(turnOutputFromResult(delegateActionStart, req.Runner, string(conv.State()), result))
 }
 
 func (t *DelegateExternalAgentTool) message(ctx context.Context, req delegateInput) (string, error) {
@@ -343,7 +331,7 @@ func (t *DelegateExternalAgentTool) message(ctx context.Context, req delegateInp
 	if err != nil {
 		return "", err
 	}
-	return formatResult(req.Runner, "ready", result), nil
+	return marshalDelegateOutput(turnOutputFromResult(delegateActionMessage, req.Runner, string(acp.ConversationStateReady), result))
 }
 
 func (t *DelegateExternalAgentTool) cancel(ctx context.Context, req delegateInput) (string, error) {
@@ -354,9 +342,11 @@ func (t *DelegateExternalAgentTool) cancel(ctx context.Context, req delegateInpu
 	if err := t.Manager.Cancel(ctx, threadID, req.Runner); err != nil {
 		return "", err
 	}
-	out := map[string]any{"runner_id": req.Runner, "session_state": "cancelling"}
-	b, _ := json.Marshal(out)
-	return string(b), nil
+	state := acp.ConversationStateAbsent
+	if conv, ok := t.Manager.GetConversation(threadID, req.Runner); ok {
+		state = conv.State()
+	}
+	return marshalDelegateOutput(sessionActionOutput{Action: delegateActionCancel, RunnerID: req.Runner, SessionState: string(state)})
 }
 
 func (t *DelegateExternalAgentTool) close(ctx context.Context, req delegateInput) (string, error) {
@@ -367,31 +357,7 @@ func (t *DelegateExternalAgentTool) close(ctx context.Context, req delegateInput
 	if err := t.Manager.CloseSession(ctx, threadID, req.Runner); err != nil {
 		return "", err
 	}
-	out := map[string]any{"runner_id": req.Runner, "session_state": "closed"}
-	b, _ := json.Marshal(out)
-	return string(b), nil
-}
-
-func formatResult(runnerID, sessionState string, result acp.TurnResult) string {
-	out := map[string]any{
-		"runner_id":       runnerID,
-		"session_state":   sessionState,
-		"acp_stop_reason": result.StopReason,
-		"assistant_text":  result.AssistantText,
-		"tool_summary": map[string]any{
-			"completed": result.ToolSummary.Completed,
-			"failed":    result.ToolSummary.Failed,
-			"total":     result.ToolSummary.Total,
-		},
-		"permission_state": "none",
-		"truncated":        result.Truncated,
-	}
-	if result.ErrorCode != "" {
-		out["error_code"] = result.ErrorCode
-		out["error_message"] = result.ErrorMessage
-	}
-	b, _ := json.Marshal(out)
-	return string(b)
+	return marshalDelegateOutput(sessionActionOutput{Action: delegateActionClose, RunnerID: req.Runner, SessionState: string(acp.ConversationStateClosed)})
 }
 
 func emitACPEvent(ctx context.Context, event tool.ACPEvent) {

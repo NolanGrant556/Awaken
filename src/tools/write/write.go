@@ -30,7 +30,7 @@ func (t *Tool) Description() string {
 }
 func (t *Tool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
-		{Name: "file_path", Description: "Target text file within writable roots.", Type: "string", Required: true},
+		{Name: "file_path", Description: "Target text file. Relative paths resolve from the primary workspace folder; explicit absolute paths are honored unless they match a protected mutation shape.", Type: "string", Required: true},
 		{Name: "content", Description: "Complete text content. Empty content is allowed.", Type: "string", Required: true},
 	}
 }

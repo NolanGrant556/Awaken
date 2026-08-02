@@ -32,7 +32,7 @@ func (t *Tool) Description() string {
 }
 func (t *Tool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
-		{Name: "file_path", Description: "Existing text file within writable roots.", Type: "string", Required: true},
+		{Name: "file_path", Description: "Existing text file. Relative paths resolve from the primary workspace folder; explicit absolute paths are honored unless they match a protected mutation shape.", Type: "string", Required: true},
 		{Name: "old_string", Description: "Exact text to replace.", Type: "string", Required: true},
 		{Name: "new_string", Description: "Replacement text.", Type: "string", Required: true},
 		{Name: "replace_all", Description: "Replace every match. Without it, old_string must be unique.", Type: "boolean"},

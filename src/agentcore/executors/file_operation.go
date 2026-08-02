@@ -10,9 +10,9 @@ import (
 
 // FileOperationExecutor provides defense-in-depth for typed file operations.
 // Read boundaries remain owned by each tool's PermissionContext checks;
-// mutations are rechecked for read-only profiles, sensitive paths and lexical
-// writable-root scope before the tool performs its stronger canonical/symlink
-// validation.
+// mutations are rechecked for read-only profiles and sensitive paths before
+// the tool performs the same canonical/symlink validation again. Workspace
+// roots remain resolution defaults, not a mutation fence.
 type FileOperationExecutor struct{}
 
 func NewFileOperationExecutor() *FileOperationExecutor { return &FileOperationExecutor{} }
@@ -28,23 +28,23 @@ func (e *FileOperationExecutor) Execute(
 	if isMutationAction(intent.RequestedAction) && execProfile.PermissionProfile == profile.PermissionReadOnly {
 		return deniedOutput("read_only_violation", fmt.Sprintf("profile is read_only but tool requests %s", intent.RequestedAction))
 	}
-	if err := enforceFileOperationBoundary(intent); err != nil {
+	if err := enforceFileOperationBoundary(ctx, intent); err != nil {
 		return deniedOutput("file_operation_boundary", err.Error())
 	}
 	return executeWithObserver(ctx, t, input, observer)
 }
 
-func enforceFileOperationBoundary(intent profile.ExecutionIntent) error {
+func enforceFileOperationBoundary(ctx context.Context, intent profile.ExecutionIntent) error {
 	if !isMutationAction(intent.RequestedAction) || len(intent.Paths) == 0 {
 		return nil
 	}
-	permissionContext := tool.NewPermissionContext(intent.WorkspaceRoot, intent.WritableRoots)
+	if !tool.HasPermissionContext(ctx) {
+		return fmt.Errorf("file mutation denied: permission context unavailable")
+	}
+	permissionContext := tool.PermissionContextFromContext(ctx)
 	for _, path := range intent.Paths {
-		if err := permissionContext.CheckSensitivePath(path); err != nil {
+		if _, err := permissionContext.ResolveMutationPathChecked(path); err != nil {
 			return fmt.Errorf("file mutation denied: %v", err)
-		}
-		if !permissionContext.IsWithinWritableRoots(path) {
-			return fmt.Errorf("file mutation denied: path %q is outside writable roots", path)
 		}
 	}
 	return nil

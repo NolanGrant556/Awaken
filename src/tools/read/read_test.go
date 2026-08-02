@@ -36,6 +36,37 @@ func TestReadTextRangeAndUnchanged(t *testing.T) {
 	}
 }
 
+func TestReadTextOnlyDeduplicatesTheExactProjection(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "sample.txt")
+	if err := os.WriteFile(path, []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := readTestContext(root, tool.ModelCapabilities{})
+	first, _ := (&Tool{}).ExecuteOutcome(ctx, `{"file_path":"sample.txt","offset":1,"limit":1}`, nil)
+	second, _ := (&Tool{}).ExecuteOutcome(ctx, `{"file_path":"sample.txt","offset":2,"limit":1}`, nil)
+	if first.IsError() || first.Content != "1\tone" || second.IsError() || second.Content != "2\ttwo" {
+		t.Fatalf("different ranges must both read content: first=%+v second=%+v", first, second)
+	}
+	repeated, _ := (&Tool{}).ExecuteOutcome(ctx, `{"file_path":"sample.txt","offset":2,"limit":1}`, nil)
+	if repeated.Content != "file_unchanged" {
+		t.Fatalf("exact repeated projection = %+v", repeated)
+	}
+}
+
+func TestReadTextNormalizesDefaultProjection(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "sample.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := readTestContext(root, tool.ModelCapabilities{})
+	first, _ := (&Tool{}).ExecuteOutcome(ctx, `{"file_path":"sample.txt"}`, nil)
+	second, _ := (&Tool{}).ExecuteOutcome(ctx, `{"file_path":"sample.txt","offset":1,"limit":2000}`, nil)
+	if first.IsError() || second.Content != "file_unchanged" {
+		t.Fatalf("normalized default projection: first=%+v second=%+v", first, second)
+	}
+}
+
 func TestReadImageCapabilityMatrix(t *testing.T) {
 	root := t.TempDir()
 	png := append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, []byte("fixture")...)
@@ -62,9 +93,31 @@ func TestReadNativePDFAndInvalidPages(t *testing.T) {
 	if outcome.IsError() || len(outcome.ModelContent) != 1 || outcome.ModelContent[0].Type != "file" || outcome.ModelContent[0].MimeType != "application/pdf" {
 		t.Fatalf("native=%+v", outcome)
 	}
-	invalid, _ := (&Tool{}).ExecuteOutcome(readTestContext(root, tool.ModelCapabilities{SupportsNativePDF: true}), `{"file_path":"sample.pdf","pages":"0"}`, nil)
+	invalid, _ := (&Tool{}).ExecuteOutcome(ctx, `{"file_path":"sample.pdf","pages":"0"}`, nil)
 	if invalid.ErrorCode != "read_invalid_pages" || !strings.Contains(invalid.ErrorMessage, "page") {
 		t.Fatalf("invalid=%+v", invalid)
+	}
+}
+
+func TestReadMediaIsNeverSuppressedByFileVersionAlone(t *testing.T) {
+	root := t.TempDir()
+	png := append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, []byte("fixture")...)
+	if err := os.WriteFile(filepath.Join(root, "image.png"), png, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state := tool.NewToolSessionState(root)
+	permission := tool.NewPermissionContext(root, []string{root})
+	ctx := tool.ContextWithPermissionContext(context.Background(), permission)
+	ctx = tool.ContextWithToolSessionState(ctx, state)
+	visibleCtx := tool.ContextWithModelCapabilities(ctx, tool.ModelCapabilities{SupportsVision: true})
+	first, _ := (&Tool{}).ExecuteOutcome(visibleCtx, `{"file_path":"image.png"}`, nil)
+	second, _ := (&Tool{}).ExecuteOutcome(visibleCtx, `{"file_path":"image.png"}`, nil)
+	if first.IsError() || second.IsError() || second.Content == "file_unchanged" || len(second.ModelContent) != 1 {
+		t.Fatalf("media reread: first=%+v second=%+v", first, second)
+	}
+	unsupported, _ := (&Tool{}).ExecuteOutcome(tool.ContextWithModelCapabilities(ctx, tool.ModelCapabilities{}), `{"file_path":"image.png"}`, nil)
+	if unsupported.ErrorCode != "model_vision_unsupported" {
+		t.Fatalf("capability change must be re-evaluated: %+v", unsupported)
 	}
 }
 
@@ -122,8 +175,6 @@ func TestReadPDFOmitsDefaultPagesAndClampsOverRange(t *testing.T) {
 		t.Fatalf("expected page_count=1, details=%v", omitted.Details)
 	}
 
-	// Fresh state so the second read is not treated as unchanged.
-	ctx = readTestContext(root, tool.ModelCapabilities{SupportsVision: true})
 	clamped, err := (&Tool{}).ExecuteOutcome(ctx, `{"file_path":"one-page.pdf","pages":"1-5"}`, nil)
 	if err != nil || clamped.IsError() || len(clamped.ModelContent) != 1 || clamped.ModelContent[0].Page != 1 {
 		t.Fatalf("clamp pages=%+v err=%v", clamped, err)

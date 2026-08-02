@@ -466,5 +466,24 @@ func TestProjectSemanticContextSnapshotAndModelUsageForLiveReplay(t *testing.T) 
 	}
 }
 
+func TestProjectSubagentProgressIncludesDurableCounters(t *testing.T) {
+	frames := ProjectSemanticRecord(agentcore.SemanticRecord{
+		SchemaVersion: 2, RecordID: "subagent-progress", Seq: 9,
+		ThreadID: "thread", RunID: "run", Kind: agentcore.SemanticKindSubagentProgress,
+		Timestamp: time.Now().UTC(), Payload: map[string]any{
+			"task_id": "task-1", "status": "running", "current_activity": "正在使用 Read",
+			"tool_use_count": 2, "estimated_tokens": 800,
+			"input_tokens": 600, "output_tokens": 200, "total_tokens": 800,
+		},
+	})
+	if len(frames) != 1 || frames[0].Type != EventAwakenSubagentActivity {
+		t.Fatalf("unexpected subagent progress projection: %+v", frames)
+	}
+	frame := frames[0]
+	if frame.SubagentTaskID != "task-1" || frame.SubagentToolUseCount != 2 || frame.SubagentInputTokens != 600 || frame.SubagentOutputTokens != 200 || frame.SubagentTotalTokens != 800 {
+		t.Fatalf("subagent counters lost: %+v", frame)
+	}
+}
+
 func intPtr(value int) *int           { return &value }
 func floatPtr(value float64) *float64 { return &value }

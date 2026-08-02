@@ -361,6 +361,9 @@ type Event struct {
 	SubagentActivity         string `json:"subagentActivity,omitempty"`
 	SubagentToolUseCount     int    `json:"subagentToolUseCount,omitempty"`
 	SubagentEstimatedTokens  int    `json:"subagentEstimatedTokens,omitempty"`
+	SubagentInputTokens      int    `json:"subagentInputTokens,omitempty"`
+	SubagentOutputTokens     int    `json:"subagentOutputTokens,omitempty"`
+	SubagentTotalTokens      int    `json:"subagentTotalTokens,omitempty"`
 	SubagentResultPreview    string `json:"subagentResultPreview,omitempty"`
 	SubagentErrorCode        string `json:"subagentErrorCode,omitempty"`
 	SubagentErrorMessage     string `json:"subagentErrorMessage,omitempty"`

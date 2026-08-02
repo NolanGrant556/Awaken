@@ -2488,13 +2488,22 @@ func TestFlushAgentTranscriptDoesNotFlushCanonicalRecorder(t *testing.T) {
 }
 
 func TestSubagentSemanticPayloadNormalizesStatusAlias(t *testing.T) {
+	started := time.Date(2026, 8, 2, 7, 0, 0, 0, time.UTC)
 	payload := subagentSemanticPayload(subagentruntime.TaskSnapshot{
-		TaskID: "subtask-1",
-		Status: subagentruntime.StatusCompleted,
+		TaskID:       "subtask-1",
+		Status:       subagentruntime.StatusCompleted,
+		ToolUseCount: 3, InputTokens: 700, OutputTokens: 200, TotalTokens: 900,
+		CreatedAt: started, StartedAt: &started,
 	})
 	status, ok := payload["status"].(string)
 	if !ok || status != "completed" {
 		t.Fatalf("subagent status must be a plain string for AG-UI projection, got %#v", payload["status"])
+	}
+	if payload["tool_use_count"] != 3 || payload["input_tokens"] != 700 || payload["output_tokens"] != 200 || payload["total_tokens"] != 900 {
+		t.Fatalf("subagent counters missing from semantic payload: %#v", payload)
+	}
+	if payload["created_at"] != "2026-08-02T07:00:00Z" || payload["started_at"] != "2026-08-02T07:00:00Z" || payload["finished_at"] != "" {
+		t.Fatalf("subagent timestamps must have live/replay string parity: %#v", payload)
 	}
 }
 

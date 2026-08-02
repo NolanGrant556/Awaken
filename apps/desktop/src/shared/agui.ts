@@ -382,6 +382,9 @@ export type AguiEvent = {
   subagentActivity?: string;
   subagentToolUseCount?: number;
   subagentEstimatedTokens?: number;
+  subagentInputTokens?: number;
+  subagentOutputTokens?: number;
+  subagentTotalTokens?: number;
   subagentResultPreview?: string;
   subagentErrorCode?: string;
   subagentErrorMessage?: string;

@@ -90,8 +90,9 @@ func (t *SubagentTool) Definition() tool.ToolDefinition {
 		OutputSchema: tool.ToolParam{
 			Type: "object", AdditionalProperties: tool.BoolPtr(false),
 			Properties: map[string]tool.ToolParam{
-				"task":  {Type: "object", AdditionalProperties: tool.BoolPtr(true)},
-				"tasks": {Type: "array", Items: &tool.ToolParam{Type: "object", AdditionalProperties: tool.BoolPtr(true)}},
+				"task":             {Type: "object", AdditionalProperties: tool.BoolPtr(true)},
+				"tasks":            {Type: "array", Items: &tool.ToolParam{Type: "object", AdditionalProperties: tool.BoolPtr(true)}},
+				"retrieval_status": {Type: "string", Enum: []any{subagentruntime.RetrievalCompleted, subagentruntime.RetrievalRunning, subagentruntime.RetrievalTimeout}},
 			},
 		},
 		Examples: []tool.ToolExample{
@@ -103,7 +104,6 @@ func (t *SubagentTool) Definition() tool.ToolDefinition {
 			{Code: subagentruntime.ErrorRuntimeUnavailable, Cause: "当前 run 没有 Subagent manager", Retryable: false},
 			{Code: subagentruntime.ErrorLimitReached, Cause: "当前 run 已达到子任务总量限制", Retryable: false},
 			{Code: subagentruntime.ErrorNotFound, Cause: "task_id 不属于当前 run", Retryable: false},
-			{Code: subagentruntime.ErrorWaitTimeout, Cause: "等待超时但任务仍可继续运行", Retryable: true},
 			{Code: subagentruntime.ErrorWorkspaceMode, Cause: "当前版本不支持请求的 workspace mode", Retryable: false},
 		},
 		SideEffects: []tool.ToolSideEffect{{
@@ -150,11 +150,11 @@ func (t *SubagentTool) Execute(ctx context.Context, raw string) (string, error) 
 		snapshot, err := controller.Status(request.TaskID)
 		return encode(map[string]any{"task": snapshot}, err)
 	case "wait":
-		snapshots, err := controller.Wait(ctx, subagentruntime.WaitRequest{
+		result, err := controller.Wait(ctx, subagentruntime.WaitRequest{
 			TaskIDs: request.TaskIDs, ReturnWhen: request.ReturnWhen,
 			Timeout: time.Duration(request.TimeoutMS) * time.Millisecond,
 		})
-		return encode(map[string]any{"tasks": snapshots}, err)
+		return encode(map[string]any{"tasks": result.Tasks, "retrieval_status": result.RetrievalStatus}, err)
 	case "cancel":
 		if strings.TrimSpace(request.TaskID) == "" {
 			return "", invalid("task_id is required for cancel")
@@ -174,7 +174,7 @@ func (t *SubagentTool) ExecuteOutcome(ctx context.Context, input string, _ tool.
 		if code == "" {
 			code = "subagent_failed"
 		}
-		outcome := tool.FailedOutcome(err.Error(), code, tool.ErrorCategoryDomain, code == subagentruntime.ErrorWaitTimeout)
+		outcome := tool.FailedOutcome(err.Error(), code, tool.ErrorCategoryDomain, false)
 		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
 	outcome := tool.SucceededOutcome(content)

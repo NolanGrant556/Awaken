@@ -14,6 +14,8 @@
 - 正式模型工具 `subagent(action=spawn|status|wait|cancel)` 已注册；只开放 fresh、`shared_readonly` 的 `explore/review` child，child 不暴露 Subagent、主动提问或 mutation 工具；
 - `src/subagentruntime` 提供 run-scoped task registry、事件驱动 wait、单任务取消、每 run 最多 8 个任务和最多 4 个并发执行；父 run 终态前会收敛非终态 child；
 - child 使用独立 conversation、agent/task identity 和取消上下文，生命周期与有界结果写入 SemanticJournal，并投影为 `AWAKEN_SUBAGENT_CHANGED`、`AWAKEN_SUBAGENT_ACTIVITY` 和兼容的 queued-message event；
+- child 的每个耐久 `tool_call` 与 `model_usage` 会按稳定 ID 去重后生成 `subagent_progress`，累计工具次数、provider-reported input/output/total tokens；中心 group 与右侧 Inspector 同时显示工具数、token 与按耐久起止时间计算的耗时；
+- `wait` 到期属于中性检索结果：返回 `retrieval_status=timeout` 和当前 snapshots，不产生失败 Outcome，也不取消 child；
 - Core 已提供 run-scoped Subagent list/detail/cancel route；message route 当前明确返回 unsupported；
 - Desktop 已实现当前 turn 的 Subagent group，以及右侧 Inspector 的任务切换、状态、最近活动、结果、错误和运行中任务取消；切换 thread 会清理 UI selection，task truth 仍来自事件投影；
 - macOS 真实 Desktop 已验证 spawn、running、completed/result 和单任务 cancelled/error 投影。
@@ -25,7 +27,7 @@
 - 不支持递归 Subagent、full-context fork、模型 profile override、detached/cross-run worker；
 - Core 重启会保留已有耐久记录，但尚未扫描未闭合 task 并补写 `interrupted`，不会恢复运行中的 child；
 - 正式 child 尚未继承父 `MemoryRecallSnapshot`；
-- root/child 原子共享 token/tool/cost 预算、child token 估算和完整 cost 统计尚未接通；
+- root/child 原子共享 token/tool/cost 预算和 child 完整 cost 统计尚未接通；provider 未报告 usage 时不伪造 child token；
 - 窄屏专用 Subagent sheet、用户追加指令输入、跨重启 Inspector selection 尚未提供。
 
 本文后续流程同时描述当前只读阶段与目标扩展。message、写 worktree、Memory、崩溃 orphan 恢复、预算和窄屏 sheet 等只有在本节移入“当前支持”并通过对应验收后，才可写成当前能力。
@@ -110,7 +112,7 @@
 
 2. Core 在 transport 前写 `subagent_spawned`，返回 `task_id`、`agent_id`、`status=running`。
 3. Workbench 当前 turn 出现“1 个子任务运行中”，右栏“子任务”入口出现 badge。
-4. child 使用独立 conversation 和 read-only profile 运行；其最近活动、工具计数、token 估算以有界事件更新。
+4. child 使用独立 conversation 和 read-only profile 运行；其最近活动、工具计数、provider-reported token 累计与耗时以有界事件更新。
 5. 主 Agent 可继续处理不重叠工作，随后调用 `wait`。
 6. child terminal 先耐久，再由 `wait` 把最终 handoff 作为 canonical tool result 返回主模型。
 7. 主 Agent 验证并整合结论，最终回答仍由主 Agent 给用户。
@@ -180,6 +182,7 @@ type SubagentRowView = {
   activity?: string;
   toolUseCount: number;
   estimatedTokens?: number;
+  totalTokens?: number;
   elapsedMs?: number;
   selected?: boolean;
 };
@@ -189,7 +192,7 @@ type SubagentRowView = {
 
 - group header：`3 个子任务 · 2 运行中 · 1 已完成`；
 - row 主行：状态图标、description、agent type；
-- row 次行：running 时显示最近 activity，terminal 时显示结果首行或稳定错误摘要；
+- row 次行：running 时显示最近 activity，terminal 时显示结果首行或稳定错误摘要；下方 compact metrics 显示已有的工具数、token 和耗时；
 - 最多在中心区显示最近 3 条 activity，不显示 tool args、完整结果、绝对路径或内部 ID；
 - 单击 row：打开/展开 Inspector，选择对应 `taskId`；
 - 键盘：row 是 button，Enter/Space 打开详情；状态用可见文本与 `aria-label`，不能只靠颜色；
@@ -291,7 +294,7 @@ src/tools/subagent/
 type Controller interface {
     Spawn(context.Context, SpawnRequest) (TaskSnapshot, error)
     Status(taskID string) (TaskSnapshot, error)
-    Wait(context.Context, WaitRequest) ([]TaskSnapshot, error)
+    Wait(context.Context, WaitRequest) (WaitResult, error)
     Message(context.Context, taskID, content string) (MessageReceipt, error)
     Cancel(context.Context, taskID, reason string) (TaskSnapshot, error)
 }
@@ -314,7 +317,8 @@ Manager 的 starter callback 固定执行：
 7. 使用 `context.WithCancel(rootRunContext)` 再派生单 task cancel；
 8. 进入 scheduler；取得 slot 后写 `running` 并启动 child runner；
 9. child terminal 时先 append+flush terminal record，再发布状态、唤醒 waiters；
-10. 终态 handoff 最大 32 KiB；更大结果使用现有 model content/offload store，父模型只收到 preview + storage metadata。
+10. child 的 `tool_call`/`model_usage` 先耐久，再由 manager 写并 flush 累计 `subagent_progress`；terminal 使用最后一份累计值；
+11. 终态 handoff 最大 32 KiB；更大结果使用现有 model content/offload store，父模型只收到 preview + storage metadata。
 
 ### 6.4 Agent types
 
@@ -355,7 +359,6 @@ action 使用严格互斥字段校验。稳定错误码至少包括：
 - `subagent_concurrency_queue_full`
 - `subagent_not_found`
 - `subagent_not_running`
-- `subagent_wait_timeout`
 - `subagent_cancelled`
 - `subagent_interrupted`
 - `subagent_workspace_mode_unsupported`
@@ -367,6 +370,8 @@ tool Outcome 的 `side_effect_state`：
 - spawn/status/wait/message/cancel 本身为 `none`；
 - child 工具的副作用记录在 child 自己的 canonical tool results；
 - terminal handoff 汇总 child observed/applied/partial/unknown，但不能把汇总当成新的副作用。
+
+`wait` 成功结果额外包含 `retrieval_status=completed|running|timeout`。`timeout` 是中性成功结果，必须同时返回当前 task snapshots；历史 `subagent_wait_timeout` 只作为旧记录兼容错误码保留，新调用不再产生。
 
 ### 6.6 并发与共享预算
 
@@ -490,6 +495,9 @@ type TaskSnapshot struct {
     CurrentActivity   string
     ToolUseCount      int
     EstimatedTokens   int
+    InputTokens       int
+    OutputTokens      int
+    TotalTokens       int
     ResultPreview     string
     ResultStorageKey  string
     ErrorCode         string
@@ -528,13 +536,13 @@ subagent_task_id
 1. `subagent_spawned` flush；
 2. scheduler admission 后 `status_changed=running`；
 3. message 先 `message_queued` flush，再入内存 queue；
-4. progress 可有界降采样，但 terminal 前最后一份计数必须耐久；
+4. 每个新 `tool_call_id` 与 `model_request_id` 在对应事实耐久后按 ID 去重并写 `subagent_progress`；terminal 前最后一份计数必须耐久；
 5. `subagent_terminal` flush；
 6. manager 更新内存状态并唤醒 waiters；
 7. root `wait` tool result耐久；
 8. 所有 child terminal 后才允许 root `run_terminal`。
 
-`subagent_progress` 不保存 reasoning 正文、完整命令或 tool result，只保存当前活动类型、净化标题和累计计数。
+`subagent_progress` 不保存 reasoning 正文、完整命令或 tool result，只保存当前活动类型、净化标题和累计计数。`estimated_tokens` 是兼容字段；当前新记录同时写 provider-reported `input_tokens`、`output_tokens`、`total_tokens`，provider 缺字段时保持缺省而不是估算。
 
 ### 8.4 重放与恢复
 
@@ -572,6 +580,9 @@ subagentModelProfileId
 subagentActivity
 subagentToolUseCount
 subagentEstimatedTokens
+subagentInputTokens
+subagentOutputTokens
+subagentTotalTokens
 subagentResultPreview
 subagentErrorCode
 subagentSideEffectState
@@ -643,7 +654,7 @@ subagentOrder: string[];
 | child provider失败 | task `failed`，handoff含稳定 error code；root run继续决定恢复 |
 | child tool partial/unknown | task可完成但必须汇总 side-effect warning；父不得盲重放 |
 | 并发已满 | task `queued`；队列也满则 spawn失败且不写伪 task |
-| wait超时 | tool返回 `subagent_wait_timeout` 与当前 snapshots；不取消 child |
+| wait超时 | tool 返回成功 Outcome、`retrieval_status=timeout` 与当前 snapshots；不取消 child，也不污染失败监督 |
 | 单 child取消超时 | task `interrupted`，保留 unknown side-effect提示 |
 | root取消 | 广播 child cancel；已有事实保留；最终 root `cancelled` |
 | Journal append/flush失败 | fail-stop；spawn/message/terminal不得先对外可见 |
@@ -686,7 +697,7 @@ subagentOrder: string[];
 3. 已完成：list/detail/cancel HTTP 与 typed bridge；message route 仅返回 unsupported；
 4. 已完成：projector、中心 group、右侧 Inspector；未完成：窄屏专用 sheet；
 5. 已完成：单 child cancel、选择与错误终态；未完成：用户追加指令及草稿恢复；
-6. 已完成：tool activity/result preview 的有界投影；未完成：token/cost 完整统计。
+6. 已完成：tool activity/result preview、工具次数、provider-reported token 累计与耗时的有界投影；未完成：完整 cost 统计。
 
 完成门禁：真实 Desktop完成本文 AC-SA-01～10。
 

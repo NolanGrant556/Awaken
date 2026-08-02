@@ -33,7 +33,7 @@ provider `needs_runtime` 的 host-generated plan 仍可投影为 `dependency_ins
 
 UI 文案、模型 payload 和 canonical outcome 是不同投影，不能相互反推。工具自报成功但输出 schema 不匹配、transport 未完成或 side effect 未验证时，normalizer 必须降为结构化失败/unknown；不得生成伪 artifact 或伪 change。
 
-`succeeded` 必须与 `transport=completed` 一致，但 semantic 可以是 success 或 neutral；例如无匹配查询或 diff 发现差异可以是“进程完成、语义中性”，不得只因 non-zero exit 把整个 run 猜成失败。`denied`/auth/runtime/unsupported 在 executor 前终止时必须是 `transport=not_started`。
+`succeeded` 必须与 `transport=completed` 一致，但 semantic 可以是 success 或 neutral；例如无匹配查询、diff 发现差异，或 Subagent `wait` 到期后返回 `retrieval_status=timeout` 与当前 snapshots，都属于“transport 完成、语义中性”，不得只因 non-zero exit 或尚未取得 terminal child 就把整个 run 猜成失败。`denied`/auth/runtime/unsupported 在 executor 前终止时必须是 `transport=not_started`。
 
 side-effect 事实与工具成败分离：
 

@@ -750,9 +750,18 @@ function upsertSubagentGroup(
       event.subagentActivity?.trim() ||
       event.toolCallName?.trim() ||
       previous?.activity,
+    toolUseCount: event.subagentToolUseCount ?? previous?.toolUseCount ?? 0,
+    estimatedTokens: event.subagentEstimatedTokens ?? previous?.estimatedTokens,
+    inputTokens: event.subagentInputTokens ?? previous?.inputTokens,
+    outputTokens: event.subagentOutputTokens ?? previous?.outputTokens,
+    totalTokens: event.subagentTotalTokens ?? previous?.totalTokens,
+    createdAt: event.subagentCreatedAt ?? previous?.createdAt,
+    startedAt: event.subagentStartedAt ?? previous?.startedAt,
+    finishedAt: event.subagentFinishedAt ?? previous?.finishedAt,
     resultPreview:
       event.subagentResultPreview?.trim() || previous?.resultPreview,
     errorCode: event.subagentErrorCode ?? previous?.errorCode,
+    errorMessage: event.subagentErrorMessage ?? previous?.errorMessage,
   };
   const tasks = existing ? existing.tasks.slice() : [];
   const index = tasks.findIndex((candidate) => candidate.taskId === taskId);

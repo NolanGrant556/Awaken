@@ -130,11 +130,17 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 	mimeType, kind := detectFileKind(path, data)
 	snapshot := snapshotFor(path, mimeType, data, info)
 	state, hasState := tool.ToolSessionStateFromContext(ctx)
-	if hasState {
-		if previous, ok := state.File(path); ok && sameSnapshot(previous, snapshot) {
+	projectionKey := ""
+	if kind == "text" {
+		projectionKey = textProjectionKey(p)
+	}
+	if hasState && projectionKey != "" {
+		if previous, ok := state.ReadProjection(path); ok &&
+			previous.ProjectionKey == projectionKey && sameSnapshot(previous.Snapshot, snapshot) {
 			state.RecordFile(snapshot)
 			outcome := tool.SucceededOutcome("file_unchanged")
 			outcome.Details = readDetails(snapshot, "file_unchanged")
+			outcome.Details["projection"] = projectionKey
 			outcome.Summary = fmt.Sprintf("%s has not changed since this thread last read it.", filepath.Base(path))
 			return outcome.WithTiming(started, time.Now().UTC()), nil
 		}
@@ -161,8 +167,23 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 	outcome.Details = mergeDetails(outcome.Details, readDetails(snapshot, kind))
 	if !outcome.IsError() && hasState {
 		state.RecordFile(snapshot)
+		if projectionKey != "" {
+			state.RecordReadProjection(tool.ReadProjectionState{Snapshot: snapshot, ProjectionKey: projectionKey})
+		}
 	}
 	return outcome.WithTiming(started, time.Now().UTC()), nil
+}
+
+func textProjectionKey(p params) string {
+	offset := p.Offset
+	if offset == 0 {
+		offset = 1
+	}
+	limit := p.Limit
+	if limit == 0 {
+		limit = defaultLineLimit
+	}
+	return fmt.Sprintf("text:offset=%d:limit=%d", offset, limit)
 }
 
 func parseParams(input string) (params, error) {

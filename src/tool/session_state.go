@@ -18,20 +18,31 @@ type FileReadState struct {
 	MimeType      string
 }
 
+// ReadProjectionState records the exact model-visible projection produced by
+// Read for one file version. It is intentionally separate from FileReadState:
+// Edit/Write only need proof that the thread observed the current file, while
+// Read deduplication must also match the requested range/route.
+type ReadProjectionState struct {
+	Snapshot      FileReadState
+	ProjectionKey string
+}
+
 // ToolSessionState owns mutable thread-local tool state. Agent replacement,
 // process restart and thread deletion therefore invalidate it safely.
 type ToolSessionState struct {
-	mu       sync.RWMutex
-	files    map[string]FileReadState
-	cwd      string
-	pathMu   sync.Mutex
-	pathLock map[string]*sync.Mutex
+	mu              sync.RWMutex
+	files           map[string]FileReadState
+	readProjections map[string]ReadProjectionState
+	cwd             string
+	pathMu          sync.Mutex
+	pathLock        map[string]*sync.Mutex
 }
 
 func NewToolSessionState(initialCWD string) *ToolSessionState {
 	state := &ToolSessionState{
-		files:    make(map[string]FileReadState),
-		pathLock: make(map[string]*sync.Mutex),
+		files:           make(map[string]FileReadState),
+		readProjections: make(map[string]ReadProjectionState),
+		pathLock:        make(map[string]*sync.Mutex),
 	}
 	if initialCWD != "" {
 		if absolute, err := filepath.Abs(initialCWD); err == nil {
@@ -39,6 +50,32 @@ func NewToolSessionState(initialCWD string) *ToolSessionState {
 		}
 	}
 	return state
+}
+
+func (s *ToolSessionState) RecordReadProjection(projection ReadProjectionState) {
+	if s == nil || projection.Snapshot.CanonicalPath == "" || projection.ProjectionKey == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.readProjections == nil {
+		s.readProjections = make(map[string]ReadProjectionState)
+	}
+	s.readProjections[filepath.Clean(projection.Snapshot.CanonicalPath)] = projection
+}
+
+func (s *ToolSessionState) ReadProjection(path string) (ReadProjectionState, bool) {
+	if s == nil {
+		return ReadProjectionState{}, false
+	}
+	canonical, err := canonicalSessionPath(path)
+	if err != nil {
+		return ReadProjectionState{}, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	projection, ok := s.readProjections[canonical]
+	return projection, ok
 }
 
 func canonicalSessionPath(path string) (string, error) {

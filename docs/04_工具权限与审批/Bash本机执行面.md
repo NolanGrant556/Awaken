@@ -4,6 +4,8 @@
 
 模型基础工具 `Bash` 以启动 Awaken Desktop 的当前登录用户身份执行命令。它不经过 `WorkspaceExecutionBroker`，不建立 restricted、supervised、staging 或 `broker_receipt` 分支，也不把 TaskScope 冒充为操作系统沙箱。
 
+`ComputerEnabled` 只表示当前 run 的 Computer Runtime 与 Host 已就绪，不改变 `Bash` 的暴露。Computer-ready run 中，`Bash`、`computer_observe`、`computer_act`、`computer_verify` 可以同时存在并交替调用；显式 `ToolExposure.ExtraHidden=["Bash"]` 仍按通用工具暴露策略生效。
+
 输入合同：
 
 ```text
@@ -24,7 +26,7 @@ Desktop 在启动 Core 前解析当前用户 login environment；run-start 环�
 - cwd 属于 thread 的 `ToolSessionState`，不能调用进程级 `chdir`；命令成功改变目录后只刷新该 thread 的 cwd。
 - thread 删除、workspace/profile 重建或 Core 退出时，内存 cwd 安全失效；它不写入 SemanticJournal。
 
-`Bash` 可以在当前用户可访问范围内运行包管理器、Skill 脚本、网络 CLI、LibreOffice、Pandoc、Python/Node 等程序。它不自动获得 `Read`/`Edit`/`Write` 的 TaskScope、预读快照、原子替换、Trash 或 Artifact 事实。
+`Bash` 可以在当前用户可访问范围内运行包管理器、Skill 脚本、网络 CLI、LibreOffice、Pandoc、Typst、Python/Node 等程序。它不自动获得 `Read`/`Edit`/`Write` 的 TaskScope、预读快照、原子替换、Trash 或 Artifact 事实。
 
 ## 3. 后台任务
 
@@ -46,6 +48,8 @@ cwd
 
 - `Bash` 的真实边界是当前用户的 OS 权限、环境和网络权限。
 - command 分类只服务活动摘要、失败监督和恢复判断，不授权或拒绝命令。
+- 直接观察和操作 GUI 应使用 `computer_*`。Computer 不可用时不得静默用 AppleScript、`xdotool`、坐标脚本等冒充 Computer Use；用户明确要求终端 GUI 自动化时可以使用 `Bash`，但结果只属于终端行为。
+- `Bash` 与 Computer 在 Journal/API 中继续形成独立 tool call/outcome。Bash 调用不会获得 Computer 的 observation、action digest、review、lease/fence 或 verify 事实，也不能被展示为 Computer 动作。
 - 永久删除、workspace 外写入、网络请求和子脚本副作用不能被 Awaken 完整观察或恢复。
 - 需要明确可恢复删除时使用 `trash_file`；需要文件并发保护时使用 `Read` 后的 `Edit`/`Write`。
 - `WorkspaceExecutionBroker` 只保留给 host-owned `dependency_install`、`git_remote` 和 MCP Artifact commit；这些窄合同不得被解释为 `Bash` 保证。
@@ -63,4 +67,4 @@ cwd
 - `src/tool/session_state.go`：thread cwd。
 - `src/runtime/run_service.go`、`project_service.go`、`cmd/awaken-core/main.go`：取消、thread 删除和 Core 退出清理。
 
-自动化至少覆盖 cwd 隔离、真实 exit/stdout/stderr、120/600 秒边界、timeout、前后台取消、Windows test binary 编译和旧 restricted/broker 路径残留扫描。真实 Desktop 还需运行一个前台 cwd 变更和一个后台任务，并核对日志/状态路径。
+自动化至少覆盖 cwd 隔离、真实 exit/stdout/stderr、120/600 秒边界、timeout、前后台取消、Windows test binary 编译、旧 restricted/broker 路径残留扫描，以及 Computer-ready 快照中的 Bash 共存和显式隐藏。真实 Desktop 还需运行一个前台 cwd 变更和一个后台任务，并在 Computer-ready run 中交替执行 Computer observation、Bash 只读命令和 Computer observation/verify，核对同一 Computer session、固定快照与 thread cwd。

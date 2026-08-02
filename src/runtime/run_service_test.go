@@ -2744,9 +2744,13 @@ func TestRunServiceCreatesComputerRuntimeWhenEnabledAndVisionSupported(t *testin
 	if !createdAgent.GetConfig().ExecutionEnvironmentSnapshot.ComputerEnabled {
 		t.Fatalf("environment snapshot should have ComputerEnabled=true")
 	}
+	visible := make(map[string]bool)
 	for _, name := range createdAgent.ModelVisibleToolPool() {
-		if name == "Bash" {
-			t.Fatal("Bash must not remain model-visible when Computer Use is ready")
+		visible[name] = true
+	}
+	for _, name := range []string{"Bash", "computer_observe", "computer_act", "computer_verify"} {
+		if !visible[name] {
+			t.Fatalf("expected %s to remain model-visible when Computer Use is ready", name)
 		}
 	}
 

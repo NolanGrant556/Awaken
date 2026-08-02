@@ -14,6 +14,7 @@ import (
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
 	"awaken/src/tool"
+	_ "awaken/src/tools/bash"
 	_ "awaken/src/tools/computer"
 	_ "awaken/src/tools/edit"
 	_ "awaken/src/tools/write"
@@ -332,7 +333,11 @@ func TestRequestBuilderExposesComputerToolsOnlyForReadyRunSnapshot(t *testing.T)
 		ExecutionEnvironmentSnapshot: &disabledEnvironment,
 		ToolAvailabilitySnapshot:     &disabledSnapshot,
 	}).Build(convcontext.New(), nil)
-	assertComputerVisibility(t, names(disabled), false)
+	disabledNames := names(disabled)
+	assertComputerVisibility(t, disabledNames, false)
+	if !disabledNames["Bash"] {
+		t.Fatal("Bash should remain visible when Computer Use is unavailable")
+	}
 
 	enabledEnvironment := tool.ExecutionEnvironmentSnapshot{SnapshotID: "computer-enabled", ComputerEnabled: true}
 	enabledSnapshot := tool.NewRunToolAvailabilitySnapshot(enabledEnvironment)
@@ -340,7 +345,22 @@ func TestRequestBuilderExposesComputerToolsOnlyForReadyRunSnapshot(t *testing.T)
 		ExecutionEnvironmentSnapshot: &enabledEnvironment,
 		ToolAvailabilitySnapshot:     &enabledSnapshot,
 	}).Build(convcontext.New(), nil)
-	assertComputerVisibility(t, names(enabled), true)
+	enabledNames := names(enabled)
+	assertComputerVisibility(t, enabledNames, true)
+	if !enabledNames["Bash"] {
+		t.Fatal("Bash should remain visible alongside ready Computer tools")
+	}
+
+	explicitlyHidden := NewRequestBuilder(AgentConfig{
+		ExecutionEnvironmentSnapshot: &enabledEnvironment,
+		ToolAvailabilitySnapshot:     &enabledSnapshot,
+		ToolExposure:                 tool.ToolExposurePolicy{ExtraHidden: []string{"Bash"}},
+	}).Build(convcontext.New(), nil)
+	explicitlyHiddenNames := names(explicitlyHidden)
+	assertComputerVisibility(t, explicitlyHiddenNames, true)
+	if explicitlyHiddenNames["Bash"] {
+		t.Fatal("explicit ExtraHidden should still hide Bash")
+	}
 }
 
 func TestRequestBuilderCompilesDefinitionV2WithoutSkillPoolNarrowing(t *testing.T) {

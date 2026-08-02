@@ -137,22 +137,10 @@ func (a *Agent) RefreshRunAvailabilityWithReason(ctx stdcontext.Context, reason 
 		ComputerEnabled:   cfg.ComputerRuntime != nil && cfg.ComputerRuntime.Ready(ctx),
 	})
 	environment := hostEnvironment.Snapshot
-	if environment.ComputerEnabled {
-		cfg.ToolExposure.ExtraHidden = appendUniqueToolName(cfg.ToolExposure.ExtraHidden, "Bash")
-	}
 	snapshot := tool.NewRunToolAvailabilitySnapshot(environment)
 	cfg.ExecutionEnvironmentSnapshot = &environment
 	cfg.ToolAvailabilitySnapshot = &snapshot
 	a.Reconfigure(cfg)
-}
-
-func appendUniqueToolName(names []string, name string) []string {
-	for _, existing := range names {
-		if strings.EqualFold(strings.TrimSpace(existing), name) {
-			return names
-		}
-	}
-	return append(names, name)
 }
 
 func localSkillRootObservations(workspace WorkspaceConfig) []tool.SkillRootObservation {

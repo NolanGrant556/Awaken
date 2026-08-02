@@ -23,7 +23,7 @@ type verifyTool struct{}
 
 func (t *observeTool) Name() string { return ToolNameObserve }
 func (t *observeTool) Description() string {
-	return "Capture a fresh screenshot and accessibility state of the authorized Computer scope."
+	return "Capture a fresh screenshot and accessibility state through the run-bound Computer lane; terminal output is not Computer observation evidence."
 }
 func (t *observeTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
@@ -39,8 +39,8 @@ func (t *observeTool) Definition() tool.ToolDefinition {
 		DisplayName:  "Computer Observe",
 		Description:  t.Description(),
 		Purpose:      "Get a fresh, authorized observation of the current Computer scope to inform the next action.",
-		WhenToUse:    []string{"Before any GUI action", "When the previous observation may be stale", "To verify the result of an action"},
-		WhenNotToUse: []string{"When typed tools, MCP tools or browser automation can solve the task", "When Computer Use is not enabled for the run"},
+		WhenToUse:    []string{"Before any direct GUI action", "When the previous observation may be stale", "To verify the visible result of an action"},
+		WhenNotToUse: []string{"For Python, Typst, builds, converters, or Skill scripts; use Bash", "When typed tools, MCP tools or browser automation can solve the task", "When Computer Use is not enabled for the run; do not impersonate it with terminal GUI scripts"},
 		InputSchema: tool.ToolParametersSchema{
 			Type: "object",
 			Properties: map[string]tool.ToolParam{
@@ -97,7 +97,7 @@ func (t *observeTool) ProviderReadiness(env tool.ExecutionEnvironmentSnapshot) t
 
 func (t *actTool) Name() string { return ToolNameAct }
 func (t *actTool) Description() string {
-	return "Propose a strongly-typed GUI action based on a fresh observation."
+	return "Propose a strongly-typed GUI action through the run-bound Computer lane based on a fresh observation."
 }
 func (t *actTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
@@ -118,7 +118,7 @@ func (t *actTool) Definition() tool.ToolDefinition {
 		Description:  t.Description(),
 		Purpose:      "Execute a checked GUI action after policy evaluation and any required human review.",
 		WhenToUse:    []string{"When a typed tool or API is unavailable", "After a fresh observation", "When the action is within the authorized scope and risk level"},
-		WhenNotToUse: []string{"For secret input, authentication, security warnings or bypassing access control", "Without a fresh observation", "When Computer Use is not enabled"},
+		WhenNotToUse: []string{"For Python, Typst, builds, converters, or Skill scripts; use Bash", "For secret input, authentication, security warnings or bypassing access control", "Without a fresh observation", "When Computer Use is not enabled; do not replace it with terminal GUI scripts unless the user explicitly requested terminal automation"},
 		InputSchema: tool.ToolParametersSchema{
 			Type: "object",
 			Properties: map[string]tool.ToolParam{
@@ -186,7 +186,7 @@ func (t *actTool) ProviderReadiness(env tool.ExecutionEnvironmentSnapshot) tool.
 
 func (t *verifyTool) Name() string { return ToolNameVerify }
 func (t *verifyTool) Description() string {
-	return "Verify that the expected effect of a previous action occurred."
+	return "Verify through fresh Computer-lane evidence that the expected effect of a previous Computer action occurred."
 }
 func (t *verifyTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
@@ -202,7 +202,7 @@ func (t *verifyTool) Definition() tool.ToolDefinition {
 		Description:  t.Description(),
 		Purpose:      "Independently check whether a GUI action produced its expected effect using a fresh observation.",
 		WhenToUse:    []string{"After computer_act", "When the agent needs to confirm a state change before proceeding"},
-		WhenNotToUse: []string{"As a substitute for a fresh observation", "When Computer Use is not enabled"},
+		WhenNotToUse: []string{"For validating Bash or terminal-driven GUI effects as if they were Computer actions", "As a substitute for a fresh observation", "When Computer Use is not enabled"},
 		InputSchema: tool.ToolParametersSchema{
 			Type: "object",
 			Properties: map[string]tool.ToolParam{

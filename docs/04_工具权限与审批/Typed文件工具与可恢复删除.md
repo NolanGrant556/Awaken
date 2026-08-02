@@ -2,7 +2,7 @@
 
 ## 1. 当前支持
 
-模型基础文件工具固定为 `Read`、`Edit`、`Write`、`Glob`、`Grep`。它们与 `Bash` 分开：路径统一由 `PermissionContext` 的 readable/writable roots、附件授权、敏感路径和 symlink 检查约束；`Bash` 不继承这些保证。
+模型基础文件工具固定为 `Read`、`Edit`、`Write`、`Glob`、`Grep`。它们与 `Bash` 分开：路径统一由 `PermissionContext` 解析，roots 提供默认作业位置和搜索范围，附件映射、敏感路径和 symlink 检查仍由宿主强制；用户明确点名的外部绝对路径不因越出 roots 被拒绝。`Bash` 不继承 typed 文件工具的快照、原子写入和结构化结果保证。
 
 | 工具 | 当前合同 |
 | --- | --- |

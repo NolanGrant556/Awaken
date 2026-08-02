@@ -2,6 +2,8 @@ package executors
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -219,6 +221,104 @@ func TestFileOperationExecutorAllowsWriteUnderWorkspaceWriteProfile(t *testing.T
 	}
 	if output.Content != "executed: test" {
 		t.Fatalf("expected content %q, got %q", "executed: test", output.Content)
+	}
+}
+
+func TestFileOperationExecutorUsesFullPermissionContextForManagedWorkspace(t *testing.T) {
+	home := t.TempDir()
+	awakenHome := filepath.Join(home, ".awaken")
+	sessionsRoot := filepath.Join(awakenHome, "sessions")
+	workspace := filepath.Join(sessionsRoot, "thread_1")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	permissionContext := tool.NewTaskScopePermissionContext(
+		"scope_thread_1",
+		workspace,
+		[]string{workspace},
+		[]string{workspace},
+		[]string{filepath.Join(workspace, "output")},
+		nil,
+		[]string{awakenHome},
+		filepath.Join(t.TempDir(), "scope_thread_1"),
+	)
+	permissionContext.ProtectedRootExceptions = []string{sessionsRoot}
+	permissionContext = permissionContext.Normalize()
+
+	target := filepath.Join(workspace, "translation-content.md")
+	intent := profile.ExecutionIntent{
+		ToolName:        "Write",
+		ToolKind:        profile.ToolKindFileOperation,
+		RequestedAction: profile.ActionWrite,
+		Paths:           []string{target},
+	}
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	output, err := NewFileOperationExecutor().Execute(ctx, intent, profile.WorkspaceWrite(), &noopTool{name: "Write"}, "test", nil)
+	if err != nil || output.IsError {
+		t.Fatalf("managed session workspace must keep its protected-root exception: output=%+v err=%v", output, err)
+	}
+}
+
+func TestFileOperationExecutorAllowsExplicitPathOutsideWorkspaceRoots(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	permissionContext := tool.NewTaskScopePermissionContext(
+		"scope_external_path",
+		workspace,
+		[]string{workspace},
+		[]string{workspace},
+		[]string{workspace},
+		nil,
+		nil,
+		filepath.Join(workspace, ".tmp"),
+	)
+	target := filepath.Join(outside, "translation-content.md")
+	intent := profile.ExecutionIntent{
+		ToolName:        "Write",
+		ToolKind:        profile.ToolKindFileOperation,
+		RequestedAction: profile.ActionWrite,
+		Paths:           []string{target},
+	}
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	output, err := NewFileOperationExecutor().Execute(ctx, intent, profile.WorkspaceWrite(), &noopTool{name: "Write"}, "test", nil)
+	if err != nil || output.IsError {
+		t.Fatalf("an explicit absolute path must not be fenced to workspace roots: output=%+v err=%v", output, err)
+	}
+}
+
+func TestFileOperationExecutorStillDeniesProtectedAwakenMetadata(t *testing.T) {
+	home := t.TempDir()
+	awakenHome := filepath.Join(home, ".awaken")
+	sessionsRoot := filepath.Join(awakenHome, "sessions")
+	workspace := filepath.Join(sessionsRoot, "thread_1")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	permissionContext := tool.NewTaskScopePermissionContext(
+		"scope_thread_1",
+		workspace,
+		[]string{workspace},
+		[]string{workspace},
+		[]string{workspace},
+		nil,
+		[]string{awakenHome},
+		filepath.Join(t.TempDir(), "scope_thread_1"),
+	)
+	permissionContext.ProtectedRootExceptions = []string{sessionsRoot}
+	permissionContext = permissionContext.Normalize()
+
+	intent := profile.ExecutionIntent{
+		ToolName:        "Write",
+		ToolKind:        profile.ToolKindFileOperation,
+		RequestedAction: profile.ActionWrite,
+		Paths:           []string{filepath.Join(awakenHome, "config", "models.json")},
+	}
+	ctx := tool.ContextWithPermissionContext(context.Background(), permissionContext)
+	output, err := NewFileOperationExecutor().Execute(ctx, intent, profile.WorkspaceWrite(), &noopTool{name: "Write"}, "test", nil)
+	if err == nil || !output.IsError || output.ErrorCode != "file_operation_boundary" {
+		t.Fatalf("Awaken metadata outside the sessions exception must remain denied: output=%+v err=%v", output, err)
 	}
 }
 

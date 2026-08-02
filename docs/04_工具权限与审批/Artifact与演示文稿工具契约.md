@@ -2,16 +2,18 @@
 
 ## 1. 当前支持边界
 
-Awaken 当前不提供内建 typed Office/PDF/image/media 生成或渲染 runtime。`artifact_runtime`、`read_artifact`、`runtime/officerender` 及 document/spreadsheet/presentation/PDF/image/media typed helper 不在注册表中，也不能写成当前能力。
+Awaken 当前不提供内建 typed Office/PDF 生成或渲染 runtime。`artifact_runtime`、`read_artifact`、`runtime/officerender` 及 document/spreadsheet/presentation/PDF typed helper 不在注册表中，也不能写成当前能力。Agent Plan 的 `image_generate` / `video_generate` 是独立媒体工具，不属于本文档发布链路。
 
-当前支持的是发布链路：
+当前支持的是文档发布链路：
 
 1. Agent 使用 `Bash`、`Write`、已激活 Skill 或 MCP provider 生成并自行验证文件；
-2. 文件位于 TaskScope `output_roots`；
+2. 文件可位于本机任意路径；`output_roots` 是生成交付物的默认位置，不是发布或打开边界；
 3. Agent 调用 `artifact_publish` 显式发布；
 4. canonical `ArtifactDescriptor` 进入 SemanticJournal、AG-UI 和 Desktop 终态交付物列表。
 
-`Write`/`Edit` 只产生文件 change/diff，永不自动生成 Artifact。`artifact_publish` 只读取既有普通文件，不修改内容；支持 `.md`、`.doc/.docx`、`.xls/.xlsx`、`.csv/.tsv`、`.pdf`、`.ppt/.pptx`，并校验 output root、symlink、regular file、扩展名与基础格式签名。
+`Write`/`Edit` 只产生文件 change/diff，永不自动生成 Artifact。`artifact_publish` 只读取既有普通文件，不修改内容；支持 `.md`、`.doc/.docx`、`.xls/.xlsx`、`.csv/.tsv`、`.pdf`、`.ppt/.pptx`，并校验 symlink、regular file、扩展名与已支持的基础格式签名。发布成功的 ready deliverable 以 durable Artifact identity 作为 Desktop open/reveal/媒体预览依据，不因所在目录被再次拒绝。
+
+`artifact_publish` 明确不支持图片和视频。`image_generate` / `video_generate` 成功时已由工具 Outcome 直接产生 `role=deliverable + status=ready + kind=image|video` 的 Artifact，并进入 Workbench 专用媒体卡与预览；不得再调用 `artifact_publish` 二次发布。媒体工具未注册、调用失败，或图片/视频仅由 Bash、Skill、外部程序写入磁盘时，当前没有通用手动媒体发布入口，Agent 必须如实报告，不能把文件存在写成“媒体交付成功”。
 
 ## 2. MCP Artifact bridge
 
@@ -42,11 +44,13 @@ Skill 是生成工作流与依赖说明，不是 Artifact 权限 owner。模型�
 - 内建 Office -> PDF、PDF extract、图片转换、媒体 probe；
 - 内建逐页 preview/视觉质量验证；
 - 从文件存在或扩展名推断业务质量；
+- 通过 `artifact_publish` 发布图片、视频，或手动把任意本地媒体文件提升为专用媒体交付物；
 - Renderer 右侧 Inspector 的 Artifact/tool 详情。
 
 ## 6. 代码 owner 与验收
 
 - `src/tools/artifact_publish`：显式 deliverable 发布。
+- `src/tools/media_generate`：专用图片/视频生成与 ready 媒体 Artifact。
 - `src/tool/artifact_contract.go`：Artifact v2 与历史 producer 兼容。
 - `src/mcpclient/artifact_bridge.go`、`provider_manifest.go`：MCP host bridge。
 - `src/tool/execution_broker*.go`：dependency/git/MCP 的 staging、Trash 与原子 commit。

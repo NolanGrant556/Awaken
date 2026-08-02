@@ -6,6 +6,7 @@ import path from "node:path";
 import type { RuntimeThreadTranscript } from "../shared/runtime.js";
 import {
   openRecordedArtifact,
+  revealRecordedArtifact,
   resolveArtifactMediaTarget,
   resolveArtifactTarget,
 } from "./artifact-open.js";
@@ -85,7 +86,7 @@ async function fixture(options?: { role?: "deliverable" | "preview" | "support" 
 }
 
 describe("artifact open authorization", () => {
-  it("opens a recorded ready deliverable inside output roots", async () => {
+  it("opens a recorded ready deliverable", async () => {
     const { file, transcript } = await fixture();
     let opened = "";
     const result = await openRecordedArtifact(
@@ -222,7 +223,7 @@ describe("artifact open authorization", () => {
     });
   });
 
-  itIfSymlinks("rejects a symlink that resolves outside output roots", async () => {
+  itIfSymlinks("opens a recorded symlink whose target is outside configured output roots", async () => {
     const { root, output, transcript } = await fixture();
     const outside = path.join(root, "outside.pdf");
     await fs.writeFile(outside, "outside");
@@ -235,27 +236,53 @@ describe("artifact open authorization", () => {
       runId: "run-1",
       artifactId: "artifact-1",
     });
-    expect(resolved).toMatchObject({
-      ok: false,
-      result: { code: "outside_output_roots" },
-    });
+    expect(resolved).toEqual({ ok: true, path: await fs.realpath(outside) });
   });
 
-  it("rejects relative traversal outside output roots", async () => {
+  it("opens a recorded workspace-relative file outside configured output roots", async () => {
     const { root, transcript } = await fixture();
-    const outside = path.join(root, "outside.pdf");
+    const deliverables = path.join(root, "deliverables");
+    await fs.mkdir(deliverables);
+    const outside = path.join(deliverables, "outside.pdf");
     await fs.writeFile(outside, "outside");
-    transcript.runs[0].events[0].artifactPath = "outside.pdf";
+    transcript.runs[0].events[0].artifactPath = "deliverables/outside.pdf";
 
     const resolved = await resolveArtifactTarget(transcript, {
       threadId: "thread-1",
       runId: "run-1",
       artifactId: "artifact-1",
     });
-    expect(resolved).toMatchObject({
-      ok: false,
-      result: { code: "outside_output_roots" },
-    });
+    expect(resolved).toEqual({ ok: true, path: await fs.realpath(outside) });
+  });
+
+  it("opens and reveals a durable artifact at an absolute path outside the workspace", async () => {
+    const { transcript } = await fixture();
+    const externalRoot = await fs.mkdtemp(path.join(os.tmpdir(), "awaken-external-artifact-"));
+    temporaryRoots.push(externalRoot);
+    const external = path.join(externalRoot, "external.pdf");
+    await fs.writeFile(external, "external");
+    transcript.runs[0].events[0].artifactPath = external;
+
+    let opened = "";
+    await expect(openRecordedArtifact(
+      transcript,
+      { threadId: "thread-1", runId: "run-1", artifactId: "artifact-1" },
+      async (target) => {
+        opened = target;
+        return "";
+      },
+    )).resolves.toEqual({ ok: true });
+    expect(opened).toBe(await fs.realpath(external));
+
+    let revealed = "";
+    await expect(revealRecordedArtifact(
+      transcript,
+      { threadId: "thread-1", runId: "run-1", artifactId: "artifact-1" },
+      (target) => {
+        revealed = target;
+      },
+    )).resolves.toEqual({ ok: true });
+    expect(revealed).toBe(await fs.realpath(external));
   });
 
   itIfSymlinks("accepts an internal symlink only after resolving its target", async () => {
@@ -352,8 +379,10 @@ describe("artifact open authorization", () => {
   });
 
   it("authorizes ready media during an active run without exposing arbitrary files", async () => {
-    const { output, transcript } = await fixture();
-    const image = path.join(output, "generated.png");
+    const { root, transcript } = await fixture();
+    const previews = path.join(root, "previews");
+    await fs.mkdir(previews);
+    const image = path.join(previews, "generated.png");
     await fs.writeFile(image, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
     transcript.runs[0].run.status = "running";
     transcript.runs[0].events = [{

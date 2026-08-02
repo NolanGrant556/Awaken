@@ -86,6 +86,13 @@ func TestDefinitionPinsProviderWithoutExposingModelArgument(t *testing.T) {
 			t.Fatalf("video input schema missing %q: %+v", field, videoDefinition.InputSchema.Properties)
 		}
 	}
+	for _, mediaDefinition := range []tool.ToolDefinition{definition, videoDefinition} {
+		modelDescription := tool.ModelDescription(mediaDefinition)
+		if !strings.Contains(modelDescription, "ready 媒体 Artifact") ||
+			!strings.Contains(modelDescription, "不得再调用 artifact_publish") {
+			t.Fatalf("media tool lost its direct-delivery boundary: %s", modelDescription)
+		}
+	}
 }
 
 func TestImageGenerateDownloadsAndPublishesLocalArtifact(t *testing.T) {

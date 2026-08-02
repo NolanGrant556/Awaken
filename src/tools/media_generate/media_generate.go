@@ -142,9 +142,9 @@ func (t *mediaTool) Name() string {
 
 func (t *mediaTool) Description() string {
 	if t.configuration.ModelKind == "image" {
-		return "根据用户目标生成图片并保存为本地交付物；生成模型已由设置固定，调用参数不得覆盖模型或凭据"
+		return "根据用户目标生成图片并直接产生 ready 媒体 Artifact 与图片专用交付卡；生成模型已由设置固定，成功后不得再调用 artifact_publish"
 	}
-	return "根据用户目标创建视频任务并保存本地 MP4；用户要求让已生成图片动起来时，必须把该 ready 图片 Artifact 的路径传入 source_image_path；任务已有 task_id 时必须续查原任务，不能重复创建计费任务"
+	return "根据用户目标创建视频任务并直接产生 ready 媒体 Artifact 与视频专用交付卡；成功后不得再调用 artifact_publish；用户要求让已生成图片动起来时，必须把该 ready 图片 Artifact 的路径传入 source_image_path；任务已有 task_id 时必须续查原任务，不能重复创建计费任务"
 }
 
 func (t *mediaTool) Parameters() []tool.ToolParameter {
@@ -217,7 +217,7 @@ func (t *mediaTool) Definition() tool.ToolDefinition {
 	)
 	return tool.BuildBuiltinDefinition(t, tool.ToolDefinition{
 		Name: t.Name(), DisplayName: displayName, Description: t.Description(),
-		Purpose:   "让当前主 Agent 通过已配置的火山 Agent Plan 生成媒体文件；模型选择和凭据由 Host 固定。",
+		Purpose:   "让当前主 Agent 通过已配置的火山 Agent Plan 生成媒体文件，并由工具本身直接发布 ready 媒体 Artifact；模型选择和凭据由 Host 固定，不经过 artifact_publish。",
 		WhenToUse: []string{when}, WhenNotToUse: []string{notWhen},
 		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
 			"generation_status": {Type: "string", Description: "succeeded、partial、failed 或 unknown"},
@@ -242,7 +242,7 @@ func (t *mediaTool) Definition() tool.ToolDefinition {
 			{Kind: tool.SideEffectNetwork, Resources: []string{"volcengine Agent Plan generation API"}, Description: "调用外部生成服务，可能消耗套餐额度或产生费用。", Reversibility: tool.ReversibilityIrreversible},
 			{Kind: tool.SideEffectCreate, Resources: []string{"workspace output media"}, Description: "把已验证的生成结果写入任务输出目录。", Reversibility: tool.ReversibilityConditional},
 		},
-		Examples: []tool.ToolExample{{Scenario: "根据用户描述生成媒体", Input: map[string]any{"prompt": "一张适合产品发布页的简洁主视觉"}, Outcome: "返回本地 ready 媒体 Artifact"}},
+		Examples: []tool.ToolExample{{Scenario: "根据用户描述生成媒体", Input: map[string]any{"prompt": "一张适合产品发布页的简洁主视觉"}, Outcome: "返回本地 ready 媒体 Artifact 并直接进入专用媒体交付卡，无需 artifact_publish"}},
 		FailureModes: []tool.ToolFailureMode{
 			{Code: "media_generate_invalid_input", Cause: "提示词或参数无效", Retryable: false, Recovery: []string{"修正参数后重试"}},
 			{Code: "media_generate_authorization_failed", Cause: "Agent Plan 凭据或套餐授权失败", Retryable: false, Recovery: []string{"在 Agent Plan 配置账户中检查凭据"}},

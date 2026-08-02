@@ -27,9 +27,12 @@ type Config struct {
 }
 
 type managedTask struct {
-	snapshot TaskSnapshot
-	prompt   string
-	cancel   context.CancelFunc
+	snapshot          TaskSnapshot
+	prompt            string
+	cancel            context.CancelFunc
+	mutationMu        sync.Mutex
+	seenToolCalls     map[string]struct{}
+	seenModelRequests map[string]struct{}
 }
 
 type Manager struct {
@@ -124,7 +127,10 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 	}
 
 	taskCtx, cancel := context.WithCancel(m.ctx)
-	task := &managedTask{snapshot: snapshot, prompt: request.Prompt, cancel: cancel}
+	task := &managedTask{
+		snapshot: snapshot, prompt: request.Prompt, cancel: cancel,
+		seenToolCalls: make(map[string]struct{}), seenModelRequests: make(map[string]struct{}),
+	}
 	m.mu.Lock()
 	m.reserved--
 	m.tasks[taskID] = task
@@ -148,22 +154,32 @@ func (m *Manager) runTask(ctx context.Context, taskID string) {
 	}
 
 	started := time.Now().UTC()
-	snapshot, ok := m.snapshot(taskID)
-	if !ok {
+	task := m.task(taskID)
+	if task == nil {
 		return
 	}
+	task.mutationMu.Lock()
+	snapshot := task.snapshot
 	snapshot.Status = StatusRunning
 	snapshot.StartedAt = &started
 	snapshot.CurrentActivity = "正在执行分配的任务"
 	if err := m.persist(ctx, "subagent_status_changed", snapshot); err != nil {
+		task.mutationMu.Unlock()
 		m.finish(taskID, StatusFailed, "", ErrorPersistence, err.Error())
 		return
 	}
 	if !m.replaceSnapshot(taskID, snapshot) {
+		task.mutationMu.Unlock()
 		return
 	}
+	task.mutationMu.Unlock()
 
-	result, err := m.cfg.Starter(ctx, StartRequest{Task: snapshot, Prompt: m.prompt(taskID)})
+	result, err := m.cfg.Starter(ctx, StartRequest{
+		Task: snapshot, Prompt: m.prompt(taskID),
+		ReportProgress: func(progressCtx context.Context, update ProgressUpdate) error {
+			return m.reportProgress(progressCtx, taskID, update)
+		},
+	})
 	if ctx.Err() != nil {
 		m.finishCancelled(taskID)
 		return
@@ -184,8 +200,14 @@ func (m *Manager) finishCancelled(taskID string) {
 }
 
 func (m *Manager) finish(taskID string, status TaskStatus, result, code, message string) {
-	snapshot, ok := m.snapshot(taskID)
-	if !ok || snapshot.Terminal() {
+	task := m.task(taskID)
+	if task == nil {
+		return
+	}
+	task.mutationMu.Lock()
+	defer task.mutationMu.Unlock()
+	snapshot := task.snapshot
+	if snapshot.Terminal() {
 		return
 	}
 	finished := time.Now().UTC()
@@ -204,6 +226,64 @@ func (m *Manager) finish(taskID string, status TaskStatus, result, code, message
 		snapshot.ErrorMessage = err.Error()
 	}
 	m.replaceSnapshot(taskID, snapshot)
+}
+
+func (m *Manager) reportProgress(ctx context.Context, taskID string, update ProgressUpdate) error {
+	task := m.task(taskID)
+	if task == nil {
+		return runtimeError(ErrorNotFound, "task does not exist in this run")
+	}
+	task.mutationMu.Lock()
+	defer task.mutationMu.Unlock()
+	snapshot := task.snapshot
+	if snapshot.Terminal() || snapshot.Status == StatusCancelling {
+		return nil
+	}
+	changed := false
+	if toolCallID := strings.TrimSpace(update.ToolCallID); toolCallID != "" {
+		if _, seen := task.seenToolCalls[toolCallID]; !seen {
+			task.seenToolCalls[toolCallID] = struct{}{}
+			snapshot.ToolUseCount++
+			changed = true
+			if toolName := strings.TrimSpace(update.ToolName); toolName != "" {
+				snapshot.CurrentActivity = bounded("正在使用 "+toolName, 160)
+			}
+		}
+	}
+	if requestID := strings.TrimSpace(update.ModelRequestID); requestID != "" {
+		if _, seen := task.seenModelRequests[requestID]; !seen {
+			task.seenModelRequests[requestID] = struct{}{}
+			if update.HasInputTokens && update.InputTokens > 0 {
+				snapshot.InputTokens += update.InputTokens
+			}
+			if update.HasOutputTokens && update.OutputTokens > 0 {
+				snapshot.OutputTokens += update.OutputTokens
+			}
+			total := 0
+			if update.HasTotalTokens && update.TotalTokens > 0 {
+				total = update.TotalTokens
+			} else {
+				total = max(update.InputTokens, 0) + max(update.OutputTokens, 0)
+			}
+			if total > 0 {
+				snapshot.TotalTokens += total
+				snapshot.EstimatedTokens = snapshot.TotalTokens
+			}
+			changed = true
+		}
+	}
+	if activity := strings.TrimSpace(update.Activity); activity != "" {
+		snapshot.CurrentActivity = bounded(activity, 160)
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	if err := m.persist(ctx, "subagent_progress", snapshot); err != nil {
+		return err
+	}
+	m.replaceSnapshot(taskID, snapshot)
+	return nil
 }
 
 func (m *Manager) Status(taskID string) (TaskSnapshot, error) {
@@ -228,21 +308,21 @@ func (m *Manager) List() []TaskSnapshot {
 	return result
 }
 
-func (m *Manager) Wait(ctx context.Context, request WaitRequest) ([]TaskSnapshot, error) {
+func (m *Manager) Wait(ctx context.Context, request WaitRequest) (WaitResult, error) {
 	if m == nil {
-		return nil, runtimeError(ErrorRuntimeUnavailable, "manager is unavailable")
+		return WaitResult{}, runtimeError(ErrorRuntimeUnavailable, "manager is unavailable")
 	}
 	if request.ReturnWhen == "" {
 		request.ReturnWhen = "all"
 	}
 	if request.ReturnWhen != "any" && request.ReturnWhen != "all" {
-		return nil, runtimeError(ErrorInvalidInput, "return_when must be any or all")
+		return WaitResult{}, runtimeError(ErrorInvalidInput, "return_when must be any or all")
 	}
 	if len(request.TaskIDs) == 0 {
-		return nil, runtimeError(ErrorInvalidInput, "task_ids is required")
+		return WaitResult{}, runtimeError(ErrorInvalidInput, "task_ids is required")
 	}
 	if request.Timeout < 0 || request.Timeout > 60*time.Second {
-		return nil, runtimeError(ErrorInvalidInput, "timeout must be between 0 and 60 seconds")
+		return WaitResult{}, runtimeError(ErrorInvalidInput, "timeout must be between 0 and 60 seconds")
 	}
 	waitCtx := ctx
 	cancel := func() {}
@@ -254,18 +334,21 @@ func (m *Manager) Wait(ctx context.Context, request WaitRequest) ([]TaskSnapshot
 	for {
 		snapshots, ready, err := m.waitState(request, true)
 		if err != nil {
-			return nil, err
+			return WaitResult{}, err
 		}
-		if ready || request.Timeout == 0 {
-			return snapshots, nil
+		if ready {
+			return WaitResult{Tasks: snapshots, RetrievalStatus: RetrievalCompleted}, nil
+		}
+		if request.Timeout == 0 {
+			return WaitResult{Tasks: snapshots, RetrievalStatus: RetrievalRunning}, nil
 		}
 		select {
 		case <-waitCtx.Done():
 			if errors.Is(waitCtx.Err(), context.DeadlineExceeded) {
 				snapshots, _, _ = m.waitState(request, false)
-				return snapshots, runtimeError(ErrorWaitTimeout, "no matching completion before timeout")
+				return WaitResult{Tasks: snapshots, RetrievalStatus: RetrievalTimeout}, nil
 			}
-			return nil, waitCtx.Err()
+			return WaitResult{}, waitCtx.Err()
 		case <-m.notify:
 		}
 	}
@@ -312,12 +395,12 @@ func (m *Manager) Message(context.Context, string, string) (MessageReceipt, erro
 
 func (m *Manager) Cancel(ctx context.Context, taskID, _ string) (TaskSnapshot, error) {
 	taskID = strings.TrimSpace(taskID)
-	m.mu.RLock()
-	task := m.tasks[taskID]
-	m.mu.RUnlock()
+	task := m.task(taskID)
 	if task == nil {
 		return TaskSnapshot{}, runtimeError(ErrorNotFound, "task does not exist in this run")
 	}
+	task.mutationMu.Lock()
+	defer task.mutationMu.Unlock()
 	snapshot := task.snapshot
 	if snapshot.Terminal() {
 		return snapshot, nil
@@ -330,6 +413,15 @@ func (m *Manager) Cancel(ctx context.Context, taskID, _ string) (TaskSnapshot, e
 	m.replaceSnapshot(taskID, snapshot)
 	task.cancel()
 	return snapshot, nil
+}
+
+func (m *Manager) task(taskID string) *managedTask {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.tasks[taskID]
 }
 
 func (m *Manager) Close(ctx context.Context) error {

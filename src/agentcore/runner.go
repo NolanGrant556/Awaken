@@ -47,6 +47,7 @@ type Runner struct {
 	llmRetrySleep        func(stdcontext.Context, time.Duration) error
 	suppressRunLifecycle bool
 	subagentController   subagentruntime.Controller
+	subagentProgress     subagentruntime.ProgressReporter
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
@@ -156,6 +157,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		events.parentAgentID = r.config.SubagentOrigin.ParentAgentID
 		events.subagentTaskID = r.config.SubagentTaskID
 	}
+	events.subagentProgress = r.subagentProgress
 	defer func() {
 		if err := events.persistenceFailure(); err != nil {
 			answer = ""
@@ -832,7 +834,7 @@ func (e *runEventEmitter) modelUsage(ctx stdcontext.Context, usage ModelUsageRec
 	e.fillIDs(&event)
 	if e.recorder == nil {
 		e.sink.Emit(event)
-		return nil
+		return e.reportModelUsage(ctx, usage)
 	}
 	persistCtx, cancel := durablePersistenceContext(ctx)
 	defer cancel()
@@ -842,6 +844,26 @@ func (e *runEventEmitter) modelUsage(ctx stdcontext.Context, usage ModelUsageRec
 	}
 	if err := e.recorder.Flush(persistCtx); err != nil {
 		return e.notePersistenceFailure("model_usage_flush", err)
+	}
+	return e.reportModelUsage(ctx, usage)
+}
+
+func (e *runEventEmitter) reportModelUsage(ctx stdcontext.Context, usage ModelUsageRecord) error {
+	if e == nil || e.subagentProgress == nil || strings.TrimSpace(usage.RequestID) == "" {
+		return nil
+	}
+	update := subagentruntime.ProgressUpdate{ModelRequestID: usage.RequestID}
+	if usage.InputTokens != nil {
+		update.InputTokens, update.HasInputTokens = *usage.InputTokens, true
+	}
+	if usage.OutputTokens != nil {
+		update.OutputTokens, update.HasOutputTokens = *usage.OutputTokens, true
+	}
+	if usage.TotalTokens != nil {
+		update.TotalTokens, update.HasTotalTokens = *usage.TotalTokens, true
+	}
+	if err := e.subagentProgress(ctx, update); err != nil {
+		return e.notePersistenceFailure("subagent_model_usage_progress", err)
 	}
 	return nil
 }
@@ -1313,6 +1335,7 @@ func (r *Runner) startNativeChild(
 	childRunner.suppressRunLifecycle = true
 	childRunner.streamLLMFunc = r.streamLLMFunc
 	childRunner.llmRetrySleep = r.llmRetrySleep
+	childRunner.subagentProgress = request.ReportProgress
 	return childRunner.RunStreamWithEvents(ctx, sink)
 }
 
@@ -1322,7 +1345,7 @@ func (r *Runner) persistSubagentEvent(ctx stdcontext.Context, event subagentrunt
 	}
 	kind := SemanticKind(event.Kind)
 	switch kind {
-	case SemanticKindSubagentSpawned, SemanticKindSubagentStatusChanged, SemanticKindSubagentTerminal:
+	case SemanticKindSubagentSpawned, SemanticKindSubagentStatusChanged, SemanticKindSubagentProgress, SemanticKindSubagentTerminal:
 	default:
 		return fmt.Errorf("unsupported subagent semantic kind %q", event.Kind)
 	}
@@ -1589,6 +1612,7 @@ type runEventEmitter struct {
 	agentID               string
 	parentAgentID         string
 	subagentTaskID        string
+	subagentProgress      subagentruntime.ProgressReporter
 	beforeTerminal        func(stdcontext.Context)
 	auxiliaryRequestIndex int
 }
@@ -2054,9 +2078,21 @@ func (e *runEventEmitter) emitToolCall(ctx stdcontext.Context, call context.Tool
 		if err := e.persistDurableBatch(ctx, "tool_call", []SemanticRecord{record}, live...); err != nil {
 			return err
 		}
-		return nil
+		return e.reportToolCall(ctx, call)
 	}
 	emitLive(e.sink, live...)
+	return e.reportToolCall(ctx, call)
+}
+
+func (e *runEventEmitter) reportToolCall(ctx stdcontext.Context, call context.ToolCall) error {
+	if e == nil || e.subagentProgress == nil {
+		return nil
+	}
+	if err := e.subagentProgress(ctx, subagentruntime.ProgressUpdate{
+		ToolCallID: call.ID, ToolName: call.Function.Name,
+	}); err != nil {
+		return e.notePersistenceFailure("subagent_tool_progress", err)
+	}
 	return nil
 }
 

@@ -89,7 +89,8 @@
 }
 
 .aw-subagent-row__title strong,
-.aw-subagent-row__detail {
+.aw-subagent-row__detail,
+.aw-subagent-row__metrics {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -102,6 +103,7 @@
 
 .aw-subagent-row__title small,
 .aw-subagent-row__detail,
+.aw-subagent-row__metrics,
 .aw-subagent-row__label {
   color: var(--aw-color-text-muted, #777);
   font-size: 11px;

@@ -764,6 +764,9 @@ describe("projectAguiEventToNarrative", () => {
       subagentTaskId: "task-1",
       toolCallName: "Read",
       subagentActivity: "读取 auth/service.go",
+      subagentToolUseCount: 1,
+      subagentTotalTokens: 450,
+      subagentStartedAt: "2026-08-02T07:00:00Z",
     });
     state = projectAguiEventToNarrative(state, {
       type: "AWAKEN_SUBAGENT_CHANGED",
@@ -781,6 +784,11 @@ describe("projectAguiEventToNarrative", () => {
       subagentAgentType: "review",
       subagentStatus: "completed",
       subagentResultPreview: "未发现越权路径",
+      subagentToolUseCount: 2,
+      subagentInputTokens: 600,
+      subagentOutputTokens: 200,
+      subagentTotalTokens: 800,
+      subagentFinishedAt: "2026-08-02T07:00:05Z",
     });
 
     expect(state.activeItem).toMatchObject({ kind: "thinking" });
@@ -794,8 +802,17 @@ describe("projectAguiEventToNarrative", () => {
           agentType: "review",
           status: "completed",
           activity: "读取 auth/service.go",
+          toolUseCount: 2,
+          estimatedTokens: undefined,
+          inputTokens: 600,
+          outputTokens: 200,
+          totalTokens: 800,
+          createdAt: undefined,
+          startedAt: "2026-08-02T07:00:00Z",
+          finishedAt: "2026-08-02T07:00:05Z",
           resultPreview: "未发现越权路径",
           errorCode: undefined,
+          errorMessage: undefined,
         },
         {
           taskId: "task-2",
@@ -803,8 +820,17 @@ describe("projectAguiEventToNarrative", () => {
           agentType: "explore",
           status: "running",
           activity: undefined,
+          toolUseCount: 0,
+          estimatedTokens: undefined,
+          inputTokens: undefined,
+          outputTokens: undefined,
+          totalTokens: undefined,
+          createdAt: undefined,
+          startedAt: undefined,
+          finishedAt: undefined,
           resultPreview: undefined,
           errorCode: undefined,
+          errorMessage: undefined,
         },
       ],
     });

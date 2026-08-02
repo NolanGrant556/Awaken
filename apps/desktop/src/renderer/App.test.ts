@@ -31,6 +31,7 @@ import {
   mediaArtifactRequestForPath,
   nextUserQuestionPromptIndex,
   nextSubagentInspectorTaskId,
+  subagentElapsedMs,
   promptNarrativeTokensForComposer,
   promptTextAfterTokenLeadingText,
   promptTokenViews,
@@ -3340,6 +3341,18 @@ describe("App workbench presentation", () => {
   it("toggles the subagent inspector detail without changing task identity", () => {
     expect(nextSubagentInspectorTaskId(undefined, "task-1")).toBe("task-1");
     expect(nextSubagentInspectorTaskId("task-1", "task-1")).toBeUndefined();
+  });
+
+  it("derives live and terminal subagent elapsed time from durable timestamps", () => {
+    expect(
+      subagentElapsedMs({ startedAt: "2026-08-02T07:00:00Z" }, Date.parse("2026-08-02T07:00:05Z")),
+    ).toBe(5000);
+    expect(
+      subagentElapsedMs(
+        { startedAt: "2026-08-02T07:00:00Z", finishedAt: "2026-08-02T07:01:05Z" },
+        Date.parse("2026-08-02T08:00:00Z"),
+      ),
+    ).toBe(65000);
   });
 
   it("uses the dock composer only after a run exists or narrative appears", () => {

@@ -76,6 +76,20 @@ type WaitRequest struct {
 	Timeout    time.Duration
 }
 
+const (
+	RetrievalCompleted = "completed"
+	RetrievalRunning   = "running"
+	RetrievalTimeout   = "timeout"
+)
+
+// WaitResult keeps an ordinary wait timeout in the success channel. A timeout
+// reports the latest task snapshots and does not imply that any child failed or
+// was cancelled.
+type WaitResult struct {
+	Tasks           []TaskSnapshot `json:"tasks"`
+	RetrievalStatus string         `json:"retrieval_status"`
+}
+
 type MessageReceipt struct {
 	TaskID    string    `json:"task_id"`
 	QueuedAt  time.Time `json:"queued_at"`
@@ -98,6 +112,9 @@ type TaskSnapshot struct {
 	CurrentActivity  string     `json:"current_activity,omitempty"`
 	ToolUseCount     int        `json:"tool_use_count"`
 	EstimatedTokens  int        `json:"estimated_tokens,omitempty"`
+	InputTokens      int        `json:"input_tokens,omitempty"`
+	OutputTokens     int        `json:"output_tokens,omitempty"`
+	TotalTokens      int        `json:"total_tokens,omitempty"`
 	ResultPreview    string     `json:"result_preview,omitempty"`
 	ErrorCode        string     `json:"error_code,omitempty"`
 	ErrorMessage     string     `json:"error_message,omitempty"`
@@ -117,9 +134,28 @@ func (s TaskSnapshot) Terminal() bool {
 }
 
 type StartRequest struct {
-	Task   TaskSnapshot
-	Prompt string
+	Task           TaskSnapshot
+	Prompt         string
+	ReportProgress ProgressReporter
 }
+
+// ProgressUpdate is emitted only after the corresponding child tool_call or
+// model_usage record is durable. IDs let the manager deduplicate retries and
+// replay-like duplicate notifications without inflating cumulative totals.
+type ProgressUpdate struct {
+	Activity        string
+	ToolCallID      string
+	ToolName        string
+	ModelRequestID  string
+	InputTokens     int
+	OutputTokens    int
+	TotalTokens     int
+	HasInputTokens  bool
+	HasOutputTokens bool
+	HasTotalTokens  bool
+}
+
+type ProgressReporter func(context.Context, ProgressUpdate) error
 
 type Starter func(context.Context, StartRequest) (string, error)
 
@@ -134,7 +170,7 @@ type Controller interface {
 	Spawn(context.Context, SpawnRequest) (TaskSnapshot, error)
 	Status(string) (TaskSnapshot, error)
 	List() []TaskSnapshot
-	Wait(context.Context, WaitRequest) ([]TaskSnapshot, error)
+	Wait(context.Context, WaitRequest) (WaitResult, error)
 	Message(context.Context, string, string) (MessageReceipt, error)
 	Cancel(context.Context, string, string) (TaskSnapshot, error)
 	Close(context.Context) error

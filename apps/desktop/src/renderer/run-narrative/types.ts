@@ -107,8 +107,17 @@ export type SubagentNarrativeTask = {
   agentType: "explore" | "review" | "general";
   status: "queued" | "running" | "completed" | "failed" | "cancelling" | "cancelled" | "interrupted";
   activity?: string;
+  toolUseCount: number;
+  estimatedTokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  createdAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
   resultPreview?: string;
   errorCode?: string;
+  errorMessage?: string;
 };
 
 export type RunNarrativeItem =

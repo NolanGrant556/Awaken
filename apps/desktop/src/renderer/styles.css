@@ -1634,6 +1634,20 @@ pre {
   gap: 4px;
 }
 
+.subagent-inspector__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.subagent-inspector__metrics span {
+  padding: 4px 7px;
+  border-radius: 7px;
+  background: rgba(127, 127, 127, 0.08);
+  color: var(--aw-color-text-muted, #666);
+  font-size: 11px;
+}
+
 .subagent-inspector__switcher button {
   overflow: hidden;
   padding: 7px 9px;

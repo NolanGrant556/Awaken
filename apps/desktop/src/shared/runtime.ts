@@ -1405,7 +1405,6 @@ export type ArtifactOpenErrorCode =
   | "run_not_terminal"
   | "artifact_not_deliverable"
   | "unsupported_type"
-  | "outside_output_roots"
   | "file_not_found"
   | "not_a_file"
   | "no_default_application"

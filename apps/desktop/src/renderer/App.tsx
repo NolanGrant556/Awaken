@@ -1262,6 +1262,27 @@ function formatTokenCount(value?: number): string | undefined {
   return String(value);
 }
 
+export function subagentElapsedMs(
+  task: Pick<SubagentNarrativeTask, "startedAt" | "finishedAt">,
+  nowMs: number,
+): number | undefined {
+  const startedAt = task.startedAt ? Date.parse(task.startedAt) : Number.NaN;
+  const finishedAt = task.finishedAt ? Date.parse(task.finishedAt) : nowMs;
+  if (!Number.isFinite(startedAt) || !Number.isFinite(finishedAt) || finishedAt < startedAt) {
+    return undefined;
+  }
+  return finishedAt - startedAt;
+}
+
+function formatSubagentElapsed(elapsedMs?: number): string | undefined {
+  if (typeof elapsedMs !== "number" || !Number.isFinite(elapsedMs) || elapsedMs < 0) {
+    return undefined;
+  }
+  const totalSeconds = Math.max(1, Math.round(elapsedMs / 1000));
+  if (totalSeconds < 60) return `${totalSeconds} 秒`;
+  return `${Math.floor(totalSeconds / 60)} 分 ${totalSeconds % 60} 秒`;
+}
+
 function rawToolId(selectionId: string): string {
   if (selectionId.startsWith("tool:")) {
     return selectionId.slice("tool:".length);
@@ -2219,6 +2240,7 @@ export function App() {
   );
   const [selectedSubagentTaskId, setSelectedSubagentTaskId] = useState<string | undefined>();
   const [cancellingSubagentTaskId, setCancellingSubagentTaskId] = useState<string | undefined>();
+  const [subagentNowMs, setSubagentNowMs] = useState(() => Date.now());
   const [promptBubbleModeByTurnId, setPromptBubbleModeByTurnId] = useState<
     Record<string, "collapsed" | "expanded">
   >({});
@@ -2368,6 +2390,13 @@ export function App() {
   const runningSubagentCount = subagentTasks.filter((task) =>
     ["queued", "running", "cancelling"].includes(task.status),
   ).length;
+
+  useEffect(() => {
+    setSubagentNowMs(Date.now());
+    if (runningSubagentCount === 0) return undefined;
+    const interval = window.setInterval(() => setSubagentNowMs(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [runningSubagentCount]);
   const desktopReady = runtimeState.supervisorStatus === "running" && runtimeInfo !== null;
   const desktopStarting =
     runtimeState.supervisorStatus === null ||
@@ -5880,6 +5909,7 @@ export function App() {
           key={key}
           tasks={item.tasks.map((task) => ({
             ...task,
+            elapsedMs: subagentElapsedMs(task, subagentNowMs),
             selected: task.taskId === selectedSubagentTaskId,
           }))}
           onSelect={handleOpenSubagent}
@@ -6975,6 +7005,28 @@ export function App() {
                                 {selectedSubagent.status}
                               </span>
                             </header>
+                            <div className="subagent-inspector__metrics" aria-label="子任务统计">
+                              <span>{selectedSubagent.toolUseCount} 次工具</span>
+                              {(selectedSubagent.totalTokens ?? selectedSubagent.estimatedTokens) ? (
+                                <span>
+                                  {new Intl.NumberFormat("zh-CN").format(
+                                    selectedSubagent.totalTokens ??
+                                      selectedSubagent.estimatedTokens ??
+                                      0,
+                                  )}{" "}
+                                  tokens
+                                </span>
+                              ) : null}
+                              {formatSubagentElapsed(
+                                subagentElapsedMs(selectedSubagent, subagentNowMs),
+                              ) ? (
+                                <span>
+                                  {formatSubagentElapsed(
+                                    subagentElapsedMs(selectedSubagent, subagentNowMs),
+                                  )}
+                                </span>
+                              ) : null}
+                            </div>
                             <div className="subagent-inspector__switcher">
                               {subagentTasks.map((task) => (
                                 <button
@@ -7010,6 +7062,9 @@ export function App() {
                               <section className="subagent-inspector__error">
                                 <h4>错误</h4>
                                 <p>{selectedSubagent.errorCode}</p>
+                                {selectedSubagent.errorMessage ? (
+                                  <p>{selectedSubagent.errorMessage}</p>
+                                ) : null}
                               </section>
                             ) : null}
                             {["queued", "running"].includes(selectedSubagent.status) ? (

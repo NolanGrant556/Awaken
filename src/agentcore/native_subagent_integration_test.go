@@ -3,6 +3,8 @@ package agentcore
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,11 +12,15 @@ import (
 	"awaken/src/llm"
 	"awaken/src/subagentruntime"
 	"awaken/src/tool"
+	_ "awaken/src/tools/read"
 	_ "awaken/src/tools/subagent"
 )
 
 func TestNativeSubagentToolRunsReadOnlyChildAndReturnsHandoff(t *testing.T) {
 	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "auth.txt"), []byte("auth/service.go\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	config := AgentConfig{
 		Workspace: WorkspaceConfig{
 			Root: root, ReadableRoots: []string{root}, WritableRoots: []string{root},
@@ -27,6 +33,7 @@ func TestNativeSubagentToolRunsReadOnlyChildAndReturnsHandoff(t *testing.T) {
 	runner.runID = "run_subagent"
 	runner.sessionID = "session_subagent"
 	runner.recorder = recorder
+	childTurns := 0
 	runner.streamLLMFunc = func(_ context.Context, events *runEventEmitter) (*llm.Response, error) {
 		if events.agentID == "" || events.subagentTaskID == "" {
 			t.Fatalf("native child identity missing: agent=%q task=%q", events.agentID, events.subagentTaskID)
@@ -36,6 +43,12 @@ func TestNativeSubagentToolRunsReadOnlyChildAndReturnsHandoff(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = request
+		childTurns++
+		if childTurns == 1 {
+			return &llm.Response{ToolCalls: []llm.ToolCall{{
+				ID: "child-read", Name: "Read", Input: `{"file_path":"auth.txt"}`,
+			}}}, nil
+		}
 		return &llm.Response{Content: "认证入口位于 auth/service.go"}, nil
 	}
 	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
@@ -95,7 +108,7 @@ func TestNativeSubagentToolRunsReadOnlyChildAndReturnsHandoff(t *testing.T) {
 		t.Fatalf("decode wait result: %v", err)
 	}
 	if len(waitPayload.Tasks) != 1 || waitPayload.Tasks[0].Status != subagentruntime.StatusCompleted ||
-		waitPayload.Tasks[0].ResultPreview != "认证入口位于 auth/service.go" {
+		waitPayload.Tasks[0].ResultPreview != "认证入口位于 auth/service.go" || waitPayload.Tasks[0].ToolUseCount != 1 {
 		t.Fatalf("wait payload = %+v", waitPayload)
 	}
 
@@ -110,6 +123,42 @@ func TestNativeSubagentToolRunsReadOnlyChildAndReturnsHandoff(t *testing.T) {
 	}
 	if !spawnedRecord || !terminalRecord {
 		t.Fatalf("missing durable lifecycle records: %+v", recorder.snapshot())
+	}
+}
+
+func TestSubagentProgressReportsOnlyAfterChildFactsAreDurable(t *testing.T) {
+	recorder := &forkCaptureRecorder{}
+	emitter := newRunEventEmitter("thread-subagent-progress", nil)
+	emitter.runID = "run-subagent-progress"
+	emitter.sessionID = "session-subagent-progress"
+	emitter.recorder = recorder
+	var updates []subagentruntime.ProgressUpdate
+	emitter.subagentProgress = func(_ context.Context, update subagentruntime.ProgressUpdate) error {
+		records := recorder.snapshot()
+		if len(records) == 0 {
+			t.Fatal("progress arrived before its semantic fact")
+		}
+		if update.ToolCallID != "" && records[len(records)-1].Kind != SemanticKindToolCall {
+			t.Fatalf("tool progress preceded durable tool_call: %+v", records)
+		}
+		if update.ModelRequestID != "" && records[len(records)-1].Kind != SemanticKindModelUsage {
+			t.Fatalf("usage progress preceded durable model_usage: %+v", records)
+		}
+		updates = append(updates, update)
+		return nil
+	}
+	call := convcontext.ToolCall{ID: "call-read", Function: convcontext.FunctionCall{Name: "Read", Arguments: `{"file_path":"README.md"}`}}
+	if err := emitter.emitToolCall(context.Background(), call); err != nil {
+		t.Fatalf("emit tool call: %v", err)
+	}
+	input, output, total := 120, 30, 150
+	if err := emitter.modelUsage(context.Background(), ModelUsageRecord{
+		RequestID: "request-1", InputTokens: &input, OutputTokens: &output, TotalTokens: &total,
+	}); err != nil {
+		t.Fatalf("emit model usage: %v", err)
+	}
+	if len(updates) != 2 || updates[0].ToolCallID != "call-read" || updates[1].ModelRequestID != "request-1" || updates[1].TotalTokens != 150 || !updates[1].HasTotalTokens {
+		t.Fatalf("progress updates = %+v", updates)
 	}
 }
 

@@ -1189,10 +1189,28 @@ func subagentSemanticPayload(snapshot subagentruntime.TaskSnapshot) map[string]a
 		"workspace_mode": snapshot.WorkspaceMode, "model_profile_id": snapshot.ModelProfileID,
 		"status": string(snapshot.Status), "current_activity": snapshot.CurrentActivity,
 		"tool_use_count": snapshot.ToolUseCount, "estimated_tokens": snapshot.EstimatedTokens,
+		"input_tokens": snapshot.InputTokens, "output_tokens": snapshot.OutputTokens,
+		"total_tokens":   snapshot.TotalTokens,
 		"result_preview": snapshot.ResultPreview, "error_code": snapshot.ErrorCode,
 		"error_message": snapshot.ErrorMessage, "side_effect_state": snapshot.SideEffectState,
-		"created_at": snapshot.CreatedAt, "started_at": snapshot.StartedAt, "finished_at": snapshot.FinishedAt,
+		"created_at":  subagentTimeString(snapshot.CreatedAt),
+		"started_at":  subagentOptionalTimeString(snapshot.StartedAt),
+		"finished_at": subagentOptionalTimeString(snapshot.FinishedAt),
 	}
+}
+
+func subagentTimeString(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
+func subagentOptionalTimeString(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return subagentTimeString(*value)
 }
 
 func (s *RunService) createAgent(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {

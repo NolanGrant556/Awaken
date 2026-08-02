@@ -1,8 +1,11 @@
+@import "../../tokens/components.css";
+
 .computer-settings {
   display: flex;
   flex-direction: column;
   gap: 24px;
   padding: 8px 0;
+  color: var(--aw-text-primary);
 }
 
 .computer-settings-header {
@@ -23,14 +26,14 @@
   margin: 0;
   font-size: 13px;
   line-height: 1.5;
-  color: var(--awaken-text-secondary, hsl(0 0% 50%));
+  color: var(--aw-text-secondary);
 }
 
 .computer-settings-card {
-  border: 1px solid var(--awaken-border, hsl(0 0% 88%));
+  border: 1px solid var(--aw-border-main);
   border-radius: 12px;
   padding: 16px;
-  background: var(--awaken-surface, hsl(0 0% 100%));
+  background: var(--aw-surface-raised);
 }
 
 .computer-settings-card-header {
@@ -66,15 +69,15 @@
   width: 24px;
   height: 24px;
   flex-shrink: 0;
-  color: var(--awaken-text-secondary, hsl(0 0% 50%));
+  color: var(--aw-text-tertiary);
 }
 
 .computer-settings-status-item[data-ok="true"] .computer-settings-status-icon {
-  color: var(--awaken-success, hsl(142 60% 40%));
+  color: var(--aw-status-success);
 }
 
 .computer-settings-status-item[data-ok="false"] .computer-settings-status-icon {
-  color: var(--awaken-danger, hsl(0 70% 50%));
+  color: var(--aw-status-danger);
 }
 
 .computer-settings-status-copy {
@@ -85,6 +88,7 @@
 }
 
 .computer-settings-status-label {
+  color: var(--aw-text-primary);
   font-size: 13px;
   font-weight: 500;
   line-height: 1.4;
@@ -93,7 +97,7 @@
 .computer-settings-status-detail {
   font-size: 12px;
   line-height: 1.4;
-  color: var(--awaken-text-secondary, hsl(0 0% 50%));
+  color: var(--aw-text-secondary);
   word-break: break-all;
 }
 
@@ -102,7 +106,7 @@
   padding-left: 18px;
   font-size: 13px;
   line-height: 1.7;
-  color: var(--awaken-text-secondary, hsl(0 0% 50%));
+  color: var(--aw-text-secondary);
 }
 
 .computer-settings-list li {
@@ -118,7 +122,7 @@
 .computer-settings-empty {
   font-size: 13px;
   line-height: 1.5;
-  color: var(--awaken-text-secondary, hsl(0 0% 50%));
+  color: var(--aw-text-secondary);
   padding: 12px 0;
 }
 
@@ -128,7 +132,7 @@
   gap: 12px;
   margin-top: 16px;
   padding-top: 16px;
-  border-top: 1px solid var(--awaken-border, hsl(0 0% 88%));
+  border-top: 1px solid var(--aw-border-light);
 }
 
 .computer-settings-enable-group {
@@ -143,15 +147,15 @@
   gap: 10px;
   padding: 10px 12px;
   border-radius: 8px;
-  background: var(--awaken-surface-muted, hsl(0 0% 96%));
-  color: var(--awaken-text-secondary, hsl(0 0% 40%));
+  background: var(--aw-surface-panel-muted);
+  color: var(--aw-text-secondary);
   font-size: 13px;
   line-height: 1.4;
 }
 
 .computer-settings-setup-error {
-  background: var(--awaken-danger-soft, hsl(0 70% 96%));
-  color: var(--awaken-danger, hsl(0 70% 45%));
+  background: var(--aw-status-danger-bg);
+  color: var(--aw-status-danger-text);
 }
 
 .computer-settings-setup-spinner {

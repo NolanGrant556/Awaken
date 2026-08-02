@@ -78,16 +78,6 @@ function legacyRole(event: AguiEvent): AguiArtifactRole {
   return event.artifactKind === "image" ? "preview" : "support";
 }
 
-function isPathWithin(root: string, target: string): boolean {
-  const relative = path.relative(root, target);
-  return (
-    relative === "" ||
-    (!path.isAbsolute(relative) &&
-      relative !== ".." &&
-      !relative.startsWith(`..${path.sep}`))
-  );
-}
-
 function foldedArtifactEvent(
   events: AguiEvent[],
   artifactId: string,
@@ -262,27 +252,6 @@ export async function resolveArtifactTarget(
     };
   }
 
-  const configuredRoots = transcript.thread.workspace.outputRoots?.length
-    ? transcript.thread.workspace.outputRoots
-    : [workspaceRoot];
-  const realRoots = (
-    await Promise.all(
-      configuredRoots.map(async (root) => {
-        try {
-          return await fs.realpath(path.resolve(root));
-        } catch {
-          return undefined;
-        }
-      }),
-    )
-  ).filter((root): root is string => Boolean(root));
-  if (!realRoots.some((root) => isPathWithin(root, realTarget))) {
-    return {
-      ok: false,
-      result: failed("outside_output_roots", "文件不在当前任务允许的输出目录中。"),
-    };
-  }
-
   try {
     const stat = await fs.stat(realTarget);
     if (!stat.isFile()) {
@@ -340,23 +309,6 @@ export async function resolveArtifactMediaTarget(
   }
   if (path.extname(realTarget).toLowerCase() !== extension) {
     return { ok: false, result: failed("unsupported_type", "媒体文件格式与交付记录不一致。") };
-  }
-  const configuredRoots = transcript.thread.workspace.outputRoots?.length
-    ? transcript.thread.workspace.outputRoots
-    : [workspaceRoot];
-  const realRoots = (
-    await Promise.all(
-      configuredRoots.map(async (root) => {
-        try {
-          return await fs.realpath(path.resolve(root));
-        } catch {
-          return undefined;
-        }
-      }),
-    )
-  ).filter((root): root is string => Boolean(root));
-  if (!realRoots.some((root) => isPathWithin(root, realTarget))) {
-    return { ok: false, result: failed("outside_output_roots", "媒体文件不在当前任务允许的输出目录中。") };
   }
   try {
     const stat = await fs.stat(realTarget);

@@ -41,12 +41,12 @@ func (e *artifactPublishError) Error() string { return e.message }
 func (t *ArtifactPublishTool) Name() string { return "artifact_publish" }
 
 func (t *ArtifactPublishTool) Description() string {
-	return "将已经存在的 Word、Markdown、Excel/CSV、PDF 或 PowerPoint 普通文件显式发布为最终交付物；只读取并校验文件，不修改内容"
+	return "将已经存在的 Word、Markdown、Excel/CSV、PDF 或 PowerPoint 普通文件显式发布为最终文档交付物；不支持图片或视频，image_generate/video_generate 会直接产生媒体交付物"
 }
 
 func (t *ArtifactPublishTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
-		{Name: "path", Description: "要发布的现有文件路径；相对路径按主文件夹解析，绝对路径可指向 output roots 之外，扩展名需受支持", Type: "string", Required: true},
+		{Name: "path", Description: "要发布的现有文档路径；只支持 .md、.doc/.docx、.xls/.xlsx、.csv/.tsv、.pdf、.ppt/.pptx，不接受图片或视频", Type: "string", Required: true},
 		{Name: "title", Description: "最终交付卡片标题；默认使用文件名", Type: "string", Required: false},
 	}
 }
@@ -56,13 +56,15 @@ func (t *ArtifactPublishTool) Definition() tool.ToolDefinition {
 		Name:        t.Name(),
 		DisplayName: "Artifact Publish",
 		Description: t.Description(),
-		Purpose:     "把已存在且受支持的文件标记为最终交付物，不改写文件内容；output roots 是交付物的默认存放位置而非硬性要求。",
+		Purpose:     "把已存在且受支持的文档、表格、演示稿或 PDF 标记为最终文档交付物，不改写文件内容；output roots 是默认存放位置而非硬性要求。",
 		WhenToUse: []string{
-			"最终文件已经生成并通过校验，但尚未作为 deliverable 发布时",
+			"受支持的最终文档文件已经生成并通过校验，但尚未作为 deliverable 发布时",
 			"需要为现有 Markdown、Office、PDF 或表格文件生成最终交付物事实时",
 		},
 		WhenNotToUse: []string{
-			"文件尚未创建、修改或验证时先使用对应 typed artifact 工具",
+			"image_generate 或 video_generate 成功时不得再次发布；它们已经产生 ready 媒体 Artifact 和专用前端交付卡",
+			"任何图片或视频文件都不属于本工具支持范围",
+			"文件尚未创建、修改或验证时先完成生成与校验",
 			"扩展名不受支持时不得发布",
 		},
 		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
@@ -74,8 +76,8 @@ func (t *ArtifactPublishTool) Definition() tool.ToolDefinition {
 		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectRead, Resources: []string{"existing output artifact"}, Description: "读取并校验现有文件，然后发布交付物元数据；不修改文件内容。", Reversibility: tool.ReversibilityNotApplicable}},
 		Examples:    []tool.ToolExample{{Scenario: "发布已生成的 PDF", Input: map[string]any{"path": "output/report.pdf", "title": "Final Report"}, Outcome: "返回 published 状态并产生 deliverable artifact"}},
 		FailureModes: []tool.ToolFailureMode{
-			{Code: "artifact_publish_invalid_input", Cause: "输入不是有效 JSON 或 path 缺失", Retryable: false, Recovery: []string{"提供现有 output 文件"}},
-			{Code: "artifact_publish_unsupported_type", Cause: "扩展名不属于可发布交付物", Retryable: false, Recovery: []string{"选择受支持类型"}},
+			{Code: "artifact_publish_invalid_input", Cause: "输入不是有效 JSON 或 path 缺失", Retryable: false, Recovery: []string{"提供现有且受支持的文档文件"}},
+			{Code: "artifact_publish_unsupported_type", Cause: "扩展名不属于可发布的文档交付物；图片/视频由专用媒体工具直接交付", Retryable: false, Recovery: []string{"选择受支持的文档类型", "媒体任务使用 image_generate 或 video_generate，且成功后不要二次发布"}},
 			{Code: "artifact_publish_outside_output_root", Cause: "路径无法安全解析（例如断链的符号链接）", Retryable: false, Recovery: []string{"确认文件真实存在再发布"}},
 			{Code: "artifact_publish_file_unavailable", Cause: "目标文件尚不存在", Retryable: true, Recovery: []string{"完成文件生成并验证实际路径"}},
 			{Code: "artifact_publish_permission_denied", Cause: "现有文件不可读", Retryable: false, Recovery: []string{"选择可读文件或修正文件权限"}},
@@ -241,8 +243,8 @@ func validatePublishableArtifact(path string, permissionContext tool.PermissionC
 	if !tool.IsPublishableArtifactPath(path) {
 		return "", &artifactPublishError{
 			code: "artifact_publish_unsupported_type", category: tool.ErrorCategoryDomain,
-			recovery: []string{"choose_supported_output_file"},
-			message:  "artifact_publish only supports .md, .doc/.docx, .xls/.xlsx, .csv/.tsv, .pdf, and .ppt/.pptx files",
+			recovery: []string{"choose_supported_document_file", "use_image_generate_or_video_generate_for_media"},
+			message:  "artifact_publish only supports document deliverables: .md, .doc/.docx, .xls/.xlsx, .csv/.tsv, .pdf, and .ppt/.pptx; image_generate/video_generate already publish ready media artifacts and must not be followed by artifact_publish",
 		}
 	}
 	resolved, err := permissionContext.ResolveOutputPathChecked(path)

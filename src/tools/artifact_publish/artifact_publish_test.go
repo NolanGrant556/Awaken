@@ -116,6 +116,40 @@ func TestArtifactPublishRejectsUnsupportedAndNonRegularPaths(t *testing.T) {
 	}
 }
 
+func TestArtifactPublishExplicitlyRoutesMediaToDedicatedTools(t *testing.T) {
+	root := t.TempDir()
+	outputRoot := filepath.Join(root, "outputs")
+	if err := os.MkdirAll(outputRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	permissionContext := publishPermissionContext(root, outputRoot)
+	instance := &ArtifactPublishTool{}
+	for _, name := range []string{"image.png", "photo.jpg", "clip.mp4"} {
+		path := filepath.Join(outputRoot, name)
+		if err := os.WriteFile(path, []byte("media"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		outcome, err := instance.ExecuteOutcome(
+			tool.ContextWithPermissionContext(context.Background(), permissionContext),
+			`{"path":"outputs/`+name+`"}`,
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("%s: unsupported media must be a typed outcome: %v", name, err)
+		}
+		if outcome.ErrorCode != "artifact_publish_unsupported_type" ||
+			!strings.Contains(outcome.ErrorMessage, "image_generate/video_generate") {
+			t.Fatalf("%s: media boundary missing from outcome: %+v", name, outcome)
+		}
+	}
+
+	modelDescription := tool.ModelDescription(instance.Definition())
+	if !strings.Contains(modelDescription, "不支持图片或视频") ||
+		!strings.Contains(modelDescription, "不得再次发布") {
+		t.Fatalf("model-visible artifact boundary is incomplete: %s", modelDescription)
+	}
+}
+
 func TestArtifactPublishRejectsDOCXDisguisedAsPDF(t *testing.T) {
 	root := t.TempDir()
 	outputRoot := filepath.Join(root, "outputs")

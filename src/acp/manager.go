@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -186,7 +188,36 @@ func (m *Manager) StartSession(ctx context.Context, threadID, runnerID, workspac
 	delete(m.starting, key)
 	m.mu.Unlock()
 	close(done)
+	m.watchConversation(conv)
 	return conv, nil
+}
+
+// watchConversation invalidates a conversation as soon as a lifecycle-aware
+// client reports that its process/transport exited. This covers idle exits,
+// where no prompt write would otherwise discover the dead pipe.
+func (m *Manager) watchConversation(conv *Conversation) {
+	lifecycle, ok := conv.Lifecycle()
+	if !ok || lifecycle.Done() == nil {
+		return
+	}
+	go func() {
+		<-lifecycle.Done()
+		state := conv.State()
+		if state == ConversationStateClosing || state == ConversationStateClosed || state == ConversationStateFailed {
+			return
+		}
+		message := "ACP runner process exited"
+		if err := lifecycle.ExitError(); err != nil {
+			message = fmt.Sprintf("ACP runner process exited: %v", err)
+		}
+		m.failConversation(conv, ErrCodeTransportClosed, message)
+	}()
+}
+
+func (m *Manager) failConversation(conv *Conversation, errorCode, errorMessage string) {
+	if client := conv.Fail(errorCode, errorMessage); client != nil {
+		_ = client.Close()
+	}
 }
 
 // GetConversation returns an existing conversation.
@@ -205,6 +236,12 @@ func (m *Manager) ListSessions() []SessionSummary {
 	for _, conv := range m.conversations {
 		out = append(out, conv.Summary())
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ThreadID == out[j].ThreadID {
+			return out[i].RunnerID < out[j].RunnerID
+		}
+		return out[i].ThreadID < out[j].ThreadID
+	})
 	return out
 }
 
@@ -235,9 +272,22 @@ func (m *Manager) Prompt(ctx context.Context, threadID, runnerID, hostRunID, too
 	defer promptCancel()
 
 	permissionHandler := &managerPermissionHandler{manager: m, conv: conv, turn: turn, ctx: ctx}
-	result, err := conv.client.Prompt(promptCtx, conv.ACPSessionID, turn.TurnID, message, handler, permissionHandler)
+	client := conv.Client()
+	var result TurnResult
+	if client == nil {
+		err = fmt.Errorf("%s: transport is not available", ErrCodeTransportClosed)
+	} else {
+		result, err = client.Prompt(promptCtx, conv.ACPSessionID, turn.TurnID, message, handler, permissionHandler)
+	}
 	result = m.normalizeTurnResult(result, err)
-	conv.FinishTurn(result)
+	if err != nil && result.ErrorCode != "" && !strings.Contains(err.Error(), result.ErrorCode) {
+		err = fmt.Errorf("%s: %w", result.ErrorCode, err)
+	}
+	if result.ErrorCode == ErrCodeTransportClosed {
+		m.failConversation(conv, result.ErrorCode, result.ErrorMessage)
+	} else {
+		conv.FinishTurn(result)
+	}
 
 	finishEvent := tool.ACPEvent{
 		Type:       tool.ACPEventTypeTurnFinished,
@@ -307,11 +357,35 @@ func (m *Manager) normalizeTurnResult(result TurnResult, err error) TurnResult {
 			result.ErrorMessage = "turn cancelled"
 			result.StopReason = string(ConversationStateCancelling)
 		default:
-			result.ErrorCode = ErrCodeTransportClosed
+			result.ErrorCode = errorCodeFromError(err)
 			result.ErrorMessage = err.Error()
 		}
 	}
+	if result.ErrorCode == ErrCodeTransportClosed && result.SideEffectState == "" {
+		result.SideEffectState = "unknown"
+	}
 	return result
+}
+
+func errorCodeFromError(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	for _, code := range []string{
+		ErrCodeCapabilityUnsupported,
+		ErrCodeOutputLimitExceeded,
+		ErrCodePermissionDenied,
+		ErrCodePermissionExpired,
+		ErrCodeSessionConflict,
+		ErrCodeSessionMissing,
+		ErrCodeTransportClosed,
+	} {
+		if strings.Contains(message, code) {
+			return code
+		}
+	}
+	return ErrCodeTransportClosed
 }
 
 // Cancel cancels the active turn (but keeps the session).

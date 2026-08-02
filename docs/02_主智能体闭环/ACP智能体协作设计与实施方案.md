@@ -7,7 +7,7 @@
 - 当前支持：
   - `github.com/coder/acp-go-sdk@v0.13.5` 已固定并封装在 `src/acp/protocol`，SDK 类型不越界；
   - `src/acp` 提供 runner registry、conversation、turn、permission、cancel/close 和错误码；
-  - `delegate_external_agent` 工具支持 list/status/start/message/cancel/close；
+  - `delegate_external_agent` 工具支持 list/status/start/message/cancel/close；六种 action 使用带 `action` 判别字段的严格 `oneOf` 输出合同，成功结果必须通过同一 ToolRuntime output schema 验证；
   - ACP 生命周期与工具进度事件（`ACPSessionStarted/Closed/Interrupted`、`ACPTurnStarted/Finished`、`ACPToolSnapshot`、`ACPPermissionRequested/Resolved`）已接入 `agentcore.EventSink`，并经 `src/protocol/agui/mapper.go` 投影为 AG-UI 事件；
   - run cancel 通过 `acp.Manager.CancelAllForThread` 传播到活跃 ACP turn；
   - Server routes：`/v1/acp/runners`、`/v1/acp/sessions`、`/v1/acp/sessions/{runner_id}/close`、`/v1/runs/{run_id}/acp-permissions/{interaction_id}/resolve`。
@@ -214,6 +214,8 @@ type Conversation struct {
     State           ConversationState
     ActiveTurn      *TurnState
     PendingPermission *PermissionRequest
+    LastErrorCode   string
+    LastErrorMessage string
 }
 ```
 
@@ -237,6 +239,8 @@ any non-closed state -> failed (process exit / protocol error)
 - 相同 runner 可同时服务多个 thread，但每个 thread 使用独立进程/session，首期不在进程内复用多 session。
 - `cwd` 在创建 session 后不变；`message` 不允许用新 cwd 偷换 workspace。需要改变 cwd 必须 `close` 后 `start`。
 - `start` 遇到已存在 live session 返回 conflict；不会隐式丢弃旧上下文。`restart=true` 不放进首期模型 schema，避免模型轻易销毁会话。
+- ACP process/pipe 生命周期由 Manager-owned context 持有，不继承某一次 `start` 工具调用的 context；工具调用返回不能终止需要跨 turn 复用的 runner。
+- transport/process 退出会立即清除 active turn 与 pending permission，把 conversation 标记为 `failed` 并保存安全的 `last_error_code/message`；failed conversation 的 `message` 不得再次写旧 client，后续只能检查外部状态后重新 `start` 或 `close`。
 - Core 重启后所有 live conversation 均为 `interrupted`；模型必须重新 `start`。
 
 ### 7.3 PermissionRequest
@@ -288,10 +292,13 @@ type PermissionRequest struct {
 
 ### 8.2 输出
 
-输出必须是 canonical `ExecutionOutcome`，`details` 使用固定 schema：
+输出必须是 canonical `ExecutionOutcome`，`details.action` 是必填判别字段，并由严格 `oneOf` 为不同 action 选择固定 schema：
 
 ```json
+{"action":"list","runners":[{"id":"codex","command":"codex-acp","args":[],"permission_mode":"ask"}]}
+{"action":"status","thread_id":"thread-1","runner_id":"codex","session_state":"failed","last_error_code":"acp_transport_closed","last_error_message":"broken pipe"}
 {
+  "action": "start",
   "runner_id": "codex",
   "session_state": "ready",
   "acp_stop_reason": "end_turn",
@@ -300,8 +307,12 @@ type PermissionRequest struct {
   "permission_state": "none",
   "truncated": false
 }
+{"action":"cancel","runner_id":"codex","session_state":"cancelling"}
+{"action":"close","runner_id":"codex","session_state":"closed"}
 ```
 
+- `list`、指定 runner 的 `status`、当前 thread 全会话 `status`、`start`、`message`、`cancel`、`close` 各自拥有封闭字段集；不得以 `additionalProperties=true` 掩盖实现与合同漂移。
+- runner/session/pending-permission 通过带 snake_case JSON tag 的安全 DTO 投影；不得把 Go 字段名或 runner env 写入 details。
 - `assistant_text` 有独立大小上限，超限复用 ToolResultOffloadStore；AG-UI 只投影稳定 preview/storage receipt。
 - ACP protocol/transport/process 错误映射到 `failed`，给出稳定 error code、retryable 和 recovery；不把 stderr 全量返回模型。
 - permission 等待不是工具成功或失败。ToolRuntime 保持当前 tool call 未完成，直到用户选择、取消或超时。
@@ -313,7 +324,7 @@ type PermissionRequest struct {
 
 1. 从当前 run 的 workspace 和 runner registry 创建 immutable snapshot。
 2. readiness probe 使用 `exec.LookPath`；若 command 为 `node`/`npx`，额外记录 Node/npx version，但不自动安装。
-3. 按平台创建新的 process group/job；stdin/stdout 专用于 ACP，stderr 进入有界诊断 ring buffer。
+3. 按平台创建新的 process group/job；process 使用独立的 Manager-owned lifecycle context，不绑定 `start` tool-call context；stdin/stdout 专用于 ACP，stderr 进入有界诊断 ring buffer。
 4. 创建 SDK client-side connection。
 5. 在 15 秒内发送 `initialize(protocolVersion=1)`；client capabilities 首期为空，不谎报 fs/terminal。
 6. 响应协议版本非 1 时关闭 connection 和 process，返回 `acp_protocol_version_mismatch`。
@@ -333,7 +344,8 @@ type PermissionRequest struct {
    - available commands/config/mode：保存 capability 状态，不直接暴露为 Awaken command；
    - usage update：可保存为 ACP runner usage，但不得混入 Awaken 主模型 usage/cost。
 4. 收到 prompt response 后校验 stop reason，flush 文本，形成 terminal receipt 和 canonical outcome。
-5. 释放 active turn；session 回到 ready。
+5. 正常响应或已确认的 cancel/timeout 释放 active turn，session 回到 ready；`acp_transport_closed`、进程退出或协议 I/O 失败则清除 active/pending、关闭并分离 client、把 session 置为 failed，不能回到 ready。
+6. lifecycle-aware client 在空闲期发现子进程退出时也执行同一 failed 转换；`status` 返回 failed 与最后错误，而不是仅凭旧内存状态报告 ready。
 
 ### 9.3 Cancel 与 close
 
@@ -702,6 +714,8 @@ Core 是 lease 与 idle 判定的唯一 owner。manifest 只做发现，不保�
 - manager：多 thread 隔离、同 conversation turn serialization、start conflict、message without session；
 - permission：exact option ID、deny mode、timeout、cancel、late response、path outside TaskScope；
 - outcome：stop reason、transport error、unknown side effect、large result offload；
+- delegate output contract：list、两种 status、start、message、cancel、close 的成功 details 全部经过 strict output schema；未知字段必须产生 `tool_output_schema_mismatch`；
+- process ownership：结束 `start` 调用 context 后 runner 仍可接受下一 prompt；进程/pipe 退出后 session 立即 failed，旧 client 不得再次 Prompt；
 - recovery：open turn/tool/permission 在启动扫描时封口且不执行进程。
 
 ### 15.2 Core 集成测试
@@ -780,7 +794,7 @@ Phase 5 必须在 packaged identity 下用 ACP compatibility suite、Zed 和另�
 | `acp_permission_denied` | 用户或 policy 拒绝 | false | 改变方案，不原样重试 |
 | `acp_permission_expired` | 等待超时 | true | 新 prompt 重新发起 |
 | `acp_turn_timeout` | prompt 超过预算 | true | 先检查外部状态，再继续或新建 |
-| `acp_transport_closed` | pipe/进程异常退出 | 条件性 | side effect unknown 时先检查 workspace |
+| `acp_transport_closed` | pipe/进程异常退出；当前 session 已失效 | false | 先检查 workspace/外部副作用，再新建 session；不得原样重放旧 message |
 | `acp_output_limit_exceeded` | frame/result 超限 | false | 缩小任务或升级兼容限制 |
 
 ## 17. 风险与回滚

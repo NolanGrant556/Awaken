@@ -1,11 +1,68 @@
 package protocol
 
 import (
+	"context"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"awaken/src/acp"
 )
+
+func TestClientProcessOutlivesStartCallContext(t *testing.T) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+	binaryName := "mock-agent"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	binaryPath := filepath.Join(t.TempDir(), binaryName)
+	build := exec.Command("go", "build", "-o", binaryPath, "./testdata/acp/mock-agent")
+	build.Dir = repoRoot
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build mock ACP agent: %v\n%s", err, output)
+	}
+
+	startCtx, cancelStart := context.WithCancel(context.Background())
+	client, err := NewClient(startCtx, acp.RunnerSnapshot{
+		ID: "mock", Command: binaryPath, StartupTimeoutSeconds: 15,
+		TurnTimeoutSeconds: 15, MaxFrameBytes: 1024 * 1024,
+	}, t.TempDir())
+	if err != nil {
+		cancelStart()
+		t.Fatalf("start client: %v", err)
+	}
+	defer client.Close()
+
+	sessionID, err := client.NewSession(startCtx, t.TempDir())
+	if err != nil {
+		cancelStart()
+		t.Fatalf("new session: %v", err)
+	}
+	cancelStart()
+
+	select {
+	case <-client.Done():
+		t.Fatalf("ACP process exited with start-call context: %v", client.ExitError())
+	case <-time.After(250 * time.Millisecond):
+	}
+
+	promptCtx, cancelPrompt := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelPrompt()
+	result, err := client.Prompt(promptCtx, sessionID, "turn-after-start", "still alive", nil, nil)
+	if err != nil {
+		t.Fatalf("prompt after start context ended: %v", err)
+	}
+	if result.StopReason != "end_turn" || !strings.Contains(result.AssistantText, "still alive") {
+		t.Fatalf("unexpected prompt result: %+v", result)
+	}
+}
 
 func TestPromptStateAccumulatesTextAndTruncatesAtMaxTurn(t *testing.T) {
 	client := &Client{maxTurn: 10}

@@ -84,26 +84,26 @@ type ToolCallSnapshot struct {
 
 // PermissionRequest is the sanitized request exposed to the UI and journal.
 type PermissionRequest struct {
-	InteractionID string
-	ThreadID      string
-	RunID         string
-	RunnerID      string
-	ACPSessionID  string
-	ToolCallID    string
-	Title         string
-	Kind          string
-	Paths         []string
-	Command       string
-	Options       []PermissionOption
-	ExpiresAt     time.Time
+	InteractionID string             `json:"interaction_id"`
+	ThreadID      string             `json:"thread_id,omitempty"`
+	RunID         string             `json:"run_id,omitempty"`
+	RunnerID      string             `json:"runner_id,omitempty"`
+	ACPSessionID  string             `json:"acp_session_id,omitempty"`
+	ToolCallID    string             `json:"tool_call_id,omitempty"`
+	Title         string             `json:"title,omitempty"`
+	Kind          string             `json:"kind,omitempty"`
+	Paths         []string           `json:"paths,omitempty"`
+	Command       string             `json:"command,omitempty"`
+	Options       []PermissionOption `json:"options,omitempty"`
+	ExpiresAt     time.Time          `json:"expires_at"`
 }
 
 // PermissionOption is a single user-facing choice for an ACP permission request.
 type PermissionOption struct {
-	OptionID    string
-	Name        string
-	Kind        string
-	Description string
+	OptionID    string `json:"option_id"`
+	Name        string `json:"name"`
+	Kind        string `json:"kind,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 // PermissionResolution is the user's decision on a pending permission request.
@@ -199,15 +199,25 @@ type Client interface {
 	Close() error
 }
 
+// ClientLifecycle is implemented by clients that can report when their
+// underlying transport process exits. Manager uses it to invalidate idle
+// conversations immediately instead of waiting for the next prompt write.
+type ClientLifecycle interface {
+	Done() <-chan struct{}
+	ExitError() error
+}
+
 // SessionSummary is the safe, non-secret view of a live conversation.
 type SessionSummary struct {
-	ThreadID          string
-	RunnerID          string
-	ACPSessionID      string
-	State             ConversationState
-	WorkspaceRoot     string
-	ActiveTurnID      string
-	PendingPermission *PermissionRequest
-	StartedAt         time.Time
-	UpdatedAt         time.Time
+	ThreadID          string             `json:"thread_id"`
+	RunnerID          string             `json:"runner_id"`
+	ACPSessionID      string             `json:"acp_session_id,omitempty"`
+	State             ConversationState  `json:"session_state"`
+	WorkspaceRoot     string             `json:"workspace_root,omitempty"`
+	ActiveTurnID      string             `json:"active_turn_id,omitempty"`
+	PendingPermission *PermissionRequest `json:"pending_permission,omitempty"`
+	LastErrorCode     string             `json:"last_error_code,omitempty"`
+	LastErrorMessage  string             `json:"last_error_message,omitempty"`
+	StartedAt         time.Time          `json:"started_at"`
+	UpdatedAt         time.Time          `json:"updated_at"`
 }

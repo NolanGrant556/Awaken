@@ -4,6 +4,7 @@ package protocol
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -32,11 +33,25 @@ type Client struct {
 
 	mu            sync.Mutex
 	currentPrompt *promptState
+
+	processMu   sync.RWMutex
+	processDone chan struct{}
+	processErr  error
+	processStop context.CancelFunc
+	closeOnce   sync.Once
+	closeErr    error
 }
 
 // NewClient spawns a local stdio ACP runner and establishes a client-side connection.
 func NewClient(ctx context.Context, snapshot acp.RunnerSnapshot, cwd string) (*Client, error) {
-	cmd := exec.CommandContext(ctx, snapshot.Command, snapshot.Args...)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// The ACP process belongs to the Manager-owned conversation, not to the
+	// context of the start tool call. Startup and prompt requests keep their
+	// own bounded contexts; this private context is cancelled only by Close.
+	processCtx, processStop := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(processCtx, snapshot.Command, snapshot.Args...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
@@ -45,19 +60,23 @@ func NewClient(ctx context.Context, snapshot acp.RunnerSnapshot, cwd string) (*C
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		processStop()
 		return nil, fmt.Errorf("%s: stdin pipe: %w", acp.ErrCodeStartTimeout, err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		processStop()
 		return nil, fmt.Errorf("%s: stdout pipe: %w", acp.ErrCodeStartTimeout, err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		processStop()
 		return nil, fmt.Errorf("%s: stderr pipe: %w", acp.ErrCodeStartTimeout, err)
 	}
 	go drainStderr(stderr, snapshot.MaxFrameBytes)
 
 	if err := cmd.Start(); err != nil {
+		processStop()
 		return nil, fmt.Errorf("%s: %w", acp.ErrCodeRunnerNotReady, err)
 	}
 
@@ -70,12 +89,15 @@ func NewClient(ctx context.Context, snapshot acp.RunnerSnapshot, cwd string) (*C
 		maxFrame = 8 * 1024 * 1024
 	}
 	c := &Client{
-		conn:     conn,
-		cmd:      cmd,
-		maxFrame: maxFrame,
-		maxTurn:  maxFrame * 4,
-		logger:   slog.Default(),
+		conn:        conn,
+		cmd:         cmd,
+		maxFrame:    maxFrame,
+		maxTurn:     maxFrame * 4,
+		logger:      slog.Default(),
+		processDone: make(chan struct{}),
+		processStop: processStop,
 	}
+	go c.waitProcess()
 
 	initCtx, cancel := context.WithTimeout(ctx, time.Duration(snapshot.StartupTimeoutSeconds)*time.Second)
 	defer cancel()
@@ -133,7 +155,11 @@ func (c *Client) NewSession(ctx context.Context, cwd string) (string, error) {
 // Prompt sends a text prompt and blocks until the turn completes or an error occurs.
 func (c *Client) Prompt(ctx context.Context, sessionID, turnID, text string, handler acp.UpdateHandler, permission acp.PermissionHandler) (acp.TurnResult, error) {
 	if !c.capability.SupportsTextPrompt {
-		return acp.TurnResult{}, fmt.Errorf("%s: text prompt not supported", acp.ErrCodeCapabilityUnsupported)
+		return acp.TurnResult{
+			ErrorCode:       acp.ErrCodeCapabilityUnsupported,
+			ErrorMessage:    "text prompt not supported",
+			SideEffectState: "none",
+		}, fmt.Errorf("%s: text prompt not supported", acp.ErrCodeCapabilityUnsupported)
 	}
 	promptCtx, promptCancel := context.WithCancel(ctx)
 	defer promptCancel()
@@ -157,8 +183,17 @@ func (c *Client) Prompt(ctx context.Context, sessionID, turnID, text string, han
 		Prompt:    []acpsdk.ContentBlock{acpsdk.TextBlock(text)},
 	})
 	if err != nil {
-		state.result.ErrorCode = acp.ErrCodeTransportClosed
-		state.result.ErrorMessage = err.Error()
+		switch {
+		case errors.Is(promptCtx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded):
+			state.result.ErrorCode = acp.ErrCodeTurnTimeout
+			state.result.ErrorMessage = "turn deadline exceeded"
+		case errors.Is(promptCtx.Err(), context.Canceled) || errors.Is(err, context.Canceled):
+			state.result.ErrorCode = acp.ErrCodeTurnCancelled
+			state.result.ErrorMessage = "turn cancelled"
+		default:
+			state.result.ErrorCode = acp.ErrCodeTransportClosed
+			state.result.ErrorMessage = err.Error()
+		}
 		return state.result, err
 	}
 	state.result.StopReason = string(resp.StopReason)
@@ -184,13 +219,58 @@ func (c *Client) CloseSession(ctx context.Context, sessionID string) error {
 
 // Close terminates the process and pipes.
 func (c *Client) Close() error {
-	if c.cmd != nil {
-		if err := c.cmd.Cancel(); err != nil {
-			_ = c.cmd.Process.Kill()
+	c.closeOnce.Do(func() {
+		if c.cmd == nil || c.cmd.Process == nil {
+			return
 		}
-		_ = c.cmd.Wait()
-	}
-	return nil
+		if c.processStop != nil {
+			c.processStop()
+		} else if c.cmd.Cancel != nil {
+			if err := c.cmd.Cancel(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				c.closeErr = err
+			}
+		} else if err := c.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			c.closeErr = err
+		}
+
+		select {
+		case <-c.processDone:
+		case <-time.After(4 * time.Second):
+			if c.cmd.Cancel != nil {
+				_ = c.cmd.Cancel()
+			} else {
+				_ = c.cmd.Process.Kill()
+			}
+			select {
+			case <-c.processDone:
+			case <-time.After(2 * time.Second):
+				if c.closeErr == nil {
+					c.closeErr = fmt.Errorf("ACP process did not exit after close")
+				}
+			}
+		}
+	})
+	return c.closeErr
+}
+
+func (c *Client) waitProcess() {
+	err := c.cmd.Wait()
+	c.processMu.Lock()
+	c.processErr = err
+	c.processMu.Unlock()
+	close(c.processDone)
+}
+
+// Done implements acp.ClientLifecycle.
+func (c *Client) Done() <-chan struct{} {
+	return c.processDone
+}
+
+// ExitError implements acp.ClientLifecycle.
+func (c *Client) ExitError() error {
+	c.processMu.RLock()
+	defer c.processMu.RUnlock()
+	return c.processErr
 }
 
 // Process returns the underlying os/exec.Cmd for tests and process-tree cleanup.

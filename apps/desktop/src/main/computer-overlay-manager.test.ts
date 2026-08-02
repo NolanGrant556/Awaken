@@ -138,6 +138,27 @@ describe("ComputerOverlayManager", () => {
 
     manager.handleRunEvent(
       event({
+        type: "TOOL_CALL_START",
+        runId: "run-1",
+        toolCallId: "bash-1",
+        toolCallName: "Bash",
+      }),
+      "run-1",
+    );
+    manager.handleRunEvent(
+      event({
+        type: "TOOL_CALL_RESULT",
+        runId: "run-1",
+        toolCallId: "bash-1",
+        toolCallName: "Bash",
+      }),
+      "run-1",
+    );
+    expect(overlay.hide).not.toHaveBeenCalled();
+    expect(electronMocks.BrowserWindow).toHaveBeenCalledTimes(1);
+
+    manager.handleRunEvent(
+      event({
         type: "TOOL_CALL_RESULT",
         runId: "run-1",
         toolCallId: "computer-1",

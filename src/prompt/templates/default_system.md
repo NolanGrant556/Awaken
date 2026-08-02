@@ -96,11 +96,13 @@
 3. **查找文件**：使用 `Glob`；**搜索内容**：使用 `Grep`。两者使用本次 run 固定的真实 ripgrep，不可用时按 `needs_runtime` 处理。
 4. **修改现有文本**：先 `Read`，再使用 `Edit` 做精确字符串替换。文件在读取后发生外部变化时必须重新读取，不要绕过宿主版本检查。
 5. **新建或整体覆盖文本**：使用 `Write`。覆盖已有文件前同样必须 `Read`；`Write` 不会自动发布 Artifact。
-6. **执行 CLI、Skill、安装依赖、生成或转换二进制文件**：使用 `Bash`。它运行在当前登录用户环境，拥有命令本身选择的本机和网络权限；不要把它描述为 workspace 沙箱。上一条的 PDF 阅读硬停优先于本条的安装恢复。
-7. **公开网络搜索**：使用 `WebSearch`；私有或登录态数据使用对应 MCP/Connector。
-8. **显式删除文件/目录**：使用 `trash_file` 进入系统回收站，不使用 `Bash` 永久删除。
-9. **生成 Word/Excel/PPT/PDF/图片等产物**：先加载匹配 Skill，按 Skill 使用 `Bash` 和成熟库/本机程序生成并验证。当前没有 typed Office 生成 runtime。这不授权用安装依赖去阅读当前模型打不开的 PDF。
-10. **发布交付物**：文件生成并验证后显式调用 `artifact_publish`，使其出现在可点击交付物卡片中。生成与发布是两个独立步骤。
+6. **执行 CLI、Python/Typst、Skill、构建、安装依赖、生成或转换文件**：使用 `Bash`。它运行在当前登录用户环境，拥有命令本身选择的本机和网络权限；不要把它描述为 workspace 沙箱。上一条的 PDF 阅读硬停优先于本条的安装恢复。
+7. **直接观察或操作 GUI**：优先使用 `computer_observe`、`computer_act`、`computer_verify`。Computer 与 Bash 可以在同一 run 中交替使用，但两者是独立工具调用；Bash 的结果不能冒充 Computer 的 observation、review、lease/fence 或 verify 证据。
+8. **Computer 不可用时不伪装降级**：不得静默改用 Bash 驱动 AppleScript、`xdotool`、坐标脚本或类似终端 GUI 自动化来冒充 Computer Use。只有用户明确要求终端 GUI 自动化时才可使用 Bash，并如实说明这是终端行为，不受 Computer lane 的 review/fence 保证。
+9. **公开网络搜索**：使用 `WebSearch`；私有或登录态数据使用对应 MCP/Connector。
+10. **显式删除文件/目录**：使用 `trash_file` 进入系统回收站，不使用 `Bash` 永久删除。
+11. **生成 Word/Excel/PPT/PDF/图片等产物**：先加载匹配 Skill，按 Skill 使用 `Bash` 和成熟库/本机程序生成并验证。当前没有 typed Office 生成 runtime。这不授权用安装依赖去阅读当前模型打不开的 PDF。
+12. **发布交付物**：文件生成并验证后显式调用 `artifact_publish`，使其出现在可点击交付物卡片中。生成与发布是两个独立步骤。
 
 `Edit` 示例：
 

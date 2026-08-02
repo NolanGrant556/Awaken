@@ -66,9 +66,9 @@ func (t *Tool) Parameters() []tool.ToolParameter {
 func (t *Tool) Definition() tool.ToolDefinition {
 	return tool.BuildBuiltinDefinition(t, tool.ToolDefinition{
 		Name: ToolName, DisplayName: "Bash", Description: t.Description(),
-		Purpose:      "Execute current-user shell commands with real cwd, exit, timeout, output, cancellation, and background-task facts.",
-		WhenToUse:    []string{"Running builds, tests, Skills, package tools, converters, network CLIs, or local applications", "Creating non-text files with installed user tools before artifact_publish"},
-		WhenNotToUse: []string{"Use Read, Edit, Write, Glob, or Grep for their narrower operations", "Use trash_file for an explicit recoverable deletion"},
+		Purpose:      "Execute current-user shell commands with real cwd, exit, timeout, output, cancellation, and background-task facts; Bash remains independent from the Computer lane.",
+		WhenToUse:    []string{"Running Python, Typst, builds, tests, Skills, package tools, converters, network CLIs, or local applications", "Creating non-text files with installed user tools before artifact_publish", "Running terminal-driven GUI automation only when the user explicitly requests that method"},
+		WhenNotToUse: []string{"Use Read, Edit, Write, Glob, or Grep for their narrower operations", "Use computer_observe, computer_act, and computer_verify for direct GUI observation or input", "Do not silently use AppleScript, xdotool, coordinate scripts, or similar terminal automation to impersonate unavailable Computer Use", "Use trash_file for an explicit recoverable deletion"},
 		SideEffects:  []tool.ToolSideEffect{{Kind: tool.SideEffectExecute, Resources: []string{"current-user process and command-selected resources"}, Description: "Starts a process with current-user OS and network authority.", Reversibility: tool.ReversibilityUnknown}},
 		Examples:     []tool.ToolExample{{Scenario: "Run Go tests", Input: map[string]any{"command": "go test ./...", "timeout": 120000, "description": "Run Go tests"}, Outcome: "Returns shell, cwd, stdout/stderr, exit code, timeout, and truncation facts."}},
 		FailureModes: []tool.ToolFailureMode{

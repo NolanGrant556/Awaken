@@ -190,7 +190,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 			}
 		}
 	}
-	r.toolRuntime = NewToolRuntimeWithConfig(sink, toolRuntimeConfigFromAgentConfig(r.config))
+	r.toolRuntime = NewToolRuntimeWithConfig(events.scopedSink(), toolRuntimeConfigFromAgentConfig(r.config))
 	// The run identity is host-owned and becomes final only after the emitter
 	// adopts a caller-supplied ID or generates one. Bind that exact identity to
 	// the already configured runtime before any model turn can issue a tool call.
@@ -979,7 +979,7 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 
 		var buffer *artifactBufferingSink
 		if events != nil {
-			buffer = &artifactBufferingSink{inner: normalizeEventSink(events.sink)}
+			buffer = &artifactBufferingSink{inner: events.scopedSink()}
 			r.toolRuntime.sink = buffer
 		}
 		executionCtx := runCtx
@@ -1025,7 +1025,7 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 			terminateReason = TerminalReasonPersistenceError
 		}
 		if events != nil {
-			r.toolRuntime.sink = events.sink
+			r.toolRuntime.sink = events.scopedSink()
 			if persistErr := events.persistenceFailure(); persistErr != nil {
 				cancel()
 				results = append(results, syntheticPersistenceFailureResult(call, persistErr))
@@ -1728,6 +1728,50 @@ func newRunEventEmitter(threadID string, sink EventSink) *runEventEmitter {
 		threadID: threadID,
 		runID:    newAwakenID("run"),
 	}
+}
+
+// runScopedEventSink is the only sink ToolRuntime may use inside a Runner.
+// ToolRuntime emits progress, command output and other ephemeral frames directly;
+// stamping them here keeps those frames in the same root/child identity scope as
+// the durable tool_call and tool_result records that surround them.
+type runScopedEventSink struct {
+	emitter *runEventEmitter
+}
+
+func (s runScopedEventSink) Emit(event AwakenEvent) {
+	if s.emitter == nil {
+		return
+	}
+	s.emitter.emit(event)
+}
+
+func (s runScopedEventSink) AwaitUserQuestion(ctx stdcontext.Context, request AwakenEvent) (string, error) {
+	if s.emitter == nil {
+		return "", stdcontext.Canceled
+	}
+	s.emitter.fillIDs(&request)
+	if awaiter, ok := s.emitter.sink.(UserQuestionAwaiter); ok {
+		return awaiter.AwaitUserQuestion(ctx, request)
+	}
+	return "", stdcontext.Canceled
+}
+
+func (s runScopedEventSink) AwaitExternalInteraction(ctx stdcontext.Context, request AwakenEvent) (ExternalInteractionResolution, error) {
+	if s.emitter == nil {
+		return "", stdcontext.Canceled
+	}
+	s.emitter.fillIDs(&request)
+	if awaiter, ok := s.emitter.sink.(ExternalInteractionAwaiter); ok {
+		return awaiter.AwaitExternalInteraction(ctx, request)
+	}
+	return "", stdcontext.Canceled
+}
+
+func (e *runEventEmitter) scopedSink() EventSink {
+	if e == nil {
+		return noopEventSink{}
+	}
+	return runScopedEventSink{emitter: e}
 }
 
 func (e *runEventEmitter) turnID() string {

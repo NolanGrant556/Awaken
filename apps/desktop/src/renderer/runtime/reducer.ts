@@ -2312,6 +2312,9 @@ export function reduceRuntimeState(
             action.event.toolCallId ||
             `tool-result-${nextState.toolResults.length + 1}`;
           const existing = nextState.toolResults.find((tool) => tool.id === id);
+          if (!existing) {
+            break;
+          }
           const progress =
             action.event.progress || action.event.message || "Tool is running";
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
@@ -2339,6 +2342,9 @@ export function reduceRuntimeState(
             action.event.toolCallId ||
             `tool-result-${nextState.toolResults.length + 1}`;
           const existing = nextState.toolResults.find((tool) => tool.id === id);
+          if (!existing) {
+            break;
+          }
           const delta = action.event.delta ?? "";
           const stream = action.event.commandStream || "output";
           nextState.toolResults = upsertToolResult(nextState.toolResults, {

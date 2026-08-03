@@ -565,6 +565,7 @@ subagent_task_id
 - `messagesFromSemanticRecords` 继续排除带 `agent_id` 的 child messages；
 - 新 `subagentTasksFromSemanticRecords` 按 task ID/seq 重建 task views；
 - transcript projector 把 child tool/message records路由到对应 task detail，不投影成 root 顶层 tool row；
+- child `ToolRuntime` 的即时 progress、command output、patch 与交互事件必须先经过 `runEventEmitter` 的 identity-scoped sink，补齐与耐久 tool call/result 相同的 task/agent/run/turn identity；不得把原始 sink 直接交给 child ToolRuntime；
 - 缺 terminal 的 task 在启动恢复阶段追加 `interrupted` terminal；只读读取 transcript 时不得临时伪造并写回；
 - 坏 task transition fail closed：保留最后合法状态，并产生 bounded unknown diagnostic；
 - terminal result blob 缺失时 UI 保留 metadata，显示 `subagent_result_blob_missing`，不得把 storage key 当正文。
@@ -645,6 +646,7 @@ subagentOrder: string[];
 - `AWAKEN_SUBAGENT_CHANGED` 首次创建所属 turn 的 `subagentGroup`；
 - 后续 event 按 task ID upsert；
 - 带 `subagentTaskId` 的 child reasoning/text/tool frame 只更新 `SubagentTaskView.narrative`，不新增 root thinking/answer/tool item，也不修改 root assistant/reasoning/tool records；
+- `TOOL_PROGRESS` 与 command output 只是已有 tool-call identity 的增量，不能创建新 root tool；缺少对应 root `TOOL_CALL_START/ARGS` 的孤立帧必须 fail closed；
 - terminal/replay 保持创建顺序；
 - run final 后 group 进入现有 execution process segment。
 

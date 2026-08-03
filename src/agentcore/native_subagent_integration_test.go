@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +34,13 @@ func TestNativeSubagentToolRunsReadOnlyChildAndReturnsHandoff(t *testing.T) {
 	runner.runID = "run_subagent"
 	runner.sessionID = "session_subagent"
 	runner.recorder = recorder
+	var childEventsMu sync.Mutex
+	var childEvents []AwakenEvent
+	childSink := EventSinkFunc(func(event AwakenEvent) {
+		childEventsMu.Lock()
+		childEvents = append(childEvents, event)
+		childEventsMu.Unlock()
+	})
 	childTurns := 0
 	runner.streamLLMFunc = func(_ context.Context, events *runEventEmitter) (*llm.Response, error) {
 		if events.agentID == "" || events.subagentTaskID == "" {
@@ -54,7 +62,7 @@ func TestNativeSubagentToolRunsReadOnlyChildAndReturnsHandoff(t *testing.T) {
 	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
 		MaxConcurrent: 1,
 		Starter: func(ctx context.Context, request subagentruntime.StartRequest) (string, error) {
-			return runner.startNativeChild(ctx, request, nil)
+			return runner.startNativeChild(ctx, request, childSink)
 		},
 		Persist: runner.persistSubagentEvent,
 	})
@@ -123,6 +131,62 @@ func TestNativeSubagentToolRunsReadOnlyChildAndReturnsHandoff(t *testing.T) {
 	}
 	if !spawnedRecord || !terminalRecord {
 		t.Fatalf("missing durable lifecycle records: %+v", recorder.snapshot())
+	}
+
+	childEventsMu.Lock()
+	capturedChildEvents := append([]AwakenEvent(nil), childEvents...)
+	childEventsMu.Unlock()
+	var sawToolProgress bool
+	for _, event := range capturedChildEvents {
+		switch event.Type {
+		case ToolCallStartedEventType,
+			ToolCallArgsEventType,
+			ToolCallFinishedEventType,
+			ToolProgressEventType,
+			CommandOutputEventType,
+			PatchUpdatedEventType,
+			ToolPermissionDecidedEventType,
+			ToolResultEventType:
+			if event.Type == ToolProgressEventType {
+				sawToolProgress = true
+			}
+			if event.SubagentTaskID != spawnPayload.Task.TaskID ||
+				event.AgentID != spawnPayload.Task.AgentID {
+				t.Fatalf("child tool event leaked without task identity: %+v", event)
+			}
+		}
+	}
+	if !sawToolProgress {
+		t.Fatalf("expected child tool progress event, got %+v", capturedChildEvents)
+	}
+}
+
+func TestRunScopedEventSinkStampsImmediateChildToolEvents(t *testing.T) {
+	var captured AwakenEvent
+	emitter := newRunEventEmitter("thread_child", EventSinkFunc(func(event AwakenEvent) {
+		captured = event
+	}))
+	emitter.runID = "run_child"
+	emitter.agentID = "agent_child"
+	emitter.parentAgentID = "agent_root"
+	emitter.subagentTaskID = "task_child"
+	emitter.turnState = newTurnState(emitter.threadID, emitter.runID, 3, "test-model").nextTurn(nil, TransitionInitial)
+
+	emitter.scopedSink().Emit(AwakenEvent{
+		Type:          CommandOutputEventType,
+		ToolCallID:    "tool_child",
+		ToolName:      "run_command",
+		CommandStream: "stdout",
+		Delta:         "child output",
+	})
+
+	if captured.ThreadID != emitter.threadID ||
+		captured.RunID != emitter.runID ||
+		captured.TurnID != emitter.turnID() ||
+		captured.AgentID != emitter.agentID ||
+		captured.ParentAgentID != emitter.parentAgentID ||
+		captured.SubagentTaskID != emitter.subagentTaskID {
+		t.Fatalf("immediate child tool event missing scoped identity: %+v", captured)
 	}
 }
 

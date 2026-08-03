@@ -16,6 +16,10 @@ export type RunNarrativeStatus =
 
 export type RunAction = {
   id: string;
+  /** Raw runtime identity used to join reducer-owned tool records. */
+  toolCallId?: string;
+  /** Stable presentation semantic derived from the canonical tool identity. */
+  visualKind?: "search";
   title: string;
   detail?: string;
   status: ToolDisplayState;
@@ -137,7 +141,16 @@ export type RunNarrativeItem =
     }
   | { kind: "thinking"; id: string; text: string; status: "active" | "done" }
   | { kind: "exploring"; id: string; actions: RunAction[]; status: "active" | "done" }
-  | { kind: "tool"; id: string; title: string; detail?: string; status: ToolDisplayState; toolStatus?: string }
+  | {
+      kind: "tool";
+      id: string;
+      /** Raw runtime identity; `id` remains the run-scoped narrative identity. */
+      toolCallId?: string;
+      title: string;
+      detail?: string;
+      status: ToolDisplayState;
+      toolStatus?: string;
+    }
   | {
       kind: "skill";
       id: string;
@@ -218,4 +231,5 @@ export type RunNarrativeState = {
   activeItem?: RunNarrativeItem;
   inspectorSelection?: InspectorSelection;
   seenEventKeys: string[];
+  replayedItemIds: string[];
 };

@@ -15,6 +15,7 @@ import type {
   RunNarrativeState,
   SubagentNarrativeTask,
 } from "./types";
+import { describeGlobPattern } from "./tool-display";
 
 const MAX_SEEN_EVENTS = 1000;
 const READ_ONLY_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "WebSearch"]);
@@ -24,6 +25,7 @@ export function createInitialRunNarrativeState(): RunNarrativeState {
   return {
     committedItems: [],
     seenEventKeys: [],
+    replayedItemIds: [],
   };
 }
 
@@ -138,37 +140,22 @@ export function projectAguiEventToNarrative(
         return activateMediaGeneration(base, event, "preparing");
       }
       if (isReadOnlyToolEvent(event)) {
-        return updateExploringAction(base, event, "active", "Tool invocation started");
+        return updateExploringAction(base, event, "active");
       }
-      return activateTool(base, event, "Tool invocation started");
-    case "TOOL_CALL_ARGS_DELTA": {
-      if (isMediaToolEvent(event)) {
-        const parameters = mediaParametersFromArgs(event.delta);
-        return activateMediaGeneration(base, event, "preparing", parameters.detail, parameters.requestedCount, parameters.requestedAspectRatio);
-      }
-      if (isReadOnlyToolEvent(event)) {
-        return updateExploringAction(
-          base,
-          event,
-          "active",
-          event.delta ? `Preparing arguments: ${event.delta}` : "Preparing tool arguments",
-        );
-      }
-      return activateTool(
-        base,
-        event,
-        event.delta ? `Preparing arguments: ${event.delta}` : "Preparing tool arguments",
-      );
-    }
+      return activateTool(base, event);
+    case "TOOL_CALL_ARGS_DELTA":
+      // Partial JSON is transport state, not a user-visible narrative fact.
+      // Core/LLM assembly owns accumulation and later emits TOOL_CALL_ARGS.
+      return base;
     case "TOOL_CALL_ARGS": {
       if (isMediaToolEvent(event)) {
         const parameters = mediaParametersFromArgs(event.delta);
         return activateMediaGeneration(base, event, "preparing", parameters.detail, parameters.requestedCount, parameters.requestedAspectRatio);
       }
       if (isReadOnlyToolEvent(event)) {
-        return updateExploringAction(base, event, "active", event.delta || "Streaming tool arguments");
+        return updateExploringAction(base, event, "active");
       }
-      return activateTool(base, event, event.delta || "Streaming tool arguments");
+      return activateTool(base, event);
     }
     case "TOOL_PROGRESS": {
       const progress = event.progress || event.message || "Tool is running";
@@ -217,13 +204,8 @@ export function projectAguiEventToNarrative(
       return activateTool(base, event, detail);
     }
     case "TOOL_CALL_END":
-      if (isMediaToolEvent(event)) {
-        return base;
-      }
-      if (isReadOnlyToolEvent(event)) {
-        return updateExploringAction(base, event, "active", "Tool call ready");
-      }
-      return activateTool(base, event, "Tool call ready");
+      // This closes the model's argument block; execution ends only at RESULT.
+      return base;
     case "TOOL_CALL_RESULT": {
       // TrashedPaths are parsed from the tool output after execution and
       // now ride on the ToolResult event (post-execution). Surface the
@@ -741,15 +723,32 @@ function upsertSubagentGroup(
       item.kind === "subagentGroup" && item.id === id,
   );
   const previous = existing?.tasks.find((task) => task.taskId === taskId);
+  const incomingStatus = event.subagentStatus ?? previous?.status ?? "running";
+  const previousTerminal = previous
+    ? ["completed", "failed", "cancelled", "interrupted"].includes(
+        previous.status,
+      )
+    : false;
+  const transitionAllowed = !previous || previous.status === incomingStatus ||
+    (previous.status === "queued" && ["running", "cancelling", "cancelled", "interrupted", "failed", "completed"].includes(incomingStatus)) ||
+    (previous.status === "running" && ["cancelling", "completed", "failed", "cancelled", "interrupted"].includes(incomingStatus)) ||
+    (previous.status === "cancelling" && ["completed", "failed", "cancelled", "interrupted"].includes(incomingStatus));
+  const status = previousTerminal || !transitionAllowed
+    ? previous!.status
+    : incomingStatus;
+  const terminal = ["completed", "failed", "cancelled", "interrupted"].includes(
+    status,
+  );
   const task: SubagentNarrativeTask = {
     taskId,
     description: event.subagentDescription?.trim() || previous?.description || "未命名子任务",
     agentType: event.subagentAgentType ?? previous?.agentType ?? "explore",
-    status: event.subagentStatus ?? previous?.status ?? "running",
-    activity:
-      event.subagentActivity?.trim() ||
-      event.toolCallName?.trim() ||
-      previous?.activity,
+    status,
+    activity: terminal
+      ? undefined
+      : event.subagentActivity?.trim() ||
+        event.toolCallName?.trim() ||
+        previous?.activity,
     toolUseCount: event.subagentToolUseCount ?? previous?.toolUseCount ?? 0,
     estimatedTokens: event.subagentEstimatedTokens ?? previous?.estimatedTokens,
     inputTokens: event.subagentInputTokens ?? previous?.inputTokens,
@@ -810,9 +809,31 @@ function commitRunCancelledHint(
           }),
           activeItem: undefined,
         }
-      : state.activeItem
-        ? commitActive(state, "done")
-        : state;
+      : state.activeItem?.kind === "tool"
+        ? {
+            ...state,
+            committedItems: upsertCommitted(state.committedItems, {
+              ...state.activeItem,
+              status: "cancelled" as const,
+            }),
+            activeItem: undefined,
+          }
+        : state.activeItem?.kind === "exploring"
+          ? {
+              ...state,
+              committedItems: upsertCommitted(state.committedItems, {
+                ...state.activeItem,
+                actions: state.activeItem.actions.map((action) => ({
+                  ...action,
+                  status: action.status === "active" ? "cancelled" as const : action.status,
+                })),
+                status: "done" as const,
+              }),
+              activeItem: undefined,
+            }
+          : state.activeItem
+            ? commitActive(state, "done")
+            : state;
   const hint: RunNarrativeItem = {
     kind: "hint",
     id: `hint:run-cancelled:${eventScope(event)}`,
@@ -1521,11 +1542,24 @@ function numberArg(args: Record<string, unknown> | undefined, key: string): numb
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function compactPathLabel(value: string): string {
+  const normalized = value.trim().replace(/[\\/]+$/, "");
+  const segments = normalized.split(/[\\/]/).filter(Boolean);
+  const label = segments.at(-1) || normalized;
+  return label.length > 72 ? `${label.slice(0, 71).trimEnd()}…` : label;
+}
+
+function compactSearchScope(value: string): string {
+  return /[*?[\]{}]/.test(value)
+    ? describeGlobPattern(value)
+    : compactPathLabel(value);
+}
+
 function readOnlyActionTitle(event: AguiEvent): string {
   const args = parseToolArgs(event.delta);
   switch (event.toolCallName) {
     case "Read": {
-      const path = stringArg(args, "file_path") ?? "file";
+      const path = compactPathLabel(stringArg(args, "file_path") ?? "文件");
       const offset = numberArg(args, "offset");
       const limit = numberArg(args, "limit");
       const range =
@@ -1534,37 +1568,51 @@ function readOnlyActionTitle(event: AguiEvent): string {
           : offset
             ? ` from L${offset}`
             : "";
-      return `Read ${path}${range}`;
+      return `读取 ${path}${range}`;
     }
     case "Glob": {
       const pattern = stringArg(args, "pattern");
       const root = stringArg(args, "path");
       if (pattern && root) {
-        return `List ${pattern} in ${root}`;
+        return `搜索 ${describeGlobPattern(pattern)} · ${compactPathLabel(root)}`;
       }
       if (pattern) {
-        return `List ${pattern}`;
+        return `搜索 ${describeGlobPattern(pattern)}`;
       }
-      return "List files";
+      return "搜索文件";
     }
     case "Grep": {
       const query = stringArg(args, "pattern");
       const include = stringArg(args, "path") ?? stringArg(args, "glob");
       if (query && include) {
-        return `Search "${query}" in ${include}`;
+        return `搜索 "${query}" · ${compactSearchScope(include)}`;
       }
       if (query) {
-        return `Search "${query}"`;
+        return `搜索 "${query}"`;
       }
-      return "Search files";
+      return "搜索文件";
     }
     case "WebSearch": {
       const query = stringArg(args, "query");
-      return query ? `Search web for "${query}"` : "Search web";
+      return query ? `搜索网页 "${query}"` : "搜索网页";
     }
     default:
-      return event.toolCallName || "Explore project";
+      return event.toolCallName || "检查项目";
   }
+}
+
+function isGenericReadOnlyActionTitle(title: string): boolean {
+  return [
+    "Explore project",
+    "Read file",
+    "List files",
+    "Search files",
+    "Search web",
+    "检查项目",
+    "读取 文件",
+    "搜索文件",
+    "搜索网页",
+  ].includes(title);
 }
 
 function upsertAction(actions: RunAction[], action: RunAction): RunAction[] {
@@ -1576,10 +1624,9 @@ function upsertAction(actions: RunAction[], action: RunAction): RunAction[] {
   updated[index] = {
     ...updated[index],
     ...action,
-    title:
-      action.title === "Explore project" || action.title.endsWith("file") || action.title.endsWith("files")
-        ? updated[index].title
-        : action.title,
+    title: isGenericReadOnlyActionTitle(action.title)
+      ? updated[index].title
+      : action.title,
   };
   return updated;
 }
@@ -1598,6 +1645,10 @@ function updateExploringAction(
   const id = existing?.id ?? exploringId(event);
   const action: RunAction = {
     id: exploringActionId(event),
+    toolCallId: event.toolCallId,
+    visualKind: ["Glob", "Grep", "WebSearch"].includes(event.toolCallName ?? "")
+      ? "search"
+      : undefined,
     title: readOnlyActionTitle(event),
     detail,
     status,
@@ -1690,7 +1741,7 @@ function appendAnswer(
 function activateTool(
   state: RunNarrativeState,
   event: AguiEvent,
-  detail: string,
+  detail?: string,
 ): RunNarrativeState {
   const id = toolId(event);
   const existing =
@@ -1705,8 +1756,9 @@ function activateTool(
     {
       kind: "tool",
       id,
+      toolCallId: event.toolCallId ?? existing?.toolCallId,
       title: event.toolCallName || existing?.title || "Tool call",
-      detail,
+      detail: detail ?? existing?.detail,
       status: "active",
     },
   );
@@ -1727,6 +1779,7 @@ function commitTool(
   const item: RunNarrativeItem = {
     kind: "tool",
     id,
+    toolCallId: event.toolCallId ?? active?.toolCallId,
     title: event.toolCallName || active?.title || "Tool result",
     detail,
     status,

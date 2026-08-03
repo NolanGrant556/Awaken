@@ -61,6 +61,113 @@ function runStatusChanged(
 }
 
 describe("projectAguiEventToNarrative", () => {
+  it("keeps partial tool arguments out of the narrative for normal and media tools", () => {
+    const normal = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      type: "TOOL_CALL_ARGS_DELTA",
+      runId: "run-1",
+      toolCallId: "write-1",
+      toolCallName: "Write",
+      delta: '{"content":"private fragment',
+    });
+    const media = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      type: "TOOL_CALL_ARGS_DELTA",
+      runId: "run-1",
+      toolCallId: "image-1",
+      toolCallName: "image_generate",
+      delta: '{"prompt":"partial',
+    });
+
+    expect(normal.activeItem).toBeUndefined();
+    expect(normal.committedItems).toEqual([]);
+    expect(JSON.stringify(normal)).not.toContain("private fragment");
+    expect(media.activeItem).toBeUndefined();
+    expect(media.committedItems).toEqual([]);
+    expect(JSON.stringify(media)).not.toContain("partial");
+  });
+
+  it("uses only complete tool arguments and keeps END non-terminal", () => {
+    let state = createInitialRunNarrativeState();
+    const base = {
+      runId: "run-1",
+      toolCallId: "write-1",
+      toolCallName: "Write",
+    };
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_START",
+      ...base,
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_ARGS",
+      ...base,
+      delta: JSON.stringify({
+        file_path: "/tmp/report.md",
+        content: "private document body",
+      }),
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_END",
+      ...base,
+    });
+
+    expect(state.activeItem).toEqual({
+      kind: "tool",
+      id: "tool:run-1:write-1",
+      toolCallId: "write-1",
+      title: "Write",
+      detail: undefined,
+      status: "active",
+    });
+    expect(JSON.stringify(state)).not.toContain("private document body");
+  });
+
+  it("uses a basename-only semantic row for completed read-only arguments", () => {
+    let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      type: "TOOL_CALL_START",
+      runId: "run-1",
+      toolCallId: "read-1",
+      toolCallName: "Read",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_ARGS",
+      runId: "run-1",
+      toolCallId: "read-1",
+      toolCallName: "Read",
+      delta: JSON.stringify({
+        file_path: "/tmp/reports/quarterly-report.pdf",
+      }),
+    });
+
+    expect(state.activeItem).toMatchObject({
+      kind: "exploring",
+      actions: [
+        {
+          title: "读取 quarterly-report.pdf",
+          status: "active",
+        },
+      ],
+    });
+    expect(JSON.stringify(state)).not.toContain("/tmp/reports/");
+  });
+
+  it("marks an unresolved active tool as cancelled when the run stops", () => {
+    let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      type: "TOOL_CALL_START",
+      runId: "run-1",
+      toolCallId: "write-1",
+      toolCallName: "Write",
+    });
+    state = projectAguiEventToNarrative(state, runStatusChanged("cancelled"));
+
+    expect(state.committedItems).toContainEqual({
+      kind: "tool",
+      id: "tool:run-1:write-1",
+      toolCallId: "write-1",
+      title: "Write",
+      detail: undefined,
+      status: "cancelled",
+    });
+  });
+
   it("shows a transient model status after a tool-result continuation", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(state, {
@@ -801,7 +908,7 @@ describe("projectAguiEventToNarrative", () => {
           description: "检查认证边界",
           agentType: "review",
           status: "completed",
-          activity: "读取 auth/service.go",
+          activity: undefined,
           toolUseCount: 2,
           estimatedTokens: undefined,
           inputTokens: 600,

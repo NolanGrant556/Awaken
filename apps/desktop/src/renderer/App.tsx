@@ -29,6 +29,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Plug,
+  Search,
   Settings,
   Workflow,
   Wrench,
@@ -48,6 +49,8 @@ import {
   AwakenMediaPreviewOverlay as MediaPreviewOverlay,
   AwakenInspectorRail as InspectorRail,
   AwakenSubagentGroup as SubagentGroup,
+  AwakenSubagentExecutionCard as SubagentExecutionCard,
+  awakenSubagentStatusLabels,
   AwakenProjectFoldersEditor as ProjectFoldersEditor,
   AwakenProviderLogo,
   AwakenSelectableCard as SelectableCard,
@@ -80,14 +83,12 @@ import {
 import { providerBrandForId } from "./model-provider-brand";
 import {
   createRuntimeClient,
-  desktopOperationIssueFromError,
   type SubscribeHandlers,
 } from "./runtime/client";
 import type {
   AwakenTheme,
   AwakenThemePreference,
   ComposerToken,
-  DesktopOperationIssue,
   MemoryDreamTask,
   ProjectEntryActionRequest,
   ProjectPathComposerTokenPayload,
@@ -113,6 +114,7 @@ import {
   type UserQuestionItem,
   type ComputerReviewItem,
   type ComputerHandoffItem,
+  type SubagentTaskView,
 } from "./runtime/reducer";
 import type {
   ACPDisplayStatus,
@@ -120,12 +122,14 @@ import type {
   RunNarrativeItem,
   SubagentNarrativeTask,
 } from "./run-narrative";
+import { describeGlobPattern } from "./run-narrative/tool-display";
 import type { ToolDisplayState } from "../shared/toolStatus";
 import { projectPetActivity } from "./pets/pet-activity-projector";
 import {
   projectNarrativeActivitySegments,
   projectNarrativeTurnBodySegments,
   contextUsagePanelBottomOffset,
+  narrativeTurnElapsedMs,
   projectVisibleNarrativeItems,
   shouldShowAssistantAnswerFooter,
   shouldUseCenterComposer,
@@ -134,6 +138,7 @@ import {
   type NarrativeTurnBodySegment,
   type NarrativeActivityBatch,
 } from "./workbenchPresentation";
+import { RunElapsedTime } from "./RunElapsedTime";
 import { selectAllInFocusedEditor } from "./desktop-selection";
 import { useComposerLifecycle } from "./useComposerLifecycle";
 import {
@@ -1283,6 +1288,19 @@ function formatSubagentElapsed(elapsedMs?: number): string | undefined {
   return `${Math.floor(totalSeconds / 60)} 分 ${totalSeconds % 60} 秒`;
 }
 
+function subagentAgentTypeLabel(
+  agentType: SubagentNarrativeTask["agentType"],
+): string {
+  switch (agentType) {
+    case "review":
+      return "复核子智能体";
+    case "general":
+      return "通用子智能体";
+    default:
+      return "探索子智能体";
+  }
+}
+
 function rawToolId(selectionId: string): string {
   if (selectionId.startsWith("tool:")) {
     return selectionId.slice("tool:".length);
@@ -1291,6 +1309,13 @@ function rawToolId(selectionId: string): string {
     return selectionId.slice("explore:".length);
   }
   return selectionId;
+}
+
+export function toolRecordIdForNarrativeItem(item: {
+  id: string;
+  toolCallId?: string;
+}): string {
+  return item.toolCallId || rawToolId(item.id);
 }
 
 type RuntimeContextWindow = ReturnType<
@@ -1742,6 +1767,43 @@ function firstStringArgument(
   return undefined;
 }
 
+function safeFileToolArguments(
+  args: Record<string, unknown> | undefined,
+): Record<string, string> | undefined {
+  const path = firstStringArgument(args, ["path", "file_path", "filePath", "target"]);
+  return path ? { path } : undefined;
+}
+
+function compactInlineLabel(value: string, maxLength = 72): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxLength) return compact;
+  return `${compact.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`;
+}
+
+function compactPathLabel(value: string): string {
+  const normalized = value.trim().replace(/[\\/]+$/, "");
+  if (!normalized) return value.trim();
+  const segments = normalized.split(/[\\/]/).filter(Boolean);
+  return compactInlineLabel(segments.at(-1) || normalized);
+}
+
+function compactToolFailureContext(value?: string): string | undefined {
+  const raw = value?.trim();
+  if (!raw) return undefined;
+  if (/permission|denied|outside writable roots?|sensitive path/i.test(raw)) {
+    return "权限被拒绝";
+  }
+  if (/timed?\s*out|timeout/i.test(raw)) return "执行超时";
+  if (/not found|no such file|enoent/i.test(raw)) return "目标不存在";
+  if (/cancelled|canceled/i.test(raw)) return "已取消";
+  if (/interrupted/i.test(raw)) return "已中断";
+  const withoutQuotedPaths = redactShellText(raw).replace(
+    /(["'])(?:\/|[A-Za-z]:\\)[^"'\n]+\1/g,
+    "$1…$1",
+  );
+  return compactInlineLabel(withoutQuotedPaths);
+}
+
 function detailCardFromSections(
   title: string,
   sections: ToolTraceDetailCard["sections"],
@@ -1761,17 +1823,56 @@ function naturalToolTitle(
   args?: Record<string, unknown>,
 ): string {
   if (kind === "terminal") {
+    const description = firstStringArgument(args, ["description", "label", "summary"]);
+    if (description) return `运行 ${compactInlineLabel(description)}`;
     const command = firstStringArgument(args, ["command", "cmd", "script"]);
-    if (command) return `运行 ${redactShellText(command).replace(/\s+/g, " ").slice(0, 96)}`;
+    if (command) return `运行 ${compactInlineLabel(redactShellText(command))}`;
     return "运行命令";
   }
   if (READ_TOOL_TITLE.test(title)) {
-    const target = firstStringArgument(args, ["path", "filePath", "query", "pattern", "url"]);
-    if (target) return `${/search|grep|glob|find|搜索/i.test(title) ? "搜索" : "读取"} ${target}`;
+    const path = firstStringArgument(args, ["path", "file_path", "filePath"]);
+    const query = firstStringArgument(args, ["query", "pattern", "url"]);
+    const glob = firstStringArgument(args, ["glob"]);
+    if (/search|grep|glob|find|搜索/i.test(title)) {
+      const compactTitle = title.replace(/\s*\{\s*$/, "").trim();
+      if (/^搜索/.test(compactTitle) && !/[*?[\]{}]/.test(compactTitle)) {
+        return compactTitle;
+      }
+      const queryLabel = query
+        ? /[*?[\]{}]/.test(query)
+          ? describeGlobPattern(query)
+          : `"${compactInlineLabel(query, 48)}"`
+        : undefined;
+      const scopeLabel = glob
+        ? describeGlobPattern(glob)
+        : path
+          ? compactPathLabel(path)
+          : undefined;
+      if (queryLabel && scopeLabel) {
+        return `搜索 ${queryLabel} · ${scopeLabel}`;
+      }
+      if (queryLabel) return `搜索 ${queryLabel}`;
+      if (scopeLabel) return `搜索 ${scopeLabel}`;
+      return "搜索文件";
+    }
+    if (path) {
+      return `${/list|列出/i.test(title) ? "列出" : "读取"} ${compactPathLabel(path)}`;
+    }
+    return /list|列出/i.test(title) ? "列出文件" : "读取文件";
   }
   if (FILE_TOOL_TITLE.test(title)) {
-    const target = firstStringArgument(args, ["path", "filePath", "target"]);
-    if (target) return `编辑 ${target}`;
+    const target = firstStringArgument(args, ["path", "file_path", "filePath", "target"]);
+    const action = /delete|删除/i.test(title)
+      ? "删除"
+      : /move|移动/i.test(title)
+        ? "移动"
+        : /copy|复制/i.test(title)
+          ? "复制"
+          : /write|create|写入|创建/i.test(title)
+            ? "写入"
+            : "编辑";
+    if (target) return `${action} ${compactPathLabel(target)}`;
+    return `${action}文件`;
   }
   return title.replace(/\s*\{\s*$/, "").trim() || "使用工具";
 }
@@ -1779,21 +1880,49 @@ function naturalToolTitle(
 export function toolTracePresentation(
   tool: ToolTraceRecordView | undefined,
   fallback?: string,
-  options: { title?: string; patch?: ToolTracePatchView } = {},
+  options: {
+    title?: string;
+    patch?: ToolTracePatchView;
+    allowLegacyFallbackOutput?: boolean;
+    status?: ToolDisplayState;
+  } = {},
 ) {
   if (!tool) {
-    const output = fallback?.trim() || undefined;
+    const legacyContent = fallback?.trim() || undefined;
+    const statusNeedsContext = Boolean(
+      options.status && options.status !== "done",
+    );
+    const detailCard = options.allowLegacyFallbackOutput && legacyContent
+      ? detailCardFromSections("工具详情", [
+          {
+            label: options.status && options.status !== "active" && options.status !== "done"
+              ? "错误与恢复信息"
+              : "结果",
+            content: legacyContent,
+            format: "text",
+            ...(options.status && options.status !== "active" && options.status !== "done"
+              ? { tone: "danger" as const }
+              : {}),
+          },
+        ])
+      : undefined;
     return {
       ...(options.title ? { title: options.title.replace(/\s*\{\s*$/, "").trim() } : {}),
-      detail: compactToolContext(fallback),
-      output,
+      detail: options.status === "active"
+        ? compactToolContext(fallback)
+        : statusNeedsContext
+          ? compactToolFailureContext(fallback)
+          : undefined,
+      output: undefined,
       outputLabel: "工具输出",
+      detailCard,
       kind: "tool" as const,
     };
   }
   const commandOutput = tool.commandOutput?.trim();
   const result = tool.content?.trim();
   const active = !tool.status || tool.status === "active";
+  const failed = Boolean(tool.status && tool.status !== "active" && tool.status !== "done");
   const output = active
     ? commandOutput || undefined
     : commandOutput || result || undefined;
@@ -1814,13 +1943,26 @@ export function toolTracePresentation(
     : undefined;
   const knownReadableTool = READ_TOOL_TITLE.test(sourceTitle);
   const knownFileTool = FILE_TOOL_TITLE.test(sourceTitle) || Boolean(options.patch);
-  const sanitizedArgs = args ? redactSensitiveValue(args) : undefined;
+  const sanitizedArgs = mcpProvider
+    ? args
+      ? redactSensitiveValue(args)
+      : undefined
+    : knownFileTool
+      ? safeFileToolArguments(args)
+      : args
+        ? redactSensitiveValue(args)
+        : undefined;
   const argumentContent = sanitizedArgs ? JSON.stringify(sanitizedArgs, null, 2) : "";
   const errorContent = tool.diagnostic ? JSON.stringify(redactSensitiveValue(tool.diagnostic), null, 2) : "";
   const sections: ToolTraceDetailCard["sections"] = [];
 
   if (command) {
-    sections.push({ label: "命令", content: redactShellText(command), format: "code" });
+    sections.push({
+      label: "命令",
+      content: redactShellText(command),
+      format: "code",
+      tone: "command",
+    });
   } else if ((mcpProvider || knownReadableTool || knownFileTool) && argumentContent) {
     sections.push({ label: mcpProvider ? "脱敏参数" : "目标与参数", content: argumentContent, format: "json" });
   }
@@ -1840,16 +1982,20 @@ export function toolTracePresentation(
     sections.push({ label: mcpProvider ? "结果" : knownReadableTool ? "匹配摘要" : "结果", content: result, format: "text" });
   }
   if (errorContent) {
-    sections.push({ label: "错误与恢复信息", content: errorContent, format: "json", tone: "danger" });
+    sections.push({
+      label: failed ? "错误与恢复信息" : "执行环境",
+      content: errorContent,
+      format: "json",
+      tone: failed ? "danger" : "muted",
+    });
   }
   const detailCard = detailCardFromSections(
     kind === "terminal" ? "Shell 详情" : mcpProvider ? `${providerLabel || "MCP"} 详情` : "工具详情",
     sections,
   );
-
   return {
     title: naturalToolTitle(sourceTitle, kind, args),
-    detail: providerLabel || (kind === "terminal" && command ? undefined : progress),
+    detail: providerLabel || (failed ? compactToolFailureContext(progress) : undefined),
     output,
     outputLabel: kind === "terminal" ? "终端输出" : mcpProvider ? "MCP 输出" : "工具输出",
     outputTruncated: tool.commandOutputTruncated,
@@ -1867,7 +2013,7 @@ type ActivitySummaryInput = {
 
 export function activityBatchSummary(actions: ActivitySummaryInput[]): {
   label: string;
-  detail: string;
+  detail?: string;
 } {
   const active = actions.some((action) => action.status === "active");
   const failed = actions.filter((action) => action.status !== "active" && action.status !== "done").length;
@@ -1884,11 +2030,13 @@ export function activityBatchSummary(actions: ActivitySummaryInput[]): {
     label = active ? `正在编辑 ${editedFiles} 个文件` : `编辑了 ${editedFiles} 个文件`;
   } else if (skillActions.length > 0) {
     const skillName = skillActions[0].title.replace(/^使用\s*/i, "");
-    label = `使用 ${skillName} · ${actions.length - skillActions.length} 个工具`;
+    const toolCount = actions.length - skillActions.length;
+    const toolSuffix = toolCount > 0 ? ` · ${toolCount} 个工具` : "";
+    label = `${active ? "正在使用" : "使用了"} ${skillName}${toolSuffix}`;
   } else {
     label = active ? `正在运行 ${actions.length} 个工具` : `使用了 ${actions.length} 个工具`;
   }
-  return { label, detail: failed > 0 ? `${failed} 个异常` : active ? "执行中" : "已完成" };
+  return { label, detail: failed > 0 ? `${failed} 个异常` : undefined };
 }
 
 function composerThreadLabel(
@@ -2135,7 +2283,6 @@ export function App() {
   const [modelSettingsInitialModelSection, setModelSettingsInitialModelSection] = useState<
     "coding_plan" | "api" | "agent_plan"
   >("coding_plan");
-  const [runCreateIssue, setRunCreateIssue] = useState<DesktopOperationIssue | null>(null);
   const [appearanceThemePreference, setAppearanceThemePreference] =
     useState<AwakenThemePreference>(readStoredThemePreference);
   const [systemAppearanceTheme, setSystemAppearanceTheme] = useState<AwakenTheme>(readSystemTheme);
@@ -2239,6 +2386,7 @@ export function App() {
     createProjectFileTabsState,
   );
   const [selectedSubagentTaskId, setSelectedSubagentTaskId] = useState<string | undefined>();
+  const [openSubagentTaskId, setOpenSubagentTaskId] = useState<string | undefined>();
   const [cancellingSubagentTaskId, setCancellingSubagentTaskId] = useState<string | undefined>();
   const [subagentNowMs, setSubagentNowMs] = useState(() => Date.now());
   const [promptBubbleModeByTurnId, setPromptBubbleModeByTurnId] = useState<
@@ -2287,6 +2435,10 @@ export function App() {
     ];
     return projectVisibleNarrativeItems({ items: narrativeItems, isBusy });
   }, [isBusy, runtimeState.narrative]);
+  const replayedNarrativeItemIds = useMemo(
+    () => new Set(runtimeState.narrative.replayedItemIds),
+    [runtimeState.narrative.replayedItemIds],
+  );
   const toolResultsById = useMemo(
     () => new Map(runtimeState.toolResults.map((record) => [record.id, record])),
     [runtimeState.toolResults],
@@ -2376,14 +2528,14 @@ export function App() {
         });
     }
   }, [artifactMediaHydrationEpoch, artifactMediaRequests, runtimeClient]);
-  const subagentTasks = useMemo<SubagentNarrativeTask[]>(() => {
-    const byId = new Map<string, SubagentNarrativeTask>();
-    for (const item of runtimeState.narrative.committedItems) {
-      if (item.kind !== "subagentGroup") continue;
-      for (const task of item.tasks) byId.set(task.taskId, task);
-    }
-    return [...byId.values()];
-  }, [runtimeState.narrative.committedItems]);
+  const subagentTasks = useMemo<SubagentTaskView[]>(
+    () =>
+      runtimeState.subagentOrder.flatMap((taskId) => {
+        const task = runtimeState.subagentsById[taskId];
+        return task ? [task] : [];
+      }),
+    [runtimeState.subagentOrder, runtimeState.subagentsById],
+  );
   const selectedSubagent =
     subagentTasks.find((task) => task.taskId === selectedSubagentTaskId) ??
     (selectedSubagentTaskId ? undefined : subagentTasks[subagentTasks.length - 1]);
@@ -3311,8 +3463,6 @@ export function App() {
     isWorkspaceValid,
     hasAttachments: composerAttachments.length > 0 || composerTokens.length > 0,
     inputAttachmentBlocked: false,
-    runtimeErrorMessage: runtimeState.errorMessage,
-    runtimeOperationIssue: runCreateIssue,
   });
   const composerInlineTextPrefix = useMemo(
     () =>
@@ -3559,6 +3709,7 @@ export function App() {
   useEffect(() => {
     setContextUsagePanelOpen(false);
     setSelectedSubagentTaskId(undefined);
+    setOpenSubagentTaskId(undefined);
     setCancellingSubagentTaskId(undefined);
   }, [runtimeState.activeThreadId]);
 
@@ -4035,9 +4186,7 @@ export function App() {
   }
 
   function applyRuntimeActions(actions: RuntimeAction[]): void {
-    for (const action of actions) {
-      dispatch(action);
-    }
+    dispatch({ type: "run/replayBatch", actions });
   }
 
   function shouldResumeSubscription(status: RuntimeRunStatus): boolean {
@@ -4426,7 +4575,6 @@ export function App() {
     threadLoadSeqRef.current += 1;
     terminalSeenRef.current = false;
     setNotice(null);
-    setRunCreateIssue(null);
     prepareForRunStart();
     dispatch({
       type: "run/requested",
@@ -4517,7 +4665,6 @@ export function App() {
       unsubscribeRef.current = unsubscribe;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create run";
-      setRunCreateIssue(desktopOperationIssueFromError(error));
       replaceComposerDraft(draftComposerState, composerDraftKey);
       dispatch({ type: "run/createFailed", message });
     }
@@ -5367,14 +5514,7 @@ export function App() {
   }
 
   function handleOpenSubagent(taskId?: string): void {
-    if (fileWorkspaceOpen) {
-      handleCloseFileWorkspace();
-    }
-    setSelectedSubagentTaskId(taskId ?? selectedSubagent?.taskId ?? subagentTasks[0]?.taskId);
-    setInspectorCollapsed(false);
-    if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
-      inspectorCollapsedBeforeResponsiveRef.current = false;
-    }
+    setOpenSubagentTaskId(taskId ?? openSubagentTaskId ?? subagentTasks[0]?.taskId);
   }
 
   function handleToggleSubagentInspector(): void {
@@ -5614,19 +5754,25 @@ export function App() {
 
   function toolTraceActionFor({
     id,
+    toolCallId,
+    visualKind,
     title,
     detail,
     status,
   }: {
     id: string;
+    toolCallId?: string;
+    visualKind?: "search";
     title: string;
     detail?: string;
     status: ToolDisplayState;
   }): ToolTraceAction {
-    const toolId = rawToolId(id);
+    const toolId = toolRecordIdForNarrativeItem({ id, toolCallId });
     const presentation = toolTracePresentation(toolResultsById.get(toolId), detail, {
       title,
       patch: patchPreviewsById.get(toolId),
+      allowLegacyFallbackOutput: status !== "active",
+      status,
     });
     return {
       id,
@@ -5637,6 +5783,10 @@ export function App() {
       outputTruncated: presentation.outputTruncated,
       detailCard: presentation.detailCard,
       kind: presentation.kind,
+      icon:
+        visualKind === "search" ? (
+          <Search size={14} strokeWidth={1.9} aria-hidden="true" />
+        ) : undefined,
       status,
       open: toolTraceOpenById[id],
       onOpenChange: (open) => updateToolTraceOpen(id, open),
@@ -5667,13 +5817,24 @@ export function App() {
     };
   }
 
-  function actionsForActivityBatch(batch: NarrativeActivityBatch): ToolTraceAction[] {
+  function actionsForActivityBatch(
+    batch: NarrativeActivityBatch,
+    animateToolEntry: boolean,
+  ): ToolTraceAction[] {
     return batch.items.flatMap((item) => {
       if (item.kind === "exploring") {
-        return item.actions.map((action) => toolTraceActionFor(action));
+        return item.actions.map((action) => ({
+          ...toolTraceActionFor(action),
+          animateEntry:
+            animateToolEntry && !replayedNarrativeItemIds.has(action.id),
+        }));
       }
-      if (item.kind === "skill") return [skillTraceAction(item)];
-      return [toolTraceActionFor(item)];
+      const animateEntry =
+        animateToolEntry && !replayedNarrativeItemIds.has(item.id);
+      if (item.kind === "skill") {
+        return [{ ...skillTraceAction(item), animateEntry }];
+      }
+      return [{ ...toolTraceActionFor(item), animateEntry }];
     });
   }
 
@@ -5686,13 +5847,19 @@ export function App() {
       if (segment.kind === "item") {
         return renderNarrativeItem(segment.item, segment.id, animateToolEntry);
       }
-      const actions = actionsForActivityBatch(segment);
+      const actions = actionsForActivityBatch(segment, animateToolEntry);
+      const searchOnly = segment.items.every(
+        (item) =>
+          item.kind === "exploring" &&
+          item.actions.length > 0 &&
+          item.actions.every((action) => action.visualKind === "search"),
+      );
       const summary = activityBatchSummary(
         actions.map((action) => ({
           kind: action.kind || "tool",
           title: action.title,
           status: action.status,
-          fileCount: patchPreviewsById.get(rawToolId(action.id))?.affectedPaths.length,
+          fileCount: patchPreviewsById.get(toolRecordIdForNarrativeItem(action))?.affectedPaths.length,
         })),
       );
       return (
@@ -5701,6 +5868,11 @@ export function App() {
           actions={actions}
           label={summary.label}
           detail={summary.detail}
+          icon={
+            searchOnly ? (
+              <Search size={14} strokeWidth={1.9} aria-hidden="true" />
+            ) : undefined
+          }
           open={activityBatchOpenById[segment.id]}
           onOpenChange={(open) => {
             setActivityBatchOpenById((current) => ({ ...current, [segment.id]: open }));
@@ -5721,6 +5893,9 @@ export function App() {
         <ThoughtTrace
           text={item.kind === "planning" ? "" : item.text}
           status={item.kind === "planning" ? "active" : item.status}
+          animateEntry={
+            animateToolEntry && !replayedNarrativeItemIds.has(item.id)
+          }
           label={
             item.kind === "planning" && item.phase === "continuation"
               ? item.text
@@ -5747,7 +5922,6 @@ export function App() {
           <AssistantMessage
             markdown={item.markdown}
             status={item.status}
-            elapsedMs={item.elapsedMs}
             showFooter={showAnswerFooter}
           />
         </div>
@@ -5778,9 +5952,13 @@ export function App() {
       );
     }
     if (item.kind === "exploring") {
-      const actions = item.actions.map((action) => toolTraceActionFor(action));
+      const actions = item.actions.map((action) => ({
+        ...toolTraceActionFor(action),
+        animateEntry:
+          animateToolEntry && !replayedNarrativeItemIds.has(action.id),
+      }));
       if (actions.length === 1) {
-        return <ToolTraceLine key={key} {...actions[0]} animateEntry={animateToolEntry} />;
+        return <ToolTraceLine key={key} {...actions[0]} />;
       }
       return (
         <ToolTraceGroup
@@ -5796,7 +5974,7 @@ export function App() {
         <ToolTraceLine
           key={key}
           {...action}
-          animateEntry={animateToolEntry}
+          animateEntry={animateToolEntry && !replayedNarrativeItemIds.has(item.id)}
         />
       );
     }
@@ -5806,7 +5984,7 @@ export function App() {
         <ToolTraceLine
           key={key}
           {...action}
-          animateEntry={animateToolEntry}
+          animateEntry={animateToolEntry && !replayedNarrativeItemIds.has(item.id)}
         />
       );
     }
@@ -5904,16 +6082,87 @@ export function App() {
       );
     }
     if (item.kind === "subagentGroup") {
+      const openTask = openSubagentTaskId
+        ? runtimeState.subagentsById[openSubagentTaskId]
+        : undefined;
+      const showOpenTask = Boolean(
+        openTask && item.tasks.some((task) => task.taskId === openTask.taskId),
+      );
+      const openTaskNarrativeItems = openTask
+        ? projectVisibleNarrativeItems({
+            items: [
+              ...openTask.narrative.committedItems,
+              ...(openTask.narrative.activeItem ? [openTask.narrative.activeItem] : []),
+            ],
+            isBusy: ["queued", "running", "cancelling"].includes(openTask.status),
+          })
+        : [];
+      const openTaskHasAnswer = openTaskNarrativeItems.some((candidate) => candidate.kind === "answer");
+      const metrics = openTask
+        ? [
+            openTask.toolUseCount > 0 ? `${openTask.toolUseCount} 次工具` : undefined,
+            (openTask.totalTokens ?? openTask.estimatedTokens)
+              ? `${new Intl.NumberFormat("zh-CN").format(
+                  openTask.totalTokens ?? openTask.estimatedTokens ?? 0,
+                )} tokens`
+              : undefined,
+            formatSubagentElapsed(subagentElapsedMs(openTask, subagentNowMs)),
+          ].filter((value): value is string => Boolean(value))
+        : [];
       return (
-        <SubagentGroup
-          key={key}
-          tasks={item.tasks.map((task) => ({
-            ...task,
-            elapsedMs: subagentElapsedMs(task, subagentNowMs),
-            selected: task.taskId === selectedSubagentTaskId,
-          }))}
-          onSelect={handleOpenSubagent}
-        />
+        <Fragment key={key}>
+          <SubagentGroup
+            tasks={item.tasks.map((task) => ({
+              ...(runtimeState.subagentsById[task.taskId] ?? task),
+              elapsedMs: subagentElapsedMs(
+                runtimeState.subagentsById[task.taskId] ?? task,
+                subagentNowMs,
+              ),
+              selected: task.taskId === openSubagentTaskId,
+            }))}
+            onSelect={handleOpenSubagent}
+          />
+          {showOpenTask && openTask ? (
+            <SubagentExecutionCard
+              title={openTask.description}
+              agentLabel={subagentAgentTypeLabel(openTask.agentType)}
+              status={openTask.status}
+              activity={openTask.activity}
+              metrics={metrics}
+              onClose={() => setOpenSubagentTaskId(undefined)}
+              onCancel={
+                ["queued", "running", "cancelling"].includes(openTask.status)
+                  ? () => void handleCancelSubagent(openTask.taskId)
+                  : undefined
+              }
+              cancelDisabled={
+                openTask.status === "cancelling" ||
+                cancellingSubagentTaskId === openTask.taskId
+              }
+            >
+              {openTaskNarrativeItems.length > 0
+                ? renderNarrativeActivityItems(
+                    `subagent:${openTask.taskId}`,
+                    openTaskNarrativeItems,
+                    false,
+                  )
+                : <p className="subagent-execution-empty">等待子任务执行记录…</p>}
+              {!openTaskHasAnswer && openTask.resultPreview ? (
+                <AssistantMessage
+                  markdown={openTask.resultPreview}
+                  status={openTask.status === "failed" ? "error" : "done"}
+                  showFooter={false}
+                />
+              ) : null}
+              {openTask.errorMessage ? (
+                <div className="subagent-execution-error" role="alert">
+                  <strong>{openTask.errorCode || "子任务失败"}</strong>
+                  <p>{openTask.errorMessage}</p>
+                </div>
+              ) : null}
+            </SubagentExecutionCard>
+          ) : null}
+        </Fragment>
       );
     }
     if (item.kind === "scheduledNotice") {
@@ -5941,7 +6190,7 @@ export function App() {
           title={item.title}
           detail={item.detail}
           status={item.status}
-          animateEntry={animateToolEntry}
+          animateEntry={animateToolEntry && !replayedNarrativeItemIds.has(item.id)}
         />
       );
     }
@@ -5955,7 +6204,7 @@ export function App() {
           title={title}
           detail={item.sessionId}
           status={acpDisplayStatusToToolStatus(item.status)}
-          animateEntry={animateToolEntry}
+          animateEntry={animateToolEntry && !replayedNarrativeItemIds.has(item.id)}
         />
       );
     }
@@ -5966,7 +6215,7 @@ export function App() {
           title={item.title}
           detail={item.detail}
           status={acpDisplayStatusToToolStatus(item.status)}
-          animateEntry={animateToolEntry}
+          animateEntry={animateToolEntry && !replayedNarrativeItemIds.has(item.id)}
         />
       );
     }
@@ -6066,10 +6315,23 @@ export function App() {
     return null;
   }
 
-  function renderTurnBodySegment(turnId: string, segment: NarrativeTurnBodySegment) {
+  function renderTurnBodySegment(
+    turnId: string,
+    segment: NarrativeTurnBodySegment,
+    timing: {
+      startedAtMs?: number;
+      completedAtMs?: number;
+      running: boolean;
+    },
+  ) {
     if (segment.kind === "items") {
-      return renderNarrativeActivityItems(turnId, segment.items);
+      return renderNarrativeActivityItems(turnId, segment.items, true);
     }
+
+    const hasElapsedTime =
+      segment.elapsedMs !== undefined ||
+      (timing.startedAtMs !== undefined &&
+        (timing.running || timing.completedAtMs !== undefined));
 
     return [
       <div
@@ -6079,7 +6341,20 @@ export function App() {
         }`}
       >
         <Disclosure
-          title={<span className="execution-process-disclosure-title">{segment.title}</span>}
+          title={
+            <span className="execution-process-disclosure-title">
+              {hasElapsedTime ? (
+                <RunElapsedTime
+                  elapsedMs={segment.elapsedMs}
+                  startedAtMs={timing.startedAtMs}
+                  completedAtMs={timing.completedAtMs}
+                  running={timing.running}
+                />
+              ) : (
+                segment.title
+              )}
+            </span>
+          }
           open={segment.open}
           onOpenChange={(open) => {
             setExecutionProcessOpenByTurnId((current) => ({
@@ -6255,47 +6530,6 @@ export function App() {
           >
             <strong>{panel.title}</strong>
             <p>{panel.message}</p>
-            {panel.actions && panel.actions.length > 0 ? (
-              <div className="composer-runtime-panel-actions">
-                {panel.actions.includes("retry") ? (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => {
-                      void handleComposerSubmit();
-                    }}
-                  >
-                    重试
-                  </Button>
-                ) : null}
-                {panel.actions.includes("relaunch") ? (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => {
-                      setNotice("正在重新启动 Awaken…");
-                      void runtimeClient.relaunchDesktop().catch(() => {
-                        setNotice("Awaken 重新启动失败，请再试一次。");
-                      });
-                    }}
-                  >
-                    重新启动 Awaken
-                  </Button>
-                ) : null}
-                {panel.actions.includes("reenter") ? (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => {
-                      setModelSettingsInitialModelSection("api");
-                      setModelSettingsOpen(true);
-                    }}
-                  >
-                    在 Awaken 中恢复
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
           </div>
         ))}
       </div>
@@ -6889,11 +7123,24 @@ export function App() {
                           {narrativeSections.turns.map((turn, index) => {
                             const isLatestPrompt = turn.id === latestPromptId;
                             const isActiveTurn = turn.id === activeWorkbenchTurnId;
+                            const settledElapsedMs = narrativeTurnElapsedMs(turn.items);
                             const turnBodySegments = projectNarrativeTurnBodySegments({
                               turnId: turn.id,
                               items: turn.items,
                               executionProcessOpen: executionProcessOpenByTurnId[turn.id] === true,
                             });
+                            const hasExecutionProcess = turnBodySegments.some(
+                              (segment) => segment.kind === "executionProcess",
+                            );
+                            const turnTiming = {
+                              startedAtMs: isLatestPrompt
+                                ? runtimeState.runStartedAtMs
+                                : undefined,
+                              completedAtMs: isLatestPrompt
+                                ? runtimeState.runCompletedAtMs
+                                : undefined,
+                              running: isLatestPrompt && isBusy,
+                            };
                             const turnStyle =
                               isLatestPrompt && latestTurnMinHeightPx > 0
                                 ? ({
@@ -6930,8 +7177,14 @@ export function App() {
                                     />
                                   </div>
                                   <div className="execution-turn-body">
+                                    {hasExecutionProcess ? null : (
+                                      <RunElapsedTime
+                                        elapsedMs={settledElapsedMs}
+                                        {...turnTiming}
+                                      />
+                                    )}
                                     {turnBodySegments.flatMap((segment) =>
-                                      renderTurnBodySegment(turn.id, segment),
+                                      renderTurnBodySegment(turn.id, segment, turnTiming),
                                     )}
                                   </div>
                                 </div>
@@ -6995,14 +7248,14 @@ export function App() {
                             <header className="subagent-inspector__header">
                               <div>
                                 <span className="subagent-inspector__eyebrow">
-                                  {selectedSubagent.agentType}
+                                  {subagentAgentTypeLabel(selectedSubagent.agentType)}
                                 </span>
                                 <h3>{selectedSubagent.description}</h3>
                               </div>
                               <span
                                 className={`subagent-inspector__status subagent-inspector__status--${selectedSubagent.status}`}
                               >
-                                {selectedSubagent.status}
+                                {awakenSubagentStatusLabels[selectedSubagent.status]}
                               </span>
                             </header>
                             <div className="subagent-inspector__metrics" aria-label="子任务统计">
@@ -7047,15 +7300,17 @@ export function App() {
                               <h4>最近活动</h4>
                               <p>
                                 {selectedSubagent.activity ||
-                                  (selectedSubagent.status === "completed"
-                                    ? "子任务已完成"
-                                    : "等待活动更新")}
+                                  awakenSubagentStatusLabels[selectedSubagent.status]}
                               </p>
                             </section>
                             {selectedSubagent.resultPreview ? (
                               <section>
                                 <h4>结果</h4>
-                                <pre>{selectedSubagent.resultPreview}</pre>
+                                <AssistantMessage
+                                  markdown={selectedSubagent.resultPreview}
+                                  status={selectedSubagent.status === "failed" ? "error" : "done"}
+                                  showFooter={false}
+                                />
                               </section>
                             ) : null}
                             {selectedSubagent.errorCode ? (

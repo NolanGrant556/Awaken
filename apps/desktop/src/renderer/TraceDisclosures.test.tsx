@@ -102,8 +102,38 @@ describe("execution trace disclosures", () => {
 
     expect(container.querySelectorAll(".tool-trace-detail-section")).toHaveLength(2);
     expect(container.querySelector('[data-format="code"]')?.textContent).toContain("npm test");
+    expect(container.querySelector(".tool-trace-output-card")?.textContent).not.toContain(
+      "Shell 详情",
+    );
+    expect(container.querySelector(".tool-trace-output-heading")).toBeNull();
+    expect(
+      container.querySelector(".tool-trace-detail-sections")?.hasAttribute(
+        "data-aw-run-stage-scroll-boundary",
+      ),
+    ).toBe(true);
     await act(async () => container.querySelector<HTMLButtonElement>(".tool-trace-output-copy")?.click());
     expect(onCopyDetail).toHaveBeenCalledWith("$ npm test\n4 tests passed");
+  });
+
+  it("bounds long detail cards and scrolls their sections inside the card", () => {
+    const componentStyles = readFileSync(
+      resolve(process.cwd(), "../../Awaken Design System/src/tokens/components.css"),
+      "utf8",
+    );
+
+    expect(componentStyles).toMatch(
+      /\.tool-trace-output-card\s*\{[\s\S]*?max-height:\s*320px;[\s\S]*?overflow:\s*hidden;/,
+    );
+    expect(componentStyles).toMatch(
+      /\.tool-trace-output-card\s*\{[\s\S]*?background:\s*var\(--aw-surface-code\);/,
+    );
+    expect(componentStyles).toMatch(
+      /\.tool-trace-detail-section\[data-tone="command"\]\s*pre\s*\{[\s\S]*?color:\s*var\(--aw-text-blue\);/,
+    );
+    expect(componentStyles).toMatch(
+      /\.tool-trace-detail-sections\s*\{[\s\S]*?max-height:\s*320px;[\s\S]*?overflow-y:\s*auto;[\s\S]*?overscroll-behavior:\s*contain;/,
+    );
+    expect(componentStyles).toMatch(/\.tool-trace-output-scroll::-webkit-scrollbar\s*\{/);
   });
 
   it("supports controlled group state while preserving active automatic behavior when uncontrolled", async () => {
@@ -114,6 +144,7 @@ describe("execution trace disclosures", () => {
           actions={[{ id: "read", title: "正在读取", status: "active" }]}
           label="正在检查 1 项"
           detail="执行中"
+          icon={<span data-testid="search-group-icon">搜索</span>}
           open={false}
           onOpenChange={onOpenChange}
         />,
@@ -121,6 +152,9 @@ describe("execution trace disclosures", () => {
     });
     const heading = container.querySelector<HTMLButtonElement>(".tool-trace-group-heading");
     expect(heading?.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      heading?.querySelector('[data-testid="search-group-icon"]'),
+    ).not.toBeNull();
     await act(async () => heading?.click());
     expect(onOpenChange).toHaveBeenCalledWith(true);
   });
@@ -143,6 +177,7 @@ describe("execution trace disclosures", () => {
     const group = container.querySelector<HTMLButtonElement>(".tool-trace-group-heading");
     const media = container.querySelector<HTMLButtonElement>(".aw-media-generation-summary");
     expect(group?.getAttribute("aria-expanded")).toBe("true");
+    expect(group?.querySelector(".tool-trace-group-detail")).toBeNull();
     expect(media?.getAttribute("aria-expanded")).toBe("true");
 
     await act(async () => {
@@ -162,6 +197,7 @@ describe("execution trace disclosures", () => {
     expect(group?.getAttribute("aria-expanded")).toBe("false");
     expect(media?.getAttribute("aria-expanded")).toBe("false");
     expect(group?.textContent).toContain("1 个工具调用");
+    expect(group?.textContent).not.toContain("已完成");
     expect(media?.textContent).toContain("已生成 1 张图片");
   });
 
@@ -197,6 +233,37 @@ describe("execution trace disclosures", () => {
     );
     expect(componentStyles).toMatch(
       /\.tool-trace-item\[data-animate-entry="false"\]\s*\{[\s\S]*?animation:\s*none;/,
+    );
+  });
+
+  it("shows historical thoughts immediately while preserving live thought entry animation", async () => {
+    await act(async () => {
+      root.render(
+        <>
+          <AwakenThoughtTrace text="Live reasoning" status="done" />
+          <AwakenThoughtTrace
+            text="Historical reasoning"
+            status="done"
+            animateEntry={false}
+          />
+        </>,
+      );
+    });
+
+    const thoughts = Array.from(
+      container.querySelectorAll<HTMLElement>(".thought-trace"),
+    );
+    expect(thoughts.map((item) => item.dataset.animateEntry)).toEqual([
+      "true",
+      "false",
+    ]);
+
+    const componentStyles = readFileSync(
+      resolve(process.cwd(), "../../Awaken Design System/src/tokens/components.css"),
+      "utf8",
+    );
+    expect(componentStyles).toMatch(
+      /\.thought-trace\[data-animate-entry="false"\] \.thought-trace-disclosure,[\s\S]*?animation:\s*none;/,
     );
   });
 

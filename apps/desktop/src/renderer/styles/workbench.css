@@ -715,6 +715,16 @@
   min-width: 0;
 }
 
+.run-elapsed-time {
+  display: inline-block;
+  min-height: 18px;
+  color: var(--aw-text-subtle);
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-medium);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--aw-line-height-sm);
+}
+
 .execution-process-disclosure {
   width: 100%;
   max-width: 100%;

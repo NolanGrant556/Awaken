@@ -48,6 +48,7 @@ import {
   shouldResetActiveThreadForWorkspaceChange,
   shouldShowSidebarThreadSpinner,
   activityBatchSummary,
+  toolRecordIdForNarrativeItem,
   toolTracePresentation,
   workbenchInspectorPresentation,
   UserQuestionPrompt,
@@ -98,11 +99,13 @@ import {
   composerContentBottomInset,
   contextUsagePanelBottomOffset,
   diffLineStats,
+  executionProcessSummaryTitle,
   groupNarrativeByTurns,
   isNearLatestTurnOutputTail,
   isNearScrollBottom,
   latestTurnMinHeightBottomReserve,
   latestTurnPromptAnchorSlack,
+  narrativeTurnElapsedMs,
   projectNarrativeTurnBodySegments,
   projectNarrativeActivitySegments,
   projectVisibleNarrativeItems,
@@ -144,12 +147,144 @@ describe("media reveal platform copy", () => {
 
 describe("tool trace presentation", () => {
   it("keeps replay-only tool details in a nested output card", () => {
-    expect(toolTracePresentation(undefined, "legacy result\nsecond line")).toEqual({
-      detail: "legacy result",
-      output: "legacy result\nsecond line",
+    expect(
+      toolTracePresentation(undefined, "legacy result\nsecond line", {
+        allowLegacyFallbackOutput: true,
+        status: "done",
+      }),
+    ).toEqual({
+      detail: undefined,
+      output: undefined,
       outputLabel: "工具输出",
+      detailCard: {
+        title: "工具详情",
+        sections: [
+          {
+            label: "结果",
+            content: "legacy result\nsecond line",
+            format: "text",
+          },
+        ],
+        copyText: "结果\nlegacy result\nsecond line",
+      },
       kind: "tool",
     });
+  });
+
+  it("never turns an active fallback into fake tool output", () => {
+    expect(
+      toolTracePresentation(undefined, "Preparing tool arguments", {
+        title: "Write",
+        allowLegacyFallbackOutput: false,
+        status: "active",
+      }),
+    ).toEqual({
+      title: "Write",
+      detail: "Preparing tool arguments",
+      output: undefined,
+      outputLabel: "工具输出",
+      detailCard: undefined,
+      kind: "tool",
+    });
+  });
+
+  it("keeps failed tool paths in the detail card instead of the main row", () => {
+    const presentation = toolTracePresentation(
+      {
+        content: 'file mutation denied: path "/Users/nolan/private/report.md" is outside writable roots',
+        status: "denied",
+      },
+      undefined,
+      { title: "Write" },
+    );
+
+    expect(presentation.title).toBe("写入文件");
+    expect(presentation.detail).toBe("权限被拒绝");
+    expect(presentation.detail).not.toContain("/Users/");
+    expect(presentation.detailCard?.copyText).toContain("/Users/nolan/private/report.md");
+  });
+
+  it("joins run-scoped narrative items through their explicit tool call id", () => {
+    expect(
+      toolRecordIdForNarrativeItem({
+        id: "tool:run-1:call:with:colons",
+        toolCallId: "call:with:colons",
+      }),
+    ).toBe("call:with:colons");
+  });
+
+  it("uses complete Write args for a path-only title without exposing content", () => {
+    const presentation = toolTracePresentation({
+      title: "Write",
+      args: JSON.stringify({
+        file_path: "/tmp/report.md",
+        content: "private document body",
+      }),
+      content: "",
+      status: "active",
+    });
+
+    expect(presentation.title).toBe("写入 report.md");
+    expect(JSON.stringify(presentation)).not.toContain("private document body");
+  });
+
+  it("keeps file paths and shell commands out of the primary semantic row", () => {
+    expect(
+      toolTracePresentation({
+        title: "Read",
+        args: JSON.stringify({ file_path: "/tmp/reports/quarterly-report.pdf" }),
+        content: "document parts: pages 1,2,3",
+        status: "done",
+      }),
+    ).toMatchObject({
+      title: "读取 quarterly-report.pdf",
+      detail: undefined,
+    });
+
+    expect(
+      toolTracePresentation({
+        title: "Bash",
+        args: JSON.stringify({
+          command: "find /tmp/reports -type f -name '*.pdf'",
+          description: "列出项目中的 PDF 文件",
+        }),
+        content: "",
+        status: "active",
+      }),
+    ).toMatchObject({
+      title: "运行 列出项目中的 PDF 文件",
+      detail: undefined,
+    });
+  });
+
+  it("keeps glob syntax in details while presenting search intent in the primary row", () => {
+    const glob = toolTracePresentation(
+      {
+        title: "Glob",
+        args: JSON.stringify({ pattern: "**/*.pdf" }),
+        content: "report.pdf",
+        status: "done",
+      },
+      undefined,
+      { title: "搜索 PDF 文件" },
+    );
+    const grep = toolTracePresentation(
+      {
+        title: "Grep",
+        args: JSON.stringify({ pattern: "Run Workbench", glob: "**/*.md" }),
+        content: "docs/intro.md:1:Run Workbench",
+        status: "done",
+      },
+      undefined,
+      { title: '搜索 "Run Workbench" · Markdown 文件' },
+    );
+
+    expect(glob.title).toBe("搜索 PDF 文件");
+    expect(glob.title).not.toContain("*");
+    expect(glob.detailCard?.copyText).toContain('"pattern": "**/*.pdf"');
+    expect(grep.title).toBe('搜索 "Run Workbench" · Markdown 文件');
+    expect(grep.title).not.toContain("*");
+    expect(grep.detailCard?.copyText).toContain('"glob": "**/*.md"');
   });
 
   it("uses typed provider source for MCP rows instead of guessing from names", () => {
@@ -186,7 +321,7 @@ describe("tool trace presentation", () => {
       }),
     ).toMatchObject({
       kind: "terminal",
-      detail: "command succeeded",
+      detail: undefined,
       output: "4 tests passed",
       outputLabel: "终端输出",
       outputTruncated: true,
@@ -302,11 +437,34 @@ describe("activity batch presentation", () => {
     expect(activityBatchSummary([
       { kind: "tool", title: "读取 README", status: "done" },
       { kind: "tool", title: "搜索 package.json", status: "done" },
-    ])).toEqual({ label: "检查了 2 项", detail: "已完成" });
+    ])).toEqual({ label: "检查了 2 项", detail: undefined });
     expect(activityBatchSummary([
       { kind: "skill", title: "PDF Skill", status: "done" },
       { kind: "tool", title: "读取文件", status: "active" },
-    ])).toEqual({ label: "使用 PDF Skill · 1 个工具", detail: "执行中" });
+    ])).toEqual({ label: "正在使用 PDF Skill · 1 个工具", detail: undefined });
+  });
+});
+
+describe("execution process summary", () => {
+  it("keeps elapsed time out of the disclosure title", () => {
+    expect(executionProcessSummaryTitle()).toBe("执行过程");
+  });
+
+  it("reads durable elapsed time from the final answer for the turn header", () => {
+    expect(
+      narrativeTurnElapsedMs([
+        { kind: "thinking", id: "thinking:1", text: "working", status: "done" },
+        {
+          kind: "answer",
+          id: "answer:1",
+          markdown: "done",
+          status: "done",
+          isFinal: true,
+          elapsedMs: 40_000,
+        },
+      ]),
+    ).toBe(40_000);
+    expect(narrativeTurnElapsedMs([])).toBeUndefined();
   });
 });
 
@@ -1424,7 +1582,6 @@ describe("composer lifecycle presentation", () => {
       composerRuntimePanelsForStatus({
         desktopNeedsRestart: true,
         desktopStarting: true,
-        runtimeErrorMessage: "boom",
       }),
     ).toEqual([
       {
@@ -1437,12 +1594,6 @@ describe("composer lifecycle presentation", () => {
         id: "starting",
         title: "Starting Awaken",
         message: "Preparing the desktop app.",
-      },
-      {
-        id: "run-error",
-        title: "Run error",
-        message: "boom",
-        tone: "error",
       },
     ]);
   });
@@ -3675,6 +3826,7 @@ describe("App workbench presentation", () => {
       markdown: "这是最终回答。",
       status: "done",
       isFinal: true,
+      elapsedMs: 277_000,
     } as const;
 
     expect(
@@ -3688,6 +3840,7 @@ describe("App workbench presentation", () => {
         kind: "executionProcess",
         id: "execution-process:prompt:thread-1:1",
         title: "执行过程",
+        elapsedMs: 277_000,
         items: [thinking, interimAnswer, tool],
         open: false,
       },

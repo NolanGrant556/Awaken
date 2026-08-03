@@ -1689,3 +1689,22 @@ pre {
 .subagent-inspector__error p {
   color: #b24a43 !important;
 }
+
+.subagent-execution-empty {
+  margin: 0;
+  color: var(--aw-text-muted);
+  font-size: 12px;
+}
+
+.subagent-execution-error {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--aw-status-danger-text) 28%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--aw-status-danger-text) 7%, transparent);
+  color: var(--aw-status-danger-text);
+  font-size: 12px;
+}
+
+.subagent-execution-error p {
+  margin: 4px 0 0;
+}

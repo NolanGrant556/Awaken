@@ -39,6 +39,9 @@ describe("RunStage layout", () => {
 
     expect(runStageScroll).toContain("overflow: auto;");
     expect(runStageScroll).toContain("scrollbar-gutter: stable both-edges;");
+    expect(designSystemStyles).toMatch(
+      /\.aw-run-stage-scroll:focus,\s*\.aw-run-stage-scroll:focus-visible\s*\{\s*outline:\s*none;/,
+    );
     expect(galleryRunStageScroll).toContain(
       "scrollbar-gutter: stable both-edges;",
     );

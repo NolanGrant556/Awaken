@@ -101,6 +101,7 @@ const ControllerHarness = forwardRef<ControllerHarnessHandle>(
             </div>
           </section>
         ))}
+        <div data-aw-run-stage-scroll-boundary="" data-nested-scroll />
       </div>
     );
   },
@@ -454,6 +455,30 @@ describe("useRunStageScrollController prompt anchor timing", () => {
       });
 
       expect(scrollToMock).not.toHaveBeenCalled();
+      expect(runStage.dataset.returnToLatestVisible).toBe("true");
+    });
+
+    it("keeps nested detail-card wheel input out of the RunStage follow state machine", () => {
+      const { runStage } = renderFollowingController();
+      const nestedScroll = runStage.querySelector<HTMLElement>("[data-nested-scroll]");
+      expect(nestedScroll).not.toBeNull();
+      Object.defineProperties(nestedScroll, {
+        clientHeight: { configurable: true, value: 100 },
+        scrollHeight: { configurable: true, value: 300 },
+      });
+
+      act(() => {
+        nestedScroll?.dispatchEvent(
+          new WheelEvent("wheel", { deltaY: -12, bubbles: true }),
+        );
+      });
+      expect(runStage.dataset.returnToLatestVisible).toBe("false");
+
+      act(() => {
+        runStage.dispatchEvent(
+          new WheelEvent("wheel", { deltaY: -12, bubbles: true }),
+        );
+      });
       expect(runStage.dataset.returnToLatestVisible).toBe("true");
     });
 

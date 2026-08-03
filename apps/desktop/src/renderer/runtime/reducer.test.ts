@@ -40,6 +40,106 @@ function makeRun(overrides: Partial<RuntimeRun> = {}): RuntimeRun {
 }
 
 describe("runtime reducer cancel handling", () => {
+  it("restores transcript actions in one reducer transition and marks only replayed narrative items", () => {
+    const replayed = reduceRuntimeState(createInitialRuntimeState(), {
+      type: "run/replayBatch",
+      actions: [
+        {
+          type: "run/threadReplayStarted",
+          threadId: "thread-1",
+          runId: "run-1",
+        },
+        { type: "run/requested", prompt: "读取历史文件" },
+        runEvent({
+          type: "REASONING_MESSAGE_CONTENT",
+          runId: "run-1",
+          threadId: "thread-1",
+          messageId: "reasoning-history",
+          delta: "先分析项目文件",
+        }),
+        runEvent({
+          type: "TOOL_CALL_START",
+          runId: "run-1",
+          threadId: "thread-1",
+          toolCallId: "read-history",
+          toolCallName: "Read",
+        }),
+        runEvent({
+          type: "TOOL_CALL_RESULT",
+          runId: "run-1",
+          threadId: "thread-1",
+          toolCallId: "read-history",
+          toolCallName: "Read",
+          toolStatus: "succeeded",
+          content: "历史内容",
+        }),
+      ],
+    });
+
+    const replayedNarrativeItems = [
+      ...replayed.narrative.committedItems,
+      ...(replayed.narrative.activeItem ? [replayed.narrative.activeItem] : []),
+    ];
+    const historicalTool = replayedNarrativeItems.find(
+      (item) => item.kind === "tool" || item.kind === "exploring",
+    );
+    expect(historicalTool).toBeDefined();
+    expect(replayed.narrative.replayedItemIds).toContain(historicalTool?.id);
+    const historicalThought = replayedNarrativeItems.find(
+      (item) => item.kind === "thinking",
+    );
+    expect(historicalThought).toBeDefined();
+    expect(replayed.narrative.replayedItemIds).toContain(historicalThought?.id);
+    if (historicalTool?.kind === "exploring") {
+      expect(replayed.narrative.replayedItemIds).toContain(
+        historicalTool.actions[0]?.id,
+      );
+    }
+    expect(replayed.threadViews["thread-1"]?.narrative.replayedItemIds).toContain(
+      historicalTool?.id,
+    );
+
+    const withLiveTool = reduceRuntimeState(
+      replayed,
+      runEvent({
+        type: "TOOL_CALL_START",
+        runId: "run-2",
+        threadId: "thread-1",
+        toolCallId: "read-live",
+        toolCallName: "Read",
+      }),
+    );
+    expect(withLiveTool.narrative.activeItem?.kind).toBe("exploring");
+    if (withLiveTool.narrative.activeItem?.kind !== "exploring") {
+      throw new Error("live exploring item missing");
+    }
+    const liveAction = withLiveTool.narrative.activeItem.actions.find(
+      (candidate) => candidate.toolCallId === "read-live",
+    );
+    expect(liveAction).toBeDefined();
+    expect(withLiveTool.narrative.replayedItemIds).not.toContain(liveAction?.id);
+  });
+
+  it("projects run creation failures into the current conversation turn", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "start a task" },
+      { type: "run/createFailed", message: "Failed to create run" },
+    ]);
+
+    expect(state.phase).toBe("error");
+    expect(state.errorMessage).toBe("Failed to create run");
+    expect(
+      state.narrative.committedItems.find(
+        (item) => item.kind === "answer" && item.status === "error",
+      ),
+    ).toMatchObject({
+      kind: "answer",
+      markdown: "Failed to create run",
+      status: "error",
+    });
+    expect(state.narrative.activeItem).toBeUndefined();
+  });
+
   it("run/cancelRequested sets phase and status to cancelling", () => {
     const state = dispatch([{ type: "run/cancelRequested" }]);
     expect(state.phase).toBe("cancelling");
@@ -155,6 +255,126 @@ describe("runtime reducer cancel handling", () => {
     const errorStep = state.steps.find((step) => step.id === "run-error");
     expect(errorStep?.description).toContain("Provider 请求失败：");
     expect(errorStep?.tag).toBe("PROVIDER_REQUEST_FAILED");
+  });
+});
+
+describe("runtime reducer native subagent isolation", () => {
+  it("routes child reasoning, tools, and answers into independent task narrative", () => {
+    const state = dispatch([
+      runEvent({
+        type: "AWAKEN_SUBAGENT_CHANGED",
+        runId: "run-1",
+        subagentTaskId: "task-1",
+        subagentAgentId: "agent-1",
+        subagentDescription: "排查会话隔离",
+        subagentAgentType: "explore",
+        subagentStatus: "running",
+      }),
+      runEvent({
+        type: "REASONING_MESSAGE_CONTENT",
+        runId: "run-1",
+        messageId: "reasoning-1",
+        subagentTaskId: "task-1",
+        subagentAgentId: "agent-1",
+        delta: "先检查事件身份",
+      }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        runId: "run-1",
+        toolCallId: "Read_0",
+        toolCallName: "Read",
+        subagentTaskId: "task-1",
+        subagentAgentId: "agent-1",
+      }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        runId: "run-1",
+        toolCallId: "Read_0",
+        toolCallName: "Read",
+        toolStatus: "succeeded",
+        content: "读取完成",
+        subagentTaskId: "task-1",
+        subagentAgentId: "agent-1",
+      }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        runId: "run-1",
+        messageId: "answer-1",
+        subagentTaskId: "task-1",
+        subagentAgentId: "agent-1",
+        delta: "已定位隔离问题",
+      }),
+    ]);
+
+    expect(state.reasoningText).toBe("");
+    expect(state.assistantText).toBe("");
+    expect(state.toolResults).toHaveLength(0);
+    expect(state.subagentOrder).toEqual(["task-1"]);
+    const task = state.subagentsById["task-1"];
+    expect(task.agentId).toBe("agent-1");
+    const childItems = [
+      ...task.narrative.committedItems,
+      ...(task.narrative.activeItem ? [task.narrative.activeItem] : []),
+    ];
+    expect(childItems.some((item) => item.kind === "thinking")).toBe(true);
+    expect(
+      childItems.some(
+        (item) => item.kind === "tool" || item.kind === "exploring",
+      ),
+    ).toBe(true);
+    expect(childItems.some((item) => item.kind === "answer")).toBe(true);
+  });
+
+  it("keeps terminal task truth stable and clears stale activity", () => {
+    const state = dispatch([
+      runEvent({
+        type: "AWAKEN_SUBAGENT_ACTIVITY",
+        subagentTaskId: "task-1",
+        subagentStatus: "running",
+        subagentActivity: "正在使用 Read",
+      }),
+      runEvent({
+        type: "AWAKEN_SUBAGENT_CHANGED",
+        subagentTaskId: "task-1",
+        subagentStatus: "completed",
+        subagentResultPreview: "完成",
+      }),
+      runEvent({
+        type: "AWAKEN_SUBAGENT_ACTIVITY",
+        subagentTaskId: "task-1",
+        subagentStatus: "running",
+        subagentActivity: "迟到的事件",
+      }),
+    ]);
+
+    expect(state.subagentsById["task-1"]).toMatchObject({
+      status: "completed",
+      resultPreview: "完成",
+    });
+    expect(state.subagentsById["task-1"].activity).toBeUndefined();
+  });
+
+  it("does not allow a late running event to reverse cancelling", () => {
+    const state = dispatch([
+      runEvent({
+        type: "AWAKEN_SUBAGENT_CHANGED",
+        subagentTaskId: "task-1",
+        subagentStatus: "running",
+      }),
+      runEvent({
+        type: "AWAKEN_SUBAGENT_CHANGED",
+        subagentTaskId: "task-1",
+        subagentStatus: "cancelling",
+      }),
+      runEvent({
+        type: "AWAKEN_SUBAGENT_ACTIVITY",
+        subagentTaskId: "task-1",
+        subagentStatus: "running",
+        subagentActivity: "迟到的 running",
+      }),
+    ]);
+
+    expect(state.subagentsById["task-1"].status).toBe("cancelling");
   });
 });
 
@@ -555,15 +775,17 @@ describe("runtime reducer run narrative projection", () => {
       "explore:grep-1",
     ]);
     expect(state.narrative.activeItem.actions[0]).toMatchObject({
-      title: "Read README.md L1-L80",
+      title: "读取 README.md L1-L80",
       status: "done",
     });
     expect(state.narrative.activeItem.actions[1]).toMatchObject({
-      title: "List **/*.md",
+      title: "搜索 Markdown 文件",
+      visualKind: "search",
       status: "done",
     });
     expect(state.narrative.activeItem.actions[2]).toMatchObject({
-      title: "Search \"Run Workbench\" in **/*.md",
+      title: "搜索 \"Run Workbench\" · Markdown 文件",
+      visualKind: "search",
       status: "done",
     });
     expect(JSON.stringify(state.narrative.activeItem.actions)).not.toContain("long content that should stay out");
@@ -717,7 +939,7 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
-  it("accumulates args deltas, replaces them with full args fallback, and projects progress", () => {
+  it("ignores args deltas, stores the complete args snapshot, and projects progress", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Inspect streaming tool args" },
       runEvent({ type: "TOOL_CALL_ARGS_DELTA", seq: 1, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\"" }),
@@ -736,7 +958,7 @@ describe("runtime reducer run narrative projection", () => {
     const step = state.steps.find((item) => item.id === "tool:read-1");
     expect(step).toMatchObject({
       title: "Read",
-      description: "{\"file_path\":\"README.md\"}",
+      description: "Tool arguments ready",
       status: "active",
     });
     expect(state.narrative.activeItem).toMatchObject({
@@ -749,10 +971,29 @@ describe("runtime reducer run narrative projection", () => {
     }
     expect(state.narrative.activeItem.actions[0]).toMatchObject({
       id: "explore:read-1",
-      title: "Read README.md",
-      detail: "{\"file_path\":\"README.md\"}",
+      toolCallId: "read-1",
+      title: "读取 README.md",
+      detail: undefined,
       status: "active",
     });
+  });
+
+  it("does not create renderer state from partial tool arguments alone", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "Wait for a complete tool call" },
+      runEvent({
+        type: "TOOL_CALL_ARGS_DELTA",
+        seq: 1,
+        toolCallId: "write-1",
+        toolCallName: "Write",
+        delta: '{"content":"private fragment',
+      }),
+    ]);
+
+    expect(state.toolResults).toEqual([]);
+    expect(state.steps).toEqual([]);
+    expect(state.narrative.activeItem).toMatchObject({ kind: "planning" });
+    expect(JSON.stringify(state)).not.toContain("private fragment");
   });
 
   it("shows a host-generated redacted install activity without assistant narration", () => {
@@ -773,6 +1014,7 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.narrative.activeItem).toEqual({
       kind: "tool",
       id: "tool:shell-install-1",
+      toolCallId: "shell-install-1",
       title: "shell",
       detail: message,
       status: "active",
@@ -793,9 +1035,10 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.narrative.committedItems).toContainEqual({
       kind: "tool",
       id: "tool:tool-1",
+      toolCallId: "tool-1",
       title: "run_command",
       detail: "Executing tool",
-      status: "done",
+      status: "cancelled",
     });
   });
 
@@ -812,6 +1055,7 @@ describe("runtime reducer run narrative projection", () => {
     expect(state.narrative.activeItem).toEqual({
       kind: "tool",
       id: "tool:tool-1",
+      toolCallId: "tool-1",
       title: "run_command",
       detail: "Executing tool",
       status: "active",

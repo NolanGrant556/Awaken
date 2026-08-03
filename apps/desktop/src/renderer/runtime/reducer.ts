@@ -30,6 +30,7 @@ import {
   type DeliverableFileType,
   type RunNarrativeItem,
   type RunNarrativeState,
+  type SubagentNarrativeTask,
 } from "../run-narrative";
 
 type RuntimePhase =
@@ -96,6 +97,16 @@ export type ArtifactRecord = {
 export type TurnDiffRecord = {
   diff: string;
   truncated?: boolean;
+};
+
+export type SubagentTaskView = SubagentNarrativeTask & {
+  agentId?: string;
+  parentAgentId?: string;
+  parentToolCallId?: string;
+  workspaceMode?: string;
+  modelProfileId?: string;
+  sideEffectState?: string;
+  narrative: RunNarrativeState;
 };
 
 export type ContextWindowRecord = {
@@ -227,6 +238,8 @@ type ThreadViewState = {
   turnDiff?: TurnDiffRecord;
   inspectorSummary: InspectorSummary;
   narrative: RunNarrativeState;
+  subagentsById: Record<string, SubagentTaskView>;
+  subagentOrder: string[];
   errorMessage?: string;
   runStartedAtMs?: number;
   runCompletedAtMs?: number;
@@ -255,6 +268,8 @@ export type RuntimeViewState = {
   turnDiff?: TurnDiffRecord;
   inspectorSummary: InspectorSummary;
   narrative: RunNarrativeState;
+  subagentsById: Record<string, SubagentTaskView>;
+  subagentOrder: string[];
   errorMessage?: string;
   runStartedAtMs?: number;
   runCompletedAtMs?: number;
@@ -266,6 +281,7 @@ export type RuntimeViewState = {
 
 export type RuntimeAction =
   | { type: "run/reset" }
+  | { type: "run/replayBatch"; actions: RuntimeAction[] }
   | {
       type: "run/requested";
       prompt: string;
@@ -373,6 +389,8 @@ const initialState: RuntimeViewState = {
   computerSession: undefined,
   artifacts: [],
   narrative: createInitialRunNarrativeState(),
+  subagentsById: {},
+  subagentOrder: [],
   inspectorSummary: createInspectorSummary(),
   threads: [],
   threadViews: {},
@@ -403,6 +421,8 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     turnDiff: state.turnDiff,
     inspectorSummary: state.inspectorSummary,
     narrative: state.narrative,
+    subagentsById: state.subagentsById,
+    subagentOrder: state.subagentOrder,
     errorMessage: state.errorMessage,
     runStartedAtMs: state.runStartedAtMs,
     runCompletedAtMs: state.runCompletedAtMs,
@@ -569,6 +589,132 @@ function scopeNarrativeEvent(
     ...event,
     threadId: event.threadId ?? state.threadId ?? state.activeThreadId,
     runId: event.runId ?? state.runId,
+  };
+}
+
+const subagentLifecycleEventTypes = new Set<AguiEvent["type"]>([
+  "AWAKEN_SUBAGENT_CHANGED",
+  "AWAKEN_SUBAGENT_ACTIVITY",
+  "AWAKEN_SUBAGENT_MESSAGE_QUEUED",
+]);
+
+function isTerminalSubagentStatus(
+  status: SubagentNarrativeTask["status"],
+): boolean {
+  return ["completed", "failed", "cancelled", "interrupted"].includes(status);
+}
+
+function acceptedSubagentStatus(
+  previous: SubagentNarrativeTask["status"] | undefined,
+  incoming: SubagentNarrativeTask["status"] | undefined,
+): SubagentNarrativeTask["status"] {
+  if (!incoming) return previous ?? "running";
+  if (!previous || previous === incoming) return incoming;
+  if (isTerminalSubagentStatus(previous)) return previous;
+  const allowed: Record<
+    Exclude<SubagentNarrativeTask["status"], "completed" | "failed" | "cancelled" | "interrupted">,
+    SubagentNarrativeTask["status"][]
+  > = {
+    queued: ["running", "cancelling", "cancelled", "interrupted", "failed", "completed"],
+    running: ["cancelling", "completed", "failed", "cancelled", "interrupted"],
+    cancelling: ["completed", "failed", "cancelled", "interrupted"],
+  };
+  return allowed[previous as keyof typeof allowed]?.includes(incoming)
+    ? incoming
+    : previous;
+}
+
+function upsertSubagentTaskView(
+  state: RuntimeViewState,
+  event: AguiEvent,
+): RuntimeViewState {
+  const taskId = event.subagentTaskId?.trim();
+  if (!taskId) return state;
+  const previous = state.subagentsById[taskId];
+  const status = acceptedSubagentStatus(previous?.status, event.subagentStatus);
+  const terminal = isTerminalSubagentStatus(status);
+  const next: SubagentTaskView = {
+    taskId,
+    description:
+      event.subagentDescription?.trim() || previous?.description || "未命名子任务",
+    agentType: event.subagentAgentType ?? previous?.agentType ?? "explore",
+    status,
+    activity: terminal
+      ? undefined
+      : event.subagentActivity?.trim() ||
+        event.toolCallName?.trim() ||
+        previous?.activity,
+    toolUseCount: event.subagentToolUseCount ?? previous?.toolUseCount ?? 0,
+    estimatedTokens:
+      event.subagentEstimatedTokens ?? previous?.estimatedTokens,
+    inputTokens: event.subagentInputTokens ?? previous?.inputTokens,
+    outputTokens: event.subagentOutputTokens ?? previous?.outputTokens,
+    totalTokens: event.subagentTotalTokens ?? previous?.totalTokens,
+    createdAt: event.subagentCreatedAt ?? previous?.createdAt,
+    startedAt: event.subagentStartedAt ?? previous?.startedAt,
+    finishedAt: event.subagentFinishedAt ?? previous?.finishedAt,
+    resultPreview:
+      event.subagentResultPreview?.trim() || previous?.resultPreview,
+    errorCode: event.subagentErrorCode ?? previous?.errorCode,
+    errorMessage: event.subagentErrorMessage ?? previous?.errorMessage,
+    agentId: event.subagentAgentId ?? previous?.agentId,
+    parentAgentId: event.subagentParentAgentId ?? previous?.parentAgentId,
+    parentToolCallId:
+      event.subagentParentToolCallId ?? previous?.parentToolCallId,
+    workspaceMode: event.subagentWorkspaceMode ?? previous?.workspaceMode,
+    modelProfileId:
+      event.subagentModelProfileId ?? previous?.modelProfileId,
+    sideEffectState:
+      event.subagentSideEffectState ?? previous?.sideEffectState,
+    narrative: previous?.narrative ?? createInitialRunNarrativeState(),
+  };
+  return {
+    ...state,
+    subagentsById: { ...state.subagentsById, [taskId]: next },
+    subagentOrder: previous
+      ? state.subagentOrder
+      : [...state.subagentOrder, taskId],
+  };
+}
+
+function scopeSubagentNarrativeEvent(
+  event: AguiEvent,
+  state: RuntimeViewState,
+  taskId: string,
+): AguiEvent {
+  const scoped = scopeNarrativeEvent(event, state);
+  const prefix = `${taskId}:`;
+  return {
+    ...scoped,
+    runId: `${scoped.runId ?? state.runId ?? "run"}:subagent:${taskId}`,
+    messageId: scoped.messageId ? `${prefix}${scoped.messageId}` : undefined,
+    parentMessageId: scoped.parentMessageId
+      ? `${prefix}${scoped.parentMessageId}`
+      : undefined,
+    toolCallId: scoped.toolCallId ? `${prefix}${scoped.toolCallId}` : undefined,
+  };
+}
+
+function reduceSubagentNarrativeEvent(
+  state: RuntimeViewState,
+  event: AguiEvent,
+): RuntimeViewState | undefined {
+  const taskId = event.subagentTaskId?.trim();
+  if (!taskId || subagentLifecycleEventTypes.has(event.type)) return undefined;
+  const withTask = upsertSubagentTaskView(state, event);
+  const task = withTask.subagentsById[taskId];
+  return {
+    ...withTask,
+    subagentsById: {
+      ...withTask.subagentsById,
+      [taskId]: {
+        ...task,
+        narrative: projectAguiEventToNarrative(
+          task.narrative,
+          scopeSubagentNarrativeEvent(event, withTask, taskId),
+        ),
+      },
+    },
   };
 }
 
@@ -1432,11 +1578,34 @@ export function createInitialRuntimeState(): RuntimeViewState {
   return initialState;
 }
 
+function replayIdentityIds(item: RunNarrativeItem): string[] {
+  return item.kind === "exploring"
+    ? [item.id, ...item.actions.map((candidate) => candidate.id)]
+    : [item.id];
+}
+
 export function reduceRuntimeState(
   state: RuntimeViewState,
   action: RuntimeAction,
 ): RuntimeViewState {
   switch (action.type) {
+    case "run/replayBatch": {
+      const replayedState = action.actions.reduce(reduceRuntimeState, state);
+      const replayedItemIds = [
+        ...replayedState.narrative.replayedItemIds,
+        ...replayedState.narrative.committedItems.flatMap(replayIdentityIds),
+        ...(replayedState.narrative.activeItem
+          ? replayIdentityIds(replayedState.narrative.activeItem)
+          : []),
+      ];
+      return saveActiveThreadView({
+        ...replayedState,
+        narrative: {
+          ...replayedState.narrative,
+          replayedItemIds: [...new Set(replayedItemIds)],
+        },
+      });
+    }
     case "run/reset":
       return {
         ...initialState,
@@ -1489,6 +1658,8 @@ export function reduceRuntimeState(
               nextNarrativeScope(state),
               action.promptTokens,
             ),
+        subagentsById: state.subagentsById,
+        subagentOrder: state.subagentOrder,
         supervisorStatus: state.supervisorStatus,
         threads: state.threads,
         activeThreadId: state.activeThreadId,
@@ -1509,6 +1680,11 @@ export function reduceRuntimeState(
         phase: "error",
         timelineStatus: "error",
         errorMessage: action.message,
+        narrative: addRunErrorToNarrative(
+          state.narrative,
+          action.message,
+          `${currentNarrativeScope(state)}:create`,
+        ),
         steps: toSteps(
           upsertStep([], "run-create-error", {
             title: "Create run failed",
@@ -1783,7 +1959,20 @@ export function reduceRuntimeState(
       };
     }
     case "run/event": {
-      const nextState = { ...state };
+      const subagentNarrativeState = reduceSubagentNarrativeEvent(
+        state,
+        action.event,
+      );
+      if (subagentNarrativeState) {
+        return saveActiveThreadView(subagentNarrativeState);
+      }
+      let nextState = { ...state };
+      if (
+        action.event.subagentTaskId &&
+        subagentLifecycleEventTypes.has(action.event.type)
+      ) {
+        nextState = upsertSubagentTaskView(nextState, action.event);
+      }
       const narrativeEvent = scopeNarrativeEvent(action.event, nextState);
       let records = state.steps.map((step, index) => ({
         ...step,
@@ -2065,6 +2254,18 @@ export function reduceRuntimeState(
           );
           break;
         case "TOOL_CALL_START":
+          {
+            const id =
+              action.event.toolCallId ||
+              `tool-result-${nextState.toolResults.length + 1}`;
+            const existing = nextState.toolResults.find((tool) => tool.id === id);
+            nextState.toolResults = upsertToolResult(nextState.toolResults, {
+              id,
+              title: action.event.toolCallName || existing?.title || "Tool call",
+              content: existing?.content ?? "",
+              status: "active",
+            });
+          }
           records = upsertStep(
             records,
             `tool:${action.event.toolCallId ?? "tool"}`,
@@ -2076,17 +2277,17 @@ export function reduceRuntimeState(
             },
           );
           break;
-        case "TOOL_CALL_ARGS":
-        case "TOOL_CALL_ARGS_DELTA": {
+        case "TOOL_CALL_ARGS_DELTA":
+          // The LLM transport owns partial-JSON accumulation. Renderer state
+          // consumes only the complete TOOL_CALL_ARGS snapshot.
+          break;
+        case "TOOL_CALL_ARGS": {
           const id =
             action.event.toolCallId ||
             `tool-result-${nextState.toolResults.length + 1}`;
           const existing = nextState.toolResults.find((tool) => tool.id === id);
           const delta = action.event.delta ?? "";
-          const args =
-            action.event.type === "TOOL_CALL_ARGS"
-              ? delta || existing?.args
-              : `${existing?.args ?? ""}${delta}`;
+          const args = delta || existing?.args;
           nextState.toolResults = upsertToolResult(nextState.toolResults, {
             id,
             title: action.event.toolCallName || existing?.title || "Tool call",
@@ -2099,12 +2300,7 @@ export function reduceRuntimeState(
             `tool:${action.event.toolCallId ?? "tool"}`,
             {
               title: action.event.toolCallName || "Tool call",
-              description: excerpt(
-                delta ||
-                  (action.event.type === "TOOL_CALL_ARGS_DELTA"
-                    ? "Preparing tool arguments"
-                    : "Streaming tool arguments"),
-              ),
+              description: "Tool arguments ready",
               status: "active",
               tag: "tool",
             },
@@ -2346,16 +2542,8 @@ export function reduceRuntimeState(
           break;
         }
         case "TOOL_CALL_END":
-          records = upsertStep(
-            records,
-            `tool:${action.event.toolCallId ?? "tool"}`,
-            {
-              title: action.event.toolCallName || "Tool call",
-              description: "Tool call complete",
-              status: "done",
-              tag: "tool",
-            },
-          );
+          // Argument framing is complete, but the tool remains active until
+          // the canonical TOOL_CALL_RESULT arrives.
           break;
         case "AWAKEN_CONTEXT_SNAPSHOT": {
           nextState.inspectorSummary = {

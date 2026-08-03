@@ -38,6 +38,7 @@ const DEFAULT_PROMPT_ANCHOR_OFFSET = 0;
 const RUN_STAGE_COMPOSER_SAFE_GAP = 72;
 const LATEST_OUTPUT_FOLLOW_THRESHOLD = 48;
 const RETURN_TO_LATEST_BUTTON_GAP_PX = 12;
+const RUN_STAGE_NESTED_SCROLL_SELECTOR = "[data-aw-run-stage-scroll-boundary]";
 
 type RunStageScrollControllerOptions = {
   showCenterComposer: boolean;
@@ -239,6 +240,20 @@ function latestTurnOutputBottom(turn: HTMLElement): number {
 function turnHasBodyItems(turn: HTMLElement): boolean {
   const body = turn.querySelector<HTMLElement>(".execution-turn-body");
   return Boolean(body?.firstElementChild);
+}
+
+function isNestedRunStageScrollTarget(
+  target: EventTarget | null,
+  runStage: HTMLElement,
+): boolean {
+  if (!(target instanceof Element)) return false;
+  const nestedScrollOwner = target.closest(RUN_STAGE_NESTED_SCROLL_SELECTOR);
+  return Boolean(
+    nestedScrollOwner &&
+      nestedScrollOwner !== runStage &&
+      (nestedScrollOwner.scrollHeight > nestedScrollOwner.clientHeight ||
+        nestedScrollOwner.scrollWidth > nestedScrollOwner.clientWidth),
+  );
 }
 
 export function useRunStageScrollController({
@@ -537,6 +552,7 @@ export function useRunStageScrollController({
       }
 
       const handleWheel = (event: WheelEvent) => {
+        if (isNestedRunStageScrollTarget(event.target, element)) return;
         if (shouldPauseLatestOutputFollowForWheel({ deltaY: event.deltaY })) {
           pauseLatestOutputFollowForUser(true);
           return;
@@ -556,9 +572,14 @@ export function useRunStageScrollController({
         pauseLatestOutputFollowForUser(true);
       };
       const handleTouchStart = (event: TouchEvent) => {
+        if (isNestedRunStageScrollTarget(event.target, element)) {
+          runStageTouchStartYRef.current = null;
+          return;
+        }
         runStageTouchStartYRef.current = event.touches[0]?.clientY ?? null;
       };
       const handleTouchMove = (event: TouchEvent) => {
+        if (isNestedRunStageScrollTarget(event.target, element)) return;
         const startY = runStageTouchStartYRef.current;
         const currentY = event.touches[0]?.clientY;
         if (

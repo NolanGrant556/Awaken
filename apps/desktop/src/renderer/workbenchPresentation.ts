@@ -44,6 +44,7 @@ export type NarrativeTurnBodySegment =
       kind: "executionProcess";
       id: string;
       title: string;
+      elapsedMs?: number;
       items: RunNarrativeItem[];
       open: boolean;
     };
@@ -82,7 +83,25 @@ const TURN_MARKER_MIN_TURN_COUNT = 3;
 const TURN_MARKER_REGULAR_LIMIT = 12;
 const TURN_MARKER_COMPACT_LIMIT = 24;
 const TURN_MARKER_SUMMARY_LIMIT = 24;
-const EXECUTION_PROCESS_SUMMARY_TITLE = "执行过程";
+export function executionProcessSummaryTitle(): string {
+  return "执行过程";
+}
+
+export function narrativeTurnElapsedMs(items: RunNarrativeItem[]): number | undefined {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (
+      item.kind === "answer" &&
+      item.isFinal === true &&
+      typeof item.elapsedMs === "number" &&
+      Number.isFinite(item.elapsedMs) &&
+      item.elapsedMs >= 0
+    ) {
+      return item.elapsedMs;
+    }
+  }
+  return undefined;
+}
 
 const TURN_MARKER_REGULAR_SIZE = { itemHeight: 18, gap: 14 };
 const TURN_MARKER_COMPACT_SIZE = { itemHeight: 12, gap: 8 };
@@ -478,11 +497,13 @@ export function projectNarrativeTurnBodySegments({
 
   const executionProcessItems = items.slice(0, firstAnswerIndex);
   const answerAndAfterItems = items.slice(firstAnswerIndex);
+  const elapsedMs = narrativeTurnElapsedMs(items);
   const segments: NarrativeTurnBodySegment[] = [
     {
       kind: "executionProcess",
       id: `execution-process:${turnId}`,
-      title: EXECUTION_PROCESS_SUMMARY_TITLE,
+      title: executionProcessSummaryTitle(),
+      ...(elapsedMs !== undefined ? { elapsedMs } : {}),
       items: executionProcessItems,
       open: executionProcessOpen,
     },

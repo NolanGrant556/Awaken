@@ -259,6 +259,36 @@ describe("runtime reducer cancel handling", () => {
 });
 
 describe("runtime reducer native subagent isolation", () => {
+  it("ignores orphan tool progress instead of projecting it into the root agent", () => {
+    const state = dispatch([
+      runEvent({
+        type: "AWAKEN_SUBAGENT_CHANGED",
+        runId: "run-1",
+        subagentTaskId: "task-1",
+        subagentAgentId: "agent-1",
+        subagentDescription: "排查会话隔离",
+        subagentAgentType: "explore",
+        subagentStatus: "running",
+      }),
+      runEvent({
+        type: "TOOL_PROGRESS",
+        runId: "run-1",
+        toolCallId: "child-bash-1",
+        toolCallName: "Bash",
+        progress: "正在运行子任务命令",
+      }),
+    ]);
+
+    expect(state.toolResults).toHaveLength(0);
+    expect(state.steps.some((step) => step.id.includes("child-bash-1"))).toBe(false);
+    expect(
+      state.narrative.committedItems.some(
+        (item) => item.kind === "tool" || item.kind === "exploring",
+      ),
+    ).toBe(false);
+    expect(state.narrative.activeItem).toBeUndefined();
+  });
+
   it("routes child reasoning, tools, and answers into independent task narrative", () => {
     const state = dispatch([
       runEvent({
@@ -1001,8 +1031,14 @@ describe("runtime reducer run narrative projection", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Prepare dependency" },
       runEvent({
-        type: "TOOL_PROGRESS",
+        type: "TOOL_CALL_START",
         seq: 1,
+        toolCallId: "shell-install-1",
+        toolCallName: "shell",
+      }),
+      runEvent({
+        type: "TOOL_PROGRESS",
+        seq: 2,
         toolCallId: "shell-install-1",
         toolCallName: "shell",
         toolProgressStage: "started",
@@ -1025,9 +1061,10 @@ describe("runtime reducer run narrative projection", () => {
   it("clears active tool projection when a run is cancelled during tool argument preparation", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Cancel during tool prep" },
-      runEvent({ type: "TOOL_CALL_ARGS_DELTA", seq: 1, toolCallId: "tool-1", toolCallName: "run_command", delta: "{\"command\"" }),
-      runEvent({ type: "TOOL_PROGRESS", seq: 2, toolCallId: "tool-1", toolCallName: "run_command", progress: "Executing tool" }),
-      runEvent({ type: "RUN_STATUS_CHANGED", seq: 3, status: "cancelled" }),
+      runEvent({ type: "TOOL_CALL_START", seq: 1, toolCallId: "tool-1", toolCallName: "run_command" }),
+      runEvent({ type: "TOOL_CALL_ARGS_DELTA", seq: 2, toolCallId: "tool-1", toolCallName: "run_command", delta: "{\"command\"" }),
+      runEvent({ type: "TOOL_PROGRESS", seq: 3, toolCallId: "tool-1", toolCallName: "run_command", progress: "Executing tool" }),
+      runEvent({ type: "RUN_STATUS_CHANGED", seq: 4, status: "cancelled" }),
     ]);
 
     expect(state.phase).toBe("cancelled");
@@ -1065,8 +1102,9 @@ describe("runtime reducer run narrative projection", () => {
   it("stores command output deltas for the terminal inspector", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Run shell" },
-      runEvent({ type: "AWAKEN_COMMAND_OUTPUT", seq: 1, toolCallId: "shell-1", toolCallName: "shell", commandStream: "stdout", delta: "hel" }),
-      runEvent({ type: "AWAKEN_COMMAND_OUTPUT", seq: 2, toolCallId: "shell-1", toolCallName: "shell", commandStream: "stdout", delta: "lo", truncated: true }),
+      runEvent({ type: "TOOL_CALL_START", seq: 1, toolCallId: "shell-1", toolCallName: "shell" }),
+      runEvent({ type: "AWAKEN_COMMAND_OUTPUT", seq: 2, toolCallId: "shell-1", toolCallName: "shell", commandStream: "stdout", delta: "hel" }),
+      runEvent({ type: "AWAKEN_COMMAND_OUTPUT", seq: 3, toolCallId: "shell-1", toolCallName: "shell", commandStream: "stdout", delta: "lo", truncated: true }),
     ]);
 
     expect(state.toolResults).toContainEqual({

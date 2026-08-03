@@ -158,6 +158,12 @@ export function projectAguiEventToNarrative(
       return activateTool(base, event);
     }
     case "TOOL_PROGRESS": {
+      // Progress is a side-channel update, never a tool identity authority.
+      // If Core did not first deliver a scoped START/ARGS frame, fail closed
+      // instead of creating a root tool row from a malformed child frame.
+      if (!hasToolNarrativeIdentity(base, event)) {
+        return base;
+      }
       const progress = event.progress || event.message || "Tool is running";
       if (isMediaToolEvent(event)) {
         return activateMediaGeneration(
@@ -1021,6 +1027,34 @@ function exploringActionId(event: AguiEvent): string {
 
 function exploringId(event: AguiEvent): string {
   return `exploring:${eventScope(event)}:${event.toolCallId ?? event.toolCallName ?? "readonly"}`;
+}
+
+function hasToolNarrativeIdentity(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): boolean {
+  if (!event.toolCallId?.trim()) {
+    return false;
+  }
+  const expectedToolId = toolId(event);
+  const expectedMediaId = mediaGenerationId(event);
+  const expectedActionId = exploringActionId(event);
+  const items = [
+    ...state.committedItems,
+    ...(state.activeItem ? [state.activeItem] : []),
+  ];
+  return items.some((item) => {
+    if (item.kind === "tool") {
+      return item.id === expectedToolId;
+    }
+    if (item.kind === "mediaGeneration") {
+      return item.id === expectedMediaId;
+    }
+    if (item.kind === "exploring") {
+      return item.actions.some((action) => action.id === expectedActionId);
+    }
+    return false;
+  });
 }
 
 function compactBoundaryId(event: AguiEvent): string {

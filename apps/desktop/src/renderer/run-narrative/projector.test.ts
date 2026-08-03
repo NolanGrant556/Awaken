@@ -636,8 +636,20 @@ describe("projectAguiEventToNarrative", () => {
     });
   });
 
-  it("surfaces tool recovery required and retry blocked notices", () => {
+  it("does not project recovery supervision as extra tool calls", () => {
     let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_START",
+      toolCallId: "call-1",
+      toolCallName: "apply_patch",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_RESULT",
+      toolCallId: "call-1",
+      toolCallName: "apply_patch",
+      toolStatus: "failed",
+      content: "patch context mismatch",
+    });
     state = projectAguiEventToNarrative(state, {
       type: "AWAKEN_TOOL_RECOVERY_REQUIRED",
       toolCallId: "call-1",
@@ -656,11 +668,16 @@ describe("projectAguiEventToNarrative", () => {
     });
 
     const notices = state.committedItems.filter((item) => item.kind === "tool");
-    expect(notices.some((item) => item.kind === "tool" && item.title === "Tool recovery required")).toBe(true);
-    expect(notices.some((item) => item.kind === "tool" && item.title === "Tool retry blocked")).toBe(true);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({
+      kind: "tool",
+      toolCallId: "call-1",
+      title: "apply_patch",
+      status: "error",
+    });
   });
 
-  it("surfaces strategy_change_required directives with a dedicated title", () => {
+  it("keeps recovery-only events out of the narrative", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(state, {
       type: "AWAKEN_TOOL_RECOVERY_REQUIRED",
@@ -672,14 +689,7 @@ describe("projectAguiEventToNarrative", () => {
       recoveryOptions: ["use_specialized_artifact_tool", "change_tool_or_library"],
     });
 
-    const notice = state.committedItems.find(
-      (item) => item.kind === "tool" && item.title === "Strategy change required",
-    );
-    expect(notice).toBeDefined();
-    if (notice?.kind !== "tool") {
-      throw new Error("strategy change notice missing");
-    }
-    expect(notice.detail).toContain("use_specialized_artifact_tool");
+    expect(state.committedItems).toEqual([]);
   });
 
   it("projects bounded Memory and Dream receipts without topic bodies", () => {

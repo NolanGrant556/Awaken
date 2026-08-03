@@ -440,6 +440,21 @@ export function contextUsagePanelBottomOffset({
   );
 }
 
+export function subagentDetailPanelBottomOffset({
+  composerContentInset,
+  gap = 12,
+  minimum = 28,
+}: {
+  composerContentInset: number;
+  gap?: number;
+  minimum?: number;
+}): number {
+  return Math.max(
+    Math.max(0, minimum),
+    Math.max(0, composerContentInset) + Math.max(0, gap),
+  );
+}
+
 export function groupNarrativeByTurns(
   items: RunNarrativeItem[],
 ): NarrativeTurnSections {

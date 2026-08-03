@@ -129,6 +129,7 @@ import {
   projectNarrativeActivitySegments,
   projectNarrativeTurnBodySegments,
   contextUsagePanelBottomOffset,
+  subagentDetailPanelBottomOffset,
   narrativeTurnElapsedMs,
   projectVisibleNarrativeItems,
   shouldShowAssistantAnswerFooter,
@@ -1293,11 +1294,11 @@ function subagentAgentTypeLabel(
 ): string {
   switch (agentType) {
     case "review":
-      return "复核子智能体";
+      return "复核智能体";
     case "general":
-      return "通用子智能体";
+      return "通用智能体";
     default:
-      return "探索子智能体";
+      return "探索智能体";
   }
 }
 
@@ -2539,6 +2540,32 @@ export function App() {
   const selectedSubagent =
     subagentTasks.find((task) => task.taskId === selectedSubagentTaskId) ??
     (selectedSubagentTaskId ? undefined : subagentTasks[subagentTasks.length - 1]);
+  const openSubagent = openSubagentTaskId
+    ? runtimeState.subagentsById[openSubagentTaskId]
+    : undefined;
+  const openSubagentNarrativeItems = openSubagent
+    ? projectVisibleNarrativeItems({
+        items: [
+          ...openSubagent.narrative.committedItems,
+          ...(openSubagent.narrative.activeItem ? [openSubagent.narrative.activeItem] : []),
+        ],
+        isBusy: ["queued", "running", "cancelling"].includes(openSubagent.status),
+      })
+    : [];
+  const openSubagentHasAnswer = openSubagentNarrativeItems.some(
+    (candidate) => candidate.kind === "answer",
+  );
+  const openSubagentMetrics = openSubagent
+    ? [
+        openSubagent.toolUseCount > 0 ? `${openSubagent.toolUseCount} 次工具` : undefined,
+        (openSubagent.totalTokens ?? openSubagent.estimatedTokens)
+          ? `${new Intl.NumberFormat("zh-CN").format(
+              openSubagent.totalTokens ?? openSubagent.estimatedTokens ?? 0,
+            )} tokens`
+          : undefined,
+        formatSubagentElapsed(subagentElapsedMs(openSubagent, subagentNowMs)),
+      ].filter((value): value is string => Boolean(value))
+    : [];
   const runningSubagentCount = subagentTasks.filter((task) =>
     ["queued", "running", "cancelling"].includes(task.status),
   ).length;
@@ -3794,7 +3821,10 @@ export function App() {
           {
             id: "context",
             ...contextMeta,
-            onClick: () => setContextUsagePanelOpen((current) => !current),
+            onClick: () => {
+              setOpenSubagentTaskId(undefined);
+              setContextUsagePanelOpen((current) => !current);
+            },
             buttonRef: contextUsageTriggerRef,
             ariaHaspopup: "dialog" as const,
             ariaExpanded: contextUsagePanelOpen,
@@ -5414,6 +5444,7 @@ export function App() {
 
   function handleOpenFileWorkspace(mode: ProjectFileWorkspaceMode = "files"): void {
     setSelectedSubagentTaskId(undefined);
+    setOpenSubagentTaskId(undefined);
     if (!fileWorkspaceOpen) {
       inspectorWidthBeforeFileWorkspaceRef.current = inspectorWidth;
     }
@@ -5514,6 +5545,7 @@ export function App() {
   }
 
   function handleOpenSubagent(taskId?: string): void {
+    setContextUsagePanelOpen(false);
     setOpenSubagentTaskId(taskId ?? openSubagentTaskId ?? subagentTasks[0]?.taskId);
   }
 
@@ -5704,6 +5736,7 @@ export function App() {
     if (items.length === 0) return;
     setMediaPreview({ items, activeId });
     setContextUsagePanelOpen(false);
+    setOpenSubagentTaskId(undefined);
   }
 
   function refreshArtifactMediaSource(key: string, request: ArtifactOpenRequest): void {
@@ -6082,87 +6115,19 @@ export function App() {
       );
     }
     if (item.kind === "subagentGroup") {
-      const openTask = openSubagentTaskId
-        ? runtimeState.subagentsById[openSubagentTaskId]
-        : undefined;
-      const showOpenTask = Boolean(
-        openTask && item.tasks.some((task) => task.taskId === openTask.taskId),
-      );
-      const openTaskNarrativeItems = openTask
-        ? projectVisibleNarrativeItems({
-            items: [
-              ...openTask.narrative.committedItems,
-              ...(openTask.narrative.activeItem ? [openTask.narrative.activeItem] : []),
-            ],
-            isBusy: ["queued", "running", "cancelling"].includes(openTask.status),
-          })
-        : [];
-      const openTaskHasAnswer = openTaskNarrativeItems.some((candidate) => candidate.kind === "answer");
-      const metrics = openTask
-        ? [
-            openTask.toolUseCount > 0 ? `${openTask.toolUseCount} 次工具` : undefined,
-            (openTask.totalTokens ?? openTask.estimatedTokens)
-              ? `${new Intl.NumberFormat("zh-CN").format(
-                  openTask.totalTokens ?? openTask.estimatedTokens ?? 0,
-                )} tokens`
-              : undefined,
-            formatSubagentElapsed(subagentElapsedMs(openTask, subagentNowMs)),
-          ].filter((value): value is string => Boolean(value))
-        : [];
       return (
-        <Fragment key={key}>
-          <SubagentGroup
-            tasks={item.tasks.map((task) => ({
-              ...(runtimeState.subagentsById[task.taskId] ?? task),
-              elapsedMs: subagentElapsedMs(
-                runtimeState.subagentsById[task.taskId] ?? task,
-                subagentNowMs,
-              ),
-              selected: task.taskId === openSubagentTaskId,
-            }))}
-            onSelect={handleOpenSubagent}
-          />
-          {showOpenTask && openTask ? (
-            <SubagentExecutionCard
-              title={openTask.description}
-              agentLabel={subagentAgentTypeLabel(openTask.agentType)}
-              status={openTask.status}
-              activity={openTask.activity}
-              metrics={metrics}
-              onClose={() => setOpenSubagentTaskId(undefined)}
-              onCancel={
-                ["queued", "running", "cancelling"].includes(openTask.status)
-                  ? () => void handleCancelSubagent(openTask.taskId)
-                  : undefined
-              }
-              cancelDisabled={
-                openTask.status === "cancelling" ||
-                cancellingSubagentTaskId === openTask.taskId
-              }
-            >
-              {openTaskNarrativeItems.length > 0
-                ? renderNarrativeActivityItems(
-                    `subagent:${openTask.taskId}`,
-                    openTaskNarrativeItems,
-                    false,
-                  )
-                : <p className="subagent-execution-empty">等待子任务执行记录…</p>}
-              {!openTaskHasAnswer && openTask.resultPreview ? (
-                <AssistantMessage
-                  markdown={openTask.resultPreview}
-                  status={openTask.status === "failed" ? "error" : "done"}
-                  showFooter={false}
-                />
-              ) : null}
-              {openTask.errorMessage ? (
-                <div className="subagent-execution-error" role="alert">
-                  <strong>{openTask.errorCode || "子任务失败"}</strong>
-                  <p>{openTask.errorMessage}</p>
-                </div>
-              ) : null}
-            </SubagentExecutionCard>
-          ) : null}
-        </Fragment>
+        <SubagentGroup
+          key={key}
+          tasks={item.tasks.map((task) => ({
+            ...(runtimeState.subagentsById[task.taskId] ?? task),
+            elapsedMs: subagentElapsedMs(
+              runtimeState.subagentsById[task.taskId] ?? task,
+              subagentNowMs,
+            ),
+            selected: task.taskId === openSubagentTaskId,
+          }))}
+          onSelect={handleOpenSubagent}
+        />
       );
     }
     if (item.kind === "scheduledNotice") {
@@ -6946,6 +6911,63 @@ export function App() {
                                 {...contextPanelData}
                                 onClose={() => closeContextUsagePanel(true)}
                               />
+                            </div>
+                          ) : null}
+                          {!fileWorkspaceSurfaceActive &&
+                          !activeMediaPreviewItem &&
+                          openSubagent ? (
+                            <div
+                              className="subagent-detail-overlay"
+                              style={{
+                                bottom: subagentDetailPanelBottomOffset({
+                                  composerContentInset: composerContentInsetPx,
+                                }),
+                              }}
+                            >
+                              <SubagentExecutionCard
+                                title={openSubagent.description}
+                                agentLabel={subagentAgentTypeLabel(openSubagent.agentType)}
+                                status={openSubagent.status}
+                                activity={openSubagent.activity}
+                                metrics={openSubagentMetrics}
+                                onClose={() => setOpenSubagentTaskId(undefined)}
+                                onCancel={
+                                  ["queued", "running", "cancelling"].includes(
+                                    openSubagent.status,
+                                  )
+                                    ? () => void handleCancelSubagent(openSubagent.taskId)
+                                    : undefined
+                                }
+                                cancelDisabled={
+                                  openSubagent.status === "cancelling" ||
+                                  cancellingSubagentTaskId === openSubagent.taskId
+                                }
+                              >
+                                {openSubagentNarrativeItems.length > 0 ? (
+                                  renderNarrativeActivityItems(
+                                    `subagent:${openSubagent.taskId}`,
+                                    openSubagentNarrativeItems,
+                                    false,
+                                  )
+                                ) : (
+                                  <p className="subagent-execution-empty">
+                                    等待子任务执行记录…
+                                  </p>
+                                )}
+                                {!openSubagentHasAnswer && openSubagent.resultPreview ? (
+                                  <AssistantMessage
+                                    markdown={openSubagent.resultPreview}
+                                    status={openSubagent.status === "failed" ? "error" : "done"}
+                                    showFooter={false}
+                                  />
+                                ) : null}
+                                {openSubagent.errorMessage ? (
+                                  <div className="subagent-execution-error" role="alert">
+                                    <strong>{openSubagent.errorCode || "子任务失败"}</strong>
+                                    <p>{openSubagent.errorMessage}</p>
+                                  </div>
+                                ) : null}
+                              </SubagentExecutionCard>
                             </div>
                           ) : null}
                           {activeMediaPreviewItem && mediaPreview ? (

@@ -1,53 +1,56 @@
 .aw-subagent-execution-card {
   overflow: hidden;
   margin-top: 10px;
-  border: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.22));
+  border: 1px solid var(--aw-border-main);
   border-radius: 14px;
-  background: var(--aw-color-surface-primary, #fff);
-  box-shadow: 0 10px 32px rgba(16, 24, 40, 0.08);
+  background: var(--aw-surface-raised);
+  box-shadow: var(--aw-shadow-popover);
+  color: var(--aw-text-primary);
 }
 
 .aw-subagent-execution-card__header {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) 30px;
+  grid-template-columns: 8px minmax(0, 1fr) max-content 30px;
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
-  border-bottom: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.16));
+  border-bottom: 1px solid var(--aw-border-light);
 }
 
 .aw-subagent-execution-card__status-dot {
   width: 8px;
   height: 8px;
   border-radius: 999px;
-  background: #909090;
+  background: var(--aw-text-tertiary);
 }
 
 .aw-subagent-execution-card--queued .aw-subagent-execution-card__status-dot,
 .aw-subagent-execution-card--running .aw-subagent-execution-card__status-dot,
 .aw-subagent-execution-card--cancelling .aw-subagent-execution-card__status-dot {
-  background: #5f7cff;
-  box-shadow: 0 0 0 4px rgba(95, 124, 255, 0.12);
+  background: var(--aw-status-running);
+  box-shadow: 0 0 0 4px var(--aw-status-running-bg);
 }
 
 .aw-subagent-execution-card--completed .aw-subagent-execution-card__status-dot {
-  background: #2e9b65;
+  background: var(--aw-status-success);
 }
 
 .aw-subagent-execution-card--failed .aw-subagent-execution-card__status-dot,
 .aw-subagent-execution-card--interrupted .aw-subagent-execution-card__status-dot {
-  background: #d05b52;
+  background: var(--aw-status-danger);
 }
 
 .aw-subagent-execution-card__heading {
-  display: grid;
+  display: flex;
+  align-items: baseline;
   min-width: 0;
-  gap: 3px;
 }
 
 .aw-subagent-execution-card__heading strong {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
-  color: var(--aw-color-text-primary, #171717);
+  color: var(--aw-text-primary);
   font-size: 14px;
   font-weight: 600;
   line-height: 1.35;
@@ -55,10 +58,21 @@
   white-space: nowrap;
 }
 
-.aw-subagent-execution-card__eyebrow,
-.aw-subagent-execution-card__summary small {
-  color: var(--aw-color-text-muted, #777);
+.aw-subagent-execution-card__agent-label {
+  flex: none;
+  color: var(--aw-text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.aw-subagent-execution-card__metrics {
+  flex: none;
+  color: var(--aw-text-tertiary);
   font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
 }
 
 .aw-subagent-execution-card__close {
@@ -68,7 +82,7 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--aw-color-text-muted, #777);
+  color: var(--aw-text-tertiary);
   font-size: 21px;
   line-height: 1;
   cursor: pointer;
@@ -76,7 +90,7 @@
 
 .aw-subagent-execution-card__close:hover,
 .aw-subagent-execution-card__close:focus-visible {
-  background: var(--aw-color-surface-hover, rgba(127, 127, 127, 0.09));
+  background: var(--aw-surface-hover);
   outline: none;
 }
 
@@ -84,7 +98,8 @@
   display: grid;
   gap: 3px;
   padding: 9px 14px;
-  border-bottom: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.12));
+  border-bottom: 1px solid var(--aw-border-light);
+  color: var(--aw-text-secondary);
   font-size: 12px;
 }
 
@@ -95,19 +110,46 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 12px 14px 16px;
-  scrollbar-gutter: stable;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 38%, transparent)
+    transparent;
+  scrollbar-width: thin;
+}
+
+.aw-subagent-execution-card__body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.aw-subagent-execution-card__body::-webkit-scrollbar-track,
+.aw-subagent-execution-card__body::-webkit-scrollbar-track-piece,
+.aw-subagent-execution-card__body::-webkit-scrollbar-corner {
+  border: 0;
+  background: transparent;
+}
+
+.aw-subagent-execution-card__body::-webkit-scrollbar-thumb {
+  min-height: 28px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--aw-text-tertiary) 38%, transparent);
+  background-clip: padding-box;
+}
+
+.aw-subagent-execution-card__body::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .aw-subagent-execution-card__footer {
   display: flex;
   justify-content: flex-end;
   padding: 9px 14px;
-  border-top: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.12));
+  border-top: 1px solid var(--aw-border-light);
 }
 
 .aw-subagent-execution-card__cancel {
   padding: 6px 10px;
-  border: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.24));
+  border: 1px solid var(--aw-border-control);
   border-radius: 8px;
   background: transparent;
   color: inherit;
@@ -117,8 +159,8 @@
 
 .aw-subagent-execution-card__cancel:hover:not(:disabled),
 .aw-subagent-execution-card__cancel:focus-visible {
-  border-color: rgba(208, 91, 82, 0.5);
-  background: rgba(208, 91, 82, 0.08);
+  border-color: color-mix(in srgb, var(--aw-status-danger) 50%, transparent);
+  background: var(--aw-status-danger-bg);
   outline: none;
 }
 

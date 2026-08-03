@@ -46,6 +46,8 @@ export function AwakenSubagentExecutionCard({
   onCancel,
   cancelDisabled = false,
 }: AwakenSubagentExecutionCardProps) {
+  const headerMeta = [...metrics, awakenSubagentStatusLabels[status]].join(" · ");
+
   return (
     <section
       className={`aw-subagent-execution-card aw-subagent-execution-card--${status}`}
@@ -54,11 +56,10 @@ export function AwakenSubagentExecutionCard({
       <header className="aw-subagent-execution-card__header">
         <span className="aw-subagent-execution-card__status-dot" aria-hidden="true" />
         <span className="aw-subagent-execution-card__heading">
-          <span className="aw-subagent-execution-card__eyebrow">
-            {agentLabel} · {awakenSubagentStatusLabels[status]}
-          </span>
+          <span className="aw-subagent-execution-card__agent-label">{agentLabel}：</span>
           <strong>{title}</strong>
         </span>
+        <small className="aw-subagent-execution-card__metrics">{headerMeta}</small>
         <button
           type="button"
           className="aw-subagent-execution-card__close"
@@ -68,12 +69,11 @@ export function AwakenSubagentExecutionCard({
           ×
         </button>
       </header>
-      {(activity || metrics.length > 0) && (
+      {activity ? (
         <div className="aw-subagent-execution-card__summary">
-          {activity ? <span>{activity}</span> : null}
-          {metrics.length > 0 ? <small>{metrics.join(" · ")}</small> : null}
+          <span>{activity}</span>
         </div>
-      )}
+      ) : null}
       <div className="aw-subagent-execution-card__body">{children}</div>
       {onCancel ? (
         <footer className="aw-subagent-execution-card__footer">

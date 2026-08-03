@@ -292,25 +292,12 @@ export function projectAguiEventToNarrative(
       );
     case "AWAKEN_TOOL_RECOVERY_REQUIRED":
     case "AWAKEN_TOOL_RETRY_BLOCKED":
-      return commitRuntimeNotice(
-        base,
-        event,
-        event.type === "AWAKEN_TOOL_RETRY_BLOCKED" ? "retry-blocked" : "recovery",
-        event.type === "AWAKEN_TOOL_RETRY_BLOCKED"
-          ? "Tool retry blocked"
-          : event.message?.includes("strategy_change_required")
-            ? "Strategy change required"
-            : "Tool recovery required",
-        [
-          event.toolCallName,
-          event.errorCode ?? event.code,
-          event.message,
-          ...(event.recoveryOptions ?? []),
-        ]
-          .filter(Boolean)
-          .join(" | "),
-        "error",
-      );
+      // Recovery supervision describes what the agent must do after the
+      // canonical tool result; it is not a second tool execution. The reducer
+      // keeps these events as inspector/recovery facts, while the narrative
+      // already renders the matching TOOL_CALL_RESULT. Creating another
+      // tool-shaped item here double-counts both the tool and the failure.
+      return base;
     case "AWAKEN_USER_QUESTION_REQUESTED":
     case "AWAKEN_USER_QUESTION_RESOLVED": {
       let detail = "";

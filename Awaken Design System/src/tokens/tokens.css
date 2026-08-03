@@ -79,6 +79,15 @@
   --aw-text-muted: var(--aw-text-secondary);
   --aw-text-subtle: var(--aw-text-tertiary);
   --aw-text-code: #1d1d1f;
+  --aw-code-inline-text: #4d6078;
+  --aw-code-inline-bg: rgba(77, 96, 120, 0.09);
+  --aw-code-syntax-comment: #747b86;
+  --aw-code-syntax-keyword: #6f42c1;
+  --aw-code-syntax-string: #377d3d;
+  --aw-code-syntax-number: #986801;
+  --aw-code-syntax-title: #2569c7;
+  --aw-code-syntax-variable: #087f8c;
+  --aw-code-syntax-meta: #7656a5;
   --aw-text-selection: #2f74ff;
   --aw-status-running: var(--aw-text-blue);
   --aw-status-running-bg: rgba(47, 116, 255, 0.11);
@@ -198,10 +207,10 @@
   --aw-font-size-md: 14px;
   --aw-font-size-lg: 16px;
   --aw-font-size-xl: 28px;
-  --aw-font-size-reading: 14px;
-  --aw-font-size-reading-h1: 20px;
-  --aw-font-size-reading-h2: 16px;
-  --aw-font-size-reading-h3: 14px;
+  --aw-font-size-reading: 15px;
+  --aw-font-size-reading-h1: 22px;
+  --aw-font-size-reading-h2: 18px;
+  --aw-font-size-reading-h3: 16px;
 
   /* Line height */
   --aw-line-height-xs: 16px;
@@ -210,10 +219,10 @@
   --aw-line-height-md: 20px;
   --aw-line-height-lg: 24px;
   --aw-line-height-xl: 36px;
-  --aw-line-height-reading: 22px;
-  --aw-line-height-reading-h1: 28px;
-  --aw-line-height-reading-h2: 24px;
-  --aw-line-height-reading-h3: 20px;
+  --aw-line-height-reading: 24px;
+  --aw-line-height-reading-h1: 30px;
+  --aw-line-height-reading-h2: 26px;
+  --aw-line-height-reading-h3: 24px;
 
   /* Font weight */
   --aw-font-weight-regular: 400;
@@ -321,6 +330,15 @@
   --aw-surface-inspector: var(--aw-surface-detail);
   --aw-surface-runtime-pill: var(--aw-surface-status-pill);
   --aw-text-code: #ebe9e2;
+  --aw-code-inline-text: #c1cbd8;
+  --aw-code-inline-bg: rgba(193, 203, 216, 0.12);
+  --aw-code-syntax-comment: #96938c;
+  --aw-code-syntax-keyword: #c4a7e7;
+  --aw-code-syntax-string: #9fca8c;
+  --aw-code-syntax-number: #e0ad72;
+  --aw-code-syntax-title: #82b8ff;
+  --aw-code-syntax-variable: #74c7d2;
+  --aw-code-syntax-meta: #c6a0f6;
   --aw-text-selection: #8ab3ff;
   --aw-status-running-bg: rgba(138, 179, 255, 0.16);
   --aw-status-running-border: rgba(138, 179, 255, 0.24);

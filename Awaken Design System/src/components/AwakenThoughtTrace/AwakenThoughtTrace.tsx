@@ -15,6 +15,7 @@ export type AwakenThoughtTraceProps = {
   durationLabel?: string;
   defaultOpen?: boolean;
   theme?: AwakenThinkingOrbTheme;
+  animateEntry?: boolean;
 };
 
 export function AwakenThoughtTrace({
@@ -24,6 +25,7 @@ export function AwakenThoughtTrace({
   durationLabel,
   defaultOpen,
   theme = "auto",
+  animateEntry = true,
 }: AwakenThoughtTraceProps) {
   const bodyId = useId();
   const [manualExpanded, setManualExpanded] = useState<boolean | null>(
@@ -46,6 +48,7 @@ export function AwakenThoughtTrace({
         expanded ? " thought-trace-open" : ""
       }`}
       data-state={status}
+      data-animate-entry={animateEntry ? "true" : "false"}
     >
       <button
         type="button"

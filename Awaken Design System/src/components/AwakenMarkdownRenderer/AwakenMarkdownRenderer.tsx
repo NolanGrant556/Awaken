@@ -1,6 +1,7 @@
 import { Children, isValidElement, useMemo, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
-import rehypeSanitize from "rehype-sanitize";
+import rehypeHighlight from "rehype-highlight";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { AwakenMermaidDiagram } from "../AwakenMermaidDiagram";
 import "./AwakenMarkdownRenderer.css";
@@ -16,6 +17,37 @@ export type AwakenMarkdownRendererProps = {
 
 const closedMermaidFencePattern =
   /(?:^|\n)(`{3,}|~{3,})[^\S\n]*mermaid[^\n]*\n([\s\S]*?)(?:\n\1[^\S\n]*(?=\n|$))/gi;
+
+const codeLanguageAliases: Readonly<Record<string, string>> = {
+  js: "javascript",
+  jsx: "javascript",
+  ts: "typescript",
+  tsx: "typescript",
+  py: "python",
+  rb: "ruby",
+  sh: "shell",
+  bash: "shell",
+  zsh: "shell",
+  yml: "yaml",
+  md: "markdown",
+  html: "html",
+  xml: "xml",
+};
+
+const markdownSanitizeSchema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    code: [
+      ...(defaultSchema.attributes?.code ?? []),
+      ["className", "hljs", "no-highlight", "nohighlight"],
+    ],
+    span: [
+      ...(defaultSchema.attributes?.span ?? []),
+      ["className", /^hljs-/],
+    ],
+  },
+};
 
 function normalizeMermaidSource(source: string): string {
   return source.trim();
@@ -36,6 +68,9 @@ function textFromNode(children: ReactNode): string {
   if (typeof children === "string" || typeof children === "number") {
     return String(children);
   }
+  if (isValidElement<{ children?: ReactNode }>(children)) {
+    return textFromNode(children.props.children);
+  }
   return "";
 }
 
@@ -50,6 +85,17 @@ function languageFromClassName(className?: string): string | undefined {
 function onlyChild(children: ReactNode): ReactNode | undefined {
   const childArray = Children.toArray(children);
   return childArray.length === 1 ? childArray[0] : undefined;
+}
+
+function languageFromCodeChild(child: ReactNode): string | undefined {
+  if (!isValidElement<{ className?: string }>(child)) {
+    return undefined;
+  }
+  return languageFromClassName(child.props.className);
+}
+
+function displayLanguage(language: string): string {
+  return codeLanguageAliases[language] ?? language;
 }
 
 export function AwakenMarkdownRenderer({
@@ -147,10 +193,20 @@ export function AwakenMarkdownRenderer({
         if (isValidElement(child) && child.type === AwakenMermaidDiagram) {
           return child;
         }
+        const language = languageFromCodeChild(child);
+        const languageLabel = language ? displayLanguage(language) : undefined;
         return (
-          <pre {...props} className="assistant-message-code-block">
-            {children}
-          </pre>
+          <div
+            className={`assistant-message-code-frame${languageLabel ? " assistant-message-code-frame-labeled" : ""}`}
+            data-language={languageLabel}
+          >
+            {languageLabel ? (
+              <div className="assistant-message-code-language">{languageLabel}</div>
+            ) : null}
+            <pre {...props} className="assistant-message-code-block">
+              {children}
+            </pre>
+          </div>
         );
       },
       table({ node: _node, children, ...props }) {
@@ -170,7 +226,10 @@ export function AwakenMarkdownRenderer({
     <div className={className}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeSanitize]}
+        rehypePlugins={[
+          [rehypeHighlight, { detect: false, plainText: ["mermaid", "text", "txt"] }],
+          [rehypeSanitize, markdownSanitizeSchema],
+        ]}
         skipHtml
         components={markdownComponents}
       >

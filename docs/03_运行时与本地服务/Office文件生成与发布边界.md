@@ -4,7 +4,7 @@
 
 Core 当前没有 Office 后台 worker，也不注册 typed Office/PDF 生成或渲染工具。Awaken 不复制、维护或托管 LibreOffice、Python、Poppler、FFmpeg 等完整 Work runtime。Agent Plan 的 `image_generate` / `video_generate` 是独立媒体 provider，不属于 Office/PDF Work runtime 或 `artifact_publish` 文档发布链。
 
-Agent 可按 Skill 使用当前用户环境中的 Python/Node/LibreOffice/Pandoc 等工具，通过 `Bash` 或 `Write` 生成 Office/PDF 文档。缺依赖时使用真实安装/执行错误恢复；该路径不获得内建版式验证、独立 LibreOffice profile 或逐页 preview 保证。
+Agent 可按 Skill 使用当前用户环境中的 Python/Node/LibreOffice/Pandoc 等工具，通过 `Bash` 或 `Write` 处理和生成 Office/PDF 文档。bundled Skill 可以随包携带确定性辅助脚本：当前 Word 阅读由纯 Python 标准库 `read_docx.py` 解析 DOCX/DOTX OOXML，并把未完整覆盖的视觉或复杂结构写入 warning；接受修订和视觉 QA 脚本也各自拥有独立 LibreOffice profile 与超时边界。这些能力只在 Agent 显式执行对应 Skill route 时成立，不是 Core typed Office runtime，也不意味着 Desktop 启动时已经准备 Python、LibreOffice 或 Poppler。其他缺失依赖仍按目标 route 的真实 doctor/执行错误恢复；没有执行对应脚本和逐页检查时，不获得版式验证或视觉 QA 证明。
 
 受支持文档生成完成后必须调用 `artifact_publish`，由 04 域验证普通文件、symlink、扩展名和基础签名，并生成 deliverable Artifact；文件目录不是发布边界。发布证明文件身份和交付状态，不证明 Office 视觉质量。图片/视频不走这条链：专用媒体工具成功时自行产生 ready 媒体 Artifact，Bash/Skill 单独生成的任意媒体文件当前没有通用手动发布入口。
 

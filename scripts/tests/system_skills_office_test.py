@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -50,6 +51,41 @@ def minimal_docx_files() -> dict[str, str]:
     }
 
 
+def analyzable_docx_files() -> dict[str, str | bytes]:
+    files: dict[str, str | bytes] = minimal_docx_files()
+    files["word/styles.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:pPr><w:outlineLvl w:val="0"/></w:pPr></w:style>
+</w:styles>"""
+    files["word/_rels/document.xml.rels"] = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdSafe" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com/a b" TargetMode="External"/>
+  <Relationship Id="rIdUnsafe" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="javascript:alert(1)" TargetMode="External"/>
+  <Relationship Id="rIdPackage" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="media/image1.png"/>
+</Relationships>"""
+    files["word/document.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+ xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+ <w:body>
+  <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>分析标题</w:t></w:r></w:p>
+  <w:p><w:r><w:t>访问</w:t></w:r><w:hyperlink r:id="rIdSafe"><w:r><w:t>官网</w:t></w:r></w:hyperlink></w:p>
+  <w:p><w:hyperlink r:id="rIdUnsafe"><w:r><w:t>危险链接文本</w:t></w:r></w:hyperlink></w:p>
+  <w:p><w:hyperlink r:id="rIdPackage"><w:r><w:t>包内关系文本</w:t></w:r></w:hyperlink></w:p>
+  <w:tbl><w:tr><w:tc><w:p><w:r><w:t>姓名</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>金额</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>甲</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>100</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+  <w:p><w:r><w:t>带脚注</w:t><w:footnoteReference w:id="2"/></w:r></w:p>
+  <w:p><w:r><w:t>带批注</w:t><w:commentReference w:id="3"/></w:r></w:p>
+  <w:p><w:r><w:drawing><wp:inline><wp:docPr id="1" name="Chart" descr="季度趋势图"/></wp:inline></w:drawing></w:r></w:p>
+ </w:body>
+</w:document>"""
+    files["word/footnotes.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:footnote w:id="2"><w:p><w:r><w:t>脚注正文</w:t></w:r></w:p></w:footnote></w:footnotes>"""
+    files["word/comments.xml"] = """<?xml version="1.0" encoding="UTF-8"?>
+<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:comment w:id="3" w:author="审阅人"><w:p><w:r><w:t>批注意见</w:t></w:r></w:p></w:comment></w:comments>"""
+    files["word/media/image1.png"] = b"not-decoded-by-reader"
+    return files
+
+
 def minimal_pptx_files() -> dict[str, str]:
     return {
         "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8"?>
@@ -76,13 +112,22 @@ def minimal_pptx_files() -> dict[str, str]:
 
 class SkillTextTests(unittest.TestCase):
     def test_three_skills_keep_awaken_contract_and_chinese_workflow(self):
-        for skill in ("word", "ppt", "excel"):
+        versions = {"word": "2.1.0", "ppt": "2.0.0", "excel": "2.0.0"}
+        for skill, version in versions.items():
             body = (SYSTEM_SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
-            self.assertIn("version: 2.0.0", body)
+            self.assertIn(f"version: {version}", body)
             self.assertIn("${AWAKEN_SKILL_DIR}", body)
             self.assertIn("artifact_publish", body)
             self.assertIn("依赖", body)
             self.assertIn("校验", body)
+
+    def test_word_reading_has_one_bundled_route(self):
+        body = (SYSTEM_SKILLS / "word" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("scripts/read_docx.py", body)
+        self.assertIn("执行唯一阅读 CLI", body)
+        self.assertIn("doctor 返回的 capabilities.python.path", body)
+        self.assertNotIn("`pandoc` 或 `markitdown`", body.lower())
+        self.assertNotIn("markitdown[docx]", body.lower())
 
 
 class WordScriptTests(unittest.TestCase):
@@ -92,6 +137,8 @@ class WordScriptTests(unittest.TestCase):
         cls.package = load_script("word", "ooxml_package.py", "awaken_word_package_test")
         cls.merger = load_script("word", "merge_runs.py", "awaken_word_merge_test")
         cls.acceptor = load_script("word", "accept_changes.py", "awaken_word_accept_test")
+        cls.reader = load_script("word", "read_docx.py", "awaken_word_read_test")
+        cls.doctor = load_script("word", "doctor.py", "awaken_word_doctor_test")
 
     def test_valid_docx_and_relationship_failure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -144,6 +191,133 @@ class WordScriptTests(unittest.TestCase):
             self.assertTrue(
                 any("word/header1.xml" in issue and "w:author" in issue for issue in self.validator.inspect(path))
             )
+
+    def test_stdlib_reader_extracts_document_structure_and_warnings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "analysis.docx"
+            write_package(path, analyzable_docx_files())
+            result = self.reader.read_docx(path)
+
+            self.assertEqual("success_with_warnings", result["status"])
+            self.assertIn("# 分析标题", result["markdown"])
+            self.assertIn("[官网](https://example.com/a%20b)", result["markdown"])
+            self.assertIn("危险链接文本", result["markdown"])
+            self.assertNotIn("javascript:", result["markdown"])
+            self.assertIn("包内关系文本", result["markdown"])
+            self.assertNotIn("media/image1.png", result["markdown"])
+            self.assertIn("| 姓名 | 金额 |", result["markdown"])
+            self.assertIn("[^脚注-2]: 脚注正文", result["markdown"])
+            self.assertIn("批注-3（审阅人）: 批注意见", result["markdown"])
+            self.assertIn("[图片: 季度趋势图", result["markdown"])
+            table = next(block for block in result["blocks"] if block["type"] == "table")
+            self.assertEqual([["姓名", "金额"], ["甲", "100"]], table["rows"])
+            warning_codes = {warning["code"] for warning in result["warnings"]}
+            self.assertIn("unsafe_hyperlink_not_linked", warning_codes)
+            self.assertIn("package_relationship_not_linked", warning_codes)
+            self.assertIn("media_not_interpreted", warning_codes)
+            self.assertEqual(1, result["stats"]["tables"])
+            self.assertEqual(1, result["stats"]["footnotes"])
+            self.assertEqual(1, result["stats"]["comments"])
+
+    def test_stdlib_reader_cli_emits_json_without_external_dependencies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "analysis.docx"
+            write_package(path, analyzable_docx_files())
+            script = SYSTEM_SKILLS / "word" / "scripts" / "read_docx.py"
+            completed = subprocess.run(
+                [sys.executable, "-B", str(script), str(path), "--format", "json"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            result = json.loads(completed.stdout)
+            self.assertEqual("success_with_warnings", result["status"])
+            self.assertIn("分析标题", result["markdown"])
+
+    def test_stdlib_reader_rejects_unsafe_package_member(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "unsafe.docx"
+            files = minimal_docx_files()
+            files["../escape.xml"] = "<escape/>"
+            write_package(path, files)
+            with self.assertRaises(self.reader.DocxReadError):
+                self.reader.read_docx(path)
+
+    def test_stdlib_reader_checks_xml_size_before_read_and_wraps_runtime_error(self):
+        class Info:
+            def __init__(self, size: int):
+                self.file_size = size
+
+        class FakePackage:
+            def __init__(self, size: int, error: Exception | None = None):
+                self.info = Info(size)
+                self.error = error
+                self.read_called = False
+
+            def getinfo(self, _part: str):
+                return self.info
+
+            def read(self, _info):
+                self.read_called = True
+                if self.error:
+                    raise self.error
+                return b"<root/>"
+
+        oversized = FakePackage(self.reader.MAX_XML_BYTES + 1)
+        with self.assertRaises(self.reader.DocxReadError):
+            self.reader.parse_part(oversized, "word/document.xml")
+        self.assertFalse(oversized.read_called)
+
+        encrypted = FakePackage(128, RuntimeError("encrypted file"))
+        with self.assertRaises(self.reader.DocxReadError) as raised:
+            self.reader.parse_part(encrypted, "word/document.xml")
+        self.assertIn("无法读取", str(raised.exception))
+
+    def test_doctor_reports_routes_independently(self):
+        original_command_path = self.doctor.command_path
+        original_module_available = self.doctor.module_available
+        original_node_module_available = self.doctor.node_module_available
+        try:
+            self.doctor.command_path = lambda *_names: None
+            self.doctor.module_available = lambda _name: False
+            self.doctor.node_module_available = lambda _name: False
+            result = self.doctor.inspect()
+            read_only = self.doctor.inspect("read")
+        finally:
+            self.doctor.command_path = original_command_path
+            self.doctor.module_available = original_module_available
+            self.doctor.node_module_available = original_node_module_available
+
+        self.assertEqual("partial", result["status"])
+        self.assertEqual("ready", result["routes"]["read"]["status"])
+        self.assertEqual("ready", result["routes"]["edit_ooxml"]["status"])
+        self.assertEqual("unavailable", result["routes"]["create"]["status"])
+        self.assertEqual("unavailable", result["routes"]["visual_qa"]["status"])
+        self.assertEqual("ready", read_only["status"])
+        self.assertEqual(["read"], read_only["ready_routes"])
+        self.assertEqual([], read_only["unavailable_routes"])
+        self.assertEqual(
+            {"python", "bundled_ooxml_reader"},
+            set(read_only["capabilities"]),
+        )
+
+    def test_doctor_does_not_recommend_missing_unused_create_alternative(self):
+        original_command_path = self.doctor.command_path
+        original_module_available = self.doctor.module_available
+        original_node_module_available = self.doctor.node_module_available
+        try:
+            self.doctor.command_path = lambda *_names: None
+            self.doctor.module_available = lambda name: name == "docx"
+            self.doctor.node_module_available = lambda _name: False
+            result = self.doctor.inspect("create")
+        finally:
+            self.doctor.command_path = original_command_path
+            self.doctor.module_available = original_module_available
+            self.doctor.node_module_available = original_node_module_available
+
+        self.assertEqual("ready", result["routes"]["create"]["status"])
+        self.assertEqual({}, result["install_hints"])
 
 
 class PptScriptTests(unittest.TestCase):

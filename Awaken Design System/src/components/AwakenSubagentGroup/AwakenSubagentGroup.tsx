@@ -1,4 +1,5 @@
 import "./AwakenSubagentGroup.css";
+import { awakenSubagentStatusLabels as statusLabels } from "../AwakenSubagentExecutionCard";
 
 export type AwakenSubagentRowView = {
   taskId: string;
@@ -17,16 +18,6 @@ export type AwakenSubagentRowView = {
 export type AwakenSubagentGroupProps = {
   tasks: AwakenSubagentRowView[];
   onSelect?: (taskId: string) => void;
-};
-
-const statusLabels: Record<AwakenSubagentRowView["status"], string> = {
-  queued: "排队中",
-  running: "运行中",
-  completed: "已完成",
-  failed: "失败",
-  cancelling: "正在取消",
-  cancelled: "已取消",
-  interrupted: "已中断",
 };
 
 function formatMetrics(task: AwakenSubagentRowView): string {

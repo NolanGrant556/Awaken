@@ -32,7 +32,7 @@ export function AwakenToolTraceGroupDemo() {
           工具轨迹 <code>AwakenDisclosure + AwakenToolTraceGroup + AwakenToolTraceLine</code>
         </h2>
         <p>
-          先按真实 Desktop 终态展示“执行过程”如何收纳活动批次，再集中观测批次摘要、
+          先按真实 Desktop 终态展示“执行时间”如何兼任过程 disclosure 并收纳活动批次，再集中观测批次摘要、
           单次工具与类型化详情卡。活动组 Chevron 常驻，单条工具 Chevron 仅在悬停、
           键盘聚焦或展开时可见；执行中文字使用从左到右的扫光反馈。
         </p>
@@ -43,9 +43,9 @@ export function AwakenToolTraceGroupDemo() {
       </header>
       <div className="ads-component-demo-grid">
         <article className="ads-component-demo-state">
-          <h3>执行过程 · 默认收起</h3>
+          <h3>执行时间/过程 · 默认收起</h3>
           <div className="ads-component-demo-canvas">
-            <AwakenDisclosure title="执行过程" defaultOpen={false}>
+            <AwakenDisclosure title="执行时间 17 秒" defaultOpen={false}>
               <GroupComponent
                 {...(AwakenToolTraceGroupStates[0].props as Record<string, unknown>)}
                 animateItems={false}
@@ -54,9 +54,9 @@ export function AwakenToolTraceGroupDemo() {
           </div>
         </article>
         <article className="ads-component-demo-state">
-          <h3>执行过程 · 已展开</h3>
+          <h3>执行时间/过程 · 已展开</h3>
           <div className="ads-component-demo-canvas">
-            <AwakenDisclosure title="执行过程" defaultOpen>
+            <AwakenDisclosure title="执行时间 17 秒" defaultOpen>
               <GroupComponent
                 {...(AwakenToolTraceGroupStates[0].props as Record<string, unknown>)}
                 animateItems={false}

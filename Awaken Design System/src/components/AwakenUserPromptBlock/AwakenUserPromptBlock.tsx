@@ -423,7 +423,10 @@ export function AwakenUserPromptBlock({
           ) : null}
           {tokens.length > 0 || text.trim().length > 0 ? (
             <div className="execution-prompt-bubble-main">
-              <p className="execution-prompt-bubble-text aw-text-selectable">
+              <p
+                className="execution-prompt-bubble-text aw-text-selectable"
+                data-aw-run-stage-scroll-boundary=""
+              >
                 {tokens.map((token) => (
                   <Fragment key={token.id}>
                     {token.leadingText ? (

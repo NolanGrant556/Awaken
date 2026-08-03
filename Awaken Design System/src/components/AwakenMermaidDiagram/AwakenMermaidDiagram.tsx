@@ -815,9 +815,15 @@ export function AwakenMermaidDiagram({
           />
         </div>
         <p>{renderState.message}</p>
-        <pre className="assistant-message-code-block">
-          <code className="assistant-message-code language-mermaid">{chart}</code>
-        </pre>
+        <div
+          className="assistant-message-code-frame assistant-message-code-frame-labeled"
+          data-language="mermaid"
+        >
+          <div className="assistant-message-code-language">mermaid</div>
+          <pre className="assistant-message-code-block">
+            <code className="assistant-message-code language-mermaid">{chart}</code>
+          </pre>
+        </div>
       </figure>
     );
   }

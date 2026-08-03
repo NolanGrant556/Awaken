@@ -208,6 +208,9 @@ if (
 const richMarkdownState = AwakenDesignSystem.AwakenAssistantMessageStates.find(
   (state) => state.id === "rich-markdown",
 );
+const articleMarkdownState = AwakenDesignSystem.AwakenAssistantMessageStates.find(
+  (state) => state.id === "article-markdown",
+);
 const footerState = AwakenDesignSystem.AwakenAssistantMessageStates.find(
   (state) => state.id === "completed-answer-footer",
 );
@@ -217,6 +220,10 @@ const completedStatesWithoutElapsed = AwakenDesignSystem.AwakenAssistantMessageS
 
 if (!richMarkdownState) {
   throw new Error("AwakenAssistantMessage rich-markdown state is missing");
+}
+
+if (!articleMarkdownState) {
+  throw new Error("AwakenAssistantMessage article-markdown state is missing");
 }
 
 if (!footerState) {
@@ -232,6 +239,10 @@ if (completedStatesWithoutElapsed.length > 0) {
 }
 
 const richMarkdownProps = requireAssistantMessageProps(richMarkdownState.id, richMarkdownState.props);
+const articleMarkdownProps = requireAssistantMessageProps(
+  articleMarkdownState.id,
+  articleMarkdownState.props,
+);
 const footerProps = requireAssistantMessageProps(footerState.id, footerState.props);
 
 const richMarkdownHtml = renderToString(
@@ -248,6 +259,28 @@ if (!richMarkdownHtml.includes("assistant-message-table-wrap")) {
 
 if (!richMarkdownHtml.includes("assistant-mermaid-diagram")) {
   throw new Error("AwakenAssistantMessage did not route closed Mermaid blocks to the diagram component");
+}
+
+const articleMarkdownHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenAssistantMessage, articleMarkdownProps),
+);
+
+if (
+  !articleMarkdownHtml.includes("assistant-message-code-frame-labeled") ||
+  !articleMarkdownHtml.includes("assistant-message-code-language\">javascript")
+) {
+  throw new Error("AwakenAssistantMessage did not render the fenced-code language label");
+}
+
+if (
+  !articleMarkdownHtml.includes("hljs-keyword") ||
+  !articleMarkdownHtml.includes("hljs-title")
+) {
+  throw new Error("AwakenAssistantMessage did not render syntax-highlight token spans");
+}
+
+if (!articleMarkdownHtml.includes("assistant-message-table-wrap")) {
+  throw new Error("AwakenAssistantMessage article state did not render the GFM table wrapper");
 }
 
 const footerHtml = renderToString(
@@ -270,12 +303,19 @@ if (!footerHtml.includes("Copy final answer")) {
   throw new Error("AwakenAssistantMessage did not render the final answer copy action");
 }
 
-if (!footerHtml.includes('<span class="assistant-message-footer-copy"><span')) {
-  throw new Error("AwakenAssistantMessage should place the copy action wrapper directly in the footer layout");
+if (!footerHtml.includes('<span class="assistant-message-footer-copy"><button')) {
+  throw new Error("AwakenAssistantMessage should place the silent copy button directly in the footer layout");
 }
 
-if (footerHtml.includes(">Copy final answer</span>")) {
-  throw new Error("AwakenAssistantMessage should render the final answer copy action as an icon-only control");
+if (!footerHtml.includes('aria-label="Copy final answer"')) {
+  throw new Error("AwakenAssistantMessage should keep an accessible name for the silent copy button");
+}
+
+if (
+  footerHtml.includes('title="Copy final answer"') ||
+  footerHtml.includes(">Copy final answer</span>")
+) {
+  throw new Error("AwakenAssistantMessage should not render visible copy text or a native title");
 }
 
 const copyOnlyFooterHtml = renderToString(
@@ -293,7 +333,7 @@ if (!copyOnlyFooterHtml.includes("Copy final answer")) {
   throw new Error("AwakenAssistantMessage should keep the final answer copy action without elapsed timing");
 }
 
-if (!copyOnlyFooterHtml.includes('<span class="assistant-message-footer-copy"><span')) {
+if (!copyOnlyFooterHtml.includes('<span class="assistant-message-footer-copy"><button')) {
   throw new Error("AwakenAssistantMessage should keep the copy-only footer action right-aligned");
 }
 
@@ -419,6 +459,37 @@ if (unclosedMermaidHtml.includes("assistant-mermaid-diagram")) {
 
 if (!unclosedMermaidHtml.includes("language-mermaid")) {
   throw new Error("AwakenAssistantMessage did not preserve unclosed Mermaid as a code block");
+}
+
+if (!unclosedMermaidHtml.includes("assistant-message-code-language\">mermaid")) {
+  throw new Error("AwakenAssistantMessage did not label the unclosed Mermaid fallback");
+}
+
+const unknownLanguageHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenMarkdownRenderer, {
+    markdown: "```awakenlang\nmake something_safe\n```",
+  }),
+);
+
+if (
+  !unknownLanguageHtml.includes("assistant-message-code-language\">awakenlang") ||
+  !unknownLanguageHtml.includes("make something_safe")
+) {
+  throw new Error("AwakenMarkdownRenderer should retain unknown-language code and its label");
+}
+
+if (unknownLanguageHtml.includes("hljs-keyword")) {
+  throw new Error("AwakenMarkdownRenderer should not guess syntax for unknown languages");
+}
+
+const unsafeMarkdownHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenMarkdownRenderer, {
+    markdown: '<script data-awaken-test="unsafe">alert(1)</script>safe',
+  }),
+);
+
+if (unsafeMarkdownHtml.includes("<script") || unsafeMarkdownHtml.includes("alert(1)")) {
+  throw new Error("AwakenMarkdownRenderer should keep raw HTML inert after adding highlighting");
 }
 
 const scheduledTaskListHtml = renderToString(

@@ -63,7 +63,16 @@ export function AwakenAssistantMessage({
               copiedLabel="Copied final answer"
               errorLabel="Copy failed"
               iconOnly
+              showTooltip={false}
               feedbackDurationMs={2000}
+              className="assistant-message-footer-copy-button"
+              style={{
+                width: "24px",
+                height: "24px",
+                border: 0,
+                borderRadius: "4px",
+                background: "transparent",
+              }}
             />
           </span>
         </footer>

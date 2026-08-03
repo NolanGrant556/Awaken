@@ -31,7 +31,7 @@ export type ToolTraceDetailSection = {
   label: string;
   content: string;
   format: "text" | "code" | "json" | "diff";
-  tone?: "default" | "muted" | "danger" | "success";
+  tone?: "default" | "muted" | "command" | "danger" | "success";
 };
 
 export type ToolTraceDetailCard = {
@@ -104,6 +104,8 @@ export function AwakenToolTraceLine({
 }: AwakenToolTraceLineProps) {
   const outputId = useId();
   const hasDetail = Boolean(detailCard?.sections.length || output);
+  const detailLabel =
+    detailCard?.title || outputLabel || (kind === "terminal" ? "终端输出" : "工具输出");
   const autoExpanded = false;
   const [manualExpanded, setManualExpanded] = useState<boolean | null>(
     defaultOpen ?? null,
@@ -175,26 +177,32 @@ export function AwakenToolTraceLine({
           <div className="tool-trace-output-rail">
             <section
               className="tool-trace-output-card"
-              aria-label={detailCard?.title || outputLabel || "工具输出"}
+              aria-label={detailLabel}
+              data-output-truncated={outputTruncated ? "true" : "false"}
             >
-              <div className="tool-trace-output-heading">
-                <span>
-                  {detailCard?.title || outputLabel || (kind === "terminal" ? "终端输出" : "工具输出")}
-                </span>
-                {outputTruncated ? <span>内容已截断</span> : null}
-                {detailCard?.copyText && onCopyDetail ? (
-                  <button
-                    type="button"
-                    className="tool-trace-output-copy"
-                    aria-label="复制详情"
-                    onClick={() => onCopyDetail(detailCard.copyText || "")}
-                  >
-                    <Copy size={13} strokeWidth={1.8} aria-hidden="true" />
-                  </button>
-                ) : null}
-              </div>
+              {outputTruncated || (detailCard?.copyText && onCopyDetail) ? (
+                <div className="tool-trace-output-actions">
+                  {outputTruncated ? (
+                    <span className="tool-trace-output-truncated">内容已截断</span>
+                  ) : null}
+                  {detailCard?.copyText && onCopyDetail ? (
+                    <button
+                      type="button"
+                      className="tool-trace-output-copy"
+                      aria-label="复制详情"
+                      onClick={() => onCopyDetail(detailCard.copyText || "")}
+                    >
+                      <Copy size={13} strokeWidth={1.8} aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               {detailCard ? (
-                <div className="tool-trace-detail-sections">
+                <div
+                  className="tool-trace-detail-sections"
+                  data-aw-run-stage-scroll-boundary=""
+                  tabIndex={0}
+                >
                   {detailCard.sections.map((section, index) => (
                     <section
                       key={`${section.label}:${index}`}
@@ -208,7 +216,13 @@ export function AwakenToolTraceLine({
                   ))}
                 </div>
               ) : (
-                <pre>{output}</pre>
+                <pre
+                  className="tool-trace-output-scroll"
+                  data-aw-run-stage-scroll-boundary=""
+                  tabIndex={0}
+                >
+                  {output}
+                </pre>
               )}
             </section>
           </div>

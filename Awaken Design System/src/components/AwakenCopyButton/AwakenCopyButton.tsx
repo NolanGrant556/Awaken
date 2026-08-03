@@ -9,6 +9,7 @@ export type AwakenCopyButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>
   copiedLabel?: string;
   errorLabel?: string;
   iconOnly?: boolean;
+  showTooltip?: boolean;
   feedbackDurationMs?: number;
   onCopied?: () => void;
   onCopyError?: (error: unknown) => void;
@@ -53,6 +54,7 @@ export function AwakenCopyButton({
   copiedLabel = "Copied",
   errorLabel = "Copy failed",
   iconOnly = false,
+  showTooltip = true,
   feedbackDurationMs = 1200,
   onCopied,
   onCopyError,
@@ -99,50 +101,51 @@ export function AwakenCopyButton({
       <Copy size={14} strokeWidth={2} />
     );
 
-  return (
-    <AwakenTooltip label={currentLabel}>
-      <button
-        type="button"
-        aria-label={currentLabel}
-        title={currentLabel}
-        disabled={disabled || text.length === 0}
-        {...props}
-        onClick={(event) => {
-          props.onClick?.(event);
-          if (event.defaultPrevented) {
-            return;
-          }
-          void handleCopy();
-        }}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: iconOnly ? 0 : "6px",
-          minWidth: 0,
-          height: "28px",
-          width: iconOnly ? "28px" : undefined,
-          padding: iconOnly ? 0 : "0 8px",
-          border: "1px solid var(--aw-border-main)",
-          borderRadius: "var(--aw-radius-control)",
-          background: copyState === "copied" ? "var(--aw-success-soft-bg)" : "var(--aw-surface-raised)",
-          color:
-            copyState === "copied"
-              ? "var(--aw-status-success)"
-              : copyState === "error"
-                ? "var(--aw-status-danger)"
-                : "var(--aw-text-muted)",
-          cursor: disabled || text.length === 0 ? "not-allowed" : "pointer",
-          fontSize: "var(--aw-font-size-xs)",
-          fontWeight: "var(--aw-font-weight-semibold)",
-          lineHeight: "var(--aw-line-height-xs)",
-          opacity: disabled || text.length === 0 ? 0.48 : 1,
-          ...props.style,
-        }}
-      >
-        {icon}
-        {iconOnly ? null : <span style={{ color: "inherit" }}>{currentLabel}</span>}
-      </button>
-    </AwakenTooltip>
+  const button = (
+    <button
+      type="button"
+      aria-label={currentLabel}
+      title={showTooltip ? currentLabel : undefined}
+      disabled={disabled || text.length === 0}
+      {...props}
+      data-copy-state={copyState}
+      onClick={(event) => {
+        props.onClick?.(event);
+        if (event.defaultPrevented) {
+          return;
+        }
+        void handleCopy();
+      }}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: iconOnly ? 0 : "6px",
+        minWidth: 0,
+        height: "28px",
+        width: iconOnly ? "28px" : undefined,
+        padding: iconOnly ? 0 : "0 8px",
+        border: "1px solid var(--aw-border-main)",
+        borderRadius: "var(--aw-radius-control)",
+        background: copyState === "copied" ? "var(--aw-success-soft-bg)" : "var(--aw-surface-raised)",
+        color:
+          copyState === "copied"
+            ? "var(--aw-status-success)"
+            : copyState === "error"
+              ? "var(--aw-status-danger)"
+              : "var(--aw-text-muted)",
+        cursor: disabled || text.length === 0 ? "not-allowed" : "pointer",
+        fontSize: "var(--aw-font-size-xs)",
+        fontWeight: "var(--aw-font-weight-semibold)",
+        lineHeight: "var(--aw-line-height-xs)",
+        opacity: disabled || text.length === 0 ? 0.48 : 1,
+        ...props.style,
+      }}
+    >
+      {icon}
+      {iconOnly ? null : <span style={{ color: "inherit" }}>{currentLabel}</span>}
+    </button>
   );
+
+  return showTooltip ? <AwakenTooltip label={currentLabel}>{button}</AwakenTooltip> : button;
 }

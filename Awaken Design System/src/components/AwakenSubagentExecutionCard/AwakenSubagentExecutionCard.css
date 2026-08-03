@@ -1,0 +1,128 @@
+.aw-subagent-execution-card {
+  overflow: hidden;
+  margin-top: 10px;
+  border: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.22));
+  border-radius: 14px;
+  background: var(--aw-color-surface-primary, #fff);
+  box-shadow: 0 10px 32px rgba(16, 24, 40, 0.08);
+}
+
+.aw-subagent-execution-card__header {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.16));
+}
+
+.aw-subagent-execution-card__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #909090;
+}
+
+.aw-subagent-execution-card--queued .aw-subagent-execution-card__status-dot,
+.aw-subagent-execution-card--running .aw-subagent-execution-card__status-dot,
+.aw-subagent-execution-card--cancelling .aw-subagent-execution-card__status-dot {
+  background: #5f7cff;
+  box-shadow: 0 0 0 4px rgba(95, 124, 255, 0.12);
+}
+
+.aw-subagent-execution-card--completed .aw-subagent-execution-card__status-dot {
+  background: #2e9b65;
+}
+
+.aw-subagent-execution-card--failed .aw-subagent-execution-card__status-dot,
+.aw-subagent-execution-card--interrupted .aw-subagent-execution-card__status-dot {
+  background: #d05b52;
+}
+
+.aw-subagent-execution-card__heading {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.aw-subagent-execution-card__heading strong {
+  overflow: hidden;
+  color: var(--aw-color-text-primary, #171717);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-subagent-execution-card__eyebrow,
+.aw-subagent-execution-card__summary small {
+  color: var(--aw-color-text-muted, #777);
+  font-size: 11px;
+}
+
+.aw-subagent-execution-card__close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--aw-color-text-muted, #777);
+  font-size: 21px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.aw-subagent-execution-card__close:hover,
+.aw-subagent-execution-card__close:focus-visible {
+  background: var(--aw-color-surface-hover, rgba(127, 127, 127, 0.09));
+  outline: none;
+}
+
+.aw-subagent-execution-card__summary {
+  display: grid;
+  gap: 3px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.12));
+  font-size: 12px;
+}
+
+.aw-subagent-execution-card__body {
+  display: grid;
+  max-height: min(46vh, 440px);
+  gap: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 14px 16px;
+  scrollbar-gutter: stable;
+}
+
+.aw-subagent-execution-card__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 9px 14px;
+  border-top: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.12));
+}
+
+.aw-subagent-execution-card__cancel {
+  padding: 6px 10px;
+  border: 1px solid var(--aw-color-border-subtle, rgba(127, 127, 127, 0.24));
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.aw-subagent-execution-card__cancel:hover:not(:disabled),
+.aw-subagent-execution-card__cancel:focus-visible {
+  border-color: rgba(208, 91, 82, 0.5);
+  background: rgba(208, 91, 82, 0.08);
+  outline: none;
+}
+
+.aw-subagent-execution-card__cancel:disabled {
+  cursor: default;
+  opacity: 0.55;
+}

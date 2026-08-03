@@ -10,6 +10,7 @@ const externalDependencies = [
   "lucide-react",
   "mermaid",
   "react-markdown",
+  "rehype-highlight",
   "rehype-sanitize",
   "remark-gfm",
   "thinking-orbs",

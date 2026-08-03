@@ -20,7 +20,6 @@ export const AwakenToolTraceGroupStates: AwakenToolTraceGroupState[] = [
         { id: "grep-usage", title: "搜索 ToolTrace 用法", status: "done" },
       ],
       label: "正在运行 3 个工具",
-      detail: "执行中",
       onSelectAction: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenToolTraceGroup>>,
   },

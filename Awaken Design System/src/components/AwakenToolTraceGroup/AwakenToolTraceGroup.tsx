@@ -1,6 +1,6 @@
 import "./AwakenToolTraceGroup.css";
 import { ChevronRight, LoaderCircle, Wrench } from "lucide-react";
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import {
   AwakenToolTraceLine,
   type AwakenToolTraceLineProps,
@@ -19,6 +19,7 @@ export type AwakenToolTraceGroupProps = {
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  icon?: ReactNode;
   /** Disable child mount animations when revealing already-finished history. */
   animateItems?: boolean;
   onSelectAction?: (action: ToolTraceAction) => void;
@@ -31,6 +32,7 @@ export function AwakenToolTraceGroup({
   defaultOpen,
   open,
   onOpenChange,
+  icon,
   animateItems = true,
   onSelectAction,
 }: AwakenToolTraceGroupProps) {
@@ -42,7 +44,7 @@ export function AwakenToolTraceGroup({
   );
   const expanded = open ?? manualExpanded ?? active;
   const summary = label || `${actions.length} 个工具调用`;
-  const detail = detailProp ?? (active ? "执行中" : failed > 0 ? `${failed} 个异常` : "已完成");
+  const detail = detailProp ?? (failed > 0 ? `${failed} 个异常` : undefined);
 
   function toggleOpen() {
     const nextOpen = !(open ?? manualExpanded ?? active);
@@ -62,10 +64,10 @@ export function AwakenToolTraceGroup({
         onClick={toggleOpen}
       >
         <span className="tool-trace-group-icon" aria-hidden="true">
-          {active ? <LoaderCircle size={14} /> : <Wrench size={14} />}
+          {icon ?? (active ? <LoaderCircle size={14} /> : <Wrench size={14} />)}
         </span>
         <span className="tool-trace-group-label">{summary}</span>
-        <span className="tool-trace-group-detail">{detail}</span>
+        {detail ? <span className="tool-trace-group-detail">{detail}</span> : null}
         <span className="tool-trace-group-chevron" aria-hidden="true">
           <ChevronRight size={13} strokeWidth={1.8} />
         </span>

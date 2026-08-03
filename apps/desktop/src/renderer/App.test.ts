@@ -111,6 +111,7 @@ import {
   projectVisibleNarrativeItems,
   scrollTopForLatestTurnScrollTail,
   scrollTopForPromptAnchor,
+  subagentDetailPanelBottomOffset,
   shouldCancelPendingPromptAnchorForScrollIntent,
   shouldFollowLatestTurnScrollTail,
   shouldPauseLatestOutputFollowForScroll,
@@ -3492,6 +3493,11 @@ describe("App workbench presentation", () => {
   it("toggles the subagent inspector detail without changing task identity", () => {
     expect(nextSubagentInspectorTaskId(undefined, "task-1")).toBe("task-1");
     expect(nextSubagentInspectorTaskId("task-1", "task-1")).toBeUndefined();
+  });
+
+  it("positions subagent detail above the measured dock composer", () => {
+    expect(subagentDetailPanelBottomOffset({ composerContentInset: 88 })).toBe(100);
+    expect(subagentDetailPanelBottomOffset({ composerContentInset: -20 })).toBe(28);
   });
 
   it("derives live and terminal subagent elapsed time from durable timestamps", () => {

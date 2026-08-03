@@ -17,7 +17,7 @@
 - child 的每个耐久 `tool_call` 与 `model_usage` 会按稳定 ID 去重后生成 `subagent_progress`，累计工具次数、provider-reported input/output/total tokens；中心 group 与右侧 Inspector 同时显示工具数、token 与按耐久起止时间计算的耗时；
 - `wait` 到期属于中性检索结果：返回 `retrieval_status=timeout` 和当前 snapshots，不产生失败 Outcome，也不取消 child；
 - Core 已提供 run-scoped Subagent list/detail/cancel route；message route 当前明确返回 unsupported；
-- Desktop reducer 已以 `subagentsById/subagentOrder` 独立保存 task truth；当前 turn 显示 Subagent group，点击 row 在中间区域打开可关闭/重开的执行详情卡，卡内按 child semantic 顺序展示思考、工具与 Markdown 结果并有独立滚动和单任务停止；右侧 Inspector 继续提供任务切换、统计和控制；
+- Desktop reducer 已以 `subagentsById/subagentOrder` 独立保存 task truth；当前 turn 显示 Subagent group，点击 row 在 dock Composer 上方打开可关闭/重开的独立执行详情浮层，卡内按 child semantic 顺序展示思考、工具与 Markdown 结果并有独立滚动和单任务停止，且不改变主对话流布局；右侧 Inspector 继续提供任务切换、统计和控制；
 - root/child 的 tool text/media blob 使用 agent/task + run + turn + tool-call 复合命名空间；超过 32 KiB 的文本只在 journal 留 digest/size/preview 票据，下一次 provider request 在 Core 内校验并水合完整内容，Renderer 与模型都不需要读取 `~/.awaken` 路径；
 - queued cancel 在 scheduler admission 后会再次检查，不能回跳 `running`；取消宽限期后写 `interrupted`；terminal append/flush 失败保留最后一份已耐久的非终态 snapshot 并让 root barrier fail closed，不发布伪成功；
 - macOS 真实 Desktop 已验证 spawn、running、completed/result 和单任务 cancelled/error 投影。
@@ -159,10 +159,10 @@
 UI 使用“三层表达”：
 
 1. **中心叙事摘要**：属于当前 turn 的 `subagentGroup` narrative item，只表达有多少 child、各自状态和最近活动；
-2. **中心执行详情卡**：点击 child row 后在同一 turn 内展开，展示该 child 自己的思考、工具、结果与停止控制；
+2. **中心执行详情浮层**：点击 child row 后在 dock Composer 上方独立打开，展示该 child 自己的思考、工具、结果与停止控制；
 3. **右侧 Subagent Inspector**：从右栏入口主动打开后查看任务切换、统计、结果和控制。
 
-这样既保留 Workbench 的主叙事，也让 child 执行过程与 root 隔离。详情卡是 narrative 内容，其 body 可以有界内滚；它不建立第二个 RunStage、overlay 或 composer owner。
+这样既保留 Workbench 的主叙事，也让 child 执行过程与 root 隔离。详情使用既有 `RunStage.overlay` owner，卡片 body 可以有界内滚；它不进入 narrative、不建立第二个 RunStage，也不是新的 composer owner。
 
 ### 5.2 中心叙事摘要
 
@@ -197,20 +197,22 @@ type SubagentRowView = {
 - row 主行：状态图标、description、agent type；
 - row 次行：running 时显示最近 activity，terminal 时显示结果首行或稳定错误摘要；下方 compact metrics 显示已有的工具数、token 和耗时；
 - 最多在中心区显示最近 3 条 activity，不显示 tool args、完整结果、绝对路径或内部 ID；
-- 单击 row：在该 group 下打开对应 `taskId` 的中心执行详情卡；打开/关闭只改变 Desktop 局部 UI state，不取消 child，也不自动打开右侧 Inspector；
+- 单击 row：在 dock Composer 上方打开对应 `taskId` 的中心执行详情浮层；打开/关闭只改变 Desktop 局部 UI state，不取消 child，也不自动打开右侧 Inspector；
 - 键盘：row 是 button，Enter/Space 打开详情；状态用可见文本与 `aria-label`，不能只靠颜色；
 - terminal 后仍保留在所属 turn；最终 answer 出现后随其他 process items 进入现有“执行过程”折叠段；
 - replay 使用 durable task identity upsert，不重复增加 row；
 - group 的展开/选择是 Desktop 局部 UI 状态，不写 Journal，不改变 follow、anchor 或 run 状态。
 
-### 5.2.1 中心执行详情卡
+### 5.2.1 中心执行详情浮层
 
 `AwakenSubagentExecutionCard` 是 Design System 纯组件，接收 task 展示 props、children 与 close/cancel callbacks；RuntimeClient、SSE、task reducer 和取消权限仍由 Desktop/Core 拥有。
 
-- header 显示中文 agent type、中文状态和 assignment description；关闭按钮只收起卡片；
-- summary 显示非终态 activity、工具数、provider-reported token 和耐久时间戳计算出的耗时；task terminal 后必须清除陈旧 activity；
+- header 只有一条主信息行：左侧按“中文 agent type：assignment description”显示，右侧依次显示工具数、provider-reported token、耐久时间戳计算出的耗时和末尾中文状态，关闭按钮只收起卡片；
+- 卡片 surface、border、text、shadow、hover 和 status 颜色只消费 Design System 浅色/深色语义 token，不得回退到固定浅色背景或深色文字；
+- summary 只在存在非终态 activity 时显示；task terminal 后必须清除陈旧 activity，不能为 metrics 保留空白或独立行；
 - body 消费 `SubagentTaskView.narrative`，按 child 自己的 semantic identity 渲染 reasoning、tool 与 answer；不得扫描 root narrative 或 DOM 拼出 child 详情；
-- body 最大高度 440px，使用独立纵向滚动与 `overscroll-behavior: contain`；外层仍由 RunStage 拥有 placement、anchor 和 follow；
+- 浮层由 `App.tsx` 编排进 `RunStage.overlay`，定位在实测 dock Composer 完整内容上方 12px，不覆盖 runtime panel 或专用 gate；透明外层 pointer-through，只有卡片本体响应交互；
+- 卡片最大宽度 680px、最大高度 560px，并继续受 RunStage 顶部 28px 与 Composer 上沿共同限制；body 使用独立纵向滚动与 `overscroll-behavior: contain`，滚动条只显示 thumb，track、track-piece、corner 和稳定 gutter 均不可见；打开、关闭和内容增长都不得改变 narrative 高度、anchor 或 follow；
 - terminal result 使用 Markdown renderer，不使用无界 `<pre>`；错误显示稳定 code/message；
 - queued/running/cancelling 显示明确的单任务停止入口；关闭卡片、切换 task 和停止 task 是三种不同动作；
 - phase 1 不支持追加指令，所以卡片与 Inspector 都不得伪造可输入的 child composer。
@@ -245,7 +247,7 @@ Workbench 右栏顶部从单一“文件”入口扩展为：
 
 追加指令输入是已确认但尚未实现的设计约束；当前 tool action 与 HTTP message route 均 fail closed，Inspector 和中心卡都不显示输入框。未来接通后也不能复用主 composer 或创建新的 thread/run/user_message。
 
-窄窗口当前沿用现有 Inspector 自动折叠，中心执行详情卡仍在所属 turn 内展开。专用 Subagent sheet 尚未提供；未来 sheet 只能消费同一详情 props，不能复制 runtime state 或新增第三种 composer variant。
+窄窗口当前沿用现有 Inspector 自动折叠，中心执行详情仍使用同一 RunStage 浮层并服从左右安全边距。专用全屏 Subagent sheet 尚未提供；未来 sheet 只能消费同一详情 props，不能复制 runtime state 或新增第三种 composer variant。
 
 ### 5.4 运行中反馈
 
@@ -259,9 +261,9 @@ Workbench 右栏顶部从单一“文件”入口扩展为：
 
 ### 5.5 Workbench ownership
 
-- `subagentGroup` 与其选中的执行详情卡都是 narrative，位于对应 `execution-turn-section`；
+- `subagentGroup` 是位于对应 `execution-turn-section` 的 narrative；选中的执行详情不是 narrative，而是 `RunStage.overlay`；
 - Inspector 仍由 `WorkbenchShell.inspector` 拥有，不进入 `RunStage`；
-- 不向 `RunStage.overlay` 或 `composer-dock-stack` 增加子任务面板；执行详情卡的有界 body scroll 不接管 RunStage follow；
+- 子任务详情只进入 `RunStage.overlay`，不得进入 `composer-dock-stack`；执行详情卡的有界 body scroll 不接管 RunStage follow；
 - 不改变 `center/dock` 判定、prompt anchor、marker、return-to-latest 或 composer 测量；
 - Design System 组件只收 props/callbacks，不读取 runtime client、SSE、Electron 或 store。
 
@@ -636,7 +638,7 @@ subagentsById: Record<string, SubagentTaskView>;
 subagentOrder: string[];
 ```
 
-`selectedSubagentTaskId`（右侧 Inspector）与 `openSubagentTaskId`（中心执行详情卡）属于 `App.tsx` 两份互不替代的局部 UI state，不进入 durable runtime reducer；reducer 只存 task truth 和每个 task 的独立 narrative。
+`selectedSubagentTaskId`（右侧 Inspector）与 `openSubagentTaskId`（中心执行详情浮层）属于 `App.tsx` 两份互不替代的局部 UI state，不进入 durable runtime reducer；reducer 只存 task truth 和每个 task 的独立 narrative。
 
 `run-narrative/projector.ts`：
 
@@ -824,8 +826,8 @@ git diff --check
 | AC-SA-11 | P0 | Git项目启动general worktree child | child只改worktree；父workspace不被并发写；结果显示branch/commit/dirty receipt |
 | AC-SA-12 | P0 | worktree child无改动/有改动/取消 | 无改动清理；有改动或未知状态保留待审查 |
 | AC-SA-13 | P1 | 非Git项目请求写child | 明确unsupported，不回落共享写 |
-| AC-SA-14 | P1 | 3+ turn后从旧turn打开child详情 | marker/current/latest身份不变，return/follow状态不变 |
-| AC-SA-15 | P1 | 缩窄窗口、折叠/展开Inspector、切文件工作区 | 窄屏sheet可用；文件树状态和Inspector宽度策略不串扰 |
+| AC-SA-14 | P1 | 3+ turn后从旧turn打开child详情 | 详情固定在Composer上方独立浮层，主对话流不增高；marker/current/latest身份不变，return/follow状态不变 |
+| AC-SA-15 | P1 | 缩窄窗口、折叠/展开Inspector、切文件工作区 | 详情浮层服从RunStage安全边距且不遮挡Composer；文件树状态和Inspector宽度策略不串扰 |
 | AC-SA-16 | P1 | child使用父已召回Memory | 只继承相容父snapshot；无新增user/project扫描或扩域 |
 | AC-SA-17 | P1 | Skill fork与原生Subagent各运行一次 | identity/event/UI文案清楚区分，父结果均正确 |
 

@@ -596,6 +596,34 @@
   pointer-events: auto;
 }
 
+.subagent-detail-overlay {
+  position: absolute;
+  top: 28px;
+  right: 32px;
+  left: 32px;
+  z-index: 6;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.subagent-detail-overlay > .aw-subagent-execution-card {
+  display: flex;
+  flex-direction: column;
+  width: min(680px, 100%);
+  max-height: min(560px, 100%);
+  margin-top: 0;
+  pointer-events: auto;
+}
+
+.subagent-detail-overlay .aw-subagent-execution-card__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
 .return-to-latest-button {
   display: inline-flex;
   align-items: center;

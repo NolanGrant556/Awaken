@@ -46,23 +46,30 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 	}
 	if taskID := stringFromAny(payload["subagent_task_id"]); taskID != "" {
 		switch record.Kind {
-		case agentcore.SemanticKindToolCall, agentcore.SemanticKindToolResult:
-			activity := base
-			activity.Type = EventAwakenSubagentActivity
-			activity.SubagentTaskID = taskID
-			activity.SubagentAgentID = stringFromAny(payload["agent_id"])
-			activity.SubagentParentAgentID = stringFromAny(payload["parent_agent_id"])
-			activity.ToolCallID = stringFromAny(payload["tool_call_id"])
-			activity.ToolCallName = stringFromAny(payload["tool_name"])
-			activity.SubagentActivity = activity.ToolCallName
-			if record.Kind == agentcore.SemanticKindToolResult {
-				activity.Status = "finished"
-			} else {
-				activity.Status = "running"
+		case agentcore.SemanticKindReasoningSummary,
+			agentcore.SemanticKindAssistantMessage,
+			agentcore.SemanticKindToolCall,
+			agentcore.SemanticKindToolResult,
+			agentcore.SemanticKindTurnBoundary:
+			childPayload := make(map[string]any, len(payload))
+			for key, value := range payload {
+				childPayload[key] = value
 			}
-			return []Event{activity}
+			delete(childPayload, "subagent_task_id")
+			delete(childPayload, "agent_id")
+			delete(childPayload, "parent_agent_id")
+			childRecord := record
+			childRecord.Payload = childPayload
+			frames := projectSemanticRecord(childRecord)
+			for i := range frames {
+				frames[i].SubagentTaskID = taskID
+				frames[i].SubagentAgentID = stringFromAny(payload["agent_id"])
+				frames[i].SubagentParentAgentID = stringFromAny(payload["parent_agent_id"])
+			}
+			return frames
 		default:
-			// Child transcript facts stay durable but never become root narrative.
+			// Child lifecycle and host-owned task state are projected from the
+			// manager records below, never as root run lifecycle frames.
 			return nil
 		}
 	}

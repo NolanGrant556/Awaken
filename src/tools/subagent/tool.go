@@ -135,12 +135,17 @@ func (t *SubagentTool) Execute(ctx context.Context, raw string) (string, error) 
 	identity, _ := tool.ToolExecutionIdentityFromContext(ctx)
 	switch request.Action {
 	case "spawn":
+		modelProfileID := strings.TrimSpace(request.ModelProfileID)
+		if modelProfileID == "" {
+			modelProfileID = strings.TrimSpace(identity.ModelProfileID)
+		}
 		snapshot, err := controller.Spawn(ctx, subagentruntime.SpawnRequest{
 			Description: request.Description, Prompt: request.Prompt,
 			AgentType: request.AgentType, WorkspaceMode: request.WorkspaceMode,
-			ModelProfileID: request.ModelProfileID, ParentAgentID: "root",
+			ModelProfileID: modelProfileID, ParentAgentID: "root",
 			ParentToolCallID: identity.ToolCallID,
 			ThreadID:         tool.ToolThreadIDFromContext(ctx), RunID: identity.RunID,
+			TurnID: identity.TurnID,
 		})
 		return encode(map[string]any{"task": snapshot}, err)
 	case "status":

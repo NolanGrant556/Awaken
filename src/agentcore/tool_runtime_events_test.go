@@ -63,6 +63,9 @@ func TestToolRuntimeEmitsArtifactsForAllowedTool(t *testing.T) {
 		got[3].Type != ArtifactCreatedEventType {
 		t.Fatalf("unexpected emitted events: %+v", got)
 	}
+	if got[1].ToolStatus != "" || got[2].ToolStatus != "" {
+		t.Fatalf("progress events must not claim canonical tool outcomes: %+v", got)
+	}
 	if got[3].ArtifactContractVersion != tool.ArtifactContractVersion ||
 		got[3].ArtifactRole != tool.ArtifactRoleDeliverable ||
 		got[3].ArtifactProducer != toolName {

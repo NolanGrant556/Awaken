@@ -13,11 +13,13 @@
 - 父 run 的取消上下文可以终止当前同步 Skill child。
 - 正式模型工具 `subagent(action=spawn|status|wait|cancel)` 已注册；只开放 fresh、`shared_readonly` 的 `explore/review` child，child 不暴露 Subagent、主动提问或 mutation 工具；
 - `src/subagentruntime` 提供 run-scoped task registry、事件驱动 wait、单任务取消、每 run 最多 8 个任务和最多 4 个并发执行；父 run 终态前会收敛非终态 child；
-- child 使用独立 conversation、agent/task identity 和取消上下文，生命周期与有界结果写入 SemanticJournal，并投影为 `AWAKEN_SUBAGENT_CHANGED`、`AWAKEN_SUBAGENT_ACTIVITY` 和兼容的 queued-message event；
+- child 使用独立 conversation、agent/task identity 和取消上下文，生命周期与有界结果写入 SemanticJournal；live Agent event 与 durable reasoning/message/tool frame 都携带同一 `subagentTaskId/subagentAgentId`，Renderer 将它们路由到 child 自己的 narrative，不再混入 root；
 - child 的每个耐久 `tool_call` 与 `model_usage` 会按稳定 ID 去重后生成 `subagent_progress`，累计工具次数、provider-reported input/output/total tokens；中心 group 与右侧 Inspector 同时显示工具数、token 与按耐久起止时间计算的耗时；
 - `wait` 到期属于中性检索结果：返回 `retrieval_status=timeout` 和当前 snapshots，不产生失败 Outcome，也不取消 child；
 - Core 已提供 run-scoped Subagent list/detail/cancel route；message route 当前明确返回 unsupported；
-- Desktop 已实现当前 turn 的 Subagent group，以及右侧 Inspector 的任务切换、状态、最近活动、结果、错误和运行中任务取消；切换 thread 会清理 UI selection，task truth 仍来自事件投影；
+- Desktop reducer 已以 `subagentsById/subagentOrder` 独立保存 task truth；当前 turn 显示 Subagent group，点击 row 在中间区域打开可关闭/重开的执行详情卡，卡内按 child semantic 顺序展示思考、工具与 Markdown 结果并有独立滚动和单任务停止；右侧 Inspector 继续提供任务切换、统计和控制；
+- root/child 的 tool text/media blob 使用 agent/task + run + turn + tool-call 复合命名空间；超过 32 KiB 的文本只在 journal 留 digest/size/preview 票据，下一次 provider request 在 Core 内校验并水合完整内容，Renderer 与模型都不需要读取 `~/.awaken` 路径；
+- queued cancel 在 scheduler admission 后会再次检查，不能回跳 `running`；取消宽限期后写 `interrupted`；terminal append/flush 失败保留最后一份已耐久的非终态 snapshot 并让 root barrier fail closed，不发布伪成功；
 - macOS 真实 Desktop 已验证 spawn、running、completed/result 和单任务 cancelled/error 投影。
 
 **当前不支持：**
@@ -154,12 +156,13 @@
 
 ### 5.1 信息架构
 
-UI 使用“两层表达”：
+UI 使用“三层表达”：
 
 1. **中心叙事摘要**：属于当前 turn 的 `subagentGroup` narrative item，只表达有多少 child、各自状态和最近活动；
-2. **右侧 Subagent Inspector**：用户主动打开后查看 assignment、活动、结果和控制。
+2. **中心执行详情卡**：点击 child row 后在同一 turn 内展开，展示该 child 自己的思考、工具、结果与停止控制；
+3. **右侧 Subagent Inspector**：从右栏入口主动打开后查看任务切换、统计、结果和控制。
 
-这样保留 Workbench 的主叙事，不把 child 原始日志铺满 `ExecutionFeed`，也不在 RunStage 外增加新的滚动/overlay/composer owner。
+这样既保留 Workbench 的主叙事，也让 child 执行过程与 root 隔离。详情卡是 narrative 内容，其 body 可以有界内滚；它不建立第二个 RunStage、overlay 或 composer owner。
 
 ### 5.2 中心叙事摘要
 
@@ -194,11 +197,23 @@ type SubagentRowView = {
 - row 主行：状态图标、description、agent type；
 - row 次行：running 时显示最近 activity，terminal 时显示结果首行或稳定错误摘要；下方 compact metrics 显示已有的工具数、token 和耗时；
 - 最多在中心区显示最近 3 条 activity，不显示 tool args、完整结果、绝对路径或内部 ID；
-- 单击 row：打开/展开 Inspector，选择对应 `taskId`；
+- 单击 row：在该 group 下打开对应 `taskId` 的中心执行详情卡；打开/关闭只改变 Desktop 局部 UI state，不取消 child，也不自动打开右侧 Inspector；
 - 键盘：row 是 button，Enter/Space 打开详情；状态用可见文本与 `aria-label`，不能只靠颜色；
 - terminal 后仍保留在所属 turn；最终 answer 出现后随其他 process items 进入现有“执行过程”折叠段；
 - replay 使用 durable task identity upsert，不重复增加 row；
 - group 的展开/选择是 Desktop 局部 UI 状态，不写 Journal，不改变 follow、anchor 或 run 状态。
+
+### 5.2.1 中心执行详情卡
+
+`AwakenSubagentExecutionCard` 是 Design System 纯组件，接收 task 展示 props、children 与 close/cancel callbacks；RuntimeClient、SSE、task reducer 和取消权限仍由 Desktop/Core 拥有。
+
+- header 显示中文 agent type、中文状态和 assignment description；关闭按钮只收起卡片；
+- summary 显示非终态 activity、工具数、provider-reported token 和耐久时间戳计算出的耗时；task terminal 后必须清除陈旧 activity；
+- body 消费 `SubagentTaskView.narrative`，按 child 自己的 semantic identity 渲染 reasoning、tool 与 answer；不得扫描 root narrative 或 DOM 拼出 child 详情；
+- body 最大高度 440px，使用独立纵向滚动与 `overscroll-behavior: contain`；外层仍由 RunStage 拥有 placement、anchor 和 follow；
+- terminal result 使用 Markdown renderer，不使用无界 `<pre>`；错误显示稳定 code/message；
+- queued/running/cancelling 显示明确的单任务停止入口；关闭卡片、切换 task 和停止 task 是三种不同动作；
+- phase 1 不支持追加指令，所以卡片与 Inspector 都不得伪造可输入的 child composer。
 
 ### 5.3 右侧 Subagent Inspector
 
@@ -217,21 +232,20 @@ Workbench 右栏顶部从单一“文件”入口扩展为：
 - 关闭右栏不取消 child；取消必须点击明确按钮；
 - 子任务详情不读取 DOM/narrative 文案反推 identity，只消费 reducer 中的 `SubagentTaskView`。
 
-详情布局：
+当前详情布局：
 
-1. 顶部：description、agent type、model display name、状态和耗时；
-2. assignment：默认折叠，展开后显示 host 已持久的分配文本；最大高度内滚动；
-3. activity：按 child semantic seq 展示有界 tool/reasoning summary，默认只展开最近项；
-4. result：terminal 后渲染 child final handoff Markdown；失败显示 error code、可恢复建议和 side-effect 提示；
+1. 顶部：description、中文 agent type、中文状态和耗时；
+2. task switcher：按创建顺序切换同一 thread 的 task；
+3. activity：显示非终态最近活动、工具数与 provider-reported token；
+4. result：terminal 后渲染 child final handoff Markdown；失败显示稳定 error code/message；
 5. 控制区：
    - running/queued：`取消子任务`；
-   - running：单行“追加指令”输入和发送按钮；
-   - terminal：不显示发送，提供“复制结果”；
-   - cancelling：按钮禁用并显示“正在取消…”。
+   - cancelling：按钮禁用并显示“正在取消…”；
+   - terminal：不显示取消。
 
-追加指令输入不是主 composer，也不创建新的 thread/run/user_message。它通过 typed bridge 调用当前 run/task control route；发送成功后清空输入并显示 receipt，失败保留草稿和焦点。
+追加指令输入是已确认但尚未实现的设计约束；当前 tool action 与 HTTP message route 均 fail closed，Inspector 和中心卡都不显示输入框。未来接通后也不能复用主 composer 或创建新的 thread/run/user_message。
 
-窄窗口下沿用现有 Inspector 自动折叠；点击中心 child row 时打开一个 UI-only modal sheet 显示同一详情 props。modal 不复制 runtime state，不新增第三种 composer variant。
+窄窗口当前沿用现有 Inspector 自动折叠，中心执行详情卡仍在所属 turn 内展开。专用 Subagent sheet 尚未提供；未来 sheet 只能消费同一详情 props，不能复制 runtime state 或新增第三种 composer variant。
 
 ### 5.4 运行中反馈
 
@@ -245,9 +259,9 @@ Workbench 右栏顶部从单一“文件”入口扩展为：
 
 ### 5.5 Workbench ownership
 
-- `subagentGroup` 是 narrative，位于对应 `execution-turn-section`；
+- `subagentGroup` 与其选中的执行详情卡都是 narrative，位于对应 `execution-turn-section`；
 - Inspector 仍由 `WorkbenchShell.inspector` 拥有，不进入 `RunStage`；
-- 不向 `RunStage.overlay` 或 `composer-dock-stack` 增加子任务面板；
+- 不向 `RunStage.overlay` 或 `composer-dock-stack` 增加子任务面板；执行详情卡的有界 body scroll 不接管 RunStage follow；
 - 不改变 `center/dock` 判定、prompt anchor、marker、return-to-latest 或 composer 测量；
 - Design System 组件只收 props/callbacks，不读取 runtime client、SSE、Electron 或 store。
 
@@ -316,9 +330,9 @@ Manager 的 starter callback 固定执行：
 6. 创建独立 `Conversation`，只注入 host handoff 和父 `MemoryRecallSnapshot` 的合法子集；
 7. 使用 `context.WithCancel(rootRunContext)` 再派生单 task cancel；
 8. 进入 scheduler；取得 slot 后写 `running` 并启动 child runner；
-9. child terminal 时先 append+flush terminal record，再发布状态、唤醒 waiters；
+9. child terminal 时先 append+flush terminal record，再发布状态、唤醒 waiters；append/flush 失败时保留最后一份已耐久 snapshot，不能在内存伪造 terminal；
 10. child 的 `tool_call`/`model_usage` 先耐久，再由 manager 写并 flush 累计 `subagent_progress`；terminal 使用最后一份累计值；
-11. 终态 handoff 最大 32 KiB；更大结果使用现有 model content/offload store，父模型只收到 preview + storage metadata。
+11. 终态 handoff 最大 32 KiB；更大结果按 `thread/task-or-agent/run/turn/tool-call` 写入 offload store，journal 只留 preview + storage metadata；父模型下一请求由 Core 校验 digest/byte size 后在内存水合完整 handoff。
 
 ### 6.4 Agent types
 
@@ -384,7 +398,7 @@ max depth               1
 child max turns         32
 child max tool calls    128
 wait timeout            60s/call
-cancel grace            5s
+cancel grace            2s
 ```
 
 root 与所有 child 共享一个原子 `RunExecutionBudget`：
@@ -565,13 +579,13 @@ AWAKEN_SUBAGENT_ACTIVITY
 AWAKEN_SUBAGENT_MESSAGE_QUEUED
 ```
 
-公共字段：
+Subagent lifecycle event 使用以下公共字段；普通 child text/reasoning/tool frame 也必须携带前三项身份字段：
 
 ```text
 subagentTaskId
-agentId
-parentAgentId
-parentToolCallId
+subagentAgentId
+subagentParentAgentId
+subagentParentToolCallId
 subagentAgentType
 subagentDescription
 subagentStatus
@@ -622,13 +636,13 @@ subagentsById: Record<string, SubagentTaskView>;
 subagentOrder: string[];
 ```
 
-`selectedSubagentTaskId` 实际属于 `App.tsx` 局部 UI state，不进入 durable runtime reducer；reducer 只存 task truth。
+`selectedSubagentTaskId`（右侧 Inspector）与 `openSubagentTaskId`（中心执行详情卡）属于 `App.tsx` 两份互不替代的局部 UI state，不进入 durable runtime reducer；reducer 只存 task truth 和每个 task 的独立 narrative。
 
 `run-narrative/projector.ts`：
 
 - `AWAKEN_SUBAGENT_CHANGED` 首次创建所属 turn 的 `subagentGroup`；
 - 后续 event 按 task ID upsert；
-- child tool/activity event只更新 task detail，不新增 root tool item；
+- 带 `subagentTaskId` 的 child reasoning/text/tool frame 只更新 `SubagentTaskView.narrative`，不新增 root thinking/answer/tool item，也不修改 root assistant/reasoning/tool records；
 - terminal/replay 保持创建顺序；
 - run final 后 group 进入现有 execution process segment。
 
@@ -659,7 +673,7 @@ subagentOrder: string[];
 | root取消 | 广播 child cancel；已有事实保留；最终 root `cancelled` |
 | Journal append/flush失败 | fail-stop；spawn/message/terminal不得先对外可见 |
 | Core崩溃 | 未闭合 tasks恢复为 `interrupted`，不自动重启 |
-| child result过大 | 原子 offload，父/UI只收 preview/metadata |
+| child result过大 | 按 agent/task 隔离原子 offload；journal/UI只收 preview/metadata，provider request在 Core 内校验后水合完整结果 |
 | result blob缺失 | 显示稳定 warning，task identity/status仍可重放 |
 | worktree创建失败 | task不进入 running；terminal `failed/subagent_worktree_failed` |
 | worktree有未合并改动 | 保留路径/branch receipt；不自动清理或合并 |

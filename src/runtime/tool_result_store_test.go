@@ -16,14 +16,14 @@ func TestToolResultStorePersistsDescriptorsWithoutInlineBase64(t *testing.T) {
 	t.Setenv("AWAKEN_HOME", home)
 	store := NewToolResultStore()
 	part := tool.ModelContentPart{Type: "image", MimeType: "image/png", DisplayName: "image.png", ByteSize: 5, DataBase64: base64.StdEncoding.EncodeToString([]byte("image"))}
-	persisted, err := store.PersistToolResult(context.Background(), "thread-a", tool.ToolExecutionIdentity{ToolCallID: "call-a"}, []tool.ModelContentPart{part})
+	persisted, err := store.PersistToolResult(context.Background(), "thread-a", tool.ToolExecutionIdentity{AgentID: "root", ToolCallID: "call-a"}, []tool.ModelContentPart{part})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(persisted) != 1 || persisted[0].StorageKey == "" || persisted[0].DataBase64 == "" {
 		t.Fatalf("persisted=%+v", persisted)
 	}
-	if !strings.HasPrefix(persisted[0].StorageKey, "thread-a/tool-results/call-a/") {
+	if !strings.HasPrefix(persisted[0].StorageKey, "thread-a/tool-results/root/call-a/") {
 		t.Fatalf("storage key=%q", persisted[0].StorageKey)
 	}
 	hydrated, warnings := store.HydrateToolResult(context.Background(), "thread-a", persisted)
@@ -36,7 +36,7 @@ func TestToolResultStoreOffloadsTextAsThreadOwned0600Blob(t *testing.T) {
 	setRuntimeUserDataDir(t)
 	store := NewToolResultStore()
 	content := strings.Repeat("large-result-", 4000)
-	receipt, err := store.OffloadToolResult(context.Background(), "thread-text", "call-text", content)
+	receipt, err := store.OffloadToolResult(context.Background(), "thread-text", tool.ToolExecutionIdentity{SubagentTaskID: "task-text", ToolCallID: "call-text"}, content)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,6 +54,62 @@ func TestToolResultStoreOffloadsTextAsThreadOwned0600Blob(t *testing.T) {
 	}
 	if receipt.ByteSize != len(content) || receipt.Digest == "" || receipt.Preview == "" {
 		t.Fatalf("invalid receipt: %+v", receipt)
+	}
+	hydrated, err := store.HydrateOffloadedToolResult(context.Background(), "thread-text", receipt)
+	if err != nil || hydrated != content {
+		t.Fatalf("hydrate mismatch: err=%v bytes=%d", err, len(hydrated))
+	}
+}
+
+func TestToolResultStoreIsolatesSameToolCallIDAcrossAgents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AWAKEN_HOME", home)
+	store := NewToolResultStore()
+	part := func(value string) tool.ModelContentPart {
+		return tool.ModelContentPart{Type: "image", MimeType: "image/png", DisplayName: value + ".png", DataBase64: base64.StdEncoding.EncodeToString([]byte(value))}
+	}
+	root, err := store.PersistToolResult(context.Background(), "thread-a", tool.ToolExecutionIdentity{AgentID: "root", ToolCallID: "Read_0"}, []tool.ModelContentPart{part("root")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := store.PersistToolResult(context.Background(), "thread-a", tool.ToolExecutionIdentity{SubagentTaskID: "task-child", ToolCallID: "Read_0"}, []tool.ModelContentPart{part("child")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root[0].StorageKey == child[0].StorageKey {
+		t.Fatalf("agent-scoped storage keys collided: %q", root[0].StorageKey)
+	}
+	root[0].DataBase64, child[0].DataBase64 = "", ""
+	hydratedRoot, rootWarnings := store.HydrateToolResult(context.Background(), "thread-a", root)
+	hydratedChild, childWarnings := store.HydrateToolResult(context.Background(), "thread-a", child)
+	if len(rootWarnings) != 0 || len(childWarnings) != 0 {
+		t.Fatalf("warnings root=%v child=%v", rootWarnings, childWarnings)
+	}
+	if got, _ := base64.StdEncoding.DecodeString(hydratedRoot[0].DataBase64); string(got) != "root" {
+		t.Fatalf("root blob overwritten: %q", got)
+	}
+	if got, _ := base64.StdEncoding.DecodeString(hydratedChild[0].DataBase64); string(got) != "child" {
+		t.Fatalf("child blob overwritten: %q", got)
+	}
+}
+
+func TestToolResultStoreIsolatesReusedToolCallIDAcrossTurns(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AWAKEN_HOME", home)
+	store := NewToolResultStore()
+	part := func(value string) tool.ModelContentPart {
+		return tool.ModelContentPart{Type: "image", MimeType: "image/png", DisplayName: value + ".png", DataBase64: base64.StdEncoding.EncodeToString([]byte(value))}
+	}
+	first, err := store.PersistToolResult(context.Background(), "thread-a", tool.ToolExecutionIdentity{AgentID: "root", RunID: "run-a", TurnID: "turn-1", ToolCallID: "Read_0"}, []tool.ModelContentPart{part("first")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.PersistToolResult(context.Background(), "thread-a", tool.ToolExecutionIdentity{AgentID: "root", RunID: "run-a", TurnID: "turn-2", ToolCallID: "Read_0"}, []tool.ModelContentPart{part("second")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first[0].StorageKey == second[0].StorageKey {
+		t.Fatalf("turn-scoped storage keys collided: %q", first[0].StorageKey)
 	}
 }
 

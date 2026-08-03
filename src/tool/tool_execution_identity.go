@@ -9,9 +9,13 @@ import (
 // intentionally not derived from model-provided tool arguments and is shared
 // by typed providers that must bind work to the current run and tool call.
 type ToolExecutionIdentity struct {
-	RunID      string
-	ToolCallID string
-	ToolName   string
+	RunID          string
+	TurnID         string
+	AgentID        string
+	SubagentTaskID string
+	ModelProfileID string
+	ToolCallID     string
+	ToolName       string
 }
 
 type toolExecutionIdentityContextKey struct{}

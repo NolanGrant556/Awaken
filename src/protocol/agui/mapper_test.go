@@ -64,6 +64,25 @@ func TestMapEventCarriesTurnMetadata(t *testing.T) {
 	}
 }
 
+func TestMapEventCarriesLiveSubagentIdentity(t *testing.T) {
+	events := MapEvent(agentcore.AwakenEvent{
+		Type:           agentcore.TextDeltaEventType,
+		ThreadID:       "thread-1",
+		RunID:          "run-1",
+		AgentID:        "agent-1",
+		ParentAgentID:  "root",
+		SubagentTaskID: "task-1",
+		Delta:          "child delta",
+	})
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	got := events[0]
+	if got.SubagentTaskID != "task-1" || got.SubagentAgentID != "agent-1" || got.SubagentParentAgentID != "root" {
+		t.Fatalf("expected live child identity, got %+v", got)
+	}
+}
+
 func TestMapEventTurnLifecycle(t *testing.T) {
 	started := MapEvent(agentcore.AwakenEvent{
 		Type:             agentcore.TurnStartedEventType,

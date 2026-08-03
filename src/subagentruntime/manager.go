@@ -14,6 +14,7 @@ import (
 const (
 	defaultMaxTasks      = 8
 	defaultMaxConcurrent = 4
+	defaultCancelGrace   = 2 * time.Second
 	maxDescriptionRunes  = 80
 	maxPromptBytes       = 32 * 1024
 	maxResultBytes       = 32 * 1024
@@ -24,15 +25,17 @@ type Config struct {
 	MaxConcurrent int
 	Starter       Starter
 	Persist       Persister
+	CancelGrace   time.Duration
 }
 
 type managedTask struct {
-	snapshot          TaskSnapshot
-	prompt            string
-	cancel            context.CancelFunc
-	mutationMu        sync.Mutex
-	seenToolCalls     map[string]struct{}
-	seenModelRequests map[string]struct{}
+	snapshot           TaskSnapshot
+	prompt             string
+	cancel             context.CancelFunc
+	mutationMu         sync.Mutex
+	seenToolCalls      map[string]struct{}
+	seenModelRequests  map[string]struct{}
+	terminalPersistErr error
 }
 
 type Manager struct {
@@ -59,6 +62,9 @@ func NewManager(parent context.Context, cfg Config) *Manager {
 	}
 	if cfg.MaxConcurrent <= 0 {
 		cfg.MaxConcurrent = defaultMaxConcurrent
+	}
+	if cfg.CancelGrace <= 0 {
+		cfg.CancelGrace = defaultCancelGrace
 	}
 	ctx, cancel := context.WithCancel(parent)
 	return &Manager{
@@ -160,6 +166,15 @@ func (m *Manager) runTask(ctx context.Context, taskID string) {
 	}
 	task.mutationMu.Lock()
 	snapshot := task.snapshot
+	if ctx.Err() != nil || snapshot.Status == StatusCancelling {
+		task.mutationMu.Unlock()
+		m.finishCancelled(taskID)
+		return
+	}
+	if snapshot.Terminal() {
+		task.mutationMu.Unlock()
+		return
+	}
 	snapshot.Status = StatusRunning
 	snapshot.StartedAt = &started
 	snapshot.CurrentActivity = "正在执行分配的任务"
@@ -221,10 +236,11 @@ func (m *Manager) finish(taskID string, status TaskStatus, result, code, message
 	err := m.persist(persistCtx, "subagent_terminal", snapshot)
 	cancel()
 	if err != nil {
-		snapshot.Status = StatusInterrupted
-		snapshot.ErrorCode = ErrorPersistence
-		snapshot.ErrorMessage = err.Error()
+		task.terminalPersistErr = err
+		m.signal()
+		return
 	}
+	task.terminalPersistErr = nil
 	m.replaceSnapshot(taskID, snapshot)
 }
 
@@ -270,6 +286,9 @@ func (m *Manager) reportProgress(ctx context.Context, taskID string, update Prog
 				snapshot.EstimatedTokens = snapshot.TotalTokens
 			}
 			changed = true
+			if strings.TrimSpace(update.Activity) == "" {
+				snapshot.CurrentActivity = "正在整理子任务结果"
+			}
 		}
 	}
 	if activity := strings.TrimSpace(update.Activity); activity != "" {
@@ -412,7 +431,19 @@ func (m *Manager) Cancel(ctx context.Context, taskID, _ string) (TaskSnapshot, e
 	}
 	m.replaceSnapshot(taskID, snapshot)
 	task.cancel()
+	go m.interruptAfterCancelGrace(taskID)
 	return snapshot, nil
+}
+
+func (m *Manager) interruptAfterCancelGrace(taskID string) {
+	timer := time.NewTimer(m.cfg.CancelGrace)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		m.finish(taskID, StatusInterrupted, "", ErrorInterrupted, "subagent did not stop within the cancellation grace period")
+	case <-m.ctx.Done():
+		return
+	}
 }
 
 func (m *Manager) task(taskID string) *managedTask {
@@ -436,10 +467,44 @@ func (m *Manager) Close(ctx context.Context) error {
 	}()
 	select {
 	case <-done:
-		return nil
+		return m.terminalPersistenceError()
 	case <-ctx.Done():
+		m.interruptNonTerminal("subagent manager close timed out")
+		if err := m.terminalPersistenceError(); err != nil {
+			return errors.Join(ctx.Err(), err)
+		}
 		return ctx.Err()
 	}
+}
+
+func (m *Manager) interruptNonTerminal(message string) {
+	for _, snapshot := range m.List() {
+		if snapshot.Terminal() {
+			continue
+		}
+		m.finish(snapshot.TaskID, StatusInterrupted, "", ErrorInterrupted, message)
+	}
+}
+
+func (m *Manager) terminalPersistenceError() error {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	tasks := make([]*managedTask, 0, len(m.tasks))
+	for _, task := range m.tasks {
+		tasks = append(tasks, task)
+	}
+	m.mu.RUnlock()
+	for _, task := range tasks {
+		task.mutationMu.Lock()
+		err := task.terminalPersistErr
+		task.mutationMu.Unlock()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *Manager) persist(ctx context.Context, kind string, snapshot TaskSnapshot) error {

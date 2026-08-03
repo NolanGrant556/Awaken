@@ -44,6 +44,7 @@ type ToolRuntime struct {
 	// this runtime issues so the decision layer can attribute the call to
 	// the spawning sub-agent. nil for the root agent.
 	subagentOrigin *profile.SubagentOrigin
+	subagentTaskID string
 	// router maps an ExecutionIntent + ExecutionProfile to the appropriate
 	// ToolExecutor (FileOperationExecutor / BashExecutor / McpExecutor /
 	// GuardianExecutor / ComputerExecutor). Task 11 of "零审批自动执行策略":
@@ -56,6 +57,7 @@ type ToolRuntime struct {
 	modelCapabilities tool.ModelCapabilities
 	toolSessionState  *tool.ToolSessionState
 	modelContentStore tool.ModelContentStore
+	modelProfileID    string
 }
 
 type ToolRuntimeConfig struct {
@@ -77,6 +79,8 @@ type ToolRuntimeConfig struct {
 	// SubagentOrigin, when set, is propagated into every ExecutionIntent
 	// so the decision layer can attribute the call.
 	SubagentOrigin    *profile.SubagentOrigin
+	SubagentTaskID    string
+	ModelProfileID    string
 	ModelCapabilities tool.ModelCapabilities
 	ToolSessionState  *tool.ToolSessionState
 	ModelContentStore tool.ModelContentStore
@@ -144,6 +148,7 @@ type ToolExecutionResult struct {
 	// a non-read-only action). Task 16: surfaced on the audit record and
 	// the ToolPermissionDecided event so the UI can attribute the denial.
 	GuardianViolation string
+	executionIdentity tool.ToolExecutionIdentity
 	// outcomeContext is consumed by the single finalizer. It is intentionally
 	// private so permission predictions cannot be promoted to execution facts.
 	outcomeContext tool.OutcomeNormalizationContext
@@ -192,10 +197,12 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 		profile:           execProfile,
 		subagentBoundary:  config.SubagentBoundary,
 		subagentOrigin:    config.SubagentOrigin,
+		subagentTaskID:    strings.TrimSpace(config.SubagentTaskID),
 		router:            router,
 		modelCapabilities: config.ModelCapabilities,
 		toolSessionState:  config.ToolSessionState,
 		modelContentStore: config.ModelContentStore,
+		modelProfileID:    strings.TrimSpace(config.ModelProfileID),
 	}
 }
 
@@ -290,11 +297,23 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		id = convcontext.GenerateToolCallID()
 	}
 
+	identity, _ := tool.ToolExecutionIdentityFromContext(ctx)
+	identity.RunID = rt.runID
+	identity.ToolCallID = id
+	identity.ToolName = call.Function.Name
+	identity.SubagentTaskID = rt.subagentTaskID
+	identity.ModelProfileID = rt.modelProfileID
+	if rt.subagentOrigin != nil {
+		identity.AgentID = strings.TrimSpace(rt.subagentOrigin.AgentID)
+	} else if strings.TrimSpace(identity.AgentID) == "" {
+		identity.AgentID = "root"
+	}
 	result := ToolExecutionResult{
-		ToolCallID:  id,
-		Name:        call.Function.Name,
-		StartedAt:   timeNowUTC(),
-		ProfileName: rt.profile.Name,
+		ToolCallID:        id,
+		Name:              call.Function.Name,
+		StartedAt:         timeNowUTC(),
+		ProfileName:       rt.profile.Name,
+		executionIdentity: identity,
 		ToolSnapshotID: func() string {
 			if rt.toolSnapshot != nil {
 				return rt.toolSnapshot.SnapshotID
@@ -448,11 +467,7 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	toolCtx = tool.ContextWithACPEventEmitter(toolCtx, func(e tool.ACPEvent) {
 		rt.sink.Emit(MapACPEvent(e))
 	})
-	toolCtx = tool.ContextWithToolExecutionIdentity(toolCtx, tool.ToolExecutionIdentity{
-		RunID:      rt.runID,
-		ToolCallID: result.ToolCallID,
-		ToolName:   result.Name,
-	})
+	toolCtx = tool.ContextWithToolExecutionIdentity(toolCtx, identity)
 	if rt.toolSnapshot != nil && rt.environment != nil {
 		toolCtx = tool.ContextWithRunAvailability(toolCtx, *rt.toolSnapshot, *rt.environment)
 		// Process-backed tools (for example Shell and the typed dependency

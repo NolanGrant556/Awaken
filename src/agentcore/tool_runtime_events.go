@@ -133,7 +133,6 @@ func (rt *ToolRuntime) emitToolProgress(result ToolExecutionResult, stage, messa
 		ToolProgressPercentage: percentage,
 		Progress:               message,
 	}
-	applyToolOutcomeFields(&event, result)
 	rt.sink.Emit(event)
 }
 

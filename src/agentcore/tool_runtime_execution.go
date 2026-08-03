@@ -272,11 +272,7 @@ func (rt *ToolRuntime) finalizeExecutedToolResult(
 	output string,
 ) ToolExecutionResult {
 	if len(result.Outcome.ModelContent) > 0 && rt.modelContentStore != nil {
-		identity := tool.ToolExecutionIdentity{
-			RunID:      rt.runID,
-			ToolCallID: result.ToolCallID,
-			ToolName:   result.Name,
-		}
+		identity := result.executionIdentity
 		persisted, err := rt.modelContentStore.PersistToolResult(
 			stdcontext.Background(),
 			rt.threadID,

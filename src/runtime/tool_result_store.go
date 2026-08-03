@@ -18,6 +18,7 @@ import (
 )
 
 const maxToolResultBlobBytes = 20 * 1024 * 1024
+const maxOffloadedToolResultBytes = 64 * 1024 * 1024
 
 // ToolResultStore owns model-facing media beneath sessions/<thread>/tool-results.
 // Storage keys are relative to the active sessions directory.
@@ -27,13 +28,15 @@ func NewToolResultStore() *ToolResultStore { return &ToolResultStore{} }
 
 func (s *ToolResultStore) OffloadToolResult(
 	_ context.Context,
-	threadID, toolCallID, content string,
+	threadID string,
+	identity tool.ToolExecutionIdentity,
+	content string,
 ) (agentcore.ToolResultOffloadReceipt, error) {
-	if strings.TrimSpace(threadID) == "" || strings.TrimSpace(toolCallID) == "" {
+	if strings.TrimSpace(threadID) == "" || strings.TrimSpace(identity.ToolCallID) == "" {
 		return agentcore.ToolResultOffloadReceipt{}, fmt.Errorf("tool result offload requires thread and tool call identity")
 	}
 	storageKey := filepath.ToSlash(filepath.Join(
-		safeTranscriptFileName(threadID), "tool-results", safeTranscriptFileName(toolCallID), "content.txt",
+		safeTranscriptFileName(threadID), "tool-results", toolResultIdentityKey(identity), "content.txt",
 	))
 	targetPath, err := ownedToolResultPath(storageKey)
 	if err != nil {
@@ -67,6 +70,43 @@ func (s *ToolResultStore) OffloadToolResult(
 	}, nil
 }
 
+func (s *ToolResultStore) HydrateOffloadedToolResult(
+	_ context.Context,
+	threadID string,
+	receipt agentcore.ToolResultOffloadReceipt,
+) (string, error) {
+	key := filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(receipt.StorageKey))))
+	threadPrefix := safeTranscriptFileName(threadID) + "/tool-results/"
+	if strings.TrimSpace(threadID) == "" || !strings.HasPrefix(key, threadPrefix) {
+		return "", errors.New("offloaded tool result is not owned by this thread")
+	}
+	path, err := ownedToolResultPath(key)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("stat offloaded tool result: %w", err)
+	}
+	if info.Size() > maxOffloadedToolResultBytes {
+		return "", fmt.Errorf("offloaded tool result exceeds %d bytes", maxOffloadedToolResultBytes)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read offloaded tool result: %w", err)
+	}
+	if receipt.ByteSize > 0 && len(data) != receipt.ByteSize {
+		return "", fmt.Errorf("offloaded tool result byte size mismatch: got %d want %d", len(data), receipt.ByteSize)
+	}
+	if digest := strings.TrimSpace(receipt.Digest); digest != "" {
+		actual := sha256.Sum256(data)
+		if !strings.EqualFold(hex.EncodeToString(actual[:]), digest) {
+			return "", errors.New("offloaded tool result digest mismatch")
+		}
+	}
+	return string(data), nil
+}
+
 func (s *ToolResultStore) PersistToolResult(
 	_ context.Context,
 	threadID string,
@@ -79,7 +119,7 @@ func (s *ToolResultStore) PersistToolResult(
 	if strings.TrimSpace(threadID) == "" || strings.TrimSpace(identity.ToolCallID) == "" {
 		return nil, fmt.Errorf("tool media persistence requires thread and tool call identity")
 	}
-	callKey := filepath.ToSlash(filepath.Join(safeTranscriptFileName(threadID), "tool-results", safeTranscriptFileName(identity.ToolCallID)))
+	callKey := filepath.ToSlash(filepath.Join(safeTranscriptFileName(threadID), "tool-results", toolResultIdentityKey(identity)))
 	callRoot, err := ownedToolResultPath(callKey)
 	if err != nil {
 		return nil, err
@@ -128,6 +168,25 @@ func (s *ToolResultStore) PersistToolResult(
 	}
 	committed = true
 	return result, nil
+}
+
+func toolResultIdentityKey(identity tool.ToolExecutionIdentity) string {
+	agentScope := strings.TrimSpace(identity.SubagentTaskID)
+	if agentScope == "" {
+		agentScope = strings.TrimSpace(identity.AgentID)
+	}
+	if agentScope == "" {
+		agentScope = "root"
+	}
+	parts := []string{safeTranscriptFileName(agentScope)}
+	if runID := strings.TrimSpace(identity.RunID); runID != "" {
+		parts = append(parts, safeTranscriptFileName(runID))
+	}
+	if turnID := strings.TrimSpace(identity.TurnID); turnID != "" {
+		parts = append(parts, safeTranscriptFileName(turnID))
+	}
+	parts = append(parts, safeTranscriptFileName(identity.ToolCallID))
+	return filepath.Join(parts...)
 }
 
 func (s *ToolResultStore) HydrateToolResult(

@@ -7,7 +7,7 @@ import (
 	"awaken/src/agentcore"
 )
 
-func TestProjectSubagentLifecycleAndSuppressChildNarrative(t *testing.T) {
+func TestProjectSubagentLifecycleAndIsolateChildNarrative(t *testing.T) {
 	now := time.Now().UTC()
 	spawned := agentcore.SemanticRecord{
 		SchemaVersion: 2, RecordID: "spawned", Seq: 10,
@@ -37,8 +37,14 @@ func TestProjectSubagentLifecycleAndSuppressChildNarrative(t *testing.T) {
 			"content": "internal child answer",
 		},
 	}
-	if frames := ProjectSemanticRecord(childMessage); len(frames) != 0 {
-		t.Fatalf("child assistant message leaked into root narrative: %+v", frames)
+	frames = ProjectSemanticRecord(childMessage)
+	if len(frames) != 3 || frames[0].Type != EventTextMessageStart || frames[1].Type != EventTextMessageContent || frames[2].Type != EventTextMessageEnd {
+		t.Fatalf("child assistant frames = %+v", frames)
+	}
+	for _, frame := range frames {
+		if frame.SubagentTaskID != "task-1" || frame.SubagentAgentID != "agent-1" {
+			t.Fatalf("child assistant identity missing: %+v", frame)
+		}
 	}
 
 	childTool := childMessage
@@ -50,7 +56,7 @@ func TestProjectSubagentLifecycleAndSuppressChildNarrative(t *testing.T) {
 		"tool_call_id": "call-1", "tool_name": "Read",
 	}
 	frames = ProjectSemanticRecord(childTool)
-	if len(frames) != 1 || frames[0].Type != EventAwakenSubagentActivity ||
+	if len(frames) != 2 || frames[0].Type != EventToolCallStart || frames[1].Type != EventToolCallEnd ||
 		frames[0].SubagentTaskID != "task-1" || frames[0].ToolCallName != "Read" {
 		t.Fatalf("child tool activity = %+v", frames)
 	}

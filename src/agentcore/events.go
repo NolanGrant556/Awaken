@@ -56,18 +56,18 @@ const (
 	ResourceReceiptEventType         AwakenEventType = "ResourceReceipt"
 	ToolRecoveryRequiredEventType    AwakenEventType = "ToolRecoveryRequired"
 	ToolRetryBlockedEventType        AwakenEventType = "ToolRetryBlocked"
-	MemoryRecalledEventType           AwakenEventType = "MemoryRecalled"
-	MemoryMutatedEventType            AwakenEventType = "MemoryMutated"
-	ContextSnapshotEventType          AwakenEventType = "ContextSnapshot"
-	ModelUsageEventType               AwakenEventType = "ModelUsage"
-	ACPSessionStartedEventType        AwakenEventType = "ACPSessionStarted"
-	ACPSessionClosedEventType         AwakenEventType = "ACPSessionClosed"
-	ACPSessionInterruptedEventType    AwakenEventType = "ACPSessionInterrupted"
-	ACPTurnStartedEventType           AwakenEventType = "ACPTurnStarted"
-	ACPTurnFinishedEventType          AwakenEventType = "ACPTurnFinished"
-	ACPToolSnapshotEventType          AwakenEventType = "ACPToolSnapshot"
-	ACPPermissionRequestedEventType   AwakenEventType = "ACPPermissionRequested"
-	ACPPermissionResolvedEventType    AwakenEventType = "ACPPermissionResolved"
+	MemoryRecalledEventType          AwakenEventType = "MemoryRecalled"
+	MemoryMutatedEventType           AwakenEventType = "MemoryMutated"
+	ContextSnapshotEventType         AwakenEventType = "ContextSnapshot"
+	ModelUsageEventType              AwakenEventType = "ModelUsage"
+	ACPSessionStartedEventType       AwakenEventType = "ACPSessionStarted"
+	ACPSessionClosedEventType        AwakenEventType = "ACPSessionClosed"
+	ACPSessionInterruptedEventType   AwakenEventType = "ACPSessionInterrupted"
+	ACPTurnStartedEventType          AwakenEventType = "ACPTurnStarted"
+	ACPTurnFinishedEventType         AwakenEventType = "ACPTurnFinished"
+	ACPToolSnapshotEventType         AwakenEventType = "ACPToolSnapshot"
+	ACPPermissionRequestedEventType  AwakenEventType = "ACPPermissionRequested"
+	ACPPermissionResolvedEventType   AwakenEventType = "ACPPermissionResolved"
 )
 
 type ArtifactStatus string
@@ -84,6 +84,9 @@ type AwakenEvent struct {
 	ThreadID                         string
 	RunID                            string
 	TurnID                           string
+	AgentID                          string
+	ParentAgentID                    string
+	SubagentTaskID                   string
 	QueryChainID                     string
 	Depth                            int
 	TurnCount                        int

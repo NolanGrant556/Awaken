@@ -60,7 +60,7 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 	}
 	runner.contextGovernor = newContextGovernor(
 		NewContextEngine(contextWindowConfigFromModelConfig(config.ModelConfig)),
-		runner.buildLLMRequest,
+		func() (LLMRequest, error) { return runner.buildLLMRequest() },
 		func(ctx stdcontext.Context, result CompactResult) error {
 			// Journal-first: persist the compacted conversation before it
 			// becomes the in-memory truth so a restart replays the same
@@ -183,10 +183,10 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 			})
 		}
 		if r.subagentController != nil {
-			events.beforeTerminal = func(terminalCtx stdcontext.Context) {
+			events.beforeTerminal = func(terminalCtx stdcontext.Context) error {
 				barrierCtx, cancel := stdcontext.WithTimeout(stdcontext.Background(), 5*time.Second)
 				defer cancel()
-				_ = r.subagentController.Close(barrierCtx)
+				return r.subagentController.Close(barrierCtx)
 			}
 		}
 	}
@@ -427,6 +427,8 @@ func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 		Profile:                      config.ExecutionProfile,
 		SubagentBoundary:             config.SubagentBoundary,
 		SubagentOrigin:               config.SubagentOrigin,
+		SubagentTaskID:               config.SubagentTaskID,
+		ModelProfileID:               config.ModelConfig.ProfileID,
 		ToolAvailabilitySnapshot:     config.ToolAvailabilitySnapshot,
 		ExecutionEnvironmentSnapshot: config.ExecutionEnvironmentSnapshot,
 		ModelCapabilities:            config.ModelConfig.Capabilities,
@@ -441,6 +443,9 @@ func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 
 func (r *Runner) buildLLMRequest() (LLMRequest, error) {
 	llmReq := r.reqBuilder.Build(r.conversation.Context, nil)
+	if err := r.hydrateOffloadedToolResults(stdcontext.Background(), llmReq.Messages); err != nil {
+		return LLMRequest{}, err
+	}
 	if err := context.ValidateToolResultPairing(llmReq.Messages); err != nil {
 		return LLMRequest{}, fmt.Errorf("invalid tool result pairing: %w", err)
 	}
@@ -978,6 +983,22 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 			r.toolRuntime.sink = buffer
 		}
 		executionCtx := runCtx
+		agentID := "root"
+		if r.config.SubagentOrigin != nil && strings.TrimSpace(r.config.SubagentOrigin.AgentID) != "" {
+			agentID = strings.TrimSpace(r.config.SubagentOrigin.AgentID)
+		}
+		identity := tool.ToolExecutionIdentity{
+			RunID:          r.runID,
+			AgentID:        agentID,
+			SubagentTaskID: strings.TrimSpace(r.config.SubagentTaskID),
+			ModelProfileID: strings.TrimSpace(r.config.ModelConfig.ProfileID),
+			ToolCallID:     call.ID,
+			ToolName:       call.Function.Name,
+		}
+		if events != nil {
+			identity.TurnID = events.turnID()
+		}
+		executionCtx = tool.ContextWithToolExecutionIdentity(executionCtx, identity)
 		if r.subagentController != nil && r.config.SubagentOrigin == nil {
 			executionCtx = subagentruntime.WithController(executionCtx, r.subagentController)
 		}
@@ -1079,7 +1100,21 @@ func (r *Runner) offloadLargeToolResult(ctx stdcontext.Context, result *ToolExec
 	if len([]byte(content)) <= toolResultOffloadThresholdBytes {
 		return nil
 	}
-	receipt, err := r.config.ToolResultOffloadStore.OffloadToolResult(ctx, r.threadID, result.ToolCallID, content)
+	identity := result.executionIdentity
+	if strings.TrimSpace(identity.ToolCallID) == "" {
+		identity = tool.ToolExecutionIdentity{
+			RunID:          r.runID,
+			AgentID:        "root",
+			SubagentTaskID: strings.TrimSpace(r.config.SubagentTaskID),
+			ModelProfileID: strings.TrimSpace(r.config.ModelConfig.ProfileID),
+			ToolCallID:     result.ToolCallID,
+			ToolName:       result.Name,
+		}
+		if r.config.SubagentOrigin != nil && strings.TrimSpace(r.config.SubagentOrigin.AgentID) != "" {
+			identity.AgentID = strings.TrimSpace(r.config.SubagentOrigin.AgentID)
+		}
+	}
+	receipt, err := r.config.ToolResultOffloadStore.OffloadToolResult(ctx, r.threadID, identity, content)
 	if err != nil {
 		return err
 	}
@@ -1092,8 +1127,75 @@ func (r *Runner) offloadLargeToolResult(ctx stdcontext.Context, result *ToolExec
 	if result.Outcome.Status != "" {
 		result.Outcome.Content = projection
 		result.Outcome.Truncated = true
+		result.Outcome.Details = map[string]any{
+			"result_storage_key": receipt.StorageKey,
+			"result_sha256":      receipt.Digest,
+			"result_bytes":       receipt.ByteSize,
+		}
 	}
 	return nil
+}
+
+func (r *Runner) hydrateOffloadedToolResults(ctx stdcontext.Context, messages []context.Message) error {
+	if r == nil || r.config.ToolResultOffloadStore == nil {
+		return nil
+	}
+	for i := range messages {
+		if messages[i].Role != context.RoleTool {
+			continue
+		}
+		marker := messages[i].Content
+		var envelope map[string]any
+		if _, ok := parseToolResultOffloadReceipt(marker); !ok {
+			if json.Unmarshal([]byte(marker), &envelope) != nil {
+				continue
+			}
+			content, _ := envelope["content"].(string)
+			marker = content
+		}
+		receipt, ok := parseToolResultOffloadReceipt(marker)
+		if !ok {
+			continue
+		}
+		content, err := r.config.ToolResultOffloadStore.HydrateOffloadedToolResult(ctx, r.threadID, receipt)
+		if err != nil {
+			return fmt.Errorf("hydrate offloaded tool result %q: %w", messages[i].ToolCallID, err)
+		}
+		if envelope == nil {
+			messages[i].Content = content
+			continue
+		}
+		envelope["content"] = content
+		envelope["truncated"] = false
+		hydrated, err := json.Marshal(envelope)
+		if err != nil {
+			return fmt.Errorf("encode hydrated tool result %q: %w", messages[i].ToolCallID, err)
+		}
+		messages[i].Content = string(hydrated)
+	}
+	return nil
+}
+
+func parseToolResultOffloadReceipt(content string) (ToolResultOffloadReceipt, bool) {
+	if !strings.HasPrefix(strings.TrimSpace(content), "[TOOL_RESULT_OFFLOADED]") {
+		return ToolResultOffloadReceipt{}, false
+	}
+	var receipt ToolResultOffloadReceipt
+	for _, line := range strings.Split(content, "\n") {
+		key, value, found := strings.Cut(strings.TrimSpace(line), "=")
+		if !found {
+			continue
+		}
+		switch key {
+		case "storage_key":
+			receipt.StorageKey = strings.TrimSpace(value)
+		case "sha256":
+			receipt.Digest = strings.TrimSpace(value)
+		case "bytes":
+			_, _ = fmt.Sscanf(strings.TrimSpace(value), "%d", &receipt.ByteSize)
+		}
+	}
+	return receipt, strings.TrimSpace(receipt.StorageKey) != ""
 }
 
 func (r *Runner) currentImplicitParentPool() []string {
@@ -1613,7 +1715,7 @@ type runEventEmitter struct {
 	parentAgentID         string
 	subagentTaskID        string
 	subagentProgress      subagentruntime.ProgressReporter
-	beforeTerminal        func(stdcontext.Context)
+	beforeTerminal        func(stdcontext.Context) error
 	auxiliaryRequestIndex int
 }
 
@@ -1788,6 +1890,15 @@ func (e *runEventEmitter) fillIDs(event *AwakenEvent) {
 	if event.RunID == "" {
 		event.RunID = e.runID
 	}
+	if event.AgentID == "" {
+		event.AgentID = e.agentID
+	}
+	if event.ParentAgentID == "" {
+		event.ParentAgentID = e.parentAgentID
+	}
+	if event.SubagentTaskID == "" {
+		event.SubagentTaskID = e.subagentTaskID
+	}
 	if e.turnState.TurnID != "" {
 		if event.TurnID == "" {
 			event.TurnID = string(e.turnState.TurnID)
@@ -1873,7 +1984,10 @@ func (e *runEventEmitter) runFinished(ctx stdcontext.Context, content string, st
 	if e.suppressRunLifecycle {
 		return
 	}
-	e.runTerminalBarrier(ctx)
+	if err := e.runTerminalBarrier(ctx); err != nil {
+		e.publishSubagentBarrierFailure(ctx, err)
+		return
+	}
 	reason := firstTerminalReason(reasons, TerminalReasonCompleted)
 	event := AwakenEvent{
 		Type:           RunFinishedEventType,
@@ -1912,7 +2026,10 @@ func (e *runEventEmitter) runErrored(ctx stdcontext.Context, err error, reasons 
 	if e.suppressRunLifecycle {
 		return
 	}
-	e.runTerminalBarrier(ctx)
+	if barrierErr := e.runTerminalBarrier(ctx); barrierErr != nil {
+		e.publishSubagentBarrierFailure(ctx, barrierErr)
+		return
+	}
 	event := AwakenEvent{
 		Type:           RunErrorEventType,
 		Error:          err.Error(),
@@ -1956,13 +2073,50 @@ func (e *runEventEmitter) runErrored(ctx stdcontext.Context, err error, reasons 
 	e.sink.Emit(event)
 }
 
-func (e *runEventEmitter) runTerminalBarrier(ctx stdcontext.Context) {
+func (e *runEventEmitter) runTerminalBarrier(ctx stdcontext.Context) error {
 	if e == nil || e.beforeTerminal == nil {
-		return
+		return nil
 	}
 	barrier := e.beforeTerminal
 	e.beforeTerminal = nil
-	barrier(ctx)
+	return barrier(ctx)
+}
+
+func (e *runEventEmitter) publishSubagentBarrierFailure(ctx stdcontext.Context, cause error) {
+	if e == nil || cause == nil {
+		return
+	}
+	err := fmt.Errorf("subagent terminal barrier failed: %w", cause)
+	event := AwakenEvent{
+		Type:           RunErrorEventType,
+		Error:          err.Error(),
+		Code:           "SUBAGENT_TERMINAL_BARRIER_FAILED",
+		TerminalReason: TerminalReasonAbortedTools,
+	}
+	e.fillIDs(&event)
+	if e.recorder != nil {
+		if persistErr := e.persistTerminal(ctx, "run_terminal_subagent_barrier", NewSemanticRecord(
+			SemanticKindRunTerminal,
+			e.threadID,
+			e.runID,
+			e.turnID(),
+			"",
+			e.sessionID,
+			map[string]any{
+				"status":          "error",
+				"error":           event.Error,
+				"code":            event.Code,
+				"terminal_reason": string(event.TerminalReason),
+			},
+		), event); persistErr != nil {
+			e.notePersistenceFailure("run_terminal_subagent_barrier", persistErr)
+			return
+		}
+		e.persistenceErr = err
+		return
+	}
+	e.persistenceErr = err
+	e.sink.Emit(event)
 }
 
 func (e *runEventEmitter) onLLMDelta(content string, isThinking bool) {

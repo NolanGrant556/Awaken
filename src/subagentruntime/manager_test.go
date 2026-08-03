@@ -2,6 +2,7 @@ package subagentruntime
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -238,5 +239,105 @@ func TestManagerPersistsDeduplicatedToolAndTokenProgress(t *testing.T) {
 	defer mu.Unlock()
 	if len(progress) != 2 || progress[0].ToolUseCount != 1 || progress[1].TotalTokens != 150 {
 		t.Fatalf("progress records = %+v", progress)
+	}
+	if progress[1].CurrentActivity != "正在整理子任务结果" {
+		t.Fatalf("model continuation kept stale tool activity: %+v", progress[1])
+	}
+}
+
+func TestManagerCancelQueuedTaskNeverStartsIt(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan string, 2)
+	manager := NewManager(context.Background(), Config{
+		MaxConcurrent: 1,
+		Starter: func(ctx context.Context, request StartRequest) (string, error) {
+			started <- request.Task.TaskID
+			select {
+			case <-release:
+				return "done", nil
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		},
+	})
+	first, err := manager.Spawn(context.Background(), SpawnRequest{Description: "first", Prompt: "first", AgentType: "explore", WorkspaceMode: "shared_readonly"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := <-started; got != first.TaskID {
+		t.Fatalf("unexpected first starter %q", got)
+	}
+	second, err := manager.Spawn(context.Background(), SpawnRequest{Description: "second", Prompt: "second", AgentType: "review", WorkspaceMode: "shared_readonly"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Cancel(context.Background(), second.TaskID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := manager.Wait(context.Background(), WaitRequest{TaskIDs: []string{second.TaskID}, Timeout: time.Second})
+	if err != nil || result.Tasks[0].Status != StatusCancelled {
+		t.Fatalf("queued cancellation = %+v err=%v", result, err)
+	}
+	select {
+	case taskID := <-started:
+		t.Fatalf("cancelled queued task started: %s", taskID)
+	default:
+	}
+	close(release)
+	_ = manager.Close(context.Background())
+}
+
+func TestManagerCancelGraceInterruptsUncooperativeStarter(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	manager := NewManager(context.Background(), Config{
+		CancelGrace: 10 * time.Millisecond,
+		Starter: func(context.Context, StartRequest) (string, error) {
+			close(started)
+			<-release
+			return "late", nil
+		},
+	})
+	task, err := manager.Spawn(context.Background(), SpawnRequest{Description: "slow", Prompt: "slow", AgentType: "explore", WorkspaceMode: "shared_readonly"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if _, err := manager.Cancel(context.Background(), task.TaskID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := manager.Wait(context.Background(), WaitRequest{TaskIDs: []string{task.TaskID}, Timeout: time.Second})
+	if err != nil || result.Tasks[0].Status != StatusInterrupted {
+		t.Fatalf("cancel grace result = %+v err=%v", result, err)
+	}
+	close(release)
+	_ = manager.Close(context.Background())
+}
+
+func TestManagerTerminalPersistenceFailureDoesNotPublishFalseTerminal(t *testing.T) {
+	persistFailure := errors.New("disk unavailable")
+	manager := NewManager(context.Background(), Config{
+		Starter: func(context.Context, StartRequest) (string, error) { return "done", nil },
+		Persist: func(_ context.Context, event PersistEvent) error {
+			if event.Kind == "subagent_terminal" {
+				return persistFailure
+			}
+			return nil
+		},
+	})
+	task, err := manager.Spawn(context.Background(), SpawnRequest{Description: "persist", Prompt: "persist", AgentType: "review", WorkspaceMode: "shared_readonly"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	snapshot, err := manager.Status(task.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Terminal() {
+		t.Fatalf("unpersisted terminal became authoritative: %+v", snapshot)
+	}
+	if err := manager.Close(context.Background()); err == nil || ErrorCode(err) != ErrorPersistence {
+		t.Fatalf("close did not surface terminal persistence failure: %v", err)
 	}
 }

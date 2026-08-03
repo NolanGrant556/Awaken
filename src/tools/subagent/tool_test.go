@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"awaken/src/subagentruntime"
+	"awaken/src/tool"
 )
 
 func TestWaitTimeoutReturnsNeutralRetrievalStatus(t *testing.T) {
@@ -47,5 +48,32 @@ func TestWaitTimeoutReturnsNeutralRetrievalStatus(t *testing.T) {
 	}
 	if outcome.DurationMs < 0 || outcome.DurationMs > int64(time.Second/time.Millisecond) {
 		t.Fatalf("unexpected duration: %dms", outcome.DurationMs)
+	}
+}
+
+func TestSpawnInheritsHostTurnAndModelProfileIdentity(t *testing.T) {
+	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
+		Starter: func(context.Context, subagentruntime.StartRequest) (string, error) {
+			return "done", nil
+		},
+	})
+	t.Cleanup(func() { _ = manager.Close(context.Background()) })
+	ctx := subagentruntime.WithController(context.Background(), manager)
+	ctx = tool.ContextWithToolThreadID(ctx, "thread-1")
+	ctx = tool.ContextWithToolExecutionIdentity(ctx, tool.ToolExecutionIdentity{
+		RunID: "run-1", TurnID: "turn-1", ToolCallID: "call-1", ModelProfileID: "profile-1",
+	})
+	output, err := (&SubagentTool{}).Execute(ctx, `{"action":"spawn","description":"inspect","prompt":"inspect","agent_type":"explore","workspace_mode":"shared_readonly"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Task subagentruntime.TaskSnapshot `json:"task"`
+	}
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Task.TurnID != "turn-1" || payload.Task.ModelProfileID != "profile-1" {
+		t.Fatalf("spawn identity was not inherited: %+v", payload.Task)
 	}
 }

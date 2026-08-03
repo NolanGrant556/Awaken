@@ -102,7 +102,8 @@ type ToolResultOffloadReceipt struct {
 }
 
 type ToolResultOffloadStore interface {
-	OffloadToolResult(stdcontext.Context, string, string, string) (ToolResultOffloadReceipt, error)
+	OffloadToolResult(stdcontext.Context, string, tool.ToolExecutionIdentity, string) (ToolResultOffloadReceipt, error)
+	HydrateOffloadedToolResult(stdcontext.Context, string, ToolResultOffloadReceipt) (string, error)
 }
 
 type MemoryRecallReceipt struct {

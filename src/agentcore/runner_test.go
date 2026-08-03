@@ -2292,6 +2292,28 @@ func TestRunEventEmitterRunErroredSetsRunCancelledCode(t *testing.T) {
 	}
 }
 
+func TestRunEventEmitterDoesNotPublishSuccessWhenSubagentBarrierFails(t *testing.T) {
+	var gotEvents []AwakenEvent
+	emitter := newRunEventEmitter("thread-test", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	emitter.beforeTerminal = func(context.Context) error {
+		return errors.New("child did not reach a durable terminal")
+	}
+
+	emitter.runFinished(context.Background(), "done", nil, TerminalReasonCompleted)
+
+	if len(gotEvents) != 1 || gotEvents[0].Type != RunErrorEventType {
+		t.Fatalf("barrier failure events = %+v", gotEvents)
+	}
+	if gotEvents[0].Code != "SUBAGENT_TERMINAL_BARRIER_FAILED" || gotEvents[0].TerminalReason != TerminalReasonAbortedTools {
+		t.Fatalf("barrier failure identity = %+v", gotEvents[0])
+	}
+	if emitter.persistenceFailure() == nil {
+		t.Fatal("barrier failure was not returned to the runner")
+	}
+}
+
 func mustRegisterRunnerTool(t *testing.T, candidate tool.Tool) {
 	t.Helper()
 	if err := tool.RegisterTool(candidate); err != nil {

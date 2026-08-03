@@ -69,6 +69,8 @@ MCP delete 与其他 MCP mutation 一样直接进入 provider transport，不要
 
 signature 由 tool name + canonical arguments hash 组成，fingerprint 用稳定 error code/主诊断并清除 workspace root、timestamp、temp path、随机 ID 等易漂移信息。对 partial/unknown 或外部副作用不得盲目重放；非相关工具的成功也不能清除未完成的 recovery directive。
 
+文件类工具的 resource revision / identity 同时识别 canonical arguments 中的 `path` 与 `file_path`：revision 保留既有 `path:<canonical-argument>` 语义，identity 再做跨平台路径清理；不能因工具 schema 使用 `file_path` 就退化为共享 `unknown`。因此不同 DOCX、TXT 或其他文件的失败预算必须彼此隔离，只有同一真实文件资源上的失败才可累计。
+
 `Bash` 的 resource revision 使用 `command + cwd` 生成不暴露命令文本的稳定摘要；不同命令不共用 `unknown` class budget。当已观测 mutation 成功，或 Bash 成功且宿主基于 canonical call arguments 与 command classifier 判定为明确恢复型 mutation（例如 `npm install`、`python -m pip install`、创建/写入文件）时，才清除旧 Bash 失败历史，使同一 validator/build 可以针对新状态重跑。仅有 `side_effect_state=unknown` 不足以解锁：`node --version`、无输出文件的 `curl` 和无关本机 CLI 不能清除失败历史或 pending recovery；副作用已证明为 `none` 的只读成功同样不能绕过失败监督。
 
 同 capability 存在多个 provider 也不允许 runtime 在失败后暗中换实现。若 provider A 已 `transport=completed` 且返回 partial/observed side effect，当次 call 必须以 A 的失败与变更事实终止，不自动调用 provider B。只有模型在检查外部状态后明确发出新的 B tool call，B 才可执行。

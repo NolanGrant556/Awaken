@@ -600,9 +600,11 @@ func ResourceRevision(arguments string, outcome tool.ExecutionOutcome) string {
 				}
 			}
 		}
-		if path, ok := payload["path"]; ok {
-			if s := strings.TrimSpace(fmt.Sprint(path)); s != "" {
-				return "path:" + s
+		for _, key := range []string{"path", "file_path"} {
+			if path, ok := payload[key]; ok {
+				if s := strings.TrimSpace(fmt.Sprint(path)); s != "" {
+					return "path:" + s
+				}
 			}
 		}
 		// Shell does not expose a typed path/revision field. Treating every
@@ -728,9 +730,11 @@ func outcomeIncludesObservedMutation(outcome tool.ExecutionOutcome) bool {
 func ResourceIdentity(arguments string, outcome tool.ExecutionOutcome) string {
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(arguments), &payload); err == nil {
-		if value, ok := payload["path"]; ok {
-			if path := strings.TrimSpace(fmt.Sprint(value)); path != "" {
-				return "path:" + filepath.ToSlash(filepath.Clean(path))
+		for _, key := range []string{"path", "file_path"} {
+			if value, ok := payload[key]; ok {
+				if path := strings.TrimSpace(fmt.Sprint(value)); path != "" {
+					return "path:" + filepath.ToSlash(filepath.Clean(path))
+				}
 			}
 		}
 	}

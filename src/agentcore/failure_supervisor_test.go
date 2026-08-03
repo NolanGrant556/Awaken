@@ -87,6 +87,51 @@ func TestResourceRevisionSeparatesBashCommandsWithoutLeakingText(t *testing.T) {
 	}
 }
 
+func TestResourceRevisionAndIdentityRecognizeFilePath(t *testing.T) {
+	first := ResourceRevision(`{"file_path":"reports/first.docx"}`, tool.ExecutionOutcome{})
+	second := ResourceRevision(`{"file_path":"notes/fresh.txt"}`, tool.ExecutionOutcome{})
+	if first == "unknown" || second == "unknown" || first == second {
+		t.Fatalf("file_path revisions were not isolated: %q %q", first, second)
+	}
+	if got := ResourceRevision(`{"path":"reports/first.docx"}`, tool.ExecutionOutcome{}); got != first {
+		t.Fatalf("file_path revision changed existing path semantics: path=%q file_path=%q", got, first)
+	}
+	if got := ResourceIdentity(`{"file_path":"notes/../notes/fresh.txt"}`, tool.ExecutionOutcome{}); got != "path:notes/fresh.txt" {
+		t.Fatalf("file_path identity=%q", got)
+	}
+}
+
+func TestFailureSupervisorDOCXFailuresDoNotBlockFreshTXTRead(t *testing.T) {
+	s := NewFailureSupervisor("/tmp/ws", 8, 32)
+	for index, path := range []string{"reports/first.docx", "reports/second.docx", "reports/third.docx"} {
+		call := convcontext.ToolCall{
+			ID: "docx-" + path,
+			Function: convcontext.FunctionCall{
+				Name:      "Read",
+				Arguments: `{"file_path":"` + path + `"}`,
+			},
+		}
+		before := s.BeforeCall(call)
+		if before.Block || !before.Allow {
+			t.Fatalf("DOCX read %d was blocked before execution: %+v", index+1, before)
+		}
+		s.NoteRealExecution(before.CallSignature)
+		s.AfterOutcome(call, tool.FailedOutcome("cannot decode Word document", "file_read_failed", tool.ErrorCategoryDomain, false))
+	}
+
+	fresh := convcontext.ToolCall{
+		ID: "txt-fresh",
+		Function: convcontext.FunctionCall{
+			Name:      "Read",
+			Arguments: `{"file_path":"notes/fresh.txt"}`,
+		},
+	}
+	decision := s.BeforeCall(fresh)
+	if decision.Block || !decision.Allow {
+		t.Fatalf("fresh TXT read inherited unrelated DOCX failures: %+v", decision)
+	}
+}
+
 func TestSyntheticBlockedResultRequiresStrategyChange(t *testing.T) {
 	call := convcontext.ToolCall{ID: "blocked", Function: convcontext.FunctionCall{Name: "Read", Arguments: `{"file_path":"missing"}`}}
 	result := SyntheticBlockedResult(call, BeforeCallDecision{Block: true, ErrorCode: ErrorCodeRepeatedFailure, ErrorMessage: "repeated", RecoveryOptions: []string{"change_path"}})

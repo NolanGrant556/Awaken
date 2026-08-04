@@ -1588,6 +1588,11 @@ pre {
   gap: 12px;
 }
 
+.subagent-inspector__header > div {
+  flex: 1;
+  min-width: 0;
+}
+
 .subagent-inspector__header h3,
 .subagent-inspector section h4 {
   margin: 0;
@@ -1606,9 +1611,11 @@ pre {
 }
 
 .subagent-inspector__status {
+  flex: 0 0 auto;
   padding: 3px 7px;
   border-radius: 999px;
   background: rgba(127, 127, 127, 0.1);
+  white-space: nowrap;
 }
 
 .subagent-inspector__status--running,

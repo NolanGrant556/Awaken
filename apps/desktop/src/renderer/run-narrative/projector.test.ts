@@ -61,13 +61,26 @@ function runStatusChanged(
 }
 
 describe("projectAguiEventToNarrative", () => {
-  it("keeps partial tool arguments out of the narrative for normal and media tools", () => {
-    const normal = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+  it("projects only Core-derived Write/Edit preparation while keeping raw deltas private", () => {
+    let normal = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
       type: "TOOL_CALL_ARGS_DELTA",
       runId: "run-1",
       toolCallId: "write-1",
       toolCallName: "Write",
-      delta: '{"content":"private fragment',
+      delta: '{"file_path":"/private/report.md","content":"private fragment',
+      toolPreparationKind: "write",
+      toolPreparationPath: "/private/report.md",
+      toolPreparationAddedLines: 1,
+    });
+    normal = projectAguiEventToNarrative(normal, {
+      type: "TOOL_CALL_ARGS_DELTA",
+      runId: "run-1",
+      toolCallId: "write-1",
+      toolCallName: "Write",
+      delta: "\\nmore private content",
+      toolPreparationKind: "write",
+      toolPreparationPath: "report.md",
+      toolPreparationAddedLines: 2,
     });
     const media = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
       type: "TOOL_CALL_ARGS_DELTA",
@@ -75,11 +88,22 @@ describe("projectAguiEventToNarrative", () => {
       toolCallId: "image-1",
       toolCallName: "image_generate",
       delta: '{"prompt":"partial',
+      toolPreparationKind: "write",
+      toolPreparationAddedLines: 99,
     });
 
-    expect(normal.activeItem).toBeUndefined();
+    expect(normal.activeItem).toEqual({
+      kind: "tool",
+      id: "tool:run-1:write-1",
+      toolCallId: "write-1",
+      title: "写入 report.md",
+      detail: "+2 行",
+      status: "active",
+    });
     expect(normal.committedItems).toEqual([]);
     expect(JSON.stringify(normal)).not.toContain("private fragment");
+    expect(JSON.stringify(normal)).not.toContain("more private content");
+    expect(JSON.stringify(normal)).not.toContain("/private/");
     expect(media.activeItem).toBeUndefined();
     expect(media.committedItems).toEqual([]);
     expect(JSON.stringify(media)).not.toContain("partial");

@@ -1008,7 +1008,7 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
-  it("does not create renderer state from partial tool arguments alone", () => {
+  it("creates only a sanitized live Write row from partial tool arguments", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Wait for a complete tool call" },
       runEvent({
@@ -1017,13 +1017,67 @@ describe("runtime reducer run narrative projection", () => {
         toolCallId: "write-1",
         toolCallName: "Write",
         delta: '{"content":"private fragment',
+        toolPreparationKind: "write",
+        toolPreparationPath: "/private/report.md",
+        toolPreparationAddedLines: 7,
       }),
     ]);
 
     expect(state.toolResults).toEqual([]);
     expect(state.steps).toEqual([]);
-    expect(state.narrative.activeItem).toMatchObject({ kind: "planning" });
+    expect(state.narrative.activeItem).toEqual({
+      kind: "tool",
+      id: "tool:write-1",
+      toolCallId: "write-1",
+      title: "写入 report.md",
+      detail: "+7 行",
+      status: "active",
+    });
     expect(JSON.stringify(state)).not.toContain("private fragment");
+    expect(JSON.stringify(state)).not.toContain("/private/");
+  });
+
+  it("does not rerender for hidden or unchanged argument delta snapshots", () => {
+    const requested = reduceRuntimeState(createInitialRuntimeState(), {
+      type: "run/requested",
+      prompt: "Stream one file",
+    });
+    const hidden = reduceRuntimeState(
+      requested,
+      runEvent({
+        type: "TOOL_CALL_ARGS_DELTA",
+        toolCallId: "bash-1",
+        toolCallName: "Bash",
+        delta: '{"command":"private fragment',
+      }),
+    );
+    expect(hidden).toBe(requested);
+
+    const first = reduceRuntimeState(
+      hidden,
+      runEvent({
+        type: "TOOL_CALL_ARGS_DELTA",
+        toolCallId: "write-1",
+        toolCallName: "Write",
+        delta: '{"content":"private fragment',
+        toolPreparationKind: "write",
+        toolPreparationPath: "report.md",
+        toolPreparationAddedLines: 1,
+      }),
+    );
+    const unchanged = reduceRuntimeState(
+      first,
+      runEvent({
+        type: "TOOL_CALL_ARGS_DELTA",
+        toolCallId: "write-1",
+        toolCallName: "Write",
+        delta: " more private fragment",
+        toolPreparationKind: "write",
+        toolPreparationPath: "report.md",
+        toolPreparationAddedLines: 1,
+      }),
+    );
+    expect(unchanged).toBe(first);
   });
 
   it("shows a host-generated redacted install activity without assistant narration", () => {

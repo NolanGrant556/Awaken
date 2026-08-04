@@ -34,7 +34,7 @@ var _ tool.OutcomeTool = (*SubagentTool)(nil)
 func (t *SubagentTool) Name() string { return ToolName }
 
 func (t *SubagentTool) Description() string {
-	return "创建和管理当前 run 内的本地只读 Subagent。支持 spawn、status、wait、cancel；Subagent 拥有独立上下文，结果通过 wait 返回。"
+	return "创建和管理当前 run 内的本地只读 Subagent。支持 spawn、status、wait、cancel；Subagent 拥有独立上下文，终态会自动通知主 Agent，status/wait 可用于显式查询。"
 }
 
 func (t *SubagentTool) Parameters() []tool.ToolParameter {
@@ -153,6 +153,9 @@ func (t *SubagentTool) Execute(ctx context.Context, raw string) (string, error) 
 			return "", invalid("task_id is required for status")
 		}
 		snapshot, err := controller.Status(request.TaskID)
+		if err == nil && snapshot.Terminal() {
+			controller.AcknowledgeTerminal(snapshot.TaskID)
+		}
 		return encode(map[string]any{"task": snapshot}, err)
 	case "wait":
 		result, err := controller.Wait(ctx, subagentruntime.WaitRequest{
@@ -165,6 +168,9 @@ func (t *SubagentTool) Execute(ctx context.Context, raw string) (string, error) 
 			return "", invalid("task_id is required for cancel")
 		}
 		snapshot, err := controller.Cancel(ctx, request.TaskID, request.Reason)
+		if err == nil && snapshot.Terminal() {
+			controller.AcknowledgeTerminal(snapshot.TaskID)
+		}
 		return encode(map[string]any{"task": snapshot}, err)
 	default:
 		return "", invalid("action must be spawn, status, wait, or cancel")

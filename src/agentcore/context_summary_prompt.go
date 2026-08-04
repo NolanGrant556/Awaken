@@ -279,7 +279,9 @@ func compactTailAnchor(messages []convcontext.Message) string {
 
 func latestMessageContent(messages []convcontext.Message, role convcontext.Role) string {
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == role && strings.TrimSpace(messages[i].Content) != "" {
+		if messages[i].Role == role &&
+			!(role == convcontext.RoleUser && messages[i].Origin == convcontext.MessageOriginSynthetic) &&
+			strings.TrimSpace(messages[i].Content) != "" {
 			return singleLineCompactText(messages[i].Content)
 		}
 	}

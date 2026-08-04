@@ -129,6 +129,7 @@ import {
   projectNarrativeActivitySegments,
   projectNarrativeTurnBodySegments,
   contextUsagePanelBottomOffset,
+  diffLineStats,
   subagentDetailPanelBottomOffset,
   narrativeTurnElapsedMs,
   projectVisibleNarrativeItems,
@@ -1863,6 +1864,9 @@ function naturalToolTitle(
   }
   if (FILE_TOOL_TITLE.test(title)) {
     const target = firstStringArgument(args, ["path", "file_path", "filePath", "target"]);
+    if (!target && /^(?:写入|编辑|修改|创建|删除|移动|复制)(?:文件|\s)/.test(title)) {
+      return compactInlineLabel(title);
+    }
     const action = /delete|删除/i.test(title)
       ? "删除"
       : /move|移动/i.test(title)
@@ -1994,9 +1998,18 @@ export function toolTracePresentation(
     kind === "terminal" ? "Shell 详情" : mcpProvider ? `${providerLabel || "MCP"} 详情` : "工具详情",
     sections,
   );
+  const patchStats = options.patch ? diffLineStats(options.patch.patch) : undefined;
+  const lineChangeDetail = patchStats
+    ? `+${patchStats.added} −${patchStats.removed} 行`
+    : undefined;
+  const preparationDetail = active && /^\+\d+(?: −\d+)? 行$/.test(progress ?? "")
+    ? progress
+    : undefined;
   return {
     title: naturalToolTitle(sourceTitle, kind, args),
-    detail: providerLabel || (failed ? compactToolFailureContext(progress) : undefined),
+    detail:
+      providerLabel ||
+      (failed ? compactToolFailureContext(progress) : lineChangeDetail || preparationDetail),
     output,
     outputLabel: kind === "terminal" ? "终端输出" : mcpProvider ? "MCP 输出" : "工具输出",
     outputTruncated: tool.commandOutputTruncated,

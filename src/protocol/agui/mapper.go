@@ -139,6 +139,10 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ToolCallID = event.ToolCallID
 		base.ToolCallName = event.ToolName
 		base.Delta = event.Delta
+		base.ToolPreparationKind = event.ToolPreparationKind
+		base.ToolPreparationPath = event.ToolPreparationPath
+		base.ToolPreparationAddedLines = event.ToolPreparationAddedLines
+		base.ToolPreparationDeletedLines = event.ToolPreparationDeletedLines
 		return []Event{base}
 	case agentcore.ToolCallArgsEventType:
 		base.Type = EventToolCallArgs

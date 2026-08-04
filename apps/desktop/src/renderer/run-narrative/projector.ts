@@ -144,8 +144,14 @@ export function projectAguiEventToNarrative(
       }
       return activateTool(base, event);
     case "TOOL_CALL_ARGS_DELTA":
-      // Partial JSON is transport state, not a user-visible narrative fact.
-      // Core/LLM assembly owns accumulation and later emits TOOL_CALL_ARGS.
+      {
+        const preparation = fileToolPreparation(event);
+        if (preparation) {
+          return activateTool(base, event, preparation.detail, preparation.title);
+        }
+      }
+      // Raw partial JSON remains transport-only. Unknown tools and deltas
+      // without Core-derived safe progress do not create narrative state.
       return base;
     case "TOOL_CALL_ARGS": {
       if (isMediaToolEvent(event)) {
@@ -624,6 +630,12 @@ function commitACPTool(state: RunNarrativeState, event: AguiEvent): RunNarrative
 }
 
 function eventKey(event: AguiEvent): string | undefined {
+  // Argument deltas are live-only and can arrive for every token. Only their
+  // Core-derived safe preparation snapshot may affect the active row, so they
+  // do not need replay/dedup bookkeeping in Renderer state.
+  if (event.type === "TOOL_CALL_ARGS_DELTA") {
+    return undefined;
+  }
   if (event.type.startsWith("AWAKEN_MEMORY_DREAM_") && event.recordId) {
     return `${event.type}:dream:${event.recordId}`;
   }
@@ -647,7 +659,6 @@ function eventKey(event: AguiEvent): string | undefined {
     event.type === "TEXT_MESSAGE_CONTENT" ||
     event.type === "REASONING_MESSAGE_CONTENT" ||
     event.type === "TOOL_CALL_ARGS" ||
-    event.type === "TOOL_CALL_ARGS_DELTA" ||
     event.type === "TOOL_PROGRESS"
   ) {
     return undefined;
@@ -1564,10 +1575,32 @@ function numberArg(args: Record<string, unknown> | undefined, key: string): numb
 }
 
 function compactPathLabel(value: string): string {
-  const normalized = value.trim().replace(/[\\/]+$/, "");
+  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, "").trim().replace(/[\\/]+$/, "");
   const segments = normalized.split(/[\\/]/).filter(Boolean);
   const label = segments.at(-1) || normalized;
   return label.length > 72 ? `${label.slice(0, 71).trimEnd()}…` : label;
+}
+
+function safePreparationLineCount(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return 0;
+  return Math.min(Math.floor(value), 10_000_000);
+}
+
+function fileToolPreparation(
+  event: AguiEvent,
+): { title: string; detail: string } | undefined {
+  const kind = event.toolPreparationKind;
+  if (kind !== "write" && kind !== "edit") return undefined;
+  if (event.toolCallName?.trim().toLowerCase() !== kind) return undefined;
+
+  const added = safePreparationLineCount(event.toolPreparationAddedLines);
+  const deleted = safePreparationLineCount(event.toolPreparationDeletedLines);
+  const path = compactPathLabel(event.toolPreparationPath ?? "");
+  const action = kind === "write" ? "写入" : "编辑";
+  return {
+    title: path ? `${action} ${path}` : `${action}文件`,
+    detail: kind === "write" ? `+${added} 行` : `+${added} −${deleted} 行`,
+  };
 }
 
 function compactSearchScope(value: string): string {
@@ -1763,12 +1796,27 @@ function activateTool(
   state: RunNarrativeState,
   event: AguiEvent,
   detail?: string,
+  title?: string,
 ): RunNarrativeState {
   const id = toolId(event);
   const existing =
     state.activeItem?.id === id && state.activeItem.kind === "tool"
       ? state.activeItem
       : undefined;
+  const nextToolCallId = event.toolCallId ?? existing?.toolCallId;
+  const nextTitle = title || existing?.title || event.toolCallName || "Tool call";
+  const nextDetail = detail ?? existing?.detail;
+  if (
+    existing &&
+    existing.toolCallId === nextToolCallId &&
+    existing.title === nextTitle &&
+    existing.detail === nextDetail &&
+    existing.status === "active" &&
+    state.inspectorSelection?.kind === "tool" &&
+    state.inspectorSelection.id === id
+  ) {
+    return state;
+  }
   return setActive(
     {
       ...state,
@@ -1777,9 +1825,9 @@ function activateTool(
     {
       kind: "tool",
       id,
-      toolCallId: event.toolCallId ?? existing?.toolCallId,
-      title: event.toolCallName || existing?.title || "Tool call",
-      detail: detail ?? existing?.detail,
+      toolCallId: nextToolCallId,
+      title: nextTitle,
+      detail: nextDetail,
       status: "active",
     },
   );

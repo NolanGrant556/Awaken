@@ -44,6 +44,26 @@ export const AwakenContextUsagePanelStates: AwakenContextUsagePanelState[] = [
     },
   },
   {
+    id: "zero-middle-category",
+    label: "中间分类为零时保持语义配色",
+    props: {
+      estimatedInputTokens: 110_724,
+      effectiveInputWindowTokens: 613_000,
+      modelWindowTokens: 629_000,
+      outputReserveTokens: 16_000,
+      autoCompactThresholdTokens: 551_700,
+      contributions: [
+        { id: "system_prompt", label: "系统提示词", estimatedTokens: 1_461 },
+        { id: "builtin_tools", label: "内置工具", estimatedTokens: 11_060 },
+        { id: "mcp", label: "MCP", estimatedTokens: 0 },
+        { id: "skills", label: "技能", estimatedTokens: 1_736 },
+        { id: "memory", label: "记忆", estimatedTokens: 747 },
+        { id: "conversation", label: "对话", estimatedTokens: 95_720 },
+      ],
+      onClose: noop,
+    },
+  },
+  {
     id: "cache-hit",
     label: "缓存命中与成本",
     props: {

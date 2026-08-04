@@ -323,7 +323,7 @@ func buildCompactSummary(boundaryID string, messages []convcontext.Message, enve
 	}
 	lastUser := ""
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == convcontext.RoleUser && strings.TrimSpace(messages[i].Content) != "" {
+		if messages[i].Role == convcontext.RoleUser && messages[i].Origin != convcontext.MessageOriginSynthetic && strings.TrimSpace(messages[i].Content) != "" {
 			lastUser = strings.TrimSpace(messages[i].Content)
 			break
 		}

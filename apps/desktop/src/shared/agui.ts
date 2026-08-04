@@ -244,6 +244,10 @@ export type AguiEvent = {
   delta?: string;
   toolCallId?: string;
   toolCallName?: string;
+  toolPreparationKind?: "write" | "edit";
+  toolPreparationPath?: string;
+  toolPreparationAddedLines?: number;
+  toolPreparationDeletedLines?: number;
   content?: string;
   result?: string;
   memories?: AguiMemoryReceipt[];

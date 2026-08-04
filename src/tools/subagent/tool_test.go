@@ -77,3 +77,41 @@ func TestSpawnInheritsHostTurnAndModelProfileIdentity(t *testing.T) {
 		t.Fatalf("spawn identity was not inherited: %+v", payload.Task)
 	}
 }
+
+func TestTerminalStatusConsumesAutomaticNotification(t *testing.T) {
+	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
+		Starter: func(context.Context, subagentruntime.StartRequest) (string, error) {
+			return "done", nil
+		},
+	})
+	t.Cleanup(func() { _ = manager.Close(context.Background()) })
+	task, err := manager.Spawn(context.Background(), subagentruntime.SpawnRequest{
+		Description: "inspect", Prompt: "inspect", AgentType: "explore", WorkspaceMode: "shared_readonly",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		snapshot, statusErr := manager.Status(task.TaskID)
+		if statusErr != nil {
+			t.Fatal(statusErr)
+		}
+		if snapshot.Terminal() {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("task did not reach terminal status")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	ctx := subagentruntime.WithController(context.Background(), manager)
+	statusInput, _ := json.Marshal(map[string]any{"action": "status", "task_id": task.TaskID})
+	if _, err := (&SubagentTool{}).Execute(ctx, string(statusInput)); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if notifications := manager.DrainTerminalNotifications(); len(notifications) != 0 {
+		t.Fatalf("terminal status must consume automatic notification: %+v", notifications)
+	}
+}

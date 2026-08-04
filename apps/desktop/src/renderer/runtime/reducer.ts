@@ -1966,6 +1966,18 @@ export function reduceRuntimeState(
       if (subagentNarrativeState) {
         return saveActiveThreadView(subagentNarrativeState);
       }
+      if (action.event.type === "TOOL_CALL_ARGS_DELTA") {
+        const projectedNarrative = projectAguiEventToNarrative(
+          state.narrative,
+          scopeNarrativeEvent(action.event, state),
+        );
+        if (projectedNarrative === state.narrative) {
+          return state;
+        }
+        return saveActiveThreadView(
+          syncActiveThreadSummary({ ...state, narrative: projectedNarrative }),
+        );
+      }
       let nextState = { ...state };
       if (
         action.event.subagentTaskId &&
@@ -2276,10 +2288,6 @@ export function reduceRuntimeState(
               tag: "tool",
             },
           );
-          break;
-        case "TOOL_CALL_ARGS_DELTA":
-          // The LLM transport owns partial-JSON accumulation. Renderer state
-          // consumes only the complete TOOL_CALL_ARGS snapshot.
           break;
         case "TOOL_CALL_ARGS": {
           const id =

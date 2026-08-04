@@ -171,6 +171,8 @@ type Controller interface {
 	Status(string) (TaskSnapshot, error)
 	List() []TaskSnapshot
 	Wait(context.Context, WaitRequest) (WaitResult, error)
+	DrainTerminalNotifications() []TaskSnapshot
+	AcknowledgeTerminal(string)
 	Message(context.Context, string, string) (MessageReceipt, error)
 	Cancel(context.Context, string, string) (TaskSnapshot, error)
 	Close(context.Context) error

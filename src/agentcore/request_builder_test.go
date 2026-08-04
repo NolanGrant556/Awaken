@@ -210,6 +210,27 @@ func TestRequestBuilderDeclaresSameTaskHistoryContinuity(t *testing.T) {
 	}
 }
 
+func TestRequestBuilderKeepsSyntheticNotificationOutOfCurrentUserAttribution(t *testing.T) {
+	ctx := convcontext.New()
+	ctx.AddUserMessage("完成这项任务")
+	ctx.AddAssistantMessage("正在等待子任务", nil)
+	ctx.AddSyntheticUserMessage("Host notification: child completed", "subagent_terminal_task-1")
+
+	req := NewRequestBuilder(AgentConfig{}).Build(ctx, nil)
+	if len(req.Messages) != 3 {
+		t.Fatalf("messages = %+v", req.Messages)
+	}
+	if req.Messages[0].Origin != convcontext.MessageOriginCurrentInput {
+		t.Fatalf("real user input lost current attribution: %+v", req.Messages)
+	}
+	if req.Messages[2].Origin != convcontext.MessageOriginSynthetic {
+		t.Fatalf("host notification origin = %+v", req.Messages[2])
+	}
+	if req.Messages[2].TurnID == "" || req.Messages[2].TurnID != req.Messages[0].TurnID {
+		t.Fatalf("synthetic notification must stay in the current user turn: %+v", req.Messages)
+	}
+}
+
 func TestRequestBuilderProjectsHistoricalImagesForTextOnlyModel(t *testing.T) {
 	ctx := convcontext.New()
 	ctx.AddUserMessageWithAttachments("", []convcontext.MessageAttachment{{

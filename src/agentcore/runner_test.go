@@ -527,6 +527,15 @@ func TestRunnerFinishesStreamedTextBeforeToolArgumentDeltas(t *testing.T) {
 			eventTypes(events),
 		)
 	}
+	modelUsageIndex := firstEventIndex(events, ModelUsageEventType)
+	if modelUsageIndex < 0 || toolArgsDeltaIndex > modelUsageIndex {
+		t.Fatalf(
+			"tool argument deltas must be emitted while the provider is still streaming: tool args=%d model usage=%d events=%v",
+			toolArgsDeltaIndex,
+			modelUsageIndex,
+			eventTypes(events),
+		)
+	}
 }
 
 func TestRunnerRunStreamWithEventsEmitsLifecycleSequence(t *testing.T) {

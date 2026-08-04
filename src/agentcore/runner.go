@@ -262,8 +262,6 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		if err := events.persistenceFailure(); err != nil {
 			return "", err
 		}
-		events.flushPendingToolCallArgsDeltas()
-
 		if len(response.ToolCalls) > 0 {
 			toolCalls := llmToolCallsToContext(response.ToolCalls)
 			results := r.executeToolCalls(ctx, toolCalls, events)
@@ -1752,7 +1750,6 @@ type runEventEmitter struct {
 	mutationOccurred      bool
 	reasoningText         strings.Builder
 	assistantText         strings.Builder
-	pendingToolCallDeltas []llm.ToolCallDelta
 	toolArgumentProgress  toolArgumentProgressTracker
 	pendingTerminalReason TerminalReason
 	persistenceErr        error
@@ -2239,13 +2236,11 @@ func (e *runEventEmitter) onToolCallArgsDelta(delta llm.ToolCallDelta) {
 	}
 	e.ensureAssistantMessageID()
 	// Some OpenAI-compatible providers stream assistant text and tool arguments
-	// in the same response. Keep tool argument previews behind the current text
-	// boundary so the durable assistant snapshot is projected before the tool
-	// item activates; otherwise the renderer can mistake that snapshot for a
-	// second post-tool answer segment.
+	// in the same response. Close the text boundary as soon as tool arguments
+	// begin so the durable assistant snapshot remains before the tool item while
+	// Write/Edit preparation can still be projected live during generation.
 	if e.textOpen {
-		e.pendingToolCallDeltas = append(e.pendingToolCallDeltas, delta)
-		return
+		e.finishTextIfOpen()
 	}
 	e.emitToolCallArgsDelta(delta)
 }
@@ -2268,13 +2263,6 @@ func (e *runEventEmitter) emitToolCallArgsDelta(delta llm.ToolCallDelta) {
 		event.ToolPreparationDeletedLines = progress.DeletedLines
 	}
 	e.emit(event)
-}
-
-func (e *runEventEmitter) flushPendingToolCallArgsDeltas() {
-	for _, delta := range e.pendingToolCallDeltas {
-		e.emitToolCallArgsDelta(delta)
-	}
-	e.pendingToolCallDeltas = nil
 }
 
 func (e *runEventEmitter) emitStandaloneText(content string) {
@@ -2967,7 +2955,6 @@ func (e *runEventEmitter) resetTurn() {
 	e.textStartedThisTurn = false
 	e.reasoningText.Reset()
 	e.assistantText.Reset()
-	e.pendingToolCallDeltas = nil
 	e.toolArgumentProgress.reset()
 }
 

@@ -141,4 +141,21 @@ describe("RunStage layout", () => {
       /\.aw-subagent-execution-card__body::\-webkit-scrollbar-track,[\s\S]*?background:\s*transparent;/,
     );
   });
+
+  it("keeps the right-rail subagent status pill on one line", () => {
+    const appStyles = readFileSync(
+      new URL("./styles.css", import.meta.url),
+      "utf8",
+    );
+    const headerContent = cssRule(
+      appStyles,
+      ".subagent-inspector__header > div",
+    );
+
+    expect(headerContent).toContain("flex: 1;");
+    expect(headerContent).toContain("min-width: 0;");
+    expect(appStyles).toMatch(
+      /\.subagent-inspector__status\s*\{[^}]*flex:\s*0 0 auto;[^}]*white-space:\s*nowrap;/,
+    );
+  });
 });

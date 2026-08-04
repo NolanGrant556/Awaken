@@ -98,6 +98,10 @@ type AwakenEvent struct {
 	ToolCallID                       string
 	ToolName                         string
 	Arguments                        string
+	ToolPreparationKind              string
+	ToolPreparationPath              string
+	ToolPreparationAddedLines        int
+	ToolPreparationDeletedLines      int
 	Progress                         string
 	CommandStream                    string
 	Patch                            string

@@ -189,6 +189,40 @@ describe("tool trace presentation", () => {
     });
   });
 
+  it("keeps streamed file line counts on the same semantic tool row", () => {
+    expect(
+      toolTracePresentation(
+        { title: "Edit", content: "", status: "active" },
+        "+12 −3 行",
+        { title: "编辑 report.md", status: "active" },
+      ),
+    ).toMatchObject({
+      title: "编辑 report.md",
+      detail: "+12 −3 行",
+      output: undefined,
+    });
+  });
+
+  it("replaces provisional counts with canonical patch line totals", () => {
+    expect(
+      toolTracePresentation(
+        { title: "Edit", content: "updated", status: "done" },
+        "+12 −3 行",
+        {
+          title: "编辑 report.md",
+          status: "done",
+          patch: {
+            patch: "--- a/report.md\n+++ b/report.md\n-old\n+new\n+second",
+            affectedPaths: ["report.md"],
+          },
+        },
+      ),
+    ).toMatchObject({
+      title: "编辑 report.md",
+      detail: "+2 −1 行",
+    });
+  });
+
   it("keeps failed tool paths in the detail card instead of the main row", () => {
     const presentation = toolTracePresentation(
       {
@@ -2481,6 +2515,34 @@ describe("context usage presentation", () => {
       }),
     );
     expect(html).toContain("暂无分类明细");
+  });
+
+  it("keeps meter colors bound to contribution semantics when a middle category is zero", () => {
+    const html = renderToString(
+      React.createElement(AwakenContextUsagePanel, {
+        estimatedInputTokens: 110_724,
+        effectiveInputWindowTokens: 613_000,
+        modelWindowTokens: 629_000,
+        outputReserveTokens: 16_000,
+        autoCompactThresholdTokens: 551_700,
+        contributions: [
+          { id: "system_prompt", label: "系统提示词", estimatedTokens: 1_461 },
+          { id: "builtin_tools", label: "内置工具", estimatedTokens: 11_060 },
+          { id: "mcp", label: "MCP", estimatedTokens: 0 },
+          { id: "skills", label: "技能", estimatedTokens: 1_736 },
+          { id: "memory", label: "记忆", estimatedTokens: 747 },
+          { id: "conversation", label: "对话", estimatedTokens: 95_720 },
+        ],
+        onClose: vi.fn(),
+      }),
+    );
+
+    expect(html).not.toContain("aw-context-usage-panel__segment--mcp");
+    expect(html).toContain("aw-context-usage-panel__segment--skills");
+    expect(html).toContain("aw-context-usage-panel__segment--memory");
+    expect(html).toContain("aw-context-usage-panel__segment--conversation");
+    expect(html).toContain("aw-context-usage-panel__dot--mcp");
+    expect(html).toContain("aw-context-usage-panel__dot--conversation");
   });
 
   it("does not fabricate a Skill/Memory split for v1 combined records", () => {

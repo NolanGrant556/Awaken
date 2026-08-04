@@ -212,12 +212,16 @@ func TestMapEventSkillLifecycle(t *testing.T) {
 
 func TestMapEventToolCallArgsDelta(t *testing.T) {
 	events := MapEvent(agentcore.AwakenEvent{
-		Type:       agentcore.ToolCallArgsDeltaEventType,
-		ThreadID:   "thread-1",
-		RunID:      "run-1",
-		ToolCallID: "tool-1",
-		ToolName:   "Read",
-		Delta:      `{"path"`,
+		Type:                        agentcore.ToolCallArgsDeltaEventType,
+		ThreadID:                    "thread-1",
+		RunID:                       "run-1",
+		ToolCallID:                  "tool-1",
+		ToolName:                    "Edit",
+		Delta:                       `{"path"`,
+		ToolPreparationKind:         "edit",
+		ToolPreparationPath:         "report.md",
+		ToolPreparationAddedLines:   12,
+		ToolPreparationDeletedLines: 3,
 	})
 
 	if len(events) != 1 {
@@ -226,8 +230,11 @@ func TestMapEventToolCallArgsDelta(t *testing.T) {
 	if events[0].Type != EventToolCallArgsDelta {
 		t.Fatalf("expected TOOL_CALL_ARGS_DELTA, got %s", events[0].Type)
 	}
-	if events[0].ToolCallID != "tool-1" || events[0].ToolCallName != "Read" || events[0].Delta != `{"path"` {
+	if events[0].ToolCallID != "tool-1" || events[0].ToolCallName != "Edit" || events[0].Delta != `{"path"` {
 		t.Fatalf("unexpected args delta payload: %+v", events[0])
+	}
+	if events[0].ToolPreparationKind != "edit" || events[0].ToolPreparationPath != "report.md" || events[0].ToolPreparationAddedLines != 12 || events[0].ToolPreparationDeletedLines != 3 {
+		t.Fatalf("unexpected safe preparation payload: %+v", events[0])
 	}
 }
 

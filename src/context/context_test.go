@@ -20,6 +20,21 @@ func TestContextDoesNotStoreSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestSyntheticUserMessageDoesNotReplaceLastUserInput(t *testing.T) {
+	ctx := New()
+	ctx.AddUserMessage("real user request")
+	ctx.AddAssistantMessage("waiting", nil)
+	ctx.AddSyntheticUserMessage("host child completion", "subagent_terminal_task-1")
+
+	if got := ctx.GetLastUserMessage(); got != "real user request" {
+		t.Fatalf("last user message = %q", got)
+	}
+	messages := ctx.GetMessages()
+	if len(messages) != 3 || messages[2].Origin != MessageOriginSynthetic || messages[2].MessageID != "subagent_terminal_task-1" {
+		t.Fatalf("synthetic message metadata = %+v", messages)
+	}
+}
+
 func TestValidateToolResultPairingPassesMatchedResults(t *testing.T) {
 	messages := []Message{
 		{Role: RoleUser, Content: "use tools"},

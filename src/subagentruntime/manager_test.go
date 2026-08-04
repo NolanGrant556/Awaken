@@ -43,6 +43,9 @@ func TestManagerSpawnWaitAndDurableOrdering(t *testing.T) {
 	if result.RetrievalStatus != RetrievalCompleted || len(result.Tasks) != 1 || result.Tasks[0].Status != StatusCompleted || result.Tasks[0].ResultPreview != "done" {
 		t.Fatalf("unexpected result: %+v", result)
 	}
+	if notifications := manager.DrainTerminalNotifications(); len(notifications) != 0 {
+		t.Fatalf("explicit wait must consume automatic terminal handoff: %+v", notifications)
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	want := []string{
@@ -194,6 +197,48 @@ func TestManagerWaitTimeoutIsNeutralAndKeepsCurrentSnapshots(t *testing.T) {
 	}
 }
 
+func TestManagerPublishesTerminalNotificationAfterWaitTimeout(t *testing.T) {
+	release := make(chan struct{})
+	manager := NewManager(context.Background(), Config{
+		Starter: func(_ context.Context, _ StartRequest) (string, error) {
+			<-release
+			return "review complete", nil
+		},
+	})
+	task, err := manager.Spawn(context.Background(), SpawnRequest{
+		Description: "review", Prompt: "review", AgentType: "review", WorkspaceMode: "shared_readonly",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	result, err := manager.Wait(context.Background(), WaitRequest{
+		TaskIDs: []string{task.TaskID}, ReturnWhen: "all", Timeout: time.Millisecond,
+	})
+	if err != nil || result.RetrievalStatus != RetrievalTimeout {
+		t.Fatalf("timeout result = %+v, err=%v", result, err)
+	}
+	close(release)
+
+	deadline := time.Now().Add(time.Second)
+	var notifications []TaskSnapshot
+	for time.Now().Before(deadline) {
+		notifications = manager.DrainTerminalNotifications()
+		if len(notifications) > 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if len(notifications) != 1 || notifications[0].TaskID != task.TaskID || notifications[0].Status != StatusCompleted || notifications[0].ResultPreview != "review complete" {
+		t.Fatalf("terminal notifications = %+v", notifications)
+	}
+	if duplicate := manager.DrainTerminalNotifications(); len(duplicate) != 0 {
+		t.Fatalf("terminal notification must be one-shot: %+v", duplicate)
+	}
+	if err := manager.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
 func TestManagerPersistsDeduplicatedToolAndTokenProgress(t *testing.T) {
 	var mu sync.Mutex
 	var progress []TaskSnapshot
@@ -336,6 +381,9 @@ func TestManagerTerminalPersistenceFailureDoesNotPublishFalseTerminal(t *testing
 	}
 	if snapshot.Terminal() {
 		t.Fatalf("unpersisted terminal became authoritative: %+v", snapshot)
+	}
+	if notifications := manager.DrainTerminalNotifications(); len(notifications) != 0 {
+		t.Fatalf("unpersisted terminal must not notify root: %+v", notifications)
 	}
 	if err := manager.Close(context.Background()); err == nil || ErrorCode(err) != ErrorPersistence {
 		t.Fatalf("close did not surface terminal persistence failure: %v", err)

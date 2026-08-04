@@ -147,6 +147,17 @@ func (c *Context) AddUserMessageWithAttachments(content string, attachments []Me
 	})
 }
 
+func (c *Context) AddSyntheticUserMessage(content, messageID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.messages = append(c.messages, Message{
+		Role:      RoleUser,
+		Content:   content,
+		Origin:    MessageOriginSynthetic,
+		MessageID: strings.TrimSpace(messageID),
+	})
+}
+
 func (c *Context) AddAssistantMessage(content string, toolCalls []ToolCall) {
 	c.AddAssistantMessageWithProviderState(content, toolCalls, nil)
 }
@@ -228,7 +239,7 @@ func (c *Context) GetLastUserMessage() string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	for i := len(c.messages) - 1; i >= 0; i-- {
-		if c.messages[i].Role == RoleUser {
+		if c.messages[i].Role == RoleUser && c.messages[i].Origin != MessageOriginSynthetic {
 			return c.messages[i].Content
 		}
 	}
@@ -415,6 +426,11 @@ func (conv *Conversation) UserInput(input string) {
 
 func (conv *Conversation) UserInputWithAttachments(input string, attachments []MessageAttachment) {
 	conv.Context.AddUserMessageWithAttachments(input, attachments)
+	conv.UpdatedAt = time.Now()
+}
+
+func (conv *Conversation) SyntheticUserInput(input, messageID string) {
+	conv.Context.AddSyntheticUserMessage(input, messageID)
 	conv.UpdatedAt = time.Now()
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -158,6 +159,102 @@ func TestNativeSubagentToolRunsReadOnlyChildAndReturnsHandoff(t *testing.T) {
 	}
 	if !sawToolProgress {
 		t.Fatalf("expected child tool progress event, got %+v", capturedChildEvents)
+	}
+}
+
+func TestRootAutomaticallyReceivesTerminalHandoffAfterWaitTimeout(t *testing.T) {
+	releaseChild := make(chan struct{})
+	terminalPersisted := make(chan struct{})
+	var terminalOnce sync.Once
+	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
+		Starter: func(_ context.Context, _ subagentruntime.StartRequest) (string, error) {
+			<-releaseChild
+			return "复核已完成：结论可用", nil
+		},
+		Persist: func(_ context.Context, event subagentruntime.PersistEvent) error {
+			if event.Kind == "subagent_terminal" {
+				terminalOnce.Do(func() { close(terminalPersisted) })
+			}
+			return nil
+		},
+	})
+	config := AgentConfig{
+		MaxThoughts:        6,
+		SubagentController: manager,
+		ToolExposure:       tool.ToolExposurePolicy{Mode: tool.ExposureAll},
+	}
+	conversation := convcontext.NewConversation(nil)
+	conversation.UserInput("请交给子任务复核并整合结果")
+	runner := NewRunner(config, conversation, NewRequestBuilder(config))
+	runner.threadID = "thread-auto-handoff"
+	runner.runID = "run-auto-handoff"
+
+	turn := 0
+	runner.streamLLMFunc = func(_ context.Context, _ *runEventEmitter) (*llm.Response, error) {
+		turn++
+		switch turn {
+		case 1:
+			return &llm.Response{ToolCalls: []llm.ToolCall{{
+				ID: "spawn-review", Name: "subagent",
+				Input: `{"action":"spawn","description":"复核结论","prompt":"只读复核结论","agent_type":"review","workspace_mode":"shared_readonly"}`,
+			}}}, nil
+		case 2:
+			tasks := manager.List()
+			if len(tasks) != 1 {
+				t.Fatalf("spawned tasks = %+v", tasks)
+			}
+			waitInput, err := json.Marshal(map[string]any{
+				"action": "wait", "task_ids": []string{tasks[0].TaskID},
+				"return_when": "all", "timeout_ms": 1,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return &llm.Response{ToolCalls: []llm.ToolCall{{
+				ID: "wait-review", Name: "subagent", Input: string(waitInput),
+			}}}, nil
+		case 3:
+			close(releaseChild)
+			select {
+			case <-terminalPersisted:
+			case <-time.After(time.Second):
+				t.Fatal("child terminal state was not persisted")
+			}
+			// This response was generated from the stale post-timeout context.
+			// The runner must retain it as history but must not finalize the run.
+			return &llm.Response{Content: "子任务还在执行中"}, nil
+		case 4:
+			messages := conversation.Context.GetMessages()
+			if got := conversation.Context.GetLastUserMessage(); got != "请交给子任务复核并整合结果" {
+				t.Fatalf("synthetic handoff replaced user request: %q", got)
+			}
+			var notifications []convcontext.Message
+			for _, message := range messages {
+				if message.Origin == convcontext.MessageOriginSynthetic {
+					notifications = append(notifications, message)
+				}
+			}
+			if len(notifications) != 1 ||
+				!strings.Contains(notifications[0].Content, `"status":"completed"`) ||
+				!strings.Contains(notifications[0].Content, "复核已完成：结论可用") {
+				t.Fatalf("automatic terminal handoff = %+v", notifications)
+			}
+			return &llm.Response{Content: "已根据完成的复核结果整合回答"}, nil
+		default:
+			t.Fatalf("unexpected model turn %d", turn)
+			return nil, nil
+		}
+	}
+
+	answer, err := runner.RunStreamWithEvents(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RunStreamWithEvents: %v", err)
+	}
+	if answer != "已根据完成的复核结果整合回答" || turn != 4 {
+		t.Fatalf("answer=%q turns=%d", answer, turn)
+	}
+	if notifications := manager.DrainTerminalNotifications(); len(notifications) != 0 {
+		t.Fatalf("automatic handoff must be one-shot: %+v", notifications)
 	}
 }
 

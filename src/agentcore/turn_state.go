@@ -18,6 +18,7 @@ type TerminalReason string
 const (
 	TransitionInitial                 TransitionReason = "initial"
 	TransitionToolResultContinuation  TransitionReason = "tool_result_continuation"
+	TransitionSubagentNotification    TransitionReason = "subagent_notification"
 	TransitionXMLFallbackContinuation TransitionReason = "xml_fallback_continuation"
 	TransitionReactiveCompactRetry    TransitionReason = "reactive_compact_retry"
 	TransitionMaxOutputContinuation   TransitionReason = "max_output_continuation"

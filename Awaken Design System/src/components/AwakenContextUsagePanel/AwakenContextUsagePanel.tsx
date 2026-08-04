@@ -8,6 +8,19 @@ export type AwakenContextUsageContribution = {
   estimatedTokens: number;
 };
 
+const contributionColorIds = new Set([
+  "system_prompt",
+  "builtin_tools",
+  "mcp",
+  "skills",
+  "memory",
+  "conversation",
+]);
+
+function contributionColorId(id: string): string {
+  return contributionColorIds.has(id) ? id : "unknown";
+}
+
 // AwakenContextUsageModelUsage mirrors the renderer-side AguiModelUsageRecord
 // fields the panel needs. The Design System component must not import from
 // renderer/shared, so the shape is re-declared here and the renderer is
@@ -203,10 +216,10 @@ export const AwakenContextUsagePanel = forwardRef<
             aria-valuenow={usedPercent}
           >
             {meterContributions.length > 0 ? (
-              meterContributions.map((contribution, index) => (
+              meterContributions.map((contribution) => (
                 <span
                   key={contribution.id}
-                  className={`aw-context-usage-panel__segment aw-context-usage-panel__segment--${index % 6}`}
+                  className={`aw-context-usage-panel__segment aw-context-usage-panel__segment--${contributionColorId(contribution.id)}`}
                   style={{
                     width: `${Math.max(
                       0,
@@ -220,7 +233,7 @@ export const AwakenContextUsagePanel = forwardRef<
               ))
             ) : (
               <span
-                className="aw-context-usage-panel__segment aw-context-usage-panel__segment--0"
+                className="aw-context-usage-panel__segment aw-context-usage-panel__segment--unknown"
                 style={{ width: `${usedPercent}%` }}
                 aria-hidden="true"
               />
@@ -234,14 +247,14 @@ export const AwakenContextUsagePanel = forwardRef<
         >
           {contributions.length > 0 ? (
             <dl>
-              {contributions.map((contribution, index) => (
+              {contributions.map((contribution) => (
                 <div
                   key={contribution.id}
                   className="aw-context-usage-panel__row"
                 >
                   <dt>
                     <span
-                      className={`aw-context-usage-panel__dot aw-context-usage-panel__dot--${index % 6}`}
+                      className={`aw-context-usage-panel__dot aw-context-usage-panel__dot--${contributionColorId(contribution.id)}`}
                       aria-hidden="true"
                     />
                     {contribution.label}

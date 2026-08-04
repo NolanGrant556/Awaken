@@ -227,6 +227,10 @@ type Event struct {
 	Delta                            string                `json:"delta,omitempty"`
 	ToolCallID                       string                `json:"toolCallId,omitempty"`
 	ToolCallName                     string                `json:"toolCallName,omitempty"`
+	ToolPreparationKind              string                `json:"toolPreparationKind,omitempty"`
+	ToolPreparationPath              string                `json:"toolPreparationPath,omitempty"`
+	ToolPreparationAddedLines        int                   `json:"toolPreparationAddedLines,omitempty"`
+	ToolPreparationDeletedLines      int                   `json:"toolPreparationDeletedLines,omitempty"`
 	Content                          string                `json:"content,omitempty"`
 	Result                           string                `json:"result,omitempty"`
 	Progress                         string                `json:"progress,omitempty"`

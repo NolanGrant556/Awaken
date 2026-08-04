@@ -117,33 +117,35 @@
   height: 100%;
 }
 
-.aw-context-usage-panel__segment--0,
-.aw-context-usage-panel__dot--0 {
+.aw-context-usage-panel__segment--system_prompt,
+.aw-context-usage-panel__dot--system_prompt {
   background: var(--aw-accent);
 }
 
-.aw-context-usage-panel__segment--1,
-.aw-context-usage-panel__dot--1 {
+.aw-context-usage-panel__segment--builtin_tools,
+.aw-context-usage-panel__dot--builtin_tools {
   background: var(--aw-accent-purple);
 }
 
-.aw-context-usage-panel__segment--2,
-.aw-context-usage-panel__dot--2 {
+.aw-context-usage-panel__segment--mcp,
+.aw-context-usage-panel__dot--mcp {
   background: var(--aw-text-blue);
 }
 
-.aw-context-usage-panel__segment--3,
-.aw-context-usage-panel__dot--3 {
+.aw-context-usage-panel__segment--skills,
+.aw-context-usage-panel__dot--skills {
   background: var(--aw-success);
 }
 
-.aw-context-usage-panel__segment--4,
-.aw-context-usage-panel__dot--4 {
+.aw-context-usage-panel__segment--memory,
+.aw-context-usage-panel__dot--memory {
   background: var(--aw-warning);
 }
 
-.aw-context-usage-panel__segment--5,
-.aw-context-usage-panel__dot--5 {
+.aw-context-usage-panel__segment--conversation,
+.aw-context-usage-panel__dot--conversation,
+.aw-context-usage-panel__segment--unknown,
+.aw-context-usage-panel__dot--unknown {
   background: var(--aw-text-tertiary);
 }
 

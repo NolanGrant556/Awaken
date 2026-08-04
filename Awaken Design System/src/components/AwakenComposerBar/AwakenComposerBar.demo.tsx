@@ -22,7 +22,7 @@ import { AwakenComposerBarStates } from "./AwakenComposerBar.states";
 type ComposerDemoStateProps = ComponentProps<typeof AwakenComposerBar>;
 
 const contextUsageDemoProps = AwakenContextUsagePanelStates.find(
-  (state) => state.id === "cache-hit",
+  (state) => state.id === "zero-middle-category",
 )?.props as ComponentProps<typeof AwakenContextUsagePanel>;
 
 function InteractiveComposerDemoState(props: ComposerDemoStateProps) {

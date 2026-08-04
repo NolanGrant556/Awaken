@@ -239,14 +239,14 @@ func attributeContextMessages(messages []convcontext.Message) []convcontext.Mess
 	attributed := cloneContextMessages(messages)
 	lastUser := -1
 	for index := range attributed {
-		if attributed[index].Role == convcontext.RoleUser {
+		if attributed[index].Role == convcontext.RoleUser && attributed[index].Origin != convcontext.MessageOriginSynthetic {
 			lastUser = index
 		}
 	}
 	currentTurnID := ""
 	for index := range attributed {
 		message := &attributed[index]
-		if message.Role == convcontext.RoleUser {
+		if message.Role == convcontext.RoleUser && message.Origin != convcontext.MessageOriginSynthetic {
 			digest := sha256.Sum256([]byte(fmt.Sprintf("turn\x00%d\x00%s", index, message.Content)))
 			currentTurnID = fmt.Sprintf("ctxturn_%x", digest[:8])
 		}

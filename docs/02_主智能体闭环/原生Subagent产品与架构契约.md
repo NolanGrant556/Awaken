@@ -16,6 +16,7 @@
 - child 使用独立 conversation、agent/task identity 和取消上下文，生命周期与有界结果写入 SemanticJournal；live Agent event 与 durable reasoning/message/tool frame 都携带同一 `subagentTaskId/subagentAgentId`，Renderer 将它们路由到 child 自己的 narrative，不再混入 root；
 - child 的每个耐久 `tool_call` 与 `model_usage` 会按稳定 ID 去重后生成 `subagent_progress`，累计工具次数、provider-reported input/output/total tokens；中心 group 与右侧 Inspector 同时显示工具数、token 与按耐久起止时间计算的耗时；
 - `wait` 到期属于中性检索结果：返回 `retrieval_status=timeout` 和当前 snapshots，不产生失败 Outcome，也不取消 child；
+- child terminal 先耐久，再进入 manager 的一次性交接队列；若 root 未通过成功 `wait` 或 terminal `status` 显式消费，Runner 会在下一模型请求边界自动注入有界结构化终态。若 child 在 root 模型生成期间完成，旧响应不能直接成为 run final，Runner 会保留该响应并追加一次带终态的新模型边界；
 - Core 已提供 run-scoped Subagent list/detail/cancel route；message route 当前明确返回 unsupported；
 - Desktop reducer 已以 `subagentsById/subagentOrder` 独立保存 task truth；当前 turn 显示 Subagent group，点击 row 在 dock Composer 上方打开可关闭/重开的独立执行详情浮层，卡内按 child semantic 顺序展示思考、工具与 Markdown 结果并有独立滚动和单任务停止，且不改变主对话流布局；右侧 Inspector 继续提供任务切换、统计和控制；
 - root/child 的 tool text/media blob 使用 agent/task + run + turn + tool-call 复合命名空间；超过 32 KiB 的文本只在 journal 留 digest/size/preview 票据，下一次 provider request 在 Core 内校验并水合完整内容，Renderer 与模型都不需要读取 `~/.awaken` 路径；
@@ -90,7 +91,7 @@
 以下参考行为不直接采用：
 
 - 不用进程内 AppState 作为 task authority；Awaken 以 Core + SemanticJournal 为真相；
-- 不用 output file/symlink 让父模型轮询；父模型通过结构化 `wait/status` outcome 获得结果；
+- 不用 output file/symlink 或高频 polling 让父模型轮询；耐久 terminal 默认通过 manager 的一次性交接队列进入父模型，结构化 `wait/status` outcome 仍是显式检索与恢复入口；
 - 不允许后台 child 在 root run 终态后继续；
 - 不让 child 重新组装更宽的工具池；它只能继承或收窄父 run 的固定 snapshot；
 - 不默认共享 workspace 并发写；写任务必须进入 host 创建的隔离 worktree；
@@ -115,9 +116,9 @@
 2. Core 在 transport 前写 `subagent_spawned`，返回 `task_id`、`agent_id`、`status=running`。
 3. Workbench 当前 turn 出现“1 个子任务运行中”，右栏“子任务”入口出现 badge。
 4. child 使用独立 conversation 和 read-only profile 运行；其最近活动、工具计数、provider-reported token 累计与耗时以有界事件更新。
-5. 主 Agent 可继续处理不重叠工作，随后调用 `wait`。
-6. child terminal 先耐久，再由 `wait` 把最终 handoff 作为 canonical tool result 返回主模型。
-7. 主 Agent 验证并整合结论，最终回答仍由主 Agent 给用户。
+5. 主 Agent 可继续处理不重叠工作，也可调用 `wait/status` 显式查询。
+6. child terminal 先耐久，再进入一次性交接队列；成功 `wait` 或 terminal `status` 消费同一份 handoff。若未显式消费，Runner 在 root 下一模型请求边界自动注入结构化终态；child 在当前模型生成期间完成时，当前响应不得直接结束 run，而要追加一次整合边界。
+7. 主 Agent 验证并整合结论，最终回答仍由主 Agent 给用户；自动 handoff 不生成用户可见的伪 user message。
 
 ### 4.2 多个并发子任务
 
@@ -310,9 +311,13 @@ src/tools/subagent/
 type Controller interface {
     Spawn(context.Context, SpawnRequest) (TaskSnapshot, error)
     Status(taskID string) (TaskSnapshot, error)
+    List() []TaskSnapshot
     Wait(context.Context, WaitRequest) (WaitResult, error)
+    DrainTerminalNotifications() []TaskSnapshot
+    AcknowledgeTerminal(taskID string)
     Message(context.Context, taskID, content string) (MessageReceipt, error)
     Cancel(context.Context, taskID, reason string) (TaskSnapshot, error)
+    Close(context.Context) error
 }
 ```
 
@@ -332,7 +337,7 @@ Manager 的 starter callback 固定执行：
 6. 创建独立 `Conversation`，只注入 host handoff 和父 `MemoryRecallSnapshot` 的合法子集；
 7. 使用 `context.WithCancel(rootRunContext)` 再派生单 task cancel；
 8. 进入 scheduler；取得 slot 后写 `running` 并启动 child runner；
-9. child terminal 时先 append+flush terminal record，再发布状态、唤醒 waiters；append/flush 失败时保留最后一份已耐久 snapshot，不能在内存伪造 terminal；
+9. child terminal 时先 append+flush terminal record，再发布状态、唤醒 waiters并进入一次性交接队列；append/flush 失败时保留最后一份已耐久 snapshot，不能在内存伪造 terminal 或通知 root；
 10. child 的 `tool_call`/`model_usage` 先耐久，再由 manager 写并 flush 累计 `subagent_progress`；terminal 使用最后一份累计值；
 11. 终态 handoff 最大 32 KiB；更大结果按 `thread/task-or-agent/run/turn/tool-call` 写入 offload store，journal 只留 preview + storage metadata；父模型下一请求由 Core 校验 digest/byte size 后在内存水合完整 handoff。
 
@@ -554,9 +559,10 @@ subagent_task_id
 3. message 先 `message_queued` flush，再入内存 queue；
 4. 每个新 `tool_call_id` 与 `model_request_id` 在对应事实耐久后按 ID 去重并写 `subagent_progress`；terminal 前最后一份计数必须耐久；
 5. `subagent_terminal` flush；
-6. manager 更新内存状态并唤醒 waiters；
-7. root `wait` tool result耐久；
-8. 所有 child terminal 后才允许 root `run_terminal`。
+6. manager 更新内存状态、唤醒 waiters，并登记未消费的一次性 terminal notification；
+7. root 成功 `wait`、terminal `status` 或 Runner 自动 drain 三者只允许一个消费者取得该 handoff；显式 tool result 按原规则耐久，自动 drain 作为 `origin=synthetic` 的 host notification 只进入 root 内存 conversation，不伪造 SemanticJournal 用户消息；
+8. child 在 root provider 生成期间完成时，旧响应先进入历史，再由 terminal notification 触发 `subagent_notification` continuation；
+9. 所有 child terminal 后才允许 root `run_terminal`。
 
 `subagent_progress` 不保存 reasoning 正文、完整命令或 tool result，只保存当前活动类型、净化标题和累计计数。`estimated_tokens` 是兼容字段；当前新记录同时写 provider-reported `input_tokens`、`output_tokens`、`total_tokens`，provider 缺字段时保持缺省而不是估算。
 
@@ -657,9 +663,9 @@ subagentOrder: string[];
 3. child 不暴露原生 Subagent、`ask_user` 和需要直接 Desktop gate 的工具。
 4. `shared_readonly` 永远不能执行 mutation；模型描述或 Skill 文本不能改变该事实。
 5. 写 child 只能使用 host-owned worktree；不得共享父 writable root。
-6. child message append-before-delivery；child terminal append-before-notify。
+6. child message append-before-delivery；child terminal append-before-notify；terminal persistence 失败时不允许自动交接。
 7. root `run_terminal` 是 run 最后一条生命周期事实，之前必须封口全部 child。
-8. child records 不进入父 conversation；只有 `wait`/terminal handoff 的有界结果进入父模型。
+8. child records 不进入父 conversation；只有显式 `wait/status` 或一次性 terminal handoff 的有界结果进入父模型。自动 handoff 使用 host-owned synthetic origin，不得替代最后一条真实用户输入或创建第二个用户 turn。
 9. Renderer 不判权限、不生成 task identity、不从文案反推 task。
 10. child 不自行扩大 Memory scope或重新运行 user-scope selector。
 11. ACP、Skill fork、原生 Subagent 保持不同 identity/event family。
@@ -673,6 +679,7 @@ subagentOrder: string[];
 | child tool partial/unknown | task可完成但必须汇总 side-effect warning；父不得盲重放 |
 | 并发已满 | task `queued`；队列也满则 spawn失败且不写伪 task |
 | wait超时 | tool 返回成功 Outcome、`retrieval_status=timeout` 与当前 snapshots；不取消 child，也不污染失败监督 |
+| wait超时后child完成 | 耐久 terminal 进入一次性交接队列；root 不需再次轮询，下一模型边界自动取得终态；若随后显式 status/wait 已消费，则不重复注入 |
 | 单 child取消超时 | task `interrupted`，保留 unknown side-effect提示 |
 | root取消 | 广播 child cancel；已有事实保留；最终 root `cancelled` |
 | Journal append/flush失败 | fail-stop；spawn/message/terminal不得先对外可见 |
@@ -704,9 +711,9 @@ subagentOrder: string[];
 3. scheduler 当前并发上限为 4、每 run 总量为 8，只开放 `explore/review + shared_readonly`；
 4. 增加 SemanticKinds、live/replay projector；
 5. root terminal barrier 与 run Stop取消 child；
-6. 自动化证明 child不能调用 mutation/subagent/ask_user。
+6. 自动化证明 child不能调用 mutation/subagent/ask_user；wait 超时后完成的 child 会在 root 下一模型边界自动交接且只交接一次。
 
-完成门禁：模型可创建只读 child，并通过 status/wait/cancel 管理；当前实现已同时提供并发和 Desktop 基础 UI。
+完成门禁：模型可创建只读 child，通过自动 terminal handoff 或 status/wait 取得结果，并可 cancel；当前实现已同时提供并发和 Desktop 基础 UI。
 
 ### Phase 2：消息与完整 Desktop UI（部分完成）
 
@@ -778,7 +785,7 @@ go vet ./...
 - profile/tool/workspace/environment snapshot no-escalation；
 - read-only child 的 mutation拒绝；
 - spawn append+flush早于 goroutine，message早于queue，terminal早于wait wakeup；
-- 4并发/8总量、queued取消、wait any/all/timeout/cancel；
+- 4并发/8总量、queued取消、wait any/all/timeout/cancel；timeout 后 terminal 自动交接、显式检索去重、terminal persistence 失败不通知；
 - root与child共享 tool/model预算；
 - root cancel传播和 terminal barrier；
 - child message只在轮次边界消费；
@@ -822,7 +829,7 @@ git diff --check
 | AC-SA-05 | P0 | 取消一个child | 目标child cancelling→cancelled；其他child和root继续 |
 | AC-SA-06 | P0 | 同时spawn 4个read-only child | 实际并发，状态/计数独立；第5个queued且slot释放后启动 |
 | AC-SA-07 | P0 | root调用wait(any/all) | any只返回新完成项，all等待全部；超时不取消 |
-| AC-SA-08 | P0 | child完成后主Agent整合回答 | child结果不直接冒充用户可见最终回答；root验证并给出final |
+| AC-SA-08 | P0 | root 的 wait 先超时，child 随后在 root 模型生成期间完成；不再手动调用 status/wait | child terminal 耐久后自动进入 root 下一模型边界且只进入一次；旧“仍在执行”响应不能直接结束 run；自动交接不冒充用户可见消息、不替代原用户请求；root验证并给出 final |
 | AC-SA-09 | P0 | child运行中点击主Stop | root与全部child收敛取消；已有工具/side-effect事实保留 |
 | AC-SA-10 | P1 | 切thread、重开Desktop | 已完成child不重不丢；未闭合child显示interrupted且不自动重跑 |
 | AC-SA-11 | P0 | Git项目启动general worktree child | child只改worktree；父workspace不被并发写；结果显示branch/commit/dirty receipt |

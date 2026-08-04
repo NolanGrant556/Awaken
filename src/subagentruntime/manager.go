@@ -43,14 +43,15 @@ type Manager struct {
 	cancel context.CancelFunc
 	cfg    Config
 
-	mu        sync.RWMutex
-	tasks     map[string]*managedTask
-	order     []string
-	delivered map[string]bool
-	reserved  int
-	slots     chan struct{}
-	notify    chan struct{}
-	wg        sync.WaitGroup
+	mu                           sync.RWMutex
+	tasks                        map[string]*managedTask
+	order                        []string
+	delivered                    map[string]bool
+	pendingTerminalNotifications []string
+	reserved                     int
+	slots                        chan struct{}
+	notify                       chan struct{}
+	wg                           sync.WaitGroup
 }
 
 func NewManager(parent context.Context, cfg Config) *Manager {
@@ -405,7 +406,53 @@ func (m *Manager) waitState(request WaitRequest, consume bool) ([]TaskSnapshot, 
 		}
 		return newlyCompleted, true, nil
 	}
+	if consume && terminal == len(all) {
+		for _, snapshot := range all {
+			m.delivered[snapshot.TaskID] = true
+		}
+	}
 	return all, terminal == len(all), nil
+}
+
+// DrainTerminalNotifications returns each durable terminal snapshot at most
+// once. Explicit wait/status consumption and automatic root delivery share the
+// same delivered set, so the parent model never receives a duplicate handoff.
+func (m *Manager) DrainTerminalNotifications() []TaskSnapshot {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.pendingTerminalNotifications) == 0 {
+		return nil
+	}
+	pending := m.pendingTerminalNotifications
+	m.pendingTerminalNotifications = nil
+	result := make([]TaskSnapshot, 0, len(pending))
+	for _, taskID := range pending {
+		task := m.tasks[taskID]
+		if task == nil || !task.snapshot.Terminal() || m.delivered[taskID] {
+			continue
+		}
+		m.delivered[taskID] = true
+		result = append(result, task.snapshot)
+	}
+	return result
+}
+
+// AcknowledgeTerminal records that the root model explicitly retrieved a
+// terminal snapshot through the status tool. It intentionally does not affect
+// non-terminal status reads.
+func (m *Manager) AcknowledgeTerminal(taskID string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	taskID = strings.TrimSpace(taskID)
+	if task := m.tasks[taskID]; task != nil && task.snapshot.Terminal() {
+		m.delivered[taskID] = true
+	}
 }
 
 func (m *Manager) Message(context.Context, string, string) (MessageReceipt, error) {
@@ -538,6 +585,9 @@ func (m *Manager) replaceSnapshot(taskID string, snapshot TaskSnapshot) bool {
 		return false
 	}
 	task.snapshot = snapshot
+	if snapshot.Terminal() && !m.delivered[taskID] {
+		m.pendingTerminalNotifications = append(m.pendingTerminalNotifications, taskID)
+	}
 	m.mu.Unlock()
 	m.signal()
 	return true

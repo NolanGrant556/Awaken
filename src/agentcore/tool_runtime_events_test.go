@@ -595,7 +595,7 @@ func TestToolRuntimeInterceptsAskUser(t *testing.T) {
 		Type: "function",
 		Function: convcontext.FunctionCall{
 			Name:      "ask_user",
-			Arguments: `{"questions_json": "[{\"question\":\"Choose a theme\",\"options\":[{\"label\":\"Dark\"},{\"label\":\"Light\"}]}]"}`,
+			Arguments: `{"questions":[{"question":"Choose a theme","options":[{"label":"Dark"},{"label":"Light"}]}]}`,
 		},
 	})
 
@@ -618,6 +618,26 @@ func TestToolRuntimeInterceptsAskUser(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected UserQuestionRequested event, got %+v", sink.events)
+	}
+}
+
+func TestToolRuntimeAskUserRejectsEmptyArgumentsWithCanonicalExample(t *testing.T) {
+	sink := &userQuestionTestSink{answer: "Dark"}
+	result := NewToolRuntime(sink).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_ask_empty", Type: "function", Function: convcontext.FunctionCall{
+			Name: "ask_user", Arguments: `{}`,
+		},
+	})
+
+	if !result.IsError || result.ErrorCode != "ask_user_invalid_input" ||
+		!strings.Contains(result.Content, `{"questions":[`) ||
+		!strings.Contains(result.Content, "不要传空对象") {
+		t.Fatalf("empty ask_user call did not receive canonical correction: %+v", result)
+	}
+	for _, event := range sink.events {
+		if event.Type == UserQuestionRequestedType {
+			t.Fatalf("invalid input reached the question awaiter: %+v", sink.events)
+		}
 	}
 }
 

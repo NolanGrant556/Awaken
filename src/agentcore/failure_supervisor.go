@@ -14,6 +14,7 @@ import (
 
 	"awaken/src/context"
 	"awaken/src/tool"
+	askuser "awaken/src/tools/ask_user"
 )
 
 const (
@@ -247,6 +248,19 @@ func (s *FailureSupervisor) BeforeCall(call context.ToolCall) BeforeCallDecision
 			if s.pendingRecovery != nil {
 				decision.RecoveryRequired = true
 				decision.RecoveryOptions = mergeUniqueStrings(decision.RecoveryOptions, s.pendingRecovery.RecoveryOptions)
+			}
+			// ask_user is an interactive gate rather than a business operation.
+			// Once a non-retryable invalid call has already received corrective
+			// feedback, replaying the identical arguments cannot make progress and
+			// must not consume the remainder of the run budget.
+			if toolName == askuser.ToolName && !meta.retryable {
+				decision.TerminateRun = true
+				decision.TerminalReason = TerminalReasonRepeatedToolFailure
+				decision.ErrorMessage += "; stopping run because ask_user repeated identical invalid arguments after corrective feedback"
+				decision.RecoveryOptions = mergeUniqueStrings(decision.RecoveryOptions, []string{
+					"start_a_new_run_with_correct_questions",
+					"choose_a_model_with_compatible_structured_tool_calling",
+				})
 			}
 			return decision
 		}
@@ -527,17 +541,18 @@ func SyntheticBlockedResult(call context.ToolCall, decision BeforeCallDecision) 
 	}
 	status := StatusStrategyChangeRequired
 	nextActions := mergeUniqueStrings(decision.RecoveryOptions, strategyChangeNextActions())
-	modelRetryable := true
+	changedCallAllowed := true
 	if decision.ExternalStateConfirmationRequired {
 		status = StatusExternalStateConfirmationRequired
 		nextActions = append([]string(nil), decision.RecoveryOptions...)
-		modelRetryable = false
+		changedCallAllowed = false
 	}
 	guidance, _ := json.Marshal(map[string]any{
-		"status":              status,
-		"retryable":           modelRetryable,
-		"same_call_retryable": false,
-		"next_actions":        nextActions,
+		"status":               status,
+		"same_call_retryable":  false,
+		"changed_call_allowed": changedCallAllowed,
+		"run_will_terminate":   decision.TerminateRun || decision.TerminateTurn,
+		"next_actions":         nextActions,
 	})
 	content := msg + "\n" + string(guidance)
 	outcome := tool.ExecutionOutcome{
@@ -555,7 +570,9 @@ func SyntheticBlockedResult(call context.ToolCall, decision BeforeCallDecision) 
 			"blocked":                              true,
 			"status":                               status,
 			"same_call_retryable":                  false,
-			"retryable":                            modelRetryable,
+			"retryable":                            false,
+			"changed_call_allowed":                 changedCallAllowed,
+			"run_will_terminate":                   decision.TerminateRun || decision.TerminateTurn,
 			"call_signature":                       decision.CallSignature,
 			"attempt_count":                        decision.AttemptCount,
 			"recovery_required":                    decision.RecoveryRequired,

@@ -2,7 +2,10 @@ package askuser
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"awaken/src/tool"
 )
 
 func TestParseQuestions_ValidSingleQuestion(t *testing.T) {
@@ -89,15 +92,70 @@ func TestFormatAnswerTextResultKeepsMultiQuestionLines(t *testing.T) {
 }
 
 func TestToolDefinition(t *testing.T) {
-	tool := &AskUserTool{}
-	if tool.Name() != ToolName {
-		t.Fatalf("unexpected tool name: %q", tool.Name())
+	askTool := &AskUserTool{}
+	if askTool.Name() != ToolName {
+		t.Fatalf("unexpected tool name: %q", askTool.Name())
 	}
-	def := tool.Definition()
+	def := askTool.Definition()
 	if def.Source != "builtin" {
 		t.Fatalf("expected builtin source, got %q", def.Source)
 	}
 	if !def.Annotations.ReadOnly {
 		t.Fatalf("expected read-only tool")
+	}
+	if len(def.InputSchema.OneOf) != 0 {
+		t.Fatalf("model schema must not expose ambiguous oneOf branches: %+v", def.InputSchema.OneOf)
+	}
+	if len(def.InputSchema.Required) != 1 || def.InputSchema.Required[0] != "questions" {
+		t.Fatalf("model schema must require only questions: %+v", def.InputSchema.Required)
+	}
+	if _, ok := def.InputSchema.Properties["questions_json"]; ok {
+		t.Fatalf("legacy questions_json leaked into model schema: %+v", def.InputSchema.Properties)
+	}
+	if def.InputSchema.AdditionalProperties == nil || *def.InputSchema.AdditionalProperties {
+		t.Fatalf("ask_user schema must reject unknown top-level properties")
+	}
+	if params := askTool.Parameters(); len(params) != 1 || params[0].Name != "questions" || !params[0].Required {
+		t.Fatalf("legacy parameter leaked into runtime parameter contract: %+v", params)
+	}
+}
+
+func TestCanonicalSchemaRejectsEmptyAndLegacyModelCalls(t *testing.T) {
+	schema := (&AskUserTool{}).InputSchema()
+	for name, input := range map[string]string{
+		"empty object": `{}`,
+		"legacy field": `{"questions_json":"[]"}`,
+		"bare array":   `[]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := tool.ValidateInputAgainstSchema(input, schema); err == nil {
+				t.Fatalf("canonical schema accepted %s", input)
+			}
+		})
+	}
+}
+
+func TestCanonicalizeLegacyArguments(t *testing.T) {
+	canonical := `{"questions":[{"question":"Theme?","options":[{"label":"Dark"},{"label":"Light"}]}]}`
+	if got, err := CanonicalizeLegacyArguments(canonical); err != nil || got != canonical {
+		t.Fatalf("canonical input changed: got=%q err=%v", got, err)
+	}
+
+	for name, legacy := range map[string]string{
+		"encoded field": `{"questions_json":"[{\"question\":\"Theme?\",\"options\":[{\"label\":\"Dark\"},{\"label\":\"Light\"}]}]"}`,
+		"bare array":    `[{"question":"Theme?","options":[{"label":"Dark"},{"label":"Light"}]}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := CanonicalizeLegacyArguments(legacy)
+			if err != nil {
+				t.Fatalf("legacy normalization failed: %v", err)
+			}
+			if !strings.Contains(got, `"questions"`) || strings.Contains(got, "questions_json") {
+				t.Fatalf("legacy input did not become canonical: %s", got)
+			}
+			if err := tool.ValidateInputAgainstSchema(got, (&AskUserTool{}).InputSchema()); err != nil {
+				t.Fatalf("normalized input failed canonical schema: %v", err)
+			}
+		})
 	}
 }

@@ -40,35 +40,26 @@ func (t *AskUserTool) Description() string {
 func (t *AskUserTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{
-			Name: "questions_json",
-			Description: "问题列表的 JSON 字符串。支持对象包装 {\"questions\": [...]} 或直接数组 [...]。" +
-				"示例：{\"questions\":[{\"question\":\"选择主题\",\"options\":[{\"label\":\"深色\"},{\"label\":\"浅色\"}],\"multi_select\":false}]}。" +
-				"每个问题须有 2-4 个选项，多选时设置 multi_select 为 true。",
-			Type:     "string",
-			Required: false,
-		},
-		{
 			Name:        "questions",
-			Description: "结构化问题数组；新调用应使用此字段，questions_json 仅用于旧 transcript 兼容。",
+			Description: "1-3 个结构化问题；每个问题必须提供 2-4 个明确选项。",
 			Type:        "array",
-			Required:    false,
+			Required:    true,
 		},
 	}
 }
 
-// InputSchema exposes questions as a real recursive object to the model while
-// Parameters retains the legacy questions_json compatibility surface.
+// InputSchema exposes one canonical object shape to every model/provider.
+// Legacy questions_json and bare-array inputs are normalized by
+// CanonicalizeLegacyArguments before runtime validation, but are intentionally
+// absent here so new model calls cannot choose an ambiguous schema branch.
 func (t *AskUserTool) InputSchema() tool.ToolParametersSchema {
 	noExtra := false
 	questions := questionArraySchema(&noExtra)
 	return tool.ToolParametersSchema{
-		Type: "object",
-		OneOf: []tool.ToolParam{
-			{Type: "object", AdditionalProperties: &noExtra, Required: []string{"questions"}, Properties: map[string]tool.ToolParam{"questions": questions}},
-			{Type: "object", AdditionalProperties: &noExtra, Required: []string{"questions_json"}, Properties: map[string]tool.ToolParam{
-				"questions_json": {Type: "string", Description: "Legacy JSON-encoded question array."},
-			}},
-		},
+		Type:                 "object",
+		AdditionalProperties: &noExtra,
+		Required:             []string{"questions"},
+		Properties:           map[string]tool.ToolParam{"questions": questions},
 	}
 }
 
@@ -129,10 +120,59 @@ func (t *AskUserTool) Execute(ctx context.Context, input string) (string, error)
 	return "", fmt.Errorf("ask_user should be handled by the runtime awaiter, not executed directly")
 }
 
+// CanonicalizeLegacyArguments converts only historical ask_user carriers to
+// the current {"questions": [...]} object. Canonical objects are returned
+// unchanged so the registered schema remains authoritative for unknown fields,
+// item bounds, and nested types.
+func CanonicalizeLegacyArguments(input string) (string, error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return input, nil
+	}
+
+	var decoded any
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+		return input, nil
+	}
+	switch value := decoded.(type) {
+	case []any:
+		questions, err := ParseQuestions(trimmed)
+		if err != nil {
+			return "", err
+		}
+		return marshalCanonicalQuestions(questions)
+	case map[string]any:
+		_, hasQuestions := value["questions"]
+		legacyValue, hasLegacy := value["questions_json"]
+		if hasQuestions || !hasLegacy {
+			return input, nil
+		}
+		legacyString, ok := legacyValue.(string)
+		if !ok || strings.TrimSpace(legacyString) == "" {
+			return input, nil
+		}
+		questions, err := ParseQuestions(legacyString)
+		if err != nil {
+			return "", err
+		}
+		return marshalCanonicalQuestions(questions)
+	default:
+		return input, nil
+	}
+}
+
+func marshalCanonicalQuestions(questions []Question) (string, error) {
+	data, err := json.Marshal(askUserInput{Questions: questions})
+	if err != nil {
+		return "", fmt.Errorf("encode canonical questions: %w", err)
+	}
+	return string(data), nil
+}
+
 func ParseQuestions(input string) ([]Question, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return nil, fmt.Errorf("questions_json is required")
+		return nil, fmt.Errorf("questions is required")
 	}
 
 	var questions []Question

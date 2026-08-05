@@ -1,6 +1,17 @@
+/// <reference types="node" />
+
+import { readFileSync } from "node:fs";
 import { AwakenMarkdownRenderer } from "@awaken/design-system";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+
+const skillPreviewStyles = readFileSync(
+  new URL(
+    "../../../../Awaken Design System/src/components/AwakenSkillPreviewDialog/AwakenSkillPreviewDialog.css",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 describe("Skill preview Markdown policy", () => {
   it("renders GFM while keeping active content, images, Mermaid, and unsafe links inert", () => {
@@ -57,5 +68,29 @@ A-->B
     expect(html).toContain("href=\"https://example.com\"");
     expect(html).not.toContain("href=\"./resource.md\"");
     expect(html).not.toContain("javascript:");
+  });
+
+  it("keeps long table identifiers readable in every SKILL.md preview", () => {
+    const html = renderToStaticMarkup(
+      <AwakenMarkdownRenderer
+        markdown={`| 状态 | 动作 |
+| --- | --- |
+| \`typst-presentation\` | 用户明确要求 PDF 幻灯片时进入 Typst 演示路线 |
+| \`needs-confirmation\` | 用户确认结构与样式增强后重跑构建计划 |
+| \`pdf-operation\` | 普通 PDF 加工交给通用 PDF Skill |`}
+        fallback=""
+        renderMermaid={false}
+        renderImages={false}
+        allowedLinkProtocols={["http", "https"]}
+      />,
+    );
+
+    expect(html).toContain("<code class=\"assistant-message-code\">typst-presentation</code>");
+    expect(skillPreviewStyles).toMatch(
+      /\.aw-skill-preview__markdown \.assistant-message-table th,\s*\.aw-skill-preview__markdown \.assistant-message-table td\s*\{[^}]*overflow-wrap:\s*normal;[^}]*word-break:\s*normal;/s,
+    );
+    expect(skillPreviewStyles).toMatch(
+      /\.aw-skill-preview__markdown \.assistant-message-table \.assistant-message-code\s*\{[^}]*white-space:\s*nowrap;[^}]*overflow-wrap:\s*normal;[^}]*word-break:\s*normal;/s,
+    );
   });
 });

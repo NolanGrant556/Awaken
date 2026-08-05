@@ -147,7 +147,7 @@ export const AwakenSkillsAgentStates: AwakenSkillGroup[] = [
 function previewState(item: AwakenSkillItem): AwakenSkillPreviewState {
   return {
     frontmatterRaw: `---\nname: ${item.id}\ndescription: ${item.description}\nsource: ${item.sourceLabel ?? item.scope}\n---`,
-    markdown: `# ${item.name}\n\n${item.description}\n\n## 使用方式\n\n当任务与 **${item.name}** 的能力范围匹配时使用。组件库中的内容为只读预览，真实正文由 Awaken Desktop 按需加载。\n\n## 执行步骤\n\n1. 核对用户目标与当前工作区。\n2. 读取完成任务所需的最少上下文。\n3. 执行操作并保留可复核证据。\n4. 返回结果、限制与下一步。\n\n> 这是用于组件交互验收的模拟 SKILL.md，不会访问本地文件或运行时。\n\n\`\`\`text\nSkill: ${item.name}\nSource: ${item.sourceLabel ?? item.scope}\nState: read-only preview\n\`\`\``,
+    markdown: `# ${item.name}\n\n${item.description}\n\n## 使用方式\n\n当任务与 **${item.name}** 的能力范围匹配时使用。组件库中的内容为只读预览，真实正文由 Awaken Desktop 按需加载。\n\n## 执行步骤\n\n1. 核对用户目标与当前工作区。\n2. 读取完成任务所需的最少上下文。\n3. 执行操作并保留可复核证据。\n4. 返回结果、限制与下一步。\n\n## 构建路线\n\n| 状态 | 动作 |\n| --- | --- |\n| \`typst-presentation\` | 用户明确要求 PDF 幻灯片时进入 Typst 演示路线 |\n| \`needs-confirmation\` | 用户确认结构与样式增强后重跑构建计划 |\n| \`pdf-operation\` | 普通 PDF 加工交给通用 PDF Skill |\n\n> 这是用于组件交互验收的模拟 SKILL.md，不会访问本地文件或运行时。\n\n\`\`\`text\nSkill: ${item.name}\nSource: ${item.sourceLabel ?? item.scope}\nState: read-only preview\n\`\`\``,
   };
 }
 

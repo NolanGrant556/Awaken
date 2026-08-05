@@ -190,6 +190,18 @@
   overflow-y: hidden;
 }
 
+.aw-skill-preview__markdown .assistant-message-table th,
+.aw-skill-preview__markdown .assistant-message-table td {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.aw-skill-preview__markdown .assistant-message-table .assistant-message-code {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
 .aw-skill-preview .aw-dialog__foot,
 .aw-project-skills-dialog--preview .aw-dialog__foot {
   justify-content: flex-start;

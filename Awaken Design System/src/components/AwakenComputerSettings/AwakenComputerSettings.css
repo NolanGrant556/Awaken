@@ -3,7 +3,9 @@
 .computer-settings {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
+  width: min(100%, var(--aw-settings-focused-content-width, 820px));
+  margin-inline: auto;
   padding: 8px 0;
   color: var(--aw-text-primary);
 }
@@ -32,7 +34,7 @@
 .computer-settings-card {
   border: 1px solid var(--aw-border-main);
   border-radius: 12px;
-  padding: 16px;
+  padding: 14px;
   background: var(--aw-surface-raised);
 }
 
@@ -40,7 +42,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .computer-settings-card-header h3 {
@@ -53,21 +55,21 @@
 .computer-settings-status-list {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 
 .computer-settings-status-item {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 10px;
 }
 
 .computer-settings-status-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
   color: var(--aw-text-tertiary);
 }
@@ -105,18 +107,18 @@
   margin: 0;
   padding-left: 18px;
   font-size: 13px;
-  line-height: 1.7;
+  line-height: 1.55;
   color: var(--aw-text-secondary);
 }
 
 .computer-settings-list li {
-  margin-bottom: 6px;
+  margin-bottom: 3px;
 }
 
 .computer-settings-form {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 14px;
 }
 
 .computer-settings-empty {

@@ -16,6 +16,22 @@ function cssRule(source: string, selector: string): string {
 }
 
 describe("RunStage layout", () => {
+  it("adds breathing room only between adjacent turns", () => {
+    const workbenchStyles = readFileSync(
+      new URL("./styles/workbench.css", import.meta.url),
+      "utf8",
+    );
+    const adjacentTurns = cssRule(
+      workbenchStyles,
+      ".execution-turn-section + .execution-turn-section",
+    );
+
+    expect(adjacentTurns).toContain("margin-top: var(--aw-space-9);");
+    expect(cssRule(workbenchStyles, ".execution-turn-section")).not.toMatch(
+      /^\s*margin-top:/m,
+    );
+  });
+
   it("reserves symmetric scrollbar space so centered turns do not shift", () => {
     const designSystemStyles = readFileSync(
       new URL(

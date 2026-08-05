@@ -16,6 +16,7 @@ import { AwakenRunStageDemo } from "../src/components/AwakenRunStage/AwakenRunSt
 import { AwakenScheduledTaskListDemo } from "../src/components/AwakenScheduledTaskList/AwakenScheduledTaskList.demo";
 import { AwakenSettingsDemo } from "../src/components/AwakenSettings/AwakenSettings.demo";
 import { AwakenSearchSettingsDemo } from "../src/components/AwakenSearchSettings/AwakenSearchSettings.demo";
+import { AwakenSelectDemo } from "../src/components/AwakenSelect/AwakenSelect.demo";
 import { AwakenPetsSettingsDemo } from "../src/components/AwakenPetsSettings/AwakenPetsSettings.demo";
 import { AwakenSidebarDemo } from "../src/components/AwakenSidebar/AwakenSidebar.demo";
 import { AwakenSkillsDemo } from "../src/components/AwakenSkills/AwakenSkills.demo";
@@ -40,6 +41,7 @@ export type AwakenGalleryCategory = "atomic" | "sidebar" | "settings" | "workben
 
 export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-product-logo", name: "AwakenProductLogo", displayName: "产品 LOGO", demo: AwakenProductLogoDemo, category: "atomic" },
+  { id: "awaken-select", name: "AwakenSelect", displayName: "单选列表", demo: AwakenSelectDemo, category: "atomic" },
   { id: "awaken-switch", name: "AwakenSwitch", displayName: "开关", demo: AwakenSwitchDemo, category: "atomic", aliases: ["awaken-skill-toggle", "awaken-connector-toggle", "awaken-settings-switch"] },
   { id: "awaken-folder", name: "AwakenFolder", displayName: "文件夹", demo: AwakenFolderDemo, category: "atomic", aliases: ["awaken-project-skill-folder"] },
   { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "「左侧栏」组件库", demo: AwakenSidebarDemo, category: "sidebar", aliases: ["awaken-dialog", "awaken-dropdown", "awaken-icon", "awaken-selectable-card"] },

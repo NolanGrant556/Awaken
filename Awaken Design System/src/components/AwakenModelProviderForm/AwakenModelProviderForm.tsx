@@ -1,6 +1,7 @@
 import "./AwakenModelProviderForm.css";
 import { useId, useState } from "react";
 import {
+  Check,
   CheckCircle2,
   ChevronDown,
   CircleAlert,
@@ -9,6 +10,7 @@ import {
   KeyRound,
 } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
+import { AwakenSelect } from "../AwakenSelect";
 import { AwakenSettingsSwitch } from "../AwakenSettingsSwitch";
 
 export type AwakenModelProviderCapability =
@@ -141,12 +143,12 @@ export function AwakenModelProviderForm({
               aria-label="展开模型建议"
               onClick={() => setPickerOpen((open) => !open)}
             >
-              <ChevronDown className="model-picker-chevron" size={16} strokeWidth={1.9} />
+              <ChevronDown className="aw-select__chevron" size={16} strokeWidth={1.9} />
             </button>
             {pickerOpen ? (
               <div
                 id={modelSuggestionsId}
-                className="model-picker-menu"
+                className="aw-select__menu"
                 role="listbox"
                 aria-labelledby={modelLabelId}
               >
@@ -154,12 +156,15 @@ export function AwakenModelProviderForm({
                   <button
                     key={model}
                     type="button"
-                    className={`model-picker-option${modelId === model ? " model-picker-option-selected" : ""}`}
+                    className="aw-select__option"
                     role="option"
                     aria-selected={modelId === model}
                     onClick={() => chooseModel(model)}
                   >
                     <span>{model}</span>
+                    {modelId === model ? (
+                      <Check size={15} strokeWidth={2} aria-hidden="true" />
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -181,38 +186,12 @@ export function AwakenModelProviderForm({
       ) : (
         <div className="model-provider-field">
           <label id={modelLabelId}>模型</label>
-          <div className="model-picker">
-            <button
-              type="button"
-              className="model-picker-trigger"
-              aria-haspopup="listbox"
-              aria-expanded={pickerOpen}
-              aria-labelledby={modelLabelId}
-              onClick={() => setPickerOpen((open) => !open)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") setPickerOpen(false);
-              }}
-            >
-              <span>{modelId}</span>
-              <ChevronDown className="model-picker-chevron" size={16} strokeWidth={1.9} />
-            </button>
-            {pickerOpen ? (
-              <div className="model-picker-menu" role="listbox" aria-labelledby={modelLabelId}>
-                {models.map((model) => (
-                  <button
-                    key={model}
-                    type="button"
-                    className={`model-picker-option${modelId === model ? " model-picker-option-selected" : ""}`}
-                    role="option"
-                    aria-selected={modelId === model}
-                    onClick={() => chooseModel(model)}
-                  >
-                    <span>{model}</span>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
+          <AwakenSelect
+            value={modelId}
+            options={models.map((model) => ({ value: model, label: model }))}
+            labelledBy={modelLabelId}
+            onValueChange={onModelChange}
+          />
         </div>
       )}
 

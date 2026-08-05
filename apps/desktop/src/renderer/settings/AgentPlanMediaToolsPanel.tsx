@@ -1,6 +1,7 @@
 import {
   AwakenButton,
   AwakenProviderLogo,
+  AwakenSelect,
   AwakenSettingsSwitch,
 } from "@awaken/design-system";
 import { useEffect, useMemo, useState } from "react";
@@ -243,39 +244,37 @@ export function AgentPlanMediaToolsPanel({
               </header>
 
               <div className="agent-plan-media-tools__card-body">
-                <label className="agent-plan-media-tools__field">
+                <div className="agent-plan-media-tools__field">
                   <span>模型</span>
-                  <select
+                  <AwakenSelect
                     value={drafts[option.capability]}
                     disabled={
                       !account?.hasKey ||
                       models.length === 0 ||
                       busyAction !== null
                     }
-                    aria-label={`${option.title}模型`}
-                    onChange={(event) =>
-                      setDrafts((current) => ({
-                        ...current,
-                        [option.capability]: event.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">
-                      {!account?.hasKey
+                    ariaLabel={`${option.title}模型`}
+                    placeholder={
+                      !account?.hasKey
                         ? "请先配置 Agent Plan 账户"
                         : models.length === 0
                           ? "当前没有可用模型"
-                          : "请选择一个模型"}
-                    </option>
-                    {models.map((model) => (
-                      <option value={model.id} key={model.id}>
-                        {model.displayName
-                          ? `${model.displayName} (${model.id})`
-                          : model.id}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                          : "请选择一个模型"
+                    }
+                    options={models.map((model) => ({
+                      value: model.id,
+                      label: model.displayName
+                        ? `${model.displayName} (${model.id})`
+                        : model.id,
+                    }))}
+                    onValueChange={(value) =>
+                      setDrafts((current) => ({
+                        ...current,
+                        [option.capability]: value,
+                      }))
+                    }
+                  />
+                </div>
 
                 <div className="agent-plan-media-tools__actions">
                   {configuration ? (

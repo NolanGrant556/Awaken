@@ -64,6 +64,7 @@ export * from "./AwakenScheduledTaskStateBadge";
 export * from "./AwakenScheduledTaskTemplateDialog";
 export * from "./AwakenSearchSettings";
 export * from "./AwakenSendButton";
+export * from "./AwakenSelect";
 export * from "./AwakenSelectableCard";
 export * from "./AwakenSettings";
 export * from "./AwakenSettingsNav";

@@ -466,6 +466,11 @@
   overflow-anchor: none;
 }
 
+/* The feed contributes 14px; this adds another 24px only at turn boundaries. */
+.execution-turn-section + .execution-turn-section {
+  margin-top: var(--aw-space-9);
+}
+
 .turn-marker-rail {
   position: absolute;
   top: 28px;

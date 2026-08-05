@@ -15,6 +15,7 @@ import {
 } from "../AwakenComposerBar";
 import type { ComposerInlineInputElement } from "../AwakenComposerBar/AwakenComposerInlineInput";
 import { AwakenDialog } from "../AwakenDialog";
+import { AwakenSelect } from "../AwakenSelect";
 import { AwakenSwitch } from "../AwakenSwitch";
 import { AwakenScheduledTaskDateTimeField } from "./AwakenScheduledTaskDateTimeField";
 import { AwakenScheduledTaskProjectPicker } from "./AwakenScheduledTaskProjectPicker";
@@ -232,6 +233,10 @@ export function AwakenScheduledTaskEditorDialog({
   onSubmit,
 }: AwakenScheduledTaskEditorDialogProps) {
   const radioGroupName = useId();
+  const profileOptions = [
+    { value: "", label: "每次运行时使用当前默认 profile" },
+    ...profiles.map((profile) => ({ value: profile.profileId, label: profile.name })),
+  ];
   const update = (patch: Partial<AwakenScheduledTaskDraft>) => onValueChange({ ...value, ...patch });
   const updateNumber = (key: "repeatEveryDays" | "repeatCount" | "timeoutSeconds" | "misfireGraceSeconds") =>
     (event: ChangeEvent<HTMLInputElement>) => {
@@ -662,18 +667,14 @@ export function AwakenScheduledTaskEditorDialog({
           <div className="aw-scheduled-task-editor__advanced-body">
             <section aria-label="模型">
               <EditorField label="模型 Profile">
-                <select
-                  className="aw-scheduled-task-editor__control"
-                  aria-label="模型 profile"
+                <AwakenSelect
+                  className="aw-scheduled-task-editor__profile-select"
                   value={value.profileId}
+                  options={profileOptions}
+                  ariaLabel="模型 profile"
                   disabled={busy}
-                  onChange={(event) => update({ profileId: event.target.value })}
-                >
-                  <option value="">每次运行时使用当前默认 profile</option>
-                  {profiles.map((profile) => (
-                    <option key={profile.profileId} value={profile.profileId}>{profile.name}</option>
-                  ))}
-                </select>
+                  onValueChange={(profileId) => update({ profileId })}
+                />
               </EditorField>
             </section>
             <section aria-label="高级选项" className="aw-scheduled-task-editor__advanced-grid">

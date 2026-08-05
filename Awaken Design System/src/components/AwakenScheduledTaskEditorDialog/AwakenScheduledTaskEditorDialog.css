@@ -853,6 +853,10 @@
   background: var(--aw-bg-white);
 }
 
+.aw-scheduled-task-editor__advanced:has(.aw-select__trigger[aria-expanded="true"]) {
+  overflow: visible;
+}
+
 .aw-scheduled-task-editor__advanced summary {
   display: flex;
   align-items: center;
@@ -900,6 +904,12 @@
   padding: 14px;
   border-top: 1px solid var(--aw-border-light);
   background: var(--aw-surface-panel-muted);
+}
+
+/* 模型列表复用全产品 AwakenSelect；向上展开，避开编辑器固定 footer。 */
+.aw-scheduled-task-editor__profile-select .aw-select__menu {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 
 .aw-scheduled-task-editor__advanced-grid {

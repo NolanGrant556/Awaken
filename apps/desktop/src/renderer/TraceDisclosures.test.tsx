@@ -366,6 +366,12 @@ describe("execution trace disclosures", () => {
       /\.thought-trace-heading:hover,[\s\S]*?color:\s*var\(--aw-text-primary\);/,
     );
     expect(componentStyles).toMatch(
+      /:root\[data-aw-focus-modality="keyboard"\] \.thought-trace-heading:focus-visible\s*\{[\s\S]*?outline:\s*none;/,
+    );
+    expect(componentStyles).toMatch(
+      /\.thought-trace-heading:focus-visible[\s\S]*?:is\(\.thought-trace-disclosure-label, \.aw-thinking-orb-status__label\)[\s\S]*?text-decoration-line:\s*underline;/,
+    );
+    expect(componentStyles).toMatch(
       /\.tool-trace-group-heading:hover,[\s\S]*?background:\s*transparent;[\s\S]*?color:\s*var\(--aw-text-primary\);/,
     );
     expect(componentStyles).toMatch(

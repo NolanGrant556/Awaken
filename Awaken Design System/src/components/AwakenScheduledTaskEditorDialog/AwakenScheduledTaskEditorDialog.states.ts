@@ -14,8 +14,8 @@ export const AwakenScheduledTaskEditorDemoProjects: AwakenScheduledTaskProjectOp
 ];
 
 export const AwakenScheduledTaskEditorDemoProfiles: AwakenScheduledTaskProfileOption[] = [
-  { profileId: "profile_kimi", name: "Kimi for Coding" },
-  { profileId: "profile_local", name: "本地模型" },
+  { profileId: "profile_kimi", name: "kimi-for-coding" },
+  { profileId: "profile_deepseek", name: "deepseek-v4-pro" },
 ];
 
 export const AwakenScheduledTaskEditorDemoTimezones: string[] = [
@@ -57,6 +57,7 @@ const createWeeklyDraft: AwakenScheduledTaskDraft = {
   cronWeekdays: [5],
   actionKind: "agent",
   content: "请基于最近一周的 memory，生成本周工作总结。",
+  profileId: "profile_kimi",
 };
 
 const editCalendarDraft: AwakenScheduledTaskDraft = {

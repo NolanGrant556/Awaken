@@ -215,17 +215,24 @@ describe("ScheduledTasksView", () => {
     );
 
     await click(buttonByText("创建任务"));
-    const profileSelect = document.querySelector<HTMLSelectElement>('select[aria-label="模型 profile"]');
-    expect(Array.from(profileSelect?.options ?? []).map((option) => option.textContent)).toEqual([
+    await click(document.querySelector(".aw-scheduled-task-editor__advanced > summary"));
+    expect(document.querySelector('select[aria-label="模型 profile"]')).toBeNull();
+    await click(buttonByAriaLabel("模型 profile"));
+    const profileOptions = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.aw-select__menu [role="option"]'),
+    );
+    expect(profileOptions.map((option) => option.textContent?.trim())).toEqual([
       "每次运行时使用当前默认 profile",
       "kimi-for-coding",
       "k3",
     ]);
-    expect(Array.from(profileSelect?.options ?? []).map((option) => option.value)).toEqual([
+    expect(profileOptions.map((option) => option.dataset.value)).toEqual([
       "",
       "profile-kimi-standard",
       "profile-kimi-k3",
     ]);
+    await click(profileOptions[2]);
+    expect(buttonByAriaLabel("模型 profile")?.textContent).toContain("k3");
   });
 
   it("uses Chinese searchable timezone labels and the custom calendar", async () => {

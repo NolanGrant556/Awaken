@@ -652,6 +652,7 @@ if (
   !productionCss.includes(".aw-scheduled-task-list__row") ||
   !productionCss.includes(".aw-scheduled-task-template-dialog") ||
   !productionCss.includes(".aw-scheduled-task-editor__section") ||
+  !productionCss.includes(".aw-scheduled-task-editor__profile-select") ||
   !productionCss.includes(".aw-scheduled-task-state-badge")
 ) {
   throw new Error("Production CSS is missing scheduled task component surfaces");

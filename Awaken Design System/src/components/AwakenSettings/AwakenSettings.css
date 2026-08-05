@@ -4,6 +4,7 @@
   --aw-settings-sidebar-width: 212px;
   --aw-settings-window-top: 44px;
   --aw-settings-page-inline-gutter: 56px;
+  --aw-settings-focused-content-width: 820px;
   --model-settings-content-width: 1120px;
   position: relative;
   isolation: isolate;

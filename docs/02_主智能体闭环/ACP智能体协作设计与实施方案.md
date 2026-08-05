@@ -12,7 +12,7 @@
   - run cancel 通过 `acp.Manager.CancelAllForThread` 传播到活跃 ACP turn；
   - Server routes：`/v1/acp/runners`、`/v1/acp/sessions`、`/v1/acp/sessions/{runner_id}/close`、`/v1/runs/{run_id}/acp-permissions/{interaction_id}/resolve`。
 - 当前支持（新增）：
-  - Desktop Settings 已增加 ACP runner 配置页，支持内置/自定义 runner 的启用、编辑、probe、新增与删除；
+  - Desktop Settings 已增加 ACP runner 配置页，支持内置/自定义 runner 的启用、编辑、probe、新增与删除；列表在 820px focused content column 中居中并使用紧凑卡片，新增与编辑复用居中模态表单及其内部滚动、底部操作、Escape/遮罩关闭和焦点恢复；
   - Main/preload/renderer typed bridge 已暴露 `getACPRunners`、`createACPRunner`、`updateACPRunner`、`deleteACPRunner`、`probeACPRunner`、`resolveACPPermission`；
   - Workbench 已展示嵌套 ACP turn/tool progress（`acpSession`/`acpTool` narrative item）和 ACP permission gate（精确 option 按钮）；
   - 新增 AI 可调用工具 `configure_acp_runner`，用于在用户级 ACP 配置中增删改 runner，不经过 TaskScope 文件桥，不触碰项目级路径。
@@ -678,7 +678,7 @@ Core 是 lease 与 idle 判定的唯一 owner。manifest 只做发现，不保�
 
 ### Phase 4：Desktop 设置与 Workbench
 
-- [x] 设置页增加 ACP runners 列表、编辑、enable/disable、probe diagnostics。
+- [x] 设置页增加 ACP runners 紧凑居中列表、居中模态新增/编辑、enable/disable、probe diagnostics；表单不再使用右侧全高 drawer。
 - [x] Workbench 展示嵌套 ACP turn/tool progress（`AWAKEN_ACP_SESSION_CHANGED` / `AWAKEN_ACP_TURN_CHANGED` / `AWAKEN_ACP_TOOL_CHANGED` → `acpSession` / `acpTool` narrative item）。
 - [x] `ExternalActionGate` 增加 ACP permission typed variant 和精确 option 按钮；cancel 提交空 option_id。
 - [x] reducer/projector 处理 ACP 事件；thread 切换/断线重连时 externalInteractions 随 run terminal 清理。
@@ -754,7 +754,7 @@ git diff --check
 ### 15.4 真实 Desktop 验收
 
 1. 从 README 正式入口启动 Awaken Desktop。
-2. 设置页新增 runner，probe 成功后开始新 thread。
+2. 设置页确认 runner 列表在宽窗口中紧凑居中；新增和编辑均从触发器打开居中模态表单，长内容只滚表单，取消、Escape、遮罩和关闭按钮均关闭并把焦点恢复到触发器；保存后 probe 成功再开始新 thread。
 3. 委派纯只读分析，验证文本和工具进度嵌套显示。
 4. 委派文件修改，验证 workspace 中真实变更、外部工具 identity 和主 Agent 收到的结果。
 5. 触发 permission，验证精确 option、拒绝、等待期间取消、迟到提交。

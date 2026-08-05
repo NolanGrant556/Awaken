@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bot,
   Code,
@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import {
   AwakenButton as Button,
+  AwakenDialog,
   AwakenSwitch,
   AwakenTooltip as Tooltip,
 } from "@awaken/design-system";
@@ -23,7 +24,12 @@ import type {
 } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
 
-const BUILTIN_ACP_ORDER = ["opencode", "qwen_code", "claude_code", "codex"] as const;
+const BUILTIN_ACP_ORDER = [
+  "opencode",
+  "qwen_code",
+  "claude_code",
+  "codex",
+] as const;
 
 const BUILTIN_ACP_TEMPLATES: Record<string, ACPRunnerCreateRequest> = {
   opencode: {
@@ -88,7 +94,7 @@ const BUILTIN_ACP_ICONS: Record<string, React.ReactNode> = {
 
 const RUNNER_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
-type DrawerMode = "create" | "edit";
+type EditorMode = "create" | "edit";
 
 function isBuiltinACPRunner(id: string): boolean {
   return BUILTIN_ACP_ORDER.includes(id as (typeof BUILTIN_ACP_ORDER)[number]);
@@ -147,9 +153,7 @@ function stringifyEnvForEdit(env: ACPRunnerEnvVar[] = []): string {
   return env.map(({ key }) => `${key}=`).join("\n");
 }
 
-function parseEnvTextForEdit(
-  value: string,
-): {
+function parseEnvTextForEdit(value: string): {
   set: Record<string, string>;
   presentKeys: Set<string>;
 } {
@@ -283,7 +287,9 @@ function validateForm(form: FormState, existingIds: string[]): string | null {
   return null;
 }
 
-function mergeRunners(apiRunners: ACPRunnerView[]): Record<string, ACPRunnerView> {
+function mergeRunners(
+  apiRunners: ACPRunnerView[],
+): Record<string, ACPRunnerView> {
   const merged: Record<string, ACPRunnerView> = {};
   for (const key of BUILTIN_ACP_ORDER) {
     merged[key] = normalizeRunner(templateToView(BUILTIN_ACP_TEMPLATES[key]));
@@ -309,14 +315,19 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
   const [persistedIds, setPersistedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerMode, setDrawerMode] = useState<DrawerMode>("create");
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorMode, setEditorMode] = useState<EditorMode>("create");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(() =>
     runnerToFormState(templateToView(BUILTIN_ACP_TEMPLATES.opencode)),
   );
   const [saving, setSaving] = useState(false);
-  const [probeStates, setProbeStates] = useState<Record<string, { busy: boolean; result?: string }>>({});
+  const [probeStates, setProbeStates] = useState<
+    Record<string, { busy: boolean; result?: string }>
+  >({});
+  const initialEditorFocusRef = useRef<HTMLInputElement>(null);
+  const editingBuiltin =
+    editorMode === "edit" && activeId !== null && isBuiltinACPRunner(activeId);
 
   const loadRunners = useCallback(
     async (preserveOrder = false) => {
@@ -345,28 +356,29 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
     void loadRunners(false);
   }, [loadRunners]);
 
-  function openCreateDrawer() {
-    setDrawerMode("create");
+  function openCreateDialog() {
+    setEditorMode("create");
     setActiveId(null);
     setForm(runnerToFormState(templateToView(BUILTIN_ACP_TEMPLATES.opencode)));
     setForm((current) => ({ ...current, id: "" }));
-    setDrawerOpen(true);
+    setEditorOpen(true);
     setMessage(null);
   }
 
-  function openEditDrawer(id: string) {
+  function openEditDialog(id: string) {
     const runner = runners[id];
     if (!runner) return;
-    setDrawerMode("edit");
+    setEditorMode("edit");
     setActiveId(id);
     setForm(runnerToFormState(runner));
-    setDrawerOpen(true);
+    setEditorOpen(true);
     setMessage(null);
   }
 
-  function closeDrawer() {
-    setDrawerOpen(false);
+  function closeDialog() {
+    setEditorOpen(false);
     setActiveId(null);
+    setMessage(null);
   }
 
   async function handleToggle(id: string) {
@@ -378,11 +390,16 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
       } else {
         const template = BUILTIN_ACP_TEMPLATES[id];
         if (!template) return;
-        await runtimeClient.createACPRunner({ ...template, enabled: !runner.enabled });
+        await runtimeClient.createACPRunner({
+          ...template,
+          enabled: !runner.enabled,
+        });
       }
       await loadRunners(true);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "切换 runner 状态失败。");
+      setMessage(
+        error instanceof Error ? error.message : "切换 runner 状态失败。",
+      );
     }
   }
 
@@ -420,10 +437,10 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
   async function handleSave() {
     const existingIds = Object.keys(runners);
     const targetId = form.id.trim();
-    const isRename = drawerMode === "edit" && activeId && targetId !== activeId;
+    const isRename = editorMode === "edit" && activeId && targetId !== activeId;
     const validationIds = isRename
       ? existingIds.filter((id) => id !== activeId)
-      : drawerMode === "create"
+      : editorMode === "create"
         ? existingIds
         : existingIds.filter((id) => id !== activeId);
     const validationError = validateForm(form, validationIds);
@@ -436,7 +453,7 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
     setMessage(null);
     try {
       const runner = formStateToRunner(form);
-      if (drawerMode === "create") {
+      if (editorMode === "create") {
         await runtimeClient.createACPRunner(runner);
       } else if (isRename && activeId) {
         if (persistedIds.has(activeId)) {
@@ -448,8 +465,12 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
           const originalKeys = new Set(
             (runners[activeId]?.env ?? []).map((e) => e.key),
           );
-          const { set: envSet, presentKeys } = parseEnvTextForEdit(form.envText);
-          const envRemove = [...originalKeys].filter((key) => !presentKeys.has(key));
+          const { set: envSet, presentKeys } = parseEnvTextForEdit(
+            form.envText,
+          );
+          const envRemove = [...originalKeys].filter(
+            (key) => !presentKeys.has(key),
+          );
           const update: ACPRunnerUpdateRequest = {
             enabled: runner.enabled,
             command: runner.command,
@@ -467,7 +488,7 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
         }
       }
       await loadRunners();
-      closeDrawer();
+      closeDialog();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存 runner 失败。");
     } finally {
@@ -477,13 +498,16 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
 
   async function handleDelete() {
     if (!activeId || isBuiltinACPRunner(activeId)) return;
-    if (!window.confirm(`确定删除自定义 runner ${activeId} 吗？此操作不可撤销。`)) return;
+    if (
+      !window.confirm(`确定删除自定义 runner ${activeId} 吗？此操作不可撤销。`)
+    )
+      return;
     setSaving(true);
     setMessage(null);
     try {
       await runtimeClient.deleteACPRunner(activeId);
       await loadRunners();
-      closeDrawer();
+      closeDialog();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "删除 runner 失败。");
     } finally {
@@ -500,14 +524,22 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
       <div className="acp-settings-toolbar">
         <div>
           <h2>外部 Agent / ACP</h2>
-          <p>配置并启用本地 ACP runner 后，主 Agent 可通过 delegate_external_agent 工具与其协作。</p>
+          <p>
+            配置并启用本地 ACP runner 后，主 Agent 可通过
+            delegate_external_agent 工具与其协作。
+          </p>
         </div>
-        <Button variant="default" size="md" icon={<Plus size={14} />} onClick={openCreateDrawer}>
+        <Button
+          variant="default"
+          size="md"
+          icon={<Plus size={14} />}
+          onClick={openCreateDialog}
+        >
           添加 runner
         </Button>
       </div>
 
-      {message ? (
+      {message && !editorOpen ? (
         <div className="model-settings-message" role="status">
           {message}
         </div>
@@ -520,218 +552,258 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
           {displayOrder
             .filter((id) => runners[id] !== undefined)
             .map((id) => {
-            const runner = runners[id];
-            if (!runner) return null;
-            const builtin = isBuiltinACPRunner(id);
-            const probe = probeStates[id];
-            const icon = BUILTIN_ACP_ICONS[id] ?? <Bot size={22} strokeWidth={1.9} />;
-            return (
-              <article
-                key={id}
-                className={`acp-runner-card${runner.enabled ? " acp-runner-card-enabled" : ""}`}
-                onClick={() => openEditDrawer(id)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    openEditDrawer(id);
-                  }
-                }}
-              >
-                <div className="acp-runner-icon" aria-hidden="true">
-                  {icon}
-                </div>
-                <div className="acp-runner-copy">
-                  <div className="acp-runner-title-row">
-                    <h3>{id}</h3>
-                    <span className={`acp-runner-tag${builtin ? " acp-runner-tag-builtin" : " acp-runner-tag-custom"}`}>
-                      {builtin ? "内置" : "自定义"}
-                    </span>
-                    <span
-                      className={`extension-state ${
-                        runner.enabled ? "extension-state-connected" : "extension-state-disabled"
-                      }`}
-                    >
-                      {runner.enabled ? "已启用" : "已禁用"}
-                    </span>
-                  </div>
-                  <div className="acp-runner-meta">
-                    <code>{runner.command}</code>
-                    {runner.args.length > 0 ? <span>{runner.args.join(" ")}</span> : null}
-                  </div>
-                  {probe?.result ? (
-                    <div className="search-channel-test-result" role="status">
-                      {probe.result}
-                    </div>
-                  ) : null}
-                </div>
-                <div
-                  className="acp-runner-actions"
-                  onClick={(event) => event.stopPropagation()}
-                  onKeyDown={(event) => event.stopPropagation()}
+              const runner = runners[id];
+              if (!runner) return null;
+              const builtin = isBuiltinACPRunner(id);
+              const probe = probeStates[id];
+              const icon = BUILTIN_ACP_ICONS[id] ?? (
+                <Bot size={22} strokeWidth={1.9} />
+              );
+              return (
+                <article
+                  key={id}
+                  className={`acp-runner-card${runner.enabled ? " acp-runner-card-enabled" : ""}`}
+                  onClick={() => openEditDialog(id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      openEditDialog(id);
+                    }
+                  }}
                 >
-                  <Tooltip label="探测命令是否可访问" placement="top">
-                    <button
-                      type="button"
-                      className="search-channel-test-button"
-                      disabled={probe?.busy}
-                      onClick={() => void handleProbe(id)}
-                    >
-                      <Wifi size={15} strokeWidth={1.9} />
-                      {probe?.busy ? "探测中…" : "探测"}
-                    </button>
-                  </Tooltip>
-                  <AwakenSwitch
-                    checked={runner.enabled}
-                    label={`${id} ACP runner`}
-                    onCheckedChange={() => void handleToggle(id)}
-                  />
-                </div>
-              </article>
-            );
-          })}
+                  <div className="acp-runner-icon" aria-hidden="true">
+                    {icon}
+                  </div>
+                  <div className="acp-runner-copy">
+                    <div className="acp-runner-title-row">
+                      <h3>{id}</h3>
+                      <span
+                        className={`acp-runner-tag${builtin ? " acp-runner-tag-builtin" : " acp-runner-tag-custom"}`}
+                      >
+                        {builtin ? "内置" : "自定义"}
+                      </span>
+                      <span
+                        className={`extension-state ${
+                          runner.enabled
+                            ? "extension-state-connected"
+                            : "extension-state-disabled"
+                        }`}
+                      >
+                        {runner.enabled ? "已启用" : "已禁用"}
+                      </span>
+                    </div>
+                    <div className="acp-runner-meta">
+                      <code>{runner.command}</code>
+                      {runner.args.length > 0 ? (
+                        <span>{runner.args.join(" ")}</span>
+                      ) : null}
+                    </div>
+                    {probe?.result ? (
+                      <div className="search-channel-test-result" role="status">
+                        {probe.result}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div
+                    className="acp-runner-actions"
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    <Tooltip label="探测命令是否可访问" placement="top">
+                      <button
+                        type="button"
+                        className="search-channel-test-button"
+                        disabled={probe?.busy}
+                        onClick={() => void handleProbe(id)}
+                      >
+                        <Wifi size={15} strokeWidth={1.9} />
+                        {probe?.busy ? "探测中…" : "探测"}
+                      </button>
+                    </Tooltip>
+                    <AwakenSwitch
+                      checked={runner.enabled}
+                      label={`${id} ACP runner`}
+                      onCheckedChange={() => void handleToggle(id)}
+                    />
+                  </div>
+                </article>
+              );
+            })}
         </div>
       )}
 
-      {drawerOpen ? (
-        <div className="acp-runner-drawer-backdrop" onClick={closeDrawer}>
-          <div
-            className="acp-runner-drawer"
-            role="dialog"
-            aria-modal="true"
-            aria-label={drawerMode === "create" ? "添加 ACP runner" : `编辑 ${activeId ?? ""}`}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="acp-runner-drawer-head">
-              <h2>{drawerMode === "create" ? "添加 ACP runner" : `编辑 ${activeId}`}</h2>
-              <button type="button" className="extension-icon-button" onClick={closeDrawer}>
-                ✕
-              </button>
-            </div>
-
-            <div className="acp-runner-form">
-              <label className="acp-runner-field">
-                <span>Runner ID</span>
-                <input
-                  type="text"
-                  value={form.id}
-                  disabled={drawerMode === "edit" && activeId ? isBuiltinACPRunner(activeId) : false}
-                  placeholder="my_runner"
-                  onChange={(event) => updateForm({ id: event.target.value })}
-                />
-              </label>
-
-              <div className="acp-runner-field acp-runner-field-inline">
-                <span>启用</span>
-                <AwakenSwitch
-                  checked={form.enabled}
-                  label="ACP runner"
-                  onCheckedChange={(enabled) => updateForm({ enabled })}
-                />
-              </div>
-
-              <label className="acp-runner-field">
-                <span>启动命令</span>
-                <input
-                  type="text"
-                  value={form.command}
-                  placeholder="npx"
-                  onChange={(event) => updateForm({ command: event.target.value })}
-                />
-              </label>
-
-              <label className="acp-runner-field">
-                <span>参数（每行一个）</span>
-                <textarea
-                  value={form.argsText}
-                  rows={4}
-                  placeholder="--acp"
-                  onChange={(event) => updateForm({ argsText: event.target.value })}
-                />
-              </label>
-
-              <label className="acp-runner-field">
-                <span>环境变量（每行 KEY=VALUE）</span>
-                <textarea
-                  value={form.envText}
-                  rows={4}
-                  placeholder="API_KEY=xxx"
-                  onChange={(event) => updateForm({ envText: event.target.value })}
-                />
-              </label>
-
-              <label className="acp-runner-field">
-                <span>权限模式</span>
-                <select
-                  value={form.permission_mode}
-                  onChange={(event) => updateForm({ permission_mode: event.target.value as ACPPermissionMode })}
-                >
-                  <option value="ask">ask（请求用户确认）</option>
-                  <option value="deny">deny（自动拒绝）</option>
-                </select>
-              </label>
-
-              <div className="acp-runner-field-row">
-                <label className="acp-runner-field">
-                  <span>启动超时（秒）</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={300}
-                    value={form.startup_timeout_seconds}
-                    onChange={(event) => updateForm({ startup_timeout_seconds: Number(event.target.value) })}
-                  />
-                </label>
-                <label className="acp-runner-field">
-                  <span>单轮超时（秒）</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={3600}
-                    value={form.turn_timeout_seconds}
-                    onChange={(event) => updateForm({ turn_timeout_seconds: Number(event.target.value) })}
-                  />
-                </label>
-                <label className="acp-runner-field">
-                  <span>最大帧字节</span>
-                  <input
-                    type="number"
-                    min={1024}
-                    max={64 * 1024 * 1024}
-                    value={form.max_frame_bytes}
-                    onChange={(event) => updateForm({ max_frame_bytes: Number(event.target.value) })}
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className="acp-runner-drawer-foot">
-              {drawerMode === "edit" && activeId && !isBuiltinACPRunner(activeId) ? (
-                <Button
-                  variant="ghost"
-                  size="md"
-                  icon={<Trash2 size={14} />}
-                  onClick={() => void handleDelete()}
-                  disabled={saving}
-                >
-                  删除
-                </Button>
-              ) : (
-                <span />
-              )}
-              <div className="acp-runner-drawer-foot-actions">
-                <Button variant="ghost" size="md" onClick={closeDrawer} disabled={saving}>
-                  取消
-                </Button>
-                <Button variant="default" size="md" onClick={() => void handleSave()} disabled={saving}>
-                  {saving ? "保存中…" : "保存"}
-                </Button>
-              </div>
+      <AwakenDialog
+        open={editorOpen}
+        title={
+          editorMode === "create" ? "添加 ACP runner" : `编辑 ${activeId ?? ""}`
+        }
+        initialFocusRef={initialEditorFocusRef}
+        className="acp-runner-dialog"
+        bodyClassName="acp-runner-dialog__body"
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
+        footer={
+          <div className="acp-runner-dialog-footer">
+            {editorMode === "edit" &&
+            activeId &&
+            !isBuiltinACPRunner(activeId) ? (
+              <Button
+                variant="ghost"
+                size="md"
+                icon={<Trash2 size={14} />}
+                onClick={() => void handleDelete()}
+                disabled={saving}
+              >
+                删除
+              </Button>
+            ) : (
+              <span />
+            )}
+            <div className="acp-runner-dialog-footer__actions">
+              <Button
+                variant="ghost"
+                size="md"
+                onClick={closeDialog}
+                disabled={saving}
+              >
+                取消
+              </Button>
+              <Button
+                variant="default"
+                size="md"
+                onClick={() => void handleSave()}
+                disabled={saving}
+              >
+                {saving ? "保存中…" : "保存"}
+              </Button>
             </div>
           </div>
+        }
+      >
+        {message ? (
+          <div className="acp-runner-dialog-message" role="alert">
+            {message}
+          </div>
+        ) : null}
+        <div className="acp-runner-form">
+          <label className="acp-runner-field">
+            <span>Runner ID</span>
+            <input
+              ref={editingBuiltin ? undefined : initialEditorFocusRef}
+              type="text"
+              value={form.id}
+              disabled={
+                editorMode === "edit" && activeId
+                  ? isBuiltinACPRunner(activeId)
+                  : false
+              }
+              placeholder="my_runner"
+              onChange={(event) => updateForm({ id: event.target.value })}
+            />
+          </label>
+
+          <div className="acp-runner-field acp-runner-field-inline">
+            <span>启用</span>
+            <AwakenSwitch
+              checked={form.enabled}
+              label="ACP runner"
+              onCheckedChange={(enabled) => updateForm({ enabled })}
+            />
+          </div>
+
+          <label className="acp-runner-field">
+            <span>启动命令</span>
+            <input
+              ref={editingBuiltin ? initialEditorFocusRef : undefined}
+              type="text"
+              value={form.command}
+              placeholder="npx"
+              onChange={(event) => updateForm({ command: event.target.value })}
+            />
+          </label>
+
+          <label className="acp-runner-field">
+            <span>参数（每行一个）</span>
+            <textarea
+              value={form.argsText}
+              rows={4}
+              placeholder="--acp"
+              onChange={(event) => updateForm({ argsText: event.target.value })}
+            />
+          </label>
+
+          <label className="acp-runner-field">
+            <span>环境变量（每行 KEY=VALUE）</span>
+            <textarea
+              value={form.envText}
+              rows={4}
+              placeholder="API_KEY=xxx"
+              onChange={(event) => updateForm({ envText: event.target.value })}
+            />
+          </label>
+
+          <label className="acp-runner-field">
+            <span>权限模式</span>
+            <select
+              value={form.permission_mode}
+              onChange={(event) =>
+                updateForm({
+                  permission_mode: event.target.value as ACPPermissionMode,
+                })
+              }
+            >
+              <option value="ask">ask（请求用户确认）</option>
+              <option value="deny">deny（自动拒绝）</option>
+            </select>
+          </label>
+
+          <div className="acp-runner-field-row">
+            <label className="acp-runner-field">
+              <span>启动超时（秒）</span>
+              <input
+                type="number"
+                min={1}
+                max={300}
+                value={form.startup_timeout_seconds}
+                onChange={(event) =>
+                  updateForm({
+                    startup_timeout_seconds: Number(event.target.value),
+                  })
+                }
+              />
+            </label>
+            <label className="acp-runner-field">
+              <span>单轮超时（秒）</span>
+              <input
+                type="number"
+                min={1}
+                max={3600}
+                value={form.turn_timeout_seconds}
+                onChange={(event) =>
+                  updateForm({
+                    turn_timeout_seconds: Number(event.target.value),
+                  })
+                }
+              />
+            </label>
+            <label className="acp-runner-field">
+              <span>最大帧字节</span>
+              <input
+                type="number"
+                min={1024}
+                max={64 * 1024 * 1024}
+                value={form.max_frame_bytes}
+                onChange={(event) =>
+                  updateForm({ max_frame_bytes: Number(event.target.value) })
+                }
+              />
+            </label>
+          </div>
         </div>
-      ) : null}
+      </AwakenDialog>
     </section>
   );
 }

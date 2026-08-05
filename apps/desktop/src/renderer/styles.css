@@ -1238,8 +1238,11 @@ pre {
 
 .acp-settings {
   display: grid;
-  gap: 18px;
-  padding: 24px;
+  gap: 14px;
+  box-sizing: border-box;
+  width: min(100%, var(--aw-settings-focused-content-width, 820px));
+  margin-inline: auto;
+  padding: 8px 0 36px;
 }
 
 .acp-settings-toolbar {
@@ -1262,7 +1265,7 @@ pre {
 
 .acp-runner-list {
   display: grid;
-  gap: 12px;
+  gap: 9px;
 }
 
 .acp-runner-empty {
@@ -1274,11 +1277,11 @@ pre {
 
 .acp-runner-card {
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr) auto;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 16px;
-  min-height: 96px;
-  padding: 16px 18px;
+  gap: 12px;
+  min-height: 76px;
+  padding: 10px 14px;
   border: 1px solid var(--aw-border-main);
   border-radius: var(--aw-radius-lg);
   background: var(--aw-bg-fill-light);
@@ -1298,8 +1301,8 @@ pre {
 .acp-runner-icon {
   display: grid;
   place-items: center;
-  width: 54px;
-  height: 54px;
+  width: 44px;
+  height: 44px;
   color: var(--aw-text-secondary);
   border-radius: var(--aw-radius-md);
   background: var(--aw-bg-white);
@@ -1319,7 +1322,7 @@ pre {
 
 .acp-runner-title-row h3 {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .acp-runner-tag {
@@ -1352,47 +1355,40 @@ pre {
 .acp-runner-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
-.acp-runner-drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: grid;
-  justify-content: end;
-  background: color-mix(in srgb, var(--aw-button-black) 26%, transparent);
+.acp-runner-dialog {
+  width: min(680px, calc(100vw - 56px));
+  max-height: min(720px, calc(100vh - 56px));
+  border-radius: 18px;
+  box-shadow: 0 30px 90px color-mix(in srgb, var(--aw-text-primary) 22%, transparent),
+    0 4px 18px color-mix(in srgb, var(--aw-text-primary) 9%, transparent);
 }
 
-.acp-runner-drawer {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(520px, 100vw);
-  height: 100%;
-  background: var(--aw-bg-white);
-  box-shadow: var(--aw-shadow-toast);
-}
-
-.acp-runner-drawer-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px 20px;
+.acp-runner-dialog .aw-dialog__head {
+  padding: 18px 22px 14px;
   border-bottom: 1px solid var(--aw-border-light);
 }
 
-.acp-runner-drawer-head h2 {
-  margin: 0;
-  font-size: 16px;
+.acp-runner-dialog__body {
+  padding: 18px 22px;
+}
+
+.acp-runner-dialog-message {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--aw-error) 30%, var(--aw-border-main));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--aw-error) 6%, var(--aw-bg-white));
+  color: var(--aw-error);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .acp-runner-form {
   display: grid;
   align-content: start;
-  gap: 16px;
-  padding: 20px;
-  overflow-y: auto;
+  gap: 14px;
 }
 
 .acp-runner-field {
@@ -1453,22 +1449,31 @@ pre {
   gap: 12px;
 }
 
-.acp-runner-drawer-foot {
+.acp-runner-dialog .aw-dialog__foot {
+  padding: 14px 22px;
+  border-top: 1px solid var(--aw-border-light);
+}
+
+.acp-runner-dialog-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 20px;
-  border-top: 1px solid var(--aw-border-light);
+  width: 100%;
 }
 
-.acp-runner-drawer-foot-actions {
+.acp-runner-dialog-footer__actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 @media (max-width: 640px) {
+  .acp-runner-dialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+
   .acp-runner-field-row {
     grid-template-columns: 1fr;
   }

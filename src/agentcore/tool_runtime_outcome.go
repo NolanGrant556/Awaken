@@ -403,6 +403,20 @@ func synthesizeValidationToolResult(result ToolExecutionResult, reason string) T
 	)
 }
 
+func synthesizeAskUserInputFailure(result ToolExecutionResult, reason string) ToolExecutionResult {
+	const expected = `{"questions":[{"question":"选择主题","options":[{"label":"深色"},{"label":"浅色"}],"multi_select":false}]}`
+	return synthesizeValidationFailure(
+		result,
+		"ask_user_invalid_input",
+		fmt.Sprintf(
+			"提问格式错误: %s。请传入包含 questions 数组的 JSON 对象，不要传空对象、questions_json 或裸数组。示例：%s",
+			firstNonEmpty(reason, "invalid question arguments"),
+			expected,
+		),
+		[]string{"send_questions_object", "provide_one_to_three_questions", "provide_two_to_four_options_per_question"},
+	)
+}
+
 func synthesizeValidationFailure(result ToolExecutionResult, code, content string, recovery []string) ToolExecutionResult {
 	result.Content = content
 	result.IsError = true

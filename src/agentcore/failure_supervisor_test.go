@@ -138,6 +138,32 @@ func TestSyntheticBlockedResultRequiresStrategyChange(t *testing.T) {
 	if !result.IsError || result.Outcome.ErrorCode != ErrorCodeRepeatedFailure || !strings.Contains(result.Content, StatusStrategyChangeRequired) {
 		t.Fatalf("blocked result=%+v", result)
 	}
+	if result.Outcome.Retryable || result.Outcome.Diagnostic["retryable"] != false ||
+		result.Outcome.Diagnostic["changed_call_allowed"] != true ||
+		strings.Contains(result.Content, `"retryable":true`) {
+		t.Fatalf("blocked result contains contradictory retry guidance: %+v", result)
+	}
+}
+
+func TestFailureSupervisorTerminatesRepeatedInvalidAskUserCall(t *testing.T) {
+	s := NewFailureSupervisor("/tmp/ws", 8, 32)
+	call := convcontext.ToolCall{ID: "ask-empty", Function: convcontext.FunctionCall{Name: "ask_user", Arguments: `{}`}}
+	first := s.BeforeCall(call)
+	if !first.Allow {
+		t.Fatalf("first ask_user call blocked: %+v", first)
+	}
+	s.NoteRealExecution(first.CallSignature)
+	s.AfterOutcome(call, tool.FailedOutcome("questions required", "ask_user_invalid_input", tool.ErrorCategoryValidation, false))
+
+	blocked := s.BeforeCall(call)
+	if !blocked.Block || !blocked.TerminateRun || blocked.TerminalReason != TerminalReasonRepeatedToolFailure {
+		t.Fatalf("repeated invalid ask_user call did not terminate: %+v", blocked)
+	}
+	result := SyntheticBlockedResult(call, blocked)
+	if result.Outcome.Diagnostic["run_will_terminate"] != true ||
+		result.Outcome.Diagnostic["changed_call_allowed"] != true {
+		t.Fatalf("terminal ask_user guidance is incomplete: %+v", result)
+	}
 }
 
 func TestFailureSupervisorBlocksChangedArgumentsAfterUnknownExternalCreation(t *testing.T) {
@@ -167,7 +193,8 @@ func TestFailureSupervisorBlocksChangedArgumentsAfterUnknownExternalCreation(t *
 	result := SyntheticBlockedResult(changed, blocked)
 	if !strings.Contains(result.Content, StatusExternalStateConfirmationRequired) ||
 		strings.Contains(result.Content, StatusStrategyChangeRequired) ||
-		result.Outcome.Diagnostic["retryable"] != false {
+		result.Outcome.Diagnostic["retryable"] != false ||
+		result.Outcome.Diagnostic["changed_call_allowed"] != false {
 		t.Fatalf("external-state block gave unsafe retry guidance: %+v", result)
 	}
 

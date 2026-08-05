@@ -411,8 +411,19 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		return finalizeToolResult(rt.providerReadinessResult(result, provider, readiness))
 	}
 
-	input, err := normalizeToolInputWithSchema(call.Function.Arguments, selectedTool, def.InputSchema, preserveInput)
+	rawInput := call.Function.Arguments
+	if call.Function.Name == askuser.ToolName {
+		var legacyErr error
+		rawInput, legacyErr = askuser.CanonicalizeLegacyArguments(rawInput)
+		if legacyErr != nil {
+			return finalizeToolResult(synthesizeAskUserInputFailure(result, legacyErr.Error()))
+		}
+	}
+	input, err := normalizeToolInputWithSchema(rawInput, selectedTool, def.InputSchema, preserveInput)
 	if err != nil {
+		if call.Function.Name == askuser.ToolName {
+			return finalizeToolResult(synthesizeAskUserInputFailure(result, err.Error()))
+		}
 		return finalizeToolResult(synthesizeValidationToolResult(result, err.Error()))
 	}
 

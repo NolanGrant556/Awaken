@@ -38,6 +38,12 @@
   transition: border-color 150ms ease;
 }
 
+.agent-plan-media-tools__card:has(.aw-select__trigger[aria-expanded="true"]) {
+  position: relative;
+  z-index: 2;
+  overflow: visible;
+}
+
 .agent-plan-media-tools__card:hover {
   border-color: color-mix(in srgb, var(--aw-accent) 18%, var(--aw-border-main));
 }
@@ -99,29 +105,9 @@
   font-weight: var(--aw-font-weight-bold);
 }
 
-.agent-plan-media-tools__field select {
-  width: 100%;
-  min-width: 0;
-  min-height: 34px;
-  padding: 0 32px 0 10px;
-  border: 1px solid var(--aw-border-main);
-  border-radius: 8px;
-  outline: none;
-  background: var(--aw-surface-raised);
-  color: var(--aw-text-primary);
-  font: inherit;
+.agent-plan-media-tools__field .aw-select__trigger,
+.agent-plan-media-tools__field .aw-select__option {
   font-size: 11px;
-}
-
-.agent-plan-media-tools__field select:focus-visible {
-  border-color: color-mix(in srgb, var(--aw-accent) 56%, var(--aw-border-main));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--aw-accent) 12%, transparent);
-}
-
-.agent-plan-media-tools__field select:disabled {
-  color: var(--aw-text-subtle);
-  cursor: not-allowed;
-  opacity: 0.74;
 }
 
 .agent-plan-media-tools__actions {

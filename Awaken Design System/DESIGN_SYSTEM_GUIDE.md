@@ -35,6 +35,13 @@ Awaken owns its visual language through its own tokens and components. Keep Awak
 - Hover, active, focus, selected, and disabled states must preserve layout size.
 - X-shaped close controls keep an accessible label but do not render a visible tooltip or native `title`; a visually hidden dialog title must leave the close control aligned to the top-right.
 - Text must not overflow controls; use truncation only where the component already implies a single line.
+- Model, tool, and other product-styled single-choice lists use `AwakenSelect`: the trigger, menu surface, option spacing, selected background, check icon, focus state, and disabled state stay consistent. Do not expose an operating-system native `<select>` menu for these product choices or add a page-private imitation of the list.
+
+## Scrolling Rules
+
+- Scrollable surfaces may show a narrow thumb as a position indicator, but never render a visible scrollbar track, track piece, corner, arrow button, or colored gutter. The Design System base layer keeps those parts transparent for Desktop and Gallery; a component may only tune the thumb width/contrast or hide the scrollbar entirely.
+- New scroll containers must reuse the base scrollbar treatment. Do not add a filled rail, permanent slot background, border, or component-local track color.
+- Removing the visible track must not remove wheel, touchpad, keyboard, or draggable-thumb scrolling, and must not change the content container's ownership of overflow.
 
 ## Validation
 

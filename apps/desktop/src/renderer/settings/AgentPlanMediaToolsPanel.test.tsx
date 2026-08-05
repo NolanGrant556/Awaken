@@ -96,23 +96,31 @@ describe("AgentPlanMediaToolsPanel", () => {
     expect(container.textContent).not.toContain("API Key");
     expect(container.querySelector(".model-provider-card")).toBeNull();
 
-    const imageSelect = container.querySelector<HTMLSelectElement>(
+    const imageSelect = container.querySelector<HTMLButtonElement>(
       '[aria-label="图片生成模型"]',
     );
-    const videoSelect = container.querySelector<HTMLSelectElement>(
+    const videoSelect = container.querySelector<HTMLButtonElement>(
       '[aria-label="视频生成模型"]',
     );
+    expect(imageSelect?.tagName).toBe("BUTTON");
+    expect(videoSelect?.tagName).toBe("BUTTON");
+
+    await act(async () => imageSelect?.click());
+    const imageList = imageSelect
+      ?.closest("article")
+      ?.querySelector('[role="listbox"]');
     expect(
-      Array.from(imageSelect?.options ?? []).map((option) => option.value),
-    ).toEqual(["", "doubao-seedream-test"]);
-    expect(
-      Array.from(videoSelect?.options ?? []).map((option) => option.value),
-    ).toEqual(["", "doubao-seedance-test"]);
+      Array.from(imageList?.querySelectorAll('[role="option"]') ?? []).map(
+        (option) => option.getAttribute("data-value"),
+      ),
+    ).toEqual(["doubao-seedream-test"]);
 
     await act(async () => {
-      if (!imageSelect) return;
-      imageSelect.value = "doubao-seedream-test";
-      imageSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      imageList
+        ?.querySelector<HTMLButtonElement>(
+          '[role="option"][data-value="doubao-seedream-test"]',
+        )
+        ?.click();
     });
     const imageCard = imageSelect?.closest("article");
     const saveButton = Array.from(
@@ -148,10 +156,10 @@ describe("AgentPlanMediaToolsPanel", () => {
     });
     await settle();
 
-    const imageSelect = container.querySelector<HTMLSelectElement>(
+    const imageSelect = container.querySelector<HTMLButtonElement>(
       '[aria-label="图片生成模型"]',
     );
-    expect(imageSelect?.value).toBe("doubao-seedream-test");
+    expect(imageSelect?.textContent).toContain("doubao-seedream-test");
     expect(container.textContent).toContain("保存更改");
     expect(container.textContent).toContain("删除");
     expect(container.textContent).not.toContain("已配置工具");
@@ -186,7 +194,7 @@ describe("AgentPlanMediaToolsPanel", () => {
 
     expect(onConfigureAccount).toHaveBeenCalledOnce();
     expect(
-      container.querySelector<HTMLSelectElement>('[aria-label="图片生成模型"]')
+      container.querySelector<HTMLButtonElement>('[aria-label="图片生成模型"]')
         ?.disabled,
     ).toBe(true);
     expect(container.textContent).toContain("请先配置 Agent Plan 账户");

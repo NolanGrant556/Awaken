@@ -58,6 +58,9 @@ describe("RunStage layout", () => {
     expect(designSystemStyles).toMatch(
       /\.aw-run-stage-scroll:focus,\s*\.aw-run-stage-scroll:focus-visible\s*\{\s*outline:\s*none;/,
     );
+    expect(designSystemStyles).toMatch(
+      /:root\[data-aw-focus-modality="pointer"\] :focus-visible\s*\{\s*outline:\s*none !important;/,
+    );
     expect(galleryRunStageScroll).toContain(
       "scrollbar-gutter: stable both-edges;",
     );

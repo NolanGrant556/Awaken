@@ -41,6 +41,11 @@
   outline-offset: 2px;
 }
 
+/* Pointer focus remains functional without surfacing keyboard-only outlines. */
+:root[data-aw-focus-modality="pointer"] :focus-visible {
+  outline: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -848,6 +853,19 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 .thought-trace-heading:focus-visible {
   outline: 2px solid var(--aw-border-control-hover);
   outline-offset: 3px;
+}
+
+:root[data-aw-focus-modality="keyboard"] .thought-trace-heading:focus-visible {
+  outline: none;
+}
+
+:root[data-aw-focus-modality="keyboard"]
+  .thought-trace-heading:focus-visible
+  :is(.thought-trace-disclosure-label, .aw-thinking-orb-status__label) {
+  text-decoration-line: underline;
+  text-decoration-color: var(--aw-border-control-hover);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 
 .thought-trace-status {

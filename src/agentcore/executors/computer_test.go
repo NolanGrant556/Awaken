@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -286,6 +287,58 @@ func TestComputerExecutorActUsesObservedObservation(t *testing.T) {
 	}
 }
 
+func TestComputerExecutorActRejectsIncompleteCoordinatesBeforePrepare(t *testing.T) {
+	ctx := context.Background()
+	policy, _ := computer.NewPolicySnapshot(computer.DefaultPolicy())
+	bind, _ := computer.NewBinding("run-1", "thread-1", "agent-1", "", policy)
+	driver := fake.NewDriver()
+	runtime := computer.NewRuntime(bind, driver)
+	exec := NewComputerExecutor(runtime)
+
+	if _, err := runtime.OpenSession(ctx, computer.CaptureWindow, computer.TargetRef{AppName: "FakeApp"}); err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+	observeOut := mustExecute(t, exec, "computer_observe", `{"scope":"window"}`)
+	obsID := observeOut.Outcome.Details["observation_id"].(string)
+	prepareCallsBefore := countDriverCalls(driver.Calls, "Prepare")
+
+	actInput := fmt.Sprintf(`{"observation_id":%q,"action":"click","target":{"x":0},"intent":"click","expected_effect":"clicked"}`, obsID)
+	actOut := mustExecute(t, exec, "computer_act", actInput)
+	if !actOut.IsError || actOut.Outcome.ErrorCode != tool.ErrorCodeValidationError {
+		t.Fatalf("expected validation error, got %+v", actOut.Outcome)
+	}
+	if actOut.Outcome.TransportStatus != tool.TransportNotStarted || actOut.Outcome.Operation == nil ||
+		actOut.Outcome.Operation.SideEffectState != tool.OutcomeSideEffectNotStarted {
+		t.Fatalf("incomplete coordinates must be a confirmed pre-input failure: %+v", actOut.Outcome)
+	}
+	if !strings.Contains(actOut.Outcome.ErrorMessage, "parameters.y is required") {
+		t.Fatalf("expected missing-y diagnostic, got %q", actOut.Outcome.ErrorMessage)
+	}
+	if got := countDriverCalls(driver.Calls, "Prepare"); got != prepareCallsBefore {
+		t.Fatalf("invalid action reached driver Prepare: before=%d after=%d", prepareCallsBefore, got)
+	}
+}
+
+func TestComputerExecutorActAcceptsCompleteZeroCoordinatePair(t *testing.T) {
+	ctx := context.Background()
+	policy, _ := computer.NewPolicySnapshot(computer.DefaultPolicy())
+	bind, _ := computer.NewBinding("run-1", "thread-1", "agent-1", "", policy)
+	driver := fake.NewDriver()
+	runtime := computer.NewRuntime(bind, driver)
+	exec := NewComputerExecutor(runtime)
+
+	if _, err := runtime.OpenSession(ctx, computer.CaptureWindow, computer.TargetRef{AppName: "FakeApp"}); err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+	observeOut := mustExecute(t, exec, "computer_observe", `{"scope":"window"}`)
+	obsID := observeOut.Outcome.Details["observation_id"].(string)
+	actInput := fmt.Sprintf(`{"observation_id":%q,"action":"click","target":{"x":0,"y":0},"intent":"click safe corner","expected_effect":"clicked"}`, obsID)
+	actOut := mustExecute(t, exec, "computer_act", actInput)
+	if actOut.Outcome.Status != tool.OutcomeSucceeded {
+		t.Fatalf("complete zero coordinate pair was rejected: %+v", actOut.Outcome)
+	}
+}
+
 func TestComputerExecutorActRejectsStaleObservation(t *testing.T) {
 	ctx := context.Background()
 	policy, _ := computer.NewPolicySnapshot(computer.DefaultPolicy())
@@ -366,7 +419,7 @@ func TestComputerExecutorActRequiresReview(t *testing.T) {
 	observeOut := mustExecute(t, exec, "computer_observe", `{"scope":"window"}`)
 	obsID := observeOut.Outcome.Details["observation_id"].(string)
 
-	actInput := fmt.Sprintf(`{"observation_id":%q,"action":"click","parameters":{"label":"Send"},"target":{},"intent":"send the email","expected_effect":"email sent"}`, obsID)
+	actInput := fmt.Sprintf(`{"observation_id":%q,"action":"click","parameters":{"label":"Send"},"target":{"x":100,"y":100},"intent":"send the email","expected_effect":"email sent"}`, obsID)
 
 	var actOut ToolExecutionOutput
 	var actErr error
@@ -418,7 +471,7 @@ func TestComputerExecutorActForbidden(t *testing.T) {
 	observeOut := mustExecute(t, exec, "computer_observe", `{"scope":"window"}`)
 	obsID := observeOut.Outcome.Details["observation_id"].(string)
 
-	actInput := fmt.Sprintf(`{"observation_id":%q,"action":"click","target":{},"intent":"click","expected_effect":"clicked"}`, obsID)
+	actInput := fmt.Sprintf(`{"observation_id":%q,"action":"click","target":{"x":100,"y":100},"intent":"click","expected_effect":"clicked"}`, obsID)
 	actOut := mustExecute(t, exec, "computer_act", actInput)
 	if actOut.Outcome.Status != tool.OutcomeFailed {
 		t.Fatalf("expected failed, got %s", actOut.Outcome.Status)
@@ -479,6 +532,16 @@ func mustExecute(t *testing.T, exec *ComputerExecutor, toolName, input string) T
 		t.Fatalf("execute %s: %v", toolName, err)
 	}
 	return out
+}
+
+func countDriverCalls(calls []fake.CallRecord, method string) int {
+	count := 0
+	for _, call := range calls {
+		if call.Method == method {
+			count++
+		}
+	}
+	return count
 }
 
 type toolStub struct {

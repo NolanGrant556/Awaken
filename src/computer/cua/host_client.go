@@ -109,6 +109,8 @@ type HostToolResult struct {
 	IsError        bool        `json:"is_error"`
 	Degraded       bool        `json:"degraded"`
 	Status         string      `json:"status,omitempty"`
+	ErrorCode      string      `json:"error_code,omitempty"`
+	ErrorCategory  string      `json:"error_category,omitempty"`
 }
 
 // HostSessionState is the host response from GetSessionState.

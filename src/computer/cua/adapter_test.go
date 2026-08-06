@@ -222,6 +222,61 @@ func TestDriverPreparePerformWait(t *testing.T) {
 	}
 }
 
+func TestHostRejectsInvalidActionParametersBeforeInput(t *testing.T) {
+	client := newTestHostClient(t)
+	ctx := context.Background()
+	const sessionID = "host-validation-test"
+	if _, err := client.StartSession(ctx, sessionID, computer.CaptureDesktop, 1, 1); err != nil {
+		t.Fatalf("start session: %v", err)
+	}
+	defer client.EndSession(context.Background(), sessionID)
+
+	state, err := client.GetDesktopState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("get desktop state: %v", err)
+	}
+	invalid := computer.PreparedAction{
+		ActionID:         "act_invalid_coordinates",
+		ObservationID:    "obs_host_validation",
+		SessionID:        computer.SessionID(sessionID),
+		FenceToken:       1,
+		ControlEpoch:     1,
+		TargetGeneration: 1,
+		Kind:             computer.ActionClick,
+		ActionDigest:     "sha256:invalid-coordinate-test",
+		ExpiresAt:        time.Now().UTC().Add(time.Minute),
+	}
+	if err := client.RegisterPreparedAction(ctx, invalid, state.ObservationToken); err != nil {
+		t.Fatalf("register invalid action: %v", err)
+	}
+	result, err := client.PerformChecked(ctx, invalid, map[string]any{"x": 0})
+	if err != nil {
+		t.Fatalf("host returned transport error for deterministic validation failure: %v", err)
+	}
+	if !result.IsError || result.Status != string(computer.ActionFailed) || result.Degraded ||
+		result.ErrorCode != "invalid_action_parameters" || result.ErrorCategory != "validation" {
+		t.Fatalf("invalid parameters must be a confirmed pre-input failure: %+v", result)
+	}
+	if strings.Contains(result.Status, "unknown") {
+		t.Fatalf("pre-input validation was marked unknown: %+v", result)
+	}
+
+	valid := invalid
+	valid.ActionID = "act_valid_after_coordinates"
+	valid.Kind = computer.ActionWait
+	valid.ActionDigest = "sha256:valid-after-coordinate-test"
+	if err := client.RegisterPreparedAction(ctx, valid, state.ObservationToken); err != nil {
+		t.Fatalf("register corrected action: %v", err)
+	}
+	result, err = client.PerformChecked(ctx, valid, map[string]any{"ms": 0})
+	if err != nil {
+		t.Fatalf("perform corrected action: %v", err)
+	}
+	if result.IsError || result.Status != string(computer.ActionSucceeded) {
+		t.Fatalf("corrected action was not allowed after validation failure: %+v", result)
+	}
+}
+
 func TestDriverCancelledPerformDoesNotBlockSessionClose(t *testing.T) {
 	driver := newTestDriver(t, computer.CaptureDesktop)
 	ctx := context.Background()

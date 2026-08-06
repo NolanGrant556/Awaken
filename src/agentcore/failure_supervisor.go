@@ -349,13 +349,17 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 	}
 
 	classKey := toolName + "|" + revision + "|" + errorClass
-	s.classFailures[classKey] = s.classFailures[classKey] + 1
-	s.classFailureMeta[classKey] = classFailureMeta{
-		toolName:   toolName,
-		revision:   revision,
-		errorClass: errorClass,
-		errorCode:  errorCode,
-		failures:   s.classFailures[classKey],
+	inputRejectedBeforeExecution := outcome.TransportStatus == tool.TransportNotStarted &&
+		outcome.ErrorCategory == tool.ErrorCategoryValidation
+	if !inputRejectedBeforeExecution {
+		s.classFailures[classKey] = s.classFailures[classKey] + 1
+		s.classFailureMeta[classKey] = classFailureMeta{
+			toolName:   toolName,
+			revision:   revision,
+			errorClass: errorClass,
+			errorCode:  errorCode,
+			failures:   s.classFailures[classKey],
+		}
 	}
 
 	if fingerprint != "" && fingerprint == s.lastFingerprint {
@@ -407,7 +411,7 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 		decision.Directive = directive
 	}
 
-	if s.classFailures[classKey] >= maxSameClassFailures {
+	if !inputRejectedBeforeExecution && s.classFailures[classKey] >= maxSameClassFailures {
 		decision.RecoveryRequired = true
 		decision.RecoveryOptions = mergeUniqueStrings(decision.RecoveryOptions, []string{
 			"change_tool_or_refresh_resource_revision",

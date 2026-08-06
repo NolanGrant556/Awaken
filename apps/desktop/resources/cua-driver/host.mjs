@@ -318,6 +318,26 @@ async function handlePerformChecked(params, signal) {
   ) {
     throw new Error("prepared action authorization is stale or mismatched");
   }
+  try {
+    validatePerformParameters(params.action, params.parameters || {});
+  } catch (err) {
+    // Parameter validation happens before the prepared action reaches the CUA
+    // driver. This is a confirmed no-input failure, not an unknown outcome.
+    prepared.consumed = true;
+    const failed = {
+      text: err instanceof Error ? err.message : String(err),
+      images: [],
+      structured_json: "",
+      raw_json: "",
+      is_error: true,
+      degraded: false,
+      status: "failed",
+      error_code: "invalid_action_parameters",
+      error_category: "validation",
+    };
+    record.actionResults.set(params.actionID, failed);
+    return failed;
+  }
   prepared.consumed = true;
   try {
     const result = await handlePerform(params, signal);
@@ -376,8 +396,8 @@ async function handleResume({ sessionID, fenceToken, controlEpoch }) {
 }
 
 function requireNumber(value, name) {
-  if (typeof value !== "number") {
-    throw new Error(`${name} must be a number`);
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${name} must be a finite number`);
   }
   return value;
 }
@@ -386,8 +406,8 @@ function optionalNumber(value, name) {
   if (value === undefined) {
     return undefined;
   }
-  if (typeof value !== "number") {
-    throw new Error(`${name} must be a number`);
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${name} must be a finite number`);
   }
   return value;
 }
@@ -423,6 +443,66 @@ function optionalStringArray(value, name) {
     throw new Error(`${name} must be an array of strings`);
   }
   return value;
+}
+
+function requireNonEmptyString(value, name) {
+  const text = optionalString(value, name);
+  if (text === undefined || text.trim() === "") {
+    throw new Error(`${name} must be a non-empty string`);
+  }
+  return text;
+}
+
+function requireNonEmptyStringArray(value, name) {
+  const values = optionalStringArray(value, name);
+  if (!values || values.length === 0 || values.some((item) => item.trim() === "")) {
+    throw new Error(`${name} must be a non-empty array of strings`);
+  }
+  return values;
+}
+
+function requireScreenCoordinate(value, name) {
+  const number = requireNumber(value, name);
+  if (!Number.isInteger(number) || number < 0) {
+    throw new Error(`${name} must be a non-negative integer`);
+  }
+  return number;
+}
+
+function validatePerformParameters(action, parameters) {
+  switch (action) {
+    case "click":
+    case "double_click":
+    case "scroll":
+    case "move_cursor":
+      requireScreenCoordinate(parameters.x, "x");
+      requireScreenCoordinate(parameters.y, "y");
+      return;
+    case "drag":
+      requireScreenCoordinate(parameters.from_x, "from_x");
+      requireScreenCoordinate(parameters.from_y, "from_y");
+      requireScreenCoordinate(parameters.to_x, "to_x");
+      requireScreenCoordinate(parameters.to_y, "to_y");
+      return;
+    case "key":
+      requireNonEmptyString(parameters.key, "key");
+      return;
+    case "hotkey":
+      requireNonEmptyStringArray(parameters.keys, "keys");
+      return;
+    case "type_text":
+      requireNonEmptyString(parameters.text, "text");
+      return;
+    case "wait": {
+      const ms = optionalNumber(parameters.ms, "ms");
+      if (ms !== undefined && (!Number.isInteger(ms) || ms < 0)) {
+        throw new Error("ms must be a non-negative integer");
+      }
+      return;
+    }
+    default:
+      throw new Error(`unsupported action: ${action}`);
+  }
 }
 
 function abortableDelay(ms, signal) {

@@ -356,6 +356,9 @@ func (r *Runtime) GetObservation(id ObservationID) (Observation, error) {
 func (r *Runtime) Prepare(ctx context.Context, obs Observation, spec ActionSpec) (PreparedAction, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := ValidateActionSpec(spec); err != nil {
+		return PreparedAction{}, fmt.Errorf("invalid action parameters: %w", err)
+	}
 	if r.session == nil {
 		return PreparedAction{}, r.noActiveSessionError()
 	}

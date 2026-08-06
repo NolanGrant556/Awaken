@@ -30,6 +30,10 @@ describe("AwakenComposerBar unified token editing", () => {
       root = undefined;
     }
     host.remove();
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 768,
+    });
     delete (
       globalThis as typeof globalThis & {
         IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -801,6 +805,78 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(trigger.style.getPropertyValue("--composer-model-trigger-collapsed-width")).toBe(
       "118px",
     );
+  });
+
+  it("flips the model menu with viewport space while preserving each variant preference", () => {
+    const metaItems = [
+      {
+        id: "model",
+        label: "GLM-5.2",
+        menuItems: Array.from({ length: 7 }, (_, index) => ({
+          id: `profile-${index}`,
+          label: `模型 ${index + 1}`,
+          selected: index === 0,
+        })),
+      },
+    ];
+    const { rerender } = renderComposer({ variant: "center", metaItems });
+    const modelRoot = host.querySelector<HTMLElement>(".composer-bar-toolbar-model")!;
+    const trigger = host.querySelector<HTMLButtonElement>(".composer-bar-model-trigger")!;
+    const bounds = vi.spyOn(modelRoot, "getBoundingClientRect").mockReturnValue({
+      x: 100,
+      y: 430,
+      left: 100,
+      top: 430,
+      right: 236,
+      bottom: 462,
+      width: 136,
+      height: 32,
+      toJSON: () => ({}),
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 500,
+    });
+
+    act(() => trigger.click());
+    expect(modelRoot.dataset.menuPlacement).toBe("top");
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 900,
+    });
+    act(() => window.dispatchEvent(new Event("resize")));
+    expect(modelRoot.dataset.menuPlacement).toBe("bottom");
+
+    act(() => trigger.click());
+    rerender({ variant: "dock", metaItems });
+    bounds.mockReturnValue({
+      x: 100,
+      y: 400,
+      left: 100,
+      top: 400,
+      right: 236,
+      bottom: 432,
+      width: 136,
+      height: 32,
+      toJSON: () => ({}),
+    });
+    act(() => trigger.click());
+    expect(modelRoot.dataset.menuPlacement).toBe("top");
+
+    bounds.mockReturnValue({
+      x: 100,
+      y: 20,
+      left: 100,
+      top: 20,
+      right: 236,
+      bottom: 52,
+      width: 136,
+      height: 32,
+      toJSON: () => ({}),
+    });
+    act(() => window.dispatchEvent(new Event("resize")));
+    expect(modelRoot.dataset.menuPlacement).toBe("bottom");
   });
 
   it("opens an effort secondary panel and immediately changes a two-level control", () => {

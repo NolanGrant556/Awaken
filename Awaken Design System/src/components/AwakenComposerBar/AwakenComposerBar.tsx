@@ -15,6 +15,7 @@ import { AwakenDropdown } from "../AwakenDropdown";
 import { AwakenMemoryLightFlow } from "../AwakenMemoryLightFlow";
 import { AwakenSendButton } from "../AwakenSendButton";
 import { AwakenTooltip } from "../AwakenTooltip";
+import { useAwakenAnchoredMenuLayout } from "../../hooks/useAwakenAnchoredMenuLayout";
 import {
   AwakenComposerInlineInput,
   composerInlinePlainTextForRange,
@@ -30,6 +31,19 @@ const COMPOSER_EFFORT_TRACK_INSET_PX = 14;
 const COMPOSER_EFFORT_DETENT_EDGE_PROGRESS = 0.08;
 const COMPOSER_EFFORT_MAX_ZONE_MIN_PROGRESS = 0.92;
 const COMPOSER_EFFORT_HYSTERESIS_PX = 8;
+const COMPOSER_MODEL_MENU_MAX_HEIGHT = 327;
+
+function estimateComposerModelMenuHeight(
+  optionCount: number,
+  hasFooterAction: boolean,
+  showingEffortPanel: boolean,
+): number {
+  if (showingEffortPanel) return 164;
+  return Math.min(
+    COMPOSER_MODEL_MENU_MAX_HEIGHT,
+    16 + optionCount * 40 + (hasFooterAction ? 49 : 0),
+  );
+}
 
 export type ComposerBarMetaMenuItem = {
   id: string;
@@ -387,10 +401,26 @@ export function AwakenComposerBar({
   const [slashPreviewState, setSlashPreviewState] = useState<SlashPreviewState | null>(null);
   const [slashPaletteStyle, setSlashPaletteStyle] = useState<SlashPaletteStyle>({});
   const [inputSelection, setInputSelection] = useState<ComposerBarInputSelection>();
-  const modelMetaRef = useRef<HTMLDivElement | null>(null);
   const inputWrapRef = useRef<HTMLDivElement | null>(null);
   const slashPaletteRef = useRef<HTMLDivElement | null>(null);
   const modelMetaItem = metaItems.find((item) => item.id === "model");
+  const {
+    anchorRef: modelMetaRef,
+    menuRef: modelMenuRef,
+    placement: modelMenuPlacement,
+    maxHeight: modelMenuMaxHeight,
+    updateLayout: updateModelMenuLayout,
+  } = useAwakenAnchoredMenuLayout<HTMLDivElement, HTMLDivElement>({
+    open: Boolean(openMetaMenuId),
+    estimatedHeight: estimateComposerModelMenuHeight(
+      modelMetaItem?.menuItems?.length ?? 0,
+      Boolean(modelMetaItem?.menuFooterAction),
+      Boolean(activeModelOptionId),
+    ),
+    maxHeight: COMPOSER_MODEL_MENU_MAX_HEIGHT,
+    preferredPlacement: variant === "dock" ? "top" : "bottom",
+    gap: 8,
+  });
   const selectedProjectOption = projectPicker?.options.find((option) => option.selected);
   const showProjectPicker = variant === "center" && Boolean(projectPicker);
   const topMetaItems: ComposerBarMetaItem[] = [];
@@ -744,7 +774,11 @@ export function AwakenComposerBar({
     );
 
     return (
-      <div className="composer-bar-toolbar-model" ref={modelMetaRef}>
+      <div
+        className="composer-bar-toolbar-model"
+        ref={modelMetaRef}
+        data-menu-placement={modelMenuPlacement}
+      >
         {isInteractive ? (
           <button
             type="button"
@@ -758,6 +792,7 @@ export function AwakenComposerBar({
             onClick={(event) => {
               if (hasMenu) {
                 if (!isMenuOpen) {
+                  updateModelMenuLayout();
                   event.currentTarget.style.setProperty(
                     "--composer-model-trigger-collapsed-width",
                     `${event.currentTarget.getBoundingClientRect().width}px`,
@@ -785,7 +820,13 @@ export function AwakenComposerBar({
           </span>
         )}
         {hasMenu && isMenuOpen ? (
-          <div className="composer-bar-model-menu" role="listbox" aria-label="选择模型">
+          <div
+            ref={modelMenuRef}
+            className="composer-bar-model-menu"
+            style={{ maxHeight: modelMenuMaxHeight }}
+            role="listbox"
+            aria-label="选择模型"
+          >
             {activeModelOption?.effort ? (
               <div className="composer-bar-model-effort-panel" role="dialog" aria-label={`${activeModelOption.label} 推理强度`}>
                 <button

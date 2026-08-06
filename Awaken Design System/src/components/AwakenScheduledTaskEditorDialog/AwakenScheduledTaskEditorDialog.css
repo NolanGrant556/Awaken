@@ -906,12 +906,7 @@
   background: var(--aw-surface-panel-muted);
 }
 
-/* 模型列表复用全产品 AwakenSelect；向上展开，避开编辑器固定 footer。 */
-.aw-scheduled-task-editor__profile-select .aw-select__menu {
-  top: auto;
-  bottom: calc(100% + 6px);
-}
-
+/* 模型列表复用全产品 AwakenSelect；按视口空间自动避开编辑器固定 footer。 */
 .aw-scheduled-task-editor__advanced-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

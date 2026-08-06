@@ -2937,6 +2937,8 @@ button.tool-trace-line:focus-visible {
   position: absolute;
   right: 0;
   z-index: 50;
+  display: flex;
+  flex-direction: column;
   width: min(260px, calc(100vw - 48px));
   overflow: hidden;
   border: 1px solid var(--aw-border-main);
@@ -2945,17 +2947,21 @@ button.tool-trace-line:focus-visible {
   box-shadow: var(--aw-shadow-menu);
 }
 
-.composer-bar-center .composer-bar-model-menu {
+.composer-bar-toolbar-model[data-menu-placement="bottom"] .composer-bar-model-menu {
   top: calc(100% + 8px);
+  bottom: auto;
 }
 
-.composer-bar-dock .composer-bar-model-menu {
+.composer-bar-toolbar-model[data-menu-placement="top"] .composer-bar-model-menu {
+  top: auto;
   bottom: calc(100% + 8px);
 }
 
 .composer-bar-model-menu-scroll {
   display: grid;
+  flex: 1 1 auto;
   gap: 4px;
+  min-height: 0;
   max-height: 278px;
   padding: 8px;
   overflow-y: auto;
@@ -2999,8 +3005,10 @@ button.tool-trace-line:focus-visible {
 
 .composer-bar-model-effort-panel {
   display: grid;
+  min-height: 0;
   gap: 12px;
   padding: 10px;
+  overflow-y: auto;
 }
 
 .composer-bar-model-effort-back {

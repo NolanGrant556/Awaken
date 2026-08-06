@@ -124,13 +124,16 @@ func (t *actTool) Definition() tool.ToolDefinition {
 			Properties: map[string]tool.ToolParam{
 				"observation_id": {Type: "string", Description: "ID of the observation this action is based on."},
 				"action":         {Type: "string", Description: "Action kind.", Enum: []any{"click", "double_click", "scroll", "drag", "key", "hotkey", "type_text", "move_cursor", "wait"}},
-				"target": {Type: "object", Description: "Target element or coordinates. For pointer actions use x/y or pixel_fallback; for AX targets use locator.", AdditionalProperties: tool.BoolPtr(true), Properties: map[string]tool.ToolParam{
-					"locator":        {Type: "string", Description: "Accessibility locator when available."},
-					"x":              {Type: "integer", Description: "Horizontal screen-point coordinate. Use the normalized model-visible screenshot directly; never use source_screenshot_width pixels."},
-					"y":              {Type: "integer", Description: "Vertical screen-point coordinate. Use the normalized model-visible screenshot directly; never use source_screenshot_height pixels."},
-					"pixel_fallback": {Type: "object", Description: "Explicit pixel fallback point.", AdditionalProperties: tool.BoolPtr(true)},
+				"target": {Type: "object", Description: "Target element or coordinates. Pointer actions require a complete x/y pair or pixel_fallback point; locator-only execution is not supported by the current host.", AdditionalProperties: tool.BoolPtr(true), Properties: map[string]tool.ToolParam{
+					"locator": {Type: "string", Description: "Accessibility locator when available."},
+					"x":       {Type: "integer", Minimum: tool.FloatPtr(0), Description: "Horizontal screen-point coordinate. Use the normalized model-visible screenshot directly; never use source_screenshot_width pixels."},
+					"y":       {Type: "integer", Minimum: tool.FloatPtr(0), Description: "Vertical screen-point coordinate. Use the normalized model-visible screenshot directly; never use source_screenshot_height pixels."},
+					"pixel_fallback": {Type: "object", Description: "Explicit complete screen-point fallback.", Required: []string{"x", "y"}, AdditionalProperties: tool.BoolPtr(false), Properties: map[string]tool.ToolParam{
+						"x": {Type: "integer", Minimum: tool.FloatPtr(0), Description: "Horizontal screen-point coordinate."},
+						"y": {Type: "integer", Minimum: tool.FloatPtr(0), Description: "Vertical screen-point coordinate."},
+					}},
 				}},
-				"parameters":       {Type: "object", Description: "Action-specific parameters. Pointer coordinates are screen points in the normalized model-visible screenshot: click x/y; scroll x/y/direction/amount; drag from_x/from_y/to_x/to_y. Keyboard: key key; hotkey keys; type_text text.", AdditionalProperties: tool.BoolPtr(true)},
+				"parameters":       {Type: "object", Description: "Action-specific parameters. Pointer coordinates are screen points in the normalized model-visible screenshot: click/move_cursor x/y; scroll x/y/direction/amount; drag from_x/from_y/to_x/to_y. Keyboard: key key; hotkey keys; type_text text. Wait: ms. Required fields are validated for the selected action before any OS input.", AdditionalProperties: tool.BoolPtr(true)},
 				"expected_context": {Type: "object", Description: "Expected context after the action.", AdditionalProperties: tool.BoolPtr(true)},
 				"intent":           {Type: "string", Description: "What the action is trying to accomplish."},
 				"expected_effect":  {Type: "string", Description: "Expected external effect."},
@@ -160,12 +163,13 @@ func (t *actTool) Definition() tool.ToolDefinition {
 		},
 		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectExecute, Resources: []string{"authorized GUI target"}, Description: "May inject mouse/keyboard input into the authorized scope.", Reversibility: tool.ReversibilityUnknown}},
 		Examples: []tool.ToolExample{
-			{Scenario: "Click an OK button", Input: map[string]any{"observation_id": "obs_xxx", "action": "click", "target": map[string]any{"locator": "button:OK"}, "intent": "Dismiss the dialog", "expected_effect": "Dialog closes", "idempotency_key": "idemp-1"}, Outcome: "Returns action_id and execution status."},
+			{Scenario: "Click an OK button", Input: map[string]any{"observation_id": "obs_xxx", "action": "click", "target": map[string]any{"locator": "button:OK", "x": 640, "y": 420}, "intent": "Dismiss the dialog", "expected_effect": "Dialog closes", "idempotency_key": "idemp-1"}, Outcome: "Returns action_id and execution status."},
 		},
 		FailureModes: []tool.ToolFailureMode{
 			{Code: "computer_unsupported", Cause: "Computer runtime is not bound", Retryable: false, Recovery: []string{"enable_computer_runtime", "use_typed_tools"}},
 			{Code: "computer_action_forbidden", Cause: "Action violates policy", Retryable: false, Recovery: []string{"change_approach", "ask_user"}},
 			{Code: "computer_stale_observation", Cause: "The observation changed before perform", Retryable: true, Recovery: []string{"computer_observe", "retry"}},
+			{Code: tool.ErrorCodeValidationError, Cause: "The selected action is missing required parameters or contains an incomplete coordinate set", Retryable: false, Recovery: []string{"correct_action_parameters", "observe_again_if_the_screen_changed"}},
 		},
 		Annotations:  tool.ToolAnnotations{ReadOnly: false, Destructive: true, CapabilityClass: tool.CapabilityClassComputerAct, TrustedOrigin: tool.TrustedOriginBuiltin},
 		Permissions:  tool.ToolPermissionSpec{CapabilityClass: tool.CapabilityClassComputerAct, NetworkScope: tool.NetworkScopeNone, RequiresReview: "high-risk GUI actions"},

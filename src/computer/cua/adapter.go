@@ -180,6 +180,9 @@ func (d *cuaDriverAdapter) Observe(ctx context.Context, sessionID computer.Sessi
 }
 
 func (d *cuaDriverAdapter) Prepare(ctx context.Context, sessionID computer.SessionID, obs computer.Observation, spec computer.ActionSpec) (computer.PreparedAction, error) {
+	if err := computer.ValidateActionSpec(spec); err != nil {
+		return computer.PreparedAction{}, fmt.Errorf("invalid action parameters: %w", err)
+	}
 	rec, ok := d.sessions[sessionID]
 	if !ok {
 		return computer.PreparedAction{}, fmt.Errorf("session %s not found", sessionID)
@@ -249,8 +252,14 @@ func (d *cuaDriverAdapter) PerformChecked(ctx context.Context, sessionID compute
 	res := computer.NewActionResult(action.ActionID, sessionID, status)
 	res.CUAStatus = result.Text
 	if result.IsError && status != computer.ActionUnknownOutcome {
-		res.ErrorCode = "cua_tool_error"
-		res.ErrorCategory = "runtime"
+		res.ErrorCode = result.ErrorCode
+		if res.ErrorCode == "" {
+			res.ErrorCode = "cua_tool_error"
+		}
+		res.ErrorCategory = result.ErrorCategory
+		if res.ErrorCategory == "" {
+			res.ErrorCategory = "runtime"
+		}
 		res.ErrorMessage = result.Text
 	}
 	return res, nil

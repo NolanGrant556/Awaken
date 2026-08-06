@@ -44,7 +44,7 @@ func TestRuntimeWithFakeDriver(t *testing.T) {
 
 	action, err := runtime.Prepare(ctx, obs, ActionSpec{
 		Kind:           ActionClick,
-		Target:         ElementRef{Locator: "button:OK"},
+		Target:         ElementRef{Locator: "button:OK", PixelFallback: &Point{X: 100, Y: 100}},
 		Intent:         "confirm the dialog",
 		ExpectedEffect: "dialog closes",
 		IdempotencyKey: "idemp-1",
@@ -268,7 +268,7 @@ func TestRuntimeReviewLifecycle(t *testing.T) {
 
 	action, err := runtime.Prepare(ctx, obs, ActionSpec{
 		Kind:           ActionClick,
-		Target:         ElementRef{Locator: "button:Send"},
+		Target:         ElementRef{Locator: "button:Send", PixelFallback: &Point{X: 100, Y: 100}},
 		Intent:         "send the email",
 		ExpectedEffect: "email sent",
 	})

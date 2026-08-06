@@ -191,6 +191,15 @@ func (in actInput) normalizedTargetAndParameters() (computer.ElementRef, map[str
 	parameters := computer.CloneActionParameters(in.Parameters)
 	if target.PixelFallback == nil && in.Target.X != nil && in.Target.Y != nil {
 		target.PixelFallback = &computer.Point{X: *in.Target.X, Y: *in.Target.Y}
+	} else if target.PixelFallback == nil {
+		// Preserve incomplete legacy coordinate input so action-specific
+		// validation can report the missing half instead of silently dropping it.
+		if in.Target.X != nil {
+			parameters["x"] = *in.Target.X
+		}
+		if in.Target.Y != nil {
+			parameters["y"] = *in.Target.Y
+		}
 	}
 	if in.Target.Key != "" {
 		if _, ok := parameters["key"]; !ok {
@@ -223,12 +232,15 @@ func (e *ComputerExecutor) executeAct(ctx context.Context, input string) (ToolEx
 	if in.ObservationID == "" {
 		return validationOutput("observation_id is required"), nil
 	}
-	obs, err := e.runtime.GetObservation(computer.ObservationID(in.ObservationID))
-	if err != nil {
-		return computerErrorOutput(err, "computer_stale_observation"), nil
-	}
 	target, parameters := in.normalizedTargetAndParameters()
 	actionKind := computer.ActionKind(in.Action)
+	if actionKind == computer.ActionWait {
+		if _, ok := parameters["ms"]; !ok {
+			if duration, exists := parameters["duration_ms"]; exists {
+				parameters["ms"] = duration
+			}
+		}
+	}
 	if actionKind == computer.ActionHotkey {
 		if keys, ok := parameters["keys"].(string); ok {
 			normalized := splitHotkey(keys)
@@ -255,6 +267,13 @@ func (e *ComputerExecutor) executeAct(ctx context.Context, input string) (ToolEx
 		Intent:          in.Intent,
 		ExpectedEffect:  in.ExpectedEffect,
 		IdempotencyKey:  in.IdempotencyKey,
+	}
+	if err := computer.ValidateActionSpec(spec); err != nil {
+		return validationOutput("invalid computer_act input: " + err.Error()), nil
+	}
+	obs, err := e.runtime.GetObservation(computer.ObservationID(in.ObservationID))
+	if err != nil {
+		return computerErrorOutput(err, "computer_stale_observation"), nil
 	}
 	prepared, err := e.runtime.Prepare(ctx, obs, spec)
 	if err != nil {
@@ -601,6 +620,9 @@ func needsRuntimeOutput(message string) ToolExecutionOutput {
 
 func validationOutput(message string) ToolExecutionOutput {
 	outcome := tool.FailedOutcome(message, tool.ErrorCodeValidationError, tool.ErrorCategoryValidation, false)
+	outcome.TransportStatus = tool.TransportNotStarted
+	outcome.Operation = &tool.OperationDescriptor{Type: "computer_act", SideEffectState: tool.OutcomeSideEffectNotStarted}
+	outcome.RecoveryOptions = []string{"correct_action_parameters", "observe_again_if_the_screen_changed"}
 	return ToolExecutionOutput{Outcome: outcome, Content: message, IsError: true, ErrorCode: tool.ErrorCodeValidationError}
 }
 

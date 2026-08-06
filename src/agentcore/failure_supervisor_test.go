@@ -76,6 +76,32 @@ func TestFailureSupervisorAllowsRetryableTwiceThenBlocks(t *testing.T) {
 	}
 }
 
+func TestFailureSupervisorAllowsCorrectedInputAfterRepeatedPreflightValidationFailures(t *testing.T) {
+	s := NewFailureSupervisor("/tmp/ws", 8, 32)
+	invalidCalls := []convcontext.ToolCall{
+		{ID: "invalid-1", Function: convcontext.FunctionCall{Name: "computer_act", Arguments: `{"observation_id":"obs-1","action":"click","target":{"x":0}}`}},
+		{ID: "invalid-2", Function: convcontext.FunctionCall{Name: "computer_act", Arguments: `{"observation_id":"obs-1","action":"click","target":{"y":10}}`}},
+		{ID: "invalid-3", Function: convcontext.FunctionCall{Name: "computer_act", Arguments: `{"observation_id":"obs-1","action":"click","target":{}}`}},
+	}
+	for _, call := range invalidCalls {
+		before := s.BeforeCall(call)
+		if before.Block || !before.Allow {
+			t.Fatalf("preflight validation call was blocked too early: %+v", before)
+		}
+		s.NoteRealExecution(before.CallSignature)
+		outcome := tool.FailedOutcome("incomplete coordinates", tool.ErrorCodeValidationError, tool.ErrorCategoryValidation, false)
+		outcome.TransportStatus = tool.TransportNotStarted
+		outcome.Operation = &tool.OperationDescriptor{Type: "computer_act", SideEffectState: tool.OutcomeSideEffectNotStarted}
+		s.AfterOutcome(call, outcome)
+	}
+
+	corrected := convcontext.ToolCall{ID: "valid", Function: convcontext.FunctionCall{Name: "computer_act", Arguments: `{"observation_id":"obs-1","action":"click","target":{"x":0,"y":10}}`}}
+	decision := s.BeforeCall(corrected)
+	if decision.Block || !decision.Allow {
+		t.Fatalf("corrected input inherited a resource failure barrier: %+v", decision)
+	}
+}
+
 func TestResourceRevisionSeparatesBashCommandsWithoutLeakingText(t *testing.T) {
 	first := ResourceRevision(`{"command":"node scripts/validate.js"}`, tool.ExecutionOutcome{})
 	second := ResourceRevision(`{"command":"npm install"}`, tool.ExecutionOutcome{})

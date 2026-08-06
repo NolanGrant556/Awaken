@@ -10,7 +10,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import zipfile
 from collections import Counter
 from pathlib import Path
@@ -19,7 +18,7 @@ sys.dont_write_bytecode = True
 
 from openpyxl import load_workbook
 
-from office_runtime import find_soffice, office_env
+from office_runtime import find_soffice, office_env, temporary_directory
 
 
 ERROR_VALUES = {"#REF!", "#DIV/0!", "#VALUE!", "#N/A", "#NAME?", "#NULL!", "#NUM!"}
@@ -95,8 +94,7 @@ def recalculate(input_path: Path, output_path: Path, timeout: int) -> dict:
     executable = find_soffice()
     if executable is None:
         raise FileNotFoundError("未找到 LibreOffice")
-    with tempfile.TemporaryDirectory(prefix="awaken-excel-recalc-", ignore_cleanup_errors=True) as directory:
-        root = Path(directory)
+    with temporary_directory("awaken-excel-recalc-") as root:
         profile = root / "profile"
         working = root / "working.xlsx"
         shutil.copy2(input_path, working)

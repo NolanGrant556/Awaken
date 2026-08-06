@@ -9,12 +9,11 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 sys.dont_write_bytecode = True
 
-from office_runtime import run_soffice
+from office_runtime import run_soffice, temporary_directory
 
 
 def numeric_key(path: Path) -> tuple[int, str]:
@@ -31,8 +30,7 @@ def render(input_path: Path, output_dir: Path, dpi: int, timeout: int) -> dict:
     if not pdftoppm:
         raise FileNotFoundError("未找到 pdftoppm（Poppler）")
     output_dir.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="awaken-word-render-", ignore_cleanup_errors=True) as directory:
-        temporary = Path(directory)
+    with temporary_directory("awaken-word-render-") as temporary:
         result = run_soffice(
             ["--convert-to", "pdf", "--outdir", str(temporary), str(input_path.resolve())],
             timeout=timeout,

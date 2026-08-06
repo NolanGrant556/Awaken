@@ -1,6 +1,6 @@
 ---
 name: word
-version: 2.1.0
+version: 2.2.0
 description: 创建、读取、编辑和校验 Word 文档（.docx）或 Word 模板（.dotx）。只要 .docx/.dotx 是主要输入或输出，就应使用本 Skill；包括专业报告、备忘录、函件、目录、页眉页脚、表格、图片、批注、修订和高保真模板改稿。若 Word 只是输入而最终还要交付 Excel/PPT/PDF，应再加载对应的最小 Skill 集合。
 when_to_use: 用户提到 Word、docx、dotx、报告文档、修订、批注、套用 Word 模板，或需要把内容整理成可交付 Word 文件时。
 user-invocable: true
@@ -8,7 +8,7 @@ user-invocable: true
 
 # Awaken Word Skill
 
-本 Skill 使用 Awaken 现有的 `Bash`、文件工具和本机 Office 依赖完成 Word 工作，不注册新的基础工具。缺少依赖时先探测，再使用 `dependency_install` 返回的可用计划或 `Bash` 安装；文件验证完成后必须调用 `artifact_publish`。
+本 Skill 使用 Awaken 现有的 `Bash`、文件工具和本机 Office 依赖完成 Word 工作，不注册新的基础工具。包内 Python helper 支持 Python 3.9 及以上；缺少依赖时先按 route 探测并复用 doctor 返回的绝对执行计划，再使用 `dependency_install` 返回的可用计划或 `Bash` 安装。文件验证完成后必须调用 `artifact_publish`。
 
 ## 先判断任务路线
 
@@ -38,19 +38,22 @@ user-invocable: true
 - 最终 `.docx` 必须位于当前任务工作区的 output root 内。
 - 临时解包和预览不得覆盖用户原文件；默认写到新的输出路径。
 - 对外部 DOCX 解包时必须使用 `scripts/ooxml_package.py`，不要直接信任压缩包路径或符号链接。
+- 用户在初始请求中点名 Word 输入或输出时，在任何相关 Bash、文件读取或 subagent 派发前加载本 Skill；同时点名多种 Office 格式时先加载对应的最小 Skill 集合，并把各格式的读取/验证边界写入子任务。
+- doctor 与所有 `--json` helper 必须作为独立命令执行，或放在 `&&` 链的末尾；禁止接 `| tail`、`| head`、`grep`、命令替换等会改变退出码或截断 JSON 的管道。
+- 对 JSON helper 必须同时核对 Bash outcome 与完整 `status`；任何 `failed`、结构 issues 或非零退出都属于失败。wrapper 失败时不得改用裸 `soffice` / `pdftoppm` 绕过独立 profile、超时和结果合同。
 
 ## 阅读固定路线
 
 阅读 `.docx` / `.dotx` 不安装 Pandoc、MarkItDown、LibreOffice 或第三方 Python 包，也不先手工解包。先用当前平台已有的 Python 启动器执行一次 read route doctor（macOS/Linux 通常是 `python3`，Windows 通常是 `py -3` 或 `python`）：
 
 ```bash
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route read --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route read --dependency-root "$PWD" --json
 ```
 
-Windows PowerShell 示例为 `py -3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route read --json`。这一步只用于取得 `capabilities.python.path` 并确认 bundled reader 存在，不探测或安装外部文档依赖。随后用 doctor 返回的绝对解释器路径执行唯一阅读 CLI；路径始终作为一个安全参数引用，PowerShell 调用绝对路径时在前面加 `&`：
+Windows PowerShell 示例为 `py -3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route read --dependency-root "$PWD" --json`。这一步只用于取得 `execution_plan.python` 并确认 bundled reader 存在，不探测或安装外部文档依赖。随后用 doctor 返回的绝对解释器路径执行唯一阅读 CLI；路径始终作为一个安全参数引用，PowerShell 调用绝对路径时在前面加 `&`：
 
 ```text
-"<doctor 返回的 capabilities.python.path>" -B "${AWAKEN_SKILL_DIR}/scripts/read_docx.py" input.docx --format json --output ./docx-read.json
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/read_docx.py" input.docx --format json --output ./docx-read.json
 ```
 
 随后用 `Read` 打开 `docx-read.json`。JSON 中：
@@ -67,10 +70,10 @@ Windows PowerShell 示例为 `py -3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" -
 纯 DOCX 阅读只依赖正在执行脚本的 Python 标准库；read route doctor 只负责返回跨平台解释器路径。创建、OOXML 编辑、接受修订或视觉 QA 前，也只探测准备执行的路线：
 
 ```text
-"<当前可用的 Python 启动器或 doctor 返回路径>" -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route create --json
-"<当前可用的 Python 启动器或 doctor 返回路径>" -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route edit_ooxml --json
-"<当前可用的 Python 启动器或 doctor 返回路径>" -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route accept_changes --json
-"<当前可用的 Python 启动器或 doctor 返回路径>" -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route visual_qa --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route create --dependency-root "$PWD" --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route edit_ooxml --dependency-root "$PWD" --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route accept_changes --dependency-root "$PWD" --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route visual_qa --dependency-root "$PWD" --json
 ```
 
 只根据目标 `routes.<route>.missing` 或 `missing_alternatives` 恢复依赖；其他路线 unavailable 不阻塞当前路线。常用依赖：
@@ -99,11 +102,11 @@ macOS/Homebrew Python 遇到 PEP 668 时优先使用工作区 `.venv` 或 `uv`�
 高保真路线：
 
 ```text
-"<doctor 返回的 capabilities.python.path>" -B "${AWAKEN_SKILL_DIR}/scripts/ooxml_package.py" unpack input.docx ./docx-unpacked
-"<doctor 返回的 capabilities.python.path>" -B "${AWAKEN_SKILL_DIR}/scripts/merge_runs.py" ./docx-unpacked
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/ooxml_package.py" unpack input.docx ./docx-unpacked
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/merge_runs.py" ./docx-unpacked
 # 使用 Read/Edit 精确修改 ./docx-unpacked/word/*.xml
-"<doctor 返回的 capabilities.python.path>" -B "${AWAKEN_SKILL_DIR}/scripts/ooxml_package.py" pack ./docx-unpacked output.docx
-"<doctor 返回的 capabilities.python.path>" -B "${AWAKEN_SKILL_DIR}/scripts/validate_docx.py" output.docx --original input.docx --json
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/ooxml_package.py" pack ./docx-unpacked output.docx
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/validate_docx.py" output.docx --original input.docx --json
 ```
 
 `merge_runs.py` 只合并格式完全一致、且只包含普通文本的相邻 run；含域、超链接、批注标记、制表符、换行、绘图或修订的 run 不会合并。更完整的判断见 `references/editing.md`。
@@ -111,7 +114,7 @@ macOS/Homebrew Python 遇到 PEP 668 时优先使用工作区 `.venv` 或 `uv`�
 接受全部修订时输出新文件，不覆盖原件：
 
 ```text
-"<doctor 返回的 capabilities.python.path>" -B "${AWAKEN_SKILL_DIR}/scripts/accept_changes.py" input.docx accepted.docx --json
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/accept_changes.py" input.docx accepted.docx --json
 ```
 
 超时、LibreOffice 未写回、输出仍含修订节点都必须视为失败。
@@ -121,7 +124,7 @@ macOS/Homebrew Python 遇到 PEP 668 时优先使用工作区 `.venv` 或 `uv`�
 ### 1. 内容 QA
 
 ```text
-"<doctor 返回的 capabilities.python.path>" -B "${AWAKEN_SKILL_DIR}/scripts/read_docx.py" output.docx --format json --output output.check.json
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/read_docx.py" output.docx --format json --output output.check.json
 ```
 
 用 `Read` 检查 `output.check.json` 的 `markdown`、表格 `blocks` 与 `warnings`，核对缺段、错序、占位符、乱码、错误链接、空白项目符号和用户要求的关键字段。
@@ -129,7 +132,7 @@ macOS/Homebrew Python 遇到 PEP 668 时优先使用工作区 `.venv` 或 `uv`�
 ### 2. 结构 QA
 
 ```text
-"<doctor 返回的 capabilities.python.path>" -B "${AWAKEN_SKILL_DIR}/scripts/validate_docx.py" output.docx --json
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/validate_docx.py" output.docx --json
 ```
 
 模板改稿必须增加 `--original 原文件.docx`。脚本检查 ZIP 路径、必需部件、XML、关系目标、批注引用和修订元数据；它不把“结构可打开”冒充“内容正确”。
@@ -139,10 +142,10 @@ macOS/Homebrew Python 遇到 PEP 668 时优先使用工作区 `.venv` 或 `uv`�
 每轮使用一个新的预览目录：
 
 ```text
-"<doctor 返回的 capabilities.python.path>" -B "${AWAKEN_SKILL_DIR}/scripts/render_docx.py" output.docx ./preview-word-1 --json
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/render_docx.py" output.docx ./preview-word-1 --json > ./preview-word-1.result.json
 ```
 
-对返回的每张页图调用 `Read`，逐页检查：文字溢出、分页孤行、表格跨页、中文字体回退、页眉页脚碰撞、图片变形、目录与页码、异常空白。发现问题后修复，使用新的预览目录重新生成并复核受影响页。
+先用 `Read` 打开完整结果 JSON；只有 Bash 成功且 `status=success` 才能继续。对 `images` 返回的每张页图调用 `Read`，逐页检查：文字溢出、分页孤行、表格跨页、中文字体回退、页眉页脚碰撞、图片变形、目录与页码、异常空白。保留实际检查的页码清单；发现问题后修复，使用新的预览目录重新生成并复核受影响页。未读取的页不能计入“逐页视觉通过”。
 
 ## 发布前检查
 

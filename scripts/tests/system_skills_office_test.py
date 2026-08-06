@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -112,7 +113,7 @@ def minimal_pptx_files() -> dict[str, str]:
 
 class SkillTextTests(unittest.TestCase):
     def test_three_skills_keep_awaken_contract_and_chinese_workflow(self):
-        versions = {"word": "2.1.0", "ppt": "2.0.0", "excel": "2.0.0"}
+        versions = {"word": "2.2.0", "ppt": "2.1.0", "excel": "2.1.0"}
         for skill, version in versions.items():
             body = (SYSTEM_SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
             self.assertIn(f"version: {version}", body)
@@ -120,12 +121,16 @@ class SkillTextTests(unittest.TestCase):
             self.assertIn("artifact_publish", body)
             self.assertIn("依赖", body)
             self.assertIn("校验", body)
+            self.assertIn("Python 3.9", body)
+            self.assertIn("execution_plan.python", body)
+            self.assertIn("禁止接 `| tail`", body)
+            self.assertIn("不得改用裸", body)
 
     def test_word_reading_has_one_bundled_route(self):
         body = (SYSTEM_SKILLS / "word" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("scripts/read_docx.py", body)
         self.assertIn("执行唯一阅读 CLI", body)
-        self.assertIn("doctor 返回的 capabilities.python.path", body)
+        self.assertIn("doctor 返回的 execution_plan.python", body)
         self.assertNotIn("`pandoc` 或 `markitdown`", body.lower())
         self.assertNotIn("markitdown[docx]", body.lower())
 
@@ -276,16 +281,19 @@ class WordScriptTests(unittest.TestCase):
 
     def test_doctor_reports_routes_independently(self):
         original_command_path = self.doctor.command_path
+        original_libreoffice_path = self.doctor.libreoffice_path
         original_module_available = self.doctor.module_available
         original_node_module_available = self.doctor.node_module_available
         try:
             self.doctor.command_path = lambda *_names: None
+            self.doctor.libreoffice_path = lambda: None
             self.doctor.module_available = lambda _name: False
-            self.doctor.node_module_available = lambda _name: False
+            self.doctor.node_module_available = lambda _name, _root=None: False
             result = self.doctor.inspect()
             read_only = self.doctor.inspect("read")
         finally:
             self.doctor.command_path = original_command_path
+            self.doctor.libreoffice_path = original_libreoffice_path
             self.doctor.module_available = original_module_available
             self.doctor.node_module_available = original_node_module_available
 
@@ -301,18 +309,24 @@ class WordScriptTests(unittest.TestCase):
             {"python", "bundled_ooxml_reader"},
             set(read_only["capabilities"]),
         )
+        self.assertEqual(str(Path.cwd().resolve()), read_only["execution_plan"]["dependency_root"])
+        self.assertEqual(str(Path(sys.executable).resolve()), read_only["execution_plan"]["python"])
+        self.assertEqual("3.9", read_only["capabilities"]["python"]["minimum_version"])
 
     def test_doctor_does_not_recommend_missing_unused_create_alternative(self):
         original_command_path = self.doctor.command_path
+        original_libreoffice_path = self.doctor.libreoffice_path
         original_module_available = self.doctor.module_available
         original_node_module_available = self.doctor.node_module_available
         try:
             self.doctor.command_path = lambda *_names: None
+            self.doctor.libreoffice_path = lambda: None
             self.doctor.module_available = lambda name: name == "docx"
-            self.doctor.node_module_available = lambda _name: False
+            self.doctor.node_module_available = lambda _name, _root=None: False
             result = self.doctor.inspect("create")
         finally:
             self.doctor.command_path = original_command_path
+            self.doctor.libreoffice_path = original_libreoffice_path
             self.doctor.module_available = original_module_available
             self.doctor.node_module_available = original_node_module_available
 
@@ -325,6 +339,7 @@ class PptScriptTests(unittest.TestCase):
     def setUpClass(cls):
         cls.validator = load_script("ppt", "validate_pptx.py", "awaken_ppt_validate_test")
         cls.package = load_script("ppt", "ooxml_package.py", "awaken_ppt_package_test")
+        cls.doctor = load_script("ppt", "doctor.py", "awaken_ppt_doctor_test")
 
     def test_valid_pptx_and_orphan_slide(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -348,6 +363,27 @@ class PptScriptTests(unittest.TestCase):
         issues = self.validator.chart_issues("ppt/charts/chart1.xml", ElementTree.fromstring(chart))
         self.assertTrue(any("outEnd" in issue for issue in issues))
 
+    def test_doctor_scopes_structural_qa_without_visual_dependencies(self):
+        original_command_path = self.doctor.command_path
+        original_libreoffice_path = self.doctor.libreoffice_path
+        original_module_available = self.doctor.module_available
+        original_node_module_available = self.doctor.node_module_available
+        try:
+            self.doctor.command_path = lambda *_names: None
+            self.doctor.libreoffice_path = lambda: None
+            self.doctor.module_available = lambda _name: False
+            self.doctor.node_module_available = lambda _name, _root=None: False
+            result = self.doctor.inspect("structural_qa")
+        finally:
+            self.doctor.command_path = original_command_path
+            self.doctor.libreoffice_path = original_libreoffice_path
+            self.doctor.module_available = original_module_available
+            self.doctor.node_module_available = original_node_module_available
+
+        self.assertEqual("ready", result["status"])
+        self.assertEqual(["structural_qa"], result["ready_routes"])
+        self.assertEqual({"python", "bundled_validator"}, set(result["capabilities"]))
+
 
 @unittest.skipUnless(importlib.util.find_spec("openpyxl"), "需要 openpyxl")
 class ExcelScriptTests(unittest.TestCase):
@@ -355,6 +391,7 @@ class ExcelScriptTests(unittest.TestCase):
     def setUpClass(cls):
         cls.inspector = load_script("excel", "inspect_workbook.py", "awaken_excel_inspect_test")
         cls.recalc = load_script("excel", "recalc.py", "awaken_excel_recalc_test")
+        cls.doctor = load_script("excel", "doctor.py", "awaken_excel_doctor_test")
 
     def test_formula_and_dynamic_function_risk(self):
         from openpyxl import Workbook
@@ -371,6 +408,27 @@ class ExcelScriptTests(unittest.TestCase):
             self.assertEqual(2, result["formula_count"])
             self.assertTrue(any(item["function"] == "XLOOKUP" for item in result["risky_formulas"]))
 
+    def test_inspector_profiles_headers_mixed_types_and_zero_values(self):
+        from openpyxl import Workbook
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mixed.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.append(["金额", "状态"])
+            sheet.append([0, "待处理"])
+            sheet.append([12.5, "完成"])
+            sheet.append(["已提交复核", "完成"])
+            workbook.save(path)
+
+            profile = self.inspector.inspect(path)["sheets"][0]["data_profile"]
+            self.assertEqual(1, profile["header_candidates"][0]["row"])
+            self.assertIn("A", profile["mixed_type_columns"])
+            column_a = next(item for item in profile["columns"] if item["column"] == "A")
+            self.assertEqual(1, column_a["zero_count"])
+            self.assertEqual(2, column_a["type_counts"]["number"])
+            self.assertEqual(2, column_a["type_counts"]["text"])
+
     def test_external_link_part_blocks_recalculation_before_libreoffice(self):
         from openpyxl import Workbook
 
@@ -384,6 +442,63 @@ class ExcelScriptTests(unittest.TestCase):
             formulas, external = self.recalc.workbook_risks(path)
             self.assertEqual(1, formulas)
             self.assertEqual(["xl/externalLinks/externalLink1.xml"], external)
+
+    def test_doctor_scopes_recalc_and_returns_absolute_plan(self):
+        result = self.doctor.inspect("recalc")
+        self.assertEqual({"python", "openpyxl", "libreoffice", "bundled_recalculator"}, set(result["capabilities"]))
+        self.assertEqual(str(Path(sys.executable).resolve()), result["execution_plan"]["python"])
+        self.assertEqual("3.9", result["capabilities"]["python"]["minimum_version"])
+
+
+class OfficePythonCompatibilityTests(unittest.TestCase):
+    def interpreters(self) -> list[str]:
+        candidates = [sys.executable, shutil.which("python3.9")]
+        xcode_python = Path(
+            "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/"
+            "Python3.framework/Versions/3.9/bin/python3.9"
+        )
+        if xcode_python.is_file():
+            candidates.append(str(xcode_python))
+        return list(dict.fromkeys(str(Path(path).resolve()) for path in candidates if path))
+
+    def test_office_temp_directories_work_on_available_python_39_and_current(self):
+        for interpreter in self.interpreters():
+            version = subprocess.run(
+                [interpreter, "-c", "import sys; print('.'.join(map(str, sys.version_info[:2])))"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+            if tuple(int(part) for part in version.split(".")) < (3, 9):
+                continue
+            for skill in ("word", "excel", "ppt"):
+                script_dir = SYSTEM_SKILLS / skill / "scripts"
+                code = (
+                    "import pathlib,sys;"
+                    f"sys.path.insert(0,{str(script_dir)!r});"
+                    "from office_runtime import temporary_directory;"
+                    "\nwith temporary_directory('awaken-office-test-') as path:\n"
+                    " assert isinstance(path, pathlib.Path)\n"
+                    " assert path.is_dir()\n"
+                    "saved = path\n"
+                    "assert not saved.exists()\n"
+                )
+                completed = subprocess.run(
+                    [interpreter, "-B", "-c", code],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(
+                    0,
+                    completed.returncode,
+                    f"{skill} failed on Python {version}: {completed.stderr}",
+                )
+
+    def test_no_office_script_uses_python_310_only_cleanup_argument(self):
+        for skill in ("word", "excel", "ppt"):
+            for script in (SYSTEM_SKILLS / skill / "scripts").glob("*.py"):
+                self.assertNotIn("ignore_cleanup_errors", script.read_text(encoding="utf-8"), str(script))
 
 
 if __name__ == "__main__":

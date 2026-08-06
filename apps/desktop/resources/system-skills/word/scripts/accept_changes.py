@@ -10,14 +10,13 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree
 
 sys.dont_write_bytecode = True
 
-from office_runtime import find_soffice, office_env
+from office_runtime import find_soffice, office_env, temporary_directory
 
 
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -61,8 +60,7 @@ def run(input_path: Path, output_path: Path, timeout: int) -> dict:
     if executable is None:
         raise FileNotFoundError("未找到 LibreOffice")
     before_count = tracked_change_count(input_path)
-    with tempfile.TemporaryDirectory(prefix="awaken-word-accept-", ignore_cleanup_errors=True) as directory:
-        root = Path(directory)
+    with temporary_directory("awaken-word-accept-") as root:
         profile = root / "profile"
         working = root / input_path.name
         shutil.copy2(input_path, working)

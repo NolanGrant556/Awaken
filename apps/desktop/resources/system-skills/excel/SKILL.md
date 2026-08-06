@@ -1,6 +1,6 @@
 ---
 name: excel
-version: 2.0.0
+version: 2.1.0
 description: 创建、读取、编辑、清洗和校验电子表格（.xlsx/.xlsm/.xltx/.csv/.tsv）。只要表格文件是主要输入或输出，就应使用本 Skill；包括公式、格式、图表、财务模型、脏表整理、模板填充和格式转换。若表格只是输入而最终还要交付 Word/PPT/PDF，应再加载对应的最小 Skill 集合。
 when_to_use: 用户提到 Excel、xlsx、xlsm、xltx、csv、tsv、工作簿、公式、财务模型、表格清洗或需要产出可继续编辑的表格文件时。
 user-invocable: true
@@ -8,7 +8,7 @@ user-invocable: true
 
 # Awaken Excel Skill
 
-本 Skill 使用 `Bash + openpyxl/pandas + LibreOffice` 完成电子表格工作。缺少依赖时先探测，再通过 Awaken 现有安装能力或 `Bash` 恢复。公式工作簿必须重算、检查错误并进行语义抽查，最终通过 `artifact_publish` 发布。
+本 Skill 使用 `Bash + openpyxl/pandas + LibreOffice` 完成电子表格工作。包内 Python helper 支持 Python 3.9 及以上；缺少依赖时先按 route 探测并复用 doctor 返回的绝对执行计划，再通过 Awaken 现有安装能力或 `Bash` 恢复。公式工作簿必须重算、检查错误并进行语义抽查，最终通过 `artifact_publish` 发布。
 
 ## 先判断任务路线
 
@@ -36,12 +36,22 @@ user-invocable: true
 - 最终表格必须位于当前任务工作区的 output root。
 - 编辑用户原文件时默认输出新文件，不覆盖原件。
 - Skill 已加载不代表 Python 包或 LibreOffice 已存在；以真实探测和执行结果为准。
+- 用户在初始请求中点名表格输入、Excel 输出或跨表分析时，在任何相关 Bash、文件读取或 subagent 派发前加载本 Skill；子任务必须继承表头、类型、空值和分母检查边界。
+- doctor 与所有 `--json` helper 必须作为独立命令执行，或放在 `&&` 链的末尾；禁止接 `| tail`、`| head`、`grep`、命令替换等会改变退出码或截断 JSON 的管道。
+- 必须同时核对 Bash outcome 与完整 JSON `status`。wrapper 失败时不得改用裸 `soffice` 绕过独立 profile、超时、外链拒绝和原子替换合同。
 
 ## 第一步：依赖探测与恢复
 
+按当前动作只探测对应 route：
+
 ```bash
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route read_precise --dependency-root "$PWD" --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route clean --dependency-root "$PWD" --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route create_edit --dependency-root "$PWD" --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route recalc --dependency-root "$PWD" --json
 ```
+
+后续命令固定使用 `execution_plan.python` 和 `execution_plan.libreoffice` 的绝对路径；不要重新调用裸 `python3` 猜测同一 run 的解释器。
 
 根据 JSON 只安装缺失项：
 
@@ -55,7 +65,7 @@ macOS PEP 668 环境优先使用工作区 `.venv` 或 `uv`；Windows 可使用 `
 ## 编辑前检查（必须）
 
 ```bash
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/inspect_workbook.py" input.xlsx --json
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/inspect_workbook.py" input.xlsx --json > ./workbook-inspection.json
 ```
 
 先确认：
@@ -66,6 +76,8 @@ python3 -B "${AWAKEN_SKILL_DIR}/scripts/inspect_workbook.py" input.xlsx --json
 - 是否含外部工作簿链接；
 - 是否使用本运行环境无法可靠验证的动态数组/新函数；
 - 原模板如何标识输入单元格、公式、跨表引用和外链。
+
+多工作簿或脏数据分析还必须先抽样建立输入剖面：候选表头、每列实际类型、空值、状态文本混入数值列、日期格式和零分母。数值转换使用显式安全函数并保留无法转换的样本；不得直接 `float(value)`，不得假定固定表头行，也不得在未检查分母时计算比例。完成剖面后再派发并行分析。
 
 `.xlsm` 使用 openpyxl 编辑时必须 `keep_vba=True`；即便如此也要认识到 openpyxl 不能完整维护所有 Excel 扩展。含宏和复杂外链的文件不能在没有备份与明确风险说明时保存或重算。
 
@@ -95,13 +107,13 @@ python3 -B "${AWAKEN_SKILL_DIR}/scripts/inspect_workbook.py" input.xlsx --json
 对 Agent 新生成的 `output.xlsx`：
 
 ```bash
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/recalc.py" output.xlsx --json
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/recalc.py" output.xlsx --json > ./recalc-result.json
 ```
 
 对用户原文件的编辑结果，显式输出新路径：
 
 ```bash
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/recalc.py" edited-before-recalc.xlsx --output final.xlsx --json
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/recalc.py" edited-before-recalc.xlsx --output final.xlsx --json > ./recalc-result.json
 ```
 
 脚本使用独立 LibreOffice profile，在临时副本上重算；只有 LibreOffice 真正写回后才原子替换目标。以下情况必须失败而不是假成功：
@@ -111,7 +123,7 @@ python3 -B "${AWAKEN_SKILL_DIR}/scripts/recalc.py" edited-before-recalc.xlsx --o
 - 有公式但文件没有被真正写回；
 - 输出无法再由 openpyxl 读取。
 
-若 JSON `status=errors_found`，根据 `error_summary` 修复后再次重算。不能只看进程是否启动或 Bash 是否打印了文件路径。
+随后用 `Read` 打开完整 `recalc-result.json`。若 JSON `status=errors_found`，根据 `error_summary` 修复后再次重算；若 `status=failed` 或 Bash 非零则路线失败。不能只看进程是否启动、Bash 是否打印了文件路径或管道末端退出码。
 
 ## 公式语义抽查
 

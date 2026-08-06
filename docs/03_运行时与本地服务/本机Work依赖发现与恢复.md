@@ -14,9 +14,9 @@ Awaken 不下载、复制、版本化或打包 Python、Node、LibreOffice、Pop
 
 ## 3. 当前依赖发现
 
-当前没有 `workspace_dependencies`、`runtime_preflight` 或 typed Work runtime 工具。run-start snapshot 只观察固定 PATH 中的通用 executable、Python/Node、包管理器和 workspace marker；`Read` 的 PDF fallback 另外从固定 snapshot 查找 `pdfinfo`、`pdftoppm`。其他 Office/媒体依赖由 Skill 或 Bash 命令真实发现。
+当前没有 `workspace_dependencies`、`runtime_preflight` 或 typed Work runtime 工具。run-start snapshot 只观察固定 PATH 中的通用 executable、Python/Node、包管理器和 workspace marker；`Read` 的 PDF fallback 另外从固定 snapshot 查找 `pdfinfo`、`pdftoppm`。bundled Word/Excel/PPT doctor 在 Agent 激活目标 Skill 后按 route 真实探测依赖，并返回当前解释器版本、最低 Python 3.9 合同、依赖根和可复用的绝对 executable plan；其他 Office/媒体依赖仍由 Skill 或 Bash 命令真实发现。
 
-Agent 或用户安装依赖后，新的 run/显式环境 refresh 才能形成新 snapshot；当前 run 不热换已经固定的 executable identity。命令也可在用户明确知道路径时使用绝对 executable。
+Agent 或用户安装依赖后，新的 run/显式环境 refresh 才能形成新 snapshot；当前 run 不热换已经固定的 executable identity。Skill doctor 的绝对执行计划从同一固定环境和明确 dependency root 中产生，后续 helper 必须复用它，不能因 `cd` 或重复裸命令重新选择解释器。用户明确指定另一个绝对 executable 时仍可直接使用，但这不改变 snapshot。
 
 ## 4. 缺失与恢复
 

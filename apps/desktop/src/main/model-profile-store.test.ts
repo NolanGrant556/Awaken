@@ -1168,7 +1168,7 @@ describe("ModelProfileStore", () => {
     });
   });
 
-  it("reuses the template profile key during connection testing", async () => {
+  it("does not reuse a saved template key when the current test form is empty", async () => {
     const fetchMock = vi.fn(
       async () => ({ ok: true, status: 200 }) as Response,
     );
@@ -1200,18 +1200,10 @@ describe("ModelProfileStore", () => {
     });
 
     expect(result).toEqual({
-      ok: true,
-      message: "连接测试通过：服务已响应 chat/completions。",
+      ok: false,
+      message: "连接测试失败：请先填写 API key。",
     });
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.deepseek.com/chat/completions",
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({
-          Authorization: "Bearer shared-key",
-        }),
-      }),
-    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("hides existing duplicate provider-model entries when listing profiles", async () => {

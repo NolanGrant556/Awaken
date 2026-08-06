@@ -80,6 +80,19 @@ function testButton(): HTMLButtonElement | null {
   );
 }
 
+function enterApiKey(value = "test-key"): void {
+  const input = document.querySelector<HTMLInputElement>(
+    ".model-provider-secret-field input",
+  );
+  if (!input) throw new Error("API key input not found");
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  setter?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 describe("DesktopSettingsDialog model connection feedback", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -133,8 +146,11 @@ describe("DesktopSettingsDialog model connection feedback", () => {
     await settle();
 
     await act(async () => providerButton()?.click());
+    expect(testButton()?.disabled).toBe(true);
+    await act(async () => enterApiKey());
     const button = testButton();
     expect(button).not.toBeNull();
+    expect(button?.disabled).toBe(false);
 
     await act(async () => button?.click());
     expect(button?.disabled).toBe(true);
@@ -181,6 +197,7 @@ describe("DesktopSettingsDialog model connection feedback", () => {
     await settle();
 
     await act(async () => providerButton()?.click());
+    await act(async () => enterApiKey());
     await act(async () => testButton()?.click());
 
     const feedback = document.querySelector(".model-provider-test-feedback");

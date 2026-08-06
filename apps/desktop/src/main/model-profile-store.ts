@@ -1267,18 +1267,7 @@ export class ModelProfileStore {
     if (!provider) {
       return { ok: false, message: "连接测试失败：未知模型供应商。" };
     }
-    const agentPlanKey =
-      provider.id === "volcengine-agent-plan"
-        ? (await this.agentPlanAccountStore.resolveKey()).apiKey
-        : "";
-    const apiKey =
-      request.apiKey?.trim() ||
-      agentPlanKey ||
-      (request.id
-        ? await this.apiKeyForProfile(request.id)
-        : request.templateProfileId
-          ? await this.apiKeyForProfile(request.templateProfileId)
-          : "");
+    const apiKey = request.apiKey?.trim() ?? "";
     if (!apiKey) {
       return { ok: false, message: "连接测试失败：请先填写 API key。" };
     }
@@ -1613,12 +1602,6 @@ export class ModelProfileStore {
     }
 
     return balances;
-  }
-
-  private async apiKeyForProfile(profileId: string): Promise<string> {
-    const store = await this.readStore();
-    const profile = store.profiles.find((entry) => entry.id === profileId);
-    return profile ? this.readProfileKey(profile) : "";
   }
 
   private async capabilityResolutionForRequest(

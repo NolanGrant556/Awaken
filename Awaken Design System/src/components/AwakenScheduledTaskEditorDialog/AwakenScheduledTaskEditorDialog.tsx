@@ -118,6 +118,13 @@ export const AWAKEN_SCHEDULED_TASK_CRON_PRESET_EXPRESSIONS: Record<
   weekly: "0 9 * * 1",
 };
 
+const AWAKEN_SCHEDULED_TASK_CRON_PRESET_OPTIONS = [
+  { value: "hourly", label: "每小时" },
+  { value: "daily", label: "每天" },
+  { value: "weekly", label: "每周" },
+  { value: "custom", label: "自定义" },
+] as const;
+
 export function createEmptyAwakenScheduledTaskDraft(timezone: string): AwakenScheduledTaskDraft {
   return {
     name: "",
@@ -362,13 +369,14 @@ export function AwakenScheduledTaskEditorDialog({
           {value.scheduleKind === "cron" ? (
             <>
               <EditorField label="循环计划">
-                <select
-                  className="aw-scheduled-task-editor__control"
-                  aria-label="循环计划"
+                <AwakenSelect
                   value={value.cronPreset}
+                  options={AWAKEN_SCHEDULED_TASK_CRON_PRESET_OPTIONS}
+                  ariaLabel="循环计划"
+                  preferredPlacement="top"
                   disabled={busy}
-                  onChange={(event) => {
-                    const preset = event.target.value as AwakenScheduledTaskCronPreset;
+                  onValueChange={(nextValue) => {
+                    const preset = nextValue as AwakenScheduledTaskCronPreset;
                     if (preset === "custom") {
                       update({ cronPreset: preset });
                       return;
@@ -384,12 +392,7 @@ export function AwakenScheduledTaskEditorDialog({
                       cron: rebuildCronExpression(preset, nextTime, nextWeekdays, value.cron),
                     });
                   }}
-                >
-                  <option value="hourly">每小时</option>
-                  <option value="daily">每天</option>
-                  <option value="weekly">每周</option>
-                  <option value="custom">自定义</option>
-                </select>
+                />
               </EditorField>
               {value.cronPreset !== "custom" ? (
                 <>

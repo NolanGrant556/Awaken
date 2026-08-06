@@ -1,7 +1,10 @@
 import "./AwakenSelect.css";
 import { useId, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
-import { useAwakenAnchoredMenuLayout } from "../../hooks/useAwakenAnchoredMenuLayout";
+import {
+  useAwakenAnchoredMenuLayout,
+  type AwakenAnchoredMenuPlacement,
+} from "../../hooks/useAwakenAnchoredMenuLayout";
 
 const MENU_GAP = 6;
 const MENU_MAX_HEIGHT = 180;
@@ -33,6 +36,7 @@ export type AwakenSelectProps = {
   labelledBy?: string;
   disabled?: boolean;
   className?: string;
+  preferredPlacement?: AwakenAnchoredMenuPlacement;
   onValueChange: (value: string) => void;
 };
 
@@ -44,6 +48,7 @@ export function AwakenSelect({
   labelledBy,
   disabled = false,
   className,
+  preferredPlacement = "bottom",
   onValueChange,
 }: AwakenSelectProps) {
   const [open, setOpen] = useState(false);
@@ -57,6 +62,7 @@ export function AwakenSelect({
     open,
     estimatedHeight: estimateMenuHeight(options.length),
     maxHeight: MENU_MAX_HEIGHT,
+    preferredPlacement,
     gap: MENU_GAP,
   });
   const menuId = useId();

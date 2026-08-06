@@ -29,7 +29,10 @@ func TestRequestFailedErrorPreservesRetryFactsAndRedactsSecrets(t *testing.T) {
 	}
 }
 
-func TestIsTransientRequestErrorOnlyRetries429And5xx(t *testing.T) {
+func TestIsTransientRequestErrorRetriesPreResponseTransport429And5xx(t *testing.T) {
+	if !IsTransientRequestError(&TransportError{}) {
+		t.Fatal("pre-response transport errors should be transient")
+	}
 	for _, status := range []int{429, 500, 503} {
 		if !IsTransientRequestError(&RequestError{StatusCode: status}) {
 			t.Fatalf("status %d should be transient", status)
@@ -39,6 +42,9 @@ func TestIsTransientRequestErrorOnlyRetries429And5xx(t *testing.T) {
 		if IsTransientRequestError(&RequestError{StatusCode: status}) {
 			t.Fatalf("status %d must not be retried", status)
 		}
+	}
+	if IsTransientRequestError(errors.New("LLM request failed: stream idle timeout")) {
+		t.Fatal("stream errors after a response begins must not be retried")
 	}
 }
 

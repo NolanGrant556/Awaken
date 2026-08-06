@@ -448,7 +448,7 @@ func redactProviderErrorSecrets(detail string) string {
 
 // transportError 返回脱敏的 transport 错误，不暴露完整 URL 或 url.Error 细节。
 func transportError(err error) error {
-	return fmt.Errorf("%w: transport error", ErrRequestFailed)
+	return &TransportError{}
 }
 
 // requestBuildError 返回脱敏的请求构造错误，不暴露完整 URL（例如 malformed base URL）。

@@ -171,6 +171,8 @@ type ArtifactDescriptor struct {
 	Producer        string         `json:"producer"`
 	Action          ArtifactAction `json:"action"`
 	ID              string         `json:"id,omitempty"`
+	GroupID         string         `json:"group_id,omitempty"`
+	GroupIndex      int            `json:"group_index,omitempty"`
 	Title           string         `json:"title,omitempty"`
 	Description     string         `json:"description,omitempty"`
 	Kind            string         `json:"kind,omitempty"`
@@ -186,19 +188,34 @@ type ScopedFile struct {
 	DisplayName string `json:"display_name,omitempty"`
 }
 
+// ScopedMediaArtifact is a host-verified ready media identity made available
+// to tools for one run. A model-provided ID never grants path access by itself;
+// the runtime rebuilds this list from the owning thread's durable transcript.
+type ScopedMediaArtifact struct {
+	ID           string       `json:"id"`
+	RunID        string       `json:"run_id,omitempty"`
+	GroupID      string       `json:"group_id,omitempty"`
+	GroupIndex   int          `json:"group_index,omitempty"`
+	DisplayIndex int          `json:"display_index,omitempty"`
+	Kind         string       `json:"kind"`
+	Path         string       `json:"path"`
+	Role         ArtifactRole `json:"role"`
+	Status       string       `json:"status"`
+}
+
 type CapabilityClass string
 
 const (
-	CapabilityUnknown            CapabilityClass = "unknown"
-	CapabilityArtifactRead       CapabilityClass = "artifact_read"
-	CapabilityArtifactWrite      CapabilityClass = "artifact_write"
-	CapabilityConnectorRead      CapabilityClass = "connector_read"
-	CapabilityConnectorWrite     CapabilityClass = "connector_write"
-	CapabilityBrowserRead        CapabilityClass = "browser_read"
-	CapabilityBrowserInteract    CapabilityClass = "browser_interaction"
-	CapabilityLocalTransform     CapabilityClass = "local_transform"
-	CapabilityExternalPublish    CapabilityClass = "external_publish"
-	CapabilitySystemOperation    CapabilityClass = "system_operation"
+	CapabilityUnknown              CapabilityClass = "unknown"
+	CapabilityArtifactRead         CapabilityClass = "artifact_read"
+	CapabilityArtifactWrite        CapabilityClass = "artifact_write"
+	CapabilityConnectorRead        CapabilityClass = "connector_read"
+	CapabilityConnectorWrite       CapabilityClass = "connector_write"
+	CapabilityBrowserRead          CapabilityClass = "browser_read"
+	CapabilityBrowserInteract      CapabilityClass = "browser_interaction"
+	CapabilityLocalTransform       CapabilityClass = "local_transform"
+	CapabilityExternalPublish      CapabilityClass = "external_publish"
+	CapabilitySystemOperation      CapabilityClass = "system_operation"
 	CapabilityClassComputerObserve CapabilityClass = "computer_observe"
 	CapabilityClassComputerAct     CapabilityClass = "computer_act"
 	CapabilityClassComputerVerify  CapabilityClass = "computer_verify"

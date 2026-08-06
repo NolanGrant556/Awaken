@@ -193,6 +193,8 @@ func ArtifactSemanticRecord(threadID, runID, turnID, sessionID string, event Awa
 		"role":             string(role),
 		"producer":         producer,
 		"artifact_id":      event.ArtifactID,
+		"group_id":         event.ArtifactGroupID,
+		"group_index":      event.ArtifactGroupIndex,
 		"title":            event.ArtifactTitle,
 		"description":      event.ArtifactDescription,
 		"kind":             event.ArtifactKind,

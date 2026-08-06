@@ -916,6 +916,8 @@ func semanticRecordToAgentEvents(record agentcore.SemanticRecord) []agentcore.Aw
 			ArtifactRole:            tool.ResolveArtifactRole(tool.ArtifactRole(stringPayload(record.Payload, "role")), producer, artifactKind, artifactPath),
 			ArtifactProducer:        producer,
 			ArtifactID:              stringPayload(record.Payload, "artifact_id"),
+			ArtifactGroupID:         stringPayload(record.Payload, "group_id"),
+			ArtifactGroupIndex:      intPayload(record.Payload, "group_index"),
 			ArtifactTitle:           stringPayload(record.Payload, "title"),
 			ArtifactDescription:     stringPayload(record.Payload, "description"),
 			ArtifactKind:            artifactKind,

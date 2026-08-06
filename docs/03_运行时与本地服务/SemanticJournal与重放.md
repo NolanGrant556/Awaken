@@ -89,6 +89,8 @@ tool call/result payload 持久保存 tool/environment snapshot ID、provider ID
 
 模型历史使用 canonical `ModelPayload`，UI 使用 display/projection。失败工具不能在重放时凭卡片文案生成不存在的 change/artifact。
 
+媒体 Artifact 可额外耐久 `group_id` 与正整数 `group_index`。它们只表达同一次组图及其稳定位置：重试失败项时复用原组与原 index，replay/终态投影据此原位排序。继续 thread 前，Runtime 从 ready deliverable Artifact 重建当前媒体可见序号与 `artifact_id` 清单；这个 host-owned 派生清单不新增 journal kind、不包含真实路径，也不回写历史 `user_message`。
+
 ## 7. Skill 与任务输入恢复
 
 `skill_activated` 保存锚定路径、正文、来源、调用模式和 receipt；服务重建时按 run 恢复 inline SkillContextBlocks。压缩按恢复后的最近调用顺序保留，单 Skill 约 5,000 tokens、合计约 25,000 tokens；6 个满预算块保留最新 5 个。截断块必须保留精确 `Read` 源路径。

@@ -372,6 +372,8 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ArtifactProducer = firstNonEmpty(event.ArtifactProducer, event.ToolName)
 		base.ArtifactRole = string(tool.ResolveArtifactRole(event.ArtifactRole, base.ArtifactProducer, event.ArtifactKind, event.ArtifactPath))
 		base.ArtifactID = event.ArtifactID
+		base.ArtifactGroupID = event.ArtifactGroupID
+		base.ArtifactGroupIndex = event.ArtifactGroupIndex
 		base.ArtifactTitle = event.ArtifactTitle
 		base.ArtifactDescription = event.ArtifactDescription
 		base.ArtifactKind = event.ArtifactKind
@@ -387,6 +389,8 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ArtifactProducer = firstNonEmpty(event.ArtifactProducer, event.ToolName)
 		base.ArtifactRole = string(tool.ResolveArtifactRole(event.ArtifactRole, base.ArtifactProducer, event.ArtifactKind, event.ArtifactPath))
 		base.ArtifactID = event.ArtifactID
+		base.ArtifactGroupID = event.ArtifactGroupID
+		base.ArtifactGroupIndex = event.ArtifactGroupIndex
 		base.ArtifactTitle = event.ArtifactTitle
 		base.ArtifactDescription = event.ArtifactDescription
 		base.ArtifactKind = event.ArtifactKind

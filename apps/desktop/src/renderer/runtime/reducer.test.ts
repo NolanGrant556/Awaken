@@ -1947,6 +1947,51 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
+  it("places a retried group image back at its original visible position", () => {
+    const imageEvent = (
+      seq: number,
+      artifactId: string,
+      artifactGroupIndex: number,
+    ): RuntimeAction =>
+      runEvent({
+        type: "AWAKEN_ARTIFACT_CREATED",
+        seq,
+        artifactId,
+        artifactTitle: `${artifactId}.png`,
+        artifactKind: "image",
+        artifactPath: `output/generated-media/${artifactId}.png`,
+        artifactStatus: "ready",
+        artifactRole: "deliverable",
+        artifactContractVersion: 2,
+        artifactProducer: "image_generate",
+        artifactGroupId: "group-5",
+        artifactGroupIndex,
+      });
+
+    const state = dispatch([
+      { type: "run/requested", prompt: "Generate five images" },
+      imageEvent(1, "image-1", 1),
+      imageEvent(2, "image-2", 2),
+      imageEvent(3, "image-4", 4),
+      imageEvent(4, "image-5", 5),
+      imageEvent(5, "image-3-retry", 3),
+      runEvent({ type: "RUN_FINISHED", seq: 6, result: "done" }),
+    ]);
+
+    const deliverables = state.narrative.committedItems.find(
+      (item) => item.kind === "deliverables",
+    );
+    expect(deliverables).toMatchObject({
+      files: [
+        { artifactId: "image-1" },
+        { artifactId: "image-2" },
+        { artifactId: "image-3-retry" },
+        { artifactId: "image-4" },
+        { artifactId: "image-5" },
+      ],
+    });
+  });
+
   it("renders every created or modified document and excludes deleted documents", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Create and update reports" },

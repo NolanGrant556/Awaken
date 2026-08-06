@@ -403,6 +403,8 @@ export type AguiEvent = {
   acpToolCallId?: string;
   acpPermissionOptions?: AguiACPPermissionOption[];
   artifactId?: string;
+  artifactGroupId?: string;
+  artifactGroupIndex?: number;
   artifactTitle?: string;
   artifactDescription?: string;
   artifactKind?: string;

@@ -778,12 +778,22 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			}
 		}
 	}
+	var mediaArtifactReferences []tool.ScopedMediaArtifact
+	if hasRequestedThread {
+		transcript, transcriptErr := s.threadStore.GetTranscript(threadID)
+		if transcriptErr == nil {
+			mediaArtifactReferences = mediaArtifactReferencesFromTranscript(transcript)
+		} else if !errors.Is(transcriptErr, ErrThreadNotFound) {
+			return Run{}, transcriptErr
+		}
+	}
 	persistedAttachments, err := persistRunInputAttachments(threadID, req.Attachments)
 	if err != nil {
 		return Run{}, err
 	}
 	workspace = mergeTaskScopeAttachments(workspace, persistedAttachments)
 	effectiveInput := effectiveInputForComposerTokens(trimmed, req.ComposerTokens)
+	effectiveInput = effectiveInputForMediaArtifactReferences(effectiveInput, mediaArtifactReferences)
 	threadLabel := threadLabelForInputAndTokens(trimmed, persistedAttachments, req.ComposerTokens)
 	ctx, cancel := context.WithCancel(context.Background())
 	session := NewSession(runID, threadID, trimmed, persistedAttachments, req.ComposerTokens, cancel)
@@ -878,7 +888,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			s.runWG.Add(1)
 			go func() {
 				defer s.runWG.Done()
-				s.execute(session, executor, agent, effectiveInput, trimmed, persistedAttachments, ctx)
+				s.executeWithMediaArtifactReferences(session, executor, agent, effectiveInput, trimmed, persistedAttachments, mediaArtifactReferences, ctx)
 			}()
 			return session.Snapshot(), nil
 		}
@@ -1030,7 +1040,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	s.runWG.Add(1)
 	go func() {
 		defer s.runWG.Done()
-		s.execute(session, executor, agent, effectiveInput, trimmed, persistedAttachments, ctx)
+		s.executeWithMediaArtifactReferences(session, executor, agent, effectiveInput, trimmed, persistedAttachments, mediaArtifactReferences, ctx)
 	}()
 
 	return session.Snapshot(), nil
@@ -1999,14 +2009,30 @@ func partialAssistantResult(agent *agentcore.Agent) string {
 }
 
 func (s *RunService) execute(session *Session, executor Executor, agent *agentcore.Agent, input string, displayInput string, attachments []RunInputAttachment, ctx context.Context) {
+	s.executeWithMediaArtifactReferences(session, executor, agent, input, displayInput, attachments, nil, ctx)
+}
+
+func (s *RunService) executeWithMediaArtifactReferences(session *Session, executor Executor, agent *agentcore.Agent, input string, displayInput string, attachments []RunInputAttachment, mediaArtifactReferences []tool.ScopedMediaArtifact, ctx context.Context) {
 	snapshot := session.Snapshot()
 	baselineSkillConfig, hasBaselineSkillConfig := snapshotAgentSkillConfig(agent)
+	var baselineMediaArtifactReferences []tool.ScopedMediaArtifact
+	if agent != nil {
+		baselineMediaArtifactReferences = append([]tool.ScopedMediaArtifact(nil), agent.GetConfig().MediaArtifactReferences...)
+		cfg := agent.GetConfig()
+		cfg.MediaArtifactReferences = append([]tool.ScopedMediaArtifact(nil), mediaArtifactReferences...)
+		agent.Reconfigure(cfg)
+	}
 	defer func() {
 		if agent != nil {
 			agent.ClearPreparedUserMessage()
 		}
 		if hasBaselineSkillConfig {
 			restoreAgentSkillConfig(agent, baselineSkillConfig)
+		}
+		if agent != nil {
+			cfg := agent.GetConfig()
+			cfg.MediaArtifactReferences = baselineMediaArtifactReferences
+			agent.Reconfigure(cfg)
 		}
 		restoreAgentDisplayInput(agent, input, displayInput)
 		s.flushAgentTranscript(session, agent)
@@ -2024,7 +2050,7 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 	if agent != nil {
 		agent.SetPendingUserAttachments(inputAttachmentsToContextAttachments(attachments))
 		agent.SetPendingComposerTokens(semanticComposerTokensForRun(snapshot.ComposerTokens))
-		if len(snapshot.ComposerTokens) > 0 {
+		if input != displayInput || len(snapshot.ComposerTokens) > 0 {
 			if err := agent.PrepareUserMessageWithDisplayInput(
 				ctx,
 				input,

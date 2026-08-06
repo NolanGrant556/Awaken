@@ -68,6 +68,10 @@ func (rt *ToolRuntime) emitArtifactDescriptors(
 		artifact.Producer = producer
 		artifact.Role = role
 		artifact.ID = firstNonEmpty(strings.TrimSpace(artifact.ID), newAwakenID("artifact"))
+		artifact.GroupID = strings.TrimSpace(artifact.GroupID)
+		if artifact.GroupIndex < 0 {
+			artifact.GroupIndex = 0
+		}
 		artifact.Title = firstNonEmpty(strings.TrimSpace(artifact.Title), fallbackArtifactTitle(artifact.Path, result.Name))
 		artifact.Description = strings.TrimSpace(artifact.Description)
 		artifact.Kind = firstNonEmpty(strings.TrimSpace(artifact.Kind), "file")
@@ -86,6 +90,8 @@ func (rt *ToolRuntime) emitArtifactDescriptors(
 			ArtifactRole:            role,
 			ArtifactProducer:        producer,
 			ArtifactID:              artifact.ID,
+			ArtifactGroupID:         artifact.GroupID,
+			ArtifactGroupIndex:      artifact.GroupIndex,
 			ArtifactTitle:           artifact.Title,
 			ArtifactDescription:     artifact.Description,
 			ArtifactKind:            artifact.Kind,
@@ -93,6 +99,15 @@ func (rt *ToolRuntime) emitArtifactDescriptors(
 			ArtifactContent:         artifact.Content,
 			ArtifactStatus:          ArtifactStatus(artifact.Status),
 		})
+		if role == tool.ArtifactRoleDeliverable && artifact.Status == "ready" &&
+			(artifact.Kind == "image" || artifact.Kind == "video") {
+			rt.permissionContext.MediaArtifacts = append(rt.permissionContext.MediaArtifacts, tool.ScopedMediaArtifact{
+				ID: artifact.ID, RunID: rt.runID, GroupID: artifact.GroupID,
+				GroupIndex: artifact.GroupIndex, Kind: artifact.Kind, Path: artifact.Path,
+				Role: role, Status: artifact.Status,
+			})
+			rt.permissionContext = rt.permissionContext.Normalize()
+		}
 	}
 	return artifacts
 }

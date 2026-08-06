@@ -205,6 +205,8 @@ type AwakenEvent struct {
 	ArtifactRole               tool.ArtifactRole
 	ArtifactProducer           string
 	ArtifactID                 string
+	ArtifactGroupID            string
+	ArtifactGroupIndex         int
 	ArtifactTitle              string
 	ArtifactDescription        string
 	ArtifactKind               string

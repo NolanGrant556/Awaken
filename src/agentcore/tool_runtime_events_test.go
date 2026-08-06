@@ -25,6 +25,8 @@ func TestToolRuntimeEmitsArtifactsForAllowedTool(t *testing.T) {
 			Producer:        toolName,
 			Action:          tool.ArtifactActionCreated,
 			ID:              "artifact-1",
+			GroupID:         "artifact-group-1",
+			GroupIndex:      3,
 			Title:           "README.md",
 			Description:     "Generated readme",
 			Kind:            "file",
@@ -68,7 +70,9 @@ func TestToolRuntimeEmitsArtifactsForAllowedTool(t *testing.T) {
 	}
 	if got[3].ArtifactContractVersion != tool.ArtifactContractVersion ||
 		got[3].ArtifactRole != tool.ArtifactRoleDeliverable ||
-		got[3].ArtifactProducer != toolName {
+		got[3].ArtifactProducer != toolName ||
+		got[3].ArtifactGroupID != "artifact-group-1" ||
+		got[3].ArtifactGroupIndex != 3 {
 		t.Fatalf("artifact v2 metadata missing: %+v", got[3])
 	}
 	if len(result.Outcome.Artifacts) != 1 || result.Outcome.Artifacts[0].ID != "artifact-1" {

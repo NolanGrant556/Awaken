@@ -83,6 +83,8 @@ export type PatchPreviewRecord = {
 
 export type ArtifactRecord = {
   id: string;
+  groupId?: string;
+  groupIndex?: number;
   title: string;
   description?: string;
   kind: string;
@@ -903,8 +905,38 @@ function appendFinalDeliverableSummary(
       candidate?.artifact.role === "deliverable" &&
         candidate.artifact.status === "ready" &&
         candidate.extension &&
-        candidate.fileType,
+      candidate.fileType,
     );
+  });
+
+  const pathPosition = new Map(pathOrder.map((key, index) => [key, index]));
+  const groupPosition = new Map<string, number>();
+  for (const key of pathOrder) {
+    const groupId = byPath.get(key)?.artifact.groupId;
+    if (groupId && !groupPosition.has(groupId)) {
+      groupPosition.set(groupId, pathPosition.get(key) ?? Number.MAX_SAFE_INTEGER);
+    }
+  }
+  eligiblePaths.sort((leftKey, rightKey) => {
+    const left = byPath.get(leftKey)!.artifact;
+    const right = byPath.get(rightKey)!.artifact;
+    const leftPosition = left.groupId
+      ? groupPosition.get(left.groupId) ?? pathPosition.get(leftKey) ?? Number.MAX_SAFE_INTEGER
+      : pathPosition.get(leftKey) ?? Number.MAX_SAFE_INTEGER;
+    const rightPosition = right.groupId
+      ? groupPosition.get(right.groupId) ?? pathPosition.get(rightKey) ?? Number.MAX_SAFE_INTEGER
+      : pathPosition.get(rightKey) ?? Number.MAX_SAFE_INTEGER;
+    if (leftPosition !== rightPosition) {
+      return leftPosition - rightPosition;
+    }
+    if (left.groupId && left.groupId === right.groupId) {
+      const leftIndex = left.groupIndex ?? Number.MAX_SAFE_INTEGER;
+      const rightIndex = right.groupIndex ?? Number.MAX_SAFE_INTEGER;
+      if (leftIndex !== rightIndex) {
+        return leftIndex - rightIndex;
+      }
+    }
+    return (pathPosition.get(leftKey) ?? 0) - (pathPosition.get(rightKey) ?? 0);
   });
 
   const id = `deliverables:${normalizedRunId}:summary`;
@@ -1466,6 +1498,11 @@ function upsertArtifact(
     });
   const next: ArtifactRecord = {
     id,
+    groupId: event.artifactGroupId || existing?.groupId,
+    groupIndex:
+      Number.isInteger(event.artifactGroupIndex) && Number(event.artifactGroupIndex) > 0
+        ? Number(event.artifactGroupIndex)
+        : existing?.groupIndex,
     title: event.artifactTitle || existing?.title || "Artifact",
     description: event.artifactDescription || existing?.description,
     kind: event.artifactKind || existing?.kind || "file",

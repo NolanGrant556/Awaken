@@ -49,7 +49,7 @@ describe("media item card behavior", () => {
     expect(onPreview).toHaveBeenCalledTimes(1);
   });
 
-  it("uses video metadata as the compact card ratio", () => {
+  it("uses video metadata as the compact card ratio and opens its bounded action menu", () => {
     const onMetadata = vi.fn();
     const onViewInInspector = vi.fn();
     act(() => {
@@ -82,12 +82,22 @@ describe("media item card behavior", () => {
       durationSeconds: 5.085,
     });
 
+    expect(host.querySelector('[role="menu"]')).toBeNull();
+    const menuTrigger = host.querySelector<HTMLButtonElement>(
+      '[aria-label="更多 竖版视频 操作"]',
+    );
+    act(() => menuTrigger?.click());
+
+    const menu = host.querySelector<HTMLElement>('[role="menu"]');
+    expect(menu).not.toBeNull();
+    expect(menu?.closest(".aw-media-item-card-menu")).not.toBeNull();
     const pinButton = [...host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
       (button) => button.textContent === "在右侧栏查看",
     );
     expect(pinButton).toBeDefined();
     act(() => pinButton?.click());
     expect(onViewInInspector).toHaveBeenCalledTimes(1);
+    expect(host.querySelector('[role="menu"]')).toBeNull();
   });
 
   it("treats an already-complete image as loaded without another load event", () => {

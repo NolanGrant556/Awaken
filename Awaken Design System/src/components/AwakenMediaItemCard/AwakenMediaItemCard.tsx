@@ -8,13 +8,13 @@ import {
   Video,
 } from "lucide-react";
 import {
-  useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
   type SyntheticEvent,
 } from "react";
+import { AwakenPopover } from "../AwakenPopover";
 
 export type AwakenMediaItemKind = "image" | "video";
 
@@ -137,7 +137,6 @@ export function AwakenMediaItemCard({
     metadata,
   );
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDetailsElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const ready = status === "ready";
@@ -186,22 +185,6 @@ export function AwakenMediaItemCard({
     }
     setLoaded(true);
   }, [aspectRatio, kind, metadata, ready, src]);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const closeOnOutsideInteraction = (event: PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutsideInteraction);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsideInteraction);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [menuOpen]);
 
   const handleImageLoad = (event: SyntheticEvent<HTMLImageElement>) => {
     const image = event.currentTarget;
@@ -335,57 +318,70 @@ export function AwakenMediaItemCard({
           />
         ) : null}
         {menuAvailable ? (
-          <details
-            ref={menuRef}
-            className="aw-media-item-card-menu"
-            open={menuOpen}
-            onToggle={(event) => setMenuOpen(event.currentTarget.open)}
-          >
-            <summary aria-label={`更多 ${title} 操作`} aria-expanded={menuOpen}>
-              <MoreHorizontal aria-hidden="true" size={17} strokeWidth={1.8} />
-            </summary>
-            <div className="aw-media-item-card-menu-popover" role="menu">
-              {onViewInInspector ? (
+          <div className="aw-media-item-card-menu">
+            <AwakenPopover
+              trigger={
                 <button
                   type="button"
-                  role="menuitem"
-                  disabled={disabled}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onViewInInspector();
-                  }}
+                  className="aw-media-item-card-menu-trigger"
+                  aria-label={`更多 ${title} 操作`}
+                  aria-expanded={menuOpen}
+                  aria-haspopup="menu"
                 >
-                  在右侧栏查看
+                  <MoreHorizontal aria-hidden="true" size={17} strokeWidth={1.8} />
                 </button>
-              ) : null}
-              {onOpenExternal ? (
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={disabled || openingExternal}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onOpenExternal();
-                  }}
-                >
-                  {localOpenLabel}
-                </button>
-              ) : null}
-              {onReveal ? (
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={disabled}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onReveal();
-                  }}
-                >
-                  {revealLabel}
-                </button>
-              ) : null}
-            </div>
-          </details>
+              }
+              content={
+                <div className="aw-media-item-card-menu-popover">
+                  {onViewInInspector ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={disabled}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onViewInInspector();
+                      }}
+                    >
+                      在右侧栏查看
+                    </button>
+                  ) : null}
+                  {onOpenExternal ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={disabled || openingExternal}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onOpenExternal();
+                      }}
+                    >
+                      {localOpenLabel}
+                    </button>
+                  ) : null}
+                  {onReveal ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={disabled}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onReveal();
+                      }}
+                    >
+                      {revealLabel}
+                    </button>
+                  ) : null}
+                </div>
+              }
+              open={menuOpen}
+              onOpenChange={setMenuOpen}
+              placement="bottom-end"
+              offset={4}
+              role="menu"
+              portalled={false}
+            />
+          </div>
         ) : null}
       </div>
     </article>

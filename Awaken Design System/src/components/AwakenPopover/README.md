@@ -16,6 +16,7 @@
 ## 规则
 
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
-- 通过 props 输入，通过回调输出。
+- 通过 props 输入，通过回调输出；调用方可显式选择 `dialog`、`menu`、`listbox`、`tree` 或 `grid` 浮层语义。
+- 默认通过 portal 避开普通容器裁切；`portalled={false}` 时保留在触发器局部层级，并使用 Floating UI 的 `flip` / `shift` 感知最近 clipping ancestor，适合必须避开局部滚动边界的卡片菜单。
 - 公共 API 变化时同步更新可观测状态。
 - Gallery 在“「账户」组件库”和“「左侧栏」组件库”的真实组合中观测本组件；原 `awaken-popover` URL 跳转到“「账户」组件库”。

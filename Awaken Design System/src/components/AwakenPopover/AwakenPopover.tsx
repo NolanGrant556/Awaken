@@ -24,6 +24,9 @@ export type AwakenPopoverProps = {
   placement?: Placement;
   offset?: number;
   matchTriggerWidth?: boolean;
+  role?: "dialog" | "menu" | "listbox" | "tree" | "grid";
+  /** Keep the floating surface beside its trigger so clipping ancestors can bound placement. */
+  portalled?: boolean;
 };
 
 export function AwakenPopover({
@@ -34,6 +37,8 @@ export function AwakenPopover({
   placement = "bottom-start",
   offset: offsetValue = 6,
   matchTriggerWidth = false,
+  role = "dialog",
+  portalled = true,
 }: AwakenPopoverProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
 
@@ -64,12 +69,12 @@ export function AwakenPopover({
 
   const click = useClick(context);
   const dismiss = useDismiss(context, { escapeKey: true, outsidePress: true });
-  const role = useRole(context);
+  const floatingRole = useRole(context, { role });
 
   const { getReferenceProps, getFloatingProps } = useInteractions([
     click,
     dismiss,
-    role,
+    floatingRole,
   ]);
 
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -81,6 +86,19 @@ export function AwakenPopover({
     }
   }, [matchTriggerWidth, refs.floating, isOpen]);
 
+  const floatingSurface = isOpen ? (
+    <FloatingFocusManager context={context} modal={false}>
+      <div
+        ref={refs.setFloating}
+        className="aw-popover__floating"
+        style={floatingStyles}
+        {...getFloatingProps()}
+      >
+        {content}
+      </div>
+    </FloatingFocusManager>
+  ) : null;
+
   return (
     <>
       <div ref={triggerRef} style={{ display: "inline-flex" }}>
@@ -88,20 +106,11 @@ export function AwakenPopover({
           {trigger}
         </div>
       </div>
-      {isOpen && (
-        <FloatingPortal>
-          <FloatingFocusManager context={context} modal={false}>
-            <div
-              ref={refs.setFloating}
-              className="aw-popover__floating"
-              style={floatingStyles}
-              {...getFloatingProps()}
-            >
-              {content}
-            </div>
-          </FloatingFocusManager>
-        </FloatingPortal>
-      )}
+      {floatingSurface
+        ? portalled
+          ? <FloatingPortal>{floatingSurface}</FloatingPortal>
+          : floatingSurface
+        : null}
     </>
   );
 }

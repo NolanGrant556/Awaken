@@ -385,6 +385,8 @@ type Event struct {
 	ArtifactRole            string                `json:"artifactRole,omitempty"`
 	ArtifactProducer        string                `json:"artifactProducer,omitempty"`
 	ArtifactID              string                `json:"artifactId,omitempty"`
+	ArtifactGroupID         string                `json:"artifactGroupId,omitempty"`
+	ArtifactGroupIndex      int                   `json:"artifactGroupIndex,omitempty"`
 	ArtifactTitle           string                `json:"artifactTitle,omitempty"`
 	ArtifactDescription     string                `json:"artifactDescription,omitempty"`
 	ArtifactKind            string                `json:"artifactKind,omitempty"`

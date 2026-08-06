@@ -15,6 +15,8 @@ Awaken 当前不提供内建 typed Office/PDF 生成或渲染 runtime。`artifac
 
 `artifact_publish` 明确不支持图片和视频。`image_generate` / `video_generate` 成功时已由工具 Outcome 直接产生 `role=deliverable + status=ready + kind=image|video` 的 Artifact，并进入 Workbench 专用媒体卡与预览；不得再调用 `artifact_publish` 二次发布。媒体工具未注册、调用失败，或图片/视频仅由 Bash、Skill、外部程序写入磁盘时，当前没有通用手动媒体发布入口，Agent 必须如实报告，不能把文件存在写成“媒体交付成功”。
 
+图片组的 Artifact 使用 `group_id + group_index` 保持组内位置。部分失败后只允许以原结果的 `retry_group_id + retry_indices` 补做未 ready 的位置，不能替换已 ready 项，也不能把补图作为新的组追加。用户按界面序号引用既有媒体时，模型必须使用 Core 注入清单中的 `artifact_id`；`video_generate.source_artifact_id` 由 ToolRuntime 对当前 thread 的 ready 图片 Artifact 做精确解析。任意自造 ID、非 deliverable、非 ready、类型不符或已不存在的文件都 fail closed；`source_image_path` 只保留给本次 run 内新产物等尚无历史卡片 identity 的显式路径链路。
+
 ## 2. MCP Artifact bridge
 
 MCP per-tool `io.awaken.tool/provider/v1.artifact_output` 可声明有界 base64 bytes、lowercase SHA-256、workspace-relative output path、content type 和 title。声明无效只停用 bridge，不阻断普通 MCP 调用。有效结果必须通过：
@@ -51,6 +53,7 @@ Skill 是生成工作流与依赖说明，不是 Artifact 权限 owner。模型�
 
 - `src/tools/artifact_publish`：显式 deliverable 发布。
 - `src/tools/media_generate`：专用图片/视频生成与 ready 媒体 Artifact。
+- `src/runtime/media_artifact_references.go`、`src/tool/permission.go`：界面媒体序号到稳定 Artifact identity 的宿主投影与精确路径复验。
 - `src/tool/artifact_contract.go`：Artifact v2 与历史 producer 兼容。
 - `src/mcpclient/artifact_bridge.go`、`provider_manifest.go`：MCP host bridge。
 - `src/tool/execution_broker*.go`：dependency/git/MCP 的 staging、Trash 与原子 commit。

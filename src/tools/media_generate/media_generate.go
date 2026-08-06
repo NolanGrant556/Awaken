@@ -64,21 +64,24 @@ type imageInput struct {
 	Prompt       string `json:"prompt"`
 	Mode         string `json:"mode,omitempty"`
 	MaxImages    int    `json:"max_images,omitempty"`
+	RetryGroupID string `json:"retry_group_id,omitempty"`
+	RetryIndices []int  `json:"retry_indices,omitempty"`
 	Size         string `json:"size,omitempty"`
 	OutputFormat string `json:"output_format,omitempty"`
 	Watermark    *bool  `json:"watermark,omitempty"`
 }
 
 type videoInput struct {
-	Prompt          string `json:"prompt"`
-	SourceImagePath string `json:"source_image_path,omitempty"`
-	SourceRole      string `json:"source_role,omitempty"`
-	TaskID          string `json:"task_id,omitempty"`
-	Ratio           string `json:"ratio,omitempty"`
-	Resolution      string `json:"resolution,omitempty"`
-	Duration        int    `json:"duration,omitempty"`
-	GenerateAudio   *bool  `json:"generate_audio,omitempty"`
-	Watermark       *bool  `json:"watermark,omitempty"`
+	Prompt           string `json:"prompt"`
+	SourceArtifactID string `json:"source_artifact_id,omitempty"`
+	SourceImagePath  string `json:"source_image_path,omitempty"`
+	SourceRole       string `json:"source_role,omitempty"`
+	TaskID           string `json:"task_id,omitempty"`
+	Ratio            string `json:"ratio,omitempty"`
+	Resolution       string `json:"resolution,omitempty"`
+	Duration         int    `json:"duration,omitempty"`
+	GenerateAudio    *bool  `json:"generate_audio,omitempty"`
+	Watermark        *bool  `json:"watermark,omitempty"`
 }
 
 type generatedItem struct {
@@ -91,6 +94,7 @@ type generatedResult struct {
 	Status         string          `json:"generation_status"`
 	Kind           string          `json:"kind"`
 	ModelID        string          `json:"model_id"`
+	GroupID        string          `json:"group_id,omitempty"`
 	TaskID         string          `json:"task_id,omitempty"`
 	Paths          []string        `json:"paths"`
 	Items          []generatedItem `json:"items,omitempty"`
@@ -142,9 +146,9 @@ func (t *mediaTool) Name() string {
 
 func (t *mediaTool) Description() string {
 	if t.configuration.ModelKind == "image" {
-		return "根据用户目标生成图片并直接产生 ready 媒体 Artifact 与图片专用交付卡；生成模型已由设置固定，成功后不得再调用 artifact_publish"
+		return "根据用户目标生成图片并直接产生 ready 媒体 Artifact 与图片专用交付卡；生成模型已由设置固定，成功后不得再调用 artifact_publish；组图部分失败后补图必须携带原结果的 retry_group_id 与失败的 retry_indices，保留用户界面中的原组图位置"
 	}
-	return "根据用户目标创建视频任务并直接产生 ready 媒体 Artifact 与视频专用交付卡；成功后不得再调用 artifact_publish；用户要求让已生成图片动起来时，必须把该 ready 图片 Artifact 的路径传入 source_image_path；任务已有 task_id 时必须续查原任务，不能重复创建计费任务"
+	return "根据用户目标创建视频任务并直接产生 ready 媒体 Artifact 与视频专用交付卡；成功后不得再调用 artifact_publish；用户引用历史媒体卡时必须按 Host 提供的界面显示顺序选择并传 source_artifact_id，不得按旧提示词编号猜测；仅当前调用中尚未进入 Host 清单的新图片使用 source_image_path；任务已有 task_id 时必须续查原任务，不能重复创建计费任务"
 }
 
 func (t *mediaTool) Parameters() []tool.ToolParameter {
@@ -153,12 +157,15 @@ func (t *mediaTool) Parameters() []tool.ToolParameter {
 		return append(parameters,
 			tool.ToolParameter{Name: "mode", Description: "单图 single 或组图 group", Type: "string"},
 			tool.ToolParameter{Name: "max_images", Description: "组图最多返回的图片数，1 到 15；仅 mode=group 时设置", Type: "integer"},
+			tool.ToolParameter{Name: "retry_group_id", Description: "补做部分失败组图时使用原结果返回的 group_id", Type: "string"},
+			tool.ToolParameter{Name: "retry_indices", Description: "补做部分失败组图时要回填的原始位置序号", Type: "array"},
 			tool.ToolParameter{Name: "size", Description: "官方支持的图片尺寸或分辨率，例如 2K；不确定时应省略并使用模型默认值", Type: "string"},
 			tool.ToolParameter{Name: "output_format", Description: "期望的图片输出格式", Type: "string"},
 			tool.ToolParameter{Name: "watermark", Description: "是否包含水印", Type: "boolean"},
 		)
 	}
 	return append(parameters,
+		tool.ToolParameter{Name: "source_artifact_id", Description: "优先使用；Host 媒体引用清单中的 ready 图片 Artifact ID", Type: "string"},
 		tool.ToolParameter{Name: "source_image_path", Description: "可选；要作为视频首帧或参考图的 ready 图片 Artifact 路径", Type: "string"},
 		tool.ToolParameter{Name: "source_role", Description: "图片作用：first_frame 或 reference_image", Type: "string"},
 		tool.ToolParameter{Name: "task_id", Description: "可选；续查已经提交的视频任务，设置后不会创建新任务", Type: "string"},
@@ -177,11 +184,14 @@ func (t *mediaTool) InputSchema() tool.ToolParametersSchema {
 	if t.configuration.ModelKind == "image" {
 		properties["mode"] = tool.ToolParam{Type: "string", Description: "生成单图或一组内容关联的图片", Enum: []any{"single", "group"}}
 		properties["max_images"] = tool.ToolParam{Type: "integer", Description: "组图返回数量上限，不保证精确返回该数量；仅 mode=group 时设置", Minimum: tool.FloatPtr(1), Maximum: tool.FloatPtr(15)}
+		properties["retry_group_id"] = tool.ToolParam{Type: "string", Description: "部分失败后补图时，必须使用原结果返回的 group_id"}
+		properties["retry_indices"] = tool.ToolParam{Type: "array", Description: "要回填的原组图位置；数量必须与本次请求数量一致", Items: &tool.ToolParam{Type: "integer", Minimum: tool.FloatPtr(1), Maximum: tool.FloatPtr(15)}}
 		properties["size"] = tool.ToolParam{Type: "string", Description: "官方支持的图片尺寸或分辨率，例如 2K；不确定时应省略并使用模型默认值"}
 		properties["output_format"] = tool.ToolParam{Type: "string", Description: "图片输出格式", Enum: []any{"png", "jpeg"}}
 		properties["watermark"] = tool.ToolParam{Type: "boolean", Description: "是否包含水印"}
 	} else {
-		properties["source_image_path"] = tool.ToolParam{Type: "string", Description: "ready 图片 Artifact 的工作区路径；当用户要求让上一张图片动起来时必须设置"}
+		properties["source_artifact_id"] = tool.ToolParam{Type: "string", Description: "Host 媒体引用清单中的 ready 图片 Artifact ID；引用历史卡片时必须使用"}
+		properties["source_image_path"] = tool.ToolParam{Type: "string", Description: "仅用于当前调用链中尚未进入 Host 引用清单的新 ready 图片路径；引用历史媒体卡时不得使用"}
 		properties["source_role"] = tool.ToolParam{Type: "string", Description: "图片作为视频首帧或参考图", Enum: []any{"first_frame", "reference_image"}}
 		properties["task_id"] = tool.ToolParam{Type: "string", Description: "续查已经提交的视频任务；设置后不再创建新任务"}
 		properties["ratio"] = tool.ToolParam{Type: "string", Description: "视频宽高比", Enum: []any{"adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}}
@@ -223,6 +233,7 @@ func (t *mediaTool) Definition() tool.ToolDefinition {
 			"generation_status": {Type: "string", Description: "succeeded、partial、failed 或 unknown"},
 			"kind":              {Type: "string", Description: "生成的媒体类型"},
 			"model_id":          {Type: "string", Description: "Host 配置固定的实际生成模型"},
+			"group_id":          {Type: "string", Description: "图片组的稳定 ID；部分失败补图必须复用"},
 			"task_id":           {Type: "string", Description: "异步视频任务 ID（图片为空）"},
 			"paths":             {Type: "array", Description: "已验证并保存的本地媒体路径", Items: &tool.ToolParam{Type: "string", Description: "本地媒体路径"}},
 			"items": {Type: "array", Description: "每个独立媒体结果的索引、状态与路径", Items: &tool.ToolParam{
@@ -250,7 +261,7 @@ func (t *mediaTool) Definition() tool.ToolDefinition {
 			{Code: "media_generate_upstream_failed", Cause: "供应商请求或任务失败", Retryable: true, Recovery: []string{"检查参数或稍后重试"}},
 			{Code: "media_generate_create_unknown", Cause: "视频任务提交没有返回任务 ID，供应商侧创建状态未知", Retryable: false, Recovery: []string{"检查火山控制台中的视频任务", "确认没有任务后再由用户明确重新创建"}},
 			{Code: "media_generate_download_failed", Cause: "结果文件无法验证或下载", Retryable: true, Recovery: []string{"重试生成或检查网络"}},
-			{Code: "media_generate_partial", Cause: "组图中仅部分结果成功保存", Retryable: false, Recovery: []string{"先使用已生成的图片，再明确补做缺失图片"}},
+			{Code: "media_generate_partial", Cause: "组图中仅部分结果成功保存", Retryable: false, Recovery: []string{"保留结果中的 group_id 与 error items.index", "补做时设置 retry_group_id 与 retry_indices，只回填缺失位置"}},
 			{Code: "media_generate_task_pending", Cause: "视频任务已提交，但本次运行未能确认终态", Retryable: false, Recovery: []string{"使用原 task_id 续查，禁止重新创建任务"}},
 			{Code: "media_generate_task_persistence_failed", Cause: "视频任务已创建，但本地任务 ID 未能可靠保存", Retryable: false, Recovery: []string{"保留当前 task_id 并续查，禁止重新创建任务"}},
 		},
@@ -274,7 +285,7 @@ func (t *mediaTool) ProviderManifest() tool.ProviderManifest {
 
 func (t *mediaTool) IsReadOnly() bool { return false }
 
-func (t *mediaTool) CheckPermission(_ context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
+func (t *mediaTool) CheckPermission(ctx context.Context, input string, permissionContext tool.PermissionContext) tool.PermissionDecision {
 	if err := t.validateInput(input); err != nil {
 		return tool.DenyPermission(err.Error())
 	}
@@ -284,13 +295,37 @@ func (t *mediaTool) CheckPermission(_ context.Context, input string, permissionC
 	if t.configuration.ModelKind == "video" {
 		var parameters videoInput
 		_ = json.Unmarshal([]byte(input), &parameters)
-		if strings.TrimSpace(parameters.SourceImagePath) != "" {
+		if strings.TrimSpace(parameters.SourceArtifactID) != "" {
+			if _, resolved, err := permissionContext.ResolveReadyMediaArtifact(parameters.SourceArtifactID, "image"); err != nil {
+				return tool.DenyPermission("source_artifact_id 必须指向当前线程可用的 ready 图片 Artifact")
+			} else if _, err := os.Stat(resolved); err != nil {
+				return tool.DenyPermission("source_artifact_id 对应的图片当前不可读取")
+			}
+		} else if strings.TrimSpace(parameters.SourceImagePath) != "" {
 			resolved, err := permissionContext.ResolveReadablePathChecked(parameters.SourceImagePath)
 			if err != nil {
 				return tool.DenyPermission(err.Error())
 			}
 			if _, err := os.Stat(resolved); err != nil {
 				return tool.DenyPermission("source_image_path 必须指向可读取的 ready 图片 Artifact")
+			}
+		}
+	} else {
+		var parameters imageInput
+		_ = json.Unmarshal([]byte(input), &parameters)
+		if strings.TrimSpace(parameters.RetryGroupID) != "" {
+			state, ok := tool.ToolSessionStateFromContext(ctx)
+			if !ok {
+				return tool.DenyPermission("retry_group_id 只允许回填当前线程已记录的部分失败组图")
+			}
+			group, found := state.MediaGroup(strings.TrimSpace(parameters.RetryGroupID))
+			if !found || group.Kind != "image" {
+				return tool.DenyPermission("retry_group_id 不属于当前线程的图片组")
+			}
+			for _, index := range parameters.RetryIndices {
+				if index > group.RequestedCount || group.ItemStatus[index] == "ready" {
+					return tool.DenyPermission("retry_indices 只能回填原图片组中尚未 ready 的位置")
+				}
 			}
 		}
 	}
@@ -381,6 +416,29 @@ func (t *mediaTool) validateInput(input string) error {
 		default:
 			return errors.New("mode 只支持 single 或 group")
 		}
+		retryGroupID := strings.TrimSpace(value.RetryGroupID)
+		if (retryGroupID == "") != (len(value.RetryIndices) == 0) {
+			return errors.New("retry_group_id 与 retry_indices 必须同时设置")
+		}
+		if retryGroupID != "" {
+			expectedCount := 1
+			if value.Mode == "group" {
+				expectedCount = value.MaxImages
+			}
+			if len(value.RetryIndices) != expectedCount {
+				return errors.New("retry_indices 数量必须与本次请求数量一致")
+			}
+			seen := map[int]struct{}{}
+			for _, index := range value.RetryIndices {
+				if index < 1 || index > 15 {
+					return errors.New("retry_indices 必须在 1 到 15 之间")
+				}
+				if _, duplicate := seen[index]; duplicate {
+					return errors.New("retry_indices 不能重复")
+				}
+				seen[index] = struct{}{}
+			}
+		}
 		return nil
 	}
 	var value videoInput
@@ -399,11 +457,16 @@ func (t *mediaTool) validateInput(input string) error {
 	if value.SourceRole != "" && value.SourceRole != "first_frame" && value.SourceRole != "reference_image" {
 		return errors.New("source_role 只支持 first_frame 或 reference_image")
 	}
-	if value.SourceRole != "" && strings.TrimSpace(value.SourceImagePath) == "" {
-		return errors.New("source_role 只能与 source_image_path 一起设置")
+	sourceArtifactID := strings.TrimSpace(value.SourceArtifactID)
+	sourceImagePath := strings.TrimSpace(value.SourceImagePath)
+	if sourceArtifactID != "" && sourceImagePath != "" {
+		return errors.New("source_artifact_id 与 source_image_path 只能设置一个")
 	}
-	if strings.TrimSpace(value.TaskID) != "" && strings.TrimSpace(value.SourceImagePath) != "" {
-		return errors.New("续查 task_id 时不能重新设置 source_image_path")
+	if value.SourceRole != "" && sourceArtifactID == "" && sourceImagePath == "" {
+		return errors.New("source_role 只能与 source_artifact_id 或 source_image_path 一起设置")
+	}
+	if strings.TrimSpace(value.TaskID) != "" && (sourceArtifactID != "" || sourceImagePath != "") {
+		return errors.New("续查 task_id 时不能重新设置来源图片")
 	}
 	return nil
 }
@@ -411,6 +474,14 @@ func (t *mediaTool) validateInput(input string) error {
 func (t *mediaTool) generateImage(ctx context.Context, input string, permissionContext tool.PermissionContext, observer tool.ToolObserver) (generatedResult, []tool.ArtifactDescriptor, error) {
 	var parameters imageInput
 	_ = json.Unmarshal([]byte(input), &parameters)
+	groupID := strings.TrimSpace(parameters.RetryGroupID)
+	if groupID == "" {
+		if identity, ok := tool.ToolExecutionIdentityFromContext(ctx); ok {
+			groupID = identity.ToolCallID
+		} else {
+			groupID = "image-group-" + uuid.NewString()
+		}
+	}
 	body := map[string]any{
 		"model": t.configuration.ModelID, "prompt": strings.TrimSpace(parameters.Prompt), "response_format": "url",
 	}
@@ -462,10 +533,14 @@ func (t *mediaTool) generateImage(ctx context.Context, input string, permissionC
 	var firstFailure error
 	emitMediaStatus(observer, "downloading", fmt.Sprintf("正在载入 %d 张图片", len(response.Data)))
 	for index, item := range response.Data {
+		groupIndex := index + 1
+		if len(parameters.RetryIndices) > index {
+			groupIndex = parameters.RetryIndices[index]
+		}
 		data, contentType, err := t.resolveImageBytes(ctx, item.URL, item.B64JSON)
 		if err != nil {
 			failedCount++
-			items = append(items, generatedItem{Index: index + 1, Status: "error"})
+			items = append(items, generatedItem{Index: groupIndex, Status: "error"})
 			if firstFailure == nil {
 				firstFailure = err
 			}
@@ -474,7 +549,7 @@ func (t *mediaTool) generateImage(ctx context.Context, input string, permissionC
 		contentType, err = validateMediaBytes("image", data, contentType)
 		if err != nil {
 			failedCount++
-			items = append(items, generatedItem{Index: index + 1, Status: "error"})
+			items = append(items, generatedItem{Index: groupIndex, Status: "error"})
 			if firstFailure == nil {
 				firstFailure = err
 			}
@@ -484,24 +559,25 @@ func (t *mediaTool) generateImage(ctx context.Context, input string, permissionC
 		_, displayPath, err := writeMediaFile(permissionContext, "image", extension, data)
 		if err != nil {
 			failedCount++
-			items = append(items, generatedItem{Index: index + 1, Status: "error"})
+			items = append(items, generatedItem{Index: groupIndex, Status: "error"})
 			if firstFailure == nil {
 				firstFailure = err
 			}
 			continue
 		}
 		paths = append(paths, displayPath)
-		items = append(items, generatedItem{Index: index + 1, Status: "ready", Path: displayPath})
-		artifacts = append(artifacts, mediaArtifact(t.Name(), "image", displayPath, index+1))
+		items = append(items, generatedItem{Index: groupIndex, Status: "ready", Path: displayPath})
+		artifacts = append(artifacts, mediaArtifact(t.Name(), "image", displayPath, groupID, groupIndex))
 	}
 	result := generatedResult{
-		Status: "succeeded", Kind: "image", ModelID: t.configuration.ModelID,
+		Status: "succeeded", Kind: "image", ModelID: t.configuration.ModelID, GroupID: groupID,
 		Paths: paths, Items: items, RequestedCount: resultLimit, FailedCount: failedCount, Provider: providerID,
 	}
+	recordMediaGroup(ctx, groupID, "image", resultLimit, items)
 	if failedCount > 0 {
 		result.Status = "partial"
 		message := fmt.Sprintf("已保存 %d 张图片，%d 张载入失败。", len(paths), failedCount)
-		emitMediaStatusDetails(observer, "partial", message, map[string]any{"items": items})
+		emitMediaStatusDetails(observer, "partial", message, map[string]any{"group_id": groupID, "items": items})
 		return result, artifacts, &providerError{
 			code: "media_generate_partial", message: message, retryable: false,
 			transportStatus: tool.TransportCompleted, cause: firstFailure,
@@ -514,12 +590,26 @@ func (t *mediaTool) generateImage(ctx context.Context, input string, permissionC
 func (t *mediaTool) generateVideo(ctx context.Context, input string, permissionContext tool.PermissionContext, observer tool.ToolObserver) (generatedResult, []tool.ArtifactDescriptor, error) {
 	var parameters videoInput
 	_ = json.Unmarshal([]byte(input), &parameters)
+	sourceImagePath := strings.TrimSpace(parameters.SourceImagePath)
+	if artifactID := strings.TrimSpace(parameters.SourceArtifactID); artifactID != "" {
+		_, resolved, err := permissionContext.ResolveReadyMediaArtifact(artifactID, "image")
+		if err != nil {
+			return generatedResult{}, nil, &providerError{code: "media_generate_invalid_input", message: "source_artifact_id 无法解析为当前线程的 ready 图片 Artifact。", retryable: false, transportStatus: tool.TransportNotStarted, cause: err}
+		}
+		sourceImagePath = resolved
+	}
 	taskID := strings.TrimSpace(parameters.TaskID)
 	taskFingerprint := ""
 	if taskID == "" {
 		content := []map[string]any{{"type": "text", "text": strings.TrimSpace(parameters.Prompt)}}
-		if strings.TrimSpace(parameters.SourceImagePath) != "" {
-			imageURL, err := sourceImageDataURL(permissionContext, parameters.SourceImagePath)
+		if sourceImagePath != "" {
+			var imageURL string
+			var err error
+			if strings.TrimSpace(parameters.SourceArtifactID) != "" {
+				imageURL, err = sourceImageDataURLResolved(sourceImagePath)
+			} else {
+				imageURL, err = sourceImageDataURL(permissionContext, sourceImagePath)
+			}
 			if err != nil {
 				return generatedResult{}, nil, &providerError{code: "media_generate_invalid_input", message: err.Error(), retryable: false, transportStatus: tool.TransportNotStarted, cause: err}
 			}
@@ -620,7 +710,11 @@ func (t *mediaTool) generateVideo(ctx context.Context, input string, permissionC
 			if err != nil {
 				return generatedResult{}, nil, err
 			}
-			artifact := mediaArtifact(t.Name(), "video", displayPath, 1)
+			groupID := ""
+			if identity, ok := tool.ToolExecutionIdentityFromContext(ctx); ok {
+				groupID = identity.ToolCallID
+			}
+			artifact := mediaArtifact(t.Name(), "video", displayPath, groupID, 1)
 			_ = t.persistVideoTask(taskFingerprint, taskID, "succeeded")
 			emitMediaStatusDetails(observer, "ready", "视频已生成", map[string]any{"task_id": taskID, "provider_status": providerStatus})
 			return generatedResult{Status: "succeeded", Kind: "video", ModelID: t.configuration.ModelID, TaskID: taskID, Paths: []string{displayPath}, Items: []generatedItem{{Index: 1, Status: "ready", Path: displayPath}}, RequestedCount: 1, Provider: providerID}, []tool.ArtifactDescriptor{artifact}, nil
@@ -863,20 +957,36 @@ func writeMediaFile(permissionContext tool.PermissionContext, kind, extension st
 	return resolved, displayPath, nil
 }
 
-func mediaArtifact(producer, kind, displayPath string, ordinal int) tool.ArtifactDescriptor {
+func mediaArtifact(producer, kind, displayPath, groupID string, ordinal int) tool.ArtifactDescriptor {
 	return tool.ArtifactDescriptor{
 		ContractVersion: tool.ArtifactContractVersion, Role: tool.ArtifactRoleDeliverable,
 		Producer: producer, Action: tool.ArtifactActionCreated,
-		ID: producer + ":" + uuid.NewString(), Title: fmt.Sprintf("Generated %s %d", kind, ordinal),
+		ID: producer + ":" + uuid.NewString(), GroupID: strings.TrimSpace(groupID), GroupIndex: ordinal,
+		Title:       fmt.Sprintf("Generated %s %d", kind, ordinal),
 		Description: "Generated media saved and verified locally", Kind: kind,
 		Path: displayPath, Status: "ready",
 	}
 }
 
+func recordMediaGroup(ctx context.Context, groupID, kind string, requestedCount int, items []generatedItem) {
+	state, ok := tool.ToolSessionStateFromContext(ctx)
+	if !ok {
+		return
+	}
+	statuses := make(map[int]string, len(items))
+	for _, item := range items {
+		statuses[item.Index] = item.Status
+	}
+	state.RecordMediaGroup(tool.MediaGroupState{
+		ID: strings.TrimSpace(groupID), Kind: strings.TrimSpace(kind),
+		RequestedCount: requestedCount, ItemStatus: statuses,
+	})
+}
+
 func generatedResultDetails(result generatedResult) map[string]any {
 	return map[string]any{
 		"generation_status": result.Status, "kind": result.Kind, "provider": result.Provider,
-		"model_id": result.ModelID, "task_id": result.TaskID, "paths": result.Paths,
+		"model_id": result.ModelID, "group_id": result.GroupID, "task_id": result.TaskID, "paths": result.Paths,
 		"items": result.Items, "requested_count": result.RequestedCount, "failed_count": result.FailedCount,
 	}
 }
@@ -939,6 +1049,10 @@ func sourceImageDataURL(permissionContext tool.PermissionContext, displayPath st
 	if err != nil {
 		return "", fmt.Errorf("无法读取 source_image_path：%w", err)
 	}
+	return sourceImageDataURLResolved(resolved)
+}
+
+func sourceImageDataURLResolved(resolved string) (string, error) {
 	file, err := os.Open(resolved)
 	if err != nil {
 		return "", errors.New("source_image_path 必须指向可读取的 ready 图片 Artifact")

@@ -27,12 +27,23 @@ type ReadProjectionState struct {
 	ProjectionKey string
 }
 
+// MediaGroupState tracks one image generation group's durable presentation
+// identity during a thread process. It lets a follow-up tool call fill failed
+// positions without turning the retry into a newly numbered group.
+type MediaGroupState struct {
+	ID             string
+	Kind           string
+	RequestedCount int
+	ItemStatus     map[int]string
+}
+
 // ToolSessionState owns mutable thread-local tool state. Agent replacement,
 // process restart and thread deletion therefore invalidate it safely.
 type ToolSessionState struct {
 	mu              sync.RWMutex
 	files           map[string]FileReadState
 	readProjections map[string]ReadProjectionState
+	mediaGroups     map[string]MediaGroupState
 	cwd             string
 	pathMu          sync.Mutex
 	pathLock        map[string]*sync.Mutex
@@ -42,6 +53,7 @@ func NewToolSessionState(initialCWD string) *ToolSessionState {
 	state := &ToolSessionState{
 		files:           make(map[string]FileReadState),
 		readProjections: make(map[string]ReadProjectionState),
+		mediaGroups:     make(map[string]MediaGroupState),
 		pathLock:        make(map[string]*sync.Mutex),
 	}
 	if initialCWD != "" {
@@ -50,6 +62,53 @@ func NewToolSessionState(initialCWD string) *ToolSessionState {
 		}
 	}
 	return state
+}
+
+func cloneMediaGroupState(group MediaGroupState) MediaGroupState {
+	cloned := group
+	cloned.ItemStatus = make(map[int]string, len(group.ItemStatus))
+	for index, status := range group.ItemStatus {
+		cloned.ItemStatus[index] = status
+	}
+	return cloned
+}
+
+func (s *ToolSessionState) RecordMediaGroup(group MediaGroupState) {
+	if s == nil || group.ID == "" || group.Kind == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.mediaGroups == nil {
+		s.mediaGroups = make(map[string]MediaGroupState)
+	}
+	if current, ok := s.mediaGroups[group.ID]; ok {
+		if group.RequestedCount < current.RequestedCount {
+			group.RequestedCount = current.RequestedCount
+		}
+		merged := cloneMediaGroupState(current)
+		for index, status := range group.ItemStatus {
+			merged.ItemStatus[index] = status
+		}
+		merged.RequestedCount = group.RequestedCount
+		merged.Kind = group.Kind
+		s.mediaGroups[group.ID] = merged
+		return
+	}
+	s.mediaGroups[group.ID] = cloneMediaGroupState(group)
+}
+
+func (s *ToolSessionState) MediaGroup(id string) (MediaGroupState, bool) {
+	if s == nil || id == "" {
+		return MediaGroupState{}, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	group, ok := s.mediaGroups[id]
+	if !ok {
+		return MediaGroupState{}, false
+	}
+	return cloneMediaGroupState(group), true
 }
 
 func (s *ToolSessionState) RecordReadProjection(projection ReadProjectionState) {

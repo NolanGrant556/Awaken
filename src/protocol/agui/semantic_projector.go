@@ -248,6 +248,8 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		artifact.ArtifactContractVersion = tool.ArtifactContractVersionOrLegacy(intFromAny(payload["contract_version"]))
 		artifact.ArtifactProducer = firstNonEmpty(stringFromAny(payload["producer"]), artifact.ToolCallName)
 		artifact.ArtifactID = stringFromAny(payload["artifact_id"])
+		artifact.ArtifactGroupID = stringFromAny(payload["group_id"])
+		artifact.ArtifactGroupIndex = intFromAny(payload["group_index"])
 		artifact.ArtifactTitle = stringFromAny(payload["title"])
 		artifact.ArtifactDescription = stringFromAny(payload["description"])
 		artifact.ArtifactKind = stringFromAny(payload["kind"])
@@ -790,6 +792,8 @@ func awakenEventFromAGUI(frame Event) agentcore.AwakenEvent {
 		ArtifactRole:            tool.ArtifactRole(frame.ArtifactRole),
 		ArtifactProducer:        frame.ArtifactProducer,
 		ArtifactID:              frame.ArtifactID,
+		ArtifactGroupID:         frame.ArtifactGroupID,
+		ArtifactGroupIndex:      frame.ArtifactGroupIndex,
 		ArtifactTitle:           frame.ArtifactTitle,
 		ArtifactDescription:     frame.ArtifactDescription,
 		ArtifactKind:            frame.ArtifactKind,

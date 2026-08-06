@@ -75,13 +75,18 @@ func TestDefinitionPinsProviderWithoutExposingModelArgument(t *testing.T) {
 		definition.InputSchema.Properties["max_images"].Maximum == nil {
 		t.Fatalf("image group schema missing: %+v", definition.InputSchema.Properties)
 	}
-	for _, field := range []string{"kind", "model_id", "task_id", "paths", "provider"} {
+	for _, field := range []string{"kind", "model_id", "group_id", "task_id", "paths", "provider"} {
 		if _, exists := definition.OutputSchema.Properties[field]; !exists {
 			t.Fatalf("media output schema missing %q: %+v", field, definition.OutputSchema.Properties)
 		}
 	}
+	for _, field := range []string{"retry_group_id", "retry_indices"} {
+		if _, exists := definition.InputSchema.Properties[field]; !exists {
+			t.Fatalf("image input schema missing %q: %+v", field, definition.InputSchema.Properties)
+		}
+	}
 	videoDefinition := newMediaTool(testConfiguration("video")).Definition()
-	for _, field := range []string{"source_image_path", "source_role", "task_id"} {
+	for _, field := range []string{"source_artifact_id", "source_image_path", "source_role", "task_id"} {
 		if _, exists := videoDefinition.InputSchema.Properties[field]; !exists {
 			t.Fatalf("video input schema missing %q: %+v", field, videoDefinition.InputSchema.Properties)
 		}
@@ -215,6 +220,61 @@ func TestImageGenerateGroupMapsProviderFieldsAndPublishesEveryResult(t *testing.
 	}
 	if !strings.Contains(observer.outputs[len(observer.outputs)-1].Delta, `"message":"已生成 3 张图片"`) {
 		t.Fatalf("group ready count missing from progress: %+v", observer.outputs)
+	}
+}
+
+func TestImageRetryKeepsOriginalGroupAndPosition(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/images/generations":
+			response.Header().Set("Content-Type", "application/json")
+			_, _ = response.Write([]byte(`{"data":[{"url":"` + server.URL + `/result.png"}]}`))
+		case "/result.png":
+			response.Header().Set("Content-Type", "image/png")
+			_, _ = response.Write([]byte("\x89PNG\r\n\x1a\nretry"))
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	configuration := testConfiguration("image")
+	configuration.BaseURL = server.URL
+	media := newMediaTool(configuration)
+	media.client = server.Client()
+	workspace := t.TempDir()
+	permission := tool.NewTaskScopePermissionContext(
+		"scope", workspace, []string{workspace}, []string{workspace}, []string{workspace}, nil, nil, "",
+	)
+	state := tool.NewToolSessionState(workspace)
+	state.RecordMediaGroup(tool.MediaGroupState{
+		ID: "group-5", Kind: "image", RequestedCount: 5,
+		ItemStatus: map[int]string{1: "ready", 2: "ready", 3: "error", 4: "ready", 5: "ready"},
+	})
+	ctx := tool.ContextWithPermissionContext(context.Background(), permission)
+	ctx = tool.ContextWithToolSessionState(ctx, state)
+	input := `{"prompt":"retry missing image","retry_group_id":"group-5","retry_indices":[3]}`
+	if decision := media.CheckPermission(ctx, input, permission); decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("expected failed position to be retryable: %+v", decision)
+	}
+	if decision := media.CheckPermission(ctx, `{"prompt":"replace ready image","retry_group_id":"group-5","retry_indices":[2]}`, permission); decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("ready group positions must not be replaced: %+v", decision)
+	}
+
+	outcome, err := media.ExecuteOutcome(ctx, input, nil)
+	if err != nil || outcome.IsError() {
+		t.Fatalf("retry outcome err=%v outcome=%+v", err, outcome)
+	}
+	if len(outcome.Artifacts) != 1 || outcome.Artifacts[0].GroupID != "group-5" || outcome.Artifacts[0].GroupIndex != 3 {
+		t.Fatalf("retry artifact lost its original group position: %+v", outcome.Artifacts)
+	}
+	if !strings.Contains(outcome.Content, `"group_id":"group-5"`) || !strings.Contains(outcome.Content, `"index":3`) {
+		t.Fatalf("retry result lost stable group metadata: %s", outcome.Content)
+	}
+	group, ok := state.MediaGroup("group-5")
+	if !ok || group.RequestedCount != 5 || group.ItemStatus[3] != "ready" {
+		t.Fatalf("retry did not merge into the original group state: %+v", group)
 	}
 }
 
@@ -469,6 +529,70 @@ func TestVideoGenerateUsesReadyImageArtifactAsFirstFrame(t *testing.T) {
 	imageURL, _ := imagePart["image_url"].(map[string]any)
 	if _, hasRole := imagePart["role"]; hasRole || !strings.HasPrefix(fmt.Sprint(imageURL["url"]), "data:image/png;base64,") {
 		t.Fatalf("unexpected image-to-video content: %+v", imagePart)
+	}
+}
+
+func TestVideoGenerateResolvesVisibleImageByStableArtifactID(t *testing.T) {
+	var server *httptest.Server
+	var providerRequest map[string]any
+	server = httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/contents/generations/tasks":
+			if err := json.NewDecoder(request.Body).Decode(&providerRequest); err != nil {
+				t.Fatal(err)
+			}
+			_, _ = response.Write([]byte(`{"id":"cgt-stable-id"}`))
+		case "/contents/generations/tasks/cgt-stable-id":
+			_, _ = response.Write([]byte(`{"status":"succeeded","content":{"video_url":"` + server.URL + `/result.mp4"}}`))
+		case "/result.mp4":
+			response.Header().Set("Content-Type", "video/mp4")
+			_, _ = response.Write([]byte("\x00\x00\x00\x18ftypmp42video"))
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	workspace := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspace, "output"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(workspace, "output", "visible-third.png")
+	if err := os.WriteFile(sourcePath, []byte("\x89PNG\r\n\x1a\nsource"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	permission := tool.NewTaskScopePermissionContext("scope", workspace, []string{workspace}, []string{workspace}, []string{workspace}, nil, nil, "")
+	permission.MediaArtifacts = []tool.ScopedMediaArtifact{{
+		ID: "artifact-visible-3", RunID: "run-images", DisplayIndex: 3,
+		Kind: "image", Path: sourcePath, Role: tool.ArtifactRoleDeliverable, Status: "ready",
+	}}
+	permission = permission.Normalize()
+	configuration := testConfiguration("video")
+	configuration.BaseURL = server.URL
+	media := newMediaTool(configuration)
+	media.client = server.Client()
+	media.pollInterval = time.Millisecond
+	ctx := tool.ContextWithPermissionContext(context.Background(), permission)
+	input := `{"prompt":"animate the third visible image","source_artifact_id":"artifact-visible-3"}`
+	if decision := media.CheckPermission(ctx, input, permission); decision.Behavior != tool.PermissionAllow {
+		t.Fatalf("stable artifact id should resolve: %+v", decision)
+	}
+	if decision := media.CheckPermission(ctx, `{"prompt":"animate","source_artifact_id":"made-up-id"}`, permission); decision.Behavior != tool.PermissionDeny {
+		t.Fatalf("an arbitrary model-provided artifact id must be rejected: %+v", decision)
+	}
+
+	outcome, err := media.ExecuteOutcome(ctx, input, nil)
+	if err != nil || outcome.IsError() {
+		t.Fatalf("stable artifact video generation failed, err=%v outcome=%+v", err, outcome)
+	}
+	content, ok := providerRequest["content"].([]any)
+	if !ok || len(content) != 2 {
+		t.Fatalf("video request did not include resolved source artifact: %+v", providerRequest)
+	}
+	imagePart, _ := content[1].(map[string]any)
+	imageURL, _ := imagePart["image_url"].(map[string]any)
+	if !strings.HasPrefix(fmt.Sprint(imageURL["url"]), "data:image/png;base64,") {
+		t.Fatalf("stable artifact did not resolve to its exact image bytes: %+v", imagePart)
 	}
 }
 

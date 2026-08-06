@@ -169,6 +169,8 @@ func TestArtifactV2SemanticRoundTrip(t *testing.T) {
 		ArtifactRole:            tool.ArtifactRoleDeliverable,
 		ArtifactProducer:        "artifact_publish",
 		ArtifactID:              "artifact_publish:report.pdf",
+		ArtifactGroupID:         "media-group-1",
+		ArtifactGroupIndex:      3,
 		ArtifactTitle:           "Final report",
 		ArtifactDescription:     "Published report.pdf",
 		ArtifactKind:            "pdf",
@@ -176,7 +178,8 @@ func TestArtifactV2SemanticRoundTrip(t *testing.T) {
 		ArtifactStatus:          agentcore.ArtifactStatusReady,
 	}
 	record := agentcore.ArtifactSemanticRecord("thread", "run", "turn", "session", event)
-	if record.Payload["contract_version"] != tool.ArtifactContractVersion || record.Payload["role"] != "deliverable" || record.Payload["producer"] != "artifact_publish" {
+	if record.Payload["contract_version"] != tool.ArtifactContractVersion || record.Payload["role"] != "deliverable" || record.Payload["producer"] != "artifact_publish" ||
+		record.Payload["group_id"] != "media-group-1" || record.Payload["group_index"] != 3 {
 		t.Fatalf("semantic record lost v2 metadata: %+v", record.Payload)
 	}
 
@@ -185,7 +188,8 @@ func TestArtifactV2SemanticRoundTrip(t *testing.T) {
 		t.Fatalf("expected one artifact frame, got %+v", frames)
 	}
 	frame := frames[0]
-	if frame.ArtifactContractVersion != tool.ArtifactContractVersion || frame.ArtifactRole != "deliverable" || frame.ArtifactProducer != "artifact_publish" {
+	if frame.ArtifactContractVersion != tool.ArtifactContractVersion || frame.ArtifactRole != "deliverable" || frame.ArtifactProducer != "artifact_publish" ||
+		frame.ArtifactGroupID != "media-group-1" || frame.ArtifactGroupIndex != 3 {
 		t.Fatalf("projector lost v2 metadata: %+v", frame)
 	}
 
@@ -193,7 +197,8 @@ func TestArtifactV2SemanticRoundTrip(t *testing.T) {
 	if len(replayed) != 1 {
 		t.Fatalf("expected one replay event, got %+v", replayed)
 	}
-	if replayed[0].ArtifactContractVersion != tool.ArtifactContractVersion || replayed[0].ArtifactRole != tool.ArtifactRoleDeliverable || replayed[0].ArtifactProducer != "artifact_publish" {
+	if replayed[0].ArtifactContractVersion != tool.ArtifactContractVersion || replayed[0].ArtifactRole != tool.ArtifactRoleDeliverable || replayed[0].ArtifactProducer != "artifact_publish" ||
+		replayed[0].ArtifactGroupID != "media-group-1" || replayed[0].ArtifactGroupIndex != 3 {
 		t.Fatalf("replay lost v2 metadata: %+v", replayed[0])
 	}
 }

@@ -111,6 +111,7 @@ type PermissionContext struct {
 	WritableRoots  []string
 	OutputRoots    []string
 	AttachedFiles  []ScopedFile
+	MediaArtifacts []ScopedMediaArtifact
 	ProtectedRoots []string
 	// ProtectedRootExceptions are narrow carve-outs inside an otherwise
 	// protected subtree. They exist because Awaken keeps managed project
@@ -248,6 +249,28 @@ func (c PermissionContext) Normalize() PermissionContext {
 		}
 	}
 
+	mediaArtifacts := make([]ScopedMediaArtifact, 0, len(c.MediaArtifacts))
+	seenMediaArtifacts := make(map[string]struct{}, len(c.MediaArtifacts))
+	for _, artifact := range c.MediaArtifacts {
+		id := strings.TrimSpace(artifact.ID)
+		kind := strings.ToLower(strings.TrimSpace(artifact.Kind))
+		path, ok := AbsoluteCleanPath(artifact.Path, root)
+		if id == "" || !ok || (kind != "image" && kind != "video") {
+			continue
+		}
+		if _, duplicate := seenMediaArtifacts[id]; duplicate {
+			continue
+		}
+		seenMediaArtifacts[id] = struct{}{}
+		artifact.ID = id
+		artifact.RunID = strings.TrimSpace(artifact.RunID)
+		artifact.GroupID = strings.TrimSpace(artifact.GroupID)
+		artifact.Kind = kind
+		artifact.Path = path
+		artifact.Status = strings.ToLower(strings.TrimSpace(artifact.Status))
+		mediaArtifacts = append(mediaArtifacts, artifact)
+	}
+
 	protectedRoots := make([]string, 0, len(c.ProtectedRoots))
 	for _, candidate := range c.ProtectedRoots {
 		if normalized, ok := AbsoluteCleanPath(candidate, root); ok {
@@ -276,10 +299,43 @@ func (c PermissionContext) Normalize() PermissionContext {
 		WritableRoots:           dedupeStrings(writableRoots),
 		OutputRoots:             dedupeStrings(outputRoots),
 		AttachedFiles:           dedupeScopedFiles(attachedFiles),
+		MediaArtifacts:          mediaArtifacts,
 		ProtectedRoots:          dedupeStrings(protectedRoots),
 		ProtectedRootExceptions: dedupeStrings(protectedRootExceptions),
 		TemporaryWorkRoot:       temporaryWorkRoot,
 	}
+}
+
+// ResolveReadyMediaArtifact binds a model-provided artifact ID back to the
+// exact host-verified ready media path in this run's task scope.
+func (c PermissionContext) ResolveReadyMediaArtifact(id, expectedKind string) (ScopedMediaArtifact, string, error) {
+	c = c.Normalize()
+	id = strings.TrimSpace(id)
+	expectedKind = strings.ToLower(strings.TrimSpace(expectedKind))
+	if id == "" {
+		return ScopedMediaArtifact{}, "", fmt.Errorf("artifact id is required")
+	}
+	for _, artifact := range c.MediaArtifacts {
+		if artifact.ID != id {
+			continue
+		}
+		if artifact.Role != ArtifactRoleDeliverable || artifact.Status != "ready" {
+			return ScopedMediaArtifact{}, "", fmt.Errorf("artifact is not a ready deliverable")
+		}
+		if expectedKind != "" && artifact.Kind != expectedKind {
+			return ScopedMediaArtifact{}, "", fmt.Errorf("artifact kind must be %s", expectedKind)
+		}
+		resolved, err := ResolvePathWithExistingAncestor(artifact.Path)
+		if err != nil {
+			return ScopedMediaArtifact{}, "", err
+		}
+		info, err := os.Stat(resolved)
+		if err != nil || !info.Mode().IsRegular() {
+			return ScopedMediaArtifact{}, "", fmt.Errorf("artifact path is not a readable regular file")
+		}
+		return artifact, resolved, nil
+	}
+	return ScopedMediaArtifact{}, "", fmt.Errorf("artifact id is not available in this thread")
 }
 
 func (c PermissionContext) IsWithinWorkspace(path string) bool {

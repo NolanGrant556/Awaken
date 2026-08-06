@@ -464,8 +464,13 @@ func (r *Runner) injectSyntheticToolResultsForCancel() {
 }
 
 func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
+	permissionContext := permissionContextFromTaskScope(config.Workspace)
+	permissionContext.MediaArtifacts = append(
+		[]tool.ScopedMediaArtifact(nil),
+		config.MediaArtifactReferences...,
+	)
 	cfg := ToolRuntimeConfig{
-		PermissionContext:            permissionContextFromTaskScope(config.Workspace),
+		PermissionContext:            permissionContext.Normalize(),
 		AutoToolPolicy:               config.AutoToolPolicy,
 		Profile:                      config.ExecutionProfile,
 		SubagentBoundary:             config.SubagentBoundary,

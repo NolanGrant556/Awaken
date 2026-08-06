@@ -81,6 +81,10 @@ type AgentConfig struct {
 	ToolSessionState *tool.ToolSessionState
 	// ModelContentStore owns tool-result media blobs beneath the thread session.
 	ModelContentStore tool.ModelContentStore
+	// MediaArtifactReferences are host-rebuilt ready media identities from the
+	// owning thread. They let tools resolve artifact IDs without trusting paths
+	// supplied by the model or Renderer.
+	MediaArtifactReferences []tool.ScopedMediaArtifact
 	// ToolResultOffloadStore durably admits large text results once before
 	// either the journal or model context observes them.
 	ToolResultOffloadStore ToolResultOffloadStore

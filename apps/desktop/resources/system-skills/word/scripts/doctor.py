@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -13,19 +15,27 @@ from pathlib import Path
 
 
 ROUTE_NAMES = ("read", "create", "edit_ooxml", "accept_changes", "visual_qa")
+MINIMUM_PYTHON = (3, 9)
 
 
 def module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
-def node_module_available(name: str) -> bool:
-    node = shutil.which("node")
+def node_module_available(name: str, dependency_root: Path | None = None) -> bool:
+    node = command_path("node")
     if not node:
         return False
+    root = (dependency_root or Path.cwd()).resolve()
     try:
         result = subprocess.run(
-            [node, "-e", f"require.resolve({name!r})"],
+            [
+                node,
+                "-e",
+                "require.resolve(process.argv[1], { paths: [process.argv[2]] })",
+                name,
+                str(root),
+            ],
             capture_output=True,
             text=True,
             timeout=10,
@@ -44,10 +54,33 @@ def command_path(*names: str) -> str | None:
     return None
 
 
-def capability(available: bool, path: str | Path | None = None) -> dict:
+def libreoffice_path() -> str | None:
+    found = command_path("soffice", "libreoffice")
+    if found:
+        return found
+    if platform.system() == "Darwin":
+        candidate = Path("/Applications/LibreOffice.app/Contents/MacOS/soffice")
+        return str(candidate) if candidate.is_file() else None
+    if platform.system() == "Windows":
+        for env_name in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
+            base = os.environ.get(env_name)
+            if not base:
+                continue
+            candidate = Path(base) / "LibreOffice" / "program" / "soffice.exe"
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
+def capability(
+    available: bool,
+    path: str | Path | None = None,
+    **details,
+) -> dict:
     result = {"available": bool(available)}
     if path:
         result["path"] = str(Path(path).resolve())
+    result.update(details)
     return result
 
 
@@ -82,8 +115,9 @@ def alternative_route(capabilities: dict, alternatives: list[list[str]]) -> dict
     }
 
 
-def inspect(route: str | None = None) -> dict:
+def inspect(route: str | None = None, dependency_root: Path | None = None) -> dict:
     script_dir = Path(__file__).resolve().parent
+    dependency_root = (dependency_root or Path.cwd()).resolve()
     bundled_paths = {
         "bundled_ooxml_reader": script_dir / "read_docx.py",
         "bundled_ooxml_editor": script_dir / "ooxml_package.py",
@@ -93,14 +127,20 @@ def inspect(route: str | None = None) -> dict:
         "bundled_docx_renderer": script_dir / "render_docx.py",
     }
     node_path = command_path("node")
-    libreoffice_path = command_path("soffice", "libreoffice")
+    office_path = libreoffice_path()
     pdftoppm_path = command_path("pdftoppm")
+    python_compatible = sys.version_info[:2] >= MINIMUM_PYTHON
     capabilities = {
-        "python": capability(True, sys.executable),
+        "python": capability(
+            python_compatible,
+            sys.executable,
+            version=platform.python_version(),
+            minimum_version="3.9",
+        ),
         "node": capability(bool(node_path), node_path),
-        "docx_node": capability(node_module_available("docx")),
+        "docx_node": capability(node_module_available("docx", dependency_root)),
         "python_docx": capability(module_available("docx")),
-        "libreoffice": capability(bool(libreoffice_path), libreoffice_path),
+        "libreoffice": capability(bool(office_path), office_path),
         "pdftoppm": capability(bool(pdftoppm_path), pdftoppm_path),
         **{
             name: capability(path.is_file(), path)
@@ -167,6 +207,14 @@ def inspect(route: str | None = None) -> dict:
             for name in sorted(blocking_missing)
             if name in all_hints
         },
+        "execution_plan": {
+            "dependency_root": str(dependency_root),
+            **{
+                name: value["path"]
+                for name, value in capabilities.items()
+                if value.get("available") and value.get("path")
+            },
+        },
     }
 
 
@@ -174,8 +222,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="按工作路线探测 Awaken Word Skill 能力")
     parser.add_argument("--json", action="store_true", help="输出 JSON")
     parser.add_argument("--route", choices=ROUTE_NAMES, help="只报告指定工作路线")
+    parser.add_argument("--dependency-root", type=Path, default=Path.cwd(), help="Node/Python 依赖所属工作区")
     args = parser.parse_args()
-    result = inspect(args.route)
+    result = inspect(args.route, args.dependency_root)
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:

@@ -39,9 +39,19 @@ def office_env() -> dict[str, str]:
 
 
 @contextmanager
+def temporary_directory(prefix: str):
+    """创建兼容 Python 3.9 的临时目录，并忽略退出阶段的清理竞争。"""
+    directory = Path(tempfile.mkdtemp(prefix=prefix))
+    try:
+        yield directory
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+@contextmanager
 def temporary_profile():
-    with tempfile.TemporaryDirectory(prefix="awaken-ppt-lo-profile-", ignore_cleanup_errors=True) as directory:
-        yield Path(directory)
+    with temporary_directory("awaken-ppt-lo-profile-") as directory:
+        yield directory
 
 
 def run_soffice(arguments: Sequence[str], *, timeout: int, profile: Path | None = None) -> subprocess.CompletedProcess[str]:

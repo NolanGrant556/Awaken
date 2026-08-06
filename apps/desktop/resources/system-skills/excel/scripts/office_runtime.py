@@ -6,6 +6,8 @@ from __future__ import annotations
 import os
 import platform
 import shutil
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -32,3 +34,13 @@ def office_env() -> dict[str, str]:
     env = os.environ.copy()
     env.setdefault("SAL_USE_VCLPLUGIN", "svp")
     return env
+
+
+@contextmanager
+def temporary_directory(prefix: str):
+    """创建兼容 Python 3.9 的临时目录，并忽略退出阶段的清理竞争。"""
+    directory = Path(tempfile.mkdtemp(prefix=prefix))
+    try:
+        yield directory
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)

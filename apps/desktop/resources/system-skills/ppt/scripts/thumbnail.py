@@ -6,13 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import tempfile
 from pathlib import Path
 
 sys.dont_write_bytecode = True
 
 from PIL import Image, ImageDraw, ImageFont
 
+from office_runtime import temporary_directory
 from render_slides import render
 
 
@@ -20,8 +20,8 @@ def build(input_path: Path, output_path: Path, columns: int) -> dict:
     if output_path.exists():
         raise ValueError(f"输出已存在，请使用新文件名: {output_path}")
     columns = max(1, min(columns, 6))
-    with tempfile.TemporaryDirectory(prefix="awaken-ppt-thumbnail-", ignore_cleanup_errors=True) as directory:
-        rendered_dir = Path(directory) / "slides"
+    with temporary_directory("awaken-ppt-thumbnail-") as directory:
+        rendered_dir = directory / "slides"
         result = render(input_path, rendered_dir, dpi=96, timeout=180)
         images = [Path(path) for path in result["images"]]
         if not images:

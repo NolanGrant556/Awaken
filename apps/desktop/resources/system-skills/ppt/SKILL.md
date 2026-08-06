@@ -1,6 +1,6 @@
 ---
 name: ppt
-version: 2.0.0
+version: 2.1.0
 description: 创建、读取、编辑和校验 PowerPoint 演示文稿（.pptx）或模板（.potx）。只要 PPTX/POTX 是主要输入或输出，就应使用本 Skill；包括路演、汇报、培训材料、模板改稿、图表、备注、合并拆分页和视觉检查。若演示文稿只是输入而最终还要交付 Word/Excel/PDF，应再加载对应的最小 Skill 集合。
 when_to_use: 用户提到 PPT、PowerPoint、pptx、potx、deck、slides、演示稿、路演、汇报页或套用演示模板时。
 user-invocable: true
@@ -8,7 +8,7 @@ user-invocable: true
 
 # Awaken PPT Skill
 
-本 Skill 使用 `Bash + PptxGenJS/python-pptx + LibreOffice/Poppler` 完成演示文稿工作。缺少依赖时先探测，再通过 Awaken 现有安装能力或 `Bash` 恢复；完成内容、结构、视觉三层 QA 后，必须调用 `artifact_publish`。
+本 Skill 使用 `Bash + PptxGenJS/python-pptx + LibreOffice/Poppler` 完成演示文稿工作。包内 Python helper 支持 Python 3.9 及以上；缺少依赖时先按 route 探测并复用 doctor 返回的绝对执行计划，再通过 Awaken 现有安装能力或 `Bash` 恢复；完成内容、结构、视觉三层 QA 后，必须调用 `artifact_publish`。
 
 ## 先判断任务路线
 
@@ -36,12 +36,23 @@ user-invocable: true
 - 最终 `.pptx` 必须位于当前任务工作区的 output root。
 - 不复用旧 PDF、旧页图或旧缩略图证明本轮 QA；每轮使用新目录。
 - 不直接 `rm` 用户目录中的文件；生成脚本使用唯一临时目录和新输出路径。
+- 用户在初始请求中点名 PPT 输入或输出时，在任何相关 Bash、文件读取或 subagent 派发前加载本 Skill；同时点名多种 Office 格式时先加载对应的最小 Skill 集合，并把结构/视觉 QA 边界写入子任务。
+- doctor 与所有 `--json` helper 必须作为独立命令执行，或放在 `&&` 链的末尾；禁止接 `| tail`、`| head`、`grep`、命令替换等会改变退出码或截断 JSON 的管道。
+- 必须同时核对 Bash outcome 与完整 JSON `status/issues`。wrapper 失败时不得改用裸 `soffice` / `pdftoppm` 绕过独立 profile、超时和页数一致性合同。
 
 ## 第一步：依赖探测与恢复
 
+按当前动作只探测对应 route：
+
 ```bash
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route create --dependency-root "$PWD" --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route edit --dependency-root "$PWD" --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route structural_qa --dependency-root "$PWD" --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route template_map --dependency-root "$PWD" --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route visual_qa --dependency-root "$PWD" --json
 ```
+
+后续命令固定使用 `execution_plan.python`、`execution_plan.node`、`execution_plan.libreoffice` 与 `execution_plan.pdftoppm` 的绝对路径；不要在改变 cwd 后重新猜测依赖。
 
 根据 JSON 只安装缺失项：
 
@@ -64,6 +75,8 @@ python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --json
 - PowerPoint 有原生能力的图表使用 `addChart`，不要先渲成图片；
 - 堆积图、组合图和次坐标轴必须通过结构校验；
 - speaker notes 使用 `slide.addNotes()`，不要画在页面上。
+- 组合图使用次坐标轴时必须同时生成完整的主/次 category axis 与 value axis；结构校验报告未声明 axis 时回到生成器修复。
+- PptxGenJS 表格、图表或复制页产生重复 shape ID 时，修复生成顺序或重建相关对象；不得把修改打包后 XML 的补丁脚本当作正式生成步骤。
 
 ## 模板编辑
 
@@ -71,7 +84,7 @@ python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --json
 
 ```bash
 python3 -m markitdown template.pptx > template-content.md
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/thumbnail.py" template.pptx template-map.jpg --json
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/thumbnail.py" template.pptx template-map.jpg --json
 ```
 
 再按 `references/editing.md` 修改。不要把所有内容都塞进同一个“标题 + 项目符号”模板页；布局数量、内容数量不一致时应删除整组多余视觉元素，而不是只清空文字。
@@ -79,10 +92,10 @@ python3 -B "${AWAKEN_SKILL_DIR}/scripts/thumbnail.py" template.pptx template-map
 高保真解包路线：
 
 ```bash
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/ooxml_package.py" unpack template.pptx ./pptx-unpacked
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/ooxml_package.py" unpack template.pptx ./pptx-unpacked
 # Read/Edit 精确修改 ppt/slides、notesSlides、charts 或 relationships
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/ooxml_package.py" pack ./pptx-unpacked output.pptx
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/validate_pptx.py" output.pptx --original template.pptx --json
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/ooxml_package.py" pack ./pptx-unpacked output.pptx
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/validate_pptx.py" output.pptx --original template.pptx --json
 ```
 
 结构性增删页必须先完成，再修改具体页面内容；否则复制页可能把已替换的内容或共享图表关系一起复制。
@@ -112,18 +125,18 @@ grep -iE "xxxx|lorem|ipsum|TODO|占位|待填|insert.*(slide|page)" output.check
 ### 2. 结构 QA
 
 ```bash
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/validate_pptx.py" output.pptx --json
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/validate_pptx.py" output.pptx --json > ./ppt-structure-result.json
 ```
 
-模板改稿增加 `--original template.pptx`。校验包括 ZIP/XML、relationship、content type、页面注册、重复 shape ID、图表坐标轴引用和堆积图标签位置。
+模板改稿增加 `--original template.pptx`。随后用 `Read` 打开完整结果 JSON；Bash 非零、`status=failed` 或 `issues` 非空都必须回到生成器修复。校验包括 ZIP/XML、relationship、content type、页面注册、重复 shape ID、图表坐标轴引用和堆积图标签位置。
 
 ### 3. 视觉 QA
 
 ```bash
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/render_slides.py" output.pptx ./preview-ppt-1 --json
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/render_slides.py" output.pptx ./preview-ppt-1 --json > ./preview-ppt-1.result.json
 ```
 
-对 JSON 返回的每一张页图调用 `Read`，优先检查：
+先用 `Read` 打开完整结果 JSON；只有 Bash 成功且 `status=success` 才能继续。对 `images` 返回的每一张页图调用 `Read`，保留实际检查的页码清单；未读取的页不能计入“逐页视觉通过”。优先检查：
 
 1. 文字溢出、裁切和过度换行；
 2. 元素重叠、线条穿字；

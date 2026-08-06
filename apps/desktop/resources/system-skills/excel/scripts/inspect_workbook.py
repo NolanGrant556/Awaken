@@ -8,13 +8,101 @@ import json
 import re
 import zipfile
 from collections import Counter
+from datetime import date, datetime
 from pathlib import Path
 
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 
 
 ERROR_VALUES = {"#REF!", "#DIV/0!", "#VALUE!", "#N/A", "#NAME?", "#NULL!", "#NUM!"}
 RISKY_FUNCTIONS = ("XLOOKUP", "XMATCH", "FILTER", "SORT", "UNIQUE", "SEQUENCE")
+PROFILE_MAX_ROWS = 2000
+PROFILE_MAX_COLUMNS = 64
+HEADER_SCAN_ROWS = 12
+
+
+def value_kind(value) -> str:
+    if value is None or value == "":
+        return "blank"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (datetime, date)):
+        return "date"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str) and value.startswith("="):
+        return "formula"
+    return "text"
+
+
+def build_data_profile(sheet) -> dict:
+    columns: dict[int, dict] = {}
+    header_candidates: list[dict] = []
+    max_row = min(sheet.max_row, PROFILE_MAX_ROWS)
+    max_column = min(sheet.max_column, PROFILE_MAX_COLUMNS)
+    for row_index, row in enumerate(
+        sheet.iter_rows(min_row=1, max_row=max_row, max_col=max_column),
+        start=1,
+    ):
+        header_values: list[str] = []
+        header_text_count = 0
+        for column_index, cell in enumerate(row, start=1):
+            value = cell.value
+            kind = value_kind(value)
+            profile = columns.setdefault(
+                column_index,
+                {"type_counts": Counter(), "zero_count": 0, "samples": []},
+            )
+            profile["type_counts"][kind] += 1
+            if kind == "number" and value == 0:
+                profile["zero_count"] += 1
+            if kind not in {"blank", "formula"} and len(profile["samples"]) < 3:
+                sample = str(value)[:120]
+                if sample not in profile["samples"]:
+                    profile["samples"].append(sample)
+            if row_index <= HEADER_SCAN_ROWS and value not in (None, ""):
+                rendered = str(value)[:120]
+                header_values.append(rendered)
+                if kind == "text":
+                    header_text_count += 1
+        if row_index <= HEADER_SCAN_ROWS and header_values:
+            header_candidates.append(
+                {
+                    "row": row_index,
+                    "score": header_text_count * 2 + len(set(header_values)),
+                    "values": header_values[:20],
+                }
+            )
+    rendered_columns: list[dict] = []
+    mixed_type_columns: list[str] = []
+    for column_index, profile in sorted(columns.items()):
+        counts = dict(profile["type_counts"])
+        observed = [
+            kind
+            for kind in ("number", "date", "boolean", "text")
+            if counts.get(kind, 0)
+        ]
+        letter = get_column_letter(column_index)
+        if len(observed) > 1:
+            mixed_type_columns.append(letter)
+        rendered_columns.append(
+            {
+                "column": letter,
+                "type_counts": counts,
+                "zero_count": profile["zero_count"],
+                "samples": profile["samples"],
+            }
+        )
+    header_candidates.sort(key=lambda item: (-item["score"], item["row"]))
+    return {
+        "profiled_rows": max_row,
+        "profiled_columns": max_column,
+        "header_candidates": header_candidates[:3],
+        "mixed_type_columns": mixed_type_columns,
+        "columns": rendered_columns,
+        "truncated": sheet.max_row > max_row or sheet.max_column > max_column,
+    }
 
 
 def inspect(path: Path) -> dict:
@@ -39,6 +127,7 @@ def inspect(path: Path) -> dict:
                 "max_row": formula_sheet.max_row,
                 "max_column": formula_sheet.max_column,
                 "merged_ranges": len(formula_sheet.merged_cells.ranges),
+                "data_profile": build_data_profile(formula_sheet),
             }
         )
         for row in formula_sheet.iter_rows():

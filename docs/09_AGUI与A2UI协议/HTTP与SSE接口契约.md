@@ -126,6 +126,15 @@ POST /v1/control/computer/reviews/{review_id}/resolve
 
 设置 route 在 Computer settings store 可建立时注册；更新会同时写入 store 与 RunService 内存配置，只影响后续 run。`/v1/control/computer/*` 仅在 Runtime control identity 注入时注册，并统一经 bearer control token middleware；Renderer 只能通过 Main 的 typed bridge 调用。业务状态、review 与兼容 route 约束见 [10 计算机操作能力](../10_计算机操作能力/索引.md)。
 
+### 3.6 Desktop 网络 route 控制
+
+```text
+GET /v1/control/network-route
+PUT /v1/control/network-route
+```
+
+仅在 Runtime control identity 注入时注册，并经同一 bearer control token middleware；network route manager 缺席时返回 503。GET 返回 Core 当前无凭据 snapshot；PUT 接受 Desktop Main 的 version 1 generation snapshot，拒绝未知字段、代理凭据与超过 32 KiB 的请求。业务优先级、MCP/CLI 恢复和跨平台验收由[03 跨平台网络代理与恢复](../03_运行时与本地服务/跨平台网络代理与恢复.md)拥有。
+
 ## 4. SSE wire
 
 `GET /v1/runs/{run_id}/events` 返回 `text/event-stream`。每个 frame：

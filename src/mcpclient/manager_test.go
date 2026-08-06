@@ -569,6 +569,50 @@ func TestManagerPanicRecordsErrorReason(t *testing.T) {
 	}
 }
 
+func TestReconnectFailedForNetworkRouteOnlyRearmsNetworkServers(t *testing.T) {
+	mgr := NewManager(WithLogger(noopLogger{}))
+	disabled := false
+	mgr.servers = map[string]*managedServer{
+		"stdio": {
+			name: "stdio", transport: TransportStdio, state: StateFailed,
+			config: McpServerConfig{Stdio: &StdioTransportConfig{Command: "missing-test-command"}},
+		},
+		"http": {
+			name: "http", transport: TransportHTTP, state: StateFailed,
+			config: McpServerConfig{HTTP: &HTTPTransportConfig{URL: "http://127.0.0.1:1"}},
+		},
+		"disabled": {
+			name: "disabled", transport: TransportSSE, state: StateDisabled,
+			config: McpServerConfig{SSE: &HTTPTransportConfig{URL: "http://127.0.0.1:1"}, Enabled: &disabled},
+		},
+		"in-process": {
+			name: "in-process", transport: TransportInProc, state: StateFailed,
+			config: McpServerConfig{InProc: &InProcTransportConfig{ServerName: "echo"}},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := mgr.ReconnectFailedForNetworkRoute(ctx); got != 2 {
+		t.Fatalf("reconnected = %d, want 2", got)
+	}
+
+	mgr.mu.RLock()
+	defer mgr.mu.RUnlock()
+	if mgr.servers["stdio"].config.Enabled == nil || !*mgr.servers["stdio"].config.Enabled {
+		t.Fatal("stdio server was not enabled")
+	}
+	if mgr.servers["http"].config.Enabled == nil || !*mgr.servers["http"].config.Enabled {
+		t.Fatal("http server was not enabled")
+	}
+	if mgr.servers["disabled"].state != StateDisabled {
+		t.Fatalf("disabled server state = %s", mgr.servers["disabled"].state)
+	}
+	if mgr.servers["in-process"].state != StateFailed {
+		t.Fatalf("in-process server state = %s", mgr.servers["in-process"].state)
+	}
+}
+
 // waitForState polls SnapshotServer until the server reaches the target
 // state or the timeout elapses.
 func waitForState(mgr *Manager, name string, want ServerState, timeout time.Duration) error {

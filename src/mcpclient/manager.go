@@ -483,6 +483,36 @@ func (m *Manager) Reconnect(ctx context.Context, name string) error {
 	return m.Enable(ctx, name)
 }
 
+// ReconnectFailedForNetworkRoute re-arms failed network-sensitive servers
+// after the host reports a route change. Pending servers already rebuild their
+// transport on every retry, and connected servers keep their current session;
+// neither is interrupted. In-process servers do not depend on host networking.
+func (m *Manager) ReconnectFailedForNetworkRoute(ctx context.Context) int {
+	m.mu.RLock()
+	names := make([]string, 0)
+	for name, server := range m.servers {
+		if server.state != StateFailed {
+			continue
+		}
+		switch server.transport {
+		case TransportStdio, TransportHTTP, TransportSSE:
+			names = append(names, name)
+		}
+	}
+	m.mu.RUnlock()
+	sort.Strings(names)
+
+	reconnected := 0
+	for _, name := range names {
+		if err := m.Reconnect(ctx, name); err != nil {
+			m.logger.Warnf("mcp server %q network-route reconnect failed: %v", name, err)
+			continue
+		}
+		reconnected++
+	}
+	return reconnected
+}
+
 // RestartWithConfig stops an existing server (if any), unregisters its tools,
 // and starts a fresh connection loop with the provided config. Used when the
 // operator edits a server's configuration from the UI.

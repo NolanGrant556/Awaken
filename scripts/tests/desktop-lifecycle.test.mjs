@@ -177,7 +177,7 @@ describe("desktop package staging", () => {
     );
   });
 
-  it("packages only the target architecture awaken-core", () => {
+  it("packages only the target architecture runtime binaries", () => {
     const config = readFileSync(
       join(repoRoot, "apps", "desktop", "electron-builder.yml"),
       "utf8",
@@ -187,6 +187,15 @@ describe("desktop package staging", () => {
     assert.match(config, /^\s*- from: resources\/system-skills\s*$/m);
     assert.match(config, /^\s*- from: resources\/officecli-release\.json\s*$/m);
     assert.match(config, /^\s*- from: resources\/licenses\s*$/m);
+    const buildSource = readFileSync(join(repoRoot, "scripts", "build-binary.mjs"), "utf8");
+    assert.match(buildSource, /awaken-network-watch\.exe/);
+    assert.match(buildSource, /platform === "win32"/);
+    const ensureSource = readFileSync(
+      join(repoRoot, "scripts", "ensure-desktop-runtime.mjs"),
+      "utf8",
+    );
+    assert.match(ensureSource, /companionBinaryPaths/);
+    assert.match(ensureSource, /awaken-network-watch\.exe/);
   });
 
   it("pins one verified OfficeCLI asset per supported product target", () => {

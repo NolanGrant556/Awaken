@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"awaken/src/mcpclient"
+	"awaken/src/networkroute"
 	"awaken/src/runtime"
 )
 
@@ -15,6 +17,8 @@ type controlHandlers struct {
 	identity     *runtime.RuntimeIdentity
 	leaseManager *runtime.LeaseManager
 	runService   *runtime.RunService
+	networkRoute *networkroute.Manager
+	mcpManager   *mcpclient.Manager
 }
 
 func (h *controlHandlers) handleRuntimeIdentity(w http.ResponseWriter, r *http.Request) {

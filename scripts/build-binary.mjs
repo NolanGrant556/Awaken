@@ -79,4 +79,24 @@ for (const target of targets) {
     process.exit(1);
   }
   console.log(`[build-binary] done: ${acpOutputPath}`);
+
+  if (platform === "win32") {
+    const networkWatchOutputPath = join(outputDir, "awaken-network-watch.exe");
+    console.log(`[build-binary] building awaken-network-watch for ${target} -> ${networkWatchOutputPath}`);
+    try {
+      execFileSync("go", ["build", "-o", networkWatchOutputPath, "./cmd/awaken-network-watch"], {
+        cwd: root,
+        env: {
+          ...process.env,
+          GOOS: goOS(platform),
+          GOARCH: goArch(arch),
+        },
+        stdio: "inherit",
+      });
+    } catch (err) {
+      console.error("[build-binary] failed to build awaken-network-watch:", err.message);
+      process.exit(1);
+    }
+    console.log(`[build-binary] done: ${networkWatchOutputPath}`);
+  }
 }

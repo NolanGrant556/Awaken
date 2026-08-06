@@ -8,11 +8,14 @@ const root = join(__dirname, "..");
 const target = `${process.platform}-${process.arch}`;
 const binName = process.platform === "win32" ? "awaken-core.exe" : "awaken-core";
 const binaryPath = join(root, "apps", "desktop", "resources", "bin", target, binName);
+const companionBinaryPaths = process.platform === "win32"
+  ? [join(root, "apps", "desktop", "resources", "bin", target, "awaken-network-watch.exe")]
+  : [];
 const sourceRoots = [join(root, "go.mod"), join(root, "cmd"), join(root, "src")];
 
-function hasExecutableBinary() {
+function hasExecutableBinary(filePath = binaryPath) {
   try {
-    accessSync(binaryPath, constants.X_OK);
+    accessSync(filePath, constants.X_OK);
     return true;
   } catch {
     return false;
@@ -57,6 +60,11 @@ function buildReason() {
   if (!hasExecutableBinary()) {
     return `missing ${binaryPath}`;
   }
+  for (const companionPath of companionBinaryPaths) {
+    if (!hasExecutableBinary(companionPath)) {
+      return `missing ${companionPath}`;
+    }
+  }
 
   const binaryStat = statSync(binaryPath);
   const newestSource = newestRuntimeSource();
@@ -72,7 +80,7 @@ const reason = buildReason();
 if (!reason) {
   console.log(`[ensure-desktop-runtime] found current ${binaryPath}`);
 } else {
-  console.log(`[ensure-desktop-runtime] ${reason}; building awaken-core for ${target}`);
+  console.log(`[ensure-desktop-runtime] ${reason}; building runtime binaries for ${target}`);
 
   try {
     execFileSync("node", ["scripts/build-binary.mjs"], {
@@ -85,7 +93,7 @@ if (!reason) {
     });
   } catch {
     console.error(
-      `[ensure-desktop-runtime] failed to build awaken-core. Run npm run build:binary for full output.`,
+      `[ensure-desktop-runtime] failed to build runtime binaries. Run npm run build:binary for full output.`,
     );
     process.exit(1);
   }
@@ -93,6 +101,12 @@ if (!reason) {
   if (!hasExecutableBinary()) {
     console.error(`[ensure-desktop-runtime] build finished but ${binaryPath} is still missing.`);
     process.exit(1);
+  }
+  for (const companionPath of companionBinaryPaths) {
+    if (!hasExecutableBinary(companionPath)) {
+      console.error(`[ensure-desktop-runtime] build finished but ${companionPath} is still missing.`);
+      process.exit(1);
+    }
   }
 }
 

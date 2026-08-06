@@ -11,6 +11,7 @@ import (
 	"awaken/src/mcpclient"
 	"awaken/src/memory"
 	"awaken/src/modelprofile"
+	"awaken/src/networkroute"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 	"awaken/src/scheduledtask"
@@ -134,6 +135,7 @@ type ControlConfig struct {
 	LeaseManager      *awruntime.LeaseManager
 	ACPSessionManager *awruntime.ACPSessionManager
 	ModelProfileStore ACPModelProfileStore
+	NetworkRoute      *networkroute.Manager
 }
 
 type ACPModelProfileStore interface {
@@ -311,12 +313,16 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 			identity:     cfg.control.Identity,
 			leaseManager: cfg.control.LeaseManager,
 			runService:   cfg.runService,
+			networkRoute: cfg.control.NetworkRoute,
+			mcpManager:   cfg.manager,
 		}
 		controlMux := http.NewServeMux()
 		controlMux.HandleFunc("GET /v1/control/runtime/identity", ctrl.handleRuntimeIdentity)
 		controlMux.HandleFunc("POST /v1/control/leases", ctrl.handleCreateLease)
 		controlMux.HandleFunc("POST /v1/control/leases/{lease_id}/heartbeat", ctrl.handleHeartbeatLease)
 		controlMux.HandleFunc("DELETE /v1/control/leases/{lease_id}", ctrl.handleReleaseLease)
+		controlMux.HandleFunc("GET /v1/control/network-route", ctrl.handleGetNetworkRoute)
+		controlMux.HandleFunc("PUT /v1/control/network-route", ctrl.handleUpdateNetworkRoute)
 		acpSessionCtrl := acpSessionControlHandlers{
 			runService:        cfg.runService,
 			acpSessionManager: cfg.control.ACPSessionManager,

@@ -79,6 +79,9 @@ type ManagerOptions = {
   openExternal?: (url: string) => Promise<void>;
   publishReadiness: (readiness: CliConnectorReadiness) => Promise<void>;
   onStateChanged: (view: CliConnectorView) => void;
+  environment?: () => NodeJS.ProcessEnv;
+  beforeNetworkOperation?: (surface: string) => Promise<void>;
+  onTransportFailure?: (surface: string) => void;
 };
 
 const providers: CliProviderId[] = ["dingtalk-workspace", "lark-cli"];
@@ -165,6 +168,7 @@ export class CliConnectorManager {
   async install(providerId: CliProviderId): Promise<CliConnectorView> {
     this.assertProvider(providerId);
     if (this.installControllers.has(providerId)) return this.view(providerId);
+    await this.prepareNetworkOperation("cli-install");
     const asset = this.assetFor(providerId);
     if (!asset) throw new CliConnectorError("CLI_UNSUPPORTED", "当前平台或架构没有受支持的安装资产");
     const controller = new AbortController();
@@ -204,7 +208,7 @@ export class CliConnectorManager {
         const archivePath = path.join(staging, `asset.${asset.archiveType === "zip" ? "zip" : "tar.gz"}`);
         try {
           this.setInstallProgress(providerId, "downloading_cli", 5, "正在下载官方 CLI");
-          const response = await this.options.fetchAsset(asset.url, controller.signal);
+          const response = await this.fetchAsset(asset.url, controller.signal, "cli-download");
           if (!response.ok) throw new CliConnectorError("CLI_DOWNLOAD_FAILED", `下载失败 (${response.status})`, "retry");
           const declaredLength = Number(response.headers.get("content-length") ?? 0);
           if (declaredLength > maxArchiveBytes) throw new CliConnectorError("CLI_ARCHIVE_TOO_LARGE", "安装包超过安全大小限制");
@@ -284,8 +288,9 @@ export class CliConnectorManager {
     const providerId: CliProviderId = "lark-cli";
     const executable = this.requireExecutable(providerId);
     if (this.authSessions.has(providerId)) return this.view(providerId);
+    await this.prepareNetworkOperation("cli-auth");
     const session = await this.createAuthSession(providerId, "正在打开飞书应用配置页面…");
-    const child = spawn(executable, ["config", "init", "--new"], safeSpawnOptions(session.directory));
+    const child = spawn(executable, ["config", "init", "--new"], this.spawnOptions(session.directory));
     this.monitorVerificationUrl(session, child, "请在已打开的飞书页面完成应用配置");
     session.child = child;
     session.view.phase = "waiting_user";
@@ -300,6 +305,7 @@ export class CliConnectorManager {
     if (providerId === "lark-cli" && this.readiness(providerId).configuration === "required") {
       return this.configureLark(true);
     }
+    await this.prepareNetworkOperation("cli-auth");
     const executable = this.requireExecutable(providerId);
     const session = await this.createAuthSession(
       providerId,
@@ -313,7 +319,7 @@ export class CliConnectorManager {
       updatedAt: new Date().toISOString(),
     });
     if (providerId === "dingtalk-workspace") {
-      const child = spawn(executable, ["auth", "login", "--format", "json"], safeSpawnOptions(session.directory));
+      const child = spawn(executable, ["auth", "login", "--format", "json"], this.spawnOptions(session.directory));
       this.monitorVerificationUrl(session, child, "请在已打开的钉钉页面完成授权");
       session.child = child;
       session.view.phase = "waiting_user";
@@ -366,7 +372,7 @@ export class CliConnectorManager {
     const args = providerId === "dingtalk-workspace"
       ? ["auth", "logout", "--format", "json"]
       : ["auth", "logout", "--json"];
-    const result = await runCommand(executable, args, this.authRoot, 60_000);
+    const result = await this.runCommand(executable, args, this.authRoot, 60_000);
     if (result.exitCode !== 0) throw new CliConnectorError("CLI_LOGOUT_FAILED", "CLI 退出登录失败", "retry");
     return this.refresh(providerId);
   }
@@ -500,7 +506,7 @@ export class CliConnectorManager {
     const args = providerId === "dingtalk-workspace"
       ? ["auth", "status", "--format", "json"]
       : ["auth", "status", "--json", "--verify"];
-    const result = await runCommand(executablePath, args, this.authRoot, 30_000);
+    const result = await this.runCommand(executablePath, args, this.authRoot, 30_000);
     const envelope = parseJSONObject(result.stdout) ?? parseJSONObject(result.stderr);
     if (result.exitCode === 0) {
       const authenticated = providerId === "dingtalk-workspace"
@@ -546,7 +552,7 @@ export class CliConnectorManager {
     }
 
     // DingTalk: auth status only has corp_id; profile comes from get-self.
-    const profile = await runCommand(
+    const profile = await this.runCommand(
       executablePath,
       ["contact", "user", "get-self", "--format", "json"],
       this.authRoot,
@@ -570,7 +576,7 @@ export class CliConnectorManager {
 
   private async startLarkSplitAuth(session: AuthSessionInternal, executable: string): Promise<void> {
     try {
-      const initiated = await runCommand(executable, ["auth", "login", "--recommend", "--no-wait", "--json"], session.directory, 30_000);
+      const initiated = await this.runCommand(executable, ["auth", "login", "--recommend", "--no-wait", "--json"], session.directory, 30_000);
       if (this.authSessions.get("lark-cli") !== session) return;
       if (initiated.exitCode !== 0) throw new CliConnectorError("CLI_AUTH_START_FAILED", "无法发起飞书授权", "retry");
       const payload = parseJSONObject(initiated.stdout);
@@ -585,7 +591,7 @@ export class CliConnectorManager {
       if (this.authSessions.get("lark-cli") !== session) return;
       session.view.phase = "confirming";
       session.view.safeMessage = "等待飞书确认授权…";
-      const child = spawn(executable, ["auth", "login", "--device-code", deviceCode, "--json"], safeSpawnOptions(session.directory));
+      const child = spawn(executable, ["auth", "login", "--device-code", deviceCode, "--json"], this.spawnOptions(session.directory));
       drainChildOutput(child);
       session.child = child;
       this.emit("lark-cli");
@@ -739,7 +745,7 @@ export class CliConnectorManager {
 
   private async probeVersion(providerId: CliProviderId, executablePath: string): Promise<string> {
     const args = providerId === "dingtalk-workspace" ? ["version", "--format", "json"] : ["--version"];
-    const result = await runCommand(executablePath, args, os.tmpdir(), 15_000);
+    const result = await this.runCommand(executablePath, args, os.tmpdir(), 15_000);
     if (result.exitCode !== 0) throw new CliConnectorError("CLI_VERSION_PROBE_FAILED", "CLI 版本探测失败", "select_executable");
     const payload = parseJSONObject(result.stdout);
     const raw = providerId === "dingtalk-workspace"
@@ -783,7 +789,7 @@ export class CliConnectorManager {
     const archivePath = path.join(staging, `skills.${bundle.archiveType === "zip" ? "zip" : "tar.gz"}`);
     try {
       if (reportProgress) this.setInstallProgress(providerId, "downloading_skills", 62, "正在下载官方 Skills");
-      const response = await this.options.fetchAsset(bundle.url, signal);
+      const response = await this.fetchAsset(bundle.url, signal, "cli-skill-download");
       if (!response.ok) throw new CliConnectorError("CLI_SKILL_DOWNLOAD_FAILED", `官方 Skill 下载失败 (${response.status})`, "retry");
       const declaredLength = Number(response.headers.get("content-length") ?? 0);
       if (declaredLength > maxArchiveBytes) throw new CliConnectorError("CLI_SKILL_ARCHIVE_TOO_LARGE", "官方 Skill 包超过安全大小限制");
@@ -966,15 +972,53 @@ export class CliConnectorManager {
   private assertProvider(providerId: string): asserts providerId is CliProviderId {
     if (!providers.includes(providerId as CliProviderId)) throw new CliConnectorError("CLI_PROVIDER_UNKNOWN", "未知 CLI provider");
   }
+
+  private commandEnvironment(): NodeJS.ProcessEnv {
+    return this.options.environment?.() ?? process.env;
+  }
+
+  private spawnOptions(cwd: string) {
+    return safeSpawnOptions(cwd, this.commandEnvironment());
+  }
+
+  private async runCommand(executable: string, args: string[], cwd: string, timeoutMs: number): Promise<CommandResult> {
+    await this.prepareNetworkOperation("cli-command");
+    try {
+      const result = await runCommand(executable, args, cwd, timeoutMs, this.commandEnvironment());
+      if (looksLikeNetworkTransportFailure(`${result.stderr}\n${result.stdout}`)) {
+        this.options.onTransportFailure?.("cli-command");
+      }
+      return result;
+    } catch (error) {
+      if (looksLikeNetworkTransportFailure(error instanceof Error ? error.message : String(error))) {
+        this.options.onTransportFailure?.("cli-command");
+      }
+      throw error;
+    }
+  }
+
+  private prepareNetworkOperation(surface: string): Promise<void> {
+    return this.options.beforeNetworkOperation?.(surface) ?? Promise.resolve();
+  }
+
+  private async fetchAsset(url: string, signal: AbortSignal, surface: string): Promise<Response> {
+    await this.prepareNetworkOperation(surface);
+    try {
+      return await this.options.fetchAsset(url, signal);
+    } catch (error) {
+      this.options.onTransportFailure?.(surface);
+      throw error;
+    }
+  }
 }
 
-function safeSpawnOptions(cwd: string) {
+function safeSpawnOptions(cwd: string, environment: NodeJS.ProcessEnv = process.env) {
   return {
     cwd,
     shell: false,
     windowsHide: true,
     env: {
-      ...safeCliEnvironment(),
+      ...safeCliEnvironment(environment),
       LARKSUITE_CLI_NO_UPDATE_NOTIFIER: "1",
       LARKSUITE_CLI_NO_SKILLS_NOTIFIER: "1",
     },
@@ -1032,15 +1076,15 @@ function isLarkVerificationUrl(url: URL): boolean {
   return !larkServiceEndpoints.has(`${host}${pathname}`);
 }
 
-export function safeCliEnvironment(): NodeJS.ProcessEnv {
+export function safeCliEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const allowed = [
     "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "TMPDIR", "TEMP", "TMP",
-    "SystemRoot", "ComSpec", "LANG", "LC_ALL", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
-    "http_proxy", "https_proxy", "no_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+    "SystemRoot", "ComSpec", "LANG", "LC_ALL", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "all_proxy", "no_proxy", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
     "XDG_CONFIG_HOME", "XDG_DATA_HOME",
   ];
   const env: NodeJS.ProcessEnv = {};
-  for (const key of allowed) if (process.env[key] !== undefined) env[key] = process.env[key];
+  for (const key of allowed) if (source[key] !== undefined) env[key] = source[key];
   return env;
 }
 
@@ -1150,8 +1194,14 @@ async function isRegularFile(value: string): Promise<boolean> {
   }
 }
 
-async function runCommand(executable: string, args: string[], cwd: string, timeoutMs: number): Promise<CommandResult> {
-  const child = spawn(executable, args, safeSpawnOptions(cwd));
+async function runCommand(
+  executable: string,
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<CommandResult> {
+  const child = spawn(executable, args, safeSpawnOptions(cwd, environment));
   let stdout = "";
   let stderr = "";
   child.stdout?.on("data", (chunk: Buffer) => { if (stdout.length < commandOutputLimit) stdout += chunk.toString("utf8"); });
@@ -1220,6 +1270,10 @@ async function isExecutableFile(filePath: string, executable = true): Promise<bo
 
 function sha256(value: Buffer): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function looksLikeNetworkTransportFailure(raw: string): boolean {
+  return /(?:ECONNREFUSED|ECONNRESET|ENETUNREACH|EHOSTUNREACH|ETIMEDOUT|connection refused|network is unreachable|proxy connect|failed to fetch|dial tcp)/i.test(raw);
 }
 
 function ownershipForPath(filePath: string, homeDir: string): CliInstallOwnership {

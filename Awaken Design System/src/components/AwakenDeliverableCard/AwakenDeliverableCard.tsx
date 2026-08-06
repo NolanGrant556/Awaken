@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AwakenMediaItemCard } from "../AwakenMediaItemCard";
+import type { AwakenMediaMetadata } from "../AwakenMediaItemCard";
 
 export type AwakenDeliverableFileType =
   | "word"
@@ -28,10 +29,13 @@ export type AwakenDeliverableCardProps = {
   previewSrc?: string;
   previewAlt?: string;
   previewAspectRatio?: number;
+  previewMetadata?: AwakenMediaMetadata;
   /** When true, media deliverables show an unavailable terminal state instead of an infinite ready skeleton. */
   previewUnavailable?: boolean;
   onPreview?: () => void;
   onMediaError?: () => void;
+  onMediaMetadata?: (metadata: AwakenMediaMetadata) => void;
+  onViewInInspector?: () => void;
   onOpen?: () => void;
   onReveal?: () => void;
   localOpenLabel?: string;
@@ -98,9 +102,12 @@ export function AwakenDeliverableCard({
   previewSrc,
   previewAlt,
   previewAspectRatio,
+  previewMetadata,
   previewUnavailable = false,
   onPreview,
   onMediaError,
+  onMediaMetadata,
+  onViewInInspector,
   onOpen,
   onReveal,
   localOpenLabel,
@@ -142,10 +149,14 @@ export function AwakenDeliverableCard({
         src={previewUnavailable ? undefined : previewSrc}
         alt={previewAlt || title}
         aspectRatio={previewAspectRatio}
+        metadata={previewMetadata}
+        formatLabel={normalizedExtension}
         disabled={disabled}
         openingExternal={opening}
         onPreview={previewUnavailable ? undefined : onPreview ?? onOpen}
         onMediaError={onMediaError}
+        onMetadata={onMediaMetadata}
+        onViewInInspector={onViewInInspector}
         onOpenExternal={onPreview ? onOpen : undefined}
         onReveal={onReveal}
         localOpenLabel={localOpenLabel}

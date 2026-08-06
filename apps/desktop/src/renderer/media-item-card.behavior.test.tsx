@@ -50,6 +50,8 @@ describe("media item card behavior", () => {
   });
 
   it("uses video metadata as the compact card ratio", () => {
+    const onMetadata = vi.fn();
+    const onViewInInspector = vi.fn();
     act(() => {
       root.render(
         <AwakenMediaItemCard
@@ -57,6 +59,9 @@ describe("media item card behavior", () => {
           status="ready"
           title="竖版视频"
           src="awaken-artifact://media/video/portrait.mp4"
+          formatLabel="mp4"
+          onMetadata={onMetadata}
+          onViewInInspector={onViewInInspector}
         />,
       );
     });
@@ -65,10 +70,24 @@ describe("media item card behavior", () => {
     expect(video).not.toBeNull();
     Object.defineProperty(video, "videoWidth", { configurable: true, value: 1080 });
     Object.defineProperty(video, "videoHeight", { configurable: true, value: 1920 });
+    Object.defineProperty(video, "duration", { configurable: true, value: 5.085 });
     act(() => video?.dispatchEvent(new Event("loadedmetadata")));
 
     const card = host.querySelector<HTMLElement>(".aw-media-item-card");
     expect(card?.style.getPropertyValue("--aw-media-item-aspect")).toBe("0.5625");
+    expect(host.textContent).toContain("1080×1920 · 5.1 秒 · MP4");
+    expect(onMetadata).toHaveBeenCalledWith({
+      width: 1080,
+      height: 1920,
+      durationSeconds: 5.085,
+    });
+
+    const pinButton = [...host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+      (button) => button.textContent === "在右侧栏查看",
+    );
+    expect(pinButton).toBeDefined();
+    act(() => pinButton?.click());
+    expect(onViewInInspector).toHaveBeenCalledTimes(1);
   });
 
   it("treats an already-complete image as loaded without another load event", () => {

@@ -28,6 +28,33 @@ export type AwakenMediaItemStatus =
   | "error"
   | "cancelled";
 
+export type AwakenMediaMetadata = {
+  width: number;
+  height: number;
+  durationSeconds?: number;
+};
+
+export function awakenMediaMetadataLabel(
+  metadata?: AwakenMediaMetadata,
+  formatLabel?: string,
+): string | undefined {
+  const parts: string[] = [];
+  if (metadata && metadata.width > 0 && metadata.height > 0) {
+    parts.push(`${Math.round(metadata.width)}×${Math.round(metadata.height)}`);
+    if (
+      typeof metadata.durationSeconds === "number" &&
+      Number.isFinite(metadata.durationSeconds) &&
+      metadata.durationSeconds >= 0
+    ) {
+      const duration = metadata.durationSeconds;
+      parts.push(duration < 10 ? `${duration.toFixed(1)} 秒` : `${Math.round(duration)} 秒`);
+    }
+  }
+  const normalizedFormat = formatLabel?.trim().replace(/^\./, "").toUpperCase();
+  if (normalizedFormat) parts.push(normalizedFormat);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
 export type AwakenMediaItemCardProps = {
   kind: AwakenMediaItemKind;
   status: AwakenMediaItemStatus;
@@ -37,11 +64,17 @@ export type AwakenMediaItemCardProps = {
   alt?: string;
   index?: number;
   aspectRatio?: number;
+  metadata?: AwakenMediaMetadata;
+  formatLabel?: string;
   disabled?: boolean;
   openingExternal?: boolean;
   onPreview?: () => void;
   /** Fired when the current media element fails to load; consumers may reissue a source. */
   onMediaError?: () => void;
+  /** Reports intrinsic dimensions (and video duration) after metadata loads. */
+  onMetadata?: (metadata: AwakenMediaMetadata) => void;
+  /** Optional secondary action that pins this media in the Desktop inspector. */
+  onViewInInspector?: () => void;
   onOpenExternal?: () => void;
   onReveal?: () => void;
   localOpenLabel?: string;
@@ -82,10 +115,14 @@ export function AwakenMediaItemCard({
   alt,
   index,
   aspectRatio,
+  metadata,
+  formatLabel,
   disabled = false,
   openingExternal = false,
   onPreview,
   onMediaError,
+  onMetadata,
+  onViewInInspector,
   onOpenExternal,
   onReveal,
   localOpenLabel = "使用本地应用打开",
@@ -96,6 +133,9 @@ export function AwakenMediaItemCard({
   const [resolvedRatio, setResolvedRatio] = useState<number | undefined>(() =>
     positiveRatio(aspectRatio),
   );
+  const [resolvedMetadata, setResolvedMetadata] = useState<AwakenMediaMetadata | undefined>(
+    metadata,
+  );
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDetailsElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
@@ -104,21 +144,32 @@ export function AwakenMediaItemCard({
   const transient =
     !ready && status !== "unknown" && status !== "error" && status !== "cancelled";
   const previewEnabled = ready && loaded && Boolean(onPreview) && !disabled;
-  const menuAvailable = Boolean(onOpenExternal || onReveal);
+  const menuAvailable = Boolean(onViewInInspector || onOpenExternal || onReveal);
   const fallbackRatio = kind === "video" ? 16 / 9 : 4 / 3;
   const cardStyle = {
     "--aw-media-item-aspect": resolvedRatio ?? positiveRatio(aspectRatio) ?? fallbackRatio,
   } as CSSProperties;
+  const resolvedDetail =
+    (resolvedMetadata
+      ? awakenMediaMetadataLabel(resolvedMetadata, formatLabel)
+      : undefined) || detail || statusLabel[status];
+
+  const applyMetadata = (nextMetadata: AwakenMediaMetadata) => {
+    setResolvedMetadata(nextMetadata);
+    onMetadata?.(nextMetadata);
+  };
 
   useLayoutEffect(() => {
     setLoaded(false);
     setResolvedRatio(positiveRatio(aspectRatio));
+    setResolvedMetadata(metadata);
     if (!ready || !src) return;
     if (kind === "image") {
       const image = imageRef.current;
       if (!image?.complete || image.naturalWidth <= 0) return;
       if (image.naturalHeight > 0) {
         setResolvedRatio(image.naturalWidth / image.naturalHeight);
+        applyMetadata({ width: image.naturalWidth, height: image.naturalHeight });
       }
       setLoaded(true);
       return;
@@ -127,9 +178,14 @@ export function AwakenMediaItemCard({
     if (!video || video.readyState < HTMLMediaElement.HAVE_METADATA) return;
     if (video.videoWidth > 0 && video.videoHeight > 0) {
       setResolvedRatio(video.videoWidth / video.videoHeight);
+      applyMetadata({
+        width: video.videoWidth,
+        height: video.videoHeight,
+        durationSeconds: Number.isFinite(video.duration) ? video.duration : undefined,
+      });
     }
     setLoaded(true);
-  }, [aspectRatio, kind, ready, src]);
+  }, [aspectRatio, kind, metadata, ready, src]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -151,6 +207,7 @@ export function AwakenMediaItemCard({
     const image = event.currentTarget;
     if (image.naturalWidth > 0 && image.naturalHeight > 0) {
       setResolvedRatio(image.naturalWidth / image.naturalHeight);
+      applyMetadata({ width: image.naturalWidth, height: image.naturalHeight });
     }
     setLoaded(true);
   };
@@ -159,6 +216,11 @@ export function AwakenMediaItemCard({
     const video = event.currentTarget;
     if (video.videoWidth > 0 && video.videoHeight > 0) {
       setResolvedRatio(video.videoWidth / video.videoHeight);
+      applyMetadata({
+        width: video.videoWidth,
+        height: video.videoHeight,
+        durationSeconds: Number.isFinite(video.duration) ? video.duration : undefined,
+      });
     }
     setLoaded(true);
   };
@@ -254,7 +316,7 @@ export function AwakenMediaItemCard({
         </span>
         <span className="aw-media-item-card-copy">
           <strong title={title}>{title}</strong>
-          <span>{detail || statusLabel[status]}</span>
+          <span title={resolvedDetail}>{resolvedDetail}</span>
         </span>
         {transient ? (
           <LoaderCircle
@@ -283,6 +345,19 @@ export function AwakenMediaItemCard({
               <MoreHorizontal aria-hidden="true" size={17} strokeWidth={1.8} />
             </summary>
             <div className="aw-media-item-card-menu-popover" role="menu">
+              {onViewInInspector ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={disabled}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onViewInInspector();
+                  }}
+                >
+                  在右侧栏查看
+                </button>
+              ) : null}
               {onOpenExternal ? (
                 <button
                   type="button"

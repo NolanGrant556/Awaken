@@ -22,6 +22,7 @@ import {
   Folder,
   FolderPlus,
   Globe2,
+  Image as ImageIcon,
   MessageSquare,
   MessageCirclePlus,
   Minimize2,
@@ -46,6 +47,7 @@ import {
   AwakenDeliverableList as DeliverableList,
   AwakenExecutionFeed as ExecutionFeed,
   AwakenMediaGenerationCard as MediaGenerationCard,
+  AwakenMediaInspector as MediaInspector,
   AwakenMediaPreviewOverlay as MediaPreviewOverlay,
   AwakenInspectorRail as InspectorRail,
   AwakenSubagentGroup as SubagentGroup,
@@ -72,6 +74,7 @@ import {
   type ComposerBarStructuredInputValue,
   type AwakenContextUsagePanelProps,
   type AwakenMediaPreviewItem,
+  type AwakenMediaMetadata,
   type NavItem,
   type PlatformKind,
   type ProjectFolderRow,
@@ -231,7 +234,8 @@ type UserQuestionPromptProps = {
   onSubmit: (answer: string) => void;
 };
 
-type MediaArtifactPreviewItem = AwakenMediaPreviewItem & {
+type MediaArtifactPreviewItem = Omit<AwakenMediaPreviewItem, "src" | "metadata"> & {
+  sourceKey: string;
   request: ArtifactOpenRequest;
 };
 
@@ -264,6 +268,12 @@ export function mediaArtifactRequestForPath(
 
 function artifactMediaSourceKey(request: ArtifactOpenRequest): string {
   return `${request.threadId}:${request.runId}:${request.artifactId}`;
+}
+
+export function mediaFormatLabelForPath(path?: string): string | undefined {
+  const filename = path?.trim().split(/[\\/]/).pop();
+  const extension = filename?.includes(".") ? filename.split(".").pop() : undefined;
+  return extension?.trim().toUpperCase() || undefined;
 }
 
 const MAX_ARTIFACT_MEDIA_SOURCE_RETRIES = 2;
@@ -2275,7 +2285,11 @@ export function App() {
   >(null);
   const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(null);
   const [mediaPreview, setMediaPreview] = useState<MediaArtifactPreviewState | null>(null);
+  const [pinnedMedia, setPinnedMedia] = useState<MediaArtifactPreviewItem | null>(null);
   const [artifactMediaSources, setArtifactMediaSources] = useState<Record<string, string | null>>({});
+  const [artifactMediaMetadata, setArtifactMediaMetadata] = useState<
+    Record<string, AwakenMediaMetadata>
+  >({});
   const [artifactMediaHydrationEpoch, setArtifactMediaHydrationEpoch] = useState(0);
   const artifactMediaSourcesRef = useRef<Record<string, string | null>>({});
   const artifactMediaSourcePendingRef = useRef<Set<string>>(new Set());
@@ -2504,7 +2518,9 @@ export function App() {
     artifactMediaSourceRetryRef.current.clear();
     artifactMediaSourcesRef.current = {};
     setArtifactMediaSources({});
+    setArtifactMediaMetadata({});
     setMediaPreview(null);
+    setPinnedMedia(null);
   }, [runtimeState.activeThreadId]);
 
   useEffect(() => {
@@ -5566,6 +5582,7 @@ export function App() {
     if (fileWorkspaceOpen) {
       handleCloseFileWorkspace();
     }
+    setPinnedMedia(null);
     setSelectedSubagentTaskId((currentTaskId) =>
       nextSubagentInspectorTaskId(
         currentTaskId,
@@ -5750,6 +5767,35 @@ export function App() {
     setMediaPreview({ items, activeId });
     setContextUsagePanelOpen(false);
     setOpenSubagentTaskId(undefined);
+  }
+
+  function pinMediaInInspector(item: MediaArtifactPreviewItem): void {
+    if (fileWorkspaceOpen) {
+      handleCloseFileWorkspace();
+    }
+    setSelectedSubagentTaskId(undefined);
+    setPinnedMedia(item);
+    setInspectorCollapsed(false);
+    if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
+      inspectorCollapsedBeforeResponsiveRef.current = false;
+    }
+  }
+
+  function recordArtifactMediaMetadata(
+    sourceKey: string,
+    metadata: AwakenMediaMetadata,
+  ): void {
+    setArtifactMediaMetadata((current) => {
+      const previous = current[sourceKey];
+      if (
+        previous?.width === metadata.width &&
+        previous.height === metadata.height &&
+        previous.durationSeconds === metadata.durationSeconds
+      ) {
+        return current;
+      }
+      return { ...current, [sourceKey]: metadata };
+    });
   }
 
   function refreshArtifactMediaSource(key: string, request: ArtifactOpenRequest): void {
@@ -6071,17 +6117,20 @@ export function App() {
           sourceUnavailable: resultItem.status === "ready" && sourceFailed,
           src: typeof sourceState === "string" ? sourceState : undefined,
           title: artifact?.title || `${item.title} ${resultItem.index}`,
+          formatLabel: mediaFormatLabelForPath(artifactPath || artifact?.path),
+          sourceKey,
           request,
         };
       });
       const previewItems: MediaArtifactPreviewItem[] = mediaEntries.flatMap((entry) =>
-        entry.src && entry.request
+        entry.src && entry.request && entry.sourceKey
           ? [{
               id: entry.id,
               kind: item.mediaKind,
               title: entry.title,
-              src: entry.src,
               alt: entry.title,
+              formatLabel: entry.formatLabel,
+              sourceKey: entry.sourceKey,
               request: entry.request,
             }]
           : [],
@@ -6104,6 +6153,8 @@ export function App() {
                 : "生成失败",
           src: entry.src,
           alt: entry.title,
+          formatLabel: entry.formatLabel,
+          metadata: sourceKey ? artifactMediaMetadata[sourceKey] : undefined,
           onPreview:
             entry.src && entry.request
               ? () => openMediaPreview(previewItems, entry.id)
@@ -6111,6 +6162,24 @@ export function App() {
           onMediaError:
             sourceKey && entry.request
               ? () => refreshArtifactMediaSource(sourceKey, entry.request!)
+              : undefined,
+          onMetadata:
+            sourceKey
+              ? (metadata: AwakenMediaMetadata) =>
+                  recordArtifactMediaMetadata(sourceKey, metadata)
+              : undefined,
+          onViewInInspector:
+            entry.src && entry.request && sourceKey
+              ? () =>
+                  pinMediaInInspector({
+                    id: entry.id,
+                    kind: item.mediaKind,
+                    title: entry.title,
+                    alt: entry.title,
+                    formatLabel: entry.formatLabel,
+                    sourceKey,
+                    request: entry.request!,
+                  })
               : undefined,
         };
       });
@@ -6206,12 +6275,14 @@ export function App() {
               `${threadId}:${file.runId}:${file.artifactId}`
             ] ?? undefined;
             if (!src) return [];
+            const sourceKey = `${threadId}:${file.runId}:${file.artifactId}`;
             return [{
               id: file.artifactId,
               kind: file.fileType,
               title: file.title,
-              src,
               alt: file.title,
+              formatLabel: file.extension,
+              sourceKey,
               request: {
                 threadId,
                 runId: file.runId,
@@ -6251,6 +6322,10 @@ export function App() {
                   ? mediaSourceState
                   : undefined,
               previewUnavailable: isMedia && mediaSourceState === null,
+              previewMetadata:
+                mediaSourceKey !== undefined
+                  ? artifactMediaMetadata[mediaSourceKey]
+                  : undefined,
               onPreview:
                 isMedia && typeof mediaSourceState === "string"
                   ? () => openMediaPreview(previewItems, file.artifactId)
@@ -6258,6 +6333,24 @@ export function App() {
               onMediaError:
                 mediaRequest && mediaSourceKey
                   ? () => refreshArtifactMediaSource(mediaSourceKey, mediaRequest)
+                  : undefined,
+              onMediaMetadata:
+                mediaSourceKey
+                  ? (metadata: AwakenMediaMetadata) =>
+                      recordArtifactMediaMetadata(mediaSourceKey, metadata)
+                  : undefined,
+              onViewInInspector:
+                typeof mediaSourceState === "string" && mediaRequest && mediaSourceKey
+                  ? () =>
+                      pinMediaInInspector({
+                        id: file.artifactId,
+                        kind: file.fileType as "image" | "video",
+                        title: file.title,
+                        alt: file.title,
+                        formatLabel: file.extension,
+                        sourceKey: mediaSourceKey,
+                        request: mediaRequest,
+                      })
                   : undefined,
               opening: openingArtifactId === file.artifactId,
               disabled: !threadId,
@@ -6378,10 +6471,36 @@ export function App() {
   const activeMediaPreviewIndex = mediaPreview
     ? Math.max(0, mediaPreview.items.findIndex((item) => item.id === mediaPreview.activeId))
     : -1;
-  const activeMediaPreviewItem =
+  const activeMediaPreviewRecord =
     mediaPreview && activeMediaPreviewIndex >= 0
       ? mediaPreview.items[activeMediaPreviewIndex]
       : undefined;
+  const activeMediaPreviewSourceState = activeMediaPreviewRecord
+    ? artifactMediaSources[activeMediaPreviewRecord.sourceKey]
+    : undefined;
+  const activeMediaPreviewItem = activeMediaPreviewRecord
+    ? {
+        ...activeMediaPreviewRecord,
+        src:
+          typeof activeMediaPreviewSourceState === "string"
+            ? activeMediaPreviewSourceState
+            : undefined,
+        metadata: artifactMediaMetadata[activeMediaPreviewRecord.sourceKey],
+      }
+    : undefined;
+  const pinnedMediaSourceState = pinnedMedia
+    ? artifactMediaSources[pinnedMedia.sourceKey]
+    : undefined;
+  const pinnedMediaItem = pinnedMedia
+    ? {
+        ...pinnedMedia,
+        src:
+          typeof pinnedMediaSourceState === "string"
+            ? pinnedMediaSourceState
+            : undefined,
+        metadata: artifactMediaMetadata[pinnedMedia.sourceKey],
+      }
+    : undefined;
   const composerBarAttachments = composerAttachmentViews(composerAttachments);
   const fileWorkspaceProjectId = workspaceLabelProjectId
     ? backendProjectIdFor(workspaceLabelProjectId)
@@ -6988,6 +7107,7 @@ export function App() {
                               item={activeMediaPreviewItem}
                               position={activeMediaPreviewIndex}
                               count={mediaPreview.items.length}
+                              sourceUnavailable={activeMediaPreviewSourceState === null}
                               openingExternal={
                                 openingArtifactId === activeMediaPreviewItem.request.artifactId
                               }
@@ -7033,6 +7153,18 @@ export function App() {
                               onReveal={() => {
                                 void revealArtifact(activeMediaPreviewItem.request);
                               }}
+                              onMediaError={() =>
+                                refreshArtifactMediaSource(
+                                  activeMediaPreviewItem.sourceKey,
+                                  activeMediaPreviewItem.request,
+                                )
+                              }
+                              onMetadata={(metadata) =>
+                                recordArtifactMediaMetadata(
+                                  activeMediaPreviewItem.sourceKey,
+                                  metadata,
+                                )
+                              }
                             />
                           ) : null}
                         </>
@@ -7250,10 +7382,26 @@ export function App() {
                       />
                     ) : (
                       <InspectorRail
-                        ariaLabel={selectedSubagentTaskId ? "子任务" : "文件"}
-                        activeId={selectedSubagentTaskId ? "subagents" : undefined}
+                        ariaLabel={pinnedMedia ? "媒体" : selectedSubagentTaskId ? "子任务" : "文件"}
+                        activeId={
+                          pinnedMedia
+                            ? "media"
+                            : selectedSubagentTaskId
+                              ? "subagents"
+                              : undefined
+                        }
                         items={[
                           ...INSPECTOR_FILE_ITEMS,
+                          ...(pinnedMedia
+                            ? [
+                                {
+                                  id: "media",
+                                  label: "媒体",
+                                  tone: "neutral" as const,
+                                  icon: <ImageIcon size={16} strokeWidth={1.8} aria-hidden="true" />,
+                                },
+                              ]
+                            : []),
                           ...(subagentTasks.length
                             ? [
                                 {
@@ -7275,10 +7423,39 @@ export function App() {
                             handleOpenFileWorkspace("browser");
                           } else if (id === "subagents") {
                             handleToggleSubagentInspector();
+                          } else if (id === "media") {
+                            setSelectedSubagentTaskId(undefined);
+                            setInspectorCollapsed(false);
                           }
                         }}
                       >
-                        {selectedSubagentTaskId && selectedSubagent ? (
+                        {pinnedMedia && pinnedMediaItem ? (
+                          <MediaInspector
+                            item={pinnedMediaItem}
+                            sourceUnavailable={pinnedMediaSourceState === null}
+                            openingExternal={
+                              openingArtifactId === pinnedMedia.request.artifactId
+                            }
+                            localOpenLabel="使用本地应用打开"
+                            revealLabel={mediaRevealLabel}
+                            onClose={() => setPinnedMedia(null)}
+                            onMediaError={() =>
+                              refreshArtifactMediaSource(
+                                pinnedMedia.sourceKey,
+                                pinnedMedia.request,
+                              )
+                            }
+                            onMetadata={(metadata) =>
+                              recordArtifactMediaMetadata(pinnedMedia.sourceKey, metadata)
+                            }
+                            onOpenExternal={() => {
+                              void openArtifactExternally(pinnedMedia.request);
+                            }}
+                            onReveal={() => {
+                              void revealArtifact(pinnedMedia.request);
+                            }}
+                          />
+                        ) : selectedSubagentTaskId && selectedSubagent ? (
                           <div className="subagent-inspector">
                             <header className="subagent-inspector__header">
                               <div>

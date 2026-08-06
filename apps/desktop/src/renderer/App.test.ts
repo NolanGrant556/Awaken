@@ -28,6 +28,7 @@ import {
   modelPreferenceChangeForOption,
   modelPreferenceRecoveryKey,
   mediaRevealLabelForPlatform,
+  mediaFormatLabelForPath,
   mediaArtifactRequestForPath,
   nextUserQuestionPromptIndex,
   nextSubagentInspectorTaskId,
@@ -143,6 +144,14 @@ describe("media reveal platform copy", () => {
     expect(mediaRevealLabelForPlatform("macos")).toBe("在 Finder 中显示");
     expect(mediaRevealLabelForPlatform("windows")).toBe("在文件资源管理器中显示");
     expect(mediaRevealLabelForPlatform("linux")).toBe("在文件管理器中显示");
+  });
+});
+
+describe("media format labels", () => {
+  it("derives an uppercase format from cross-platform artifact paths", () => {
+    expect(mediaFormatLabelForPath("output/generated-media/final.mp4")).toBe("MP4");
+    expect(mediaFormatLabelForPath("output\\generated-media\\look.webp")).toBe("WEBP");
+    expect(mediaFormatLabelForPath("README")).toBeUndefined();
   });
 });
 

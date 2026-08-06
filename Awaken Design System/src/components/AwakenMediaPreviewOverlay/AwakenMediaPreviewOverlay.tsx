@@ -63,7 +63,6 @@ export function AwakenMediaPreviewOverlay({
 }: AwakenMediaPreviewOverlayProps) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const fullscreenRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
@@ -85,7 +84,11 @@ export function AwakenMediaPreviewOverlay({
     setNaturalSize(undefined);
     setDragging(false);
     setLoadFailed(false);
-    requestAnimationFrame(() => closeButtonRef.current?.focus());
+    // Keep programmatic focus on the outline-free dialog surface. Arrow-key
+    // navigation changes the item and the global modality to keyboard; focusing
+    // the close button here would therefore paint a misleading blue ring even
+    // though the user did not navigate to that button with Tab.
+    requestAnimationFrame(() => dialogRef.current?.focus());
   }, [item.id]);
 
   useEffect(() => {
@@ -201,7 +204,6 @@ export function AwakenMediaPreviewOverlay({
             {count > 1 ? <span>{position + 1} / {count}</span> : null}
           </span>
           <button
-            ref={closeButtonRef}
             type="button"
             className="aw-media-preview-icon-button"
             aria-label="关闭媒体预览"

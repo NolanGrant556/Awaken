@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { NetworkRouteSnapshot } from "./network-route-manager.js";
 
 export interface RuntimeManifest {
   schema_version: number;
@@ -62,6 +63,21 @@ export class RuntimeControlClient {
     if (body.base_url !== this.baseUrl) {
       throw new Error(`base_url mismatch: ${body.base_url} != ${this.baseUrl}`);
     }
+  }
+
+  async updateNetworkRoute(snapshot: NetworkRouteSnapshot): Promise<NetworkRouteSnapshot> {
+    const resp = await fetch(`${this.baseUrl}/v1/control/network-route`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(snapshot),
+    });
+    if (!resp.ok) {
+      throw new Error(`network route update failed: ${resp.status}`);
+    }
+    return (await resp.json()) as NetworkRouteSnapshot;
   }
 
   async createLease(ownerID: string, ownerKind: "desktop" | "bridge" = "desktop"): Promise<RuntimeLease> {

@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"awaken/src/networkroute"
 )
 
 // Session is the handle a connected server exposes. It is satisfied by the
@@ -43,13 +46,14 @@ func buildTransport(cfg McpServerConfig, registry *InProcRegistry, authHandler a
 		if cfg.Stdio.Cwd != "" {
 			cmd.Dir = cfg.Stdio.Cwd
 		}
-		if len(cfg.Stdio.Env) > 0 {
-			// Start from the current process environment so PATH, SystemRoot,
-			// APPDATA and other required variables are preserved. Without this,
-			// npx/cmd on Windows fails because it cannot locate Node or system
-			// directories.
-			cmd.Env = append(os.Environ(), envSlice(cfg.Stdio.Env)...)
+		// Every new stdio server receives the current route snapshot rather than
+		// the Core's stale launch-time proxy values. PATH, SystemRoot, APPDATA and
+		// other required values remain present on macOS and Windows.
+		childEnvironment, err := networkroute.DefaultEnvironmentForChild(os.Environ())
+		if err != nil {
+			return nil, TransportStdio, fmt.Errorf("resolve network route: %w", err)
 		}
+		cmd.Env = append(childEnvironment, envSlice(cfg.Stdio.Env)...)
 		return &mcp.CommandTransport{Command: cmd}, TransportStdio, nil
 	case TransportHTTP:
 		httpClient := buildHTTPClient(cfg.InsecureSkipVerify)
@@ -92,13 +96,26 @@ func buildTransport(cfg McpServerConfig, registry *InProcRegistry, authHandler a
 // buildHTTPClient returns an *http.Client honouring the insecureSkipVerify
 // flag. The timeout matches the agent's default tool-call timeout.
 func buildHTTPClient(insecure bool) *http.Client {
-	client := &http.Client{
-		Timeout: 60 * time.Second,
+	transport := &http.Transport{
+		Proxy:       networkroute.DefaultProxyForRequest,
+		DialContext: networkroute.WithRouteFailureFeedback((&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext),
+	}
+	if base, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport = base.Clone()
+		transport.Proxy = networkroute.DefaultProxyForRequest
+		transport.DialContext = networkroute.WithRouteFailureFeedback(transport.DialContext)
 	}
 	if insecure {
-		client.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		tlsConfig := &tls.Config{}
+		if transport.TLSClientConfig != nil {
+			tlsConfig = transport.TLSClientConfig.Clone()
 		}
+		tlsConfig.InsecureSkipVerify = true //nolint:gosec -- explicit user MCP config compatibility
+		transport.TLSClientConfig = tlsConfig
+	}
+	client := &http.Client{
+		Timeout:   60 * time.Second,
+		Transport: transport,
 	}
 	return client
 }

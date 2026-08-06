@@ -8,6 +8,8 @@
 
 Desktop 主进程启动一个本地 core 子进程，并通过随机 `127.0.0.1` 端口与其通信。端口由操作系统使用 `listen(0)` 分配，每次重试都重新分配；`8787` 不是 Desktop 产品合同，只能出现在独立开发/测试示例中。
 
+Windows Desktop 还启动一个无网络、无持久化的 `awaken-network-watch.exe` 辅助进程，只订阅 registry 代理变化并向 Main 输出信号；macOS 复用系统 `scutil`。它们不是第二个 Core，不持有 token、provider key 或 route 值，且由 Main 在退出时终止。完整行为由[跨平台网络代理与恢复](跨平台网络代理与恢复.md)拥有。
+
 renderer 不直接管理 core URL 或子进程，必须经 preload/main bridge 使用当前 supervisor 提供的地址。
 
 ## 状态机与 owner
@@ -35,6 +37,7 @@ Desktop 向 core 注入：
 - `AWAKEN_USER_DATA_DIR`：当前 launch mode 的 Electron userData，供桌面偏好、宠物、旧状态兼容和测试隔离使用；
 - `AWAKEN_HOME`：由 Main 从用户主目录确定的业务数据根 `~/.awaken`，承载 FileStore、模型配置、user MCP server 配置和 connector 认证 metadata；其中 user MCP 配置唯一位于 `config/mcp-servers.json`；
 - `AWAKEN_DEFAULT_WORKSPACE`：始终注入。值为用户明确选择过的 workspace；没有任何用户选择时注入空值，core 视为"无默认 workspace"启动，不回退 cwd 或用户主目录。用户主目录不再被隐式注册为默认项目；startRun 仍要求每次 run 携带有效 workspace。
+- `AWAKEN_PROXY_POLICY` 与 `AWAKEN_SYSTEM_PROXY_SNAPSHOT`：Main 观察到的跨平台网络策略和无凭据系统 route；Core 启动后继续通过 authenticated control route 接收 generation 更新。完整优先级、恢复与平台边界见[跨平台网络代理与恢复](跨平台网络代理与恢复.md)。
 
 启动前移除 `AWAKEN_CONFIG_DIR` 和历史 LLM provider/API key 环境变量，避免 shell 环境意外改变 Desktop 身份或泄露旧凭据。模型 key 由 05 域的 `~/.awaken/.env` 文件契约管理。MCP user config 不从 `AWAKEN_USER_DATA_DIR` 或任何旧位置迁移、导入或 fallback；没有 default workspace 时 project scope 缺席，但 user scope 的管理与连接不受影响。
 
@@ -55,6 +58,7 @@ core 异常退出后状态为 `crashed`。重新启动会恢复线程历史，�
 - stop 必须有 graceful -> force 的有界升级，不能留下孤儿 core。
 - 当前没有把外部远程 runtime URL 作为正式 Desktop 产品入口。
 - 当前不保证 crash 后自动续跑 active run，只保证可确认历史恢复。
+- 当前不把已开始输出、可能产生费用或外部副作用的请求因代理切换而盲目重放；只保证安全的新连接读取最新 route。
 
 ## `awaken-acp` 入口
 
@@ -75,6 +79,6 @@ core 异常退出后状态为 `crashed`。重新启动会恢复线程历史，�
 
 ## 测试与真实 Desktop 验收
 
-自动化 owner：[`apps/desktop/src/main/runtime-supervisor.test.ts`](../../apps/desktop/src/main/runtime-supervisor.test.ts)、[`scripts/tests/desktop-lifecycle.test.mjs`](../../scripts/tests/desktop-lifecycle.test.mjs)。测试覆盖随机端口、重试、健康超时、generation、环境清理和升级关闭。
+自动化 owner：[`apps/desktop/src/main/runtime-supervisor.test.ts`](../../apps/desktop/src/main/runtime-supervisor.test.ts)、[`apps/desktop/src/main/network-route-manager.test.ts`](../../apps/desktop/src/main/network-route-manager.test.ts)、[`apps/desktop/src/main/network-route-observer.test.ts`](../../apps/desktop/src/main/network-route-observer.test.ts)、[`scripts/tests/desktop-lifecycle.test.mjs`](../../scripts/tests/desktop-lifecycle.test.mjs)。测试覆盖随机端口、重试、健康超时、进程 generation、环境清理、网络 route generation、原生变化信号、macOS/Windows 陈旧 loopback 代理降级/恢复和升级关闭。
 
 真实验收必须通过 README 正式入口：确认只出现一个受管 Desktop/core 实例、实际地址为 loopback 随机端口、health 成功后 UI 才可用；关闭后 core 退出；重新打开后历史从持久层恢复。不要把独立运行 core 或固定 `8787` 的 curl smoke 当成 Desktop 验收。

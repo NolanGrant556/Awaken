@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	ctx "awaken/src/context"
+	"awaken/src/networkroute"
 )
 
 const (
@@ -68,6 +70,7 @@ var (
 func newProviderTransport(responseHeaderTimeout time.Duration) *http.Transport {
 	return &http.Transport{
 		Proxy:                 smartProxy,
+		DialContext:           networkroute.WithRouteFailureFeedback((&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext),
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
@@ -160,16 +163,11 @@ func streamIdleTimeoutError(timeout time.Duration) error {
 	return fmt.Errorf("%w: stream idle timeout after %s while reading body", ErrRequestFailed, timeout)
 }
 
-// smartProxy 先尝试代理，失败则直连
+// smartProxy delegates to the process-wide route authority. In auto mode an
+// unavailable loopback proxy is bypassed before request bytes are written;
+// proxy-only mode remains fail-closed.
 func smartProxy(req *http.Request) (*url.URL, error) {
-	proxyURL, err := http.ProxyFromEnvironment(req)
-	if err != nil {
-		return nil, nil // 出错时直连
-	}
-	if proxyURL != nil {
-		return proxyURL, nil // 使用代理
-	}
-	return nil, nil // 无代理配置，直连
+	return networkroute.DefaultProxyForRequest(req)
 }
 
 // LoadConfig 从 .env 和 config.toml 加载配置。

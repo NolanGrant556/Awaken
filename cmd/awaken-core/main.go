@@ -28,6 +28,7 @@ import (
 	"awaken/src/mcpclient"
 	"awaken/src/memory"
 	"awaken/src/modelprofile"
+	"awaken/src/networkroute"
 	"awaken/src/runtime"
 	"awaken/src/scheduledtask"
 	"awaken/src/server"
@@ -43,6 +44,8 @@ import (
 func main() {
 	ownerMode := flag.String("owner-mode", "desktop", "Core owner mode: desktop or headless")
 	flag.Parse()
+	routeManager := networkroute.NewFromEnvironment(os.Environ())
+	networkroute.InstallDefaultHTTPTransport(routeManager)
 
 	addr := os.Getenv("AWAKEN_CORE_ADDR")
 	if addr == "" {
@@ -347,6 +350,7 @@ func main() {
 			LeaseManager:      leaseManager,
 			ACPSessionManager: acpSessionManager,
 			ModelProfileStore: modelprofile.NewUserStore(desktopdata.AwakenHomeRoot()),
+			NetworkRoute:      routeManager,
 		}
 	}
 

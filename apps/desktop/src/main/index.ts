@@ -169,6 +169,11 @@ import { listProjectDirectory, resolveProjectEntry } from "./project-files.js";
 import { ProjectFilePreviewManager } from "./project-file-preview-manager.js";
 import { ArtifactMediaManager } from "./artifact-media-manager.js";
 import { ComputerOverlayManager } from "./computer-overlay-manager.js";
+import {
+  NetworkRouteManager,
+  type NetworkRouteSnapshot,
+} from "./network-route-manager.js";
+import { NetworkRouteObserver } from "./network-route-observer.js";
 import { enforceMainWindowZoom } from "./window-zoom.js";
 import { MACOS_WINDOW_CHROME_GEOMETRY } from "../shared/window-chrome.js";
 import {
@@ -240,6 +245,9 @@ let petStore: PetStore | null = null;
 let petWindowManager: PetWindowManager | null = null;
 let computerOverlayManager: ComputerOverlayManager | null = null;
 let cliConnectorManager: CliConnectorManager | null = null;
+let networkRouteManager: NetworkRouteManager | null = null;
+let networkRouteObserver: NetworkRouteObserver | null = null;
+let networkRoutePowerListener: (() => void) | null = null;
 let mainWindowRef: BrowserWindow | null = null;
 let pendingPetThreadId: string | null = null;
 let isQuitting = false;
@@ -281,6 +289,16 @@ function cliConnectorManifestPath(): string {
     : join(app.getAppPath(), "resources", "cli-connectors", "manifest.json");
 }
 
+function networkRouteObserverBinaryPath(): string {
+  const targetDir = `${process.platform}-${process.arch}`;
+  const binaryName = process.platform === "win32"
+    ? "awaken-network-watch.exe"
+    : "awaken-network-watch";
+  return app.isPackaged
+    ? join(process.resourcesPath, "bin", targetDir, binaryName)
+    : join(__dirname, "../../resources/bin", targetDir, binaryName);
+}
+
 function broadcastCliConnectorState(connector: CliConnectorView): void {
   for (const wc of webContents.getAllWebContents()) {
     if (!wc.isDestroyed()) wc.send("awaken:cli-connector-state", { connector });
@@ -297,6 +315,25 @@ async function publishCliReadiness(readiness: CliConnectorReadiness): Promise<vo
     },
     body: JSON.stringify(readiness),
   });
+}
+
+async function synchronizeNetworkRoute(snapshot?: NetworkRouteSnapshot): Promise<void> {
+  const client = supervisor?.getControlClient();
+  const current = snapshot ?? networkRouteManager?.currentSnapshot();
+  if (!client || !current) return;
+  try {
+    await client.updateNetworkRoute(current);
+  } catch (error) {
+    console.warn("network_route_sync_failed", {
+      generation: current.generation,
+      platform: process.platform,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function prepareNetworkRoute(surface: string): Promise<void> {
+  await networkRouteManager?.prepareForNetworkOperation(surface);
 }
 
 function loadDesktopIcon() {
@@ -1819,6 +1856,7 @@ ipcMain.handle("awaken:list-connectors", async () => {
 });
 
 ipcMain.handle("awaken:connect-connector", async (_event, connectorId: string) => {
+  await prepareNetworkRoute("connector-connect");
   return requestRuntime<RuntimeConnectorActionResponse>(`/v1/connectors/${connectorId}/connect`, {
     method: "POST",
     headers: {
@@ -1887,6 +1925,7 @@ ipcMain.handle("awaken:list-mcp-servers", async () => {
 ipcMain.handle(
   "awaken:configure-mcp-servers",
   async (_event, request: ConfigureMcpServersRequest) => {
+    await prepareNetworkRoute("mcp-configure");
     return requestRuntime<ConfigureMcpServersResponse>("/v1/mcp/servers", {
       method: "POST",
       headers: {
@@ -1909,6 +1948,7 @@ ipcMain.handle("awaken:get-mcp-server-config", async (_event, name: string) => {
 ipcMain.handle(
   "awaken:update-mcp-server-config",
   async (_event, name: string, request: UpdateMcpServerConfigRequest) => {
+    await prepareNetworkRoute("mcp-update");
     return requestRuntime<ConfigureMcpServersResponse>(
       `/v1/mcp/servers/${encodeURIComponent(name)}/config`,
       {
@@ -1939,6 +1979,7 @@ ipcMain.handle("awaken:disable-mcp-server", async (_event, name: string) => {
 });
 
 ipcMain.handle("awaken:enable-mcp-server", async (_event, name: string) => {
+  await prepareNetworkRoute("mcp-enable");
   return requestRuntimeOK(`/v1/mcp/servers/${encodeURIComponent(name)}/enable`, {
     method: "POST",
   });
@@ -2199,6 +2240,7 @@ ipcMain.handle("awaken:test-model-profile", async (_event, request: ModelProfile
     if (!modelProfileStore) {
       throw new Error("Model profile store unavailable");
     }
+    await prepareNetworkRoute("model-profile-test");
     return modelProfileStore.testProfile(request);
   });
 });
@@ -2208,6 +2250,7 @@ ipcMain.handle(
   async (_event, request: ModelProfileSaveRequest) =>
     runDesktopOperation(async () => {
       if (!modelProfileStore) throw new Error("Model profile store unavailable");
+      await prepareNetworkRoute("model-reasoning-test");
       return modelProfileStore.testAgentPlanReasoningCapability(request);
     }),
 );
@@ -2216,6 +2259,7 @@ ipcMain.handle("awaken:sync-model-capabilities", async () => {
   if (!modelProfileStore) {
     throw new Error("Model profile store unavailable");
   }
+  await prepareNetworkRoute("model-capability-sync");
   await modelProfileStore.syncCapabilities();
   const providers = modelProfileStore.listProviders() satisfies ModelProviderWire[];
   return providers.map(normalizeModelProvider);
@@ -2225,6 +2269,7 @@ ipcMain.handle("awaken:get-model-profile-balances", async () => {
   if (!modelProfileStore) {
     throw new Error("Model profile store unavailable");
   }
+  await prepareNetworkRoute("model-balance");
   const balances = await modelProfileStore.fetchBalances();
   const result: ModelProfileBalancesResultWire = { balances };
   return normalizeModelProfileBalancesResult(result);
@@ -2243,6 +2288,7 @@ ipcMain.handle(
     if (!searchSettingsStore) {
       throw new Error("Search settings store unavailable");
     }
+    await prepareNetworkRoute("search-provider-test");
     return searchSettingsStore.testProvider(request.provider);
   },
 );
@@ -3052,6 +3098,7 @@ ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
     // fully resolved, credential-bearing model_profile assembled here.
     body.model_profile_id = undefined;
     body.reasoning_effort = undefined;
+    await prepareNetworkRoute("model-run");
     const run = await requestRuntime("/v1/runs", {
       method: "POST",
       headers: {
@@ -3462,6 +3509,37 @@ app.whenReady().then(async () => {
   modelProfileStore = new ModelProfileStore(awakenHome);
   await modelProfileStore.initialize();
   searchSettingsStore = new SearchSettingsStore(configDir);
+  networkRouteManager = new NetworkRouteManager({
+    platform: process.platform,
+    resolveProxy: (url) => session.defaultSession.resolveProxy(url),
+    forceReloadProxyConfig: () => session.defaultSession.forceReloadProxyConfig(),
+    onSnapshotChanged: (snapshot) => {
+      void cliConnectorManager?.refreshAll();
+      return synchronizeNetworkRoute(snapshot);
+    },
+    onError: (error) => {
+      console.warn("network_route_refresh_failed", {
+        platform: process.platform,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    },
+  });
+  await networkRouteManager.initialize();
+  networkRouteObserver = new NetworkRouteObserver({
+    platform: process.platform,
+    windowsHelperPath: process.platform === "win32" ? networkRouteObserverBinaryPath() : undefined,
+    onChange: (reason) => networkRouteManager?.notifySystemChange(reason),
+    onError: (error) => {
+      console.warn("network_route_observer_failed", {
+        platform: process.platform,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    },
+  });
+  networkRouteObserver.start();
+  networkRoutePowerListener = () => networkRouteManager?.notifySystemChange("power-resume");
+  powerMonitor.on("resume", networkRoutePowerListener);
+  powerMonitor.on("unlock-screen", networkRoutePowerListener);
   cliConnectorManager = new CliConnectorManager({
     homeDir: app.getPath("home"),
     platform: process.platform,
@@ -3471,6 +3549,9 @@ app.whenReady().then(async () => {
     openExternal: (url) => shell.openExternal(url),
     publishReadiness: publishCliReadiness,
     onStateChanged: broadcastCliConnectorState,
+    environment: () => networkRouteManager?.childEnvironment(process.env) ?? process.env,
+    beforeNetworkOperation: prepareNetworkRoute,
+    onTransportFailure: (surface) => networkRouteManager?.notifyTransportFailure(surface),
   });
   await cliConnectorManager.initialize();
   petStore = new PetStore(configDir, app.getPath("userData"));
@@ -3572,23 +3653,26 @@ app.whenReady().then(async () => {
     {},
     {
       resolveProductEnvironment: async () => {
+        let searchEnvironment: NodeJS.ProcessEnv = {
+          AWAKEN_WEB_SEARCH_PROVIDERS: "",
+        };
         try {
-          const searchEnvironment = (await searchSettingsStore?.runtimeEnvironment()) ?? {
+          searchEnvironment = (await searchSettingsStore?.runtimeEnvironment()) ?? {
             AWAKEN_WEB_SEARCH_PROVIDERS: "",
-          };
-          const managedBin = cliConnectorManager?.managedBinPath() ?? "";
-          const inheritedPath = process.env.PATH ?? "";
-          return {
-            ...searchEnvironment,
-            AWAKEN_DESKTOP_CONTROL_TOKEN: desktopControlToken,
-            PATH: managedBin ? `${managedBin}${path.delimiter}${inheritedPath}` : inheritedPath,
           };
         } catch (error) {
           console.error("[awaken-desktop] search settings unavailable", {
             message: error instanceof Error ? error.message : String(error),
           });
-          return { AWAKEN_WEB_SEARCH_PROVIDERS: "" };
         }
+        const managedBin = cliConnectorManager?.managedBinPath() ?? "";
+        const inheritedPath = process.env.PATH ?? "";
+        return {
+          ...searchEnvironment,
+          ...(networkRouteManager?.runtimeEnvironment() ?? {}),
+          AWAKEN_DESKTOP_CONTROL_TOKEN: desktopControlToken,
+          PATH: managedBin ? `${managedBin}${path.delimiter}${inheritedPath}` : inheritedPath,
+        };
       },
     },
   );
@@ -3608,6 +3692,7 @@ app.whenReady().then(async () => {
       startProjectTrashWorker();
       startScheduledTaskEventStreamIfNeeded();
       void cliConnectorManager?.refreshAll();
+      void synchronizeNetworkRoute();
     } else if (info.status !== "running") {
       runtimeBaseUrl = null;
       stopScheduledTaskEventStream();
@@ -3636,6 +3721,7 @@ app.whenReady().then(async () => {
   memoryDreamSchedulerTimer = setInterval(() => void runAutomaticDreamIfEligible(), 60_000);
 
   app.on("activate", () => {
+    networkRouteManager?.notifySystemChange("app-activate");
     if (!mainWindowRef || mainWindowRef.isDestroyed()) {
       createMainWindow();
     } else {
@@ -3667,6 +3753,15 @@ app.on("before-quit", (event) => {
   projectFilePreviewManager = null;
   artifactMediaManager?.dispose();
   artifactMediaManager = null;
+  if (networkRoutePowerListener) {
+    powerMonitor.removeListener("resume", networkRoutePowerListener);
+    powerMonitor.removeListener("unlock-screen", networkRoutePowerListener);
+  }
+  networkRoutePowerListener = null;
+  networkRouteObserver?.dispose();
+  networkRouteObserver = null;
+  networkRouteManager?.dispose();
+  networkRouteManager = null;
   void (async () => {
     try {
       if (supervisor) {

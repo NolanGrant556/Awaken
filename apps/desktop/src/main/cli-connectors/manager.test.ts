@@ -73,16 +73,16 @@ describe("CliConnectorManager", () => {
   });
 
   it("passes only a non-secret environment allowlist to official CLI processes", () => {
-    const previousSecret = process.env.OPENAI_API_KEY;
-    process.env.OPENAI_API_KEY = "must-not-leak";
-    try {
-      const env = safeCliEnvironment();
-      expect(env.OPENAI_API_KEY).toBeUndefined();
-      expect(env.PATH).toBe(process.env.PATH);
-    } finally {
-      if (previousSecret === undefined) delete process.env.OPENAI_API_KEY;
-      else process.env.OPENAI_API_KEY = previousSecret;
-    }
+    const env = safeCliEnvironment({
+      PATH: "/test/bin",
+      ALL_PROXY: "socks5://127.0.0.1:7897",
+      all_proxy: "socks5://127.0.0.1:7897",
+      OPENAI_API_KEY: "must-not-leak",
+    });
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(env.PATH).toBe("/test/bin");
+    expect(env.ALL_PROXY).toBe("socks5://127.0.0.1:7897");
+    expect(env.all_proxy).toBe("socks5://127.0.0.1:7897");
   });
 
   it("rejects an unbounded response stream before retaining bytes past the limit", async () => {
@@ -143,6 +143,7 @@ fi
     process.env.PATH = "";
     const published: CliConnectorReadiness[] = [];
     const stateChanges = vi.fn();
+    const beforeNetworkOperation = vi.fn(async () => undefined);
     const manager = new CliConnectorManager({
       homeDir: root,
       platform: "darwin",
@@ -151,6 +152,7 @@ fi
       fetchAsset: vi.fn(async (url) => new Response(url.includes("skills") ? skillArchiveBytes : archiveBytes, { status: 200 })),
       publishReadiness: vi.fn(async (readiness) => { published.push(readiness); }),
       onStateChanged: stateChanges,
+      beforeNetworkOperation,
     });
     await manager.initialize();
     const installed = await manager.install("dingtalk-workspace");
@@ -172,6 +174,9 @@ fi
     expect(progressEvents.length).toBeGreaterThan(3);
     expect(progressEvents).toEqual([...progressEvents].sort((a, b) => a - b));
     expect(stateChanges.mock.calls.some(([view]) => view.installProgress?.phase === "downloading_skills")).toBe(true);
+    expect(beforeNetworkOperation).toHaveBeenCalledWith("cli-command");
+    expect(beforeNetworkOperation).toHaveBeenCalledWith("cli-download");
+    expect(beforeNetworkOperation).toHaveBeenCalledWith("cli-skill-download");
 
     const authRoot = path.join(root, ".awaken", "runtime", "auth");
     await fs.rm(authRoot, { recursive: true, force: true });

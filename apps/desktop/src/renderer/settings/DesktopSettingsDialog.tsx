@@ -770,7 +770,7 @@ export function DesktopSettingsDialog({
   }
 
   async function testDraft(): Promise<void> {
-    if (!draft) return;
+    if (!draft || draft.apiKey.trim() === "") return;
     const provider = providerById.get(draft.providerId);
     if (!provider) return;
     setTesting(true);
@@ -798,7 +798,7 @@ export function DesktopSettingsDialog({
   }
 
   async function testDraftReasoning(): Promise<void> {
-    if (!draft) return;
+    if (!draft || draft.apiKey.trim() === "") return;
     const provider = providerById.get(draft.providerId);
     if (!provider) return;
     setTestingReasoning(true);

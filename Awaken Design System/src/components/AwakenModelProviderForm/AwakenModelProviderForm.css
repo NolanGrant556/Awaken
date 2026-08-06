@@ -52,11 +52,18 @@
   color: color-mix(in srgb, var(--aw-error) 78%, var(--aw-text-primary));
 }
 
-.model-provider-primary-test:hover,
-.model-provider-primary-test:focus-visible {
+.model-provider-primary-test:not(:disabled):hover,
+.model-provider-primary-test:not(:disabled):focus-visible {
   border-color: color-mix(in srgb, var(--provider-accent, var(--aw-accent)) 48%, var(--aw-border-main)) !important;
   background: color-mix(in srgb, var(--provider-accent, var(--aw-accent)) 11%, var(--aw-surface-raised)) !important;
   box-shadow: 0 4px 12px color-mix(in srgb, var(--provider-accent, var(--aw-accent)) 9%, transparent);
+}
+
+.model-provider-primary-test:disabled {
+  border-color: var(--aw-border-main) !important;
+  background: var(--aw-bg-fill-light) !important;
+  color: var(--aw-text-subtle) !important;
+  box-shadow: none;
 }
 
 .model-provider-advanced {

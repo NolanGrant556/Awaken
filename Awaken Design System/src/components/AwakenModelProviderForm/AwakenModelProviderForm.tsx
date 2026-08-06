@@ -12,6 +12,17 @@ import {
 import { AwakenButton } from "../AwakenButton";
 import { AwakenSelect } from "../AwakenSelect";
 import { AwakenSettingsSwitch } from "../AwakenSettingsSwitch";
+import { useAwakenAnchoredMenuLayout } from "../../hooks/useAwakenAnchoredMenuLayout";
+
+const MODEL_SUGGESTIONS_MAX_HEIGHT = 180;
+
+function estimateModelSuggestionsHeight(modelCount: number): number {
+  if (modelCount === 0) return 58;
+  return Math.min(
+    MODEL_SUGGESTIONS_MAX_HEIGHT,
+    10 + modelCount * 32 + Math.max(0, modelCount - 1) * 2,
+  );
+}
 
 export type AwakenModelProviderCapability =
   | "supportsVision"
@@ -104,6 +115,18 @@ export function AwakenModelProviderForm({
   onSubmit,
 }: AwakenModelProviderFormProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const hasDraftApiKey = apiKey.trim().length > 0;
+  const {
+    anchorRef: customPickerRef,
+    menuRef: customSuggestionsRef,
+    placement: customSuggestionsPlacement,
+    maxHeight: customSuggestionsMaxHeight,
+    updateLayout: updateCustomSuggestionsLayout,
+  } = useAwakenAnchoredMenuLayout<HTMLDivElement, HTMLDivElement>({
+    open: pickerOpen && modelMode === "custom",
+    estimatedHeight: estimateModelSuggestionsHeight(models.length),
+    maxHeight: MODEL_SUGGESTIONS_MAX_HEIGHT,
+  });
   const fieldId = useId();
   const modelLabelId = `${fieldId}-model-label`;
   const modelInputId = `${fieldId}-model-input`;
@@ -112,6 +135,11 @@ export function AwakenModelProviderForm({
   function chooseModel(nextModelId: string): void {
     onModelChange(nextModelId);
     setPickerOpen(false);
+  }
+
+  function toggleCustomPicker(): void {
+    if (!pickerOpen) updateCustomSuggestionsLayout();
+    setPickerOpen((open) => !open);
   }
 
   return (
@@ -123,13 +151,17 @@ export function AwakenModelProviderForm({
       {modelMode === "custom" ? (
         <div className="model-provider-field">
           <label id={modelLabelId} htmlFor={modelInputId}>模型</label>
-          <div className="model-custom-picker">
+          <div
+            ref={customPickerRef}
+            className="model-custom-picker aw-select"
+            data-menu-placement={customSuggestionsPlacement}
+          >
             <input
               id={modelInputId}
               value={modelId}
               aria-expanded={pickerOpen}
               aria-controls={modelSuggestionsId}
-              onClick={() => setPickerOpen((open) => !open)}
+              onClick={toggleCustomPicker}
               onChange={(event) => onModelChange(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Escape") setPickerOpen(false);
@@ -141,14 +173,16 @@ export function AwakenModelProviderForm({
               aria-haspopup="listbox"
               aria-expanded={pickerOpen}
               aria-label="展开模型建议"
-              onClick={() => setPickerOpen((open) => !open)}
+              onClick={toggleCustomPicker}
             >
               <ChevronDown className="aw-select__chevron" size={16} strokeWidth={1.9} />
             </button>
             {pickerOpen ? (
               <div
+                ref={customSuggestionsRef}
                 id={modelSuggestionsId}
                 className="aw-select__menu"
+                style={{ maxHeight: customSuggestionsMaxHeight }}
                 role="listbox"
                 aria-labelledby={modelLabelId}
               >
@@ -224,7 +258,7 @@ export function AwakenModelProviderForm({
             variant="default"
             size="md"
             loading={testing}
-            disabled={saving}
+            disabled={saving || !hasDraftApiKey}
             onClick={onTest}
           >
             测试连接
@@ -282,10 +316,10 @@ export function AwakenModelProviderForm({
           {presentation === "inline" || showReasoningTest || showAccountActions ? (
             <div className="model-provider-verification-actions">
               {presentation === "inline" ? (
-                <AwakenButton variant="default" size="md" loading={testing} disabled={saving} onClick={onTest}>测试连接</AwakenButton>
+                <AwakenButton variant="default" size="md" loading={testing} disabled={saving || !hasDraftApiKey} onClick={onTest}>测试连接</AwakenButton>
               ) : null}
               {showReasoningTest ? (
-                <AwakenButton variant="default" size="md" loading={testingReasoning} disabled={saving || testing} onClick={onTestReasoning}>验证 effort（少量消耗）</AwakenButton>
+                <AwakenButton variant="default" size="md" loading={testingReasoning} disabled={saving || testing || !hasDraftApiKey} onClick={onTestReasoning}>验证 effort（少量消耗）</AwakenButton>
               ) : null}
               {showAccountActions ? (
                 <>

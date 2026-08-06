@@ -1,6 +1,6 @@
 ---
 name: pdf
-version: 1.1.0
+version: 1.1.2
 description: 处理通用 PDF：在模型具备原生 PDF 或视觉能力时阅读/抽取，以及合并拆分、旋转、水印、新建、填表、加密解密、抽图；扫描件 OCR 仅在本机已有工具时。专业长文档、Markdown 精排、论文/简历或明确要求 Typst/PDF 幻灯片时改用 PDF_Max（调用 ID：pdf-max）。
 when_to_use: 需要读写、加工或生成通用 PDF，且当前模型能通过 Read 打开 PDF（原生 PDF 或视觉）或任务是创建/加工而非“替无能力模型读懂 PDF”时；需要专业 Typst 排版时不要使用本 Skill。
 user-invocable: true
@@ -21,6 +21,16 @@ user-invocable: true
 3. **禁止**为绕过该限制而：加载本 Skill 的安装剧本、`uv`/`pip`/`venv` 装 `pdfplumber`/`pypdf`、装 Poppler/tesseract/OCR、用 Bash 抽文本或渲图冒充“已读懂”、或改去装 Excel/Word 依赖读同源文件来替代用户点名的 PDF。
 
 本 Skill **不能**把无 PDF/无视觉的模型变成能读 PDF。加工/生成路径（合并、拆分、新建、填表等）仅在任务本身不依赖“当前模型看见 PDF 内容”时继续；若用户要的就是读懂附件 PDF，一律走上面的硬停。
+
+## 阅读分页策略
+
+页数未知时按以下顺序执行：
+
+1. 首次优先显式传 `pages: "1-10"`。如果模型省略 `pages`，宿主也会把超过 10 页的渲染页路线自动归一化为首段 `1-10`，不会先返回分页参数异常；已知不超过 10 页则仍整份读取，`route=native_pdf` 则表示原生整份已完整交给模型。
+2. 从成功结果的 `page_count` 与 `route` 判断后续：`route=native_pdf` 表示整份 PDF 已交给模型，无需重复读取；渲染页路线且 `page_count > 10` 时，继续读取 `11-20`、`21-30` 等剩余范围。
+3. 每次最多 20 页；已经知道总页数时，最后一段只请求真实剩余页。
+
+模型应为已知 >10 页的后续读取显式传页码；即使首次遗漏，宿主也不会整份渲染长 PDF。该策略保留上下文保护，同时避免把正常的页数发现过程显示成一次工具异常。
 
 ## Awaken 工具约定
 
@@ -59,7 +69,7 @@ Windows 上把 `python3` / `pip3` 换成 `python` / `pip`（或 `py -m pip`）�
 
 | 任务 | 推荐 |
 | --- | --- |
-| 读懂/摘要 PDF | **`Read`**；若 `model_pdf_unsupported` → 请用户换模型 |
+| 读懂/摘要 PDF | **`Read`**；页数未知先传 `pages: "1-10"`；若 `model_pdf_unsupported` → 请用户换模型 |
 | 抽表格（模型已能读或任务为加工） | `pdfplumber` → DataFrame / Excel |
 | 合并/拆分/旋转/元数据 | `pypdf` |
 | 新建 PDF | `reportlab` |

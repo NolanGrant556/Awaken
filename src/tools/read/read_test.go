@@ -181,18 +181,97 @@ func TestReadPDFOmitsDefaultPagesAndClampsOverRange(t *testing.T) {
 	}
 }
 
-func TestReadPDFRequiresPagesForLongDocuments(t *testing.T) {
+func TestReadPDFUnknownPageCountGuidanceUsesSuccessfulBoundedRanges(t *testing.T) {
+	if _, err := exec.LookPath("pdftoppm"); err != nil {
+		t.Skip("pdftoppm unavailable")
+	}
 	if _, err := exec.LookPath("pdfinfo"); err != nil {
 		t.Skip("pdfinfo unavailable")
 	}
 	root := t.TempDir()
-	writeMinimalPDF(t, filepath.Join(root, "long.pdf"), 11)
-	outcome, err := (&Tool{}).ExecuteOutcome(readTestContext(root, tool.ModelCapabilities{SupportsNativePDF: true}), `{"file_path":"long.pdf"}`, nil)
+	writeMinimalPDF(t, filepath.Join(root, "thirteen.pdf"), 13)
+	ctx := readTestContext(root, tool.ModelCapabilities{SupportsVision: true})
+	first, err := (&Tool{}).ExecuteOutcome(ctx, `{"file_path":"thirteen.pdf","pages":"1-10"}`, nil)
+	if err != nil || first.IsError() || len(first.ModelContent) != 10 {
+		t.Fatalf("first bounded range=%+v err=%v", first, err)
+	}
+	if count, _ := first.Details["page_count"].(int); count != 13 {
+		t.Fatalf("first range should expose page_count=13, details=%v", first.Details)
+	}
+	remaining, err := (&Tool{}).ExecuteOutcome(ctx, `{"file_path":"thirteen.pdf","pages":"11-13"}`, nil)
+	if err != nil || remaining.IsError() || len(remaining.ModelContent) != 3 {
+		t.Fatalf("remaining bounded range=%+v err=%v", remaining, err)
+	}
+}
+
+func TestReadPDFAutomaticallyDefaultsLongDocumentsToFirstTenPages(t *testing.T) {
+	if _, err := exec.LookPath("pdftoppm"); err != nil {
+		t.Skip("pdftoppm unavailable")
+	}
+	if _, err := exec.LookPath("pdfinfo"); err != nil {
+		t.Skip("pdfinfo unavailable")
+	}
+	root := t.TempDir()
+	writeMinimalPDF(t, filepath.Join(root, "long.pdf"), 13)
+	outcome, err := (&Tool{}).ExecuteOutcome(readTestContext(root, tool.ModelCapabilities{SupportsVision: true}), `{"file_path":"long.pdf"}`, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if outcome.ErrorCode != "read_pdf_pages_required" || !strings.Contains(outcome.ErrorMessage, "11 pages") {
+	if outcome.IsError() || len(outcome.ModelContent) != 10 {
 		t.Fatalf("long pdf=%+v", outcome)
+	}
+	if defaulted, _ := outcome.Details["pages_defaulted"].(bool); !defaulted {
+		t.Fatalf("omitted long PDF pages should be normalized, details=%v", outcome.Details)
+	}
+	if count, _ := outcome.Details["page_count"].(int); count != 13 {
+		t.Fatalf("normalized result should expose page_count=13, details=%v", outcome.Details)
+	}
+	pages, _ := outcome.Details["pages"].([]int)
+	if len(pages) != 10 || pages[0] != 1 || pages[9] != 10 {
+		t.Fatalf("normalized pages=%v", pages)
+	}
+	if !strings.Contains(outcome.Summary, "default first 10 of 13 pages") {
+		t.Fatalf("normalized summary should explain the host strategy: %q", outcome.Summary)
+	}
+}
+
+func TestReadPDFNativeOnlyRouteRemainsCompleteWhenPagesAreOmitted(t *testing.T) {
+	if _, err := exec.LookPath("pdfinfo"); err != nil {
+		t.Skip("pdfinfo unavailable")
+	}
+	root := t.TempDir()
+	writeMinimalPDF(t, filepath.Join(root, "long-native.pdf"), 13)
+	outcome, err := (&Tool{}).ExecuteOutcome(readTestContext(root, tool.ModelCapabilities{SupportsNativePDF: true}), `{"file_path":"long-native.pdf"}`, nil)
+	if err != nil || outcome.IsError() || len(outcome.ModelContent) != 1 || outcome.ModelContent[0].Type != "file" {
+		t.Fatalf("native long PDF=%+v err=%v", outcome, err)
+	}
+	if route, _ := outcome.Details["route"].(string); route != "native_pdf" {
+		t.Fatalf("native route details=%v", outcome.Details)
+	}
+	if defaulted, _ := outcome.Details["pages_defaulted"].(bool); defaulted {
+		t.Fatalf("native_pdf is already complete and must not claim rendered-page defaulting: %v", outcome.Details)
+	}
+}
+
+func TestReadDefinitionPromisesHostNormalizationWithoutAProbeFailure(t *testing.T) {
+	definition := (&Tool{}).Definition()
+	if !strings.Contains(definition.Description, "safely defaults to pages 1-10") || !strings.Contains(definition.Description, "page_count") {
+		t.Fatalf("description must promise the bounded host default: %q", definition.Description)
+	}
+	found := false
+	for _, example := range definition.Examples {
+		if example.Scenario == "Read PDF with unknown page count" {
+			_, pagesProvided := example.Input["pages"]
+			found = !pagesProvided && strings.Contains(example.Outcome, "pages 1-10") && strings.Contains(example.Outcome, "page_count")
+		}
+	}
+	if !found {
+		t.Fatalf("definition must include an unknown-page-count example: %+v", definition.Examples)
+	}
+	for _, failureMode := range definition.FailureModes {
+		if failureMode.Code == "read_pdf_pages_required" {
+			t.Fatalf("omitted pages are host-normalized and must not remain a declared failure mode: %+v", definition.FailureModes)
+		}
 	}
 }
 

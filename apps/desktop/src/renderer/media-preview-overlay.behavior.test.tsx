@@ -83,4 +83,61 @@ describe("AwakenMediaPreviewOverlay focus ownership", () => {
     expect(document.activeElement).toBe(dialog);
     expect(document.activeElement).not.toBe(close);
   });
+
+  it("attempts video playback, reports metadata, and asks the host to renew a failed source", async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const onMediaError = vi.fn();
+    const onMetadata = vi.fn();
+    act(() => {
+      root.render(
+        <AwakenMediaPreviewOverlay
+          item={{ id: "video-1", kind: "video", title: "视频 1", src: "preview://video-1" }}
+          position={0}
+          count={1}
+          onClose={vi.fn()}
+          onMediaError={onMediaError}
+          onMetadata={onMetadata}
+        />,
+      );
+    });
+
+    const video = host.querySelector<HTMLVideoElement>("video")!;
+    Object.defineProperty(video, "videoWidth", { configurable: true, value: 1080 });
+    Object.defineProperty(video, "videoHeight", { configurable: true, value: 1920 });
+    Object.defineProperty(video, "duration", { configurable: true, value: 5.085 });
+    await act(async () => video.dispatchEvent(new Event("loadedmetadata")));
+
+    expect(play).toHaveBeenCalledTimes(1);
+    expect(onMetadata).toHaveBeenCalledWith({
+      width: 1080,
+      height: 1920,
+      durationSeconds: 5.085,
+    });
+
+    act(() => video.dispatchEvent(new Event("error")));
+    expect(onMediaError).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toContain("正在重新载入视频预览");
+  });
+
+  it("shows an explicit play action when autoplay is rejected", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockRejectedValue(new Error("blocked"));
+    act(() => {
+      root.render(
+        <AwakenMediaPreviewOverlay
+          item={{ id: "video-2", kind: "video", title: "视频 2", src: "preview://video-2" }}
+          position={0}
+          count={1}
+          onClose={vi.fn()}
+        />,
+      );
+    });
+
+    await act(async () => {
+      host.querySelector<HTMLVideoElement>("video")?.dispatchEvent(new Event("loadedmetadata"));
+      await Promise.resolve();
+    });
+    expect(host.querySelector<HTMLButtonElement>(".aw-media-preview-play-fallback")?.textContent).toBe(
+      "播放视频",
+    );
+  });
 });

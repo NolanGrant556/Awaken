@@ -4,6 +4,7 @@ import { useId, useMemo, useState } from "react";
 import {
   AwakenMediaItemCard,
   type AwakenMediaItemKind,
+  type AwakenMediaMetadata,
   type AwakenMediaItemStatus,
 } from "../AwakenMediaItemCard";
 
@@ -18,8 +19,12 @@ export type AwakenMediaGenerationSource = {
   src?: string;
   alt?: string;
   aspectRatio?: number;
+  metadata?: AwakenMediaMetadata;
+  formatLabel?: string;
   onPreview?: () => void;
   onMediaError?: () => void;
+  onMetadata?: (metadata: AwakenMediaMetadata) => void;
+  onViewInInspector?: () => void;
   /** Compatibility for consumers that previously used the only click action. */
   onOpen?: () => void;
 };
@@ -165,8 +170,12 @@ export function AwakenMediaGenerationCard({
                 alt={source?.alt || `${label} ${itemNumber}`}
                 index={slotCount > 1 ? itemNumber : undefined}
                 aspectRatio={source?.aspectRatio ?? requestedAspectRatio}
+                metadata={source?.metadata}
+                formatLabel={source?.formatLabel}
                 onPreview={source?.onPreview ?? source?.onOpen}
                 onMediaError={source?.onMediaError}
+                onMetadata={source?.onMetadata}
+                onViewInInspector={source?.onViewInInspector}
               />
             );
           })}

@@ -19,13 +19,16 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SyntheticEvent,
 } from "react";
+import type { AwakenMediaMetadata } from "../AwakenMediaItemCard";
 
 export type AwakenMediaPreviewItem = {
   id: string;
   kind: "image" | "video";
   title: string;
-  src: string;
+  src?: string;
   alt?: string;
+  metadata?: AwakenMediaMetadata;
+  formatLabel?: string;
 };
 
 export type AwakenMediaPreviewOverlayProps = {
@@ -40,6 +43,10 @@ export type AwakenMediaPreviewOverlayProps = {
   openingExternal?: boolean;
   localOpenLabel?: string;
   revealLabel?: string;
+  sourceUnavailable?: boolean;
+  autoPlayVideo?: boolean;
+  onMediaError?: () => void;
+  onMetadata?: (metadata: AwakenMediaMetadata) => void;
 };
 
 const focusableSelector = [
@@ -60,11 +67,17 @@ export function AwakenMediaPreviewOverlay({
   openingExternal = false,
   localOpenLabel = "使用本地应用打开",
   revealLabel = "在 Finder/资源管理器中显示",
+  sourceUnavailable = false,
+  autoPlayVideo = true,
+  onMediaError,
+  onMetadata,
 }: AwakenMediaPreviewOverlayProps) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const fullscreenRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const autoplayAttemptedSourceRef = useRef<string | undefined>(undefined);
   const dragRef = useRef<{
     pointerId: number;
     x: number;
@@ -77,6 +90,7 @@ export function AwakenMediaPreviewOverlay({
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number }>();
   const [dragging, setDragging] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [autoplayRejected, setAutoplayRejected] = useState(false);
 
   useEffect(() => {
     setFit(true);
@@ -84,12 +98,28 @@ export function AwakenMediaPreviewOverlay({
     setNaturalSize(undefined);
     setDragging(false);
     setLoadFailed(false);
+    setAutoplayRejected(false);
     // Keep programmatic focus on the outline-free dialog surface. Arrow-key
     // navigation changes the item and the global modality to keyboard; focusing
     // the close button here would therefore paint a misleading blue ring even
     // though the user did not navigate to that button with Tab.
     requestAnimationFrame(() => dialogRef.current?.focus());
-  }, [item.id]);
+  }, [item.id, item.src]);
+
+  const reportMediaError = () => {
+    setLoadFailed(true);
+    onMediaError?.();
+  };
+
+  const attemptVideoPlayback = (video: HTMLVideoElement) => {
+    if (!autoPlayVideo || !item.src) return;
+    if (autoplayAttemptedSourceRef.current === item.src) return;
+    autoplayAttemptedSourceRef.current = item.src;
+    void video.play().then(
+      () => setAutoplayRejected(false),
+      () => setAutoplayRejected(true),
+    );
+  };
 
   useEffect(() => {
     const previousActiveElement = document.activeElement;
@@ -244,8 +274,10 @@ export function AwakenMediaPreviewOverlay({
               onPointerUp={finishPointerDrag}
               onPointerCancel={finishPointerDrag}
             >
-              {loadFailed ? (
+              {sourceUnavailable ? (
                 <span className="aw-media-preview-error">图片预览加载失败，可以尝试使用本地应用打开。</span>
+              ) : !item.src || loadFailed ? (
+                <span className="aw-media-preview-error" role="status">正在重新载入图片预览…</span>
               ) : (
                 <span className="aw-media-preview-image-stage" style={imageStageStyle}>
                   <img
@@ -254,26 +286,65 @@ export function AwakenMediaPreviewOverlay({
                     draggable={false}
                     onLoad={(event: SyntheticEvent<HTMLImageElement>) => {
                       const image = event.currentTarget;
-                      setNaturalSize({ width: image.naturalWidth, height: image.naturalHeight });
+                      const metadata = {
+                        width: image.naturalWidth,
+                        height: image.naturalHeight,
+                      };
+                      setNaturalSize(metadata);
+                      onMetadata?.(metadata);
                     }}
-                    onError={() => setLoadFailed(true)}
+                    onError={reportMediaError}
                   />
                 </span>
               )}
             </div>
           ) : (
             <div className="aw-media-preview-video-canvas">
-              {loadFailed ? (
+              {sourceUnavailable ? (
                 <span className="aw-media-preview-error">视频预览加载失败，可以尝试使用本地应用打开。</span>
+              ) : !item.src || loadFailed ? (
+                <span className="aw-media-preview-error" role="status">正在重新载入视频预览…</span>
               ) : (
-                <video
-                  src={item.src}
-                  controls
-                  playsInline
-                  preload="metadata"
-                  aria-label={item.alt || item.title}
-                  onError={() => setLoadFailed(true)}
-                />
+                <>
+                  <video
+                    ref={videoRef}
+                    src={item.src}
+                    controls
+                    autoPlay={autoPlayVideo}
+                    playsInline
+                    preload="metadata"
+                    aria-label={item.alt || item.title}
+                    onLoadedMetadata={(event) => {
+                      const video = event.currentTarget;
+                      onMetadata?.({
+                        width: video.videoWidth,
+                        height: video.videoHeight,
+                        durationSeconds: Number.isFinite(video.duration)
+                          ? video.duration
+                          : undefined,
+                      });
+                      attemptVideoPlayback(video);
+                    }}
+                    onPlay={() => setAutoplayRejected(false)}
+                    onError={reportMediaError}
+                  />
+                  {autoplayRejected ? (
+                    <button
+                      type="button"
+                      className="aw-media-preview-play-fallback"
+                      onClick={() => {
+                        const video = videoRef.current;
+                        if (!video) return;
+                        void video.play().then(
+                          () => setAutoplayRejected(false),
+                          () => setAutoplayRejected(true),
+                        );
+                      }}
+                    >
+                      播放视频
+                    </button>
+                  ) : null}
+                </>
               )}
             </div>
           )}

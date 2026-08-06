@@ -38,7 +38,8 @@ describe("final deliverable list", () => {
     expect(html).toContain(">PDF</span>");
     expect(html).toContain("PDF 文件");
     expect(html).toContain("打开 交付版本.pdf");
-    expect(html).toContain("在 Finder/资源管理器中显示");
+    expect(html).toContain("更多 交付版本.pdf 操作");
+    expect(html).not.toContain("在 Finder/资源管理器中显示");
   });
 
   it("renders image and video delivery cards as independent compact media items", () => {
@@ -224,7 +225,8 @@ describe("final deliverable list", () => {
     expect((html.match(/aw-deliverable-card aw-/g) ?? [])).toHaveLength(3);
     expect(html).toContain(`展开其余 ${hidden} 个交付文件`);
     expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain("在 Finder/资源管理器中显示");
+    expect(html).toContain("更多 交付文件-1.xlsx 操作");
+    expect(html).not.toContain("在 Finder/资源管理器中显示");
   });
 
   it.each([

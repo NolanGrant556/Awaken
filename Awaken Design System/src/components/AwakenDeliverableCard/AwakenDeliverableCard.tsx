@@ -7,9 +7,10 @@ import {
   MoreHorizontal,
   Presentation,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { AwakenMediaItemCard } from "../AwakenMediaItemCard";
 import type { AwakenMediaMetadata } from "../AwakenMediaItemCard";
+import { AwakenPopover } from "../AwakenPopover";
 
 export type AwakenDeliverableFileType =
   | "word"
@@ -114,25 +115,8 @@ export function AwakenDeliverableCard({
   revealLabel,
 }: AwakenDeliverableCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDetailsElement>(null);
   const normalizedExtension = extension.replace(/^\./, "").toUpperCase();
   const canOpen = Boolean(onOpen) && !disabled && !opening;
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const closeOnOutsideInteraction = (event: PointerEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", closeOnOutsideInteraction);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsideInteraction);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [menuOpen]);
 
   if (fileType === "image" || fileType === "video") {
     const mediaStatus = previewUnavailable ? "error" : "ready";
@@ -201,29 +185,42 @@ export function AwakenDeliverableCard({
       </button>
 
       {onReveal ? (
-        <details
-          ref={menuRef}
-          className="aw-deliverable-card-menu"
-          open={menuOpen}
-          onToggle={(event) => setMenuOpen(event.currentTarget.open)}
-        >
-          <summary aria-label={`更多 ${title} 操作`} aria-expanded={menuOpen}>
-            <MoreHorizontal aria-hidden="true" size={20} strokeWidth={1.8} />
-          </summary>
-          <div className="aw-deliverable-card-menu-popover" role="menu">
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setMenuOpen(false);
-                onReveal();
-              }}
-              disabled={disabled}
-            >
-              {revealLabel || "在 Finder/资源管理器中显示"}
-            </button>
-          </div>
-        </details>
+        <div className="aw-deliverable-card-menu">
+          <AwakenPopover
+            trigger={
+              <button
+                type="button"
+                className="aw-deliverable-card-menu-trigger"
+                aria-label={`更多 ${title} 操作`}
+                aria-expanded={menuOpen}
+                aria-haspopup="menu"
+              >
+                <MoreHorizontal aria-hidden="true" size={20} strokeWidth={1.8} />
+              </button>
+            }
+            content={
+              <div className="aw-deliverable-card-menu-popover">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onReveal();
+                  }}
+                  disabled={disabled}
+                >
+                  {revealLabel || "在 Finder/资源管理器中显示"}
+                </button>
+              </div>
+            }
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            placement="bottom-end"
+            offset={4}
+            role="menu"
+            portalled={false}
+          />
+        </div>
       ) : null}
     </article>
   );

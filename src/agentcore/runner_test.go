@@ -2246,6 +2246,18 @@ func TestRunnerRetriesTransientLLMStatusWithoutRetryingPermanentFailure(t *testi
 	if err == nil || calls != 1 {
 		t.Fatalf("permanent provider failure must not retry, calls=%d err=%v", calls, err)
 	}
+
+	calls = 0
+	response, err = runner.streamLLMWithTransientRetry(context.Background(), nil, func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		calls++
+		if calls == 1 {
+			return nil, &llm.TransportError{}
+		}
+		return &llm.Response{Content: "recovered after connection reset"}, nil
+	})
+	if err != nil || response == nil || response.Content != "recovered after connection reset" || calls != 2 {
+		t.Fatalf("expected a pre-response transport retry, calls=%d response=%+v err=%v", calls, response, err)
+	}
 }
 
 func TestRunEventEmitterRunErroredTransportErrorDoesNotLeakURL(t *testing.T) {

@@ -21,6 +21,17 @@ type RequestError struct {
 	Detail     string
 }
 
+// TransportError represents a request that failed before the provider returned
+// an HTTP response. It deliberately carries no URL or underlying network error
+// so credentials and endpoint details cannot leak into journals or UI events.
+// Because no response stream began, the agent runner may safely retry it within
+// the same turn.
+type TransportError struct{}
+
+func (e *TransportError) Error() string { return ErrRequestFailed.Error() + ": transport error" }
+
+func (e *TransportError) Unwrap() error { return ErrRequestFailed }
+
 func (e *RequestError) Error() string {
 	if e == nil {
 		return ErrRequestFailed.Error()
@@ -50,6 +61,10 @@ func RequestRetryAfter(err error) (time.Duration, bool) {
 }
 
 func IsTransientRequestError(err error) bool {
+	var transportError *TransportError
+	if errors.As(err, &transportError) {
+		return true
+	}
 	status, ok := RequestStatus(err)
 	return ok && (status == 429 || status >= 500)
 }

@@ -41,7 +41,7 @@ type params struct {
 func (t *Tool) Name() string { return ToolName }
 
 func (t *Tool) Description() string {
-	return "Read a text file, supported image, or PDF. A relative path resolves against the primary folder; an absolute path is read wherever it points, including outside the task's folders. Text uses 1-based offset/limit; images and PDFs return model-visible media when the selected model supports it. For PDFs with more than 10 pages, provide pages (for example 1-5); omit pages for shorter PDFs."
+	return "Read a text file, supported image, or PDF. A relative path resolves against the primary folder; an absolute path is read wherever it points, including outside the task's folders. Text uses 1-based offset/limit; images and PDFs return model-visible media when the selected model supports it. PDF pages is optional: a known PDF with at most 10 pages is read whole; when pages is omitted for a longer rendered PDF, Read safely defaults to pages 1-10 instead of failing. Inspect route and page_count after the first result: native_pdf is already complete; rendered pages continue with the remaining ranges. Maximum 20 rendered pages per call."
 }
 
 func (t *Tool) Parameters() []tool.ToolParameter {
@@ -49,7 +49,7 @@ func (t *Tool) Parameters() []tool.ToolParameter {
 		{Name: "file_path", Description: "Absolute path or path relative to the workspace.", Type: "string", Required: true},
 		{Name: "offset", Description: "1-based first text line. Defaults to 1.", Type: "integer"},
 		{Name: "limit", Description: "Maximum text lines. Defaults to and is capped at 2000.", Type: "integer"},
-		{Name: "pages", Description: "Optional PDF page range (for example 1-5 or 1,3,7-9). Required for PDFs with more than 10 pages. Maximum 20 pages per request. Out-of-range pages are ignored when the document page count is known.", Type: "string"},
+		{Name: "pages", Description: "Optional PDF page range (for example 1-10 or 1,3,7-9). If omitted, a known PDF with at most 10 pages is read whole and a longer rendered PDF safely defaults to its first 10 pages; route=native_pdf is already complete. Inspect route and page_count in the successful result before planning later ranges. Maximum 20 rendered pages per request. Out-of-range pages are ignored when the document page count is known.", Type: "string"},
 	}
 }
 
@@ -73,11 +73,10 @@ func (t *Tool) Definition() tool.ToolDefinition {
 		Examples: []tool.ToolExample{
 			{Scenario: "Read text", Input: map[string]any{"file_path": "README.md", "offset": 1, "limit": 200}, Outcome: "Returns numbered text lines and a host snapshot."},
 			{Scenario: "Read short PDF", Input: map[string]any{"file_path": "report.pdf"}, Outcome: "Reads the whole short PDF natively, or renders all of its pages for a vision model."},
-			{Scenario: "Read large PDF pages", Input: map[string]any{"file_path": "report.pdf", "pages": "1-5"}, Outcome: "Returns a native PDF or rendered page images according to model capability."},
+			{Scenario: "Read PDF with unknown page count", Input: map[string]any{"file_path": "report.pdf"}, Outcome: "Reads a known short PDF whole or safely defaults a longer PDF to pages 1-10. Inspect route and page_count before requesting later ranges."},
 		},
 		FailureModes: []tool.ToolFailureMode{
 			{Code: "read_invalid_input", Cause: "Path, text range, or PDF page range is invalid", Retryable: false},
-			{Code: "read_pdf_pages_required", Cause: "A PDF with more than 10 pages was read without pages", Retryable: true},
 			{Code: "unsupported_media", Cause: "The file type or selected model capability is unsupported", Retryable: false},
 			{Code: "read_media_too_large", Cause: "The model media payload exceeds 20 MiB", Retryable: false},
 			{Code: tool.ErrorCodeNeedsRuntime, Cause: "Poppler is required for PDF rendering but unavailable", Retryable: true},
@@ -333,6 +332,7 @@ func readPDF(ctx context.Context, p params, path string, data []byte) (tool.Exec
 	capabilities := tool.ModelCapabilitiesFromContext(ctx)
 	pageCount, hasPageCount := pdfPageCount(ctx, path)
 	pagesSpecified := strings.TrimSpace(p.Pages) != ""
+	pagesDefaulted := false
 
 	var pages []int
 	if pagesSpecified {
@@ -352,17 +352,19 @@ func readPDF(ctx context.Context, p params, path string, data []byte) (tool.Exec
 				), nil
 			}
 		}
-	} else if hasPageCount && pageCount > pdfInlinePageThreshold {
-		return tool.FailedOutcome(
-			fmt.Sprintf(
-				"This PDF has %d pages, which is too many to read at once. Use the pages parameter to read specific page ranges (e.g., pages: \"1-5\"). Maximum %d pages per request.",
-				pageCount,
-				maxPDFPages,
-			),
-			"read_pdf_pages_required",
-			tool.ErrorCategoryValidation,
-			true,
-		), nil
+	} else if hasPageCount && pageCount > pdfInlinePageThreshold && capabilities.SupportsVision {
+		// Keep long PDFs bounded even when the model omits the optional pages
+		// argument. This is a host normalization, not a failed probe that the
+		// model must recover from on a second turn.
+		pages = pageRange(1, pdfInlinePageThreshold)
+		pagesSpecified = true
+		pagesDefaulted = true
+	} else if !hasPageCount && !capabilities.SupportsNativePDF && capabilities.SupportsVision {
+		// A vision-only route cannot send the native document. Use the same
+		// bounded first segment when pdfinfo cannot provide a page count.
+		pages = pageRange(1, pdfInlinePageThreshold)
+		pagesSpecified = true
+		pagesDefaulted = true
 	}
 
 	// Native PDF: omit pages → whole short/unknown-length document (Claude Code style).
@@ -377,6 +379,9 @@ func readPDF(ctx context.Context, p params, path string, data []byte) (tool.Exec
 		details := map[string]any{"type": "document", "route": "native_pdf"}
 		if pagesSpecified {
 			details["requested_pages"] = pages
+		}
+		if pagesDefaulted {
+			details["pages_defaulted"] = true
 		}
 		if hasPageCount {
 			details["page_count"] = pageCount
@@ -393,17 +398,6 @@ func readPDF(ctx context.Context, p params, path string, data []byte) (tool.Exec
 		), nil
 	}
 	if !pagesSpecified {
-		if !hasPageCount {
-			return tool.FailedOutcome(
-				fmt.Sprintf(
-					"Cannot determine PDF page count for vision rendering. Use the pages parameter to read specific page ranges (e.g., pages: \"1-5\"). Maximum %d pages per request.",
-					maxPDFPages,
-				),
-				"read_pdf_pages_required",
-				tool.ErrorCategoryValidation,
-				true,
-			), nil
-		}
 		pages = pageRange(1, pageCount)
 	}
 	parts, err := renderPDFPages(ctx, path, pages)
@@ -426,11 +420,18 @@ func readPDF(ctx context.Context, p params, path string, data []byte) (tool.Exec
 	outcome := tool.SucceededOutcome(fmt.Sprintf("document parts: %s pages %s", filepath.Base(path), formatPages(pages)))
 	outcome.ModelContent = parts
 	details := map[string]any{"type": "parts", "route": "poppler", "pages": pages, "total_media_bytes": total}
+	if pagesDefaulted {
+		details["pages_defaulted"] = true
+	}
 	if hasPageCount {
 		details["page_count"] = pageCount
 	}
 	outcome.Details = details
-	outcome.Summary = fmt.Sprintf("Rendered %d page(s) from %s for the vision model.", len(parts), filepath.Base(path))
+	if pagesDefaulted && hasPageCount {
+		outcome.Summary = fmt.Sprintf("Rendered the default first %d of %d pages from %s because pages was omitted.", len(parts), pageCount, filepath.Base(path))
+	} else {
+		outcome.Summary = fmt.Sprintf("Rendered %d page(s) from %s for the vision model.", len(parts), filepath.Base(path))
+	}
 	return outcome, nil
 }
 

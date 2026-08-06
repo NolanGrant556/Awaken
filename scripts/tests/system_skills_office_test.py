@@ -134,6 +134,15 @@ class SkillTextTests(unittest.TestCase):
         self.assertNotIn("`pandoc` 或 `markitdown`", body.lower())
         self.assertNotIn("markitdown[docx]", body.lower())
 
+    def test_pdf_reading_starts_with_a_bounded_successful_range(self):
+        body = (SYSTEM_SKILLS / "pdf" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("version: 1.1.2", body)
+        self.assertIn('pages: "1-10"', body)
+        self.assertIn("page_count", body)
+        self.assertIn("route=native_pdf", body)
+        self.assertIn("宿主也会把超过 10 页的渲染页路线自动归一化", body)
+        self.assertNotIn("read_pdf_pages_required", body)
+
 
 class WordScriptTests(unittest.TestCase):
     @classmethod

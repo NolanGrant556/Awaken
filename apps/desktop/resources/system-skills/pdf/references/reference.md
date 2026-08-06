@@ -40,4 +40,5 @@ with open("out.pdf", "wb") as f:
 ## 与 Awaken Read 的关系
 
 - 读 PDF 内容直接用 `Read`；原生 PDF 或渲图路由由宿主按当前模型自动选择，不需要在 Skill 内判断。
+- 页数未知时首次优先显式传 `pages: "1-10"`，再依据成功结果的 `route` 与 `page_count` 决定是否读取剩余范围；若模型省略，宿主会把长 PDF 的渲染页路线自动归一化为首段 `1-10`，不会先制造一次工具异常；`route=native_pdf` 代表原生整份已完整交给模型。
 - 本参考里的 `pdftotext` / `pdfplumber` 适用于需要把文本落盘再加工（清洗、抽表、拼接）的场景。

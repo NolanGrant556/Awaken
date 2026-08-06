@@ -17,11 +17,21 @@ const account: AgentPlanAccount = {
   hasKey: true,
   maskedKey: "•••• 1234",
   credentialRevision: 1,
-  modelIds: ["glm-5.2", "doubao-seedream-test", "doubao-seedance-test"],
+  modelIds: [
+    "glm-5.2",
+    "doubao-seedream-test",
+    "doubao-seedance-2.0",
+    "doubao-seedance-2.0-fast",
+    "doubao-seedance-2.0-mini",
+    "doubao-seedance-1.5-pro",
+  ],
   catalog: [
     { id: "glm-5.2", kind: "llm" },
     { id: "doubao-seedream-test", kind: "image" },
-    { id: "doubao-seedance-test", kind: "video" },
+    { id: "doubao-seedance-2.0", kind: "video" },
+    { id: "doubao-seedance-2.0-fast", kind: "video" },
+    { id: "doubao-seedance-2.0-mini", kind: "video" },
+    { id: "doubao-seedance-1.5-pro", kind: "video" },
   ],
   catalogUpdatedAt: "2026-07-30T00:00:00.000Z",
 };
@@ -63,6 +73,10 @@ describe("AgentPlanMediaToolsPanel", () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     document.body.replaceChildren();
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 768,
+    });
     vi.restoreAllMocks();
   });
 
@@ -104,6 +118,74 @@ describe("AgentPlanMediaToolsPanel", () => {
     );
     expect(imageSelect?.tagName).toBe("BUTTON");
     expect(videoSelect?.tagName).toBe("BUTTON");
+    const triggerRectSpy = vi
+      .spyOn(videoSelect!, "getBoundingClientRect")
+      .mockReturnValue({
+        top: 430,
+        bottom: 470,
+        left: 100,
+        right: 700,
+        width: 600,
+        height: 40,
+        x: 100,
+        y: 430,
+        toJSON: () => ({}),
+      });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 500,
+    });
+
+    await act(async () => videoSelect?.click());
+    const videoSelectRoot = videoSelect?.closest(".aw-select");
+    expect(videoSelectRoot?.getAttribute("data-menu-placement")).toBe("top");
+    const videoList = videoSelect
+      ?.closest("article")
+      ?.querySelector('[role="listbox"]');
+    const videoOptions = Array.from(
+      videoList?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [],
+    );
+    expect(videoOptions.map((option) => option.dataset.value)).toEqual([
+      "doubao-seedance-2.0",
+      "doubao-seedance-2.0-fast",
+      "doubao-seedance-2.0-mini",
+      "doubao-seedance-1.5-pro",
+    ]);
+    await act(async () => {
+      videoOptions[0]?.focus();
+      videoOptions[0]?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "End", bubbles: true }),
+      );
+    });
+    expect(document.activeElement).toBe(videoOptions.at(-1));
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 900,
+    });
+    await act(async () => window.dispatchEvent(new Event("resize")));
+    expect(videoSelectRoot?.getAttribute("data-menu-placement")).toBe(
+      "bottom",
+    );
+
+    triggerRectSpy.mockReturnValue({
+      top: 110,
+      bottom: 150,
+      left: 100,
+      right: 700,
+      width: 600,
+      height: 40,
+      x: 100,
+      y: 110,
+      toJSON: () => ({}),
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 260,
+    });
+    await act(async () => window.dispatchEvent(new Event("resize")));
+    expect(videoList?.getAttribute("style")).toContain("max-height: 96px");
+    await act(async () => videoSelect?.click());
 
     await act(async () => imageSelect?.click());
     const imageList = imageSelect

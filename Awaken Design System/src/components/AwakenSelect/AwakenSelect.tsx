@@ -1,6 +1,23 @@
 import "./AwakenSelect.css";
-import { useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
+import { useAwakenAnchoredMenuLayout } from "../../hooks/useAwakenAnchoredMenuLayout";
+
+const MENU_GAP = 6;
+const MENU_MAX_HEIGHT = 180;
+const MENU_OPTION_HEIGHT = 32;
+const MENU_OPTION_GAP = 2;
+const MENU_VERTICAL_PADDING = 10;
+
+function estimateMenuHeight(optionCount: number): number {
+  if (optionCount === 0) return 58;
+  return Math.min(
+    MENU_MAX_HEIGHT,
+    MENU_VERTICAL_PADDING +
+      optionCount * MENU_OPTION_HEIGHT +
+      Math.max(0, optionCount - 1) * MENU_OPTION_GAP,
+  );
+}
 
 export type AwakenSelectOption = {
   value: string;
@@ -30,7 +47,18 @@ export function AwakenSelect({
   onValueChange,
 }: AwakenSelectProps) {
   const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
+  const {
+    anchorRef: triggerRef,
+    menuRef,
+    placement: menuPlacement,
+    maxHeight: menuMaxHeight,
+    updateLayout: updateMenuLayout,
+  } = useAwakenAnchoredMenuLayout<HTMLButtonElement, HTMLDivElement>({
+    open,
+    estimatedHeight: estimateMenuHeight(options.length),
+    maxHeight: MENU_MAX_HEIGHT,
+    gap: MENU_GAP,
+  });
   const menuId = useId();
   const selectedOption = options.find((option) => option.value === value);
 
@@ -63,6 +91,7 @@ export function AwakenSelect({
   return (
     <div
       className={`aw-select${className ? ` ${className}` : ""}`}
+      data-menu-placement={menuPlacement}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
       }}
@@ -77,7 +106,10 @@ export function AwakenSelect({
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          if (!open) updateMenuLayout();
+          setOpen((current) => !current);
+        }}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             setOpen(false);
@@ -103,8 +135,10 @@ export function AwakenSelect({
 
       {open ? (
         <div
+          ref={menuRef}
           id={menuId}
           className="aw-select__menu"
+          style={{ maxHeight: menuMaxHeight }}
           role="listbox"
           aria-label={labelledBy ? undefined : ariaLabel}
           aria-labelledby={labelledBy}

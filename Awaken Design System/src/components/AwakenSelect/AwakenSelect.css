@@ -93,6 +93,11 @@
   box-shadow: var(--aw-shadow-popover);
 }
 
+.aw-select[data-menu-placement="top"] .aw-select__menu {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
 .aw-select__option {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 16px;

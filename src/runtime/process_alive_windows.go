@@ -3,20 +3,25 @@
 package runtime
 
 import (
-	"os"
-	"syscall"
+	"golang.org/x/sys/windows"
 )
 
 func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
+	if pid <= 0 {
+		return false
+	}
+	// A terminated Windows process object can remain open while another process
+	// still holds a handle. OpenProcess succeeding therefore does not prove that
+	// the process is running; check its exit code as well.
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
 		return false
 	}
-	// Signal 0 on Windows does not reliably check existence; use OpenProcess.
-	handle, err := syscall.OpenProcess(syscall.PROCESS_QUERY_INFORMATION, false, uint32(proc.Pid))
-	if err != nil {
+	defer windows.CloseHandle(handle)
+	var exitCode uint32
+	if err := windows.GetExitCodeProcess(handle, &exitCode); err != nil {
 		return false
 	}
-	_ = syscall.CloseHandle(handle)
-	return true
+	const stillActive = 259
+	return exitCode == stillActive
 }

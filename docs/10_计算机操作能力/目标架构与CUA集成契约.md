@@ -160,7 +160,8 @@ CUA 上游若没有单个原子 primitive，`CUADriverAdapter` 必须在 Host �
 
 ### 7.1 Capture scope
 
-- 当前 CUA typed desktop-state、pointer 与 keyboard API 要求 desktop session，因此默认使用 `DESKTOP`，采用屏幕点坐标；Host 返回系统屏幕点、原始截图物理像素和 backing scale，adapter 在进入模型媒体链前把截图降采样到屏幕点尺寸，Host 在输入注入时再按同一 scale 换回物理像素；
+- 当前锁定的 `@trycua/cua-driver@0.19.0` typed desktop-state、pointer 与 keyboard API 要求 desktop session，因此默认使用 `DESKTOP`。坐标转换必须按平台隔离：Windows Awaken Host 运行于普通 `node.exe`，CUA 返回的 primary-display 截图宽高、`screen_width/screen_height` 和进程内 `scale_factor` 都可能是 DPI 虚拟化结果；Electron Main 必须从 `screen.getPrimaryDisplay().scaleFactor` 提供 Windows 专用权威倍率，Host 返回 `unit=logical_pixel`，模型和 adapter 保持截图尺寸不变，仅在 pointer 输入边界乘该倍率转为 `SendInput` 使用的物理屏幕像素。`screen_width == screenshot_width` 或 CUA 内部 `scale_factor=1` 不能作为 DPI-aware 或无需转换的判断。macOS 不提供 Windows 倍率，继续返回系统屏幕点、原始截图 backing pixels 和 backing scale，adapter 在进入模型媒体链前把截图降采样到屏幕点尺寸，Host 在输入注入时再按同一 scale 换回 Driver 输入坐标。不得用 Windows DPI scale 改写 macOS 路径，也不得把 macOS 的 point/backing-pixel 转换套到 Windows；该版本是 Windows 键盘输入与高 DPI 点击映射的最低当前基线，不能回退到已知会误报输入成功的 0.12.5；
+- Windows desktop session 的普通 key、`type_text`、不含 Windows 键的应用 hotkey 与 pointer route 仍按上述 Driver 合同执行；`win`/`windows`/`meta`/`cmd`/`command` 参与的 Shell 全局快捷键在上游虽然可解析，但 desktop route 只保证向前台窗口发送且 effect 为 `unverifiable`，当前不在可靠支持面内。Host 必须在注入前确定性拒绝，调用方必须从 fresh observation 选择可见系统 UI；
 - `WINDOW` 保留为显式 scope；只有 Host 能建立并证明窗口隔离时才能使用 window-local 坐标或 background delivery，否则必须明确失败；
 - `AUTO` 只可用于探测/兼容，正式 session 建立后必须记录解析出的不可变 scope；
 - macOS 无 Screen Recording 时可降级为 accessibility/tree-only 观察，但不得伪造截图已获取；缺少 Accessibility 时禁止动作。
@@ -176,7 +177,7 @@ CUA 上游若没有单个原子 primitive，`CUADriverAdapter` 必须在 Host �
 - accessibility locator 或 window-local pixel fallback；
 - 内容摘要和坐标空间。
 
-优先 accessibility 动作，无法稳定定位时才允许像素动作。像素动作的 freshness window 更短，风险策略可以要求 review 或拒绝。
+优先 accessibility 动作，无法稳定定位时才允许像素动作。当前 CUA adapter 的默认 observation freshness window 为 5 分钟，以覆盖真实模型在截图与大工具目录下超过 2 分钟的往返；任何 session、fence、control epoch 或 target generation 变化仍立即作废 observation。未来引入可证明的 window-local/accessibility target 后，像素动作可以使用更短 freshness，风险策略也可以要求 review 或拒绝。
 
 ### 7.3 浏览器能力
 

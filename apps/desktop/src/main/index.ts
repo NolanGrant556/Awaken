@@ -3671,6 +3671,16 @@ app.whenReady().then(async () => {
           ...searchEnvironment,
           ...(networkRouteManager?.runtimeEnvironment() ?? {}),
           AWAKEN_DESKTOP_CONTROL_TOKEN: desktopControlToken,
+          ...(process.platform === "win32"
+            ? {
+                // The CUA N-API module runs inside a DPI-virtualized node.exe,
+                // while its SendInput path consumes physical screen pixels.
+                // Electron owns the authoritative primary-display scale.
+                AWAKEN_CUA_WINDOWS_SCALE_FACTOR: String(
+                  electronScreen.getPrimaryDisplay().scaleFactor,
+                ),
+              }
+            : {}),
           PATH: managedBin ? `${managedBin}${path.delimiter}${inheritedPath}` : inheritedPath,
         };
       },

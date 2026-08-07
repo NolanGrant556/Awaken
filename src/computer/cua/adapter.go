@@ -14,6 +14,8 @@ import (
 	"awaken/src/computer"
 )
 
+const defaultObservationTTL = 5 * time.Minute
+
 // DriverOptions configures the CUA driver adapter.
 type DriverOptions struct {
 	// Host is the pre-connected HostClient. Most callers use NewHostClient and
@@ -29,8 +31,10 @@ type DriverOptions struct {
 	ScreenshotWorkDir string
 
 	// ObservationTTL is the freshness window for observations produced by
-	// Observe. It defaults to two minutes so a vision-model turn can finish
-	// before the checked action while still requiring frequent re-observation.
+	// Observe. It defaults to five minutes. Real model turns can exceed two
+	// minutes before emitting the checked action, especially with screenshots
+	// and large tool catalogs, so a shorter default rejects otherwise current
+	// observations before the model can use them.
 	ObservationTTL time.Duration
 }
 
@@ -48,7 +52,7 @@ func NewDriver(opts DriverOptions) (computer.Driver, error) {
 	}
 	ttl := opts.ObservationTTL
 	if ttl <= 0 {
-		ttl = 2 * time.Minute
+		ttl = defaultObservationTTL
 	}
 	return &cuaDriverAdapter{
 		host:     opts.Host,

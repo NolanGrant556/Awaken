@@ -49,6 +49,8 @@ supervisor 只保留最多 1,000 条当前进程日志；重启会清空内存�
 
 core 异常退出后状态为 `crashed`。重新启动会恢复线程历史，但不会恢复旧 child 中的 goroutine、SSE stream 或 Office 子进程。开放语义事实如何封口由 [SemanticJournal 与重放](SemanticJournal与重放.md) 定义。
 
+Windows 的 manifest PID 存活判定不能只以 `OpenProcess` 成功为依据：已经退出的进程对象在仍有句柄引用时仍可能被打开。Core 与 launcher 必须进一步读取进程退出状态，仅将 `STILL_ACTIVE` 判为存活；否则旧 `runtime/core.json` 会被误判为另一个运行实例，三次启动均以 `runtime manifest owned by another running instance` 失败，并使 Renderer 进入 `Awaken needs restart`。退出状态判定通过后，旧 manifest 可由新 Core 的原子 compare-and-swap 正常替换，不需要用户手工删除 userData。
+
 ## 不变量与当前不支持
 
 - 正式 Desktop 必须使用随机 loopback 地址，不得把固定端口写入 renderer 或文档。
@@ -79,6 +81,6 @@ core 异常退出后状态为 `crashed`。重新启动会恢复线程历史，�
 
 ## 测试与真实 Desktop 验收
 
-自动化 owner：[`apps/desktop/src/main/runtime-supervisor.test.ts`](../../apps/desktop/src/main/runtime-supervisor.test.ts)、[`apps/desktop/src/main/network-route-manager.test.ts`](../../apps/desktop/src/main/network-route-manager.test.ts)、[`apps/desktop/src/main/network-route-observer.test.ts`](../../apps/desktop/src/main/network-route-observer.test.ts)、[`scripts/tests/desktop-lifecycle.test.mjs`](../../scripts/tests/desktop-lifecycle.test.mjs)。测试覆盖随机端口、重试、健康超时、进程 generation、环境清理、网络 route generation、原生变化信号、macOS/Windows 陈旧 loopback 代理降级/恢复和升级关闭。
+自动化 owner：[`apps/desktop/src/main/runtime-supervisor.test.ts`](../../apps/desktop/src/main/runtime-supervisor.test.ts)、[`apps/desktop/src/main/network-route-manager.test.ts`](../../apps/desktop/src/main/network-route-manager.test.ts)、[`apps/desktop/src/main/network-route-observer.test.ts`](../../apps/desktop/src/main/network-route-observer.test.ts)、[`scripts/tests/desktop-lifecycle.test.mjs`](../../scripts/tests/desktop-lifecycle.test.mjs) 与 Windows 专项 [`src/runtime/process_alive_windows_test.go`](../../src/runtime/process_alive_windows_test.go)。测试覆盖随机端口、重试、健康超时、进程 generation、环境清理、网络 route generation、原生变化信号、Windows 已退出但句柄仍可打开的 PID、macOS/Windows 陈旧 loopback 代理降级/恢复和升级关闭。
 
 真实验收必须通过 README 正式入口：确认只出现一个受管 Desktop/core 实例、实际地址为 loopback 随机端口、health 成功后 UI 才可用；关闭后 core 退出；重新打开后历史从持久层恢复。不要把独立运行 core 或固定 `8787` 的 curl smoke 当成 Desktop 验收。

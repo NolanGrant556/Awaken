@@ -166,6 +166,7 @@ function updateCoordinateScale(record, text, structuredJson) {
   let screenHeight = 0;
   let screenshotWidth = 0;
   let screenshotHeight = 0;
+  let platformScaleFactor = 1;
   if (typeof structuredJson === "string" && structuredJson !== "") {
     try {
       const parsed = JSON.parse(structuredJson);
@@ -173,6 +174,7 @@ function updateCoordinateScale(record, text, structuredJson) {
       screenHeight = Number(parsed.screen_height) || 0;
       screenshotWidth = Number(parsed.screenshot_width) || 0;
       screenshotHeight = Number(parsed.screenshot_height) || 0;
+      platformScaleFactor = Number(parsed.scale_factor) || 1;
     } catch {
       // Fall through to the bounded human-readable state parser below.
     }
@@ -194,6 +196,40 @@ function updateCoordinateScale(record, text, structuredJson) {
       screenHeight = Number(dimensions[4]);
     }
   }
+
+  // The CUA Rust executable is manifested Per-Monitor V2, but Awaken embeds the
+  // N-API module in node.exe. On Windows that host remains DPI-virtualized: the
+  // screenshot is in logical desktop pixels while SendInput consumes physical
+  // screen pixels. The CUA-reported scale_factor can be virtualized to 1 too,
+  // so Desktop supplies the authoritative primary-display scale via the Host
+  // environment. The package is pinned, so keep this adapter contract explicit
+  // instead of inferring awareness from screen_width == screenshot_width (both
+  // values are virtualized together in node.exe).
+  if (process.platform === "win32") {
+    const desktopScaleFactor = Number(
+      process.env.AWAKEN_CUA_WINDOWS_SCALE_FACTOR,
+    );
+    const inputScaleFactor =
+      Number.isFinite(desktopScaleFactor) &&
+      desktopScaleFactor >= 1 &&
+      desktopScaleFactor <= 4
+        ? desktopScaleFactor
+        : platformScaleFactor;
+    record.coordinateScaleX = inputScaleFactor;
+    record.coordinateScaleY = inputScaleFactor;
+    return {
+      unit: "logical_pixel",
+      width: screenshotWidth || screenWidth,
+      height: screenshotHeight || screenHeight,
+      source_screenshot_width: screenshotWidth,
+      source_screenshot_height: screenshotHeight,
+      scale_x: record.coordinateScaleX,
+      scale_y: record.coordinateScaleY,
+    };
+  }
+
+  // Preserve the existing macOS (and fallback platform) behavior: the model
+  // sees screen points while the driver receives backing pixels.
   if (screenshotWidth > 0 && screenWidth > 0) {
     record.coordinateScaleX = screenshotWidth / screenWidth;
   }
@@ -488,7 +524,19 @@ function validatePerformParameters(action, parameters) {
       requireNonEmptyString(parameters.key, "key");
       return;
     case "hotkey":
-      requireNonEmptyStringArray(parameters.keys, "keys");
+      {
+        const keys = requireNonEmptyStringArray(parameters.keys, "keys");
+        if (
+          process.platform === "win32" &&
+          keys.some((key) =>
+            ["win", "windows", "meta", "cmd", "command"].includes(key.trim().toLowerCase()),
+          )
+        ) {
+          throw new Error(
+            "Windows Shell global hotkeys are not reliably supported by the current desktop CUA route: the upstream driver can report the keys as sent without the Shell handling them; use a fresh screenshot and click the visible system UI instead",
+          );
+        }
+      }
       return;
     case "type_text":
       requireNonEmptyString(parameters.text, "text");

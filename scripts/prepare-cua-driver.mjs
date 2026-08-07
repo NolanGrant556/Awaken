@@ -50,6 +50,7 @@ function install() {
   execFileSync("npm", ["install", "--omit=dev"], {
     cwd: hostDir,
     stdio: "inherit",
+    shell: process.platform === "win32",
   });
 }
 

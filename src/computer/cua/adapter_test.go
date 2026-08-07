@@ -35,6 +35,10 @@ func hostWorkspace(t *testing.T) (scriptPath, workingDir string) {
 }
 
 func newTestHostClient(t *testing.T) HostClient {
+	return newTestHostClientWithEnv(t)
+}
+
+func newTestHostClientWithEnv(t *testing.T, extraEnv ...string) HostClient {
 	t.Helper()
 	scriptPath, workingDir := hostWorkspace(t)
 	if _, err := os.Stat(scriptPath); err != nil {
@@ -43,6 +47,7 @@ func newTestHostClient(t *testing.T) HostClient {
 	client, err := NewHostClient(HostOptions{
 		HostScriptPath: scriptPath,
 		WorkingDir:     workingDir,
+		ExtraEnv:       extraEnv,
 		StartupTimeout: 30 * time.Second,
 	})
 	if err != nil {
@@ -66,6 +71,9 @@ func TestHostClientHealth(t *testing.T) {
 	}
 	if hr.Version == "" {
 		t.Fatal("expected driver version")
+	}
+	if hr.Version != "0.19.0" {
+		t.Fatalf("expected pinned driver version 0.19.0, got %s", hr.Version)
 	}
 	if hr.ProtocolVersion != 2 {
 		t.Fatalf("expected protocol version 2, got %d", hr.ProtocolVersion)
@@ -92,6 +100,20 @@ func TestNormalizeScreenshotToCoordinateSpace(t *testing.T) {
 	}
 	if r, _, _, _ := result.At(1, 1).RGBA(); r == 0 {
 		t.Fatal("expected normalized pixel to sample the matching source point")
+	}
+}
+
+func TestDriverDefaultObservationTTLAllowsSlowModelTurn(t *testing.T) {
+	driver, err := NewDriver(DriverOptions{Host: newTestHostClient(t)})
+	if err != nil {
+		t.Fatalf("create driver: %v", err)
+	}
+	adapter, ok := driver.(*cuaDriverAdapter)
+	if !ok {
+		t.Fatalf("driver type = %T, want *cuaDriverAdapter", driver)
+	}
+	if adapter.ttl != 5*time.Minute {
+		t.Fatalf("default observation TTL = %s, want 5m", adapter.ttl)
 	}
 }
 
@@ -149,7 +171,20 @@ func TestDriverQuiesceAndResumeUseHostBarrier(t *testing.T) {
 }
 
 func TestDriverOpenObserveCloseDesktop(t *testing.T) {
-	driver := newTestDriver(t, computer.CaptureDesktop)
+	var host HostClient
+	if runtime.GOOS == "windows" {
+		host = newTestHostClientWithEnv(t, "AWAKEN_CUA_WINDOWS_SCALE_FACTOR=1.25")
+	} else {
+		host = newTestHostClient(t)
+	}
+	driver, err := NewDriver(DriverOptions{
+		Host:              host,
+		ScreenshotWorkDir: t.TempDir(),
+		ObservationTTL:    30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("create driver: %v", err)
+	}
 	ctx := context.Background()
 
 	bind := newTestBinding(t, computer.CaptureDesktop)
@@ -168,7 +203,18 @@ func TestDriverOpenObserveCloseDesktop(t *testing.T) {
 		t.Logf("desktop observe failed (expected if no TCC): %v", err)
 	} else {
 		t.Logf("desktop observation produced %d screenshot ref", countMediaRefs(&obs))
-		if obs.CoordinateSpace == nil || obs.CoordinateSpace.Unit != "screen_point" {
+		if obs.CoordinateSpace == nil {
+			t.Fatal("expected coordinate metadata")
+		}
+		t.Logf("desktop coordinate space: %+v", *obs.CoordinateSpace)
+		if runtime.GOOS == "windows" {
+			if obs.CoordinateSpace.Unit != "logical_pixel" ||
+				obs.CoordinateSpace.ScaleX != 1.25 || obs.CoordinateSpace.ScaleY != 1.25 ||
+				obs.CoordinateSpace.Width != obs.CoordinateSpace.SourceScreenshotWidth ||
+				obs.CoordinateSpace.Height != obs.CoordinateSpace.SourceScreenshotHeight {
+				t.Fatalf("Windows desktop coordinates must expose the logical-to-physical DPI transform: %+v", obs.CoordinateSpace)
+			}
+		} else if obs.CoordinateSpace.Unit != "screen_point" {
 			t.Fatalf("expected screen-point coordinate metadata, got %+v", obs.CoordinateSpace)
 		}
 		if obs.Screenshot != nil &&
@@ -261,6 +307,25 @@ func TestHostRejectsInvalidActionParametersBeforeInput(t *testing.T) {
 		t.Fatalf("pre-input validation was marked unknown: %+v", result)
 	}
 
+	if runtime.GOOS == "windows" {
+		unsupported := invalid
+		unsupported.ActionID = "act_unsupported_windows_shell_hotkey"
+		unsupported.Kind = computer.ActionHotkey
+		unsupported.ActionDigest = "sha256:unsupported-windows-shell-hotkey"
+		if err := client.RegisterPreparedAction(ctx, unsupported, state.ObservationToken); err != nil {
+			t.Fatalf("register unsupported hotkey: %v", err)
+		}
+		result, err = client.PerformChecked(ctx, unsupported, map[string]any{"keys": []string{"win", "r"}})
+		if err != nil {
+			t.Fatalf("host returned transport error for unsupported Windows shell hotkey: %v", err)
+		}
+		if !result.IsError || result.Status != string(computer.ActionFailed) || result.Degraded ||
+			result.ErrorCode != "invalid_action_parameters" ||
+			!strings.Contains(result.Text, "Windows Shell global hotkeys are not reliably supported") {
+			t.Fatalf("Windows shell hotkey must fail before input: %+v", result)
+		}
+	}
+
 	valid := invalid
 	valid.ActionID = "act_valid_after_coordinates"
 	valid.Kind = computer.ActionWait
@@ -321,7 +386,18 @@ func TestDriverCancelledPerformDoesNotBlockSessionClose(t *testing.T) {
 func TestDriverPerformMoveCursor(t *testing.T) {
 	// move_cursor is a desktop-scope action in the CUA SDK, so the session must
 	// use the desktop scope. This requires Screen Recording TCC for the terminal.
-	driver := newTestDriver(t, computer.CaptureDesktop)
+	host := newTestHostClient(t)
+	if runtime.GOOS == "windows" {
+		host = newTestHostClientWithEnv(t, "AWAKEN_CUA_WINDOWS_SCALE_FACTOR=1.25")
+	}
+	driver, err := NewDriver(DriverOptions{
+		Host:              host,
+		ScreenshotWorkDir: t.TempDir(),
+		ObservationTTL:    30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("create driver: %v", err)
+	}
 	ctx := context.Background()
 
 	bind := newTestBinding(t, computer.CaptureDesktop)
@@ -354,6 +430,13 @@ func TestDriverPerformMoveCursor(t *testing.T) {
 	}
 	if res.Status != computer.ActionSucceeded {
 		t.Fatalf("expected move_cursor to succeed, got %s", res.Status)
+	}
+	if cursorX, cursorY, ok := observedCursorPosition(); ok {
+		wantX := int(100 * obs.CoordinateSpace.ScaleX)
+		wantY := int(100 * obs.CoordinateSpace.ScaleY)
+		if cursorX != wantX || cursorY != wantY {
+			t.Fatalf("cursor landed at physical (%d,%d), want (%d,%d) from logical (100,100) and scale %.2fx%.2f", cursorX, cursorY, wantX, wantY, obs.CoordinateSpace.ScaleX, obs.CoordinateSpace.ScaleY)
+		}
 	}
 }
 

@@ -97,7 +97,7 @@ func (t *observeTool) ProviderReadiness(env tool.ExecutionEnvironmentSnapshot) t
 
 func (t *actTool) Name() string { return ToolNameAct }
 func (t *actTool) Description() string {
-	return "Propose a strongly-typed GUI action through the run-bound Computer lane based on a fresh observation."
+	return "Propose a strongly-typed GUI action through the run-bound Computer lane based on a fresh observation. Windows Shell global shortcuts using the Windows/Meta/Command key are not reliably supported by the current desktop route; click visible system UI from a fresh screenshot instead."
 }
 func (t *actTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
@@ -118,7 +118,7 @@ func (t *actTool) Definition() tool.ToolDefinition {
 		Description:  t.Description(),
 		Purpose:      "Execute a checked GUI action after policy evaluation and any required human review.",
 		WhenToUse:    []string{"When a typed tool or API is unavailable", "After a fresh observation", "When the action is within the authorized scope and risk level"},
-		WhenNotToUse: []string{"For Python, Typst, builds, converters, or Skill scripts; use Bash", "For secret input, authentication, security warnings or bypassing access control", "Without a fresh observation", "When Computer Use is not enabled; do not replace it with terminal GUI scripts unless the user explicitly requested terminal automation"},
+		WhenNotToUse: []string{"For Python, Typst, builds, converters, or Skill scripts; use Bash", "For secret input, authentication, security warnings or bypassing access control", "Without a fresh observation", "For Windows Shell global shortcuts using win/windows/meta/cmd/command; the current CUA route cannot verify that the Shell handled them, so click visible system UI instead", "When Computer Use is not enabled; do not replace it with terminal GUI scripts unless the user explicitly requested terminal automation"},
 		InputSchema: tool.ToolParametersSchema{
 			Type: "object",
 			Properties: map[string]tool.ToolParam{
@@ -126,14 +126,14 @@ func (t *actTool) Definition() tool.ToolDefinition {
 				"action":         {Type: "string", Description: "Action kind.", Enum: []any{"click", "double_click", "scroll", "drag", "key", "hotkey", "type_text", "move_cursor", "wait"}},
 				"target": {Type: "object", Description: "Target element or coordinates. Pointer actions require a complete x/y pair or pixel_fallback point; locator-only execution is not supported by the current host.", AdditionalProperties: tool.BoolPtr(true), Properties: map[string]tool.ToolParam{
 					"locator": {Type: "string", Description: "Accessibility locator when available."},
-					"x":       {Type: "integer", Minimum: tool.FloatPtr(0), Description: "Horizontal screen-point coordinate. Use the normalized model-visible screenshot directly; never use source_screenshot_width pixels."},
-					"y":       {Type: "integer", Minimum: tool.FloatPtr(0), Description: "Vertical screen-point coordinate. Use the normalized model-visible screenshot directly; never use source_screenshot_height pixels."},
+					"x":       {Type: "integer", Minimum: tool.FloatPtr(0), Description: "Horizontal coordinate in the model-visible screenshot. Use that screenshot's full pixel width directly; the Host applies any platform DPI/backing transform."},
+					"y":       {Type: "integer", Minimum: tool.FloatPtr(0), Description: "Vertical coordinate in the model-visible screenshot. Use that screenshot's full pixel height directly; the Host applies any platform DPI/backing transform."},
 					"pixel_fallback": {Type: "object", Description: "Explicit complete screen-point fallback.", Required: []string{"x", "y"}, AdditionalProperties: tool.BoolPtr(false), Properties: map[string]tool.ToolParam{
 						"x": {Type: "integer", Minimum: tool.FloatPtr(0), Description: "Horizontal screen-point coordinate."},
 						"y": {Type: "integer", Minimum: tool.FloatPtr(0), Description: "Vertical screen-point coordinate."},
 					}},
 				}},
-				"parameters":       {Type: "object", Description: "Action-specific parameters. Pointer coordinates are screen points in the normalized model-visible screenshot: click/move_cursor x/y; scroll x/y/direction/amount; drag from_x/from_y/to_x/to_y. Keyboard: key key; hotkey keys; type_text text. Wait: ms. Required fields are validated for the selected action before any OS input.", AdditionalProperties: tool.BoolPtr(true)},
+				"parameters":       {Type: "object", Description: "Action-specific parameters. Pointer coordinates always come from the full model-visible screenshot: logical desktop pixels on Windows and normalized screen points on macOS. The Host applies Windows DPI scale or macOS backing scale exactly once. Use click/move_cursor x/y; scroll x/y/direction/amount; drag from_x/from_y/to_x/to_y. Keyboard: key key; hotkey keys; type_text text. Windows Shell global hotkeys containing win/windows/meta/cmd/command are rejected because the current desktop route cannot verify that the Shell handled them; use screenshot-guided visible system UI. Wait: ms. Required fields are validated for the selected action before any OS input.", AdditionalProperties: tool.BoolPtr(true)},
 				"expected_context": {Type: "object", Description: "Expected context after the action.", AdditionalProperties: tool.BoolPtr(true)},
 				"intent":           {Type: "string", Description: "What the action is trying to accomplish."},
 				"expected_effect":  {Type: "string", Description: "Expected external effect."},

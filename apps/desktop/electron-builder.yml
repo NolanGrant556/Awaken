@@ -30,6 +30,14 @@ extraResources:
   - from: resources/cua-driver
     to: cua-driver
     filter: ["**/*"]
+  # electron-builder hardcodes a filter that drops the root-level `node_modules`
+  # of any extraResources `from` directory (see app-builder-lib fileMatcher/filter.js,
+  # `if (relative === "node_modules") return false`). We work around it by pointing
+  # a second extraResources entry directly at that node_modules folder, so the CUA
+  # host sidecar (host.mjs -> @trycua/cua-driver) has its deps in the installer.
+  - from: resources/cua-driver/node_modules
+    to: cua-driver/node_modules
+    filter: ["**/*"]
   - from: build/icon.png
     to: icon.png
 mac:

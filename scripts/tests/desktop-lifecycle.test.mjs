@@ -220,7 +220,15 @@ describe("desktop package staging", () => {
     );
     assert.match(
       desktopPackage.scripts.dist,
-      /clean:package && npm run build:binary && npm run prepare:officecli && npm run build/,
+      /clean:package && npm run build:binary && npm run prepare:officecli && npm run prepare:runtime && npm run build/,
+    );
+    assert.match(desktopPackage.scripts["dist:adhoc"], /-c\.mac\.identity=-/);
+    assert.match(desktopPackage.scripts["dist:adhoc"], /-c\.mac\.hardenedRuntime=false/);
+    assert.match(desktopPackage.scripts["dist:release"], /-c\.mac\.forceCodeSigning=true/);
+    const rootPackage = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+    assert.match(
+      rootPackage.scripts["dist:desktop:adhoc"],
+      /@awaken\/desktop run dist:adhoc/,
     );
     const ensureSource = readFileSync(
       join(repoRoot, "scripts", "ensure-desktop-runtime.mjs"),

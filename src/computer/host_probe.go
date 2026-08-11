@@ -28,6 +28,13 @@ type HostStatus struct {
 	Message string `json:"message,omitempty"`
 }
 
+// Ready reports whether the global Host can back a Computer-enabled run. This
+// is the run-independent equivalent of Runtime.Ready and is used by projection
+// paths that must not create a run-bound Computer session.
+func (s HostStatus) Ready() bool {
+	return s.Available && s.Healthy && s.TCCScreenRecording && s.TCCAccessibility
+}
+
 // HostProbe probes the global Computer Host sidecar without binding it to a
 // run. Implementations must be safe to call concurrently and must return
 // quickly (e.g. by reusing a shared Host client).

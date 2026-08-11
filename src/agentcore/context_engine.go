@@ -4,8 +4,6 @@ import (
 	stdcontext "context"
 	"errors"
 	"fmt"
-
-	"awaken/src/llm"
 )
 
 var errContextCompactCircuitOpen = errors.New("context compact circuit open")
@@ -223,8 +221,15 @@ func (g *contextGovernor) compactCircuitOpenError() error {
 }
 
 func contextWindowConfigFromModelConfig(config ModelConfig) ContextWindowConfig {
+	modelWindow := config.ContextWindow
+	// Some provider catalogs report an input-only ceiling while others report
+	// a total context window. Convert the input-only ceiling into the engine's
+	// total-window representation so the output reserve is not subtracted twice.
+	if config.MaxInputTokens > 0 && (modelWindow <= 0 || config.MaxInputTokens < modelWindow) {
+		modelWindow = config.MaxInputTokens + defaultOutputReserve
+	}
 	return ContextWindowConfig{
-		ModelWindow:           config.ContextWindow,
+		ModelWindow:           modelWindow,
 		AutoCompactTokenLimit: config.AutoCompactTokenLimit,
 	}
 }
@@ -238,8 +243,7 @@ func compactMode(reactive bool) CompactMode {
 
 func compactSummaryModel(envelope ContextEnvelope) string {
 	cfg := llmConfigForCompaction(envelope)
-	aux, _ := llm.AuxiliaryConfig(cfg)
-	return aux.Model
+	return cfg.Model
 }
 
 func newContextWindowBlockedError(state ContextWindowState, cause error) error {

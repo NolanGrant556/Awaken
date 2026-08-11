@@ -6,6 +6,7 @@ import (
 	"awaken/src/agentcore/subagent"
 	"awaken/src/computer"
 	"awaken/src/context"
+	"awaken/src/llm"
 	"awaken/src/prompt"
 	"awaken/src/subagentruntime"
 	"awaken/src/tool"
@@ -21,9 +22,17 @@ type AgentConfig struct {
 	// DefaultMaxToolExecutions (512).
 	MaxToolExecutions int
 	ModelConfig       ModelConfig
-	EntryPoint        string
-	Workspace         WorkspaceConfig
-	SkillSummary      string
+	// CompactModelConfig and SubagentModelConfig are Host-resolved purpose
+	// routes. Empty values inherit ModelConfig; model-visible tool arguments
+	// cannot choose credentials or profile IDs.
+	CompactModelConfig  ModelConfig
+	SubagentModelConfig ModelConfig
+	// ModelRequestPurpose separates cache and usage identity for normal turns,
+	// native Subagents and scheduled runs. Empty defaults to agent_turn.
+	ModelRequestPurpose llm.RequestPurpose
+	EntryPoint          string
+	Workspace           WorkspaceConfig
+	SkillSummary        string
 	// MemoryContextProvider reads the current host-owned Memory indexes at
 	// request build time. Failures degrade to no Memory block.
 	MemoryContextProvider func() (string, error)
@@ -178,6 +187,7 @@ type WorkspaceConfig = TaskScope
 type ModelConfig struct {
 	APIKey                string
 	BaseURL               string
+	InferenceEndpoint     string
 	Model                 string
 	CapabilityModelID     string
 	EndpointSelector      string
@@ -190,6 +200,8 @@ type ModelConfig struct {
 	MaxTokens             int
 	AuthScheme            string
 	ContextWindow         int
+	MaxInputTokens        int
+	SupportsPromptCache   bool
 	AutoCompactTokenLimit int
 	Capabilities          tool.ModelCapabilities
 	ReasoningEffort       string

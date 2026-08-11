@@ -190,6 +190,20 @@
   font-size: var(--aw-font-size-base);
 }
 
+.aw-profile-balance-panel__detail-sections {
+  display: grid;
+  gap: var(--aw-space-5);
+}
+
+.aw-profile-balance-panel__local-usage {
+  display: grid;
+  gap: var(--aw-space-2);
+  padding: var(--aw-space-6);
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-surface-raised);
+}
+
 .aw-profile-balance-panel__amount,
 .aw-profile-balance-panel__quotas,
 .aw-profile-balance-panel__quota {

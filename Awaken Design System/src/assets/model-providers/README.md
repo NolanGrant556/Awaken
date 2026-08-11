@@ -11,6 +11,9 @@
 | `doubao.png` | Doubao | 用户确认的 640 × 640 彩色原图，并与 [Lobe Icons Doubao](https://lobehub.com/icons/doubao) 核对 |
 | `deepseek.svg` | DeepSeek | [Lobe Icons DeepSeek](https://lobehub.com/icons/deepseek)，并与 DeepSeek 产品标识核对 |
 | `volcengine.svg` | 火山引擎 | [theSVG Volcengine](https://thesvg.org/icon/volcengine)，并与[火山引擎官方图标](https://portal.volccdn.com/obj/volcfe/misc/favicon.png)核对 |
+| `openai.svg` | OpenAI | [Lobe Icons OpenAI](https://lobehub.com/icons/openai) |
+| `anthropic.svg` | Anthropic | [Lobe Icons Anthropic](https://lobehub.com/icons/anthropic) |
+| `gemini.svg` | Google Gemini | [Lobe Icons Gemini](https://lobehub.com/icons/gemini) |
 
 SVG 来源为 MIT 授权的品牌图标资源；Kimi 图标来自用户本机安装的官方 App，品牌标识本身仍归各自权利人所有。Kimi API 与 Kimi Coding Plan 共用 Kimi Logo，Qwen API 与 Qwen Token Plan 共用 Qwen Logo，火山 Coding Plan、Doubao Ark API 与火山 Agent Plan 分别使用其产品对应 Logo。
 

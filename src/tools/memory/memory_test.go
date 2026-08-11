@@ -3,10 +3,12 @@ package memorytool
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"awaken/src/memory"
 	"awaken/src/tool"
 )
 
@@ -85,5 +87,39 @@ func TestMutationOutcomeGivesModelExplicitCompletionReceipt(t *testing.T) {
 	}
 	if len(outcome.NextActions) != 1 || !strings.Contains(outcome.NextActions[0].Description, "finish") {
 		t.Fatalf("missing finish guidance: %+v", outcome.NextActions)
+	}
+}
+
+func TestToolResolvesLegacyIndexFilenameToCanonicalMemoryID(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	t.Setenv("AWAKEN_HOME", home)
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(workspace, []string{workspace}))
+	ctx = tool.ContextWithToolThreadID(ctx, "thread_alias")
+	ctx = tool.ContextWithToolExecutionIdentity(ctx, tool.ToolExecutionIdentity{RunID: "run_alias", ToolCallID: "call_create", ToolName: ToolName})
+	createdRaw, err := (&Tool{}).Execute(ctx, `{"action":"create","scope":"user","type":"feedback","name":"Alias test","description":"Resolve legacy filename","content":"Use the canonical identity after resolving a filename."}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var created map[string]any
+	if err := json.Unmarshal([]byte(createdRaw), &created); err != nil {
+		t.Fatal(err)
+	}
+	memoryID, _ := created["memory_id"].(string)
+	store, err := memory.NewStore(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := store.Get(memoryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = tool.ContextWithToolExecutionIdentity(ctx, tool.ToolExecutionIdentity{RunID: "run_alias", ToolCallID: "call_get", ToolName: ToolName})
+	gotRaw, err := (&Tool{}).Execute(ctx, fmt.Sprintf(`{"action":"get","memory_id":%q}`, filepath.Base(record.Path)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gotRaw, `"memory_id":"`+memoryID+`"`) {
+		t.Fatalf("legacy alias did not resolve to canonical id: %s", gotRaw)
 	}
 }

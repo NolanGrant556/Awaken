@@ -45,7 +45,11 @@ func TestStoreCreateWritesMarkdownAndIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(index, "[Database testing]") || !strings.Contains(index, filepath.Base(record.Path)) {
+	if !strings.Contains(index, "[Database testing]") ||
+		!strings.Contains(index, filepath.Base(record.Path)) ||
+		!strings.Contains(index, "memory_id: `"+record.MemoryID+"`") ||
+		!strings.Contains(index, "scope: `project`") ||
+		!strings.Contains(index, "revision: `1`") {
 		t.Fatalf("unexpected index: %s", index)
 	}
 	info, err := os.Stat(record.Path)
@@ -54,6 +58,32 @@ func TestStoreCreateWritesMarkdownAndIndex(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("topic mode = %o", info.Mode().Perm())
+	}
+}
+
+func TestStoreResolveReferenceAcceptsCanonicalAndExactLegacyAlias(t *testing.T) {
+	store := testStore(t)
+	record, err := store.Create(testCreate(ScopeProject))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reference := range []string{
+		record.MemoryID,
+		filepath.Base(record.Path),
+		strings.TrimSuffix(filepath.Base(record.Path), filepath.Ext(record.Path)),
+	} {
+		resolved, resolveErr := store.ResolveReference(reference)
+		if resolveErr != nil {
+			t.Fatalf("ResolveReference(%q): %v", reference, resolveErr)
+		}
+		if resolved.MemoryID != record.MemoryID {
+			t.Fatalf("ResolveReference(%q)=%q want %q", reference, resolved.MemoryID, record.MemoryID)
+		}
+	}
+	for _, reference := range []string{"../" + filepath.Base(record.Path), record.Path, "missing.md"} {
+		if _, resolveErr := store.ResolveReference(reference); !errors.Is(resolveErr, ErrNotFound) {
+			t.Fatalf("ResolveReference(%q) error=%v want ErrNotFound", reference, resolveErr)
+		}
 	}
 }
 

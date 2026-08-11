@@ -37,9 +37,11 @@ import {
   type InstallSkillRequest,
   type InstallSkillResponse,
   type ModelProfileBalancesResult,
+  type ModelCatalogRefreshResult,
   type ModelReasoningCapabilityTestResult,
   type UserQuestionAnswer,
   type ModelProfileSaveRequest,
+  type ModelPurposeRouting,
   type ModelProfileTestResult,
   type ModelProvider,
   type MemoryDreamTask,
@@ -216,6 +218,8 @@ export type RuntimeClient = {
   enableSkill: (id: string) => Promise<void>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
+  getModelPurposeRouting?: () => Promise<ModelPurposeRouting>;
+  saveModelPurposeRouting?: (routing: ModelPurposeRouting) => Promise<ModelPurposeRouting>;
   getAgentPlanAccount: () => Promise<AgentPlanAccount>;
   saveAgentPlanAccount: (request: AgentPlanAccountSaveRequest) => Promise<AgentPlanAccount>;
   refreshAgentPlanModels: () => Promise<AgentPlanAccount>;
@@ -235,6 +239,9 @@ export type RuntimeClient = {
   testModelProfile: (request: ModelProfileSaveRequest) => Promise<ModelProfileTestResult>;
   testAgentPlanReasoningCapability: (request: ModelProfileSaveRequest) => Promise<ModelReasoningCapabilityTestResult>;
   syncModelCapabilities: () => Promise<ModelProvider[]>;
+  refreshModelCatalog: (
+    request: ModelProfileSaveRequest,
+  ) => Promise<ModelCatalogRefreshResult>;
   getModelProfileBalances: () => Promise<ModelProfileBalancesResult>;
   getRun: (runId: string) => Promise<RuntimeRun>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
@@ -455,6 +462,8 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     enableSkill: (id) => bridge.enableSkill(id),
     listModelProviders: () => bridge.listModelProviders(),
     listModelProfiles: () => bridge.listModelProfiles(),
+    getModelPurposeRouting: () => bridge.getModelPurposeRouting(),
+    saveModelPurposeRouting: (routing) => bridge.saveModelPurposeRouting(routing),
     getAgentPlanAccount: () => bridge.getAgentPlanAccount(),
     saveAgentPlanAccount: (request) =>
       unwrapDesktopOperation(bridge.saveAgentPlanAccount(request)),
@@ -473,6 +482,8 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     testAgentPlanReasoningCapability: (request) =>
       unwrapDesktopOperation(bridge.testAgentPlanReasoningCapability(request)),
     syncModelCapabilities: () => bridge.syncModelCapabilities(),
+    refreshModelCatalog: (request) =>
+      unwrapDesktopOperation(bridge.refreshModelCatalog(request)),
     getModelProfileBalances: () => bridge.getModelProfileBalances(),
     getRun: (runId) => bridge.getRun(runId),
     getThreadTranscript: (threadId) => bridge.getThreadTranscript(threadId),

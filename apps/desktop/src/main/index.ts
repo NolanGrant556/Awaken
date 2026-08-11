@@ -68,6 +68,8 @@ import {
   type InstallSkillResponse,
   type ModelProfileBalancesResultWire,
   type ModelProfileSaveRequest,
+  type ModelPurpose,
+  type ModelPurposeRouting,
   type ModelProviderWire,
   type PickedAttachmentFile,
   type ProjectDirectoryListRequest,
@@ -2085,6 +2087,19 @@ ipcMain.handle("awaken:list-model-profiles", async () => {
   return profiles.map(normalizeModelProfileSummary);
 });
 
+ipcMain.handle("awaken:get-model-purpose-routing", async () => {
+  if (!modelProfileStore) throw new Error("Model profile store unavailable");
+  return modelProfileStore.getPurposeRouting();
+});
+
+ipcMain.handle(
+  "awaken:save-model-purpose-routing",
+  async (_event, routing: ModelPurposeRouting) => {
+    if (!modelProfileStore) throw new Error("Model profile store unavailable");
+    return modelProfileStore.savePurposeRouting(routing);
+  },
+);
+
 async function ensureNoActiveRunsForSettingsChange(): Promise<void> {
   const threads = await requestRuntime<RuntimeThreadWire[]>("/v1/threads");
   if (threads.some((thread) => Boolean(thread.active_run_id))) {
@@ -2264,6 +2279,22 @@ ipcMain.handle("awaken:sync-model-capabilities", async () => {
   const providers = modelProfileStore.listProviders() satisfies ModelProviderWire[];
   return providers.map(normalizeModelProvider);
 });
+
+ipcMain.handle(
+  "awaken:refresh-model-catalog",
+  async (_event, request: ModelProfileSaveRequest) =>
+    runDesktopOperation(async () => {
+      if (!modelProfileStore) {
+        throw new Error("Model profile store unavailable");
+      }
+      await prepareNetworkRoute("model-catalog-refresh");
+      const result = await modelProfileStore.refreshProviderCatalog(request);
+      return {
+        provider: normalizeModelProvider(result.provider),
+        message: result.message,
+      };
+    }),
+);
 
 ipcMain.handle("awaken:get-model-profile-balances", async () => {
   if (!modelProfileStore) {
@@ -3093,6 +3124,15 @@ ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
     if (!selectedProfile) {
       throw new Error("请先在设置 > 模型中配置可用模型。");
     }
+    const purposeProfiles: NonNullable<typeof selectedProfile.purposeProfiles> = {};
+    for (const purpose of ["thread_title", "compact_summary", "subagent"] as ModelPurpose[]) {
+      const resolved = await modelProfileStore?.resolvePurposeRunProfile(
+        purpose,
+        selectedProfile.profileId,
+      );
+      if (resolved) purposeProfiles[purpose] = resolved;
+    }
+    selectedProfile.purposeProfiles = purposeProfiles;
     body.model_profile = normalizeModelProfileRunConfig(selectedProfile);
     // Renderer selection hints terminate at Main. Core receives only the
     // fully resolved, credential-bearing model_profile assembled here.

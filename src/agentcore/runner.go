@@ -174,8 +174,12 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	if r.config.SubagentOrigin == nil {
 		r.subagentController = r.config.SubagentController
 		if r.subagentController == nil && r.recorder != nil {
+			subagentProfileID := strings.TrimSpace(r.config.SubagentModelConfig.ProfileID)
+			if subagentProfileID == "" {
+				subagentProfileID = strings.TrimSpace(r.config.ModelConfig.ProfileID)
+			}
 			r.subagentController = subagentruntime.NewManager(ctx, subagentruntime.Config{
-				MaxTasks: 8, MaxConcurrent: 4,
+				MaxTasks: 8, MaxConcurrent: 4, ModelProfileID: subagentProfileID,
 				Starter: func(childCtx stdcontext.Context, request subagentruntime.StartRequest) (string, error) {
 					return r.startNativeChild(childCtx, request, events.sink)
 				},
@@ -555,7 +559,7 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 	request := llm.Request{
 		RequestID: requestID, SystemPrompt: llmReq.SystemPrompt, Messages: llmReq.Messages,
 		Tools: llmReq.Tools, Model: llmReq.Model, Temperature: llmReq.Temperature,
-		MaxTokens: llmReq.MaxTokens, Purpose: llm.RequestPurposeAgentTurn,
+		MaxTokens: llmReq.MaxTokens, Purpose: r.modelRequestPurpose(),
 		AffinityScopeID: r.threadID,
 		ReasoningPolicy: r.config.ModelConfig.ReasoningEffort,
 	}
@@ -569,7 +573,7 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 	llmReq.ContextWindowState.UsageSnapshot = &snapshot
 	llmReq.ContextUsage = snapshot
 	if events != nil {
-		if err := events.modelRequest(ctx, snapshot); err != nil {
+		if err := events.modelRequest(ctx, snapshot, request.Purpose); err != nil {
 			return nil, err
 		}
 	}
@@ -580,17 +584,19 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 	}
 	started := time.Now()
 	response, streamErr := llm.StreamPreparedWithObserver(ctx, config, prepared, observer)
-	if response != nil && prepared.Cache.ReasoningReplay && strings.TrimSpace(response.Thinking) != "" {
-		revision := config.CredentialRevision
-		if revision == 0 {
-			revision = 1
+	if response != nil {
+		if response.ProviderOpaqueState == nil && prepared.Cache.ReasoningReplay && strings.TrimSpace(response.Thinking) != "" {
+			revision := config.CredentialRevision
+			if revision == 0 {
+				revision = 1
+			}
+			response.ProviderOpaqueState = &context.ProviderOpaqueMessageState{
+				ProviderID: strings.ToLower(strings.TrimSpace(config.ProviderID)), ProfileID: strings.TrimSpace(config.ProfileID),
+				CredentialRevision: revision, ModelID: llmReq.Model, ProtocolFamily: protocol,
+				EndpointContractID: prepared.Cache.EndpointContract, Content: response.Thinking,
+			}
 		}
-		response.ProviderOpaqueState = &context.ProviderOpaqueMessageState{
-			ProviderID: strings.ToLower(strings.TrimSpace(config.ProviderID)), ProfileID: strings.TrimSpace(config.ProfileID),
-			CredentialRevision: revision, ModelID: llmReq.Model, ProtocolFamily: protocol,
-			EndpointContractID: prepared.Cache.EndpointContract, Content: response.Thinking,
-		}
-		if events != nil {
+		if response.ProviderOpaqueState != nil && events != nil {
 			if persistErr := events.providerOpaqueState(ctx, response.ProviderOpaqueState); persistErr != nil {
 				return nil, persistErr
 			}
@@ -608,6 +614,14 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		}
 	}
 	return response, streamErr
+}
+
+func (r *Runner) modelRequestPurpose() llm.RequestPurpose {
+	purpose := r.config.ModelRequestPurpose
+	if purpose == "" {
+		return llm.RequestPurposeAgentTurn
+	}
+	return purpose
 }
 
 func (e *runEventEmitter) providerOpaqueState(ctx stdcontext.Context, state *context.ProviderOpaqueMessageState) error {
@@ -631,20 +645,22 @@ func (e *runEventEmitter) providerOpaqueState(ctx stdcontext.Context, state *con
 
 func (r *Runner) transportConfig(llmReq LLMRequest) llm.Config {
 	return llm.Config{
-		APIKey:             r.config.ModelConfig.APIKey,
-		BaseURL:            r.config.ModelConfig.BaseURL,
-		Model:              llmReq.Model,
-		CapabilityModelID:  r.config.ModelConfig.CapabilityModelID,
-		EndpointSelector:   r.config.ModelConfig.EndpointSelector,
-		ModelSelectorKind:  r.config.ModelConfig.ModelSelectorKind,
-		Protocol:           llm.Protocol(r.config.ModelConfig.Protocol),
-		ProviderID:         r.config.ModelConfig.ProviderID,
-		ProfileID:          r.config.ModelConfig.ProfileID,
-		CredentialRevision: r.config.ModelConfig.CredentialRevision,
-		Temperature:        llmReq.Temperature,
-		MaxTokens:          llmReq.MaxTokens,
-		AuthScheme:         r.config.ModelConfig.AuthScheme,
-		ReasoningEffort:    r.config.ModelConfig.ReasoningEffort,
+		APIKey:              r.config.ModelConfig.APIKey,
+		BaseURL:             r.config.ModelConfig.BaseURL,
+		InferenceEndpoint:   r.config.ModelConfig.InferenceEndpoint,
+		Model:               llmReq.Model,
+		CapabilityModelID:   r.config.ModelConfig.CapabilityModelID,
+		EndpointSelector:    r.config.ModelConfig.EndpointSelector,
+		ModelSelectorKind:   r.config.ModelConfig.ModelSelectorKind,
+		Protocol:            llm.Protocol(r.config.ModelConfig.Protocol),
+		ProviderID:          r.config.ModelConfig.ProviderID,
+		ProfileID:           r.config.ModelConfig.ProfileID,
+		CredentialRevision:  r.config.ModelConfig.CredentialRevision,
+		Temperature:         llmReq.Temperature,
+		MaxTokens:           llmReq.MaxTokens,
+		AuthScheme:          r.config.ModelConfig.AuthScheme,
+		SupportsPromptCache: r.config.ModelConfig.SupportsPromptCache,
+		ReasoningEffort:     r.config.ModelConfig.ReasoningEffort,
 	}
 }
 
@@ -675,6 +691,7 @@ func modelUsageRecord(requestID, model, protocol string, config llm.Config, purp
 	}
 	if response != nil {
 		record.ProviderRequestID = response.ProviderRequestID
+		record.RateLimitObservation = modelRateLimitObservation(response.RateLimitObservation)
 	}
 	if response != nil && response.Usage != nil {
 		record.UsageComplete = true
@@ -697,6 +714,17 @@ func modelUsageRecord(requestID, model, protocol string, config llm.Config, purp
 	}
 	applyPricing(&record)
 	return record
+}
+
+func modelRateLimitObservation(value *llm.RateLimitObservation) *RateLimitObservation {
+	if value == nil {
+		return nil
+	}
+	return &RateLimitObservation{
+		RequestLimit: value.RequestLimit, RequestRemaining: value.RequestRemaining, RequestReset: value.RequestReset,
+		TokenLimit: value.TokenLimit, TokenRemaining: value.TokenRemaining, TokenReset: value.TokenReset,
+		ObservedAt: value.ObservedAt,
+	}
 }
 
 func normalizedModelUsageReasoningPolicy(config llm.Config, purpose llm.RequestPurpose) string {
@@ -839,7 +867,7 @@ func (e *runEventEmitter) memoryRecalled(ctx stdcontext.Context, receipts []Memo
 	return nil
 }
 
-func (e *runEventEmitter) modelRequest(ctx stdcontext.Context, snapshot ContextUsageSnapshot) error {
+func (e *runEventEmitter) modelRequest(ctx stdcontext.Context, snapshot ContextUsageSnapshot, purpose llm.RequestPurpose) error {
 	event := AwakenEvent{Type: ContextSnapshotEventType, ContextUsageSnapshot: &snapshot}
 	e.fillIDs(&event)
 	if e.recorder == nil {
@@ -848,7 +876,7 @@ func (e *runEventEmitter) modelRequest(ctx stdcontext.Context, snapshot ContextU
 	}
 	records := []SemanticRecord{
 		e.withAgentIdentity(ContextSnapshotSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, snapshot)),
-		e.withAgentIdentity(ModelRequestSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, snapshot)),
+		e.withAgentIdentity(ModelRequestSemanticRecord(e.threadID, e.runID, e.turnID(), e.sessionID, snapshot, purpose)),
 	}
 	persistCtx, cancel := durablePersistenceContext(ctx)
 	defer cancel()
@@ -1442,10 +1470,6 @@ func (r *Runner) startNativeChild(
 	if r == nil || r.config.SubagentOrigin != nil {
 		return "", &subagentruntime.Error{Code: subagentruntime.ErrorBoundaryViolation, Message: "only the root runner may start native subagents"}
 	}
-	if requested := strings.TrimSpace(request.Task.ModelProfileID); requested != "" &&
-		requested != strings.TrimSpace(r.config.ModelConfig.ProfileID) {
-		return "", &subagentruntime.Error{Code: subagentruntime.ErrorInvalidInput, Message: "model_profile_id must match the current run in phase 1"}
-	}
 	readOnly := profile.WorkspaceReadOnly()
 	parentConfig := r.config
 	if parentConfig.ExecutionProfile == nil {
@@ -1457,6 +1481,9 @@ func (r *Runner) startNativeChild(
 	})
 	if err != nil {
 		return "", &subagentruntime.Error{Code: subagentruntime.ErrorBoundaryViolation, Message: err.Error()}
+	}
+	if strings.TrimSpace(parentConfig.SubagentModelConfig.Model) != "" {
+		childConfig.ModelConfig = parentConfig.SubagentModelConfig
 	}
 	childConfig.SubagentTaskID = request.Task.TaskID
 	childConfig.SubagentController = nil
@@ -2426,7 +2453,22 @@ func memoryMutationReceipt(result ToolExecutionResult) (MemoryRecallReceipt, boo
 	if result.Name != "memory" {
 		return MemoryRecallReceipt{}, false
 	}
-	receipt := MemoryRecallReceipt{Status: "rejected", ErrorCode: firstNonEmpty(result.ErrorCode, result.Outcome.ErrorCode)}
+	var arguments map[string]any
+	if json.Unmarshal([]byte(result.SemanticArguments), &arguments) != nil {
+		return MemoryRecallReceipt{}, false
+	}
+	action := strings.ToLower(memoryPayloadString(arguments, "action"))
+	if action != "create" && action != "update" && action != "supersede" && action != "delete" {
+		return MemoryRecallReceipt{}, false
+	}
+	receipt := MemoryRecallReceipt{
+		MemoryID:  memoryPayloadString(arguments, "memory_id"),
+		Scope:     memoryPayloadString(arguments, "scope"),
+		Type:      memoryPayloadString(arguments, "type"),
+		Action:    action,
+		Status:    "rejected",
+		ErrorCode: firstNonEmpty(result.ErrorCode, result.Outcome.ErrorCode),
+	}
 	if result.IsError || result.Outcome.IsError() {
 		return receipt, true
 	}
@@ -2437,7 +2479,7 @@ func memoryMutationReceipt(result ToolExecutionResult) (MemoryRecallReceipt, boo
 	receipt.MemoryID = memoryPayloadString(payload, "memory_id")
 	receipt.Scope = memoryPayloadString(payload, "scope")
 	receipt.Type = memoryPayloadString(payload, "type")
-	receipt.Action = memoryPayloadString(payload, "action")
+	receipt.Action = firstNonEmpty(memoryPayloadString(payload, "action"), action)
 	receipt.Status = memoryPayloadString(payload, "status")
 	if revision, ok := payload["revision"].(float64); ok {
 		receipt.Revision = int(revision)

@@ -388,6 +388,8 @@ func TestStreamInvokeAnthropicThinkingAndText(t *testing.T) {
 data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}`,
 			`event: content_block_delta
 data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think"}}`,
+			`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"signed-thinking"}}`,
 			`event: content_block_stop
 data: {"type":"content_block_stop","index":0}`,
 			`event: content_block_start
@@ -426,6 +428,61 @@ data: {"type":"message_stop"}`,
 	}
 	if thinkingContent != "Let me think" {
 		t.Fatalf("expected thinking 'Let me think', got %q", thinkingContent)
+	}
+	if resp.ProviderOpaqueState == nil || !strings.Contains(resp.ProviderOpaqueState.Content, "signed-thinking") {
+		t.Fatalf("expected signed Anthropic replay state, got %+v", resp.ProviderOpaqueState)
+	}
+}
+
+func TestPrepareAnthropicThinkingAndSignedReplay(t *testing.T) {
+	cfg := Config{
+		APIKey: "test-key", BaseURL: "https://api.anthropic.com", Model: "claude-sonnet-4-6",
+		Protocol: ProtocolAnthropicMessages, ProviderID: "anthropic", ProfileID: "profile-anthropic", CredentialRevision: 3,
+		Temperature: 0.4, MaxTokens: 16000,
+	}
+	prepared, err := PrepareRequest(cfg, Request{
+		UserPrompt: "think", ReasoningPolicy: "high", Purpose: RequestPurposeAgentTurn,
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first map[string]interface{}
+	if err := json.Unmarshal(prepared.Body, &first); err != nil {
+		t.Fatal(err)
+	}
+	if first["temperature"] != nil {
+		t.Fatalf("extended thinking must omit temperature: %s", prepared.Body)
+	}
+	if thinking, ok := first["thinking"].(map[string]interface{}); !ok || thinking["type"] != "enabled" || thinking["budget_tokens"] != float64(8192) {
+		t.Fatalf("unexpected thinking config: %s", prepared.Body)
+	}
+
+	payload, _ := json.Marshal(anthropicThinkingState{Thinking: "private reasoning", Signature: "signature-1"})
+	state := &ctx.ProviderOpaqueMessageState{
+		ProviderID: "anthropic", ProfileID: "profile-anthropic", CredentialRevision: 3,
+		ModelID: "claude-sonnet-4-6", ProtocolFamily: string(ProtocolAnthropicMessages),
+		EndpointContractID: EndpointContractAnthropicMessages, Content: string(payload),
+	}
+	prepared, err = PrepareRequest(cfg, Request{
+		Messages: []ctx.Message{
+			{Role: ctx.RoleAssistant, Content: "answer", ProviderOpaqueState: state},
+			{Role: ctx.RoleUser, Content: "continue"},
+		},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replay struct {
+		Messages []struct {
+			Content interface{} `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(prepared.Body, &replay); err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(replay.Messages[0].Content)
+	if !strings.Contains(string(encoded), `"type":"thinking"`) || !strings.Contains(string(encoded), `"signature":"signature-1"`) {
+		t.Fatalf("signed thinking block was not replayed: %s", prepared.Body)
 	}
 }
 
@@ -534,8 +591,8 @@ func TestApplyAuthHeadersExplicitXAPIKey(t *testing.T) {
 	if req.Header.Get("x-api-key") != "secret" {
 		t.Errorf("expected x-api-key secret, got %q", req.Header.Get("x-api-key"))
 	}
-	if req.Header.Get("anthropic-version") != "2023-06-01" {
-		t.Errorf("expected anthropic-version 2023-06-01, got %q", req.Header.Get("anthropic-version"))
+	if req.Header.Get("anthropic-version") != "" {
+		t.Errorf("expected no anthropic-version for OpenAI Chat, got %q", req.Header.Get("anthropic-version"))
 	}
 	if req.Header.Get("Authorization") != "" {
 		t.Errorf("expected no Authorization header, got %q", req.Header.Get("Authorization"))
@@ -554,6 +611,33 @@ func TestApplyAuthHeadersExplicitBearer(t *testing.T) {
 	}
 	if req.Header.Get("x-api-key") != "" {
 		t.Errorf("expected no x-api-key header, got %q", req.Header.Get("x-api-key"))
+	}
+}
+
+func TestApplyAuthHeadersSupportedCustomSchemes(t *testing.T) {
+	tests := []struct {
+		scheme string
+		header string
+		value  string
+	}{
+		{scheme: "api-key", header: "api-key", value: "secret"},
+		{scheme: "x-goog-api-key", header: "x-goog-api-key", value: "secret"},
+		{scheme: "none", header: "Authorization", value: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.scheme, func(t *testing.T) {
+			req, err := http.NewRequest("POST", "http://example.com", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			applyAuthHeaders(req, Config{APIKey: "secret", AuthScheme: tt.scheme}, ProtocolOpenAIChat)
+			if got := req.Header.Get(tt.header); got != tt.value {
+				t.Fatalf("%s header=%q, want %q", tt.header, got, tt.value)
+			}
+			if tt.scheme == "none" && len(req.Header.Values("Authorization")) != 0 {
+				t.Fatal("no-auth scheme must not emit Authorization")
+			}
+		})
 	}
 }
 
@@ -777,8 +861,9 @@ func newAnthropicServer(t *testing.T, handler http.HandlerFunc) *httptest.Server
 
 func anthropicConfig(baseURL string) Config {
 	return Config{
-		APIKey:  "test-key",
-		BaseURL: baseURL + "/anthropic",
-		Model:   "claude-test",
+		APIKey:   "test-key",
+		BaseURL:  baseURL + "/anthropic",
+		Model:    "claude-test",
+		Protocol: ProtocolAnthropicMessages,
 	}
 }

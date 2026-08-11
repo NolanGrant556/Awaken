@@ -12,6 +12,7 @@
 - `context: fork` Skill 已能通过 `Runner.startSkillChild` 同步运行真实 child，child 的模型消息、工具调用和压缩记录带 `agent_id`，父模型历史恢复会排除 child records；
 - 父 run 的取消上下文可以终止当前同步 Skill child。
 - 正式模型工具 `subagent(action=spawn|status|wait|cancel)` 已注册；只开放 fresh、`shared_readonly` 的 `explore/review` child，child 不暴露 Subagent、主动提问或 mutation 工具；
+- child 模型由 Host 解析：默认继承父 Agent profile；Host 内部存在有效 `subagent` route 时可先解析该 route，Renderer 不提供用途模型选择器；模型可见 spawn schema 不含 `model_profile_id`、endpoint 或凭据；
 - `src/subagentruntime` 提供 run-scoped task registry、事件驱动 wait、单任务取消、每 run 最多 8 个任务和最多 4 个并发执行；父 run 终态前会收敛非终态 child；
 - child 使用独立 conversation、agent/task identity 和取消上下文，生命周期与有界结果写入 SemanticJournal；live Agent event 与 durable reasoning/message/tool frame 都携带同一 `subagentTaskId/subagentAgentId`，Renderer 将它们路由到 child 自己的 narrative，不再混入 root；
 - child 的每个耐久 `tool_call` 与 `model_usage` 会按稳定 ID 去重后生成 `subagent_progress`，累计工具次数、provider-reported input/output/total tokens；中心 group 与右侧 Inspector 同时显示工具数、token 与按耐久起止时间计算的耗时；
@@ -27,7 +28,7 @@
 
 - 不支持向运行中的 child 追加消息；tool action 与 HTTP message route 都 fail closed；
 - 不支持 `general` 或任何写能力 child，也没有独立 Git worktree；
-- 不支持递归 Subagent、full-context fork、模型 profile override、detached/cross-run worker；
+- 不支持递归 Subagent、full-context fork、由模型或 child prompt 任意指定 profile、detached/cross-run worker；
 - Core 重启会保留已有耐久记录，但尚未扫描未闭合 task 并补写 `interrupted`，不会恢复运行中的 child；
 - 正式 child 尚未继承父 `MemoryRecallSnapshot`；
 - root/child 原子共享 token/tool/cost 预算和 child 完整 cost 统计尚未接通；provider 未报告 usage 时不伪造 child token；
@@ -366,7 +367,6 @@ Manager 的 starter callback 固定执行：
   "prompt": "spawn/message 使用，最大 32 KiB",
   "agent_type": "explore | review | general",
   "workspace_mode": "shared_readonly | git_worktree",
-  "model_profile_id": "可选、只能选择 host catalog 中已配置 profile",
   "return_when": "any | all",
   "timeout_ms": "0-60000"
 }
@@ -467,9 +467,10 @@ root 与所有 child 共享一个原子 `RunExecutionBudget`：
 
 ### 7.3 模型选择
 
-- 默认继承父 run 的 model profile；
-- `model_profile_id` 只能引用当前 Desktop 已配置且可运行的 profile；
-- host 解析 profile，不接受 child prompt 注入 endpoint/key/model；
+- Host 默认继承父 run 的 model profile；内部存在有效 `subagent` route 时可先解析，route 已删除/停用时仍继承父 profile；
+- 模型工具 schema 不暴露 `model_profile_id`。只有 Desktop/Main 构造的非敏感 purpose routing 可以引用当前已配置且可运行的 profile；
+- host 解析完整 profile 和凭据，不接受 root/child prompt 注入 endpoint/key/model；
+- child 走用途 profile 自己保存的 Chat/Responses/Messages 协议，协议原始 SSE 不进入 Subagent runtime；
 - child 的 `model_request/model_usage/context_snapshot` 带 `agent_id`、`task_id`；
 - root Context Usage 面板的“当前请求”不混入 child 请求；新增子任务聚合行只展示 child 累计 token/cost，并保持现有六项总和契约不被改写；
 - child usage 计入 thread/run 总成本统计，但不能覆盖 root 的 latest provider usage。

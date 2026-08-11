@@ -25,6 +25,7 @@ func TestResolvePromptCacheCapabilityRequiresExactProviderEndpointAndProtocol(t 
 		{name: "kimi coding official", cfg: Config{ProviderID: "kimi-coding-plan", BaseURL: "https://api.kimi.com/coding/v1", Protocol: ProtocolOpenAIChat}, want: "kimi_coding_plan_openai_chat_v1"},
 		{name: "volc official", cfg: Config{ProviderID: "volcengine", BaseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", Protocol: ProtocolOpenAIChat}, want: "volcengine_coding_plan_openai_chat_v1"},
 		{name: "custom endpoint denied", cfg: Config{ProviderID: "kimi-cn", BaseURL: "https://proxy.example/v1", Protocol: ProtocolOpenAIChat}},
+		{name: "custom endpoint admitted by profile contract", cfg: Config{ProviderID: "custom", BaseURL: "https://proxy.example/v1", Protocol: ProtocolOpenAIResponses, SupportsPromptCache: true}, want: "profile_capability_openai_responses"},
 		{name: "provider mismatch denied", cfg: Config{ProviderID: "deepseek", BaseURL: "https://api.moonshot.cn/v1", Protocol: ProtocolOpenAIChat}},
 		{name: "protocol mismatch denied", cfg: Config{ProviderID: "deepseek", BaseURL: "https://api.deepseek.com", Protocol: ProtocolAnthropicMessages}},
 	}
@@ -69,6 +70,8 @@ func TestPromptCacheAffinityKeyIsStableAndPurposeBound(t *testing.T) {
 		{name: "revision", cfg: func() Config { next := cfg; next.CredentialRevision = 3; return next }(), req: baseRequest},
 		{name: "model", cfg: func() Config { next := cfg; next.Model = "k3"; return next }(), req: baseRequest},
 		{name: "purpose", cfg: cfg, req: Request{AffinityScopeID: "thread-1", Purpose: RequestPurposeCompactSummary, ReasoningPolicy: "provider_default"}},
+		{name: "subagent purpose", cfg: cfg, req: Request{AffinityScopeID: "thread-1", Purpose: RequestPurposeSubagent, ReasoningPolicy: "provider_default"}},
+		{name: "scheduled purpose", cfg: cfg, req: Request{AffinityScopeID: "thread-1", Purpose: RequestPurposeScheduledTask, ReasoningPolicy: "provider_default"}},
 		{name: "reasoning", cfg: cfg, req: Request{AffinityScopeID: "thread-1", Purpose: RequestPurposeAgentTurn, ReasoningPolicy: "max"}},
 	}
 	for _, mutation := range mutations {
@@ -116,6 +119,11 @@ func TestPrepareOpenAIPromptCacheRequestContracts(t *testing.T) {
 		{
 			name: "unidentified custom endpoint fails closed", stream: true, disableReasoning: true,
 			cfg: Config{APIKey: "test", BaseURL: "https://proxy.example/deepseek", Protocol: ProtocolOpenAIChat, Model: "deepseek-chat"},
+		},
+		{
+			name: "custom endpoint uses explicit cache capability", stream: true, disableReasoning: true,
+			cfg:            Config{APIKey: "test", ProviderID: "custom", ProfileID: "p-custom", BaseURL: "https://proxy.example/v1", Protocol: ProtocolOpenAIChat, Model: "compatible-model", SupportsPromptCache: true},
+			wantCapability: "profile_capability_openai_chat", wantKey: true, wantIncludeUsage: true,
 		},
 	}
 	for _, tt := range tests {

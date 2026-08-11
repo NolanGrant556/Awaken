@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/llm"
 )
 
 // newScheduledTestService builds a RunService on an isolated AWAKEN_HOME with
@@ -97,6 +98,12 @@ func TestStartScheduledRunDedicatedThread(t *testing.T) {
 	}
 	if snapshot.TitleSource != ThreadTitleSourceTask {
 		t.Fatalf("title source = %q, want %q", snapshot.TitleSource, ThreadTitleSourceTask)
+	}
+	service.mu.RLock()
+	agentPurpose := service.threads[first.ThreadID].agent.GetConfig().ModelRequestPurpose
+	service.mu.RUnlock()
+	if agentPurpose != llm.RequestPurposeScheduledTask {
+		t.Fatalf("scheduled model request purpose = %q, want %q", agentPurpose, llm.RequestPurposeScheduledTask)
 	}
 	if snapshot.TitleStatus != ThreadTitleStatusReady {
 		t.Fatalf("title status = %q, want %q", snapshot.TitleStatus, ThreadTitleStatusReady)

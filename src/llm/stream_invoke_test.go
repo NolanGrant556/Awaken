@@ -100,6 +100,87 @@ func TestStreamInvokeOpenAIReasoningOnlyDoesNotReturnEmptyResponse(t *testing.T)
 	}
 }
 
+func TestStreamInvokeMiniMaxReasoningDetailsSnapshotsBecomeUnifiedDeltas(t *testing.T) {
+	server := newStreamServer(t, "/chat/completions", []string{
+		`data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"step"}]}}]}`,
+		`data: {"choices":[{"delta":{"reasoning_details":[{"type":"reasoning.text","text":"step one"}]}}]}`,
+		`data: {"choices":[{"delta":{"content":"answer"}}]}`,
+		`data: {"choices":[{"delta":{"content":"answer done"}}]}`,
+		`data: [DONE]`,
+	})
+	defer server.Close()
+
+	cfg := testConfig(server.URL)
+	cfg.ProviderID = "minimax"
+	var thinking, answer string
+	resp, err := StreamInvoke(context.Background(), cfg, Request{UserPrompt: "hi"}, func(content string, isThinking bool) {
+		if isThinking {
+			thinking += content
+		} else {
+			answer += content
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thinking != "step one" || resp.Thinking != "step one" {
+		t.Fatalf("reasoning snapshot duplicated or lost: callback=%q response=%q", thinking, resp.Thinking)
+	}
+	if answer != "answer done" || resp.Content != "answer done" {
+		t.Fatalf("content snapshot duplicated or lost: callback=%q response=%q", answer, resp.Content)
+	}
+}
+
+func TestStreamInvokeLeadingThinkTagsSplitAcrossChunks(t *testing.T) {
+	server := newStreamServer(t, "/chat/completions", []string{
+		`data: {"choices":[{"delta":{"content":"<thi"}}]}`,
+		`data: {"choices":[{"delta":{"content":"nk>private "}}]}`,
+		`data: {"choices":[{"delta":{"content":"reasoning</thi"}}]}`,
+		`data: {"choices":[{"delta":{"content":"nk>\nfinal"}}]}`,
+		`data: [DONE]`,
+	})
+	defer server.Close()
+
+	var thinking, answer string
+	resp, err := StreamInvoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "hi"}, func(content string, isThinking bool) {
+		if isThinking {
+			thinking += content
+		} else {
+			answer += content
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thinking != "private reasoning" || resp.Thinking != thinking {
+		t.Fatalf("inline thinking was not normalized: callback=%q response=%q", thinking, resp.Thinking)
+	}
+	if answer != "final" || resp.Content != "final" || strings.Contains(resp.Content, "<think>") {
+		t.Fatalf("inline thinking leaked into answer: callback=%q response=%q", answer, resp.Content)
+	}
+}
+
+func TestPrepareMiniMaxChatRequestsSeparatedReasoning(t *testing.T) {
+	cfg := Config{
+		APIKey: "test", BaseURL: "https://api.minimaxi.com/v1", Model: "MiniMax-M3",
+		Protocol: ProtocolOpenAIChat, ProviderID: "minimax", ProfileID: "profile-minimax",
+	}
+	prepared, err := PrepareRequest(cfg, Request{UserPrompt: "hi"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(prepared.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["reasoning_split"] != true {
+		t.Fatalf("MiniMax request missing reasoning_split: %s", prepared.Body)
+	}
+	if !prepared.Cache.ReasoningReplay {
+		t.Fatal("MiniMax separated reasoning must be retained for exact-contract continuation")
+	}
+}
+
 func TestStreamInvokeOpenAIMaxOutputStopReason(t *testing.T) {
 	server := newStreamServer(t, "/chat/completions", []string{
 		`data: {"choices":[{"delta":{"content":"partial"}}]}`,

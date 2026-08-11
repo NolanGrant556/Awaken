@@ -526,8 +526,19 @@ func mapModelUsageRecord(usage *agentcore.ModelUsageRecord) *ModelUsageRecord {
 		RawUsage:      mapRawModelUsage(usage.RawUsage),
 		UsageComplete: usage.UsageComplete, CalculatedCostUSD: cloneFloatPointer(usage.CalculatedCostUSD),
 		PricingSnapshot: mapPricingSnapshot(usage.PricingSnapshot), Currency: usage.Currency,
-		ProviderRequestID: usage.ProviderRequestID, LatencyMS: usage.LatencyMS,
+		ProviderRequestID: usage.ProviderRequestID, RateLimitObservation: mapRateLimitObservation(usage.RateLimitObservation), LatencyMS: usage.LatencyMS,
 		Status: string(usage.Status), ErrorCode: usage.ErrorCode, CompletedAt: usage.CompletedAt.UTC().Format(time.RFC3339Nano),
+	}
+}
+
+func mapRateLimitObservation(value *agentcore.RateLimitObservation) *RateLimitObservation {
+	if value == nil {
+		return nil
+	}
+	return &RateLimitObservation{
+		RequestLimit: value.RequestLimit, RequestRemaining: value.RequestRemaining, RequestReset: value.RequestReset,
+		TokenLimit: value.TokenLimit, TokenRemaining: value.TokenRemaining, TokenReset: value.TokenReset,
+		ObservedAt: value.ObservedAt.UTC().Format(time.RFC3339Nano),
 	}
 }
 

@@ -47,7 +47,7 @@ func (t *Tool) InputSchema() tool.ToolParametersSchema {
 			"types":  {Type: "array", Description: "Optional memory-type filters for search.", Items: &tool.ToolParam{Type: "string", Description: "One memory type.", Enum: []any{"user", "feedback", "project", "reference"}}},
 			"type":   {Type: "string", Enum: []any{"user", "feedback", "project", "reference"}, Description: "Required for create."},
 			"query":  {Type: "string", Description: "Text query for search."}, "limit": {Type: "integer", Description: "Maximum search results, from 1 through 20.", Minimum: floatPtr(1), Maximum: floatPtr(20)},
-			"memory_id": {Type: "string", Description: "Stable identity for get or mutation actions."}, "expected_revision": {Type: "integer", Description: "Last observed revision for optimistic concurrency.", Minimum: floatPtr(1)},
+			"memory_id": {Type: "string", Description: "Canonical mem_* identity shown in MEMORY.md/search results. Exact legacy topic filenames are accepted only for backward compatibility."}, "expected_revision": {Type: "integer", Description: "Last observed revision for optimistic concurrency.", Minimum: floatPtr(1)},
 			"name": {Type: "string", Description: "Short topic name for create."}, "description": {Type: "string", Description: "Short, concrete recall description for create."}, "content": {Type: "string", Description: "Markdown topic body for create."},
 			"keywords": {Type: "array", Description: "Optional search terms for create.", Items: &tool.ToolParam{Type: "string", Description: "One search keyword."}},
 			"patch": {Type: "object", Description: "Fields to replace during update; omitted fields remain unchanged.", AdditionalProperties: tool.BoolPtr(false), Properties: map[string]tool.ToolParam{
@@ -109,7 +109,13 @@ func (t *Tool) Execute(ctx context.Context, raw string) (string, error) {
 		if p.MemoryID == "" {
 			return "", fmt.Errorf("memory_invalid_input: memory_id is required")
 		}
-		output, err = store.Get(p.MemoryID)
+		resolved, resolveErr := store.ResolveReference(p.MemoryID)
+		if resolveErr != nil {
+			err = resolveErr
+		} else {
+			p.MemoryID = resolved.MemoryID
+			output = resolved
+		}
 	case "create":
 		record, createErr := store.Create(memory.CreateInput{Scope: p.Scope, Type: p.Type, Name: p.Name, Description: p.Description, Content: p.Content, Keywords: p.Keywords, Source: source})
 		record.Action, output, err = "create", record, createErr
@@ -117,18 +123,36 @@ func (t *Tool) Execute(ctx context.Context, raw string) (string, error) {
 		if p.MemoryID == "" || p.ExpectedRevision < 1 || strings.TrimSpace(p.Reason) == "" {
 			return "", fmt.Errorf("memory_invalid_input: memory_id, expected_revision and reason are required")
 		}
+		resolved, resolveErr := store.ResolveReference(p.MemoryID)
+		if resolveErr != nil {
+			err = resolveErr
+			break
+		}
+		p.MemoryID = resolved.MemoryID
 		record, updateErr := store.Update(p.MemoryID, p.ExpectedRevision, p.Patch, source)
 		record.Action, output, err = "update", record, updateErr
 	case "supersede":
 		if p.MemoryID == "" || p.ExpectedRevision < 1 || strings.TrimSpace(p.Reason) == "" {
 			return "", fmt.Errorf("memory_invalid_input: memory_id, expected_revision and reason are required")
 		}
+		resolved, resolveErr := store.ResolveReference(p.MemoryID)
+		if resolveErr != nil {
+			err = resolveErr
+			break
+		}
+		p.MemoryID = resolved.MemoryID
 		record, supersedeErr := store.Supersede(p.MemoryID, p.ExpectedRevision, source)
 		record.Action, output, err = "supersede", record, supersedeErr
 	case "delete":
 		if p.MemoryID == "" || p.ExpectedRevision < 1 || strings.TrimSpace(p.Reason) == "" {
 			return "", fmt.Errorf("memory_invalid_input: memory_id, expected_revision and reason are required")
 		}
+		resolved, resolveErr := store.ResolveReference(p.MemoryID)
+		if resolveErr != nil {
+			err = resolveErr
+			break
+		}
+		p.MemoryID = resolved.MemoryID
 		err = store.Delete(p.MemoryID, p.ExpectedRevision)
 		output = map[string]any{"action": "delete", "memory_id": p.MemoryID, "revision": p.ExpectedRevision}
 	default:
@@ -173,6 +197,8 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, raw string, _ tool.ToolObserv
 		code, category, retryable = "memory_sensitive_content", tool.ErrorCategoryPolicy, false
 	case strings.Contains(message, "memory_duplicate"):
 		code, category, retryable = "memory_duplicate", tool.ErrorCategoryDomain, true
+	case errors.Is(err, memory.ErrAmbiguousRef):
+		code, category, retryable = "memory_ambiguous_reference", tool.ErrorCategoryDomain, true
 	case errors.Is(err, memory.ErrNotFound):
 		code, category, retryable = "memory_not_found", tool.ErrorCategoryDomain, false
 	default:

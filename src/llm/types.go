@@ -15,8 +15,10 @@ type Protocol string
 
 const (
 	ProtocolOpenAIChat        Protocol = "openai_chat"
+	ProtocolOpenAIResponses   Protocol = "openai_responses"
 	ProtocolAnthropicMessages Protocol = "anthropic_messages"
 	ProtocolMiniMaxChat       Protocol = "minimax_chat"
+	protocolInvalid           Protocol = "invalid"
 )
 
 // Config 是 LLM 配置
@@ -34,7 +36,9 @@ type Config struct {
 	Temperature           float64
 	MaxTokens             int
 	AuthScheme            string
+	InferenceEndpoint     string
 	ContextWindow         int
+	SupportsPromptCache   bool
 	AutoCompactTokenLimit int
 	ReasoningEffort       string
 }
@@ -43,6 +47,8 @@ type RequestPurpose string
 
 const (
 	RequestPurposeAgentTurn         RequestPurpose = "agent_turn"
+	RequestPurposeSubagent          RequestPurpose = "subagent"
+	RequestPurposeScheduledTask     RequestPurpose = "scheduled_task"
 	RequestPurposeThreadTitle       RequestPurpose = "thread_title"
 	RequestPurposeCompactSummary    RequestPurpose = "compact_summary"
 	RequestPurposeMemoryRecall      RequestPurpose = "memory_recall"
@@ -94,15 +100,28 @@ type PreparedPromptCache struct {
 
 // Response 是统一响应结构
 type Response struct {
-	Content             string
-	Thinking            string
-	ToolCalls           []ToolCall
-	Usage               *Usage
-	IsFinished          bool
-	StopReason          string
-	MaxOutputReached    bool
-	ProviderRequestID   string
-	ProviderOpaqueState *context.ProviderOpaqueMessageState
+	Content              string
+	Thinking             string
+	ToolCalls            []ToolCall
+	Usage                *Usage
+	IsFinished           bool
+	StopReason           string
+	MaxOutputReached     bool
+	ProviderRequestID    string
+	RateLimitObservation *RateLimitObservation
+	ProviderOpaqueState  *context.ProviderOpaqueMessageState
+}
+
+// RateLimitObservation preserves the most recent provider response-header
+// facts without interpreting provider-specific reset formats.
+type RateLimitObservation struct {
+	RequestLimit     string
+	RequestRemaining string
+	RequestReset     string
+	TokenLimit       string
+	TokenRemaining   string
+	TokenReset       string
+	ObservedAt       time.Time
 }
 
 // Usage 是 provider 返回的可选 token 用量信息。
@@ -152,6 +171,34 @@ type ToolCallDelta struct {
 type StreamObserver struct {
 	OnContent       StreamCallback
 	OnToolCallDelta func(ToolCallDelta)
+	OnEvent         func(StreamEvent)
+}
+
+type StreamEventType string
+
+const (
+	StreamEventTextDelta      StreamEventType = "text_delta"
+	StreamEventReasoningDelta StreamEventType = "reasoning_delta"
+	StreamEventToolCallStart  StreamEventType = "tool_call_start"
+	StreamEventToolCallDelta  StreamEventType = "tool_call_delta"
+	StreamEventToolCallDone   StreamEventType = "tool_call_done"
+	StreamEventUsage          StreamEventType = "usage"
+	StreamEventCompleted      StreamEventType = "completed"
+	StreamEventFailed         StreamEventType = "failed"
+)
+
+// StreamEvent is the provider-neutral stream contract. Existing callbacks
+// remain supported, while new protocol adapters publish the same typed events
+// so callers never need to inspect provider SSE payloads.
+type StreamEvent struct {
+	Type          StreamEventType
+	Content       string
+	IsThinking    bool
+	ToolCallDelta *ToolCallDelta
+	ToolCall      *ToolCall
+	Usage         *Usage
+	StopReason    string
+	ErrorCode     string
 }
 
 // Transport 是 LLM 传输层接口
@@ -186,10 +233,14 @@ func resolveProtocol(cfg Config) Protocol {
 		switch cfg.Protocol {
 		case ProtocolOpenAIChat:
 			return ProtocolOpenAIChat
+		case ProtocolOpenAIResponses:
+			return ProtocolOpenAIResponses
 		case ProtocolAnthropicMessages:
 			return ProtocolAnthropicMessages
 		case ProtocolMiniMaxChat:
 			return ProtocolMiniMaxChat
+		default:
+			return protocolInvalid
 		}
 	}
 
@@ -199,25 +250,18 @@ func resolveProtocol(cfg Config) Protocol {
 		switch protocol {
 		case "openai_chat":
 			return ProtocolOpenAIChat
+		case "openai_responses":
+			return ProtocolOpenAIResponses
 		case "anthropic_messages":
 			return ProtocolAnthropicMessages
 		case "minimax_chat":
 			return ProtocolMiniMaxChat
+		default:
+			return protocolInvalid
 		}
 	}
-
-	// 自动判断
-	baseURL := strings.ToLower(cfg.BaseURL)
-	if strings.Contains(baseURL, "api.anthropic.com") {
-		return ProtocolAnthropicMessages
-	}
-	if strings.HasSuffix(baseURL, "/anthropic") {
-		return ProtocolAnthropicMessages
-	}
-	if strings.Contains(baseURL, "/anthropic/") {
-		return ProtocolAnthropicMessages
-	}
-
+	// Empty/auto remains a legacy OpenAI Chat default. Non-empty unknown values
+	// fail closed above; endpoint strings are never used to guess a protocol.
 	return ProtocolOpenAIChat
 }
 

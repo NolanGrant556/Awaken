@@ -24,6 +24,7 @@ import {
   contextUsagePanelData,
   isUserQuestionSelectionAnswered,
   insertComposerTokenAtOffset,
+  modelProfileLabel,
   replaceComposerActionTriggerWithToken,
   modelPreferenceChangeForOption,
   modelPreferenceRecoveryKey,
@@ -650,6 +651,8 @@ function stubElectronBridge(): void {
       enableSkill: vi.fn(),
       listModelProviders: vi.fn(async () => []),
       listModelProfiles: vi.fn(async () => []),
+      getModelPurposeRouting: vi.fn(async () => ({})),
+      saveModelPurposeRouting: vi.fn(async (routing) => routing),
       getAgentPlanAccount: vi.fn(async () => ({
         accountId: "volcengine-agent-plan-default" as const,
         providerId: "volcengine-agent-plan" as const,
@@ -682,6 +685,15 @@ function stubElectronBridge(): void {
         value: { ok: false, message: "" },
       })),
       syncModelCapabilities: vi.fn(async () => []),
+      refreshModelCatalog: vi.fn(async () => ({
+        ok: false as const,
+        issue: {
+          code: "operation_failed" as const,
+          message: "not implemented",
+          retryable: false,
+          actions: [],
+        },
+      })),
       getModelProfileBalances: vi.fn(async () => ({ balances: [] })),
       pickAttachments: vi.fn(async () => ({ canceled: true as const })),
       pickDirectory: vi.fn(async () => ({ canceled: true as const })),
@@ -2408,6 +2420,7 @@ describe("context usage presentation", () => {
         purpose: "agent_turn",
         cacheMode: "automatic_prefix",
         cacheKeyApplied: false,
+        inputTokens: 24_000,
         cachedInputTokens: 18_000,
         uncachedInputTokens: 6_000,
         outputTokens: 800,
@@ -2426,7 +2439,7 @@ describe("context usage presentation", () => {
       cachedInputTokens: 18_000,
       uncachedInputTokens: 6_000,
       cacheWriteTokens: undefined,
-      inputTokens: undefined,
+      inputTokens: 24_000,
       outputTokens: 800,
       reasoningTokens: undefined,
       totalTokens: undefined,
@@ -2444,6 +2457,8 @@ describe("context usage presentation", () => {
     );
     expect(html).toContain("上次请求");
     expect(html).toContain("已命中");
+    expect(html).toContain("输入 Token");
+    expect(html).toContain("24K");
     expect(html).toContain("命中 Token");
     expect(html).toContain("18K");
     expect(html).toContain("未命中 Token");
@@ -3452,6 +3467,22 @@ describe("App workbench presentation", () => {
     expect(
       modelPreferenceChangeForOption("profile-current", "profile-current", "high"),
     ).toBeUndefined();
+  });
+
+  it("keeps Composer model labels free of transport protocol names", () => {
+    const chatProfile = {
+      modelId: "ark-code-latest",
+      displayName: "火山 Agent Plan",
+      protocol: "openai_chat",
+    };
+    const responsesProfile = {
+      modelId: "gpt-5.6-sol",
+      displayName: "OpenAI",
+      protocol: "openai_responses",
+    };
+
+    expect(modelProfileLabel(chatProfile)).toBe("ark-code-latest");
+    expect(modelProfileLabel(responsesProfile)).toBe("gpt-5.6-sol");
   });
 
   it("does not recover a model preference while a new thread is awaiting metadata", () => {

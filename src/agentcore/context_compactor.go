@@ -291,8 +291,11 @@ func compactSummaryLLMCall(ctx stdcontext.Context, cfg llm.Config, req llm.Reque
 }
 
 func (e *runEventEmitter) invokeCompactSummary(ctx stdcontext.Context, cfg llm.Config, req llm.Request) (string, error) {
-	auxCfg, auxiliaryFallback := llm.AuxiliaryConfig(cfg)
+	auxCfg := cfg
 	req.Model = auxCfg.Model
+	if auxCfg.MaxTokens > 0 && (req.MaxTokens <= 0 || req.MaxTokens > auxCfg.MaxTokens) {
+		req.MaxTokens = auxCfg.MaxTokens
+	}
 	req.Purpose = llm.RequestPurposeCompactSummary
 	req.AffinityScopeID = e.threadID
 	req.RequestID = ""
@@ -301,7 +304,7 @@ func (e *runEventEmitter) invokeCompactSummary(ctx stdcontext.Context, cfg llm.C
 	resp, err := StreamRecordedModel(ctx, ModelCallAuthority{
 		ThreadID: e.threadID, RunID: e.runID, TurnID: e.turnID(), SessionID: e.sessionID,
 		Recorder: e.recorder, Sink: e.sink,
-	}, auxCfg, req, llm.StreamObserver{}, retryIndex, auxiliaryFallback)
+	}, auxCfg, req, llm.StreamObserver{}, retryIndex, false)
 	if err != nil {
 		if requiredTemperature, ok := llm.RequiredTemperatureFromError(err); ok {
 			retryReq := req
@@ -313,7 +316,7 @@ func (e *runEventEmitter) invokeCompactSummary(ctx stdcontext.Context, cfg llm.C
 			resp, err = StreamRecordedModel(ctx, ModelCallAuthority{
 				ThreadID: e.threadID, RunID: e.runID, TurnID: e.turnID(), SessionID: e.sessionID,
 				Recorder: e.recorder, Sink: e.sink,
-			}, auxCfg, retryReq, llm.StreamObserver{}, retryIndex, auxiliaryFallback)
+			}, auxCfg, retryReq, llm.StreamObserver{}, retryIndex, false)
 		}
 	}
 	if err != nil {
@@ -567,6 +570,7 @@ func llmConfigForCompaction(envelope ContextEnvelope) llm.Config {
 	return llm.Config{
 		APIKey:                modelCfg.APIKey,
 		BaseURL:               modelCfg.BaseURL,
+		InferenceEndpoint:     modelCfg.InferenceEndpoint,
 		Model:                 model,
 		Protocol:              llm.Protocol(modelCfg.Protocol),
 		ProviderID:            modelCfg.ProviderID,
@@ -576,6 +580,7 @@ func llmConfigForCompaction(envelope ContextEnvelope) llm.Config {
 		MaxTokens:             modelCfg.MaxTokens,
 		AuthScheme:            modelCfg.AuthScheme,
 		ContextWindow:         modelCfg.ContextWindow,
+		SupportsPromptCache:   modelCfg.SupportsPromptCache,
 		AutoCompactTokenLimit: modelCfg.AutoCompactTokenLimit,
 	}
 }

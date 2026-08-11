@@ -175,19 +175,21 @@ func generateThreadTitleWithProfile(
 	}
 
 	mainCfg := llm.Config{
-		APIKey:             profile.APIKey,
-		BaseURL:            profile.BaseURL,
-		Model:              profile.ModelID,
-		Protocol:           llm.Protocol(profile.Protocol),
-		ProviderID:         profile.ProviderID,
-		ProfileID:          profile.ProfileID,
-		CredentialRevision: profile.CredentialRevision,
-		Temperature:        profile.Temperature,
-		MaxTokens:          profile.MaxTokens,
-		AuthScheme:         profile.AuthScheme,
-		ContextWindow:      profile.ContextWindow,
+		APIKey:              profile.APIKey,
+		BaseURL:             profile.BaseURL,
+		InferenceEndpoint:   profile.InferenceEndpoint,
+		Model:               profile.ModelID,
+		Protocol:            llm.Protocol(profile.Protocol),
+		ProviderID:          profile.ProviderID,
+		ProfileID:           profile.ProfileID,
+		CredentialRevision:  profile.CredentialRevision,
+		Temperature:         profile.Temperature,
+		MaxTokens:           profile.MaxTokens,
+		AuthScheme:          profile.AuthScheme,
+		ContextWindow:       profile.ContextWindow,
+		SupportsPromptCache: profile.SupportsPromptCache,
 	}
-	cfg, auxiliaryFallback := llm.AuxiliaryConfig(mainCfg)
+	cfg := mainCfg
 
 	resp, err := agentcore.InvokeRecordedModel(ctx, authority, cfg, llm.Request{
 		SystemPrompt:     "You generate very short chat session titles. Output only the title text. No quotes, periods, newlines, or explanations.",
@@ -200,7 +202,7 @@ func generateThreadTitleWithProfile(
 		Messages: []convcontext.Message{
 			{Role: convcontext.RoleUser, Content: prompt},
 		},
-	}, retryIndex, auxiliaryFallback)
+	}, retryIndex, false)
 	if err != nil {
 		return "", err
 	}
@@ -211,45 +213,20 @@ func generateThreadTitleWithProfile(
 }
 
 func threadTitleMaxTokensForProfile(profile *ModelProfileConfig) int {
-	if threadTitleUsesForcedReasoningBudget(profile) {
+	if profile != nil && strings.TrimSpace(profile.ReasoningEffort) != "" {
+		if profile.MaxTokens > 0 && profile.MaxTokens < threadTitleForcedReasoningMaxTokens {
+			return profile.MaxTokens
+		}
 		return threadTitleForcedReasoningMaxTokens
 	}
 	return threadTitleMaxTokens
 }
 
 func threadTitleGenerationTimeoutForProfile(profile *ModelProfileConfig) time.Duration {
-	if threadTitleUsesForcedReasoningBudget(profile) {
+	if profile != nil && strings.TrimSpace(profile.ReasoningEffort) != "" {
 		return threadTitleForcedReasoningTimeout
 	}
 	return threadTitleGenerationTimeout
-}
-
-func threadTitleUsesForcedReasoningBudget(profile *ModelProfileConfig) bool {
-	if profile == nil {
-		return false
-	}
-	modelID := strings.ToLower(strings.TrimSpace(profile.ModelID))
-	providerID := strings.ToLower(strings.TrimSpace(profile.ProviderID))
-	switch modelID {
-	case "kimi-for-coding", "kimi-for-coding-highspeed":
-		// These Kimi aliases spend output tokens on reasoning before emitting
-		// content. A compact title budget can therefore return HTTP 200 with an
-		// empty content field even though the main run succeeds.
-		return true
-	case "k3", "k3-256k":
-		// Kimi Coding Plan routes these primary aliases to the same forced-
-		// reasoning auxiliary title model. Budget by the effective auxiliary
-		// contract, not only by the primary profile's model spelling.
-		return providerID == "kimi-coding-plan"
-	case "ark-code-latest":
-		// Agent Plan currently ignores DisableReasoning for this auxiliary
-		// request and accounts reasoning inside max_tokens. The compact 48-token
-		// budget has been observed to spend 45 tokens on reasoning and emit no
-		// title, so it needs the same bounded forced-reasoning policy.
-		return providerID == "volcengine-agent-plan" || providerID == "volcengine"
-	default:
-		return false
-	}
 }
 
 func localThreadTitle(firstUserMessage string, attachments []RunInputAttachment, composerTokens []ComposerToken) string {

@@ -15,7 +15,7 @@ func applyRequestPolicy(cfg Config, req Request) Request {
 // provider boundary. Auxiliary requests intentionally return no effort even
 // when their Config came from the same profile as an agent turn.
 func nativeReasoningEffort(cfg Config, req Request) string {
-	if req.Purpose != RequestPurposeAgentTurn {
+	if !isAgentExecutionPurpose(req.Purpose) {
 		return ""
 	}
 	effort := strings.ToLower(strings.TrimSpace(req.ReasoningPolicy))
@@ -25,7 +25,10 @@ func nativeReasoningEffort(cfg Config, req Request) string {
 	provider := strings.ToLower(strings.TrimSpace(cfg.ProviderID))
 	model := capabilityModelID(cfg, req)
 	switch {
-	case provider == "qwen-token-plan" && model == "qwen3.8-max-preview":
+	case provider == "openai":
+		return effort
+	case (provider == "qwen-token-plan" && model == "qwen3.8-max-preview") ||
+		(provider == "qwen" && model == "qwen3.8-max"):
 		switch effort {
 		case "low":
 			return "low"
@@ -86,6 +89,10 @@ func nativeReasoningEffort(cfg Config, req Request) string {
 		}
 	}
 	return ""
+}
+
+func isAgentExecutionPurpose(purpose RequestPurpose) bool {
+	return purpose == RequestPurposeAgentTurn || purpose == RequestPurposeSubagent || purpose == RequestPurposeScheduledTask
 }
 
 // capabilityModelID is the documented model-family identity used for

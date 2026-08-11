@@ -107,10 +107,13 @@ func ContextEpochSemanticRecord(threadID, runID, turnID, sessionID string, recei
 	})
 }
 
-func ModelRequestSemanticRecord(threadID, runID, turnID, sessionID string, snapshot ContextUsageSnapshot) SemanticRecord {
+func ModelRequestSemanticRecord(threadID, runID, turnID, sessionID string, snapshot ContextUsageSnapshot, purpose llm.RequestPurpose) SemanticRecord {
+	if purpose == "" {
+		purpose = llm.RequestPurposeAgentTurn
+	}
 	payload := map[string]any{
 		"request_id":             snapshot.RequestID,
-		"purpose":                "agent_turn",
+		"purpose":                string(purpose),
 		"model_id":               snapshot.ModelID,
 		"protocol_family":        snapshot.ProtocolFamily,
 		"request_shape_digest":   snapshot.RequestShapeDigest,

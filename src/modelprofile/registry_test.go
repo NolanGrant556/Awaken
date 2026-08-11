@@ -1,12 +1,35 @@
 package modelprofile
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
+
+var expectedProtocols = map[string][]string{
+	"openai":                []string{"openai_chat", "openai_responses"},
+	"anthropic":             []string{"anthropic_messages"},
+	"google":                []string{"openai_chat"},
+	"custom":                []string{"openai_chat", "openai_responses", "anthropic_messages"},
+	"deepseek":              []string{"openai_chat", "openai_responses", "anthropic_messages"},
+	"kimi-cn":               []string{"openai_chat"},
+	"kimi-coding-plan":      []string{"openai_chat", "anthropic_messages"},
+	"minimax-token-plan":    []string{"openai_chat", "openai_responses", "anthropic_messages"},
+	"glm-coding-plan":       []string{"openai_chat", "anthropic_messages"},
+	"volcengine":            []string{"openai_chat", "anthropic_messages"},
+	"qwen-token-plan":       []string{"openai_chat", "openai_responses", "anthropic_messages"},
+	"minimax":               []string{"openai_chat", "openai_responses", "anthropic_messages"},
+	"glm":                   []string{"openai_chat", "anthropic_messages"},
+	"qwen":                  []string{"openai_chat", "openai_responses", "anthropic_messages"},
+	"doubao":                []string{"openai_chat"},
+	"volcengine-agent-plan": []string{"openai_chat", "anthropic_messages"},
+}
 
 func TestBuiltinProvidersIncludeRequiredDefaults(t *testing.T) {
 	providers := BuiltinProviders()
 	want := []string{
-		"deepseek", "kimi-cn", "kimi-coding-plan", "volcengine", "qwen-token-plan",
-		"minimax", "glm", "qwen", "doubao", "volcengine-agent-plan",
+		"openai", "anthropic", "google", "custom",
+		"deepseek", "kimi-cn", "kimi-coding-plan", "minimax-token-plan", "glm-coding-plan",
+		"volcengine", "qwen-token-plan", "minimax", "glm", "qwen", "doubao", "volcengine-agent-plan",
 	}
 	if len(providers) != len(want) {
 		t.Fatalf("expected %d providers, got %d", len(want), len(providers))
@@ -21,18 +44,17 @@ func TestBuiltinProvidersIncludeRequiredDefaults(t *testing.T) {
 		if !ok {
 			t.Fatalf("missing provider %q", id)
 		}
-		if provider.DefaultModel == "" {
+		if provider.DefaultModel == "" && provider.ID != "custom" {
 			t.Fatalf("provider %q is missing default model", id)
 		}
-		if provider.BaseURL == "" {
+		if provider.BaseURL == "" && provider.ID != "custom" {
 			t.Fatalf("provider %q is missing base URL", id)
 		}
-		for modelID, capability := range provider.ModelCapabilities {
-			if capability.SupportsTools != "ready" {
-				t.Fatalf("provider %q model %q must default to tools ready, got %q", id, modelID, capability.SupportsTools)
-			}
+		if got := provider.SupportedProtocols; !reflect.DeepEqual(got, expectedProtocols[id]) {
+			t.Fatalf("provider %q protocols mismatch: got %v want %v", id, got, expectedProtocols[id])
 		}
 	}
+
 	kimiCode := seen["kimi-coding-plan"]
 	if kimiCode.BaseURL != "https://api.kimi.com/coding/v1" {
 		t.Fatalf("expected Kimi Code base URL, got %q", kimiCode.BaseURL)
@@ -60,6 +82,34 @@ func TestBuiltinProvidersIncludeRequiredDefaults(t *testing.T) {
 	}
 	if got := kimiCode.ModelCapabilities["kimi-for-coding"].DefaultTemperature; got != 1 {
 		t.Fatalf("expected Kimi Code default temperature 1, got %v", got)
+	}
+	google := seen["google"].ModelCapabilities["gemini-3.6-flash"]
+	if !google.SupportsVision || google.SupportsNativePDF || google.SupportsVideo || google.SupportsPromptCache {
+		t.Fatalf("Google OpenAI-compatible Chat capability must stay within its documented contract: %+v", google)
+	}
+	if got := google.SupportedProtocols; !reflect.DeepEqual(got, []string{"openai_chat"}) {
+		t.Fatalf("Google model protocol contract mismatch: %v", got)
+	}
+	if got := seen["qwen"].ModelCapabilities["qwen3.8-max"].SupportedProtocols; !reflect.DeepEqual(got, allLLMProtocols()) {
+		t.Fatalf("Qwen model protocol contract mismatch: %v", got)
+	}
+	if seen["openai"].CatalogStrategy != "openai" {
+		t.Fatalf("OpenAI must keep its live model catalog strategy, got %q", seen["openai"].CatalogStrategy)
+	}
+	if seen["custom"].CatalogStrategy != "none" {
+		t.Fatalf("custom API models must be entered manually, got catalog strategy %q", seen["custom"].CatalogStrategy)
+	}
+	if seen["custom"].AccessType != "custom" {
+		t.Fatalf("custom API must use its dedicated access type, got %q", seen["custom"].AccessType)
+	}
+	if got := seen["minimax-token-plan"].BaseURL; got != "https://api.minimaxi.com/v1" {
+		t.Fatalf("MiniMax Token Plan must use the China endpoint, got %q", got)
+	}
+	if got := seen["minimax"].BaseURL; got != "https://api.minimaxi.com/v1" {
+		t.Fatalf("MiniMax API must use the China endpoint, got %q", got)
+	}
+	if !seen["qwen-token-plan"].AllowCustomModel {
+		t.Fatal("Qwen Token Plan must retain manual model ID fallback")
 	}
 
 	volc := seen["volcengine"]

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"awaken/src/llm"
 	"awaken/src/tool/profile"
 )
 
@@ -44,6 +45,9 @@ func TestCreateSubagent_NilRequestedProfile_InheritsParent(t *testing.T) {
 	if child.ExecutionProfile.Name != "workspace_write" {
 		t.Errorf("Profile.Name: got %q want %q",
 			child.ExecutionProfile.Name, "workspace_write")
+	}
+	if child.ModelRequestPurpose != llm.RequestPurposeSubagent {
+		t.Fatalf("ModelRequestPurpose: got %q want %q", child.ModelRequestPurpose, llm.RequestPurposeSubagent)
 	}
 }
 

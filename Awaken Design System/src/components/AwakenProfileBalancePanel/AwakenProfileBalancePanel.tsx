@@ -31,7 +31,8 @@ export type AwakenProfileBalanceQuota = {
 
 export type AwakenProfileBalanceDetail =
   | { kind: "amount"; amounts: AwakenProfileBalanceAmount[] }
-  | { kind: "quota"; quotas: AwakenProfileBalanceQuota[] };
+  | { kind: "quota"; quotas: AwakenProfileBalanceQuota[] }
+  | { kind: "usage"; metrics: Array<{ name: string; value: number; unit: "tokens" | "requests" | "usd" }>; consoleURL?: string };
 
 export type AwakenProfileBalance = {
   profileId: string;
@@ -42,6 +43,7 @@ export type AwakenProfileBalance = {
   status: AwakenProfileBalanceStatus;
   fetchedAt?: string;
   detail?: AwakenProfileBalanceDetail;
+  localUsage?: Extract<AwakenProfileBalanceDetail, { kind: "usage" }>;
   error?: string;
   credentialIssue?: "unreadable";
 };
@@ -159,6 +161,24 @@ function QuotaView({ quota }: { quota: AwakenProfileBalanceQuota }) {
   );
 }
 
+function UsageView({
+  detail,
+}: {
+  detail: Extract<AwakenProfileBalanceDetail, { kind: "usage" }>;
+}) {
+  return (
+    <div className="aw-profile-balance-panel__amount-breakdown">
+      {detail.metrics.map((metric) => (
+        <div className="aw-profile-balance-panel__amount-metric" key={`${metric.name}-${metric.unit}`}>
+          <span>{metric.name}</span>
+          <strong>{metric.unit === "usd" ? `$${metric.value.toFixed(2)}` : metric.value.toLocaleString()}</strong>
+        </div>
+      ))}
+      {detail.consoleURL ? <a href={detail.consoleURL} target="_blank" rel="noreferrer">打开供应商控制台</a> : null}
+    </div>
+  );
+}
+
 function BalanceDetail({
   balance,
   onOpenSettings,
@@ -166,17 +186,19 @@ function BalanceDetail({
   balance: AwakenProfileBalance;
   onOpenSettings?: () => void;
 }) {
-  if (balance.status === "available" && balance.detail) {
-    return balance.detail.kind === "amount" ? (
+  const officialDetail = balance.status === "available" && balance.detail
+    ? balance.detail.kind === "amount" ? (
       <BalanceAmountView amounts={balance.detail.amounts} />
+    ) : balance.detail.kind === "usage" ? (
+      <UsageView detail={balance.detail} />
     ) : (
       <div className="aw-profile-balance-panel__quotas">
         {balance.detail.quotas.map((quota) => (
           <QuotaView key={quota.name} quota={quota} />
         ))}
       </div>
-    );
-  }
+    )
+    : null;
 
   const unreadable = balance.credentialIssue === "unreadable";
   const message =
@@ -189,13 +211,23 @@ function BalanceDetail({
           : balance.error || "用量查询失败";
 
   return (
-    <div className="aw-profile-balance-panel__detail-empty" role={unreadable ? "alert" : "status"}>
-      <AlertCircle size={20} strokeWidth={1.9} aria-hidden="true" />
-      <span>{message}</span>
-      {unreadable ? (
-        <AwakenButton variant="default" size="sm" onClick={onOpenSettings}>
-          前往设置
-        </AwakenButton>
+    <div className="aw-profile-balance-panel__detail-sections">
+      {officialDetail ?? (
+        <div className="aw-profile-balance-panel__detail-empty" role={unreadable ? "alert" : "status"}>
+          <AlertCircle size={20} strokeWidth={1.9} aria-hidden="true" />
+          <span>{message}</span>
+          {unreadable ? (
+            <AwakenButton variant="default" size="sm" onClick={onOpenSettings}>
+              前往设置
+            </AwakenButton>
+          ) : null}
+        </div>
+      )}
+      {balance.localUsage ? (
+        <section className="aw-profile-balance-panel__local-usage" aria-label="Awaken 本地用量">
+          <span className="aw-profile-balance-panel__summary-label">Awaken 本地记录</span>
+          <UsageView detail={balance.localUsage} />
+        </section>
       ) : null}
     </div>
   );

@@ -3071,8 +3071,8 @@ func TestModelStatusSmoke(t *testing.T) {
 	if info.ConfiguredModel != cfg.Model {
 		t.Fatalf("expected configured_model %q, got %q", cfg.Model, info.ConfiguredModel)
 	}
-	if info.Protocol != "openai_chat" && info.Protocol != "anthropic_messages" {
-		t.Fatalf("expected protocol openai_chat or anthropic_messages, got %q", info.Protocol)
+	if info.Protocol != "openai_chat" && info.Protocol != "openai_responses" && info.Protocol != "anthropic_messages" {
+		t.Fatalf("expected a supported LLM protocol, got %q", info.Protocol)
 	}
 	if !info.HasAPIKey {
 		t.Fatalf("expected has_api_key true")

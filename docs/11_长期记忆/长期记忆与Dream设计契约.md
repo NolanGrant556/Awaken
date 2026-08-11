@@ -221,6 +221,8 @@ delete(memory_id, expected_revision, reason)
 
 Memory service 是唯一 mutation owner：
 
+- `MEMORY.md` 每个主题入口必须同时暴露 canonical `memory_id`、`scope`、`type`、`revision` 和主题链接；模型调用 get/update/supersede/delete 时优先使用 canonical ID，不再从文件名自行推断 identity；
+- 为兼容旧索引与旧模型调用，工具层可在当前 scope 内把“完整主题文件名或去扩展名 stem”安全解析为 canonical ID。resolver 拒绝绝对路径、路径分隔符和 `.`/`..` 穿越；零匹配返回 not found，多匹配返回 ambiguous，不允许模型自由拼接路径；
 - 从当前 run 填入 source identity，模型输入不能伪造；
 - 校验 scope、canonical workspace、symlink、路径、frontmatter、UTF-8、大小和 revision；
 - 在写入前执行 secret/sensitive-content gate；
@@ -229,6 +231,7 @@ Memory service 是唯一 mutation owner：
 - 主题文件成功而索引更新失败时保留主题 authority，并把索引标记为需要重建；不能反过来只留下索引指针；
 - delete 从主题文件与索引移除正文；thread receipt 只保存 identity/action/revision，不保存可复活正文；
 - create/update/supersede/delete 给主模型的结果只包含完成状态、action、identity、scope/type、revision 和时间，不回灌刚保存的完整正文；search/get 仍返回完成当前任务所需的受控内容；
+- 只有 create/update/supersede/delete 才能生成 `memory_mutated` receipt；search/get 的成功或失败始终是读取结果，不能投影成“记忆操作未写入”。同一 mutation 的通用 tool row 会被 typed Memory receipt 替换，Workbench 只保留一个主要展示 owner；后台自动 recall 仍是独立 receipt；
 - 普通 `Read`/`Edit`/`Write` 对 Memory 根维持敏感/host-owned 限制，`Bash` 的当前用户权限事实不等于合法 Memory mutation，任何 Bash 改动在下次扫描时必须经过格式和 identity 校验。
 
 Memory 工具进入 run 固定 ToolAvailabilitySnapshot。实现该工具意味着改变 04 域当前工具目录事实，必须同步更新 04 权威、测试和真实 Desktop 验收，不能只在 prompt 中宣称存在。

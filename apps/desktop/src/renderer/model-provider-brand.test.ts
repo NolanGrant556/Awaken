@@ -4,6 +4,9 @@ import { providerBrandForId } from "./model-provider-brand";
 describe("providerBrandForId", () => {
   it("maps every current provider entry to its official product brand", () => {
     expect({
+      openai: providerBrandForId("openai"),
+      anthropic: providerBrandForId("anthropic"),
+      google: providerBrandForId("google"),
       "kimi-coding-plan": providerBrandForId("kimi-coding-plan"),
       "kimi-cn": providerBrandForId("kimi-cn"),
       volcengine: providerBrandForId("volcengine"),
@@ -15,6 +18,9 @@ describe("providerBrandForId", () => {
       doubao: providerBrandForId("doubao"),
       deepseek: providerBrandForId("deepseek"),
     }).toEqual({
+      openai: "openai",
+      anthropic: "anthropic",
+      google: "gemini",
       "kimi-coding-plan": "kimi",
       "kimi-cn": "kimi",
       volcengine: "volcengine",
@@ -29,6 +35,7 @@ describe("providerBrandForId", () => {
   });
 
   it("does not invent a logo for an unknown provider", () => {
+    expect(providerBrandForId("custom")).toBeUndefined();
     expect(providerBrandForId("custom-provider")).toBeUndefined();
   });
 });

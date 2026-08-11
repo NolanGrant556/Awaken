@@ -98,6 +98,10 @@ type ToolExecutionResult struct {
 	Truncated  bool
 	Status     ToolExecutionStatus
 	ErrorCode  string
+	// SemanticArguments is the tool-owned, body-free argument projection used
+	// for durable semantic classification. It is populated only when a tool
+	// implements SemanticJournalSanitizer; raw model arguments never enter it.
+	SemanticArguments string
 	// Outcome is the canonical structured tool result when available.
 	// Compatibility fields (Status/IsError/ErrorCode/DurationMs) are derived
 	// from it; emitToolResult prefers Outcome when Status is set.
@@ -533,6 +537,9 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	result.DecisionReason = decision.Reason
 	if strings.TrimSpace(decision.UpdatedInput) != "" {
 		input = decision.UpdatedInput
+	}
+	if sanitizer, ok := selectedTool.(tool.SemanticJournalSanitizer); ok {
+		result.SemanticArguments = sanitizer.SemanticJournalArguments(input)
 	}
 
 	// ask_user is handled specially: it does not execute a real tool but

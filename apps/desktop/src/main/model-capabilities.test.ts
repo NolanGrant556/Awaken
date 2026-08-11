@@ -39,6 +39,16 @@ describe("model capabilities", () => {
     });
   });
 
+  it("keeps confirmed model protocols separate from provider-wide compatibility", () => {
+    expect(capabilityForModel("qwen", "qwen3.8-max")).toMatchObject({
+      supported_protocols: ["openai_chat", "openai_responses", "anthropic_messages"],
+    });
+    expect(capabilityForModel("google", "gemini-3.6-flash")).toMatchObject({
+      supported_protocols: ["openai_chat"],
+    });
+    expect(capabilityForModel("deepseek", "deepseek-v4-pro")?.supported_protocols).toBeUndefined();
+  });
+
   it("knows all Kimi Code plan model limits", () => {
     expect(capabilityForModel("kimi-coding-plan", "k3")).toMatchObject({
       context_window: 1024 * 1024,
@@ -86,7 +96,33 @@ describe("model capabilities", () => {
     });
   });
 
-  it("defaults every configured model to tool-capable without a probe override", () => {
+  it("keeps provider-native effort labels when an older dynamic cache lacks them", () => {
+    const exact = resolution({
+      provider_id: "qwen",
+      profile_id: "qwen-profile",
+      normalized_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      protocol_family: "openai_responses",
+      endpoint_contract_id: "openai_responses_v1",
+    });
+    exact.selector = "qwen3.8-max";
+    setCapabilityOverrides([{ scope: exact.scope, models: {
+      "qwen3.8-max": {
+        reasoning_effort: {
+          levels: ["low", "high", "max"],
+          default_level: "max",
+        },
+      },
+    } }]);
+
+    expect(capabilityForModel("qwen", "qwen3.8-max", exact)?.reasoning_effort)
+      .toEqual({
+        levels: ["low", "high", "max"],
+        default_level: "max",
+        display_labels: { low: "low", high: "medium", max: "xhigh" },
+      });
+  });
+
+  it("keeps unknown tool capability and exact negative observations conservative", () => {
     const exact = resolution({ provider_id: "volcengine-agent-plan", profile_id: "agent-profile" });
     exact.selector = "custom-model";
     setCapabilityOverrides([{ scope: exact.scope, models: {
@@ -97,14 +133,26 @@ describe("model capabilities", () => {
     expect(capabilityForModel("volcengine-agent-plan", "custom-model")).toBeUndefined();
     expect(
       capabilityForModel("volcengine-agent-plan", "custom-model", exact)?.supports_tools,
-    ).toBe("ready");
+    ).toBe("unsupported");
     expect(
       normalizeAdvancedWithModelCapability(
-        { supportsTools: "unknown" },
+        { supportsTools: "ready" },
         "qwen",
         "custom-model",
       ).supportsTools,
-    ).toBe("ready");
+    ).toBeUndefined();
+  });
+
+  it("uses the current official MiniMax M3 and GLM 5.2 token limits", () => {
+    expect(capabilityForModel("minimax", "MiniMax-M3")).toMatchObject({
+      context_window: 1_000_000,
+      max_output_tokens: 128_000,
+      supports_prompt_cache: true,
+    });
+    expect(capabilityForModel("glm", "glm-5.2")).toMatchObject({
+      context_window: 1_000_000,
+      max_output_tokens: 128_000,
+    });
   });
 
   it("knows Volcengine Coding Plan model limits", () => {
@@ -162,17 +210,15 @@ describe("model capabilities", () => {
     });
   });
 
-  it("uses conservative Volcengine defaults for custom Coding Plan model names", () => {
-    expect(
-      normalizeAdvancedWithModelCapability(
-        undefined,
-        "volcengine",
-        "new-model-from-console",
-      ),
-    ).toMatchObject({
-      contextWindow: 256_000,
-      maxTokens: 32_000,
-    });
+  it("does not invent token limits for unknown Volcengine model names", () => {
+    const advanced = normalizeAdvancedWithModelCapability(
+      undefined,
+      "volcengine",
+      "new-model-from-console",
+    );
+    expect(advanced.contextWindow).toBeUndefined();
+    expect(advanced.maxTokens).toBeUndefined();
+    expect(advanced.supportsTools).toBeUndefined();
   });
 
   it("fills Kimi Code temperature from model capability", () => {
@@ -204,12 +250,19 @@ describe("model capabilities", () => {
       levels: ["low", "high", "max"],
       default_level: "max",
     });
-    expect(capabilityForModel("glm", "glm-5.2")?.reasoning_effort).toEqual({
-      levels: ["high", "max"],
-      default_level: "high",
-    });
+    expect(capabilityForModel("glm", "glm-5.2")?.reasoning_effort).toBeUndefined();
     expect(capabilityForModel("qwen-token-plan", "qwen3.8-max-preview")?.reasoning_effort)
-      .toEqual({ levels: ["low", "high", "max"], default_level: "max" });
+      .toEqual({
+        levels: ["low", "high", "max"],
+        default_level: "max",
+        display_labels: { low: "low", high: "medium", max: "xhigh" },
+      });
+    expect(capabilityForModel("qwen", "qwen3.8-max")?.reasoning_effort)
+      .toEqual({
+        levels: ["low", "high", "max"],
+        default_level: "max",
+        display_labels: { low: "low", high: "medium", max: "xhigh" },
+      });
     expect(capabilityForModel("minimax", "MiniMax-M3")?.reasoning_effort).toBeUndefined();
     expect(capabilityForModel("qwen", "qwen3.7-max")?.reasoning_effort).toBeUndefined();
     expect(capabilityForModel("volcengine-agent-plan", "ark-code-latest")?.reasoning_effort)
@@ -217,8 +270,8 @@ describe("model capabilities", () => {
   });
 
   it("falls back from stale effort to profile and capability defaults", () => {
-    expect(resolveReasoningEffort("glm", "glm-5.2", "low", "max")).toBe("max");
-    expect(resolveReasoningEffort("glm", "glm-5.2", "low", "low")).toBe("high");
+    expect(resolveReasoningEffort("glm", "glm-5.2", "low", "max")).toBeUndefined();
+    expect(resolveReasoningEffort("glm", "glm-5.2", "low", "low")).toBeUndefined();
     expect(resolveReasoningEffort("minimax", "MiniMax-M3", "max", "max")).toBeUndefined();
   });
 

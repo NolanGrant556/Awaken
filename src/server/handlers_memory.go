@@ -122,7 +122,7 @@ func (h memoryDreamHandlers) handleStart(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	profile := request.ModelProfile
-	config := llm.Config{APIKey: profile.APIKey, BaseURL: profile.BaseURL, Model: profile.ModelID, Protocol: llm.Protocol(profile.Protocol), ProviderID: profile.ProviderID, ProfileID: profile.ProfileID, CredentialRevision: profile.CredentialRevision, Temperature: profile.Temperature, MaxTokens: profile.MaxTokens, AuthScheme: profile.AuthScheme, ContextWindow: profile.ContextWindow}
+	config := llm.Config{APIKey: profile.APIKey, BaseURL: profile.BaseURL, InferenceEndpoint: profile.InferenceEndpoint, Model: profile.ModelID, Protocol: llm.Protocol(profile.Protocol), ProviderID: profile.ProviderID, ProfileID: profile.ProfileID, CredentialRevision: profile.CredentialRevision, Temperature: profile.Temperature, MaxTokens: profile.MaxTokens, AuthScheme: profile.AuthScheme, ContextWindow: profile.ContextWindow, SupportsPromptCache: profile.SupportsPromptCache}
 	task, err := h.runner.Start(context.Background(), store, config, request.Scopes, request.ProjectID)
 	if err != nil {
 		writeErrorJSON(w, http.StatusInternalServerError, "DREAM_TASK_PERSIST_FAILED", err.Error())

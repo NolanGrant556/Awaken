@@ -501,7 +501,26 @@ function commitMemoryReceipt(state: RunNarrativeState, event: AguiEvent): RunNar
     detail: detail || undefined,
     status: event.type === "AWAKEN_MEMORY_REJECTED" ? "error" : "done",
   };
-  return { ...state, committedItems: upsertCommitted(state.committedItems, item) };
+
+	// A mutation receipt is the single user-facing owner for this Memory write.
+	// TOOL_CALL_RESULT remains on the wire for model/runtime correctness, but
+	// its generic tool row is removed once the typed mutation receipt arrives.
+	const mutationToolId = event.toolCallId ? toolId(event) : undefined;
+	const committedItems = mutationToolId
+		? state.committedItems.filter((candidate) => candidate.id !== mutationToolId)
+		: state.committedItems;
+	const activeItem = mutationToolId && state.activeItem?.id === mutationToolId
+		? undefined
+		: state.activeItem;
+	return {
+		...state,
+		committedItems: upsertCommitted(committedItems, item),
+		activeItem,
+		inspectorSelection:
+			mutationToolId && state.inspectorSelection?.id === mutationToolId
+				? undefined
+				: state.inspectorSelection,
+	};
 }
 
 function commitDreamReceipt(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
@@ -914,7 +933,10 @@ function setActive(state: RunNarrativeState, item: RunNarrativeItem): RunNarrati
     : state.committedItems;
   return {
     ...state,
-    committedItems: committed,
+    // A durable snapshot can reactivate an item that was already committed by
+    // the live stream. Keep one owner for the item while it is active so React
+    // never receives the same narrative id twice.
+    committedItems: committed.filter((candidate) => candidate.id !== item.id),
     activeItem: item,
   };
 }
@@ -1777,6 +1799,36 @@ function appendAnswer(
   event: AguiEvent,
 ): RunNarrativeState {
   const id = answerId(state, event);
+
+  // Older compatible-provider journals may contain a leading <think> block
+  // inside assistant_message because the adapter had not normalized it yet.
+  // Repair only durable full snapshots; live text remains owned by the Core
+  // stream state machine and arbitrary answer text containing tags is left
+  // untouched unless the tag is the first non-whitespace block.
+  if (event.recordId) {
+    const legacy = splitLeadingThinkSnapshot(delta);
+    if (legacy) {
+      const withoutEmptyAnswer =
+        state.activeItem?.kind === "answer" && state.activeItem.id === id
+          ? { ...state, activeItem: undefined }
+          : state;
+      const withThinking: RunNarrativeState = {
+        ...withoutEmptyAnswer,
+        committedItems: upsertCommitted(withoutEmptyAnswer.committedItems, {
+          kind: "thinking",
+          id: thinkingId(event),
+          text: legacy.thinking,
+          status: "done",
+        }),
+      };
+      return setActive(withThinking, {
+        kind: "answer",
+        id,
+        markdown: legacy.answer,
+        status: "active",
+      });
+    }
+  }
   const current =
     state.activeItem?.id === id && state.activeItem.kind === "answer"
       ? state.activeItem.markdown
@@ -1790,6 +1842,20 @@ function appendAnswer(
     markdown: event.recordId ? delta : current + delta,
     status: "active",
   });
+}
+
+function splitLeadingThinkSnapshot(
+  value: string,
+): { thinking: string; answer: string } | undefined {
+  const start = value.search(/\S/);
+  if (start < 0 || !value.startsWith("<think>", start)) return undefined;
+  const reasoningStart = start + "<think>".length;
+  const end = value.indexOf("</think>", reasoningStart);
+  if (end < 0) return undefined;
+  return {
+    thinking: value.slice(reasoningStart, end),
+    answer: value.slice(end + "</think>".length).replace(/^[\r\n]+/, ""),
+  };
 }
 
 function activateTool(

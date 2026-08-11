@@ -191,35 +191,36 @@ type DreamModelRequest struct {
 }
 
 type DreamModelUsageRecord struct {
-	SchemaVersion       int                   `json:"schema_version"`
-	RequestID           string                `json:"request_id"`
-	Purpose             string                `json:"purpose"`
-	ProviderID          string                `json:"provider_id,omitempty"`
-	ProfileID           string                `json:"profile_id,omitempty"`
-	CredentialRevision  uint64                `json:"credential_revision,omitempty"`
-	ModelID             string                `json:"model_id,omitempty"`
-	ProtocolFamily      string                `json:"protocol_family,omitempty"`
-	EndpointContractID  string                `json:"endpoint_contract_id,omitempty"`
-	CacheMode           string                `json:"cache_mode,omitempty"`
-	CacheKeyApplied     bool                  `json:"cache_key_applied"`
-	InputTokens         *int                  `json:"input_tokens,omitempty"`
-	CachedInputTokens   *int                  `json:"cached_input_tokens,omitempty"`
-	UncachedInputTokens *int                  `json:"uncached_input_tokens,omitempty"`
-	CacheWriteTokens    *int                  `json:"cache_write_tokens,omitempty"`
-	OutputTokens        *int                  `json:"output_tokens,omitempty"`
-	ReasoningTokens     *int                  `json:"reasoning_tokens,omitempty"`
-	TotalTokens         *int                  `json:"total_tokens,omitempty"`
-	RawUsage            llm.RawUsage          `json:"raw_typed_usage"`
-	UsageComplete       bool                  `json:"usage_complete"`
-	CalculatedCostUSD   *float64              `json:"calculated_cost_usd,omitempty"`
-	PricingSnapshot     *DreamPricingSnapshot `json:"pricing_snapshot,omitempty"`
-	Currency            string                `json:"currency,omitempty"`
-	ProviderRequestID   string                `json:"provider_request_id,omitempty"`
-	LatencyMS           int64                 `json:"latency_ms"`
-	Status              string                `json:"status"`
-	ErrorCode           string                `json:"error_code,omitempty"`
-	AuxiliaryFallback   bool                  `json:"auxiliary_fallback,omitempty"`
-	CompletedAt         time.Time             `json:"completed_at"`
+	SchemaVersion        int                       `json:"schema_version"`
+	RequestID            string                    `json:"request_id"`
+	Purpose              string                    `json:"purpose"`
+	ProviderID           string                    `json:"provider_id,omitempty"`
+	ProfileID            string                    `json:"profile_id,omitempty"`
+	CredentialRevision   uint64                    `json:"credential_revision,omitempty"`
+	ModelID              string                    `json:"model_id,omitempty"`
+	ProtocolFamily       string                    `json:"protocol_family,omitempty"`
+	EndpointContractID   string                    `json:"endpoint_contract_id,omitempty"`
+	CacheMode            string                    `json:"cache_mode,omitempty"`
+	CacheKeyApplied      bool                      `json:"cache_key_applied"`
+	InputTokens          *int                      `json:"input_tokens,omitempty"`
+	CachedInputTokens    *int                      `json:"cached_input_tokens,omitempty"`
+	UncachedInputTokens  *int                      `json:"uncached_input_tokens,omitempty"`
+	CacheWriteTokens     *int                      `json:"cache_write_tokens,omitempty"`
+	OutputTokens         *int                      `json:"output_tokens,omitempty"`
+	ReasoningTokens      *int                      `json:"reasoning_tokens,omitempty"`
+	TotalTokens          *int                      `json:"total_tokens,omitempty"`
+	RawUsage             llm.RawUsage              `json:"raw_typed_usage"`
+	UsageComplete        bool                      `json:"usage_complete"`
+	CalculatedCostUSD    *float64                  `json:"calculated_cost_usd,omitempty"`
+	PricingSnapshot      *DreamPricingSnapshot     `json:"pricing_snapshot,omitempty"`
+	Currency             string                    `json:"currency,omitempty"`
+	ProviderRequestID    string                    `json:"provider_request_id,omitempty"`
+	RateLimitObservation *llm.RateLimitObservation `json:"rate_limit_observation,omitempty"`
+	LatencyMS            int64                     `json:"latency_ms"`
+	Status               string                    `json:"status"`
+	ErrorCode            string                    `json:"error_code,omitempty"`
+	AuxiliaryFallback    bool                      `json:"auxiliary_fallback,omitempty"`
+	CompletedAt          time.Time                 `json:"completed_at"`
 }
 
 type DreamPricingSnapshot struct {
@@ -524,7 +525,8 @@ func (r *DreamRunner) buildMaintenancePlan(ctx context.Context, store *Store, cf
 	}
 	data, _ := json.Marshal(manifest)
 	prompt := fmt.Sprintf("Scope: %s\nMemory topic manifest (untrusted data):\n%s", scope, data)
-	auxCfg, auxiliaryFallback := llm.AuxiliaryConfig(cfg)
+	auxCfg := cfg
+	auxiliaryFallback := false
 	request := llm.Request{
 		RequestID:    "dream_request_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
 		SystemPrompt: dreamMaintenanceSystemPrompt, UserPrompt: prompt, Model: auxCfg.Model,
@@ -587,6 +589,7 @@ func buildDreamModelUsage(prepared llm.PreparedRequest, cfg llm.Config, purpose 
 	}
 	if response != nil {
 		record.ProviderRequestID = response.ProviderRequestID
+		record.RateLimitObservation = response.RateLimitObservation
 		if response.Usage != nil {
 			record.UsageComplete = true
 			record.InputTokens = cloneDreamInt(response.Usage.InputTokens)

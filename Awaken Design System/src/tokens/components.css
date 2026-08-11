@@ -3155,6 +3155,21 @@ button.tool-trace-line:focus-visible {
   outline: none;
 }
 
+.composer-bar-model-effort-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 var(--composer-effort-track-inset, 14px);
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  line-height: 1;
+}
+
+.composer-bar-model-effort-labels > span[data-selected="true"] {
+  color: var(--aw-text-primary);
+  font-weight: var(--aw-font-weight-semibold);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .composer-bar-model-trigger-open {
     animation: none !important;

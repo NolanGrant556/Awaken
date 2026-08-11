@@ -5,6 +5,7 @@ import (
 
 	"awaken/src/agentcore/guardian"
 	"awaken/src/agentcore/subagent"
+	"awaken/src/llm"
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
 )
@@ -99,6 +100,7 @@ func CreateSubagent(parent AgentConfig, spawn SpawnConfig) (AgentConfig, error) 
 		MaxThoughts:                  parent.MaxThoughts,
 		MaxToolExecutions:            parent.MaxToolExecutions,
 		ModelConfig:                  parent.ModelConfig,
+		ModelRequestPurpose:          llm.RequestPurposeSubagent,
 		EntryPoint:                   parent.EntryPoint,
 		Workspace:                    parent.Workspace,
 		SkillSummary:                 parent.SkillSummary,

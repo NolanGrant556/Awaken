@@ -315,32 +315,39 @@ func resolveMaxTokens(cfg Config, req Request) int {
 
 func applyAuthHeaders(httpReq *http.Request, cfg Config, protocol Protocol) {
 	httpReq.Header.Set("Content-Type", "application/json")
+	if protocol == ProtocolAnthropicMessages {
+		httpReq.Header.Set("anthropic-version", "2023-06-01")
+	}
 
 	scheme := strings.ToLower(cfg.AuthScheme)
 	if scheme == "" {
 		scheme = "auto"
 	}
 
-	useAPIKey := false
 	switch scheme {
 	case "x-api-key":
-		useAPIKey = true
+		httpReq.Header.Set("x-api-key", cfg.APIKey)
+		return
+	case "api-key":
+		httpReq.Header.Set("api-key", cfg.APIKey)
+		return
+	case "x-goog-api-key":
+		httpReq.Header.Set("x-goog-api-key", cfg.APIKey)
+		return
+	case "none":
+		return
 	case "bearer":
-		useAPIKey = false
+		httpReq.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+		return
 	default: // auto
 		if protocol == ProtocolAnthropicMessages {
 			if u, err := url.Parse(cfg.BaseURL); err == nil && u.Hostname() == "api.anthropic.com" {
-				useAPIKey = true
+				httpReq.Header.Set("x-api-key", cfg.APIKey)
+				return
 			}
 		}
 	}
-
-	if useAPIKey {
-		httpReq.Header.Set("x-api-key", cfg.APIKey)
-		httpReq.Header.Set("anthropic-version", "2023-06-01")
-	} else {
-		httpReq.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	}
+	httpReq.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 }
 
 func providerRequestID(resp *http.Response) string {
@@ -353,6 +360,34 @@ func providerRequestID(resp *http.Response) string {
 		}
 	}
 	return ""
+}
+
+func providerRateLimitObservation(resp *http.Response) *RateLimitObservation {
+	if resp == nil {
+		return nil
+	}
+	header := func(names ...string) string {
+		for _, name := range names {
+			if value := strings.TrimSpace(resp.Header.Get(name)); value != "" {
+				return value
+			}
+		}
+		return ""
+	}
+	observation := &RateLimitObservation{
+		RequestLimit:     header("x-ratelimit-limit-requests", "anthropic-ratelimit-requests-limit"),
+		RequestRemaining: header("x-ratelimit-remaining-requests", "anthropic-ratelimit-requests-remaining"),
+		RequestReset:     header("x-ratelimit-reset-requests", "anthropic-ratelimit-requests-reset"),
+		TokenLimit:       header("x-ratelimit-limit-tokens", "anthropic-ratelimit-tokens-limit"),
+		TokenRemaining:   header("x-ratelimit-remaining-tokens", "anthropic-ratelimit-tokens-remaining"),
+		TokenReset:       header("x-ratelimit-reset-tokens", "anthropic-ratelimit-tokens-reset"),
+		ObservedAt:       time.Now().UTC(),
+	}
+	if observation.RequestLimit == "" && observation.RequestRemaining == "" && observation.RequestReset == "" &&
+		observation.TokenLimit == "" && observation.TokenRemaining == "" && observation.TokenReset == "" {
+		return nil
+	}
+	return observation
 }
 
 func requestFailedError(resp *http.Response) error {
@@ -459,9 +494,25 @@ func getTransport(cfg Config) Transport {
 	switch protocol {
 	case ProtocolAnthropicMessages:
 		return newAnthropicTransport()
-	default:
+	case ProtocolOpenAIResponses:
+		return newOpenAIResponsesTransport()
+	case ProtocolOpenAIChat, ProtocolMiniMaxChat:
 		return newOpenAITransport()
+	default:
+		return &unsupportedTransport{protocol: cfg.Protocol}
 	}
+}
+
+type unsupportedTransport struct{ protocol Protocol }
+
+func (t *unsupportedTransport) protocolError() error {
+	return fmt.Errorf("%w: %q", ErrUnsupportedProtocol, t.protocol)
+}
+func (t *unsupportedTransport) Invoke(stdctx.Context, Config, Request) (*Response, error) {
+	return nil, t.protocolError()
+}
+func (t *unsupportedTransport) StreamInvoke(stdctx.Context, Config, Request, StreamCallback) (*Response, error) {
+	return nil, t.protocolError()
 }
 
 // --- 兼容 wrapper ---
@@ -486,7 +537,7 @@ func Call(ctx stdctx.Context, cfg Config, req Request) (string, error) {
 
 // Invoke 同步调用，返回完整响应
 func Invoke(ctx stdctx.Context, cfg Config, req Request) (*Response, error) {
-	if cfg.APIKey == "" {
+	if apiKeyRequired(cfg) && cfg.APIKey == "" {
 		return nil, ErrMissingAPIKey
 	}
 
@@ -511,7 +562,7 @@ func StreamInvoke(ctx stdctx.Context, cfg Config, req Request, callback StreamCa
 }
 
 func StreamInvokeWithObserver(ctx stdctx.Context, cfg Config, req Request, observer StreamObserver) (*Response, error) {
-	if cfg.APIKey == "" {
+	if apiKeyRequired(cfg) && cfg.APIKey == "" {
 		return nil, ErrMissingAPIKey
 	}
 
@@ -525,6 +576,10 @@ func StreamInvokeWithObserver(ctx stdctx.Context, cfg Config, req Request, obser
 		return observerTransport.StreamInvokeWithObserver(ctx, cfg, req, observer)
 	}
 	return transport.StreamInvoke(ctx, cfg, req, observer.OnContent)
+}
+
+func apiKeyRequired(cfg Config) bool {
+	return !strings.EqualFold(strings.TrimSpace(cfg.AuthScheme), "none")
 }
 
 // CallWithContext 使用 Conversation Context 调用

@@ -345,6 +345,13 @@ describe("projectAguiEventToNarrative", () => {
       markdown: "streamed answer",
       status: "done",
     });
+    expect([
+      ...state.committedItems,
+      ...(state.activeItem ? [state.activeItem] : []),
+    ].map((item) => item.id)).toHaveLength(new Set([
+      ...state.committedItems,
+      ...(state.activeItem ? [state.activeItem] : []),
+    ].map((item) => item.id)).size);
   });
 
   it("reconciles a durable reasoning snapshot with already streamed deltas", () => {
@@ -397,6 +404,11 @@ describe("projectAguiEventToNarrative", () => {
       text: "先检查技能目录",
       status: "done",
     });
+    const visibleIds = [
+      ...state.committedItems,
+      ...(state.activeItem ? [state.activeItem] : []),
+    ].map((item) => item.id);
+    expect(visibleIds).toHaveLength(new Set(visibleIds).size);
   });
 
   it("keeps reasoning before the answer when its durable snapshot arrives after streamed text", () => {
@@ -734,6 +746,62 @@ describe("projectAguiEventToNarrative", () => {
     expect(receipts[0]).toMatchObject({ title: "已召回 1 条记忆", detail: "用户 · user · r2", status: "done" });
     expect(receipts[1]).toMatchObject({ title: "记忆整理完成", detail: "更新 1 条 · 归档 2 条 · 冲突 0 条", status: "done" });
     expect(JSON.stringify(receipts)).not.toContain("topic body");
+  });
+
+  it("repairs legacy assistant snapshots with a leading think block", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "TEXT_MESSAGE_START",
+      runId: "run-minimax",
+      messageId: "message-minimax",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "TEXT_MESSAGE_CONTENT",
+      runId: "run-minimax",
+      messageId: "message-minimax",
+      recordId: "assistant-message-old",
+      delta: "<think>private host reasoning</think>\n\n最终回答",
+    });
+
+    expect(state.committedItems).toContainEqual({
+      kind: "thinking",
+      id: "thinking:run-minimax:message-minimax",
+      text: "private host reasoning",
+      status: "done",
+    });
+    expect(state.activeItem).toMatchObject({
+      kind: "answer",
+      markdown: "最终回答",
+    });
+  });
+
+  it("replaces a generic Memory mutation row with its typed receipt", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_START",
+      runId: "run-memory",
+      toolCallId: "call-memory",
+      toolCallName: "memory",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_RESULT",
+      runId: "run-memory",
+      toolCallId: "call-memory",
+      toolCallName: "memory",
+      toolStatus: "failed",
+      content: "memory revision conflict",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_MEMORY_REJECTED",
+      runId: "run-memory",
+      toolCallId: "call-memory",
+      recordId: "memory-rejected-1",
+      errorCode: "memory_revision_conflict",
+      memories: [{ memoryId: "mem_1", scope: "user", memoryType: "feedback", revision: 1 }],
+    });
+
+    expect(state.committedItems.filter((item) => item.kind === "tool")).toEqual([]);
+    expect(state.committedItems.filter((item) => item.kind === "memoryReceipt")).toHaveLength(1);
   });
 
   it("deduplicates Dream receipts by task identity instead of terminal status", () => {

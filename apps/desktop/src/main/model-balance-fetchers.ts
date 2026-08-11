@@ -218,4 +218,138 @@ export async function fetchKimiCodingBalance(
   return { kind: "quota", quotas };
 }
 
+export async function fetchKimiBalance(
+  baseURL: string,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<ModelBalanceDetailWire> {
+  const response = await fetchWithAuth(
+    `${trimTrailingSlash(baseURL)}/users/me/balance`,
+    apiKey,
+    signal,
+  );
+  await assertOk(response);
+  const body = assertObject(await response.json());
+  const data = assertObject(body.data);
+  if (body.status !== true || parseBalanceValue(data.available_balance) < 0) {
+    throw new BalanceFetchError("Kimi 余额响应格式无效");
+  }
+  for (const field of ["available_balance", "voucher_balance", "cash_balance"] as const) {
+    if (typeof data[field] !== "number" && typeof data[field] !== "string") {
+      throw new BalanceFetchError("Kimi 余额响应格式无效");
+    }
+  }
+  return {
+    kind: "amount",
+    amounts: [{
+      currency: "CNY",
+      total: parseBalanceValue(data.available_balance),
+      granted: parseBalanceValue(data.voucher_balance),
+      topped_up: parseBalanceValue(data.cash_balance),
+    }],
+  };
+}
+
+function nestedNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : typeof value === "string" && Number.isFinite(Number(value))
+      ? Number(value)
+      : 0;
+}
+
+function collectResults(body: unknown): Record<string, unknown>[] {
+  const data = Array.isArray(assertObject(body).data) ? assertObject(body).data as unknown[] : [];
+  return data.flatMap((bucket) => {
+    const value = assertObject(bucket);
+    return Array.isArray(value.results)
+      ? value.results.map(assertObject)
+      : [];
+  });
+}
+
+async function fetchPagedResults(
+  initialURL: string,
+  headers: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>[]> {
+  let url: string | undefined = initialURL;
+  const results: Record<string, unknown>[] = [];
+  for (let pageIndex = 0; url && pageIndex < 20; pageIndex += 1) {
+    const response = await fetch(url, { headers, signal });
+    await assertOk(response);
+    const body = await response.json();
+    results.push(...collectResults(body));
+    const record = assertObject(body);
+    const nextPage = typeof record.next_page === "string" ? record.next_page : "";
+    if (!nextPage) break;
+    const nextURL: URL = new URL(url);
+    nextURL.searchParams.set("page", nextPage);
+    url = nextURL.toString();
+  }
+  return results;
+}
+
+export async function fetchOpenAIOrganizationUsage(
+  adminKey: string,
+  signal?: AbortSignal,
+): Promise<ModelBalanceDetailWire> {
+  const endTime = Math.floor(Date.now() / 1000);
+  const startTime = endTime - 7 * 24 * 60 * 60;
+  const headers = { Accept: "application/json", Authorization: `Bearer ${adminKey}` };
+  const [usageResults, costResults] = await Promise.all([
+    fetchPagedResults(`https://api.openai.com/v1/organization/usage/completions?start_time=${startTime}&end_time=${endTime}&bucket_width=1d`, headers, signal),
+    fetchPagedResults(`https://api.openai.com/v1/organization/costs?start_time=${startTime}&end_time=${endTime}&bucket_width=1d`, headers, signal),
+  ]);
+  const sum = (field: string) => usageResults.reduce((total, item) => total + nestedNumber(item[field]), 0);
+  const cost = costResults.reduce((total, item) => {
+    const amount = item.amount;
+    return total + (amount && typeof amount === "object" ? nestedNumber((amount as Record<string, unknown>).value) : 0);
+  }, 0);
+  return {
+    kind: "usage",
+    metrics: [
+      { name: "近 7 天输入", value: sum("input_tokens"), unit: "tokens" },
+      { name: "近 7 天缓存输入", value: sum("input_cached_tokens"), unit: "tokens" },
+      { name: "近 7 天输出", value: sum("output_tokens"), unit: "tokens" },
+      { name: "近 7 天请求", value: sum("num_model_requests"), unit: "requests" },
+      { name: "近 7 天成本", value: cost, unit: "usd" },
+    ],
+    console_url: "https://platform.openai.com/usage",
+  };
+}
+
+export async function fetchAnthropicOrganizationUsage(
+  adminKey: string,
+  signal?: AbortSignal,
+): Promise<ModelBalanceDetailWire> {
+  const endingAt = new Date();
+  const startingAt = new Date(endingAt.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const query = `starting_at=${encodeURIComponent(startingAt.toISOString())}&ending_at=${encodeURIComponent(endingAt.toISOString())}&bucket_width=1d`;
+  const headers = { Accept: "application/json", "x-api-key": adminKey, "anthropic-version": "2023-06-01" };
+  const [usageResults, costResults] = await Promise.all([
+    fetchPagedResults(`https://api.anthropic.com/v1/organizations/usage_report/messages?${query}`, headers, signal),
+    fetchPagedResults(`https://api.anthropic.com/v1/organizations/cost_report?${query}`, headers, signal),
+  ]);
+  const sum = (field: string) => usageResults.reduce((total, item) => total + nestedNumber(item[field]), 0);
+  const cacheWrite = usageResults.reduce((total, item) => {
+    const cache = item.cache_creation;
+    if (!cache || typeof cache !== "object") return total;
+    const record = cache as Record<string, unknown>;
+    return total + nestedNumber(record.ephemeral_5m_input_tokens) + nestedNumber(record.ephemeral_1h_input_tokens);
+  }, 0);
+  const costCents = costResults.reduce((total, item) => total + nestedNumber(item.amount), 0);
+  return {
+    kind: "usage",
+    metrics: [
+      { name: "近 7 天非缓存输入", value: sum("uncached_input_tokens"), unit: "tokens" },
+      { name: "近 7 天缓存读取", value: sum("cache_read_input_tokens"), unit: "tokens" },
+      { name: "近 7 天缓存写入", value: cacheWrite, unit: "tokens" },
+      { name: "近 7 天输出", value: sum("output_tokens"), unit: "tokens" },
+      { name: "近 7 天成本", value: costCents / 100, unit: "usd" },
+    ],
+    console_url: "https://console.anthropic.com/settings/usage",
+  };
+}
+
 export { BalanceFetchError };

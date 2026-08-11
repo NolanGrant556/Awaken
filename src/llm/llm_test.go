@@ -187,6 +187,19 @@ func TestCallMissingAPIKey(t *testing.T) {
 	}
 }
 
+func TestPrepareRequestAllowsExplicitNoAuth(t *testing.T) {
+	prepared, err := PrepareRequest(Config{
+		BaseURL: "http://127.0.0.1:8080/v1", Model: "local-model",
+		Protocol: ProtocolOpenAIChat, AuthScheme: "none",
+	}, Request{UserPrompt: "Hello"}, false)
+	if err != nil {
+		t.Fatalf("no-auth custom endpoint should not require an API key: %v", err)
+	}
+	if prepared.Endpoint != "http://127.0.0.1:8080/v1/chat/completions" {
+		t.Fatalf("unexpected no-auth endpoint %q", prepared.Endpoint)
+	}
+}
+
 func TestCallMissingModel(t *testing.T) {
 	cfg := Config{
 		APIKey:  "test-key",

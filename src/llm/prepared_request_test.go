@@ -51,3 +51,37 @@ func TestPreparedRequestSendsExactLoweredBodyWithoutRebuild(t *testing.T) {
 		t.Fatalf("transport rebuilt prepared body:\nwant %s\n got %s", wantBody, gotBody)
 	}
 }
+
+func TestPreparedStreamPublishesProviderNeutralFailureEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "busy", http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	cfg := Config{APIKey: "test-key", BaseURL: server.URL, Model: "test-model", Protocol: ProtocolOpenAIChat}
+	prepared, err := PrepareRequest(cfg, Request{UserPrompt: "hello"}, true)
+	if err != nil {
+		t.Fatalf("prepare request: %v", err)
+	}
+	var events []StreamEvent
+	_, err = StreamPreparedWithObserver(context.Background(), cfg, prepared, StreamObserver{
+		OnEvent: func(event StreamEvent) { events = append(events, event) },
+	})
+	if err == nil {
+		t.Fatal("expected provider error")
+	}
+	if len(events) != 1 || events[0].Type != StreamEventFailed || events[0].ErrorCode != "http_429" {
+		t.Fatalf("unexpected terminal events: %+v", events)
+	}
+}
+
+func TestProviderRateLimitObservationNormalizesOpenAIAndAnthropicHeaders(t *testing.T) {
+	response := &http.Response{Header: http.Header{
+		"X-Ratelimit-Remaining-Requests":       []string{"47"},
+		"Anthropic-Ratelimit-Tokens-Remaining": []string{"12000"},
+	}}
+	observation := providerRateLimitObservation(response)
+	if observation == nil || observation.RequestRemaining != "47" || observation.TokenRemaining != "12000" || observation.ObservedAt.IsZero() {
+		t.Fatalf("unexpected rate limit observation: %+v", observation)
+	}
+}

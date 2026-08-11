@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { AwakenModelProviderForm } from "@awaken/design-system";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-describe("AwakenModelProviderForm custom model suggestions", () => {
+describe("AwakenModelProviderForm custom model input", () => {
   let host: HTMLDivElement;
   let root: Root;
 
@@ -35,7 +35,7 @@ describe("AwakenModelProviderForm custom model suggestions", () => {
     ).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it("flips editable model suggestions and recomputes while open", () => {
+  it("renders custom models as a plain text field without suggestions", () => {
     act(() => {
       root.render(
         <AwakenModelProviderForm
@@ -54,36 +54,53 @@ describe("AwakenModelProviderForm custom model suggestions", () => {
       );
     });
 
-    const picker = host.querySelector<HTMLElement>(".model-custom-picker")!;
-    const trigger = host.querySelector<HTMLButtonElement>(
-      ".model-custom-picker-trigger",
-    )!;
-    vi.spyOn(picker, "getBoundingClientRect").mockReturnValue({
-      x: 100,
-      y: 430,
-      left: 100,
-      top: 430,
-      right: 500,
-      bottom: 470,
-      width: 400,
-      height: 40,
-      toJSON: () => ({}),
-    });
-    Object.defineProperty(window, "innerHeight", {
-      configurable: true,
-      value: 500,
+    const modelInput = host.querySelector<HTMLInputElement>(
+      'input[placeholder="输入模型 ID"]',
+    );
+    expect(modelInput?.value).toBe("model-a");
+    expect(host.querySelector(".model-custom-picker-trigger")).toBeNull();
+    expect(host.querySelector('[role="listbox"]')).toBeNull();
+    expect(host.querySelector('[role="option"]')).toBeNull();
+  });
+
+  it("shows synchronized candidates while keeping official providers editable", () => {
+    const onModelChange = vi.fn();
+    act(() => {
+      root.render(
+        <AwakenModelProviderForm
+          providerId="qwen"
+          modelMode="editable"
+          models={["qwen3.8-max", "qwen3.7-plus"]}
+          modelId="qwen3.8-max"
+          baseURL="https://dashscope.aliyuncs.com/compatible-mode/v1"
+          apiKey="key"
+          apiKeyPlaceholder="API Key"
+          apiDocsURL="https://help.aliyun.com"
+          onModelChange={onModelChange}
+          onBaseURLChange={vi.fn()}
+          onApiKeyChange={vi.fn()}
+        />,
+      );
     });
 
-    act(() => trigger.click());
-    expect(picker.dataset.menuPlacement).toBe("top");
-    expect(host.querySelectorAll('[role="option"]')).toHaveLength(4);
-
-    Object.defineProperty(window, "innerHeight", {
-      configurable: true,
-      value: 900,
+    const input = host.querySelector<HTMLInputElement>('input[role="combobox"]');
+    expect(input?.value).toBe("qwen3.8-max");
+    expect(host.querySelector("datalist")).toBeNull();
+    expect(input?.getAttribute("aria-expanded")).toBe("false");
+    act(() => input?.focus());
+    expect([...host.querySelectorAll('[role="option"]')].map((option) => option.textContent))
+      .toEqual(["qwen3.8-max", "qwen3.7-plus"]);
+    expect(input?.getAttribute("aria-expanded")).toBe("true");
+    act(() => host.querySelectorAll<HTMLButtonElement>('[role="option"]')[1]?.click());
+    expect(onModelChange).toHaveBeenCalledWith("qwen3.7-plus");
+    act(() => {
+      if (input) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(input, "qwen-custom-id");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
     });
-    act(() => window.dispatchEvent(new Event("resize")));
-    expect(picker.dataset.menuPlacement).toBe("bottom");
+    expect(onModelChange).toHaveBeenCalledWith("qwen-custom-id");
   });
 
   it("keeps every API-key connection test disabled until the current form has a key", () => {
@@ -118,5 +135,160 @@ describe("AwakenModelProviderForm custom model suggestions", () => {
     expect(button.disabled).toBe(false);
     act(() => button.click());
     expect(onTest).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires a model and Base URL even when no authentication is selected", () => {
+    const onTest = vi.fn();
+    const renderForm = (modelId: string, baseURL: string) => (
+      <AwakenModelProviderForm
+        providerId="custom"
+        presentation="modal"
+        modelMode="custom"
+        models={[]}
+        modelId={modelId}
+        authScheme="none"
+        baseURL={baseURL}
+        apiKey=""
+        apiKeyPlaceholder="API Key"
+        apiDocsURL=""
+        onModelChange={vi.fn()}
+        onBaseURLChange={vi.fn()}
+        onApiKeyChange={vi.fn()}
+        onTest={onTest}
+      />
+    );
+
+    act(() => root.render(renderForm("", "")));
+    const button = host.querySelector<HTMLButtonElement>(".model-provider-primary-test")!;
+    expect(button.disabled).toBe(true);
+
+    act(() => root.render(renderForm("local-model", "")));
+    expect(button.disabled).toBe(true);
+
+    act(() => root.render(renderForm("local-model", "http://127.0.0.1:8080/v1")));
+    expect(button.disabled).toBe(false);
+    act(() => button.click());
+    expect(onTest).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders single protocol and model choices as readonly fields", () => {
+    act(() => {
+      root.render(
+        <AwakenModelProviderForm
+          providerId="openai"
+          presentation="modal"
+          modelMode="select"
+          models={["gpt-5.1"]}
+          modelId="gpt-5.1"
+          protocol="openai_responses"
+          protocolOptions={[
+            { value: "openai_responses", label: "OpenAI Responses" },
+          ]}
+          authScheme="bearer"
+          authSchemeOptions={[
+            { value: "bearer", label: "Authorization: Bearer" },
+          ]}
+          baseURL="https://api.openai.com/v1"
+          apiKey="demo-key"
+          apiKeyPlaceholder="API Key"
+          apiDocsURL="https://platform.openai.com"
+          onModelChange={vi.fn()}
+          onProtocolChange={vi.fn()}
+          onAuthSchemeChange={vi.fn()}
+          onBaseURLChange={vi.fn()}
+          onApiKeyChange={vi.fn()}
+        />,
+      );
+    });
+
+    expect(host.querySelectorAll(".model-provider-readonly-choice")).toHaveLength(2);
+    expect(host.querySelectorAll(".aw-select__trigger")).toHaveLength(0);
+    expect(host.textContent).not.toContain("API 密钥发送方式");
+    expect(host.textContent).not.toContain("当前 Header：");
+  });
+
+  it("updates the auth header example and catalog refresh action from props", () => {
+    const onRefreshCatalog = vi.fn();
+    const renderForm = (
+      authScheme: string,
+      authSchemeOptions: Array<{ value: string; label: string }>,
+    ) => (
+      <AwakenModelProviderForm
+        providerId="custom-provider"
+        presentation="modal"
+        modelMode="custom"
+        models={["model-a", "model-b"]}
+        modelId="model-a"
+        authScheme={authScheme}
+        authSchemeOptions={authSchemeOptions}
+        showAuthScheme
+        baseURL="https://example.com/v1"
+        apiKey="demo-key"
+        apiKeyPlaceholder="API Key"
+        apiDocsURL="https://example.com/docs"
+        showCatalogRefresh
+        catalogStatus="目录已刷新"
+        onModelChange={vi.fn()}
+        onAuthSchemeChange={vi.fn()}
+        onBaseURLChange={vi.fn()}
+        onApiKeyChange={vi.fn()}
+        onRefreshCatalog={onRefreshCatalog}
+      />
+    );
+
+    act(() =>
+      root.render(
+        renderForm("x-api-key", [
+          { value: "x-api-key", label: "x-api-key" },
+          { value: "none", label: "无鉴权" },
+        ]),
+      ),
+    );
+    expect(host.textContent).toContain("x-api-key: <API_KEY>");
+    expect(host.textContent).toContain("目录已刷新");
+
+    const refreshButton = Array.from(host.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("刷新模型目录"),
+    );
+    expect(refreshButton).toBeTruthy();
+    act(() => refreshButton?.click());
+    expect(onRefreshCatalog).toHaveBeenCalledTimes(1);
+
+    act(() =>
+      root.render(
+        renderForm("none", [
+          { value: "x-api-key", label: "x-api-key" },
+          { value: "none", label: "无鉴权" },
+        ]),
+      ),
+    );
+    expect(host.textContent).toContain("无鉴权（不发送认证 Header）");
+  });
+
+  it("keeps custom Base URL in the primary form without advanced capability controls", () => {
+    act(() => {
+      root.render(
+        <AwakenModelProviderForm
+          providerId="custom"
+          presentation="modal"
+          modelMode="custom"
+          models={[]}
+          modelId="custom-model"
+          baseURL="https://example.com/v1"
+          showBaseURL
+          apiKey="demo-key"
+          apiKeyPlaceholder="API Key"
+          apiDocsURL="https://example.com/docs"
+          onModelChange={vi.fn()}
+          onBaseURLChange={vi.fn()}
+          onApiKeyChange={vi.fn()}
+        />,
+      );
+    });
+
+    expect(host.textContent).toContain("Base URL");
+    expect(host.textContent).not.toContain("高级设置");
+    expect(host.textContent).not.toContain("输入能力");
+    expect(host.textContent).not.toContain("已解析能力与来源");
   });
 });

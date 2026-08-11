@@ -751,3 +751,22 @@ func TestToolDisplayContentAndModelPayloadRemainSeparate(t *testing.T) {
 		t.Fatalf("model context did not receive structured payload: %+v", model)
 	}
 }
+
+func TestMemoryMutationReceiptOnlyOwnsMutationActions(t *testing.T) {
+	readFailure := ToolExecutionResult{
+		Name: "memory", IsError: true, ErrorCode: "memory_not_found",
+		SemanticArguments: `{"action":"get","memory_id":"legacy-topic.md"}`,
+	}
+	if receipt, ok := memoryMutationReceipt(readFailure); ok {
+		t.Fatalf("read failure must stay a generic tool result, got %+v", receipt)
+	}
+
+	writeFailure := ToolExecutionResult{
+		Name: "memory", IsError: true, ErrorCode: "memory_revision_conflict",
+		SemanticArguments: `{"action":"update","memory_id":"mem_1","expected_revision":1}`,
+	}
+	receipt, ok := memoryMutationReceipt(writeFailure)
+	if !ok || receipt.Action != "update" || receipt.MemoryID != "mem_1" || receipt.Status != "rejected" {
+		t.Fatalf("mutation failure did not produce typed rejection: %+v ok=%v", receipt, ok)
+	}
+}

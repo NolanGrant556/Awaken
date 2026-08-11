@@ -39,7 +39,7 @@ var reasoningControlCapabilities = []ReasoningControlCapability{
 	},
 	{
 		ID: "qwen_api_enable_thinking_v1", ProviderID: "qwen", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-		ProtocolFamily: ProtocolOpenAIChat, Models: []string{"qwen3.7-max"},
+		ProtocolFamily: ProtocolOpenAIChat, Models: []string{"qwen3.7-max", "qwen3.8-max"},
 		WireStrategy: ReasoningControlEnableThinking,
 	},
 	{

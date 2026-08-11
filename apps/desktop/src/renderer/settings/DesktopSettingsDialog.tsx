@@ -36,6 +36,7 @@ export type DraftState = {
   providerId: string;
   modelId: string;
   apiKey: string;
+  managementApiKey: string;
   baseURL: string;
   protocol: string;
   authScheme: string;
@@ -65,6 +66,7 @@ const MODEL_SETTINGS_TABS = [
   { id: "coding_plan", label: "Coding Plan" },
   { id: "api", label: "API" },
   { id: "agent_plan", label: "Agent Plan" },
+  { id: "custom", label: "自定义" },
 ];
 
 const MODEL_SETTINGS_COPY: Record<
@@ -85,6 +87,11 @@ const MODEL_SETTINGS_COPY: Record<
     title: "Agent Plan",
     description: "管理 Agent Plan 账户、模型与生成工具。",
     connectionLabel: "配置账户",
+  },
+  custom: {
+    title: "自定义",
+    description: "管理自行声明协议与推理地址的模型连接。",
+    connectionLabel: "配置 API Key",
   },
 };
 
@@ -115,6 +122,37 @@ const MAX_TOKENS_DEFAULT = 8192;
 const MAX_TOKENS_MIN = 256;
 const MAX_TOKENS_MAX = 1_000_000;
 const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";
+const PROTOCOL_LABELS: Record<string, string> = {
+  openai_chat: "OpenAI Chat Completions",
+  openai_responses: "OpenAI Responses",
+  anthropic_messages: "Anthropic Messages",
+  minimax_chat: "MiniMax Legacy",
+};
+const AUTH_SCHEME_OPTIONS = [
+  { value: "bearer", label: "Authorization: Bearer" },
+  { value: "x-api-key", label: "x-api-key" },
+  { value: "api-key", label: "api-key（Azure）" },
+  { value: "x-goog-api-key", label: "x-goog-api-key" },
+  { value: "none", label: "无鉴权" },
+];
+function protocolOptions(provider: ModelProvider, currentProtocol?: string) {
+  const protocols = provider.supportedProtocols?.length
+    ? provider.supportedProtocols
+    : [provider.protocol];
+  const availableProtocols =
+    currentProtocol && !protocols.includes(currentProtocol)
+      ? [...protocols, currentProtocol]
+      : protocols;
+  return availableProtocols.map((value) => ({
+    value,
+    label: PROTOCOL_LABELS[value] ??
+      (value === "minimax_chat" ? "MiniMax Legacy" : value),
+  }));
+}
+
+function authSchemeOptions() {
+  return AUTH_SCHEME_OPTIONS;
+}
 
 function providerBrand(
   provider: ModelProvider,
@@ -204,12 +242,24 @@ function clampContextWindow(
   value: number | undefined,
   max: number = CONTEXT_WINDOW_MAX,
 ): number {
-  if (!Number.isFinite(value)) return max;
+  if (!Number.isFinite(value) || value === undefined || value <= 0) return 0;
   return Math.min(max, Math.max(CONTEXT_WINDOW_MIN, Math.round(value ?? max)));
 }
 
 function modelCapabilityFor(provider: ModelProvider, modelId: string) {
   return provider.modelCapabilities[modelId];
+}
+
+export function modelCandidatesForProtocol(
+  provider: ModelProvider,
+  protocol: string,
+): string[] {
+  return provider.models.filter((modelId) => {
+    const confirmed = modelCapabilityFor(provider, modelId)?.supportedProtocols;
+    // Sparse /models responses and manually entered future model IDs remain
+    // admissible. Only an explicit per-model contract narrows suggestions.
+    return !confirmed?.length || confirmed.includes(protocol);
+  });
 }
 
 function contextWindowMaxForProfile(
@@ -220,7 +270,10 @@ function contextWindowMaxForProfile(
   const capability = provider
     ? modelCapabilityFor(provider, profile.modelId)
     : undefined;
-  return capability?.contextWindow ?? CONTEXT_WINDOW_MAX;
+  return profile.advanced?.maxInputTokens ??
+    capability?.maxInputTokens ??
+    capability?.contextWindow ??
+    0;
 }
 
 function contextWindowForProfile(
@@ -228,11 +281,21 @@ function contextWindowForProfile(
   providers: ModelProvider[],
 ): number {
   const max = contextWindowMaxForProfile(profile, providers);
+  if (max <= 0) {
+    const savedValue = profile.advanced?.contextWindow;
+    return Number.isFinite(savedValue) && (savedValue ?? 0) > 0
+      ? Math.round(savedValue ?? 0)
+      : 0;
+  }
   return clampContextWindow(profile.advanced?.contextWindow, max);
 }
 
+function contextWindowInputValue(value: number): string {
+  return value > 0 ? value.toString() : "";
+}
+
 function clampMaxTokens(value: number | undefined): number {
-  if (!Number.isFinite(value)) return MAX_TOKENS_DEFAULT;
+  if (!Number.isFinite(value) || value === undefined || value <= 0) return 0;
   return Math.min(
     MAX_TOKENS_MAX,
     Math.max(MAX_TOKENS_MIN, Math.round(value ?? MAX_TOKENS_DEFAULT)),
@@ -243,22 +306,21 @@ function maxTokensForProfile(profile: RuntimeModelProfileSummary): number {
   return clampMaxTokens(profile.advanced?.maxTokens);
 }
 
-function providerHasEditableCapabilities(provider: ModelProvider): boolean {
-  return provider.allowCustomModel || provider.endpointModel;
-}
-
 function advancedWithModelCapability(
   provider: ModelProvider,
   modelId: string,
   advanced: RuntimeModelProfileSummary["advanced"],
   overwrite: boolean,
 ): RuntimeModelProfileSummary["advanced"] {
-  const capability =
-    modelCapabilityFor(provider, modelId) ??
-    (provider.allowCustomModel
-      ? modelCapabilityFor(provider, provider.defaultModel)
-      : undefined);
-  if (!capability) return advanced;
+  const capability = modelCapabilityFor(provider, modelId);
+  if (!capability) {
+    return overwrite
+      ? {
+          endpointId: advanced?.endpointId,
+          inferenceEndpoint: advanced?.inferenceEndpoint,
+        }
+      : advanced;
+  }
   const inferredMaxTokens =
     capability.maxOutputTokens ?? capability.defaultMaxTokens;
   const shouldUseInferredMaxTokens =
@@ -270,6 +332,10 @@ function advancedWithModelCapability(
       overwrite || advanced?.contextWindow === undefined
         ? capability.contextWindow
         : advanced.contextWindow,
+    maxInputTokens:
+      overwrite || advanced?.maxInputTokens === undefined
+        ? capability.maxInputTokens
+        : advanced.maxInputTokens,
     maxTokens: shouldUseInferredMaxTokens
       ? inferredMaxTokens
       : advanced.maxTokens,
@@ -286,6 +352,10 @@ function advancedWithModelCapability(
         ? capability.supportsVideo
         : advanced.supportsVideo,
     supportsTools: capability.supportsTools ?? advanced?.supportsTools,
+    supportsPromptCache:
+      overwrite || advanced?.supportsPromptCache === undefined
+        ? capability.supportsPromptCache
+        : advanced.supportsPromptCache,
     defaultReasoningEffort:
       overwrite || advanced?.defaultReasoningEffort === undefined
         ? capability.reasoningEffort?.defaultLevel
@@ -299,7 +369,14 @@ function parseContextWindowInput(
 ): number | undefined {
   if (value.trim() === "") return undefined;
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? clampContextWindow(parsed, max) : undefined;
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  if (max <= 0) {
+    return Math.min(
+      CONTEXT_WINDOW_MAX,
+      Math.max(CONTEXT_WINDOW_MIN, Math.round(parsed)),
+    );
+  }
+  return clampContextWindow(parsed, max);
 }
 
 function parseMaxTokensInput(value: string): number | undefined {
@@ -309,6 +386,7 @@ function parseMaxTokensInput(value: string): number | undefined {
 }
 
 function contextWindowFill(value: number, max: number): number {
+  if (max <= CONTEXT_WINDOW_MIN) return 0;
   return (
     ((clampContextWindow(value, max) - CONTEXT_WINDOW_MIN) /
       (max - CONTEXT_WINDOW_MIN)) *
@@ -317,6 +395,7 @@ function contextWindowFill(value: number, max: number): number {
 }
 
 function contextWindowAnchor(max: number): number {
+  if (max <= 0) return 0;
   return clampContextWindow(Math.round(max * CONTEXT_WINDOW_ANCHOR_RATIO), max);
 }
 
@@ -332,19 +411,20 @@ function configuredDraftsFromProfiles(
   providers: ModelProvider[],
 ): Record<string, ConfiguredProfileDraft> {
   return Object.fromEntries(
-    profiles.map((profile) => [
-      profile.id,
-      {
-        enabled: profile.enabled,
-        contextWindow: contextWindowForProfile(profile, providers),
-        contextWindowInput: contextWindowForProfile(
-          profile,
-          providers,
-        ).toString(),
-        maxTokens: maxTokensForProfile(profile),
-        maxTokensInput: maxTokensForProfile(profile).toString(),
-      },
-    ]),
+    profiles.map((profile) => {
+      const contextWindow = contextWindowForProfile(profile, providers);
+      const maxTokens = maxTokensForProfile(profile);
+      return [
+        profile.id,
+        {
+          enabled: profile.enabled,
+          contextWindow,
+          contextWindowInput: contextWindowInputValue(contextWindow),
+          maxTokens,
+          maxTokensInput: maxTokens.toString(),
+        },
+      ];
+    }),
   );
 }
 
@@ -359,6 +439,7 @@ function draftFromProvider(provider: ModelProvider): DraftState {
     providerId: provider.id,
     modelId: provider.defaultModel,
     apiKey: "",
+    managementApiKey: "",
     baseURL: provider.baseURL,
     protocol: provider.protocol,
     authScheme: provider.authScheme,
@@ -387,6 +468,7 @@ function draftFromTemplate(
     providerId: templateProfile.providerId,
     modelId,
     apiKey: "",
+    managementApiKey: "",
     baseURL: templateProfile.baseURL || provider.baseURL,
     protocol: templateProfile.protocol || provider.protocol,
     authScheme: templateProfile.authScheme || provider.authScheme,
@@ -414,6 +496,7 @@ export function draftFromExistingProfile(
     providerId: profile.providerId,
     modelId,
     apiKey: "",
+    managementApiKey: "",
     baseURL: profile.baseURL || provider.baseURL,
     protocol: profile.protocol || provider.protocol,
     authScheme: profile.authScheme || provider.authScheme,
@@ -459,6 +542,7 @@ export function toSaveRequest(
     protocol: draft.protocol,
     authScheme: draft.authScheme,
     apiKey: draft.apiKey.trim() || undefined,
+    managementApiKey: draft.managementApiKey.trim() || undefined,
     enabled: draft.enabled,
     isDefault: draft.isDefault,
     advanced,
@@ -504,8 +588,9 @@ export function DesktopSettingsDialog({
   const [testing, setTesting] = useState(false);
   const [testFeedback, setTestFeedback] =
     useState<ModelConnectionTestFeedback | null>(null);
-  const [testingReasoning, setTestingReasoning] = useState(false);
   const [refreshingAgentPlan, setRefreshingAgentPlan] = useState(false);
+  const [refreshingCatalog, setRefreshingCatalog] = useState(false);
+  const [catalogStatus, setCatalogStatus] = useState<string | null>(null);
   const [deletingAgentPlan, setDeletingAgentPlan] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -514,6 +599,7 @@ export function DesktopSettingsDialog({
   const settingsRootRef = useRef<HTMLElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const expandedProviderIdRef = useRef<string | null>(null);
+  const catalogRefreshIdRef = useRef(0);
 
   const providerById = useMemo(() => {
     return new Map(providers.map((provider) => [provider.id, provider]));
@@ -614,10 +700,13 @@ export function DesktopSettingsDialog({
   }
 
   function collapseProviderEditor(): void {
+    expandedProviderIdRef.current = null;
+    catalogRefreshIdRef.current += 1;
     setExpandedProviderId(null);
     setDraft(null);
     setShowApiKey(false);
     setTestFeedback(null);
+    setCatalogStatus(null);
   }
 
   useEffect(() => {
@@ -661,6 +750,9 @@ export function DesktopSettingsDialog({
         setExpandedProviderId(null);
         setDraft(null);
         setShowApiKey(false);
+        setCatalogStatus(null);
+        setRefreshingCatalog(false);
+        catalogRefreshIdRef.current += 1;
         expandedProviderIdRef.current = null;
         return;
       }
@@ -710,11 +802,34 @@ export function DesktopSettingsDialog({
       return;
     }
 
+    const nextDraft = createDraftForProvider(provider);
+    expandedProviderIdRef.current = provider.id;
+    catalogRefreshIdRef.current += 1;
+    setRefreshingCatalog(false);
     setExpandedProviderId(provider.id);
-    setDraft(createDraftForProvider(provider));
+    setDraft(nextDraft);
     setShowApiKey(false);
     setTestFeedback(null);
     setMessage(null);
+    setCatalogStatus(
+      provider.id === "custom"
+        ? null
+        : provider.catalogStrategy === "none"
+        ? `${provider.displayName} 未提供可由当前推理凭据调用的模型目录 API，请使用官方清单或手填模型 ID。`
+        : provider.catalogObservedAt
+        ? `当前目录来自供应商 API，观测时间 ${provider.catalogObservedAt}`
+        : "当前先展示官方清单与本地缓存；填写或复用 API Key 后可从供应商 API 刷新。",
+    );
+
+    const template = providerTemplateProfile(provider.id);
+    if (
+      provider.catalogStrategy !== "none" &&
+      (nextDraft.authScheme === "none" ||
+        nextDraft.apiKey.trim() !== "" ||
+        template?.hasKey)
+    ) {
+      void refreshCatalog(provider, nextDraft, true);
+    }
   }
 
   function editExistingProfile(profile: RuntimeModelProfileSummary): void {
@@ -770,7 +885,7 @@ export function DesktopSettingsDialog({
   }
 
   async function testDraft(): Promise<void> {
-    if (!draft || draft.apiKey.trim() === "") return;
+    if (!draft || (draft.authScheme !== "none" && draft.apiKey.trim() === "")) return;
     const provider = providerById.get(draft.providerId);
     if (!provider) return;
     setTesting(true);
@@ -797,37 +912,89 @@ export function DesktopSettingsDialog({
     }
   }
 
-  async function testDraftReasoning(): Promise<void> {
-    if (!draft || draft.apiKey.trim() === "") return;
+  async function refreshCatalog(
+    provider: ModelProvider,
+    catalogDraft: DraftState,
+    background = false,
+  ): Promise<void> {
+    const refreshId = catalogRefreshIdRef.current + 1;
+    catalogRefreshIdRef.current = refreshId;
+    setRefreshingCatalog(true);
+    if (!background) setCatalogStatus(null);
+    try {
+      const result = await runtimeClient.refreshModelCatalog(
+        toSaveRequest(catalogDraft, provider),
+      );
+      setProviders((current) =>
+        current.map((item) =>
+          item.id === result.provider.id ? result.provider : item,
+        ),
+      );
+      setDraft((current) => {
+        if (!current || current.providerId !== result.provider.id) return current;
+        const selectedModelId = current.modelId || result.provider.defaultModel;
+        return {
+          ...current,
+          modelId: selectedModelId,
+          advanced: advancedWithModelCapability(
+            result.provider,
+            selectedModelId,
+            current.advanced,
+            false,
+          ),
+        };
+      });
+      if (
+        catalogRefreshIdRef.current === refreshId &&
+        expandedProviderIdRef.current === provider.id
+      ) {
+        setCatalogStatus(result.message);
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "刷新模型目录失败";
+      if (
+        catalogRefreshIdRef.current === refreshId &&
+        expandedProviderIdRef.current === provider.id
+      ) {
+        setCatalogStatus(
+          background
+            ? `供应商目录暂未刷新：${errorMessage} 当前继续使用官方清单或本地缓存。`
+            : errorMessage,
+        );
+      }
+    } finally {
+      if (catalogRefreshIdRef.current === refreshId) {
+        setRefreshingCatalog(false);
+      }
+    }
+  }
+
+  async function refreshSelectedProviderCatalog(): Promise<void> {
+    if (!draft) return;
     const provider = providerById.get(draft.providerId);
     if (!provider) return;
-    setTestingReasoning(true);
-    setMessage(null);
-    try {
-      const result = await runtimeClient.testAgentPlanReasoningCapability(
-        toSaveRequest(draft, provider),
-      );
-      showToast(result.message);
-      await loadModelSettings();
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : "effort 验证失败");
-    } finally {
-      setTestingReasoning(false);
-    }
+    await refreshCatalog(provider, draft);
   }
 
   async function refreshAgentPlanModels(): Promise<void> {
     setRefreshingAgentPlan(true);
     setMessage(null);
+    setCatalogStatus(null);
     try {
       const account = await runtimeClient.refreshAgentPlanModels();
       setAgentPlanAccount(account);
       await loadModelSettings();
-      showToast(`Agent Plan 模型目录已刷新（${account.modelIds.length} 个）`);
+      const imageCount = account.catalog.filter((item) => item.kind === "image").length;
+      const videoCount = account.catalog.filter((item) => item.kind === "video").length;
+      const status = `Agent Plan 目录已刷新：主模型 ark-code-latest，图片 ${imageCount} 个，视频 ${videoCount} 个`;
+      setCatalogStatus(status);
+      showToast(status);
     } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "刷新 Agent Plan 模型目录失败",
-      );
+      const status =
+        error instanceof Error ? error.message : "刷新 Agent Plan 模型目录失败";
+      setCatalogStatus(status);
+      setMessage(status);
     } finally {
       setRefreshingAgentPlan(false);
     }
@@ -903,7 +1070,7 @@ export function DesktopSettingsDialog({
     );
     updateConfiguredDraft(profileId, {
       contextWindow: nextValue,
-      contextWindowInput: nextValue.toString(),
+      contextWindowInput: contextWindowInputValue(nextValue),
     });
   }
 
@@ -919,7 +1086,7 @@ export function DesktopSettingsDialog({
         [profileId]: {
           ...existing,
           contextWindow: nextValue,
-          contextWindowInput: nextValue.toString(),
+          contextWindowInput: contextWindowInputValue(nextValue),
         },
       };
     });
@@ -961,7 +1128,7 @@ export function DesktopSettingsDialog({
         [profileId]: {
           ...existing,
           contextWindow: nextValue,
-          contextWindowInput: nextValue.toString(),
+          contextWindowInput: contextWindowInputValue(nextValue),
         },
       };
     });
@@ -1208,52 +1375,68 @@ export function DesktopSettingsDialog({
                     providerId={selectedProvider.id}
                     presentation="modal"
                     modelMode={
-                      selectedProvider.allowCustomModel
+                      selectedProvider.id === "custom"
                         ? "custom"
                         : selectedProvider.endpointModel
                           ? "endpoint"
+                          : selectedProvider.allowCustomModel
+                            ? "editable"
                           : "select"
                     }
-                    models={selectedProvider.models}
+                    models={modelCandidatesForProtocol(
+                      selectedProvider,
+                      selectedProviderDraft.protocol,
+                    )}
                     modelId={
                       selectedProvider.endpointModel
                         ? selectedProviderDraft.endpointId ||
                           selectedProviderDraft.modelId
                         : selectedProviderDraft.modelId
                     }
+                    protocol={selectedProviderDraft.protocol}
+                    protocolOptions={protocolOptions(
+                      selectedProvider,
+                      selectedProviderDraft.protocol,
+                    )}
+                    authScheme={selectedProviderDraft.authScheme}
+                    authSchemeOptions={authSchemeOptions()}
+                    showAuthScheme={selectedProvider.id === "custom"}
                     baseURL={selectedProviderDraft.baseURL}
-                    baseURLReadOnly={
-                      selectedProvider.accessType === "agent_plan" ||
-                      selectedProvider.id === "qwen-token-plan"
-                    }
+                    showBaseURL
+                    baseURLReadOnly={selectedProvider.id !== "custom"}
                     apiKey={selectedProviderDraft.apiKey}
+                    managementApiKey={selectedProviderDraft.managementApiKey}
+                    maskedManagementApiKey={
+                      selectedProviderProfiles.find((profile) => profile.hasManagementKey)
+                        ?.maskedManagementKey
+                    }
+                    showManagementApiKey={selectedProvider.id === "openai" || selectedProvider.id === "anthropic"}
                     apiKeyPlaceholder={`输入 ${selectedProvider.keyEnvName}`}
                     apiDocsURL={selectedProvider.apiDocsURL}
                     templateNote={
                       selectedProvider.endpointModel
                         ? `运行时模型必须填写控制台创建的 ep-* 推理接入点；模型族为 ${selectedProvider.defaultModel}。`
+                        : selectedProvider.id === "custom"
+                          ? "选择接口协议并填写对应的 Base URL。"
                         : null
                     }
                     showApiKey={showApiKey}
-                    editableCapabilities={providerHasEditableCapabilities(
-                      selectedProvider,
-                    )}
-                    supportsVision={
-                      selectedProviderDraft.advanced?.supportsVision === true
-                    }
-                    supportsNativePDF={
-                      selectedProviderDraft.advanced?.supportsNativePDF === true
-                    }
-                    supportsVideo={
-                      selectedProviderDraft.advanced?.supportsVideo === true
-                    }
                     saving={saving}
                     testing={testing}
                     testFeedback={testFeedback}
-                    testingReasoning={testingReasoning}
-                    showReasoningTest={
-                      selectedProvider.accessType === "agent_plan" &&
-                      selectedProviderDraft.modelId !== "ark-code-latest"
+                    showCatalogRefresh={
+                      selectedProvider.id !== "custom" &&
+                      selectedProvider.accessType !== "agent_plan" &&
+                      selectedProvider.catalogStrategy !== "none"
+                    }
+                    refreshingCatalog={refreshingCatalog}
+                    catalogStatus={
+                      selectedProvider.id === "custom"
+                        ? undefined
+                        : catalogStatus ??
+                          (selectedProvider.catalogStrategy === "none"
+                            ? `${selectedProvider.displayName} 未提供可由当前推理凭据调用的模型目录 API，请使用官方清单或手填模型 ID。`
+                            : undefined)
                     }
                     showAccountActions={
                       selectedProvider.accessType === "agent_plan"
@@ -1285,6 +1468,41 @@ export function DesktopSettingsDialog({
                         ),
                       });
                     }}
+                    onProtocolChange={(protocol) => {
+                      setTestFeedback(null);
+                      const knownOfficialBaseURLs = new Set([
+                        selectedProvider.baseURL.replace(/\/+$/, ""),
+                        ...Object.values(selectedProvider.protocolBaseURLs).map(
+                          (value) => value.replace(/\/+$/, ""),
+                        ),
+                      ]);
+                      const currentBaseURL = selectedProviderDraft.baseURL.replace(
+                        /\/+$/,
+                        "",
+                      );
+                      const knownOfficialAuthSchemes = new Set([
+                        selectedProvider.authScheme,
+                        ...Object.values(selectedProvider.protocolAuthSchemes),
+                      ]);
+                      setDraft({
+                        ...selectedProviderDraft,
+                        protocol,
+                        baseURL: knownOfficialBaseURLs.has(currentBaseURL)
+                          ? selectedProvider.protocolBaseURLs[protocol] ??
+                            selectedProvider.baseURL
+                          : selectedProviderDraft.baseURL,
+                        authScheme: knownOfficialAuthSchemes.has(
+                          selectedProviderDraft.authScheme,
+                        )
+                          ? selectedProvider.protocolAuthSchemes[protocol] ??
+                            selectedProvider.authScheme
+                          : selectedProviderDraft.authScheme,
+                      });
+                    }}
+                    onAuthSchemeChange={(authScheme) => {
+                      setTestFeedback(null);
+                      setDraft({ ...selectedProviderDraft, authScheme });
+                    }}
                     onBaseURLChange={(baseURL) => {
                       setTestFeedback(null);
                       setDraft({ ...selectedProviderDraft, baseURL });
@@ -1293,45 +1511,15 @@ export function DesktopSettingsDialog({
                       setTestFeedback(null);
                       setDraft({ ...selectedProviderDraft, apiKey });
                     }}
-                    onShowApiKeyChange={setShowApiKey}
-                    onCapabilityChange={(capability, checked) => {
+                    onManagementApiKeyChange={(managementApiKey) => {
                       setTestFeedback(null);
-                      if (capability === "supportsVision") {
-                        setDraft({
-                          ...selectedProviderDraft,
-                          advanced: {
-                            ...selectedProviderDraft.advanced,
-                            supportsVision: checked,
-                            supportsVideo: checked
-                              ? (selectedProviderDraft.advanced
-                                  ?.supportsVideo ?? false)
-                              : false,
-                          },
-                        });
-                      } else if (capability === "supportsVideo") {
-                        setDraft({
-                          ...selectedProviderDraft,
-                          advanced: {
-                            ...selectedProviderDraft.advanced,
-                            supportsVision: checked
-                              ? true
-                              : (selectedProviderDraft.advanced
-                                  ?.supportsVision ?? false),
-                            supportsVideo: checked,
-                          },
-                        });
-                      } else {
-                        setDraft({
-                          ...selectedProviderDraft,
-                          advanced: {
-                            ...selectedProviderDraft.advanced,
-                            supportsNativePDF: checked,
-                          },
-                        });
-                      }
+                      setDraft({ ...selectedProviderDraft, managementApiKey });
                     }}
+                    onRefreshCatalog={() => {
+                      void refreshSelectedProviderCatalog();
+                    }}
+                    onShowApiKeyChange={setShowApiKey}
                     onTest={() => void testDraft()}
-                    onTestReasoning={() => void testDraftReasoning()}
                     onRefreshAccount={() => void refreshAgentPlanModels()}
                     onDeleteAccount={() => void deleteAgentPlanAccount()}
                     onCancel={collapseProviderEditor}
@@ -1358,10 +1546,9 @@ export function DesktopSettingsDialog({
                   const profileDraft = configuredDrafts[profile.id] ?? {
                     enabled: profile.enabled,
                     contextWindow: contextWindowForProfile(profile, providers),
-                    contextWindowInput: contextWindowForProfile(
-                      profile,
-                      providers,
-                    ).toString(),
+                    contextWindowInput: contextWindowInputValue(
+                      contextWindowForProfile(profile, providers),
+                    ),
                     maxTokens: maxTokensForProfile(profile),
                     maxTokensInput: maxTokensForProfile(profile).toString(),
                   };
@@ -1372,6 +1559,7 @@ export function DesktopSettingsDialog({
                       ? providerBrand(providerById.get(profile.providerId)!)
                       : undefined,
                     modelId: profile.modelId,
+                    protocolLabel: PROTOCOL_LABELS[profile.protocol] ?? profile.protocol,
                     isDefault: profile.isDefault,
                     credentialStatus: credentialStatusLabel(
                       profile.profileStatus,
@@ -1382,9 +1570,10 @@ export function DesktopSettingsDialog({
                         : ("default" as const),
                     enabled: profileDraft.enabled,
                     contextWindow: profileDraft.contextWindow,
+                    contextUnknown: contextWindowMax <= 0,
                     contextWindowInput: profileDraft.contextWindowInput,
                     contextWindowMin: CONTEXT_WINDOW_MIN,
-                    contextWindowMax,
+                    contextWindowMax: Math.max(CONTEXT_WINDOW_MIN, contextWindowMax),
                     contextWindowStep: CONTEXT_WINDOW_SLIDER_STEP,
                     contextFill: contextWindowFill(
                       profileDraft.contextWindow,
@@ -1397,9 +1586,9 @@ export function DesktopSettingsDialog({
                     contextAnchorValue: effectiveAnchor,
                     contextAnchorLabel: formatContextWindow(effectiveAnchor),
                     contextEndLabel: formatContextWindow(contextWindowMax),
-                    compressionValue: calculateAutoCompactThreshold(
-                      profileDraft.contextWindow,
-                    ),
+                    compressionValue: contextWindowMax > 0
+                      ? calculateAutoCompactThreshold(profileDraft.contextWindow)
+                      : "未知",
                     maxTokensInput: profileDraft.maxTokensInput,
                   };
                 })}

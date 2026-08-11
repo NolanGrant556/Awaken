@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/llm"
 	"awaken/src/tool"
 )
 
@@ -430,12 +431,13 @@ func TestProjectSemanticContextSnapshotAndModelUsageForLiveReplay(t *testing.T) 
 		SchemaVersion: 1, RequestID: "req_1", Purpose: "agent_turn", ModelID: "model",
 		ProtocolFamily: "openai_chat", ReasoningPolicy: "max", InputTokens: intPtr(40), OutputTokens: intPtr(2), TotalTokens: intPtr(42),
 		UsageComplete: true, RetryIndex: 2, AuxiliaryFallback: true, CalculatedCostUSD: floatPtr(0.125), Currency: "USD",
-		PricingSnapshot: &agentcore.PricingSnapshot{SnapshotID: "price_1", ProviderID: "deepseek", ModelID: "model", Currency: "USD", UnitTokens: 1_000_000, EffectiveDate: "2026-07-19", SourceURL: "https://example.test/pricing"},
-		LatencyMS:       25, Status: agentcore.ModelUsageSucceeded, CompletedAt: now,
+		PricingSnapshot:      &agentcore.PricingSnapshot{SnapshotID: "price_1", ProviderID: "deepseek", ModelID: "model", Currency: "USD", UnitTokens: 1_000_000, EffectiveDate: "2026-07-19", SourceURL: "https://example.test/pricing"},
+		RateLimitObservation: &agentcore.RateLimitObservation{RequestRemaining: "47", TokenRemaining: "12000", ObservedAt: now},
+		LatencyMS:            25, Status: agentcore.ModelUsageSucceeded, CompletedAt: now,
 	}
 	records := []agentcore.SemanticRecord{
 		agentcore.ContextSnapshotSemanticRecord("thread", "run", "turn", "session", snapshot),
-		agentcore.ModelRequestSemanticRecord("thread", "run", "turn", "session", snapshot),
+		agentcore.ModelRequestSemanticRecord("thread", "run", "turn", "session", snapshot, llm.RequestPurposeAgentTurn),
 		agentcore.ModelUsageSemanticRecord("thread", "run", "turn", "session", usage),
 	}
 	for index := range records {
@@ -455,8 +457,14 @@ func TestProjectSemanticContextSnapshotAndModelUsageForLiveReplay(t *testing.T) 
 	if frames[1].ModelUsage.ReasoningPolicy != "max" {
 		t.Fatalf("model usage reasoning policy was lost: %+v", frames[1].ModelUsage)
 	}
+	if frames[1].ModelUsage.RateLimitObservation == nil || frames[1].ModelUsage.RateLimitObservation.RequestRemaining != "47" {
+		t.Fatalf("rate-limit observation was lost: %+v", frames[1].ModelUsage)
+	}
 	if roundTrip := modelUsageRecordFromWire(frames[1].ModelUsage); roundTrip.ReasoningPolicy != "max" {
 		t.Fatalf("wire-to-semantic reasoning policy was lost: %+v", roundTrip)
+	}
+	if roundTrip := modelUsageRecordFromWire(frames[1].ModelUsage); roundTrip.RateLimitObservation == nil || roundTrip.RateLimitObservation.TokenRemaining != "12000" {
+		t.Fatalf("wire-to-semantic rate-limit observation was lost: %+v", roundTrip)
 	}
 	if frames[1].ModelUsage.RetryIndex != 2 || !frames[1].ModelUsage.AuxiliaryFallback || frames[1].ModelUsage.CalculatedCostUSD == nil || frames[1].ModelUsage.PricingSnapshot == nil {
 		t.Fatalf("pricing/retry fields were lost: %+v", frames[1].ModelUsage)

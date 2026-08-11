@@ -458,7 +458,7 @@ func TestGenerateThreadTitleRecordsPurposeAndTerminalUsage(t *testing.T) {
 	if requestID == "" || usage.RequestID != requestID || usage.Purpose != "thread_title" || usage.InputTokens == nil || *usage.InputTokens != 20 {
 		t.Fatalf("request=%q usage=%+v", requestID, usage)
 	}
-	if usage.ProviderID != "kimi-cn" || usage.ProfileID != "profile-title" || usage.CredentialRevision != 7 || usage.ModelID != "kimi-k2.6" {
+	if usage.ProviderID != "kimi-cn" || usage.ProfileID != "profile-title" || usage.CredentialRevision != 7 || usage.ModelID != "kimi-k3" {
 		t.Fatalf("thread-title auxiliary config lost provider/profile/credential identity: %+v", usage)
 	}
 }
@@ -599,8 +599,8 @@ func TestGenerateThreadTitleWithProfileUsesProviderRequestPolicy(t *testing.T) {
 	} else if err := json.Unmarshal(raw, &maxTokens); err != nil {
 		t.Fatalf("failed to decode max_tokens: %v", err)
 	}
-	if maxTokens != threadTitleForcedReasoningMaxTokens {
-		t.Fatalf("expected forced-reasoning title budget %d, got %d in body %+v", threadTitleForcedReasoningMaxTokens, maxTokens, body)
+	if maxTokens != threadTitleMaxTokens {
+		t.Fatalf("expected inherited-profile title budget %d, got %d in body %+v", threadTitleMaxTokens, maxTokens, body)
 	}
 
 	if _, ok := body["thinking"]; ok {
@@ -612,35 +612,15 @@ func TestThreadTitleMaxTokensForProfileKeepsCompactDefault(t *testing.T) {
 	if got := threadTitleMaxTokensForProfile(&ModelProfileConfig{ModelID: "deepseek-v4-flash"}); got != threadTitleMaxTokens {
 		t.Fatalf("expected default title budget %d, got %d", threadTitleMaxTokens, got)
 	}
-	if got := threadTitleMaxTokensForProfile(&ModelProfileConfig{ModelID: "kimi-for-coding-highspeed"}); got != threadTitleForcedReasoningMaxTokens {
-		t.Fatalf("expected Kimi forced-reasoning budget %d, got %d", threadTitleForcedReasoningMaxTokens, got)
-	}
 	if got := threadTitleGenerationTimeoutForProfile(&ModelProfileConfig{ModelID: "deepseek-v4-flash"}); got != threadTitleGenerationTimeout {
 		t.Fatalf("expected default title timeout %s, got %s", threadTitleGenerationTimeout, got)
 	}
-	if got := threadTitleGenerationTimeoutForProfile(&ModelProfileConfig{ModelID: "kimi-for-coding"}); got != threadTitleForcedReasoningTimeout {
-		t.Fatalf("expected Kimi forced-reasoning timeout %s, got %s", threadTitleForcedReasoningTimeout, got)
+	reasoningProfile := &ModelProfileConfig{ProviderID: "custom", ModelID: "any-model", ReasoningEffort: "high", MaxTokens: 256}
+	if got := threadTitleMaxTokensForProfile(reasoningProfile); got != 256 {
+		t.Fatalf("expected capability-routed reasoning budget 256, got %d", got)
 	}
-	for _, modelID := range []string{"k3", "k3-256k"} {
-		profile := &ModelProfileConfig{ProviderID: "kimi-coding-plan", ModelID: modelID}
-		if got := threadTitleMaxTokensForProfile(profile); got != threadTitleForcedReasoningMaxTokens {
-			t.Fatalf("expected Kimi Coding Plan %s title budget %d, got %d", modelID, threadTitleForcedReasoningMaxTokens, got)
-		}
-		if got := threadTitleGenerationTimeoutForProfile(profile); got != threadTitleForcedReasoningTimeout {
-			t.Fatalf("expected Kimi Coding Plan %s title timeout %s, got %s", modelID, threadTitleForcedReasoningTimeout, got)
-		}
-	}
-	for _, providerID := range []string{"volcengine-agent-plan", "volcengine"} {
-		profile := &ModelProfileConfig{ProviderID: providerID, ModelID: "ark-code-latest"}
-		if got := threadTitleMaxTokensForProfile(profile); got != threadTitleForcedReasoningMaxTokens {
-			t.Fatalf("expected %s ark-code-latest title budget %d, got %d", providerID, threadTitleForcedReasoningMaxTokens, got)
-		}
-		if got := threadTitleGenerationTimeoutForProfile(profile); got != threadTitleForcedReasoningTimeout {
-			t.Fatalf("expected %s ark-code-latest title timeout %s, got %s", providerID, threadTitleForcedReasoningTimeout, got)
-		}
-	}
-	if got := threadTitleMaxTokensForProfile(&ModelProfileConfig{ProviderID: "openai", ModelID: "ark-code-latest"}); got != threadTitleMaxTokens {
-		t.Fatalf("unexpected forced-reasoning budget for unrelated ark-code-latest provider: %d", got)
+	if got := threadTitleGenerationTimeoutForProfile(reasoningProfile); got != threadTitleForcedReasoningTimeout {
+		t.Fatalf("expected capability-routed reasoning timeout %s, got %s", threadTitleForcedReasoningTimeout, got)
 	}
 }
 

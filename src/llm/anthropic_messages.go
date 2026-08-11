@@ -23,12 +23,25 @@ func newAnthropicTransport() *anthropicTransport {
 // --- 请求结构 ---
 
 type anthropicRequest struct {
-	Model     string             `json:"model"`
-	System    string             `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-	Tools     []anthropicTool    `json:"tools,omitempty"`
-	MaxTokens int                `json:"max_tokens"`
-	Stream    bool               `json:"stream,omitempty"`
+	Model       string             `json:"model"`
+	System      interface{}        `json:"system,omitempty"`
+	Messages    []anthropicMessage `json:"messages"`
+	Tools       []anthropicTool    `json:"tools,omitempty"`
+	MaxTokens   int                `json:"max_tokens"`
+	Temperature *float64           `json:"temperature,omitempty"`
+	Thinking    *anthropicThinking `json:"thinking,omitempty"`
+	Stream      bool               `json:"stream,omitempty"`
+}
+
+type anthropicThinking struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
+}
+
+type anthropicTextBlock struct {
+	Type         string                 `json:"type"`
+	Text         string                 `json:"text"`
+	CacheControl map[string]interface{} `json:"cache_control,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -51,12 +64,13 @@ type anthropicResponse struct {
 }
 
 type anthropicContentBlock struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text,omitempty"`
-	Thinking string          `json:"thinking,omitempty"`
-	ID       string          `json:"id,omitempty"`
-	Name     string          `json:"name,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
+	Signature string          `json:"signature,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
 }
 
 // --- Stream 结构 ---
@@ -73,6 +87,7 @@ type anthropicStreamDelta struct {
 	Type        string `json:"type,omitempty"`
 	Text        string `json:"text,omitempty"`
 	Thinking    string `json:"thinking,omitempty"`
+	Signature   string `json:"signature,omitempty"`
 	PartialJSON string `json:"partial_json,omitempty"`
 	StopReason  string `json:"stop_reason,omitempty"`
 }
@@ -94,6 +109,13 @@ func buildAnthropicMessagesURL(baseURL string) string {
 	return baseURL + "/v1/messages"
 }
 
+func anthropicMessagesURL(cfg Config) string {
+	if endpoint := strings.TrimSpace(cfg.InferenceEndpoint); endpoint != "" {
+		return endpoint
+	}
+	return buildAnthropicMessagesURL(cfg.BaseURL)
+}
+
 func (t *anthropicTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*Response, error) {
 	prepared, err := prepareAnthropicRequest(cfg, req, false)
 	if err != nil {
@@ -103,26 +125,70 @@ func (t *anthropicTransport) Invoke(ctx stdctx.Context, cfg Config, req Request)
 }
 
 func prepareAnthropicRequest(cfg Config, req Request, stream bool) (PreparedRequest, error) {
-	url := buildAnthropicMessagesURL(cfg.BaseURL)
-	messages, err := buildAnthropicMessages(req)
+	req = applyRequestPolicy(cfg, req)
+	url := anthropicMessagesURL(cfg)
+	cacheMetadata, _ := promptCacheMetadata(cfg, req)
+	messages, err := buildAnthropicMessagesForConfig(cfg, req, cacheMetadata)
 	if err != nil {
 		return PreparedRequest{}, err
 	}
 
+	maxTokens := resolveMaxTokens(cfg, req)
+	thinking := anthropicThinkingForRequest(req, maxTokens)
+	temperature := resolveTemperature(cfg, req)
+	if thinking != nil {
+		temperature = nil
+	}
 	anthropicReq := anthropicRequest{
-		Model:     resolveModel(cfg, req),
-		System:    req.SystemPrompt,
-		Messages:  messages,
-		Tools:     convertToolsToAnthropic(req.Tools),
-		MaxTokens: resolveMaxTokens(cfg, req),
-		Stream:    stream,
+		Model:       resolveModel(cfg, req),
+		System:      anthropicSystemContent(req.SystemPrompt, cacheMetadata),
+		Messages:    messages,
+		Tools:       convertToolsToAnthropic(req.Tools),
+		MaxTokens:   maxTokens,
+		Temperature: temperature,
+		Thinking:    thinking,
+		Stream:      stream,
 	}
 
 	body, err := json.Marshal(anthropicReq)
 	if err != nil {
 		return PreparedRequest{}, fmt.Errorf("failed to marshal request: %w", err)
 	}
-	return newPreparedRequest(req, ProtocolAnthropicMessages, url, body, stream), nil
+	prepared := newPreparedRequest(req, ProtocolAnthropicMessages, url, body, stream)
+	prepared.Cache = cacheMetadata
+	return prepared, nil
+}
+
+func anthropicThinkingForRequest(req Request, maxTokens int) *anthropicThinking {
+	if req.DisableReasoning || strings.TrimSpace(req.ReasoningPolicy) == "" || maxTokens <= 1024 {
+		return nil
+	}
+	budget := 8192
+	switch strings.ToLower(strings.TrimSpace(req.ReasoningPolicy)) {
+	case "low":
+		budget = 1024
+	case "max":
+		budget = maxTokens / 2
+	}
+	if budget >= maxTokens {
+		budget = maxTokens - 1
+	}
+	if budget < 1024 {
+		return nil
+	}
+	return &anthropicThinking{Type: "enabled", BudgetTokens: budget}
+}
+
+func anthropicSystemContent(systemPrompt string, cache PreparedPromptCache) interface{} {
+	if strings.TrimSpace(systemPrompt) == "" {
+		return nil
+	}
+	if cache.Mode != PromptCacheExplicit {
+		return systemPrompt
+	}
+	block := anthropicTextBlock{Type: "text", Text: systemPrompt}
+	block.CacheControl = map[string]interface{}{"type": "ephemeral"}
+	return []anthropicTextBlock{block}
 }
 
 func (t *anthropicTransport) invokePrepared(ctx stdctx.Context, cfg Config, prepared PreparedRequest) (*Response, error) {
@@ -131,7 +197,7 @@ func (t *anthropicTransport) invokePrepared(ctx stdctx.Context, cfg Config, prep
 		return nil, requestBuildError(err)
 	}
 
-	applyAuthHeaders(httpReq, cfg, ProtocolAnthropicMessages)
+	applyAuthHeaders(httpReq, cfg, prepared.Protocol)
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
@@ -151,6 +217,13 @@ func (t *anthropicTransport) invokePrepared(ctx stdctx.Context, cfg Config, prep
 	result, responseErr := responseFromAnthropic(anthropicResp)
 	if result != nil {
 		result.ProviderRequestID = providerRequestID(resp)
+		result.RateLimitObservation = providerRateLimitObservation(resp)
+		for _, block := range anthropicResp.Content {
+			if block.Type == "thinking" {
+				result.ProviderOpaqueState = anthropicOpaqueState(cfg, prepared, block.Thinking, block.Signature)
+				break
+			}
+		}
 	}
 	return result, responseErr
 }
@@ -176,7 +249,7 @@ func (t *anthropicTransport) streamPrepared(ctx stdctx.Context, cfg Config, prep
 		return nil, requestBuildError(err)
 	}
 
-	applyAuthHeaders(httpReq, cfg, ProtocolAnthropicMessages)
+	applyAuthHeaders(httpReq, cfg, prepared.Protocol)
 
 	resp, err := streamHTTPClient.Do(httpReq)
 	if err != nil {
@@ -188,8 +261,9 @@ func (t *anthropicTransport) streamPrepared(ctx stdctx.Context, cfg Config, prep
 		return nil, requestFailedError(resp)
 	}
 
-	state := newAnthropicStreamState(observer)
+	state := newAnthropicStreamState(cfg, prepared, observer)
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	currentEvent := ""
 	watchdog := newStreamIdleWatchdog(cancel, streamIdleTimeoutForPrepared(prepared))
 	defer watchdog.Stop()
@@ -225,6 +299,8 @@ func (t *anthropicTransport) streamPrepared(ctx stdctx.Context, cfg Config, prep
 	result, responseErr := state.response()
 	if result != nil {
 		result.ProviderRequestID = providerRequestID(resp)
+		result.RateLimitObservation = providerRateLimitObservation(resp)
+		state.emitEvent(StreamEvent{Type: StreamEventCompleted, Usage: result.Usage, StopReason: result.StopReason})
 	}
 	return result, responseErr
 }
@@ -232,6 +308,12 @@ func (t *anthropicTransport) streamPrepared(ctx stdctx.Context, cfg Config, prep
 // --- 消息转换 ---
 
 func buildAnthropicMessages(req Request) ([]anthropicMessage, error) {
+	return buildAnthropicMessagesForConfig(Config{Protocol: ProtocolAnthropicMessages}, req, PreparedPromptCache{
+		EndpointContract: EndpointContractAnthropicMessages,
+	})
+}
+
+func buildAnthropicMessagesForConfig(cfg Config, req Request, cache PreparedPromptCache) ([]anthropicMessage, error) {
 	var messages []anthropicMessage
 
 	if len(req.Messages) > 0 {
@@ -243,12 +325,16 @@ func buildAnthropicMessages(req Request) ([]anthropicMessage, error) {
 		for i < len(req.Messages) {
 			msg := req.Messages[i]
 
-			if msg.Role == context.RoleAssistant && len(msg.ToolCalls) > 0 {
+			if msg.Role == context.RoleAssistant {
 				messages = append(messages, anthropicMessage{
 					Role:    "assistant",
-					Content: buildAssistantContentBlocks(msg),
+					Content: buildAssistantContentBlocks(cfg, req, cache, msg),
 				})
 
+				if len(msg.ToolCalls) == 0 {
+					i++
+					continue
+				}
 				var toolResults []map[string]interface{}
 				i++
 				for i < len(req.Messages) && req.Messages[i].Role == context.RoleTool {
@@ -318,8 +404,13 @@ func anthropicToolResultContent(message context.Message) interface{} {
 	return blocks
 }
 
-func buildAssistantContentBlocks(msg context.Message) []map[string]interface{} {
-	blocks := make([]map[string]interface{}, 0, len(msg.ToolCalls)+1)
+func buildAssistantContentBlocks(cfg Config, req Request, cache PreparedPromptCache, msg context.Message) []map[string]interface{} {
+	blocks := make([]map[string]interface{}, 0, len(msg.ToolCalls)+2)
+	if thinking, signature, ok := replayAnthropicThinking(cfg, req, cache, msg.ProviderOpaqueState); ok {
+		blocks = append(blocks, map[string]interface{}{
+			"type": "thinking", "thinking": thinking, "signature": signature,
+		})
+	}
 	if msg.Content != "" {
 		blocks = append(blocks, map[string]interface{}{
 			"type": "text",
@@ -335,6 +426,35 @@ func buildAssistantContentBlocks(msg context.Message) []map[string]interface{} {
 		})
 	}
 	return blocks
+}
+
+type anthropicThinkingState struct {
+	Thinking  string `json:"thinking"`
+	Signature string `json:"signature"`
+}
+
+func replayAnthropicThinking(cfg Config, req Request, cache PreparedPromptCache, state *context.ProviderOpaqueMessageState) (string, string, bool) {
+	if state == nil || strings.TrimSpace(state.Content) == "" {
+		return "", "", false
+	}
+	revision := cfg.CredentialRevision
+	if revision == 0 {
+		revision = 1
+	}
+	if state.ProviderID != normalizeProviderID(cfg.ProviderID) ||
+		state.ProfileID != strings.TrimSpace(cfg.ProfileID) ||
+		state.CredentialRevision != revision ||
+		state.ModelID != resolveModel(cfg, req) ||
+		state.ProtocolFamily != string(ProtocolAnthropicMessages) ||
+		state.EndpointContractID != cache.EndpointContract {
+		return "", "", false
+	}
+	var payload anthropicThinkingState
+	if err := json.Unmarshal([]byte(state.Content), &payload); err != nil ||
+		strings.TrimSpace(payload.Thinking) == "" || strings.TrimSpace(payload.Signature) == "" {
+		return "", "", false
+	}
+	return payload.Thinking, payload.Signature, true
 }
 
 func parseToolUseInput(arguments string) map[string]interface{} {
@@ -387,19 +507,16 @@ func anthropicUserContent(msg context.Message) interface{} {
 		})
 	}
 	for _, attachment := range msg.Attachments {
-		if attachment.Kind != "image" ||
-			strings.TrimSpace(attachment.MimeType) == "" ||
+		if strings.TrimSpace(attachment.MimeType) == "" ||
 			strings.TrimSpace(attachment.DataBase64) == "" {
 			continue
 		}
-		blocks = append(blocks, map[string]interface{}{
-			"type": "image",
-			"source": map[string]interface{}{
-				"type":       "base64",
-				"media_type": attachment.MimeType,
-				"data":       attachment.DataBase64,
-			},
-		})
+		source := map[string]interface{}{"type": "base64", "media_type": attachment.MimeType, "data": attachment.DataBase64}
+		if attachment.Kind == "image" {
+			blocks = append(blocks, map[string]interface{}{"type": "image", "source": source})
+		} else if attachment.MimeType == "application/pdf" {
+			blocks = append(blocks, map[string]interface{}{"type": "document", "source": source})
+		}
 	}
 	if len(blocks) == 0 {
 		return msg.Content
@@ -467,9 +584,12 @@ func responseFromAnthropic(resp anthropicResponse) (*Response, error) {
 // --- Anthropic Stream State ---
 
 type anthropicStreamState struct {
+	cfg         Config
+	prepared    PreparedRequest
 	observer    StreamObserver
 	content     strings.Builder
 	thinking    strings.Builder
+	signature   strings.Builder
 	toolCalls   []ToolCall
 	currentTool *anthropicToolAccumulator
 	usage       *Usage
@@ -483,8 +603,9 @@ type anthropicToolAccumulator struct {
 	arguments strings.Builder
 }
 
-func newAnthropicStreamState(observer StreamObserver) *anthropicStreamState {
+func newAnthropicStreamState(cfg Config, prepared PreparedRequest, observer StreamObserver) *anthropicStreamState {
 	return &anthropicStreamState{
+		cfg: cfg, prepared: prepared,
 		observer:  observer,
 		toolCalls: make([]ToolCall, 0),
 	}
@@ -511,6 +632,9 @@ func (s *anthropicStreamState) consume(data string, event string) {
 
 	case "message_delta":
 		s.usage = mergeAnthropicResponseUsage(s.usage, anthropicResponseUsage(streamEvent.Usage))
+		if s.usage != nil {
+			s.emitEvent(StreamEvent{Type: StreamEventUsage, Usage: s.usage})
+		}
 		if streamEvent.Delta != nil && streamEvent.Delta.StopReason != "" {
 			s.stopReason = strings.TrimSpace(streamEvent.Delta.StopReason)
 		}
@@ -522,6 +646,8 @@ func (s *anthropicStreamState) consume(data string, event string) {
 				index: streamEvent.Index,
 				name:  streamEvent.ContentBlock.Name,
 			}
+			started := ToolCall{ID: streamEvent.ContentBlock.ID, Name: streamEvent.ContentBlock.Name}
+			s.emitEvent(StreamEvent{Type: StreamEventToolCallStart, ToolCall: &started})
 		}
 
 	case "content_block_delta":
@@ -533,6 +659,10 @@ func (s *anthropicStreamState) consume(data string, event string) {
 			if streamEvent.Delta.Thinking != "" {
 				s.thinking.WriteString(streamEvent.Delta.Thinking)
 				s.emit(streamEvent.Delta.Thinking, true)
+			}
+		case "signature_delta":
+			if streamEvent.Delta.Signature != "" {
+				s.signature.WriteString(streamEvent.Delta.Signature)
 			}
 		case "text_delta":
 			if streamEvent.Delta.Text != "" {
@@ -557,11 +687,13 @@ func (s *anthropicStreamState) consume(data string, event string) {
 			if id == "" {
 				id = fmt.Sprintf("tool_index_%d", s.currentTool.index)
 			}
-			s.toolCalls = append(s.toolCalls, ToolCall{
+			completed := ToolCall{
 				ID:    id,
 				Name:  s.currentTool.name,
 				Input: s.currentTool.arguments.String(),
-			})
+			}
+			s.toolCalls = append(s.toolCalls, completed)
+			s.emitEvent(StreamEvent{Type: StreamEventToolCallDone, ToolCall: &completed})
 			s.currentTool = nil
 		}
 	}
@@ -571,11 +703,23 @@ func (s *anthropicStreamState) emit(content string, isThinking bool) {
 	if s.observer.OnContent != nil {
 		s.observer.OnContent(content, isThinking)
 	}
+	eventType := StreamEventTextDelta
+	if isThinking {
+		eventType = StreamEventReasoningDelta
+	}
+	s.emitEvent(StreamEvent{Type: eventType, Content: content, IsThinking: isThinking})
 }
 
 func (s *anthropicStreamState) emitToolCallDelta(delta ToolCallDelta) {
 	if s.observer.OnToolCallDelta != nil {
 		s.observer.OnToolCallDelta(delta)
+	}
+	s.emitEvent(StreamEvent{Type: StreamEventToolCallDelta, ToolCallDelta: &delta})
+}
+
+func (s *anthropicStreamState) emitEvent(event StreamEvent) {
+	if s.observer.OnEvent != nil {
+		s.observer.OnEvent(event)
 	}
 }
 
@@ -589,10 +733,36 @@ func (s *anthropicStreamState) response() (*Response, error) {
 		StopReason:       s.stopReason,
 		MaxOutputReached: isMaxOutputStopReason(s.stopReason),
 	}
+	result.ProviderOpaqueState = anthropicOpaqueState(s.cfg, s.prepared, result.Thinking, s.signature.String())
 	if !responseHasSignal(result) {
 		return nil, ErrEmptyResponse
 	}
 	return result, nil
+}
+
+func anthropicOpaqueState(cfg Config, prepared PreparedRequest, thinking string, signature string) *context.ProviderOpaqueMessageState {
+	if strings.TrimSpace(thinking) == "" || strings.TrimSpace(signature) == "" {
+		return nil
+	}
+	payload, err := json.Marshal(anthropicThinkingState{Thinking: thinking, Signature: signature})
+	if err != nil {
+		return nil
+	}
+	var requestBody struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(prepared.Body, &requestBody); err != nil {
+		return nil
+	}
+	revision := cfg.CredentialRevision
+	if revision == 0 {
+		revision = 1
+	}
+	return &context.ProviderOpaqueMessageState{
+		ProviderID: normalizeProviderID(cfg.ProviderID), ProfileID: strings.TrimSpace(cfg.ProfileID),
+		CredentialRevision: revision, ModelID: requestBody.Model, ProtocolFamily: string(ProtocolAnthropicMessages),
+		EndpointContractID: prepared.Cache.EndpointContract, Content: string(payload),
+	}
 }
 
 func anthropicResponseUsage(raw *anthropicUsage) *Usage {

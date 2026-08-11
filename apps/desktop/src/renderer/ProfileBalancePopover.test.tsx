@@ -30,6 +30,12 @@ const mockBalances: ModelProfileBalance[] = [
     displayName: "火山 Agent Plan",
     status: "unsupported",
     error: "当前供应商暂不支持查询用量",
+    localUsage: {
+      kind: "usage",
+      metrics: [
+        { name: "Awaken 本地缓存输入", value: 12, unit: "tokens" },
+      ],
+    },
   },
 ];
 
@@ -155,6 +161,12 @@ describe("ProfileBalancePopover", () => {
     expect(document.querySelector('[data-provider-brand="volcengine"]')).not.toBeNull();
     expect(document.querySelector(".aw-profile-balance-panel__detail")?.textContent).toContain(
       "当前供应商暂不支持查询用量",
+    );
+    expect(document.querySelector(".aw-profile-balance-panel__detail")?.textContent).toContain(
+      "Awaken 本地记录",
+    );
+    expect(document.querySelector(".aw-profile-balance-panel__detail")?.textContent).toContain(
+      "12",
     );
   });
 

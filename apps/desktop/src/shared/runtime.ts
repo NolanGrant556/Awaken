@@ -825,6 +825,15 @@ export type ModelProviderWire = {
   display_name: string;
   base_url: string;
   protocol: string;
+  supported_protocols?: string[];
+  official_protocols?: string[];
+  protocol_base_urls?: Record<string, string>;
+  protocol_auth_schemes?: Record<string, string>;
+  catalog_strategy?: ModelCatalogStrategy;
+  catalog_url?: string;
+  catalog_auth_scheme?: string;
+  catalog_source?: ModelCatalogSource;
+  catalog_observed_at?: string;
   auth_scheme: string;
   key_env_name: string;
   default_model: string;
@@ -839,6 +848,8 @@ export type ModelProviderWire = {
 };
 
 export type ModelCapabilityWire = {
+  supported_protocols?: string[];
+  max_input_tokens?: number;
   context_window?: number;
   max_output_tokens?: number;
   default_max_tokens?: number;
@@ -847,23 +858,59 @@ export type ModelCapabilityWire = {
   supports_native_pdf?: boolean;
   supports_video?: boolean;
   supports_tools?: ModelToolCapabilityStatus;
+  supports_prompt_cache?: boolean;
   reasoning_effort?: ReasoningEffortCapabilityWire;
+  field_sources?: Partial<Record<ModelCapabilityField, ModelCapabilityFieldSourceWire>>;
 };
 
-export type ModelAccessType = "coding_plan" | "api" | "agent_plan";
+export type ModelCatalogStrategy = "openai" | "anthropic" | "google" | "none";
+
+export type ModelCatalogSource = "provider_api" | "official_manifest" | "unavailable";
+
+export type ModelCapabilityField =
+  | "supportedProtocols"
+  | "maxInputTokens"
+  | "contextWindow"
+  | "maxOutputTokens"
+  | "supportsVision"
+  | "supportsNativePDF"
+  | "supportsVideo"
+  | "supportsTools"
+  | "supportsPromptCache"
+  | "reasoningEffort";
+
+export type ModelCapabilitySource = "provider_api" | "official_manifest" | "user_override" | "unknown";
+
+export type ModelCapabilityFieldSourceWire = {
+  source: ModelCapabilitySource;
+  observed_at?: string;
+};
+
+export type ModelCapabilityFieldSource = {
+  source: ModelCapabilitySource;
+  observedAt?: string;
+};
+
+export type ModelAccessType = "coding_plan" | "api" | "agent_plan" | "custom";
 
 export type ModelSelectorKind = "model" | "endpoint";
+
+export type ModelPurpose = "thread_title" | "compact_summary" | "subagent" | "scheduled_task";
+
+export type ModelPurposeRouting = Partial<Record<ModelPurpose, string>>;
 
 export type ReasoningEffortLevel = "low" | "high" | "max";
 
 export type ReasoningEffortCapabilityWire = {
   levels: ReasoningEffortLevel[];
   default_level: ReasoningEffortLevel;
+  display_labels?: Partial<Record<ReasoningEffortLevel, string>>;
 };
 
 export type ReasoningEffortCapability = {
   levels: ReasoningEffortLevel[];
   defaultLevel: ReasoningEffortLevel;
+  displayLabels?: Partial<Record<ReasoningEffortLevel, string>>;
 };
 
 export type ModelToolCapabilityStatus = "ready" | "unsupported" | "unknown";
@@ -873,6 +920,13 @@ export type ModelProvider = {
   displayName: string;
   baseURL: string;
   protocol: string;
+  supportedProtocols?: string[];
+  officialProtocols: string[];
+  protocolBaseURLs: Record<string, string>;
+  protocolAuthSchemes: Record<string, string>;
+  catalogStrategy?: ModelCatalogStrategy;
+  catalogSource: ModelCatalogSource;
+  catalogObservedAt?: string;
   authScheme: string;
   keyEnvName: string;
   defaultModel: string;
@@ -887,6 +941,8 @@ export type ModelProvider = {
 };
 
 export type ModelCapability = {
+  supportedProtocols?: string[];
+  maxInputTokens?: number;
   contextWindow?: number;
   maxOutputTokens?: number;
   defaultMaxTokens?: number;
@@ -895,7 +951,9 @@ export type ModelCapability = {
   supportsNativePDF?: boolean;
   supportsVideo?: boolean;
   supportsTools?: ModelToolCapabilityStatus;
+  supportsPromptCache?: boolean;
   reasoningEffort?: ReasoningEffortCapability;
+  fieldSources?: Partial<Record<ModelCapabilityField, ModelCapabilityFieldSource>>;
 };
 
 export const DEFAULT_CONTEXT_OUTPUT_RESERVE = 16_000;
@@ -927,11 +985,14 @@ export type ModelProfileAdvancedWire = {
   max_tokens?: number;
   endpoint_id?: string;
   prompt_cache_key?: string;
+  inference_endpoint?: string;
+  max_input_tokens?: number;
   context_window?: number;
   supports_vision?: boolean;
   supports_native_pdf?: boolean;
   supports_video?: boolean;
   supports_tools?: ModelToolCapabilityStatus;
+  supports_prompt_cache?: boolean;
   default_reasoning_effort?: ReasoningEffortLevel;
 };
 
@@ -940,11 +1001,14 @@ export type ModelProfileAdvanced = {
   maxTokens?: number;
   endpointId?: string;
   promptCacheKey?: string;
+  inferenceEndpoint?: string;
+  maxInputTokens?: number;
   contextWindow?: number;
   supportsVision?: boolean;
   supportsNativePDF?: boolean;
   supportsVideo?: boolean;
   supportsTools?: ModelToolCapabilityStatus;
+  supportsPromptCache?: boolean;
   defaultReasoningEffort?: ReasoningEffortLevel;
 };
 
@@ -976,6 +1040,8 @@ export type RuntimeModelProfileSummaryWire = {
   auth_scheme: string;
   has_key: boolean;
   masked_key?: string;
+  has_management_key?: boolean;
+  masked_management_key?: string;
   enabled: boolean;
   is_default: boolean;
   profile_status: ModelCredentialStatus;
@@ -999,6 +1065,8 @@ export type RuntimeModelProfileSummary = {
   authScheme: string;
   hasKey: boolean;
   maskedKey?: string;
+  hasManagementKey?: boolean;
+  maskedManagementKey?: string;
   enabled: boolean;
   isDefault: boolean;
   profileStatus: ModelCredentialStatus;
@@ -1016,6 +1084,7 @@ export type ModelProfileSaveRequest = {
   protocol?: string;
   authScheme?: string;
   apiKey?: string;
+  managementApiKey?: string;
   enabled?: boolean;
   isDefault?: boolean;
   advanced?: ModelProfileAdvanced;
@@ -1024,6 +1093,11 @@ export type ModelProfileSaveRequest = {
 
 export type ModelProfileTestResult = {
   ok: boolean;
+  message: string;
+};
+
+export type ModelCatalogRefreshResult = {
+  provider: ModelProvider;
   message: string;
 };
 
@@ -1188,9 +1262,16 @@ export type ModelBalanceQuotaWire = {
   reset_at?: string;
 };
 
+export type ModelUsageMetricWire = {
+  name: string;
+  value: number;
+  unit: "tokens" | "requests" | "usd";
+};
+
 export type ModelBalanceDetailWire =
   | { kind: "amount"; amounts: ModelBalanceAmountWire[] }
-  | { kind: "quota"; quotas: ModelBalanceQuotaWire[] };
+  | { kind: "quota"; quotas: ModelBalanceQuotaWire[] }
+  | { kind: "usage"; metrics: ModelUsageMetricWire[]; console_url?: string };
 
 export type ModelProfileBalanceWire = {
   profile_id: string;
@@ -1200,6 +1281,7 @@ export type ModelProfileBalanceWire = {
   status: ModelBalanceStatusWire;
   fetched_at?: string;
   detail?: ModelBalanceDetailWire;
+  local_usage?: Extract<ModelBalanceDetailWire, { kind: "usage" }>;
   error?: string;
   credential_issue?: "unreadable";
 };
@@ -1228,7 +1310,8 @@ export type ModelBalanceQuota = {
 
 export type ModelBalanceDetail =
   | { kind: "amount"; amounts: ModelBalanceAmount[] }
-  | { kind: "quota"; quotas: ModelBalanceQuota[] };
+  | { kind: "quota"; quotas: ModelBalanceQuota[] }
+  | { kind: "usage"; metrics: Array<{ name: string; value: number; unit: "tokens" | "requests" | "usd" }>; consoleURL?: string };
 
 export type ModelProfileBalance = {
   profileId: string;
@@ -1238,6 +1321,7 @@ export type ModelProfileBalance = {
   status: ModelBalanceStatus;
   fetchedAt?: string;
   detail?: ModelBalanceDetail;
+  localUsage?: Extract<ModelBalanceDetail, { kind: "usage" }>;
   error?: string;
   credentialIssue?: "unreadable";
 };
@@ -1332,19 +1416,23 @@ export type ModelProfileRunConfigWire = {
   endpoint_selector?: string;
   model_selector_kind?: ModelSelectorKind;
   base_url?: string;
+  inference_endpoint?: string;
   protocol?: string;
   auth_scheme?: string;
   api_key?: string;
   temperature?: number;
   max_tokens?: number;
   context_window?: number;
+  max_input_tokens?: number;
   prompt_cache_key?: string;
   credential_revision?: number;
   supports_vision?: boolean;
   supports_native_pdf?: boolean;
   supports_video?: boolean;
   supports_tools?: ModelToolCapabilityStatus;
+  supports_prompt_cache?: boolean;
   reasoning_effort?: ReasoningEffortLevel;
+  purpose_profiles?: Partial<Record<ModelPurpose, ModelProfileRunConfigWire>>;
 };
 
 export type ModelProfileRunConfig = {
@@ -1356,19 +1444,23 @@ export type ModelProfileRunConfig = {
   endpointSelector?: string;
   modelSelectorKind?: ModelSelectorKind;
   baseURL?: string;
+  inferenceEndpoint?: string;
   protocol?: string;
   authScheme?: string;
   apiKey?: string;
   temperature?: number;
   maxTokens?: number;
   contextWindow?: number;
+  maxInputTokens?: number;
   promptCacheKey?: string;
   credentialRevision?: number;
   supportsVision?: boolean;
   supportsNativePDF?: boolean;
   supportsVideo?: boolean;
   supportsTools?: ModelToolCapabilityStatus;
+  supportsPromptCache?: boolean;
   reasoningEffort?: ReasoningEffortLevel;
+  purposeProfiles?: Partial<Record<ModelPurpose, ModelProfileRunConfig>>;
 };
 
 export type WorkspacePickResult =
@@ -1951,6 +2043,8 @@ export type AwakenBridge = {
   enableSkill: (id: string) => Promise<void>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
+  getModelPurposeRouting: () => Promise<ModelPurposeRouting>;
+  saveModelPurposeRouting: (routing: ModelPurposeRouting) => Promise<ModelPurposeRouting>;
   getAgentPlanAccount: () => Promise<AgentPlanAccount>;
   saveAgentPlanAccount: (
     request: AgentPlanAccountSaveRequest,
@@ -1976,6 +2070,9 @@ export type AwakenBridge = {
     request: ModelProfileSaveRequest,
   ) => Promise<DesktopOperationResult<ModelReasoningCapabilityTestResult>>;
   syncModelCapabilities: () => Promise<ModelProvider[]>;
+  refreshModelCatalog: (
+    request: ModelProfileSaveRequest,
+  ) => Promise<DesktopOperationResult<ModelCatalogRefreshResult>>;
   getModelProfileBalances: () => Promise<ModelProfileBalancesResult>;
   pickAttachments: (defaultPath?: string) => Promise<AttachmentPickResult>;
   pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
@@ -2173,6 +2270,17 @@ export function normalizeModelProvider(provider: ModelProviderWire): ModelProvid
     displayName: provider.display_name,
     baseURL: provider.base_url,
     protocol: provider.protocol,
+    supportedProtocols: provider.supported_protocols?.length
+      ? [...provider.supported_protocols]
+      : [provider.protocol],
+    officialProtocols: provider.official_protocols
+      ? [...provider.official_protocols]
+      : [provider.protocol],
+    protocolBaseURLs: { ...(provider.protocol_base_urls ?? {}) },
+    protocolAuthSchemes: { ...(provider.protocol_auth_schemes ?? {}) },
+    catalogStrategy: provider.catalog_strategy ?? "openai",
+    catalogSource: provider.catalog_source ?? "official_manifest",
+    catalogObservedAt: provider.catalog_observed_at,
     authScheme: provider.auth_scheme,
     keyEnvName: provider.key_env_name,
     defaultModel: provider.default_model,
@@ -2203,6 +2311,10 @@ export function normalizeModelCapability(
   capability: ModelCapabilityWire,
 ): ModelCapability {
   return {
+    supportedProtocols: capability.supported_protocols?.length
+      ? [...capability.supported_protocols]
+      : undefined,
+    maxInputTokens: capability.max_input_tokens,
     contextWindow: capability.context_window,
     maxOutputTokens: capability.max_output_tokens,
     defaultMaxTokens: capability.default_max_tokens,
@@ -2211,11 +2323,25 @@ export function normalizeModelCapability(
     supportsNativePDF: capability.supports_native_pdf,
     supportsVideo: capability.supports_video,
     supportsTools: capability.supports_tools,
+    supportsPromptCache: capability.supports_prompt_cache,
     reasoningEffort: capability.reasoning_effort
       ? {
           levels: [...capability.reasoning_effort.levels],
           defaultLevel: capability.reasoning_effort.default_level,
+          displayLabels: capability.reasoning_effort.display_labels
+            ? { ...capability.reasoning_effort.display_labels }
+            : undefined,
         }
+      : undefined,
+    fieldSources: capability.field_sources
+      ? Object.fromEntries(
+          Object.entries(capability.field_sources).map(([field, value]) => [
+            field,
+            value
+              ? { source: value.source, observedAt: value.observed_at }
+              : undefined,
+          ]),
+        )
       : undefined,
   };
 }
@@ -2229,11 +2355,14 @@ export function normalizeModelProfileAdvanced(
     maxTokens: advanced.max_tokens,
     endpointId: advanced.endpoint_id,
     promptCacheKey: advanced.prompt_cache_key,
+    inferenceEndpoint: advanced.inference_endpoint,
+    maxInputTokens: advanced.max_input_tokens,
     contextWindow: advanced.context_window,
     supportsVision: advanced.supports_vision,
     supportsNativePDF: advanced.supports_native_pdf,
     supportsVideo: advanced.supports_video,
     supportsTools: advanced.supports_tools,
+    supportsPromptCache: advanced.supports_prompt_cache,
     defaultReasoningEffort: advanced.default_reasoning_effort,
   };
 }
@@ -2247,11 +2376,14 @@ export function toModelProfileAdvancedWire(
     max_tokens: advanced.maxTokens,
     endpoint_id: advanced.endpointId,
     prompt_cache_key: advanced.promptCacheKey,
+    inference_endpoint: advanced.inferenceEndpoint,
+    max_input_tokens: advanced.maxInputTokens,
     context_window: advanced.contextWindow,
     supports_vision: advanced.supportsVision,
     supports_native_pdf: advanced.supportsNativePDF,
     supports_video: advanced.supportsVideo,
     supports_tools: advanced.supportsTools,
+    supports_prompt_cache: advanced.supportsPromptCache,
     default_reasoning_effort: advanced.defaultReasoningEffort,
   };
 }
@@ -2283,6 +2415,8 @@ export function normalizeModelProfileSummary(
     authScheme: profile.auth_scheme,
     hasKey: profile.has_key,
     maskedKey: profile.masked_key,
+    hasManagementKey: profile.has_management_key,
+    maskedManagementKey: profile.masked_management_key,
     enabled: profile.enabled,
     isDefault: profile.is_default,
     profileStatus: profile.profile_status,
@@ -2305,19 +2439,30 @@ export function normalizeModelProfileRunConfig(
     endpoint_selector: profile.endpointSelector,
     model_selector_kind: profile.modelSelectorKind,
     base_url: profile.baseURL,
+    inference_endpoint: profile.inferenceEndpoint,
     protocol: profile.protocol,
     auth_scheme: profile.authScheme,
     api_key: profile.apiKey,
     temperature: profile.temperature,
     max_tokens: profile.maxTokens,
     context_window: profile.contextWindow,
+    max_input_tokens: profile.maxInputTokens,
     prompt_cache_key: profile.promptCacheKey,
     credential_revision: profile.credentialRevision,
     supports_vision: profile.supportsVision,
     supports_native_pdf: profile.supportsNativePDF,
     supports_video: profile.supportsVideo,
     supports_tools: profile.supportsTools,
+    supports_prompt_cache: profile.supportsPromptCache,
     reasoning_effort: profile.reasoningEffort,
+    purpose_profiles: profile.purposeProfiles
+      ? Object.fromEntries(
+          Object.entries(profile.purposeProfiles).map(([purpose, value]) => [
+            purpose,
+            value ? normalizeModelProfileRunConfig(value) : undefined,
+          ]),
+        )
+      : undefined,
   };
 }
 
@@ -2381,6 +2526,13 @@ export function normalizeModelBalanceDetail(detail: ModelBalanceDetailWire): Mod
       amounts: detail.amounts.map(normalizeModelBalanceAmount),
     };
   }
+  if (detail.kind === "usage") {
+    return {
+      kind: "usage",
+      metrics: detail.metrics.map((metric) => ({ ...metric })),
+      consoleURL: detail.console_url,
+    };
+  }
   return {
     kind: "quota",
     quotas: detail.quotas.map(normalizeModelBalanceQuota),
@@ -2398,6 +2550,9 @@ export function normalizeModelProfileBalance(
     status: normalizeModelBalanceStatus(balance.status),
     fetchedAt: balance.fetched_at,
     detail: balance.detail ? normalizeModelBalanceDetail(balance.detail) : undefined,
+    localUsage: balance.local_usage
+      ? normalizeModelBalanceDetail(balance.local_usage) as Extract<ModelBalanceDetail, { kind: "usage" }>
+      : undefined,
     error: balance.error,
     credentialIssue: balance.credential_issue,
   };

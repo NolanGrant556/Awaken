@@ -891,11 +891,23 @@ func modelUsageRecordFromWire(value *ModelUsageRecord) agentcore.ModelUsageRecor
 		RawUsage:      rawModelUsageRecordFromWire(value.RawUsage),
 		UsageComplete: value.UsageComplete, CalculatedCostUSD: cloneFloatPointer(value.CalculatedCostUSD),
 		PricingSnapshot: pricingSnapshotFromWire(value.PricingSnapshot), Currency: value.Currency,
-		ProviderRequestID: value.ProviderRequestID, LatencyMS: value.LatencyMS,
+		ProviderRequestID: value.ProviderRequestID, RateLimitObservation: rateLimitObservationFromWire(value.RateLimitObservation), LatencyMS: value.LatencyMS,
 		Status: agentcore.ModelUsageStatus(value.Status), ErrorCode: value.ErrorCode,
 	}
 	usage.CompletedAt, _ = time.Parse(time.RFC3339Nano, value.CompletedAt)
 	return usage
+}
+
+func rateLimitObservationFromWire(value *RateLimitObservation) *agentcore.RateLimitObservation {
+	if value == nil {
+		return nil
+	}
+	result := &agentcore.RateLimitObservation{
+		RequestLimit: value.RequestLimit, RequestRemaining: value.RequestRemaining, RequestReset: value.RequestReset,
+		TokenLimit: value.TokenLimit, TokenRemaining: value.TokenRemaining, TokenReset: value.TokenReset,
+	}
+	result.ObservedAt, _ = time.Parse(time.RFC3339Nano, value.ObservedAt)
+	return result
 }
 
 func pricingSnapshotFromWire(value *PricingSnapshot) *agentcore.PricingSnapshot {

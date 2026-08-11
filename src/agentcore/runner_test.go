@@ -258,6 +258,7 @@ func TestRunnerAnthropicWriteAutoAllowFeedsBack(t *testing.T) {
 	defer server.Close()
 
 	cfg := testAgentConfigWithWorkspace(server.URL+"/anthropic", 3, root)
+	cfg.ModelConfig.Protocol = "anthropic_messages"
 	var sawAuthRequired bool
 	agent := NewAgent(cfg)
 	answer, err := agent.RunStreamWithEvents(context.Background(), "create via anthropic Write", EventSinkFunc(func(event AwakenEvent) {
@@ -596,6 +597,7 @@ data: {"type":"message_stop"}`,
 	defer server.Close()
 
 	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	cfg.ModelConfig.Protocol = "anthropic_messages"
 	var gotEvents []AwakenEvent
 	recorder := &failingRecorder{}
 	agent := NewAgent(cfg)
@@ -822,6 +824,7 @@ data: {"type":"message_stop"}`,
 	defer server.Close()
 
 	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	cfg.ModelConfig.Protocol = "anthropic_messages"
 	conv := convcontext.NewConversation(nil)
 	conv.UserInput("use tool")
 	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
@@ -900,6 +903,7 @@ data: {"type":"message_stop"}`,
 	defer server.Close()
 
 	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	cfg.ModelConfig.Protocol = "anthropic_messages"
 	cfg.Workspace.Root = workspaceRoot
 	cfg.Workspace.ReadableRoots = []string{workspaceRoot}
 	cfg.Workspace.WritableRoots = []string{workspaceRoot}
@@ -1471,8 +1475,8 @@ func TestRunnerPropagatesXAPIKeyAuthScheme(t *testing.T) {
 	if got := capturedHeaders.Get("x-api-key"); got != "test-key" {
 		t.Fatalf("expected x-api-key 'test-key', got %q", got)
 	}
-	if got := capturedHeaders.Get("anthropic-version"); got != "2023-06-01" {
-		t.Fatalf("expected anthropic-version '2023-06-01', got %q", got)
+	if got := capturedHeaders.Get("anthropic-version"); got != "" {
+		t.Fatalf("x-api-key alone must not imply Anthropic protocol, got anthropic-version %q", got)
 	}
 }
 
@@ -1551,6 +1555,7 @@ func TestRunnerCancelInjectsSyntheticToolResults(t *testing.T) {
 	})
 
 	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	cfg.ModelConfig.Protocol = "anthropic_messages"
 	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1688,6 +1693,7 @@ data: {"type":"message_stop"}`,
 	defer server.Close()
 
 	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	cfg.ModelConfig.Protocol = "anthropic_messages"
 	conv := convcontext.NewConversation(nil)
 	conv.UserInput("use cancel tool")
 	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
@@ -1999,6 +2005,7 @@ data: {"type":"message_stop"}`,
 	defer server.Close()
 
 	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	cfg.ModelConfig.Protocol = "anthropic_messages"
 	conv := convcontext.NewConversation(nil)
 	conv.UserInput("use cancel then fail tool")
 	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
@@ -2090,6 +2097,7 @@ data: {"type":"message_stop"}`,
 	defer server.Close()
 
 	cfg := testAgentConfig(server.URL+"/anthropic", 3)
+	cfg.ModelConfig.Protocol = "anthropic_messages"
 	conv := convcontext.NewConversation(nil)
 	conv.UserInput("use xml tool")
 	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))

@@ -32,6 +32,7 @@ const (
 
 var (
 	ErrNotFound         = errors.New("memory: record not found")
+	ErrAmbiguousRef     = errors.New("memory: reference is ambiguous")
 	ErrRevisionConflict = errors.New("memory: revision conflict")
 	ErrDuplicate        = errors.New("memory: possible duplicate record")
 	ErrSensitive        = errors.New("memory: sensitive or disallowed content")
@@ -134,6 +135,53 @@ func (s *Store) Get(id string) (Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.getLocked(strings.TrimSpace(id))
+}
+
+// ResolveReference converts the canonical mem_* identity or one exact legacy
+// topic filename from a model-visible MEMORY.md index into the canonical
+// record identity. Legacy aliases are resolved only against records already
+// admitted by this Store; arbitrary paths and ambiguous aliases fail closed.
+func (s *Store) ResolveReference(reference string) (Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	reference = strings.TrimSpace(reference)
+	if reference == "" {
+		return Record{}, ErrNotFound
+	}
+	if strings.HasPrefix(reference, "mem_") {
+		return s.getLocked(reference)
+	}
+	if filepath.IsAbs(reference) || strings.ContainsAny(reference, `/\\`) || reference == "." || reference == ".." {
+		return Record{}, ErrNotFound
+	}
+
+	legacyFilename := filepath.Base(reference)
+	legacyStem := strings.TrimSuffix(legacyFilename, filepath.Ext(legacyFilename))
+	var matches []Record
+	for _, scope := range []Scope{ScopeProject, ScopeUser} {
+		root, rootErr := s.root(scope)
+		if rootErr != nil {
+			continue
+		}
+		records, err := s.scanRoot(root, scope, true)
+		if err != nil {
+			return Record{}, err
+		}
+		for _, record := range records {
+			filename := filepath.Base(record.Path)
+			if filename == legacyFilename || strings.TrimSuffix(filename, filepath.Ext(filename)) == legacyStem {
+				matches = append(matches, record)
+			}
+		}
+	}
+	if len(matches) == 0 {
+		return Record{}, ErrNotFound
+	}
+	if len(matches) > 1 {
+		return Record{}, ErrAmbiguousRef
+	}
+	return matches[0], nil
 }
 
 func (s *Store) Search(query string, scope *Scope, types []Type, limit int) ([]Record, error) {
@@ -632,7 +680,10 @@ func buildIndexData(records []Record) []byte {
 	sort.SliceStable(records, func(i, j int) bool { return records[i].UpdatedAt.After(records[j].UpdatedAt) })
 	var buf bytes.Buffer
 	for _, record := range records {
-		line := fmt.Sprintf("- [%s](%s) — %s\n", markdownLabel(record.Name), filepath.Base(record.Path), oneLine(record.Description))
+		line := fmt.Sprintf(
+			"- [%s](%s) — memory_id: `%s`; scope: `%s`; type: `%s`; revision: `%d` — %s\n",
+			markdownLabel(record.Name), filepath.Base(record.Path), record.MemoryID, record.Scope, record.Type, record.Revision, oneLine(record.Description),
+		)
 		if buf.Len()+len(line) > maxIndexBytes || bytes.Count(buf.Bytes(), []byte("\n")) >= maxIndexLines {
 			break
 		}

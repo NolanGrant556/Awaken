@@ -256,9 +256,9 @@ func (s *Service) RunNow(taskID, idempotencyKey string) (Execution, error) {
 	if scheduler == nil {
 		return Execution{}, errors.New("scheduledtask: scheduler is not running")
 	}
-	if scheduler.IsActive(taskID) {
-		return Execution{}, ErrTaskAlreadyRunning
-	}
+	// Scheduler.RunManual resolves the caller's idempotency key before checking
+	// the active-run guard. A lost 202 may therefore be retried even while the
+	// original worker is still unwinding; only a distinct key conflicts.
 	return scheduler.RunManual(task, idempotencyKey)
 }
 

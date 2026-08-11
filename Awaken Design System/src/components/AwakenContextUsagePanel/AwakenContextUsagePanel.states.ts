@@ -84,6 +84,7 @@ export const AwakenContextUsagePanelStates: AwakenContextUsagePanelState[] = [
         status: "succeeded",
         cacheMode: "automatic_prefix",
         cacheKeyApplied: false,
+        inputTokens: 92_100,
         cachedInputTokens: 78_400,
         uncachedInputTokens: 13_700,
         outputTokens: 1_240,

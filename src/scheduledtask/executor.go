@@ -206,7 +206,7 @@ func (e *RunServiceExecutor) resolveProfile(profileID string) (*runtime.ModelPro
 	if e.Profiles == nil {
 		return nil, &ExecError{Code: ErrorCodeModelProfileUnavailable, Message: "model profile store unavailable"}
 	}
-	resolved, err := e.Profiles.Resolve(profileID)
+	resolved, err := e.Profiles.ResolveForPurpose("scheduled_task", profileID)
 	if err != nil {
 		return nil, &ExecError{Code: ErrorCodeModelProfileUnavailable, Message: "model profile is not ready"}
 	}

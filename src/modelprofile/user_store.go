@@ -37,17 +37,20 @@ type ProfileSummary struct {
 type ResolvedProfile struct {
 	ProfileSummary
 	BaseURL               string
+	InferenceEndpoint     string
 	Protocol              string
 	AuthScheme            string
 	APIKey                string
 	Temperature           float64
 	MaxTokens             int
 	ContextWindow         int
+	MaxInputTokens        int
 	CredentialRevision    uint64
 	SupportsVision        bool
 	SupportsNativePDF     bool
 	SupportsVideo         bool
 	SupportsTools         string
+	SupportsPromptCache   bool
 	SupportsComputerUse   bool
 	ReasoningEffort       string
 	ReasoningEffortLevels []string `json:"-"`
@@ -118,9 +121,31 @@ func (s *UserStore) Resolve(profileID string) (ResolvedProfile, error) {
 	return profiles[0], nil
 }
 
+// ResolveForPurpose applies an explicit pin first, then an optional Host-owned
+// purpose default, then the normal ready default. An explicit unavailable pin
+// fails closed; a stale optional purpose default safely falls back.
+func (s *UserStore) ResolveForPurpose(purpose, explicitProfileID string) (ResolvedProfile, error) {
+	if explicit := strings.TrimSpace(explicitProfileID); explicit != "" {
+		return s.Resolve(explicit)
+	}
+	raw, err := os.ReadFile(filepath.Join(s.root, "config", "models.json"))
+	if err == nil {
+		var file storedProfileFile
+		if json.Unmarshal(raw, &file) == nil {
+			if routed := strings.TrimSpace(file.PurposeRoutes[strings.TrimSpace(purpose)]); routed != "" {
+				if resolved, routeErr := s.Resolve(routed); routeErr == nil {
+					return resolved, nil
+				}
+			}
+		}
+	}
+	return s.Resolve("")
+}
+
 type storedProfileFile struct {
-	Version  int             `json:"version"`
-	Profiles []storedProfile `json:"profiles"`
+	Version       int               `json:"version"`
+	Profiles      []storedProfile   `json:"profiles"`
+	PurposeRoutes map[string]string `json:"purposeRoutes,omitempty"`
 }
 
 type storedProfile struct {
@@ -149,11 +174,14 @@ type storedProfileAdvanced struct {
 	Temperature            *float64 `json:"temperature"`
 	MaxTokens              *int     `json:"maxTokens"`
 	EndpointID             string   `json:"endpointId"`
+	InferenceEndpoint      string   `json:"inferenceEndpoint"`
+	MaxInputTokens         *int     `json:"maxInputTokens"`
 	ContextWindow          *int     `json:"contextWindow"`
 	SupportsVision         *bool    `json:"supportsVision"`
 	SupportsNativePDF      *bool    `json:"supportsNativePDF"`
 	SupportsVideo          *bool    `json:"supportsVideo"`
 	SupportsTools          string   `json:"supportsTools"`
+	SupportsPromptCache    *bool    `json:"supportsPromptCache"`
 	SupportsComputerUse    *bool    `json:"supportsComputerUse"`
 	DefaultReasoningEffort string   `json:"defaultReasoningEffort"`
 }
@@ -249,6 +277,7 @@ type capabilityCacheScope struct {
 }
 
 type cachedModelCapability struct {
+	MaxInputTokens      *int                       `json:"max_input_tokens"`
 	ContextWindow       *int                       `json:"context_window"`
 	MaxOutputTokens     *int                       `json:"max_output_tokens"`
 	DefaultMaxTokens    *int                       `json:"default_max_tokens"`
@@ -257,6 +286,7 @@ type cachedModelCapability struct {
 	SupportsNativePDF   *bool                      `json:"supports_native_pdf"`
 	SupportsVideo       *bool                      `json:"supports_video"`
 	SupportsTools       *string                    `json:"supports_tools"`
+	SupportsPromptCache *bool                      `json:"supports_prompt_cache"`
 	SupportsComputerUse *bool                      `json:"supports_computer_use"`
 	ReasoningEffort     *ReasoningEffortCapability `json:"reasoning_effort"`
 }
@@ -276,7 +306,7 @@ func (s *UserStore) loadReady() ([]ResolvedProfile, error) {
 	if err := json.Unmarshal(raw, &file); err != nil {
 		return nil, fmt.Errorf("parse model profiles: %w", err)
 	}
-	if file.Version != 1 && file.Version != 2 {
+	if file.Version != 1 && file.Version != 2 && file.Version != 3 {
 		return nil, fmt.Errorf("unsupported model profile version %d", file.Version)
 	}
 	env, err := readEnvFile(filepath.Join(s.root, ".env"))
@@ -291,7 +321,8 @@ func (s *UserStore) loadReady() ([]ResolvedProfile, error) {
 		providerByID[provider.ID] = provider
 	}
 
-	// Desktop read compatibility keeps the later duplicate provider+model.
+	// Desktop read compatibility keeps the later duplicate full profile identity
+	// (provider + normalized base URL + selector + protocol).
 	// Build in reverse, then restore file order.
 	seenIdentity := make(map[string]struct{})
 	reversed := make([]ResolvedProfile, 0, len(file.Profiles))
@@ -308,6 +339,9 @@ func (s *UserStore) loadReady() ([]ResolvedProfile, error) {
 			continue
 		}
 		resolved := normalizeStoredProfile(stored, provider, nil)
+		if resolved.ID == "" {
+			continue
+		}
 		keyName := "AWAKEN_API_KEY_" + resolved.ID
 		effectiveRevision := resolved.CredentialRevision
 		if effectiveRevision == 0 {
@@ -336,13 +370,18 @@ func (s *UserStore) loadReady() ([]ResolvedProfile, error) {
 			resolved = normalizeStoredProfile(stored, provider, cached)
 			resolved.CredentialRevision = effectiveRevision
 		}
-		identity := resolved.ProviderID + "\x00" + resolved.CapabilityModelID
+		identity := strings.Join([]string{
+			resolved.ProviderID,
+			normalizeCapabilityBaseURL(resolved.BaseURL),
+			resolved.ModelID,
+			strings.ToLower(strings.TrimSpace(resolved.Protocol)),
+		}, "\x00")
 		if _, duplicate := seenIdentity[identity]; duplicate {
 			continue
 		}
 		seenIdentity[identity] = struct{}{}
 		key := strings.TrimSpace(env[keyName])
-		if key == "" {
+		if key == "" && !strings.EqualFold(resolved.AuthScheme, "none") {
 			continue
 		}
 		resolved.APIKey = key
@@ -380,16 +419,28 @@ func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cac
 	if provider.ID == "volcengine" && baseURL == "https://ark.cn-beijing.volces.com/api/v3" {
 		baseURL = provider.BaseURL
 	}
-	if provider.ID == "volcengine-agent-plan" {
-		baseURL = provider.BaseURL
-	}
-	protocol := strings.TrimSpace(stored.Protocol)
+	protocol := strings.ToLower(strings.TrimSpace(stored.Protocol))
 	if protocol == "" {
 		protocol = provider.Protocol
 	}
-	authScheme := strings.TrimSpace(stored.AuthScheme)
+	protocolWasRetired := false
+	if !validProtocolForProvider(protocol, provider) {
+		if !knownProtocol(protocol) {
+			return ResolvedProfile{}
+		}
+		protocol = provider.Protocol
+		protocolWasRetired = true
+		baseURL = provider.BaseURL
+	}
+	authScheme := strings.ToLower(strings.TrimSpace(stored.AuthScheme))
 	if authScheme == "" {
 		authScheme = provider.AuthScheme
+	}
+	if protocolWasRetired {
+		authScheme = provider.AuthScheme
+	}
+	if !validAuthScheme(authScheme) {
+		return ResolvedProfile{}
 	}
 	displayName := strings.TrimSpace(stored.DisplayName)
 	if displayName == "" {
@@ -401,23 +452,24 @@ func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cac
 		capability = mergeCachedCapability(capability, cached)
 		hasCapability = true
 	}
-	contextWindow := 1_000_000
-	maxTokens := 8192
-	if provider.ID == "volcengine" {
-		contextWindow = 256_000
-		maxTokens = 32_000
-	}
+	contextWindow := 0
+	maxTokens := 0
+	maxInputTokens := 0
 	temperature := float64(0)
 	supportsVision := false
 	supportsNativePDF := false
 	supportsVideo := false
-	supportsTools := "ready"
+	supportsTools := "unknown"
+	supportsPromptCache := false
 	supportsComputerUse := false
 	reasoningEffort := ""
 	var reasoningEffortLevels []string
 	if hasCapability {
 		if capability.ContextWindow > 0 {
 			contextWindow = capability.ContextWindow
+		}
+		if capability.MaxInputTokens > 0 {
+			maxInputTokens = capability.MaxInputTokens
 		}
 		if capability.DefaultMaxTokens > 0 {
 			maxTokens = capability.DefaultMaxTokens
@@ -429,10 +481,20 @@ func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cac
 		supportsNativePDF = capability.SupportsNativePDF
 		supportsVideo = capability.SupportsVideo
 		supportsComputerUse = capability.SupportsComputerUse
+		if capability.SupportsTools != "" {
+			supportsTools = capability.SupportsTools
+		}
+		supportsPromptCache = capability.SupportsPromptCache
 		if capability.ReasoningEffort != nil {
 			reasoningEffort = capability.ReasoningEffort.DefaultLevel
 			reasoningEffortLevels = append([]string(nil), capability.ReasoningEffort.Levels...)
 		}
+	}
+	// Native PDF is a protocol contract as well as a model capability. OpenAI's
+	// Responses API accepts input_file blocks; Chat-compatible providers do not
+	// inherit that fact merely because their native model API accepts PDFs.
+	if provider.ID == "openai" && protocol == "openai_responses" {
+		supportsNativePDF = true
 	}
 	if stored.Advanced.ContextWindow != nil && *stored.Advanced.ContextWindow > 0 {
 		contextWindow = *stored.Advanced.ContextWindow
@@ -445,24 +507,6 @@ func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cac
 		if hasCapability && capability.MaxOutputTokens > 0 && maxTokens > capability.MaxOutputTokens {
 			maxTokens = capability.MaxOutputTokens
 		}
-	}
-	if stored.Advanced.Temperature != nil {
-		temperature = *stored.Advanced.Temperature
-	}
-	if stored.Advanced.SupportsVision != nil {
-		supportsVision = *stored.Advanced.SupportsVision
-	}
-	if stored.Advanced.SupportsNativePDF != nil {
-		supportsNativePDF = *stored.Advanced.SupportsNativePDF
-	}
-	if stored.Advanced.SupportsVideo != nil {
-		supportsVideo = *stored.Advanced.SupportsVideo
-	}
-	if hasCapability && capability.ReasoningEffort != nil && slices.Contains(capability.ReasoningEffort.Levels, stored.Advanced.DefaultReasoningEffort) {
-		reasoningEffort = stored.Advanced.DefaultReasoningEffort
-	}
-	if stored.Advanced.SupportsComputerUse != nil {
-		supportsComputerUse = *stored.Advanced.SupportsComputerUse
 	}
 	revision := stored.CredentialRevision
 	if revision < 1 {
@@ -477,16 +521,19 @@ func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cac
 			IsDefault:   stored.IsDefault,
 		},
 		BaseURL:               baseURL,
+		InferenceEndpoint:     strings.TrimSpace(stored.Advanced.InferenceEndpoint),
 		Protocol:              protocol,
 		AuthScheme:            authScheme,
 		Temperature:           temperature,
 		MaxTokens:             maxTokens,
 		ContextWindow:         contextWindow,
+		MaxInputTokens:        maxInputTokens,
 		CredentialRevision:    revision,
 		SupportsVision:        supportsVision,
 		SupportsNativePDF:     supportsNativePDF,
 		SupportsVideo:         supportsVideo,
 		SupportsTools:         supportsTools,
+		SupportsPromptCache:   supportsPromptCache,
 		SupportsComputerUse:   supportsComputerUse,
 		ReasoningEffort:       reasoningEffort,
 		ReasoningEffortLevels: reasoningEffortLevels,
@@ -513,6 +560,9 @@ func mergeCachedCapability(base ModelCapability, cached *cachedModelCapability) 
 	if cached.ContextWindow != nil {
 		base.ContextWindow = *cached.ContextWindow
 	}
+	if cached.MaxInputTokens != nil {
+		base.MaxInputTokens = *cached.MaxInputTokens
+	}
 	if cached.MaxOutputTokens != nil {
 		base.MaxOutputTokens = *cached.MaxOutputTokens
 	}
@@ -534,13 +584,26 @@ func mergeCachedCapability(base ModelCapability, cached *cachedModelCapability) 
 	if cached.SupportsTools != nil {
 		base.SupportsTools = *cached.SupportsTools
 	}
+	if cached.SupportsPromptCache != nil {
+		base.SupportsPromptCache = *cached.SupportsPromptCache
+	}
 	if cached.SupportsComputerUse != nil {
 		base.SupportsComputerUse = *cached.SupportsComputerUse
 	}
 	if cached.ReasoningEffort != nil {
+		displayLabels := make(map[string]string)
+		if base.ReasoningEffort != nil {
+			for level, label := range base.ReasoningEffort.DisplayLabels {
+				displayLabels[level] = label
+			}
+		}
+		for level, label := range cached.ReasoningEffort.DisplayLabels {
+			displayLabels[level] = label
+		}
 		base.ReasoningEffort = &ReasoningEffortCapability{
-			Levels:       append([]string(nil), cached.ReasoningEffort.Levels...),
-			DefaultLevel: cached.ReasoningEffort.DefaultLevel,
+			Levels:        append([]string(nil), cached.ReasoningEffort.Levels...),
+			DefaultLevel:  cached.ReasoningEffort.DefaultLevel,
+			DisplayLabels: displayLabels,
 		}
 	}
 	return base
@@ -622,9 +685,33 @@ func capabilityEndpointContract(protocol string) string {
 		return "minimax_chatcompletion_v2"
 	case "anthropic_messages":
 		return "anthropic_messages_v1"
+	case "openai_responses":
+		return "openai_responses_v1"
 	default:
 		return "openai_chat_completions_v1"
 	}
+}
+
+func validProtocolForProvider(protocol string, provider Provider) bool {
+	if !knownProtocol(protocol) {
+		return false
+	}
+	if provider.ID == "minimax" && protocol == "minimax_chat" {
+		return true
+	}
+	allowed := provider.SupportedProtocols
+	if len(allowed) == 0 {
+		allowed = []string{provider.Protocol}
+	}
+	return slices.Contains(allowed, protocol)
+}
+
+func knownProtocol(protocol string) bool {
+	return protocol == "openai_chat" || protocol == "openai_responses" || protocol == "anthropic_messages" || protocol == "minimax_chat"
+}
+
+func validAuthScheme(authScheme string) bool {
+	return slices.Contains([]string{"bearer", "x-api-key", "api-key", "x-goog-api-key", "none"}, authScheme)
 }
 
 func readAgentPlanAccount(path string) (storedAgentPlanAccount, error) {

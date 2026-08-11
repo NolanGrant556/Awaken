@@ -64,6 +64,30 @@ func TestManagerSpawnWaitAndDurableOrdering(t *testing.T) {
 	}
 }
 
+func TestManagerUsesHostResolvedModelProfileIdentity(t *testing.T) {
+	started := make(chan TaskSnapshot, 1)
+	manager := NewManager(context.Background(), Config{
+		ModelProfileID: "profile-purpose-subagent",
+		Starter: func(_ context.Context, request StartRequest) (string, error) {
+			started <- request.Task
+			return "done", nil
+		},
+	})
+	task, err := manager.Spawn(context.Background(), SpawnRequest{
+		Description: "inspect", Prompt: "inspect", AgentType: "explore",
+		WorkspaceMode: "shared_readonly", ModelProfileID: "profile-untrusted-input",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.ModelProfileID != "profile-purpose-subagent" {
+		t.Fatalf("spawn identity=%q", task.ModelProfileID)
+	}
+	if running := <-started; running.ModelProfileID != "profile-purpose-subagent" {
+		t.Fatalf("starter identity=%q", running.ModelProfileID)
+	}
+}
+
 func TestManagerRejectsNestedAndWritableSpawn(t *testing.T) {
 	manager := NewManager(context.Background(), Config{
 		Starter: func(context.Context, StartRequest) (string, error) { return "", nil },

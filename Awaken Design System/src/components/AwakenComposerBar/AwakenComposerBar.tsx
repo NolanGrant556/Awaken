@@ -38,7 +38,7 @@ function estimateComposerModelMenuHeight(
   hasFooterAction: boolean,
   showingEffortPanel: boolean,
 ): number {
-  if (showingEffortPanel) return 164;
+  if (showingEffortPanel) return 188;
   return Math.min(
     COMPOSER_MODEL_MENU_MAX_HEIGHT,
     16 + optionCount * 40 + (hasFooterAction ? 49 : 0),
@@ -55,6 +55,7 @@ export type ComposerBarMetaMenuItem = {
   effort?: {
     levels: Array<"low" | "high" | "max">;
     selectedLevel: "low" | "high" | "max";
+    displayLabels?: Partial<Record<"low" | "high" | "max", string>>;
     note?: string;
     onChange: (level: "low" | "high" | "max") => void;
   };
@@ -634,6 +635,8 @@ export function AwakenComposerBar({
     const pendingEffortProgress = pendingEffortIndex >= 0
       ? effortProgressAtIndex(pendingEffortIndex)
       : 0;
+    const effortLabel = (level: "low" | "high" | "max") =>
+      activeModelOption?.effort?.displayLabels?.[level] ?? level;
 
     function effortPointerInput(event: ReactPointerEvent<HTMLDivElement>): {
       progress: number;
@@ -852,7 +855,7 @@ export function AwakenComposerBar({
                   aria-valuemin={0}
                   aria-valuemax={Math.max(0, activeEffortLevels.length - 1)}
                   aria-valuenow={Math.max(0, pendingEffortIndex)}
-                  aria-valuetext={pendingModelEffort ?? undefined}
+                  aria-valuetext={pendingModelEffort ? effortLabel(pendingModelEffort) : undefined}
                   data-effort={pendingModelEffort ?? undefined}
                   style={
                     {
@@ -928,6 +931,16 @@ export function AwakenComposerBar({
                   <span className="composer-bar-model-effort-thumb-rail" aria-hidden="true">
                     <span className="composer-bar-model-effort-thumb" />
                   </span>
+                </div>
+                <div className="composer-bar-model-effort-labels" aria-hidden="true">
+                  {activeEffortLevels.map((level) => (
+                    <span
+                      key={level}
+                      data-selected={level === pendingModelEffort ? "true" : "false"}
+                    >
+                      {effortLabel(level)}
+                    </span>
+                  ))}
                 </div>
                 {activeModelOption.effort.note ? (
                   <p className="composer-bar-model-effort-note">{activeModelOption.effort.note}</p>

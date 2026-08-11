@@ -23,9 +23,13 @@ const (
 type Config struct {
 	MaxTasks      int
 	MaxConcurrent int
-	Starter       Starter
-	Persist       Persister
-	CancelGrace   time.Duration
+	// ModelProfileID is resolved by the Host for this run. When set it is the
+	// only profile identity recorded for spawned tasks; model-visible input
+	// cannot override it.
+	ModelProfileID string
+	Starter        Starter
+	Persist        Persister
+	CancelGrace    time.Duration
 }
 
 type managedTask struct {
@@ -105,6 +109,9 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 	}
 	if strings.TrimSpace(request.ParentAgentID) != "" && request.ParentAgentID != "root" {
 		return TaskSnapshot{}, runtimeError(ErrorBoundaryViolation, "only the root agent may spawn a subagent")
+	}
+	if modelProfileID := strings.TrimSpace(m.cfg.ModelProfileID); modelProfileID != "" {
+		request.ModelProfileID = modelProfileID
 	}
 
 	m.mu.Lock()

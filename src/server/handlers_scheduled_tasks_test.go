@@ -512,11 +512,19 @@ func TestScheduledTaskRunNowAndLastExecution(t *testing.T) {
 	}
 	executionID := execution["execution_id"].(string)
 
+	// A retry with the same key is idempotent even while the original worker is
+	// active; a distinct key is the case that conflicts with 409.
+	rec = doJSON(t, f.router, http.MethodPost, "/v1/scheduled-tasks/"+taskID+"/run", map[string]any{
+		"idempotency_key": "run-key-1",
+	})
+	if rec.Code != http.StatusAccepted || decodeBody(t, rec)["execution_id"] != executionID {
+		t.Fatalf("active idempotent retry did not replay execution: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
 	waitForTerminalExecution(t, f, taskID)
 
 	// A retry with the same key after completion returns the same execution,
-	// never a second one (a retry while still active conflicts with 409,
-	// covered by TestScheduledTaskRunConflictAndCancel).
+	// never a second one.
 	rec = doJSON(t, f.router, http.MethodPost, "/v1/scheduled-tasks/"+taskID+"/run", map[string]any{
 		"idempotency_key": "run-key-1",
 	})

@@ -16,6 +16,7 @@ import {
   AppearanceSettings,
   DesktopSettingsDialog,
   draftFromExistingProfile,
+  modelCandidatesForProtocol,
   toSaveRequest,
 } from "./DesktopSettingsDialog";
 
@@ -50,6 +51,7 @@ describe("DesktopSettingsDialog", () => {
     expect(html).toContain("Coding Plan");
     expect(html).toContain("API");
     expect(html).toContain("Agent Plan");
+    expect(html).toContain("自定义");
     expect(html).not.toContain("图片视频工具");
     expect(html).toContain("aw-model-settings__rail");
     expect(html).toContain("配置 Token");
@@ -171,7 +173,7 @@ describe("provider connection cards", () => {
     expect(html).toContain("model-provider-modal");
     expect(html).toContain('tabindex="-1"');
     expect(html).toContain("model-provider-form-footer");
-    expect(html).toContain("高级设置");
+    expect(html).not.toContain("高级设置");
     expect(html).not.toContain("Function Calling");
     expect(html).toContain("保存连接");
     expect(html).toContain("已连接");
@@ -185,6 +187,12 @@ describe("model credential recovery draft", () => {
       displayName: "DeepSeek",
       baseURL: "https://api.deepseek.com",
       protocol: "openai_chat",
+      supportedProtocols: ["openai_chat", "openai_responses", "anthropic_messages"],
+      officialProtocols: ["openai_chat"],
+      protocolBaseURLs: {},
+      protocolAuthSchemes: {},
+      catalogStrategy: "openai",
+      catalogSource: "official_manifest",
       authScheme: "bearer",
       keyEnvName: "DEEPSEEK_API_KEY",
       defaultModel: "deepseek-v4-pro",
@@ -218,5 +226,40 @@ describe("model credential recovery draft", () => {
       templateProfileId: undefined,
       apiKey: "replacement-key",
     });
+  });
+});
+
+describe("model protocol recommendations", () => {
+  it("filters only models with an explicit incompatible contract and keeps unknown models selectable", () => {
+    const provider = {
+      id: "example",
+      displayName: "Example",
+      baseURL: "https://example.com/v1",
+      protocol: "openai_chat",
+      supportedProtocols: ["openai_chat", "openai_responses"],
+      officialProtocols: ["openai_chat", "openai_responses"],
+      protocolBaseURLs: {},
+      protocolAuthSchemes: {},
+      catalogStrategy: "openai",
+      catalogSource: "provider_api",
+      authScheme: "bearer",
+      keyEnvName: "EXAMPLE_API_KEY",
+      defaultModel: "chat-only",
+      models: ["chat-only", "responses-ready", "future-model"],
+      docsURL: "",
+      apiDocsURL: "",
+      codingPreset: false,
+      endpointModel: false,
+      allowCustomModel: true,
+      modelCapabilities: {
+        "chat-only": { supportedProtocols: ["openai_chat"] },
+        "responses-ready": { supportedProtocols: ["openai_chat", "openai_responses"] },
+      },
+    } satisfies ModelProvider;
+
+    expect(modelCandidatesForProtocol(provider, "openai_responses")).toEqual([
+      "responses-ready",
+      "future-model",
+    ]);
   });
 });

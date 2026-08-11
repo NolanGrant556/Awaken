@@ -322,6 +322,19 @@
   pointer-events: none;
 }
 
+.configured-context-manual {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.configured-context-manual-note {
+  margin: 0;
+  color: var(--aw-text-tertiary);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .configured-context-scale-label,
 .configured-context-anchor {
   position: absolute;

@@ -44,8 +44,10 @@ import {
   type InstallSkillRequest,
   type InstallSkillResponse,
   type ModelProfileBalancesResult,
+  type ModelCatalogRefreshResult,
   type ModelReasoningCapabilityTestResult,
   type ModelProfileSaveRequest,
+  type ModelPurposeRouting,
   type ModelProfileTestResult,
   type ModelProvider,
   type MemoryDreamTask,
@@ -498,6 +500,10 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:list-model-providers") as Promise<ModelProvider[]>,
   listModelProfiles: () =>
     ipcRenderer.invoke("awaken:list-model-profiles") as Promise<RuntimeModelProfileSummary[]>,
+  getModelPurposeRouting: () =>
+    ipcRenderer.invoke("awaken:get-model-purpose-routing") as Promise<ModelPurposeRouting>,
+  saveModelPurposeRouting: (routing: ModelPurposeRouting) =>
+    ipcRenderer.invoke("awaken:save-model-purpose-routing", routing) as Promise<ModelPurposeRouting>,
   getAgentPlanAccount: () =>
     ipcRenderer.invoke("awaken:get-agent-plan-account") as Promise<AgentPlanAccount>,
   saveAgentPlanAccount: (request: AgentPlanAccountSaveRequest) =>
@@ -545,6 +551,10 @@ const bridge: AwakenBridge = {
     >,
   syncModelCapabilities: () =>
     ipcRenderer.invoke("awaken:sync-model-capabilities") as Promise<ModelProvider[]>,
+  refreshModelCatalog: (request: ModelProfileSaveRequest) =>
+    ipcRenderer.invoke("awaken:refresh-model-catalog", request) as Promise<
+      DesktopOperationResult<ModelCatalogRefreshResult>
+    >,
   getModelProfileBalances: () =>
     ipcRenderer.invoke("awaken:get-model-profile-balances") as Promise<ModelProfileBalancesResult>,
   pickAttachments: (defaultPath?: string) =>

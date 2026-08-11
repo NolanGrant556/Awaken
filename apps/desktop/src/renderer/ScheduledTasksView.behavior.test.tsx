@@ -30,8 +30,8 @@ const readyProfile: RuntimeModelProfileSummary = {
   displayName: "GPT 默认",
   modelId: "gpt-5",
   baseURL: "https://api.example.com",
-  protocol: "openai",
-  authScheme: "api_key",
+  protocol: "openai_chat",
+  authScheme: "bearer",
   hasKey: true,
   enabled: true,
   isDefault: true,
@@ -226,6 +226,8 @@ describe("ScheduledTasksView", () => {
       "kimi-for-coding",
       "k3",
     ]);
+    expect(profileOptions.some((option) => /Chat|Responses|Messages/.test(option.textContent ?? "")))
+      .toBe(false);
     expect(profileOptions.map((option) => option.dataset.value)).toEqual([
       "",
       "profile-kimi-standard",

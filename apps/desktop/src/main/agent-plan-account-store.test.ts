@@ -222,7 +222,7 @@ describe("AgentPlanAccountStore", () => {
     const provider = profiles
       .listProviders()
       .find((item) => item.id === "volcengine-agent-plan");
-    expect(provider?.models).toEqual(["ark-code-latest", "glm-5.2"]);
+    expect(provider?.models).toEqual(["ark-code-latest"]);
     expect(provider?.allow_custom_model).toBe(false);
     await expect(
       profiles.saveProfile({

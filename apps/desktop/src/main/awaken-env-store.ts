@@ -5,6 +5,7 @@ import path from "node:path";
 const PROFILE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const ENV_KEY_PREFIX = "AWAKEN_API_KEY_";
 const AGENT_PLAN_ENV_KEY_PREFIX = "AWAKEN_AGENT_PLAN_API_KEY_";
+const MANAGEMENT_ENV_KEY_PREFIX = "AWAKEN_MANAGEMENT_API_KEY_";
 const mutationQueuesByPath = new Map<string, Promise<void>>();
 
 export type AwakenEnvStoreErrorCode =
@@ -42,6 +43,14 @@ function keyForAgentPlanAccount(accountId: string): string {
     );
   }
   return `${AGENT_PLAN_ENV_KEY_PREFIX}${normalized}`;
+}
+
+function keyForManagementProvider(providerId: string): string {
+  const normalized = providerId.trim().toLowerCase();
+  if (normalized !== "openai" && normalized !== "anthropic") {
+    throw new AwakenEnvStoreError("invalid_profile_id", "该供应商不支持独立管理凭据。");
+  }
+  return `${MANAGEMENT_ENV_KEY_PREFIX}${normalized.toUpperCase()}`;
 }
 
 function decodeValue(raw: string): string {
@@ -125,6 +134,18 @@ export class AwakenEnvStore {
 
   async deleteAgentPlanKey(accountId: string): Promise<void> {
     return this.deleteValue(keyForAgentPlanAccount(accountId));
+  }
+
+  async getManagementKey(providerId: string): Promise<string> {
+    return this.getValue(keyForManagementProvider(providerId));
+  }
+
+  async setManagementKey(providerId: string, value: string): Promise<void> {
+    return this.setValue(keyForManagementProvider(providerId), value);
+  }
+
+  async deleteManagementKey(providerId: string): Promise<void> {
+    return this.deleteValue(keyForManagementProvider(providerId));
   }
 
   private async getValue(key: string): Promise<string> {

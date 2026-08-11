@@ -56,6 +56,10 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 	messages = projectMessagesForModelCapabilities(messages, rb.config.ModelConfig.Capabilities)
 	attributedTools := rb.attributeToolSchemas(tools)
 
+	compactModelConfig := rb.config.CompactModelConfig
+	if strings.TrimSpace(compactModelConfig.Model) == "" {
+		compactModelConfig = rb.config.ModelConfig
+	}
 	envelope := ContextEnvelope{
 		SystemBlocks: []ContextBlock{
 			{ID: "system_prompt", Kind: ContextContributionSystemPrompt, Content: staticContent},
@@ -70,7 +74,7 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		CacheKeys:          rb.buildCacheKeys(staticContent, tools, snapshot),
 		Deltas:             rb.buildContextDeltas(snapshot, tools),
 		Messages:           cloneContextMessages(messages),
-		CompactModelConfig: rb.config.ModelConfig,
+		CompactModelConfig: compactModelConfig,
 		Model:              rb.config.ModelConfig.Model,
 		Temperature:        rb.config.ModelConfig.Temperature,
 		MaxTokens:          rb.config.ModelConfig.MaxTokens,

@@ -151,6 +151,9 @@ function createMockRuntimeClient(): RuntimeClient {
     testModelProfile: vi.fn(async () => ({ ok: true, message: "" })),
     testAgentPlanReasoningCapability: vi.fn(async () => ({ ok: false, message: "" })),
     syncModelCapabilities: vi.fn(async () => []),
+    refreshModelCatalog: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
     getModelProfileBalances: vi.fn(async () => ({ balances: [] })),
     getRun: vi.fn(async () => ({
       runId: "",

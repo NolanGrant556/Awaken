@@ -61,6 +61,21 @@ describe("AwakenEnvStore", () => {
     await expect(store.getKey("profile-one")).resolves.toBe("");
   });
 
+  it("keeps inference, management, and Agent Plan credential namespaces separate", async () => {
+    const store = new AwakenEnvStore(awakenHome);
+    await store.setKey("openai-profile", "inference-secret");
+    await store.setManagementKey("openai", "management-secret");
+    await store.setAgentPlanKey("volcengine-agent-plan-default", "plan-secret");
+
+    await expect(store.getKey("openai-profile")).resolves.toBe("inference-secret");
+    await expect(store.getManagementKey("openai")).resolves.toBe("management-secret");
+    await expect(store.getAgentPlanKey("volcengine-agent-plan-default")).resolves.toBe("plan-secret");
+    const raw = await readFile(join(awakenHome, ".env"), "utf8");
+    expect(raw).toContain("AWAKEN_API_KEY_openai-profile=");
+    expect(raw).toContain("AWAKEN_MANAGEMENT_API_KEY_OPENAI=");
+    expect(raw).toContain("AWAKEN_AGENT_PLAN_API_KEY_volcengine-agent-plan-default=");
+  });
+
   it("rejects profile IDs that could inject another env assignment", async () => {
     const store = new AwakenEnvStore(awakenHome);
     await expect(store.setKey("bad\nINJECTED", "secret")).rejects.toMatchObject({

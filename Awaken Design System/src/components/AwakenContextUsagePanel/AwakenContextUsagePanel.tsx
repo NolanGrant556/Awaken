@@ -289,6 +289,14 @@ export const AwakenContextUsagePanel = forwardRef<
                   </dd>
                 </div>
               ) : null}
+              {latestModelUsage.inputTokens != null ? (
+                <div className="aw-context-usage-panel__row">
+                  <dt>输入 Token</dt>
+                  <dd>
+                    {formatContextUsageTokens(latestModelUsage.inputTokens)}
+                  </dd>
+                </div>
+              ) : null}
               {latestModelUsage.cachedInputTokens != null ? (
                 <div className="aw-context-usage-panel__row">
                   <dt>命中 Token</dt>

@@ -98,6 +98,117 @@ func TestUserStoreFailsClosedOnMalformedEnv(t *testing.T) {
 	}
 }
 
+func TestUserStoreKeepsSameModelAcrossProtocolsAndRoutesPurposes(t *testing.T) {
+	root := t.TempDir()
+	writeUserStoreFixture(t, root, `{
+  "version": 3,
+  "purposeRoutes": {"compact_summary":"openai-chat"},
+  "profiles": [
+    {"id":"openai-responses","providerId":"openai","modelId":"gpt-5.6-sol","protocol":"openai_responses","enabled":true,"isDefault":true},
+    {"id":"openai-chat","providerId":"openai","modelId":"gpt-5.6-sol","protocol":"openai_chat","enabled":true,"isDefault":false}
+  ]
+}`, "AWAKEN_API_KEY_openai-responses=responses-key\nAWAKEN_API_KEY_openai-chat=chat-key\n")
+
+	store := NewUserStore(root)
+	catalog, err := store.ListReady()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Profiles) != 2 {
+		t.Fatalf("same model profiles with different protocols were collapsed: %+v", catalog.Profiles)
+	}
+	compact, err := store.ResolveForPurpose("compact_summary", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compact.ID != "openai-chat" || compact.Protocol != "openai_chat" {
+		t.Fatalf("unexpected compact route: %+v", compact)
+	}
+	if _, err := store.ResolveForPurpose("scheduled_task", "missing-pin"); !errors.Is(err, ErrProfileUnavailable) {
+		t.Fatalf("explicit scheduled pin must fail closed, got %v", err)
+	}
+}
+
+func TestUserStoreKeepsNativePDFScopedToProtocolContract(t *testing.T) {
+	root := t.TempDir()
+	writeUserStoreFixture(t, root, `{
+  "version": 3,
+  "profiles": [
+    {"id":"openai-responses","providerId":"openai","modelId":"gpt-5.6-sol","protocol":"openai_responses","enabled":true,"isDefault":true},
+    {"id":"google-chat","providerId":"google","modelId":"gemini-3.6-flash","protocol":"openai_chat","enabled":true,"isDefault":false}
+  ]
+}`, "AWAKEN_API_KEY_openai-responses=responses-key\nAWAKEN_API_KEY_google-chat=google-key\n")
+
+	store := NewUserStore(root)
+	responses, err := store.Resolve("openai-responses")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !responses.SupportsNativePDF || !responses.SupportsPromptCache {
+		t.Fatalf("OpenAI Responses protocol capability missing: %+v", responses)
+	}
+	google, err := store.Resolve("google-chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !google.SupportsVision || google.SupportsNativePDF || google.SupportsVideo || google.SupportsPromptCache {
+		t.Fatalf("Google Chat compatibility inherited unsupported native features: %+v", google)
+	}
+}
+
+func TestUserStoreRejectsUnknownProtocol(t *testing.T) {
+	root := t.TempDir()
+	writeUserStoreFixture(t, root, `{
+  "version": 3,
+  "profiles": [
+    {"id":"unsafe","providerId":"custom","modelId":"model","baseURL":"https://gateway.test/v1","protocol":"guessed_protocol","enabled":true,"isDefault":true}
+  ]
+}`, "AWAKEN_API_KEY_unsafe=key\n")
+
+	if _, err := NewUserStore(root).Resolve(""); !errors.Is(err, ErrNoUsableProfile) {
+		t.Fatalf("unknown protocol must fail closed, got %v", err)
+	}
+}
+
+func TestUserStoreMigratesRetiredBuiltInProtocolToProviderContract(t *testing.T) {
+	root := t.TempDir()
+	writeUserStoreFixture(t, root, `{
+  "version": 3,
+  "profiles": [
+    {"id":"anthropic-legacy-chat","providerId":"anthropic","modelId":"claude-sonnet-5","baseURL":"https://api.anthropic.com/v1","protocol":"openai_chat","authScheme":"bearer","enabled":true,"isDefault":true}
+  ]
+}`, "AWAKEN_API_KEY_anthropic-legacy-chat=key\n")
+
+	profile, err := NewUserStore(root).Resolve("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Protocol != "anthropic_messages" || profile.BaseURL != "https://api.anthropic.com" || profile.AuthScheme != "x-api-key" {
+		t.Fatalf("retired protocol was not migrated to the provider contract: %+v", profile)
+	}
+}
+
+func TestUserStoreIgnoresLegacyCapabilitySwitchesButKeepsTokenLimits(t *testing.T) {
+	root := t.TempDir()
+	writeUserStoreFixture(t, root, `{
+  "version": 3,
+  "profiles": [
+    {"id":"google","providerId":"google","modelId":"gemini-3.6-flash","protocol":"openai_chat","enabled":true,"isDefault":true,"advanced":{"contextWindow":64000,"maxTokens":12000,"supportsVision":false,"supportsNativePDF":true,"supportsVideo":true,"supportsTools":"unsupported","supportsPromptCache":true}}
+  ]
+}`, "AWAKEN_API_KEY_google=key\n")
+
+	profile, err := NewUserStore(root).Resolve("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.ContextWindow != 64000 || profile.MaxTokens != 12000 {
+		t.Fatalf("user token limits were not preserved: %+v", profile)
+	}
+	if !profile.SupportsVision || profile.SupportsNativePDF || profile.SupportsVideo || profile.SupportsTools != "ready" || profile.SupportsPromptCache {
+		t.Fatalf("legacy capability switches overrode provider facts: %+v", profile)
+	}
+}
+
 func TestUserStoreRejectsAgentPlanMediaModelAsMainProfile(t *testing.T) {
 	root := t.TempDir()
 	writeUserStoreFixture(t, root, `{
@@ -122,6 +233,24 @@ func TestUserStoreRejectsAgentPlanMediaModelAsMainProfile(t *testing.T) {
 	}
 	if _, err := store.Resolve("agent-image"); !errors.Is(err, ErrProfileUnavailable) {
 		t.Fatalf("expected image model profile to be unavailable, got %v", err)
+	}
+}
+
+func TestMergeCachedCapabilityPreservesProviderNativeEffortLabels(t *testing.T) {
+	base := ModelCapability{
+		ReasoningEffort: effortWithLabels(
+			[]string{"low", "high", "max"},
+			"max",
+			map[string]string{"low": "low", "high": "medium", "max": "xhigh"},
+		),
+	}
+	cached := &cachedModelCapability{
+		ReasoningEffort: effort([]string{"low", "high", "max"}, "max"),
+	}
+
+	merged := mergeCachedCapability(base, cached)
+	if merged.ReasoningEffort == nil || merged.ReasoningEffort.DisplayLabels["high"] != "medium" || merged.ReasoningEffort.DisplayLabels["max"] != "xhigh" {
+		t.Fatalf("provider-native labels were dropped by an older cache: %+v", merged.ReasoningEffort)
 	}
 }
 

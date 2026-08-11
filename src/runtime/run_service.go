@@ -22,6 +22,7 @@ import (
 	"awaken/src/computer"
 	convcontext "awaken/src/context"
 	"awaken/src/desktopdata"
+	"awaken/src/llm"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
 	"awaken/src/subagentruntime"
@@ -147,28 +148,32 @@ type ComposerTokenPayload struct {
 }
 
 type ModelProfileConfig struct {
-	ProfileID           string  `json:"profile_id,omitempty"`
-	ProviderID          string  `json:"provider_id,omitempty"`
-	DisplayName         string  `json:"display_name,omitempty"`
-	ModelID             string  `json:"model_id,omitempty"`
-	CapabilityModelID   string  `json:"capability_model_id,omitempty"`
-	EndpointSelector    string  `json:"endpoint_selector,omitempty"`
-	ModelSelectorKind   string  `json:"model_selector_kind,omitempty"`
-	BaseURL             string  `json:"base_url,omitempty"`
-	Protocol            string  `json:"protocol,omitempty"`
-	AuthScheme          string  `json:"auth_scheme,omitempty"`
-	APIKey              string  `json:"api_key,omitempty"`
-	Temperature         float64 `json:"temperature,omitempty"`
-	MaxTokens           int     `json:"max_tokens,omitempty"`
-	ContextWindow       int     `json:"context_window,omitempty"`
-	PromptCacheKey      string  `json:"prompt_cache_key,omitempty"`
-	CredentialRevision  uint64  `json:"credential_revision,omitempty"`
-	SupportsVision      bool    `json:"supports_vision,omitempty"`
-	SupportsNativePDF   bool    `json:"supports_native_pdf,omitempty"`
-	SupportsVideo       bool    `json:"supports_video,omitempty"`
-	SupportsTools       string  `json:"supports_tools,omitempty"`
-	SupportsComputerUse bool    `json:"supports_computer_use,omitempty"`
-	ReasoningEffort     string  `json:"reasoning_effort,omitempty"`
+	ProfileID           string                         `json:"profile_id,omitempty"`
+	ProviderID          string                         `json:"provider_id,omitempty"`
+	DisplayName         string                         `json:"display_name,omitempty"`
+	ModelID             string                         `json:"model_id,omitempty"`
+	CapabilityModelID   string                         `json:"capability_model_id,omitempty"`
+	EndpointSelector    string                         `json:"endpoint_selector,omitempty"`
+	ModelSelectorKind   string                         `json:"model_selector_kind,omitempty"`
+	BaseURL             string                         `json:"base_url,omitempty"`
+	InferenceEndpoint   string                         `json:"inference_endpoint,omitempty"`
+	Protocol            string                         `json:"protocol,omitempty"`
+	AuthScheme          string                         `json:"auth_scheme,omitempty"`
+	APIKey              string                         `json:"api_key,omitempty"`
+	Temperature         float64                        `json:"temperature,omitempty"`
+	MaxTokens           int                            `json:"max_tokens,omitempty"`
+	ContextWindow       int                            `json:"context_window,omitempty"`
+	MaxInputTokens      int                            `json:"max_input_tokens,omitempty"`
+	PromptCacheKey      string                         `json:"prompt_cache_key,omitempty"`
+	CredentialRevision  uint64                         `json:"credential_revision,omitempty"`
+	SupportsVision      bool                           `json:"supports_vision,omitempty"`
+	SupportsNativePDF   bool                           `json:"supports_native_pdf,omitempty"`
+	SupportsVideo       bool                           `json:"supports_video,omitempty"`
+	SupportsTools       string                         `json:"supports_tools,omitempty"`
+	SupportsPromptCache bool                           `json:"supports_prompt_cache,omitempty"`
+	SupportsComputerUse bool                           `json:"supports_computer_use,omitempty"`
+	ReasoningEffort     string                         `json:"reasoning_effort,omitempty"`
+	PurposeProfiles     map[string]*ModelProfileConfig `json:"purpose_profiles,omitempty"`
 }
 
 type Executor interface {
@@ -874,10 +879,11 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			s.sessions[runID] = session
 			threadSnapshot = s.threads[threadID].snapshot()
 			s.mu.Unlock()
+			configureAgentModelRequestPurpose(agent, modelRequestPurposeForClient(req.Client))
 			if err := s.bindAgentRecorder(agent, session, threadID, runID, req.Client.SessionID, threadSnapshot.Label); err != nil {
 				return rollbackStart(err, false)
 			}
-			s.bindSubagentController(ctx, agent, session)
+			s.bindSubagentController(ctx, agent, session, subagentModelProfileID(req.ModelProfile))
 			if err := s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel); err != nil {
 				return rollbackStart(err, true)
 			}
@@ -966,6 +972,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	}
 	s.sessions[runID] = session
 	s.mu.Unlock()
+	configureAgentModelRequestPurpose(agent, modelRequestPurposeForClient(req.Client))
 
 	s.mu.RLock()
 	computerSettings := s.computerSettings
@@ -1024,7 +1031,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			return record.RecordID, nil
 		})
 	}
-	s.bindSubagentController(ctx, agent, session)
+	s.bindSubagentController(ctx, agent, session, subagentModelProfileID(req.ModelProfile))
 	createThreadErr := s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel)
 	if createThreadErr != nil {
 		return rollbackStart(createThreadErr, true)
@@ -1034,7 +1041,13 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		return rollbackStart(appendInputErr, true)
 	}
 	if shouldGenerateThreadTitle {
-		go s.scheduleThreadTitleGeneration(context.Background(), threadID, runID, trimmed, persistedAttachments, req.ComposerTokens, req.ModelProfile)
+		titleProfile := req.ModelProfile
+		if req.ModelProfile != nil {
+			if routed := req.ModelProfile.PurposeProfiles["thread_title"]; routed != nil {
+				titleProfile = routed
+			}
+		}
+		go s.scheduleThreadTitleGeneration(context.Background(), threadID, runID, trimmed, persistedAttachments, req.ComposerTokens, titleProfile)
 	}
 	executor := s.newExecutor(agent)
 	s.runWG.Add(1)
@@ -1161,12 +1174,17 @@ func (s *RunService) bindAgentRecorder(agent *agentcore.Agent, session *Session,
 	return nil
 }
 
-func (s *RunService) bindSubagentController(ctx context.Context, agent *agentcore.Agent, session *Session) {
+func (s *RunService) bindSubagentController(
+	ctx context.Context,
+	agent *agentcore.Agent,
+	session *Session,
+	modelProfileID string,
+) {
 	if agent == nil || session == nil {
 		return
 	}
 	controller := subagentruntime.NewManager(ctx, subagentruntime.Config{
-		MaxTasks: 8, MaxConcurrent: 4,
+		MaxTasks: 8, MaxConcurrent: 4, ModelProfileID: strings.TrimSpace(modelProfileID),
 		Starter: func(childCtx context.Context, request subagentruntime.StartRequest) (string, error) {
 			return agent.RunNativeSubagent(childCtx, request, sessionEventSink{session: session})
 		},
@@ -1188,6 +1206,33 @@ func (s *RunService) bindSubagentController(ctx context.Context, agent *agentcor
 	})
 	session.SetSubagentController(controller)
 	agent.SetSubagentController(controller)
+}
+
+func subagentModelProfileID(profile *ModelProfileConfig) string {
+	if profile == nil {
+		return ""
+	}
+	if routed := profile.PurposeProfiles["subagent"]; routed != nil && strings.TrimSpace(routed.ProfileID) != "" {
+		return routed.ProfileID
+	}
+	return profile.ProfileID
+}
+
+func modelRequestPurposeForClient(client ClientInfo) llm.RequestPurpose {
+	if strings.EqualFold(strings.TrimSpace(client.Source), ScheduledClientSource) ||
+		strings.EqualFold(strings.TrimSpace(client.EntryPoint), ScheduledClientSource) {
+		return llm.RequestPurposeScheduledTask
+	}
+	return llm.RequestPurposeAgentTurn
+}
+
+func configureAgentModelRequestPurpose(agent *agentcore.Agent, purpose llm.RequestPurpose) {
+	if agent == nil {
+		return
+	}
+	cfg := agent.GetConfig()
+	cfg.ModelRequestPurpose = purpose
+	agent.Reconfigure(cfg)
 }
 
 func subagentSemanticPayload(snapshot subagentruntime.TaskSnapshot) map[string]any {
@@ -1443,18 +1488,29 @@ func modelProfileCacheKey(profile *ModelProfileConfig) string {
 		profile.EndpointSelector,
 		profile.ModelSelectorKind,
 		profile.BaseURL,
+		profile.InferenceEndpoint,
 		profile.Protocol,
 		profile.AuthScheme,
 		hashSecret(profile.APIKey),
 		strconv.FormatFloat(profile.Temperature, 'g', -1, 64),
 		strconv.Itoa(profile.MaxTokens),
 		strconv.Itoa(profile.ContextWindow),
+		strconv.Itoa(profile.MaxInputTokens),
 		strconv.FormatUint(profile.CredentialRevision, 10),
 		strconv.FormatBool(profile.SupportsVision),
 		strconv.FormatBool(profile.SupportsNativePDF),
 		strconv.FormatBool(profile.SupportsVideo),
 		profile.SupportsTools,
+		strconv.FormatBool(profile.SupportsPromptCache),
 		profile.ReasoningEffort,
+	}
+	purposes := make([]string, 0, len(profile.PurposeProfiles))
+	for purpose := range profile.PurposeProfiles {
+		purposes = append(purposes, purpose)
+	}
+	sort.Strings(purposes)
+	for _, purpose := range purposes {
+		parts = append(parts, "purpose:"+purpose, modelProfileCacheKey(profile.PurposeProfiles[purpose]))
 	}
 	return strings.Join(parts, "\x00")
 }

@@ -14,17 +14,16 @@ import (
 const ToolName = "subagent"
 
 type input struct {
-	Action         string   `json:"action"`
-	TaskID         string   `json:"task_id,omitempty"`
-	TaskIDs        []string `json:"task_ids,omitempty"`
-	Description    string   `json:"description,omitempty"`
-	Prompt         string   `json:"prompt,omitempty"`
-	AgentType      string   `json:"agent_type,omitempty"`
-	WorkspaceMode  string   `json:"workspace_mode,omitempty"`
-	ModelProfileID string   `json:"model_profile_id,omitempty"`
-	ReturnWhen     string   `json:"return_when,omitempty"`
-	TimeoutMS      int      `json:"timeout_ms,omitempty"`
-	Reason         string   `json:"reason,omitempty"`
+	Action        string   `json:"action"`
+	TaskID        string   `json:"task_id,omitempty"`
+	TaskIDs       []string `json:"task_ids,omitempty"`
+	Description   string   `json:"description,omitempty"`
+	Prompt        string   `json:"prompt,omitempty"`
+	AgentType     string   `json:"agent_type,omitempty"`
+	WorkspaceMode string   `json:"workspace_mode,omitempty"`
+	ReturnWhen    string   `json:"return_when,omitempty"`
+	TimeoutMS     int      `json:"timeout_ms,omitempty"`
+	Reason        string   `json:"reason,omitempty"`
 }
 
 type SubagentTool struct{}
@@ -57,17 +56,16 @@ func (t *SubagentTool) InputSchema() tool.ToolParametersSchema {
 		Type: "object", AdditionalProperties: &noExtra,
 		Required: []string{"action"},
 		Properties: map[string]tool.ToolParam{
-			"action":           {Type: "string", Description: "要执行的生命周期动作", Enum: []any{"spawn", "status", "wait", "cancel"}},
-			"task_id":          {Type: "string", Description: "status 或 cancel 的目标 task ID"},
-			"task_ids":         {Type: "array", Description: "wait 的目标 task ID 列表", Items: &tool.ToolParam{Type: "string"}},
-			"description":      {Type: "string", Description: "用户可见的简短任务说明"},
-			"prompt":           {Type: "string", Description: "交给 child 的完整任务说明"},
-			"agent_type":       {Type: "string", Description: "host-owned child 角色", Enum: []any{"explore", "review"}},
-			"workspace_mode":   {Type: "string", Description: "child workspace 隔离模式", Enum: []any{"shared_readonly"}},
-			"model_profile_id": {Type: "string", Description: "可选的已配置模型 profile ID"},
-			"return_when":      {Type: "string", Description: "等待任一或全部任务完成", Enum: []any{"any", "all"}},
-			"timeout_ms":       {Type: "integer", Description: "wait 超时毫秒数，最大 60000"},
-			"reason":           {Type: "string", Description: "取消原因"},
+			"action":         {Type: "string", Description: "要执行的生命周期动作", Enum: []any{"spawn", "status", "wait", "cancel"}},
+			"task_id":        {Type: "string", Description: "status 或 cancel 的目标 task ID"},
+			"task_ids":       {Type: "array", Description: "wait 的目标 task ID 列表", Items: &tool.ToolParam{Type: "string"}},
+			"description":    {Type: "string", Description: "用户可见的简短任务说明"},
+			"prompt":         {Type: "string", Description: "交给 child 的完整任务说明"},
+			"agent_type":     {Type: "string", Description: "host-owned child 角色", Enum: []any{"explore", "review"}},
+			"workspace_mode": {Type: "string", Description: "child workspace 隔离模式", Enum: []any{"shared_readonly"}},
+			"return_when":    {Type: "string", Description: "等待任一或全部任务完成", Enum: []any{"any", "all"}},
+			"timeout_ms":     {Type: "integer", Description: "wait 超时毫秒数，最大 60000"},
+			"reason":         {Type: "string", Description: "取消原因"},
 		},
 	}
 }
@@ -135,10 +133,7 @@ func (t *SubagentTool) Execute(ctx context.Context, raw string) (string, error) 
 	identity, _ := tool.ToolExecutionIdentityFromContext(ctx)
 	switch request.Action {
 	case "spawn":
-		modelProfileID := strings.TrimSpace(request.ModelProfileID)
-		if modelProfileID == "" {
-			modelProfileID = strings.TrimSpace(identity.ModelProfileID)
-		}
+		modelProfileID := strings.TrimSpace(identity.ModelProfileID)
 		snapshot, err := controller.Spawn(ctx, subagentruntime.SpawnRequest{
 			Description: request.Description, Prompt: request.Prompt,
 			AgentType: request.AgentType, WorkspaceMode: request.WorkspaceMode,

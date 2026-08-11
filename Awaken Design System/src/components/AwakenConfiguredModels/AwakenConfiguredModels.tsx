@@ -12,11 +12,13 @@ export type AwakenConfiguredModelItem = {
   displayName: string;
   brand?: AwakenProviderBrand;
   modelId: string;
+  protocolLabel?: string;
   isDefault?: boolean;
   credentialStatus?: string | null;
   credentialTone?: "default" | "unreadable";
   enabled: boolean;
   contextWindow: number;
+  contextUnknown?: boolean;
   contextWindowInput: string;
   contextWindowMin: number;
   contextWindowMax: number;
@@ -85,6 +87,12 @@ export function AwakenConfiguredModels({
             "--context-anchor": `${model.contextAnchor}%`,
           } as CSSProperties;
           const anyDeleteBusy = Boolean(deletingModelId);
+          const contextSummary = model.contextWindowInput.trim()
+            ? `${model.contextWindowInput.trim()} context`
+            : "上下文未知";
+          const outputSummary = model.maxTokensInput.trim()
+            ? `${model.maxTokensInput.trim()} output`
+            : "output 未知";
           return (
             <article className="configured-model-card" key={model.id}>
               <header className="configured-model-card__header">
@@ -98,6 +106,9 @@ export function AwakenConfiguredModels({
                   <strong title={`${model.displayName}：${model.modelId}`}>
                     {model.displayName}：{model.modelId}
                   </strong>
+                  {model.protocolLabel ? (
+                    <span className="configured-model-credential-status">{model.protocolLabel}</span>
+                  ) : null}
                   {model.credentialStatus ? (
                     <span className={`configured-model-credential-status${model.credentialTone === "unreadable" ? " configured-model-credential-status-unreadable" : ""}`}>
                       {model.credentialStatus}
@@ -125,12 +136,29 @@ export function AwakenConfiguredModels({
               <details className="configured-model-card__details">
                 <summary>
                   <span>LLM 参数</span>
-                  <span>{model.contextWindowInput} context · {model.maxTokensInput} output</span>
+                  <span>{contextSummary} · {outputSummary}</span>
                 </summary>
                 <div className="configured-model-card__body">
                   <div className="configured-parameter configured-parameter--context">
                     <span className="configured-parameter__label">上下文长度</span>
-                    <div className="configured-context" style={contextStyle}>
+                    {model.contextUnknown ? (
+                      <div className="configured-context-manual">
+                        <input
+                          className="configured-context-input"
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={model.contextWindowInput}
+                          placeholder="手动输入上下文长度"
+                          onChange={(event) => onContextInputChange?.(model.id, event.target.value)}
+                          onBlur={() => onContextInputCommit?.(model.id)}
+                          aria-label={`${model.modelId} 手动上下文长度`}
+                        />
+                        <p className="configured-context-manual-note">
+                          当前目录没有返回上下文窗口，可手动输入后保存。
+                        </p>
+                      </div>
+                    ) : <div className="configured-context" style={contextStyle}>
                       <div className="configured-context-main">
                         <input
                           className="configured-context-range"
@@ -163,7 +191,7 @@ export function AwakenConfiguredModels({
                         </button>
                         <span className="configured-context-scale-label configured-context-scale-end">{model.contextEndLabel}</span>
                       </div>
-                    </div>
+                    </div>}
                   </div>
                   <div className="configured-parameter configured-parameter--compression">
                     <span className="configured-parameter__label">自动压缩阈值</span>

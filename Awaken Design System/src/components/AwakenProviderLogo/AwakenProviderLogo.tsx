@@ -6,8 +6,14 @@ import qwenLogo from "../../assets/model-providers/qwen.svg";
 import doubaoLogo from "../../assets/model-providers/doubao.png";
 import deepseekLogo from "../../assets/model-providers/deepseek.svg";
 import volcengineLogo from "../../assets/model-providers/volcengine.svg";
+import openaiLogo from "../../assets/model-providers/openai.svg";
+import anthropicLogo from "../../assets/model-providers/anthropic.svg";
+import geminiLogo from "../../assets/model-providers/gemini.svg";
 
 export type AwakenProviderBrand =
+  | "openai"
+  | "anthropic"
+  | "gemini"
   | "kimi"
   | "minimax"
   | "glm"
@@ -17,6 +23,9 @@ export type AwakenProviderBrand =
   | "volcengine";
 
 const PROVIDER_LOGOS: Record<AwakenProviderBrand, string> = {
+  openai: openaiLogo,
+  anthropic: anthropicLogo,
+  gemini: geminiLogo,
   kimi: kimiLogo,
   minimax: minimaxLogo,
   glm: glmLogo,

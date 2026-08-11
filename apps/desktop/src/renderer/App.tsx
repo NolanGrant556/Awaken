@@ -96,6 +96,7 @@ import type {
   ProjectEntryActionRequest,
   ProjectPathComposerTokenPayload,
   RuntimeInfo,
+  ModelAccessType,
   ModelProvider,
   ReasoningEffortLevel,
   RuntimeProject,
@@ -1654,7 +1655,9 @@ export function contextUsagePanelData(
   };
 }
 
-function modelProfileLabel(profile: RuntimeModelProfileSummary): string {
+export function modelProfileLabel(
+  profile: Pick<RuntimeModelProfileSummary, "modelId" | "displayName">,
+): string {
   return profile.modelId || profile.displayName;
 }
 
@@ -2308,9 +2311,8 @@ export function App() {
   }>({ reasoningEffortByProfile: {} });
   const recoveredModelPreferenceRef = useRef<string>("");
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const [modelSettingsInitialModelSection, setModelSettingsInitialModelSection] = useState<
-    "coding_plan" | "api" | "agent_plan"
-  >("coding_plan");
+  const [modelSettingsInitialModelSection, setModelSettingsInitialModelSection] =
+    useState<ModelAccessType>("coding_plan");
   const [appearanceThemePreference, setAppearanceThemePreference] =
     useState<AwakenThemePreference>(readStoredThemePreference);
   const [systemAppearanceTheme, setSystemAppearanceTheme] = useState<AwakenTheme>(readSystemTheme);
@@ -3455,6 +3457,9 @@ export function App() {
     storedReasoningEffort && selectedReasoningCapability?.levels.includes(storedReasoningEffort)
       ? storedReasoningEffort
       : selectedReasoningCapability?.defaultLevel;
+  const selectedReasoningEffortLabel = selectedReasoningEffort
+    ? selectedReasoningCapability?.displayLabels?.[selectedReasoningEffort] ?? selectedReasoningEffort
+    : undefined;
   const recoveredPreferenceKey = modelPreferenceRecoveryKey(
     activeThread?.threadId,
     activeThread?.selectedModelProfileId,
@@ -3778,7 +3783,7 @@ export function App() {
     enabledModelProfiles.length > 0 && selectedModelProfile
       ? {
           id: "model",
-          label: `${modelProfileLabel(selectedModelProfile)}${selectedReasoningEffort ? ` · ${selectedReasoningEffort}` : ""}`,
+          label: `${modelProfileLabel(selectedModelProfile)}${selectedReasoningEffortLabel ? ` · ${selectedReasoningEffortLabel}` : ""}`,
           icon: modelProfileIcon(selectedModelProfile),
           disabled: isBusy,
           menuItems: enabledModelProfiles.map((profile) => {
@@ -3818,6 +3823,7 @@ export function App() {
                   ? {
                       levels: capability.levels,
                       selectedLevel: effectiveEffort,
+                      displayLabels: capability.displayLabels,
                       note: activeThread?.runId
                         ? "切换模型或推理强度会重建对话缓存，下次发送消息时生效。"
                         : undefined,

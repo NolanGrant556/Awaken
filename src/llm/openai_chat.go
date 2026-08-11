@@ -33,6 +33,7 @@ type openaiChatRequest struct {
 	EnableThinking  *bool                    `json:"enable_thinking,omitempty"`
 	Reasoning       *openaiReasoningConfig   `json:"reasoning,omitempty"`
 	ReasoningEffort string                   `json:"reasoning_effort,omitempty"`
+	ReasoningSplit  *bool                    `json:"reasoning_split,omitempty"`
 	StreamOptions   *openaiStreamOptions     `json:"stream_options,omitempty"`
 	PromptCacheKey  string                   `json:"prompt_cache_key,omitempty"`
 	Tools           []map[string]interface{} `json:"tools,omitempty"`
@@ -43,12 +44,19 @@ type openaiStreamOptions struct {
 }
 
 type openaiChatMessage struct {
-	Role             string           `json:"role"`
-	Content          interface{}      `json:"content,omitempty"`
-	ReasoningContent string           `json:"reasoning_content,omitempty"`
-	ToolCalls        []openaiToolCall `json:"tool_calls,omitempty"`
-	ToolCallID       string           `json:"tool_call_id,omitempty"`
-	Name             string           `json:"name,omitempty"`
+	Role             string                  `json:"role"`
+	Content          interface{}             `json:"content,omitempty"`
+	ReasoningContent string                  `json:"reasoning_content,omitempty"`
+	ReasoningDetails []openAIReasoningDetail `json:"reasoning_details,omitempty"`
+	ToolCalls        []openaiToolCall        `json:"tool_calls,omitempty"`
+	ToolCallID       string                  `json:"tool_call_id,omitempty"`
+	Name             string                  `json:"name,omitempty"`
+}
+
+type openAIReasoningDetail struct {
+	Type      string `json:"type,omitempty"`
+	Text      string `json:"text,omitempty"`
+	Signature string `json:"signature,omitempty"`
 }
 
 type openaiToolCall struct {
@@ -76,9 +84,10 @@ type openaiChatResponse struct {
 	Usage   *openAIUsage `json:"usage,omitempty"`
 	Choices []struct {
 		Message struct {
-			Content          string           `json:"content"`
-			ReasoningContent string           `json:"reasoning_content,omitempty"`
-			ToolCalls        []openaiToolCall `json:"tool_calls,omitempty"`
+			Content          string                  `json:"content"`
+			ReasoningContent string                  `json:"reasoning_content,omitempty"`
+			ReasoningDetails []openAIReasoningDetail `json:"reasoning_details,omitempty"`
+			ToolCalls        []openaiToolCall        `json:"tool_calls,omitempty"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason,omitempty"`
 	} `json:"choices"`
@@ -88,9 +97,10 @@ type openaiStreamResponse struct {
 	Usage   *openAIUsage `json:"usage,omitempty"`
 	Choices []struct {
 		Delta struct {
-			Content          string                 `json:"content,omitempty"`
-			ReasoningContent string                 `json:"reasoning_content,omitempty"`
-			ToolCalls        []openaiStreamToolCall `json:"tool_calls,omitempty"`
+			Content          string                  `json:"content,omitempty"`
+			ReasoningContent string                  `json:"reasoning_content,omitempty"`
+			ReasoningDetails []openAIReasoningDetail `json:"reasoning_details,omitempty"`
+			ToolCalls        []openaiStreamToolCall  `json:"tool_calls,omitempty"`
 		} `json:"delta"`
 		FinishReason string `json:"finish_reason,omitempty"`
 	} `json:"choices"`
@@ -137,9 +147,14 @@ func (t *openaiTransport) Invoke(ctx stdctx.Context, cfg Config, req Request) (*
 
 func prepareOpenAIRequest(cfg Config, req Request, stream bool) (PreparedRequest, error) {
 	protocol := resolveProtocol(cfg)
-	url := cfg.BaseURL + "/chat/completions"
+	url := strings.TrimSpace(cfg.InferenceEndpoint)
+	if url == "" {
+		url = strings.TrimRight(cfg.BaseURL, "/") + "/chat/completions"
+	}
 	if protocol == ProtocolMiniMaxChat {
-		url = cfg.BaseURL + "/text/chatcompletion_v2"
+		if strings.TrimSpace(cfg.InferenceEndpoint) == "" {
+			url = strings.TrimRight(cfg.BaseURL, "/") + "/text/chatcompletion_v2"
+		}
 	}
 	req = applyRequestPolicy(cfg, req)
 	cacheMetadata, affinityKey := promptCacheMetadata(cfg, req)
@@ -153,6 +168,14 @@ func prepareOpenAIRequest(cfg Config, req Request, stream bool) (PreparedRequest
 	}
 	applyOpenAIReasoningControls(&chatReq, cfg, req)
 	chatReq.ReasoningEffort = nativeReasoningEffort(cfg, req)
+	if usesMiniMaxReasoningSplit(cfg) {
+		enabled := true
+		chatReq.ReasoningSplit = &enabled
+		cacheMetadata.ReasoningReplay = true
+		if cacheMetadata.EndpointContract == "" {
+			cacheMetadata.EndpointContract = EndpointContractOpenAIChat
+		}
+	}
 	if affinityKey != "" {
 		chatReq.PromptCacheKey = affinityKey
 		if stream {
@@ -179,7 +202,7 @@ func (t *openaiTransport) invokePrepared(ctx stdctx.Context, cfg Config, prepare
 		return nil, requestBuildError(err)
 	}
 
-	applyAuthHeaders(httpReq, cfg, ProtocolOpenAIChat)
+	applyAuthHeaders(httpReq, cfg, prepared.Protocol)
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
@@ -201,9 +224,10 @@ func (t *openaiTransport) invokePrepared(ctx stdctx.Context, cfg Config, prepare
 	}
 
 	choice := chatResp.Choices[0]
-	result, responseErr := responseFromOpenAIMessage(choice.Message.Content, choice.Message.ReasoningContent, choice.Message.ToolCalls, choice.FinishReason, choiceUsage(chatResp.Usage, usageNormalizerID(cfg)))
+	result, responseErr := responseFromOpenAIMessage(choice.Message.Content, choice.Message.ReasoningContent, choice.Message.ReasoningDetails, choice.Message.ToolCalls, choice.FinishReason, choiceUsage(chatResp.Usage, usageNormalizerID(cfg)))
 	if result != nil {
 		result.ProviderRequestID = providerRequestID(resp)
+		result.RateLimitObservation = providerRateLimitObservation(resp)
 	}
 	return result, responseErr
 }
@@ -229,7 +253,7 @@ func (t *openaiTransport) streamPrepared(ctx stdctx.Context, cfg Config, prepare
 		return nil, requestBuildError(err)
 	}
 
-	applyAuthHeaders(httpReq, cfg, ProtocolOpenAIChat)
+	applyAuthHeaders(httpReq, cfg, prepared.Protocol)
 
 	resp, err := streamHTTPClient.Do(httpReq)
 	if err != nil {
@@ -241,8 +265,9 @@ func (t *openaiTransport) streamPrepared(ctx stdctx.Context, cfg Config, prepare
 		return nil, requestFailedError(resp)
 	}
 
-	state := newOpenAIStreamState(observer, usageNormalizerID(cfg))
+	state := newOpenAIStreamState(observer, usageNormalizerID(cfg), usesMiniMaxReasoningSplit(cfg))
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	watchdog := newStreamIdleWatchdog(cancel, streamIdleTimeoutForPrepared(prepared))
 	defer watchdog.Stop()
 
@@ -272,6 +297,8 @@ func (t *openaiTransport) streamPrepared(ctx stdctx.Context, cfg Config, prepare
 	result, responseErr := state.response()
 	if result != nil {
 		result.ProviderRequestID = providerRequestID(resp)
+		result.RateLimitObservation = providerRateLimitObservation(resp)
+		state.emitEvent(StreamEvent{Type: StreamEventCompleted, Usage: result.Usage, StopReason: result.StopReason})
 	}
 	return result, responseErr
 }
@@ -292,7 +319,12 @@ func buildOpenAIMessages(cfg Config, req Request, cache PreparedPromptCache) []o
 				ToolCalls: contextToolCallsToOpenAI(msg.ToolCalls), ToolCallID: msg.ToolCallID, Name: msg.Name,
 			}
 			if msg.Role == context.RoleAssistant {
-				message.ReasoningContent = replayProviderOpaqueReasoning(cfg, req, cache, msg.ProviderOpaqueState)
+				reasoning := replayProviderOpaqueReasoning(cfg, req, cache, msg.ProviderOpaqueState)
+				if usesMiniMaxReasoningSplit(cfg) && reasoning != "" {
+					message.ReasoningDetails = []openAIReasoningDetail{{Type: "reasoning.text", Text: reasoning}}
+				} else {
+					message.ReasoningContent = reasoning
+				}
 			}
 			messages = append(messages, message)
 			index++
@@ -489,6 +521,14 @@ func applyOpenAIReasoningControls(chatReq *openaiChatRequest, cfg Config, req Re
 	if isKimiK27Code(strings.ToLower(resolveModel(cfg, req))) {
 		return
 	}
+	provider := normalizeProviderID(cfg.ProviderID)
+	model := strings.ToLower(resolveModel(cfg, req))
+	if (provider == "qwen" && model == "qwen3.8-max") ||
+		(provider == "qwen-token-plan" && model == "qwen3.8-max-preview") {
+		// These contracts are reasoning-only. Auxiliary purposes omit effort but
+		// must not attempt to disable thinking, otherwise title/compact probes fail.
+		return
+	}
 	capability, ok := ResolveReasoningControlCapability(cfg, req)
 	if !ok {
 		return
@@ -521,7 +561,17 @@ func contextToolCallsToOpenAI(toolCalls []context.ToolCall) []openaiToolCall {
 	return result
 }
 
-func responseFromOpenAIMessage(content string, thinking string, toolCalls []openaiToolCall, stopReason string, usage *Usage) (*Response, error) {
+func responseFromOpenAIMessage(content string, thinking string, reasoningDetails []openAIReasoningDetail, toolCalls []openaiToolCall, stopReason string, usage *Usage) (*Response, error) {
+	if detailsThinking := reasoningDetailsText(reasoningDetails); detailsThinking != "" {
+		thinking = detailsThinking
+	}
+	cleanContent, inlineThinking, split := splitLeadingThinkBlock(content)
+	if split {
+		content = cleanContent
+		if thinking == "" {
+			thinking = inlineThinking
+		}
+	}
 	stopReason = strings.TrimSpace(stopReason)
 	result := &Response{
 		Content:          content,
@@ -545,6 +595,20 @@ func responseFromOpenAIMessage(content string, thinking string, toolCalls []open
 		return nil, ErrEmptyResponse
 	}
 	return result, nil
+}
+
+func usesMiniMaxReasoningSplit(cfg Config) bool {
+	provider := normalizeProviderID(cfg.ProviderID)
+	return resolveProtocol(cfg) == ProtocolOpenAIChat &&
+		(provider == "minimax" || provider == "minimax-token-plan")
+}
+
+func reasoningDetailsText(details []openAIReasoningDetail) string {
+	var text strings.Builder
+	for _, detail := range details {
+		text.WriteString(detail.Text)
+	}
+	return text.String()
 }
 
 func convertToolsToOpenAI(tools []tool.ToolSchema) []map[string]interface{} {
@@ -572,6 +636,10 @@ type openAIStreamState struct {
 	usage             *Usage
 	stopReason        string
 	usageNormalizerID string
+	miniMaxSnapshots  bool
+	contentSnapshot   string
+	reasoningSnapshot string
+	inlineThinking    leadingThinkStream
 }
 
 type openaiStreamToolAccumulator struct {
@@ -581,10 +649,10 @@ type openaiStreamToolAccumulator struct {
 	arguments strings.Builder
 }
 
-func newOpenAIStreamState(observer StreamObserver, normalizerID string) *openAIStreamState {
+func newOpenAIStreamState(observer StreamObserver, normalizerID string, miniMaxSnapshots bool) *openAIStreamState {
 	return &openAIStreamState{
 		observer: observer, toolCalls: make(map[int]*openaiStreamToolAccumulator),
-		usageNormalizerID: normalizerID,
+		usageNormalizerID: normalizerID, miniMaxSnapshots: miniMaxSnapshots,
 	}
 }
 
@@ -595,19 +663,28 @@ func (s *openAIStreamState) consume(data string) {
 	}
 	if usage := choiceUsage(chunk.Usage, s.usageNormalizerID); usage != nil {
 		s.usage = usage
+		s.emitEvent(StreamEvent{Type: StreamEventUsage, Usage: usage})
 	}
 
 	for _, choice := range chunk.Choices {
 		if choice.FinishReason != "" {
 			s.stopReason = strings.TrimSpace(choice.FinishReason)
 		}
-		if choice.Delta.ReasoningContent != "" {
-			s.thinking.WriteString(choice.Delta.ReasoningContent)
-			s.emit(choice.Delta.ReasoningContent, true)
+		reasoningDelta := choice.Delta.ReasoningContent
+		if detailsSnapshot := reasoningDetailsText(choice.Delta.ReasoningDetails); detailsSnapshot != "" {
+			reasoningDelta = snapshotSuffix(s.reasoningSnapshot, detailsSnapshot)
+			s.reasoningSnapshot = detailsSnapshot
+		}
+		if reasoningDelta != "" {
+			s.writeReasoning(reasoningDelta)
 		}
 		if choice.Delta.Content != "" {
-			s.content.WriteString(choice.Delta.Content)
-			s.emit(choice.Delta.Content, false)
+			contentDelta := choice.Delta.Content
+			if s.miniMaxSnapshots {
+				contentDelta = snapshotSuffix(s.contentSnapshot, choice.Delta.Content)
+				s.contentSnapshot = choice.Delta.Content
+			}
+			s.inlineThinking.consume(contentDelta, s.writeReasoning, s.writeContent)
 		}
 
 		for _, toolCall := range choice.Delta.ToolCalls {
@@ -615,6 +692,8 @@ func (s *openAIStreamState) consume(data string) {
 			if acc == nil {
 				acc = &openaiStreamToolAccumulator{}
 				s.toolCalls[toolCall.Index] = acc
+				started := ToolCall{ID: toolCall.ID, Name: toolCall.Function.Name}
+				s.emitEvent(StreamEvent{Type: StreamEventToolCallStart, ToolCall: &started})
 			}
 			if toolCall.ID != "" {
 				acc.id = toolCall.ID
@@ -642,16 +721,49 @@ func (s *openAIStreamState) emit(content string, isThinking bool) {
 	if s.observer.OnContent != nil {
 		s.observer.OnContent(content, isThinking)
 	}
+	eventType := StreamEventTextDelta
+	if isThinking {
+		eventType = StreamEventReasoningDelta
+	}
+	s.emitEvent(StreamEvent{Type: eventType, Content: content, IsThinking: isThinking})
+}
+
+func (s *openAIStreamState) writeContent(content string) {
+	if content == "" {
+		return
+	}
+	s.content.WriteString(content)
+	s.emit(content, false)
+}
+
+func (s *openAIStreamState) writeReasoning(content string) {
+	if content == "" {
+		return
+	}
+	s.thinking.WriteString(content)
+	s.emit(content, true)
 }
 
 func (s *openAIStreamState) emitToolCallDelta(delta ToolCallDelta) {
 	if s.observer.OnToolCallDelta != nil {
 		s.observer.OnToolCallDelta(delta)
 	}
+	s.emitEvent(StreamEvent{Type: StreamEventToolCallDelta, ToolCallDelta: &delta})
+}
+
+func (s *openAIStreamState) emitEvent(event StreamEvent) {
+	if s.observer.OnEvent != nil {
+		s.observer.OnEvent(event)
+	}
 }
 
 func (s *openAIStreamState) response() (*Response, error) {
+	s.inlineThinking.finish(s.writeReasoning, s.writeContent)
 	toolCalls := s.sortedToolCalls()
+	for index := range toolCalls {
+		call := toolCalls[index]
+		s.emitEvent(StreamEvent{Type: StreamEventToolCallDone, ToolCall: &call})
+	}
 	result := &Response{
 		Content:          s.content.String(),
 		Thinking:         s.thinking.String(),
@@ -665,6 +777,117 @@ func (s *openAIStreamState) response() (*Response, error) {
 		return nil, ErrEmptyResponse
 	}
 	return result, nil
+}
+
+func snapshotSuffix(previous, current string) string {
+	if previous == "" {
+		return current
+	}
+	if strings.HasPrefix(current, previous) {
+		return current[len(previous):]
+	}
+	// Some compatible endpoints switch from cumulative snapshots to real
+	// deltas mid-stream. Preserve the new frame instead of dropping content.
+	return current
+}
+
+func splitLeadingThinkBlock(content string) (answer string, thinking string, ok bool) {
+	start := len(content) - len(strings.TrimLeft(content, " \t\r\n"))
+	if !strings.HasPrefix(content[start:], "<think>") {
+		return content, "", false
+	}
+	rest := content[start+len("<think>"):]
+	if end := strings.Index(rest, "</think>"); end >= 0 {
+		return strings.TrimLeft(rest[end+len("</think>"):], "\r\n"), rest[:end], true
+	}
+	return "", rest, true
+}
+
+type leadingThinkStream struct {
+	mode   uint8
+	buffer string
+}
+
+const (
+	thinkStreamUndecided uint8 = iota
+	thinkStreamReasoning
+	thinkStreamText
+)
+
+func (s *leadingThinkStream) consume(delta string, reasoning func(string), text func(string)) {
+	if delta == "" {
+		return
+	}
+	switch s.mode {
+	case thinkStreamText:
+		text(delta)
+		return
+	case thinkStreamReasoning:
+		s.consumeReasoning(delta, reasoning, text)
+		return
+	}
+
+	s.buffer += delta
+	trimmed := strings.TrimLeft(s.buffer, " \t\r\n")
+	if strings.HasPrefix(trimmed, "<think>") {
+		s.mode = thinkStreamReasoning
+		s.buffer = strings.TrimPrefix(trimmed, "<think>")
+		s.consumeReasoning("", reasoning, text)
+		return
+	}
+	if strings.HasPrefix("<think>", trimmed) {
+		return
+	}
+	s.mode = thinkStreamText
+	text(s.buffer)
+	s.buffer = ""
+}
+
+func (s *leadingThinkStream) consumeReasoning(delta string, reasoning func(string), text func(string)) {
+	s.buffer += delta
+	if end := strings.Index(s.buffer, "</think>"); end >= 0 {
+		reasoning(s.buffer[:end])
+		remainder := strings.TrimLeft(s.buffer[end+len("</think>"):], "\r\n")
+		s.buffer = ""
+		s.mode = thinkStreamText
+		text(remainder)
+		return
+	}
+	// Keep only the possible closing-tag prefix buffered so reasoning remains
+	// truly streaming while a </think> tag may be split across SSE chunks.
+	keep := longestSuffixPrefix(s.buffer, "</think>")
+	emitUntil := len(s.buffer) - keep
+	if emitUntil > 0 {
+		reasoning(s.buffer[:emitUntil])
+		s.buffer = s.buffer[emitUntil:]
+	}
+}
+
+func (s *leadingThinkStream) finish(reasoning func(string), text func(string)) {
+	switch s.mode {
+	case thinkStreamReasoning:
+		reasoning(s.buffer)
+	case thinkStreamText:
+		text(s.buffer)
+	default:
+		// A truncated prefix such as "<thi" is ordinary answer text; only a
+		// complete leading <think> tag authorizes reclassification.
+		text(s.buffer)
+	}
+	s.buffer = ""
+}
+
+func longestSuffixPrefix(value, marker string) int {
+	limit := len(marker) - 1
+	if len(value) < limit {
+		limit = len(value)
+	}
+	for length := limit; length > 0; length-- {
+		if strings.HasSuffix(value, marker[:length]) {
+			return length
+		}
+	}
+	return 0
 }
 
 func choiceUsage(raw *openAIUsage, normalizerID string) *Usage {

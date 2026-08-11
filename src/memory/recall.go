@@ -360,7 +360,8 @@ func validateSelections(selections []Selection, candidates []Candidate) []Select
 }
 
 func modelSelector(cfg llm.Config, invoke ModelInvoker) Selector {
-	auxCfg, auxiliaryFallback := llm.AuxiliaryConfig(cfg)
+	auxCfg := cfg
+	auxiliaryFallback := false
 	return func(ctx context.Context, query string, candidates []Candidate) ([]Selection, error) {
 		manifest := append([]Candidate(nil), candidates...)
 		sort.SliceStable(manifest, func(i, j int) bool {

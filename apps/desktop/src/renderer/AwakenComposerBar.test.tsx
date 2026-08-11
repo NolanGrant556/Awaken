@@ -994,6 +994,38 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(host.querySelector(".composer-bar-model-effort-flow")).toBeNull();
   });
 
+  it("shows provider-native reasoning labels without changing canonical effort values", () => {
+    renderComposer({
+      metaItems: [{
+        id: "model",
+        label: "qwen3.8-max · xhigh",
+        menuItems: [{
+          id: "profile-qwen",
+          label: "qwen3.8-max",
+          selected: true,
+          effort: {
+            levels: ["low", "high", "max"],
+            selectedLevel: "max",
+            displayLabels: { low: "low", high: "medium", max: "xhigh" },
+            onChange: vi.fn(),
+          },
+        }],
+      }],
+    });
+
+    act(() => host.querySelector<HTMLButtonElement>(".composer-bar-model-trigger")?.click());
+    act(() => host.querySelector<HTMLButtonElement>(".composer-bar-model-option")?.click());
+
+    const slider = host.querySelector<HTMLElement>(".composer-bar-model-effort-slider");
+    expect(slider?.getAttribute("aria-valuetext")).toBe("xhigh");
+    expect(slider?.dataset.effort).toBe("max");
+    expect(
+      [...host.querySelectorAll(".composer-bar-model-effort-labels > span")].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(["low", "medium", "xhigh"]);
+  });
+
   it("selects an effort-capable target model before opening its secondary panel", () => {
     const callOrder: string[] = [];
     renderComposer({

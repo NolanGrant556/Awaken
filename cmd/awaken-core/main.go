@@ -92,7 +92,7 @@ func main() {
 				workspaceRoot = defaultWorkspace
 			}
 			recallManager, recallErr := memory.NewRecallManager(workspaceRoot, llm.Config{
-				APIKey: modelCfg.APIKey, BaseURL: modelCfg.BaseURL, Model: modelCfg.Model,
+				APIKey: modelCfg.APIKey, BaseURL: modelCfg.BaseURL, InferenceEndpoint: modelCfg.InferenceEndpoint, Model: modelCfg.Model,
 				Protocol: llm.Protocol(modelCfg.Protocol), Temperature: modelCfg.Temperature,
 				ProviderID: modelCfg.ProviderID, ProfileID: modelCfg.ProfileID, CredentialRevision: modelCfg.CredentialRevision,
 				MaxTokens: modelCfg.MaxTokens, AuthScheme: modelCfg.AuthScheme, ContextWindow: modelCfg.ContextWindow,
@@ -101,9 +101,11 @@ func main() {
 				log.Printf("[memory] automatic recall disabled: %v", recallErr)
 			}
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts: 0,
-				EntryPoint:  "awaken-core",
-				ModelConfig: modelCfg,
+				MaxThoughts:         0,
+				EntryPoint:          "awaken-core",
+				ModelConfig:         modelCfg,
+				CompactModelConfig:  purposeModelConfig(profile, "compact_summary"),
+				SubagentModelConfig: purposeModelConfig(profile, "subagent"),
 				SkillSummary: skills.FormatRuntimeSkillSummary(
 					skillRegistry.PreviewLocalSources(skillSourceDirsForWorkspace(workspace)),
 				),
@@ -440,21 +442,24 @@ func modelConfigFromProfile(profile *runtime.ModelProfileConfig) agentcore.Model
 		return agentcore.ModelConfig{}
 	}
 	return agentcore.ModelConfig{
-		APIKey:             profile.APIKey,
-		BaseURL:            profile.BaseURL,
-		Model:              profile.ModelID,
-		CapabilityModelID:  profile.CapabilityModelID,
-		EndpointSelector:   profile.EndpointSelector,
-		ModelSelectorKind:  profile.ModelSelectorKind,
-		Protocol:           profile.Protocol,
-		ProviderID:         profile.ProviderID,
-		ProfileID:          profile.ProfileID,
-		CredentialRevision: profile.CredentialRevision,
-		Temperature:        profile.Temperature,
-		MaxTokens:          profile.MaxTokens,
-		AuthScheme:         profile.AuthScheme,
-		ContextWindow:      profile.ContextWindow,
-		ReasoningEffort:    profile.ReasoningEffort,
+		APIKey:              profile.APIKey,
+		BaseURL:             profile.BaseURL,
+		InferenceEndpoint:   profile.InferenceEndpoint,
+		Model:               profile.ModelID,
+		CapabilityModelID:   profile.CapabilityModelID,
+		EndpointSelector:    profile.EndpointSelector,
+		ModelSelectorKind:   profile.ModelSelectorKind,
+		Protocol:            profile.Protocol,
+		ProviderID:          profile.ProviderID,
+		ProfileID:           profile.ProfileID,
+		CredentialRevision:  profile.CredentialRevision,
+		Temperature:         profile.Temperature,
+		MaxTokens:           profile.MaxTokens,
+		AuthScheme:          profile.AuthScheme,
+		ContextWindow:       profile.ContextWindow,
+		MaxInputTokens:      profile.MaxInputTokens,
+		SupportsPromptCache: profile.SupportsPromptCache,
+		ReasoningEffort:     profile.ReasoningEffort,
 		Capabilities: tool.ModelCapabilities{
 			SupportsVision:      profile.SupportsVision,
 			SupportsNativePDF:   profile.SupportsNativePDF,
@@ -462,6 +467,13 @@ func modelConfigFromProfile(profile *runtime.ModelProfileConfig) agentcore.Model
 			SupportsComputerUse: profile.SupportsComputerUse,
 		},
 	}
+}
+
+func purposeModelConfig(profile *runtime.ModelProfileConfig, purpose string) agentcore.ModelConfig {
+	if profile == nil {
+		return agentcore.ModelConfig{}
+	}
+	return modelConfigFromProfile(profile.PurposeProfiles[purpose])
 }
 
 // buildMCPManager loads project and user MCP configs, merges them, and

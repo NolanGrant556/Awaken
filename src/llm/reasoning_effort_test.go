@@ -16,17 +16,20 @@ func TestReasoningEffortProviderMapping(t *testing.T) {
 		{"deepseek max", "deepseek", "deepseek-v4-pro", "", "", "max", "max"},
 		{"qwen high", "qwen-token-plan", "qwen3.8-max-preview", "", "", "high", "medium"},
 		{"qwen max", "qwen-token-plan", "qwen3.8-max-preview", "", "", "max", "xhigh"},
+		{"qwen api low", "qwen", "qwen3.8-max", "", "", "low", "low"},
+		{"qwen api high", "qwen", "qwen3.8-max", "", "", "high", "medium"},
+		{"qwen api max", "qwen", "qwen3.8-max", "", "", "max", "xhigh"},
 		{"doubao high exact family", "doubao", "ep-test", "doubao-seed-2.1-pro", "endpoint", "high", "medium"},
 		{"doubao max exact family", "doubao", "ep-test", "doubao-seed-2.1-pro", "endpoint", "max", "high"},
 		{"doubao opaque endpoint hidden", "doubao", "ep-test", "", "endpoint", "max", ""},
-		{"qwen api hidden", "qwen", "qwen3.7-max", "", "", "max", ""},
+		{"qwen 3.7 api hidden", "qwen", "qwen3.7-max", "", "", "max", ""},
 		{"minimax hidden", "minimax", "MiniMax-M3", "", "", "max", ""},
 		{"agent exact qwen max", "volcengine-agent-plan", "qwen3.8-max-preview", "", "", "max", "xhigh"},
 		{"agent exact glm high", "volcengine-agent-plan", "glm-5.2", "", "", "high", "high"},
 		{"agent routed model hidden", "volcengine-agent-plan", "ark-code-latest", "", "", "max", ""},
 	}
 	for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			prepared, err := PrepareRequest(Config{
 				APIKey: "test", BaseURL: "https://example.invalid/v1", Protocol: ProtocolOpenAIChat,
 				ProviderID: tt.provider, Model: tt.model, CapabilityModelID: tt.capabilityModel,
@@ -44,6 +47,23 @@ func TestReasoningEffortProviderMapping(t *testing.T) {
 				t.Fatalf("reasoning_effort = %q, want %q; body=%s", got, tt.want, prepared.Body)
 			}
 		})
+	}
+}
+
+func TestQwen38AuxiliaryRequestDoesNotDisableRequiredReasoning(t *testing.T) {
+	prepared, err := PrepareRequest(Config{
+		APIKey: "test", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+		Protocol: ProtocolOpenAIChat, ProviderID: "qwen", Model: "qwen3.8-max",
+	}, Request{Purpose: RequestPurposeThreadTitle, DisableReasoning: true}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(prepared.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := body["enable_thinking"]; exists {
+		t.Fatalf("reasoning-only Qwen auxiliary request tried to disable thinking: %s", prepared.Body)
 	}
 }
 
@@ -66,7 +86,7 @@ func TestAuxiliaryRequestDoesNotInheritReasoningEffort(t *testing.T) {
 
 func TestMiniMaxM3UsesOfficialChatCompletionV2Endpoint(t *testing.T) {
 	prepared, err := PrepareRequest(Config{
-		APIKey: "test", BaseURL: "https://api.minimax.io/v1", Protocol: ProtocolMiniMaxChat,
+		APIKey: "test", BaseURL: "https://api.minimaxi.com/v1", Protocol: ProtocolMiniMaxChat,
 		ProviderID: "minimax", Model: "MiniMax-M3",
 	}, Request{Purpose: RequestPurposeAgentTurn}, false)
 	if err != nil {
@@ -75,7 +95,7 @@ func TestMiniMaxM3UsesOfficialChatCompletionV2Endpoint(t *testing.T) {
 	if prepared.Protocol != ProtocolMiniMaxChat {
 		t.Fatalf("protocol = %q", prepared.Protocol)
 	}
-	if prepared.Endpoint != "https://api.minimax.io/v1/text/chatcompletion_v2" {
+	if prepared.Endpoint != "https://api.minimaxi.com/v1/text/chatcompletion_v2" {
 		t.Fatalf("endpoint = %q", prepared.Endpoint)
 	}
 }

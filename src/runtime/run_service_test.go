@@ -729,6 +729,17 @@ func TestModelProfileCacheKeyUsesCredentialRevisionButIgnoresLegacyPromptCacheOv
 	}
 }
 
+func TestModelProfileCacheKeyIncludesPurposeProfiles(t *testing.T) {
+	base := &ModelProfileConfig{ProfileID: "profile", ModelID: "model"}
+	routed := *base
+	routed.PurposeProfiles = map[string]*ModelProfileConfig{
+		"subagent": {ProfileID: "child-profile", ModelID: "child-model", Protocol: "openai_responses"},
+	}
+	if modelProfileCacheKey(base) == modelProfileCacheKey(&routed) {
+		t.Fatal("purpose profile identity must participate in the Agent cache key")
+	}
+}
+
 func TestRunServiceAllowsImageOnlyInputWhenModelSupportsVision(t *testing.T) {
 	t.Setenv(awakenHomeEnv, t.TempDir())
 	service := NewRunServiceWithModelProfiles(

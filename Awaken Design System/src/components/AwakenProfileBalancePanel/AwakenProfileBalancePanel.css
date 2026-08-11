@@ -190,18 +190,27 @@
   font-size: var(--aw-font-size-base);
 }
 
+.aw-profile-balance-panel__setup-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-bold);
+  text-decoration: none;
+}
+
+.aw-profile-balance-panel__setup-link:hover {
+  background: var(--aw-surface-hover);
+}
+
 .aw-profile-balance-panel__detail-sections {
   display: grid;
   gap: var(--aw-space-5);
-}
-
-.aw-profile-balance-panel__local-usage {
-  display: grid;
-  gap: var(--aw-space-2);
-  padding: var(--aw-space-6);
-  border: 1px solid var(--aw-border-light);
-  border-radius: var(--aw-radius-control);
-  background: var(--aw-surface-raised);
 }
 
 .aw-profile-balance-panel__amount,

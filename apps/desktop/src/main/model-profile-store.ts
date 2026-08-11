@@ -11,7 +11,6 @@ import type {
   ModelCredentialReference,
   ModelProfileAdvanced,
   ModelProfileBalanceWire,
-  ModelUsageMetricWire,
   ModelProfileSaveRequest,
   ModelProfileTestResult,
   ModelProviderWire,
@@ -47,6 +46,7 @@ import {
   fetchDeepSeekBalance,
   fetchKimiBalance,
   fetchKimiCodingBalance,
+  fetchMiniMaxTokenPlanBalance,
   fetchOpenAIOrganizationUsage,
   fetchAnthropicOrganizationUsage,
   BalanceFetchError,
@@ -66,6 +66,22 @@ const AGENT_PLAN_EFFORT_PROBE_TIMEOUT_MS = 8_000;
 const CONNECTION_TEST_TIMEOUT_MS = 30_000;
 const MINIMAX_CN_OPENAI_BASE_URL = "https://api.minimaxi.com/v1";
 const MINIMAX_CN_ANTHROPIC_BASE_URL = "https://api.minimaxi.com/anthropic";
+const DOUBAO_API_MODELS = [
+  "doubao-seed-evolving",
+  "doubao-seed-2-1-pro-260628",
+  "doubao-seed-2-1-turbo-260628",
+  "doubao-seed-2-0-code-preview-260215",
+  "doubao-seed-2-0-pro-260215",
+  "doubao-seed-2-0-lite-260428",
+];
+const DOUBAO_API_MODEL_DISPLAY_NAMES: Record<string, string> = {
+  "doubao-seed-evolving": "Doubao-Seed-Evolving",
+  "doubao-seed-2-1-pro-260628": "Doubao-Seed-2.1-Pro",
+  "doubao-seed-2-1-turbo-260628": "Doubao-Seed-2.1-Turbo",
+  "doubao-seed-2-0-code-preview-260215": "Doubao-Seed-2.0-Code",
+  "doubao-seed-2-0-pro-260215": "Doubao-Seed-2.0-Pro",
+  "doubao-seed-2-0-lite-260428": "Doubao-Seed-2.0-Lite",
+};
 const THREE_LLM_PROTOCOLS = [
   "openai_chat",
   "openai_responses",
@@ -422,8 +438,9 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
       openai_responses: "bearer",
     },
     key_env_name: "ARK_API_KEY",
-    default_model: "doubao-seed-2.1-pro",
-    models: ["doubao-seed-2.1-pro"],
+    default_model: "doubao-seed-2-1-pro-260628",
+    models: [...DOUBAO_API_MODELS],
+    model_display_names: { ...DOUBAO_API_MODEL_DISPLAY_NAMES },
     docs_url: "https://www.volcengine.com/product/doubao",
     api_docs_url: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
     access_type: "api",
@@ -563,12 +580,33 @@ function normalizeAuthScheme(provider: ModelProviderWire | undefined, value: str
 function normalizeProviderModelId(provider: ModelProviderWire | undefined, modelId: string): string {
   const trimmed = modelId.trim();
   if (!provider) return trimmed;
+  if (provider.id === "doubao" && trimmed === "doubao-seed-2.1-pro") {
+    return "doubao-seed-2-1-pro-260628";
+  }
   if (provider.endpoint_model) {
-    return provider.models.includes(trimmed) ? trimmed : provider.default_model;
+    // Ark accepts either an exact Model ID or an ep-* Endpoint ID. Endpoint
+    // providers therefore cannot collapse an unknown selector to the default
+    // model: doing so changes the request target and invents capabilities.
+    return trimmed || provider.default_model;
   }
   if (provider.allow_custom_model) return trimmed || provider.default_model;
   if (trimmed && provider.models.includes(trimmed)) return trimmed;
   return provider.default_model;
+}
+
+function isEndpointSelector(selector: string): boolean {
+  return /^ep-[A-Za-z0-9_-]+$/.test(selector.trim());
+}
+
+function inferenceSelector(
+  provider: ModelProviderWire | undefined,
+  modelId: string,
+  advanced?: ModelProfileAdvanced,
+): string {
+  const normalizedModelId = normalizeProviderModelId(provider, modelId);
+  if (!provider?.endpoint_model) return normalizedModelId;
+  const endpointId = advanced?.endpointId?.trim() || "";
+  return isEndpointSelector(endpointId) ? endpointId : normalizedModelId;
 }
 
 function normalizeProviderBaseURL(
@@ -653,7 +691,10 @@ function capabilityResolutionForIdentity(
       protocol_family: protocol.trim().toLowerCase(),
       profile_id: profileId.trim(),
       credential_revision: Math.max(1, Math.floor(credentialRevision)),
-      selector_kind: provider.endpoint_model ? "endpoint" : "model",
+      selector_kind:
+        provider.endpoint_model && isEndpointSelector(selector)
+          ? "endpoint"
+          : "model",
       endpoint_contract_id: capabilityEndpointContract(protocol),
     },
     selector: selector.trim(),
@@ -664,10 +705,55 @@ const BALANCE_SUPPORTED_PROVIDERS = new Set<string>([
   "deepseek",
   "kimi-cn",
   "kimi-coding-plan",
+  "minimax-token-plan",
   "openai",
   "anthropic",
-  "google",
 ]);
+
+type ProviderUsageSetup = {
+  message: string;
+  url: string;
+  label: string;
+};
+
+const PROVIDER_USAGE_SETUP: Readonly<Record<string, ProviderUsageSetup>> = {
+  google: {
+    message:
+      "Gemini 普通 API Key 不能查询账户用量；如需自动查询，须在 Google Cloud 配置项目与只读监控授权。",
+    url: "https://ai.google.dev/gemini-api/docs/billing",
+    label: "查看 Gemini 计费与授权",
+  },
+  qwen: {
+    message:
+      "Qwen 推理 API Key 不能查询账户用量；须先在阿里云启用模型高级监控，并使用独立的 AccessKey、AccessKey Secret 与 Prometheus HTTP API 地址。",
+    url: "https://help.aliyun.com/zh/model-studio/model-telemetry",
+    label: "查看 Qwen 监控与授权",
+  },
+  "qwen-token-plan": {
+    message:
+      "Qwen Token Plan Key 没有公开的套餐用量查询接口；请在阿里云 Model Studio 控制台查看套餐窗口与剩余额度。",
+    url: "https://help.aliyun.com/zh/model-studio/token-plan",
+    label: "打开 Qwen Token Plan 说明",
+  },
+  doubao: {
+    message:
+      "豆包 Ark 推理 API Key 不能查询账户用量；GetInferenceUsage 需要独立的火山云 AK/SK 与只读方舟管理权限。",
+    url: "https://api.volcengine.com/api-docs/view?action=GetInferenceUsage&serviceCode=ark&version=2024-01-01",
+    label: "查看豆包用量授权",
+  },
+  volcengine: {
+    message:
+      "火山 Coding Plan 推理 Key 不能查询套餐用量；请在火山方舟控制台查看套餐，并按平台说明配置云账号管理权限。",
+    url: "https://www.volcengine.com/docs/82379/2188958",
+    label: "打开 Coding Plan 说明",
+  },
+  "volcengine-agent-plan": {
+    message:
+      "火山 Agent Plan 推理 Key 不能查询套餐用量；GetAFPUsage 需要独立的火山云 AK/SK 与只读方舟管理权限。",
+    url: "https://api.volcengine.com/api-docs/view?action=GetAFPUsage&serviceCode=ark&version=2024-01-01",
+    label: "查看 Agent Plan 用量授权",
+  },
+};
 
 function isBalanceSupportedProvider(providerId: string): boolean {
   return BALANCE_SUPPORTED_PROVIDERS.has(providerId);
@@ -686,6 +772,8 @@ async function fetchBalanceForProvider(
       return await fetchKimiBalance(baseURL, apiKey, signal);
     case "kimi-coding-plan":
       return await fetchKimiCodingBalance(baseURL, apiKey, signal);
+    case "minimax-token-plan":
+      return await fetchMiniMaxTokenPlanBalance(baseURL, apiKey, signal);
     case "openai":
       return await fetchOpenAIOrganizationUsage(apiKey, signal);
     case "anthropic":
@@ -845,7 +933,7 @@ async function testModelEndpoint(
 }
 
 function connectionTestBody(provider: ModelProviderWire, protocol: string, modelId: string): string {
-  const model = modelId || provider.default_model;
+  const model = modelId;
   switch (protocol) {
     case "openai_responses":
       return JSON.stringify({ model, input: "ping", stream: false, store: false });
@@ -889,6 +977,7 @@ function agentPlanReasoningCandidate(modelId: string): AgentPlanReasoningCandida
         nativeByLevel: { low: "low", high: "medium", max: "xhigh" },
       };
     case "doubao-seed-2.1-pro":
+    case "doubao-seed-2-1-pro-260628":
       return {
         levels: ["low", "high", "max"],
         defaultLevel: "high",
@@ -1055,6 +1144,7 @@ function toSummary(
     provider_id: profile.providerId,
     display_name: profile.displayName,
     model_id: modelId,
+    model_display_name: provider?.model_display_names?.[modelId] ?? modelId,
     base_url: baseURL,
     protocol: profile.protocol,
     auth_scheme: profile.authScheme,
@@ -1119,9 +1209,7 @@ function templateProfileForSave(
 function storedProfileIdentityKey(profile: StoredModelProfile): string {
   const provider = providerById(profile.providerId);
   const modelId = normalizeProviderModelId(provider, profile.modelId);
-  const selector = provider?.endpoint_model
-    ? profile.advanced?.endpointId?.trim() || modelId
-    : modelId;
+  const selector = inferenceSelector(provider, modelId, profile.advanced);
   const baseURL = normalizeCapabilityBaseURL(
     normalizeProviderBaseURL(provider, profile.baseURL),
   );
@@ -1304,9 +1392,7 @@ export class ModelProfileStore {
       if (!credential.apiKey && profile.authScheme !== "none") continue;
       const baseURL = normalizeProviderBaseURL(provider, profile.baseURL);
       const capabilityModelId = normalizeProviderModelId(provider, profile.modelId);
-      const selector = provider.endpoint_model
-        ? profile.advanced?.endpointId?.trim() || ""
-        : capabilityModelId;
+      const selector = inferenceSelector(provider, capabilityModelId, profile.advanced);
       if (!selector) continue;
       const credentialRevision =
         credential.credentialRevision ?? profile.credentialRevision ?? 1;
@@ -1418,9 +1504,7 @@ export class ModelProfileStore {
         provider.catalog_url,
       );
       const protocol = normalizeProtocol(provider, request.protocol);
-      const selector = provider.endpoint_model
-        ? request.advanced?.endpointId?.trim() || ""
-        : normalizeProviderModelId(provider, request.modelId);
+      const selector = inferenceSelector(provider, request.modelId, request.advanced);
       if (storedProfile && selector) {
         const resolution = capabilityResolutionForIdentity(
           provider,
@@ -1686,9 +1770,7 @@ export class ModelProfileStore {
           capabilityCredentialRevision,
           baseURL,
           request.protocol?.trim() || existing.protocol || provider.protocol,
-          provider.endpoint_model
-            ? sourceAdvanced?.endpointId?.trim() || ""
-            : modelId,
+          inferenceSelector(provider, modelId, sourceAdvanced),
         )
       : undefined;
     const advanced = normalizeAdvancedWithModelCapability(
@@ -1704,8 +1786,8 @@ export class ModelProfileStore {
       request.advanced?.defaultReasoningEffort,
       capabilityResolution,
     );
-    if (provider.endpoint_model && !/^ep-[A-Za-z0-9_-]+$/.test(advanced.endpointId?.trim() ?? "")) {
-      throw new Error("Doubao Ark 需要填写 ep-* 推理接入点。");
+    if (provider.endpoint_model && !inferenceSelector(provider, modelId, advanced)) {
+      throw new Error("请选择或填写 Model ID / Endpoint ID。");
     }
     const profile: StoredModelProfile = {
       id: existing?.id ?? randomUUID(),
@@ -1879,10 +1961,15 @@ export class ModelProfileStore {
     }
     const credentialRevision =
       credential.credentialRevision ?? profile.credentialRevision ?? 1;
-    const endpointSelector = provider?.endpoint_model
-      ? profile.advanced?.endpointId?.trim() || ""
+    const transportSelector = inferenceSelector(
+      provider,
+      capabilityModelId,
+      profile.advanced,
+    );
+    const endpointSelector = isEndpointSelector(transportSelector)
+      ? transportSelector
       : undefined;
-    const modelId = endpointSelector || capabilityModelId;
+    const modelId = transportSelector;
     const capabilityResolution = provider
       ? capabilityResolutionForIdentity(
           provider,
@@ -1907,7 +1994,7 @@ export class ModelProfileStore {
       modelId,
       capabilityModelId,
       endpointSelector,
-      modelSelectorKind: provider?.endpoint_model ? "endpoint" : "model",
+      modelSelectorKind: endpointSelector ? "endpoint" : "model",
       baseURL,
       inferenceEndpoint: advanced.inferenceEndpoint,
       protocol: profile.protocol,
@@ -1949,9 +2036,7 @@ export class ModelProfileStore {
     const credential = await this.readProfileCredential(profile);
     const credentialRevision =
       credential.credentialRevision ?? profile.credentialRevision ?? 1;
-    const selector = provider.endpoint_model
-      ? profile.advanced?.endpointId?.trim() || ""
-      : capabilityModelId;
+    const selector = inferenceSelector(provider, capabilityModelId, profile.advanced);
     if (!selector) return undefined;
     return reasoningEffortCapability(
       profile.providerId,
@@ -2020,9 +2105,13 @@ export class ModelProfileStore {
       return { ok: false, message: "连接测试失败：请先填写 API key。" };
     }
     const baseURL = normalizeProviderBaseURL(provider, request.baseURL);
-    const modelId = provider.endpoint_model
-      ? request.advanced?.endpointId?.trim() || ""
-      : normalizeProviderModelId(provider, request.modelId);
+    const modelId = inferenceSelector(provider, request.modelId, request.advanced);
+    if (!modelId) {
+      return {
+        ok: false,
+        message: "连接测试失败：请选择或填写 Model ID / Endpoint ID。",
+      };
+    }
     const requestId = `connection_${randomUUID().replaceAll("-", "")}`;
     const requestBody = connectionTestBody(provider, protocol, modelId);
     try {
@@ -2247,35 +2336,12 @@ export class ModelProfileStore {
     const fetchedDetails = new Map<string, ModelProfileBalanceWire["detail"] | null>();
     const fetchErrors = new Map<string, string>();
     const credentialIssues = new Map<string, "unreadable">();
-    const localUsageByProvider = new Map<
-      string,
-      Extract<ModelProfileBalanceWire["detail"], { kind: "usage" }>
-    >();
-
-    const profilesByProvider = new Map<string, StoredModelProfile[]>();
-    for (const profile of candidateProfiles) {
-      const profiles = profilesByProvider.get(profile.providerId) ?? [];
-      profiles.push(profile);
-      profilesByProvider.set(profile.providerId, profiles);
-    }
-    await Promise.all(Array.from(profilesByProvider.entries()).map(async ([providerId, profiles]) => {
-      const consoleURL = providerId === "openai"
-        ? "https://platform.openai.com/usage"
-        : providerId === "anthropic"
-          ? "https://console.anthropic.com/settings/usage"
-          : providerId === "google"
-            ? "https://aistudio.google.com/usage"
-            : "";
-      const usage = await this.localUsageDetail(profiles.map((profile) => profile.id), consoleURL);
-      if (usage?.kind === "usage") localUsageByProvider.set(providerId, usage);
-    }));
 
     for (const profile of candidateProfiles) {
       if (providerKeys.has(profile.providerId)) continue;
       const provider = providerById(profile.providerId);
       if (!provider) continue;
       if (!isBalanceSupportedProvider(profile.providerId)) continue;
-      if (profile.providerId === "google") continue;
       let apiKey = "";
       try {
         apiKey =
@@ -2308,7 +2374,6 @@ export class ModelProfileStore {
 
     await Promise.allSettled(
       Array.from(providerKeys.entries()).map(async ([providerId, apiKey]) => {
-        if (providerId === "google") return;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), BALANCE_FETCH_TIMEOUT_MS);
         const combinedSignal = signal
@@ -2354,17 +2419,21 @@ export class ModelProfileStore {
           : undefined) ?? profile;
       const modelId = normalizeProviderModelId(provider, representative.modelId);
       const displayName = provider?.display_name ?? representative.displayName;
-      const localUsage = localUsageByProvider.get(profile.providerId);
 
-      if (profile.providerId === "google") {
+      const usageSetup = PROVIDER_USAGE_SETUP[profile.providerId];
+      if (usageSetup) {
         balances.push({
           profile_id: representative.id,
           provider_id: profile.providerId,
           model_id: modelId,
           display_name: displayName,
-          status: "unsupported",
-          error: "Google 普通 API Key 没有公开余额接口；下方展示 Awaken 本地逐次用量。",
-          local_usage: localUsage,
+          status:
+            profile.providerId === "qwen-token-plan"
+              ? "unsupported"
+              : "requires_setup",
+          error: usageSetup.message,
+          setup_url: usageSetup.url,
+          setup_label: usageSetup.label,
         });
         continue;
       }
@@ -2377,7 +2446,6 @@ export class ModelProfileStore {
           display_name: displayName,
           status: "unsupported",
           error: "暂不支持查询该供应商余额",
-          local_usage: localUsage,
         });
         continue;
       }
@@ -2392,7 +2460,6 @@ export class ModelProfileStore {
           status: "error",
           error,
           credential_issue: credentialIssues.get(profile.providerId),
-          local_usage: localUsage,
         });
         continue;
       }
@@ -2408,7 +2475,6 @@ export class ModelProfileStore {
             profile.providerId === "openai" || profile.providerId === "anthropic"
               ? "请先配置独立的组织用量管理密钥"
               : "请先配置 API key",
-          local_usage: localUsage,
         });
         continue;
       }
@@ -2422,94 +2488,10 @@ export class ModelProfileStore {
         status: detail ? "available" : "error",
         fetched_at: new Date().toISOString(),
         detail: detail ?? undefined,
-        local_usage: localUsage,
       });
     }
 
     return balances;
-  }
-
-  private async localUsageDetail(
-    profileIds: string[],
-    consoleURL: string,
-  ): Promise<ModelProfileBalanceWire["detail"]> {
-    let records: Array<Record<string, unknown>> = [];
-    for (const profileId of profileIds) {
-      const filePath = path.join(this.usageDir, `${profileId.replace(/[^A-Za-z0-9._-]/g, "_")}.jsonl`);
-      try {
-        records.push(...(await fs.readFile(filePath, "utf8"))
-          .split(/\r?\n/u)
-          .filter(Boolean)
-          .flatMap((line) => {
-            try { return [JSON.parse(line) as Record<string, unknown>]; } catch { return []; }
-          }));
-      } catch {
-        // A profile without local usage contributes zero metrics.
-      }
-    }
-    const profileSet = new Set(profileIds);
-    try {
-      const generation = (await fs.readFile(path.join(path.dirname(this.usageDir), "..", "CURRENT"), "utf8")).trim();
-      if (/^[A-Za-z0-9._-]+$/.test(generation)) {
-        const sessionsDir = path.join(path.dirname(this.usageDir), "..", "store-generations", generation, "sessions");
-        const sessions = await fs.readdir(sessionsDir, { withFileTypes: true });
-        for (const session of sessions) {
-          if (!session.isDirectory()) continue;
-          try {
-            const journal = await fs.readFile(path.join(sessionsDir, session.name, "journal.jsonl"), "utf8");
-            for (const line of journal.split(/\r?\n/u)) {
-              if (!line) continue;
-              try {
-                const semantic = JSON.parse(line) as Record<string, unknown>;
-                const payload = semantic.payload;
-                if (semantic.kind !== "model_usage" || !payload || typeof payload !== "object") continue;
-                const usage = payload as Record<string, unknown>;
-                if (profileSet.has(String(usage.profile_id ?? ""))) {
-                  records.push({ kind: "model_usage", ...usage });
-                }
-              } catch {
-                // Ignore a torn final journal line; Core owns corruption recovery.
-              }
-            }
-          } catch {
-            // A session may disappear between directory listing and reading.
-          }
-        }
-      }
-    } catch {
-      // Local usage is optional before the FileStore generation exists.
-    }
-    const usage = records.filter((record) => record.kind === "model_usage" && record.status === "succeeded");
-    const sum = (field: string) => usage.reduce(
-      (total, record) => total + (typeof record[field] === "number" ? record[field] as number : 0),
-      0,
-    );
-    const latestRateLimit = [...records].reverse().find(
-      (record) => record.rate_limit_observation && typeof record.rate_limit_observation === "object",
-    )?.rate_limit_observation as Record<string, unknown> | undefined;
-    const rateMetrics: ModelUsageMetricWire[] = latestRateLimit
-      ? [
-          ["最近一次请求剩余额度", latestRateLimit.request_remaining, "requests"] as const,
-          ["最近一次 Token 剩余额度", latestRateLimit.token_remaining, "tokens"] as const,
-        ].flatMap(([name, raw, unit]): ModelUsageMetricWire[] => {
-          const value = typeof raw === "string" ? Number(raw) : raw;
-          return typeof value === "number" && Number.isFinite(value)
-            ? [{ name: `${name}（${String(latestRateLimit.observed_at ?? "未知时间")}）`, value, unit }]
-            : [];
-        })
-      : [];
-    return {
-      kind: "usage",
-      metrics: [
-        { name: "Awaken 本地输入", value: sum("input_tokens"), unit: "tokens" },
-        { name: "Awaken 本地缓存输入", value: sum("cached_input_tokens"), unit: "tokens" },
-        { name: "Awaken 本地输出", value: sum("output_tokens"), unit: "tokens" },
-        { name: "Awaken 已记录请求", value: usage.length, unit: "requests" },
-        { name: "本地可计算成本", value: sum("calculated_cost_usd"), unit: "usd" },
-        ...rateMetrics,
-      ],
-      console_url: consoleURL,
-    };
   }
 
   private async capabilityResolutionForRequest(
@@ -2600,9 +2582,7 @@ export class ModelProfileStore {
     const provider = providerById(profile.providerId);
     const capabilityModelId = normalizeProviderModelId(provider, profile.modelId);
     const baseURL = normalizeProviderBaseURL(provider, profile.baseURL);
-    const selector = provider?.endpoint_model
-      ? profile.advanced?.endpointId?.trim() || ""
-      : capabilityModelId;
+    const selector = inferenceSelector(provider, capabilityModelId, profile.advanced);
     const resolution = provider && selector
       ? capabilityResolutionForIdentity(
           provider,

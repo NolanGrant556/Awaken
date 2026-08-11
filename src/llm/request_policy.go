@@ -27,6 +27,10 @@ func nativeReasoningEffort(cfg Config, req Request) string {
 	switch {
 	case provider == "openai":
 		return effort
+	case provider == "google" && strings.HasPrefix(model, "gemini-"):
+		if effort == "low" || effort == "high" {
+			return effort
+		}
 	case (provider == "qwen-token-plan" && model == "qwen3.8-max-preview") ||
 		(provider == "qwen" && model == "qwen3.8-max"):
 		switch effort {
@@ -37,7 +41,8 @@ func nativeReasoningEffort(cfg Config, req Request) string {
 		case "max":
 			return "xhigh"
 		}
-	case provider == "doubao" && model == "doubao-seed-2.1-pro":
+	case provider == "doubao" &&
+		(model == "doubao-seed-2.1-pro" || model == "doubao-seed-2-1-pro-260628"):
 		switch effort {
 		case "low":
 			return "low"
@@ -50,7 +55,7 @@ func nativeReasoningEffort(cfg Config, req Request) string {
 		return effort
 	case provider == "kimi-coding-plan" && (model == "k3" || model == "k3-256k"):
 		return effort
-	case provider == "glm" && model == "glm-5.2":
+	case (provider == "glm" || provider == "glm-coding-plan") && model == "glm-5.2":
 		if effort == "high" || effort == "max" {
 			return effort
 		}

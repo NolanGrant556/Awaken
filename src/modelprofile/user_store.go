@@ -335,9 +335,6 @@ func (s *UserStore) loadReady() ([]ResolvedProfile, error) {
 		if !ok {
 			continue
 		}
-		if provider.EndpointModel && !endpointIDPattern.MatchString(strings.TrimSpace(stored.Advanced.EndpointID)) {
-			continue
-		}
 		resolved := normalizeStoredProfile(stored, provider, nil)
 		if resolved.ID == "" {
 			continue
@@ -397,12 +394,15 @@ func (s *UserStore) loadReady() ([]ResolvedProfile, error) {
 func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cachedModelCapability) ResolvedProfile {
 	id := strings.TrimSpace(stored.ID)
 	capabilityModelID := strings.TrimSpace(stored.ModelID)
-	if capabilityModelID == "" || (!provider.AllowCustomModel && !slices.Contains(provider.Models, capabilityModelID)) {
+	if provider.ID == "doubao" && capabilityModelID == "doubao-seed-2.1-pro" {
+		capabilityModelID = "doubao-seed-2-1-pro-260628"
+	}
+	if capabilityModelID == "" || (!provider.EndpointModel && !provider.AllowCustomModel && !slices.Contains(provider.Models, capabilityModelID)) {
 		capabilityModelID = provider.DefaultModel
 	}
 	modelID := capabilityModelID
 	if provider.EndpointModel {
-		if endpoint := strings.TrimSpace(stored.Advanced.EndpointID); endpoint != "" {
+		if endpoint := strings.TrimSpace(stored.Advanced.EndpointID); endpointIDPattern.MatchString(endpoint) {
 			modelID = endpoint
 		}
 	}
@@ -539,13 +539,13 @@ func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cac
 		ReasoningEffortLevels: reasoningEffortLevels,
 		CapabilityModelID:     capabilityModelID,
 		EndpointSelector: func() string {
-			if provider.EndpointModel {
+			if provider.EndpointModel && endpointIDPattern.MatchString(modelID) {
 				return modelID
 			}
 			return ""
 		}(),
 		ModelSelectorKind: func() string {
-			if provider.EndpointModel {
+			if provider.EndpointModel && endpointIDPattern.MatchString(modelID) {
 				return "endpoint"
 			}
 			return "model"

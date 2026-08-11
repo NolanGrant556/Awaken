@@ -253,7 +253,11 @@ export function ScheduledTasksView({
           .filter((profile) => profile.enabled && profile.profileStatus === "ready")
           .map((profile) => ({
             profileId: profile.id,
-            name: profile.modelId || profile.displayName || profile.id,
+            name:
+              profile.modelDisplayName ||
+              profile.modelId ||
+              profile.displayName ||
+              profile.id,
           })),
       );
       setSystemTimezone(timezone || "UTC");

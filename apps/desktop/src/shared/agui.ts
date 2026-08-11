@@ -174,6 +174,7 @@ export type AguiModelUsageRecord = {
   invalidationReason?: string;
   retryIndex?: number;
   auxiliaryFallback?: boolean;
+  sentEstimatedInputTokens?: number;
   inputTokens?: number;
   cachedInputTokens?: number;
   uncachedInputTokens?: number;

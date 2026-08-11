@@ -450,6 +450,10 @@ function draftFromProvider(provider: ModelProvider): DraftState {
   };
 }
 
+function isEndpointModelId(value: string): boolean {
+  return /^ep-[A-Za-z0-9_-]+$/.test(value.trim());
+}
+
 function draftFromTemplate(
   templateProfile: RuntimeModelProfileSummary | undefined,
   provider: ModelProvider,
@@ -476,7 +480,9 @@ function draftFromTemplate(
     isDefault,
     endpointId:
       templateProfile.advanced?.endpointId ??
-      (provider.endpointModel ? templateProfile.modelId : ""),
+      (provider.endpointModel && isEndpointModelId(templateProfile.modelId)
+        ? templateProfile.modelId
+        : ""),
     advanced: advancedWithModelCapability(
       provider,
       modelId,
@@ -504,7 +510,9 @@ export function draftFromExistingProfile(
     isDefault: profile.isDefault,
     endpointId:
       profile.advanced?.endpointId ??
-      (provider.endpointModel ? profile.modelId : ""),
+      (provider.endpointModel && isEndpointModelId(profile.modelId)
+        ? profile.modelId
+        : ""),
     advanced: advancedWithModelCapability(
       provider,
       modelId,
@@ -528,7 +536,10 @@ export function toSaveRequest(
     modelId,
     {
       ...draft.advanced,
-      endpointId: provider.endpointModel ? endpointId || undefined : undefined,
+      endpointId:
+        provider.endpointModel && isEndpointModelId(endpointId)
+          ? endpointId
+          : undefined,
     },
     false,
   );
@@ -1223,7 +1234,7 @@ export function DesktopSettingsDialog({
   async function deleteConfiguredProfile(
     profile: RuntimeModelProfileSummary,
   ): Promise<void> {
-    if (!window.confirm(`删除 ${profile.modelId} 的模型配置？`)) {
+    if (!window.confirm(`删除 ${profile.modelDisplayName ?? profile.modelId} 的模型配置？`)) {
       return;
     }
 
@@ -1387,6 +1398,7 @@ export function DesktopSettingsDialog({
                       selectedProvider,
                       selectedProviderDraft.protocol,
                     )}
+                    modelDisplayNames={selectedProvider.modelDisplayNames}
                     modelId={
                       selectedProvider.endpointModel
                         ? selectedProviderDraft.endpointId ||
@@ -1415,7 +1427,7 @@ export function DesktopSettingsDialog({
                     apiDocsURL={selectedProvider.apiDocsURL}
                     templateNote={
                       selectedProvider.endpointModel
-                        ? `运行时模型必须填写控制台创建的 ep-* 推理接入点；模型族为 ${selectedProvider.defaultModel}。`
+                        ? "按量调用可选择官方 Model ID；使用自建推理接入点时可输入 ep-* Endpoint ID。"
                         : selectedProvider.id === "custom"
                           ? "选择接口协议并填写对应的 Base URL。"
                         : null
@@ -1452,14 +1464,17 @@ export function DesktopSettingsDialog({
                     deletingAccount={deletingAgentPlan}
                     onModelChange={(nextModelId) => {
                       setTestFeedback(null);
+                      const usesEndpoint =
+                        selectedProvider.endpointModel &&
+                        isEndpointModelId(nextModelId);
                       setDraft({
                         ...selectedProviderDraft,
                         endpointId: selectedProvider.endpointModel
-                          ? nextModelId
+                          ? usesEndpoint
+                            ? nextModelId
+                            : ""
                           : selectedProviderDraft.endpointId,
-                        modelId: selectedProvider.endpointModel
-                          ? selectedProvider.defaultModel
-                          : nextModelId,
+                        modelId: nextModelId,
                         advanced: advancedWithModelCapability(
                           selectedProvider,
                           nextModelId,
@@ -1558,7 +1573,7 @@ export function DesktopSettingsDialog({
                     brand: providerById.get(profile.providerId)
                       ? providerBrand(providerById.get(profile.providerId)!)
                       : undefined,
-                    modelId: profile.modelId,
+                    modelId: profile.modelDisplayName ?? profile.modelId,
                     protocolLabel: PROTOCOL_LABELS[profile.protocol] ?? profile.protocol,
                     isDefault: profile.isDefault,
                     credentialStatus: credentialStatusLabel(

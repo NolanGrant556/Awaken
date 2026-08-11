@@ -30,6 +30,7 @@ import type { AguiEvent } from "../shared/agui.js";
 import {
   DESKTOP_SELECT_ALL_REQUESTED_CHANNEL,
   isDesktopSelectAllShortcut,
+  isDesktopTabNavigation,
   isDesktopZoomShortcut,
 } from "../shared/desktop-selection.js";
 import { PROJECT_FILE_PREVIEW_INTERACTION_CHANNEL } from "../shared/project-file-preview-interaction.js";
@@ -1075,6 +1076,10 @@ function createMainWindow(): BrowserWindow {
   });
 
   mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (isDesktopTabNavigation(input)) {
+      event.preventDefault();
+      return;
+    }
     if (isDesktopZoomShortcut(input)) {
       event.preventDefault();
       resetMainWindowZoom();
@@ -1098,6 +1103,11 @@ function createMainWindow(): BrowserWindow {
     }
   });
   mainWindow.webContents.on("did-attach-webview", (_event, guest) => {
+    guest.on("before-input-event", (event, input) => {
+      if (isDesktopTabNavigation(input)) {
+        event.preventDefault();
+      }
+    });
     projectFilePreviewManager?.attachGuest(guest);
   });
 

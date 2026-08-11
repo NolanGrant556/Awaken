@@ -213,6 +213,7 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
   },
   deepseek: {
     "deepseek-v4-pro": {
+      supported_protocols: ["openai_chat", "anthropic_messages"],
       context_window: 1_000_000,
       max_output_tokens: 384_000,
       default_max_tokens: DEFAULT_MAX_TOKENS,
@@ -222,12 +223,14 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       reasoning_effort: { levels: ["high", "max"], default_level: "high" },
     },
     "deepseek-v4-flash": {
+      supported_protocols: ["openai_chat", "openai_responses", "anthropic_messages"],
       context_window: 1_000_000,
       max_output_tokens: 384_000,
       default_max_tokens: DEFAULT_MAX_TOKENS,
       supports_vision: false,
       supports_video: false,
       supports_tools: "ready",
+      reasoning_effort: { levels: ["high", "max"], default_level: "high" },
     },
   },
   "kimi-cn": {
@@ -500,6 +503,7 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       supports_vision: false,
       supports_video: false,
       supports_tools: "ready",
+      reasoning_effort: { levels: ["high", "max"], default_level: "max" },
     },
   },
   "glm-coding-plan": {
@@ -510,6 +514,7 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
       supports_vision: false,
       supports_video: false,
       supports_tools: "ready",
+      reasoning_effort: { levels: ["high", "max"], default_level: "max" },
     },
     "glm-5-turbo": {
       context_window: 200_000,
@@ -570,6 +575,18 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
     },
   },
   doubao: {
+    "doubao-seed-2-1-pro-260628": {
+      supported_protocols: ["openai_chat", "openai_responses"],
+      context_window: 256_000,
+      max_output_tokens: 128_000,
+      default_max_tokens: 32_000,
+      supports_vision: true,
+      supports_video: true,
+      supports_tools: "ready",
+      reasoning_effort: { levels: ["low", "high", "max"], default_level: "high" },
+    },
+    // Read compatibility for profiles created before Ark exposed exact,
+    // versioned Model IDs in the provider manifest.
     "doubao-seed-2.1-pro": {
       supported_protocols: ["openai_chat", "openai_responses"],
       context_window: 256_000,

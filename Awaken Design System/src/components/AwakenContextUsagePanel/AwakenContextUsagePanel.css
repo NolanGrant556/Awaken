@@ -143,7 +143,15 @@
 }
 
 .aw-context-usage-panel__segment--conversation,
-.aw-context-usage-panel__dot--conversation,
+.aw-context-usage-panel__dot--conversation {
+  background: var(--aw-text-tertiary);
+}
+
+.aw-context-usage-panel__segment--other,
+.aw-context-usage-panel__dot--other {
+  background: var(--aw-text-disabled);
+}
+
 .aw-context-usage-panel__segment--unknown,
 .aw-context-usage-panel__dot--unknown {
   background: var(--aw-text-tertiary);

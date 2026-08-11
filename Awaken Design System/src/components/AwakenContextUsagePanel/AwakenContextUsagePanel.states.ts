@@ -12,7 +12,7 @@ const noop = () => {};
 export const AwakenContextUsagePanelStates: AwakenContextUsagePanelState[] = [
   {
     id: "breakdown",
-    label: "分类估算",
+    label: "分类与协议开销",
     props: {
       estimatedInputTokens: 92_100,
       effectiveInputWindowTokens: 240_000,
@@ -25,7 +25,8 @@ export const AwakenContextUsagePanelStates: AwakenContextUsagePanelState[] = [
         { id: "mcp", label: "MCP", estimatedTokens: 4_800 },
         { id: "skills", label: "技能", estimatedTokens: 2_400 },
         { id: "memory", label: "记忆", estimatedTokens: 1_800 },
-        { id: "conversation", label: "对话", estimatedTokens: 73_600 },
+        { id: "conversation", label: "对话", estimatedTokens: 70_000 },
+        { id: "other", label: "其他/协议开销", estimatedTokens: 3_600 },
       ],
       onClose: noop,
     },

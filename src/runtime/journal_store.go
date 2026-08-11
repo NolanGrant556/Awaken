@@ -413,6 +413,9 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 				Status:         agentcore.ModelUsageInterrupted, ErrorCode: "usage_unknown",
 				CompletedAt: time.Now().UTC(),
 			}
+			if estimate := intPayload(requestRecord.Payload, "estimated_input_tokens"); estimate > 0 {
+				usage.SentEstimatedInputTokens = &estimate
+			}
 			usageRecord := agentcore.ModelUsageSemanticRecord(
 				journal.ThreadID(), runID, requestRecord.TurnID, requestRecord.SessionID, usage,
 			)

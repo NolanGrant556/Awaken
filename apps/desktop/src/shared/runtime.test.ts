@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculateAutoCompactThreshold,
   effectiveContextWindow,
+  normalizeModelProfileBalance,
   normalizeModelProfileRunConfig,
   normalizeModelProfileSummary,
   normalizeModelProvider,
@@ -79,6 +80,37 @@ describe("runtime shared model provider normalization", () => {
         credentialRevision: 4,
       }),
     ).toMatchObject({ credential_revision: 4 });
+  });
+
+  it("normalizes provider setup links and percentage quota units", () => {
+    expect(normalizeModelProfileBalance({
+      profile_id: "qwen-usage",
+      provider_id: "qwen",
+      model_id: "qwen3.8-max",
+      status: "requires_setup",
+      error: "需要独立管理授权",
+      setup_url: "https://help.aliyun.com/zh/model-studio/model-telemetry",
+      setup_label: "查看 Qwen 监控与授权",
+      detail: {
+        kind: "quota",
+        quotas: [{
+          name: "当前窗口",
+          limit: 100,
+          used: 25,
+          remaining: 75,
+          unit: "percent",
+          unlimited: true,
+        }],
+      },
+    })).toMatchObject({
+      status: "requires_setup",
+      setupURL: "https://help.aliyun.com/zh/model-studio/model-telemetry",
+      setupLabel: "查看 Qwen 监控与授权",
+      detail: {
+        kind: "quota",
+        quotas: [{ unit: "percent", unlimited: true }],
+      },
+    });
   });
 });
 

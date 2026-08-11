@@ -12,7 +12,8 @@ export type AwakenProfileBalanceStatus =
   | "unavailable"
   | "missing_key"
   | "error"
-  | "unsupported";
+  | "unsupported"
+  | "requires_setup";
 
 export type AwakenProfileBalanceAmount = {
   currency: string;
@@ -26,6 +27,8 @@ export type AwakenProfileBalanceQuota = {
   limit: number;
   used: number;
   remaining: number;
+  unit?: "requests" | "percent";
+  unlimited?: boolean;
   resetAt?: string;
 };
 
@@ -43,9 +46,10 @@ export type AwakenProfileBalance = {
   status: AwakenProfileBalanceStatus;
   fetchedAt?: string;
   detail?: AwakenProfileBalanceDetail;
-  localUsage?: Extract<AwakenProfileBalanceDetail, { kind: "usage" }>;
   error?: string;
   credentialIssue?: "unreadable";
+  setupURL?: string;
+  setupLabel?: string;
 };
 
 export type AwakenProfileBalancePanelProps = {
@@ -137,14 +141,14 @@ function BalanceAmountView({ amounts }: { amounts: AwakenProfileBalanceAmount[] 
 }
 
 function QuotaView({ quota }: { quota: AwakenProfileBalanceQuota }) {
-  const progress = quota.limit > 0 ? quota.used / quota.limit : 0;
+  const progress = !quota.unlimited && quota.limit > 0 ? quota.used / quota.limit : 0;
   const percentage = Math.min(100, Math.max(0, progress * 100));
   return (
     <div className="aw-profile-balance-panel__quota">
       <div className="aw-profile-balance-panel__quota-header">
         <span className="aw-profile-balance-panel__quota-name">{quota.name}</span>
         <span className="aw-profile-balance-panel__quota-value">
-          {formatUsedPercentage(quota.used, quota.limit)}
+          {quota.unlimited ? "∞" : formatUsedPercentage(quota.used, quota.limit)}
         </span>
       </div>
       <div className="aw-profile-balance-panel__quota-bar">
@@ -154,8 +158,14 @@ function QuotaView({ quota }: { quota: AwakenProfileBalanceQuota }) {
         />
       </div>
       <div className="aw-profile-balance-panel__quota-meta">
-        已用 {quota.used} · 剩余 {quota.remaining}
-        {quota.resetAt ? <span> · 重置 {formatResetTime(quota.resetAt)}</span> : null}
+        {quota.unlimited ? (
+          "无限制"
+        ) : (
+          <>
+            已用 {quota.used}{quota.unit === "percent" ? "%" : ""} · 剩余 {quota.remaining}{quota.unit === "percent" ? "%" : ""}
+            {quota.resetAt ? <span> · 重置 {formatResetTime(quota.resetAt)}</span> : null}
+          </>
+        )}
       </div>
     </div>
   );
@@ -206,8 +216,10 @@ function BalanceDetail({
       ? "请先配置 API key"
       : unreadable
         ? "无法读取模型密钥，请在设置中重新输入。"
-        : balance.status === "unsupported"
-          ? "当前供应商暂不支持查询用量"
+        : balance.status === "requires_setup"
+          ? balance.error || "需要配置独立的供应商用量管理授权。"
+          : balance.status === "unsupported"
+            ? balance.error || "当前供应商暂不支持查询用量"
           : balance.error || "用量查询失败";
 
   return (
@@ -221,14 +233,18 @@ function BalanceDetail({
               前往设置
             </AwakenButton>
           ) : null}
+          {balance.setupURL ? (
+            <a
+              className="aw-profile-balance-panel__setup-link"
+              href={balance.setupURL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {balance.setupLabel || "打开供应商说明"}
+            </a>
+          ) : null}
         </div>
       )}
-      {balance.localUsage ? (
-        <section className="aw-profile-balance-panel__local-usage" aria-label="Awaken 本地用量">
-          <span className="aw-profile-balance-panel__summary-label">Awaken 本地记录</span>
-          <UsageView detail={balance.localUsage} />
-        </section>
-      ) : null}
     </div>
   );
 }

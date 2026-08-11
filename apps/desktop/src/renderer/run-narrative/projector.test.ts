@@ -82,7 +82,9 @@ describe("projectAguiEventToNarrative", () => {
       toolPreparationPath: "report.md",
       toolPreparationAddedLines: 2,
     });
-    const media = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+    const media = projectAguiEventToNarrative(
+      createInitialRunNarrativeState(),
+      {
       type: "TOOL_CALL_ARGS_DELTA",
       runId: "run-1",
       toolCallId: "image-1",
@@ -90,7 +92,8 @@ describe("projectAguiEventToNarrative", () => {
       delta: '{"prompt":"partial',
       toolPreparationKind: "write",
       toolPreparationAddedLines: 99,
-    });
+      },
+    );
 
     expect(normal.activeItem).toEqual({
       kind: "tool",
@@ -244,12 +247,15 @@ describe("projectAguiEventToNarrative", () => {
     ] as const;
 
     for (const [transitionReason, text] of transitions) {
-      const state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      const state = projectAguiEventToNarrative(
+        createInitialRunNarrativeState(),
+        {
         type: "AWAKEN_TURN_STARTED",
         runId: "run-1",
         turnId: `turn-${transitionReason}`,
         transitionReason,
-      });
+        },
+      );
       expect(state.activeItem).toMatchObject({
         kind: "planning",
         text,
@@ -257,12 +263,15 @@ describe("projectAguiEventToNarrative", () => {
       });
     }
 
-    const initial = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+    const initial = projectAguiEventToNarrative(
+      createInitialRunNarrativeState(),
+      {
       type: "AWAKEN_TURN_STARTED",
       runId: "run-1",
       turnId: "turn-1",
       transitionReason: "initial",
-    });
+      },
+    );
     expect(initial.activeItem).toBeUndefined();
   });
 
@@ -275,8 +284,14 @@ describe("projectAguiEventToNarrative", () => {
         transitionReason: "tool_result_continuation",
       });
 
-    const answering = projectAguiEventToNarrative(waitingState(), textMessageStart());
-    expect(answering.activeItem).toMatchObject({ kind: "answer", status: "active" });
+    const answering = projectAguiEventToNarrative(
+      waitingState(),
+      textMessageStart(),
+    );
+    expect(answering.activeItem).toMatchObject({
+      kind: "answer",
+      status: "active",
+    });
 
     const usingTool = projectAguiEventToNarrative(waitingState(), {
       type: "TOOL_CALL_START",
@@ -284,7 +299,10 @@ describe("projectAguiEventToNarrative", () => {
       toolCallId: "tool-2",
       toolCallName: "Glob",
     });
-    expect(usingTool.activeItem).toMatchObject({ kind: "exploring", status: "active" });
+    expect(usingTool.activeItem).toMatchObject({
+      kind: "exploring",
+      status: "active",
+    });
 
     const finished = projectAguiEventToNarrative(waitingState(), {
       type: "RUN_FINISHED",
@@ -319,7 +337,10 @@ describe("projectAguiEventToNarrative", () => {
   it("reconciles a durable assistant snapshot with already streamed deltas", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(state, textMessageStart());
-    state = projectAguiEventToNarrative(state, textMessageContent("streamed answer"));
+    state = projectAguiEventToNarrative(
+      state,
+      textMessageContent("streamed answer"),
+    );
     state = projectAguiEventToNarrative(state, {
       ...textMessageStart(),
       seq: 32,
@@ -345,13 +366,19 @@ describe("projectAguiEventToNarrative", () => {
       markdown: "streamed answer",
       status: "done",
     });
-    expect([
+    expect(
+      [
       ...state.committedItems,
       ...(state.activeItem ? [state.activeItem] : []),
-    ].map((item) => item.id)).toHaveLength(new Set([
+      ].map((item) => item.id),
+    ).toHaveLength(
+      new Set(
+        [
       ...state.committedItems,
       ...(state.activeItem ? [state.activeItem] : []),
-    ].map((item) => item.id)).size);
+        ].map((item) => item.id),
+      ).size,
+    );
   });
 
   it("reconciles a durable reasoning snapshot with already streamed deltas", () => {
@@ -468,6 +495,124 @@ describe("projectAguiEventToNarrative", () => {
     ]);
     expect(state.committedItems[0]).toMatchObject({ text: "先思考" });
     expect(state.committedItems[1]).toMatchObject({ markdown: "最终回答" });
+  });
+
+  it("reconciles terminal durable snapshots without reactivating rendered thought or answer rows", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "REASONING_MESSAGE_START",
+      rawType: "REASONING_MESSAGE_START",
+      runId: "run-1",
+      messageId: "reasoning-1",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "REASONING_MESSAGE_CONTENT",
+      rawType: "REASONING_MESSAGE_CONTENT",
+      runId: "run-1",
+      messageId: "reasoning-1",
+      delta: "流式思考",
+    });
+    state = projectAguiEventToNarrative(state, textMessageStart());
+    state = projectAguiEventToNarrative(state, textMessageContent("流式回答"));
+    state = projectAguiEventToNarrative(state, textMessageEnd());
+
+    expect(state.activeItem).toBeUndefined();
+    expect(state.committedItems.map((item) => item.id)).toEqual([
+      "thinking:run-1:reasoning-1",
+      "answer:run-1:msg-1",
+    ]);
+
+    const durableReasoningStart = {
+      type: "REASONING_MESSAGE_START",
+      rawType: "REASONING_MESSAGE_START",
+      runId: "run-1",
+      messageId: "reasoning-1",
+      seq: 33,
+      recordId: "rec-reasoning-1",
+    } satisfies AguiEvent;
+    const beforeDurableReasoningStart = state;
+    state = projectAguiEventToNarrative(state, durableReasoningStart);
+    expect(state.committedItems).toBe(
+      beforeDurableReasoningStart.committedItems,
+    );
+    expect(state.activeItem).toBeUndefined();
+    expect(state.committedItems.map((item) => item.id)).toEqual([
+      "thinking:run-1:reasoning-1",
+      "answer:run-1:msg-1",
+    ]);
+
+    state = projectAguiEventToNarrative(state, {
+      ...durableReasoningStart,
+      type: "REASONING_MESSAGE_CONTENT",
+      rawType: "REASONING_MESSAGE_CONTENT",
+      seq: 34,
+      delta: "耐久思考快照",
+    });
+    state = projectAguiEventToNarrative(state, {
+      ...durableReasoningStart,
+      type: "REASONING_MESSAGE_END",
+      rawType: "REASONING_MESSAGE_END",
+      seq: 35,
+    });
+    expect(state.activeItem).toBeUndefined();
+    expect(state.committedItems[0]).toMatchObject({
+      text: "耐久思考快照",
+      status: "done",
+    });
+
+    const durableAnswerStart = {
+      ...textMessageStart(),
+      seq: 36,
+      recordId: "rec-answer-1",
+    } satisfies AguiEvent;
+    const beforeDurableAnswerStart = state;
+    state = projectAguiEventToNarrative(state, durableAnswerStart);
+    expect(state.committedItems).toBe(beforeDurableAnswerStart.committedItems);
+    expect(state.activeItem).toBeUndefined();
+    state = projectAguiEventToNarrative(state, {
+      ...textMessageContent("耐久回答快照"),
+      seq: 37,
+      recordId: "rec-answer-1",
+    });
+    state = projectAguiEventToNarrative(state, {
+      ...textMessageEnd(),
+      seq: 38,
+      recordId: "rec-answer-1",
+    });
+
+    expect(state.activeItem).toBeUndefined();
+    expect(state.committedItems).toEqual([
+      {
+        kind: "thinking",
+        id: "thinking:run-1:reasoning-1",
+        text: "耐久思考快照",
+        status: "done",
+      },
+      {
+        kind: "answer",
+        id: "answer:run-1:msg-1",
+        markdown: "耐久回答快照",
+        status: "done",
+      },
+    ]);
+
+    state = projectAguiEventToNarrative(state, {
+      type: "RUN_FINISHED",
+      rawType: "RUN_FINISHED",
+      runId: "run-1",
+      seq: 39,
+    });
+    expect(state.activeItem).toBeUndefined();
+    expect(state.committedItems.map((item) => item.id)).toEqual([
+      "thinking:run-1:reasoning-1",
+      "answer:run-1:msg-1",
+    ]);
+    expect(state.committedItems[1]).toMatchObject({
+      kind: "answer",
+      markdown: "耐久回答快照",
+      status: "done",
+      isFinal: true,
+    });
   });
 
   it("adds a hint item when a run is cancelled by the user", () => {
@@ -722,7 +867,10 @@ describe("projectAguiEventToNarrative", () => {
       errorCode: "read_artifact_specialized_tool_required",
       message:
         "strategy_change_required: 6 tool failures accumulated (turn=6 run=6); do not repeat the failing approach",
-      recoveryOptions: ["use_specialized_artifact_tool", "change_tool_or_library"],
+      recoveryOptions: [
+        "use_specialized_artifact_tool",
+        "change_tool_or_library",
+      ],
     });
 
     expect(state.committedItems).toEqual([]);
@@ -733,18 +881,32 @@ describe("projectAguiEventToNarrative", () => {
     state = projectAguiEventToNarrative(state, {
       type: "AWAKEN_MEMORY_RECALLED",
       recordId: "memory-recall-1",
-      memories: [{ memoryId: "mem_1", scope: "user", memoryType: "user", revision: 2 }],
+      memories: [
+        { memoryId: "mem_1", scope: "user", memoryType: "user", revision: 2 },
+      ],
     });
     state = projectAguiEventToNarrative(state, {
       type: "AWAKEN_MEMORY_DREAM_COMPLETED",
       recordId: "dream_1",
-      diagnostic: { reports: { user: { updated: 1, superseded: 2, conflicts: 0 } } },
+      diagnostic: {
+        reports: { user: { updated: 1, superseded: 2, conflicts: 0 } },
+      },
     });
 
-    const receipts = state.committedItems.filter((item) => item.kind === "memoryReceipt");
+    const receipts = state.committedItems.filter(
+      (item) => item.kind === "memoryReceipt",
+    );
     expect(receipts).toHaveLength(2);
-    expect(receipts[0]).toMatchObject({ title: "已召回 1 条记忆", detail: "用户 · user · r2", status: "done" });
-    expect(receipts[1]).toMatchObject({ title: "记忆整理完成", detail: "更新 1 条 · 归档 2 条 · 冲突 0 条", status: "done" });
+    expect(receipts[0]).toMatchObject({
+      title: "已召回 1 条记忆",
+      detail: "用户 · user · r2",
+      status: "done",
+    });
+    expect(receipts[1]).toMatchObject({
+      title: "记忆整理完成",
+      detail: "更新 1 条 · 归档 2 条 · 冲突 0 条",
+      status: "done",
+    });
     expect(JSON.stringify(receipts)).not.toContain("topic body");
   });
 
@@ -769,10 +931,13 @@ describe("projectAguiEventToNarrative", () => {
       text: "private host reasoning",
       status: "done",
     });
-    expect(state.activeItem).toMatchObject({
+    expect(state.committedItems).toContainEqual({
       kind: "answer",
+      id: "answer:run-minimax:message-minimax",
       markdown: "最终回答",
+      status: "done",
     });
+    expect(state.activeItem).toBeUndefined();
   });
 
   it("replaces a generic Memory mutation row with its typed receipt", () => {
@@ -797,11 +962,22 @@ describe("projectAguiEventToNarrative", () => {
       toolCallId: "call-memory",
       recordId: "memory-rejected-1",
       errorCode: "memory_revision_conflict",
-      memories: [{ memoryId: "mem_1", scope: "user", memoryType: "feedback", revision: 1 }],
+      memories: [
+        {
+          memoryId: "mem_1",
+          scope: "user",
+          memoryType: "feedback",
+          revision: 1,
+        },
+      ],
     });
 
-    expect(state.committedItems.filter((item) => item.kind === "tool")).toEqual([]);
-    expect(state.committedItems.filter((item) => item.kind === "memoryReceipt")).toHaveLength(1);
+    expect(state.committedItems.filter((item) => item.kind === "tool")).toEqual(
+      [],
+    );
+    expect(
+      state.committedItems.filter((item) => item.kind === "memoryReceipt"),
+    ).toHaveLength(1);
   });
 
   it("deduplicates Dream receipts by task identity instead of terminal status", () => {
@@ -863,7 +1039,9 @@ describe("projectAguiEventToNarrative", () => {
       message: "Session closed",
     });
 
-    const sessions = state.committedItems.filter((item) => item.kind === "acpSession");
+    const sessions = state.committedItems.filter(
+      (item) => item.kind === "acpSession",
+    );
     expect(sessions).toHaveLength(1);
     expect(sessions[0]).toMatchObject({
       id: "acp-session:run-1:claude-code:sess-1",
@@ -898,7 +1076,9 @@ describe("projectAguiEventToNarrative", () => {
       message: "Reading file updated",
     });
 
-    const tools = state.committedItems.filter((item) => item.kind === "acpTool");
+    const tools = state.committedItems.filter(
+      (item) => item.kind === "acpTool",
+    );
     expect(tools).toHaveLength(1);
     expect(tools[0]).toMatchObject({
       id: "acp-tool:run-1:claude-code:sess-1:tool-1",
@@ -1052,7 +1232,10 @@ describe("projectAguiEventToNarrative", () => {
       toolCallId: "call-media",
       toolCallName: "video_generate",
     };
-    state = projectAguiEventToNarrative(state, { type: "TOOL_CALL_START", ...base });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_START",
+      ...base,
+    });
     expect(state.activeItem).toMatchObject({
       kind: "mediaGeneration",
       id: "media:run-media:call-media",
@@ -1103,7 +1286,10 @@ describe("projectAguiEventToNarrative", () => {
       toolCallId: "call-partial-group",
       toolCallName: "image_generate",
     };
-    state = projectAguiEventToNarrative(state, { type: "TOOL_CALL_START", ...base });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_START",
+      ...base,
+    });
     state = projectAguiEventToNarrative(state, {
       type: "TOOL_CALL_ARGS",
       ...base,
@@ -1145,14 +1331,21 @@ describe("projectAguiEventToNarrative", () => {
       toolCallId: "call-video-unknown",
       toolCallName: "video_generate",
     };
-    state = projectAguiEventToNarrative(state, { type: "TOOL_CALL_START", ...base });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_START",
+      ...base,
+    });
     state = projectAguiEventToNarrative(state, {
       type: "AWAKEN_COMMAND_OUTPUT",
       ...base,
       commandStream: "media_status",
-      delta: '{"stage":"queued","message":"视频任务已提交","task_id":"cgt-1"}\n',
+      delta:
+        '{"stage":"queued","message":"视频任务已提交","task_id":"cgt-1"}\n',
     });
-    expect(state.activeItem).toMatchObject({ taskId: "cgt-1", status: "queued" });
+    expect(state.activeItem).toMatchObject({
+      taskId: "cgt-1",
+      status: "queued",
+    });
     state = projectAguiEventToNarrative(state, {
       type: "TOOL_CALL_RESULT",
       ...base,
@@ -1181,11 +1374,18 @@ describe("projectAguiEventToNarrative", () => {
       toolCallId: "call-image-unknown",
       toolCallName: "image_generate",
     };
-    state = projectAguiEventToNarrative(state, { type: "TOOL_CALL_START", ...base });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_START",
+      ...base,
+    });
     state = projectAguiEventToNarrative(state, {
       type: "TOOL_CALL_ARGS",
       ...base,
-      delta: JSON.stringify({ prompt: "十五张", mode: "group", max_images: 15 }),
+      delta: JSON.stringify({
+        prompt: "十五张",
+        mode: "group",
+        max_images: 15,
+      }),
     });
     state = projectAguiEventToNarrative(state, {
       type: "TOOL_CALL_RESULT",
@@ -1209,7 +1409,10 @@ describe("projectAguiEventToNarrative", () => {
       toolCallId: "call-image-group",
       toolCallName: "image_generate",
     };
-    state = projectAguiEventToNarrative(state, { type: "TOOL_CALL_START", ...base });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_START",
+      ...base,
+    });
     state = projectAguiEventToNarrative(state, {
       type: "TOOL_CALL_ARGS",
       ...base,
@@ -1254,7 +1457,10 @@ describe("projectAguiEventToNarrative", () => {
       toolCallId: "call-video-ratio",
       toolCallName: "video_generate",
     };
-    state = projectAguiEventToNarrative(state, { type: "TOOL_CALL_START", ...base });
+    state = projectAguiEventToNarrative(state, {
+      type: "TOOL_CALL_START",
+      ...base,
+    });
     state = projectAguiEventToNarrative(state, {
       type: "TOOL_CALL_ARGS",
       ...base,

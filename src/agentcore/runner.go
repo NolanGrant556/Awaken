@@ -577,6 +577,7 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 			return nil, err
 		}
 	}
+	r.contextGovernor.RecordSentRequestEstimate(snapshot.EstimatedInputTokens)
 	observer := llm.StreamObserver{}
 	if events != nil {
 		observer.OnContent = llm.StreamCallback(events.onLLMDelta)
@@ -603,6 +604,8 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		}
 	}
 	usage := modelUsageRecord(requestID, llmReq.Model, protocol, config, request.Purpose, prepared, started, response, streamErr, ctx.Err())
+	sentEstimatedInputTokens := snapshot.EstimatedInputTokens
+	usage.SentEstimatedInputTokens = &sentEstimatedInputTokens
 	if llmReq.ContextEpoch != nil {
 		usage.ContextEpochID = llmReq.ContextEpoch.EpochID
 		usage.PrefixDigest = llmReq.ContextEpoch.BaselineDigest

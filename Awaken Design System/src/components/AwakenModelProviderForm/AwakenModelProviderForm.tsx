@@ -17,6 +17,8 @@ type AwakenModelProviderChoiceOption = {
   disabled?: boolean;
 };
 
+const EMPTY_MODEL_DISPLAY_NAMES: Record<string, string> = {};
+
 export type AwakenModelProviderTestFeedback = {
   tone: "success" | "error";
   message: string;
@@ -27,6 +29,7 @@ export type AwakenModelProviderFormProps = {
   presentation?: "inline" | "modal";
   modelMode: "custom" | "editable" | "endpoint" | "select";
   models: string[];
+  modelDisplayNames?: Record<string, string>;
   modelId: string;
   protocol?: string;
   protocolOptions?: Array<{ value: string; label: string }>;
@@ -84,11 +87,19 @@ function authHeaderExample(authScheme: string): string {
   }
 }
 
+function modelDisplayValue(
+  modelDisplayNames: Record<string, string>,
+  modelId: string,
+): string {
+  return modelDisplayNames[modelId] ?? modelId;
+}
+
 export function AwakenModelProviderForm({
   providerId,
   presentation = "inline",
   modelMode,
   models,
+  modelDisplayNames = EMPTY_MODEL_DISPLAY_NAMES,
   modelId,
   protocol = "openai_chat",
   protocolOptions = [{ value: "openai_chat", label: "OpenAI Chat Completions" }],
@@ -131,6 +142,9 @@ export function AwakenModelProviderForm({
   onSubmit,
 }: AwakenModelProviderFormProps) {
   const [modelCatalogOpen, setModelCatalogOpen] = useState(false);
+  const [modelInputValue, setModelInputValue] = useState(() =>
+    modelDisplayValue(modelDisplayNames, modelId),
+  );
   const modelCatalogRef = useRef<HTMLDivElement>(null);
   const hasDraftApiKey = authScheme === "none" || apiKey.trim().length > 0;
   const hasTestTarget =
@@ -141,6 +155,10 @@ export function AwakenModelProviderForm({
   const modelInputId = `${fieldId}-model-input`;
   const modelCatalogId = `${fieldId}-model-catalog`;
   const authHeaderExampleId = `${fieldId}-auth-header-example`;
+
+  useEffect(() => {
+    setModelInputValue(modelDisplayValue(modelDisplayNames, modelId));
+  }, [modelId, modelDisplayNames]);
 
   useEffect(() => {
     if (!modelCatalogOpen) return;
@@ -224,13 +242,19 @@ export function AwakenModelProviderForm({
         </div>
       ) : modelMode === "endpoint" || modelMode === "editable" ? (
         <div className="model-provider-field">
-          <label id={modelLabelId} htmlFor={modelInputId}>模型</label>
+          <label id={modelLabelId} htmlFor={modelInputId}>
+            {modelMode === "endpoint" ? "模型 / 推理接入点" : "模型"}
+          </label>
           <div className="model-provider-model-combobox" ref={modelCatalogRef}>
             <input
               id={modelInputId}
               role="combobox"
-              value={modelId}
-              placeholder={modelMode === "endpoint" ? "输入推理接入点 ID" : "选择或输入模型 ID"}
+              value={modelInputValue}
+              placeholder={
+                modelMode === "endpoint"
+                  ? "选择或输入 Model ID / Endpoint ID"
+                  : "选择或输入模型 ID"
+              }
               autoComplete="off"
               aria-labelledby={modelLabelId}
               aria-controls={modelCatalogId}
@@ -242,6 +266,7 @@ export function AwakenModelProviderForm({
                 if (event.key === "ArrowDown") setModelCatalogOpen(true);
               }}
               onChange={(event) => {
+                setModelInputValue(event.target.value);
                 onModelChange(event.target.value);
                 setModelCatalogOpen(true);
               }}
@@ -271,11 +296,12 @@ export function AwakenModelProviderForm({
                     role="option"
                     aria-selected={model === modelId}
                     onClick={() => {
+                      setModelInputValue(modelDisplayValue(modelDisplayNames, model));
                       onModelChange(model);
                       setModelCatalogOpen(false);
                     }}
                   >
-                    <span>{model}</span>
+                    <span>{modelDisplayValue(modelDisplayNames, model)}</span>
                     {model === modelId ? <CheckCircle2 size={15} strokeWidth={2} /> : null}
                   </button>
                 ))}
@@ -289,7 +315,10 @@ export function AwakenModelProviderForm({
           {renderChoiceControl(
             modelLabelId,
             modelId,
-            models.map((model) => ({ value: model, label: model })),
+            models.map((model) => ({
+              value: model,
+              label: modelDisplayValue(modelDisplayNames, model),
+            })),
             onModelChange,
           )}
         </div>

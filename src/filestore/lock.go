@@ -69,7 +69,7 @@ func AcquireLock(path, ownerID string, ttl time.Duration) (*FileLock, error) {
 		if !errors.Is(err, os.ErrExist) {
 			return nil, fmt.Errorf("filestore: create lock file: %w", err)
 		}
-		stale, observed, staleErr := lockIsStale(path)
+		stale, observed, staleErr := lockIsStale(path, ttl)
 		if staleErr != nil {
 			return nil, staleErr
 		}
@@ -126,7 +126,7 @@ func (l *FileLock) Refresh() error {
 	return nil
 }
 
-func lockIsStale(path string) (bool, []byte, error) {
+func lockIsStale(path string, ttl time.Duration) (bool, []byte, error) {
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return true, nil, nil
@@ -136,8 +136,25 @@ func lockIsStale(path string) (bool, []byte, error) {
 	}
 	var owner lockOwner
 	if err := json.Unmarshal(data, &owner); err != nil {
-		// An unreadable lock file cannot prove a live owner, but reclaiming a
-		// lock we cannot understand is unsafe. Fail closed.
+		// O_EXCL makes the empty lock path visible before the owner payload is
+		// written. A process terminated in that small window can therefore leave
+		// an empty or partial lock behind. Keep a fresh unreadable lock fail-closed
+		// so an in-flight writer cannot be displaced, but let the same TTL that
+		// fences a valid owner expire the abandoned initialization. AcquireLock
+		// re-reads and compares the bytes before reclaiming, so a writer that
+		// finishes while we inspect the path wins the race.
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return false, data, fmt.Errorf("filestore: stat unreadable lock owner at %s: %w", path, statErr)
+		}
+		now := time.Now().UTC()
+		modifiedAt := info.ModTime().UTC()
+		if modifiedAt.After(now) {
+			return false, data, fmt.Errorf("filestore: unreadable lock owner at %s has a future modification time %s: %w", path, modifiedAt.Format(time.RFC3339Nano), err)
+		}
+		if now.Sub(modifiedAt) >= ttl {
+			return true, data, nil
+		}
 		return false, data, fmt.Errorf("filestore: unreadable lock owner at %s: %w", path, err)
 	}
 	if !owner.ExpiresAt.IsZero() && time.Now().UTC().After(owner.ExpiresAt) {

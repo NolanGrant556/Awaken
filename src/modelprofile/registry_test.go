@@ -20,7 +20,7 @@ var expectedProtocols = map[string][]string{
 	"minimax":               []string{"openai_chat", "openai_responses", "anthropic_messages"},
 	"glm":                   []string{"openai_chat", "anthropic_messages"},
 	"qwen":                  []string{"openai_chat", "openai_responses", "anthropic_messages"},
-	"doubao":                []string{"openai_chat"},
+	"doubao":                []string{"openai_chat", "openai_responses"},
 	"volcengine-agent-plan": []string{"openai_chat", "anthropic_messages"},
 }
 
@@ -90,6 +90,21 @@ func TestBuiltinProvidersIncludeRequiredDefaults(t *testing.T) {
 	if got := google.SupportedProtocols; !reflect.DeepEqual(got, []string{"openai_chat"}) {
 		t.Fatalf("Google model protocol contract mismatch: %v", got)
 	}
+	if got := google.ReasoningEffort; got == nil || !reflect.DeepEqual(got.Levels, []string{"low", "high"}) || got.DefaultLevel != "high" {
+		t.Fatalf("Google reasoning effort contract mismatch: %+v", got)
+	}
+	if got := seen["glm"].ModelCapabilities["glm-5.2"].ReasoningEffort; got == nil || !reflect.DeepEqual(got.Levels, []string{"high", "max"}) || got.DefaultLevel != "max" {
+		t.Fatalf("GLM API reasoning effort contract mismatch: %+v", got)
+	}
+	if got := seen["glm-coding-plan"].ModelCapabilities["glm-5.2"].ReasoningEffort; got == nil || !reflect.DeepEqual(got.Levels, []string{"high", "max"}) || got.DefaultLevel != "max" {
+		t.Fatalf("GLM Coding Plan reasoning effort contract mismatch: %+v", got)
+	}
+	if got := seen["deepseek"].ModelCapabilities["deepseek-v4-pro"].SupportedProtocols; !reflect.DeepEqual(got, []string{"openai_chat", "anthropic_messages"}) {
+		t.Fatalf("DeepSeek V4 Pro protocol contract mismatch: %v", got)
+	}
+	if got := seen["deepseek"].ModelCapabilities["deepseek-v4-flash"].SupportedProtocols; !reflect.DeepEqual(got, allLLMProtocols()) {
+		t.Fatalf("DeepSeek V4 Flash protocol contract mismatch: %v", got)
+	}
 	if got := seen["qwen"].ModelCapabilities["qwen3.8-max"].SupportedProtocols; !reflect.DeepEqual(got, allLLMProtocols()) {
 		t.Fatalf("Qwen model protocol contract mismatch: %v", got)
 	}
@@ -145,6 +160,23 @@ func TestProviderByID(t *testing.T) {
 		t.Fatalf("unexpected display name %q", provider.DisplayName)
 	}
 	if provider, ok := ProviderByID("doubao"); !ok || !provider.EndpointModel {
-		t.Fatal("doubao must resolve as an endpoint-model provider")
+		t.Fatal("doubao must resolve as a dual Model ID / Endpoint ID provider")
+	} else {
+		if provider.DefaultModel != "doubao-seed-2-1-pro-260628" {
+			t.Fatalf("unexpected Doubao default model %q", provider.DefaultModel)
+		}
+		if !reflect.DeepEqual(provider.Models, []string{
+			"doubao-seed-evolving",
+			"doubao-seed-2-1-pro-260628",
+			"doubao-seed-2-1-turbo-260628",
+			"doubao-seed-2-0-code-preview-260215",
+			"doubao-seed-2-0-pro-260215",
+			"doubao-seed-2-0-lite-260428",
+		}) {
+			t.Fatalf("unexpected Doubao model manifest: %v", provider.Models)
+		}
+		if got := provider.ModelDisplayNames["doubao-seed-2-1-pro-260628"]; got != "Doubao-Seed-2.1-Pro" {
+			t.Fatalf("unexpected Doubao model display name %q", got)
+		}
 	}
 }

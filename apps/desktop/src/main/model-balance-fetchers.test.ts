@@ -3,6 +3,7 @@ import {
   fetchDeepSeekBalance,
   fetchKimiBalance,
   fetchKimiCodingBalance,
+  fetchMiniMaxTokenPlanBalance,
   fetchOpenAIOrganizationUsage,
   fetchAnthropicOrganizationUsage,
   BalanceFetchError,
@@ -371,5 +372,160 @@ describe("fetchKimiBalance", () => {
         topped_up: 3.00001,
       }],
     });
+  });
+});
+
+describe("fetchMiniMaxTokenPlanBalance", () => {
+  it("queries the documented China endpoint with the existing Token Plan key", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      expect(String(input)).toBe("https://www.minimaxi.com/v1/token_plan/remains");
+      const headers = new Headers(init?.headers);
+      expect(headers.get("Authorization")).toBe("Bearer minimax-plan-key");
+      return new Response(JSON.stringify({
+        model_remains: [{
+          model_name: "general",
+          current_interval_total_count: 200,
+          current_interval_usage_count: 50,
+          remains_time: 3_600_000,
+          current_weekly_total_count: 1000,
+          current_weekly_usage_count: 300,
+          weekly_remains_time: 86_400_000,
+        }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchMiniMaxTokenPlanBalance(
+      "https://api.minimaxi.com/v1",
+      "minimax-plan-key",
+    )).resolves.toMatchObject({
+      kind: "quota",
+      quotas: [
+        {
+          name: "5 小时额度",
+          limit: 200,
+          used: 50,
+          remaining: 150,
+          unit: "requests",
+          reset_at: expect.any(String),
+        },
+        {
+          name: "周额度",
+          limit: 1000,
+          used: 300,
+          remaining: 700,
+          unit: "requests",
+          reset_at: expect.any(String),
+        },
+      ],
+    });
+  });
+
+  it("uses the provider remaining percentages for time-based plans", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      model_remains: [{
+        model_name: "general",
+        current_interval_total_count: 0,
+        current_interval_usage_count: 0,
+        current_interval_remaining_percent: 99,
+        current_weekly_total_count: 0,
+        current_weekly_usage_count: 0,
+        current_weekly_remaining_percent: 88,
+      }, {
+        model_name: "video",
+        current_interval_remaining_percent: 40,
+        current_weekly_remaining_percent: 30,
+      }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    await expect(fetchMiniMaxTokenPlanBalance(
+      "https://api.minimaxi.com/v1",
+      "minimax-plan-key",
+    )).resolves.toEqual({
+      kind: "quota",
+      quotas: [
+        {
+          name: "5 小时额度",
+          limit: 100,
+          used: 1,
+          remaining: 99,
+          unit: "percent",
+        },
+        {
+          name: "周额度",
+          limit: 100,
+          used: 12,
+          remaining: 88,
+          unit: "percent",
+        },
+      ],
+    });
+  });
+
+  it("maps MiniMax status 3 to an unlimited weekly quota", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      model_remains: [{
+        model_name: "general",
+        current_interval_status: 1,
+        current_interval_remaining_percent: 100,
+        remains_time: 10_000,
+        current_weekly_status: 3,
+        current_weekly_remaining_percent: 100,
+        weekly_remains_time: 20_000,
+      }],
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    await expect(fetchMiniMaxTokenPlanBalance(
+      "https://api.minimaxi.com/v1",
+      "minimax-plan-key",
+    )).resolves.toEqual({
+      kind: "quota",
+      quotas: [
+        {
+          name: "5 小时额度",
+          limit: 100,
+          used: 0,
+          remaining: 100,
+          unit: "percent",
+          reset_at: expect.any(String),
+        },
+        {
+          name: "周额度",
+          limit: 0,
+          used: 0,
+          remaining: 0,
+          unlimited: true,
+        },
+      ],
+    });
+  });
+
+  it("selects the documented international endpoint for global profiles", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      expect(String(input)).toBe("https://www.minimax.io/v1/token_plan/remains");
+      return new Response(JSON.stringify({
+        model_remains: [{
+          model_name: "general",
+          current_interval_remaining_percent: 100,
+        }],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchMiniMaxTokenPlanBalance(
+      "https://api.minimax.io/v1",
+      "minimax-plan-key",
+    )).resolves.toMatchObject({ kind: "quota" });
+  });
+
+  it("rejects responses without a usable quota", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      model_remains: [],
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    await expect(fetchMiniMaxTokenPlanBalance(
+      "https://api.minimaxi.com/v1",
+      "minimax-plan-key",
+    )).rejects.toBeInstanceOf(BalanceFetchError);
   });
 });

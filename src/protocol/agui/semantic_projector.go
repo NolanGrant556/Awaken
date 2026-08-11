@@ -14,8 +14,25 @@ import (
 // Live SSE and transcript replay must share this projector.
 func ProjectSemanticRecords(records []agentcore.SemanticRecord) []Event {
 	out := make([]Event, 0, len(records)*2)
+	sentEstimates := make(map[string]int)
 	for _, record := range records {
+		if record.Kind == agentcore.SemanticKindModelRequest {
+			requestID := stringFromAny(record.Payload["request_id"])
+			estimate := intFromAny(record.Payload["estimated_input_tokens"])
+			if requestID != "" && estimate > 0 {
+				sentEstimates[requestID] = estimate
+			}
+		}
 		frames := ProjectSemanticRecord(record)
+		for index := range frames {
+			usage := frames[index].ModelUsage
+			if usage == nil || usage.SentEstimatedInputTokens != nil {
+				continue
+			}
+			if estimate := sentEstimates[usage.RequestID]; estimate > 0 {
+				usage.SentEstimatedInputTokens = &estimate
+			}
+		}
 		out = append(out, frames...)
 	}
 	return out
@@ -884,7 +901,8 @@ func modelUsageRecordFromWire(value *ModelUsageRecord) agentcore.ModelUsageRecor
 		CacheMode:       value.CacheMode, CacheKeyApplied: value.CacheKeyApplied,
 		ContextEpochID: value.ContextEpochID, PrefixDigest: value.PrefixDigest, InvalidationReason: value.InvalidationReason,
 		RetryIndex: value.RetryIndex, AuxiliaryFallback: value.AuxiliaryFallback,
-		InputTokens: cloneIntPointer(value.InputTokens), CachedInputTokens: cloneIntPointer(value.CachedInputTokens),
+		SentEstimatedInputTokens: cloneIntPointer(value.SentEstimatedInputTokens),
+		InputTokens:              cloneIntPointer(value.InputTokens), CachedInputTokens: cloneIntPointer(value.CachedInputTokens),
 		UncachedInputTokens: cloneIntPointer(value.UncachedInputTokens), CacheWriteTokens: cloneIntPointer(value.CacheWriteTokens),
 		OutputTokens: cloneIntPointer(value.OutputTokens), ReasoningTokens: cloneIntPointer(value.ReasoningTokens),
 		TotalTokens:   cloneIntPointer(value.TotalTokens),

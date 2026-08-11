@@ -254,6 +254,52 @@ func TestMergeCachedCapabilityPreservesProviderNativeEffortLabels(t *testing.T) 
 	}
 }
 
+func TestUserStoreResolvesDoubaoModelAndEndpointSelectorsSeparately(t *testing.T) {
+	root := t.TempDir()
+	writeUserStoreFixture(t, root, `{
+  "version": 3,
+  "profiles": [
+    {"id":"doubao-model","providerId":"doubao","modelId":"doubao-seed-2-1-pro-260628","protocol":"openai_chat","enabled":true,"isDefault":true},
+    {"id":"doubao-endpoint","providerId":"doubao","modelId":"ep-custom-endpoint","protocol":"openai_responses","enabled":true,"isDefault":false,"advanced":{"endpointId":"ep-custom-endpoint"}}
+  ]
+}`, "AWAKEN_API_KEY_doubao-model=model-key\nAWAKEN_API_KEY_doubao-endpoint=endpoint-key\n")
+
+	store := NewUserStore(root)
+	direct, err := store.Resolve("doubao-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if direct.ModelID != "doubao-seed-2-1-pro-260628" || direct.CapabilityModelID != direct.ModelID || direct.ModelSelectorKind != "model" || direct.EndpointSelector != "" {
+		t.Fatalf("unexpected direct Doubao profile: %+v", direct)
+	}
+
+	endpoint, err := store.Resolve("doubao-endpoint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if endpoint.ModelID != "ep-custom-endpoint" || endpoint.CapabilityModelID != "ep-custom-endpoint" || endpoint.ModelSelectorKind != "endpoint" || endpoint.EndpointSelector != "ep-custom-endpoint" {
+		t.Fatalf("unexpected endpoint Doubao profile: %+v", endpoint)
+	}
+}
+
+func TestUserStoreMigratesLegacyDoubaoDisplayAlias(t *testing.T) {
+	root := t.TempDir()
+	writeUserStoreFixture(t, root, `{
+  "version": 3,
+  "profiles": [
+    {"id":"doubao-legacy","providerId":"doubao","modelId":"doubao-seed-2.1-pro","protocol":"openai_chat","enabled":true,"isDefault":true}
+  ]
+}`, "AWAKEN_API_KEY_doubao-legacy=legacy-key\n")
+
+	legacy, err := NewUserStore(root).Resolve("doubao-legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.ModelID != "doubao-seed-2-1-pro-260628" || legacy.CapabilityModelID != legacy.ModelID || legacy.ModelSelectorKind != "model" {
+		t.Fatalf("legacy Doubao profile was not normalized: %+v", legacy)
+	}
+}
+
 func writeUserStoreFixture(t *testing.T, root, models, env string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(root, "config"), 0o700); err != nil {

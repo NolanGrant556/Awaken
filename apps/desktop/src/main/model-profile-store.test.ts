@@ -140,12 +140,29 @@ describe("ModelProfileStore", () => {
     });
     expect(providers.find((provider) => provider.id === "doubao")).toMatchObject({
       base_url: "https://ark.cn-beijing.volces.com/api/v3",
+      default_model: "doubao-seed-2-1-pro-260628",
+      models: expect.arrayContaining([
+        "doubao-seed-evolving",
+        "doubao-seed-2-1-pro-260628",
+        "doubao-seed-2-1-turbo-260628",
+        "doubao-seed-2-0-code-preview-260215",
+        "doubao-seed-2-0-pro-260215",
+        "doubao-seed-2-0-lite-260428",
+      ]),
+      model_display_names: {
+        "doubao-seed-evolving": "Doubao-Seed-Evolving",
+        "doubao-seed-2-1-pro-260628": "Doubao-Seed-2.1-Pro",
+        "doubao-seed-2-1-turbo-260628": "Doubao-Seed-2.1-Turbo",
+        "doubao-seed-2-0-code-preview-260215": "Doubao-Seed-2.0-Code",
+        "doubao-seed-2-0-pro-260215": "Doubao-Seed-2.0-Pro",
+        "doubao-seed-2-0-lite-260428": "Doubao-Seed-2.0-Lite",
+      },
       protocol_base_urls: {
         openai_chat: "https://ark.cn-beijing.volces.com/api/v3",
         openai_responses: "https://ark.cn-beijing.volces.com/api/v3",
       },
       model_capabilities: {
-        "doubao-seed-2.1-pro": expect.objectContaining({
+        "doubao-seed-2-1-pro-260628": expect.objectContaining({
           supported_protocols: ["openai_chat", "openai_responses"],
         }),
       },
@@ -617,7 +634,40 @@ describe("ModelProfileStore", () => {
     );
   });
 
-  it("tests Doubao Ark Responses on the official v3 endpoint", async () => {
+  it("tests a direct Doubao Ark Model ID without requiring an endpoint", async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ choices: [] }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new ModelProfileStore(configDir).testProfile({
+      providerId: "doubao",
+      displayName: "Doubao Ark",
+      modelId: "doubao-seed-2-1-pro-260628",
+      baseURL: "https://ark.cn-beijing.volces.com/api/v3",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "test-key",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      message: "连接测试通过：服务已响应 chat/completions。",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          model: "doubao-seed-2-1-pro-260628",
+          messages: [{ role: "user", content: "ping" }],
+          stream: false,
+        }),
+      }),
+    );
+  });
+
+  it("tests a Doubao Ark Endpoint ID on the official Responses endpoint", async () => {
     const fetchMock = vi.fn(
       async () => new Response(JSON.stringify({ output_text: "ok" }), { status: 200 }),
     );
@@ -626,7 +676,7 @@ describe("ModelProfileStore", () => {
     const result = await new ModelProfileStore(configDir).testProfile({
       providerId: "doubao",
       displayName: "Doubao Ark",
-      modelId: "doubao-seed-2.1-pro",
+      modelId: "doubao-seed-2-1-pro-260628",
       baseURL: "https://ark.cn-beijing.volces.com/api/v3",
       protocol: "openai_responses",
       authScheme: "bearer",
@@ -650,6 +700,67 @@ describe("ModelProfileStore", () => {
         }),
       }),
     );
+  });
+
+  it("saves direct Doubao Model IDs and keeps ep-* as a separate selector kind", async () => {
+    const store = new ModelProfileStore(configDir);
+    const direct = await store.saveProfile({
+      providerId: "doubao",
+      modelId: "doubao-seed-2-1-pro-260628",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "direct-key",
+      isDefault: true,
+    });
+    const endpoint = await store.saveProfile({
+      providerId: "doubao",
+      modelId: "ep-custom-endpoint",
+      protocol: "openai_responses",
+      authScheme: "bearer",
+      apiKey: "endpoint-key",
+      advanced: { endpointId: "ep-custom-endpoint" },
+      isDefault: false,
+    });
+
+    expect(direct).toMatchObject({
+      model_id: "doubao-seed-2-1-pro-260628",
+      model_display_name: "Doubao-Seed-2.1-Pro",
+    });
+
+    await expect(store.resolveRunProfile(direct.id)).resolves.toMatchObject({
+      modelId: "doubao-seed-2-1-pro-260628",
+      capabilityModelId: "doubao-seed-2-1-pro-260628",
+      modelSelectorKind: "model",
+      endpointSelector: undefined,
+    });
+    await expect(store.resolveRunProfile(endpoint.id)).resolves.toMatchObject({
+      modelId: "ep-custom-endpoint",
+      capabilityModelId: "ep-custom-endpoint",
+      modelSelectorKind: "endpoint",
+      endpointSelector: "ep-custom-endpoint",
+    });
+  });
+
+  it("migrates the old Doubao display alias to the exact Model ID", async () => {
+    const store = new ModelProfileStore(configDir);
+    const saved = await store.saveProfile({
+      providerId: "doubao",
+      modelId: "doubao-seed-2.1-pro",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "legacy-key",
+      isDefault: true,
+    });
+
+    expect(saved).toMatchObject({
+      model_id: "doubao-seed-2-1-pro-260628",
+      model_display_name: "Doubao-Seed-2.1-Pro",
+    });
+    await expect(store.resolveRunProfile(saved.id)).resolves.toMatchObject({
+      modelId: "doubao-seed-2-1-pro-260628",
+      capabilityModelId: "doubao-seed-2-1-pro-260628",
+      modelSelectorKind: "model",
+    });
   });
 
   it("fails closed for unsupported official protocols and keeps custom providers protocol-flexible", async () => {
@@ -844,7 +955,7 @@ describe("ModelProfileStore", () => {
       store.refreshProviderCatalog({
         providerId: "doubao",
         displayName: "Doubao Ark",
-        modelId: "doubao-seed-2.1-pro",
+        modelId: "doubao-seed-2-1-pro-260628",
         baseURL: "https://ark.cn-beijing.volces.com/api/v3",
         protocol: "openai_chat",
         authScheme: "bearer",
@@ -2047,7 +2158,7 @@ describe("ModelProfileStore", () => {
   });
 
   describe("fetchBalances", () => {
-    it("keeps Google official quota unsupported while exposing durable local usage", async () => {
+    it("explains Google Cloud monitoring setup without aggregating local usage", async () => {
       const store = new ModelProfileStore(configDir);
       const profile = await store.saveProfile({
         providerId: "google",
@@ -2071,21 +2182,16 @@ describe("ModelProfileStore", () => {
         },
       })}\n`, "utf8");
 
-      await expect(store.fetchBalances()).resolves.toEqual([
+      const balances = await store.fetchBalances();
+      expect(balances).toEqual([
         expect.objectContaining({
           provider_id: "google",
-          status: "unsupported",
-          error: expect.stringContaining("没有公开余额接口"),
-          local_usage: expect.objectContaining({
-            kind: "usage",
-            metrics: expect.arrayContaining([
-              { name: "Awaken 本地输入", value: 100, unit: "tokens" },
-              { name: "Awaken 本地缓存输入", value: 40, unit: "tokens" },
-              { name: "Awaken 本地输出", value: 20, unit: "tokens" },
-            ]),
-          }),
+          status: "requires_setup",
+          error: expect.stringContaining("Google Cloud"),
+          setup_url: expect.stringContaining("gemini-api/docs/billing"),
         }),
       ]);
+      expect(balances[0]).not.toHaveProperty("local_usage");
     });
 
     it("queries the official Kimi API balance endpoint", async () => {
@@ -2123,6 +2229,92 @@ describe("ModelProfileStore", () => {
           amounts: [{ currency: "CNY", total: 12.5, granted: 2.5, topped_up: 10 }],
         },
       });
+    });
+
+    it("queries MiniMax Token Plan quota with the saved subscription key", async () => {
+      const fetchMock = vi.fn(async (input: string | URL | Request) => {
+        expect(String(input)).toBe("https://www.minimaxi.com/v1/token_plan/remains");
+        return new Response(JSON.stringify({
+          model_remains: [{
+            model_name: "general",
+            current_interval_remaining_percent: 75,
+            current_weekly_remaining_percent: 60,
+          }, {
+            model_name: "video",
+            current_interval_remaining_percent: 10,
+          }],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const store = new ModelProfileStore(configDir);
+      await store.saveProfile({
+        providerId: "minimax-token-plan",
+        modelId: "MiniMax-M3",
+        apiKey: "minimax-plan-key",
+        enabled: true,
+        isDefault: true,
+      });
+
+      await expect(store.fetchBalances()).resolves.toEqual([
+        expect.objectContaining({
+          provider_id: "minimax-token-plan",
+          status: "available",
+          detail: {
+            kind: "quota",
+            quotas: [
+              expect.objectContaining({
+                name: "5 小时额度",
+                remaining: 75,
+                unit: "percent",
+              }),
+              expect.objectContaining({
+                name: "周额度",
+                remaining: 60,
+                unit: "percent",
+              }),
+            ],
+          },
+        }),
+      ]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("explains management authorization for Qwen and Doubao instead of using inference keys", async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const store = new ModelProfileStore(configDir);
+      await store.saveProfile({
+        providerId: "qwen",
+        modelId: "qwen3.8-max",
+        apiKey: "dashscope-key",
+        enabled: true,
+        isDefault: true,
+      });
+      await store.saveProfile({
+        providerId: "doubao",
+        modelId: "doubao-seed-2-1-pro-260628",
+        apiKey: "ark-inference-key",
+        enabled: true,
+        isDefault: false,
+      });
+
+      const balances = await store.fetchBalances();
+
+      expect(balances).toEqual([
+        expect.objectContaining({
+          provider_id: "qwen",
+          status: "requires_setup",
+          error: expect.stringContaining("AccessKey"),
+          setup_url: expect.stringContaining("model-telemetry"),
+        }),
+        expect.objectContaining({
+          provider_id: "doubao",
+          status: "requires_setup",
+          error: expect.stringContaining("AK/SK"),
+          setup_url: expect.stringContaining("GetInferenceUsage"),
+        }),
+      ]);
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it("returns missing_key status for profiles without a .env key", async () => {

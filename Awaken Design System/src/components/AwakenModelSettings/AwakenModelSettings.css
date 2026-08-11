@@ -8,6 +8,24 @@
   background: transparent;
 }
 
+.aw-model-settings-page__scroll-thumb {
+  position: absolute;
+  top: 0;
+  right: 3px;
+  z-index: 6;
+  width: 4px;
+  height: var(--aw-model-scroll-thumb-height, 44px);
+  border-radius: var(--aw-radius-pill);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 52%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(var(--aw-model-scroll-thumb-offset, 172px));
+}
+
+.aw-model-settings-page[data-scrollable="true"] > .aw-model-settings-page__scroll-thumb {
+  opacity: 1;
+}
+
 .aw-model-settings-page__content {
   box-sizing: border-box;
   width: min(calc(100% - 36px), var(--model-settings-content-width, 1120px));

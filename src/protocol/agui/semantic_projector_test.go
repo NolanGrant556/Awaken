@@ -429,7 +429,7 @@ func TestProjectSemanticContextSnapshotAndModelUsageForLiveReplay(t *testing.T) 
 	}
 	usage := agentcore.ModelUsageRecord{
 		SchemaVersion: 1, RequestID: "req_1", Purpose: "agent_turn", ModelID: "model",
-		ProtocolFamily: "openai_chat", ReasoningPolicy: "max", InputTokens: intPtr(40), OutputTokens: intPtr(2), TotalTokens: intPtr(42),
+		ProtocolFamily: "openai_chat", ReasoningPolicy: "max", SentEstimatedInputTokens: intPtr(38), InputTokens: intPtr(40), OutputTokens: intPtr(2), TotalTokens: intPtr(42),
 		UsageComplete: true, RetryIndex: 2, AuxiliaryFallback: true, CalculatedCostUSD: floatPtr(0.125), Currency: "USD",
 		PricingSnapshot:      &agentcore.PricingSnapshot{SnapshotID: "price_1", ProviderID: "deepseek", ModelID: "model", Currency: "USD", UnitTokens: 1_000_000, EffectiveDate: "2026-07-19", SourceURL: "https://example.test/pricing"},
 		RateLimitObservation: &agentcore.RateLimitObservation{RequestRemaining: "47", TokenRemaining: "12000", ObservedAt: now},
@@ -454,6 +454,9 @@ func TestProjectSemanticContextSnapshotAndModelUsageForLiveReplay(t *testing.T) 
 	if frames[1].ModelUsage == nil || frames[1].ModelUsage.RequestID != "req_1" || frames[1].ModelUsage.InputTokens == nil || *frames[1].ModelUsage.InputTokens != 40 {
 		t.Fatalf("model usage was lost: %+v", frames[1])
 	}
+	if frames[1].ModelUsage.SentEstimatedInputTokens == nil || *frames[1].ModelUsage.SentEstimatedInputTokens != 38 {
+		t.Fatalf("sent-request estimate was lost: %+v", frames[1].ModelUsage)
+	}
 	if frames[1].ModelUsage.ReasoningPolicy != "max" {
 		t.Fatalf("model usage reasoning policy was lost: %+v", frames[1].ModelUsage)
 	}
@@ -463,11 +466,29 @@ func TestProjectSemanticContextSnapshotAndModelUsageForLiveReplay(t *testing.T) 
 	if roundTrip := modelUsageRecordFromWire(frames[1].ModelUsage); roundTrip.ReasoningPolicy != "max" {
 		t.Fatalf("wire-to-semantic reasoning policy was lost: %+v", roundTrip)
 	}
+	if roundTrip := modelUsageRecordFromWire(frames[1].ModelUsage); roundTrip.SentEstimatedInputTokens == nil || *roundTrip.SentEstimatedInputTokens != 38 {
+		t.Fatalf("wire-to-semantic sent-request estimate was lost: %+v", roundTrip)
+	}
 	if roundTrip := modelUsageRecordFromWire(frames[1].ModelUsage); roundTrip.RateLimitObservation == nil || roundTrip.RateLimitObservation.TokenRemaining != "12000" {
 		t.Fatalf("wire-to-semantic rate-limit observation was lost: %+v", roundTrip)
 	}
 	if frames[1].ModelUsage.RetryIndex != 2 || !frames[1].ModelUsage.AuxiliaryFallback || frames[1].ModelUsage.CalculatedCostUSD == nil || frames[1].ModelUsage.PricingSnapshot == nil {
 		t.Fatalf("pricing/retry fields were lost: %+v", frames[1].ModelUsage)
+	}
+
+	legacyUsage := usage
+	legacyUsage.SentEstimatedInputTokens = nil
+	legacyRecords := []agentcore.SemanticRecord{
+		agentcore.ModelRequestSemanticRecord("thread", "run", "turn", "session", snapshot, llm.RequestPurposeAgentTurn),
+		agentcore.ModelUsageSemanticRecord("thread", "run", "turn", "session", legacyUsage),
+	}
+	for index := range legacyRecords {
+		legacyRecords[index].Seq = uint64(index + 1)
+		legacyRecords[index].Timestamp = now
+	}
+	legacyFrames := ProjectSemanticRecords(legacyRecords)
+	if len(legacyFrames) != 1 || legacyFrames[0].ModelUsage == nil || legacyFrames[0].ModelUsage.SentEstimatedInputTokens == nil || *legacyFrames[0].ModelUsage.SentEstimatedInputTokens != 42 {
+		t.Fatalf("legacy replay did not recover sent-request estimate: %+v", legacyFrames)
 	}
 
 	legacy := ProjectSemanticRecord(agentcore.SemanticRecord{

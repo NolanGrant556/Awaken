@@ -95,7 +95,12 @@ func TestPrepareOpenAIPromptCacheRequestContracts(t *testing.T) {
 		{
 			name: "deepseek automatic prefix", stream: true,
 			cfg:            Config{APIKey: "test", ProviderID: "deepseek", ProfileID: "p1", BaseURL: "https://api.deepseek.com", Protocol: ProtocolOpenAIChat, Model: "deepseek-v4-pro"},
-			wantCapability: "deepseek_openai_chat_v1",
+			wantCapability: "deepseek_openai_chat_v1", wantIncludeUsage: true,
+		},
+		{
+			name: "doubao streaming usage without cache claim", stream: true,
+			cfg:              Config{APIKey: "test", ProviderID: "doubao", ProfileID: "p1", BaseURL: "https://ark.cn-beijing.volces.com/api/v3", Protocol: ProtocolOpenAIChat, Model: "doubao-seed-2-1-pro-260628"},
+			wantIncludeUsage: true,
 		},
 		{
 			name: "kimi cn affinity streaming", stream: true,
@@ -159,6 +164,39 @@ func TestPrepareOpenAIPromptCacheRequestContracts(t *testing.T) {
 			_, hasThinking := body["thinking"]
 			if hasThinking != tt.wantThinkingField {
 				t.Fatalf("thinking presence=%v body=%s", hasThinking, prepared.Body)
+			}
+		})
+	}
+}
+
+func TestOpenAIChatStreamingUsageCapabilityRequiresExactContract(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{
+			name: "doubao official chat",
+			cfg:  Config{ProviderID: "doubao", BaseURL: "https://ark.cn-beijing.volces.com/api/v3", Protocol: ProtocolOpenAIChat},
+			want: true,
+		},
+		{
+			name: "doubao responses uses its own usage events",
+			cfg:  Config{ProviderID: "doubao", BaseURL: "https://ark.cn-beijing.volces.com/api/v3", Protocol: ProtocolOpenAIResponses},
+		},
+		{
+			name: "doubao proxy is not assumed compatible",
+			cfg:  Config{ProviderID: "doubao", BaseURL: "https://proxy.example/v3", Protocol: ProtocolOpenAIChat},
+		},
+		{
+			name: "unknown compatible endpoint fails closed",
+			cfg:  Config{ProviderID: "custom", BaseURL: "https://proxy.example/v1", Protocol: ProtocolOpenAIChat},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := supportsOpenAIChatStreamingUsage(tt.cfg); got != tt.want {
+				t.Fatalf("supportsOpenAIChatStreamingUsage=%v want=%v", got, tt.want)
 			}
 		})
 	}

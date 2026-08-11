@@ -41,6 +41,7 @@ describe("DesktopSettingsDialog", () => {
     expect(html).toContain("aw-settings-shell--full-bleed");
     expect(html).toContain("aw-model-orbit--light");
     expect(html).toContain("aw-model-orbit__sphere-canvas");
+    expect(html).toContain("aw-model-settings-page__scroll-thumb");
     expect(
       html.match(/aw-model-orbit__logo aw-model-orbit__logo--/g),
     ).toHaveLength(6);
@@ -225,6 +226,62 @@ describe("model credential recovery draft", () => {
       id: "profile-1",
       templateProfileId: undefined,
       apiKey: "replacement-key",
+    });
+  });
+
+  it("keeps direct Ark Model IDs separate from optional ep-* selectors", () => {
+    const provider = {
+      id: "doubao",
+      displayName: "Doubao Ark",
+      baseURL: "https://ark.cn-beijing.volces.com/api/v3",
+      protocol: "openai_chat",
+      supportedProtocols: ["openai_chat", "openai_responses"],
+      officialProtocols: ["openai_chat", "openai_responses"],
+      protocolBaseURLs: {},
+      protocolAuthSchemes: {},
+      catalogStrategy: "none",
+      catalogSource: "official_manifest",
+      authScheme: "bearer",
+      keyEnvName: "ARK_API_KEY",
+      defaultModel: "doubao-seed-2-1-pro-260628",
+      models: ["doubao-seed-2-1-pro-260628"],
+      docsURL: "",
+      apiDocsURL: "",
+      accessType: "api",
+      codingPreset: false,
+      endpointModel: true,
+      allowCustomModel: false,
+      modelCapabilities: {},
+    } satisfies ModelProvider;
+    const directProfile = {
+      id: "doubao-direct",
+      providerId: "doubao",
+      displayName: "Doubao Ark",
+      modelId: "doubao-seed-2-1-pro-260628",
+      baseURL: provider.baseURL,
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      hasKey: true,
+      enabled: true,
+      isDefault: true,
+      profileStatus: "ready",
+    } satisfies RuntimeModelProfileSummary;
+    const endpointProfile = {
+      ...directProfile,
+      id: "doubao-endpoint",
+      modelId: "ep-custom-endpoint",
+      advanced: { endpointId: "ep-custom-endpoint" },
+    } satisfies RuntimeModelProfileSummary;
+
+    const directDraft = draftFromExistingProfile(directProfile, provider);
+    expect(directDraft.endpointId).toBe("");
+    expect(toSaveRequest(directDraft, provider).advanced?.endpointId).toBeUndefined();
+
+    const endpointDraft = draftFromExistingProfile(endpointProfile, provider);
+    expect(endpointDraft.endpointId).toBe("ep-custom-endpoint");
+    expect(toSaveRequest(endpointDraft, provider)).toMatchObject({
+      modelId: "ep-custom-endpoint",
+      advanced: { endpointId: "ep-custom-endpoint" },
     });
   });
 });

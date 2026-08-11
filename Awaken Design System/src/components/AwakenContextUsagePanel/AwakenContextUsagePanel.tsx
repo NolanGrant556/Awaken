@@ -15,6 +15,7 @@ const contributionColorIds = new Set([
   "skills",
   "memory",
   "conversation",
+  "other",
 ]);
 
 function contributionColorId(id: string): string {
@@ -113,9 +114,9 @@ function formatCostLabel(
 }
 
 // hasLastRequestSignal returns true when the usage record carries at least one
-// cache, cost or invalidation signal worth showing. A record with only
-// status/purpose/inputTokens carries no cache or cost information and would
-// just add noise, so it does not trigger the section.
+// cache or cost signal worth showing. Context-epoch boundary reasons are host
+// diagnostics rather than proof that a provider supports prompt caching, so a
+// reason by itself must not create an otherwise empty "上次请求" section.
 function hasLastRequestSignal(
   usage: AwakenContextUsageModelUsage | null | undefined,
 ): usage is AwakenContextUsageModelUsage {
@@ -126,8 +127,7 @@ function hasLastRequestSignal(
     usage.cacheMode !== undefined ||
     usage.cachedInputTokens != null ||
     usage.uncachedInputTokens != null ||
-    usage.calculatedCostUsd != null ||
-    (usage.invalidationReason !== undefined && usage.invalidationReason !== "")
+    usage.calculatedCostUsd != null
   );
 }
 
@@ -201,7 +201,7 @@ export const AwakenContextUsagePanel = forwardRef<
         >
           <div className="aw-context-usage-panel__summary-stats">
             <span className="aw-context-usage-panel__summary-percent">
-              {usedPercent}% 已使用
+              {usedPercent}% 预计使用
             </span>
             <span className="aw-context-usage-panel__summary-tokens">
               {usageSummary}
@@ -210,7 +210,7 @@ export const AwakenContextUsagePanel = forwardRef<
           <div
             className="aw-context-usage-panel__meter"
             role="meter"
-            aria-label="可用输入窗口使用比例"
+            aria-label="可用输入窗口预计使用比例"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={usedPercent}

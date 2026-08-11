@@ -178,9 +178,9 @@ func prepareOpenAIRequest(cfg Config, req Request, stream bool) (PreparedRequest
 	}
 	if affinityKey != "" {
 		chatReq.PromptCacheKey = affinityKey
-		if stream {
-			chatReq.StreamOptions = &openaiStreamOptions{IncludeUsage: true}
-		}
+	}
+	if stream && supportsOpenAIChatStreamingUsage(cfg) {
+		chatReq.StreamOptions = &openaiStreamOptions{IncludeUsage: true}
 	}
 
 	if len(req.Tools) > 0 {

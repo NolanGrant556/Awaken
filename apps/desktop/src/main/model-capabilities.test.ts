@@ -46,7 +46,19 @@ describe("model capabilities", () => {
     expect(capabilityForModel("google", "gemini-3.6-flash")).toMatchObject({
       supported_protocols: ["openai_chat"],
     });
-    expect(capabilityForModel("deepseek", "deepseek-v4-pro")?.supported_protocols).toBeUndefined();
+    expect(capabilityForModel("deepseek", "deepseek-v4-pro")?.supported_protocols).toEqual([
+      "openai_chat",
+      "anthropic_messages",
+    ]);
+    expect(capabilityForModel("deepseek", "deepseek-v4-flash")?.supported_protocols).toEqual([
+      "openai_chat",
+      "openai_responses",
+      "anthropic_messages",
+    ]);
+    expect(capabilityForModel("deepseek", "deepseek-v4-flash")?.reasoning_effort).toEqual({
+      levels: ["high", "max"],
+      default_level: "high",
+    });
   });
 
   it("knows all Kimi Code plan model limits", () => {
@@ -250,7 +262,14 @@ describe("model capabilities", () => {
       levels: ["low", "high", "max"],
       default_level: "max",
     });
-    expect(capabilityForModel("glm", "glm-5.2")?.reasoning_effort).toBeUndefined();
+    expect(capabilityForModel("glm", "glm-5.2")?.reasoning_effort).toEqual({
+      levels: ["high", "max"],
+      default_level: "max",
+    });
+    expect(capabilityForModel("glm-coding-plan", "glm-5.2")?.reasoning_effort).toEqual({
+      levels: ["high", "max"],
+      default_level: "max",
+    });
     expect(capabilityForModel("qwen-token-plan", "qwen3.8-max-preview")?.reasoning_effort)
       .toEqual({
         levels: ["low", "high", "max"],
@@ -270,8 +289,8 @@ describe("model capabilities", () => {
   });
 
   it("falls back from stale effort to profile and capability defaults", () => {
-    expect(resolveReasoningEffort("glm", "glm-5.2", "low", "max")).toBeUndefined();
-    expect(resolveReasoningEffort("glm", "glm-5.2", "low", "low")).toBeUndefined();
+    expect(resolveReasoningEffort("glm", "glm-5.2", "low", "max")).toBe("max");
+    expect(resolveReasoningEffort("glm", "glm-5.2", "low", "low")).toBe("max");
     expect(resolveReasoningEffort("minimax", "MiniMax-M3", "max", "max")).toBeUndefined();
   });
 
@@ -279,12 +298,13 @@ describe("model capabilities", () => {
     expect(() => validateReasoningEffort("glm", "glm-5.2", "low")).toThrow(
       "当前模型不支持推理强度 low",
     );
+    expect(() => validateReasoningEffort("glm", "glm-5.2", "high")).not.toThrow();
     expect(() => validateReasoningEffort("qwen", "qwen3.7-max", "max")).toThrow();
   });
 
   it("does not infer Doubao reasoning capability from an opaque endpoint selector", () => {
     expect(capabilityForModel("doubao", "ep-arbitrary")?.reasoning_effort).toBeUndefined();
-    expect(capabilityForModel("doubao", "doubao-seed-2.1-pro")?.reasoning_effort).toEqual({
+    expect(capabilityForModel("doubao", "doubao-seed-2-1-pro-260628")?.reasoning_effort).toEqual({
       levels: ["low", "high", "max"],
       default_level: "high",
     });

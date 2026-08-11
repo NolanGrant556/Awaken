@@ -32,20 +32,21 @@ type ContextWindowConfig struct {
 }
 
 type ContextWindowState struct {
-	ModelWindow                 int
-	OutputReserve               int
-	EffectiveWindow             int
-	EstimatedTokens             int
-	WarningThreshold            int
-	AutoCompactThreshold        int
-	CompactTarget               int
-	LastAPIUsageTokens          int
-	EstimatedDeltaTokens        int
-	LastCompactBoundaryID       string
-	ConsecutiveCompactFailures  int
-	HasAttemptedReactiveCompact bool
-	CompactCircuitOpen          bool
-	UsageSnapshot               *ContextUsageSnapshot
+	ModelWindow                  int
+	OutputReserve                int
+	EffectiveWindow              int
+	EstimatedTokens              int
+	WarningThreshold             int
+	AutoCompactThreshold         int
+	CompactTarget                int
+	LastAPIUsageTokens           int
+	LastSentEstimatedInputTokens int
+	EstimatedDeltaTokens         int
+	LastCompactBoundaryID        string
+	ConsecutiveCompactFailures   int
+	HasAttemptedReactiveCompact  bool
+	CompactCircuitOpen           bool
+	UsageSnapshot                *ContextUsageSnapshot
 }
 
 type CompactResult struct {
@@ -150,7 +151,7 @@ func contextProjectionRequest(envelope ContextEnvelope, state ContextWindowState
 }
 
 func (state ContextWindowState) ShouldWarn() bool {
-	return state.WarningThreshold > 0 && state.EstimatedTokens >= state.WarningThreshold
+	return state.WarningThreshold > 0 && state.ConservativeProjectedTokens() >= state.WarningThreshold
 }
 
 func (state ContextWindowState) ShouldAutoCompact() bool {
@@ -158,12 +159,10 @@ func (state ContextWindowState) ShouldAutoCompact() bool {
 }
 
 // ShouldAutoCompactByActualUsage is a parallel proactive-compact trigger that
-// uses the last provider-reported continuation usage plus the locally-estimated
-// delta accumulated since that request. The runner prefers provider total usage
-// because the next request re-admits the previous assistant output, and falls
-// back to input usage when total is unavailable. It catches cases where the v4
-// leaf estimator is too optimistic: a too-late compact would otherwise surface
-// as a reactive compact or a provider prompt-too-long failure.
+// anchors the current local projection to the last provider-reported usage.
+// The delta between the current estimate and the exact estimate captured when
+// that provider request was sent preserves legitimate tool/message changes
+// without pretending the local estimator is an authoritative tokenizer.
 //
 // This trigger is intentionally parallel and non-replacing:
 //   - it never overrides EstimatedTokens or the v4 estimator;
@@ -171,26 +170,45 @@ func (state ContextWindowState) ShouldAutoCompact() bool {
 //   - LastAPIUsageTokens == 0 (no prior request, or just after a successful
 //     compact) leaves this trigger inert, so only ShouldAutoCompact drives
 //     the decision in those cases.
-//
-// EstimatedDeltaTokens only accounts for host-owned trailing deltas (MCP,
-// Skill, Memory, runtime, day boundary); user input and tool results added
-// since the last request are not in the delta, so this trigger may still fire
-// slightly late. That is acceptable: the goal is to avoid the far worse case
-// of firing too late and hitting a provider context-length error.
 func (state ContextWindowState) ShouldAutoCompactByActualUsage() bool {
 	if state.AutoCompactThreshold <= 0 || state.LastAPIUsageTokens <= 0 {
 		return false
 	}
-	projected := state.LastAPIUsageTokens + state.EstimatedDeltaTokens
-	if projected < state.LastAPIUsageTokens {
-		// Overflow guard: treat as over threshold.
-		return true
-	}
-	return projected >= state.AutoCompactThreshold
+	return state.actualUsageProjectedTokens() >= state.AutoCompactThreshold
 }
 
 func (state ContextWindowState) ShouldBlock() bool {
-	return state.blockingThreshold() > 0 && state.EstimatedTokens >= state.blockingThreshold()
+	return state.blockingThreshold() > 0 && state.ConservativeProjectedTokens() >= state.blockingThreshold()
+}
+
+// ConservativeProjectedTokens returns the safer of the current local estimate
+// and a provider-anchored projection. Old records that predate the sent-request
+// estimate fall back to the narrower host-delta behavior.
+func (state ContextWindowState) ConservativeProjectedTokens() int {
+	projected := state.EstimatedTokens
+	if state.LastAPIUsageTokens <= 0 {
+		return projected
+	}
+	anchored := state.actualUsageProjectedTokens()
+	if anchored > projected {
+		return anchored
+	}
+	return projected
+}
+
+func (state ContextWindowState) actualUsageProjectedTokens() int {
+	delta := state.EstimatedDeltaTokens
+	if state.LastSentEstimatedInputTokens > 0 {
+		delta = state.EstimatedTokens - state.LastSentEstimatedInputTokens
+	}
+	if delta > 0 && state.LastAPIUsageTokens > int(^uint(0)>>1)-delta {
+		return int(^uint(0) >> 1)
+	}
+	projected := state.LastAPIUsageTokens + delta
+	if projected < 0 {
+		return 0
+	}
+	return projected
 }
 
 func (state ContextWindowState) blockingThreshold() int {
@@ -203,8 +221,9 @@ func (state ContextWindowState) blockingThreshold() int {
 
 func (state ContextWindowState) Summary() string {
 	return fmt.Sprintf(
-		"context tokens estimated=%d effective=%d warning=%d autocompact=%d compact_target=%d",
+		"context tokens estimated=%d projected=%d effective=%d warning=%d autocompact=%d compact_target=%d",
 		state.EstimatedTokens,
+		state.ConservativeProjectedTokens(),
 		state.EffectiveWindow,
 		state.WarningThreshold,
 		state.AutoCompactThreshold,

@@ -103,6 +103,55 @@ describe("AwakenModelProviderForm custom model input", () => {
     expect(onModelChange).toHaveBeenCalledWith("qwen-custom-id");
   });
 
+  it("offers Ark Model IDs while allowing a manual Endpoint ID", () => {
+    const onModelChange = vi.fn();
+    act(() => {
+      root.render(
+        <AwakenModelProviderForm
+          providerId="doubao"
+          modelMode="endpoint"
+          models={[
+            "doubao-seed-2-1-pro-260628",
+            "doubao-seed-2-1-turbo-260628",
+          ]}
+          modelDisplayNames={{
+            "doubao-seed-2-1-pro-260628": "Doubao-Seed-2.1-Pro",
+            "doubao-seed-2-1-turbo-260628": "Doubao-Seed-2.1-Turbo",
+          }}
+          modelId="doubao-seed-2-1-pro-260628"
+          baseURL="https://ark.cn-beijing.volces.com/api/v3"
+          apiKey="key"
+          apiKeyPlaceholder="API Key"
+          apiDocsURL="https://console.volcengine.com"
+          onModelChange={onModelChange}
+          onBaseURLChange={vi.fn()}
+          onApiKeyChange={vi.fn()}
+        />,
+      );
+    });
+
+    const input = host.querySelector<HTMLInputElement>('input[role="combobox"]');
+    expect(input?.placeholder).toBe("选择或输入 Model ID / Endpoint ID");
+    expect(input?.value).toBe("Doubao-Seed-2.1-Pro");
+    expect(host.textContent).toContain("模型 / 推理接入点");
+    act(() => input?.focus());
+    expect([...host.querySelectorAll('[role="option"]')].map((option) => option.textContent))
+      .toEqual([
+        "Doubao-Seed-2.1-Pro",
+        "Doubao-Seed-2.1-Turbo",
+      ]);
+    act(() => host.querySelectorAll<HTMLButtonElement>('[role="option"]')[1]?.click());
+    expect(onModelChange).toHaveBeenCalledWith("doubao-seed-2-1-turbo-260628");
+    act(() => {
+      if (input) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(input, "ep-custom-endpoint");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    expect(onModelChange).toHaveBeenCalledWith("ep-custom-endpoint");
+  });
+
   it("keeps every API-key connection test disabled until the current form has a key", () => {
     const onTest = vi.fn();
     const renderForm = (apiKey: string) => (

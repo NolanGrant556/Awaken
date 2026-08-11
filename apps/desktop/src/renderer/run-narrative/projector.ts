@@ -53,16 +53,19 @@ export function appendRunRequestedNarrative(
 ): RunNarrativeState {
   const trimmed = prompt.trim();
   const settledState = state.activeItem ? commitActive(state, "done") : state;
-  const promptAttachments = attachments && attachments.length > 0
+  const promptAttachments =
+    attachments && attachments.length > 0
     ? attachments.map((attachment) => ({ ...attachment }))
     : undefined;
-  const promptTokens = tokens && tokens.length > 0
+  const promptTokens =
+    tokens && tokens.length > 0
     ? tokens.map((token) => ({
         ...token,
         payload: token.payload ? { ...token.payload } : undefined,
       }))
     : undefined;
-  const committedItems = trimmed || promptAttachments || promptTokens
+  const committedItems =
+    trimmed || promptAttachments || promptTokens
     ? upsertCommitted(settledState.committedItems, {
         kind: "prompt",
         id: `prompt:${scopeId}`,
@@ -128,12 +131,18 @@ export function projectAguiEventToNarrative(
       return appendThinking(base, event.delta ?? "", event);
     case "REASONING_MESSAGE_END":
     case "REASONING_END":
+      if (event.recordId) {
+        return base;
+      }
       return commitMatchingActive(base, thinkingId(event), "done");
     case "TEXT_MESSAGE_START":
       return activateAnswer(base, event);
     case "TEXT_MESSAGE_CONTENT":
       return appendAnswer(base, event.delta ?? "", event);
     case "TEXT_MESSAGE_END":
+      if (event.recordId) {
+        return base;
+      }
       return commitMatchingActiveAnswer(base, event, "done");
     case "TOOL_CALL_START":
       if (isMediaToolEvent(event)) {
@@ -147,7 +156,12 @@ export function projectAguiEventToNarrative(
       {
         const preparation = fileToolPreparation(event);
         if (preparation) {
-          return activateTool(base, event, preparation.detail, preparation.title);
+          return activateTool(
+            base,
+            event,
+            preparation.detail,
+            preparation.title,
+          );
         }
       }
       // Raw partial JSON remains transport-only. Unknown tools and deltas
@@ -156,7 +170,14 @@ export function projectAguiEventToNarrative(
     case "TOOL_CALL_ARGS": {
       if (isMediaToolEvent(event)) {
         const parameters = mediaParametersFromArgs(event.delta);
-        return activateMediaGeneration(base, event, "preparing", parameters.detail, parameters.requestedCount, parameters.requestedAspectRatio);
+        return activateMediaGeneration(
+          base,
+          event,
+          "preparing",
+          parameters.detail,
+          parameters.requestedCount,
+          parameters.requestedAspectRatio,
+        );
       }
       if (isReadOnlyToolEvent(event)) {
         return updateExploringAction(base, event, "active");
@@ -244,7 +265,13 @@ export function projectAguiEventToNarrative(
         ]
           .filter(Boolean)
           .join("\n");
-        return updateExploringAction(base, event, displayStatus, detail, event.toolStatus);
+        return updateExploringAction(
+          base,
+          event,
+          displayStatus,
+          detail,
+          event.toolStatus,
+        );
       }
       const baseDetail = event.content || "Tool returned empty content";
       const detail = [
@@ -278,7 +305,8 @@ export function projectAguiEventToNarrative(
         "runtime",
         event.type === "AWAKEN_RUNTIME_READY"
           ? "Runtime ready"
-          : event.type === "AWAKEN_RUNTIME_MISSING" || event.type === "AWAKEN_RUNTIME_REPAIR_FAILED"
+          : event.type === "AWAKEN_RUNTIME_MISSING" ||
+              event.type === "AWAKEN_RUNTIME_REPAIR_FAILED"
             ? "Runtime missing"
             : "Runtime preparing",
         [
@@ -290,7 +318,8 @@ export function projectAguiEventToNarrative(
         ]
           .filter(Boolean)
           .join(" | "),
-        event.type === "AWAKEN_RUNTIME_MISSING" || event.type === "AWAKEN_RUNTIME_REPAIR_FAILED"
+        event.type === "AWAKEN_RUNTIME_MISSING" ||
+          event.type === "AWAKEN_RUNTIME_REPAIR_FAILED"
           ? "error"
           : event.type === "AWAKEN_RUNTIME_READY"
             ? "done"
@@ -416,7 +445,8 @@ function activateContinuationPlanning(
   if (!label) {
     return state;
   }
-  const turnIdentity = event.turnId ?? String(event.turnCount ?? transitionReason);
+  const turnIdentity =
+    event.turnId ?? String(event.turnCount ?? transitionReason);
   return setActive(state, {
     kind: "planning",
     id: `planning:${eventScopedId(event, turnIdentity)}`,
@@ -426,7 +456,10 @@ function activateContinuationPlanning(
   });
 }
 
-function commitSkillTrace(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+function commitSkillTrace(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
   const skillId = event.skillId?.trim() || "unknown-skill";
   const failed = event.type === "AWAKEN_SKILL_FAILED_TO_LOAD";
   const done =
@@ -434,7 +467,9 @@ function commitSkillTrace(state: RunNarrativeState, event: AguiEvent): RunNarrat
     event.type === "AWAKEN_SKILL_CONTENT_LOADED";
   const source = event.skillSource?.trim();
   const version = event.skillVersion?.trim();
-  const detail = [source, version ? `v${version}` : ""].filter(Boolean).join(" · ");
+  const detail = [source, version ? `v${version}` : ""]
+    .filter(Boolean)
+    .join(" · ");
   const output = [
     event.type === "AWAKEN_SKILL_CONTENT_LOADED" && event.skillResource
       ? `已加载资源：${event.skillResource}`
@@ -478,10 +513,14 @@ function commitScheduledNotice(
   };
 }
 
-function commitMemoryReceipt(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+function commitMemoryReceipt(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
   const count = event.memories?.length ?? 0;
   const titles: Record<string, string> = {
-    AWAKEN_MEMORY_RECALLED: count > 0 ? `已召回 ${count} 条记忆` : "未召回相关记忆",
+    AWAKEN_MEMORY_RECALLED:
+      count > 0 ? `已召回 ${count} 条记忆` : "未召回相关记忆",
     AWAKEN_MEMORY_CREATED: "已写入长期记忆",
     AWAKEN_MEMORY_UPDATED: "已更新长期记忆",
     AWAKEN_MEMORY_SUPERSEDED: "已归档旧记忆",
@@ -489,11 +528,17 @@ function commitMemoryReceipt(state: RunNarrativeState, event: AguiEvent): RunNar
     AWAKEN_MEMORY_REJECTED: "记忆操作未写入",
   };
   const metadata = (event.memories ?? []).map((memory) =>
-    [memory.scope === "project" ? "项目" : "用户", memory.memoryType, `r${memory.revision}`]
+    [
+      memory.scope === "project" ? "项目" : "用户",
+      memory.memoryType,
+      `r${memory.revision}`,
+    ]
       .filter(Boolean)
       .join(" · "),
   );
-  const detail = [...metadata, event.errorCode ?? ""].filter(Boolean).join("；");
+  const detail = [...metadata, event.errorCode ?? ""]
+    .filter(Boolean)
+    .join("；");
   const item: RunNarrativeItem = {
     kind: "memoryReceipt",
     id: `memory:${event.recordId ?? eventScopedId(event, event.type)}`,
@@ -507,9 +552,12 @@ function commitMemoryReceipt(state: RunNarrativeState, event: AguiEvent): RunNar
 	// its generic tool row is removed once the typed mutation receipt arrives.
 	const mutationToolId = event.toolCallId ? toolId(event) : undefined;
 	const committedItems = mutationToolId
-		? state.committedItems.filter((candidate) => candidate.id !== mutationToolId)
+    ? state.committedItems.filter(
+        (candidate) => candidate.id !== mutationToolId,
+      )
 		: state.committedItems;
-	const activeItem = mutationToolId && state.activeItem?.id === mutationToolId
+  const activeItem =
+    mutationToolId && state.activeItem?.id === mutationToolId
 		? undefined
 		: state.activeItem;
 	return {
@@ -523,9 +571,21 @@ function commitMemoryReceipt(state: RunNarrativeState, event: AguiEvent): RunNar
 	};
 }
 
-function commitDreamReceipt(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
-  const report = event.diagnostic?.reports as Record<string, { updated?: number; superseded?: number; conflicts?: number }> | undefined;
-  const totals = Object.values(report ?? {}).reduce<{ updated: number; superseded: number; conflicts: number }>(
+function commitDreamReceipt(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
+  const report = event.diagnostic?.reports as
+    | Record<
+        string,
+        { updated?: number; superseded?: number; conflicts?: number }
+      >
+    | undefined;
+  const totals = Object.values(report ?? {}).reduce<{
+    updated: number;
+    superseded: number;
+    conflicts: number;
+  }>(
     (sum, item) => ({
       updated: sum.updated + (item.updated ?? 0),
       superseded: sum.superseded + (item.superseded ?? 0),
@@ -551,7 +611,10 @@ function commitDreamReceipt(state: RunNarrativeState, event: AguiEvent): RunNarr
     detail,
     status: completed ? "done" : "error",
   };
-  return { ...state, committedItems: upsertCommitted(state.committedItems, item) };
+  return {
+    ...state,
+    committedItems: upsertCommitted(state.committedItems, item),
+  };
 }
 
 function acpSessionItemId(event: AguiEvent): string {
@@ -565,7 +628,8 @@ function acpToolItemId(event: AguiEvent): string {
   const scope = eventScope(event);
   const runnerId = event.acpRunnerId ?? "unknown";
   const sessionId = event.acpSessionId ?? event.toolCallId ?? "current";
-  const toolCallId = event.acpToolCallId ?? event.toolCallId ?? event.toolCallName ?? "snapshot";
+  const toolCallId =
+    event.acpToolCallId ?? event.toolCallId ?? event.toolCallName ?? "snapshot";
   return `acp-tool:${scope}:${runnerId}:${sessionId}:${toolCallId}`;
 }
 
@@ -601,7 +665,10 @@ function acpRunnerLabel(runnerId?: string): string {
     .join(" ");
 }
 
-function commitACPSession(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+function commitACPSession(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
   const status = acpDisplayStatus(event);
   const runnerId = event.acpRunnerId ?? "unknown";
   const message = event.message ?? event.content ?? "";
@@ -613,10 +680,16 @@ function commitACPSession(state: RunNarrativeState, event: AguiEvent): RunNarrat
     status,
     message: message || undefined,
   };
-  return { ...state, committedItems: upsertCommitted(state.committedItems, item) };
+  return {
+    ...state,
+    committedItems: upsertCommitted(state.committedItems, item),
+  };
 }
 
-function commitACPTurn(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+function commitACPTurn(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
   const status = acpDisplayStatus(event);
   const runnerId = event.acpRunnerId ?? "unknown";
   const message = event.message ?? event.content ?? "";
@@ -628,13 +701,22 @@ function commitACPTurn(state: RunNarrativeState, event: AguiEvent): RunNarrative
     status,
     message: message || undefined,
   };
-  return { ...state, committedItems: upsertCommitted(state.committedItems, item) };
+  return {
+    ...state,
+    committedItems: upsertCommitted(state.committedItems, item),
+  };
 }
 
-function commitACPTool(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+function commitACPTool(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
   const runnerId = event.acpRunnerId ?? "unknown";
   const title = event.toolCallName || event.content || "External agent tool";
-  const detail = event.message && event.message !== event.content ? event.message : undefined;
+  const detail =
+    event.message && event.message !== event.content
+      ? event.message
+      : undefined;
   const item: RunNarrativeItem = {
     kind: "acpTool",
     id: acpToolItemId(event),
@@ -645,7 +727,10 @@ function commitACPTool(state: RunNarrativeState, event: AguiEvent): RunNarrative
     detail,
     status: "active",
   };
-  return { ...state, committedItems: upsertCommitted(state.committedItems, item) };
+  return {
+    ...state,
+    committedItems: upsertCommitted(state.committedItems, item),
+  };
 }
 
 function eventKey(event: AguiEvent): string | undefined {
@@ -734,6 +819,33 @@ function upsertCommitted(
   return updated;
 }
 
+function upsertCommittedBeforeRunAnswer(
+  items: RunNarrativeItem[],
+  item: RunNarrativeItem,
+  event: AguiEvent,
+): RunNarrativeItem[] {
+  const existingIndex = items.findIndex(
+    (candidate) => candidate.id === item.id,
+  );
+  if (existingIndex >= 0) {
+    const updated = items.slice();
+    updated[existingIndex] = item;
+    return updated;
+  }
+
+  const answerIndex = items.findIndex(
+    (candidate) =>
+      candidate.kind === "answer" && isAnswerForEvent(candidate.id, event),
+  );
+  if (answerIndex < 0) {
+    return [...items, item];
+  }
+
+  const updated = items.slice();
+  updated.splice(answerIndex, 0, item);
+  return updated;
+}
+
 function upsertSubagentGroup(
   state: RunNarrativeState,
   event: AguiEvent,
@@ -752,19 +864,41 @@ function upsertSubagentGroup(
         previous.status,
       )
     : false;
-  const transitionAllowed = !previous || previous.status === incomingStatus ||
-    (previous.status === "queued" && ["running", "cancelling", "cancelled", "interrupted", "failed", "completed"].includes(incomingStatus)) ||
-    (previous.status === "running" && ["cancelling", "completed", "failed", "cancelled", "interrupted"].includes(incomingStatus)) ||
-    (previous.status === "cancelling" && ["completed", "failed", "cancelled", "interrupted"].includes(incomingStatus));
-  const status = previousTerminal || !transitionAllowed
-    ? previous!.status
-    : incomingStatus;
+  const transitionAllowed =
+    !previous ||
+    previous.status === incomingStatus ||
+    (previous.status === "queued" &&
+      [
+        "running",
+        "cancelling",
+        "cancelled",
+        "interrupted",
+        "failed",
+        "completed",
+      ].includes(incomingStatus)) ||
+    (previous.status === "running" &&
+      [
+        "cancelling",
+        "completed",
+        "failed",
+        "cancelled",
+        "interrupted",
+      ].includes(incomingStatus)) ||
+    (previous.status === "cancelling" &&
+      ["completed", "failed", "cancelled", "interrupted"].includes(
+        incomingStatus,
+      ));
+  const status =
+    previousTerminal || !transitionAllowed ? previous!.status : incomingStatus;
   const terminal = ["completed", "failed", "cancelled", "interrupted"].includes(
     status,
   );
   const task: SubagentNarrativeTask = {
     taskId,
-    description: event.subagentDescription?.trim() || previous?.description || "未命名子任务",
+    description:
+      event.subagentDescription?.trim() ||
+      previous?.description ||
+      "未命名子任务",
     agentType: event.subagentAgentType ?? previous?.agentType ?? "explore",
     status,
     activity: terminal
@@ -848,7 +982,10 @@ function commitRunCancelledHint(
                 ...state.activeItem,
                 actions: state.activeItem.actions.map((action) => ({
                   ...action,
-                  status: action.status === "active" ? "cancelled" as const : action.status,
+                  status:
+                    action.status === "active"
+                      ? ("cancelled" as const)
+                      : action.status,
                 })),
                 status: "done" as const,
               }),
@@ -894,7 +1031,10 @@ function commitMatchingActiveAnswer(
   return commitActive(state, status);
 }
 
-function commitErrorAnswer(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+function commitErrorAnswer(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
   return addRunErrorToNarrative(
     state,
     narrativeErrorMessage(event),
@@ -902,10 +1042,17 @@ function commitErrorAnswer(state: RunNarrativeState, event: AguiEvent): RunNarra
   );
 }
 
-function markLatestAnswerFinal(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+function markLatestAnswerFinal(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
   for (let index = state.committedItems.length - 1; index >= 0; index -= 1) {
     const item = state.committedItems[index];
-    if (item.kind === "answer" && item.status === "done" && isAnswerForEvent(item.id, event)) {
+    if (
+      item.kind === "answer" &&
+      item.status === "done" &&
+      isAnswerForEvent(item.id, event)
+    ) {
       const committedItems = state.committedItems.slice();
       committedItems[index] = { ...item, isFinal: true };
       return { ...state, committedItems };
@@ -918,10 +1065,16 @@ function isAnswerForEvent(itemId: string, event: AguiEvent): boolean {
   if (!event.runId) {
     return true;
   }
-  return itemId === `answer:${event.runId}` || itemId.startsWith(`answer:${event.runId}:`);
+  return (
+    itemId === `answer:${event.runId}` ||
+    itemId.startsWith(`answer:${event.runId}:`)
+  );
 }
 
-function setActive(state: RunNarrativeState, item: RunNarrativeItem): RunNarrativeState {
+function setActive(
+  state: RunNarrativeState,
+  item: RunNarrativeItem,
+): RunNarrativeState {
   if (state.activeItem?.id === item.id) {
     return {
       ...state,
@@ -929,7 +1082,10 @@ function setActive(state: RunNarrativeState, item: RunNarrativeItem): RunNarrati
     };
   }
   const committed = state.activeItem
-    ? upsertCommitted(state.committedItems, applyStatus(state.activeItem, "done"))
+    ? upsertCommitted(
+        state.committedItems,
+        applyStatus(state.activeItem, "done"),
+      )
     : state.committedItems;
   return {
     ...state,
@@ -965,9 +1121,13 @@ function applyStatus(
     case "memoryReceipt":
     case "acpSession":
     case "acpTool":
-      return status === "done" || status === "error" ? { ...item, status } : item;
+      return status === "done" || status === "error"
+        ? { ...item, status }
+        : item;
     case "answer":
-      return status === "done" || status === "error" ? { ...item, status } : item;
+      return status === "done" || status === "error"
+        ? { ...item, status }
+        : item;
     case "scheduledNotice":
     case "hint":
       return item;
@@ -988,7 +1148,10 @@ function isAnswerSegmentId(id: string, baseId: string): boolean {
 
 function answerId(state: RunNarrativeState, event: AguiEvent): string {
   const baseId = answerBaseId(event);
-  if (state.activeItem?.kind === "answer" && isAnswerSegmentId(state.activeItem.id, baseId)) {
+  if (
+    state.activeItem?.kind === "answer" &&
+    isAnswerSegmentId(state.activeItem.id, baseId)
+  ) {
     return state.activeItem.id;
   }
 
@@ -998,7 +1161,9 @@ function answerId(state: RunNarrativeState, event: AguiEvent): string {
   // inventing a second answer segment.
   if (
     event.recordId &&
-    state.committedItems.some((item) => item.kind === "answer" && item.id === baseId)
+    state.committedItems.some(
+      (item) => item.kind === "answer" && item.id === baseId,
+    )
   ) {
     return baseId;
   }
@@ -1101,33 +1266,46 @@ function compactStatus(event: AguiEvent): CompactBoundaryItem["status"] {
 }
 
 function compactMode(event: AguiEvent): string | undefined {
-  return compactString(event.contextCompactMode) ||
+  return (
+    compactString(event.contextCompactMode) ||
     compactString(event.compactMode) ||
-    compactModeFromMessage(event.message);
+    compactModeFromMessage(event.message)
+  );
 }
 
 function compactBoundaryValue(event: AguiEvent): string | undefined {
-  return compactString(event.contextCompactBoundaryId) ||
+  return (
+    compactString(event.contextCompactBoundaryId) ||
     compactString(event.compactBoundaryId) ||
-    compactBoundaryFromMessage(event.message);
+    compactBoundaryFromMessage(event.message)
+  );
 }
 
 function compactPreEstimate(event: AguiEvent): number | undefined {
-  return finiteNumber(event.contextCompactPreEstimateTokens) ??
+  return (
+    finiteNumber(event.contextCompactPreEstimateTokens) ??
     finiteNumber(event.compactPreEstimate) ??
-    (event.type === "AWAKEN_COMPACT_STARTED" ? finiteNumber(event.contextEstimatedTokens) : undefined);
+    (event.type === "AWAKEN_COMPACT_STARTED"
+      ? finiteNumber(event.contextEstimatedTokens)
+      : undefined)
+  );
 }
 
 function compactPostEstimate(event: AguiEvent): number | undefined {
-  return finiteNumber(event.contextCompactPostEstimateTokens) ??
+  return (
+    finiteNumber(event.contextCompactPostEstimateTokens) ??
     finiteNumber(event.compactPostEstimate) ??
     (event.type === "AWAKEN_COMPACT_FINISHED"
-      ? finiteNumber(event.contextEstimatedTokens) ?? compactEstimatedTokensFromMessage(event.message)
-      : undefined);
+      ? (finiteNumber(event.contextEstimatedTokens) ??
+        compactEstimatedTokensFromMessage(event.message))
+      : undefined)
+  );
 }
 
 function finiteNumber(value?: number): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function compactBoundaryFromMessage(message?: string): string | undefined {
@@ -1136,11 +1314,15 @@ function compactBoundaryFromMessage(message?: string): string | undefined {
 }
 
 function compactModeFromMessage(message?: string): string | undefined {
-  const match = message?.match(/\bcompact (?:started|finished|failed):\s*([a-z_]+)(?=\s|$)/i);
+  const match = message?.match(
+    /\bcompact (?:started|finished|failed):\s*([a-z_]+)(?=\s|$)/i,
+  );
   return match?.[1]?.toLowerCase();
 }
 
-function compactEstimatedTokensFromMessage(message?: string): number | undefined {
+function compactEstimatedTokensFromMessage(
+  message?: string,
+): number | undefined {
   const match = message?.match(/\bestimated_tokens=(\d+)\b/i);
   if (!match) {
     return undefined;
@@ -1149,8 +1331,12 @@ function compactEstimatedTokensFromMessage(message?: string): number | undefined
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function compactTitle(status: CompactBoundaryItem["status"], mode?: string): string {
-  const modeLabel = mode === "manual" ? "手动" : mode === "auto" || !mode ? "自动" : "";
+function compactTitle(
+  status: CompactBoundaryItem["status"],
+  mode?: string,
+): string {
+  const modeLabel =
+    mode === "manual" ? "手动" : mode === "auto" || !mode ? "自动" : "";
   if (status === "started") {
     return modeLabel ? `正在${modeLabel}压缩上下文` : "正在压缩上下文";
   }
@@ -1177,7 +1363,9 @@ function compactDetail(item: {
 }): string | undefined {
   const parts: string[] = [];
   if (item.preEstimate !== undefined && item.postEstimate !== undefined) {
-    parts.push(`${formatTokenCount(item.preEstimate)} -> ${formatTokenCount(item.postEstimate)}`);
+    parts.push(
+      `${formatTokenCount(item.preEstimate)} -> ${formatTokenCount(item.postEstimate)}`,
+    );
   } else if (item.preEstimate !== undefined) {
     parts.push(`${formatTokenCount(item.preEstimate)} 压缩前`);
   } else if (item.postEstimate !== undefined) {
@@ -1209,7 +1397,10 @@ function eventScopedId(event: AguiEvent, value?: string): string {
   return value ?? eventScope(event);
 }
 
-function commitCompactBoundary(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+function commitCompactBoundary(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
   const status = compactStatus(event);
   const mode = compactMode(event);
   const boundaryId = compactBoundaryValue(event);
@@ -1268,7 +1459,8 @@ function mediaParametersFromArgs(value?: string): {
       size?: unknown;
       ratio?: unknown;
     };
-    const prompt = typeof parsed.prompt === "string" ? parsed.prompt.trim() : "";
+    const prompt =
+      typeof parsed.prompt === "string" ? parsed.prompt.trim() : "";
     const requestedCount =
       parsed.mode === "group" &&
       typeof parsed.max_images === "number" &&
@@ -1277,17 +1469,22 @@ function mediaParametersFromArgs(value?: string): {
       parsed.max_images <= 15
         ? parsed.max_images
         : undefined;
-    const ratioValue = typeof parsed.ratio === "string"
+    const ratioValue =
+      typeof parsed.ratio === "string"
       ? parsed.ratio
       : typeof parsed.size === "string"
         ? parsed.size
         : "";
-    const ratioMatch = ratioValue.trim().match(/^(\d+(?:\.\d+)?)\s*[:x×]\s*(\d+(?:\.\d+)?)$/i);
+    const ratioMatch = ratioValue
+      .trim()
+      .match(/^(\d+(?:\.\d+)?)\s*[:x×]\s*(\d+(?:\.\d+)?)$/i);
     const requestedAspectRatio = ratioMatch
       ? Number(ratioMatch[1]) / Number(ratioMatch[2])
       : undefined;
     return {
-      ...(prompt ? { detail: prompt.length > 96 ? `${prompt.slice(0, 93)}...` : prompt } : {}),
+      ...(prompt
+        ? { detail: prompt.length > 96 ? `${prompt.slice(0, 93)}...` : prompt }
+        : {}),
       ...(requestedCount ? { requestedCount } : {}),
       ...(requestedAspectRatio && Number.isFinite(requestedAspectRatio)
         ? { requestedAspectRatio }
@@ -1325,7 +1522,8 @@ function mediaStatusFromCommandOutput(value?: string): {
       task_id?: unknown;
       items?: unknown;
     };
-    const stage = typeof parsed.stage === "string" ? parsed.stage : "generating";
+    const stage =
+      typeof parsed.stage === "string" ? parsed.stage : "generating";
     const status: MediaGenerationStatus =
       stage === "queued" || stage === "downloading" || stage === "ready"
         ? stage
@@ -1351,7 +1549,10 @@ function mediaStatusFromCommandOutput(value?: string): {
 }
 
 function validMediaCount(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 15
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= 15
     ? value
     : undefined;
 }
@@ -1361,15 +1562,26 @@ function parseMediaItems(value: unknown): MediaGenerationItem[] {
   const items: MediaGenerationItem[] = [];
   for (const candidate of value) {
     if (!candidate || typeof candidate !== "object") continue;
-    const item = candidate as { index?: unknown; status?: unknown; path?: unknown };
+    const item = candidate as {
+      index?: unknown;
+      status?: unknown;
+      path?: unknown;
+    };
     const index = validMediaCount(item.index);
-    if (!index || (item.status !== "ready" && item.status !== "error" && item.status !== "unknown")) {
+    if (
+      !index ||
+      (item.status !== "ready" &&
+        item.status !== "error" &&
+        item.status !== "unknown")
+    ) {
       continue;
     }
     items.push({
       index,
       status: item.status,
-      ...(typeof item.path === "string" && item.path ? { path: item.path } : {}),
+      ...(typeof item.path === "string" && item.path
+        ? { path: item.path }
+        : {}),
     });
   }
   return items.sort((left, right) => left.index - right.index);
@@ -1390,7 +1602,9 @@ function activateMediaGeneration(
     state.activeItem?.id === id && state.activeItem.kind === "mediaGeneration"
       ? state.activeItem
       : state.committedItems.find(
-          (item): item is Extract<RunNarrativeItem, { kind: "mediaGeneration" }> =>
+          (
+            item,
+          ): item is Extract<RunNarrativeItem, { kind: "mediaGeneration" }> =>
             item.id === id && item.kind === "mediaGeneration",
         );
   const kind = mediaKind(event);
@@ -1413,9 +1627,14 @@ function activateMediaGeneration(
         ? { requestedCount: requestedCount ?? existing?.requestedCount }
         : {}),
       ...((requestedAspectRatio ?? existing?.requestedAspectRatio)
-        ? { requestedAspectRatio: requestedAspectRatio ?? existing?.requestedAspectRatio }
+        ? {
+            requestedAspectRatio:
+              requestedAspectRatio ?? existing?.requestedAspectRatio,
+          }
         : {}),
-      ...((taskId ?? existing?.taskId) ? { taskId: taskId ?? existing?.taskId } : {}),
+      ...((taskId ?? existing?.taskId)
+        ? { taskId: taskId ?? existing?.taskId }
+        : {}),
       ...((mediaItems ?? existing?.mediaItems)
         ? { mediaItems: mediaItems ?? existing?.mediaItems }
         : {}),
@@ -1434,7 +1653,9 @@ function commitMediaGeneration(
     state.activeItem?.id === id && state.activeItem.kind === "mediaGeneration"
       ? state.activeItem
       : state.committedItems.find(
-          (item): item is Extract<RunNarrativeItem, { kind: "mediaGeneration" }> =>
+          (
+            item,
+          ): item is Extract<RunNarrativeItem, { kind: "mediaGeneration" }> =>
             item.id === id && item.kind === "mediaGeneration",
         );
   let paths: string[] = [];
@@ -1453,14 +1674,19 @@ function commitMediaGeneration(
       task_id?: unknown;
     };
     paths = Array.isArray(payload.paths)
-      ? payload.paths.filter((value): value is string => typeof value === "string" && value.length > 0)
+      ? payload.paths.filter(
+          (value): value is string =>
+            typeof value === "string" && value.length > 0,
+        )
       : [];
     const generationStatus = payload.generation_status ?? payload.status;
     payloadSucceeded = generationStatus === "succeeded" && paths.length > 0;
-    payloadStatus = typeof generationStatus === "string" ? generationStatus : undefined;
+    payloadStatus =
+      typeof generationStatus === "string" ? generationStatus : undefined;
     payloadItems = parseMediaItems(payload.items);
     payloadRequestedCount = validMediaCount(payload.requested_count);
-    payloadTaskId = typeof payload.task_id === "string" ? payload.task_id : undefined;
+    payloadTaskId =
+      typeof payload.task_id === "string" ? payload.task_id : undefined;
   } catch {
     // Structured result parsing is best-effort; canonical toolStatus remains authoritative otherwise.
   }
@@ -1501,11 +1727,16 @@ function commitMediaGeneration(
     ...(existing?.requestedAspectRatio
       ? { requestedAspectRatio: existing.requestedAspectRatio }
       : {}),
-    ...((payloadTaskId ?? existing?.taskId) ? { taskId: payloadTaskId ?? existing?.taskId } : {}),
-    ...((payloadItems.length > 0 || existing?.mediaItems)
-      ? { mediaItems: payloadItems.length > 0 ? payloadItems : existing?.mediaItems }
+    ...((payloadTaskId ?? existing?.taskId)
+      ? { taskId: payloadTaskId ?? existing?.taskId }
       : {}),
-    artifactPaths: paths.length > 0 ? paths : existing?.artifactPaths ?? [],
+    ...(payloadItems.length > 0 || existing?.mediaItems
+      ? {
+          mediaItems:
+            payloadItems.length > 0 ? payloadItems : existing?.mediaItems,
+        }
+      : {}),
+    artifactPaths: paths.length > 0 ? paths : (existing?.artifactPaths ?? []),
   };
   return {
     ...state,
@@ -1537,11 +1768,14 @@ function toolDecisionDetail(event: AguiEvent): string {
   }
 
   if (action === "transform" && event.transformedFrom && event.transformedTo) {
-    parts.push(`${event.transformedFrom} command transformed to ${event.transformedTo}`);
+    parts.push(
+      `${event.transformedFrom} command transformed to ${event.transformedTo}`,
+    );
   }
 
   if (action === "deny") {
-    const reason = event.toolDecisionReason || event.message || "denied by policy";
+    const reason =
+      event.toolDecisionReason || event.message || "denied by policy";
     parts.push(`Denied: ${reason}`);
   }
 
@@ -1566,7 +1800,8 @@ function summarizeToolResult(content?: string): string {
   if (!normalized) {
     return "Tool returned empty content";
   }
-  const firstLine = normalized.split("\n").find((line) => line.trim()) ?? normalized;
+  const firstLine =
+    normalized.split("\n").find((line) => line.trim()) ?? normalized;
   return firstLine.length > 96 ? `${firstLine.slice(0, 96)}...` : firstLine;
 }
 
@@ -1586,25 +1821,37 @@ function parseToolArgs(delta?: string): Record<string, unknown> | undefined {
   return undefined;
 }
 
-function stringArg(args: Record<string, unknown> | undefined, key: string): string | undefined {
+function stringArg(
+  args: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
   const value = args?.[key];
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function numberArg(args: Record<string, unknown> | undefined, key: string): number | undefined {
+function numberArg(
+  args: Record<string, unknown> | undefined,
+  key: string,
+): number | undefined {
   const value = args?.[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function compactPathLabel(value: string): string {
-  const normalized = value.replace(/[\u0000-\u001f\u007f]/g, "").trim().replace(/[\\/]+$/, "");
+  const normalized = value
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .trim()
+    .replace(/[\\/]+$/, "");
   const segments = normalized.split(/[\\/]/).filter(Boolean);
   const label = segments.at(-1) || normalized;
   return label.length > 72 ? `${label.slice(0, 71).trimEnd()}…` : label;
 }
 
 function safePreparationLineCount(value: number | undefined): number {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return 0;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+    return 0;
   return Math.min(Math.floor(value), 10_000_000);
 }
 
@@ -1715,9 +1962,7 @@ function updateExploringAction(
   toolStatus?: string,
 ): RunNarrativeState {
   const existing =
-    state.activeItem?.kind === "exploring"
-      ? state.activeItem
-      : undefined;
+    state.activeItem?.kind === "exploring" ? state.activeItem : undefined;
   const id = existing?.id ?? exploringId(event);
   const action: RunAction = {
     id: exploringActionId(event),
@@ -1740,17 +1985,29 @@ function updateExploringAction(
       kind: "exploring",
       id,
       actions: upsertAction(existing?.actions ?? [], action),
-      status: status === "active" ? "active" : existing?.status ?? "active",
+      status: status === "active" ? "active" : (existing?.status ?? "active"),
     },
   );
 }
 
-function activateThinking(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+function activateThinking(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
+  // Durable reasoning_summary records are canonical snapshots of reasoning
+  // that the live stream has normally already shown. Their synthetic
+  // START/CONTENT/END frames must not reactivate a completed Thought: doing so
+  // remounts its active UI just before the terminal process fold and creates a
+  // visible one-frame layout flash.
+  if (event.recordId) {
+    return state;
+  }
   const item: RunNarrativeItem = {
     kind: "thinking",
     id: thinkingId(event),
     text:
-      state.activeItem?.id === thinkingId(event) && state.activeItem.kind === "thinking"
+      state.activeItem?.id === thinkingId(event) &&
+      state.activeItem.kind === "thinking"
         ? state.activeItem.text
         : "",
     status: "active",
@@ -1764,6 +2021,23 @@ function appendThinking(
   event: AguiEvent,
 ): RunNarrativeState {
   const id = thinkingId(event);
+  if (event.recordId) {
+    const item: RunNarrativeItem = {
+      kind: "thinking",
+      id,
+      text: delta,
+      status: "done",
+    };
+    return {
+      ...state,
+      committedItems: upsertCommittedBeforeRunAnswer(
+        state.committedItems,
+        item,
+        event,
+      ),
+      activeItem: state.activeItem?.id === id ? undefined : state.activeItem,
+    };
+  }
   const current =
     state.activeItem?.id === id && state.activeItem.kind === "thinking"
       ? state.activeItem.text
@@ -1771,15 +2045,21 @@ function appendThinking(
   return setActive(state, {
     kind: "thinking",
     id,
-    // A durable reasoning_summary frame is the full user-visible snapshot.
-    // Replace already streamed deltas for the same message instead of
-    // appending the summary a second time.
-    text: event.recordId ? delta : current + delta,
+    text: current + delta,
     status: "active",
   });
 }
 
-function activateAnswer(state: RunNarrativeState, event: AguiEvent): RunNarrativeState {
+function activateAnswer(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
+  // Like reasoning summaries, a durable assistant_message is a reconciliation
+  // snapshot. Its synthetic START frame must not move an already rendered
+  // answer back into active state.
+  if (event.recordId) {
+    return state;
+  }
   const id = answerId(state, event);
   const item: RunNarrativeItem = {
     kind: "answer",
@@ -1808,26 +2088,55 @@ function appendAnswer(
   if (event.recordId) {
     const legacy = splitLeadingThinkSnapshot(delta);
     if (legacy) {
-      const withoutEmptyAnswer =
-        state.activeItem?.kind === "answer" && state.activeItem.id === id
-          ? { ...state, activeItem: undefined }
+      const settledState =
+        state.activeItem && state.activeItem.id !== id
+          ? commitActive(state, "done")
           : state;
       const withThinking: RunNarrativeState = {
-        ...withoutEmptyAnswer,
-        committedItems: upsertCommitted(withoutEmptyAnswer.committedItems, {
-          kind: "thinking",
-          id: thinkingId(event),
-          text: legacy.thinking,
+        ...settledState,
+        committedItems: upsertCommittedBeforeRunAnswer(
+          settledState.committedItems,
+          {
+            kind: "thinking",
+            id: thinkingId(event),
+            text: legacy.thinking,
+            status: "done",
+          },
+          event,
+        ),
+        activeItem:
+          settledState.activeItem?.id === id
+            ? undefined
+            : settledState.activeItem,
+      };
+      return {
+        ...withThinking,
+        committedItems: upsertCommitted(withThinking.committedItems, {
+          kind: "answer",
+          id,
+          markdown: legacy.answer,
           status: "done",
         }),
       };
-      return setActive(withThinking, {
+    }
+
+    const settledState =
+      state.activeItem && state.activeItem.id !== id
+        ? commitActive(state, "done")
+        : state;
+    return {
+      ...settledState,
+      committedItems: upsertCommitted(settledState.committedItems, {
         kind: "answer",
         id,
-        markdown: legacy.answer,
-        status: "active",
-      });
-    }
+        markdown: delta,
+        status: "done",
+      }),
+      activeItem:
+        settledState.activeItem?.id === id
+          ? undefined
+          : settledState.activeItem,
+    };
   }
   const current =
     state.activeItem?.id === id && state.activeItem.kind === "answer"
@@ -1836,10 +2145,7 @@ function appendAnswer(
   return setActive(state, {
     kind: "answer",
     id,
-    // A durable assistant_message frame is a full snapshot projected from the
-    // journal. It replaces any ephemeral deltas already shown for the same
-    // message instead of appending the text a second time.
-    markdown: event.recordId ? delta : current + delta,
+    markdown: current + delta,
     status: "active",
   });
 }
@@ -1870,7 +2176,8 @@ function activateTool(
       ? state.activeItem
       : undefined;
   const nextToolCallId = event.toolCallId ?? existing?.toolCallId;
-  const nextTitle = title || existing?.title || event.toolCallName || "Tool call";
+  const nextTitle =
+    title || existing?.title || event.toolCallName || "Tool call";
   const nextDetail = detail ?? existing?.detail;
   if (
     existing &&

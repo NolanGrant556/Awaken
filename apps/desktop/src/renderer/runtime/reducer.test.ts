@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { AguiEvent } from "../../shared/agui";
-import type { RuntimeRun, RuntimeThread, SupervisorStatusInfo } from "../../shared/runtime";
+import type {
+  RuntimeRun,
+  RuntimeThread,
+  SupervisorStatusInfo,
+} from "../../shared/runtime";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -23,7 +27,9 @@ function runEventAt(event: AguiEvent, receivedAtMs: number): RuntimeAction {
   return { type: "run/event", event, receivedAtMs };
 }
 
-function countRunCancelledSteps(state: ReturnType<typeof createInitialRuntimeState>): number {
+function countRunCancelledSteps(
+  state: ReturnType<typeof createInitialRuntimeState>,
+): number {
   return state.steps.filter((step) => step.id === "run-cancelled").length;
 }
 
@@ -95,9 +101,9 @@ describe("runtime reducer cancel handling", () => {
         historicalTool.actions[0]?.id,
       );
     }
-    expect(replayed.threadViews["thread-1"]?.narrative.replayedItemIds).toContain(
-      historicalTool?.id,
-    );
+    expect(
+      replayed.threadViews["thread-1"]?.narrative.replayedItemIds,
+    ).toContain(historicalTool?.id);
 
     const withLiveTool = reduceRuntimeState(
       replayed,
@@ -117,7 +123,9 @@ describe("runtime reducer cancel handling", () => {
       (candidate) => candidate.toolCallId === "read-live",
     );
     expect(liveAction).toBeDefined();
-    expect(withLiveTool.narrative.replayedItemIds).not.toContain(liveAction?.id);
+    expect(withLiveTool.narrative.replayedItemIds).not.toContain(
+      liveAction?.id,
+    );
   });
 
   it("projects run creation failures into the current conversation turn", () => {
@@ -149,8 +157,16 @@ describe("runtime reducer cancel handling", () => {
   it("run/cancelSync with cancelled status keeps cancelled out of failed state", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "cancel me" },
-      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
-      { type: "run/threadAdded", threadId: "thread-1", label: "cancel me", runId: "run-1" },
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-1", threadId: "thread-1" }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "cancel me",
+        runId: "run-1",
+      },
       runEvent({
         type: "AWAKEN_ARTIFACT_CREATED",
         artifactId: "cancelled-report",
@@ -163,7 +179,14 @@ describe("runtime reducer cancel handling", () => {
         artifactProducer: "artifact_publish",
       }),
       { type: "run/cancelRequested" },
-      { type: "run/cancelSync", run: makeRun({ runId: "run-1", threadId: "thread-1", status: "cancelled" }) },
+      {
+        type: "run/cancelSync",
+        run: makeRun({
+          runId: "run-1",
+          threadId: "thread-1",
+          status: "cancelled",
+        }),
+      },
     ]);
 
     expect(state.phase).toBe("cancelled");
@@ -175,7 +198,9 @@ describe("runtime reducer cancel handling", () => {
       activeRunId: undefined,
     });
     expect(
-      state.narrative.committedItems.find((item) => item.kind === "deliverables"),
+      state.narrative.committedItems.find(
+        (item) => item.kind === "deliverables",
+      ),
     ).toMatchObject({
       terminalStatus: "cancelled",
       files: [
@@ -199,7 +224,11 @@ describe("runtime reducer cancel handling", () => {
   it("RUN_STATUS_CHANGED(cancelled) followed by RUN_ERROR(RUN_CANCELLED) keeps a single run-cancelled step", () => {
     const state = dispatch([
       runEvent({ type: "RUN_STATUS_CHANGED", status: "cancelled" }),
-      runEvent({ type: "RUN_ERROR", code: "RUN_CANCELLED", message: "Run was cancelled by user" }),
+      runEvent({
+        type: "RUN_ERROR",
+        code: "RUN_CANCELLED",
+        message: "Run was cancelled by user",
+      }),
     ]);
     expect(state.phase).toBe("cancelled");
     expect(countRunCancelledSteps(state)).toBe(1);
@@ -208,7 +237,11 @@ describe("runtime reducer cancel handling", () => {
 
   it("RUN_ERROR with code RUN_CANCELLED alone sets phase to cancelled", () => {
     const state = dispatch([
-      runEvent({ type: "RUN_ERROR", code: "RUN_CANCELLED", message: "Run was cancelled by user" }),
+      runEvent({
+        type: "RUN_ERROR",
+        code: "RUN_CANCELLED",
+        message: "Run was cancelled by user",
+      }),
     ]);
     expect(state.phase).toBe("cancelled");
     expect(countRunCancelledSteps(state)).toBe(1);
@@ -232,11 +265,15 @@ describe("runtime reducer cancel handling", () => {
       }),
     ]);
     expect(state.phase).toBe("error");
-    expect(state.errorMessage).toBe("API key 缺失，请在 Settings > Models 配置模型 API key");
+    expect(state.errorMessage).toBe(
+      "API key 缺失，请在 Settings > Models 配置模型 API key",
+    );
     expect(state.errorMessage).not.toContain("sk-");
     expect(state.errorMessage).not.toContain("LLM_API_KEY=");
     const errorStep = state.steps.find((step) => step.id === "run-error");
-    expect(errorStep?.description).toBe("API key 缺失，请在 Settings > Models 配置模型 API key");
+    expect(errorStep?.description).toBe(
+      "API key 缺失，请在 Settings > Models 配置模型 API key",
+    );
     expect(errorStep?.tag).toBe("PROVIDER_AUTH_MISSING");
   });
 
@@ -280,7 +317,9 @@ describe("runtime reducer native subagent isolation", () => {
     ]);
 
     expect(state.toolResults).toHaveLength(0);
-    expect(state.steps.some((step) => step.id.includes("child-bash-1"))).toBe(false);
+    expect(state.steps.some((step) => step.id.includes("child-bash-1"))).toBe(
+      false,
+    );
     expect(
       state.narrative.committedItems.some(
         (item) => item.kind === "tool" || item.kind === "exploring",
@@ -419,7 +458,9 @@ describe("runtime reducer canonical auth wire", () => {
         authUrl: "https://github.com/login/device",
       }),
     ]);
-    expect(state.steps.find((step) => step.id.startsWith("auth:"))).toMatchObject({
+    expect(
+      state.steps.find((step) => step.id.startsWith("auth:")),
+    ).toMatchObject({
       title: "Authorization required",
       description: "github | repo | https://github.com/login/device",
     });
@@ -431,10 +472,22 @@ describe("runtime reducer replay idempotency", () => {
     // Simulate a partial state with some accumulated text, then a recovery
     // (which resets to initial), then a full replay of text deltas.
     const state = dispatch([
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", messageId: "msg-1", delta: "partial" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        messageId: "msg-1",
+        delta: "partial",
+      }),
       { type: "run/recovered", run: makeRun({ status: "running" }) },
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", messageId: "msg-1", delta: "hello" }),
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", messageId: "msg-1", delta: " world" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        messageId: "msg-1",
+        delta: "hello",
+      }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        messageId: "msg-1",
+        delta: " world",
+      }),
     ]);
     expect(state.assistantText).toBe("hello world");
   });
@@ -473,7 +526,10 @@ describe("runtime reducer replay idempotency", () => {
     expect(finishedState.phase).toBe("done");
 
     const errorState = dispatch([
-      { type: "run/recovered", run: makeRun({ status: "error", error: "boom" }) },
+      {
+        type: "run/recovered",
+        run: makeRun({ status: "error", error: "boom" }),
+      },
     ]);
     expect(errorState.phase).toBe("error");
     expect(errorState.errorMessage).toBe("boom");
@@ -531,15 +587,31 @@ describe("runtime reducer replay idempotency", () => {
     const state = dispatch([
       {
         type: "run/recovered",
-        run: makeRun({ runId: "run-1", threadId: "thread-1", status: "running" }),
+        run: makeRun({
+          runId: "run-1",
+          threadId: "thread-1",
+          status: "running",
+        }),
         prompt: "Restore this run",
       },
-      runEvent({ type: "RUN_STARTED", seq: 1, runId: "run-1", threadId: "thread-1" }),
-      runEvent({ type: "RUN_STARTED", seq: 1, runId: "run-1", threadId: "thread-1" }),
+      runEvent({
+        type: "RUN_STARTED",
+        seq: 1,
+        runId: "run-1",
+        threadId: "thread-1",
+      }),
+      runEvent({
+        type: "RUN_STARTED",
+        seq: 1,
+        runId: "run-1",
+        threadId: "thread-1",
+      }),
     ]);
 
     expect(state.prompt).toBe("Restore this run");
-    expect(state.narrative.committedItems.filter((item) => item.kind === "prompt")).toEqual([
+    expect(
+      state.narrative.committedItems.filter((item) => item.kind === "prompt"),
+    ).toEqual([
       { kind: "prompt", id: "prompt:thread-1:1", text: "Restore this run" },
     ]);
   });
@@ -548,11 +620,25 @@ describe("runtime reducer replay idempotency", () => {
     const state = dispatch([
       {
         type: "run/recovered",
-        run: makeRun({ runId: "run-1", threadId: "thread-1", status: "finished" }),
+        run: makeRun({
+          runId: "run-1",
+          threadId: "thread-1",
+          status: "finished",
+        }),
         prompt: "Recover final answer",
       },
-      runEvent({ type: "RUN_STARTED", seq: 1, runId: "run-1", threadId: "thread-1" }),
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 2, messageId: "msg-1", delta: "done" }),
+      runEvent({
+        type: "RUN_STARTED",
+        seq: 1,
+        runId: "run-1",
+        threadId: "thread-1",
+      }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 2,
+        messageId: "msg-1",
+        delta: "done",
+      }),
       runEvent({ type: "RUN_FINISHED", seq: 3, result: "done" }),
     ]);
 
@@ -571,13 +657,38 @@ describe("runtime reducer replay idempotency", () => {
     const state = dispatch([
       {
         type: "run/recovered",
-        run: makeRun({ runId: "run-1", threadId: "thread-1", status: "running" }),
+        run: makeRun({
+          runId: "run-1",
+          threadId: "thread-1",
+          status: "running",
+        }),
         prompt: "Recover mixed run",
       },
-      runEvent({ type: "RUN_STARTED", seq: 1, runId: "run-1", threadId: "thread-1" }),
-      runEvent({ type: "REASONING_MESSAGE_CONTENT", seq: 2, messageId: "reason-1", delta: "checking" }),
-      runEvent({ type: "TOOL_CALL_START", seq: 3, toolCallId: "read-1", toolCallName: "read_file" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 4, toolCallId: "read-1", toolCallName: "read_file", content: "README" }),
+      runEvent({
+        type: "RUN_STARTED",
+        seq: 1,
+        runId: "run-1",
+        threadId: "thread-1",
+      }),
+      runEvent({
+        type: "REASONING_MESSAGE_CONTENT",
+        seq: 2,
+        messageId: "reason-1",
+        delta: "checking",
+      }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        seq: 3,
+        toolCallId: "read-1",
+        toolCallName: "read_file",
+      }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 4,
+        toolCallId: "read-1",
+        toolCallName: "read_file",
+        content: "README",
+      }),
       runEvent({
         type: "AWAKEN_ARTIFACT_CREATED",
         seq: 5,
@@ -586,13 +697,30 @@ describe("runtime reducer replay idempotency", () => {
         artifactKind: "file",
         artifactPath: "note.md",
       }),
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 6, messageId: "msg-1", delta: "hello" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 6,
+        messageId: "msg-1",
+        delta: "hello",
+      }),
       { type: "run/reconnecting" },
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 6, messageId: "msg-1", delta: "hello" }),
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 7, messageId: "msg-1", delta: " world" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 6,
+        messageId: "msg-1",
+        delta: "hello",
+      }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 7,
+        messageId: "msg-1",
+        delta: " world",
+      }),
     ]);
 
-    expect(state.narrative.committedItems.filter((item) => item.kind === "prompt")).toHaveLength(1);
+    expect(
+      state.narrative.committedItems.filter((item) => item.kind === "prompt"),
+    ).toHaveLength(1);
     expect(state.reasoningText).toBe("checking");
     expect(state.artifacts).toHaveLength(1);
     expect(state.narrative.activeItem).toMatchObject({
@@ -606,7 +734,9 @@ describe("runtime reducer replay idempotency", () => {
 
 describe("runtime reducer run narrative projection", () => {
   it("run/requested creates prompt committed item and planning active item", () => {
-    const state = dispatch([{ type: "run/requested", prompt: "Build the workbench" }]);
+    const state = dispatch([
+      { type: "run/requested", prompt: "Build the workbench" },
+    ]);
 
     expect(state.narrative.committedItems).toEqual([
       { kind: "prompt", id: "prompt:draft:1", text: "Build the workbench" },
@@ -663,14 +793,33 @@ describe("runtime reducer run narrative projection", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Say hello" },
       runEvent({ type: "RUN_STARTED", seq: 1 }),
-      runEvent({ type: "REASONING_MESSAGE_CONTENT", seq: 2, messageId: "r1", delta: "checking" }),
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 3, messageId: "m1", delta: "hello" }),
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 4, messageId: "m1", delta: " world" }),
+      runEvent({
+        type: "REASONING_MESSAGE_CONTENT",
+        seq: 2,
+        messageId: "r1",
+        delta: "checking",
+      }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 3,
+        messageId: "m1",
+        delta: "hello",
+      }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 4,
+        messageId: "m1",
+        delta: " world",
+      }),
       runEvent({ type: "TEXT_MESSAGE_END", seq: 5, messageId: "m1" }),
     ]);
 
-    const thinking = state.narrative.committedItems.find((item) => item.kind === "thinking");
-    const answer = state.narrative.committedItems.find((item) => item.kind === "answer");
+    const thinking = state.narrative.committedItems.find(
+      (item) => item.kind === "thinking",
+    );
+    const answer = state.narrative.committedItems.find(
+      (item) => item.kind === "answer",
+    );
 
     expect(thinking).toMatchObject({
       kind: "thinking",
@@ -690,7 +839,10 @@ describe("runtime reducer run narrative projection", () => {
   it("keeps assistant text segments when a reused message id is interrupted by tools", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Investigate" },
-      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-1", threadId: "thread-1" }),
+      },
       runEvent({ type: "RUN_STARTED", seq: 1, runId: "run-1" }),
       runEvent({
         type: "TEXT_MESSAGE_CONTENT",
@@ -721,10 +873,17 @@ describe("runtime reducer run narrative projection", () => {
         messageId: "m1",
         delta: "最终总结。",
       }),
-      runEvent({ type: "RUN_FINISHED", seq: 6, runId: "run-1", result: "done" }),
+      runEvent({
+        type: "RUN_FINISHED",
+        seq: 6,
+        runId: "run-1",
+        result: "done",
+      }),
     ]);
 
-    const answers = state.narrative.committedItems.filter((item) => item.kind === "answer");
+    const answers = state.narrative.committedItems.filter(
+      (item) => item.kind === "answer",
+    );
 
     expect(answers).toEqual([
       {
@@ -754,12 +913,32 @@ describe("runtime reducer run narrative projection", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Patch a file" },
       runEvent({ type: "RUN_STARTED", seq: 1 }),
-      runEvent({ type: "TOOL_CALL_START", seq: 2, toolCallId: "tool-1", toolCallName: "apply_patch" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 3, toolCallId: "tool-1", toolCallName: "apply_patch", content: "pending approval" }),
-      runEvent({ type: "AWAKEN_ARTIFACT_CREATED", seq: 5, artifactId: "artifact-1", artifactTitle: "note.md", artifactKind: "added", artifactPath: "note.md" }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        seq: 2,
+        toolCallId: "tool-1",
+        toolCallName: "apply_patch",
+      }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 3,
+        toolCallId: "tool-1",
+        toolCallName: "apply_patch",
+        content: "pending approval",
+      }),
+      runEvent({
+        type: "AWAKEN_ARTIFACT_CREATED",
+        seq: 5,
+        artifactId: "artifact-1",
+        artifactTitle: "note.md",
+        artifactKind: "added",
+        artifactPath: "note.md",
+      }),
     ]);
 
-    const tool = state.narrative.committedItems.find((item) => item.id === "tool:tool-1");
+    const tool = state.narrative.committedItems.find(
+      (item) => item.id === "tool:tool-1",
+    );
 
     expect(tool).toMatchObject({
       kind: "tool",
@@ -767,8 +946,12 @@ describe("runtime reducer run narrative projection", () => {
       detail: "pending approval",
       status: "done",
     });
-    expect(state.artifacts).toContainEqual(expect.objectContaining({ id: "artifact-1" }));
-    expect(state.narrative.committedItems.some((item) => item.kind === "fileChange")).toBe(false);
+    expect(state.artifacts).toContainEqual(
+      expect.objectContaining({ id: "artifact-1" }),
+    );
+    expect(
+      state.narrative.committedItems.some((item) => item.kind === "fileChange"),
+    ).toBe(false);
     expect(state.narrative.inspectorSelection).toEqual({
       kind: "tool",
       id: "tool:tool-1",
@@ -779,15 +962,68 @@ describe("runtime reducer run narrative projection", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Summarize project" },
       runEvent({ type: "RUN_STARTED", seq: 1 }),
-      runEvent({ type: "TOOL_CALL_START", seq: 2, toolCallId: "read-1", toolCallName: "Read" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 3, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\":\"README.md\",\"offset\":1,\"limit\":80}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 4, toolCallId: "read-1", toolCallName: "Read", content: "# Awaken\nlong content that should stay out of center narrative" }),
-      runEvent({ type: "TOOL_CALL_START", seq: 5, toolCallId: "list-1", toolCallName: "Glob" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 6, toolCallId: "list-1", toolCallName: "Glob", delta: "{\"pattern\":\"**/*.md\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 7, toolCallId: "list-1", toolCallName: "Glob", content: "README.md\ndocs/intro.md" }),
-      runEvent({ type: "TOOL_CALL_START", seq: 8, toolCallId: "grep-1", toolCallName: "Grep" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 9, toolCallId: "grep-1", toolCallName: "Grep", delta: "{\"pattern\":\"Run Workbench\",\"glob\":\"**/*.md\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 10, toolCallId: "grep-1", toolCallName: "Grep", content: "docs/desktop-run-workbench-vertical-slices.md:1:Run Workbench" }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        seq: 2,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+      }),
+      runEvent({
+        type: "TOOL_CALL_ARGS",
+        seq: 3,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        delta: '{"file_path":"README.md","offset":1,"limit":80}',
+      }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 4,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        content:
+          "# Awaken\nlong content that should stay out of center narrative",
+      }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        seq: 5,
+        toolCallId: "list-1",
+        toolCallName: "Glob",
+      }),
+      runEvent({
+        type: "TOOL_CALL_ARGS",
+        seq: 6,
+        toolCallId: "list-1",
+        toolCallName: "Glob",
+        delta: '{"pattern":"**/*.md"}',
+      }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 7,
+        toolCallId: "list-1",
+        toolCallName: "Glob",
+        content: "README.md\ndocs/intro.md",
+      }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        seq: 8,
+        toolCallId: "grep-1",
+        toolCallName: "Grep",
+      }),
+      runEvent({
+        type: "TOOL_CALL_ARGS",
+        seq: 9,
+        toolCallId: "grep-1",
+        toolCallName: "Grep",
+        delta: '{"pattern":"Run Workbench","glob":"**/*.md"}',
+      }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 10,
+        toolCallId: "grep-1",
+        toolCallName: "Grep",
+        content:
+          "docs/desktop-run-workbench-vertical-slices.md:1:Run Workbench",
+      }),
     ]);
 
     expect(state.narrative.activeItem).toMatchObject({
@@ -799,11 +1035,9 @@ describe("runtime reducer run narrative projection", () => {
       throw new Error("expected exploring item");
     }
     expect(state.narrative.activeItem.actions).toHaveLength(3);
-    expect(state.narrative.activeItem.actions.map((action) => action.id)).toEqual([
-      "explore:read-1",
-      "explore:list-1",
-      "explore:grep-1",
-    ]);
+    expect(
+      state.narrative.activeItem.actions.map((action) => action.id),
+    ).toEqual(["explore:read-1", "explore:list-1", "explore:grep-1"]);
     expect(state.narrative.activeItem.actions[0]).toMatchObject({
       title: "读取 README.md L1-L80",
       status: "done",
@@ -814,26 +1048,75 @@ describe("runtime reducer run narrative projection", () => {
       status: "done",
     });
     expect(state.narrative.activeItem.actions[2]).toMatchObject({
-      title: "搜索 \"Run Workbench\" · Markdown 文件",
+      title: '搜索 "Run Workbench" · Markdown 文件',
       visualKind: "search",
       status: "done",
     });
-    expect(JSON.stringify(state.narrative.activeItem.actions)).not.toContain("long content that should stay out");
+    expect(JSON.stringify(state.narrative.activeItem.actions)).not.toContain(
+      "long content that should stay out",
+    );
   });
 
   it("keeps later read-only tools after intervening thinking instead of backfilling older exploring", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Inspect ordering" },
       runEvent({ type: "RUN_STARTED", seq: 1 }),
-      runEvent({ type: "TOOL_CALL_START", seq: 2, toolCallId: "read-1", toolCallName: "Read" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 3, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\":\"README.md\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 4, toolCallId: "read-1", toolCallName: "Read", content: "# Awaken" }),
-      runEvent({ type: "REASONING_MESSAGE_START", seq: 5, messageId: "reason-1" }),
-      runEvent({ type: "REASONING_MESSAGE_CONTENT", seq: 6, messageId: "reason-1", delta: "Now inspect source." }),
-      runEvent({ type: "REASONING_MESSAGE_END", seq: 7, messageId: "reason-1" }),
-      runEvent({ type: "TOOL_CALL_START", seq: 8, toolCallId: "list-1", toolCallName: "Glob" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 9, toolCallId: "list-1", toolCallName: "Glob", delta: "{\"pattern\":\"src/**/*.go\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 10, toolCallId: "list-1", toolCallName: "Glob", content: "src/main.go" }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        seq: 2,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+      }),
+      runEvent({
+        type: "TOOL_CALL_ARGS",
+        seq: 3,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        delta: '{"file_path":"README.md"}',
+      }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 4,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        content: "# Awaken",
+      }),
+      runEvent({
+        type: "REASONING_MESSAGE_START",
+        seq: 5,
+        messageId: "reason-1",
+      }),
+      runEvent({
+        type: "REASONING_MESSAGE_CONTENT",
+        seq: 6,
+        messageId: "reason-1",
+        delta: "Now inspect source.",
+      }),
+      runEvent({
+        type: "REASONING_MESSAGE_END",
+        seq: 7,
+        messageId: "reason-1",
+      }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        seq: 8,
+        toolCallId: "list-1",
+        toolCallName: "Glob",
+      }),
+      runEvent({
+        type: "TOOL_CALL_ARGS",
+        seq: 9,
+        toolCallId: "list-1",
+        toolCallName: "Glob",
+        delta: '{"pattern":"src/**/*.go"}',
+      }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 10,
+        toolCallId: "list-1",
+        toolCallName: "Glob",
+        content: "src/main.go",
+      }),
       runEvent({ type: "RUN_FINISHED", seq: 11 }),
     ]);
 
@@ -859,12 +1142,46 @@ describe("runtime reducer run narrative projection", () => {
   it("does not duplicate read-only exploring actions when sequenced events replay", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Replay exploring" },
-      runEvent({ type: "TOOL_CALL_START", seq: 1, toolCallId: "read-1", toolCallName: "Read" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 2, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\":\"README.md\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 3, toolCallId: "read-1", toolCallName: "Read", content: "# Awaken" }),
-      runEvent({ type: "TOOL_CALL_START", seq: 1, toolCallId: "read-1", toolCallName: "Read" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 2, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\":\"README.md\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 3, toolCallId: "read-1", toolCallName: "Read", content: "# Awaken" }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        seq: 1,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+      }),
+      runEvent({
+        type: "TOOL_CALL_ARGS",
+        seq: 2,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        delta: '{"file_path":"README.md"}',
+      }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 3,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        content: "# Awaken",
+      }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        seq: 1,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+      }),
+      runEvent({
+        type: "TOOL_CALL_ARGS",
+        seq: 2,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        delta: '{"file_path":"README.md"}',
+      }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 3,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        content: "# Awaken",
+      }),
     ]);
 
     expect(state.narrative.activeItem).toMatchObject({
@@ -880,14 +1197,26 @@ describe("runtime reducer run narrative projection", () => {
   it("stores raw tool args and result for inspector records", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Inspect tool" },
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 1, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\":\"README.md\"}" }),
-      runEvent({ type: "TOOL_CALL_RESULT", seq: 2, toolCallId: "read-1", toolCallName: "Read", content: "# Awaken\nfull result" }),
+      runEvent({
+        type: "TOOL_CALL_ARGS",
+        seq: 1,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        delta: '{"file_path":"README.md"}',
+      }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        seq: 2,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        content: "# Awaken\nfull result",
+      }),
     ]);
 
     expect(state.toolResults).toContainEqual({
       id: "read-1",
       title: "Read",
-      args: "{\"file_path\":\"README.md\"}",
+      args: '{"file_path":"README.md"}',
       content: "# Awaken\nfull result",
       status: "done",
     });
@@ -919,9 +1248,9 @@ describe("runtime reducer run narrative projection", () => {
       toolStatus: "succeeded",
       diagnostic: { reason: "no_match" },
     });
-    expect(state.steps.find((step) => step.id === "tool:rg-1")?.description).toContain(
-      "diagnostic: no_match",
-    );
+    expect(
+      state.steps.find((step) => step.id === "tool:rg-1")?.description,
+    ).toContain("diagnostic: no_match");
     expect(state.narrative.committedItems).toContainEqual(
       expect.objectContaining({
         kind: "tool",
@@ -972,16 +1301,40 @@ describe("runtime reducer run narrative projection", () => {
   it("ignores args deltas, stores the complete args snapshot, and projects progress", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Inspect streaming tool args" },
-      runEvent({ type: "TOOL_CALL_ARGS_DELTA", seq: 1, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\"" }),
-      runEvent({ type: "TOOL_CALL_ARGS_DELTA", seq: 2, toolCallId: "read-1", toolCallName: "Read", delta: ":\"README.md\"}" }),
-      runEvent({ type: "TOOL_PROGRESS", seq: 3, toolCallId: "read-1", toolCallName: "Read", progress: "Executing tool" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 4, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\":\"README.md\"}" }),
+      runEvent({
+        type: "TOOL_CALL_ARGS_DELTA",
+        seq: 1,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        delta: '{"file_path"',
+      }),
+      runEvent({
+        type: "TOOL_CALL_ARGS_DELTA",
+        seq: 2,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        delta: ':"README.md"}',
+      }),
+      runEvent({
+        type: "TOOL_PROGRESS",
+        seq: 3,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        progress: "Executing tool",
+      }),
+      runEvent({
+        type: "TOOL_CALL_ARGS",
+        seq: 4,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        delta: '{"file_path":"README.md"}',
+      }),
     ]);
 
     expect(state.toolResults).toContainEqual({
       id: "read-1",
       title: "Read",
-      args: "{\"file_path\":\"README.md\"}",
+      args: '{"file_path":"README.md"}',
       content: "",
       status: "active",
     });
@@ -1081,7 +1434,8 @@ describe("runtime reducer run narrative projection", () => {
   });
 
   it("shows a host-generated redacted install activity without assistant narration", () => {
-    const message = "正在安装依赖: pip install requests --index-url sk-[redacted]";
+    const message =
+      "正在安装依赖: pip install requests --index-url sk-[redacted]";
     const state = dispatch([
       { type: "run/requested", prompt: "Prepare dependency" },
       runEvent({
@@ -1109,15 +1463,34 @@ describe("runtime reducer run narrative projection", () => {
       detail: message,
       status: "active",
     });
-    expect(JSON.stringify(state)).not.toContain("sk-abcdefghijklmnopqrstuvwxyz");
+    expect(JSON.stringify(state)).not.toContain(
+      "sk-abcdefghijklmnopqrstuvwxyz",
+    );
   });
 
   it("clears active tool projection when a run is cancelled during tool argument preparation", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Cancel during tool prep" },
-      runEvent({ type: "TOOL_CALL_START", seq: 1, toolCallId: "tool-1", toolCallName: "run_command" }),
-      runEvent({ type: "TOOL_CALL_ARGS_DELTA", seq: 2, toolCallId: "tool-1", toolCallName: "run_command", delta: "{\"command\"" }),
-      runEvent({ type: "TOOL_PROGRESS", seq: 3, toolCallId: "tool-1", toolCallName: "run_command", progress: "Executing tool" }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        seq: 1,
+        toolCallId: "tool-1",
+        toolCallName: "run_command",
+      }),
+      runEvent({
+        type: "TOOL_CALL_ARGS_DELTA",
+        seq: 2,
+        toolCallId: "tool-1",
+        toolCallName: "run_command",
+        delta: '{"command"',
+      }),
+      runEvent({
+        type: "TOOL_PROGRESS",
+        seq: 3,
+        toolCallId: "tool-1",
+        toolCallName: "run_command",
+        progress: "Executing tool",
+      }),
       runEvent({ type: "RUN_STATUS_CHANGED", seq: 4, status: "cancelled" }),
     ]);
 
@@ -1136,13 +1509,37 @@ describe("runtime reducer run narrative projection", () => {
   it("keeps non-read-only tool active between tool call end and result progress", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Run command" },
-      runEvent({ type: "TOOL_CALL_START", seq: 1, toolCallId: "tool-1", toolCallName: "run_command" }),
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 2, toolCallId: "tool-1", toolCallName: "run_command", delta: "{\"command\":\"pwd\"}" }),
-      runEvent({ type: "TOOL_CALL_END", seq: 3, toolCallId: "tool-1", toolCallName: "run_command" }),
-      runEvent({ type: "TOOL_PROGRESS", seq: 4, toolCallId: "tool-1", toolCallName: "run_command", progress: "Executing tool" }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        seq: 1,
+        toolCallId: "tool-1",
+        toolCallName: "run_command",
+      }),
+      runEvent({
+        type: "TOOL_CALL_ARGS",
+        seq: 2,
+        toolCallId: "tool-1",
+        toolCallName: "run_command",
+        delta: '{"command":"pwd"}',
+      }),
+      runEvent({
+        type: "TOOL_CALL_END",
+        seq: 3,
+        toolCallId: "tool-1",
+        toolCallName: "run_command",
+      }),
+      runEvent({
+        type: "TOOL_PROGRESS",
+        seq: 4,
+        toolCallId: "tool-1",
+        toolCallName: "run_command",
+        progress: "Executing tool",
+      }),
     ]);
 
-    expect(state.narrative.committedItems.find((item) => item.id === "tool:tool-1")).toBeUndefined();
+    expect(
+      state.narrative.committedItems.find((item) => item.id === "tool:tool-1"),
+    ).toBeUndefined();
     expect(state.narrative.activeItem).toEqual({
       kind: "tool",
       id: "tool:tool-1",
@@ -1156,9 +1553,29 @@ describe("runtime reducer run narrative projection", () => {
   it("stores command output deltas for the terminal inspector", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Run shell" },
-      runEvent({ type: "TOOL_CALL_START", seq: 1, toolCallId: "shell-1", toolCallName: "shell" }),
-      runEvent({ type: "AWAKEN_COMMAND_OUTPUT", seq: 2, toolCallId: "shell-1", toolCallName: "shell", commandStream: "stdout", delta: "hel" }),
-      runEvent({ type: "AWAKEN_COMMAND_OUTPUT", seq: 3, toolCallId: "shell-1", toolCallName: "shell", commandStream: "stdout", delta: "lo", truncated: true }),
+      runEvent({
+        type: "TOOL_CALL_START",
+        seq: 1,
+        toolCallId: "shell-1",
+        toolCallName: "shell",
+      }),
+      runEvent({
+        type: "AWAKEN_COMMAND_OUTPUT",
+        seq: 2,
+        toolCallId: "shell-1",
+        toolCallName: "shell",
+        commandStream: "stdout",
+        delta: "hel",
+      }),
+      runEvent({
+        type: "AWAKEN_COMMAND_OUTPUT",
+        seq: 3,
+        toolCallId: "shell-1",
+        toolCallName: "shell",
+        commandStream: "stdout",
+        delta: "lo",
+        truncated: true,
+      }),
     ]);
 
     expect(state.toolResults).toContainEqual({
@@ -1170,7 +1587,9 @@ describe("runtime reducer run narrative projection", () => {
       commandOutputTruncated: true,
       status: "active",
     });
-    expect(state.steps.find((step) => step.id === "tool:shell-1")).toMatchObject({
+    expect(
+      state.steps.find((step) => step.id === "tool:shell-1"),
+    ).toMatchObject({
       title: "shell",
       description: "lo",
       status: "active",
@@ -1179,7 +1598,8 @@ describe("runtime reducer run narrative projection", () => {
   });
 
   it("stores patch previews and turn diff for the changes inspector", () => {
-    const patch = "*** Begin Patch\n*** Add File: note.md\n+hello\n*** End Patch";
+    const patch =
+      "*** Begin Patch\n*** Add File: note.md\n+hello\n*** End Patch";
     const diff = "diff --git a/note.md b/note.md\nnew file mode 100644";
     const state = dispatch([
       { type: "run/requested", prompt: "Patch file" },
@@ -1206,7 +1626,9 @@ describe("runtime reducer run narrative projection", () => {
       },
     ]);
     expect(state.turnDiff).toEqual({ diff, truncated: true });
-    expect(state.steps.find((step) => step.id === "patch:patch-1")).toMatchObject({
+    expect(
+      state.steps.find((step) => step.id === "patch:patch-1"),
+    ).toMatchObject({
       title: "Patch preview updated",
       status: "active",
       tag: "patch",
@@ -1251,16 +1673,22 @@ describe("runtime reducer run narrative projection", () => {
       affectedPaths: ["note.md"],
       patchSummary: "modify note.md",
     });
-    expect(state.toolResults.find((tool) => tool.id === "read-1")).toMatchObject({
+    expect(
+      state.toolResults.find((tool) => tool.id === "read-1"),
+    ).toMatchObject({
       title: "Read",
       status: "done",
     });
-    expect(state.toolResults.find((tool) => tool.id === "patch-1")).toMatchObject({
+    expect(
+      state.toolResults.find((tool) => tool.id === "patch-1"),
+    ).toMatchObject({
       title: "Edit",
       status: "error",
       content: expect.stringContaining("writes require allowlist"),
     });
-    expect(state.steps.find((step) => step.id === "tool-decision:patch-1")).toMatchObject({
+    expect(
+      state.steps.find((step) => step.id === "tool-decision:patch-1"),
+    ).toMatchObject({
       title: "Edit deny",
       status: "error",
       tag: "headless_default",
@@ -1288,7 +1716,8 @@ describe("runtime reducer run narrative projection", () => {
       runEvent({
         type: "AWAKEN_COMPACT_FINISHED",
         seq: 3,
-        message: "compact finished: auto boundary=compact_1 estimated_tokens=4800",
+        message:
+          "compact finished: auto boundary=compact_1 estimated_tokens=4800",
         contextCompactMode: "auto",
         contextCompactBoundaryId: "compact_1",
         contextCompactPreEstimateTokens: 9600,
@@ -1364,7 +1793,9 @@ describe("runtime reducer run narrative projection", () => {
     });
     expect(state.inspectorSummary.terminalReason).toBe("completed");
     expect(state.inspectorSummary.terminalMessage).toBe("done");
-    expect(state.steps.find((step) => step.id === "context-window")).toMatchObject({
+    expect(
+      state.steps.find((step) => step.id === "context-window"),
+    ).toMatchObject({
       title: "Context window warning",
       status: "done",
     });
@@ -1373,7 +1804,11 @@ describe("runtime reducer run narrative projection", () => {
       status: "done",
       tag: "compact_1",
     });
-    expect(state.narrative.committedItems.find((item) => item.kind === "compactBoundary")).toMatchObject({
+    expect(
+      state.narrative.committedItems.find(
+        (item) => item.kind === "compactBoundary",
+      ),
+    ).toMatchObject({
       kind: "compactBoundary",
       status: "finished",
       title: "已自动压缩上下文",
@@ -1456,7 +1891,10 @@ describe("runtime reducer run narrative projection", () => {
       snapshot: {
         snapshotId: "ctx-1",
         contributions: expect.arrayContaining([
-          expect.objectContaining({ kind: "conversation", estimatedTokens: 90000 }),
+          expect.objectContaining({
+            kind: "conversation",
+            estimatedTokens: 90000,
+          }),
         ]),
       },
       latestModelUsage: {
@@ -1466,7 +1904,10 @@ describe("runtime reducer run narrative projection", () => {
       },
       modelUsages: [
         expect.objectContaining({ requestId: "req-1", purpose: "agent_turn" }),
-        expect.objectContaining({ requestId: "req-title", purpose: "thread_title" }),
+        expect.objectContaining({
+          requestId: "req-title",
+          purpose: "thread_title",
+        }),
       ],
     });
   });
@@ -1485,7 +1926,8 @@ describe("runtime reducer run narrative projection", () => {
       runEvent({
         type: "AWAKEN_COMPACT_FINISHED",
         seq: 2,
-        message: "compact finished: reactive boundary=compact_legacy estimated_tokens=4800",
+        message:
+          "compact finished: reactive boundary=compact_legacy estimated_tokens=4800",
         contextEffectiveWindow: 12000,
         contextEstimatedTokens: 4800,
         contextEstimatedDeltaTokens: -4800,
@@ -1506,7 +1948,11 @@ describe("runtime reducer run narrative projection", () => {
       effectiveWindow: 12000,
       estimatedDeltaTokens: -4800,
     });
-    expect(state.narrative.committedItems.find((item) => item.kind === "compactBoundary")).toMatchObject({
+    expect(
+      state.narrative.committedItems.find(
+        (item) => item.kind === "compactBoundary",
+      ),
+    ).toMatchObject({
       kind: "compactBoundary",
       status: "finished",
       title: "已压缩上下文",
@@ -1543,7 +1989,13 @@ describe("runtime reducer run narrative projection", () => {
   it("marks failed read-only tool actions and inspector records as error from toolStatus", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Inspect failure" },
-      runEvent({ type: "TOOL_CALL_ARGS", seq: 1, toolCallId: "read-1", toolCallName: "Read", delta: "{\"file_path\":\"missing.md\"}" }),
+      runEvent({
+        type: "TOOL_CALL_ARGS",
+        seq: 1,
+        toolCallId: "read-1",
+        toolCallName: "Read",
+        delta: '{"file_path":"missing.md"}',
+      }),
       runEvent({
         type: "TOOL_CALL_RESULT",
         seq: 2,
@@ -1736,7 +2188,7 @@ describe("runtime reducer run narrative projection", () => {
         seq: 1,
         toolCallId: "read-1",
         toolCallName: "read_file",
-        delta: "{\"path\":\"README.md\"}",
+        delta: '{"path":"README.md"}',
       }),
     ]);
 
@@ -1761,20 +2213,31 @@ describe("runtime reducer run narrative projection", () => {
         artifactContractVersion: 2,
         artifactProducer: "artifact_publish",
       }),
-      { type: "run/streamFailed", message: "failed after 5 reconnect attempts" },
+      {
+        type: "run/streamFailed",
+        message: "failed after 5 reconnect attempts",
+      },
     ]);
 
     expect(state.phase).toBe("error");
     expect(state.status).toBe("error");
     expect(state.timelineStatus).toBe("error");
     expect(state.errorMessage).toBe("failed after 5 reconnect attempts");
-    expect(state.steps.find((step) => step.id === "stream-failed")).toMatchObject({
+    expect(
+      state.steps.find((step) => step.id === "stream-failed"),
+    ).toMatchObject({
       title: "Stream failed",
       status: "error",
     });
-    expect(state.narrative.committedItems.some((item) => item.id === "answer:error:current:stream")).toBe(true);
     expect(
-      state.narrative.committedItems.find((item) => item.kind === "deliverables"),
+      state.narrative.committedItems.some(
+        (item) => item.id === "answer:error:current:stream",
+      ),
+    ).toBe(true);
+    expect(
+      state.narrative.committedItems.find(
+        (item) => item.kind === "deliverables",
+      ),
     ).toMatchObject({
       terminalStatus: "error",
       files: [{ artifactId: "stream-report" }],
@@ -1794,7 +2257,12 @@ describe("runtime reducer run narrative projection", () => {
         artifactDescription: "Updated file",
         artifactStatus: "ready",
       }),
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 2, messageId: "m1", delta: "done" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 2,
+        messageId: "m1",
+        delta: "done",
+      }),
       runEvent({ type: "RUN_FINISHED", seq: 3, result: "done" }),
     ]);
 
@@ -1851,7 +2319,9 @@ describe("runtime reducer run narrative projection", () => {
       undefined,
     ]);
     expect(
-      state.narrative.committedItems.some((item) => item.kind === "deliverables"),
+      state.narrative.committedItems.some(
+        (item) => item.kind === "deliverables",
+      ),
     ).toBe(false);
   });
 
@@ -1882,11 +2352,18 @@ describe("runtime reducer run narrative projection", () => {
         artifactContractVersion: 2,
         artifactProducer: "artifact_render",
       }),
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 3, messageId: "m1", delta: "done" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 3,
+        messageId: "m1",
+        delta: "done",
+      }),
       runEvent({ type: "RUN_FINISHED", seq: 4, result: "done" }),
     ]);
 
-    const answerIndex = state.narrative.committedItems.findIndex((item) => item.kind === "answer");
+    const answerIndex = state.narrative.committedItems.findIndex(
+      (item) => item.kind === "answer",
+    );
     const deliverableIndex = state.narrative.committedItems.findIndex(
       (item) => item.kind === "deliverables",
     );
@@ -1938,7 +2415,9 @@ describe("runtime reducer run narrative projection", () => {
     ]);
 
     expect(
-      state.narrative.committedItems.find((item) => item.kind === "deliverables"),
+      state.narrative.committedItems.find(
+        (item) => item.kind === "deliverables",
+      ),
     ).toMatchObject({
       files: [
         { artifactId: "image-1", fileType: "image", extension: "png" },
@@ -2059,7 +2538,9 @@ describe("runtime reducer run narrative projection", () => {
     ]);
 
     expect(
-      state.narrative.committedItems.find((item) => item.kind === "deliverables"),
+      state.narrative.committedItems.find(
+        (item) => item.kind === "deliverables",
+      ),
     ).toMatchObject({
       files: [
         { artifactId: "apply_patch:added:new.md" },
@@ -2072,15 +2553,27 @@ describe("runtime reducer run narrative projection", () => {
   it.each([
     {
       name: "failed",
-      terminal: runEvent({ type: "RUN_ERROR", seq: 2, code: "TOOL_FAILED", message: "failed" }),
+      terminal: runEvent({
+        type: "RUN_ERROR",
+        seq: 2,
+        code: "TOOL_FAILED",
+        message: "failed",
+      }),
       expected: "error" as const,
     },
     {
       name: "cancelled",
-      terminal: runEvent({ type: "RUN_ERROR", seq: 2, code: "RUN_CANCELLED", message: "cancelled" }),
+      terminal: runEvent({
+        type: "RUN_ERROR",
+        seq: 2,
+        code: "RUN_CANCELLED",
+        message: "cancelled",
+      }),
       expected: "cancelled" as const,
     },
-  ])("keeps ready deliverables when a run is $name", ({ terminal, expected }) => {
+  ])(
+    "keeps ready deliverables when a run is $name",
+    ({ terminal, expected }) => {
     const state = dispatch([
       { type: "run/requested", prompt: "Create a report" },
       runEvent({
@@ -2098,17 +2591,43 @@ describe("runtime reducer run narrative projection", () => {
       terminal,
     ]);
     expect(
-      state.narrative.committedItems.find((item) => item.kind === "deliverables"),
-    ).toMatchObject({ terminalStatus: expected, files: [{ artifactId: "report" }] });
+        state.narrative.committedItems.find(
+          (item) => item.kind === "deliverables",
+        ),
+      ).toMatchObject({
+        terminalStatus: expected,
+        files: [{ artifactId: "report" }],
   });
+    },
+  );
 
   it("does not duplicate narrative items or deltas when sequenced events replay", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Replay safe" },
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 1, messageId: "m1", delta: "he" }),
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 2, messageId: "m1", delta: "llo" }),
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 1, messageId: "m1", delta: "he" }),
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 2, messageId: "m1", delta: "llo" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 1,
+        messageId: "m1",
+        delta: "he",
+      }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 2,
+        messageId: "m1",
+        delta: "llo",
+      }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 1,
+        messageId: "m1",
+        delta: "he",
+      }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 2,
+        messageId: "m1",
+        delta: "llo",
+      }),
     ]);
 
     const ids = [
@@ -2127,7 +2646,12 @@ describe("runtime reducer run narrative projection", () => {
   it("does not double assistantText when a durable snapshot follows streaming", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Snapshot" },
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 16, messageId: "m1", delta: "hello" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 16,
+        messageId: "m1",
+        delta: "hello",
+      }),
       runEvent({
         type: "TEXT_MESSAGE_CONTENT",
         seq: 32,
@@ -2139,10 +2663,13 @@ describe("runtime reducer run narrative projection", () => {
     ]);
 
     expect(state.assistantText).toBe("hello");
-    expect(state.narrative.activeItem).toMatchObject({
+    expect(state.narrative.committedItems).toContainEqual({
       kind: "answer",
+      id: "answer:m1",
       markdown: "hello",
+      status: "done",
     });
+    expect(state.narrative.activeItem).toBeUndefined();
   });
 
   it("preserves repeated unsequenced text deltas", () => {
@@ -2163,7 +2690,12 @@ describe("runtime reducer run narrative projection", () => {
   it("commits active narrative item when run finishes", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Finish" },
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 1, messageId: "m1", delta: "done" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 1,
+        messageId: "m1",
+        delta: "done",
+      }),
       runEvent({ type: "RUN_FINISHED", seq: 2, result: "done" }),
     ]);
 
@@ -2180,14 +2712,20 @@ describe("runtime reducer run narrative projection", () => {
   it("annotates the successful final answer with elapsed runtime", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Finish", startedAtMs: 1000 },
-      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-1", threadId: "thread-1" }),
+      },
       runEvent({
         type: "TEXT_MESSAGE_CONTENT",
         runId: "run-1",
         messageId: "m1",
         delta: "done",
       }),
-      runEventAt({ type: "RUN_FINISHED", runId: "run-1", result: "done" }, 66000),
+      runEventAt(
+        { type: "RUN_FINISHED", runId: "run-1", result: "done" },
+        66000,
+      ),
     ]);
 
     expect(state.narrative.committedItems).toContainEqual({
@@ -2246,7 +2784,10 @@ describe("runtime reducer run narrative projection", () => {
   it("annotates an already committed text message when finished status arrives", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Finish", startedAtMs: 2000 },
-      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-1", threadId: "thread-1" }),
+      },
       runEvent({
         type: "TEXT_MESSAGE_CONTENT",
         runId: "run-1",
@@ -2254,7 +2795,10 @@ describe("runtime reducer run narrative projection", () => {
         delta: "done",
       }),
       runEvent({ type: "TEXT_MESSAGE_END", runId: "run-1", messageId: "m1" }),
-      runEventAt({ type: "RUN_STATUS_CHANGED", runId: "run-1", status: "finished" }, 47000),
+      runEventAt(
+        { type: "RUN_STATUS_CHANGED", runId: "run-1", status: "finished" },
+        47000,
+      ),
     ]);
 
     expect(state.narrative.committedItems).toContainEqual({
@@ -2270,14 +2814,20 @@ describe("runtime reducer run narrative projection", () => {
   it("commits a streaming answer and annotates elapsed runtime when finished status arrives", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Finish", startedAtMs: 2000 },
-      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-1", threadId: "thread-1" }),
+      },
       runEvent({
         type: "TEXT_MESSAGE_CONTENT",
         runId: "run-1",
         messageId: "m1",
         delta: "streamed done",
       }),
-      runEventAt({ type: "RUN_STATUS_CHANGED", runId: "run-1", status: "finished" }, 47000),
+      runEventAt(
+        { type: "RUN_STATUS_CHANGED", runId: "run-1", status: "finished" },
+        47000,
+      ),
     ]);
 
     expect(state.narrative.committedItems).toContainEqual({
@@ -2293,12 +2843,19 @@ describe("runtime reducer run narrative projection", () => {
   it("does not annotate cancelled or error answers with elapsed runtime", () => {
     const cancelled = dispatch([
       { type: "run/requested", prompt: "Cancel", startedAtMs: 1000 },
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", messageId: "m1", delta: "partial" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        messageId: "m1",
+        delta: "partial",
+      }),
       runEventAt({ type: "RUN_STATUS_CHANGED", status: "cancelled" }, 3000),
     ]);
     const errored = dispatch([
       { type: "run/requested", prompt: "Error", startedAtMs: 1000 },
-      runEventAt({ type: "RUN_ERROR", code: "INTERNAL_ERROR", message: "boom" }, 3000),
+      runEventAt(
+        { type: "RUN_ERROR", code: "INTERNAL_ERROR", message: "boom" },
+        3000,
+      ),
     ]);
 
     const cancelledAnswer = cancelled.narrative.committedItems.find(
@@ -2340,10 +2897,20 @@ describe("runtime reducer run narrative projection", () => {
   it("keeps active answer available for live tail after stream interruption", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Stream" },
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 1, messageId: "m1", delta: "partial" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 1,
+        messageId: "m1",
+        delta: "partial",
+      }),
       { type: "run/reconnecting" },
       { type: "run/streamError", message: "stream disconnected" },
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", seq: 2, messageId: "m1", delta: " recovered" }),
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        seq: 2,
+        messageId: "m1",
+        delta: " recovered",
+      }),
     ]);
 
     expect(state.phase).toBe("reconnecting");
@@ -2354,16 +2921,31 @@ describe("runtime reducer run narrative projection", () => {
       markdown: "partial recovered",
       status: "active",
     });
-    expect(state.narrative.committedItems.some((item) => item.id === "answer:error:stream")).toBe(false);
+    expect(
+      state.narrative.committedItems.some(
+        (item) => item.id === "answer:error:stream",
+      ),
+    ).toBe(false);
   });
 });
 
 describe("runtime reducer thread snapshots", () => {
   it("tracks sidebar run status across run lifecycle", () => {
     let state = createInitialRuntimeState();
-    state = reduceRuntimeState(state, { type: "run/requested", prompt: "update file" });
-    state = reduceRuntimeState(state, { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) });
-    state = reduceRuntimeState(state, { type: "run/threadAdded", threadId: "thread-1", label: "update file", runId: "run-1" });
+    state = reduceRuntimeState(state, {
+      type: "run/requested",
+      prompt: "update file",
+    });
+    state = reduceRuntimeState(state, {
+      type: "run/created",
+      run: makeRun({ runId: "run-1", threadId: "thread-1" }),
+    });
+    state = reduceRuntimeState(state, {
+      type: "run/threadAdded",
+      threadId: "thread-1",
+      label: "update file",
+      runId: "run-1",
+    });
 
     expect(state.threads[0]).toMatchObject({
       threadId: "thread-1",
@@ -2372,20 +2954,29 @@ describe("runtime reducer thread snapshots", () => {
       artifactCount: 0,
     });
 
-    state = reduceRuntimeState(state, runEvent({ type: "RUN_STATUS_CHANGED", status: "running" }));
-    state = reduceRuntimeState(state, runEvent({
+    state = reduceRuntimeState(
+      state,
+      runEvent({ type: "RUN_STATUS_CHANGED", status: "running" }),
+    );
+    state = reduceRuntimeState(
+      state,
+      runEvent({
       type: "AWAKEN_ARTIFACT_CREATED",
       artifactId: "artifact-1",
       artifactTitle: "example.ts",
       artifactKind: "file",
       artifactPath: "src/example.ts",
-    }));
+      }),
+    );
 
     expect(state.threads[0]).toMatchObject({
       artifactCount: 1,
     });
 
-    state = reduceRuntimeState(state, runEvent({ type: "RUN_FINISHED", result: "done" }));
+    state = reduceRuntimeState(
+      state,
+      runEvent({ type: "RUN_FINISHED", result: "done" }),
+    );
 
     expect(state.threads[0]).toMatchObject({
       runStatus: "finished",
@@ -2397,8 +2988,16 @@ describe("runtime reducer thread snapshots", () => {
   it("restores the selected thread view when switching conversations", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "first prompt" },
-      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
-      { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-1", threadId: "thread-1" }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "first prompt",
+        runId: "run-1",
+      },
       runEvent({
         type: "TEXT_MESSAGE_CONTENT",
         threadId: "thread-1",
@@ -2408,9 +3007,23 @@ describe("runtime reducer thread snapshots", () => {
       }),
       { type: "run/reset" },
       { type: "run/requested", prompt: "second prompt" },
-      { type: "run/created", run: makeRun({ runId: "run-2", threadId: "thread-2" }) },
-      { type: "run/threadAdded", threadId: "thread-2", label: "second prompt", runId: "run-2" },
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", threadId: "thread-2", runId: "run-2", messageId: "msg-2", delta: "second answer" }),
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-2", threadId: "thread-2" }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-2",
+        label: "second prompt",
+        runId: "run-2",
+      },
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        threadId: "thread-2",
+        runId: "run-2",
+        messageId: "msg-2",
+        delta: "second answer",
+      }),
       { type: "run/threadSwitch", threadId: "thread-1" },
     ]);
 
@@ -2428,16 +3041,29 @@ describe("runtime reducer thread snapshots", () => {
       text: "first prompt",
     });
     expect(
-      narrativeItems.some((item) => item.kind === "prompt" && item.text === "second prompt"),
+      narrativeItems.some(
+        (item) => item.kind === "prompt" && item.text === "second prompt",
+      ),
     ).toBe(false);
-    expect(state.threads.map((thread) => thread.threadId)).toEqual(["thread-1", "thread-2"]);
+    expect(state.threads.map((thread) => thread.threadId)).toEqual([
+      "thread-1",
+      "thread-2",
+    ]);
   });
 
   it("restores artifact state when switching threads", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "first prompt" },
-      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
-      { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-1", threadId: "thread-1" }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "first prompt",
+        runId: "run-1",
+      },
       runEvent({
         type: "AWAKEN_ARTIFACT_CREATED",
         artifactId: "artifact-1",
@@ -2447,9 +3073,23 @@ describe("runtime reducer thread snapshots", () => {
       }),
       { type: "run/reset" },
       { type: "run/requested", prompt: "second prompt" },
-      { type: "run/created", run: makeRun({ runId: "run-2", threadId: "thread-2" }) },
-      { type: "run/threadAdded", threadId: "thread-2", label: "second prompt", runId: "run-2" },
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", threadId: "thread-2", runId: "run-2", messageId: "msg-2", delta: "second answer" }),
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-2", threadId: "thread-2" }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-2",
+        label: "second prompt",
+        runId: "run-2",
+      },
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        threadId: "thread-2",
+        runId: "run-2",
+        messageId: "msg-2",
+        delta: "second answer",
+      }),
       { type: "run/threadSwitch", threadId: "thread-1" },
     ]);
 
@@ -2460,14 +3100,24 @@ describe("runtime reducer thread snapshots", () => {
 
     expect(state.activeThreadId).toBe("thread-1");
     expect(state.artifacts).toHaveLength(1);
-    expect(narrativeItems.some((item) => item.kind === "fileChange")).toBe(false);
+    expect(narrativeItems.some((item) => item.kind === "fileChange")).toBe(
+      false,
+    );
   });
 
   it("starts a follow-up run in the same active thread after completion", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "first prompt" },
-      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
-      { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-1", threadId: "thread-1" }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "first prompt",
+        runId: "run-1",
+      },
       runEvent({
         type: "TEXT_MESSAGE_CONTENT",
         threadId: "thread-1",
@@ -2477,8 +3127,16 @@ describe("runtime reducer thread snapshots", () => {
       }),
       runEvent({ type: "RUN_FINISHED", result: "first done" }),
       { type: "run/requested", prompt: "follow up prompt" },
-      { type: "run/created", run: makeRun({ runId: "run-2", threadId: "thread-1" }) },
-      { type: "run/threadAdded", threadId: "thread-1", label: "follow up prompt", runId: "run-2" },
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-2", threadId: "thread-1" }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "follow up prompt",
+        runId: "run-2",
+      },
     ]);
 
     expect(state.activeThreadId).toBe("thread-1");
@@ -2491,7 +3149,9 @@ describe("runtime reducer thread snapshots", () => {
       runStatus: "running",
       activeRunId: "run-2",
     });
-    const prompts = state.narrative.committedItems.filter((item) => item.kind === "prompt");
+    const prompts = state.narrative.committedItems.filter(
+      (item) => item.kind === "prompt",
+    );
     expect(prompts).toEqual([
       { kind: "prompt", id: "prompt:draft:1", text: "first prompt" },
       { kind: "prompt", id: "prompt:thread-1:2", text: "follow up prompt" },
@@ -2515,30 +3175,74 @@ describe("runtime reducer thread snapshots", () => {
   it("uses run-scoped fallback ids for consecutive answers without message ids", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "first prompt" },
-      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
-      { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-1", threadId: "thread-1" }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "first prompt",
+        runId: "run-1",
+      },
       runEvent({ type: "TEXT_MESSAGE_CONTENT", delta: "first answer" }),
       runEvent({ type: "RUN_FINISHED", result: "first done" }),
       { type: "run/requested", prompt: "follow up prompt" },
-      { type: "run/created", run: makeRun({ runId: "run-2", threadId: "thread-1" }) },
-      { type: "run/threadAdded", threadId: "thread-1", label: "follow up prompt", runId: "run-2" },
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-2", threadId: "thread-1" }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "follow up prompt",
+        runId: "run-2",
+      },
       runEvent({ type: "TEXT_MESSAGE_CONTENT", delta: "second answer" }),
       runEvent({ type: "RUN_FINISHED", result: "second done" }),
     ]);
 
-    const answers = state.narrative.committedItems.filter((item) => item.kind === "answer");
+    const answers = state.narrative.committedItems.filter(
+      (item) => item.kind === "answer",
+    );
     expect(answers).toEqual([
-      { kind: "answer", id: "answer:run-1", markdown: "first answer", status: "done", isFinal: true },
-      { kind: "answer", id: "answer:run-2", markdown: "second answer", status: "done", isFinal: true },
+      {
+        kind: "answer",
+        id: "answer:run-1",
+        markdown: "first answer",
+        status: "done",
+        isFinal: true,
+      },
+      {
+        kind: "answer",
+        id: "answer:run-2",
+        markdown: "second answer",
+        status: "done",
+        isFinal: true,
+      },
     ]);
   });
 
   it("loads runtime thread list without losing saved thread views", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "first prompt" },
-      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
-      { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
-      runEvent({ type: "TEXT_MESSAGE_CONTENT", threadId: "thread-1", runId: "run-1", messageId: "msg-1", delta: "first answer" }),
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-1", threadId: "thread-1" }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "first prompt",
+        runId: "run-1",
+      },
+      runEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        threadId: "thread-1",
+        runId: "run-1",
+        messageId: "msg-1",
+        delta: "first answer",
+      }),
       {
         type: "run/threadsLoaded",
         threads: [
@@ -2562,8 +3266,16 @@ describe("runtime reducer thread snapshots", () => {
   it("clears stale active thread when runtime no longer lists it", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "first prompt" },
-      { type: "run/created", run: makeRun({ runId: "run-1", threadId: "thread-1" }) },
-      { type: "run/threadAdded", threadId: "thread-1", label: "first prompt", runId: "run-1" },
+      {
+        type: "run/created",
+        run: makeRun({ runId: "run-1", threadId: "thread-1" }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "first prompt",
+        runId: "run-1",
+      },
       { type: "run/threadsLoaded", threads: [] },
     ]);
 

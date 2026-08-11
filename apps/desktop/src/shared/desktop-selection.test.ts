@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isDesktopSelectAllShortcut,
+  isDesktopTabNavigation,
   isDesktopZoomShortcut,
 } from "./desktop-selection.js";
 
@@ -68,5 +69,42 @@ describe("isDesktopZoomShortcut", () => {
     expect(isDesktopZoomShortcut(keyboardInput({ key: "+", code: "Equal" }))).toBe(false);
     expect(isDesktopZoomShortcut(keyboardInput({ key: "a", code: "KeyA", meta: true }))).toBe(false);
     expect(isDesktopZoomShortcut(keyboardInput({ key: "+", code: "Equal", control: true, alt: true }))).toBe(false);
+  });
+});
+
+describe("isDesktopTabNavigation", () => {
+  it("recognizes unmodified Tab and Shift+Tab key-down input", () => {
+    expect(
+      isDesktopTabNavigation(keyboardInput({ key: "Tab", code: "Tab" })),
+    ).toBe(true);
+    expect(
+      isDesktopTabNavigation(
+        keyboardInput({ key: "Tab", code: "Tab", shift: true }),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not consume modified, key-up, or unrelated input", () => {
+    expect(
+      isDesktopTabNavigation(
+        keyboardInput({ key: "Tab", code: "Tab", control: true }),
+      ),
+    ).toBe(false);
+    expect(
+      isDesktopTabNavigation(
+        keyboardInput({ key: "Tab", code: "Tab", meta: true }),
+      ),
+    ).toBe(false);
+    expect(
+      isDesktopTabNavigation(
+        keyboardInput({ key: "Tab", code: "Tab", alt: true }),
+      ),
+    ).toBe(false);
+    expect(
+      isDesktopTabNavigation(
+        keyboardInput({ type: "keyUp", key: "Tab", code: "Tab" }),
+      ),
+    ).toBe(false);
+    expect(isDesktopTabNavigation(keyboardInput())).toBe(false);
   });
 });

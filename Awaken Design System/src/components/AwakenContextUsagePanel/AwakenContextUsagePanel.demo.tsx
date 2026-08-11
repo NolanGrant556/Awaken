@@ -14,7 +14,7 @@ export function AwakenContextUsagePanelDemo() {
         <h2>
           上下文用量面板 <code>AwakenContextUsagePanel</code>
         </h2>
-        <p>展示当前下一次模型请求的六项可求和分类与输入窗口。</p>
+        <p>展示当前下一次模型请求的六项分类、可选协议开销与输入窗口。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenContextUsagePanelStates.map((state) => (

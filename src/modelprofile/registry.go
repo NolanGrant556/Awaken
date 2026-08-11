@@ -13,6 +13,7 @@ type Provider struct {
 	KeyEnvName         string                     `json:"key_env_name"`
 	DefaultModel       string                     `json:"default_model"`
 	Models             []string                   `json:"models"`
+	ModelDisplayNames  map[string]string          `json:"model_display_names,omitempty"`
 	DocsURL            string                     `json:"docs_url"`
 	APIDocsURL         string                     `json:"api_docs_url"`
 	AccessType         string                     `json:"access_type"`
@@ -188,20 +189,24 @@ func BuiltinProviders() []Provider {
 			AccessType: "api",
 			ModelCapabilities: map[string]ModelCapability{
 				"deepseek-v4-pro": {
-					ContextWindow:    1000000,
-					MaxOutputTokens:  384000,
-					DefaultMaxTokens: 8192,
-					SupportsVision:   false,
-					SupportsVideo:    false,
-					SupportsTools:    "ready",
-					ReasoningEffort:  effort([]string{"high", "max"}, "high"),
+					SupportedProtocols: []string{"openai_chat", "anthropic_messages"},
+					ContextWindow:      1000000,
+					MaxOutputTokens:    384000,
+					DefaultMaxTokens:   8192,
+					SupportsVision:     false,
+					SupportsVideo:      false,
+					SupportsTools:      "ready",
+					ReasoningEffort:    effort([]string{"high", "max"}, "high"),
 				},
 				"deepseek-v4-flash": {
-					ContextWindow:    1000000,
-					MaxOutputTokens:  384000,
-					DefaultMaxTokens: 8192,
-					SupportsVision:   false,
-					SupportsVideo:    false,
+					SupportedProtocols: allLLMProtocols(),
+					ContextWindow:      1000000,
+					MaxOutputTokens:    384000,
+					DefaultMaxTokens:   8192,
+					SupportsVision:     false,
+					SupportsVideo:      false,
+					SupportsTools:      "ready",
+					ReasoningEffort:    effort([]string{"high", "max"}, "high"),
 				},
 			},
 		},
@@ -382,7 +387,7 @@ func BuiltinProviders() []Provider {
 			ModelCapabilities: map[string]ModelCapability{
 				"glm-5.2": {
 					ContextWindow: 1000000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000,
-					SupportsTools: "ready",
+					SupportsTools: "ready", ReasoningEffort: effort([]string{"high", "max"}, "max"),
 				},
 				"glm-5-turbo": {
 					ContextWindow: 200000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000,
@@ -573,7 +578,7 @@ func BuiltinProviders() []Provider {
 			Protocol: "openai_chat", SupportedProtocols: []string{"openai_chat", "anthropic_messages"}, CatalogStrategy: "openai", AuthScheme: "bearer", KeyEnvName: "ZHIPU_API_KEY",
 			DefaultModel: "glm-5.2", Models: []string{"glm-5.2"},
 			DocsURL: "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2", APIDocsURL: "https://open.bigmodel.cn/usercenter/apikeys", AccessType: "api",
-			ModelCapabilities: map[string]ModelCapability{"glm-5.2": {ContextWindow: 1000000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsTools: "ready"}},
+			ModelCapabilities: map[string]ModelCapability{"glm-5.2": {ContextWindow: 1000000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsTools: "ready", ReasoningEffort: effort([]string{"high", "max"}, "max")}},
 		},
 		{
 			ID: "qwen", DisplayName: "Qwen API", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -587,10 +592,28 @@ func BuiltinProviders() []Provider {
 		},
 		{
 			ID: "doubao", DisplayName: "Doubao Ark API", BaseURL: "https://ark.cn-beijing.volces.com/api/v3",
-			Protocol: "openai_chat", SupportedProtocols: []string{"openai_chat"}, CatalogStrategy: "none", AuthScheme: "bearer", KeyEnvName: "ARK_API_KEY",
-			DefaultModel: "doubao-seed-2.1-pro", Models: []string{"doubao-seed-2.1-pro"}, EndpointModel: true,
+			Protocol: "openai_chat", SupportedProtocols: []string{"openai_chat", "openai_responses"}, CatalogStrategy: "none", AuthScheme: "bearer", KeyEnvName: "ARK_API_KEY",
+			DefaultModel: "doubao-seed-2-1-pro-260628", Models: []string{
+				"doubao-seed-evolving",
+				"doubao-seed-2-1-pro-260628",
+				"doubao-seed-2-1-turbo-260628",
+				"doubao-seed-2-0-code-preview-260215",
+				"doubao-seed-2-0-pro-260215",
+				"doubao-seed-2-0-lite-260428",
+			}, ModelDisplayNames: map[string]string{
+				"doubao-seed-evolving":                "Doubao-Seed-Evolving",
+				"doubao-seed-2-1-pro-260628":          "Doubao-Seed-2.1-Pro",
+				"doubao-seed-2-1-turbo-260628":        "Doubao-Seed-2.1-Turbo",
+				"doubao-seed-2-0-code-preview-260215": "Doubao-Seed-2.0-Code",
+				"doubao-seed-2-0-pro-260215":          "Doubao-Seed-2.0-Pro",
+				"doubao-seed-2-0-lite-260428":         "Doubao-Seed-2.0-Lite",
+			}, EndpointModel: true,
 			DocsURL: "https://www.volcengine.com/product/doubao", APIDocsURL: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey", AccessType: "api",
-			ModelCapabilities: map[string]ModelCapability{"doubao-seed-2.1-pro": {ContextWindow: 256000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high", "max"}, "high")}},
+			ModelCapabilities: map[string]ModelCapability{
+				"doubao-seed-2-1-pro-260628": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 256000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high", "max"}, "high")},
+				// Compatibility for profiles saved before exact Ark Model IDs were exposed.
+				"doubao-seed-2.1-pro": {SupportedProtocols: []string{"openai_chat", "openai_responses"}, ContextWindow: 256000, MaxOutputTokens: 128000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready", ReasoningEffort: effort([]string{"low", "high", "max"}, "high")},
+			},
 		},
 		{
 			ID: "volcengine-agent-plan", DisplayName: "火山 Agent Plan", BaseURL: "https://ark.cn-beijing.volces.com/api/plan/v3",

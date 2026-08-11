@@ -17,6 +17,15 @@ function parseBalanceValue(value: unknown): number {
   return 0;
 }
 
+function parseOptionalBalanceValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
 class BalanceFetchError extends Error {
   constructor(
     message: string,
@@ -248,6 +257,160 @@ export async function fetchKimiBalance(
       topped_up: parseBalanceValue(data.cash_balance),
     }],
   };
+}
+
+type MiniMaxTokenPlanRemain = {
+  modelName: string;
+  currentTotal?: number;
+  currentUsed?: number;
+  currentRemainingPercent?: number;
+  currentStatus?: number;
+  currentResetAfterMs?: number;
+  weeklyTotal?: number;
+  weeklyUsed?: number;
+  weeklyRemainingPercent?: number;
+  weeklyStatus?: number;
+  weeklyResetAfterMs?: number;
+};
+
+function parseMiniMaxTokenPlanRemain(value: unknown): MiniMaxTokenPlanRemain | null {
+  const item = assertObject(value);
+  const modelName = typeof item.model_name === "string" ? item.model_name.trim() : "";
+  if (!modelName) return null;
+  return {
+    modelName,
+    currentTotal: parseOptionalBalanceValue(item.current_interval_total_count),
+    currentUsed: parseOptionalBalanceValue(item.current_interval_usage_count),
+    currentRemainingPercent: parseOptionalBalanceValue(
+      item.current_interval_remaining_percent,
+    ),
+    currentStatus: parseOptionalBalanceValue(item.current_interval_status),
+    currentResetAfterMs: parseOptionalBalanceValue(item.remains_time),
+    weeklyTotal: parseOptionalBalanceValue(item.current_weekly_total_count),
+    weeklyUsed: parseOptionalBalanceValue(item.current_weekly_usage_count),
+    weeklyRemainingPercent: parseOptionalBalanceValue(
+      item.current_weekly_remaining_percent,
+    ),
+    weeklyStatus: parseOptionalBalanceValue(item.current_weekly_status),
+    weeklyResetAfterMs: parseOptionalBalanceValue(item.weekly_remains_time),
+  };
+}
+
+function minimaxTokenPlanResetAt(remainingMs?: number): string | undefined {
+  if (remainingMs === undefined || remainingMs <= 0) return undefined;
+  return new Date(Date.now() + remainingMs).toISOString();
+}
+
+function minimaxTokenPlanQuota(
+  name: string,
+  total: number | undefined,
+  used: number | undefined,
+  remainingPercent: number | undefined,
+  status: number | undefined,
+  resetAfterMs: number | undefined,
+): ModelBalanceQuotaWire | null {
+  // MiniMax reports status=3 for an unlimited window. The numeric fields stay
+  // at 0/0 and remaining_percent=100, so preserving only the numbers would
+  // incorrectly render a normal, finite 100% quota.
+  if (status === 3) {
+    return {
+      name,
+      limit: 0,
+      used: 0,
+      remaining: 0,
+      unlimited: true,
+    };
+  }
+  if (total !== undefined && total > 0) {
+    const normalizedUsed = Math.max(0, Math.min(total, used ?? 0));
+    return {
+      name,
+      limit: total,
+      used: normalizedUsed,
+      remaining: Math.max(0, total - normalizedUsed),
+      unit: "requests",
+      reset_at: minimaxTokenPlanResetAt(resetAfterMs),
+    };
+  }
+  if (remainingPercent !== undefined) {
+    const remaining = Math.max(0, Math.min(100, remainingPercent));
+    return {
+      name,
+      limit: 100,
+      used: 100 - remaining,
+      remaining,
+      unit: "percent",
+      reset_at: minimaxTokenPlanResetAt(resetAfterMs),
+    };
+  }
+  return null;
+}
+
+function miniMaxTokenPlanUsageURL(baseURL: string): string {
+  try {
+    const hostname = new URL(baseURL).hostname.toLowerCase();
+    if (hostname === "api.minimax.io" || hostname.endsWith(".minimax.io")) {
+      return "https://www.minimax.io/v1/token_plan/remains";
+    }
+  } catch {
+    // Built-in MiniMax Token Plan profiles are China-region profiles. Invalid
+    // legacy base URLs therefore fail closed to the documented China contract.
+  }
+  return "https://www.minimaxi.com/v1/token_plan/remains";
+}
+
+export async function fetchMiniMaxTokenPlanBalance(
+  baseURL: string,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<ModelBalanceDetailWire> {
+  const response = await fetch(miniMaxTokenPlanUsageURL(baseURL), {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    signal,
+  });
+  await assertOk(response);
+
+  const body = assertObject(await response.json());
+  if (!Array.isArray(body.model_remains)) {
+    throw new BalanceFetchError("MiniMax Token Plan 额度响应格式无效");
+  }
+
+  const quotas = body.model_remains.flatMap((entry): ModelBalanceQuotaWire[] => {
+    const remain = parseMiniMaxTokenPlanRemain(entry);
+    // This profile is the text Coding/Token Plan entry. MiniMax returns
+    // additional media resource buckets (for example `video`) from the same
+    // endpoint; those belong to media tools and are not this model's quota.
+    if (!remain || remain.modelName.toLowerCase() !== "general") return [];
+    const current = minimaxTokenPlanQuota(
+      "5 小时额度",
+      remain.currentTotal,
+      remain.currentUsed,
+      remain.currentRemainingPercent,
+      remain.currentStatus,
+      remain.currentResetAfterMs,
+    );
+    const weekly = minimaxTokenPlanQuota(
+      "周额度",
+      remain.weeklyTotal,
+      remain.weeklyUsed,
+      remain.weeklyRemainingPercent,
+      remain.weeklyStatus,
+      remain.weeklyResetAfterMs,
+    );
+    return [current, weekly].filter(
+      (quota): quota is ModelBalanceQuotaWire => quota !== null,
+    );
+  });
+
+  if (quotas.length === 0) {
+    throw new BalanceFetchError("MiniMax Token Plan 额度响应为空");
+  }
+  return { kind: "quota", quotas };
 }
 
 function nestedNumber(value: unknown): number {

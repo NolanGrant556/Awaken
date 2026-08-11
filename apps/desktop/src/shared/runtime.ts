@@ -838,6 +838,7 @@ export type ModelProviderWire = {
   key_env_name: string;
   default_model: string;
   models: string[];
+  model_display_names?: Record<string, string>;
   docs_url: string;
   api_docs_url: string;
   access_type?: ModelAccessType;
@@ -931,6 +932,7 @@ export type ModelProvider = {
   keyEnvName: string;
   defaultModel: string;
   models: string[];
+  modelDisplayNames?: Record<string, string>;
   docsURL: string;
   apiDocsURL: string;
   accessType?: ModelAccessType;
@@ -1035,6 +1037,7 @@ export type RuntimeModelProfileSummaryWire = {
   provider_id: string;
   display_name: string;
   model_id: string;
+  model_display_name?: string;
   base_url: string;
   protocol: string;
   auth_scheme: string;
@@ -1060,6 +1063,7 @@ export type RuntimeModelProfileSummary = {
   accessType?: ModelAccessType;
   credentialReference?: ModelCredentialReference;
   modelId: string;
+  modelDisplayName?: string;
   baseURL: string;
   protocol: string;
   authScheme: string;
@@ -1245,7 +1249,12 @@ export function normalizeAgentPlanMediaTools(
 }
 
 export type ModelBalanceStatusWire =
-  "available" | "unavailable" | "missing_key" | "error" | "unsupported";
+  | "available"
+  | "unavailable"
+  | "missing_key"
+  | "error"
+  | "unsupported"
+  | "requires_setup";
 
 export type ModelBalanceAmountWire = {
   currency: string;
@@ -1259,6 +1268,8 @@ export type ModelBalanceQuotaWire = {
   limit: number;
   used: number;
   remaining: number;
+  unit?: "requests" | "percent";
+  unlimited?: boolean;
   reset_at?: string;
 };
 
@@ -1281,9 +1292,10 @@ export type ModelProfileBalanceWire = {
   status: ModelBalanceStatusWire;
   fetched_at?: string;
   detail?: ModelBalanceDetailWire;
-  local_usage?: Extract<ModelBalanceDetailWire, { kind: "usage" }>;
   error?: string;
   credential_issue?: "unreadable";
+  setup_url?: string;
+  setup_label?: string;
 };
 
 export type ModelProfileBalancesResultWire = {
@@ -1291,7 +1303,12 @@ export type ModelProfileBalancesResultWire = {
 };
 
 export type ModelBalanceStatus =
-  "available" | "unavailable" | "missing_key" | "error" | "unsupported";
+  | "available"
+  | "unavailable"
+  | "missing_key"
+  | "error"
+  | "unsupported"
+  | "requires_setup";
 
 export type ModelBalanceAmount = {
   currency: string;
@@ -1305,6 +1322,8 @@ export type ModelBalanceQuota = {
   limit: number;
   used: number;
   remaining: number;
+  unit?: "requests" | "percent";
+  unlimited?: boolean;
   resetAt?: string;
 };
 
@@ -1321,9 +1340,10 @@ export type ModelProfileBalance = {
   status: ModelBalanceStatus;
   fetchedAt?: string;
   detail?: ModelBalanceDetail;
-  localUsage?: Extract<ModelBalanceDetail, { kind: "usage" }>;
   error?: string;
   credentialIssue?: "unreadable";
+  setupURL?: string;
+  setupLabel?: string;
 };
 
 export type ModelProfileBalancesResult = {
@@ -2285,6 +2305,7 @@ export function normalizeModelProvider(provider: ModelProviderWire): ModelProvid
     keyEnvName: provider.key_env_name,
     defaultModel: provider.default_model,
     models: provider.models,
+    modelDisplayNames: { ...(provider.model_display_names ?? {}) },
     docsURL: provider.docs_url,
     apiDocsURL: provider.api_docs_url,
     accessType: provider.access_type ?? (provider.coding_preset ? "coding_plan" : "api"),
@@ -2410,6 +2431,7 @@ export function normalizeModelProfileSummary(
           }
       : undefined,
     modelId: profile.model_id,
+    modelDisplayName: profile.model_display_name ?? profile.model_id,
     baseURL: profile.base_url,
     protocol: profile.protocol,
     authScheme: profile.auth_scheme,
@@ -2515,6 +2537,8 @@ export function normalizeModelBalanceQuota(quota: ModelBalanceQuotaWire): ModelB
     limit: quota.limit,
     used: quota.used,
     remaining: quota.remaining,
+    unit: quota.unit,
+    unlimited: quota.unlimited,
     resetAt: quota.reset_at,
   };
 }
@@ -2550,11 +2574,10 @@ export function normalizeModelProfileBalance(
     status: normalizeModelBalanceStatus(balance.status),
     fetchedAt: balance.fetched_at,
     detail: balance.detail ? normalizeModelBalanceDetail(balance.detail) : undefined,
-    localUsage: balance.local_usage
-      ? normalizeModelBalanceDetail(balance.local_usage) as Extract<ModelBalanceDetail, { kind: "usage" }>
-      : undefined,
     error: balance.error,
     credentialIssue: balance.credential_issue,
+    setupURL: balance.setup_url,
+    setupLabel: balance.setup_label,
   };
 }
 

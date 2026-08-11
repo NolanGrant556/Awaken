@@ -212,11 +212,35 @@ func TestContextGovernorRecordResponseUsageSetsLastAPIUsageTokens(t *testing.T) 
 	governor := newContextGovernor(engine, func() (LLMRequest, error) {
 		return LLMRequest{}, nil
 	}, nil)
+	governor.RecordSentRequestEstimate(250)
 	governor.RecordResponseUsage(321)
 
 	state := governor.withRunState(testContextWindowState(2000))
 	if state.LastAPIUsageTokens != 321 {
 		t.Fatalf("expected last API usage tokens to be preserved in state, got %+v", state)
+	}
+	if state.LastSentEstimatedInputTokens != 250 {
+		t.Fatalf("expected matching sent-request estimate to be preserved in state, got %+v", state)
+	}
+}
+
+func TestConservativeProjectedTokensAnchorsProviderUsageToCurrentEstimate(t *testing.T) {
+	state := testContextWindowState(14572)
+	state.LastAPIUsageTokens = 20224
+	state.LastSentEstimatedInputTokens = 16501
+
+	if got := state.ConservativeProjectedTokens(); got != 18295 {
+		t.Fatalf("ConservativeProjectedTokens=%d, want 18295", got)
+	}
+}
+
+func TestShouldBlockUsesProviderAnchoredProjection(t *testing.T) {
+	state := testContextWindowState(80000)
+	state.LastAPIUsageTokens = 100000
+	state.LastSentEstimatedInputTokens = 84000
+
+	if !state.ShouldBlock() {
+		t.Fatalf("expected provider-anchored projection to cross blocking threshold: %+v", state)
 	}
 }
 
@@ -339,6 +363,9 @@ func TestPrepareRequestAutoCompactsByActualUsageEvenWhenV4EstimateIsBelowThresho
 	// PrepareRequest does not loop on stale LastAPIUsageTokens.
 	if governor.lastAPIUsageTokens != 0 {
 		t.Fatalf("expected lastAPIUsageTokens reset after successful compact, got %d", governor.lastAPIUsageTokens)
+	}
+	if governor.lastSentEstimatedInputTokens != 0 {
+		t.Fatalf("expected lastSentEstimatedInputTokens reset after successful compact, got %d", governor.lastSentEstimatedInputTokens)
 	}
 	if req.ContextWindowState.LastAPIUsageTokens != 0 {
 		t.Fatalf("expected rebuilt state to reflect reset lastAPIUsageTokens, got %d", req.ContextWindowState.LastAPIUsageTokens)

@@ -171,6 +171,20 @@
   overscroll-behavior: contain;
 }
 
+.aw-settings-main--full-bleed > .aw-model-settings-page {
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.aw-settings-main--full-bleed > .aw-model-settings-page::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 .aw-settings-toast {
   position: absolute;
   top: 50%;

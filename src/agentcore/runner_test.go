@@ -1009,6 +1009,10 @@ func TestRunnerRunStreamWithEventsPlainQA(t *testing.T) {
 			t.Fatalf("unexpected event type at %d: want %s got %s (%v)", i, want, gotTypes[i], gotTypes)
 		}
 	}
+	usageEvent := gotEvents[firstEventIndex(gotEvents, ModelUsageEventType)]
+	if usageEvent.ModelUsage == nil || usageEvent.ModelUsage.SentEstimatedInputTokens == nil || *usageEvent.ModelUsage.SentEstimatedInputTokens <= 0 {
+		t.Fatalf("expected model usage to retain the exact sent-request estimate, got %+v", usageEvent.ModelUsage)
+	}
 
 	for _, event := range gotEvents {
 		switch event.Type {

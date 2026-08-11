@@ -28,12 +28,22 @@ const mockBalances: ModelProfileBalance[] = [
     providerId: "volcengine-agent-plan",
     modelId: "ark-code-latest",
     displayName: "火山 Agent Plan",
-    status: "unsupported",
-    error: "当前供应商暂不支持查询用量",
-    localUsage: {
-      kind: "usage",
-      metrics: [
-        { name: "Awaken 本地缓存输入", value: 12, unit: "tokens" },
+    status: "requires_setup",
+    error: "火山 Agent Plan 推理 Key 不能查询套餐用量；GetAFPUsage 需要独立的火山云 AK/SK 与只读方舟管理权限。",
+    setupURL: "https://api.volcengine.com/api-docs/view?action=GetAFPUsage&serviceCode=ark&version=2024-01-01",
+    setupLabel: "查看 Agent Plan 用量授权",
+  },
+  {
+    profileId: "minimax-token-plan",
+    providerId: "minimax-token-plan",
+    modelId: "MiniMax-M3",
+    displayName: "MiniMax Token Plan",
+    status: "available",
+    detail: {
+      kind: "quota",
+      quotas: [
+        { name: "5 小时额度", limit: 100, used: 0, remaining: 100, unit: "percent" },
+        { name: "周额度", limit: 0, used: 0, remaining: 0, unlimited: true },
       ],
     },
   },
@@ -157,17 +167,28 @@ describe("ProfileBalancePopover", () => {
       "ark-code-latest",
     );
 
+    await act(async () => buttonByText("MiniMax Token Plan")?.click());
+    expect(document.querySelector(".aw-profile-balance-panel__detail")?.textContent).toContain(
+      "5 小时额度",
+    );
+    expect(document.querySelector(".aw-profile-balance-panel__detail")?.textContent).toContain(
+      "周额度∞无限制",
+    );
+    expect(document.querySelector(".aw-profile-balance-panel__detail")?.textContent).not.toContain(
+      "video",
+    );
+
     await act(async () => buttonByText("火山 Agent Plan")?.click());
     expect(document.querySelector('[data-provider-brand="volcengine"]')).not.toBeNull();
     expect(document.querySelector(".aw-profile-balance-panel__detail")?.textContent).toContain(
-      "当前供应商暂不支持查询用量",
+      "需要独立的火山云 AK/SK",
     );
-    expect(document.querySelector(".aw-profile-balance-panel__detail")?.textContent).toContain(
-      "Awaken 本地记录",
+    const setupLink = document.querySelector<HTMLAnchorElement>(
+      ".aw-profile-balance-panel__setup-link",
     );
-    expect(document.querySelector(".aw-profile-balance-panel__detail")?.textContent).toContain(
-      "12",
-    );
+    expect(setupLink?.textContent).toBe("查看 Agent Plan 用量授权");
+    expect(setupLink?.href).toContain("GetAFPUsage");
+    expect(document.querySelector(".aw-profile-balance-panel__local-usage")).toBeNull();
   });
 
   it("collapses repeated provider failures into one credential recovery state", () => {

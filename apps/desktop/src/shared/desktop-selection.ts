@@ -44,3 +44,18 @@ export function isDesktopZoomShortcut(
     )
   );
 }
+
+export function isDesktopTabNavigation(
+  input: DesktopKeyboardInput,
+): boolean {
+  const isTabKey =
+    input.key.toLowerCase() === "tab" || input.code?.toLowerCase() === "tab";
+
+  return (
+    input.type === "keyDown" &&
+    !input.control &&
+    !input.meta &&
+    !input.alt &&
+    isTabKey
+  );
+}

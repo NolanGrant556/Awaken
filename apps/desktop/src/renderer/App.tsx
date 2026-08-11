@@ -1394,13 +1394,20 @@ function providerCurrentContextTokens(usage: RuntimeModelUsage | undefined): num
   return safeTokenSum(cached, uncached, cacheWrite, output ?? 0);
 }
 
+const PROVIDER_ANCHOR_COMPATIBLE_EPOCH_BOUNDARIES = new Set([
+  "system_prompt_changed",
+  "tool_removed",
+  "tool_schema_changed",
+  "canonical_tool_added",
+]);
+
 function usageMatchesSnapshot(
   usage: RuntimeModelUsage | undefined,
   snapshot: NonNullable<RuntimeContextWindow>["snapshot"],
   currentModel?: RuntimeModelIdentity,
 ): boolean {
-  if (!usage || !snapshot) {
-    return true;
+  if (!usage) {
+    return false;
   }
   if (
     currentModel &&
@@ -1430,6 +1437,9 @@ function usageMatchesSnapshot(
   ) {
     return false;
   }
+  if (!snapshot) {
+    return true;
+  }
   if (usage.modelId && snapshot.modelId && usage.modelId !== snapshot.modelId) {
     return false;
   }
@@ -1451,7 +1461,9 @@ function usageMatchesSnapshot(
     snapshot.contextEpochId &&
     usage.contextEpochId !== snapshot.contextEpochId &&
     snapshot.contextEpochBoundaryReason !== undefined &&
-    snapshot.contextEpochBoundaryReason !== "tool_schema_changed"
+    !PROVIDER_ANCHOR_COMPATIBLE_EPOCH_BOUNDARIES.has(
+      snapshot.contextEpochBoundaryReason,
+    )
   ) {
     return false;
   }
@@ -1462,14 +1474,40 @@ function usageMatchesSnapshot(
   );
 }
 
+function providerAnchoredContextTokens(
+  usage: RuntimeModelUsage | undefined,
+  snapshot: NonNullable<RuntimeContextWindow>["snapshot"],
+  currentModel?: RuntimeModelIdentity,
+): number | undefined {
+  if (!usageMatchesSnapshot(usage, snapshot, currentModel)) {
+    return undefined;
+  }
+  const providerActual = providerCurrentContextTokens(usage);
+  if (providerActual === undefined) {
+    return undefined;
+  }
+  const currentEstimate = normalizedTokenCount(snapshot?.estimatedInputTokens);
+  const sentEstimate = normalizedTokenCount(usage?.sentEstimatedInputTokens);
+  if (currentEstimate === undefined || sentEstimate === undefined) {
+    return providerActual;
+  }
+  const projected = providerActual + currentEstimate - sentEstimate;
+  if (!Number.isSafeInteger(projected)) {
+    return undefined;
+  }
+  return Math.max(0, projected);
+}
+
 function currentContextTokens(
   contextWindow: RuntimeContextWindow,
   currentModel?: RuntimeModelIdentity,
 ): number | undefined {
   const usage = contextWindow?.latestModelUsage;
-  const providerActual = usageMatchesSnapshot(usage, contextWindow?.snapshot, currentModel)
-    ? providerCurrentContextTokens(usage)
-    : undefined;
+  const providerActual = providerAnchoredContextTokens(
+    usage,
+    contextWindow?.snapshot,
+    currentModel,
+  );
   return (
     providerActual ??
     normalizedTokenCount(contextWindow?.actualTokens) ??
@@ -1522,6 +1560,11 @@ const CONTEXT_PANEL_CONTRIBUTIONS = [
   { id: "conversation", label: "对话" },
 ] as const;
 
+const CONTEXT_PANEL_OTHER_CONTRIBUTION = {
+  id: "other",
+  label: "其他/协议开销",
+} as const;
+
 function proportionallyAllocateTokens(values: number[], target: number): number[] {
   const sourceTotal = values.reduce((sum, value) => sum + value, 0);
   if (target <= 0) {
@@ -1543,26 +1586,22 @@ function proportionallyAllocateTokens(values: number[], target: number): number[
   return allocated;
 }
 
-function reconcileContributionTokens(values: number[], currentTokens: number): number[] {
+function reconcileContributionTokens(
+  values: number[],
+  currentTokens: number,
+): { values: number[]; otherTokens: number } {
   const sourceTotal = values.reduce((sum, value) => sum + value, 0);
   const delta = currentTokens - sourceTotal;
   if (delta === 0) {
-    return values;
+    return { values, otherTokens: 0 };
   }
-
-  const conversationIndex = CONTEXT_PANEL_CONTRIBUTIONS.findIndex(
-    (contribution) => contribution.id === "conversation",
-  );
-  const reconciled = values.slice();
   if (delta > 0) {
-    reconciled[conversationIndex] += delta;
-    return reconciled;
+    return { values, otherTokens: delta };
   }
-  if (reconciled[conversationIndex] + delta >= 0) {
-    reconciled[conversationIndex] += delta;
-    return reconciled;
-  }
-  return proportionallyAllocateTokens(values, currentTokens);
+  return {
+    values: proportionallyAllocateTokens(values, currentTokens),
+    otherTokens: 0,
+  };
 }
 
 export function contextUsagePanelData(
@@ -1614,12 +1653,29 @@ export function contextUsagePanelData(
     rawContributions.length > 0 &&
     hasRetainedContributionContract &&
     classifiedTokens === snapshot?.estimatedInputTokens;
-  const reconciledTokens = hasCompleteBreakdown
+  const reconciled = hasCompleteBreakdown
     ? reconcileContributionTokens(
         CONTEXT_PANEL_CONTRIBUTIONS.map((contribution) => tokensByKind.get(contribution.id) ?? 0),
         currentInputTokens,
       )
+    : { values: [], otherTokens: 0 };
+
+  const contributions: Array<{
+    id: string;
+    label: string;
+    estimatedTokens: number;
+  }> = hasCompleteBreakdown
+    ? CONTEXT_PANEL_CONTRIBUTIONS.map((contribution, index) => ({
+        ...contribution,
+        estimatedTokens: reconciled.values[index],
+      }))
     : [];
+  if (hasCompleteBreakdown && reconciled.otherTokens > 0) {
+    contributions.push({
+      ...CONTEXT_PANEL_OTHER_CONTRIBUTION,
+      estimatedTokens: reconciled.otherTokens,
+    });
+  }
   return {
     estimatedInputTokens: currentInputTokens,
     effectiveInputWindowTokens,
@@ -1627,12 +1683,7 @@ export function contextUsagePanelData(
     outputReserveTokens,
     autoCompactThresholdTokens:
       snapshot?.autoCompactThresholdTokens ?? contextWindow.autoCompactThreshold ?? 0,
-    contributions: hasCompleteBreakdown
-      ? CONTEXT_PANEL_CONTRIBUTIONS.map((contribution, index) => ({
-          ...contribution,
-          estimatedTokens: reconciledTokens[index],
-        }))
-      : [],
+    contributions,
     latestModelUsage: contextWindow.latestModelUsage
       ? {
           status: contextWindow.latestModelUsage.status,
@@ -1647,7 +1698,11 @@ export function contextUsagePanelData(
           totalTokens: contextWindow.latestModelUsage.totalTokens,
           calculatedCostUsd: contextWindow.latestModelUsage.calculatedCostUsd,
           currency: contextWindow.latestModelUsage.currency,
-          invalidationReason: contextWindow.latestModelUsage.invalidationReason,
+          invalidationReason:
+            contextWindow.latestModelUsage.cacheMode &&
+            contextWindow.latestModelUsage.invalidationReason !== "initial_baseline"
+              ? contextWindow.latestModelUsage.invalidationReason
+              : undefined,
           purpose: contextWindow.latestModelUsage.purpose,
           errorCode: contextWindow.latestModelUsage.errorCode,
         }
@@ -1656,9 +1711,12 @@ export function contextUsagePanelData(
 }
 
 export function modelProfileLabel(
-  profile: Pick<RuntimeModelProfileSummary, "modelId" | "displayName">,
+  profile: Pick<
+    RuntimeModelProfileSummary,
+    "modelId" | "modelDisplayName" | "displayName"
+  >,
 ): string {
-  return profile.modelId || profile.displayName;
+  return profile.modelDisplayName || profile.modelId || profile.displayName;
 }
 
 export function modelPreferenceChangeForOption(

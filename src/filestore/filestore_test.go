@@ -198,12 +198,60 @@ func TestFileLockUnreadableOwnerFailsClosed(t *testing.T) {
 	if err := os.WriteFile(path, []byte("garbage"), FilePerm); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := AcquireLock(path, "owner", time.Minute); err == nil || errors.Is(err, ErrLockHeld) {
+	_, err := AcquireLock(path, "owner", time.Minute)
+	if err == nil {
+		t.Fatalf("unreadable lock owner must fail closed")
+	}
+	if errors.Is(err, ErrLockHeld) {
 		// Must be a hard error explaining the unreadable owner, not a silent
 		// reclaim and not a plain "held" answer.
-		if err == nil {
-			t.Fatalf("unreadable lock owner must fail closed")
-		}
+		t.Fatalf("unreadable lock owner must return a hard error, got %v", err)
+	}
+}
+
+func TestFileLockExpiredUnreadableOwnerIsReclaimed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "store.lock")
+	if err := os.WriteFile(path, nil, FilePerm); err != nil {
+		t.Fatal(err)
+	}
+	expiredAt := time.Now().UTC().Add(-2 * time.Minute)
+	if err := os.Chtimes(path, expiredAt, expiredAt); err != nil {
+		t.Fatal(err)
+	}
+
+	lock, err := AcquireLock(path, "recovery-owner", time.Minute)
+	if err != nil {
+		t.Fatalf("expired unreadable lock must be reclaimable: %v", err)
+	}
+	defer lock.Release()
+
+	var owner lockOwner
+	if err := ReadJSON(path, &owner); err != nil {
+		t.Fatalf("reclaimed lock must contain readable owner metadata: %v", err)
+	}
+	if owner.OwnerID != "recovery-owner" || owner.PID != os.Getpid() {
+		t.Fatalf("unexpected reclaimed owner: %+v", owner)
+	}
+}
+
+func TestFileLockFutureUnreadableOwnerFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "store.lock")
+	if err := os.WriteFile(path, nil, FilePerm); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().UTC().Add(2 * time.Minute)
+	if err := os.Chtimes(path, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := AcquireLock(path, "owner", time.Minute)
+	if err == nil {
+		t.Fatalf("future unreadable lock owner must fail closed")
+	}
+	if errors.Is(err, ErrLockHeld) {
+		t.Fatalf("future unreadable lock owner must return a hard error, got %v", err)
 	}
 }
 

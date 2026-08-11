@@ -36,8 +36,10 @@ export const AwakenProfileBalanceSamples: NonNullable<
     providerBrand: "volcengine",
     modelId: "ark-code-latest",
     displayName: "火山 Agent Plan",
-    status: "unsupported",
-    error: "当前供应商暂不支持查询用量",
+    status: "requires_setup",
+    error: "火山 Agent Plan 推理 Key 不能查询套餐用量；GetAFPUsage 需要独立的火山云 AK/SK 与只读方舟管理权限。",
+    setupURL: "https://api.volcengine.com/api-docs/view?action=GetAFPUsage&serviceCode=ark&version=2024-01-01",
+    setupLabel: "查看 Agent Plan 用量授权",
   },
 ];
 

@@ -27,13 +27,15 @@ type contextWindowEventSink interface {
 }
 
 type contextGovernor struct {
-	engine                     ContextEngine
-	rebuildRequest             func() (LLMRequest, error)
-	applyCompactResult         func(stdcontext.Context, CompactResult) error
-	consecutiveCompactFailures int
-	reactiveCompactAttempted   bool
-	compactCircuitOpen         bool
-	lastAPIUsageTokens         int
+	engine                          ContextEngine
+	rebuildRequest                  func() (LLMRequest, error)
+	applyCompactResult              func(stdcontext.Context, CompactResult) error
+	consecutiveCompactFailures      int
+	reactiveCompactAttempted        bool
+	compactCircuitOpen              bool
+	lastAPIUsageTokens              int
+	lastSentEstimatedInputTokens    int
+	pendingSentEstimatedInputTokens int
 }
 
 func NewContextEngine(config ContextWindowConfig) ContextEngine {
@@ -133,12 +135,21 @@ func (g *contextGovernor) withRunState(state ContextWindowState) ContextWindowSt
 	state.HasAttemptedReactiveCompact = g.reactiveCompactAttempted
 	state.CompactCircuitOpen = g.compactCircuitOpen
 	state.LastAPIUsageTokens = g.lastAPIUsageTokens
+	state.LastSentEstimatedInputTokens = g.lastSentEstimatedInputTokens
 	return state
+}
+
+func (g *contextGovernor) RecordSentRequestEstimate(estimatedInputTokens int) {
+	if estimatedInputTokens > 0 {
+		g.pendingSentEstimatedInputTokens = estimatedInputTokens
+	}
 }
 
 func (g *contextGovernor) RecordResponseUsage(responseUsageTokens int) {
 	if responseUsageTokens > 0 {
 		g.lastAPIUsageTokens = responseUsageTokens
+		g.lastSentEstimatedInputTokens = g.pendingSentEstimatedInputTokens
+		g.pendingSentEstimatedInputTokens = 0
 	}
 }
 
@@ -199,6 +210,8 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 	// input. Reset the actual-usage trigger so ShouldAutoCompactByActualUsage
 	// stays inert until the next response sets a fresh LastAPIUsageTokens.
 	g.lastAPIUsageTokens = 0
+	g.lastSentEstimatedInputTokens = 0
+	g.pendingSentEstimatedInputTokens = 0
 	if events != nil {
 		events.emitCompactFinished(state, result, compactSummaryModel(*llmReq.EnvelopeDebug))
 	}

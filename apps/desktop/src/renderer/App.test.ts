@@ -1993,7 +1993,7 @@ describe("context usage presentation", () => {
     });
   });
 
-  it("reconciles provider actual usage into the existing six fields", () => {
+  it("keeps typed estimates intact and exposes provider residual as other overhead", () => {
     const data = contextUsagePanelData({
       eventType: "AWAKEN_CONTEXT_SNAPSHOT",
       snapshot: {
@@ -2043,7 +2043,8 @@ describe("context usage presentation", () => {
       { id: "mcp", label: "MCP", estimatedTokens: 8_000 },
       { id: "skills", label: "技能", estimatedTokens: 1_000 },
       { id: "memory", label: "记忆", estimatedTokens: 500 },
-      { id: "conversation", label: "对话", estimatedTokens: 10_500 },
+      { id: "conversation", label: "对话", estimatedTokens: 6_500 },
+      { id: "other", label: "其他/协议开销", estimatedTokens: 4_000 },
     ]);
     expect(
       data?.contributions?.reduce((sum, contribution) => sum + contribution.estimatedTokens, 0),
@@ -2128,6 +2129,63 @@ describe("context usage presentation", () => {
     });
 
     expect(data?.estimatedInputTokens).toBe(28_000);
+  });
+
+  it("projects the current context from provider truth after tools are removed", () => {
+    const data = contextUsagePanelData({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      snapshot: {
+        schemaVersion: 4,
+        snapshotId: "ctx-after-tool-removal",
+        estimatorId: "awaken_leaf_v4",
+        basis: "current_projection",
+        modelId: "doubao-seed-2.1-pro",
+        protocolFamily: "openai_chat",
+        contextEpochId: "epoch-b",
+        contextEpochBoundaryReason: "tool_removed",
+        modelWindowTokens: 256_000,
+        outputReserveTokens: 16_000,
+        effectiveInputWindowTokens: 240_000,
+        estimatedInputTokens: 14_572,
+        warningThresholdTokens: 204_000,
+        autoCompactThresholdTokens: 216_000,
+        compactTargetTokens: 72_000,
+        contributions: [
+          { kind: "system_prompt", estimatedTokens: 1_400, sourceCount: 1 },
+          { kind: "builtin_tools", estimatedTokens: 9_798, sourceCount: 22 },
+          { kind: "skills", estimatedTokens: 2_400, sourceCount: 1 },
+          { kind: "memory", estimatedTokens: 747, sourceCount: 1 },
+          { kind: "conversation", estimatedTokens: 227, sourceCount: 2 },
+        ],
+        generatedAt: "2026-08-11T00:00:02Z",
+      },
+      latestModelUsage: {
+        schemaVersion: 1,
+        requestId: "req-doubao",
+        purpose: "agent_turn",
+        modelId: "doubao-seed-2.1-pro",
+        protocolFamily: "openai_chat",
+        contextEpochId: "epoch-a",
+        sentEstimatedInputTokens: 16_501,
+        inputTokens: 20_082,
+        outputTokens: 142,
+        totalTokens: 20_224,
+        usageComplete: true,
+        latencyMs: 20,
+        status: "succeeded",
+        completedAt: "2026-08-11T00:00:01Z",
+      },
+    });
+
+    expect(data?.estimatedInputTokens).toBe(18_295);
+    expect(data?.contributions?.at(-1)).toEqual({
+      id: "other",
+      label: "其他/协议开销",
+      estimatedTokens: 3_723,
+    });
+    expect(
+      data?.contributions?.reduce((sum, contribution) => sum + contribution.estimatedTokens, 0),
+    ).toBe(18_295);
   });
 
   it("does not reuse usage from another provider profile with the same model protocol", () => {
@@ -2367,7 +2425,7 @@ describe("context usage presentation", () => {
     );
     expect(html).toContain("系统提示词");
     expect(html).toContain("上下文用量");
-    expect(html).toContain("已使用");
+    expect(html).toContain("预计使用");
     expect(html).toContain("~24K / 112K Token");
     expect(html).not.toContain("上下文用了");
     expect(html).not.toContain("约 24K");
@@ -2523,6 +2581,29 @@ describe("context usage presentation", () => {
     expect(html).not.toContain("未命中");
   });
 
+  it("does not present a host context boundary as provider cache data", () => {
+    const html = renderToString(
+      React.createElement(AwakenContextUsagePanel, {
+        estimatedInputTokens: 16_000,
+        effectiveInputWindowTokens: 240_000,
+        modelWindowTokens: 256_000,
+        outputReserveTokens: 16_000,
+        autoCompactThresholdTokens: 216_000,
+        contributions: [],
+        latestModelUsage: {
+          status: "succeeded",
+          invalidationReason: "initial_baseline",
+          calculatedCostUsd: null,
+        },
+        onClose: vi.fn(),
+      }),
+    );
+
+    expect(html).not.toContain("上次请求");
+    expect(html).not.toContain("initial_baseline");
+    expect(html).not.toContain("失效原因");
+  });
+
   it("keeps legacy aggregates honest when no typed breakdown exists", () => {
     const data = contextUsagePanelData({
       eventType: "AWAKEN_CONTEXT_ESTIMATED",
@@ -2556,6 +2637,7 @@ describe("context usage presentation", () => {
           { id: "skills", label: "技能", estimatedTokens: 1_736 },
           { id: "memory", label: "记忆", estimatedTokens: 747 },
           { id: "conversation", label: "对话", estimatedTokens: 95_720 },
+          { id: "other", label: "其他/协议开销", estimatedTokens: 1_000 },
         ],
         onClose: vi.fn(),
       }),
@@ -2565,8 +2647,10 @@ describe("context usage presentation", () => {
     expect(html).toContain("aw-context-usage-panel__segment--skills");
     expect(html).toContain("aw-context-usage-panel__segment--memory");
     expect(html).toContain("aw-context-usage-panel__segment--conversation");
+    expect(html).toContain("aw-context-usage-panel__segment--other");
     expect(html).toContain("aw-context-usage-panel__dot--mcp");
     expect(html).toContain("aw-context-usage-panel__dot--conversation");
+    expect(html).toContain("aw-context-usage-panel__dot--other");
   });
 
   it("does not fabricate a Skill/Memory split for v1 combined records", () => {
@@ -3480,9 +3564,16 @@ describe("App workbench presentation", () => {
       displayName: "OpenAI",
       protocol: "openai_responses",
     };
+    const doubaoProfile = {
+      modelId: "doubao-seed-2-1-pro-260628",
+      modelDisplayName: "Doubao-Seed-2.1-Pro",
+      displayName: "Doubao Ark",
+      protocol: "openai_chat",
+    };
 
     expect(modelProfileLabel(chatProfile)).toBe("ark-code-latest");
     expect(modelProfileLabel(responsesProfile)).toBe("gpt-5.6-sol");
+    expect(modelProfileLabel(doubaoProfile)).toBe("Doubao-Seed-2.1-Pro");
   });
 
   it("does not recover a model preference while a new thread is awaiting metadata", () => {

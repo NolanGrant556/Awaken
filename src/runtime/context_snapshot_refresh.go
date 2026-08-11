@@ -63,7 +63,7 @@ func (s *RunService) RefreshThreadContextSnapshot(ctx context.Context, threadID 
 	cfg := agent.GetConfig()
 	cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), restored.SkillContextBlocks...)
 	agent.Reconfigure(cfg)
-	agent.RefreshRunAvailabilityWithReason(ctx, "thread_replay")
+	agent.RefreshProjectedRunAvailabilityWithReason(ctx, "thread_replay", s.projectedComputerEnabled(ctx, profile))
 
 	snapshot, epoch, err := agent.ProjectCurrentContextUsage(ctx)
 	if err != nil {
@@ -117,6 +117,24 @@ func (s *RunService) RefreshThreadContextSnapshot(ctx context.Context, threadID 
 		return ContextSnapshotRefreshResult{}, err
 	}
 	return ContextSnapshotRefreshResult{Snapshot: snapshot, Persisted: true}, nil
+}
+
+// projectedComputerEnabled resolves the same product gates used by StartRun
+// without constructing a run-bound Binding or Runtime. The global Host probe
+// reports driver/TCC readiness for inactive-thread projections.
+func (s *RunService) projectedComputerEnabled(ctx context.Context, profile *ModelProfileConfig) bool {
+	if s == nil || profile == nil || !profile.SupportsVision {
+		return false
+	}
+	s.mu.RLock()
+	settings := s.computerSettings
+	probe := s.computerHostProbe
+	s.mu.RUnlock()
+	if !settings.Enabled || probe == nil {
+		return false
+	}
+	status, err := probe.Probe(ctx)
+	return err == nil && status.Ready()
 }
 
 func latestRunIDForContextRefresh(meta storedThreadRecord, restored restoredTranscript) string {

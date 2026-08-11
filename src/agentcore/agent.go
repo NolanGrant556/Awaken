@@ -126,6 +126,26 @@ func (a *Agent) RefreshRunAvailabilityWithReason(ctx stdcontext.Context, reason 
 		return
 	}
 	cfg := a.config
+	computerEnabled := cfg.ComputerRuntime != nil && cfg.ComputerRuntime.Ready(ctx)
+	a.refreshRunAvailabilityWithComputerState(ctx, reason, computerEnabled)
+}
+
+// RefreshProjectedRunAvailabilityWithReason refreshes a projection-only Agent
+// from run-independent host readiness. It never creates or exposes an
+// executable Computer runtime. If a real runtime is already bound, its live
+// readiness remains authoritative.
+func (a *Agent) RefreshProjectedRunAvailabilityWithReason(ctx stdcontext.Context, reason string, computerEnabled bool) {
+	if a == nil {
+		return
+	}
+	if runtime := a.config.ComputerRuntime; runtime != nil {
+		computerEnabled = runtime.Ready(ctx)
+	}
+	a.refreshRunAvailabilityWithComputerState(ctx, reason, computerEnabled)
+}
+
+func (a *Agent) refreshRunAvailabilityWithComputerState(ctx stdcontext.Context, reason string, computerEnabled bool) {
+	cfg := a.config
 	permissionContext := permissionContextFromTaskScope(cfg.Workspace)
 	hostEnvironment := tool.ResolveHostEnvironment(ctx, tool.ExecutionEnvironmentProbeOptions{
 		WorkspaceRoot:     permissionContext.WorkspaceRoot,
@@ -134,7 +154,7 @@ func (a *Agent) RefreshRunAvailabilityWithReason(ctx stdcontext.Context, reason 
 		TemporaryWorkRoot: permissionContext.TemporaryWorkRoot,
 		RefreshReason:     reason,
 		ProbeVersions:     true,
-		ComputerEnabled:   cfg.ComputerRuntime != nil && cfg.ComputerRuntime.Ready(ctx),
+		ComputerEnabled:   computerEnabled,
 	})
 	environment := hostEnvironment.Snapshot
 	snapshot := tool.NewRunToolAvailabilitySnapshot(environment)

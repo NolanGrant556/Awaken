@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"awaken/src/agentcore"
+	"awaken/src/computer"
+	"awaken/src/computer/fake"
 )
 
 func TestRefreshThreadContextSnapshotPersistsV4ForDurableHistory(t *testing.T) {
@@ -108,7 +110,128 @@ func TestJournalContainsContextEpochUsesDurableIdentity(t *testing.T) {
 	}
 }
 
+func TestRefreshThreadContextSnapshotPreservesComputerToolsWhenHostReady(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	workspace := t.TempDir()
+	createdAgents := make([]*agentcore.Agent, 0, 2)
+	service := newContextRefreshTestServiceWithObserver(func(agent *agentcore.Agent) {
+		createdAgents = append(createdAgents, agent)
+	})
+	service.SetComputerSettings(computer.Settings{Enabled: true})
+	service.SetComputerDriverFactory(func(computer.Binding) (computer.Driver, error) {
+		return fake.NewDriver(), nil
+	})
+	service.SetComputerHostProbe(computer.HostProbeFunc(func(context.Context) (computer.HostStatus, error) {
+		return computer.HostStatus{
+			Available:          true,
+			Healthy:            true,
+			TCCScreenRecording: true,
+			TCCAccessibility:   true,
+		}, nil
+	}))
+	profile := &ModelProfileConfig{
+		ProfileID: "profile-vision", ProviderID: "test", ModelID: "vision-model",
+		BaseURL: "https://example.invalid", Protocol: "openai_chat", APIKey: "secret",
+		SupportsVision: true, SupportsComputerUse: true, ContextWindow: 240_000, MaxTokens: 16_000,
+	}
+	run, err := service.StartRun(StartRunRequest{
+		Input: "保留 Computer 工具", Workspace: WorkspaceConfig{WorkspaceRoot: workspace}, ModelProfile: profile,
+	})
+	if err != nil {
+		t.Fatalf("start seed run: %v", err)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+	if len(createdAgents) != 1 {
+		t.Fatalf("expected one live agent before replay, got %d", len(createdAgents))
+	}
+	liveSnapshot, liveEpoch, err := createdAgents[0].ProjectCurrentContextUsage(context.Background())
+	if err != nil {
+		t.Fatalf("project live Computer context: %v", err)
+	}
+	if liveEpoch == nil {
+		t.Fatal("expected live Computer context epoch")
+	}
+	recorder, err := service.journals.OpenRecorder(run.ThreadID)
+	if err != nil {
+		t.Fatalf("open seed journal: %v", err)
+	}
+	if err := recorder.Append(context.Background(), agentcore.ContextEpochSemanticRecord(run.ThreadID, run.RunID, "", "", *liveEpoch)); err != nil {
+		t.Fatalf("persist live Computer context epoch: %v", err)
+	}
+	if err := recorder.Append(context.Background(), agentcore.ContextSnapshotSemanticRecord(run.ThreadID, run.RunID, "", "", liveSnapshot)); err != nil {
+		t.Fatalf("persist live Computer context snapshot: %v", err)
+	}
+	if err := recorder.Flush(context.Background()); err != nil {
+		t.Fatalf("flush live Computer context: %v", err)
+	}
+
+	result, err := service.RefreshThreadContextSnapshot(context.Background(), run.ThreadID, profile)
+	if err != nil {
+		t.Fatalf("refresh durable thread context: %v", err)
+	}
+	if result.Snapshot.ContextEpochBoundaryReason == "tool_removed" {
+		t.Fatal("thread replay fabricated tool_removed while Computer remained ready")
+	}
+	if len(createdAgents) < 2 {
+		t.Fatalf("expected run and replay agents, got %d", len(createdAgents))
+	}
+	replayAgent := createdAgents[len(createdAgents)-1]
+	cfg := replayAgent.GetConfig()
+	if cfg.ComputerRuntime != nil {
+		t.Fatal("thread replay must not create a run-bound Computer runtime")
+	}
+	if cfg.ExecutionEnvironmentSnapshot == nil || !cfg.ExecutionEnvironmentSnapshot.ComputerEnabled {
+		t.Fatalf("thread replay lost ready Computer Host state: %+v", cfg.ExecutionEnvironmentSnapshot)
+	}
+	visible := make(map[string]bool)
+	for _, name := range replayAgent.ModelVisibleToolPool() {
+		visible[name] = true
+	}
+	for _, name := range []string{"computer_observe", "computer_act", "computer_verify"} {
+		if !visible[name] {
+			t.Fatalf("thread replay removed %s while Computer remained ready", name)
+		}
+	}
+}
+
+func TestProjectedComputerEnabledRequiresEveryProductGate(t *testing.T) {
+	readyStatus := computer.HostStatus{
+		Available: true, Healthy: true, TCCScreenRecording: true, TCCAccessibility: true,
+	}
+	tests := []struct {
+		name            string
+		settingsEnabled bool
+		supportsVision  bool
+		status          computer.HostStatus
+		want            bool
+	}{
+		{name: "ready", settingsEnabled: true, supportsVision: true, status: readyStatus, want: true},
+		{name: "settings disabled", supportsVision: true, status: readyStatus},
+		{name: "vision unsupported", settingsEnabled: true, status: readyStatus},
+		{name: "host unavailable", settingsEnabled: true, supportsVision: true, status: computer.HostStatus{}},
+		{name: "host unhealthy", settingsEnabled: true, supportsVision: true, status: computer.HostStatus{Available: true, TCCScreenRecording: true, TCCAccessibility: true}},
+		{name: "screen recording missing", settingsEnabled: true, supportsVision: true, status: computer.HostStatus{Available: true, Healthy: true, TCCAccessibility: true}},
+		{name: "accessibility missing", settingsEnabled: true, supportsVision: true, status: computer.HostStatus{Available: true, Healthy: true, TCCScreenRecording: true}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &RunService{computerSettings: computer.Settings{Enabled: tc.settingsEnabled}}
+			service.SetComputerHostProbe(computer.HostProbeFunc(func(context.Context) (computer.HostStatus, error) {
+				return tc.status, nil
+			}))
+			got := service.projectedComputerEnabled(context.Background(), &ModelProfileConfig{SupportsVision: tc.supportsVision})
+			if got != tc.want {
+				t.Fatalf("projectedComputerEnabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func newContextRefreshTestService() *RunService {
+	return newContextRefreshTestServiceWithObserver(nil)
+}
+
+func newContextRefreshTestServiceWithObserver(observer func(*agentcore.Agent)) *RunService {
 	return NewRunServiceWithModelProfiles(
 		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
 			model := agentcore.ModelConfig{}
@@ -120,11 +243,15 @@ func newContextRefreshTestService() *RunService {
 					ContextWindow: profile.ContextWindow,
 				}
 			}
-			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+			agent := agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
 				ModelConfig:       model,
 				Workspace:         agentcore.WorkspaceConfig{Root: workspace.WorkspaceRoot, WritableRoots: workspace.WritableRoots},
 				ContextEpochStore: NewContextEpochStore(),
 			}, threadID)
+			if observer != nil {
+				observer(agent)
+			}
+			return agent
 		},
 		func(agent *agentcore.Agent) Executor {
 			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {

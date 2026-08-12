@@ -240,6 +240,9 @@ func main() {
 	runService.SetComputerHostProbe(computer.HostProbeFunc(func(ctx context.Context) (computer.HostStatus, error) {
 		return probeCUAHost(ctx, cuaHostManager)
 	}))
+	runService.SetComputerHostPermissionRequester(computer.HostPermissionRequesterFunc(func(ctx context.Context) (computer.HostStatus, error) {
+		return requestCUAHostPermissions(ctx, cuaHostManager)
+	}))
 	skillManager.SetOnActivated(func(plan *skillruntime.SkillActivationPlan) {
 		if plan == nil {
 			return
@@ -645,6 +648,45 @@ func probeCUAHost(ctx context.Context, manager *cua.HostManager) (computer.HostS
 		return status, nil
 	}
 
+	status.Available = true
+	status.Healthy = hr.Healthy
+	status.Version = hr.Version
+	status.ProtocolVersion = hr.ProtocolVersion
+	status.OS = hr.OS
+	status.TCCScreenRecording = hr.TCCScreenRecording
+	status.TCCAccessibility = hr.TCCAccessibility
+	status.Message = hr.Message
+	return status, nil
+}
+
+// requestCUAHostPermissions executes the macOS permission request inside the
+// CUA Host process, then projects the refreshed Host-owned TCC state.
+func requestCUAHostPermissions(ctx context.Context, manager *cua.HostManager) (computer.HostStatus, error) {
+	status := computer.HostStatus{Available: false, Healthy: false}
+	if manager == nil {
+		status.Message = "host manager not configured"
+		return status, nil
+	}
+
+	scriptPath, _, err := manager.ResolvedHostPaths()
+	if err != nil {
+		status.Message = err.Error()
+		return status, nil
+	}
+	status.HostScriptPath = scriptPath
+	status.NodePath = manager.ResolvedNodePath()
+
+	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	client, err := manager.GetClient(requestCtx)
+	if err != nil {
+		status.Message = err.Error()
+		return status, nil
+	}
+	hr, err := client.RequestPermissions(requestCtx)
+	if err != nil {
+		return status, err
+	}
 	status.Available = true
 	status.Healthy = hr.Healthy
 	status.Version = hr.Version

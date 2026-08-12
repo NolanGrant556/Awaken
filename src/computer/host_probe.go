@@ -49,3 +49,18 @@ type HostProbeFunc func(ctx context.Context) (HostStatus, error)
 func (f HostProbeFunc) Probe(ctx context.Context) (HostStatus, error) {
 	return f(ctx)
 }
+
+// HostPermissionRequester asks the trusted Computer Host process to request
+// the operating-system permissions needed for capture and input. The returned
+// status must be measured by that same Host identity.
+type HostPermissionRequester interface {
+	RequestPermissions(ctx context.Context) (HostStatus, error)
+}
+
+// HostPermissionRequesterFunc adapts a function to HostPermissionRequester.
+type HostPermissionRequesterFunc func(ctx context.Context) (HostStatus, error)
+
+// RequestPermissions implements HostPermissionRequester.
+func (f HostPermissionRequesterFunc) RequestPermissions(ctx context.Context) (HostStatus, error) {
+	return f(ctx)
+}

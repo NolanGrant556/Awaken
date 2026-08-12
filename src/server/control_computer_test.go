@@ -57,6 +57,63 @@ func TestComputerControlRoutesProtectedByControlToken(t *testing.T) {
 	}
 }
 
+func TestComputerPermissionRequestUsesHostRequester(t *testing.T) {
+	service := awruntime.NewRunServiceWithModelProfiles(
+		func(workspace awruntime.WorkspaceConfig, threadID string, profile *awruntime.ModelProfileConfig) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
+		},
+		func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				return "done", nil
+			})
+		},
+	)
+	requestCount := 0
+	service.SetComputerHostPermissionRequester(computer.HostPermissionRequesterFunc(func(context.Context) (computer.HostStatus, error) {
+		requestCount++
+		return computer.HostStatus{
+			Available:          true,
+			Healthy:            true,
+			TCCScreenRecording: true,
+			TCCAccessibility:   true,
+		}, nil
+	}))
+	identity := &awruntime.RuntimeIdentity{
+		RuntimeIdentity: "test-runtime",
+		InstanceID:      "test-instance",
+		ControlToken:    "test-token",
+		OwnerMode:       "test",
+		BaseURL:         "http://localhost",
+		StartedAt:       time.Now().UTC(),
+	}
+	router := NewRouterWithControl(service, nil, nil, nil, nil, nil, "", nil, &ControlConfig{
+		Identity:          identity,
+		LeaseManager:      awruntime.NewLeaseManager(nil),
+		ACPSessionManager: awruntime.NewACPSessionManager(nil, nil),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/control/computer/permissions/request", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without token, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/control/computer/permissions/request", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	rr = httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if requestCount != 1 {
+		t.Fatalf("expected one Host permission request, got %d", requestCount)
+	}
+	if !strings.Contains(rr.Body.String(), `"tcc_screen_recording":true`) || !strings.Contains(rr.Body.String(), `"tcc_accessibility":true`) {
+		t.Fatalf("expected refreshed Host permission status, got %s", rr.Body.String())
+	}
+}
+
 func TestComputerControlSessionLifecycle(t *testing.T) {
 	t.Setenv("AWAKEN_HOME", t.TempDir())
 	releaseRun := make(chan struct{})

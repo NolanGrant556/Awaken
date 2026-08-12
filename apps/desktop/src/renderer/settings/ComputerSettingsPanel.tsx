@@ -1,10 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AwakenComputerSettings } from "@awaken/design-system";
 import type { AwakenComputerSettingsValue } from "@awaken/design-system";
-import type { ComputerHostStatus, ComputerSettingsDocument } from "../../shared/runtime";
+import type {
+  ComputerHostStatus,
+  ComputerPermission,
+  ComputerSettingsDocument,
+} from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
 
-function toFormValue(document: ComputerSettingsDocument): AwakenComputerSettingsValue {
+function firstMissingPermission(
+  status: ComputerHostStatus,
+): ComputerPermission | null {
+  if (!status.tcc_screen_recording) return "screen_recording";
+  if (!status.tcc_accessibility) return "accessibility";
+  return null;
+}
+
+function permissionLabel(permission: ComputerPermission): string {
+  return permission === "screen_recording" ? "屏幕录制" : "辅助功能";
+}
+
+function toFormValue(
+  document: ComputerSettingsDocument,
+): AwakenComputerSettingsValue {
   const value = document.value;
   return {
     enabled: value.enabled,
@@ -29,16 +47,19 @@ export function ComputerSettingsPanel({
   runtimeClient: RuntimeClient;
 }) {
   const [status, setStatus] = useState<ComputerHostStatus | null>(null);
-  const [document, setDocument] = useState<ComputerSettingsDocument | null>(null);
+  const [document, setDocument] = useState<ComputerSettingsDocument | null>(
+    null,
+  );
   const [draft, setDraft] = useState<AwakenComputerSettingsValue | null>(null);
   const [loading, setLoading] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageTone, setMessageTone] = useState<"info" | "error">("info");
 
   const saveTimerRef = useRef<number | null>(null);
   const setupInFlightRef = useRef(false);
-  const autoSetupAttemptedRef = useRef(false);
+  const lastOpenedPermissionRef = useRef<ComputerPermission | null>(null);
 
   useEffect(() => {
     return () => {
@@ -52,6 +73,7 @@ export function ComputerSettingsPanel({
     setLoading(true);
     setSettingsLoading(true);
     setMessage(null);
+    setMessageTone("info");
     try {
       const [nextStatus, nextDocument] = await Promise.all([
         runtimeClient.getComputerHostStatus(),
@@ -61,6 +83,7 @@ export function ComputerSettingsPanel({
       setDocument(nextDocument);
       setDraft(toFormValue(nextDocument));
     } catch (error: unknown) {
+      setMessageTone("error");
       setMessage(
         error instanceof Error
           ? error.message
@@ -115,9 +138,11 @@ export function ComputerSettingsPanel({
     async (nextDraft: AwakenComputerSettingsValue) => {
       setSettingsBusy(true);
       setMessage(null);
+      setMessageTone("info");
       try {
         await persistSettings(nextDraft);
       } catch (error: unknown) {
+        setMessageTone("error");
         setMessage(
           error instanceof Error
             ? error.message
@@ -130,17 +155,60 @@ export function ComputerSettingsPanel({
     [persistSettings],
   );
 
+  const requestPermissionsAndOpenNext = useCallback(
+    async (preferredPermission?: ComputerPermission) => {
+      setMessageTone("info");
+      setMessage("正在请求屏幕录制与辅助功能权限…");
+      const requestedStatus = await runtimeClient.requestComputerPermissions();
+      setStatus(requestedStatus);
+
+      const preferredStillMissing =
+        preferredPermission === "screen_recording"
+          ? !requestedStatus.tcc_screen_recording
+          : preferredPermission === "accessibility"
+            ? !requestedStatus.tcc_accessibility
+            : false;
+      const permission = preferredStillMissing
+        ? preferredPermission!
+        : firstMissingPermission(requestedStatus);
+      if (!permission && requestedStatus.available && requestedStatus.healthy) {
+        lastOpenedPermissionRef.current = null;
+        setMessage(null);
+        return;
+      }
+      if (!permission) {
+        setMessageTone("error");
+        setMessage(requestedStatus.message ?? "CUA Host 不可用。");
+        return;
+      }
+
+      lastOpenedPermissionRef.current = permission;
+      setMessage(
+        `请在 macOS 系统设置中为 Computer Host 开启${permissionLabel(permission)}权限。`,
+      );
+      await runtimeClient.openComputerPermissionSettings(permission);
+    },
+    [runtimeClient],
+  );
+
   const setupEnvironment = useCallback(
-    async (enabledDraft: AwakenComputerSettingsValue) => {
+    async (
+      enabledDraft: AwakenComputerSettingsValue,
+      options: { persist?: boolean } = {},
+    ) => {
       if (setupInFlightRef.current) return;
       setupInFlightRef.current = true;
       setSettingsBusy(true);
       setMessage(null);
+      setMessageTone("info");
 
       try {
-        // 1. Persist the enabled flag first so Core side is aligned.
-        setMessage("正在启用计算机操作…");
-        await persistSettings(enabledDraft);
+        // 1. Persist a newly enabled flag first so Core side is aligned. An
+        // already-enabled setup recovery does not create a redundant revision.
+        if (options.persist !== false) {
+          setMessage("正在启用计算机操作…");
+          await persistSettings(enabledDraft);
+        }
 
         // 2. Prepare Node runtime and CUA Host if missing.
         setMessage("正在检查 CUA 运行时…");
@@ -153,24 +221,20 @@ export function ComputerSettingsPanel({
           return;
         }
 
-        // 3. Refresh status so we know whether permissions are still missing.
+        // 3. Refresh status so we know whether Host-owned permissions are
+        // still missing.
         setMessage("正在检查权限状态…");
         const nextStatus = await runtimeClient.getComputerHostStatus();
         setStatus(nextStatus);
 
-        // 4. Request screen recording permission if not granted.
-        if (!nextStatus.tcc_screen_recording) {
-          setMessage("正在请求屏幕录制权限…");
-          await runtimeClient.requestComputerPermission("screen_recording");
+        // 4. Ask the real CUA Host for both TCC permissions. If macOS still
+        // requires a manual toggle, open the first missing System Settings pane.
+        if (firstMissingPermission(nextStatus)) {
+          await requestPermissionsAndOpenNext();
+          return;
         }
 
-        // 5. Request accessibility permission if not granted (opens System Settings).
-        if (!nextStatus.tcc_accessibility) {
-          setMessage("正在打开辅助功能权限设置…");
-          await runtimeClient.requestComputerPermission("accessibility");
-        }
-
-        // 6. Final status refresh.
+        // 5. Final status refresh.
         const finalStatus = await runtimeClient.getComputerHostStatus();
         setStatus(finalStatus);
 
@@ -180,7 +244,10 @@ export function ComputerSettingsPanel({
           finalStatus.tcc_accessibility
         ) {
           setMessage(null);
-        } else if (!finalStatus.tcc_screen_recording || !finalStatus.tcc_accessibility) {
+        } else if (
+          !finalStatus.tcc_screen_recording ||
+          !finalStatus.tcc_accessibility
+        ) {
           setMessage(
             "运行时准备完成，但系统权限尚未授予。请在系统设置中授权后点击刷新。",
           );
@@ -188,6 +255,7 @@ export function ComputerSettingsPanel({
           setMessage(finalStatus.message ?? "CUA Host 不可用。");
         }
       } catch (error: unknown) {
+        setMessageTone("error");
         setMessage(
           error instanceof Error
             ? error.message
@@ -198,24 +266,78 @@ export function ComputerSettingsPanel({
         setupInFlightRef.current = false;
       }
     },
-    [runtimeClient, persistSettings],
+    [runtimeClient, persistSettings, requestPermissionsAndOpenNext],
   );
 
-  // Auto-setup when the setting is already enabled but the runtime is missing.
+  const continuePermissionSetup = useCallback(
+    async (preferredPermission?: ComputerPermission) => {
+      if (setupInFlightRef.current) return;
+      setupInFlightRef.current = true;
+      setSettingsBusy(true);
+      try {
+        await requestPermissionsAndOpenNext(preferredPermission);
+      } catch (error: unknown) {
+        setMessageTone("error");
+        setMessage(
+          error instanceof Error ? error.message : "权限请求失败，请稍后重试。",
+        );
+      } finally {
+        setSettingsBusy(false);
+        setupInFlightRef.current = false;
+      }
+    },
+    [requestPermissionsAndOpenNext],
+  );
+
+  // Returning from System Settings refreshes Host-owned TCC state. When the
+  // first permission was granted, continue to the second pane automatically;
+  // returning without progress leaves the user in Awaken with a retry action.
   useEffect(() => {
-    if (
-      document &&
-      status &&
-      document.value.enabled &&
-      !status.available &&
-      !autoSetupAttemptedRef.current &&
-      !setupInFlightRef.current &&
-      !settingsLoading
-    ) {
-      autoSetupAttemptedRef.current = true;
-      void setupEnvironment(toFormValue(document));
-    }
-  }, [document, status, settingsLoading, setupEnvironment]);
+    const handleFocus = () => {
+      if (
+        lastOpenedPermissionRef.current === null ||
+        !document?.value.enabled ||
+        setupInFlightRef.current ||
+        settingsLoading
+      ) {
+        return;
+      }
+      void (async () => {
+        setupInFlightRef.current = true;
+        setSettingsBusy(true);
+        try {
+          setMessageTone("info");
+          setMessage("正在重新检测系统权限…");
+          const nextStatus = await runtimeClient.getComputerHostStatus();
+          setStatus(nextStatus);
+          const missing = firstMissingPermission(nextStatus);
+          if (!missing && nextStatus.available && nextStatus.healthy) {
+            lastOpenedPermissionRef.current = null;
+            setMessage(null);
+          } else if (missing && missing !== lastOpenedPermissionRef.current) {
+            await requestPermissionsAndOpenNext(missing);
+          } else if (missing) {
+            setMessage(
+              `${permissionLabel(missing)}权限仍未开启，可点击“去授权”继续。`,
+            );
+          } else {
+            setMessageTone("error");
+            setMessage(nextStatus.message ?? "CUA Host 不可用。");
+          }
+        } catch (error: unknown) {
+          setMessageTone("error");
+          setMessage(
+            error instanceof Error ? error.message : "重新检测系统权限失败。",
+          );
+        } finally {
+          setSettingsBusy(false);
+          setupInFlightRef.current = false;
+        }
+      })();
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, [document, requestPermissionsAndOpenNext, runtimeClient, settingsLoading]);
 
   const handleSettingsChange = useCallback(
     (next: AwakenComputerSettingsValue) => {
@@ -247,11 +369,18 @@ export function ComputerSettingsPanel({
       settingsLoading={settingsLoading}
       settingsBusy={settingsBusy}
       settingsError={message}
+      settingsMessageTone={messageTone}
       onRefresh={loadAll}
       onSettingsChange={handleSettingsChange}
+      onRequestPermissions={() => {
+        void continuePermissionSetup();
+      }}
+      onOpenPermissionSettings={(permission) => {
+        void continuePermissionSetup(permission);
+      }}
       onSetupRuntime={() => {
         if (draft) {
-          void setupEnvironment(draft);
+          void setupEnvironment(draft, { persist: false });
         }
       }}
     />

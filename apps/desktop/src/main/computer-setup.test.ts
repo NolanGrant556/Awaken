@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   accessSync: vi.fn(),
   existsSync: vi.fn(),
   getAppPath: vi.fn(),
+  openExternal: vi.fn(),
 }));
 
 vi.mock("node:fs", () => ({
@@ -14,17 +15,21 @@ vi.mock("node:fs", () => ({
 
 vi.mock("electron", () => ({
   app: { getAppPath: mocks.getAppPath },
-  shell: {},
-  systemPreferences: {},
+  shell: { openExternal: mocks.openExternal },
 }));
 
-import { prepareComputerRuntime } from "./computer-setup.js";
+import {
+  openComputerPermissionSettings,
+  prepareComputerRuntime,
+} from "./computer-setup.js";
 
 describe("prepareComputerRuntime", () => {
   beforeEach(() => {
     mocks.accessSync.mockReset();
     mocks.existsSync.mockReset();
     mocks.getAppPath.mockReset();
+    mocks.openExternal.mockReset();
+    mocks.openExternal.mockResolvedValue(undefined);
     mocks.getAppPath.mockReturnValue(
       "/Applications/Awaken.app/Contents/Resources/app.asar",
     );
@@ -53,4 +58,21 @@ describe("prepareComputerRuntime", () => {
         "打包应用缺少 bundled Node runtime 或 CUA Host，请重新安装完整安装包。",
     });
   });
+
+  it.runIf(process.platform === "darwin")(
+    "opens the exact macOS privacy panes for both Computer permissions",
+    async () => {
+      await openComputerPermissionSettings("screen_recording");
+      await openComputerPermissionSettings("accessibility");
+
+      expect(mocks.openExternal).toHaveBeenNthCalledWith(
+        1,
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+      );
+      expect(mocks.openExternal).toHaveBeenNthCalledWith(
+        2,
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+      );
+    },
+  );
 });

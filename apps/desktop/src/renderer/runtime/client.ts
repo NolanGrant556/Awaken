@@ -332,16 +332,10 @@ export type RuntimeClient = {
     cua_host_ready: boolean;
     message?: string;
   }>;
-  getComputerPermissionStatus: (
+  requestComputerPermissions: () => Promise<ComputerHostStatus>;
+  openComputerPermissionSettings: (
     permission: "screen_recording" | "accessibility",
-  ) => Promise<
-    "not-determined" | "granted" | "denied" | "restricted" | "unknown"
-  >;
-  requestComputerPermission: (
-    permission: "screen_recording" | "accessibility",
-  ) => Promise<
-    "not-determined" | "granted" | "denied" | "restricted" | "unknown"
-  >;
+  ) => Promise<void>;
   getDesktopPreferences: () => Promise<DesktopPreferences>;
   saveDesktopPreferences: (request: DesktopPreferencesSaveRequest) => Promise<DesktopPreferences>;
   listMemories: (request?: MemoryListRequest) => Promise<RuntimeMemory[]>;
@@ -532,10 +526,9 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getComputerSettings: () => bridge.getComputerSettings(),
     saveComputerSettings: (request) => bridge.saveComputerSettings(request),
     prepareComputerRuntime: () => bridge.prepareComputerRuntime(),
-    getComputerPermissionStatus: (permission) =>
-      bridge.getComputerPermissionStatus(permission),
-    requestComputerPermission: (permission) =>
-      bridge.requestComputerPermission(permission),
+    requestComputerPermissions: () => bridge.requestComputerPermissions(),
+    openComputerPermissionSettings: (permission) =>
+      bridge.openComputerPermissionSettings(permission),
     getDesktopPreferences: () => bridge.getDesktopPreferences(),
     saveDesktopPreferences: (request) => bridge.saveDesktopPreferences(request),
     listMemories: (request) => bridge.listMemories(request),

@@ -87,6 +87,11 @@
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  flex: 1;
+}
+
+.computer-settings-status-item > button {
+  flex-shrink: 0;
 }
 
 .computer-settings-status-label {

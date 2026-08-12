@@ -218,6 +218,9 @@ type RunService struct {
 	// computerHostProbe probes the global Computer Host sidecar for settings
 	// and readiness checks that are not tied to a run.
 	computerHostProbe computer.HostProbe
+	// computerHostPermissionRequester asks the actual Host identity to request
+	// every OS permission required by Computer Use.
+	computerHostPermissionRequester computer.HostPermissionRequester
 	// computerSettings holds user-configurable Computer Use preferences. It
 	// gates whether runs can create a ComputerBinding and what policy defaults
 	// apply.
@@ -282,6 +285,17 @@ func (s *RunService) SetComputerHostProbe(probe computer.HostProbe) {
 	s.computerHostProbe = probe
 }
 
+// SetComputerHostPermissionRequester registers the trusted Host permission
+// request path used by the Desktop setup flow.
+func (s *RunService) SetComputerHostPermissionRequester(requester computer.HostPermissionRequester) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.computerHostPermissionRequester = requester
+}
+
 // SetComputerSettings registers user-configurable Computer Use preferences.
 func (s *RunService) SetComputerSettings(settings computer.Settings) {
 	if s == nil {
@@ -315,6 +329,21 @@ func (s *RunService) ComputerHostStatus(ctx context.Context) (computer.HostStatu
 		return computer.HostStatus{Available: false, Message: "computer host probe not configured"}, nil
 	}
 	return probe.Probe(ctx)
+}
+
+// RequestComputerHostPermissions delegates to the real Host process so TCC
+// grants attach to the process that performs screen capture and input.
+func (s *RunService) RequestComputerHostPermissions(ctx context.Context) (computer.HostStatus, error) {
+	if s == nil {
+		return computer.HostStatus{Available: false, Message: "run service not initialized"}, nil
+	}
+	s.mu.RLock()
+	requester := s.computerHostPermissionRequester
+	s.mu.RUnlock()
+	if requester == nil {
+		return computer.HostStatus{Available: false, Message: "computer host permission requester not configured"}, nil
+	}
+	return requester.RequestPermissions(ctx)
 }
 
 func (s *RunService) restoreSkillInvocationHistory(activator *skillruntime.Activator) {

@@ -1580,12 +1580,6 @@ export type ComputerRuntimeSetupResult = {
 };
 
 export type ComputerPermission = "screen_recording" | "accessibility";
-export type ComputerPermissionStatus =
-  | "not-determined"
-  | "granted"
-  | "denied"
-  | "restricted"
-  | "unknown";
 
 export type SearchProviderId = "exa" | "tavily";
 
@@ -2003,12 +1997,10 @@ export type AwakenBridge = {
     request: ComputerSettingsSaveRequest,
   ) => Promise<ComputerSettingsDocument>;
   prepareComputerRuntime: () => Promise<ComputerRuntimeSetupResult>;
-  getComputerPermissionStatus: (
+  requestComputerPermissions: () => Promise<ComputerHostStatus>;
+  openComputerPermissionSettings: (
     permission: ComputerPermission,
-  ) => Promise<ComputerPermissionStatus>;
-  requestComputerPermission: (
-    permission: ComputerPermission,
-  ) => Promise<ComputerPermissionStatus>;
+  ) => Promise<void>;
   subscribeRun: (runId: string, handlers: RunStreamHandlers, afterSeq?: number) => Promise<string>;
   unsubscribeRun: (subscriptionId: string) => void;
   getDesktopPreferences: () => Promise<DesktopPreferences>;

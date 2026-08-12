@@ -30,7 +30,6 @@ import {
   type CliProviderId,
   type ComputerHostStatus,
   type ComputerPermission,
-  type ComputerPermissionStatus,
   type ComputerRuntimeSetupResult,
   type ComputerSettingsDocument,
   type ComputerSettingsSaveRequest,
@@ -392,10 +391,10 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:save-computer-settings", request) as Promise<ComputerSettingsDocument>,
   prepareComputerRuntime: () =>
     ipcRenderer.invoke("awaken:prepare-computer-runtime") as Promise<ComputerRuntimeSetupResult>,
-  getComputerPermissionStatus: (permission: ComputerPermission) =>
-    ipcRenderer.invoke("awaken:get-computer-permission-status", permission) as Promise<ComputerPermissionStatus>,
-  requestComputerPermission: (permission: ComputerPermission) =>
-    ipcRenderer.invoke("awaken:request-computer-permission", permission) as Promise<ComputerPermissionStatus>,
+  requestComputerPermissions: () =>
+    ipcRenderer.invoke("awaken:request-computer-permissions") as Promise<ComputerHostStatus>,
+  openComputerPermissionSettings: (permission: ComputerPermission) =>
+    ipcRenderer.invoke("awaken:open-computer-permission-settings", permission) as Promise<void>,
   subscribeRun: async (runId: string, handlers: RunStreamHandlers, afterCursor?: number) => {
     const subscriptionId = crypto.randomUUID();
     subscriptions.set(subscriptionId, handlers);

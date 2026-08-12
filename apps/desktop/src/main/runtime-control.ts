@@ -184,6 +184,42 @@ export class RuntimeControlClient {
     };
   }
 
+  async requestComputerPermissions(): Promise<{
+    available: boolean;
+    healthy: boolean;
+    version?: string;
+    protocol_version?: number;
+    os?: string;
+    tcc_screen_recording: boolean;
+    tcc_accessibility: boolean;
+    node_path?: string;
+    host_script_path?: string;
+    message?: string;
+  }> {
+    const resp = await fetch(
+      `${this.baseUrl}/v1/control/computer/permissions/request`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${this.token}` },
+      },
+    );
+    if (!resp.ok) {
+      throw new Error(`request computer permissions failed: ${resp.status}`);
+    }
+    return (await resp.json()) as {
+      available: boolean;
+      healthy: boolean;
+      version?: string;
+      protocol_version?: number;
+      os?: string;
+      tcc_screen_recording: boolean;
+      tcc_accessibility: boolean;
+      node_path?: string;
+      host_script_path?: string;
+      message?: string;
+    };
+  }
+
   async getComputerSettings(): Promise<{
     revision: number;
     value: {

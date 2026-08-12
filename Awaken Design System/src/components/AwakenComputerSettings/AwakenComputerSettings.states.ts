@@ -32,6 +32,8 @@ export const AwakenComputerSettingsStates = [
       onRefresh: () => undefined,
       onSettingsChange: () => undefined,
       onSetupRuntime: () => undefined,
+      onRequestPermissions: () => undefined,
+      onOpenPermissionSettings: () => undefined,
     } satisfies AwakenComputerSettingsProps,
   },
   {
@@ -51,6 +53,8 @@ export const AwakenComputerSettingsStates = [
       onRefresh: () => undefined,
       onSettingsChange: () => undefined,
       onSetupRuntime: () => undefined,
+      onRequestPermissions: () => undefined,
+      onOpenPermissionSettings: () => undefined,
     } satisfies AwakenComputerSettingsProps,
   },
   {

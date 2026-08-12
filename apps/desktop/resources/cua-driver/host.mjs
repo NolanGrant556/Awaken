@@ -26,6 +26,7 @@ import {
   ScrollInput,
   TypeTextInput,
   currentMacOsPermissionStatus,
+  requestMacOsPermissions,
 } from "@trycua/cua-driver";
 import { randomUUID } from "node:crypto";
 
@@ -96,6 +97,16 @@ async function handleHealth() {
     tcc_accessibility: Boolean(permissions.accessibility),
     message: "CUA embedded host",
   };
+}
+
+async function handleRequestPermissions() {
+  if (process.platform === "darwin") {
+    // TCC consent belongs to the process that captures the screen and injects
+    // input. Request both permissions from this Host process instead of from
+    // Electron Main so macOS grants the identity that actually uses CUA.
+    requestMacOsPermissions();
+  }
+  return await handleHealth();
 }
 
 async function handleStartSession({ sessionID, captureScope, fenceToken, controlEpoch }) {
@@ -695,6 +706,8 @@ async function dispatch(method, params, signal) {
   switch (method) {
     case "health":
       return await handleHealth();
+    case "requestPermissions":
+      return await handleRequestPermissions();
     case "startSession":
       return await handleStartSession(params);
     case "getDesktopState":

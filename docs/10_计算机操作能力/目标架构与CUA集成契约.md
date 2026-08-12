@@ -83,6 +83,7 @@ Phase 4 的当前实现把 CUA Host 作为 Core（`cmd/awaken-core`）管理的 
 - `RunService.StartRun` 通过 `computerDriverFactory` 获取 driver；Host 不可用时回退到 `NewUnavailableDriver()`；
 - 后台健康检查与失败重启由 Core 负责，应用关闭时 `HostManager.Close()` 停止子进程；
 - Desktop Main 当前不直接管理 Host 子进程，只通过现有 `/v1/control/computer/*` 控制面转发用户 review/handoff 决定。
+- macOS 权限请求由 Node Host 内锁定的 CUA native SDK 发起，确保检查、弹出请求与真正执行 capture/input 的进程身份一致；Desktop Main 只经 authenticated Core route 触发该调用并负责打开精确的系统设置页，不再用 Electron 主进程代替 Host 请求 TCC；
 
 这是向 4.1 首选形态迁移的 interim 步骤：Core 直接 spawn Node host 并把 Host 脚本放入产品资源目录，简化了开发验证与资源分发；但生产发布仍需把 Node runtime 与 Host 一起打包签名，并最终由 Desktop Main 管理 TCC/生命周期，把 Core-Host IPC 约束为 Awaken 自有最小合同。
 

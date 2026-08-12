@@ -1,16 +1,10 @@
 import { execFile } from "node:child_process";
 import { accessSync, constants, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { app, shell, systemPreferences } from "electron";
+import { app, shell } from "electron";
 import type { ComputerRuntimeSetupResult } from "../shared/runtime.js";
 
 export type ComputerPermission = "screen_recording" | "accessibility";
-export type ComputerPermissionStatus =
-  | "not-determined"
-  | "granted"
-  | "denied"
-  | "restricted"
-  | "unknown";
 
 const target = `${process.platform}-${process.arch}`;
 
@@ -107,7 +101,8 @@ export async function prepareComputerRuntime(): Promise<ComputerRuntimeSetupResu
     const hostScriptPath = cuaHostScriptPath(packagedRoot);
     const hostModulesPath = cuaHostNodeModulesPath(packagedRoot);
     const nodeReady = existsSync(nodePath) && canExecute(nodePath);
-    const cuaHostReady = existsSync(hostScriptPath) && existsSync(hostModulesPath);
+    const cuaHostReady =
+      existsSync(hostScriptPath) && existsSync(hostModulesPath);
     if (!nodeReady || !cuaHostReady) {
       return {
         node_ready: nodeReady,
@@ -168,74 +163,17 @@ export async function prepareComputerRuntime(): Promise<ComputerRuntimeSetupResu
   return { node_ready: nodeReady, cua_host_ready: cuaHostReady };
 }
 
-function normalizeMediaAccessStatus(
-  status: string | undefined,
-): ComputerPermissionStatus {
-  switch (status) {
-    case "not-determined":
-      return "not-determined";
-    case "granted":
-      return "granted";
-    case "denied":
-      return "denied";
-    case "restricted":
-      return "restricted";
-    default:
-      return "unknown";
-  }
-}
-
-export function getComputerPermissionStatus(
+export async function openComputerPermissionSettings(
   permission: ComputerPermission,
-): ComputerPermissionStatus {
-  if (permission === "screen_recording") {
-    if (process.platform !== "darwin") {
-      // Electron only exposes screen capture media access on macOS.
-      return "unknown";
-    }
-    // getMediaAccessStatus also accepts "screen" at runtime on macOS even
-    // though the bundled type declarations only list "microphone" | "camera".
-    const status = systemPreferences.getMediaAccessStatus("screen" as "camera");
-    return normalizeMediaAccessStatus(status);
+): Promise<void> {
+  if (process.platform !== "darwin") {
+    return;
   }
-
-  if (permission === "accessibility") {
-    if (process.platform !== "darwin") {
-      return "unknown";
-    }
-    // macOS does not provide a public API to query accessibility permission
-    // from a non-accessibility process. We treat it as unknown and rely on
-    // the user granting it through System Settings.
-    return "unknown";
-  }
-
-  return "unknown";
-}
-
-export async function requestComputerPermission(
-  permission: ComputerPermission,
-): Promise<ComputerPermissionStatus> {
-  if (permission === "screen_recording") {
-    if (process.platform !== "darwin") {
-      return "unknown";
-    }
-    // Electron's type declarations restrict askForMediaAccess to "microphone" |
-    // "camera", but macOS 10.15+ also supports "screen" for screen recording.
-    const granted = await systemPreferences.askForMediaAccess("screen" as "camera");
-    return granted ? "granted" : "denied";
-  }
-
-  if (permission === "accessibility") {
-    if (process.platform !== "darwin") {
-      return "unknown";
-    }
-    // Open System Settings at the Accessibility pane so the user can enable
-    // Awaken manually. There is no programmatic request API.
-    await shell.openExternal(
-      "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
-    );
-    return "not-determined";
-  }
-
-  return "unknown";
+  const pane =
+    permission === "screen_recording"
+      ? "Privacy_ScreenCapture"
+      : "Privacy_Accessibility";
+  await shell.openExternal(
+    `x-apple.systempreferences:com.apple.preference.security?${pane}`,
+  );
 }

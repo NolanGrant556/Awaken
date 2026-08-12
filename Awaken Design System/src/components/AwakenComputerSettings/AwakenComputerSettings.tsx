@@ -1,4 +1,10 @@
-import { CircleCheck, CircleX, MonitorCog, RefreshCw } from "lucide-react";
+import {
+  CircleCheck,
+  CircleX,
+  ExternalLink,
+  MonitorCog,
+  RefreshCw,
+} from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenSettingsSwitch } from "../AwakenSettingsSwitch";
 import "./AwakenComputerSettings.css";
@@ -28,19 +34,30 @@ export type AwakenComputerSettingsProps = {
   settingsLoading?: boolean;
   settingsBusy?: boolean;
   settingsError?: string | null;
+  settingsMessageTone?: "info" | "error";
   onRefresh?: () => void;
   onSettingsChange?: (settings: AwakenComputerSettingsValue) => void;
   onSetupRuntime?: () => void;
+  onRequestPermissions?: () => void;
+  onOpenPermissionSettings?: (
+    permission: "screen_recording" | "accessibility",
+  ) => void;
 };
 
 function StatusItem({
   label,
   ok,
   detail,
+  actionLabel,
+  onAction,
+  actionDisabled,
 }: {
   label: string;
   ok: boolean;
   detail?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  actionDisabled?: boolean;
 }) {
   return (
     <div className="computer-settings-status-item" data-ok={ok}>
@@ -57,6 +74,17 @@ function StatusItem({
           <span className="computer-settings-status-detail">{detail}</span>
         ) : null}
       </div>
+      {actionLabel && onAction ? (
+        <AwakenButton
+          size="sm"
+          variant="ghost"
+          disabled={actionDisabled}
+          onClick={onAction}
+        >
+          <ExternalLink size={14} strokeWidth={1.9} />
+          {actionLabel}
+        </AwakenButton>
+      ) : null}
     </div>
   );
 }
@@ -68,9 +96,12 @@ export function AwakenComputerSettings({
   settingsLoading,
   settingsBusy,
   settingsError,
+  settingsMessageTone = "info",
   onRefresh,
   onSettingsChange,
   onSetupRuntime,
+  onRequestPermissions,
+  onOpenPermissionSettings,
 }: AwakenComputerSettingsProps) {
   const hostReady = status?.available === true && status?.healthy === true;
   const screenRecordingReady = status?.tcc_screen_recording === true;
@@ -131,7 +162,14 @@ export function AwakenComputerSettings({
             detail={
               screenRecordingReady
                 ? "已授权"
-                : "需要在系统设置中授予 Awaken 屏幕录制权限"
+                : "需要在系统设置中开启屏幕录制权限"
+            }
+            actionLabel={screenRecordingReady ? undefined : "去授权"}
+            actionDisabled={settingsBusy}
+            onAction={
+              screenRecordingReady
+                ? undefined
+                : () => onOpenPermissionSettings?.("screen_recording")
             }
           />
           <StatusItem
@@ -140,19 +178,37 @@ export function AwakenComputerSettings({
             detail={
               accessibilityReady
                 ? "已授权"
-                : "需要在系统设置中授予 Awaken 辅助功能权限"
+                : "需要在系统设置中开启辅助功能权限"
+            }
+            actionLabel={accessibilityReady ? undefined : "去授权"}
+            actionDisabled={settingsBusy}
+            onAction={
+              accessibilityReady
+                ? undefined
+                : () => onOpenPermissionSettings?.("accessibility")
             }
           />
         </div>
-        {!hostReady && settings?.enabled ? (
+        {settings?.enabled &&
+        (!hostReady || !screenRecordingReady || !accessibilityReady) ? (
           <div className="computer-settings-status-actions">
             <AwakenButton
               size="sm"
               loading={settingsBusy}
               disabled={settingsBusy}
-              onClick={() => onSetupRuntime?.()}
+              onClick={() => {
+                if (!hostReady) {
+                  onSetupRuntime?.();
+                } else {
+                  onRequestPermissions?.();
+                }
+              }}
             >
-              {settingsBusy ? "准备中…" : "准备 CUA 运行时"}
+              {settingsBusy
+                ? "配置中…"
+                : !hostReady
+                  ? "准备 CUA 运行时"
+                  : "继续授权"}
             </AwakenButton>
           </div>
         ) : null}
@@ -182,8 +238,12 @@ export function AwakenComputerSettings({
                 </div>
               ) : settingsError ? (
                 <div
-                  className="computer-settings-setup computer-settings-setup-error"
-                  role="alert"
+                  className={`computer-settings-setup${
+                    settingsMessageTone === "error"
+                      ? " computer-settings-setup-error"
+                      : ""
+                  }`}
+                  role={settingsMessageTone === "error" ? "alert" : "status"}
                 >
                   {settingsError}
                 </div>

@@ -179,3 +179,18 @@ func (h *computerControlHandlers) handleGetComputerHostStatus(w http.ResponseWri
 
 	writeJSON(w, http.StatusOK, status)
 }
+
+func (h *computerControlHandlers) handleRequestComputerHostPermissions(w http.ResponseWriter, r *http.Request) {
+	if h.runService == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "RUN_SERVICE_UNAVAILABLE", "run service not initialized")
+		return
+	}
+
+	status, err := h.runService.RequestComputerHostPermissions(r.Context())
+	if err != nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "COMPUTER_PERMISSION_REQUEST_FAILED", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, status)
+}

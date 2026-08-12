@@ -367,6 +367,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 			controlMux.HandleFunc("POST /v1/control/computer/reviews/{review_id}/resolve", computerCtrl.handleResolveComputerReview)
 			controlMux.HandleFunc("POST /v1/control/computer/runs/{run_id}/reviews/{review_id}/resolve", computerCtrl.handleResolveComputerReview)
 			controlMux.HandleFunc("GET /v1/control/computer/status", computerCtrl.handleGetComputerHostStatus)
+			controlMux.HandleFunc("POST /v1/control/computer/permissions/request", computerCtrl.handleRequestComputerHostPermissions)
 		}
 		mux.Handle("/v1/control/", auth(controlMux))
 	}

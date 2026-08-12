@@ -32,6 +32,10 @@ type HostClient interface {
 	// Health reports driver readiness and macOS permission status.
 	Health(ctx context.Context) (computer.HealthResult, error)
 
+	// RequestPermissions asks the actual Host process to request every macOS
+	// permission needed by Computer Use, then returns the refreshed health.
+	RequestPermissions(ctx context.Context) (computer.HealthResult, error)
+
 	// StartSession asks the host to create a CUA session with the Awaken session
 	// ID as the stable SDK session identifier.
 	StartSession(ctx context.Context, sessionID string, scope computer.CaptureScope, fence computer.FenceToken, epoch computer.ControlEpoch) (HostSessionResult, error)
@@ -365,6 +369,18 @@ func (c *stdioHostClient) Health(ctx context.Context) (computer.HealthResult, er
 	if err != nil {
 		return computer.HealthResult{}, err
 	}
+	return decodeHealthResult(raw)
+}
+
+func (c *stdioHostClient) RequestPermissions(ctx context.Context) (computer.HealthResult, error) {
+	raw, err := c.request(ctx, "requestPermissions", struct{}{})
+	if err != nil {
+		return computer.HealthResult{}, err
+	}
+	return decodeHealthResult(raw)
+}
+
+func decodeHealthResult(raw json.RawMessage) (computer.HealthResult, error) {
 	var hr struct {
 		Healthy            bool   `json:"healthy"`
 		Version            string `json:"version"`

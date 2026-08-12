@@ -164,9 +164,8 @@ import { CliConnectorManager } from "./cli-connectors/manager.js";
 import { MemoryDreamSchedulerStore } from "./memory-dream-scheduler-store.js";
 import { openProjectEntryWithApplication } from "./project-entry-actions.js";
 import {
-  getComputerPermissionStatus,
+  openComputerPermissionSettings,
   prepareComputerRuntime,
-  requestComputerPermission,
 } from "./computer-setup.js";
 import { listProjectDirectory, resolveProjectEntry } from "./project-files.js";
 import { ProjectFilePreviewManager } from "./project-file-preview-manager.js";
@@ -3324,17 +3323,18 @@ ipcMain.handle("awaken:prepare-computer-runtime", async () => {
   return prepareComputerRuntime();
 });
 
-ipcMain.handle(
-  "awaken:get-computer-permission-status",
-  async (_event, permission: "screen_recording" | "accessibility") => {
-    return getComputerPermissionStatus(permission);
-  },
-);
+ipcMain.handle("awaken:request-computer-permissions", async () => {
+  const client = supervisor?.getControlClient();
+  if (!client) {
+    throw new Error("runtime control client is not available");
+  }
+  return client.requestComputerPermissions();
+});
 
 ipcMain.handle(
-  "awaken:request-computer-permission",
+  "awaken:open-computer-permission-settings",
   async (_event, permission: "screen_recording" | "accessibility") => {
-    return requestComputerPermission(permission);
+    return openComputerPermissionSettings(permission);
   },
 );
 

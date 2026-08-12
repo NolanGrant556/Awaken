@@ -848,8 +848,13 @@ function stubElectronBridge(): void {
         cua_host_ready: false,
         message: "not configured",
       })),
-      getComputerPermissionStatus: vi.fn(async () => "unknown" as const),
-      requestComputerPermission: vi.fn(async () => "unknown" as const),
+      requestComputerPermissions: vi.fn(async () => ({
+        available: false,
+        healthy: false,
+        tcc_screen_recording: false,
+        tcc_accessibility: false,
+      })),
+      openComputerPermissionSettings: vi.fn(async () => undefined),
     } satisfies AwakenBridge,
   });
 }

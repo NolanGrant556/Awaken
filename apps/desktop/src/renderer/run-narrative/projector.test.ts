@@ -817,6 +817,45 @@ describe("projectAguiEventToNarrative", () => {
     });
   });
 
+  it("projects Hook start and completion into one replay-stable safe trace", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_HOOK_STARTED", runId: "run-hook", hookInvocationId: "hookinv-1",
+      hookId: "project:lint", hookEvent: "PreToolUse", hookSourceKind: "project",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_HOOK_COMPLETED", runId: "run-hook", hookInvocationId: "hookinv-1",
+      hookId: "project:lint", hookEvent: "PreToolUse", hookSourceKind: "project",
+      hookAction: "block_tool", hookReasonCode: "policy", hookReason: "unsafe target",
+      hookOutputPreview: "bounded diagnostic", status: "blocked", durationMs: 9,
+    });
+    const hooks = state.committedItems.filter((item) => item.kind === "hook");
+    expect(hooks).toHaveLength(1);
+    expect(hooks[0]).toMatchObject({
+      id: "hook:run-hook:hookinv-1", title: "Hook · project:lint",
+      detail: "PreToolUse · project · 9 ms", output: "policy\nunsafe target\nbounded diagnostic",
+      status: "blocked",
+    });
+  });
+
+  it("keeps BeforeFinish blocks non-final and exposes the retry transition", () => {
+	let state = createInitialRunNarrativeState();
+	state = projectAguiEventToNarrative(state, { type: "TEXT_MESSAGE_START", runId: "run-finish", messageId: "candidate-1" });
+	state = projectAguiEventToNarrative(state, { type: "TEXT_MESSAGE_CONTENT", runId: "run-finish", messageId: "candidate-1", delta: "draft" });
+	state = projectAguiEventToNarrative(state, { type: "TEXT_MESSAGE_END", runId: "run-finish", messageId: "candidate-1" });
+	state = projectAguiEventToNarrative(state, {
+		type: "AWAKEN_HOOK_COMPLETED", runId: "run-finish", hookInvocationId: "finish-hook-1",
+		hookId: "user:review", hookEvent: "BeforeFinish", hookAction: "block_finish", status: "blocked",
+	});
+	state = projectAguiEventToNarrative(state, {
+		type: "AWAKEN_TURN_STARTED", runId: "run-finish", turnId: "turn-2", transitionReason: "before_finish_hook_retry",
+	});
+	expect(state.committedItems.find((item) => item.kind === "answer")).toMatchObject({ markdown: "draft", status: "done" });
+	expect(state.committedItems.find((item) => item.kind === "answer")).not.toHaveProperty("isFinal", true);
+	expect(state.committedItems.find((item) => item.kind === "hook")).toMatchObject({ status: "blocked" });
+	expect(state.activeItem).toMatchObject({ kind: "planning", text: "正在根据 Hook 反馈完善回答" });
+  });
+
   it("does not project recovery supervision as extra tool calls", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(state, {

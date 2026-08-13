@@ -160,6 +160,14 @@ export type RunNarrativeItem =
       status: "active" | "done" | "error";
     }
   | {
+      kind: "hook";
+      id: string;
+      title: string;
+      detail?: string;
+      output?: string;
+      status: "active" | "done" | "error" | "blocked" | "interrupted";
+    }
+  | {
       kind: "mediaGeneration";
       id: string;
       toolCallId: string;

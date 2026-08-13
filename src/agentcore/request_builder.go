@@ -115,6 +115,20 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 			Content: block.Content, State: ContextEpochSourceUpdated,
 		})
 	}
+	for _, block := range rb.config.HookContextBlocks {
+		if strings.TrimSpace(block.Content) == "" {
+			continue
+		}
+		block.Kind = ContextContributionRuntimeContext
+		envelope.SystemBlocks = append(envelope.SystemBlocks, block)
+		envelope.SystemContextItems = append(envelope.SystemContextItems, ContextItem{
+			ID: firstNonEmptyAttachmentValue(block.ID, "hook_context"), Type: "hook_context", Content: block.Content,
+		})
+		envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{
+			SourceKey: firstNonEmptyAttachmentValue(block.ID, "hook_context"), Kind: ContextContributionRuntimeContext,
+			Content: block.Content, State: ContextEpochSourceUpdated,
+		})
+	}
 	// Append the host-generated explicit selection after every Skill body.
 	// A Skill may contain arbitrary instructions, including text that mimics
 	// this block, but it cannot replace the typed Runtime-owned binding.

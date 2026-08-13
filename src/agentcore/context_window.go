@@ -87,6 +87,7 @@ type CompactRequest struct {
 	Envelope         ContextEnvelope
 	TargetTokens     int
 	SummaryMaxTokens int
+	HookInstruction  string
 
 	summaryInvoker compactSummaryInvoker
 }

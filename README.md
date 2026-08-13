@@ -11,7 +11,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 - 左侧栏负责项目与线程入口；
 - 中间工作区负责输入、运行叙事、状态反馈和最终交付物；
 - 右侧 Inspector 当前提供项目文件工作区、文件夹组选择、筛选、只读目录树以及 Office、Markdown、代码/文本、PDF、图片和 HTML 只读预览；HTML 统一进入隔离的“浏览器”入口；当前 thread 存在原生 Subagent 记录时，还提供子任务详情、状态、活动、结果、错误与单任务取消；文件编辑与通用工具详情尚未接通；
-- Settings 承载模型、搜索、长期记忆、外观、桌面宠物和 ACP runner 等配置面；
+- Settings 承载模型、搜索、长期记忆、外观、桌面宠物、计算机操作、Hook 和 ACP runner 等配置面；设置界面的用户可见标题显示为“钩子”；
 - Desktop 负责启动、监督和关闭本地 `awaken-core`，用户不需要单独运行 Core；
 - `Awaken Design System` 是纯 UI 组件包和 Gallery，不拥有产品状态、后端策略或运行时协议。
 
@@ -24,11 +24,11 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | 桌面工作台 | 项目与线程导航、Workbench 输入和运行叙事、附件、交付物、外观、宠物与 Desktop 生命周期 | [01 桌面工作台](docs/01_桌面工作台/索引.md) |
 | 主智能体闭环 | thread/run、多轮上下文、压缩、主动提问、取消和失败终止；原生只读 Subagent 支持 explore/review、每 run 8 个任务/4 并发、终态自动交接、status/wait/cancel、耐久事件与 Desktop 任务组/Inspector | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
 | 运行时与本地服务 | Desktop 托管本地服务、SemanticJournal、工具媒体 blob、当前用户执行环境观察与历史回放 | [03 运行时与本地服务](docs/03_运行时与本地服务/索引.md) |
-| 工具、权限与安全执行 | 七个模型基础工具、provider/capability/dependency、每 run 可用性快照、零审批、TaskScope/Trash，以及保留工具的窄 broker 合同 | [04 工具、权限与安全执行](docs/04_工具权限与审批/索引.md) |
+| 工具、权限与安全执行 | 七个模型基础工具、provider/capability/dependency、每 run 可用性快照、零审批、TaskScope/Trash；command/受控 HTTP/prompt/只读 agent Hook 覆盖十一类边界、阻断/输入更新、耐久回执与显式 Skill 激活注册；以及保留工具的窄 broker 合同 | [04 工具、权限与安全执行](docs/04_工具权限与审批/索引.md) |
 | 模型与供应商 | 模型 profile、能力与余额、调用链、安全凭据存储及故障恢复 | [05 模型与供应商配置](docs/05_模型与供应商配置/索引.md) |
 | MCP runtime | user/project/dynamic 配置、stdio/http/sse、动态工具直通、可选 Artifact metadata、认证与 prompt/resource Skill bridge | [06 MCP 运行时](docs/06_MCP运行时/索引.md) |
 | 连接器 | MCP/CLI provider 目录、官方 CLI 安装与授权、生命周期、readiness 与重启 ownership 边界 | [07 连接器](docs/07_连接器/索引.md) |
-| 技能 | 多来源 Universal Skill 发现、按需正文/资源、composer 当前选择的 run-scoped 确定性绑定、统一 catalog、inline/真实 child fork、MCP 动态来源与恢复，以及随 App 分发的 word/excel/ppt/pdf/code-search/PDF_Max 内置 Skill 包 | [08 技能](docs/08_技能/索引.md) |
+| 技能 | 多来源 Universal Skill 发现、按需正文/资源、composer 当前选择的 run-scoped 确定性绑定、统一 catalog、inline/真实 child fork、MCP 动态来源与恢复；composer 显式激活后可注册包内受控 Hook；以及随 App 分发的 word/excel/ppt/pdf/code-search/PDF_Max 内置 Skill 包 | [08 技能](docs/08_技能/索引.md) |
 | ACP Client/Agent | ACP Client（Phase 0–4）：runner 配置、probe 与 Desktop 设置页；`delegate_external_agent` 工具、会话生命周期与权限处理已在 Core 实现；Workbench 嵌套进度与 permission gate UI 已实现。ACP Agent（Phase 5）：`cmd/awaken-acp` 与 `src/acp/agentbridge` 已实现 stdio transport、launcher lease、authenticated control routes、Core 事件投影、模型 profile selector/default fallback 与 cancel/close；Desktop-owned 与 core-only 的真实 stdio prompt 已通过，第三方 client、headless 多进程验收与跨 Core 重启恢复仍是已知缺口 | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
 | AG-UI 与 A2UI | Awaken 自有事件到 AG-UI-compatible wire 的映射；A2UI 仅作参考 | [09 AG-UI 与 A2UI 协议](docs/09_AGUI与A2UI协议/索引.md) |
 | Computer Use | CUA Host、观察/动作/验证工具、复核、暂停/接管/交还、媒体策略与发布准入 | [10 计算机操作能力](docs/10_计算机操作能力/索引.md) |

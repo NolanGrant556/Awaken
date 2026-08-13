@@ -172,6 +172,9 @@ func TestOrphanRunRecoverySynthesizesInterruptedOutcome(t *testing.T) {
 	_ = journal.Append(ctx, agentcore.NewSemanticRecord(agentcore.SemanticKindModelRequest, "thread_orphan", "run_orphan", "turn_1", "", "", map[string]any{
 		"request_id": "request_orphan", "purpose": "agent_turn", "model_id": "test-model", "protocol_family": "openai_chat",
 	}))
+	_ = journal.Append(ctx, agentcore.NewSemanticRecord(agentcore.SemanticKindHookInvocationStarted, "thread_orphan", "run_orphan", "turn_1", "", "", map[string]any{
+		"invocation_id": "hookinv_orphan", "hook_id": "user:orphan", "event": "PreToolUse", "source_kind": "user", "status": "started",
+	}))
 	_ = journal.Close()
 
 	records, err := ReadExecutionJournal(path)
@@ -187,7 +190,7 @@ func TestOrphanRunRecoverySynthesizesInterruptedOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("recoverOrphanRuns: %v", err)
 	}
-	var sawResult, sawUsage, sawTerminal bool
+	var sawResult, sawUsage, sawHookCompletion, sawTerminal bool
 	for _, record := range recovered {
 		if record.Seq == 0 {
 			t.Fatalf("recovered record %s returned seq=0: %+v", record.Kind, record)
@@ -226,9 +229,17 @@ func TestOrphanRunRecoverySynthesizesInterruptedOutcome(t *testing.T) {
 				t.Fatalf("recovery must not invent provider usage: %#v", record.Payload)
 			}
 		}
+		if record.Kind == agentcore.SemanticKindHookInvocationCompleted {
+			sawHookCompletion = true
+			if stringPayload(record.Payload, "invocation_id") != "hookinv_orphan" ||
+				stringPayload(record.Payload, "status") != "interrupted" ||
+				stringPayload(record.Payload, "process_state") != "unknown" {
+				t.Fatalf("unexpected recovered Hook receipt: %#v", record.Payload)
+			}
+		}
 	}
-	if !sawResult || !sawUsage || !sawTerminal {
-		t.Fatalf("expected synthetic tool_result, model_usage, and run_terminal, got %+v", recovered)
+	if !sawResult || !sawUsage || !sawHookCompletion || !sawTerminal {
+		t.Fatalf("expected synthetic tool_result, model_usage, Hook completion, and run_terminal, got %+v", recovered)
 	}
 	durable, err := ReadExecutionJournal(path)
 	if err != nil {

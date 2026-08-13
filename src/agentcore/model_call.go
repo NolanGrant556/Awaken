@@ -13,12 +13,13 @@ import (
 // calls use SemanticJournal; Dream and profile connection tests use their own
 // authorities and therefore do not call these helpers.
 type ModelCallAuthority struct {
-	ThreadID  string
-	RunID     string
-	TurnID    string
-	SessionID string
-	Recorder  SemanticRecorder
-	Sink      EventSink
+	ThreadID         string
+	RunID            string
+	TurnID           string
+	SessionID        string
+	Recorder         SemanticRecorder
+	Sink             EventSink
+	HookInvocationID string
 }
 
 func (a ModelCallAuthority) valid() bool {
@@ -48,6 +49,9 @@ func prepareRecordedModelCall(
 		prepared.RequestID, req.Purpose, firstNonEmptyModelValue(req.Model, cfg.Model), string(prepared.Protocol),
 		prepared.RequestShapeDigest, convcontext.EstimateTokens(string(prepared.Body)), retryIndex,
 	)
+	if strings.TrimSpace(authority.HookInvocationID) != "" {
+		record.Payload["hook_invocation_id"] = authority.HookInvocationID
+	}
 	persistCtx, cancel := durablePersistenceContext(ctx)
 	defer cancel()
 	if err := authority.Recorder.Append(persistCtx, record); err != nil {
@@ -68,6 +72,7 @@ func persistRecordedModelUsage(ctx stdcontext.Context, authority ModelCallAuthor
 	emitter.sessionID = authority.SessionID
 	emitter.recorder = authority.Recorder
 	emitter.turnState.TurnID = TurnID(authority.TurnID)
+	emitter.hookInvocationID = authority.HookInvocationID
 	return emitter.modelUsage(ctx, usage)
 }
 

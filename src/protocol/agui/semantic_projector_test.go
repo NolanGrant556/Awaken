@@ -1,6 +1,8 @@
 package agui
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -516,6 +518,51 @@ func TestProjectSubagentProgressIncludesDurableCounters(t *testing.T) {
 	frame := frames[0]
 	if frame.SubagentTaskID != "task-1" || frame.SubagentToolUseCount != 2 || frame.SubagentInputTokens != 600 || frame.SubagentOutputTokens != 200 || frame.SubagentTotalTokens != 800 {
 		t.Fatalf("subagent counters lost: %+v", frame)
+	}
+}
+
+func TestProjectHookReceiptsExposeSafeFieldsOnly(t *testing.T) {
+	frames := ProjectSemanticRecord(agentcore.SemanticRecord{
+		SchemaVersion: 2, RecordID: "hook-completed", Seq: 12,
+		ThreadID: "thread", RunID: "run", Kind: agentcore.SemanticKindHookInvocationCompleted,
+		Timestamp: time.Now().UTC(), Payload: map[string]any{
+			"invocation_id": "hookinv_1", "hook_id": "project:lint", "event": "PreToolUse",
+			"source_kind": "project", "status": "blocked", "action": "block_tool",
+			"reason_code": "policy", "reason": "unsafe target", "duration_ms": 9,
+			"output_preview": "bounded diagnostic", "command": []string{"/secret/hook"}, "source_path": "/secret/hooks.json",
+		},
+	})
+	if len(frames) != 1 || frames[0].Type != EventAwakenHookCompleted {
+		t.Fatalf("unexpected Hook projection: %+v", frames)
+	}
+	frame := frames[0]
+	if frame.HookID != "project:lint" || frame.HookAction != "block_tool" || frame.HookOutputPreview != "bounded diagnostic" || frame.DurationMs != 9 {
+		t.Fatalf("Hook fields lost: %+v", frame)
+	}
+	if frame.RawEvent != nil || frame.RawType != "" || strings.Contains(fmt.Sprintf("%+v", frame), "/secret/") {
+		t.Fatalf("sensitive Hook configuration leaked: %+v", frame)
+	}
+}
+
+func TestProjectChildHookReceiptKeepsSubagentScope(t *testing.T) {
+	frames := ProjectSemanticRecord(agentcore.SemanticRecord{
+		SchemaVersion: 2, RecordID: "child-hook", Seq: 13, ThreadID: "thread", RunID: "run",
+		Kind: agentcore.SemanticKindHookInvocationStarted, Timestamp: time.Now().UTC(),
+		Payload: map[string]any{"invocation_id": "hookinv_child", "hook_id": "user:child", "event": "SubagentStart", "status": "started", "subagent_task_id": "task-1"},
+	})
+	if len(frames) != 1 || frames[0].Type != EventAwakenHookStarted || frames[0].SubagentTaskID != "task-1" {
+		t.Fatalf("child Hook scope lost: %+v", frames)
+	}
+}
+
+func TestProjectSuppressesHookInternalAssistantNarrative(t *testing.T) {
+	frames := ProjectSemanticRecord(agentcore.SemanticRecord{
+		SchemaVersion: 2, RecordID: "hook-assistant", Seq: 14, ThreadID: "thread", RunID: "run",
+		Kind: agentcore.SemanticKindAssistantMessage, Timestamp: time.Now().UTC(),
+		Payload: map[string]any{"content": `{"ok":true}`, "role": "assistant", "hook_invocation_id": "hookinv_agent"},
+	})
+	if len(frames) != 0 {
+		t.Fatalf("Hook-internal assistant narrative leaked: %+v", frames)
 	}
 }
 

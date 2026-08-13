@@ -182,7 +182,7 @@ func buildSemanticCompactSummary(ctx stdcontext.Context, req CompactRequest, bou
 		}
 		userInstruction := convcontext.Message{
 			Role:    convcontext.RoleUser,
-			Content: compactSummaryUserInstruction(boundaryID, req.Envelope, messages, tailMessages),
+			Content: compactSummaryUserInstruction(boundaryID, req.Envelope, messages, tailMessages, req.HookInstruction),
 		}
 		summaryRequestMessages := append(messages, userInstruction)
 		if err := convcontext.ValidateToolResultPairing(summaryRequestMessages); err != nil {

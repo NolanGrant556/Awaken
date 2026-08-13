@@ -22,6 +22,7 @@ import (
 	"awaken/src/computer"
 	convcontext "awaken/src/context"
 	"awaken/src/desktopdata"
+	"awaken/src/hookruntime"
 	"awaken/src/llm"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
@@ -228,6 +229,7 @@ type RunService struct {
 	// computerLeaseManager is shared by every run so a physical desktop can
 	// have only one active Computer controller at a time.
 	computerLeaseManager *computer.LeaseManager
+	hookStore            *hookruntime.Store
 }
 
 // drainRunWorkers blocks until every launched run goroutine has fully
@@ -505,6 +507,119 @@ func (s *RunService) ProjectService() *ProjectService {
 	return s.projectService
 }
 
+func (s *RunService) SetHookStore(store *hookruntime.Store) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.hookStore = store
+	s.mu.Unlock()
+}
+
+func hookProjectRoots(workspace WorkspaceConfig) []string {
+	if workspace.SessionWorkspace {
+		return nil
+	}
+	roots := make([]string, 0, len(workspace.ReadableRoots)+1)
+	seen := map[string]struct{}{}
+	for _, root := range append([]string{workspace.WorkspaceRoot}, workspace.ReadableRoots...) {
+		root = filepath.Clean(strings.TrimSpace(root))
+		if root == "." || !filepath.IsAbs(root) {
+			continue
+		}
+		if _, ok := seen[root]; ok {
+			continue
+		}
+		seen[root] = struct{}{}
+		roots = append(roots, root)
+	}
+	return roots
+}
+
+func (s *RunService) buildHookSnapshot(workspace WorkspaceConfig) (hookruntime.AvailabilitySnapshot, error) {
+	s.mu.RLock()
+	store := s.hookStore
+	s.mu.RUnlock()
+	if store == nil {
+		return hookruntime.EmptySnapshot(), nil
+	}
+	return store.BuildSnapshot(scopeProjectID(workspace), hookProjectRoots(workspace), workspace.SessionWorkspace)
+}
+
+func (s *RunService) HookStatus(projectID string) (hookruntime.AvailabilitySnapshot, error) {
+	s.mu.RLock()
+	store := s.hookStore
+	s.mu.RUnlock()
+	if store == nil {
+		return hookruntime.AvailabilitySnapshot{}, errors.New("hook store is not configured")
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return store.Inspect("", nil, false)
+	}
+	if s.projectService == nil {
+		return hookruntime.AvailabilitySnapshot{}, ErrProjectNotFound
+	}
+	projects, err := s.projectService.ListProjects(false)
+	if err != nil {
+		return hookruntime.AvailabilitySnapshot{}, err
+	}
+	for _, project := range projects {
+		if project.ProjectID == projectID {
+			return store.Inspect(projectID, project.AllRoots(), false)
+		}
+	}
+	return hookruntime.AvailabilitySnapshot{}, ErrProjectNotFound
+}
+
+func (s *RunService) TrustProjectHook(projectID, sourcePath, digest string) (hookruntime.AvailabilitySnapshot, error) {
+	status, err := s.HookStatus(projectID)
+	if err != nil {
+		return status, err
+	}
+	found := false
+	for _, source := range status.Sources {
+		if source.Kind == hookruntime.SourceProject && source.Path == filepath.Clean(sourcePath) && source.Digest == strings.TrimSpace(digest) && source.Status == hookruntime.StatusUntrusted {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return status, errors.New("hook source or digest is not the current untrusted project config")
+	}
+	s.mu.RLock()
+	store := s.hookStore
+	s.mu.RUnlock()
+	if err := store.TrustStore().Trust(projectID, sourcePath, digest); err != nil {
+		return status, err
+	}
+	return s.HookStatus(projectID)
+}
+
+func (s *RunService) RevokeProjectHook(projectID, sourcePath string) (hookruntime.AvailabilitySnapshot, error) {
+	status, err := s.HookStatus(projectID)
+	if err != nil {
+		return status, err
+	}
+	found := false
+	for _, source := range status.Sources {
+		if source.Kind == hookruntime.SourceProject && source.Path == filepath.Clean(sourcePath) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return status, errors.New("hook source is not attached to this project")
+	}
+	s.mu.RLock()
+	store := s.hookStore
+	s.mu.RUnlock()
+	if err := store.TrustStore().Revoke(projectID, sourcePath); err != nil {
+		return status, err
+	}
+	return s.HookStatus(projectID)
+}
+
 func (s *RunService) lockProjectMutation() {
 	s.projectMutationMu.Lock()
 }
@@ -766,6 +881,10 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if err != nil {
 		return Run{}, err
 	}
+	hookSnapshot, err := s.buildHookSnapshot(workspace)
+	if err != nil {
+		return Run{}, fmt.Errorf("build hook snapshot: %w", err)
+	}
 	if err := validateComposerFileTokens(req.ComposerTokens, workspace); err != nil {
 		return Run{}, err
 	}
@@ -831,6 +950,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	threadLabel := threadLabelForInputAndTokens(trimmed, persistedAttachments, req.ComposerTokens)
 	ctx, cancel := context.WithCancel(context.Background())
 	session := NewSession(runID, threadID, trimmed, persistedAttachments, req.ComposerTokens, cancel)
+	session.SetHookSnapshotID(hookSnapshot.SnapshotID)
 	if req.ModelProfile != nil {
 		session.SetModelSelection(req.ModelProfile.ProfileID, req.ModelProfile.ReasoningEffort)
 	}
@@ -908,7 +1028,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			s.sessions[runID] = session
 			threadSnapshot = s.threads[threadID].snapshot()
 			s.mu.Unlock()
-			configureAgentModelRequestPurpose(agent, modelRequestPurposeForClient(req.Client))
+			configureAgentForRun(agent, modelRequestPurposeForClient(req.Client), hookSnapshot)
 			if err := s.bindAgentRecorder(agent, session, threadID, runID, req.Client.SessionID, threadSnapshot.Label); err != nil {
 				return rollbackStart(err, false)
 			}
@@ -1001,7 +1121,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	}
 	s.sessions[runID] = session
 	s.mu.Unlock()
-	configureAgentModelRequestPurpose(agent, modelRequestPurposeForClient(req.Client))
+	configureAgentForRun(agent, modelRequestPurposeForClient(req.Client), hookSnapshot)
 
 	s.mu.RLock()
 	computerSettings := s.computerSettings
@@ -1255,12 +1375,13 @@ func modelRequestPurposeForClient(client ClientInfo) llm.RequestPurpose {
 	return llm.RequestPurposeAgentTurn
 }
 
-func configureAgentModelRequestPurpose(agent *agentcore.Agent, purpose llm.RequestPurpose) {
+func configureAgentForRun(agent *agentcore.Agent, purpose llm.RequestPurpose, snapshot hookruntime.AvailabilitySnapshot) {
 	if agent == nil {
 		return
 	}
 	cfg := agent.GetConfig()
 	cfg.ModelRequestPurpose = purpose
+	cfg.HookAvailabilitySnapshot = &snapshot
 	agent.Reconfigure(cfg)
 }
 
@@ -2150,6 +2271,23 @@ func (s *RunService) executeWithMediaArtifactReferences(session *Session, execut
 				return
 			}
 		}
+		agent.ConfigureHookDispatcher()
+		if agent.HookPreflightRequiresPreparedUserMessage() && input == displayInput && len(snapshot.ComposerTokens) == 0 {
+			if err := agent.PrepareUserMessageWithDisplayInput(ctx, input, displayInput, sessionEventSink{session: session}); err != nil {
+				session.CompleteError(err.Error(), "persistence_error")
+				return
+			}
+		}
+		if err := agent.RunHookPreflight(ctx, sessionEventSink{session: session}, displayInput); err != nil {
+			code := "hook_failed"
+			if errors.Is(err, agentcore.ErrHookBlocked) {
+				code = "hook_blocked"
+			} else if errors.Is(err, hookruntime.ErrPersistence) || errors.Is(err, agentcore.ErrPersistenceFailed) {
+				code = "persistence_error"
+			}
+			session.CompleteError(err.Error(), code)
+			return
+		}
 		if err := s.preActivateComposerSkillsWithSink(ctx, agent, snapshot, sessionEventSink{session: session}); err != nil {
 			session.CompleteError(err.Error(), skillActivationErrorCode(err))
 			return
@@ -2270,6 +2408,11 @@ func (s *RunService) preActivateComposerSkillsWithSink(ctx context.Context, agen
 	if activator.Registry != nil {
 		for _, plan := range plans {
 			activator.Registry.MarkInvoked(plan.SkillID, time.Now().UTC())
+		}
+	}
+	for _, plan := range plans {
+		if err := agent.RegisterActivatedSkillHooks(plan); err != nil {
+			return fmt.Errorf("register activated Skill Hook %q: %w", plan.SkillID, err)
 		}
 	}
 	for _, plan := range plans {
@@ -2530,7 +2673,17 @@ func effectiveInputForComposerTokens(input string, tokens []ComposerToken) strin
 	}
 	if !hasModelExpansion {
 		// Explicit Skill identity enters the host-generated system context. The
-		// model-facing user message remains byte-for-byte the accepted input.
+		// model-facing user message normally remains byte-for-byte the accepted
+		// input. A token-only Skill turn still needs a non-empty provider message;
+		// the durable/display user message remains empty and the Skill body stays
+		// in host-owned system context.
+		if strings.TrimSpace(input) == "" {
+			for _, token := range tokens {
+				if strings.EqualFold(strings.TrimSpace(token.Type), "skill") {
+					return "Follow the explicitly selected Skill instructions for this turn."
+				}
+			}
+		}
 		return input
 	}
 

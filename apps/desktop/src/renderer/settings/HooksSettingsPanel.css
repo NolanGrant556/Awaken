@@ -1,0 +1,39 @@
+.aw-hooks-settings { width: min(860px, 100%); margin: 0 auto; display: grid; gap: 18px; color: var(--aw-text-primary); }
+.aw-hooks-settings header p { margin: 0; }
+.aw-hooks-settings header p, .aw-hooks-settings__source span, .aw-hooks-settings__source small { color: var(--aw-text-secondary); }
+.aw-hooks-settings__warning { display: flex; gap: 10px; align-items: center; padding: 11px 14px; border: 1px solid color-mix(in srgb, var(--aw-warning, #c66a22) 28%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--aw-warning, #c66a22) 8%, var(--aw-surface-panel)); font-size: 13px; }
+.aw-hooks-settings__warning svg { flex: none; color: var(--aw-warning, #c66a22); }
+.aw-hooks-settings__project { display: grid; gap: 7px; font-weight: 600; }
+.aw-hooks-settings select { max-width: 360px; padding: 8px 10px; border: 1px solid var(--aw-border-main); border-radius: 8px; background: var(--aw-surface-raised); color: inherit; }
+.aw-hooks-settings__sources { display: grid; gap: 14px; }
+.aw-hooks-settings__source { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--aw-border-main); border-radius: 12px; background: var(--aw-surface-panel); }
+.aw-hooks-settings__source-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.aw-hooks-settings__source-heading > div { display: grid; gap: 3px; }
+.aw-hooks-settings__status { padding: 3px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; background: var(--aw-surface-raised); }
+.aw-hooks-settings__status--enabled { color: var(--aw-success, #28784c) !important; }
+.aw-hooks-settings__status--untrusted, .aw-hooks-settings__status--invalid { color: var(--aw-warning, #b65b18) !important; }
+.aw-hooks-settings__path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; font-size: 12px; }
+.aw-hooks-settings__event { overflow: hidden; border: 1px solid var(--aw-border-main); border-radius: 10px; background: var(--aw-surface-raised); }
+.aw-hooks-settings__event-heading { display: flex; gap: 10px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--aw-border-main); }
+.aw-hooks-settings__event-heading > div { display: grid; gap: 2px; }
+.aw-hooks-settings__event-heading span { font-size: 12px; }
+.aw-hooks-settings__hook + .aw-hooks-settings__hook { border-top: 1px solid var(--aw-border-main); }
+.aw-hooks-settings__hook summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 11px 14px; cursor: pointer; list-style: none; }
+.aw-hooks-settings__hook summary::-webkit-details-marker { display: none; }
+.aw-hooks-settings__hook summary > span:first-child { overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.aw-hooks-settings__hook summary > span:nth-child(2) { font-size: 12px; }
+.aw-hooks-settings__hook summary svg { transition: transform 150ms ease; }
+.aw-hooks-settings__hook[open] summary svg { transform: rotate(180deg); }
+.aw-hooks-settings__detail-card { display: grid; gap: 8px; margin: 0 14px 14px; padding: 12px; border: 1px solid var(--aw-border-main); border-radius: 8px; background: var(--aw-surface-panel); }
+.aw-hooks-settings__detail-row { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 10px; font-size: 13px; }
+.aw-hooks-settings__detail-row dt { color: var(--aw-text-secondary); }
+.aw-hooks-settings__detail-row dd { min-width: 0; margin: 0; overflow-wrap: anywhere; user-select: text; }
+.aw-hooks-settings__detail-row code, .aw-hooks-settings__detail-row pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.aw-hooks-settings__detail-row pre { max-height: 180px; margin: 0; overflow: auto; }
+.aw-hooks-settings__secret-note { margin-left: 5px; font-size: 12px; }
+.aw-hooks-settings__trust-actions { display: flex; justify-content: flex-end; padding-top: 2px; }
+.aw-hooks-settings button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--aw-border-main); background: var(--aw-surface-raised); color: inherit; cursor: pointer; }
+.aw-hooks-settings button:disabled { cursor: default; opacity: .55; }
+.aw-hooks-settings__diagnostic, .aw-hooks-settings__message { margin: 0; color: var(--aw-warning, #b65b18); overflow-wrap: anywhere; }
+.aw-hooks-settings__empty, .aw-hooks-settings__loading, .aw-hooks-settings__empty-source { margin: 0; color: var(--aw-text-secondary); }
+@media (max-width: 640px) { .aw-hooks-settings__detail-row { grid-template-columns: 1fr; gap: 2px; } .aw-hooks-settings__source-heading { align-items: flex-start; } }

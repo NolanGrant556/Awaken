@@ -70,6 +70,7 @@ type SkillActivationPlan struct {
 	Model                     string                    `json:"model,omitempty"`
 	Effort                    string                    `json:"effort,omitempty"`
 	ToolHints                 []skills.ToolHint         `json:"tool_hints,omitempty"`
+	HooksRaw                  any                       `json:"-"`
 }
 
 type InvocationSource string
@@ -153,6 +154,7 @@ func (a *Activator) Activate(req ActivationRequest) (*SkillActivationPlan, error
 		Model:                     def.Model,
 		Effort:                    def.Effort,
 		ToolHints:                 append([]skills.ToolHint(nil), def.ToolHints...),
+		HooksRaw:                  def.HooksRaw,
 		CompatibilityStatus:       CompatibilityOK,
 	}
 	for _, capName := range def.RequiredCapabilities {
@@ -253,6 +255,7 @@ func (p *SkillActivationPlan) Clone() *SkillActivationPlan {
 	clone.ResourceReceipts = append([]SkillResourceReceipt(nil), p.ResourceReceipts...)
 	clone.CompatibilityErrors = append([]SkillCompatibilityError(nil), p.CompatibilityErrors...)
 	clone.ToolHints = append([]skills.ToolHint(nil), p.ToolHints...)
+	clone.HooksRaw = p.HooksRaw
 	return &clone
 }
 

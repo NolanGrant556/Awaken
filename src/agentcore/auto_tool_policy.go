@@ -41,6 +41,7 @@ const (
 	ToolDecisionSourceTransform         ToolDecisionSource = "transform"
 	ToolDecisionSourceAuthRequired      ToolDecisionSource = "auth_required"
 	ToolDecisionSourceRuntimeRequired   ToolDecisionSource = "runtime_required"
+	ToolDecisionSourceHook              ToolDecisionSource = "hook"
 )
 
 type ToolDecisionRequest struct {

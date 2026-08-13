@@ -30,6 +30,8 @@ type contextGovernor struct {
 	engine                          ContextEngine
 	rebuildRequest                  func() (LLMRequest, error)
 	applyCompactResult              func(stdcontext.Context, CompactResult) error
+	preCompactHook                  func(stdcontext.Context, contextWindowEventSink, CompactMode, ContextWindowState) (string, error)
+	postCompactHook                 func(stdcontext.Context, contextWindowEventSink, CompactResult) error
 	consecutiveCompactFailures      int
 	reactiveCompactAttempted        bool
 	compactCircuitOpen              bool
@@ -79,6 +81,9 @@ func (g *contextGovernor) PrepareRequest(ctx stdcontext.Context, llmReq LLMReque
 	if llmReq.ContextWindowState.ShouldAutoCompact() || llmReq.ContextWindowState.ShouldAutoCompactByActualUsage() {
 		compactedReq, err := g.compactForRequest(ctx, llmReq, events, false)
 		if err != nil {
+			if emitter, ok := events.(*runEventEmitter); ok && emitter != nil && emitter.persistenceFailure() != nil {
+				return LLMRequest{}, err
+			}
 			if llmReq.ContextWindowState.ShouldBlock() && g.compactCircuitOpen {
 				blockErr := newContextWindowBlockedError(llmReq.ContextWindowState, err)
 				if events != nil {
@@ -169,11 +174,25 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 	if events != nil {
 		events.emitCompactStarted(state, mode)
 	}
+	hookInstruction := ""
+	if g.preCompactHook != nil {
+		var hookErr error
+		hookInstruction, hookErr = g.preCompactHook(ctx, events, mode, state)
+		if hookErr != nil {
+			g.recordCompactFailure()
+			failedState := g.withRunState(llmReq.ContextWindowState)
+			if events != nil {
+				events.emitCompactFailed(failedState, mode, hookErr.Error(), hookErr.Error())
+			}
+			return llmReq, hookErr
+		}
+	}
 	compactRequest := CompactRequest{
-		Mode:         mode,
-		Envelope:     *llmReq.EnvelopeDebug,
-		Messages:     llmReq.Messages,
-		TargetTokens: llmReq.ContextWindowState.CompactTarget,
+		Mode:            mode,
+		Envelope:        *llmReq.EnvelopeDebug,
+		Messages:        llmReq.Messages,
+		TargetTokens:    llmReq.ContextWindowState.CompactTarget,
+		HookInstruction: hookInstruction,
 	}
 	if emitter, ok := events.(*runEventEmitter); ok && emitter != nil {
 		compactRequest.summaryInvoker = emitter.invokeCompactSummary
@@ -214,6 +233,14 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 	g.pendingSentEstimatedInputTokens = 0
 	if events != nil {
 		events.emitCompactFinished(state, result, compactSummaryModel(*llmReq.EnvelopeDebug))
+	}
+	if g.postCompactHook != nil {
+		if hookErr := g.postCompactHook(ctx, events, result); hookErr != nil {
+			if emitter, ok := events.(*runEventEmitter); ok && emitter != nil {
+				_ = emitter.notePersistenceFailure("post_compact_hook", hookErr)
+			}
+			return LLMRequest{}, hookErr
+		}
 	}
 	rebuilt, err := g.rebuildRequest()
 	if err != nil {

@@ -4,7 +4,7 @@ import "strings"
 
 func applyRequestPolicy(cfg Config, req Request) Request {
 	switch req.Purpose {
-	case RequestPurposeThreadTitle, RequestPurposeCompactSummary, RequestPurposeMemoryRecall, RequestPurposeMemoryMaintenance:
+	case RequestPurposeThreadTitle, RequestPurposeCompactSummary, RequestPurposeMemoryRecall, RequestPurposeMemoryMaintenance, RequestPurposeHookPrompt:
 		return applyAuxiliaryRequestPolicy(cfg, req)
 	default:
 		return req
@@ -97,7 +97,7 @@ func nativeReasoningEffort(cfg Config, req Request) string {
 }
 
 func isAgentExecutionPurpose(purpose RequestPurpose) bool {
-	return purpose == RequestPurposeAgentTurn || purpose == RequestPurposeSubagent || purpose == RequestPurposeScheduledTask
+	return purpose == RequestPurposeAgentTurn || purpose == RequestPurposeSubagent || purpose == RequestPurposeScheduledTask || purpose == RequestPurposeHookAgent
 }
 
 // capabilityModelID is the documented model-family identity used for

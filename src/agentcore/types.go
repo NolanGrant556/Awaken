@@ -6,6 +6,7 @@ import (
 	"awaken/src/agentcore/subagent"
 	"awaken/src/computer"
 	"awaken/src/context"
+	"awaken/src/hookruntime"
 	"awaken/src/llm"
 	"awaken/src/prompt"
 	"awaken/src/subagentruntime"
@@ -22,11 +23,14 @@ type AgentConfig struct {
 	// DefaultMaxToolExecutions (512).
 	MaxToolExecutions int
 	ModelConfig       ModelConfig
-	// CompactModelConfig and SubagentModelConfig are Host-resolved purpose
+	// Purpose-specific configs are Host-resolved routes. Empty values inherit
+	// ModelConfig; model-visible Hook output cannot choose credentials/profile IDs.
 	// routes. Empty values inherit ModelConfig; model-visible tool arguments
 	// cannot choose credentials or profile IDs.
-	CompactModelConfig  ModelConfig
-	SubagentModelConfig ModelConfig
+	CompactModelConfig    ModelConfig
+	SubagentModelConfig   ModelConfig
+	HookPromptModelConfig ModelConfig
+	HookAgentModelConfig  ModelConfig
 	// ModelRequestPurpose separates cache and usage identity for normal turns,
 	// native Subagents and scheduled runs. Empty defaults to agent_turn.
 	ModelRequestPurpose llm.RequestPurpose
@@ -54,6 +58,24 @@ type AgentConfig struct {
 	// ExecutionEnvironmentSnapshot is the bounded, secret-free observation used
 	// to evaluate provider readiness for ToolAvailabilitySnapshot.
 	ExecutionEnvironmentSnapshot *tool.ExecutionEnvironmentSnapshot
+	// HookAvailabilitySnapshot pins the validated and trusted Hook definitions
+	// for one run. The run-scoped Dispatcher is built from this immutable
+	// authority so configuration changes cannot alter an active run.
+	HookAvailabilitySnapshot *hookruntime.AvailabilitySnapshot
+	// HookDispatcher is the run-scoped command dispatcher built from the pinned
+	// Hook and execution-environment snapshots. It is shared by preflight,
+	// Runner and tool boundaries so budgets cannot reset mid-run.
+	HookDispatcher *hookruntime.Dispatcher
+	// HookSecretResolver resolves opaque HTTP header references inside Core.
+	// Secret values never enter hooks.json, snapshots, Journal, AG-UI or Renderer.
+	HookSecretResolver hookruntime.SecretResolver
+	// HookLifecycleStarted records that Runtime ran the durable Hook preflight
+	// before composer Skill activation. Runner must not duplicate run_started or
+	// hook_snapshot when this flag is set.
+	HookLifecycleStarted bool
+	// HookContextBlocks are host-owned untrusted data admitted from successful
+	// Hook responses. They are separate from Skill activation authority.
+	HookContextBlocks []ContextBlock
 	// SkillContextBlocks are typed system context blocks injected from
 	// explicit or model-selected Skill activation. Package resources stay
 	// on-demand and are not preloaded here.

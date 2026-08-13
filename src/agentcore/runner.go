@@ -13,6 +13,7 @@ import (
 
 	"awaken/src/agentcore/executors"
 	"awaken/src/context"
+	"awaken/src/hookruntime"
 	"awaken/src/internal/outputlimit"
 	"awaken/src/llm"
 	"awaken/src/skillruntime"
@@ -48,6 +49,7 @@ type Runner struct {
 	suppressRunLifecycle bool
 	subagentController   subagentruntime.Controller
 	subagentProgress     subagentruntime.ProgressReporter
+	configureEmitter     func(*runEventEmitter)
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
@@ -76,6 +78,28 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 			return nil
 		},
 	)
+	runner.contextGovernor.preCompactHook = func(ctx stdcontext.Context, sink contextWindowEventSink, mode CompactMode, state ContextWindowState) (string, error) {
+		events, _ := sink.(*runEventEmitter)
+		result, err := runner.dispatchHookScoped(ctx, events, hookruntime.EventPreCompact, map[string]any{
+			"mode": mode, "estimatedInputTokens": state.EstimatedTokens,
+			"compactTarget": state.CompactTarget,
+		}, "", false)
+		if err != nil {
+			return "", err
+		}
+		if result.Action == "block_compact" {
+			return "", fmt.Errorf("%w: %s", ErrHookBlocked, firstNonEmpty(result.Reason, "PreCompact Hook blocked compaction"))
+		}
+		return strings.Join(result.AdditionalContext, "\n"), nil
+	}
+	runner.contextGovernor.postCompactHook = func(ctx stdcontext.Context, sink contextWindowEventSink, result CompactResult) error {
+		events, _ := sink.(*runEventEmitter)
+		_, err := runner.dispatchHookScoped(ctx, events, hookruntime.EventPostCompact, map[string]any{
+			"mode": result.Mode, "compactBoundaryId": result.BoundaryID,
+			"preEstimateTokens": result.PreEstimateTokens, "postEstimateTokens": result.PostEstimateTokens,
+		}, "", false)
+		return err
+	}
 	return runner
 }
 
@@ -151,6 +175,9 @@ func (r *Runner) persistContextCompacted(ctx stdcontext.Context, result CompactR
 
 func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (answer string, runErr error) {
 	events := newRunEventEmitter(r.threadID, sink)
+	if r.configureEmitter != nil {
+		r.configureEmitter(events)
+	}
 	events.suppressRunLifecycle = r.suppressRunLifecycle
 	if r.config.SubagentOrigin != nil {
 		events.agentID = r.config.SubagentOrigin.AgentID
@@ -181,7 +208,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 			r.subagentController = subagentruntime.NewManager(ctx, subagentruntime.Config{
 				MaxTasks: 8, MaxConcurrent: 4, ModelProfileID: subagentProfileID,
 				Starter: func(childCtx stdcontext.Context, request subagentruntime.StartRequest) (string, error) {
-					return r.startNativeChild(childCtx, request, events.sink)
+					return r.startNativeChildWithHooks(childCtx, request, events)
 				},
 				Persist: r.persistSubagentEvent,
 			})
@@ -201,16 +228,23 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	// Child/fork runners enter through this same path with their inherited ID.
 	r.toolRuntime.runID = r.runID
 	r.toolRuntime.threadID = r.threadID
-	if err := events.runStarted(ctx); err != nil {
-		return "", err
+	if !r.config.HookLifecycleStarted {
+		if err := events.runStarted(ctx); err != nil {
+			return "", err
+		}
+		if err := r.persistHookSnapshot(ctx); err != nil {
+			return "", err
+		}
 	}
+	events.afterTerminal = r.runEndHookCallback()
 	turnState := newTurnState(events.threadID, events.runID, r.effectiveMaxThoughts(), r.config.ModelConfig.Model)
 	transition := TransitionInitial
 	maxOutputContinuations := 0
 	var continuedOutput strings.Builder
 	maxThoughts := r.effectiveMaxThoughts()
+	beforeFinishBlocks := 0
 
-	for i := 0; i < maxThoughts; i++ {
+	for i := 0; i < maxThoughts+beforeFinishBlocks; i++ {
 		if err := events.persistenceFailure(); err != nil {
 			return "", err
 		}
@@ -314,6 +348,16 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 
 		if handled, finalAnswer := r.handleXMLFallback(ctx, response.Content, events); handled {
 			if finalAnswer != "" {
+				blocked, hookErr := r.beforeFinish(ctx, events, finalAnswer, &beforeFinishBlocks)
+				if hookErr != nil {
+					return "", hookErr
+				}
+				if blocked {
+					events.turnFinished(ctx, "", TransitionBeforeFinishHook)
+					events.resetTurn()
+					transition = TransitionBeforeFinishHook
+					continue
+				}
 				finalAnswer = continuedOutput.String() + finalAnswer
 				finalState, snapshotErr := r.persistCurrentContextSnapshot(ctx, events)
 				if snapshotErr != nil {
@@ -339,7 +383,17 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 			return "", llm.ErrEmptyResponse
 		}
 		finalContent := continuedOutput.String() + response.Content
+		blocked, hookErr := r.beforeFinish(ctx, events, response.Content, &beforeFinishBlocks)
+		if hookErr != nil {
+			return "", hookErr
+		}
 		r.conversation.AssistantOutputWithProviderState(response.Content, nil, response.ProviderOpaqueState)
+		if blocked {
+			events.turnFinished(ctx, "", TransitionBeforeFinishHook)
+			events.resetTurn()
+			transition = TransitionBeforeFinishHook
+			continue
+		}
 		events.finishTextIfOpen()
 		finalState, snapshotErr := r.persistCurrentContextSnapshot(ctx, events)
 		if snapshotErr != nil {
@@ -354,6 +408,37 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	err := maxThoughtsError(maxThoughts)
 	events.runErrored(ctx, err, TerminalReasonMaxTurns)
 	return "", err
+}
+
+func (r *Runner) persistHookSnapshot(ctx stdcontext.Context) error {
+	if r == nil || r.recorder == nil || r.config.HookAvailabilitySnapshot == nil {
+		return nil
+	}
+	snapshot := r.config.HookAvailabilitySnapshot
+	sources := make([]map[string]any, 0, len(snapshot.Sources))
+	for _, source := range snapshot.Sources {
+		sources = append(sources, map[string]any{
+			"kind": source.Kind, "status": source.Status, "digest": source.Digest,
+			"hook_count": source.HookCount,
+		})
+	}
+	enabled := 0
+	for _, hooks := range snapshot.HooksByEvent {
+		enabled += len(hooks)
+	}
+	record := NewSemanticRecord(SemanticKindHookSnapshot, r.threadID, r.runID, "", "", r.sessionID, map[string]any{
+		"snapshot_id": snapshot.SnapshotID, "schema_version": snapshot.SchemaVersion,
+		"enabled_hook_count": enabled, "diagnostic_count": len(snapshot.Diagnostics), "sources": sources,
+	})
+	persistCtx, cancel := durablePersistenceContext(ctx)
+	defer cancel()
+	if err := r.recorder.Append(persistCtx, record); err != nil {
+		return fmt.Errorf("persist hook snapshot: %w", err)
+	}
+	if err := r.recorder.Flush(persistCtx); err != nil {
+		return fmt.Errorf("flush hook snapshot: %w", err)
+	}
+	return nil
 }
 
 type subagentTerminalNotification struct {
@@ -1046,6 +1131,29 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 				continue
 			}
 		}
+		hookCall := call
+		preSubject := hookToolSubject(hookCall, nil)
+		preHook, hookErr := r.dispatchHook(runCtx, events, hookruntime.EventPreToolUse, preSubject)
+		if hookErr != nil {
+			cancel()
+			results = append(results, syntheticPersistenceFailureResult(call, hookErr))
+			terminateReason = TerminalReasonPersistenceError
+			continue
+		}
+		if preHook.Action == "update_input" && len(preHook.UpdatedInput) > 0 {
+			hookCall.Function.Arguments = string(preHook.UpdatedInput)
+		}
+		if preHook.Action == "block_tool" {
+			result := syntheticHookBlockedToolResult(hookCall, preHook.Reason)
+			results = append(results, result)
+			if events != nil {
+				if err := events.emitToolResultBatch(runCtx, result, nil, nil); err != nil {
+					cancel()
+					terminateReason = TerminalReasonPersistenceError
+				}
+			}
+			continue
+		}
 		// Re-check after durable tool_call append; never execute tools after journal failure.
 		if runCtx.Err() != nil {
 			results = append(results, syntheticCancelledToolResult(call))
@@ -1097,7 +1205,7 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 				},
 			))
 		}
-		result := r.toolRuntime.Execute(executionCtx, call)
+		result := r.toolRuntime.Execute(executionCtx, hookCall)
 		if offloadErr := r.offloadLargeToolResult(runCtx, &result); offloadErr != nil {
 			cancel()
 			result = syntheticPersistenceFailureResult(call, fmt.Errorf("tool result offload: %w", offloadErr))
@@ -1159,6 +1267,16 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 				// recovery directive so live and replay never ask for recovery before
 				// showing the failure that requires it.
 				events.emitRecoveryDecision(call, recoveryOptions, recoveryErrorCode, false)
+			}
+		}
+		if terminateReason == "" {
+			postEvent := hookruntime.EventPostToolUse
+			if result.IsError || result.Outcome.IsError() {
+				postEvent = hookruntime.EventPostToolUseFailure
+			}
+			if _, hookErr := r.dispatchHook(runCtx, events, postEvent, hookToolSubject(hookCall, &result)); hookErr != nil {
+				cancel()
+				terminateReason = TerminalReasonPersistenceError
 			}
 		}
 	}
@@ -1470,6 +1588,49 @@ func (r *Runner) startNativeChild(
 	request subagentruntime.StartRequest,
 	sink EventSink,
 ) (string, error) {
+	return r.startNativeChildConfigured(ctx, request, sink, nil)
+}
+
+func (r *Runner) startNativeChildWithHooks(ctx stdcontext.Context, request subagentruntime.StartRequest, events *runEventEmitter) (string, error) {
+	subject := map[string]any{
+		"taskId": request.Task.TaskID, "agentId": request.Task.AgentID,
+		"agentType": request.Task.AgentType, "description": request.Task.Description,
+		"workspaceMode": request.Task.WorkspaceMode,
+	}
+	start, err := r.dispatchHookScoped(ctx, events, hookruntime.EventSubagentStart, subject, request.Task.TaskID, false)
+	if err != nil {
+		return "", err
+	}
+	if start.Action == "block_subagent" {
+		return "", &subagentruntime.Error{Code: "subagent_hook_blocked", Message: firstNonEmpty(start.Reason, "SubagentStart Hook blocked the child")}
+	}
+	content, childErr := r.startNativeChildConfigured(ctx, request, events.sink, hookContextBlocks(hookruntime.EventSubagentStart, start.AdditionalContext))
+	stopSubject := map[string]any{
+		"taskId": request.Task.TaskID, "agentId": request.Task.AgentID,
+		"status":      map[bool]string{true: "failed", false: "completed"}[childErr != nil],
+		"resultBytes": len([]byte(content)),
+	}
+	if childErr != nil {
+		stopSubject["error"] = childErr.Error()
+	}
+	stopCtx := ctx
+	stopCancel := func() {}
+	if stopCtx == nil || stopCtx.Err() != nil {
+		stopCtx, stopCancel = stdcontext.WithTimeout(stdcontext.Background(), 5*time.Second)
+	}
+	defer stopCancel()
+	if _, stopErr := r.dispatchHookScoped(stopCtx, events, hookruntime.EventSubagentStop, stopSubject, request.Task.TaskID, false); stopErr != nil {
+		return "", stopErr
+	}
+	return content, childErr
+}
+
+func (r *Runner) startNativeChildConfigured(
+	ctx stdcontext.Context,
+	request subagentruntime.StartRequest,
+	sink EventSink,
+	hookBlocks []ContextBlock,
+) (string, error) {
 	if r == nil || r.config.SubagentOrigin != nil {
 		return "", &subagentruntime.Error{Code: subagentruntime.ErrorBoundaryViolation, Message: "only the root runner may start native subagents"}
 	}
@@ -1489,6 +1650,7 @@ func (r *Runner) startNativeChild(
 		childConfig.ModelConfig = parentConfig.SubagentModelConfig
 	}
 	childConfig.SubagentTaskID = request.Task.TaskID
+	childConfig.HookContextBlocks = append(childConfig.HookContextBlocks, hookBlocks...)
 	childConfig.SubagentController = nil
 	childConfig.MaxThoughts = minPositive(childConfig.MaxThoughts, 32)
 	childConfig.MaxToolExecutions = minPositive(childConfig.MaxToolExecutions, 128)
@@ -1792,8 +1954,10 @@ type runEventEmitter struct {
 	agentID               string
 	parentAgentID         string
 	subagentTaskID        string
+	hookInvocationID      string
 	subagentProgress      subagentruntime.ProgressReporter
 	beforeTerminal        func(stdcontext.Context) error
+	afterTerminal         func(stdcontext.Context, string, TerminalReason, int)
 	auxiliaryRequestIndex int
 }
 
@@ -1955,7 +2119,7 @@ func (e *runEventEmitter) persistDurableBatch(ctx stdcontext.Context, phase stri
 }
 
 func (e *runEventEmitter) withAgentIdentity(record SemanticRecord) SemanticRecord {
-	if e == nil || strings.TrimSpace(e.agentID) == "" {
+	if e == nil || (strings.TrimSpace(e.agentID) == "" && strings.TrimSpace(e.parentAgentID) == "" && strings.TrimSpace(e.subagentTaskID) == "" && strings.TrimSpace(e.hookInvocationID) == "") {
 		return record
 	}
 	copyPayload := make(map[string]any, len(record.Payload)+3)
@@ -1968,6 +2132,9 @@ func (e *runEventEmitter) withAgentIdentity(record SemanticRecord) SemanticRecor
 	}
 	if strings.TrimSpace(e.subagentTaskID) != "" {
 		copyPayload["subagent_task_id"] = e.subagentTaskID
+	}
+	if strings.TrimSpace(e.hookInvocationID) != "" {
+		copyPayload["hook_invocation_id"] = e.hookInvocationID
 	}
 	record.Payload = copyPayload
 	return record
@@ -2136,9 +2303,15 @@ func (e *runEventEmitter) runFinished(ctx stdcontext.Context, content string, st
 		), event); err != nil {
 			return
 		}
+		if e.afterTerminal != nil {
+			e.afterTerminal(ctx, "finished", reason, len([]byte(content)))
+		}
 		return
 	}
 	e.sink.Emit(event)
+	if e.afterTerminal != nil {
+		e.afterTerminal(ctx, "finished", reason, len([]byte(content)))
+	}
 }
 
 func (e *runEventEmitter) runErrored(ctx stdcontext.Context, err error, reasons ...TerminalReason) {
@@ -2190,9 +2363,15 @@ func (e *runEventEmitter) runErrored(ctx stdcontext.Context, err error, reasons 
 		), event); persistErr != nil {
 			return
 		}
+		if e.afterTerminal != nil {
+			e.afterTerminal(ctx, status, event.TerminalReason, 0)
+		}
 		return
 	}
 	e.sink.Emit(event)
+	if e.afterTerminal != nil {
+		e.afterTerminal(ctx, status, event.TerminalReason, 0)
+	}
 }
 
 func (e *runEventEmitter) runTerminalBarrier(ctx stdcontext.Context) error {

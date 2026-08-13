@@ -34,6 +34,9 @@ import {
   type DeleteSkillRequest,
   type DeleteSkillResponse,
   type GetSkillPreviewRequest,
+	type HookRevokeRequest,
+	type HookStatus,
+	type HookTrustRequest,
   type InstallSkillRequest,
   type InstallSkillResponse,
   type ModelProfileBalancesResult,
@@ -342,6 +345,9 @@ export type RuntimeClient = {
   getMemory: (memoryId: string, projectId?: string) => Promise<RuntimeMemory>;
   deleteMemory: (memoryId: string, expectedRevision: number, projectId?: string) => Promise<void>;
   getMemorySettings: () => Promise<MemorySettingsDocument>;
+	getHookStatus?: (projectId?: string) => Promise<HookStatus>;
+	trustProjectHook?: (request: HookTrustRequest) => Promise<HookStatus>;
+	revokeProjectHook?: (request: HookRevokeRequest) => Promise<HookStatus>;
   updateMemorySettings: (request: MemorySettingsPatch) => Promise<MemorySettingsDocument>;
   startMemoryDream: (projectId?: string) => Promise<MemoryDreamTask>;
   getMemoryDream: (taskId: string) => Promise<MemoryDreamTask>;
@@ -536,6 +542,15 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     deleteMemory: (memoryId, expectedRevision, projectId) =>
       bridge.deleteMemory(memoryId, expectedRevision, projectId),
     getMemorySettings: () => bridge.getMemorySettings(),
+		getHookStatus: bridge.getHookStatus
+			? (projectId) => bridge.getHookStatus!(projectId)
+			: undefined,
+		trustProjectHook: bridge.trustProjectHook
+			? (request) => bridge.trustProjectHook!(request)
+			: undefined,
+		revokeProjectHook: bridge.revokeProjectHook
+			? (request) => bridge.revokeProjectHook!(request)
+			: undefined,
     updateMemorySettings: (request) => bridge.updateMemorySettings(request),
     startMemoryDream: (projectId) => bridge.startMemoryDream(projectId),
     getMemoryDream: (taskId) => bridge.getMemoryDream(taskId),

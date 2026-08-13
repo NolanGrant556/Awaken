@@ -54,6 +54,8 @@ const (
 	RequestPurposeMemoryRecall      RequestPurpose = "memory_recall"
 	RequestPurposeMemoryMaintenance RequestPurpose = "memory_maintenance"
 	RequestPurposeConnectionTest    RequestPurpose = "connection_test"
+	RequestPurposeHookPrompt        RequestPurpose = "hook_prompt"
+	RequestPurposeHookAgent         RequestPurpose = "hook_agent"
 )
 
 // Request 是统一请求结构

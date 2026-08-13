@@ -365,6 +365,7 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 		terminal          bool
 		openCalls         map[string]agentcore.SemanticRecord
 		openModelRequests map[string]agentcore.SemanticRecord
+		openHooks         map[string]agentcore.SemanticRecord
 	}
 	runs := map[string]*runState{}
 	for _, record := range records {
@@ -374,7 +375,7 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 		}
 		state, ok := runs[runID]
 		if !ok {
-			state = &runState{openCalls: map[string]agentcore.SemanticRecord{}, openModelRequests: map[string]agentcore.SemanticRecord{}}
+			state = &runState{openCalls: map[string]agentcore.SemanticRecord{}, openModelRequests: map[string]agentcore.SemanticRecord{}, openHooks: map[string]agentcore.SemanticRecord{}}
 			runs[runID] = state
 		}
 		switch record.Kind {
@@ -396,13 +397,42 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 		case agentcore.SemanticKindModelUsage:
 			requestID := stringPayload(record.Payload, "request_id")
 			delete(state.openModelRequests, requestID)
+		case agentcore.SemanticKindHookInvocationStarted:
+			invocationID := stringPayload(record.Payload, "invocation_id")
+			if invocationID != "" {
+				state.openHooks[invocationID] = record
+			}
+		case agentcore.SemanticKindHookInvocationCompleted:
+			delete(state.openHooks, stringPayload(record.Payload, "invocation_id"))
 		}
 	}
 
 	var appended []agentcore.SemanticRecord
 	for runID, state := range runs {
-		if state.terminal && len(state.openCalls) == 0 && len(state.openModelRequests) == 0 {
+		if state.terminal && len(state.openCalls) == 0 && len(state.openModelRequests) == 0 && len(state.openHooks) == 0 {
 			continue
+		}
+		for invocationID, started := range state.openHooks {
+			completed := agentcore.NewSemanticRecord(
+				agentcore.SemanticKindHookInvocationCompleted,
+				journal.ThreadID(), runID, started.TurnID, "", started.SessionID,
+				map[string]any{
+					"invocation_id": invocationID,
+					"hook_id":       stringPayload(started.Payload, "hook_id"),
+					"event":         stringPayload(started.Payload, "event"),
+					"source_kind":   stringPayload(started.Payload, "source_kind"),
+					"status":        "interrupted",
+					"spawn_state":   "unknown",
+					"process_state": "unknown",
+					"action":        "continue",
+					"reason_code":   "process_restarted",
+				},
+			)
+			assigned, err := journal.AppendAssigned(ctx, completed)
+			if err != nil {
+				return appended, err
+			}
+			appended = append(appended, assigned)
 		}
 		for requestID, requestRecord := range state.openModelRequests {
 			usage := agentcore.ModelUsageRecord{

@@ -61,12 +61,21 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 	if payload == nil {
 		payload = map[string]any{}
 	}
+	if stringFromAny(payload["hook_invocation_id"]) != "" {
+		switch record.Kind {
+		case agentcore.SemanticKindHookInvocationStarted, agentcore.SemanticKindHookInvocationCompleted, agentcore.SemanticKindModelUsage:
+		default:
+			return nil
+		}
+	}
 	if taskID := stringFromAny(payload["subagent_task_id"]); taskID != "" {
 		switch record.Kind {
 		case agentcore.SemanticKindReasoningSummary,
 			agentcore.SemanticKindAssistantMessage,
 			agentcore.SemanticKindToolCall,
 			agentcore.SemanticKindToolResult,
+			agentcore.SemanticKindHookInvocationStarted,
+			agentcore.SemanticKindHookInvocationCompleted,
 			agentcore.SemanticKindTurnBoundary:
 			childPayload := make(map[string]any, len(payload))
 			for key, value := range payload {
@@ -107,6 +116,18 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		// Request composition is durable for audit/recovery but the separate
 		// context_snapshot record owns the renderer projection.
 		return nil
+	case agentcore.SemanticKindHookSnapshot:
+		// Hook configuration receipts are host audit/configuration facts exposed
+		// through /v1/hooks and the run DTO, not the narrative wire.
+		return nil
+	case agentcore.SemanticKindHookInvocationStarted:
+		base.Type = EventAwakenHookStarted
+		applyHookPayload(&base, payload)
+		return []Event{base}
+	case agentcore.SemanticKindHookInvocationCompleted:
+		base.Type = EventAwakenHookCompleted
+		applyHookPayload(&base, payload)
+		return []Event{base}
 	case agentcore.SemanticKindContextEpoch, agentcore.SemanticKindProviderOpaqueState:
 		// These records are local durability authorities. Their payloads must not
 		// enter AG-UI, renderer state, Memory or telemetry.
@@ -454,6 +475,19 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		unknown.RawType = string(record.Kind)
 		return []Event{unknown}
 	}
+}
+
+func applyHookPayload(event *Event, payload map[string]any) {
+	event.HookInvocationID = stringFromAny(payload["invocation_id"])
+	event.HookID = stringFromAny(payload["hook_id"])
+	event.HookEvent = stringFromAny(payload["event"])
+	event.HookSourceKind = stringFromAny(payload["source_kind"])
+	event.Status = stringFromAny(payload["status"])
+	event.HookAction = stringFromAny(payload["action"])
+	event.HookReasonCode = stringFromAny(payload["reason_code"])
+	event.HookReason = stringFromAny(payload["reason"])
+	event.HookOutputPreview = stringFromAny(payload["output_preview"])
+	event.DurationMs = int64(intFromAny(payload["duration_ms"]))
 }
 
 func projectComputerEvent(base Event, kind agentcore.SemanticKind, payload map[string]any) []Event {

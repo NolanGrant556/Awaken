@@ -3,7 +3,7 @@ import type { RunNarrativeItem } from "./run-narrative";
 type PromptNarrativeItem = Extract<RunNarrativeItem, { kind: "prompt" }>;
 type ActivityNarrativeItem = Extract<
   RunNarrativeItem,
-  { kind: "exploring" | "tool" | "skill" }
+  { kind: "exploring" | "tool" | "skill" | "hook" }
 >;
 
 export type NarrativeActivityBatch = {
@@ -108,7 +108,7 @@ const TURN_MARKER_COMPACT_SIZE = { itemHeight: 12, gap: 8 };
 const TURN_MARKER_SUMMARY_SIZE = { itemHeight: 8, gap: 5 };
 
 function isActivityNarrativeItem(item: RunNarrativeItem): item is ActivityNarrativeItem {
-  return item.kind === "exploring" || item.kind === "tool" || item.kind === "skill";
+  return item.kind === "exploring" || item.kind === "tool" || item.kind === "skill" || item.kind === "hook";
 }
 
 function activityActionCount(item: ActivityNarrativeItem): number {

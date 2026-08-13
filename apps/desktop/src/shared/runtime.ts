@@ -161,6 +161,7 @@ export type RuntimeRunWire = {
   finished_at?: string | null;
   model_profile_id?: string;
   reasoning_effort?: ReasoningEffortLevel;
+  hook_snapshot_id?: string;
 };
 
 export type RuntimeRun = {
@@ -178,7 +179,48 @@ export type RuntimeRun = {
   finishedAt?: string;
   modelProfileId?: string;
   reasoningEffort?: ReasoningEffortLevel;
+  hookSnapshotId?: string;
 };
+
+export type HookSourceStatus = "enabled" | "disabled" | "untrusted" | "invalid";
+export type HookReviewItem = {
+  id: string;
+  event: string;
+  type: "command" | "http" | "prompt" | "agent";
+  toolNames?: string[];
+  command?: string[];
+  cwd?: string;
+  url?: string;
+  allowLoopback?: boolean;
+  secretHeaderNames?: string[];
+  prompt?: string;
+  model?: string;
+  maxTurns?: number;
+  timeoutMs: number;
+  maxOutputBytes: number;
+  onFailure: "continue" | "block";
+};
+export type HookSourceReceipt = {
+  kind: "user" | "project";
+  path: string;
+  projectRoot?: string;
+  digest?: string;
+  status: HookSourceStatus;
+  hookCount: number;
+  diagnostic?: string;
+  hooks: HookReviewItem[];
+};
+export type HookDiagnostic = { code: string; message: string; sourcePath?: string };
+export type HookStatus = {
+  snapshotId: string;
+  schemaVersion: number;
+  createdAt: string;
+  enabledHookCount: number;
+  sources: HookSourceReceipt[];
+  diagnostics?: HookDiagnostic[];
+};
+export type HookTrustRequest = { projectId: string; sourcePath: string; digest: string };
+export type HookRevokeRequest = { projectId: string; sourcePath: string };
 
 export type RuntimeThreadWire = {
   thread_id: string;
@@ -896,7 +938,13 @@ export type ModelAccessType = "coding_plan" | "api" | "agent_plan" | "custom";
 
 export type ModelSelectorKind = "model" | "endpoint";
 
-export type ModelPurpose = "thread_title" | "compact_summary" | "subagent" | "scheduled_task";
+export type ModelPurpose =
+  | "thread_title"
+  | "compact_summary"
+  | "subagent"
+  | "scheduled_task"
+  | "hook_prompt"
+  | "hook_agent";
 
 export type ModelPurposeRouting = Partial<Record<ModelPurpose, string>>;
 
@@ -2017,6 +2065,9 @@ export type AwakenBridge = {
   getMemory: (memoryId: string, projectId?: string) => Promise<RuntimeMemory>;
   deleteMemory: (memoryId: string, expectedRevision: number, projectId?: string) => Promise<void>;
   getMemorySettings: () => Promise<MemorySettingsDocument>;
+	getHookStatus?: (projectId?: string) => Promise<HookStatus>;
+	trustProjectHook?: (request: HookTrustRequest) => Promise<HookStatus>;
+	revokeProjectHook?: (request: HookRevokeRequest) => Promise<HookStatus>;
   updateMemorySettings: (request: MemorySettingsPatch) => Promise<MemorySettingsDocument>;
   startMemoryDream: (projectId?: string) => Promise<MemoryDreamTask>;
   getMemoryDream: (taskId: string) => Promise<MemoryDreamTask>;
@@ -2139,6 +2190,7 @@ export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
     finishedAt: run.finished_at ?? undefined,
     modelProfileId: run.model_profile_id || undefined,
     reasoningEffort: run.reasoning_effort || undefined,
+    hookSnapshotId: run.hook_snapshot_id || undefined,
   };
 }
 

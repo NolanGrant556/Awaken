@@ -499,12 +499,12 @@ func TestEffectiveInputForComposerSkillTokensKeepsUserTask(t *testing.T) {
 	}
 }
 
-func TestEffectiveInputForComposerSkillTokensKeepsEmptyInput(t *testing.T) {
+func TestEffectiveInputForComposerSkillTokensSuppliesTokenOnlyModelTask(t *testing.T) {
 	effective := effectiveInputForComposerTokens("", []ComposerToken{
 		{ID: "skill:pptx:user", Type: "skill", Label: "pptx", Payload: ComposerTokenPayload{SkillID: "pptx"}},
 	})
-	if effective != "" {
-		t.Fatalf("token-only turn changed the user-authored empty input: %q", effective)
+	if effective != "Follow the explicitly selected Skill instructions for this turn." {
+		t.Fatalf("token-only turn did not receive a host model task: %q", effective)
 	}
 }
 

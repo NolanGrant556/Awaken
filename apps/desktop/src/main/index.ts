@@ -1810,6 +1810,25 @@ ipcMain.handle(
 ipcMain.handle("awaken:get-memory-settings", async () =>
   normalizeMemorySettings(await requestRuntime<MemorySettingsDocumentWire>("/v1/memory/settings")),
 );
+
+ipcMain.handle("awaken:get-hook-status", async (_event, projectId?: string) => {
+	const suffix = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+	return requestRuntime(`/v1/hooks${suffix}`);
+});
+ipcMain.handle("awaken:trust-project-hook", async (_event, request) =>
+	requestRuntime("/v1/hooks/trust", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(request),
+	}),
+);
+ipcMain.handle("awaken:revoke-project-hook", async (_event, request) =>
+	requestRuntime("/v1/hooks/revoke", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(request),
+	}),
+);
 ipcMain.handle("awaken:update-memory-settings", async (_event, request) => {
   const input = request as {
     expectedRevision: number;
@@ -3135,7 +3154,13 @@ ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
       throw new Error("请先在设置 > 模型中配置可用模型。");
     }
     const purposeProfiles: NonNullable<typeof selectedProfile.purposeProfiles> = {};
-    for (const purpose of ["thread_title", "compact_summary", "subagent"] as ModelPurpose[]) {
+    for (const purpose of [
+      "thread_title",
+      "compact_summary",
+      "subagent",
+      "hook_prompt",
+      "hook_agent",
+    ] as ModelPurpose[]) {
       const resolved = await modelProfileStore?.resolvePurposeRunProfile(
         purpose,
         selectedProfile.profileId,

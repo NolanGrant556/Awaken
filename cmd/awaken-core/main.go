@@ -24,6 +24,7 @@ import (
 	"awaken/src/connectors"
 	"awaken/src/desktopdata"
 	"awaken/src/filestore"
+	"awaken/src/hookruntime"
 	"awaken/src/llm"
 	"awaken/src/mcpclient"
 	"awaken/src/memory"
@@ -101,11 +102,13 @@ func main() {
 				log.Printf("[memory] automatic recall disabled: %v", recallErr)
 			}
 			agentCfg := agentcore.AgentConfig{
-				MaxThoughts:         0,
-				EntryPoint:          "awaken-core",
-				ModelConfig:         modelCfg,
-				CompactModelConfig:  purposeModelConfig(profile, "compact_summary"),
-				SubagentModelConfig: purposeModelConfig(profile, "subagent"),
+				MaxThoughts:           0,
+				EntryPoint:            "awaken-core",
+				ModelConfig:           modelCfg,
+				CompactModelConfig:    purposeModelConfig(profile, "compact_summary"),
+				SubagentModelConfig:   purposeModelConfig(profile, "subagent"),
+				HookPromptModelConfig: purposeModelConfig(profile, "hook_prompt"),
+				HookAgentModelConfig:  purposeModelConfig(profile, "hook_agent"),
 				SkillSummary: skills.FormatRuntimeSkillSummary(
 					skillRegistry.PreviewLocalSources(skillSourceDirsForWorkspace(workspace)),
 				),
@@ -169,6 +172,7 @@ func main() {
 				ModelContentStore:      runtime.NewToolResultStore(),
 				ToolResultOffloadStore: runtime.NewToolResultStore(),
 				ContextEpochStore:      runtime.NewContextEpochStore(),
+				HookSecretResolver:     hookruntime.NewFileSecretStore(desktopdata.AwakenHomeRoot()),
 			}
 			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
 		},
@@ -178,6 +182,11 @@ func main() {
 			})
 		},
 	)
+	if hookStore, hookErr := hookruntime.NewStore(desktopdata.AwakenHomeRoot()); hookErr != nil {
+		log.Printf("[hooks] configuration store unavailable: %v", hookErr)
+	} else {
+		runService.SetHookStore(hookStore)
+	}
 	runService.SetSkillActivator(skillManager.Activator())
 
 	// Load user Computer Use settings once at startup. Defaults are safe and

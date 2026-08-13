@@ -45,6 +45,8 @@ const (
 	EventAwakenSkillContentLoaded           EventType = "AWAKEN_SKILL_CONTENT_LOADED"
 	EventAwakenSkillExecutionContext        EventType = "AWAKEN_SKILL_EXECUTION_CONTEXT"
 	EventAwakenSkillFailedToLoad            EventType = "AWAKEN_SKILL_FAILED_TO_LOAD"
+	EventAwakenHookStarted                  EventType = "AWAKEN_HOOK_STARTED"
+	EventAwakenHookCompleted                EventType = "AWAKEN_HOOK_COMPLETED"
 	EventAwakenUserQuestionRequested        EventType = "AWAKEN_USER_QUESTION_REQUESTED"
 	EventAwakenUserQuestionResolved         EventType = "AWAKEN_USER_QUESTION_RESOLVED"
 	EventAwakenExternalInteractionRequested EventType = "AWAKEN_EXTERNAL_INTERACTION_REQUESTED"
@@ -354,6 +356,14 @@ type Event struct {
 	SkillResourceMode          string           `json:"skillResourceMode,omitempty"`
 	SkillEffectiveTools        []string         `json:"skillEffectiveTools,omitempty"`
 	SkillDiagnostics           []string         `json:"skillDiagnostics,omitempty"`
+	HookInvocationID           string           `json:"hookInvocationId,omitempty"`
+	HookID                     string           `json:"hookId,omitempty"`
+	HookEvent                  string           `json:"hookEvent,omitempty"`
+	HookSourceKind             string           `json:"hookSourceKind,omitempty"`
+	HookAction                 string           `json:"hookAction,omitempty"`
+	HookReasonCode             string           `json:"hookReasonCode,omitempty"`
+	HookReason                 string           `json:"hookReason,omitempty"`
+	HookOutputPreview          string           `json:"hookOutputPreview,omitempty"`
 	QuestionID                 string           `json:"questionId,omitempty"`
 	QuestionAnswer             string           `json:"questionAnswer,omitempty"`
 	InteractionID              string           `json:"interactionId,omitempty"`

@@ -41,6 +41,8 @@ export type AguiEventType =
   | "AWAKEN_SKILL_CONTENT_LOADED"
   | "AWAKEN_SKILL_EXECUTION_CONTEXT"
   | "AWAKEN_SKILL_FAILED_TO_LOAD"
+  | "AWAKEN_HOOK_STARTED"
+  | "AWAKEN_HOOK_COMPLETED"
   | "AWAKEN_USER_QUESTION_REQUESTED"
   | "AWAKEN_USER_QUESTION_RESOLVED"
   | "AWAKEN_EXTERNAL_INTERACTION_REQUESTED"
@@ -245,6 +247,14 @@ export type AguiEvent = {
   delta?: string;
   toolCallId?: string;
   toolCallName?: string;
+  hookInvocationId?: string;
+  hookId?: string;
+  hookEvent?: string;
+  hookSourceKind?: string;
+  hookAction?: string;
+  hookReasonCode?: string;
+  hookReason?: string;
+  hookOutputPreview?: string;
   toolPreparationKind?: "write" | "edit";
   toolPreparationPath?: string;
   toolPreparationAddedLines?: number;

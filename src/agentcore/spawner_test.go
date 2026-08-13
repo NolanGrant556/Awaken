@@ -4,9 +4,25 @@ import (
 	"strings"
 	"testing"
 
+	"awaken/src/hookruntime"
 	"awaken/src/llm"
 	"awaken/src/tool/profile"
 )
+
+func TestCreateSubagentInheritsImmutableHookSnapshotAndDispatcher(t *testing.T) {
+	parent := rootAgentConfig(profile.WorkspaceReadOnly())
+	snapshot := hookruntime.EmptySnapshot()
+	dispatcher := hookruntime.NewDispatcher(snapshot, "")
+	parent.HookAvailabilitySnapshot = &snapshot
+	parent.HookDispatcher = dispatcher
+	child, err := CreateSubagent(parent, SpawnConfig{AgentID: "child-hook", ParentAgentID: "root"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.HookAvailabilitySnapshot != parent.HookAvailabilitySnapshot || child.HookDispatcher != dispatcher {
+		t.Fatal("child did not inherit the parent run Hook snapshot and dispatcher")
+	}
+}
 
 // rootAgentConfig builds a minimal root AgentConfig for spawner tests.
 // The root agent has no SubagentBoundary and no SubagentOrigin.

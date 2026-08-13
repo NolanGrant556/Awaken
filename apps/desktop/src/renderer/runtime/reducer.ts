@@ -2809,6 +2809,18 @@ export function reduceRuntimeState(
           });
           break;
         }
+        case "AWAKEN_HOOK_STARTED":
+        case "AWAKEN_HOOK_COMPLETED": {
+          const completed = action.event.type === "AWAKEN_HOOK_COMPLETED";
+          const failed = completed && action.event.status !== "success" && action.event.status !== "blocked";
+          records = upsertStep(records, `hook:${action.event.hookInvocationId ?? action.event.recordId ?? action.event.seq}`, {
+            title: completed ? "Hook completed" : "Hook started",
+            description: [action.event.hookId, action.event.hookEvent, action.event.hookAction, action.event.hookReasonCode].filter(Boolean).join(" | "),
+            status: failed ? "error" : completed ? "done" : "active",
+            tag: "hook",
+          });
+          break;
+        }
         case "AWAKEN_TOOL_RECOVERY_REQUIRED":
         case "AWAKEN_TOOL_RETRY_BLOCKED": {
           const recoveryKey = [

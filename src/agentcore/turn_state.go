@@ -22,6 +22,7 @@ const (
 	TransitionXMLFallbackContinuation TransitionReason = "xml_fallback_continuation"
 	TransitionReactiveCompactRetry    TransitionReason = "reactive_compact_retry"
 	TransitionMaxOutputContinuation   TransitionReason = "max_output_continuation"
+	TransitionBeforeFinishHook        TransitionReason = "before_finish_hook_retry"
 )
 
 const (
@@ -41,6 +42,7 @@ const (
 	TerminalReasonMaxOutputReached    TerminalReason = "max_output_reached"
 	TerminalReasonRepeatedToolFailure TerminalReason = "repeated_tool_failure"
 	TerminalReasonPersistenceError    TerminalReason = "persistence_error"
+	TerminalReasonHookBlocked         TerminalReason = "hook_blocked"
 )
 
 type TurnState struct {

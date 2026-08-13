@@ -10,6 +10,7 @@ import (
 
 	"awaken/src/computer"
 	"awaken/src/context"
+	"awaken/src/hookruntime"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
 	"awaken/src/subagentruntime"
@@ -210,6 +211,21 @@ func (a *Agent) ApplySkillActivationPlan(skillID string, effectiveTools []string
 		})
 	}
 	a.Reconfigure(cfg)
+}
+
+func (a *Agent) RegisterActivatedSkillHooks(plan *skillruntime.SkillActivationPlan) error {
+	if a == nil || plan == nil || plan.HooksRaw == nil || a.config.HookDispatcher == nil {
+		return nil
+	}
+	source := hookruntime.SourceUser
+	if plan.Source == skills.SourceProject {
+		source = hookruntime.SourceProject
+	}
+	compiled, err := hookruntime.CompileActivatedSkillHooks(plan.SkillID, plan.RootDir, plan.SkillFilePath, source, plan.HooksRaw)
+	if err != nil {
+		return err
+	}
+	return a.config.HookDispatcher.RegisterActivatedSkillHooks(compiled)
 }
 
 // SetSemanticRecorder injects the per-thread durable journal writer.

@@ -46,6 +46,16 @@ type Run struct {
 	FinishedAt       *time.Time           `json:"finished_at,omitempty"`
 	ModelProfileID   string               `json:"model_profile_id,omitempty"`
 	ReasoningEffort  string               `json:"reasoning_effort,omitempty"`
+	HookSnapshotID   string               `json:"hook_snapshot_id,omitempty"`
+}
+
+func (s *Session) SetHookSnapshotID(snapshotID string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.run.HookSnapshotID = strings.TrimSpace(snapshotID)
+	s.mu.Unlock()
 }
 
 type Event struct {

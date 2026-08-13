@@ -11,7 +11,8 @@ permission_decision, skill_activated, resource_receipt,
 runtime_notice, recovery_decision, context_compacted, turn_boundary,
 run_terminal, persistence_warning, memory_recalled, memory_mutated,
 context_snapshot, model_request, model_usage, context_epoch,
-provider_opaque_state
+provider_opaque_state, hook_snapshot, hook_invocation_started,
+hook_invocation_completed
 computer_session_opened, computer_state_changed,
 computer_observation_captured, computer_action_prepared,
 computer_review_requested, computer_review_resolved,
@@ -22,12 +23,15 @@ computer_session_closed, computer_media_accessed
 
 `permission_decision` 是工具自动策略或 transform 的记录，不代表通用 Approval 能力。
 
+`hook_snapshot` 是 run 配置审计事实，紧随 `run_started` 耐久化；它只含 snapshot ID、schema version、enabled/diagnostic 数量和各来源的 kind/status/digest/hook count，不含路径、matcher、command 或环境。它不投影 AG-UI frame，也不证明命令已经执行。每次真实执行在 spawn 前 append+flush `hook_invocation_started`，结束后 append+flush `hook_invocation_completed`；completion 只保存 identity、event/source、spawn/process/status/action/reason、duration、输入摘要、输出摘要与有界 preview，不保存 command、完整路径、输入正文、环境或完整 stdout/stderr。
+
 `memory_recalled` 与 `memory_mutated` 只保存 Memory identity、scope/type、action、revision、status、count、source identity 和错误码，不保存主题正文。Dream maintenance task/report 的耐久 authority 是 `~/.awaken/memory/dream-tasks/`，其 `model_requests` / `model_usage` 也只写该 task authority，不写 thread SemanticJournal；其恢复和投影由 11 域定义。连接测试模型调用写 profile-scoped `~/.awaken/usage/model-profiles/*.jsonl`，同样不写 thread journal。
 
 ## 2. Journal-first 写入顺序
 
 - composer 将文本、有序 attachments 和 tokens 写入结构化 `user_message`；含 Skill token 的路径必须在预激活前完成该写入；
 - run 主循环写 `run_started`，已准备的 composer turn 被 Agent 消费一次，不再写第二条 user message；
+- run 带 Hook snapshot 时，在任何模型或工具执行前写并 flush 脱敏 `hook_snapshot`；每个 command Hook 在 spawn 前写并 flush started，completion 在其决策生效前写并 flush；
 - 有副作用工具必须在 transport 前耐久 `tool_call` 和 decision；
 - Skill 成功激活在正文进入执行上下文或 child 启动前写 `skill_activated`/`resource_receipt`；失败不写伪 activation；
 - observed changes、artifacts 与 canonical `tool_result` 成批写入；
@@ -38,7 +42,7 @@ computer_session_closed, computer_media_accessed
 - Context Epoch 的 exact baseline/source/tool 内容写 sidecar；journal 的 `context_epoch` 只写 epoch ID、digest、状态和边界原因；
 - 最后写唯一 `run_terminal`。
 
-append 或 flush 失败必须 fail-stop；不能继续副作用、模型 transport 或先切换内存上下文再补记。取消/崩溃恢复将未闭合 tool call 标为 interrupted/unknown；有 request 无 usage 的模型调用补 `interrupted + usage_unknown`，不猜 token、cache 或成本。
+append 或 flush 失败必须 fail-stop；不能继续副作用、模型 transport 或先切换内存上下文再补记。取消/崩溃恢复将未闭合 tool call 标为 interrupted/unknown；有 request 无 usage 的模型调用补 `interrupted + usage_unknown`；有 Hook started 无 completion 时补 `interrupted + spawn_state/process_state=unknown`，不重跑命令，也不猜副作用。`RunEnd` completion 可以位于 terminal 之后，恢复和投影必须保留该因果顺序。
 
 ## 3. 结构化用户输入与附件
 

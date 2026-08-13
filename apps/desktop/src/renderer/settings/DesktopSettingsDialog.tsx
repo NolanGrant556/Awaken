@@ -29,6 +29,7 @@ import { MemorySettingsPanel } from "./MemorySettingsPanel";
 import { ACPSettingsPanel } from "./ACPSettingsPanel";
 import { AgentPlanMediaToolsPanel } from "./AgentPlanMediaToolsPanel";
 import { ComputerSettingsPanel } from "./ComputerSettingsPanel";
+import { HooksSettingsPanel } from "./HooksSettingsPanel";
 
 export type DraftState = {
   profileId?: string;
@@ -56,6 +57,7 @@ type SettingsDialogSection =
   | "appearance"
   | "pets"
   | "computer"
+  | "hooks"
   | "acp";
 type ModelConnectionTestFeedback = {
   tone: "success" | "error";
@@ -102,6 +104,7 @@ const SETTINGS_SECTION_TITLES: Record<SettingsDialogSection, string> = {
   appearance: "外观",
   pets: "宠物",
   computer: "计算机操作",
+	hooks: "钩子",
   acp: "外部 Agent / ACP",
 };
 
@@ -1329,6 +1332,8 @@ export function DesktopSettingsDialog({
         <PetsSettingsPanel runtimeClient={runtimeClient} />
       ) : activeSettingsSection === "computer" ? (
         <ComputerSettingsPanel runtimeClient={runtimeClient} />
+		) : activeSettingsSection === "hooks" ? (
+			<HooksSettingsPanel runtimeClient={runtimeClient} currentProjectId={currentProjectId} />
       ) : activeSettingsSection === "acp" ? (
         <ACPSettingsPanel runtimeClient={runtimeClient} />
       ) : (

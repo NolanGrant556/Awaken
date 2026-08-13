@@ -37,7 +37,7 @@ func TestStartRunComposerSkillSelectionReachesFinalProviderRequest(t *testing.T)
 			wantSelectionCount:  1,
 		},
 		{
-			name:                "token-only turn keeps empty user content",
+			name:                "token-only turn receives host model task",
 			input:               "",
 			selected:            []string{"pptx"},
 			wantReferenceRule:   "singular_deictic_references_resolve_to_selected_skill",
@@ -137,8 +137,12 @@ func TestStartRunComposerSkillSelectionReachesFinalProviderRequest(t *testing.T)
 				t.Fatal("final provider request was not observed")
 			}
 			systemPrompt, lastUserContent := providerSystemAndLastUserContent(t, providerRequest)
-			if lastUserContent != strings.TrimSpace(tc.input) {
-				t.Fatalf("model-facing user content changed: got %q want %q", lastUserContent, strings.TrimSpace(tc.input))
+			wantUserContent := strings.TrimSpace(tc.input)
+			if wantUserContent == "" && len(tc.selected) > 0 {
+				wantUserContent = "Follow the explicitly selected Skill instructions for this turn."
+			}
+			if lastUserContent != wantUserContent {
+				t.Fatalf("model-facing user content changed: got %q want %q", lastUserContent, wantUserContent)
 			}
 			for _, expected := range []string{
 				`"run_id":"` + run.RunID + `"`,

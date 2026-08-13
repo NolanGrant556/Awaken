@@ -1650,7 +1650,14 @@ export class ModelProfileStore {
       const store = await this.readStore();
       const validIDs = new Set(store.profiles.map((profile) => profile.id));
       const next: ModelPurposeRouting = {};
-      for (const purpose of ["thread_title", "compact_summary", "subagent", "scheduled_task"] as ModelPurpose[]) {
+      for (const purpose of [
+        "thread_title",
+        "compact_summary",
+        "subagent",
+        "scheduled_task",
+        "hook_prompt",
+        "hook_agent",
+      ] as ModelPurpose[]) {
         const profileID = routing[purpose]?.trim();
         if (profileID && validIDs.has(profileID)) next[purpose] = profileID;
       }

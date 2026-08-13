@@ -41,6 +41,9 @@ import {
   type DeleteSkillRequest,
   type DeleteSkillResponse,
   type GetSkillPreviewRequest,
+	type HookRevokeRequest,
+	type HookStatus,
+	type HookTrustRequest,
   type InstallSkillRequest,
   type InstallSkillResponse,
   type ModelProfileBalancesResult,
@@ -200,6 +203,12 @@ const bridge: AwakenBridge = {
     ) as Promise<void>,
   getMemorySettings: () =>
     ipcRenderer.invoke("awaken:get-memory-settings") as Promise<MemorySettingsDocument>,
+	getHookStatus: (projectId?: string) =>
+		ipcRenderer.invoke("awaken:get-hook-status", projectId) as Promise<HookStatus>,
+	trustProjectHook: (request: HookTrustRequest) =>
+		ipcRenderer.invoke("awaken:trust-project-hook", request) as Promise<HookStatus>,
+	revokeProjectHook: (request: HookRevokeRequest) =>
+		ipcRenderer.invoke("awaken:revoke-project-hook", request) as Promise<HookStatus>,
   updateMemorySettings: (request: MemorySettingsPatch) =>
     ipcRenderer.invoke("awaken:update-memory-settings", request) as Promise<MemorySettingsDocument>,
   startMemoryDream: (projectId?: string) =>

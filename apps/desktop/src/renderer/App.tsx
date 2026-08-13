@@ -5973,6 +5973,20 @@ export function App() {
     };
   }
 
+  function hookTraceAction(item: Extract<RunNarrativeItem, { kind: "hook" }>): ToolTraceAction {
+    const sections: ToolTraceDetailCard["sections"] = [];
+    if (item.detail?.trim()) sections.push({ label: "事件与来源", content: item.detail.trim(), format: "text" });
+    if (item.output?.trim()) sections.push({ label: "安全回执", content: item.output.trim(), format: "text" });
+    return {
+      id: item.id, title: item.title, status: item.status, kind: "terminal",
+      detailCard: detailCardFromSections("Hook 详情", sections),
+      output: item.output, outputLabel: "Hook 回执",
+      open: toolTraceOpenById[item.id],
+      onOpenChange: (open) => updateToolTraceOpen(item.id, open),
+      onCopyDetail: copyToolDetail,
+    };
+  }
+
   function actionsForActivityBatch(
     batch: NarrativeActivityBatch,
     animateToolEntry: boolean,
@@ -5989,6 +6003,9 @@ export function App() {
         animateToolEntry && !replayedNarrativeItemIds.has(item.id);
       if (item.kind === "skill") {
         return [{ ...skillTraceAction(item), animateEntry }];
+      }
+      if (item.kind === "hook") {
+        return [{ ...hookTraceAction(item), animateEntry }];
       }
       return [{ ...toolTraceActionFor(item), animateEntry }];
     });
@@ -6143,6 +6160,10 @@ export function App() {
           animateEntry={animateToolEntry && !replayedNarrativeItemIds.has(item.id)}
         />
       );
+    }
+    if (item.kind === "hook") {
+      const action = hookTraceAction(item);
+      return <ToolTraceLine key={key} {...action} animateEntry={animateToolEntry && !replayedNarrativeItemIds.has(item.id)} />;
     }
     if (item.kind === "mediaGeneration") {
       const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;

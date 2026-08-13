@@ -372,6 +372,9 @@ export function projectAguiEventToNarrative(
     case "AWAKEN_SKILL_EXECUTION_CONTEXT":
     case "AWAKEN_SKILL_FAILED_TO_LOAD":
       return commitSkillTrace(base, event);
+    case "AWAKEN_HOOK_STARTED":
+    case "AWAKEN_HOOK_COMPLETED":
+      return commitHookTrace(base, event);
     case "AWAKEN_COMPACT_STARTED":
     case "AWAKEN_COMPACT_FINISHED":
     case "AWAKEN_COMPACT_FAILED":
@@ -434,6 +437,7 @@ const continuationPlanningLabels: Record<string, string> = {
   reactive_compact_retry: "正在整理上下文并重试",
   max_output_continuation: "正在继续生成",
   xml_fallback_continuation: "正在继续处理工具结果",
+  before_finish_hook_retry: "正在根据 Hook 反馈完善回答",
 };
 
 function activateContinuationPlanning(
@@ -491,6 +495,33 @@ function commitSkillTrace(
     ...state,
     committedItems: upsertCommitted(state.committedItems, item),
   };
+}
+
+function commitHookTrace(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
+  const hookId = event.hookId?.trim() || "unknown-hook";
+  const invocationId = event.hookInvocationId?.trim() || event.recordId || String(event.seq ?? hookId);
+  const completed = event.type === "AWAKEN_HOOK_COMPLETED";
+  const failed = completed && event.status !== "success" && event.status !== "blocked";
+  const blocked = ["block_run", "block_tool", "block_compact", "block_subagent", "block_finish"].includes(event.hookAction ?? "");
+  const interrupted = event.status === "interrupted";
+  const detail = [event.hookEvent, event.hookSourceKind, event.durationMs != null ? `${event.durationMs} ms` : ""]
+    .filter(Boolean)
+    .join(" · ");
+  const output = [event.hookReasonCode, event.hookReason, event.hookOutputPreview]
+    .filter(Boolean)
+    .join("\n");
+  const item: RunNarrativeItem = {
+    kind: "hook",
+    id: `hook:${eventScope(event)}:${invocationId}`,
+    title: `Hook · ${hookId}`,
+    detail: detail || undefined,
+    output: output || undefined,
+    status: interrupted ? "interrupted" : blocked ? "blocked" : failed ? "error" : completed ? "done" : "active",
+  };
+  return { ...state, committedItems: upsertCommitted(state.committedItems, item) };
 }
 
 function commitScheduledNotice(
@@ -1118,6 +1149,7 @@ function applyStatus(
       return status === "error" ? { ...item, status: "error" } : item;
     case "tool":
     case "skill":
+    case "hook":
     case "memoryReceipt":
     case "acpSession":
     case "acpTool":

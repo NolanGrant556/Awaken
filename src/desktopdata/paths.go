@@ -26,6 +26,16 @@ func MCPConfigPath(root string) string {
 	return filepath.Join(filepath.Clean(root), "config", "mcp-servers.json")
 }
 
+// HookConfigPath returns the only user-scoped Hook configuration path.
+func HookConfigPath(root string) string {
+	return filepath.Join(filepath.Clean(root), "config", "hooks.json")
+}
+
+// HookTrustPath returns the project Hook trust authority path.
+func HookTrustPath(root string) string {
+	return filepath.Join(filepath.Clean(root), "config", "hook-trust.json")
+}
+
 // SessionsRoot is the single subtree of the Awaken business-data root that the
 // agent is allowed to mutate. Everything else under the root (config,
 // credentials, store generations, user memory) stays protected, so this path is

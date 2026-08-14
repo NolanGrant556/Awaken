@@ -18,7 +18,7 @@ const buttonStyle: CSSProperties = {
   color: "var(--aw-text-onblack)",
   fontSize: "var(--aw-font-size-lg)",
   lineHeight: "var(--aw-line-height-lg)",
-  fontWeight: "var(--aw-font-weight-semibold)",
+  fontWeight: "var(--aw-font-weight-medium)",
   textAlign: "left",
   cursor: "pointer",
   transition: "background-color var(--aw-transition-fast), border-color var(--aw-transition-fast)",

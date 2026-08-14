@@ -2396,7 +2396,7 @@ button.tool-trace-line:focus-visible {
 .aw-task-welcome {
   display: grid;
   justify-items: center;
-  gap: 10px;
+  gap: 14px;
   width: min(780px, 100%);
   min-width: 0;
   margin: 0 auto;

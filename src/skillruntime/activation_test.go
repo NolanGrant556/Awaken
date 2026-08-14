@@ -181,3 +181,15 @@ Body
 		t.Fatalf("explicit empty parent expanded: %v", plan.EffectiveTools)
 	}
 }
+
+func TestSkillRootForPromptUsesShellSafeWindowsSeparators(t *testing.T) {
+	got := skillRootForPrompt("windows", `C:\Users\tester\.awaken\skills\system-skills\excel`)
+	want := `C:/Users/tester/.awaken/skills/system-skills/excel`
+	if got != want {
+		t.Fatalf("got=%q want=%q", got, want)
+	}
+	posix := "/Users/tester/.awaken/skills/excel"
+	if got := skillRootForPrompt("darwin", posix); got != posix {
+		t.Fatalf("darwin path changed: %q", got)
+	}
+}

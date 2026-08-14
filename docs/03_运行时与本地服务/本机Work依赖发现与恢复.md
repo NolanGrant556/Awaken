@@ -33,7 +33,7 @@ Agent 或用户安装依赖后，新的 run/显式环境 refresh 才能形成新
 ## 6. 平台边界
 
 - macOS：当前支持 login PATH、Homebrew 与当前用户应用；必须用真实 Desktop 验证依赖复用和安装后重试。
-- Windows：代码支持登录用户环境与 Bash/pwsh/powershell/cmd 回退；cross-build 不代替实机。
+- Windows：代码只把已验证的 Git Bash 作为 POSIX Shell，明确排除系统 WSL `bash.exe` 启动入口，再按 pwsh/powershell/cmd 做执行前健康回退；环境快照同时观察 `py`、`python3` 与 `python`，Office doctor 从实际可用启动器进入并返回后续固定使用的绝对解释器。cross-build 不代替实机。
 - Linux：遵循 PATH 与用户环境，不能从 macOS 验收推导发布结论。
 
 ## 7. 代码 owner

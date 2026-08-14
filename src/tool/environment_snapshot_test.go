@@ -84,6 +84,20 @@ func TestProbeExecutionEnvironmentIsBoundedDeterministicAndRedacted(t *testing.T
 	}
 }
 
+func TestDefaultEnvironmentExecutablesIncludeWindowsCommandAndPythonLaunchers(t *testing.T) {
+	wanted := map[string]bool{"cmd": false, "py": false, "python": false, "python3": false}
+	for _, name := range defaultEnvironmentExecutables {
+		if _, ok := wanted[name]; ok {
+			wanted[name] = true
+		}
+	}
+	for name, found := range wanted {
+		if !found {
+			t.Fatalf("default executable %q is missing", name)
+		}
+	}
+}
+
 func containsEnvironmentReference(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

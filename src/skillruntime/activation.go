@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -208,7 +209,8 @@ func (a *Activator) Activate(req ActivationRequest) (*SkillActivationPlan, error
 		}
 		body = loadedBody
 	}
-	body = strings.ReplaceAll(body, "${AWAKEN_SKILL_DIR}", def.RootDir)
+	promptRoot := skillRootForPrompt(runtime.GOOS, def.RootDir)
+	body = strings.ReplaceAll(body, "${AWAKEN_SKILL_DIR}", promptRoot)
 	if !req.SkipArgRender {
 		argDefs := make([]SkillArgDef, len(def.Arguments))
 		for i, arg := range def.Arguments {
@@ -316,12 +318,20 @@ func renderActivatedBody(def *skills.SkillDefinition, body string) string {
 	var b strings.Builder
 	if root := strings.TrimSpace(def.RootDir); root != "" {
 		b.WriteString("Base directory for this skill: ")
-		b.WriteString(root)
+		b.WriteString(skillRootForPrompt(runtime.GOOS, root))
 		b.WriteString("\n")
 		b.WriteString("Resources are not preloaded. Read references, scripts, templates, and assets from this package only when the task needs them, using the appropriate file, artifact, or shell tool.\n\n")
 	}
 	b.WriteString(body)
 	return b.String()
+}
+
+func skillRootForPrompt(platform string, root string) string {
+	root = strings.TrimSpace(root)
+	if platform == "windows" {
+		return strings.ReplaceAll(root, `\`, "/")
+	}
+	return root
 }
 
 func loadLocalSkillBody(def *skills.SkillDefinition) (string, error) {

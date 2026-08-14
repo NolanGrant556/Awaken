@@ -78,7 +78,7 @@ type ExecutionEnvironmentSnapshot struct {
 	// ComputerEnabled is set by the runtime when a run is configured with a
 	// Computer binding. It gates whether computer_* tools are exposed in the
 	// pinned tool snapshot. It does not imply a real CUA Host is available.
-	ComputerEnabled          bool                              `json:"computer_enabled,omitempty"`
+	ComputerEnabled bool `json:"computer_enabled,omitempty"`
 }
 
 type VersionProbeFunc func(ctx context.Context, executable string, maxOutputBytes int) (string, error)
@@ -123,7 +123,7 @@ type ExecutionEnvironmentProbeOptions struct {
 }
 
 var defaultEnvironmentExecutables = []string{
-	"sh", "bash", "zsh", "pwsh", "powershell", "python3", "python", "node",
+	"sh", "bash", "zsh", "pwsh", "powershell", "cmd", "python3", "python", "py", "node",
 	"git", "gh", "go", "java", "soffice", "libreoffice", "pdftoppm", "pdfinfo", "rg", "ffmpeg",
 	"pandoc", "docker", "dws", "lark-cli",
 }

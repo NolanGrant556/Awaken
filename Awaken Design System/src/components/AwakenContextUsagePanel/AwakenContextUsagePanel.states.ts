@@ -14,7 +14,7 @@ export const AwakenContextUsagePanelStates: AwakenContextUsagePanelState[] = [
     id: "breakdown",
     label: "分类与协议开销",
     props: {
-      estimatedInputTokens: 92_100,
+      currentInputTokens: 92_100,
       effectiveInputWindowTokens: 240_000,
       modelWindowTokens: 256_000,
       outputReserveTokens: 16_000,
@@ -35,7 +35,7 @@ export const AwakenContextUsagePanelStates: AwakenContextUsagePanelState[] = [
     id: "legacy",
     label: "旧记录暂无分类明细",
     props: {
-      estimatedInputTokens: 12_000,
+      currentInputTokens: 12_000,
       effectiveInputWindowTokens: 112_000,
       modelWindowTokens: 128_000,
       outputReserveTokens: 16_000,
@@ -48,7 +48,7 @@ export const AwakenContextUsagePanelStates: AwakenContextUsagePanelState[] = [
     id: "zero-middle-category",
     label: "中间分类为零时保持语义配色",
     props: {
-      estimatedInputTokens: 110_724,
+      currentInputTokens: 110_724,
       effectiveInputWindowTokens: 613_000,
       modelWindowTokens: 629_000,
       outputReserveTokens: 16_000,
@@ -68,7 +68,7 @@ export const AwakenContextUsagePanelStates: AwakenContextUsagePanelState[] = [
     id: "cache-hit",
     label: "缓存命中与成本",
     props: {
-      estimatedInputTokens: 92_100,
+      currentInputTokens: 92_100,
       effectiveInputWindowTokens: 240_000,
       modelWindowTokens: 256_000,
       outputReserveTokens: 16_000,
@@ -100,7 +100,7 @@ export const AwakenContextUsagePanelStates: AwakenContextUsagePanelState[] = [
     id: "cache-undocumented",
     label: "火山未确认",
     props: {
-      estimatedInputTokens: 64_200,
+      currentInputTokens: 64_200,
       effectiveInputWindowTokens: 112_000,
       modelWindowTokens: 128_000,
       outputReserveTokens: 16_000,

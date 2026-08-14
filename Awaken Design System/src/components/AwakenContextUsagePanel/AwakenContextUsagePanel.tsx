@@ -46,7 +46,7 @@ export type AwakenContextUsageModelUsage = {
 
 export type AwakenContextUsagePanelProps = {
   id?: string;
-  estimatedInputTokens: number;
+  currentInputTokens: number;
   effectiveInputWindowTokens: number;
   modelWindowTokens: number;
   outputReserveTokens: number;
@@ -113,11 +113,11 @@ function formatCostLabel(
   return `${symbol}${usage.calculatedCostUsd.toFixed(4)}`;
 }
 
-// hasLastRequestSignal returns true when the usage record carries at least one
+// hasUsageDetailsSignal returns true when the usage record carries at least one
 // cache or cost signal worth showing. Context-epoch boundary reasons are host
 // diagnostics rather than proof that a provider supports prompt caching, so a
-// reason by itself must not create an otherwise empty "上次请求" section.
-function hasLastRequestSignal(
+// reason by itself must not create an otherwise empty usage-details section.
+function hasUsageDetailsSignal(
   usage: AwakenContextUsageModelUsage | null | undefined,
 ): usage is AwakenContextUsageModelUsage {
   if (!usage) {
@@ -137,7 +137,7 @@ export const AwakenContextUsagePanel = forwardRef<
 >(function AwakenContextUsagePanel(
   {
     id,
-    estimatedInputTokens,
+    currentInputTokens,
     effectiveInputWindowTokens,
     contributions = [],
     latestModelUsage,
@@ -152,7 +152,7 @@ export const AwakenContextUsagePanel = forwardRef<
   );
   const usedRatio =
     effectiveInputWindowTokens > 0
-      ? estimatedInputTokens / effectiveInputWindowTokens
+      ? currentInputTokens / effectiveInputWindowTokens
       : 0;
   const usedPercent = Math.max(0, Math.min(100, Math.round(usedRatio * 100)));
 
@@ -160,15 +160,15 @@ export const AwakenContextUsagePanel = forwardRef<
     closeButtonRef.current?.focus();
   }, []);
 
-  const showLastRequest = hasLastRequestSignal(latestModelUsage);
-  const cacheState = showLastRequest
+  const showUsageDetails = hasUsageDetailsSignal(latestModelUsage);
+  const cacheState = showUsageDetails
     ? resolveCacheState(latestModelUsage)
     : null;
-  const costLabel = showLastRequest
+  const costLabel = showUsageDetails
     ? formatCostLabel(latestModelUsage)
     : undefined;
 
-  const usageSummary = `~${formatContextUsageTokens(estimatedInputTokens)} / ${formatContextUsageTokens(effectiveInputWindowTokens)} Token`;
+  const usageSummary = `${formatContextUsageTokens(currentInputTokens)} / ${formatContextUsageTokens(effectiveInputWindowTokens)} Token`;
 
   return (
     <div
@@ -201,7 +201,7 @@ export const AwakenContextUsagePanel = forwardRef<
         >
           <div className="aw-context-usage-panel__summary-stats">
             <span className="aw-context-usage-panel__summary-percent">
-              {usedPercent}% 预计使用
+              {usedPercent}% 当前使用
             </span>
             <span className="aw-context-usage-panel__summary-tokens">
               {usageSummary}
@@ -210,7 +210,7 @@ export const AwakenContextUsagePanel = forwardRef<
           <div
             className="aw-context-usage-panel__meter"
             role="meter"
-            aria-label="可用输入窗口预计使用比例"
+            aria-label="可用输入窗口当前使用比例"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={usedPercent}
@@ -270,12 +270,11 @@ export const AwakenContextUsagePanel = forwardRef<
           )}
         </section>
 
-        {showLastRequest ? (
+        {showUsageDetails ? (
           <section
-            className="aw-context-usage-panel__last-request"
-            aria-label="上次请求缓存与成本"
+            className="aw-context-usage-panel__usage-details"
+            aria-label="缓存与成本"
           >
-            <h3 className="aw-context-usage-panel__subtitle">上次请求</h3>
             <dl>
               {cacheState ? (
                 <div className="aw-context-usage-panel__row">

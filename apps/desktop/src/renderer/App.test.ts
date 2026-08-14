@@ -1969,7 +1969,7 @@ describe("context usage presentation", () => {
     expect(contextUsagePanelBottomOffset({ composerBarInset: -20 })).toBe(28);
   });
 
-  it("uses the latest complete provider usage as current accumulated context", () => {
+  it("uses the latest complete provider input as current context usage", () => {
     expect(
       contextUsageMeta({
         eventType: "AWAKEN_CONTEXT_SNAPSHOT",
@@ -1993,8 +1993,80 @@ describe("context usage presentation", () => {
       }),
     ).toEqual({
       label: "上下文窗口",
-      value: "23k / 112k",
-      progress: 22_800 / 112_000,
+      value: "22k / 112k",
+      progress: 22_000 / 112_000,
+    });
+  });
+
+  it("rebuilds inclusive input from complete input breakdown without adding output", () => {
+    expect(
+      contextUsageMeta({
+        eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+        estimatedTokens: 24_000,
+        actualTokens: 99_000,
+        modelWindow: 128_000,
+        outputReserve: 16_000,
+        effectiveWindow: 112_000,
+        latestModelUsage: {
+          schemaVersion: 1,
+          requestId: "req-breakdown",
+          purpose: "agent_turn",
+          cachedInputTokens: 8_000,
+          uncachedInputTokens: 1_500,
+          cacheWriteTokens: 500,
+          outputTokens: 800,
+          totalTokens: 10_800,
+          usageComplete: true,
+          latencyMs: 20,
+          status: "succeeded",
+          completedAt: "2026-07-19T00:00:01Z",
+        },
+      }),
+    ).toEqual({
+      label: "上下文窗口",
+      value: "10k / 112k",
+      progress: 10_000 / 112_000,
+    });
+  });
+
+  it("falls back to the local snapshot when provider input is unavailable", () => {
+    expect(
+      contextUsageMeta({
+        eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+        actualTokens: 99_000,
+        modelWindow: 128_000,
+        outputReserve: 16_000,
+        effectiveWindow: 112_000,
+        snapshot: {
+          schemaVersion: 4,
+          snapshotId: "ctx-local-fallback",
+          estimatorId: "awaken_leaf_v4",
+          basis: "current_projection",
+          modelWindowTokens: 128_000,
+          outputReserveTokens: 16_000,
+          effectiveInputWindowTokens: 112_000,
+          estimatedInputTokens: 24_000,
+          warningThresholdTokens: 95_000,
+          autoCompactThresholdTokens: 100_800,
+          compactTargetTokens: 40_000,
+          contributions: [{ kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 }],
+          generatedAt: "2026-07-19T00:00:02Z",
+        },
+        latestModelUsage: {
+          schemaVersion: 1,
+          requestId: "req-total-only",
+          purpose: "agent_turn",
+          totalTokens: 99_000,
+          usageComplete: true,
+          latencyMs: 20,
+          status: "succeeded",
+          completedAt: "2026-07-19T00:00:01Z",
+        },
+      }),
+    ).toEqual({
+      label: "上下文窗口",
+      value: "24k / 112k",
+      progress: 24_000 / 112_000,
     });
   });
 
@@ -2041,7 +2113,7 @@ describe("context usage presentation", () => {
       },
     });
 
-    expect(data?.estimatedInputTokens).toBe(28_000);
+    expect(data?.currentInputTokens).toBe(27_200);
     expect(data?.contributions).toEqual([
       { id: "system_prompt", label: "系统提示词", estimatedTokens: 2_000 },
       { id: "builtin_tools", label: "内置工具", estimatedTokens: 6_000 },
@@ -2049,11 +2121,11 @@ describe("context usage presentation", () => {
       { id: "skills", label: "技能", estimatedTokens: 1_000 },
       { id: "memory", label: "记忆", estimatedTokens: 500 },
       { id: "conversation", label: "对话", estimatedTokens: 6_500 },
-      { id: "other", label: "其他/协议开销", estimatedTokens: 4_000 },
+      { id: "other", label: "其他/协议开销", estimatedTokens: 3_200 },
     ]);
     expect(
       data?.contributions?.reduce((sum, contribution) => sum + contribution.estimatedTokens, 0),
-    ).toBe(28_000);
+    ).toBe(27_200);
   });
 
   it("does not reuse provider usage after an incompatible context identity change", () => {
@@ -2093,10 +2165,10 @@ describe("context usage presentation", () => {
       },
     });
 
-    expect(data?.estimatedInputTokens).toBe(24_000);
+    expect(data?.currentInputTokens).toBe(24_000);
   });
 
-  it("keeps the latest provider actual across a tool-schema-only epoch rotation", () => {
+  it("keeps the latest provider input across a tool-schema-only epoch rotation", () => {
     const data = contextUsagePanelData({
       eventType: "AWAKEN_CONTEXT_SNAPSHOT",
       snapshot: {
@@ -2125,6 +2197,8 @@ describe("context usage presentation", () => {
         modelId: "model-a",
         protocolFamily: "openai_chat",
         contextEpochId: "epoch-a",
+        inputTokens: 27_200,
+        outputTokens: 800,
         totalTokens: 28_000,
         usageComplete: true,
         latencyMs: 20,
@@ -2133,10 +2207,10 @@ describe("context usage presentation", () => {
       },
     });
 
-    expect(data?.estimatedInputTokens).toBe(28_000);
+    expect(data?.currentInputTokens).toBe(27_200);
   });
 
-  it("projects the current context from provider truth after tools are removed", () => {
+  it("does not add local post-request deltas to provider input after tools are removed", () => {
     const data = contextUsagePanelData({
       eventType: "AWAKEN_CONTEXT_SNAPSHOT",
       snapshot: {
@@ -2182,15 +2256,15 @@ describe("context usage presentation", () => {
       },
     });
 
-    expect(data?.estimatedInputTokens).toBe(18_295);
+    expect(data?.currentInputTokens).toBe(20_082);
     expect(data?.contributions?.at(-1)).toEqual({
       id: "other",
       label: "其他/协议开销",
-      estimatedTokens: 3_723,
+      estimatedTokens: 5_510,
     });
     expect(
       data?.contributions?.reduce((sum, contribution) => sum + contribution.estimatedTokens, 0),
-    ).toBe(18_295);
+    ).toBe(20_082);
   });
 
   it("does not reuse usage from another provider profile with the same model protocol", () => {
@@ -2241,7 +2315,7 @@ describe("context usage presentation", () => {
       },
     );
 
-    expect(data?.estimatedInputTokens).toBe(24_000);
+    expect(data?.currentInputTokens).toBe(24_000);
   });
 
   it("does not reuse provider usage after the reasoning effort changes", () => {
@@ -2289,7 +2363,7 @@ describe("context usage presentation", () => {
       },
     );
 
-    expect(data?.estimatedInputTokens).toBe(24_000);
+    expect(data?.currentInputTokens).toBe(24_000);
   });
 
   it("matches endpoint transport usage through a separate capability model identity", () => {
@@ -2325,6 +2399,8 @@ describe("context usage presentation", () => {
           endpointSelector: "ep-doubao-test",
           modelSelectorKind: "endpoint",
           protocolFamily: "openai_chat",
+          inputTokens: 27_200,
+          outputTokens: 800,
           totalTokens: 28_000,
           usageComplete: true,
           latencyMs: 20,
@@ -2344,7 +2420,7 @@ describe("context usage presentation", () => {
       },
     );
 
-    expect(data?.estimatedInputTokens).toBe(28_000);
+    expect(data?.currentInputTokens).toBe(27_200);
   });
 
   it("projects typed breakdowns without exposing model-call accounting in the panel", () => {
@@ -2430,8 +2506,10 @@ describe("context usage presentation", () => {
     );
     expect(html).toContain("系统提示词");
     expect(html).toContain("上下文用量");
-    expect(html).toContain("预计使用");
-    expect(html).toContain("~24K / 112K Token");
+    expect(html).toContain("当前使用");
+    expect(html).toContain("24K / 112K Token");
+    expect(html).not.toContain("预计使用");
+    expect(html).not.toContain("~24K / 112K Token");
     expect(html).not.toContain("上下文用了");
     expect(html).not.toContain("约 24K");
     expect(html).not.toContain("模型总窗口");
@@ -2452,7 +2530,7 @@ describe("context usage presentation", () => {
     expect(html).not.toContain("US$0.011000");
   });
 
-  it("projects last-request cache hit and cost when latestModelUsage carries signal", () => {
+  it("shows cache hit and cost directly after the context breakdown", () => {
     const data = contextUsagePanelData({
       eventType: "AWAKEN_CONTEXT_SNAPSHOT",
       snapshot: {
@@ -2483,9 +2561,9 @@ describe("context usage presentation", () => {
         purpose: "agent_turn",
         cacheMode: "automatic_prefix",
         cacheKeyApplied: false,
-        inputTokens: 24_000,
+        inputTokens: 27_200,
         cachedInputTokens: 18_000,
-        uncachedInputTokens: 6_000,
+        uncachedInputTokens: 9_200,
         outputTokens: 800,
         calculatedCostUsd: 0.0123,
         currency: "USD",
@@ -2500,9 +2578,9 @@ describe("context usage presentation", () => {
       cacheMode: "automatic_prefix",
       cacheKeyApplied: false,
       cachedInputTokens: 18_000,
-      uncachedInputTokens: 6_000,
+      uncachedInputTokens: 9_200,
       cacheWriteTokens: undefined,
-      inputTokens: 24_000,
+      inputTokens: 27_200,
       outputTokens: 800,
       reasoningTokens: undefined,
       totalTokens: undefined,
@@ -2518,17 +2596,20 @@ describe("context usage presentation", () => {
         onClose: vi.fn(),
       }),
     );
-    expect(html).toContain("上次请求");
+    expect(html).not.toContain("上次请求");
     expect(html).toContain("已命中");
     expect(html).toContain("输入 Token");
-    expect(html).toContain("24K");
+    expect(html).toContain("27K");
     expect(html).toContain("命中 Token");
     expect(html).toContain("18K");
     expect(html).toContain("未命中 Token");
-    expect(html).toContain("6.0K");
+    expect(html).toContain("9.2K");
     expect(html).toContain("输出 Token");
     expect(html).toContain("成本");
     expect(html).toContain("$0.0123");
+    expect(html).toContain("其他/协议开销");
+    expect(html.indexOf("其他/协议开销")).toBeLessThan(html.indexOf("缓存"));
+    expect(html).not.toContain("aw-context-usage-panel__subtitle");
   });
 
   it("shows cache as 未确认 and cost as 未知 for undocumented providers", () => {
@@ -2578,7 +2659,7 @@ describe("context usage presentation", () => {
         onClose: vi.fn(),
       }),
     );
-    expect(html).toContain("上次请求");
+    expect(html).not.toContain("上次请求");
     expect(html).toContain("未确认");
     expect(html).toContain("成本");
     expect(html).toContain("未知");
@@ -2589,7 +2670,7 @@ describe("context usage presentation", () => {
   it("does not present a host context boundary as provider cache data", () => {
     const html = renderToString(
       React.createElement(AwakenContextUsagePanel, {
-        estimatedInputTokens: 16_000,
+        currentInputTokens: 16_000,
         effectiveInputWindowTokens: 240_000,
         modelWindowTokens: 256_000,
         outputReserveTokens: 16_000,
@@ -2630,7 +2711,7 @@ describe("context usage presentation", () => {
   it("keeps meter colors bound to contribution semantics when a middle category is zero", () => {
     const html = renderToString(
       React.createElement(AwakenContextUsagePanel, {
-        estimatedInputTokens: 110_724,
+        currentInputTokens: 110_724,
         effectiveInputWindowTokens: 613_000,
         modelWindowTokens: 629_000,
         outputReserveTokens: 16_000,

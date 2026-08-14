@@ -1361,7 +1361,7 @@ function safeTokenSum(...values: number[]): number | undefined {
   return Number.isSafeInteger(total) && total >= 0 ? total : undefined;
 }
 
-function providerCurrentContextTokens(usage: RuntimeModelUsage | undefined): number | undefined {
+function providerCurrentInputTokens(usage: RuntimeModelUsage | undefined): number | undefined {
   if (
     !usage ||
     usage.purpose !== "agent_turn" ||
@@ -1372,17 +1372,8 @@ function providerCurrentContextTokens(usage: RuntimeModelUsage | undefined): num
   }
 
   const input = normalizedTokenCount(usage.inputTokens);
-  const output = normalizedTokenCount(usage.outputTokens);
-  const total = normalizedTokenCount(usage.totalTokens);
-  if (
-    total !== undefined &&
-    (input === undefined || total >= input) &&
-    (output === undefined || total >= output)
-  ) {
-    return total;
-  }
   if (input !== undefined) {
-    return output !== undefined ? safeTokenSum(input, output) : input;
+    return input;
   }
 
   const cached = normalizedTokenCount(usage.cachedInputTokens);
@@ -1391,10 +1382,10 @@ function providerCurrentContextTokens(usage: RuntimeModelUsage | undefined): num
     return undefined;
   }
   const cacheWrite = normalizedTokenCount(usage.cacheWriteTokens) ?? 0;
-  return safeTokenSum(cached, uncached, cacheWrite, output ?? 0);
+  return safeTokenSum(cached, uncached, cacheWrite);
 }
 
-const PROVIDER_ANCHOR_COMPATIBLE_EPOCH_BOUNDARIES = new Set([
+const PROVIDER_INPUT_COMPATIBLE_EPOCH_BOUNDARIES = new Set([
   "system_prompt_changed",
   "tool_removed",
   "tool_schema_changed",
@@ -1461,7 +1452,7 @@ function usageMatchesSnapshot(
     snapshot.contextEpochId &&
     usage.contextEpochId !== snapshot.contextEpochId &&
     snapshot.contextEpochBoundaryReason !== undefined &&
-    !PROVIDER_ANCHOR_COMPATIBLE_EPOCH_BOUNDARIES.has(
+    !PROVIDER_INPUT_COMPATIBLE_EPOCH_BOUNDARIES.has(
       snapshot.contextEpochBoundaryReason,
     )
   ) {
@@ -1474,7 +1465,7 @@ function usageMatchesSnapshot(
   );
 }
 
-function providerAnchoredContextTokens(
+function compatibleProviderInputTokens(
   usage: RuntimeModelUsage | undefined,
   snapshot: NonNullable<RuntimeContextWindow>["snapshot"],
   currentModel?: RuntimeModelIdentity,
@@ -1482,20 +1473,7 @@ function providerAnchoredContextTokens(
   if (!usageMatchesSnapshot(usage, snapshot, currentModel)) {
     return undefined;
   }
-  const providerActual = providerCurrentContextTokens(usage);
-  if (providerActual === undefined) {
-    return undefined;
-  }
-  const currentEstimate = normalizedTokenCount(snapshot?.estimatedInputTokens);
-  const sentEstimate = normalizedTokenCount(usage?.sentEstimatedInputTokens);
-  if (currentEstimate === undefined || sentEstimate === undefined) {
-    return providerActual;
-  }
-  const projected = providerActual + currentEstimate - sentEstimate;
-  if (!Number.isSafeInteger(projected)) {
-    return undefined;
-  }
-  return Math.max(0, projected);
+  return providerCurrentInputTokens(usage);
 }
 
 function currentContextTokens(
@@ -1503,14 +1481,13 @@ function currentContextTokens(
   currentModel?: RuntimeModelIdentity,
 ): number | undefined {
   const usage = contextWindow?.latestModelUsage;
-  const providerActual = providerAnchoredContextTokens(
+  const providerInput = compatibleProviderInputTokens(
     usage,
     contextWindow?.snapshot,
     currentModel,
   );
   return (
-    providerActual ??
-    normalizedTokenCount(contextWindow?.actualTokens) ??
+    providerInput ??
     normalizedTokenCount(contextWindow?.snapshot?.estimatedInputTokens) ??
     normalizedTokenCount(contextWindow?.estimatedTokens)
   );
@@ -1677,7 +1654,7 @@ export function contextUsagePanelData(
     });
   }
   return {
-    estimatedInputTokens: currentInputTokens,
+    currentInputTokens,
     effectiveInputWindowTokens,
     modelWindowTokens,
     outputReserveTokens,

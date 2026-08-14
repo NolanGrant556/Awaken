@@ -48,6 +48,9 @@ export type ProjectFilesWorkspaceProps = {
   runtimeClient: Pick<
     RuntimeClient,
     | "listProjectDirectory"
+    | "watchProjectDirectory"
+    | "unwatchProjectDirectory"
+    | "onProjectDirectoryChanged"
     | "copyProjectEntryPath"
     | "openProjectEntryWith"
     | "startProjectFilePreview"
@@ -246,6 +249,8 @@ export function ProjectFilesWorkspace({
   const contextOpenWithRef = useRef<HTMLDivElement>(null);
   const contextSubmenuRef = useRef<HTMLDivElement>(null);
   const requestGenerationRef = useRef(0);
+  const directoryRefreshSequenceRef = useRef(0);
+  const listingsRef = useRef(listings);
   const previewPrimaryPointerGestureRef = useRef<PreviewPrimaryPointerGesture | undefined>(
     undefined,
   );
@@ -263,6 +268,10 @@ export function ProjectFilesWorkspace({
   useEffect(() => {
     setWorkspaceMode(initialMode);
   }, [initialMode]);
+
+  useEffect(() => {
+    listingsRef.current = listings;
+  }, [listings]);
 
   useEffect(() => {
     if (folders.some((folder) => folder.path === selectedFolderPath)) {
@@ -355,6 +364,7 @@ export function ProjectFilesWorkspace({
   useEffect(() => {
     const generation = requestGenerationRef.current + 1;
     requestGenerationRef.current = generation;
+    directoryRefreshSequenceRef.current += 1;
     setListings({});
     setExpandedPaths(new Set());
     setLoadingPaths(new Set());
@@ -389,6 +399,117 @@ export function ProjectFilesWorkspace({
         }
       });
   }, [projectId, runtimeClient, selectedFolder?.path]);
+
+  const refreshLoadedDirectories = useCallback(async (): Promise<void> => {
+    if (!projectId || !selectedFolder?.path) return;
+    const generation = requestGenerationRef.current;
+    const refreshSequence = directoryRefreshSequenceRef.current + 1;
+    directoryRefreshSequenceRef.current = refreshSequence;
+    const loadedPaths = Object.keys(listingsRef.current);
+    const paths = loadedPaths.includes("") ? loadedPaths : ["", ...loadedPaths];
+    const refreshed = await Promise.all(
+      paths.map(async (relativePath) => {
+        try {
+          const result = await runtimeClient.listProjectDirectory({
+            projectId,
+            folderPath: selectedFolder.path,
+            ...(relativePath ? { relativePath } : {}),
+          });
+          return { relativePath, result };
+        } catch {
+          return { relativePath, result: undefined };
+        }
+      }),
+    );
+    if (
+      requestGenerationRef.current !== generation ||
+      directoryRefreshSequenceRef.current !== refreshSequence
+    ) {
+      return;
+    }
+
+    const root = refreshed.find((entry) => entry.relativePath === "");
+    const rootResult = root?.result;
+    if (!rootResult || !rootResult.ok) {
+      setListings({});
+      setExpandedPaths(new Set());
+      setErrorMessage(rootResult?.message ?? "文件目录暂时无法读取。");
+      return;
+    }
+
+    const nextListings: Record<string, ProjectDirectoryEntry[]> = {};
+    const availableDirectoryPaths = new Set<string>();
+    const successfullyLoadedPaths = new Set<string>();
+    for (const entry of refreshed) {
+      if (!entry.result?.ok) continue;
+      successfullyLoadedPaths.add(entry.relativePath);
+      nextListings[entry.relativePath] = entry.result.entries;
+      for (const child of entry.result.entries) {
+        if (child.kind === "directory") availableDirectoryPaths.add(child.relativePath);
+      }
+    }
+    for (const relativePath of Object.keys(nextListings)) {
+      if (
+        relativePath &&
+        (!availableDirectoryPaths.has(relativePath) || !successfullyLoadedPaths.has(relativePath))
+      ) {
+        delete nextListings[relativePath];
+      }
+    }
+    setListings(nextListings);
+    setExpandedPaths((current) =>
+      new Set(
+        [...current].filter(
+          (relativePath) =>
+            availableDirectoryPaths.has(relativePath) &&
+            successfullyLoadedPaths.has(relativePath),
+        ),
+      ),
+    );
+    setErrorMessage(undefined);
+  }, [projectId, runtimeClient, selectedFolder?.path]);
+
+  useEffect(() => {
+    if (!projectId || !selectedFolder?.path) return;
+    const generation = requestGenerationRef.current;
+    let disposed = false;
+    let subscriptionId: string | undefined;
+    const removeChangeListener = runtimeClient.onProjectDirectoryChanged((event) => {
+      if (event.subscriptionId !== subscriptionId) return;
+      void refreshLoadedDirectories();
+    });
+
+    void runtimeClient
+      .watchProjectDirectory({
+        projectId,
+        folderPath: selectedFolder.path,
+      })
+      .then((result) => {
+        if (disposed || requestGenerationRef.current !== generation) {
+          if (result.ok) void runtimeClient.unwatchProjectDirectory(result.subscriptionId);
+          return;
+        }
+        if (!result.ok) {
+          setErrorMessage(result.message);
+          return;
+        }
+        subscriptionId = result.subscriptionId;
+        // Refresh once after the watcher is active to close the small setup gap
+        // between the initial directory snapshot and subscription readiness.
+        void refreshLoadedDirectories();
+      })
+      .catch(() => {
+        if (!disposed && requestGenerationRef.current === generation) {
+          setErrorMessage("文件变化暂时无法自动同步。");
+        }
+      });
+
+    return () => {
+      disposed = true;
+      removeChangeListener();
+      if (subscriptionId) void runtimeClient.unwatchProjectDirectory(subscriptionId);
+    };
+  }, [projectId, refreshLoadedDirectories, runtimeClient, selectedFolder?.path]);
 
   async function loadDirectory(relativePath: string): Promise<void> {
     if (!projectId || !selectedFolder?.path || loadingPaths.has(relativePath)) {

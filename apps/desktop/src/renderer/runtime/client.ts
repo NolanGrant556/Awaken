@@ -51,9 +51,12 @@ import {
   type MemoryListRequest,
   type MemorySettingsDocument,
   type MemorySettingsPatch,
+  type ProjectDirectoryChangedEvent,
   type ProjectFolderSelection,
   type ProjectDirectoryListRequest,
   type ProjectDirectoryListResult,
+  type ProjectDirectoryWatchRequest,
+  type ProjectDirectoryWatchResult,
   type ProjectEntryActionRequest,
   type ProjectEntryActionResult,
   type ProjectEntryOpenWithRequest,
@@ -259,6 +262,13 @@ export type RuntimeClient = {
   listProjectDirectory: (
     request: ProjectDirectoryListRequest,
   ) => Promise<ProjectDirectoryListResult>;
+  watchProjectDirectory: (
+    request: ProjectDirectoryWatchRequest,
+  ) => Promise<ProjectDirectoryWatchResult>;
+  unwatchProjectDirectory: (subscriptionId: string) => Promise<void>;
+  onProjectDirectoryChanged: (
+    handler: (event: ProjectDirectoryChangedEvent) => void,
+  ) => () => void;
   resolveProjectEntryForTask: (
     request: ProjectEntryActionRequest,
   ) => Promise<ProjectEntryResolveResult>;
@@ -494,6 +504,9 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     deleteThread: (threadId) => bridge.deleteThread(threadId),
     listProjects: (includeRemoved) => bridge.listProjects(includeRemoved),
     listProjectDirectory: (request) => bridge.listProjectDirectory(request),
+    watchProjectDirectory: (request) => bridge.watchProjectDirectory(request),
+    unwatchProjectDirectory: (subscriptionId) => bridge.unwatchProjectDirectory(subscriptionId),
+    onProjectDirectoryChanged: (handler) => bridge.onProjectDirectoryChanged(handler),
     resolveProjectEntryForTask: (request) => bridge.resolveProjectEntryForTask(request),
     copyProjectEntryPath: (request) => bridge.copyProjectEntryPath(request),
     openProjectEntryWith: (request) => bridge.openProjectEntryWith(request),

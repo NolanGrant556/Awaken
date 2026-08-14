@@ -85,9 +85,9 @@
   box-sizing: border-box;
   display: flex;
   align-items: flex-end;
-  width: calc(100% - 28px);
+  width: 100%;
   min-height: 60px;
-  margin: -28px auto 0;
+  margin: -28px 0 0;
   padding: 22px 12px 8px;
   border: 1px solid var(--aw-border-light);
   border-top: 0;

@@ -28,7 +28,7 @@ const rowBase: CSSProperties = {
   color: "var(--aw-text-secondary)",
   fontSize: "var(--aw-font-size-lg)",
   lineHeight: "var(--aw-line-height-lg)",
-  fontWeight: "var(--aw-font-weight-semibold)",
+  fontWeight: "var(--aw-font-weight-medium)",
   textAlign: "left",
   cursor: "pointer",
   transition: "background-color var(--aw-transition-fast), color var(--aw-transition-fast)",

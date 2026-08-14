@@ -16,6 +16,64 @@ function cssRule(source: string, selector: string): string {
 }
 
 describe("RunStage layout", () => {
+  it("keeps the center-home spacing, project shelf, and sidebar typography aligned", () => {
+    const workbenchStyles = readFileSync(
+      new URL("./styles/workbench.css", import.meta.url),
+      "utf8",
+    );
+    const designSystemStyles = readFileSync(
+      new URL(
+        "../../../../Awaken Design System/src/tokens/components.css",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const composerStyles = readFileSync(
+      new URL(
+        "../../../../Awaken Design System/src/components/AwakenComposerBar/AwakenComposerBar.css",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const newTaskSource = readFileSync(
+      new URL(
+        "../../../../Awaken Design System/src/components/AwakenNewTaskButton/AwakenNewTaskButton.tsx",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const primaryNavSource = readFileSync(
+      new URL(
+        "../../../../Awaken Design System/src/components/AwakenPrimaryNav/AwakenPrimaryNav.tsx",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(cssRule(workbenchStyles, ".run-stage-center-composer")).toContain(
+      "gap: 16px;",
+    );
+    expect(cssRule(designSystemStyles, ".aw-task-welcome")).toContain("gap: 14px;");
+
+    const projectShelf = cssRule(composerStyles, ".composer-bar-project-shelf");
+    expect(projectShelf).toContain("width: 100%;");
+    expect(projectShelf).toContain("margin: -28px 0 0;");
+    expect(projectShelf).not.toContain("calc(100% - 28px)");
+
+    const newTaskStyle = newTaskSource.slice(
+      newTaskSource.indexOf("const buttonStyle"),
+      newTaskSource.indexOf("const leftStyle"),
+    );
+    const primaryNavStyle = primaryNavSource.slice(
+      primaryNavSource.indexOf("const rowBase"),
+      primaryNavSource.indexOf("const iconWrapStyle"),
+    );
+    expect(newTaskStyle).toContain('fontWeight: "var(--aw-font-weight-medium)"');
+    expect(primaryNavStyle).toContain('fontWeight: "var(--aw-font-weight-medium)"');
+    expect(newTaskStyle).not.toContain("--aw-font-weight-semibold");
+    expect(primaryNavStyle).not.toContain("--aw-font-weight-semibold");
+  });
+
   it("adds breathing room only between adjacent turns", () => {
     const workbenchStyles = readFileSync(
       new URL("./styles/workbench.css", import.meta.url),

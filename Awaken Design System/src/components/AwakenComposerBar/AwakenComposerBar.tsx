@@ -304,7 +304,7 @@ function ComposerContextUsageMeter({
   const accessibleName = item.value ? `${item.label}，${item.value}` : item.label;
   const tooltipLabel = (
     <span className="composer-bar-context-tooltip">
-      <span className="composer-bar-context-tooltip-summary">{progressPercent}% 预计使用</span>
+      <span className="composer-bar-context-tooltip-summary">{progressPercent}% 当前使用</span>
       {item.value ? (
         <span className="composer-bar-context-tooltip-detail">{item.value}</span>
       ) : null}

@@ -1,6 +1,6 @@
 ---
 name: excel
-version: 2.1.0
+version: 2.2.0
 description: 创建、读取、编辑、清洗和校验电子表格（.xlsx/.xlsm/.xltx/.csv/.tsv）。只要表格文件是主要输入或输出，就应使用本 Skill；包括公式、格式、图表、财务模型、脏表整理、模板填充和格式转换。若表格只是输入而最终还要交付 Word/PPT/PDF，应再加载对应的最小 Skill 集合。
 when_to_use: 用户提到 Excel、xlsx、xlsm、xltx、csv、tsv、工作簿、公式、财务模型、表格清洗或需要产出可继续编辑的表格文件时。
 user-invocable: true
@@ -33,6 +33,7 @@ user-invocable: true
 | 发布最终交付物 | `artifact_publish`（必做） |
 
 - 包内脚本一律通过 `${AWAKEN_SKILL_DIR}` 的绝对路径调用。
+- Windows 注入到正文的 Skill 路径使用 `C:/...` 形式，可同时作为 Git Bash、PowerShell、cmd 和 Python 参数；不要改回反斜杠路径再交给 POSIX Shell。
 - 最终表格必须位于当前任务工作区的 output root。
 - 编辑用户原文件时默认输出新文件，不覆盖原件。
 - Skill 已加载不代表 Python 包或 LibreOffice 已存在；以真实探测和执行结果为准。
@@ -42,14 +43,22 @@ user-invocable: true
 
 ## 第一步：依赖探测与恢复
 
-按当前动作只探测对应 route：
+按当前动作只探测对应 route。macOS、Linux 或 Windows Git Bash 使用当前快照已观察到的 `python3`/`python`：
 
 ```bash
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route read_precise --dependency-root "$PWD" --json
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route clean --dependency-root "$PWD" --json
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route create_edit --dependency-root "$PWD" --json
-python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route recalc --dependency-root "$PWD" --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route read_precise --dependency-root "." --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route clean --dependency-root "." --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route create_edit --dependency-root "." --json
+python3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route recalc --dependency-root "." --json
 ```
+
+Windows 优先根据环境快照使用已观察到的 Python Launcher；`py` 可用时命令为：
+
+```text
+py -3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py" --route read_precise --dependency-root "." --json
+```
+
+若快照只有 `python`，把 `py -3` 换成 `python`。两者都未观察到时，不要反复猜测命令名；报告 Python 3.9+ 缺失并按正常安装路线恢复。Bash 结果会报告实际 Shell；后续在 PowerShell 中调用 doctor 返回的绝对 Python 路径时使用 `& "<execution_plan.python>" ...`，Git Bash/cmd 使用 `"<execution_plan.python>" ...`。
 
 后续命令固定使用 `execution_plan.python` 和 `execution_plan.libreoffice` 的绝对路径；不要重新调用裸 `python3` 猜测同一 run 的解释器。
 

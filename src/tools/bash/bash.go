@@ -134,7 +134,7 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, observer tool.T
 	if err != nil {
 		return tool.FailedOutcome(err.Error(), tool.ErrorCodeNeedsRuntime, tool.ErrorCategoryRuntime, true).WithTiming(started, time.Now().UTC()), nil
 	}
-	shell, args, kind, err := selectShell(hostEnvironment, p.Command)
+	shell, args, kind, err := selectShell(ctx, hostEnvironment, p.Command)
 	if err != nil {
 		return tool.FailedOutcome(err.Error(), tool.ErrorCodeProcessSpawnFailed, tool.ErrorCategoryRuntime, true).WithTiming(started, time.Now().UTC()), nil
 	}
@@ -183,16 +183,9 @@ func pinnedHostEnvironment(ctx context.Context, cwd string) (tool.HostEnvironmen
 	return tool.ResolveHostEnvironment(ctx, tool.ExecutionEnvironmentProbeOptions{WorkingDirectory: cwd, WorkspaceRoot: cwd, RefreshReason: "bash_direct", ProbeVersions: false}), nil
 }
 
-func selectShell(environment tool.HostEnvironment, command string) (string, []string, string, error) {
+func selectShell(ctx context.Context, environment tool.HostEnvironment, command string) (string, []string, string, error) {
 	if runtime.GOOS == "windows" {
-		for _, candidate := range []struct{ name, kind string }{{"bash", "posix"}, {"pwsh", "powershell"}, {"powershell", "powershell"}, {"cmd", "cmd"}} {
-			path := findExecutable(environment, candidate.name)
-			if path == "" {
-				continue
-			}
-			return path, invocationArgs(path, candidate.kind, command), candidate.kind, nil
-		}
-		return "", nil, "", fmt.Errorf("no supported shell found (Git Bash, pwsh, powershell, cmd)")
+		return selectWindowsShell(ctx, environment, command, cachedShellHealthProbe)
 	}
 	shell := strings.TrimSpace(environment.Shell)
 	if shell == "" {

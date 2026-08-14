@@ -113,7 +113,7 @@ def minimal_pptx_files() -> dict[str, str]:
 
 class SkillTextTests(unittest.TestCase):
     def test_three_skills_keep_awaken_contract_and_chinese_workflow(self):
-        versions = {"word": "2.2.0", "ppt": "2.1.0", "excel": "2.1.0"}
+        versions = {"word": "2.2.0", "ppt": "2.1.0", "excel": "2.2.0"}
         for skill, version in versions.items():
             body = (SYSTEM_SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
             self.assertIn(f"version: {version}", body)
@@ -125,6 +125,13 @@ class SkillTextTests(unittest.TestCase):
             self.assertIn("execution_plan.python", body)
             self.assertIn("禁止接 `| tail`", body)
             self.assertIn("不得改用裸", body)
+
+    def test_excel_documents_windows_launcher_and_shell_safe_paths(self):
+        body = (SYSTEM_SKILLS / "excel" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("Windows 注入到正文的 Skill 路径使用 `C:/...`", body)
+        self.assertIn('py -3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py"', body)
+        self.assertIn("<execution_plan.python>", body)
+        self.assertNotIn('--dependency-root "$PWD"', body)
 
     def test_word_reading_has_one_bundled_route(self):
         body = (SYSTEM_SKILLS / "word" / "SKILL.md").read_text(encoding="utf-8")

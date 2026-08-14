@@ -69,8 +69,10 @@ const (
 // McpConfigFactory is a function that produces one or more MCP server configs
 // from a connector definition and optional OAuth scopes. The returned map keys
 // are server keys (e.g. "notion", "notion_search") and the values are
-// ScopedMcpServerConfig entries to inject into the MCP manager.
-type McpConfigFactory func(def ConnectorDefinition, scopes []string) map[string]mcpclient.ScopedMcpServerConfig
+// ScopedMcpServerConfig entries to inject into the MCP manager. Factories may
+// prepare connector-owned runtime assets, so preparation failures are returned
+// instead of being deferred to an opaque child-process startup error.
+type McpConfigFactory func(def ConnectorDefinition, scopes []string) (map[string]mcpclient.ScopedMcpServerConfig, error)
 
 // ConnectorDefinition is the static metadata for a single connector.
 type ConnectorDefinition struct {

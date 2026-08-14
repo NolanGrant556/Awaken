@@ -194,7 +194,7 @@ func npxDependency(source string) tool.DependencyRequirement {
 }
 
 // puppeteerConfigFactory generates MCP server configs for the Puppeteer connector.
-func puppeteerConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
+func puppeteerConfigFactory(def ConnectorDefinition, _ []string) (map[string]mcpclient.ScopedMcpServerConfig, error) {
 	cmd, args := npxCommand("-y", "@modelcontextprotocol/server-puppeteer")
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"puppeteer": {
@@ -209,11 +209,11 @@ func puppeteerConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpc
 				DisplayName: def.DisplayName,
 			},
 		},
-	}
+	}, nil
 }
 
 // chromeDevToolsConfigFactory generates MCP server configs for the Chrome DevTools MCP connector.
-func chromeDevToolsConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
+func chromeDevToolsConfigFactory(def ConnectorDefinition, _ []string) (map[string]mcpclient.ScopedMcpServerConfig, error) {
 	cmd, args := npxCommand("-y", "chrome-devtools-mcp@latest")
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"chrome-devtools-mcp": {
@@ -228,11 +228,15 @@ func chromeDevToolsConfigFactory(def ConnectorDefinition, _ []string) map[string
 				DisplayName: def.DisplayName,
 			},
 		},
-	}
+	}, nil
 }
 
 // playwrightConfigFactory generates MCP server configs for the Playwright connector.
-func playwrightConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
+func playwrightConfigFactory(def ConnectorDefinition, _ []string) (map[string]mcpclient.ScopedMcpServerConfig, error) {
+	env, err := preparePlaywrightLogEnvironment()
+	if err != nil {
+		return nil, err
+	}
 	cmd, args := npxCommand("-y", "@executeautomation/playwright-mcp-server")
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"playwright": {
@@ -242,16 +246,16 @@ func playwrightConfigFactory(def ConnectorDefinition, _ []string) map[string]mcp
 				Stdio: &mcpclient.StdioTransportConfig{
 					Command: cmd,
 					Args:    args,
-					Env:     map[string]string{},
+					Env:     env,
 				},
 				DisplayName: def.DisplayName,
 			},
 		},
-	}
+	}, nil
 }
 
 // githubConfigFactory generates MCP server configs for the GitHub connector.
-func githubConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
+func githubConfigFactory(def ConnectorDefinition, _ []string) (map[string]mcpclient.ScopedMcpServerConfig, error) {
 	cmd, args := npxCommand("-y", "@modelcontextprotocol/server-github")
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"github": {
@@ -265,11 +269,11 @@ func githubConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclie
 				DisplayName: def.DisplayName,
 			},
 		},
-	}
+	}, nil
 }
 
 // context7ConfigFactory generates MCP server configs for the Context7 connector.
-func context7ConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpclient.ScopedMcpServerConfig {
+func context7ConfigFactory(def ConnectorDefinition, _ []string) (map[string]mcpclient.ScopedMcpServerConfig, error) {
 	cmd, args := npxCommand("-y", "@upstash/context7-mcp@latest")
 	return map[string]mcpclient.ScopedMcpServerConfig{
 		"context7": {
@@ -286,7 +290,7 @@ func context7ConfigFactory(def ConnectorDefinition, _ []string) map[string]mcpcl
 				DisplayName: def.DisplayName,
 			},
 		},
-	}
+	}, nil
 }
 
 // mergeScopes merges the connector's required scopes with any user-supplied

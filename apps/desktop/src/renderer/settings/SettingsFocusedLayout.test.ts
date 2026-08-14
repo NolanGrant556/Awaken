@@ -24,17 +24,29 @@ const computerStyles = readFileSync(
   ),
   "utf8",
 );
+const searchStyles = readFileSync(
+  new URL(
+    "../../../../../Awaken Design System/src/components/AwakenSearchSettings/AwakenSearchSettings.css",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const desktopStyles = readFileSync(
   new URL("../styles.css", import.meta.url),
   "utf8",
 );
 
 describe("focused settings layout", () => {
-  it("centers the three compact settings pages on one shared width", () => {
+  it("centers the compact settings pages on one shared width", () => {
     expect(settingsStyles).toContain(
       "--aw-settings-focused-content-width: 820px;",
     );
-    for (const styles of [petsStyles, computerStyles, desktopStyles]) {
+    for (const styles of [
+      petsStyles,
+      computerStyles,
+      searchStyles,
+      desktopStyles,
+    ]) {
       expect(styles).toContain(
         "width: min(100%, var(--aw-settings-focused-content-width, 820px));",
       );
@@ -44,6 +56,9 @@ describe("focused settings layout", () => {
     expect(petsStyles).toContain("min-height: 56px;");
     expect(computerStyles).toMatch(
       /\.computer-settings-card\s*\{[\s\S]*?padding:\s*14px;/,
+    );
+    expect(searchStyles).toMatch(
+      /\.search-channel-card\s*\{[\s\S]*?min-height:\s*76px;[\s\S]*?padding:\s*12px 14px;/,
     );
     expect(desktopStyles).toContain("min-height: 76px;");
   });

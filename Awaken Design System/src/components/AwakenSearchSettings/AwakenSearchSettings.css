@@ -1,26 +1,26 @@
 @import "../../tokens/components.css";
 
-.search-settings { display: grid; gap: 18px; padding: 24px; }
+.search-settings { display: grid; gap: 18px; box-sizing: border-box; width: min(100%, var(--aw-settings-focused-content-width, 820px)); margin-inline: auto; padding: 8px 0 36px; }
 .search-settings-intro h2 { margin: 0 0 6px; font-size: 16px; }
 .search-settings-intro p,
 .search-channel-copy p { margin: 0; color: var(--aw-text-secondary); font-size: 13px; }
 .search-channel-list { display: grid; gap: 12px; }
 .search-channel-card {
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr) auto;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 16px;
-  min-height: 96px;
-  padding: 16px 18px;
+  gap: 12px;
+  min-height: 76px;
+  padding: 12px 14px;
   border: 1px solid var(--aw-border-main);
   border-radius: var(--aw-radius-lg);
   background: var(--aw-bg-fill-light);
 }
-.search-channel-icon { display: grid; place-items: center; width: 54px; height: 54px; color: var(--aw-text-secondary); border-radius: var(--aw-radius-md); background: var(--aw-bg-white); }
-.search-channel-copy { min-width: 0; }
-.search-channel-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
+.search-channel-icon { display: grid; place-items: center; width: 44px; height: 44px; color: var(--aw-text-secondary); border-radius: var(--aw-radius-md); background: var(--aw-bg-white); }
+.search-channel-copy { display: grid; gap: 4px; min-width: 0; }
+.search-channel-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .search-channel-title-row h3 { margin: 0; font-size: 15px; }
-.search-channel-meta { display: flex; gap: 6px; margin-top: 9px; }
+.search-channel-meta { display: flex; gap: 6px; }
 .search-channel-meta span { padding: 2px 8px; color: var(--aw-text-secondary); font-size: 12px; border-radius: 999px; background: var(--aw-bg-fill); }
 .search-channel-actions { display: flex; align-items: center; gap: 12px; }
 .search-channel-test-button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 10px; color: var(--aw-text-secondary); font-size: 12px; font-weight: var(--aw-font-weight-bold); border: 1px solid var(--aw-border-main); border-radius: var(--aw-radius-md); background: var(--aw-bg-white); }
@@ -32,5 +32,4 @@
 @media (max-width: 720px) {
   .search-channel-card { grid-template-columns: 44px minmax(0, 1fr); }
   .search-channel-actions { grid-column: 2; justify-content: space-between; }
-  .search-channel-icon { width: 44px; height: 44px; }
 }

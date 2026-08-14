@@ -45,9 +45,9 @@ export function AwakenSearchSettings({
                 <span className={`extension-state ${provider.enabled ? "extension-state-connected" : "extension-state-disabled"}`}>
                   {provider.enabled ? "已开启" : "已关闭"}
                 </span>
+                <div className="search-channel-meta"><span>内置</span><span>免 key</span></div>
               </div>
               <p>{provider.description}</p>
-              <div className="search-channel-meta"><span>内置</span><span>免 key</span></div>
               {provider.testMessage ? <div className="search-channel-test-result" role="status">{provider.testMessage}</div> : null}
             </div>
             <div className="search-channel-actions">

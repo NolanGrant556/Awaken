@@ -71,6 +71,11 @@ func main() {
 	} else if len(legacyCLIReport.Removed) > 0 || len(legacyCLIReport.ReviewRequired) > 0 {
 		log.Printf("[connectors] legacy CLI MCP migration removed=%v review_required=%v", legacyCLIReport.Removed, legacyCLIReport.ReviewRequired)
 	}
+	if changed, prepareErr := connectors.PreparePlaywrightLogRouting(); prepareErr != nil {
+		log.Printf("[connectors] Playwright MCP log routing unavailable: %v", prepareErr)
+	} else if changed {
+		log.Printf("[connectors] Playwright MCP log routing prepared under AWAKEN_HOME")
+	}
 
 	manager := buildMCPManager(defaultWorkspace)
 	connRegistry := buildConnectorRegistry(manager, defaultWorkspace, legacyCLIReport.ReviewRequired)

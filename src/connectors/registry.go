@@ -270,7 +270,11 @@ func (r *Registry) Connect(ctx context.Context, connectorID string) error {
 		}
 	} else if def.McpConfigFactory != nil {
 		// Builtin connector: use config factory.
-		scopedConfigs = def.McpConfigFactory(def, nil)
+		var err error
+		scopedConfigs, err = def.McpConfigFactory(def, nil)
+		if err != nil {
+			return fmt.Errorf("prepare connector %q config: %w", connectorID, err)
+		}
 	} else {
 		return fmt.Errorf("connector %q has neither a config factory nor a raw config", connectorID)
 	}

@@ -45,6 +45,12 @@ function dispatchPreviewPointerEvent(
 
 function previewRuntimeClient() {
   return {
+    watchProjectDirectory: vi.fn(async () => ({
+      ok: true as const,
+      subscriptionId: "project-files-watch-1",
+    })),
+    unwatchProjectDirectory: vi.fn(async () => undefined),
+    onProjectDirectoryChanged: vi.fn(() => () => {}),
     copyProjectEntryPath: vi.fn(async () => ({ ok: true as const })),
     openProjectEntryWith: vi.fn(async () => ({ ok: true as const })),
     startProjectFilePreview: vi.fn(async () => ({
@@ -464,6 +470,132 @@ describe("ProjectFilesWorkspace", () => {
       folderPath: "/workspace/docs",
     });
     expect(container.textContent).toContain("brief.md");
+  });
+
+  it("refreshes loaded directory snapshots after files are added or deleted", async () => {
+    let entries = [
+      { name: "old.txt", relativePath: "old.txt", kind: "file" as const },
+    ];
+    const listProjectDirectory = vi.fn(async () => ({
+      ok: true as const,
+      relativePath: "",
+      entries,
+    }));
+    let emitDirectoryChanged: ((event: { subscriptionId: string }) => void) | undefined;
+    const unwatchProjectDirectory = vi.fn(async () => undefined);
+    const runtimeActions = {
+      ...previewRuntimeClient(),
+      listProjectDirectory,
+      watchProjectDirectory: vi.fn(async () => ({
+        ok: true as const,
+        subscriptionId: "watch-1",
+      })),
+      unwatchProjectDirectory,
+      onProjectDirectoryChanged: vi.fn(
+        (handler: (event: { subscriptionId: string }) => void) => {
+          emitDirectoryChanged = handler;
+          return () => {};
+        },
+      ),
+    };
+
+    await act(async () => {
+      root.render(
+        <ProjectFilesWorkspace
+          runtimeClient={runtimeActions}
+          projectId="project-1"
+          folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
+        />,
+      );
+    });
+    await settle();
+    expect(container.textContent).toContain("old.txt");
+
+    entries = [
+      { name: "new.txt", relativePath: "new.txt", kind: "file" as const },
+    ];
+    await act(async () => {
+      emitDirectoryChanged?.({ subscriptionId: "watch-1" });
+    });
+    await settle();
+
+    expect(container.textContent).toContain("new.txt");
+    expect(container.textContent).not.toContain("old.txt");
+    expect(listProjectDirectory).toHaveBeenLastCalledWith({
+      projectId: "project-1",
+      folderPath: "/workspace/app",
+    });
+  });
+
+  it("refreshes expanded directories without collapsing surviving tree state", async () => {
+    let nestedEntries = [
+      { name: "old.md", relativePath: "docs/old.md", kind: "file" as const },
+    ];
+    const listProjectDirectory = vi.fn(
+      async (request: { relativePath?: string }) =>
+        request.relativePath === "docs"
+          ? {
+              ok: true as const,
+              relativePath: "docs",
+              entries: nestedEntries,
+            }
+          : {
+              ok: true as const,
+              relativePath: "",
+              entries: [
+                { name: "docs", relativePath: "docs", kind: "directory" as const },
+              ],
+            },
+    );
+    let emitDirectoryChanged: ((event: { subscriptionId: string }) => void) | undefined;
+    const runtimeActions = {
+      ...previewRuntimeClient(),
+      listProjectDirectory,
+      watchProjectDirectory: vi.fn(async () => ({
+        ok: true as const,
+        subscriptionId: "watch-nested",
+      })),
+      onProjectDirectoryChanged: vi.fn(
+        (handler: (event: { subscriptionId: string }) => void) => {
+          emitDirectoryChanged = handler;
+          return () => {};
+        },
+      ),
+    };
+
+    await act(async () => {
+      root.render(
+        <ProjectFilesWorkspace
+          runtimeClient={runtimeActions}
+          projectId="project-1"
+          folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
+        />,
+      );
+    });
+    await settle();
+    const docsRow = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[role="treeitem"]'),
+    ).find((row) => row.textContent?.includes("docs"));
+    await act(async () => docsRow?.click());
+    await settle();
+    expect(container.textContent).toContain("old.md");
+
+    nestedEntries = [
+      { name: "new.md", relativePath: "docs/new.md", kind: "file" as const },
+    ];
+    await act(async () => {
+      emitDirectoryChanged?.({ subscriptionId: "watch-nested" });
+    });
+    await settle();
+
+    expect(docsRow?.getAttribute("aria-expanded")).toBe("true");
+    expect(container.textContent).toContain("new.md");
+    expect(container.textContent).not.toContain("old.md");
+    expect(listProjectDirectory).toHaveBeenCalledWith({
+      projectId: "project-1",
+      folderPath: "/workspace/app",
+      relativePath: "docs",
+    });
   });
 
   it("reports file selections as project-scoped tabs with the matching mode", async () => {

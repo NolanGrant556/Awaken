@@ -56,9 +56,13 @@ import {
   type MemoryListRequest,
   type MemorySettingsDocument,
   type MemorySettingsPatch,
+  PROJECT_DIRECTORY_CHANGED_CHANNEL,
+  type ProjectDirectoryChangedEvent,
   type ProjectFolderSelection,
   type ProjectDirectoryListRequest,
   type ProjectDirectoryListResult,
+  type ProjectDirectoryWatchRequest,
+  type ProjectDirectoryWatchResult,
   type ProjectEntryActionRequest,
   type ProjectEntryActionResult,
   type ProjectEntryOpenWithRequest,
@@ -246,6 +250,19 @@ const bridge: AwakenBridge = {
       "awaken:list-project-directory",
       request,
     ) as Promise<ProjectDirectoryListResult>,
+  watchProjectDirectory: (request: ProjectDirectoryWatchRequest) =>
+    ipcRenderer.invoke(
+      "awaken:watch-project-directory",
+      request,
+    ) as Promise<ProjectDirectoryWatchResult>,
+  unwatchProjectDirectory: (subscriptionId: string) =>
+    ipcRenderer.invoke("awaken:unwatch-project-directory", subscriptionId) as Promise<void>,
+  onProjectDirectoryChanged: (callback) => {
+    const handler = (_event: IpcRendererEvent, payload: ProjectDirectoryChangedEvent) =>
+      callback(payload);
+    ipcRenderer.on(PROJECT_DIRECTORY_CHANGED_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(PROJECT_DIRECTORY_CHANGED_CHANNEL, handler);
+  },
   resolveProjectEntryForTask: (request: ProjectEntryActionRequest) =>
     ipcRenderer.invoke(
       "awaken:resolve-project-entry-for-task",

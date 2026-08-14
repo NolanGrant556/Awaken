@@ -147,3 +147,28 @@ describe("preload scheduled task bridge", () => {
     expect(activated).toEqual(["thread-9"]);
   });
 });
+
+describe("preload project directory watch bridge", () => {
+  it("forwards scoped watch lifecycle calls and removes change listeners", async () => {
+    const bridge = exposedBridge as Record<string, (...args: unknown[]) => unknown>;
+    const request = { projectId: "project-1", folderPath: "/workspace/app" };
+    invokeMock.mockResolvedValue({ ok: true, subscriptionId: "watch-1" });
+
+    await bridge.watchProjectDirectory(request);
+    expect(invokeMock).toHaveBeenLastCalledWith("awaken:watch-project-directory", request);
+    await bridge.unwatchProjectDirectory("watch-1");
+    expect(invokeMock).toHaveBeenLastCalledWith("awaken:unwatch-project-directory", "watch-1");
+
+    const received: unknown[] = [];
+    const unsubscribe = bridge.onProjectDirectoryChanged(
+      (event: unknown) => received.push(event),
+    ) as () => void;
+    const dispatch = listeners.get("awaken:project-directory-changed");
+    expect(dispatch).toBeDefined();
+    dispatch!({}, { subscriptionId: "watch-1" });
+    expect(received).toEqual([{ subscriptionId: "watch-1" }]);
+
+    unsubscribe();
+    expect(listeners.has("awaken:project-directory-changed")).toBe(false);
+  });
+});

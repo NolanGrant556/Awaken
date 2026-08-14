@@ -334,6 +334,30 @@ export type ProjectDirectoryListResult =
       message: string;
     };
 
+export const PROJECT_DIRECTORY_CHANGED_CHANNEL = "awaken:project-directory-changed";
+
+export type ProjectDirectoryWatchRequest = {
+  projectId: string;
+  folderPath: string;
+};
+
+export type ProjectDirectoryWatchResult =
+  | {
+      ok: true;
+      subscriptionId: string;
+    }
+  | {
+      ok: false;
+      code:
+        | Exclude<ProjectDirectoryListResult, { ok: true }>["code"]
+        | "WATCH_UNAVAILABLE";
+      message: string;
+    };
+
+export type ProjectDirectoryChangedEvent = {
+  subscriptionId: string;
+};
+
 export type ProjectEntryKind = "directory" | "file";
 
 export type ProjectEntryActionRequest = {
@@ -1971,6 +1995,13 @@ export type AwakenBridge = {
   listProjectDirectory: (
     request: ProjectDirectoryListRequest,
   ) => Promise<ProjectDirectoryListResult>;
+  watchProjectDirectory: (
+    request: ProjectDirectoryWatchRequest,
+  ) => Promise<ProjectDirectoryWatchResult>;
+  unwatchProjectDirectory: (subscriptionId: string) => Promise<void>;
+  onProjectDirectoryChanged: (
+    handler: (event: ProjectDirectoryChangedEvent) => void,
+  ) => () => void;
   resolveProjectEntryForTask: (
     request: ProjectEntryActionRequest,
   ) => Promise<ProjectEntryResolveResult>;

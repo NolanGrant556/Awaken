@@ -572,6 +572,12 @@ function stubElectronBridge(): void {
         relativePath: "",
         entries: [],
       })),
+      watchProjectDirectory: vi.fn(async () => ({
+        ok: true as const,
+        subscriptionId: "project-files-watch-1",
+      })),
+      unwatchProjectDirectory: vi.fn(async () => undefined),
+      onProjectDirectoryChanged: vi.fn(() => () => {}),
       resolveProjectEntryForTask: vi.fn(async () => ({
         ok: false as const,
         code: "ENTRY_NOT_FOUND" as const,

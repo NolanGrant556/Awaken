@@ -39,6 +39,7 @@ import {
   normalizeModelProvider,
   normalizeModelProfileRunConfig,
   normalizeModelProfileSummary,
+  PROJECT_DIRECTORY_CHANGED_CHANNEL,
   normalizeRuntimeProject,
   normalizeRuntimeProjectOperation,
   normalizeRuntimeInfo,
@@ -75,6 +76,8 @@ import {
   type PickedAttachmentFile,
   type ProjectDirectoryListRequest,
   type ProjectDirectoryListResult,
+  type ProjectDirectoryWatchRequest,
+  type ProjectDirectoryWatchResult,
   type ProjectEntryActionRequest,
   type ProjectEntryActionResult,
   type ProjectEntryOpenWithRequest,
@@ -168,6 +171,7 @@ import {
   prepareComputerRuntime,
 } from "./computer-setup.js";
 import { listProjectDirectory, resolveProjectEntry } from "./project-files.js";
+import { ProjectDirectoryWatchManager } from "./project-directory-watch-manager.js";
 import { ProjectFilePreviewManager } from "./project-file-preview-manager.js";
 import { ArtifactMediaManager } from "./artifact-media-manager.js";
 import { ComputerOverlayManager } from "./computer-overlay-manager.js";
@@ -272,6 +276,13 @@ type StreamSubscription = {
 const subscriptions = new Map<string, StreamSubscription>();
 const computerRunMonitors = new Map<string, AbortController>();
 const desktopControlToken = randomUUID();
+const projectDirectoryWatchManager = new ProjectDirectoryWatchManager(
+  ({ webContentsId, event }) => {
+    const target = webContents.fromId(webContentsId);
+    if (!target || target.isDestroyed()) return;
+    target.send(PROJECT_DIRECTORY_CHANGED_CHANNEL, event);
+  },
+);
 
 const defaultWindowWidth = 1440;
 const defaultWindowHeight = 960;
@@ -1026,6 +1037,7 @@ function cleanupWindowSubscriptions(targetId: number): void {
       subscriptions.delete(subscriptionId);
     }
   }
+  projectDirectoryWatchManager.releaseForWebContents(targetId);
 }
 
 function createMainWindow(): BrowserWindow {
@@ -2639,6 +2651,44 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  "awaken:watch-project-directory",
+  async (event, request: ProjectDirectoryWatchRequest): Promise<ProjectDirectoryWatchResult> => {
+    if (
+      !mainWindowRef ||
+      mainWindowRef.isDestroyed() ||
+      event.sender.id !== mainWindowRef.webContents.id
+    ) {
+      return {
+        ok: false,
+        code: "UNAUTHORIZED",
+        message: "文件目录订阅来源无效。",
+      };
+    }
+    const projects = await requestRuntimeDomain<RuntimeProjectWire[]>(
+      "/v1/projects?include_removed=false",
+      { method: "GET" },
+    );
+    return projectDirectoryWatchManager.subscribe(
+      projects.map(normalizeRuntimeProject),
+      request,
+      event.sender.id,
+    );
+  },
+);
+
+ipcMain.handle("awaken:unwatch-project-directory", (event, subscriptionId: string): void => {
+  if (
+    !mainWindowRef ||
+    mainWindowRef.isDestroyed() ||
+    event.sender.id !== mainWindowRef.webContents.id ||
+    typeof subscriptionId !== "string"
+  ) {
+    return;
+  }
+  projectDirectoryWatchManager.unsubscribe(subscriptionId, event.sender.id);
+});
+
+ipcMain.handle(
   "awaken:resolve-project-entry-for-task",
   async (event, request: ProjectEntryActionRequest): Promise<ProjectEntryResolveResult> => {
     if (
@@ -3834,6 +3884,7 @@ app.on("before-quit", (event) => {
     subscription.controller.abort();
   }
   subscriptions.clear();
+  projectDirectoryWatchManager.dispose();
   projectFilePreviewManager?.dispose();
   projectFilePreviewManager = null;
   artifactMediaManager?.dispose();

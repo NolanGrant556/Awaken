@@ -16,6 +16,7 @@ import (
 	"awaken/src/tool"
 	_ "awaken/src/tools/read"
 	_ "awaken/src/tools/subagent"
+	_ "awaken/src/tools/write"
 )
 
 func TestNativeSubagentToolRunsReadOnlyChildAndReturnsHandoff(t *testing.T) {
@@ -320,6 +321,216 @@ func TestSubagentProgressReportsOnlyAfterChildFactsAreDurable(t *testing.T) {
 	}
 	if len(updates) != 2 || updates[0].ToolCallID != "call-read" || updates[1].ModelRequestID != "request-1" || updates[1].TotalTokens != 150 || !updates[1].HasTotalTokens {
 		t.Fatalf("progress updates = %+v", updates)
+	}
+}
+
+func TestNativeGeneralSharedChildWritesParentWorkspace(t *testing.T) {
+	root := t.TempDir()
+	config := AgentConfig{
+		Workspace: WorkspaceConfig{
+			Root: root, ReadableRoots: []string{root}, WritableRoots: []string{root},
+		},
+		ToolExposure: tool.ToolExposurePolicy{Mode: tool.ExposureAll},
+	}
+	runner := NewRunner(config, convcontext.NewConversation(nil), NewRequestBuilder(config))
+	runner.threadID = "thread_write"
+	runner.runID = "run_write"
+	childTurns := 0
+	runner.streamLLMFunc = func(_ context.Context, events *runEventEmitter) (*llm.Response, error) {
+		if events.subagentTaskID == "" {
+			t.Fatal("child identity missing")
+		}
+		childTurns++
+		if childTurns == 1 {
+			return &llm.Response{ToolCalls: []llm.ToolCall{{
+				ID: "child-write", Name: "Write", Input: `{"file_path":"note.txt","content":"from general"}`,
+			}}}, nil
+		}
+		return &llm.Response{Content: "wrote note.txt"}, nil
+	}
+	var drained []string
+	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
+		ParentWritableRoots: []string{root},
+		Starter: func(ctx context.Context, request subagentruntime.StartRequest) (string, error) {
+			original := request.DrainMessages
+			request.DrainMessages = func() []subagentruntime.QueuedMessage {
+				messages := original()
+				for _, message := range messages {
+					drained = append(drained, message.Content)
+				}
+				return messages
+			}
+			return runner.startNativeChild(ctx, request, nil)
+		},
+		Persist: runner.persistSubagentEvent,
+	})
+	runner.subagentController = manager
+	t.Cleanup(func() { _ = manager.Close(context.Background()) })
+	events := newRunEventEmitter(runner.threadID, nil)
+	events.runID = runner.runID
+	runner.toolRuntime = NewToolRuntimeWithConfig(nil, toolRuntimeConfigFromAgentConfig(config))
+	runner.toolRuntime.runID = runner.runID
+	runner.toolRuntime.threadID = runner.threadID
+
+	spawned := runner.executeToolCalls(context.Background(), []convcontext.ToolCall{{
+		ID: "call_spawn_write",
+		Function: convcontext.FunctionCall{
+			Name:      "subagent",
+			Arguments: `{"action":"spawn","description":"写说明","prompt":"创建 note.txt","agent_type":"general","workspace_mode":"shared"}`,
+		},
+	}}, events)
+	if len(spawned) != 1 || spawned[0].IsError {
+		t.Fatalf("spawn = %+v", spawned)
+	}
+	var spawnPayload struct {
+		Task subagentruntime.TaskSnapshot `json:"task"`
+	}
+	if err := json.Unmarshal([]byte(spawned[0].Content), &spawnPayload); err != nil {
+		t.Fatal(err)
+	}
+	waitArgs, _ := json.Marshal(map[string]any{
+		"action": "wait", "task_ids": []string{spawnPayload.Task.TaskID}, "timeout_ms": 2000,
+	})
+	waited := runner.executeToolCalls(context.Background(), []convcontext.ToolCall{{
+		ID: "call_wait_write", Function: convcontext.FunctionCall{Name: "subagent", Arguments: string(waitArgs)},
+	}}, events)
+	if len(waited) != 1 || waited[0].IsError {
+		t.Fatalf("wait = %+v", waited)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "note.txt"))
+	if err != nil || string(data) != "from general" {
+		t.Fatalf("parent file = %q err=%v", data, err)
+	}
+}
+
+func TestNativeChildDrainsQueuedMessageAtNextTurn(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "auth.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := AgentConfig{
+		Workspace:    WorkspaceConfig{Root: root, ReadableRoots: []string{root}, WritableRoots: []string{root}},
+		ToolExposure: tool.ToolExposurePolicy{Mode: tool.ExposureAll},
+	}
+	runner := NewRunner(config, convcontext.NewConversation(nil), NewRequestBuilder(config))
+	runner.threadID = "thread_msg"
+	runner.runID = "run_msg"
+	started := make(chan struct{})
+	release := make(chan struct{})
+	childTurns := 0
+	runner.streamLLMFunc = func(_ context.Context, events *runEventEmitter) (*llm.Response, error) {
+		if events.subagentTaskID == "" {
+			return &llm.Response{Content: "root"}, nil
+		}
+		childTurns++
+		if childTurns == 1 {
+			close(started)
+			<-release
+			return &llm.Response{ToolCalls: []llm.ToolCall{{
+				ID: "child-read", Name: "Read", Input: `{"file_path":"auth.txt"}`,
+			}}}, nil
+		}
+		return &llm.Response{Content: "processed follow-up"}, nil
+	}
+	var drained []string
+	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
+		Starter: func(ctx context.Context, request subagentruntime.StartRequest) (string, error) {
+			original := request.DrainMessages
+			request.DrainMessages = func() []subagentruntime.QueuedMessage {
+				messages := original()
+				for _, message := range messages {
+					drained = append(drained, message.Content)
+				}
+				return messages
+			}
+			return runner.startNativeChild(ctx, request, nil)
+		},
+		Persist: runner.persistSubagentEvent,
+	})
+	runner.subagentController = manager
+	t.Cleanup(func() { _ = manager.Close(context.Background()) })
+	events := newRunEventEmitter(runner.threadID, nil)
+	events.runID = runner.runID
+	runner.toolRuntime = NewToolRuntimeWithConfig(nil, toolRuntimeConfigFromAgentConfig(config))
+	runner.toolRuntime.runID = runner.runID
+	runner.toolRuntime.threadID = runner.threadID
+	spawned := runner.executeToolCalls(context.Background(), []convcontext.ToolCall{{
+		ID: "call_spawn_msg",
+		Function: convcontext.FunctionCall{
+			Name:      "subagent",
+			Arguments: `{"action":"spawn","description":"探索","prompt":"先读文件","agent_type":"explore"}`,
+		},
+	}}, events)
+	var spawnPayload struct {
+		Task subagentruntime.TaskSnapshot `json:"task"`
+	}
+	if err := json.Unmarshal([]byte(spawned[0].Content), &spawnPayload); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if _, err := manager.Message(context.Background(), spawnPayload.Task.TaskID, "also list risks"); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	waitArgs, _ := json.Marshal(map[string]any{
+		"action": "wait", "task_ids": []string{spawnPayload.Task.TaskID}, "timeout_ms": 2000,
+	})
+	waited := runner.executeToolCalls(context.Background(), []convcontext.ToolCall{{
+		ID: "call_wait_msg", Function: convcontext.FunctionCall{Name: "subagent", Arguments: string(waitArgs)},
+	}}, events)
+	if len(waited) != 1 || waited[0].IsError {
+		t.Fatalf("wait = %+v", waited)
+	}
+	found := false
+	for _, content := range drained {
+		if content == "also list risks" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("queued message was not drained at child turn boundary: %v", drained)
+	}
+}
+
+func TestNativeChildInheritsFrozenMemorySnapshot(t *testing.T) {
+	root := t.TempDir()
+	config := AgentConfig{
+		Workspace:    WorkspaceConfig{Root: root, ReadableRoots: []string{root}, WritableRoots: []string{root}},
+		ToolExposure: tool.ToolExposurePolicy{Mode: tool.ExposureAll},
+	}
+	runner := NewRunner(config, convcontext.NewConversation(nil), NewRequestBuilder(config))
+	runner.memoryRecallSnapshot = &MemoryRecallSnapshot{
+		WorkspaceRoot: root,
+		Items: []MemoryRecallSnapshotItem{{
+			MemoryID: "mem_auth", Scope: "project", Content: "<memory id=\"mem_auth\">jwt</memory>",
+		}},
+	}
+	var seen string
+	runner.streamLLMFunc = func(_ context.Context, events *runEventEmitter) (*llm.Response, error) {
+		if events.subagentTaskID == "" {
+			return &llm.Response{Content: "root"}, nil
+		}
+		if runner.reqBuilder != nil {
+			// Child runner copies streamLLMFunc but uses its own request builder.
+		}
+		return &llm.Response{Content: "used inherited memory"}, nil
+	}
+	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
+		Starter: func(ctx context.Context, request subagentruntime.StartRequest) (string, error) {
+			content, err := runner.startNativeChild(ctx, request, nil)
+			seen = content
+			return content, err
+		},
+	})
+	task, err := manager.Spawn(context.Background(), subagentruntime.SpawnRequest{
+		Description: "use memory", Prompt: "summarize auth memory", AgentType: subagentruntime.AgentTypeReview,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := manager.Wait(context.Background(), subagentruntime.WaitRequest{TaskIDs: []string{task.TaskID}, Timeout: 2 * time.Second})
+	if err != nil || result.Tasks[0].Status != subagentruntime.StatusCompleted || seen != "used inherited memory" {
+		t.Fatalf("result=%+v seen=%q err=%v", result, seen, err)
 	}
 }
 

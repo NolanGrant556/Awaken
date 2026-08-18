@@ -100,9 +100,13 @@ func TestManagerRejectsNestedAndWritableSpawn(t *testing.T) {
 			request: SpawnRequest{Description: "x", Prompt: "y", AgentType: "explore", WorkspaceMode: "shared_readonly", ParentAgentID: "child"},
 			code:    ErrorBoundaryViolation,
 		},
-		"writable": {
+		"readonly-worktree": {
 			request: SpawnRequest{Description: "x", Prompt: "y", AgentType: "explore", WorkspaceMode: "git_worktree", ParentAgentID: "root"},
 			code:    ErrorWorkspaceMode,
+		},
+		"unknown-type": {
+			request: SpawnRequest{Description: "x", Prompt: "y", AgentType: "custom", WorkspaceMode: "shared_readonly", ParentAgentID: "root"},
+			code:    ErrorInvalidInput,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -112,6 +116,114 @@ func TestManagerRejectsNestedAndWritableSpawn(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestManagerAcceptsPlanAndGeneralShared(t *testing.T) {
+	manager := NewManager(context.Background(), Config{
+		ParentWritableRoots: []string{"/workspace"},
+		Starter:             func(context.Context, StartRequest) (string, error) { return "done", nil },
+	})
+	plan, err := manager.Spawn(context.Background(), SpawnRequest{
+		Description: "plan change", Prompt: "plan the auth rewrite", AgentType: AgentTypePlan,
+	})
+	if err != nil || plan.AgentType != AgentTypePlan || plan.WorkspaceMode != WorkspaceSharedReadOnly {
+		t.Fatalf("plan spawn = %+v err=%v", plan, err)
+	}
+	general, err := manager.Spawn(context.Background(), SpawnRequest{
+		Description: "implement", Prompt: "write the file", AgentType: AgentTypeGeneral,
+	})
+	if err != nil || general.AgentType != AgentTypeGeneral || general.WorkspaceMode != WorkspaceShared {
+		t.Fatalf("general spawn = %+v err=%v", general, err)
+	}
+	_, err = manager.Spawn(context.Background(), SpawnRequest{
+		Description: "second write", Prompt: "also write", AgentType: AgentTypeGeneral, WorkspaceMode: WorkspaceShared,
+	})
+	if ErrorCode(err) != ErrorBoundaryViolation {
+		t.Fatalf("overlapping shared write: %v", err)
+	}
+}
+
+func TestManagerMessageQueuesBeforeChildDrainAndRejectsTerminal(t *testing.T) {
+	started := make(chan StartRequest, 1)
+	release := make(chan struct{})
+	var events []string
+	var mu sync.Mutex
+	manager := NewManager(context.Background(), Config{
+		Starter: func(_ context.Context, request StartRequest) (string, error) {
+			started <- request
+			<-release
+			return "done", nil
+		},
+		Persist: func(_ context.Context, event PersistEvent) error {
+			mu.Lock()
+			kind := event.Kind
+			if event.Message != nil {
+				kind += ":" + event.Message.Content
+			}
+			events = append(events, kind)
+			mu.Unlock()
+			return nil
+		},
+	})
+	task, err := manager.Spawn(context.Background(), SpawnRequest{
+		Description: "chat", Prompt: "start", AgentType: AgentTypeExplore,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := <-started
+	receipt, err := manager.Message(context.Background(), task.TaskID, "follow up")
+	if err != nil || receipt.MessageID == "" {
+		t.Fatalf("message: %+v err=%v", receipt, err)
+	}
+	queued := request.DrainMessages()
+	if len(queued) != 1 || queued[0].Content != "follow up" {
+		t.Fatalf("drain = %+v", queued)
+	}
+	if second := request.DrainMessages(); len(second) != 0 {
+		t.Fatalf("messages must be one-shot: %+v", second)
+	}
+	close(release)
+	_, _ = manager.Wait(context.Background(), WaitRequest{TaskIDs: []string{task.TaskID}, Timeout: time.Second})
+	if _, err := manager.Message(context.Background(), task.TaskID, "too late"); ErrorCode(err) != ErrorNotRunning {
+		t.Fatalf("terminal message: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	found := false
+	for _, event := range events {
+		if event == "subagent_message_queued:follow up" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("message was not persisted before queue: %v", events)
+	}
+}
+
+func TestManagerMessageIdempotency(t *testing.T) {
+	manager := NewManager(context.Background(), Config{
+		Starter: func(ctx context.Context, _ StartRequest) (string, error) {
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+	})
+	task, err := manager.Spawn(context.Background(), SpawnRequest{Description: "id", Prompt: "id", AgentType: AgentTypeReview})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := manager.MessageIdempotent(context.Background(), task.TaskID, "same", "key-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.MessageIdempotent(context.Background(), task.TaskID, "same", "key-1")
+	if err != nil || second.MessageID != first.MessageID {
+		t.Fatalf("idempotent replay = %+v err=%v", second, err)
+	}
+	if _, err := manager.MessageIdempotent(context.Background(), task.TaskID, "other", "key-1"); ErrorCode(err) != ErrorIdempotency {
+		t.Fatalf("conflict: %v", err)
+	}
+	_ = manager.Close(context.Background())
 }
 
 func TestManagerCancelDoesNotCancelSibling(t *testing.T) {

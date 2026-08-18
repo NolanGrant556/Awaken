@@ -219,6 +219,23 @@ describe("RunStage layout", () => {
     );
   });
 
+  it("keeps subagent follow-up input off the main composer", () => {
+    const appSource = readFileSync(
+      new URL("./App.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(appSource).toContain('id="subagent-overlay-message"');
+    expect(appSource).toContain('id="subagent-inspector-message"');
+    expect(appSource).toContain("handleMessageSubagent");
+    expect(appSource).toContain("subagentMessageDrafts");
+    expect(appSource).toContain('placeholder="不会占用主输入框"');
+    const overlayForm = appSource.slice(
+      appSource.indexOf('id="subagent-overlay-message"'),
+      appSource.indexOf('id="subagent-overlay-message"') + 400,
+    );
+    expect(overlayForm).not.toContain("composer");
+  });
+
   it("keeps the right-rail subagent status pill on one line", () => {
     const appStyles = readFileSync(
       new URL("./styles.css", import.meta.url),

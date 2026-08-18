@@ -1292,7 +1292,7 @@ export function subagentElapsedMs(
   return finishedAt - startedAt;
 }
 
-function subagentWorkspaceModeLabel(mode?: string): string | undefined {
+export function subagentWorkspaceModeLabel(mode?: string): string | undefined {
   switch (mode) {
     case "shared":
       return "共享可写";
@@ -1314,7 +1314,7 @@ function formatSubagentElapsed(elapsedMs?: number): string | undefined {
   return `${Math.floor(totalSeconds / 60)} 分 ${totalSeconds % 60} 秒`;
 }
 
-function subagentAgentTypeLabel(
+export function subagentAgentTypeLabel(
   agentType: SubagentNarrativeTask["agentType"],
 ): string {
   switch (agentType) {

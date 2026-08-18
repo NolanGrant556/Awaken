@@ -64,6 +64,8 @@ import {
   type ProjectFilePreviewActionRequest,
   type ProjectFilePreviewActionResult,
   type ProjectFilePreviewCloseRequest,
+  type ProjectFilePreviewSaveRequest,
+  type ProjectFilePreviewSaveResult,
   type ProjectFilePreviewStartRequest,
   type ProjectFilePreviewStartResult,
   type ProjectMutationResult,
@@ -287,6 +289,9 @@ export type RuntimeClient = {
   revealProjectFile: (
     request: ProjectFilePreviewActionRequest,
   ) => Promise<ProjectFilePreviewActionResult>;
+  saveProjectMarkdownFile: (
+    request: ProjectFilePreviewSaveRequest,
+  ) => Promise<ProjectFilePreviewSaveResult>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
   createProject: (
     folders: ProjectFolderSelection[],
@@ -515,6 +520,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     onProjectFilePreviewInteraction: (handler) => bridge.onProjectFilePreviewInteraction(handler),
     openProjectFileExternally: (request) => bridge.openProjectFileExternally(request),
     revealProjectFile: (request) => bridge.revealProjectFile(request),
+    saveProjectMarkdownFile: (request) => bridge.saveProjectMarkdownFile(request),
     upsertProject: (workspaceRoot, displayName) => bridge.upsertProject(workspaceRoot, displayName),
     createProject: (folders, displayName) => bridge.createProject(folders, displayName),
     attachProjectFolder: (projectId, path) => bridge.attachProjectFolder(projectId, path),

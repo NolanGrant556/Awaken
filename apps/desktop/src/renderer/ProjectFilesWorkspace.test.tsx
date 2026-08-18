@@ -61,6 +61,10 @@ function previewRuntimeClient() {
     closeProjectFilePreview: vi.fn(async () => undefined),
     openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
     revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+    saveProjectMarkdownFile: vi.fn(async () => ({
+      ok: true as const,
+      byteLength: 0,
+    })),
   };
 }
 

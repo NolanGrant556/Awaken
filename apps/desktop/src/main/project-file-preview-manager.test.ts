@@ -374,4 +374,76 @@ describe("ProjectFilePreviewManager", () => {
     });
     manager.dispose();
   });
+
+  it("saves Markdown in place and rejects every other preview kind", async () => {
+    const root = await temporaryRoot();
+    await fs.writeFile(path.join(root, "README.md"), "# Project\n");
+    await fs.writeFile(path.join(root, "notes.txt"), "plain\n");
+    await fs.writeFile(path.join(root, "index.html"), "<p>hi</p>\n");
+    const { manager } = createManager(root);
+    const request = {
+      projectId: "project-1",
+      folderPath: root,
+    };
+
+    await expect(
+      manager.saveMarkdown({
+        ...request,
+        relativePath: "README.md",
+        content: "# Updated\n",
+      }),
+    ).resolves.toEqual({ ok: true, byteLength: Buffer.byteLength("# Updated\n") });
+    await expect(fs.readFile(path.join(root, "README.md"), "utf8")).resolves.toBe(
+      "# Updated\n",
+    );
+    await expect(
+      manager.saveMarkdown({
+        ...request,
+        relativePath: "notes.txt",
+        content: "changed\n",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "UNSUPPORTED_FILE_TYPE",
+    });
+    await expect(fs.readFile(path.join(root, "notes.txt"), "utf8")).resolves.toBe(
+      "plain\n",
+    );
+    await expect(
+      manager.saveMarkdown({
+        ...request,
+        relativePath: "index.html",
+        content: "<p>no</p>\n",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "UNSUPPORTED_FILE_TYPE",
+    });
+    await expect(
+      manager.saveMarkdown({
+        ...request,
+        relativePath: "missing.md",
+        content: "# New\n",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "FILE_NOT_FOUND",
+    });
+    await expect(fs.access(path.join(root, "missing.md"))).rejects.toThrow();
+    await expect(
+      manager.saveMarkdown({
+        ...request,
+        relativePath: "README.md",
+        content: "x".repeat(MAX_TEXT_PREVIEW_BYTES + 1),
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "FILE_TOO_LARGE",
+      limitBytes: MAX_TEXT_PREVIEW_BYTES,
+    });
+    await expect(fs.readFile(path.join(root, "README.md"), "utf8")).resolves.toBe(
+      "# Updated\n",
+    );
+    manager.dispose();
+  });
 });

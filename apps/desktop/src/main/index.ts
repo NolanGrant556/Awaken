@@ -85,6 +85,8 @@ import {
   type ProjectFilePreviewActionRequest,
   type ProjectFilePreviewActionResult,
   type ProjectFilePreviewCloseRequest,
+  type ProjectFilePreviewSaveRequest,
+  type ProjectFilePreviewSaveResult,
   type ProjectFilePreviewStartRequest,
   type ProjectFilePreviewStartResult,
   type ProjectMutationResult,
@@ -2846,6 +2848,28 @@ ipcMain.handle(
       };
     }
     return projectFilePreviewManager.reveal(request);
+  },
+);
+
+ipcMain.handle(
+  "awaken:save-project-markdown-file",
+  async (
+    event,
+    request: ProjectFilePreviewSaveRequest,
+  ): Promise<ProjectFilePreviewSaveResult> => {
+    if (
+      !mainWindowRef ||
+      mainWindowRef.isDestroyed() ||
+      event.sender.id !== mainWindowRef.webContents.id ||
+      !projectFilePreviewManager
+    ) {
+      return {
+        ok: false,
+        code: "UNAUTHORIZED",
+        message: "Markdown 保存请求来源无效。",
+      };
+    }
+    return projectFilePreviewManager.saveMarkdown(request);
   },
 );
 

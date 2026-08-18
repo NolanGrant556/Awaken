@@ -10,7 +10,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 
 - 左侧栏负责项目与线程入口；
 - 中间工作区负责输入、运行叙事、状态反馈和最终交付物；
-- 右侧 Inspector 当前提供项目文件工作区、文件夹组选择、筛选、只读目录树以及 Office、Markdown、代码/文本、PDF、图片和 HTML 只读预览；HTML 统一进入隔离的“浏览器”入口；当前 thread 存在原生 Subagent 记录时，还提供子任务详情、状态、活动、结果、错误与单任务取消；文件编辑与通用工具详情尚未接通；
+- 右侧 Inspector 当前提供项目文件工作区、文件夹组选择、筛选、只读目录树以及 Office、代码/文本、PDF、图片和 HTML 只读预览；Markdown 可在同一文件工作区切换预览与编辑并写回原文件；HTML 统一进入隔离的“浏览器”入口；当前 thread 存在原生 Subagent 记录时，还提供子任务详情、状态、活动、结果、错误与单任务取消；Markdown 以外的文件编辑与通用工具详情尚未接通；
 - Settings 承载模型、搜索、长期记忆、外观、桌面宠物、计算机操作、Hook 和 ACP runner 等配置面；设置界面的用户可见标题显示为“钩子”；
 - Desktop 负责启动、监督和关闭本地 `awaken-core`，用户不需要单独运行 Core；
 - `Awaken Design System` 是纯 UI 组件包和 Gallery，不拥有产品状态、后端策略或运行时协议。

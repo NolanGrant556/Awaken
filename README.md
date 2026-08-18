@@ -144,6 +144,7 @@ Gallery 使用 mock state，只能证明组件渲染，不能替代 Awaken Deskt
 
 ## 项目级硬边界
 
+- 本仓库是要开发的产品源码仓。工作区里如果同时检出 [NolanGrant556/Agent_up](https://github.com/NolanGrant556/Agent_up)，那只是其他 Agent 产品的对照快照，不是本产品的一部分；对照结论不要写进 `docs/`。协作规则见 [AGENTS.md](AGENTS.md)。
 - Desktop 是正式产品 consumer，并拥有 `awaken-core` 的本地生命周期；不得增加需要用户独立维护的第二套 Core 入口。
 - Workbench 中间区域的 ownership、唯一滚动容器和 `center` / `dock` 形态不得绕过；具体规则只以 [架构契约](docs/01_桌面工作台/中间交互区域/架构契约.md) 为准。
 - `Awaken Design System` 不得依赖 Electron、HTTP/SSE、Agent Core、MCP 或产品 store；Desktop 也不得从其源码内部路径建立私有耦合。

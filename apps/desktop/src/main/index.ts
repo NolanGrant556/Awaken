@@ -3260,6 +3260,26 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  "awaken:message-subagent",
+  async (
+    _event,
+    payload: { runId: string; taskId: string; content: string; idempotencyKey?: string },
+  ) => {
+    await requestRuntimeOK(
+      `/v1/runs/${encodeURIComponent(payload.runId)}/subagents/${encodeURIComponent(payload.taskId)}/messages`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: payload.content,
+          idempotency_key: payload.idempotencyKey,
+        }),
+      },
+    );
+  },
+);
+
+ipcMain.handle(
   "awaken:answer-user-question",
   async (_event, payload: { runId: string; questionId: string; answer: string }) => {
     await requestRuntimeOK(

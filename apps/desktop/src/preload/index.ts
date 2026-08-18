@@ -370,6 +370,18 @@ const bridge: AwakenBridge = {
       taskId,
       reason,
     }) as Promise<void>,
+  messageSubagent: (
+    runId: string,
+    taskId: string,
+    content: string,
+    idempotencyKey?: string,
+  ) =>
+    ipcRenderer.invoke("awaken:message-subagent", {
+      runId,
+      taskId,
+      content,
+      idempotencyKey,
+    }) as Promise<void>,
   answerUserQuestion: (runId: string, questionId: string, answer: string) =>
     ipcRenderer.invoke("awaken:answer-user-question", {
       runId,

@@ -477,7 +477,22 @@ func (h runHandlers) handleGetSubagent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h runHandlers) handleMessageSubagent(w http.ResponseWriter, r *http.Request) {
-	writeErrorJSON(w, http.StatusConflict, subagentruntime.ErrorNotRunning, "subagent messages are not available in phase 1")
+	var request struct {
+		Content        string `json:"content"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decodeJSON(r, &request); err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, subagentruntime.ErrorInvalidInput, err.Error())
+			return
+		}
+	}
+	receipt, err := h.runService.MessageSubagent(r.Context(), r.PathValue("run_id"), r.PathValue("task_id"), request.Content, request.IdempotencyKey)
+	if err != nil {
+		h.writeSubagentError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"receipt": receipt})
 }
 
 func (h runHandlers) handleCancelSubagent(w http.ResponseWriter, r *http.Request) {
@@ -509,7 +524,7 @@ func (h runHandlers) writeSubagentError(w http.ResponseWriter, err error) {
 		writeErrorJSON(w, http.StatusNotFound, code, err.Error())
 	case subagentruntime.ErrorInvalidInput:
 		writeErrorJSON(w, http.StatusBadRequest, code, err.Error())
-	case subagentruntime.ErrorNotRunning:
+	case subagentruntime.ErrorNotRunning, subagentruntime.ErrorIdempotency:
 		writeErrorJSON(w, http.StatusConflict, code, err.Error())
 	default:
 		if code == "" {

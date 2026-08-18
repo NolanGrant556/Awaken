@@ -27,9 +27,13 @@ type Config struct {
 	// only profile identity recorded for spawned tasks; model-visible input
 	// cannot override it.
 	ModelProfileID string
-	Starter        Starter
-	Persist        Persister
-	CancelGrace    time.Duration
+	// ParentWritableRoots is the root Agent's writable set. Concurrent shared
+	// write children that overlap this set fail closed.
+	ParentWorkspaceRoot string
+	ParentWritableRoots []string
+	Starter             Starter
+	Persist             Persister
+	CancelGrace         time.Duration
 }
 
 type managedTask struct {
@@ -39,7 +43,14 @@ type managedTask struct {
 	mutationMu         sync.Mutex
 	seenToolCalls      map[string]struct{}
 	seenModelRequests  map[string]struct{}
+	messages           []QueuedMessage
+	writableRoots      []string
 	terminalPersistErr error
+}
+
+type messageReceiptRecord struct {
+	content string
+	receipt MessageReceipt
 }
 
 type Manager struct {
@@ -52,6 +63,7 @@ type Manager struct {
 	order                        []string
 	delivered                    map[string]bool
 	pendingTerminalNotifications []string
+	messageReceipts              map[string]messageReceiptRecord
 	reserved                     int
 	slots                        chan struct{}
 	notify                       chan struct{}
@@ -74,10 +86,11 @@ func NewManager(parent context.Context, cfg Config) *Manager {
 	ctx, cancel := context.WithCancel(parent)
 	return &Manager{
 		ctx: ctx, cancel: cancel, cfg: cfg,
-		tasks:     make(map[string]*managedTask),
-		delivered: make(map[string]bool),
-		slots:     make(chan struct{}, cfg.MaxConcurrent),
-		notify:    make(chan struct{}, 1),
+		tasks:           make(map[string]*managedTask),
+		delivered:       make(map[string]bool),
+		messageReceipts: make(map[string]messageReceiptRecord),
+		slots:           make(chan struct{}, cfg.MaxConcurrent),
+		notify:          make(chan struct{}, 1),
 	}
 }
 
@@ -87,28 +100,28 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 	}
 	request.Description = strings.TrimSpace(request.Description)
 	request.Prompt = strings.TrimSpace(request.Prompt)
-	request.AgentType = strings.ToLower(strings.TrimSpace(request.AgentType))
-	request.WorkspaceMode = strings.ToLower(strings.TrimSpace(request.WorkspaceMode))
-	if request.AgentType == "" {
-		request.AgentType = "explore"
-	}
-	if request.WorkspaceMode == "" {
-		request.WorkspaceMode = "shared_readonly"
-	}
+	request.AgentType = NormalizeAgentType(request.AgentType)
+	request.WorkspaceMode = NormalizeWorkspaceMode(request.AgentType, request.WorkspaceMode)
 	if request.Description == "" || request.Prompt == "" {
 		return TaskSnapshot{}, runtimeError(ErrorInvalidInput, "description and prompt are required")
 	}
 	if utf8.RuneCountInString(request.Description) > maxDescriptionRunes || len(request.Prompt) > maxPromptBytes {
 		return TaskSnapshot{}, runtimeError(ErrorInvalidInput, "description or prompt exceeds the supported limit")
 	}
-	if request.AgentType != "explore" && request.AgentType != "review" {
-		return TaskSnapshot{}, runtimeError(ErrorInvalidInput, "phase 1 supports explore and review agent types")
-	}
-	if request.WorkspaceMode != "shared_readonly" {
-		return TaskSnapshot{}, runtimeError(ErrorWorkspaceMode, "phase 1 supports shared_readonly only")
+	if err := ValidateSpawnCombo(request.AgentType, request.WorkspaceMode); err != nil {
+		return TaskSnapshot{}, err
 	}
 	if strings.TrimSpace(request.ParentAgentID) != "" && request.ParentAgentID != "root" {
 		return TaskSnapshot{}, runtimeError(ErrorBoundaryViolation, "only the root agent may spawn a subagent")
+	}
+	writableRoots := append([]string(nil), request.WritableRoots...)
+	if len(writableRoots) == 0 {
+		writableRoots = append([]string(nil), m.cfg.ParentWritableRoots...)
+	}
+	if request.WorkspaceMode == WorkspaceShared {
+		if err := m.rejectOverlappingSharedWrite(writableRoots); err != nil {
+			return TaskSnapshot{}, err
+		}
 	}
 	if modelProfileID := strings.TrimSpace(m.cfg.ModelProfileID); modelProfileID != "" {
 		request.ModelProfileID = modelProfileID
@@ -144,6 +157,7 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 	task := &managedTask{
 		snapshot: snapshot, prompt: request.Prompt, cancel: cancel,
 		seenToolCalls: make(map[string]struct{}), seenModelRequests: make(map[string]struct{}),
+		writableRoots: writableRoots,
 	}
 	m.mu.Lock()
 	m.reserved--
@@ -201,6 +215,12 @@ func (m *Manager) runTask(ctx context.Context, taskID string) {
 		Task: snapshot, Prompt: m.prompt(taskID),
 		ReportProgress: func(progressCtx context.Context, update ProgressUpdate) error {
 			return m.reportProgress(progressCtx, taskID, update)
+		},
+		DrainMessages: func() []QueuedMessage {
+			return m.takeMessages(taskID)
+		},
+		AttachWorktree: func(receipt *WorktreeReceipt) {
+			m.attachWorktree(taskID, receipt)
 		},
 	})
 	if ctx.Err() != nil {
@@ -462,8 +482,143 @@ func (m *Manager) AcknowledgeTerminal(taskID string) {
 	}
 }
 
-func (m *Manager) Message(context.Context, string, string) (MessageReceipt, error) {
-	return MessageReceipt{}, runtimeError(ErrorNotRunning, "subagent messages are not available in phase 1")
+func (m *Manager) Message(ctx context.Context, taskID, content string) (MessageReceipt, error) {
+	return m.MessageIdempotent(ctx, taskID, content, "")
+}
+
+func (m *Manager) MessageIdempotent(ctx context.Context, taskID, content, idempotencyKey string) (MessageReceipt, error) {
+	if m == nil {
+		return MessageReceipt{}, runtimeError(ErrorRuntimeUnavailable, "manager is unavailable")
+	}
+	taskID = strings.TrimSpace(taskID)
+	content = strings.TrimSpace(content)
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if taskID == "" || content == "" {
+		return MessageReceipt{}, runtimeError(ErrorInvalidInput, "task_id and content are required")
+	}
+	if len(content) > maxPromptBytes {
+		return MessageReceipt{}, runtimeError(ErrorInvalidInput, "message exceeds the supported limit")
+	}
+	if idempotencyKey != "" {
+		m.mu.RLock()
+		recorded, ok := m.messageReceipts[idempotencyKey]
+		m.mu.RUnlock()
+		if ok {
+			if recorded.content != content {
+				return MessageReceipt{}, runtimeError(ErrorIdempotency, "idempotency key was reused with a different body")
+			}
+			return recorded.receipt, nil
+		}
+	}
+	task := m.task(taskID)
+	if task == nil {
+		return MessageReceipt{}, runtimeError(ErrorNotFound, "task does not exist in this run")
+	}
+	task.mutationMu.Lock()
+	snapshot := task.snapshot
+	if snapshot.Terminal() || snapshot.Status == StatusCancelling {
+		task.mutationMu.Unlock()
+		return MessageReceipt{}, runtimeError(ErrorNotRunning, "subagent is not running")
+	}
+	queued := QueuedMessage{ID: newID("submsg"), Content: content, QueuedAt: time.Now().UTC()}
+	if err := m.persistMessage(ctx, snapshot, queued); err != nil {
+		task.mutationMu.Unlock()
+		return MessageReceipt{}, err
+	}
+	task.messages = append(task.messages, queued)
+	task.mutationMu.Unlock()
+	receipt := MessageReceipt{TaskID: taskID, QueuedAt: queued.QueuedAt, MessageID: queued.ID}
+	if idempotencyKey != "" {
+		m.mu.Lock()
+		m.messageReceipts[idempotencyKey] = messageReceiptRecord{content: content, receipt: receipt}
+		m.mu.Unlock()
+	}
+	m.signal()
+	return receipt, nil
+}
+
+func (m *Manager) persistMessage(ctx context.Context, snapshot TaskSnapshot, message QueuedMessage) error {
+	if m.cfg.Persist == nil {
+		return nil
+	}
+	if err := m.cfg.Persist(ctx, PersistEvent{Kind: "subagent_message_queued", Snapshot: snapshot, Message: &message}); err != nil {
+		return runtimeError(ErrorPersistence, err.Error())
+	}
+	return nil
+}
+
+func (m *Manager) takeMessages(taskID string) []QueuedMessage {
+	task := m.task(taskID)
+	if task == nil {
+		return nil
+	}
+	task.mutationMu.Lock()
+	defer task.mutationMu.Unlock()
+	if len(task.messages) == 0 {
+		return nil
+	}
+	queued := append([]QueuedMessage(nil), task.messages...)
+	task.messages = nil
+	return queued
+}
+
+func (m *Manager) attachWorktree(taskID string, receipt *WorktreeReceipt) {
+	task := m.task(taskID)
+	if task == nil || receipt == nil {
+		return
+	}
+	task.mutationMu.Lock()
+	defer task.mutationMu.Unlock()
+	copied := *receipt
+	task.snapshot.Worktree = &copied
+}
+
+func (m *Manager) rejectOverlappingSharedWrite(writableRoots []string) error {
+	if len(writableRoots) == 0 {
+		return nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, task := range m.tasks {
+		if task == nil {
+			continue
+		}
+		snapshot := task.snapshot
+		if snapshot.Terminal() || snapshot.WorkspaceMode != WorkspaceShared {
+			continue
+		}
+		if rootsOverlap(writableRoots, task.writableRoots) {
+			return runtimeError(ErrorBoundaryViolation, "two write-capable children cannot share the same writable root")
+		}
+	}
+	return nil
+}
+
+func rootsOverlap(left, right []string) bool {
+	for _, a := range left {
+		a = normalizeRoot(a)
+		if a == "" {
+			continue
+		}
+		for _, b := range right {
+			b = normalizeRoot(b)
+			if b == "" {
+				continue
+			}
+			if a == b || strings.HasPrefix(a, b+string(osPathSeparator)) || strings.HasPrefix(b, a+string(osPathSeparator)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+const osPathSeparator = "/"
+
+func normalizeRoot(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimRight(value, "/\\")
+	return value
 }
 
 func (m *Manager) Cancel(ctx context.Context, taskID, _ string) (TaskSnapshot, error) {

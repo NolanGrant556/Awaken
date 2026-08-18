@@ -1,0 +1,4 @@
+{
+  "name": "Awaken",
+  "install": "npm ci\ngo version"
+}

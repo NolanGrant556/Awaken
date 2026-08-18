@@ -115,3 +115,13 @@ Design System Gallery、mock state、直接 provider/API 调用和旧验收摘�
 - 已明确报告尚存缺口、未执行项和外部阻塞。
 
 测试未执行、Desktop 无法访问或证据仍是旧基线时，只能说明已经完成的部分和阻塞，不能写“全部通过”。
+
+## Cursor Cloud specific instructions
+
+Cloud Agent 工作区可能同时检出 `Agent_up` 对照库。产品工作只在 `/agent/repos/Awaken`。启动命令、route 和验收步骤仍以根 [README.md](README.md) 和对应域文档为准，不要在这里复制第二套。
+
+Linux Cloud VM 上的已知限制：
+
+- 正式 Desktop 入口 `npm run open:desktop` 只覆盖 macOS；`npm run dev:desktop` 会走 `ensure-desktop-runtime`，其中 OfficeCLI 在 `linux-*` 上直接失败。不要把 Linux 上的 Electron / Gallery / 单独 `awaken-core` 写成 Desktop 验收通过。
+- Cloud 上可做的验证是 `npm ci`、`go vet` / 聚焦 `go test`、`npm run typecheck:desktop`、`npm --workspace @awaken/desktop run test`、以及隔离 userData 下启动 Core 后的 `/health` 与 `POST /v1/projects`。真实对话需要用户在 Settings 写入的模型 key（`~/.awaken/.env`），环境安装阶段不要伪造凭据。
+- `go.mod` 要求 Go 1.25.2；基础镜像里的 `go` 会按 toolchain 自动下载，`install` 里的 `go version` 就是为了把该 toolchain 预热进快照。

@@ -623,5 +623,7 @@ func permissionContextFromTaskScope(scope WorkspaceConfig) tool.PermissionContex
 		scope.TemporaryWorkRoot,
 	)
 	permissionContext.ProtectedRootExceptions = scope.ProtectedRootExceptions
+	permissionContext.ProjectID = strings.TrimSpace(scope.ProjectID)
+	permissionContext.SessionWorkspace = scope.SessionWorkspace
 	return permissionContext.Normalize()
 }

@@ -105,14 +105,18 @@ type PermissionDecision struct {
 }
 
 type PermissionContext struct {
-	ScopeID        string
-	WorkspaceRoot  string
-	ReadableRoots  []string
-	WritableRoots  []string
-	OutputRoots    []string
-	AttachedFiles  []ScopedFile
-	MediaArtifacts []ScopedMediaArtifact
-	ProtectedRoots []string
+	ScopeID string
+	// ProjectID and SessionWorkspace are Host-owned identity facts used by
+	// project-scoped configuration tools. They never grant path access.
+	ProjectID        string
+	SessionWorkspace bool
+	WorkspaceRoot    string
+	ReadableRoots    []string
+	WritableRoots    []string
+	OutputRoots      []string
+	AttachedFiles    []ScopedFile
+	MediaArtifacts   []ScopedMediaArtifact
+	ProtectedRoots   []string
 	// ProtectedRootExceptions are narrow carve-outs inside an otherwise
 	// protected subtree. They exist because Awaken keeps managed project
 	// working directories under its own business-data root, which is protected
@@ -294,6 +298,8 @@ func (c PermissionContext) Normalize() PermissionContext {
 
 	return PermissionContext{
 		ScopeID:                 strings.TrimSpace(c.ScopeID),
+		ProjectID:               strings.TrimSpace(c.ProjectID),
+		SessionWorkspace:        c.SessionWorkspace,
 		WorkspaceRoot:           root,
 		ReadableRoots:           dedupeStrings(readableRoots),
 		WritableRoots:           dedupeStrings(writableRoots),

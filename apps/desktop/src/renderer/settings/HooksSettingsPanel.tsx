@@ -32,6 +32,12 @@ const STATUS_LABELS: Record<HookSourceReceipt["status"], string> = {
   invalid: "配置无效",
 };
 
+const SOURCE_LABELS: Record<HookSourceReceipt["kind"], string> = {
+  user: "用户配置",
+  project: "项目共享配置",
+  project_local: "项目本地配置",
+};
+
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return <div className="aw-hooks-settings__detail-row"><dt>{label}</dt><dd>{children}</dd></div>;
 }
@@ -71,7 +77,7 @@ function SourceDetails({ source, projectId, loading, onTrustChange }: {
   return (
     <article className="aw-hooks-settings__source">
       <div className="aw-hooks-settings__source-heading">
-        <div><strong>{source.kind === "user" ? "用户配置" : "项目配置"}</strong><span>{source.hookCount} 个钩子</span></div>
+        <div><strong>{SOURCE_LABELS[source.kind]}</strong><span>{source.hookCount} 个钩子</span></div>
         <span className={`aw-hooks-settings__status aw-hooks-settings__status--${source.status}`}>{STATUS_LABELS[source.status]}</span>
       </div>
       <code className="aw-hooks-settings__path" title={source.path}>{source.path}</code>
@@ -89,7 +95,7 @@ function SourceDetails({ source, projectId, loading, onTrustChange }: {
         </section>
       ))}
       {source.status !== "invalid" && grouped.length === 0 ? <p className="aw-hooks-settings__empty-source">此配置没有已声明的钩子。</p> : null}
-      {source.kind === "project" && projectId ? (
+      {source.kind !== "user" && projectId ? (
         <div className="aw-hooks-settings__trust-actions">
           {source.status === "enabled"
             ? <button type="button" disabled={loading} onClick={() => onTrustChange(source, false)}>撤销信任</button>

@@ -12,6 +12,7 @@ func TestBuiltInToolNamesAreProviderSafe(t *testing.T) {
 		"Glob": false, "Grep": false, "WebSearch": false,
 		"artifact_publish": false, "trash_file": false, "calculator": false,
 		"ask_user": false, "dependency_install": false, "git_remote": false,
+		"configure_hook": false,
 		"subagent":         false,
 		"computer_observe": false, "computer_act": false, "computer_verify": false,
 	}

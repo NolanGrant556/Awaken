@@ -115,3 +115,15 @@ Design System Gallery、mock state、直接 provider/API 调用和旧验收摘�
 - 已明确报告尚存缺口、未执行项和外部阻塞。
 
 测试未执行、Desktop 无法访问或证据仍是旧基线时，只能说明已经完成的部分和阻塞，不能写“全部通过”。
+
+## Cursor Cloud specific instructions
+
+开发对照库 [NolanGrant556/Agent_up](https://github.com/NolanGrant556/Agent_up) 只在开发时作为外部产品参考。它不是本仓的一部分，也不拥有 Awaken 的产品事实。
+
+当 Cloud 环境同时检出该仓时：
+
+- 主仓永远是本仓。只在 Awaken 树内改代码、开分支、提交和 PR。
+- Agent_up 默认只读。不要改它的快照、根文档或同步策略，除非用户明确要求改那个仓。
+- 禁止互相侵入：不要把 Agent_up 做成 submodule、vendor 目录或拷进本仓；也不要把本仓文件、`docs/`、依赖或构建产物写入 Agent_up。
+- 对照结论不能覆盖本仓 README 与 `docs/` 的权威。Agent_up 里的外部产品实现只作参考，不能单独证明 Awaken 的当前支持项。
+- 不要对 Agent_up 跑安装、测试或发布，除非用户明确要求研究其中某一棵快照树。

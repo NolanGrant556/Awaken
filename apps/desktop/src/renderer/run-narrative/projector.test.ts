@@ -1228,6 +1228,7 @@ describe("projectAguiEventToNarrative", () => {
           taskId: "task-1",
           description: "检查认证边界",
           agentType: "review",
+          workspaceMode: undefined,
           status: "completed",
           activity: undefined,
           toolUseCount: 2,
@@ -1246,6 +1247,7 @@ describe("projectAguiEventToNarrative", () => {
           taskId: "task-2",
           description: "检查测试入口",
           agentType: "explore",
+          workspaceMode: undefined,
           status: "running",
           activity: undefined,
           toolUseCount: 0,
@@ -1260,6 +1262,36 @@ describe("projectAguiEventToNarrative", () => {
           errorCode: undefined,
           errorMessage: undefined,
         },
+      ],
+    });
+  });
+
+  it("projects plan/general workspace modes onto the narrative group", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_SUBAGENT_CHANGED",
+      runId: "run-1",
+      subagentTaskId: "task-plan",
+      subagentDescription: "规划改动",
+      subagentAgentType: "plan",
+      subagentWorkspaceMode: "shared_readonly",
+      subagentStatus: "running",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_SUBAGENT_CHANGED",
+      runId: "run-1",
+      subagentTaskId: "task-write",
+      subagentDescription: "实现改动",
+      subagentAgentType: "general",
+      subagentWorkspaceMode: "git_worktree",
+      subagentStatus: "queued",
+    });
+    const group = state.committedItems.find((item) => item.kind === "subagentGroup");
+    expect(group).toMatchObject({
+      kind: "subagentGroup",
+      tasks: [
+        { taskId: "task-plan", agentType: "plan", workspaceMode: "shared_readonly" },
+        { taskId: "task-write", agentType: "general", workspaceMode: "git_worktree" },
       ],
     });
   });

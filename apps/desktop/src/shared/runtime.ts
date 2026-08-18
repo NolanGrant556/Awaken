@@ -201,7 +201,7 @@ export type HookReviewItem = {
   onFailure: "continue" | "block";
 };
 export type HookSourceReceipt = {
-  kind: "user" | "project";
+  kind: "user" | "project" | "project_local";
   path: string;
   projectRoot?: string;
   digest?: string;

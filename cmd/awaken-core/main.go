@@ -39,6 +39,7 @@ import (
 	_ "awaken/src/tools"
 	bashtool "awaken/src/tools/bash"
 	configureacprunner "awaken/src/tools/configure_acp_runner"
+	configurehook "awaken/src/tools/configure_hook"
 	delegateexternalagent "awaken/src/tools/delegate_external_agent"
 )
 
@@ -191,6 +192,7 @@ func main() {
 		log.Printf("[hooks] configuration store unavailable: %v", hookErr)
 	} else {
 		runService.SetHookStore(hookStore)
+		configurehook.SetStore(hookStore)
 	}
 	runService.SetSkillActivator(skillManager.Activator())
 

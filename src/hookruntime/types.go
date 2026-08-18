@@ -30,9 +30,14 @@ const (
 type SourceKind string
 
 const (
-	SourceUser    SourceKind = "user"
-	SourceProject SourceKind = "project"
+	SourceUser         SourceKind = "user"
+	SourceProject      SourceKind = "project"
+	SourceProjectLocal SourceKind = "project_local"
 )
+
+func (s SourceKind) RequiresProjectTrust() bool {
+	return s == SourceProject || s == SourceProjectLocal
+}
 
 type SourceStatus string
 

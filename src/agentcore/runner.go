@@ -1656,7 +1656,7 @@ func (r *Runner) startNativeChildConfigured(
 	childConfig.MaxToolExecutions = minPositive(childConfig.MaxToolExecutions, 128)
 	childConfig.ToolExposure.ExtraHidden = appendUniqueStrings(
 		childConfig.ToolExposure.ExtraHidden,
-		"subagent", "ask_user", "delegate_external_agent", "configure_acp_runner",
+		"subagent", "ask_user", "delegate_external_agent", "configure_acp_runner", "configure_hook",
 	)
 	role := "codebase explorer"
 	if request.Task.AgentType == "review" {

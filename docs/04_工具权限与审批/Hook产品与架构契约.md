@@ -32,13 +32,14 @@ Hook 允许用户在确定的任务生命周期边界执行本机命令、受控
 | `prompt` | prompt、可选 model selector |
 | `agent` | prompt、可选 model selector、最大轮次 |
 
-该页面是检查和信任界面，不是配置编辑器。配置仍由用户在对应 JSON 文件中维护；信任变化只影响后续新 run，不能热改已经固定的 run。
+该页面是检查和信任界面，不是表单配置编辑器。用户既可以直接维护对应 JSON，也可以在普通对话中用自然语言要求主智能体调用 `configure_hook`。该工具只接受结构化配置、由 Core 校验整个下一版本并原子落盘；项目共享/本地配置仍必须由用户在设置中显式信任。任何配置或信任变化只影响后续新 run，不能热改已经固定的 run。
 
 ## 3. 当前支持与当前缺口
 
 ### 3.1 当前支持
 
-- user/project 两类 `hooks.json`，version 1 严格 schema；
+- user、project shared、project local 三类持久配置，version 1 严格 schema；
+- 主智能体 `configure_hook` 工具支持查看、upsert、删除单条 Hook 和启停来源，可从自然语言请求生成配置；
 - project 配置按 `project_id + canonical path + normalized digest` 显式信任；
 - 每个新 run 固定不可热更新的可用性快照；
 - `command`、`http`、`prompt`、只读 `agent` 四类同步执行器；
@@ -51,7 +52,7 @@ Hook 允许用户在确定的任务生命周期边界执行本机命令、受控
 
 ### 3.2 当前不支持或未完成验证
 
-- 不提供配置编辑器、`once`、并行/后台 Hook、异步唤醒和 child 内部 tool Hook；
+- 不提供设置表单编辑器、managed/CLI settings、Plugin 自动 Hook、SDK callback、任意 session function Hook、`once`、并行/后台 Hook、异步唤醒和 child 内部 tool Hook；
 - stdout/stderr 超限时直接形成 protocol failure，不保存大型 result blob；
 - 模型调用 `skill`、fork Skill 或仅发现 Skill 不注册包内 Hook；
 - HTTP proxy-only DNS 不能工作：当前在交给代理前仍要求本机解析目标；
@@ -67,13 +68,27 @@ Hook 允许用户在确定的任务生命周期边界执行本机命令、受控
 | 来源 | 路径 | 默认行为 |
 | --- | --- | --- |
 | user | `~/.awaken/config/hooks.json` | schema 和文件约束有效时启用；Unix 要求不授予 group/other 权限 |
-| project | 每个项目文件夹的 `<folder>/.awaken/hooks.json` | 未信任时只允许检查，不进入执行快照 |
+| project shared | 每个项目文件夹的 `<folder>/.awaken/hooks.json` | 未信任时只允许检查，不进入执行快照；适合随项目共享 |
+| project local | 每个项目文件夹的 `<folder>/.awaken/hooks.local.json` | 未信任时只允许检查，不进入执行快照；AI 写入时使用 `0600`，适合本机差异 |
 
-项目按已保存文件夹顺序发现，主文件夹在前；不向父目录递归搜索，不从 cwd 猜项目，不扫描独立对话或 managed session workspace。symlink、非普通文件、超过 1 MiB、非 UTF-8、JSON/schema 错误均 fail closed。
+项目按已保存文件夹顺序发现，主文件夹在前；每个文件夹内 shared 先于 local。不向父目录递归搜索，不从 cwd 猜项目，不扫描独立对话或 managed session workspace。symlink、非普通文件、超过 1 MiB、非 UTF-8、JSON/schema 错误均 fail closed。
 
 信任记录位于 `~/.awaken/config/hook-trust.json`。信任精确绑定 project、canonical config path 和规范化内容摘要；正文、realpath 或项目成员关系变化后，后续检查立即回到待信任。信任不是一次工具审批，也不会扩大 TaskScope、工具快照或模型凭据。
 
-### 4.2 version 1 形状
+### 4.2 自然语言配置工具
+
+`configure_hook` 是主智能体唯一可以修改受保护 Hook 配置的路径，支持：
+
+- `list`：查看某一来源的规范化静态详情；
+- `upsert`：按全来源唯一 `id` 新增或替换一条 Hook；
+- `delete`：删除指定 `id`，空 matcher/event 自动收敛；
+- `set_enabled`：启用或停用整个来源。
+
+scope 只允许 `user | project | project_local`。项目 scope 默认使用当前项目主文件夹，也可选择当前 TaskScope 中一个精确的已绑定可写文件夹；不接受父目录、相对逃逸、独立会话目录或任意外部路径。工具不接受整段 JSON 覆盖，不覆盖 invalid/unsafe 旧文件，不接受 shell 字符串或 secret 明文，并且不能调用 trust API。写入前必须完整经过 version 1 normalization；写入使用同目录临时文件、fsync 和原子替换。成功只产生下一 run 可见的配置事实，不改变当前 run 的 Hook snapshot。
+
+sourcecode 的用户、项目共享、项目本地三层持久配置语义已对应；Skill frontmatter 对应其临时 frontmatter 注册。Awaken 仍以 Desktop 为唯一产品入口，因此没有 `--settings` 配置层；managed policy、Plugin 自动注册、SDK callback 和任意内存 function Hook 尚未实现，不能写成已经完全兼容 sourcecode。
+
+### 4.3 version 1 形状
 
 ```json
 {
@@ -108,9 +123,9 @@ Hook 允许用户在确定的任务生命周期边界执行本机命令、受控
 - `onFailure` 只允许 `continue | block`，且事件必须允许阻断；
 - 工具事件 matcher 是 canonical tool name 精确列表或 `*`，不接受 regex；非工具事件不接受 `toolNames`；
 - 未知 version、event、executor、字段或越界值使整个来源 invalid，不能忽略后继续运行其余条目；
-- 来源按 user、project 主文件夹、project 其余文件夹的顺序合并，同一来源保持声明顺序，不以 key override。
+- 来源按 user、项目主文件夹 shared/local、其余文件夹 shared/local 的顺序合并，同一来源保持声明顺序，不以 key override。
 
-### 4.3 执行器字段
+### 4.4 执行器字段
 
 - `command`：`command` 必须是非空 argv；不接受隐式 shell 字符串。`cwd` 只允许 `workspace_root | project_root`；
 - `http`：只接受 `http/https` URL、可选 `allowLoopback` 和 `secretHeaders`。header 值是 Core secret store 引用，不是明文；
@@ -153,7 +168,9 @@ stdout 是一个 UTF-8 JSON 对象；空 stdout 等价 `continue`：
 
 ```mermaid
 flowchart TD
-  Config["user/project hooks.json"] --> Store["Hook Store：解析、摘要、信任"]
+  Natural["自然语言请求"] --> Tool["configure_hook：结构化校验与原子写"]
+  Tool --> Config["user/project/project-local config"]
+  Config --> Store["Hook Store：解析、摘要、信任"]
   Store --> Inspect["Settings 检查 DTO"]
   Inspect --> UI["Desktop 设置 > 钩子"]
   Store --> Snapshot["run 固定执行快照"]
@@ -171,6 +188,7 @@ flowchart TD
 | 路径 | 职责 |
 | --- | --- |
 | `src/hookruntime` | schema、配置检查、信任、matcher、dispatcher、command/HTTP executor、secret resolver |
+| `src/tools/configure_hook` | 主智能体自然语言配置的结构化工具、TaskScope source 选择和 canonical Outcome |
 | `src/agentcore` | run/tool/compact/Subagent/BeforeFinish 接入，prompt/agent 执行与模型 usage |
 | `src/runtime` | project roots、run snapshot 装配、Journal 与恢复 |
 | `src/server/handlers_hooks.go` | 本地 status/trust/revoke API 和检查 DTO |
@@ -181,6 +199,8 @@ flowchart TD
 `Store.BuildSnapshot` 只产生执行所需的 immutable snapshot；`Store.Inspect` 在相同解析和信任结果上附加 `ReviewHook`。`ReviewHook` 不参与 snapshot digest，也不进入 `hook_snapshot` Journal。设置 DTO 可以包含静态命令、URL、matcher 或 prompt 供当前用户审查，但不得包含 secret 引用值、环境、运行输入、stdout/stderr 或模型/provider credential。
 
 Renderer 不能读取配置文件再自行拼详情；否则会绕过 canonical path、strict schema、默认值归一化和信任摘要。Settings 中的详情也不能复用为运行 authority。
+
+`configure_hook` 不能暴露给只读 Subagent 或 Hook agent，不能在 input 中接收 trust/digest，也不能用用户自然语言授权推导永久项目信任。模型选择何种字段不是 authority；Core 对 action-specific 字段、完整 config、目标来源和 exact writable project root 的复核才是落盘门禁。
 
 ## 7. 执行安全
 
@@ -242,6 +262,7 @@ Core 在 started 后崩溃时，恢复只把 invocation 封口为 interrupted、
 聚焦自动化至少覆盖：
 
 - schema、默认值、unknown field、边界、UTF-8、稳定摘要和多根顺序；
+- shared/local 同根顺序、local 独立摘要信任、AI 工具 exact writable root、session workspace 拒绝、invalid 旧文件不覆盖和原子写；
 - trust 精确绑定、变更失效、symlink/realpath 和 session workspace 不扫描；
 - Settings 检查 DTO 在未信任时仍返回归一化详情、隐藏 secret 引用和值，并且不改变执行 snapshot/digest；
 - argv/cwd/minimal environment、timeout/cancel、进程树和输出协议；
@@ -258,8 +279,9 @@ Core 在 started 后崩溃时，恢复只把 invocation 封口为 interrupted、
 3. 待信任项目配置可以先展开审查详情，secret 值不出现；
 4. 信任后只在下一 run 执行，修改摘要后重新待信任，撤销后下一 run 停止执行；
 5. command/HTTP/prompt/agent 和 Skill Hook各完成至少一条真实旅程；
-6. block、update input、timeout、cancel、BeforeFinish 重入和 Core 重启恢复符合本文；
-7. 重开 Desktop 后 Hook trace 不重复，live/replay 顺序一致；
-8. macOS/Windows 分别验证进程树、路径、配置权限/ACL、系统代理和 `NO_PROXY`。
+6. 用自然语言分别创建 user、project shared 和 project local Hook，核对模型调用 `configure_hook`；项目写入后设置页先显示待信任，用户信任后只在下一 run 生效；删除/停用也只影响下一 run；
+7. block、update input、timeout、cancel、BeforeFinish 重入和 Core 重启恢复符合本文；
+8. 重开 Desktop 后 Hook trace 不重复，live/replay 顺序一致；
+9. macOS/Windows 分别验证进程树、路径、配置权限/ACL、系统代理和 `NO_PROXY`。
 
 Gallery、mock、直接 Core API 和交叉编译只作辅助证据，不能替代真实 Desktop 或 Windows 实机。当前已完成和未完成的本次验证记录只写入交付结论，不在本文维护历史勾选。

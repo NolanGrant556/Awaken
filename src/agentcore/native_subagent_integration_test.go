@@ -332,9 +332,11 @@ func TestNativeGeneralSharedChildWritesParentWorkspace(t *testing.T) {
 		},
 		ToolExposure: tool.ToolExposurePolicy{Mode: tool.ExposureAll},
 	}
+	recorder := &forkCaptureRecorder{}
 	runner := NewRunner(config, convcontext.NewConversation(nil), NewRequestBuilder(config))
 	runner.threadID = "thread_write"
 	runner.runID = "run_write"
+	runner.recorder = recorder
 	childTurns := 0
 	runner.streamLLMFunc = func(_ context.Context, events *runEventEmitter) (*llm.Response, error) {
 		if events.subagentTaskID == "" {
@@ -368,6 +370,7 @@ func TestNativeGeneralSharedChildWritesParentWorkspace(t *testing.T) {
 	t.Cleanup(func() { _ = manager.Close(context.Background()) })
 	events := newRunEventEmitter(runner.threadID, nil)
 	events.runID = runner.runID
+	events.recorder = recorder
 	runner.toolRuntime = NewToolRuntimeWithConfig(nil, toolRuntimeConfigFromAgentConfig(config))
 	runner.toolRuntime.runID = runner.runID
 	runner.toolRuntime.threadID = runner.threadID
@@ -412,9 +415,11 @@ func TestNativeChildDrainsQueuedMessageAtNextTurn(t *testing.T) {
 		Workspace:    WorkspaceConfig{Root: root, ReadableRoots: []string{root}, WritableRoots: []string{root}},
 		ToolExposure: tool.ToolExposurePolicy{Mode: tool.ExposureAll},
 	}
+	recorder := &forkCaptureRecorder{}
 	runner := NewRunner(config, convcontext.NewConversation(nil), NewRequestBuilder(config))
 	runner.threadID = "thread_msg"
 	runner.runID = "run_msg"
+	runner.recorder = recorder
 	started := make(chan struct{})
 	release := make(chan struct{})
 	childTurns := 0
@@ -451,6 +456,7 @@ func TestNativeChildDrainsQueuedMessageAtNextTurn(t *testing.T) {
 	t.Cleanup(func() { _ = manager.Close(context.Background()) })
 	events := newRunEventEmitter(runner.threadID, nil)
 	events.runID = runner.runID
+	events.recorder = recorder
 	runner.toolRuntime = NewToolRuntimeWithConfig(nil, toolRuntimeConfigFromAgentConfig(config))
 	runner.toolRuntime.runID = runner.runID
 	runner.toolRuntime.threadID = runner.threadID
@@ -461,6 +467,9 @@ func TestNativeChildDrainsQueuedMessageAtNextTurn(t *testing.T) {
 			Arguments: `{"action":"spawn","description":"探索","prompt":"先读文件","agent_type":"explore"}`,
 		},
 	}}, events)
+	if len(spawned) != 1 || spawned[0].IsError {
+		t.Fatalf("spawn = %+v", spawned)
+	}
 	var spawnPayload struct {
 		Task subagentruntime.TaskSnapshot `json:"task"`
 	}

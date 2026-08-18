@@ -802,6 +802,40 @@ func (s *RunService) ActiveRunCount() int {
 	return count
 }
 
+// RunActivitySnapshot reports how many runs are currently in flight. Active
+// counts every thread with an active run, including runs that are already
+// being cancelled; Cancelling counts the subset whose session status is
+// RunStatusCancelling. Native sub-runs execute inside their parent's active
+// run and are not counted separately.
+type RunActivitySnapshot struct {
+	Active     int
+	Cancelling int
+}
+
+// ActivitySnapshot returns the current in-flight run counts across all run
+// sources (normal, scheduled and ACP runs all go through StartRun).
+func (s *RunService) ActivitySnapshot() RunActivitySnapshot {
+	s.mu.RLock()
+	var snapshot RunActivitySnapshot
+	sessions := make([]*Session, 0, len(s.threads))
+	for _, thread := range s.threads {
+		if thread.activeRunID == "" {
+			continue
+		}
+		snapshot.Active++
+		if session := s.sessions[thread.activeRunID]; session != nil {
+			sessions = append(sessions, session)
+		}
+	}
+	s.mu.RUnlock()
+	for _, session := range sessions {
+		if session.Snapshot().Status == RunStatusCancelling {
+			snapshot.Cancelling++
+		}
+	}
+	return snapshot
+}
+
 func (s *RunService) closeAndEvictDeletedThread(threadID string) error {
 	s.mu.RLock()
 	thread := s.threads[threadID]

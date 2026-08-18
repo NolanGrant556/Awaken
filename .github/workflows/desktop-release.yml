@@ -1,0 +1,519 @@
+# Awaken Desktop release orchestration (design contract §7.4).
+#
+# Single automated path for stable releases: push a vX.Y.Z tag, or re-run an
+# existing tag via workflow_dispatch (re-runs reuse the same immutable tag
+# commit and the same unpublished draft; they never move tags or overwrite a
+# published release).
+#
+# Flow: prepare -> create-draft -> build-macos + build-windows -> assemble
+# -> upload-draft-assets -> upgrade-smoke -> publish -> post-publish-observe.
+# Any pre-publish failure leaves the draft for diagnosis; nothing is made
+# public. Published assets are never overwritten — fixes ship as a higher
+# version.
+#
+# Secrets (never echoed; keep out of logs and product resources):
+#   AWAKEN_RELEASES_TOKEN     fine-grained token, Contents: write on
+#                             NolanGrant556/Awaken-Releases only
+#   APPLE_API_KEY_P8_BASE64   base64 of the App Store Connect .p8 key
+#   APPLE_API_KEY_ID / APPLE_API_ISSUER
+#   AWAKEN_CODESIGN_IDENTITY  e.g. "Developer ID Application: Name (TEAMID)"
+#   CSC_LINK / CSC_KEY_PASSWORD            macOS Developer ID certificate
+#   WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD    Windows Authenticode certificate
+
+name: desktop-release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z tag to re-run (must already exist)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASES_REPO: NolanGrant556/Awaken-Releases
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - name: Resolve triggering tag to an immutable commit
+        id: resolve
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="$REF_NAME"
+            # A tag push with a non-zero "before" is a moved/overwritten tag.
+            if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+              echo "tag $TAG was moved or overwritten; refusing to release" >&2
+              exit 1
+            fi
+          fi
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "tag $TAG is not strict SemVer vX.Y.Z" >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          if [ "$VERSION" = "0.0.0" ]; then
+            echo "0.0.0 is the pre-update placeholder, not a release" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout the tag commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Pin resolved commit and verify ancestry
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse "$TAG^{commit}")"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          git fetch origin main --depth=200
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "tag commit $SHA is not reachable from origin/main" >&2
+            exit 1
+          fi
+        id: commit
+
+      - name: Verify tag == package.json version == lockfile workspace version
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          PKG_VERSION="$(node -p "require('./apps/desktop/package.json').version")"
+          LOCK_VERSION="$(node -p "require('./package-lock.json').packages['apps/desktop'].version")"
+          echo "package.json=$PKG_VERSION lockfile=$LOCK_VERSION expected=$VERSION"
+          [ "$PKG_VERSION" = "$VERSION" ]
+          [ "$LOCK_VERSION" = "$VERSION" ]
+
+      - name: Verify updater dependency placement
+        run: |
+          set -euo pipefail
+          node -e "
+            const pkg = require('./apps/desktop/package.json');
+            if (!pkg.dependencies?.['electron-updater']) {
+              throw new Error('electron-updater must be a runtime dependency of @awaken/desktop');
+            }
+            if (pkg.devDependencies?.['electron-updater']) {
+              throw new Error('electron-updater must not be a devDependency');
+            }
+          "
+
+      - name: Reject an already-published release for this tag
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Unauthenticated read: a published release is visible without a
+          # token. Drafts are invisible here and handled by create-draft.
+          if curl -sf "https://api.github.com/repos/$RELEASES_REPO/releases/tags/$TAG" -o /tmp/existing-release.json; then
+            echo "release $TAG is already published; refusing to overwrite" >&2
+            exit 1
+          fi
+
+  create-draft:
+    needs: prepare
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.draft.outputs.release_id }}
+      upload_url: ${{ steps.draft.outputs.upload_url }}
+    steps:
+      - name: Create or reuse the draft release
+        id: draft
+        env:
+          GH_TOKEN: ${{ secrets.AWAKEN_RELEASES_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          set -euo pipefail
+          MARKER="awaken-source-sha: $SHA"
+          EXISTING="$(gh api "repos/$RELEASES_REPO/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$TAG\") | [.id, .draft, .body] | @tsv" || true)"
+          if [ -n "$EXISTING" ]; then
+            ID="$(echo "$EXISTING" | head -1 | cut -f1)"
+            DRAFT="$(echo "$EXISTING" | head -1 | cut -f2)"
+            BODY="$(echo "$EXISTING" | head -1 | cut -f3-)"
+            if [ "$DRAFT" != "true" ]; then
+              echo "release $TAG is already public; refusing" >&2
+              exit 1
+            fi
+            if [[ "$BODY" != *"$MARKER"* ]]; then
+              echo "existing draft $TAG was built from a different source SHA; refusing reuse" >&2
+              exit 1
+            fi
+            echo "reusing draft release $ID"
+          else
+            ID="$(gh api "repos/$RELEASES_REPO/releases" -X POST \
+              -f tag_name="$TAG" -f name="Awaken $TAG" \
+              -F draft=true -F prerelease=false \
+              -f body="Awaken Desktop $TAG"$'\n\n'"<!-- $MARKER -->" \
+              --jq .id)"
+            echo "created draft release $ID"
+          fi
+          echo "release_id=$ID" >> "$GITHUB_OUTPUT"
+          echo "upload_url=https://uploads.github.com/repos/$RELEASES_REPO/releases/$ID/assets{?name,label}" >> "$GITHUB_OUTPUT"
+
+  build-macos:
+    needs: [prepare, create-draft]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Prepare App Store Connect API key
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/notary"
+          echo "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/notary/AuthKey.p8"
+          echo "APPLE_API_KEY_FILE=$RUNNER_TEMP/notary/AuthKey.p8" >> "$GITHUB_ENV"
+
+      - name: Build signed + notarized macOS artifacts (arm64 + x64)
+        env:
+          APPLE_API_KEY: ${{ env.APPLE_API_KEY_FILE }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          AWAKEN_CODESIGN_IDENTITY: ${{ secrets.AWAKEN_CODESIGN_IDENTITY }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: npm run dist:desktop:release
+
+      - name: Smoke-run the arm64 app bundle
+        run: |
+          set -euo pipefail
+          APP="apps/desktop/dist-electron/mac-arm64/Awaken.app"
+          spctl -a -vv -t exec "$APP"
+          codesign --verify --deep --strict "$APP"
+
+      - name: Verify update artifacts
+        run: |
+          node scripts/release/verify-update-artifacts.mjs \
+            --version "${{ needs.prepare.outputs.version }}" \
+            --dir apps/desktop/dist-electron \
+            --receipt "$RUNNER_TEMP/verify-receipt-macos.json"
+
+      - name: Audit package contents (DMG/ZIP comparison runs here, on macOS)
+        run: |
+          node scripts/release/audit-package-contents.mjs \
+            --dir apps/desktop/dist-electron \
+            --receipt "$RUNNER_TEMP/audit-receipt-macos.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            apps/desktop/dist-electron/*.dmg
+            apps/desktop/dist-electron/*.zip
+            apps/desktop/dist-electron/*.blockmap
+            apps/desktop/dist-electron/latest-mac.yml
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-receipts-macos
+          path: |
+            ${{ runner.temp }}/verify-receipt-macos.json
+            ${{ runner.temp }}/audit-receipt-macos.json
+          if-no-files-found: error
+          retention-days: 90
+
+  build-windows:
+    needs: [prepare, create-draft]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build signed Windows x64 NSIS
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: npm run dist:desktop:release
+
+      - name: Verify Authenticode signature
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem apps/desktop/dist-electron/Awaken-Setup-*-x64.exe | Select-Object -First 1
+          $sig = Get-AuthenticodeSignature $exe.FullName
+          if ($sig.Status -ne 'Valid') { throw "Authenticode signature invalid: $($sig.Status)" }
+          Write-Output "publisher: $($sig.SignerCertificate.Subject)"
+
+      - name: Verify update artifacts
+        shell: bash
+        run: |
+          node scripts/release/verify-update-artifacts.mjs \
+            --version "${{ needs.prepare.outputs.version }}" \
+            --dir apps/desktop/dist-electron \
+            --receipt "$RUNNER_TEMP/verify-receipt-windows.json"
+
+      - name: Audit Windows package contents
+        shell: bash
+        run: |
+          node scripts/release/audit-package-contents.mjs \
+            --dir apps/desktop/dist-electron \
+            --receipt "$RUNNER_TEMP/audit-receipt-windows.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            apps/desktop/dist-electron/*.exe
+            apps/desktop/dist-electron/*.blockmap
+            apps/desktop/dist-electron/latest.yml
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-receipts-windows
+          path: |
+            ${{ runner.temp }}/verify-receipt-windows.json
+            ${{ runner.temp }}/audit-receipt-windows.json
+          if-no-files-found: error
+          retention-days: 90
+
+  assemble:
+    needs: [prepare, create-draft, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      - name: Collect all platform artifacts
+        run: mkdir -p assembled
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-artifacts
+          path: assembled
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-artifacts
+          path: assembled
+
+      - name: Enforce the exact asset whitelist
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('node:fs');
+            const v = process.env.VERSION;
+            const expected = [
+              \`Awaken-\${v}-arm64.dmg\`, \`Awaken-\${v}-x64.dmg\`,
+              \`Awaken-\${v}-arm64.zip\`, \`Awaken-\${v}-x64.zip\`,
+              \`Awaken-Setup-\${v}-x64.exe\`, \`Awaken-Setup-\${v}-x64.exe.blockmap\`,
+              'latest-mac.yml', 'latest.yml',
+            ];
+            const optional = [
+              \`Awaken-\${v}-arm64.dmg.blockmap\`, \`Awaken-\${v}-x64.dmg.blockmap\`,
+              \`Awaken-\${v}-arm64.zip.blockmap\`, \`Awaken-\${v}-x64.zip.blockmap\`,
+            ];
+            const actual = fs.readdirSync('assembled').filter(f => fs.statSync('assembled/' + f).isFile());
+            for (const name of expected) {
+              if (!actual.includes(name)) throw new Error('missing asset: ' + name);
+            }
+            const allowed = new Set([...expected, ...optional]);
+            for (const name of actual) {
+              if (!allowed.has(name)) throw new Error('unexpected asset: ' + name);
+            }
+            console.log('whitelist OK:', actual.sort().join(', '));
+          "
+
+      - name: Verify both update feeds against the assembled assets
+        run: |
+          node scripts/release/verify-update-artifacts.mjs \
+            --version "${{ needs.prepare.outputs.version }}" \
+            --dir assembled \
+            --receipt verify-receipt-assembled.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assembled-artifacts
+          path: assembled/
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-receipts-assembled
+          path: |
+            verify-receipt-assembled.json
+          if-no-files-found: error
+          retention-days: 90
+
+  upload-draft-assets:
+    needs: [prepare, create-draft, assemble]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: assembled-artifacts
+          path: assembled
+
+      - name: Upload the whitelist to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.AWAKEN_RELEASES_TOKEN }}
+          RELEASE_ID: ${{ needs.create-draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          # Re-upload only when the asset is absent; a same-name asset on a
+          # reused draft must be byte-identical (checked below), never
+          # silently replaced.
+          EXISTING="$(gh api "repos/$RELEASES_REPO/releases/$RELEASE_ID/assets" --paginate --jq '.[].name')"
+          for file in assembled/*; do
+            name="$(basename "$file")"
+            if echo "$EXISTING" | grep -qx "$name"; then
+              echo "asset $name already on draft; keeping for hash check"
+              continue
+            fi
+            echo "uploading $name"
+            gh api "repos/$RELEASES_REPO/releases/$RELEASE_ID/assets?name=$name" \
+              -X POST -H "Content-Type: application/octet-stream" \
+              --input "$file" --jq .name
+          done
+
+      - name: Re-read the asset list and sample re-download for hash equality
+        env:
+          GH_TOKEN: ${{ secrets.AWAKEN_RELEASES_TOKEN }}
+          RELEASE_ID: ${{ needs.create-draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$RELEASES_REPO/releases/$RELEASE_ID/assets" --paginate \
+            --jq '.[] | [.name, .size] | @tsv' > remote-assets.tsv
+          LOCAL_COUNT="$(find assembled -type f | wc -l | tr -d ' ')"
+          REMOTE_COUNT="$(wc -l < remote-assets.tsv | tr -d ' ')"
+          [ "$LOCAL_COUNT" = "$REMOTE_COUNT" ]
+          # Sample one installer per platform: hash the remote copy and compare.
+          for name in $(ls assembled | grep -E '\.(dmg|exe)$' | head -2) "latest-mac.yml"; do
+            gh api "repos/$RELEASES_REPO/releases/$RELEASE_ID/assets" --paginate \
+              --jq ".[] | select(.name == \"$name\") | .id" > asset-id.txt
+            ASSET_ID="$(cat asset-id.txt)"
+            gh api "repos/$RELEASES_REPO/releases/assets/$ASSET_ID" \
+              -H "Accept: application/octet-stream" > "redownload-$name"
+            LOCAL_SHA="$(shasum -a 256 "assembled/$name" | cut -d' ' -f1)"
+            REMOTE_SHA="$(shasum -a 256 "redownload-$name" | cut -d' ' -f1)"
+            echo "$name local=$LOCAL_SHA remote=$REMOTE_SHA"
+            [ "$LOCAL_SHA" = "$REMOTE_SHA" ]
+          done
+
+  upgrade-smoke:
+    needs: [prepare, create-draft, upload-draft-assets]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Block publish until the real installed-app upgrade smoke is implemented
+        run: |
+          echo "Refusing to publish: the previous-version installed-app upgrade smoke is not implemented." >&2
+          echo "Required evidence: discover -> download -> defer -> quitAndInstall -> target-version boot on macOS and Windows." >&2
+          exit 1
+
+  publish:
+    needs: [prepare, create-draft, upload-draft-assets, upgrade-smoke]
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - name: Promote the draft to a public stable release (single API call)
+        env:
+          GH_TOKEN: ${{ secrets.AWAKEN_RELEASES_TOKEN }}
+          RELEASE_ID: ${{ needs.create-draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$RELEASES_REPO/releases/$RELEASE_ID" -X PATCH \
+            -F draft=false -F prerelease=false --jq '.tag_name + " published"'
+
+      - name: Prove unauthenticated public access to release and assets
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          curl -sf "https://api.github.com/repos/$RELEASES_REPO/releases/tags/$TAG" \
+            | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const r=JSON.parse(d);if(r.draft)process.exit(1);console.log('public release assets:',r.assets.length)})"
+          curl -sfIL -o /dev/null \
+            "https://github.com/$RELEASES_REPO/releases/download/$TAG/latest-mac.yml"
+          curl -sfIL -o /dev/null \
+            "https://github.com/$RELEASES_REPO/releases/download/$TAG/Awaken-$VERSION-arm64.zip"
+
+  post-publish-observe:
+    needs: [prepare, publish]
+    runs-on: macos-14
+    steps:
+      - name: First production feed check (alert only, never overwrite)
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          # This job observes the production feed the way a previous-version
+          # install sees it. It can only fail the workflow as an alert; a
+          # problem here is fixed by shipping a higher patch version, never
+          # by rewriting published assets.
+          curl -sfL "https://github.com/$RELEASES_REPO/releases/download/$TAG/latest-mac.yml" -o /tmp/latest-mac.yml
+          curl -sfL "https://github.com/$RELEASES_REPO/releases/download/$TAG/latest.yml" -o /tmp/latest.yml
+          node -e "
+            const fs = require('node:fs');
+            for (const f of ['/tmp/latest-mac.yml', '/tmp/latest.yml']) {
+              const text = fs.readFileSync(f, 'utf8');
+              if (!text.includes('version: ' + process.env.VERSION)) {
+                throw new Error(f + ' does not serve version ' + process.env.VERSION);
+              }
+            }
+            console.log('production feed serves v' + process.env.VERSION);
+          "

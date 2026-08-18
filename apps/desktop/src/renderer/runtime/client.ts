@@ -105,6 +105,7 @@ import {
   type WorkspacePickResult,
   type WorkspaceValidationResult,
 } from "../../shared/runtime";
+import type { DesktopUpdateSnapshot } from "../../shared/desktop-update";
 import type { ProjectFilePreviewInteraction } from "../../shared/project-file-preview-interaction";
 import type {
   PetActivitySnapshot,
@@ -393,6 +394,11 @@ export type RuntimeClient = {
   getSystemTimezone: () => Promise<string>;
   subscribeScheduledTaskEvents: (handler: (event: ScheduledTaskEvent) => void) => () => void;
   onScheduledTaskThreadActivation: (handler: (threadId: string) => void) => () => void;
+  getDesktopUpdateState: () => Promise<DesktopUpdateSnapshot>;
+  checkDesktopUpdate: () => Promise<DesktopUpdateSnapshot>;
+  downloadDesktopUpdate: () => Promise<DesktopUpdateSnapshot>;
+  restartAndInstallDesktopUpdate: () => Promise<DesktopUpdateSnapshot>;
+  onDesktopUpdateStateChanged: (handler: (snapshot: DesktopUpdateSnapshot) => void) => () => void;
   listPets: () => Promise<PetSummary[]>;
   getPetSettings: () => Promise<PetSettings>;
   selectPet: (petId: string) => Promise<PetSettings>;
@@ -690,6 +696,11 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getSystemTimezone: () => bridge.getSystemTimezone(),
     subscribeScheduledTaskEvents: (handler) => bridge.subscribeScheduledTaskEvents(handler),
     onScheduledTaskThreadActivation: (handler) => bridge.onScheduledTaskThreadActivation(handler),
+    getDesktopUpdateState: () => bridge.getDesktopUpdateState(),
+    checkDesktopUpdate: () => bridge.checkDesktopUpdate(),
+    downloadDesktopUpdate: () => bridge.downloadDesktopUpdate(),
+    restartAndInstallDesktopUpdate: () => bridge.restartAndInstallDesktopUpdate(),
+    onDesktopUpdateStateChanged: (handler) => bridge.onDesktopUpdateStateChanged(handler),
     listPets: () => bridge.listPets(),
     getPetSettings: () => bridge.getPetSettings(),
     selectPet: (petId) => bridge.selectPet(petId),

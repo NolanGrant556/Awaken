@@ -187,6 +187,19 @@ import {
   startScheduledTaskEventStream,
   type ScheduledTaskEventStream,
 } from "./scheduled-tasks.js";
+// electron-updater 是 CommonJS；按 electron-builder 官方 interop 形式取 autoUpdater，
+// 只在 index.ts 获取一次并注入 DesktopUpdateManager，不在多个模块重复绑定 listener。
+import electronUpdaterPkg from "electron-updater";
+import {
+  DESKTOP_UPDATE_CHANNELS,
+  disabledDesktopUpdateSnapshot,
+  isStableDesktopUpdateIdentity,
+  type DesktopRuntimeActivity,
+} from "../shared/desktop-update.js";
+import { DesktopUpdateManager } from "./desktop-update-manager.js";
+import { DesktopShutdownCoordinator } from "./desktop-shutdown-coordinator.js";
+
+const { autoUpdater } = electronUpdaterPkg;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let runtimeBaseUrl: string | null = null;
@@ -257,6 +270,11 @@ let networkRoutePowerListener: (() => void) | null = null;
 let mainWindowRef: BrowserWindow | null = null;
 let pendingPetThreadId: string | null = null;
 let isQuitting = false;
+let desktopUpdateManager: DesktopUpdateManager | null = null;
+let desktopShutdownCoordinator: DesktopShutdownCoordinator | null = null;
+let updateStartupCheckTimer: NodeJS.Timeout | null = null;
+let updateIntervalTimer: NodeJS.Timeout | null = null;
+let updatePowerResumeListener: (() => void) | null = null;
 let projectTrashWorkerTimer: NodeJS.Timeout | null = null;
 let projectTrashWorkerRunning = false;
 let memoryDreamSchedulerStore: MemoryDreamSchedulerStore | null = null;
@@ -1148,6 +1166,7 @@ function createMainWindow(): BrowserWindow {
     }
     rendererReadyToShow = true;
     showMainWindow();
+    scheduleDesktopUpdateChecks();
     if (pendingPetThreadId) {
       event.sender.send(PET_IPC_CHANNELS.petThreadActivationRequested, pendingPetThreadId);
       pendingPetThreadId = null;
@@ -1317,6 +1336,121 @@ function assertMainWindowSender(event: IpcMainInvokeEvent): void {
 
 function scheduledTaskPath(taskId: string, suffix = ""): string {
   return `/v1/scheduled-tasks/${encodeURIComponent(taskId)}${suffix}`;
+}
+
+/**
+ * 更新命令只接受当前主窗口；payload 不含 URL/路径/版本/资产选择。
+ * 快照广播只发往当前主窗口，窗口销毁后由 closed 处理自然终止。
+ */
+function requireMainWindowSender(event: IpcMainInvokeEvent): void {
+  if (
+    !mainWindowRef ||
+    mainWindowRef.isDestroyed() ||
+    event.sender.id !== mainWindowRef.webContents.id
+  ) {
+    throw new Error("无法确认更新请求来自 Awaken 主窗口。");
+  }
+}
+
+async function fetchRuntimeActivitySnapshot(): Promise<DesktopRuntimeActivity | null> {
+  if (!runtimeBaseUrl) {
+    return null;
+  }
+  try {
+    return await requestRuntime<DesktopRuntimeActivity>("/v1/runtime/activity", {
+      method: "GET",
+    });
+  } catch (error) {
+    console.warn("desktop_update_activity_unavailable", {
+      component: "desktop-updater",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+}
+
+async function readDesktopUpdateBuildChannel(): Promise<unknown> {
+  if (!app.isPackaged) return undefined;
+  try {
+    const metadata = JSON.parse(
+      await fs.readFile(join(app.getAppPath(), "package.json"), "utf8"),
+    ) as { awakenUpdateChannel?: unknown };
+    return metadata.awakenUpdateChannel;
+  } catch (error) {
+    console.warn("desktop_update_identity_unavailable", {
+      component: "desktop-updater",
+      error_name: error instanceof Error ? error.name : "unknown",
+    });
+    return undefined;
+  }
+}
+
+function subscribeDesktopUpdateStateBroadcast(): void {
+  if (!desktopUpdateManager) return;
+  desktopUpdateManager.subscribe((snapshot) => {
+    if (!mainWindowRef || mainWindowRef.isDestroyed()) return;
+    mainWindowRef.webContents.send(DESKTOP_UPDATE_CHANNELS.stateChanged, snapshot);
+  });
+}
+
+function registerDesktopUpdateIpcHandlers(): void {
+  ipcMain.handle(DESKTOP_UPDATE_CHANNELS.getState, (event) => {
+    requireMainWindowSender(event);
+    return (
+      desktopUpdateManager?.getSnapshot() ?? disabledDesktopUpdateSnapshot(app.getVersion())
+    );
+  });
+  ipcMain.handle(DESKTOP_UPDATE_CHANNELS.check, async (event) => {
+    requireMainWindowSender(event);
+    return (
+      desktopUpdateManager?.check("retry") ?? disabledDesktopUpdateSnapshot(app.getVersion())
+    );
+  });
+  ipcMain.handle(DESKTOP_UPDATE_CHANNELS.download, async (event) => {
+    requireMainWindowSender(event);
+    return (
+      desktopUpdateManager?.download() ?? disabledDesktopUpdateSnapshot(app.getVersion())
+    );
+  });
+  ipcMain.handle(DESKTOP_UPDATE_CHANNELS.restartAndInstall, async (event) => {
+    requireMainWindowSender(event);
+    return (
+      desktopUpdateManager?.restartAndInstall() ??
+      disabledDesktopUpdateSnapshot(app.getVersion())
+    );
+  });
+}
+
+/** Renderer ready 后延迟首次检查；之后每 6 小时最多自动检查一次（manager 内部节流）。 */
+function scheduleDesktopUpdateChecks(): void {
+  if (!desktopUpdateManager || updateStartupCheckTimer || updateIntervalTimer) {
+    return;
+  }
+  updateStartupCheckTimer = setTimeout(() => {
+    updateStartupCheckTimer = null;
+    void desktopUpdateManager?.check("startup");
+    if (!updateIntervalTimer) {
+      updateIntervalTimer = setInterval(
+        () => void desktopUpdateManager?.check("interval"),
+        6 * 60 * 60 * 1000,
+      );
+    }
+  }, 20_000);
+}
+
+function stopDesktopUpdateScheduling(): void {
+  if (updateStartupCheckTimer) {
+    clearTimeout(updateStartupCheckTimer);
+    updateStartupCheckTimer = null;
+  }
+  if (updateIntervalTimer) {
+    clearInterval(updateIntervalTimer);
+    updateIntervalTimer = null;
+  }
+  if (updatePowerResumeListener) {
+    powerMonitor.removeListener("resume", updatePowerResumeListener);
+    updatePowerResumeListener = null;
+  }
 }
 
 function registerScheduledTaskIpcHandlers(): void {
@@ -3723,6 +3857,41 @@ app.whenReady().then(async () => {
   registerPetIpcHandlers();
   registerScheduledTaskIpcHandlers();
 
+  desktopShutdownCoordinator = new DesktopShutdownCoordinator({
+    stopSyncOwners: stopSyncShutdownOwners,
+    stopAsyncOwners: stopAsyncShutdownOwners,
+    finalizeOwners: finalizeShutdownOwners,
+  });
+  const desktopUpdateBuildChannel = await readDesktopUpdateBuildChannel();
+  desktopUpdateManager = new DesktopUpdateManager({
+    updater: autoUpdater,
+    // 只有安装版稳定身份启用更新器；Awaken Dev、Gallery、ad-hoc 包不访问 GitHub。
+    enabled: isStableDesktopUpdateIdentity({
+      packaged: app.isPackaged,
+      devServer: isDevServer,
+      channel: desktopUpdateBuildChannel,
+      version: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+    }),
+    currentVersion: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    receiptPath: join(app.getPath("userData"), "desktop-update-receipt.json"),
+    fetchActivity: fetchRuntimeActivitySnapshot,
+    requestShutdown: (mode) => {
+      if (!desktopShutdownCoordinator) {
+        return Promise.resolve({ ok: false, reason: "shutdown coordinator unavailable" });
+      }
+      return desktopShutdownCoordinator.stop(mode);
+    },
+  });
+  desktopUpdateManager.initialize();
+  subscribeDesktopUpdateStateBroadcast();
+  registerDesktopUpdateIpcHandlers();
+  updatePowerResumeListener = () => void desktopUpdateManager?.check("resume");
+  powerMonitor.on("resume", updatePowerResumeListener);
+
   projectFilePreviewManager = new ProjectFilePreviewManager({
     getProjects: async () => {
       const projects = await requestRuntimeDomain<RuntimeProjectWire[]>(
@@ -3857,6 +4026,7 @@ app.whenReady().then(async () => {
 
   app.on("activate", () => {
     networkRouteManager?.notifySystemChange("app-activate");
+    void desktopUpdateManager?.check("activate");
     if (!mainWindowRef || mainWindowRef.isDestroyed()) {
       createMainWindow();
     } else {
@@ -3871,10 +4041,8 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", (event) => {
-  if (isQuitting) return;
-  event.preventDefault();
-  isQuitting = true;
+/** 退出清理的同步 owner：与 before-quit 原顺序一致，供 shutdown coordinator 调用。 */
+function stopSyncShutdownOwners(): void {
   stopProjectTrashWorker();
   stopScheduledTaskEventStream();
   stopComputerRunMonitors();
@@ -3898,19 +4066,50 @@ app.on("before-quit", (event) => {
   networkRouteObserver = null;
   networkRouteManager?.dispose();
   networkRouteManager = null;
-  void (async () => {
-    try {
-      if (supervisor) {
-        await supervisor.stop();
-      }
-      await cliConnectorManager?.dispose();
-      await petWindowManager?.dispose();
-      await computerOverlayManager?.dispose();
-    } catch (err) {
-      console.error("[awaken-desktop] supervisor stop failed", err);
+}
+
+/** 只在全部 owner 已成功停止后销毁 updater/scheduler；失败时仍可向窗口回报并重试。 */
+function finalizeShutdownOwners(): void {
+  stopDesktopUpdateScheduling();
+  desktopUpdateManager?.dispose();
+  desktopUpdateManager = null;
+}
+
+/** 退出清理的异步 owner：supervisor/Core、CLI connector、pet/computer overlay。 */
+async function stopAsyncShutdownOwners(): Promise<void> {
+  if (supervisor) {
+    await supervisor.stop();
+  }
+  await cliConnectorManager?.dispose();
+  await petWindowManager?.dispose();
+  await computerOverlayManager?.dispose();
+}
+
+app.on("before-quit", (event) => {
+  if (isQuitting) return;
+  if (desktopShutdownCoordinator?.updateInstallReady) {
+    // update-install 清理已完成，放行让 quitAndInstall 的安装器接管；
+    // before-quit-for-update 不再发起第二次清理，也不调用 app.exit()。
+    isQuitting = true;
+    return;
+  }
+  event.preventDefault();
+  isQuitting = true;
+  const coordinator = desktopShutdownCoordinator;
+  if (!coordinator) {
+    app.exit();
+    return;
+  }
+  void coordinator.stop("normal").then((result) => {
+    if (!result.ok) {
+      console.error("[awaken-desktop] shutdown cleanup failed", { reason: result.reason });
+    }
+    if (coordinator.updateInstallReady) {
+      // 清理期间已被更新安装路径接管，普通退出不得抢跑安装器。
+      return;
     }
     app.exit();
-  })();
+  });
 });
 
 process.on("uncaughtException", (error) => {

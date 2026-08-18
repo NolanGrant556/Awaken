@@ -88,7 +88,7 @@ project scope  <workspace>/.awaken/memory/
 
 ### 4.1 目录布局
 
-两个 scope 使用相同布局：
+两个 scope 使用相同布局（以下文件名均为示意，不指向仓库内真实文件）：
 
 ```text
 memory/
@@ -104,7 +104,7 @@ memory/
 
 ### 4.2 `MEMORY.md`
 
-`MEMORY.md` 是导航和常驻小索引，不是记忆正文。每行格式：
+`MEMORY.md` 是导航和常驻小索引，不是记忆正文。每行格式（示例，链接目标为同目录下的主题文件）：
 
 ```markdown
 - [数据库测试约束](feedback-testing-a82c.md) — 集成测试必须连接真实数据库

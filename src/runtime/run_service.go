@@ -579,7 +579,7 @@ func (s *RunService) TrustProjectHook(projectID, sourcePath, digest string) (hoo
 	}
 	found := false
 	for _, source := range status.Sources {
-		if source.Kind == hookruntime.SourceProject && source.Path == filepath.Clean(sourcePath) && source.Digest == strings.TrimSpace(digest) && source.Status == hookruntime.StatusUntrusted {
+		if source.Kind.RequiresProjectTrust() && source.Path == filepath.Clean(sourcePath) && source.Digest == strings.TrimSpace(digest) && source.Status == hookruntime.StatusUntrusted {
 			found = true
 			break
 		}
@@ -603,7 +603,7 @@ func (s *RunService) RevokeProjectHook(projectID, sourcePath string) (hookruntim
 	}
 	found := false
 	for _, source := range status.Sources {
-		if source.Kind == hookruntime.SourceProject && source.Path == filepath.Clean(sourcePath) {
+		if source.Kind.RequiresProjectTrust() && source.Path == filepath.Clean(sourcePath) {
 			found = true
 			break
 		}

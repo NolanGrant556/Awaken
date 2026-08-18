@@ -90,7 +90,7 @@ func (r *Runner) executeAgentHook(ctx context.Context, input hookruntime.InputEn
 	cfg.HookLifecycleStarted = true
 	cfg.ComputerRuntime = nil
 	cfg.ToolExposure.ExtraHidden = appendUniqueStrings(cfg.ToolExposure.ExtraHidden,
-		"subagent", "ask_user", "delegate_external_agent", "configure_acp_runner", "computer_observe", "computer_act", "computer_verify", "Bash", "Edit", "Write", "trash_file", "artifact_publish", "dependency_install", "git_remote")
+		"subagent", "ask_user", "delegate_external_agent", "configure_acp_runner", "configure_hook", "computer_observe", "computer_act", "computer_verify", "Bash", "Edit", "Write", "trash_file", "artifact_publish", "dependency_install", "git_remote")
 	cfg.SystemPrompt = "You are an Awaken local read-only Hook verifier. Inspect only the assigned workspace and return exactly one JSON object: {\"ok\":boolean,\"reason\":string?,\"additionalContext\":string?}. Never mutate files, use network tools, delegate, ask the user, or execute nested Hooks."
 	conversation := convcontext.NewConversation(nil)
 	conversation.UserInput(renderHookPrompt(hook.Command.Prompt, inputJSON))

@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -23,8 +24,9 @@ import (
 var hookIDPattern = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
 
 type Store struct {
-	root  string
-	trust *TrustStore
+	root       string
+	trust      *TrustStore
+	mutationMu sync.Mutex
 }
 
 func NewStore(root string) (*Store, error) {
@@ -67,6 +69,7 @@ func (s *Store) buildSnapshot(projectID string, projectRoots []string, sessionWo
 			}
 			seen[root] = struct{}{}
 			candidates = append(candidates, sourceCandidate{kind: SourceProject, path: filepath.Join(root, ".awaken", "hooks.json"), projectRoot: root})
+			candidates = append(candidates, sourceCandidate{kind: SourceProjectLocal, path: filepath.Join(root, ".awaken", "hooks.local.json"), projectRoot: root})
 		}
 	}
 	seenStableIDs := map[string]struct{}{}
@@ -127,7 +130,7 @@ func (s *Store) loadCandidate(projectID string, candidate sourceCandidate) (Sour
 		receipt.Status, receipt.Diagnostic = StatusInvalid, err.Error()
 		return receipt, nil, err
 	}
-	if candidate.kind == SourceProject {
+	if candidate.kind.RequiresProjectTrust() {
 		canonicalRoot, rootErr := filepath.EvalSymlinks(candidate.projectRoot)
 		if rootErr != nil {
 			err = fmt.Errorf("hookruntime: resolve project root: %w", rootErr)
@@ -139,7 +142,11 @@ func (s *Store) loadCandidate(projectID string, candidate sourceCandidate) (Sour
 			receipt.Status, receipt.Diagnostic = StatusInvalid, rootErr.Error()
 			return receipt, nil, rootErr
 		}
-		expected := filepath.Join(filepath.Clean(canonicalRoot), ".awaken", "hooks.json")
+		filename := "hooks.json"
+		if candidate.kind == SourceProjectLocal {
+			filename = "hooks.local.json"
+		}
+		expected := filepath.Join(filepath.Clean(canonicalRoot), ".awaken", filename)
 		if canonical != expected {
 			err = errors.New("hookruntime: project hooks.json resolves outside the project root")
 			receipt.Status, receipt.Diagnostic = StatusInvalid, err.Error()
@@ -171,7 +178,7 @@ func (s *Store) loadCandidate(projectID string, candidate sourceCandidate) (Sour
 		receipt.Status = StatusDisabled
 		return receipt, &config, nil
 	}
-	if candidate.kind == SourceProject {
+	if candidate.kind.RequiresProjectTrust() {
 		trusted, trustErr := s.trust.IsTrusted(projectID, canonical, receipt.Digest)
 		if trustErr != nil {
 			receipt.Status, receipt.Diagnostic = StatusUntrusted, trustErr.Error()

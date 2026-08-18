@@ -58,4 +58,25 @@ describe("HooksSettingsPanel", () => {
     expect(trustProjectHook).toHaveBeenCalledWith({ projectId: "project-1", sourcePath: "/work/.awaken/hooks.json", digest: "abcdef1234567890" });
     expect(container.textContent).toContain("只会影响后续新任务");
   });
+
+  it("shows project-local Hook as a separately trustable source", async () => {
+    const getHookStatus = vi.fn(async () => ({
+      snapshotId: "snapshot-local", schemaVersion: 1, createdAt: "2026-08-18T00:00:00Z", enabledHookCount: 0,
+      sources: [{
+        kind: "project_local" as const, path: "/work/.awaken/hooks.local.json", digest: "local1234567890", status: "untrusted" as const, hookCount: 1,
+        hooks: [{ id: "local-check", event: "RunStart", type: "prompt" as const, prompt: "Check local state", timeoutMs: 10000, maxOutputBytes: 65536, onFailure: "continue" as const }],
+      }],
+    }));
+    const trustProjectHook = vi.fn(async () => ({ snapshotId: "trusted", schemaVersion: 1, createdAt: "2026-08-18T00:00:01Z", enabledHookCount: 1, sources: [] }));
+    const runtimeClient = {
+      getHookStatus, trustProjectHook, revokeProjectHook: vi.fn(),
+      listProjects: vi.fn(async () => [{ projectId: "project-1", displayName: "Awaken", state: "active", workspaceRoot: "/work", folders: [], createdAt: "", updatedAt: "", version: 1 }]),
+    } as unknown as RuntimeClient;
+    await act(async () => { root.render(<HooksSettingsPanel runtimeClient={runtimeClient} currentProjectId="project-1" />); });
+    expect(container.textContent).toContain("项目本地配置");
+    expect(container.textContent).toContain("hooks.local.json");
+    const button = [...container.querySelectorAll("button")].find((item) => item.textContent === "信任当前配置");
+    await act(async () => { button!.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
+    expect(trustProjectHook).toHaveBeenCalledWith({ projectId: "project-1", sourcePath: "/work/.awaken/hooks.local.json", digest: "local1234567890" });
+  });
 });

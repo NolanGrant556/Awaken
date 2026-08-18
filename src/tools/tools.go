@@ -7,6 +7,7 @@ import (
 	_ "awaken/src/tools/calculator"
 	_ "awaken/src/tools/computer"
 	_ "awaken/src/tools/configure_acp_runner"
+	_ "awaken/src/tools/configure_hook"
 	_ "awaken/src/tools/delegate_external_agent"
 	_ "awaken/src/tools/dependency_install"
 	_ "awaken/src/tools/edit"

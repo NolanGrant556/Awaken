@@ -459,6 +459,7 @@ export type ProjectFilePreviewErrorCode =
   | "PATH_OUTSIDE_PROJECT"
   | "FILE_NOT_FOUND"
   | "FILE_UNREADABLE"
+  | "FILE_UNWRITABLE"
   | "UNSUPPORTED_FILE_TYPE"
   | "FILE_TOO_LARGE"
   | "IMAGE_TOO_LARGE"
@@ -498,6 +499,20 @@ export type ProjectFilePreviewActionResult =
       ok: false;
       code: ProjectFilePreviewErrorCode;
       message: string;
+    };
+
+export type ProjectFilePreviewSaveRequest = ProjectFilePreviewActionRequest & {
+  content: string;
+};
+
+export type ProjectFilePreviewSaveResult =
+  | { ok: true; byteLength: number }
+  | {
+      ok: false;
+      code: ProjectFilePreviewErrorCode;
+      message: string;
+      byteLength?: number;
+      limitBytes?: number;
     };
 
 /** Folder list submitted when creating a project. An empty list is legal: the
@@ -2020,6 +2035,9 @@ export type AwakenBridge = {
   revealProjectFile: (
     request: ProjectFilePreviewActionRequest,
   ) => Promise<ProjectFilePreviewActionResult>;
+  saveProjectMarkdownFile: (
+    request: ProjectFilePreviewSaveRequest,
+  ) => Promise<ProjectFilePreviewSaveResult>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
   createProject: (
     folders: ProjectFolderSelection[],

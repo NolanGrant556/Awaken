@@ -1,0 +1,7 @@
+{
+  "name": "Awaken",
+  "install": "if [ -f package-lock.json ] && [ -f go.mod ]; then :; elif [ -f /agent/repos/Awaken/package-lock.json ]; then cd /agent/repos/Awaken; fi\nnpm ci\ngo version",
+  "repositoryDependencies": [
+    "github.com/NolanGrant556/Agent_up"
+  ]
+}

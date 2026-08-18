@@ -8,6 +8,10 @@ import { AwakenNewTaskButton } from "../AwakenNewTaskButton";
 import { AwakenPrimaryNav } from "../AwakenPrimaryNav";
 import { AwakenProjectTree } from "../AwakenProjectTree";
 import { AwakenProfileButton } from "../AwakenProfileButton";
+import {
+  AwakenSidebarUpdateButton,
+  type AwakenSidebarUpdateAction,
+} from "./AwakenSidebarUpdateButton";
 
 export type AwakenSidebarProps = {
   navItems?: NavItem[];
@@ -39,7 +43,8 @@ export type AwakenSidebarProps = {
   onNewTask?: () => void;
   onExpandedChange?: (ids: string[]) => void;
   onProfileClick?: () => void;
-  profileButtonRef?: React.RefObject<HTMLDivElement | null>;
+  profileButtonRef?: React.RefObject<HTMLButtonElement | null>;
+  profileUpdateAction?: AwakenSidebarUpdateAction;
 };
 
 const sidebarStyle: CSSProperties = {
@@ -123,6 +128,7 @@ export function AwakenSidebar({
   onExpandedChange,
   onProfileClick,
   profileButtonRef,
+  profileUpdateAction,
 }: AwakenSidebarProps) {
   const showProjects = projectSectionLabel !== "" || projects.length > 0;
   const showConversations =
@@ -187,17 +193,23 @@ export function AwakenSidebar({
         ) : null}
       </div>
 
-      {profileName || profileAvatarFallback || profileAvatarSrc || onProfileClick ? (
-        <div ref={profileButtonRef} className="aw-sidebar-profile" style={bottomStyle}>
-          <AwakenProfileButton
-            name={profileName}
-            subtitle={profileSubtitle}
-            avatarFallback={profileAvatarFallback}
-            avatarSrc={profileAvatarSrc}
-            expanded={profileExpanded}
-            controls={profileControls}
-            onClick={onProfileClick}
-          />
+      {profileName || profileAvatarFallback || profileAvatarSrc || onProfileClick || profileUpdateAction ? (
+        <div className="aw-sidebar-profile" style={bottomStyle}>
+          {profileUpdateAction ? (
+            <AwakenSidebarUpdateButton action={profileUpdateAction} />
+          ) : null}
+          {profileName || profileAvatarFallback || profileAvatarSrc || onProfileClick ? (
+            <AwakenProfileButton
+              name={profileName}
+              subtitle={profileSubtitle}
+              avatarFallback={profileAvatarFallback}
+              avatarSrc={profileAvatarSrc}
+              expanded={profileExpanded}
+              controls={profileControls}
+              onClick={onProfileClick}
+              buttonRef={profileButtonRef}
+            />
+          ) : null}
         </div>
       ) : null}
     </aside>

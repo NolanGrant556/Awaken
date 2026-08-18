@@ -415,6 +415,19 @@ function createMockRuntimeClient(): RuntimeClient {
     getSystemTimezone: vi.fn(async () => "UTC"),
     subscribeScheduledTaskEvents: vi.fn(() => () => {}),
     onScheduledTaskThreadActivation: vi.fn(() => () => {}),
+    getDesktopUpdateState: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    checkDesktopUpdate: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    downloadDesktopUpdate: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    restartAndInstallDesktopUpdate: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    onDesktopUpdateStateChanged: vi.fn(() => () => {}),
   } satisfies RuntimeClient;
 }
 

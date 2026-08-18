@@ -826,6 +826,27 @@ function stubElectronBridge(): void {
       getSystemTimezone: vi.fn(async () => "UTC"),
       subscribeScheduledTaskEvents: vi.fn(() => () => {}),
       onScheduledTaskThreadActivation: vi.fn(() => () => {}),
+      getDesktopUpdateState: vi.fn(async () => ({
+        operationId: "disabled",
+        phase: "disabled" as const,
+        currentVersion: "0.1.0",
+      })),
+      checkDesktopUpdate: vi.fn(async () => ({
+        operationId: "disabled",
+        phase: "disabled" as const,
+        currentVersion: "0.1.0",
+      })),
+      downloadDesktopUpdate: vi.fn(async () => ({
+        operationId: "disabled",
+        phase: "disabled" as const,
+        currentVersion: "0.1.0",
+      })),
+      restartAndInstallDesktopUpdate: vi.fn(async () => ({
+        operationId: "disabled",
+        phase: "disabled" as const,
+        currentVersion: "0.1.0",
+      })),
+      onDesktopUpdateStateChanged: vi.fn(() => () => {}),
       resolveComputerReview: vi.fn(async () => undefined),
       computerSessionControl: vi.fn(async () => undefined),
       getComputerHostStatus: vi.fn(async () => ({

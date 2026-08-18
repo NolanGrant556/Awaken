@@ -45,6 +45,8 @@ Desktop 向 core 注入：
 
 正常 stop 先调用 09 协议域定义的 shutdown 动作，最多等待 2 秒，再发送平台对应的 graceful signal；约 3 秒后仍未退出则强制结束，约 3.5 秒完成 stop 收口。Unix 使用 `SIGTERM`/`SIGKILL`，Windows 使用受支持的中断与 `taskkill` 路径。
 
+core 另提供只读 route `GET /v1/runtime/activity`，返回当前 in-flight run 计数（`active_run_count`、`cancelling_run_count`、`observed_at`），供 Main 在更新重启等维护操作前判定运行时是否仍有活动 run；route 注册条件与字段契约由 09 协议域的 HTTP/SSE 接口契约唯一拥有。
+
 supervisor 只保留最多 1,000 条当前进程日志；重启会清空内存日志缓冲，这不是审计或会话存储。
 
 core 异常退出后状态为 `crashed`。重新启动会恢复线程历史，但不会恢复旧 child 中的 goroutine、SSE stream 或 Office 子进程。开放语义事实如何封口由 [SemanticJournal 与重放](SemanticJournal与重放.md) 定义。

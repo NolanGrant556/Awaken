@@ -249,6 +249,15 @@
   box-shadow: 0 0 0 2px var(--aw-focus-ring);
 }
 
+.aw-sidebar-demo__update-list {
+  display: grid;
+  gap: var(--aw-space-2);
+  padding: var(--aw-space-3);
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-bg-nav);
+}
+
 .aw-sidebar-demo__spinner-row {
   display: inline-flex;
   align-items: center;

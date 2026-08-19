@@ -12,6 +12,7 @@ import (
 
 	convcontext "awaken/src/context"
 	"awaken/src/llm"
+	"awaken/src/tool"
 )
 
 func TestCompactConversationWithRequestCanaryFactEntersSummary(t *testing.T) {
@@ -829,4 +830,189 @@ func TestCompactConversationPreservesCanaryUserAndToolFacts(t *testing.T) {
 			t.Fatalf("expected compact summary to preserve %q, got %q", want, result.SummaryMessage.Content)
 		}
 	}
+}
+
+func TestCompactSummaryRequestStripsMediaPayloads(t *testing.T) {
+	messages := []convcontext.Message{
+		{Role: convcontext.RoleUser, Content: "read the deck"},
+		{
+			Role: convcontext.RoleAssistant,
+			ToolCalls: []convcontext.ToolCall{{
+				ID: "call-1", Function: convcontext.FunctionCall{Name: "Read", Arguments: `{"file_path":"deck.pdf"}`},
+			}},
+		},
+		{
+			Role: convcontext.RoleTool, ToolCallID: "call-1", Name: "Read",
+			Content: "page image " + strings.Repeat("x", 400),
+			ModelContent: []tool.ModelContentPart{{
+				Type: "image", MimeType: "image/png", DisplayName: "deck.pdf", Page: 1,
+				DataBase64: "aW1hZ2U=", StorageKey: "thread/tool-results/call/part-001.png", ByteSize: 8,
+			}},
+		},
+		{Role: convcontext.RoleUser, Content: "latest tail question"},
+	}
+
+	result, err := CompactConversationWithRequest(stdcontext.Background(), CompactRequest{
+		Mode:         CompactModeManual,
+		Messages:     messages,
+		Envelope:     ContextEnvelope{Messages: messages, Model: "test-model"},
+		TargetTokens: 1,
+		summaryInvoker: func(_ stdcontext.Context, _ llm.Config, req llm.Request) (string, error) {
+			for _, message := range req.Messages {
+				for _, part := range message.ModelContent {
+					if strings.TrimSpace(part.DataBase64) != "" {
+						t.Fatalf("summary request leaked media payload: %+v", part)
+					}
+				}
+				for _, attachment := range message.Attachments {
+					if strings.TrimSpace(attachment.DataBase64) != "" {
+						t.Fatalf("summary request leaked attachment payload: %+v", attachment)
+					}
+				}
+			}
+			return renderCompactSummarySections(map[string][]string{
+				"Active Task":               {"- Summarize the deck."},
+				"Goal":                      {"- Keep images out of the summary request."},
+				"Constraints & Preferences": {"- None."},
+				"Completed Actions":         {"- Read deck.pdf."},
+				"Active State":              {"- None."},
+				"In Progress":               {"- None."},
+				"Blocked":                   {"- None."},
+				"Key Decisions":             {"- None."},
+				"Resolved Questions":        {"- None."},
+				"Pending User Asks":         {"- None."},
+				"Relevant Files":            {"- deck.pdf"},
+				"Remaining Work":            {"- Continue from the protected tail."},
+				"Critical Context":          {"- Older page images were stubbed."},
+			}), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("CompactConversationWithRequest returned error: %v", err)
+	}
+	if result.Fallback.Used {
+		t.Fatalf("did not expect fallback, got %+v", result.Fallback)
+	}
+}
+
+func TestCompactOversizedTailAbsorbsClosedMediaGroup(t *testing.T) {
+	messages := []convcontext.Message{
+		{Role: convcontext.RoleUser, Content: "read these pages"},
+	}
+	calls := make([]convcontext.ToolCall, 0, 14)
+	for i := 1; i <= 14; i++ {
+		calls = append(calls, convcontext.ToolCall{
+			ID:       "call-" + strings.Repeat("x", 0) + itoaCompact(i),
+			Function: convcontext.FunctionCall{Name: "Read", Arguments: `{"file_path":"deck.pdf","pages":"1-10"}`},
+		})
+	}
+	messages = append(messages, convcontext.Message{Role: convcontext.RoleAssistant, ToolCalls: calls})
+	for i := 1; i <= 14; i++ {
+		parts := make([]tool.ModelContentPart, 0, 10)
+		for page := 1; page <= 10; page++ {
+			parts = append(parts, tool.ModelContentPart{
+				Type: "image", MimeType: "image/png", DisplayName: "deck.pdf", Page: page,
+				DataBase64: "aW1hZ2U=", StorageKey: "thread/tool-results/call/part.png", ByteSize: 8,
+			})
+		}
+		messages = append(messages, convcontext.Message{
+			Role: convcontext.RoleTool, ToolCallID: "call-" + itoaCompact(i), Name: "Read",
+			Content: "pages", ModelContent: parts,
+		})
+	}
+
+	result, err := CompactConversationWithRequest(stdcontext.Background(), CompactRequest{
+		Mode:     CompactModeManual,
+		Messages: messages,
+		Envelope: ContextEnvelope{
+			Messages: messages, Model: "test-model",
+			CompactModelConfig: ModelConfig{ContextWindow: 40000},
+		},
+		TargetTokens: 1,
+		summaryInvoker: func(_ stdcontext.Context, _ llm.Config, req llm.Request) (string, error) {
+			for _, message := range req.Messages {
+				for _, part := range message.ModelContent {
+					if strings.TrimSpace(part.DataBase64) != "" {
+						t.Fatalf("summary request still carried page images: %+v", part)
+					}
+				}
+			}
+			return renderCompactSummarySections(map[string][]string{
+				"Active Task":               {"- Read these pages."},
+				"Goal":                      {"- Absorb the oversized media tail."},
+				"Constraints & Preferences": {"- None."},
+				"Completed Actions":         {"- Read deck.pdf."},
+				"Active State":              {"- None."},
+				"In Progress":               {"- None."},
+				"Blocked":                   {"- None."},
+				"Key Decisions":             {"- None."},
+				"Resolved Questions":        {"- None."},
+				"Pending User Asks":         {"- None."},
+				"Relevant Files":            {"- deck.pdf"},
+				"Remaining Work":            {"- Continue from the latest user request."},
+				"Critical Context":          {"- 140 page images moved into the prefix."},
+			}), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("CompactConversationWithRequest returned error: %v", err)
+	}
+	if len(result.TailMessages) != 1 || result.TailMessages[0].Content != "read these pages" {
+		t.Fatalf("expected absorbed tail to keep only the latest user, got %+v", result.TailMessages)
+	}
+	for _, message := range result.TailMessages {
+		for _, part := range message.ModelContent {
+			if strings.TrimSpace(part.DataBase64) != "" {
+				t.Fatalf("compact tail still carried DataBase64: %+v", part)
+			}
+		}
+	}
+}
+
+func TestCompactOversizedUnclosedPairingIsRejected(t *testing.T) {
+	parts := make([]tool.ModelContentPart, 0, 40)
+	for page := 1; page <= 40; page++ {
+		parts = append(parts, tool.ModelContentPart{
+			Type: "image", MimeType: "image/png", DisplayName: "deck.pdf", Page: page,
+			DataBase64: "aW1hZ2U=", StorageKey: "thread/tool-results/call/part.png", ByteSize: 8,
+		})
+	}
+	messages := []convcontext.Message{
+		{Role: convcontext.RoleUser, Content: "read these pages"},
+		{
+			Role: convcontext.RoleAssistant,
+			ToolCalls: []convcontext.ToolCall{
+				{ID: "call-1", Function: convcontext.FunctionCall{Name: "Read"}},
+				{ID: "call-2", Function: convcontext.FunctionCall{Name: "Read"}},
+			},
+		},
+		{Role: convcontext.RoleTool, ToolCallID: "call-1", Name: "Read", Content: "pages", ModelContent: parts},
+	}
+	_, err := CompactConversationWithRequest(stdcontext.Background(), CompactRequest{
+		Mode:     CompactModeManual,
+		Messages: messages,
+		Envelope: ContextEnvelope{
+			Messages: messages, Model: "test-model",
+			CompactModelConfig: ModelConfig{ContextWindow: 40000},
+		},
+		TargetTokens: 1,
+		summaryInvoker: func(stdcontext.Context, llm.Config, llm.Request) (string, error) {
+			return "should not run", nil
+		},
+	})
+	if !errors.Is(err, errOversizedProtectedTail) {
+		t.Fatalf("expected oversized protected tail, got %v", err)
+	}
+}
+
+func itoaCompact(value int) string {
+	if value == 0 {
+		return "0"
+	}
+	digits := make([]byte, 0, 4)
+	for value > 0 {
+		digits = append([]byte{byte('0' + value%10)}, digits...)
+		value /= 10
+	}
+	return string(digits)
 }

@@ -144,7 +144,7 @@ func (r *Runner) dispatchHookScoped(ctx context.Context, events *runEventEmitter
 	}
 	if installContext && len(result.AdditionalContext) > 0 {
 		r.installHookContext(event, result.AdditionalContext)
-		r.reqBuilder = NewRequestBuilder(r.config)
+		r.rebuildRequestBuilder()
 	}
 	return result, nil
 }
@@ -192,7 +192,7 @@ func (r *Runner) beforeFinish(ctx context.Context, events *runEventEmitter, cand
 		Content:   "The host withheld the preceding candidate answer from finalization. Produce a new candidate after considering this untrusted local Hook feedback data:\n<before_finish_hook_feedback>\n" + strings.Join(feedback, "\n") + "\n</before_finish_hook_feedback>",
 		InvokedAt: time.Now().UTC(),
 	})
-	r.reqBuilder = NewRequestBuilder(r.config)
+	r.rebuildRequestBuilder()
 	return true, nil
 }
 
@@ -277,6 +277,6 @@ func (a *Agent) RunHookPreflight(ctx context.Context, sink EventSink, userInput 
 	}
 	a.config = runner.config
 	a.config.HookLifecycleStarted = true
-	a.reqBuilder = NewRequestBuilder(a.config)
+	a.reqBuilder = NewRequestBuilder(a.config).BindThread(a.threadID)
 	return nil
 }

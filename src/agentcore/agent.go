@@ -54,7 +54,7 @@ func NewAgentWithConversationAndThreadID(config AgentConfig, conv *context.Conve
 	if config.ToolSessionState == nil {
 		config.ToolSessionState = tool.NewToolSessionState(config.Workspace.Root)
 	}
-	reqBuilder := NewRequestBuilder(config)
+	reqBuilder := NewRequestBuilder(config).BindThread(threadID)
 
 	return &Agent{
 		config:       config,
@@ -97,7 +97,7 @@ func (a *Agent) ModelVisibleToolPool() []string {
 
 func (a *Agent) Reconfigure(config AgentConfig) {
 	a.config = config
-	a.reqBuilder = NewRequestBuilder(config)
+	a.reqBuilder = NewRequestBuilder(config).BindThread(a.threadID)
 }
 
 // SetComputerRuntime binds a run-scoped Computer runtime to the agent. The next
@@ -331,7 +331,7 @@ func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, si
 	// Skill invocation and compact restoration update per-agent context. Keep
 	// the runner's immutable-by-call snapshot as the next run's starting point.
 	a.config = runner.config
-	a.reqBuilder = NewRequestBuilder(a.config)
+	a.reqBuilder = NewRequestBuilder(a.config).BindThread(a.threadID)
 	return result, err
 }
 

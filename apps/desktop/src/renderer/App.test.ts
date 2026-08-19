@@ -3934,6 +3934,13 @@ describe("App workbench presentation", () => {
       text: "Planning next moves",
       status: "done",
     };
+    const compactBoundary: RunNarrativeItem = {
+      kind: "compactBoundary",
+      id: "compact:run-1:compact-1",
+      status: "finished",
+      title: "已自动压缩上下文",
+      detail: "120k -> 48k · compact-1",
+    };
     const thinking: RunNarrativeItem = {
       kind: "thinking",
       id: "thinking:run-1:reasoning-1",
@@ -3943,7 +3950,7 @@ describe("App workbench presentation", () => {
 
     expect(
       projectVisibleNarrativeItems({
-        items: [prompt, planning],
+        items: [prompt, compactBoundary, planning],
         isBusy: true,
       }),
     ).toEqual([prompt, planning]);
@@ -3957,8 +3964,15 @@ describe("App workbench presentation", () => {
 
     expect(
       projectVisibleNarrativeItems({
-        items: [prompt, planning],
+        items: [prompt, compactBoundary, planning],
         isBusy: false,
+      }),
+    ).toEqual([prompt]);
+
+    expect(
+      projectVisibleNarrativeItems({
+        items: [prompt, compactBoundary],
+        isBusy: true,
       }),
     ).toEqual([prompt]);
   });

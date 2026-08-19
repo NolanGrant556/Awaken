@@ -138,7 +138,7 @@ export type RunNarrativeItem =
       id: string;
       text: string;
       status: "active" | "done";
-      phase?: "continuation";
+      phase?: "continuation" | "compaction";
     }
   | { kind: "thinking"; id: string; text: string; status: "active" | "done" }
   | { kind: "exploring"; id: string; actions: RunAction[]; status: "active" | "done" }

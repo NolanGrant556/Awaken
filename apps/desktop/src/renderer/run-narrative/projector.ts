@@ -376,6 +376,7 @@ export function projectAguiEventToNarrative(
     case "AWAKEN_HOOK_COMPLETED":
       return commitHookTrace(base, event);
     case "AWAKEN_COMPACT_STARTED":
+      return activateCompactPlanning(base, event);
     case "AWAKEN_COMPACT_FINISHED":
     case "AWAKEN_COMPACT_FAILED":
       return commitCompactBoundary(base, event);
@@ -434,11 +435,28 @@ export function projectAguiEventToNarrative(
 
 const continuationPlanningLabels: Record<string, string> = {
   tool_result_continuation: "正在分析工具结果",
-  reactive_compact_retry: "正在整理上下文并重试",
+  reactive_compact_retry: "上下文压缩中",
   max_output_continuation: "正在继续生成",
   xml_fallback_continuation: "正在继续处理工具结果",
   before_finish_hook_retry: "正在根据 Hook 反馈完善回答",
 };
+
+function compactPlanningId(event: AguiEvent): string {
+  return `planning:${eventScope(event)}:context-compaction`;
+}
+
+function activateCompactPlanning(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
+  return setActive(state, {
+    kind: "planning",
+    id: compactPlanningId(event),
+    text: "上下文压缩中",
+    status: "active",
+    phase: "compaction",
+  });
+}
 
 function activateContinuationPlanning(
   state: RunNarrativeState,
@@ -453,10 +471,16 @@ function activateContinuationPlanning(
     event.turnId ?? String(event.turnCount ?? transitionReason);
   return setActive(state, {
     kind: "planning",
-    id: `planning:${eventScopedId(event, turnIdentity)}`,
+    id:
+      transitionReason === "reactive_compact_retry"
+        ? compactPlanningId(event)
+        : `planning:${eventScopedId(event, turnIdentity)}`,
     text: label,
     status: "active",
-    phase: "continuation",
+    phase:
+      transitionReason === "reactive_compact_retry"
+        ? "compaction"
+        : "continuation",
   });
 }
 
@@ -1458,7 +1482,13 @@ function commitCompactBoundary(
     postEstimate,
     fallbackUsed,
   };
-  const settledState = state.activeItem ? commitActive(state, "done") : state;
+  const compactPlanningActive =
+    state.activeItem?.kind === "planning" &&
+    state.activeItem.id === compactPlanningId(event);
+  const settledState =
+    state.activeItem && !compactPlanningActive
+      ? commitActive(state, "done")
+      : state;
   return {
     ...settledState,
     committedItems: upsertCommitted(settledState.committedItems, item),

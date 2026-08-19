@@ -241,7 +241,7 @@ describe("projectAguiEventToNarrative", () => {
 
   it("uses continuation-specific labels and ignores an initial model turn", () => {
     const transitions = [
-      ["reactive_compact_retry", "正在整理上下文并重试"],
+      ["reactive_compact_retry", "上下文压缩中"],
       ["max_output_continuation", "正在继续生成"],
       ["xml_fallback_continuation", "正在继续处理工具结果"],
     ] as const;
@@ -259,7 +259,10 @@ describe("projectAguiEventToNarrative", () => {
       expect(state.activeItem).toMatchObject({
         kind: "planning",
         text,
-        phase: "continuation",
+        phase:
+          transitionReason === "reactive_compact_retry"
+            ? "compaction"
+            : "continuation",
       });
     }
 
@@ -273,6 +276,56 @@ describe("projectAguiEventToNarrative", () => {
       },
     );
     expect(initial.activeItem).toBeUndefined();
+  });
+
+  it("keeps one live compaction status across compact completion and retry", () => {
+    let state = projectAguiEventToNarrative(
+      createInitialRunNarrativeState(),
+      {
+        type: "AWAKEN_COMPACT_STARTED",
+        runId: "run-1",
+        seq: 1,
+        contextCompactMode: "reactive",
+      },
+    );
+
+    expect(state.activeItem).toEqual({
+      kind: "planning",
+      id: "planning:run-1:context-compaction",
+      text: "上下文压缩中",
+      status: "active",
+      phase: "compaction",
+    });
+
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_COMPACT_FINISHED",
+      runId: "run-1",
+      seq: 2,
+      contextCompactMode: "reactive",
+      contextCompactBoundaryId: "compact-1",
+      contextCompactPreEstimateTokens: 120000,
+      contextCompactPostEstimateTokens: 48000,
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_TURN_STARTED",
+      runId: "run-1",
+      turnId: "turn-2",
+      turnCount: 2,
+      transitionReason: "reactive_compact_retry",
+    });
+
+    expect(state.activeItem).toMatchObject({
+      kind: "planning",
+      id: "planning:run-1:context-compaction",
+      text: "上下文压缩中",
+      phase: "compaction",
+    });
+    expect(
+      state.committedItems.filter((item) => item.kind === "planning"),
+    ).toHaveLength(0);
+    expect(
+      state.committedItems.filter((item) => item.kind === "compactBoundary"),
+    ).toHaveLength(1);
   });
 
   it("lets the next answer, tool, or terminal event replace the transient model status", () => {

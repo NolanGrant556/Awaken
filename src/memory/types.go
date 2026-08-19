@@ -52,6 +52,20 @@ type Record struct {
 	Action  string `yaml:"-" json:"action,omitempty"`
 }
 
+type RecallSnapshot struct {
+	WorkspaceRoot string
+	Items         []RecallSnapshotItem
+}
+
+type RecallSnapshotItem struct {
+	MemoryID string
+	Scope    string
+	Type     string
+	Revision int
+	Bytes    int
+	Content  string
+}
+
 type Source struct {
 	ThreadID   string
 	RecordID   string

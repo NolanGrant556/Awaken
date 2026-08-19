@@ -78,6 +78,41 @@ func TestSpawnInheritsHostTurnAndModelProfileIdentity(t *testing.T) {
 	}
 }
 
+func TestMessageActionQueuesPrompt(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
+		Starter: func(ctx context.Context, _ subagentruntime.StartRequest) (string, error) {
+			close(started)
+			<-release
+			return "done", nil
+		},
+	})
+	t.Cleanup(func() {
+		close(release)
+		_ = manager.Close(context.Background())
+	})
+	task, err := manager.Spawn(context.Background(), subagentruntime.SpawnRequest{
+		Description: "inspect", Prompt: "inspect", AgentType: "explore", WorkspaceMode: "shared_readonly",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	ctx := subagentruntime.WithController(context.Background(), manager)
+	raw, _ := json.Marshal(map[string]any{"action": "message", "task_id": task.TaskID, "prompt": "also check errors"})
+	output, err := (&SubagentTool{}).Execute(ctx, string(raw))
+	if err != nil {
+		t.Fatalf("message: %v", err)
+	}
+	var payload struct {
+		Receipt subagentruntime.MessageReceipt `json:"receipt"`
+	}
+	if err := json.Unmarshal([]byte(output), &payload); err != nil || payload.Receipt.MessageID == "" {
+		t.Fatalf("receipt = %s err=%v", output, err)
+	}
+}
+
 func TestTerminalStatusConsumesAutomaticNotification(t *testing.T) {
 	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
 		Starter: func(context.Context, subagentruntime.StartRequest) (string, error) {

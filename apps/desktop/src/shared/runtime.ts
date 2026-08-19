@@ -2049,6 +2049,12 @@ export type AwakenBridge = {
   startRun: (request: StartRunRequest) => Promise<DesktopOperationResult<RuntimeRun>>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   cancelSubagent?: (runId: string, taskId: string, reason?: string) => Promise<void>;
+  messageSubagent?: (
+    runId: string,
+    taskId: string,
+    content: string,
+    idempotencyKey?: string,
+  ) => Promise<void>;
   answerUserQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
   resolveExternalInteraction: (
     runId: string,

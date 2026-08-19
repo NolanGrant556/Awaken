@@ -30,8 +30,23 @@ const (
 	ErrorCancelled          = "subagent_cancelled"
 	ErrorInterrupted        = "subagent_interrupted"
 	ErrorWorkspaceMode      = "subagent_workspace_mode_unsupported"
+	ErrorWorktreeFailed     = "subagent_worktree_failed"
 	ErrorBoundaryViolation  = "subagent_boundary_violation"
 	ErrorPersistence        = "subagent_persistence_failed"
+	ErrorIdempotency        = "subagent_idempotency_conflict"
+)
+
+const (
+	AgentTypeExplore = "explore"
+	AgentTypePlan    = "plan"
+	AgentTypeReview  = "review"
+	AgentTypeGeneral = "general"
+)
+
+const (
+	WorkspaceSharedReadOnly = "shared_readonly"
+	WorkspaceShared         = "shared"
+	WorkspaceGitWorktree    = "git_worktree"
 )
 
 type Error struct {
@@ -63,11 +78,12 @@ type SpawnRequest struct {
 	AgentType        string `json:"agent_type"`
 	WorkspaceMode    string `json:"workspace_mode"`
 	ModelProfileID   string `json:"model_profile_id,omitempty"`
-	ParentAgentID    string `json:"-"`
-	ParentToolCallID string `json:"-"`
-	ThreadID         string `json:"-"`
-	RunID            string `json:"-"`
-	TurnID           string `json:"-"`
+	ParentAgentID    string   `json:"-"`
+	ParentToolCallID string   `json:"-"`
+	ThreadID         string   `json:"-"`
+	RunID            string   `json:"-"`
+	TurnID           string   `json:"-"`
+	WritableRoots    []string `json:"-"`
 }
 
 type WaitRequest struct {
@@ -118,10 +134,30 @@ type TaskSnapshot struct {
 	ResultPreview    string     `json:"result_preview,omitempty"`
 	ErrorCode        string     `json:"error_code,omitempty"`
 	ErrorMessage     string     `json:"error_message,omitempty"`
-	SideEffectState  string     `json:"side_effect_state,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	StartedAt        *time.Time `json:"started_at,omitempty"`
-	FinishedAt       *time.Time `json:"finished_at,omitempty"`
+	SideEffectState  string           `json:"side_effect_state,omitempty"`
+	Worktree         *WorktreeReceipt `json:"worktree,omitempty"`
+	CreatedAt        time.Time        `json:"created_at"`
+	StartedAt        *time.Time       `json:"started_at,omitempty"`
+	FinishedAt       *time.Time       `json:"finished_at,omitempty"`
+}
+
+// WorktreeReceipt is the host-owned isolation record for a git_worktree child.
+// Host never auto-merges these changes back into the parent workspace.
+type WorktreeReceipt struct {
+	Path        string   `json:"path,omitempty"`
+	Branch      string   `json:"branch,omitempty"`
+	BaseCommit  string   `json:"base_commit,omitempty"`
+	HeadCommit  string   `json:"head_commit,omitempty"`
+	Dirty       bool     `json:"dirty,omitempty"`
+	NeedsReview bool     `json:"needs_review,omitempty"`
+	Cleaned     bool     `json:"cleaned,omitempty"`
+	Changed     []string `json:"changed_paths,omitempty"`
+}
+
+type QueuedMessage struct {
+	ID       string    `json:"message_id"`
+	Content  string    `json:"content"`
+	QueuedAt time.Time `json:"queued_at"`
 }
 
 func (s TaskSnapshot) Terminal() bool {
@@ -137,6 +173,8 @@ type StartRequest struct {
 	Task           TaskSnapshot
 	Prompt         string
 	ReportProgress ProgressReporter
+	DrainMessages  func() []QueuedMessage
+	AttachWorktree func(*WorktreeReceipt)
 }
 
 // ProgressUpdate is emitted only after the corresponding child tool_call or
@@ -162,6 +200,7 @@ type Starter func(context.Context, StartRequest) (string, error)
 type PersistEvent struct {
 	Kind     string
 	Snapshot TaskSnapshot
+	Message  *QueuedMessage
 }
 
 type Persister func(context.Context, PersistEvent) error

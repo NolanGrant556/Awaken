@@ -356,6 +356,52 @@ func TestOrphanRecoveryClosesRunThatCrashedBeforeRunStarted(t *testing.T) {
 	}
 }
 
+func TestOrphanSubagentIsSealedInterruptedWithoutRerun(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "thread_subagent_orphan.jsonl")
+	journal, err := NewExecutionJournal(path, "thread_subagent_orphan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_ = journal.Append(ctx, agentcore.NewSemanticRecord(agentcore.SemanticKindRunStarted, "thread_subagent_orphan", "run_sa", "", "", "", map[string]any{}))
+	_ = journal.Append(ctx, agentcore.NewSemanticRecord(agentcore.SemanticKindSubagentSpawned, "thread_subagent_orphan", "run_sa", "turn_1", "call_1", "", map[string]any{
+		"task_id": "subtask_orphan", "agent_id": "subagent_orphan", "status": "running", "agent_type": "explore",
+	}))
+	_ = journal.Append(ctx, agentcore.NewSemanticRecord(agentcore.SemanticKindRunTerminal, "thread_subagent_orphan", "run_sa", "", "", "", map[string]any{
+		"status": "completed",
+	}))
+	if err := journal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	records, err := ReadExecutionJournal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewExecutionJournal(path, "thread_subagent_orphan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	recovered, err := recoverOrphanRuns(ctx, reopened, records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var terminals int
+	for _, record := range recovered {
+		if record.Kind == agentcore.SemanticKindSubagentTerminal {
+			terminals++
+			if stringPayload(record.Payload, "task_id") != "subtask_orphan" ||
+				stringPayload(record.Payload, "status") != "interrupted" ||
+				stringPayload(record.Payload, "error_code") != "subagent_interrupted" {
+				t.Fatalf("orphan terminal = %#v", record.Payload)
+			}
+		}
+	}
+	if terminals != 1 {
+		t.Fatalf("expected one interrupted subagent terminal, recovered=%+v", recovered)
+	}
+}
+
 func TestWriteFailureKeepsPending(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "missing", "thread.jsonl")

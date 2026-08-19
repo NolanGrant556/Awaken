@@ -33,7 +33,9 @@ import {
   mediaArtifactRequestForPath,
   nextUserQuestionPromptIndex,
   nextSubagentInspectorTaskId,
+  subagentAgentTypeLabel,
   subagentElapsedMs,
+  subagentWorkspaceModeLabel,
   promptNarrativeTokensForComposer,
   promptTextAfterTokenLeadingText,
   promptTokenViews,
@@ -3778,6 +3780,16 @@ describe("App workbench presentation", () => {
   it("toggles the subagent inspector detail without changing task identity", () => {
     expect(nextSubagentInspectorTaskId(undefined, "task-1")).toBe("task-1");
     expect(nextSubagentInspectorTaskId("task-1", "task-1")).toBeUndefined();
+  });
+
+  it("labels plan/general roles and write isolation without claiming Desktop smoke", () => {
+    expect(subagentAgentTypeLabel("explore")).toBe("探索智能体");
+    expect(subagentAgentTypeLabel("plan")).toBe("规划智能体");
+    expect(subagentAgentTypeLabel("review")).toBe("复核智能体");
+    expect(subagentAgentTypeLabel("general")).toBe("通用智能体");
+    expect(subagentWorkspaceModeLabel("shared_readonly")).toBe("只读共享");
+    expect(subagentWorkspaceModeLabel("shared")).toBe("共享可写");
+    expect(subagentWorkspaceModeLabel("git_worktree")).toBe("Git worktree");
   });
 
   it("positions subagent detail above the measured dock composer", () => {

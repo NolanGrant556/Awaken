@@ -11,6 +11,7 @@ import (
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
+	"awaken/src/subagentruntime"
 	"awaken/src/tool"
 )
 
@@ -366,6 +367,7 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 		openCalls         map[string]agentcore.SemanticRecord
 		openModelRequests map[string]agentcore.SemanticRecord
 		openHooks         map[string]agentcore.SemanticRecord
+		openSubagents     map[string]agentcore.SemanticRecord
 	}
 	runs := map[string]*runState{}
 	for _, record := range records {
@@ -375,12 +377,21 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 		}
 		state, ok := runs[runID]
 		if !ok {
-			state = &runState{openCalls: map[string]agentcore.SemanticRecord{}, openModelRequests: map[string]agentcore.SemanticRecord{}, openHooks: map[string]agentcore.SemanticRecord{}}
+			state = &runState{
+				openCalls: map[string]agentcore.SemanticRecord{}, openModelRequests: map[string]agentcore.SemanticRecord{},
+				openHooks: map[string]agentcore.SemanticRecord{}, openSubagents: map[string]agentcore.SemanticRecord{},
+			}
 			runs[runID] = state
 		}
 		switch record.Kind {
 		case agentcore.SemanticKindRunTerminal:
 			state.terminal = true
+		case agentcore.SemanticKindSubagentSpawned, agentcore.SemanticKindSubagentStatusChanged, agentcore.SemanticKindSubagentProgress:
+			if taskID := stringPayload(record.Payload, "task_id"); taskID != "" {
+				state.openSubagents[taskID] = record
+			}
+		case agentcore.SemanticKindSubagentTerminal:
+			delete(state.openSubagents, stringPayload(record.Payload, "task_id"))
 		case agentcore.SemanticKindToolCall:
 			callID := stringPayload(record.Payload, "tool_call_id")
 			if callID != "" {
@@ -409,8 +420,30 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 
 	var appended []agentcore.SemanticRecord
 	for runID, state := range runs {
-		if state.terminal && len(state.openCalls) == 0 && len(state.openModelRequests) == 0 && len(state.openHooks) == 0 {
+		if state.terminal && len(state.openCalls) == 0 && len(state.openModelRequests) == 0 && len(state.openHooks) == 0 && len(state.openSubagents) == 0 {
 			continue
+		}
+		for taskID, latest := range state.openSubagents {
+			payload := map[string]any{}
+			for key, value := range latest.Payload {
+				payload[key] = value
+			}
+			payload["task_id"] = taskID
+			payload["status"] = string(subagentruntime.StatusInterrupted)
+			payload["error_code"] = subagentruntime.ErrorInterrupted
+			payload["error_message"] = "subagent was interrupted by process restart"
+			payload["current_activity"] = ""
+			now := time.Now().UTC().Format(time.RFC3339Nano)
+			payload["finished_at"] = now
+			terminal := agentcore.NewSemanticRecord(
+				agentcore.SemanticKindSubagentTerminal,
+				journal.ThreadID(), runID, latest.TurnID, latest.ParentID, latest.SessionID, payload,
+			)
+			assigned, err := journal.AppendAssigned(ctx, terminal)
+			if err != nil {
+				return appended, err
+			}
+			appended = append(appended, assigned)
 		}
 		for invocationID, started := range state.openHooks {
 			completed := agentcore.NewSemanticRecord(

@@ -314,6 +314,12 @@ export type RuntimeClient = {
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   cancelSubagent?: (runId: string, taskId: string, reason?: string) => Promise<void>;
+  messageSubagent?: (
+    runId: string,
+    taskId: string,
+    content: string,
+    idempotencyKey?: string,
+  ) => Promise<void>;
   answerUserQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
   resolveExternalInteraction: (
     runId: string,
@@ -535,6 +541,10 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     cancelRun: bridge.cancelRun,
     cancelSubagent: bridge.cancelSubagent
       ? (runId, taskId, reason) => bridge.cancelSubagent!(runId, taskId, reason)
+      : undefined,
+    messageSubagent: bridge.messageSubagent
+      ? (runId, taskId, content, idempotencyKey) =>
+          bridge.messageSubagent!(runId, taskId, content, idempotencyKey)
       : undefined,
     answerUserQuestion: bridge.answerUserQuestion,
     resolveExternalInteraction: bridge.resolveExternalInteraction,

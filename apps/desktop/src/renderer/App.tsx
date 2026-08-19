@@ -13,6 +13,7 @@ import type {
 } from "react";
 import {
   CalendarClock,
+  CheckCheck,
   ChevronDown,
   ChevronUp,
   ChevronsDownUp,
@@ -23,6 +24,7 @@ import {
   FolderPlus,
   Globe2,
   Image as ImageIcon,
+  ListChecks,
   MessageSquare,
   MessageCirclePlus,
   Minimize2,
@@ -32,6 +34,7 @@ import {
   Plug,
   Search,
   Settings,
+  Trash2,
   Workflow,
   Wrench,
   X,
@@ -305,6 +308,11 @@ type PendingProjectDelete = {
   threadCount: number;
   /** 仅 trash 用：废纸篓是文件夹粒度，这里是本次要移走的那个目录。 */
   folderPath?: string;
+};
+
+type PendingThreadDelete = {
+  threadIds: string[];
+  source: "single" | "batch";
 };
 
 export type WorkbenchInspectorPresentation = {
@@ -2502,6 +2510,12 @@ export function App() {
   );
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([]);
   const [conversationSectionExpanded, setConversationSectionExpanded] = useState(true);
+  const [conversationBatchMode, setConversationBatchMode] = useState(false);
+  const [selectedConversationThreadIds, setSelectedConversationThreadIds] = useState<string[]>(
+    [],
+  );
+  const [pendingThreadDelete, setPendingThreadDelete] = useState<PendingThreadDelete | null>(null);
+  const [threadDeleteSubmitting, setThreadDeleteSubmitting] = useState(false);
   const [projectOrderIds, setProjectOrderIds] = useState<string[]>([]);
   const [projectReorderSubmitting, setProjectReorderSubmitting] = useState(false);
   const projectReorderSubmittingRef = useRef(false);
@@ -4141,7 +4155,7 @@ export function App() {
             label: "删除会话",
             tone: "danger",
             onSelect: () => {
-              void handleDeleteThread(thread.threadId);
+              requestThreadDelete([thread.threadId], "single");
             },
           },
         ],
@@ -4156,7 +4170,53 @@ export function App() {
   const conversationThreads = runtimeState.threads.filter(
     (thread) => projectIdForThread(thread, effectiveDefaultWorkspacePath) === undefined,
   );
-  const conversationItems = threadItems(conversationThreads);
+  const eligibleConversationThreadIds = conversationThreads
+    .filter((thread) => !shouldShowSidebarThreadSpinner(thread))
+    .map((thread) => thread.threadId);
+  const eligibleConversationThreadIdsKey = eligibleConversationThreadIds.join("\u0000");
+  const eligibleConversationThreadIdSet = new Set(eligibleConversationThreadIds);
+  useEffect(() => {
+    if (!conversationBatchMode) {
+      return;
+    }
+    setSelectedConversationThreadIds((current) => {
+      const eligibleIds = new Set(eligibleConversationThreadIds);
+      const next = current.filter((threadId) => eligibleIds.has(threadId));
+      return next.length === current.length ? current : next;
+    });
+  }, [conversationBatchMode, eligibleConversationThreadIdsKey]);
+  const selectedConversationThreadIdSet = new Set(
+    selectedConversationThreadIds.filter((threadId) =>
+      eligibleConversationThreadIdSet.has(threadId),
+    ),
+  );
+  const selectedConversationCount = selectedConversationThreadIdSet.size;
+  const allEligibleConversationsSelected =
+    eligibleConversationThreadIds.length > 0 &&
+    selectedConversationCount === eligibleConversationThreadIds.length;
+  const conversationItems = threadItems(conversationThreads).map((item, index) => {
+    if (!conversationBatchMode) {
+      return item;
+    }
+    const thread = conversationThreads[index]!;
+    const selectionDisabled = shouldShowSidebarThreadSpinner(thread);
+    return {
+      ...item,
+      selection: {
+        checked: selectedConversationThreadIdSet.has(thread.threadId),
+        disabled: selectionDisabled,
+        disabledReason: selectionDisabled ? "正在运行，停止后可删除" : undefined,
+        onChange: (checked: boolean) => {
+          setSelectedConversationThreadIds((current) => {
+            if (checked) {
+              return current.includes(thread.threadId) ? current : [...current, thread.threadId];
+            }
+            return current.filter((threadId) => threadId !== thread.threadId);
+          });
+        },
+      },
+    };
+  });
 
   const defaultProjectThreads = threadItemsForProject(DEFAULT_WORKSPACE_PROJECT_ID);
   const unorderedRepositoryProjects: ProjectItem[] = [
@@ -5116,35 +5176,88 @@ export function App() {
     setRenameDraft("");
   }
 
-  async function handleDeleteThread(threadId: string): Promise<void> {
+  function enterConversationBatchMode(): void {
+    setConversationSectionExpanded(true);
+    setSelectedConversationThreadIds([]);
+    setConversationBatchMode(true);
+    setNotice(null);
+  }
+
+  function exitConversationBatchMode(): void {
+    setConversationBatchMode(false);
+    setSelectedConversationThreadIds([]);
+  }
+
+  function requestThreadDelete(
+    threadIds: string[],
+    source: PendingThreadDelete["source"],
+  ): void {
     if (!desktopReady) {
       return;
     }
-
-    const thread = runtimeState.threads.find((item) => item.threadId === threadId);
-    if (!thread) {
-      setNotice("会话不存在");
+    const existingThreadIds = new Set(runtimeState.threads.map((thread) => thread.threadId));
+    const requestedThreadIds = threadIds.filter((threadId) => existingThreadIds.has(threadId));
+    if (requestedThreadIds.length === 0) {
+      setNotice("没有可删除的会话");
       return;
     }
-    if (!window.confirm(`确认删除会话 "${thread.label}"？`)) {
+    setPendingThreadDelete({ threadIds: requestedThreadIds, source });
+    setNotice(null);
+  }
+
+  async function handleConfirmThreadDelete(): Promise<void> {
+    const pending = pendingThreadDelete;
+    if (!pending || threadDeleteSubmitting || !desktopReady) {
       return;
     }
 
+    setThreadDeleteSubmitting(true);
     try {
-      const result = await runtimeClient.deleteThread(threadId);
+      const result = await runtimeClient.deleteThreads(pending.threadIds);
       if (!result.ok) {
         setNotice(result.message);
         return;
       }
-      await refreshAfterThreadMutation([threadId]);
-      setNotice("已删除会话");
+
+      await refreshAfterThreadMutation(result.deletedThreadIds);
+      const failedThreadIds = result.failures.map((failure) => failure.threadId);
+      if (pending.source === "batch") {
+        setSelectedConversationThreadIds(failedThreadIds);
+        if (failedThreadIds.length === 0) {
+          setConversationBatchMode(false);
+        }
+      }
+
+      if (result.failures.length === 0) {
+        setNotice(
+          result.deletedThreadIds.length === 1
+            ? "已删除会话"
+            : `已删除 ${result.deletedThreadIds.length} 个对话`,
+        );
+      } else {
+        const busyCount = result.failures.filter(
+          (failure) => failure.code === "THREAD_BUSY",
+        ).length;
+        const failureSummary = busyCount === result.failures.length
+          ? `${busyCount} 个会话正在运行，停止后可继续删除`
+          : `${result.failures.length} 个会话未能删除，请稍后重试`;
+        setNotice(
+          result.deletedThreadIds.length > 0
+            ? `已删除 ${result.deletedThreadIds.length} 个对话；${failureSummary}`
+            : failureSummary,
+        );
+      }
+      setPendingThreadDelete(null);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "删除会话失败");
       await refreshThreads();
+    } finally {
+      setThreadDeleteSubmitting(false);
     }
   }
 
   function handleSelectProject(id: string): void {
+    exitConversationBatchMode();
     setActiveNavId(undefined);
     if (id.startsWith("thread:")) {
       void handleSelectConversation(id.slice("thread:".length));
@@ -5579,6 +5692,7 @@ export function App() {
   }
 
   function handleSelectConversationScope(): void {
+    exitConversationBatchMode();
     if (runtimeState.activeThreadId && activeThreadProjectId !== undefined) {
       resetActiveThreadContext();
     }
@@ -5590,6 +5704,7 @@ export function App() {
   }
 
   function handleNewTask(): void {
+    exitConversationBatchMode();
     setConversationScope(true);
     setSelectedProjectId(undefined);
     workspaceTargetPathRef.current = "";
@@ -5599,6 +5714,7 @@ export function App() {
   }
 
   function handleSelectNav(id: string): void {
+    exitConversationBatchMode();
     setActiveNavId(id);
   }
 
@@ -6850,6 +6966,21 @@ export function App() {
       : pendingProjectDelete?.action === "delete_history"
         ? "确认删除历史"
         : "移到废纸篓";
+  const pendingThreadDeleteThreads = pendingThreadDelete
+    ? pendingThreadDelete.threadIds.flatMap((threadId) => {
+        const thread = runtimeState.threads.find((item) => item.threadId === threadId);
+        return thread ? [thread] : [];
+      })
+    : [];
+  const pendingThreadDeleteCount = pendingThreadDeleteThreads.length;
+  const threadDeleteDialogTitle = pendingThreadDelete?.source === "batch"
+    ? `删除 ${pendingThreadDeleteCount} 个对话？`
+    : pendingThreadDeleteThreads[0]
+      ? `删除会话“${pendingThreadDeleteThreads[0].label}”？`
+      : "删除会话？";
+  const threadDeleteDialogCopy = pendingThreadDelete?.source === "batch"
+    ? "将删除所选对话记录和 Awaken 管理的附件；对话产生的文件不会被删除。此操作无法撤销。"
+    : "将删除这条对话记录和 Awaken 管理的附件；对话产生的文件不会被删除。此操作无法撤销。";
 
   return (
     <>
@@ -7123,23 +7254,75 @@ export function App() {
                     </SidebarSectionAction>
                   </span>
                 }
-                conversationSectionLabel="对话"
+                conversationSectionLabel={
+                  conversationBatchMode ? `对话 · 已选 ${selectedConversationCount}` : "对话"
+                }
                 conversationSectionExpanded={conversationSectionExpanded}
                 conversationSectionActions={
                   <span className="sidebar-section-actions">
-                    <SidebarSectionAction
-                      label={conversationSectionExpanded ? "收起对话" : "展开对话"}
-                      onClick={() => setConversationSectionExpanded((expanded) => !expanded)}
-                    >
-                      {conversationSectionExpanded ? (
-                        <ChevronsDownUp size={13} strokeWidth={1.85} />
-                      ) : (
-                        <ChevronsUpDown size={13} strokeWidth={1.85} />
-                      )}
-                    </SidebarSectionAction>
-                    <SidebarSectionAction label="新增对话" onClick={handleNewTask}>
-                      <MessageCirclePlus size={13} strokeWidth={1.85} />
-                    </SidebarSectionAction>
+                    {conversationBatchMode ? (
+                      <>
+                        <SidebarSectionAction
+                          label={
+                            allEligibleConversationsSelected ? "取消全选" : "全选可删除对话"
+                          }
+                          disabled={eligibleConversationThreadIds.length === 0}
+                          onClick={() => {
+                            setSelectedConversationThreadIds(
+                              allEligibleConversationsSelected ? [] : eligibleConversationThreadIds,
+                            );
+                          }}
+                        >
+                          <CheckCheck size={13} strokeWidth={1.85} />
+                        </SidebarSectionAction>
+                        <SidebarSectionAction
+                          label={
+                            selectedConversationCount > 0
+                              ? `删除 ${selectedConversationCount} 个对话`
+                              : "请选择要删除的对话"
+                          }
+                          className="conversation-batch-delete-action"
+                          disabled={selectedConversationCount === 0}
+                          onClick={() => {
+                            requestThreadDelete(
+                              Array.from(selectedConversationThreadIdSet),
+                              "batch",
+                            );
+                          }}
+                        >
+                          <Trash2 size={13} strokeWidth={1.85} />
+                        </SidebarSectionAction>
+                        <SidebarSectionAction
+                          label="退出批量管理"
+                          onClick={exitConversationBatchMode}
+                        >
+                          <X size={13} strokeWidth={1.85} />
+                        </SidebarSectionAction>
+                      </>
+                    ) : (
+                      <>
+                        <SidebarSectionAction
+                          label={conversationSectionExpanded ? "收起对话" : "展开对话"}
+                          onClick={() => setConversationSectionExpanded((expanded) => !expanded)}
+                        >
+                          {conversationSectionExpanded ? (
+                            <ChevronsDownUp size={13} strokeWidth={1.85} />
+                          ) : (
+                            <ChevronsUpDown size={13} strokeWidth={1.85} />
+                          )}
+                        </SidebarSectionAction>
+                        <SidebarSectionAction
+                          label="批量管理对话"
+                          disabled={conversationThreads.length === 0}
+                          onClick={enterConversationBatchMode}
+                        >
+                          <ListChecks size={13} strokeWidth={1.85} />
+                        </SidebarSectionAction>
+                        <SidebarSectionAction label="新增对话" onClick={handleNewTask}>
+                          <MessageCirclePlus size={13} strokeWidth={1.85} />
+                        </SidebarSectionAction>
+                      </>
+                    )}
                   </span>
                 }
                 showProjectCount={false}
@@ -7917,6 +8100,42 @@ export function App() {
         }
       >
         <p className="project-delete-dialog-copy">{projectDeleteDialogBody}</p>
+      </Dialog>
+      <Dialog
+        open={Boolean(pendingThreadDelete)}
+        title={threadDeleteDialogTitle}
+        onOpenChange={(open) => {
+          if (!open && !threadDeleteSubmitting) {
+            setPendingThreadDelete(null);
+          }
+        }}
+        footer={
+          <>
+            <Button
+              variant="default"
+              size="md"
+              disabled={threadDeleteSubmitting}
+              onClick={() => setPendingThreadDelete(null)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              loading={threadDeleteSubmitting}
+              disabled={pendingThreadDeleteCount === 0}
+              onClick={() => {
+                void handleConfirmThreadDelete();
+              }}
+            >
+              {pendingThreadDelete?.source === "batch"
+                ? `删除 ${pendingThreadDeleteCount} 个对话`
+                : "删除会话"}
+            </Button>
+          </>
+        }
+      >
+        <p className="project-delete-dialog-copy">{threadDeleteDialogCopy}</p>
       </Dialog>
       <Dialog
         open={renameDialogOpen}

@@ -101,6 +101,7 @@ import {
   type StartRunRequest,
   type SupervisorStatusInfo,
   type ThreadDeleteResult,
+  type ThreadBatchDeleteResult,
   type ThreadModelPreferenceRequest,
   type UpdateMcpServerConfigRequest,
   type ProjectFoldersPickResult,
@@ -262,6 +263,7 @@ export type RuntimeClient = {
     request: ThreadModelPreferenceRequest,
   ) => Promise<RuntimeThread>;
   deleteThread: (threadId: string) => Promise<ThreadDeleteResult>;
+  deleteThreads: (threadIds: string[]) => Promise<ThreadBatchDeleteResult>;
   listProjects: (includeRemoved?: boolean) => Promise<RuntimeProject[]>;
   listProjectDirectory: (
     request: ProjectDirectoryListRequest,
@@ -523,6 +525,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     updateThreadModelPreference: (threadId, request) =>
       bridge.updateThreadModelPreference(threadId, request),
     deleteThread: (threadId) => bridge.deleteThread(threadId),
+    deleteThreads: (threadIds) => bridge.deleteThreads(threadIds),
     listProjects: (includeRemoved) => bridge.listProjects(includeRemoved),
     listProjectDirectory: (request) => bridge.listProjectDirectory(request),
     watchProjectDirectory: (request) => bridge.watchProjectDirectory(request),

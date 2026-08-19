@@ -25,6 +25,7 @@ function createElectronBridge(
     listThreads: vi.fn(async () => []),
     renameThread: vi.fn(),
     deleteThread: vi.fn(),
+    deleteThreads: vi.fn(),
     startRun: vi.fn(),
     cancelRun: vi.fn(),
     subscribeRun: vi.fn(async () => "subscription-1"),
@@ -127,6 +128,24 @@ describe("electron runtime client", () => {
 
     const client = createRuntimeClient();
     await expect(client.getSupervisorStatus()).resolves.toEqual({ status: "running" });
+  });
+
+  it("forwards batch thread deletion through the typed bridge", async () => {
+    const { bridge } = createElectronBridge({ status: "running" });
+    bridge.deleteThreads = vi.fn(async () => ({
+      ok: true as const,
+      deletedThreadIds: ["thread-1"],
+      failures: [{ threadId: "thread-2", code: "THREAD_BUSY", message: "busy" }],
+    }));
+    installBridge(bridge);
+
+    const client = createRuntimeClient();
+    await expect(client.deleteThreads(["thread-1", "thread-2"])).resolves.toEqual({
+      ok: true,
+      deletedThreadIds: ["thread-1"],
+      failures: [{ threadId: "thread-2", code: "THREAD_BUSY", message: "busy" }],
+    });
+    expect(bridge.deleteThreads).toHaveBeenCalledWith(["thread-1", "thread-2"]);
   });
 
   it("forwards sanitized supervisor status events", () => {

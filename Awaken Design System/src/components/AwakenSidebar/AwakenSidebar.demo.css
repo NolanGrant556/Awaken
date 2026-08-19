@@ -223,6 +223,16 @@
   line-height: var(--aw-line-height-sm);
 }
 
+.aw-sidebar-demo__batch-delete-action:not(:disabled) {
+  color: var(--aw-status-danger);
+}
+
+.aw-sidebar-demo__batch-delete-action:not(:disabled):hover,
+.aw-sidebar-demo__batch-delete-action:not(:disabled):focus-visible {
+  background: var(--aw-surface-danger);
+  color: var(--aw-status-danger);
+}
+
 .aw-sidebar-demo__rename-field {
   display: grid;
   gap: var(--aw-space-3);

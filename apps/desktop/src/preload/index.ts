@@ -103,6 +103,7 @@ import {
   type StartRunRequest,
   type SupervisorStatusInfo,
   type ThreadDeleteResult,
+  type ThreadBatchDeleteResult,
   type ThreadModelPreferenceRequest,
   type UpdateMcpServerConfigRequest,
   type ProjectFoldersPickResult,
@@ -257,6 +258,8 @@ const bridge: AwakenBridge = {
     ) as Promise<RuntimeThread>,
   deleteThread: (threadId: string) =>
     ipcRenderer.invoke("awaken:delete-thread", threadId) as Promise<ThreadDeleteResult>,
+  deleteThreads: (threadIds: string[]) =>
+    ipcRenderer.invoke("awaken:delete-threads", threadIds) as Promise<ThreadBatchDeleteResult>,
   listProjects: (includeRemoved = false) =>
     ipcRenderer.invoke("awaken:list-projects", includeRemoved) as Promise<RuntimeProject[]>,
   listProjectDirectory: (request: ProjectDirectoryListRequest) =>

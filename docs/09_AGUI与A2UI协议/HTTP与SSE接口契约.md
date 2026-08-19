@@ -28,6 +28,7 @@ POST   /v1/hooks/revoke
 GET    /v1/threads
 PATCH  /v1/threads/{thread_id}
 DELETE /v1/threads/{thread_id}
+POST   /v1/threads/batch-delete
 GET    /v1/threads/{thread_id}/transcript
 POST   /v1/threads/{thread_id}/context-snapshot
 POST   /v1/runs
@@ -44,6 +45,8 @@ POST   /v1/shutdown
 ```
 
 `POST /v1/runs` 的 `workspace` 对象即 TaskScope wire。`workspace_root` 是已绑定项目的主文件夹；只给 `project_id` 表示零文件夹项目；两者都为空表示独立对话。Core 在规范化 workspace 前确定 thread ID：新对话生成 ID，follow-up 使用请求的 `thread_id`，然后解析到 thread 专属 session 工作目录。业务数据根不可用或 managed owner ID 不安全时返回 `INVALID_INPUT`。可选的 `project_name` 只用于让模型说得出自己在哪个项目里，Core 不从它解析路径或权限。`session_workspace` 由服务端派生并回写，客户端传入值一律被覆盖。roots 的语义与形状名单由 [TaskScope 与路径安全](../04_工具权限与审批/TaskScope与路径安全.md) 唯一拥有。
+
+`POST /v1/threads/batch-delete` 接受 `{"thread_ids":[...]}`，最多 200 个非空 thread ID，按首次出现顺序去重。响应始终区分 `deleted_thread_ids` 与 `failures[{thread_id,error,message}]`；逐项复用单条 durable delete，当前 active thread 以 `THREAD_BUSY` 留在失败集合。该 route 不承诺跨 session 原子性，Desktop 只能移除 `deleted_thread_ids`，不得把失败项乐观隐藏。
 
 `/v1/shutdown` 只有注入 shutdown callback 才注册。`GET /v1/runtime/activity` 无条件注册、`RunService` 缺席时返回 503，只读返回 `{active_run_count, cancelling_run_count, observed_at}`（RFC3339 UTC）：`active_run_count` 统计当前 in-flight run（含正在取消的 run；普通、定时与 ACP run 都经 `RunService.StartRun`，统一计入），`cancelling_run_count` 是其中已进入 cancelling 状态的子集。其用途是 Electron Main 在退出/维护类操作（如更新重启）前读取运行时活动快照；Renderer 不直接调用。`/audit` 当前返回空数组，查询链尚未接通；其审计语义由 04 域记录。`POST /v1/threads/{thread_id}/context-snapshot` 接收与 run 相同的 `model_profile`，只重建并耐久化该 thread 的当前下一请求 projection；不发 provider 请求，响应为 204。Desktop 在 GET transcript 前调用它；没有可运行 profile 时直接读取历史 transcript。
 

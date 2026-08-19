@@ -996,6 +996,91 @@ func TestRenameAndDeleteThreadEndpoints(t *testing.T) {
 	}
 }
 
+func TestBatchDeleteThreadsReturnsPerThreadResults(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	busyStarted := make(chan struct{})
+	releaseBusy := make(chan struct{})
+	var busyStartedOnce sync.Once
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			if input == "busy" {
+				busyStartedOnce.Do(func() { close(busyStarted) })
+				select {
+				case <-releaseBusy:
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+			}
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	first, err := runService.StartRun(awruntime.StartRunRequest{Input: "first"})
+	if err != nil {
+		t.Fatalf("StartRun(first): %v", err)
+	}
+	second, err := runService.StartRun(awruntime.StartRunRequest{Input: "second"})
+	if err != nil {
+		t.Fatalf("StartRun(second): %v", err)
+	}
+	waitHTTPServiceRunTerminal(t, runService, first.RunID)
+	waitHTTPServiceRunTerminal(t, runService, second.RunID)
+	waitHTTPServiceThreadIdle(t, runService, first.ThreadID)
+	waitHTTPServiceThreadIdle(t, runService, second.ThreadID)
+
+	busy, err := runService.StartRun(awruntime.StartRunRequest{Input: "busy"})
+	if err != nil {
+		t.Fatalf("StartRun(busy): %v", err)
+	}
+	select {
+	case <-busyStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("busy run did not start")
+	}
+	t.Cleanup(func() {
+		close(releaseBusy)
+		waitHTTPServiceRunTerminal(t, runService, busy.RunID)
+	})
+
+	ts := httptest.NewServer(newRouterInternal(routerConfig{runService: runService}))
+	defer ts.Close()
+	requestBody := fmt.Sprintf(
+		`{"thread_ids":[%q,%q,%q,%q]}`,
+		first.ThreadID,
+		second.ThreadID,
+		busy.ThreadID,
+		busy.ThreadID,
+	)
+	resp, err := http.Post(
+		ts.URL+"/v1/threads/batch-delete",
+		"application/json",
+		strings.NewReader(requestBody),
+	)
+	if err != nil {
+		t.Fatalf("POST /v1/threads/batch-delete: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	var result batchDeleteThreadsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode batch delete response: %v", err)
+	}
+	if got := strings.Join(result.DeletedThreadIDs, ","); got != first.ThreadID+","+second.ThreadID {
+		t.Fatalf("unexpected deleted thread ids: %q", got)
+	}
+	if len(result.Failures) != 1 || result.Failures[0].ThreadID != busy.ThreadID || result.Failures[0].Error != "THREAD_BUSY" {
+		t.Fatalf("unexpected failures: %+v", result.Failures)
+	}
+	threads := runService.ListThreads()
+	if len(threads) != 1 || threads[0].ThreadID != busy.ThreadID {
+		t.Fatalf("expected only busy thread to remain, got %+v", threads)
+	}
+}
+
 func TestGetThreadTranscriptEndpointReturnsMappedRuns(t *testing.T) {
 	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
 		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {

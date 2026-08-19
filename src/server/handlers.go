@@ -42,6 +42,23 @@ type renameThreadRequest struct {
 	Label string `json:"label"`
 }
 
+const maxBatchDeleteThreads = 200
+
+type batchDeleteThreadsRequest struct {
+	ThreadIDs []string `json:"thread_ids"`
+}
+
+type batchDeleteThreadFailureResponse struct {
+	ThreadID string `json:"thread_id"`
+	Error    string `json:"error"`
+	Message  string `json:"message"`
+}
+
+type batchDeleteThreadsResponse struct {
+	DeletedThreadIDs []string                           `json:"deleted_thread_ids"`
+	Failures         []batchDeleteThreadFailureResponse `json:"failures"`
+}
+
 type threadModelPreferenceRequest struct {
 	ModelProfileID  string `json:"model_profile_id"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
@@ -205,6 +222,61 @@ func (h runHandlers) handleDeleteThread(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h runHandlers) handleBatchDeleteThreads(w http.ResponseWriter, r *http.Request) {
+	var req batchDeleteThreadsRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	if len(req.ThreadIDs) == 0 {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "thread_ids must not be empty")
+		return
+	}
+	if len(req.ThreadIDs) > maxBatchDeleteThreads {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "thread_ids exceeds batch limit")
+		return
+	}
+
+	threadIDs := make([]string, 0, len(req.ThreadIDs))
+	seen := make(map[string]struct{}, len(req.ThreadIDs))
+	for _, rawThreadID := range req.ThreadIDs {
+		threadID := strings.TrimSpace(rawThreadID)
+		if threadID == "" {
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "thread_ids must not contain empty values")
+			return
+		}
+		if _, exists := seen[threadID]; exists {
+			continue
+		}
+		seen[threadID] = struct{}{}
+		threadIDs = append(threadIDs, threadID)
+	}
+
+	deleted, failures := h.runService.DeleteThreads(threadIDs)
+	response := batchDeleteThreadsResponse{
+		DeletedThreadIDs: deleted,
+		Failures:         make([]batchDeleteThreadFailureResponse, 0, len(failures)),
+	}
+	for _, failure := range failures {
+		code := "INTERNAL_ERROR"
+		message := "failed to delete thread"
+		switch {
+		case errors.Is(failure.Err, awruntime.ErrThreadNotFound):
+			code = "THREAD_NOT_FOUND"
+			message = failure.Err.Error()
+		case errors.Is(failure.Err, awruntime.ErrThreadBusy):
+			code = "THREAD_BUSY"
+			message = failure.Err.Error()
+		}
+		response.Failures = append(response.Failures, batchDeleteThreadFailureResponse{
+			ThreadID: failure.ThreadID,
+			Error:    code,
+			Message:  message,
+		})
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h runHandlers) handleGetThreadTranscript(w http.ResponseWriter, r *http.Request) {

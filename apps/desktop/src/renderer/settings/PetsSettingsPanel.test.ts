@@ -176,6 +176,11 @@ function createMockRuntimeClient(): RuntimeClient {
       throw new Error("not implemented");
     }),
     deleteThread: vi.fn(async () => ({ ok: true as const })),
+    deleteThreads: vi.fn(async (threadIds: string[]) => ({
+      ok: true as const,
+      deletedThreadIds: threadIds,
+      failures: [],
+    })),
     listProjects: vi.fn(async () => []),
     listProjectDirectory: vi.fn(async () => ({
       ok: true as const,

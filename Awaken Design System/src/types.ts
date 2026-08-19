@@ -54,8 +54,16 @@ export type ProjectItem = {
   isLoading?: boolean;          // 展开时显示 loading ring
   disabled?: boolean;
   hoverCard?: ProjectHoverCard;  // 悬停时在行右侧展示的文件夹组成卡片
+  selection?: ProjectItemSelection; // 受控批量选择态；存在时整行切换选择而不是导航
   // 注意：展开状态由 ProjectTree 组件通过 expandedIds / defaultExpandedIds 管理，
   // 不在节点数据中保存，避免 controlled/uncontrolled 状态重复。
+};
+
+export type ProjectItemSelection = {
+  checked: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
+  onChange?: (checked: boolean) => void;
 };
 
 export type ProjectHoverCardFolder = {

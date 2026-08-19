@@ -131,6 +131,7 @@ import {
   toScheduledTaskPatchWire,
   type StartRunRequest,
   type ThreadDeleteResult,
+  type ThreadBatchDeleteResult,
   type ThreadModelPreferenceRequest,
   type UpdateMcpServerConfigRequest,
   type UpsertProjectResult,
@@ -2740,6 +2741,50 @@ ipcMain.handle(
         ok: false,
         code: "THREAD_DELETE_FAILED",
         message: "删除请求暂时未完成，Awaken 会保留当前会话，请稍后重试。",
+      };
+    }
+  },
+);
+
+type ThreadBatchDeleteWire = {
+  deleted_thread_ids: string[];
+  failures: Array<{
+    thread_id: string;
+    error: string;
+    message: string;
+  }>;
+};
+
+ipcMain.handle(
+  "awaken:delete-threads",
+  async (_event, threadIds: string[]): Promise<ThreadBatchDeleteResult> => {
+    try {
+      const result = await requestRuntimeDomain<ThreadBatchDeleteWire>(
+        "/v1/threads/batch-delete",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ thread_ids: threadIds }),
+        },
+      );
+      return {
+        ok: true,
+        deletedThreadIds: result.deleted_thread_ids,
+        failures: result.failures.map((failure) => ({
+          threadId: failure.thread_id,
+          code: failure.error,
+          message: failure.message,
+        })),
+      };
+    } catch (error) {
+      console.error("thread_batch_delete_failed", {
+        threadCount: threadIds.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        ok: false,
+        code: error instanceof RuntimeDomainError ? error.code : "THREAD_BATCH_DELETE_FAILED",
+        message: "批量删除请求暂时未完成，Awaken 会保留尚未确认删除的会话，请稍后重试。",
       };
     }
   },

@@ -171,6 +171,16 @@ pre {
   color: var(--aw-text-secondary);
 }
 
+.conversation-batch-delete-action:not(:disabled) {
+  color: var(--aw-status-danger);
+}
+
+.conversation-batch-delete-action:not(:disabled):hover,
+.conversation-batch-delete-action:not(:disabled):focus-visible {
+  background: var(--aw-surface-danger);
+  color: var(--aw-status-danger);
+}
+
 .create-project-dialog-body {
   display: grid;
   gap: 10px;

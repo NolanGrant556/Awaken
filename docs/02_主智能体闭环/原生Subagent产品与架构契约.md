@@ -24,7 +24,7 @@
 - queued cancel 在 scheduler admission 后会再次检查，不能回跳 `running`；取消宽限期后写 `interrupted`；terminal append/flush 失败保留最后一份已耐久的非终态 snapshot 并让 root barrier fail closed，不发布伪成功；
 - Core 重启时，journal 恢复会把没有 `subagent_terminal` 的已创建 task 补写 `interrupted`，不重跑模型或工具；
 - 正式 child 继承父 run 已召回且冻结的 `MemoryRecallSnapshot` 子集，不运行 user-scope selector，也不把临时 worktree 当成新 project；
-- Desktop reducer 已投影 `plan`/`general`、workspace mode，Inspector 与中心执行卡提供追加指令输入（不复用主 composer）。**本次未做真实 Desktop 走查**，不得把 AC-SA 真机项写成已通过。
+- Desktop reducer 已投影 `plan`/`general` 与 workspace mode；Inspector 和中心执行卡只提供查看、关闭与单任务取消，不向用户提供追加指令输入。Core 内主 Agent 仍可使用 `message` action。AC-SA 的完成声明必须依验收表逐项留下当前 Desktop 证据，不能由自动化或单一旧截图替代。
 
 **当前不支持：**
 
@@ -52,7 +52,7 @@
 
 1. 创建一个或多个独立 child，明确分配任务、角色和只读/隔离写入模式；
 2. 在同一 run 内并发执行互不依赖的子任务；
-3. 查询或等待 child、向运行中的 child 追加指令、取消单个 child；
+3. 由主 Agent 查询或等待 child、向运行中的 child 追加指令、取消单个 child；Desktop 用户界面只提供查看和取消；
 4. 只把结构化进度与最终 handoff 返回父上下文，不把 child 原始 transcript 全量灌入父模型；
 5. 在 Workbench 看到稳定的子任务摘要、状态、进度、结果和控制入口；
 6. 切换 thread 或重启 Desktop 后重放已完成事实，并把崩溃时仍运行的 child 显式恢复为 `interrupted`；
@@ -128,9 +128,9 @@
 - `return_when=any` 返回本次新到达的 terminal tasks；已消费的 completion 不能重复冒充新通知；
 - UI 按创建顺序展示，状态更新不得重排正在阅读的列表。
 
-### 4.3 追加指令
+### 4.3 主 Agent 追加指令
 
-- 主模型使用 `message` action，Desktop 用户使用同一 Core control service；
+- 主模型使用 `message` action；Desktop 不向用户暴露 message 输入面或发送按钮；
 - message 必须先写 `subagent_message_queued` 并 flush，再进入 child queue；
 - child 只在一次模型响应结束、下一次 provider request 构建前 drain；
 - 已开始的 tool call 不被 message 抢占；
@@ -216,7 +216,7 @@ type SubagentRowView = {
 - 卡片最大宽度 680px、最大高度 560px，并继续受 RunStage 顶部 28px 与 Composer 上沿共同限制；body 使用独立纵向滚动与 `overscroll-behavior: contain`，滚动条只显示 thumb，track、track-piece、corner 和稳定 gutter 均不可见；打开、关闭和内容增长都不得改变 narrative 高度、anchor 或 follow；
 - terminal result 使用 Markdown renderer，不使用无界 `<pre>`；错误显示稳定 code/message；
 - queued/running/cancelling 显示明确的单任务停止入口；关闭卡片、切换 task 和停止 task 是三种不同动作；
-- 运行中/排队中的 child 可在卡片与 Inspector 使用独立追加指令输入；不得复用主 composer，也不得因此创建新的 thread/run/user_message。终态 child 不显示输入框。
+- 运行中/排队中的 child 在卡片与 Inspector 中只提供单任务停止入口，不显示追加指令输入。Core 内主 Agent 的 `message` action 不创建新的 thread/run/user_message，也不投影为用户消息。
 
 ### 5.3 右侧 Subagent Inspector
 
@@ -246,7 +246,7 @@ Workbench 右栏顶部从单一“文件”入口扩展为：
    - cancelling：按钮禁用并显示“正在取消…”；
    - terminal：不显示取消。
 
-追加指令输入已接通：用户和主模型走同一 Core `message` 服务。Inspector 和中心卡使用独立输入，不复用主 composer，也不创建新的 thread/run/user_message。真实 Desktop 发送手感以自动化和契约为准，本次未做 AC-SA-04 真机走查。
+Core `message` 服务继续供主模型使用；Desktop Inspector 和中心卡不提供用户输入，不复用主 composer，也不创建新的 thread/run/user_message。
 
 窄窗口当前沿用现有 Inspector 自动折叠，中心执行详情仍使用同一 RunStage 浮层并服从左右安全边距。专用全屏 Subagent sheet 尚未提供；未来 sheet 只能消费同一详情 props，不能复制 runtime state 或新增第三种 composer variant。
 
@@ -728,7 +728,7 @@ subagentOrder: string[];
 1. 已完成：并发上限 4、run tasks 上限 8；
 2. 已完成：事件驱动 `wait(any/all)` 与 `message` boundary queue；
 3. 已完成：list/detail/cancel/message HTTP 与 typed bridge；
-4. 已完成：projector、中心 group、右侧 Inspector、独立追加指令输入；未完成：窄屏专用 sheet；
+4. 已完成：projector、中心 group、右侧 Inspector，以及用户侧只查看/取消的控制边界；未完成：窄屏专用 sheet；
 5. 已完成：单 child cancel、选择与错误终态；草稿只留在 Renderer 内存；
 6. 已完成：tool activity/result preview、工具次数、provider-reported token 累计与耗时的有界投影；未完成：完整 cost 统计。
 
@@ -818,7 +818,7 @@ git diff --check
 
 - reducer：task upsert、顺序、terminal、replay、跨thread隔离；
 - projector：child events只形成 subagent group，不污染 root tool narrative；
-- App：Inspector入口/badge/选择、cancel/message、文件工作区状态互不覆盖；
+- App：Inspector入口/badge/选择、cancel、无用户 message 输入、文件工作区状态互不覆盖；
 - workbench presentation：final后进入 execution process、group展开不改变 turn/anchor；
 - Design System：所有 status、长文本、键盘、浅/深主题和窄宽度；
 - Main/preload：typed route、run/task绑定、idempotency和错误映射。
@@ -834,7 +834,7 @@ git diff --check
 | AC-SA-01 | P0 | 让主 Agent创建一个 explore child | 当前 turn出现子任务 group；右栏入口和 running badge出现 |
 | AC-SA-02 | P0 | child运行时继续观察主 turn | child activity更新不抢焦点、不拉回暂停滚动、不改变prompt anchor |
 | AC-SA-03 | P0 | 打开子任务右栏并选择child | 显示同一 task identity、assignment、activity、模型、耗时；不显示原始秘密/args |
-| AC-SA-04 | P0 | 向运行中child追加指令 | 发送成功有receipt、草稿清空；child在下一轮次边界处理；主composer不受影响 |
+| AC-SA-04 | P0 | 打开运行中 child 的中心详情与右侧 Inspector | 两处都不显示追加指令输入或发送按钮；查看、关闭、取消可用，主 composer 不受影响；主 Agent 的内部 `message` action 仍按 Core 自动化验证 |
 | AC-SA-05 | P0 | 取消一个child | 目标child cancelling→cancelled；其他child和root继续 |
 | AC-SA-06 | P0 | 同时spawn 4个read-only child | 实际并发，状态/计数独立；第5个queued且slot释放后启动 |
 | AC-SA-07 | P0 | root调用wait(any/all) | any只返回新完成项，all等待全部；超时不取消 |

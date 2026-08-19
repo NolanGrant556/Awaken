@@ -75,6 +75,11 @@ export default function FilePreviewHost({
   const [guestLoading, setGuestLoading] = useState(false);
   const activePreviewIdRef = useRef<string | undefined>(undefined);
   const generationRef = useRef(0);
+  const onModeChangeRef = useRef(onModeChange);
+  const onPreviewLabelChangeRef = useRef(onPreviewLabelChange);
+
+  onModeChangeRef.current = onModeChange;
+  onPreviewLabelChangeRef.current = onPreviewLabelChange;
 
   const closeActivePreview = useCallback(() => {
     const previewId = activePreviewIdRef.current;
@@ -94,7 +99,7 @@ export default function FilePreviewHost({
 
     const requestId = previewRequestId();
     setState({ status: "loading", requestId, displayName: selection.name });
-    onPreviewLabelChange?.(selection.name);
+    onPreviewLabelChangeRef.current?.(selection.name);
     void runtimeClient
       .startProjectFilePreview({
         requestId,
@@ -116,7 +121,7 @@ export default function FilePreviewHost({
           return;
         }
         activePreviewIdRef.current = result.preview.previewId;
-        onModeChange(result.preview.kind === "html" ? "browser" : "files");
+        onModeChangeRef.current(result.preview.kind === "html" ? "browser" : "files");
         setState({ status: "ready", preview: result.preview });
       })
       .catch(() => {
@@ -135,8 +140,6 @@ export default function FilePreviewHost({
   }, [
     closeActivePreview,
     folderPath,
-    onModeChange,
-    onPreviewLabelChange,
     projectId,
     retryGeneration,
     runtimeClient,

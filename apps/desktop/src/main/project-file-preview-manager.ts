@@ -14,6 +14,9 @@ import type {
   ProjectFilePreviewInteraction,
 } from "../shared/project-file-preview-interaction.js";
 import type {
+  ArtifactOpenRequest,
+  ArtifactOpenResult,
+  ArtifactPreviewStartRequest,
   ProjectFilePreviewActionRequest,
   ProjectFilePreviewActionResult,
   ProjectFilePreviewCloseRequest,
@@ -25,7 +28,9 @@ import type {
   ProjectFilePreviewStartRequest,
   ProjectFilePreviewStartResult,
   RuntimeProject,
+  RuntimeThreadTranscript,
 } from "../shared/runtime.js";
+import { resolveArtifactTarget } from "./artifact-open.js";
 import { OfficeCliError, OfficeCliRenderer, type OfficeCliRuntimePaths } from "./officecli.js";
 import { resolveProjectFile, type ResolvedProjectFile } from "./project-files.js";
 import {
@@ -59,8 +64,7 @@ const PDF_CORS_HEADERS = {
 type PreviewRecord = {
   previewId: string;
   kind: Exclude<ProjectFilePreviewKind, "markdown" | "code">;
-  request: ProjectFilePreviewActionRequest;
-  source: ResolvedProjectFile;
+  sourceRef: PreviewSourceRef;
   sourceByteLength: number;
   servePath: string;
   src: string;
@@ -74,10 +78,15 @@ type PreviewRecord = {
   session?: Session;
 };
 
+type PreviewSourceRef =
+  | { kind: "project"; request: ProjectFilePreviewActionRequest }
+  | { kind: "artifact"; request: ArtifactOpenRequest };
+
 type PreviewWebviewParameters = Record<string, string>;
 
 export type ProjectFilePreviewManagerOptions = {
   getProjects: () => Promise<RuntimeProject[]>;
+  getTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
   runtimePaths: OfficeCliRuntimePaths;
   defaultSession: Session;
   sessionFromPartition: (partition: string) => Session;
@@ -148,6 +157,26 @@ function previewError(
   details: { byteLength?: number; limitBytes?: number } = {},
 ): ProjectFilePreviewStartResult {
   return { ok: false, code, message, ...details };
+}
+
+function artifactPreviewError(
+  result: ArtifactOpenResult,
+): ProjectFilePreviewStartResult {
+  if (result.ok) {
+    return previewError("PREVIEW_UNAVAILABLE", "交付物预览暂时不可用。");
+  }
+  switch (result.code) {
+    case "artifact_not_recorded":
+    case "file_not_found":
+    case "not_a_file":
+      return previewError("FILE_NOT_FOUND", result.message);
+    case "unsupported_type":
+    case "artifact_not_deliverable":
+    case "run_not_terminal":
+      return previewError("UNSUPPORTED_FILE_TYPE", result.message);
+    default:
+      return previewError("PREVIEW_UNAVAILABLE", result.message);
+  }
 }
 
 function saveError(
@@ -268,168 +297,19 @@ export class ProjectFilePreviewManager {
       }
       const resolved = await resolveProjectFile(projects, request);
       if (!resolved.ok) return previewError(resolved.code, resolved.message);
-      let classification = classifyPreviewFile(resolved.file.displayName);
-      const stat = await fs.stat(resolved.file.realPath);
-      let textBuffer: Buffer | undefined;
-      let textContent: string | undefined;
-      if (!classification) {
-        if (stat.size > MAX_TEXT_PREVIEW_BYTES) {
-          return previewError(
-            "FILE_TOO_LARGE",
-            `文件大小超过当前文本预览上限（${Math.round(MAX_TEXT_PREVIEW_BYTES / 1024 / 1024)} MiB）。`,
-            { byteLength: stat.size, limitBytes: MAX_TEXT_PREVIEW_BYTES },
-          );
-        }
-        textBuffer = await readFilePrefix(
-          resolved.file.realPath,
-          MAX_TEXT_PREVIEW_BYTES + 1,
-        );
-        if (textBuffer.length > MAX_TEXT_PREVIEW_BYTES) {
-          return previewError(
-            "FILE_TOO_LARGE",
-            `文件大小超过当前文本预览上限（${Math.round(MAX_TEXT_PREVIEW_BYTES / 1024 / 1024)} MiB）。`,
-            {
-              byteLength: Math.max(stat.size, textBuffer.length),
-              limitBytes: MAX_TEXT_PREVIEW_BYTES,
-            },
-          );
-        }
-        textContent = decodeTextPreviewBuffer(textBuffer);
-        if (textContent === undefined) {
-          return previewError(
-            "UNSUPPORTED_FILE_TYPE",
-            "Awaken 暂不支持预览这种文件格式。",
-          );
-        }
-        classification = {
-          kind: "code",
-          extension: path.extname(resolved.file.displayName).slice(1).toLocaleLowerCase(),
-          language: languageNameForFile(resolved.file.displayName),
-        };
-      }
-
-      const limit = previewByteLimit(classification.kind);
-      if (stat.size > limit) {
-        return previewError(
-          "FILE_TOO_LARGE",
-          `文件大小超过当前预览上限（${Math.round(limit / 1024 / 1024)} MiB）。`,
-          { byteLength: stat.size, limitBytes: limit },
-        );
-      }
-
-      if (classification.kind === "markdown" || classification.kind === "code") {
-        const buffer = textBuffer ?? await readFilePrefix(resolved.file.realPath, limit + 1);
-        if (buffer.length > limit) {
-          return previewError(
-            "FILE_TOO_LARGE",
-            `文件大小超过当前预览上限（${Math.round(limit / 1024 / 1024)} MiB）。`,
-            {
-              byteLength: Math.max(stat.size, buffer.length),
-              limitBytes: limit,
-            },
-          );
-        }
-        const content = textContent ?? decodeTextPreviewBuffer(buffer);
-        if (content === undefined) {
-          return previewError(
-            "TEXT_BINARY_CONTENT",
-            "这个文件包含二进制内容，无法作为文本预览。",
-          );
-        }
-        const handle: ProjectFilePreviewHandle = {
-          previewId: randomUUID(),
-          requestId: request.requestId,
-          kind: classification.kind,
-          transport: "text",
-          displayName: resolved.file.displayName,
-          relativePath: resolved.file.relativePath,
-          byteLength: stat.size,
-          content,
-          language: classification.language,
-        };
-        return { ok: true, preview: handle };
-      }
-
-      if (classification.kind === "image" && classification.extension !== "svg") {
-        const dimensions = rasterDimensions(
-          classification.extension,
-          await readImageHeader(resolved.file.realPath),
-        );
-        if (
-          dimensions &&
-          dimensions.width > 0 &&
-          dimensions.height > 0 &&
-          dimensions.width * dimensions.height > MAX_IMAGE_PIXELS
-        ) {
-          return previewError(
-            "IMAGE_TOO_LARGE",
-            "图片像素尺寸超过当前预览上限。",
-          );
-        }
-      }
-
-      let officeOutputPath: string | undefined;
-      if (classification.kind === "office") {
-        officeOutputPath = await this.officeRenderer.render(
-          resolved.file.realPath,
-          controller.signal,
-        );
-      }
-      if (controller.signal.aborted) {
-        return previewError("PREVIEW_CANCELLED", "已取消文件预览。");
-      }
-
-      const previewId = randomUUID();
-      const partition =
-        classification.kind === "image" || classification.kind === "pdf"
-          ? undefined
-          : `awaken-preview-${previewId}`;
-      const servePath =
-        classification.kind === "office"
-          ? "index.html"
-          : classification.kind === "pdf"
-            ? "document.pdf"
-            : classification.kind === "image"
-              ? `image.${classification.extension}`
-              : resolved.file.relativePath;
-      const src = `${PREVIEW_SCHEME}://${previewId}/${encodedPreviewPath(servePath)}`;
-      const record: PreviewRecord = {
-        previewId,
-        kind: classification.kind,
-        request: {
-          projectId: request.projectId,
-          folderPath: request.folderPath,
-          relativePath: request.relativePath,
+      return this.startResolvedPreview(
+        request.requestId,
+        {
+          kind: "project",
+          request: {
+            projectId: request.projectId,
+            folderPath: request.folderPath,
+            relativePath: request.relativePath,
+          },
         },
-        source: resolved.file,
-        sourceByteLength: stat.size,
-        servePath,
-        src,
-        partition,
-        officeOutputPath,
-        expiresAt: Date.now() + PREVIEW_TTL_MS,
-        requestCount: 0,
-        inflightRequests: 0,
-        responseBytes: 0,
-        active: true,
-      };
-      this.previews.set(previewId, record);
-      if (partition) this.configurePreviewSession(record, partition);
-
-      return {
-        ok: true,
-        preview: {
-          previewId,
-          requestId: request.requestId,
-          kind: classification.kind,
-          transport: "url",
-          displayName: resolved.file.displayName,
-          relativePath: resolved.file.relativePath,
-          byteLength: stat.size,
-          src,
-          partition,
-        },
-      };
+        resolved.file,
+        controller,
+      );
     } catch (error) {
       if (error instanceof OfficeCliError) {
         return previewError(error.code, error.message);
@@ -443,6 +323,232 @@ export class ProjectFilePreviewManager {
         this.pendingRequests.delete(request.requestId);
       }
     }
+  }
+
+  async startArtifact(
+    request: ArtifactPreviewStartRequest,
+  ): Promise<ProjectFilePreviewStartResult> {
+    if (
+      !request ||
+      typeof request.requestId !== "string" ||
+      !request.requestId.trim() ||
+      request.requestId.length > 128 ||
+      typeof request.threadId !== "string" ||
+      !request.threadId.trim() ||
+      typeof request.runId !== "string" ||
+      !request.runId.trim() ||
+      typeof request.artifactId !== "string" ||
+      !request.artifactId.trim()
+    ) {
+      return previewError("INVALID_REQUEST", "交付物预览请求无效。");
+    }
+
+    this.cancel({ requestId: request.requestId });
+    const controller = new AbortController();
+    this.pendingRequests.set(request.requestId, controller);
+    try {
+      const artifactRequest: ArtifactOpenRequest = {
+        threadId: request.threadId,
+        runId: request.runId,
+        artifactId: request.artifactId,
+        artifactPath: request.artifactPath,
+      };
+      const resolved = await resolveArtifactTarget(
+        await this.options.getTranscript(request.threadId),
+        artifactRequest,
+      );
+      if (!resolved.ok) return artifactPreviewError(resolved.result);
+      if (controller.signal.aborted) {
+        return previewError("PREVIEW_CANCELLED", "已取消交付物预览。");
+      }
+      const displayName = path.basename(resolved.path);
+      const source: ResolvedProjectFile = {
+        projectId: "",
+        registeredRoot: path.dirname(resolved.path),
+        realRoot: path.dirname(resolved.path),
+        absolutePath: resolved.path,
+        realPath: resolved.path,
+        relativePath: displayName,
+        displayName,
+      };
+      return this.startResolvedPreview(
+        request.requestId,
+        { kind: "artifact", request: artifactRequest },
+        source,
+        controller,
+      );
+    } catch (error) {
+      if (error instanceof OfficeCliError) {
+        return previewError(error.code, error.message);
+      }
+      return previewError(
+        "PREVIEW_UNAVAILABLE",
+        "交付物预览暂时不可用，请重试或使用系统默认应用打开。",
+      );
+    } finally {
+      if (this.pendingRequests.get(request.requestId) === controller) {
+        this.pendingRequests.delete(request.requestId);
+      }
+    }
+  }
+
+  private async startResolvedPreview(
+    requestId: string,
+    sourceRef: PreviewSourceRef,
+    source: ResolvedProjectFile,
+    controller: AbortController,
+  ): Promise<ProjectFilePreviewStartResult> {
+    let classification = classifyPreviewFile(source.displayName);
+    const stat = await fs.stat(source.realPath);
+    let textBuffer: Buffer | undefined;
+    let textContent: string | undefined;
+    if (!classification) {
+      if (stat.size > MAX_TEXT_PREVIEW_BYTES) {
+        return previewError(
+          "FILE_TOO_LARGE",
+          `文件大小超过当前文本预览上限（${Math.round(MAX_TEXT_PREVIEW_BYTES / 1024 / 1024)} MiB）。`,
+          { byteLength: stat.size, limitBytes: MAX_TEXT_PREVIEW_BYTES },
+        );
+      }
+      textBuffer = await readFilePrefix(source.realPath, MAX_TEXT_PREVIEW_BYTES + 1);
+      if (textBuffer.length > MAX_TEXT_PREVIEW_BYTES) {
+        return previewError(
+          "FILE_TOO_LARGE",
+          `文件大小超过当前文本预览上限（${Math.round(MAX_TEXT_PREVIEW_BYTES / 1024 / 1024)} MiB）。`,
+          {
+            byteLength: Math.max(stat.size, textBuffer.length),
+            limitBytes: MAX_TEXT_PREVIEW_BYTES,
+          },
+        );
+      }
+      textContent = decodeTextPreviewBuffer(textBuffer);
+      if (textContent === undefined) {
+        return previewError(
+          "UNSUPPORTED_FILE_TYPE",
+          "Awaken 暂不支持预览这种文件格式。",
+        );
+      }
+      classification = {
+        kind: "code",
+        extension: path.extname(source.displayName).slice(1).toLocaleLowerCase(),
+        language: languageNameForFile(source.displayName),
+      };
+    }
+    if (sourceRef.kind === "artifact" && classification.kind === "html") {
+      return previewError("UNSUPPORTED_FILE_TYPE", "交付物暂不支持内嵌预览 HTML。");
+    }
+
+    const limit = previewByteLimit(classification.kind);
+    if (stat.size > limit) {
+      return previewError(
+        "FILE_TOO_LARGE",
+        `文件大小超过当前预览上限（${Math.round(limit / 1024 / 1024)} MiB）。`,
+        { byteLength: stat.size, limitBytes: limit },
+      );
+    }
+
+    if (classification.kind === "markdown" || classification.kind === "code") {
+      const buffer = textBuffer ?? await readFilePrefix(source.realPath, limit + 1);
+      if (buffer.length > limit) {
+        return previewError(
+          "FILE_TOO_LARGE",
+          `文件大小超过当前预览上限（${Math.round(limit / 1024 / 1024)} MiB）。`,
+          {
+            byteLength: Math.max(stat.size, buffer.length),
+            limitBytes: limit,
+          },
+        );
+      }
+      const content = textContent ?? decodeTextPreviewBuffer(buffer);
+      if (content === undefined) {
+        return previewError(
+          "TEXT_BINARY_CONTENT",
+          "这个文件包含二进制内容，无法作为文本预览。",
+        );
+      }
+      const handle: ProjectFilePreviewHandle = {
+        previewId: randomUUID(),
+        requestId,
+        kind: classification.kind,
+        transport: "text",
+        displayName: source.displayName,
+        relativePath: source.relativePath,
+        byteLength: stat.size,
+        content,
+        language: classification.language,
+      };
+      return { ok: true, preview: handle };
+    }
+
+    if (classification.kind === "image" && classification.extension !== "svg") {
+      const dimensions = rasterDimensions(
+        classification.extension,
+        await readImageHeader(source.realPath),
+      );
+      if (
+        dimensions &&
+        dimensions.width > 0 &&
+        dimensions.height > 0 &&
+        dimensions.width * dimensions.height > MAX_IMAGE_PIXELS
+      ) {
+        return previewError("IMAGE_TOO_LARGE", "图片像素尺寸超过当前预览上限。");
+      }
+    }
+
+    let officeOutputPath: string | undefined;
+    if (classification.kind === "office") {
+      officeOutputPath = await this.officeRenderer.render(source.realPath, controller.signal);
+    }
+    if (controller.signal.aborted) {
+      return previewError("PREVIEW_CANCELLED", "已取消文件预览。");
+    }
+
+    const previewId = randomUUID();
+    const partition =
+      classification.kind === "image" || classification.kind === "pdf"
+        ? undefined
+        : `awaken-preview-${previewId}`;
+    const servePath =
+      classification.kind === "office"
+        ? "index.html"
+        : classification.kind === "pdf"
+          ? "document.pdf"
+          : classification.kind === "image"
+            ? `image.${classification.extension}`
+            : source.relativePath;
+    const src = `${PREVIEW_SCHEME}://${previewId}/${encodedPreviewPath(servePath)}`;
+    const record: PreviewRecord = {
+      previewId,
+      kind: classification.kind,
+      sourceRef,
+      sourceByteLength: stat.size,
+      servePath,
+      src,
+      partition,
+      officeOutputPath,
+      expiresAt: Date.now() + PREVIEW_TTL_MS,
+      requestCount: 0,
+      inflightRequests: 0,
+      responseBytes: 0,
+      active: true,
+    };
+    this.previews.set(previewId, record);
+    if (partition) this.configurePreviewSession(record, partition);
+
+    return {
+      ok: true,
+      preview: {
+        previewId,
+        requestId,
+        kind: classification.kind,
+        transport: "url",
+        displayName: source.displayName,
+        relativePath: source.relativePath,
+        byteLength: stat.size,
+        src,
+        partition,
+      },
+    };
   }
 
   cancel(request: ProjectFilePreviewCloseRequest): void {
@@ -662,11 +768,40 @@ export class ProjectFilePreviewManager {
     item: DownloadItem,
   ): Promise<void> {
     if (record.kind !== "pdf" || item.getURL() !== record.src) return;
-    const refreshed = await resolveProjectFile(await this.options.getProjects(), record.request);
-    if (!refreshed.ok) return;
-    const destination = await this.options.savePdfAs(refreshed.file.displayName);
+    const refreshed = await this.resolveRecordFile(record);
+    if (!refreshed) return;
+    const destination = await this.options.savePdfAs(refreshed.displayName);
     if (!destination) return;
-    await fs.copyFile(refreshed.file.realPath, destination);
+    await fs.copyFile(refreshed.realPath, destination);
+  }
+
+  private async resolveRecordFile(record: PreviewRecord): Promise<ResolvedProjectFile | undefined> {
+    if (record.sourceRef.kind === "project") {
+      const resolved = await resolveProjectFile(
+        await this.options.getProjects(),
+        record.sourceRef.request,
+      );
+      return resolved.ok ? resolved.file : undefined;
+    }
+    try {
+      const resolved = await resolveArtifactTarget(
+        await this.options.getTranscript(record.sourceRef.request.threadId),
+        record.sourceRef.request,
+      );
+      if (!resolved.ok) return undefined;
+      const displayName = path.basename(resolved.path);
+      return {
+        projectId: "",
+        registeredRoot: path.dirname(resolved.path),
+        realRoot: path.dirname(resolved.path),
+        absolutePath: resolved.path,
+        realPath: resolved.path,
+        relativePath: displayName,
+        displayName,
+      };
+    } catch {
+      return undefined;
+    }
   }
 
   private recordFromUrl(value: string): PreviewRecord | undefined {
@@ -770,8 +905,8 @@ export class ProjectFilePreviewManager {
     record: PreviewRecord,
     requestedPath: string,
   ): Promise<{ filePath: string; mimeType: string } | undefined> {
-    const refreshed = await resolveProjectFile(await this.options.getProjects(), record.request);
-    if (!refreshed.ok) {
+    const refreshed = await this.resolveRecordFile(record);
+    if (!refreshed) {
       record.active = false;
       return undefined;
     }
@@ -782,14 +917,18 @@ export class ProjectFilePreviewManager {
     if (record.kind === "pdf" || record.kind === "image") {
       if (requestedPath !== record.servePath) return undefined;
       return {
-        filePath: refreshed.file.realPath,
-        mimeType: mimeTypeForFile(refreshed.file.displayName),
+        filePath: refreshed.realPath,
+        mimeType: mimeTypeForFile(refreshed.displayName),
       };
     }
-    if (record.kind !== "html" || !requestedPath) return undefined;
+    if (
+      record.kind !== "html" ||
+      !requestedPath ||
+      record.sourceRef.kind !== "project"
+    ) return undefined;
     const child = await resolveProjectFile(await this.options.getProjects(), {
-      projectId: record.request.projectId,
-      folderPath: record.request.folderPath,
+      projectId: record.sourceRef.request.projectId,
+      folderPath: record.sourceRef.request.folderPath,
       relativePath: requestedPath,
     });
     if (!child.ok) return undefined;

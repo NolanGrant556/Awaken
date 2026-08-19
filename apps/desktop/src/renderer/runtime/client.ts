@@ -15,6 +15,7 @@ import {
   type ArtifactOpenRequest,
   type ArtifactOpenResult,
   type ArtifactMediaSourceResult,
+  type ArtifactPreviewStartRequest,
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
@@ -280,6 +281,9 @@ export type RuntimeClient = {
   startProjectFilePreview: (
     request: ProjectFilePreviewStartRequest,
   ) => Promise<ProjectFilePreviewStartResult>;
+  startArtifactPreview: (
+    request: ArtifactPreviewStartRequest,
+  ) => Promise<ProjectFilePreviewStartResult>;
   closeProjectFilePreview: (request: ProjectFilePreviewCloseRequest) => Promise<void>;
   onProjectFilePreviewInteraction: (
     handler: (interaction: ProjectFilePreviewInteraction) => void,
@@ -528,6 +532,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     copyProjectEntryPath: (request) => bridge.copyProjectEntryPath(request),
     openProjectEntryWith: (request) => bridge.openProjectEntryWith(request),
     startProjectFilePreview: (request) => bridge.startProjectFilePreview(request),
+    startArtifactPreview: (request) => bridge.startArtifactPreview(request),
     closeProjectFilePreview: (request) => bridge.closeProjectFilePreview(request),
     onProjectFilePreviewInteraction: (handler) => bridge.onProjectFilePreviewInteraction(handler),
     openProjectFileExternally: (request) => bridge.openProjectFileExternally(request),

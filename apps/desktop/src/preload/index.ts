@@ -21,6 +21,7 @@ import {
   type ArtifactOpenRequest,
   type ArtifactOpenResult,
   type ArtifactMediaSourceResult,
+  type ArtifactPreviewStartRequest,
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
@@ -294,6 +295,11 @@ const bridge: AwakenBridge = {
   startProjectFilePreview: (request: ProjectFilePreviewStartRequest) =>
     ipcRenderer.invoke(
       "awaken:start-project-file-preview",
+      request,
+    ) as Promise<ProjectFilePreviewStartResult>,
+  startArtifactPreview: (request: ArtifactPreviewStartRequest) =>
+    ipcRenderer.invoke(
+      "awaken:start-artifact-preview",
       request,
     ) as Promise<ProjectFilePreviewStartResult>,
   closeProjectFilePreview: (request: ProjectFilePreviewCloseRequest) =>

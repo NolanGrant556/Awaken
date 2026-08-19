@@ -592,6 +592,11 @@ function stubElectronBridge(): void {
         code: "UNSUPPORTED_FILE_TYPE" as const,
         message: "unsupported",
       })),
+      startArtifactPreview: vi.fn(async () => ({
+        ok: false as const,
+        code: "UNSUPPORTED_FILE_TYPE" as const,
+        message: "unsupported",
+      })),
       closeProjectFilePreview: vi.fn(async () => undefined),
       onProjectFilePreviewInteraction: vi.fn(() => () => {}),
       openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),

@@ -37,7 +37,7 @@ describe("final deliverable list", () => {
     expect(html).toContain("lucide-file-type2");
     expect(html).toContain(">PDF</span>");
     expect(html).toContain("PDF 文件");
-    expect(html).toContain("打开 交付版本.pdf");
+    expect(html).toContain("在右侧栏预览 交付版本.pdf");
     expect(html).toContain("更多 交付版本.pdf 操作");
     expect(html).not.toContain("在 Finder/资源管理器中显示");
   });

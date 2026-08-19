@@ -1599,6 +1599,10 @@ export type ArtifactOpenRequest = {
   artifactPath?: string;
 };
 
+export type ArtifactPreviewStartRequest = ArtifactOpenRequest & {
+  requestId: string;
+};
+
 export type ArtifactOpenErrorCode =
   | "runtime_unavailable"
   | "artifact_not_recorded"
@@ -2025,6 +2029,9 @@ export type AwakenBridge = {
   openProjectEntryWith: (request: ProjectEntryOpenWithRequest) => Promise<ProjectEntryActionResult>;
   startProjectFilePreview: (
     request: ProjectFilePreviewStartRequest,
+  ) => Promise<ProjectFilePreviewStartResult>;
+  startArtifactPreview: (
+    request: ArtifactPreviewStartRequest,
   ) => Promise<ProjectFilePreviewStartResult>;
   closeProjectFilePreview: (request: ProjectFilePreviewCloseRequest) => Promise<void>;
   onProjectFilePreviewInteraction: (

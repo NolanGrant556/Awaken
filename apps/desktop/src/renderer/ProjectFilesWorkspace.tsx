@@ -32,6 +32,9 @@ import vscodeLogo from "./assets/open-with/vscode.png";
 import wpsOfficeLogo from "./assets/open-with/wps-office.png";
 import xcodeLogo from "./assets/open-with/xcode.png";
 import type { RuntimeClient } from "./runtime/client";
+import ArtifactPreviewHost, {
+  type ArtifactPreviewSelection,
+} from "./file-preview/ArtifactPreviewHost";
 import FilePreviewHost, { type ProjectFileWorkspaceMode } from "./file-preview/FilePreviewHost";
 import { projectFileTabId, type ProjectFileWorkspaceTab } from "./projectFileTabs";
 import { projectFileIconKind, projectFileTreeRows, type ProjectFileTreeRow } from "./projectFiles";
@@ -53,17 +56,21 @@ export type ProjectFilesWorkspaceProps = {
     | "onProjectDirectoryChanged"
     | "copyProjectEntryPath"
     | "openProjectEntryWith"
+    | "startArtifactPreview"
     | "startProjectFilePreview"
     | "closeProjectFilePreview"
     | "openProjectFileExternally"
     | "revealProjectFile"
     | "saveProjectMarkdownFile"
+    | "openArtifact"
+    | "revealArtifact"
   >;
   projectId?: string;
   projectLabel?: string;
   folders: ProjectFilesFolder[];
   initialMode?: ProjectFileWorkspaceMode;
   activeTab?: ProjectFileWorkspaceTab;
+  artifactPreview?: ArtifactPreviewSelection;
   expanded?: boolean;
   onWorkspaceModeChange?: (mode: ProjectFileWorkspaceMode) => void;
   onOpenTab?: (tab: ProjectFileWorkspaceTab) => void;
@@ -224,6 +231,7 @@ export function ProjectFilesWorkspace({
   folders,
   initialMode = "files",
   activeTab,
+  artifactPreview,
   expanded = false,
   onWorkspaceModeChange,
   onOpenTab,
@@ -252,18 +260,21 @@ export function ProjectFilesWorkspace({
   const requestGenerationRef = useRef(0);
   const directoryRefreshSequenceRef = useRef(0);
   const listingsRef = useRef(listings);
+  const onWorkspaceModeChangeRef = useRef(onWorkspaceModeChange);
   const previewPrimaryPointerGestureRef = useRef<PreviewPrimaryPointerGesture | undefined>(
     undefined,
   );
+
+  onWorkspaceModeChangeRef.current = onWorkspaceModeChange;
 
   const selectedFolder = folders.find((folder) => folder.path === selectedFolderPath) ?? folders[0];
 
   const changeWorkspaceMode = useCallback(
     (mode: ProjectFileWorkspaceMode): void => {
       setWorkspaceMode(mode);
-      onWorkspaceModeChange?.(mode);
+      onWorkspaceModeChangeRef.current?.(mode);
     },
-    [onWorkspaceModeChange],
+    [],
   );
 
   useEffect(() => {
@@ -890,7 +901,12 @@ export function ProjectFilesWorkspace({
           onPointerUp={handlePreviewPointerUp}
           onPointerCancel={handlePreviewPointerCancel}
         >
-          {activeTab || workspaceMode === "browser" ? (
+          {artifactPreview && workspaceMode === "files" ? (
+            <ArtifactPreviewHost
+              runtimeClient={runtimeClient}
+              selection={artifactPreview}
+            />
+          ) : activeTab || workspaceMode === "browser" ? (
             <FilePreviewHost
               runtimeClient={runtimeClient}
               projectId={projectId}

@@ -1698,27 +1698,6 @@ pre {
   word-break: break-word;
 }
 
-.subagent-message-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 12px 0;
-}
-
-.subagent-message-form label {
-  font-size: 12px;
-  color: var(--aw-text-secondary, inherit);
-}
-
-.subagent-message-form textarea {
-  width: 100%;
-  resize: vertical;
-  min-height: 72px;
-  border-radius: 8px;
-  padding: 8px;
-  font: inherit;
-}
-
 .subagent-inspector__error p {
   color: #b24a43 !important;
 }

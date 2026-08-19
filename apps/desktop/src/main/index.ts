@@ -55,6 +55,7 @@ import {
   type AttachmentPickResult,
   type ArtifactOpenRequest,
   type ArtifactOpenResult,
+  type ArtifactPreviewStartRequest,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
   type CliActivation,
@@ -2928,6 +2929,34 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  "awaken:start-artifact-preview",
+  async (
+    event,
+    request: ArtifactPreviewStartRequest,
+  ): Promise<ProjectFilePreviewStartResult> => {
+    if (
+      !mainWindowRef ||
+      mainWindowRef.isDestroyed() ||
+      event.sender.id !== mainWindowRef.webContents.id
+    ) {
+      return {
+        ok: false,
+        code: "UNAUTHORIZED",
+        message: "交付物预览请求来源无效。",
+      };
+    }
+    if (!projectFilePreviewManager) {
+      return {
+        ok: false,
+        code: "PREVIEW_UNAVAILABLE",
+        message: "文件预览服务尚未就绪。",
+      };
+    }
+    return projectFilePreviewManager.startArtifact(request);
+  },
+);
+
+ipcMain.handle(
   "awaken:close-project-file-preview",
   async (event, request: ProjectFilePreviewCloseRequest): Promise<void> => {
     if (
@@ -3945,6 +3974,13 @@ app.whenReady().then(async () => {
         },
       );
       return projects.map(normalizeRuntimeProject);
+    },
+    getTranscript: async (threadId) => {
+      const transcript = await requestRuntime<RuntimeThreadTranscriptWire>(
+        `/v1/threads/${encodeURIComponent(threadId)}/transcript`,
+        { method: "GET" },
+      );
+      return normalizeRuntimeThreadTranscript(transcript);
     },
     runtimePaths: {
       packaged: app.isPackaged,

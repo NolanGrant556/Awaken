@@ -136,6 +136,62 @@ describe("FilePreviewHost", () => {
     expect(container.querySelector(".project-file-preview-toolbar")).toBeNull();
   });
 
+  it("keeps Markdown edit mode and the active preview across parent callback rerenders", async () => {
+    const startProjectFilePreview = vi.fn(async (request) => ({
+      ok: true as const,
+      preview: {
+        previewId: "preview-stable-markdown",
+        requestId: request.requestId,
+        kind: "markdown" as const,
+        transport: "text" as const,
+        displayName: "README.md",
+        relativePath: "README.md",
+        byteLength: 16,
+        content: "# Stable\n",
+        language: "markdown",
+      },
+    }));
+    const runtimeClient = {
+      startProjectFilePreview,
+      closeProjectFilePreview: vi.fn(async () => undefined),
+      openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
+      revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+      saveProjectMarkdownFile: vi.fn(async () => ({
+        ok: true as const,
+        byteLength: 16,
+      })),
+    };
+    const selection = { name: "README.md", relativePath: "README.md" };
+    const render = (onModeChange: (mode: "files" | "browser") => void) => (
+      <FilePreviewHost
+        runtimeClient={runtimeClient}
+        projectId="project-1"
+        folderPath="/workspace"
+        selection={selection}
+        mode="files"
+        onModeChange={onModeChange}
+        onPreviewLabelChange={() => undefined}
+      />
+    );
+
+    await act(async () => root.render(render(() => undefined)));
+    await settleUntil(
+      () => container.querySelector('[aria-label="编辑 Markdown"]') !== null,
+    );
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[aria-label="编辑 Markdown"]')
+        ?.click();
+    });
+    expect(container.querySelector("[data-markdown-mode='edit']")).not.toBeNull();
+
+    await act(async () => root.render(render(() => undefined)));
+
+    expect(startProjectFilePreview).toHaveBeenCalledTimes(1);
+    expect(container.querySelector("[data-markdown-mode='edit']")).not.toBeNull();
+    expect(container.textContent).not.toContain("正在准备预览");
+  });
+
   it("renders code controls in the shared single-line heading without search", async () => {
     const runtimeClient = {
       startProjectFilePreview: vi.fn(async (request) => ({

@@ -11,7 +11,7 @@
   border: 1px solid var(--aw-border-control);
   border-radius: var(--aw-radius-panel);
   background: var(--aw-surface-raised);
-  box-shadow: var(--aw-shadow-raised);
+  box-shadow: 0 1px 3px color-mix(in srgb, #000 8%, transparent);
   transition:
     border-color var(--aw-transition-normal),
     background-color var(--aw-transition-normal),
@@ -21,8 +21,7 @@
 
 .aw-deliverable-card:hover {
   border-color: var(--aw-border-control-hover);
-  box-shadow: var(--aw-shadow-card-hover);
-  transform: translateY(-1px);
+  box-shadow: 0 3px 10px color-mix(in srgb, #000 10%, transparent);
 }
 
 .aw-deliverable-card[data-menu-open="true"] {

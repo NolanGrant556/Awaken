@@ -201,6 +201,7 @@ import {
 import { ProjectFilesWorkspace } from "./ProjectFilesWorkspace";
 import ProjectFileIcon from "./ProjectFileIcon";
 import type { ProjectFileWorkspaceMode } from "./file-preview/FilePreviewHost";
+import type { ArtifactPreviewSelection } from "./file-preview/ArtifactPreviewHost";
 import {
   activeProjectFileTab,
   createProjectFileTabsState,
@@ -2551,11 +2552,11 @@ export function App() {
     undefined,
     createProjectFileTabsState,
   );
+  const [deliverablePreview, setDeliverablePreview] =
+    useState<ArtifactPreviewSelection>();
   const [selectedSubagentTaskId, setSelectedSubagentTaskId] = useState<string | undefined>();
   const [openSubagentTaskId, setOpenSubagentTaskId] = useState<string | undefined>();
   const [cancellingSubagentTaskId, setCancellingSubagentTaskId] = useState<string | undefined>();
-  const [subagentMessageDrafts, setSubagentMessageDrafts] = useState<Record<string, string>>({});
-  const [sendingSubagentTaskId, setSendingSubagentTaskId] = useState<string | undefined>();
   const [subagentNowMs, setSubagentNowMs] = useState(() => Date.now());
   const [promptBubbleModeByTurnId, setPromptBubbleModeByTurnId] = useState<
     Record<string, "collapsed" | "expanded">
@@ -2661,6 +2662,7 @@ export function App() {
     setArtifactMediaMetadata({});
     setMediaPreview(null);
     setPinnedMedia(null);
+    setDeliverablePreview(undefined);
   }, [runtimeState.activeThreadId]);
 
   useEffect(() => {
@@ -5689,6 +5691,7 @@ export function App() {
     setExpandedFileComposerIdleMode("full");
     setExpandedFileComposerTrackedRun(undefined);
     dispatchFileWorkspaceTabs({ type: "reset" });
+    setDeliverablePreview(undefined);
     const previousWidth = inspectorWidthBeforeFileWorkspaceRef.current;
     inspectorWidthBeforeFileWorkspaceRef.current = null;
     if (previousWidth !== null) {
@@ -5697,12 +5700,14 @@ export function App() {
   }
 
   function handleOpenProjectFileTab(tab: ProjectFileWorkspaceTab): void {
+    setDeliverablePreview(undefined);
     dispatchFileWorkspaceTabs({ type: "open", tab });
     setFileWorkspaceMode(tab.mode);
     handleShowFileWorkspaceSurface();
   }
 
   function handleActivateProjectFileTab(tab: ProjectFileWorkspaceTab): void {
+    setDeliverablePreview(undefined);
     dispatchFileWorkspaceTabs({ type: "activate", tabId: tab.id });
     setFileWorkspaceMode(tab.mode);
     handleShowFileWorkspaceSurface();
@@ -5715,6 +5720,24 @@ export function App() {
     });
     dispatchFileWorkspaceTabs({ type: "close", tabId });
     setFileWorkspaceMode(activeProjectFileTab(nextState)?.mode ?? "files");
+  }
+
+  function handleOpenDeliverablePreview(
+    file: {
+      artifactId: string;
+      runId: string;
+      title: string;
+    },
+    threadId: string,
+  ): void {
+    setDeliverablePreview({
+      threadId,
+      runId: file.runId,
+      artifactId: file.artifactId,
+      title: file.title,
+    });
+    setPinnedMedia(null);
+    handleOpenFileWorkspace("files");
   }
 
   function handleOpenSubagent(taskId?: string): void {
@@ -5736,21 +5759,6 @@ export function App() {
     setInspectorCollapsed(false);
     if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
       inspectorCollapsedBeforeResponsiveRef.current = false;
-    }
-  }
-
-  async function handleMessageSubagent(taskId: string): Promise<void> {
-    const content = subagentMessageDrafts[taskId]?.trim();
-    if (!content || !runtimeState.runId || !runtimeClient.messageSubagent) return;
-    setSendingSubagentTaskId(taskId);
-    setNotice(null);
-    try {
-      await runtimeClient.messageSubagent(runtimeState.runId, taskId, content);
-      setSubagentMessageDrafts((current) => ({ ...current, [taskId]: "" }));
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "追加子任务指令失败");
-    } finally {
-      setSendingSubagentTaskId(undefined);
     }
   }
 
@@ -6448,29 +6456,6 @@ export function App() {
     }
     if (item.kind === "deliverables") {
       const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;
-      const previewItems: MediaArtifactPreviewItem[] = threadId
-        ? item.files.flatMap((file) => {
-            if (file.fileType !== "image" && file.fileType !== "video") return [];
-            const src = artifactMediaSources[
-              `${threadId}:${file.runId}:${file.artifactId}`
-            ] ?? undefined;
-            if (!src) return [];
-            const sourceKey = `${threadId}:${file.runId}:${file.artifactId}`;
-            return [{
-              id: file.artifactId,
-              kind: file.fileType,
-              title: file.title,
-              alt: file.title,
-              formatLabel: file.extension,
-              sourceKey,
-              request: {
-                threadId,
-                runId: file.runId,
-                artifactId: file.artifactId,
-              },
-            }];
-          })
-        : [];
       return (
         <DeliverableList
           key={key}
@@ -6507,20 +6492,7 @@ export function App() {
                   ? artifactMediaMetadata[mediaSourceKey]
                   : undefined,
               onPreview:
-                isMedia && typeof mediaSourceState === "string"
-                  ? () => openMediaPreview(previewItems, file.artifactId)
-                  : undefined,
-              onMediaError:
-                mediaRequest && mediaSourceKey
-                  ? () => refreshArtifactMediaSource(mediaSourceKey, mediaRequest)
-                  : undefined,
-              onMediaMetadata:
-                mediaSourceKey
-                  ? (metadata: AwakenMediaMetadata) =>
-                      recordArtifactMediaMetadata(mediaSourceKey, metadata)
-                  : undefined,
-              onViewInInspector:
-                typeof mediaSourceState === "string" && mediaRequest && mediaSourceKey
+                isMedia && typeof mediaSourceState === "string" && mediaRequest && mediaSourceKey
                   ? () =>
                       pinMediaInInspector({
                         id: file.artifactId,
@@ -6532,9 +6504,27 @@ export function App() {
                         request: mediaRequest,
                       })
                   : undefined,
+              onMediaError:
+                mediaRequest && mediaSourceKey
+                  ? () => refreshArtifactMediaSource(mediaSourceKey, mediaRequest)
+                  : undefined,
+              onMediaMetadata:
+                mediaSourceKey
+                  ? (metadata: AwakenMediaMetadata) =>
+                      recordArtifactMediaMetadata(mediaSourceKey, metadata)
+                  : undefined,
               opening: openingArtifactId === file.artifactId,
               disabled: !threadId,
               onOpen: threadId
+                ? isMedia
+                  ? () => openArtifactExternally({
+                      threadId,
+                      runId: file.runId,
+                      artifactId: file.artifactId,
+                    })
+                  : () => handleOpenDeliverablePreview(file, threadId)
+                : undefined,
+              onOpenExternal: threadId && !isMedia
                 ? () => openArtifactExternally({
                     threadId,
                     runId: file.runId,
@@ -6932,49 +6922,92 @@ export function App() {
                 fileWorkspaceOpen && inspectorPresentation.available ? (
                   <div className="workbench-chrome-file-mode">
                     <div className="project-files-tabs" role="tablist" aria-label="打开的文件">
-                      {visibleFileWorkspaceTabs.length > 0 ? (
-                        visibleFileWorkspaceTabs.map((tab) => {
-                          const active =
-                            fileWorkspaceTabsAreActive && tab.id === activeFileWorkspaceTab?.id;
-                          const iconKind = projectFileIconKind({
-                            kind: "file",
-                            name: tab.name,
-                          });
-                          return (
-                            <div
-                              key={tab.id}
-                              className={`project-files-tab${active ? " is-active" : ""}`}
-                              role="presentation"
+                      {deliverablePreview ? (() => {
+                        const iconKind = projectFileIconKind({
+                          kind: "file",
+                          name: deliverablePreview.title,
+                        });
+                        return (
+                          <div
+                            className={`project-files-tab${
+                              fileWorkspaceTabsAreActive ? " is-active" : ""
+                            }`}
+                            role="presentation"
+                          >
+                            <button
+                              type="button"
+                              className="project-files-tab__activate"
+                              role="tab"
+                              aria-selected={fileWorkspaceTabsAreActive}
+                              title={deliverablePreview.title}
+                              onClick={handleShowFileWorkspaceSurface}
                             >
-                              <button
-                                type="button"
-                                className="project-files-tab__activate"
-                                role="tab"
-                                aria-selected={active}
-                                title={tab.name}
-                                onClick={() => handleActivateProjectFileTab(tab)}
+                              <span
+                                className="project-files-tab__file-icon"
+                                data-file-icon={iconKind}
                               >
-                                <span
-                                  className="project-files-tab__file-icon"
-                                  data-file-icon={iconKind}
-                                >
-                                  <ProjectFileIcon kind={iconKind} size={16} strokeWidth={1.8} />
-                                </span>
-                                <span className="project-files-tab__label">{tab.name}</span>
-                              </button>
-                              <button
-                                type="button"
-                                className="project-files-tab__close"
-                                aria-label={`关闭 ${tab.name}`}
-                                title={`关闭 ${tab.name}`}
-                                onClick={() => handleCloseProjectFileTab(tab.id)}
+                                <ProjectFileIcon kind={iconKind} size={16} strokeWidth={1.8} />
+                              </span>
+                              <span className="project-files-tab__label">
+                                {deliverablePreview.title}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="project-files-tab__close"
+                              aria-label={`关闭 ${deliverablePreview.title}`}
+                              title={`关闭 ${deliverablePreview.title}`}
+                              onClick={() => setDeliverablePreview(undefined)}
+                            >
+                              <X size={15} strokeWidth={1.9} />
+                            </button>
+                          </div>
+                        );
+                      })() : null}
+                      {visibleFileWorkspaceTabs.map((tab) => {
+                        const active =
+                          !deliverablePreview &&
+                          fileWorkspaceTabsAreActive &&
+                          tab.id === activeFileWorkspaceTab?.id;
+                        const iconKind = projectFileIconKind({
+                          kind: "file",
+                          name: tab.name,
+                        });
+                        return (
+                          <div
+                            key={tab.id}
+                            className={`project-files-tab${active ? " is-active" : ""}`}
+                            role="presentation"
+                          >
+                            <button
+                              type="button"
+                              className="project-files-tab__activate"
+                              role="tab"
+                              aria-selected={active}
+                              title={tab.name}
+                              onClick={() => handleActivateProjectFileTab(tab)}
+                            >
+                              <span
+                                className="project-files-tab__file-icon"
+                                data-file-icon={iconKind}
                               >
-                                <X size={15} strokeWidth={1.9} />
-                              </button>
-                            </div>
-                          );
-                        })
-                      ) : (
+                                <ProjectFileIcon kind={iconKind} size={16} strokeWidth={1.8} />
+                              </span>
+                              <span className="project-files-tab__label">{tab.name}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="project-files-tab__close"
+                              aria-label={`关闭 ${tab.name}`}
+                              title={`关闭 ${tab.name}`}
+                              onClick={() => handleCloseProjectFileTab(tab.id)}
+                            >
+                              <X size={15} strokeWidth={1.9} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {!deliverablePreview && visibleFileWorkspaceTabs.length === 0 ? (
                         <div
                           className={`project-files-tab is-placeholder${
                             fileWorkspaceTabsAreActive ? " is-active" : ""
@@ -7002,7 +7035,7 @@ export function App() {
                             <X size={15} strokeWidth={1.9} />
                           </button>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                     {fileWorkspaceExpandedActive ? (
                       <Tooltip label="收起面板" placement="bottom">
@@ -7273,42 +7306,6 @@ export function App() {
                                     status={openSubagent.status === "failed" ? "error" : "done"}
                                     showFooter={false}
                                   />
-                                ) : null}
-                                {["queued", "running"].includes(openSubagent.status) ? (
-                                  <form
-                                    className="subagent-message-form"
-                                    onSubmit={(event) => {
-                                      event.preventDefault();
-                                      void handleMessageSubagent(openSubagent.taskId);
-                                    }}
-                                  >
-                                    <label htmlFor="subagent-overlay-message">追加指令</label>
-                                    <textarea
-                                      id="subagent-overlay-message"
-                                      rows={3}
-                                      value={subagentMessageDrafts[openSubagent.taskId] ?? ""}
-                                      onChange={(event) =>
-                                        setSubagentMessageDrafts((current) => ({
-                                          ...current,
-                                          [openSubagent.taskId]: event.target.value,
-                                        }))
-                                      }
-                                      placeholder="不会占用主输入框"
-                                    />
-                                    <Button
-                                      variant="default"
-                                      size="sm"
-                                      type="submit"
-                                      disabled={
-                                        sendingSubagentTaskId === openSubagent.taskId ||
-                                        !(subagentMessageDrafts[openSubagent.taskId] ?? "").trim()
-                                      }
-                                    >
-                                      {sendingSubagentTaskId === openSubagent.taskId
-                                        ? "发送中…"
-                                        : "发送给子任务"}
-                                    </Button>
-                                  </form>
                                 ) : null}
                                 {openSubagent.errorMessage ? (
                                   <div className="subagent-execution-error" role="alert">
@@ -7589,8 +7586,12 @@ export function App() {
                         folders={fileWorkspaceFolders}
                         initialMode={fileWorkspaceMode}
                         activeTab={activeFileWorkspaceTab}
+                        artifactPreview={deliverablePreview}
                         expanded={fileWorkspaceExpandedActive}
-                        onWorkspaceModeChange={setFileWorkspaceMode}
+                        onWorkspaceModeChange={(mode) => {
+                          setFileWorkspaceMode(mode);
+                          if (mode === "browser") setDeliverablePreview(undefined);
+                        }}
                         onOpenTab={handleOpenProjectFileTab}
                         onExpand={handleExpandFileWorkspace}
                         onPreviewPrimaryClick={handleExpandedFilePreviewPrimaryClick}
@@ -7753,42 +7754,6 @@ export function App() {
                                   <p>{selectedSubagent.errorMessage}</p>
                                 ) : null}
                               </section>
-                            ) : null}
-                            {["queued", "running"].includes(selectedSubagent.status) ? (
-                              <form
-                                className="subagent-message-form"
-                                onSubmit={(event) => {
-                                  event.preventDefault();
-                                  void handleMessageSubagent(selectedSubagent.taskId);
-                                }}
-                              >
-                                <label htmlFor="subagent-inspector-message">追加指令</label>
-                                <textarea
-                                  id="subagent-inspector-message"
-                                  rows={3}
-                                  value={subagentMessageDrafts[selectedSubagent.taskId] ?? ""}
-                                  onChange={(event) =>
-                                    setSubagentMessageDrafts((current) => ({
-                                      ...current,
-                                      [selectedSubagent.taskId]: event.target.value,
-                                    }))
-                                  }
-                                  placeholder="不会占用主输入框"
-                                />
-                                <Button
-                                  variant="default"
-                                  size="sm"
-                                  type="submit"
-                                  disabled={
-                                    sendingSubagentTaskId === selectedSubagent.taskId ||
-                                    !(subagentMessageDrafts[selectedSubagent.taskId] ?? "").trim()
-                                  }
-                                >
-                                  {sendingSubagentTaskId === selectedSubagent.taskId
-                                    ? "发送中…"
-                                    : "发送给子任务"}
-                                </Button>
-                              </form>
                             ) : null}
                             {["queued", "running"].includes(selectedSubagent.status) ? (
                               <Button

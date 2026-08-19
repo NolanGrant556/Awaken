@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,9 +11,23 @@ import {
   projectFilesSubmenuPlacement,
 } from "./ProjectFilesWorkspace";
 
+const projectFileStyles = readFileSync(
+  resolve(process.cwd(), "src/renderer/styles/project-files.css"),
+  "utf8",
+);
+
 async function settle(): Promise<void> {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+async function settleUntil(isReady: () => boolean): Promise<void> {
+  await act(async () => {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      if (isReady()) return;
+    }
   });
 }
 
@@ -53,6 +69,11 @@ function previewRuntimeClient() {
     onProjectDirectoryChanged: vi.fn(() => () => {}),
     copyProjectEntryPath: vi.fn(async () => ({ ok: true as const })),
     openProjectEntryWith: vi.fn(async () => ({ ok: true as const })),
+    startArtifactPreview: vi.fn(async () => ({
+      ok: false as const,
+      code: "UNSUPPORTED_FILE_TYPE" as const,
+      message: "unsupported",
+    })),
     startProjectFilePreview: vi.fn(async () => ({
       ok: false as const,
       code: "UNSUPPORTED_FILE_TYPE" as const,
@@ -65,6 +86,8 @@ function previewRuntimeClient() {
       ok: true as const,
       byteLength: 0,
     })),
+    openArtifact: vi.fn(async () => ({ ok: true as const })),
+    revealArtifact: vi.fn(async () => ({ ok: true as const })),
   };
 }
 
@@ -108,6 +131,69 @@ describe("ProjectFilesWorkspace", () => {
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
+  });
+
+  it("switches the full-width file surface without an intermediate width animation", () => {
+    expect(projectFileStyles).toMatch(
+      /\.aw-workbench-shell:has\(> \.aw-workbench-inspector > \.project-files-workspace\)\s*\{\s*transition:\s*none;/,
+    );
+  });
+
+  it("renders a durable deliverable in the right file workspace", async () => {
+    const startArtifactPreview = vi.fn(async () => ({
+      ok: true as const,
+      preview: {
+        previewId: "artifact-preview-1",
+        requestId: "artifact-request-1",
+        kind: "markdown" as const,
+        transport: "text" as const,
+        displayName: "delivery.md",
+        relativePath: "delivery.md",
+        byteLength: 12,
+        content: "# Delivery\n",
+        language: "markdown",
+      },
+    }));
+    const runtimeClient = {
+      ...previewRuntimeClient(),
+      listProjectDirectory: vi.fn(async () => ({
+        ok: true as const,
+        relativePath: "",
+        entries: [],
+      })),
+      startArtifactPreview,
+    };
+
+    await act(async () => {
+      root.render(
+        <ProjectFilesWorkspace
+          runtimeClient={runtimeClient}
+          projectId="project-1"
+          projectLabel="Awaken"
+          folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
+          artifactPreview={{
+            threadId: "thread-1",
+            runId: "run-1",
+            artifactId: "artifact-1",
+            title: "交付报告.md",
+          }}
+        />,
+      );
+    });
+    await settleUntil(
+      () => container.querySelector("[data-preview-kind='markdown']") !== null,
+    );
+
+    expect(startArtifactPreview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "thread-1",
+        runId: "run-1",
+        artifactId: "artifact-1",
+      }),
+    );
+    expect(container.querySelector("[data-preview-kind='markdown']")?.textContent).toContain(
+      "Delivery",
+    );
   });
 
   it("renders the browser empty state without a project or active file tab", async () => {

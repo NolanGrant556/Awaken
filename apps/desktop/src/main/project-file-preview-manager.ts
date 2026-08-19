@@ -20,6 +20,8 @@ import type {
   ProjectFilePreviewErrorCode,
   ProjectFilePreviewHandle,
   ProjectFilePreviewKind,
+  ProjectFilePreviewSaveRequest,
+  ProjectFilePreviewSaveResult,
   ProjectFilePreviewStartRequest,
   ProjectFilePreviewStartResult,
   RuntimeProject,
@@ -146,6 +148,20 @@ function previewError(
   details: { byteLength?: number; limitBytes?: number } = {},
 ): ProjectFilePreviewStartResult {
   return { ok: false, code, message, ...details };
+}
+
+function saveError(
+  code: ProjectFilePreviewErrorCode,
+  message: string,
+  details: { byteLength?: number; limitBytes?: number } = {},
+): ProjectFilePreviewSaveResult {
+  return { ok: false, code, message, ...details };
+}
+
+function nodeErrorCode(error: unknown): string {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String(error.code)
+    : "";
 }
 
 function isHttpUrl(value: string): boolean {
@@ -564,6 +580,60 @@ export class ProjectFilePreviewManager {
         code: "PREVIEW_UNAVAILABLE",
         message: "暂时无法在文件管理器中显示这个文件。",
       };
+    }
+  }
+
+  async saveMarkdown(
+    request: ProjectFilePreviewSaveRequest,
+  ): Promise<ProjectFilePreviewSaveResult> {
+    if (typeof request?.content !== "string") {
+      return saveError("INVALID_REQUEST", "Markdown 保存请求无效。");
+    }
+    if (request.content.length > MAX_TEXT_PREVIEW_BYTES) {
+      return saveError(
+        "FILE_TOO_LARGE",
+        `文件大小超过当前文本预览上限（${Math.round(MAX_TEXT_PREVIEW_BYTES / 1024 / 1024)} MiB）。`,
+        {
+          byteLength: request.content.length,
+          limitBytes: MAX_TEXT_PREVIEW_BYTES,
+        },
+      );
+    }
+
+    try {
+      const resolved = await resolveProjectFile(await this.options.getProjects(), request);
+      if (!resolved.ok) return resolved;
+      const classification = classifyPreviewFile(resolved.file.displayName);
+      if (classification?.kind !== "markdown") {
+        return saveError("UNSUPPORTED_FILE_TYPE", "当前只支持保存 Markdown 文件。");
+      }
+
+      const nextBuffer = Buffer.from(request.content, "utf8");
+      if (nextBuffer.length > MAX_TEXT_PREVIEW_BYTES) {
+        return saveError(
+          "FILE_TOO_LARGE",
+          `文件大小超过当前文本预览上限（${Math.round(MAX_TEXT_PREVIEW_BYTES / 1024 / 1024)} MiB）。`,
+          {
+            byteLength: nextBuffer.length,
+            limitBytes: MAX_TEXT_PREVIEW_BYTES,
+          },
+        );
+      }
+
+      const current = await fs.readFile(resolved.file.realPath);
+      if (!current.equals(nextBuffer)) {
+        await fs.writeFile(resolved.file.realPath, nextBuffer);
+      }
+      return { ok: true, byteLength: nextBuffer.length };
+    } catch (error) {
+      const code = nodeErrorCode(error);
+      if (code === "ENOENT" || code === "ENOTDIR") {
+        return saveError("FILE_NOT_FOUND", "所选项目文件不存在。");
+      }
+      if (code === "EACCES" || code === "EPERM" || code === "EROFS") {
+        return saveError("FILE_UNWRITABLE", "这个 Markdown 文件当前不可写入。");
+      }
+      return saveError("FILE_UNWRITABLE", "暂时无法保存这个 Markdown 文件。");
     }
   }
 

@@ -596,6 +596,10 @@ function stubElectronBridge(): void {
       onProjectFilePreviewInteraction: vi.fn(() => () => {}),
       openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
       revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+      saveProjectMarkdownFile: vi.fn(async () => ({
+        ok: true as const,
+        byteLength: 0,
+      })),
       upsertProject: vi.fn(),
       reorderProjects: vi.fn(),
       detachProject: vi.fn(),

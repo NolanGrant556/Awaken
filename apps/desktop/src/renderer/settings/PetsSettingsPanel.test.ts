@@ -204,6 +204,10 @@ function createMockRuntimeClient(): RuntimeClient {
     onProjectFilePreviewInteraction: vi.fn(() => () => {}),
     openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
     revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+    saveProjectMarkdownFile: vi.fn(async () => ({
+      ok: true as const,
+      byteLength: 0,
+    })),
     upsertProject: vi.fn(async () => ({}) as never),
     reorderProjects: vi.fn(async () => ({}) as never),
     detachProject: vi.fn(async () => ({}) as never),

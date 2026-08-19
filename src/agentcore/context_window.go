@@ -376,12 +376,20 @@ func isPromptTooLongError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, errContextWindowBlocked) ||
+		errors.Is(err, errContextCompactCircuitOpen) ||
+		errors.Is(err, errInsufficientReduction) ||
+		errors.Is(err, errStillAboveAutoThreshold) ||
+		errors.Is(err, errStillAboveBlockThreshold) ||
+		errors.Is(err, errOversizedProtectedTail) ||
+		errors.Is(err, errNotEnoughCompactableHistory) {
+		return false
+	}
 	text := strings.ToLower(err.Error())
 	for _, marker := range []string{
 		"prompt too long",
 		"context length",
 		"maximum context",
-		"context window",
 		"too many tokens",
 	} {
 		if strings.Contains(text, marker) {

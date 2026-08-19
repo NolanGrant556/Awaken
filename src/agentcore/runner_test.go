@@ -1041,6 +1041,7 @@ func TestRunnerReactiveCompactRetrySuccess(t *testing.T) {
 		}
 		return &llm.Response{Content: "done"}, nil
 	}
+	installSuccessfulTestCompactor(runner)
 
 	var gotEvents []AwakenEvent
 	conv.UserInput("remember this before compact")
@@ -1078,6 +1079,7 @@ func TestRunnerReactiveCompactSecondPromptTooLongTerminates(t *testing.T) {
 		calls++
 		return nil, errors.New("maximum context length exceeded")
 	}
+	installSuccessfulTestCompactor(runner)
 
 	var gotEvents []AwakenEvent
 	conv.UserInput("remember this before compact")
@@ -1096,6 +1098,30 @@ func TestRunnerReactiveCompactSecondPromptTooLongTerminates(t *testing.T) {
 	}
 	if gotEvents[runErrorIndex].TerminalReason != TerminalReasonPromptTooLong {
 		t.Fatalf("expected prompt_too_long terminal reason, got %+v", gotEvents[runErrorIndex])
+	}
+}
+
+func installSuccessfulTestCompactor(runner *Runner) {
+	if runner == nil || runner.contextGovernor == nil {
+		return
+	}
+	runner.contextGovernor.engine = &fakeContextEngine{
+		evaluateFn: func(envelope ContextEnvelope) ContextWindowState {
+			return NewContextEngine(ContextWindowConfig{}).Evaluate(envelope)
+		},
+		compactFn: func(_ context.Context, req CompactRequest) (CompactResult, error) {
+			summary := convcontext.Message{
+				Role:              convcontext.RoleUser,
+				Content:           "compact summary",
+				CompactBoundaryID: "compact-test",
+			}
+			return CompactResult{
+				Mode:           req.Mode,
+				BoundaryID:     "compact-test",
+				SummaryMessage: summary,
+				Messages:       []convcontext.Message{summary},
+			}, nil
+		},
 	}
 }
 

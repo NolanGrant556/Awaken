@@ -10,7 +10,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 
 - 左侧栏负责项目与线程入口；
 - 中间工作区负责输入、运行叙事、状态反馈和最终交付物；
-- 右侧 Inspector 当前提供项目文件工作区、文件夹组选择、筛选、只读目录树以及 Office、代码/文本、PDF、图片和 HTML 只读预览；Markdown 可在同一文件工作区切换预览与编辑并写回原文件；HTML 统一进入隔离的“浏览器”入口；当前 thread 存在原生 Subagent 记录时，还提供子任务详情、状态、活动、结果、错误与单任务取消；Markdown 以外的文件编辑与通用工具详情尚未接通；
+- 右侧 Inspector 当前提供项目文件工作区、文件夹组选择、筛选、只读目录树以及 Office、代码/文本、PDF、图片和 HTML 只读预览；从项目文件树打开的 Markdown 可在同一文件工作区切换预览与编辑并写回原文件，从交付卡打开的临时 Artifact Markdown 标签当前只读；HTML 统一进入隔离的“浏览器”入口；当前 thread 存在原生 Subagent 记录时，还提供子任务详情、状态、活动、结果、错误与单任务取消；项目 Markdown 以外的文件编辑与通用工具详情尚未接通；
 - Settings 承载模型、搜索、长期记忆、外观、桌面宠物、计算机操作、Hook 和 ACP runner 等配置面；设置界面的用户可见标题显示为“钩子”；
 - Desktop 负责启动、监督和关闭本地 `awaken-core`，用户不需要单独运行 Core；
 - `Awaken Design System` 是纯 UI 组件包和 Gallery，不拥有产品状态、后端策略或运行时协议。
@@ -152,7 +152,7 @@ Gallery 使用 mock state，只能证明组件渲染，不能替代 Awaken Deskt
 - Gallery、旧截图、旧验收摘要和绕过 Desktop 的 provider smoke 不能作为真实产品通过证据。
 - `Bash` 以 Desktop 向 `awaken-core` 注入的当前登录用户身份和 login 环境直接执行，不经过 restricted/staging broker，也不声称 workspace 隔离、全部副作用可观测或任意删除可恢复；TaskScope、Trash 与 staging 只属于实际选用的 typed 工具及 `dependency_install`、`git_remote`、MCP Artifact bridge。Computer-ready run 同时暴露 `Bash` 与三个 `computer_*` 工具：前者用于 CLI、Python/Typst、构建和 Skill 脚本，后者用于直接 GUI 观察与输入。只有 Computer lane 内动作受其 review、lease/fence 和 verify 约束，Bash 事件保持独立且不能冒充 Computer 证据。消息发送不经过 Awaken 人工审核门。
 - 不得把 A2UI、原生 OS Computer Use、MCP WebSocket、完整 OAuth/401 自动恢复、全平台强制 Shell overlay 等尚未实现或不完整能力写成当前支持。
-- Memory/Dream 的已实现范围、child recall 后置约束和真实 Desktop/跨平台验收缺口只以 [11 长期记忆](docs/11_长期记忆/索引.md) 为准。
+- Memory/Dream 的已实现范围、child 对父 `MemoryRecallSnapshot` 的继承约束和真实 Desktop/跨平台验收缺口只以 [11 长期记忆](docs/11_长期记忆/索引.md) 为准。
 - 不提交 secret、userData、依赖目录或生成产物；不覆盖或清理与当前任务无关的本地改动。
 - 代码改变产品事实时，必须在同一任务同步更新唯一权威文档和当前验收证据。
 

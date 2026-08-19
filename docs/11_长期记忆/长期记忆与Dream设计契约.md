@@ -203,8 +203,8 @@ run 建立时读取允许 scope 的 `MEMORY.md`，按合计预算形成 host-own
 - run 内后续 turn 可追加新的 recall receipts，但不得无界重复同一文件；
 - Memory mutation 的工具结果可供当前 Agent 使用，新内容从下一 run 才成为自动召回候选；
 - child Agent 默认只继承父 run 已召回且与 child workspace scope 相容的 Memory identity；
-- child 不单独扫描 user scope，不得扩大父边界；父显式允许时可在相同 project scope 发起新召回；
-- child 的写入仍通过相同 Memory service 和 parent/child source identity，不能直接编辑文件。
+- child 的 recall start/drain/reset/capture hook 在派生时被清空；它不扫描 user/project scope，不能发起新 selector，只注入与 child workspace scope 相容的父 run 冻结快照；
+- child 若在固定工具快照与权限边界内获准写入，仍必须通过同一 Memory service 和 parent/child source identity，不能直接编辑文件；新内容从下一 run 才成为自动召回候选。
 
 ## 6. 受控 Memory 能力
 

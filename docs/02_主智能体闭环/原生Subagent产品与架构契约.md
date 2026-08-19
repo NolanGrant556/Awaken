@@ -272,13 +272,14 @@ Core `message` 服务继续供主模型使用；Desktop Inspector 和中心卡�
 
 ### 6.1 模块与 owner
 
-新增：
+当前模块：
 
 ```text
 src/subagentruntime/
   types.go          # task/status/request/result/controller interface
   manager.go        # run-scoped registry、queue、并发、wait、cancel
-  budget.go         # root/children 共享预算
+  context.go        # root/child run context 与任务身份
+  roles.go          # agent role 注册与工具边界
   manager_test.go
 
 src/tools/subagent/
@@ -286,11 +287,11 @@ src/tools/subagent/
   tool_test.go
 ```
 
-修改：
+主要集成点：
 
 - `src/agentcore/runner.go`：向 tool execution context 注入 run-scoped controller；启动 child Runner；在 root terminal 前执行 child barrier；
 - `src/agentcore/spawner.go`：补齐明确的 child budgets、Memory snapshot、tool exposure 和 context identity复制；
-- `src/agentcore/types.go`：增加 `SubagentController`、共享 budget、父 Memory snapshot；
+- `src/agentcore/types.go`：定义 `SubagentController`、parent/child 边界和父 `MemoryRecallSnapshot` 相关 hook；
 - `src/runtime/run_service.go`、`session.go`：每个 run 创建/销毁 manager，把 Desktop control route 绑定到精确 session；
 - `src/agentcore/semantic_record.go`、journal restore：增加稳定 child kinds 与 orphan recovery；
 - `src/protocol/agui`、`src/server`：wire 和 control route；
@@ -394,7 +395,7 @@ tool Outcome 的 `side_effect_state`：
 
 `wait` 成功结果额外包含 `retrieval_status=completed|running|timeout`。`timeout` 是中性成功结果，必须同时返回当前 task snapshots；历史 `subagent_wait_timeout` 只作为旧记录兼容错误码保留，新调用不再产生。
 
-### 6.6 并发与共享预算
+### 6.6 并发与当前预算边界
 
 默认门禁：
 
@@ -408,14 +409,13 @@ wait timeout            60s/call
 cancel grace            2s
 ```
 
-root 与所有 child 共享一个原子 `RunExecutionBudget`：
+当前 root 与每个 child 由各自 `Runner` 内的 `FailureSupervisor` 独立计数，尚未接通 run-scoped 的共享原子预算：
 
-- root 现有 128 turn / 512 tool execution 仍是 run 总上限；
-- child 的 32/128 是单 task 子上限，不额外扩大全局 512；
-- 每次 provider request 和实际 tool execution在开始前从对应预算 owner admission；
-- 排队、status、wait 不消耗 child model/tool budget，但 tool 自身仍计入 root 的 tool-call监督；
-- 任一 child 达到自身上限只终止该 child，不直接伪造 root run error；
-- 全局预算耗尽时 manager 取消未终态 child，root 按现有 run 级预算终止。
+- root 仍按现有默认值独立受限于 128 turn / 512 tool execution；
+- 每个 child 的 32 turn / 128 tool execution 是单 task 上限，但尚不会从同一个 root + children 全局计数器原子扣减；
+- root 调用 spawn/status/wait/message/cancel 工具仍计入 root 自身的 tool execution；排队和等待不会额外消耗 child 的 model/tool 预算；
+- 任一 child 达到自身上限只终止该 child，不直接伪造 root run error；root 终态 barrier 仍负责收敛未终态 child；
+- “root 与所有 child 共享 token / tool / cost 预算”仍是明确已知缺口，不得从并发上限、child 子上限或 terminal barrier 推导为已实现。
 
 ### 6.7 Workspace 与写隔离
 
@@ -793,7 +793,7 @@ go vet ./...
 - read-only child 的 mutation拒绝；
 - spawn append+flush早于 goroutine，message早于queue，terminal早于wait wakeup；
 - 4并发/8总量、queued取消、wait any/all/timeout/cancel；timeout 后 terminal 自动交接、显式检索去重、terminal persistence 失败不通知；
-- root与child共享 tool/model预算；
+- root 与 child 各自预算上限的独立生效与耗尽行为；共享原子 tool/model/cost 预算未实现前，测试不得把独立计数伪装成全局预算；
 - root cancel传播和 terminal barrier；
 - child message只在轮次边界消费；
 - child records不进入父 model history；

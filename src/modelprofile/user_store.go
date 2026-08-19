@@ -496,6 +496,15 @@ func normalizeStoredProfile(stored storedProfile, provider Provider, cached *cac
 	if provider.ID == "openai" && protocol == "openai_responses" {
 		supportsNativePDF = true
 	}
+	// Custom profiles are user-declared transport contracts. Only the explicit
+	// vision toggle is admitted; it enables image input and PDF page rendering,
+	// but never upgrades the gateway to native PDF support.
+	if provider.ID == "custom" {
+		if stored.Advanced.SupportsVision != nil {
+			supportsVision = *stored.Advanced.SupportsVision
+		}
+		supportsNativePDF = false
+	}
 	if stored.Advanced.ContextWindow != nil && *stored.Advanced.ContextWindow > 0 {
 		contextWindow = *stored.Advanced.ContextWindow
 		if hasCapability && capability.ContextWindow > 0 && contextWindow > capability.ContextWindow {

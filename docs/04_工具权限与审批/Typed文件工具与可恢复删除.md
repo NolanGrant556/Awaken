@@ -12,6 +12,8 @@
 | `Glob` | 使用 run snapshot 固定的真实 `rg`，默认 hidden/no-ignore、稳定排序；默认每页 100 条、`limit` 最大 1000，以 opaque `cursor/next_cursor` 继续枚举并报告 total/truncated |
 | `Grep` | 使用真实 `rg` argv，支持 glob/type/output mode/context/line/ignore-case/head/offset/multiline，保留真实无匹配和截断事实；`head_limit/offset` 提供稳定续读 |
 
+自定义 API profile 的视觉能力默认关闭；用户在连接配置中明确开启“视觉多模态”后，`Read` 才可把图片或 Poppler 渲染出的 PDF 页面作为模型媒体发送。该开关不等于原生 PDF 支持，`route=native_pdf` 仍不可用；关闭或旧配置未声明时继续以 `model_pdf_unsupported` fail closed。
+
 缺少 `rg` 时 `Glob`/`Grep` 返回 `needs_runtime`，不回退到语义较弱的 Go 搜索。两者默认按 TaskScope 精确 roots 搜索；共同父目录或项目外路径必须通过 TaskScope 文档定义的 `scope_mode` 明确区分，不得靠退回 `Bash find` 绕过分页。`Edit`/`Write` 使用同目录临时文件、fsync 和原子替换；未知/二进制编码拒绝覆盖。失败不刷新 thread 文件状态，成功会记录新的 SHA-256/size/mtime/type 快照。
 
 删除统一使用 `trash_file`，支持单路径或明确路径列表。canonical schema 和 executor 都要求 `path` 与 `paths` 必须且只能提供一个；为兼容拒绝根级组合关键字的 OpenAI Chat/Responses 网关，wire schema 会把两项显示为带互斥说明的可选属性，但 ToolRuntime 仍按 canonical `oneOf` 在权限与执行前拒绝缺失或同时提供。成功结果返回 `original_path`、`method`，并在平台可观察时返回 `trashed_path`，同时写 observed `trashed` change；批量中途失败标为 partial/unknown，要求先检查原路径和 Trash，禁止自动改用永久删除。

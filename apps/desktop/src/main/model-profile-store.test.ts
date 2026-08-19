@@ -2065,6 +2065,54 @@ describe("ModelProfileStore", () => {
     });
   });
 
+  it("updates the template profile when the connection identity stays unchanged", async () => {
+    const store = new ModelProfileStore(configDir);
+
+    const templateProfile = await store.saveProfile({
+      providerId: "custom",
+      displayName: "自定义 API",
+      modelId: "vision-model",
+      baseURL: "https://gateway.test/v1",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "shared-key",
+      enabled: true,
+      isDefault: true,
+      advanced: {
+        supportsVision: false,
+      },
+    });
+
+    const updatedProfile = await store.saveProfile({
+      templateProfileId: templateProfile.id,
+      providerId: "custom",
+      displayName: "自定义 API",
+      modelId: "vision-model",
+      baseURL: "https://gateway.test/v1",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      enabled: true,
+      isDefault: true,
+      advanced: {
+        supportsVision: true,
+        supportsNativePDF: true,
+      },
+    });
+
+    const profiles = await store.listProfiles();
+
+    expect(updatedProfile.id).toBe(templateProfile.id);
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]).toMatchObject({
+      id: templateProfile.id,
+      has_key: true,
+      advanced: {
+        supports_vision: true,
+        supports_native_pdf: false,
+      },
+    });
+  });
+
   it("does not reuse a saved template key when the current test form is empty", async () => {
     const fetchMock = vi.fn(
       async () => ({ ok: true, status: 200 }) as Response,

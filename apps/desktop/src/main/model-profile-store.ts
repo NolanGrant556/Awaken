@@ -1711,7 +1711,7 @@ export class ModelProfileStore {
     provider: ModelProviderWire,
   ): Promise<RuntimeModelProfileSummaryWire> {
     const store = await this.readStore();
-    const existingIndex = request.id
+    let existingIndex = request.id
       ? store.profiles.findIndex((profile) => profile.id === request.id)
       : -1;
     const modelId = normalizeProviderModelId(provider, request.modelId);
@@ -1734,7 +1734,7 @@ export class ModelProfileStore {
       baseURL,
       request.advanced?.inferenceEndpoint,
     );
-    const existing = existingIndex >= 0 ? store.profiles[existingIndex] : undefined;
+    let existing = existingIndex >= 0 ? store.profiles[existingIndex] : undefined;
     const templateProfile = templateProfileForSave(
       store,
       provider.id,
@@ -1752,11 +1752,24 @@ export class ModelProfileStore {
       isDefault: false,
       advanced: request.advanced ?? existing?.advanced ?? templateProfile?.advanced,
     });
-    const duplicateProfile = store.profiles.find(
-      (profile) => profile.id !== existing?.id && storedProfileIdentityKey(profile) === candidateIdentity,
+    const duplicateIndex = store.profiles.findIndex(
+      (profile) =>
+        profile.id !== existing?.id &&
+        storedProfileIdentityKey(profile) === candidateIdentity,
     );
-    if (duplicateProfile) {
-      throw new Error(DUPLICATE_MODEL_PROFILE_ERROR);
+    if (duplicateIndex >= 0) {
+      const duplicateProfile = store.profiles[duplicateIndex];
+      // The connection form uses the last saved profile as a credential
+      // template. If the user keeps the exact same connection identity, this
+      // is an edit of that profile (for example toggling custom vision), not a
+      // request to create a duplicate. Changing model/protocol/Base URL still
+      // creates a separate profile and keeps the shared-key template behavior.
+      if (!existing && duplicateProfile.id === templateProfile?.id) {
+        existingIndex = duplicateIndex;
+        existing = duplicateProfile;
+      } else {
+        throw new Error(DUPLICATE_MODEL_PROFILE_ERROR);
+      }
     }
     const sourceAdvanced =
       request.advanced ?? existing?.advanced ?? templateProfile?.advanced;

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenSelect } from "../AwakenSelect";
+import { AwakenSwitch } from "../AwakenSwitch";
 
 type AwakenModelProviderChoiceOption = {
   value: string;
@@ -47,6 +48,8 @@ export type AwakenModelProviderFormProps = {
   apiDocsURL: string;
   templateNote?: string | null;
   showApiKey?: boolean;
+  showVisionCapability?: boolean;
+  supportsVision?: boolean;
   saving?: boolean;
   testing?: boolean;
   testFeedback?: AwakenModelProviderTestFeedback | null;
@@ -64,6 +67,7 @@ export type AwakenModelProviderFormProps = {
   onApiKeyChange: (apiKey: string) => void;
   onManagementApiKeyChange?: (apiKey: string) => void;
   onShowApiKeyChange?: (show: boolean) => void;
+  onSupportsVisionChange?: (supported: boolean) => void;
   onTest?: () => void;
   onRefreshCatalog?: () => void;
   onRefreshAccount?: () => void;
@@ -117,6 +121,8 @@ export function AwakenModelProviderForm({
   apiDocsURL,
   templateNote,
   showApiKey = false,
+  showVisionCapability = false,
+  supportsVision = false,
   saving = false,
   testing = false,
   testFeedback = null,
@@ -134,6 +140,7 @@ export function AwakenModelProviderForm({
   onApiKeyChange,
   onManagementApiKeyChange,
   onShowApiKeyChange,
+  onSupportsVisionChange,
   onTest,
   onRefreshCatalog,
   onRefreshAccount,
@@ -362,6 +369,21 @@ export function AwakenModelProviderForm({
           </button>
         </div>
       </div>
+
+      {showVisionCapability ? (
+        <div className="model-provider-capability-toggle">
+          <div>
+            <strong>视觉多模态</strong>
+            <p>开启后允许发送图片，并可把 PDF 页面渲染为图片读取；不代表接口支持原生 PDF。</p>
+          </div>
+          <AwakenSwitch
+            checked={supportsVision}
+            label="视觉多模态"
+            size="compact"
+            onCheckedChange={onSupportsVisionChange}
+          />
+        </div>
+      ) : null}
 
       {showBaseURL ? (
         <div className="model-provider-field">

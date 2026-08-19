@@ -55,16 +55,16 @@ func TestEstimateReadMediaAdmissionTokens(t *testing.T) {
 	if got := estimateReadMediaAdmissionTokens(`{"file_path":"notes.md"}`); got != 0 {
 		t.Fatalf("text read estimate=%d", got)
 	}
-	if got := estimateReadMediaAdmissionTokens(`{"file_path":"chart.png"}`); got != mediaAdmissionTokensPerPart {
+	if got := estimateReadMediaAdmissionTokens(`{"file_path":"chart.png"}`); got != convcontext.MediaPartTokenEstimate {
 		t.Fatalf("image estimate=%d", got)
 	}
-	if got := estimateReadMediaAdmissionTokens(`{"file_path":"report.pdf"}`); got != defaultOmittedPDFAdmissionPages*mediaAdmissionTokensPerPart {
+	if got := estimateReadMediaAdmissionTokens(`{"file_path":"report.pdf"}`); got != defaultOmittedPDFAdmissionPages*convcontext.MediaPartTokenEstimate {
 		t.Fatalf("omitted pdf pages estimate=%d", got)
 	}
-	if got := estimateReadMediaAdmissionTokens(`{"file_path":"report.pdf","pages":"1-10"}`); got != 10*mediaAdmissionTokensPerPart {
+	if got := estimateReadMediaAdmissionTokens(`{"file_path":"report.pdf","pages":"1-10"}`); got != 10*convcontext.MediaPartTokenEstimate {
 		t.Fatalf("explicit 1-10 estimate=%d", got)
 	}
-	if got := estimateReadMediaAdmissionTokens(`{"file_path":"report.pdf","pages":"1,3,7-9"}`); got != 5*mediaAdmissionTokensPerPart {
+	if got := estimateReadMediaAdmissionTokens(`{"file_path":"report.pdf","pages":"1,3,7-9"}`); got != 5*convcontext.MediaPartTokenEstimate {
 		t.Fatalf("sparse pages estimate=%d", got)
 	}
 }

@@ -48,7 +48,7 @@ append 或 flush 失败必须 fail-stop；不能继续副作用、模型 transpo
 
 `user_message` 保存文本、有序 attachments 和 composer tokens。附件保存 identity、kind、MIME、路径/显示名、尺寸、字节数与 runtime-owned `storage_key`；image base64 不写入 JSONL。重放以结构化字段为源，不从 UI 文案恢复 Slash token，也不扫描附件目录发明历史。
 
-历史附件在重放时继续保留，不因当前所选模型缺少媒体能力而删改。进入下一次模型请求前，Agent Core 以当前 pinned `ModelCapabilities` 深拷贝并投影消息：不支持 vision/native PDF 的 profile 只收到稳定文本/metadata，不收到对应 Base64 content part；支持能力的 profile 仍可使用原 storage key 水合后的媒体。`context_snapshot` 统计该次实际准入的请求副本，而不是未下发的本地媒体。
+历史附件在重放时继续保留，不因当前所选模型缺少媒体能力而删改。Journal 对 tool-result media 只恢复 `storage_key` 与元数据，不在重放时全量灌回原图。进入下一次模型请求前，Agent Core 以当前 pinned `ModelCapabilities` 和**当前窗口**深拷贝并投影消息：不支持 vision/native PDF 的 profile 只收到稳定文本/metadata；支持能力的 profile 只水合近尾 1 个安全组内、且剩余窗口装得下的媒体。更早 Read/图/PDF 页以 stub 进入请求，blob 文件仍留在 `tool-results/`。`context_snapshot` 统计该次实际准入的请求副本，而不是未下发的本地媒体。重启后的 prepared request 必须与 live 投影一致。
 
 Skill 预激活失败仍保留已写入的 `user_message`；成功的多 Skill records 成批写入，批次失败不保留部分 activation。
 
@@ -87,7 +87,7 @@ tool call/result payload 持久保存 tool/environment snapshot ID、provider ID
 
 超过 32 KiB 的文本结果在首次写 journal/model context 前把完整正文原子写入同一 tool-results 目录的 `content.txt`（`0600`），再以 digest、字节数、稳定 preview 和 storage key 组成唯一 admission projection。重放和压缩识别该 projection，不重新截断或事后替换。
 
-重放和 compaction 在进入模型上下文前重新水合 storage key。blob 缺失或 key 非法时保留原历史 tool card，并向模型结果追加 `tool_media_blob_missing` warning；不得把路径字符串或空 content 伪装成视觉成功。删除 thread 时删除其 tool-results，workspace/profile/线程状态重建后不会沿用内存文件快照或 cwd。
+重放恢复 storage key 与元数据；hydrate 只发生在近尾媒体预算内。blob 缺失或 key 非法时保留原历史 tool card，并在实际 hydrate 失败时向模型结果追加 `tool_media_blob_missing` warning；不得把路径字符串或空 content 伪装成视觉成功。删除 thread 时删除其 tool-results，workspace/profile/线程状态重建后不会沿用内存文件快照或 cwd。
 
 重放不查询当前 registry 或当前机器环境，也不因 provider 后来 ready 而改写旧 run。旧工具名按通用 legacy tool card 投影，不重写历史记录。
 

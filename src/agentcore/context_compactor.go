@@ -24,7 +24,10 @@ const (
 
 type compactSummaryInvoker func(stdcontext.Context, llm.Config, llm.Request) (string, error)
 
-var errNotEnoughCompactableHistory = errors.New("not enough compactable history")
+var (
+	errNotEnoughCompactableHistory = errors.New("not enough compactable history")
+	errOversizedProtectedTail      = errors.New("oversized protected tail")
+)
 
 type compactSummaryBuildResult struct {
 	Text                 string
@@ -73,6 +76,17 @@ func CompactConversationWithRequest(ctx stdcontext.Context, req CompactRequest) 
 	}
 	if len(prefixMessages) == 0 {
 		return CompactResult{}, errNotEnoughCompactableHistory
+	}
+	if over, limit := compactTailExceedsBudget(req, tailMessages); over {
+		tailMessages = lightenCompactTail(tailMessages)
+		if estimateMessagesTokens(tailMessages) > limit {
+			var absorbErr error
+			prefixMessages, tailMessages, absorbErr = absorbOversizedCompactTail(prefixMessages, tailMessages, limit)
+			if absorbErr != nil {
+				return CompactResult{}, absorbErr
+			}
+			prefixGroups = compactSafeGroups(prefixMessages)
+		}
 	}
 
 	summaryResult := buildSemanticCompactSummary(ctx, req, boundaryID, prefixGroups, tailMessages)
@@ -151,6 +165,146 @@ func cloneCompactGroupSlice(groups [][]convcontext.Message) [][]convcontext.Mess
 		out[i] = cloneContextMessages(group)
 	}
 	return out
+}
+
+func compactTailExceedsBudget(req CompactRequest, tail []convcontext.Message) (bool, int) {
+	if len(tail) == 0 {
+		return false, 0
+	}
+	state := NewContextWindowStateWithConfig(req.Envelope, contextWindowConfigFromModelConfig(req.Envelope.CompactModelConfig))
+	limit := state.CompactTarget
+	if reserved := state.blockingThreshold() - compactSummaryDefaultMaxTokens; reserved > 0 && reserved < limit {
+		limit = reserved
+	}
+	if limit <= 0 {
+		return false, limit
+	}
+	return estimateMessagesTokens(tail) > limit, limit
+}
+
+func lightenCompactTail(messages []convcontext.Message) []convcontext.Message {
+	out := cloneContextMessages(messages)
+	for i := range out {
+		stubMessageMedia(&out[i])
+	}
+	return out
+}
+
+func absorbOversizedCompactTail(prefix, tail []convcontext.Message, limit int) ([]convcontext.Message, []convcontext.Message, error) {
+	all := append(cloneContextMessages(prefix), cloneContextMessages(tail)...)
+	protected := protectedCompactTail(all, tail)
+	if estimateMessagesTokens(protected) > limit {
+		return nil, nil, errOversizedProtectedTail
+	}
+	absorbed := messagesExceptProtectedTail(all, protected)
+	if len(absorbed) == 0 {
+		return nil, nil, errOversizedProtectedTail
+	}
+	if compactMessagesEqual(absorbed, prefix) && compactMessagesEqual(protected, tail) {
+		return nil, nil, errOversizedProtectedTail
+	}
+	if err := convcontext.ValidateToolResultPairing(append([]convcontext.Message{{
+		Role:    convcontext.RoleUser,
+		Content: "compact-boundary-placeholder",
+	}}, protected...)); err != nil {
+		return nil, nil, fmt.Errorf("compact would break tool pairing: %w", err)
+	}
+	return absorbed, protected, nil
+}
+
+func protectedCompactTail(all, tail []convcontext.Message) []convcontext.Message {
+	protected := make([]convcontext.Message, 0, 4)
+	if user := lastUserMessage(all); user != nil {
+		protected = append(protected, *user)
+	}
+	if pairing := trailingUnclosedPairing(tail); len(pairing) > 0 {
+		if len(protected) > 0 && compactMessageIdentity(protected[0], pairing[0]) {
+			protected = pairing
+		} else {
+			protected = append(protected, pairing...)
+		}
+	}
+	return cloneContextMessages(protected)
+}
+
+func lastUserMessage(messages []convcontext.Message) *convcontext.Message {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == convcontext.RoleUser && messages[i].Origin != convcontext.MessageOriginSynthetic {
+			message := messages[i]
+			return &message
+		}
+	}
+	return nil
+}
+
+func trailingUnclosedPairing(messages []convcontext.Message) []convcontext.Message {
+	groups := compactSafeGroups(messages)
+	if len(groups) == 0 {
+		return nil
+	}
+	last := groups[len(groups)-1]
+	if isIncompleteToolGroup(last) {
+		return cloneContextMessages(last)
+	}
+	return nil
+}
+
+func isIncompleteToolGroup(group []convcontext.Message) bool {
+	if len(group) == 0 || group[0].Role != convcontext.RoleAssistant || len(group[0].ToolCalls) == 0 {
+		return false
+	}
+	pending := make(map[string]bool, len(group[0].ToolCalls))
+	for _, call := range group[0].ToolCalls {
+		pending[call.ID] = true
+	}
+	for _, message := range group[1:] {
+		if message.Role != convcontext.RoleTool {
+			return true
+		}
+		delete(pending, message.ToolCallID)
+	}
+	return len(pending) > 0
+}
+
+func messagesExceptProtectedTail(all, protected []convcontext.Message) []convcontext.Message {
+	if len(protected) == 0 {
+		return cloneContextMessages(all)
+	}
+	out := make([]convcontext.Message, 0, len(all))
+	for _, message := range all {
+		skip := false
+		for _, keep := range protected {
+			if compactMessageIdentity(message, keep) {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			out = append(out, message)
+		}
+	}
+	return cloneContextMessages(out)
+}
+
+func compactMessageIdentity(left, right convcontext.Message) bool {
+	return left.Role == right.Role &&
+		left.Content == right.Content &&
+		left.ToolCallID == right.ToolCallID &&
+		left.Name == right.Name &&
+		left.MessageID == right.MessageID &&
+		len(left.ToolCalls) == len(right.ToolCalls)
+}
+
+func compactMessagesEqual(left, right []convcontext.Message) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if !compactMessageIdentity(left[i], right[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func flattenCompactGroups(groups [][]convcontext.Message) []convcontext.Message {
@@ -340,17 +494,23 @@ func buildCompactSummaryRequestMessages(groups [][]convcontext.Message) ([]convc
 			flat = append(flat, compactedMessage)
 		}
 	}
-	return flat, toolResultsPruned
+	return stripImagesFromMessages(flat), toolResultsPruned
 }
 
 func structurallyCompactMessage(message convcontext.Message) (convcontext.Message, bool) {
 	if message.Role != convcontext.RoleTool {
+		stripMessageMediaPayloads(&message)
 		return message, false
 	}
 	if estimateMessageTokens(message) <= compactToolResultTokenThreshold {
+		stripMessageMediaPayloads(&message)
 		return message, false
 	}
 	message.Content = structuralToolResultDigest(message)
+	message.ModelContent = nil
+	for i := range message.Attachments {
+		message.Attachments[i].DataBase64 = ""
+	}
 	return message, true
 }
 

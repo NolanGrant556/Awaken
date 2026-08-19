@@ -71,7 +71,7 @@ func (r *Runner) compactInvokedSkillContext() {
 	// System blocks keep invocation order even though selection used recency.
 	sort.SliceStable(kept, func(i, j int) bool { return kept[i].InvokedAt.Before(kept[j].InvokedAt) })
 	r.config.SkillContextBlocks = kept
-	r.reqBuilder = NewRequestBuilder(r.config)
+	r.rebuildRequestBuilder()
 }
 
 func truncateSkillContext(value string, maxRunes int) (string, bool) {

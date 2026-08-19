@@ -16,10 +16,6 @@ import (
 const (
 	ErrorCodeContextAdmissionExhausted = "context_admission_exhausted"
 	defaultOmittedPDFAdmissionPages    = 10
-	// mediaAdmissionTokensPerPart matches the session-level image/PDF page
-	// estimate in src/context. Admission uses the same constant so a later
-	// hydrate/projection change cannot silently reopen the 19.5K→306K jump.
-	mediaAdmissionTokensPerPart = 2000
 )
 
 type readAdmissionArgs struct {
@@ -113,7 +109,7 @@ func estimateReadMediaAdmissionTokens(arguments string) int {
 	}
 	switch strings.ToLower(filepath.Ext(strings.TrimSpace(parsed.FilePath))) {
 	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
-		return mediaAdmissionTokensPerPart
+		return convcontext.MediaPartTokenEstimate
 	case ".pdf":
 		pages := defaultOmittedPDFAdmissionPages
 		if spec := strings.TrimSpace(parsed.Pages); spec != "" {
@@ -121,7 +117,7 @@ func estimateReadMediaAdmissionTokens(arguments string) int {
 				pages = counted
 			}
 		}
-		return pages * mediaAdmissionTokensPerPart
+		return pages * convcontext.MediaPartTokenEstimate
 	default:
 		return 0
 	}

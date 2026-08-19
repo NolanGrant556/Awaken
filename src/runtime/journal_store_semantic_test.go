@@ -117,3 +117,39 @@ func TestSkillInvocationHistoryRestoresLatestTimestampWithoutLeakingForkContext(
 		t.Fatalf("fork context leaked or inline latest lost: %+v", restored.SkillContextBlocks)
 	}
 }
+
+func TestMessagesFromSemanticRecordsRestoresToolMediaMetadataWithoutHydrating(t *testing.T) {
+	outcome := tool.ExecutionOutcome{
+		Content: "page image",
+		Status:  tool.OutcomeSucceeded,
+		ModelContent: []tool.ModelContentPart{{
+			Type: "image", MimeType: "image/png", DisplayName: "chart.png",
+			StorageKey: "thread_1/tool-results/call_1/part-001.png", ByteSize: 12, DataBase64: "",
+		}},
+	}
+	record := agentcore.NewSemanticRecord(
+		agentcore.SemanticKindToolResult,
+		"thread_1",
+		"run_1",
+		"turn_1",
+		"call_1",
+		"",
+		map[string]any{
+			"tool_call_id": "call_1",
+			"tool_name":    "Read",
+			"content":      "page image",
+			"outcome":      outcomeToAnyMap(outcome),
+		},
+	)
+	messages := messagesFromSemanticRecords([]agentcore.SemanticRecord{record})
+	if len(messages) != 1 || len(messages[0].ModelContent) != 1 {
+		t.Fatalf("unexpected restored messages: %+v", messages)
+	}
+	part := messages[0].ModelContent[0]
+	if part.StorageKey != "thread_1/tool-results/call_1/part-001.png" || part.ByteSize != 12 {
+		t.Fatalf("replay lost durable media metadata: %+v", part)
+	}
+	if part.DataBase64 != "" {
+		t.Fatalf("replay hydrated media bytes: %q", part.DataBase64)
+	}
+}

@@ -109,6 +109,14 @@ import type {
   UpsertProjectResult,
 } from "../shared/runtime";
 import type { AguiEvent } from "../shared/agui";
+import type {
+  DesktopUpdateErrorCode,
+  DesktopUpdateSnapshot,
+} from "../shared/desktop-update";
+import {
+  buildSidebarUpdateAction,
+  desktopUpdateInstallBlockedMessage,
+} from "./desktopUpdatePresentation";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -193,6 +201,7 @@ import {
 import { ProjectFilesWorkspace } from "./ProjectFilesWorkspace";
 import ProjectFileIcon from "./ProjectFileIcon";
 import type { ProjectFileWorkspaceMode } from "./file-preview/FilePreviewHost";
+import type { ArtifactPreviewSelection } from "./file-preview/ArtifactPreviewHost";
 import {
   activeProjectFileTab,
   createProjectFileTabsState,
@@ -1292,6 +1301,19 @@ export function subagentElapsedMs(
   return finishedAt - startedAt;
 }
 
+export function subagentWorkspaceModeLabel(mode?: string): string | undefined {
+  switch (mode) {
+    case "shared":
+      return "共享可写";
+    case "git_worktree":
+      return "Git worktree";
+    case "shared_readonly":
+      return "只读共享";
+    default:
+      return mode || undefined;
+  }
+}
+
 function formatSubagentElapsed(elapsedMs?: number): string | undefined {
   if (typeof elapsedMs !== "number" || !Number.isFinite(elapsedMs) || elapsedMs < 0) {
     return undefined;
@@ -1301,12 +1323,14 @@ function formatSubagentElapsed(elapsedMs?: number): string | undefined {
   return `${Math.floor(totalSeconds / 60)} 分 ${totalSeconds % 60} 秒`;
 }
 
-function subagentAgentTypeLabel(
+export function subagentAgentTypeLabel(
   agentType: SubagentNarrativeTask["agentType"],
 ): string {
   switch (agentType) {
     case "review":
       return "复核智能体";
+    case "plan":
+      return "规划智能体";
     case "general":
       return "通用智能体";
     default:
@@ -2316,6 +2340,84 @@ export function App() {
     [runtimeClient],
   );
 
+  // Desktop 更新：先取当前快照再订阅变更；Main 是唯一 authority，
+  // 推送先到时忽略迟到的 getState 返回，不写入 localStorage。
+  const [desktopUpdateSnapshot, setDesktopUpdateSnapshot] =
+    useState<DesktopUpdateSnapshot | null>(null);
+  const [updateRestartDialogOpen, setUpdateRestartDialogOpen] = useState(false);
+  const [updateInstallBlockedCode, setUpdateInstallBlockedCode] = useState<
+    DesktopUpdateErrorCode | undefined
+  >(undefined);
+  const [updateInstallStarting, setUpdateInstallStarting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let pushReceived = false;
+    const unsubscribe = runtimeClient.onDesktopUpdateStateChanged((snapshot) => {
+      pushReceived = true;
+      if (!cancelled) {
+        setDesktopUpdateSnapshot(snapshot);
+      }
+    });
+    runtimeClient
+      .getDesktopUpdateState()
+      .then((snapshot) => {
+        if (!cancelled && !pushReceived) {
+          setDesktopUpdateSnapshot(snapshot);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [runtimeClient]);
+
+  const sidebarUpdateAction = useMemo(
+    () =>
+      buildSidebarUpdateAction(desktopUpdateSnapshot, {
+        onDownload: () => {
+          void runtimeClient
+            .downloadDesktopUpdate()
+            .then(setDesktopUpdateSnapshot)
+            .catch(() => undefined);
+        },
+        onRestartRequested: () => {
+          setUpdateInstallBlockedCode(undefined);
+          setUpdateRestartDialogOpen(true);
+        },
+        onRetry: (retryFrom) => {
+          const request =
+            retryFrom === "download"
+              ? runtimeClient.downloadDesktopUpdate()
+              : runtimeClient.checkDesktopUpdate();
+          void request.then(setDesktopUpdateSnapshot).catch(() => undefined);
+        },
+      }),
+    [desktopUpdateSnapshot, runtimeClient],
+  );
+
+  const updateInstallBlockedNotice = desktopUpdateInstallBlockedMessage(updateInstallBlockedCode);
+  const updateInstallRetryBlocked =
+    updateInstallBlockedCode === "active_runs" || updateInstallBlockedCode === "shutdown_failed";
+
+  const handleConfirmUpdateRestart = async () => {
+    setUpdateInstallStarting(true);
+    try {
+      const snapshot = await runtimeClient.restartAndInstallDesktopUpdate();
+      setDesktopUpdateSnapshot(snapshot);
+      if (snapshot.phase === "downloaded") {
+        // active_runs / shutdown_failed：留在确认框说明原因，不强制退出、不丢弃任务。
+        setUpdateInstallBlockedCode(snapshot.errorCode);
+        setUpdateInstallStarting(false);
+      }
+      // phase === "installing" 表示清理完成、安装器已接管，App 即将退出。
+    } catch {
+      setUpdateInstallBlockedCode("shutdown_failed");
+      setUpdateInstallStarting(false);
+    }
+  };
+
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
   const [resolvingExternalInteractionId, setResolvingExternalInteractionId] = useState<
@@ -2358,7 +2460,7 @@ export function App() {
   const [appearanceSaving, setAppearanceSaving] = useState(false);
   const [appearanceMessage, setAppearanceMessage] = useState<string | null>(null);
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
-  const profileButtonRef = useRef<HTMLDivElement>(null);
+  const profileButtonRef = useRef<HTMLButtonElement>(null);
   const [contextUsagePanelOpen, setContextUsagePanelOpen] = useState(false);
   const contextUsageTriggerRef = useRef<HTMLButtonElement>(null);
   const contextUsagePanelRef = useRef<HTMLDivElement>(null);
@@ -2450,6 +2552,8 @@ export function App() {
     undefined,
     createProjectFileTabsState,
   );
+  const [deliverablePreview, setDeliverablePreview] =
+    useState<ArtifactPreviewSelection>();
   const [selectedSubagentTaskId, setSelectedSubagentTaskId] = useState<string | undefined>();
   const [openSubagentTaskId, setOpenSubagentTaskId] = useState<string | undefined>();
   const [cancellingSubagentTaskId, setCancellingSubagentTaskId] = useState<string | undefined>();
@@ -2558,6 +2662,7 @@ export function App() {
     setArtifactMediaMetadata({});
     setMediaPreview(null);
     setPinnedMedia(null);
+    setDeliverablePreview(undefined);
   }, [runtimeState.activeThreadId]);
 
   useEffect(() => {
@@ -5586,6 +5691,7 @@ export function App() {
     setExpandedFileComposerIdleMode("full");
     setExpandedFileComposerTrackedRun(undefined);
     dispatchFileWorkspaceTabs({ type: "reset" });
+    setDeliverablePreview(undefined);
     const previousWidth = inspectorWidthBeforeFileWorkspaceRef.current;
     inspectorWidthBeforeFileWorkspaceRef.current = null;
     if (previousWidth !== null) {
@@ -5594,12 +5700,14 @@ export function App() {
   }
 
   function handleOpenProjectFileTab(tab: ProjectFileWorkspaceTab): void {
+    setDeliverablePreview(undefined);
     dispatchFileWorkspaceTabs({ type: "open", tab });
     setFileWorkspaceMode(tab.mode);
     handleShowFileWorkspaceSurface();
   }
 
   function handleActivateProjectFileTab(tab: ProjectFileWorkspaceTab): void {
+    setDeliverablePreview(undefined);
     dispatchFileWorkspaceTabs({ type: "activate", tabId: tab.id });
     setFileWorkspaceMode(tab.mode);
     handleShowFileWorkspaceSurface();
@@ -5612,6 +5720,24 @@ export function App() {
     });
     dispatchFileWorkspaceTabs({ type: "close", tabId });
     setFileWorkspaceMode(activeProjectFileTab(nextState)?.mode ?? "files");
+  }
+
+  function handleOpenDeliverablePreview(
+    file: {
+      artifactId: string;
+      runId: string;
+      title: string;
+    },
+    threadId: string,
+  ): void {
+    setDeliverablePreview({
+      threadId,
+      runId: file.runId,
+      artifactId: file.artifactId,
+      title: file.title,
+    });
+    setPinnedMedia(null);
+    handleOpenFileWorkspace("files");
   }
 
   function handleOpenSubagent(taskId?: string): void {
@@ -6330,29 +6456,6 @@ export function App() {
     }
     if (item.kind === "deliverables") {
       const threadId = runtimeState.activeThreadId ?? runtimeState.threadId;
-      const previewItems: MediaArtifactPreviewItem[] = threadId
-        ? item.files.flatMap((file) => {
-            if (file.fileType !== "image" && file.fileType !== "video") return [];
-            const src = artifactMediaSources[
-              `${threadId}:${file.runId}:${file.artifactId}`
-            ] ?? undefined;
-            if (!src) return [];
-            const sourceKey = `${threadId}:${file.runId}:${file.artifactId}`;
-            return [{
-              id: file.artifactId,
-              kind: file.fileType,
-              title: file.title,
-              alt: file.title,
-              formatLabel: file.extension,
-              sourceKey,
-              request: {
-                threadId,
-                runId: file.runId,
-                artifactId: file.artifactId,
-              },
-            }];
-          })
-        : [];
       return (
         <DeliverableList
           key={key}
@@ -6389,20 +6492,7 @@ export function App() {
                   ? artifactMediaMetadata[mediaSourceKey]
                   : undefined,
               onPreview:
-                isMedia && typeof mediaSourceState === "string"
-                  ? () => openMediaPreview(previewItems, file.artifactId)
-                  : undefined,
-              onMediaError:
-                mediaRequest && mediaSourceKey
-                  ? () => refreshArtifactMediaSource(mediaSourceKey, mediaRequest)
-                  : undefined,
-              onMediaMetadata:
-                mediaSourceKey
-                  ? (metadata: AwakenMediaMetadata) =>
-                      recordArtifactMediaMetadata(mediaSourceKey, metadata)
-                  : undefined,
-              onViewInInspector:
-                typeof mediaSourceState === "string" && mediaRequest && mediaSourceKey
+                isMedia && typeof mediaSourceState === "string" && mediaRequest && mediaSourceKey
                   ? () =>
                       pinMediaInInspector({
                         id: file.artifactId,
@@ -6414,9 +6504,27 @@ export function App() {
                         request: mediaRequest,
                       })
                   : undefined,
+              onMediaError:
+                mediaRequest && mediaSourceKey
+                  ? () => refreshArtifactMediaSource(mediaSourceKey, mediaRequest)
+                  : undefined,
+              onMediaMetadata:
+                mediaSourceKey
+                  ? (metadata: AwakenMediaMetadata) =>
+                      recordArtifactMediaMetadata(mediaSourceKey, metadata)
+                  : undefined,
               opening: openingArtifactId === file.artifactId,
               disabled: !threadId,
               onOpen: threadId
+                ? isMedia
+                  ? () => openArtifactExternally({
+                      threadId,
+                      runId: file.runId,
+                      artifactId: file.artifactId,
+                    })
+                  : () => handleOpenDeliverablePreview(file, threadId)
+                : undefined,
+              onOpenExternal: threadId && !isMedia
                 ? () => openArtifactExternally({
                     threadId,
                     runId: file.runId,
@@ -6814,49 +6922,92 @@ export function App() {
                 fileWorkspaceOpen && inspectorPresentation.available ? (
                   <div className="workbench-chrome-file-mode">
                     <div className="project-files-tabs" role="tablist" aria-label="打开的文件">
-                      {visibleFileWorkspaceTabs.length > 0 ? (
-                        visibleFileWorkspaceTabs.map((tab) => {
-                          const active =
-                            fileWorkspaceTabsAreActive && tab.id === activeFileWorkspaceTab?.id;
-                          const iconKind = projectFileIconKind({
-                            kind: "file",
-                            name: tab.name,
-                          });
-                          return (
-                            <div
-                              key={tab.id}
-                              className={`project-files-tab${active ? " is-active" : ""}`}
-                              role="presentation"
+                      {deliverablePreview ? (() => {
+                        const iconKind = projectFileIconKind({
+                          kind: "file",
+                          name: deliverablePreview.title,
+                        });
+                        return (
+                          <div
+                            className={`project-files-tab${
+                              fileWorkspaceTabsAreActive ? " is-active" : ""
+                            }`}
+                            role="presentation"
+                          >
+                            <button
+                              type="button"
+                              className="project-files-tab__activate"
+                              role="tab"
+                              aria-selected={fileWorkspaceTabsAreActive}
+                              title={deliverablePreview.title}
+                              onClick={handleShowFileWorkspaceSurface}
                             >
-                              <button
-                                type="button"
-                                className="project-files-tab__activate"
-                                role="tab"
-                                aria-selected={active}
-                                title={tab.name}
-                                onClick={() => handleActivateProjectFileTab(tab)}
+                              <span
+                                className="project-files-tab__file-icon"
+                                data-file-icon={iconKind}
                               >
-                                <span
-                                  className="project-files-tab__file-icon"
-                                  data-file-icon={iconKind}
-                                >
-                                  <ProjectFileIcon kind={iconKind} size={16} strokeWidth={1.8} />
-                                </span>
-                                <span className="project-files-tab__label">{tab.name}</span>
-                              </button>
-                              <button
-                                type="button"
-                                className="project-files-tab__close"
-                                aria-label={`关闭 ${tab.name}`}
-                                title={`关闭 ${tab.name}`}
-                                onClick={() => handleCloseProjectFileTab(tab.id)}
+                                <ProjectFileIcon kind={iconKind} size={16} strokeWidth={1.8} />
+                              </span>
+                              <span className="project-files-tab__label">
+                                {deliverablePreview.title}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="project-files-tab__close"
+                              aria-label={`关闭 ${deliverablePreview.title}`}
+                              title={`关闭 ${deliverablePreview.title}`}
+                              onClick={() => setDeliverablePreview(undefined)}
+                            >
+                              <X size={15} strokeWidth={1.9} />
+                            </button>
+                          </div>
+                        );
+                      })() : null}
+                      {visibleFileWorkspaceTabs.map((tab) => {
+                        const active =
+                          !deliverablePreview &&
+                          fileWorkspaceTabsAreActive &&
+                          tab.id === activeFileWorkspaceTab?.id;
+                        const iconKind = projectFileIconKind({
+                          kind: "file",
+                          name: tab.name,
+                        });
+                        return (
+                          <div
+                            key={tab.id}
+                            className={`project-files-tab${active ? " is-active" : ""}`}
+                            role="presentation"
+                          >
+                            <button
+                              type="button"
+                              className="project-files-tab__activate"
+                              role="tab"
+                              aria-selected={active}
+                              title={tab.name}
+                              onClick={() => handleActivateProjectFileTab(tab)}
+                            >
+                              <span
+                                className="project-files-tab__file-icon"
+                                data-file-icon={iconKind}
                               >
-                                <X size={15} strokeWidth={1.9} />
-                              </button>
-                            </div>
-                          );
-                        })
-                      ) : (
+                                <ProjectFileIcon kind={iconKind} size={16} strokeWidth={1.8} />
+                              </span>
+                              <span className="project-files-tab__label">{tab.name}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="project-files-tab__close"
+                              aria-label={`关闭 ${tab.name}`}
+                              title={`关闭 ${tab.name}`}
+                              onClick={() => handleCloseProjectFileTab(tab.id)}
+                            >
+                              <X size={15} strokeWidth={1.9} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {!deliverablePreview && visibleFileWorkspaceTabs.length === 0 ? (
                         <div
                           className={`project-files-tab is-placeholder${
                             fileWorkspaceTabsAreActive ? " is-active" : ""
@@ -6884,7 +7035,7 @@ export function App() {
                             <X size={15} strokeWidth={1.9} />
                           </button>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                     {fileWorkspaceExpandedActive ? (
                       <Tooltip label="收起面板" placement="bottom">
@@ -7004,6 +7155,7 @@ export function App() {
                 onNewTask={handleNewTask}
                 onProfileClick={() => setProfilePopoverOpen(true)}
                 profileButtonRef={profileButtonRef}
+                profileUpdateAction={sidebarUpdateAction}
               />
             </WorkbenchSidebarFrame>
           }
@@ -7434,8 +7586,12 @@ export function App() {
                         folders={fileWorkspaceFolders}
                         initialMode={fileWorkspaceMode}
                         activeTab={activeFileWorkspaceTab}
+                        artifactPreview={deliverablePreview}
                         expanded={fileWorkspaceExpandedActive}
-                        onWorkspaceModeChange={setFileWorkspaceMode}
+                        onWorkspaceModeChange={(mode) => {
+                          setFileWorkspaceMode(mode);
+                          if (mode === "browser") setDeliverablePreview(undefined);
+                        }}
                         onOpenTab={handleOpenProjectFileTab}
                         onExpand={handleExpandFileWorkspace}
                         onPreviewPrimaryClick={handleExpandedFilePreviewPrimaryClick}
@@ -7523,6 +7679,9 @@ export function App() {
                               <div>
                                 <span className="subagent-inspector__eyebrow">
                                   {subagentAgentTypeLabel(selectedSubagent.agentType)}
+                                  {subagentWorkspaceModeLabel(selectedSubagent.workspaceMode)
+                                    ? ` · ${subagentWorkspaceModeLabel(selectedSubagent.workspaceMode)}`
+                                    : ""}
                                 </span>
                                 <h3>{selectedSubagent.description}</h3>
                               </div>
@@ -7846,6 +8005,56 @@ export function App() {
         }}
         onClose={() => setProfilePopoverOpen(false)}
       />
+      <Dialog
+        open={updateRestartDialogOpen}
+        title="重启以完成更新"
+        onOpenChange={(open) => {
+          if (!open && !updateInstallStarting) {
+            // “稍后”只关闭确认框；Main 仍保持 downloaded，侧栏保留重启入口。
+            setUpdateRestartDialogOpen(false);
+            setUpdateInstallBlockedCode(undefined);
+          }
+        }}
+        footer={
+          <>
+            <Button
+              variant="default"
+              size="md"
+              disabled={updateInstallStarting}
+              onClick={() => {
+                setUpdateRestartDialogOpen(false);
+                setUpdateInstallBlockedCode(undefined);
+              }}
+            >
+              稍后
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              loading={updateInstallStarting}
+              disabled={updateInstallStarting || updateInstallRetryBlocked}
+              onClick={() => {
+                void handleConfirmUpdateRestart();
+              }}
+            >
+              立即重启
+            </Button>
+          </>
+        }
+      >
+        <div className="desktop-update-dialog-body">
+          <p>
+            当前版本 v{desktopUpdateSnapshot?.currentVersion ?? "--"}，将更新到 v
+            {desktopUpdateSnapshot?.availableVersion ?? "--"}。
+          </p>
+          {desktopUpdateSnapshot?.releaseName ? (
+            <p>{desktopUpdateSnapshot.releaseName}</p>
+          ) : null}
+          {updateInstallBlockedNotice ? (
+            <p role="alert">{updateInstallBlockedNotice}</p>
+          ) : null}
+        </div>
+      </Dialog>
     </>
   );
 }

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"awaken/src/acp"
 	"awaken/src/agentcore"
@@ -477,7 +478,22 @@ func (h runHandlers) handleGetSubagent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h runHandlers) handleMessageSubagent(w http.ResponseWriter, r *http.Request) {
-	writeErrorJSON(w, http.StatusConflict, subagentruntime.ErrorNotRunning, "subagent messages are not available in phase 1")
+	var request struct {
+		Content        string `json:"content"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := decodeJSON(r, &request); err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, subagentruntime.ErrorInvalidInput, err.Error())
+			return
+		}
+	}
+	receipt, err := h.runService.MessageSubagent(r.Context(), r.PathValue("run_id"), r.PathValue("task_id"), request.Content, request.IdempotencyKey)
+	if err != nil {
+		h.writeSubagentError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"receipt": receipt})
 }
 
 func (h runHandlers) handleCancelSubagent(w http.ResponseWriter, r *http.Request) {
@@ -509,7 +525,7 @@ func (h runHandlers) writeSubagentError(w http.ResponseWriter, err error) {
 		writeErrorJSON(w, http.StatusNotFound, code, err.Error())
 	case subagentruntime.ErrorInvalidInput:
 		writeErrorJSON(w, http.StatusBadRequest, code, err.Error())
-	case subagentruntime.ErrorNotRunning:
+	case subagentruntime.ErrorNotRunning, subagentruntime.ErrorIdempotency:
 		writeErrorJSON(w, http.StatusConflict, code, err.Error())
 	default:
 		if code == "" {
@@ -610,6 +626,28 @@ func handleRuntimeInfo(w http.ResponseWriter, r *http.Request, provider RuntimeI
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+type runtimeActivityResponse struct {
+	ActiveRunCount     int    `json:"active_run_count"`
+	CancellingRunCount int    `json:"cancelling_run_count"`
+	ObservedAt         string `json:"observed_at"`
+}
+
+// handleRuntimeActivity reports a read-only snapshot of in-flight runs so
+// Desktop Main can gate exit/maintenance operations (e.g. update restarts).
+func handleRuntimeActivity(w http.ResponseWriter, r *http.Request, runService *awruntime.RunService) {
+	if runService == nil {
+		http.Error(w, "runtime activity unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	snapshot := runService.ActivitySnapshot()
+	writeJSON(w, http.StatusOK, runtimeActivityResponse{
+		ActiveRunCount:     snapshot.Active,
+		CancellingRunCount: snapshot.Cancelling,
+		ObservedAt:         time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

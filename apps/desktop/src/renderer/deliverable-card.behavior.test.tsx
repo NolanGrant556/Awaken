@@ -22,6 +22,7 @@ describe("deliverable card behavior", () => {
 
   it("mounts the reveal menu beside the card so local clipping boundaries can reposition it", () => {
     const onReveal = vi.fn();
+    const onOpenExternal = vi.fn();
     act(() => {
       root.render(
         <AwakenDeliverableCard
@@ -29,6 +30,7 @@ describe("deliverable card behavior", () => {
           extension="pdf"
           fileType="pdf"
           onOpen={() => undefined}
+          onOpenExternal={onOpenExternal}
           onReveal={onReveal}
         />,
       );
@@ -45,7 +47,12 @@ describe("deliverable card behavior", () => {
     expect(menu?.closest(".aw-deliverable-card-menu")).not.toBeNull();
     expect(menu?.classList.contains("aw-popover__floating")).toBe(true);
 
-    const reveal = host.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    const actions = host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
+    expect(actions).toHaveLength(2);
+    act(() => actions[0]?.click());
+    expect(onOpenExternal).toHaveBeenCalledTimes(1);
+    act(() => trigger?.click());
+    const reveal = host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[1];
     act(() => reveal?.click());
     expect(onReveal).toHaveBeenCalledTimes(1);
     expect(host.querySelector('[role="menu"]')).toBeNull();

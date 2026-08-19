@@ -38,6 +38,7 @@ export type AwakenDeliverableCardProps = {
   onMediaMetadata?: (metadata: AwakenMediaMetadata) => void;
   onViewInInspector?: () => void;
   onOpen?: () => void;
+  onOpenExternal?: () => void;
   onReveal?: () => void;
   localOpenLabel?: string;
   revealLabel?: string;
@@ -110,6 +111,7 @@ export function AwakenDeliverableCard({
   onMediaMetadata,
   onViewInInspector,
   onOpen,
+  onOpenExternal,
   onReveal,
   localOpenLabel,
   revealLabel,
@@ -162,7 +164,7 @@ export function AwakenDeliverableCard({
         className="aw-deliverable-card-open"
         onClick={onOpen}
         disabled={!canOpen}
-        aria-label={opening ? `正在打开 ${title}` : `打开 ${title}`}
+        aria-label={opening ? `正在打开 ${title}` : `在右侧栏预览 ${title}`}
       >
         <span className="aw-deliverable-card-document" aria-hidden="true">
           <FileTypeIcon fileType={fileType} />
@@ -184,7 +186,7 @@ export function AwakenDeliverableCard({
         ) : null}
       </button>
 
-      {onReveal ? (
+      {onOpenExternal || onReveal ? (
         <div className="aw-deliverable-card-menu">
           <AwakenPopover
             trigger={
@@ -200,17 +202,32 @@ export function AwakenDeliverableCard({
             }
             content={
               <div className="aw-deliverable-card-menu-popover">
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onReveal();
-                  }}
-                  disabled={disabled}
-                >
-                  {revealLabel || "在 Finder/资源管理器中显示"}
-                </button>
+                {onOpenExternal ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onOpenExternal();
+                    }}
+                    disabled={disabled || opening}
+                  >
+                    {localOpenLabel || "使用本地应用打开"}
+                  </button>
+                ) : null}
+                {onReveal ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onReveal();
+                    }}
+                    disabled={disabled}
+                  >
+                    {revealLabel || "在 Finder/资源管理器中显示"}
+                  </button>
+                ) : null}
               </div>
             }
             open={menuOpen}

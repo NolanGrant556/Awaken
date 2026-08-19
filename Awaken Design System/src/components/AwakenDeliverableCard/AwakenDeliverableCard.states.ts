@@ -24,7 +24,7 @@ export const AwakenDeliverableCardStates: AwakenDeliverableCardState[] = [
   {
     id: "pdf-ready",
     name: "PDF 已就绪",
-    description: "显式发布的 PDF 使用专用图标，并由整张卡片打开。",
+    description: "显式发布的 PDF 使用专用图标，并由整张卡片进入右侧预览。",
     props: {
       title: "风险分析报告.pdf",
       extension: ".pdf",
@@ -36,7 +36,7 @@ export const AwakenDeliverableCardStates: AwakenDeliverableCardState[] = [
   {
     id: "pdf-opening",
     name: "PDF 打开中",
-    description: "PDF 正在交给系统默认应用。",
+    description: "PDF 正在通过更多菜单交给系统默认应用。",
     props: {
       title: "风险分析报告.pdf",
       extension: "pdf",
@@ -48,7 +48,7 @@ export const AwakenDeliverableCardStates: AwakenDeliverableCardState[] = [
   {
     id: "image-ready",
     name: "图片已就绪",
-    description: "最终交付图片使用独立紧凑卡片，单击进入预览。",
+    description: "最终交付图片使用独立紧凑卡片，单击进入右侧查看器。",
     props: {
       title: "生成的主视觉.png",
       extension: "png",

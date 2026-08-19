@@ -302,6 +302,23 @@ func (m *RecallManager) EndTurn() {
 	m.promotedReceipts = nil
 }
 
+func (m *RecallManager) Snapshot(workspaceRoot string) RecallSnapshot {
+	if m == nil {
+		return RecallSnapshot{WorkspaceRoot: workspaceRoot}
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	items := make([]RecallSnapshotItem, 0, len(m.records))
+	for _, record := range m.records {
+		content := formatRecallRecord(record)
+		items = append(items, RecallSnapshotItem{
+			MemoryID: record.MemoryID, Scope: string(record.Scope), Type: string(record.Type),
+			Revision: record.Revision, Bytes: len([]byte(content)), Content: content,
+		})
+	}
+	return RecallSnapshot{WorkspaceRoot: workspaceRoot, Items: items}
+}
+
 func (m *RecallManager) Receipts() []RecallReceipt {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

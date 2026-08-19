@@ -171,6 +171,112 @@ func TestRuntimeInfoEndpoint(t *testing.T) {
 	}
 }
 
+func TestRuntimeActivityEndpoint(t *testing.T) {
+	t.Run("unavailable without run service", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/runtime/activity", nil)
+		rec := httptest.NewRecorder()
+
+		NewRouter(nil, nil).ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("expected 503, got %d", rec.Code)
+		}
+	})
+
+	t.Run("reports in-flight run counts", func(t *testing.T) {
+		started := make(chan struct{})
+		release := make(chan struct{})
+		runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+			return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				close(started)
+				// Ignore ctx so the session stays observable in cancelling
+				// state until release; cancellation wins over the late return.
+				<-release
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "too late"})
+				return "too late", nil
+			})
+		})
+
+		ts := httptest.NewServer(NewRouter(runService, nil))
+		defer ts.Close()
+
+		getActivity := func(t *testing.T) runtimeActivityResponse {
+			t.Helper()
+			resp, err := http.Get(ts.URL + "/v1/runtime/activity")
+			if err != nil {
+				t.Fatalf("GET /v1/runtime/activity failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("expected 200, got %d", resp.StatusCode)
+			}
+			if got := resp.Header.Get("Content-Type"); !strings.Contains(got, "application/json") {
+				t.Fatalf("expected json content type, got %q", got)
+			}
+			var activity runtimeActivityResponse
+			if err := json.NewDecoder(resp.Body).Decode(&activity); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if activity.ObservedAt == "" {
+				t.Fatalf("expected observed_at to be set, got %+v", activity)
+			}
+			if _, err := time.Parse(time.RFC3339, activity.ObservedAt); err != nil {
+				t.Fatalf("expected RFC3339 observed_at, got %q", activity.ObservedAt)
+			}
+			return activity
+		}
+
+		if activity := getActivity(t); activity.ActiveRunCount != 0 || activity.CancellingRunCount != 0 {
+			t.Fatalf("expected zero activity before runs, got %+v", activity)
+		}
+
+		resp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(`{"input":"hello","workspace":{"workspace_root":"/tmp/awaken-test-workspace"}}`))
+		if err != nil {
+			t.Fatalf("POST /v1/runs failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected 201, got %d", resp.StatusCode)
+		}
+		var created awruntime.Run
+		if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+			t.Fatalf("failed to decode create response: %v", err)
+		}
+		<-started
+
+		if activity := getActivity(t); activity.ActiveRunCount != 1 || activity.CancellingRunCount != 0 {
+			t.Fatalf("expected active=1 cancelling=0 for running run, got %+v", activity)
+		}
+
+		cancelResp, err := http.Post(ts.URL+"/v1/runs/"+created.RunID+"/cancel", "application/json", nil)
+		if err != nil {
+			t.Fatalf("POST /cancel failed: %v", err)
+		}
+		defer cancelResp.Body.Close()
+		if cancelResp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 from cancel, got %d", cancelResp.StatusCode)
+		}
+
+		if activity := getActivity(t); activity.ActiveRunCount != 1 || activity.CancellingRunCount != 1 {
+			t.Fatalf("expected active=1 cancelling=1 for cancelling run, got %+v", activity)
+		}
+
+		close(release)
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			activity := getActivity(t)
+			if activity.ActiveRunCount == 0 && activity.CancellingRunCount == 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("expected zero activity after run finished, got %+v", activity)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	})
+}
+
 func TestModelProvidersEndpoint(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/model-providers", nil)
 	rec := httptest.NewRecorder()

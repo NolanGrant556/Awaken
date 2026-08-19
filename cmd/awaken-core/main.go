@@ -160,6 +160,23 @@ func main() {
 						recallManager.ResetAfterCompaction()
 					}
 				},
+				CaptureMemoryRecallSnapshot: func() *agentcore.MemoryRecallSnapshot {
+					if recallManager == nil {
+						return nil
+					}
+					snapshot := recallManager.Snapshot(workspaceRoot)
+					if len(snapshot.Items) == 0 {
+						return nil
+					}
+					items := make([]agentcore.MemoryRecallSnapshotItem, 0, len(snapshot.Items))
+					for _, item := range snapshot.Items {
+						items = append(items, agentcore.MemoryRecallSnapshotItem{
+							MemoryID: item.MemoryID, Scope: item.Scope, Type: item.Type,
+							Revision: item.Revision, Bytes: item.Bytes, Content: item.Content,
+						})
+					}
+					return &agentcore.MemoryRecallSnapshot{WorkspaceRoot: snapshot.WorkspaceRoot, Items: items}
+				},
 				Workspace: agentcore.WorkspaceConfig{
 					ScopeID:                 workspace.ScopeID,
 					ProjectID:               workspace.ProjectID,

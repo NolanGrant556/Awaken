@@ -802,6 +802,40 @@ func (s *RunService) ActiveRunCount() int {
 	return count
 }
 
+// RunActivitySnapshot reports how many runs are currently in flight. Active
+// counts every thread with an active run, including runs that are already
+// being cancelled; Cancelling counts the subset whose session status is
+// RunStatusCancelling. Native sub-runs execute inside their parent's active
+// run and are not counted separately.
+type RunActivitySnapshot struct {
+	Active     int
+	Cancelling int
+}
+
+// ActivitySnapshot returns the current in-flight run counts across all run
+// sources (normal, scheduled and ACP runs all go through StartRun).
+func (s *RunService) ActivitySnapshot() RunActivitySnapshot {
+	s.mu.RLock()
+	var snapshot RunActivitySnapshot
+	sessions := make([]*Session, 0, len(s.threads))
+	for _, thread := range s.threads {
+		if thread.activeRunID == "" {
+			continue
+		}
+		snapshot.Active++
+		if session := s.sessions[thread.activeRunID]; session != nil {
+			sessions = append(sessions, session)
+		}
+	}
+	s.mu.RUnlock()
+	for _, session := range sessions {
+		if session.Snapshot().Status == RunStatusCancelling {
+			snapshot.Cancelling++
+		}
+	}
+	return snapshot
+}
+
 func (s *RunService) closeAndEvictDeletedThread(threadID string) error {
 	s.mu.RLock()
 	thread := s.threads[threadID]
@@ -1332,8 +1366,11 @@ func (s *RunService) bindSubagentController(
 	if agent == nil || session == nil {
 		return
 	}
+	agentConfig := agent.GetConfig()
 	controller := subagentruntime.NewManager(ctx, subagentruntime.Config{
 		MaxTasks: 8, MaxConcurrent: 4, ModelProfileID: strings.TrimSpace(modelProfileID),
+		ParentWorkspaceRoot: agentConfig.Workspace.Root,
+		ParentWritableRoots: append([]string(nil), agentConfig.Workspace.WritableRoots...),
 		Starter: func(childCtx context.Context, request subagentruntime.StartRequest) (string, error) {
 			return agent.RunNativeSubagent(childCtx, request, sessionEventSink{session: session})
 		},
@@ -1345,7 +1382,7 @@ func (s *RunService) bindSubagentController(
 			snapshot := event.Snapshot
 			record := agentcore.NewSemanticRecord(
 				agentcore.SemanticKind(event.Kind), snapshot.ThreadID, snapshot.RunID,
-				snapshot.TurnID, snapshot.ParentToolCallID, "", subagentSemanticPayload(snapshot),
+				snapshot.TurnID, snapshot.ParentToolCallID, "", agentcore.PersistSubagentPayload(event),
 			)
 			if err := recorder.Append(persistCtx, record); err != nil {
 				return err
@@ -1398,6 +1435,7 @@ func subagentSemanticPayload(snapshot subagentruntime.TaskSnapshot) map[string]a
 		"total_tokens":   snapshot.TotalTokens,
 		"result_preview": snapshot.ResultPreview, "error_code": snapshot.ErrorCode,
 		"error_message": snapshot.ErrorMessage, "side_effect_state": snapshot.SideEffectState,
+		"worktree":    snapshot.Worktree,
 		"created_at":  subagentTimeString(snapshot.CreatedAt),
 		"started_at":  subagentOptionalTimeString(snapshot.StartedAt),
 		"finished_at": subagentOptionalTimeString(snapshot.FinishedAt),
@@ -2166,6 +2204,21 @@ func (s *RunService) GetSubagent(runID, taskID string) (subagentruntime.TaskSnap
 		return subagentruntime.TaskSnapshot{}, &subagentruntime.Error{Code: subagentruntime.ErrorNotFound, Message: "subagent task not found"}
 	}
 	return controller.Status(taskID)
+}
+
+func (s *RunService) MessageSubagent(ctx context.Context, runID, taskID, content, idempotencyKey string) (subagentruntime.MessageReceipt, error) {
+	session, err := s.session(runID)
+	if err != nil {
+		return subagentruntime.MessageReceipt{}, err
+	}
+	controller := session.SubagentController()
+	if controller == nil {
+		return subagentruntime.MessageReceipt{}, &subagentruntime.Error{Code: subagentruntime.ErrorNotFound, Message: "subagent task not found"}
+	}
+	if manager, ok := controller.(*subagentruntime.Manager); ok {
+		return manager.MessageIdempotent(ctx, taskID, content, idempotencyKey)
+	}
+	return controller.Message(ctx, taskID, content)
 }
 
 func (s *RunService) CancelSubagent(ctx context.Context, runID, taskID, reason string) (subagentruntime.TaskSnapshot, error) {

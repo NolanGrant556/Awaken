@@ -15,6 +15,7 @@ import {
   type ArtifactOpenRequest,
   type ArtifactOpenResult,
   type ArtifactMediaSourceResult,
+  type ArtifactPreviewStartRequest,
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
@@ -64,6 +65,8 @@ import {
   type ProjectFilePreviewActionRequest,
   type ProjectFilePreviewActionResult,
   type ProjectFilePreviewCloseRequest,
+  type ProjectFilePreviewSaveRequest,
+  type ProjectFilePreviewSaveResult,
   type ProjectFilePreviewStartRequest,
   type ProjectFilePreviewStartResult,
   type ProjectMutationResult,
@@ -105,6 +108,7 @@ import {
   type WorkspacePickResult,
   type WorkspaceValidationResult,
 } from "../../shared/runtime";
+import type { DesktopUpdateSnapshot } from "../../shared/desktop-update";
 import type { ProjectFilePreviewInteraction } from "../../shared/project-file-preview-interaction";
 import type {
   PetActivitySnapshot,
@@ -277,6 +281,9 @@ export type RuntimeClient = {
   startProjectFilePreview: (
     request: ProjectFilePreviewStartRequest,
   ) => Promise<ProjectFilePreviewStartResult>;
+  startArtifactPreview: (
+    request: ArtifactPreviewStartRequest,
+  ) => Promise<ProjectFilePreviewStartResult>;
   closeProjectFilePreview: (request: ProjectFilePreviewCloseRequest) => Promise<void>;
   onProjectFilePreviewInteraction: (
     handler: (interaction: ProjectFilePreviewInteraction) => void,
@@ -287,6 +294,9 @@ export type RuntimeClient = {
   revealProjectFile: (
     request: ProjectFilePreviewActionRequest,
   ) => Promise<ProjectFilePreviewActionResult>;
+  saveProjectMarkdownFile: (
+    request: ProjectFilePreviewSaveRequest,
+  ) => Promise<ProjectFilePreviewSaveResult>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
   createProject: (
     folders: ProjectFolderSelection[],
@@ -314,6 +324,12 @@ export type RuntimeClient = {
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   cancelSubagent?: (runId: string, taskId: string, reason?: string) => Promise<void>;
+  messageSubagent?: (
+    runId: string,
+    taskId: string,
+    content: string,
+    idempotencyKey?: string,
+  ) => Promise<void>;
   answerUserQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
   resolveExternalInteraction: (
     runId: string,
@@ -393,6 +409,11 @@ export type RuntimeClient = {
   getSystemTimezone: () => Promise<string>;
   subscribeScheduledTaskEvents: (handler: (event: ScheduledTaskEvent) => void) => () => void;
   onScheduledTaskThreadActivation: (handler: (threadId: string) => void) => () => void;
+  getDesktopUpdateState: () => Promise<DesktopUpdateSnapshot>;
+  checkDesktopUpdate: () => Promise<DesktopUpdateSnapshot>;
+  downloadDesktopUpdate: () => Promise<DesktopUpdateSnapshot>;
+  restartAndInstallDesktopUpdate: () => Promise<DesktopUpdateSnapshot>;
+  onDesktopUpdateStateChanged: (handler: (snapshot: DesktopUpdateSnapshot) => void) => () => void;
   listPets: () => Promise<PetSummary[]>;
   getPetSettings: () => Promise<PetSettings>;
   selectPet: (petId: string) => Promise<PetSettings>;
@@ -511,10 +532,12 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     copyProjectEntryPath: (request) => bridge.copyProjectEntryPath(request),
     openProjectEntryWith: (request) => bridge.openProjectEntryWith(request),
     startProjectFilePreview: (request) => bridge.startProjectFilePreview(request),
+    startArtifactPreview: (request) => bridge.startArtifactPreview(request),
     closeProjectFilePreview: (request) => bridge.closeProjectFilePreview(request),
     onProjectFilePreviewInteraction: (handler) => bridge.onProjectFilePreviewInteraction(handler),
     openProjectFileExternally: (request) => bridge.openProjectFileExternally(request),
     revealProjectFile: (request) => bridge.revealProjectFile(request),
+    saveProjectMarkdownFile: (request) => bridge.saveProjectMarkdownFile(request),
     upsertProject: (workspaceRoot, displayName) => bridge.upsertProject(workspaceRoot, displayName),
     createProject: (folders, displayName) => bridge.createProject(folders, displayName),
     attachProjectFolder: (projectId, path) => bridge.attachProjectFolder(projectId, path),
@@ -535,6 +558,10 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     cancelRun: bridge.cancelRun,
     cancelSubagent: bridge.cancelSubagent
       ? (runId, taskId, reason) => bridge.cancelSubagent!(runId, taskId, reason)
+      : undefined,
+    messageSubagent: bridge.messageSubagent
+      ? (runId, taskId, content, idempotencyKey) =>
+          bridge.messageSubagent!(runId, taskId, content, idempotencyKey)
       : undefined,
     answerUserQuestion: bridge.answerUserQuestion,
     resolveExternalInteraction: bridge.resolveExternalInteraction,
@@ -690,6 +717,11 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getSystemTimezone: () => bridge.getSystemTimezone(),
     subscribeScheduledTaskEvents: (handler) => bridge.subscribeScheduledTaskEvents(handler),
     onScheduledTaskThreadActivation: (handler) => bridge.onScheduledTaskThreadActivation(handler),
+    getDesktopUpdateState: () => bridge.getDesktopUpdateState(),
+    checkDesktopUpdate: () => bridge.checkDesktopUpdate(),
+    downloadDesktopUpdate: () => bridge.downloadDesktopUpdate(),
+    restartAndInstallDesktopUpdate: () => bridge.restartAndInstallDesktopUpdate(),
+    onDesktopUpdateStateChanged: (handler) => bridge.onDesktopUpdateStateChanged(handler),
     listPets: () => bridge.listPets(),
     getPetSettings: () => bridge.getPetSettings(),
     selectPet: (petId) => bridge.selectPet(petId),

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Session, WebContents, WebPreferences } from "electron";
-import type { RuntimeProject } from "../shared/runtime.js";
+import type { RuntimeProject, RuntimeThreadTranscript } from "../shared/runtime.js";
 import { ProjectFilePreviewManager } from "./project-file-preview-manager.js";
 import { MAX_TEXT_PREVIEW_BYTES } from "./project-file-preview-policy.js";
 
@@ -65,13 +65,17 @@ function fakeSession(): FakeSession {
   return fake;
 }
 
-function createManager(root: string) {
+function createManager(root: string, transcript?: RuntimeThreadTranscript) {
   const defaultSession = fakeSession();
   const previewSessions = new Map<string, FakeSession>();
   const openExternal = vi.fn(async () => undefined);
   const onPreviewInteraction = vi.fn();
   const manager = new ProjectFilePreviewManager({
     getProjects: async () => [project(root)],
+    getTranscript: async () => {
+      if (!transcript) throw new Error("missing transcript fixture");
+      return transcript;
+    },
     runtimePaths: {
       packaged: false,
       resourcesPath: root,
@@ -107,6 +111,52 @@ afterEach(async () => {
 });
 
 describe("ProjectFilePreviewManager", () => {
+  it("previews a recorded deliverable through its durable artifact identity", async () => {
+    const root = await temporaryRoot();
+    await fs.writeFile(path.join(root, "delivery.md"), "# Delivery\n");
+    const transcript = {
+      thread: {
+        threadId: "thread-1",
+        workspace: { workspaceRoot: root },
+      },
+      runs: [
+        {
+          run: { runId: "run-1", status: "finished" },
+          events: [
+            {
+              type: "AWAKEN_ARTIFACT_CREATED",
+              artifactId: "artifact-1",
+              artifactPath: "delivery.md",
+              artifactTitle: "Delivery",
+              artifactKind: "document",
+              artifactStatus: "ready",
+              artifactRole: "deliverable",
+              artifactContractVersion: 2,
+              artifactProducer: "artifact_publish",
+            },
+          ],
+        },
+      ],
+    } as unknown as RuntimeThreadTranscript;
+    const { manager } = createManager(root, transcript);
+
+    await expect(
+      manager.startArtifact({
+        requestId: "artifact-preview-1",
+        threadId: "thread-1",
+        runId: "run-1",
+        artifactId: "artifact-1",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      preview: {
+        kind: "markdown",
+        transport: "text",
+        content: "# Delivery\n",
+      },
+    });
+  });
+
   it("returns bounded text through typed IPC and rejects a file just over the limit", async () => {
     const root = await temporaryRoot();
     await fs.writeFile(path.join(root, "README.md"), "# Project\n");
@@ -372,6 +422,78 @@ describe("ProjectFilePreviewManager", () => {
       previewId: result.preview.previewId,
       type: "primary-click",
     });
+    manager.dispose();
+  });
+
+  it("saves Markdown in place and rejects every other preview kind", async () => {
+    const root = await temporaryRoot();
+    await fs.writeFile(path.join(root, "README.md"), "# Project\n");
+    await fs.writeFile(path.join(root, "notes.txt"), "plain\n");
+    await fs.writeFile(path.join(root, "index.html"), "<p>hi</p>\n");
+    const { manager } = createManager(root);
+    const request = {
+      projectId: "project-1",
+      folderPath: root,
+    };
+
+    await expect(
+      manager.saveMarkdown({
+        ...request,
+        relativePath: "README.md",
+        content: "# Updated\n",
+      }),
+    ).resolves.toEqual({ ok: true, byteLength: Buffer.byteLength("# Updated\n") });
+    await expect(fs.readFile(path.join(root, "README.md"), "utf8")).resolves.toBe(
+      "# Updated\n",
+    );
+    await expect(
+      manager.saveMarkdown({
+        ...request,
+        relativePath: "notes.txt",
+        content: "changed\n",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "UNSUPPORTED_FILE_TYPE",
+    });
+    await expect(fs.readFile(path.join(root, "notes.txt"), "utf8")).resolves.toBe(
+      "plain\n",
+    );
+    await expect(
+      manager.saveMarkdown({
+        ...request,
+        relativePath: "index.html",
+        content: "<p>no</p>\n",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "UNSUPPORTED_FILE_TYPE",
+    });
+    await expect(
+      manager.saveMarkdown({
+        ...request,
+        relativePath: "missing.md",
+        content: "# New\n",
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "FILE_NOT_FOUND",
+    });
+    await expect(fs.access(path.join(root, "missing.md"))).rejects.toThrow();
+    await expect(
+      manager.saveMarkdown({
+        ...request,
+        relativePath: "README.md",
+        content: "x".repeat(MAX_TEXT_PREVIEW_BYTES + 1),
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      code: "FILE_TOO_LARGE",
+      limitBytes: MAX_TEXT_PREVIEW_BYTES,
+    });
+    await expect(fs.readFile(path.join(root, "README.md"), "utf8")).resolves.toBe(
+      "# Updated\n",
+    );
     manager.dispose();
   });
 });

@@ -200,10 +200,19 @@ function createMockRuntimeClient(): RuntimeClient {
       code: "UNSUPPORTED_FILE_TYPE" as const,
       message: "unsupported",
     })),
+    startArtifactPreview: vi.fn(async () => ({
+      ok: false as const,
+      code: "UNSUPPORTED_FILE_TYPE" as const,
+      message: "unsupported",
+    })),
     closeProjectFilePreview: vi.fn(async () => undefined),
     onProjectFilePreviewInteraction: vi.fn(() => () => {}),
     openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
     revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+    saveProjectMarkdownFile: vi.fn(async () => ({
+      ok: true as const,
+      byteLength: 0,
+    })),
     upsertProject: vi.fn(async () => ({}) as never),
     reorderProjects: vi.fn(async () => ({}) as never),
     detachProject: vi.fn(async () => ({}) as never),
@@ -415,6 +424,19 @@ function createMockRuntimeClient(): RuntimeClient {
     getSystemTimezone: vi.fn(async () => "UTC"),
     subscribeScheduledTaskEvents: vi.fn(() => () => {}),
     onScheduledTaskThreadActivation: vi.fn(() => () => {}),
+    getDesktopUpdateState: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    checkDesktopUpdate: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    downloadDesktopUpdate: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    restartAndInstallDesktopUpdate: vi.fn(async () => {
+      throw new Error("not implemented");
+    }),
+    onDesktopUpdateStateChanged: vi.fn(() => () => {}),
   } satisfies RuntimeClient;
 }
 

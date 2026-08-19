@@ -13,11 +13,14 @@ import type {
   RunAction,
   RunNarrativeItem,
   RunNarrativeState,
+  RunPlanNarrativeSnapshot,
+  RunPlanStepStatus,
   SubagentNarrativeTask,
 } from "./types";
 import { describeGlobPattern } from "./tool-display";
 
 const MAX_SEEN_EVENTS = 1000;
+const MAX_RUN_PLAN_RECEIPT_TOOL_IDS = 200;
 const READ_ONLY_TOOL_NAMES = new Set(["Read", "Glob", "Grep", "WebSearch"]);
 const MEDIA_TOOL_NAMES = new Set(["image_generate", "video_generate"]);
 
@@ -26,6 +29,8 @@ export function createInitialRunNarrativeState(): RunNarrativeState {
     committedItems: [],
     seenEventKeys: [],
     replayedItemIds: [],
+    runPlanSnapshotsByRunId: {},
+    runPlanReceiptToolIds: [],
   };
 }
 
@@ -406,23 +411,35 @@ export function projectAguiEventToNarrative(
     case "AWAKEN_SUBAGENT_ACTIVITY":
     case "AWAKEN_SUBAGENT_MESSAGE_QUEUED":
       return upsertSubagentGroup(base, event);
+    case "AWAKEN_PLAN_UPDATED":
+      return recordRunPlanSnapshot(base, event);
     case "RUN_FINISHED":
-      return markLatestAnswerFinal(commitActive(base, "done"), event);
+      return markLatestAnswerFinal(
+        commitActive(projectTerminalRunPlan(base, event), "done"),
+        event,
+      );
     case "RUN_ERROR":
       if (event.code === "RUN_CANCELLED") {
-        return commitRunCancelledHint(base, event, "你停止了生成本次回答");
+        return commitRunCancelledHint(
+          projectTerminalRunPlan(base, event),
+          event,
+          "你停止了生成本次回答",
+        );
       }
-      return commitErrorAnswer(base, event);
+      return commitErrorAnswer(projectTerminalRunPlan(base, event), event);
     case "RUN_STATUS_CHANGED":
       if (event.status === "cancelled") {
         return commitRunCancelledHint(
-          base,
+          projectTerminalRunPlan(base, event),
           event,
           event.message || "你停止生成了本次回答",
         );
       }
       if (event.status === "finished") {
-        return markLatestAnswerFinal(commitActive(base, "done"), event);
+        return markLatestAnswerFinal(
+          commitActive(projectTerminalRunPlan(base, event), "done"),
+          event,
+        );
       }
       return base;
     case "AWAKEN_SCHEDULED_NOTICE":
@@ -645,6 +662,119 @@ function commitDreamReceipt(
   return {
     ...state,
     committedItems: upsertCommitted(state.committedItems, item),
+  };
+}
+
+function runPlanStepStatus(value?: string): RunPlanStepStatus {
+  return value === "in_progress" || value === "completed"
+    ? value
+    : "pending";
+}
+
+/**
+ * Records the latest full plan snapshot of a run and removes the generic
+ * Tool row of the successful update_plan call that produced this receipt
+ * (contract §8.2: the typed plan projection owns that row). Live frames never
+ * create a turn-body item; the snapshot becomes a `runPlan` item only at run
+ * terminal via projectTerminalRunPlan. Version-upsert mirrors the reducer
+ * slice: same planId needs a strictly higher version to replace, a different
+ * planId is a new plan in the same run.
+ */
+function recordRunPlanSnapshot(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
+  const planId = event.planId?.trim();
+  // Plan snapshots are run-scoped like the reducer slice; a frame without a
+  // resolvable runId (after reducer scoping) is dropped, never keyed by
+  // thread.
+  const runId = event.runId?.trim();
+  if (!planId || !runId || !Array.isArray(event.planItems)) {
+    return state;
+  }
+  const version = event.planVersion ?? 0;
+  const previous = state.runPlanSnapshotsByRunId[runId];
+  const replaceSnapshot =
+    !previous || previous.planId !== planId || version > previous.version;
+  const snapshot: RunPlanNarrativeSnapshot = {
+    planId,
+    version,
+    explanation: event.planExplanation?.trim() || undefined,
+    items: event.planItems.map((item) => ({
+      step: item.step,
+      activeForm: item.activeForm,
+      status: runPlanStepStatus(item.status),
+    })),
+    completedCount: event.planCompletedCount ?? 0,
+    totalCount: event.planTotalCount ?? event.planItems.length,
+  };
+
+  // A plan receipt is the single user-facing owner for this update_plan
+  // call. TOOL_CALL_START/RESULT stay on the wire for model/runtime
+  // correctness, but the generic tool row is removed once the typed receipt
+  // arrives (same ownership rule as commitMemoryReceipt), and the receipt
+  // toolCallId is remembered so a later RESULT cannot recreate the row.
+  const receiptToolId = event.toolCallId ? toolId(event) : undefined;
+  const committedItems = receiptToolId
+    ? state.committedItems.filter((candidate) => candidate.id !== receiptToolId)
+    : state.committedItems;
+  const activeItem =
+    receiptToolId && state.activeItem?.id === receiptToolId
+      ? undefined
+      : state.activeItem;
+  return {
+    ...state,
+    committedItems,
+    activeItem,
+    inspectorSelection:
+      receiptToolId && state.inspectorSelection?.id === receiptToolId
+        ? undefined
+        : state.inspectorSelection,
+    runPlanSnapshotsByRunId: replaceSnapshot
+      ? { ...state.runPlanSnapshotsByRunId, [runId]: snapshot }
+      : state.runPlanSnapshotsByRunId,
+    runPlanReceiptToolIds: receiptToolId
+      ? [...state.runPlanReceiptToolIds, receiptToolId].slice(
+          -MAX_RUN_PLAN_RECEIPT_TOOL_IDS,
+        )
+      : state.runPlanReceiptToolIds,
+  };
+}
+
+/**
+ * Terminal projection of the run's latest plan snapshot (contract §5.4):
+ * success, error, cancel and interrupt all keep the real three-state step
+ * statuses of the last snapshot. The stable id `run-plan:<runId>:<planId>`
+ * makes repeated terminal frames and live/replay overlap idempotent.
+ */
+function projectTerminalRunPlan(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
+  const runId = event.runId?.trim();
+  const snapshot = runId ? state.runPlanSnapshotsByRunId[runId] : undefined;
+  if (!runId || !snapshot) {
+    return state;
+  }
+  const item: RunNarrativeItem = {
+    kind: "runPlan",
+    id: `run-plan:${runId}:${snapshot.planId}`,
+    runId,
+    planId: snapshot.planId,
+    version: snapshot.version,
+    title: `执行计划 · ${snapshot.completedCount}/${snapshot.totalCount}`,
+    explanation: snapshot.explanation,
+    items: snapshot.items.map((planItem) => ({ ...planItem })),
+    completedCount: snapshot.completedCount,
+    totalCount: snapshot.totalCount,
+  };
+  return {
+    ...state,
+    committedItems: upsertCommittedBeforeRunAnswer(
+      state.committedItems,
+      item,
+      event,
+    ),
   };
 }
 
@@ -1145,6 +1275,7 @@ function applyStatus(
     case "compactBoundary":
     case "deliverables":
     case "subagentGroup":
+    case "runPlan":
       return item;
     case "mediaGeneration":
       return status === "error" ? { ...item, status: "error" } : item;
@@ -2204,6 +2335,11 @@ function activateTool(
   title?: string,
 ): RunNarrativeState {
   const id = toolId(event);
+  // A successful update_plan call is owned by its plan receipt; its frames
+  // must not (re)activate a generic tool row.
+  if (state.runPlanReceiptToolIds.includes(id)) {
+    return state;
+  }
   const existing =
     state.activeItem?.id === id && state.activeItem.kind === "tool"
       ? state.activeItem
@@ -2247,6 +2383,14 @@ function commitTool(
   toolStatus?: string,
 ): RunNarrativeState {
   const id = toolId(event);
+  // The plan receipt already replaced this successful update_plan row; a
+  // later RESULT frame (journal order puts plan_updated before tool_result)
+  // must not recreate it. Failed calls have no receipt and keep their row.
+  if (state.runPlanReceiptToolIds.includes(id)) {
+    return state.activeItem?.id === id
+      ? { ...state, activeItem: undefined }
+      : state;
+  }
   const active =
     state.activeItem?.id === id && state.activeItem.kind === "tool"
       ? state.activeItem

@@ -1,0 +1,290 @@
+@import "../../tokens/components.css";
+
+/* AwakenRunPlanTrigger: compact entry inside the ComposerDock stack. The
+   caller (App.tsx) owns placement; the trigger only styles its own pill. */
+.aw-run-plan-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--aw-space-3);
+  max-width: 100%;
+  min-height: 44px;
+  min-width: 0;
+  padding: var(--aw-space-3) var(--aw-space-5);
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-surface-raised);
+  box-shadow: var(--aw-shadow-popover);
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-base);
+  cursor: pointer;
+  transition:
+    background-color var(--aw-transition-fast),
+    border-color var(--aw-transition-fast),
+    color var(--aw-transition-fast);
+}
+
+.aw-run-plan-trigger:hover {
+  border-color: var(--aw-border-control-hover);
+  color: var(--aw-text-primary);
+}
+
+.aw-run-plan-trigger:focus-visible {
+  border-color: var(--aw-border-control-hover);
+  outline: 2px solid var(--aw-border-control-hover);
+  outline-offset: 1px;
+}
+
+.aw-run-plan-trigger__icon {
+  display: inline-grid;
+  flex: 0 0 16px;
+  place-items: center;
+}
+
+.aw-run-plan-trigger--in_progress .aw-run-plan-trigger__icon {
+  color: var(--aw-status-running);
+}
+
+.aw-run-plan-trigger--completed .aw-run-plan-trigger__icon {
+  color: var(--aw-success);
+}
+
+.aw-run-plan-trigger--pending .aw-run-plan-trigger__icon {
+  color: var(--aw-text-tertiary);
+}
+
+.aw-run-plan-trigger__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* AwakenRunPlanPanel: expanded read-only plan inside RunStage.overlay. The
+   wrapper is pointer-through; the panel body is pointer-auto. Bottom offset
+   and composer inset are owned by the caller, not by this stylesheet. */
+.aw-run-plan-panel-wrap {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.aw-run-plan-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  align-self: flex-end;
+  width: min(640px, 100%);
+  max-height: min(360px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+  box-shadow: var(--aw-shadow-popover);
+  color: var(--aw-text-primary);
+  pointer-events: auto;
+}
+
+.aw-run-plan-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-5);
+  padding: var(--aw-space-5) var(--aw-space-6) var(--aw-space-3);
+}
+
+.aw-run-plan-panel__title {
+  margin: 0;
+  min-width: 0;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: var(--aw-line-height-base);
+}
+
+.aw-run-plan-panel__close {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  place-items: center;
+  margin-right: -2px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--aw-radius-sm);
+  background: transparent;
+  color: var(--aw-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color var(--aw-transition-fast),
+    border-color var(--aw-transition-fast),
+    color var(--aw-transition-fast);
+}
+
+.aw-run-plan-panel__close:hover {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.aw-run-plan-panel__close:focus-visible {
+  border-color: var(--aw-border-control-hover);
+  outline: 2px solid var(--aw-border-control-hover);
+  outline-offset: 1px;
+}
+
+.aw-run-plan-panel__explanation {
+  margin: 0;
+  padding: 0 var(--aw-space-6) var(--aw-space-3);
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-base);
+  overflow-wrap: anywhere;
+}
+
+.aw-run-plan-panel__scroll {
+  min-height: 0;
+  padding: 0 var(--aw-space-6) var(--aw-space-5);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color:
+    color-mix(in srgb, var(--aw-text-tertiary) 42%, transparent)
+    transparent;
+}
+
+.aw-run-plan-panel__scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.aw-run-plan-panel__scroll::-webkit-scrollbar-track,
+.aw-run-plan-panel__scroll::-webkit-scrollbar-track-piece,
+.aw-run-plan-panel__scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.aw-run-plan-panel__scroll::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--aw-text-tertiary) 42%, transparent);
+  background-clip: padding-box;
+}
+
+/* Shared read-only step list (panel + historical variant). */
+.aw-run-plan-list {
+  display: grid;
+  gap: var(--aw-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aw-run-plan-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: var(--aw-space-3);
+  align-items: start;
+  padding: var(--aw-space-2) 0;
+}
+
+.aw-run-plan-item__icon {
+  display: inline-grid;
+  place-items: center;
+  padding-top: 2px;
+}
+
+.aw-run-plan-item__step {
+  min-width: 0;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-base);
+  overflow-wrap: anywhere;
+}
+
+.aw-run-plan-item__status {
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-base);
+  white-space: nowrap;
+}
+
+.aw-run-plan-item--completed .aw-run-plan-item__icon {
+  color: var(--aw-success);
+}
+
+.aw-run-plan-item--completed .aw-run-plan-item__step {
+  color: var(--aw-text-tertiary);
+}
+
+.aw-run-plan-item--in_progress .aw-run-plan-item__icon {
+  color: var(--aw-status-running);
+}
+
+.aw-run-plan-item--in_progress .aw-run-plan-item__step {
+  color: var(--aw-text-primary);
+  font-weight: var(--aw-font-weight-semibold);
+}
+
+.aw-run-plan-item--in_progress .aw-run-plan-item__status {
+  color: var(--aw-status-running);
+}
+
+.aw-run-plan-item--pending .aw-run-plan-item__icon {
+  color: var(--aw-text-tertiary);
+}
+
+/* Historical variant: terminal snapshot inside a turn's execution process.
+   Static icons, no interaction. */
+.aw-run-plan-historical {
+  display: grid;
+  gap: var(--aw-space-3);
+  padding: var(--aw-space-4) var(--aw-space-5);
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-primary);
+}
+
+.aw-run-plan-historical__title {
+  margin: 0;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: var(--aw-line-height-base);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes aw-run-plan-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.aw-run-plan-spin {
+  animation: aw-run-plan-spin 1s linear infinite;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-run-plan-trigger,
+  .aw-run-plan-panel__close {
+    transition: none;
+  }
+
+  .aw-run-plan-spin {
+    animation: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .aw-run-plan-panel__header,
+  .aw-run-plan-panel__explanation,
+  .aw-run-plan-panel__scroll {
+    padding-left: var(--aw-space-5);
+    padding-right: var(--aw-space-5);
+  }
+}

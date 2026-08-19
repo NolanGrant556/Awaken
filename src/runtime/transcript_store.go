@@ -13,6 +13,7 @@ import (
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
 	"awaken/src/internal/outputlimit"
+	"awaken/src/tool"
 )
 
 const (
@@ -45,10 +46,14 @@ type TranscriptRecord struct {
 }
 
 type restoredTranscript struct {
-	Messages               []convcontext.Message
-	SkillContextBlocks     []agentcore.ContextBlock
-	SkillInvokedAt         map[string]time.Time
-	RunIDs                 []string
+	Messages           []convcontext.Message
+	SkillContextBlocks []agentcore.ContextBlock
+	SkillInvokedAt     map[string]time.Time
+	RunIDs             []string
+	// RunPlanSnapshots holds the latest root run plan snapshot per run
+	// rebuilt from durable plan_updated records (historical facts; a new run
+	// always starts without a plan and creates its own plan_id).
+	RunPlanSnapshots       map[string]tool.RunPlanSnapshot
 	Label                  string
 	CreatedAt              time.Time
 	UpdatedAt              time.Time

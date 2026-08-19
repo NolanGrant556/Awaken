@@ -67,6 +67,9 @@ import {
   AwakenWorkbenchChrome as WorkbenchChrome,
   AwakenWorkbenchShell as WorkbenchShell,
   AwakenWorkbenchSidebarFrame as WorkbenchSidebarFrame,
+  AwakenRunPlanHistorical as RunPlanHistorical,
+  AwakenRunPlanPanel as RunPlanPanel,
+  AwakenRunPlanTrigger as RunPlanTrigger,
   AwakenRunStage as RunStage,
   AwakenComposerDock as ComposerDock,
   type ComposerBarInputSelection,
@@ -142,6 +145,8 @@ import {
   projectNarrativeTurnBodySegments,
   contextUsagePanelBottomOffset,
   diffLineStats,
+  runPlanPanelBottomOffset,
+  runPlanStepStatusForDisplay,
   subagentDetailPanelBottomOffset,
   narrativeTurnElapsedMs,
   projectVisibleNarrativeItems,
@@ -161,6 +166,7 @@ import {
   type ThreadComposerDraft,
 } from "./useThreadComposerDraft";
 import { useRunStageScrollController } from "./useRunStageScrollController";
+import { useRunPlanEntry } from "./useRunPlanEntry";
 import { MACOS_WINDOW_CHROME_GEOMETRY } from "../shared/window-chrome";
 import {
   actionsForThreadTranscript,
@@ -2597,6 +2603,28 @@ export function App() {
     runtimeState.phase === "running" ||
     runtimeState.phase === "reconnecting" ||
     runtimeState.phase === "cancelling";
+  // Latest plan snapshot of the active run (contract 运行计划与任务进度设计
+  // 契约 §8.2/§8.3): live frames only feed this slice; the trigger/panel are
+  // its sole live projection and the terminal history lives in the narrative.
+  const activeRunPlan = runtimeState.runId
+    ? runtimeState.runPlansById[runtimeState.runId]
+    : undefined;
+  const runPlanEntry = useRunPlanEntry({
+    threadId: runtimeState.activeThreadId,
+    runId: runtimeState.runId,
+    plan: activeRunPlan,
+    isBusy,
+  });
+  const activeRunPlanItems = useMemo(
+    () =>
+      (activeRunPlan?.items ?? []).map((item) => ({
+        step: item.step,
+        activeForm: item.activeForm,
+        status: runPlanStepStatusForDisplay(item.status),
+      })),
+    [activeRunPlan],
+  );
+  const runPlanPanelId = "awaken-run-plan-panel";
   const visibleNarrativeItems = useMemo<RunNarrativeItem[]>(() => {
     const narrativeItems: RunNarrativeItem[] = [
       ...runtimeState.narrative.committedItems,
@@ -3998,6 +4026,7 @@ export function App() {
             ...contextMeta,
             onClick: () => {
               setOpenSubagentTaskId(undefined);
+              runPlanEntry.closePanel(false);
               setContextUsagePanelOpen((current) => !current);
             },
             buttonRef: contextUsageTriggerRef,
@@ -5620,6 +5649,7 @@ export function App() {
   function handleOpenFileWorkspace(mode: ProjectFileWorkspaceMode = "files"): void {
     setSelectedSubagentTaskId(undefined);
     setOpenSubagentTaskId(undefined);
+    runPlanEntry.closePanel(false);
     if (!fileWorkspaceOpen) {
       inspectorWidthBeforeFileWorkspaceRef.current = inspectorWidth;
     }
@@ -5638,6 +5668,7 @@ export function App() {
     setExpandedWorkspaceSurface("file");
     setExpandedFileComposerIdleMode("full");
     setContextUsagePanelOpen(false);
+    runPlanEntry.closePanel(false);
     setInspectorCollapsed(false);
     if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
       inspectorCollapsedBeforeResponsiveRef.current = false;
@@ -5658,6 +5689,7 @@ export function App() {
   function handleShowFileWorkspaceSurface(): void {
     if (fileWorkspaceExpanded) {
       setContextUsagePanelOpen(false);
+      runPlanEntry.closePanel(false);
       setExpandedWorkspaceSurface("file");
       setExpandedFileComposerIdleMode("full");
     }
@@ -5742,6 +5774,7 @@ export function App() {
 
   function handleOpenSubagent(taskId?: string): void {
     setContextUsagePanelOpen(false);
+    runPlanEntry.closePanel(false);
     setOpenSubagentTaskId(taskId ?? openSubagentTaskId ?? subagentTasks[0]?.taskId);
   }
 
@@ -5934,6 +5967,7 @@ export function App() {
     setMediaPreview({ items, activeId });
     setContextUsagePanelOpen(false);
     setOpenSubagentTaskId(undefined);
+    runPlanEntry.closePanel(false);
   }
 
   function pinMediaInInspector(item: MediaArtifactPreviewItem): void {
@@ -6207,6 +6241,17 @@ export function App() {
       return (
         <div key={key} className="narrative-hint">
           {item.text}
+        </div>
+      );
+    }
+    if (item.kind === "runPlan") {
+      return (
+        <div key={key} className="narrative-run-plan">
+          <RunPlanHistorical
+            items={item.items}
+            completedCount={item.completedCount}
+            totalCount={item.totalCount}
+          />
         </div>
       );
     }
@@ -7259,6 +7304,26 @@ export function App() {
                               />
                             </div>
                           ) : null}
+                          {!activeMediaPreviewItem &&
+                          runPlanEntry.panelOpen &&
+                          activeRunPlan ? (
+                            <div
+                              className="run-plan-overlay"
+                              style={{
+                                bottom: runPlanPanelBottomOffset({
+                                  composerContentInset: composerContentInsetPx,
+                                }),
+                              }}
+                            >
+                              <RunPlanPanel
+                                id={runPlanPanelId}
+                                ref={runPlanEntry.panelRef}
+                                items={activeRunPlanItems}
+                                explanation={activeRunPlan.explanation}
+                                onClose={() => runPlanEntry.closePanel(true)}
+                              />
+                            </div>
+                          ) : null}
                           {!fileWorkspaceSurfaceActive &&
                           !activeMediaPreviewItem &&
                           openSubagent ? (
@@ -7395,55 +7460,71 @@ export function App() {
                               {renderExternalActionGate()}
                               {renderComputerReviewGate()}
                               {renderComputerHandoffIndicator()}
-                              {activeUserQuestion ? null : (
-                                <ExpandedFileComposer
-                                  active={fileWorkspaceSurfaceActive}
-                                  idleMode={expandedFileComposerIdleMode}
-                                  running={isBusy}
-                                  completed={expandedFileComposerCompleted}
-                                  completedElapsedMs={expandedFileComposerElapsedMs}
-                                  forceFull={expandedFileComposerForceFull}
-                                  onShowCompact={() => setExpandedFileComposerIdleMode("compact")}
-                                  onShowFull={handleShowExpandedFileComposerFull}
-                                  onStop={() => {
+                              {runPlanEntry.entryVisible && activeRunPlan ? (
+                                <RunPlanTrigger
+                                  ref={runPlanEntry.triggerRef}
+                                  items={activeRunPlanItems}
+                                  completedCount={activeRunPlan.completedCount}
+                                  totalCount={activeRunPlan.totalCount}
+                                  currentStep={activeRunPlan.currentStep}
+                                  allCompleted={activeRunPlan.allCompleted}
+                                  open={runPlanEntry.panelOpen}
+                                  onToggle={() => {
+                                    if (!runPlanEntry.panelOpen) {
+                                      setContextUsagePanelOpen(false);
+                                      setOpenSubagentTaskId(undefined);
+                                    }
+                                    runPlanEntry.togglePanel();
+                                  }}
+                                />
+                              ) : null}
+                              <ExpandedFileComposer
+                                active={fileWorkspaceSurfaceActive}
+                                idleMode={expandedFileComposerIdleMode}
+                                running={isBusy}
+                                completed={expandedFileComposerCompleted}
+                                completedElapsedMs={expandedFileComposerElapsedMs}
+                                forceFull={expandedFileComposerForceFull}
+                                onShowCompact={() => setExpandedFileComposerIdleMode("compact")}
+                                onShowFull={handleShowExpandedFileComposerFull}
+                                onStop={() => {
+                                  void handleComposerSubmit();
+                                }}
+                              >
+                                <ComposerBar
+                                  value={composerValue}
+                                  onChange={setComposerValue}
+                                  onStructuredInputChange={handleComposerStructuredInputChange}
+                                  onSubmit={() => {
                                     void handleComposerSubmit();
                                   }}
-                                >
-                                  <ComposerBar
-                                    value={composerValue}
-                                    onChange={setComposerValue}
-                                    onStructuredInputChange={handleComposerStructuredInputChange}
-                                    onSubmit={() => {
-                                      void handleComposerSubmit();
-                                    }}
-                                    onAddContext={handleAddContext}
-                                    placeholder={fileWorkspaceSurfaceActive ? "输入后续任务…" : ""}
-                                    disabled={composerBarState.disabled}
-                                    isReady={composerBarState.isReady}
-                                    submitMode={composerBarState.submitMode}
-                                    submitDisabled={composerBarState.submitDisabled}
-                                    variant="dock"
-                                    metaItems={dockComposerMetaItems}
-                                    focusRequest={composerFocusRequest}
-                                    focusOffset={composerFocusOffset}
-                                    onInputSelectionChange={(selection) => {
-                                      setComposerInputSelection({
-                                        anchor: selection.anchor,
-                                        focus: selection.focus,
-                                      });
-                                    }}
-                                    attachments={composerBarAttachments}
-                                    tokens={composerBarTokens}
-                                    slashPalette={composerBarSlashPalette}
-                                    onInputKeyDown={handleComposerInputKeyDown}
-                                    onRemoveAttachment={handleRemoveComposerAttachment}
-                                    onRemoveToken={handleRemoveComposerToken}
-                                    onPasteImages={(files) => {
-                                      void handlePasteImages(files);
-                                    }}
-                                  />
-                                </ExpandedFileComposer>
-                              )}
+                                  onAddContext={handleAddContext}
+                                  placeholder={fileWorkspaceSurfaceActive ? "输入后续任务…" : ""}
+                                  disabled={composerBarState.disabled}
+                                  isReady={composerBarState.isReady}
+                                  submitMode={composerBarState.submitMode}
+                                  submitDisabled={composerBarState.submitDisabled}
+                                  variant="dock"
+                                  metaItems={dockComposerMetaItems}
+                                  focusRequest={composerFocusRequest}
+                                  focusOffset={composerFocusOffset}
+                                  onInputSelectionChange={(selection) => {
+                                    setComposerInputSelection({
+                                      anchor: selection.anchor,
+                                      focus: selection.focus,
+                                    });
+                                  }}
+                                  attachments={composerBarAttachments}
+                                  tokens={composerBarTokens}
+                                  slashPalette={composerBarSlashPalette}
+                                  onInputKeyDown={handleComposerInputKeyDown}
+                                  onRemoveAttachment={handleRemoveComposerAttachment}
+                                  onRemoveToken={handleRemoveComposerToken}
+                                  onPasteImages={(files) => {
+                                    void handlePasteImages(files);
+                                  }}
+                                />
+                              </ExpandedFileComposer>
                             </div>
                           </ComposerDock>
                         )
@@ -7457,42 +7538,40 @@ export function App() {
                           {renderExternalActionGate()}
                           {renderComputerReviewGate()}
                           {renderComputerHandoffIndicator()}
-                          {activeUserQuestion ? null : (
-                            <ComposerBar
-                              value={composerValue}
-                              onChange={setComposerValue}
-                              onStructuredInputChange={handleComposerStructuredInputChange}
-                              onSubmit={() => {
-                                void handleComposerSubmit();
-                              }}
-                              onAddContext={handleAddContext}
-                              placeholder=""
-                              disabled={composerBarState.disabled}
-                              isReady={composerBarState.isReady}
-                              submitMode={composerBarState.submitMode}
-                              submitDisabled={composerBarState.submitDisabled}
-                              variant="center"
-                              metaItems={composerMetaItems}
-                              projectPicker={composerProjectPicker}
-                              focusRequest={composerFocusRequest}
-                              focusOffset={composerFocusOffset}
-                              onInputSelectionChange={(selection) => {
-                                setComposerInputSelection({
-                                  anchor: selection.anchor,
-                                  focus: selection.focus,
-                                });
-                              }}
-                              attachments={composerBarAttachments}
-                              tokens={composerBarTokens}
-                              slashPalette={composerBarSlashPalette}
-                              onInputKeyDown={handleComposerInputKeyDown}
-                              onRemoveAttachment={handleRemoveComposerAttachment}
-                              onRemoveToken={handleRemoveComposerToken}
-                              onPasteImages={(files) => {
-                                void handlePasteImages(files);
-                              }}
-                            />
-                          )}
+                          <ComposerBar
+                            value={composerValue}
+                            onChange={setComposerValue}
+                            onStructuredInputChange={handleComposerStructuredInputChange}
+                            onSubmit={() => {
+                              void handleComposerSubmit();
+                            }}
+                            onAddContext={handleAddContext}
+                            placeholder=""
+                            disabled={composerBarState.disabled}
+                            isReady={composerBarState.isReady}
+                            submitMode={composerBarState.submitMode}
+                            submitDisabled={composerBarState.submitDisabled}
+                            variant="center"
+                            metaItems={composerMetaItems}
+                            projectPicker={composerProjectPicker}
+                            focusRequest={composerFocusRequest}
+                            focusOffset={composerFocusOffset}
+                            onInputSelectionChange={(selection) => {
+                              setComposerInputSelection({
+                                anchor: selection.anchor,
+                                focus: selection.focus,
+                              });
+                            }}
+                            attachments={composerBarAttachments}
+                            tokens={composerBarTokens}
+                            slashPalette={composerBarSlashPalette}
+                            onInputKeyDown={handleComposerInputKeyDown}
+                            onRemoveAttachment={handleRemoveComposerAttachment}
+                            onRemoveToken={handleRemoveComposerToken}
+                            onPasteImages={(files) => {
+                              void handlePasteImages(files);
+                            }}
+                          />
                         </div>
                       ) : null}
 

@@ -18,6 +18,9 @@ const (
 	acpHidden           = "delegate_external_agent"
 	acpConfigHidden     = "configure_acp_runner"
 	hookConfigHidden    = "configure_hook"
+	// runPlanHidden keeps the root-only update_plan tool out of child tool
+	// pools; child progress uses native Subagent facts (运行计划契约 §6.1).
+	runPlanHidden = "update_plan"
 )
 
 var mutationTools = []string{
@@ -25,7 +28,7 @@ var mutationTools = []string{
 }
 
 var orchestrationTools = []string{
-	orchestrationHidden, askUserHidden, acpHidden, acpConfigHidden, hookConfigHidden,
+	orchestrationHidden, askUserHidden, acpHidden, acpConfigHidden, hookConfigHidden, runPlanHidden,
 }
 
 func RoleCatalog() map[string]Role {

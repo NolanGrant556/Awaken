@@ -61,6 +61,12 @@ const (
 	// assistant message.
 	SemanticKindScheduledNotice SemanticKind = "scheduled_notice"
 
+	// SemanticKindPlanUpdated is the durable, sanitized run-plan snapshot fact
+	// of one root run (contract: 运行计划与任务进度设计契约 §7.2). The payload
+	// carries only the bounded snapshot, derived counters and tool_call_id —
+	// never model reasoning or raw unvalidated JSON.
+	SemanticKindPlanUpdated SemanticKind = "plan_updated"
+
 	// Computer Use semantic kinds (docs/10_计算机操作能力/)
 	SemanticKindComputerSessionOpened            SemanticKind = "computer_session_opened"
 	SemanticKindComputerStateChanged             SemanticKind = "computer_state_changed"
@@ -137,6 +143,15 @@ type AssignedSemanticRecorder interface {
 	SemanticRecorder
 	AppendAssigned(ctx context.Context, record SemanticRecord) (SemanticRecord, error)
 	AppendBatchAssigned(ctx context.Context, records []SemanticRecord) ([]SemanticRecord, error)
+}
+
+// FlushedSemanticRecorder appends one safety-sensitive fact, flushes durable
+// storage, and only then publishes the assigned record to live consumers.
+// Facts whose UI must never get ahead of durable truth (for example Computer
+// review gates and run-plan snapshots) use this optional production contract.
+type FlushedSemanticRecorder interface {
+	SemanticRecorder
+	AppendFlushed(ctx context.Context, record SemanticRecord) (SemanticRecord, error)
 }
 
 // CanonicalLiveSemanticRecorder marks a recorder that publishes successfully

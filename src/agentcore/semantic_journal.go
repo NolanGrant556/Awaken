@@ -210,6 +210,38 @@ func ArtifactSemanticRecord(threadID, runID, turnID, sessionID string, event Awa
 	})
 }
 
+// PlanUpdatedSemanticRecord assembles the durable, sanitized plan_updated
+// fact (contract §7.2): the bounded snapshot, derived counters and the
+// tool_call receipt only — no model reasoning or raw unvalidated JSON.
+func PlanUpdatedSemanticRecord(
+	threadID, runID, turnID, sessionID, toolCallID string,
+	snapshot tool.RunPlanSnapshot,
+	counts RunPlanCounts,
+) SemanticRecord {
+	items := make([]map[string]any, 0, len(snapshot.Items))
+	for _, item := range snapshot.Items {
+		items = append(items, map[string]any{
+			"step":        item.Step,
+			"active_form": item.ActiveForm,
+			"status":      string(item.Status),
+		})
+	}
+	payload := map[string]any{
+		"plan_id":         snapshot.PlanID,
+		"version":         snapshot.Version,
+		"items":           items,
+		"completed_count": counts.CompletedCount,
+		"total_count":     counts.TotalCount,
+		"current_step":    counts.CurrentStep,
+		"all_completed":   counts.AllCompleted,
+		"tool_call_id":    toolCallID,
+	}
+	if strings.TrimSpace(snapshot.Explanation) != "" {
+		payload["explanation"] = snapshot.Explanation
+	}
+	return NewSemanticRecord(SemanticKindPlanUpdated, threadID, runID, turnID, toolCallID, sessionID, payload)
+}
+
 func PermissionDecisionSemanticRecord(threadID, runID, turnID, sessionID string, event AwakenEvent) SemanticRecord {
 	record := NewSemanticRecord(SemanticKindPermissionDecision, threadID, runID, turnID, event.ToolCallID, sessionID, map[string]any{
 		"tool_call_id":       event.ToolCallID,

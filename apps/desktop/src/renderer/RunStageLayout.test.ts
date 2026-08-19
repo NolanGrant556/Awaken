@@ -142,6 +142,47 @@ describe("RunStage layout", () => {
     expect(card).toContain("max-height: min(560px, 100%);");
   });
 
+  it("bounds the run-plan overlay between the stage top and measured composer", () => {
+    const workbenchStyles = readFileSync(
+      new URL("./styles/workbench.css", import.meta.url),
+      "utf8",
+    );
+    const overlay = cssRule(workbenchStyles, ".run-plan-overlay");
+
+    expect(overlay).toContain("position: absolute;");
+    expect(overlay).toContain("top: 28px;");
+    expect(overlay).toContain("pointer-events: none;");
+  });
+
+  it("makes plan, context, subagent, and media overlays mutually exclusive", () => {
+    const appSource = readFileSync(
+      new URL("./App.tsx", import.meta.url),
+      "utf8",
+    );
+    const planToggleStart = appSource.indexOf("onToggle={() => {");
+    const planToggleEnd = appSource.indexOf("}}", planToggleStart);
+    const planToggle = appSource.slice(planToggleStart, planToggleEnd);
+
+    expect(planToggleStart).toBeGreaterThan(-1);
+    expect(planToggle).toContain("setContextUsagePanelOpen(false)");
+    expect(planToggle).toContain("setOpenSubagentTaskId(undefined)");
+    expect(appSource).toContain("runPlanEntry.closePanel(false);");
+    expect(appSource).toContain(
+      "bottom: runPlanPanelBottomOffset({\n                                  composerContentInset: composerContentInsetPx,",
+    );
+  });
+
+  it("keeps the composer mounted while ask_user is active", () => {
+    const appSource = readFileSync(
+      new URL("./App.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(appSource).not.toContain("{activeUserQuestion ? null : (");
+    expect(appSource).toContain("{renderUserQuestionPrompt()}");
+    expect(appSource).toContain('<ComposerBar\n                                  value={composerValue}');
+  });
+
   it("renders subagent detail through RunStage overlay instead of the narrative item", () => {
     const appSource = readFileSync(
       new URL("./App.tsx", import.meta.url),

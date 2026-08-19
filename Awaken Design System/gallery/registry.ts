@@ -12,6 +12,7 @@ import { AwakenMemorySettingsDemo } from "../src/components/AwakenMemorySettings
 import { AwakenModelSettingsDemo } from "../src/components/AwakenModelSettings/AwakenModelSettings.demo";
 import { AwakenOriginalThinkingDemo } from "../src/components/AwakenOriginalThinking/AwakenOriginalThinking.demo";
 import { AwakenProductLogoDemo } from "../src/components/AwakenProductLogo/AwakenProductLogo.demo";
+import { AwakenRunPlanDemo } from "../src/components/AwakenRunPlan/AwakenRunPlan.demo";
 import { AwakenRunStageDemo } from "../src/components/AwakenRunStage/AwakenRunStage.demo";
 import { AwakenScheduledTaskListDemo } from "../src/components/AwakenScheduledTaskList/AwakenScheduledTaskList.demo";
 import { AwakenSettingsDemo } from "../src/components/AwakenSettings/AwakenSettings.demo";
@@ -84,6 +85,7 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-thinking-orb", name: "AwakenThinkingOrb", displayName: "思考球", demo: AwakenThinkingOrbDemo, category: "atomic" },
   { id: "awaken-dotm-square3", name: "AwakenDotmSquare3", displayName: "矩阵方块", demo: AwakenDotmSquare3Demo, category: "atomic" },
   { id: "awaken-run-stage", name: "AwakenRunStage", displayName: "「运行阶段」组件库", demo: AwakenRunStageDemo, category: "workbench", aliases: ["awaken-execution-feed"] },
+  { id: "awaken-run-plan", name: "AwakenRunPlan", displayName: "「运行计划」组件库", demo: AwakenRunPlanDemo, category: "workbench", aliases: ["awaken-run-plan-trigger", "awaken-run-plan-panel", "awaken-run-plan-historical"] },
   { id: "awaken-task-welcome", name: "AwakenTaskWelcome", displayName: "「任务欢迎区」组件库", demo: AwakenTaskWelcomeDemo, category: "workbench" },
   { id: "awaken-thought-trace", name: "AwakenThoughtTrace", displayName: "「思路轨迹」组件库", demo: AwakenThoughtTraceDemo, category: "workbench" },
   {

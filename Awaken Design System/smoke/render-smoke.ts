@@ -722,4 +722,123 @@ if (sidebarProfileIndex === -1 || sidebarUpdateIndex === -1 || sidebarUpdateInde
   throw new Error("AwakenSidebar update entry must be a sibling above the profile button, not nested inside it");
 }
 
+const expectedRunPlanStateIds = [
+  "in-progress",
+  "first-step",
+  "last-step",
+  "all-completed",
+  "with-explanation",
+  "long-steps-overflow",
+];
+const runPlanStateIds = AwakenDesignSystem.AwakenRunPlanStates.map((state) => state.id);
+
+if (runPlanStateIds.join(",") !== expectedRunPlanStateIds.join(",")) {
+  throw new Error(`AwakenRunPlan states are incomplete or out of order: ${runPlanStateIds.join(", ")}`);
+}
+
+const runPlanSmokeItems = [
+  {
+    step: "梳理运行计划的 Core 快照",
+    activeForm: "正在梳理运行计划的 Core 快照",
+    status: "completed" as const,
+  },
+  {
+    step: "实现运行计划协议",
+    activeForm: "正在实现运行计划协议",
+    status: "in_progress" as const,
+  },
+  {
+    step: "补齐自动化与真实 Desktop 验收",
+    activeForm: "正在补齐自动化与真实 Desktop 验收",
+    status: "pending" as const,
+  },
+];
+
+const runPlanTriggerHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenRunPlanTrigger, {
+    items: runPlanSmokeItems,
+    completedCount: 1,
+    totalCount: 3,
+    currentStep: 2,
+    allCompleted: false,
+    open: false,
+    onToggle: () => undefined,
+  }),
+);
+
+if (
+  !runPlanTriggerHtml.includes("第 2/3 步 · 正在实现运行计划协议") ||
+  !runPlanTriggerHtml.includes('aria-haspopup="dialog"') ||
+  !runPlanTriggerHtml.includes('aria-expanded="false"') ||
+  !runPlanTriggerHtml.includes("共 3 步") ||
+  !runPlanTriggerHtml.includes("已完成 1 步") ||
+  !runPlanTriggerHtml.includes("aw-run-plan-spin")
+) {
+  throw new Error("AwakenRunPlanTrigger must render the step summary, accessible name and spinning in-progress icon");
+}
+
+const runPlanCompletedTriggerHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenRunPlanTrigger, {
+    items: runPlanSmokeItems.map((item) => ({ ...item, status: "completed" as const })),
+    completedCount: 3,
+    totalCount: 3,
+    currentStep: 3,
+    allCompleted: true,
+    open: true,
+    onToggle: () => undefined,
+  }),
+);
+
+if (
+  !runPlanCompletedTriggerHtml.includes("3/3 · 计划已完成") ||
+  !runPlanCompletedTriggerHtml.includes("全部完成")
+) {
+  throw new Error("AwakenRunPlanTrigger must render the M/M completion summary when all steps are completed");
+}
+
+const runPlanPanelHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenRunPlanPanel, {
+    items: runPlanSmokeItems,
+    explanation: "调查后增加了一个必要步骤。",
+    onClose: () => undefined,
+  }),
+);
+
+if (
+  !runPlanPanelHtml.includes('role="dialog"') ||
+  !runPlanPanelHtml.includes("运行计划") ||
+  !runPlanPanelHtml.includes("aw-run-plan-panel-wrap") ||
+  !runPlanPanelHtml.includes("调查后增加了一个必要步骤。") ||
+  !runPlanPanelHtml.includes("已完成") ||
+  !runPlanPanelHtml.includes("进行中") ||
+  !runPlanPanelHtml.includes("待处理")
+) {
+  throw new Error("AwakenRunPlanPanel must render the dialog, explanation and textual tri-state for every step");
+}
+
+const runPlanHistoricalHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenRunPlanHistorical, {
+    items: runPlanSmokeItems,
+    completedCount: 1,
+    totalCount: 3,
+  }),
+);
+
+if (
+  !runPlanHistoricalHtml.includes("执行计划 · 1/3") ||
+  runPlanHistoricalHtml.includes("aw-run-plan-spin")
+) {
+  throw new Error("AwakenRunPlanHistorical must render the terminal title without animated icons");
+}
+
+if (
+  !productionCss.includes(".aw-run-plan-trigger") ||
+  !productionCss.includes("min-height:44px") ||
+  !productionCss.includes(".aw-run-plan-panel") ||
+  !productionCss.includes(".aw-run-plan-historical") ||
+  !productionCss.includes("aw-run-plan-spin")
+) {
+  throw new Error("Production CSS is missing AwakenRunPlan component surfaces");
+}
+
 console.log(`awaken design system render smoke passed: ${demoEntries.length} components`);

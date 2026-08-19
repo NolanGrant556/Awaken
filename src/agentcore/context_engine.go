@@ -4,9 +4,31 @@ import (
 	stdcontext "context"
 	"errors"
 	"fmt"
+	"strings"
+
+	convcontext "awaken/src/context"
 )
 
-var errContextCompactCircuitOpen = errors.New("context compact circuit open")
+var (
+	errContextCompactCircuitOpen = errors.New("context compact circuit open")
+	errInsufficientReduction     = errors.New("insufficient reduction")
+	errStillAboveAutoThreshold   = errors.New("still above auto threshold")
+	errStillAboveBlockThreshold  = errors.New("still above block threshold")
+)
+
+const (
+	minCompactableHistoryTokens = 5000
+	compactInnerRetryLimit      = 2
+	compactMinReductionRatio    = 0.80
+)
+
+const (
+	compactFailureInsufficientReduction    = "insufficient_reduction"
+	compactFailureStillAboveAutoThreshold  = "still_above_auto_threshold"
+	compactFailureStillAboveBlockThreshold = "still_above_block_threshold"
+	compactFailureOversizedProtectedTail   = "oversized_protected_tail"
+	compactFailureNotEnoughHistory         = "not_enough_compactable_history"
+)
 
 type ContextEngine interface {
 	Evaluate(envelope ContextEnvelope) ContextWindowState
@@ -38,6 +60,7 @@ type contextGovernor struct {
 	lastAPIUsageTokens              int
 	lastSentEstimatedInputTokens    int
 	pendingSentEstimatedInputTokens int
+	lastCompactFailureReason        string
 }
 
 func NewContextEngine(config ContextWindowConfig) ContextEngine {
@@ -74,6 +97,7 @@ func (g *contextGovernor) PrepareRequest(ctx stdcontext.Context, llmReq LLMReque
 	if events != nil {
 		events.emitContextWindow(llmReq.ContextWindowState)
 	}
+	var compactErr error
 	// ShouldAutoCompact drives the v4-estimator path. ShouldAutoCompactByActualUsage
 	// is a parallel trigger based on the last provider-reported usage plus the
 	// locally-estimated delta; it catches cases where the v4 estimate is too
@@ -81,6 +105,7 @@ func (g *contextGovernor) PrepareRequest(ctx stdcontext.Context, llmReq LLMReque
 	if llmReq.ContextWindowState.ShouldAutoCompact() || llmReq.ContextWindowState.ShouldAutoCompactByActualUsage() {
 		compactedReq, err := g.compactForRequest(ctx, llmReq, events, false)
 		if err != nil {
+			compactErr = err
 			if emitter, ok := events.(*runEventEmitter); ok && emitter != nil && emitter.persistenceFailure() != nil {
 				return LLMRequest{}, err
 			}
@@ -91,15 +116,28 @@ func (g *contextGovernor) PrepareRequest(ctx stdcontext.Context, llmReq LLMReque
 				}
 				return LLMRequest{}, blockErr
 			}
-			return g.evaluateRequest(llmReq), nil
-		}
-		llmReq = compactedReq
-		if events != nil {
-			events.emitContextWindow(llmReq.ContextWindowState)
+			if !llmReq.ContextWindowState.ShouldBlock() {
+				return g.evaluateRequest(llmReq), nil
+			}
+		} else {
+			llmReq = compactedReq
+			if events != nil {
+				events.emitContextWindow(llmReq.ContextWindowState)
+			}
 		}
 	}
 	if llmReq.ContextWindowState.ShouldBlock() {
-		blockErr := newContextWindowBlockedError(llmReq.ContextWindowState, nil)
+		if !g.compactCircuitOpen && g.consecutiveCompactFailures < 3 {
+			if compactErr != nil {
+				return LLMRequest{}, compactErr
+			}
+			return g.evaluateRequest(llmReq), fmt.Errorf("%w: estimated %d tokens exceeds blocking threshold %d",
+				errStillAboveBlockThreshold,
+				llmReq.ContextWindowState.ConservativeProjectedTokens(),
+				llmReq.ContextWindowState.blockingThreshold(),
+			)
+		}
+		blockErr := newContextWindowBlockedError(llmReq.ContextWindowState, compactErr)
 		if events != nil {
 			events.emitContextBlocked(g.withRunState(llmReq.ContextWindowState), blockErr.Error())
 		}
@@ -113,13 +151,16 @@ func (g *contextGovernor) TryReactiveCompact(ctx stdcontext.Context, events cont
 		return false, nil
 	}
 	g.reactiveCompactAttempted = true
+	if g.lastCompactFailureReason == compactFailureOversizedProtectedTail {
+		return false, errOversizedProtectedTail
+	}
 	llmReq, err := g.rebuildRequest()
 	if err != nil {
 		return false, err
 	}
 	llmReq = g.evaluateRequest(llmReq)
 	if _, err := g.compactForRequest(ctx, llmReq, events, true); err != nil {
-		if llmReq.ContextWindowState.ShouldBlock() && events != nil {
+		if llmReq.ContextWindowState.ShouldBlock() && g.compactCircuitOpen && events != nil {
 			events.emitContextBlocked(g.withRunState(llmReq.ContextWindowState), newContextWindowBlockedError(llmReq.ContextWindowState, err).Error())
 		}
 		return false, err
@@ -179,12 +220,23 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 		var hookErr error
 		hookInstruction, hookErr = g.preCompactHook(ctx, events, mode, state)
 		if hookErr != nil {
-			g.recordCompactFailure()
+			g.recordCompactFailure(hookErr)
 			failedState := g.withRunState(llmReq.ContextWindowState)
 			if events != nil {
 				events.emitCompactFailed(failedState, mode, hookErr.Error(), hookErr.Error())
 			}
 			return llmReq, hookErr
+		}
+	}
+	if !reactive {
+		if compactable := compactableHistoryTokens(llmReq.Messages, state.CompactTarget, state.ConservativeProjectedTokens()); compactable < minCompactableHistoryTokens {
+			err := errNotEnoughCompactableHistory
+			g.recordCompactFailure(err)
+			failedState := g.withRunState(llmReq.ContextWindowState)
+			if events != nil {
+				events.emitCompactFailed(failedState, mode, err.Error(), compactFailureReason(err))
+			}
+			return llmReq, err
 		}
 	}
 	compactRequest := CompactRequest{
@@ -197,16 +249,38 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 	if emitter, ok := events.(*runEventEmitter); ok && emitter != nil {
 		compactRequest.summaryInvoker = emitter.invokeCompactSummary
 	}
-	result, err := g.engine.Compact(ctx, compactRequest)
+	var result CompactResult
+	var err error
+	for attempt := 0; attempt <= compactInnerRetryLimit; attempt++ {
+		if attempt > 0 {
+			compactRequest.Messages = lightenCompactTail(compactRequest.Messages)
+			if compactRequest.TargetTokens > 1 {
+				compactRequest.TargetTokens = compactRequest.TargetTokens / 2
+				if compactRequest.TargetTokens < 1 {
+					compactRequest.TargetTokens = 1
+				}
+			}
+		}
+		result, err = g.engine.Compact(ctx, compactRequest)
+		if err != nil {
+			break
+		}
+		if postErr := g.evaluateCompactPostcondition(llmReq, state, result); postErr != nil {
+			err = postErr
+			continue
+		}
+		err = nil
+		break
+	}
 	if err != nil {
-		g.recordCompactFailure()
+		g.recordCompactFailure(err)
 		failedState := g.withRunState(llmReq.ContextWindowState)
 		message := err.Error()
 		if g.compactCircuitOpen {
 			message = fmt.Sprintf("%s: %v", g.compactCircuitOpenError(), err)
 		}
 		if events != nil {
-			events.emitCompactFailed(failedState, mode, message, err.Error())
+			events.emitCompactFailed(failedState, mode, message, compactFailureReason(err))
 		}
 		return llmReq, err
 	}
@@ -215,7 +289,7 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 	// failure and keeps the pre-compact messages authoritative.
 	if g.applyCompactResult != nil {
 		if applyErr := g.applyCompactResult(ctx, result); applyErr != nil {
-			g.recordCompactFailure()
+			g.recordCompactFailure(applyErr)
 			failedState := g.withRunState(llmReq.ContextWindowState)
 			if events != nil {
 				events.emitCompactFailed(failedState, mode, applyErr.Error(), applyErr.Error())
@@ -224,6 +298,7 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 		}
 	}
 	g.consecutiveCompactFailures = 0
+	g.lastCompactFailureReason = ""
 	// A successful compact changes the conversation, so the previous
 	// provider-reported usage no longer corresponds to the next request's
 	// input. Reset the actual-usage trigger so ShouldAutoCompactByActualUsage
@@ -249,10 +324,86 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 	return g.evaluateRequest(rebuilt), nil
 }
 
-func (g *contextGovernor) recordCompactFailure() {
+func (g *contextGovernor) recordCompactFailure(err error) {
 	g.consecutiveCompactFailures++
+	g.lastCompactFailureReason = compactFailureReason(err)
 	if g.consecutiveCompactFailures >= 3 {
 		g.compactCircuitOpen = true
+	}
+}
+
+func (g *contextGovernor) evaluateCompactPostcondition(llmReq LLMRequest, preState ContextWindowState, result CompactResult) error {
+	if result.Fallback.Used {
+		return fmt.Errorf("%w: fallback summary is not a successful compact", errInsufficientReduction)
+	}
+	summaryText := strings.TrimSpace(result.SummaryMessage.Content)
+	if summaryText == "" && len(result.Messages) > 0 {
+		summaryText = strings.TrimSpace(result.Messages[0].Content)
+	}
+	if summaryText == "" {
+		return fmt.Errorf("%w: empty summary", errInsufficientReduction)
+	}
+	if err := convcontext.ValidateToolResultPairing(result.Messages); err != nil {
+		return err
+	}
+	envelope := ContextEnvelope{}
+	if llmReq.EnvelopeDebug != nil {
+		envelope = *llmReq.EnvelopeDebug
+	}
+	envelope.Messages = result.Messages
+	postState := g.engine.Evaluate(envelope)
+	postState.LastAPIUsageTokens = 0
+	postState.LastSentEstimatedInputTokens = 0
+	post := postState.ConservativeProjectedTokens()
+	autoThreshold := preState.AutoCompactThreshold
+	if postState.AutoCompactThreshold > 0 {
+		autoThreshold = postState.AutoCompactThreshold
+	}
+	if autoThreshold > 0 && post >= autoThreshold {
+		return fmt.Errorf("%w: post=%d auto=%d", errStillAboveAutoThreshold, post, autoThreshold)
+	}
+	blockThreshold := preState.blockingThreshold()
+	if postState.blockingThreshold() > 0 {
+		blockThreshold = postState.blockingThreshold()
+	}
+	if blockThreshold > 0 && post >= blockThreshold {
+		return fmt.Errorf("%w: post=%d block=%d", errStillAboveBlockThreshold, post, blockThreshold)
+	}
+	preMessages := estimateMessagesTokens(llmReq.Messages)
+	postMessages := estimateMessagesTokens(result.Messages)
+	if preMessages >= minCompactableHistoryTokens && postMessages > int(float64(preMessages)*compactMinReductionRatio) {
+		return fmt.Errorf("%w: post=%d pre=%d", errInsufficientReduction, postMessages, preMessages)
+	}
+	return nil
+}
+
+func compactableHistoryTokens(messages []convcontext.Message, targetTokens, projectedTokens int) int {
+	prefix, _ := splitCompactGroups(messages, targetTokens)
+	localPrefix := estimateMessagesTokens(flattenCompactGroups(prefix))
+	localTotal := estimateMessagesTokens(messages)
+	if localTotal > 0 && projectedTokens > localTotal*2 {
+		return projectedTokens
+	}
+	return localPrefix
+}
+
+func compactFailureReason(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch {
+	case errors.Is(err, errInsufficientReduction):
+		return compactFailureInsufficientReduction
+	case errors.Is(err, errStillAboveAutoThreshold):
+		return compactFailureStillAboveAutoThreshold
+	case errors.Is(err, errStillAboveBlockThreshold):
+		return compactFailureStillAboveBlockThreshold
+	case errors.Is(err, errOversizedProtectedTail):
+		return compactFailureOversizedProtectedTail
+	case errors.Is(err, errNotEnoughCompactableHistory):
+		return compactFailureNotEnoughHistory
+	default:
+		return err.Error()
 	}
 }
 

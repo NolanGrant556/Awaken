@@ -2,6 +2,7 @@ package agentcore
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -200,7 +201,19 @@ func TestIsPromptTooLongError(t *testing.T) {
 	if !isPromptTooLongError(errors.New("maximum context length exceeded")) {
 		t.Fatalf("expected prompt-too-long detection")
 	}
+	if !isPromptTooLongError(errors.New("prompt too long")) {
+		t.Fatalf("expected provider prompt-too-long detection")
+	}
 	if isPromptTooLongError(errors.New("transport error")) {
 		t.Fatalf("did not expect prompt-too-long detection")
+	}
+	if isPromptTooLongError(errContextWindowBlocked) {
+		t.Fatalf("CONTEXT_BLOCKED must not be treated as a reactive prompt-too-long error")
+	}
+	if isPromptTooLongError(fmt.Errorf("%w: estimated 98000 tokens exceeds blocking threshold 96000", errContextWindowBlocked)) {
+		t.Fatalf("wrapped CONTEXT_BLOCKED must not be treated as prompt-too-long")
+	}
+	if isPromptTooLongError(errInsufficientReduction) || isPromptTooLongError(errOversizedProtectedTail) {
+		t.Fatalf("compact postcondition errors must not trigger reactive compact")
 	}
 }

@@ -57,6 +57,7 @@ export type ProjectFilesWorkspaceProps = {
     | "closeProjectFilePreview"
     | "openProjectFileExternally"
     | "revealProjectFile"
+    | "saveProjectMarkdownFile"
   >;
   projectId?: string;
   projectLabel?: string;

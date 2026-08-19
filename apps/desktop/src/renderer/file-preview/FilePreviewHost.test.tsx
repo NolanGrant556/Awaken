@@ -44,6 +44,10 @@ describe("FilePreviewHost", () => {
               ok: true as const,
             })),
             revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+            saveProjectMarkdownFile: vi.fn(async () => ({
+              ok: true as const,
+              byteLength: 0,
+            })),
           }}
           mode="browser"
           onModeChange={vi.fn()}
@@ -93,6 +97,10 @@ describe("FilePreviewHost", () => {
               ok: true as const,
             })),
             revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+            saveProjectMarkdownFile: vi.fn(async () => ({
+              ok: true as const,
+              byteLength: 42,
+            })),
           }}
           projectId="project-1"
           folderPath="/workspace"
@@ -123,6 +131,8 @@ describe("FilePreviewHost", () => {
     expect(
       container.querySelectorAll(".project-file-preview-heading"),
     ).toHaveLength(1);
+    expect(container.querySelector('[aria-label="预览 Markdown"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="编辑 Markdown"]')).not.toBeNull();
     expect(container.querySelector(".project-file-preview-toolbar")).toBeNull();
   });
 
@@ -145,6 +155,10 @@ describe("FilePreviewHost", () => {
       closeProjectFilePreview: vi.fn(async () => undefined),
       openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
       revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+      saveProjectMarkdownFile: vi.fn(async () => ({
+        ok: true as const,
+        byteLength: 0,
+      })),
     };
 
     await act(async () => {
@@ -171,6 +185,7 @@ describe("FilePreviewHost", () => {
       container.querySelectorAll(".project-file-preview-heading"),
     ).toHaveLength(1);
     expect(container.querySelector(".project-file-preview-toolbar")).toBeNull();
+    expect(container.querySelector('[aria-label="编辑 Markdown"]')).toBeNull();
     expect(container.textContent).not.toContain("搜索");
   });
 
@@ -194,6 +209,10 @@ describe("FilePreviewHost", () => {
       closeProjectFilePreview: vi.fn(async () => undefined),
       openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
       revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+      saveProjectMarkdownFile: vi.fn(async () => ({
+        ok: true as const,
+        byteLength: 0,
+      })),
     };
     const selection = { name: "index.html", relativePath: "site/index.html" };
     await act(async () => {
@@ -274,6 +293,10 @@ describe("FilePreviewHost", () => {
       }),
       openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
       revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+      saveProjectMarkdownFile: vi.fn(async () => ({
+        ok: true as const,
+        byteLength: 0,
+      })),
     };
     const onModeChange = vi.fn();
     const onPreviewPrimaryClick = vi.fn();

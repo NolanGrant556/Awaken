@@ -70,6 +70,8 @@ import {
   type ProjectFilePreviewActionRequest,
   type ProjectFilePreviewActionResult,
   type ProjectFilePreviewCloseRequest,
+  type ProjectFilePreviewSaveRequest,
+  type ProjectFilePreviewSaveResult,
   type ProjectFilePreviewStartRequest,
   type ProjectFilePreviewStartResult,
   type ProjectMutationResult,
@@ -301,6 +303,11 @@ const bridge: AwakenBridge = {
       "awaken:reveal-project-file",
       request,
     ) as Promise<ProjectFilePreviewActionResult>,
+  saveProjectMarkdownFile: (request: ProjectFilePreviewSaveRequest) =>
+    ipcRenderer.invoke(
+      "awaken:save-project-markdown-file",
+      request,
+    ) as Promise<ProjectFilePreviewSaveResult>,
   upsertProject: (workspaceRoot: string, displayName?: string) =>
     ipcRenderer.invoke("awaken:upsert-project", {
       workspaceRoot,

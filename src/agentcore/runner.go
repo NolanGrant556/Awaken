@@ -1201,6 +1201,17 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 			continue
 		}
 
+		if result, rejected := r.admitToolCall(hookCall, results); rejected {
+			results = append(results, result)
+			if events != nil {
+				if err := events.emitToolResultBatch(runCtx, result, nil, nil); err != nil {
+					cancel()
+					terminateReason = TerminalReasonPersistenceError
+				}
+			}
+			continue
+		}
+
 		if r.failureSupervisor != nil {
 			r.failureSupervisor.NoteRealExecution(before.CallSignature)
 		}

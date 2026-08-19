@@ -227,7 +227,8 @@ export function projectVisibleNarrativeItems({
   const trailingIndex = items.length - 1;
   return items.filter(
     (item, index) =>
-      item.kind !== "planning" || (isBusy && index === trailingIndex),
+      item.kind !== "compactBoundary" &&
+      (item.kind !== "planning" || (isBusy && index === trailingIndex)),
   );
 }
 

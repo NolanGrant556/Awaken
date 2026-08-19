@@ -6289,14 +6289,14 @@ export function App() {
             animateToolEntry && !replayedNarrativeItemIds.has(item.id)
           }
           label={
-            item.kind === "planning" && item.phase === "continuation"
+            item.kind === "planning" && item.phase
               ? item.text
               : undefined
           }
           theme={appearanceTheme}
         />
       );
-      return item.kind === "planning" && item.phase === "continuation" ? (
+      return item.kind === "planning" && item.phase ? (
         <div key={key} className="narrative-model-continuation">
           {thoughtTrace}
         </div>
@@ -6327,21 +6327,7 @@ export function App() {
       );
     }
     if (item.kind === "compactBoundary") {
-      return (
-        <div
-          key={key}
-          className={`compact-boundary compact-boundary-${item.status}`}
-          role="separator"
-          aria-label={item.detail ? `${item.title}: ${item.detail}` : item.title}
-        >
-          <span className="compact-boundary-line" aria-hidden="true" />
-          <span className="compact-boundary-copy">
-            <span className="compact-boundary-title">{item.title}</span>
-            {item.detail ? <span className="compact-boundary-detail">{item.detail}</span> : null}
-          </span>
-          <span className="compact-boundary-line" aria-hidden="true" />
-        </div>
-      );
+      return null;
     }
     if (item.kind === "exploring") {
       const actions = item.actions.map((action) => ({

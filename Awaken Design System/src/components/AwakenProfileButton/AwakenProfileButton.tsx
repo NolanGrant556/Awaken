@@ -1,5 +1,5 @@
 import "./AwakenProfileButton.css";
-import type { CSSProperties, MouseEvent } from "react";
+import type { CSSProperties, MouseEvent, Ref } from "react";
 import { ChevronUp } from "lucide-react";
 import { AwakenAvatar } from "../AwakenAvatar";
 
@@ -11,6 +11,7 @@ export type AwakenProfileButtonProps = {
   expanded?: boolean;
   controls?: string;
   onClick?: () => void;
+  buttonRef?: Ref<HTMLButtonElement>;
 };
 
 const buttonStyle: CSSProperties = {
@@ -59,6 +60,7 @@ export function AwakenProfileButton({
   expanded,
   controls,
   onClick,
+  buttonRef,
 }: AwakenProfileButtonProps) {
   const handleEnter = (e: MouseEvent<HTMLButtonElement>) => {
     e.currentTarget.style.background = "var(--aw-bg-fill-light)";
@@ -75,6 +77,7 @@ export function AwakenProfileButton({
 
   return (
     <button
+      ref={buttonRef}
       type="button"
       onClick={onClick}
       aria-label={`用户 ${name}`}

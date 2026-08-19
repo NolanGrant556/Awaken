@@ -317,4 +317,54 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
       onProfileClick: noop,
     } as unknown as Partial<ComponentProps<typeof AwakenSidebar>>,
   },
+  {
+    id: "update-available",
+    label: "有可用更新",
+    props: {
+      profileName: "Nolan",
+      profileAvatarFallback: "AW",
+      onProfileClick: noop,
+      profileUpdateAction: { state: "available", label: "更新到 v0.2.0", onClick: noop },
+    },
+  },
+  {
+    id: "update-downloading-indeterminate",
+    label: "更新下载中（未知总量）",
+    props: {
+      profileName: "Nolan",
+      profileAvatarFallback: "AW",
+      onProfileClick: noop,
+      profileUpdateAction: { state: "downloading", label: "正在下载更新…", onClick: noop },
+    },
+  },
+  {
+    id: "update-downloading-37",
+    label: "更新下载 37%",
+    props: {
+      profileName: "Nolan",
+      profileAvatarFallback: "AW",
+      onProfileClick: noop,
+      profileUpdateAction: { state: "downloading", label: "正在下载更新", progress: 37, onClick: noop },
+    },
+  },
+  {
+    id: "update-downloaded",
+    label: "更新已下载待重启",
+    props: {
+      profileName: "Nolan",
+      profileAvatarFallback: "AW",
+      onProfileClick: noop,
+      profileUpdateAction: { state: "downloaded", label: "重启以完成更新", onClick: noop },
+    },
+  },
+  {
+    id: "update-error",
+    label: "更新失败",
+    props: {
+      profileName: "Nolan",
+      profileAvatarFallback: "AW",
+      onProfileClick: noop,
+      profileUpdateAction: { state: "error", label: "更新失败，点击重试", onClick: noop },
+    },
+  },
 ];

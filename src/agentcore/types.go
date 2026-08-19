@@ -2,6 +2,7 @@ package agentcore
 
 import (
 	stdcontext "context"
+	"strings"
 
 	"awaken/src/agentcore/subagent"
 	"awaken/src/computer"
@@ -47,6 +48,10 @@ type AgentConfig struct {
 	MemoryRecallEnd          func()
 	MemoryRecallDrain        func() []MemoryRecallReceipt
 	MemoryRecallReset        func()
+	// CaptureMemoryRecallSnapshot returns the parent run's already-recalled
+	// Memory identities and frozen content. Child agents inherit a compatible
+	// subset and must not run a user-scope selector.
+	CaptureMemoryRecallSnapshot func() *MemoryRecallSnapshot
 	AutoToolPolicy           AutoToolPolicy
 	// ToolExposure selects the model-visible tool pool. Empty Mode uses
 	// DefaultToolExposurePolicy applies generic explicit hide/show rules.
@@ -150,6 +155,54 @@ type MemoryRecallReceipt struct {
 	Action    string `json:"action,omitempty"`
 	Status    string `json:"status,omitempty"`
 	ErrorCode string `json:"error_code,omitempty"`
+}
+
+// MemoryRecallSnapshot is the run-scoped, host-owned recall set formed after
+// the first successful parent recall. Later turns may append identities; they
+// never replace already injected content.
+type MemoryRecallSnapshot struct {
+	WorkspaceRoot string
+	Items         []MemoryRecallSnapshotItem
+}
+
+type MemoryRecallSnapshotItem struct {
+	MemoryID string
+	Scope    string
+	Type     string
+	Revision int
+	Bytes    int
+	Content  string
+}
+
+func (s *MemoryRecallSnapshot) MergePreserveExisting(incoming *MemoryRecallSnapshot) {
+	if s == nil || incoming == nil {
+		return
+	}
+	seen := make(map[string]bool, len(s.Items))
+	for _, item := range s.Items {
+		seen[item.MemoryID] = true
+	}
+	for _, item := range incoming.Items {
+		if item.MemoryID == "" || seen[item.MemoryID] {
+			continue
+		}
+		s.Items = append(s.Items, item)
+		seen[item.MemoryID] = true
+	}
+}
+
+func (s *MemoryRecallSnapshot) ContextBlock() string {
+	if s == nil || len(s.Items) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString("<awaken_recalled_memories trust=\"data_only\" origin=\"inherited_parent_snapshot\">\n")
+	for _, item := range s.Items {
+		builder.WriteString(item.Content)
+		builder.WriteString("\n")
+	}
+	builder.WriteString("</awaken_recalled_memories>")
+	return builder.String()
 }
 
 // ComposerSkillSelectionContext records the current run and the ordered Skills

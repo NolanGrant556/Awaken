@@ -4,7 +4,7 @@ import { awakenSubagentStatusLabels as statusLabels } from "../AwakenSubagentExe
 export type AwakenSubagentRowView = {
   taskId: string;
   description: string;
-  agentType: "explore" | "review" | "general";
+  agentType: "explore" | "plan" | "review" | "general";
   status: "queued" | "running" | "completed" | "failed" | "cancelling" | "cancelled" | "interrupted";
   activity?: string;
   resultPreview?: string;

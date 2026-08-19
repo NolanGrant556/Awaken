@@ -20,6 +20,7 @@ import { AwakenSidebarThreadSpinner } from "../AwakenSidebarThreadSpinner";
 import { AwakenWorkbenchSidebarFrame } from "../AwakenWorkbenchSidebarFrame";
 import { AwakenSidebar } from "./AwakenSidebar";
 import { AwakenSidebarStates } from "./AwakenSidebar.states";
+import { AwakenSidebarUpdateButton } from "./AwakenSidebarUpdateButton";
 
 type SidebarDialogMode =
   | "create-project"
@@ -35,6 +36,7 @@ const DEMO_PROJECT_FOLDER_PATHS = [
 
 export function AwakenSidebarDemo() {
   const desktopProps = AwakenSidebarStates[0]?.props ?? {};
+  const updateStates = AwakenSidebarStates.filter((state) => state.id.startsWith("update-"));
   const navItems = desktopProps.navItems ?? [];
   const [projects, setProjects] = useState(desktopProps.projects ?? []);
   const conversations = desktopProps.conversations ?? [];
@@ -312,6 +314,30 @@ export function AwakenSidebarDemo() {
               >
                 New Agent
               </AwakenNewTaskButton>
+            </div>
+          </article>
+
+          <article className="aw-sidebar-demo__part">
+            <header>
+              <h4>更新入口</h4>
+              <code>AwakenSidebarUpdateButton</code>
+              <p>位于账户入口上方的更新提示按钮：有新版本、下载中（未知/已知进度）、待重启与失败重试；点击只回传回调。</p>
+            </header>
+            <div className="aw-sidebar-demo__part-canvas aw-sidebar-demo__part-canvas--sidebar-width">
+              <div className="aw-sidebar-demo__update-list">
+                {updateStates.map((state) =>
+                  state.props.profileUpdateAction ? (
+                    <AwakenSidebarUpdateButton
+                      key={state.id}
+                      action={{
+                        ...state.props.profileUpdateAction,
+                        onClick: () =>
+                          setLastAction(`已触发更新入口回调（${state.label}，Gallery 模拟）。`),
+                      }}
+                    />
+                  ) : null,
+                )}
+              </div>
             </div>
           </article>
 

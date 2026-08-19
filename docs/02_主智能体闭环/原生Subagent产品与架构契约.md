@@ -11,30 +11,29 @@
 - `ToolRuntime` 会把 `SubagentOrigin` 带入 execution intent，并在执行前复核 child boundary；
 - `context: fork` Skill 已能通过 `Runner.startSkillChild` 同步运行真实 child，child 的模型消息、工具调用和压缩记录带 `agent_id`，父模型历史恢复会排除 child records；
 - 父 run 的取消上下文可以终止当前同步 Skill child。
-- 正式模型工具 `subagent(action=spawn|status|wait|cancel)` 已注册；只开放 fresh、`shared_readonly` 的 `explore/review` child，child 不暴露 Subagent、主动提问或 mutation 工具；
+- 正式模型工具 `subagent(action=spawn|status|wait|cancel|message)` 已注册；host-owned 角色为 `explore` / `plan` / `review` / `general`。只读角色强制 `shared_readonly` 且隐藏 mutation 工具；`general` 默认 `shared` 可写父工作区，或可选 `git_worktree`。child 不暴露 Subagent、主动提问、ACP 或 Hook 配置工具；
 - child 模型由 Host 解析：默认继承父 Agent profile；Host 内部存在有效 `subagent` route 时可先解析该 route，Renderer 不提供用途模型选择器；模型可见 spawn schema 不含 `model_profile_id`、endpoint 或凭据；
 - `src/subagentruntime` 提供 run-scoped task registry、事件驱动 wait、单任务取消、每 run 最多 8 个任务和最多 4 个并发执行；父 run 终态前会收敛非终态 child；
 - child 使用独立 conversation、agent/task identity 和取消上下文，生命周期与有界结果写入 SemanticJournal；live Agent event 与 durable reasoning/message/tool frame 都携带同一 `subagentTaskId/subagentAgentId`，Renderer 将它们路由到 child 自己的 narrative，不再混入 root；
 - child 的每个耐久 `tool_call` 与 `model_usage` 会按稳定 ID 去重后生成 `subagent_progress`，累计工具次数、provider-reported input/output/total tokens；中心 group 与右侧 Inspector 同时显示工具数、token 与按耐久起止时间计算的耗时；
 - `wait` 到期属于中性检索结果：返回 `retrieval_status=timeout` 和当前 snapshots，不产生失败 Outcome，也不取消 child；
 - child terminal 先耐久，再进入 manager 的一次性交接队列；若 root 未通过成功 `wait` 或 terminal `status` 显式消费，Runner 会在下一模型请求边界自动注入有界结构化终态。若 child 在 root 模型生成期间完成，旧响应不能直接成为 run final，Runner 会保留该响应并追加一次带终态的新模型边界；
-- Core 已提供 run-scoped Subagent list/detail/cancel route；message route 当前明确返回 unsupported；
+- Core 已提供 run-scoped Subagent list/detail/cancel/message route；message 先写 `subagent_message_queued` 再入队，child 只在下一模型轮次边界 drain，终态任务返回 `subagent_not_running` 且不复活；
 - Desktop reducer 已以 `subagentsById/subagentOrder` 独立保存 task truth；当前 turn 显示 Subagent group，点击 row 在 dock Composer 上方打开可关闭/重开的独立执行详情浮层，卡内按 child semantic 顺序展示思考、工具与 Markdown 结果并有独立滚动和单任务停止，且不改变主对话流布局；右侧 Inspector 继续提供任务切换、统计和控制；
 - root/child 的 tool text/media blob 使用 agent/task + run + turn + tool-call 复合命名空间；超过 32 KiB 的文本只在 journal 留 digest/size/preview 票据，下一次 provider request 在 Core 内校验并水合完整内容，Renderer 与模型都不需要读取 `~/.awaken` 路径；
 - queued cancel 在 scheduler admission 后会再次检查，不能回跳 `running`；取消宽限期后写 `interrupted`；terminal append/flush 失败保留最后一份已耐久的非终态 snapshot 并让 root barrier fail closed，不发布伪成功；
-- macOS 真实 Desktop 已验证 spawn、running、completed/result 和单任务 cancelled/error 投影。
+- Core 重启时，journal 恢复会把没有 `subagent_terminal` 的已创建 task 补写 `interrupted`，不重跑模型或工具；
+- 正式 child 继承父 run 已召回且冻结的 `MemoryRecallSnapshot` 子集，不运行 user-scope selector，也不把临时 worktree 当成新 project；
+- Desktop reducer 已投影 `plan`/`general` 与 workspace mode；Inspector 和中心执行卡只提供查看、关闭与单任务取消，不向用户提供追加指令输入。Core 内主 Agent 仍可使用 `message` action。AC-SA 的完成声明必须依验收表逐项留下当前 Desktop 证据，不能由自动化或单一旧截图替代。
 
 **当前不支持：**
 
-- 不支持向运行中的 child 追加消息；tool action 与 HTTP message route 都 fail closed；
-- 不支持 `general` 或任何写能力 child，也没有独立 Git worktree；
-- 不支持递归 Subagent、full-context fork、由模型或 child prompt 任意指定 profile、detached/cross-run worker；
-- Core 重启会保留已有耐久记录，但尚未扫描未闭合 task 并补写 `interrupted`，不会恢复运行中的 child；
-- 正式 child 尚未继承父 `MemoryRecallSnapshot`；
+- 不支持递归 Subagent、省略类型的隐式 full-context fork、由模型或 child prompt 任意指定 profile、detached/cross-run worker；
+- 不支持自定义 markdown/JSON agent 目录、teammate 广播、自动 merge worktree；
+- 两个并发 `shared` 可写 child 若 writable root 重叠会被拒绝；不会静默共享同一可写根；
 - root/child 原子共享 token/tool/cost 预算和 child 完整 cost 统计尚未接通；provider 未报告 usage 时不伪造 child token；
-- 窄屏专用 Subagent sheet、用户追加指令输入、跨重启 Inspector selection 尚未提供。
-
-本文后续流程同时描述当前只读阶段与目标扩展。message、写 worktree、Memory、崩溃 orphan 恢复、预算和窄屏 sheet 等只有在本节移入“当前支持”并通过对应验收后，才可写成当前能力。
+- 窄屏专用 Subagent sheet、跨重启 Inspector selection、review 的 `/tmp` 写例外尚未提供；
+- 真实 Desktop AC-SA-01～17 本次不执行，不能用自动化或旧截图代替。
 
 本文使用下列术语：
 
@@ -53,7 +52,7 @@
 
 1. 创建一个或多个独立 child，明确分配任务、角色和只读/隔离写入模式；
 2. 在同一 run 内并发执行互不依赖的子任务；
-3. 查询或等待 child、向运行中的 child 追加指令、取消单个 child；
+3. 由主 Agent 查询或等待 child、向运行中的 child 追加指令、取消单个 child；Desktop 用户界面只提供查看和取消；
 4. 只把结构化进度与最终 handoff 返回父上下文，不把 child 原始 transcript 全量灌入父模型；
 5. 在 Workbench 看到稳定的子任务摘要、状态、进度、结果和控制入口；
 6. 切换 thread 或重启 Desktop 后重放已完成事实，并把崩溃时仍运行的 child 显式恢复为 `interrupted`；
@@ -95,7 +94,7 @@
 - 不用 output file/symlink 或高频 polling 让父模型轮询；耐久 terminal 默认通过 manager 的一次性交接队列进入父模型，结构化 `wait/status` outcome 仍是显式检索与恢复入口；
 - 不允许后台 child 在 root run 终态后继续；
 - 不让 child 重新组装更宽的工具池；它只能继承或收窄父 run 的固定 snapshot；
-- 不默认共享 workspace 并发写；写任务必须进入 host 创建的隔离 worktree；
+- 不默认让两个可写 child 共享同一 writable root；`general` 默认可写父 cwd，`git_worktree` 才隔离；host 不自动 merge；
 - 不以 UI retention/eviction 决定持久事实是否存在。
 
 ## 4. 产品流程
@@ -129,9 +128,9 @@
 - `return_when=any` 返回本次新到达的 terminal tasks；已消费的 completion 不能重复冒充新通知；
 - UI 按创建顺序展示，状态更新不得重排正在阅读的列表。
 
-### 4.3 追加指令
+### 4.3 主 Agent 追加指令
 
-- 主模型使用 `message` action，Desktop 用户使用同一 Core control service；
+- 主模型使用 `message` action；Desktop 不向用户暴露 message 输入面或发送按钮；
 - message 必须先写 `subagent_message_queued` 并 flush，再进入 child queue；
 - child 只在一次模型响应结束、下一次 provider request 构建前 drain；
 - 已开始的 tool call 不被 message 抢占；
@@ -181,7 +180,7 @@ Awaken Design System/src/components/AwakenSubagentRow/
 type SubagentRowView = {
   taskId: string;
   description: string;
-  agentType: "explore" | "review" | "general";
+  agentType: "explore" | "plan" | "review" | "general";
   status: "queued" | "running" | "completed" |
           "failed" | "cancelling" | "cancelled" | "interrupted";
   activity?: string;
@@ -217,7 +216,7 @@ type SubagentRowView = {
 - 卡片最大宽度 680px、最大高度 560px，并继续受 RunStage 顶部 28px 与 Composer 上沿共同限制；body 使用独立纵向滚动与 `overscroll-behavior: contain`，滚动条只显示 thumb，track、track-piece、corner 和稳定 gutter 均不可见；打开、关闭和内容增长都不得改变 narrative 高度、anchor 或 follow；
 - terminal result 使用 Markdown renderer，不使用无界 `<pre>`；错误显示稳定 code/message；
 - queued/running/cancelling 显示明确的单任务停止入口；关闭卡片、切换 task 和停止 task 是三种不同动作；
-- phase 1 不支持追加指令，所以卡片与 Inspector 都不得伪造可输入的 child composer。
+- 运行中/排队中的 child 在卡片与 Inspector 中只提供单任务停止入口，不显示追加指令输入。Core 内主 Agent 的 `message` action 不创建新的 thread/run/user_message，也不投影为用户消息。
 
 ### 5.3 右侧 Subagent Inspector
 
@@ -247,7 +246,7 @@ Workbench 右栏顶部从单一“文件”入口扩展为：
    - cancelling：按钮禁用并显示“正在取消…”；
    - terminal：不显示取消。
 
-追加指令输入是已确认但尚未实现的设计约束；当前 tool action 与 HTTP message route 均 fail closed，Inspector 和中心卡都不显示输入框。未来接通后也不能复用主 composer 或创建新的 thread/run/user_message。
+Core `message` 服务继续供主模型使用；Desktop Inspector 和中心卡不提供用户输入，不复用主 composer，也不创建新的 thread/run/user_message。
 
 窄窗口当前沿用现有 Inspector 自动折叠，中心执行详情仍使用同一 RunStage 浮层并服从左右安全边距。专用全屏 Subagent sheet 尚未提供；未来 sheet 只能消费同一详情 props，不能复制 runtime state 或新增第三种 composer variant。
 
@@ -273,13 +272,14 @@ Workbench 右栏顶部从单一“文件”入口扩展为：
 
 ### 6.1 模块与 owner
 
-新增：
+当前模块：
 
 ```text
 src/subagentruntime/
   types.go          # task/status/request/result/controller interface
   manager.go        # run-scoped registry、queue、并发、wait、cancel
-  budget.go         # root/children 共享预算
+  context.go        # root/child run context 与任务身份
+  roles.go          # agent role 注册与工具边界
   manager_test.go
 
 src/tools/subagent/
@@ -287,11 +287,11 @@ src/tools/subagent/
   tool_test.go
 ```
 
-修改：
+主要集成点：
 
 - `src/agentcore/runner.go`：向 tool execution context 注入 run-scoped controller；启动 child Runner；在 root terminal 前执行 child barrier；
 - `src/agentcore/spawner.go`：补齐明确的 child budgets、Memory snapshot、tool exposure 和 context identity复制；
-- `src/agentcore/types.go`：增加 `SubagentController`、共享 budget、父 Memory snapshot；
+- `src/agentcore/types.go`：定义 `SubagentController`、parent/child 边界和父 `MemoryRecallSnapshot` 相关 hook；
 - `src/runtime/run_service.go`、`session.go`：每个 run 创建/销毁 manager，把 Desktop control route 绑定到精确 session；
 - `src/agentcore/semantic_record.go`、journal restore：增加稳定 child kinds 与 orphan recovery；
 - `src/protocol/agui`、`src/server`：wire 和 control route；
@@ -333,8 +333,8 @@ Manager 的 starter callback 固定执行：
 3. 写并 flush `subagent_spawned`；
 4. 通过 `CreateSubagent` 复制父 immutable snapshots；
 5. 强制应用 child role profile：
-   - `explore`、`review`：`read_only + network <= parent`；
-   - `general`：只有 `git_worktree` 模式可继承写能力；
+   - `explore`、`plan`、`review`：`read_only + network <= parent`；
+   - `general`：`shared` 继承不超过父 profile 的写能力；`git_worktree` 先由 host 建隔离 worktree 再重锚 writable roots；
 6. 创建独立 `Conversation`，只注入 host handoff 和父 `MemoryRecallSnapshot` 的合法子集；
 7. 使用 `context.WithCancel(rootRunContext)` 再派生单 task cancel；
 8. 进入 scheduler；取得 slot 后写 `running` 并启动 child runner；
@@ -349,8 +349,9 @@ Manager 的 starter callback 固定执行：
 | type | 用途 | profile | tool exposure |
 | --- | --- | --- | --- |
 | `explore` | 代码搜索、资料定位、事实梳理 | 强制 read-only | 父 snapshot 的只读子集 |
+| `plan` | 只读规划实现路径，输出 Critical Files | 强制 read-only | 父 snapshot 的只读子集 |
 | `review` | 独立复核、风险和测试缺口 | 强制 read-only | 父 snapshot 的只读子集 |
-| `general` | 独立实现 | 不超过父 profile，且必须 worktree | 父 snapshot 去除 subagent/ask_user/外部交互 gate 后的子集 |
+| `general` | 独立实现 | 不超过父 profile；默认 shared，可选 worktree | 父 snapshot 去除 subagent/ask_user/外部交互 gate 后的子集 |
 
 定义正文作为 host-owned prompt section 进入 child request，并计入 `subagent_definitions` context contribution。模型不能通过 input 提交任意 system prompt、permission profile 或工具名。
 
@@ -365,8 +366,8 @@ Manager 的 starter callback 固定执行：
   "task_ids": ["wait 使用"],
   "description": "spawn 使用，1-80 字符",
   "prompt": "spawn/message 使用，最大 32 KiB",
-  "agent_type": "explore | review | general",
-  "workspace_mode": "shared_readonly | git_worktree",
+  "agent_type": "explore | plan | review | general",
+  "workspace_mode": "shared_readonly | shared | git_worktree",
   "return_when": "any | all",
   "timeout_ms": "0-60000"
 }
@@ -394,7 +395,7 @@ tool Outcome 的 `side_effect_state`：
 
 `wait` 成功结果额外包含 `retrieval_status=completed|running|timeout`。`timeout` 是中性成功结果，必须同时返回当前 task snapshots；历史 `subagent_wait_timeout` 只作为旧记录兼容错误码保留，新调用不再产生。
 
-### 6.6 并发与共享预算
+### 6.6 并发与当前预算边界
 
 默认门禁：
 
@@ -408,14 +409,13 @@ wait timeout            60s/call
 cancel grace            2s
 ```
 
-root 与所有 child 共享一个原子 `RunExecutionBudget`：
+当前 root 与每个 child 由各自 `Runner` 内的 `FailureSupervisor` 独立计数，尚未接通 run-scoped 的共享原子预算：
 
-- root 现有 128 turn / 512 tool execution 仍是 run 总上限；
-- child 的 32/128 是单 task 子上限，不额外扩大全局 512；
-- 每次 provider request 和实际 tool execution在开始前从对应预算 owner admission；
-- 排队、status、wait 不消耗 child model/tool budget，但 tool 自身仍计入 root 的 tool-call监督；
-- 任一 child 达到自身上限只终止该 child，不直接伪造 root run error；
-- 全局预算耗尽时 manager 取消未终态 child，root 按现有 run 级预算终止。
+- root 仍按现有默认值独立受限于 128 turn / 512 tool execution；
+- 每个 child 的 32 turn / 128 tool execution 是单 task 上限，但尚不会从同一个 root + children 全局计数器原子扣减；
+- root 调用 spawn/status/wait/message/cancel 工具仍计入 root 自身的 tool execution；排队和等待不会额外消耗 child 的 model/tool 预算；
+- 任一 child 达到自身上限只终止该 child，不直接伪造 root run error；root 终态 barrier 仍负责收敛未终态 child；
+- “root 与所有 child 共享 token / tool / cost 预算”仍是明确已知缺口，不得从并发上限、child 子上限或 terminal barrier 推导为已实现。
 
 ### 6.7 Workspace 与写隔离
 
@@ -424,6 +424,13 @@ root 与所有 child 共享一个原子 `RunExecutionBudget`：
 - canonical workspace 与父完全一致；
 - child profile 强制 read-only；
 - 可以并发；
+- 不创建 worktree。
+
+`shared`：
+
+- 仅 `general` 可请求；
+- canonical workspace 与父完全一致，profile 不超过父写能力；
+- 两个并发 shared 可写 child 的 writable root 相交时 spawn fail closed；
 - 不创建 worktree。
 
 `git_worktree`：
@@ -663,7 +670,7 @@ subagentOrder: string[];
 2. root-only spawn 同时由 tool exposure 和 runtime origin check 防守。
 3. child 不暴露原生 Subagent、`ask_user` 和需要直接 Desktop gate 的工具。
 4. `shared_readonly` 永远不能执行 mutation；模型描述或 Skill 文本不能改变该事实。
-5. 写 child 只能使用 host-owned worktree；不得共享父 writable root。
+5. 只读角色永远不能执行 mutation。`general` 默认可写父 workspace；两个并发可写 child 不得共享同一 writable root。`git_worktree` 的写入只落在 host 创建的 worktree，host 不自动 merge。
 6. child message append-before-delivery；child terminal append-before-notify；terminal persistence 失败时不允许自动交接。
 7. root `run_terminal` 是 run 最后一条生命周期事实，之前必须封口全部 child。
 8. child records 不进入父 conversation；只有显式 `wait/status` 或一次性 terminal handoff 的有界结果进入父模型。自动 handoff 使用 host-owned synthetic origin，不得替代最后一条真实用户输入或创建第二个用户 turn。
@@ -709,44 +716,43 @@ subagentOrder: string[];
 
 1. 将现有 `startSkillChild` 的通用 child 构造抽为 runner-owned starter；
 2. 实现 `subagent(action=spawn|status|wait|cancel)`；
-3. scheduler 当前并发上限为 4、每 run 总量为 8，只开放 `explore/review + shared_readonly`；
+3. scheduler 当前并发上限为 4、每 run 总量为 8；只读角色开放 `explore/plan/review + shared_readonly`，`general` 开放 `shared` 或 `git_worktree`；
 4. 增加 SemanticKinds、live/replay projector；
 5. root terminal barrier 与 run Stop取消 child；
 6. 自动化证明 child不能调用 mutation/subagent/ask_user；wait 超时后完成的 child 会在 root 下一模型边界自动交接且只交接一次。
 
 完成门禁：模型可创建只读 child，通过自动 terminal handoff 或 status/wait 取得结果，并可 cancel；当前实现已同时提供并发和 Desktop 基础 UI。
 
-### Phase 2：消息与完整 Desktop UI（部分完成）
+### Phase 2：消息与完整 Desktop UI（Core 已完成；Desktop 真机未走查）
 
 1. 已完成：并发上限 4、run tasks 上限 8；
-2. 已完成：事件驱动 `wait(any/all)`；未完成：`message` boundary queue；
-3. 已完成：list/detail/cancel HTTP 与 typed bridge；message route 仅返回 unsupported；
-4. 已完成：projector、中心 group、右侧 Inspector；未完成：窄屏专用 sheet；
-5. 已完成：单 child cancel、选择与错误终态；未完成：用户追加指令及草稿恢复；
+2. 已完成：事件驱动 `wait(any/all)` 与 `message` boundary queue；
+3. 已完成：list/detail/cancel/message HTTP 与 typed bridge；
+4. 已完成：projector、中心 group、右侧 Inspector，以及用户侧只查看/取消的控制边界；未完成：窄屏专用 sheet；
+5. 已完成：单 child cancel、选择与错误终态；草稿只留在 Renderer 内存；
 6. 已完成：tool activity/result preview、工具次数、provider-reported token 累计与耗时的有界投影；未完成：完整 cost 统计。
 
-完成门禁：真实 Desktop完成本文 AC-SA-01～10。
+完成门禁：Go/Desktop 自动化必须通过。AC-SA-01～10 真机走查本次不执行。
 
-### Phase 3：写 child 与 worktree
+### Phase 3：写 child 与 worktree（Core 已完成；Desktop 真机未走查）
 
-1. 实现 host-owned Git worktree service；
-2. 开放 `general + git_worktree`；
-3. child workspace/snapshot重锚、分支/commit/dirty receipt；
-4. 无改动自动清理，有改动/取消/失败保留；
-5. 主 Agent审查和显式整合旅程；
-6. 冲突、非 Git、worktree外写入和重启残留恢复测试。
+1. 已完成：host-owned Git worktree service；
+2. 已完成：开放 `general + shared` 与 `general + git_worktree`；
+3. 已完成：child workspace/snapshot 重锚、分支/commit/dirty receipt；
+4. 已完成：无改动自动清理，有改动/取消/失败保留；
+5. 主 Agent 审查和显式整合仍由父模型负责，host 不自动 merge；
+6. 已完成：重叠写拒绝、非 Git unsupported、worktree 不污染父树的自动化。
 
-完成门禁：AC-SA-11～13；此前 UI 必须把写模式标为不支持，不能静默共享写。
+完成门禁：相关 Go 测试必须通过。AC-SA-11～13 真机走查本次不执行。
 
-### Phase 4：Memory 与 Skill fork统一底座
+### Phase 4：Memory 与 orphan 恢复（部分完成）
 
-1. 落地父 `MemoryRecallSnapshot` 与 child继承门禁；
-2. 让 `context: fork` Skill通过同一 manager/starter运行，但保留 Skill event/receipt；
-3. 删除旧 `Runner.startSkillChild` 中重复 lifecycle代码；
-4. 验证 Skill fork行为、父结果和旧 journal兼容不变；
-5. 更新 08/11 域当前支持状态。
+1. 已完成：父 `MemoryRecallSnapshot` 与 child 继承门禁；child 不跑 user-scope selector；
+2. 已完成：journal 启动恢复把无 terminal 的 task 补 `interrupted`，不重跑；
+3. 未完成：让 `context: fork` Skill 通过同一 manager/starter 运行；
+4. 未完成：删除旧 `Runner.startSkillChild` 中重复 lifecycle 代码。
 
-完成门禁：child Memory不扩域；Skill fork Desktop与重启验收通过。
+完成门禁：child Memory 不扩域的自动化必须通过。Skill fork 统一底座与 Desktop 重启验收仍是后置项。
 
 ### Phase 5：可选 full-context fork
 
@@ -787,7 +793,7 @@ go vet ./...
 - read-only child 的 mutation拒绝；
 - spawn append+flush早于 goroutine，message早于queue，terminal早于wait wakeup；
 - 4并发/8总量、queued取消、wait any/all/timeout/cancel；timeout 后 terminal 自动交接、显式检索去重、terminal persistence 失败不通知；
-- root与child共享 tool/model预算；
+- root 与 child 各自预算上限的独立生效与耗尽行为；共享原子 tool/model/cost 预算未实现前，测试不得把独立计数伪装成全局预算；
 - root cancel传播和 terminal barrier；
 - child message只在轮次边界消费；
 - child records不进入父 model history；
@@ -812,7 +818,7 @@ git diff --check
 
 - reducer：task upsert、顺序、terminal、replay、跨thread隔离；
 - projector：child events只形成 subagent group，不污染 root tool narrative；
-- App：Inspector入口/badge/选择、cancel/message、文件工作区状态互不覆盖；
+- App：Inspector入口/badge/选择、cancel、无用户 message 输入、文件工作区状态互不覆盖；
 - workbench presentation：final后进入 execution process、group展开不改变 turn/anchor；
 - Design System：所有 status、长文本、键盘、浅/深主题和窄宽度；
 - Main/preload：typed route、run/task绑定、idempotency和错误映射。
@@ -821,12 +827,14 @@ git diff --check
 
 按根 README 正式入口运行。动态行为必须录屏或连续关键帧；Gallery/mock 只能辅助组件检查。
 
+**本次对齐任务明确不执行真实 Desktop 验收。** 下表仍是目标手工步骤，不得把未走查结果写成已通过。
+
 | ID | 级别 | 操作 | 预期 |
 | --- | --- | --- | --- |
 | AC-SA-01 | P0 | 让主 Agent创建一个 explore child | 当前 turn出现子任务 group；右栏入口和 running badge出现 |
 | AC-SA-02 | P0 | child运行时继续观察主 turn | child activity更新不抢焦点、不拉回暂停滚动、不改变prompt anchor |
 | AC-SA-03 | P0 | 打开子任务右栏并选择child | 显示同一 task identity、assignment、activity、模型、耗时；不显示原始秘密/args |
-| AC-SA-04 | P0 | 向运行中child追加指令 | 发送成功有receipt、草稿清空；child在下一轮次边界处理；主composer不受影响 |
+| AC-SA-04 | P0 | 打开运行中 child 的中心详情与右侧 Inspector | 两处都不显示追加指令输入或发送按钮；查看、关闭、取消可用，主 composer 不受影响；主 Agent 的内部 `message` action 仍按 Core 自动化验证 |
 | AC-SA-05 | P0 | 取消一个child | 目标child cancelling→cancelled；其他child和root继续 |
 | AC-SA-06 | P0 | 同时spawn 4个read-only child | 实际并发，状态/计数独立；第5个queued且slot释放后启动 |
 | AC-SA-07 | P0 | root调用wait(any/all) | any只返回新完成项，all等待全部；超时不取消 |
@@ -852,7 +860,7 @@ git diff --check
 - root terminal barrier、取消、预算、no-escalation 和 orphan recovery通过；
 - 11 域 child Memory约束随正式 child同时落地；
 - 自动化来自本次工作区实际执行；
-- macOS真实 Desktop AC-SA-01～10、14～17有当前证据；
+- macOS真实 Desktop AC-SA-01～17 本次未执行，保持未走查；
 - Windows/Linux未实机时继续明确标记平台缺口；
 - 同步更新根 README 能力地图、02 当前事实、01 Workbench/右栏/叙事/验收、03 SemanticJournal/存储、04 工具与权限、08 Skill fork、09 wire/routes、11 Memory；
 - 不保留第二份实施计划、旧 route/schema副本或把 `/sourcecode` 行为写成 Awaken 当前事实。

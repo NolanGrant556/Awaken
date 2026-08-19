@@ -219,6 +219,18 @@ describe("RunStage layout", () => {
     );
   });
 
+  it("does not expose a user follow-up input inside subagent details", () => {
+    const appSource = readFileSync(
+      new URL("./App.tsx", import.meta.url),
+      "utf8",
+    );
+    expect(appSource).not.toContain('id="subagent-overlay-message"');
+    expect(appSource).not.toContain('id="subagent-inspector-message"');
+    expect(appSource).not.toContain("handleMessageSubagent");
+    expect(appSource).not.toContain("subagentMessageDrafts");
+    expect(appSource).not.toContain("发送给子任务");
+  });
+
   it("keeps the right-rail subagent status pill on one line", () => {
     const appStyles = readFileSync(
       new URL("./styles.css", import.meta.url),

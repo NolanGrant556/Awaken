@@ -21,6 +21,7 @@ import {
   type ArtifactOpenRequest,
   type ArtifactOpenResult,
   type ArtifactMediaSourceResult,
+  type ArtifactPreviewStartRequest,
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
@@ -70,6 +71,8 @@ import {
   type ProjectFilePreviewActionRequest,
   type ProjectFilePreviewActionResult,
   type ProjectFilePreviewCloseRequest,
+  type ProjectFilePreviewSaveRequest,
+  type ProjectFilePreviewSaveResult,
   type ProjectFilePreviewStartRequest,
   type ProjectFilePreviewStartResult,
   type ProjectMutationResult,
@@ -114,6 +117,17 @@ import {
   type PetSettings,
   type PetSummary,
 } from "../shared/pets.js";
+import {
+  DESKTOP_UPDATE_CHANNELS,
+  type DesktopUpdateSnapshot,
+} from "../shared/desktop-update.js";
+
+const desktopUpdateStateHandlers = new Set<(snapshot: DesktopUpdateSnapshot) => void>();
+
+ipcRenderer.on(DESKTOP_UPDATE_CHANNELS.stateChanged, (_event, payload: DesktopUpdateSnapshot) => {
+  if (!payload || typeof payload.phase !== "string") return;
+  for (const handler of desktopUpdateStateHandlers) handler(payload);
+});
 
 const subscriptions = new Map<string, RunStreamHandlers>();
 const cliConnectorStateHandlers = new Set<(event: CliConnectorStateEvent) => void>();
@@ -283,6 +297,11 @@ const bridge: AwakenBridge = {
       "awaken:start-project-file-preview",
       request,
     ) as Promise<ProjectFilePreviewStartResult>,
+  startArtifactPreview: (request: ArtifactPreviewStartRequest) =>
+    ipcRenderer.invoke(
+      "awaken:start-artifact-preview",
+      request,
+    ) as Promise<ProjectFilePreviewStartResult>,
   closeProjectFilePreview: (request: ProjectFilePreviewCloseRequest) =>
     ipcRenderer.invoke("awaken:close-project-file-preview", request) as Promise<void>,
   onProjectFilePreviewInteraction: (callback) => {
@@ -301,6 +320,11 @@ const bridge: AwakenBridge = {
       "awaken:reveal-project-file",
       request,
     ) as Promise<ProjectFilePreviewActionResult>,
+  saveProjectMarkdownFile: (request: ProjectFilePreviewSaveRequest) =>
+    ipcRenderer.invoke(
+      "awaken:save-project-markdown-file",
+      request,
+    ) as Promise<ProjectFilePreviewSaveResult>,
   upsertProject: (workspaceRoot: string, displayName?: string) =>
     ipcRenderer.invoke("awaken:upsert-project", {
       workspaceRoot,
@@ -369,6 +393,18 @@ const bridge: AwakenBridge = {
       runId,
       taskId,
       reason,
+    }) as Promise<void>,
+  messageSubagent: (
+    runId: string,
+    taskId: string,
+    content: string,
+    idempotencyKey?: string,
+  ) =>
+    ipcRenderer.invoke("awaken:message-subagent", {
+      runId,
+      taskId,
+      content,
+      idempotencyKey,
     }) as Promise<void>,
   answerUserQuestion: (runId: string, questionId: string, answer: string) =>
     ipcRenderer.invoke("awaken:answer-user-question", {
@@ -646,6 +682,20 @@ const bridge: AwakenBridge = {
   onScheduledTaskThreadActivation: (handler) => {
     scheduledTaskThreadActivationHandlers.add(handler);
     return () => scheduledTaskThreadActivationHandlers.delete(handler);
+  },
+  getDesktopUpdateState: () =>
+    ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.getState) as Promise<DesktopUpdateSnapshot>,
+  checkDesktopUpdate: () =>
+    ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.check) as Promise<DesktopUpdateSnapshot>,
+  downloadDesktopUpdate: () =>
+    ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.download) as Promise<DesktopUpdateSnapshot>,
+  restartAndInstallDesktopUpdate: () =>
+    ipcRenderer.invoke(
+      DESKTOP_UPDATE_CHANNELS.restartAndInstall,
+    ) as Promise<DesktopUpdateSnapshot>,
+  onDesktopUpdateStateChanged: (handler) => {
+    desktopUpdateStateHandlers.add(handler);
+    return () => desktopUpdateStateHandlers.delete(handler);
   },
   listPets: () => ipcRenderer.invoke(PET_IPC_CHANNELS.listPets) as Promise<PetSummary[]>,
   getPetSettings: () => ipcRenderer.invoke(PET_IPC_CHANNELS.getPetSettings) as Promise<PetSettings>,

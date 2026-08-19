@@ -1,6 +1,7 @@
 import type { AguiEvent } from "./agui.js";
 import type { ProjectFilePreviewInteraction } from "./project-file-preview-interaction.js";
 import type { PetActivitySnapshot, PetBridge } from "./pets.js";
+import type { DesktopUpdateSnapshot } from "./desktop-update.js";
 
 export type DesktopPlatform = "macos" | "windows" | "linux";
 
@@ -459,6 +460,7 @@ export type ProjectFilePreviewErrorCode =
   | "PATH_OUTSIDE_PROJECT"
   | "FILE_NOT_FOUND"
   | "FILE_UNREADABLE"
+  | "FILE_UNWRITABLE"
   | "UNSUPPORTED_FILE_TYPE"
   | "FILE_TOO_LARGE"
   | "IMAGE_TOO_LARGE"
@@ -498,6 +500,20 @@ export type ProjectFilePreviewActionResult =
       ok: false;
       code: ProjectFilePreviewErrorCode;
       message: string;
+    };
+
+export type ProjectFilePreviewSaveRequest = ProjectFilePreviewActionRequest & {
+  content: string;
+};
+
+export type ProjectFilePreviewSaveResult =
+  | { ok: true; byteLength: number }
+  | {
+      ok: false;
+      code: ProjectFilePreviewErrorCode;
+      message: string;
+      byteLength?: number;
+      limitBytes?: number;
     };
 
 /** Folder list submitted when creating a project. An empty list is legal: the
@@ -1583,6 +1599,10 @@ export type ArtifactOpenRequest = {
   artifactPath?: string;
 };
 
+export type ArtifactPreviewStartRequest = ArtifactOpenRequest & {
+  requestId: string;
+};
+
 export type ArtifactOpenErrorCode =
   | "runtime_unavailable"
   | "artifact_not_recorded"
@@ -2010,6 +2030,9 @@ export type AwakenBridge = {
   startProjectFilePreview: (
     request: ProjectFilePreviewStartRequest,
   ) => Promise<ProjectFilePreviewStartResult>;
+  startArtifactPreview: (
+    request: ArtifactPreviewStartRequest,
+  ) => Promise<ProjectFilePreviewStartResult>;
   closeProjectFilePreview: (request: ProjectFilePreviewCloseRequest) => Promise<void>;
   onProjectFilePreviewInteraction: (
     handler: (interaction: ProjectFilePreviewInteraction) => void,
@@ -2020,6 +2043,9 @@ export type AwakenBridge = {
   revealProjectFile: (
     request: ProjectFilePreviewActionRequest,
   ) => Promise<ProjectFilePreviewActionResult>;
+  saveProjectMarkdownFile: (
+    request: ProjectFilePreviewSaveRequest,
+  ) => Promise<ProjectFilePreviewSaveResult>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
   createProject: (
     folders: ProjectFolderSelection[],
@@ -2049,6 +2075,12 @@ export type AwakenBridge = {
   startRun: (request: StartRunRequest) => Promise<DesktopOperationResult<RuntimeRun>>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
   cancelSubagent?: (runId: string, taskId: string, reason?: string) => Promise<void>;
+  messageSubagent?: (
+    runId: string,
+    taskId: string,
+    content: string,
+    idempotencyKey?: string,
+  ) => Promise<void>;
   answerUserQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
   resolveExternalInteraction: (
     runId: string,
@@ -2192,6 +2224,11 @@ export type AwakenBridge = {
   getSystemTimezone: () => Promise<string>;
   subscribeScheduledTaskEvents: (handler: (event: ScheduledTaskEvent) => void) => () => void;
   onScheduledTaskThreadActivation: (handler: (threadId: string) => void) => () => void;
+  getDesktopUpdateState: () => Promise<DesktopUpdateSnapshot>;
+  checkDesktopUpdate: () => Promise<DesktopUpdateSnapshot>;
+  downloadDesktopUpdate: () => Promise<DesktopUpdateSnapshot>;
+  restartAndInstallDesktopUpdate: () => Promise<DesktopUpdateSnapshot>;
+  onDesktopUpdateStateChanged: (handler: (snapshot: DesktopUpdateSnapshot) => void) => () => void;
 } & PetBridge;
 
 export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {

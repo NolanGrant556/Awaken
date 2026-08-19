@@ -33,7 +33,9 @@ import {
   mediaArtifactRequestForPath,
   nextUserQuestionPromptIndex,
   nextSubagentInspectorTaskId,
+  subagentAgentTypeLabel,
   subagentElapsedMs,
+  subagentWorkspaceModeLabel,
   promptNarrativeTokensForComposer,
   promptTextAfterTokenLeadingText,
   promptTokenViews,
@@ -590,10 +592,19 @@ function stubElectronBridge(): void {
         code: "UNSUPPORTED_FILE_TYPE" as const,
         message: "unsupported",
       })),
+      startArtifactPreview: vi.fn(async () => ({
+        ok: false as const,
+        code: "UNSUPPORTED_FILE_TYPE" as const,
+        message: "unsupported",
+      })),
       closeProjectFilePreview: vi.fn(async () => undefined),
       onProjectFilePreviewInteraction: vi.fn(() => () => {}),
       openProjectFileExternally: vi.fn(async () => ({ ok: true as const })),
       revealProjectFile: vi.fn(async () => ({ ok: true as const })),
+      saveProjectMarkdownFile: vi.fn(async () => ({
+        ok: true as const,
+        byteLength: 0,
+      })),
       upsertProject: vi.fn(),
       reorderProjects: vi.fn(),
       detachProject: vi.fn(),
@@ -826,6 +837,27 @@ function stubElectronBridge(): void {
       getSystemTimezone: vi.fn(async () => "UTC"),
       subscribeScheduledTaskEvents: vi.fn(() => () => {}),
       onScheduledTaskThreadActivation: vi.fn(() => () => {}),
+      getDesktopUpdateState: vi.fn(async () => ({
+        operationId: "disabled",
+        phase: "disabled" as const,
+        currentVersion: "0.1.0",
+      })),
+      checkDesktopUpdate: vi.fn(async () => ({
+        operationId: "disabled",
+        phase: "disabled" as const,
+        currentVersion: "0.1.0",
+      })),
+      downloadDesktopUpdate: vi.fn(async () => ({
+        operationId: "disabled",
+        phase: "disabled" as const,
+        currentVersion: "0.1.0",
+      })),
+      restartAndInstallDesktopUpdate: vi.fn(async () => ({
+        operationId: "disabled",
+        phase: "disabled" as const,
+        currentVersion: "0.1.0",
+      })),
+      onDesktopUpdateStateChanged: vi.fn(() => () => {}),
       resolveComputerReview: vi.fn(async () => undefined),
       computerSessionControl: vi.fn(async () => undefined),
       getComputerHostStatus: vi.fn(async () => ({
@@ -3778,6 +3810,16 @@ describe("App workbench presentation", () => {
   it("toggles the subagent inspector detail without changing task identity", () => {
     expect(nextSubagentInspectorTaskId(undefined, "task-1")).toBe("task-1");
     expect(nextSubagentInspectorTaskId("task-1", "task-1")).toBeUndefined();
+  });
+
+  it("labels plan/general roles and write isolation without claiming Desktop smoke", () => {
+    expect(subagentAgentTypeLabel("explore")).toBe("探索智能体");
+    expect(subagentAgentTypeLabel("plan")).toBe("规划智能体");
+    expect(subagentAgentTypeLabel("review")).toBe("复核智能体");
+    expect(subagentAgentTypeLabel("general")).toBe("通用智能体");
+    expect(subagentWorkspaceModeLabel("shared_readonly")).toBe("只读共享");
+    expect(subagentWorkspaceModeLabel("shared")).toBe("共享可写");
+    expect(subagentWorkspaceModeLabel("git_worktree")).toBe("Git worktree");
   });
 
   it("positions subagent detail above the measured dock composer", () => {

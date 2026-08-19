@@ -1,11 +1,32 @@
 appId: com.awaken.desktop
 productName: Awaken
+electronUpdaterCompatibility: ">=2.16"
+extraMetadata:
+  # Local and ad-hoc packages remain update-disabled. dist:release is the
+  # only script allowed to override this marker to "stable".
+  awakenUpdateChannel: disabled
+# electron-builder resolves hook paths starting with "." against process.cwd();
+# all dist scripts run electron-builder with cwd = apps/desktop, and the npm
+# workspace root (repo root) check in app-builder-lib util/resolve.js then
+# accepts ../../scripts/release/*.mjs as inside the workspace.
+afterSign: ../../scripts/release/staple-macos-app.mjs
+afterAllArtifactBuild: ../../scripts/release/notarize-macos-artifacts.mjs
+publish:
+  provider: github
+  owner: NolanGrant556
+  repo: Awaken-Releases
+  releaseType: release
 directories:
   output: dist-electron
   buildResources: build
 files:
   - dist/**/*
   - package.json
+  - "!dist/**/*.test.js"
+  - "!dist/**/*.spec.js"
+  - "!dist/**/*.map"
+  - "!dist/**/__tests__/**"
+  - "!dist/**/fixtures/**"
   - "!**/node_modules/*/{CHANGELOG.md,README.md,readme.md,readme}"
   - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
   - "!**/.{idea,git,cache,vscode,DS_Store}"
@@ -26,10 +47,21 @@ extraResources:
     filter: ["**/*"]
   - from: resources/bin/${platform}-${arch}
     to: bin/${platform}-${arch}
-    filter: ["**/*"]
+    filter:
+      - "**/*"
+      - "!node/include/**/*"
+      - "!node/share/doc/**/*"
+      - "!node/share/man/**/*"
+      - "!node/README.md"
+      - "!node/CHANGELOG.md"
+      - "!**/*.map"
   - from: resources/cua-driver
     to: cua-driver
-    filter: ["**/*"]
+    filter:
+      - "**/*"
+      - "!**/*.map"
+      - "!**/{test,tests,__tests__,example,examples}/**/*"
+      - "!**/{README,CHANGELOG,readme,changelog}*"
   # electron-builder hardcodes a filter that drops the root-level `node_modules`
   # of any extraResources `from` directory (see app-builder-lib fileMatcher/filter.js,
   # `if (relative === "node_modules") return false`). We work around it by pointing
@@ -37,19 +69,37 @@ extraResources:
   # host sidecar (host.mjs -> @trycua/cua-driver) has its deps in the installer.
   - from: resources/cua-driver/node_modules
     to: cua-driver/node_modules
-    filter: ["**/*"]
+    filter:
+      - "**/*"
+      - "!**/*.map"
+      - "!**/{test,tests,__tests__,example,examples}/**/*"
+      - "!**/{README,CHANGELOG,readme,changelog}*"
   - from: build/icon.png
     to: icon.png
 mac:
   icon: build/icon.icns
   category: public.app-category.developer-tools
+  artifactName: "Awaken-${version}-${arch}.${ext}"
+  # Release builds (dist:release) notarize via App Store Connect API key env
+  # (APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER) and fail closed when
+  # missing; local dist / dist:adhoc pass -c.mac.notarize=false explicitly.
+  notarize: true
   target:
     - target: dmg
       arch:
         - arm64
         - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
 win:
   icon: build/icon.ico
+  artifactName: "Awaken-Setup-${version}-${arch}.${ext}"
+  target:
+    - target: nsis
+      arch:
+        - x64
 nsis:
   oneClick: false
   perMachine: true

@@ -4,6 +4,10 @@
   overflow: hidden;
 }
 
+.aw-workbench-shell:has(> .aw-workbench-inspector > .project-files-workspace) {
+  transition: none;
+}
+
 .project-files-workspace {
   container-type: inline-size;
   position: relative;
@@ -721,6 +725,37 @@ body.is-project-file-list-resizing .project-files-workspace__body {
   overflow: hidden;
 }
 
+.project-file-preview-heading__format-actions {
+  gap: 8px;
+}
+
+.project-file-markdown-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--aw-bg-fill-light);
+}
+
+.project-file-markdown-mode-switch button {
+  min-width: 28px;
+  min-height: 26px;
+  padding: 0 5px;
+  border-radius: 7px;
+}
+
+.project-file-markdown-save-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.project-file-markdown-save-state:has(.project-file-markdown-preview__status) {
+  padding-right: 8px;
+}
+
 .project-file-preview-heading__file-actions {
   flex: none;
   padding-left: 4px;
@@ -749,6 +784,15 @@ body.is-project-file-list-resizing .project-files-workspace__body {
 .project-file-preview-state__actions button:focus-visible,
 .project-file-preview-heading button[aria-pressed="true"] {
   background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.project-file-markdown-mode-switch button[aria-pressed="true"] {
+  background: var(--aw-surface-raised);
+  box-shadow: 0 1px 3px color-mix(in srgb, #000 10%, transparent);
+}
+
+.project-file-markdown-save-state.is-dirty .project-file-markdown-save-button {
   color: var(--aw-text-primary);
 }
 
@@ -903,6 +947,45 @@ body.is-project-file-list-resizing .project-files-workspace__body {
   font-size: 15px;
   line-height: 1.75;
   user-select: text;
+}
+
+.project-file-markdown-editor {
+  cursor: text;
+  caret-color: var(--aw-accent);
+  outline: none;
+}
+
+.project-file-markdown-preview__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 132px;
+  overflow: hidden;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-file-markdown-preview__status::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.project-file-markdown-save-state.is-dirty .project-file-markdown-preview__status {
+  color: var(--aw-warning-text);
+}
+
+.project-file-markdown-save-state.is-saving .project-file-markdown-preview__status {
+  color: var(--aw-accent-text);
+}
+
+.project-file-markdown-save-state.is-error .project-file-markdown-preview__status {
+  color: var(--aw-status-danger-text);
 }
 
 .project-file-markdown-preview > :first-child {
@@ -1067,6 +1150,14 @@ body.is-project-file-list-resizing .project-files-workspace__body {
 
   .project-file-preview-heading__address {
     max-width: 92px;
+  }
+
+  .project-file-markdown-preview__status {
+    display: none;
+  }
+
+  .project-file-markdown-save-state:has(.project-file-markdown-preview__status) {
+    padding-right: 0;
   }
 }
 

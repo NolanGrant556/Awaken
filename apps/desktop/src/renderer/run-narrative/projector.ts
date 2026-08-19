@@ -931,6 +931,7 @@ function upsertSubagentGroup(
       previous?.description ||
       "未命名子任务",
     agentType: event.subagentAgentType ?? previous?.agentType ?? "explore",
+    workspaceMode: event.subagentWorkspaceMode ?? previous?.workspaceMode,
     status,
     activity: terminal
       ? undefined

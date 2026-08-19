@@ -116,6 +116,17 @@ import {
   type PetSettings,
   type PetSummary,
 } from "../shared/pets.js";
+import {
+  DESKTOP_UPDATE_CHANNELS,
+  type DesktopUpdateSnapshot,
+} from "../shared/desktop-update.js";
+
+const desktopUpdateStateHandlers = new Set<(snapshot: DesktopUpdateSnapshot) => void>();
+
+ipcRenderer.on(DESKTOP_UPDATE_CHANNELS.stateChanged, (_event, payload: DesktopUpdateSnapshot) => {
+  if (!payload || typeof payload.phase !== "string") return;
+  for (const handler of desktopUpdateStateHandlers) handler(payload);
+});
 
 const subscriptions = new Map<string, RunStreamHandlers>();
 const cliConnectorStateHandlers = new Set<(event: CliConnectorStateEvent) => void>();
@@ -665,6 +676,20 @@ const bridge: AwakenBridge = {
   onScheduledTaskThreadActivation: (handler) => {
     scheduledTaskThreadActivationHandlers.add(handler);
     return () => scheduledTaskThreadActivationHandlers.delete(handler);
+  },
+  getDesktopUpdateState: () =>
+    ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.getState) as Promise<DesktopUpdateSnapshot>,
+  checkDesktopUpdate: () =>
+    ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.check) as Promise<DesktopUpdateSnapshot>,
+  downloadDesktopUpdate: () =>
+    ipcRenderer.invoke(DESKTOP_UPDATE_CHANNELS.download) as Promise<DesktopUpdateSnapshot>,
+  restartAndInstallDesktopUpdate: () =>
+    ipcRenderer.invoke(
+      DESKTOP_UPDATE_CHANNELS.restartAndInstall,
+    ) as Promise<DesktopUpdateSnapshot>,
+  onDesktopUpdateStateChanged: (handler) => {
+    desktopUpdateStateHandlers.add(handler);
+    return () => desktopUpdateStateHandlers.delete(handler);
   },
   listPets: () => ipcRenderer.invoke(PET_IPC_CHANNELS.listPets) as Promise<PetSummary[]>,
   getPetSettings: () => ipcRenderer.invoke(PET_IPC_CHANNELS.getPetSettings) as Promise<PetSettings>,

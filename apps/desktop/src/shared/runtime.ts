@@ -1,6 +1,7 @@
 import type { AguiEvent } from "./agui.js";
 import type { ProjectFilePreviewInteraction } from "./project-file-preview-interaction.js";
 import type { PetActivitySnapshot, PetBridge } from "./pets.js";
+import type { DesktopUpdateSnapshot } from "./desktop-update.js";
 
 export type DesktopPlatform = "macos" | "windows" | "linux";
 
@@ -2216,6 +2217,11 @@ export type AwakenBridge = {
   getSystemTimezone: () => Promise<string>;
   subscribeScheduledTaskEvents: (handler: (event: ScheduledTaskEvent) => void) => () => void;
   onScheduledTaskThreadActivation: (handler: (threadId: string) => void) => () => void;
+  getDesktopUpdateState: () => Promise<DesktopUpdateSnapshot>;
+  checkDesktopUpdate: () => Promise<DesktopUpdateSnapshot>;
+  downloadDesktopUpdate: () => Promise<DesktopUpdateSnapshot>;
+  restartAndInstallDesktopUpdate: () => Promise<DesktopUpdateSnapshot>;
+  onDesktopUpdateStateChanged: (handler: (snapshot: DesktopUpdateSnapshot) => void) => () => void;
 } & PetBridge;
 
 export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {

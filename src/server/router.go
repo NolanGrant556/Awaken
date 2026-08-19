@@ -165,6 +165,9 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	mux.HandleFunc("GET /v1/runtime/info", func(w http.ResponseWriter, r *http.Request) {
 		handleRuntimeInfo(w, r, cfg.infoProvider)
 	})
+	mux.HandleFunc("GET /v1/runtime/activity", func(w http.ResponseWriter, r *http.Request) {
+		handleRuntimeActivity(w, r, cfg.runService)
+	})
 	mux.HandleFunc("GET /v1/model-providers", handleModelProviders)
 	if cfg.runService != nil {
 		var modelProfileStore ACPModelProfileStore

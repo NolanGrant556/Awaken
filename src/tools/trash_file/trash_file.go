@@ -48,10 +48,11 @@ func (t *TrashFileTool) InputSchema() tool.ToolParametersSchema {
 	item := tool.ToolParam{Type: "string", Description: "要移入回收站的明确路径", MinLength: intPtr(1)}
 	minItems := 1
 	return tool.ToolParametersSchema{
-		Type: "object",
+		Type:        "object",
+		Description: "path 与 paths 必须且只能提供一个；单目标使用 path，批量目标使用 paths",
 		Properties: map[string]tool.ToolParam{
-			"path":  {Type: "string", Description: "单个明确路径", MinLength: intPtr(1)},
-			"paths": {Type: "array", Description: "一个或多个明确路径", Items: &item, MinItems: &minItems},
+			"path":  {Type: "string", Description: "单个明确路径；不得与 paths 同时提供", MinLength: intPtr(1)},
+			"paths": {Type: "array", Description: "一个或多个明确路径；不得与 path 同时提供", Items: &item, MinItems: &minItems},
 		},
 		AdditionalProperties: additional,
 		OneOf: []tool.ToolParam{

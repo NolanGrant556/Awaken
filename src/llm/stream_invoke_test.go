@@ -381,15 +381,21 @@ func TestStreamInvokeOpenAIKimiK27DisableReasoningIsSuppressed(t *testing.T) {
 	}
 }
 
-func TestResolveTemperatureCanOmitAndUseExplicitZero(t *testing.T) {
+func TestResolveTemperatureOmitsUnknownAndPreservesExplicitValues(t *testing.T) {
 	if got := resolveTemperature(Config{}, Request{OmitTemperature: true}); got != nil {
 		t.Fatalf("expected omitted temperature, got %v", *got)
 	}
 	if got := resolveTemperature(Config{Temperature: 1}, Request{TemperatureOverride: float64Pointer(0)}); got == nil || *got != 0 {
 		t.Fatalf("expected explicit zero temperature, got %v", got)
 	}
-	if got := resolveTemperature(Config{}, Request{}); got == nil || *got != 0.7 {
-		t.Fatalf("expected legacy default temperature 0.7, got %v", got)
+	if got := resolveTemperature(Config{}, Request{}); got != nil {
+		t.Fatalf("expected unspecified temperature to be omitted, got %v", *got)
+	}
+	if got := resolveTemperature(Config{Temperature: 0.4}, Request{}); got == nil || *got != 0.4 {
+		t.Fatalf("expected configured temperature 0.4, got %v", got)
+	}
+	if got := resolveTemperature(Config{}, Request{Temperature: 0.2}); got == nil || *got != 0.2 {
+		t.Fatalf("expected request temperature 0.2, got %v", got)
 	}
 }
 

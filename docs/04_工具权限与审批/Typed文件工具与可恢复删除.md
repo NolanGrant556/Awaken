@@ -14,7 +14,7 @@
 
 缺少 `rg` 时 `Glob`/`Grep` 返回 `needs_runtime`，不回退到语义较弱的 Go 搜索。两者默认按 TaskScope 精确 roots 搜索；共同父目录或项目外路径必须通过 TaskScope 文档定义的 `scope_mode` 明确区分，不得靠退回 `Bash find` 绕过分页。`Edit`/`Write` 使用同目录临时文件、fsync 和原子替换；未知/二进制编码拒绝覆盖。失败不刷新 thread 文件状态，成功会记录新的 SHA-256/size/mtime/type 快照。
 
-删除统一使用 `trash_file`，支持单路径或明确路径列表。成功结果返回 `original_path`、`method`，并在平台可观察时返回 `trashed_path`，同时写 observed `trashed` change；批量中途失败标为 partial/unknown，要求先检查原路径和 Trash，禁止自动改用永久删除。
+删除统一使用 `trash_file`，支持单路径或明确路径列表。canonical schema 和 executor 都要求 `path` 与 `paths` 必须且只能提供一个；为兼容拒绝根级组合关键字的 OpenAI Chat/Responses 网关，wire schema 会把两项显示为带互斥说明的可选属性，但 ToolRuntime 仍按 canonical `oneOf` 在权限与执行前拒绝缺失或同时提供。成功结果返回 `original_path`、`method`，并在平台可观察时返回 `trashed_path`，同时写 observed `trashed` change；批量中途失败标为 partial/unknown，要求先检查原路径和 Trash，禁止自动改用永久删除。
 
 上述是 typed 文件工具的可恢复合同。默认 raw Shell 不再将 `rm`/`rmdir`/`unlink` 等命令转换为 `trash_file`，它按当前登录用户的 Terminal 语义直接执行；UI/Outcome 不得伪造可恢复 change。
 

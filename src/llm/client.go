@@ -270,14 +270,13 @@ func resolveTemperature(cfg Config, req Request) *float64 {
 	if req.OmitTemperature {
 		return nil
 	}
-	temperature := req.Temperature
-	if temperature == 0 {
-		temperature = cfg.Temperature
-		if temperature == 0 {
-			temperature = 0.7
-		}
+	if req.Temperature != 0 {
+		return float64Pointer(req.Temperature)
 	}
-	return float64Pointer(temperature)
+	if cfg.Temperature != 0 {
+		return float64Pointer(cfg.Temperature)
+	}
+	return nil
 }
 
 func float64Pointer(value float64) *float64 {

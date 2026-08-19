@@ -211,6 +211,9 @@ const richMarkdownState = AwakenDesignSystem.AwakenAssistantMessageStates.find(
 const articleMarkdownState = AwakenDesignSystem.AwakenAssistantMessageStates.find(
   (state) => state.id === "article-markdown",
 );
+const narrowChineseTableState = AwakenDesignSystem.AwakenAssistantMessageStates.find(
+  (state) => state.id === "narrow-chinese-table",
+);
 const footerState = AwakenDesignSystem.AwakenAssistantMessageStates.find(
   (state) => state.id === "completed-answer-footer",
 );
@@ -224,6 +227,10 @@ if (!richMarkdownState) {
 
 if (!articleMarkdownState) {
   throw new Error("AwakenAssistantMessage article-markdown state is missing");
+}
+
+if (!narrowChineseTableState) {
+  throw new Error("AwakenAssistantMessage narrow-chinese-table state is missing");
 }
 
 if (!footerState) {
@@ -242,6 +249,10 @@ const richMarkdownProps = requireAssistantMessageProps(richMarkdownState.id, ric
 const articleMarkdownProps = requireAssistantMessageProps(
   articleMarkdownState.id,
   articleMarkdownState.props,
+);
+const narrowChineseTableProps = requireAssistantMessageProps(
+  narrowChineseTableState.id,
+  narrowChineseTableState.props,
 );
 const footerProps = requireAssistantMessageProps(footerState.id, footerState.props);
 
@@ -281,6 +292,33 @@ if (
 
 if (!articleMarkdownHtml.includes("assistant-message-table-wrap")) {
   throw new Error("AwakenAssistantMessage article state did not render the GFM table wrapper");
+}
+
+const narrowChineseTableHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenAssistantMessage, narrowChineseTableProps),
+);
+
+if (
+  !narrowChineseTableHtml.includes("企业经营风险分析报告.docx") ||
+  !narrowChineseTableHtml.includes("QA 状态") ||
+  (narrowChineseTableHtml.match(/<th>/g)?.length ?? 0) !== 3
+) {
+  throw new Error("AwakenAssistantMessage narrow Chinese table fixture is incomplete");
+}
+
+const productionTableRule = productionCss.match(/\.assistant-message-table\{([^}]*)\}/)?.[1] ?? "";
+const productionTableCellRule =
+  productionCss.match(
+    /\.assistant-message-table th,.assistant-message-table td\{([^}]*)\}/,
+  )?.[1] ?? "";
+
+if (
+  !productionTableRule.includes("min-width:560px") ||
+  !productionTableCellRule.includes("min-width:8rem") ||
+  !productionTableCellRule.includes("overflow-wrap:normal") ||
+  !productionTableCellRule.includes("word-break:normal")
+) {
+  throw new Error("AwakenAssistantMessage tables must preserve readable cells and horizontal overflow");
 }
 
 const footerHtml = renderToString(

@@ -34,7 +34,11 @@ export function AwakenAssistantMessageDemo() {
       </header>
       <div className="ads-component-demo-grid">
         {AwakenAssistantMessageStates.map((state) => (
-          <article key={state.id} className="ads-component-demo-state">
+          <article
+            key={state.id}
+            className="ads-component-demo-state"
+            data-demo-width={state.id === "narrow-chinese-table" ? "narrow" : undefined}
+          >
             <h3>{state.label}</h3>
             <div className="ads-component-demo-canvas">
               <Component {...(defaultProps as Record<string, unknown>)} {...(state.props as Record<string, unknown>)} />

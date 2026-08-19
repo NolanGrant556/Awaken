@@ -1862,11 +1862,14 @@ button.tool-trace-line:focus-visible {
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
 }
 
 .assistant-message-table {
   width: 100%;
+  min-width: 560px;
   border-collapse: collapse;
   background: transparent;
   font-size: 14px;
@@ -1875,10 +1878,13 @@ button.tool-trace-line:focus-visible {
 
 .assistant-message-table th,
 .assistant-message-table td {
+  min-width: 8rem;
   padding: 9px 8px;
   border-bottom: 1px solid var(--aw-border-light);
   text-align: left;
   vertical-align: top;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .assistant-message-table th {

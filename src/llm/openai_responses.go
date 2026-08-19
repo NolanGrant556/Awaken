@@ -320,7 +320,7 @@ func convertToolsToOpenAIResponses(tools []tool.ToolSchema) []openAIResponsesToo
 	}
 	result := make([]openAIResponsesTool, 0, len(tools))
 	for _, schema := range tools {
-		result = append(result, openAIResponsesTool{Type: "function", Name: schema.Function.Name, Description: schema.Function.Description, Parameters: tool.SchemaAsMap(schema.Function.Parameters)})
+		result = append(result, openAIResponsesTool{Type: "function", Name: schema.Function.Name, Description: schema.Function.Description, Parameters: projectOpenAICompatibleToolParameters(schema.Function.Parameters)})
 	}
 	return result
 }

@@ -619,7 +619,7 @@ func convertToolsToOpenAI(tools []tool.ToolSchema) []map[string]interface{} {
 			"function": map[string]interface{}{
 				"name":        t.Function.Name,
 				"description": t.Function.Description,
-				"parameters":  tool.SchemaAsMap(t.Function.Parameters),
+				"parameters":  projectOpenAICompatibleToolParameters(t.Function.Parameters),
 			},
 		}
 	}

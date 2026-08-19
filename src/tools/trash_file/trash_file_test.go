@@ -118,6 +118,30 @@ func TestTrashFileEmitsDeletedArtifactTombstones(t *testing.T) {
 	}
 }
 
+func TestTrashFileCanonicalSchemaAndParserRequireExactlyOneInput(t *testing.T) {
+	trashTool := &TrashFileTool{}
+	schema := trashTool.InputSchema()
+	if len(schema.OneOf) != 2 {
+		t.Fatalf("expected canonical path/paths oneOf, got %+v", schema)
+	}
+	for _, input := range []string{`{}`, `{"path":"one.txt","paths":["two.txt"]}`} {
+		if err := tool.ValidateInputAgainstSchema(input, schema); err == nil {
+			t.Fatalf("expected canonical validation to reject %s", input)
+		}
+		if _, err := parseTrashFileParams(input); err == nil {
+			t.Fatalf("expected executor parser to reject %s", input)
+		}
+	}
+	for _, input := range []string{`{"path":"one.txt"}`, `{"paths":["one.txt","two.txt"]}`} {
+		if err := tool.ValidateInputAgainstSchema(input, schema); err != nil {
+			t.Fatalf("expected canonical validation to accept %s: %v", input, err)
+		}
+		if _, err := parseTrashFileParams(input); err != nil {
+			t.Fatalf("expected executor parser to accept %s: %v", input, err)
+		}
+	}
+}
+
 func TestTrashFileResolvesRelativeDirectoryThroughPermissionContext(t *testing.T) {
 	adapter := &recordingTrashAdapter{dir: filepath.Join(t.TempDir(), "trash")}
 	trash.SetAdapter(adapter)

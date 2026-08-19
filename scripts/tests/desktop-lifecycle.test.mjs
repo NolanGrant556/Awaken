@@ -224,7 +224,11 @@ describe("desktop package staging", () => {
     );
     assert.match(desktopPackage.scripts["dist:adhoc"], /-c\.mac\.identity=-/);
     assert.match(desktopPackage.scripts["dist:adhoc"], /-c\.mac\.hardenedRuntime=false/);
-    assert.match(desktopPackage.scripts["dist:release"], /-c\.mac\.forceCodeSigning=true/);
+    assert.match(desktopPackage.scripts["dist:release"], /-c\.forceCodeSigning=true/);
+    assert.match(
+      desktopPackage.scripts["dist:release"],
+      /-c\.extraMetadata\.awakenUpdateChannel=stable/,
+    );
     const rootPackage = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
     assert.match(
       rootPackage.scripts["dist:desktop:adhoc"],

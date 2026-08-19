@@ -658,4 +658,68 @@ if (
   throw new Error("Production CSS is missing scheduled task component surfaces");
 }
 
+const sidebarUpdateStateIds = AwakenDesignSystem.AwakenSidebarStates
+  .map((state) => state.id)
+  .filter((id) => id.startsWith("update-"));
+
+if (
+  sidebarUpdateStateIds.join(",") !==
+  [
+    "update-available",
+    "update-downloading-indeterminate",
+    "update-downloading-37",
+    "update-downloaded",
+    "update-error",
+  ].join(",")
+) {
+  throw new Error(`AwakenSidebar update states are incomplete or out of order: ${sidebarUpdateStateIds.join(", ")}`);
+}
+
+const sidebarUpdateOnlyHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenSidebar, {
+    profileUpdateAction: { state: "available", label: "更新到 v0.2.0", onClick: () => undefined },
+  }),
+);
+
+if (
+  !sidebarUpdateOnlyHtml.includes("aw-sidebar-profile") ||
+  !sidebarUpdateOnlyHtml.includes("aw-sidebar-update") ||
+  !sidebarUpdateOnlyHtml.includes('type="button"')
+) {
+  throw new Error("AwakenSidebar must render the update entry button even without profile fields");
+}
+
+const sidebarUpdateProgressState = AwakenDesignSystem.AwakenSidebarStates.find(
+  (state) => state.id === "update-downloading-37",
+);
+const sidebarUpdateProgressHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenSidebar, sidebarUpdateProgressState?.props ?? {}),
+);
+
+if (
+  !sidebarUpdateProgressHtml.includes('role="progressbar"') ||
+  !sidebarUpdateProgressHtml.includes('aria-valuenow="37"') ||
+  !sidebarUpdateProgressHtml.includes('aria-busy="true"')
+) {
+  throw new Error("AwakenSidebar update entry must expose a determinate progressbar while downloading");
+}
+
+const sidebarUpdateIndeterminateState = AwakenDesignSystem.AwakenSidebarStates.find(
+  (state) => state.id === "update-downloading-indeterminate",
+);
+const sidebarUpdateIndeterminateHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenSidebar, sidebarUpdateIndeterminateState?.props ?? {}),
+);
+
+if (sidebarUpdateIndeterminateHtml.includes('role="progressbar"')) {
+  throw new Error("AwakenSidebar update entry must not render a progressbar without a finite progress");
+}
+
+const sidebarUpdateIndex = sidebarUpdateProgressHtml.indexOf("aw-sidebar-update");
+const sidebarProfileIndex = sidebarUpdateProgressHtml.indexOf('aria-label="用户 Nolan"');
+
+if (sidebarProfileIndex === -1 || sidebarUpdateIndex === -1 || sidebarUpdateIndex > sidebarProfileIndex) {
+  throw new Error("AwakenSidebar update entry must be a sibling above the profile button, not nested inside it");
+}
+
 console.log(`awaken design system render smoke passed: ${demoEntries.length} components`);

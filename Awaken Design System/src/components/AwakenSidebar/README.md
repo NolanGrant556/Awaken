@@ -16,6 +16,7 @@
 - `AwakenSidebarSectionAction`：项目全部展开/收起、对话分区展开/收起、创建项目、新增对话和项目行内动作。
 - `AwakenSidebarThreadSpinner`：只在 running / cancelling 线程行末显示的运行指示。
 - `AwakenProfileButton`：只作为 Nolan 账户入口在完整侧栏中出现；它与额度面板的完整组合归入独立“「账户」组件库”。
+- `AwakenSidebarUpdateButton`：通过 `profileUpdateAction` 传入的更新入口，渲染在底部固定区、账户入口上方；仅表达 `available / downloading / downloaded / error` 四种 UI 状态，下载进度与重启、重试行为全部由 consumer 通过回调接管。
 - `AwakenDialog + AwakenIconButton`：保留统一模态与关闭按钮能力；Gallery 在本组件族中观测创建项目、移除项目和重命名会话三个 App 级真实流程。
 - `AwakenSelectableCard`：只在创建项目弹窗中展示 Desktop 当前支持的本地文件夹来源，不展示尚未支持的远程或云端来源。
 - `AwakenProjectFoldersEditor`：在创建项目和编辑项目两个弹窗中观测项目的文件夹列表、主文件夹徽标和每行更多操作；Gallery 只模拟回调，不打开系统对话框、不触碰磁盘。
@@ -27,6 +28,7 @@
 ## 文件
 
 - `AwakenSidebar.tsx` - 组件实现。
+- `AwakenSidebarUpdateButton.tsx` - 底部更新入口按钮与 `AwakenSidebarUpdateAction` 类型。
 - `AwakenSidebar.css` - 组件局部样式入口。
 - `AwakenSidebar.demo.css` - “「左侧栏」组件库” Gallery 专用布局。
 - `AwakenSidebar.states.ts` - 可观测状态与模拟 props。

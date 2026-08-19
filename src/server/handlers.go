@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"awaken/src/acp"
 	"awaken/src/agentcore"
@@ -625,6 +626,28 @@ func handleRuntimeInfo(w http.ResponseWriter, r *http.Request, provider RuntimeI
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+type runtimeActivityResponse struct {
+	ActiveRunCount     int    `json:"active_run_count"`
+	CancellingRunCount int    `json:"cancelling_run_count"`
+	ObservedAt         string `json:"observed_at"`
+}
+
+// handleRuntimeActivity reports a read-only snapshot of in-flight runs so
+// Desktop Main can gate exit/maintenance operations (e.g. update restarts).
+func handleRuntimeActivity(w http.ResponseWriter, r *http.Request, runService *awruntime.RunService) {
+	if runService == nil {
+		http.Error(w, "runtime activity unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	snapshot := runService.ActivitySnapshot()
+	writeJSON(w, http.StatusOK, runtimeActivityResponse{
+		ActiveRunCount:     snapshot.Active,
+		CancellingRunCount: snapshot.Cancelling,
+		ObservedAt:         time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

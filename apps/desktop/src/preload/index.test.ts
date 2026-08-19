@@ -148,6 +148,55 @@ describe("preload scheduled task bridge", () => {
   });
 });
 
+describe("preload desktop update bridge", () => {
+  it("exposes only narrow update methods with no payload escape hatch", () => {
+    const bridge = exposedBridge as Record<string, unknown>;
+    for (const key of [
+      "getDesktopUpdateState",
+      "checkDesktopUpdate",
+      "downloadDesktopUpdate",
+      "restartAndInstallDesktopUpdate",
+      "onDesktopUpdateStateChanged",
+    ]) {
+      expect(typeof bridge[key], key).toBe("function");
+    }
+  });
+
+  it("forwards commands to the typed channels without any payload", async () => {
+    const bridge = exposedBridge as Record<string, (...args: unknown[]) => unknown>;
+    invokeMock.mockResolvedValue({ operationId: "op", phase: "idle", currentVersion: "0.1.0" });
+
+    await bridge.getDesktopUpdateState();
+    expect(invokeMock).toHaveBeenLastCalledWith("awaken:desktop-update:get-state");
+
+    await bridge.checkDesktopUpdate();
+    expect(invokeMock).toHaveBeenLastCalledWith("awaken:desktop-update:check");
+
+    await bridge.downloadDesktopUpdate();
+    expect(invokeMock).toHaveBeenLastCalledWith("awaken:desktop-update:download");
+
+    await bridge.restartAndInstallDesktopUpdate();
+    expect(invokeMock).toHaveBeenLastCalledWith("awaken:desktop-update:restart-and-install");
+  });
+
+  it("dispatches state snapshots until unsubscribe and drops malformed payloads", () => {
+    const bridge = exposedBridge as Record<string, (handler: (snapshot: unknown) => void) => () => void>;
+    const received: unknown[] = [];
+    const unsubscribe = bridge.onDesktopUpdateStateChanged((snapshot) => received.push(snapshot));
+
+    const dispatch = listeners.get("awaken:desktop-update:state-changed");
+    expect(dispatch).toBeDefined();
+    const snapshot = { operationId: "op-1", phase: "available", currentVersion: "0.1.0" };
+    dispatch!({}, snapshot);
+    dispatch!({}, { noPhase: true });
+    expect(received).toEqual([snapshot]);
+
+    unsubscribe();
+    dispatch!({}, snapshot);
+    expect(received).toHaveLength(1);
+  });
+});
+
 describe("preload project directory watch bridge", () => {
   it("forwards scoped watch lifecycle calls and removes change listeners", async () => {
     const bridge = exposedBridge as Record<string, (...args: unknown[]) => unknown>;

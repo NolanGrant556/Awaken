@@ -109,6 +109,14 @@ import type {
   UpsertProjectResult,
 } from "../shared/runtime";
 import type { AguiEvent } from "../shared/agui";
+import type {
+  DesktopUpdateErrorCode,
+  DesktopUpdateSnapshot,
+} from "../shared/desktop-update";
+import {
+  buildSidebarUpdateAction,
+  desktopUpdateInstallBlockedMessage,
+} from "./desktopUpdatePresentation";
 import {
   createInitialRuntimeState,
   reduceRuntimeState,
@@ -2331,6 +2339,84 @@ export function App() {
     [runtimeClient],
   );
 
+  // Desktop 更新：先取当前快照再订阅变更；Main 是唯一 authority，
+  // 推送先到时忽略迟到的 getState 返回，不写入 localStorage。
+  const [desktopUpdateSnapshot, setDesktopUpdateSnapshot] =
+    useState<DesktopUpdateSnapshot | null>(null);
+  const [updateRestartDialogOpen, setUpdateRestartDialogOpen] = useState(false);
+  const [updateInstallBlockedCode, setUpdateInstallBlockedCode] = useState<
+    DesktopUpdateErrorCode | undefined
+  >(undefined);
+  const [updateInstallStarting, setUpdateInstallStarting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let pushReceived = false;
+    const unsubscribe = runtimeClient.onDesktopUpdateStateChanged((snapshot) => {
+      pushReceived = true;
+      if (!cancelled) {
+        setDesktopUpdateSnapshot(snapshot);
+      }
+    });
+    runtimeClient
+      .getDesktopUpdateState()
+      .then((snapshot) => {
+        if (!cancelled && !pushReceived) {
+          setDesktopUpdateSnapshot(snapshot);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [runtimeClient]);
+
+  const sidebarUpdateAction = useMemo(
+    () =>
+      buildSidebarUpdateAction(desktopUpdateSnapshot, {
+        onDownload: () => {
+          void runtimeClient
+            .downloadDesktopUpdate()
+            .then(setDesktopUpdateSnapshot)
+            .catch(() => undefined);
+        },
+        onRestartRequested: () => {
+          setUpdateInstallBlockedCode(undefined);
+          setUpdateRestartDialogOpen(true);
+        },
+        onRetry: (retryFrom) => {
+          const request =
+            retryFrom === "download"
+              ? runtimeClient.downloadDesktopUpdate()
+              : runtimeClient.checkDesktopUpdate();
+          void request.then(setDesktopUpdateSnapshot).catch(() => undefined);
+        },
+      }),
+    [desktopUpdateSnapshot, runtimeClient],
+  );
+
+  const updateInstallBlockedNotice = desktopUpdateInstallBlockedMessage(updateInstallBlockedCode);
+  const updateInstallRetryBlocked =
+    updateInstallBlockedCode === "active_runs" || updateInstallBlockedCode === "shutdown_failed";
+
+  const handleConfirmUpdateRestart = async () => {
+    setUpdateInstallStarting(true);
+    try {
+      const snapshot = await runtimeClient.restartAndInstallDesktopUpdate();
+      setDesktopUpdateSnapshot(snapshot);
+      if (snapshot.phase === "downloaded") {
+        // active_runs / shutdown_failed：留在确认框说明原因，不强制退出、不丢弃任务。
+        setUpdateInstallBlockedCode(snapshot.errorCode);
+        setUpdateInstallStarting(false);
+      }
+      // phase === "installing" 表示清理完成、安装器已接管，App 即将退出。
+    } catch {
+      setUpdateInstallBlockedCode("shutdown_failed");
+      setUpdateInstallStarting(false);
+    }
+  };
+
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [notice, setNotice] = useState<string | null>(null);
   const [resolvingExternalInteractionId, setResolvingExternalInteractionId] = useState<
@@ -2373,7 +2459,7 @@ export function App() {
   const [appearanceSaving, setAppearanceSaving] = useState(false);
   const [appearanceMessage, setAppearanceMessage] = useState<string | null>(null);
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
-  const profileButtonRef = useRef<HTMLDivElement>(null);
+  const profileButtonRef = useRef<HTMLButtonElement>(null);
   const [contextUsagePanelOpen, setContextUsagePanelOpen] = useState(false);
   const contextUsageTriggerRef = useRef<HTMLButtonElement>(null);
   const contextUsagePanelRef = useRef<HTMLDivElement>(null);
@@ -7036,6 +7122,7 @@ export function App() {
                 onNewTask={handleNewTask}
                 onProfileClick={() => setProfilePopoverOpen(true)}
                 profileButtonRef={profileButtonRef}
+                profileUpdateAction={sidebarUpdateAction}
               />
             </WorkbenchSidebarFrame>
           }
@@ -7953,6 +8040,56 @@ export function App() {
         }}
         onClose={() => setProfilePopoverOpen(false)}
       />
+      <Dialog
+        open={updateRestartDialogOpen}
+        title="重启以完成更新"
+        onOpenChange={(open) => {
+          if (!open && !updateInstallStarting) {
+            // “稍后”只关闭确认框；Main 仍保持 downloaded，侧栏保留重启入口。
+            setUpdateRestartDialogOpen(false);
+            setUpdateInstallBlockedCode(undefined);
+          }
+        }}
+        footer={
+          <>
+            <Button
+              variant="default"
+              size="md"
+              disabled={updateInstallStarting}
+              onClick={() => {
+                setUpdateRestartDialogOpen(false);
+                setUpdateInstallBlockedCode(undefined);
+              }}
+            >
+              稍后
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              loading={updateInstallStarting}
+              disabled={updateInstallStarting || updateInstallRetryBlocked}
+              onClick={() => {
+                void handleConfirmUpdateRestart();
+              }}
+            >
+              立即重启
+            </Button>
+          </>
+        }
+      >
+        <div className="desktop-update-dialog-body">
+          <p>
+            当前版本 v{desktopUpdateSnapshot?.currentVersion ?? "--"}，将更新到 v
+            {desktopUpdateSnapshot?.availableVersion ?? "--"}。
+          </p>
+          {desktopUpdateSnapshot?.releaseName ? (
+            <p>{desktopUpdateSnapshot.releaseName}</p>
+          ) : null}
+          {updateInstallBlockedNotice ? (
+            <p role="alert">{updateInstallBlockedNotice}</p>
+          ) : null}
+        </div>
+      </Dialog>
     </>
   );
 }

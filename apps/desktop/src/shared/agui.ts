@@ -389,7 +389,7 @@ export type AguiEvent = {
   subagentAgentId?: string;
   subagentParentAgentId?: string;
   subagentParentToolCallId?: string;
-  subagentAgentType?: "explore" | "review" | "general";
+  subagentAgentType?: "explore" | "plan" | "review" | "general";
   subagentDescription?: string;
   subagentStatus?: "queued" | "running" | "completed" | "failed" | "cancelling" | "cancelled" | "interrupted";
   subagentWorkspaceMode?: string;

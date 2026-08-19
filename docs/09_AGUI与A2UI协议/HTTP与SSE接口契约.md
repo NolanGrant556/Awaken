@@ -48,7 +48,7 @@ POST   /v1/shutdown
 
 Hook routes 只有 `RunService` 注入时注册，业务合同由 [Hook 产品与架构契约](../04_工具权限与审批/Hook产品与架构契约.md)拥有。GET 的 Settings 检查 DTO 返回 snapshot identity、enabled count、来源 receipt/诊断，以及 Core 严格解析和归一化后的静态 Hook 详情；详情可以包含命令 argv、URL、matcher 或 prompt 供当前用户在信任前审查，但不包含 secret 引用值、运行输入、环境或输出，也不进入 run snapshot/Journal。trust 绑定 `projectId + canonical sourcePath + digest`，revoke 绑定 project/source，均只影响后续 run。run 内 `hook_invocation_started/completed` 分别投影为 `AWAKEN_HOOK_STARTED/COMPLETED`；wire 只含 invocation/Hook/event/source identity、status/action/reason、duration 与有界 preview，不含 command、配置路径、输入正文、secret env 或完整 stdout/stderr。
 
-Subagent list/detail/cancel route 只操作请求 run 的当前 task registry；run/task 不匹配返回 404。message route 为已保留的 typed surface，当前返回 409 unsupported，不会写入伪消息事件。完整状态、取消和恢复边界见 [02 原生 Subagent 产品与架构契约](../02_主智能体闭环/原生Subagent产品与架构契约.md)。
+Subagent list/detail/cancel/message route 只操作请求 run 的当前 task registry；run/task 不匹配返回 404。message body 只接受 `{content, idempotency_key}`，先耐久再入队；终态 task 返回 409 `subagent_not_running`。完整状态、取消和恢复边界见 [02 原生 Subagent 产品与架构契约](../02_主智能体闭环/原生Subagent产品与架构契约.md)。
 
 ### 3.2 项目与可恢复删除
 

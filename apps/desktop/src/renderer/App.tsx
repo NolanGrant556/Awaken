@@ -1292,6 +1292,19 @@ export function subagentElapsedMs(
   return finishedAt - startedAt;
 }
 
+export function subagentWorkspaceModeLabel(mode?: string): string | undefined {
+  switch (mode) {
+    case "shared":
+      return "共享可写";
+    case "git_worktree":
+      return "Git worktree";
+    case "shared_readonly":
+      return "只读共享";
+    default:
+      return mode || undefined;
+  }
+}
+
 function formatSubagentElapsed(elapsedMs?: number): string | undefined {
   if (typeof elapsedMs !== "number" || !Number.isFinite(elapsedMs) || elapsedMs < 0) {
     return undefined;
@@ -1301,12 +1314,14 @@ function formatSubagentElapsed(elapsedMs?: number): string | undefined {
   return `${Math.floor(totalSeconds / 60)} 分 ${totalSeconds % 60} 秒`;
 }
 
-function subagentAgentTypeLabel(
+export function subagentAgentTypeLabel(
   agentType: SubagentNarrativeTask["agentType"],
 ): string {
   switch (agentType) {
     case "review":
       return "复核智能体";
+    case "plan":
+      return "规划智能体";
     case "general":
       return "通用智能体";
     default:
@@ -2453,6 +2468,8 @@ export function App() {
   const [selectedSubagentTaskId, setSelectedSubagentTaskId] = useState<string | undefined>();
   const [openSubagentTaskId, setOpenSubagentTaskId] = useState<string | undefined>();
   const [cancellingSubagentTaskId, setCancellingSubagentTaskId] = useState<string | undefined>();
+  const [subagentMessageDrafts, setSubagentMessageDrafts] = useState<Record<string, string>>({});
+  const [sendingSubagentTaskId, setSendingSubagentTaskId] = useState<string | undefined>();
   const [subagentNowMs, setSubagentNowMs] = useState(() => Date.now());
   const [promptBubbleModeByTurnId, setPromptBubbleModeByTurnId] = useState<
     Record<string, "collapsed" | "expanded">
@@ -5636,6 +5653,21 @@ export function App() {
     }
   }
 
+  async function handleMessageSubagent(taskId: string): Promise<void> {
+    const content = subagentMessageDrafts[taskId]?.trim();
+    if (!content || !runtimeState.runId || !runtimeClient.messageSubagent) return;
+    setSendingSubagentTaskId(taskId);
+    setNotice(null);
+    try {
+      await runtimeClient.messageSubagent(runtimeState.runId, taskId, content);
+      setSubagentMessageDrafts((current) => ({ ...current, [taskId]: "" }));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "追加子任务指令失败");
+    } finally {
+      setSendingSubagentTaskId(undefined);
+    }
+  }
+
   async function handleCancelSubagent(taskId: string): Promise<void> {
     if (!runtimeState.runId || !runtimeClient.cancelSubagent) return;
     setCancellingSubagentTaskId(taskId);
@@ -7155,6 +7187,42 @@ export function App() {
                                     showFooter={false}
                                   />
                                 ) : null}
+                                {["queued", "running"].includes(openSubagent.status) ? (
+                                  <form
+                                    className="subagent-message-form"
+                                    onSubmit={(event) => {
+                                      event.preventDefault();
+                                      void handleMessageSubagent(openSubagent.taskId);
+                                    }}
+                                  >
+                                    <label htmlFor="subagent-overlay-message">追加指令</label>
+                                    <textarea
+                                      id="subagent-overlay-message"
+                                      rows={3}
+                                      value={subagentMessageDrafts[openSubagent.taskId] ?? ""}
+                                      onChange={(event) =>
+                                        setSubagentMessageDrafts((current) => ({
+                                          ...current,
+                                          [openSubagent.taskId]: event.target.value,
+                                        }))
+                                      }
+                                      placeholder="不会占用主输入框"
+                                    />
+                                    <Button
+                                      variant="default"
+                                      size="sm"
+                                      type="submit"
+                                      disabled={
+                                        sendingSubagentTaskId === openSubagent.taskId ||
+                                        !(subagentMessageDrafts[openSubagent.taskId] ?? "").trim()
+                                      }
+                                    >
+                                      {sendingSubagentTaskId === openSubagent.taskId
+                                        ? "发送中…"
+                                        : "发送给子任务"}
+                                    </Button>
+                                  </form>
+                                ) : null}
                                 {openSubagent.errorMessage ? (
                                   <div className="subagent-execution-error" role="alert">
                                     <strong>{openSubagent.errorCode || "子任务失败"}</strong>
@@ -7523,6 +7591,9 @@ export function App() {
                               <div>
                                 <span className="subagent-inspector__eyebrow">
                                   {subagentAgentTypeLabel(selectedSubagent.agentType)}
+                                  {subagentWorkspaceModeLabel(selectedSubagent.workspaceMode)
+                                    ? ` · ${subagentWorkspaceModeLabel(selectedSubagent.workspaceMode)}`
+                                    : ""}
                                 </span>
                                 <h3>{selectedSubagent.description}</h3>
                               </div>
@@ -7595,6 +7666,42 @@ export function App() {
                                   <p>{selectedSubagent.errorMessage}</p>
                                 ) : null}
                               </section>
+                            ) : null}
+                            {["queued", "running"].includes(selectedSubagent.status) ? (
+                              <form
+                                className="subagent-message-form"
+                                onSubmit={(event) => {
+                                  event.preventDefault();
+                                  void handleMessageSubagent(selectedSubagent.taskId);
+                                }}
+                              >
+                                <label htmlFor="subagent-inspector-message">追加指令</label>
+                                <textarea
+                                  id="subagent-inspector-message"
+                                  rows={3}
+                                  value={subagentMessageDrafts[selectedSubagent.taskId] ?? ""}
+                                  onChange={(event) =>
+                                    setSubagentMessageDrafts((current) => ({
+                                      ...current,
+                                      [selectedSubagent.taskId]: event.target.value,
+                                    }))
+                                  }
+                                  placeholder="不会占用主输入框"
+                                />
+                                <Button
+                                  variant="default"
+                                  size="sm"
+                                  type="submit"
+                                  disabled={
+                                    sendingSubagentTaskId === selectedSubagent.taskId ||
+                                    !(subagentMessageDrafts[selectedSubagent.taskId] ?? "").trim()
+                                  }
+                                >
+                                  {sendingSubagentTaskId === selectedSubagent.taskId
+                                    ? "发送中…"
+                                    : "发送给子任务"}
+                                </Button>
+                              </form>
                             ) : null}
                             {["queued", "running"].includes(selectedSubagent.status) ? (
                               <Button

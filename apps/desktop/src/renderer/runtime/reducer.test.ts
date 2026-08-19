@@ -445,6 +445,26 @@ describe("runtime reducer native subagent isolation", () => {
 
     expect(state.subagentsById["task-1"].status).toBe("cancelling");
   });
+
+  it("keeps plan/general isolation fields on the independent task view", () => {
+    const state = dispatch([
+      runEvent({
+        type: "AWAKEN_SUBAGENT_CHANGED",
+        runId: "run-1",
+        subagentTaskId: "task-write",
+        subagentAgentId: "agent-write",
+        subagentDescription: "实现改动",
+        subagentAgentType: "general",
+        subagentWorkspaceMode: "shared",
+        subagentStatus: "running",
+      }),
+    ]);
+    expect(state.subagentsById["task-write"]).toMatchObject({
+      agentType: "general",
+      workspaceMode: "shared",
+      description: "实现改动",
+    });
+  });
 });
 
 describe("runtime reducer canonical auth wire", () => {

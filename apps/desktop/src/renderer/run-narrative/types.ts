@@ -108,7 +108,8 @@ export type ACPDisplayStatus =
 export type SubagentNarrativeTask = {
   taskId: string;
   description: string;
-  agentType: "explore" | "review" | "general";
+  agentType: "explore" | "plan" | "review" | "general";
+  workspaceMode?: "shared_readonly" | "shared" | "git_worktree" | string;
   status: "queued" | "running" | "completed" | "failed" | "cancelling" | "cancelled" | "interrupted";
   activity?: string;
   toolUseCount: number;

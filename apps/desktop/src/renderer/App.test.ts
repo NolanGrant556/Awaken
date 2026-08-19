@@ -113,6 +113,8 @@ import {
   projectNarrativeTurnBodySegments,
   projectNarrativeActivitySegments,
   projectVisibleNarrativeItems,
+  runPlanPanelBottomOffset,
+  runPlanStepStatusForDisplay,
   scrollTopForLatestTurnScrollTail,
   scrollTopForPromptAnchor,
   subagentDetailPanelBottomOffset,
@@ -1998,6 +2000,24 @@ describe("AwakenComposerBar layout contract", () => {
         { width: 1200, height: 700 },
       ).left,
     ).toBe("832px");
+  });
+});
+
+describe("run plan presentation", () => {
+  it("anchors the overlay panel 12px above the measured composer content inset", () => {
+    expect(runPlanPanelBottomOffset({ composerContentInset: 148 })).toBe(160);
+    expect(runPlanPanelBottomOffset({ composerContentInset: -20 })).toBe(28);
+    expect(
+      runPlanPanelBottomOffset({ composerContentInset: 100, gap: 8 }),
+    ).toBe(108);
+  });
+
+  it("normalizes wire step statuses into the display three-state union", () => {
+    expect(runPlanStepStatusForDisplay("completed")).toBe("completed");
+    expect(runPlanStepStatusForDisplay("in_progress")).toBe("in_progress");
+    expect(runPlanStepStatusForDisplay("pending")).toBe("pending");
+    expect(runPlanStepStatusForDisplay("")).toBe("pending");
+    expect(runPlanStepStatusForDisplay("unknown-state")).toBe("pending");
   });
 });
 

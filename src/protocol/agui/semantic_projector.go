@@ -406,6 +406,36 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		notice.TaskName = stringFromAny(payload["task_name"])
 		notice.NoticeContent = stringFromAny(payload["content"])
 		return []Event{notice}
+	case agentcore.SemanticKindPlanUpdated:
+		// Durable run-plan full snapshot (contract §8.1): one replayable frame
+		// carrying the sanitized snapshot and derived counters. Missing payload
+		// fields degrade to zero values; the frame is still emitted so live and
+		// replay stay in lockstep. Version ordering/dedup is the Desktop
+		// reducer's job; the projector only projects faithfully.
+		plan := base
+		plan.Type = EventAwakenPlanUpdated
+		plan.PlanID = stringFromAny(payload["plan_id"])
+		plan.PlanVersion = uint64(int64FromAny(payload["version"]))
+		plan.PlanExplanation = stringFromAny(payload["explanation"])
+		plan.PlanCompletedCount = intFromAny(payload["completed_count"])
+		plan.PlanTotalCount = intFromAny(payload["total_count"])
+		plan.PlanCurrentStep = intFromAny(payload["current_step"])
+		plan.PlanAllCompleted = boolFromAny(payload["all_completed"])
+		plan.ToolCallID = stringFromAny(payload["tool_call_id"])
+		raw, err := json.Marshal(payload["items"])
+		if err == nil {
+			var items []struct {
+				Step       string `json:"step"`
+				ActiveForm string `json:"active_form"`
+				Status     string `json:"status"`
+			}
+			if json.Unmarshal(raw, &items) == nil {
+				for _, item := range items {
+					plan.PlanItems = append(plan.PlanItems, RunPlanItemReceipt{Step: item.Step, ActiveForm: item.ActiveForm, Status: item.Status})
+				}
+			}
+		}
+		return []Event{plan}
 	case agentcore.SemanticKindRecoveryDecision:
 		recovery := base
 		if boolFromAny(payload["blocked"]) {

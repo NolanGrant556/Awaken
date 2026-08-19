@@ -68,6 +68,22 @@ export const AwakenAssistantMessageStates: AwakenAssistantMessageState[] = [
     } as unknown as Partial<ComponentProps<typeof AwakenAssistantMessage>>,
   },
   {
+    id: "narrow-chinese-table",
+    label: "窄宽中文表格",
+    props: {
+      markdown: [
+        "## 📦 交付成果",
+        "",
+        "| 交付物 | 内容 | QA 状态 |",
+        "| --- | --- | --- |",
+        "| 企业经营风险分析报告.docx（10页） | 管理层摘要、6 大风险领域发现、10 条行动建议 | 结构 + 内容 + 逐页视觉 QA 通过 |",
+        "| 企业经营风险数据底稿.xlsx | 跨部门风险明细与优先级 | 公式与字段已复核 |",
+      ].join("\n"),
+      status: "done",
+      elapsedMs: 31000,
+    } as unknown as Partial<ComponentProps<typeof AwakenAssistantMessage>>,
+  },
+  {
     id: "completed-answer-footer",
     label: "完成回答与底部操作",
     props: {

@@ -2,11 +2,15 @@ import "./AwakenSidebar.css";
 import "./AwakenSidebar.demo.css";
 import { useEffect, useRef, useState } from "react";
 import {
+  CheckCheck,
   ChevronsDownUp,
   ChevronsUpDown,
   FolderPlus,
+  ListChecks,
   MessageCirclePlus,
   Monitor,
+  Trash2,
+  X,
 } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
@@ -26,6 +30,7 @@ type SidebarDialogMode =
   | "create-project"
   | "edit-project"
   | "detach-project"
+  | "delete-conversations"
   | "rename-thread"
   | null;
 
@@ -39,11 +44,13 @@ export function AwakenSidebarDemo() {
   const updateStates = AwakenSidebarStates.filter((state) => state.id.startsWith("update-"));
   const navItems = desktopProps.navItems ?? [];
   const [projects, setProjects] = useState(desktopProps.projects ?? []);
-  const conversations = desktopProps.conversations ?? [];
+  const [conversations, setConversations] = useState(desktopProps.conversations ?? []);
   const [activeNavId, setActiveNavId] = useState(desktopProps.activeNavId);
   const [activeProjectId, setActiveProjectId] = useState(desktopProps.activeProjectId);
   const [expandedIds, setExpandedIds] = useState<string[]>(desktopProps.expandedIds ?? []);
   const [conversationSectionExpanded, setConversationSectionExpanded] = useState(true);
+  const [conversationBatchMode, setConversationBatchMode] = useState(false);
+  const [selectedConversationIds, setSelectedConversationIds] = useState<string[]>([]);
   const [dialogMode, setDialogMode] = useState<SidebarDialogMode>(null);
   const [renameDraft, setRenameDraft] = useState("设计系统清理");
   const [projectNameDraft, setProjectNameDraft] = useState("");
@@ -93,27 +100,95 @@ export function AwakenSidebarDemo() {
       </AwakenSidebarSectionAction>
     </span>
   );
+  const eligibleConversationIds = conversations
+    .filter((conversation) => !conversation.isLoading)
+    .map((conversation) => conversation.id);
+  const selectedConversationIdSet = new Set(
+    selectedConversationIds.filter((id) => eligibleConversationIds.includes(id)),
+  );
+  const allEligibleConversationsSelected =
+    eligibleConversationIds.length > 0 &&
+    selectedConversationIdSet.size === eligibleConversationIds.length;
+  const presentedConversations = conversations.map((conversation) => conversationBatchMode
+    ? {
+        ...conversation,
+        selection: {
+          checked: selectedConversationIdSet.has(conversation.id),
+          disabled: Boolean(conversation.isLoading),
+          disabledReason: conversation.isLoading ? "正在运行，停止后可删除" : undefined,
+          onChange: (checked: boolean) => setSelectedConversationIds((current) => checked
+            ? current.includes(conversation.id) ? current : [...current, conversation.id]
+            : current.filter((id) => id !== conversation.id)),
+        },
+      }
+    : conversation);
   const conversationSectionActions = (
     <span className="aw-sidebar-demo__section-actions">
-      <AwakenSidebarSectionAction
-        label={conversationSectionExpanded ? "收起对话" : "展开对话"}
-        onClick={() => {
-          setConversationSectionExpanded((expanded) => !expanded);
-          setLastAction(conversationSectionExpanded ? "已收起对话。" : "已展开对话。");
-        }}
-      >
-        {conversationSectionExpanded ? (
-          <ChevronsDownUp size={13} strokeWidth={1.85} />
-        ) : (
-          <ChevronsUpDown size={13} strokeWidth={1.85} />
-        )}
-      </AwakenSidebarSectionAction>
-      <AwakenSidebarSectionAction
-        label="新增对话"
-        onClick={() => setLastAction("已触发新增对话回调（Gallery 模拟）。")}
-      >
-        <MessageCirclePlus size={13} strokeWidth={1.85} />
-      </AwakenSidebarSectionAction>
+      {conversationBatchMode ? (
+        <>
+          <AwakenSidebarSectionAction
+            label={allEligibleConversationsSelected ? "取消全选" : "全选可删除对话"}
+            disabled={eligibleConversationIds.length === 0}
+            onClick={() => setSelectedConversationIds(
+              allEligibleConversationsSelected ? [] : eligibleConversationIds,
+            )}
+          >
+            <CheckCheck size={13} strokeWidth={1.85} />
+          </AwakenSidebarSectionAction>
+          <AwakenSidebarSectionAction
+            label={selectedConversationIdSet.size > 0
+              ? `删除 ${selectedConversationIdSet.size} 个对话`
+              : "请选择要删除的对话"}
+            className="aw-sidebar-demo__batch-delete-action"
+            disabled={selectedConversationIdSet.size === 0}
+            onClick={() => setDialogMode("delete-conversations")}
+          >
+            <Trash2 size={13} strokeWidth={1.85} />
+          </AwakenSidebarSectionAction>
+          <AwakenSidebarSectionAction
+            label="退出批量管理"
+            onClick={() => {
+              setConversationBatchMode(false);
+              setSelectedConversationIds([]);
+            }}
+          >
+            <X size={13} strokeWidth={1.85} />
+          </AwakenSidebarSectionAction>
+        </>
+      ) : (
+        <>
+          <AwakenSidebarSectionAction
+            label={conversationSectionExpanded ? "收起对话" : "展开对话"}
+            onClick={() => {
+              setConversationSectionExpanded((expanded) => !expanded);
+              setLastAction(conversationSectionExpanded ? "已收起对话。" : "已展开对话。");
+            }}
+          >
+            {conversationSectionExpanded ? (
+              <ChevronsDownUp size={13} strokeWidth={1.85} />
+            ) : (
+              <ChevronsUpDown size={13} strokeWidth={1.85} />
+            )}
+          </AwakenSidebarSectionAction>
+          <AwakenSidebarSectionAction
+            label="批量管理对话"
+            disabled={conversations.length === 0}
+            onClick={() => {
+              setConversationSectionExpanded(true);
+              setSelectedConversationIds([]);
+              setConversationBatchMode(true);
+            }}
+          >
+            <ListChecks size={13} strokeWidth={1.85} />
+          </AwakenSidebarSectionAction>
+          <AwakenSidebarSectionAction
+            label="新增对话"
+            onClick={() => setLastAction("已触发新增对话回调（Gallery 模拟）。")}
+          >
+            <MessageCirclePlus size={13} strokeWidth={1.85} />
+          </AwakenSidebarSectionAction>
+        </>
+      )}
     </span>
   );
 
@@ -194,7 +269,9 @@ export function AwakenSidebarDemo() {
       ? "编辑项目"
       : dialogMode === "detach-project"
         ? "从 Awaken 移除项目"
-        : "重命名会话";
+        : dialogMode === "delete-conversations"
+          ? `删除 ${selectedConversationIdSet.size} 个对话？`
+          : "重命名会话";
 
   const dialogFooter = dialogMode === "create-project" ? (
     <>
@@ -216,6 +293,21 @@ export function AwakenSidebarDemo() {
       <AwakenButton onClick={() => closeDialog()}>取消</AwakenButton>
       <AwakenButton variant="primary" onClick={() => closeDialog("已模拟从 Awaken 移除项目。")}>确认移除</AwakenButton>
     </>
+  ) : dialogMode === "delete-conversations" ? (
+    <>
+      <AwakenButton onClick={() => closeDialog()}>取消</AwakenButton>
+      <AwakenButton
+        variant="primary"
+        onClick={() => {
+          setConversations((current) => current.filter((item) => !selectedConversationIdSet.has(item.id)));
+          setConversationBatchMode(false);
+          setSelectedConversationIds([]);
+          closeDialog(`已模拟删除 ${selectedConversationIdSet.size} 个对话。`);
+        }}
+      >
+        删除 {selectedConversationIdSet.size} 个对话
+      </AwakenButton>
+    </>
   ) : (
     <>
       <AwakenButton onClick={() => closeDialog()}>取消</AwakenButton>
@@ -233,7 +325,7 @@ export function AwakenSidebarDemo() {
     <section className="ads-component-demo aw-sidebar-demo" aria-label="「左侧栏」组件库 AwakenSidebar 演示">
       <header className="ads-component-demo-header">
         <h2>「左侧栏」组件库 <code>AwakenSidebar + AwakenDialog</code></h2>
-        <p>先查看 Awaken Desktop 当前完整组合，再操作项目菜单、区块工具提示和包含真实选择卡片的创建项目弹窗。</p>
+        <p>先查看 Awaken Desktop 当前完整组合，再操作项目菜单、对话批量选择、区块工具提示和统一确认弹窗。</p>
       </header>
 
       <div className="aw-sidebar-demo__controls">
@@ -269,13 +361,16 @@ export function AwakenSidebarDemo() {
               <AwakenSidebar
                 {...desktopProps}
                 projects={projects}
-                conversations={conversations}
+                conversations={presentedConversations}
                 activeNavId={activeNavId}
                 activeProjectId={activeProjectId}
                 expandedIds={expandedIds}
                 projectSectionActions={projectSectionActions}
                 conversationSectionExpanded={conversationSectionExpanded}
                 conversationSectionActions={conversationSectionActions}
+                conversationSectionLabel={conversationBatchMode
+                  ? `对话 · 已选 ${selectedConversationIdSet.size}`
+                  : "对话"}
                 onSelectNav={selectNav}
                 onSelectProject={selectProject}
                 onSelectConversation={selectProject}
@@ -422,7 +517,7 @@ export function AwakenSidebarDemo() {
             <header>
               <h4>侧栏弹窗流程</h4>
               <code>AwakenDialog + AwakenIconButton + AwakenSelectableCard + AwakenProjectFoldersEditor</code>
-              <p>集中观测 App 从左侧栏触发的创建项目、编辑项目、移除项目和重命名会话；关闭图标按钮、本地来源选择卡片和文件夹编辑器均使用真实组合。</p>
+              <p>集中观测 App 从左侧栏触发的创建项目、编辑项目、移除项目、重命名会话和批量删除确认；关闭图标按钮、本地来源选择卡片和文件夹编辑器均使用真实组合。</p>
             </header>
             <div className="aw-sidebar-demo__part-canvas aw-sidebar-demo__dialog-actions">
               <AwakenButton onClick={() => setDialogMode("create-project")}>创建项目</AwakenButton>
@@ -462,6 +557,10 @@ export function AwakenSidebarDemo() {
         ) : dialogMode === "detach-project" ? (
           <p className="aw-sidebar-demo__dialog-copy">
             “Awaken”会从侧栏移除。3 条历史会话和磁盘文件都会保留。
+          </p>
+        ) : dialogMode === "delete-conversations" ? (
+          <p className="aw-sidebar-demo__dialog-copy">
+            将删除所选对话记录和 Awaken 管理的附件；对话产生的文件不会被删除。此操作无法撤销。
           </p>
         ) : dialogMode === "rename-thread" ? (
           <label className="aw-sidebar-demo__rename-field">

@@ -103,6 +103,12 @@ body.aw-project-reordering * {
   color: var(--aw-text-primary);
 }
 
+.aw-project-node--selected > .aw-project-row,
+.aw-project-node--selected.aw-project-node--active > .aw-project-row {
+  background: color-mix(in srgb, var(--aw-accent) 12%, var(--aw-bg-fill-light));
+  color: var(--aw-text-primary);
+}
+
 .aw-project-node:not(.aw-project-node--disabled) > .aw-project-row:hover,
 .aw-project-node:not(.aw-project-node--disabled) > .aw-project-row:has(.aw-project-row-main:focus-visible),
 .aw-project-node:not(.aw-project-node--disabled) > .aw-project-row:has(.aw-project-row-actions :focus-visible) {
@@ -114,6 +120,11 @@ body.aw-project-reordering * {
 .aw-project-node--active:not(.aw-project-node--disabled) > .aw-project-row:has(.aw-project-row-main:focus-visible),
 .aw-project-node--active:not(.aw-project-node--disabled) > .aw-project-row:has(.aw-project-row-actions :focus-visible) {
   background: var(--aw-bg-fill-dark);
+}
+
+.aw-project-node--selected:not(.aw-project-node--disabled) > .aw-project-row:hover,
+.aw-project-node--selected:not(.aw-project-node--disabled) > .aw-project-row:has(.aw-project-row-main:focus-visible) {
+  background: color-mix(in srgb, var(--aw-accent) 16%, var(--aw-bg-fill-light));
 }
 
 .aw-project-row-main {
@@ -144,6 +155,34 @@ body.aw-project-reordering * {
   flex: 0 0 20px;
   color: var(--aw-text-tertiary);
   transition: color var(--aw-transition-fast);
+}
+
+.aw-project-row-checkbox {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--aw-border-control);
+  border-radius: 4px;
+  background: var(--aw-bg-white);
+  color: #ffffff;
+  transition:
+    background-color var(--aw-transition-fast),
+    border-color var(--aw-transition-fast),
+    color var(--aw-transition-fast);
+}
+
+.aw-project-row-checkbox svg {
+  opacity: 0;
+}
+
+.aw-project-node--selected .aw-project-row-checkbox {
+  border-color: var(--aw-accent);
+  background: var(--aw-accent);
+}
+
+.aw-project-node--selected .aw-project-row-checkbox svg {
+  opacity: 1;
 }
 
 .aw-project-row-icon svg,

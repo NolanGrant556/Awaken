@@ -1950,6 +1950,31 @@ func (s *RunService) DeleteThread(threadID string) error {
 	return s.threadStore.DeleteThread(threadID)
 }
 
+// ThreadDeleteFailure preserves the thread identity for a failed member of a
+// batch delete. Batch deletion is intentionally per-thread rather than
+// transactional: project-less conversations are removed directly from the
+// FileStore, so a later filesystem failure cannot roll back an earlier delete.
+type ThreadDeleteFailure struct {
+	ThreadID string
+	Err      error
+}
+
+// DeleteThreads applies the ordinary durable delete contract to each thread
+// and returns an explicit per-thread result. Callers must not interpret a
+// partial success as an all-or-nothing transaction.
+func (s *RunService) DeleteThreads(threadIDs []string) ([]string, []ThreadDeleteFailure) {
+	deleted := make([]string, 0, len(threadIDs))
+	failed := make([]ThreadDeleteFailure, 0)
+	for _, threadID := range threadIDs {
+		if err := s.DeleteThread(threadID); err != nil {
+			failed = append(failed, ThreadDeleteFailure{ThreadID: threadID, Err: err})
+			continue
+		}
+		deleted = append(deleted, threadID)
+	}
+	return deleted, failed
+}
+
 func (s *RunService) Subscribe(runID string, afterSeq uint64) (Subscription, error) {
 	session, err := s.session(runID)
 	if err != nil {

@@ -13,15 +13,15 @@
 - `AwakenPrimaryNav`：连接器与技能入口。
 - `AwakenProjectTree + AwakenDropdown`：“项目工作区”项目/线程树与“对话”扁平 thread 列表，以及项目/会话的真实更多操作菜单。
 - 顶层项目通过按住拖拽或 `Alt + ↑/↓` 排序；`onReorderProjects` 只回传完整顺序，持久化仍由 consumer 负责。
-- `AwakenSidebarSectionAction`：项目全部展开/收起、对话分区展开/收起、创建项目、新增对话和项目行内动作。
+- `AwakenSidebarSectionAction`：项目全部展开/收起、对话分区展开/收起、批量管理、创建项目、新增对话和项目行内动作。
 - `AwakenSidebarThreadSpinner`：只在 running / cancelling 线程行末显示的运行指示。
 - `AwakenProfileButton`：只作为 Nolan 账户入口在完整侧栏中出现；它与额度面板的完整组合归入独立“「账户」组件库”。
 - `AwakenSidebarUpdateButton`：通过 `profileUpdateAction` 传入的更新入口，渲染在底部固定区、账户入口上方；仅表达 `available / downloading / downloaded / error` 四种 UI 状态，下载进度与重启、重试行为全部由 consumer 通过回调接管。
-- `AwakenDialog + AwakenIconButton`：保留统一模态与关闭按钮能力；Gallery 在本组件族中观测创建项目、移除项目和重命名会话三个 App 级真实流程。
+- `AwakenDialog + AwakenIconButton`：保留统一模态与关闭按钮能力；Gallery 在本组件族中观测创建项目、移除项目、重命名会话和批量删除确认流程。
 - `AwakenSelectableCard`：只在创建项目弹窗中展示 Desktop 当前支持的本地文件夹来源，不展示尚未支持的远程或云端来源。
 - `AwakenProjectFoldersEditor`：在创建项目和编辑项目两个弹窗中观测项目的文件夹列表、主文件夹徽标和每行更多操作；Gallery 只模拟回调，不打开系统对话框、不触碰磁盘。
 
-项目树与对话列表同时展示当前真实支持的更多菜单、展开与选中状态，以及“暂无项目”“暂无会话”两种空状态。项目区和对话区位于同一个中部纵向滚动容器，顶部 New Agent/一级导航与底部账户固定；滚动条使用窄轨道。`AwakenDropdown` 保留自己的组件目录与公开导出，但不再单独占用 Gallery 入口；`AwakenTooltip` 随侧栏区块动作和其他真实消费组件观测，`AwakenAvatar` 仍保留独立入口。New Agent 加号、项目树箭头和账户入口箭头直接使用 `lucide-react`，不再经过重复的 `AwakenIcon` 包装层。
+项目树与对话列表同时展示当前真实支持的更多菜单、展开、active 与受控批量选择状态，以及“暂无项目”“暂无会话”两种空状态。批量选择、全选、删除和退出都由 consumer 作为标题区动作传入；Sidebar 不保存选择集合或调用 runtime。项目区和对话区位于同一个中部纵向滚动容器，顶部 New Agent/一级导航与底部账户固定；滚动条使用窄轨道。`AwakenDropdown` 保留自己的组件目录与公开导出，但不再单独占用 Gallery 入口；`AwakenTooltip` 随侧栏区块动作和其他真实消费组件观测，`AwakenAvatar` 仍保留独立入口。New Agent 加号、项目树箭头和账户入口箭头直接使用 `lucide-react`，不再经过重复的 `AwakenIcon` 包装层。
 
 侧栏不保留品牌行；顶部直接从 `New Agent` 开始。带项目身份的 thread 位于“项目工作区”树下，空项目身份的 thread 位于独立“对话”分区。
 

@@ -587,6 +587,20 @@ export type ProjectReorderResult =
 
 export type ThreadDeleteResult = { ok: true } | { ok: false; code: string; message: string };
 
+export type ThreadBatchDeleteFailure = {
+  threadId: string;
+  code: string;
+  message: string;
+};
+
+export type ThreadBatchDeleteResult =
+  | {
+      ok: true;
+      deletedThreadIds: string[];
+      failures: ThreadBatchDeleteFailure[];
+    }
+  | { ok: false; code: string; message: string };
+
 export type RenameThreadRequest = {
   label: string;
 };
@@ -2011,6 +2025,7 @@ export type AwakenBridge = {
     request: ThreadModelPreferenceRequest,
   ) => Promise<RuntimeThread>;
   deleteThread: (threadId: string) => Promise<ThreadDeleteResult>;
+  deleteThreads: (threadIds: string[]) => Promise<ThreadBatchDeleteResult>;
   listProjects: (includeRemoved?: boolean) => Promise<RuntimeProject[]>;
   listProjectDirectory: (
     request: ProjectDirectoryListRequest,

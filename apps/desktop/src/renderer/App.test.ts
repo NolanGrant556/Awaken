@@ -568,6 +568,11 @@ function stubElectronBridge(): void {
       renameThread: vi.fn(),
       updateThreadModelPreference: vi.fn(),
       deleteThread: vi.fn(async () => ({ ok: true as const })),
+      deleteThreads: vi.fn(async (threadIds: string[]) => ({
+        ok: true as const,
+        deletedThreadIds: threadIds,
+        failures: [],
+      })),
       listProjects: vi.fn(async () => []),
       listProjectDirectory: vi.fn(async () => ({
         ok: true as const,
@@ -3597,6 +3602,41 @@ describe("sidebar thread status presentation", () => {
     expect(html).toContain("aw-sidebar-thread-spinner");
     expect(html).toContain("aw-dotm-square3");
   });
+
+  it("renders controlled conversation selection without row menus", () => {
+    const html = renderToString(
+      React.createElement(AwakenProjectTree, {
+        items: [
+          {
+            id: "thread:ready",
+            kind: "thread",
+            label: "可删除会话",
+            menuItems: [{ id: "delete", label: "删除会话" }],
+            selection: { checked: true, onChange: vi.fn() },
+          },
+          {
+            id: "thread:busy",
+            kind: "thread",
+            label: "运行中会话",
+            isLoading: true,
+            selection: {
+              checked: false,
+              disabled: true,
+              disabledReason: "正在运行，停止后可删除",
+              onChange: vi.fn(),
+            },
+          },
+        ],
+      }),
+    );
+
+    expect(html).toContain('role="checkbox"');
+    expect(html).toContain('aria-checked="true"');
+    expect(html).toContain('aria-label="取消选择 可删除会话"');
+    expect(html).toContain('title="正在运行，停止后可删除"');
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).not.toContain("更多操作");
+  });
 });
 
 describe("App workbench presentation", () => {
@@ -3763,6 +3803,7 @@ describe("App workbench presentation", () => {
     expect(html).not.toContain("⌘N");
     expect(html).toContain('aria-label="创建项目"');
     expect(html).toContain('aria-label="展开全部项目"');
+    expect(html).toContain('aria-label="批量管理对话"');
     expect(html).toContain('aria-label="新增对话"');
     expect(html).toContain(">对话<");
     expect(html).toContain('aria-label="选择项目，当前：选择项目"');

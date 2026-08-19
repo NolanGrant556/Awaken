@@ -144,7 +144,7 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
         { id: "conversation-3", kind: "thread", label: "整理会议笔记", menuItems: threadMenuItems() },
         { id: "conversation-4", kind: "thread", label: "生成一份说明文档", menuItems: threadMenuItems() },
         { id: "conversation-5", kind: "thread", label: "检查交付清单", menuItems: threadMenuItems() },
-        { id: "conversation-6", kind: "thread", label: "分析临时数据", menuItems: threadMenuItems() },
+        { id: "conversation-6", kind: "thread", label: "分析临时数据", isLoading: true, menuItems: threadMenuItems() },
         { id: "conversation-7", kind: "thread", label: "规划下周任务", menuItems: threadMenuItems() },
       ],
       activeProjectId: "finance-attachment",

@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
+  Check,
   ChevronRight,
   Folder,
   FolderOpen,
@@ -348,7 +349,8 @@ function ProjectNode({
   const hasChildren = childItems.length > 0;
   const isExpanded = expanded.includes(item.id);
   const isActive = item.id === activeId;
-  const isDisabled = item.disabled;
+  const selection = item.selection;
+  const isDisabled = item.disabled || Boolean(selection?.disabled);
   const isLoading = item.isLoading;
   const kind = item.kind ?? (depth === 0 || hasChildren ? "project" : "thread");
   const isProject = kind === "project";
@@ -376,6 +378,8 @@ function ProjectNode({
     hasChildren ? "aw-project-node--has-children" : "",
     isExpanded ? "aw-project-node--expanded" : "",
     isActive ? "aw-project-node--active" : "",
+    selection ? "aw-project-node--selection" : "",
+    selection?.checked ? "aw-project-node--selected" : "",
     isDisabled ? "aw-project-node--disabled" : "",
     menuOpen ? "aw-project-node--menu-open" : "",
     reorderable && isTopLevel ? "aw-project-node--reorderable" : "",
@@ -403,6 +407,10 @@ function ProjectNode({
   const handleClick = () => {
     if (isDisabled) return;
     if (consumeSuppressedClick?.(item.id)) return;
+    if (selection) {
+      selection.onChange?.(!selection.checked);
+      return;
+    }
     if (isExpandable) {
       onToggle(item.id);
     }
@@ -427,19 +435,27 @@ function ProjectNode({
         <button
           type="button"
           className="aw-project-row-main"
-          disabled={isDisabled}
+          disabled={item.disabled}
           onClick={handleClick}
           onPointerDown={isTopLevel ? (event) => onPointerDown?.(event, item) : undefined}
           onKeyDown={isTopLevel ? (event) => onReorderKeyDown?.(event, item.id) : undefined}
-          title={item.hoverCard && isTopLevel ? undefined : item.path ?? item.label}
-          aria-current={isActive ? "true" : undefined}
+          title={selection?.disabledReason ?? (item.hoverCard && isTopLevel ? undefined : item.path ?? item.label)}
+          role={selection ? "checkbox" : undefined}
+          aria-checked={selection ? selection.checked : undefined}
+          aria-disabled={isDisabled || undefined}
+          aria-label={selection ? `${selection.checked ? "取消选择" : "选择"} ${item.label}` : undefined}
+          aria-current={!selection && isActive ? "true" : undefined}
           aria-expanded={isExpandable ? isExpanded : undefined}
           aria-grabbed={isDragging || undefined}
           aria-keyshortcuts={reorderable && isTopLevel ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
           style={rowButtonStyle}
         >
           <span className="aw-project-row-icon">
-            {isProject ? (
+            {selection ? (
+              <span className="aw-project-row-checkbox" aria-hidden="true">
+                <Check size={12} strokeWidth={2.2} />
+              </span>
+            ) : isProject ? (
               isExpanded ? (
                 <FolderOpen size={20} strokeWidth={1.75} aria-hidden="true" />
               ) : (
@@ -460,7 +476,7 @@ function ProjectNode({
           {isLoading ? <AwakenSidebarThreadSpinner /> : null}
           {showTimeLabel ? <span className="aw-project-row-meta">{item.timeLabel}</span> : null}
         </button>
-        {item.action || item.menuItems?.length ? (
+        {!selection && (item.action || item.menuItems?.length) ? (
           <span className="aw-project-row-actions">
             {item.action}
             {item.menuItems?.length ? (

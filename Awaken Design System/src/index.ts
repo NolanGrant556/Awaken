@@ -14,6 +14,7 @@ export type {
   NavItem,
   ConversationItem,
   ProjectItem,
+  ProjectItemSelection,
   ProjectMenuItem,
   ProjectFolderRow,
   ProjectFolderRowAction,

@@ -209,6 +209,39 @@ describe("model capabilities", () => {
     });
   });
 
+  it("defaults custom visual input off and only accepts an explicit custom override", () => {
+    expect(
+      normalizeAdvancedWithModelCapability(undefined, "custom", "custom-model"),
+    ).toMatchObject({
+      supportsVision: false,
+      supportsNativePDF: false,
+    });
+
+    expect(
+      normalizeAdvancedWithModelCapability(
+        { supportsVision: true, supportsNativePDF: true },
+        "custom",
+        "custom-model",
+      ),
+    ).toMatchObject({
+      supportsVision: true,
+      supportsNativePDF: false,
+    });
+  });
+
+  it("keeps built-in capabilities authoritative when legacy switches disagree", () => {
+    const advanced = normalizeAdvancedWithModelCapability(
+      { supportsVision: false, supportsNativePDF: true },
+      "openai",
+      "gpt-5.6-sol",
+      undefined,
+      "openai_chat",
+    );
+
+    expect(advanced.supportsVision).toBe(true);
+    expect(advanced.supportsNativePDF).toBeUndefined();
+  });
+
   it("caps profile values to selected model limits", () => {
     expect(
       normalizeAdvancedWithModelCapability(

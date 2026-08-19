@@ -165,3 +165,27 @@
   gap: 7px;
   padding-top: 2px;
 }
+
+.model-provider-capability-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--aw-surface-raised) 82%, var(--aw-bg-fill-light) 18%);
+}
+
+.model-provider-capability-toggle strong {
+  color: var(--aw-text-primary);
+  font-size: 12px;
+  font-weight: var(--aw-font-weight-bold);
+}
+
+.model-provider-capability-toggle p {
+  margin: 3px 0 0;
+  color: var(--aw-text-subtle);
+  font-size: 11px;
+  line-height: 1.5;
+}

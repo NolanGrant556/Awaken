@@ -423,6 +423,20 @@ describe("DesktopSettingsDialog model connection feedback", () => {
       listModelProfiles: vi.fn(async () => []),
       getAgentPlanAccount: vi.fn(async () => null),
       syncModelCapabilities: vi.fn(async () => [deepSeekProvider, customProvider]),
+      saveModelProfile: vi.fn(async (request) => ({
+        id: "custom-profile",
+        providerId: "custom",
+        displayName: "自定义 API",
+        modelId: request.modelId,
+        baseURL: request.baseURL,
+        protocol: request.protocol,
+        authScheme: request.authScheme,
+        hasKey: Boolean(request.apiKey),
+        enabled: request.enabled,
+        isDefault: request.isDefault,
+        profileStatus: "ready",
+        advanced: request.advanced,
+      })),
     } as unknown as RuntimeClient;
 
     await act(async () => {
@@ -469,6 +483,50 @@ describe("DesktopSettingsDialog model connection feedback", () => {
         button.textContent?.includes("刷新模型目录"),
       ),
     ).toBe(false);
+
+    const visionSwitch = document.querySelector<HTMLButtonElement>(
+      '.model-provider-capability-toggle [role="switch"]',
+    );
+    expect(visionSwitch?.getAttribute("aria-checked")).toBe("false");
+    expect(container.textContent).toContain("不代表接口支持原生 PDF");
+
+    await act(async () => visionSwitch?.click());
+    expect(visionSwitch?.getAttribute("aria-checked")).toBe("true");
+
+    const modelInput = document.querySelector<HTMLInputElement>(
+      'input[placeholder="输入模型 ID"]',
+    );
+    const baseURLLabel = Array.from(document.querySelectorAll("label")).find(
+      (label) => label.textContent === "Base URL",
+    );
+    const baseURLInput = baseURLLabel?.htmlFor
+      ? document.getElementById(baseURLLabel.htmlFor)
+      : null;
+    await act(async () => {
+      if (modelInput) enterTextInput(modelInput, "vision-model");
+      if (baseURLInput instanceof HTMLInputElement) {
+        enterTextInput(baseURLInput, "https://gateway.example/v1");
+      }
+      enterApiKey("custom-key");
+    });
+
+    const saveButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent?.includes("保存连接"));
+    await act(async () => saveButton?.click());
+    await settle();
+
+    expect(runtimeClient.saveModelProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "custom",
+        modelId: "vision-model",
+        baseURL: "https://gateway.example/v1",
+        advanced: expect.objectContaining({
+          supportsVision: true,
+          supportsNativePDF: false,
+        }),
+      }),
+    );
   });
 
   it("explains a static catalog instead of presenting a refresh action that cannot work", async () => {

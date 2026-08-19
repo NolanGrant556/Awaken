@@ -743,6 +743,8 @@ export function normalizeAdvancedWithModelCapability(
   protocol?: string,
 ): ModelProfileAdvanced {
   const capability = capabilityForModel(providerId, modelId, resolution);
+  const customVision =
+    providerId === "custom" ? advanced?.supportsVision ?? false : undefined;
   const inferredMaxTokens =
     capability?.default_max_tokens ?? capability?.max_output_tokens;
   const requestedMaxTokens = advanced?.maxTokens ?? inferredMaxTokens;
@@ -750,16 +752,19 @@ export function normalizeAdvancedWithModelCapability(
     advanced?.contextWindow ?? capability?.context_window;
   return {
     ...advanced,
-    // Connection forms no longer own capability switches. Runtime admission
-    // trusts exact provider metadata first, then the official manifest; an
-    // unknown field stays unknown so Read can degrade or return a typed error.
+    // Built-in capability switches are runtime facts, not editable preferences.
+    // A custom profile is the narrow exception: the user explicitly declares
+    // whether its exact transport contract accepts visual input.
     temperature: capability?.default_temperature,
-    supportsVision: capability?.supports_vision,
+    supportsVision:
+      providerId === "custom" ? customVision : capability?.supports_vision,
     maxInputTokens: capability?.max_input_tokens,
     supportsNativePDF:
-      (providerId === "openai" && protocol === "openai_responses"
-        ? true
-        : capability?.supports_native_pdf),
+      providerId === "custom"
+        ? false
+        : providerId === "openai" && protocol === "openai_responses"
+          ? true
+          : capability?.supports_native_pdf,
     supportsVideo: capability?.supports_video,
     supportsTools: capability?.supports_tools,
     supportsPromptCache: capability?.supports_prompt_cache,

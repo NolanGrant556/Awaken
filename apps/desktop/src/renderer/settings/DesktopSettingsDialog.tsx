@@ -316,13 +316,22 @@ function advancedWithModelCapability(
   overwrite: boolean,
 ): RuntimeModelProfileSummary["advanced"] {
   const capability = modelCapabilityFor(provider, modelId);
+  const customVision =
+    provider.id === "custom" ? advanced?.supportsVision ?? false : undefined;
   if (!capability) {
-    return overwrite
+    const nextAdvanced = overwrite
       ? {
           endpointId: advanced?.endpointId,
           inferenceEndpoint: advanced?.inferenceEndpoint,
         }
       : advanced;
+    return provider.id === "custom"
+      ? {
+          ...nextAdvanced,
+          supportsVision: customVision,
+          supportsNativePDF: false,
+        }
+      : nextAdvanced;
   }
   const inferredMaxTokens =
     capability.maxOutputTokens ?? capability.defaultMaxTokens;
@@ -343,13 +352,17 @@ function advancedWithModelCapability(
       ? inferredMaxTokens
       : advanced.maxTokens,
     supportsVision:
-      overwrite || advanced?.supportsVision === undefined
-        ? capability.supportsVision
-        : advanced.supportsVision,
+      provider.id === "custom"
+        ? customVision
+        : overwrite || advanced?.supportsVision === undefined
+          ? capability.supportsVision
+          : advanced.supportsVision,
     supportsNativePDF:
-      overwrite || advanced?.supportsNativePDF === undefined
-        ? capability.supportsNativePDF
-        : advanced.supportsNativePDF,
+      provider.id === "custom"
+        ? false
+        : overwrite || advanced?.supportsNativePDF === undefined
+          ? capability.supportsNativePDF
+          : advanced.supportsNativePDF,
     supportsVideo:
       overwrite || advanced?.supportsVideo === undefined
         ? capability.supportsVideo
@@ -1438,6 +1451,12 @@ export function DesktopSettingsDialog({
                         : null
                     }
                     showApiKey={showApiKey}
+                    showVisionCapability={selectedProvider.id === "custom"}
+                    supportsVision={
+                      selectedProvider.id === "custom"
+                        ? selectedProviderDraft.advanced?.supportsVision ?? false
+                        : false
+                    }
                     saving={saving}
                     testing={testing}
                     testFeedback={testFeedback}
@@ -1534,6 +1553,17 @@ export function DesktopSettingsDialog({
                     onManagementApiKeyChange={(managementApiKey) => {
                       setTestFeedback(null);
                       setDraft({ ...selectedProviderDraft, managementApiKey });
+                    }}
+                    onSupportsVisionChange={(supportsVision) => {
+                      setTestFeedback(null);
+                      setDraft({
+                        ...selectedProviderDraft,
+                        advanced: {
+                          ...selectedProviderDraft.advanced,
+                          supportsVision,
+                          supportsNativePDF: false,
+                        },
+                      });
                     }}
                     onRefreshCatalog={() => {
                       void refreshSelectedProviderCatalog();

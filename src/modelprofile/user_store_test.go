@@ -209,6 +209,44 @@ func TestUserStoreIgnoresLegacyCapabilitySwitchesButKeepsTokenLimits(t *testing.
 	}
 }
 
+func TestUserStoreAcceptsOnlyExplicitCustomVisionCapability(t *testing.T) {
+	t.Run("enabled", func(t *testing.T) {
+		root := t.TempDir()
+		writeUserStoreFixture(t, root, `{
+  "version": 3,
+  "profiles": [
+    {"id":"custom-vision","providerId":"custom","modelId":"custom-model","baseURL":"https://gateway.example/v1","protocol":"openai_chat","authScheme":"bearer","enabled":true,"isDefault":true,"advanced":{"supportsVision":true,"supportsNativePDF":true}}
+  ]
+}`, "AWAKEN_API_KEY_custom-vision=key\n")
+
+		profile, err := NewUserStore(root).Resolve("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !profile.SupportsVision || profile.SupportsNativePDF {
+			t.Fatalf("custom vision contract was not preserved safely: %+v", profile)
+		}
+	})
+
+	t.Run("omitted defaults off", func(t *testing.T) {
+		root := t.TempDir()
+		writeUserStoreFixture(t, root, `{
+  "version": 3,
+  "profiles": [
+    {"id":"custom-default","providerId":"custom","modelId":"custom-model","baseURL":"https://gateway.example/v1","protocol":"openai_chat","authScheme":"bearer","enabled":true,"isDefault":true}
+  ]
+}`, "AWAKEN_API_KEY_custom-default=key\n")
+
+		profile, err := NewUserStore(root).Resolve("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if profile.SupportsVision || profile.SupportsNativePDF {
+			t.Fatalf("custom media capabilities did not fail closed: %+v", profile)
+		}
+	})
+}
+
 func TestUserStoreRejectsAgentPlanMediaModelAsMainProfile(t *testing.T) {
 	root := t.TempDir()
 	writeUserStoreFixture(t, root, `{

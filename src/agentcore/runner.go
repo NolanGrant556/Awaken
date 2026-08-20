@@ -620,13 +620,17 @@ func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 
 func (r *Runner) buildLLMRequest() (LLMRequest, error) {
 	llmReq := r.reqBuilder.Build(r.conversation.Context, nil)
-	if err := r.hydrateOffloadedToolResults(stdcontext.Background(), llmReq.Messages); err != nil {
-		return LLMRequest{}, err
-	}
 	if err := context.ValidateToolResultPairing(llmReq.Messages); err != nil {
 		return LLMRequest{}, fmt.Errorf("invalid tool result pairing: %w", err)
 	}
 	return llmReq, nil
+}
+
+func (r *Runner) rebuildRequestBuilder() {
+	if r == nil {
+		return
+	}
+	r.reqBuilder = NewRequestBuilder(r.config).BindThread(r.threadID)
 }
 
 func (r *Runner) persistCurrentContextSnapshot(ctx stdcontext.Context, events *runEventEmitter) (*ContextWindowState, error) {
@@ -1201,6 +1205,17 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 			continue
 		}
 
+		if result, rejected := r.admitToolCall(hookCall, results); rejected {
+			results = append(results, result)
+			if events != nil {
+				if err := events.emitToolResultBatch(runCtx, result, nil, nil); err != nil {
+					cancel()
+					terminateReason = TerminalReasonPersistenceError
+				}
+			}
+			continue
+		}
+
 		if r.failureSupervisor != nil {
 			r.failureSupervisor.NoteRealExecution(before.CallSignature)
 		}
@@ -1550,7 +1565,7 @@ func (r *Runner) applyImplicitSkillActivation(
 			r.config.SkillContextBlocks = append(r.config.SkillContextBlocks, block)
 		}
 	}
-	r.reqBuilder = NewRequestBuilder(r.config)
+	r.rebuildRequestBuilder()
 }
 
 func (r *Runner) startSkillChild(
@@ -1609,7 +1624,7 @@ func (r *Runner) startSkillChild(
 
 	conversation := context.NewConversation(nil)
 	conversation.UserInput("Execute the loaded forked Skill instructions and return the completed result to the parent Agent.")
-	childRunner := NewRunner(childConfig, conversation, NewRequestBuilder(childConfig))
+	childRunner := NewRunner(childConfig, conversation, NewRequestBuilder(childConfig).BindThread(r.threadID))
 	childRunner.threadID = r.threadID
 	childRunner.runID = r.runID
 	childRunner.sessionID = r.sessionID
@@ -1717,7 +1732,7 @@ func (r *Runner) startNativeChildConfigured(
 
 	conversation := context.NewConversation(nil)
 	conversation.UserInput(request.Prompt)
-	childRunner := NewRunner(childConfig, conversation, NewRequestBuilder(childConfig))
+	childRunner := NewRunner(childConfig, conversation, NewRequestBuilder(childConfig).BindThread(r.threadID))
 	childRunner.threadID = r.threadID
 	childRunner.runID = r.runID
 	childRunner.sessionID = r.sessionID

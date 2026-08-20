@@ -45,23 +45,36 @@ func TestRunnerOffloadsLargeToolResultBeforeAdmission(t *testing.T) {
 	}
 }
 
-func TestRunnerHydratesOffloadedToolResultOnlyForModelRequest(t *testing.T) {
+func TestBuildLLMRequestKeepsOffloadedToolResultStub(t *testing.T) {
 	original := strings.Repeat("child result ", 4000)
+	marker := "[TOOL_RESULT_OFFLOADED]\nstorage_key=thread/tool-results/task/call/content.txt\nsha256=abc123\nbytes=52000"
 	store := &fakeToolResultOffloadStore{
 		content: original,
 		receipt: ToolResultOffloadReceipt{StorageKey: "thread/tool-results/task/call/content.txt", Digest: "abc123", ByteSize: len(original)},
 	}
-	messages := []convcontext.Message{{Role: convcontext.RoleTool, ToolCallID: "call", Content: "[TOOL_RESULT_OFFLOADED]\nstorage_key=thread/tool-results/task/call/content.txt\nsha256=abc123\nbytes=52000"}}
-	runner := &Runner{threadID: "thread", config: AgentConfig{ToolResultOffloadStore: store}}
-	if err := runner.hydrateOffloadedToolResults(stdcontext.Background(), messages); err != nil {
+	conv := convcontext.NewConversation(nil)
+	conv.Context.SetMessages([]convcontext.Message{
+		{Role: convcontext.RoleUser, Content: "run the tool"},
+		{Role: convcontext.RoleAssistant, ToolCalls: []convcontext.ToolCall{{
+			ID: "call", Function: convcontext.FunctionCall{Name: "wait"},
+		}}},
+		{Role: convcontext.RoleTool, ToolCallID: "call", Name: "wait", Content: marker},
+	})
+	runner := NewRunner(AgentConfig{ToolResultOffloadStore: store}, conv, NewRequestBuilder(AgentConfig{}).BindThread("thread"))
+	runner.threadID = "thread"
+	req, err := runner.buildLLMRequest()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if messages[0].Content != original {
-		t.Fatalf("model request did not receive hydrated content: %q", messages[0].Content)
+	if !strings.Contains(req.Messages[2].Content, "[TOOL_RESULT_OFFLOADED]") {
+		t.Fatalf("model request should keep the offload stub, got %q", req.Messages[2].Content)
+	}
+	if strings.Contains(req.Messages[2].Content, original) {
+		t.Fatal("offloaded tool result was fully hydrated into the provider request")
 	}
 }
 
-func TestRunnerHydratesOffloadedCanonicalOutcomeEnvelope(t *testing.T) {
+func TestHydrateOffloadedToolResultHelperStillRestoresFullText(t *testing.T) {
 	original := strings.Repeat("full wait result ", 3000)
 	marker := "[TOOL_RESULT_OFFLOADED]\nstorage_key=thread/tool-results/task/call/content.txt\nsha256=abc123\nbytes=51000"
 	store := &fakeToolResultOffloadStore{content: original}
@@ -79,6 +92,6 @@ func TestRunnerHydratesOffloadedCanonicalOutcomeEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	if payload["content"] != original || payload["truncated"] != false {
-		t.Fatalf("canonical outcome was not hydrated: %+v", payload)
+		t.Fatalf("canonical outcome helper did not hydrate: %+v", payload)
 	}
 }

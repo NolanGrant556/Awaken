@@ -226,9 +226,9 @@ func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convconte
 			// compact structured payload used during the live run; feeding display
 			// text here loses error_code/retryable/process facts after restart.
 			if outcome, ok := executionOutcomePayload(record.Payload); ok {
-				hydrated, warnings := NewToolResultStore().HydrateToolResult(context.Background(), record.ThreadID, outcome.ModelContent)
-				outcome.ModelContent = hydrated
-				outcome.Warnings = append(outcome.Warnings, warnings...)
+				// Replay restores storage_key + metadata only. Hydration of
+				// near-tail media happens later in the current-window request
+				// projection, so restart and live prepared requests match.
 				content = outcome.ModelPayload()
 				isError = outcome.IsError()
 				modelContent = tool.CloneModelContent(outcome.ModelContent)
@@ -259,7 +259,7 @@ func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convconte
 	return messages
 }
 
-func compactedMessagesFromSemanticRecord(threadID string, payload map[string]any) ([]convcontext.Message, bool) {
+func compactedMessagesFromSemanticRecord(_ string, payload map[string]any) ([]convcontext.Message, bool) {
 	var durable []agentcore.SemanticCompactedMessage
 	if !decodeSemanticUserMessageField(payload, "messages", &durable) || len(durable) == 0 {
 		return nil, false
@@ -288,11 +288,8 @@ func compactedMessagesFromSemanticRecord(threadID string, payload map[string]any
 			})
 		}
 		compactBoundaryID := strings.TrimSpace(message.CompactBoundaryID)
-		hydratedModelContent, warnings := NewToolResultStore().HydrateToolResult(context.Background(), threadID, message.ModelContent)
 		content := message.Content
-		for _, warning := range warnings {
-			content += fmt.Sprintf("\n[%s: %s]", warning.Code, warning.Message)
-		}
+		modelContent := tool.CloneModelContent(message.ModelContent)
 		if len(messages) == 0 {
 			if compactBoundaryID == "" {
 				compactBoundaryID = boundaryID
@@ -313,7 +310,7 @@ func compactedMessagesFromSemanticRecord(threadID string, payload map[string]any
 			Name:                message.Name,
 			IsError:             message.IsError,
 			CompactBoundaryID:   compactBoundaryID,
-			ModelContent:        hydratedModelContent,
+			ModelContent:        modelContent,
 			Origin:              message.Origin,
 			MessageID:           message.MessageID,
 			TurnID:              message.TurnID,

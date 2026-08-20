@@ -57,7 +57,10 @@ export function AwakenLogoDemo() {
                 type="radio"
                 name="aw-logo-optical-size"
                 checked={opticalSize === size}
-                onChange={() => setOpticalSize(size)}
+                onChange={() => {
+                  setOpticalSize(size);
+                  setPreviewScale(size);
+                }}
               />
               {size}
             </label>

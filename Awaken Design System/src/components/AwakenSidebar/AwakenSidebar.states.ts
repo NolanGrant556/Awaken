@@ -153,7 +153,7 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
       profileName: "Nolan",
       profileAvatarFallback: "AW",
       profileAvatarSrc: undefined,
-      newTaskLabel: "New Agent",
+      newTaskLabel: "新建任务",
       projectSectionLabel: "项目工作区",
       showProjectCount: false,
       projectSectionActions: createElement(

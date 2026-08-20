@@ -11,6 +11,7 @@ export type AwakenSettingsProps = {
   navItems: AwakenSettingsNavItem[];
   activeSectionId: string;
   sectionTitle: string;
+  sectionDescription?: ReactNode;
   message?: ReactNode;
   toast?: ReactNode;
   children: ReactNode;
@@ -29,6 +30,7 @@ export function AwakenSettings({
   navItems,
   activeSectionId,
   sectionTitle,
+  sectionDescription,
   message,
   toast,
   children,
@@ -90,6 +92,9 @@ export function AwakenSettings({
             <div className="aw-settings-page">
               <header className="aw-settings-page__header">
                 <h1 className="aw-settings-page__title">{sectionTitle}</h1>
+                {sectionDescription ? (
+                  <p className="aw-settings-page__description">{sectionDescription}</p>
+                ) : null}
               </header>
               {message ? <div className="model-settings-message">{message}</div> : null}
               {children}

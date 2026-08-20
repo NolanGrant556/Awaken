@@ -9,7 +9,10 @@ export type AwakenAppearanceSettingsProps = AwakenThemeChoiceGroupProps & {
   message?: ReactNode;
 };
 
-export function AwakenAppearanceSettings({ message, ...props }: AwakenAppearanceSettingsProps) {
+export function AwakenAppearanceSettings({
+  message,
+  ...props
+}: AwakenAppearanceSettingsProps) {
   return (
     <section className="appearance-settings" aria-label="外观">
       <div className="appearance-settings-row">

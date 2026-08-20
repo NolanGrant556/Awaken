@@ -7,7 +7,8 @@ export type AwakenProductLogoState = {
 };
 
 export const AwakenProductLogoStates: AwakenProductLogoState[] = [
-  { id: "compact", label: "紧凑 32px", props: { size: "sm" } },
-  { id: "standard", label: "标准 40px", props: { size: "md" } },
-  { id: "display", label: "展示 64px", props: { size: "lg" } },
+  { id: "mark-compact", label: "标记 32px", props: { size: "sm", variant: "mark" } },
+  { id: "mark-standard", label: "标记 40px", props: { size: "md", variant: "mark" } },
+  { id: "mark-display", label: "标记 64px", props: { size: "lg", variant: "mark" } },
+  { id: "icon-standard", label: "应用图标 40px", props: { size: "md", variant: "icon" } },
 ];

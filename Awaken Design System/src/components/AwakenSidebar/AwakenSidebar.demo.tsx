@@ -376,7 +376,7 @@ export function AwakenSidebarDemo() {
                 onSelectConversation={selectProject}
                 onReorderProjects={reorderProjects}
                 onExpandedChange={setExpandedIds}
-                onNewTask={() => setLastAction("已触发 New Agent 回调（Gallery 模拟）。")}
+                onNewTask={() => setLastAction("已触发新建任务回调（Gallery 模拟）。")}
                 onProfileClick={() => setLastAction("已触发 Nolan 个人入口回调（Gallery 模拟）。")}
               />
             </AwakenWorkbenchSidebarFrame>
@@ -384,7 +384,7 @@ export function AwakenSidebarDemo() {
           <div className="aw-sidebar-demo__composition-note">
             <span>当前 Desktop 组合</span>
             <strong>项目与独立对话共用一个滚动区</strong>
-            <p>保留 New Agent、连接器/技能导航、项目工作区、独立对话、运行中线程指示、行内菜单和 Nolan 个人入口；顶部与账户区固定。</p>
+            <p>保留新建任务、连接器/技能导航、项目工作区、独立对话、运行中线程指示、行内菜单和 Nolan 个人入口；顶部与账户区固定。</p>
             <output aria-live="polite">{lastAction}</output>
           </div>
         </div>
@@ -401,13 +401,13 @@ export function AwakenSidebarDemo() {
             <header>
               <h4>新建任务按钮</h4>
               <code>AwakenNewTaskButton</code>
-              <p>提供 Desktop 左上角的 New Agent 主入口。</p>
+              <p>提供 Desktop 左上角的新建任务主入口。</p>
             </header>
             <div className="aw-sidebar-demo__part-canvas aw-sidebar-demo__part-canvas--sidebar-width">
               <AwakenNewTaskButton
-                onClick={() => setLastAction("已触发 New Agent 回调（Gallery 模拟）。")}
+                onClick={() => setLastAction("已触发新建任务回调（Gallery 模拟）。")}
               >
-                New Agent
+                新建任务
               </AwakenNewTaskButton>
             </div>
           </article>

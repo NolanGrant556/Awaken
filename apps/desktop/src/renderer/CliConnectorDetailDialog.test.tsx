@@ -205,7 +205,7 @@ describe("CliConnectorDetailDialog", () => {
 
     expect(document.body.textContent).toContain("CLI 与官方 Skills 已安装，当前未授权");
     expect(document.body.textContent).not.toContain("CLI 操作失败");
-    expect(document.querySelector("img.aw-product-logo")).not.toBeNull();
+    expect(document.querySelector(".aw-product-logo")).not.toBeNull();
     const reauthorize = Array.from(document.querySelectorAll("button"))
       .find((button) => button.textContent === "重新授权");
     expect(reauthorize).toBeTruthy();

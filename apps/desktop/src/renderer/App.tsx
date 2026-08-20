@@ -95,6 +95,7 @@ import {
   type SubscribeHandlers,
 } from "./runtime/client";
 import type {
+  AwakenFontScale,
   AwakenTheme,
   AwakenThemePreference,
   ComposerToken,
@@ -245,6 +246,16 @@ import {
   type ComposerTokenPlacement,
   type SlashAction,
 } from "./composerSlash";
+import {
+  DEFAULT_INSPECTOR_WIDTH,
+  FILE_WORKSPACE_INSPECTOR_CAP,
+  MAX_INSPECTOR_WIDTH,
+  MIN_INSPECTOR_WIDTH,
+  computeEffectiveInspectorWidth,
+  inspectorWidthCap,
+  readWindowWidth,
+  sanitizeInspectorPreference,
+} from "./workbenchLayout";
 
 type UserQuestionPromptProps = {
   question: UserQuestionItem;
@@ -2161,10 +2172,6 @@ function composerThreadLabel(
 const DEFAULT_SIDEBAR_WIDTH = 300;
 const MIN_SIDEBAR_WIDTH = 228;
 const MAX_SIDEBAR_WIDTH = 420;
-const DEFAULT_INSPECTOR_WIDTH = 300;
-const MIN_INSPECTOR_WIDTH = 260;
-const MAX_INSPECTOR_WIDTH = 760;
-const FILE_WORKSPACE_INSPECTOR_WIDTH = 720;
 const LAYOUT_STEP = 12;
 const INSPECTOR_RESPONSIVE_COLLAPSE_QUERY = "(max-width: 1180px)";
 const INSPECTOR_FILE_ITEMS = [
@@ -2182,6 +2189,7 @@ const INSPECTOR_FILE_ITEMS = [
   },
 ];
 const STORED_THEME_KEY = "awaken:appearance:theme";
+const STORED_FONT_SCALE_KEY = "awaken:appearance:fontScale";
 const DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY = "awaken:memory:dreamReceiptThreadAssignments";
 const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
 
@@ -2239,6 +2247,15 @@ function readStoredThemePreference(): AwakenThemePreference {
   return normalizeThemePreference(readStoredString(STORED_THEME_KEY));
 }
 
+function normalizeFontScale(value: unknown): AwakenFontScale {
+  const numeric = typeof value === "string" ? Number(value) : value;
+  return numeric === 125 || numeric === 150 || numeric === 200 ? numeric : 100;
+}
+
+function readStoredFontScale(): AwakenFontScale {
+  return normalizeFontScale(readStoredString(STORED_FONT_SCALE_KEY, "100"));
+}
+
 function readSystemTheme(): AwakenTheme {
   if (
     typeof window !== "undefined" &&
@@ -2291,7 +2308,6 @@ export function App() {
   const threadLoadSeqRef = useRef(0);
   const inspectorCollapsedValueRef = useRef(false);
   const inspectorCollapsedBeforeResponsiveRef = useRef<boolean | null>(null);
-  const inspectorWidthBeforeFileWorkspaceRef = useRef<number | null>(null);
   const projectOperationPollFailuresRef = useRef<Set<string>>(new Set());
   const threadTitlePollsRef = useRef<Map<string, () => void>>(new Map());
   const workspaceTargetPathRef = useRef("");
@@ -2466,6 +2482,8 @@ export function App() {
     useState<ModelAccessType>("coding_plan");
   const [appearanceThemePreference, setAppearanceThemePreference] =
     useState<AwakenThemePreference>(readStoredThemePreference);
+  const [appearanceFontScale, setAppearanceFontScale] =
+    useState<AwakenFontScale>(readStoredFontScale);
   const [systemAppearanceTheme, setSystemAppearanceTheme] = useState<AwakenTheme>(readSystemTheme);
   const appearanceTheme = effectiveThemeForPreference(
     appearanceThemePreference,
@@ -2548,13 +2566,19 @@ export function App() {
     ),
   );
   const [inspectorWidth, setInspectorWidth] = useState(() =>
-    readStoredNumber(
-      "awaken:layout:inspectorWidth",
-      DEFAULT_INSPECTOR_WIDTH,
-      MIN_INSPECTOR_WIDTH,
-      MAX_INSPECTOR_WIDTH,
+    sanitizeInspectorPreference(
+      readStoredNumber(
+        "awaken:layout:inspectorWidth",
+        DEFAULT_INSPECTOR_WIDTH,
+        MIN_INSPECTOR_WIDTH,
+        MAX_INSPECTOR_WIDTH,
+      ),
     ),
   );
+  const [fileWorkspaceInspectorWidth, setFileWorkspaceInspectorWidth] = useState<
+    number | undefined
+  >();
+  const [windowWidth, setWindowWidth] = useState(readWindowWidth);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
     readStoredBoolean("awaken:layout:inspectorCollapsed", false),
   );
@@ -2803,9 +2827,11 @@ export function App() {
     }
     document.documentElement.dataset.awTheme = appearanceTheme;
     document.documentElement.dataset.awThemePreference = appearanceThemePreference;
+    document.documentElement.dataset.awFontScale = String(appearanceFontScale);
     document.documentElement.style.colorScheme = appearanceTheme === "dark" ? "dark" : "light";
     writeStoredValue(STORED_THEME_KEY, appearanceThemePreference);
-  }, [appearanceTheme, appearanceThemePreference]);
+    writeStoredValue(STORED_FONT_SCALE_KEY, String(appearanceFontScale));
+  }, [appearanceFontScale, appearanceTheme, appearanceThemePreference]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -2850,6 +2876,7 @@ export function App() {
         const preferences = await runtimeClient.getDesktopPreferences();
         if (!cancelled) {
           setAppearanceThemePreference(preferences.theme);
+          setAppearanceFontScale(preferences.fontScale);
         }
       } catch {
         // The localStorage mirror already provides the best available fallback.
@@ -2861,6 +2888,19 @@ export function App() {
       cancelled = true;
     };
   }, [runtimeClient]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const handleResize = () => {
+      setWindowWidth(readWindowWidth());
+    };
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, []);
 
   useEffect(() => {
     writeStoredValue("awaken:layout:sidebarWidth", String(sidebarWidth));
@@ -3451,9 +3491,31 @@ export function App() {
     try {
       const preferences = await runtimeClient.saveDesktopPreferences({ theme });
       setAppearanceThemePreference(preferences.theme);
+      setAppearanceFontScale(preferences.fontScale);
     } catch (error) {
       setAppearanceThemePreference(previousTheme);
       setAppearanceMessage(error instanceof Error ? error.message : "Failed to save theme");
+    } finally {
+      setAppearanceSaving(false);
+    }
+  }
+
+  async function handleAppearanceFontScaleChange(fontScale: AwakenFontScale): Promise<void> {
+    if (fontScale === appearanceFontScale || appearanceSaving) {
+      return;
+    }
+
+    const previousScale = appearanceFontScale;
+    setAppearanceFontScale(fontScale);
+    setAppearanceSaving(true);
+    setAppearanceMessage(null);
+    try {
+      const preferences = await runtimeClient.saveDesktopPreferences({ fontScale });
+      setAppearanceThemePreference(preferences.theme);
+      setAppearanceFontScale(preferences.fontScale);
+    } catch (error) {
+      setAppearanceFontScale(previousScale);
+      setAppearanceMessage(error instanceof Error ? error.message : "Failed to save display size");
     } finally {
       setAppearanceSaving(false);
     }
@@ -4437,6 +4499,19 @@ export function App() {
     activeNavSection,
     inspectorCollapsed,
   );
+  const inspectorCap = inspectorWidthCap({
+    fileWorkspaceOpen,
+    preferenceWidth: inspectorWidth,
+    overrideWidth: fileWorkspaceInspectorWidth,
+  });
+  const effectiveInspectorWidth = computeEffectiveInspectorWidth({
+    windowWidth,
+    sidebarWidth,
+    sidebarCollapsed,
+    inspectorAvailable: inspectorPresentation.available,
+    inspectorCollapsed: inspectorPresentation.effectiveCollapsed,
+    cap: inspectorCap,
+  });
 
   function createSubscribeHandlers(): SubscribeHandlers {
     return {
@@ -5766,13 +5841,10 @@ export function App() {
     setSelectedSubagentTaskId(undefined);
     setOpenSubagentTaskId(undefined);
     runPlanEntry.closePanel(false);
-    if (!fileWorkspaceOpen) {
-      inspectorWidthBeforeFileWorkspaceRef.current = inspectorWidth;
-    }
     setFileWorkspaceOpen(true);
     setExpandedWorkspaceSurface("file");
     setFileWorkspaceMode(mode);
-    setInspectorWidth(FILE_WORKSPACE_INSPECTOR_WIDTH);
+    setFileWorkspaceInspectorWidth(undefined);
     setInspectorCollapsed(false);
     if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
       inspectorCollapsedBeforeResponsiveRef.current = false;
@@ -5840,11 +5912,7 @@ export function App() {
     setExpandedFileComposerTrackedRun(undefined);
     dispatchFileWorkspaceTabs({ type: "reset" });
     setDeliverablePreview(undefined);
-    const previousWidth = inspectorWidthBeforeFileWorkspaceRef.current;
-    inspectorWidthBeforeFileWorkspaceRef.current = null;
-    if (previousWidth !== null) {
-      setInspectorWidth(previousWidth);
-    }
+    setFileWorkspaceInspectorWidth(undefined);
   }
 
   function handleOpenProjectFileTab(tab: ProjectFileWorkspaceTab): void {
@@ -6028,15 +6096,20 @@ export function App() {
     const target = event.currentTarget;
     target.setPointerCapture?.(event.pointerId);
     const startX = event.clientX;
-    const startWidth = inspectorWidth;
+    const startWidth = effectiveInspectorWidth || inspectorWidth;
+    const resizeMax = fileWorkspaceOpen ? FILE_WORKSPACE_INSPECTOR_CAP : MAX_INSPECTOR_WIDTH;
 
     function handlePointerMove(moveEvent: PointerEvent): void {
       moveEvent.preventDefault();
       const nextWidth = clampNumber(
         startWidth - (moveEvent.clientX - startX),
         MIN_INSPECTOR_WIDTH,
-        MAX_INSPECTOR_WIDTH,
+        resizeMax,
       );
+      if (fileWorkspaceOpen) {
+        setFileWorkspaceInspectorWidth(nextWidth);
+        return;
+      }
       setInspectorWidth(nextWidth);
     }
 
@@ -6073,9 +6146,14 @@ export function App() {
     }
     event.preventDefault();
     const delta = event.key === "ArrowLeft" ? LAYOUT_STEP : -LAYOUT_STEP;
-    setInspectorWidth((width) =>
-      clampNumber(width + delta, MIN_INSPECTOR_WIDTH, MAX_INSPECTOR_WIDTH),
-    );
+    const resizeMax = fileWorkspaceOpen ? FILE_WORKSPACE_INSPECTOR_CAP : MAX_INSPECTOR_WIDTH;
+    if (fileWorkspaceOpen) {
+      setFileWorkspaceInspectorWidth((width) =>
+        clampNumber((width ?? FILE_WORKSPACE_INSPECTOR_CAP) + delta, MIN_INSPECTOR_WIDTH, resizeMax),
+      );
+      return;
+    }
+    setInspectorWidth((width) => clampNumber(width + delta, MIN_INSPECTOR_WIDTH, resizeMax));
   }
 
   function openMediaPreview(items: MediaArtifactPreviewItem[], activeId: string): void {
@@ -6842,10 +6920,10 @@ export function App() {
   );
   const fileWorkspaceTabsAreActive =
     !fileWorkspaceExpandedActive || expandedWorkspaceSurface === "file";
-  const currentConversationLabel = activeThread?.label?.trim() || "New Agent";
+  const currentConversationLabel = activeThread?.label?.trim() || "新建任务";
   const layoutStyle = {
     "--aw-sidebar-width": `${sidebarWidth}px`,
-    "--aw-inspector-width": `${inspectorWidth}px`,
+    "--aw-inspector-width": `${effectiveInspectorWidth}px`,
   } as CSSProperties;
 
   function renderExternalActionGate() {
@@ -7047,8 +7125,8 @@ export function App() {
                   "aria-label": "Resize inspector",
                   "aria-orientation": "vertical",
                   "aria-valuemin": MIN_INSPECTOR_WIDTH,
-                  "aria-valuemax": MAX_INSPECTOR_WIDTH,
-                  "aria-valuenow": inspectorWidth,
+                  "aria-valuemax": inspectorCap,
+                  "aria-valuenow": effectiveInspectorWidth,
                   tabIndex: 0,
                   onPointerDown: handleInspectorResizeStart,
                   onKeyDown: handleInspectorResizeKeyDown,
@@ -7260,7 +7338,7 @@ export function App() {
                 defaultExpandedIds={[DEFAULT_WORKSPACE_PROJECT_ID]}
                 profileName="Nolan"
                 profileAvatarFallback="AW"
-                newTaskLabel="New Agent"
+                newTaskLabel="新建任务"
                 projectSectionLabel="项目工作区"
                 projectSectionActions={
                   <span className="sidebar-section-actions">
@@ -7668,7 +7746,11 @@ export function App() {
                                     void handleComposerSubmit();
                                   }}
                                   onAddContext={handleAddContext}
-                                  placeholder={fileWorkspaceSurfaceActive ? "输入后续任务…" : ""}
+                                  placeholder={
+                                    fileWorkspaceSurfaceActive
+                                      ? "输入后续任务…"
+                                      : "给当前运行追加任务…"
+                                  }
                                   disabled={composerBarState.disabled}
                                   isReady={composerBarState.isReady}
                                   submitMode={composerBarState.submitMode}
@@ -7715,7 +7797,7 @@ export function App() {
                               void handleComposerSubmit();
                             }}
                             onAddContext={handleAddContext}
-                            placeholder=""
+                            placeholder="描述任务，或 / 选择技能"
                             disabled={composerBarState.disabled}
                             isReady={composerBarState.isReady}
                             submitMode={composerBarState.submitMode}
@@ -8262,10 +8344,14 @@ export function App() {
         currentProjectId={activeThreadProjectId ?? selectedProjectId}
         theme={appearanceTheme}
         themePreference={appearanceThemePreference}
+        fontScale={appearanceFontScale}
         themeSaving={appearanceSaving}
         themeMessage={appearanceMessage}
         onThemePreferenceChange={(theme) => {
           void handleAppearanceThemeChange(theme);
+        }}
+        onFontScaleChange={(fontScale) => {
+          void handleAppearanceFontScaleChange(fontScale);
         }}
         onOpenChange={setModelSettingsOpen}
         initialModelSection={modelSettingsInitialModelSection}

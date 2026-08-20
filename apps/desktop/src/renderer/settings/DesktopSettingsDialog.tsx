@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AwakenAppearanceSettings,
+  type AwakenFontScaleValue,
   AwakenConfiguredModels,
   AwakenModelSettings,
   AwakenModelProviderForm,
@@ -14,6 +15,7 @@ import {
 import { calculateAutoCompactThreshold } from "../../shared/runtime";
 import type {
   AgentPlanAccount,
+  AwakenFontScale,
   AwakenTheme,
   AwakenThemePreference,
   ModelAccessType,
@@ -206,9 +208,11 @@ type DesktopSettingsDialogProps = {
   runtimeClient: RuntimeClient;
   theme: AwakenTheme;
   themePreference: AwakenThemePreference;
+  fontScale: AwakenFontScale;
   themeSaving: boolean;
   themeMessage: string | null;
   onThemePreferenceChange: (theme: AwakenThemePreference) => void;
+  onFontScaleChange: (fontScale: AwakenFontScale) => void;
   onOpenChange: (open: boolean) => void;
   onProfilesChanged: () => void;
   currentProjectId?: string;
@@ -218,23 +222,32 @@ type DesktopSettingsDialogProps = {
 
 type AppearanceSettingsProps = {
   themePreference: AwakenThemePreference;
+  fontScale: AwakenFontScale;
   themeSaving: boolean;
   message?: string | null;
   onThemePreferenceChange: (theme: AwakenThemePreference) => void;
+  onFontScaleChange: (fontScale: AwakenFontScale) => void;
 };
 
 export function AppearanceSettings({
   themePreference,
+  fontScale,
   themeSaving,
   message,
   onThemePreferenceChange,
+  onFontScaleChange,
 }: AppearanceSettingsProps) {
   return (
     <AwakenAppearanceSettings
       value={themePreference}
+      fontScale={String(fontScale) as AwakenFontScaleValue}
       disabled={themeSaving}
+      fontScaleDisabled={themeSaving}
       message={message}
       onValueChange={onThemePreferenceChange}
+      onFontScaleChange={(value) => {
+        onFontScaleChange(Number(value) as AwakenFontScale);
+      }}
     />
   );
 }
@@ -584,9 +597,11 @@ export function DesktopSettingsDialog({
   runtimeClient,
   theme,
   themePreference,
+  fontScale,
   themeSaving,
   themeMessage,
   onThemePreferenceChange,
+  onFontScaleChange,
   onOpenChange,
   onProfilesChanged,
   currentProjectId,
@@ -1316,9 +1331,12 @@ export function DesktopSettingsDialog({
           : undefined
       }
       contentLayout={
-        activeSettingsSection === "memory" || activeSettingsSection === "models"
-          ? "full-bleed"
-          : "standard"
+        activeSettingsSection === "memory" ? "full-bleed" : "standard"
+      }
+      sectionDescription={
+        activeSettingsSection === "models"
+          ? "配置模型接入、连接状态与推理参数。"
+          : undefined
       }
       navItems={AwakenSettingsNavItems}
       activeSectionId={activeSettingsSection}
@@ -1342,9 +1360,11 @@ export function DesktopSettingsDialog({
       ) : activeSettingsSection === "appearance" ? (
         <AppearanceSettings
           themePreference={themePreference}
+          fontScale={fontScale}
           themeSaving={themeSaving}
           message={themeMessage}
           onThemePreferenceChange={onThemePreferenceChange}
+          onFontScaleChange={onFontScaleChange}
         />
       ) : activeSettingsSection === "pets" ? (
         <PetsSettingsPanel runtimeClient={runtimeClient} />
@@ -1356,7 +1376,6 @@ export function DesktopSettingsDialog({
         <ACPSettingsPanel runtimeClient={runtimeClient} />
       ) : (
         <AwakenModelSettings
-          theme={theme}
           tabs={MODEL_SETTINGS_TABS}
           activeTabId={activeSection}
           views={[

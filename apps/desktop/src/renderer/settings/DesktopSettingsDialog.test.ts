@@ -28,9 +28,11 @@ describe("DesktopSettingsDialog", () => {
         runtimeClient: {} as RuntimeClient,
         theme: "light",
         themePreference: "system",
+        fontScale: 100,
         themeSaving: false,
         themeMessage: null,
         onThemePreferenceChange: vi.fn(),
+        onFontScaleChange: vi.fn(),
         onOpenChange: vi.fn(),
         onProfilesChanged: vi.fn(),
       }),
@@ -38,13 +40,10 @@ describe("DesktopSettingsDialog", () => {
 
     expect(html).toContain("aw-settings-shell--screen");
     expect(html).toContain("aw-settings-shell--models");
-    expect(html).toContain("aw-settings-shell--full-bleed");
-    expect(html).toContain("aw-model-orbit--light");
-    expect(html).toContain("aw-model-orbit__sphere-canvas");
-    expect(html).toContain("aw-model-settings-page__scroll-thumb");
-    expect(
-      html.match(/aw-model-orbit__logo aw-model-orbit__logo--/g),
-    ).toHaveLength(6);
+    expect(html).toContain("aw-settings-shell--standard");
+    expect(html).toContain("配置模型接入、连接状态与推理参数。");
+    expect(html).not.toContain("aw-settings-shell--full-bleed");
+    expect(html).not.toContain("aw-model-orbit");
     expect(html).toContain("aw-settings-sidebar");
     expect(html).toContain("返回应用");
     expect(html).toContain('role="dialog"');
@@ -69,12 +68,16 @@ describe("AppearanceSettings", () => {
     const html = renderToString(
       React.createElement(AppearanceSettings, {
         themePreference: "system",
+        fontScale: 100,
         themeSaving: false,
         onThemePreferenceChange: vi.fn(),
+        onFontScaleChange: vi.fn(),
       }),
     );
 
     expect(html).toContain("跟随系统");
+    expect(html).toContain("显示大小");
+    expect(html).toContain("100%");
     expect(html).toContain("浅色");
     expect(html).toContain("黑色");
     expect(html).toContain('role="radiogroup"');

@@ -54,6 +54,15 @@ describe("RunStage layout", () => {
       "gap: 16px;",
     );
     expect(cssRule(designSystemStyles, ".aw-task-welcome")).toContain("gap: 14px;");
+    expect(cssRule(designSystemStyles, ".aw-task-welcome__message")).toContain(
+      "font-size: var(--aw-font-size-lg);",
+    );
+    expect(cssRule(designSystemStyles, ".composer-bar textarea")).toContain(
+      "font-size: var(--aw-font-size-md) !important;",
+    );
+    expect(cssRule(designSystemStyles, ".composer-bar textarea")).toContain(
+      "line-height: var(--aw-line-height-md) !important;",
+    );
 
     const projectShelf = cssRule(composerStyles, ".composer-bar-project-shelf");
     expect(projectShelf).toContain("width: 100%;");

@@ -3545,3 +3545,239 @@ describe("runtime reducer ACP permission gate", () => {
     expect(state.externalInteractions).toHaveLength(0);
   });
 });
+
+describe("runtime reducer run plan snapshots", () => {
+  const planItemsV1 = [
+    { step: "调查现状", activeForm: "正在调查现状", status: "completed" },
+    { step: "实现运行计划协议", activeForm: "正在实现运行计划协议", status: "in_progress" },
+    { step: "补齐自动化验收", activeForm: "正在补齐自动化验收", status: "pending" },
+  ];
+
+  function planEvent(overrides: Partial<AguiEvent> = {}): AguiEvent {
+    return {
+      type: "AWAKEN_PLAN_UPDATED",
+      threadId: "thread-1",
+      runId: "run-1",
+      turnId: "turn-1",
+      toolCallId: "call-plan-1",
+      planId: "plan-1",
+      planVersion: 1,
+      planItems: planItemsV1,
+      planCompletedCount: 1,
+      planTotalCount: 3,
+      planCurrentStep: 2,
+      planAllCompleted: false,
+      timestamp: 1_700_000_000_000,
+      ...overrides,
+    };
+  }
+
+  function stateWithActiveRun() {
+    return dispatch([
+      { type: "run/requested", prompt: "实现运行计划" },
+      { type: "run/created", run: makeRun() },
+    ]);
+  }
+
+  it("upserts the full snapshot keyed by runId without a turn-body narrative item", () => {
+    const before = stateWithActiveRun();
+    const after = reduceRuntimeState(before, runEvent(planEvent()));
+
+    const plan = after.runPlansById["run-1"];
+    expect(plan).toMatchObject({
+      planId: "plan-1",
+      version: 1,
+      completedCount: 1,
+      totalCount: 3,
+      currentStep: 2,
+      allCompleted: false,
+      toolCallId: "call-plan-1",
+      updatedAtMs: 1_700_000_000_000,
+    });
+    expect(plan?.items).toEqual(planItemsV1);
+    // Live plan frames record the projector snapshot for terminal projection
+    // but must not enter the turn body or the step timeline.
+    expect(after.narrative.committedItems).toEqual(
+      before.narrative.committedItems,
+    );
+    expect(after.narrative.runPlanSnapshotsByRunId["run-1"]).toMatchObject({
+      planId: "plan-1",
+      version: 1,
+      completedCount: 1,
+      totalCount: 3,
+    });
+    expect(after.steps).toBe(before.steps);
+  });
+
+  it("keeps a trimmed explanation and omits an empty one", () => {
+    const withExplanation = reduceRuntimeState(
+      stateWithActiveRun(),
+      runEvent(planEvent({ planExplanation: "  调查后增加一个必要步骤  " })),
+    );
+    expect(withExplanation.runPlansById["run-1"]?.explanation).toBe(
+      "调查后增加一个必要步骤",
+    );
+
+    const withoutExplanation = reduceRuntimeState(
+      stateWithActiveRun(),
+      runEvent(planEvent({ planExplanation: "   " })),
+    );
+    expect(
+      withoutExplanation.runPlansById["run-1"]?.explanation,
+    ).toBeUndefined();
+  });
+
+  it("treats a duplicate same-version frame as idempotent", () => {
+    const first = reduceRuntimeState(stateWithActiveRun(), runEvent(planEvent()));
+    const second = reduceRuntimeState(first, runEvent(planEvent()));
+
+    expect(second).toBe(first);
+    expect(second.runPlansById["run-1"]?.version).toBe(1);
+  });
+
+  it("ignores a lower version and replaces in place on a higher version", () => {
+    const v2Items = [
+      planItemsV1[0],
+      { ...planItemsV1[1], status: "completed" },
+      { ...planItemsV1[2], status: "in_progress" },
+    ];
+    let state = reduceRuntimeState(stateWithActiveRun(), runEvent(planEvent()));
+    state = reduceRuntimeState(
+      state,
+      runEvent(
+        planEvent({
+          planVersion: 2,
+          planItems: v2Items,
+          planCompletedCount: 2,
+          planCurrentStep: 3,
+          toolCallId: "call-plan-2",
+        }),
+      ),
+    );
+    expect(state.runPlansById["run-1"]).toMatchObject({
+      version: 2,
+      completedCount: 2,
+      currentStep: 3,
+      toolCallId: "call-plan-2",
+    });
+    expect(state.runPlansById["run-1"]?.items[1]?.status).toBe("completed");
+
+    // A stale late frame must not move the snapshot backwards.
+    const stale = reduceRuntimeState(
+      state,
+      runEvent(planEvent({ planVersion: 1 })),
+    );
+    expect(stale).toBe(state);
+    expect(stale.runPlansById["run-1"]?.version).toBe(2);
+  });
+
+  it("replaces the run entry when a different planId arrives for the same run", () => {
+    let state = reduceRuntimeState(stateWithActiveRun(), runEvent(planEvent()));
+    state = reduceRuntimeState(
+      state,
+      runEvent(
+        planEvent({ planId: "plan-2", planVersion: 1, planTotalCount: 1 }),
+      ),
+    );
+    expect(state.runPlansById["run-1"]).toMatchObject({
+      planId: "plan-2",
+      version: 1,
+      totalCount: 1,
+    });
+  });
+
+  it("falls back to the active run when the frame has no runId", () => {
+    const state = reduceRuntimeState(
+      stateWithActiveRun(),
+      runEvent(planEvent({ runId: undefined })),
+    );
+    expect(state.runPlansById["run-1"]?.planId).toBe("plan-1");
+  });
+
+  it("drops frames that carry neither a planId nor a resolvable run", () => {
+    const before = stateWithActiveRun();
+    const noPlanId = reduceRuntimeState(
+      before,
+      runEvent(planEvent({ planId: "  " })),
+    );
+    expect(noPlanId.runPlansById).toEqual(before.runPlansById);
+    expect(noPlanId.narrative.committedItems).toEqual(
+      before.narrative.committedItems,
+    );
+    expect(noPlanId.narrative.runPlanSnapshotsByRunId).toEqual({});
+
+    const idle = createInitialRuntimeState();
+    // No frame runId and no active run: there is no run scope to store under.
+    const noRun = reduceRuntimeState(
+      idle,
+      runEvent(planEvent({ runId: undefined })),
+    );
+    expect(noRun.runPlansById).toEqual({});
+    expect(noRun.narrative.runPlanSnapshotsByRunId).toEqual({});
+  });
+
+  it("clears run-scoped plans when a new run is requested", () => {
+    let state = reduceRuntimeState(stateWithActiveRun(), runEvent(planEvent()));
+    expect(state.runPlansById["run-1"]).toBeDefined();
+
+    state = reduceRuntimeState(state, {
+      type: "run/requested",
+      prompt: "下一个任务",
+    });
+    expect(state.runPlansById).toEqual({});
+  });
+
+  it("upserts through the replay batch path with the same version rules", () => {
+    const state = reduceRuntimeState(createInitialRuntimeState(), {
+      type: "run/replayBatch",
+      actions: [
+        {
+          type: "run/threadReplayStarted",
+          threadId: "thread-1",
+          runId: "run-1",
+        },
+        runEvent(planEvent({ planVersion: 2, planCompletedCount: 2 })),
+        // Stale overlap from a reconnect must not regress the replayed snapshot.
+        runEvent(planEvent({ planVersion: 1 })),
+      ],
+    });
+
+    expect(state.runPlansById["run-1"]).toMatchObject({
+      version: 2,
+      completedCount: 2,
+    });
+    expect(state.threadViews["thread-1"]?.runPlansById["run-1"]?.version).toBe(
+      2,
+    );
+  });
+
+  it("keeps plans isolated per thread and restores them on switch back", () => {
+    let state = dispatch([
+      runEvent({ type: "RUN_STARTED", threadId: "thread-1", runId: "run-1" }),
+      runEvent(planEvent()),
+      { type: "run/threadSwitch", threadId: "thread-2" },
+      runEvent(
+        planEvent({
+          threadId: "thread-2",
+          runId: "run-2",
+          planId: "plan-2",
+          planVersion: 3,
+        }),
+      ),
+    ]);
+
+    expect(state.runPlansById["run-2"]?.planId).toBe("plan-2");
+    expect(state.runPlansById["run-1"]).toBeUndefined();
+    expect(state.threadViews["thread-1"]?.runPlansById["run-1"]).toMatchObject({
+      planId: "plan-1",
+      version: 1,
+    });
+
+    state = reduceRuntimeState(state, {
+      type: "run/threadSwitch",
+      threadId: "thread-1",
+    });
+    expect(state.runPlansById["run-1"]?.planId).toBe("plan-1");
+    expect(state.runPlansById["run-2"]).toBeUndefined();
+  });
+});

@@ -17,5 +17,8 @@ export type {
   RunNarrativeItem,
   RunNarrativeState,
   RunNarrativeStatus,
+  RunPlanNarrativeSnapshot,
+  RunPlanNarrativeStep,
+  RunPlanStepStatus,
   SubagentNarrativeTask,
 } from "./types";

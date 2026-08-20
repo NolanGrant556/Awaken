@@ -58,6 +58,10 @@ type ToolRuntime struct {
 	toolSessionState  *tool.ToolSessionState
 	modelContentStore tool.ModelContentStore
 	modelProfileID    string
+	// runPlanService is the run-scoped root RunPlanService. It is assigned by
+	// the root Runner after the final run identity exists; child runtimes
+	// never receive one (root-only contract).
+	runPlanService tool.RunPlanService
 }
 
 type ToolRuntimeConfig struct {
@@ -483,6 +487,9 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 		rt.sink.Emit(MapACPEvent(e))
 	})
 	toolCtx = tool.ContextWithToolExecutionIdentity(toolCtx, identity)
+	if rt.runPlanService != nil {
+		toolCtx = tool.ContextWithRunPlanService(toolCtx, rt.runPlanService)
+	}
 	if rt.toolSnapshot != nil && rt.environment != nil {
 		toolCtx = tool.ContextWithRunAvailability(toolCtx, *rt.toolSnapshot, *rt.environment)
 		// Process-backed tools (for example Shell and the typed dependency

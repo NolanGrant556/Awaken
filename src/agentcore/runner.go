@@ -53,6 +53,7 @@ type Runner struct {
 	subagentMessages     func() []subagentruntime.QueuedMessage
 	memoryRecallSnapshot *MemoryRecallSnapshot
 	configureEmitter     func(*runEventEmitter)
+	runPlanService       tool.RunPlanService
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
@@ -233,6 +234,22 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	// Child/fork runners enter through this same path with their inherited ID.
 	r.toolRuntime.runID = r.runID
 	r.toolRuntime.threadID = r.threadID
+	if r.config.SubagentOrigin == nil {
+		// Root-only run plan service (运行计划契约 §6.1/§7.2): child runners
+		// (SubagentOrigin != nil) never receive one, so update_plan degrades
+		// to plan_service_unavailable there instead of mutating parent state.
+		planService := NewRunPlanService(RunPlanServiceConfig{
+			ThreadID:  r.threadID,
+			RunID:     r.runID,
+			SessionID: r.sessionID,
+			Persist: func(persistCtx stdcontext.Context, record SemanticRecord) error {
+				return r.persistRunPlanRecord(persistCtx, events, record)
+			},
+		})
+		r.runPlanService = planService
+		r.toolRuntime.runPlanService = planService
+		r.reqBuilder.UpdateRunPlanContextProvider(planService.ContextBlock)
+	}
 	if !r.config.HookLifecycleStarted {
 		if err := events.runStarted(ctx); err != nil {
 			return "", err
@@ -1808,6 +1825,40 @@ func anchorChildWorkspace(child *AgentConfig, parent AgentConfig, receipt subage
 		child.SubagentBoundary.WorkspaceRoot = receipt.Path
 		child.SubagentBoundary.WritableRoots = []string{receipt.Path}
 	}
+}
+
+// persistRunPlanRecord is the journal-first gate behind RunPlanService
+// (contract §7.2): the plan_updated record must be appended AND flushed
+// before the in-memory snapshot may move. Failures are reported through the
+// run's standard fail-stop persistence path so a half-persisted plan can
+// never become live truth.
+func (r *Runner) persistRunPlanRecord(ctx stdcontext.Context, events *runEventEmitter, record SemanticRecord) error {
+	if r.recorder == nil {
+		return ErrPersistenceUnavailable
+	}
+	if err := events.persistenceFailure(); err != nil {
+		return err
+	}
+	persistCtx, cancel := durablePersistenceContext(ctx)
+	defer cancel()
+	// The production live recorder normally publishes non-terminal records as
+	// soon as Append succeeds. A plan snapshot is stricter: the UI must not see
+	// it until Flush has confirmed durable truth. Use the atomic append+flush+
+	// publish path when available; the fallback preserves legacy/test recorder
+	// compatibility without claiming canonical live publication.
+	if flushed, ok := r.recorder.(FlushedSemanticRecorder); ok {
+		if _, err := flushed.AppendFlushed(persistCtx, record); err != nil {
+			return events.notePersistenceFailure("plan_updated_append_flush", err)
+		}
+		return nil
+	}
+	if err := r.recorder.Append(persistCtx, record); err != nil {
+		return events.notePersistenceFailure("plan_updated_append", err)
+	}
+	if err := r.recorder.Flush(persistCtx); err != nil {
+		return events.notePersistenceFailure("plan_updated_flush", err)
+	}
+	return nil
 }
 
 func (r *Runner) persistSubagentEvent(ctx stdcontext.Context, event subagentruntime.PersistEvent) error {

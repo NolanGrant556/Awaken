@@ -5,6 +5,7 @@ import type {
   AguiContextUsageSnapshot,
   AguiEvent,
   AguiModelUsageRecord,
+  AguiRunPlanItem,
 } from "./agui";
 import {
   toolDisplayStateFromStatus,
@@ -109,6 +110,31 @@ export type SubagentTaskView = SubagentNarrativeTask & {
   modelProfileId?: string;
   sideEffectState?: string;
   narrative: RunNarrativeState;
+};
+
+export type RunPlanItemView = {
+  step: string;
+  activeForm: string;
+  status: string;
+};
+
+/**
+ * Latest durable plan snapshot of one root run, keyed by runId in
+ * `runPlansById`. Rebuilt from AWAKEN_PLAN_UPDATED full-snapshot frames;
+ * only a strictly higher version of the same planId may replace it
+ * (contract: 运行计划与任务进度设计契约 §8.2/§10).
+ */
+export type RunPlanView = {
+  planId: string;
+  version: number;
+  explanation?: string;
+  items: RunPlanItemView[];
+  completedCount: number;
+  totalCount: number;
+  currentStep: number;
+  allCompleted: boolean;
+  toolCallId?: string;
+  updatedAtMs?: number;
 };
 
 export type ContextWindowRecord = {
@@ -242,6 +268,7 @@ type ThreadViewState = {
   narrative: RunNarrativeState;
   subagentsById: Record<string, SubagentTaskView>;
   subagentOrder: string[];
+  runPlansById: Record<string, RunPlanView>;
   errorMessage?: string;
   runStartedAtMs?: number;
   runCompletedAtMs?: number;
@@ -272,6 +299,7 @@ export type RuntimeViewState = {
   narrative: RunNarrativeState;
   subagentsById: Record<string, SubagentTaskView>;
   subagentOrder: string[];
+  runPlansById: Record<string, RunPlanView>;
   errorMessage?: string;
   runStartedAtMs?: number;
   runCompletedAtMs?: number;
@@ -393,6 +421,7 @@ const initialState: RuntimeViewState = {
   narrative: createInitialRunNarrativeState(),
   subagentsById: {},
   subagentOrder: [],
+  runPlansById: {},
   inspectorSummary: createInspectorSummary(),
   threads: [],
   threadViews: {},
@@ -425,6 +454,7 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     narrative: state.narrative,
     subagentsById: state.subagentsById,
     subagentOrder: state.subagentOrder,
+    runPlansById: state.runPlansById,
     errorMessage: state.errorMessage,
     runStartedAtMs: state.runStartedAtMs,
     runCompletedAtMs: state.runCompletedAtMs,
@@ -676,6 +706,57 @@ function upsertSubagentTaskView(
     subagentOrder: previous
       ? state.subagentOrder
       : [...state.subagentOrder, taskId],
+  };
+}
+
+/**
+ * Version-upsert one AWAKEN_PLAN_UPDATED full snapshot under its runId
+ * (contract §8.2/§10): the same planId at the same version is idempotent
+ * replay/overlap, a lower version is a stale late frame, and only a strictly
+ * higher version — or a different planId, i.e. a new plan in that run — may
+ * replace the stored snapshot in place. Frames without runId fall back to the
+ * active run. Live frames never enter the turn body; terminal narrative
+ * projection is a separate concern.
+ */
+function upsertRunPlanView(
+  state: RuntimeViewState,
+  event: AguiEvent,
+  receivedAtMs?: number,
+): RuntimeViewState {
+  const planId = event.planId?.trim();
+  if (!planId) {
+    return state;
+  }
+  const runId = event.runId?.trim() || state.runId;
+  if (!runId) {
+    return state;
+  }
+  const version = event.planVersion ?? 0;
+  const previous = state.runPlansById[runId];
+  if (previous && previous.planId === planId && version <= previous.version) {
+    return state;
+  }
+  const next: RunPlanView = {
+    planId,
+    version,
+    explanation: event.planExplanation?.trim() || undefined,
+    items: (event.planItems ?? []).map((item: AguiRunPlanItem) => ({
+      step: item.step,
+      activeForm: item.activeForm,
+      status: item.status,
+    })),
+    completedCount: event.planCompletedCount ?? 0,
+    totalCount: event.planTotalCount ?? 0,
+    currentStep: event.planCurrentStep ?? 0,
+    allCompleted: event.planAllCompleted ?? false,
+    toolCallId: event.toolCallId,
+    updatedAtMs: validTimestamp(event.timestamp)
+      ? event.timestamp
+      : receivedAtMs,
+  };
+  return {
+    ...state,
+    runPlansById: { ...state.runPlansById, [runId]: next },
   };
 }
 
@@ -1697,6 +1778,9 @@ export function reduceRuntimeState(
             ),
         subagentsById: state.subagentsById,
         subagentOrder: state.subagentOrder,
+        // Plan snapshots are run-scoped: a new run starts without a plan and
+        // must not inherit the previous run's live progress entry.
+        runPlansById: {},
         supervisorStatus: state.supervisorStatus,
         threads: state.threads,
         activeThreadId: state.activeThreadId,
@@ -2002,6 +2086,27 @@ export function reduceRuntimeState(
       );
       if (subagentNarrativeState) {
         return saveActiveThreadView(subagentNarrativeState);
+      }
+      if (action.event.type === "AWAKEN_PLAN_UPDATED") {
+        // Plan full snapshots update the run-scoped plan store and reach the
+        // narrative projector, which records the latest snapshot for terminal
+        // projection and removes the successful update_plan generic tool row.
+        // Live frames still produce no turn-body item.
+        const planState = upsertRunPlanView(
+          state,
+          action.event,
+          action.receivedAtMs,
+        );
+        const projectedNarrative = projectAguiEventToNarrative(
+          planState.narrative,
+          scopeNarrativeEvent(action.event, planState),
+        );
+        if (planState === state && projectedNarrative === state.narrative) {
+          return state;
+        }
+        return saveActiveThreadView(
+          syncActiveThreadSummary({ ...planState, narrative: projectedNarrative }),
+        );
       }
       if (action.event.type === "TOOL_CALL_ARGS_DELTA") {
         const projectedNarrative = projectAguiEventToNarrative(

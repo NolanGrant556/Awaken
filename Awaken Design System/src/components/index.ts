@@ -57,6 +57,7 @@ export * from "./AwakenProjectHoverCard";
 export * from "./AwakenProjectSkillFolder";
 export * from "./AwakenProjectSkillsDialog";
 export * from "./AwakenProjectTree";
+export * from "./AwakenRunPlan";
 export * from "./AwakenRunStage";
 export * from "./AwakenScheduledTaskEditorDialog";
 export * from "./AwakenScheduledTaskHistoryDialog";

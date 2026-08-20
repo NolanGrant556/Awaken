@@ -71,3 +71,23 @@ func TestReadOnlyRolesHideMutationTools(t *testing.T) {
 		}
 	}
 }
+
+// RP-G10: the root-only update_plan tool is hidden from every child role;
+// child progress uses native Subagent facts (运行计划契约 §6.1).
+func TestAllRolesHideUpdatePlan(t *testing.T) {
+	for agentType := range RoleCatalog() {
+		role, ok := LookupRole(agentType)
+		if !ok {
+			t.Fatalf("%s role missing", agentType)
+		}
+		hidden := false
+		for _, name := range role.DisallowedTools {
+			if name == "update_plan" {
+				hidden = true
+			}
+		}
+		if !hidden {
+			t.Fatalf("%s must hide update_plan", agentType)
+		}
+	}
+}

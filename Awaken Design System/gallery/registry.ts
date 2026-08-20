@@ -11,6 +11,7 @@ import { AwakenConnectorsDemo } from "../src/components/AwakenConnectors/AwakenC
 import { AwakenMemorySettingsDemo } from "../src/components/AwakenMemorySettings/AwakenMemorySettings.demo";
 import { AwakenModelSettingsDemo } from "../src/components/AwakenModelSettings/AwakenModelSettings.demo";
 import { AwakenOriginalThinkingDemo } from "../src/components/AwakenOriginalThinking/AwakenOriginalThinking.demo";
+import { AwakenLogoDemo } from "../src/components/AwakenLogo/AwakenLogo.demo";
 import { AwakenProductLogoDemo } from "../src/components/AwakenProductLogo/AwakenProductLogo.demo";
 import { AwakenRunPlanDemo } from "../src/components/AwakenRunPlan/AwakenRunPlan.demo";
 import { AwakenRunStageDemo } from "../src/components/AwakenRunStage/AwakenRunStage.demo";
@@ -41,6 +42,7 @@ export type AwakenGalleryEntry = {
 export type AwakenGalleryCategory = "atomic" | "sidebar" | "settings" | "workbench" | "composition";
 
 export const awakenGalleryEntries: AwakenGalleryEntry[] = [
+  { id: "awaken-logo-library", name: "AwakenLogo", displayName: "Logo 库", demo: AwakenLogoDemo, category: "atomic", aliases: ["awaken-logo"] },
   { id: "awaken-product-logo", name: "AwakenProductLogo", displayName: "产品 LOGO", demo: AwakenProductLogoDemo, category: "atomic" },
   { id: "awaken-select", name: "AwakenSelect", displayName: "单选列表", demo: AwakenSelectDemo, category: "atomic" },
   { id: "awaken-switch", name: "AwakenSwitch", displayName: "开关", demo: AwakenSwitchDemo, category: "atomic", aliases: ["awaken-skill-toggle", "awaken-connector-toggle", "awaken-settings-switch"] },

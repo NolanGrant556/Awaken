@@ -32,6 +32,7 @@ if (productionDemoExports.length > 0) {
 const demoOnlySelectors = [
   ".aw-account-demo",
   ".aw-connectors-demo",
+  ".aw-logo-library-demo",
   ".aw-project-skill-folder-demo",
   ".aw-settings-demo",
   ".aw-sidebar-demo",
@@ -105,6 +106,33 @@ const thinkingOrbStateIds = AwakenDesignSystem.AwakenThinkingOrbStates.map((stat
 
 if (thinkingOrbStateIds.join(",") !== expectedThinkingOrbStateIds.join(",")) {
   throw new Error(`AwakenThinkingOrb states are incomplete or out of order: ${thinkingOrbStateIds.join(", ")}`);
+}
+
+AwakenDesignSystem.assertAwakenLogoCatalog();
+if (!productionCss.includes("--aw-logo-stroke-16")) {
+  throw new Error("Production CSS is missing logo optical-stroke tokens");
+}
+
+const productMarkHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenLogo, {
+    id: "product-mark",
+    opticalSize: 16,
+    appearance: "outline",
+  }),
+);
+if (
+  !productMarkHtml.includes('data-logo-id="product-mark"') ||
+  !productMarkHtml.includes('data-optical-size="16"') ||
+  !productMarkHtml.includes('data-logo-style="outline"')
+) {
+  throw new Error("AwakenLogo must render catalog product-mark optical cuts");
+}
+
+const welcomeWordmarkHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenTaskWelcome),
+);
+if (!welcomeWordmarkHtml.includes('data-logo-id="product-wordmark"')) {
+  throw new Error("AwakenTaskWelcome must consume the logo catalog wordmark");
 }
 
 const composingOrbState = AwakenDesignSystem.AwakenThinkingOrbStates.find(

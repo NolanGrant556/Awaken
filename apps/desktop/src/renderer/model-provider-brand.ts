@@ -1,5 +1,7 @@
 import type { AwakenProviderBrand } from "@awaken/design-system";
 
+/** Maps Core providerId onto Design System logo catalog ids. Unknown ids stay unmapped. */
+
 const PROVIDER_BRAND_BY_ID: Record<string, AwakenProviderBrand> = {
   openai: "openai",
   anthropic: "anthropic",

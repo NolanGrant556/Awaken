@@ -8,7 +8,8 @@ Awaken is a local-first desktop office agent workbench, not an IDE chrome skin a
 
 - Light mode is the first supported target. Light surfaces stay cool near-white; dark surfaces stay warm black (`#11110f`). Both themes are the same product with two skins.
 - Brand voltage is `--aw-accent` only. Do not introduce a second brand hue.
-- `AwakenProductLogo` owns the square product mark and the optional full app-icon composition; `logo-wordmark.svg` owns the horizontal wordmark. They are the only primary brand assets and must not substitute for each other through cropping.
+- The logo catalog in `src/logos/` owns product and provider marks. `AwakenProductLogo` and `AwakenLogo` only render catalog entries; `logo-wordmark.svg` remains the horizontal wordmark. They are the only primary brand assets and must not substitute for each other through cropping.
+- Product mark has two optical cuts: 16 (holds 12–20px, 1.25px outline stroke) and 24 (from 22px, 1.5px outline stroke). Do not scale one drawing across both ranges.
 - Use the mark-only asset inside product chrome. The full app-icon PNG (black field + light squircle + mark) is for Dock, installer, and other OS icon surfaces.
 - Use neutral surfaces, restrained borders, and typography for hierarchy.
 - Use black or near-black for the primary action; brand and accent colors must come from Awaken semantic tokens.
@@ -20,9 +21,11 @@ Awaken is a local-first desktop office agent workbench, not an IDE chrome skin a
 
 Three assets, never cropped into each other:
 
-1. **Mark** — the two-pillar A only, transparent SVG. In-app sizes `16 / 24 / 32 / 40 / 64`. Color follows `--aw-text-primary`.
+1. **Mark** — the two-pillar A only, from the logo catalog. Optical cuts `16 / 24`; display sizes `16 / 24 / 32 / 40 / 64`. Color follows `--aw-text-primary`.
 2. **App icon** — the authored 256 PNG composition. Dock, Start menu, and installer only.
 3. **Wordmark** — welcome empty state, About, and installer covers. Default visual width is `220px` (`200px` at narrow widths).
+
+Mark construction: horizontal / vertical / 45° segments, closed shapes, round caps, vertical optical shape. Recurring two-pillar geometry stays consistent across filled and outline. Minimum cut between overlapping parts is `--aw-logo-cut-min` (3px on the 16 grid). Generic UI icons stay on `lucide-react`; this catalog is not an icon font.
 
 Clear space around the mark is one quarter of its height. Do not stretch, rotate, recolor the mark to accent purple, add a stroke or shadow, or override the welcome wordmark with an arbitrary `logoSrc`. A full export matrix (favicon, DMG, ICO, document covers) is not a current capability.
 

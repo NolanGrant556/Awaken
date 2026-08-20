@@ -1,4 +1,5 @@
 export * from "./components";
+export * from "./logos";
 export {
   AWAKEN_FOCUS_MODALITY_ATTRIBUTE,
   installAwakenFocusModality,

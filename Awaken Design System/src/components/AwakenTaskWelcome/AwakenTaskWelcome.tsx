@@ -1,5 +1,5 @@
 import "./AwakenTaskWelcome.css";
-import logo from "../../assets/logo-wordmark.svg";
+import { AwakenLogo } from "../AwakenLogo/AwakenLogo";
 
 export type AwakenTaskWelcomeProps = {
   message?: string;
@@ -14,7 +14,11 @@ export function AwakenTaskWelcome({
 
   return (
     <section className={classNames} aria-label="Awaken task welcome">
-      <img className="aw-task-welcome__logo" src={logo} alt="" aria-hidden="true" />
+      <AwakenLogo
+        id="product-wordmark"
+        className="aw-task-welcome__logo"
+        decorative
+      />
       <p className="aw-task-welcome__message">{message}</p>
     </section>
   );

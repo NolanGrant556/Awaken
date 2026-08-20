@@ -33,7 +33,7 @@ function AnatomyMarker({ number, name }: { number: string; name: string }) {
 function WorkbenchAnatomySidebar() {
   return (
     <div className="aw-workbench-anatomy__sidebar" aria-label="Awaken 左侧栏示意">
-      <button type="button" className="aw-workbench-anatomy__new-task">＋ New Agent</button>
+      <button type="button" className="aw-workbench-anatomy__new-task">＋ 新建任务</button>
       <div className="aw-workbench-anatomy__sidebar-links">
         <span><Plug size={12} aria-hidden="true" />连接器</span>
         <span><Wrench size={12} aria-hidden="true" />技能</span>

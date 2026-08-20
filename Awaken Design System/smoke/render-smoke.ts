@@ -56,22 +56,8 @@ if (!productionCss.includes(".aw-memory-light-flow-layout")) {
   throw new Error("Production CSS is missing the shared AwakenMemoryLightFlow layout");
 }
 
-if (!productionCss.includes(".aw-model-orbit")) {
-  throw new Error("Production CSS is missing the shared model orbit header");
-}
-
-const modelOrbitKeyframes = [
-  "aw-model-orbit-drift-cw",
-  "aw-model-orbit-drift-ccw",
-  "aw-model-orbit-counter-cw",
-  "aw-model-orbit-counter-ccw",
-];
-
-if (
-  modelOrbitKeyframes.some((keyframe) => !productionCss.includes(keyframe)) ||
-  (productionCss.match(/360deg/g)?.length ?? 0) < modelOrbitKeyframes.length
-) {
-  throw new Error("Production CSS must preserve the complete 360-degree model orbit animations");
+if (productionCss.includes(".aw-model-orbit")) {
+  throw new Error("Production CSS must not keep the retired model orbit header");
 }
 
 if (productionCss.includes("记忆控制")) {
@@ -150,8 +136,8 @@ const thinkingOrbStatusHtml = renderToString(
   React.createElement(AwakenDesignSystem.AwakenThinkingOrbStatus),
 );
 
-if (!thinkingOrbStatusHtml.includes('role="status"') || !thinkingOrbStatusHtml.includes('aria-label="Thinking..."')) {
-  throw new Error("AwakenThinkingOrbStatus must expose the Thinking line as an accessible status");
+if (!thinkingOrbStatusHtml.includes('role="status"') || !thinkingOrbStatusHtml.includes('aria-label="思考中..."')) {
+  throw new Error("AwakenThinkingOrbStatus must expose the thinking line as an accessible status");
 }
 
 if (!thinkingOrbStatusHtml.includes('aria-hidden="true"')) {
@@ -179,7 +165,7 @@ const activeThoughtTraceHtml = renderToString(
 );
 
 if (
-  !activeThoughtTraceHtml.includes('aria-label="Thinking..."') ||
+  !activeThoughtTraceHtml.includes('aria-label="思考中..."') ||
   !activeThoughtTraceHtml.includes("aw-thinking-orb-status") ||
   !activeThoughtTraceHtml.includes('data-size="20"') ||
   activeThoughtTraceHtml.includes('data-paused="true"')
@@ -196,7 +182,7 @@ const completedThoughtTraceHtml = renderToString(
 );
 
 if (
-  !completedThoughtTraceHtml.includes("Thought") ||
+  !completedThoughtTraceHtml.includes("思考过程") ||
   !completedThoughtTraceHtml.includes("thought-trace-disclosure") ||
   !completedThoughtTraceHtml.includes('aria-hidden="true"') ||
   completedThoughtTraceHtml.includes("aw-thinking-orb-status") ||

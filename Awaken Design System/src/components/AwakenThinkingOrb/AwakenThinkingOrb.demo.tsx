@@ -24,9 +24,9 @@ export function AwakenThinkingOrbDemo() {
           <AwakenThinkingOrbStatus theme="dark" />
         </div>
         <div className="aw-thinking-orb-demo__featured-copy">
-          <h3 id="aw-thinking-orb-featured-title">Thinking 行内状态</h3>
+          <h3 id="aw-thinking-orb-featured-title">思考中行内状态</h3>
           <p>
-            思考球、<code>Thinking</code> 文案和三点节奏动效使用透明行内布局；<code>state=&quot;composing&quot;</code> 仍是 Canvas 状态，不是第七种 state。
+            思考球、<code>思考中</code> 文案和三点节奏动效使用透明行内布局；<code>state=&quot;composing&quot;</code> 仍是 Canvas 状态，不是第七种 state。
           </p>
         </div>
       </section>

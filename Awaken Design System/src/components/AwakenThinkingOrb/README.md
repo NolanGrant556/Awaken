@@ -5,7 +5,7 @@ UI-only 的 Canvas 思考球组件。它通过 MIT 许可的 `thinking-orbs` 包
 ## 使用边界
 
 - `AwakenThinkingOrb` 是 Design System 对官方 `ThinkingOrb` 的窄 wrapper，统一提供 Awaken 命名与 `aw-thinking-orb` class，不复制第三方 Canvas 引擎。
-- `AwakenThinkingOrbStatus` 以透明行内布局组合思考球、`Thinking` 文案和三点节奏动效；不提供背景、描边、圆角胶囊或固定宽度。内部使用 `state="composing"`、`size={64}`、`speed={2.4}`。
+- `AwakenThinkingOrbStatus` 以透明行内布局组合思考球、`思考中` 文案和三点节奏动效；不提供背景、描边、圆角胶囊或固定宽度。内部使用 `state="composing"`、`size={64}`、`speed={2.4}`。
 - 支持 `working`、`searching`、`solving`、`listening`、`composing`、`shaping` 六种状态。
 - 官方没有第七种 `thinking` state；官网的 `Thinking....` 只是 `composing` 动效的展示文案。
 - 只支持官方分别调校的 `64` 和 `20` 两档尺寸；它们不是同一 Canvas 的比例缩放。

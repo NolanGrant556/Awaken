@@ -61,7 +61,7 @@ export function AwakenWorkbenchChrome({
           <PanelLeft size={14} strokeWidth={1.9} />
         </ChromeIconButton>
         {sidebarCollapsed ? (
-          <ChromeIconButton label="New Agent" onClick={onNewTask}>
+          <ChromeIconButton label="新建任务" onClick={onNewTask}>
             <MessageCirclePlus size={14} strokeWidth={1.9} />
           </ChromeIconButton>
         ) : null}

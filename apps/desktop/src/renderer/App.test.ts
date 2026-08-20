@@ -636,8 +636,8 @@ function stubElectronBridge(): void {
       answerUserQuestion: vi.fn(),
       subscribeRun: vi.fn(),
       unsubscribeRun: vi.fn(),
-      getDesktopPreferences: vi.fn(async () => ({ theme: "light" as const })),
-      saveDesktopPreferences: vi.fn(async () => ({ theme: "light" as const })),
+      getDesktopPreferences: vi.fn(async () => ({ theme: "light" as const, fontScale: 100 as const })),
+      saveDesktopPreferences: vi.fn(async () => ({ theme: "light" as const, fontScale: 100 as const })),
       getRuntimeInfo: vi.fn(),
       listConnectors: vi.fn(async () => []),
       connectConnector: vi.fn(),
@@ -3817,9 +3817,9 @@ describe("App workbench presentation", () => {
     expect(html).toContain('aria-label="Resize inspector"');
     expect(html).toContain("aw-task-welcome__logo");
     expect(html).toContain("把任务交给 Awaken，自主执行，唤醒自由。");
-    expect(html).toContain('placeholder=""');
+    expect(html).toContain('placeholder="描述任务，或 / 选择技能"');
     expect(html).toContain('rows="3"');
-    expect(html).toContain("New Agent");
+    expect(html).toContain("新建任务");
     expect(html).not.toContain("⌘N");
     expect(html).toContain('aria-label="创建项目"');
     expect(html).toContain('aria-label="展开全部项目"');

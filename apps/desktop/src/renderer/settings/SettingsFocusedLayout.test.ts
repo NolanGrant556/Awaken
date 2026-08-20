@@ -79,16 +79,15 @@ describe("focused settings layout", () => {
     expect(desktopStyles).not.toContain(".acp-runner-drawer");
   });
 
-  it("keeps the full-bleed model page as the vertical scroll owner", () => {
-    expect(settingsStyles).toMatch(
-      /\.aw-settings-main--full-bleed > \.aw-model-settings-page\s*\{[\s\S]*?height:\s*100%;[\s\S]*?overflow-x:\s*hidden;[\s\S]*?overflow-y:\s*auto;[\s\S]*?overscroll-behavior:\s*contain;/,
-    );
+  it("uses the standard settings page as the model scroll owner", () => {
     expect(settingsStyles).toMatch(
       /\.aw-settings-main\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?overflow:\s*hidden;/,
     );
     expect(settingsStyles).toMatch(
-      /\.aw-settings-main--full-bleed > \.aw-model-settings-page\s*\{[\s\S]*?scrollbar-width:\s*none;/,
+      /\.aw-settings-scroll\s*\{[\s\S]*?overflow-x:\s*hidden;[\s\S]*?overflow-y:\s*auto;/,
     );
+    expect(settingsStyles).not.toContain(".aw-model-settings-page");
+    expect(settingsStyles).toContain(".aw-settings-page__description");
   });
 
   it("uses the shared lightweight scrollbar and keeps global rules inside its editor", () => {

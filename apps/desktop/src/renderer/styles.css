@@ -302,8 +302,8 @@ pre {
 .extension-header h1 {
   margin: 0;
   color: var(--aw-text-primary);
-  font-size: 30px;
-  font-weight: 850;
+  font-size: var(--aw-font-size-xl);
+  font-weight: var(--aw-font-weight-heavy);
   line-height: 1.1;
 }
 

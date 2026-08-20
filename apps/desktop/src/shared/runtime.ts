@@ -21,13 +21,17 @@ export type DesktopOperationResult<T> =
 
 export type AwakenTheme = "light" | "dark";
 export type AwakenThemePreference = "system" | AwakenTheme;
+export const AWAKEN_FONT_SCALES = [100, 125, 150, 200] as const;
+export type AwakenFontScale = (typeof AWAKEN_FONT_SCALES)[number];
 
 export type DesktopPreferences = {
   theme: AwakenThemePreference;
+  fontScale: AwakenFontScale;
 };
 
 export type DesktopPreferencesSaveRequest = {
   theme?: AwakenThemePreference;
+  fontScale?: AwakenFontScale;
 };
 
 export type MemoryScope = "user" | "project";

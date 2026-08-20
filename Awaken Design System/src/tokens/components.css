@@ -2403,7 +2403,7 @@ button.tool-trace-line:focus-visible {
   display: grid;
   justify-items: center;
   gap: 14px;
-  width: min(780px, 100%);
+  width: min(760px, 100%);
   min-width: 0;
   margin: 0 auto;
   padding: 0 0 2px;
@@ -2413,7 +2413,7 @@ button.tool-trace-line:focus-visible {
 
 .aw-task-welcome__logo {
   display: block;
-  width: 320px;
+  width: 220px;
   max-width: 62%;
   height: auto;
   filter: var(--aw-brand-wordmark-filter, none);
@@ -2480,7 +2480,7 @@ button.tool-trace-line:focus-visible {
 
 .composer-bar-center {
   position: relative;
-  width: min(780px, calc(100% - 64px));
+  width: min(760px, calc(100% - 64px));
   min-height: 148px;
 }
 
@@ -3357,7 +3357,7 @@ button.tool-trace-line:focus-visible {
 
 @media (max-width: 720px) {
   .aw-task-welcome__logo {
-    width: 260px;
+    width: 200px;
   }
 
   .aw-task-welcome__message {

@@ -147,7 +147,6 @@ export function AwakenSettingsDemo() {
   } else {
     content = (
       <AwakenModelSettings
-        theme={previewTheme}
         tabs={modelAccessTabs}
         activeTabId={activeModelTabId}
         views={apiModelViews}
@@ -219,10 +218,13 @@ export function AwakenSettingsDemo() {
       <div className="aw-settings-demo__preview">
         <AwakenSettings
           presentation="embedded"
-          contentLayout={activeSectionId === "memory" || activeSectionId === "models" ? "full-bleed" : "standard"}
+          contentLayout={activeSectionId === "memory" ? "full-bleed" : "standard"}
           navItems={AwakenSettingsNavItems}
           activeSectionId={activeSectionId}
           sectionTitle={sectionTitles[activeSectionId] ?? "设置"}
+          sectionDescription={
+            activeSectionId === "models" ? "配置模型接入、连接状态与推理参数。" : undefined
+          }
           onBack={() => setLastAction("已触发返回应用回调（Gallery 模拟）。")}
           onSelectSection={(id) => {
             setActiveSectionId(id);

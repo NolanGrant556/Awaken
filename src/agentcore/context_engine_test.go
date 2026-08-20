@@ -426,3 +426,167 @@ func minInt(a, b int) int {
 	}
 	return b
 }
+
+func TestContextGovernorRejectsCompactThatStaysAboveAutoThreshold(t *testing.T) {
+	envelope := ContextEnvelope{
+		Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: "large context"}},
+	}
+	applyCalled := 0
+	engine := &fakeContextEngine{
+		evaluateFn: func(envelope ContextEnvelope) ContextWindowState {
+			return testBlockedContextWindowState(98000)
+		},
+		compactFn: func(ctx stdcontext.Context, req CompactRequest) (CompactResult, error) {
+			return CompactResult{
+				BoundaryID:     "compact-stale",
+				SummaryMessage: convcontext.Message{Role: convcontext.RoleUser, Content: "summary"},
+				Messages: []convcontext.Message{{
+					Role: convcontext.RoleUser, Content: "summary", CompactBoundaryID: "compact-stale",
+				}},
+				EstimatedTokens: 95000,
+			}, nil
+		},
+	}
+	governor := newContextGovernor(engine, func() (LLMRequest, error) {
+		return LLMRequest{Messages: envelope.Messages, EnvelopeDebug: &envelope}, nil
+	}, func(_ stdcontext.Context, result CompactResult) error {
+		applyCalled++
+		return nil
+	})
+	sink := &fakeContextEventSink{}
+	_, err := governor.PrepareRequest(stdcontext.Background(), LLMRequest{
+		Messages:      envelope.Messages,
+		EnvelopeDebug: &envelope,
+	}, sink)
+	if err == nil || !errors.Is(err, errStillAboveAutoThreshold) {
+		t.Fatalf("expected still-above-auto postcondition failure, got %v", err)
+	}
+	if applyCalled != 0 {
+		t.Fatalf("failed compact must not apply a new epoch, applyCalled=%d", applyCalled)
+	}
+	if governor.consecutiveCompactFailures != 1 || governor.lastCompactFailureReason != compactFailureStillAboveAutoThreshold {
+		t.Fatalf("failure state = failures=%d reason=%q", governor.consecutiveCompactFailures, governor.lastCompactFailureReason)
+	}
+	if engine.compactCalls != compactInnerRetryLimit+1 {
+		t.Fatalf("expected %d inner compact attempts, got %d", compactInnerRetryLimit+1, engine.compactCalls)
+	}
+	if len(sink.blocked) != 0 {
+		t.Fatalf("must not emit CONTEXT_BLOCKED before three failures, got %v", sink.blocked)
+	}
+}
+
+func TestContextGovernorOpensCircuitAndBlocksAfterThreeFailures(t *testing.T) {
+	envelope := ContextEnvelope{
+		Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: "large context"}},
+	}
+	engine := &fakeContextEngine{
+		evaluateFn: func(envelope ContextEnvelope) ContextWindowState {
+			return testBlockedContextWindowState(98000)
+		},
+		compactFn: func(ctx stdcontext.Context, req CompactRequest) (CompactResult, error) {
+			return CompactResult{}, errOversizedProtectedTail
+		},
+	}
+	governor := newContextGovernor(engine, func() (LLMRequest, error) {
+		return LLMRequest{Messages: envelope.Messages, EnvelopeDebug: &envelope}, nil
+	}, func(_ stdcontext.Context, result CompactResult) error {
+		t.Fatal("applyCompactResult must not run after oversized tail failure")
+		return nil
+	})
+	sink := &fakeContextEventSink{}
+	for i := 0; i < 2; i++ {
+		_, err := governor.PrepareRequest(stdcontext.Background(), LLMRequest{
+			Messages:      envelope.Messages,
+			EnvelopeDebug: &envelope,
+		}, sink)
+		if !errors.Is(err, errOversizedProtectedTail) {
+			t.Fatalf("attempt %d: expected oversized tail, got %v", i+1, err)
+		}
+		if errors.Is(err, errContextWindowBlocked) {
+			t.Fatalf("attempt %d blocked too early: %v", i+1, err)
+		}
+		if len(sink.blocked) != 0 {
+			t.Fatalf("attempt %d emitted CONTEXT_BLOCKED: %v", i+1, sink.blocked)
+		}
+	}
+	_, err := governor.PrepareRequest(stdcontext.Background(), LLMRequest{
+		Messages:      envelope.Messages,
+		EnvelopeDebug: &envelope,
+	}, sink)
+	if !errors.Is(err, errContextWindowBlocked) {
+		t.Fatalf("third failure should open the circuit and block, got %v", err)
+	}
+	if !governor.compactCircuitOpen || governor.consecutiveCompactFailures < 3 {
+		t.Fatalf("expected circuit open after 3 failures, got failures=%d open=%v", governor.consecutiveCompactFailures, governor.compactCircuitOpen)
+	}
+	if isPromptTooLongError(err) {
+		t.Fatalf("CONTEXT_BLOCKED must not be classified as prompt-too-long")
+	}
+}
+
+func TestTryReactiveCompactSkipsSameOversizedTail(t *testing.T) {
+	envelope := ContextEnvelope{
+		Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: "large context"}},
+	}
+	engine := &fakeContextEngine{
+		evaluateFn: func(envelope ContextEnvelope) ContextWindowState {
+			return testContextWindowState(92000)
+		},
+		compactFn: func(ctx stdcontext.Context, req CompactRequest) (CompactResult, error) {
+			t.Fatal("reactive compact must not run after an oversized-tail auto failure")
+			return CompactResult{}, nil
+		},
+	}
+	governor := newContextGovernor(engine, func() (LLMRequest, error) {
+		return LLMRequest{Messages: envelope.Messages, EnvelopeDebug: &envelope}, nil
+	}, nil)
+	governor.lastCompactFailureReason = compactFailureOversizedProtectedTail
+	ok, err := governor.TryReactiveCompact(stdcontext.Background(), &fakeContextEventSink{})
+	if ok || !errors.Is(err, errOversizedProtectedTail) {
+		t.Fatalf("expected oversized tail to suppress reactive compact, ok=%v err=%v", ok, err)
+	}
+	if engine.compactCalls != 0 {
+		t.Fatalf("reactive compact wrote another attempt: %d", engine.compactCalls)
+	}
+}
+
+func TestContextGovernorFallbackSummaryIsNotSuccess(t *testing.T) {
+	envelope := ContextEnvelope{
+		Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: "large context"}},
+	}
+	applyCalled := 0
+	engine := &fakeContextEngine{
+		evaluateFn: func(envelope ContextEnvelope) ContextWindowState {
+			if len(envelope.Messages) > 0 && envelope.Messages[0].CompactBoundaryID != "" {
+				return testContextWindowState(4000)
+			}
+			return testBlockedContextWindowState(98000)
+		},
+		compactFn: func(ctx stdcontext.Context, req CompactRequest) (CompactResult, error) {
+			return CompactResult{
+				BoundaryID:     "compact-fallback",
+				SummaryMessage: convcontext.Message{Role: convcontext.RoleUser, Content: "[COMPACT_FALLBACK:llm_summary_failed]"},
+				Messages: []convcontext.Message{{
+					Role: convcontext.RoleUser, Content: "[COMPACT_FALLBACK:llm_summary_failed]", CompactBoundaryID: "compact-fallback",
+				}},
+				Fallback: CompactFallback{Used: true, Marker: "[COMPACT_FALLBACK:llm_summary_failed]", Reason: "provider unavailable"},
+			}, nil
+		},
+	}
+	governor := newContextGovernor(engine, func() (LLMRequest, error) {
+		return LLMRequest{Messages: envelope.Messages, EnvelopeDebug: &envelope}, nil
+	}, func(_ stdcontext.Context, result CompactResult) error {
+		applyCalled++
+		return nil
+	})
+	_, err := governor.PrepareRequest(stdcontext.Background(), LLMRequest{
+		Messages:      envelope.Messages,
+		EnvelopeDebug: &envelope,
+	}, &fakeContextEventSink{})
+	if !errors.Is(err, errInsufficientReduction) {
+		t.Fatalf("fallback summary must not count as success, got %v", err)
+	}
+	if applyCalled != 0 {
+		t.Fatalf("fallback compact applied a new epoch")
+	}
+}

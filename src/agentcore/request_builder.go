@@ -13,6 +13,7 @@ import (
 type RequestBuilder struct {
 	config      AgentConfig
 	runtimeInfo prompt.RuntimeInfo
+	threadID    string
 }
 
 const conversationContinuityBlockID = "conversation_continuity"
@@ -23,6 +24,14 @@ func NewRequestBuilder(config AgentConfig) *RequestBuilder {
 		config:      config,
 		runtimeInfo: prompt.NewRuntimeInfo(),
 	}
+}
+
+func (rb *RequestBuilder) BindThread(threadID string) *RequestBuilder {
+	if rb == nil {
+		return nil
+	}
+	rb.threadID = strings.TrimSpace(threadID)
+	return rb
 }
 
 func (rb *RequestBuilder) UpdateRuntimeInfo(info prompt.RuntimeInfo) {
@@ -48,12 +57,10 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		messages = modelProvider.GetMessagesForModel()
 	}
 	messages = attributeContextMessages(messages)
-	// Journal replay deliberately restores the complete local conversation,
-	// including durable media. Project that history through the currently
-	// selected model's capability contract before estimating or serializing the
-	// request. The projection is a deep clone, so switching models never erases
-	// attachment data from the thread.
-	messages = projectMessagesForModelCapabilities(messages, rb.config.ModelConfig.Capabilities)
+	// Journal replay restores storage keys and metadata. The request clone is
+	// rebuilt from the current window and capability snapshot: older media is
+	// stubbed, and only the near-tail safe group may be hydrated.
+	messages = projectMessagesForCapabilities(messages, rb.config.ModelConfig.Capabilities)
 	attributedTools := rb.attributeToolSchemas(tools)
 
 	compactModelConfig := rb.config.CompactModelConfig
@@ -147,6 +154,14 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		Kind:      continuityBlock.Kind,
 		Content:   continuityBlock.Content,
 		State:     ContextEpochSourceUpdated,
+	})
+	envelope.ContextWindowState = NewContextEngine(contextWindowConfigFromModelConfig(rb.config.ModelConfig)).Evaluate(envelope)
+	envelope.Messages = applyWindowRequestProjection(envelope.Messages, requestProjectionOptions{
+		capabilities: rb.config.ModelConfig.Capabilities,
+		windowConfig: contextWindowConfigFromModelConfig(rb.config.ModelConfig),
+		windowState:  envelope.ContextWindowState,
+		threadID:     rb.threadID,
+		store:        rb.config.ModelContentStore,
 	})
 	envelope.ContextWindowState = NewContextEngine(contextWindowConfigFromModelConfig(rb.config.ModelConfig)).Evaluate(envelope)
 	return envelope

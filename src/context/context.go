@@ -96,7 +96,13 @@ type Context struct {
 	tools       []tool.ToolSchema
 }
 
-const roughImageAttachmentTokenEstimate = 2000
+// MediaPartTokenEstimate is the session-level token price for one admitted
+// image, rendered PDF page, or native PDF file. Admission, request
+// projection, and compact all use this constant. Do not replace it with
+// len(base64)/4, JSON.stringify/4, or a provider-specific image token.
+const MediaPartTokenEstimate = 2000
+
+const roughImageAttachmentTokenEstimate = MediaPartTokenEstimate
 
 type Option func(*Context)
 
@@ -326,9 +332,27 @@ func EstimateAttachmentPayloadTokens(kind string, content string) int {
 		if strings.TrimSpace(content) == "" {
 			return 0
 		}
-		return roughImageAttachmentTokenEstimate
+		return MediaPartTokenEstimate
 	}
 	return EstimateTokens(content)
+}
+
+func MessageAttachmentHasAdmittedMedia(attachment MessageAttachment) bool {
+	if !strings.EqualFold(strings.TrimSpace(attachment.Kind), "image") {
+		return false
+	}
+	return strings.TrimSpace(attachment.DataBase64) != "" ||
+		strings.TrimSpace(attachment.StorageKey) != "" ||
+		attachment.ByteSize > 0
+}
+
+func ModelContentPartHasAdmittedMedia(part tool.ModelContentPart) bool {
+	if part.Type != "image" && part.Type != "file" {
+		return false
+	}
+	return strings.TrimSpace(part.DataBase64) != "" ||
+		strings.TrimSpace(part.StorageKey) != "" ||
+		part.ByteSize > 0
 }
 
 func EstimateMessageAttachmentTokens(attachment MessageAttachment) int {
@@ -337,17 +361,19 @@ func EstimateMessageAttachmentTokens(attachment MessageAttachment) int {
 	total += EstimateTokens(attachment.MimeType)
 	total += EstimateTokens(attachment.Path)
 	total += EstimateTokens(attachment.DisplayName)
-	total += EstimateAttachmentPayloadTokens(attachment.Kind, attachment.DataBase64)
+	if MessageAttachmentHasAdmittedMedia(attachment) {
+		return total + MediaPartTokenEstimate
+	}
+	if !strings.EqualFold(strings.TrimSpace(attachment.Kind), "image") {
+		total += EstimateAttachmentPayloadTokens(attachment.Kind, attachment.DataBase64)
+	}
 	return total
 }
 
 func EstimateModelContentTokens(part tool.ModelContentPart) int {
 	total := EstimateTokens(part.Type) + EstimateTokens(part.MimeType) + EstimateTokens(part.DisplayName)
-	if part.Type == "image" || part.Type == "file" {
-		if strings.TrimSpace(part.DataBase64) == "" {
-			return total
-		}
-		return total + roughImageAttachmentTokenEstimate
+	if ModelContentPartHasAdmittedMedia(part) {
+		return total + MediaPartTokenEstimate
 	}
 	return total
 }

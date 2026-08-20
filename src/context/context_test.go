@@ -123,8 +123,47 @@ func TestEstimateMediaTokensExcludeProviderOmittedPayloads(t *testing.T) {
 	}
 	part := tool.ModelContentPart{Type: "image", MimeType: "image/png", DisplayName: "chart.png"}
 	metadataOnly := EstimateModelContentTokens(part)
+	if metadataOnly >= MediaPartTokenEstimate {
+		t.Fatalf("cleared stub must not pay the media session price, got %d", metadataOnly)
+	}
 	part.DataBase64 = "aW1hZ2U="
-	if withPayload := EstimateModelContentTokens(part); withPayload <= metadataOnly {
+	if withPayload := EstimateModelContentTokens(part); withPayload < metadataOnly+MediaPartTokenEstimate {
 		t.Fatalf("expected admitted media payload estimate above metadata-only estimate: metadata=%d payload=%d", metadataOnly, withPayload)
+	}
+}
+
+func TestEstimateModelContentTokensCountsDurableMediaWithoutPayload(t *testing.T) {
+	stub := tool.ModelContentPart{Type: "image", MimeType: "image/png", DisplayName: "chart.png"}
+	stubTokens := EstimateModelContentTokens(stub)
+
+	withKey := stub
+	withKey.StorageKey = "thread/tool-results/call/part-001.png"
+	if got := EstimateModelContentTokens(withKey); got < stubTokens+MediaPartTokenEstimate {
+		t.Fatalf("storage_key-only image must still cost %d, got %d", MediaPartTokenEstimate, got)
+	}
+
+	withSize := stub
+	withSize.ByteSize = 4096
+	if got := EstimateModelContentTokens(withSize); got < stubTokens+MediaPartTokenEstimate {
+		t.Fatalf("ByteSize-only image must still cost %d, got %d", MediaPartTokenEstimate, got)
+	}
+
+	filePart := tool.ModelContentPart{Type: "file", MimeType: "application/pdf", DisplayName: "report.pdf", StorageKey: "thread/tool-results/call/part-001.pdf"}
+	if got := EstimateModelContentTokens(filePart); got < MediaPartTokenEstimate {
+		t.Fatalf("native PDF with storage_key must cost %d, got %d", MediaPartTokenEstimate, got)
+	}
+}
+
+func TestEstimateMessageAttachmentTokensCountsStorageKeyWithoutPayload(t *testing.T) {
+	cleared := MessageAttachment{Kind: "image", MimeType: "image/png", DisplayName: "a.png"}
+	if got := EstimateMessageAttachmentTokens(cleared); got >= MediaPartTokenEstimate {
+		t.Fatalf("cleared image stub must not pay the media session price, got %d", got)
+	}
+	durable := MessageAttachment{
+		Kind: "image", MimeType: "image/png", DisplayName: "a.png",
+		StorageKey: "sessions/t/attachments/a.png", ByteSize: 12,
+	}
+	if got := EstimateMessageAttachmentTokens(durable); got < MediaPartTokenEstimate {
+		t.Fatalf("durable image attachment must cost %d, got %d", MediaPartTokenEstimate, got)
 	}
 }

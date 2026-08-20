@@ -95,7 +95,6 @@ import {
   type SubscribeHandlers,
 } from "./runtime/client";
 import type {
-  AwakenFontScale,
   AwakenTheme,
   AwakenThemePreference,
   ComposerToken,
@@ -2189,7 +2188,7 @@ const INSPECTOR_FILE_ITEMS = [
   },
 ];
 const STORED_THEME_KEY = "awaken:appearance:theme";
-const STORED_FONT_SCALE_KEY = "awaken:appearance:fontScale";
+const LEGACY_STORED_FONT_SCALE_KEY = "awaken:appearance:fontScale";
 const DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY = "awaken:memory:dreamReceiptThreadAssignments";
 const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
 
@@ -2245,15 +2244,6 @@ function normalizeThemePreference(value: string): AwakenThemePreference {
 
 function readStoredThemePreference(): AwakenThemePreference {
   return normalizeThemePreference(readStoredString(STORED_THEME_KEY));
-}
-
-function normalizeFontScale(value: unknown): AwakenFontScale {
-  const numeric = typeof value === "string" ? Number(value) : value;
-  return numeric === 125 || numeric === 150 || numeric === 200 ? numeric : 100;
-}
-
-function readStoredFontScale(): AwakenFontScale {
-  return normalizeFontScale(readStoredString(STORED_FONT_SCALE_KEY, "100"));
 }
 
 function readSystemTheme(): AwakenTheme {
@@ -2482,8 +2472,6 @@ export function App() {
     useState<ModelAccessType>("coding_plan");
   const [appearanceThemePreference, setAppearanceThemePreference] =
     useState<AwakenThemePreference>(readStoredThemePreference);
-  const [appearanceFontScale, setAppearanceFontScale] =
-    useState<AwakenFontScale>(readStoredFontScale);
   const [systemAppearanceTheme, setSystemAppearanceTheme] = useState<AwakenTheme>(readSystemTheme);
   const appearanceTheme = effectiveThemeForPreference(
     appearanceThemePreference,
@@ -2827,11 +2815,15 @@ export function App() {
     }
     document.documentElement.dataset.awTheme = appearanceTheme;
     document.documentElement.dataset.awThemePreference = appearanceThemePreference;
-    document.documentElement.dataset.awFontScale = String(appearanceFontScale);
+    delete document.documentElement.dataset.awFontScale;
     document.documentElement.style.colorScheme = appearanceTheme === "dark" ? "dark" : "light";
     writeStoredValue(STORED_THEME_KEY, appearanceThemePreference);
-    writeStoredValue(STORED_FONT_SCALE_KEY, String(appearanceFontScale));
-  }, [appearanceFontScale, appearanceTheme, appearanceThemePreference]);
+    try {
+      window.localStorage.removeItem(LEGACY_STORED_FONT_SCALE_KEY);
+    } catch {
+      // Leftover scale mirrors are unused after the preference was removed.
+    }
+  }, [appearanceTheme, appearanceThemePreference]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -2876,7 +2868,6 @@ export function App() {
         const preferences = await runtimeClient.getDesktopPreferences();
         if (!cancelled) {
           setAppearanceThemePreference(preferences.theme);
-          setAppearanceFontScale(preferences.fontScale);
         }
       } catch {
         // The localStorage mirror already provides the best available fallback.
@@ -3491,31 +3482,9 @@ export function App() {
     try {
       const preferences = await runtimeClient.saveDesktopPreferences({ theme });
       setAppearanceThemePreference(preferences.theme);
-      setAppearanceFontScale(preferences.fontScale);
     } catch (error) {
       setAppearanceThemePreference(previousTheme);
       setAppearanceMessage(error instanceof Error ? error.message : "Failed to save theme");
-    } finally {
-      setAppearanceSaving(false);
-    }
-  }
-
-  async function handleAppearanceFontScaleChange(fontScale: AwakenFontScale): Promise<void> {
-    if (fontScale === appearanceFontScale || appearanceSaving) {
-      return;
-    }
-
-    const previousScale = appearanceFontScale;
-    setAppearanceFontScale(fontScale);
-    setAppearanceSaving(true);
-    setAppearanceMessage(null);
-    try {
-      const preferences = await runtimeClient.saveDesktopPreferences({ fontScale });
-      setAppearanceThemePreference(preferences.theme);
-      setAppearanceFontScale(preferences.fontScale);
-    } catch (error) {
-      setAppearanceFontScale(previousScale);
-      setAppearanceMessage(error instanceof Error ? error.message : "Failed to save display size");
     } finally {
       setAppearanceSaving(false);
     }
@@ -8344,14 +8313,10 @@ export function App() {
         currentProjectId={activeThreadProjectId ?? selectedProjectId}
         theme={appearanceTheme}
         themePreference={appearanceThemePreference}
-        fontScale={appearanceFontScale}
         themeSaving={appearanceSaving}
         themeMessage={appearanceMessage}
         onThemePreferenceChange={(theme) => {
           void handleAppearanceThemeChange(theme);
-        }}
-        onFontScaleChange={(fontScale) => {
-          void handleAppearanceFontScaleChange(fontScale);
         }}
         onOpenChange={setModelSettingsOpen}
         initialModelSection={modelSettingsInitialModelSection}

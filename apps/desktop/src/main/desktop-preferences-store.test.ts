@@ -20,7 +20,7 @@ describe("DesktopPreferencesStore", () => {
 
     await store.initialize();
 
-    expect(store.snapshot()).toEqual({ theme: "light", fontScale: 100 });
+    expect(store.snapshot()).toEqual({ theme: "light" });
   });
 
   it("persists the selected dark theme", async () => {
@@ -32,7 +32,7 @@ describe("DesktopPreferencesStore", () => {
     const reloaded = new DesktopPreferencesStore(configDir);
     await reloaded.initialize();
 
-    expect(reloaded.snapshot()).toEqual({ theme: "dark", fontScale: 100 });
+    expect(reloaded.snapshot()).toEqual({ theme: "dark" });
     await expect(
       readFile(join(configDir, "desktop-preferences.json"), "utf8"),
     ).resolves.toContain('"theme": "dark"');
@@ -47,7 +47,7 @@ describe("DesktopPreferencesStore", () => {
     const reloaded = new DesktopPreferencesStore(configDir);
     await reloaded.initialize();
 
-    expect(reloaded.snapshot()).toEqual({ theme: "system", fontScale: 100 });
+    expect(reloaded.snapshot()).toEqual({ theme: "system" });
     await expect(
       readFile(join(configDir, "desktop-preferences.json"), "utf8"),
     ).resolves.toContain('"theme": "system"');
@@ -63,33 +63,24 @@ describe("DesktopPreferencesStore", () => {
 
     await store.initialize();
 
-    expect(store.snapshot()).toEqual({ theme: "light", fontScale: 100 });
+    expect(store.snapshot()).toEqual({ theme: "light" });
   });
 
-  it("persists a supported font scale and keeps the current theme", async () => {
-    const store = new DesktopPreferencesStore(configDir);
-
-    await store.initialize();
-    await store.savePreferences({ fontScale: 150 });
-
-    const reloaded = new DesktopPreferencesStore(configDir);
-    await reloaded.initialize();
-
-    expect(reloaded.snapshot()).toEqual({ theme: "light", fontScale: 150 });
-    await expect(
-      readFile(join(configDir, "desktop-preferences.json"), "utf8"),
-    ).resolves.toContain('"fontScale": 150');
-  });
-
-  it("normalizes unknown font scales back to 100", async () => {
+  it("ignores leftover fontScale in stored preferences", async () => {
     await writeFile(
       join(configDir, "desktop-preferences.json"),
-      JSON.stringify({ version: 1, theme: "dark", fontScale: 180 }),
+      JSON.stringify({ version: 1, theme: "dark", fontScale: 150 }),
+      "utf8",
     );
     const store = new DesktopPreferencesStore(configDir);
 
     await store.initialize();
 
-    expect(store.snapshot()).toEqual({ theme: "dark", fontScale: 100 });
+    expect(store.snapshot()).toEqual({ theme: "dark" });
+
+    await store.savePreferences({ theme: "dark" });
+    await expect(
+      readFile(join(configDir, "desktop-preferences.json"), "utf8"),
+    ).resolves.not.toContain("fontScale");
   });
 });

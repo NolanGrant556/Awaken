@@ -1,7 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
-  AwakenFontScale,
   AwakenThemePreference,
   DesktopPreferences,
   DesktopPreferencesSaveRequest,
@@ -11,16 +10,10 @@ const DESKTOP_PREFERENCES_FILE = "desktop-preferences.json";
 
 const DEFAULT_DESKTOP_PREFERENCES: DesktopPreferences = {
   theme: "light",
-  fontScale: 100,
 };
 
 function normalizeThemePreference(value: unknown): AwakenThemePreference {
   return value === "system" || value === "dark" ? value : "light";
-}
-
-function normalizeFontScale(value: unknown): AwakenFontScale {
-  const numeric = typeof value === "string" ? Number(value) : value;
-  return numeric === 125 || numeric === 150 || numeric === 200 ? numeric : 100;
 }
 
 function normalizePreferences(value: unknown): DesktopPreferences {
@@ -31,7 +24,6 @@ function normalizePreferences(value: unknown): DesktopPreferences {
   const candidate = value as Record<string, unknown>;
   return {
     theme: normalizeThemePreference(candidate.theme),
-    fontScale: normalizeFontScale(candidate.fontScale),
   };
 }
 

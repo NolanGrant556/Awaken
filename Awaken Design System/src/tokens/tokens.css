@@ -200,32 +200,29 @@
   --aw-font-sans: "SF Pro Text", "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --aw-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  /* Font scale: Desktop may set html[data-aw-font-scale] to multiply only these metrics. */
-  --aw-font-scale: 1;
-
   /* Font size */
-  --aw-font-size-xs: calc(11px * var(--aw-font-scale));
-  --aw-font-size-sm: calc(12px * var(--aw-font-scale));
-  --aw-font-size-base: calc(14px * var(--aw-font-scale));
-  --aw-font-size-md: calc(14px * var(--aw-font-scale));
-  --aw-font-size-lg: calc(16px * var(--aw-font-scale));
-  --aw-font-size-xl: calc(28px * var(--aw-font-scale));
-  --aw-font-size-reading: calc(15px * var(--aw-font-scale));
-  --aw-font-size-reading-h1: calc(22px * var(--aw-font-scale));
-  --aw-font-size-reading-h2: calc(18px * var(--aw-font-scale));
-  --aw-font-size-reading-h3: calc(16px * var(--aw-font-scale));
+  --aw-font-size-xs: 11px;
+  --aw-font-size-sm: 12px;
+  --aw-font-size-base: 14px;
+  --aw-font-size-md: 14px;
+  --aw-font-size-lg: 16px;
+  --aw-font-size-xl: 28px;
+  --aw-font-size-reading: 15px;
+  --aw-font-size-reading-h1: 22px;
+  --aw-font-size-reading-h2: 18px;
+  --aw-font-size-reading-h3: 16px;
 
   /* Line height */
-  --aw-line-height-xs: calc(16px * var(--aw-font-scale));
-  --aw-line-height-sm: calc(18px * var(--aw-font-scale));
-  --aw-line-height-base: calc(20px * var(--aw-font-scale));
-  --aw-line-height-md: calc(20px * var(--aw-font-scale));
-  --aw-line-height-lg: calc(24px * var(--aw-font-scale));
-  --aw-line-height-xl: calc(36px * var(--aw-font-scale));
-  --aw-line-height-reading: calc(24px * var(--aw-font-scale));
-  --aw-line-height-reading-h1: calc(30px * var(--aw-font-scale));
-  --aw-line-height-reading-h2: calc(26px * var(--aw-font-scale));
-  --aw-line-height-reading-h3: calc(24px * var(--aw-font-scale));
+  --aw-line-height-xs: 16px;
+  --aw-line-height-sm: 18px;
+  --aw-line-height-base: 20px;
+  --aw-line-height-md: 20px;
+  --aw-line-height-lg: 24px;
+  --aw-line-height-xl: 36px;
+  --aw-line-height-reading: 24px;
+  --aw-line-height-reading-h1: 30px;
+  --aw-line-height-reading-h2: 26px;
+  --aw-line-height-reading-h3: 24px;
 
   /* Font weight */
   --aw-font-weight-regular: 400;
@@ -404,16 +401,4 @@
     --aw-sidebar-width: 280px;
     --aw-content-width: 720px;
   }
-}
-
-:root[data-aw-font-scale="125"] {
-  --aw-font-scale: 1.25;
-}
-
-:root[data-aw-font-scale="150"] {
-  --aw-font-scale: 1.5;
-}
-
-:root[data-aw-font-scale="200"] {
-  --aw-font-scale: 2;
 }

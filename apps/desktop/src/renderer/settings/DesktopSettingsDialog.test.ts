@@ -28,11 +28,9 @@ describe("DesktopSettingsDialog", () => {
         runtimeClient: {} as RuntimeClient,
         theme: "light",
         themePreference: "system",
-        fontScale: 100,
         themeSaving: false,
         themeMessage: null,
         onThemePreferenceChange: vi.fn(),
-        onFontScaleChange: vi.fn(),
         onOpenChange: vi.fn(),
         onProfilesChanged: vi.fn(),
       }),
@@ -68,16 +66,14 @@ describe("AppearanceSettings", () => {
     const html = renderToString(
       React.createElement(AppearanceSettings, {
         themePreference: "system",
-        fontScale: 100,
         themeSaving: false,
         onThemePreferenceChange: vi.fn(),
-        onFontScaleChange: vi.fn(),
       }),
     );
 
     expect(html).toContain("跟随系统");
-    expect(html).toContain("显示大小");
-    expect(html).toContain("100%");
+    expect(html).not.toContain("显示大小");
+    expect(html).not.toContain("100%");
     expect(html).toContain("浅色");
     expect(html).toContain("黑色");
     expect(html).toContain('role="radiogroup"');

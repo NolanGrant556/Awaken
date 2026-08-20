@@ -143,6 +143,15 @@ func contextProjectionRequest(envelope ContextEnvelope, state ContextWindowState
 		EndpointSelector: envelope.CompactModelConfig.EndpointSelector, ModelSelectorKind: envelope.CompactModelConfig.ModelSelectorKind,
 		ContextWindowState: state,
 	}
+	for _, item := range envelope.UserContextItems {
+		if strings.TrimSpace(item.Content) == "" {
+			continue
+		}
+		req.PrefixMessages = append(req.PrefixMessages, convcontext.Message{
+			Role: convcontext.RoleUser, Content: item.Content,
+			Origin: convcontext.MessageOriginSynthetic, MessageID: item.ID,
+		})
+	}
 	if len(req.AttributedTools) == 0 {
 		for _, schema := range envelope.ToolSchemas {
 			req.AttributedTools = append(req.AttributedTools, AttributedToolSchema{Schema: schema})

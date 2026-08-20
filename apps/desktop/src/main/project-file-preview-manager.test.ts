@@ -442,7 +442,7 @@ describe("ProjectFilePreviewManager", () => {
         relativePath: "README.md",
         content: "# Updated\n",
       }),
-    ).resolves.toEqual({ ok: true, byteLength: Buffer.byteLength("# Updated\n") });
+    ).resolves.toMatchObject({ ok: true, byteLength: Buffer.byteLength("# Updated\n") });
     await expect(fs.readFile(path.join(root, "README.md"), "utf8")).resolves.toBe(
       "# Updated\n",
     );
@@ -496,4 +496,50 @@ describe("ProjectFilePreviewManager", () => {
     );
     manager.dispose();
   });
+
+	it("requires digest CAS for project AGENTS.md and preserves both conflict bodies", async () => {
+		const root = await temporaryRoot();
+		await fs.mkdir(path.join(root, ".awaken"));
+		await fs.writeFile(path.join(root, ".awaken", "AGENTS.md"), "# Original\n");
+		const { manager } = createManager(root);
+		const preview = await manager.start({
+			requestId: "preview-agents",
+			projectId: "project-1",
+			folderPath: root,
+			relativePath: ".awaken/AGENTS.md",
+		});
+		if (!preview.ok || preview.preview.transport !== "text") throw new Error("expected text preview");
+
+		await expect(manager.saveMarkdown({
+			projectId: "project-1",
+			folderPath: root,
+			relativePath: ".awaken/AGENTS.md",
+			content: "# Missing digest\n",
+		})).resolves.toMatchObject({ ok: false, code: "INVALID_REQUEST" });
+
+		await fs.writeFile(path.join(root, ".awaken", "AGENTS.md"), "# External\n");
+		const conflict = await manager.saveMarkdown({
+			projectId: "project-1",
+			folderPath: root,
+			relativePath: ".awaken/AGENTS.md",
+			content: "# Local draft\n",
+			expectedDigest: preview.preview.contentDigest,
+		});
+		expect(conflict).toMatchObject({
+			ok: false,
+			code: "FILE_CHANGED",
+			currentContent: "# External\n",
+			currentDigest: expect.any(String),
+			submittedContent: "# Local draft\n",
+		});
+		if (conflict.ok || !conflict.currentDigest) throw new Error("expected conflict digest");
+		await expect(manager.saveMarkdown({
+			projectId: "project-1",
+			folderPath: root,
+			relativePath: ".awaken/AGENTS.md",
+			content: "# Local draft\n",
+			expectedDigest: conflict.currentDigest,
+		})).resolves.toMatchObject({ ok: true, digest: expect.any(String) });
+		await expect(fs.readFile(path.join(root, ".awaken", "AGENTS.md"), "utf8")).resolves.toBe("# Local draft\n");
+	});
 });

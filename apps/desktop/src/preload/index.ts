@@ -41,6 +41,9 @@ import {
   type DeleteSkillRequest,
   type DeleteSkillResponse,
   type GetSkillPreviewRequest,
+	type GlobalAgentsDeleteRequest,
+	type GlobalAgentsDocument,
+	type GlobalAgentsSaveRequest,
 	type HookRevokeRequest,
 	type HookStatus,
 	type HookTrustRequest,
@@ -76,6 +79,7 @@ import {
   type ProjectFilePreviewStartRequest,
   type ProjectFilePreviewStartResult,
   type ProjectMutationResult,
+	type ProjectAgentsCreateResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
   type RunStreamHandlers,
@@ -328,6 +332,14 @@ const bridge: AwakenBridge = {
       "awaken:save-project-markdown-file",
       request,
     ) as Promise<ProjectFilePreviewSaveResult>,
+	createProjectAgentsFile: (projectId: string) =>
+		ipcRenderer.invoke("awaken:create-project-agents-file", projectId) as Promise<ProjectAgentsCreateResult>,
+	getGlobalAgentsDocument: () =>
+		ipcRenderer.invoke("awaken:get-global-agents-document") as Promise<GlobalAgentsDocument>,
+	saveGlobalAgentsDocument: (request: GlobalAgentsSaveRequest) =>
+		ipcRenderer.invoke("awaken:save-global-agents-document", request) as Promise<GlobalAgentsDocument>,
+	deleteGlobalAgentsDocument: (request: GlobalAgentsDeleteRequest) =>
+		ipcRenderer.invoke("awaken:delete-global-agents-document", request) as Promise<GlobalAgentsDocument>,
   upsertProject: (workspaceRoot: string, displayName?: string) =>
     ipcRenderer.invoke("awaken:upsert-project", {
       workspaceRoot,

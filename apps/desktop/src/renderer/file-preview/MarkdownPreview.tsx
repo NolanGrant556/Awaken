@@ -256,6 +256,11 @@ export default function MarkdownPreview({
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string>();
+	const [saveConflict, setSaveConflict] = useState<{
+		currentContent: string;
+		submittedContent: string;
+		showingCurrent: boolean;
+	}>();
   const previewRef = useRef<HTMLElement>(null);
   const editorRef = useRef<HTMLElement>(null);
   const editorTemplateRef = useRef<HTMLDivElement>(null);
@@ -273,6 +278,7 @@ export default function MarkdownPreview({
     setRenderedContent(preview.content);
     setDirty(false);
     setSaveError(undefined);
+	setSaveConflict(undefined);
     setSaving(false);
     draftRef.current = preview.content;
     savedRef.current = preview.content;
@@ -291,10 +297,18 @@ export default function MarkdownPreview({
       const result = await onSaveRef.current(content);
       if (!result.ok) {
         setSaveError(result.message);
+		if (result.code === "FILE_CHANGED" && result.currentContent !== undefined && result.submittedContent !== undefined) {
+			setSaveConflict({
+				currentContent: result.currentContent,
+				submittedContent: result.submittedContent,
+				showingCurrent: false,
+			});
+		}
         return false;
       }
       savedRef.current = content;
       setDirty(false);
+		setSaveConflict(undefined);
       return true;
     } catch {
       setSaveError("暂时无法保存这个 Markdown 文件。");
@@ -303,6 +317,24 @@ export default function MarkdownPreview({
       setSaving(false);
     }
   }, []);
+
+	function toggleConflictVersion(): void {
+		if (!saveConflict) return;
+		const nextContent = saveConflict.showingCurrent
+			? saveConflict.submittedContent
+			: saveConflict.currentContent;
+		const showingCurrent = !saveConflict.showingCurrent;
+		setRenderedContent(nextContent);
+		draftRef.current = nextContent;
+		if (showingCurrent) {
+			savedRef.current = nextContent;
+			setDirty(false);
+		} else {
+			setDirty(nextContent !== savedRef.current);
+		}
+		setSaveConflict({ ...saveConflict, showingCurrent });
+		setSaveError(showingCurrent ? "已加载磁盘版本；本地草稿仍可恢复。" : "已恢复本地草稿；保存前请重新加载并合并外部修改。" );
+	}
 
   useEffect(
     () => () => {
@@ -458,6 +490,15 @@ export default function MarkdownPreview({
             >
               <Save size={15} aria-hidden="true" />
             </button>
+			{saveConflict ? (
+				<button
+					type="button"
+					className="project-file-markdown-conflict-button"
+					onClick={toggleConflictVersion}
+				>
+					{saveConflict.showingCurrent ? "恢复本地草稿" : "重新加载磁盘版本"}
+				</button>
+			) : null}
             {saveError ? (
               <span
                 className="project-file-markdown-preview__status"

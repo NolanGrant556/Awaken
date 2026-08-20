@@ -108,6 +108,7 @@ func CreateSubagent(parent AgentConfig, spawn SpawnConfig) (AgentConfig, error) 
 		EntryPoint:                   parent.EntryPoint,
 		Workspace:                    parent.Workspace,
 		SkillSummary:                 parent.SkillSummary,
+		InstructionSnapshot:          parent.InstructionSnapshot,
 		AutoToolPolicy:               parent.AutoToolPolicy,
 		ToolExposure:                 parent.ToolExposure,
 		ToolAvailabilitySnapshot:     parent.ToolAvailabilitySnapshot,

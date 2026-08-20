@@ -7,6 +7,7 @@ import (
 	"time"
 
 	convcontext "awaken/src/context"
+	"awaken/src/instructions"
 	"awaken/src/llm"
 	"awaken/src/tool"
 )
@@ -105,6 +106,10 @@ func ContextEpochSemanticRecord(threadID, runID, turnID, sessionID string, recei
 		"creation_boundary_reason": receipt.CreationBoundaryReason,
 		"baseline_sequence":        receipt.BaselineSequence,
 	})
+}
+
+func InstructionSnapshotSemanticRecord(threadID, runID, sessionID string, summary instructions.Summary) SemanticRecord {
+	return NewSemanticRecord(SemanticKindInstructionSnapshot, threadID, runID, "", "", sessionID, semanticPayload(summary))
 }
 
 func ModelRequestSemanticRecord(threadID, runID, turnID, sessionID string, snapshot ContextUsageSnapshot, purpose llm.RequestPurpose) SemanticRecord {

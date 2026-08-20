@@ -1,0 +1,295 @@
+.aw-agents-settings {
+  width: min(860px, 100%);
+  margin: 0 auto;
+  color: var(--aw-text-primary);
+}
+
+.aw-agents-settings--loading {
+  padding: 18px 0;
+  color: var(--aw-text-secondary);
+  font-size: 13px;
+}
+
+.aw-agents-settings__card {
+  display: grid;
+  gap: 12px;
+  box-sizing: border-box;
+  padding: 4px 0 0;
+}
+
+.aw-agents-settings__header,
+.aw-agents-settings__identity,
+.aw-agents-settings footer,
+.aw-agents-settings__actions,
+.aw-agents-settings__editor-head,
+.aw-agents-settings__editor-title,
+.aw-agents-settings__footer-note {
+  display: flex;
+  align-items: center;
+}
+
+.aw-agents-settings__header {
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 44px;
+  padding: 0 2px;
+}
+
+.aw-agents-settings__identity {
+  min-width: 0;
+  gap: 10px;
+}
+
+.aw-agents-settings__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid color-mix(in srgb, var(--aw-accent-primary, #6e5bd5) 14%, var(--aw-border-light));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--aw-accent-primary, #6e5bd5) 7%, var(--aw-bg-white));
+  color: var(--aw-accent-primary, #6e5bd5);
+}
+
+.aw-agents-settings h2 {
+  min-width: 0;
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-agents-settings__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-white);
+  color: var(--aw-text-tertiary);
+  font-size: 10px;
+  font-weight: var(--aw-font-weight-semibold);
+}
+
+.aw-agents-settings__state::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--aw-text-tertiary);
+  content: "";
+}
+
+.aw-agents-settings__state.is-active {
+  border-color: color-mix(in srgb, var(--aw-success, #28784c) 18%, var(--aw-border-light));
+  background: color-mix(in srgb, var(--aw-success, #28784c) 5%, var(--aw-bg-white));
+  color: var(--aw-success, #28784c);
+}
+
+.aw-agents-settings__state.is-active::before {
+  background: var(--aw-success, #28784c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--aw-success, #28784c) 10%, transparent);
+}
+
+.aw-agents-settings__editor {
+  overflow: hidden;
+  border: 1px solid var(--aw-border-main);
+  border-radius: 14px;
+  background: var(--aw-bg-white);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.aw-agents-settings__editor:hover {
+  border-color: var(--aw-border-control-hover);
+}
+
+.aw-agents-settings__editor:focus-within {
+  border-color: var(--aw-accent-primary, #6e5bd5);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--aw-accent-primary, #6e5bd5) 10%, transparent);
+}
+
+.aw-agents-settings__editor-head {
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 40px;
+  padding: 0 13px;
+  border-bottom: 1px solid var(--aw-border-light);
+  background: color-mix(in srgb, var(--aw-bg-fill-light) 72%, var(--aw-bg-white));
+}
+
+.aw-agents-settings__editor-title {
+  gap: 6px;
+}
+
+.aw-agents-settings__editor-head label {
+  color: var(--aw-text-tertiary);
+  font-size: 10px;
+  font-weight: var(--aw-font-weight-semibold);
+}
+
+.aw-agents-settings__editor-head > span {
+  color: var(--aw-text-tertiary);
+  font-size: 11px;
+}
+
+.aw-agents-settings__editor-head > span.is-over {
+  color: var(--aw-warning, #b65b18);
+}
+
+.aw-agents-settings textarea {
+  box-sizing: border-box;
+  width: 100%;
+  height: clamp(300px, 42vh, 400px);
+  min-height: 300px;
+  max-height: 400px;
+  resize: none;
+  overflow-y: auto;
+  padding: 15px 16px;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  background: var(--aw-bg-white);
+  color: inherit;
+  font: 13px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent) transparent;
+  scrollbar-width: thin;
+  tab-size: 2;
+}
+
+.aw-agents-settings textarea::-webkit-scrollbar {
+  width: 6px;
+}
+
+.aw-agents-settings textarea::-webkit-scrollbar-track,
+.aw-agents-settings textarea::-webkit-scrollbar-track-piece,
+.aw-agents-settings textarea::-webkit-scrollbar-corner {
+  border: 0;
+  background: transparent;
+}
+
+.aw-agents-settings textarea::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  border: 0;
+  border-radius: var(--aw-radius-pill);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent);
+}
+
+.aw-agents-settings textarea::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--aw-text-secondary) 42%, transparent);
+}
+
+.aw-agents-settings textarea::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.aw-agents-settings textarea:focus {
+  outline: none;
+}
+
+.aw-agents-settings__footer-note {
+  min-width: 0;
+  gap: 7px;
+  color: var(--aw-text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.aw-agents-settings__footer-note svg {
+  flex: none;
+  color: var(--aw-text-tertiary);
+}
+
+.aw-agents-settings__footer-note.has-message {
+  color: var(--aw-success, #28784c);
+}
+
+.aw-agents-settings__footer-note.has-message svg {
+  color: currentColor;
+}
+
+.aw-agents-settings__footer-note.is-error {
+  color: var(--aw-danger, #c54949);
+}
+
+.aw-agents-settings footer {
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 38px;
+  padding: 0 2px;
+}
+
+.aw-agents-settings__actions {
+  gap: 8px;
+}
+
+.aw-agents-settings button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 8px 13px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: 10px;
+  background: var(--aw-bg-white);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.aw-agents-settings button:hover:enabled {
+  border-color: var(--aw-border-control-hover);
+  background: var(--aw-bg-fill-light);
+}
+
+.aw-agents-settings button.is-danger:hover:enabled {
+  border-color: color-mix(in srgb, var(--aw-danger, #c54949) 22%, var(--aw-border-main));
+  background: color-mix(in srgb, var(--aw-danger, #c54949) 6%, var(--aw-bg-white));
+  color: var(--aw-danger, #c54949);
+}
+
+.aw-agents-settings button.is-primary {
+  min-width: 76px;
+  border-color: transparent;
+  background: var(--aw-accent-primary, #6e5bd5);
+  color: white;
+}
+
+.aw-agents-settings button.is-primary:hover:enabled {
+  background: color-mix(in srgb, var(--aw-accent-primary, #6e5bd5) 88%, #000);
+}
+
+.aw-agents-settings button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+@media (max-width: 760px) {
+  .aw-agents-settings footer {
+    align-items: flex-end;
+    flex-direction: column;
+  }
+
+  .aw-agents-settings__footer-note {
+    align-self: stretch;
+  }
+}
+
+@media (max-height: 760px) {
+  .aw-agents-settings__card {
+    gap: 10px;
+  }
+
+  .aw-agents-settings textarea {
+    height: clamp(240px, 36vh, 300px);
+    min-height: 240px;
+    max-height: 300px;
+  }
+}

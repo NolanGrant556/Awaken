@@ -39,6 +39,7 @@ import {
   normalizeModelProvider,
   normalizeModelProfileRunConfig,
   normalizeModelProfileSummary,
+	normalizeGlobalAgentsDocument,
   PROJECT_DIRECTORY_CHANGED_CHANNEL,
   normalizeRuntimeProject,
   normalizeRuntimeProjectOperation,
@@ -67,6 +68,10 @@ import {
   type DeleteSkillRequest,
   type DeleteSkillResponse,
   type GetSkillPreviewRequest,
+	type GlobalAgentsDeleteRequest,
+	type GlobalAgentsDocument,
+	type GlobalAgentsDocumentWire,
+	type GlobalAgentsSaveRequest,
   type InstallSkillRequest,
   type InstallSkillResponse,
   type ModelProfileBalancesResultWire,
@@ -91,6 +96,7 @@ import {
   type ProjectFilePreviewStartRequest,
   type ProjectFilePreviewStartResult,
   type ProjectMutationResult,
+	type ProjectAgentsCreateResult,
   type ProjectReorderResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
@@ -874,7 +880,15 @@ function consumeSSEFrame(frame: string, onEvent: (event: AguiEvent) => void): vo
   }
 
   const payload = dataLines.join("\n");
-  onEvent(JSON.parse(payload) as AguiEvent);
+  const event = JSON.parse(payload) as AguiEvent;
+  if (event.instructionSnapshot) {
+    event.instructionSnapshot = {
+      ...event.instructionSnapshot,
+      sources: event.instructionSnapshot.sources ?? [],
+      diagnostics: event.instructionSnapshot.diagnostics ?? [],
+    };
+  }
+  onEvent(event);
 }
 
 async function pumpComputerOverlayEvents(
@@ -3079,6 +3093,100 @@ ipcMain.handle(
     }
     return projectFilePreviewManager.saveMarkdown(request);
   },
+);
+
+ipcMain.handle(
+	"awaken:create-project-agents-file",
+	async (event, projectId: string): Promise<ProjectAgentsCreateResult> => {
+		if (!mainWindowRef || mainWindowRef.isDestroyed() || event.sender.id !== mainWindowRef.webContents.id) {
+			return { ok: false, code: "UNAUTHORIZED", message: "项目指令创建请求来源无效。" };
+		}
+		try {
+			const projects = (await requestRuntimeDomain<RuntimeProjectWire[]>(
+				"/v1/projects?include_removed=false",
+				{ method: "GET" },
+			)).map(normalizeRuntimeProject);
+			const project = projects.find((candidate) => candidate.projectId === projectId && candidate.state === "active");
+			if (!project) return { ok: false, code: "PROJECT_NOT_FOUND", message: "当前项目不存在或已被移除。" };
+			const primary = project.folders.find((folder) => folder.isPrimary)?.path ?? project.workspaceRoot;
+			if (!primary || !path.isAbsolute(primary)) {
+				return { ok: false, code: "PRIMARY_FOLDER_MISSING", message: "当前项目没有可用的主文件夹。" };
+			}
+			const primaryReal = await fs.realpath(primary);
+			const agentsDirectory = path.join(primaryReal, ".awaken");
+			await fs.mkdir(agentsDirectory, { recursive: true, mode: 0o700 });
+			const directoryReal = await fs.realpath(agentsDirectory);
+			const relativeDirectory = path.relative(primaryReal, directoryReal);
+			if (relativeDirectory === ".." || relativeDirectory.startsWith(`..${path.sep}`) || path.isAbsolute(relativeDirectory)) {
+				return { ok: false, code: "CREATE_FAILED", message: ".awaken 目录超出项目主文件夹。" };
+			}
+			const target = path.join(directoryReal, "AGENTS.md");
+			const temporary = path.join(directoryReal, `.AGENTS.md.tmp-${randomUUID()}`);
+			let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+			try {
+				handle = await fs.open(temporary, "wx", 0o600);
+				await handle.writeFile("# 项目指令\n", "utf8");
+				await handle.sync();
+				await handle.close();
+				handle = undefined;
+				await fs.link(temporary, target);
+				if (process.platform !== "win32") {
+					const directoryHandle = await fs.open(directoryReal, "r");
+					try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+				}
+			} catch (error) {
+				if (typeof error === "object" && error !== null && "code" in error && String(error.code) === "EEXIST") {
+					return { ok: false, code: "FILE_EXISTS", message: "项目 AGENTS.md 已存在，未覆盖原文件。" };
+				}
+				throw error;
+			} finally {
+				await handle?.close().catch(() => undefined);
+				await fs.rm(temporary, { force: true }).catch(() => undefined);
+			}
+			return { ok: true, projectId, folderPath: primary, relativePath: ".awaken/AGENTS.md", name: "AGENTS.md" };
+		} catch {
+			return { ok: false, code: "CREATE_FAILED", message: "暂时无法创建项目 AGENTS.md。" };
+		}
+	},
+);
+
+ipcMain.handle("awaken:get-global-agents-document", async (): Promise<GlobalAgentsDocument> => {
+	const document = await requestRuntimeDomain<GlobalAgentsDocumentWire>("/v1/instructions/global", { method: "GET" });
+	return normalizeGlobalAgentsDocument(document);
+});
+
+ipcMain.handle(
+	"awaken:save-global-agents-document",
+	async (_event, request: GlobalAgentsSaveRequest): Promise<GlobalAgentsDocument> => {
+		try {
+			const document = await requestRuntimeDomain<GlobalAgentsDocumentWire>("/v1/instructions/global", {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ expected_revision: request.expectedRevision, content: request.content }),
+			});
+			return normalizeGlobalAgentsDocument(document);
+		} catch (error) {
+			if (error instanceof RuntimeDomainError) throw new Error(`${error.code}: ${error.message}`);
+			throw error;
+		}
+	},
+);
+
+ipcMain.handle(
+	"awaken:delete-global-agents-document",
+	async (_event, request: GlobalAgentsDeleteRequest): Promise<GlobalAgentsDocument> => {
+		try {
+			const document = await requestRuntimeDomain<GlobalAgentsDocumentWire>("/v1/instructions/global", {
+				method: "DELETE",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ expected_revision: request.expectedRevision }),
+			});
+			return normalizeGlobalAgentsDocument(document);
+		} catch (error) {
+			if (error instanceof RuntimeDomainError) throw new Error(`${error.code}: ${error.message}`);
+			throw error;
+		}
+	},
 );
 
 ipcMain.handle(

@@ -74,6 +74,7 @@ export default function FilePreviewHost({
   const [retryGeneration, setRetryGeneration] = useState(0);
   const [guestLoading, setGuestLoading] = useState(false);
   const activePreviewIdRef = useRef<string | undefined>(undefined);
+	const markdownDigestRef = useRef<string | undefined>(undefined);
   const generationRef = useRef(0);
   const onModeChangeRef = useRef(onModeChange);
   const onPreviewLabelChangeRef = useRef(onPreviewLabelChange);
@@ -121,6 +122,9 @@ export default function FilePreviewHost({
           return;
         }
         activePreviewIdRef.current = result.preview.previewId;
+		markdownDigestRef.current = result.preview.transport === "text"
+			? result.preview.contentDigest
+			: undefined;
         onModeChangeRef.current(result.preview.kind === "html" ? "browser" : "files");
         setState({ status: "ready", preview: result.preview });
       })
@@ -315,10 +319,19 @@ export default function FilePreviewHost({
                 frameProps={frameProps}
                 onSave={(content) =>
                   actionRequest
-                    ? runtimeClient.saveProjectMarkdownFile({
-                        ...actionRequest,
-                        content,
-                      })
+					? runtimeClient.saveProjectMarkdownFile({
+							...actionRequest,
+							content,
+						expectedDigest: actionRequest.relativePath === ".awaken/AGENTS.md"
+							? markdownDigestRef.current
+							: undefined,
+						  }).then((result) => {
+							if (result.ok && result.digest) markdownDigestRef.current = result.digest;
+							if (!result.ok && result.code === "FILE_CHANGED" && result.currentDigest) {
+								markdownDigestRef.current = result.currentDigest;
+							}
+							return result;
+						  })
                     : Promise.resolve({
                         ok: false,
                         code: "INVALID_REQUEST",

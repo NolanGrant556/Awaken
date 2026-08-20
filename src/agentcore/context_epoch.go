@@ -8,13 +8,13 @@ import (
 	"sort"
 	"strings"
 
+	convcontext "awaken/src/context"
 	"awaken/src/tool"
 )
 
-// ContextEpochSchemaVersion 3 keeps capability-family identity separate from
-// the transport selector (for example doubao-seed-2.1-pro vs ep-*). Runtime
-// rotates older sidecars once at a safe cold boundary.
-const ContextEpochSchemaVersion = 3
+// ContextEpochSchemaVersion 4 snapshots request-only synthetic prefix messages
+// such as the frozen AGENTS.md authority separately from conversation history.
+const ContextEpochSchemaVersion = 4
 
 type ContextEpochSourceState string
 
@@ -55,6 +55,8 @@ type ContextEpochCandidate struct {
 	PromptSchemaVersion string
 	CompactBoundaryID   string
 	ExactSystemPrompt   string
+	PrefixMessages      []convcontext.Message
+	InstructionDigest   string
 	Sources             []ContextEpochSourceCandidate
 	Tools               []ContextEpochToolCandidate
 }
@@ -71,6 +73,7 @@ type ContextEpochReceipt struct {
 type ContextEpochProjection struct {
 	SystemPrompt    string
 	PromptSections  []PromptSection
+	PrefixMessages  []convcontext.Message
 	Tools           []tool.ToolSchema
 	AttributedTools []AttributedToolSchema
 	Receipt         ContextEpochReceipt
@@ -96,7 +99,8 @@ func contextEpochCandidate(threadID string, config ModelConfig, req LLMRequest, 
 		ModelSelectorKind: strings.ToLower(strings.TrimSpace(config.ModelSelectorKind)),
 		ProtocolFamily:    config.Protocol, EndpointContractID: endpointContractID, NormalizedBaseURL: normalizedBaseURL,
 		ReasoningPolicy:     normalizeContextEpochReasoningPolicy(config.ReasoningEffort),
-		PromptSchemaVersion: "awaken_prompt_v1", ExactSystemPrompt: req.SystemPrompt,
+		PromptSchemaVersion: "awaken_prompt_v2", ExactSystemPrompt: req.SystemPrompt,
+		PrefixMessages: cloneContextMessages(req.PrefixMessages), InstructionDigest: req.InstructionDigest,
 		Sources: cloneContextEpochSourceCandidates(req.EpochSources),
 	}
 	if req.ContextWindowState.LastCompactBoundaryID != "" {

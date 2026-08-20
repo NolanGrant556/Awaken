@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	convcontext "awaken/src/context"
 	"awaken/src/filestore"
 	"awaken/src/tool"
 )
@@ -66,6 +67,8 @@ type contextEpochSidecar struct {
 	ThreadID               string                       `json:"thread_id"`
 	BaselineSequence       uint64                       `json:"baseline_sequence"`
 	ExactBaselineText      string                       `json:"exact_baseline_text"`
+	PrefixMessages         []convcontext.Message        `json:"prefix_messages,omitempty"`
+	InstructionDigest      string                       `json:"instruction_digest,omitempty"`
 	BaselineDigest         string                       `json:"baseline_digest"`
 	PromptSchemaVersion    string                       `json:"prompt_schema_version"`
 	WorkspaceRoot          string                       `json:"workspace_root"`
@@ -155,7 +158,7 @@ func newContextEpoch(candidate agentcore.ContextEpochCandidate, sequence uint64)
 	if credentialRevision == 0 {
 		credentialRevision = 1
 	}
-	baselineDigest := agentcore.ContextEpochSourceDigest(candidate.ExactSystemPrompt)
+	baselineDigest := contextEpochBaselineDigest(candidate.ExactSystemPrompt, candidate.PrefixMessages)
 	epochSeed := strings.Join([]string{
 		candidate.ThreadID, fmt.Sprint(sequence), baselineDigest, candidate.ProviderID,
 		candidate.ProfileID, fmt.Sprint(credentialRevision), candidate.ModelID,
@@ -168,6 +171,7 @@ func newContextEpoch(candidate agentcore.ContextEpochCandidate, sequence uint64)
 	epoch := contextEpochSidecar{
 		SchemaVersion: agentcore.ContextEpochSchemaVersion, EpochID: "epoch_" + hex.EncodeToString(epochHash[:12]),
 		ThreadID: candidate.ThreadID, BaselineSequence: sequence, ExactBaselineText: candidate.ExactSystemPrompt,
+		PrefixMessages: append([]convcontext.Message(nil), candidate.PrefixMessages...), InstructionDigest: candidate.InstructionDigest,
 		BaselineDigest: baselineDigest, PromptSchemaVersion: candidate.PromptSchemaVersion,
 		WorkspaceRoot: candidate.WorkspaceRoot, ProviderID: candidate.ProviderID, ProfileID: candidate.ProfileID,
 		CredentialRevision: credentialRevision, ModelID: candidate.ModelID, ProtocolFamily: candidate.ProtocolFamily,
@@ -207,6 +211,8 @@ func contextEpochBoundaryReason(current contextEpochSidecar, candidate agentcore
 	switch {
 	case current.SchemaVersion != agentcore.ContextEpochSchemaVersion || current.PromptSchemaVersion != candidate.PromptSchemaVersion:
 		return "prompt_schema_incompatible"
+	case current.InstructionDigest != candidate.InstructionDigest:
+		return "agents_instructions_changed"
 	case current.WorkspaceRoot != candidate.WorkspaceRoot:
 		return "workspace_moved"
 	case current.ProviderID != candidate.ProviderID || current.ProfileID != candidate.ProfileID || current.CredentialRevision != revision:
@@ -361,7 +367,8 @@ func appendContextEpochDelta(epoch *contextEpochSidecar, snapshot *contextEpochS
 
 func projectContextEpoch(epoch contextEpochSidecar, state, reason string) agentcore.ContextEpochProjection {
 	projection := agentcore.ContextEpochProjection{
-		SystemPrompt: epoch.ExactBaselineText,
+		SystemPrompt:   epoch.ExactBaselineText,
+		PrefixMessages: append([]convcontext.Message(nil), epoch.PrefixMessages...),
 		Receipt: agentcore.ContextEpochReceipt{
 			EpochID: epoch.EpochID, BaselineDigest: epoch.BaselineDigest, State: state,
 			BoundaryReason: reason, CreationBoundaryReason: epoch.CreationBoundaryReason,
@@ -431,9 +438,38 @@ func readCurrentContextEpoch(dir string) (contextEpochSidecar, error) {
 	if epoch.EpochID != pointer.EpochID || epoch.SchemaVersion != pointer.SchemaVersion || !supportedContextEpochSchemaVersion(epoch.SchemaVersion) {
 		return contextEpochSidecar{}, errors.New("context epoch sidecar identity mismatch")
 	}
+	if epoch.SchemaVersion == agentcore.ContextEpochSchemaVersion {
+		if epoch.BaselineDigest != contextEpochBaselineDigest(epoch.ExactBaselineText, epoch.PrefixMessages) {
+			return contextEpochSidecar{}, errors.New("context epoch baseline digest mismatch")
+		}
+		for _, message := range epoch.PrefixMessages {
+			if message.Role != convcontext.RoleUser || message.Origin != convcontext.MessageOriginSynthetic || strings.TrimSpace(message.Content) == "" {
+				return contextEpochSidecar{}, errors.New("context epoch instruction prefix is invalid")
+			}
+		}
+		for _, source := range epoch.SourceSnapshots {
+			if source.BaselineDigest != agentcore.ContextEpochSourceDigest(source.BaselineValue) || source.ValueDigest != agentcore.ContextEpochSourceDigest(source.Value) {
+				return contextEpochSidecar{}, errors.New("context epoch source digest mismatch")
+			}
+		}
+		for _, entry := range epoch.Tools {
+			candidate := agentcore.ContextEpochToolCandidate{Schema: entry.Schema, Provenance: entry.Provenance}
+			if entry.Digest != agentcore.ContextEpochToolDigest(candidate) {
+				return contextEpochSidecar{}, errors.New("context epoch tool digest mismatch")
+			}
+		}
+	}
 	return epoch, nil
 }
 
+func contextEpochBaselineDigest(systemPrompt string, prefixMessages []convcontext.Message) string {
+	if len(prefixMessages) == 0 {
+		prefixMessages = nil
+	}
+	prefixJSON, _ := json.Marshal(prefixMessages)
+	return agentcore.ContextEpochSourceDigest(systemPrompt + "\x00" + string(prefixJSON))
+}
+
 func supportedContextEpochSchemaVersion(version int) bool {
-	return version == 1 || version == agentcore.ContextEpochSchemaVersion
+	return version == 1 || version == 3 || version == agentcore.ContextEpochSchemaVersion
 }

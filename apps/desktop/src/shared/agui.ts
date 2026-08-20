@@ -63,6 +63,7 @@ export type AguiEventType =
   | "AWAKEN_MEMORY_DELETED"
   | "AWAKEN_MEMORY_REJECTED"
   | "AWAKEN_CONTEXT_SNAPSHOT"
+	| "AWAKEN_INSTRUCTION_SNAPSHOT"
   | "AWAKEN_MODEL_USAGE"
   | "AWAKEN_SUBAGENT_CHANGED"
   | "AWAKEN_SUBAGENT_ACTIVITY"
@@ -162,6 +163,32 @@ export type AguiContextUsageSnapshot = {
   generatedAt: string;
 };
 
+export type InstructionDiagnostic = {
+	code: string;
+	message: string;
+	scope: "global" | "project";
+	displayPath: string;
+};
+
+export type InstructionSourceSummary = {
+	scope: "global" | "project";
+	displayPath: string;
+	scopeRoot?: string;
+	digest?: string;
+	originalBytes: number;
+	appliedBytes: number;
+	truncated: boolean;
+	status: "applied" | "skipped";
+};
+
+export type InstructionSnapshotSummary = {
+	snapshotId: string;
+	capturedAt: string;
+	partial: boolean;
+	sources: InstructionSourceSummary[];
+	diagnostics: InstructionDiagnostic[];
+};
+
 export type AguiModelUsageRecord = {
   schemaVersion: number;
   requestId: string;
@@ -233,6 +260,7 @@ export type AguiRawModelUsage = {
 
 export type AguiEvent = {
   type: AguiEventType;
+	instructionSnapshot?: InstructionSnapshotSummary;
   timestamp?: number;
   seq?: number;
   /** Live SSE resume cursor; independent from durable semantic seq. */

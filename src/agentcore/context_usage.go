@@ -228,6 +228,9 @@ func buildContextUsageSnapshot(req LLMRequest, basis, requestID, protocol, shape
 			add(ContextContributionConversation, convcontext.EstimateModelContentTokens(part))
 		}
 	}
+	for _, message := range req.PrefixMessages {
+		add(ContextContributionSystemPrompt, estimateMessageTextTokens(message))
+	}
 
 	known := 0
 	for _, entry := range counts {

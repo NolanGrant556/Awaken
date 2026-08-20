@@ -3780,4 +3780,41 @@ describe("runtime reducer run plan snapshots", () => {
     expect(state.runPlansById["run-1"]?.planId).toBe("plan-1");
     expect(state.runPlansById["run-2"]).toBeUndefined();
   });
+
+	it("projects instruction snapshots from start responses and replay events", () => {
+		const summary = {
+			snapshotId: "instructions-1",
+			capturedAt: "2026-08-20T10:00:00Z",
+			partial: true,
+			sources: [{
+				scope: "project" as const,
+				displayPath: ".awaken/AGENTS.md",
+				scopeRoot: "/project",
+				originalBytes: 10,
+				appliedBytes: 10,
+				truncated: false,
+				status: "applied" as const,
+			}],
+			diagnostics: [],
+		};
+		let state = reduceRuntimeState(createInitialRuntimeState(), {
+			type: "run/created",
+			run: {
+				runId: "run-1",
+				threadId: "thread-1",
+				status: "running",
+				cancelRequested: false,
+				createdAt: "2026-08-20T10:00:00Z",
+				updatedAt: "2026-08-20T10:00:00Z",
+				instructionSnapshot: summary,
+			},
+		});
+		expect(state.inspectorSummary.instructionSnapshot).toEqual(summary);
+
+		state = reduceRuntimeState(state, runEvent({
+			type: "AWAKEN_INSTRUCTION_SNAPSHOT",
+			instructionSnapshot: { ...summary, snapshotId: "instructions-replayed", partial: false },
+		}));
+		expect(state.inspectorSummary.instructionSnapshot?.snapshotId).toBe("instructions-replayed");
+	});
 });

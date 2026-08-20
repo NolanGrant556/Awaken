@@ -10,7 +10,7 @@ tool_call, tool_result, artifact, file_change, turn_diff,
 permission_decision, skill_activated, resource_receipt,
 runtime_notice, recovery_decision, context_compacted, turn_boundary,
 run_terminal, persistence_warning, memory_recalled, memory_mutated,
-context_snapshot, model_request, model_usage, context_epoch,
+context_snapshot, model_request, model_usage, context_epoch, instruction_snapshot,
 provider_opaque_state, hook_snapshot, hook_invocation_started,
 hook_invocation_completed
 computer_session_opened, computer_state_changed,
@@ -27,6 +27,8 @@ computer_session_closed, computer_media_accessed
 
 `memory_recalled` 与 `memory_mutated` 只保存 Memory identity、scope/type、action、revision、status、count、source identity 和错误码，不保存主题正文。Dream maintenance task/report 的耐久 authority 是 `~/.awaken/memory/dream-tasks/`，其 `model_requests` / `model_usage` 也只写该 task authority，不写 thread SemanticJournal；其恢复和投影由 11 域定义。连接测试模型调用写 profile-scoped `~/.awaken/usage/model-profiles/*.jsonl`，同样不写 thread journal。
 
+`instruction_snapshot` 在 run 执行前保存本次冻结指令的安全摘要：snapshot ID/time/partial、每个来源的 scope/display path/scope root/digest/original/applied bytes/truncated/status 和 diagnostics。它不保存 global/project 正文。旧 run 没有该 kind 时保持“无历史摘要”，不得读取当前文件反向补造。
+
 ## 2. Journal-first 写入顺序
 
 - composer 将文本、有序 attachments 和 tokens 写入结构化 `user_message`；含 Skill token 的路径必须在预激活前完成该写入；
@@ -40,6 +42,7 @@ computer_session_closed, computer_media_accessed
 - 每次 thread-bound 模型调用在 transport 前写并 flush 脱敏 `model_request`，结束后以同一 request ID 写 `model_usage`；对话状态变化后写当前下一请求的 `context_snapshot`；
 - 统一 LLM observer 发出的可展示 reasoning 在该段结束时 append `reasoning_summary`，再发布其 canonical live record；该记录只含展示正文、reasoning role 与稳定 message ID，并随 run terminal 的 flush 进入稳定存储；
 - Context Epoch 的 exact baseline/source/tool 内容写 sidecar；journal 的 `context_epoch` 只写 epoch ID、digest、状态和边界原因；
+- AGENTS synthetic prefix 正文只写 Context Epoch sidecar；`instruction_snapshot` append/flush 后通过 canonical projector 进入 live/replay，正文不得进入 payload；
 - 最后写唯一 `run_terminal`。
 
 append 或 flush 失败必须 fail-stop；不能继续副作用、模型 transport 或先切换内存上下文再补记。取消/崩溃恢复将未闭合 tool call 标为 interrupted/unknown；有 request 无 usage 的模型调用补 `interrupted + usage_unknown`；有 Hook started 无 completion 时补 `interrupted + spawn_state/process_state=unknown`，不重跑命令，也不猜副作用。`RunEnd` completion 可以位于 terminal 之后，恢复和投影必须保留该因果顺序。
@@ -73,7 +76,7 @@ agent_id               # 仅 child runner
 
 ## 5. 上下文、模型调用与 provider 事实
 
-`context_snapshot` 保存版本、basis、模型/协议/window/threshold、request-shape digest 和 typed contribution 计数；`model_request` 保存 request identity、purpose、模型/协议、shape digest、估算和 retry，不保存 HTTP body；`model_usage` 保存 provider/profile/credential/model/endpoint、cache metadata、nullable normalized/raw usage、pricing/cost、request ID、latency和终态。缺失 provider 字段保持缺失，不折 0。live 与 replay 使用同一 semantic projector，最近 provider usage 不反向改写当前 context snapshot。Renderer 回放同一 thread 的多个 run 时保留最后一个合法 `context_snapshot`；后续 run 没有快照不代表窗口为空，不得覆盖已恢复值。
+`context_snapshot` 保存版本、basis、模型/协议/window/threshold、request-shape digest 和 typed contribution 计数；`model_request` 保存 request identity、purpose、模型/协议、shape digest、估算和 retry，不保存 HTTP body；`model_usage` 保存 provider/profile/credential/model/endpoint、cache metadata、nullable normalized/raw usage、pricing/cost、request ID、latency和终态。缺失 provider 字段保持缺失，不折 0。live 与 replay 使用同一 semantic projector，最近 provider usage 不反向改写当前 context snapshot。Renderer 回放同一 thread 的多个 run 时保留最后一个合法 `context_snapshot`；后续 run 没有快照不代表窗口为空，不得覆盖已恢复值。`instruction_snapshot` 则是 run-scoped：重放按所属 run 恢复，不能像 thread-scoped context snapshot 跨 run 沿用。
 
 Desktop 打开 thread 时先调用 `POST /v1/threads/{thread_id}/context-snapshot`，body 只复用当前 run profile 合同。Core 从 durable conversation 恢复 compact、附件、tool result 和已激活 Skill，结合当前 tool/MCP availability、Skill catalog、Memory 与当前 profile 生成下一请求的 v4 snapshot，flush 后 Desktop 再 GET transcript。该动作不发 provider 请求、不写 `model_request/model_usage`、不保存 API key；相同 projection 不重复追加。旧 run 的终态 session 仍驻留内存时，transcript 合并必须把此类 replay supplement 投影出来。没有可运行 profile 或 active run 正在拥有 live projection 时，历史 transcript 仍可读，不伪造 snapshot。
 

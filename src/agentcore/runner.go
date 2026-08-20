@@ -702,8 +702,11 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 	}
 	requestID := newAwakenID("model_request")
 	config := r.transportConfig(llmReq)
+	messages := make([]context.Message, 0, len(llmReq.PrefixMessages)+len(llmReq.Messages))
+	messages = append(messages, cloneContextMessages(llmReq.PrefixMessages)...)
+	messages = append(messages, cloneContextMessages(llmReq.Messages)...)
 	request := llm.Request{
-		RequestID: requestID, SystemPrompt: llmReq.SystemPrompt, Messages: llmReq.Messages,
+		RequestID: requestID, SystemPrompt: llmReq.SystemPrompt, Messages: messages,
 		Tools: llmReq.Tools, Model: llmReq.Model, Temperature: llmReq.Temperature,
 		MaxTokens: llmReq.MaxTokens, Purpose: r.modelRequestPurpose(),
 		AffinityScopeID: r.threadID,
@@ -966,6 +969,7 @@ func (r *Runner) applyContextEpoch(ctx stdcontext.Context, req LLMRequest, event
 	}
 	req.SystemPrompt = projection.SystemPrompt
 	req.PromptSections = projection.PromptSections
+	req.PrefixMessages = projection.PrefixMessages
 	req.Tools = projection.Tools
 	req.AttributedTools = projection.AttributedTools
 	req.ContextEpoch = &projection.Receipt

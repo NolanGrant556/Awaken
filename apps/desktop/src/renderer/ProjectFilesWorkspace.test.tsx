@@ -139,6 +139,60 @@ describe("ProjectFilesWorkspace", () => {
     );
   });
 
+  it("keeps the file filter compact when the optional AGENTS creator is visible", () => {
+    expect(projectFileStyles).toMatch(
+      /\.project-files-navigator:has\(> \.project-files-create-agents\)\s*\{\s*grid-template-rows:\s*auto auto auto minmax\(0, 1fr\);/,
+    );
+    expect(projectFileStyles).toMatch(
+      /\.project-files-filter\s*\{[^}]*height:\s*36px;[^}]*max-height:\s*36px;/s,
+    );
+  });
+
+  it("labels the filter as loaded-tree filtering and clears it without changing layout", async () => {
+    const listProjectDirectory = vi.fn(async () => ({
+      ok: true as const,
+      relativePath: "",
+      entries: [
+        { name: "员工花名册.xlsx", relativePath: "员工花名册.xlsx", kind: "file" as const },
+        { name: "README.md", relativePath: "README.md", kind: "file" as const },
+      ],
+    }));
+
+    await act(async () => {
+      root.render(
+        <ProjectFilesWorkspace
+          runtimeClient={{
+            listProjectDirectory,
+            createProjectAgentsFile: vi.fn(),
+            ...previewRuntimeClient(),
+          }}
+          projectId="project-1"
+          folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
+        />,
+      );
+    });
+    await settleUntil(() => container.querySelectorAll('[role="treeitem"]').length === 2);
+
+    const input = container.querySelector<HTMLInputElement>('[aria-label="筛选已加载的文件"]');
+    expect(input?.placeholder).toBe("筛选已加载文件…");
+    expect(input?.title).toBe("仅筛选当前已经加载的目录内容");
+    expect(container.querySelector(".project-files-create-agents")).not.toBeNull();
+
+    await act(async () => {
+      if (!input) return;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "员工");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(container.querySelectorAll('[role="treeitem"]')).toHaveLength(1);
+    const clear = container.querySelector<HTMLButtonElement>('[aria-label="清除文件筛选"]');
+    expect(clear).not.toBeNull();
+
+    await act(async () => clear?.click());
+    expect(input?.value).toBe("");
+    expect(container.querySelectorAll('[role="treeitem"]')).toHaveLength(2);
+  });
+
   it("renders a durable deliverable in the right file workspace", async () => {
     const startArtifactPreview = vi.fn(async () => ({
       ok: true as const,

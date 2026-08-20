@@ -37,7 +37,6 @@ Clear space around the mark is one quarter of its height. Do not stretch, rotate
 - Long-form assistant answers use the reading tokens: `15px / 24px` body, with `22px / 30px`, `18px / 26px`, and `16px / 24px` heading tiers.
 - Chrome and helper copy must not go below `12px / 18px`.
 - Weight roles are regular `400`, medium `500`, semibold `600`, bold `650`, and heavy `700`; use the role token instead of local `700` / `800` / `820` / `850` values. `650` is the SF Pro optical target and falls back to `600` on other platforms.
-- Desktop may apply a user font scale of `100 / 125 / 150 / 200` to font-size and line-height tokens only. Do not scale column widths, icon geometry, or composer radius with that preference.
 - Default icon size is `16px`; compact icons may use `14px`.
 - Line icons default to a `1.75` optical stroke; brand marks and filled status graphics keep their authored geometry.
 - Compact controls use a `6px` radius, default controls use `8px`, cards / popovers / panels use `12px`, and the composer surface uses `16px`.

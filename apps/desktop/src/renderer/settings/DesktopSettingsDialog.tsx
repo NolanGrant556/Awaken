@@ -30,6 +30,7 @@ import { ACPSettingsPanel } from "./ACPSettingsPanel";
 import { AgentPlanMediaToolsPanel } from "./AgentPlanMediaToolsPanel";
 import { ComputerSettingsPanel } from "./ComputerSettingsPanel";
 import { HooksSettingsPanel } from "./HooksSettingsPanel";
+import { GlobalAgentsSettingsPanel } from "./GlobalAgentsSettingsPanel";
 
 export type DraftState = {
   profileId?: string;
@@ -54,6 +55,7 @@ type SettingsDialogSection =
   | "models"
   | "search"
   | "memory"
+  | "instructions"
   | "appearance"
   | "pets"
   | "computer"
@@ -101,10 +103,11 @@ const SETTINGS_SECTION_TITLES: Record<SettingsDialogSection, string> = {
   models: "模型",
   search: "搜索",
   memory: "记忆",
+  instructions: "全局规则",
   appearance: "外观",
   pets: "宠物",
   computer: "计算机操作",
-	hooks: "钩子",
+  hooks: "钩子",
   acp: "外部 Agent / ACP",
 };
 
@@ -1334,6 +1337,8 @@ export function DesktopSettingsDialog({
           currentProjectId={currentProjectId}
           theme={theme}
         />
+      ) : activeSettingsSection === "instructions" ? (
+        <GlobalAgentsSettingsPanel runtimeClient={runtimeClient} />
       ) : activeSettingsSection === "appearance" ? (
         <AppearanceSettings
           themePreference={themePreference}

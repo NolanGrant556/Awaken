@@ -41,6 +41,7 @@ const (
 	SemanticKindModelRequest            SemanticKind = "model_request"
 	SemanticKindModelUsage              SemanticKind = "model_usage"
 	SemanticKindContextEpoch            SemanticKind = "context_epoch"
+	SemanticKindInstructionSnapshot     SemanticKind = "instruction_snapshot"
 	SemanticKindProviderOpaqueState     SemanticKind = "provider_opaque_state"
 	SemanticKindSubagentSpawned         SemanticKind = "subagent_spawned"
 	SemanticKindSubagentStatusChanged   SemanticKind = "subagent_status_changed"

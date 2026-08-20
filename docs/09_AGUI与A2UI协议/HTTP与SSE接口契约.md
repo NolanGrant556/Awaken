@@ -46,6 +46,8 @@ POST   /v1/shutdown
 
 `POST /v1/runs` 的 `workspace` 对象即 TaskScope wire。`workspace_root` 是已绑定项目的主文件夹；只给 `project_id` 表示零文件夹项目；两者都为空表示独立对话。Core 在规范化 workspace 前确定 thread ID：新对话生成 ID，follow-up 使用请求的 `thread_id`，然后解析到 thread 专属 session 工作目录。业务数据根不可用或 managed owner ID 不安全时返回 `INVALID_INPUT`。可选的 `project_name` 只用于让模型说得出自己在哪个项目里，Core 不从它解析路径或权限。`session_workspace` 由服务端派生并回写，客户端传入值一律被覆盖。roots 的语义与形状名单由 [TaskScope 与路径安全](../04_工具权限与审批/TaskScope与路径安全.md) 唯一拥有。
 
+`GET /v1/instructions/global` 返回 `GlobalAgentsDocument{exists,revision,digest,content,byte_count,updated_at,max_bytes}`。`PUT /v1/instructions/global` 接受 `{expected_revision,content}`，`DELETE` 接受 `{expected_revision}`；revision 不匹配返回 409 `INSTRUCTION_REVISION_CONFLICT`。三条 route 只在 RunService 存在时注册。Renderer 不可通过 `POST /v1/runs` 提交 AGENTS 正文或路径。业务优先级、截断与恢复见 [02 AGENTS 指令与运行快照](../02_主智能体闭环/AGENTS指令与运行快照.md)。
+
 `POST /v1/threads/batch-delete` 接受 `{"thread_ids":[...]}`，最多 200 个非空 thread ID，按首次出现顺序去重。响应始终区分 `deleted_thread_ids` 与 `failures[{thread_id,error,message}]`；逐项复用单条 durable delete，当前 active thread 以 `THREAD_BUSY` 留在失败集合。该 route 不承诺跨 session 原子性，Desktop 只能移除 `deleted_thread_ids`，不得把失败项乐观隐藏。
 
 `/v1/shutdown` 只有注入 shutdown callback 才注册。`GET /v1/runtime/activity` 无条件注册、`RunService` 缺席时返回 503，只读返回 `{active_run_count, cancelling_run_count, observed_at}`（RFC3339 UTC）：`active_run_count` 统计当前 in-flight run（含正在取消的 run；普通、定时与 ACP run 都经 `RunService.StartRun`，统一计入），`cancelling_run_count` 是其中已进入 cancelling 状态的子集。其用途是 Electron Main 在退出/维护类操作（如更新重启）前读取运行时活动快照；Renderer 不直接调用。`/audit` 当前返回空数组，查询链尚未接通；其审计语义由 04 域记录。`POST /v1/threads/{thread_id}/context-snapshot` 接收与 run 相同的 `model_profile`，只重建并耐久化该 thread 的当前下一请求 projection；不发 provider 请求，响应为 204。Desktop 在 GET transcript 前调用它；没有可运行 profile 时直接读取历史 transcript。
@@ -175,7 +177,7 @@ frame cursor = runtime/semantic event sequence * 16 + frame sub-index
 
 ## 6. Live 与 transcript 一致性
 
-订阅先输出历史，再接 active channel。run 执行期间“transcript snapshot + after_cursor SSE”必须做到每个文本、工具、terminal frame 恰好一次。live 与重放都通过同一 semantic projector；任何只修 live mapper、不修 journal projector 的变化都不完整。
+订阅先输出历史，再接 active channel。run 执行期间“transcript snapshot + after_cursor SSE”必须做到每个文本、工具、terminal 和 `AWAKEN_INSTRUCTION_SNAPSHOT` frame 恰好一次。live 与重放都通过同一 semantic projector；任何只修 live mapper、不修 journal projector 的变化都不完整。
 
 用户 prompt 从 run metadata 重建，不由 SemanticKindUserMessage 产生重复 AG-UI frame。terminal、artifact、tool pairing 也必须按相同 record identity 去重。
 

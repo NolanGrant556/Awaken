@@ -6,6 +6,7 @@ import type {
   AguiEvent,
   AguiModelUsageRecord,
   AguiRunPlanItem,
+	InstructionSnapshotSummary,
 } from "./agui";
 import {
   toolDisplayStateFromStatus,
@@ -217,6 +218,7 @@ export type InspectorSummary = {
   lastToolDecision?: ToolDecisionRecord;
   contextWindow?: ContextWindowRecord;
   compact?: CompactRecord;
+	instructionSnapshot?: InstructionSnapshotSummary;
   terminalReason?: string;
   terminalMessage?: string;
   unknownEvents: UnknownEventRecord[];
@@ -1608,6 +1610,13 @@ function syncFromRun(
   state: RuntimeViewState,
   run: RuntimeRun,
 ): RuntimeViewState {
+	state = {
+		...state,
+		inspectorSummary: {
+			...state.inspectorSummary,
+			instructionSnapshot: run.instructionSnapshot ?? state.inspectorSummary.instructionSnapshot,
+		},
+	};
   if (run.status === "cancelling") {
     return {
       ...state,
@@ -1761,6 +1770,7 @@ export function reduceRuntimeState(
             state.activeThreadId || state.threadId
               ? state.inspectorSummary.contextWindow
               : undefined,
+		  instructionSnapshot: undefined,
         },
         narrative: shouldAppendNarrative(state)
           ? appendRunRequestedNarrative(
@@ -2711,6 +2721,15 @@ export function reduceRuntimeState(
           };
           break;
         }
+		case "AWAKEN_INSTRUCTION_SNAPSHOT": {
+			if (action.event.instructionSnapshot) {
+				nextState.inspectorSummary = {
+					...nextState.inspectorSummary,
+					instructionSnapshot: action.event.instructionSnapshot,
+				};
+			}
+			break;
+		}
         case "AWAKEN_MODEL_USAGE": {
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,

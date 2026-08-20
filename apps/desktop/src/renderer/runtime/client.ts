@@ -35,6 +35,9 @@ import {
   type DeleteSkillRequest,
   type DeleteSkillResponse,
   type GetSkillPreviewRequest,
+	type GlobalAgentsDeleteRequest,
+	type GlobalAgentsDocument,
+	type GlobalAgentsSaveRequest,
 	type HookRevokeRequest,
 	type HookStatus,
 	type HookTrustRequest,
@@ -70,6 +73,7 @@ import {
   type ProjectFilePreviewStartRequest,
   type ProjectFilePreviewStartResult,
   type ProjectMutationResult,
+	type ProjectAgentsCreateResult,
   type ProjectReorderResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
@@ -299,6 +303,10 @@ export type RuntimeClient = {
   saveProjectMarkdownFile: (
     request: ProjectFilePreviewSaveRequest,
   ) => Promise<ProjectFilePreviewSaveResult>;
+	createProjectAgentsFile?: (projectId: string) => Promise<ProjectAgentsCreateResult>;
+	getGlobalAgentsDocument?: () => Promise<GlobalAgentsDocument>;
+	saveGlobalAgentsDocument?: (request: GlobalAgentsSaveRequest) => Promise<GlobalAgentsDocument>;
+	deleteGlobalAgentsDocument?: (request: GlobalAgentsDeleteRequest) => Promise<GlobalAgentsDocument>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
   createProject: (
     folders: ProjectFolderSelection[],
@@ -541,6 +549,18 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     openProjectFileExternally: (request) => bridge.openProjectFileExternally(request),
     revealProjectFile: (request) => bridge.revealProjectFile(request),
     saveProjectMarkdownFile: (request) => bridge.saveProjectMarkdownFile(request),
+		createProjectAgentsFile: bridge.createProjectAgentsFile
+			? (projectId) => bridge.createProjectAgentsFile!(projectId)
+			: undefined,
+		getGlobalAgentsDocument: bridge.getGlobalAgentsDocument
+			? () => bridge.getGlobalAgentsDocument!()
+			: undefined,
+		saveGlobalAgentsDocument: bridge.saveGlobalAgentsDocument
+			? (request) => bridge.saveGlobalAgentsDocument!(request)
+			: undefined,
+		deleteGlobalAgentsDocument: bridge.deleteGlobalAgentsDocument
+			? (request) => bridge.deleteGlobalAgentsDocument!(request)
+			: undefined,
     upsertProject: (workspaceRoot, displayName) => bridge.upsertProject(workspaceRoot, displayName),
     createProject: (folders, displayName) => bridge.createProject(folders, displayName),
     attachProjectFolder: (projectId, path) => bridge.attachProjectFolder(projectId, path),

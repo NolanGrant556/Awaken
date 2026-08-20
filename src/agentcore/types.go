@@ -8,6 +8,7 @@ import (
 	"awaken/src/computer"
 	"awaken/src/context"
 	"awaken/src/hookruntime"
+	"awaken/src/instructions"
 	"awaken/src/llm"
 	"awaken/src/prompt"
 	"awaken/src/subagentruntime"
@@ -38,6 +39,9 @@ type AgentConfig struct {
 	EntryPoint          string
 	Workspace           WorkspaceConfig
 	SkillSummary        string
+	// InstructionSnapshot is the immutable global/project AGENTS.md authority
+	// captured by Runtime for this run. Its model-visible body is request-only.
+	InstructionSnapshot *instructions.Snapshot
 	// MemoryContextProvider reads the current host-owned Memory indexes at
 	// request build time. Failures degrade to no Memory block.
 	MemoryContextProvider func() (string, error)
@@ -290,6 +294,7 @@ type ModelConfig struct {
 type LLMRequest struct {
 	SystemPrompt       string
 	PromptSections     []PromptSection
+	PrefixMessages     []context.Message
 	Messages           []context.Message
 	Tools              []tool.ToolSchema
 	AttributedTools    []AttributedToolSchema
@@ -304,6 +309,7 @@ type LLMRequest struct {
 	EnvelopeDebug      *ContextEnvelope
 	EpochSources       []ContextEpochSourceCandidate
 	ContextEpoch       *ContextEpochReceipt
+	InstructionDigest  string
 }
 
 type RuntimeInfoProvider interface {

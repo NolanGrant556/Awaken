@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/instructions"
 	"awaken/src/tool"
 )
 
@@ -111,6 +112,14 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		}
 		base.Type = EventAwakenContextSnapshot
 		base.ContextUsageSnapshot = mapContextUsageSnapshot(&snapshot)
+		return []Event{base}
+	case agentcore.SemanticKindInstructionSnapshot:
+		var snapshot instructions.Summary
+		if decodeSemanticPayload(payload, &snapshot) != nil {
+			return nil
+		}
+		base.Type = EventAwakenInstructionSnapshot
+		base.InstructionSnapshot = mapInstructionSnapshot(snapshot)
 		return []Event{base}
 	case agentcore.SemanticKindModelRequest:
 		// Request composition is durable for audit/recovery but the separate
@@ -505,6 +514,27 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		unknown.RawType = string(record.Kind)
 		return []Event{unknown}
 	}
+}
+
+func mapInstructionSnapshot(snapshot instructions.Summary) *InstructionSnapshotSummary {
+	result := &InstructionSnapshotSummary{
+		SnapshotID: snapshot.SnapshotID, CapturedAt: snapshot.CapturedAt.UTC().Format(time.RFC3339Nano), Partial: snapshot.Partial,
+		Sources:     make([]InstructionSourceSummary, 0, len(snapshot.Sources)),
+		Diagnostics: make([]InstructionDiagnostic, 0, len(snapshot.Diagnostics)),
+	}
+	for _, source := range snapshot.Sources {
+		result.Sources = append(result.Sources, InstructionSourceSummary{
+			Scope: string(source.Scope), DisplayPath: source.DisplayPath, ScopeRoot: source.ScopeRoot,
+			Digest: source.Digest, OriginalBytes: source.OriginalBytes, AppliedBytes: source.AppliedBytes,
+			Truncated: source.Truncated, Status: string(source.Status),
+		})
+	}
+	for _, diagnostic := range snapshot.Diagnostics {
+		result.Diagnostics = append(result.Diagnostics, InstructionDiagnostic{
+			Code: diagnostic.Code, Message: diagnostic.Message, Scope: string(diagnostic.Scope), DisplayPath: diagnostic.DisplayPath,
+		})
+	}
+	return result
 }
 
 func applyHookPayload(event *Event, payload map[string]any) {

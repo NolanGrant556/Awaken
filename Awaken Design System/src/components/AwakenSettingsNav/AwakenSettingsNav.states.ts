@@ -1,14 +1,15 @@
 import type { AwakenSettingsNavProps } from "./AwakenSettingsNav";
-import { Bot, Brain, Cpu, MonitorCog, Palette, PawPrint, Search, Webhook } from "lucide-react";
+import { Bot, Brain, Cpu, FileText, MonitorCog, Palette, PawPrint, Search, Webhook } from "lucide-react";
 
 export const AwakenSettingsNavItems: AwakenSettingsNavProps["items"] = [
   { id: "models", label: "模型", icon: Cpu },
   { id: "search", label: "搜索", icon: Search },
   { id: "memory", label: "记忆", icon: Brain },
+  { id: "instructions", label: "全局规则", icon: FileText },
   { id: "appearance", label: "外观", icon: Palette },
   { id: "pets", label: "宠物", icon: PawPrint },
   { id: "computer", label: "计算机操作", icon: MonitorCog },
-	{ id: "hooks", label: "钩子", icon: Webhook },
+  { id: "hooks", label: "钩子", icon: Webhook },
   // ACP 配置的是外部 runner 进程，用机器人头像与本机能力型分区区分开。
   { id: "acp", label: "ACP", icon: Bot },
 ];

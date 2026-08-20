@@ -1,4 +1,4 @@
-import type { AguiEvent } from "./agui.js";
+import type { AguiEvent, InstructionSnapshotSummary } from "./agui.js";
 import type { ProjectFilePreviewInteraction } from "./project-file-preview-interaction.js";
 import type { PetActivitySnapshot, PetBridge } from "./pets.js";
 import type { DesktopUpdateSnapshot } from "./desktop-update.js";
@@ -163,7 +163,57 @@ export type RuntimeRunWire = {
   model_profile_id?: string;
   reasoning_effort?: ReasoningEffortLevel;
   hook_snapshot_id?: string;
+	instruction_snapshot?: InstructionSnapshotSummaryWire;
 };
+
+export type InstructionSnapshotSummaryWire = {
+	snapshot_id: string;
+	captured_at: string;
+	partial: boolean;
+	sources?: Array<{
+		scope: "global" | "project";
+		display_path: string;
+		scope_root?: string;
+		digest?: string;
+		original_bytes: number;
+		applied_bytes: number;
+		truncated: boolean;
+		status: "applied" | "skipped";
+	}>;
+	diagnostics?: Array<{
+		code: string;
+		message: string;
+		scope: "global" | "project";
+		display_path: string;
+	}>;
+};
+
+export type GlobalAgentsDocumentWire = {
+	exists: boolean;
+	revision: string;
+	digest: string;
+	content: string;
+	byte_count: number;
+	updated_at?: string;
+	max_bytes: number;
+};
+
+export type GlobalAgentsDocument = {
+	exists: boolean;
+	revision: string;
+	digest: string;
+	content: string;
+	byteCount: number;
+	updatedAt?: string;
+	maxBytes: number;
+};
+
+export type GlobalAgentsSaveRequest = { expectedRevision: string; content: string };
+export type GlobalAgentsDeleteRequest = { expectedRevision: string };
+
+export type ProjectAgentsCreateResult =
+	| { ok: true; projectId: string; folderPath: string; relativePath: ".awaken/AGENTS.md"; name: "AGENTS.md" }
+	| { ok: false; code: "UNAUTHORIZED" | "PROJECT_NOT_FOUND" | "PRIMARY_FOLDER_MISSING" | "FILE_EXISTS" | "CREATE_FAILED"; message: string };
 
 export type RuntimeRun = {
   runId: string;
@@ -181,6 +231,7 @@ export type RuntimeRun = {
   modelProfileId?: string;
   reasoningEffort?: ReasoningEffortLevel;
   hookSnapshotId?: string;
+	instructionSnapshot?: InstructionSnapshotSummary;
 };
 
 export type HookSourceStatus = "enabled" | "disabled" | "untrusted" | "invalid";
@@ -434,6 +485,7 @@ export type ProjectFilePreviewTextHandle = {
   relativePath: string;
   byteLength: number;
   content: string;
+	contentDigest?: string;
   language?: string;
 };
 
@@ -461,6 +513,7 @@ export type ProjectFilePreviewErrorCode =
   | "FILE_NOT_FOUND"
   | "FILE_UNREADABLE"
   | "FILE_UNWRITABLE"
+	| "FILE_CHANGED"
   | "UNSUPPORTED_FILE_TYPE"
   | "FILE_TOO_LARGE"
   | "IMAGE_TOO_LARGE"
@@ -504,16 +557,20 @@ export type ProjectFilePreviewActionResult =
 
 export type ProjectFilePreviewSaveRequest = ProjectFilePreviewActionRequest & {
   content: string;
+	expectedDigest?: string;
 };
 
 export type ProjectFilePreviewSaveResult =
-  | { ok: true; byteLength: number }
+  | { ok: true; byteLength: number; digest?: string }
   | {
       ok: false;
       code: ProjectFilePreviewErrorCode;
       message: string;
       byteLength?: number;
       limitBytes?: number;
+		currentContent?: string;
+		currentDigest?: string;
+		submittedContent?: string;
     };
 
 /** Folder list submitted when creating a project. An empty list is legal: the
@@ -2061,6 +2118,10 @@ export type AwakenBridge = {
   saveProjectMarkdownFile: (
     request: ProjectFilePreviewSaveRequest,
   ) => Promise<ProjectFilePreviewSaveResult>;
+	createProjectAgentsFile?: (projectId: string) => Promise<ProjectAgentsCreateResult>;
+	getGlobalAgentsDocument?: () => Promise<GlobalAgentsDocument>;
+	saveGlobalAgentsDocument?: (request: GlobalAgentsSaveRequest) => Promise<GlobalAgentsDocument>;
+	deleteGlobalAgentsDocument?: (request: GlobalAgentsDeleteRequest) => Promise<GlobalAgentsDocument>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
   createProject: (
     folders: ProjectFolderSelection[],
@@ -2266,7 +2327,46 @@ export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
     modelProfileId: run.model_profile_id || undefined,
     reasoningEffort: run.reasoning_effort || undefined,
     hookSnapshotId: run.hook_snapshot_id || undefined,
+		instructionSnapshot: run.instruction_snapshot
+			? normalizeInstructionSnapshot(run.instruction_snapshot)
+			: undefined,
   };
+}
+
+export function normalizeInstructionSnapshot(snapshot: InstructionSnapshotSummaryWire): InstructionSnapshotSummary {
+	return {
+		snapshotId: snapshot.snapshot_id,
+		capturedAt: snapshot.captured_at,
+		partial: Boolean(snapshot.partial),
+		sources: (snapshot.sources ?? []).map((source) => ({
+			scope: source.scope,
+			displayPath: source.display_path,
+			scopeRoot: source.scope_root,
+			digest: source.digest,
+			originalBytes: source.original_bytes,
+			appliedBytes: source.applied_bytes,
+			truncated: Boolean(source.truncated),
+			status: source.status,
+		})),
+		diagnostics: (snapshot.diagnostics ?? []).map((diagnostic) => ({
+			code: diagnostic.code,
+			message: diagnostic.message,
+			scope: diagnostic.scope,
+			displayPath: diagnostic.display_path,
+		})),
+	};
+}
+
+export function normalizeGlobalAgentsDocument(document: GlobalAgentsDocumentWire): GlobalAgentsDocument {
+	return {
+		exists: Boolean(document.exists),
+		revision: document.revision,
+		digest: document.digest,
+		content: document.content,
+		byteCount: document.byte_count,
+		updatedAt: document.updated_at,
+		maxBytes: document.max_bytes,
+	};
 }
 
 export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread {

@@ -18,6 +18,7 @@ import {
   Maximize2,
   Plus,
   Search,
+  X,
 } from "lucide-react";
 import { AwakenPopover as Popover, AwakenTooltip as Tooltip } from "@awaken/design-system";
 import type {
@@ -64,7 +65,7 @@ export type ProjectFilesWorkspaceProps = {
     | "saveProjectMarkdownFile"
     | "openArtifact"
     | "revealArtifact"
-  >;
+  > & Partial<Pick<RuntimeClient, "createProjectAgentsFile">>;
   projectId?: string;
   projectLabel?: string;
   folders: ProjectFilesFolder[];
@@ -681,6 +682,66 @@ export function ProjectFilesWorkspace({
       }),
     [activeTab, expandedPaths, filter, listings, selectedFolder?.path],
   );
+  const rootAwakenDirectory = listings[""]?.find(
+    (entry) => entry.kind === "directory" && entry.relativePath === ".awaken",
+  );
+  const agentsDirectoryListing = listings[".awaken"];
+  const projectAgentsExists = Boolean(
+    agentsDirectoryListing?.some(
+      (entry) => entry.kind === "file" && entry.relativePath === ".awaken/AGENTS.md",
+    ),
+  );
+  const projectAgentsKnown =
+    Boolean(listings[""]) && (!rootAwakenDirectory || agentsDirectoryListing !== undefined);
+  const showCreateProjectAgents = Boolean(
+    projectId &&
+      selectedFolder?.isPrimary &&
+      runtimeClient.createProjectAgentsFile &&
+      projectAgentsKnown &&
+      !projectAgentsExists,
+  );
+
+  useEffect(() => {
+    if (
+      rootAwakenDirectory &&
+      agentsDirectoryListing === undefined &&
+      !loadingPaths.has(".awaken") &&
+      !errorMessage
+    ) {
+      void loadDirectory(".awaken");
+    }
+  }, [agentsDirectoryListing, errorMessage, loadingPaths, rootAwakenDirectory]);
+
+  async function createProjectAgents(): Promise<void> {
+    if (!projectId || !runtimeClient.createProjectAgentsFile) return;
+    try {
+      const result = await runtimeClient.createProjectAgentsFile(projectId);
+      if (!result.ok) {
+        setContextStatus({
+          message: result.message,
+          tone: result.code === "FILE_EXISTS" ? "info" : "error",
+        });
+        await refreshLoadedDirectories();
+        return;
+      }
+      await refreshLoadedDirectories();
+      onOpenTab?.({
+        id: projectFileTabId(result.projectId, result.folderPath, result.relativePath),
+        projectId: result.projectId,
+        folderPath: result.folderPath,
+        name: result.name,
+        relativePath: result.relativePath,
+        mode: "files",
+      });
+      changeWorkspaceMode("files");
+      setContextStatus({
+        message: "已创建项目 AGENTS.md；保存后的修改从下一次运行生效。",
+        tone: "info",
+      });
+    } catch {
+      setContextStatus({ message: "暂时无法创建项目 AGENTS.md。", tone: "error" });
+    }
+  }
 
   const emptyTitle = !projectId ? "选择项目" : folders.length === 0 ? "项目没有文件夹" : "打开文件";
   const emptyDescription = !projectId
@@ -1005,6 +1066,16 @@ export function ProjectFilesWorkspace({
               }
             />
           </div>
+          {showCreateProjectAgents ? (
+            <button
+              type="button"
+              className="project-files-create-agents"
+              onClick={() => void createProjectAgents()}
+            >
+              <Plus size={15} strokeWidth={1.9} aria-hidden="true" />
+              创建 AGENTS.md
+            </button>
+          ) : null}
 
           <label className="project-files-filter">
             <Search size={16} strokeWidth={1.75} aria-hidden="true" />
@@ -1012,10 +1083,22 @@ export function ProjectFilesWorkspace({
               type="search"
               value={filter}
               disabled={!selectedFolder}
-              placeholder="筛选文件…"
-              aria-label="筛选文件"
+              placeholder="筛选已加载文件…"
+              aria-label="筛选已加载的文件"
+              title="仅筛选当前已经加载的目录内容"
               onChange={(event) => setFilter(event.currentTarget.value)}
             />
+            {filter ? (
+              <button
+                type="button"
+                className="project-files-filter__clear"
+                aria-label="清除文件筛选"
+                title="清除筛选"
+                onClick={() => setFilter("")}
+              >
+                <X size={14} strokeWidth={2} aria-hidden="true" />
+              </button>
+            ) : null}
           </label>
 
           <div className="project-files-tree-wrap">
@@ -1081,6 +1164,9 @@ export function ProjectFilesWorkspace({
                         />
                       </span>
                       <span className="project-files-tree-row__label">{row.name}</span>
+                      {row.relativePath === ".awaken/AGENTS.md" && !selectedFolder?.isPrimary ? (
+                        <span className="project-files-tree-row__agents-note">普通 Markdown</span>
+                      ) : null}
                     </button>
                   );
                 })}

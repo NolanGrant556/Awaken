@@ -11,6 +11,7 @@ import (
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
+	"awaken/src/instructions"
 	"awaken/src/subagentruntime"
 	"awaken/src/tool"
 )
@@ -820,6 +821,14 @@ func durableRunsFromSemanticRecords(threadID string, records []agentcore.Semanti
 			}
 		case agentcore.SemanticKindRunStarted:
 			run.Status = RunStatusRunning
+		case agentcore.SemanticKindInstructionSnapshot:
+			encoded, err := json.Marshal(record.Payload)
+			if err == nil {
+				var summary instructions.Summary
+				if json.Unmarshal(encoded, &summary) == nil && strings.TrimSpace(summary.SnapshotID) != "" {
+					run.InstructionSnapshot = &summary
+				}
+			}
 		case agentcore.SemanticKindRunTerminal:
 			status := stringPayload(record.Payload, "status")
 			finished := record.Timestamp

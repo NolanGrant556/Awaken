@@ -53,6 +53,7 @@ describe("DesktopSettingsDialog", () => {
     expect(html).toContain("API");
     expect(html).toContain("Agent Plan");
     expect(html).toContain("自定义");
+    expect(html).toContain("全局规则");
     expect(html).not.toContain("图片视频工具");
     expect(html).toContain("aw-model-settings__rail");
     expect(html).toContain("配置 Token");

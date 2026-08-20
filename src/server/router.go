@@ -199,6 +199,10 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("POST /v1/runs/{run_id}/user-questions/{question_id}/answer", handlers.handleAnswerUserQuestion)
 		mux.HandleFunc("POST /v1/runs/{run_id}/external-interactions/{interaction_id}/resolve", handlers.handleResolveExternalInteraction)
 		mux.HandleFunc("GET /v1/runs/{run_id}/audit", handlers.handleGetRunAudit)
+		instructionH := instructionHandlers{service: cfg.runService}
+		mux.HandleFunc("GET /v1/instructions/global", instructionH.handleGetGlobal)
+		mux.HandleFunc("PUT /v1/instructions/global", instructionH.handlePutGlobal)
+		mux.HandleFunc("DELETE /v1/instructions/global", instructionH.handleDeleteGlobal)
 		hooks := hookHandlers{service: cfg.runService}
 		mux.HandleFunc("GET /v1/hooks", hooks.handleStatus)
 		mux.HandleFunc("POST /v1/hooks/trust", hooks.handleTrust)

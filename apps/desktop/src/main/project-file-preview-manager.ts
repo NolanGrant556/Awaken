@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -191,6 +191,35 @@ function nodeErrorCode(error: unknown): string {
   return typeof error === "object" && error !== null && "code" in error
     ? String(error.code)
     : "";
+}
+
+function sha256(data: Uint8Array): string {
+	return createHash("sha256").update(data).digest("hex");
+}
+
+async function atomicReplaceFile(target: string, content: Buffer): Promise<void> {
+	const directory = path.dirname(target);
+	const temporary = path.join(directory, `.${path.basename(target)}.tmp-${randomUUID()}`);
+	let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+	try {
+		handle = await fs.open(temporary, "wx", 0o600);
+		await handle.writeFile(content);
+		await handle.sync();
+		await handle.close();
+		handle = undefined;
+		await fs.rename(temporary, target);
+		if (process.platform !== "win32") {
+			const directoryHandle = await fs.open(directory, "r");
+			try {
+				await directoryHandle.sync();
+			} finally {
+				await directoryHandle.close();
+			}
+		}
+	} finally {
+		await handle?.close().catch(() => undefined);
+		await fs.rm(temporary, { force: true }).catch(() => undefined);
+	}
 }
 
 function isHttpUrl(value: string): boolean {
@@ -475,6 +504,7 @@ export class ProjectFilePreviewManager {
         relativePath: source.relativePath,
         byteLength: stat.size,
         content,
+		contentDigest: sha256(buffer),
         language: classification.language,
       };
       return { ok: true, preview: handle };
@@ -727,10 +757,43 @@ export class ProjectFilePreviewManager {
       }
 
       const current = await fs.readFile(resolved.file.realPath);
+		const isProjectAgents = resolved.file.relativePath === ".awaken/AGENTS.md";
+		if (isProjectAgents && !request.expectedDigest) {
+			return saveError("INVALID_REQUEST", "保存项目 AGENTS.md 需要当前文件摘要。");
+		}
+		if (request.expectedDigest && sha256(current) !== request.expectedDigest) {
+			return {
+				ok: false as const,
+				code: "FILE_CHANGED" as const,
+				message: "文件已被其他程序修改，请重新加载后再保存。",
+				currentContent: current.toString("utf8"),
+				currentDigest: sha256(current),
+				submittedContent: request.content,
+			};
+		}
       if (!current.equals(nextBuffer)) {
-        await fs.writeFile(resolved.file.realPath, nextBuffer);
+			if (isProjectAgents && request.expectedDigest) {
+				const latest = await fs.readFile(resolved.file.realPath);
+				if (sha256(latest) !== request.expectedDigest) {
+					return {
+						ok: false as const,
+						code: "FILE_CHANGED" as const,
+						message: "文件已被其他程序修改，请重新加载后再保存。",
+						currentContent: latest.toString("utf8"),
+						currentDigest: sha256(latest),
+						submittedContent: request.content,
+					};
+				}
+				await atomicReplaceFile(resolved.file.realPath, nextBuffer);
+			} else {
+				await fs.writeFile(resolved.file.realPath, nextBuffer);
+			}
       }
-      return { ok: true, byteLength: nextBuffer.length };
+		return {
+			ok: true,
+			byteLength: nextBuffer.length,
+			...(isProjectAgents ? { digest: sha256(nextBuffer) } : {}),
+		};
     } catch (error) {
       const code = nodeErrorCode(error);
       if (code === "ENOENT" || code === "ENOTDIR") {

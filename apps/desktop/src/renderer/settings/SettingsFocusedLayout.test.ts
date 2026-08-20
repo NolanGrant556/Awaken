@@ -35,6 +35,14 @@ const desktopStyles = readFileSync(
   new URL("../styles.css", import.meta.url),
   "utf8",
 );
+const globalAgentsStyles = readFileSync(
+  new URL("./GlobalAgentsSettingsPanel.css", import.meta.url),
+  "utf8",
+);
+const globalAgentsComponent = readFileSync(
+  new URL("./GlobalAgentsSettingsPanel.tsx", import.meta.url),
+  "utf8",
+);
 
 describe("focused settings layout", () => {
   it("centers the compact settings pages on one shared width", () => {
@@ -80,6 +88,36 @@ describe("focused settings layout", () => {
     );
     expect(settingsStyles).toMatch(
       /\.aw-settings-main--full-bleed > \.aw-model-settings-page\s*\{[\s\S]*?scrollbar-width:\s*none;/,
+    );
+  });
+
+  it("uses the shared lightweight scrollbar and keeps global rules inside its editor", () => {
+    expect(settingsStyles).toMatch(
+      /\.aw-settings-scroll\s*\{[\s\S]*?scrollbar-color:\s*color-mix\(in srgb, var\(--aw-text-tertiary\) 28%, transparent\) transparent;/,
+    );
+    expect(settingsStyles).toMatch(
+      /\.aw-settings-scroll::-webkit-scrollbar-thumb\s*\{[\s\S]*?min-height:\s*44px;[\s\S]*?border-radius:\s*var\(--aw-radius-pill\);/,
+    );
+    expect(settingsStyles).toMatch(
+      /\.aw-settings-scroll::-webkit-scrollbar-button\s*\{[\s\S]*?display:\s*none;/,
+    );
+    expect(globalAgentsStyles).toMatch(
+      /\.aw-agents-settings textarea\s*\{[\s\S]*?height:\s*clamp\(300px, 42vh, 400px\);[\s\S]*?max-height:\s*400px;[\s\S]*?resize:\s*none;[\s\S]*?overflow-y:\s*auto;/,
+    );
+    expect(globalAgentsStyles).toMatch(
+      /\.aw-agents-settings__card\s*\{[\s\S]*?padding:\s*4px 0 0;/,
+    );
+    expect(globalAgentsStyles).toMatch(
+      /\.aw-agents-settings__editor:focus-within\s*\{[\s\S]*?box-shadow:\s*0 0 0 3px/,
+    );
+    expect(globalAgentsStyles).toMatch(
+      /\.aw-agents-settings__identity\s*\{[\s\S]*?gap:\s*10px;/,
+    );
+    expect(globalAgentsStyles).not.toContain("aw-agents-settings__metadata");
+    expect(globalAgentsStyles).not.toContain("aw-agents-settings__document-path");
+    expect(globalAgentsComponent).not.toContain("~/.awaken/AGENTS.md");
+    expect(globalAgentsStyles).toMatch(
+      /\.aw-agents-settings textarea::-webkit-scrollbar-thumb\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--aw-text-tertiary\) 28%, transparent\);/,
     );
   });
 

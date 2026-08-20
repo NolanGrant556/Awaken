@@ -23,6 +23,7 @@ import (
 	convcontext "awaken/src/context"
 	"awaken/src/desktopdata"
 	"awaken/src/hookruntime"
+	"awaken/src/instructions"
 	"awaken/src/llm"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
@@ -230,6 +231,8 @@ type RunService struct {
 	// have only one active Computer controller at a time.
 	computerLeaseManager *computer.LeaseManager
 	hookStore            *hookruntime.Store
+	instructionLoader    *instructions.Loader
+	globalInstructions   *instructions.GlobalDocumentStore
 }
 
 // drainRunWorkers blocks until every launched run goroutine has fully
@@ -479,6 +482,8 @@ func NewRunService(
 		threadStore:          store,
 		journals:             newJournalManager(pathFn),
 		computerLeaseManager: computer.NewLeaseManager(),
+		instructionLoader:    instructions.NewLoader(""),
+		globalInstructions:   instructions.NewGlobalDocumentStore(""),
 	}
 	// Project lifecycle is available whenever the thread store also satisfies
 	// the domain repository contract; no concrete storage type checks.
@@ -486,6 +491,27 @@ func NewRunService(
 		service.projectService = newProjectService(service, repo)
 	}
 	return service
+}
+
+func (s *RunService) GetGlobalInstructions() (instructions.GlobalAgentsDocument, error) {
+	if s == nil || s.globalInstructions == nil {
+		return instructions.GlobalAgentsDocument{}, errors.New("global instructions store is unavailable")
+	}
+	return s.globalInstructions.Get()
+}
+
+func (s *RunService) PutGlobalInstructions(expectedRevision, content string) (instructions.GlobalAgentsDocument, error) {
+	if s == nil || s.globalInstructions == nil {
+		return instructions.GlobalAgentsDocument{}, errors.New("global instructions store is unavailable")
+	}
+	return s.globalInstructions.Put(expectedRevision, content)
+}
+
+func (s *RunService) DeleteGlobalInstructions(expectedRevision string) (instructions.GlobalAgentsDocument, error) {
+	if s == nil || s.globalInstructions == nil {
+		return instructions.GlobalAgentsDocument{}, errors.New("global instructions store is unavailable")
+	}
+	return s.globalInstructions.Delete(expectedRevision)
 }
 
 func NewRunServiceWithModelProfiles(
@@ -915,6 +941,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if err != nil {
 		return Run{}, err
 	}
+	instructionSnapshot := s.instructionLoader.Load(workspace.WorkspaceRoot, workspace.SessionWorkspace)
 	hookSnapshot, err := s.buildHookSnapshot(workspace)
 	if err != nil {
 		return Run{}, fmt.Errorf("build hook snapshot: %w", err)
@@ -985,6 +1012,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	session := NewSession(runID, threadID, trimmed, persistedAttachments, req.ComposerTokens, cancel)
 	session.SetHookSnapshotID(hookSnapshot.SnapshotID)
+	session.SetInstructionSnapshot(instructionSnapshot.SafeSummary())
 	if req.ModelProfile != nil {
 		session.SetModelSelection(req.ModelProfile.ProfileID, req.ModelProfile.ReasoningEffort)
 	}
@@ -1062,8 +1090,11 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			s.sessions[runID] = session
 			threadSnapshot = s.threads[threadID].snapshot()
 			s.mu.Unlock()
-			configureAgentForRun(agent, modelRequestPurposeForClient(req.Client), hookSnapshot)
+			configureAgentForRun(agent, modelRequestPurposeForClient(req.Client), hookSnapshot, &instructionSnapshot)
 			if err := s.bindAgentRecorder(agent, session, threadID, runID, req.Client.SessionID, threadSnapshot.Label); err != nil {
+				return rollbackStart(err, false)
+			}
+			if err := persistInstructionSnapshot(session, req.Client.SessionID); err != nil {
 				return rollbackStart(err, false)
 			}
 			s.bindSubagentController(ctx, agent, session, subagentModelProfileID(req.ModelProfile))
@@ -1155,7 +1186,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	}
 	s.sessions[runID] = session
 	s.mu.Unlock()
-	configureAgentForRun(agent, modelRequestPurposeForClient(req.Client), hookSnapshot)
+	configureAgentForRun(agent, modelRequestPurposeForClient(req.Client), hookSnapshot, &instructionSnapshot)
 
 	s.mu.RLock()
 	computerSettings := s.computerSettings
@@ -1187,6 +1218,9 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	}
 
 	if err := s.bindAgentRecorder(agent, session, threadID, runID, req.Client.SessionID, threadSnapshot.Label); err != nil {
+		return rollbackStart(err, false)
+	}
+	if err := persistInstructionSnapshot(session, req.Client.SessionID); err != nil {
 		return rollbackStart(err, false)
 	}
 	if cr := session.ComputerRuntime(); cr != nil {
@@ -1412,14 +1446,36 @@ func modelRequestPurposeForClient(client ClientInfo) llm.RequestPurpose {
 	return llm.RequestPurposeAgentTurn
 }
 
-func configureAgentForRun(agent *agentcore.Agent, purpose llm.RequestPurpose, snapshot hookruntime.AvailabilitySnapshot) {
+func configureAgentForRun(agent *agentcore.Agent, purpose llm.RequestPurpose, snapshot hookruntime.AvailabilitySnapshot, instructionSnapshot *instructions.Snapshot) {
 	if agent == nil {
 		return
 	}
 	cfg := agent.GetConfig()
 	cfg.ModelRequestPurpose = purpose
 	cfg.HookAvailabilitySnapshot = &snapshot
+	cfg.InstructionSnapshot = instructionSnapshot
 	agent.Reconfigure(cfg)
+}
+
+func persistInstructionSnapshot(session *Session, sessionID string) error {
+	if session == nil {
+		return nil
+	}
+	snapshot := session.Snapshot()
+	if snapshot.InstructionSnapshot == nil {
+		return nil
+	}
+	recorder := session.semanticRecorderSnapshot()
+	if recorder == nil {
+		// Lightweight unit services explicitly opt into a no-op recorder. The
+		// production StartRun guard rejects missing persistence before this point.
+		return nil
+	}
+	record := agentcore.InstructionSnapshotSemanticRecord(snapshot.ThreadID, snapshot.RunID, sessionID, *snapshot.InstructionSnapshot)
+	if err := recorder.Append(context.Background(), record); err != nil {
+		return err
+	}
+	return recorder.Flush(context.Background())
 }
 
 func subagentSemanticPayload(snapshot subagentruntime.TaskSnapshot) map[string]any {
@@ -2098,6 +2154,7 @@ func isActiveTranscriptReplaySupplement(kind agentcore.SemanticKind) bool {
 	switch kind {
 	case agentcore.SemanticKindContextSnapshot,
 		agentcore.SemanticKindContextEpoch,
+		agentcore.SemanticKindInstructionSnapshot,
 		agentcore.SemanticKindModelUsage:
 		return true
 	default:

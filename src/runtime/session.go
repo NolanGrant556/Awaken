@@ -8,6 +8,7 @@ import (
 
 	"awaken/src/agentcore"
 	"awaken/src/computer"
+	"awaken/src/instructions"
 	"awaken/src/subagentruntime"
 )
 
@@ -32,21 +33,22 @@ const (
 )
 
 type Run struct {
-	RunID            string               `json:"run_id"`
-	ThreadID         string               `json:"thread_id"`
-	Input            string               `json:"input,omitempty"`
-	InputAttachments []RunInputAttachment `json:"input_attachments,omitempty"`
-	ComposerTokens   []ComposerToken      `json:"composer_tokens,omitempty"`
-	Status           RunStatus            `json:"status"`
-	Result           string               `json:"result,omitempty"`
-	Error            string               `json:"error,omitempty"`
-	CancelRequested  bool                 `json:"cancel_requested,omitempty"`
-	CreatedAt        time.Time            `json:"created_at"`
-	UpdatedAt        time.Time            `json:"updated_at"`
-	FinishedAt       *time.Time           `json:"finished_at,omitempty"`
-	ModelProfileID   string               `json:"model_profile_id,omitempty"`
-	ReasoningEffort  string               `json:"reasoning_effort,omitempty"`
-	HookSnapshotID   string               `json:"hook_snapshot_id,omitempty"`
+	RunID               string                `json:"run_id"`
+	ThreadID            string                `json:"thread_id"`
+	Input               string                `json:"input,omitempty"`
+	InputAttachments    []RunInputAttachment  `json:"input_attachments,omitempty"`
+	ComposerTokens      []ComposerToken       `json:"composer_tokens,omitempty"`
+	Status              RunStatus             `json:"status"`
+	Result              string                `json:"result,omitempty"`
+	Error               string                `json:"error,omitempty"`
+	CancelRequested     bool                  `json:"cancel_requested,omitempty"`
+	CreatedAt           time.Time             `json:"created_at"`
+	UpdatedAt           time.Time             `json:"updated_at"`
+	FinishedAt          *time.Time            `json:"finished_at,omitempty"`
+	ModelProfileID      string                `json:"model_profile_id,omitempty"`
+	ReasoningEffort     string                `json:"reasoning_effort,omitempty"`
+	HookSnapshotID      string                `json:"hook_snapshot_id,omitempty"`
+	InstructionSnapshot *instructions.Summary `json:"instruction_snapshot,omitempty"`
 }
 
 func (s *Session) SetHookSnapshotID(snapshotID string) {
@@ -55,6 +57,16 @@ func (s *Session) SetHookSnapshotID(snapshotID string) {
 	}
 	s.mu.Lock()
 	s.run.HookSnapshotID = strings.TrimSpace(snapshotID)
+	s.mu.Unlock()
+}
+
+func (s *Session) SetInstructionSnapshot(snapshot instructions.Summary) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	copy := snapshot
+	s.run.InstructionSnapshot = &copy
 	s.mu.Unlock()
 }
 

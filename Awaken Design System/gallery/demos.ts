@@ -33,6 +33,7 @@ export { AwakenProfileButtonDemo } from "../src/components/AwakenProfileButton/A
 export { AwakenProjectSkillFolderDemo } from "../src/components/AwakenProjectSkillFolder/AwakenProjectSkillFolder.demo";
 export { AwakenProjectSkillsDialogDemo } from "../src/components/AwakenProjectSkillsDialog/AwakenProjectSkillsDialog.demo";
 export { AwakenProjectTreeDemo } from "../src/components/AwakenProjectTree/AwakenProjectTree.demo";
+export { AwakenRunPlanDemo } from "../src/components/AwakenRunPlan/AwakenRunPlan.demo";
 export { AwakenRunStageDemo } from "../src/components/AwakenRunStage/AwakenRunStage.demo";
 export { AwakenScheduledTaskEditorDialogDemo } from "../src/components/AwakenScheduledTaskEditorDialog/AwakenScheduledTaskEditorDialog.demo";
 export { AwakenScheduledTaskHistoryDialogDemo } from "../src/components/AwakenScheduledTaskHistoryDialog/AwakenScheduledTaskHistoryDialog.demo";

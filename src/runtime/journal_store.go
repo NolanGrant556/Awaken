@@ -651,6 +651,7 @@ func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restored
 		RunIDs:             runIDsFromSemanticRecords(records),
 		SkillContextBlocks: skillContextBlocksFromSemanticRecords(records),
 		SkillInvokedAt:     skillInvocationTimesFromSemanticRecords(records),
+		RunPlanSnapshots:   runPlanSnapshotsFromSemanticRecords(records),
 	}
 	for _, record := range records {
 		if restored.CreatedAt.IsZero() || record.Timestamp.Before(restored.CreatedAt) {
@@ -714,6 +715,47 @@ func skillContextBlocksFromSemanticRecords(records []agentcore.SemanticRecord) [
 		blocks = append(blocks, latest[skillID])
 	}
 	return blocks
+}
+
+// runPlanSnapshotsFromSemanticRecords rebuilds the latest root run plan
+// snapshot per run from durable plan_updated records (运行计划契约 §7.3).
+// Child-local records (payload agent_id set) never contribute, and a lower
+// version never replaces a higher one — replay is idempotent by plan version.
+func runPlanSnapshotsFromSemanticRecords(records []agentcore.SemanticRecord) map[string]tool.RunPlanSnapshot {
+	latest := map[string]tool.RunPlanSnapshot{}
+	for _, record := range records {
+		if record.Kind != agentcore.SemanticKindPlanUpdated || strings.TrimSpace(record.RunID) == "" {
+			continue
+		}
+		if strings.TrimSpace(stringPayload(record.Payload, "agent_id")) != "" {
+			continue
+		}
+		planID := strings.TrimSpace(stringPayload(record.Payload, "plan_id"))
+		version := uint64(intPayload(record.Payload, "version"))
+		if planID == "" || version == 0 {
+			continue
+		}
+		if existing, ok := latest[record.RunID]; ok && existing.Version >= version {
+			continue
+		}
+		snapshot := tool.RunPlanSnapshot{
+			PlanID:      planID,
+			Version:     version,
+			Explanation: stringPayload(record.Payload, "explanation"),
+			UpdatedAt:   record.Timestamp.UTC(),
+		}
+		// Payloads arrive both as JSON round-tripped []any (journal replay)
+		// and as in-memory []map[string]any (direct recorder captures);
+		// normalize through JSON instead of asserting either concrete type.
+		if rawItems, err := json.Marshal(record.Payload["items"]); err == nil {
+			var items []tool.RunPlanItem
+			if json.Unmarshal(rawItems, &items) == nil {
+				snapshot.Items = items
+			}
+		}
+		latest[record.RunID] = snapshot
+	}
+	return latest
 }
 
 func skillInvocationTimesFromSemanticRecords(records []agentcore.SemanticRecord) map[string]time.Time {

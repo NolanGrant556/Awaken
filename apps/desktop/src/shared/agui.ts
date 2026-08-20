@@ -72,6 +72,7 @@ export type AguiEventType =
   | "AWAKEN_MEMORY_DREAM_CANCELLED"
   | "AWAKEN_MEMORY_DREAM_INTERRUPTED"
   | "AWAKEN_SCHEDULED_NOTICE"
+  | "AWAKEN_PLAN_UPDATED"
   | "AWAKEN_COMPUTER_REVIEW_REQUESTED"
   | "AWAKEN_COMPUTER_REVIEW_RESOLVED"
   | "AWAKEN_COMPUTER_SESSION_CHANGED"
@@ -103,6 +104,12 @@ export type AguiACPPermissionOption = {
 
 export type AguiRunOutcome = {
   type: string;
+};
+
+export type AguiRunPlanItem = {
+  step: string;
+  activeForm: string;
+  status: string;
 };
 
 export type AguiContextContributionKind =
@@ -275,6 +282,15 @@ export type AguiEvent = {
   executionId?: string;
   taskName?: string;
   noticeContent?: string;
+  // Run-plan full snapshot, surfaced on AWAKEN_PLAN_UPDATED (contract §8.1).
+  planId?: string;
+  planVersion?: number;
+  planExplanation?: string;
+  planItems?: AguiRunPlanItem[];
+  planCompletedCount?: number;
+  planTotalCount?: number;
+  planCurrentStep?: number;
+  planAllCompleted?: boolean;
   terminalReason?: string;
   transitionReason?: string;
   contextModelWindow?: number;

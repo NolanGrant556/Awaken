@@ -38,6 +38,14 @@ func (rb *RequestBuilder) UpdateRuntimeInfo(info prompt.RuntimeInfo) {
 	rb.runtimeInfo = info
 }
 
+// UpdateRunPlanContextProvider binds the run-scoped CurrentRunPlan provider
+// after construction. The root Runner calls it once the run identity (and
+// therefore the RunPlanService) exists; the RequestBuilder itself stays a
+// pure consumer of the callback, like MemoryContextProvider.
+func (rb *RequestBuilder) UpdateRunPlanContextProvider(provider func() (string, error)) {
+	rb.config.RunPlanContextProvider = provider
+}
+
 func (rb *RequestBuilder) Build(ctx ContextProvider, tools []tool.ToolSchema) LLMRequest {
 	envelope := rb.BuildContextEnvelope(ctx, tools)
 	return rb.BuildLLMRequestFromEnvelope(envelope)
@@ -104,6 +112,23 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 			digest := sha256.Sum256([]byte(content))
 			envelope.Deltas = append(envelope.Deltas, ContextDelta{Type: ContextDeltaMemoryHit, Summary: fmt.Sprintf("index:%x", digest[:8])})
 			envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{SourceKey: "memory_context", Kind: ContextContributionMemory, Content: content, State: ContextEpochSourceUpdated})
+		}
+	}
+	// CurrentRunPlan is the host-owned latest durable run plan snapshot. It
+	// survives compaction because the provider reads the run-scoped service,
+	// not conversation messages; it is never a user message or Memory.
+	if rb.config.RunPlanContextProvider != nil {
+		content, err := rb.config.RunPlanContextProvider()
+		switch {
+		case err != nil:
+			envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{SourceKey: "current_run_plan", Kind: ContextContributionRuntimeContext, State: ContextEpochSourceUnavailable})
+		case strings.TrimSpace(content) == "":
+			// No plan exists for this run yet: skip the block entirely.
+		default:
+			block := ContextBlock{ID: "current_run_plan", Kind: ContextContributionRuntimeContext, Content: content}
+			envelope.SystemBlocks = append(envelope.SystemBlocks, block)
+			envelope.SystemContextItems = append(envelope.SystemContextItems, ContextItem{ID: block.ID, Type: "current_run_plan", Content: content})
+			envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{SourceKey: "current_run_plan", Kind: ContextContributionRuntimeContext, Content: content, State: ContextEpochSourceUpdated})
 		}
 	}
 	for _, block := range rb.config.SkillContextBlocks {

@@ -41,6 +41,11 @@ type AgentConfig struct {
 	// MemoryContextProvider reads the current host-owned Memory indexes at
 	// request build time. Failures degrade to no Memory block.
 	MemoryContextProvider func() (string, error)
+	// RunPlanContextProvider renders the host-owned CurrentRunPlan block of
+	// the current root run at request build time. It is bound by the root
+	// Runner to the run-scoped RunPlanService; empty content skips the block.
+	// Child configs never inherit it (root-only contract).
+	RunPlanContextProvider func() (string, error)
 	// MemoryRecallStart launches non-blocking manifest selection for a user
 	// turn. MemoryContextProvider exposes a completed result later.
 	MemoryRecallStart        func(stdcontext.Context, string, []string)
@@ -52,7 +57,7 @@ type AgentConfig struct {
 	// Memory identities and frozen content. Child agents inherit a compatible
 	// subset and must not run a user-scope selector.
 	CaptureMemoryRecallSnapshot func() *MemoryRecallSnapshot
-	AutoToolPolicy           AutoToolPolicy
+	AutoToolPolicy              AutoToolPolicy
 	// ToolExposure selects the model-visible tool pool. Empty Mode uses
 	// DefaultToolExposurePolicy applies generic explicit hide/show rules.
 	ToolExposure tool.ToolExposurePolicy

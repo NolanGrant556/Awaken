@@ -456,6 +456,39 @@ export function subagentDetailPanelBottomOffset({
   );
 }
 
+/**
+ * Bottom offset of the run-plan overlay panel (contract 运行计划与任务进度
+ * 设计契约 §5.3): the panel sits 12px above the measured composer content
+ * inset, same rule as the subagent detail overlay.
+ */
+export function runPlanPanelBottomOffset({
+  composerContentInset,
+  gap = 12,
+  minimum = 28,
+}: {
+  composerContentInset: number;
+  gap?: number;
+  minimum?: number;
+}): number {
+  return Math.max(
+    Math.max(0, minimum),
+    Math.max(0, composerContentInset) + Math.max(0, gap),
+  );
+}
+
+/**
+ * Normalizes a wire/reducer plan item status (declared as `string` on the
+ * AWAKEN_PLAN_UPDATED frame) into the three-state union the Design System
+ * run-plan components accept; unknown values degrade to `pending`.
+ */
+export function runPlanStepStatusForDisplay(
+  status: string,
+): "pending" | "in_progress" | "completed" {
+  return status === "in_progress" || status === "completed"
+    ? status
+    : "pending";
+}
+
 export function groupNarrativeByTurns(
   items: RunNarrativeItem[],
 ): NarrativeTurnSections {

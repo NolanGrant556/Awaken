@@ -236,7 +236,7 @@
 .aw-profile-balance-panel__amount-primary {
   color: var(--aw-text-primary);
   font-size: 32px;
-  font-weight: 850;
+  font-weight: var(--aw-font-weight-heavy);
   line-height: 1.15;
 }
 

@@ -65,4 +65,22 @@ describe("DesktopPreferencesStore", () => {
 
     expect(store.snapshot()).toEqual({ theme: "light" });
   });
+
+  it("ignores leftover fontScale in stored preferences", async () => {
+    await writeFile(
+      join(configDir, "desktop-preferences.json"),
+      JSON.stringify({ version: 1, theme: "dark", fontScale: 150 }),
+      "utf8",
+    );
+    const store = new DesktopPreferencesStore(configDir);
+
+    await store.initialize();
+
+    expect(store.snapshot()).toEqual({ theme: "dark" });
+
+    await store.savePreferences({ theme: "dark" });
+    await expect(
+      readFile(join(configDir, "desktop-preferences.json"), "utf8"),
+    ).resolves.not.toContain("fontScale");
+  });
 });

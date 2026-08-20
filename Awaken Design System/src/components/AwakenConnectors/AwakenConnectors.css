@@ -32,7 +32,7 @@
   gap: 20px;
   min-width: 0;
 }
-.aw-connectors__header h1 { margin: 0; color: var(--aw-text-primary); font-size: 28px; font-weight: 820; line-height: 1.12; letter-spacing: -0.025em; }
+.aw-connectors__header h1 { margin: 0; color: var(--aw-text-primary); font-size: var(--aw-font-size-xl); font-weight: var(--aw-font-weight-heavy); line-height: 1.12; letter-spacing: -0.025em; }
 .aw-connectors__header p { margin: 6px 0 0; color: var(--aw-text-secondary); font-size: 13px; line-height: 1.4; }
 .aw-connectors__header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 0 0 auto; }
 .aw-connectors__refresh {

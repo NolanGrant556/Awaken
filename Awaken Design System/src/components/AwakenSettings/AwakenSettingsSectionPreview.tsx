@@ -15,11 +15,13 @@ const routeBySection: Record<string, string> = {
 export function AwakenSettingsSectionPreview({
   activeSectionId,
   sectionTitle,
+  sectionDescription,
   fullBleed = false,
   children,
 }: {
   activeSectionId: string;
   sectionTitle: string;
+  sectionDescription?: ReactNode;
   fullBleed?: boolean;
   children: ReactNode;
 }) {
@@ -36,6 +38,7 @@ export function AwakenSettingsSectionPreview({
         navItems={AwakenSettingsNavItems}
         activeSectionId={activeSectionId}
         sectionTitle={sectionTitle}
+        sectionDescription={sectionDescription}
         onBack={() => { window.location.hash = "/components/awaken-settings"; }}
         onSelectSection={navigate}
       >

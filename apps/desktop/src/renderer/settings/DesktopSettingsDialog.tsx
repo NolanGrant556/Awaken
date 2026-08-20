@@ -1316,9 +1316,12 @@ export function DesktopSettingsDialog({
           : undefined
       }
       contentLayout={
-        activeSettingsSection === "memory" || activeSettingsSection === "models"
-          ? "full-bleed"
-          : "standard"
+        activeSettingsSection === "memory" ? "full-bleed" : "standard"
+      }
+      sectionDescription={
+        activeSettingsSection === "models"
+          ? "配置模型接入、连接状态与推理参数。"
+          : undefined
       }
       navItems={AwakenSettingsNavItems}
       activeSectionId={activeSettingsSection}
@@ -1356,7 +1359,6 @@ export function DesktopSettingsDialog({
         <ACPSettingsPanel runtimeClient={runtimeClient} />
       ) : (
         <AwakenModelSettings
-          theme={theme}
           tabs={MODEL_SETTINGS_TABS}
           activeTabId={activeSection}
           views={[

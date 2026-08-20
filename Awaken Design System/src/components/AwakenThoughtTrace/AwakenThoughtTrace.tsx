@@ -36,10 +36,10 @@ export function AwakenThoughtTrace({
   const statusLabel =
     label ??
     (status === "active"
-      ? "Thinking"
+      ? "思考中"
       : status === "error"
-        ? "Thinking interrupted"
-        : "Thought");
+        ? "思考已中断"
+        : "思考过程");
   const heading = durationLabel ? `${statusLabel} ${durationLabel}` : statusLabel;
 
   return (

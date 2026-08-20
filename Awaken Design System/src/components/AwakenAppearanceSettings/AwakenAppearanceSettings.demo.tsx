@@ -12,7 +12,10 @@ export function AwakenAppearanceSettingsDemo() {
         <p>沿用 Awaken 当前跟随系统、浅色与黑色主题选择。</p>
       </header>
       <AwakenSettingsSectionPreview activeSectionId="appearance" sectionTitle="外观">
-        <AwakenAppearanceSettings value={value} onValueChange={setValue} />
+        <AwakenAppearanceSettings
+          value={value}
+          onValueChange={setValue}
+        />
       </AwakenSettingsSectionPreview>
     </section>
   );

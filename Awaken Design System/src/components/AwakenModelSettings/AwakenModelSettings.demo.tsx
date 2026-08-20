@@ -51,7 +51,11 @@ export function AwakenModelSettingsDemo() {
         <h2>模型设置 <code>AwakenModelSettings</code></h2>
         <p>左侧区分接入类型，右侧独立管理连接与 LLM 设置。</p>
       </header>
-      <AwakenSettingsSectionPreview activeSectionId="models" sectionTitle="模型">
+      <AwakenSettingsSectionPreview
+        activeSectionId="models"
+        sectionTitle="模型"
+        sectionDescription="配置模型接入、连接状态与推理参数。"
+      >
         <AwakenModelSettings
           tabs={accessTabs}
           activeTabId={activeTabId}

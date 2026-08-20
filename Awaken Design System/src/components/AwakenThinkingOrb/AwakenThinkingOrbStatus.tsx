@@ -22,7 +22,7 @@ export interface AwakenThinkingOrbStatusProps
 }
 
 export function AwakenThinkingOrbStatus({
-  label = "Thinking",
+  label = "思考中",
   showEllipsis = true,
   state = "composing",
   size = 64,

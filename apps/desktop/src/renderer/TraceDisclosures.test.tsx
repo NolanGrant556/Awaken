@@ -45,7 +45,7 @@ describe("execution trace disclosures", () => {
       );
     });
     expect(heading?.getAttribute("aria-expanded")).toBe("false");
-    expect(heading?.textContent).toContain("Thought");
+    expect(heading?.textContent).toContain("思考过程");
 
     await act(async () => heading?.click());
     expect(heading?.getAttribute("aria-expanded")).toBe("true");

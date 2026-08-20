@@ -185,6 +185,14 @@
   letter-spacing: -0.03em;
 }
 
+.aw-settings-page__description {
+  margin: 0;
+  color: var(--aw-text-secondary);
+  font-size: 13px;
+  font-weight: var(--aw-font-weight-regular);
+  line-height: 1.45;
+}
+
 .aw-settings-main--full-bleed > .aw-memory-light-flow-layout {
   height: 100%;
   overflow-x: hidden;
@@ -192,19 +200,6 @@
   overscroll-behavior: contain;
 }
 
-.aw-settings-main--full-bleed > .aw-model-settings-page {
-  height: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-}
-
-.aw-settings-main--full-bleed > .aw-model-settings-page::-webkit-scrollbar {
-  display: none;
-  width: 0;
-  height: 0;
-}
 
 .aw-settings-toast {
   position: absolute;

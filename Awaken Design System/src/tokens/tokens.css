@@ -239,7 +239,7 @@
   --aw-text-base: var(--aw-font-size-base) / var(--aw-line-height-base) / var(--aw-font-weight-regular);
   --aw-text-md: var(--aw-font-size-md) / var(--aw-line-height-md) / var(--aw-font-weight-regular);
   --aw-text-lg: var(--aw-font-size-lg) / var(--aw-line-height-lg) / var(--aw-font-weight-regular);
-  --aw-text-xl: var(--aw-font-size-xl) / var(--aw-line-height-xl) / 620;
+  --aw-text-xl: var(--aw-font-size-xl) / var(--aw-line-height-xl) / var(--aw-font-weight-heavy);
 
   /* Layout */
   --aw-sidebar-width: 300px;

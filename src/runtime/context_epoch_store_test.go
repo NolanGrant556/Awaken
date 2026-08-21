@@ -126,6 +126,145 @@ func TestContextEpochAppendOnlyDeltaReasonCarriesChangedSegments(t *testing.T) {
 	}
 }
 
+func TestContextEpochLateAddedSourcesPersistEmptyBaselineDigestAndSurviveRestart(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	store := NewContextEpochStore()
+	candidate := testContextEpochCandidate()
+	if _, err := store.Project(context.Background(), candidate); err != nil {
+		t.Fatalf("initial projection: %v", err)
+	}
+
+	lateSources := []agentcore.ContextEpochSourceCandidate{
+		{SourceKey: "skill_activation_excel", Kind: agentcore.ContextContributionSkills, Content: "excel skill", State: agentcore.ContextEpochSourceUpdated},
+		{SourceKey: "current_run_plan", Kind: agentcore.ContextContributionOther, Content: "plan", State: agentcore.ContextEpochSourceUpdated},
+		{SourceKey: "hook_context_before_model_0", Kind: agentcore.ContextContributionOther, Content: "hook context", State: agentcore.ContextEpochSourceUpdated},
+		{SourceKey: "runtime_recovery", Kind: agentcore.ContextContributionOther, Content: "recovery", State: agentcore.ContextEpochSourceUpdated},
+		{SourceKey: "composer_skill_selection", Kind: agentcore.ContextContributionSkills, Content: "selected skill", State: agentcore.ContextEpochSourceUpdated},
+	}
+	changed := candidate
+	changed.Sources = append(append([]agentcore.ContextEpochSourceCandidate(nil), candidate.Sources...), lateSources...)
+	second, err := store.Project(context.Background(), changed)
+	if err != nil {
+		t.Fatalf("append late sources: %v", err)
+	}
+	if second.Receipt.State != "updated" {
+		t.Fatalf("late sources did not update the epoch: %+v", second.Receipt)
+	}
+
+	raw := readRawCurrentContextEpoch(t, candidate.ThreadID)
+	emptyDigest := agentcore.ContextEpochSourceDigest("")
+	for _, late := range lateSources {
+		var found *contextEpochSourceSnapshot
+		for index := range raw.SourceSnapshots {
+			if raw.SourceSnapshots[index].SourceKey == late.SourceKey {
+				found = &raw.SourceSnapshots[index]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("late source %q was not persisted", late.SourceKey)
+		}
+		if found.BaselineValue != "" || found.BaselineDigest != emptyDigest {
+			t.Fatalf("late source %q baseline=(%q,%q), want explicit empty baseline", late.SourceKey, found.BaselineValue, found.BaselineDigest)
+		}
+		if found.Value != late.Content || found.ValueDigest != agentcore.ContextEpochSourceDigest(late.Content) {
+			t.Fatalf("late source %q current value/digest mismatch: %+v", late.SourceKey, *found)
+		}
+	}
+
+	restarted := NewContextEpochStore()
+	third, err := restarted.Project(context.Background(), changed)
+	if err != nil {
+		t.Fatalf("restart projection after late sources: %v", err)
+	}
+	if third.Receipt.EpochID != second.Receipt.EpochID || third.SystemPrompt != second.SystemPrompt {
+		t.Fatalf("restart did not preserve the late-source epoch: second=%+v third=%+v", second.Receipt, third.Receipt)
+	}
+}
+
+func TestContextEpochNormalizesOnlyKnownMissingLateSourceBaselineDigest(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	store := NewContextEpochStore()
+	candidate := testContextEpochCandidate()
+	if _, err := store.Project(context.Background(), candidate); err != nil {
+		t.Fatalf("initial projection: %v", err)
+	}
+	changed := candidate
+	changed.Sources = append(append([]agentcore.ContextEpochSourceCandidate(nil), candidate.Sources...), agentcore.ContextEpochSourceCandidate{
+		SourceKey: "skill_activation_excel", Kind: agentcore.ContextContributionSkills,
+		Content: "excel skill", State: agentcore.ContextEpochSourceUpdated,
+	})
+	if _, err := store.Project(context.Background(), changed); err != nil {
+		t.Fatalf("append late source: %v", err)
+	}
+
+	raw := readRawCurrentContextEpoch(t, candidate.ThreadID)
+	for index := range raw.SourceSnapshots {
+		if raw.SourceSnapshots[index].SourceKey == "skill_activation_excel" {
+			raw.SourceSnapshots[index].BaselineDigest = ""
+			raw.SourceSnapshots[index].BaselineValue = ""
+		}
+	}
+	writeRawContextEpoch(t, candidate.ThreadID, raw)
+
+	restarted := NewContextEpochStore()
+	if _, err := restarted.Project(context.Background(), changed); err != nil {
+		t.Fatalf("known late-source writer shape was not normalized: %v", err)
+	}
+	normalized := readRawCurrentContextEpoch(t, candidate.ThreadID)
+	for _, source := range normalized.SourceSnapshots {
+		if source.SourceKey == "skill_activation_excel" && source.BaselineDigest != agentcore.ContextEpochSourceDigest("") {
+			t.Fatalf("known late-source baseline digest was not durably normalized: %+v", source)
+		}
+	}
+}
+
+func TestContextEpochRejectsLateSourceNormalizationWhenDeltaDoesNotMatch(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	store := NewContextEpochStore()
+	candidate := testContextEpochCandidate()
+	if _, err := store.Project(context.Background(), candidate); err != nil {
+		t.Fatalf("initial projection: %v", err)
+	}
+	changed := candidate
+	changed.Sources = append(append([]agentcore.ContextEpochSourceCandidate(nil), candidate.Sources...), agentcore.ContextEpochSourceCandidate{
+		SourceKey: "skill_activation_excel", Kind: agentcore.ContextContributionSkills,
+		Content: "excel skill", State: agentcore.ContextEpochSourceUpdated,
+	})
+	if _, err := store.Project(context.Background(), changed); err != nil {
+		t.Fatalf("append late source: %v", err)
+	}
+
+	raw := readRawCurrentContextEpoch(t, candidate.ThreadID)
+	for index := range raw.SourceSnapshots {
+		if raw.SourceSnapshots[index].SourceKey == "skill_activation_excel" {
+			raw.SourceSnapshots[index].BaselineDigest = ""
+		}
+	}
+	for index := range raw.Deltas {
+		if raw.Deltas[index].SourceKey == "skill_activation_excel" {
+			raw.Deltas[index].Content += "\ntampered"
+		}
+	}
+	writeRawContextEpoch(t, candidate.ThreadID, raw)
+	before, err := os.ReadFile(currentContextEpochPath(t, candidate.ThreadID))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = NewContextEpochStore().Project(context.Background(), changed)
+	if err == nil || !strings.Contains(err.Error(), "context epoch source digest mismatch") {
+		t.Fatalf("tampered late-source delta must remain fail-stop, got %v", err)
+	}
+	after, readErr := os.ReadFile(currentContextEpochPath(t, candidate.ThreadID))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(after) != string(before) {
+		t.Fatal("failed normalization rewrote the source sidecar")
+	}
+}
+
 func TestContextEpochThreeFullReplayToolTurnsKeepCanonicalPrefix(t *testing.T) {
 	t.Setenv(awakenHomeEnv, t.TempDir())
 	store := NewContextEpochStore()
@@ -360,4 +499,51 @@ func contextEpochToolNames(values []tool.ToolSchema) []string {
 		result = append(result, value.Function.Name)
 	}
 	return result
+}
+
+func readRawCurrentContextEpoch(t *testing.T, threadID string) contextEpochSidecar {
+	t.Helper()
+	dir := filepath.Join(activeSessionsDir(), safeTranscriptFileName(threadID), "context", "epochs")
+	var pointer contextEpochPointer
+	pointerBytes, err := os.ReadFile(filepath.Join(dir, "current.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(pointerBytes, &pointer); err != nil {
+		t.Fatal(err)
+	}
+	var epoch contextEpochSidecar
+	epochBytes, err := os.ReadFile(filepath.Join(dir, pointer.EpochID+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(epochBytes, &epoch); err != nil {
+		t.Fatal(err)
+	}
+	return epoch
+}
+
+func writeRawContextEpoch(t *testing.T, threadID string, epoch contextEpochSidecar) {
+	t.Helper()
+	encoded, err := json.MarshalIndent(epoch, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(currentContextEpochPath(t, threadID), append(encoded, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func currentContextEpochPath(t *testing.T, threadID string) string {
+	t.Helper()
+	dir := filepath.Join(activeSessionsDir(), safeTranscriptFileName(threadID), "context", "epochs")
+	var pointer contextEpochPointer
+	pointerBytes, err := os.ReadFile(filepath.Join(dir, "current.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(pointerBytes, &pointer); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(dir, pointer.EpochID+".json")
 }

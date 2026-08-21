@@ -89,6 +89,7 @@ type contextEpochSidecar struct {
 	Tools                  []contextEpochToolSnapshot   `json:"tools"`
 	Deltas                 []contextEpochDelta          `json:"deltas,omitempty"`
 	UpdatedAt              time.Time                    `json:"updated_at"`
+	needsNormalization     bool
 }
 
 func (store *ContextEpochFileStore) Project(_ context.Context, candidate agentcore.ContextEpochCandidate) (agentcore.ContextEpochProjection, error) {
@@ -144,7 +145,7 @@ func (store *ContextEpochFileStore) Project(_ context.Context, candidate agentco
 	if state == "created" || state == "rotated" {
 		current.CreationBoundaryReason = reason
 	}
-	if state != "unchanged" {
+	if state != "unchanged" || current.needsNormalization {
 		current.UpdatedAt = time.Now().UTC()
 		if err := persistContextEpoch(dir, current); err != nil {
 			return agentcore.ContextEpochProjection{}, err
@@ -305,6 +306,7 @@ func updateContextEpoch(current *contextEpochSidecar, candidate agentcore.Contex
 		}
 		snapshot := contextEpochSourceSnapshot{
 			SourceKey: source.SourceKey, Kind: source.Kind, CodecVersion: 1,
+			BaselineDigest: agentcore.ContextEpochSourceDigest(""), BaselineValue: "",
 			ValueDigest: agentcore.ContextEpochSourceDigest(source.Content), Value: source.Content,
 		}
 		current.SourceSnapshots = append(current.SourceSnapshots, snapshot)
@@ -348,12 +350,9 @@ func updateContextEpoch(current *contextEpochSidecar, candidate agentcore.Contex
 func appendContextEpochDelta(epoch *contextEpochSidecar, snapshot *contextEpochSourceSnapshot, state agentcore.ContextEpochSourceState, value string) {
 	sequence := uint64(len(epoch.Deltas) + 1)
 	digest := agentcore.ContextEpochSourceDigest(value)
-	deltaText := fmt.Sprintf("\n\n### Awaken host context update\nsource=%s\nstate=%s\nsequence=%d", snapshot.SourceKey, state, sequence)
+	deltaText := contextEpochDeltaContent(snapshot.SourceKey, state, sequence, value)
 	if state == agentcore.ContextEpochSourceRemoved {
-		deltaText += "\nThis previously admitted host context source is removed."
 		value = ""
-	} else {
-		deltaText += "\n\n" + value
 	}
 	epoch.Deltas = append(epoch.Deltas, contextEpochDelta{
 		Sequence: sequence, SourceKey: snapshot.SourceKey, Kind: snapshot.Kind, State: state,
@@ -363,6 +362,14 @@ func appendContextEpochDelta(epoch *contextEpochSidecar, snapshot *contextEpochS
 	snapshot.ValueDigest = digest
 	snapshot.AppliedSequence = sequence
 	snapshot.State = state
+}
+
+func contextEpochDeltaContent(sourceKey string, state agentcore.ContextEpochSourceState, sequence uint64, value string) string {
+	deltaText := fmt.Sprintf("\n\n### Awaken host context update\nsource=%s\nstate=%s\nsequence=%d", sourceKey, state, sequence)
+	if state == agentcore.ContextEpochSourceRemoved {
+		return deltaText + "\nThis previously admitted host context source is removed."
+	}
+	return deltaText + "\n\n" + value
 }
 
 func projectContextEpoch(epoch contextEpochSidecar, state, reason string) agentcore.ContextEpochProjection {
@@ -447,8 +454,15 @@ func readCurrentContextEpoch(dir string) (contextEpochSidecar, error) {
 				return contextEpochSidecar{}, errors.New("context epoch instruction prefix is invalid")
 			}
 		}
-		for _, source := range epoch.SourceSnapshots {
-			if source.BaselineDigest != agentcore.ContextEpochSourceDigest(source.BaselineValue) || source.ValueDigest != agentcore.ContextEpochSourceDigest(source.Value) {
+		for index := range epoch.SourceSnapshots {
+			source := &epoch.SourceSnapshots[index]
+			if source.ValueDigest != agentcore.ContextEpochSourceDigest(source.Value) {
+				return contextEpochSidecar{}, errors.New("context epoch source digest mismatch")
+			}
+			if source.BaselineDigest == agentcore.ContextEpochSourceDigest(source.BaselineValue) {
+				continue
+			}
+			if !normalizeKnownLateAddedSourceBaseline(&epoch, source) {
 				return contextEpochSidecar{}, errors.New("context epoch source digest mismatch")
 			}
 		}
@@ -460,6 +474,32 @@ func readCurrentContextEpoch(dir string) (contextEpochSidecar, error) {
 		}
 	}
 	return epoch, nil
+}
+
+// normalizeKnownLateAddedSourceBaseline repairs only the schema-v4 writer shape
+// that represented a source first admitted after the baseline without persisting
+// the digest of its empty baseline. The current value and its exact append delta
+// must already be independently valid; every other mismatch remains fail-stop.
+func normalizeKnownLateAddedSourceBaseline(epoch *contextEpochSidecar, source *contextEpochSourceSnapshot) bool {
+	if epoch == nil || source == nil ||
+		source.CodecVersion != 1 || source.BaselineDigest != "" || source.BaselineValue != "" ||
+		source.AppliedSequence == 0 || source.State != agentcore.ContextEpochSourceUpdated {
+		return false
+	}
+	for _, delta := range epoch.Deltas {
+		if delta.Sequence != source.AppliedSequence {
+			continue
+		}
+		if delta.SourceKey != source.SourceKey || delta.Kind != source.Kind ||
+			delta.State != agentcore.ContextEpochSourceUpdated || delta.Digest != source.ValueDigest ||
+			delta.Content != contextEpochDeltaContent(source.SourceKey, agentcore.ContextEpochSourceUpdated, source.AppliedSequence, source.Value) {
+			return false
+		}
+		source.BaselineDigest = agentcore.ContextEpochSourceDigest("")
+		epoch.needsNormalization = true
+		return true
+	}
+	return false
 }
 
 func contextEpochBaselineDigest(systemPrompt string, prefixMessages []convcontext.Message) string {

@@ -31,7 +31,7 @@ RequestBuilder 使用 `ContextEnvelope.UserContextItems` 生成 request-only syn
 
 Context Epoch schema v4 把 synthetic prefix messages 和 instruction digest 保存到 thread 的 epoch sidecar，与 conversation history 分离。指令 digest 变化、来源删除或切换主文件夹时冷旋转；指令变化的边界原因为 `agents_instructions_changed`，workspace identity 变化仍使用 `workspace_moved`。旧正文不会出现在新 Epoch 请求中。
 
-compact 成功后以 `compact_succeeded` 创建的新 Epoch继续携带当前 run 的同一 prefix；compact 失败或取消不切 Epoch。Provider retry 使用同一个 prepared request，不重新读取文件。Context Epoch pointer/sidecar/digest 损坏时阻止模型请求并保留原数据，不回退到猜测的旧规则。
+compact 成功后以 `compact_succeeded` 创建的新 Epoch继续携带当前 run 的同一 prefix；compact 失败或取消不切 Epoch。Provider retry 使用同一个 prepared request，不重新读取文件。Context Epoch pointer/sidecar/digest 损坏时阻止模型请求并保留原数据，不回退到猜测的旧规则；唯一自动归一化例外是可由 current value digest 与同 sequence 的完整 append delta 精确证明的“晚加入 source 缺少空 baseline digest”旧 v4 writer 形态，其他不一致仍 fail-stop。
 
 ## 5. 耐久、断线与重启
 

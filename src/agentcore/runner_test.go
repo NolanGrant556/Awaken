@@ -28,6 +28,14 @@ type runnerTestTool struct {
 	fail bool
 }
 
+type failingContextEpochStore struct {
+	err error
+}
+
+func (store failingContextEpochStore) Project(context.Context, ContextEpochCandidate) (ContextEpochProjection, error) {
+	return ContextEpochProjection{}, store.err
+}
+
 func (t runnerTestTool) Name() string {
 	return t.name
 }
@@ -2258,6 +2266,66 @@ func TestRunEventEmitterRunErroredSetsRequestFailedCode(t *testing.T) {
 	}
 	if !strings.Contains(gotEvents[0].Error, llm.ErrRequestFailed.Error()) {
 		t.Fatalf("expected error text to contain %q, got %q", llm.ErrRequestFailed.Error(), gotEvents[0].Error)
+	}
+}
+
+func TestContextEpochProjectionFailureIsClassifiedAsLocalPreparationError(t *testing.T) {
+	projectionErr := fmt.Errorf("%w: %w", ErrContextEpochProjection, errors.New("context epoch source digest mismatch"))
+	wrapped := wrapModelInvocationError(projectionErr)
+	if !errors.Is(wrapped, ErrContextEpochProjection) {
+		t.Fatalf("wrapped error lost Context Epoch identity: %v", wrapped)
+	}
+	if strings.Contains(wrapped.Error(), "LLM stream call failed") || !strings.HasPrefix(wrapped.Error(), "context preparation failed:") {
+		t.Fatalf("Context Epoch error was presented as an LLM stream failure: %v", wrapped)
+	}
+	if got := terminalReasonForError(wrapped); got != TerminalReasonContextEpochError {
+		t.Fatalf("terminal reason=%q, want %q", got, TerminalReasonContextEpochError)
+	}
+
+	var gotEvents []AwakenEvent
+	emitter := newRunEventEmitter("thread-test", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	emitter.runErrored(context.Background(), wrapped)
+	if len(gotEvents) != 1 {
+		t.Fatalf("expected 1 event, got %d: %+v", len(gotEvents), gotEvents)
+	}
+	if gotEvents[0].Code != "CONTEXT_EPOCH_ERROR" || gotEvents[0].TerminalReason != TerminalReasonContextEpochError {
+		t.Fatalf("unexpected Context Epoch error event: %+v", gotEvents[0])
+	}
+}
+
+func TestRunnerContextEpochProjectionFailureDoesNotReachProvider(t *testing.T) {
+	server := newRunnerStreamServer(t, func(http.ResponseWriter, *http.Request) {
+		t.Fatal("Context Epoch projection failure must stop before provider transport")
+	})
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL, 2)
+	cfg.ContextEpochStore = failingContextEpochStore{err: errors.New("context epoch source digest mismatch")}
+	var gotEvents []AwakenEvent
+	agent := NewAgent(cfg)
+	_, err := agent.RunStreamWithEvents(context.Background(), "projection test", EventSinkFunc(func(event AwakenEvent) {
+		gotEvents = append(gotEvents, event)
+	}))
+	if err == nil {
+		t.Fatal("expected Context Epoch projection failure")
+	}
+	if strings.Contains(err.Error(), "LLM stream call failed") || !strings.HasPrefix(err.Error(), "context preparation failed:") {
+		t.Fatalf("unexpected returned error classification: %v", err)
+	}
+
+	var runError *AwakenEvent
+	for index := range gotEvents {
+		if gotEvents[index].Type == RunErrorEventType {
+			runError = &gotEvents[index]
+		}
+	}
+	if runError == nil {
+		t.Fatalf("missing RunError event: %+v", gotEvents)
+	}
+	if runError.Code != "CONTEXT_EPOCH_ERROR" || runError.TerminalReason != TerminalReasonContextEpochError {
+		t.Fatalf("unexpected RunError event: %+v", *runError)
 	}
 }
 

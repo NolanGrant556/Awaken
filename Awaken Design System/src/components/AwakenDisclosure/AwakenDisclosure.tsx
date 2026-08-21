@@ -1,6 +1,6 @@
 import "./AwakenDisclosure.css";
 import { useId, useState, type ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 
 export type AwakenDisclosureProps = {
   title: ReactNode;
@@ -52,7 +52,7 @@ export function AwakenDisclosure({
           </span>
         ) : null}
         <span className="aw-disclosure-chevron" aria-hidden="true">
-          <ChevronRight size={15} strokeWidth={2} />
+          <AwakenIcon concept="disclose" size={16} />
         </span>
       </button>
       {open ? (

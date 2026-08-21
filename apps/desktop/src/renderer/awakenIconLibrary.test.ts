@@ -135,12 +135,23 @@ describe("光学与网格不变量", () => {
     }
   });
 
-  it("全套线性图标使用同一个描边宽度", () => {
+  it("描边字形共用同一个描边宽度，实心字形描边为 0", () => {
     for (const name of AWAKEN_LINE_ICON_NAMES) {
       const icon = getAwakenIcon(name);
       if (icon.mode !== "line") continue;
-      expect(icon.strokeWidth, name).toBe(AWAKEN_ICON_STROKE);
+      // 实心字形的视觉包围盒就是几何包围盒，不为描边留半个描边宽度。
+      expect(icon.strokeWidth, name).toBe(icon.filled ? 0 : AWAKEN_ICON_STROKE);
     }
+  });
+
+  it("实心字形只给产品真正需要的概念做", () => {
+    const filled = AWAKEN_LINE_ICON_NAMES.filter((name) => {
+      const icon = getAwakenIcon(name);
+      return icon.mode === "line" && icon.filled;
+    });
+    // 停止是唯一需要实心的概念：描边版在 16px 下读起来像一个空框，
+    // 与「发送」的视觉重量不成对比。新增实心字形必须在这里显式登记。
+    expect(filled).toEqual(["stop"]);
   });
 
   it("品牌标记保留 authored geometry，并声明可读下限", () => {

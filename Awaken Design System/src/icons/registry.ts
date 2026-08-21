@@ -26,7 +26,9 @@ export type AwakenIconRender =
       readonly mode: "line";
       readonly viewBox: string;
       readonly paths: readonly string[];
+      /** 实心字形为 0，渲染时改用 fill。 */
       readonly strokeWidth: number;
+      readonly filled: boolean;
       /** 实测视觉尺寸（16 网格单位），供光学审计核对。 */
       readonly measured: readonly [number, number];
       readonly shape: AwakenOpticalShape;
@@ -53,17 +55,19 @@ function compileLineIcons(): Record<AwakenLineIconName, AwakenIconRender> {
   const out = {} as Record<AwakenLineIconName, AwakenIconRender>;
   for (const key of Object.keys(ICON_DEFINITIONS) as AwakenLineIconName[]) {
     const def = ICON_DEFINITIONS[key];
+    const stroke = def.filled ? 0 : AWAKEN_ICON_STROKE;
     const { ops, measured } = normalizeToOptical(
       def.build(),
       opticalVisual(def),
       def.fit ?? "bbox",
-      AWAKEN_ICON_STROKE,
+      stroke,
     );
     out[key] = {
       mode: "line",
       viewBox: LINE_VIEW_BOX,
       paths: emitPaths(ops),
-      strokeWidth: AWAKEN_ICON_STROKE,
+      strokeWidth: stroke,
+      filled: def.filled ?? false,
       measured,
       shape: def.shape,
       minSize: def.minSize ?? 12,

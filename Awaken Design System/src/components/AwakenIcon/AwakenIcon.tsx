@@ -58,7 +58,8 @@ function AwakenIconImpl({
     ...a11y,
   };
 
-  if (icon.mode === "brand-fill") {
+  const isFilled = icon.mode === "brand-fill" || (icon.mode === "line" && icon.filled);
+  if (isFilled) {
     return (
       <svg {...common} fill="currentColor">
         {icon.paths.map((d, i) => (

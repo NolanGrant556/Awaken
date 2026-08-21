@@ -291,7 +291,7 @@ func (t *openaiTransport) streamPrepared(ctx stdctx.Context, cfg Config, prepare
 		if watchdog.TimedOut() {
 			return nil, streamIdleTimeoutError(watchdog.Timeout())
 		}
-		return nil, fmt.Errorf("failed to read stream: %w", err)
+		return nil, streamReadError(streamCtx, err)
 	}
 
 	result, responseErr := state.response()

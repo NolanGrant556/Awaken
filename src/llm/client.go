@@ -480,7 +480,14 @@ func redactProviderErrorSecrets(detail string) string {
 
 // transportError 返回脱敏的 transport 错误，不暴露完整 URL 或 url.Error 细节。
 func transportError(err error) error {
-	return &TransportError{}
+	return &TransportError{Reason: sanitizeNetworkReason(err)}
+}
+
+func streamReadError(ctx stdctx.Context, err error) error {
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return &StreamDisconnectedError{Reason: sanitizeNetworkReason(err)}
 }
 
 // requestBuildError 返回脱敏的请求构造错误，不暴露完整 URL（例如 malformed base URL）。

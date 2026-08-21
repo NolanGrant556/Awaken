@@ -122,7 +122,10 @@ export function projectAguiEventToNarrative(
     return state;
   }
 
-  const base = key ? markSeen(state, key) : state;
+  const seen = key ? markSeen(state, key) : state;
+  const base = eventResumesAfterProviderReconnect(event)
+    ? clearProviderReconnectItems(seen)
+    : seen;
 
   switch (event.type) {
     case "RUN_STARTED":
@@ -524,19 +527,45 @@ function clearProviderReconnectItems(
   return { ...state, committedItems, activeItem };
 }
 
-function providerReconnectItemId(event: AguiEvent): string {
-  const payload = event.providerReconnect;
-  const stableSeq = event.semanticSeq ?? event.seq;
-  if (typeof stableSeq === "number") {
-    return `provider-reconnect:${eventScope(event)}:${stableSeq}`;
+function providerReconnectItemId(
+  event: AguiEvent,
+  phase: "waiting_for_network" | "reconnecting",
+): string {
+  return `provider-reconnect:${eventScope(event)}:${phase}`;
+}
+
+function eventResumesAfterProviderReconnect(event: AguiEvent): boolean {
+  switch (event.type) {
+    case "AWAKEN_TURN_STARTED":
+    case "REASONING_START":
+    case "REASONING_MESSAGE_START":
+    case "REASONING_MESSAGE_CONTENT":
+    case "REASONING_MESSAGE_END":
+    case "REASONING_END":
+    case "TEXT_MESSAGE_START":
+    case "TEXT_MESSAGE_CONTENT":
+    case "TEXT_MESSAGE_END":
+    case "TOOL_CALL_START":
+    case "TOOL_CALL_END":
+    case "TOOL_CALL_RESULT":
+      return true;
+    default:
+      return false;
   }
-  return [
-    "provider-reconnect",
-    eventScope(event),
-    payload?.phase ?? "unknown",
-    String(payload?.attempt ?? 0),
-    payload?.detail?.trim() ?? "",
-  ].join(":");
+}
+
+export function restoreLiveProviderReconnectItems(
+  state: RunNarrativeState,
+  items: readonly Extract<RunNarrativeItem, { kind: "providerReconnect" }>[],
+): RunNarrativeState {
+  if (items.length === 0) {
+    return state;
+  }
+  const committedItems = [
+    ...state.committedItems.filter((item) => item.kind !== "providerReconnect"),
+    ...items,
+  ];
+  return { ...state, committedItems };
 }
 
 function projectProviderReconnect(
@@ -544,10 +573,7 @@ function projectProviderReconnect(
   event: AguiEvent,
 ): RunNarrativeState {
   const payload = event.providerReconnect;
-  if (!payload) {
-    return state;
-  }
-  if (payload.phase === "recovered") {
+  if (!payload || payload.phase === "recovered") {
     return clearProviderReconnectItems(state);
   }
   if (
@@ -563,7 +589,7 @@ function projectProviderReconnect(
   const detail = payload.detail?.trim();
   const item: RunNarrativeItem = {
     kind: "providerReconnect",
-    id: providerReconnectItemId(event),
+    id: providerReconnectItemId(event, payload.phase),
     phase: payload.phase,
     attempt: payload.attempt ?? 0,
     maxAttempts: payload.maxAttempts ?? 0,
@@ -1025,8 +1051,8 @@ function eventKey(event: AguiEvent): string | undefined {
   if (event.type === "TOOL_CALL_ARGS_DELTA") {
     return undefined;
   }
-  // Live reconnect frames often have no durable seq. Dedup by phase/attempt
-  // so stacked waits and retries are not collapsed into one seen key.
+  // Live reconnect frames get unique SSE seq values. Keep that in the seen
+  // key so the same phase can update in place; do not collapse by phase.
   if (event.type === "AWAKEN_PROVIDER_RECONNECT") {
     const payload = event.providerReconnect;
     const stableSeq = event.semanticSeq ?? event.seq;

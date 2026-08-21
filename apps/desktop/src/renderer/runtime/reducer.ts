@@ -29,6 +29,7 @@ import {
   createInitialRunNarrativeState,
   createRunRequestedNarrative,
   projectAguiEventToNarrative,
+  restoreLiveProviderReconnectItems,
   type PromptNarrativeToken,
   type DeliverableFileType,
   type RunNarrativeItem,
@@ -485,6 +486,92 @@ function emptyThreadView(threadId: string, runId?: string): ThreadViewState {
   };
 }
 
+function upsertProviderReconnectAttempt(
+  attempts: ProviderReconnectAttempt[],
+  incoming: ProviderReconnectAttempt,
+): ProviderReconnectAttempt[] {
+  const index = attempts.findIndex((item) => item.phase === incoming.phase);
+  if (index < 0) {
+    return [...attempts, incoming];
+  }
+  const next = attempts.slice();
+  next[index] = incoming;
+  return next;
+}
+
+function providerReconnectItems(
+  narrative: RunNarrativeState,
+): Extract<RunNarrativeItem, { kind: "providerReconnect" }>[] {
+  return narrative.committedItems.filter(
+    (item): item is Extract<RunNarrativeItem, { kind: "providerReconnect" }> =>
+      item.kind === "providerReconnect",
+  );
+}
+
+function captureLiveProviderReconnect(state: RuntimeViewState): {
+  items: Extract<RunNarrativeItem, { kind: "providerReconnect" }>[];
+  attempts: ProviderReconnectAttempt[];
+  childItemsByTaskId: Record<
+    string,
+    Extract<RunNarrativeItem, { kind: "providerReconnect" }>[]
+  >;
+} {
+  const childItemsByTaskId: Record<
+    string,
+    Extract<RunNarrativeItem, { kind: "providerReconnect" }>[]
+  > = {};
+  for (const [taskId, task] of Object.entries(state.subagentsById)) {
+    const items = providerReconnectItems(task.narrative);
+    if (items.length > 0) {
+      childItemsByTaskId[taskId] = items;
+    }
+  }
+  return {
+    items: providerReconnectItems(state.narrative),
+    attempts: state.providerReconnectAttempts ?? [],
+    childItemsByTaskId,
+  };
+}
+
+function restoreLiveProviderReconnect(
+  state: RuntimeViewState,
+  snapshot: ReturnType<typeof captureLiveProviderReconnect>,
+): RuntimeViewState {
+  if (!isActiveRunStatus(state.status)) {
+    return state;
+  }
+  const childTaskIds = Object.keys(snapshot.childItemsByTaskId);
+  if (snapshot.items.length === 0 && childTaskIds.length === 0) {
+    return state;
+  }
+  let next: RuntimeViewState = {
+    ...state,
+    narrative: restoreLiveProviderReconnectItems(state.narrative, snapshot.items),
+    providerReconnectAttempts:
+      snapshot.attempts.length > 0
+        ? snapshot.attempts
+        : state.providerReconnectAttempts,
+  };
+  if (childTaskIds.length === 0) {
+    return next;
+  }
+  const subagentsById = { ...next.subagentsById };
+  for (const taskId of childTaskIds) {
+    const task = subagentsById[taskId];
+    if (!task) {
+      continue;
+    }
+    subagentsById[taskId] = {
+      ...task,
+      narrative: restoreLiveProviderReconnectItems(
+        task.narrative,
+        snapshot.childItemsByTaskId[taskId] ?? [],
+      ),
+    };
+  }
+  return { ...next, subagentsById };
+}
+
 function applyProviderReconnect(
   state: RuntimeViewState,
   event: AguiEvent,
@@ -504,8 +591,8 @@ function applyProviderReconnect(
   }
   const next: RuntimeViewState = {
     ...state,
-    providerReconnectAttempts: [
-      ...(state.providerReconnectAttempts ?? []),
+    providerReconnectAttempts: upsertProviderReconnectAttempt(
+      state.providerReconnectAttempts ?? [],
       {
         phase: payload.phase,
         attempt: payload.attempt ?? 0,
@@ -513,7 +600,7 @@ function applyProviderReconnect(
         detail: payload.detail,
         resetInProgress: payload.resetInProgress,
       },
-    ],
+    ),
   };
   if (payload.resetInProgress) {
     next.assistantText = "";
@@ -1767,6 +1854,7 @@ export function reduceRuntimeState(
 ): RuntimeViewState {
   switch (action.type) {
     case "run/replayBatch": {
+      const liveReconnect = captureLiveProviderReconnect(state);
       const replayedState = action.actions.reduce(reduceRuntimeState, state);
       const replayedItemIds = [
         ...replayedState.narrative.replayedItemIds,
@@ -1775,10 +1863,14 @@ export function reduceRuntimeState(
           ? replayIdentityIds(replayedState.narrative.activeItem)
           : []),
       ];
+      const restored = restoreLiveProviderReconnect(
+        replayedState,
+        liveReconnect,
+      );
       return saveActiveThreadView({
-        ...replayedState,
+        ...restored,
         narrative: {
-          ...replayedState.narrative,
+          ...restored.narrative,
           replayedItemIds: [...new Set(replayedItemIds)],
         },
       });

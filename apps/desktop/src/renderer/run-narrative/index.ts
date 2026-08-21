@@ -5,6 +5,7 @@ export {
   createRunRequestedNarrative,
   discardInProgressModelOutput,
   projectAguiEventToNarrative,
+  restoreLiveProviderReconnectItems,
 } from "./projector";
 
 export type {

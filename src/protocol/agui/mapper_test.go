@@ -674,6 +674,39 @@ func TestMapEventACPPermissionLifecycle(t *testing.T) {
 	}
 }
 
+func TestMapEventProviderReconnect(t *testing.T) {
+	waiting := MapEvent(agentcore.AwakenEvent{
+		Type:     agentcore.ProviderReconnectEventType,
+		ThreadID: "thread-1",
+		RunID:    "run-1",
+		TurnID:   "turn-1",
+		ProviderReconnect: &agentcore.ProviderReconnectStatus{
+			Phase:           agentcore.ProviderReconnectWaiting,
+			Attempt:         2,
+			MaxAttempts:     0,
+			Detail:          "tls handshake eof",
+			ResetInProgress: false,
+		},
+	})
+	if len(waiting) != 1 || waiting[0].Type != EventAwakenProviderReconnect || waiting[0].ProviderReconnect == nil {
+		t.Fatalf("expected live reconnect frame, got %+v", waiting)
+	}
+	payload := waiting[0].ProviderReconnect
+	if payload.Phase != agentcore.ProviderReconnectWaiting || payload.Attempt != 2 || payload.MaxAttempts != 0 || payload.Detail != "tls handshake eof" || payload.ResetInProgress {
+		t.Fatalf("unexpected waiting payload: %+v", payload)
+	}
+
+	recovered := MapEvent(agentcore.AwakenEvent{
+		Type: agentcore.ProviderReconnectEventType,
+		ProviderReconnect: &agentcore.ProviderReconnectStatus{
+			Phase: agentcore.ProviderReconnectRecovered,
+		},
+	})
+	if len(recovered) != 1 || recovered[0].ProviderReconnect == nil || recovered[0].ProviderReconnect.Phase != agentcore.ProviderReconnectRecovered {
+		t.Fatalf("expected recovered frame, got %+v", recovered)
+	}
+}
+
 func TestMapEventUnknownFallsBackWithRawPayload(t *testing.T) {
 	events := MapEvent(agentcore.AwakenEvent{
 		Type:      agentcore.AwakenEventType("FutureEvent"),

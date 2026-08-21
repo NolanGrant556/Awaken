@@ -3,6 +3,7 @@ export {
   appendRunRequestedNarrative,
   createInitialRunNarrativeState,
   createRunRequestedNarrative,
+  discardInProgressModelOutput,
   projectAguiEventToNarrative,
 } from "./projector";
 

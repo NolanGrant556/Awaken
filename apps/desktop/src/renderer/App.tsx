@@ -32,6 +32,7 @@ import {
   awakenSubagentStatusLabels,
   AwakenProjectFoldersEditor as ProjectFoldersEditor,
   AwakenProviderLogo,
+  AwakenReconnectStatus as ReconnectStatus,
   AwakenSelectableCard as SelectableCard,
   AwakenSidebar as Sidebar,
   AwakenSidebarSectionAction as SidebarSectionAction,
@@ -102,6 +103,7 @@ import {
   reduceRuntimeState,
   threadItemFromRuntime,
   type ThreadItem,
+  type ProviderReconnectAttempt,
   type RuntimeAction,
   type UserQuestionItem,
   type ComputerReviewItem,
@@ -6724,6 +6726,43 @@ export function App() {
     return null;
   }
 
+  function providerReconnectTitle(attempt: ProviderReconnectAttempt): string {
+    if (attempt.phase === "waiting_for_network") {
+      return "正在等待网络";
+    }
+    if (attempt.maxAttempts > 0) {
+      return `正在重新连接 ${attempt.attempt}/${attempt.maxAttempts}`;
+    }
+    return "正在重新连接";
+  }
+
+  function providerReconnectDetails(
+    attempts: ProviderReconnectAttempt[],
+  ): string[] {
+    const details: string[] = [];
+    for (const attempt of attempts) {
+      const detail = attempt.detail?.trim();
+      if (detail && details[details.length - 1] !== detail) {
+        details.push(detail);
+      }
+    }
+    return details;
+  }
+
+  function renderProviderReconnectStatus() {
+    const attempts = runtimeState.providerReconnectAttempts ?? [];
+    const latest = attempts[attempts.length - 1];
+    if (!latest) {
+      return null;
+    }
+    return (
+      <ReconnectStatus
+        title={providerReconnectTitle(latest)}
+        details={providerReconnectDetails(attempts)}
+      />
+    );
+  }
+
   function renderTurnBodySegment(
     turnId: string,
     segment: NarrativeTurnBodySegment,
@@ -7837,6 +7876,9 @@ export function App() {
                                         {...turnTiming}
                                       />
                                     )}
+                                    {isLatestPrompt
+                                      ? renderProviderReconnectStatus()
+                                      : null}
                                     {turnBodySegments.flatMap((segment) =>
                                       renderTurnBodySegment(turn.id, segment, turnTiming),
                                     )}

@@ -438,8 +438,6 @@ export type RuntimeClient = {
   openCodexPetsDirectory: () => Promise<void>;
 };
 
-const MAX_RECONNECT_RETRIES = 5;
-
 function reconnectDelay(retryCount: number): number {
   return Math.min(1000 * Math.pow(2, retryCount), 10000);
 }
@@ -661,12 +659,6 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
         if (isRunNotFoundError(reason)) {
           handlers.onError?.(
             `Run session was not found on the server (it may have been lost after restart): ${reason}`,
-          );
-          return;
-        }
-        if (retryCount >= MAX_RECONNECT_RETRIES) {
-          handlers.onError?.(
-            `Runtime stream failed after ${MAX_RECONNECT_RETRIES} reconnect attempts: ${reason}`,
           );
           return;
         }

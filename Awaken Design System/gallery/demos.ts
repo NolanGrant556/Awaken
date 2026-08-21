@@ -29,6 +29,7 @@ export { AwakenOriginalThinkingDemo } from "../src/components/AwakenOriginalThin
 export { AwakenPetsSettingsDemo } from "../src/components/AwakenPetsSettings/AwakenPetsSettings.demo";
 export { AwakenPrimaryNavDemo } from "../src/components/AwakenPrimaryNav/AwakenPrimaryNav.demo";
 export { AwakenProductLogoDemo } from "../src/components/AwakenProductLogo/AwakenProductLogo.demo";
+export { AwakenReconnectStatusDemo } from "../src/components/AwakenReconnectStatus/AwakenReconnectStatus.demo";
 export { AwakenProfileBalancePanelDemo } from "../src/components/AwakenProfileBalancePanel/AwakenProfileBalancePanel.demo";
 export { AwakenProfileButtonDemo } from "../src/components/AwakenProfileButton/AwakenProfileButton.demo";
 export { AwakenProjectSkillFolderDemo } from "../src/components/AwakenProjectSkillFolder/AwakenProjectSkillFolder.demo";

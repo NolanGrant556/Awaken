@@ -199,7 +199,7 @@ describe("electron runtime client", () => {
     unsubscribe();
   });
 
-  it("max retries delivers a readable bridge reconnect error", async () => {
+  it("keeps reconnecting while the run is not terminal", async () => {
     const { bridge } = createElectronBridge({ status: "running" });
     const subscriptions: Array<{
       handlers: Parameters<AwakenBridge["subscribeRun"]>[1];
@@ -213,20 +213,21 @@ describe("electron runtime client", () => {
 
     const client = createRuntimeClient();
     const onError = vi.fn();
+    const onReconnect = vi.fn();
     await client.subscribeRun("run-1", {
       onEvent: vi.fn(),
       onError,
-      onReconnect: vi.fn(),
+      onReconnect,
     });
 
-    for (let i = 0; i < 6; i += 1) {
+    for (let i = 0; i < 8; i += 1) {
       subscriptions[subscriptions.length - 1].handlers.onError?.("connection dropped");
       await vi.advanceTimersByTimeAsync(10000);
     }
 
-    expect(onError).toHaveBeenCalledWith(
-      expect.stringContaining("failed after 5 reconnect attempts"),
-    );
+    expect(onError).not.toHaveBeenCalled();
+    expect(onReconnect).toHaveBeenCalledTimes(8);
+    expect(subscriptions).toHaveLength(9);
   });
 
   it("terminal close does not reconnect", async () => {

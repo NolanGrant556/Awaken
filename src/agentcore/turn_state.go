@@ -33,6 +33,7 @@ const (
 	TerminalReasonMaxTurns            TerminalReason = "max_turns"
 	TerminalReasonContextWarning      TerminalReason = "context_warning"
 	TerminalReasonContextBlocked      TerminalReason = "context_blocked"
+	TerminalReasonContextEpochError   TerminalReason = "context_epoch_error"
 	TerminalReasonPromptTooLong       TerminalReason = "prompt_too_long"
 	TerminalReasonCompactFailed       TerminalReason = "compact_failed"
 	TerminalReasonModelError          TerminalReason = "model_error"

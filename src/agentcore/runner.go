@@ -32,7 +32,10 @@ const (
 	maxTransientLLMRetries            = 2
 )
 
-var ErrPersistenceFailed = errors.New("persistence_error")
+var (
+	ErrPersistenceFailed      = errors.New("persistence_error")
+	ErrContextEpochProjection = errors.New("project context epoch")
+)
 
 type Runner struct {
 	config               AgentConfig
@@ -311,7 +314,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 				events.runErrored(ctx, runErr, TerminalReasonPromptTooLong)
 				return "", runErr
 			}
-			runErr := fmt.Errorf("LLM stream call failed: %w", err)
+			runErr := wrapModelInvocationError(err)
 			reason := terminalReasonForError(err)
 			events.turnFinished(ctx, reason, "")
 			events.runErrored(ctx, runErr, reason)
@@ -965,7 +968,7 @@ func (r *Runner) applyContextEpoch(ctx stdcontext.Context, req LLMRequest, event
 	)
 	projection, err := r.config.ContextEpochStore.Project(ctx, candidate)
 	if err != nil {
-		return LLMRequest{}, fmt.Errorf("project context epoch: %w", err)
+		return LLMRequest{}, fmt.Errorf("%w: %w", ErrContextEpochProjection, err)
 	}
 	req.SystemPrompt = projection.SystemPrompt
 	req.PromptSections = projection.PromptSections
@@ -1980,6 +1983,8 @@ func terminalReasonForError(err error) TerminalReason {
 	switch {
 	case err == nil:
 		return ""
+	case errors.Is(err, ErrContextEpochProjection):
+		return TerminalReasonContextEpochError
 	case errors.Is(err, errContextWindowBlocked):
 		return TerminalReasonContextBlocked
 	case errors.Is(err, stdcontext.Canceled):
@@ -1991,6 +1996,13 @@ func terminalReasonForError(err error) TerminalReason {
 	default:
 		return TerminalReasonModelError
 	}
+}
+
+func wrapModelInvocationError(err error) error {
+	if errors.Is(err, ErrContextEpochProjection) {
+		return fmt.Errorf("context preparation failed: %w", err)
+	}
+	return fmt.Errorf("LLM stream call failed: %w", err)
 }
 
 func maxOutputContinuationPrompt(stopReason string) string {
@@ -2535,6 +2547,8 @@ func (e *runEventEmitter) runErrored(ctx stdcontext.Context, err error, reasons 
 	switch {
 	case errors.Is(err, errContextWindowBlocked):
 		event.Code = "CONTEXT_BLOCKED"
+	case errors.Is(err, ErrContextEpochProjection):
+		event.Code = "CONTEXT_EPOCH_ERROR"
 	case errors.Is(err, llm.ErrMissingAPIKey):
 		event.Code = "PROVIDER_AUTH_MISSING"
 	case errors.Is(err, llm.ErrRequestFailed):

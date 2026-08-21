@@ -1,5 +1,5 @@
 import "./AwakenSkills.css";
-import { Search } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import type { HTMLAttributes } from "react";
 import { AwakenFolder } from "../AwakenFolder";
 import { AwakenProjectSkillsDialog } from "../AwakenProjectSkillsDialog";
@@ -147,7 +147,7 @@ export function AwakenSkills({
           ))}
         </div>
         <label className="aw-skills__search">
-          <Search size={15} strokeWidth={1.8} aria-hidden="true" />
+          <AwakenIcon concept="search" size={16} />
           <span className="aw-skills__sr-only">搜索 Skills</span>
           <input
             value={searchValue}

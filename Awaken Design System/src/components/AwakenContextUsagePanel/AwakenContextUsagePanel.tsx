@@ -1,5 +1,5 @@
 import "./AwakenContextUsagePanel.css";
-import { X } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { forwardRef, useEffect, useId, useRef } from "react";
 
 export type AwakenContextUsageContribution = {
@@ -190,7 +190,7 @@ export const AwakenContextUsagePanel = forwardRef<
           aria-label="关闭上下文用量"
           onClick={onClose}
         >
-          <X size={15} strokeWidth={1.9} aria-hidden="true" />
+          <AwakenIcon concept="close" size={16} />
         </button>
       </header>
 

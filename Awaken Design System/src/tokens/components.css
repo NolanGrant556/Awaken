@@ -1065,9 +1065,9 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .tool-trace-group-heading[aria-expanded="true"]
-  .tool-trace-group-icon:has(.lucide-loader-circle)
+  .tool-trace-group-icon:has(.aw-icon--spinner)
   svg,
-.tool-trace-group-icon .lucide-loader-circle {
+.tool-trace-group-icon .aw-icon--spinner {
   animation: spin 1.1s linear infinite;
 }
 

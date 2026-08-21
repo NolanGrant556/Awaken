@@ -1,11 +1,11 @@
 import "./AwakenScheduledTaskEditorDialog.css";
+import { AwakenIcon } from "../AwakenIcon";
 import {
   useId,
   type ChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
-import { CalendarClock, Check, ChevronDown, Clock } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import {
   AwakenComposerBar,
@@ -257,7 +257,7 @@ export function AwakenScheduledTaskEditorDialog({
       title={
         <span className="aw-scheduled-task-editor__dialog-title">
           <span className="aw-scheduled-task-editor__dialog-icon" aria-hidden="true">
-            <CalendarClock size={18} strokeWidth={1.8} />
+            <AwakenIcon concept="scheduled-task" size={20} />
           </span>
           <span>
             <strong>{mode === "create" ? "创建定时任务" : "编辑定时任务"}</strong>
@@ -270,7 +270,7 @@ export function AwakenScheduledTaskEditorDialog({
         <>
           <AwakenButton variant="default" size="md" disabled={busy} onClick={() => onOpenChange(false)}>取消</AwakenButton>
           <AwakenButton variant="primary" size="md" loading={busy} onClick={() => onSubmit(value)}>
-            <Check size={15} strokeWidth={1.9} />保存任务
+            <AwakenIcon concept="step-done" size={16} />保存任务
           </AwakenButton>
         </>
       }
@@ -420,7 +420,7 @@ export function AwakenScheduledTaskEditorDialog({
                           }}
                         />
                         <span className="aw-scheduled-task-editor__time-icon" aria-hidden="true">
-                          <Clock size={16} strokeWidth={1.9} />
+                          <AwakenIcon concept="scheduled-task" size={16} />
                         </span>
                       </span>
                     </EditorField>
@@ -665,7 +665,7 @@ export function AwakenScheduledTaskEditorDialog({
               <strong>模型与高级选项</strong>
               <small>默认会使用运行时的当前模型配置</small>
             </span>
-            <ChevronDown size={16} strokeWidth={1.9} aria-hidden="true" />
+            <AwakenIcon concept="dropdown" size={16} />
           </summary>
           <div className="aw-scheduled-task-editor__advanced-body">
             <section aria-label="模型">

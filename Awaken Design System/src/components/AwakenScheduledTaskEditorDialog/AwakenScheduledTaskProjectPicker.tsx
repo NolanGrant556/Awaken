@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Folder, Search } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenPopover } from "../AwakenPopover";
 import type { AwakenScheduledTaskProjectOption } from "./AwakenScheduledTaskEditorDialog";
 
@@ -58,17 +58,12 @@ export function AwakenScheduledTaskProjectPicker({
           aria-invalid={invalid || undefined}
           disabled={disabled}
         >
-          <Folder size={16} strokeWidth={1.8} aria-hidden="true" />
+          <AwakenIcon concept="project" size={16} />
           <span data-placeholder={selected ? undefined : "true"}>
             <strong>{selected?.name ?? (value ? "当前项目不可用" : "请选择项目")}</strong>
             <small>{selected ? "任务将在此项目中运行" : "选择任务的运行位置"}</small>
           </span>
-          <ChevronDown
-            size={15}
-            strokeWidth={1.9}
-            aria-hidden="true"
-            data-open={open ? "true" : "false"}
-          />
+          <AwakenIcon concept="dropdown" size={16} />
         </button>
       }
       content={
@@ -83,7 +78,7 @@ export function AwakenScheduledTaskProjectPicker({
             <span>{projects.length} 个项目</span>
           </div>
           <label className="aw-scheduled-task-editor__project-search">
-            <Search size={15} strokeWidth={1.8} aria-hidden="true" />
+            <AwakenIcon concept="search" size={16} />
             <input
               ref={searchRef}
               type="search"
@@ -139,11 +134,11 @@ export function AwakenScheduledTaskProjectPicker({
                 }}
               >
                 <span className="aw-scheduled-task-editor__project-option-icon">
-                  <Folder size={15} strokeWidth={1.8} aria-hidden="true" />
+                  <AwakenIcon concept="project" size={16} />
                 </span>
                 <span>{project.name}</span>
                 {value === project.projectId ? (
-                  <Check size={15} strokeWidth={2} aria-hidden="true" />
+                  <AwakenIcon concept="step-done" size={16} />
                 ) : null}
               </button>
             ))}

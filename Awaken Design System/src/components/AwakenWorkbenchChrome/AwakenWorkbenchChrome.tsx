@@ -1,7 +1,7 @@
 import "./AwakenWorkbenchChrome.css";
+import { AwakenIcon } from "../AwakenIcon";
 import type { ReactNode } from "react";
 import type { PlatformKind } from "../../types";
-import { MessageCirclePlus, PanelLeft } from "lucide-react";
 
 export type AwakenWorkbenchChromeProps = {
   sidebarCollapsed?: boolean;
@@ -58,11 +58,11 @@ export function AwakenWorkbenchChrome({
           label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
           onClick={onToggleSidebar}
         >
-          <PanelLeft size={14} strokeWidth={1.9} />
+          <AwakenIcon concept="toggle-left-panel" size={14} />
         </ChromeIconButton>
         {sidebarCollapsed ? (
           <ChromeIconButton label="新建任务" onClick={onNewTask}>
-            <MessageCirclePlus size={14} strokeWidth={1.9} />
+            <AwakenIcon concept="thread-new" size={14} />
           </ChromeIconButton>
         ) : null}
       </div>

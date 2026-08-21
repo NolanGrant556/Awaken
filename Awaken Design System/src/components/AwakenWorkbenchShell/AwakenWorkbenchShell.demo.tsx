@@ -1,6 +1,6 @@
 import "./AwakenWorkbenchShell.css";
+import { AwakenIcon } from "../AwakenIcon";
 import "./AwakenWorkbenchShell.demo.css";
-import { Folder, Plug, Wrench } from "lucide-react";
 import { AwakenAppShell } from "../AwakenAppShell/AwakenAppShell";
 import { AwakenAppShellDemo } from "../AwakenAppShell/AwakenAppShell.demo";
 import { AwakenComposerBar } from "../AwakenComposerBar/AwakenComposerBar";
@@ -35,13 +35,13 @@ function WorkbenchAnatomySidebar() {
     <div className="aw-workbench-anatomy__sidebar" aria-label="Awaken 左侧栏示意">
       <button type="button" className="aw-workbench-anatomy__new-task">＋ 新建任务</button>
       <div className="aw-workbench-anatomy__sidebar-links">
-        <span><Plug size={12} aria-hidden="true" />连接器</span>
-        <span><Wrench size={12} aria-hidden="true" />技能</span>
+        <span><AwakenIcon concept="connector" size={12} />连接器</span>
+        <span><AwakenIcon concept="tool" size={12} />技能</span>
       </div>
       <div className="aw-workbench-anatomy__projects">
         <strong>项目工作区</strong>
-        <span><Folder size={12} aria-hidden="true" />04_市场部</span>
-        <span><Folder size={12} aria-hidden="true" />01_财务部</span>
+        <span><AwakenIcon concept="project" size={12} />04_市场部</span>
+        <span><AwakenIcon concept="project" size={12} />01_财务部</span>
       </div>
       <div className="aw-workbench-anatomy__profile"><b>AW</b><span>Nolan</span></div>
     </div>
@@ -118,7 +118,7 @@ function WorkbenchAnatomyScene() {
                             id: "files",
                             label: "文件",
                             icon: (
-                              <Folder size={16} strokeWidth={1.8} aria-hidden="true" />
+                              <AwakenIcon concept="project" size={16} />
                             ),
                           },
                         ]}

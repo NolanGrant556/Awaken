@@ -1,5 +1,6 @@
 import type { CSSProperties, MouseEvent } from "react";
-import { AlertCircle, ArrowDownCircle, RefreshCw, RotateCw } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
+import type { AwakenIconConcept } from "../../icons";
 
 export type AwakenSidebarUpdateAction = {
   state: "available" | "downloading" | "downloaded" | "error";
@@ -17,11 +18,11 @@ export type AwakenSidebarUpdateButtonProps = {
 
 type UpdateState = AwakenSidebarUpdateAction["state"];
 
-const STATE_ICON: Record<UpdateState, typeof ArrowDownCircle> = {
-  available: ArrowDownCircle,
-  downloading: RefreshCw,
-  downloaded: RotateCw,
-  error: AlertCircle,
+const STATE_CONCEPT: Record<UpdateState, AwakenIconConcept> = {
+  available: "update-available",
+  downloading: "refresh",
+  downloaded: "restart",
+  error: "error",
 };
 
 const STATE_FOREGROUND: Record<UpdateState, string> = {
@@ -88,8 +89,7 @@ function clampProgress(progress: number): number {
 
 export function AwakenSidebarUpdateButton({ action }: AwakenSidebarUpdateButtonProps) {
   const { state, label, progress, disabled, onClick } = action;
-  const Icon = STATE_ICON[state];
-  const showProgress =
+    const showProgress =
     state === "downloading" && typeof progress === "number" && Number.isFinite(progress);
   const busy = state === "downloading";
 
@@ -128,7 +128,7 @@ export function AwakenSidebarUpdateButton({ action }: AwakenSidebarUpdateButtonP
       onMouseUp={handleUp}
     >
       <span style={rowStyle}>
-        <Icon size={16} strokeWidth={1.9} aria-hidden="true" />
+        <AwakenIcon concept={STATE_CONCEPT[state]} size={16} />
         <span style={labelStyle}>{label}</span>
       </span>
       {showProgress ? (

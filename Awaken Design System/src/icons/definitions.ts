@@ -23,19 +23,24 @@ import {
 import {
   bracketPair,
   chevron,
+  cornerBrackets,
   crescent,
   crossMark,
   display,
   exclamationMark,
   eye,
   fileBody,
+  fileWithMark,
   folderBody,
   gear,
+  globe,
   hexagon,
   hexagonCore,
   hexagonHook,
   hexagonSlots,
+  magnifier,
   minusMark,
+  panelFrame,
   personBust,
   plusMark,
   questionMark,
@@ -1278,6 +1283,661 @@ const RAW_DEFINITIONS = {
           [8, 13.4],
         ],
         [0, 0.6, 1.1, 1.1, 0.6, 0],
+      ),
+    ],
+  },
+
+  // ---- 文件类型族：同一个文件外形 + 不同内标 ----
+  // 十一个类型共用 fileWithMark，比逐个手画更一致；内标一律只有一个形体，
+  // 因为文件外形已经占掉大部分空间，15px 下容不下第二个细节。
+  file: {
+    shape: "vertical",
+    purpose: "未识别类型文件",
+    build: () => fileWithMark(),
+  },
+  "file-markdown": {
+    shape: "vertical",
+    minSize: 14,
+    purpose: "Markdown 文件",
+    build: () =>
+      fileWithMark(
+        poly(
+          [
+            [5.5, 7.4],
+            [5.5, 11.2],
+          ],
+          0,
+        ),
+        poly(
+          [
+            [3.6, 9.3],
+            [5.5, 11.2],
+            [7.4, 9.3],
+          ],
+          [0, 0.7, 0],
+        ),
+      ),
+  },
+  "file-code": {
+    shape: "vertical",
+    minSize: 14,
+    purpose: "代码文件",
+    build: () =>
+      fileWithMark(
+        poly(
+          [
+            [4.3, 7.9],
+            [2.6, 9.6],
+            [4.3, 11.3],
+          ],
+          [0, 0.7, 0],
+        ),
+        poly(
+          [
+            [6.9, 7.9],
+            [8.6, 9.6],
+            [6.9, 11.3],
+          ],
+          [0, 0.7, 0],
+        ),
+      ),
+  },
+  "file-data": {
+    shape: "vertical",
+    minSize: 14,
+    purpose: "数据文件（JSON / YAML）",
+    build: () => fileWithMark(...bracketPair(5.5, 9.6, 3.1, 1.5, 2.1)),
+  },
+  "file-image": {
+    shape: "vertical",
+    minSize: 14,
+    purpose: "图片文件",
+    build: () => fileWithMark(circle(5.5, 9.6, 1.9)),
+  },
+  "file-archive": {
+    shape: "vertical",
+    minSize: 14,
+    purpose: "压缩包",
+    build: () =>
+      fileWithMark(
+        poly([[5.5, 7.3], [5.5, 7.3]], 0),
+        poly([[5.5, 9.6], [5.5, 9.6]], 0),
+        poly([[5.5, 11.9], [5.5, 11.9]], 0),
+      ),
+  },
+  "file-audio": {
+    shape: "vertical",
+    minSize: 14,
+    purpose: "音频文件",
+    build: () =>
+      fileWithMark(
+        circle(4.4, 11.3, 1.5),
+        poly(
+          [
+            [5.9, 11.3],
+            [5.9, 7.4],
+            [8.2, 8.1],
+          ],
+          [0, 0.6, 0],
+        ),
+      ),
+  },
+  "file-video": {
+    shape: "vertical",
+    minSize: 14,
+    purpose: "视频文件",
+    build: () =>
+      fileWithMark(
+        poly(
+          [
+            [4.2, 7.4],
+            [8.3, 9.7],
+            [4.2, 12],
+          ],
+          0.6,
+          true,
+        ),
+      ),
+  },
+  "file-pdf": {
+    shape: "vertical",
+    minSize: 14,
+    purpose: "PDF",
+    // PDF 没有能在 15px 读出的字母标，改用一条贯穿的实心横带，
+    // 在文件族里是唯一的「带」，因此可辨。
+    build: () =>
+      fileWithMark(
+        poly(
+          [
+            [1.6, 8.2],
+            [9.4, 8.2],
+            [9.4, 11],
+            [1.6, 11],
+          ],
+          0.8,
+          true,
+        ),
+      ),
+  },
+  table: {
+    shape: "square",
+    minSize: 14,
+    purpose: "表格 / Excel",
+    build: () => [
+      poly(
+        [
+          [1.6, 2.6],
+          [14.4, 2.6],
+          [14.4, 13.4],
+          [1.6, 13.4],
+        ],
+        1.7,
+        true,
+      ),
+      poly(
+        [
+          [1.6, 6.2],
+          [14.4, 6.2],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [1.6, 9.8],
+          [14.4, 9.8],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [6.4, 6.2],
+          [6.4, 13.4],
+        ],
+        0,
+      ),
+    ],
+  },
+  "display-play": {
+    shape: "horizontal",
+    minSize: 14,
+    purpose: "演示 / PowerPoint",
+    build: () => [
+      ...display(),
+      poly(
+        [
+          [6.6, 4.5],
+          [10.2, 6.8],
+          [6.6, 9.1],
+        ],
+        0.6,
+        true,
+      ),
+    ],
+  },
+  symlink: {
+    // 第一版画成两个互扣圆环，与 mcp-compact 撞形（后者刻意呼应 MCP 官方标记的
+    // 互扣语义）。改成折向箭头：先上行再右转，表示「指向别处」，
+    // 与 external-link 的斜向箭头也区分得开。
+    shape: "square",
+    purpose: "符号链接",
+    build: () => [
+      poly(
+        [
+          [3.4, 13],
+          [3.4, 6.6],
+          [11.4, 6.6],
+        ],
+        [0, 1.3, 0],
+      ),
+      poly(
+        [
+          [8.6, 3.8],
+          [11.4, 6.6],
+          [8.6, 9.4],
+        ],
+        [0, 0.8, 0],
+      ),
+    ],
+  },
+  folders: {
+    shape: "horizontal",
+    minSize: 14,
+    purpose: "文件夹组",
+    build: () => [
+      // 后层只画露出的两条边，避免与前层重叠形成双描边。
+      poly(
+        [
+          [3.4, 4.4],
+          [3.4, 1.9],
+          [7.2, 1.9],
+          [8.8, 3.5],
+          [14.6, 3.5],
+        ],
+        [0, 1.1, 0.8, 0.6, 0],
+      ),
+      poly(
+        [
+          [1.4, 5.4],
+          [5.2, 5.4],
+          [6.8, 7],
+          [12.6, 7],
+          [12.6, 13.6],
+          [1.4, 13.6],
+        ],
+        [1.2, 0.8, 0.6, 1.2, 1.2, 1.2],
+        true,
+      ),
+    ],
+  },
+  "folder-search": {
+    shape: "horizontal",
+    minSize: 16,
+    purpose: "定位到文件夹",
+    build: () => [
+      poly(
+        [
+          [1.4, 12.8],
+          [1.4, 3.2],
+          [6.2, 3.2],
+          [8.2, 5.2],
+          [13, 5.2],
+          [13, 7.4],
+        ],
+        [1.2, 1.2, 0.8, 0.6, 1.2, 0],
+      ),
+      circle(10.2, 10.4, 2.6),
+      poly(
+        [
+          [12.2, 12.4],
+          [14.6, 14.8],
+        ],
+        0,
+      ),
+    ],
+  },
+
+  // ---- 预览与缩放 ----
+  "magnifying-glass-plus": {
+    shape: "circle",
+    minSize: 14,
+    purpose: "放大",
+    build: () => magnifier(plusMark(6.25, 6.25, 2.1)),
+  },
+  "magnifying-glass-minus": {
+    shape: "circle",
+    minSize: 14,
+    purpose: "缩小",
+    build: () => magnifier([minusMark(6.25, 6.25, 2.1)]),
+  },
+  "rect-magnifying-glass": {
+    shape: "circle",
+    minSize: 16,
+    purpose: "适应页面",
+    build: () =>
+      magnifier([
+        poly(
+          [
+            [4.1, 4.6],
+            [8.4, 4.6],
+            [8.4, 7.9],
+            [4.1, 7.9],
+          ],
+          0.6,
+          true,
+        ),
+      ]),
+  },
+  "corners-out": {
+    shape: "square",
+    purpose: "放大 / 全屏",
+    build: () => cornerBrackets(true),
+  },
+  "corners-in": {
+    shape: "square",
+    purpose: "退出全屏",
+    build: () => cornerBrackets(false),
+  },
+  "arrow-ccw": {
+    shape: "circle",
+    fit: "radial",
+    purpose: "逆时针旋转 / 重置",
+    build: () => {
+      const r = 5.6;
+      return [arc(8, 8, r, 230, -80), arrow(8, 8, r, -80, -1, 3.1, 32)];
+    },
+  },
+  pencil: {
+    shape: "circle",
+    purpose: "编辑",
+    build: () => [
+      // 笔身沿 45 度，笔尖在左下，遵循「方向跟随指针」的反向（书写方向）。
+      poly(
+        [
+          [2.1, 13.9],
+          [3.2, 10.4],
+          [11.4, 2.2],
+          [13.8, 4.6],
+          [5.6, 12.8],
+        ],
+        [0.5, 0.6, 1.1, 1.1, 0.6],
+        true,
+      ),
+      poly(
+        [
+          [9.6, 4],
+          [12, 6.4],
+        ],
+        0,
+      ),
+    ],
+  },
+  paragraph: {
+    shape: "square",
+    purpose: "自动换行",
+    build: () => [
+      poly(
+        [
+          [1.6, 3.4],
+          [14.4, 3.4],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [1.6, 8],
+          [11.2, 8],
+          [11.2, 11.4],
+          [4.6, 11.4],
+        ],
+        [0, 1.5, 1.5, 0],
+      ),
+      poly(
+        [
+          [6.6, 9.4],
+          [4.6, 11.4],
+          [6.6, 13.4],
+        ],
+        [0, 0.7, 0],
+      ),
+    ],
+  },
+
+  // ---- 布局与窗口 ----
+  "layout-sidebar-left": {
+    shape: "horizontal",
+    purpose: "切换左侧栏",
+    build: () => panelFrame("left"),
+  },
+  "layout-sidebar-right": {
+    shape: "horizontal",
+    purpose: "切换右侧 Inspector",
+    build: () => panelFrame("right"),
+  },
+  window: {
+    // 标题栏三个点是与 credit-card 区分的关键：两者都是圆角矩形加一条顶部横线，
+    // 没有点的话在任何尺寸下都分不开。
+    shape: "horizontal",
+    minSize: 14,
+    purpose: "用其他应用打开",
+    build: () => [
+      poly(
+        [
+          [1.6, 2.8],
+          [14.4, 2.8],
+          [14.4, 13.2],
+          [1.6, 13.2],
+        ],
+        1.8,
+        true,
+      ),
+      poly(
+        [
+          [1.6, 6.2],
+          [14.4, 6.2],
+        ],
+        0,
+      ),
+      poly([[4, 4.5], [4, 4.5]], 0),
+      poly([[6.2, 4.5], [6.2, 4.5]], 0),
+      poly([[8.4, 4.5], [8.4, 4.5]], 0),
+    ],
+  },
+  globe: {
+    shape: "circle",
+    purpose: "浏览器 / 时区 / 联网",
+    build: () => globe(),
+  },
+
+  // ---- 媒体 ----
+  image: {
+    shape: "square",
+    minSize: 14,
+    purpose: "图片",
+    build: () => [
+      poly(
+        [
+          [1.6, 2.6],
+          [14.4, 2.6],
+          [14.4, 13.4],
+          [1.6, 13.4],
+        ],
+        1.7,
+        true,
+      ),
+      circle(5.5, 6.5, 1.4),
+      poly(
+        [
+          [1.6, 11.6],
+          [6.1, 7.6],
+          [14.4, 13.4],
+        ],
+        [0, 0.8, 0],
+      ),
+    ],
+  },
+  play: {
+    shape: "circle",
+    filled: true,
+    visual: [11.5, 12.5],
+    purpose: "播放",
+    build: () => [
+      poly(
+        [
+          [3.6, 2.2],
+          [13.4, 8],
+          [3.6, 13.8],
+        ],
+        1.1,
+        true,
+      ),
+    ],
+  },
+  "video-camera": {
+    shape: "horizontal",
+    minSize: 14,
+    purpose: "视频",
+    build: () => [
+      poly(
+        [
+          [1.4, 4.6],
+          [9.6, 4.6],
+          [9.6, 11.4],
+          [1.4, 11.4],
+        ],
+        1.6,
+        true,
+      ),
+      poly(
+        [
+          [9.6, 8.6],
+          [14.6, 11.4],
+          [14.6, 4.6],
+          [9.6, 7.4],
+        ],
+        [0, 0.8, 0.8, 0],
+        true,
+      ),
+    ],
+  },
+
+  // ---- 连接器 ----
+  server: {
+    shape: "vertical",
+    minSize: 14,
+    purpose: "MCP server",
+    build: () => {
+      const ops: GeomOp[] = [];
+      for (const y of [2.4, 9]) {
+        ops.push(
+          poly(
+            [
+              [2.6, y],
+              [13.4, y],
+              [13.4, y + 4.6],
+              [2.6, y + 4.6],
+            ],
+            1.3,
+            true,
+          ),
+        );
+        ops.push(poly([[5.2, y + 2.3], [5.2, y + 2.3]], 0));
+      }
+      return ops;
+    },
+  },
+  "plug-slash": {
+    shape: "circle",
+    minSize: 16,
+    purpose: "结束接管 / 断开",
+    build: () => [
+      poly(
+        [
+          [5.2, 10.8],
+          [2.4, 13.6],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [6.1, 5.1],
+          [10.9, 9.9],
+          [8.6, 12.2],
+          [3.8, 7.4],
+        ],
+        1.4,
+        true,
+      ),
+      poly(
+        [
+          [9.4, 3.6],
+          [11.2, 5.4],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [12, 6.2],
+          [13.8, 8],
+        ],
+        0,
+      ),
+      // 斜杠从左上切到右下，与全套斜杠方向一致。
+      poly(
+        [
+          [2.4, 2.4],
+          [13.6, 13.6],
+        ],
+        0,
+      ),
+    ],
+  },
+
+  // ---- 其它补齐 ----
+  "arrow-right": {
+    shape: "horizontal",
+    purpose: "前进",
+    build: () => [
+      poly(
+        [
+          [1.6, 8],
+          [14.4, 8],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [9.7, 3.3],
+          [14.4, 8],
+          [9.7, 12.7],
+        ],
+        [0, 0.8, 0],
+      ),
+    ],
+  },
+  funnel: {
+    shape: "vertical",
+    purpose: "筛选",
+    build: () => [
+      poly(
+        [
+          [1.6, 2.6],
+          [14.4, 2.6],
+          [9.4, 8.4],
+          [9.4, 14],
+          [6.6, 12],
+          [6.6, 8.4],
+        ],
+        [1, 1, 0.7, 0.7, 0.7, 0.7],
+        true,
+      ),
+    ],
+  },
+  comment: {
+    shape: "circle",
+    minSize: 14,
+    purpose: "会话（圆形气泡）",
+    build: () => [
+      circle(8, 7.2, 5.9),
+      poly(
+        [
+          [4.6, 11.9],
+          [3.2, 14.4],
+        ],
+        0,
+      ),
+    ],
+  },
+  package: {
+    shape: "square",
+    minSize: 14,
+    purpose: "包 / 依赖 token",
+    build: () => [
+      poly(
+        [
+          [8, 1.8],
+          [14.2, 5.1],
+          [14.2, 11.5],
+          [8, 14.8],
+          [1.8, 11.5],
+          [1.8, 5.1],
+        ],
+        1.1,
+        true,
+      ),
+      poly(
+        [
+          [1.8, 5.1],
+          [8, 8.4],
+          [14.2, 5.1],
+        ],
+        [0, 0.8, 0],
+      ),
+      poly(
+        [
+          [8, 8.4],
+          [8, 14.8],
+        ],
+        0,
       ),
     ],
   },

@@ -1,5 +1,5 @@
 import { createElement, type ComponentProps } from "react";
-import { Plus, X } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import type { AwakenIconButton } from "./AwakenIconButton";
 
 export type AwakenIconButtonState = {
@@ -16,7 +16,7 @@ export const AwakenIconButtonStates: AwakenIconButtonState[] = [
       label: "添加上下文",
       variant: "square",
       size: "sm",
-      children: createElement(Plus, { size: 16, strokeWidth: 1.85 }),
+      children: createElement(AwakenIcon, { concept: "add", size: 16 }),
       disabled: false,
     } as unknown as Partial<ComponentProps<typeof AwakenIconButton>>,
   },
@@ -27,7 +27,7 @@ export const AwakenIconButtonStates: AwakenIconButtonState[] = [
       label: "添加上下文",
       variant: "square",
       size: "sm",
-      children: createElement(Plus, { size: 16, strokeWidth: 1.85 }),
+      children: createElement(AwakenIcon, { concept: "add", size: 16 }),
       disabled: true,
     } as unknown as Partial<ComponentProps<typeof AwakenIconButton>>,
   },
@@ -39,7 +39,7 @@ export const AwakenIconButtonStates: AwakenIconButtonState[] = [
       variant: "square",
       size: "sm",
       showTooltip: false,
-      children: createElement(X, { size: 15, strokeWidth: 1.9 }),
+      children: createElement(AwakenIcon, { concept: "close", size: 16 }),
     } as unknown as Partial<ComponentProps<typeof AwakenIconButton>>,
   },
 ];

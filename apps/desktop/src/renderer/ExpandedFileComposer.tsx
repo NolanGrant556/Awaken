@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { LoaderCircle, MessageSquare } from "lucide-react";
+import { AwakenIcon } from "@awaken/design-system";
 
 export type ExpandedFileComposerIdleMode = "rail" | "compact" | "full";
 export type ExpandedFileComposerPresentation =
@@ -174,7 +174,7 @@ export function ExpandedFileComposer({
           onClick={onShowFull}
         >
           <span className="expanded-file-composer__icon" aria-hidden="true">
-            <MessageSquare size={17} strokeWidth={1.8} />
+            <AwakenIcon concept="memory-feedback" size={16} />
           </span>
           <span className="expanded-file-composer__label">继续对话</span>
           <span className="expanded-file-composer__hint">再次点击展开</span>
@@ -193,7 +193,7 @@ export function ExpandedFileComposer({
             className="expanded-file-composer__icon expanded-file-composer__spinner"
             aria-hidden="true"
           >
-            <LoaderCircle size={18} strokeWidth={1.9} />
+            <AwakenIcon concept="step-running" size={20} />
           </span>
           <span className="expanded-file-composer__label">正在执行</span>
           <span className="expanded-file-composer__hint">点击停止</span>

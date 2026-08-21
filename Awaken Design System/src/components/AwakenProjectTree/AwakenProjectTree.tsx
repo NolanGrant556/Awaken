@@ -1,4 +1,5 @@
 import "./AwakenProjectTree.css";
+import { AwakenIcon } from "../AwakenIcon";
 import {
   useCallback,
   useEffect,
@@ -9,14 +10,6 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import {
-  Check,
-  ChevronRight,
-  Folder,
-  FolderOpen,
-  MessageSquare,
-  MoreHorizontal,
-} from "lucide-react";
 import type { ProjectItem } from "../../types";
 import { AwakenDropdown } from "../AwakenDropdown";
 import {
@@ -303,7 +296,7 @@ export function AwakenProjectTree({
               style={{ left: dragPoint.x + 12, top: dragPoint.y + 10 }}
               aria-hidden="true"
             >
-              <Folder size={19} strokeWidth={1.75} />
+              <AwakenIcon concept="project" size={20} />
               <span>
                 {items.find((item) => item.id === dragSourceId)?.label ?? dragSourceId}
               </span>
@@ -453,23 +446,23 @@ function ProjectNode({
           <span className="aw-project-row-icon">
             {selection ? (
               <span className="aw-project-row-checkbox" aria-hidden="true">
-                <Check size={12} strokeWidth={2.2} />
+                <AwakenIcon concept="step-done" size={12} />
               </span>
             ) : isProject ? (
               isExpanded ? (
-                <FolderOpen size={20} strokeWidth={1.75} aria-hidden="true" />
+                <AwakenIcon concept="folder-expanded" size={20} />
               ) : (
-                <Folder size={20} strokeWidth={1.75} aria-hidden="true" />
+                <AwakenIcon concept="project" size={20} />
               )
             ) : isTopLevel ? (
-              <MessageSquare size={17} strokeWidth={1.75} aria-hidden="true" />
+              <AwakenIcon concept="memory-feedback" size={16} />
             ) : null}
           </span>
           <span className="aw-project-row-label-wrap">
             <span className="aw-project-row-label">{item.label}</span>
             {showInlineChevron ? (
               <span className="aw-project-inline-chevron" aria-hidden="true">
-                <ChevronRight size={16} strokeWidth={1.85} aria-hidden="true" />
+                <AwakenIcon concept="disclose" size={16} />
               </span>
             ) : null}
           </span>
@@ -493,7 +486,7 @@ function ProjectNode({
                     title={`${item.label} 更多操作`}
                     disabled={isDisabled}
                   >
-                    <MoreHorizontal size={16} strokeWidth={1.9} />
+                    <AwakenIcon concept="more-actions" size={16} />
                   </button>
                 }
               >

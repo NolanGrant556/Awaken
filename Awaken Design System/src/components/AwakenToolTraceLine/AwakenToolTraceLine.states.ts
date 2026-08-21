@@ -107,4 +107,59 @@ export const AwakenToolTraceLineStates: AwakenToolTraceLineState[] = [
       onSelect: undefined,
     } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,
   },
+  // 八个状态各有唯一图形，这里把此前只覆盖 active / done / error 的状态补齐。
+  // 真实运行里 denied / cancelled / interrupted / blocked / unsupported 需要相应的
+  // 权限拒绝、取消、中断、策略阻断与工具不可用条件才会出现，Gallery 是它们
+  // 唯一可稳定观测的入口。
+  {
+    id: "denied",
+    label: "被拒绝",
+    props: {
+      title: "computer_action",
+      detail: "点击「确认支付」",
+      status: "denied",
+      onSelect: noop,
+    } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,
+  },
+  {
+    id: "cancelled",
+    label: "已取消",
+    props: {
+      title: "web_search",
+      detail: "季度财报对比",
+      status: "cancelled",
+      onSelect: noop,
+    } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,
+  },
+  {
+    id: "interrupted",
+    label: "被中断",
+    props: {
+      title: "Bash",
+      detail: "npm run build",
+      status: "interrupted",
+      kind: "terminal",
+      onSelect: noop,
+    } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,
+  },
+  {
+    id: "blocked",
+    label: "被策略阻断",
+    props: {
+      title: "git_remote",
+      detail: "push origin main",
+      status: "blocked",
+      onSelect: noop,
+    } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,
+  },
+  {
+    id: "unsupported",
+    label: "工具不可用",
+    props: {
+      title: "media_generate",
+      detail: "当前模型不支持图像生成",
+      status: "unsupported",
+      onSelect: noop,
+    } as unknown as Partial<ComponentProps<typeof AwakenToolTraceLine>>,
+  },
 ];

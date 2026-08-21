@@ -1,5 +1,5 @@
 import "./AwakenMediaGenerationCard.css";
-import { ChevronRight, LoaderCircle } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { useId, useMemo, useState } from "react";
 import {
   AwakenMediaItemCard,
@@ -132,11 +132,11 @@ export function AwakenMediaGenerationCard({
         {transient ? (
           <span className="aw-media-generation-summary-progress">
             {kind === "image" && slotCount > 1 ? `最多 ${slotCount} 张` : null}
-            <LoaderCircle size={16} strokeWidth={1.9} aria-hidden="true" />
+            <AwakenIcon concept="step-running" size={16} />
           </span>
         ) : null}
         <span className="aw-media-generation-chevron" aria-hidden="true">
-          <ChevronRight size={13} strokeWidth={1.8} />
+          <AwakenIcon concept="disclose" size={14} />
         </span>
       </button>
 

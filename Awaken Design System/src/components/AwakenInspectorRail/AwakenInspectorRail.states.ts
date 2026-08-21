@@ -1,5 +1,6 @@
 import { createElement, type ComponentProps } from "react";
-import { Folder, Globe2, Image as ImageIcon } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
+
 import type { AwakenInspectorRail } from "./AwakenInspectorRail";
 import { AwakenMediaInspector } from "../AwakenMediaInspector";
 
@@ -8,21 +9,13 @@ const fileAndBrowserItems = [
     id: "files",
     label: "文件",
     tone: "neutral" as const,
-    icon: createElement(Folder, {
-      size: 16,
-      strokeWidth: 1.8,
-      "aria-hidden": true,
-    }),
+    icon: createElement(AwakenIcon, { concept: "project", size: 16 }),
   },
   {
     id: "browser",
     label: "浏览器",
     tone: "neutral" as const,
-    icon: createElement(Globe2, {
-      size: 16,
-      strokeWidth: 1.8,
-      "aria-hidden": true,
-    }),
+    icon: createElement(AwakenIcon, { concept: "browser", size: 16 }),
   },
 ];
 
@@ -53,11 +46,7 @@ export const AwakenInspectorRailStates: AwakenInspectorRailState[] = [
           id: "media",
           label: "媒体",
           tone: "neutral",
-          icon: createElement(ImageIcon, {
-            size: 16,
-            strokeWidth: 1.8,
-            "aria-hidden": true,
-          }),
+          icon: createElement(AwakenIcon, { concept: "media-image", size: 16 }),
         },
       ],
       children: createElement(AwakenMediaInspector, {

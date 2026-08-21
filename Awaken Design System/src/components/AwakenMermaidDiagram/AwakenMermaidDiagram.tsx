@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { AlertCircle, Check, Copy, Maximize2, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenTooltip } from "../AwakenTooltip";
 import "./AwakenMermaidDiagram.css";
 
@@ -289,12 +289,12 @@ function labelForCopyState(copyState: CopyState) {
 
 function iconForCopyState(copyState: CopyState) {
   if (copyState === "copied") {
-    return <Check size={15} strokeWidth={2.4} />;
+    return <AwakenIcon concept="step-done" size={16} />;
   }
   if (copyState === "error") {
-    return <AlertCircle size={15} strokeWidth={2.2} />;
+    return <AwakenIcon concept="error" size={16} />;
   }
-  return <Copy size={15} strokeWidth={2} />;
+  return <AwakenIcon concept="copy" size={16} />;
 }
 
 function clampExpandedZoom(value: number): number {
@@ -337,7 +337,7 @@ function MermaidDiagramToolbar({
             title="Expand diagram"
             onClick={onExpand}
           >
-            <Maximize2 size={15} strokeWidth={2} />
+            <AwakenIcon concept="expand-full" size={16} />
           </button>
         </AwakenTooltip>
       ) : null}
@@ -368,7 +368,7 @@ function MermaidDiagramToolbar({
           aria-label="Close expanded diagram"
           onClick={onClose}
         >
-          <X size={16} strokeWidth={2} />
+          <AwakenIcon concept="close" size={16} />
         </button>
       ) : null}
     </div>
@@ -403,7 +403,7 @@ function MermaidDiagramZoomControls({
           disabled={!canZoomOut}
           onClick={() => onZoomChange(clampExpandedZoom(zoom - EXPANDED_ZOOM_STEP))}
         >
-          <ZoomOut size={15} strokeWidth={2} />
+          <AwakenIcon concept="zoom-out" size={16} />
         </button>
       </AwakenTooltip>
 
@@ -431,7 +431,7 @@ function MermaidDiagramZoomControls({
           disabled={!canZoomIn}
           onClick={() => onZoomChange(clampExpandedZoom(zoom + EXPANDED_ZOOM_STEP))}
         >
-          <ZoomIn size={15} strokeWidth={2} />
+          <AwakenIcon concept="zoom-in" size={16} />
         </button>
       </AwakenTooltip>
 
@@ -444,7 +444,7 @@ function MermaidDiagramZoomControls({
           disabled={!canResetView}
           onClick={onResetView}
         >
-          <RotateCcw size={14} strokeWidth={2} />
+          <AwakenIcon concept="rotate-ccw" size={14} />
         </button>
       </AwakenTooltip>
     </div>

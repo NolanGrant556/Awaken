@@ -1,6 +1,5 @@
 import "./AwakenProfileMenuPanel.css";
 import { AwakenIcon } from "../AwakenIcon";
-import { ChevronRight } from "lucide-react";
 import {
   useId,
   useState,
@@ -69,12 +68,7 @@ export function AwakenProfileMenuPanel({
           >
             <AwakenIcon concept="settings-appearance" size={16} />
             <span>外观</span>
-            <ChevronRight
-              size={14}
-              strokeWidth={1.9}
-              className="aw-profile-menu-panel__action-chevron"
-              aria-hidden="true"
-            />
+            <AwakenIcon concept="disclose" size={14} className="aw-profile-menu-panel__action-chevron" />
           </button>
           {appearanceOpen ? (
             <div

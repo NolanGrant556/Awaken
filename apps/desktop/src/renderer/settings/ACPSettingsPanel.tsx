@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Code, Plus, Trash2 } from "lucide-react";
+
 import {
   AwakenIcon,
   AwakenButton as Button,
@@ -524,7 +524,7 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
         <Button
           variant="default"
           size="md"
-          icon={<Plus size={14} />}
+          icon={<AwakenIcon concept="add" size={14} />}
           onClick={openCreateDialog}
         >
           添加 runner
@@ -645,7 +645,7 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
               <Button
                 variant="ghost"
                 size="md"
-                icon={<Trash2 size={14} />}
+                icon={<AwakenIcon concept="delete" size={14} />}
                 onClick={() => void handleDelete()}
                 disabled={saving}
               >

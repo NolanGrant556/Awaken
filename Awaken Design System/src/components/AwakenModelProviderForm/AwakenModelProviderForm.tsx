@@ -1,7 +1,6 @@
 import "./AwakenModelProviderForm.css";
 import { AwakenIcon } from "../AwakenIcon";
 import { useEffect, useId, useRef, useState } from "react";
-import { CheckCircle2 } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenSelect } from "../AwakenSelect";
 import { AwakenSwitch } from "../AwakenSwitch";
@@ -438,7 +437,7 @@ export function AwakenModelProviderForm({
               aria-live={testFeedback.tone === "error" ? "assertive" : "polite"}
             >
               {testFeedback.tone === "success" ? (
-                <CheckCircle2 size={16} strokeWidth={2} aria-hidden="true" />
+                <AwakenIcon concept="success" size={16} />
               ) : (
                 <AwakenIcon concept="error" size={16} />
               )}

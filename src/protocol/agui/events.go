@@ -87,11 +87,26 @@ const (
 	EventAwakenComputerVerification    EventType = "AWAKEN_COMPUTER_VERIFICATION_COMPLETED"
 	EventAwakenComputerHandoffStarted  EventType = "AWAKEN_COMPUTER_HANDOFF_STARTED"
 	EventAwakenComputerHandoffEnded    EventType = "AWAKEN_COMPUTER_HANDOFF_ENDED"
-	EventAwakenUnknown                 EventType = "AWAKEN_UNKNOWN_EVENT"
+	// EventAwakenProviderReconnect is a live-only status frame while the
+	// runner waits for the provider network or retries a disconnected
+	// stream. It is never written to SemanticJournal and must not appear
+	// in durable replay. Contract: docs/09_AGUI与A2UI协议/事件与字段契约.md.
+	EventAwakenProviderReconnect EventType = "AWAKEN_PROVIDER_RECONNECT"
+	EventAwakenUnknown           EventType = "AWAKEN_UNKNOWN_EVENT"
 )
 
 type RunOutcome struct {
 	Type string `json:"type"`
+}
+
+// ProviderReconnectPayload is the live-only reconnect status carried on
+// AWAKEN_PROVIDER_RECONNECT. maxAttempts=0 means unbounded connection wait.
+type ProviderReconnectPayload struct {
+	Phase           string `json:"phase"`
+	Attempt         int    `json:"attempt,omitempty"`
+	MaxAttempts     int    `json:"maxAttempts,omitempty"`
+	Detail          string `json:"detail,omitempty"`
+	ResetInProgress bool   `json:"resetInProgress,omitempty"`
 }
 
 type ACPPermissionOption struct {
@@ -491,4 +506,7 @@ type Event struct {
 	ComputerActor              string   `json:"computerActor,omitempty"`
 	ComputerHandoff            bool     `json:"computerHandoff,omitempty"`
 	ComputerEvidenceRefs       []string `json:"computerEvidenceRefs,omitempty"`
+	// ProviderReconnect is live-only. Replay and SemanticJournal must not
+	// reconstruct this frame from durable records.
+	ProviderReconnect *ProviderReconnectPayload `json:"providerReconnect,omitempty"`
 }

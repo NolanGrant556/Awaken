@@ -1894,4 +1894,71 @@ describe("run plan terminal projection (RP-D03)", () => {
       items: planItemsV2,
     });
   });
+
+  it("discards in-progress thinking on provider reconnect reset and restores planning", () => {
+    let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      type: "REASONING_START",
+      runId: "run-1",
+      messageId: "think-live",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "REASONING_MESSAGE_CONTENT",
+      runId: "run-1",
+      messageId: "think-live",
+      delta: "partial thought that never finished",
+    });
+    expect(state.activeItem).toMatchObject({
+      kind: "thinking",
+      text: "partial thought that never finished",
+    });
+
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_PROVIDER_RECONNECT",
+      runId: "run-1",
+      providerReconnect: {
+        phase: "reconnecting",
+        attempt: 1,
+        maxAttempts: 5,
+        detail: "stream eof",
+        resetInProgress: true,
+      },
+    });
+    expect(state.activeItem).toMatchObject({
+      kind: "planning",
+      id: "planning:run-1",
+      text: "Planning next moves",
+      status: "active",
+    });
+    expect(
+      state.committedItems.some((item) => item.kind === "thinking"),
+    ).toBe(false);
+  });
+
+  it("keeps thinking when provider reconnect does not reset in-progress output", () => {
+    let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      type: "REASONING_START",
+      runId: "run-1",
+      messageId: "think-keep",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "REASONING_MESSAGE_CONTENT",
+      runId: "run-1",
+      messageId: "think-keep",
+      delta: "still thinking",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_PROVIDER_RECONNECT",
+      runId: "run-1",
+      providerReconnect: {
+        phase: "waiting_for_network",
+        attempt: 1,
+        maxAttempts: 0,
+        detail: "tls handshake eof",
+      },
+    });
+    expect(state.activeItem).toMatchObject({
+      kind: "thinking",
+      text: "still thinking",
+    });
+  });
 });

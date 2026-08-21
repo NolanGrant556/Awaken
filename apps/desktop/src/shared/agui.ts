@@ -80,6 +80,7 @@ export type AguiEventType =
   | "AWAKEN_COMPUTER_VERIFICATION_COMPLETED"
   | "AWAKEN_COMPUTER_HANDOFF_STARTED"
   | "AWAKEN_COMPUTER_HANDOFF_ENDED"
+  | "AWAKEN_PROVIDER_RECONNECT"
   | "AWAKEN_UNKNOWN_EVENT";
 
 export type AguiMemoryReceipt = {
@@ -105,6 +106,19 @@ export type AguiACPPermissionOption = {
 
 export type AguiRunOutcome = {
   type: string;
+};
+
+export type AguiProviderReconnectPhase =
+  | "waiting_for_network"
+  | "reconnecting"
+  | "recovered";
+
+export type AguiProviderReconnect = {
+  phase: AguiProviderReconnectPhase;
+  attempt?: number;
+  maxAttempts?: number;
+  detail?: string;
+  resetInProgress?: boolean;
 };
 
 export type AguiRunPlanItem = {
@@ -486,4 +500,5 @@ export type AguiEvent = {
   computerActor?: string;
   computerHandoff?: boolean;
   computerEvidenceRefs?: string[];
+  providerReconnect?: AguiProviderReconnect;
 };

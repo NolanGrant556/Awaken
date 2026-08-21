@@ -445,6 +445,11 @@ export function projectAguiEventToNarrative(
       return base;
     case "AWAKEN_SCHEDULED_NOTICE":
       return commitScheduledNotice(base, event);
+    case "AWAKEN_PROVIDER_RECONNECT":
+      if (event.providerReconnect?.resetInProgress) {
+        return discardInProgressModelOutput(base, event);
+      }
+      return base;
     default:
       return base;
   }
@@ -473,6 +478,25 @@ function activateCompactPlanning(
     status: "active",
     phase: "compaction",
   });
+}
+
+export function discardInProgressModelOutput(
+  state: RunNarrativeState,
+  event?: AguiEvent,
+): RunNarrativeState {
+  const active = state.activeItem;
+  if (!active || (active.kind !== "thinking" && active.kind !== "answer")) {
+    return state;
+  }
+  return {
+    ...state,
+    activeItem: {
+      kind: "planning",
+      id: `planning:${event ? eventScope(event) : "current"}`,
+      text: "Planning next moves",
+      status: "active",
+    },
+  };
 }
 
 function activateContinuationPlanning(

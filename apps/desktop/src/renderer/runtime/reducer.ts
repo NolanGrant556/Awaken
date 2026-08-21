@@ -5,6 +5,7 @@ import type {
   AguiContextUsageSnapshot,
   AguiEvent,
   AguiModelUsageRecord,
+  AguiProviderReconnect,
   AguiRunPlanItem,
 	InstructionSnapshotSummary,
 } from "./agui";
@@ -136,6 +137,14 @@ export type RunPlanView = {
   allCompleted: boolean;
   toolCallId?: string;
   updatedAtMs?: number;
+};
+
+export type ProviderReconnectAttempt = {
+  phase: Exclude<AguiProviderReconnect["phase"], "recovered">;
+  attempt: number;
+  maxAttempts: number;
+  detail?: string;
+  resetInProgress?: boolean;
 };
 
 export type ContextWindowRecord = {
@@ -274,6 +283,7 @@ type ThreadViewState = {
   errorMessage?: string;
   runStartedAtMs?: number;
   runCompletedAtMs?: number;
+  providerReconnectAttempts: ProviderReconnectAttempt[];
 };
 
 export type RuntimeViewState = {
@@ -305,6 +315,7 @@ export type RuntimeViewState = {
   errorMessage?: string;
   runStartedAtMs?: number;
   runCompletedAtMs?: number;
+  providerReconnectAttempts: ProviderReconnectAttempt[];
   threads: ThreadItem[];
   activeThreadId?: string;
   threadViews: Record<string, ThreadViewState>;
@@ -425,6 +436,7 @@ const initialState: RuntimeViewState = {
   subagentOrder: [],
   runPlansById: {},
   inspectorSummary: createInspectorSummary(),
+  providerReconnectAttempts: [],
   threads: [],
   threadViews: {},
   supervisorStatus: null,
@@ -460,6 +472,7 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     errorMessage: state.errorMessage,
     runStartedAtMs: state.runStartedAtMs,
     runCompletedAtMs: state.runCompletedAtMs,
+    providerReconnectAttempts: state.providerReconnectAttempts ?? [],
   };
 }
 
@@ -470,6 +483,43 @@ function emptyThreadView(threadId: string, runId?: string): ThreadViewState {
     threadId,
     runId,
   };
+}
+
+function applyProviderReconnect(
+  state: RuntimeViewState,
+  event: AguiEvent,
+): RuntimeViewState {
+  const payload = event.providerReconnect;
+  if (!payload || payload.phase === "recovered") {
+    return {
+      ...state,
+      providerReconnectAttempts: [],
+    };
+  }
+  if (
+    payload.phase !== "waiting_for_network" &&
+    payload.phase !== "reconnecting"
+  ) {
+    return state;
+  }
+  const next: RuntimeViewState = {
+    ...state,
+    providerReconnectAttempts: [
+      ...(state.providerReconnectAttempts ?? []),
+      {
+        phase: payload.phase,
+        attempt: payload.attempt ?? 0,
+        maxAttempts: payload.maxAttempts ?? 0,
+        detail: payload.detail,
+        resetInProgress: payload.resetInProgress,
+      },
+    ],
+  };
+  if (payload.resetInProgress) {
+    next.assistantText = "";
+    next.reasoningText = "";
+  }
+  return next;
 }
 
 function saveActiveThreadView(state: RuntimeViewState): RuntimeViewState {
@@ -1751,6 +1801,7 @@ export function reduceRuntimeState(
         steps: [],
         assistantText: "",
         reasoningText: "",
+        providerReconnectAttempts: [],
 		toolResults: [],
 		patchPreviews: [],
 		userQuestions: [],
@@ -1907,6 +1958,7 @@ export function reduceRuntimeState(
 		errorMessage: action.message,
 		userQuestions: [],
 		externalInteractions: [],
+        providerReconnectAttempts: [],
 		inspectorSummary: {
             ...state.inspectorSummary,
             terminalReason: "stream_failed",
@@ -2272,6 +2324,7 @@ export function reduceRuntimeState(
             status === "finished" ||
             status === "error"
           ) {
+            nextState.providerReconnectAttempts = [];
             nextState.inspectorSummary = {
               ...nextState.inspectorSummary,
               terminalReason: terminalReasonForEvent(action.event) ?? status,
@@ -2305,6 +2358,7 @@ export function reduceRuntimeState(
           nextState.externalInteractions = [];
           nextState.computerReviews = [];
           nextState.computerHandoffs = [];
+          nextState.providerReconnectAttempts = [];
           nextState.runCompletedAtMs =
             nextState.runCompletedAtMs ??
             (validTimestamp(action.event.timestamp)
@@ -3214,6 +3268,7 @@ export function reduceRuntimeState(
           break;
         }
         case "RUN_ERROR":
+          nextState.providerReconnectAttempts = [];
           if (action.event.code === "RUN_CANCELLED") {
             nextState.phase = "cancelled";
             nextState.status = "cancelled";
@@ -3265,6 +3320,9 @@ export function reduceRuntimeState(
               "error",
             terminalMessage: nextState.errorMessage || action.event.message,
           };
+          break;
+        case "AWAKEN_PROVIDER_RECONNECT":
+          nextState = applyProviderReconnect(nextState, action.event);
           break;
         case "AWAKEN_UNKNOWN_EVENT": {
           nextState.inspectorSummary = {

@@ -5,6 +5,7 @@ export {
   type AwakenIconFit,
   type AwakenOpticalShape,
   type GeomOp,
+  arcThroughChord,
   emitPaths,
   minGap,
   normalizeToOptical,

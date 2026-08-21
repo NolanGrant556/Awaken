@@ -14,16 +14,20 @@ import {
   type GeomOp,
   type Vec,
   arc,
+  arcThroughChord,
   arrow,
   circle,
   poly,
   rotate,
 } from "./geometry";
 import {
+  bracketPair,
   chevron,
+  crescent,
   crossMark,
   display,
   exclamationMark,
+  eye,
   fileBody,
   folderBody,
   gear,
@@ -32,10 +36,13 @@ import {
   hexagonHook,
   hexagonSlots,
   minusMark,
+  personBust,
   plusMark,
   questionMark,
   shield,
+  signalWaves,
   statusRing,
+  sun,
   triangle,
 } from "./primitives";
 
@@ -693,6 +700,584 @@ const RAW_DEFINITIONS = {
         ],
         1.6,
         true,
+      ),
+    ],
+  },
+
+  // ---- 设置页导航 ----
+  chip: {
+    shape: "square",
+    minSize: 14,
+    purpose: "模型 / 算力",
+    build: () => {
+      const ops: GeomOp[] = [
+        poly(
+          [
+            [2.4, 2.4],
+            [13.6, 2.4],
+            [13.6, 13.6],
+            [2.4, 13.6],
+          ],
+          1.5,
+          true,
+        ),
+        poly(
+          [
+            [5.7, 5.7],
+            [10.3, 5.7],
+            [10.3, 10.3],
+            [5.7, 10.3],
+          ],
+          0.7,
+          true,
+        ),
+      ];
+      // 四边各两根引脚，长度一致。
+      for (const t of [-1.8, 1.8]) {
+        ops.push(poly([[8 + t, 0.6], [8 + t, 2.4]], 0));
+        ops.push(poly([[8 + t, 13.6], [8 + t, 15.4]], 0));
+        ops.push(poly([[0.6, 8 + t], [2.4, 8 + t]], 0));
+        ops.push(poly([[13.6, 8 + t], [15.4, 8 + t]], 0));
+      }
+      return ops;
+    },
+  },
+  stack: {
+    // 长期记忆用「层叠」而不是大脑。
+    //
+    // 试过两版大脑：圆加中缝被读成被分割的圆；交替半径的叶状轮廓在倒角后
+    // 退化成五边形。大脑的识别特征是脑回的起伏，而这套图标只用直线倒角，
+    // 在 16px 下画不出可辨的脑回 —— 与其上一个读不出来的字形，不如换比喻。
+    //
+    // 层叠在语义上更贴 Awaken 的记忆：它就是不断累积的 Markdown 记忆层。
+    // 顶层画完整菱形，下面两层只画下半的 V，这样三层在 16 网格里放得开。
+    shape: "square",
+    minSize: 16,
+    purpose: "长期记忆（累积的记忆层）",
+    build: () => [
+      poly(
+        [
+          [8, 1.8],
+          [13.8, 5],
+          [8, 8.2],
+          [2.2, 5],
+        ],
+        0.8,
+        true,
+      ),
+      poly(
+        [
+          [2.2, 8],
+          [8, 11.2],
+          [13.8, 8],
+        ],
+        [0, 0.8, 0],
+      ),
+      poly(
+        [
+          [2.2, 10.6],
+          [8, 13.8],
+          [13.8, 10.6],
+        ],
+        [0, 0.8, 0],
+      ),
+    ],
+  },
+  "color-mode": {
+    // 第一版是「圆 + 三个颜料井」，实测三点在圆里被读成一张脸。
+    // 改成对比度画法：圆加一条竖直分界，右半用等距斜线填充，
+    // 这是「浅色 / 深色外观」的通用表达，且斜线方向与全套斜杠一致。
+    shape: "circle",
+    minSize: 14,
+    purpose: "外观",
+    build: () => {
+      const ops: GeomOp[] = [
+        circle(8, 8, 6.375),
+        poly(
+          [
+            [8, 1.6],
+            [8, 14.4],
+          ],
+          0,
+        ),
+      ];
+      // 三条斜线的两端都落在圆内，长度按弦长收缩。
+      for (const [y, len] of [
+        [4.9, 2.4],
+        [8, 4.9],
+        [11.1, 2.4],
+      ] as const) {
+        ops.push(poly([[8.6, y], [8.6 + len, y]], 0));
+      }
+      return ops;
+    },
+  },
+  paw: {
+    shape: "circle",
+    minSize: 16,
+    purpose: "桌面宠物",
+    build: () => {
+      const ops: GeomOp[] = [];
+      // 四个脚趾沿一段弧分布，掌垫在下方。
+      for (const [x, y, r] of [
+        [3.6, 6.1, 1.35],
+        [6.6, 4.3, 1.4],
+        [9.7, 4.3, 1.4],
+        [12.6, 6.1, 1.35],
+      ] as const) {
+        ops.push(circle(x, y, r));
+      }
+      ops.push(
+        poly(
+          [
+            [5.5, 9.2],
+            [10.7, 9.2],
+            [10.7, 12.6],
+            [5.5, 12.6],
+          ],
+          2.3,
+          true,
+        ),
+      );
+      return ops;
+    },
+  },
+  robot: {
+    shape: "square",
+    minSize: 14,
+    purpose: "ACP runner",
+    build: () => [
+      poly(
+        [
+          [1.8, 4.6],
+          [14.2, 4.6],
+          [14.2, 13.4],
+          [1.8, 13.4],
+        ],
+        2,
+        true,
+      ),
+      poly(
+        [
+          [8, 2],
+          [8, 4.6],
+        ],
+        0,
+      ),
+      poly([[5.6, 8.4], [5.6, 8.4]], 0),
+      poly([[10.4, 8.4], [10.4, 8.4]], 0),
+      poly(
+        [
+          [6, 11.1],
+          [10, 11.1],
+        ],
+        0,
+      ),
+    ],
+  },
+
+  // ---- 主题三选 ----
+  sun: {
+    shape: "circle",
+    fit: "radial",
+    purpose: "浅色主题",
+    build: () => sun(),
+  },
+  moon: {
+    shape: "circle",
+    fit: "radial",
+    purpose: "黑色主题",
+    build: () => crescent(),
+  },
+  display: {
+    shape: "horizontal",
+    purpose: "跟随系统",
+    build: () => display(),
+  },
+
+  // ---- 账户与用量 ----
+  person: {
+    shape: "circle",
+    minSize: 14,
+    purpose: "用户",
+    build: () => personBust(),
+  },
+  gauge: {
+    shape: "horizontal",
+    minSize: 14,
+    purpose: "用量",
+    build: () => [
+      arcThroughChord([1.6, 11.4], [14.4, 11.4], 6.1, "right"),
+      poly(
+        [
+          [8, 11.4],
+          [11.3, 6.9],
+        ],
+        0,
+      ),
+    ],
+  },
+  "credit-card": {
+    shape: "horizontal",
+    purpose: "余额",
+    build: () => [
+      poly(
+        [
+          [1, 3.1],
+          [15, 3.1],
+          [15, 12.9],
+          [1, 12.9],
+        ],
+        1.7,
+        true,
+      ),
+      poly(
+        [
+          [1, 6.6],
+          [15, 6.6],
+        ],
+        0,
+      ),
+    ],
+  },
+  key: {
+    shape: "circle",
+    minSize: 14,
+    purpose: "API 密钥",
+    build: () => [
+      circle(4.9, 11.1, 3.1),
+      poly(
+        [
+          [7.1, 8.9],
+          [13.7, 2.3],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [10.3, 5.7],
+          [12.4, 7.8],
+        ],
+        0,
+      ),
+    ],
+  },
+  eye: {
+    shape: "horizontal",
+    purpose: "显示明文",
+    build: () => eye(),
+  },
+  "eye-slash": {
+    shape: "horizontal",
+    minSize: 14,
+    purpose: "隐藏明文",
+    build: () => [
+      ...eye(),
+      // 斜杠方向与全套一致：从左上切到右下，与「跟随指针」的方向相反。
+      poly(
+        [
+          [2.4, 2.4],
+          [13.6, 13.6],
+        ],
+        0,
+      ),
+    ],
+  },
+
+  // ---- 通用动作补充 ----
+  "arrow-left": {
+    shape: "horizontal",
+    purpose: "返回 / 后退",
+    build: () => [
+      poly(
+        [
+          [14.4, 8],
+          [1.6, 8],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [6.3, 3.3],
+          [1.6, 8],
+          [6.3, 12.7],
+        ],
+        [0, 0.8, 0],
+      ),
+    ],
+  },
+  "arrow-right-up": {
+    // 遵循「方向跟随指针」：斜向箭头一律走左下到右上。
+    shape: "square",
+    purpose: "外部链接跳转",
+    build: () => [
+      poly(
+        [
+          [3.1, 12.9],
+          [12.9, 3.1],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [5.9, 3.1],
+          [12.9, 3.1],
+          [12.9, 10.1],
+        ],
+        [0, 0.8, 0],
+      ),
+    ],
+  },
+  "chevron-up": {
+    shape: "horizontal",
+    visual: [11.8, 6.5],
+    purpose: "向上展开",
+    build: () => [poly(rotate([[0, 0], [5.25, 5.25], [0, 10.5]], -90, [2.625, 5.25]), [0, 1, 0])],
+  },
+  "arrow-cw": {
+    shape: "circle",
+    fit: "radial",
+    purpose: "重启 / 顺时针重试",
+    build: () => {
+      const r = 5.6;
+      return [arc(8, 8, r, -50, 260), arrow(8, 8, r, 260, 1, 3.1, 32)];
+    },
+  },
+  "arrow-circle-down": {
+    shape: "circle",
+    minSize: 14,
+    purpose: "有新版本可下载",
+    build: () => [
+      statusRing(),
+      poly(
+        [
+          [8, 4.4],
+          [8, 11],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [5.4, 8.4],
+          [8, 11],
+          [10.6, 8.4],
+        ],
+        [0, 0.7, 0],
+      ),
+    ],
+  },
+  upload: {
+    shape: "vertical",
+    purpose: "导入 / 上传",
+    build: () => [
+      poly(
+        [
+          [8, 13],
+          [8, 2.4],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [4.4, 6],
+          [8, 2.4],
+          [11.6, 6],
+        ],
+        [0, 0.8, 0],
+      ),
+      poly(
+        [
+          [2.2, 14.6],
+          [13.8, 14.6],
+        ],
+        0,
+      ),
+    ],
+  },
+  "external-link": {
+    shape: "square",
+    minSize: 14,
+    purpose: "在外部打开",
+    build: () => [
+      // 方框缺右上角，让斜向箭头从缺口出去；这是「开口只在必要处」的例外。
+      poly(
+        [
+          [8.6, 2.6],
+          [2.6, 2.6],
+          [2.6, 13.4],
+          [13.4, 13.4],
+          [13.4, 7.4],
+        ],
+        [0, 1.5, 1.5, 1.5, 0],
+      ),
+      poly(
+        [
+          [7.8, 8.2],
+          [13.4, 2.6],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [9.6, 2.6],
+          [13.4, 2.6],
+          [13.4, 6.4],
+        ],
+        [0, 0.7, 0],
+      ),
+    ],
+  },
+  "floppy-disc": {
+    shape: "square",
+    minSize: 14,
+    purpose: "保存",
+    build: () => [
+      poly(
+        [
+          [2.2, 2.2],
+          [11.1, 2.2],
+          [13.8, 4.9],
+          [13.8, 13.8],
+          [2.2, 13.8],
+        ],
+        [1.6, 0.5, 1.6, 1.6, 1.6],
+        true,
+      ),
+      poly(
+        [
+          [5.5, 2.2],
+          [5.5, 6],
+          [10.5, 6],
+          [10.5, 2.2],
+        ],
+        [0, 0.6, 0.6, 0],
+      ),
+      poly(
+        [
+          [5.5, 13.8],
+          [5.5, 9.6],
+          [10.5, 9.6],
+          [10.5, 13.8],
+        ],
+        [0, 0.6, 0.6, 0],
+      ),
+    ],
+  },
+  "shield-check": {
+    shape: "vertical",
+    minSize: 14,
+    purpose: "已授信",
+    build: () => [
+      shield(),
+      poly(
+        [
+          [5.6, 6.4],
+          [7.4, 8.2],
+          [10.6, 5],
+        ],
+        [0, 0.8, 0],
+      ),
+    ],
+  },
+  wifi: {
+    shape: "horizontal",
+    purpose: "网络 / 连通性",
+    build: () => signalWaves(),
+  },
+  "brackets-square": {
+    shape: "horizontal",
+    purpose: "代码 / opencode runner",
+    build: () => bracketPair(),
+  },
+  lightning: {
+    shape: "vertical",
+    purpose: "Claude Code runner",
+    build: () => [
+      poly(
+        [
+          [9.6, 1.4],
+          [4.2, 8.7],
+          [7.9, 8.7],
+          [6.4, 14.6],
+          [11.8, 7.3],
+          [8.1, 7.3],
+        ],
+        0.6,
+        true,
+      ),
+    ],
+  },
+  history: {
+    shape: "circle",
+    fit: "radial",
+    minSize: 14,
+    purpose: "最近更新与整理",
+    build: () => {
+      const r = 6.1;
+      return [
+        arc(8, 8, r, -130, 180),
+        arrow(8, 8, r, -130, -1, 2.9, 32),
+        poly(
+          [
+            [8, 4.6],
+            [8, 8],
+            [10.8, 8],
+          ],
+          [0, 0.7, 0],
+        ),
+      ];
+    },
+  },
+  "chat-bubble": {
+    shape: "square",
+    purpose: "会话 / 反馈",
+    build: () => [
+      poly(
+        [
+          [0, 0],
+          [12.6, 0],
+          [12.6, 9.4],
+          [3.6, 9.4],
+          [0, 12.6],
+        ],
+        [1.9, 1.9, 1.9, 0.4, 0.4],
+        true,
+      ),
+    ],
+  },
+  "book-open": {
+    shape: "horizontal",
+    minSize: 14,
+    purpose: "参考资料",
+    build: () => [
+      poly(
+        [
+          [8, 4],
+          [8, 13.4],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [8, 4],
+          [4.4, 2.4],
+          [1.2, 2.4],
+          [1.2, 11.8],
+          [4.4, 11.8],
+          [8, 13.4],
+        ],
+        [0, 0.6, 1.1, 1.1, 0.6, 0],
+      ),
+      poly(
+        [
+          [8, 4],
+          [11.6, 2.4],
+          [14.8, 2.4],
+          [14.8, 11.8],
+          [11.6, 11.8],
+          [8, 13.4],
+        ],
+        [0, 0.6, 1.1, 1.1, 0.6, 0],
       ),
     ],
   },

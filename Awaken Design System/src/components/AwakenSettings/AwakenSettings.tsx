@@ -1,5 +1,5 @@
 import "./AwakenSettings.css";
-import { ArrowLeft } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import type { CSSProperties, ReactNode, Ref } from "react";
 import { AwakenSettingsNav, type AwakenSettingsNavItem } from "../AwakenSettingsNav";
 
@@ -67,7 +67,7 @@ export function AwakenSettings({
         <div className="aw-settings-sidebar__head">
           {onBack ? (
             <button type="button" className="aw-settings-back" onClick={onBack}>
-              <ArrowLeft size={17} strokeWidth={1.8} aria-hidden="true" />
+              <AwakenIcon concept="navigate-back" size={16} />
               <span>{backLabel}</span>
             </button>
           ) : null}

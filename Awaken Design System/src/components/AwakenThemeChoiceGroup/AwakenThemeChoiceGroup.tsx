@@ -1,5 +1,5 @@
 import "./AwakenThemeChoiceGroup.css";
-import { Monitor, Moon, Sun } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 
 export type AwakenThemeChoiceValue = "system" | "light" | "dark";
 
@@ -11,9 +11,9 @@ export type AwakenThemeChoiceGroupProps = {
 };
 
 const choices = [
-  { value: "system", label: "跟随系统", Icon: Monitor },
-  { value: "light", label: "浅色", Icon: Sun },
-  { value: "dark", label: "黑色", Icon: Moon },
+  { value: "system", label: "跟随系统", concept: "theme-system" as const },
+  { value: "light", label: "浅色", concept: "theme-light" as const },
+  { value: "dark", label: "黑色", concept: "theme-dark" as const },
 ] as const;
 
 export function AwakenThemeChoiceGroup({
@@ -28,7 +28,7 @@ export function AwakenThemeChoiceGroup({
       role="radiogroup"
       aria-label="主题"
     >
-      {choices.map(({ value: choiceValue, label, Icon }) => {
+      {choices.map(({ value: choiceValue, label, concept }) => {
         const selected = choiceValue === value;
         return (
           <button
@@ -40,7 +40,7 @@ export function AwakenThemeChoiceGroup({
             disabled={disabled}
             onClick={() => onValueChange?.(choiceValue)}
           >
-            <Icon size={17} strokeWidth={1.9} aria-hidden="true" />
+            <AwakenIcon concept={concept} size={16} />
             <span>{label}</span>
           </button>
         );

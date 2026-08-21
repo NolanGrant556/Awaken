@@ -68,7 +68,22 @@ const (
 	ACPToolSnapshotEventType         AwakenEventType = "ACPToolSnapshot"
 	ACPPermissionRequestedEventType  AwakenEventType = "ACPPermissionRequested"
 	ACPPermissionResolvedEventType   AwakenEventType = "ACPPermissionResolved"
+	ProviderReconnectEventType       AwakenEventType = "ProviderReconnect"
 )
+
+const (
+	ProviderReconnectWaiting   = "waiting_for_network"
+	ProviderReconnectRetrying  = "reconnecting"
+	ProviderReconnectRecovered = "recovered"
+)
+
+type ProviderReconnectStatus struct {
+	Phase           string `json:"phase"`
+	Attempt         int    `json:"attempt,omitempty"`
+	MaxAttempts     int    `json:"maxAttempts,omitempty"`
+	Detail          string `json:"detail,omitempty"`
+	ResetInProgress bool   `json:"resetInProgress,omitempty"`
+}
 
 type ArtifactStatus string
 
@@ -220,6 +235,7 @@ type AwakenEvent struct {
 	ResourceSize               int64
 	ResourceMode               string
 	ResourceSource             string
+	ProviderReconnect          *ProviderReconnectStatus
 }
 
 var awakenIDCounter uint64

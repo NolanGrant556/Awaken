@@ -29,7 +29,9 @@ const (
 	maxOutputContinuationAttempts     = 1
 	maxOutputContinuationPromptPrefix = "请继续上一条回答，从中断处继续，不要重复已经输出的内容。"
 	toolResultOffloadThresholdBytes   = 32 * 1024
-	maxTransientLLMRetries            = 2
+	maxTransientLLMRetries            = 5
+	initialConnectionRetryDelay       = 5 * time.Second
+	maxConnectionRetryDelay           = 60 * time.Second
 )
 
 var (
@@ -535,28 +537,87 @@ func (r *Runner) streamLLMWithTransientRetry(
 	events *runEventEmitter,
 	stream func(stdcontext.Context, *runEventEmitter) (*llm.Response, error),
 ) (*llm.Response, error) {
-	for retry := 0; ; retry++ {
+	connectionDelay := initialConnectionRetryDelay
+	connectionAttempts := 0
+	transientAttempts := 0
+	emittedReconnect := false
+	for {
 		response, err := stream(ctx, events)
-		if err == nil || retry >= maxTransientLLMRetries || !llm.IsTransientRequestError(err) {
+		if err == nil {
+			if emittedReconnect {
+				events.providerReconnectRecovered()
+			}
+			return response, nil
+		}
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		kind, reset := llmRetryKind(err, events)
+		if kind == llmRetryNone {
 			return response, err
 		}
+		if reset {
+			events.discardEphemeralStreamOutput()
+		}
+		emittedReconnect = true
+		if kind == llmRetryConnection {
+			connectionAttempts++
+			events.providerReconnect(ProviderReconnectWaiting, connectionAttempts, 0, err, reset)
+			if err := r.sleepLLMRetry(ctx, connectionDelay); err != nil {
+				return nil, err
+			}
+			if connectionDelay < maxConnectionRetryDelay {
+				connectionDelay *= 2
+				if connectionDelay > maxConnectionRetryDelay {
+					connectionDelay = maxConnectionRetryDelay
+				}
+			}
+			continue
+		}
+		if transientAttempts >= maxTransientLLMRetries {
+			return response, err
+		}
+		transientAttempts++
+		events.providerReconnect(ProviderReconnectRetrying, transientAttempts, maxTransientLLMRetries, err, reset)
 		delay, ok := llm.RequestRetryAfter(err)
 		if !ok {
-			delay = time.Duration(retry+1) * time.Second
+			delay = time.Duration(transientAttempts) * time.Second
 		}
-		// Provider Retry-After values can be unexpectedly large. Keep a bounded
-		// in-turn retry and return control to the user after that boundary.
 		if delay > 30*time.Second {
 			delay = 30 * time.Second
 		}
-		sleep := r.llmRetrySleep
-		if sleep == nil {
-			sleep = sleepWithContext
-		}
-		if err := sleep(ctx, delay); err != nil {
+		if err := r.sleepLLMRetry(ctx, delay); err != nil {
 			return nil, err
 		}
 	}
+}
+
+const (
+	llmRetryNone       = ""
+	llmRetryConnection = "connection"
+	llmRetryTransient  = "transient"
+)
+
+func llmRetryKind(err error, events *runEventEmitter) (kind string, reset bool) {
+	if events != nil && events.toolStreamStarted {
+		return llmRetryNone, false
+	}
+	reset = events != nil && events.hasEphemeralStreamOutput()
+	if llm.IsConnectionError(err) {
+		return llmRetryConnection, reset
+	}
+	if llm.IsTransientRequestError(err) {
+		return llmRetryTransient, reset
+	}
+	return llmRetryNone, false
+}
+
+func (r *Runner) sleepLLMRetry(ctx stdcontext.Context, delay time.Duration) error {
+	sleep := r.llmRetrySleep
+	if sleep == nil {
+		sleep = sleepWithContext
+	}
+	return sleep(ctx, delay)
 }
 
 func sleepWithContext(ctx stdcontext.Context, delay time.Duration) error {
@@ -2155,6 +2216,7 @@ type runEventEmitter struct {
 	textOpen              bool
 	reasoningOpen         bool
 	textStartedThisTurn   bool
+	toolStreamStarted     bool
 	mutationOccurred      bool
 	reasoningText         strings.Builder
 	assistantText         strings.Builder
@@ -2661,6 +2723,7 @@ func (e *runEventEmitter) onToolCallArgsDelta(delta llm.ToolCallDelta) {
 	if delta.ArgumentsDelta == "" {
 		return
 	}
+	e.toolStreamStarted = true
 	e.ensureAssistantMessageID()
 	// Some OpenAI-compatible providers stream assistant text and tool arguments
 	// in the same response. Close the text boundary as soon as tool arguments
@@ -2707,6 +2770,7 @@ func (e *runEventEmitter) emitStandaloneText(content string) {
 }
 
 func (e *runEventEmitter) emitToolCall(ctx stdcontext.Context, call context.ToolCall) error {
+	e.toolStreamStarted = true
 	parentMessageID := e.ensureAssistantMessageID()
 	started := AwakenEvent{
 		Type:            ToolCallStartedEventType,
@@ -3395,9 +3459,59 @@ func (e *runEventEmitter) resetTurn() {
 	e.textOpen = false
 	e.reasoningOpen = false
 	e.textStartedThisTurn = false
+	e.toolStreamStarted = false
 	e.reasoningText.Reset()
 	e.assistantText.Reset()
 	e.toolArgumentProgress.reset()
+}
+
+func (e *runEventEmitter) hasEphemeralStreamOutput() bool {
+	if e == nil {
+		return false
+	}
+	return e.textOpen || e.reasoningOpen || e.assistantText.Len() > 0 || e.reasoningText.Len() > 0
+}
+
+func (e *runEventEmitter) discardEphemeralStreamOutput() {
+	if e == nil || e.toolStreamStarted {
+		return
+	}
+	e.currentAssistantID = ""
+	e.textMessageID = ""
+	e.reasoningMessageID = ""
+	e.textOpen = false
+	e.reasoningOpen = false
+	e.textStartedThisTurn = false
+	e.assistantText.Reset()
+	e.reasoningText.Reset()
+}
+
+func (e *runEventEmitter) providerReconnect(phase string, attempt, maxAttempts int, err error, reset bool) {
+	if e == nil {
+		return
+	}
+	e.emit(AwakenEvent{
+		Type: ProviderReconnectEventType,
+		ProviderReconnect: &ProviderReconnectStatus{
+			Phase:           phase,
+			Attempt:         attempt,
+			MaxAttempts:     maxAttempts,
+			Detail:          llm.SafeRetryDetail(err),
+			ResetInProgress: reset,
+		},
+	})
+}
+
+func (e *runEventEmitter) providerReconnectRecovered() {
+	if e == nil {
+		return
+	}
+	e.emit(AwakenEvent{
+		Type: ProviderReconnectEventType,
+		ProviderReconnect: &ProviderReconnectStatus{
+			Phase: ProviderReconnectRecovered,
+		},
+	})
 }
 
 func (e *runEventEmitter) textWasStartedThisTurn() bool {

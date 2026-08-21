@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ShieldCheck, TriangleAlert, Webhook } from "lucide-react";
+import { AwakenIcon } from "@awaken/design-system";
 import type { HookReviewItem, HookSourceReceipt, HookStatus, RuntimeProject } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
 import "./HooksSettingsPanel.css";
@@ -85,10 +85,10 @@ function SourceDetails({ source, projectId, loading, onTrustChange }: {
       {source.diagnostic ? <p className="aw-hooks-settings__diagnostic">{source.diagnostic}</p> : null}
       {grouped.map(([event, hooks]) => (
         <section key={event} className="aw-hooks-settings__event">
-          <div className="aw-hooks-settings__event-heading"><Webhook size={17} aria-hidden="true" /><div><strong>{event}</strong><span>{EVENT_LABELS[event] ?? event}</span></div></div>
+          <div className="aw-hooks-settings__event-heading"><AwakenIcon concept="hook" size={16} /><div><strong>{event}</strong><span>{EVENT_LABELS[event] ?? event}</span></div></div>
           {hooks.map((hook, index) => (
             <details key={`${event}:${hook.id}`} className="aw-hooks-settings__hook" open={index === 0}>
-              <summary><span>{hook.id}</span><span>{TYPE_LABELS[hook.type]}</span><ChevronDown size={16} aria-hidden="true" /></summary>
+              <summary><span>{hook.id}</span><span>{TYPE_LABELS[hook.type]}</span><AwakenIcon concept="dropdown" size={16} /></summary>
               <HookDetails hook={hook} />
             </details>
           ))}
@@ -100,7 +100,7 @@ function SourceDetails({ source, projectId, loading, onTrustChange }: {
           {source.status === "enabled"
             ? <button type="button" disabled={loading} onClick={() => onTrustChange(source, false)}>撤销信任</button>
             : source.status === "untrusted"
-              ? <button type="button" disabled={loading || !source.digest} onClick={() => onTrustChange(source, true)}><ShieldCheck size={16} aria-hidden="true" />信任当前配置</button>
+              ? <button type="button" disabled={loading || !source.digest} onClick={() => onTrustChange(source, true)}><AwakenIcon concept="trusted" size={16} />信任当前配置</button>
               : null}
         </div>
       ) : null}
@@ -151,7 +151,7 @@ export function HooksSettingsPanel({ runtimeClient, currentProjectId }: { runtim
   return (
     <section className="aw-hooks-settings" aria-label="钩子设置">
       <header><p>查看用户与项目配置，并在信任前审查每个钩子的执行条件和操作。</p></header>
-      <div className="aw-hooks-settings__warning"><TriangleAlert size={18} aria-hidden="true" /><span>钩子可以在沙盒外以当前用户身份运行。请审查最近安装或修改的所有钩子。</span></div>
+      <div className="aw-hooks-settings__warning"><AwakenIcon concept="warning" size={20} /><span>钩子可以在沙盒外以当前用户身份运行。请审查最近安装或修改的所有钩子。</span></div>
       <label className="aw-hooks-settings__project">项目<select value={projectId} onChange={(event) => setProjectId(event.target.value)}><option value="">仅用户配置</option>{projects.map((project) => <option key={project.projectId} value={project.projectId}>{project.displayName}</option>)}</select></label>
       {message ? <p role="status" className="aw-hooks-settings__message">{message}</p> : null}
       {loading ? <p className="aw-hooks-settings__loading">正在读取钩子状态…</p> : null}

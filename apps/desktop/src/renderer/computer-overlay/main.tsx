@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useState } from "react";
+import { AwakenIcon } from "@awaken/design-system";
 import { createRoot } from "react-dom/client";
-import { Power } from "lucide-react";
 import type {
   ComputerOverlayBridge,
   ComputerOverlayState,
@@ -46,7 +46,7 @@ function ComputerOverlayApp() {
           title="停止计算机操作"
           onClick={() => void stop()}
         >
-          <Power size={18} strokeWidth={2.2} aria-hidden="true" />
+          <AwakenIcon concept="end-takeover" size={20} />
         </button>
       </section>
       {message ? <p className="computer-overlay-error" role="alert">{message}</p> : null}

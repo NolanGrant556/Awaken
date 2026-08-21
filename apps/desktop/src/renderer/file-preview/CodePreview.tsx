@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { AwakenIcon } from "@awaken/design-system";
 import { defaultKeymap } from "@codemirror/commands";
 import {
   bracketMatching,
@@ -12,7 +13,6 @@ import {
   keymap,
   lineNumbers,
 } from "@codemirror/view";
-import { WrapText } from "lucide-react";
 import type { ProjectFilePreviewTextHandle } from "../../shared/runtime";
 import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 import { loadPreviewLanguage } from "./previewLanguage";
@@ -115,7 +115,7 @@ export default function CodePreview({ preview, frameProps }: CodePreviewProps) {
             });
           }}
         >
-          <WrapText size={15} aria-hidden="true" />
+          <AwakenIcon concept="wrap-text" size={16} />
         </button>
       }
     >

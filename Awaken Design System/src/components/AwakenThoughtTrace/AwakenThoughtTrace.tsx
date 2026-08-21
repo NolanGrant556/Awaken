@@ -1,5 +1,5 @@
 import "./AwakenThoughtTrace.css";
-import { ChevronRight } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { useId, useState } from "react";
 import {
   AwakenThinkingOrbStatus,
@@ -73,7 +73,7 @@ export function AwakenThoughtTrace({
           </span>
         )}
         <span className="thought-trace-disclosure-icon" aria-hidden="true">
-          <ChevronRight size={12} strokeWidth={1.8} />
+          <AwakenIcon concept="disclose" size={12} />
         </span>
       </button>
       <div

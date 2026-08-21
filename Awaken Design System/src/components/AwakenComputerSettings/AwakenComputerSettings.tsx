@@ -1,11 +1,5 @@
-import {
-  CircleCheck,
-  CircleX,
-  ExternalLink,
-  MonitorCog,
-  RefreshCw,
-} from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenSettingsSwitch } from "../AwakenSettingsSwitch";
 import "./AwakenComputerSettings.css";
 
@@ -63,9 +57,9 @@ function StatusItem({
     <div className="computer-settings-status-item" data-ok={ok}>
       <div className="computer-settings-status-icon" aria-hidden="true">
         {ok ? (
-          <CircleCheck size={18} strokeWidth={1.9} />
+          <AwakenIcon concept="success" size={20} />
         ) : (
-          <CircleX size={18} strokeWidth={1.9} />
+          <AwakenIcon concept="failure" size={20} />
         )}
       </div>
       <div className="computer-settings-status-copy">
@@ -81,7 +75,7 @@ function StatusItem({
           disabled={actionDisabled}
           onClick={onAction}
         >
-          <ExternalLink size={14} strokeWidth={1.9} />
+          <AwakenIcon concept="external-open" size={14} />
           {actionLabel}
         </AwakenButton>
       ) : null}
@@ -129,14 +123,14 @@ export function AwakenComputerSettings({
           disabled={loading}
           onClick={() => onRefresh?.()}
         >
-          <RefreshCw size={16} strokeWidth={1.9} />
+          <AwakenIcon concept="refresh" size={16} />
           {loading ? "检测中…" : "刷新状态"}
         </AwakenButton>
       </div>
 
       <div className="computer-settings-card">
         <div className="computer-settings-card-header">
-          <MonitorCog size={20} strokeWidth={1.9} />
+          <AwakenIcon concept="computer-use" size={20} />
           <h3>运行状态</h3>
         </div>
         <div className="computer-settings-status-list">

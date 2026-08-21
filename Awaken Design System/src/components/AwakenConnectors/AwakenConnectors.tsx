@@ -1,5 +1,5 @@
 import "./AwakenConnectors.css";
-import { Plus, RefreshCw } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenConnectorCard } from "../AwakenConnectorCard";
 import type { AwakenConnectorCardItem, AwakenConnectorKind } from "./AwakenConnectors.types";
@@ -75,11 +75,11 @@ export function AwakenConnectors({
           </div>
           <div className="aw-connectors__header-actions">
             <button type="button" className="aw-connectors__refresh" aria-label="刷新" disabled={loading} onClick={onRefresh}>
-              <RefreshCw size={15} strokeWidth={1.9} />
+              <AwakenIcon concept="refresh" size={16} />
             </button>
             {activeKind === "mcp" ? (
               <AwakenButton variant="primary" size="sm" onClick={onConfigureMcp}>
-                <Plus size={15} strokeWidth={1.9} />配置 MCP
+                <AwakenIcon concept="add" size={16} />配置 MCP
               </AwakenButton>
             ) : null}
           </div>

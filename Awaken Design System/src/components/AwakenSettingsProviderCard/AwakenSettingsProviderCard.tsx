@@ -1,6 +1,6 @@
 import "./AwakenSettingsProviderCard.css";
+import { AwakenIcon } from "../AwakenIcon";
 import { useEffect, useRef, type ReactNode } from "react";
-import { ArrowUpRight, X } from "lucide-react";
 import {
   AwakenProviderLogo,
   type AwakenProviderBrand,
@@ -53,7 +53,7 @@ export function AwakenSettingsProviderCard({
       </span>
       <span className="model-provider-card__action">
         配置
-        <ArrowUpRight size={15} strokeWidth={1.9} aria-hidden="true" />
+        <AwakenIcon concept="provider-link" size={16} />
       </span>
     </button>
   );
@@ -143,7 +143,7 @@ export function AwakenSettingsProviderModal({
             aria-label="关闭配置面板"
             onClick={onClose}
           >
-            <X size={18} strokeWidth={1.9} aria-hidden="true" />
+            <AwakenIcon concept="close" size={20} />
           </button>
           {caption ? <div className="model-provider-modal__caption">{caption}</div> : null}
         </header>

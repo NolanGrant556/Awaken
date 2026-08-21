@@ -6,21 +6,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import {
-  AppWindow,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Copy,
-  FileText,
-  Folder,
-  FolderOpen,
-  Globe2,
-  Maximize2,
-  Plus,
-  Search,
-  X,
-} from "lucide-react";
-import { AwakenPopover as Popover, AwakenTooltip as Tooltip } from "@awaken/design-system";
+  AwakenIcon, AwakenPopover as Popover, AwakenTooltip as Tooltip } from "@awaken/design-system";
 import type {
   ProjectDirectoryEntry,
   ProjectEntryActionRequest,
@@ -900,7 +886,7 @@ export function ProjectFilesWorkspace({
             aria-selected={workspaceMode === "files"}
             onClick={() => changeWorkspaceMode("files")}
           >
-            <FileText size={15} strokeWidth={1.8} aria-hidden="true" />
+            <AwakenIcon concept="file-text" size={16} />
             文件
           </button>
           <button
@@ -909,7 +895,7 @@ export function ProjectFilesWorkspace({
             aria-selected={workspaceMode === "browser"}
             onClick={() => changeWorkspaceMode("browser")}
           >
-            <Globe2 size={15} strokeWidth={1.8} aria-hidden="true" />
+            <AwakenIcon concept="browser" size={16} />
             浏览器
           </button>
         </div>
@@ -922,7 +908,7 @@ export function ProjectFilesWorkspace({
                 aria-label="展开面板"
                 onClick={onExpand}
               >
-                <Maximize2 size={17} strokeWidth={1.8} />
+                <AwakenIcon concept="expand-full" size={16} />
               </button>
             </Tooltip>
           ) : null}
@@ -937,7 +923,7 @@ export function ProjectFilesWorkspace({
               setFileListExpanded((current) => !current);
             }}
           >
-            <FolderOpen size={18} strokeWidth={1.8} />
+            <AwakenIcon concept="folder-expanded" size={20} />
           </button>
         </div>
       </header>
@@ -979,7 +965,7 @@ export function ProjectFilesWorkspace({
             />
           ) : (
             <div className="project-files-preview-empty is-centered">
-              <FolderOpen size={42} strokeWidth={1.6} aria-hidden="true" />
+              <AwakenIcon concept="folder-expanded" size={24} />
               <strong>{emptyTitle}</strong>
               <span>{emptyDescription}</span>
             </div>
@@ -1031,10 +1017,10 @@ export function ProjectFilesWorkspace({
                   disabled={folders.length === 0}
                   aria-label="选择项目文件夹组"
                 >
-                  <Folder size={17} strokeWidth={1.8} aria-hidden="true" />
+                  <AwakenIcon concept="project" size={16} />
                   <span>{selectedFolder?.label ?? projectLabel ?? "选择文件夹"}</span>
                   {folders.length > 1 ? (
-                    <ChevronDown size={15} strokeWidth={1.8} aria-hidden="true" />
+                    <AwakenIcon concept="dropdown" size={16} />
                   ) : null}
                 </button>
               }
@@ -1054,11 +1040,11 @@ export function ProjectFilesWorkspace({
                           setFolderMenuOpen(false);
                         }}
                       >
-                        <Folder size={16} strokeWidth={1.75} aria-hidden="true" />
+                        <AwakenIcon concept="project" size={16} />
                         <span>
                           <strong>{folder.label}</strong>
                         </span>
-                        {selected ? <Check size={16} strokeWidth={1.9} aria-hidden="true" /> : null}
+                        {selected ? <AwakenIcon concept="step-done" size={16} /> : null}
                       </button>
                     );
                   })}
@@ -1072,13 +1058,13 @@ export function ProjectFilesWorkspace({
               className="project-files-create-agents"
               onClick={() => void createProjectAgents()}
             >
-              <Plus size={15} strokeWidth={1.9} aria-hidden="true" />
+              <AwakenIcon concept="add" size={16} />
               创建 AGENTS.md
             </button>
           ) : null}
 
           <label className="project-files-filter">
-            <Search size={16} strokeWidth={1.75} aria-hidden="true" />
+            <AwakenIcon concept="search" size={16} />
             <input
               type="search"
               value={filter}
@@ -1096,7 +1082,7 @@ export function ProjectFilesWorkspace({
                 title="清除筛选"
                 onClick={() => setFilter("")}
               >
-                <X size={14} strokeWidth={2} aria-hidden="true" />
+                <AwakenIcon concept="close" size={14} />
               </button>
             ) : null}
           </label>
@@ -1154,13 +1140,13 @@ export function ProjectFilesWorkspace({
                     >
                       <span className="project-files-tree-row__chevron">
                         {directory ? (
-                          <ChevronRight size={15} strokeWidth={2} aria-hidden="true" />
+                          <AwakenIcon concept="disclose" size={16} />
                         ) : null}
                       </span>
                       <span className="project-files-tree-row__icon" data-file-icon={iconKind}>
                         <ProjectFileIcon
                           kind={iconKind}
-                          size={iconKind === "folder" || iconKind === "folder-open" ? 16 : 15}
+                          size={16}
                         />
                       </span>
                       <span className="project-files-tree-row__label">{row.name}</span>
@@ -1192,11 +1178,11 @@ export function ProjectFilesWorkspace({
             disabled={addTaskDisabled || !onAddTaskContext}
             onClick={() => void addContextMenuEntryToTask()}
           >
-            <Plus size={16} strokeWidth={1.9} aria-hidden="true" />
+            <AwakenIcon concept="add" size={16} />
             <span>添加任务</span>
           </button>
           <button type="button" role="menuitem" onClick={() => void copyContextMenuEntryPath()}>
-            <Copy size={15} strokeWidth={1.9} aria-hidden="true" />
+            <AwakenIcon concept="copy" size={16} />
             <span>复制路径</span>
           </button>
           <div className="project-files-context-menu__separator" role="separator" />
@@ -1230,14 +1216,9 @@ export function ProjectFilesWorkspace({
                 )
               }
             >
-              <AppWindow size={15} strokeWidth={1.8} aria-hidden="true" />
+              <AwakenIcon concept="open-with" size={16} />
               <span>打开方式</span>
-              <ChevronRight
-                className="project-files-context-menu__submenu-chevron"
-                size={15}
-                strokeWidth={2}
-                aria-hidden="true"
-              />
+              <AwakenIcon concept="disclose" size={16} className="project-files-context-menu__submenu-chevron" />
             </button>
             {contextMenu.openWithMenuOpen ? (
               <div

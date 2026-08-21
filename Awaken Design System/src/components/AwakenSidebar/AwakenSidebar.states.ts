@@ -1,12 +1,5 @@
 import { createElement, type ComponentProps } from "react";
-import {
-  ChevronsDownUp,
-  ChevronsUpDown,
-  FolderPlus,
-  MessageCirclePlus,
-  Plug,
-  Wrench,
-} from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenSidebarSectionAction } from "../AwakenSidebarSectionAction";
 import type { AwakenSidebar } from "./AwakenSidebar";
 
@@ -23,7 +16,7 @@ function projectAction(label: string) {
     AwakenSidebarSectionAction,
     {
       label: `New session in ${label}`,
-      children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
+      children: createElement(AwakenIcon, { concept: "thread-new", size: 14 }),
     },
   );
 }
@@ -70,12 +63,12 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
         {
           id: "connectors",
           label: "连接器",
-          icon: createElement(Plug, { size: 16, strokeWidth: 1.9 }),
+          icon: createElement(AwakenIcon, { concept: "connector", size: 16 }),
         },
         {
           id: "skills",
           label: "技能",
-          icon: createElement(Wrench, { size: 16, strokeWidth: 1.9 }),
+          icon: createElement(AwakenIcon, { concept: "tool", size: 16 }),
         },
       ],
       activeNavId: "skills",
@@ -163,14 +156,14 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
           AwakenSidebarSectionAction,
           {
             label: "展开全部项目",
-            children: createElement(ChevronsUpDown, { size: 13, strokeWidth: 1.85 }),
+            children: createElement(AwakenIcon, { concept: "expand-all", size: 14 }),
           },
         ),
         createElement(
           AwakenSidebarSectionAction,
           {
             label: "创建项目",
-            children: createElement(FolderPlus, { size: 13, strokeWidth: 1.85 }),
+            children: createElement(AwakenIcon, { concept: "project-add", size: 14 }),
           },
         ),
       ),
@@ -183,14 +176,14 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
           AwakenSidebarSectionAction,
           {
             label: "收起对话",
-            children: createElement(ChevronsDownUp, { size: 13, strokeWidth: 1.85 }),
+            children: createElement(AwakenIcon, { concept: "collapse-all", size: 14 }),
           },
         ),
         createElement(
           AwakenSidebarSectionAction,
           {
             label: "新增对话",
-            children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
+            children: createElement(AwakenIcon, { concept: "thread-new", size: 14 }),
           },
         ),
       ),
@@ -306,7 +299,7 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
         AwakenSidebarSectionAction,
         {
           label: "添加文件夹",
-          children: createElement(FolderPlus, { size: 13, strokeWidth: 1.85 }),
+          children: createElement(AwakenIcon, { concept: "project-add", size: 14 }),
         },
       ),
       profileSubtitle: "/Users/nolangrant/Awaken",

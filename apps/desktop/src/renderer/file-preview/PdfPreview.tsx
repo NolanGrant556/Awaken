@@ -1,12 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Minus,
-  Plus,
-  RotateCw,
-  Scan,
-} from "lucide-react";
+import { AwakenIcon } from "@awaken/design-system";
 import {
   getDocument,
   GlobalWorkerOptions,
@@ -197,7 +190,7 @@ export default function PdfPreview({
               disabled={!pageCount || pageNumber <= 1}
               onClick={() => changePage(pageNumber - 1)}
             >
-              <ChevronLeft size={16} aria-hidden="true" />
+              <AwakenIcon concept="back" size={16} />
             </button>
             <label className="project-file-pdf-preview__page">
               <input
@@ -218,7 +211,7 @@ export default function PdfPreview({
               disabled={!pageCount || pageNumber >= pageCount}
               onClick={() => changePage(pageNumber + 1)}
             >
-              <ChevronRight size={16} aria-hidden="true" />
+              <AwakenIcon concept="disclose" size={16} />
             </button>
           </div>
           <div className="project-file-preview-heading__control-group">
@@ -228,7 +221,7 @@ export default function PdfPreview({
               title="缩小"
               onClick={() => changeScale((fitWidth ? 1 : scale) - SCALE_STEP)}
             >
-              <Minus size={16} aria-hidden="true" />
+              <AwakenIcon concept="collapse" size={16} />
             </button>
             <output aria-label="缩放比例">
               {fitWidth ? "适宽" : `${Math.round(scale * 100)}%`}
@@ -239,7 +232,7 @@ export default function PdfPreview({
               title="放大"
               onClick={() => changeScale((fitWidth ? 1 : scale) + SCALE_STEP)}
             >
-              <Plus size={16} aria-hidden="true" />
+              <AwakenIcon concept="add" size={16} />
             </button>
             <button
               type="button"
@@ -248,7 +241,7 @@ export default function PdfPreview({
               aria-pressed={fitWidth}
               onClick={() => setFitWidth(true)}
             >
-              <Scan size={15} aria-hidden="true" />
+              <AwakenIcon concept="fit-page" size={16} />
             </button>
             <button
               type="button"
@@ -256,7 +249,7 @@ export default function PdfPreview({
               title="顺时针旋转"
               onClick={() => setRotation((value) => (value + 90) % 360)}
             >
-              <RotateCw size={15} aria-hidden="true" />
+              <AwakenIcon concept="rotate-cw" size={16} />
             </button>
           </div>
         </div>

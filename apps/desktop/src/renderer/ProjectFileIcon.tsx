@@ -1,55 +1,37 @@
-import {
-  File,
-  FileArchive,
-  FileAudio2,
-  FileCode2,
-  FileImage,
-  FileJson2,
-  FileSpreadsheet,
-  FileText,
-  FileType,
-  FileType2,
-  FileVideo2,
-  Folder,
-  FolderOpen,
-  Link2,
-  Presentation,
-  type LucideIcon,
-} from "lucide-react";
+import { AwakenIcon, type AwakenIconConcept, type AwakenIconSize } from "@awaken/design-system";
+
 import type { ProjectFileIconKind } from "./projectFiles";
 
 export type ProjectFileVisualIconKind = ProjectFileIconKind | "folder-open";
 
-const icons: Record<ProjectFileVisualIconKind, LucideIcon> = {
-  "folder-open": FolderOpen,
-  folder: Folder,
-  symlink: Link2,
-  word: FileText,
-  excel: FileSpreadsheet,
-  powerpoint: Presentation,
-  pdf: FileType2,
-  markdown: FileType,
-  code: FileCode2,
-  data: FileJson2,
-  image: FileImage,
-  archive: FileArchive,
-  audio: FileAudio2,
-  video: FileVideo2,
-  text: FileText,
-  file: File,
+/**
+ * 文件类型 → 概念。图形由 Design System 的文件类型族提供：十一个类型共用同一个
+ * 文件外形，只换内标，因此文件树里的每一行都是同一个「文件」。
+ */
+const concepts: Record<ProjectFileVisualIconKind, AwakenIconConcept> = {
+  "folder-open": "folder-expanded",
+  folder: "project",
+  symlink: "symlink",
+  word: "file-text",
+  excel: "spreadsheet",
+  powerpoint: "presentation",
+  pdf: "file-pdf",
+  markdown: "file-markdown",
+  code: "file-code",
+  data: "file-data",
+  image: "file-image",
+  archive: "file-archive",
+  audio: "file-audio",
+  video: "file-video",
+  text: "file-text",
+  file: "file-generic",
 };
 
 export type ProjectFileIconProps = {
   kind: ProjectFileVisualIconKind;
-  size?: number;
-  strokeWidth?: number;
+  size?: AwakenIconSize;
 };
 
-export default function ProjectFileIcon({
-  kind,
-  size = 15,
-  strokeWidth = 1.75,
-}: ProjectFileIconProps) {
-  const Icon = icons[kind];
-  return <Icon size={size} strokeWidth={strokeWidth} aria-hidden="true" />;
+export default function ProjectFileIcon({ kind, size = 16 }: ProjectFileIconProps) {
+  return <AwakenIcon concept={concepts[kind]} size={size} />;
 }

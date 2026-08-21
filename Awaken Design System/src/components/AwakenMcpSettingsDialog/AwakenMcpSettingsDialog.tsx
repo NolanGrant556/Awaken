@@ -1,5 +1,5 @@
 import "./AwakenMcpSettingsDialog.css";
-import { Check, Trash2 } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 import type { AwakenMcpLogItem, AwakenMcpToolItem } from "../AwakenConnectors/AwakenConnectors.types";
@@ -48,12 +48,12 @@ export function AwakenMcpSettingsDialog({
       footer={
         <div className="aw-mcp-settings-dialog__footer">
           <AwakenButton className="aw-mcp-settings-dialog__delete" variant="default" size="md" disabled={saving} onClick={onDelete}>
-            <Trash2 size={15} strokeWidth={1.9} />删除
+            <AwakenIcon concept="delete" size={16} />删除
           </AwakenButton>
           <div>
             <AwakenButton variant="default" size="md" disabled={saving} onClick={() => onOpenChange(false)}>取消</AwakenButton>
             <AwakenButton variant="primary" size="md" loading={saving} disabled={configValue.trim() === ""} onClick={onSave}>
-              <Check size={15} strokeWidth={1.9} />保存
+              <AwakenIcon concept="step-done" size={16} />保存
             </AwakenButton>
           </div>
         </div>

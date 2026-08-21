@@ -1,7 +1,6 @@
 @import "../../tokens/components.css";
 
-.aw-primary-nav svg {
-  width: var(--aw-icon-size-20);
-  height: var(--aw-icon-size-20);
-  stroke-width: 1.9;
-}
+/*
+ * 图标的尺寸与描边由图标层决定，这里不再覆写 svg。
+ * CSS 的 stroke-width 会盖掉 SVG 的呈现属性，一条覆写就能把全套描边静默改掉。
+ */

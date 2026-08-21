@@ -1,0 +1,11 @@
+/*
+ * AwakenIcon 只负责把图标层的几何投出来。
+ * 尺寸由 size prop 决定，颜色跟随 currentColor，
+ * 描边宽度由图标层给定，不在 CSS 里覆盖 —— 它参与光学归一化。
+ */
+.aw-icon {
+  display: block;
+  flex: none;
+  /* 图标与相邻文字按视觉中心对齐，而不是按基线。 */
+  vertical-align: middle;
+}

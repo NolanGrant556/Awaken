@@ -1,6 +1,6 @@
 import { createElement } from "react";
+import { AwakenIcon } from "../AwakenIcon";
 import type { ComponentProps } from "react";
-import { Settings } from "lucide-react";
 import type {
   AwakenComposerBar,
   ComposerBarMetaItem,
@@ -40,7 +40,7 @@ const modelMetaItem: ComposerBarMetaItem = {
   ],
   menuFooterAction: {
     label: "添加模型",
-    icon: createElement(Settings, { size: 16, strokeWidth: 1.9 }),
+    icon: createElement(AwakenIcon, { concept: "settings", size: 16 }),
     onClick: noop,
   },
 };

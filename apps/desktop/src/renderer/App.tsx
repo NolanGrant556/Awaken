@@ -11,34 +11,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import {
-  CalendarClock,
-  CheckCheck,
-  ChevronDown,
-  ChevronUp,
-  ChevronsDownUp,
-  ChevronsUpDown,
-  Clock,
-  File as FileIcon,
-  Folder,
-  FolderPlus,
-  Globe2,
-  Image as ImageIcon,
-  ListChecks,
-  MessageSquare,
-  MessageCirclePlus,
-  Minimize2,
-  Monitor,
-  PanelRightClose,
-  PanelRightOpen,
-  Plug,
-  Search,
-  Settings,
-  Trash2,
-  Workflow,
-  Wrench,
-  X,
-} from "lucide-react";
+
 import {
   AwakenAppShell as AppShell,
   AwakenAssistantMessage as AssistantMessage,
@@ -49,6 +22,7 @@ import {
   AwakenDialog as Dialog,
   AwakenDeliverableList as DeliverableList,
   AwakenExecutionFeed as ExecutionFeed,
+  AwakenIcon,
   AwakenMediaGenerationCard as MediaGenerationCard,
   AwakenMediaInspector as MediaInspector,
   AwakenMediaPreviewOverlay as MediaPreviewOverlay,
@@ -894,7 +868,7 @@ export function UserQuestionPrompt({
                 onClick={goToPreviousQuestion}
                 disabled={disabled || !hasPreviousQuestion}
               >
-                <ChevronUp size={15} strokeWidth={1.9} />
+                <AwakenIcon concept="collapse-up" size={16} />
               </button>
               <span className="user-question-card__counter" aria-live="polite">
                 {currentPageIndex + 1} of {questionCount}
@@ -907,7 +881,7 @@ export function UserQuestionPrompt({
                 onClick={goToNextQuestion}
                 disabled={disabled || !hasNextQuestion}
               >
-                <ChevronDown size={15} strokeWidth={1.9} />
+                <AwakenIcon concept="dropdown" size={16} />
               </button>
             </div>
           ) : null}
@@ -919,7 +893,7 @@ export function UserQuestionPrompt({
             onClick={onCancel}
             disabled={disabled}
           >
-            <X size={20} strokeWidth={1.8} />
+            <AwakenIcon concept="close" size={20} />
           </button>
         </div>
       </div>
@@ -2178,13 +2152,13 @@ const INSPECTOR_FILE_ITEMS = [
     id: "files",
     label: "文件",
     tone: "neutral" as const,
-    icon: <Folder size={16} strokeWidth={1.8} aria-hidden="true" />,
+    icon: <AwakenIcon concept="project" size={16} />,
   },
   {
     id: "browser",
     label: "浏览器",
     tone: "neutral" as const,
-    icon: <Globe2 size={16} strokeWidth={1.8} aria-hidden="true" />,
+    icon: <AwakenIcon concept="browser" size={16} />,
   },
 ];
 const STORED_THEME_KEY = "awaken:appearance:theme";
@@ -3859,17 +3833,17 @@ export function App() {
     {
       id: "connectors",
       label: "连接器",
-      icon: <Plug size={16} strokeWidth={1.9} />,
+      icon: <AwakenIcon concept="connector" size={20} />,
     },
     {
       id: "skills",
       label: "技能",
-      icon: <Wrench size={16} strokeWidth={1.9} />,
+      icon: <AwakenIcon concept="skill" size={20} />,
     },
     {
       id: "scheduled-tasks",
       label: "定时任务",
-      icon: <CalendarClock size={16} strokeWidth={1.9} />,
+      icon: <AwakenIcon concept="scheduled-task" size={20} />,
     },
   ];
   const topbarStatusLabel = desktopNeedsRestart
@@ -4049,7 +4023,7 @@ export function App() {
           }),
           menuFooterAction: {
             label: "添加模型",
-            icon: <Settings size={16} strokeWidth={1.9} />,
+            icon: <AwakenIcon concept="settings" size={16} />,
             onClick: () => {
               setModelSettingsInitialModelSection("coding_plan");
               setModelSettingsOpen(true);
@@ -4092,7 +4066,7 @@ export function App() {
           handleNewProjectSession(projectId);
         }}
       >
-        <MessageCirclePlus size={13} strokeWidth={1.85} />
+        <AwakenIcon concept="thread-new" size={16} />
       </SidebarSectionAction>
     );
   }
@@ -6241,7 +6215,7 @@ export function App() {
       kind: presentation.kind,
       icon:
         visualKind === "search" ? (
-          <Search size={14} strokeWidth={1.9} aria-hidden="true" />
+          <AwakenIcon concept="search" size={14} />
         ) : undefined,
       status,
       open: toolTraceOpenById[id],
@@ -6343,7 +6317,7 @@ export function App() {
           detail={summary.detail}
           icon={
             searchOnly ? (
-              <Search size={14} strokeWidth={1.9} aria-hidden="true" />
+              <AwakenIcon concept="search" size={14} />
             ) : undefined
           }
           open={activityBatchOpenById[segment.id]}
@@ -6598,7 +6572,7 @@ export function App() {
       return (
         <div key={key} className="scheduled-notice-card" role="note" aria-label="定时提醒">
           <span className="scheduled-notice-card__icon" aria-hidden="true">
-            <Clock size={14} strokeWidth={1.9} />
+            <AwakenIcon concept="scheduled-task" size={14} />
           </span>
           <span className="scheduled-notice-card__body">
             <span className="scheduled-notice-card__header">
@@ -7121,7 +7095,7 @@ export function App() {
                       title={currentConversationLabel}
                       onClick={handleShowConversationSurface}
                     >
-                      <MessageSquare size={16} strokeWidth={1.8} aria-hidden="true" />
+                      <AwakenIcon concept="memory-feedback" size={16} />
                       <span>{currentConversationLabel}</span>
                     </button>
                   </div>
@@ -7155,7 +7129,7 @@ export function App() {
                                 className="project-files-tab__file-icon"
                                 data-file-icon={iconKind}
                               >
-                                <ProjectFileIcon kind={iconKind} size={16} strokeWidth={1.8} />
+                                <ProjectFileIcon kind={iconKind} size={16} />
                               </span>
                               <span className="project-files-tab__label">
                                 {deliverablePreview.title}
@@ -7168,7 +7142,7 @@ export function App() {
                               title={`关闭 ${deliverablePreview.title}`}
                               onClick={() => setDeliverablePreview(undefined)}
                             >
-                              <X size={15} strokeWidth={1.9} />
+                              <AwakenIcon concept="close" size={16} />
                             </button>
                           </div>
                         );
@@ -7200,7 +7174,7 @@ export function App() {
                                 className="project-files-tab__file-icon"
                                 data-file-icon={iconKind}
                               >
-                                <ProjectFileIcon kind={iconKind} size={16} strokeWidth={1.8} />
+                                <ProjectFileIcon kind={iconKind} size={16} />
                               </span>
                               <span className="project-files-tab__label">{tab.name}</span>
                             </button>
@@ -7211,7 +7185,7 @@ export function App() {
                               title={`关闭 ${tab.name}`}
                               onClick={() => handleCloseProjectFileTab(tab.id)}
                             >
-                              <X size={15} strokeWidth={1.9} />
+                              <AwakenIcon concept="close" size={16} />
                             </button>
                           </div>
                         );
@@ -7230,7 +7204,7 @@ export function App() {
                             aria-selected={fileWorkspaceTabsAreActive}
                             onClick={handleShowFileWorkspaceSurface}
                           >
-                            <FileIcon size={16} strokeWidth={1.8} aria-hidden="true" />
+                            <AwakenIcon concept="file-generic" size={16} />
                             <span className="project-files-tab__label">
                               {fileWorkspaceMode === "browser" ? "浏览器" : "打开文件"}
                             </span>
@@ -7241,7 +7215,7 @@ export function App() {
                             aria-label="关闭文件视图"
                             onClick={handleCloseFileWorkspace}
                           >
-                            <X size={15} strokeWidth={1.9} />
+                            <AwakenIcon concept="close" size={16} />
                           </button>
                         </div>
                       ) : null}
@@ -7254,7 +7228,7 @@ export function App() {
                           aria-label="收起面板"
                           onClick={handleContractFileWorkspace}
                         >
-                          <Minimize2 size={14} strokeWidth={1.9} />
+                          <AwakenIcon concept="exit-full" size={14} />
                         </button>
                       </Tooltip>
                     ) : null}
@@ -7265,9 +7239,9 @@ export function App() {
                       onClick={handleToggleInspectorCollapsed}
                     >
                       {inspectorCollapsed ? (
-                        <PanelRightOpen size={14} strokeWidth={1.9} />
+                        <AwakenIcon concept="toggle-right-panel" size={14} />
                       ) : (
-                        <PanelRightClose size={14} strokeWidth={1.9} />
+                        <AwakenIcon concept="toggle-right-panel" size={14} />
                       )}
                     </button>
                   </div>
@@ -7284,9 +7258,9 @@ export function App() {
                         onClick={handleToggleInspectorCollapsed}
                       >
                         {inspectorCollapsed ? (
-                          <PanelRightOpen size={14} strokeWidth={1.9} />
+                          <AwakenIcon concept="toggle-right-panel" size={14} />
                         ) : (
-                          <PanelRightClose size={14} strokeWidth={1.9} />
+                          <AwakenIcon concept="toggle-right-panel" size={14} />
                         )}
                       </button>
                     ) : null}
@@ -7322,13 +7296,13 @@ export function App() {
                       }
                     >
                       {allProjectsExpanded ? (
-                        <ChevronsDownUp size={13} strokeWidth={1.85} />
+                        <AwakenIcon concept="collapse-all" size={16} />
                       ) : (
-                        <ChevronsUpDown size={13} strokeWidth={1.85} />
+                        <AwakenIcon concept="expand-all" size={16} />
                       )}
                     </SidebarSectionAction>
                     <SidebarSectionAction label="创建项目" onClick={handleOpenCreateProject}>
-                      <FolderPlus size={13} strokeWidth={1.85} />
+                      <AwakenIcon concept="project-add" size={16} />
                     </SidebarSectionAction>
                   </span>
                 }
@@ -7351,7 +7325,7 @@ export function App() {
                             );
                           }}
                         >
-                          <CheckCheck size={13} strokeWidth={1.85} />
+                          <AwakenIcon concept="select-all" size={16} />
                         </SidebarSectionAction>
                         <SidebarSectionAction
                           label={
@@ -7368,13 +7342,13 @@ export function App() {
                             );
                           }}
                         >
-                          <Trash2 size={13} strokeWidth={1.85} />
+                          <AwakenIcon concept="delete" size={16} />
                         </SidebarSectionAction>
                         <SidebarSectionAction
                           label="退出批量管理"
                           onClick={exitConversationBatchMode}
                         >
-                          <X size={13} strokeWidth={1.85} />
+                          <AwakenIcon concept="close" size={16} />
                         </SidebarSectionAction>
                       </>
                     ) : (
@@ -7384,9 +7358,9 @@ export function App() {
                           onClick={() => setConversationSectionExpanded((expanded) => !expanded)}
                         >
                           {conversationSectionExpanded ? (
-                            <ChevronsDownUp size={13} strokeWidth={1.85} />
+                            <AwakenIcon concept="collapse-all" size={16} />
                           ) : (
-                            <ChevronsUpDown size={13} strokeWidth={1.85} />
+                            <AwakenIcon concept="expand-all" size={16} />
                           )}
                         </SidebarSectionAction>
                         <SidebarSectionAction
@@ -7394,10 +7368,10 @@ export function App() {
                           disabled={conversationThreads.length === 0}
                           onClick={enterConversationBatchMode}
                         >
-                          <ListChecks size={13} strokeWidth={1.85} />
+                          <AwakenIcon concept="select-mode" size={16} />
                         </SidebarSectionAction>
                         <SidebarSectionAction label="新增对话" onClick={handleNewTask}>
-                          <MessageCirclePlus size={13} strokeWidth={1.85} />
+                          <AwakenIcon concept="thread-new" size={16} />
                         </SidebarSectionAction>
                       </>
                     )}
@@ -7497,7 +7471,7 @@ export function App() {
                                 title="回到最新输出"
                                 onClick={handleReturnToLatestClick}
                               >
-                                <ChevronDown size={16} strokeWidth={2.1} aria-hidden="true" />
+                                <AwakenIcon concept="dropdown" size={16} />
                               </button>
                             </div>
                           ) : null}
@@ -7915,7 +7889,7 @@ export function App() {
                                   id: "media",
                                   label: "媒体",
                                   tone: "neutral" as const,
-                                  icon: <ImageIcon size={16} strokeWidth={1.8} aria-hidden="true" />,
+                                  icon: <AwakenIcon concept="media-image" size={16} />,
                                 },
                               ]
                             : []),
@@ -7928,7 +7902,7 @@ export function App() {
                                   tone: runningSubagentCount
                                     ? ("warning" as const)
                                     : ("neutral" as const),
-                                  icon: <Workflow size={16} strokeWidth={1.8} aria-hidden="true" />,
+                                  icon: <AwakenIcon concept="subagent" size={16} />,
                                 },
                               ]
                             : []),
@@ -8092,7 +8066,7 @@ export function App() {
               <SelectableCard
                 compact
                 selected={pendingProjectMode === "local"}
-                icon={<Monitor size={15} strokeWidth={1.9} />}
+                icon={<AwakenIcon concept="theme-system" size={16} />}
                 title="Local"
                 onSelect={() => setPendingProjectMode("local")}
               />

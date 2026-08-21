@@ -17,12 +17,6 @@
     opacity var(--aw-transition-fast);
 }
 
-.aw-sidebar-section-action svg {
-  width: var(--aw-icon-size-16);
-  height: var(--aw-icon-size-16);
-  stroke-width: 1.85;
-}
-
 .aw-sidebar-section-action:hover,
 .aw-sidebar-section-action:focus-visible {
   background: var(--aw-bg-fill-light);

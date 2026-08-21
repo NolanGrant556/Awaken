@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ExternalLink, FolderSearch2, RefreshCw } from "lucide-react";
+import { AwakenIcon } from "@awaken/design-system";
 
 export type PreviewFrameProps = {
   displayName: string;
@@ -44,7 +44,7 @@ export default function PreviewFrame({
               title="重新载入文件预览"
               onClick={onReload}
             >
-              <RefreshCw size={15} aria-hidden="true" />
+              <AwakenIcon concept="refresh" size={16} />
             </button>
             <button
               type="button"
@@ -52,7 +52,7 @@ export default function PreviewFrame({
               title="使用系统默认应用打开"
               onClick={onOpenExternal}
             >
-              <ExternalLink size={15} aria-hidden="true" />
+              <AwakenIcon concept="external-open" size={16} />
             </button>
             <button
               type="button"
@@ -60,7 +60,7 @@ export default function PreviewFrame({
               title="在文件管理器中显示"
               onClick={onReveal}
             >
-              <FolderSearch2 size={15} aria-hidden="true" />
+              <AwakenIcon concept="locate-folder" size={16} />
             </button>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import "./AwakenProfileMenuPanel.css";
-import { ChevronRight, Gauge, Palette, Settings } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import {
   useId,
   useState,
@@ -66,14 +66,9 @@ export function AwakenProfileMenuPanel({
             aria-controls={appearancePanelId}
             onClick={() => setAppearanceOpen((current) => !current)}
           >
-            <Palette size={15} strokeWidth={1.9} aria-hidden="true" />
+            <AwakenIcon concept="settings-appearance" size={16} />
             <span>外观</span>
-            <ChevronRight
-              size={14}
-              strokeWidth={1.9}
-              className="aw-profile-menu-panel__action-chevron"
-              aria-hidden="true"
-            />
+            <AwakenIcon concept="disclose" size={14} className="aw-profile-menu-panel__action-chevron" />
           </button>
           {appearanceOpen ? (
             <div
@@ -96,7 +91,7 @@ export function AwakenProfileMenuPanel({
           className="aw-profile-menu-panel__action"
           onClick={onOpenUsage}
         >
-          <Gauge size={15} strokeWidth={1.9} aria-hidden="true" />
+          <AwakenIcon concept="usage" size={16} />
           <span>查询用量</span>
         </button>
         <button
@@ -104,7 +99,7 @@ export function AwakenProfileMenuPanel({
           className="aw-profile-menu-panel__action"
           onClick={onOpenSettings}
         >
-          <Settings size={15} strokeWidth={1.9} aria-hidden="true" />
+          <AwakenIcon concept="settings" size={16} />
           {settingsLabel}
         </button>
       </div>

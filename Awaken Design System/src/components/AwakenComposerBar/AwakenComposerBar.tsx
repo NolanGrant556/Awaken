@@ -8,7 +8,7 @@ import type {
   ReactNode,
   Ref,
 } from "react";
-import { Check, ChevronDown, ChevronLeft, FileText, Folder, FolderPlus, X } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenComposerInput, type ComposerInputSelection } from "../AwakenComposerInput";
 import { AwakenContextButton } from "../AwakenContextButton";
 import { AwakenDropdown } from "../AwakenDropdown";
@@ -766,12 +766,7 @@ export function AwakenComposerBar({
         {item.icon ? <span className="composer-bar-model-trigger-icon">{item.icon}</span> : null}
         <span className="composer-bar-model-trigger-label">{item.label}</span>
         {hasMenu ? (
-          <ChevronDown
-            className="composer-bar-model-trigger-chevron"
-            size={14}
-            strokeWidth={1.85}
-            aria-hidden="true"
-          />
+          <AwakenIcon concept="dropdown" size={16} />
         ) : null}
       </>
     );
@@ -838,7 +833,7 @@ export function AwakenComposerBar({
                   onClick={() => setActiveModelOptionId(null)}
                   aria-label="返回模型列表"
                 >
-                  <ChevronLeft size={15} aria-hidden="true" />
+                  <AwakenIcon concept="back" size={16} />
                   {activeModelOption.icon ? (
                     <span className="composer-bar-model-option-icon composer-bar-model-effort-icon">
                       {activeModelOption.icon}
@@ -975,12 +970,7 @@ export function AwakenComposerBar({
                   ) : null}
                   <span className="composer-bar-model-option-label">{option.label}</span>
                   {option.selected ? (
-                    <Check
-                      className="composer-bar-model-option-check"
-                      size={15}
-                      strokeWidth={2}
-                      aria-hidden="true"
-                    />
+                    <AwakenIcon concept="step-done" size={16} />
                   ) : null}
                 </button>
               ))}
@@ -1020,7 +1010,7 @@ export function AwakenComposerBar({
       selectedProjectOption?.icon === null
         ? null
         : (selectedProjectOption?.icon ?? (
-            <Folder size={17} strokeWidth={1.85} aria-hidden="true" />
+            <AwakenIcon concept="project" size={16} />
           ));
     const showClearAction = Boolean(
       projectPicker.clearAction && selectedProjectOption && selectedProjectIcon !== null,
@@ -1052,7 +1042,7 @@ export function AwakenComposerBar({
                     projectPicker.clearAction?.onClick();
                   }}
                 >
-                  <X size={11} strokeWidth={2.1} aria-hidden="true" />
+                  <AwakenIcon concept="close" size={12} />
                 </button>
               ) : null}
               <button
@@ -1069,12 +1059,7 @@ export function AwakenComposerBar({
                   <span className="composer-bar-project-trigger-icon">{selectedProjectIcon}</span>
                 ) : null}
                 <span className="composer-bar-project-trigger-label">{triggerLabel}</span>
-                <ChevronDown
-                  className="composer-bar-project-trigger-chevron"
-                  size={14}
-                  strokeWidth={1.9}
-                  aria-hidden="true"
-                />
+                <AwakenIcon concept="dropdown" size={16} />
               </button>
             </div>
           }
@@ -1087,7 +1072,7 @@ export function AwakenComposerBar({
                   const optionIcon =
                     option.icon === null
                       ? null
-                      : (option.icon ?? <Folder size={16} strokeWidth={1.8} aria-hidden="true" />);
+                      : (option.icon ?? <AwakenIcon concept="project" size={16} />);
 
                   return (
                     <button
@@ -1107,7 +1092,7 @@ export function AwakenComposerBar({
                       {optionIcon}
                       <span className="composer-bar-project-option-label">{option.label}</span>
                       {option.selected ? (
-                        <Check size={15} strokeWidth={2} aria-hidden="true" />
+                        <AwakenIcon concept="step-done" size={16} />
                       ) : (
                         <span aria-hidden="true" />
                       )}
@@ -1132,7 +1117,7 @@ export function AwakenComposerBar({
                 }}
               >
                 <span className="composer-bar-project-create-icon">
-                  <FolderPlus size={16} strokeWidth={1.85} aria-hidden="true" />
+                  <AwakenIcon concept="project-add" size={16} />
                 </span>
                 <span className="composer-bar-project-create-copy">
                   <span className="composer-bar-project-create-label">
@@ -1163,12 +1148,7 @@ export function AwakenComposerBar({
           <img src={attachment.src} alt={attachment.alt} />
         ) : (
           <div className="composer-bar-file-card" aria-label={label}>
-            <FileText
-              className="composer-bar-file-card-icon"
-              size={17}
-              strokeWidth={1.85}
-              aria-hidden="true"
-            />
+            <AwakenIcon concept="context-file" size={16} />
             <span className="composer-bar-file-card-name">{label}</span>
             {attachment.extension ? (
               <span className="composer-bar-file-card-extension">{attachment.extension}</span>
@@ -1182,7 +1162,7 @@ export function AwakenComposerBar({
             aria-label={`移除 ${label}`}
             onClick={() => onRemoveAttachment(attachment.id)}
           >
-            <X size={12} strokeWidth={2.2} />
+            <AwakenIcon concept="close" size={12} />
           </button>
         ) : null}
       </div>

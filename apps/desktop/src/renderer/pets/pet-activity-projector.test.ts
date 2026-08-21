@@ -30,6 +30,7 @@ function emptyViewState(): RuntimeViewState {
     subagentsById: {},
     subagentOrder: [],
     runPlansById: {},
+    providerReconnectAttempts: [],
     threads: [],
     threadViews: {},
     supervisorStatus: null,

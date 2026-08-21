@@ -33,14 +33,34 @@ export const AWAKEN_ICON_CONCEPTS = {
   disclose: "chevron-right",
   dropdown: "chevron-down",
 
-  // 运行状态
+  // Composer
+  send: "arrow-up",
+  stop: "stop",
+  "context-file": "file-list",
+  "computer-use": "display-pointer",
+  back: "chevron-left",
+  copy: "copy",
+
+  // 运行状态。迁移前这一族是散的：错误有四个同义图标，unsupported 与 error
+  // 共用一个，loading 有两个。现在每个状态只有一个图形。
   "step-pending": "circle",
+  "step-running": "spinner",
   "step-done": "check",
+  success: "check-circle",
+  failure: "x-circle",
+  error: "exclamation-circle",
+  warning: "exclamation-triangle",
+  unsupported: "question-circle",
+  cancelled: "minus-circle",
+  denied: "slash-circle",
+  interrupted: "stop-circle",
+  blocked: "shield-x",
   "select-all": "checks",
   "select-mode": "check-square",
 
   // 能力与来源
   tool: "wrench",
+  "tool-terminal": "terminal",
   skill: "skill",
   "skill-active": "skill-core",
   hook: "hook",

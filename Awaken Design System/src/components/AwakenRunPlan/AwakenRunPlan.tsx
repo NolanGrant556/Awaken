@@ -1,5 +1,5 @@
 import "./AwakenRunPlan.css";
-import { Check, Circle, LoaderCircle, X } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { forwardRef, useId } from "react";
 
 // AwakenRunPlanItemView mirrors the renderer-side RunPlanView item fields the
@@ -39,19 +39,18 @@ function RunPlanStatusIcon({
   animated: boolean;
 }) {
   if (status === "completed") {
-    return <Check size={16} strokeWidth={2} aria-hidden="true" />;
+    return <AwakenIcon concept="step-done" size={16} />;
   }
   if (status === "in_progress") {
     return (
-      <LoaderCircle
+      <AwakenIcon
+        concept="step-running"
         size={16}
-        strokeWidth={2}
-        aria-hidden="true"
         className={animated ? "aw-run-plan-spin" : undefined}
       />
     );
   }
-  return <Circle size={16} strokeWidth={1.8} aria-hidden="true" />;
+  return <AwakenIcon concept="step-pending" size={16} />;
 }
 
 // RunPlanItemList is the shared read-only step list used by both the expanded
@@ -178,7 +177,7 @@ export const AwakenRunPlanPanel = forwardRef<
             aria-label="关闭运行计划"
             onClick={onClose}
           >
-            <X size={15} strokeWidth={1.9} aria-hidden="true" />
+            <AwakenIcon concept="close" size={16} />
           </button>
         </header>
         {explanation ? (

@@ -173,6 +173,122 @@ export function hexagonHook(cx = 8, cy = 8): GeomOp {
 }
 
 /**
+ * 状态族的容器圆。全套状态图标共用同一个圆，半径不得逐个微调 ——
+ * 它们经常同屏出现（工具轨迹一行一个状态），容器一旦不同就会看出参差。
+ */
+export function statusRing(cx = 8, cy = 8, r = 6.375): GeomOp {
+  return circle(cx, cy, r);
+}
+
+/** 感叹号内标：一段竖杠加一个点。点用零长线段实现，靠圆头端点成为正圆。 */
+export function exclamationMark(cx = 8, cy = 8): GeomOp[] {
+  return [
+    poly(
+      [
+        [cx, cy - 3.4],
+        [cx, cy + 0.6],
+      ],
+      0,
+    ),
+    poly(
+      [
+        [cx, cy + 3.1],
+        [cx, cy + 3.1],
+      ],
+      0,
+    ),
+  ];
+}
+
+/**
+ * 问号内标。只用直线段加大圆角逼近问号，不引入自由曲线。
+ * 用于工具轨迹的 unsupported 状态 —— 它此前和 error 共用一个图标。
+ */
+export function questionMark(cx = 8, cy = 8): GeomOp[] {
+  return [
+    poly(
+      [
+        [cx - 1.7, cy - 2.1],
+        [cx, cy - 3.3],
+        [cx + 1.7, cy - 2.1],
+        [cx, cy - 0.3],
+        [cx, cy + 0.9],
+      ],
+      [0, 1.4, 1.4, 1.1, 0],
+    ),
+    poly(
+      [
+        [cx, cy + 3.2],
+        [cx, cy + 3.2],
+      ],
+      0,
+    ),
+  ];
+}
+
+/**
+ * 盾牌轮廓。用于「被策略阻断」，盾牌本身承载「策略」语义。
+ *
+ * 必须明显高于宽：实测宽 10.2 × 高 10 的方胖盾牌加内标后会被读成动物脸。
+ */
+export function shield(cx = 8, cy = 8): GeomOp {
+  return poly(
+    [
+      [cx - 4.55, cy - 5.9],
+      [cx + 4.55, cy - 5.9],
+      [cx + 4.55, cy - 1],
+      [cx, cy + 5.9],
+      [cx - 4.55, cy - 1],
+    ],
+    [1.5, 1.5, 0.9, 1.7, 0.9],
+    true,
+  );
+}
+
+/** 圆角三角形。用于警告。 */
+export function triangle(cx = 8, cy = 8, half = 6.1, height = 10.5): GeomOp {
+  return poly(
+    [
+      [cx, cy - height / 2],
+      [cx + half, cy + height / 2],
+      [cx - half, cy + height / 2],
+    ],
+    1.5,
+    true,
+  );
+}
+
+/** 显示器轮廓加底座。屏幕与底座是两段，底座延长到光学边界。 */
+export function display(cx = 8, cy = 8, w = 12.6, h = 9.2): GeomOp[] {
+  return [
+    poly(
+      [
+        [cx - w / 2, cy - h / 2 - 1],
+        [cx + w / 2, cy - h / 2 - 1],
+        [cx + w / 2, cy + h / 2 - 1],
+        [cx - w / 2, cy + h / 2 - 1],
+      ],
+      1.7,
+      true,
+    ),
+    poly(
+      [
+        [cx - 3.2, cy + h / 2 + 2.4],
+        [cx + 3.2, cy + h / 2 + 2.4],
+      ],
+      0,
+    ),
+    poly(
+      [
+        [cx, cy + h / 2 - 1],
+        [cx, cy + h / 2 + 2.4],
+      ],
+      0,
+    ),
+  ];
+}
+
+/**
  * 齿轮。8 齿而不是 6 齿：六重对称无法让齿同时落在水平与垂直轴上，
  * 轮廓会是六边形而不是正圆（实测 6 齿是 12.3 宽 × 14 高）。
  * 中心孔必须占外径 40% 以上，否则 12px 下先糊掉的就是它。

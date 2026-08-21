@@ -1,5 +1,5 @@
 import "./AwakenContextButton.css";
-import { Plus } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenIconButton } from "../AwakenIconButton";
 
 export type AwakenContextButtonProps = {
@@ -16,7 +16,7 @@ export function AwakenContextButton({ onClick, disabled }: AwakenContextButtonPr
       variant="square"
       size="sm"
     >
-      <Plus size={16} strokeWidth={1.85} />
+      <AwakenIcon concept="add" size={16} />
     </AwakenIconButton>
   );
 }

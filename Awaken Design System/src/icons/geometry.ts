@@ -173,10 +173,19 @@ export function normalizeToOptical(
   const targetH = visual[1] - stroke;
 
   let s: number;
+  let anchorX = b.cx;
+  let anchorY = b.cy;
   if (fit === "radial") {
+    // 圆形族按外接圆归一化。锚点必须是圆本身的圆心，不能用包围盒中心 ——
+    // 缺口圆弧（如 spinner）的包围盒并不以圆心为中心，用包围盒中心会算错半径。
+    const round = ops.find((o) => (o.op === "circle" || o.op === "arc") && o.measure);
+    if (round && (round.op === "circle" || round.op === "arc")) {
+      anchorX = round.c[0];
+      anchorY = round.c[1];
+    }
     let rMax = 0;
     for (const [x, y] of measured) {
-      rMax = Math.max(rMax, Math.hypot(x - b.cx, y - b.cy));
+      rMax = Math.max(rMax, Math.hypot(x - anchorX, y - anchorY));
     }
     s = rMax > 1e-9 ? Math.min(targetW, targetH) / 2 / rMax : 1;
   } else {
@@ -186,7 +195,7 @@ export function normalizeToOptical(
   }
 
   const center = AWAKEN_ICON_GRID / 2;
-  const out = scaleOps(ops, s, center - b.cx * s, center - b.cy * s);
+  const out = scaleOps(ops, s, center - anchorX * s, center - anchorY * s);
   const nb = bounds(samplePoints(out, true));
   return { ops: out, measured: [nb.w + stroke, nb.h + stroke] };
 }
@@ -242,7 +251,10 @@ function roundedPath(pts: readonly Vec[], radii: readonly number[], closed: bool
     });
   }
 
-  const start = closed && corners.has(0) ? corners.get(0)!.t1 : pts[0];
+  // 闭合路径必须从顶点 0 的「出边」切点起笔。用入边切点 t1 起笔会让最后的 Z
+  // 沿着顶点 0 的弦直接闭合，把这个角切掉 —— 描边形状上表现为第一个角变平，
+  // 实心形状上表现为缺一块。
+  const start = closed && corners.has(0) ? corners.get(0)!.t2 : pts[0];
   const seg: string[] = [`M${fmt(start[0])} ${fmt(start[1])}`];
   const order = closed ? [...Array(n).keys()].map((i) => i + 1) : [...Array(n - 1).keys()].map((i) => i + 1);
 

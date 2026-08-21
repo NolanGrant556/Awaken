@@ -1,5 +1,5 @@
 import "./AwakenToolTraceGroup.css";
-import { ChevronRight, LoaderCircle, Wrench } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { useId, useState, type ReactNode } from "react";
 import {
   AwakenToolTraceLine,
@@ -64,12 +64,12 @@ export function AwakenToolTraceGroup({
         onClick={toggleOpen}
       >
         <span className="tool-trace-group-icon" aria-hidden="true">
-          {icon ?? (active ? <LoaderCircle size={14} /> : <Wrench size={14} />)}
+          {icon ?? (active ? <AwakenIcon concept="step-running" size={14} /> : <AwakenIcon concept="tool" size={14} />)}
         </span>
         <span className="tool-trace-group-label">{summary}</span>
         {detail ? <span className="tool-trace-group-detail">{detail}</span> : null}
         <span className="tool-trace-group-chevron" aria-hidden="true">
-          <ChevronRight size={13} strokeWidth={1.8} />
+          <AwakenIcon concept="disclose" size={14} />
         </span>
       </button>
       <div

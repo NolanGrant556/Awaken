@@ -22,6 +22,9 @@ import {
 import {
   chevron,
   crossMark,
+  display,
+  exclamationMark,
+  fileBody,
   folderBody,
   gear,
   hexagon,
@@ -30,6 +33,10 @@ import {
   hexagonSlots,
   minusMark,
   plusMark,
+  questionMark,
+  shield,
+  statusRing,
+  triangle,
 } from "./primitives";
 
 export type IconDefinition = {
@@ -44,6 +51,11 @@ export type IconDefinition = {
    * 由 registry 暴露给审计测试与调用点检查。
    */
   readonly minSize?: number;
+  /**
+   * 实心字形。实心图标的视觉包围盒就是几何包围盒，不需要为描边留出半个描边宽度，
+   * 因此光学归一化按 stroke 0 计算。只给产品真正需要实心的概念做实心版。
+   */
+  readonly filled?: boolean;
   /** 该图标在产品中的用处。concepts.ts 负责概念到名字的映射，这里只描述图形本身。 */
   readonly purpose: string;
 };
@@ -411,6 +423,276 @@ const RAW_DEFINITIONS = {
           [7.2, 11.8],
         ],
         [0, 1, 0],
+      ),
+    ],
+  },
+
+  // ---- 状态族：同一个容器圆 + 不同内标 ----
+  // 迁移前状态语义是混乱的：错误有 AlertCircle / CircleAlert / AlertTriangle /
+  // TriangleAlert 四个同义图标，unsupported 与 error 共用一个，loading 有
+  // LoaderCircle / Loader2 两个。这一族把每个状态收敛到唯一图形。
+  spinner: {
+    shape: "circle",
+    fit: "radial",
+    purpose: "进行中",
+    // 留 60 度缺口，旋转时才看得出在转；缺口起点落在 -60 度，与指针对角线一致。
+    build: () => [arc(8, 8, 6.375, -60, 240)],
+  },
+  "check-circle": {
+    shape: "circle",
+    minSize: 14,
+    purpose: "成功 / 就绪",
+    build: () => [
+      statusRing(),
+      poly(
+        [
+          [5.4, 8.2],
+          [7.3, 10.1],
+          [10.7, 6.7],
+        ],
+        [0, 0.9, 0],
+      ),
+    ],
+  },
+  "x-circle": {
+    shape: "circle",
+    minSize: 14,
+    purpose: "失败 / 缺失",
+    build: () => [statusRing(), ...crossMark(8, 8, 2.3)],
+  },
+  "exclamation-circle": {
+    shape: "circle",
+    minSize: 14,
+    purpose: "错误",
+    build: () => [statusRing(), ...exclamationMark()],
+  },
+  "question-circle": {
+    shape: "circle",
+    minSize: 14,
+    purpose: "不支持 / 未知",
+    build: () => [statusRing(), ...questionMark()],
+  },
+  "minus-circle": {
+    shape: "circle",
+    minSize: 14,
+    purpose: "已取消",
+    build: () => [statusRing(), minusMark(8, 8, 2.6)],
+  },
+  "slash-circle": {
+    shape: "circle",
+    minSize: 14,
+    purpose: "被拒绝",
+    // 斜杠按「禁止」的通用画法贯穿到接近圆周，是对 ≥3 单位净间隙规则的
+    // 有意例外：缩短反而读不出禁止。方向与其它斜杠一致，从左下切到右上的反向。
+    build: () => [
+      statusRing(),
+      poly(
+        [
+          [3.6, 12.4],
+          [12.4, 3.6],
+        ],
+        0,
+      ),
+    ],
+  },
+  "stop-circle": {
+    shape: "circle",
+    minSize: 14,
+    purpose: "被中断",
+    build: () => [
+      statusRing(),
+      poly(
+        [
+          [6.1, 6.1],
+          [9.9, 6.1],
+          [9.9, 9.9],
+          [6.1, 9.9],
+        ],
+        0.7,
+        true,
+      ),
+    ],
+  },
+  "shield-x": {
+    shape: "vertical",
+    minSize: 14,
+    purpose: "被权限策略阻断",
+    build: () => [shield(), ...crossMark(8, 6.3, 1.6)],
+  },
+  "exclamation-triangle": {
+    // 声明为 horizontal 会把三角压扁成又宽又矮；警告三角接近等边，用显式 visual。
+    shape: "horizontal",
+    visual: [13.5, 12],
+    minSize: 14,
+    purpose: "警告",
+    build: () => [
+      triangle(),
+      poly(
+        [
+          [8, 6],
+          [8, 8.9],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [8, 11.1],
+          [8, 11.1],
+        ],
+        0,
+      ),
+    ],
+  },
+
+  // ---- 工具来源与终端 ----
+  terminal: {
+    shape: "square",
+    purpose: "终端类工具",
+    build: () => [
+      poly(
+        [
+          [0, 0],
+          [11.75, 0],
+          [11.75, 11.75],
+          [0, 11.75],
+        ],
+        1.9,
+        true,
+      ),
+      poly(
+        [
+          [2.9, 4.1],
+          [5.1, 6.3],
+          [2.9, 8.5],
+        ],
+        [0, 0.8, 0],
+      ),
+      poly(
+        [
+          [6.6, 8.5],
+          [9.1, 8.5],
+        ],
+        0,
+      ),
+    ],
+  },
+
+  // ---- Composer ----
+  "arrow-up": {
+    shape: "vertical",
+    purpose: "发送",
+    build: () => [
+      poly(
+        [
+          [8, 14.4],
+          [8, 1.6],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [3.3, 6.3],
+          [8, 1.6],
+          [12.7, 6.3],
+        ],
+        [0, 0.8, 0],
+      ),
+    ],
+  },
+  stop: {
+    // 唯一的实心字形。停止必须比发送更「重」，描边版在 16px 下读起来像一个空框。
+    shape: "square",
+    filled: true,
+    visual: [10.5, 10.5],
+    purpose: "停止运行",
+    build: () => [
+      poly(
+        [
+          [2.75, 2.75],
+          [13.25, 2.75],
+          [13.25, 13.25],
+          [2.75, 13.25],
+        ],
+        2.2,
+        true,
+      ),
+    ],
+  },
+  "chevron-left": {
+    shape: "vertical",
+    visual: [6.5, 11.8],
+    purpose: "返回上一级",
+    build: () => [poly(rotate([[0, 0], [5.25, 5.25], [0, 10.5]], 180, [2.625, 5.25]), [0, 1, 0])],
+  },
+  "file-list": {
+    shape: "vertical",
+    purpose: "文件 / 上下文文件 token",
+    build: () => [
+      fileBody(),
+      poly(
+        [
+          [2.7, 8.1],
+          [8.3, 8.1],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [2.7, 10.7],
+          [6.4, 10.7],
+        ],
+        0,
+      ),
+    ],
+  },
+  "display-pointer": {
+    shape: "horizontal",
+    minSize: 14,
+    purpose: "计算机操作",
+    build: () => [
+      ...display(),
+      // 屏幕里是一支指向右上的箭头，遵循全套「方向跟随指针」的规则。
+      // 实心三角形在 14px 会被圆角揉成一个水滴，因此用描边箭头。
+      poly(
+        [
+          [5.9, 8],
+          [9.4, 4.5],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [9.4, 6.4],
+          [9.4, 4.5],
+          [7.5, 4.5],
+        ],
+        [0, 0.6, 0],
+      ),
+    ],
+  },
+  copy: {
+    shape: "square",
+    minSize: 14,
+    purpose: "复制",
+    build: () => [
+      // 后层只画露出的两条边，避免与前层重叠形成双描边。
+      poly(
+        [
+          [3.4, 1.1],
+          [11.6, 1.1],
+          [11.6, 9.3],
+        ],
+        [1.6, 1.6, 0],
+      ),
+      poly(
+        [
+          [1.1, 4.4],
+          [8.6, 4.4],
+          [8.6, 11.9],
+          [1.1, 11.9],
+        ],
+        1.6,
+        true,
       ),
     ],
   },

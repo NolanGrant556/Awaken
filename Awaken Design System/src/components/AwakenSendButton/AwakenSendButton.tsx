@@ -1,5 +1,5 @@
 import "./AwakenSendButton.css";
-import { ArrowUp, Square } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenTooltip } from "../AwakenTooltip";
 
 export type AwakenSendButtonProps = {
@@ -67,9 +67,9 @@ export function AwakenSendButton({ ready, onClick, disabled, loading, mode = "se
           }}
         />
       ) : isStop ? (
-        <Square size={14} strokeWidth={2.2} fill="currentColor" />
+        <AwakenIcon concept="stop" size={14} />
       ) : (
-        <ArrowUp size={18} strokeWidth={1.85} />
+        <AwakenIcon concept="send" size={16} />
       )}
     </button>
   );

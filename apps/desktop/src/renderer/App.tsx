@@ -13,20 +13,14 @@ import type {
 } from "react";
 import {
   CalendarClock,
-  CheckCheck,
   ChevronDown,
   ChevronUp,
-  ChevronsDownUp,
-  ChevronsUpDown,
   Clock,
   File as FileIcon,
   Folder,
-  FolderPlus,
   Globe2,
   Image as ImageIcon,
-  ListChecks,
   MessageSquare,
-  MessageCirclePlus,
   Minimize2,
   Monitor,
   PanelRightClose,
@@ -49,6 +43,7 @@ import {
   AwakenDialog as Dialog,
   AwakenDeliverableList as DeliverableList,
   AwakenExecutionFeed as ExecutionFeed,
+  AwakenIcon,
   AwakenMediaGenerationCard as MediaGenerationCard,
   AwakenMediaInspector as MediaInspector,
   AwakenMediaPreviewOverlay as MediaPreviewOverlay,
@@ -3859,17 +3854,17 @@ export function App() {
     {
       id: "connectors",
       label: "连接器",
-      icon: <Plug size={16} strokeWidth={1.9} />,
+      icon: <AwakenIcon concept="connector" size={16} />,
     },
     {
       id: "skills",
       label: "技能",
-      icon: <Wrench size={16} strokeWidth={1.9} />,
+      icon: <AwakenIcon concept="skill" size={16} />,
     },
     {
       id: "scheduled-tasks",
       label: "定时任务",
-      icon: <CalendarClock size={16} strokeWidth={1.9} />,
+      icon: <AwakenIcon concept="scheduled-task" size={16} />,
     },
   ];
   const topbarStatusLabel = desktopNeedsRestart
@@ -4092,7 +4087,7 @@ export function App() {
           handleNewProjectSession(projectId);
         }}
       >
-        <MessageCirclePlus size={13} strokeWidth={1.85} />
+        <AwakenIcon concept="thread-new" size={14} />
       </SidebarSectionAction>
     );
   }
@@ -7322,13 +7317,13 @@ export function App() {
                       }
                     >
                       {allProjectsExpanded ? (
-                        <ChevronsDownUp size={13} strokeWidth={1.85} />
+                        <AwakenIcon concept="collapse-all" size={14} />
                       ) : (
-                        <ChevronsUpDown size={13} strokeWidth={1.85} />
+                        <AwakenIcon concept="expand-all" size={14} />
                       )}
                     </SidebarSectionAction>
                     <SidebarSectionAction label="创建项目" onClick={handleOpenCreateProject}>
-                      <FolderPlus size={13} strokeWidth={1.85} />
+                      <AwakenIcon concept="project-add" size={14} />
                     </SidebarSectionAction>
                   </span>
                 }
@@ -7351,7 +7346,7 @@ export function App() {
                             );
                           }}
                         >
-                          <CheckCheck size={13} strokeWidth={1.85} />
+                          <AwakenIcon concept="select-all" size={14} />
                         </SidebarSectionAction>
                         <SidebarSectionAction
                           label={
@@ -7368,13 +7363,13 @@ export function App() {
                             );
                           }}
                         >
-                          <Trash2 size={13} strokeWidth={1.85} />
+                          <AwakenIcon concept="delete" size={14} />
                         </SidebarSectionAction>
                         <SidebarSectionAction
                           label="退出批量管理"
                           onClick={exitConversationBatchMode}
                         >
-                          <X size={13} strokeWidth={1.85} />
+                          <AwakenIcon concept="close" size={14} />
                         </SidebarSectionAction>
                       </>
                     ) : (
@@ -7384,9 +7379,9 @@ export function App() {
                           onClick={() => setConversationSectionExpanded((expanded) => !expanded)}
                         >
                           {conversationSectionExpanded ? (
-                            <ChevronsDownUp size={13} strokeWidth={1.85} />
+                            <AwakenIcon concept="collapse-all" size={14} />
                           ) : (
-                            <ChevronsUpDown size={13} strokeWidth={1.85} />
+                            <AwakenIcon concept="expand-all" size={14} />
                           )}
                         </SidebarSectionAction>
                         <SidebarSectionAction
@@ -7394,10 +7389,10 @@ export function App() {
                           disabled={conversationThreads.length === 0}
                           onClick={enterConversationBatchMode}
                         >
-                          <ListChecks size={13} strokeWidth={1.85} />
+                          <AwakenIcon concept="select-mode" size={14} />
                         </SidebarSectionAction>
                         <SidebarSectionAction label="新增对话" onClick={handleNewTask}>
-                          <MessageCirclePlus size={13} strokeWidth={1.85} />
+                          <AwakenIcon concept="thread-new" size={14} />
                         </SidebarSectionAction>
                       </>
                     )}

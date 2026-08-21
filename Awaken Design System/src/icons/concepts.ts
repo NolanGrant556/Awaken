@@ -11,7 +11,8 @@
 import type { AwakenIconName } from "./registry";
 
 export const AWAKEN_ICON_CONCEPTS = {
-  // 项目与文件
+  // 会话与项目
+  "thread-new": "chat-bubble-plus",
   project: "folder",
   "project-add": "folder-plus",
   "folder-expanded": "folder-open",
@@ -21,6 +22,9 @@ export const AWAKEN_ICON_CONCEPTS = {
   close: "x",
   collapse: "minus",
   delete: "trash",
+  "more-actions": "dots-horizontal",
+  "expand-all": "chevrons-up-down",
+  "collapse-all": "chevrons-down-up",
   search: "magnifying-glass",
   refresh: "arrows-cw",
   settings: "cog",
@@ -32,6 +36,8 @@ export const AWAKEN_ICON_CONCEPTS = {
   // 运行状态
   "step-pending": "circle",
   "step-done": "check",
+  "select-all": "checks",
+  "select-mode": "check-square",
 
   // 能力与来源
   tool: "wrench",
@@ -40,6 +46,7 @@ export const AWAKEN_ICON_CONCEPTS = {
   hook: "hook",
   connector: "connector",
   subagent: "subagent",
+  "scheduled-task": "clock",
 
   /**
    * MCP 按尺寸分两路：

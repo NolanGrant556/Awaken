@@ -12,23 +12,23 @@ import (
 )
 
 const (
-	threadTitleGenerationTimeout        = 8 * time.Second
-	threadTitleForcedReasoningTimeout   = 45 * time.Second
-	threadTitleMaxTokens                = 48
-	threadTitleForcedReasoningMaxTokens = 512
-	threadTitleMaxRuneLength            = 24
+	threadTitleGenerationTimeout = 60 * time.Second
+	threadTitleMaxTokens         = 32_000
+	threadTitleMaxRuneLength     = 50
 )
 
 func buildThreadTitlePrompt(firstUserMessage string, attachments []RunInputAttachment, composerTokens []ComposerToken, modelProfile *ModelProfileConfig) string {
 	var b strings.Builder
 	b.WriteString("You are a concise chat-session title generator.\n\n")
-	b.WriteString("Task: Generate a very short title summarizing the user's first message. Name the underlying topic or task; do not copy the user's sentence.\n")
+	b.WriteString("Task: Generate a meaningful title for the conversation from the user's first message. Name the underlying topic or task; never answer the user's question and do not copy the user's sentence.\n")
 	b.WriteString("- If the main language is Chinese, output 4-12 Chinese characters.\n")
 	b.WriteString("- Otherwise, output 3-8 English words.\n")
 	b.WriteString("Rules:\n")
 	b.WriteString("- Output ONLY the title text.\n")
-	b.WriteString("- No quotation marks, no periods, no newlines, no explanations.\n")
-	b.WriteString("- Keep it concise and descriptive.\n")
+	b.WriteString("- Use the same language as the user's message.\n")
+	b.WriteString("- Keep technical terms, product names, and numbers when they identify the topic.\n")
+	b.WriteString("- No quotation marks, no periods, no newlines, no explanations, and no tool calls.\n")
+	b.WriteString("- Keep it concise and descriptive, with no more than 50 characters.\n")
 	b.WriteString("- Do not output a question.\n\n")
 	b.WriteString("Examples:\n")
 	b.WriteString("User message: 告诉我，这个项目有什么文档？主要是什么方向的？内容都是什么\n")
@@ -86,6 +86,13 @@ func buildThreadTitlePrompt(firstUserMessage string, attachments []RunInputAttac
 }
 
 func cleanGeneratedThreadTitle(title string) string {
+	title = stripThreadTitleThinking(strings.TrimSpace(title))
+	for _, line := range strings.Split(title, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			title = line
+			break
+		}
+	}
 	title = strings.TrimSpace(title)
 	// Strip common wrappers/explanations on a single line.
 	title = strings.TrimPrefix(title, "Title: ")
@@ -118,7 +125,26 @@ func cleanGeneratedThreadTitle(title string) string {
 		return ""
 	}
 
-	return trimThreadLabel(title)
+	return title
+}
+
+func stripThreadTitleThinking(value string) string {
+	for {
+		lower := strings.ToLower(value)
+		start := strings.Index(lower, "<think>")
+		if start < 0 {
+			return strings.TrimSpace(value)
+		}
+		end := strings.Index(lower[start+len("<think>"):], "</think>")
+		if end < 0 {
+			if strings.TrimSpace(value[:start]) == "" {
+				return ""
+			}
+			return strings.TrimSpace(value[:start])
+		}
+		end += start + len("<think>")
+		value = value[:start] + value[end+len("</think>"):]
+	}
 }
 
 func validGeneratedThreadTitle(title, firstUserMessage string) string {
@@ -191,7 +217,7 @@ func generateThreadTitleWithProfile(
 	}
 	cfg := mainCfg
 
-	resp, err := agentcore.InvokeRecordedModel(ctx, authority, cfg, llm.Request{
+	resp, err := agentcore.StreamRecordedModel(ctx, authority, cfg, llm.Request{
 		SystemPrompt:     "You generate very short chat session titles. Output only the title text. No quotes, periods, newlines, or explanations.",
 		UserPrompt:       prompt,
 		Model:            cfg.Model,
@@ -202,7 +228,7 @@ func generateThreadTitleWithProfile(
 		Messages: []convcontext.Message{
 			{Role: convcontext.RoleUser, Content: prompt},
 		},
-	}, retryIndex, false)
+	}, llm.StreamObserver{}, retryIndex, false)
 	if err != nil {
 		return "", err
 	}
@@ -213,19 +239,13 @@ func generateThreadTitleWithProfile(
 }
 
 func threadTitleMaxTokensForProfile(profile *ModelProfileConfig) int {
-	if profile != nil && strings.TrimSpace(profile.ReasoningEffort) != "" {
-		if profile.MaxTokens > 0 && profile.MaxTokens < threadTitleForcedReasoningMaxTokens {
-			return profile.MaxTokens
-		}
-		return threadTitleForcedReasoningMaxTokens
+	if profile != nil && profile.MaxTokens > 0 && profile.MaxTokens < threadTitleMaxTokens {
+		return profile.MaxTokens
 	}
 	return threadTitleMaxTokens
 }
 
-func threadTitleGenerationTimeoutForProfile(profile *ModelProfileConfig) time.Duration {
-	if profile != nil && strings.TrimSpace(profile.ReasoningEffort) != "" {
-		return threadTitleForcedReasoningTimeout
-	}
+func threadTitleGenerationTimeoutForProfile(_ *ModelProfileConfig) time.Duration {
 	return threadTitleGenerationTimeout
 }
 

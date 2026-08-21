@@ -316,6 +316,9 @@ func TestStreamInvokeOpenAICompactSummaryAppliesProviderTemperaturePolicy(t *tes
 		{name: "kimi coding highspeed always thinking", model: "kimi-for-coding-highspeed", wantTemperature: 1.0, wantNoThinking: true},
 		{name: "kimi k2.6 instant", model: "kimi-k2.6", wantTemperature: 0.6, wantNoThinking: true},
 		{name: "kimi k2.7 always thinking", model: "kimi-k2.7-code", wantTemperature: 1.0, wantNoThinking: true},
+		{name: "kimi k3", model: "k3", wantTemperature: 1.0, wantNoThinking: true},
+		{name: "kimi k3 256k", model: "k3-256k", wantTemperature: 1.0, wantNoThinking: true},
+		{name: "kimi k3 cn", model: "kimi-k3", wantTemperature: 1.0, wantNoThinking: true},
 		{name: "deepseek deterministic compact", model: "deepseek-v4-pro", wantTemperature: 0.0, wantNoThinking: true},
 		{name: "ark deterministic compact", model: "ark-code-latest", wantTemperature: 0.1, wantNoThinking: true},
 	}

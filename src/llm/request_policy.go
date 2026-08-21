@@ -123,6 +123,9 @@ func applyAuxiliaryRequestPolicy(cfg Config, req Request) Request {
 		// Kimi K2.7 Code always thinks and rejects thinking.disabled.
 		req.DisableReasoning = false
 		setCompactTemperature(&req, 1.0)
+	case isKimiK3(model):
+		// Kimi K3 rejects compact temperatures and currently requires 1.
+		setCompactTemperature(&req, 1.0)
 	case isKimiK25OrK26(model):
 		if req.DisableReasoning {
 			setCompactTemperature(&req, 0.6)
@@ -163,6 +166,10 @@ func isKimiProvider(key string) bool {
 
 func isKimiK25OrK26(model string) bool {
 	return model == "kimi-k2.5" || model == "kimi-k2.6"
+}
+
+func isKimiK3(model string) bool {
+	return model == "kimi-k3" || model == "k3" || model == "k3-256k"
 }
 
 func isKimiK27Code(model string) bool {

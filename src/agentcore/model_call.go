@@ -104,7 +104,7 @@ func InvokeRecordedModel(
 	return response, callErr
 }
 
-// StreamRecordedModel is the streaming counterpart used by compact summary.
+// StreamRecordedModel is the streaming counterpart used by auxiliary model calls.
 func StreamRecordedModel(
 	ctx stdcontext.Context,
 	authority ModelCallAuthority,

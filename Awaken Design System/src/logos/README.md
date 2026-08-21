@@ -2,7 +2,7 @@
 
 本文是 Logo 目录、光学切法和概念对照的唯一权威。Design System Guide 只保留视觉方向；Desktop 只消费 `@awaken/design-system` 出口，不另建第二份 Awaken 或供应商 Logo。
 
-方法来自 [The making of Cursor's icons](https://www.minoradventures.co/blog/the-making-of-cursors-icons) 的工作方式，不复制 Cursor 图标本身。通用界面图形仍用 `lucide-react`。
+方法来自 [The making of Cursor's icons](https://www.minoradventures.co/blog/the-making-of-cursors-icons) 的工作方式，不复制 Cursor 图标本身。界面图标由 [图标库](../icons/README.md) 拥有。
 
 ## 当前支持
 
@@ -15,7 +15,7 @@
 ## 当前不支持
 
 - 完整 Brand 导出矩阵（favicon、DMG、ICO、文档封面）。
-- 用自研图标字体替换 `lucide-react`。
+- 用图标字体或 Figma `ship it` 管线发布品牌标记。界面图标的当前边界见 [图标库](../icons/README.md)。
 - 为连接器第三方品牌重绘光学切法；连接器仍由 consumer 传入官方图。
 - 自动从 Figma 发布或 `ship it` 字体编译管线。
 

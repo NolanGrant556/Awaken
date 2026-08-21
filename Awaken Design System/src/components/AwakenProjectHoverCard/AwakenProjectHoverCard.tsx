@@ -14,7 +14,7 @@ import {
   useRole,
   type Placement,
 } from "@floating-ui/react";
-import { Folder, MessageCircle, Settings } from "lucide-react";
+import { Folder, MessageCircle, Settings } from "../../icons";
 import type { ProjectHoverCard } from "../../types";
 
 export type ProjectHoverCardAnchorProps = {

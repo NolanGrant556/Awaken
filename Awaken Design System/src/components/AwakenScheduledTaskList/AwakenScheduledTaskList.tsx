@@ -1,6 +1,6 @@
 import "./AwakenScheduledTaskList.css";
 import { useState } from "react";
-import { CalendarClock, MoreHorizontal } from "lucide-react";
+import { CalendarClock, MoreHorizontal } from "../../icons";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDropdown } from "../AwakenDropdown";
 import { AwakenSwitch } from "../AwakenSwitch";

@@ -1,5 +1,5 @@
 import { createElement, type ComponentProps } from "react";
-import { MessageCirclePlus } from "lucide-react";
+import { MessageCirclePlus } from "../../icons";
 import { AwakenSidebarSectionAction } from "../AwakenSidebarSectionAction";
 import type { AwakenProjectTree } from "./AwakenProjectTree";
 

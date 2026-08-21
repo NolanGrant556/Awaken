@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useRef } from "react";
-import { Brain } from "lucide-react";
+import { Brain } from "../../icons";
 import { AwakenMemoryLightFlow } from "./AwakenMemoryLightFlow";
 import type { AwakenMemoryLightFlowTheme } from "./AwakenMemoryLightFlow.model";
 import "./AwakenMemoryLightFlowLayout.css";

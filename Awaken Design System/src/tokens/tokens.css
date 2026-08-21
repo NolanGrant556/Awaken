@@ -184,6 +184,8 @@
   --aw-icon-size-20: 20px;
   --aw-icon-size-24: 24px;
   --aw-icon-stroke: 1.75;
+  --aw-icon-stroke-16: 1.25px;
+  --aw-icon-stroke-24: 1.5px;
 
   /* Logo optical cuts: 16 holds 12–20px, 24 takes over from 22px. */
   --aw-logo-stroke-16: 1.25px;

@@ -1,5 +1,5 @@
 import "./AwakenMediaGenerationCard.css";
-import { ChevronRight, LoaderCircle } from "lucide-react";
+import { ChevronRight, LoaderCircle } from "../../icons";
 import { useId, useMemo, useState } from "react";
 import {
   AwakenMediaItemCard,

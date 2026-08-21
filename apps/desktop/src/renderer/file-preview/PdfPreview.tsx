@@ -6,7 +6,7 @@ import {
   Plus,
   RotateCw,
   Scan,
-} from "lucide-react";
+} from "@awaken/design-system";
 import {
   getDocument,
   GlobalWorkerOptions,

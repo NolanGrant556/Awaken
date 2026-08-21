@@ -1,5 +1,5 @@
 import { createElement, type ComponentProps } from "react";
-import { Monitor } from "lucide-react";
+import { Monitor } from "../../icons";
 import type { AwakenSelectableCard } from "./AwakenSelectableCard";
 
 export type AwakenSelectableCardState = {

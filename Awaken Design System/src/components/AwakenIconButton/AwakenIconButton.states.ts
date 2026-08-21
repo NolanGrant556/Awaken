@@ -1,5 +1,5 @@
 import { createElement, type ComponentProps } from "react";
-import { Plus, X } from "lucide-react";
+import { Plus, X } from "../../icons";
 import type { AwakenIconButton } from "./AwakenIconButton";
 
 export type AwakenIconButtonState = {

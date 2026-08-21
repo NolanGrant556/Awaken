@@ -1,5 +1,5 @@
 import "./AwakenSettings.css";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "../../icons";
 import type { CSSProperties, ReactNode, Ref } from "react";
 import { AwakenSettingsNav, type AwakenSettingsNavItem } from "../AwakenSettingsNav";
 

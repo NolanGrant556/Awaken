@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import type { ComponentProps } from "react";
-import { Settings } from "lucide-react";
+import { Settings } from "../../icons";
 import type {
   AwakenComposerBar,
   ComposerBarMetaItem,

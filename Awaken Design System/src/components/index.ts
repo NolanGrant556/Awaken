@@ -30,6 +30,7 @@ export * from "./AwakenMediaInspector";
 export * from "./AwakenMediaItemCard";
 export * from "./AwakenMediaPreviewOverlay";
 export * from "./AwakenFolder";
+export * from "./AwakenIcon";
 export * from "./AwakenIconButton";
 export * from "./AwakenInspectorRail";
 export * from "./AwakenSubagentGroup";

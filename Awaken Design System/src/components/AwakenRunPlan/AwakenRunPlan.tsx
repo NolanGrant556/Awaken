@@ -1,5 +1,5 @@
 import "./AwakenRunPlan.css";
-import { Check, Circle, LoaderCircle, X } from "lucide-react";
+import { Check, Circle, LoaderCircle, X } from "../../icons";
 import { forwardRef, useId } from "react";
 
 // AwakenRunPlanItemView mirrors the renderer-side RunPlanView item fields the

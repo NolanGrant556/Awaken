@@ -1,6 +1,6 @@
 import "./AwakenWorkbenchShell.css";
 import "./AwakenWorkbenchShell.demo.css";
-import { Folder, Plug, Wrench } from "lucide-react";
+import { Folder, Plug, Wrench } from "../../icons";
 import { AwakenAppShell } from "../AwakenAppShell/AwakenAppShell";
 import { AwakenAppShellDemo } from "../AwakenAppShell/AwakenAppShell.demo";
 import { AwakenComposerBar } from "../AwakenComposerBar/AwakenComposerBar";

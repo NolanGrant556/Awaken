@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { LoaderCircle, MessageSquare } from "lucide-react";
+import { LoaderCircle, MessageSquare } from "@awaken/design-system";
 
 export type ExpandedFileComposerIdleMode = "rail" | "compact" | "full";
 export type ExpandedFileComposerPresentation =

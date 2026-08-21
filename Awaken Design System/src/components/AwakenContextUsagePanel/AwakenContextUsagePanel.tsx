@@ -1,5 +1,5 @@
 import "./AwakenContextUsagePanel.css";
-import { X } from "lucide-react";
+import { X } from "../../icons";
 import { forwardRef, useEffect, useId, useRef } from "react";
 
 export type AwakenContextUsageContribution = {

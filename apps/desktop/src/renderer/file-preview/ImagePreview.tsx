@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Maximize2, Minus, Plus, RotateCcw } from "lucide-react";
+import { Maximize2, Minus, Plus, RotateCcw } from "@awaken/design-system";
 import type { ProjectFilePreviewUrlHandle } from "../../shared/runtime";
 import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 

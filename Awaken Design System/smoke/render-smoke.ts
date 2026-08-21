@@ -32,6 +32,7 @@ if (productionDemoExports.length > 0) {
 const demoOnlySelectors = [
   ".aw-account-demo",
   ".aw-connectors-demo",
+  ".aw-icon-library-demo",
   ".aw-logo-library-demo",
   ".aw-project-skill-folder-demo",
   ".aw-settings-demo",

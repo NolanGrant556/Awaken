@@ -1,5 +1,5 @@
 import "./AwakenConnectors.css";
-import { Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw } from "../../icons";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenConnectorCard } from "../AwakenConnectorCard";
 import type { AwakenConnectorCardItem, AwakenConnectorKind } from "./AwakenConnectors.types";

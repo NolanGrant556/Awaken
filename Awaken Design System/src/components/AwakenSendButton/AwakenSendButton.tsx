@@ -1,5 +1,5 @@
 import "./AwakenSendButton.css";
-import { ArrowUp, Square } from "lucide-react";
+import { ArrowUp, Square } from "../../icons";
 import { AwakenTooltip } from "../AwakenTooltip";
 
 export type AwakenSendButtonProps = {

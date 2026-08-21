@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Folder, Search } from "lucide-react";
+import { Check, ChevronDown, Folder, Search } from "../../icons";
 import { AwakenPopover } from "../AwakenPopover";
 import type { AwakenScheduledTaskProjectOption } from "./AwakenScheduledTaskEditorDialog";
 

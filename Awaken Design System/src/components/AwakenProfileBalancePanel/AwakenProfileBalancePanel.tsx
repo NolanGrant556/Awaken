@@ -1,6 +1,6 @@
 import "./AwakenProfileBalancePanel.css";
 import { useState, type CSSProperties } from "react";
-import { AlertCircle, Loader2, Wallet } from "lucide-react";
+import { AlertCircle, Loader2, Wallet } from "../../icons";
 import { AwakenButton } from "../AwakenButton";
 import {
   AwakenProviderLogo,

@@ -1,5 +1,5 @@
 import "./AwakenMediaInspector.css";
-import { ExternalLink, FolderOpen, RotateCw, X } from "lucide-react";
+import { ExternalLink, FolderOpen, RotateCw, X } from "../../icons";
 import type { SyntheticEvent } from "react";
 import {
   awakenMediaMetadataLabel,

@@ -8,7 +8,7 @@ import {
   Trash2,
   Wifi,
   Zap,
-} from "lucide-react";
+} from "@awaken/design-system";
 import {
   AwakenButton as Button,
   AwakenDialog,

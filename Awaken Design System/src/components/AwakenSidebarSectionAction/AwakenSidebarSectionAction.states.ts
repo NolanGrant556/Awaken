@@ -1,5 +1,5 @@
 import { createElement, type ComponentProps } from "react";
-import { FolderPlus, ListFilter } from "lucide-react";
+import { FolderPlus, ListFilter } from "../../icons";
 import type { AwakenSidebarSectionAction } from "./AwakenSidebarSectionAction";
 
 export type AwakenSidebarSectionActionState = {

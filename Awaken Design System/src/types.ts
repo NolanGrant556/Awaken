@@ -23,7 +23,7 @@ export type ModelSelectorPlacement = "bottom-start" | "bottom-end";
 export type NavItem = {
   id: string;
   label: string;
-  icon?: React.ReactNode;   // lucide-react 图标组件
+  icon?: React.ReactNode;   // Awaken 图标库图形
   shortcut?: string;        // 如 "N", "Shift+P"
   badge?: string | number;  // 右上角徽章
   disabled?: boolean;

@@ -1,5 +1,5 @@
 import "./AwakenConnectorCard.css";
-import { Check, Plus, Plug, Server, Settings, X } from "lucide-react";
+import { Check, Plus, Plug, Server, Settings, X } from "../../icons";
 import { AwakenConnectorBrandIcon } from "../AwakenConnectorBrandIcon";
 import { AwakenSwitch } from "../AwakenSwitch";
 import type { AwakenConnectorCardItem } from "../AwakenConnectors/AwakenConnectors.types";

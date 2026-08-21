@@ -1,5 +1,5 @@
 import "./AwakenCliConnectorDetailDialog.css";
-import { Check } from "lucide-react";
+import { Check } from "../../icons";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenConnectorBrandIcon } from "../AwakenConnectorBrandIcon";
 import { AwakenDialog } from "../AwakenDialog";

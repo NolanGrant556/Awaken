@@ -9,7 +9,7 @@ import {
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { FileText, Monitor, Package } from "lucide-react";
+import { FileText, Monitor, Package } from "../../icons";
 import { AwakenCopyButton } from "../AwakenCopyButton";
 
 const collapsedAttachmentLimit = 3;

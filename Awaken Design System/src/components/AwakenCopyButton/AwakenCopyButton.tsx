@@ -1,6 +1,6 @@
 import "./AwakenCopyButton.css";
 import { useEffect, useRef, useState, type ButtonHTMLAttributes } from "react";
-import { AlertCircle, Check, Copy } from "lucide-react";
+import { AlertCircle, Check, Copy } from "../../icons";
 import { AwakenTooltip } from "../AwakenTooltip";
 
 export type AwakenCopyButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & {

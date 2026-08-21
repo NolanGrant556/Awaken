@@ -11,7 +11,7 @@ import {
   MessageSquare,
   RefreshCw,
   UserRound,
-} from "lucide-react";
+} from "../../icons";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 import { AwakenMarkdownRenderer } from "../AwakenMarkdownRenderer";

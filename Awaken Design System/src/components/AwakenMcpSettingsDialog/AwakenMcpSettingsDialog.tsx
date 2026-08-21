@@ -1,5 +1,5 @@
 import "./AwakenMcpSettingsDialog.css";
-import { Check, Trash2 } from "lucide-react";
+import { Check, Trash2 } from "../../icons";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 import type { AwakenMcpLogItem, AwakenMcpToolItem } from "../AwakenConnectors/AwakenConnectors.types";

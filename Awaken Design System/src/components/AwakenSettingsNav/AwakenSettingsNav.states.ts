@@ -1,5 +1,5 @@
 import type { AwakenSettingsNavProps } from "./AwakenSettingsNav";
-import { Bot, Brain, Cpu, FileText, MonitorCog, Palette, PawPrint, Search, Webhook } from "lucide-react";
+import { Bot, Brain, Cpu, FileText, MonitorCog, Palette, PawPrint, Search, Webhook } from "../../icons";
 
 export const AwakenSettingsNavItems: AwakenSettingsNavProps["items"] = [
   { id: "models", label: "模型", icon: Cpu },

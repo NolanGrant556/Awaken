@@ -1,5 +1,5 @@
 import "./AwakenContextButton.css";
-import { Plus } from "lucide-react";
+import { Plus } from "../../icons";
 import { AwakenIconButton } from "../AwakenIconButton";
 
 export type AwakenContextButtonProps = {

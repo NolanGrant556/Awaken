@@ -1,5 +1,5 @@
 import "./AwakenThoughtTrace.css";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "../../icons";
 import { useId, useState } from "react";
 import {
   AwakenThinkingOrbStatus,

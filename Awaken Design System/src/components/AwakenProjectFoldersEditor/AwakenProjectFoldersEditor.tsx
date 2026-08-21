@@ -1,6 +1,6 @@
 import "./AwakenProjectFoldersEditor.css";
 import { useState } from "react";
-import { Folder, MoreHorizontal, Plus, X } from "lucide-react";
+import { Folder, MoreHorizontal, Plus, X } from "../../icons";
 import { AwakenDropdown } from "../AwakenDropdown";
 import type { ProjectFolderRow, ProjectFolderRowAction } from "../../types";
 

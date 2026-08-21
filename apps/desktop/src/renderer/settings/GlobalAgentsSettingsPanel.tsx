@@ -5,7 +5,7 @@ import {
   RefreshCw,
   Save,
   Trash2,
-} from "lucide-react";
+} from "@awaken/design-system";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { GlobalAgentsDocument } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";

@@ -1,10 +1,10 @@
 import "./AwakenSettingsNav.css";
-import type { LucideIcon } from "lucide-react";
+import type { AwakenGlyphComponent } from "../../icons";
 
 export type AwakenSettingsNavItem = {
   id: string;
   label: string;
-  icon?: LucideIcon;
+  icon?: AwakenGlyphComponent;
   disabled?: boolean;
 };
 

@@ -6,7 +6,7 @@ import {
   MessageCirclePlus,
   Plug,
   Wrench,
-} from "lucide-react";
+} from "../../icons";
 import { AwakenSidebarSectionAction } from "../AwakenSidebarSectionAction";
 import type { AwakenSidebar } from "./AwakenSidebar";
 

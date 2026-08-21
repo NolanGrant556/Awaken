@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ExternalLink, FolderSearch2, Globe2, RefreshCw } from "lucide-react";
+import { ExternalLink, FolderSearch2, Globe2, RefreshCw } from "@awaken/design-system";
 import type {
   ProjectFilePreviewActionRequest,
   ProjectFilePreviewHandle,

@@ -12,7 +12,7 @@ import {
   ShieldOff,
   TerminalSquare,
   Wrench,
-} from "lucide-react";
+} from "../../icons";
 import { useId, useState, type ReactNode } from "react";
 
 export type ToolTraceStatus =

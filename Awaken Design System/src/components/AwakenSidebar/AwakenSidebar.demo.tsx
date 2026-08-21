@@ -11,7 +11,7 @@ import {
   Monitor,
   Trash2,
   X,
-} from "lucide-react";
+} from "../../icons";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 import { AwakenNewTaskButton } from "../AwakenNewTaskButton";

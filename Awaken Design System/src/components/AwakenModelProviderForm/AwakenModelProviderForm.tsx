@@ -7,7 +7,7 @@ import {
   Eye,
   EyeOff,
   KeyRound,
-} from "lucide-react";
+} from "../../icons";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenSelect } from "../AwakenSelect";
 import { AwakenSwitch } from "../AwakenSwitch";

@@ -1,4 +1,5 @@
 export * from "./components";
+export * from "./icons";
 export {
   AWAKEN_FOCUS_MODALITY_ATTRIBUTE,
   installAwakenFocusModality,

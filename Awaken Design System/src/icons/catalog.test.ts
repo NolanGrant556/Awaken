@@ -9,6 +9,7 @@ import {
 } from "./catalog";
 import { AWAKEN_ICON_DRAWINGS } from "./drawings";
 import { awakenLucideClassName } from "./lucideClass";
+import { awakenIconPaint } from "./paint";
 import { resolveAwakenIconOpticalSize } from "./stroke";
 import { AWAKEN_ICON_IDS, AWAKEN_LUCIDE_GLYPH_IDS } from "./types";
 
@@ -55,6 +56,17 @@ describe("Awaken icon catalog", () => {
     assert.equal(awakenLucideClassName("Monitor"), "lucide lucide-monitor");
     assert.equal(awakenLucideClassName("FileType2"), "lucide lucide-file-type2");
     assert.equal(awakenLucideClassName("FileCode2"), "lucide lucide-file-code2");
+  });
+
+  it("fills closed shapes in filled style and keeps line icons as strokes", () => {
+    const plugBody = AWAKEN_ICON_DRAWINGS.plug.find((op) => op.kind === "poly" && op.fillable);
+    assert.ok(plugBody);
+    assert.deepEqual(awakenIconPaint(plugBody, false), { fill: "none", stroke: "currentColor" });
+    assert.deepEqual(awakenIconPaint(plugBody, true), { fill: "currentColor", stroke: "none" });
+    assert.deepEqual(awakenIconPaint(AWAKEN_ICON_DRAWINGS.plus[0], true), {
+      fill: "none",
+      stroke: "currentColor",
+    });
   });
 
   it("finds icons by concept and usage tags", () => {

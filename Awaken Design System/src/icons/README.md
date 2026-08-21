@@ -10,7 +10,7 @@
 
 - 当前 Desktop / Design System chrome 用到的界面图标，按唯一 catalog id 登记。
 - 16 / 24 光学尺寸：16 覆盖 12–20px 显示，描边 1.25px；24 从 22px 起，描边 1.5px。
-- outline 与 filled。16 会丢掉只属于 24 的细节。
+- outline 与 filled。filled 只填充图纸里标记为 `fillable` 的闭合形；纯线段图标（`plus`、chevron、箭头）外观与 outline 相同。16 会丢掉只属于 24 的细节。填充色写在图形的 inline `style` 上，避免父级 SVG `fill="none"` 把实心切法盖掉。
 - lucide 兼容出口：旧的 `Plus`、`FileType2`、`Loader2` 等名称指向同一个概念，并保留现有测试依赖的 `lucide-*` class。
 - Gallery 伴生页：网格、搜索、尺寸/样式、概念表。
 - Desktop 侧栏、设置导航、Composer 发送、文件类型、连接器和预览工具栏都走这套图标。
@@ -21,6 +21,7 @@
 - 复制 Cursor 图标 path。
 - 自动从 Figma 发布或 `ship it` 字体编译管线。
 - 用这套目录替换品牌 Logo；产品标记仍在 Logo 库。
+- 为纯线段图标另做一套加粗或三角填充切法；当前 filled 与 outline 共用同一组 stroke。
 
 ## 用户入口
 

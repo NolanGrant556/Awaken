@@ -25,6 +25,7 @@ export {
   resolveAwakenIconOpticalSize,
 } from "./stroke";
 export { AWAKEN_ICON_DRAWINGS, awakenIconDrawing } from "./drawings";
+export { awakenIconPaint } from "./paint";
 export { awakenLucideClassName } from "./lucideClass";
 export {
   createAwakenGlyph,

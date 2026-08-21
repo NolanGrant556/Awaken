@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode, SVGProps } from "react";
 import { awakenIconDrawing } from "../../icons/drawings";
+import { awakenIconPaint } from "../../icons/paint";
 import {
   awakenIconStrokeStyle,
   awakenIconViewBox,
@@ -31,18 +32,6 @@ function pointsAttr(
   return points.map(([x, y]) => `${scaleValue(x, opticalSize)} ${scaleValue(y, opticalSize)}`).join(" ");
 }
 
-function paint(op: AwakenIconOp, filled: boolean): { fill: string; stroke: string } {
-  if (op.kind === "line") {
-    return { fill: "none", stroke: "currentColor" };
-  }
-  const isFilledDot = op.kind === "circle" && op.fillable;
-  const isFilledShape = filled && op.fillable;
-  if (isFilledDot || isFilledShape) {
-    return { fill: "currentColor", stroke: "none" };
-  }
-  return { fill: "none", stroke: "currentColor" };
-}
-
 function renderOp(
   op: AwakenIconOp,
   opticalSize: AwakenIconOpticalSize,
@@ -53,7 +42,8 @@ function renderOp(
     return null;
   }
 
-  const { fill, stroke } = paint(op, filled);
+  const { fill, stroke } = awakenIconPaint(op, filled);
+  const paintStyle = { fill, stroke };
 
   if (op.kind === "line") {
     return (
@@ -65,6 +55,7 @@ function renderOp(
         y2={scaleValue(op.b[1], opticalSize)}
         fill="none"
         stroke="currentColor"
+        style={{ fill: "none", stroke: "currentColor" }}
       />
     );
   }
@@ -78,6 +69,7 @@ function renderOp(
         r={scaleValue(op.r, opticalSize)}
         fill={fill}
         stroke={stroke}
+        style={paintStyle}
       />
     );
   }
@@ -93,6 +85,7 @@ function renderOp(
         rx={op.r ? scaleValue(op.r, opticalSize) : undefined}
         fill={fill}
         stroke={stroke}
+        style={paintStyle}
       />
     );
   }
@@ -104,6 +97,7 @@ function renderOp(
         points={pointsAttr(op.points, opticalSize)}
         fill={fill}
         stroke={stroke}
+        style={paintStyle}
       />
     );
   }
@@ -114,6 +108,7 @@ function renderOp(
       points={pointsAttr(op.points, opticalSize)}
       fill="none"
       stroke="currentColor"
+      style={{ fill: "none", stroke: "currentColor" }}
     />
   );
 }

@@ -58,6 +58,47 @@ export const AWAKEN_ICON_CONCEPTS = {
   "select-all": "checks",
   "select-mode": "check-square",
 
+  // 设置页导航
+  "settings-model": "chip",
+  "settings-memory": "stack",
+  "settings-appearance": "color-mode",
+  "settings-pets": "paw",
+  "settings-acp": "robot",
+
+  // 主题三选
+  "theme-light": "sun",
+  "theme-dark": "moon",
+  "theme-system": "display",
+
+  // 账户与供应商
+  user: "person",
+  usage: "gauge",
+  balance: "credit-card",
+  "api-key": "key",
+  reveal: "eye",
+  conceal: "eye-slash",
+  "provider-link": "arrow-right-up",
+
+  // 设置页动作
+  "navigate-back": "arrow-left",
+  "external-open": "external-link",
+  save: "floppy-disc",
+  trusted: "shield-check",
+  network: "wifi",
+  "collapse-up": "chevron-up",
+  restart: "arrow-cw",
+  "update-available": "arrow-circle-down",
+  "import": "upload",
+  history: "history",
+
+  // 记忆主题
+  "memory-feedback": "chat-bubble",
+  "memory-reference": "book-open",
+
+  // ACP runner 品类
+  "runner-code": "brackets-square",
+  "runner-lightning": "lightning",
+
   // 能力与来源
   tool: "wrench",
   "tool-terminal": "terminal",

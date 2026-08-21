@@ -1,17 +1,7 @@
 import "./AwakenMemorySettings.css";
+import { AwakenIcon } from "../AwakenIcon";
 import { useState } from "react";
-import {
-  ArrowLeft,
-  BookOpenText,
-  Brain,
-  ChevronRight,
-  Clock3,
-  Folder,
-  History,
-  MessageSquare,
-  RefreshCw,
-  UserRound,
-} from "lucide-react";
+import { BookOpenText, ChevronRight, Folder, RefreshCw, UserRound } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 import { AwakenMarkdownRenderer } from "../AwakenMarkdownRenderer";
@@ -95,10 +85,10 @@ export type AwakenMemorySettingsProps = {
 
 function MemoryTopicIcon({ kind = "reference" }: { kind?: AwakenMemoryTopicKind }) {
   const iconProps = { size: 18, strokeWidth: 1.8, "aria-hidden": true } as const;
-  if (kind === "user") return <UserRound {...iconProps} />;
-  if (kind === "feedback") return <MessageSquare {...iconProps} />;
-  if (kind === "project") return <Folder {...iconProps} />;
-  return <BookOpenText {...iconProps} />;
+  if (kind === "user") return <AwakenIcon concept="user" size={20} />;
+  if (kind === "feedback") return <AwakenIcon concept="memory-feedback" size={20} />;
+  if (kind === "project") return <AwakenIcon concept="project" size={20} />;
+  return <AwakenIcon concept="memory-reference" size={20} />;
 }
 
 const MEMORY_ACTIVITY_TITLE_LIMIT = 32;
@@ -258,27 +248,27 @@ export function AwakenMemorySettings({
             </div>
           </header>
 
-          {dreamStatusLabel ? <div className="memory-dream-status" role="status"><RefreshCw size={14} aria-hidden="true" />记忆整理：{dreamStatusLabel}</div> : null}
+          {dreamStatusLabel ? <div className="memory-dream-status" role="status"><AwakenIcon concept="refresh" size={14} />记忆整理：{dreamStatusLabel}</div> : null}
 
           <div className="memory-activity-view">
             <section className="memory-activity-panel" aria-label="最近更新与整理">
               <header>
-                <div><History size={17} aria-hidden="true" /><strong>最近更新与整理</strong></div>
+                <div><AwakenIcon concept="history" size={16} /><strong>最近更新与整理</strong></div>
                 <div className="memory-manager-actions">
-                  <button type="button" className="memory-dream-button" disabled={dreamBusy || !canStartDream || dreamRunning} onClick={onStartDream}><Brain size={15} aria-hidden="true" />更新记忆</button>
+                  <button type="button" className="memory-dream-button" disabled={dreamBusy || !canStartDream || dreamRunning} onClick={onStartDream}><AwakenIcon concept="settings-memory" size={16} />更新记忆</button>
                   {dreamRunning ? <button type="button" className="memory-cancel-button" onClick={onCancelDream}>取消</button> : null}
                 </div>
               </header>
               <div className="memory-activity-list">
                 {visibleActivities.map((activity) => (
                   <button type="button" className="memory-activity-row" key={activity.id} aria-haspopup="dialog" aria-label={`${activity.label} ${activity.title} ${activity.timeLabel}`} onClick={() => setActiveActivity(activity)}>
-                    <span className={`memory-activity-marker memory-activity-marker-${activity.kind}`}>{activity.kind === "dream" ? <RefreshCw size={15} aria-hidden="true" /> : <Brain size={15} aria-hidden="true" />}</span>
+                    <span className={`memory-activity-marker memory-activity-marker-${activity.kind}`}>{activity.kind === "dream" ? <RefreshCw size={15} aria-hidden="true" /> : <AwakenIcon concept="settings-memory" size={16} />}</span>
                     <span className="memory-activity-copy"><small>{activity.label}</small><strong>{truncateActivityTitle(activity.title)}</strong></span>
                     <time>{activity.timeLabel}</time>
-                    <ChevronRight size={16} aria-hidden="true" />
+                    <AwakenIcon concept="disclose" size={16} />
                   </button>
                 ))}
-                {!activities.length ? <div className="memory-empty"><Clock3 size={22} aria-hidden="true" /><span>暂无最近动态</span></div> : null}
+                {!activities.length ? <div className="memory-empty"><AwakenIcon concept="scheduled-task" size={24} /><span>暂无最近动态</span></div> : null}
                 {activities.length > MEMORY_ACTIVITY_INITIAL_VISIBLE ? (
                   <div className="memory-activity-list-controls">
                     <button
@@ -378,7 +368,7 @@ export function AwakenMemorySettings({
         {!libraryDetailOpen && libraryShowsTopics ? (
           <div className="memory-topic-browser">
             {libraryView.kind === "project" ? (
-              <button type="button" className="memory-library-back" onClick={() => setLibraryView({ kind: "projects" })}><ArrowLeft size={15} aria-hidden="true" />返回项目列表</button>
+              <button type="button" className="memory-library-back" onClick={() => setLibraryView({ kind: "projects" })}><AwakenIcon concept="navigate-back" size={16} />返回项目列表</button>
             ) : null}
             <div className="memory-topic-list" aria-label="记忆列表">
               {!libraryLoading ? memories.map((memory) => (

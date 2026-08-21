@@ -1,10 +1,11 @@
 import "./AwakenSettingsNav.css";
-import type { LucideIcon } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
+import type { AwakenIconConcept } from "../../icons";
 
 export type AwakenSettingsNavItem = {
   id: string;
   label: string;
-  icon?: LucideIcon;
+  concept?: AwakenIconConcept;
   disabled?: boolean;
 };
 
@@ -36,7 +37,7 @@ export function AwakenSettingsNav({
           disabled={item.disabled}
           onClick={() => onSelect?.(item.id)}
         >
-          {item.icon ? <item.icon size={17} strokeWidth={1.8} aria-hidden="true" /> : null}
+          {item.concept ? <AwakenIcon concept={item.concept} size={16} /> : null}
           <span>{item.label}</span>
         </button>
       ))}

@@ -7,7 +7,7 @@
  * 所有原语都在 16 网格的 stroke-center 坐标系里定义，最终位置与尺寸
  * 由 geometry.ts 的光学归一化统一决定，因此这里的坐标只需保证比例正确。
  */
-import { type GeomOp, type Vec, poly, circle } from "./geometry";
+import { type GeomOp, type Vec, arcThroughChord, circle, poly } from "./geometry";
 
 /**
  * 文件夹容器。tabHeight 同时是页签台阶高度和 45 度斜边长度。
@@ -286,6 +286,87 @@ export function display(cx = 8, cy = 8, w = 12.6, h = 9.2): GeomOp[] {
       0,
     ),
   ];
+}
+
+/** 眼睛：上下两片眼睑用同一条弦、同一个拱高，因此曲率精确对称。 */
+export function eye(cx = 8, cy = 8, halfWidth = 6.4, sagitta = 3.15, pupil = 1.95): GeomOp[] {
+  const from: Vec = [cx - halfWidth, cy];
+  const to: Vec = [cx + halfWidth, cy];
+  return [
+    arcThroughChord(from, to, sagitta, "right"),
+    arcThroughChord(from, to, sagitta, "left"),
+    circle(cx, cy, pupil),
+  ];
+}
+
+/** 月牙：外弧与内弧共用两个端点，靠拱高差形成月牙宽度。 */
+export function crescent(cx = 8, cy = 8, half = 6.3, outer = 6.1, inner = 2.6): GeomOp[] {
+  const from: Vec = [cx + 1.6, cy - half];
+  const to: Vec = [cx + 1.6, cy + half];
+  return [arcThroughChord(from, to, outer, "left"), arcThroughChord(from, to, inner, "left")];
+}
+
+/** 太阳：圆盘加八条等长射线。射线端点落在同一光学圆上。 */
+export function sun(cx = 8, cy = 8, core = 3.1, from = 4.5, to = 6.3): GeomOp[] {
+  const ops: GeomOp[] = [circle(cx, cy, core)];
+  for (let i = 0; i < 8; i += 1) {
+    const a = (i * 45 * Math.PI) / 180;
+    ops.push(
+      poly(
+        [
+          [cx + from * Math.cos(a), cy + from * Math.sin(a)],
+          [cx + to * Math.cos(a), cy + to * Math.sin(a)],
+        ],
+        0,
+      ),
+    );
+  }
+  return ops;
+}
+
+/** 人像：头部圆加肩部弧。用于用户与账户相关概念。 */
+export function personBust(cx = 8, cy = 8): GeomOp[] {
+  return [
+    circle(cx, cy - 3.1, 2.75),
+    arcThroughChord([cx - 5.2, cy + 5.6], [cx + 5.2, cy + 5.6], 3.9, "right"),
+  ];
+}
+
+/** 一对方括号，用于「代码」。花括号需要自由曲线，方括号只用直线。 */
+export function bracketPair(cx = 8, cy = 8, half = 5.4, reach = 2.6, drop = 4.6): GeomOp[] {
+  return [
+    poly(
+      [
+        [cx - half + reach, cy - drop],
+        [cx - half, cy - drop],
+        [cx - half, cy + drop],
+        [cx - half + reach, cy + drop],
+      ],
+      [0, 0.9, 0.9, 0],
+    ),
+    poly(
+      [
+        [cx + half - reach, cy - drop],
+        [cx + half, cy - drop],
+        [cx + half, cy + drop],
+        [cx + half - reach, cy + drop],
+      ],
+      [0, 0.9, 0.9, 0],
+    ),
+  ];
+}
+
+/** 同心信号弧加一个点，用于网络与连通性。三条弧共用圆心。 */
+export function signalWaves(cx = 8, cy = 11.2): GeomOp[] {
+  const ops: GeomOp[] = [poly([[cx, cy], [cx, cy]], 0)];
+  for (const [half, sag] of [
+    [3.1, 1.5],
+    [5.2, 2.5],
+    [7.3, 3.5],
+  ] as const) {
+    ops.push(arcThroughChord([cx - half, cy - sag], [cx + half, cy - sag], sag, "right"));
+  }
+  return ops;
 }
 
 /**

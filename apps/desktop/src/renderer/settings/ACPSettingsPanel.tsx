@@ -1,15 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Code, Plus, Trash2 } from "lucide-react";
 import {
-  Bot,
-  Code,
-  Cpu,
-  Plus,
-  Terminal,
-  Trash2,
-  Wifi,
-  Zap,
-} from "lucide-react";
-import {
+  AwakenIcon,
   AwakenButton as Button,
   AwakenDialog,
   AwakenSwitch,
@@ -86,10 +78,10 @@ const BUILTIN_ACP_DISPLAY_NAMES: Record<string, string> = {
 };
 
 const BUILTIN_ACP_ICONS: Record<string, React.ReactNode> = {
-  opencode: <Code size={22} strokeWidth={1.9} />,
-  qwen_code: <Terminal size={22} strokeWidth={1.9} />,
-  claude_code: <Zap size={22} strokeWidth={1.9} />,
-  codex: <Cpu size={22} strokeWidth={1.9} />,
+  opencode: <AwakenIcon concept="runner-code" size={24} />,
+  qwen_code: <AwakenIcon concept="tool-terminal" size={24} />,
+  claude_code: <AwakenIcon concept="runner-lightning" size={24} />,
+  codex: <AwakenIcon concept="settings-model" size={24} />,
 };
 
 const RUNNER_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -557,7 +549,7 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
               const builtin = isBuiltinACPRunner(id);
               const probe = probeStates[id];
               const icon = BUILTIN_ACP_ICONS[id] ?? (
-                <Bot size={22} strokeWidth={1.9} />
+                <AwakenIcon concept="settings-acp" size={24} />
               );
               return (
                 <article
@@ -618,7 +610,7 @@ export function ACPSettingsPanel({ runtimeClient }: ACPSettingsPanelProps) {
                         disabled={probe?.busy}
                         onClick={() => void handleProbe(id)}
                       >
-                        <Wifi size={15} strokeWidth={1.9} />
+                        <AwakenIcon concept="network" size={16} />
                         {probe?.busy ? "探测中…" : "探测"}
                       </button>
                     </Tooltip>

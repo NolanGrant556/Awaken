@@ -1,13 +1,7 @@
 import "./AwakenModelProviderForm.css";
+import { AwakenIcon } from "../AwakenIcon";
 import { useEffect, useId, useRef, useState } from "react";
-import {
-  CheckCircle2,
-  ChevronDown,
-  CircleAlert,
-  Eye,
-  EyeOff,
-  KeyRound,
-} from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenSelect } from "../AwakenSelect";
 import { AwakenSwitch } from "../AwakenSwitch";
@@ -286,7 +280,7 @@ export function AwakenModelProviderForm({
               aria-expanded={modelCatalogOpen}
               onClick={() => setModelCatalogOpen((open) => !open)}
             >
-              <ChevronDown size={17} strokeWidth={1.8} />
+              <AwakenIcon concept="dropdown" size={16} />
             </button>
             {modelCatalogOpen && models.length > 0 ? (
               <div
@@ -309,7 +303,7 @@ export function AwakenModelProviderForm({
                     }}
                   >
                     <span>{modelDisplayValue(modelDisplayNames, model)}</span>
-                    {model === modelId ? <CheckCircle2 size={15} strokeWidth={2} /> : null}
+                    {model === modelId ? <AwakenIcon concept="success" size={16} /> : null}
                   </button>
                 ))}
               </div>
@@ -365,7 +359,7 @@ export function AwakenModelProviderForm({
             aria-pressed={showApiKey}
             onClick={() => onShowApiKeyChange?.(!showApiKey)}
           >
-            {showApiKey ? <EyeOff size={15} strokeWidth={1.9} /> : <Eye size={15} strokeWidth={1.9} />}
+            {showApiKey ? <AwakenIcon concept="conceal" size={16} /> : <AwakenIcon concept="reveal" size={16} />}
           </button>
         </div>
       </div>
@@ -446,7 +440,7 @@ export function AwakenModelProviderForm({
               {testFeedback.tone === "success" ? (
                 <CheckCircle2 size={16} strokeWidth={2} aria-hidden="true" />
               ) : (
-                <CircleAlert size={16} strokeWidth={2} aria-hidden="true" />
+                <AwakenIcon concept="error" size={16} />
               )}
               <span>{testFeedback.message}</span>
             </div>
@@ -456,7 +450,7 @@ export function AwakenModelProviderForm({
 
       <div className="model-provider-form-footer">
         <div className="model-provider-link-row">
-          <a href={apiDocsURL} target="_blank" rel="noreferrer"><KeyRound size={14} />获取 API 密钥</a>
+          <a href={apiDocsURL} target="_blank" rel="noreferrer"><AwakenIcon concept="api-key" size={14} />获取 API 密钥</a>
           {accountStatus ? <span className="model-provider-account-status">{accountStatus}</span> : null}
         </div>
         <div className="model-provider-form-actions">

@@ -1,5 +1,5 @@
 import "./AwakenSearchSettings.css";
-import { Search, Wifi } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenSwitch } from "../AwakenSwitch";
 
 export type AwakenSearchProviderItem = {
@@ -37,7 +37,7 @@ export function AwakenSearchSettings({
         {providers.map((provider) => (
           <article className="search-channel-card" key={provider.id}>
             <div className="search-channel-icon" aria-hidden="true">
-              <Search size={20} strokeWidth={1.9} />
+              <AwakenIcon concept="search" size={20} />
             </div>
             <div className="search-channel-copy">
               <div className="search-channel-title-row">
@@ -57,7 +57,7 @@ export function AwakenSearchSettings({
                 disabled={provider.testing || provider.disabled || provider.testDisabled}
                 onClick={() => onTestProvider?.(provider.id)}
               >
-                <Wifi size={15} strokeWidth={1.9} />
+                <AwakenIcon concept="network" size={16} />
                 {provider.testing ? "测试中…" : "测试连接"}
               </button>
               <AwakenSwitch

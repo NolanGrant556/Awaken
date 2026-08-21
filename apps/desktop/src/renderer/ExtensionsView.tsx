@@ -1,13 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Check,
-  FileUp,
-  FolderOpen,
-  RefreshCw,
-  Trash2,
-  Upload,
-} from "lucide-react";
-import {
+  AwakenIcon,
   AwakenButton as Button,
   AwakenCliConnectorDetailDialog,
   AwakenConnectors,
@@ -1763,7 +1756,7 @@ export function ExtensionsView({
                 void refresh();
               }}
             >
-              <RefreshCw size={16} strokeWidth={1.9} />
+              <AwakenIcon concept="refresh" size={16} />
             </button>
             <Button
               variant="primary"
@@ -1774,7 +1767,7 @@ export function ExtensionsView({
                 setSkillDialogOpen(true);
               }}
             >
-              <Upload size={16} strokeWidth={1.9} />
+              <AwakenIcon concept="import" size={16} />
               安装 Skill
             </Button>
           </div>
@@ -1954,7 +1947,7 @@ export function ExtensionsView({
                   void handleDeleteSkill();
                 }}
               >
-                <Trash2 size={15} strokeWidth={1.9} />
+                <AwakenIcon concept="delete" size={16} />
                 确认删除
               </Button>
             </>
@@ -2049,7 +2042,7 @@ export function ExtensionsView({
                 void handleDeleteSkill();
               }}
             >
-              <Trash2 size={15} strokeWidth={1.9} />
+              <AwakenIcon concept="delete" size={16} />
               确认删除
             </Button>
           </>
@@ -2100,7 +2093,7 @@ export function ExtensionsView({
                 void handleInstallSkill();
               }}
             >
-              <Check size={15} strokeWidth={1.9} />
+              <AwakenIcon concept="step-done" size={16} />
               安装
             </Button>
           </>
@@ -2144,7 +2137,7 @@ export function ExtensionsView({
                     void handlePickSkillProjectRoot();
                   }}
                 >
-                  <FolderOpen size={16} strokeWidth={1.9} />
+                  <AwakenIcon concept="folder-expanded" size={16} />
                 </button>
               </div>
             </div>
@@ -2171,7 +2164,7 @@ export function ExtensionsView({
               accept=".md,.zip"
               onChange={(event) => setSkillFile(event.target.files?.item(0) ?? null)}
             />
-            <FileUp size={22} strokeWidth={1.9} />
+            <AwakenIcon concept="import" size={24} />
             <strong>{skillFile ? skillFile.name : "拖放或点击上传"}</strong>
           </label>
           <p>支持 SKILL.md 文件，或包含 SKILL.md 的 skill 文件夹 zip。</p>

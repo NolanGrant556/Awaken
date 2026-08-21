@@ -84,6 +84,45 @@ export function arrow(
   return { op: "arrow", c: [cx, cy], r, angle, forward, length, spread, measure };
 }
 
+/**
+ * 按弦与拱高构造圆弧。
+ *
+ * 少数概念本质上就是圆弧：眼睛的上下眼睑、月牙、信号弧。它们无法用直线倒角表达。
+ * 这个辅助让它们仍然是「从圆上截取」而不是自由曲线：给定两端点与拱高，
+ * 反解出唯一的圆心与半径，因此同一族的弧曲率可以精确复用。
+ */
+export function arcThroughChord(
+  from: Vec,
+  to: Vec,
+  sagitta: number,
+  side: "left" | "right" = "left",
+): GeomOp {
+  const mx = (from[0] + to[0]) / 2;
+  const my = (from[1] + to[1]) / 2;
+  const dx = to[0] - from[0];
+  const dy = to[1] - from[1];
+  const chord = Math.hypot(dx, dy);
+  const half = chord / 2;
+  const r = (half * half + sagitta * sagitta) / (2 * sagitta);
+  const sign = side === "left" ? 1 : -1;
+  const nx = (-dy / chord) * sign;
+  const ny = (dx / chord) * sign;
+  const cx = mx - nx * (r - sagitta);
+  const cy = my - ny * (r - sagitta);
+  const deg = (v: number) => (v * 180) / Math.PI;
+  const a0 = deg(Math.atan2(from[1] - cy, from[0] - cx));
+  const a1raw = deg(Math.atan2(to[1] - cy, to[0] - cx));
+  const peak = deg(Math.atan2(my + ny * sagitta - cy, mx + nx * sagitta - cx));
+  const norm = (v: number) => ((v % 360) + 360) % 360;
+  // 两个方向都试，取真正经过拱点的那一段。拱点按构造就是弧的中点，
+  // 因此「经过拱点」唯一确定了应该走哪一边。
+  const forward = norm(a1raw - a0);
+  const backward = norm(a0 - a1raw);
+  const peakForward = norm(peak - a0);
+  const a1 = peakForward <= forward ? a0 + forward : a0 - backward;
+  return arc(cx, cy, r, a0, a1);
+}
+
 export function rotate(pts: readonly Vec[], deg: number, about: Vec = [0, 0]): Vec[] {
   const a = (deg * Math.PI) / 180;
   const ca = Math.cos(a);

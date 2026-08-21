@@ -416,29 +416,38 @@ export function projectAguiEventToNarrative(
       return recordRunPlanSnapshot(base, event);
     case "RUN_FINISHED":
       return markLatestAnswerFinal(
-        commitActive(projectTerminalRunPlan(base, event), "done"),
+        commitActive(
+          projectTerminalRunPlan(clearProviderReconnectItems(base), event),
+          "done",
+        ),
         event,
       );
     case "RUN_ERROR":
       if (event.code === "RUN_CANCELLED") {
         return commitRunCancelledHint(
-          projectTerminalRunPlan(base, event),
+          projectTerminalRunPlan(clearProviderReconnectItems(base), event),
           event,
           "你停止了生成本次回答",
         );
       }
-      return commitErrorAnswer(projectTerminalRunPlan(base, event), event);
+      return commitErrorAnswer(
+        projectTerminalRunPlan(clearProviderReconnectItems(base), event),
+        event,
+      );
     case "RUN_STATUS_CHANGED":
       if (event.status === "cancelled") {
         return commitRunCancelledHint(
-          projectTerminalRunPlan(base, event),
+          projectTerminalRunPlan(clearProviderReconnectItems(base), event),
           event,
           event.message || "你停止生成了本次回答",
         );
       }
       if (event.status === "finished") {
         return markLatestAnswerFinal(
-          commitActive(projectTerminalRunPlan(base, event), "done"),
+          commitActive(
+            projectTerminalRunPlan(clearProviderReconnectItems(base), event),
+            "done",
+          ),
           event,
         );
       }
@@ -446,10 +455,7 @@ export function projectAguiEventToNarrative(
     case "AWAKEN_SCHEDULED_NOTICE":
       return commitScheduledNotice(base, event);
     case "AWAKEN_PROVIDER_RECONNECT":
-      if (event.providerReconnect?.resetInProgress) {
-        return discardInProgressModelOutput(base, event);
-      }
-      return base;
+      return projectProviderReconnect(base, event);
     default:
       return base;
   }
@@ -496,6 +502,76 @@ export function discardInProgressModelOutput(
       text: "Planning next moves",
       status: "active",
     },
+  };
+}
+
+function clearProviderReconnectItems(
+  state: RunNarrativeState,
+): RunNarrativeState {
+  const committedItems = state.committedItems.filter(
+    (item) => item.kind !== "providerReconnect",
+  );
+  const activeItem =
+    state.activeItem?.kind === "providerReconnect"
+      ? undefined
+      : state.activeItem;
+  if (
+    committedItems.length === state.committedItems.length &&
+    activeItem === state.activeItem
+  ) {
+    return state;
+  }
+  return { ...state, committedItems, activeItem };
+}
+
+function providerReconnectItemId(event: AguiEvent): string {
+  const payload = event.providerReconnect;
+  const stableSeq = event.semanticSeq ?? event.seq;
+  if (typeof stableSeq === "number") {
+    return `provider-reconnect:${eventScope(event)}:${stableSeq}`;
+  }
+  return [
+    "provider-reconnect",
+    eventScope(event),
+    payload?.phase ?? "unknown",
+    String(payload?.attempt ?? 0),
+    payload?.detail?.trim() ?? "",
+  ].join(":");
+}
+
+function projectProviderReconnect(
+  state: RunNarrativeState,
+  event: AguiEvent,
+): RunNarrativeState {
+  const payload = event.providerReconnect;
+  if (!payload) {
+    return state;
+  }
+  if (payload.phase === "recovered") {
+    return clearProviderReconnectItems(state);
+  }
+  if (
+    payload.phase !== "waiting_for_network" &&
+    payload.phase !== "reconnecting"
+  ) {
+    return state;
+  }
+
+  const next = payload.resetInProgress
+    ? discardInProgressModelOutput(state, event)
+    : state;
+  const detail = payload.detail?.trim();
+  const item: RunNarrativeItem = {
+    kind: "providerReconnect",
+    id: providerReconnectItemId(event),
+    phase: payload.phase,
+    attempt: payload.attempt ?? 0,
+    maxAttempts: payload.maxAttempts ?? 0,
+    ...(detail ? { detail } : {}),
+  };
+  return {
+    ...next,
+    committedItems: upsertCommitted(next.committedItems, item),
   };
 }
 
@@ -949,6 +1025,23 @@ function eventKey(event: AguiEvent): string | undefined {
   if (event.type === "TOOL_CALL_ARGS_DELTA") {
     return undefined;
   }
+  // Live reconnect frames often have no durable seq. Dedup by phase/attempt
+  // so stacked waits and retries are not collapsed into one seen key.
+  if (event.type === "AWAKEN_PROVIDER_RECONNECT") {
+    const payload = event.providerReconnect;
+    const stableSeq = event.semanticSeq ?? event.seq;
+    if (typeof stableSeq === "number") {
+      return `seq:${eventScope(event)}:${stableSeq}:${event.type}:reconnect`;
+    }
+    return [
+      event.type,
+      eventScope(event),
+      payload?.phase ?? "unknown",
+      String(payload?.attempt ?? 0),
+      payload?.detail ?? "",
+      payload?.resetInProgress ? "reset" : "keep",
+    ].join(":");
+  }
   if (event.type.startsWith("AWAKEN_MEMORY_DREAM_") && event.recordId) {
     return `${event.type}:dream:${event.recordId}`;
   }
@@ -1342,6 +1435,7 @@ function applyStatus(
         : item;
     case "scheduledNotice":
     case "hint":
+    case "providerReconnect":
       return item;
   }
 }

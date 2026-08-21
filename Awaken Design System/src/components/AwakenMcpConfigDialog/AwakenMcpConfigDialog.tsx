@@ -1,5 +1,5 @@
 import "./AwakenMcpConfigDialog.css";
-import { Check } from "lucide-react";
+import { Check } from "../../icons";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 

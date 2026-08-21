@@ -38,7 +38,7 @@ import {
   Workflow,
   Wrench,
   X,
-} from "lucide-react";
+} from "@awaken/design-system";
 import {
   AwakenAppShell as AppShell,
   AwakenAssistantMessage as AssistantMessage,

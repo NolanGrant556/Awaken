@@ -25,7 +25,7 @@ Three assets, never cropped into each other:
 2. **App icon** — the authored 256 PNG composition. Dock, Start menu, and installer only.
 3. **Wordmark** — welcome empty state, About, and installer covers. Default visual width is `220px` (`200px` at narrow widths).
 
-Mark construction: horizontal / vertical / 45° segments, closed shapes, round caps, vertical optical shape. Recurring two-pillar geometry stays consistent across filled and outline. Minimum cut between overlapping parts is `--aw-logo-cut-min` (3px on the 16 grid). Generic UI icons stay on `lucide-react`; this catalog is not an icon font.
+Mark construction: horizontal / vertical / 45° segments, closed shapes, round caps, vertical optical shape. Recurring two-pillar geometry stays consistent across filled and outline. Minimum cut between overlapping parts is `--aw-logo-cut-min` (3px on the 16 grid). Interface icons live in `src/icons/` with the same construction rules; they are not a lucide wrapper and not an icon font.
 
 Clear space around the mark is one quarter of its height. Do not stretch, rotate, recolor the mark to accent purple, add a stroke or shadow, or override the welcome wordmark with an arbitrary `logoSrc`. A full export matrix (favicon, DMG, ICO, document covers) is not a current capability.
 
@@ -41,7 +41,8 @@ Clear space around the mark is one quarter of its height. Do not stretch, rotate
 - Chrome and helper copy must not go below `12px / 18px`.
 - Weight roles are regular `400`, medium `500`, semibold `600`, bold `650`, and heavy `700`; use the role token instead of local `700` / `800` / `820` / `850` values. `650` is the SF Pro optical target and falls back to `600` on other platforms.
 - Default icon size is `16px`; compact icons may use `14px`.
-- Line icons default to a `1.75` optical stroke; brand marks and filled status graphics keep their authored geometry.
+- Catalog icons use `--aw-icon-stroke-16` (`1.25px`) and `--aw-icon-stroke-24` (`1.5px`). The older `--aw-icon-stroke: 1.75` skeleton token remains for leftover chrome that still references it; do not retarget that token as a density change.
+- Brand marks and filled status graphics keep their authored geometry.
 - Compact controls use a `6px` radius, default controls use `8px`, cards / popovers / panels use `12px`, and the composer surface uses `16px`.
 - Interactive neutral states must move through `--aw-bg-fill-light`, `--aw-bg-fill-main`, and `--aw-bg-fill-dark`.
 - Status colors are semantic only: success, warning, error, running, and permission states.

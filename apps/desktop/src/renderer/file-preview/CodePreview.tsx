@@ -12,7 +12,7 @@ import {
   keymap,
   lineNumbers,
 } from "@codemirror/view";
-import { WrapText } from "lucide-react";
+import { WrapText } from "@awaken/design-system";
 import type { ProjectFilePreviewTextHandle } from "../../shared/runtime";
 import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 import { loadPreviewLanguage } from "./previewLanguage";

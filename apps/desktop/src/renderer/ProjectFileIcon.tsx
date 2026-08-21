@@ -14,13 +14,13 @@ import {
   FolderOpen,
   Link2,
   Presentation,
-  type LucideIcon,
-} from "lucide-react";
+  type AwakenGlyphComponent,
+} from "@awaken/design-system";
 import type { ProjectFileIconKind } from "./projectFiles";
 
 export type ProjectFileVisualIconKind = ProjectFileIconKind | "folder-open";
 
-const icons: Record<ProjectFileVisualIconKind, LucideIcon> = {
+const icons: Record<ProjectFileVisualIconKind, AwakenGlyphComponent> = {
   "folder-open": FolderOpen,
   folder: Folder,
   symlink: Link2,

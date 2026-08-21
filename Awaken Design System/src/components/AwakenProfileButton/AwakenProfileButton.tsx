@@ -1,6 +1,6 @@
 import "./AwakenProfileButton.css";
 import type { CSSProperties, MouseEvent, Ref } from "react";
-import { ChevronUp } from "lucide-react";
+import { ChevronUp } from "../../icons";
 import { AwakenAvatar } from "../AwakenAvatar";
 
 export type AwakenProfileButtonProps = {

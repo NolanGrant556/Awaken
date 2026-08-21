@@ -1,6 +1,6 @@
 import "./AwakenNewTaskButton.css";
 import type { ButtonHTMLAttributes, CSSProperties, MouseEvent } from "react";
-import { Plus } from "lucide-react";
+import { Plus } from "../../icons";
 
 export type AwakenNewTaskButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> & {
   onClick?: () => void;

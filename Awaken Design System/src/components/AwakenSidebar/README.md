@@ -21,7 +21,7 @@
 - `AwakenSelectableCard`：只在创建项目弹窗中展示 Desktop 当前支持的本地文件夹来源，不展示尚未支持的远程或云端来源。
 - `AwakenProjectFoldersEditor`：在创建项目和编辑项目两个弹窗中观测项目的文件夹列表、主文件夹徽标和每行更多操作；Gallery 只模拟回调，不打开系统对话框、不触碰磁盘。
 
-项目树与对话列表同时展示当前真实支持的更多菜单、展开、active 与受控批量选择状态，以及“暂无项目”“暂无会话”两种空状态。批量选择、全选、删除和退出都由 consumer 作为标题区动作传入；Sidebar 不保存选择集合或调用 runtime。项目区和对话区位于同一个中部纵向滚动容器，顶部新建任务/一级导航与底部账户固定；滚动条使用窄轨道。`AwakenDropdown` 保留自己的组件目录与公开导出，但不再单独占用 Gallery 入口；`AwakenTooltip` 随侧栏区块动作和其他真实消费组件观测，`AwakenAvatar` 仍保留独立入口。New Agent 加号、项目树箭头和账户入口箭头直接使用 `lucide-react`，不再经过重复的 `AwakenIcon` 包装层。
+项目树与对话列表同时展示当前真实支持的更多菜单、展开、active 与受控批量选择状态，以及“暂无项目”“暂无会话”两种空状态。批量选择、全选、删除和退出都由 consumer 作为标题区动作传入；Sidebar 不保存选择集合或调用 runtime。项目区和对话区位于同一个中部纵向滚动容器，顶部新建任务/一级导航与底部账户固定；滚动条使用窄轨道。`AwakenDropdown` 保留自己的组件目录与公开导出，但不再单独占用 Gallery 入口；`AwakenTooltip` 随侧栏区块动作和其他真实消费组件观测，`AwakenAvatar` 仍保留独立入口。New Agent 加号、项目树箭头和账户入口箭头使用图标库的 lucide 兼容出口，由 [图标库](../../icons/README.md) 拥有。
 
 侧栏不保留品牌行；顶部直接从 `新建任务` 开始。带项目身份的 thread 位于“项目工作区”树下，空项目身份的 thread 位于独立“对话”分区。
 
@@ -40,4 +40,4 @@
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
 - 通过 props 输入，通过回调输出。
 - 公共 API 变化时同步更新可观测状态。
-- 原 `awaken-dialog`、`awaken-dropdown`、`awaken-icon` 与 `awaken-selectable-card` URL 均跳转到“「左侧栏」组件库”；技能、设置和连接器各自在自己的组件族中继续观测对应弹窗。
+- 原 `awaken-dialog`、`awaken-dropdown` 与 `awaken-selectable-card` URL 均跳转到“「左侧栏」组件库”；原 `awaken-icon` URL 跳转到“图标库”。技能、设置和连接器各自在自己的组件族中继续观测对应弹窗。

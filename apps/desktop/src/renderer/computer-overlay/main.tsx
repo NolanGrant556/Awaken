@@ -1,6 +1,7 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Power } from "lucide-react";
+import { Power } from "@awaken/design-system";
+import "@awaken/design-system/index.css";
 import type {
   ComputerOverlayBridge,
   ComputerOverlayState,

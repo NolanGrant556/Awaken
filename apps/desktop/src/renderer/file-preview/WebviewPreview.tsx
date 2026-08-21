@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { WebviewTag } from "electron";
-import { ArrowLeft, ArrowRight, RefreshCw } from "lucide-react";
+import { ArrowLeft, ArrowRight, RefreshCw } from "@awaken/design-system";
 import type { ProjectFilePreviewUrlHandle } from "../../shared/runtime";
 import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 

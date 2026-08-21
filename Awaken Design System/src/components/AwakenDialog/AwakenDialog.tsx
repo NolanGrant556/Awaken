@@ -1,5 +1,5 @@
 import "./AwakenDialog.css";
-import { X } from "lucide-react";
+import { X } from "../../icons";
 import {
   useEffect,
   useId,

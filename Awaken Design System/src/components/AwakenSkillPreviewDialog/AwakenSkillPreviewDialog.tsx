@@ -1,5 +1,5 @@
 import "./AwakenSkillPreviewDialog.css";
-import { Trash2, Wrench } from "lucide-react";
+import { Trash2, Wrench } from "../../icons";
 import { useEffect, useRef, type ReactNode, type Ref } from "react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";

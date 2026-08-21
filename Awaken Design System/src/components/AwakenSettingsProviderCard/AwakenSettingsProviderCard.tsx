@@ -1,6 +1,6 @@
 import "./AwakenSettingsProviderCard.css";
 import { useEffect, useRef, type ReactNode } from "react";
-import { ArrowUpRight, X } from "lucide-react";
+import { ArrowUpRight, X } from "../../icons";
 import {
   AwakenProviderLogo,
   type AwakenProviderBrand,

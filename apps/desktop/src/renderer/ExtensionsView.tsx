@@ -6,7 +6,7 @@ import {
   RefreshCw,
   Trash2,
   Upload,
-} from "lucide-react";
+} from "@awaken/design-system";
 import {
   AwakenButton as Button,
   AwakenCliConnectorDetailDialog,

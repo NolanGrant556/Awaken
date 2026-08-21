@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ShieldCheck, TriangleAlert, Webhook } from "lucide-react";
+import { ChevronDown, ShieldCheck, TriangleAlert, Webhook } from "@awaken/design-system";
 import type { HookReviewItem, HookSourceReceipt, HookStatus, RuntimeProject } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
 import "./HooksSettingsPanel.css";

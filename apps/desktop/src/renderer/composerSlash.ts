@@ -1,5 +1,5 @@
 import { createElement, type ReactNode } from "react";
-import { MonitorCog, Wrench } from "lucide-react";
+import { MonitorCog, Wrench } from "@awaken/design-system";
 import type {
   ComputerUseComposerTokenPayload,
   ComposerToken,

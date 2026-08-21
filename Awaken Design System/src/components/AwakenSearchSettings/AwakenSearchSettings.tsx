@@ -1,5 +1,5 @@
 import "./AwakenSearchSettings.css";
-import { Search, Wifi } from "lucide-react";
+import { Search, Wifi } from "../../icons";
 import { AwakenSwitch } from "../AwakenSwitch";
 
 export type AwakenSearchProviderItem = {

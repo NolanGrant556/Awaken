@@ -8,7 +8,7 @@ import type {
   ReactNode,
   Ref,
 } from "react";
-import { Check, ChevronDown, ChevronLeft, FileText, Folder, FolderPlus, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, FileText, Folder, FolderPlus, X } from "../../icons";
 import { AwakenComposerInput, type ComposerInputSelection } from "../AwakenComposerInput";
 import { AwakenContextButton } from "../AwakenContextButton";
 import { AwakenDropdown } from "../AwakenDropdown";

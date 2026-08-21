@@ -28,7 +28,8 @@
     "preview": "npm run build:gallery && vite preview --host 127.0.0.1",
     "smoke:render": "npm run build && tsx smoke/render-smoke.ts",
     "typecheck": "tsc --noEmit",
-    "test:logos": "tsx --test src/logos/catalog.test.ts"
+    "test:logos": "tsx --test src/logos/catalog.test.ts",
+    "test:icons": "tsx --test src/icons/catalog.test.ts"
   },
   "dependencies": {
     "@floating-ui/react": "^0.27.19",

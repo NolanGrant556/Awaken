@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { ExternalLink, FolderSearch2, RefreshCw } from "lucide-react";
+import { ExternalLink, FolderSearch2, RefreshCw } from "@awaken/design-system";
 import type { ArtifactOpenRequest, ProjectFilePreviewHandle } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
 import ImagePreview from "./ImagePreview";

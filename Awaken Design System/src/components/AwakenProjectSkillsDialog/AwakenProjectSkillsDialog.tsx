@@ -1,5 +1,5 @@
 import "./AwakenProjectSkillsDialog.css";
-import { Check, ChevronDown, Folder, Folders } from "lucide-react";
+import { Check, ChevronDown, Folder, Folders } from "../../icons";
 import {
   useEffect,
   useRef,

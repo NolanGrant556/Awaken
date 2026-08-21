@@ -19,7 +19,7 @@ import {
   Plus,
   Search,
   X,
-} from "lucide-react";
+} from "@awaken/design-system";
 import { AwakenPopover as Popover, AwakenTooltip as Tooltip } from "@awaken/design-system";
 import type {
   ProjectDirectoryEntry,

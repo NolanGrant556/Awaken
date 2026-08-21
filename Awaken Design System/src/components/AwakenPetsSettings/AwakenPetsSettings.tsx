@@ -1,6 +1,6 @@
 import "./AwakenPetsSettings.css";
 import type { ReactNode } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw } from "../../icons";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenSwitch } from "../AwakenSwitch";
 import { AwakenTooltip } from "../AwakenTooltip";

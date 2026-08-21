@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { AlertCircle, Check, Copy, Maximize2, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
+import { AlertCircle, Check, Copy, Maximize2, RotateCcw, X, ZoomIn, ZoomOut } from "../../icons";
 import { AwakenTooltip } from "../AwakenTooltip";
 import "./AwakenMermaidDiagram.css";
 

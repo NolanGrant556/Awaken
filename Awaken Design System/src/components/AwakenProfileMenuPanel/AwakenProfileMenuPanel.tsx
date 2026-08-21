@@ -1,5 +1,5 @@
 import "./AwakenProfileMenuPanel.css";
-import { ChevronRight, Gauge, Palette, Settings } from "lucide-react";
+import { ChevronRight, Gauge, Palette, Settings } from "../../icons";
 import {
   useId,
   useState,

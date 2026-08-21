@@ -1,6 +1,6 @@
 import "./AwakenSelect.css";
 import { useId, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "../../icons";
 import {
   useAwakenAnchoredMenuLayout,
   type AwakenAnchoredMenuPlacement,

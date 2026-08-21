@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Globe2, Search } from "lucide-react";
+import { Check, ChevronDown, Globe2, Search } from "../../icons";
 import { AwakenPopover } from "../AwakenPopover";
 import { presentAwakenTimezone } from "./timezone";
 

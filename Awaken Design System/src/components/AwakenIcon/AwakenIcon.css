@@ -1,0 +1,39 @@
+.aw-icon {
+  display: inline-block;
+  flex: 0 0 auto;
+  overflow: visible;
+  color: currentColor;
+  vertical-align: middle;
+  --aw-icon-stroke-16: 1.25px;
+  --aw-icon-stroke-24: 1.5px;
+}
+
+.aw-icon line,
+.aw-icon circle,
+.aw-icon rect,
+.aw-icon polygon,
+.aw-icon polyline,
+.aw-icon path {
+  stroke-width: var(--aw-icon-stroke, var(--aw-icon-stroke-16));
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.aw-icon--optical-16 {
+  --aw-icon-stroke: var(--aw-icon-stroke-16);
+}
+
+.aw-icon--optical-24 {
+  --aw-icon-stroke: var(--aw-icon-stroke-24);
+}
+
+.aw-icon--spin {
+  animation: aw-icon-spin 1s linear infinite;
+}
+
+@keyframes aw-icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

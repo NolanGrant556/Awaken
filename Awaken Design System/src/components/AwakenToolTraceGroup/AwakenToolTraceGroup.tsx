@@ -1,5 +1,5 @@
 import "./AwakenToolTraceGroup.css";
-import { ChevronRight, LoaderCircle, Wrench } from "lucide-react";
+import { ChevronRight, LoaderCircle, Wrench } from "../../icons";
 import { useId, useState, type ReactNode } from "react";
 import {
   AwakenToolTraceLine,

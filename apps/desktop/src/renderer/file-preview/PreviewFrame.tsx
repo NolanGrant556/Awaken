@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ExternalLink, FolderSearch2, RefreshCw } from "lucide-react";
+import { ExternalLink, FolderSearch2, RefreshCw } from "@awaken/design-system";
 
 export type PreviewFrameProps = {
   displayName: string;

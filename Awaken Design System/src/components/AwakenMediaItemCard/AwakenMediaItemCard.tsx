@@ -6,7 +6,7 @@ import {
   MoreHorizontal,
   Play,
   Video,
-} from "lucide-react";
+} from "../../icons";
 import {
   useLayoutEffect,
   useRef,

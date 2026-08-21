@@ -1,5 +1,5 @@
 import { createElement, type ComponentProps } from "react";
-import { Folder, Globe2, Image as ImageIcon } from "lucide-react";
+import { Folder, Globe2, Image as ImageIcon } from "../../icons";
 import type { AwakenInspectorRail } from "./AwakenInspectorRail";
 import { AwakenMediaInspector } from "../AwakenMediaInspector";
 

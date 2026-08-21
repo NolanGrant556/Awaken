@@ -4,7 +4,7 @@ import {
   ExternalLink,
   MonitorCog,
   RefreshCw,
-} from "lucide-react";
+} from "../../icons";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenSettingsSwitch } from "../AwakenSettingsSwitch";
 import "./AwakenComputerSettings.css";

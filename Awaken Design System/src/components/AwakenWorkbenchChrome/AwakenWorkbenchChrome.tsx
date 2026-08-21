@@ -1,7 +1,7 @@
 import "./AwakenWorkbenchChrome.css";
 import type { ReactNode } from "react";
 import type { PlatformKind } from "../../types";
-import { MessageCirclePlus, PanelLeft } from "lucide-react";
+import { MessageCirclePlus, PanelLeft } from "../../icons";
 
 export type AwakenWorkbenchChromeProps = {
   sidebarCollapsed?: boolean;

@@ -5,7 +5,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
-import { CalendarClock, Check, ChevronDown, Clock } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, Clock } from "../../icons";
 import { AwakenButton } from "../AwakenButton";
 import {
   AwakenComposerBar,

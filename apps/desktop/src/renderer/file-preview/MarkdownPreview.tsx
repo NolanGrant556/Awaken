@@ -14,7 +14,7 @@ import type {
 import { syntaxTree } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
 import { classHighlighter, highlightTree } from "@lezer/highlight";
-import { Eye, Pencil, Save } from "lucide-react";
+import { Eye, Pencil, Save } from "@awaken/design-system";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";

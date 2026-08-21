@@ -8,7 +8,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw } from "@awaken/design-system";
 import {
   AwakenButton,
   AwakenDialog,

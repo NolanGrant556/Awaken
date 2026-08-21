@@ -6,7 +6,7 @@ import {
   LoaderCircle,
   MoreHorizontal,
   Presentation,
-} from "lucide-react";
+} from "../../icons";
 import { useState } from "react";
 import { AwakenMediaItemCard } from "../AwakenMediaItemCard";
 import type { AwakenMediaMetadata } from "../AwakenMediaItemCard";

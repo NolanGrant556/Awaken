@@ -1,5 +1,5 @@
 import type { CSSProperties, MouseEvent } from "react";
-import { AlertCircle, ArrowDownCircle, RefreshCw, RotateCw } from "lucide-react";
+import { AlertCircle, ArrowDownCircle, RefreshCw, RotateCw } from "../../icons";
 
 export type AwakenSidebarUpdateAction = {
   state: "available" | "downloading" | "downloaded" | "error";

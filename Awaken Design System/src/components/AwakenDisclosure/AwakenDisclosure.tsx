@@ -1,6 +1,6 @@
 import "./AwakenDisclosure.css";
 import { useId, useState, type ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "../../icons";
 
 export type AwakenDisclosureProps = {
   title: ReactNode;

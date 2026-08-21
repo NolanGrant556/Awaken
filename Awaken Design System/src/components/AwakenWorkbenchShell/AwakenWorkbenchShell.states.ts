@@ -1,5 +1,5 @@
 import { createElement, type ComponentProps } from "react";
-import { Folder } from "lucide-react";
+import { Folder } from "../../icons";
 import { AwakenInspectorRail } from "../AwakenInspectorRail";
 import type { AwakenWorkbenchShell } from "./AwakenWorkbenchShell";
 

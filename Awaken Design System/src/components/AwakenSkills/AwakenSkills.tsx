@@ -1,5 +1,5 @@
 import "./AwakenSkills.css";
-import { Search } from "lucide-react";
+import { Search } from "../../icons";
 import type { HTMLAttributes } from "react";
 import { AwakenFolder } from "../AwakenFolder";
 import { AwakenProjectSkillsDialog } from "../AwakenProjectSkillsDialog";

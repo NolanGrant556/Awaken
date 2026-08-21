@@ -1,5 +1,5 @@
 import "./AwakenSkillCard.css";
-import { Wrench } from "lucide-react";
+import { Wrench } from "../../icons";
 import type { HTMLAttributes } from "react";
 import { AwakenSwitch } from "../AwakenSwitch";
 import type { AwakenSkillItem } from "../AwakenSkills/AwakenSkills.types";

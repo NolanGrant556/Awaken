@@ -16,7 +16,7 @@ import {
   FolderOpen,
   MessageSquare,
   MoreHorizontal,
-} from "lucide-react";
+} from "../../icons";
 import type { ProjectItem } from "../../types";
 import { AwakenDropdown } from "../AwakenDropdown";
 import {

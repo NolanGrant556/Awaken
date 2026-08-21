@@ -3367,7 +3367,7 @@ export function App() {
 
     threadTitlePollsRef.current.set(threadId, cancel);
 
-    const delays = [500, 1000, 2000, 4000, 8000, 12000, 20000, 30000];
+    const delays = [500, 1000, 2000, 4000, 8000, 12000, 20000, 30000, 60000, 90000];
 
     async function pollOnce(): Promise<void> {
       for (const delay of delays) {

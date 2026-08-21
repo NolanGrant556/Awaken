@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -422,8 +423,10 @@ func TestLocalThreadTitleUsesShortInputSkillAndAttachmentWithoutModelCall(t *tes
 
 func TestGenerateThreadTitleRecordsPurposeAndTerminalUsage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"成本治理"},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":3,"total_tokens":23}}`))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"成本治理\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":3,\"total_tokens\":23}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
 	journal, err := NewExecutionJournal(filepath.Join(t.TempDir(), "thread.jsonl"), "thread-title-usage")
@@ -555,6 +558,12 @@ func TestGeneratedThreadTitleQualityGateRejectsQuestionEcho(t *testing.T) {
 	if got := validGeneratedThreadTitle("项目文档概览", "告诉我，这个项目有什么文档？主要是什么方向的？内容都是什么"); got != "项目文档概览" {
 		t.Fatalf("expected concise topic title, got %q", got)
 	}
+	if got := validGeneratedThreadTitle("<think>先总结用户意图</think>\n标题：项目文档概览", "告诉我，这个项目有什么文档？主要是什么方向的？内容都是什么"); got != "项目文档概览" {
+		t.Fatalf("expected reasoning wrapper to be removed, got %q", got)
+	}
+	if got := validGeneratedThreadTitle(strings.Repeat("长", threadTitleMaxRuneLength+1), "请总结这段内容"); got != "" {
+		t.Fatalf("expected overlong title to be rejected, got %q", got)
+	}
 }
 
 func TestGenerateThreadTitleWithProfileUsesProviderRequestPolicy(t *testing.T) {
@@ -566,8 +575,9 @@ func TestGenerateThreadTitleWithProfileUsesProviderRequestPolicy(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("failed to decode request body: %v", err)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"项目文档概览"},"finish_reason":"stop"}]}`))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"项目文档概览\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
 
@@ -602,25 +612,38 @@ func TestGenerateThreadTitleWithProfileUsesProviderRequestPolicy(t *testing.T) {
 	if maxTokens != threadTitleMaxTokens {
 		t.Fatalf("expected inherited-profile title budget %d, got %d in body %+v", threadTitleMaxTokens, maxTokens, body)
 	}
+	var stream bool
+	if raw := body["stream"]; len(raw) == 0 {
+		t.Fatalf("expected stream in request body: %+v", body)
+	} else if err := json.Unmarshal(raw, &stream); err != nil {
+		t.Fatalf("failed to decode stream: %v", err)
+	}
+	if !stream {
+		t.Fatalf("expected streaming title request, got %+v", body)
+	}
 
 	if _, ok := body["thinking"]; ok {
 		t.Fatalf("expected Kimi K2.7 request to omit thinking.disabled, got %+v", body)
 	}
 }
 
-func TestThreadTitleMaxTokensForProfileKeepsCompactDefault(t *testing.T) {
+func TestThreadTitleBudgetUsesModelSafeCapWithoutReasoningHeuristic(t *testing.T) {
 	if got := threadTitleMaxTokensForProfile(&ModelProfileConfig{ModelID: "deepseek-v4-flash"}); got != threadTitleMaxTokens {
-		t.Fatalf("expected default title budget %d, got %d", threadTitleMaxTokens, got)
+		t.Fatalf("expected title budget cap %d, got %d", threadTitleMaxTokens, got)
 	}
 	if got := threadTitleGenerationTimeoutForProfile(&ModelProfileConfig{ModelID: "deepseek-v4-flash"}); got != threadTitleGenerationTimeout {
-		t.Fatalf("expected default title timeout %s, got %s", threadTitleGenerationTimeout, got)
+		t.Fatalf("expected title timeout %s, got %s", threadTitleGenerationTimeout, got)
 	}
 	reasoningProfile := &ModelProfileConfig{ProviderID: "custom", ModelID: "any-model", ReasoningEffort: "high", MaxTokens: 256}
 	if got := threadTitleMaxTokensForProfile(reasoningProfile); got != 256 {
-		t.Fatalf("expected capability-routed reasoning budget 256, got %d", got)
+		t.Fatalf("expected profile output limit 256, got %d", got)
 	}
-	if got := threadTitleGenerationTimeoutForProfile(reasoningProfile); got != threadTitleForcedReasoningTimeout {
-		t.Fatalf("expected capability-routed reasoning timeout %s, got %s", threadTitleForcedReasoningTimeout, got)
+	if got := threadTitleGenerationTimeoutForProfile(reasoningProfile); got != threadTitleGenerationTimeout {
+		t.Fatalf("expected uniform title timeout %s, got %s", threadTitleGenerationTimeout, got)
+	}
+	largeProfile := &ModelProfileConfig{ProviderID: "custom", ModelID: "any-model", MaxTokens: 64_000}
+	if got := threadTitleMaxTokensForProfile(largeProfile); got != threadTitleMaxTokens {
+		t.Fatalf("expected title budget capped at %d, got %d", threadTitleMaxTokens, got)
 	}
 }
 

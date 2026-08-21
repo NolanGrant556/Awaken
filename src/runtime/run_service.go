@@ -1593,7 +1593,7 @@ func (s *RunService) ApplyGeneratedThreadTitle(threadID, seedRunID, title string
 func (s *RunService) applyAutomaticThreadTitle(threadID, seedRunID, title string, source ThreadTitleSource) {
 	threadID = strings.TrimSpace(threadID)
 	seedRunID = strings.TrimSpace(seedRunID)
-	title = cleanGeneratedThreadTitle(title)
+	title = trimThreadLabel(cleanGeneratedThreadTitle(title))
 	if threadID == "" || seedRunID == "" || title == "" {
 		return
 	}

@@ -7,6 +7,7 @@ import { AwakenAppearanceSettingsDemo } from "../src/components/AwakenAppearance
 import { AwakenComposerBarDemo } from "../src/components/AwakenComposerBar/AwakenComposerBar.demo";
 import { AwakenComputerSettingsDemo } from "../src/components/AwakenComputerSettings/AwakenComputerSettings.demo";
 import { AwakenFolderDemo } from "../src/components/AwakenFolder/AwakenFolder.demo";
+import { AwakenIconDemo } from "../src/components/AwakenIcon/AwakenIcon.demo";
 import { AwakenConnectorsDemo } from "../src/components/AwakenConnectors/AwakenConnectors.demo";
 import { AwakenMemorySettingsDemo } from "../src/components/AwakenMemorySettings/AwakenMemorySettings.demo";
 import { AwakenModelSettingsDemo } from "../src/components/AwakenModelSettings/AwakenModelSettings.demo";
@@ -45,7 +46,8 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-select", name: "AwakenSelect", displayName: "单选列表", demo: AwakenSelectDemo, category: "atomic" },
   { id: "awaken-switch", name: "AwakenSwitch", displayName: "开关", demo: AwakenSwitchDemo, category: "atomic", aliases: ["awaken-skill-toggle", "awaken-connector-toggle", "awaken-settings-switch"] },
   { id: "awaken-folder", name: "AwakenFolder", displayName: "文件夹", demo: AwakenFolderDemo, category: "atomic", aliases: ["awaken-project-skill-folder"] },
-  { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "「左侧栏」组件库", demo: AwakenSidebarDemo, category: "sidebar", aliases: ["awaken-dialog", "awaken-dropdown", "awaken-icon", "awaken-selectable-card"] },
+  { id: "awaken-icon", name: "AwakenIcon", displayName: "图标库", demo: AwakenIconDemo, category: "atomic" },
+  { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "「左侧栏」组件库", demo: AwakenSidebarDemo, category: "sidebar", aliases: ["awaken-dialog", "awaken-dropdown", "awaken-selectable-card"] },
   { id: "awaken-skills", name: "AwakenSkills", displayName: "「技能」组件库", demo: AwakenSkillsDemo, category: "sidebar" },
   { id: "awaken-account", name: "AwakenAccount", displayName: "「账户」组件库", demo: AwakenAccountDemo, category: "sidebar", aliases: ["awaken-popover"] },
   { id: "awaken-connectors", name: "AwakenConnectors", displayName: "「连接器」组件库", demo: AwakenConnectorsDemo, category: "sidebar" },

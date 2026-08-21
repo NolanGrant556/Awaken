@@ -1,0 +1,202 @@
+.aw-icon-demo__block {
+  margin-top: 26px;
+}
+
+.aw-icon-demo__block h3 {
+  font-size: 14px;
+  font-weight: var(--aw-font-weight-semibold, 600);
+  color: var(--aw-text-primary);
+  margin-bottom: 4px;
+}
+
+.aw-icon-demo__hint {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--aw-text-tertiary);
+  max-width: 720px;
+  margin-bottom: 12px;
+}
+
+.aw-icon-demo__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  border: 1px solid var(--aw-border-subtle);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  background: var(--aw-bg-surface);
+}
+
+.aw-icon-demo__row-label {
+  flex: none;
+  width: 38px;
+  font-family: var(--aw-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--aw-text-tertiary);
+}
+
+.aw-icon-demo__row-icons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  color: var(--aw-text-primary);
+}
+
+.aw-icon-demo__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+}
+
+.aw-icon-demo__card {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 9px 11px;
+  border: 1px solid var(--aw-border-subtle);
+  border-radius: 8px;
+  background: var(--aw-bg-surface);
+}
+
+.aw-icon-demo__card-art {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--aw-border-subtle);
+  border-radius: 6px;
+  color: var(--aw-text-primary);
+}
+
+.aw-icon-demo__card-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.aw-icon-demo__card-meta code {
+  font-size: 12px;
+  color: var(--aw-text-primary);
+}
+
+.aw-icon-demo__card-meta span {
+  font-size: 12px;
+  color: var(--aw-text-secondary);
+}
+
+.aw-icon-demo__card-meta em {
+  font-family: var(--aw-font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  font-style: normal;
+  color: var(--aw-text-tertiary);
+}
+
+.aw-icon-demo__family {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.aw-icon-demo__family-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 128px;
+  padding: 14px 12px;
+  border: 1px solid var(--aw-border-subtle);
+  border-radius: 10px;
+  background: var(--aw-bg-surface);
+  color: var(--aw-text-primary);
+}
+
+.aw-icon-demo__family-small {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.aw-icon-demo__family-item code {
+  font-size: 11px;
+  color: var(--aw-text-primary);
+}
+
+.aw-icon-demo__family-item span {
+  font-size: 11px;
+  color: var(--aw-text-tertiary);
+  text-align: center;
+}
+
+.aw-icon-demo__concepts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px;
+}
+
+.aw-icon-demo__concept {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--aw-border-subtle);
+  border-radius: 7px;
+  background: var(--aw-bg-surface);
+  color: var(--aw-text-primary);
+}
+
+.aw-icon-demo__concept code {
+  font-size: 11px;
+  color: var(--aw-text-secondary);
+}
+
+.aw-icon-demo__concept em {
+  margin-left: auto;
+  font-family: var(--aw-font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  font-style: normal;
+  color: var(--aw-text-tertiary);
+}
+
+.aw-icon-demo__shapes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px;
+}
+
+.aw-icon-demo__shape {
+  padding: 11px 12px;
+  border: 1px solid var(--aw-border-subtle);
+  border-radius: 8px;
+  background: var(--aw-bg-surface);
+}
+
+.aw-icon-demo__shape-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.aw-icon-demo__shape-head code {
+  font-size: 12px;
+  color: var(--aw-text-primary);
+}
+
+.aw-icon-demo__shape-head em {
+  font-family: var(--aw-font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  font-style: normal;
+  color: var(--aw-text-tertiary);
+}
+
+.aw-icon-demo__shape-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--aw-text-primary);
+}

@@ -3833,17 +3833,17 @@ export function App() {
     {
       id: "connectors",
       label: "连接器",
-      icon: <AwakenIcon concept="connector" size={16} />,
+      icon: <AwakenIcon concept="connector" size={20} />,
     },
     {
       id: "skills",
       label: "技能",
-      icon: <AwakenIcon concept="skill" size={16} />,
+      icon: <AwakenIcon concept="skill" size={20} />,
     },
     {
       id: "scheduled-tasks",
       label: "定时任务",
-      icon: <AwakenIcon concept="scheduled-task" size={16} />,
+      icon: <AwakenIcon concept="scheduled-task" size={20} />,
     },
   ];
   const topbarStatusLabel = desktopNeedsRestart
@@ -4066,7 +4066,7 @@ export function App() {
           handleNewProjectSession(projectId);
         }}
       >
-        <AwakenIcon concept="thread-new" size={14} />
+        <AwakenIcon concept="thread-new" size={16} />
       </SidebarSectionAction>
     );
   }
@@ -7296,13 +7296,13 @@ export function App() {
                       }
                     >
                       {allProjectsExpanded ? (
-                        <AwakenIcon concept="collapse-all" size={14} />
+                        <AwakenIcon concept="collapse-all" size={16} />
                       ) : (
-                        <AwakenIcon concept="expand-all" size={14} />
+                        <AwakenIcon concept="expand-all" size={16} />
                       )}
                     </SidebarSectionAction>
                     <SidebarSectionAction label="创建项目" onClick={handleOpenCreateProject}>
-                      <AwakenIcon concept="project-add" size={14} />
+                      <AwakenIcon concept="project-add" size={16} />
                     </SidebarSectionAction>
                   </span>
                 }
@@ -7325,7 +7325,7 @@ export function App() {
                             );
                           }}
                         >
-                          <AwakenIcon concept="select-all" size={14} />
+                          <AwakenIcon concept="select-all" size={16} />
                         </SidebarSectionAction>
                         <SidebarSectionAction
                           label={
@@ -7342,13 +7342,13 @@ export function App() {
                             );
                           }}
                         >
-                          <AwakenIcon concept="delete" size={14} />
+                          <AwakenIcon concept="delete" size={16} />
                         </SidebarSectionAction>
                         <SidebarSectionAction
                           label="退出批量管理"
                           onClick={exitConversationBatchMode}
                         >
-                          <AwakenIcon concept="close" size={14} />
+                          <AwakenIcon concept="close" size={16} />
                         </SidebarSectionAction>
                       </>
                     ) : (
@@ -7358,9 +7358,9 @@ export function App() {
                           onClick={() => setConversationSectionExpanded((expanded) => !expanded)}
                         >
                           {conversationSectionExpanded ? (
-                            <AwakenIcon concept="collapse-all" size={14} />
+                            <AwakenIcon concept="collapse-all" size={16} />
                           ) : (
-                            <AwakenIcon concept="expand-all" size={14} />
+                            <AwakenIcon concept="expand-all" size={16} />
                           )}
                         </SidebarSectionAction>
                         <SidebarSectionAction
@@ -7368,10 +7368,10 @@ export function App() {
                           disabled={conversationThreads.length === 0}
                           onClick={enterConversationBatchMode}
                         >
-                          <AwakenIcon concept="select-mode" size={14} />
+                          <AwakenIcon concept="select-mode" size={16} />
                         </SidebarSectionAction>
                         <SidebarSectionAction label="新增对话" onClick={handleNewTask}>
-                          <AwakenIcon concept="thread-new" size={14} />
+                          <AwakenIcon concept="thread-new" size={16} />
                         </SidebarSectionAction>
                       </>
                     )}

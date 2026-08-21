@@ -453,7 +453,6 @@
 .composer-bar-slash-option-icon svg {
   width: var(--aw-icon-size-14);
   height: var(--aw-icon-size-14);
-  stroke-width: var(--aw-icon-stroke);
 }
 
 .composer-bar-slash-option-label {

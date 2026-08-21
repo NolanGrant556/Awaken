@@ -1,6 +1,6 @@
 import "./AwakenNewTaskButton.css";
+import { AwakenIcon } from "../AwakenIcon";
 import type { ButtonHTMLAttributes, CSSProperties, MouseEvent } from "react";
-import { Plus } from "lucide-react";
 
 export type AwakenNewTaskButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick"> & {
   onClick?: () => void;
@@ -74,7 +74,7 @@ export function AwakenNewTaskButton({
       {...props}
     >
       <span style={leftStyle}>
-        <Plus size={20} strokeWidth={1.9} aria-hidden="true" />
+        <AwakenIcon concept="add" size={20} />
         <span>{children}</span>
       </span>
     </button>

@@ -676,7 +676,6 @@
   flex: 0 0 auto;
   width: var(--aw-icon-size-16);
   height: var(--aw-icon-size-16);
-  stroke-width: var(--aw-icon-stroke);
 }
 
 .return-to-latest-button:hover,

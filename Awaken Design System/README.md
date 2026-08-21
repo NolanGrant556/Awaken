@@ -86,6 +86,75 @@ http://127.0.0.1:5173/#/components/awaken-memory-settings
 
 `npm run dev:ui` 只是启动组件观测服务的命令。真正的观测入口是注册表中的独立组件或组件族 URL。组件族可以在一个入口内集中展示完整组合及其可复用小组件；`http://127.0.0.1:5173/` 会自动落到某个已注册 URL，本身不作为独立入口。
 
+## 图标库契约
+
+Awaken 自有的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是唯一渲染出口，Gallery 入口是 `awaken-icon`。
+
+### 分层与 owner
+
+| 文件 | 职责 |
+| --- | --- |
+| `src/icons/geometry.ts` | 几何内核：op 构造、倒角、光学形状归一化、path 编译 |
+| `src/icons/primitives.ts` | 复用原语：文件夹、文件、加减叉、折叠箭头、六边形、齿轮 |
+| `src/icons/definitions.ts` | 图标定义。每个图标只声明几何与光学形状 |
+| `src/icons/brandMarks.ts` | 第三方官方品牌标记，保留 authored geometry |
+| `src/icons/registry.ts` | 名字 → 渲染数据，`AwakenIconName` 类型 |
+| `src/icons/concepts.ts` | 概念 → 图形的唯一映射 |
+| `src/icons/sizes.ts` | 尺寸档，与 `tokens.css` 的 `--aw-icon-size-*` 同一套 |
+
+### 不可违反的约束
+
+- 16 单位网格，坐标一律是 stroke-center 坐标。
+- 基本线只允许 0 / 45 / 90 度；其它角度必须由概念本身要求。
+- 先画直线再倒圆角，不使用自由曲线；全套圆头端点与圆角接合。
+- 描边固定 `1.25`，是几何常量而不是可换肤 token —— 它参与光学归一化，改它会同时改变每个图标的视觉尺寸。`AwakenIcon` 不接受调用点覆盖描边。
+- 每个图标声明一个光学形状，视觉包围盒归一化到该形状尺寸：Square `13`、Circle `14`、Horizontal `14×11`、Vertical `11×14`。圆形族用外接圆归一化（`fit: "radial"`），否则与方形族不等重量。
+- 重叠元素之间的 stroke-center 净间隙不小于 3 个网格单位。
+- 尺寸只接受 `12 / 14 / 16 / 20 / 24` 五档。16 是主用尺寸，12 是全套的可读下限。
+- 内标密度高的图标声明更高的 `minSize`，调用点不得低于它。
+- 闭合路径从顶点 0 的**出边**切点起笔。用入边切点起笔会让收尾的 `Z` 沿该顶点的弦闭合，把第一个角切掉；描边形状上表现为第一个角变平，实心形状上表现为缺一块。
+- 圆形族的 `radial` 归一化以**圆本身的圆心**为锚点，不能用包围盒中心：缺口圆弧（`spinner`）的包围盒并不以圆心为中心。
+
+### 状态族
+
+工具轨迹与运行计划的状态共用同一个容器圆（`statusRing`）加不同内标，因为它们经常同屏逐行出现，容器一旦不同就会看出参差。迁移前这一族是散的：错误有 `AlertCircle` / `CircleAlert` / `AlertTriangle` / `TriangleAlert` 四个同义图标，`unsupported` 与 `error` 共用一个因此无法区分「工具失败」和「工具不可用」，loading 有 `LoaderCircle` / `Loader2` 两个。现在每个状态在 `concepts.ts` 里只有一个图形。
+
+`slash-circle` 的斜杠按「禁止」的通用画法贯穿到接近圆周，是对「净间隙 ≥3 单位」的**有意例外**：缩短反而读不出禁止。这类例外必须写在图标定义的注释里。
+
+### 比喻可以换，可读性不能让
+
+当一个概念的常规比喻在 16px 下画不出可辨形体时，换比喻，而不是上一个读不出来的字形。
+
+长期记忆是这条规则的实例。常规比喻是大脑，但大脑的识别特征是脑回的起伏，而这套图标只用直线倒角；试过「圆加中缝」（被读成被分割的圆）和「交替半径的叶状轮廓」（倒角后退化成五边形）两版都不可辨，最终改用 `stack`（层叠）。它在语义上反而更贴 Awaken 的记忆 —— 记忆就是不断累积的 Markdown 记忆层。同理，外观原本画调色盘（圆加三个颜料井），三点在圆里被读成一张脸，改用 `color-mode` 的对比度画法。
+
+换比喻必须写在图标定义的注释里，包含试过哪些版本、为什么不可辨。否则下一个人会把它改回去。
+
+### 圆弧的唯一合法来源
+
+少数概念本质上就是圆弧：眼睛的上下眼睑、月牙、信号弧。它们用 `arcThroughChord` 按弦与拱高反解圆心与半径，因此仍然是「从圆上截取」而不是自由曲线，同族的弧曲率可以精确复用。不得为了省事直接写 SVG 的 `C`/`Q` 曲线。
+
+### 实心字形
+
+只给产品真正需要实心的概念做实心版。实心图标的视觉包围盒就是几何包围盒，不为描边预留半个描边宽度，因此按 `stroke 0` 归一化。当前唯一的实心字形是 `stop` —— 描边版在 16px 下读起来像一个空框，和「发送」的视觉重量不成对比。允许实心的清单在图标契约测试里显式登记，新增必须同时改测试。
+
+### 六边形形状族
+
+尖顶正六边形是 Awaken「可装配单元」的族形，全套里唯一，因此小尺寸下不会与方框族、文件族混淆。当前成员：`skill`（基型，可读下限 12px）、`skill-core`、`hook`、`connector`（带内标，可读下限 16px）。该外形与 Agent Skills 生态的事实标记一致，但几何由 Awaken 自有 `hexagon` 原语生成，不引用外部文件。
+
+### 品牌标记
+
+第三方官方标记不进入 16 网格构造体系，也不参与光学归一化，按既有规则保留 authored geometry；名字带 `-mark` 后缀与自绘图标区分，并各自声明来源、许可、商标归属与 `minSize`。
+
+MCP 使用官方标记 `mcp-mark`，可读下限 20px —— 更小尺寸下互扣勾形的平行笔画会粘连，这是标记结构决定的，与缩放方式无关。因此 14–16px 的密集行改用 Awaken 自绘的 `mcp-compact` 伴随字形，不改动官方标记。
+
+### 概念优先
+
+产品代码优先用 `concept` 而不是 `name`：概念是稳定的语义 API，图形属于图标层，可以在不动调用点的前提下替换。`concepts.ts` 保证每个「X 用哪个图标」只有一个答案。
+
+### 图标库的验证
+
+图标层的契约测试在 `apps/desktop/src/renderer/awakenIconLibrary.test.ts`（仓库当前只有 desktop workspace 配置了 vitest，且它的 alias 直接指向本包源码）。覆盖几何快照、光学形状审计、网格边界、描边不变量、概念表完整性，以及「图标层不依赖 lucide-react」与「调用点只用尺寸档且不低于 minSize」两条守卫。几何一旦改动，快照会在 review 中显示 path 级别的差异。
+
 ## 组件 URL 规则
 
 每个组件的 `component-id` 由组件名转换为 kebab case：
@@ -114,7 +183,7 @@ http://127.0.0.1:5173/#/components/awaken-connectors
 
 Gallery 左栏按“原子组件”“左侧栏组件”“设置页组件”“中间交互区组件”“布局 / 组合组件”五个目录分区。每个分区标题都是可访问的展开/收起按钮，显示当前入口数量；首次打开 URL 时只展开当前组件所属分区，切换 hash 到其他分区的组件时对应分区自动展开。所有 Gallery 注册项必须在 `registry.ts` 显式声明分类，不能回退为没有归属的一列长清单。
 
-“原子组件”只保留确实需要脱离业务场景单独观测的视觉单元。当前入口为产品 LOGO、开关、文件夹、头像、原始思考动效、思考球和矩阵方块。`AwakenThinkingOrb` 通过 `thinking-orbs` 的公开 API 组合六种 Canvas 视觉状态与 64px、20px 两档专用尺寸；`AwakenThinkingOrbStatus` 以透明行内布局组合思考球、状态文案与三点节奏动效，不提供胶囊表面；`思考中` 明确映射到 `composing`，不虚构第七种 state。Gallery 独立观测完整组件族，Desktop 只通过 `AwakenThoughtTrace` 在 active 状态注入当前主题和运行状态，完成态由 ThoughtTrace 切换为 Chevron 历史入口；Design System 不读取或推断 runtime。`AwakenDotmSquare3` 是固定的 5×5 方形点阵加载指示器；`AwakenSidebarThreadSpinner` 只组合它的 14px 尺寸，不另行维护一套动效。`AwakenSwitch` 是全产品布尔启停的唯一视觉原子，开启使用成功绿色、关闭使用中性灰色；Skills、连接器和设置语义外壳只做兼容映射，不再维护各自颜色与几何。`AwakenFolder` 是 Skills 与记忆项目入口共用的中性文件夹原子，只拥有名称、辅助信息和受控展开交互。图标按钮、弹出层、发送按钮、选择卡片、工具提示和记忆光流 primitive 仍保留生产源码和公开导出，但随真实消费组件族观测，不再用虚构状态重复占用目录。`AwakenMemoryLightFlow` 是适配浅色与深色主题的纯装饰 Canvas 光流，以铺满正常页头高度的独立细线构成；`AwakenMemoryLightFlowLayout` 负责把它与现有 `AwakenMemorySettings` 组合为正式记忆页布局，并统一在“记忆设置”入口观测。通用界面图形直接使用 `lucide-react`，不再维护只包裹 SVG path 的 `AwakenIcon`；原 `awaken-icon` URL 跳转到展示其真实替代位置的“「左侧栏」组件库”。其中“产品 LOGO”入口对应 `AwakenProductLogo`，默认渲染 `product-mark.svg` 双柱标记，`icon` 变体才使用 `src/assets/product-logo.png` 这份官方 256×256 App Icon。横向 `AWAKEN` 字标仍由 `logo-wordmark.svg` 负责；三件套用途不同，不得互相裁切替代。
+“原子组件”只保留确实需要脱离业务场景单独观测的视觉单元。当前入口为产品 LOGO、开关、文件夹、头像、原始思考动效、思考球和矩阵方块。`AwakenThinkingOrb` 通过 `thinking-orbs` 的公开 API 组合六种 Canvas 视觉状态与 64px、20px 两档专用尺寸；`AwakenThinkingOrbStatus` 以透明行内布局组合思考球、状态文案与三点节奏动效，不提供胶囊表面；`思考中` 明确映射到 `composing`，不虚构第七种 state。Gallery 独立观测完整组件族，Desktop 只通过 `AwakenThoughtTrace` 在 active 状态注入当前主题和运行状态，完成态由 ThoughtTrace 切换为 Chevron 历史入口；Design System 不读取或推断 runtime。`AwakenDotmSquare3` 是固定的 5×5 方形点阵加载指示器；`AwakenSidebarThreadSpinner` 只组合它的 14px 尺寸，不另行维护一套动效。`AwakenSwitch` 是全产品布尔启停的唯一视觉原子，开启使用成功绿色、关闭使用中性灰色；Skills、连接器和设置语义外壳只做兼容映射，不再维护各自颜色与几何。`AwakenFolder` 是 Skills 与记忆项目入口共用的中性文件夹原子，只拥有名称、辅助信息和受控展开交互。图标按钮、弹出层、发送按钮、选择卡片、工具提示和记忆光流 primitive 仍保留生产源码和公开导出，但随真实消费组件族观测，不再用虚构状态重复占用目录。`AwakenMemoryLightFlow` 是适配浅色与深色主题的纯装饰 Canvas 光流，以铺满正常页头高度的独立细线构成；`AwakenMemoryLightFlowLayout` 负责把它与现有 `AwakenMemorySettings` 组合为正式记忆页布局，并统一在“记忆设置”入口观测。“图标库”入口对应 `AwakenIcon`，它是 Awaken 全部界面图形的唯一渲染出口，`awaken-icon` 是它的正式 URL。它与早先被移除的同名组件不是同一件东西：那一版只包裹外部 SVG path，没有拥有几何，因此没有存在价值；当前这一版拥有 `src/icons` 下的完整图标层（几何内核、复用原语、光学形状归一化、概念表），因此图标层的 owner 回到 Design System。迁移已完成：`lucide-react` 已从依赖中移除，Design System 与 Desktop 全树不再有第三方界面图形。其中“产品 LOGO”入口对应 `AwakenProductLogo`，默认渲染 `product-mark.svg` 双柱标记，`icon` 变体才使用 `src/assets/product-logo.png` 这份官方 256×256 App Icon。横向 `AWAKEN` 字标仍由 `logo-wordmark.svg` 负责；三件套用途不同，不得互相裁切替代。
 
 “左侧栏组件”收纳 `AwakenSidebar`、Skills、Account、Connectors 等工作台侧栏组件族；设置页不再作为左侧栏弹窗归入该目录。“中间交互区组件”只收纳 Desktop 当前采用的 `RunStage`、center/dock `ComposerBar`、执行叙事、提示与回答、工具轨迹和最终交付物组件；该分组的 Gallery 状态统一一行一列展示，便于按完整可用宽度复核中间区组件，但不改变 Desktop 对滚动、overlay、composer 和 runtime 编排的 ownership。其中“输入栏”组件族用真实 Workbench 缩略场景明确区分上方滚动输出与底部停靠输入栏，并从真实上下文圆环入口（hover 摘要、点击打开）打开 `RunStage.overlay` 中的 `AwakenContextUsagePanel`；`center-idle` 状态还观测由受控 `projectPicker` 提供的首页项目低栏，项目数据与创建逻辑仍由 consumer 拥有。随后集中展示 `AwakenComposerBar`、底层 `AwakenComposerInput`、由 `AwakenIconButton` 实现的添加上下文按钮、`AwakenSendButton` 的发送/停止状态、两者的 `AwakenTooltip`，以及 `AwakenUserPromptBlock` 的已提交提示及复制状态。相关组件保留独立源码和公开导出，但不重复占用 Gallery 目录；原 `awaken-composer-input`、`awaken-context-button`、`awaken-user-prompt-block`、`awaken-composer-dock`、`awaken-icon-button`、`awaken-send-button`、`awaken-tooltip` URL 均跳转到该组件族入口。“助手消息”组件族通过已完成回答底部操作区观测 `AwakenCopyButton` 的真实回答复制状态；复制组件保留独立源码和公开导出，原 `awaken-copy-button` URL 跳转到该组件族入口。“运行阶段”组件族先用完整运行缩略场景标出 `AwakenRunStage` 的滚动/停靠 ownership 与 `AwakenExecutionFeed` 的叙事边界，再补充 RunStage 自身状态；两个组件保留独立源码和公开导出，原 `awaken-execution-feed` URL 会跳转到该组件族入口。“工具轨迹”组件族先展示 Desktop 在最终回答后由 `AwakenDisclosure` 收纳“执行过程”的真实组合，再集中观测 `AwakenToolTraceGroup` 与 `AwakenToolTraceLine`；三者保留独立源码和公开导出，原 `awaken-disclosure`、`awaken-tool-trace-group`、`awaken-tool-trace-line` URL 均跳转到统一入口。“「最终交付物」组件库”集中展示 `AwakenDeliverableCard` 的单文件状态与 `AwakenDeliverableList` 的列表组合状态；两者同样保留独立源码和公开导出，原 `awaken-deliverable-card`、`awaken-deliverable-list` URL 会跳转到统一入口。
 

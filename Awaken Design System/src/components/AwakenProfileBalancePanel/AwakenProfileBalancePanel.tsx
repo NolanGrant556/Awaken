@@ -1,6 +1,6 @@
 import "./AwakenProfileBalancePanel.css";
+import { AwakenIcon } from "../AwakenIcon";
 import { useState, type CSSProperties } from "react";
-import { AlertCircle, Loader2, Wallet } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import {
   AwakenProviderLogo,
@@ -226,7 +226,7 @@ function BalanceDetail({
     <div className="aw-profile-balance-panel__detail-sections">
       {officialDetail ?? (
         <div className="aw-profile-balance-panel__detail-empty" role={unreadable ? "alert" : "status"}>
-          <AlertCircle size={20} strokeWidth={1.9} aria-hidden="true" />
+          <AwakenIcon concept="error" size={20} />
           <span>{message}</span>
           {unreadable ? (
             <AwakenButton variant="default" size="sm" onClick={onOpenSettings}>
@@ -315,22 +315,17 @@ export function AwakenProfileBalancePanel({
     >
       {loading ? (
         <div className="aw-profile-balance-panel__message">
-          <Loader2
-            size={20}
-            strokeWidth={1.9}
-            className="aw-profile-balance-panel__spin"
-            aria-hidden="true"
-          />
+          <AwakenIcon concept="step-running" size={20} className="aw-profile-balance-panel__spin" />
           <span>正在查询用量…</span>
         </div>
       ) : error ? (
         <div className="aw-profile-balance-panel__message" role="alert">
-          <AlertCircle size={20} strokeWidth={1.9} aria-hidden="true" />
+          <AwakenIcon concept="error" size={20} />
           <span>{error}</span>
         </div>
       ) : balances.length === 0 ? (
         <div className="aw-profile-balance-panel__message">
-          <Wallet size={20} strokeWidth={1.9} aria-hidden="true" />
+          <AwakenIcon concept="balance" size={20} />
           <span>没有已启用的模型 API</span>
         </div>
       ) : (

@@ -1,5 +1,5 @@
 import "./AwakenCliConnectorDetailDialog.css";
-import { Check } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenConnectorBrandIcon } from "../AwakenConnectorBrandIcon";
 import { AwakenDialog } from "../AwakenDialog";
@@ -120,7 +120,7 @@ export function AwakenCliConnectorDetailDialog({
         >
           {action === "logout" ? (
             <>
-              <span className="aw-cli-connector-detail__connected-label"><Check size={15} strokeWidth={2.4} />已连接</span>
+              <span className="aw-cli-connector-detail__connected-label"><AwakenIcon concept="step-done" size={16} />已连接</span>
               <span className="aw-cli-connector-detail__logout-label">取消登录</span>
             </>
           ) : actionLabels[action]}
@@ -131,7 +131,7 @@ export function AwakenCliConnectorDetailDialog({
         <div className="aw-cli-connector-detail__brands" aria-hidden="true">
           <AwakenProductLogo size="md" decorative />
           <span className="aw-cli-connector-detail__link" data-connected={connected ? "true" : "false"}>
-            {connected ? <Check size={14} strokeWidth={2.4} /> : <span>·</span>}
+            {connected ? <AwakenIcon concept="step-done" size={14} /> : <span>·</span>}
           </span>
           <AwakenConnectorBrandIcon
             providerId={providerId}

@@ -8,8 +8,8 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { Plus, RefreshCw } from "lucide-react";
 import {
+  AwakenIcon,
   AwakenButton,
   AwakenDialog,
   AwakenScheduledTaskEditorDialog,
@@ -777,7 +777,7 @@ export function ScheduledTasksView({
                 void refreshTasks();
               }}
             >
-              <RefreshCw size={16} strokeWidth={1.9} />
+              <AwakenIcon concept="refresh" size={16} />
             </button>
             <AwakenButton
               variant="default"
@@ -791,7 +791,7 @@ export function ScheduledTasksView({
               size="md"
               onClick={() => openCreateEditor()}
             >
-              <Plus size={16} strokeWidth={1.9} />
+              <AwakenIcon concept="add" size={16} />
               创建任务
             </AwakenButton>
           </div>

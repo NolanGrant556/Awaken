@@ -1,6 +1,6 @@
 import "./AwakenPetsSettings.css";
+import { AwakenIcon } from "../AwakenIcon";
 import type { ReactNode } from "react";
-import { RefreshCw } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenSwitch } from "../AwakenSwitch";
 import { AwakenTooltip } from "../AwakenTooltip";
@@ -69,7 +69,7 @@ export function AwakenPetsSettings({
         <div className="pets-settings-section-header">
           <h2>已导入宠物</h2>
           <div className="pets-settings-section-actions">
-            <AwakenButton variant="ghost" size="sm" onClick={onRefresh} disabled={loading} icon={<RefreshCw size={14} />}>刷新 Codex 宠物</AwakenButton>
+            <AwakenButton variant="ghost" size="sm" onClick={onRefresh} disabled={loading} icon={<AwakenIcon concept="refresh" size={14} />}>刷新 Codex 宠物</AwakenButton>
             <AwakenButton variant="ghost" size="sm" onClick={onOpenAwakenDirectory}>打开 Awaken 目录</AwakenButton>
             <AwakenButton variant="ghost" size="sm" onClick={onOpenCodexDirectory}>打开 Codex 目录</AwakenButton>
           </div>

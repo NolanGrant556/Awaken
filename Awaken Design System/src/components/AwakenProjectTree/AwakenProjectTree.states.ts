@@ -1,5 +1,5 @@
 import { createElement, type ComponentProps } from "react";
-import { MessageCirclePlus } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenSidebarSectionAction } from "../AwakenSidebarSectionAction";
 import type { AwakenProjectTree } from "./AwakenProjectTree";
 
@@ -25,7 +25,7 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
             AwakenSidebarSectionAction,
             {
               label: "新建会话",
-              children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
+              children: createElement(AwakenIcon, { concept: "thread-new", size: 14 }),
             },
           ),
           menuItems: [
@@ -66,7 +66,7 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
             AwakenSidebarSectionAction,
             {
               label: "新建会话",
-              children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
+              children: createElement(AwakenIcon, { concept: "thread-new", size: 14 }),
             },
           ),
         },
@@ -90,7 +90,7 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
             AwakenSidebarSectionAction,
             {
               label: "新建会话",
-              children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
+              children: createElement(AwakenIcon, { concept: "thread-new", size: 14 }),
             },
           ),
           menuItems: [
@@ -200,7 +200,7 @@ export const AwakenProjectTreeStates: AwakenProjectTreeState[] = [
             AwakenSidebarSectionAction,
             {
               label: "新建会话",
-              children: createElement(MessageCirclePlus, { size: 13, strokeWidth: 1.85 }),
+              children: createElement(AwakenIcon, { concept: "thread-new", size: 14 }),
             },
           ),
         },

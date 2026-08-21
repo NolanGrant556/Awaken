@@ -1,5 +1,5 @@
 import "./AwakenSkillPreviewDialog.css";
-import { Trash2, Wrench } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { useEffect, useRef, type ReactNode, type Ref } from "react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
@@ -36,7 +36,7 @@ export function AwakenSkillPreviewSurface({
     <div className="aw-skill-preview-surface">
       <div className="aw-skill-preview-summary">
         <span className="aw-skill-preview-summary__icon" aria-hidden="true">
-          <Wrench size={20} strokeWidth={1.8} />
+          <AwakenIcon concept="skill" size={20} />
         </span>
         <div className="aw-skill-preview-summary__copy">
           <div className="aw-skill-preview-summary__title">
@@ -153,7 +153,7 @@ export function AwakenSkillPreviewDeleteButton({
       loading={deleting}
       onClick={onDelete}
     >
-      <Trash2 size={15} strokeWidth={1.9} />
+      <AwakenIcon concept="delete" size={16} />
       删除
     </AwakenButton>
   );

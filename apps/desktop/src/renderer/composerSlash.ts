@@ -1,5 +1,5 @@
 import { createElement, type ReactNode } from "react";
-import { MonitorCog, Wrench } from "lucide-react";
+import { AwakenIcon } from "@awaken/design-system";
 import type {
   ComputerUseComposerTokenPayload,
   ComposerToken,
@@ -255,7 +255,8 @@ export function skillSlashActionsFromSkills(
           skill.whenToUse,
           skill.skillFilePath,
         ].filter((value): value is string => Boolean(value)),
-        icon: createElement(Wrench, { size: 13, strokeWidth: 1.85 }),
+        // 技能条目用技能自己的图形，不再借用工具图标。
+        icon: createElement(AwakenIcon, { concept: "skill", size: 14 }),
         preview: {
           description: skill.whenToUse || skill.description,
           path: skill.skillFilePath,
@@ -300,7 +301,7 @@ export function computerUseMentionProvider(): SlashProvider {
           label: "Computer Use",
           description: "引导模型观察并操作本机图形界面",
           keywords: ["computer", "computer use", "计算机", "电脑", "GUI", "桌面"],
-          icon: createElement(MonitorCog, { size: 13, strokeWidth: 1.85 }),
+          icon: createElement(AwakenIcon, { concept: "computer-use", size: 14 }),
           preview: {
             description:
               "选择 Computer Use 能力；提交时由运行时向模型提供引导，不在用户输入中显示提示词。",

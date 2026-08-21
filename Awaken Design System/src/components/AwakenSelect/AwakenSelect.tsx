@@ -1,6 +1,6 @@
 import "./AwakenSelect.css";
+import { AwakenIcon } from "../AwakenIcon";
 import { useId, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
 import {
   useAwakenAnchoredMenuLayout,
   type AwakenAnchoredMenuPlacement,
@@ -131,12 +131,7 @@ export function AwakenSelect({
         <span data-placeholder={selectedOption ? undefined : "true"}>
           {selectedOption?.label ?? placeholder}
         </span>
-        <ChevronDown
-          className="aw-select__chevron"
-          size={16}
-          strokeWidth={1.9}
-          aria-hidden="true"
-        />
+        <AwakenIcon concept="dropdown" size={16} className="aw-select__chevron" />
       </button>
 
       {open ? (
@@ -194,7 +189,7 @@ export function AwakenSelect({
             >
               <span>{option.label}</span>
               {value === option.value ? (
-                <Check size={15} strokeWidth={2} aria-hidden="true" />
+                <AwakenIcon concept="step-done" size={16} />
               ) : null}
             </button>
           ))}

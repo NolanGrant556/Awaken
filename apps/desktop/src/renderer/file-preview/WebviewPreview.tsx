@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { AwakenIcon } from "@awaken/design-system";
 import type { WebviewTag } from "electron";
-import { ArrowLeft, ArrowRight, RefreshCw } from "lucide-react";
 import type { ProjectFilePreviewUrlHandle } from "../../shared/runtime";
 import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 
@@ -127,7 +127,7 @@ export default function WebviewPreview({
               disabled={!canGoBack}
               onClick={() => runGuestAction((webview) => webview.goBack())}
             >
-              <ArrowLeft size={16} aria-hidden="true" />
+              <AwakenIcon concept="navigate-back" size={16} />
             </button>
             <button
               type="button"
@@ -136,7 +136,7 @@ export default function WebviewPreview({
               disabled={!canGoForward}
               onClick={() => runGuestAction((webview) => webview.goForward())}
             >
-              <ArrowRight size={16} aria-hidden="true" />
+              <AwakenIcon concept="forward" size={16} />
             </button>
             <button
               type="button"
@@ -144,7 +144,7 @@ export default function WebviewPreview({
               title="刷新页面"
               onClick={() => runGuestAction((webview) => webview.reload())}
             >
-              <RefreshCw size={15} aria-hidden="true" />
+              <AwakenIcon concept="refresh" size={16} />
             </button>
             <output
               className="project-file-preview-heading__address"

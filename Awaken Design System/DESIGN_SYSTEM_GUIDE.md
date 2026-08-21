@@ -37,8 +37,9 @@ Clear space around the mark is one quarter of its height. Do not stretch, rotate
 - Long-form assistant answers use the reading tokens: `15px / 24px` body, with `22px / 30px`, `18px / 26px`, and `16px / 24px` heading tiers.
 - Chrome and helper copy must not go below `12px / 18px`.
 - Weight roles are regular `400`, medium `500`, semibold `600`, bold `650`, and heavy `700`; use the role token instead of local `700` / `800` / `820` / `850` values. `650` is the SF Pro optical target and falls back to `600` on other platforms.
-- Default icon size is `16px`; compact icons may use `14px`.
-- Line icons default to a `1.75` optical stroke; brand marks and filled status graphics keep their authored geometry.
+- Default icon size is `16px`; compact icons may use `14px`. Icons rendered through `AwakenIcon` accept only the five existing size tokens `12 / 14 / 16 / 20 / 24`.
+- Awaken's own line icons are drawn on a 16-unit grid and carry an intrinsic `1.25` stroke, because the stroke participates in optical normalisation and cannot be re-skinned without changing every icon's visual size. All interface graphics go through `AwakenIcon`; `lucide-react` is no longer a dependency. The icon contract lives in `README.md` under 图标库契约.
+- Brand marks and filled status graphics keep their authored geometry and do not take part in optical normalisation.
 - Compact controls use a `6px` radius, default controls use `8px`, cards / popovers / panels use `12px`, and the composer surface uses `16px`.
 - Interactive neutral states must move through `--aw-bg-fill-light`, `--aw-bg-fill-main`, and `--aw-bg-fill-dark`.
 - Status colors are semantic only: success, warning, error, running, and permission states.
@@ -68,5 +69,7 @@ Before shipping visual changes, verify:
 - `npm --workspace @awaken/design-system run smoke:render`
 - `npm --workspace @awaken/desktop run typecheck`
 - `npm --workspace @awaken/desktop run test`
+
+Icon changes additionally go through `apps/desktop/src/renderer/awakenIconLibrary.test.ts`. A geometry change shows up as a snapshot diff; update it only after checking the icon at real product sizes, because 12px legibility is the binding constraint and it is not visible in the path data.
 
 For Desktop visual QA on macOS, use the official root commands `npm run open:desktop` and `npm run close:desktop`. Windows currently uses the foreground `npm run dev:desktop` entry. The root `README.md` is the sole authority for current platform entry details.

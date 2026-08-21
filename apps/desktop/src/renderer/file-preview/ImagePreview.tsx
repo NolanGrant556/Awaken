@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Maximize2, Minus, Plus, RotateCcw } from "lucide-react";
+import { AwakenIcon } from "@awaken/design-system";
 import type { ProjectFilePreviewUrlHandle } from "../../shared/runtime";
 import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 
@@ -42,14 +42,14 @@ export default function ImagePreview({
             aria-label="缩小图片"
             onClick={() => adjustScale(-0.1)}
           >
-            <Minus size={15} aria-hidden="true" />
+            <AwakenIcon concept="collapse" size={16} />
           </button>
           <button
             type="button"
             aria-label="放大图片"
             onClick={() => adjustScale(0.1)}
           >
-            <Plus size={15} aria-hidden="true" />
+            <AwakenIcon concept="add" size={16} />
           </button>
           <button
             type="button"
@@ -61,7 +61,7 @@ export default function ImagePreview({
               setScale(1);
             }}
           >
-            <Maximize2 size={15} aria-hidden="true" />
+            <AwakenIcon concept="expand-full" size={16} />
           </button>
           <button
             type="button"
@@ -82,7 +82,7 @@ export default function ImagePreview({
               setScale(1);
             }}
           >
-            <RotateCcw size={15} aria-hidden="true" />
+            <AwakenIcon concept="rotate-ccw" size={16} />
           </button>
         </>
       }

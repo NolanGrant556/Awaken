@@ -1,5 +1,5 @@
 import "./AwakenSkillCard.css";
-import { Wrench } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import type { HTMLAttributes } from "react";
 import { AwakenSwitch } from "../AwakenSwitch";
 import type { AwakenSkillItem } from "../AwakenSkills/AwakenSkills.types";
@@ -24,7 +24,7 @@ export function AwakenSkillCard({
   const cardBody = (
     <>
       <span className="aw-skill-card__icon" aria-hidden="true">
-        <Wrench size={18} strokeWidth={1.8} />
+        <AwakenIcon concept="skill" size={20} />
       </span>
       <span className="aw-skill-card__copy">
         <span className="aw-skill-card__title-row">

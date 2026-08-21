@@ -1,5 +1,5 @@
 import { createElement, type ComponentProps } from "react";
-import { Folder } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenInspectorRail } from "../AwakenInspectorRail";
 import type { AwakenWorkbenchShell } from "./AwakenWorkbenchShell";
 
@@ -16,11 +16,7 @@ const currentInspector = createElement(AwakenInspectorRail, {
     {
       id: "files",
       label: "文件",
-      icon: createElement(Folder, {
-        size: 16,
-        strokeWidth: 1.8,
-        "aria-hidden": true,
-      }),
+      icon: createElement(AwakenIcon, { concept: "project", size: 16 }),
     },
   ],
 });

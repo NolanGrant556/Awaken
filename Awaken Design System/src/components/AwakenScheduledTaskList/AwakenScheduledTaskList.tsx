@@ -1,6 +1,6 @@
 import "./AwakenScheduledTaskList.css";
+import { AwakenIcon } from "../AwakenIcon";
 import { useState } from "react";
-import { CalendarClock, MoreHorizontal } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDropdown } from "../AwakenDropdown";
 import { AwakenSwitch } from "../AwakenSwitch";
@@ -98,7 +98,7 @@ function ScheduledTaskRow({
   return (
     <li className="aw-scheduled-task-list__row" data-state={item.state} data-running={item.running ? "true" : "false"}>
       <span className="aw-scheduled-task-list__row-icon" aria-hidden="true">
-        <CalendarClock size={16} strokeWidth={1.9} />
+        <AwakenIcon concept="scheduled-task" size={16} />
       </span>
       <span className="aw-scheduled-task-list__row-copy">
         <span className="aw-scheduled-task-list__row-title-line">
@@ -132,7 +132,7 @@ function ScheduledTaskRow({
               className="aw-scheduled-task-list__row-menu-trigger"
               aria-label={`${item.name} ${labels.moreActionsLabel}`}
             >
-              <MoreHorizontal size={16} strokeWidth={1.9} />
+              <AwakenIcon concept="more-actions" size={16} />
             </button>
           }
         >

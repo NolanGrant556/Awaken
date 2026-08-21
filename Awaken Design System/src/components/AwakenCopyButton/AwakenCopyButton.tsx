@@ -1,6 +1,6 @@
 import "./AwakenCopyButton.css";
+import { AwakenIcon } from "../AwakenIcon";
 import { useEffect, useRef, useState, type ButtonHTMLAttributes } from "react";
-import { AlertCircle, Check, Copy } from "lucide-react";
 import { AwakenTooltip } from "../AwakenTooltip";
 
 export type AwakenCopyButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & {
@@ -94,11 +94,11 @@ export function AwakenCopyButton({
 
   const icon =
     copyState === "copied" ? (
-      <Check size={14} strokeWidth={2.4} />
+      <AwakenIcon concept="step-done" size={14} />
     ) : copyState === "error" ? (
-      <AlertCircle size={14} strokeWidth={2.2} />
+      <AwakenIcon concept="error" size={14} />
     ) : (
-      <Copy size={14} strokeWidth={2} />
+      <AwakenIcon concept="copy" size={14} />
     );
 
   const button = (

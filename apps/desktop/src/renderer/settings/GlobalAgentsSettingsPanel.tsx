@@ -1,12 +1,5 @@
-import {
-  AlertTriangle,
-  CircleCheck,
-  FileText,
-  RefreshCw,
-  Save,
-  Trash2,
-} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AwakenIcon } from "@awaken/design-system";
 import type { GlobalAgentsDocument } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
 import "./GlobalAgentsSettingsPanel.css";
@@ -118,7 +111,7 @@ export function GlobalAgentsSettingsPanel({ runtimeClient }: Props) {
         <header className="aw-agents-settings__header">
           <div className="aw-agents-settings__identity">
             <span className="aw-agents-settings__icon" aria-hidden="true">
-              <FileText size={20} />
+              <AwakenIcon concept="context-file" size={20} />
             </span>
             <h2 id="aw-agents-settings-title">AGENTS.md</h2>
             <span className={`aw-agents-settings__state${document?.exists ? " is-active" : ""}`}>
@@ -153,14 +146,14 @@ export function GlobalAgentsSettingsPanel({ runtimeClient }: Props) {
             aria-live={message ? "polite" : undefined}
           >
             {message ? (
-              conflict ? <AlertTriangle size={15} aria-hidden="true" /> : <CircleCheck size={15} aria-hidden="true" />
+              conflict ? <AwakenIcon concept="warning" size={16} /> : <AwakenIcon concept="success" size={16} />
             ) : null}
             <span>{message ?? "冲突时项目规则优先 · 仅影响新任务 · 请勿写入密钥"}</span>
           </div>
           <div className="aw-agents-settings__actions">
             {conflict ? (
               <button type="button" onClick={() => void load()}>
-                <RefreshCw size={15} />
+                <AwakenIcon concept="refresh" size={16} />
                 重新加载
               </button>
             ) : null}
@@ -170,7 +163,7 @@ export function GlobalAgentsSettingsPanel({ runtimeClient }: Props) {
               disabled={!document?.exists || saving}
               onClick={() => void remove()}
             >
-              <Trash2 size={15} />
+              <AwakenIcon concept="delete" size={16} />
               删除
             </button>
             <button
@@ -179,7 +172,7 @@ export function GlobalAgentsSettingsPanel({ runtimeClient }: Props) {
               disabled={!document || saving || draft === document.content}
               onClick={() => void save()}
             >
-              <Save size={15} />
+              <AwakenIcon concept="save" size={16} />
               保存
             </button>
           </div>

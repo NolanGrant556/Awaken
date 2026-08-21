@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Globe2, Search } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenPopover } from "../AwakenPopover";
 import { presentAwakenTimezone } from "./timezone";
 
@@ -62,12 +62,12 @@ export function AwakenScheduledTaskTimezonePicker({
           aria-invalid={invalid || undefined}
           disabled={disabled}
         >
-          <Globe2 size={16} strokeWidth={1.8} aria-hidden="true" />
+          <AwakenIcon concept="browser" size={16} />
           <span>
             <strong>{selected.name}</strong>
             <small>{selected.offsetLabel}</small>
           </span>
-          <ChevronDown size={15} strokeWidth={1.9} aria-hidden="true" />
+          <AwakenIcon concept="dropdown" size={16} />
         </button>
       }
       content={
@@ -78,7 +78,7 @@ export function AwakenScheduledTaskTimezonePicker({
           }}
         >
           <label className="aw-scheduled-task-editor__timezone-search">
-            <Search size={15} strokeWidth={1.8} aria-hidden="true" />
+            <AwakenIcon concept="search" size={16} />
             <input
               ref={searchRef}
               type="search"
@@ -135,7 +135,7 @@ export function AwakenScheduledTaskTimezonePicker({
                     <strong>{presentAwakenTimezone(systemTimezone, referenceDate).name}</strong>
                     <small>{presentAwakenTimezone(systemTimezone, referenceDate).offsetLabel}</small>
                   </span>
-                  {value === systemTimezone ? <Check size={15} strokeWidth={2} /> : null}
+                  {value === systemTimezone ? <AwakenIcon concept="step-done" size={16} /> : null}
                 </button>
               </div>
             ) : null}
@@ -157,7 +157,7 @@ export function AwakenScheduledTaskTimezonePicker({
                       <strong>{option.name}</strong>
                       <small>{option.offsetLabel}</small>
                     </span>
-                    {value === option.id ? <Check size={15} strokeWidth={2} /> : null}
+                    {value === option.id ? <AwakenIcon concept="step-done" size={16} /> : null}
                   </button>
                 ))}
               </section>

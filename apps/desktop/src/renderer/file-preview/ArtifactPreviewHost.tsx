@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { ExternalLink, FolderSearch2, RefreshCw } from "lucide-react";
+import { AwakenIcon } from "@awaken/design-system";
 import type { ArtifactOpenRequest, ProjectFilePreviewHandle } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
 import ImagePreview from "./ImagePreview";
@@ -142,15 +142,15 @@ export default function ArtifactPreviewHost({
         <span>{state.message}</span>
         <div className="project-file-preview-state__actions">
           <button type="button" onClick={() => setRetryGeneration((value) => value + 1)}>
-            <RefreshCw size={15} aria-hidden="true" />
+            <AwakenIcon concept="refresh" size={16} />
             重试
           </button>
           <button type="button" onClick={() => runArtifactAction(runtimeClient.openArtifact)}>
-            <ExternalLink size={15} aria-hidden="true" />
+            <AwakenIcon concept="external-open" size={16} />
             使用系统默认应用打开
           </button>
           <button type="button" onClick={() => runArtifactAction(runtimeClient.revealArtifact)}>
-            <FolderSearch2 size={15} aria-hidden="true" />
+            <AwakenIcon concept="locate-folder" size={16} />
             在文件管理器中显示
           </button>
         </div>

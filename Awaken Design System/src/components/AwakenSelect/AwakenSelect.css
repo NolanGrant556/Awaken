@@ -68,7 +68,6 @@
   width: var(--aw-icon-size-16);
   height: var(--aw-icon-size-16);
   color: var(--aw-text-secondary);
-  stroke-width: var(--aw-icon-stroke);
   transition: transform var(--aw-transition-fast);
 }
 

@@ -1,5 +1,5 @@
 import { createElement, type ComponentProps } from "react";
-import { Monitor } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import type { AwakenSelectableCard } from "./AwakenSelectableCard";
 
 export type AwakenSelectableCardState = {
@@ -16,7 +16,7 @@ export const AwakenSelectableCardStates: AwakenSelectableCardState[] = [
     label: "本地已选",
     props: {
       selected: true,
-      icon: createElement(Monitor, { size: 18, strokeWidth: 1.9 }),
+      icon: createElement(AwakenIcon, { concept: "theme-system", size: 20 }),
       title: "Local",
       description: "Use a folder on this Mac as an Awaken project.",
       onSelect: noop,
@@ -27,7 +27,7 @@ export const AwakenSelectableCardStates: AwakenSelectableCardState[] = [
     label: "本地可选",
     props: {
       selected: false,
-      icon: createElement(Monitor, { size: 18, strokeWidth: 1.9 }),
+      icon: createElement(AwakenIcon, { concept: "theme-system", size: 20 }),
       title: "Local",
       description: "Use a folder on this Mac as an Awaken project.",
       onSelect: noop,
@@ -39,7 +39,7 @@ export const AwakenSelectableCardStates: AwakenSelectableCardState[] = [
     props: {
       compact: true,
       selected: true,
-      icon: createElement(Monitor, { size: 15, strokeWidth: 1.9 }),
+      icon: createElement(AwakenIcon, { concept: "theme-system", size: 16 }),
       title: "Local",
       description: "Use a folder on this Mac as an Awaken project.",
       onSelect: noop,

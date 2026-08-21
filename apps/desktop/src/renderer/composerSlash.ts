@@ -255,7 +255,8 @@ export function skillSlashActionsFromSkills(
           skill.whenToUse,
           skill.skillFilePath,
         ].filter((value): value is string => Boolean(value)),
-        icon: createElement(AwakenIcon, { concept: "tool", size: 14 }),
+        // 技能条目用技能自己的图形，不再借用工具图标。
+        icon: createElement(AwakenIcon, { concept: "skill", size: 14 }),
         preview: {
           description: skill.whenToUse || skill.description,
           path: skill.skillFilePath,

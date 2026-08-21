@@ -1,7 +1,6 @@
 import "./AwakenProfileBalancePanel.css";
 import { AwakenIcon } from "../AwakenIcon";
 import { useState, type CSSProperties } from "react";
-import { Loader2 } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import {
   AwakenProviderLogo,
@@ -316,12 +315,7 @@ export function AwakenProfileBalancePanel({
     >
       {loading ? (
         <div className="aw-profile-balance-panel__message">
-          <Loader2
-            size={20}
-            strokeWidth={1.9}
-            className="aw-profile-balance-panel__spin"
-            aria-hidden="true"
-          />
+          <AwakenIcon concept="step-running" size={20} className="aw-profile-balance-panel__spin" />
           <span>正在查询用量…</span>
         </div>
       ) : error ? (

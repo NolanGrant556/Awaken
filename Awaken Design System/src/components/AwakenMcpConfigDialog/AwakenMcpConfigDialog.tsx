@@ -1,5 +1,5 @@
 import "./AwakenMcpConfigDialog.css";
-import { Check } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 
@@ -45,7 +45,7 @@ export function AwakenMcpConfigDialog({
         <>
           <AwakenButton variant="default" size="md" disabled={busy} onClick={() => onOpenChange(false)}>取消</AwakenButton>
           <AwakenButton variant="primary" size="md" loading={busy} disabled={value.trim() === ""} onClick={onSubmit}>
-            <Check size={15} strokeWidth={1.9} />确认
+            <AwakenIcon concept="step-done" size={16} />确认
           </AwakenButton>
         </>
       }

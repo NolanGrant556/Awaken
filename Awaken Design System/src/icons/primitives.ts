@@ -288,6 +288,120 @@ export function display(cx = 8, cy = 8, w = 12.6, h = 9.2): GeomOp[] {
   ];
 }
 
+/**
+ * 文件容器 + 内标。文件类型族的唯一入口。
+ *
+ * 十一个文件类型共用同一个文件外形，只换内标 —— 这比逐个手画更一致，
+ * 也保证「同一个文件在十个图标里是同一个文件」。
+ */
+export function fileWithMark(...inner: GeomOp[]): GeomOp[] {
+  return [fileBody(), ...inner];
+}
+
+/** 放大镜。缩放族（放大 / 缩小 / 适应）共用同一个镜片与手柄几何。 */
+export function magnifier(inner: GeomOp[] = []): GeomOp[] {
+  const r = 4.35;
+  const lens: Vec = [6.25, 6.25];
+  const k = 1 / Math.SQRT2;
+  return [
+    circle(lens[0], lens[1], r),
+    poly(
+      [
+        [lens[0] + (r + 0.6) * k, lens[1] + (r + 0.6) * k],
+        [13.7, 13.7],
+      ],
+      0,
+    ),
+    ...inner,
+  ];
+}
+
+/**
+ * 四角括号。向外表示展开到全屏，向内表示还原。
+ * 两者共用同一组坐标，只交换括号朝向，因此互为精确镜像。
+ */
+export function cornerBrackets(out: boolean): GeomOp[] {
+  const near = 1.6;
+  const far = 14.4;
+  const arm = 3.9;
+  const ops: GeomOp[] = [];
+  for (const [cx, cy, sx, sy] of [
+    [near, near, 1, 1],
+    [far, near, -1, 1],
+    [far, far, -1, -1],
+    [near, far, 1, -1],
+  ] as const) {
+    if (out) {
+      ops.push(
+        poly(
+          [
+            [cx + sx * arm, cy],
+            [cx, cy],
+            [cx, cy + sy * arm],
+          ],
+          [0, 0.9, 0],
+        ),
+      );
+    } else {
+      // 还原：括号内缩，顶点落在离边 4.6 处。
+      const ix = cx + sx * 4.6;
+      const iy = cy + sy * 4.6;
+      ops.push(
+        poly(
+          [
+            [ix - sx * arm, iy],
+            [ix, iy],
+            [ix, iy - sy * arm],
+          ],
+          [0, 0.9, 0],
+        ),
+      );
+    }
+  }
+  return ops;
+}
+
+/** 面板框：外框加一条分栏线，line 决定被分出的那一侧。 */
+export function panelFrame(side: "left" | "right"): GeomOp[] {
+  const x = side === "left" ? 6 : 10;
+  return [
+    poly(
+      [
+        [1.6, 2.6],
+        [14.4, 2.6],
+        [14.4, 13.4],
+        [1.6, 13.4],
+      ],
+      1.8,
+      true,
+    ),
+    poly(
+      [
+        [x, 2.6],
+        [x, 13.4],
+      ],
+      0,
+    ),
+  ];
+}
+
+/** 地球：圆 + 赤道 + 两条经线。经线用同一拱高，左右精确对称。 */
+export function globe(): GeomOp[] {
+  const r = 6.375;
+  return [
+    circle(8, 8, r),
+    poly(
+      [
+        [8 - r, 8],
+        [8 + r, 8],
+      ],
+      0,
+    ),
+    arcThroughChord([8, 8 - r], [8, 8 + r], 2.7, "left"),
+    arcThroughChord([8, 8 - r], [8, 8 + r], 2.7, "right"),
+  ];
+}
+
 /** 眼睛：上下两片眼睑用同一条弦、同一个拱高，因此曲率精确对称。 */
 export function eye(cx = 8, cy = 8, halfWidth = 6.4, sagitta = 3.15, pupil = 1.95): GeomOp[] {
   const from: Vec = [cx - halfWidth, cy];

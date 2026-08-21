@@ -1,12 +1,6 @@
 import "./AwakenMediaItemCard.css";
-import {
-  AlertCircle,
-  Image as ImageIcon,
-  LoaderCircle,
-  MoreHorizontal,
-  Play,
-  Video,
-} from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
+
 import {
   useLayoutEffect,
   useRef,
@@ -250,12 +244,12 @@ export function AwakenMediaItemCard({
       ) : null}
       {status === "unknown" || status === "error" || status === "cancelled" ? (
         <span className="aw-media-item-card-terminal" aria-hidden="true">
-          <AlertCircle size={20} strokeWidth={1.8} />
+          <AwakenIcon concept="error" size={20} />
         </span>
       ) : null}
       {loaded && ready && kind === "video" ? (
         <span className="aw-media-item-card-play" aria-hidden="true">
-          <Play size={17} fill="currentColor" strokeWidth={1.6} />
+          <AwakenIcon concept="media-play" size={16} />
         </span>
       ) : null}
       {typeof index === "number" ? (
@@ -292,9 +286,9 @@ export function AwakenMediaItemCard({
       <div className="aw-media-item-card-footer">
         <span className="aw-media-item-card-kind" aria-hidden="true">
           {kind === "image" ? (
-            <ImageIcon size={14} strokeWidth={1.8} />
+            <AwakenIcon concept="media-image" size={14} />
           ) : (
-            <Video size={14} strokeWidth={1.8} />
+            <AwakenIcon concept="media-video" size={14} />
           )}
         </span>
         <span className="aw-media-item-card-copy">
@@ -302,20 +296,10 @@ export function AwakenMediaItemCard({
           <span title={resolvedDetail}>{resolvedDetail}</span>
         </span>
         {transient ? (
-          <LoaderCircle
-            className="aw-media-item-card-spinner"
-            size={15}
-            strokeWidth={1.9}
-            aria-hidden="true"
-          />
+          <AwakenIcon concept="step-running" size={16} className="aw-media-item-card-spinner" />
         ) : null}
         {openingExternal ? (
-          <LoaderCircle
-            className="aw-media-item-card-spinner"
-            size={15}
-            strokeWidth={1.9}
-            aria-hidden="true"
-          />
+          <AwakenIcon concept="step-running" size={16} className="aw-media-item-card-spinner" />
         ) : null}
         {menuAvailable ? (
           <div className="aw-media-item-card-menu">
@@ -328,7 +312,7 @@ export function AwakenMediaItemCard({
                   aria-expanded={menuOpen}
                   aria-haspopup="menu"
                 >
-                  <MoreHorizontal aria-hidden="true" size={17} strokeWidth={1.8} />
+                  <AwakenIcon concept="more-actions" size={16} />
                 </button>
               }
               content={

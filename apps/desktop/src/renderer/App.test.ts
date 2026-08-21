@@ -2939,7 +2939,7 @@ describe("AwakenUserPromptBlock layout contract", () => {
 
     expect(html).toContain("execution-prompt-bubble-token-capability");
     expect(html).toContain("Computer Use");
-    expect(html).toContain("lucide-monitor");
+    expect(html).toContain("aw-icon--display");
   });
 
   it("renders selected skill tokens before text when no inline position is present", () => {

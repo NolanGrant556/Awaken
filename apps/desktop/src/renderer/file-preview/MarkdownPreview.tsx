@@ -12,9 +12,9 @@ import type {
   ReactNode,
 } from "react";
 import { syntaxTree } from "@codemirror/language";
+import { AwakenIcon } from "@awaken/design-system";
 import { EditorState } from "@codemirror/state";
 import { classHighlighter, highlightTree } from "@lezer/highlight";
-import { Eye, Pencil, Save } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -457,7 +457,7 @@ export default function MarkdownPreview({
               aria-pressed={mode === "preview"}
               onClick={() => void requestPreviewMode()}
             >
-              <Eye size={15} aria-hidden="true" />
+              <AwakenIcon concept="reveal" size={16} />
             </button>
             <button
               type="button"
@@ -466,7 +466,7 @@ export default function MarkdownPreview({
               aria-pressed={mode === "edit"}
               onClick={enterEditMode}
             >
-              <Pencil size={15} aria-hidden="true" />
+              <AwakenIcon concept="edit" size={16} />
             </button>
           </div>
           <div
@@ -488,7 +488,7 @@ export default function MarkdownPreview({
               disabled={!dirty || saving}
               onClick={() => void persist()}
             >
-              <Save size={15} aria-hidden="true" />
+              <AwakenIcon concept="save" size={16} />
             </button>
 			{saveConflict ? (
 				<button

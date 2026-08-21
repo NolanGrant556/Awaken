@@ -1,15 +1,5 @@
 import "./AwakenMediaPreviewOverlay.css";
-import {
-  ChevronLeft,
-  ChevronRight,
-  ExternalLink,
-  FolderOpen,
-  Maximize2,
-  Minus,
-  Plus,
-  RotateCcw,
-  X,
-} from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import {
   useEffect,
   useId,
@@ -239,7 +229,7 @@ export function AwakenMediaPreviewOverlay({
             aria-label="关闭媒体预览"
             onClick={onClose}
           >
-            <X size={18} strokeWidth={1.9} aria-hidden="true" />
+            <AwakenIcon concept="close" size={20} />
           </button>
         </header>
 
@@ -251,7 +241,7 @@ export function AwakenMediaPreviewOverlay({
               aria-label="查看上一个媒体"
               onClick={onPrevious}
             >
-              <ChevronLeft size={22} strokeWidth={1.8} aria-hidden="true" />
+              <AwakenIcon concept="back" size={24} />
             </button>
           ) : null}
           {onNext ? (
@@ -261,7 +251,7 @@ export function AwakenMediaPreviewOverlay({
               aria-label="查看下一个媒体"
               onClick={onNext}
             >
-              <ChevronRight size={22} strokeWidth={1.8} aria-hidden="true" />
+              <AwakenIcon concept="disclose" size={24} />
             </button>
           ) : null}
 
@@ -355,13 +345,13 @@ export function AwakenMediaPreviewOverlay({
             {item.kind === "image" ? (
               <>
                 <button type="button" aria-label="缩小图片" onClick={() => adjustScale(-0.25)}>
-                  <Minus size={15} aria-hidden="true" />
+                  <AwakenIcon concept="collapse" size={16} />
                 </button>
                 <span className="aw-media-preview-scale">
                   {fit ? "适应" : `${Math.round(scale * 100)}%`}
                 </span>
                 <button type="button" aria-label="放大图片" onClick={() => adjustScale(0.25)}>
-                  <Plus size={15} aria-hidden="true" />
+                  <AwakenIcon concept="add" size={16} />
                 </button>
                 <button
                   type="button"
@@ -373,7 +363,7 @@ export function AwakenMediaPreviewOverlay({
                     setScale(1);
                   }}
                 >
-                  <RotateCcw size={15} aria-hidden="true" />
+                  <AwakenIcon concept="rotate-ccw" size={16} />
                 </button>
                 <button
                   type="button"
@@ -395,7 +385,7 @@ export function AwakenMediaPreviewOverlay({
                 void fullscreenRef.current?.requestFullscreen?.();
               }}
             >
-              <Maximize2 size={15} aria-hidden="true" />
+              <AwakenIcon concept="expand-full" size={16} />
             </button>
           </div>
           <div className="aw-media-preview-toolbar-group aw-media-preview-toolbar-system">
@@ -407,7 +397,7 @@ export function AwakenMediaPreviewOverlay({
                 disabled={openingExternal}
                 onClick={onOpenExternal}
               >
-                <ExternalLink size={15} aria-hidden="true" />
+                <AwakenIcon concept="external-open" size={16} />
                 打开
               </button>
             ) : null}
@@ -418,7 +408,7 @@ export function AwakenMediaPreviewOverlay({
                 title={revealLabel}
                 onClick={onReveal}
               >
-                <FolderOpen size={15} aria-hidden="true" />
+                <AwakenIcon concept="folder-expanded" size={16} />
                 显示位置
               </button>
             ) : null}

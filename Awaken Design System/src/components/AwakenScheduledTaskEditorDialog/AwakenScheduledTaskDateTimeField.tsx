@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Clock } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenPopover } from "../AwakenPopover";
 
 type LocalDateTime = {
@@ -164,9 +164,9 @@ export function AwakenScheduledTaskDateTimeField({
           aria-invalid={invalid || undefined}
           disabled={disabled}
         >
-          <CalendarDays size={16} strokeWidth={1.8} aria-hidden="true" />
+          <AwakenIcon concept="scheduled-task" size={16} />
           <span data-placeholder={!selected ? "true" : "false"}>{displayValue(value)}</span>
-          <ChevronDown size={15} strokeWidth={1.9} aria-hidden="true" />
+          <AwakenIcon concept="dropdown" size={16} />
         </button>
       }
       content={
@@ -181,10 +181,10 @@ export function AwakenScheduledTaskDateTimeField({
             <strong>{visibleMonth.year}年 {visibleMonth.month}月</strong>
             <span>
               <button type="button" aria-label="上个月" onClick={() => moveMonth(-1)}>
-                <ChevronLeft size={16} strokeWidth={1.9} />
+                <AwakenIcon concept="back" size={16} />
               </button>
               <button type="button" aria-label="下个月" onClick={() => moveMonth(1)}>
-                <ChevronRight size={16} strokeWidth={1.9} />
+                <AwakenIcon concept="disclose" size={16} />
               </button>
             </span>
           </div>
@@ -231,7 +231,7 @@ export function AwakenScheduledTaskDateTimeField({
             })}
           </div>
           <div className="aw-scheduled-task-editor__time-row">
-            <span><Clock size={15} strokeWidth={1.8} />时间</span>
+            <span><AwakenIcon concept="scheduled-task" size={16} />时间</span>
             <label>
               <span className="aw-visually-hidden">小时</span>
               <input

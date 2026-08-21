@@ -1,7 +1,6 @@
 import "./AwakenMemorySettings.css";
 import { AwakenIcon } from "../AwakenIcon";
 import { useState } from "react";
-import { BookOpenText, ChevronRight, Folder, RefreshCw, UserRound } from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 import { AwakenMarkdownRenderer } from "../AwakenMarkdownRenderer";
@@ -262,7 +261,7 @@ export function AwakenMemorySettings({
               <div className="memory-activity-list">
                 {visibleActivities.map((activity) => (
                   <button type="button" className="memory-activity-row" key={activity.id} aria-haspopup="dialog" aria-label={`${activity.label} ${activity.title} ${activity.timeLabel}`} onClick={() => setActiveActivity(activity)}>
-                    <span className={`memory-activity-marker memory-activity-marker-${activity.kind}`}>{activity.kind === "dream" ? <RefreshCw size={15} aria-hidden="true" /> : <AwakenIcon concept="settings-memory" size={16} />}</span>
+                    <span className={`memory-activity-marker memory-activity-marker-${activity.kind}`}>{activity.kind === "dream" ? <AwakenIcon concept="refresh" size={16} /> : <AwakenIcon concept="settings-memory" size={16} />}</span>
                     <span className="memory-activity-copy"><small>{activity.label}</small><strong>{truncateActivityTitle(activity.title)}</strong></span>
                     <time>{activity.timeLabel}</time>
                     <AwakenIcon concept="disclose" size={16} />
@@ -305,22 +304,22 @@ export function AwakenMemorySettings({
 
           <div className="memory-library-overview">
             <button type="button" className="memory-library-entry" aria-haspopup="dialog" onClick={() => openLibraryScope("user")}>
-              <span className="memory-library-entry-icon"><UserRound size={19} strokeWidth={1.8} aria-hidden="true" /></span>
+              <span className="memory-library-entry-icon"><AwakenIcon concept="user" size={20} /></span>
               <span className="memory-library-entry-copy">
                 <strong>用户记忆</strong>
                 <span>用户资料、协作偏好与个人参考入口</span>
                 <small>{topicCountLabel(librarySummary.userTopicCount, librarySummary.userTopicCountCapped)}{librarySummary.userUpdatedLabel ? ` · 最近更新 ${librarySummary.userUpdatedLabel}` : ""}</small>
               </span>
-              <span className="memory-library-entry-action">查看<ChevronRight size={17} aria-hidden="true" /></span>
+              <span className="memory-library-entry-action">查看<AwakenIcon concept="disclose" size={16} /></span>
             </button>
             <button type="button" className="memory-library-entry" aria-haspopup="dialog" onClick={() => setLibraryView({ kind: "projects" })}>
-              <span className="memory-library-entry-icon"><Folder size={19} strokeWidth={1.8} aria-hidden="true" /></span>
+              <span className="memory-library-entry-icon"><AwakenIcon concept="project" size={20} /></span>
               <span className="memory-library-entry-copy">
                 <strong>项目记忆</strong>
                 <span>按工作区保存的项目背景、决策与参考入口</span>
                 <small>{librarySummary.projectCount} 个项目 · {topicCountLabel(librarySummary.projectTopicCount, librarySummary.projectTopicCountCapped)}{librarySummary.projectUpdatedLabel ? ` · 最近更新 ${librarySummary.projectUpdatedLabel}` : ""}</small>
               </span>
-              <span className="memory-library-entry-action">查看<ChevronRight size={17} aria-hidden="true" /></span>
+              <span className="memory-library-entry-action">查看<AwakenIcon concept="disclose" size={16} /></span>
             </button>
           </div>
         </section>
@@ -360,7 +359,7 @@ export function AwakenMemorySettings({
                   onOpen={() => openLibraryScope("project", project.id, project.name)}
                 />
               ))}
-              {!memoryProjects.length ? <div className="memory-empty"><Folder size={22} aria-hidden="true" /><span>暂无产生记忆的项目</span></div> : null}
+              {!memoryProjects.length ? <div className="memory-empty"><AwakenIcon concept="project" size={24} /><span>暂无产生记忆的项目</span></div> : null}
             </div>
           </div>
         ) : null}
@@ -380,12 +379,12 @@ export function AwakenMemorySettings({
                       <span>{memory.description}</span>
                       <small><span>{memory.typeLabel}</span><i aria-hidden="true" /><span className={memory.status === "superseded" ? "memory-status-superseded" : "memory-status-active"}>{memory.statusLabel}</span><i aria-hidden="true" /><span>{memory.updatedLabel}</span></small>
                     </span>
-                    <span className="memory-topic-action">查看<ChevronRight size={17} aria-hidden="true" /></span>
+                    <span className="memory-topic-action">查看<AwakenIcon concept="disclose" size={16} /></span>
                   </button>
                 </article>
               )) : null}
-              {libraryLoading ? <div className="memory-empty"><RefreshCw size={22} className="memory-loading-icon" aria-hidden="true" /><span>正在读取记忆</span></div> : null}
-              {!libraryLoading && !memories.length ? <div className="memory-empty"><BookOpenText size={22} aria-hidden="true" /><span>暂无记忆</span></div> : null}
+              {libraryLoading ? <div className="memory-empty"><AwakenIcon concept="refresh" size={24} className="memory-loading-icon" /><span>正在读取记忆</span></div> : null}
+              {!libraryLoading && !memories.length ? <div className="memory-empty"><AwakenIcon concept="memory-reference" size={24} /><span>暂无记忆</span></div> : null}
             </div>
           </div>
         ) : null}

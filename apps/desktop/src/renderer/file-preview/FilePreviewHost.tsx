@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ExternalLink, FolderSearch2, Globe2, RefreshCw } from "lucide-react";
+import { AwakenIcon } from "@awaken/design-system";
 import type {
   ProjectFilePreviewActionRequest,
   ProjectFilePreviewHandle,
@@ -212,7 +212,7 @@ export default function FilePreviewHost({
   if (mode === "browser" && state.status !== "ready") {
     return (
       <div className="project-files-preview-empty is-centered">
-        <Globe2 size={42} strokeWidth={1.5} aria-hidden="true" />
+        <AwakenIcon concept="browser" size={24} />
         <strong>浏览器</strong>
         <span>预览 Html 文件</span>
       </div>
@@ -241,7 +241,7 @@ export default function FilePreviewHost({
             type="button"
             onClick={() => setRetryGeneration((value) => value + 1)}
           >
-            <RefreshCw size={15} aria-hidden="true" />
+            <AwakenIcon concept="refresh" size={16} />
             重试
           </button>
           <button
@@ -250,14 +250,14 @@ export default function FilePreviewHost({
               runFallbackAction(runtimeClient.openProjectFileExternally)
             }
           >
-            <ExternalLink size={15} aria-hidden="true" />
+            <AwakenIcon concept="external-open" size={16} />
             使用系统默认应用打开
           </button>
           <button
             type="button"
             onClick={() => runFallbackAction(runtimeClient.revealProjectFile)}
           >
-            <FolderSearch2 size={15} aria-hidden="true" />
+            <AwakenIcon concept="locate-folder" size={16} />
             在文件管理器中显示
           </button>
         </div>
@@ -396,7 +396,7 @@ export default function FilePreviewHost({
       </div>
       {!previewVisible ? (
         <div className="project-files-preview-empty is-centered">
-          <Globe2 size={42} strokeWidth={1.5} aria-hidden="true" />
+          <AwakenIcon concept="browser" size={24} />
           {preview.kind === "html" ? (
             <>
               <strong>{preview.displayName}</strong>

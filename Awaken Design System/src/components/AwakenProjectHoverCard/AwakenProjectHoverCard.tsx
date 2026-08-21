@@ -1,4 +1,5 @@
 import "./AwakenProjectHoverCard.css";
+import { AwakenIcon } from "../AwakenIcon";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   autoUpdate,
@@ -14,7 +15,6 @@ import {
   useRole,
   type Placement,
 } from "@floating-ui/react";
-import { Folder, MessageCircle, Settings } from "lucide-react";
 import type { ProjectHoverCard } from "../../types";
 
 export type ProjectHoverCardAnchorProps = {
@@ -92,7 +92,7 @@ export function AwakenProjectHoverCard({
           >
             <div className="aw-project-hover-card__header">
               <span className="aw-project-hover-card__header-icon" aria-hidden="true">
-                <Folder size={16} strokeWidth={1.9} />
+                <AwakenIcon concept="project" size={16} />
               </span>
               <span className="aw-project-hover-card__title">{card.title}</span>
             </div>
@@ -100,7 +100,7 @@ export function AwakenProjectHoverCard({
             {card.summary ? (
               <div className="aw-project-hover-card__summary">
                 <span aria-hidden="true">
-                  <MessageCircle size={15} strokeWidth={1.9} />
+                  <AwakenIcon concept="conversation" size={16} />
                 </span>
                 <span>{card.summary}</span>
               </div>
@@ -123,7 +123,7 @@ export function AwakenProjectHoverCard({
                       onClick={() => card.onRevealFolder?.(folder.path)}
                     >
                       <span aria-hidden="true">
-                        <Folder size={16} strokeWidth={1.9} />
+                        <AwakenIcon concept="project" size={16} />
                       </span>
                       <span className="aw-project-hover-card__folder-label">
                         {folder.label ?? folder.path}
@@ -147,7 +147,7 @@ export function AwakenProjectHoverCard({
                   onClick={() => card.onAction?.()}
                 >
                   <span aria-hidden="true">
-                    <Settings size={16} strokeWidth={1.9} />
+                    <AwakenIcon concept="settings" size={16} />
                   </span>
                   <span>{card.actionLabel}</span>
                 </button>

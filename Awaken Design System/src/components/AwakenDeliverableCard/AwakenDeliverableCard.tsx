@@ -1,12 +1,5 @@
 import "./AwakenDeliverableCard.css";
-import {
-  FileSpreadsheet,
-  FileText,
-  FileType2,
-  LoaderCircle,
-  MoreHorizontal,
-  Presentation,
-} from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { useState } from "react";
 import { AwakenMediaItemCard } from "../AwakenMediaItemCard";
 import type { AwakenMediaMetadata } from "../AwakenMediaItemCard";
@@ -57,41 +50,21 @@ const fileTypeLabel: Record<AwakenDeliverableFileType, string> = {
 function FileTypeIcon({ fileType }: { fileType: AwakenDeliverableFileType }) {
   if (fileType === "excel") {
     return (
-      <FileSpreadsheet
-        className="aw-deliverable-card-type-icon"
-        aria-hidden="true"
-        size={22}
-        strokeWidth={1.65}
-      />
+      <AwakenIcon concept="spreadsheet" size={24} className="aw-deliverable-card-type-icon" />
     );
   }
   if (fileType === "powerpoint") {
     return (
-      <Presentation
-        className="aw-deliverable-card-type-icon"
-        aria-hidden="true"
-        size={22}
-        strokeWidth={1.65}
-      />
+      <AwakenIcon concept="presentation" size={24} className="aw-deliverable-card-type-icon" />
     );
   }
   if (fileType === "pdf") {
     return (
-      <FileType2
-        className="aw-deliverable-card-type-icon aw-deliverable-card-pdf-icon"
-        aria-hidden="true"
-        size={22}
-        strokeWidth={1.65}
-      />
+      <AwakenIcon concept="file-pdf" size={24} className="aw-deliverable-card-type-icon aw-deliverable-card-pdf-icon" />
     );
   }
   return (
-    <FileText
-      className="aw-deliverable-card-type-icon"
-      aria-hidden="true"
-      size={22}
-      strokeWidth={1.65}
-    />
+    <AwakenIcon concept="file-text" size={24} className="aw-deliverable-card-type-icon" />
   );
 }
 
@@ -177,12 +150,7 @@ export function AwakenDeliverableCard({
           <span className="aw-deliverable-card-kind">{fileTypeLabel[fileType]}</span>
         </span>
         {opening ? (
-          <LoaderCircle
-            className="aw-deliverable-card-spinner"
-            aria-hidden="true"
-            size={18}
-            strokeWidth={1.9}
-          />
+          <AwakenIcon concept="step-running" size={20} className="aw-deliverable-card-spinner" />
         ) : null}
       </button>
 
@@ -197,7 +165,7 @@ export function AwakenDeliverableCard({
                 aria-expanded={menuOpen}
                 aria-haspopup="menu"
               >
-                <MoreHorizontal aria-hidden="true" size={20} strokeWidth={1.8} />
+                <AwakenIcon concept="more-actions" size={20} />
               </button>
             }
             content={

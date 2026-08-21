@@ -1,5 +1,5 @@
 import "./AwakenConnectorCard.css";
-import { Check, Plus, Plug, Server, Settings, X } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import { AwakenConnectorBrandIcon } from "../AwakenConnectorBrandIcon";
 import { AwakenSwitch } from "../AwakenSwitch";
 import type { AwakenConnectorCardItem } from "../AwakenConnectors/AwakenConnectors.types";
@@ -70,7 +70,7 @@ export function AwakenConnectorCard({
           disabled={item.busy}
           onClick={() => onPrimaryAction?.(item)}
         >
-          {item.connected ? <Check size={16} strokeWidth={2.2} /> : <Plus size={16} strokeWidth={1.9} />}
+          {item.connected ? <AwakenIcon concept="step-done" size={16} /> : <AwakenIcon concept="add" size={16} />}
         </button>
       </article>
     );
@@ -79,7 +79,7 @@ export function AwakenConnectorCard({
   return (
     <article className="aw-connector-card" data-variant={item.variant}>
       <span className="aw-connector-card__icon" aria-hidden="true">
-        {item.variant === "server" ? <Server size={18} strokeWidth={1.9} /> : <Plug size={18} strokeWidth={1.9} />}
+        {item.variant === "server" ? <AwakenIcon concept="mcp-server" size={20} /> : <AwakenIcon concept="connector" size={20} />}
       </span>
       <span className="aw-connector-card__copy">
         <span className="aw-connector-card__title-row">
@@ -112,7 +112,7 @@ export function AwakenConnectorCard({
             disabled={item.busy}
             onClick={() => onSettings?.(item)}
           >
-            <Settings size={16} strokeWidth={1.9} />
+            <AwakenIcon concept="settings" size={16} />
           </button>
         </span>
       ) : (
@@ -123,7 +123,7 @@ export function AwakenConnectorCard({
           disabled={item.busy}
           onClick={() => onPrimaryAction?.(item)}
         >
-          {item.connected ? <X size={16} strokeWidth={1.9} /> : <Plus size={16} strokeWidth={1.9} />}
+          {item.connected ? <AwakenIcon concept="close" size={16} /> : <AwakenIcon concept="add" size={16} />}
         </button>
       )}
     </article>

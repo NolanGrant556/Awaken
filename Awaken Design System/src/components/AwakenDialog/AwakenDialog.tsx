@@ -1,5 +1,5 @@
 import "./AwakenDialog.css";
-import { X } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import {
   useEffect,
   useId,
@@ -158,7 +158,7 @@ export function AwakenDialog({
             showTooltip={false}
             onClick={() => onOpenChange(false)}
           >
-            <X size={15} strokeWidth={1.9} />
+            <AwakenIcon concept="close" size={16} />
           </AwakenIconButton>
         </header>
         <div

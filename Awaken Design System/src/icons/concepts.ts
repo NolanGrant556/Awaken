@@ -99,6 +99,53 @@ export const AWAKEN_ICON_CONCEPTS = {
   "runner-code": "brackets-square",
   "runner-lightning": "lightning",
 
+  // 文件类型
+  "file-generic": "file",
+  "file-text": "file-list",
+  "file-markdown": "file-markdown",
+  "file-code": "file-code",
+  "file-data": "file-data",
+  "file-image": "file-image",
+  "file-archive": "file-archive",
+  "file-audio": "file-audio",
+  "file-video": "file-video",
+  "file-pdf": "file-pdf",
+  spreadsheet: "table",
+  presentation: "display-play",
+  symlink: "symlink",
+  "folder-group": "folders",
+  "locate-folder": "folder-search",
+
+  // 预览与视图
+  "zoom-in": "magnifying-glass-plus",
+  "zoom-out": "magnifying-glass-minus",
+  "fit-page": "rect-magnifying-glass",
+  "expand-full": "corners-out",
+  "exit-full": "corners-in",
+  "rotate-ccw": "arrow-ccw",
+  "rotate-cw": "arrow-cw",
+  edit: "pencil",
+  "wrap-text": "paragraph",
+  forward: "arrow-right",
+  filter: "funnel",
+
+  // 布局与窗口
+  "toggle-left-panel": "layout-sidebar-left",
+  "toggle-right-panel": "layout-sidebar-right",
+  "open-with": "window",
+  browser: "globe",
+
+  // 媒体
+  "media-image": "image",
+  "media-play": "play",
+  "media-video": "video-camera",
+
+  // 连接器与接管
+  "mcp-server": "server",
+  "end-takeover": "plug-slash",
+  conversation: "comment",
+  "capability-package": "package",
+
   // 能力与来源
   tool: "wrench",
   "tool-terminal": "terminal",

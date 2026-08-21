@@ -34,7 +34,7 @@ describe("final deliverable list", () => {
 
     expect(html).toContain("aw-deliverable-card-pdf");
     expect(html).toContain('data-file-type="pdf"');
-    expect(html).toContain("lucide-file-type2");
+    expect(html).toContain("aw-icon--file-pdf");
     expect(html).toContain(">PDF</span>");
     expect(html).toContain("PDF 文件");
     expect(html).toContain("在右侧栏预览 交付版本.pdf");

@@ -1,17 +1,7 @@
 import "./AwakenSidebar.css";
+import { AwakenIcon } from "../AwakenIcon";
 import "./AwakenSidebar.demo.css";
 import { useEffect, useRef, useState } from "react";
-import {
-  CheckCheck,
-  ChevronsDownUp,
-  ChevronsUpDown,
-  FolderPlus,
-  ListChecks,
-  MessageCirclePlus,
-  Monitor,
-  Trash2,
-  X,
-} from "lucide-react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 import { AwakenNewTaskButton } from "../AwakenNewTaskButton";
@@ -87,16 +77,16 @@ export function AwakenSidebarDemo() {
         }}
       >
         {allProjectsExpanded ? (
-          <ChevronsDownUp size={13} strokeWidth={1.85} />
+          <AwakenIcon concept="collapse-all" size={14} />
         ) : (
-          <ChevronsUpDown size={13} strokeWidth={1.85} />
+          <AwakenIcon concept="expand-all" size={14} />
         )}
       </AwakenSidebarSectionAction>
       <AwakenSidebarSectionAction
         label="创建项目"
         onClick={() => setLastAction("已触发创建项目回调（Gallery 模拟）。")}
       >
-        <FolderPlus size={13} strokeWidth={1.85} />
+        <AwakenIcon concept="project-add" size={14} />
       </AwakenSidebarSectionAction>
     </span>
   );
@@ -133,7 +123,7 @@ export function AwakenSidebarDemo() {
               allEligibleConversationsSelected ? [] : eligibleConversationIds,
             )}
           >
-            <CheckCheck size={13} strokeWidth={1.85} />
+            <AwakenIcon concept="select-all" size={14} />
           </AwakenSidebarSectionAction>
           <AwakenSidebarSectionAction
             label={selectedConversationIdSet.size > 0
@@ -143,7 +133,7 @@ export function AwakenSidebarDemo() {
             disabled={selectedConversationIdSet.size === 0}
             onClick={() => setDialogMode("delete-conversations")}
           >
-            <Trash2 size={13} strokeWidth={1.85} />
+            <AwakenIcon concept="delete" size={14} />
           </AwakenSidebarSectionAction>
           <AwakenSidebarSectionAction
             label="退出批量管理"
@@ -152,7 +142,7 @@ export function AwakenSidebarDemo() {
               setSelectedConversationIds([]);
             }}
           >
-            <X size={13} strokeWidth={1.85} />
+            <AwakenIcon concept="close" size={14} />
           </AwakenSidebarSectionAction>
         </>
       ) : (
@@ -165,9 +155,9 @@ export function AwakenSidebarDemo() {
             }}
           >
             {conversationSectionExpanded ? (
-              <ChevronsDownUp size={13} strokeWidth={1.85} />
+              <AwakenIcon concept="collapse-all" size={14} />
             ) : (
-              <ChevronsUpDown size={13} strokeWidth={1.85} />
+              <AwakenIcon concept="expand-all" size={14} />
             )}
           </AwakenSidebarSectionAction>
           <AwakenSidebarSectionAction
@@ -179,13 +169,13 @@ export function AwakenSidebarDemo() {
               setConversationBatchMode(true);
             }}
           >
-            <ListChecks size={13} strokeWidth={1.85} />
+            <AwakenIcon concept="select-mode" size={14} />
           </AwakenSidebarSectionAction>
           <AwakenSidebarSectionAction
             label="新增对话"
             onClick={() => setLastAction("已触发新增对话回调（Gallery 模拟）。")}
           >
-            <MessageCirclePlus size={13} strokeWidth={1.85} />
+            <AwakenIcon concept="thread-new" size={14} />
           </AwakenSidebarSectionAction>
         </>
       )}
@@ -279,7 +269,7 @@ export function AwakenSidebarDemo() {
         <AwakenSelectableCard
           compact
           selected
-          icon={<Monitor size={15} strokeWidth={1.9} />}
+          icon={<AwakenIcon concept="theme-system" size={16} />}
           title="Local"
         />
       </div>

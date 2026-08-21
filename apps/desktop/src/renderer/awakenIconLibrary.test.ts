@@ -149,9 +149,11 @@ describe("光学与网格不变量", () => {
       const icon = getAwakenIcon(name);
       return icon.mode === "line" && icon.filled;
     });
-    // 停止是唯一需要实心的概念：描边版在 16px 下读起来像一个空框，
-    // 与「发送」的视觉重量不成对比。新增实心字形必须在这里显式登记。
-    expect(filled).toEqual(["stop"]);
+    // 只有两个概念需要实心：
+    // - stop：描边版在 16px 下读起来像一个空框，与「发送」的视觉重量不成对比；
+    // - play：播放三角是约定俗成的实心形，描边版会被读成「下一个」箭头。
+    // 新增实心字形必须在这里显式登记，避免实心层悄悄长大。
+    expect(filled).toEqual(["play", "stop"]);
   });
 
   it("品牌标记保留 authored geometry，并声明可读下限", () => {
@@ -180,8 +182,11 @@ describe("概念表", () => {
 });
 
 describe("越层守卫", () => {
-  it("图标层不依赖 lucide-react", () => {
-    const files = [...walk(path.join(DS_SRC, "icons")), ...walk(path.join(DS_SRC, "components", "AwakenIcon"))];
+  it("Design System 与 Desktop 全树都不再依赖 lucide-react", () => {
+    // 迁移已完成，因此守卫范围从图标层扩到全树：界面图形一律走 AwakenIcon。
+    // `lucide-react` 也已从 package.json 移除，所以这条同时是「装不上就 import 不了」
+    // 的双保险 —— 但保留断言，避免有人重新加回依赖。
+    const files = [...walk(DS_SRC), ...walk(DESKTOP_SRC)].filter((f) => !f.endsWith("awakenIconLibrary.test.ts"));
     expect(files.length).toBeGreaterThan(0);
     const offenders = files.filter((f) => /from\s+["']lucide-react["']/.test(readFileSync(f, "utf8")));
     expect(offenders.map((f) => path.relative(REPO_ROOT, f))).toEqual([]);

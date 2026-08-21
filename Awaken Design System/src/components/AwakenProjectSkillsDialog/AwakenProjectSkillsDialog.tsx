@@ -1,5 +1,5 @@
 import "./AwakenProjectSkillsDialog.css";
-import { Check, ChevronDown, Folder, Folders } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import {
   useEffect,
   useRef,
@@ -148,12 +148,7 @@ export function AwakenProjectSkillsDialog({
                     aria-expanded={folderPopoverOpen}
                     aria-haspopup="dialog"
                   >
-                    <Folders
-                      className="aw-project-skills-dialog__folder-summary-icon"
-                      size={16}
-                      strokeWidth={1.8}
-                      aria-hidden="true"
-                    />
+                    <AwakenIcon concept="folder-group" size={16} className="aw-project-skills-dialog__folder-summary-icon" />
                     <span className="aw-project-skills-dialog__folder-summary-count">
                       {projectFolders.length} 个项目文件夹
                     </span>
@@ -168,13 +163,7 @@ export function AwakenProjectSkillsDialog({
                         ? `当前：${selectedFolder.label || folderName(selectedFolder.path)}`
                         : `主：${primaryFolder.label || folderName(primaryFolder.path)}`}
                     </span>
-                    <ChevronDown
-                      className="aw-project-skills-dialog__folder-summary-chevron"
-                      data-open={folderPopoverOpen ? "true" : "false"}
-                      size={14}
-                      strokeWidth={1.8}
-                      aria-hidden="true"
-                    />
+                    <AwakenIcon concept="dropdown" size={14} className="aw-project-skills-dialog__folder-summary-chevron" />
                   </button>
                 }
                 content={
@@ -204,7 +193,7 @@ export function AwakenProjectSkillsDialog({
                         }}
                       >
                         <span className="aw-project-skills-dialog__folder-icon">
-                          <Folders size={15} strokeWidth={1.8} aria-hidden="true" />
+                          <AwakenIcon concept="folder-group" size={16} />
                         </span>
                         <span className="aw-project-skills-dialog__folder-copy">
                           <span className="aw-project-skills-dialog__folder-name-row">
@@ -216,7 +205,7 @@ export function AwakenProjectSkillsDialog({
                         <span className="aw-project-skills-dialog__folder-meta">
                           <span>{project.skills.length}</span>
                           {!selectedFolder ? (
-                            <Check size={14} strokeWidth={2} aria-hidden="true" />
+                            <AwakenIcon concept="step-done" size={14} />
                           ) : null}
                         </span>
                       </button>
@@ -241,7 +230,7 @@ export function AwakenProjectSkillsDialog({
                             }}
                           >
                             <span className="aw-project-skills-dialog__folder-icon">
-                              <Folder size={15} strokeWidth={1.8} aria-hidden="true" />
+                              <AwakenIcon concept="project" size={16} />
                             </span>
                             <span className="aw-project-skills-dialog__folder-copy">
                               <span className="aw-project-skills-dialog__folder-name-row">
@@ -258,7 +247,7 @@ export function AwakenProjectSkillsDialog({
                             <span className="aw-project-skills-dialog__folder-meta">
                               <span>{folderSkillCount}</span>
                               {selected ? (
-                                <Check size={14} strokeWidth={2} aria-hidden="true" />
+                                <AwakenIcon concept="step-done" size={14} />
                               ) : null}
                             </span>
                           </button>

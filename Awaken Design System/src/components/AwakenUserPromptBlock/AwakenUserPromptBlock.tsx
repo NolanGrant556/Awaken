@@ -1,4 +1,5 @@
 import "./AwakenUserPromptBlock.css";
+import { AwakenIcon } from "../AwakenIcon";
 import {
   Fragment,
   useEffect,
@@ -9,7 +10,7 @@ import {
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { FileText, Monitor, Package } from "lucide-react";
+
 import { AwakenCopyButton } from "../AwakenCopyButton";
 
 const collapsedAttachmentLimit = 3;
@@ -329,12 +330,7 @@ export function AwakenUserPromptBlock({
           />
         ) : (
           <div className="execution-prompt-bubble-file-card" aria-label={label}>
-            <FileText
-              className="execution-prompt-bubble-file-icon"
-              size={18}
-              strokeWidth={1.85}
-              aria-hidden="true"
-            />
+            <AwakenIcon concept="file-text" size={20} className="execution-prompt-bubble-file-icon" />
             <span className="execution-prompt-bubble-file-name aw-text-selectable">
               {label}
             </span>
@@ -367,17 +363,16 @@ export function AwakenUserPromptBlock({
 
   function renderToken(token: AwakenUserPromptToken) {
     const tokenType = token.type ?? "token";
-    const TokenIcon = tokenType === "capability" ? Monitor : Package;
+    const tokenConcept = tokenType === "capability" ? "theme-system" : "capability-package";
     return (
       <span
         className={`execution-prompt-bubble-token execution-prompt-bubble-token-${tokenType}`}
         title={token.title ?? token.label}
       >
-        <TokenIcon
-          className="execution-prompt-bubble-token-icon"
+        <AwakenIcon
+          concept={tokenConcept}
           size={14}
-          strokeWidth={1.9}
-          aria-hidden="true"
+          className="execution-prompt-bubble-token-icon"
         />
         <span className="execution-prompt-bubble-token-label aw-text-selectable">
           {token.label}

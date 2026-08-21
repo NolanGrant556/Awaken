@@ -1,5 +1,5 @@
 import "./AwakenMediaInspector.css";
-import { ExternalLink, FolderOpen, RotateCw, X } from "lucide-react";
+import { AwakenIcon } from "../AwakenIcon";
 import type { SyntheticEvent } from "react";
 import {
   awakenMediaMetadataLabel,
@@ -50,7 +50,7 @@ export function AwakenMediaInspector({
       <span>{unavailableLabel}</span>
       {onMediaError ? (
         <button type="button" onClick={onMediaError}>
-          <RotateCw size={15} aria-hidden="true" />
+          <AwakenIcon concept="rotate-cw" size={16} />
           重新加载
         </button>
       ) : null}
@@ -95,7 +95,7 @@ export function AwakenMediaInspector({
           {metadataLabel ? <small>{metadataLabel}</small> : null}
         </span>
         <button type="button" aria-label="关闭媒体查看器" onClick={onClose}>
-          <X size={17} strokeWidth={1.9} aria-hidden="true" />
+          <AwakenIcon concept="close" size={16} />
         </button>
       </header>
       <div className="aw-media-inspector__canvas">{content}</div>
@@ -108,13 +108,13 @@ export function AwakenMediaInspector({
               aria-label={localOpenLabel}
               onClick={onOpenExternal}
             >
-              <ExternalLink size={15} aria-hidden="true" />
+              <AwakenIcon concept="external-open" size={16} />
               打开
             </button>
           ) : null}
           {onReveal ? (
             <button type="button" aria-label={revealLabel} onClick={onReveal}>
-              <FolderOpen size={15} aria-hidden="true" />
+              <AwakenIcon concept="folder-expanded" size={16} />
               显示位置
             </button>
           ) : null}

@@ -1,6 +1,6 @@
 import "./AwakenProjectFoldersEditor.css";
+import { AwakenIcon } from "../AwakenIcon";
 import { useState } from "react";
-import { Folder, MoreHorizontal, Plus, X } from "lucide-react";
 import { AwakenDropdown } from "../AwakenDropdown";
 import type { ProjectFolderRow, ProjectFolderRowAction } from "../../types";
 
@@ -47,7 +47,7 @@ function FolderRow({
       data-busy={busy ? "true" : "false"}
     >
       <span className="aw-project-folders-editor__row-icon" aria-hidden="true">
-        <Folder size={16} strokeWidth={1.9} />
+        <AwakenIcon concept="project" size={16} />
       </span>
       {/* 只展示末段名字；完整路径留在原生 title 上，用于区分同名文件夹。 */}
       <span className="aw-project-folders-editor__row-label" title={folder.path}>
@@ -80,7 +80,7 @@ function FolderRow({
                 title={`${label} 更多操作`}
                 disabled={busy}
               >
-                <MoreHorizontal size={16} strokeWidth={1.9} />
+                <AwakenIcon concept="more-actions" size={16} />
               </button>
             }
           >
@@ -119,7 +119,7 @@ function FolderRow({
             disabled={busy}
             onClick={() => folder.onRemove?.(folder.path)}
           >
-            <X size={16} strokeWidth={1.9} />
+            <AwakenIcon concept="close" size={16} />
           </button>
         ) : null}
       </span>
@@ -165,7 +165,7 @@ export function AwakenProjectFoldersEditor({
           onClick={onAddFolder}
         >
           <span className="aw-project-folders-editor__add-icon" aria-hidden="true">
-            <Plus size={16} strokeWidth={2} />
+            <AwakenIcon concept="add" size={16} />
           </span>
           <span>{addLabel}</span>
         </button>

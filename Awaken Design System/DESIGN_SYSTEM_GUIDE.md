@@ -38,7 +38,7 @@ Clear space around the mark is one quarter of its height. Do not stretch, rotate
 - Chrome and helper copy must not go below `12px / 18px`.
 - Weight roles are regular `400`, medium `500`, semibold `600`, bold `650`, and heavy `700`; use the role token instead of local `700` / `800` / `820` / `850` values. `650` is the SF Pro optical target and falls back to `600` on other platforms.
 - Default icon size is `16px`; compact icons may use `14px`. Icons rendered through `AwakenIcon` accept only the five existing size tokens `12 / 14 / 16 / 20 / 24`.
-- Awaken's own line icons are drawn on a 16-unit grid and carry an intrinsic `1.25` stroke, because the stroke participates in optical normalisation and cannot be re-skinned without changing every icon's visual size. `--aw-icon-stroke: 1.75` remains only for the `lucide-react` call sites that have not been migrated yet. The icon contract lives in `README.md` under 图标库契约.
+- Awaken's own line icons are drawn on a 16-unit grid and carry an intrinsic `1.25` stroke, because the stroke participates in optical normalisation and cannot be re-skinned without changing every icon's visual size. All interface graphics go through `AwakenIcon`; `lucide-react` is no longer a dependency. The icon contract lives in `README.md` under 图标库契约.
 - Brand marks and filled status graphics keep their authored geometry and do not take part in optical normalisation.
 - Compact controls use a `6px` radius, default controls use `8px`, cards / popovers / panels use `12px`, and the composer surface uses `16px`.
 - Interactive neutral states must move through `--aw-bg-fill-light`, `--aw-bg-fill-main`, and `--aw-bg-fill-dark`.

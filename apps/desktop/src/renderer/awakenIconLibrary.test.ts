@@ -200,6 +200,41 @@ describe("越层守卫", () => {
   });
 });
 
+describe("CSS 不得覆盖图标描边", () => {
+  it("没有任何 CSS 规则给图标 svg 设置 stroke-width", () => {
+    // CSS 的 stroke-width 会盖掉 SVG 的同名呈现属性，因此一条
+    // `.foo svg { stroke-width: ... }` 就能把全套 1.25 静默改成别的值，
+    // 而注册表层的描边不变量测试完全看不到。迁移时真实踩过：
+    // 九条规则用 --aw-icon-stroke(1.75) 覆盖了新图标。
+    const cssFiles: string[] = [];
+    for (const root of [DS_SRC, DESKTOP_SRC]) {
+      for (const dir of [root]) {
+        const stack = [dir];
+        while (stack.length) {
+          const cur = stack.pop()!;
+          for (const entry of readdirSync(cur)) {
+            if (entry === "node_modules" || entry === "dist") continue;
+            const full = path.join(cur, entry);
+            if (statSync(full).isDirectory()) stack.push(full);
+            else if (entry.endsWith(".css")) cssFiles.push(full);
+          }
+        }
+      }
+    }
+    expect(cssFiles.length).toBeGreaterThan(0);
+    const offenders: string[] = [];
+    for (const file of cssFiles) {
+      const text = readFileSync(file, "utf8");
+      for (const m of text.matchAll(/([^{}]*svg[^{}]*)\{([^}]*)\}/g)) {
+        if (/\bstroke-width\s*:/.test(m[2])) {
+          offenders.push(`${path.relative(REPO_ROOT, file)}: ${m[1].trim().slice(0, 60)}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe("调用点守卫", () => {
   const sources = [...walk(DS_SRC), ...walk(DESKTOP_SRC)].filter((f) => !f.endsWith(".test.ts") && !f.endsWith(".test.tsx"));
 

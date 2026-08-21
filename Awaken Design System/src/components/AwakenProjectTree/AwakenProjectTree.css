@@ -188,7 +188,6 @@ body.aw-project-reordering * {
 .aw-project-row-icon svg,
 .aw-project-inline-chevron svg,
 .aw-project-row-menu-trigger svg {
-  stroke-width: var(--aw-icon-stroke);
 }
 
 .aw-project-row:hover .aw-project-row-icon,

@@ -335,7 +335,6 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
 .aw-workbench-inspector-toggle svg {
   width: var(--aw-icon-size-16);
   height: var(--aw-icon-size-16);
-  stroke-width: var(--aw-icon-stroke);
 }
 
 .workbench-chrome-icon:hover,
@@ -1966,7 +1965,6 @@ button.tool-trace-line:focus-visible {
 .assistant-mermaid-action svg {
   width: var(--aw-icon-size-14);
   height: var(--aw-icon-size-14);
-  stroke-width: var(--aw-icon-stroke);
 }
 
 .assistant-mermaid-action:hover,
@@ -2303,7 +2301,6 @@ button.tool-trace-line:focus-visible {
 .light-inspector-tab-icon svg {
   width: var(--aw-icon-size-16);
   height: var(--aw-icon-size-16);
-  stroke-width: var(--aw-icon-stroke);
 }
 
 .light-inspector-tab-meta {
@@ -2916,7 +2913,6 @@ button.tool-trace-line:focus-visible {
 .composer-bar-model-trigger-chevron {
   width: var(--aw-icon-size-14);
   height: var(--aw-icon-size-14);
-  stroke-width: var(--aw-icon-stroke);
 }
 
 .composer-bar-model-trigger-label {
@@ -3258,7 +3254,6 @@ button.tool-trace-line:focus-visible {
 .composer-bar-model-option-icon svg {
   width: var(--aw-icon-size-14);
   height: var(--aw-icon-size-14);
-  stroke-width: var(--aw-icon-stroke);
 }
 
 .composer-bar-model-option-icon .aw-provider-logo {

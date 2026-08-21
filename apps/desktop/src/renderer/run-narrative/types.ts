@@ -272,7 +272,8 @@ export type RunNarrativeItem =
   | {
       /**
        * Live-only provider reconnect row at the current execution cursor.
-       * Never journaled; recovered and run terminal strip these items.
+       * One stable identity per phase; recovered, run terminal, and resumed
+       * model output strip these items. Never journaled.
        */
       kind: "providerReconnect";
       id: string;

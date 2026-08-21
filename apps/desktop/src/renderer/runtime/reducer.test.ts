@@ -3930,4 +3930,177 @@ describe("runtime reducer run plan snapshots", () => {
     expect(failed.providerReconnectAttempts).toEqual([]);
     expect(failed.phase).toBe("error");
   });
+
+  it("upserts the same reconnect phase instead of recording every backoff tick", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "继续当前任务" },
+      {
+        type: "run/created",
+        run: makeRun({ status: "running" }),
+      },
+      runEvent({
+        type: "AWAKEN_PROVIDER_RECONNECT",
+        runId: "run-1",
+        seq: 11,
+        providerReconnect: {
+          phase: "waiting_for_network",
+          attempt: 1,
+          maxAttempts: 0,
+          detail: "tls handshake eof",
+        },
+      }),
+      runEvent({
+        type: "AWAKEN_PROVIDER_RECONNECT",
+        runId: "run-1",
+        seq: 12,
+        providerReconnect: {
+          phase: "waiting_for_network",
+          attempt: 4,
+          maxAttempts: 0,
+          detail: "error sending request",
+        },
+      }),
+    ]);
+
+    expect(state.providerReconnectAttempts).toEqual([
+      {
+        phase: "waiting_for_network",
+        attempt: 4,
+        maxAttempts: 0,
+        detail: "error sending request",
+        resetInProgress: undefined,
+      },
+    ]);
+    expect(
+      state.narrative.committedItems.filter(
+        (item) => item.kind === "providerReconnect",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("keeps in-session live reconnect rows after transcript replay of a running run", () => {
+    const live = dispatch([
+      { type: "run/requested", prompt: "继续当前任务" },
+      {
+        type: "run/created",
+        run: makeRun({ status: "running" }),
+      },
+      runEvent({
+        type: "TOOL_CALL_START",
+        runId: "run-1",
+        toolCallId: "tool-1",
+        toolCallName: "Bash",
+      }),
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        runId: "run-1",
+        toolCallId: "tool-1",
+        toolCallName: "Bash",
+        toolStatus: "succeeded",
+      }),
+      runEvent({
+        type: "AWAKEN_PROVIDER_RECONNECT",
+        runId: "run-1",
+        seq: 80,
+        providerReconnect: {
+          phase: "waiting_for_network",
+          attempt: 2,
+          maxAttempts: 0,
+          detail: "tls handshake eof",
+        },
+      }),
+    ]);
+
+    const replayed = reduceRuntimeState(live, {
+      type: "run/replayBatch",
+      actions: [
+        {
+          type: "run/threadReplayStarted",
+          threadId: "thread-1",
+          runId: "run-1",
+        },
+        { type: "run/requested", prompt: "继续当前任务" },
+        {
+          type: "run/created",
+          run: makeRun({ status: "running" }),
+        },
+        runEvent({
+          type: "TOOL_CALL_START",
+          runId: "run-1",
+          toolCallId: "tool-1",
+          toolCallName: "Bash",
+        }),
+        runEvent({
+          type: "TOOL_CALL_RESULT",
+          runId: "run-1",
+          toolCallId: "tool-1",
+          toolCallName: "Bash",
+          toolStatus: "succeeded",
+        }),
+      ],
+    });
+
+    const reconnects = replayed.narrative.committedItems.filter(
+      (item) => item.kind === "providerReconnect",
+    );
+    expect(reconnects).toEqual([
+      expect.objectContaining({
+        phase: "waiting_for_network",
+        attempt: 2,
+        detail: "tls handshake eof",
+      }),
+    ]);
+    expect(replayed.providerReconnectAttempts).toEqual([
+      expect.objectContaining({
+        phase: "waiting_for_network",
+        attempt: 2,
+      }),
+    ]);
+    expect(replayed.narrative.replayedItemIds).not.toContain(reconnects[0]?.id);
+  });
+
+  it("does not restore live reconnect rows when transcript replay ends the run", () => {
+    const live = dispatch([
+      { type: "run/requested", prompt: "继续当前任务" },
+      {
+        type: "run/created",
+        run: makeRun({ status: "running" }),
+      },
+      runEvent({
+        type: "AWAKEN_PROVIDER_RECONNECT",
+        runId: "run-1",
+        seq: 81,
+        providerReconnect: {
+          phase: "reconnecting",
+          attempt: 2,
+          maxAttempts: 5,
+          detail: "stream eof",
+        },
+      }),
+    ]);
+
+    const replayed = reduceRuntimeState(live, {
+      type: "run/replayBatch",
+      actions: [
+        {
+          type: "run/threadReplayStarted",
+          threadId: "thread-1",
+          runId: "run-1",
+        },
+        { type: "run/requested", prompt: "继续当前任务" },
+        {
+          type: "run/created",
+          run: makeRun({ status: "finished" }),
+        },
+        runEvent({ type: "RUN_FINISHED", runId: "run-1" }),
+      ],
+    });
+
+    expect(
+      replayed.narrative.committedItems.some(
+        (item) => item.kind === "providerReconnect",
+      ),
+    ).toBe(false);
+    expect(replayed.providerReconnectAttempts).toEqual([]);
+  });
 });

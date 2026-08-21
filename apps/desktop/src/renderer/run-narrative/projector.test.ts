@@ -1974,6 +1974,144 @@ describe("run plan terminal projection (RP-D03)", () => {
     });
   });
 
+  it("upserts the same provider reconnect phase instead of stacking every backoff tick", () => {
+    let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      type: "AWAKEN_PROVIDER_RECONNECT",
+      runId: "run-1",
+      seq: 11,
+      providerReconnect: {
+        phase: "waiting_for_network",
+        attempt: 1,
+        maxAttempts: 0,
+        detail: "tls handshake eof",
+      },
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_PROVIDER_RECONNECT",
+      runId: "run-1",
+      seq: 12,
+      providerReconnect: {
+        phase: "waiting_for_network",
+        attempt: 3,
+        maxAttempts: 0,
+        detail: "error sending request",
+      },
+    });
+
+    const reconnects = state.committedItems.filter(
+      (item) => item.kind === "providerReconnect",
+    );
+    expect(reconnects).toEqual([
+      expect.objectContaining({
+        id: "provider-reconnect:run-1:waiting_for_network",
+        phase: "waiting_for_network",
+        attempt: 3,
+        maxAttempts: 0,
+        detail: "error sending request",
+      }),
+    ]);
+  });
+
+  it("updates reconnecting attempt in place and stacks a later waiting phase", () => {
+    let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      type: "AWAKEN_PROVIDER_RECONNECT",
+      runId: "run-1",
+      seq: 21,
+      providerReconnect: {
+        phase: "reconnecting",
+        attempt: 1,
+        maxAttempts: 5,
+        detail: "stream eof",
+      },
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_PROVIDER_RECONNECT",
+      runId: "run-1",
+      seq: 22,
+      providerReconnect: {
+        phase: "reconnecting",
+        attempt: 5,
+        maxAttempts: 5,
+        detail: "tls handshake eof",
+      },
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_PROVIDER_RECONNECT",
+      runId: "run-1",
+      seq: 23,
+      providerReconnect: {
+        phase: "waiting_for_network",
+        attempt: 2,
+        maxAttempts: 0,
+        detail: "error sending request",
+      },
+    });
+
+    expect(
+      state.committedItems.filter((item) => item.kind === "providerReconnect"),
+    ).toEqual([
+      expect.objectContaining({
+        id: "provider-reconnect:run-1:reconnecting",
+        phase: "reconnecting",
+        attempt: 5,
+        detail: "tls handshake eof",
+      }),
+      expect.objectContaining({
+        id: "provider-reconnect:run-1:waiting_for_network",
+        phase: "waiting_for_network",
+        attempt: 2,
+        detail: "error sending request",
+      }),
+    ]);
+  });
+
+  it("clears live reconnect rows when model output resumes after a missed recovered", () => {
+    let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      type: "AWAKEN_PROVIDER_RECONNECT",
+      runId: "run-1",
+      seq: 31,
+      providerReconnect: {
+        phase: "waiting_for_network",
+        attempt: 2,
+        maxAttempts: 0,
+        detail: "tls handshake eof",
+      },
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "REASONING_MESSAGE_CONTENT",
+      runId: "run-1",
+      messageId: "think-resume",
+      delta: "back online",
+    });
+    expect(
+      state.committedItems.some((item) => item.kind === "providerReconnect"),
+    ).toBe(false);
+    expect(state.activeItem).toMatchObject({
+      kind: "thinking",
+      text: "back online",
+    });
+  });
+
+  it("clears live reconnect rows when the reconnect payload is missing", () => {
+    let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      type: "AWAKEN_PROVIDER_RECONNECT",
+      runId: "run-1",
+      providerReconnect: {
+        phase: "waiting_for_network",
+        attempt: 1,
+        maxAttempts: 0,
+      },
+    });
+    const cleared = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_PROVIDER_RECONNECT",
+      runId: "run-1",
+      seq: 41,
+    });
+    expect(
+      cleared.committedItems.some((item) => item.kind === "providerReconnect"),
+    ).toBe(false);
+  });
+
   it("appends stacked provider reconnect rows after already committed work", () => {
     let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
       type: "TOOL_CALL_START",

@@ -5,6 +5,7 @@ export type {
   AguiEvent,
   AguiEventType,
   AguiModelUsageRecord,
+  AguiProviderReconnect,
   AguiRunPlanItem,
 	InstructionSnapshotSummary,
 } from "../../shared/agui";

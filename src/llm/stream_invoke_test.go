@@ -40,6 +40,31 @@ func TestStreamInvokeOpenAITextDeltas(t *testing.T) {
 	}
 }
 
+func TestStreamInvokeOpenAICleanEOFBeforeTerminalIsDisconnected(t *testing.T) {
+	server := newStreamServer(t, "/chat/completions", []string{
+		`data: {"choices":[{"delta":{"content":"partial"}}]}`,
+	})
+	defer server.Close()
+
+	resp, err := StreamInvoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "hi"}, nil)
+	var disconnected *StreamDisconnectedError
+	if !errors.As(err, &disconnected) {
+		t.Fatalf("clean EOF before a terminal marker must disconnect, response=%+v err=%v", resp, err)
+	}
+}
+
+func TestStreamInvokeOpenAIFinishReasonCompletesWithoutDoneSentinel(t *testing.T) {
+	server := newStreamServer(t, "/chat/completions", []string{
+		`data: {"choices":[{"delta":{"content":"complete"},"finish_reason":"stop"}]}`,
+	})
+	defer server.Close()
+
+	resp, err := StreamInvoke(context.Background(), testConfig(server.URL), Request{UserPrompt: "hi"}, nil)
+	if err != nil || resp == nil || resp.Content != "complete" {
+		t.Fatalf("finish_reason is an explicit terminal signal, response=%+v err=%v", resp, err)
+	}
+}
+
 func TestStreamInvokeOpenAIReasoningContentDeltas(t *testing.T) {
 	server := newStreamServer(t, "/chat/completions", []string{
 		`data: {"choices":[{"delta":{"reasoning_content":"Let "}}]}`,
@@ -509,6 +534,8 @@ func TestStreamInvokeAnthropicThinkingAndTextDeltas(t *testing.T) {
 		`data: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"hmm"}}`,
 		`event: content_block_delta`,
 		`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"done"}}`,
+		`event: message_stop`,
+		`data: {"type":"message_stop"}`,
 	})
 	defer server.Close()
 

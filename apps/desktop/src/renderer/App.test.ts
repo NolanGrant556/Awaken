@@ -442,7 +442,7 @@ describe("activity batch presentation", () => {
     });
   });
 
-  it("flattens exploring actions and stops at reasoning, visible copy, gate, media and final boundaries", () => {
+  it("flattens exploring actions and stops at reasoning, visible copy, reconnect, gate, media and final boundaries", () => {
     const exploring: RunNarrativeItem = {
       kind: "exploring",
       id: "exploring:1",
@@ -456,6 +456,14 @@ describe("activity batch presentation", () => {
       { kind: "thinking", id: "thought:1", text: "next", status: "done" },
       { kind: "answer", id: "answer:1", markdown: "progress", status: "active", isFinal: false },
       { kind: "hint", id: "hint:1", text: "waiting" },
+      {
+        kind: "providerReconnect",
+        id: "provider-reconnect:1",
+        phase: "waiting_for_network",
+        attempt: 1,
+        maxAttempts: 0,
+        detail: "tls handshake eof",
+      },
       {
         kind: "mediaGeneration",
         id: "media:1",
@@ -474,8 +482,16 @@ describe("activity batch presentation", () => {
     });
 
     expect(segments[0]).toMatchObject({ kind: "activityBatch", actionCount: 2, failedCount: 1 });
-    expect(segments.slice(1, 7).map((segment) => segment.kind)).toEqual(["item", "item", "item", "item", "item", "item"]);
-    expect(segments[7]).toMatchObject({ kind: "item", item: { id: "tool:c" } });
+    expect(segments.slice(1, 8).map((segment) => segment.kind)).toEqual([
+      "item",
+      "item",
+      "item",
+      "item",
+      "item",
+      "item",
+      "item",
+    ]);
+    expect(segments[8]).toMatchObject({ kind: "item", item: { id: "tool:c" } });
   });
 
   it("creates deterministic command, check, skill and error summaries", () => {
@@ -3995,6 +4011,41 @@ describe("App workbench presentation", () => {
         isBusy: true,
       }),
     ).toEqual([prompt]);
+  });
+
+  it("keeps live provider reconnect rows at the current cursor before trailing thinking", () => {
+    const prompt: RunNarrativeItem = {
+      kind: "prompt",
+      id: "prompt:draft:1",
+      text: "Start the run",
+    };
+    const tool: RunNarrativeItem = {
+      kind: "tool",
+      id: "tool:run-1:bash-1",
+      title: "运行检查",
+      status: "done",
+    };
+    const reconnect: RunNarrativeItem = {
+      kind: "providerReconnect",
+      id: "provider-reconnect:run-1:1",
+      phase: "reconnecting",
+      attempt: 1,
+      maxAttempts: 5,
+      detail: "stream eof",
+    };
+    const planning: RunNarrativeItem = {
+      kind: "planning",
+      id: "planning:run-1",
+      text: "Planning next moves",
+      status: "active",
+    };
+
+    expect(
+      projectVisibleNarrativeItems({
+        items: [prompt, tool, reconnect, planning],
+        isBusy: true,
+      }),
+    ).toEqual([prompt, tool, reconnect, planning]);
   });
 
   it("shows turn markers once the run stage has at least three turns", () => {

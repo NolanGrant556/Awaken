@@ -3,7 +3,10 @@ export {
   appendRunRequestedNarrative,
   createInitialRunNarrativeState,
   createRunRequestedNarrative,
+  discardInProgressModelOutput,
+  eventResumesAfterProviderReconnect,
   projectAguiEventToNarrative,
+  restoreLiveProviderReconnectItems,
 } from "./projector";
 
 export type {

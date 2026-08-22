@@ -32,6 +32,7 @@ import {
   awakenSubagentStatusLabels,
   AwakenProjectFoldersEditor as ProjectFoldersEditor,
   AwakenProviderLogo,
+  AwakenReconnectStatus as ReconnectStatus,
   AwakenSelectableCard as SelectableCard,
   AwakenSidebar as Sidebar,
   AwakenSidebarSectionAction as SidebarSectionAction,
@@ -6381,6 +6382,15 @@ export function App() {
         </div>
       );
     }
+    if (item.kind === "providerReconnect") {
+      return (
+        <ReconnectStatus
+          key={key}
+          title={providerReconnectTitle(item)}
+          detail={item.detail}
+        />
+      );
+    }
     if (item.kind === "runPlan") {
       return (
         <div key={key} className="narrative-run-plan">
@@ -6722,6 +6732,18 @@ export function App() {
       return null;
     }
     return null;
+  }
+
+  function providerReconnectTitle(
+    item: Extract<RunNarrativeItem, { kind: "providerReconnect" }>,
+  ): string {
+    if (item.phase === "waiting_for_network") {
+      return "正在等待网络";
+    }
+    if (item.maxAttempts > 0) {
+      return `正在重新连接 ${item.attempt}/${item.maxAttempts}`;
+    }
+    return "正在重新连接";
   }
 
   function renderTurnBodySegment(

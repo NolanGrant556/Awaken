@@ -177,7 +177,7 @@ frame cursor = runtime/semantic event sequence * 16 + frame sub-index
 
 ## 6. Live 与 transcript 一致性
 
-订阅先输出历史，再接 active channel。run 执行期间“transcript snapshot + after_cursor SSE”必须做到每个文本、工具、terminal 和 `AWAKEN_INSTRUCTION_SNAPSHOT` frame 恰好一次。live 与重放都通过同一 semantic projector；任何只修 live mapper、不修 journal projector 的变化都不完整。
+订阅先输出历史，再接 active channel。run 执行期间“transcript snapshot + after_cursor SSE”必须做到每个文本、工具、terminal 和 `AWAKEN_INSTRUCTION_SNAPSHOT` frame 恰好一次。live 与重放都通过同一 semantic projector；任何只修 live mapper、不修 journal projector 的变化都不完整。唯一例外是 live-only `AWAKEN_PROVIDER_RECONNECT`：它不在 transcript snapshot 中，重连订阅后只能靠后续 live 帧恢复，不得从 journal 补造。
 
 用户 prompt 从 run metadata 重建，不由 SemanticKindUserMessage 产生重复 AG-UI frame。terminal、artifact、tool pairing 也必须按相同 record identity 去重。
 
@@ -186,6 +186,7 @@ frame cursor = runtime/semantic event sequence * 16 + frame sub-index
 - 无效 cursor 按 0 处理；consumer 应保存最近成功处理的 `id`。
 - run 不存在返回 404；建立 stream 后客户端断开由 request context 终止订阅。
 - runtime 重启后的耐久恢复通过 transcript/projector，不保证恢复进程内 active channel。
+- Desktop SSE 客户端在 run 未收到 `RUN_FINISHED`/`RUN_ERROR` 前持续重连，退避上限 10 秒；只有 `run_not_found`/404 才把订阅收成失败。这与 02 域的 provider 网络等待/流重试不是同一条链。
 - 未知事件仍可通过 `AWAKEN_UNKNOWN_EVENT` 传输；不得中止整个 stream。
 
 ## 8. 验证依据

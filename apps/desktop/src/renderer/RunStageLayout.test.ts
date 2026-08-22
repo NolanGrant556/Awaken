@@ -192,6 +192,18 @@ describe("RunStage layout", () => {
     expect(appSource).toContain('<ComposerBar\n                                  value={composerValue}');
   });
 
+  it("renders provider reconnect as a narrative item instead of a timer chrome slot", () => {
+    const appSource = readFileSync(
+      new URL("./App.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(appSource).toContain('if (item.kind === "providerReconnect")');
+    expect(appSource).toContain("<ReconnectStatus");
+    expect(appSource).not.toContain("renderProviderReconnectStatus");
+    expect(appSource).not.toContain("isLatestPrompt\n                                      ? renderProviderReconnectStatus()");
+  });
+
   it("renders subagent detail through RunStage overlay instead of the narrative item", () => {
     const appSource = readFileSync(
       new URL("./App.tsx", import.meta.url),

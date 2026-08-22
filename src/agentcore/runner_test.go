@@ -2366,6 +2366,132 @@ func TestRunnerRetriesTransientLLMStatusWithoutRetryingPermanentFailure(t *testi
 	}
 }
 
+func TestRunnerKeepsTurnAliveAcrossConnectionLoss(t *testing.T) {
+	var events []AwakenEvent
+	emitter := newRunEventEmitter("thread-reconnect", EventSinkFunc(func(event AwakenEvent) {
+		events = append(events, event)
+	}))
+	runner := NewRunner(testAgentConfig("http://unused", 2), convcontext.NewConversation(nil), nil)
+	runner.llmRetrySleep = func(context.Context, time.Duration) error { return nil }
+	calls := 0
+	response, err := runner.streamLLMWithTransientRetry(context.Background(), emitter, func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		calls++
+		if calls < 4 {
+			return nil, &llm.TransportError{Reason: "tls handshake eof"}
+		}
+		return &llm.Response{Content: "continued"}, nil
+	})
+	if err != nil || response == nil || response.Content != "continued" || calls != 4 {
+		t.Fatalf("connection loss must keep retrying, calls=%d response=%+v err=%v", calls, response, err)
+	}
+	waiting := 0
+	recovered := 0
+	for _, event := range events {
+		if event.Type != ProviderReconnectEventType || event.ProviderReconnect == nil {
+			continue
+		}
+		if event.ProviderReconnect.Phase == ProviderReconnectWaiting {
+			waiting++
+			if event.ProviderReconnect.Detail != "tls handshake eof" {
+				t.Fatalf("reconnect detail leaked or missing: %+v", event.ProviderReconnect)
+			}
+		}
+		if event.ProviderReconnect.Phase == ProviderReconnectRecovered {
+			recovered++
+		}
+	}
+	if waiting != 3 || recovered != 1 {
+		t.Fatalf("expected 3 waiting + recovered events, waiting=%d recovered=%d events=%+v", waiting, recovered, events)
+	}
+}
+
+func TestRunnerRetriesStreamDisconnectBeforeToolStart(t *testing.T) {
+	var events []AwakenEvent
+	emitter := newRunEventEmitter("thread-stream", EventSinkFunc(func(event AwakenEvent) {
+		events = append(events, event)
+	}))
+	runner := NewRunner(testAgentConfig("http://unused", 2), convcontext.NewConversation(nil), nil)
+	runner.llmRetrySleep = func(context.Context, time.Duration) error { return nil }
+	calls := 0
+	response, err := runner.streamLLMWithTransientRetry(context.Background(), emitter, func(_ context.Context, current *runEventEmitter) (*llm.Response, error) {
+		calls++
+		if calls == 1 {
+			current.onLLMDelta("partial", false)
+			return nil, &llm.StreamDisconnectedError{Reason: "stream eof"}
+		}
+		return &llm.Response{Content: "fresh"}, nil
+	})
+	if err != nil || response == nil || response.Content != "fresh" || calls != 2 {
+		t.Fatalf("stream disconnect before tools must retry, calls=%d response=%+v err=%v", calls, response, err)
+	}
+	if emitter.hasEphemeralStreamOutput() {
+		t.Fatal("failed partial stream must be discarded before retry")
+	}
+	var retryEvent *AwakenEvent
+	for index := range events {
+		if events[index].Type == ProviderReconnectEventType && events[index].ProviderReconnect != nil &&
+			events[index].ProviderReconnect.Phase == ProviderReconnectRetrying {
+			retryEvent = &events[index]
+		}
+	}
+	if retryEvent == nil || !retryEvent.ProviderReconnect.ResetInProgress || retryEvent.ProviderReconnect.Attempt != 1 {
+		t.Fatalf("expected reconnecting event with reset, got %+v", retryEvent)
+	}
+}
+
+func TestRunnerGivesUpAfterBoundedStreamDisconnects(t *testing.T) {
+	var events []AwakenEvent
+	emitter := newRunEventEmitter("thread-stream-limit", EventSinkFunc(func(event AwakenEvent) {
+		events = append(events, event)
+	}))
+	runner := NewRunner(testAgentConfig("http://unused", 2), convcontext.NewConversation(nil), nil)
+	runner.llmRetrySleep = func(context.Context, time.Duration) error { return nil }
+	calls := 0
+	_, err := runner.streamLLMWithTransientRetry(context.Background(), emitter, func(_ context.Context, current *runEventEmitter) (*llm.Response, error) {
+		calls++
+		if calls == maxTransientLLMRetries+1 {
+			current.onLLMDelta("final partial output", false)
+		}
+		return nil, &llm.StreamDisconnectedError{Reason: "stream eof"}
+	})
+	if err == nil || calls != maxTransientLLMRetries+1 {
+		t.Fatalf("bounded stream disconnect must stop after %d retries, calls=%d err=%v", maxTransientLLMRetries, calls, err)
+	}
+	if emitter.hasEphemeralStreamOutput() {
+		t.Fatal("the final failed attempt must discard unpersisted model output")
+	}
+	var finalReset *ProviderReconnectStatus
+	for _, event := range events {
+		if event.Type == ProviderReconnectEventType &&
+			event.ProviderReconnect != nil &&
+			event.ProviderReconnect.Phase == ProviderReconnectRetrying &&
+			event.ProviderReconnect.ResetInProgress {
+			finalReset = event.ProviderReconnect
+		}
+	}
+	if finalReset == nil || finalReset.Attempt != maxTransientLLMRetries {
+		t.Fatalf("final failure must emit a reset frame before terminal, got %+v", finalReset)
+	}
+}
+
+func TestRunnerDoesNotRetryAfterToolStreamStarts(t *testing.T) {
+	emitter := newRunEventEmitter("thread-tools", EventSinkFunc(func(AwakenEvent) {}))
+	runner := NewRunner(testAgentConfig("http://unused", 2), convcontext.NewConversation(nil), nil)
+	runner.llmRetrySleep = func(context.Context, time.Duration) error {
+		t.Fatal("tool-stream failures must not sleep/retry")
+		return nil
+	}
+	calls := 0
+	_, err := runner.streamLLMWithTransientRetry(context.Background(), emitter, func(_ context.Context, current *runEventEmitter) (*llm.Response, error) {
+		calls++
+		current.onLLMStreamEvent(llm.StreamEvent{Type: llm.StreamEventToolCallStart})
+		return nil, &llm.TransportError{Reason: "connection reset"}
+	})
+	if err == nil || calls != 1 {
+		t.Fatalf("tool stream start must block retry, calls=%d err=%v", calls, err)
+	}
+}
+
 func TestRunEventEmitterRunErroredTransportErrorDoesNotLeakURL(t *testing.T) {
 	var gotEvents []AwakenEvent
 	emitter := newRunEventEmitter("thread-test", EventSinkFunc(func(event AwakenEvent) {

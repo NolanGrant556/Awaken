@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendRunRequestedNarrative,
   createInitialRunNarrativeState,
   projectAguiEventToNarrative,
 } from "./projector";
@@ -2015,6 +2016,45 @@ describe("run plan terminal projection (RP-D03)", () => {
       kind: "providerReconnect",
       phase: "waiting_for_network",
       detail: "tls handshake eof",
+    });
+  });
+
+  it("restores initial planning behind provider reconnect after RUN_STARTED commits it", () => {
+    let state = appendRunRequestedNarrative(
+      createInitialRunNarrativeState(),
+      "check provider recovery",
+      undefined,
+      "run-1",
+    );
+    state = projectAguiEventToNarrative(state, {
+      type: "RUN_STARTED",
+      runId: "run-1",
+    });
+    expect(state.activeItem).toBeUndefined();
+    expect(state.committedItems.at(-1)).toMatchObject({
+      kind: "planning",
+      status: "done",
+    });
+
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_PROVIDER_RECONNECT",
+      runId: "run-1",
+      providerReconnect: {
+        phase: "waiting_for_network",
+        attempt: 1,
+        maxAttempts: 0,
+        detail: "error sending request",
+      },
+    });
+
+    expect(state.committedItems.at(-1)).toMatchObject({
+      kind: "providerReconnect",
+      phase: "waiting_for_network",
+    });
+    expect(state.activeItem).toMatchObject({
+      kind: "planning",
+      id: "planning:run-1",
+      status: "active",
     });
   });
 

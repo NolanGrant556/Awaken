@@ -575,11 +575,29 @@ export function restoreLiveProviderReconnectItems(
   if (items.length === 0) {
     return state;
   }
+  const next = reactivateTrailingPlanningForProviderReconnect(state);
   const committedItems = [
-    ...state.committedItems.filter((item) => item.kind !== "providerReconnect"),
+    ...next.committedItems.filter((item) => item.kind !== "providerReconnect"),
     ...items,
   ];
-  return { ...state, committedItems };
+  return { ...next, committedItems };
+}
+
+function reactivateTrailingPlanningForProviderReconnect(
+  state: RunNarrativeState,
+): RunNarrativeState {
+  if (state.activeItem || state.committedItems.length === 0) {
+    return state;
+  }
+  const trailingItem = state.committedItems.at(-1);
+  if (trailingItem?.kind !== "planning") {
+    return state;
+  }
+  return {
+    ...state,
+    committedItems: state.committedItems.slice(0, -1),
+    activeItem: { ...trailingItem, status: "active" },
+  };
 }
 
 function projectProviderReconnect(
@@ -597,9 +615,10 @@ function projectProviderReconnect(
     return state;
   }
 
-  const next = payload.resetInProgress
+  const reset = payload.resetInProgress
     ? discardInProgressModelOutput(state, event)
     : state;
+  const next = reactivateTrailingPlanningForProviderReconnect(reset);
   const detail = payload.detail?.trim();
   const item: RunNarrativeItem = {
     kind: "providerReconnect",

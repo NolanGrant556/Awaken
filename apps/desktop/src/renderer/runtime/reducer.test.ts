@@ -4059,6 +4059,72 @@ describe("runtime reducer run plan snapshots", () => {
     expect(replayed.narrative.replayedItemIds).not.toContain(reconnects[0]?.id);
   });
 
+  it("does not restore a reconnect row when newer replayed output proves recovery", () => {
+    const live = dispatch([
+      { type: "run/requested", prompt: "继续当前任务" },
+      {
+        type: "run/created",
+        run: makeRun({ status: "running" }),
+      },
+      runEvent({
+        type: "TOOL_CALL_RESULT",
+        runId: "run-1",
+        toolCallId: "tool-1",
+        toolCallName: "Bash",
+        toolStatus: "succeeded",
+        timestamp: 100,
+      }),
+      runEvent({
+        type: "AWAKEN_PROVIDER_RECONNECT",
+        runId: "run-1",
+        timestamp: 200,
+        providerReconnect: {
+          phase: "waiting_for_network",
+          attempt: 2,
+          maxAttempts: 0,
+        },
+      }),
+    ]);
+
+    const replayed = reduceRuntimeState(live, {
+      type: "run/replayBatch",
+      actions: [
+        {
+          type: "run/threadReplayStarted",
+          threadId: "thread-1",
+          runId: "run-1",
+        },
+        { type: "run/requested", prompt: "继续当前任务" },
+        {
+          type: "run/created",
+          run: makeRun({ status: "running" }),
+        },
+        runEvent({
+          type: "TOOL_CALL_RESULT",
+          runId: "run-1",
+          toolCallId: "tool-1",
+          toolCallName: "Bash",
+          toolStatus: "succeeded",
+          timestamp: 100,
+        }),
+        runEvent({
+          type: "TEXT_MESSAGE_CONTENT",
+          runId: "run-1",
+          messageId: "resumed",
+          delta: "provider recovered while this thread was away",
+          timestamp: 300,
+        }),
+      ],
+    });
+
+    expect(
+      replayed.narrative.committedItems.some(
+        (item) => item.kind === "providerReconnect",
+      ),
+    ).toBe(false);
+    expect(replayed.providerReconnectAttempts).toEqual([]);
+  });
+
   it("does not restore live reconnect rows when transcript replay ends the run", () => {
     const live = dispatch([
       { type: "run/requested", prompt: "继续当前任务" },

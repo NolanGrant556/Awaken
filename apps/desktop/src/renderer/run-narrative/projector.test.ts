@@ -1941,6 +1941,50 @@ describe("run plan terminal projection (RP-D03)", () => {
     });
   });
 
+  it("discards reasoning already moved behind an in-progress answer", () => {
+    let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      type: "REASONING_MESSAGE_CONTENT",
+      runId: "run-1",
+      messageId: "think-mixed",
+      delta: "partial reasoning",
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "TEXT_MESSAGE_CONTENT",
+      runId: "run-1",
+      messageId: "answer-mixed",
+      delta: "partial answer",
+    });
+    expect(state.committedItems.at(-1)).toMatchObject({
+      kind: "thinking",
+      text: "partial reasoning",
+    });
+    expect(state.activeItem).toMatchObject({
+      kind: "answer",
+      markdown: "partial answer",
+    });
+
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_PROVIDER_RECONNECT",
+      runId: "run-1",
+      providerReconnect: {
+        phase: "reconnecting",
+        attempt: 1,
+        maxAttempts: 5,
+        resetInProgress: true,
+      },
+    });
+
+    expect(
+      state.committedItems.some(
+        (item) => item.kind === "thinking" || item.kind === "answer",
+      ),
+    ).toBe(false);
+    expect(state.activeItem).toMatchObject({
+      kind: "planning",
+      status: "active",
+    });
+  });
+
   it("keeps thinking when provider reconnect does not reset in-progress output", () => {
     let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
       type: "REASONING_START",

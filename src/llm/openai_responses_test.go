@@ -111,6 +111,25 @@ func TestStreamOpenAIResponsesNormalizesEvents(t *testing.T) {
 	}
 }
 
+func TestStreamOpenAIResponsesCleanEOFBeforeTerminalIsDisconnected(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`data: {"type":"response.output_text.delta","delta":"partial"}` + "\n\n"))
+	}))
+	defer server.Close()
+
+	resp, err := StreamInvokeWithObserver(
+		context.Background(),
+		Config{APIKey: "test", BaseURL: server.URL, Model: "gpt-test", Protocol: ProtocolOpenAIResponses},
+		Request{UserPrompt: "hi"},
+		StreamObserver{},
+	)
+	var disconnected *StreamDisconnectedError
+	if !errors.As(err, &disconnected) {
+		t.Fatalf("clean EOF before response.completed/[DONE] must disconnect, response=%+v err=%v", resp, err)
+	}
+}
+
 func TestUnknownProtocolFailsClosedWithoutRequest(t *testing.T) {
 	_, err := Invoke(context.Background(), Config{APIKey: "test", BaseURL: "https://api.anthropic.com", Model: "claude", Protocol: Protocol("mystery")}, Request{UserPrompt: "hi"})
 	if !errors.Is(err, ErrUnsupportedProtocol) {

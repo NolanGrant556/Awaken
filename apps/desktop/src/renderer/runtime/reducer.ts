@@ -28,6 +28,7 @@ import {
   appendRunRequestedNarrative,
   createInitialRunNarrativeState,
   createRunRequestedNarrative,
+  eventResumesAfterProviderReconnect,
   projectAguiEventToNarrative,
   restoreLiveProviderReconnectItems,
   type PromptNarrativeToken,
@@ -529,6 +530,72 @@ function captureLiveProviderReconnect(state: RuntimeViewState): {
   return {
     items: providerReconnectItems(state.narrative),
     attempts: state.providerReconnectAttempts ?? [],
+    childItemsByTaskId,
+  };
+}
+
+function replayEventIsNewerThanReconnect(
+  event: AguiEvent,
+  item: Extract<RunNarrativeItem, { kind: "providerReconnect" }>,
+): boolean {
+  if (!eventResumesAfterProviderReconnect(event)) {
+    return false;
+  }
+  if (
+    typeof item.streamCursor === "number" &&
+    typeof event.streamCursor === "number" &&
+    event.streamCursor > item.streamCursor
+  ) {
+    return true;
+  }
+  return (
+    typeof item.observedAtMs === "number" &&
+    validTimestamp(event.timestamp) &&
+    event.timestamp > item.observedAtMs
+  );
+}
+
+function replayProvesReconnectRecovered(
+  item: Extract<RunNarrativeItem, { kind: "providerReconnect" }>,
+  actions: readonly RuntimeAction[],
+  subagentTaskId?: string,
+): boolean {
+  return actions.some((action) => {
+    if (action.type !== "run/event") {
+      return false;
+    }
+    const eventTaskId = action.event.subagentTaskId?.trim();
+    if ((subagentTaskId ?? "") !== (eventTaskId ?? "")) {
+      return false;
+    }
+    return replayEventIsNewerThanReconnect(action.event, item);
+  });
+}
+
+function filterRecoveredProviderReconnect(
+  snapshot: ReturnType<typeof captureLiveProviderReconnect>,
+  actions: readonly RuntimeAction[],
+): ReturnType<typeof captureLiveProviderReconnect> {
+  const items = snapshot.items.filter(
+    (item) => !replayProvesReconnectRecovered(item, actions),
+  );
+  const remainingPhases = new Set(items.map((item) => item.phase));
+  const childItemsByTaskId: typeof snapshot.childItemsByTaskId = {};
+  for (const [taskId, childItems] of Object.entries(
+    snapshot.childItemsByTaskId,
+  )) {
+    const remaining = childItems.filter(
+      (item) => !replayProvesReconnectRecovered(item, actions, taskId),
+    );
+    if (remaining.length > 0) {
+      childItemsByTaskId[taskId] = remaining;
+    }
+  }
+  return {
+    items,
+    attempts: snapshot.attempts.filter((attempt) =>
+      remainingPhases.has(attempt.phase),
+    ),
     childItemsByTaskId,
   };
 }
@@ -1854,7 +1921,10 @@ export function reduceRuntimeState(
 ): RuntimeViewState {
   switch (action.type) {
     case "run/replayBatch": {
-      const liveReconnect = captureLiveProviderReconnect(state);
+      const liveReconnect = filterRecoveredProviderReconnect(
+        captureLiveProviderReconnect(state),
+        action.actions,
+      );
       const replayedState = action.actions.reduce(reduceRuntimeState, state);
       const replayedItemIds = [
         ...replayedState.narrative.replayedItemIds,

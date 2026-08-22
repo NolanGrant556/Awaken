@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -371,6 +372,26 @@ data: {"type":"message_stop"}`,
 	}
 	if deltas[1].ArgumentsDelta != `"expression":"1+1"` || deltas[2].ArgumentsDelta != "}" {
 		t.Fatalf("unexpected argument deltas: %+v", deltas)
+	}
+}
+
+func TestStreamInvokeAnthropicCleanEOFBeforeMessageStopIsDisconnected(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}`+"\n\n")
+	}))
+	defer server.Close()
+
+	resp, err := StreamInvokeWithObserver(
+		context.Background(),
+		anthropicConfig(server.URL),
+		Request{UserPrompt: "hi"},
+		StreamObserver{},
+	)
+	var disconnected *StreamDisconnectedError
+	if !errors.As(err, &disconnected) {
+		t.Fatalf("clean EOF before message_stop must disconnect, response=%+v err=%v", resp, err)
 	}
 }
 

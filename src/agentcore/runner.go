@@ -556,11 +556,11 @@ func (r *Runner) streamLLMWithTransientRetry(
 		if kind == llmRetryNone {
 			return response, err
 		}
-		if reset {
-			events.discardEphemeralStreamOutput()
-		}
 		emittedReconnect = true
 		if kind == llmRetryConnection {
+			if reset {
+				events.discardEphemeralStreamOutput()
+			}
 			connectionAttempts++
 			events.providerReconnect(ProviderReconnectWaiting, connectionAttempts, 0, err, reset)
 			if err := r.sleepLLMRetry(ctx, connectionDelay); err != nil {
@@ -575,7 +575,20 @@ func (r *Runner) streamLLMWithTransientRetry(
 			continue
 		}
 		if transientAttempts >= maxTransientLLMRetries {
+			if reset {
+				events.discardEphemeralStreamOutput()
+				events.providerReconnect(
+					ProviderReconnectRetrying,
+					maxTransientLLMRetries,
+					maxTransientLLMRetries,
+					err,
+					true,
+				)
+			}
 			return response, err
+		}
+		if reset {
+			events.discardEphemeralStreamOutput()
 		}
 		transientAttempts++
 		events.providerReconnect(ProviderReconnectRetrying, transientAttempts, maxTransientLLMRetries, err, reset)
@@ -795,6 +808,7 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 	if events != nil {
 		observer.OnContent = llm.StreamCallback(events.onLLMDelta)
 		observer.OnToolCallDelta = events.onToolCallArgsDelta
+		observer.OnEvent = events.onLLMStreamEvent
 	}
 	started := time.Now()
 	response, streamErr := llm.StreamPreparedWithObserver(ctx, config, prepared, observer)
@@ -2733,6 +2747,15 @@ func (e *runEventEmitter) onToolCallArgsDelta(delta llm.ToolCallDelta) {
 		e.finishTextIfOpen()
 	}
 	e.emitToolCallArgsDelta(delta)
+}
+
+func (e *runEventEmitter) onLLMStreamEvent(event llm.StreamEvent) {
+	if e == nil {
+		return
+	}
+	if event.Type == llm.StreamEventToolCallStart {
+		e.toolStreamStarted = true
+	}
 }
 
 func (e *runEventEmitter) emitToolCallArgsDelta(delta llm.ToolCallDelta) {

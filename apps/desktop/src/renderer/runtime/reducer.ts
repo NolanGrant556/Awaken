@@ -5,6 +5,7 @@ import type {
   AguiContextUsageSnapshot,
   AguiEvent,
   AguiModelUsageRecord,
+  AguiProviderReconnect,
   AguiRunPlanItem,
 	InstructionSnapshotSummary,
 } from "./agui";
@@ -27,7 +28,9 @@ import {
   appendRunRequestedNarrative,
   createInitialRunNarrativeState,
   createRunRequestedNarrative,
+  eventResumesAfterProviderReconnect,
   projectAguiEventToNarrative,
+  restoreLiveProviderReconnectItems,
   type PromptNarrativeToken,
   type DeliverableFileType,
   type RunNarrativeItem,
@@ -136,6 +139,14 @@ export type RunPlanView = {
   allCompleted: boolean;
   toolCallId?: string;
   updatedAtMs?: number;
+};
+
+export type ProviderReconnectAttempt = {
+  phase: Exclude<AguiProviderReconnect["phase"], "recovered">;
+  attempt: number;
+  maxAttempts: number;
+  detail?: string;
+  resetInProgress?: boolean;
 };
 
 export type ContextWindowRecord = {
@@ -274,6 +285,7 @@ type ThreadViewState = {
   errorMessage?: string;
   runStartedAtMs?: number;
   runCompletedAtMs?: number;
+  providerReconnectAttempts: ProviderReconnectAttempt[];
 };
 
 export type RuntimeViewState = {
@@ -305,6 +317,7 @@ export type RuntimeViewState = {
   errorMessage?: string;
   runStartedAtMs?: number;
   runCompletedAtMs?: number;
+  providerReconnectAttempts: ProviderReconnectAttempt[];
   threads: ThreadItem[];
   activeThreadId?: string;
   threadViews: Record<string, ThreadViewState>;
@@ -425,6 +438,7 @@ const initialState: RuntimeViewState = {
   subagentOrder: [],
   runPlansById: {},
   inspectorSummary: createInspectorSummary(),
+  providerReconnectAttempts: [],
   threads: [],
   threadViews: {},
   supervisorStatus: null,
@@ -460,6 +474,7 @@ function viewFromState(state: RuntimeViewState): ThreadViewState {
     errorMessage: state.errorMessage,
     runStartedAtMs: state.runStartedAtMs,
     runCompletedAtMs: state.runCompletedAtMs,
+    providerReconnectAttempts: state.providerReconnectAttempts ?? [],
   };
 }
 
@@ -470,6 +485,195 @@ function emptyThreadView(threadId: string, runId?: string): ThreadViewState {
     threadId,
     runId,
   };
+}
+
+function upsertProviderReconnectAttempt(
+  attempts: ProviderReconnectAttempt[],
+  incoming: ProviderReconnectAttempt,
+): ProviderReconnectAttempt[] {
+  const index = attempts.findIndex((item) => item.phase === incoming.phase);
+  if (index < 0) {
+    return [...attempts, incoming];
+  }
+  const next = attempts.slice();
+  next[index] = incoming;
+  return next;
+}
+
+function providerReconnectItems(
+  narrative: RunNarrativeState,
+): Extract<RunNarrativeItem, { kind: "providerReconnect" }>[] {
+  return narrative.committedItems.filter(
+    (item): item is Extract<RunNarrativeItem, { kind: "providerReconnect" }> =>
+      item.kind === "providerReconnect",
+  );
+}
+
+function captureLiveProviderReconnect(state: RuntimeViewState): {
+  items: Extract<RunNarrativeItem, { kind: "providerReconnect" }>[];
+  attempts: ProviderReconnectAttempt[];
+  childItemsByTaskId: Record<
+    string,
+    Extract<RunNarrativeItem, { kind: "providerReconnect" }>[]
+  >;
+} {
+  const childItemsByTaskId: Record<
+    string,
+    Extract<RunNarrativeItem, { kind: "providerReconnect" }>[]
+  > = {};
+  for (const [taskId, task] of Object.entries(state.subagentsById)) {
+    const items = providerReconnectItems(task.narrative);
+    if (items.length > 0) {
+      childItemsByTaskId[taskId] = items;
+    }
+  }
+  return {
+    items: providerReconnectItems(state.narrative),
+    attempts: state.providerReconnectAttempts ?? [],
+    childItemsByTaskId,
+  };
+}
+
+function replayEventIsNewerThanReconnect(
+  event: AguiEvent,
+  item: Extract<RunNarrativeItem, { kind: "providerReconnect" }>,
+): boolean {
+  if (!eventResumesAfterProviderReconnect(event)) {
+    return false;
+  }
+  if (
+    typeof item.streamCursor === "number" &&
+    typeof event.streamCursor === "number" &&
+    event.streamCursor > item.streamCursor
+  ) {
+    return true;
+  }
+  return (
+    typeof item.observedAtMs === "number" &&
+    validTimestamp(event.timestamp) &&
+    event.timestamp > item.observedAtMs
+  );
+}
+
+function replayProvesReconnectRecovered(
+  item: Extract<RunNarrativeItem, { kind: "providerReconnect" }>,
+  actions: readonly RuntimeAction[],
+  subagentTaskId?: string,
+): boolean {
+  return actions.some((action) => {
+    if (action.type !== "run/event") {
+      return false;
+    }
+    const eventTaskId = action.event.subagentTaskId?.trim();
+    if ((subagentTaskId ?? "") !== (eventTaskId ?? "")) {
+      return false;
+    }
+    return replayEventIsNewerThanReconnect(action.event, item);
+  });
+}
+
+function filterRecoveredProviderReconnect(
+  snapshot: ReturnType<typeof captureLiveProviderReconnect>,
+  actions: readonly RuntimeAction[],
+): ReturnType<typeof captureLiveProviderReconnect> {
+  const items = snapshot.items.filter(
+    (item) => !replayProvesReconnectRecovered(item, actions),
+  );
+  const remainingPhases = new Set(items.map((item) => item.phase));
+  const childItemsByTaskId: typeof snapshot.childItemsByTaskId = {};
+  for (const [taskId, childItems] of Object.entries(
+    snapshot.childItemsByTaskId,
+  )) {
+    const remaining = childItems.filter(
+      (item) => !replayProvesReconnectRecovered(item, actions, taskId),
+    );
+    if (remaining.length > 0) {
+      childItemsByTaskId[taskId] = remaining;
+    }
+  }
+  return {
+    items,
+    attempts: snapshot.attempts.filter((attempt) =>
+      remainingPhases.has(attempt.phase),
+    ),
+    childItemsByTaskId,
+  };
+}
+
+function restoreLiveProviderReconnect(
+  state: RuntimeViewState,
+  snapshot: ReturnType<typeof captureLiveProviderReconnect>,
+): RuntimeViewState {
+  if (!isActiveRunStatus(state.status)) {
+    return state;
+  }
+  const childTaskIds = Object.keys(snapshot.childItemsByTaskId);
+  if (snapshot.items.length === 0 && childTaskIds.length === 0) {
+    return state;
+  }
+  let next: RuntimeViewState = {
+    ...state,
+    narrative: restoreLiveProviderReconnectItems(state.narrative, snapshot.items),
+    providerReconnectAttempts:
+      snapshot.attempts.length > 0
+        ? snapshot.attempts
+        : state.providerReconnectAttempts,
+  };
+  if (childTaskIds.length === 0) {
+    return next;
+  }
+  const subagentsById = { ...next.subagentsById };
+  for (const taskId of childTaskIds) {
+    const task = subagentsById[taskId];
+    if (!task) {
+      continue;
+    }
+    subagentsById[taskId] = {
+      ...task,
+      narrative: restoreLiveProviderReconnectItems(
+        task.narrative,
+        snapshot.childItemsByTaskId[taskId] ?? [],
+      ),
+    };
+  }
+  return { ...next, subagentsById };
+}
+
+function applyProviderReconnect(
+  state: RuntimeViewState,
+  event: AguiEvent,
+): RuntimeViewState {
+  const payload = event.providerReconnect;
+  if (!payload || payload.phase === "recovered") {
+    return {
+      ...state,
+      providerReconnectAttempts: [],
+    };
+  }
+  if (
+    payload.phase !== "waiting_for_network" &&
+    payload.phase !== "reconnecting"
+  ) {
+    return state;
+  }
+  const next: RuntimeViewState = {
+    ...state,
+    providerReconnectAttempts: upsertProviderReconnectAttempt(
+      state.providerReconnectAttempts ?? [],
+      {
+        phase: payload.phase,
+        attempt: payload.attempt ?? 0,
+        maxAttempts: payload.maxAttempts ?? 0,
+        detail: payload.detail,
+        resetInProgress: payload.resetInProgress,
+      },
+    ),
+  };
+  if (payload.resetInProgress) {
+    next.assistantText = "";
+    next.reasoningText = "";
+  }
+  return next;
 }
 
 function saveActiveThreadView(state: RuntimeViewState): RuntimeViewState {
@@ -1717,6 +1921,10 @@ export function reduceRuntimeState(
 ): RuntimeViewState {
   switch (action.type) {
     case "run/replayBatch": {
+      const liveReconnect = filterRecoveredProviderReconnect(
+        captureLiveProviderReconnect(state),
+        action.actions,
+      );
       const replayedState = action.actions.reduce(reduceRuntimeState, state);
       const replayedItemIds = [
         ...replayedState.narrative.replayedItemIds,
@@ -1725,10 +1933,14 @@ export function reduceRuntimeState(
           ? replayIdentityIds(replayedState.narrative.activeItem)
           : []),
       ];
+      const restored = restoreLiveProviderReconnect(
+        replayedState,
+        liveReconnect,
+      );
       return saveActiveThreadView({
-        ...replayedState,
+        ...restored,
         narrative: {
-          ...replayedState.narrative,
+          ...restored.narrative,
           replayedItemIds: [...new Set(replayedItemIds)],
         },
       });
@@ -1751,6 +1963,7 @@ export function reduceRuntimeState(
         steps: [],
         assistantText: "",
         reasoningText: "",
+        providerReconnectAttempts: [],
 		toolResults: [],
 		patchPreviews: [],
 		userQuestions: [],
@@ -1907,6 +2120,7 @@ export function reduceRuntimeState(
 		errorMessage: action.message,
 		userQuestions: [],
 		externalInteractions: [],
+        providerReconnectAttempts: [],
 		inspectorSummary: {
             ...state.inspectorSummary,
             terminalReason: "stream_failed",
@@ -2272,6 +2486,7 @@ export function reduceRuntimeState(
             status === "finished" ||
             status === "error"
           ) {
+            nextState.providerReconnectAttempts = [];
             nextState.inspectorSummary = {
               ...nextState.inspectorSummary,
               terminalReason: terminalReasonForEvent(action.event) ?? status,
@@ -2305,6 +2520,7 @@ export function reduceRuntimeState(
           nextState.externalInteractions = [];
           nextState.computerReviews = [];
           nextState.computerHandoffs = [];
+          nextState.providerReconnectAttempts = [];
           nextState.runCompletedAtMs =
             nextState.runCompletedAtMs ??
             (validTimestamp(action.event.timestamp)
@@ -3214,6 +3430,7 @@ export function reduceRuntimeState(
           break;
         }
         case "RUN_ERROR":
+          nextState.providerReconnectAttempts = [];
           if (action.event.code === "RUN_CANCELLED") {
             nextState.phase = "cancelled";
             nextState.status = "cancelled";
@@ -3265,6 +3482,9 @@ export function reduceRuntimeState(
               "error",
             terminalMessage: nextState.errorMessage || action.event.message,
           };
+          break;
+        case "AWAKEN_PROVIDER_RECONNECT":
+          nextState = applyProviderReconnect(nextState, action.event);
           break;
         case "AWAKEN_UNKNOWN_EVENT": {
           nextState.inspectorSummary = {

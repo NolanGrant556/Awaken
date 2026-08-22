@@ -473,6 +473,18 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.Status = event.Content
 		copyACPFields(&base, event)
 		return []Event{base}
+	case agentcore.ProviderReconnectEventType:
+		base.Type = EventAwakenProviderReconnect
+		if event.ProviderReconnect != nil {
+			base.ProviderReconnect = &ProviderReconnectPayload{
+				Phase:           event.ProviderReconnect.Phase,
+				Attempt:         event.ProviderReconnect.Attempt,
+				MaxAttempts:     event.ProviderReconnect.MaxAttempts,
+				Detail:          event.ProviderReconnect.Detail,
+				ResetInProgress: event.ProviderReconnect.ResetInProgress,
+			}
+		}
+		return []Event{base}
 	default:
 		base.Type = EventAwakenUnknown
 		base.RawType = string(event.Type)

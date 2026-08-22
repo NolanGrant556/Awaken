@@ -46,6 +46,29 @@ func TestIsTransientRequestErrorRetriesPreResponseTransport429And5xx(t *testing.
 	if IsTransientRequestError(errors.New("LLM request failed: stream idle timeout")) {
 		t.Fatal("stream errors after a response begins must not be retried")
 	}
+	if !IsTransientRequestError(&StreamDisconnectedError{Reason: "tls handshake eof"}) {
+		t.Fatal("stream disconnect before completion should be transient")
+	}
+	if !IsConnectionError(&TransportError{Reason: "error sending request"}) {
+		t.Fatal("pre-response transport errors are connection failures")
+	}
+	if IsConnectionError(&StreamDisconnectedError{Reason: "stream eof"}) {
+		t.Fatal("post-response stream disconnect is not a connection wait")
+	}
+}
+
+func TestSafeRetryDetailNeverLeaksURL(t *testing.T) {
+	detail := SafeRetryDetail(transportError(errors.New("Post \"https://secret.example/v1/chat\": tls: handshake eof")))
+	if detail != "tls handshake eof" {
+		t.Fatalf("unexpected transport detail %q", detail)
+	}
+	if strings.Contains(detail, "secret.example") || strings.Contains(detail, "https://") {
+		t.Fatalf("retry detail leaked endpoint: %q", detail)
+	}
+	streamDetail := SafeRetryDetail(&StreamDisconnectedError{Reason: "stream eof"})
+	if streamDetail != "stream eof" {
+		t.Fatalf("unexpected stream detail %q", streamDetail)
+	}
 }
 
 // Keep this file independent from the larger invoke test helpers.

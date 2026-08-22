@@ -49,6 +49,7 @@ export * from "./AwakenPetsSettings";
 export * from "./AwakenPopover";
 export * from "./AwakenPrimaryNav";
 export * from "./AwakenProductLogo";
+export * from "./AwakenReconnectStatus";
 export * from "./AwakenProfileButton";
 export * from "./AwakenProfileBalancePanel";
 export * from "./AwakenProfileMenuPanel";

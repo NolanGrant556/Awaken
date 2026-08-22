@@ -270,6 +270,21 @@ export type RunNarrativeItem =
     }
   | { kind: "hint"; id: string; text: string }
   | {
+      /**
+       * Live-only provider reconnect row at the current execution cursor.
+       * One stable identity per phase; recovered, run terminal, and resumed
+       * model output strip these items. Never journaled.
+       */
+      kind: "providerReconnect";
+      id: string;
+      phase: "waiting_for_network" | "reconnecting";
+      attempt: number;
+      maxAttempts: number;
+      detail?: string;
+      observedAtMs?: number;
+      streamCursor?: number;
+    }
+  | {
       kind: "scheduledNotice";
       id: string;
       taskId: string;

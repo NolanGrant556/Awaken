@@ -270,6 +270,7 @@ func (t *openaiTransport) streamPrepared(ctx stdctx.Context, cfg Config, prepare
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	watchdog := newStreamIdleWatchdog(cancel, streamIdleTimeoutForPrepared(prepared))
 	defer watchdog.Stop()
+	terminalSeen := false
 
 	for scanner.Scan() {
 		watchdog.Reset()
@@ -281,6 +282,7 @@ func (t *openaiTransport) streamPrepared(ctx stdctx.Context, cfg Config, prepare
 		if strings.HasPrefix(line, "data:") {
 			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 			if data == "[DONE]" {
+				terminalSeen = true
 				break
 			}
 			state.consume(data)
@@ -291,7 +293,10 @@ func (t *openaiTransport) streamPrepared(ctx stdctx.Context, cfg Config, prepare
 		if watchdog.TimedOut() {
 			return nil, streamIdleTimeoutError(watchdog.Timeout())
 		}
-		return nil, fmt.Errorf("failed to read stream: %w", err)
+		return nil, streamReadError(streamCtx, err)
+	}
+	if !terminalSeen && !state.completed {
+		return nil, &StreamDisconnectedError{Reason: "stream eof"}
 	}
 
 	result, responseErr := state.response()
@@ -635,6 +640,7 @@ type openAIStreamState struct {
 	toolCalls         map[int]*openaiStreamToolAccumulator
 	usage             *Usage
 	stopReason        string
+	completed         bool
 	usageNormalizerID string
 	miniMaxSnapshots  bool
 	contentSnapshot   string
@@ -669,6 +675,7 @@ func (s *openAIStreamState) consume(data string) {
 	for _, choice := range chunk.Choices {
 		if choice.FinishReason != "" {
 			s.stopReason = strings.TrimSpace(choice.FinishReason)
+			s.completed = true
 		}
 		reasoningDelta := choice.Delta.ReasoningContent
 		if detailsSnapshot := reasoningDetailsText(choice.Delta.ReasoningDetails); detailsSnapshot != "" {

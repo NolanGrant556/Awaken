@@ -3431,8 +3431,9 @@ func TestRunWithoutAPIKeyEmitsProviderAuthMissing(t *testing.T) {
 	}
 }
 
-// TestRunWithBadBaseURLEmitsProviderRequestFailed 验证 provider 请求失败时
-// RunError 事件 code=PROVIDER_REQUEST_FAILED。此测试不依赖真实 LLM，始终运行。
+// TestRunWithBadBaseURLEmitsProviderRequestFailed 验证无法构造 provider 请求时
+// RunError 事件 code=PROVIDER_REQUEST_FAILED。连接已发起但暂时不可达由
+// ProviderReconnect 的等待网络政策覆盖，不属于这个永久配置错误用例。
 func TestRunWithBadBaseURLEmitsProviderRequestFailed(t *testing.T) {
 	runService := awruntime.NewRunService(
 		func(workspace awruntime.WorkspaceConfig, threadID string) *agentcore.Agent {
@@ -3441,7 +3442,7 @@ func TestRunWithBadBaseURLEmitsProviderRequestFailed(t *testing.T) {
 				EntryPoint:  "awaken-core-smoke",
 				ModelConfig: agentcore.ModelConfig{
 					APIKey:  "dummy-key-not-real",
-					BaseURL: "http://127.0.0.1:1/invalid",
+					BaseURL: "http://[::1",
 					Model:   "test-model",
 				},
 				Workspace: agentcore.WorkspaceConfig{

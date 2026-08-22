@@ -209,6 +209,7 @@ func (t *openAIResponsesTransport) streamPrepared(ctx stdctx.Context, cfg Config
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	watchdog := newStreamIdleWatchdog(cancel, streamIdleTimeoutForPrepared(prepared))
 	defer watchdog.Stop()
+	terminalSeen := false
 	for scanner.Scan() {
 		watchdog.Reset()
 		line := strings.TrimSpace(scanner.Text())
@@ -216,7 +217,11 @@ func (t *openAIResponsesTransport) streamPrepared(ctx stdctx.Context, cfg Config
 			continue
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" || data == "[DONE]" {
+		if data == "" {
+			continue
+		}
+		if data == "[DONE]" {
+			terminalSeen = true
 			continue
 		}
 		state.consume(data)
@@ -225,7 +230,10 @@ func (t *openAIResponsesTransport) streamPrepared(ctx stdctx.Context, cfg Config
 		if watchdog.TimedOut() {
 			return nil, streamIdleTimeoutError(watchdog.Timeout())
 		}
-		return nil, fmt.Errorf("failed to read stream: %w", err)
+		return nil, streamReadError(streamCtx, err)
+	}
+	if !terminalSeen && !state.completed {
+		return nil, &StreamDisconnectedError{Reason: "stream eof"}
 	}
 	result, responseErr := state.response()
 	if result != nil {
@@ -392,6 +400,7 @@ type openAIResponsesStreamState struct {
 	toolCalls   map[int]*openAIResponsesToolAccumulator
 	usage       *Usage
 	stopReason  string
+	completed   bool
 	failureCode string
 	responseID  string
 }
@@ -449,6 +458,7 @@ func (s *openAIResponsesStreamState) consume(data string) {
 			s.emit(StreamEvent{Type: StreamEventToolCallDone, ToolCall: &completed})
 		}
 	case "response.completed", "response.incomplete":
+		s.completed = true
 		if event.Response != nil {
 			s.responseID = event.Response.ID
 			s.usage = normalizeOpenAIResponsesUsage(event.Response.Usage)
@@ -460,6 +470,7 @@ func (s *openAIResponsesStreamState) consume(data string) {
 			s.emit(StreamEvent{Type: StreamEventCompleted, StopReason: s.stopReason})
 		}
 	case "response.failed", "error":
+		s.completed = true
 		if event.Response != nil {
 			s.responseID = event.Response.ID
 			if event.Response.Error != nil {

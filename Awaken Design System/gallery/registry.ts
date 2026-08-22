@@ -26,6 +26,7 @@ import { AwakenSwitchDemo } from "../src/components/AwakenSwitch/AwakenSwitch.de
 import { AwakenTaskWelcomeDemo } from "../src/components/AwakenTaskWelcome/AwakenTaskWelcome.demo";
 import { AwakenDotmSquare3Demo } from "../src/components/AwakenDotmSquare3/AwakenDotmSquare3.demo";
 import { AwakenThinkingOrbDemo } from "../src/components/AwakenThinkingOrb/AwakenThinkingOrb.demo";
+import { AwakenReconnectStatusDemo } from "../src/components/AwakenReconnectStatus/AwakenReconnectStatus.demo";
 import { AwakenThoughtTraceDemo } from "../src/components/AwakenThoughtTrace/AwakenThoughtTrace.demo";
 import { AwakenToolTraceGroupDemo } from "../src/components/AwakenToolTraceGroup/AwakenToolTraceGroup.demo";
 import { AwakenWorkbenchShellDemo } from "../src/components/AwakenWorkbenchShell/AwakenWorkbenchShell.demo";
@@ -90,6 +91,7 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-run-plan", name: "AwakenRunPlan", displayName: "「运行计划」组件库", demo: AwakenRunPlanDemo, category: "workbench", aliases: ["awaken-run-plan-trigger", "awaken-run-plan-panel", "awaken-run-plan-historical"] },
   { id: "awaken-task-welcome", name: "AwakenTaskWelcome", displayName: "「任务欢迎区」组件库", demo: AwakenTaskWelcomeDemo, category: "workbench" },
   { id: "awaken-thought-trace", name: "AwakenThoughtTrace", displayName: "「思路轨迹」组件库", demo: AwakenThoughtTraceDemo, category: "workbench" },
+  { id: "awaken-reconnect-status", name: "AwakenReconnectStatus", displayName: "「供应商重连」组件库", demo: AwakenReconnectStatusDemo, category: "workbench" },
   {
     id: "awaken-tool-trace",
     name: "AwakenToolTraceGroup",

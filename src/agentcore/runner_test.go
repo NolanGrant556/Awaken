@@ -2440,16 +2440,37 @@ func TestRunnerRetriesStreamDisconnectBeforeToolStart(t *testing.T) {
 }
 
 func TestRunnerGivesUpAfterBoundedStreamDisconnects(t *testing.T) {
-	emitter := newRunEventEmitter("thread-stream-limit", EventSinkFunc(func(AwakenEvent) {}))
+	var events []AwakenEvent
+	emitter := newRunEventEmitter("thread-stream-limit", EventSinkFunc(func(event AwakenEvent) {
+		events = append(events, event)
+	}))
 	runner := NewRunner(testAgentConfig("http://unused", 2), convcontext.NewConversation(nil), nil)
 	runner.llmRetrySleep = func(context.Context, time.Duration) error { return nil }
 	calls := 0
-	_, err := runner.streamLLMWithTransientRetry(context.Background(), emitter, func(context.Context, *runEventEmitter) (*llm.Response, error) {
+	_, err := runner.streamLLMWithTransientRetry(context.Background(), emitter, func(_ context.Context, current *runEventEmitter) (*llm.Response, error) {
 		calls++
+		if calls == maxTransientLLMRetries+1 {
+			current.onLLMDelta("final partial output", false)
+		}
 		return nil, &llm.StreamDisconnectedError{Reason: "stream eof"}
 	})
 	if err == nil || calls != maxTransientLLMRetries+1 {
 		t.Fatalf("bounded stream disconnect must stop after %d retries, calls=%d err=%v", maxTransientLLMRetries, calls, err)
+	}
+	if emitter.hasEphemeralStreamOutput() {
+		t.Fatal("the final failed attempt must discard unpersisted model output")
+	}
+	var finalReset *ProviderReconnectStatus
+	for _, event := range events {
+		if event.Type == ProviderReconnectEventType &&
+			event.ProviderReconnect != nil &&
+			event.ProviderReconnect.Phase == ProviderReconnectRetrying &&
+			event.ProviderReconnect.ResetInProgress {
+			finalReset = event.ProviderReconnect
+		}
+	}
+	if finalReset == nil || finalReset.Attempt != maxTransientLLMRetries {
+		t.Fatalf("final failure must emit a reset frame before terminal, got %+v", finalReset)
 	}
 }
 
@@ -2463,7 +2484,7 @@ func TestRunnerDoesNotRetryAfterToolStreamStarts(t *testing.T) {
 	calls := 0
 	_, err := runner.streamLLMWithTransientRetry(context.Background(), emitter, func(_ context.Context, current *runEventEmitter) (*llm.Response, error) {
 		calls++
-		current.toolStreamStarted = true
+		current.onLLMStreamEvent(llm.StreamEvent{Type: llm.StreamEventToolCallStart})
 		return nil, &llm.TransportError{Reason: "connection reset"}
 	})
 	if err == nil || calls != 1 {

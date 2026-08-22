@@ -494,11 +494,25 @@ export function discardInProgressModelOutput(
   event?: AguiEvent,
 ): RunNarrativeState {
   const active = state.activeItem;
-  if (!active || (active.kind !== "thinking" && active.kind !== "answer")) {
+  const committedItems = state.committedItems.slice();
+  while (
+    committedItems.length > 0 &&
+    (committedItems.at(-1)?.kind === "thinking" ||
+      committedItems.at(-1)?.kind === "answer")
+  ) {
+    committedItems.pop();
+  }
+  const activeIsModelOutput =
+    active?.kind === "thinking" || active?.kind === "answer";
+  if (
+    !activeIsModelOutput &&
+    committedItems.length === state.committedItems.length
+  ) {
     return state;
   }
   return {
     ...state,
+    committedItems,
     activeItem: {
       kind: "planning",
       id: `planning:${event ? eventScope(event) : "current"}`,
@@ -534,7 +548,7 @@ function providerReconnectItemId(
   return `provider-reconnect:${eventScope(event)}:${phase}`;
 }
 
-function eventResumesAfterProviderReconnect(event: AguiEvent): boolean {
+export function eventResumesAfterProviderReconnect(event: AguiEvent): boolean {
   switch (event.type) {
     case "AWAKEN_TURN_STARTED":
     case "REASONING_START":
@@ -594,6 +608,13 @@ function projectProviderReconnect(
     attempt: payload.attempt ?? 0,
     maxAttempts: payload.maxAttempts ?? 0,
     ...(detail ? { detail } : {}),
+    ...(typeof event.timestamp === "number" && Number.isFinite(event.timestamp)
+      ? { observedAtMs: event.timestamp }
+      : {}),
+    ...(typeof event.streamCursor === "number" &&
+    Number.isFinite(event.streamCursor)
+      ? { streamCursor: event.streamCursor }
+      : {}),
   };
   return {
     ...next,

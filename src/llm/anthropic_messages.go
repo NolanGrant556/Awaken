@@ -295,6 +295,9 @@ func (t *anthropicTransport) streamPrepared(ctx stdctx.Context, cfg Config, prep
 		}
 		return nil, streamReadError(streamCtx, err)
 	}
+	if !state.completed {
+		return nil, &StreamDisconnectedError{Reason: "stream eof"}
+	}
 
 	result, responseErr := state.response()
 	if result != nil {
@@ -594,6 +597,7 @@ type anthropicStreamState struct {
 	currentTool *anthropicToolAccumulator
 	usage       *Usage
 	stopReason  string
+	completed   bool
 }
 
 type anthropicToolAccumulator struct {
@@ -696,6 +700,12 @@ func (s *anthropicStreamState) consume(data string, event string) {
 			s.emitEvent(StreamEvent{Type: StreamEventToolCallDone, ToolCall: &completed})
 			s.currentTool = nil
 		}
+
+	case "message_stop":
+		s.completed = true
+
+	case "error":
+		s.completed = true
 	}
 }
 

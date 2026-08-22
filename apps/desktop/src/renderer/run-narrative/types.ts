@@ -281,6 +281,8 @@ export type RunNarrativeItem =
       attempt: number;
       maxAttempts: number;
       detail?: string;
+      observedAtMs?: number;
+      streamCursor?: number;
     }
   | {
       kind: "scheduledNotice";

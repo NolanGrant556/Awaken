@@ -4,10 +4,22 @@
  * 这一层是 Cursor 那招「换字体不改引用」在组件层的等价物：
  * 调用点只认名字，几何可以逐个替换而调用点零改动。
  *
- * 线性图标由 geometry.ts 在模块初始化时编译一次（纯数学，成本可忽略），
- * 品牌标记保留 authored paths；可以携带对称透明 viewBox 留白，不进入 16 网格路径归一化。
+ * Awaken 构造几何由 geometry.ts 在模块初始化时编译一次；用户确认的 licensed
+ * authored 字形已经离线固化为同名 16-grid path，并在这里覆盖基础定义而不改变 API。
+ * 品牌标记保留自己的 authored paths 与 viewBox。
  */
 import { MCP_OFFICIAL_MARK, type BrandMark } from "./brandMarks";
+import {
+  APPROVED_LUCIDE_GLYPHS,
+  type ApprovedLucideGlyph,
+} from "./approvedLucideGlyphs";
+import {
+  APPROVED_LUCIDE_LICENSE,
+  APPROVED_LUCIDE_SOURCES,
+  APPROVED_LUCIDE_STROKE,
+  APPROVED_LUCIDE_VERSION,
+  type ApprovedLucideIconName,
+} from "./approvedLucideSources";
 import {
   ICON_DEFINITIONS,
   type AwakenLineIconName,
@@ -29,11 +41,20 @@ export type AwakenIconRender =
       /** 实心字形为 0，渲染时改用 fill。 */
       readonly strokeWidth: number;
       readonly filled: boolean;
+      /** 少数 authored 子路径需要保留自身的 currentColor 填充。 */
+      readonly filledPathIndexes?: readonly number[];
       /** 实测视觉尺寸（16 网格单位），供光学审计核对。 */
-      readonly measured: readonly [number, number];
+      readonly measured?: readonly [number, number];
       readonly shape: AwakenOpticalShape;
       /** 可读下限（px）。低于它的调用点由守卫测试拦下。 */
       readonly minSize: number;
+      readonly provenance:
+        | { readonly kind: "awaken-geometry" }
+        | {
+            readonly kind: "licensed-authored" | "restored-authored";
+            readonly source: string;
+            readonly license: string;
+          };
     }
   | {
       readonly mode: "brand-stroke";
@@ -55,16 +76,43 @@ function compileLineIcons(): Record<AwakenLineIconName, AwakenIconRender> {
   const out = {} as Record<AwakenLineIconName, AwakenIconRender>;
   for (const key of Object.keys(ICON_DEFINITIONS) as AwakenLineIconName[]) {
     const def = ICON_DEFINITIONS[key];
+    const approved = (
+      APPROVED_LUCIDE_GLYPHS as Partial<Record<AwakenLineIconName, ApprovedLucideGlyph>>
+    )[key];
+    if (approved) {
+      const sourceIcon = APPROVED_LUCIDE_SOURCES[key as ApprovedLucideIconName];
+      out[key] = {
+        mode: "line",
+        viewBox: LINE_VIEW_BOX,
+        paths: approved.paths,
+        strokeWidth: def.filled ? 0 : APPROVED_LUCIDE_STROKE,
+        filled: def.filled ?? false,
+        filledPathIndexes: approved.filledPathIndexes,
+        shape: def.shape,
+        minSize: def.minSize ?? 12,
+        provenance: {
+          kind: "licensed-authored",
+          source: `lucide-react v${APPROVED_LUCIDE_VERSION} · ${sourceIcon}`,
+          license: APPROVED_LUCIDE_LICENSE,
+        },
+      };
+      continue;
+    }
     if (def.authored) {
       out[key] = {
         mode: "line",
         viewBox: LINE_VIEW_BOX,
         paths: def.authored.paths,
-        strokeWidth: AWAKEN_ICON_STROKE,
-        filled: false,
+        strokeWidth: def.filled ? 0 : AWAKEN_ICON_STROKE,
+        filled: def.filled ?? false,
         measured: def.authored.measured,
         shape: def.shape,
         minSize: def.minSize ?? 12,
+        provenance: {
+          kind: "restored-authored",
+          source: def.authored.source,
+          license: def.authored.license,
+        },
       };
       continue;
     }
@@ -87,6 +135,7 @@ function compileLineIcons(): Record<AwakenLineIconName, AwakenIconRender> {
       measured,
       shape: def.shape,
       minSize: def.minSize ?? 12,
+      provenance: { kind: "awaken-geometry" },
     };
   }
   return out;

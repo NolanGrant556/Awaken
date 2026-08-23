@@ -263,30 +263,35 @@ export function triangle(cx = 8, cy = 8, half = 6.1, height = 10.5): GeomOp {
   );
 }
 
-/** 显示器轮廓加底座。屏幕与底座是两段，底座延长到光学边界。 */
-export function display(cx = 8, cy = 8, w = 12.6, h = 9.2): GeomOp[] {
+/**
+ * 显示器轮廓加底座。屏幕与底座是两段，底座延长到光学边界。
+ *
+ * 屏幕主体扩大、细腿缩短，让 display 系列在 14–20px 的产品尺寸下更饱满，
+ * 同时仍由一个原语约束跟随系统、演示和 Computer Use 三个图标的家族比例。
+ */
+export function display(cx = 8, cy = 8, w = 13.5, h = 9.9): GeomOp[] {
   return [
     poly(
       [
-        [cx - w / 2, cy - h / 2 - 1],
-        [cx + w / 2, cy - h / 2 - 1],
-        [cx + w / 2, cy + h / 2 - 1],
-        [cx - w / 2, cy + h / 2 - 1],
+        [cx - w / 2, cy - h / 2 - 0.8],
+        [cx + w / 2, cy - h / 2 - 0.8],
+        [cx + w / 2, cy + h / 2 - 0.8],
+        [cx - w / 2, cy + h / 2 - 0.8],
       ],
       1.7,
       true,
     ),
     poly(
       [
-        [cx - 3.2, cy + h / 2 + 2.4],
-        [cx + 3.2, cy + h / 2 + 2.4],
+        [cx - 3.4, cy + h / 2 + 2.1],
+        [cx + 3.4, cy + h / 2 + 2.1],
       ],
       0,
     ),
     poly(
       [
-        [cx, cy + h / 2 - 1],
-        [cx, cy + h / 2 + 2.4],
+        [cx, cy + h / 2 - 0.8],
+        [cx, cy + h / 2 + 2.1],
       ],
       0,
     ),

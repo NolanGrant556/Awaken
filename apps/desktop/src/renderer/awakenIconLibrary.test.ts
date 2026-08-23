@@ -188,6 +188,14 @@ describe("概念表", () => {
     expect(AWAKEN_ICON_CONCEPTS["mcp-brand"]).toBe("mcp-mark");
     expect(AWAKEN_ICON_CONCEPTS["mcp-source"]).toBe("mcp-mark");
   });
+
+  it("记忆恢复 PR #36 前的 Brain 图形，并由 Design System 持有来源", () => {
+    expect(AWAKEN_ICON_CONCEPTS["settings-memory"]).toBe("brain");
+    const brain = ICON_DEFINITIONS.brain;
+    expect(brain.build).toBeUndefined();
+    expect(brain.authored?.source).toContain("lucide-react v0.468.0");
+    expect(brain.authored?.license).toBe("ISC");
+  });
 });
 
 describe("越层守卫", () => {

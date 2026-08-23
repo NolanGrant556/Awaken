@@ -60,7 +60,7 @@ export const AWAKEN_ICON_CONCEPTS = {
 
   // 设置页导航
   "settings-model": "chip",
-  "settings-memory": "stack",
+  "settings-memory": "brain",
   "settings-appearance": "color-mode",
   "settings-pets": "paw",
   "settings-acp": "robot",

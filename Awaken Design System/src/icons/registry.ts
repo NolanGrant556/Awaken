@@ -55,6 +55,22 @@ function compileLineIcons(): Record<AwakenLineIconName, AwakenIconRender> {
   const out = {} as Record<AwakenLineIconName, AwakenIconRender>;
   for (const key of Object.keys(ICON_DEFINITIONS) as AwakenLineIconName[]) {
     const def = ICON_DEFINITIONS[key];
+    if (def.authored) {
+      out[key] = {
+        mode: "line",
+        viewBox: LINE_VIEW_BOX,
+        paths: def.authored.paths,
+        strokeWidth: AWAKEN_ICON_STROKE,
+        filled: false,
+        measured: def.authored.measured,
+        shape: def.shape,
+        minSize: def.minSize ?? 12,
+      };
+      continue;
+    }
+    if (!def.build) {
+      throw new Error(`Awaken 图标 ${key} 缺少 build 或 authored path`);
+    }
     const stroke = def.filled ? 0 : AWAKEN_ICON_STROKE;
     const { ops, measured } = normalizeToOptical(
       def.build(),

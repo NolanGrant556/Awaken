@@ -20,6 +20,7 @@ const (
 type Scope string
 
 const (
+	ScopePlugin  Scope = "plugin"
 	ScopeUser    Scope = "user"
 	ScopeProject Scope = "project"
 	ScopeDynamic Scope = "dynamic"

@@ -13,6 +13,8 @@ import {
   dedupeSkills,
   findConnectorOwnedMcpServer,
   isUserInstalledMcpServer,
+  pluginOwnerFromSkillId,
+  skillSourceLabel,
   isSkillVisibleInView,
   loadMcpSettingsResources,
   loadSkillListsForRoots,
@@ -80,6 +82,23 @@ describe("MCP source grouping", () => {
     } satisfies RuntimeMcpServer;
 
     expect(isUserInstalledMcpServer(standalone, ownedNames)).toBe(true);
+  });
+
+  it("labels plugin skills with the owning plugin name", () => {
+    expect(pluginOwnerFromSkillId("plugin__acme-tools__lint")).toBe("acme-tools");
+    expect(skillSourceLabel("plugin", "plugin__acme-tools__lint")).toBe("插件 · acme-tools");
+    expect(skillSourceLabel("plugin")).toBe("插件");
+  });
+
+  it("keeps plugin-owned MCP servers out of the user-installed group", () => {
+    const ownedNames = connectorOwnedMcpServerNames([]);
+    const pluginServer = {
+      name: "plugin__acme.tools__validator",
+      state: "connected",
+      transport: "stdio",
+      scope: "plugin",
+    } satisfies RuntimeMcpServer;
+    expect(isUserInstalledMcpServer(pluginServer, ownedNames)).toBe(false);
   });
 
   it("resolves the single owned server used by an installed connector card", () => {

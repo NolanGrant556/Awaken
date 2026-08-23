@@ -104,7 +104,7 @@ func newScheduledTaskFixture(t *testing.T) *scheduledTaskFixture {
 	})
 	return &scheduledTaskFixture{
 		service:  service,
-		router:   NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, service),
+		router:   NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, service, nil),
 		executor: executor,
 		repo:     repo,
 	}
@@ -188,7 +188,7 @@ func waitForTerminalExecution(t *testing.T, f *scheduledTaskFixture, taskID stri
 }
 
 func TestScheduledTasksUnavailableWithoutService(t *testing.T) {
-	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil)
+	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil, nil)
 	for _, path := range []string{
 		"/v1/scheduled-tasks",
 		"/v1/scheduled-tasks/events",

@@ -121,6 +121,7 @@ describe("ExtensionsView behavior", () => {
       listCliConnectors: vi.fn(async () => []),
       listMcpServers: vi.fn(async () => []),
       listSkills: vi.fn(async () => []),
+      listPlugins: vi.fn(async () => []),
       subscribeCliConnectorState: vi.fn(() => () => undefined),
     } as unknown as RuntimeClient;
 
@@ -437,6 +438,7 @@ describe("ExtensionsView behavior", () => {
       listCliConnectors: vi.fn(async () => []),
       listMcpServers: vi.fn(async () => []),
       listSkills: vi.fn(async () => [globalAgentsSkill, projectAgentsSkill]),
+      listPlugins: vi.fn(async () => []),
       getSkillPreview: vi.fn(async () => ({
         frontmatterRaw: "---\nname: project-review\n---",
         bodyMarkdown: "# 项目代码复核",

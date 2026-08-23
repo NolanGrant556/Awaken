@@ -8,6 +8,9 @@ import {
   AwakenFolder,
   AwakenMcpConfigDialog,
   AwakenMcpSettingsDialog,
+  AwakenPluginCard,
+  AwakenPluginDetailDialog,
+  AwakenPluginInstallDialog,
   AwakenProjectSkillsDialog,
   AwakenSkillCard,
   type AwakenCliConnectorAction,
@@ -23,6 +26,7 @@ import type {
   RuntimeLogEntry,
   RuntimeMcpServer,
   RuntimeMcpServerConfigResponse,
+  RuntimePlugin,
   RuntimeProject,
   RuntimeSkill,
   RuntimeToolInfo,
@@ -45,7 +49,7 @@ export type McpToolInfo = {
   readOnly: boolean;
 };
 
-export type ExtensionSection = "connectors" | "skills";
+export type ExtensionSection = "connectors" | "skills" | "plugins";
 
 type ConnectorKind = "mcp" | "cli";
 export type SkillView = "awaken" | "project" | "user" | "agents";
@@ -147,11 +151,19 @@ export function connectorOwnedMcpServerNames(
   return names;
 }
 
+export function isPluginMcpServerName(name: string): boolean {
+  return name.startsWith("plugin__");
+}
+
 export function isUserInstalledMcpServer(
   server: Pick<RuntimeMcpServer, "name" | "sourceConnectorId">,
   connectorOwnedNames: ReadonlySet<string>,
 ): boolean {
-  return !server.sourceConnectorId?.trim() && !connectorOwnedNames.has(server.name);
+  return (
+    !server.sourceConnectorId?.trim() &&
+    !connectorOwnedNames.has(server.name) &&
+    !isPluginMcpServerName(server.name)
+  );
 }
 
 export function findConnectorOwnedMcpServer(
@@ -337,7 +349,19 @@ function cliConnectorCardItem(
   };
 }
 
-export function skillSourceLabel(source: string): string {
+export function pluginOwnerFromSkillId(id: string): string | undefined {
+  if (!id.startsWith("plugin__")) {
+    return undefined;
+  }
+  const rest = id.slice("plugin__".length);
+  const separator = rest.indexOf("__");
+  if (separator <= 0) {
+    return undefined;
+  }
+  return rest.slice(0, separator);
+}
+
+export function skillSourceLabel(source: string, skillId?: string): string {
   switch (source) {
     case "project":
       return "项目";
@@ -345,6 +369,10 @@ export function skillSourceLabel(source: string): string {
       return "全局";
     case "bundled":
       return "Awaken 内置";
+    case "plugin": {
+      const owner = pluginOwnerFromSkillId(skillId ?? "");
+      return owner ? `插件 · ${owner}` : "插件";
+    }
     default:
       return sourceLabel(source);
   }
@@ -682,6 +710,18 @@ export function ExtensionsView({
   const [mcpLogs, setMcpLogs] = useState<RuntimeLogEntry[]>([]);
   const [savingMcpConfig, setSavingMcpConfig] = useState(false);
   const [loadingMcpSettings, setLoadingMcpSettings] = useState(false);
+  const [plugins, setPlugins] = useState<RuntimePlugin[]>([]);
+  const [pluginDialogOpen, setPluginDialogOpen] = useState(false);
+  const [pluginInstallMode, setPluginInstallMode] = useState<"local" | "url">("local");
+  const [pluginLocalPath, setPluginLocalPath] = useState("");
+  const [pluginUrl, setPluginUrl] = useState("");
+  const [pluginRef, setPluginRef] = useState("");
+  const [pluginSubpath, setPluginSubpath] = useState("");
+  const [pluginReplace, setPluginReplace] = useState(false);
+  const [pluginConfirm, setPluginConfirm] = useState(false);
+  const [installingPlugin, setInstallingPlugin] = useState(false);
+  const [selectedPlugin, setSelectedPlugin] = useState<RuntimePlugin | null>(null);
+  const [busyPluginName, setBusyPluginName] = useState<string | null>(null);
 
   const normalizedQuery = query.trim().toLowerCase();
   function applySkillCatalogSnapshot(snapshot: SkillCatalogSnapshot): void {
@@ -730,6 +770,7 @@ export function ExtensionsView({
         nextMcpServers,
         nextProjectSkillResults,
         fallbackSkills,
+        nextPlugins,
       ] = await Promise.all([
         runtimeClient.listConnectors(),
         runtimeClient.listCliConnectors(),
@@ -738,6 +779,7 @@ export function ExtensionsView({
         needsFallbackCatalog
           ? runtimeClient.listSkills(fallbackRoots.length > 0 ? fallbackRoots : undefined)
           : Promise.resolve([]),
+        runtimeClient.listPlugins().catch(() => []),
       ]);
       if (generation !== refreshGenerationRef.current) {
         return;
@@ -756,6 +798,7 @@ export function ExtensionsView({
       }
       setConnectors(nextConnectors);
       setCliConnectors(nextCliConnectors);
+      setPlugins(nextPlugins);
       const busyServerName = busyMcpServerNameRef.current;
       setMcpServers((current) => {
         if (!busyServerName) {
@@ -1039,7 +1082,7 @@ export function ExtensionsView({
           scope: "project",
           sourceLabel: sourceFolder
             ? sourceFolder.label
-            : skillSourceLabel(skill.sourceOrigin),
+            : skillSourceLabel(skill.sourceOrigin, skill.id),
           diagnostic: diagnostics.length > 0 ? diagnostics.join(" · ") : undefined,
           previewable: canPreviewSkill(skill),
           busy: busySkillId === skill.id,
@@ -1521,7 +1564,7 @@ export function ExtensionsView({
     );
     return {
       name: skill.displayName || skill.name,
-      sourceLabel: skillSourceLabel(skill.sourceOrigin),
+      sourceLabel: skillSourceLabel(skill.sourceOrigin, skill.id),
       description: skill.whenToUse || skill.description,
       enabled:
         skillToggleStates[skillKey] ?? skill.state !== "disabled_by_policy",
@@ -1557,7 +1600,7 @@ export function ExtensionsView({
                 : skill.sourceOrigin === "mcp"
                   ? "mcp"
                   : "other",
-      sourceLabel: skillSourceLabel(skill.sourceOrigin),
+      sourceLabel: skillSourceLabel(skill.sourceOrigin, skill.id),
       diagnostic:
         diagnostics.length > 0 ? `诊断：${diagnostics.join(" · ")}` : undefined,
       previewable,
@@ -1632,6 +1675,263 @@ export function ExtensionsView({
   const selectedCliProduct = selectedCliConnector
     ? cliConnectorProductCopy(selectedCliConnector.id)
     : null;
+
+  async function handleInstallPlugin(): Promise<void> {
+    setInstallingPlugin(true);
+    setErrorMessage(null);
+    try {
+      const source =
+        pluginInstallMode === "local"
+          ? { kind: "local_path" as const, path: pluginLocalPath.trim() }
+          : pluginUrl.includes(".git") || pluginRef.trim() || pluginSubpath.trim()
+            ? {
+                kind: "remote_git" as const,
+                url: pluginUrl.trim(),
+                ref: pluginRef.trim() || undefined,
+                subpath: pluginSubpath.trim() || undefined,
+              }
+            : { kind: "remote_url" as const, url: pluginUrl.trim() };
+      await runtimeClient.installPlugin({ source, replace: pluginReplace });
+      setPluginDialogOpen(false);
+      setPluginConfirm(false);
+      onNotice("插件已安装");
+      await refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setInstallingPlugin(false);
+    }
+  }
+
+  async function handleTogglePlugin(plugin: RuntimePlugin, enabled: boolean): Promise<void> {
+    setBusyPluginName(plugin.name);
+    try {
+      const next = enabled
+        ? await runtimeClient.enablePlugin(plugin.name)
+        : await runtimeClient.disablePlugin(plugin.name);
+      setPlugins((current) => current.map((item) => (item.name === next.name ? next : item)));
+      if (selectedPlugin?.name === next.name) {
+        setSelectedPlugin(next);
+      }
+      await refresh(false);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusyPluginName(null);
+    }
+  }
+
+  async function openPluginDetail(name: string): Promise<void> {
+    try {
+      setSelectedPlugin(await runtimeClient.getPlugin(name));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (section === "plugins") {
+    const visiblePlugins = plugins.filter((plugin) =>
+      matchesQuery(plugin.name, normalizedQuery) ||
+      matchesQuery(plugin.description, normalizedQuery) ||
+      matchesQuery(plugin.version, normalizedQuery),
+    );
+    return (
+      <section className="extension-view" aria-label="插件">
+        <div className="extension-view-inner">
+          <header className="extension-header">
+            <div>
+              <h1>插件</h1>
+              <p>安装符合 Agent Plugins 1.0.0 的第三方插件包，统一管理其中的 Skills 与 MCP servers。</p>
+            </div>
+            <div className="extension-header-actions">
+              <button
+                type="button"
+                className="extension-icon-button"
+                aria-label="刷新"
+                disabled={loading}
+                onClick={() => { void refresh(); }}
+              >
+                <AwakenIcon concept="refresh" size={16} />
+              </button>
+              <Button
+                variant="primary"
+                size="md"
+                onClick={() => {
+                  setPluginConfirm(false);
+                  setPluginDialogOpen(true);
+                }}
+              >
+                <AwakenIcon concept="import" size={16} />
+                安装插件
+              </Button>
+            </div>
+          </header>
+        <div className="extension-toolbar">
+          <input
+            value={query}
+            placeholder="搜索插件..."
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+        {errorMessage ? <p className="extension-error" role="alert">{errorMessage}</p> : null}
+          {loading && visiblePlugins.length === 0 ? <p>正在加载插件…</p> : null}
+          {!loading && visiblePlugins.length === 0 ? <p>还没有安装插件。</p> : null}
+          <div className="extension-card-list">
+            {visiblePlugins.map((plugin) => (
+              <AwakenPluginCard
+                key={plugin.name}
+                plugin={{
+                  name: plugin.name,
+                  version: plugin.version,
+                  description: plugin.description,
+                  skillCount: plugin.skillCount,
+                  serverCount: plugin.serverCount,
+                  enabled: plugin.enabled,
+                  busy: busyPluginName === plugin.name,
+                  diagnostic: plugin.diagnostics?.[0]?.message,
+                }}
+                onOpen={() => { void openPluginDetail(plugin.name); }}
+                onEnabledChange={(enabled) => { void handleTogglePlugin(plugin, enabled); }}
+              />
+            ))}
+          </div>
+        </div>
+        <AwakenPluginInstallDialog
+          open={pluginDialogOpen}
+          mode={pluginInstallMode}
+          localPath={pluginLocalPath}
+          url={pluginUrl}
+          refValue={pluginRef}
+          subpath={pluginSubpath}
+          replace={pluginReplace}
+          confirm={pluginConfirm}
+          errorMessage={pluginDialogOpen ? errorMessage : null}
+          busy={installingPlugin}
+          onOpenChange={setPluginDialogOpen}
+          onModeChange={setPluginInstallMode}
+          onLocalPathChange={setPluginLocalPath}
+          onUrlChange={setPluginUrl}
+          onRefChange={setPluginRef}
+          onSubpathChange={setPluginSubpath}
+          onReplaceChange={setPluginReplace}
+          onConfirmChange={setPluginConfirm}
+          onPickLocal={() => {
+            void runtimeClient.pickDirectory().then((result) => {
+              if (!result.canceled) setPluginLocalPath(result.path);
+            });
+          }}
+          onSubmit={() => { void handleInstallPlugin(); }}
+        />
+        <AwakenPluginDetailDialog
+          open={selectedPlugin !== null}
+          name={selectedPlugin?.name ?? ""}
+          version={selectedPlugin?.version}
+          description={selectedPlugin?.description}
+          sourceLabel={selectedPlugin ? `${selectedPlugin.source.kind}${selectedPlugin.source.url ? ` ${selectedPlugin.source.url}` : selectedPlugin.source.path ? ` ${selectedPlugin.source.path}` : ""}` : undefined}
+          digest={selectedPlugin?.digest}
+          skills={(selectedPlugin?.skills ?? []).map((skill) => ({
+            id: skill.id,
+            name: skill.name,
+            description: skill.description,
+            previewable: canPreviewSkill(skill),
+          }))}
+          servers={(selectedPlugin?.servers ?? []).map((server) => ({
+            shortName: server.shortName,
+            identity: server.identity,
+            state: server.state,
+            enabled: server.enabled,
+            errorReason: server.errorReason,
+            invalid: server.invalid?.message,
+          }))}
+          diagnostics={(selectedPlugin?.diagnostics ?? []).map((item) => item.message ?? item.code ?? "")}
+          busy={busyPluginName === selectedPlugin?.name}
+          onOpenChange={(open) => {
+            if (!open) setSelectedPlugin(null);
+          }}
+          onPreviewSkill={(skillId) => {
+            const skill = selectedPlugin?.skills?.find((item) => item.id === skillId);
+            if (skill && canPreviewSkill(skill)) {
+              setSkillPreviewTarget({
+                catalogEntryId: skill.catalogEntryId ?? "",
+                skillId: skill.id,
+              });
+            }
+          }}
+          onServerEnabledChange={(shortName, enabled) => {
+            if (!selectedPlugin) return;
+            void (async () => {
+              setBusyPluginName(selectedPlugin.name);
+              try {
+                const next = enabled
+                  ? await runtimeClient.enablePluginServer(selectedPlugin.name, shortName)
+                  : await runtimeClient.disablePluginServer(selectedPlugin.name, shortName);
+                setSelectedPlugin(next);
+                setPlugins((current) => current.map((item) => (item.name === next.name ? next : item)));
+              } catch (error) {
+                setErrorMessage(error instanceof Error ? error.message : String(error));
+              } finally {
+                setBusyPluginName(null);
+              }
+            })();
+          }}
+          onUpgrade={() => {
+            if (!selectedPlugin) return;
+            void (async () => {
+              setBusyPluginName(selectedPlugin.name);
+              try {
+                const result = await runtimeClient.upgradePlugin(selectedPlugin.name);
+                setSelectedPlugin(result.plugin);
+                onNotice(result.message);
+                await refresh(false);
+              } catch (error) {
+                setErrorMessage(error instanceof Error ? error.message : String(error));
+              } finally {
+                setBusyPluginName(null);
+              }
+            })();
+          }}
+          onUninstall={() => {
+            if (!selectedPlugin) return;
+            if (!window.confirm(`卸载「${selectedPlugin.name}」会把插件包和数据目录移入回收站。确定继续？`)) {
+              return;
+            }
+            void (async () => {
+              setBusyPluginName(selectedPlugin.name);
+              try {
+                await runtimeClient.uninstallPlugin(selectedPlugin.name);
+                setSelectedPlugin(null);
+                onNotice("插件已移入回收站");
+                await refresh(false);
+              } catch (error) {
+                setErrorMessage(error instanceof Error ? error.message : String(error));
+              } finally {
+                setBusyPluginName(null);
+              }
+            })();
+          }}
+        />
+        <SkillPreviewDialog
+          target={skillPreviewTarget}
+          presentation={
+            selectedPlugin?.skills?.find((skill) => skill.id === skillPreviewTarget?.skillId)
+              ? {
+                  name: selectedPlugin.skills.find((skill) => skill.id === skillPreviewTarget?.skillId)?.name ?? "",
+                  sourceLabel: "插件",
+                  description: selectedPlugin.skills.find((skill) => skill.id === skillPreviewTarget?.skillId)?.description ?? "",
+                  enabled: true,
+                  toggleDisabled: true,
+                  deletable: false,
+                }
+              : null
+          }
+          runtimeClient={runtimeClient}
+          onOpenChange={(open) => {
+            if (!open) setSkillPreviewTarget(null);
+          }}
+        />
+      </section>
+    );
+  }
 
   if (section === "connectors") {
     return (

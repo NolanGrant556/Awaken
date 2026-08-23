@@ -35,7 +35,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | 长期记忆与 Dream | Markdown Memory、主模型相关性召回、受控工具、无正文事件、Settings 查看/删除、手动/空闲期 Dream、Workbench 紧凑回执与 Dream 重启恢复 | [11 长期记忆](docs/11_长期记忆/索引.md) |
 | 定时任务 | 首版已支持：左侧一级入口、循环/日程任务、10 个内置模板、创建/编辑/启停/删除/立即执行/取消、专属线程、执行历史、Core 内调度器与 misfire 恢复、Agent 与固定提醒两类任务；Desktop 完全退出后不运行 | [12 定时任务](docs/12_定时任务/索引.md) |
 | 移动端 | 当前不支持；已确认目标设计为 Desktop/Core 继续拥有本机执行与耐久事实，手机通过受控 Gateway 与可自托管 relay 查看和控制任务，不直接连接或暴露 loopback Core | [13 移动端](docs/13_移动端/索引.md) |
-| 插件 | 当前不支持；已确认目标设计为按 Agent Plugins 1.0.0 标准安装第三方插件目录（`plugin.json` + `skills/` + `mcp.json`），由 Core 插件层把包内 Skills 与 MCP servers 以受控 identity 注入现有 Skill Catalog 与 MCP runtime，支持整体启停、升级与 Trash 可恢复卸载 | [14 插件](docs/14_插件/索引.md) |
+| 插件 | 首期已支持：Desktop 插件页按 Agent Plugins 1.0.0 安装 user-scope 第三方插件（root `plugin.json` + `skills/` + `mcp.json`），Core `src/plugins` 把启用包内 Skills/MCP 以 `plugin__` identity 注入既有 08/06 运行时，支持启停、升级与 Trash 卸载。marketplace / legacy manifest / 插件自动 Hook / 模型 `plugin_install` 当前不支持；真实 Desktop 2.1 验收尚未完成 | [14 插件](docs/14_插件/索引.md) |
 
 各入口的 `索引.md` 只负责路由。产品行为、代码 owner、状态/数据/事件流、异常恢复和验收方法以索引指向的专项文档为准。
 
@@ -127,6 +127,7 @@ Gallery 使用 mock state，只能证明组件渲染，不能替代 Awaken Deskt
 | `src/tool`、`src/tools` | 工具合同、暴露、权限、Outcome 与内置工具 |
 | `src/mcpclient` | MCP 配置、连接、认证和动态工具桥接 |
 | `src/skills`、`src/skillruntime` | Skill 发现、激活和执行 |
+| `src/plugins` | Agent Plugins 包格式、安装生命周期，以及向 08/06 提供 root 与 plugin-scope 配置 |
 | `scripts` | Desktop、构建与验收自动化 |
 | `Awaken Design System` | UI-only 组件、tokens、资源和 Gallery |
 | `docs` | 按产品功能域组织的确定性工程知识库 |

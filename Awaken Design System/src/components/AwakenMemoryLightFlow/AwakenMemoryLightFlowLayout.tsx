@@ -1,5 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useRef } from "react";
 import { AwakenIcon } from "../AwakenIcon";
+import { useAwakenSettingsSection } from "../AwakenSettings/AwakenSettingsSectionContext";
 import { AwakenMemoryLightFlow } from "./AwakenMemoryLightFlow";
 import type { AwakenMemoryLightFlowTheme } from "./AwakenMemoryLightFlow.model";
 import "./AwakenMemoryLightFlowLayout.css";
@@ -14,11 +15,14 @@ export type AwakenMemoryLightFlowLayoutProps = {
 
 export function AwakenMemoryLightFlowLayout({
   theme = "light",
-  title = "记忆",
+  title,
   titleAs = "h2",
   className,
   children,
 }: AwakenMemoryLightFlowLayoutProps) {
+  const settingsSection = useAwakenSettingsSection();
+  const resolvedTitle = title ?? settingsSection?.title ?? "记忆";
+  const titleIconConcept = settingsSection?.concept ?? "settings-memory";
   const rootRef = useRef<HTMLElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const Heading = titleAs;
@@ -97,8 +101,8 @@ export function AwakenMemoryLightFlowLayout({
       <div className="aw-memory-light-flow-layout__ambient">
         <AwakenMemoryLightFlow theme={theme} />
         <Heading className="aw-memory-light-flow-layout__title">
-          <AwakenIcon concept="settings-memory" size={24} className="aw-memory-light-flow-layout__title-icon" />
-          <span>{title}</span>
+          <AwakenIcon concept={titleIconConcept} size={24} className="aw-memory-light-flow-layout__title-icon" />
+          <span>{resolvedTitle}</span>
         </Heading>
       </div>
       <div className="aw-memory-light-flow-layout__content">

@@ -91,7 +91,7 @@ const RAW_DEFINITIONS = {
   "folder-open": {
     shape: "horizontal",
     purpose: "展开中的文件夹",
-    build: () => [folderOpen()],
+    build: () => folderOpen(),
   },
 
   // ---- 圆形族 ----

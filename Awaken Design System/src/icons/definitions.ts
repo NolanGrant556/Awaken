@@ -32,6 +32,7 @@ import {
   fileBody,
   fileWithMark,
   folderBody,
+  folderOpen,
   gear,
   globe,
   hexagon,
@@ -86,6 +87,11 @@ const RAW_DEFINITIONS = {
     shape: "square",
     purpose: "新建 / 添加文件夹或项目",
     build: () => [folderBody(5, 2.9, 12.4, 12), ...plusMark(6.2, 7.45, 2.35)],
+  },
+  "folder-open": {
+    shape: "horizontal",
+    purpose: "展开中的文件夹",
+    build: () => [folderOpen()],
   },
 
   // ---- 圆形族 ----

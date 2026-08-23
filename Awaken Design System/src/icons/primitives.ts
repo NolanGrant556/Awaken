@@ -32,6 +32,44 @@ export function folderBody(
   return poly(pts, [1.35, 0.9, 0.6, 1.35, 1.35, 1.35], true);
 }
 
+/**
+ * 展开中的文件夹。页签台阶与 `folderBody` 同一套，正面按打开口来画：
+ * 左唇 45° 抬起、底边更宽。这是同一个文件夹被打开，不是另一只托盘。
+ *
+ * 试过展开态继续用收起的 `folderBody`，侧栏点开后图标不再变化，读不出开合。
+ * 试过托盘形双平行四边形，16px 下被读成文件托盘。
+ */
+export function folderOpen(
+  tabWidth = 5.2,
+  tabHeight = 3,
+  width = 14,
+  height = 10.7,
+): GeomOp {
+  const mouthY = tabHeight + 2.6;
+  const lip = 2.8;
+  const frontOut = 1.6;
+  const frontRightX = width + frontOut;
+  const frontRightY = mouthY + frontOut;
+  const drop = height - frontRightY;
+  return poly(
+    [
+      [0, mouthY + lip],
+      [lip, mouthY],
+      [width, mouthY],
+      [frontRightX, frontRightY],
+      [frontRightX - drop, height],
+      [0, height],
+      [0, 0],
+      [tabWidth, 0],
+      [tabWidth + tabHeight, tabHeight],
+      [width, tabHeight],
+      [width, mouthY],
+    ],
+    [0.8, 0.8, 0.8, 0.8, 1.1, 1.1, 1.35, 0.9, 0.6, 1.35, 0.8],
+    false,
+  );
+}
+
 /** 文件主体：右上角折角。折角边长同时是 45 度斜边。 */
 export function fileBody(width = 11, height = 13.4, fold = 3.6): GeomOp {
   const pts: Vec[] = [

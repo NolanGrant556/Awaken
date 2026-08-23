@@ -590,7 +590,7 @@ describe("ProjectFilesWorkspace", () => {
     await settle();
     expect(container.textContent).toContain("index.ts");
     expect(srcRow?.getAttribute("aria-expanded")).toBe("true");
-    expect(srcRow?.querySelector('[data-file-icon="folder"]')).not.toBeNull();
+    expect(srcRow?.querySelector('[data-file-icon="folder-open"]')).not.toBeNull();
     const indexRow = Array.from(container.querySelectorAll("button")).find(
       (button) => button.textContent?.trim() === "index.ts",
     );

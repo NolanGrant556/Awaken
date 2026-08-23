@@ -7,7 +7,6 @@ const externalDependencies = [
   "react-dom",
   "react/jsx-runtime",
   "@floating-ui/react",
-  "lucide-react",
   "mermaid",
   "react-markdown",
   "rehype-highlight",

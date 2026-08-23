@@ -230,33 +230,6 @@ function tokenRenderSignature(tokens: ComposerInlineToken[]): string {
   return JSON.stringify(tokens.map(({ id, type, label, title }) => [id, type, label, title ?? ""]));
 }
 
-function appendPackageIcon(document: Document, token: HTMLElement): void {
-  const namespace = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(namespace, "svg");
-  svg.setAttribute("class", "composer-bar-token-icon");
-  svg.setAttribute("width", "14");
-  svg.setAttribute("height", "14");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "1.9");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
-  svg.setAttribute("focusable", "false");
-  svg.setAttribute("aria-hidden", "true");
-  for (const pathData of [
-    "m7.5 4.27 9 5.15",
-    "M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z",
-    "m3.3 7 8.7 5 8.7-5",
-    "M12 22V12",
-  ]) {
-    const path = document.createElementNS(namespace, "path");
-    path.setAttribute("d", pathData);
-    svg.append(path);
-  }
-  token.append(svg);
-}
-
 function appendAwakenLineIcon(
   document: Document,
   token: HTMLElement,
@@ -279,39 +252,12 @@ function appendAwakenLineIcon(
   svg.setAttribute("stroke-linejoin", "round");
   svg.setAttribute("focusable", "false");
   svg.setAttribute("aria-hidden", "true");
-  for (const pathData of icon.paths) {
+  for (const [index, pathData] of icon.paths.entries()) {
     const path = document.createElementNS(namespace, "path");
     path.setAttribute("d", pathData);
-    svg.append(path);
-  }
-  token.append(svg);
-}
-
-function appendComputerIcon(document: Document, token: HTMLElement): void {
-  const namespace = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(namespace, "svg");
-  svg.setAttribute("class", "composer-bar-token-icon");
-  svg.setAttribute("width", "14");
-  svg.setAttribute("height", "14");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "1.9");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
-  svg.setAttribute("focusable", "false");
-  svg.setAttribute("aria-hidden", "true");
-
-  const rect = document.createElementNS(namespace, "rect");
-  rect.setAttribute("x", "2");
-  rect.setAttribute("y", "3");
-  rect.setAttribute("width", "20");
-  rect.setAttribute("height", "14");
-  rect.setAttribute("rx", "2");
-  svg.append(rect);
-  for (const pathData of ["M8 21h8", "M12 17v4"]) {
-    const path = document.createElementNS(namespace, "path");
-    path.setAttribute("d", pathData);
+    if (icon.filledPathIndexes?.includes(index)) {
+      path.setAttribute("fill", "currentColor");
+    }
     svg.append(path);
   }
   token.append(svg);
@@ -325,11 +271,11 @@ function composerTokenElement(document: Document, token: ComposerInlineToken): H
   element.setAttribute("draggable", "false");
   element.title = token.title ?? token.label;
   if (token.type === "capability") {
-    appendComputerIcon(document, element);
+    appendAwakenLineIcon(document, element, "display-pointer");
   } else if (token.type === "skill") {
     appendAwakenLineIcon(document, element, "book-open");
   } else {
-    appendPackageIcon(document, element);
+    appendAwakenLineIcon(document, element, "package");
   }
 
   const label = document.createElement("span");

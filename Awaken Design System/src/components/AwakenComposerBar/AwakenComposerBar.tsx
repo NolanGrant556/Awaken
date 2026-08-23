@@ -766,7 +766,9 @@ export function AwakenComposerBar({
         {item.icon ? <span className="composer-bar-model-trigger-icon">{item.icon}</span> : null}
         <span className="composer-bar-model-trigger-label">{item.label}</span>
         {hasMenu ? (
-          <AwakenIcon concept="dropdown" size={16} />
+          <span className="composer-bar-model-trigger-chevron" aria-hidden="true">
+            <AwakenIcon concept="dropdown" size={14} />
+          </span>
         ) : null}
       </>
     );

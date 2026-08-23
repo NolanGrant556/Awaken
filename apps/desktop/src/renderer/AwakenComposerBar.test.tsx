@@ -174,8 +174,16 @@ describe("AwakenComposerBar unified token editing", () => {
     );
 
     expect(token?.textContent).toBe("Computer Use");
-    expect(token?.querySelector("rect")?.getAttribute("width")).toBe("20");
-    expect(token?.querySelectorAll("path")).toHaveLength(2);
+    expect(token?.querySelector("svg")?.classList.contains("aw-icon--display-pointer")).toBe(true);
+    expect(token?.querySelectorAll("path").length).toBeGreaterThan(0);
+  });
+
+  it("renders file tokens from the Awaken package icon registry", () => {
+    const { editor } = renderComposer({
+      tokens: [{ id: "file-token", type: "file", label: "上下文" }],
+    });
+    const token = editor.querySelector('[data-composer-token-id="file-token"]');
+    expect(token?.querySelector("svg")?.classList.contains("aw-icon--package")).toBe(true);
   });
 
   it("maps edits before and after the token back to structured segments", () => {
@@ -814,8 +822,16 @@ describe("AwakenComposerBar unified token editing", () => {
     const trigger = host.querySelector<HTMLButtonElement>(".composer-bar-model-trigger");
     expect(trigger?.querySelector(".composer-bar-model-trigger-icon")).not.toBeNull();
     expect(trigger?.querySelector('[data-testid="selected-model-logo"]')).not.toBeNull();
+    const chevron = trigger?.querySelector<HTMLElement>(
+      ".composer-bar-model-trigger-chevron",
+    );
+    expect(chevron?.getAttribute("aria-hidden")).toBe("true");
+    expect(chevron?.querySelector(".aw-icon--chevron-down")?.getAttribute("width")).toBe(
+      "14",
+    );
     expect(trigger?.getAttribute("aria-label")).toBe("kimi-for-coding");
     expect(trigger?.title).toBe("kimi-for-coding");
+    expect(trigger?.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("stretches the model trigger itself in both center and dock composers", () => {
@@ -842,6 +858,7 @@ describe("AwakenComposerBar unified token editing", () => {
 
     act(() => trigger.click());
     expect(trigger.classList).toContain("composer-bar-model-trigger-open");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(trigger.style.getPropertyValue("--composer-model-trigger-collapsed-width")).toBe(
       "136px",
     );
@@ -850,6 +867,7 @@ describe("AwakenComposerBar unified token editing", () => {
     );
 
     act(() => trigger.click());
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
     rerender({ variant: "dock" });
     bounds.mockReturnValue({
       x: 0,
@@ -865,6 +883,7 @@ describe("AwakenComposerBar unified token editing", () => {
     act(() => trigger.click());
     expect(host.querySelector(".composer-bar-dock")).not.toBeNull();
     expect(trigger.classList).toContain("composer-bar-model-trigger-open");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(trigger.style.getPropertyValue("--composer-model-trigger-collapsed-width")).toBe(
       "118px",
     );

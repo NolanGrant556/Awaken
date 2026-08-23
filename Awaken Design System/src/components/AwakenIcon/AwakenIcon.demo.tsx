@@ -5,6 +5,10 @@ import {
   AWAKEN_ICON_STROKE,
   AWAKEN_LINE_ICON_NAMES,
   AWAKEN_OPTICAL_SHAPES,
+  APPROVED_LUCIDE_ICON_NAMES,
+  APPROVED_LUCIDE_LICENSE,
+  APPROVED_LUCIDE_STROKE,
+  APPROVED_LUCIDE_VERSION,
   ICON_DEFINITIONS,
   MCP_OFFICIAL_MARK,
   getAwakenIcon,
@@ -30,10 +34,11 @@ export function AwakenIconDemo() {
           图标库 <code>AwakenIcon</code>
         </h2>
         <p>
-          Awaken 自有的 16 网格线性图标集，共 {AWAKEN_LINE_ICON_NAMES.length} 个原创字形与{" "}
-          {AWAKEN_BRAND_ICON_NAMES.length} 个第三方官方品牌标记。全套由同一套几何约束生成：只用 0 / 45 / 90
-          度直线后倒角、圆头端点、描边固定 {AWAKEN_ICON_STROKE}、按四种光学形状归一化视觉重量、重叠净间隙不小于 3
-          个网格单位。<code>AwakenIcon</code> 是唯一渲染出口，尺寸只接受 {AWAKEN_ICON_SIZES.join(" / ")} 五档。
+          Awaken 的 16 网格线性图标集，共 {AWAKEN_LINE_ICON_NAMES.length} 个字形与{" "}
+          {AWAKEN_BRAND_ICON_NAMES.length} 个第三方官方品牌标记。其中 {APPROVED_LUCIDE_ICON_NAMES.length} 个字形来自经用户确认的
+          Lucide v{APPROVED_LUCIDE_VERSION} 母形（{APPROVED_LUCIDE_LICENSE}），已经离线固化为本地 path，不产生运行时依赖；其余字形由 Awaken 几何或有来源的产品恢复轮廓持有。
+          Awaken 几何使用固定 {AWAKEN_ICON_STROKE} 描边，Lucide 固化轮廓使用等比后的 {APPROVED_LUCIDE_STROKE} 描边，二者都保持圆头端点与圆角接合。
+          <code>AwakenIcon</code> 仍是唯一渲染出口，尺寸只接受 {AWAKEN_ICON_SIZES.join(" / ")} 五档。
         </p>
       </header>
 
@@ -58,14 +63,15 @@ export function AwakenIconDemo() {
       <div className="aw-icon-demo__block">
         <h3>逐图标</h3>
         <p className="aw-icon-demo__hint">
-          实测视觉尺寸贴合声明的光学形状，是「同屏视觉重量一致」的验收口径；等比缩放只能让一条轴贴合，另一条轴不得超出。
+          Awaken 构造几何继续显示目标与实测光学盒；Lucide authored 字形保留独立实验室中确认的原始比例，不再二次拉伸。
         </p>
         <div className="aw-icon-demo__grid">
           {AWAKEN_LINE_ICON_NAMES.map((name) => {
             const icon = getAwakenIcon(name);
             const def = ICON_DEFINITIONS[name];
             const [tw, th] = opticalVisual(def);
-            const measured = icon.mode === "line" ? icon.measured : ([0, 0] as const);
+            const measured = icon.mode === "line" ? icon.measured : undefined;
+            const provenance = icon.mode === "line" ? icon.provenance : undefined;
             return (
               <div key={name} className="aw-icon-demo__card">
                 <div className="aw-icon-demo__card-art">
@@ -75,7 +81,11 @@ export function AwakenIconDemo() {
                   <code>{name}</code>
                   <span>{def.purpose}</span>
                   <em>
-                    {def.shape} · 目标 {tw}×{th} · 实测 {measured[0].toFixed(2)}×{measured[1].toFixed(2)}
+                    {provenance?.kind === "licensed-authored"
+                      ? `${def.shape} · ${provenance.source} · ${provenance.license}`
+                      : measured
+                        ? `${def.shape} · 目标 ${tw}×${th} · 实测 ${measured[0].toFixed(2)}×${measured[1].toFixed(2)}`
+                        : `${def.shape} · authored`}
                     {icon.mode === "line" && icon.minSize > 12 ? ` · 下限 ${icon.minSize}px` : ""}
                   </em>
                 </div>
@@ -88,7 +98,7 @@ export function AwakenIconDemo() {
       <div className="aw-icon-demo__block">
         <h3>能力与连接器入口</h3>
         <p className="aw-icon-demo__hint">
-          产品一级入口优先使用熟悉、彼此可区分的比喻：连接器恢复插头，Skill 使用打开的书，CLI 使用终端；Hook 保留可装配单元六边形。
+          产品一级入口优先使用熟悉、彼此可区分的比喻：连接器使用插头，Skill 使用打开的书，CLI 使用终端；Hook 使用 Webhook 路由结构。
         </p>
         <div className="aw-icon-demo__family">
           {CAPABILITY_FAMILY.map(({ name, label }) => (
@@ -146,7 +156,7 @@ export function AwakenIconDemo() {
       <div className="aw-icon-demo__block">
         <h3>光学形状</h3>
         <p className="aw-icon-demo__hint">
-          四种光学形状各自的视觉尺寸经过补偿，使不同外形的图标读起来一样大 —— 圆必须画得比方稍大才显得等大。
+          四种光学形状继续作为分组、定制几何归一化和尺寸审计口径；licensed authored 字形保留已确认比例，不用目标盒再次拉伸。
         </p>
         <div className="aw-icon-demo__shapes">
           {(Object.keys(AWAKEN_OPTICAL_SHAPES) as Array<keyof typeof AWAKEN_OPTICAL_SHAPES>).map((shape) => {

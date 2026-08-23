@@ -923,7 +923,14 @@ export function ProjectFilesWorkspace({
               setFileListExpanded((current) => !current);
             }}
           >
-            <AwakenIcon concept="folder-expanded" size={20} />
+            <span className="project-files-pathbar__folder-icon" aria-hidden="true">
+              <span className="project-files-pathbar__folder-icon-state project-files-pathbar__folder-icon-state--collapsed">
+                <AwakenIcon concept="project" size={20} />
+              </span>
+              <span className="project-files-pathbar__folder-icon-state project-files-pathbar__folder-icon-state--expanded">
+                <AwakenIcon concept="folder-expanded" size={20} />
+              </span>
+            </span>
           </button>
         </div>
       </header>

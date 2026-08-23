@@ -2137,7 +2137,7 @@ export function ExtensionsView({
                     void handlePickSkillProjectRoot();
                   }}
                 >
-                  <AwakenIcon concept="project" size={16} />
+                  <AwakenIcon concept="folder-expanded" size={16} />
                 </button>
               </div>
             </div>

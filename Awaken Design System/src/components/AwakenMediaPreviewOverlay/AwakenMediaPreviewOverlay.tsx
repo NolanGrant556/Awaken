@@ -408,7 +408,7 @@ export function AwakenMediaPreviewOverlay({
                 title={revealLabel}
                 onClick={onReveal}
               >
-                <AwakenIcon concept="project" size={16} />
+                <AwakenIcon concept="folder-expanded" size={16} />
                 显示位置
               </button>
             ) : null}

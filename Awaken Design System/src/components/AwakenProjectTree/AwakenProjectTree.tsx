@@ -449,7 +449,11 @@ function ProjectNode({
                 <AwakenIcon concept="step-done" size={12} />
               </span>
             ) : isProject ? (
-              <AwakenIcon concept="project" size={20} />
+              isExpanded ? (
+                <AwakenIcon concept="folder-expanded" size={20} />
+              ) : (
+                <AwakenIcon concept="project" size={20} />
+              )
             ) : isTopLevel ? (
               <AwakenIcon concept="memory-feedback" size={16} />
             ) : null}

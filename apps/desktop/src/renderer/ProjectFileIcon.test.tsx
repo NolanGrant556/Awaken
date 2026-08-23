@@ -21,6 +21,7 @@ describe("ProjectFileIcon", () => {
     ["file", "aw-icon--file"],
     ["symlink", "aw-icon--symlink"],
     ["folder", "aw-icon--folder"],
+    ["folder-open", "aw-icon--folder-open"],
   ] as const)("renders the %s file-type icon", (kind, expectedClass) => {
     expect(renderToStaticMarkup(<ProjectFileIcon kind={kind} />)).toContain(
       expectedClass,

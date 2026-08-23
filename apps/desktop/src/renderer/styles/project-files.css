@@ -605,7 +605,7 @@ body.is-project-file-list-resizing .project-files-workspace__body {
   transition: color 140ms ease;
 }
 
-.project-files-tree-row[aria-expanded="true"] .project-files-tree-row__icon {
+.project-files-tree-row__icon[data-file-icon="folder-open"] {
   color: var(--aw-text-secondary);
   animation: project-files-folder-open 170ms cubic-bezier(0.2, 0.75, 0.25, 1);
 }
@@ -1559,7 +1559,7 @@ body.is-project-file-list-resizing .project-files-workspace__body {
 
 @media (prefers-reduced-motion: reduce) {
   .project-files-tree-row.is-nested,
-  .project-files-tree-row[aria-expanded="true"] .project-files-tree-row__icon,
+  .project-files-tree-row__icon[data-file-icon="folder-open"],
   .project-files-tree-row.is-loading .project-files-tree-row__icon {
     animation: none;
   }

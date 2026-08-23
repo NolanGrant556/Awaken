@@ -15,7 +15,6 @@ export const AWAKEN_ICON_CONCEPTS = {
   "thread-new": "chat-bubble-plus",
   project: "folder",
   "project-add": "folder-plus",
-  "folder-expanded": "folder-open",
 
   // 通用动作
   add: "plus",

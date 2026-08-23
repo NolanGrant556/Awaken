@@ -96,7 +96,7 @@ Awaken 自有的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是�
 | --- | --- |
 | `src/icons/geometry.ts` | 几何内核：op 构造、倒角、光学形状归一化、path 编译 |
 | `src/icons/primitives.ts` | 复用原语：文件夹、文件、加减叉、折叠箭头、六边形、齿轮 |
-| `src/icons/definitions.ts` | 图标定义。每个图标只声明几何与光学形状 |
+| `src/icons/definitions.ts` | 图标定义。默认声明构造几何与光学形状；恢复历史字形时可声明有来源、有许可、可审计的 authored path 例外 |
 | `src/icons/brandMarks.ts` | 第三方官方品牌标记，保留 authored paths 并可增加对称透明 viewBox 留白 |
 | `src/icons/registry.ts` | 名字 → 渲染数据，`AwakenIconName` 类型 |
 | `src/icons/concepts.ts` | 概念 → 图形的唯一映射 |
@@ -125,7 +125,9 @@ Awaken 自有的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是�
 
 当一个概念的常规比喻在 16px 下画不出可辨形体时，换比喻，而不是上一个读不出来的字形。
 
-长期记忆是这条规则的实例。常规比喻是大脑，但大脑的识别特征是脑回的起伏，而这套图标只用直线倒角；试过「圆加中缝」（被读成被分割的圆）和「交替半径的叶状轮廓」（倒角后退化成五边形）两版都不可辨，最终改用 `stack`（层叠）。它在语义上反而更贴 Awaken 的记忆 —— 记忆就是不断累积的 Markdown 记忆层。同理，外观原本画调色盘（圆加三个颜料井），三点在圆里被读成一张脸，改用 `color-mode` 的对比度画法。
+长期记忆是一个有来源的恢复例外。PR #36 前 Desktop 实际使用 `lucide-react v0.468.0` 的 `Brain`；用户辨认的是这套带脑回曲线的脑袋轮廓，直线倒角版和 `stack`（层叠）都没有保留原有识别性。现在 `settings-memory` 重新映射到 `brain`，并把原 Brain 的 authored path 等比缩放进本图标库，保留 ISC 来源与许可记录，继续使用 Awaken 固定 `1.25` 描边。Desktop 不重新引入 `lucide-react` 运行时依赖，所有记忆入口仍只消费 `settings-memory` concept。
+
+这种 authored 恢复只用于产品已经形成稳定识别、且当前几何构造规则无法无损复现的历史字形。定义必须同时记录原始来源、版本、许可、实测光学包围盒与 `minSize`，并继续通过概念表、快照和尺寸守卫；不能借此绕过图标 owner 或在调用点粘贴 SVG。同理，外观原本画调色盘（圆加三个颜料井），三点在圆里被读成一张脸，仍使用 `color-mode` 的对比度画法。
 
 换比喻必须写在图标定义的注释里，包含试过哪些版本、为什么不可辨。否则下一个人会把它改回去。
 

@@ -35,13 +35,14 @@ export function folderBody(
 /**
  * 展开中的文件夹。页签台阶与 `folderBody` 同一套。
  *
- * 20px 侧栏实测：只要背板再画通高左边，正面梯形会被重新围成合上的盒子，
- * 开口只剩盒子中间一条横线。所以背板只留页签和顶边；正面是占大部分高度
- * 的 45° 梯形，左边必须是斜边。这是同一只文件夹被打开。
+ * 这是同一只文件夹被打开：背板只留页签和顶边，正面是 ≥3 网格开口之下
+ * 的 45° 平行四边形。描边 1.25，开口中心距必须明显大于描边，20px 侧栏
+ * 才能看出「合上 / 打开」，而不是盒子中间一条横线。
  *
- * 试过托盘形双平行四边形：16px 下被读成文件托盘。
- * 试过通高背板 + 梯形正面：20px 下读成合上的盒子中间一刀。
  * 试过展开态继续用收起的 `folderBody`：侧栏点开后图标不再变化。
+ * 试过托盘形双平行四边形：16px 下被读成文件托盘。
+ * 试过通高背板 + 贴着页签的内折：开口中心距 1.4 < 描边，20px 糊成合上的盒子。
+ * 试过通高背板 + 梯形正面：左边把剪影重新围成矩形，开口只剩中间一刀。
  */
 export function folderOpen(
   tabWidth = 5.2,
@@ -49,9 +50,9 @@ export function folderOpen(
   width = 14,
   height = 10.7,
 ): GeomOp[] {
-  const mouthY = tabHeight + 1.4;
-  const lip = height - mouthY;
-  const frontRight = width + 0.3;
+  const mouthY = tabHeight + 3.15;
+  const rise = height - mouthY;
+  const frontRight = width + 0.35;
   return [
     poly(
       [
@@ -59,16 +60,16 @@ export function folderOpen(
         [0, 0],
         [tabWidth, 0],
         [tabWidth + tabHeight, tabHeight],
-        [width - 3.6, tabHeight],
+        [width - 2.2, tabHeight],
       ],
       [0, 1.35, 0.9, 0.6, 0],
     ),
     poly(
       [
         [0, height],
-        [lip, mouthY],
+        [rise, mouthY],
         [frontRight, mouthY],
-        [frontRight, height],
+        [frontRight - rise, height],
       ],
       [0.75, 0.75, 1.05, 1.05],
       true,

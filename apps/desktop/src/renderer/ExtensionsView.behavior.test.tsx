@@ -179,6 +179,7 @@ describe("ExtensionsView behavior", () => {
       listCliConnectors: vi.fn(async () => []),
       listMcpServers: vi.fn(async () => []),
       listSkills,
+      listPlugins: vi.fn(async () => []),
       getSkillPreview,
       deleteSkill,
       subscribeCliConnectorState: vi.fn(() => () => undefined),
@@ -346,6 +347,7 @@ describe("ExtensionsView behavior", () => {
       listCliConnectors: vi.fn(async () => []),
       listMcpServers: vi.fn(async () => []),
       listSkills,
+      listPlugins: vi.fn(async () => []),
       subscribeCliConnectorState: vi.fn(() => () => undefined),
     } as unknown as RuntimeClient;
 
@@ -486,6 +488,7 @@ describe("ExtensionsView behavior", () => {
       listCliConnectors: vi.fn(async () => []),
       listMcpServers: vi.fn(async () => []),
       listSkills,
+      listPlugins: vi.fn(async () => []),
       getSkillPreview: vi.fn(async () => ({
         frontmatterRaw: "---\nname: project-report\n---",
         bodyMarkdown: "# 项目报告正文",

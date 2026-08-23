@@ -19,7 +19,7 @@ export function AwakenPluginCardDemo() {
   return (
     <section className="ads-component-demo" aria-label="Plugin 组件族演示">
       <header className="ads-component-demo-header">
-        <h2>Plugin 组件族</h2>
+        <h2>Plugin 卡片 <code>AwakenPluginCard</code></h2>
       </header>
       <div className="aw-plugin-card-demo__stack">
         {items.map((plugin) => (

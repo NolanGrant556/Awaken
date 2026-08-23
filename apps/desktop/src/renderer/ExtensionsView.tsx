@@ -779,7 +779,9 @@ export function ExtensionsView({
         needsFallbackCatalog
           ? runtimeClient.listSkills(fallbackRoots.length > 0 ? fallbackRoots : undefined)
           : Promise.resolve([]),
-        runtimeClient.listPlugins().catch(() => []),
+        typeof runtimeClient.listPlugins === "function"
+          ? runtimeClient.listPlugins().catch(() => [])
+          : Promise.resolve([]),
       ]);
       if (generation !== refreshGenerationRef.current) {
         return;

@@ -8,7 +8,7 @@
 
 长提示默认收起到 3 行；单击气泡后展开到 9 行，超过部分在气泡内部滚动。拖选正文、token 标签或附件文件名不会触发展开。展开后点击气泡外空白处会复原，底部小工具栏提供复制按钮。
 
-结构化 token 与前后正文在同一个文本流中投影。组件保留 `leadingText` 的原始空格和换行，并让“前文 → token → 后文”按气泡实际宽度自然换行；token 不拥有独立 flex 行，后文也不会被拆成单独文本块。正文、token 标签（Skill/文件/capability）与附件显示名可局部选择；`data-aw-select-all-root` 承接 Desktop 的 `Cmd/Ctrl+A`。默认复制与选区复制都按可见正文流拼装（含 token 标签），不把软换行写成硬换行，也不包含 Skill 路径或隐藏引导。父级传入 `copyText` 时可覆盖工具栏默认值。
+结构化 token 与前后正文在同一个文本流中投影。组件保留 `leadingText` 的原始空格和换行，并让“前文 → token → 后文”按气泡实际宽度自然换行；token 不拥有独立 flex 行，后文也不会被拆成单独文本块。Prompt token 的 label 继续参与周围正文 baseline，14px 图标统一下沉 3px，使图标、label 与前后 12/18px 正文的可见底线一致；这一规则同时覆盖 Skill、文件与 capability token。正文、token 标签（Skill/文件/capability）与附件显示名可局部选择；`data-aw-select-all-root` 承接 Desktop 的 `Cmd/Ctrl+A`，组件监听逻辑选区并在其穿过 Token 时给整个原子节点补齐选中底色，因此 SVG 图标、间距和 label 之间不会留下白洞。默认复制与选区复制都按可见正文流拼装（含 token 标签），不把软换行写成硬换行，也不包含 Skill 路径或隐藏引导。父级传入 `copyText` 时可覆盖工具栏默认值。
 
 ## 文件
 

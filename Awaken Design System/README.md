@@ -97,7 +97,7 @@ Awaken 自有的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是�
 | `src/icons/geometry.ts` | 几何内核：op 构造、倒角、光学形状归一化、path 编译 |
 | `src/icons/primitives.ts` | 复用原语：文件夹、文件、加减叉、折叠箭头、六边形、齿轮 |
 | `src/icons/definitions.ts` | 图标定义。每个图标只声明几何与光学形状 |
-| `src/icons/brandMarks.ts` | 第三方官方品牌标记，保留 authored geometry |
+| `src/icons/brandMarks.ts` | 第三方官方品牌标记，保留 authored paths 并可增加对称透明 viewBox 留白 |
 | `src/icons/registry.ts` | 名字 → 渲染数据，`AwakenIconName` 类型 |
 | `src/icons/concepts.ts` | 概念 → 图形的唯一映射 |
 | `src/icons/sizes.ts` | 尺寸档，与 `tokens.css` 的 `--aw-icon-size-*` 同一套 |
@@ -129,7 +129,7 @@ Awaken 自有的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是�
 
 换比喻必须写在图标定义的注释里，包含试过哪些版本、为什么不可辨。否则下一个人会把它改回去。
 
-展开文件夹使用一条连续轮廓连接前翻页、底边和后层文件夹。在项目树的 20px 尺寸下，它必须明确读成单个打开的文件夹，不能用两条重叠横边形成托盘或文件夹组；多文件夹语义只由 `folders` 承担。
+文件夹闭合/展开态使用同一桌面文件夹比例：页签先用短圆肩离开顶边，再以紧凑斜肩落到主体。展开态用一条连续轮廓连接前翻页、底边和后层，在项目树的 20px 尺寸下必须明确读成单个打开的文件夹，不能成为托盘或文件夹组；多文件夹语义只由 `folders` 承担。
 
 ### 圆弧的唯一合法来源
 
@@ -139,15 +139,15 @@ Awaken 自有的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是�
 
 只给产品真正需要实心的概念做实心版。实心图标的视觉包围盒就是几何包围盒，不为描边预留半个描边宽度，因此按 `stroke 0` 归一化。当前唯一的实心字形是 `stop` —— 描边版在 16px 下读起来像一个空框，和「发送」的视觉重量不成对比。允许实心的清单在图标契约测试里显式登记，新增必须同时改测试。
 
-### 六边形形状族
+### 能力与连接器图形
 
-尖顶正六边形是 Awaken「可装配单元」的族形，全套里唯一，因此小尺寸下不会与方框族、文件族混淆。当前成员：`skill`（基型，可读下限 12px）、`skill-core`、`hook`、`connector`（带内标，可读下限 16px）。该外形与 Agent Skills 生态的事实标记一致，但几何由 Awaken 自有 `hexagon` 原语生成，不引用外部文件。
+一级入口使用直接、彼此可区分的比喻：`connector` 是清晰的双插脚 Plug 轮廓；`skill` 与 `skill-active` 统一映射 `book-open`；CLI 使用 `terminal`。Hook 仍使用六边形表达可装配扩展单元。产品调用点只消费这些概念映射，不自行复制 SVG。
 
 ### 品牌标记
 
-第三方官方标记不进入 16 网格构造体系，也不参与光学归一化，按既有规则保留 authored geometry；名字带 `-mark` 后缀与自绘图标区分，并各自声明来源、许可、商标归属与 `minSize`。
+第三方官方标记不进入 16 网格构造体系，保留 authored paths；Design System 可以只在 viewBox 外围增加对称透明留白，让它与线性图标共用光学包围盒，不得改写原始 path。名字带 `-mark` 后缀与自绘图标区分，并各自声明来源、许可、商标归属与 `minSize`。
 
-MCP 使用官方标记 `mcp-mark`，可读下限 20px —— 更小尺寸下互扣勾形的平行笔画会粘连，这是标记结构决定的，与缩放方式无关。因此 14–16px 的密集行改用 Awaken 自绘的 `mcp-compact` 伴随字形，不改动官方标记。
+MCP 使用官方标记 `mcp-mark`，对称留白后的可读下限为 14px。连接器 MCP/CLI 分类共用 16px 请求尺寸，MCP 目录卡使用 20px 卡片尺寸，MCP 工具轨迹与其它工具共用 14px 请求尺寸。三处都消费同一官方标记，不使用自绘伴随字形。
 
 ### 概念优先
 

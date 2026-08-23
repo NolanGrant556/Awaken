@@ -46,7 +46,7 @@
 
 .composer-bar-token {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 4px;
   min-width: 0;
   max-width: min(220px, 100%);
@@ -61,9 +61,16 @@
 }
 
 .composer-bar-token-icon {
+  display: block;
   flex: 0 0 auto;
   color: currentColor;
-  transform: translateY(0.08em);
+  /* The 14px SVG box is mathematically centered in the 20px text line box,
+     but its visible stroke otherwise sits above the glyph baseline. */
+  transform: translateY(2px);
+}
+
+.composer-bar-token[data-composer-token-selected] {
+  background: color-mix(in srgb, var(--aw-text-blue) 22%, transparent);
 }
 
 .composer-bar-token-label {

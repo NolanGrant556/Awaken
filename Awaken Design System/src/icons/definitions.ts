@@ -35,9 +35,7 @@ import {
   gear,
   globe,
   hexagon,
-  hexagonCore,
   hexagonHook,
-  hexagonSlots,
   magnifier,
   minusMark,
   panelFrame,
@@ -59,8 +57,7 @@ export type IconDefinition = {
   readonly build: () => GeomOp[];
   /**
    * 可读下限。默认 12 —— 全套的设计目标就是 12px 可读。
-   * 内标密度高的图标（六边形族带内标的成员）实测要到 16px 才分得开，
-   * 由 registry 暴露给审计测试与调用点检查。
+   * 内标密度高的图标会声明更高下限，由 registry 暴露给审计测试与调用点检查。
    */
   readonly minSize?: number;
   /**
@@ -91,32 +88,31 @@ const RAW_DEFINITIONS = {
     shape: "horizontal",
     purpose: "展开中的文件夹",
     build: () => [
-      // 单条连续轮廓保留熟悉的「前翻页 + 后层文件夹」读法。前一版把后层与
-      // 前翻页拆成两条横向路径，20px 项目行里会叠成托盘或文件夹组；展开态
-      // 必须和 folders 的多文件夹语义保持可辨。
+      // 展开态使用单条连续轮廓：后层与闭合态共用短圆肩页签，
+      // 前翻页只保留一条清晰斜口，避免读成托盘或多文件夹。
       poly(
         [
-          [3.8, 8.2],
-          [4.8, 6.1],
-          [5.9, 5],
-          [14.2, 5],
-          [15.3, 6.3],
-          [14.2, 11.8],
-          [12.9, 13],
+          [3.8, 8.5],
+          [4.9, 6.3],
+          [6, 5.2],
+          [14.1, 5.2],
+          [15.2, 6.35],
+          [14.05, 11.8],
+          [12.8, 13],
           [2.2, 13],
-          [0.8, 11.7],
-          [0.8, 2.3],
-          [2.2, 1],
-          [5, 1],
-          [6.1, 1.6],
-          [7.2, 3],
-          [8.3, 3.8],
-          [12.7, 3.8],
-          [14.2, 5],
+          [0.8, 11.8],
+          [0.8, 2.4],
+          [2.15, 1.1],
+          [5.25, 1.1],
+          [6.05, 1.45],
+          [7.35, 3.25],
+          [12.65, 3.25],
+          [14, 4.4],
+          [14.1, 5.2],
         ],
         [
-          0, 0.5, 1.1, 1.2, 1.2, 1.35, 1.2, 1.2, 1.3, 1.3, 1.3, 0.8, 0.6, 0.8,
-          1.1, 1.2, 0,
+          0, 0.55, 1.05, 1.15, 1.2, 1.35, 1.2, 1.2, 1.3, 1.3, 1.3, 0.8, 0.55,
+          0.75, 1.1, 1.2, 0,
         ],
         false,
       ),
@@ -181,20 +177,7 @@ const RAW_DEFINITIONS = {
     },
   },
 
-  // ---- 六边形族：Awaken 可装配单元 ----
-  skill: {
-    shape: "circle",
-    fit: "radial",
-    purpose: "技能包（可装配单元基型）",
-    build: () => [hexagon()],
-  },
-  "skill-core": {
-    shape: "circle",
-    fit: "radial",
-    minSize: 16,
-    purpose: "已激活的技能包",
-    build: () => [hexagon(), hexagonCore()],
-  },
+  // ---- 可装配扩展单元 ----
   hook: {
     shape: "circle",
     fit: "radial",
@@ -203,14 +186,6 @@ const RAW_DEFINITIONS = {
     purpose: "钩子（可装配单元）",
     build: () => [hexagon(), hexagonHook()],
   },
-  connector: {
-    shape: "circle",
-    fit: "radial",
-    minSize: 16,
-    purpose: "连接器（可装配单元）",
-    build: () => [hexagon(), ...hexagonSlots()],
-  },
-
   // ---- 方形族 ----
   plus: {
     shape: "square",
@@ -1481,8 +1456,8 @@ const RAW_DEFINITIONS = {
     ],
   },
   symlink: {
-    // 第一版画成两个互扣圆环，与 mcp-compact 撞形（后者刻意呼应 MCP 官方标记的
-    // 互扣语义）。改成折向箭头：先上行再右转，表示「指向别处」，
+    // 第一版画成两个互扣圆环，与 MCP 官方标记的互扣结构撞形。
+    // 改成折向箭头：先上行再右转，表示「指向别处」，
     // 与 external-link 的斜向箭头也区分得开。
     shape: "square",
     purpose: "符号链接",
@@ -1787,6 +1762,49 @@ const RAW_DEFINITIONS = {
   },
 
   // ---- 连接器 ----
+  connector: {
+    shape: "vertical",
+    purpose: "连接器（插头）",
+    build: () => [
+      poly(
+        [
+          [6, 5.2],
+          [6, 1.4],
+        ],
+        0,
+      ),
+      poly(
+        [
+          [10, 5.2],
+          [10, 1.4],
+        ],
+        0,
+      ),
+      // Plug 依靠四个识别点：双插脚、横向插头体、收窄下沿与电缆。
+      // 圆弧在 16 网格中用 45 度折线后倒角表达，避免自由曲线。
+      poly(
+        [
+          [3.6, 5.2],
+          [12.4, 5.2],
+          [12.4, 8.4],
+          [11.5, 10.2],
+          [9.5, 11.4],
+          [6.5, 11.4],
+          [4.5, 10.2],
+          [3.6, 8.4],
+        ],
+        [0.8, 0.8, 0.7, 1.1, 1.1, 1.1, 1.1, 0.7],
+        true,
+      ),
+      poly(
+        [
+          [8, 11.4],
+          [8, 14.6],
+        ],
+        0,
+      ),
+    ],
+  },
   server: {
     shape: "vertical",
     minSize: 14,
@@ -2002,35 +2020,6 @@ const RAW_DEFINITIONS = {
         true,
       ),
     ],
-  },
-  /**
-   * MCP 官方标记在 13/14px 无法读出（见 brandMarks.ts 的 minSize 说明），
-   * 因此工具轨迹这类密集行需要一个 compact 伴随字形。
-   * 这里不改动官方标记，而是用 Awaken 自己的几何表达「两个互扣的环」，
-   * 保留互扣语义但把笔画减到 14px 能分辨的数量。
-   */
-  "mcp-compact": {
-    shape: "circle",
-    minSize: 14,
-    purpose: "MCP 来源（14–16px 的 compact 伴随字形）",
-    build: () => {
-      const linkA: Vec[] = [
-        [0, -2.15],
-        [3.1, -2.15],
-        [3.1, 2.15],
-        [0, 2.15],
-      ];
-      const linkB: Vec[] = [
-        [2.2, -2.15],
-        [5.3, -2.15],
-        [5.3, 2.15],
-        [2.2, 2.15],
-      ];
-      return [
-        poly(rotate(linkA, -45, [2.65, 0]), 1.6, true),
-        poly(rotate(linkB, -45, [2.65, 0]), 1.6, true),
-      ];
-    },
   },
 } as const satisfies Record<string, IconDefinition>;
 

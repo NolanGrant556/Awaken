@@ -681,9 +681,16 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .execution-prompt-bubble-token-icon {
+  display: block;
   flex: 0 0 auto;
   color: currentColor;
-  transform: translateY(0.08em);
+  /* Prompt tokens sit on the surrounding text baseline; lower the 14px
+     visible stroke to the 12/18px glyph baseline without moving the label. */
+  transform: translateY(3px);
+}
+
+.execution-prompt-bubble-token[data-prompt-token-selected] {
+  background: color-mix(in srgb, var(--aw-text-blue) 22%, transparent);
 }
 
 .execution-prompt-bubble-inline-text {
@@ -1191,7 +1198,7 @@ button.tool-trace-line:focus-visible {
   color: var(--aw-status-running);
 }
 
-.tool-trace-line-active .tool-trace-line-icon svg {
+.tool-trace-line-active .tool-trace-line-icon[data-icon-kind="status"] svg {
   animation: spin 1s linear infinite;
 }
 

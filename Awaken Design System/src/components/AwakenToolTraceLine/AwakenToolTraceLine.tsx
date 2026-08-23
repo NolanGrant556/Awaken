@@ -49,9 +49,12 @@ export type AwakenToolTraceLineProps = {
   onSelect?: () => void;
 };
 
-// 每个状态映射到状态族里唯一的图形。迁移前 error 与 unsupported 共用
-// AlertCircle，无法区分「工具失败」和「工具不可用」；现在 unsupported 用问号。
+// MCP / Skill / Terminal 首先保留来源身份，状态由行的色彩与文案表达。
+// 普通工具则使用状态族的唯一图形，避免 error 与 unsupported 等状态撞形。
 function statusIcon(status: ToolTraceStatus, kind: ToolTraceKind) {
+  if (kind === "mcp") return <AwakenIcon concept="mcp-source" size={14} />;
+  if (kind === "skill") return <AwakenIcon concept="skill" size={14} />;
+  if (kind === "terminal") return <AwakenIcon concept="tool-terminal" size={14} />;
   switch (status) {
     case "active":
       return <AwakenIcon concept="step-running" size={14} />;
@@ -68,9 +71,6 @@ function statusIcon(status: ToolTraceStatus, kind: ToolTraceKind) {
     case "unsupported":
       return <AwakenIcon concept="unsupported" size={14} />;
     default:
-      if (kind === "mcp") return <AwakenIcon concept="mcp-source" size={14} />;
-      if (kind === "skill") return <AwakenIcon concept="skill" size={14} />;
-      if (kind === "terminal") return <AwakenIcon concept="tool-terminal" size={14} />;
       return <AwakenIcon concept="tool" size={14} />;
   }
 }
@@ -117,7 +117,12 @@ export function AwakenToolTraceLine({
 
   const rowContent = (
     <>
-      <span className="tool-trace-line-icon">{icon ?? statusIcon(status, kind)}</span>
+      <span
+        className="tool-trace-line-icon"
+        data-icon-kind={icon || kind !== "tool" ? "source" : "status"}
+      >
+        {icon ?? statusIcon(status, kind)}
+      </span>
       <span className="tool-trace-line-copy">
         <span className="tool-trace-line-title">{title}</span>
         {detail ? <span className="tool-trace-line-detail">{detail}</span> : null}

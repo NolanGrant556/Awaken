@@ -156,14 +156,14 @@ describe("光学与网格不变量", () => {
     expect(filled).toEqual(["play", "stop"]);
   });
 
-  it("品牌标记保留 authored geometry，并声明可读下限", () => {
+  it("品牌标记保留 authored paths，并声明可读下限", () => {
     for (const name of AWAKEN_BRAND_ICON_NAMES) {
       const icon = getAwakenIcon(name);
       expect(icon.mode).not.toBe("line");
       if (icon.mode === "line") continue;
-      // 品牌标记不使用 16 网格 viewBox —— 它们不参与光学归一化。
+      // 品牌标记不使用 16 网格 viewBox：保留 authored paths，只允许对称透明留白。
       expect(icon.viewBox).not.toBe(`0 0 ${AWAKEN_ICON_GRID} ${AWAKEN_ICON_GRID}`);
-      expect(icon.minSize).toBeGreaterThanOrEqual(20);
+      expect(icon.minSize).toBeGreaterThanOrEqual(14);
     }
   });
 });
@@ -178,6 +178,15 @@ describe("概念表", () => {
   it("一概念一图标：概念名不重复", () => {
     const keys = Object.keys(AWAKEN_ICON_CONCEPTS);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it("连接器、Skill、CLI 与 MCP 使用当前确定的图形", () => {
+    expect(AWAKEN_ICON_CONCEPTS.connector).toBe("connector");
+    expect(AWAKEN_ICON_CONCEPTS.skill).toBe("book-open");
+    expect(AWAKEN_ICON_CONCEPTS["skill-active"]).toBe("book-open");
+    expect(AWAKEN_ICON_CONCEPTS["tool-terminal"]).toBe("terminal");
+    expect(AWAKEN_ICON_CONCEPTS["mcp-brand"]).toBe("mcp-mark");
+    expect(AWAKEN_ICON_CONCEPTS["mcp-source"]).toBe("mcp-mark");
   });
 });
 

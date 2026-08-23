@@ -84,7 +84,7 @@ function buttonByText(text: string): HTMLButtonElement | undefined {
   );
 }
 
-describe("ExtensionsView project Skills flow", () => {
+describe("ExtensionsView behavior", () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -103,6 +103,53 @@ describe("ExtensionsView project Skills flow", () => {
     await act(async () => root.unmount());
     document.body.replaceChildren();
     vi.restoreAllMocks();
+  });
+
+  it("clears visible loading after a silent refresh supersedes its data generation", async () => {
+    let resolveInitialRuntimeInfo: ((value: { defaultWorkspace: string }) => void) | undefined;
+    const initialRuntimeInfo = new Promise<{ defaultWorkspace: string }>((resolve) => {
+      resolveInitialRuntimeInfo = resolve;
+    });
+    const getRuntimeInfo = vi
+      .fn<() => Promise<{ defaultWorkspace: string }>>()
+      .mockImplementationOnce(() => initialRuntimeInfo)
+      .mockResolvedValue({ defaultWorkspace: projectRoot });
+    const runtimeClient = {
+      getRuntimeInfo,
+      listProjects: vi.fn(async () => [runtimeProject]),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => []),
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="connectors"
+          desktopReady
+          runtimeClient={runtimeClient}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={vi.fn()}
+        />,
+      );
+    });
+    await settle();
+
+    const refreshButton = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="刷新"]',
+    );
+    expect(getRuntimeInfo).toHaveBeenCalledTimes(2);
+    expect(refreshButton?.disabled).toBe(true);
+
+    await act(async () => {
+      resolveInitialRuntimeInfo?.({ defaultWorkspace: projectRoot });
+      await initialRuntimeInfo;
+    });
+    await settle();
+
+    expect(refreshButton?.disabled).toBe(false);
   });
 
   it("opens a project window, previews SKILL.md, and deletes through confirmation", async () => {

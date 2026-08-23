@@ -72,6 +72,8 @@ import {
 	type GlobalAgentsDocument,
 	type GlobalAgentsDocumentWire,
 	type GlobalAgentsSaveRequest,
+  type InstallPluginRequest,
+  type InstallPluginResponse,
   type InstallSkillRequest,
   type InstallSkillResponse,
   type ModelProfileBalancesResultWire,
@@ -109,6 +111,7 @@ import {
   type RuntimeProjectOperation,
   type RuntimeProjectOperationWire,
   type RuntimeProjectWire,
+  type RuntimePlugin,
   type RuntimeSkill,
   type SkillProjectRoots,
   type SkillPreviewResponse,
@@ -2261,6 +2264,73 @@ ipcMain.handle("awaken:enable-skill", async (_event, id: string) => {
     },
   );
 });
+
+ipcMain.handle("awaken:list-plugins", async () => {
+  return requestRuntime<RuntimePlugin[]>("/v1/plugins", { method: "GET" });
+});
+
+ipcMain.handle("awaken:get-plugin", async (_event, name: string) => {
+  const trimmed = String(name ?? "").trim();
+  if (!trimmed) {
+    throw new Error("Plugin name is required");
+  }
+  return requestRuntime<RuntimePlugin>(`/v1/plugins/${encodeURIComponent(trimmed)}`, {
+    method: "GET",
+  });
+});
+
+ipcMain.handle("awaken:install-plugin", async (_event, request: InstallPluginRequest) => {
+  return requestRuntime<InstallPluginResponse>("/v1/plugins/install", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+});
+
+ipcMain.handle("awaken:enable-plugin", async (_event, name: string) => {
+  return requestRuntime<RuntimePlugin>(`/v1/plugins/${encodeURIComponent(name)}/enable`, {
+    method: "POST",
+  });
+});
+
+ipcMain.handle("awaken:disable-plugin", async (_event, name: string) => {
+  return requestRuntime<RuntimePlugin>(`/v1/plugins/${encodeURIComponent(name)}/disable`, {
+    method: "POST",
+  });
+});
+
+ipcMain.handle("awaken:upgrade-plugin", async (_event, name: string) => {
+  return requestRuntime<InstallPluginResponse>(`/v1/plugins/${encodeURIComponent(name)}/upgrade`, {
+    method: "POST",
+  });
+});
+
+ipcMain.handle("awaken:uninstall-plugin", async (_event, name: string) => {
+  return requestRuntime<{ trashedPath?: string; message: string }>(
+    `/v1/plugins/${encodeURIComponent(name)}`,
+    { method: "DELETE" },
+  );
+});
+
+ipcMain.handle(
+  "awaken:enable-plugin-server",
+  async (_event, name: string, shortName: string) => {
+    return requestRuntime<RuntimePlugin>(
+      `/v1/plugins/${encodeURIComponent(name)}/servers/${encodeURIComponent(shortName)}/enable`,
+      { method: "POST" },
+    );
+  },
+);
+
+ipcMain.handle(
+  "awaken:disable-plugin-server",
+  async (_event, name: string, shortName: string) => {
+    return requestRuntime<RuntimePlugin>(
+      `/v1/plugins/${encodeURIComponent(name)}/servers/${encodeURIComponent(shortName)}/disable`,
+      { method: "POST" },
+    );
+  },
+);
 
 ipcMain.handle("awaken:list-model-providers", async () => {
   if (!modelProfileStore) {

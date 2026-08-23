@@ -81,7 +81,7 @@ POST   /v1/project-operations/{operation_id}/fail-trash
 
 只有 ProjectService 存在时注册。`POST /v1/projects` 同时承担单文件夹 upsert（body 带 `workspace_root`）与多文件夹创建（body 带 `folders`）；废纸篓是文件夹粒度，`POST /v1/projects/{project_id}/folders/trash` 的 body 必须指明目标 `path`。请求与响应字段、错误码由 [项目生命周期与删除：API 与持久化](../01_桌面工作台/左侧栏/项目生命周期与删除/API与持久化.md) 唯一拥有。
 
-### 3.3 Tool、MCP、Connector 和 Skill
+### 3.3 Tool、MCP、Connector、Skill 和 Plugin
 
 ```text
 GET    /v1/tools
@@ -98,10 +98,25 @@ GET    /v1/connectors
 POST   /v1/connectors/{id}/connect
 POST   /v1/connectors/{id}/disconnect
 GET    /v1/skills
+POST   /v1/skills/preview
 POST   /v1/skills/install
+DELETE /v1/skills/{id}
+POST   /v1/skills/{id}/enable
+POST   /v1/skills/{id}/disable
+GET    /v1/plugins
+POST   /v1/plugins/install
+GET    /v1/plugins/{name}
+POST   /v1/plugins/{name}/enable
+POST   /v1/plugins/{name}/disable
+POST   /v1/plugins/{name}/upgrade
+DELETE /v1/plugins/{name}
+POST   /v1/plugins/{name}/servers/{short}/enable
+POST   /v1/plugins/{name}/servers/{short}/disable
 ```
 
-`/v1/mcp/servers*` 依赖 MCP manager；connector routes 依赖 registry。Skill list/install 始终注册，registry 缺失时返回 503。`GET /v1/skills` 可按主文件夹优先重复提交 `projectRoot` query；Core 把这些值视为同一个项目的有序文件夹组，在一次 discovery 中合并并返回每条 project Skill 的实际 `projectPath`。只提交一次保持原单文件夹语义。`POST /v1/skills/{id}/execute` 未注册，只是保留 handler。
+`/v1/mcp/servers*` 依赖 MCP manager；connector routes 依赖 registry。Skill list/install/preview/delete/enable/disable 始终注册，registry 缺失时返回 503。`GET /v1/skills` 可按主文件夹优先重复提交 `projectRoot` query；Core 把这些值视为同一个项目的有序文件夹组，在一次 discovery 中合并并返回每条 project Skill 的实际 `projectPath`。只提交一次保持原单文件夹语义。`POST /v1/skills/{id}/execute` 未注册，只是保留 handler。Skill 预览与删除的业务合同由 [08 技能](../08_技能/索引.md) 拥有。
+
+`/v1/plugins*` 始终注册；`PluginStore` 缺失返回 503 `PLUGINS_UNAVAILABLE`，`plugins.json` 损坏返回 503 `PLUGIN_STATE_CORRUPT`。业务合同由 [14 插件](../14_插件/索引.md) 拥有。Renderer 只通过 Main `requestRuntime` 调用，不直接读写插件目录或状态文件。
 
 ### 3.4 Memory 与 Dream
 

@@ -47,6 +47,8 @@ import {
 	type HookRevokeRequest,
 	type HookStatus,
 	type HookTrustRequest,
+  type InstallPluginRequest,
+  type InstallPluginResponse,
   type InstallSkillRequest,
   type InstallSkillResponse,
   type ModelProfileBalancesResult,
@@ -93,6 +95,7 @@ import {
   type RuntimeProject,
   type ProjectReorderResult,
   type RuntimeProjectOperation,
+  type RuntimePlugin,
   type RuntimeSkill,
   type SkillProjectRoots,
   type SkillPreviewResponse,
@@ -572,6 +575,26 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:delete-skill", request) as Promise<DeleteSkillResponse>,
   disableSkill: (id: string) => ipcRenderer.invoke("awaken:disable-skill", id) as Promise<void>,
   enableSkill: (id: string) => ipcRenderer.invoke("awaken:enable-skill", id) as Promise<void>,
+  listPlugins: () => ipcRenderer.invoke("awaken:list-plugins") as Promise<RuntimePlugin[]>,
+  getPlugin: (name: string) =>
+    ipcRenderer.invoke("awaken:get-plugin", name) as Promise<RuntimePlugin>,
+  installPlugin: (request: InstallPluginRequest) =>
+    ipcRenderer.invoke("awaken:install-plugin", request) as Promise<InstallPluginResponse>,
+  enablePlugin: (name: string) =>
+    ipcRenderer.invoke("awaken:enable-plugin", name) as Promise<RuntimePlugin>,
+  disablePlugin: (name: string) =>
+    ipcRenderer.invoke("awaken:disable-plugin", name) as Promise<RuntimePlugin>,
+  upgradePlugin: (name: string) =>
+    ipcRenderer.invoke("awaken:upgrade-plugin", name) as Promise<InstallPluginResponse>,
+  uninstallPlugin: (name: string) =>
+    ipcRenderer.invoke("awaken:uninstall-plugin", name) as Promise<{
+      trashedPath?: string;
+      message: string;
+    }>,
+  enablePluginServer: (name: string, shortName: string) =>
+    ipcRenderer.invoke("awaken:enable-plugin-server", name, shortName) as Promise<RuntimePlugin>,
+  disablePluginServer: (name: string, shortName: string) =>
+    ipcRenderer.invoke("awaken:disable-plugin-server", name, shortName) as Promise<RuntimePlugin>,
   listModelProviders: () =>
     ipcRenderer.invoke("awaken:list-model-providers") as Promise<ModelProvider[]>,
   listModelProfiles: () =>

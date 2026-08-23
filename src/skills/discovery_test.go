@@ -29,7 +29,8 @@ func TestLocalSourceDirsProductionContract(t *testing.T) {
 	}
 	t.Setenv(EnvManagedSkillDirs, joinSourceDirList([]string{managedA, managedB}))
 	t.Setenv(EnvAdditionalSkillDirs, joinSourceDirList([]string{additionalA, additionalB}))
-	t.Setenv(EnvPluginSkillDirs, plugin)
+	t.Cleanup(func() { SetPluginSkillRoots(nil) })
+	SetPluginSkillRoots([]string{plugin})
 	t.Setenv(EnvBundledSkillDirs, "")
 	t.Setenv(EnvLegacyCommandDirs, legacy)
 
@@ -74,7 +75,8 @@ func TestLocalSourceDirsForProjectRootsDiscoversEveryAwakenFolderPrimaryFirst(t 
 	t.Setenv("HOME", home)
 	t.Setenv(EnvManagedSkillDirs, filepath.Join(base, "managed"))
 	t.Setenv(EnvAdditionalSkillDirs, "")
-	t.Setenv(EnvPluginSkillDirs, "")
+	t.Cleanup(func() { SetPluginSkillRoots(nil) })
+	SetPluginSkillRoots(nil)
 	t.Setenv(EnvBundledSkillDirs, "")
 	t.Setenv(EnvLegacyCommandDirs, "")
 
@@ -143,8 +145,10 @@ func TestProductionDiscoveryMultipleRootsPriorityAndRealpathDedupe(t *testing.T)
 	writeTestSkillPackage(t, additionalA, "shared", "---\nname: shared\ndescription: additional first\n---\nBody")
 	writeTestSkillPackage(t, additionalB, "shared", "---\nname: shared\ndescription: additional second\n---\nBody")
 	writeTestSkillPackage(t, filepath.Join(project, ".awaken", "skills"), "shared", "---\nname: shared\ndescription: project winner\n---\nBody")
-	writeTestSkillPackage(t, pluginA, "plugin-a", "---\nname: plugin-a\ndescription: plugin a\n---\nBody")
-	writeTestSkillPackage(t, pluginB, "plugin-b", "---\nname: plugin-b\ndescription: plugin b\n---\nBody")
+	pluginSkillsA := filepath.Join(pluginA, "skills")
+	pluginSkillsB := filepath.Join(pluginB, "skills")
+	writeTestSkillPackage(t, pluginSkillsA, "plugin-a", "---\nname: plugin-a\ndescription: plugin a\n---\nBody")
+	writeTestSkillPackage(t, pluginSkillsB, "plugin-b", "---\nname: plugin-b\ndescription: plugin b\n---\nBody")
 	writeTestSkillPackage(t, bundled, "bundled-one", "---\nname: bundled-one\ndescription: bundled\n---\nBody")
 	writeTestSkillPackage(t, managed, "managed-one", "---\nname: managed-one\ndescription: managed\n---\nBody")
 	duplicateLink := filepath.Join(base, "additional-link")
@@ -161,14 +165,15 @@ func TestProductionDiscoveryMultipleRootsPriorityAndRealpathDedupe(t *testing.T)
 	}
 	additionalDirs = append(additionalDirs, additionalB)
 	t.Setenv(EnvAdditionalSkillDirs, joinSourceDirList(additionalDirs))
-	t.Setenv(EnvPluginSkillDirs, joinSourceDirList([]string{pluginA, pluginB}))
+	t.Cleanup(func() { SetPluginSkillRoots(nil) })
+	SetPluginSkillRoots([]string{pluginSkillsA, pluginSkillsB})
 	t.Setenv(EnvBundledSkillDirs, bundled)
 	t.Setenv(EnvLegacyCommandDirs, "")
 
 	reg := NewSkillRegistry(nil)
 	reg.LoadFromSources(LocalSourceDirs(project))
 	for id, source := range map[string]SourceOrigin{
-		"shared": SourceProject, "plugin-a": SourcePlugin, "plugin-b": SourcePlugin,
+		"shared": SourceProject, "plugin__plugin-a__plugin-a": SourcePlugin, "plugin__plugin-b__plugin-b": SourcePlugin,
 		"bundled-one": SourceBundled, "managed-one": SourceManaged,
 	} {
 		def := reg.Get(id)
@@ -201,7 +206,8 @@ func TestSameRealDirectoryAcrossProjectAndUserSourcesIsDiscoveredOnce(t *testing
 	t.Setenv("HOME", home)
 	t.Setenv(EnvManagedSkillDirs, filepath.Join(t.TempDir(), "none"))
 	t.Setenv(EnvAdditionalSkillDirs, "")
-	t.Setenv(EnvPluginSkillDirs, "")
+	t.Cleanup(func() { SetPluginSkillRoots(nil) })
+	SetPluginSkillRoots(nil)
 	t.Setenv(EnvBundledSkillDirs, "")
 	t.Setenv(EnvLegacyCommandDirs, "")
 
@@ -249,8 +255,9 @@ func TestSymlinkedSourceRootAcrossOriginsIsDiscoveredOnce(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv(EnvManagedSkillDirs, filepath.Join(t.TempDir(), "none"))
 	t.Setenv(EnvAdditionalSkillDirs, realRoot)
-	t.Setenv(EnvPluginSkillDirs, linkRoot)
-	t.Setenv(EnvBundledSkillDirs, "")
+	t.Cleanup(func() { SetPluginSkillRoots(nil) })
+	SetPluginSkillRoots(nil)
+	t.Setenv(EnvBundledSkillDirs, linkRoot)
 	t.Setenv(EnvLegacyCommandDirs, "")
 
 	reg := NewSkillRegistry(nil)
@@ -294,7 +301,8 @@ func TestAgentSkillSourceDiscoveryAndPriority(t *testing.T) {
 	}
 	t.Setenv(EnvManagedSkillDirs, filepath.Join(t.TempDir(), "none"))
 	t.Setenv(EnvAdditionalSkillDirs, "")
-	t.Setenv(EnvPluginSkillDirs, "")
+	t.Cleanup(func() { SetPluginSkillRoots(nil) })
+	SetPluginSkillRoots(nil)
 	t.Setenv(EnvBundledSkillDirs, "")
 	t.Setenv(EnvLegacyCommandDirs, "")
 
@@ -344,7 +352,8 @@ func TestLegacyFlatCommandDiscoveryWithoutFrontmatter(t *testing.T) {
 	}
 	t.Setenv(EnvManagedSkillDirs, filepath.Join(t.TempDir(), "none"))
 	t.Setenv(EnvAdditionalSkillDirs, "")
-	t.Setenv(EnvPluginSkillDirs, "")
+	t.Cleanup(func() { SetPluginSkillRoots(nil) })
+	SetPluginSkillRoots(nil)
 	t.Setenv(EnvBundledSkillDirs, "")
 	t.Setenv(EnvLegacyCommandDirs, "")
 	reg := NewSkillRegistry(nil)

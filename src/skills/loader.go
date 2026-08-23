@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"awaken/src/plugins"
 )
 
 const reservedSystemSkillsDirName = "system-skills"
@@ -50,7 +52,7 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 
 		rootDir := filepath.Join(dir, dirName)
 		path := filepath.Join(rootDir, "SKILL.md")
-		fallbackID := SkillIDFromNameOrFallback(dirName, "")
+		fallbackID := namespacedSkillID(source, dir, SkillIDFromNameOrFallback(dirName, ""))
 		base := &SkillDefinition{
 			ID: fallbackID, Name: fallbackID, Source: source, Scope: source,
 			RootDir: rootDir, SourceRoot: resolvedSkillsRoot, SkillFilePath: path, FilePath: path,
@@ -93,9 +95,9 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 			continue
 		}
 
-		id := SkillIDFromNameOrFallback(dirName, def.Name)
+		id := namespacedSkillID(source, dir, SkillIDFromNameOrFallback(dirName, def.Name))
 		if strings.TrimSpace(def.Name) == "" {
-			def.Name = id
+			def.Name = SkillIDFromNameOrFallback(dirName, def.Name)
 		}
 
 		def.ID = id
@@ -275,6 +277,13 @@ func LoadLegacyCommandsDir(dir string) map[string]*SkillDefinition {
 		flat[id] = def
 	}
 	return MergeSkills(packages, flat)
+}
+
+func namespacedSkillID(source SourceOrigin, skillsRoot, skillID string) string {
+	if source != SourcePlugin {
+		return skillID
+	}
+	return plugins.SkillCatalogID(plugins.PluginNameFromSkillsRoot(skillsRoot), skillID)
 }
 
 func SkillIDFromNameOrFallback(fallback string, skillName string) string {

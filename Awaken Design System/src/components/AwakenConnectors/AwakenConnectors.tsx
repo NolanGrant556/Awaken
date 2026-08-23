@@ -96,7 +96,11 @@ export function AwakenConnectors({
                 data-active={activeKind === kind ? "true" : "false"}
                 onClick={() => onKindChange(kind)}
               >
-                {kind.toUpperCase()}
+                <AwakenIcon
+                  concept={kind === "mcp" ? "mcp-brand" : "tool-terminal"}
+                  size={16}
+                />
+                <span>{kind.toUpperCase()}</span>
               </button>
             ))}
           </div>

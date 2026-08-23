@@ -665,6 +665,7 @@ export function ExtensionsView({
   const skillSnapshotSignatureRef = useRef("");
   const skillSyncInFlightRef = useRef(false);
   const refreshGenerationRef = useRef(0);
+  const visibleRefreshGenerationRef = useRef(0);
   const busyMcpServerNameRef = useRef<string | null>(null);
   const [skillToggleStates, setSkillToggleStates] = useState<Record<string, boolean>>({});
   const [busySkillId, setBusySkillId] = useState<string | null>(null);
@@ -698,6 +699,9 @@ export function ExtensionsView({
       return;
     }
     const generation = ++refreshGenerationRef.current;
+    const visibleGeneration = showLoading
+      ? ++visibleRefreshGenerationRef.current
+      : null;
     if (showLoading) {
       setLoading(true);
     }
@@ -777,7 +781,12 @@ export function ExtensionsView({
       }
       setErrorMessage(error instanceof Error ? error.message : "扩展列表加载失败");
     } finally {
-      if (showLoading && generation === refreshGenerationRef.current) {
+      // Silent polling may supersede the data snapshot, but it must not steal
+      // ownership of a visible refresh indicator and leave the button spinning.
+      if (
+        visibleGeneration !== null &&
+        visibleGeneration === visibleRefreshGenerationRef.current
+      ) {
         setLoading(false);
       }
     }

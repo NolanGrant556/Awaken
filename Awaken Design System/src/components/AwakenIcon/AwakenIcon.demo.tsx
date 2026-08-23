@@ -15,11 +15,11 @@ import {
 import { AwakenIcon } from "./AwakenIcon";
 import "./AwakenIcon.demo.css";
 
-const HEXAGON_FAMILY: Array<{ name: AwakenIconName; label: string }> = [
-  { name: "skill", label: "技能包（基型）" },
-  { name: "skill-core", label: "已激活" },
-  { name: "hook", label: "钩子" },
+const CAPABILITY_FAMILY: Array<{ name: AwakenIconName; label: string }> = [
   { name: "connector", label: "连接器" },
+  { name: "book-open", label: "技能" },
+  { name: "terminal", label: "CLI" },
+  { name: "hook", label: "钩子" },
 ];
 
 export function AwakenIconDemo() {
@@ -86,13 +86,12 @@ export function AwakenIconDemo() {
       </div>
 
       <div className="aw-icon-demo__block">
-        <h3>六边形形状族</h3>
+        <h3>能力与连接器入口</h3>
         <p className="aw-icon-demo__hint">
-          尖顶正六边形是 Awaken「可装配单元」的族形，全套里唯一，因此不会和方框族、文件族混淆。族内成员靠内标区分；带内标的成员实测要到
-          16px 才分得开，因此它们的可读下限是 16px，只有基型 <code>skill</code> 能下到 12px。
+          产品一级入口优先使用熟悉、彼此可区分的比喻：连接器恢复插头，Skill 使用打开的书，CLI 使用终端；Hook 保留可装配单元六边形。
         </p>
         <div className="aw-icon-demo__family">
-          {HEXAGON_FAMILY.map(({ name, label }) => (
+          {CAPABILITY_FAMILY.map(({ name, label }) => (
             <div key={name} className="aw-icon-demo__family-item">
               <AwakenIcon name={name} size={24} />
               <div className="aw-icon-demo__family-small">
@@ -108,30 +107,21 @@ export function AwakenIconDemo() {
       </div>
 
       <div className="aw-icon-demo__block">
-        <h3>官方品牌标记与 compact 伴随字形</h3>
+        <h3>官方品牌标记</h3>
         <p className="aw-icon-demo__hint">
-          MCP 使用官方标记（{MCP_OFFICIAL_MARK.source}），保留 authored geometry 不参与光学归一化。它的可读下限是{" "}
-          {MCP_OFFICIAL_MARK.minSize}px：更小的尺寸下互扣勾形的平行笔画会粘连，这是标记结构决定的。因此 14–16px 的密集行改用
-          Awaken 自绘的 <code>mcp-compact</code> 伴随字形，不改动官方标记。商标归 {MCP_OFFICIAL_MARK.trademark}。
+          MCP 使用官方标记（{MCP_OFFICIAL_MARK.source}），保留 authored paths，只用对称透明留白对齐光学包围盒。它的可读下限是{" "}
+          {MCP_OFFICIAL_MARK.minSize}px；连接器分类、MCP 卡片与 MCP 工具轨迹统一使用这份标记，不再以自绘图形替代。商标归{" "}
+          {MCP_OFFICIAL_MARK.trademark}。
         </p>
         <div className="aw-icon-demo__family">
           <div className="aw-icon-demo__family-item">
             <AwakenIcon name="mcp-mark" size={24} label="Model Context Protocol" />
             <div className="aw-icon-demo__family-small">
-              <AwakenIcon name="mcp-mark" size={24} />
-              <AwakenIcon name="mcp-mark" size={20} />
+              <AwakenIcon name="mcp-mark" size={16} />
+              <AwakenIcon name="mcp-mark" size={14} />
             </div>
             <code>mcp-mark</code>
             <span>官方标记 · 仅 ≥{MCP_OFFICIAL_MARK.minSize}px</span>
-          </div>
-          <div className="aw-icon-demo__family-item">
-            <AwakenIcon name="mcp-compact" size={24} />
-            <div className="aw-icon-demo__family-small">
-              <AwakenIcon name="mcp-compact" size={16} />
-              <AwakenIcon name="mcp-compact" size={14} />
-            </div>
-            <code>mcp-compact</code>
-            <span>compact 伴随字形 · 14–16px</span>
           </div>
         </div>
       </div>

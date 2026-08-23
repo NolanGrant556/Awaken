@@ -18,7 +18,6 @@ export {
 } from "./definitions";
 export {
   MCP_OFFICIAL_MARK,
-  SKILL_SHAPE_PROVENANCE,
   type BrandMark,
 } from "./brandMarks";
 export {

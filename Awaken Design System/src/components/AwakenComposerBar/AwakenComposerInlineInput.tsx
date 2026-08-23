@@ -9,6 +9,7 @@ import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { getAwakenIcon, type AwakenLineIconName } from "../../icons";
 import {
   type ComposerInputCaretRect,
   pastedImageFilesFromClipboardData,
@@ -69,6 +70,7 @@ export type AwakenComposerInlineInputProps = {
 };
 
 const COMPOSER_TOKEN_ATTRIBUTE = "data-composer-token-id";
+const COMPOSER_TOKEN_SELECTED_ATTRIBUTE = "data-composer-token-selected";
 const BLOCK_TAG_NAMES = new Set([
   "ADDRESS",
   "ARTICLE",
@@ -255,6 +257,36 @@ function appendPackageIcon(document: Document, token: HTMLElement): void {
   token.append(svg);
 }
 
+function appendAwakenLineIcon(
+  document: Document,
+  token: HTMLElement,
+  name: AwakenLineIconName,
+): void {
+  const icon = getAwakenIcon(name);
+  if (icon.mode !== "line") {
+    throw new Error(`Composer token 只接受线性图标：${name}`);
+  }
+  const namespace = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(namespace, "svg");
+  svg.setAttribute("class", `composer-bar-token-icon aw-icon aw-icon--${name}`);
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("viewBox", icon.viewBox);
+  svg.setAttribute("fill", icon.filled ? "currentColor" : "none");
+  svg.setAttribute("stroke", icon.filled ? "none" : "currentColor");
+  svg.setAttribute("stroke-width", String(icon.strokeWidth));
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("focusable", "false");
+  svg.setAttribute("aria-hidden", "true");
+  for (const pathData of icon.paths) {
+    const path = document.createElementNS(namespace, "path");
+    path.setAttribute("d", pathData);
+    svg.append(path);
+  }
+  token.append(svg);
+}
+
 function appendComputerIcon(document: Document, token: HTMLElement): void {
   const namespace = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(namespace, "svg");
@@ -294,6 +326,8 @@ function composerTokenElement(document: Document, token: ComposerInlineToken): H
   element.title = token.title ?? token.label;
   if (token.type === "capability") {
     appendComputerIcon(document, element);
+  } else if (token.type === "skill") {
+    appendAwakenLineIcon(document, element, "book-open");
   } else {
     appendPackageIcon(document, element);
   }
@@ -382,6 +416,27 @@ export function composerInlineInputSelection(element: HTMLElement): ComposerInli
       bottom: rect.bottom || (rect.top || elementRect.top) + lineHeight,
     },
   };
+}
+
+export function syncComposerInlineTokenSelection(element: HTMLElement): void {
+  const selection = composerInlineInputSelection(element);
+  const selectedTokenIds = new Set<string>();
+  if (selection && selection.anchor !== selection.focus) {
+    const start = Math.min(selection.anchor, selection.focus);
+    const end = Math.max(selection.anchor, selection.focus);
+    const value = composerInlineInputStructuredValue(element);
+    for (const range of tokenRanges(value)) {
+      if (start < range.end && end > range.start) {
+        selectedTokenIds.add(range.id);
+      }
+    }
+  }
+  for (const token of element.querySelectorAll<HTMLElement>(`[${COMPOSER_TOKEN_ATTRIBUTE}]`)) {
+    token.toggleAttribute(
+      COMPOSER_TOKEN_SELECTED_ATTRIBUTE,
+      selectedTokenIds.has(token.getAttribute(COMPOSER_TOKEN_ATTRIBUTE) ?? ""),
+    );
+  }
 }
 
 function composerInlinePointForOffset(
@@ -631,15 +686,19 @@ export function AwakenComposerInlineInput({
 
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || disabled || !onSelectionChange) {
+    if (!editor || disabled) {
       return;
     }
-    const handleSelectionChange = (): void => emitSelection();
+    const handleSelectionChange = (): void => {
+      syncComposerInlineTokenSelection(editor);
+      emitSelection();
+    };
     editor.ownerDocument.addEventListener("selectionchange", handleSelectionChange);
+    handleSelectionChange();
     return () => {
       editor.ownerDocument.removeEventListener("selectionchange", handleSelectionChange);
     };
-  }, [disabled, emitSelection, onSelectionChange]);
+  }, [disabled, emitSelection]);
 
   const emitStructuredValue = useCallback(() => {
     const editor = editorRef.current;

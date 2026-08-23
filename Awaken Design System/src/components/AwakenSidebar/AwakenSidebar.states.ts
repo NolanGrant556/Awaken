@@ -68,7 +68,7 @@ export const AwakenSidebarStates: AwakenSidebarState[] = [
         {
           id: "skills",
           label: "技能",
-          icon: createElement(AwakenIcon, { concept: "tool", size: 16 }),
+          icon: createElement(AwakenIcon, { concept: "skill", size: 16 }),
         },
       ],
       activeNavId: "skills",

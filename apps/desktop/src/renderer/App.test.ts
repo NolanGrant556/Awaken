@@ -336,7 +336,7 @@ describe("tool trace presentation", () => {
     expect(grep.detailCard?.copyText).toContain('"glob": "**/*.md"');
   });
 
-  it("uses typed provider source for MCP rows instead of guessing from names", () => {
+  it("keeps the MCP source identity for built-in and user-added servers", () => {
     expect(
       toolTracePresentation({
         content: "created issue #42",
@@ -356,7 +356,31 @@ describe("tool trace presentation", () => {
         status: "done",
         providerId: "connector:unknown",
       }).kind,
-    ).toBe("tool");
+    ).toBe("mcp");
+    expect(
+      toolTracePresentation(
+        undefined,
+        "Preparing tool arguments",
+        { title: "mcp__customer_server__read", status: "active" },
+      ).kind,
+    ).toBe("mcp");
+    expect(
+      toolTracePresentation({
+        title: "mcp__custom__inspect",
+        content: "done",
+        status: "done",
+        providerSource: "user",
+      }).kind,
+    ).toBe("mcp");
+    expect(
+      toolTracePresentation({
+        title: "Bash",
+        content: "done",
+        commandOutput: "connector output",
+        status: "done",
+        providerId: "connector:custom:bash",
+      }).kind,
+    ).toBe("mcp");
   });
 
   it("projects command streams as bounded terminal output cards", () => {
@@ -1506,6 +1530,9 @@ describe("Composer Slash Palette helpers", () => {
 
     expect(actions.map((action) => action.label)).toEqual(["Daily Followup", "mcp-skill"]);
     expect(actions.every((action) => !action.disabled)).toBe(true);
+    expect(renderToString(React.createElement(React.Fragment, null, actions[0]?.icon))).toContain(
+      "aw-icon--book-open",
+    );
     expect(filterSlashActions(actions, "powerpoint")).toHaveLength(0);
     expect(filterSlashActions(actions, "mcp provided")).toHaveLength(1);
     expect(filterSlashActions(actions, "follow-up")[0]?.id).toContain("daily-followup");
@@ -2927,6 +2954,7 @@ describe("AwakenUserPromptBlock layout contract", () => {
     );
 
     expect(html).toContain("execution-prompt-bubble-token");
+    expect(html).toContain("aw-icon--book-open");
     expect(html).toContain("deep-research");
     expect(html.indexOf("你好，你看到这个 skill 不?")).toBeLessThan(html.indexOf("deep-research"));
     expect(html.indexOf("deep-research")).toBeLessThan(html.indexOf("请继续"));

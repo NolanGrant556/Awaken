@@ -5,7 +5,7 @@
  * 调用点只认名字，几何可以逐个替换而调用点零改动。
  *
  * 线性图标由 geometry.ts 在模块初始化时编译一次（纯数学，成本可忽略），
- * 品牌标记保留 authored geometry 不参与归一化。
+ * 品牌标记保留 authored paths；可以携带对称透明 viewBox 留白，不进入 16 网格路径归一化。
  */
 import { MCP_OFFICIAL_MARK, type BrandMark } from "./brandMarks";
 import {

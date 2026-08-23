@@ -114,7 +114,7 @@ export function AwakenMediaInspector({
           ) : null}
           {onReveal ? (
             <button type="button" aria-label={revealLabel} onClick={onReveal}>
-              <AwakenIcon concept="folder-expanded" size={16} />
+              <AwakenIcon concept="project" size={16} />
               显示位置
             </button>
           ) : null}

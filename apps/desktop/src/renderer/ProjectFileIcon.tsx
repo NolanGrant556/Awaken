@@ -2,14 +2,14 @@ import { AwakenIcon, type AwakenIconConcept, type AwakenIconSize } from "@awaken
 
 import type { ProjectFileIconKind } from "./projectFiles";
 
-export type ProjectFileVisualIconKind = ProjectFileIconKind | "folder-open";
+export type ProjectFileVisualIconKind = ProjectFileIconKind;
 
 /**
  * 文件类型 → 概念。图形由 Design System 的文件类型族提供：十一个类型共用同一个
  * 文件外形，只换内标，因此文件树里的每一行都是同一个「文件」。
+ * 目录展开不换图标，只靠箭头旋转表达开合。
  */
 const concepts: Record<ProjectFileVisualIconKind, AwakenIconConcept> = {
-  "folder-open": "folder-expanded",
   folder: "project",
   symlink: "symlink",
   word: "file-text",

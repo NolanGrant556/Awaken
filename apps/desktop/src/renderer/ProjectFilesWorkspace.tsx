@@ -25,7 +25,7 @@ import ArtifactPreviewHost, {
 import FilePreviewHost, { type ProjectFileWorkspaceMode } from "./file-preview/FilePreviewHost";
 import { projectFileTabId, type ProjectFileWorkspaceTab } from "./projectFileTabs";
 import { projectFileIconKind, projectFileTreeRows, type ProjectFileTreeRow } from "./projectFiles";
-import ProjectFileIcon, { type ProjectFileVisualIconKind } from "./ProjectFileIcon";
+import ProjectFileIcon from "./ProjectFileIcon";
 import "./styles/project-files.css";
 
 export type ProjectFilesFolder = {
@@ -204,11 +204,6 @@ function isMinimumWidthRightwardFling(samples: PointerSample[]): boolean {
 
 function preferredFolderPath(folders: ProjectFilesFolder[]): string {
   return folders.find((folder) => folder.isPrimary)?.path ?? folders[0]?.path ?? "";
-}
-
-function rowIconKind(entry: ProjectFileTreeRow): ProjectFileVisualIconKind {
-  if (entry.kind === "directory" && entry.expanded) return "folder-open";
-  return projectFileIconKind(entry);
 }
 
 export function ProjectFilesWorkspace({
@@ -923,7 +918,7 @@ export function ProjectFilesWorkspace({
               setFileListExpanded((current) => !current);
             }}
           >
-            <AwakenIcon concept="folder-expanded" size={20} />
+            <AwakenIcon concept="project" size={20} />
           </button>
         </div>
       </header>
@@ -965,7 +960,7 @@ export function ProjectFilesWorkspace({
             />
           ) : (
             <div className="project-files-preview-empty is-centered">
-              <AwakenIcon concept="folder-expanded" size={24} />
+              <AwakenIcon concept="project" size={24} />
               <strong>{emptyTitle}</strong>
               <span>{emptyDescription}</span>
             </div>
@@ -1101,7 +1096,7 @@ export function ProjectFilesWorkspace({
                 {rows.map((row) => {
                   const directory = row.kind === "directory";
                   const loading = loadingPaths.has(row.relativePath);
-                  const iconKind = rowIconKind(row);
+                  const iconKind = projectFileIconKind(row);
                   return (
                     <button
                       key={row.relativePath}

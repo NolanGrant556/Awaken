@@ -4084,6 +4084,7 @@ func TestMCPProjectOverrideLifecyclePersistsAcrossRestart(t *testing.T) {
 			t.Fatalf("load project config: %v", err)
 		}
 		mgr.Start(context.Background(), mcpclient.MergeScoped(
+			nil,
 			mcpclient.ToScoped(userCfg, mcpclient.ScopeUser),
 			mcpclient.ToScoped(projectCfg, mcpclient.ScopeProject),
 			nil,

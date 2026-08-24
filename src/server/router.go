@@ -12,6 +12,7 @@ import (
 	"awaken/src/memory"
 	"awaken/src/modelprofile"
 	"awaken/src/networkroute"
+	"awaken/src/plugins"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
 	"awaken/src/scheduledtask"
@@ -109,7 +110,7 @@ func NewRouterWithControl(runService *awruntime.RunService, infoProvider Runtime
 // NewRouterWithScheduledTasks builds a fully-wired router that also exposes
 // the /v1/scheduled-tasks/* surface. A nil service keeps the routes
 // registered but answering 503 (the runtime started without a store).
-func NewRouterWithScheduledTasks(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, acpManager *acp.Manager, workspaceRoot string, syncSkillsForWorkspace func(awruntime.WorkspaceConfig), control *ControlConfig, scheduledTasks *scheduledtask.Service, shutdown ...func()) http.Handler {
+func NewRouterWithScheduledTasks(runService *awruntime.RunService, infoProvider RuntimeInfoProvider, manager *mcpclient.Manager, connectorRegistry *connectors.Registry, skillRegistry *skills.SkillRegistry, acpManager *acp.Manager, workspaceRoot string, syncSkillsForWorkspace func(awruntime.WorkspaceConfig), control *ControlConfig, scheduledTasks *scheduledtask.Service, pluginStore *plugins.Store, shutdown ...func()) http.Handler {
 	cfg := routerConfig{
 		runService:             runService,
 		infoProvider:           infoProvider,
@@ -121,6 +122,7 @@ func NewRouterWithScheduledTasks(runService *awruntime.RunService, infoProvider 
 		acpManager:             acpManager,
 		control:                control,
 		scheduledTasks:         scheduledTasks,
+		pluginStore:            pluginStore,
 	}
 	if len(shutdown) > 0 {
 		cfg.shutdown = shutdown[0]
@@ -156,6 +158,7 @@ type routerConfig struct {
 	acpManager             *acp.Manager
 	control                *ControlConfig
 	scheduledTasks         *scheduledtask.Service
+	pluginStore            *plugins.Store
 }
 
 func newRouterInternal(cfg routerConfig) http.Handler {
@@ -285,6 +288,16 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("POST /v1/connectors/{id}/disconnect", connH.handleDisconnect)
 		mux.HandleFunc("PUT /v1/connectors/{id}/cli-readiness", connH.handleCLIReadiness)
 	}
+	pluginH := pluginHandlers{store: cfg.pluginStore, manager: cfg.manager, skillRegistry: cfg.skillRegistry}
+	mux.HandleFunc("GET /v1/plugins", pluginH.handleList)
+	mux.HandleFunc("POST /v1/plugins/install", pluginH.handleInstall)
+	mux.HandleFunc("GET /v1/plugins/{name}", pluginH.handleGet)
+	mux.HandleFunc("POST /v1/plugins/{name}/enable", pluginH.handleEnable)
+	mux.HandleFunc("POST /v1/plugins/{name}/disable", pluginH.handleDisable)
+	mux.HandleFunc("POST /v1/plugins/{name}/upgrade", pluginH.handleUpgrade)
+	mux.HandleFunc("DELETE /v1/plugins/{name}", pluginH.handleDelete)
+	mux.HandleFunc("POST /v1/plugins/{name}/servers/{short}/enable", pluginH.handleServerEnable)
+	mux.HandleFunc("POST /v1/plugins/{name}/servers/{short}/disable", pluginH.handleServerDisable)
 	skillH := skillHandlers{registry: cfg.skillRegistry, workspaceRoot: cfg.workspaceRoot, trashAdapter: cfg.skillTrashAdapter}
 	mux.HandleFunc("GET /v1/skills", skillH.handleListSkills)
 	mux.HandleFunc("POST /v1/skills/preview", skillH.handlePreviewSkill)

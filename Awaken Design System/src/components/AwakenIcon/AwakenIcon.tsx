@@ -79,7 +79,11 @@ function AwakenIconImpl({
       strokeLinejoin="round"
     >
       {icon.paths.map((d, i) => (
-        <path key={i} d={d} />
+        <path
+          key={i}
+          d={d}
+          fill={icon.mode === "line" && icon.filledPathIndexes?.includes(i) ? "currentColor" : undefined}
+        />
       ))}
     </svg>
   );

@@ -4,6 +4,7 @@ import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
   AwakenComposerBar,
+  AwakenUserPromptBlock,
   plainTextFromPromptClipboardRoot,
 } from "@awaken/design-system";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -127,9 +128,35 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(host.querySelectorAll('[contenteditable="plaintext-only"]')).toHaveLength(1);
     expect(token?.getAttribute("contenteditable")).toBe("false");
     expect(token?.textContent).toContain("Documents");
+    expect(token?.querySelector(".aw-icon--book-open")).not.toBeNull();
     expect(editor.textContent).toContain("你使用这个技能 ");
     expect(textNodes(editor).map((node) => node.data)).toEqual(["你使用这个技能 ", "写"]);
     expect(host.querySelector("textarea")).toBeNull();
+  });
+
+  it("highlights the complete atomic token, including its icon, when the selection crosses it", () => {
+    const { editor } = renderComposer({ value: "写" });
+    const token = editor.querySelector<HTMLElement>(
+      '[data-composer-token-id="skill:documents:user"]',
+    );
+    expect(token).not.toBeNull();
+
+    editor.focus();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    act(() => document.dispatchEvent(new Event("selectionchange")));
+
+    expect(selection?.toString()).toContain("Documents");
+    expect(token?.hasAttribute("data-composer-token-selected")).toBe(true);
+    expect(token?.querySelector(".composer-bar-token-icon")).not.toBeNull();
+
+    const trailingText = lastTextNode(editor);
+    collapseSelection(trailingText, trailingText.length);
+    act(() => document.dispatchEvent(new Event("selectionchange")));
+    expect(token?.hasAttribute("data-composer-token-selected")).toBe(false);
   });
 
   it("renders capability tokens as an atomic Computer Use chip with a monitor icon", () => {
@@ -147,8 +174,16 @@ describe("AwakenComposerBar unified token editing", () => {
     );
 
     expect(token?.textContent).toBe("Computer Use");
-    expect(token?.querySelector("rect")?.getAttribute("width")).toBe("20");
-    expect(token?.querySelectorAll("path")).toHaveLength(2);
+    expect(token?.querySelector("svg")?.classList.contains("aw-icon--display-pointer")).toBe(true);
+    expect(token?.querySelectorAll("path").length).toBeGreaterThan(0);
+  });
+
+  it("renders file tokens from the Awaken package icon registry", () => {
+    const { editor } = renderComposer({
+      tokens: [{ id: "file-token", type: "file", label: "上下文" }],
+    });
+    const token = editor.querySelector('[data-composer-token-id="file-token"]');
+    expect(token?.querySelector("svg")?.classList.contains("aw-icon--package")).toBe(true);
   });
 
   it("maps edits before and after the token back to structured segments", () => {
@@ -331,6 +366,42 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(plainTextFromPromptClipboardRoot(root)).toBe(
       "2026年上半年经营管理部经营数据可视化图表.pdf 你能看到这个文档吗？",
     );
+  });
+
+  it("highlights the complete prompt token when the selection crosses its label", () => {
+    root ??= createRoot(host);
+    act(() => {
+      root?.render(
+        <AwakenUserPromptBlock
+          text="？这个是什么来的？"
+          tokens={[
+            {
+              id: "skill:hyperframes-animation:user",
+              type: "skill",
+              label: "hyperframes-animation",
+              leadingText: "你看到这个 skill 吗 ",
+            },
+          ]}
+        />,
+      );
+    });
+    const selectRoot = host.querySelector<HTMLElement>("[data-aw-select-all-root]")!;
+    const token = selectRoot.querySelector<HTMLElement>(
+      ".execution-prompt-bubble-token",
+    )!;
+    const range = document.createRange();
+    range.selectNodeContents(selectRoot);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    act(() => document.dispatchEvent(new Event("selectionchange")));
+
+    expect(token.hasAttribute("data-prompt-token-selected")).toBe(true);
+    expect(token.querySelector(".execution-prompt-bubble-token-icon")).not.toBeNull();
+
+    collapseSelection(selectRoot, selectRoot.childNodes.length);
+    act(() => document.dispatchEvent(new Event("selectionchange")));
+    expect(token.hasAttribute("data-prompt-token-selected")).toBe(false);
   });
 
   it("copies visible plaintext with token labels and no soft-wrap breaks", () => {
@@ -751,8 +822,16 @@ describe("AwakenComposerBar unified token editing", () => {
     const trigger = host.querySelector<HTMLButtonElement>(".composer-bar-model-trigger");
     expect(trigger?.querySelector(".composer-bar-model-trigger-icon")).not.toBeNull();
     expect(trigger?.querySelector('[data-testid="selected-model-logo"]')).not.toBeNull();
+    const chevron = trigger?.querySelector<HTMLElement>(
+      ".composer-bar-model-trigger-chevron",
+    );
+    expect(chevron?.getAttribute("aria-hidden")).toBe("true");
+    expect(chevron?.querySelector(".aw-icon--chevron-down")?.getAttribute("width")).toBe(
+      "14",
+    );
     expect(trigger?.getAttribute("aria-label")).toBe("kimi-for-coding");
     expect(trigger?.title).toBe("kimi-for-coding");
+    expect(trigger?.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("stretches the model trigger itself in both center and dock composers", () => {
@@ -779,6 +858,7 @@ describe("AwakenComposerBar unified token editing", () => {
 
     act(() => trigger.click());
     expect(trigger.classList).toContain("composer-bar-model-trigger-open");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(trigger.style.getPropertyValue("--composer-model-trigger-collapsed-width")).toBe(
       "136px",
     );
@@ -787,6 +867,7 @@ describe("AwakenComposerBar unified token editing", () => {
     );
 
     act(() => trigger.click());
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
     rerender({ variant: "dock" });
     bounds.mockReturnValue({
       x: 0,
@@ -802,6 +883,7 @@ describe("AwakenComposerBar unified token editing", () => {
     act(() => trigger.click());
     expect(host.querySelector(".composer-bar-dock")).not.toBeNull();
     expect(trigger.classList).toContain("composer-bar-model-trigger-open");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(trigger.style.getPropertyValue("--composer-model-trigger-collapsed-width")).toBe(
       "118px",
     );

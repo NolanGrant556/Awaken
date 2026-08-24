@@ -31,7 +31,8 @@ func TestAgentRefreshRunAvailabilityCarriesTaskAndSkillMetadataWithoutLoadingSki
 	// shell files. The project/user defaults remain metadata only.
 	t.Setenv(skills.EnvManagedSkillDirs, filepath.Join(t.TempDir(), "managed"))
 	t.Setenv(skills.EnvAdditionalSkillDirs, filepath.Join(t.TempDir(), "additional"))
-	t.Setenv(skills.EnvPluginSkillDirs, filepath.Join(t.TempDir(), "plugin"))
+	t.Cleanup(func() { skills.SetPluginSkillRoots(nil) })
+	skills.SetPluginSkillRoots([]string{filepath.Join(t.TempDir(), "plugin")})
 	t.Setenv(skills.EnvBundledSkillDirs, "")
 	t.Setenv(skills.EnvLegacyCommandDirs, "")
 	t.Setenv("SHELL", "/unsupported/test-shell")

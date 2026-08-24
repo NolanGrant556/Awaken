@@ -1,0 +1,32 @@
+@import "../../tokens/components.css";
+
+.aw-plugin-detail-dialog__body {
+  display: grid;
+  gap: var(--aw-space-4);
+}
+
+.aw-plugin-detail-dialog__meta,
+.aw-plugin-detail-dialog__digest,
+.aw-plugin-detail-dialog__risk {
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-plugin-detail-dialog__diagnostics {
+  color: var(--aw-error);
+}
+
+.aw-plugin-detail-dialog__body ul {
+  display: grid;
+  gap: var(--aw-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aw-plugin-detail-dialog__body li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-3);
+}

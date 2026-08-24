@@ -15,6 +15,31 @@ import { AwakenCopyButton } from "../AwakenCopyButton";
 
 const collapsedAttachmentLimit = 3;
 const expandDragThresholdPx = 4;
+const PROMPT_TOKEN_SELECTED_ATTRIBUTE = "data-prompt-token-selected";
+
+export function syncPromptTokenSelection(root: HTMLElement): void {
+  const selection = root.ownerDocument.defaultView?.getSelection();
+  const selectedTokens = new Set<HTMLElement>();
+  const tokens = Array.from(
+    root.querySelectorAll<HTMLElement>(".execution-prompt-bubble-token"),
+  );
+  if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
+    for (let rangeIndex = 0; rangeIndex < selection.rangeCount; rangeIndex += 1) {
+      const range = selection.getRangeAt(rangeIndex);
+      for (const token of tokens) {
+        if (range.intersectsNode(token)) {
+          selectedTokens.add(token);
+        }
+      }
+    }
+  }
+  for (const token of tokens) {
+    token.toggleAttribute(
+      PROMPT_TOKEN_SELECTED_ATTRIBUTE,
+      selectedTokens.has(token),
+    );
+  }
+}
 
 function appendPromptClipboardSegment(output: string, segment: string): string {
   if (!segment) {
@@ -168,6 +193,7 @@ export function AwakenUserPromptBlock({
 }: AwakenUserPromptBlockProps) {
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(false);
   const blockRef = useRef<HTMLElement | null>(null);
+  const selectRootRef = useRef<HTMLDivElement | null>(null);
   const pointerGestureRef = useRef<{
     x: number;
     y: number;
@@ -217,6 +243,27 @@ export function AwakenUserPromptBlock({
       document.removeEventListener("pointerdown", handleDocumentPointerDown);
     };
   }, [isExpanded, expanded, onExpandedChange]);
+
+  useEffect(() => {
+    const selectRoot = selectRootRef.current;
+    if (!selectRoot) {
+      return;
+    }
+    const ownerDocument = selectRoot.ownerDocument;
+    const handleSelectionChange = () => {
+      syncPromptTokenSelection(selectRoot);
+    };
+    handleSelectionChange();
+    ownerDocument.addEventListener("selectionchange", handleSelectionChange);
+    return () => {
+      ownerDocument.removeEventListener("selectionchange", handleSelectionChange);
+      for (const token of selectRoot.querySelectorAll<HTMLElement>(
+        ".execution-prompt-bubble-token",
+      )) {
+        token.removeAttribute(PROMPT_TOKEN_SELECTED_ATTRIBUTE);
+      }
+    };
+  }, []);
 
   function expandPrompt(): void {
     if (!isInteractive) {
@@ -363,7 +410,11 @@ export function AwakenUserPromptBlock({
 
   function renderToken(token: AwakenUserPromptToken) {
     const tokenType = token.type ?? "token";
-    const tokenConcept = tokenType === "capability" ? "theme-system" : "capability-package";
+    const tokenConcept = tokenType === "capability"
+      ? "theme-system"
+      : tokenType === "skill"
+        ? "skill"
+        : "capability-package";
     return (
       <span
         className={`execution-prompt-bubble-token execution-prompt-bubble-token-${tokenType}`}
@@ -403,6 +454,7 @@ export function AwakenUserPromptBlock({
         onKeyDown={handlePromptKeyDown}
       >
         <div
+          ref={selectRootRef}
           data-aw-select-all-root=""
           className="execution-prompt-bubble-select-root"
           onCopy={handlePromptCopy}

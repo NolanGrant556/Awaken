@@ -61,7 +61,7 @@ export const AWAKEN_ICON_CONCEPTS = {
 
   // 设置页导航
   "settings-model": "chip",
-  "settings-memory": "stack",
+  "settings-memory": "brain",
   "settings-appearance": "color-mode",
   "settings-pets": "paw",
   "settings-acp": "robot",
@@ -150,21 +150,16 @@ export const AWAKEN_ICON_CONCEPTS = {
   // 能力与来源
   tool: "wrench",
   "tool-terminal": "terminal",
-  skill: "skill",
-  "skill-active": "skill-core",
+  skill: "book-open",
+  "skill-active": "book-open",
   hook: "hook",
   connector: "connector",
   subagent: "subagent",
   "scheduled-task": "clock",
 
-  /**
-   * MCP 按尺寸分两路：
-   * - `mcp-brand` 用官方标记，只在 ≥20px 的连接器卡片、MCP 设置等处使用；
-   * - `mcp-source` 用 compact 伴随字形，用于 13/14px 的工具轨迹这类密集行。
-   * 官方标记在小尺寸会粘连，这是标记结构决定的，不是缩放方式的问题。
-   */
+  /** MCP 分类、卡片与工具轨迹统一使用同一官方标记。 */
   "mcp-brand": "mcp-mark",
-  "mcp-source": "mcp-compact",
+  "mcp-source": "mcp-mark",
 } as const satisfies Record<string, AwakenIconName>;
 
 export type AwakenIconConcept = keyof typeof AWAKEN_ICON_CONCEPTS;

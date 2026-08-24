@@ -177,12 +177,20 @@
 }
 
 .aw-settings-page__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0;
   color: var(--aw-text-primary);
   font-size: 26px;
   font-weight: var(--aw-font-weight-heavy);
   line-height: 1.15;
   letter-spacing: -0.03em;
+}
+
+.aw-settings-page__title-icon {
+  flex: 0 0 auto;
+  color: currentColor;
 }
 
 .aw-settings-page__description {

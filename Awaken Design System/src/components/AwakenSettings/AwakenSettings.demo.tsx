@@ -31,14 +31,9 @@ const apiModelViews = [
   { id: "llm", label: "LLM 设置" },
 ];
 
-const sectionTitles: Record<string, string> = {
-  models: "模型",
-  search: "搜索",
-  memory: "记忆",
-  appearance: "外观",
-  pets: "宠物",
-  acp: "ACP",
-};
+const sectionTitles = Object.fromEntries(
+  AwakenSettingsNavItems.map((item) => [item.id, item.label]),
+) as Record<string, string>;
 
 const configuredModel = {
   id: "deepseek",
@@ -138,11 +133,9 @@ export function AwakenSettingsDemo() {
         onToggleOverlay={() => setLastAction("已触发唤醒宠物（Gallery 模拟）。")}
       />
     );
-  } else if (activeSectionId === "acp") {
-    // 设计系统只拥有 ACP 这一个导航入口，runner 列表和编辑表单由 Desktop 拥有。
-    // 不占位就会落进下面的 else，在「ACP」标题下显示模型设置。
+  } else if (["instructions", "computer", "hooks", "acp"].includes(activeSectionId)) {
     content = (
-      <p>ACP runner 的列表与编辑表单由 Desktop 拥有，Gallery 只观测这个导航入口。</p>
+      <p>{sectionTitles[activeSectionId]}的完整内容由对应设置页或 Desktop consumer 观测；此处验证统一导航与标题。</p>
     );
   } else {
     content = (

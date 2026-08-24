@@ -15,6 +15,7 @@
  * 所以这里断言的就是 Design System 的真实实现。
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -28,6 +29,12 @@ import {
   AWAKEN_ICON_STROKE,
   AWAKEN_LINE_ICON_NAMES,
   AWAKEN_OPTICAL_SHAPES,
+  APPROVED_LUCIDE_GLYPHS,
+  APPROVED_LUCIDE_ICON_NAMES,
+  APPROVED_LUCIDE_LICENSE,
+  APPROVED_LUCIDE_SOURCES,
+  APPROVED_LUCIDE_STROKE,
+  APPROVED_LUCIDE_VERSION,
   ICON_DEFINITIONS,
   getAwakenIcon,
   isAwakenIconName,
@@ -37,6 +44,17 @@ import {
 const REPO_ROOT = path.resolve(__dirname, "../../../..");
 const DS_SRC = path.join(REPO_ROOT, "Awaken Design System", "src");
 const DESKTOP_SRC = path.join(REPO_ROOT, "apps", "desktop", "src");
+
+const PRODUCT_APPROVED_ICON_DIGESTS = {
+  brain: "07158d2f25e925e3e36db7aee89b77d4f973ce758458e0d99a5d458c59783a4e",
+  connector: "050aeec594e18aee075e2b302bf5af350a475b38e1c95f9262d60d3bcc066071",
+  folder: "bc3ca3cdb88518eb7b3b8f60623627c23ba7bb9f64bb6adffa85614648262175",
+  "folder-open": "74988aa27f3440fc2f92bed23b3acd81b1fef864aa18707602c73ad87123fdcc",
+  "folder-plus": "d61abf5638dd4fcbb626cd0711c68d46dd72a16a381abc00f9dc424b6d40e32c",
+  "mcp-mark": "98fd09c590a32b9f57ce02dbd2e8b00b5c5ad06b12ab3b31b56d063fafb69f5c",
+  "book-open": "eec3bf9ff8717eb1d5dd3b5976310ec2fabfbf3e36f02f5e025f6afeedfd4232",
+  terminal: "23704d14f851a1e3374751137118edbabd3520473f3470bd9a751864fc6cc20d",
+} as const;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -97,12 +115,17 @@ describe("几何快照", () => {
 });
 
 describe("光学与网格不变量", () => {
-  it("每个线性图标贴合它声明的光学形状", () => {
+  it("Awaken 构造几何贴合光学盒，licensed authored 字形保留确认过的比例", () => {
     for (const name of AWAKEN_LINE_ICON_NAMES) {
       const icon = getAwakenIcon(name);
       if (icon.mode !== "line") continue;
+      if (icon.provenance.kind === "licensed-authored") {
+        expect(icon.measured, `${name} 不应被二次光学拉伸`).toBeUndefined();
+        continue;
+      }
       const [targetW, targetH] = opticalVisual(ICON_DEFINITIONS[name]);
-      const [w, h] = icon.measured;
+      expect(icon.measured, `${name} 缺少光学测量`).toBeDefined();
+      const [w, h] = icon.measured!;
       // 等比缩放只能让一条轴贴合目标，另一条轴不得超出。
       const touchesW = Math.abs(w - targetW) < 0.05;
       const touchesH = Math.abs(h - targetH) < 0.05;
@@ -135,13 +158,40 @@ describe("光学与网格不变量", () => {
     }
   });
 
-  it("描边字形共用同一个描边宽度，实心字形描边为 0", () => {
+  it("描边字形只使用两套经确认的线宽，实心字形描边为 0", () => {
     for (const name of AWAKEN_LINE_ICON_NAMES) {
       const icon = getAwakenIcon(name);
       if (icon.mode !== "line") continue;
       // 实心字形的视觉包围盒就是几何包围盒，不为描边留半个描边宽度。
-      expect(icon.strokeWidth, name).toBe(icon.filled ? 0 : AWAKEN_ICON_STROKE);
+      const expectedStroke =
+        icon.provenance.kind === "licensed-authored"
+          ? APPROVED_LUCIDE_STROKE
+          : AWAKEN_ICON_STROKE;
+      expect(icon.strokeWidth, name).toBe(icon.filled ? 0 : expectedStroke);
     }
+  });
+
+  it("94 个确认候选全部静态固化并保留 Lucide 来源与许可", () => {
+    expect(APPROVED_LUCIDE_ICON_NAMES).toHaveLength(94);
+    expect(Object.keys(APPROVED_LUCIDE_SOURCES).sort()).toEqual(APPROVED_LUCIDE_ICON_NAMES);
+    for (const name of APPROVED_LUCIDE_ICON_NAMES) {
+      const icon = getAwakenIcon(name);
+      expect(icon.mode, name).toBe("line");
+      if (icon.mode !== "line") continue;
+      expect(icon.provenance, name).toEqual({
+        kind: "licensed-authored",
+        source: `lucide-react v${APPROVED_LUCIDE_VERSION} · ${APPROVED_LUCIDE_SOURCES[name]}`,
+        license: APPROVED_LUCIDE_LICENSE,
+      });
+      expect(icon.paths, name).toEqual(APPROVED_LUCIDE_GLYPHS[name].paths);
+    }
+  });
+
+  it("KeyRound 的 authored 实心圆点不会在 path-only 固化时丢失", () => {
+    const key = getAwakenIcon("key");
+    expect(key.mode).toBe("line");
+    if (key.mode !== "line") return;
+    expect(key.filledPathIndexes).toEqual([1]);
   });
 
   it("实心字形只给产品真正需要的概念做", () => {
@@ -156,14 +206,14 @@ describe("光学与网格不变量", () => {
     expect(filled).toEqual(["play", "stop"]);
   });
 
-  it("品牌标记保留 authored geometry，并声明可读下限", () => {
+  it("品牌标记保留 authored paths，并声明可读下限", () => {
     for (const name of AWAKEN_BRAND_ICON_NAMES) {
       const icon = getAwakenIcon(name);
       expect(icon.mode).not.toBe("line");
       if (icon.mode === "line") continue;
-      // 品牌标记不使用 16 网格 viewBox —— 它们不参与光学归一化。
+      // 品牌标记不使用 16 网格 viewBox：保留 authored paths，只允许对称透明留白。
       expect(icon.viewBox).not.toBe(`0 0 ${AWAKEN_ICON_GRID} ${AWAKEN_ICON_GRID}`);
-      expect(icon.minSize).toBeGreaterThanOrEqual(20);
+      expect(icon.minSize).toBeGreaterThanOrEqual(14);
     }
   });
 });
@@ -179,6 +229,40 @@ describe("概念表", () => {
     const keys = Object.keys(AWAKEN_ICON_CONCEPTS);
     expect(new Set(keys).size).toBe(keys.length);
   });
+
+  it("连接器、Skill、CLI 与 MCP 使用当前确定的图形", () => {
+    expect(AWAKEN_ICON_CONCEPTS.connector).toBe("connector");
+    expect(AWAKEN_ICON_CONCEPTS.skill).toBe("book-open");
+    expect(AWAKEN_ICON_CONCEPTS["skill-active"]).toBe("book-open");
+    expect(AWAKEN_ICON_CONCEPTS["tool-terminal"]).toBe("terminal");
+    expect(AWAKEN_ICON_CONCEPTS["mcp-brand"]).toBe("mcp-mark");
+    expect(AWAKEN_ICON_CONCEPTS["mcp-source"]).toBe("mcp-mark");
+  });
+
+  it("记忆恢复 PR #36 前的 Brain 图形，并由 Design System 持有来源", () => {
+    expect(AWAKEN_ICON_CONCEPTS["settings-memory"]).toBe("brain");
+    const brain = ICON_DEFINITIONS.brain;
+    expect(brain.build).toBeUndefined();
+    expect(brain.authored?.source).toContain("lucide-react v0.468.0");
+    expect(brain.authored?.license).toBe("ISC");
+  });
+});
+
+describe("已确认产品字形保护", () => {
+  it("文件夹、记忆、连接器、MCP、Skill 与 CLI 字形保持已确认版本", () => {
+    for (const [name, expected] of Object.entries(PRODUCT_APPROVED_ICON_DIGESTS)) {
+      const icon = getAwakenIcon(name as keyof typeof PRODUCT_APPROVED_ICON_DIGESTS);
+      const value = JSON.stringify({
+        mode: icon.mode,
+        viewBox: icon.viewBox,
+        paths: icon.paths,
+        strokeWidth: "strokeWidth" in icon ? icon.strokeWidth : undefined,
+        filled: icon.mode === "line" ? icon.filled : undefined,
+        minSize: icon.minSize,
+      });
+      expect(createHash("sha256").update(value).digest("hex"), name).toBe(expected);
+    }
+  });
 });
 
 describe("越层守卫", () => {
@@ -190,6 +274,14 @@ describe("越层守卫", () => {
     expect(files.length).toBeGreaterThan(0);
     const offenders = files.filter((f) => /from\s+["']lucide-react["']/.test(readFileSync(f, "utf8")));
     expect(offenders.map((f) => path.relative(REPO_ROOT, f))).toEqual([]);
+    const designSystemPackage = JSON.parse(
+      readFileSync(path.join(REPO_ROOT, "Awaken Design System", "package.json"), "utf8"),
+    ) as { dependencies?: Record<string, string> };
+    const desktopPackage = JSON.parse(
+      readFileSync(path.join(REPO_ROOT, "apps", "desktop", "package.json"), "utf8"),
+    ) as { dependencies?: Record<string, string> };
+    expect(designSystemPackage.dependencies?.["lucide-react"]).toBeUndefined();
+    expect(desktopPackage.dependencies?.["lucide-react"]).toBeUndefined();
   });
 
   it("图标层不依赖 Electron、runtime 或产品 store", () => {

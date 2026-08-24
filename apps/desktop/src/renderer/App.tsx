@@ -364,7 +364,7 @@ export type WorkbenchNavSection = ExtensionSection | "scheduled-tasks";
 export function workbenchNavSectionForNavId(
   activeNavId: string | undefined,
 ): WorkbenchNavSection | undefined {
-  if (activeNavId === "connectors" || activeNavId === "skills") {
+  if (activeNavId === "connectors" || activeNavId === "skills" || activeNavId === "plugins") {
     return activeNavId;
   }
   if (activeNavId === "scheduled-tasks") {
@@ -2004,6 +2004,8 @@ export function toolTracePresentation(
     status?: ToolDisplayState;
   } = {},
 ) {
+  const requestedTitle = options.title?.trim() || "";
+  const requestedMcpIdentity = /^mcp__.+__/i.test(requestedTitle);
   if (!tool) {
     const legacyContent = fallback?.trim() || undefined;
     const statusNeedsContext = Boolean(
@@ -2033,7 +2035,7 @@ export function toolTracePresentation(
       output: undefined,
       outputLabel: "工具输出",
       detailCard,
-      kind: "tool" as const,
+      kind: requestedMcpIdentity ? "mcp" as const : "tool" as const,
     };
   }
   const commandOutput = tool.commandOutput?.trim();
@@ -2044,13 +2046,18 @@ export function toolTracePresentation(
     ? commandOutput || undefined
     : commandOutput || result || undefined;
   const providerSource = tool.providerSource?.trim().toLowerCase() || "";
-  const mcpProvider = providerSource === "mcp" || providerSource === "connector";
   const sourceTitle = options.title || tool.title || "使用工具";
+  const providerId = tool.providerId?.trim() || "";
+  const mcpProvider =
+    providerSource === "mcp" ||
+    providerSource === "connector" ||
+    /^(?:mcp|connector):/i.test(providerId) ||
+    /^mcp__.+__/i.test(sourceTitle);
   const args = argumentRecord(tool.args);
   const shellTool = Boolean(commandOutput) || SHELL_TOOL_TITLE.test(sourceTitle);
-  const kind = shellTool ? "terminal" : mcpProvider ? "mcp" : "tool";
+  const kind = mcpProvider ? "mcp" : shellTool ? "terminal" : "tool";
   const providerLabel = mcpProvider
-    ? tool.providerId?.replace(/^(mcp|connector):/i, "")
+    ? providerId.replace(/^(mcp|connector):/i, "")
     : undefined;
   const progress = active
     ? compactToolContext(fallback) || compactToolContext(commandOutput) || compactToolContext(result)
@@ -3883,6 +3890,11 @@ export function App() {
       icon: <AwakenIcon concept="skill" size={20} />,
     },
     {
+      id: "plugins",
+      label: "插件",
+      icon: <AwakenIcon concept="skill" size={20} />,
+    },
+    {
       id: "scheduled-tasks",
       label: "定时任务",
       icon: <AwakenIcon concept="scheduled-task" size={20} />,
@@ -4457,7 +4469,9 @@ export function App() {
   const showTurnMarkerRail = !fileWorkspaceSurfaceActive && turnMarkerDisplay.mode !== "hidden";
   const activeNavSection = workbenchNavSectionForNavId(activeNavId);
   const activeExtensionSection: ExtensionSection | undefined =
-    activeNavSection === "connectors" || activeNavSection === "skills"
+    activeNavSection === "connectors" ||
+    activeNavSection === "skills" ||
+    activeNavSection === "plugins"
       ? activeNavSection
       : undefined;
   const scheduledTasksNavActive = activeNavSection === "scheduled-tasks";

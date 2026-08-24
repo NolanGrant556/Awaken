@@ -16,6 +16,33 @@ function cssRule(source: string, selector: string): string {
 }
 
 describe("RunStage layout", () => {
+  it("keeps the model trigger responsive and animates only its visible chevron", () => {
+    const designSystemStyles = readFileSync(
+      new URL(
+        "../../../../Awaken Design System/src/tokens/components.css",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(designSystemStyles).toContain(
+      "@container composer-bar-layout (max-width: 440px)",
+    );
+    expect(designSystemStyles).toMatch(
+      /\.composer-bar \.composer-bar-model-trigger-label,\s*\.composer-bar \.composer-bar-model-trigger-chevron\s*\{\s*display: none;/,
+    );
+
+    expect(designSystemStyles).toMatch(
+      /\.composer-bar-model-trigger-chevron\s*\{\s*display: inline-flex;[\s\S]*?transform: rotate\(0deg\);[\s\S]*?transition: transform 240ms[\s\S]*?\}/,
+    );
+    expect(designSystemStyles).toMatch(
+      /\.composer-bar-model-trigger\[aria-expanded="true"\]\s*\.composer-bar-model-trigger-chevron\s*\{\s*transform: rotate\(180deg\);/,
+    );
+    expect(designSystemStyles).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.composer-bar-model-trigger-chevron\s*\{\s*transition: none !important;/,
+    );
+  });
+
   it("keeps the center-home spacing, project shelf, and sidebar typography aligned", () => {
     const workbenchStyles = readFileSync(
       new URL("./styles/workbench.css", import.meta.url),

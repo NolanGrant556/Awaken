@@ -334,13 +334,18 @@ func (d *SkillDefinition) CanonicalFrontmatterMap() map[string]any {
 	return out
 }
 
-// ValidateNameReserved checks whether the given name starts with the reserved
-// mcp__ prefix. Local packages cannot impersonate MCP-owned identities.
+// ValidateNameReserved checks whether the given name starts with a reserved
+// identity prefix. Local packages cannot impersonate MCP-owned or plugin-owned
+// catalog IDs.
 const reservedMcpPrefix = "mcp__"
+const reservedPluginPrefix = "plugin__"
 
 func ValidateNameReserved(name string) error {
 	if strings.HasPrefix(name, reservedMcpPrefix) {
 		return fmt.Errorf("skill name %q starts with reserved prefix %q", name, reservedMcpPrefix)
+	}
+	if strings.HasPrefix(name, reservedPluginPrefix) {
+		return fmt.Errorf("skill name %q starts with reserved prefix %q", name, reservedPluginPrefix)
 	}
 	return nil
 }

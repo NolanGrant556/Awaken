@@ -220,7 +220,7 @@ func TestMergeScopedProjectOverridesUser(t *testing.T) {
 			HTTP: &HTTPTransportConfig{URL: "https://project.example.com"},
 		}},
 	}
-	merged := MergeScoped(user, project, nil, nil)
+	merged := MergeScoped(nil, user, project, nil, nil)
 	if len(merged) != 1 {
 		t.Fatalf("expected 1 merged server, got %d", len(merged))
 	}
@@ -240,7 +240,7 @@ func TestMergeScopedDropsInvalid(t *testing.T) {
 		}},
 		{Name: "invalid", Scope: ScopeUser, Config: McpServerConfig{}}, // no transport
 	}
-	merged := MergeScoped(servers, nil, nil, nil)
+	merged := MergeScoped(nil, servers, nil, nil, nil)
 	if len(merged) != 1 {
 		t.Fatalf("expected 1 valid server after merge, got %d", len(merged))
 	}
@@ -262,7 +262,7 @@ func TestMergeScopedDisabledRetained(t *testing.T) {
 			Enabled: &disabled,
 		}},
 	}
-	merged := MergeScoped(servers, nil, nil, nil)
+	merged := MergeScoped(nil, servers, nil, nil, nil)
 	if len(merged) != 2 {
 		t.Fatalf("expected enabled and disabled servers, got %+v", merged)
 	}
@@ -275,6 +275,50 @@ func TestMergeScopedDisabledRetained(t *testing.T) {
 	}
 	if off, ok := byName["off"]; !ok || off.Config.Enabled == nil || *off.Config.Enabled {
 		t.Fatalf("disabled server was not retained: %+v", merged)
+	}
+}
+
+func TestStdioChildEnvInjectsReservedPluginVarsLast(t *testing.T) {
+	env := stdioChildEnv(&StdioTransportConfig{
+		Env:        map[string]string{"FOO": "bar", "PLUGIN_ROOT": "attacker", "plugin_data": "attacker"},
+		PluginRoot: "/plugins/packages/acme",
+		PluginData: "/plugins/data/acme",
+	}, []string{"PATH=/bin"})
+	joined := env
+	if len(joined) < 4 || joined[0] != "PATH=/bin" {
+		t.Fatalf("env=%v", joined)
+	}
+	seenRoot, seenData, seenAttacker := false, false, false
+	for _, item := range joined {
+		if item == "PLUGIN_ROOT=/plugins/packages/acme" {
+			seenRoot = true
+		}
+		if item == "PLUGIN_DATA=/plugins/data/acme" {
+			seenData = true
+		}
+		if item == "PLUGIN_ROOT=attacker" || item == "plugin_data=attacker" {
+			seenAttacker = true
+		}
+	}
+	if !seenRoot || !seenData || seenAttacker {
+		t.Fatalf("reserved env injection failed: %v", joined)
+	}
+}
+
+func TestMergeScopedUserOverridesPlugin(t *testing.T) {
+	plugin := []ScopedMcpServerConfig{
+		{Name: "shared", Scope: ScopePlugin, Config: McpServerConfig{
+			HTTP: &HTTPTransportConfig{URL: "https://plugin.example.com"},
+		}},
+	}
+	user := []ScopedMcpServerConfig{
+		{Name: "shared", Scope: ScopeUser, Config: McpServerConfig{
+			HTTP: &HTTPTransportConfig{URL: "https://user.example.com"},
+		}},
+	}
+	merged := MergeScoped(plugin, user, nil, nil, nil)
+	if len(merged) != 1 || merged[0].Scope != ScopeUser || merged[0].Config.HTTP.URL != "https://user.example.com" {
+		t.Fatalf("user should override plugin: %+v", merged)
 	}
 }
 

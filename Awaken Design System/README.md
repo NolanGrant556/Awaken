@@ -204,6 +204,8 @@ Gallery 左栏按“原子组件”“左侧栏组件”“设置页组件”“
 
 “「连接器」组件库”集中展示 Desktop 直接消费的 `AwakenConnectors` 完整 MCP/CLI 组合，以及连接器卡片、品牌图标、server 开关、CLI 详情、MCP 配置和 MCP 设置弹窗。Gallery 只注入 mock 状态；连接器目录、MCP server snapshot、CLI readiness、安装/授权、配置保存、日志读取与持久化仍由 Desktop Main/Core/Renderer 对应 owner 负责。
 
+“「插件」组件库”集中展示 Desktop 插件页消费的 `AwakenPluginCard`、`AwakenPluginDetailDialog` 与 `AwakenPluginInstallDialog`。Gallery 只注入 mock 状态；安装来源、启停、升级、卸载、Skill 预览和 MCP readiness 仍由 Desktop Renderer 通过 Main `requestRuntime` 调用 Core `/v1/plugins*`。安装弹窗的无沙盒风险说明是固定文案。
+
 ## 组件文件夹契约
 
 每个组件都应该独立放在自己的文件夹里；只有拥有顶层 Gallery 入口的组件或组件族必须保留独立 `*.demo.tsx`，被组件族收纳的小组件由组件族 Demo 观测：

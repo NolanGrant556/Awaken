@@ -96,7 +96,12 @@ func TestReadSkillPreviewSupportsEveryLocalPackageSource(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(packageRoot, "SKILL.md"), []byte(raw), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			def := LoadDir(root, source)["source-preview"]
+			loaded := LoadDir(root, source)
+			id := "source-preview"
+			if source == SourcePlugin {
+				id = namespacedSkillID(source, root, "source-preview")
+			}
+			def := loaded[id]
 			if def == nil {
 				t.Fatal("expected discovered skill")
 			}

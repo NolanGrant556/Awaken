@@ -116,6 +116,8 @@ import {
   type RenameThreadRequest,
   type RuntimeThreadTranscriptWire,
   type RuntimeThreadWire,
+  type RuntimeThreadListView,
+  type SetThreadArchivedResult,
   type RuntimeToolInfo,
   type SearchSettings,
   type SearchSettingsSaveRequest,
@@ -2679,13 +2681,48 @@ ipcMain.handle("awaken:get-thread-transcript", async (_event, threadId: string) 
   return normalizeRuntimeThreadTranscript(transcript);
 });
 
-ipcMain.handle("awaken:list-threads", async () => {
-  const threads = await requestRuntime<RuntimeThreadWire[]>("/v1/threads", {
-    method: "GET",
-  });
+ipcMain.handle("awaken:list-threads", async (_event, view?: RuntimeThreadListView) => {
+  const threadView = view === "archived" ? "archived" : "active";
+  const threads = await requestRuntime<RuntimeThreadWire[]>(
+    `/v1/threads?view=${threadView}`,
+    {
+      method: "GET",
+    },
+  );
 
   return threads.map(normalizeRuntimeThread);
 });
+
+ipcMain.handle(
+  "awaken:set-thread-archived",
+  async (_event, threadId: string, archived: boolean): Promise<SetThreadArchivedResult> => {
+    try {
+      const thread = await requestRuntimeDomain<RuntimeThreadWire>(
+        `/v1/threads/${encodeURIComponent(threadId)}/archive`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ archived: Boolean(archived) }),
+        },
+      );
+      return { ok: true, thread: normalizeRuntimeThread(thread) };
+    } catch (error) {
+      console.error("thread_archive_failed", {
+        threadId,
+        archived,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        ok: false,
+        code: error instanceof RuntimeDomainError ? error.code : "THREAD_ARCHIVE_FAILED",
+        message:
+          error instanceof RuntimeDomainError
+            ? error.message
+            : "归档请求暂时未完成，Awaken 会保留当前会话，请稍后重试。",
+      };
+    }
+  },
+);
 
 ipcMain.handle("awaken:rename-thread", async (_event, threadId: string, label: string) => {
   const body: RenameThreadRequest = { label };
@@ -2742,7 +2779,7 @@ ipcMain.handle(
   "awaken:delete-thread",
   async (_event, threadId: string): Promise<ThreadDeleteResult> => {
     try {
-      await requestRuntimeOK(`/v1/threads/${threadId}`, {
+      await requestRuntimeDomainOK(`/v1/threads/${encodeURIComponent(threadId)}`, {
         method: "DELETE",
       });
       return { ok: true };
@@ -2753,8 +2790,11 @@ ipcMain.handle(
       });
       return {
         ok: false,
-        code: "THREAD_DELETE_FAILED",
-        message: "删除请求暂时未完成，Awaken 会保留当前会话，请稍后重试。",
+        code: error instanceof RuntimeDomainError ? error.code : "THREAD_DELETE_FAILED",
+        message:
+          error instanceof RuntimeDomainError
+            ? error.message
+            : "删除请求暂时未完成，Awaken 会保留当前会话，请稍后重试。",
       };
     }
   },

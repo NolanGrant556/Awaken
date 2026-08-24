@@ -13,6 +13,7 @@ import {
 function makeTranscript(): RuntimeThreadTranscript {
   return {
     thread: {
+      archived: false,
       threadId: "thread-1",
       label: "你好",
       runId: "run-2",
@@ -64,6 +65,7 @@ describe("thread transcript replay helpers", () => {
   it("replays a host-owned scheduled reminder without a user prompt", () => {
     const transcript: RuntimeThreadTranscript = {
       thread: {
+        archived: false,
         threadId: "thread-reminder",
         label: "喝水提醒",
         runId: "run-reminder",
@@ -171,6 +173,7 @@ describe("thread transcript replay helpers", () => {
   it("replays durable attachment cards and composer tokens without text inference", () => {
     const transcript: RuntimeThreadTranscript = {
       thread: {
+        archived: false,
         threadId: "thread-structured-input",
         label: "附件任务",
         runId: "run-structured-input",
@@ -244,6 +247,7 @@ describe("thread transcript replay helpers", () => {
     const leadingText = "现在我需要你帮我分析现有的财务数据风险，然后使用 ";
     const transcript: RuntimeThreadTranscript = {
       thread: {
+        archived: false,
         threadId: "thread-inline-token",
         label: "财务风险报告",
         runId: "run-inline-token",
@@ -304,6 +308,7 @@ describe("thread transcript replay helpers", () => {
   it("restores assistant text when one semantic record projects to frames with the same seq", () => {
     const transcript: RuntimeThreadTranscript = {
       thread: {
+        archived: false,
         threadId: "thread-semantic",
         label: "历史重放",
         runId: "run-semantic",
@@ -492,6 +497,7 @@ describe("thread transcript replay helpers", () => {
 
     const transcript: RuntimeThreadTranscript = {
       thread: {
+        archived: false,
         threadId: run.threadId,
         label: "完整验收",
         runId: run.runId,
@@ -525,6 +531,7 @@ describe("thread transcript replay helpers", () => {
   it("synthesizes a replay answer from finished run result when text events are missing", () => {
     const transcript: RuntimeThreadTranscript = {
       thread: {
+        archived: false,
         threadId: "thread-result",
         label: "恢复历史",
         runId: "run-result",
@@ -581,6 +588,7 @@ describe("thread transcript replay helpers", () => {
   it("synthesizes a replay answer from cancelled run result when text events are missing", () => {
     const transcript: RuntimeThreadTranscript = {
       thread: {
+        archived: false,
         threadId: "thread-cancelled",
         label: "恢复中断",
         runId: "run-cancelled",

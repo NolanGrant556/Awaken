@@ -201,7 +201,7 @@ func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {
 		t.Fatalf("expected reconfigured model config, got %+v", secondCfg)
 	}
 	waitForThreadIdle(t, service, first.ThreadID)
-	threads := service.ListThreads()
+	threads := service.ListThreads(ThreadListViewActive)
 	if len(threads) != 1 || threads[0].SelectedModelProfileID != "profile-b" || threads[0].ReasoningEffortByProfile["profile-b"] != "high" {
 		t.Fatalf("thread preference not persisted: %+v", threads)
 	}
@@ -681,7 +681,7 @@ func TestComposerSkillTokenOnlyRequestIsValidAndLabelsThreadFromToken(t *testing
 	if len(transcript.Runs) != 1 || len(transcript.Runs[0].Run.ComposerTokens) != 1 {
 		t.Fatalf("expected transcript run to keep composer token, got %+v", transcript.Runs)
 	}
-	threads := service.ListThreads()
+	threads := service.ListThreads(ThreadListViewActive)
 	if len(threads) != 1 || threads[0].ThreadID != run.ThreadID {
 		t.Fatalf("expected one thread for token-only run, got %+v", threads)
 	}
@@ -928,7 +928,7 @@ func TestProjectlessConversationsGetThreadOwnedSessionWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start first project-less conversation: %v", err)
 	}
-	firstThread := service.ListThreads()[0]
+	firstThread := service.ListThreads(ThreadListViewActive)[0]
 	wantFirstRoot := filepath.Clean(desktopdata.SessionWorkspacePath(home, first.ThreadID))
 	if firstThread.Workspace.WorkspaceRoot != wantFirstRoot {
 		t.Fatalf("first workspace root=%q want=%q", firstThread.Workspace.WorkspaceRoot, wantFirstRoot)
@@ -950,7 +950,7 @@ func TestProjectlessConversationsGetThreadOwnedSessionWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("continue project-less conversation: %v", err)
 	}
-	followUpThread := service.ListThreads()[0]
+	followUpThread := service.ListThreads(ThreadListViewActive)[0]
 	if followUpThread.Workspace.WorkspaceRoot != wantFirstRoot {
 		t.Fatalf("follow-up workspace root=%q want=%q", followUpThread.Workspace.WorkspaceRoot, wantFirstRoot)
 	}
@@ -961,7 +961,7 @@ func TestProjectlessConversationsGetThreadOwnedSessionWorkspaces(t *testing.T) {
 		t.Fatalf("start second project-less conversation: %v", err)
 	}
 	var secondRoot string
-	for _, thread := range service.ListThreads() {
+	for _, thread := range service.ListThreads(ThreadListViewActive) {
 		if thread.ThreadID == second.ThreadID {
 			secondRoot = thread.Workspace.WorkspaceRoot
 		}
@@ -973,7 +973,7 @@ func TestProjectlessConversationsGetThreadOwnedSessionWorkspaces(t *testing.T) {
 	if err := service.DeleteThread(first.ThreadID); err != nil {
 		t.Fatalf("delete project-less conversation: %v", err)
 	}
-	for _, thread := range service.ListThreads() {
+	for _, thread := range service.ListThreads(ThreadListViewActive) {
 		if thread.ThreadID == first.ThreadID {
 			t.Fatalf("deleted project-less conversation remained in thread list: %+v", thread)
 		}
@@ -1585,7 +1585,7 @@ func TestListThreadsReturnsRuntimeThreads(t *testing.T) {
 	}
 	waitForRunTerminal(t, service, run.RunID)
 
-	threads := service.ListThreads()
+	threads := service.ListThreads(ThreadListViewActive)
 	if len(threads) != 1 {
 		t.Fatalf("expected one thread, got %d", len(threads))
 	}
@@ -1630,7 +1630,7 @@ func TestListThreadsReturnsRecentThreadsFirst(t *testing.T) {
 	}
 	waitForRunTerminal(t, service, secondRun.RunID)
 
-	threads := service.ListThreads()
+	threads := service.ListThreads(ThreadListViewActive)
 	if len(threads) != 2 {
 		t.Fatalf("expected two threads, got %d", len(threads))
 	}
@@ -1664,7 +1664,7 @@ func TestListThreadsRestoresDurableThreadsAfterRestart(t *testing.T) {
 		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
 	}
 
-	threads := restartedService.ListThreads()
+	threads := restartedService.ListThreads(ThreadListViewActive)
 	if len(threads) != 1 {
 		t.Fatalf("expected one durable thread after restart, got %d", len(threads))
 	}
@@ -1711,7 +1711,7 @@ func TestRenameThreadPersistsDurableLabel(t *testing.T) {
 	if err := restartedService.SetDefaultWorkspace(WorkspaceConfig{WorkspaceRoot: root}); err != nil {
 		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
 	}
-	threads := restartedService.ListThreads()
+	threads := restartedService.ListThreads(ThreadListViewActive)
 	if len(threads) != 1 {
 		t.Fatalf("expected one durable thread, got %d", len(threads))
 	}
@@ -1737,7 +1737,7 @@ func TestDeleteThreadRemovesMemoryAndDurableTranscript(t *testing.T) {
 	if err := service.DeleteThread(run.ThreadID); err != nil {
 		t.Fatalf("DeleteThread returned error: %v", err)
 	}
-	if got := service.ListThreads(); len(got) != 0 {
+	if got := service.ListThreads(ThreadListViewActive); len(got) != 0 {
 		t.Fatalf("expected no in-memory threads after delete, got %+v", got)
 	}
 	if _, err := os.Stat(transcriptPath(run.ThreadID)); !errors.Is(err, os.ErrNotExist) {
@@ -1748,7 +1748,7 @@ func TestDeleteThreadRemovesMemoryAndDurableTranscript(t *testing.T) {
 	if err := restartedService.SetDefaultWorkspace(WorkspaceConfig{WorkspaceRoot: root}); err != nil {
 		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
 	}
-	if got := restartedService.ListThreads(); len(got) != 0 {
+	if got := restartedService.ListThreads(ThreadListViewActive); len(got) != 0 {
 		t.Fatalf("expected no durable threads after restart, got %+v", got)
 	}
 }
@@ -2073,7 +2073,7 @@ func TestListThreadsRestoresDurableThreadsAcrossStoredWorkspaces(t *testing.T) {
 		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
 	}
 
-	threads := restartedService.ListThreads()
+	threads := restartedService.ListThreads(ThreadListViewActive)
 	if len(threads) != 2 {
 		t.Fatalf("expected two durable threads across workspaces, got %d", len(threads))
 	}
@@ -2409,7 +2409,7 @@ func TestStartRunStorageFailureRollsBackBusyAndGhostState(t *testing.T) {
 	}); err == nil {
 		t.Fatal("expected new-thread storage failure")
 	}
-	if threads := secondService.ListThreads(); len(threads) != 0 {
+	if threads := secondService.ListThreads(ThreadListViewActive); len(threads) != 0 {
 		t.Fatalf("failed new run left ghost thread: %+v", threads)
 	}
 	if len(secondService.sessions) != 0 || len(secondService.threads) != 0 {
@@ -2575,7 +2575,7 @@ func waitForRunTerminal(t *testing.T, service *RunService, runID string) Run {
 }
 
 func threadHasActiveRun(service *RunService, threadID, runID string) bool {
-	for _, thread := range service.ListThreads() {
+	for _, thread := range service.ListThreads(ThreadListViewActive) {
 		if thread.ThreadID == threadID {
 			return thread.ActiveRunID == runID
 		}
@@ -3016,4 +3016,288 @@ func TestRunServiceFallsBackToUnavailableDriverOnFactoryError(t *testing.T) {
 	}
 
 	waitForRunTerminal(t, service, run.RunID)
+}
+
+func TestSetThreadArchivedMemoryThreadLifecycle(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	root := t.TempDir()
+	service := newDurableThreadTestService()
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "archive me",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+	waitForTranscriptMessageCount(t, root, run.ThreadID, 2)
+
+	// Archiving an idle in-memory thread moves it between views.
+	archived, err := service.SetThreadArchived(run.ThreadID, true)
+	if err != nil {
+		t.Fatalf("SetThreadArchived returned error: %v", err)
+	}
+	if !archived.Archived || archived.ArchivedAt.IsZero() {
+		t.Fatalf("expected archived snapshot with archived_at, got %+v", archived)
+	}
+	if threads := service.ListThreads(ThreadListViewActive); len(threads) != 0 {
+		t.Fatalf("archived thread must leave the active view, got %+v", threads)
+	}
+	archivedList := service.ListThreads(ThreadListViewArchived)
+	if len(archivedList) != 1 || archivedList[0].ThreadID != run.ThreadID {
+		t.Fatalf("archived thread must appear in the archived view, got %+v", archivedList)
+	}
+
+	// The same target state is idempotent and keeps archived_at stable.
+	again, err := service.SetThreadArchived(run.ThreadID, true)
+	if err != nil {
+		t.Fatalf("idempotent SetThreadArchived returned error: %v", err)
+	}
+	if !again.ArchivedAt.Equal(archived.ArchivedAt) {
+		t.Fatalf("idempotent archive moved archived_at: %v -> %v", archived.ArchivedAt, again.ArchivedAt)
+	}
+
+	// Archiving the currently loaded thread keeps its transcript readable.
+	transcript, err := service.GetThreadTranscript(run.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadTranscript on archived thread returned error: %v", err)
+	}
+	if len(transcript.Runs) != 1 {
+		t.Fatalf("archived thread lost runs: %+v", transcript.Runs)
+	}
+	messages := 0
+	for _, record := range transcript.Runs[0].SemanticRecords {
+		if record.Kind == agentcore.SemanticKindUserMessage || record.Kind == agentcore.SemanticKindAssistantMessage {
+			messages++
+		}
+	}
+	if messages != 2 {
+		t.Fatalf("archived thread lost transcript messages, got %d", messages)
+	}
+
+	// An archived thread rejects follow-up runs even with the UI bypassed.
+	if _, err := service.StartRun(StartRunRequest{
+		Input:     "follow up",
+		ThreadID:  run.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	}); !errors.Is(err, ErrThreadArchived) {
+		t.Fatalf("follow-up on archived thread must fail with ErrThreadArchived, got %v", err)
+	}
+
+	// Unarchiving returns the thread to active and allows runs again.
+	unarchived, err := service.SetThreadArchived(run.ThreadID, false)
+	if err != nil {
+		t.Fatalf("unarchive returned error: %v", err)
+	}
+	if unarchived.Archived || !unarchived.ArchivedAt.IsZero() {
+		t.Fatalf("expected unarchived snapshot, got %+v", unarchived)
+	}
+	if threads := service.ListThreads(ThreadListViewActive); len(threads) != 1 {
+		t.Fatalf("unarchived thread must return to the active view, got %+v", threads)
+	}
+	followUp, err := service.StartRun(StartRunRequest{
+		Input:     "follow up",
+		ThreadID:  run.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("follow-up after unarchive returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, followUp.RunID)
+}
+
+func TestSetThreadArchivedDurableOnlyThreadAndRestart(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	root := t.TempDir()
+	firstService := newDurableThreadTestService()
+	run, err := firstService.StartRun(StartRunRequest{
+		Input:     "durable archive",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, firstService, run.RunID)
+	waitForTranscriptMessageCount(t, root, run.ThreadID, 2)
+
+	// A restarted service holds no in-memory thread: the mutation must work
+	// straight off the durable record.
+	restarted := newDurableThreadTestService()
+	archived, err := restarted.SetThreadArchived(run.ThreadID, true)
+	if err != nil {
+		t.Fatalf("SetThreadArchived on durable-only thread returned error: %v", err)
+	}
+	if !archived.Archived || archived.ArchivedAt.IsZero() {
+		t.Fatalf("expected archived durable snapshot, got %+v", archived)
+	}
+	if threads := restarted.ListThreads(ThreadListViewActive); len(threads) != 0 {
+		t.Fatalf("durable archived thread must leave the active view, got %+v", threads)
+	}
+	if threads := restarted.ListThreads(ThreadListViewArchived); len(threads) != 1 {
+		t.Fatalf("durable archived thread must appear in the archived view, got %+v", threads)
+	}
+
+	// The restore path of StartRun enforces the same archived guard.
+	if _, err := restarted.StartRun(StartRunRequest{
+		Input:     "follow up",
+		ThreadID:  run.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	}); !errors.Is(err, ErrThreadArchived) {
+		t.Fatalf("follow-up on restored archived thread must fail with ErrThreadArchived, got %v", err)
+	}
+
+	// One more restart recovers the archive state purely from metadata.
+	third := newDurableThreadTestService()
+	archivedList := third.ListThreads(ThreadListViewArchived)
+	if len(archivedList) != 1 || archivedList[0].ThreadID != run.ThreadID || !archivedList[0].Archived {
+		t.Fatalf("restart must recover archive state, got %+v", archivedList)
+	}
+	if threads := third.ListThreads(ThreadListViewActive); len(threads) != 0 {
+		t.Fatalf("archived thread must not resurrect into the active view, got %+v", threads)
+	}
+}
+
+type firstRestoreBlockingThreadStore struct {
+	ThreadStore
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *firstRestoreBlockingThreadStore) RestoreThread(threadID string) (storedThreadRecord, restoredTranscript, error) {
+	record, transcript, err := s.ThreadStore.RestoreThread(threadID)
+	s.mu.Lock()
+	s.calls++
+	call := s.calls
+	s.mu.Unlock()
+	if call == 1 {
+		close(s.started)
+		<-s.release
+	}
+	return record, transcript, err
+}
+
+func TestSetThreadArchivedWinsAgainstStaleDurableOnlyStart(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	workspace := t.TempDir()
+	creator := newDurableThreadTestService()
+	run, err := creator.StartRun(StartRunRequest{
+		Input:     "archive race",
+		Workspace: WorkspaceConfig{WorkspaceRoot: workspace},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, creator, run.RunID)
+	waitForTranscriptMessageCount(t, workspace, run.ThreadID, 2)
+
+	service := newDurableThreadTestService()
+	blockingStore := &firstRestoreBlockingThreadStore{
+		ThreadStore: service.threadStore,
+		started:     make(chan struct{}),
+		release:     make(chan struct{}),
+	}
+	service.threadStore = blockingStore
+	startResult := make(chan error, 1)
+	go func() {
+		_, startErr := service.StartRun(StartRunRequest{
+			Input:     "stale follow-up",
+			ThreadID:  run.ThreadID,
+			Workspace: WorkspaceConfig{WorkspaceRoot: workspace},
+		})
+		startResult <- startErr
+	}()
+
+	select {
+	case <-blockingStore.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("StartRun did not reach the optimistic durable restore")
+	}
+
+	if _, err := service.SetThreadArchived(run.ThreadID, true); err != nil {
+		close(blockingStore.release)
+		t.Fatalf("SetThreadArchived returned error: %v", err)
+	}
+	close(blockingStore.release)
+
+	select {
+	case err := <-startResult:
+		if !errors.Is(err, ErrThreadArchived) {
+			t.Fatalf("stale StartRun must re-read archive authority, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("StartRun did not finish after releasing optimistic restore")
+	}
+	if got := service.ListThreads(ThreadListViewActive); len(got) != 0 {
+		t.Fatalf("archive winner must stay out of active view, got %+v", got)
+	}
+}
+
+func TestSetThreadArchivedRejectsBusyAndScheduledThreads(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	root := t.TempDir()
+	busyStarted := make(chan struct{})
+	releaseBusy := make(chan struct{})
+	var busyStartedOnce sync.Once
+	service := NewRunService(nil, func(agent *agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			if input == "busy" {
+				busyStartedOnce.Do(func() { close(busyStarted) })
+				select {
+				case <-releaseBusy:
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+			}
+			sink.Emit(agentcore.AwakenEvent{
+				Type:           agentcore.RunFinishedEventType,
+				Content:        "done",
+				TerminalReason: agentcore.TerminalReasonCompleted,
+			})
+			return "done", nil
+		})
+	})
+
+	busy, err := service.StartRun(StartRunRequest{
+		Input:     "busy",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("StartRun(busy) returned error: %v", err)
+	}
+	select {
+	case <-busyStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("busy run did not start")
+	}
+	t.Cleanup(func() {
+		close(releaseBusy)
+		waitForRunTerminal(t, service, busy.RunID)
+	})
+
+	// A running thread cannot be archived.
+	if _, err := service.SetThreadArchived(busy.ThreadID, true); !errors.Is(err, ErrThreadBusy) {
+		t.Fatalf("archiving a running thread must fail with ErrThreadBusy, got %v", err)
+	}
+
+	// Scheduled-task dedicated threads reject archiving outright.
+	scheduled, err := service.StartRun(StartRunRequest{
+		Input:     "scheduled notice",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		Client:    ClientInfo{Source: ScheduledClientSource},
+	})
+	if err != nil {
+		t.Fatalf("StartRun(scheduled) returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, scheduled.RunID)
+	if _, err := service.SetThreadArchived(scheduled.ThreadID, true); !errors.Is(err, ErrThreadArchiveUnsupported) {
+		t.Fatalf("archiving a scheduled thread must fail with ErrThreadArchiveUnsupported, got %v", err)
+	}
+
+	// Unknown threads report not found.
+	if _, err := service.SetThreadArchived("thread_missing", true); !errors.Is(err, ErrThreadNotFound) {
+		t.Fatalf("archiving a missing thread must fail with ErrThreadNotFound, got %v", err)
+	}
 }

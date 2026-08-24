@@ -147,6 +147,7 @@ type fileSessionMetadata struct {
 	CreatedAt                string            `json:"created_at"`
 	UpdatedAt                string            `json:"updated_at"`
 	Archived                 bool              `json:"archived,omitempty"`
+	ArchivedAt               string            `json:"archived_at,omitempty"`
 	Deleted                  bool              `json:"deleted,omitempty"`
 	DeletedAt                string            `json:"deleted_at,omitempty"`
 	DeleteOperationID        string            `json:"delete_operation_id,omitempty"`
@@ -473,6 +474,16 @@ func storedRecordFromSessionMetadata(meta fileSessionMetadata) storedThreadRecor
 		source = ThreadTitleSourceManual
 		status = ThreadTitleStatusReady
 	}
+	// archived_at only exists while archived=true. Older metadata may carry
+	// archived without archived_at; fall back to updated_at for display and
+	// ordering instead of rewriting history (archive contract §4.1).
+	var archivedAt time.Time
+	if meta.Archived {
+		archivedAt = parseStoredTime(meta.ArchivedAt)
+		if archivedAt.IsZero() {
+			archivedAt = parseStoredTime(meta.UpdatedAt)
+		}
+	}
 	return storedThreadRecord{
 		Snapshot: ThreadSnapshot{
 			ThreadID:                 meta.ThreadID,
@@ -486,6 +497,8 @@ func storedRecordFromSessionMetadata(meta fileSessionMetadata) storedThreadRecor
 			Workspace:                workspace,
 			CreatedAt:                parseStoredTime(meta.CreatedAt),
 			UpdatedAt:                parseStoredTime(meta.UpdatedAt),
+			Archived:                 meta.Archived,
+			ArchivedAt:               archivedAt,
 			Source:                   strings.TrimSpace(meta.Source),
 			SelectedModelProfileID:   strings.TrimSpace(meta.SelectedModelProfileID),
 			ReasoningEffortByProfile: cloneStringMap(meta.ReasoningEffortByProfile),
@@ -760,34 +773,116 @@ func (s *FileDesktopStore) listSessionMetadata() ([]fileSessionMetadata, error) 
 	return sessions, nil
 }
 
-func (s *FileDesktopStore) ListThreads() ([]ThreadSnapshot, error) {
+func (s *FileDesktopStore) ListThreads(view ThreadListView) ([]ThreadSnapshot, error) {
+	if view != ThreadListViewActive && view != ThreadListViewArchived && view != ThreadListViewAll {
+		return nil, fmt.Errorf("invalid thread list view %q", view)
+	}
 	sessions, err := s.listSessionMetadata()
 	if err != nil {
 		return nil, err
 	}
 	var records []storedThreadRecord
 	for _, meta := range sessions {
+		// Deletion always wins over archiving: deleted records never appear
+		// in any view.
 		if meta.Deleted {
 			continue
 		}
+		switch view {
+		case ThreadListViewActive:
+			if meta.Archived {
+				continue
+			}
+		case ThreadListViewArchived:
+			if !meta.Archived {
+				continue
+			}
+		}
 		records = append(records, storedRecordFromSessionMetadata(meta))
 	}
-	// Frozen query contract: updatedAt DESC, createdAt DESC, threadId ASC.
-	sort.Slice(records, func(i, j int) bool {
-		a, b := records[i].Snapshot, records[j].Snapshot
-		if !a.UpdatedAt.Equal(b.UpdatedAt) {
-			return a.UpdatedAt.After(b.UpdatedAt)
-		}
-		if !a.CreatedAt.Equal(b.CreatedAt) {
-			return a.CreatedAt.After(b.CreatedAt)
-		}
-		return a.ThreadID < b.ThreadID
-	})
+	if view == ThreadListViewArchived {
+		// Frozen archived query contract: archivedAt DESC, updatedAt DESC,
+		// createdAt DESC, threadId ASC.
+		sort.Slice(records, func(i, j int) bool {
+			a, b := records[i].Snapshot, records[j].Snapshot
+			if !a.ArchivedAt.Equal(b.ArchivedAt) {
+				return a.ArchivedAt.After(b.ArchivedAt)
+			}
+			if !a.UpdatedAt.Equal(b.UpdatedAt) {
+				return a.UpdatedAt.After(b.UpdatedAt)
+			}
+			if !a.CreatedAt.Equal(b.CreatedAt) {
+				return a.CreatedAt.After(b.CreatedAt)
+			}
+			return a.ThreadID < b.ThreadID
+		})
+	} else {
+		// Frozen query contract: updatedAt DESC, createdAt DESC, threadId ASC.
+		sort.Slice(records, func(i, j int) bool {
+			a, b := records[i].Snapshot, records[j].Snapshot
+			if !a.UpdatedAt.Equal(b.UpdatedAt) {
+				return a.UpdatedAt.After(b.UpdatedAt)
+			}
+			if !a.CreatedAt.Equal(b.CreatedAt) {
+				return a.CreatedAt.After(b.CreatedAt)
+			}
+			return a.ThreadID < b.ThreadID
+		})
+	}
 	out := make([]ThreadSnapshot, 0, len(records))
 	for _, record := range records {
 		out = append(out, record.Snapshot)
 	}
 	return out, nil
+}
+
+// SetThreadArchived flips the durable archived flag in one locked atomic
+// metadata write. Archiving never touches updated_at, so a management action
+// cannot push a conversation to the top of the regular list; the same target
+// state is idempotent and never rewrites archived_at; unarchiving clears
+// archived_at together with the flag (archive contract §4.1/§4.3).
+func (s *FileDesktopStore) SetThreadArchived(threadID string, archived bool, now time.Time) (ThreadSnapshot, error) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return ThreadSnapshot{}, ErrThreadNotFound
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	} else {
+		now = now.UTC()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return ThreadSnapshot{}, err
+	}
+	defer lock.Release()
+
+	meta, err := s.readSessionMetadata(threadID)
+	if os.IsNotExist(err) {
+		return ThreadSnapshot{}, ErrThreadNotFound
+	}
+	if err != nil {
+		return ThreadSnapshot{}, err
+	}
+	if meta.Deleted {
+		return ThreadSnapshot{}, ErrThreadNotFound
+	}
+	if meta.Archived == archived {
+		return storedRecordFromSessionMetadata(meta).Snapshot, nil
+	}
+	meta.Archived = archived
+	if archived {
+		meta.ArchivedAt = formatStoredTime(now)
+	} else {
+		meta.ArchivedAt = ""
+	}
+	if err := s.writeSessionMetadata(meta); err != nil {
+		return ThreadSnapshot{}, err
+	}
+	return storedRecordFromSessionMetadata(meta).Snapshot, nil
 }
 
 func (s *FileDesktopStore) RestoreThread(threadID string) (storedThreadRecord, restoredTranscript, error) {

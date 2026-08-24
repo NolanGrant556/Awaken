@@ -71,7 +71,7 @@ func TestStoreThreadLabelRoundTripIsUnicodeSafe(t *testing.T) {
 		t.Fatalf("CreateThread: %v", err)
 	}
 
-	threads, err := store.ListThreads()
+	threads, err := store.ListThreads(ThreadListViewActive)
 	if err != nil {
 		t.Fatalf("ListThreads: %v", err)
 	}

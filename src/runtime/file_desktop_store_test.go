@@ -94,7 +94,7 @@ func TestFileStoreThreadCRUDListOrderAndTitleCAS(t *testing.T) {
 		}
 	}
 
-	threads, err := store.ListThreads()
+	threads, err := store.ListThreads(ThreadListViewActive)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestFileStoreThreadCRUDListOrderAndTitleCAS(t *testing.T) {
 	if _, err := store.threadRecord("thread_3"); !errors.Is(err, ErrThreadNotFound) {
 		t.Fatalf("deleted thread must be gone, got %v", err)
 	}
-	threads, err = store.ListThreads()
+	threads, err = store.ListThreads(ThreadListViewActive)
 	if err != nil || len(threads) != 2 {
 		t.Fatalf("expected 2 threads after delete, got %+v err=%v", threads, err)
 	}
@@ -180,7 +180,7 @@ func TestFileStoreProjectlessSessionThreadDoesNotCreateProject(t *testing.T) {
 		t.Fatalf("create project-less thread: %v", err)
 	}
 
-	threads, err := store.ListThreads()
+	threads, err := store.ListThreads(ThreadListViewActive)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestFileStoreStructuredInputSurvivesServiceRestart(t *testing.T) {
 	if len(replayed.ComposerTokens) != 1 || replayed.ComposerTokens[0] != token {
 		t.Fatalf("composer token changed after restart: %+v", replayed.ComposerTokens)
 	}
-	threads := restarted.ListThreads()
+	threads := restarted.ListThreads(ThreadListViewActive)
 	if len(threads) != 1 || threads[0].ThreadID != run.ThreadID {
 		t.Fatalf("thread listing after restart: %+v", threads)
 	}
@@ -380,7 +380,7 @@ func TestFileStoreDetachKeepsHistoryAndReAddReusesProjectID(t *testing.T) {
 	if first.OperationID != second.OperationID {
 		t.Fatalf("detach must be idempotent: %q vs %q", first.OperationID, second.OperationID)
 	}
-	if got := service.ListThreads(); len(got) != 1 {
+	if got := service.ListThreads(ThreadListViewActive); len(got) != 1 {
 		t.Fatalf("detach must keep thread history, got %+v", got)
 	}
 	visible, err := projects.ListProjects(false)
@@ -406,7 +406,7 @@ func TestFileStoreDetachKeepsHistoryAndReAddReusesProjectID(t *testing.T) {
 	if readded.ProjectID != project.ProjectID || readded.State != ProjectStateActive {
 		t.Fatalf("re-add must reuse the original project id, got %+v", readded)
 	}
-	if got := service.ListThreads(); len(got) != 1 {
+	if got := service.ListThreads(ThreadListViewActive); len(got) != 1 {
 		t.Fatalf("re-add must restore thread history, got %+v", got)
 	}
 	if _, err := projects.DeleteProjectThreads(project.ProjectID, "detach-1"); !errors.Is(err, ErrIdempotencyKeyConflict) {
@@ -502,7 +502,7 @@ func TestFileStoreDeleteHistorySoftDeletesAndCleanupPurges(t *testing.T) {
 	if operation.MatchedThreads != 5 || operation.PendingCleanup != 5 {
 		t.Fatalf("unexpected operation counts: %+v", operation)
 	}
-	if got := service.ListThreads(); len(got) != 0 {
+	if got := service.ListThreads(ThreadListViewActive); len(got) != 0 {
 		t.Fatalf("soft-deleted threads must disappear from listing, got %+v", got)
 	}
 
@@ -611,7 +611,7 @@ func TestFileStoreTrashLifecycleHappyPathAndFailureRestore(t *testing.T) {
 	if _, ok := afterTrash[0].PrimaryFolder(); ok {
 		t.Fatalf("trashing the only folder must leave the project folderless: %+v", afterTrash[0].Folders)
 	}
-	if got := service.ListThreads(); len(got) != 1 {
+	if got := service.ListThreads(ThreadListViewActive); len(got) != 1 {
 		t.Fatalf("folder trash must keep Awaken history, got %+v", got)
 	}
 
@@ -739,5 +739,231 @@ func TestFileStoreLifecycleJournalRollForwardAndSnapshotRebuild(t *testing.T) {
 	}
 	if snapshot.AppliedSeq == 0 {
 		t.Fatalf("snapshot applied seq missing: %+v", snapshot)
+	}
+}
+
+func TestFileStoreThreadArchiveContract(t *testing.T) {
+	root := setFileStoreTestRoots(t)
+	store, ok := newThreadStore().(*FileDesktopStore)
+	if !ok {
+		t.Fatal("expected FileDesktopStore")
+	}
+	workspace := t.TempDir()
+	base := time.Date(2026, 8, 1, 10, 0, 0, 0, time.UTC)
+	create := func(id string, updatedAt time.Time) ThreadSnapshot {
+		t.Helper()
+		snapshot := ThreadSnapshot{
+			ThreadID:    id,
+			Label:       "label " + id,
+			TitleSource: ThreadTitleSourceFirstUser,
+			TitleStatus: ThreadTitleStatusReady,
+			Workspace:   WorkspaceConfig{WorkspaceRoot: workspace},
+			CreatedAt:   base,
+			UpdatedAt:   updatedAt,
+		}
+		if err := store.CreateThread(snapshot, "", ""); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+		return snapshot
+	}
+	snapA := create("thread_a", base.Add(time.Minute))
+	create("thread_c", base.Add(3*time.Minute))
+	// thread_b carries a pending first_user seed so the title CAS below
+	// performs a real metadata write.
+	snapB := ThreadSnapshot{
+		ThreadID:       "thread_b",
+		Label:          "label thread_b",
+		TitleSource:    ThreadTitleSourceFirstUser,
+		TitleStatus:    ThreadTitleStatusPending,
+		TitleSeedRunID: "run_b",
+		Workspace:      WorkspaceConfig{WorkspaceRoot: workspace},
+		CreatedAt:      base,
+		UpdatedAt:      base.Add(2 * time.Minute),
+	}
+	if err := store.CreateThread(snapB, "", ""); err != nil {
+		t.Fatalf("create thread_b: %v", err)
+	}
+
+	// Legacy metadata without any archived field reads as active.
+	active, err := store.ListThreads(ThreadListViewActive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 3 {
+		t.Fatalf("legacy metadata must read as active, got %+v", active)
+	}
+	for _, thread := range active {
+		if thread.Archived || !thread.ArchivedAt.IsZero() {
+			t.Fatalf("legacy metadata must project unarchived, got %+v", thread)
+		}
+	}
+	if archived, err := store.ListThreads(ThreadListViewArchived); err != nil || len(archived) != 0 {
+		t.Fatalf("archived view must be empty before archiving, got %+v, %v", archived, err)
+	}
+
+	// Archive thread_a: archived_at is written, updated_at is untouched.
+	archiveA := base.Add(time.Hour)
+	updated, err := store.SetThreadArchived("thread_a", true, archiveA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.Archived || !updated.ArchivedAt.Equal(archiveA) {
+		t.Fatalf("archive projection mismatch: %+v", updated)
+	}
+	if !updated.UpdatedAt.Equal(snapA.UpdatedAt) {
+		t.Fatalf("archiving must not move updated_at, got %v want %v", updated.UpdatedAt, snapA.UpdatedAt)
+	}
+
+	// Same target state is idempotent and never rewrites archived_at.
+	again, err := store.SetThreadArchived("thread_a", true, archiveA.Add(4*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !again.ArchivedAt.Equal(archiveA) {
+		t.Fatalf("idempotent archive moved archived_at to %v", again.ArchivedAt)
+	}
+
+	archiveB := base.Add(2 * time.Hour)
+	if _, err := store.SetThreadArchived("thread_b", true, archiveB); err != nil {
+		t.Fatal(err)
+	}
+
+	// The three views are mutually exclusive and collectively exhaustive.
+	active, err = store.ListThreads(ThreadListViewActive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 1 || active[0].ThreadID != "thread_c" {
+		t.Fatalf("active view mismatch: %+v", active)
+	}
+	archivedList, err := store.ListThreads(ThreadListViewArchived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(archivedList) != 2 || archivedList[0].ThreadID != "thread_b" || archivedList[1].ThreadID != "thread_a" {
+		t.Fatalf("archived view must sort archivedAt DESC, got %+v", archivedList)
+	}
+	all, err := store.ListThreads(ThreadListViewAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("all view must return every non-deleted thread, got %+v", all)
+	}
+	membership := map[string]int{}
+	for _, thread := range active {
+		membership[thread.ThreadID]++
+	}
+	for _, thread := range archivedList {
+		membership[thread.ThreadID]++
+	}
+	for id, count := range membership {
+		if count != 1 {
+			t.Fatalf("thread %s appears in %d views, active and archived must be exclusive", id, count)
+		}
+	}
+
+	// archived=true without archived_at falls back to updated_at.
+	meta, err := store.readSessionMetadata("thread_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.ArchivedAt = ""
+	if err := store.writeSessionMetadata(meta); err != nil {
+		t.Fatal(err)
+	}
+	record, err := store.threadRecord("thread_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !record.Snapshot.Archived || !record.Snapshot.ArchivedAt.Equal(snapA.UpdatedAt) {
+		t.Fatalf("missing archived_at must fall back to updated_at, got %+v", record.Snapshot)
+	}
+
+	// An ordinary upsert with a stale unarchived snapshot must not clobber
+	// the durable archive fields.
+	staleB := snapB
+	if err := store.CreateThread(staleB, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	meta, err = store.readSessionMetadata("thread_b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !meta.Archived || meta.ArchivedAt != formatStoredTime(archiveB) {
+		t.Fatalf("ordinary upsert clobbered archive fields: %+v", meta)
+	}
+
+	// A late title CAS write must also preserve the archive fields.
+	if _, err := store.UpdateThreadTitleMetadata("thread_b", "迟到标题", ThreadTitleSourceLLM, ThreadTitleStatusReady, "run_b", base.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	meta, err = store.readSessionMetadata("thread_b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !meta.Archived || meta.ArchivedAt != formatStoredTime(archiveB) || meta.Title != "迟到标题" {
+		t.Fatalf("title CAS clobbered archive fields: %+v", meta)
+	}
+
+	// Unarchiving clears archived_at and returns the thread to active.
+	unarchived, err := store.SetThreadArchived("thread_a", false, base.Add(5*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unarchived.Archived || !unarchived.ArchivedAt.IsZero() {
+		t.Fatalf("unarchive projection mismatch: %+v", unarchived)
+	}
+	meta, err = store.readSessionMetadata("thread_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Archived || meta.ArchivedAt != "" {
+		t.Fatalf("unarchive must clear durable archive fields: %+v", meta)
+	}
+	active, err = store.ListThreads(ThreadListViewActive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 2 {
+		t.Fatalf("unarchived thread must return to active view, got %+v", active)
+	}
+
+	// A reopened store on the same root recovers the archive state.
+	reopened, err := newFileDesktopStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archivedList, err = reopened.ListThreads(ThreadListViewArchived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(archivedList) != 1 || archivedList[0].ThreadID != "thread_b" || !archivedList[0].ArchivedAt.Equal(archiveB) {
+		t.Fatalf("restarted store must recover archive state, got %+v", archivedList)
+	}
+
+	// Deletion always wins over archiving.
+	meta, err = reopened.readSessionMetadata("thread_b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.Deleted = true
+	if err := reopened.writeSessionMetadata(meta); err != nil {
+		t.Fatal(err)
+	}
+	if archivedList, err = reopened.ListThreads(ThreadListViewArchived); err != nil || len(archivedList) != 0 {
+		t.Fatalf("deleted thread must leave archived view, got %+v, %v", archivedList, err)
+	}
+	if all, err = reopened.ListThreads(ThreadListViewAll); err != nil || len(all) != 2 {
+		t.Fatalf("deleted thread must leave all view, got %+v, %v", all, err)
+	}
+	if _, err := reopened.SetThreadArchived("thread_b", true, base); !errors.Is(err, ErrThreadNotFound) {
+		t.Fatalf("archiving a deleted thread must fail with ErrThreadNotFound, got %v", err)
+	}
+	if _, err := reopened.SetThreadArchived("thread_missing", true, base); !errors.Is(err, ErrThreadNotFound) {
+		t.Fatalf("archiving a missing thread must fail with ErrThreadNotFound, got %v", err)
+	}
+	if _, err := reopened.ListThreads(ThreadListView("invalid")); err == nil {
+		t.Fatal("invalid thread list view must fail closed")
 	}
 }

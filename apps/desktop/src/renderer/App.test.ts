@@ -51,6 +51,8 @@ import {
   shouldUseCenterComposerWithFileWorkspace,
   shouldResetActiveThreadForWorkspaceChange,
   shouldShowSidebarThreadSpinner,
+  sidebarThreadArchiveMenuState,
+  sidebarThreadMenuItems,
   activityBatchSummary,
   toolRecordIdForNarrativeItem,
   toolTracePresentation,
@@ -916,6 +918,7 @@ function stubElectronBridge(): void {
         tcc_accessibility: false,
       })),
       openComputerPermissionSettings: vi.fn(async () => undefined),
+      setThreadArchived: vi.fn(async () => ({ ok: true as const, thread: {} as never })),
     } satisfies AwakenBridge,
   });
 }
@@ -4988,5 +4991,58 @@ describe("App workbench presentation", () => {
         hasLatestTurn: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("sidebar thread archive menu", () => {
+  const idleThread = { threadId: "thread-1", label: "会话", runStatus: "finished" as const };
+
+  it("orders the menu as rename, archive, delete with danger only on delete", () => {
+    const items = sidebarThreadMenuItems(idleThread, {
+      onRename: vi.fn(),
+      onArchive: vi.fn(),
+      onDelete: vi.fn(),
+    });
+
+    expect(items.map((item) => item.id)).toEqual([
+      "rename-thread",
+      "archive-thread",
+      "delete-thread",
+    ]);
+    expect(items[1].tone).toBeUndefined();
+    expect(items[1].disabled).toBe(false);
+    expect(items[2].tone).toBe("danger");
+  });
+
+  it("disables archive for running or cancelling threads with guidance", () => {
+    for (const runStatus of ["running", "cancelling"] as const) {
+      expect(sidebarThreadArchiveMenuState({ ...idleThread, runStatus })).toEqual({
+        disabled: true,
+        disabledReason: "请先停止正在运行的任务",
+      });
+    }
+    // 无 runStatus 时按 activeRunId 兜底。
+    expect(
+      sidebarThreadArchiveMenuState({ threadId: "t", label: "x", activeRunId: "run-1" }),
+    ).toEqual({ disabled: true, disabledReason: "请先停止正在运行的任务" });
+  });
+
+  it("disables archive for scheduled task threads with guidance", () => {
+    expect(
+      sidebarThreadArchiveMenuState({ ...idleThread, source: "scheduled_task" }),
+    ).toEqual({ disabled: true, disabledReason: "定时任务会话由定时任务管理" });
+  });
+
+  it("enables archive for idle regular threads and wires the callback", () => {
+    const onArchive = vi.fn();
+    const items = sidebarThreadMenuItems(idleThread, {
+      onRename: vi.fn(),
+      onArchive,
+      onDelete: vi.fn(),
+    });
+
+    expect(sidebarThreadArchiveMenuState(idleThread)).toEqual({ disabled: false });
+    items[1].onSelect?.();
+    expect(onArchive).toHaveBeenCalledTimes(1);
   });
 });

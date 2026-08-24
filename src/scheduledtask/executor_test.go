@@ -198,7 +198,7 @@ func waitForAllThreadsIdle(t *testing.T, service *runtime.RunService) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		busy := false
-		for _, snapshot := range service.ListThreads() {
+		for _, snapshot := range service.ListThreads(runtime.ThreadListViewActive) {
 			if snapshot.ActiveRunID != "" {
 				busy = true
 			}
@@ -279,7 +279,7 @@ func TestExecutorAgentDedicatedThreadAndProfile(t *testing.T) {
 
 	// The thread is titled by the task and carries the scheduled source.
 	var found *runtime.ThreadSnapshot
-	for _, snapshot := range f.service.ListThreads() {
+	for _, snapshot := range f.service.ListThreads(runtime.ThreadListViewActive) {
 		if snapshot.ThreadID == threadID {
 			copy := snapshot
 			found = &copy
@@ -667,7 +667,7 @@ func TestExecutorCancel(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		runID := ""
-		for _, snapshot := range f.service.ListThreads() {
+		for _, snapshot := range f.service.ListThreads(runtime.ThreadListViewActive) {
 			if snapshot.ActiveRunID != "" {
 				runID = snapshot.ActiveRunID
 			}

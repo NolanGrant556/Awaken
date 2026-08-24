@@ -3267,6 +3267,7 @@ describe("runtime reducer thread snapshots", () => {
         type: "run/threadsLoaded",
         threads: [
           {
+            archived: false,
             threadId: "thread-1",
             label: "first prompt",
             runId: "run-1",
@@ -3347,6 +3348,7 @@ describe("runtime reducer thread title lifecycle", () => {
   function makeThread(overrides: Partial<RuntimeThread> = {}): RuntimeThread {
     return {
       threadId: "thread-1",
+      archived: false,
       label: "fallback",
       workspace: { workspaceRoot: "/tmp", writableRoots: ["/tmp"] },
       createdAt: "2026-01-01T00:00:00Z",

@@ -1,6 +1,7 @@
 export { AwakenAccountDemo } from "../src/components/AwakenAccount/AwakenAccount.demo";
 export { AwakenAppearanceSettingsDemo } from "../src/components/AwakenAppearanceSettings/AwakenAppearanceSettings.demo";
 export { AwakenAppShellDemo } from "../src/components/AwakenAppShell/AwakenAppShell.demo";
+export { AwakenArchivedChatsSettingsDemo } from "../src/components/AwakenArchivedChatsSettings/AwakenArchivedChatsSettings.demo";
 export { AwakenAssistantMessageDemo } from "../src/components/AwakenAssistantMessage/AwakenAssistantMessage.demo";
 export { AwakenAvatarDemo } from "../src/components/AwakenAvatar/AwakenAvatar.demo";
 export { AwakenCliConnectorDetailDialogDemo } from "../src/components/AwakenCliConnectorDetailDialog/AwakenCliConnectorDetailDialog.demo";

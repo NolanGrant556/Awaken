@@ -42,6 +42,10 @@ type renameThreadRequest struct {
 	Label string `json:"label"`
 }
 
+type archiveThreadRequest struct {
+	Archived *bool `json:"archived"`
+}
+
 const maxBatchDeleteThreads = 200
 
 type batchDeleteThreadsRequest struct {
@@ -121,6 +125,8 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 			writeErrorJSON(w, http.StatusBadRequest, "THREAD_WORKSPACE_MISMATCH", err.Error())
 		case errors.Is(err, awruntime.ErrThreadBusy):
 			writeErrorJSON(w, http.StatusConflict, "THREAD_BUSY", err.Error())
+		case errors.Is(err, awruntime.ErrThreadArchived):
+			writeErrorJSON(w, http.StatusConflict, "THREAD_ARCHIVED", err.Error())
 		case errors.Is(err, awruntime.ErrProjectOperationConflict):
 			writeErrorJSON(w, http.StatusConflict, "PROJECT_OPERATION_CONFLICT", err.Error())
 		case errors.Is(err, awruntime.ErrInvalidInput):
@@ -139,7 +145,52 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h runHandlers) handleListThreads(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.runService.ListThreads())
+	// A missing view defaults to active so existing callers automatically
+	// exclude archived threads; unknown values are rejected, never silently
+	// downgraded (archive contract §4.2).
+	var view awruntime.ThreadListView
+	switch raw := strings.TrimSpace(r.URL.Query().Get("view")); raw {
+	case "", string(awruntime.ThreadListViewActive):
+		view = awruntime.ThreadListViewActive
+	case string(awruntime.ThreadListViewArchived):
+		view = awruntime.ThreadListViewArchived
+	case string(awruntime.ThreadListViewAll):
+		view = awruntime.ThreadListViewAll
+	default:
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_THREAD_VIEW", "view must be one of active, archived, all")
+		return
+	}
+	writeJSON(w, http.StatusOK, h.runService.ListThreads(view))
+}
+
+func (h runHandlers) handleArchiveThread(w http.ResponseWriter, r *http.Request) {
+	threadID := r.PathValue("thread_id")
+	var req archiveThreadRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	if req.Archived == nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "archived is required")
+		return
+	}
+
+	thread, err := h.runService.SetThreadArchived(threadID, *req.Archived)
+	if err != nil {
+		switch {
+		case errors.Is(err, awruntime.ErrThreadNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrThreadBusy):
+			writeErrorJSON(w, http.StatusConflict, "THREAD_BUSY", err.Error())
+		case errors.Is(err, awruntime.ErrThreadArchiveUnsupported):
+			writeErrorJSON(w, http.StatusConflict, "THREAD_ARCHIVE_UNSUPPORTED", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusInternalServerError, "THREAD_ARCHIVE_FAILED", "failed to update thread archive state")
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, thread)
 }
 
 func (h runHandlers) handleRenameThread(w http.ResponseWriter, r *http.Request) {

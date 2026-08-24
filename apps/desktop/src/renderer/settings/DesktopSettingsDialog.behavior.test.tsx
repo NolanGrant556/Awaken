@@ -195,6 +195,7 @@ describe("DesktopSettingsDialog model connection feedback", () => {
           onThemePreferenceChange={vi.fn()}
           onOpenChange={vi.fn()}
           onProfilesChanged={vi.fn()}
+          onThreadsChanged={vi.fn()}
           initialModelSection="api"
         />,
       );
@@ -246,6 +247,7 @@ describe("DesktopSettingsDialog model connection feedback", () => {
           onThemePreferenceChange={vi.fn()}
           onOpenChange={vi.fn()}
           onProfilesChanged={vi.fn()}
+          onThreadsChanged={vi.fn()}
           initialModelSection="api"
         />,
       );
@@ -301,6 +303,7 @@ describe("DesktopSettingsDialog model connection feedback", () => {
           onThemePreferenceChange={vi.fn()}
           onOpenChange={vi.fn()}
           onProfilesChanged={vi.fn()}
+          onThreadsChanged={vi.fn()}
           initialModelSection="agent_plan"
         />,
       );
@@ -343,6 +346,7 @@ describe("DesktopSettingsDialog model connection feedback", () => {
           onThemePreferenceChange={vi.fn()}
           onOpenChange={vi.fn()}
           onProfilesChanged={vi.fn()}
+          onThreadsChanged={vi.fn()}
           initialModelSection="api"
         />,
       );
@@ -451,6 +455,7 @@ describe("DesktopSettingsDialog model connection feedback", () => {
           onThemePreferenceChange={vi.fn()}
           onOpenChange={vi.fn()}
           onProfilesChanged={vi.fn()}
+          onThreadsChanged={vi.fn()}
           initialModelSection="api"
         />,
       );
@@ -558,6 +563,7 @@ describe("DesktopSettingsDialog model connection feedback", () => {
           onThemePreferenceChange={vi.fn()}
           onOpenChange={vi.fn()}
           onProfilesChanged={vi.fn()}
+          onThreadsChanged={vi.fn()}
           initialModelSection="coding_plan"
         />,
       );
@@ -625,6 +631,7 @@ describe("DesktopSettingsDialog model connection feedback", () => {
           onThemePreferenceChange={vi.fn()}
           onOpenChange={vi.fn()}
           onProfilesChanged={vi.fn()}
+          onThreadsChanged={vi.fn()}
           initialModelSection="api"
         />,
       );

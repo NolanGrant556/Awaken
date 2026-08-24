@@ -702,3 +702,51 @@ describe("scheduled task wire normalization", () => {
     });
   });
 });
+
+describe("runtime thread archive normalization", () => {
+  const baseWire = {
+    thread_id: "thread-1",
+    label: "归档会话",
+    workspace: { workspace_root: "/tmp" },
+    created_at: "2026-08-01T00:00:00Z",
+    updated_at: "2026-08-02T00:00:00Z",
+  };
+
+  it("maps archived, archived_at and source from the wire", () => {
+    expect(
+      normalizeRuntimeThread({
+        ...baseWire,
+        archived: true,
+        archived_at: "2026-08-20T10:20:30Z",
+        source: "scheduled_task",
+      }),
+    ).toMatchObject({
+      archived: true,
+      archivedAt: "2026-08-20T10:20:30Z",
+      source: "scheduled_task",
+    });
+  });
+
+  it("defaults legacy threads without archive fields to unarchived", () => {
+    expect(normalizeRuntimeThread(baseWire)).toMatchObject({
+      archived: false,
+      archivedAt: undefined,
+      source: undefined,
+    });
+  });
+
+  it("treats the Go zero time archived_at as absent", () => {
+    expect(
+      normalizeRuntimeThread({
+        ...baseWire,
+        archived: false,
+        archived_at: "0001-01-01T00:00:00Z",
+        source: "",
+      }),
+    ).toMatchObject({
+      archived: false,
+      archivedAt: undefined,
+      source: undefined,
+    });
+  });
+});

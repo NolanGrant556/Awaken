@@ -31,6 +31,7 @@ import { AgentPlanMediaToolsPanel } from "./AgentPlanMediaToolsPanel";
 import { ComputerSettingsPanel } from "./ComputerSettingsPanel";
 import { HooksSettingsPanel } from "./HooksSettingsPanel";
 import { GlobalAgentsSettingsPanel } from "./GlobalAgentsSettingsPanel";
+import { ArchivedChatsSettingsPanel } from "./ArchivedChatsSettingsPanel";
 
 export type DraftState = {
   profileId?: string;
@@ -60,7 +61,8 @@ type SettingsDialogSection =
   | "pets"
   | "computer"
   | "hooks"
-  | "acp";
+  | "acp"
+  | "archived-chats";
 type ModelConnectionTestFeedback = {
   tone: "success" | "error";
   message: string;
@@ -109,6 +111,7 @@ const SETTINGS_SECTION_TITLES: Record<SettingsDialogSection, string> = {
   computer: "计算机操作",
   hooks: "钩子",
   acp: "外部 Agent / ACP",
+  "archived-chats": "已归档的聊天",
 };
 
 type ConfiguredProfileDraft = {
@@ -211,6 +214,8 @@ type DesktopSettingsDialogProps = {
   onThemePreferenceChange: (theme: AwakenThemePreference) => void;
   onOpenChange: (open: boolean) => void;
   onProfilesChanged: () => void;
+  /** 归档/取消归档/删除完成后刷新 active 侧栏列表。 */
+  onThreadsChanged: () => void;
   currentProjectId?: string;
   initialSection?: SettingsDialogSection;
   initialModelSection?: ModelSettingsSection;
@@ -589,6 +594,7 @@ export function DesktopSettingsDialog({
   onThemePreferenceChange,
   onOpenChange,
   onProfilesChanged,
+  onThreadsChanged,
   currentProjectId,
   initialSection = "models",
   initialModelSection = "coding_plan",
@@ -1357,6 +1363,11 @@ export function DesktopSettingsDialog({
 			<HooksSettingsPanel runtimeClient={runtimeClient} currentProjectId={currentProjectId} />
       ) : activeSettingsSection === "acp" ? (
         <ACPSettingsPanel runtimeClient={runtimeClient} />
+      ) : activeSettingsSection === "archived-chats" ? (
+        <ArchivedChatsSettingsPanel
+          runtimeClient={runtimeClient}
+          onThreadsChanged={onThreadsChanged}
+        />
       ) : (
         <AwakenModelSettings
           tabs={MODEL_SETTINGS_TABS}

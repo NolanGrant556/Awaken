@@ -964,7 +964,7 @@ func TestRenameAndDeleteThreadEndpoints(t *testing.T) {
 			}
 		})
 	}
-	currentThreads := runService.ListThreads()
+	currentThreads := runService.ListThreads(awruntime.ThreadListViewActive)
 	if len(currentThreads) != 1 || currentThreads[0].SelectedModelProfileID != "profile-kimi" || currentThreads[0].ReasoningEffortByProfile["profile-kimi"] != "max" {
 		t.Fatalf("invalid preferences mutated thread metadata: %+v", currentThreads)
 	}
@@ -1075,7 +1075,7 @@ func TestBatchDeleteThreadsReturnsPerThreadResults(t *testing.T) {
 	if len(result.Failures) != 1 || result.Failures[0].ThreadID != busy.ThreadID || result.Failures[0].Error != "THREAD_BUSY" {
 		t.Fatalf("unexpected failures: %+v", result.Failures)
 	}
-	threads := runService.ListThreads()
+	threads := runService.ListThreads(awruntime.ThreadListViewActive)
 	if len(threads) != 1 || threads[0].ThreadID != busy.ThreadID {
 		t.Fatalf("expected only busy thread to remain, got %+v", threads)
 	}
@@ -1946,7 +1946,7 @@ func waitHTTPServiceThreadIdle(t *testing.T, service *awruntime.RunService, thre
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		for _, thread := range service.ListThreads() {
+		for _, thread := range service.ListThreads(awruntime.ThreadListViewActive) {
 			if thread.ThreadID == threadID && thread.ActiveRunID == "" {
 				return
 			}
@@ -5017,3 +5017,221 @@ func echoInProcServerFactory() mcpclient.InProcServerFactory {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func TestThreadArchiveEndpoints(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	busyStarted := make(chan struct{})
+	releaseBusy := make(chan struct{})
+	var busyStartedOnce sync.Once
+	runService := awruntime.NewRunService(nil, func(agent *agentcore.Agent) awruntime.Executor {
+		return awruntime.ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+			if input == "busy" {
+				busyStartedOnce.Do(func() { close(busyStarted) })
+				select {
+				case <-releaseBusy:
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+			}
+			sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "done"})
+			return "done", nil
+		})
+	})
+
+	startThread := func(input string) awruntime.Run {
+		t.Helper()
+		run, err := runService.StartRun(awruntime.StartRunRequest{Input: input})
+		if err != nil {
+			t.Fatalf("StartRun(%q): %v", input, err)
+		}
+		waitHTTPServiceRunTerminal(t, runService, run.RunID)
+		waitHTTPServiceThreadIdle(t, runService, run.ThreadID)
+		return run
+	}
+	idle := startThread("idle")
+	startThread("second")
+	scheduled, err := runService.StartRun(awruntime.StartRunRequest{
+		Input:  "scheduled notice",
+		Client: awruntime.ClientInfo{Source: awruntime.ScheduledClientSource},
+	})
+	if err != nil {
+		t.Fatalf("StartRun(scheduled): %v", err)
+	}
+	waitHTTPServiceRunTerminal(t, runService, scheduled.RunID)
+	waitHTTPServiceThreadIdle(t, runService, scheduled.ThreadID)
+
+	busy, err := runService.StartRun(awruntime.StartRunRequest{Input: "busy"})
+	if err != nil {
+		t.Fatalf("StartRun(busy): %v", err)
+	}
+	select {
+	case <-busyStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("busy run did not start")
+	}
+	t.Cleanup(func() {
+		close(releaseBusy)
+		waitHTTPServiceRunTerminal(t, runService, busy.RunID)
+	})
+
+	ts := httptest.NewServer(newRouterInternal(routerConfig{runService: runService}))
+	defer ts.Close()
+
+	listThreads := func(query string) ([]awruntime.ThreadSnapshot, int) {
+		t.Helper()
+		resp, err := http.Get(ts.URL + "/v1/threads" + query)
+		if err != nil {
+			t.Fatalf("GET /v1/threads%s: %v", query, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, resp.StatusCode
+		}
+		var threads []awruntime.ThreadSnapshot
+		if err := json.NewDecoder(resp.Body).Decode(&threads); err != nil {
+			t.Fatalf("decode thread list: %v", err)
+		}
+		return threads, resp.StatusCode
+	}
+	archiveThread := func(threadID, body string) (int, awruntime.ThreadSnapshot, errorResponse) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPatch, ts.URL+"/v1/threads/"+threadID+"/archive", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("PATCH archive %s: %v", threadID, err)
+		}
+		defer resp.Body.Close()
+		var snapshot awruntime.ThreadSnapshot
+		var failure errorResponse
+		if resp.StatusCode == http.StatusOK {
+			if err := json.NewDecoder(resp.Body).Decode(&snapshot); err != nil {
+				t.Fatalf("decode archive response: %v", err)
+			}
+		} else if err := json.NewDecoder(resp.Body).Decode(&failure); err != nil {
+			t.Fatalf("decode archive error response: %v", err)
+		}
+		return resp.StatusCode, snapshot, failure
+	}
+
+	// A missing view is equivalent to active and hides nothing yet.
+	threads, _ := listThreads("")
+	if len(threads) != 4 {
+		t.Fatalf("default view must list every active thread, got %+v", threads)
+	}
+
+	// Unknown view values are rejected with a stable code, never downgraded.
+	resp, err := http.Get(ts.URL + "/v1/threads?view=bogus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid view, got %d", resp.StatusCode)
+	}
+	var viewFailure errorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&viewFailure); err != nil {
+		t.Fatal(err)
+	}
+	if viewFailure.Error != "INVALID_THREAD_VIEW" {
+		t.Fatalf("expected INVALID_THREAD_VIEW, got %+v", viewFailure)
+	}
+
+	// Malformed bodies are rejected with the shared request validation style.
+	if status, _, failure := archiveThread(idle.ThreadID, `{"archived":"yes"}`); status != http.StatusBadRequest || failure.Error != "INVALID_REQUEST" {
+		t.Fatalf("expected 400 INVALID_REQUEST for malformed body, got %d %+v", status, failure)
+	}
+	if status, _, failure := archiveThread(idle.ThreadID, `{}`); status != http.StatusBadRequest || failure.Error != "INVALID_REQUEST" {
+		t.Fatalf("expected 400 INVALID_REQUEST when archived is missing, got %d %+v", status, failure)
+	}
+
+	// A running thread reports THREAD_BUSY.
+	if status, _, failure := archiveThread(busy.ThreadID, `{"archived":true}`); status != http.StatusConflict || failure.Error != "THREAD_BUSY" {
+		t.Fatalf("expected 409 THREAD_BUSY, got %d %+v", status, failure)
+	}
+
+	// Scheduled-task dedicated threads reject archiving.
+	if status, _, failure := archiveThread(scheduled.ThreadID, `{"archived":true}`); status != http.StatusConflict || failure.Error != "THREAD_ARCHIVE_UNSUPPORTED" {
+		t.Fatalf("expected 409 THREAD_ARCHIVE_UNSUPPORTED, got %d %+v", status, failure)
+	}
+
+	// Unknown threads report THREAD_NOT_FOUND.
+	if status, _, failure := archiveThread("thread_missing", `{"archived":true}`); status != http.StatusNotFound || failure.Error != "THREAD_NOT_FOUND" {
+		t.Fatalf("expected 404 THREAD_NOT_FOUND, got %d %+v", status, failure)
+	}
+
+	// Archive an idle thread: the response carries the updated snapshot.
+	status, archived, failure := archiveThread(idle.ThreadID, `{"archived":true}`)
+	if status != http.StatusOK {
+		t.Fatalf("expected 200 from archive, got %d %+v", status, failure)
+	}
+	if !archived.Archived || archived.ArchivedAt.IsZero() {
+		t.Fatalf("archive response must carry archived and archived_at, got %+v", archived)
+	}
+
+	// Archiving again is idempotent and keeps archived_at stable.
+	status, again, failure := archiveThread(idle.ThreadID, `{"archived":true}`)
+	if status != http.StatusOK {
+		t.Fatalf("expected 200 from idempotent archive, got %d %+v", status, failure)
+	}
+	if !again.ArchivedAt.Equal(archived.ArchivedAt) {
+		t.Fatalf("idempotent archive moved archived_at: %v -> %v", archived.ArchivedAt, again.ArchivedAt)
+	}
+
+	// The three views slice the same collection without overlap.
+	threads, _ = listThreads("?view=active")
+	if len(threads) != 3 {
+		t.Fatalf("active view must hide the archived thread, got %+v", threads)
+	}
+	for _, thread := range threads {
+		if thread.ThreadID == idle.ThreadID || thread.Archived {
+			t.Fatalf("active view leaked archived thread: %+v", thread)
+		}
+	}
+	threads, _ = listThreads("?view=archived")
+	if len(threads) != 1 || threads[0].ThreadID != idle.ThreadID || !threads[0].Archived {
+		t.Fatalf("archived view mismatch: %+v", threads)
+	}
+	threads, _ = listThreads("?view=all")
+	if len(threads) != 4 {
+		t.Fatalf("all view must return every non-deleted thread, got %+v", threads)
+	}
+
+	// An archived thread rejects new runs with THREAD_ARCHIVED.
+	followUpBody := fmt.Sprintf(`{"input":"follow up","thread_id":%q}`, idle.ThreadID)
+	followUpResp, err := http.Post(ts.URL+"/v1/runs", "application/json", strings.NewReader(followUpBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer followUpResp.Body.Close()
+	if followUpResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 for run on archived thread, got %d", followUpResp.StatusCode)
+	}
+	var runFailure errorResponse
+	if err := json.NewDecoder(followUpResp.Body).Decode(&runFailure); err != nil {
+		t.Fatal(err)
+	}
+	if runFailure.Error != "THREAD_ARCHIVED" {
+		t.Fatalf("expected THREAD_ARCHIVED, got %+v", runFailure)
+	}
+
+	// Unarchiving returns the thread to the active view.
+	status, unarchived, failure := archiveThread(idle.ThreadID, `{"archived":false}`)
+	if status != http.StatusOK {
+		t.Fatalf("expected 200 from unarchive, got %d %+v", status, failure)
+	}
+	if unarchived.Archived || !unarchived.ArchivedAt.IsZero() {
+		t.Fatalf("unarchive response must clear archived fields, got %+v", unarchived)
+	}
+	threads, _ = listThreads("?view=active")
+	if len(threads) != 4 {
+		t.Fatalf("unarchived thread must return to the active view, got %+v", threads)
+	}
+	if threads, _ = listThreads("?view=archived"); len(threads) != 0 {
+		t.Fatalf("archived view must be empty after unarchive, got %+v", threads)
+	}
+}

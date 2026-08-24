@@ -247,7 +247,7 @@ func TestRenameThreadPersistsManualMetadata(t *testing.T) {
 
 	// Verify the durable store carries manual metadata.
 	store := newThreadStore()
-	threads, err := store.ListThreads()
+	threads, err := store.ListThreads(ThreadListViewActive)
 	if err != nil {
 		t.Fatalf("ListThreads returned error: %v", err)
 	}
@@ -290,7 +290,7 @@ func TestTitleMetadataRestoredAfterRestart(t *testing.T) {
 		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
 	}
 
-	threads := restartedService.ListThreads()
+	threads := restartedService.ListThreads(ThreadListViewActive)
 	if len(threads) != 1 {
 		t.Fatalf("expected one thread after restart, got %d", len(threads))
 	}
@@ -388,7 +388,7 @@ func TestGeneratedTitlePersistsForNewThread(t *testing.T) {
 	}
 
 	restartedService := newDurableThreadTestService()
-	threads := restartedService.ListThreads()
+	threads := restartedService.ListThreads(ThreadListViewActive)
 	if len(threads) != 1 {
 		t.Fatalf("expected one restored thread, got %d", len(threads))
 	}
@@ -710,7 +710,7 @@ func waitForStoredThreadTitle(t *testing.T, threadID, label string, source Threa
 	store := newThreadStore()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		threads, err := store.ListThreads()
+		threads, err := store.ListThreads(ThreadListViewActive)
 		if err == nil {
 			for _, thread := range threads {
 				if thread.ThreadID == threadID && thread.Label == label && thread.TitleSource == source && thread.TitleStatus == status {
@@ -720,7 +720,7 @@ func waitForStoredThreadTitle(t *testing.T, threadID, label string, source Threa
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	threads, err := store.ListThreads()
+	threads, err := store.ListThreads(ThreadListViewActive)
 	if err != nil {
 		t.Fatalf("ListThreads returned error while waiting for title: %v", err)
 	}

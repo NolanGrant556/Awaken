@@ -7,7 +7,7 @@
 - 组件只接收 `theme`、`tone`、`variant`、`className` 和可选无障碍标签；默认 `memory + ambient` 保持记忆页视觉，`compact` 为小尺寸容器降低细丝与颗粒数量，并提高线宽、亮度和局部辉光以保持可读动势。
 - 不读取 Memory、Electron、runtime、store、文件系统或网络。
 - 不触发回调，不改变记忆设置状态，也不代表运行、焦点或选中状态。
-- Gallery 与真实 Desktop 都通过 `AwakenMemoryLightFlowLayout` 组合现有 `AwakenMemorySettings`，两端共用相同的脑形图标标题、标题位置、页头高度、开关清单与记忆管理布局；脑形图标复用左侧“记忆”导航的 `Brain` 图形，只作装饰且不进入可访问名称。
+- Gallery 与真实 Desktop 都通过 `AwakenMemoryLightFlowLayout` 组合现有 `AwakenMemorySettings`，两端共用相同的脑形图标标题、标题位置、页头高度、开关清单与记忆管理布局；光流页头从外层 `AwakenSettings` 当前分区继承标题与 `settings-memory` concept，因此与左侧“记忆”导航统一消费 `settings-memory -> brain`。Design System 拥有带来源与许可记录的 authored 几何，图标只作装饰且不进入可访问名称。
 - 光流页头横向贴满消费容器，不再套独立卡片外框；标题下方直接进入开关清单，不额外显示“记忆控制”说明行。
 - 记忆组合根节点承接完整纵向滚动并隐藏会占用额外 gutter 的原生滚动条；光流页头属于同一滚动内容并随页面移动。无轨道细滑块只绘制在页头下方的白色记忆视口右缘，高度限制在 44–72px，并按完整 `scrollHeight` 映射位置，不会缩短滚轮、触控板或触摸滚动的真实范围。Gallery 与 Desktop 使用同一实现。
 - 真实消费只传入当前生效的 `light` / `dark` 主题，不增加记忆开关、外观偏好或业务回调。

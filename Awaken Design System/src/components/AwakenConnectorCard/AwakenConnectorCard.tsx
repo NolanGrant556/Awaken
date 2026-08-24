@@ -79,7 +79,7 @@ export function AwakenConnectorCard({
   return (
     <article className="aw-connector-card" data-variant={item.variant}>
       <span className="aw-connector-card__icon" aria-hidden="true">
-        {item.variant === "server" ? <AwakenIcon concept="mcp-server" size={20} /> : <AwakenIcon concept="connector" size={20} />}
+        <AwakenIcon concept="mcp-brand" size={20} />
       </span>
       <span className="aw-connector-card__copy">
         <span className="aw-connector-card__title-row">

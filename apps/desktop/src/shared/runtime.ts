@@ -909,6 +909,61 @@ export type RuntimeSkill = {
 
 export type SkillProjectRoots = string | string[];
 
+export type RuntimePluginDiagnostic = {
+  code?: string;
+  message?: string;
+  severity?: string;
+};
+
+export type RuntimePluginSource = {
+  kind: "local_path" | "remote_url" | "remote_git" | string;
+  path?: string;
+  url?: string;
+  ref?: string;
+  subpath?: string;
+};
+
+export type RuntimePluginServer = {
+  shortName: string;
+  identity: string;
+  transport?: string;
+  state?: string;
+  enabled: boolean;
+  errorReason?: string;
+  invalid?: RuntimePluginDiagnostic;
+};
+
+export type RuntimePlugin = {
+  name: string;
+  version?: string;
+  description?: string;
+  author?: { name?: string; email?: string; url?: string };
+  homepage?: string;
+  repository?: string;
+  license?: string;
+  keywords?: string[];
+  enabled: boolean;
+  source: RuntimePluginSource;
+  digest?: string;
+  installedAt?: string;
+  skillRoot?: string;
+  skills?: RuntimeSkill[];
+  servers?: RuntimePluginServer[];
+  diagnostics?: RuntimePluginDiagnostic[];
+  skillCount: number;
+  serverCount: number;
+};
+
+export type InstallPluginRequest = {
+  source: RuntimePluginSource;
+  replace?: boolean;
+};
+
+export type InstallPluginResponse = {
+  plugin: RuntimePlugin;
+  message: string;
+};
+
 export type ComposerTokenType =
   | "skill"
   | "file"
@@ -2257,6 +2312,15 @@ export type AwakenBridge = {
   deleteSkill: (request: DeleteSkillRequest) => Promise<DeleteSkillResponse>;
   disableSkill: (id: string) => Promise<void>;
   enableSkill: (id: string) => Promise<void>;
+  listPlugins: () => Promise<RuntimePlugin[]>;
+  getPlugin: (name: string) => Promise<RuntimePlugin>;
+  installPlugin: (request: InstallPluginRequest) => Promise<InstallPluginResponse>;
+  enablePlugin: (name: string) => Promise<RuntimePlugin>;
+  disablePlugin: (name: string) => Promise<RuntimePlugin>;
+  upgradePlugin: (name: string) => Promise<InstallPluginResponse>;
+  uninstallPlugin: (name: string) => Promise<{ trashedPath?: string; message: string }>;
+  enablePluginServer: (name: string, shortName: string) => Promise<RuntimePlugin>;
+  disablePluginServer: (name: string, shortName: string) => Promise<RuntimePlugin>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
   getModelPurposeRouting: () => Promise<ModelPurposeRouting>;

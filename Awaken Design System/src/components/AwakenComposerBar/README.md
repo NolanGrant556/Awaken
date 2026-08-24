@@ -10,11 +10,11 @@
 
 当前 Desktop 的 `center` 与 `dock` 形态共享同一个受控模型选择入口：父级通过 `metaItems` 传入当前模型、可选模型、供应商 Logo、选中回调和“添加模型”动作，组件负责列表的展开、收起、选中标记及键盘关闭；支持推理强度的模型进入二级面板后继续复用同一枚 Logo，并用一条可拖动、可键盘操作的 Codex 式离散轨道选择档位。轨道不显示 `Effort`、提交按钮或档位文字；最低档直接落在轨道左端且不重复画圆点，其余档位圆点始终保留在中性轨道层，最高档提示点在右端内侧留出间距，而选中最高档后的白色滑块仍到达轨道右端。彩色光流从上层覆盖已经过的点，白色圆形滑块再覆盖当前点，只有滑块右侧尚未选择的中性灰点露出。往回拖时光流裁切边界后退，被覆盖的档位点会自然重新出现，不通过隐藏节点模拟。光流直接复用 `AwakenMemoryLightFlow` 的紧凑绘制变体，并单独增强细丝线宽、亮度和局部辉光；普通档为绿色，最右 `max` 档为红色，轨道本身不保存模型配置。拖动期间滑块与填充边界精确跟随指针，松手、取消或键盘选择后收敛到所选档位；`max` 仍只在指针进入最右区域并跨过像素回差后触发，避免提前变红。点击、拖动或 Arrow/Home/End 只能落在 capability 真实存在的档位并立即回调；单纯悬停或移动不变更档位。Gallery 提供三档、两档和无档位 mock，但不读取或保存真实模型配置。
 
-模型菜单打开时，底部模型触发按钮使用同一套 240ms 横向伸展动效：右端位置保持稳定，胶囊从当前内容宽度向左拉长到菜单宽度，按钮内容随胶囊居中；模型列表卡片继续使用原有尺寸和定位，不参与伸展。`center` 首页与 `dock` 对话页共享同一实现，只在点击时读取一次按钮当前宽度，不新增计时状态、运行时订阅或持续动画循环；系统启用 `prefers-reduced-motion` 时直接显示展开后的按钮。
+模型菜单打开时，底部模型触发按钮使用同一套 240ms 横向伸展动效：右端位置保持稳定，胶囊从当前内容宽度向左拉长到菜单宽度，按钮内容随胶囊居中；宽态 Chevron 同步旋转，关闭时反向收回。模型列表卡片继续使用原有尺寸和定位，不参与伸展。`center` 首页与 `dock` 对话页共享同一实现，只在点击时读取一次按钮当前宽度，不新增计时状态、运行时订阅或持续动画循环；系统启用 `prefers-reduced-motion` 时直接显示展开后的按钮并停用 Chevron 过渡。Composer 自身可用宽度不超过 `440px` 时，触发按钮继续收为只显示供应商 Logo 的 32px 圆形胶囊，隐藏模型名与 Chevron。
 
 `center` 还可以通过受控 `projectPicker` 在输入 surface 下方显示项目作用域低栏。当前作用域直接从 `options[].selected` 派生；`label` 控制菜单与可访问名称，`options[].icon === null` 表示不渲染图标，用于无项目时的“选择项目”占位状态；项目选项未传 `icon` 时继续使用默认文件夹图标。已选项目且父级传入 `clearAction` 时，文件夹图标会在整段触发器 hover 或清除按钮获得键盘焦点后原位换成圆形 `X`；点击 `X` 只回调清除动作，不打开项目菜单。菜单只展示父级传入的选项并回调选择动作，「创建项目」也只回调父级。组件不读取 workspace、FileStore 或 Electron，也不保存第二份作用域选择；`dock` 不渲染这条首页低栏。Gallery 的 `center-idle` 状态提供可切换 mock 项目、取消选择和创建入口。
 
-无结构化 token 时继续使用原生 textarea。结构化 token 存在时，整个输入流只有一个 `contenteditable="plaintext-only"` editing host；每个 token 是带稳定 `data-composer-token-id` 的 `contenteditable="false"` 原子节点，token 前文、token 间正文和最后尾文都可在同一光标、选区与 IME 上下文中编辑。长前缀自然换行后，剩余宽度允许时 token、尾文与光标继续当前行；token 的视觉间距不改写正文值。
+无结构化 token 时继续使用原生 textarea。结构化 token 存在时，整个输入流只有一个 `contenteditable="plaintext-only"` editing host；每个 token 是带稳定 `data-composer-token-id` 的 `contenteditable="false"` 原子节点，token 前文、token 间正文和最后尾文都可在同一光标、选区与 IME 上下文中编辑。token 内部先保持图标盒与 label 行盒的几何中心一致，再对全部 14px token 图标使用统一 2px 光学下沉，使书本、显示器和文件图形的可见底线与相邻字形对齐；不得为单一 token 类型添加另一套偏移。选区跨过 token 时，组件为整个原子节点补齐选中底色，因此图标、间距和 label 在 `Cmd/Ctrl+A` 中表现为一个整体。长前缀自然换行后，剩余宽度允许时 token、尾文与光标继续当前行；token 的视觉间距不改写正文值。
 
 组件以 DOM 为编辑期事实源：`input` 后把 token 前的文本映射为对应 `leadingText`，把最后一个 token 后的文本映射为 `value`，再通过 `onStructuredInputChange` 交给父级持久化。React 不控制 editing host 的 children；只有 token identity/label 或外部 draft 真正变化时才在 layout 阶段重建 DOM，并按不包含 token label 的逻辑 offset 恢复选区。composition 期间禁止重建，复制纯文本时也不把 token label 写入正文或剪贴板。
 

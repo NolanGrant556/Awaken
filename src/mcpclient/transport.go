@@ -53,7 +53,7 @@ func buildTransport(cfg McpServerConfig, registry *InProcRegistry, authHandler a
 		if err != nil {
 			return nil, TransportStdio, fmt.Errorf("resolve network route: %w", err)
 		}
-		cmd.Env = append(childEnvironment, envSlice(cfg.Stdio.Env)...)
+		cmd.Env = stdioChildEnv(cfg.Stdio, childEnvironment)
 		return &mcp.CommandTransport{Command: cmd}, TransportStdio, nil
 	case TransportHTTP:
 		httpClient := buildHTTPClient(cfg.InsecureSkipVerify)
@@ -198,4 +198,33 @@ func envSlice(env map[string]string) []string {
 		out = append(out, k+"="+v)
 	}
 	return out
+}
+
+func stripReservedPluginEnv(env map[string]string) map[string]string {
+	if env == nil {
+		return nil
+	}
+	out := make(map[string]string, len(env))
+	for key, value := range env {
+		if strings.EqualFold(key, "PLUGIN_ROOT") || strings.EqualFold(key, "PLUGIN_DATA") {
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func stdioChildEnv(cfg *StdioTransportConfig, childEnvironment []string) []string {
+	env := append([]string{}, childEnvironment...)
+	if cfg == nil {
+		return env
+	}
+	env = append(env, envSlice(stripReservedPluginEnv(cfg.Env))...)
+	if cfg.PluginRoot != "" {
+		env = append(env, "PLUGIN_ROOT="+cfg.PluginRoot)
+	}
+	if cfg.PluginData != "" {
+		env = append(env, "PLUGIN_DATA="+cfg.PluginData)
+	}
+	return env
 }

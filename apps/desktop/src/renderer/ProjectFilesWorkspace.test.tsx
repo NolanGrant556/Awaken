@@ -139,6 +139,20 @@ describe("ProjectFilesWorkspace", () => {
     );
   });
 
+  it("animates the file-list width, content, divider, and folder state with reduced-motion fallback", () => {
+    expect(projectFileStyles).toContain(
+      "transition: grid-template-columns 210ms cubic-bezier(0.2, 0.8, 0.2, 1);",
+    );
+    expect(projectFileStyles).toContain("transform: translateX(12px);");
+    expect(projectFileStyles).toContain("visibility 0s linear 190ms;");
+    expect(projectFileStyles).toContain(
+      ".project-files-pathbar__folder-icon-state--expanded",
+    );
+    expect(projectFileStyles).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.project-files-pathbar__folder-icon-state \{\s*transition: none;/,
+    );
+  });
+
   it("keeps the file filter compact when the optional AGENTS creator is visible", () => {
     expect(projectFileStyles).toMatch(
       /\.project-files-navigator:has\(> \.project-files-create-agents\)\s*\{\s*grid-template-rows:\s*auto auto auto minmax\(0, 1fr\);/,
@@ -315,6 +329,17 @@ describe("ProjectFilesWorkspace", () => {
       }) as DOMRect;
     const toggle = container.querySelector<HTMLButtonElement>('[aria-label="收起文件列表"]');
     expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle?.classList).toContain("is-expanded");
+    expect(
+      toggle?.querySelector(
+        ".project-files-pathbar__folder-icon-state--collapsed .aw-icon--folder",
+      ),
+    ).not.toBeNull();
+    expect(
+      toggle?.querySelector(
+        ".project-files-pathbar__folder-icon-state--expanded .aw-icon--folder-open",
+      ),
+    ).not.toBeNull();
     expect(navigator?.getAttribute("aria-hidden")).toBe("false");
     expect(divider?.getAttribute("aria-valuenow")).toBe("240");
     expect(container.textContent).toContain("README.md");
@@ -334,6 +359,7 @@ describe("ProjectFilesWorkspace", () => {
     await act(async () => toggle?.click());
     expect(toggle?.getAttribute("aria-label")).toBe("展开文件列表");
     expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle?.classList).not.toContain("is-expanded");
     expect(navigator?.getAttribute("aria-hidden")).toBe("true");
     expect(divider?.getAttribute("aria-hidden")).toBe("true");
     expect(divider?.getAttribute("tabindex")).toBe("-1");
@@ -343,6 +369,8 @@ describe("ProjectFilesWorkspace", () => {
 
     await act(async () => toggle?.click());
     expect(toggle?.getAttribute("aria-label")).toBe("收起文件列表");
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
+    expect(toggle?.classList).toContain("is-expanded");
     expect(navigator?.getAttribute("aria-hidden")).toBe("false");
     expect(divider?.getAttribute("aria-hidden")).toBe("false");
     expect(body?.style.getPropertyValue("--project-file-list-width")).toBe("388px");

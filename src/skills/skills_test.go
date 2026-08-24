@@ -604,6 +604,23 @@ func TestValidateNameReserved(t *testing.T) {
 	if err := ValidateNameReserved("mcp__test"); err == nil {
 		t.Error("mcp__ prefix should be rejected")
 	}
+	if err := ValidateNameReserved("plugin__acme-tools__lint"); err == nil {
+		t.Error("plugin__ prefix should be rejected")
+	}
+}
+
+func TestPluginSourceSkillIDsAreNamespaced(t *testing.T) {
+	pkg := filepath.Join(t.TempDir(), "packages", "acme.tools")
+	skillsRoot := filepath.Join(pkg, "skills")
+	writeTestSkillPackage(t, skillsRoot, "lint", "---\nname: lint\ndescription: lint files\n---\nBody")
+	loaded := LoadDir(skillsRoot, SourcePlugin)
+	def := loaded["plugin__acme-tools__lint"]
+	if def == nil || def.Name != "lint" || def.Source != SourcePlugin {
+		t.Fatalf("namespaced plugin skill missing: %+v keys=%v", def, loaded)
+	}
+	if _, exists := loaded["lint"]; exists {
+		t.Fatal("bare skill id should not be used for plugin source")
+	}
 }
 
 // ---- RequiredMcpServers availability tests ----

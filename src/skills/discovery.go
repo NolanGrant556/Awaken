@@ -5,15 +5,36 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 const (
 	EnvManagedSkillDirs    = "AWAKEN_MANAGED_SKILL_DIRS"
 	EnvAdditionalSkillDirs = "AWAKEN_ADDITIONAL_SKILL_DIRS"
-	EnvPluginSkillDirs     = "AWAKEN_PLUGIN_SKILL_DIRS"
 	EnvBundledSkillDirs    = "AWAKEN_BUNDLED_SKILL_DIRS"
 	EnvLegacyCommandDirs   = "AWAKEN_LEGACY_COMMAND_DIRS"
 )
+
+var (
+	pluginSkillRootsMu sync.RWMutex
+	pluginSkillRoots   []string
+)
+
+// SetPluginSkillRoots replaces the plugin source roots consumed by local
+// discovery. The unique owner is the Core plugin store; tests inject roots
+// directly and should reset with t.Cleanup.
+func SetPluginSkillRoots(roots []string) {
+	pluginSkillRootsMu.Lock()
+	defer pluginSkillRootsMu.Unlock()
+	pluginSkillRoots = append([]string(nil), roots...)
+}
+
+// PluginSkillRoots returns a copy of the current plugin source roots.
+func PluginSkillRoots() []string {
+	pluginSkillRootsMu.RLock()
+	defer pluginSkillRootsMu.RUnlock()
+	return append([]string(nil), pluginSkillRoots...)
+}
 
 // LocalSourceDirs builds the complete production discovery contract consumed
 // by the existing Core boot path. Map values are OS path lists, not single
@@ -64,7 +85,7 @@ func LocalSourceDirsForProjectRoots(projectRoots []string) map[SourceOrigin]stri
 	}
 	setSourceDirList(dirs, SourceManaged, managed)
 	setSourceDirList(dirs, SourceAdditional, configuredSourceDirs(os.Getenv(EnvAdditionalSkillDirs), home))
-	setSourceDirList(dirs, SourcePlugin, configuredSourceDirs(os.Getenv(EnvPluginSkillDirs), home))
+	setSourceDirList(dirs, SourcePlugin, PluginSkillRoots())
 	// Bundled Skills have no implicit repository/package fallback. A packaged
 	// application must explicitly set AWAKEN_BUNDLED_SKILL_DIRS when it ships any.
 	setSourceDirList(dirs, SourceBundled, configuredSourceDirs(os.Getenv(EnvBundledSkillDirs), home))

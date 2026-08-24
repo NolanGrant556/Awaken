@@ -36,6 +36,17 @@ func HookTrustPath(root string) string {
 	return filepath.Join(filepath.Clean(root), "config", "hook-trust.json")
 }
 
+// PluginsConfigPath returns the only user-scoped plugin state file under an
+// already-resolved Awaken business-data root.
+func PluginsConfigPath(root string) string {
+	return filepath.Join(filepath.Clean(root), "config", "plugins.json")
+}
+
+// PluginsRoot returns the installed plugin packages/data tree.
+func PluginsRoot(root string) string {
+	return filepath.Join(filepath.Clean(root), "plugins")
+}
+
 // SessionsRoot is the single subtree of the Awaken business-data root that the
 // agent is allowed to mutate. Everything else under the root (config,
 // credentials, store generations, user memory) stays protected, so this path is

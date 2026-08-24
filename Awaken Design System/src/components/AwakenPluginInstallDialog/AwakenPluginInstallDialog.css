@@ -1,0 +1,44 @@
+@import "../../tokens/components.css";
+
+.aw-plugin-install-dialog__body {
+  display: grid;
+  gap: var(--aw-space-4);
+}
+
+.aw-plugin-install-dialog__modes {
+  display: flex;
+  gap: var(--aw-space-2);
+}
+
+.aw-plugin-install-dialog__modes button {
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+  color: inherit;
+  padding: var(--aw-space-2) var(--aw-space-3);
+}
+
+.aw-plugin-install-dialog__modes button[data-active="true"] {
+  border-color: var(--aw-border-control-hover);
+}
+
+.aw-plugin-install-dialog__body label {
+  display: grid;
+  gap: var(--aw-space-2);
+}
+
+.aw-plugin-install-dialog__path {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--aw-space-2);
+}
+
+.aw-plugin-install-dialog__risk {
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-plugin-install-dialog__check {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}

@@ -1,4 +1,16 @@
 export {
+  APPROVED_LUCIDE_GLYPHS,
+  APPROVED_LUCIDE_ICON_NAMES,
+  type ApprovedLucideGlyph,
+} from "./approvedLucideGlyphs";
+export {
+  APPROVED_LUCIDE_LICENSE,
+  APPROVED_LUCIDE_SOURCES,
+  APPROVED_LUCIDE_STROKE,
+  APPROVED_LUCIDE_VERSION,
+  type ApprovedLucideIconName,
+} from "./approvedLucideSources";
+export {
   AWAKEN_ICON_GRID,
   AWAKEN_ICON_STROKE,
   AWAKEN_OPTICAL_SHAPES,
@@ -18,7 +30,6 @@ export {
 } from "./definitions";
 export {
   MCP_OFFICIAL_MARK,
-  SKILL_SHAPE_PROVENANCE,
   type BrandMark,
 } from "./brandMarks";
 export {

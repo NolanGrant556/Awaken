@@ -41,6 +41,8 @@ import {
 	type HookRevokeRequest,
 	type HookStatus,
 	type HookTrustRequest,
+  type InstallPluginRequest,
+  type InstallPluginResponse,
   type InstallSkillRequest,
   type InstallSkillResponse,
   type ModelProfileBalancesResult,
@@ -86,6 +88,7 @@ import {
   type RuntimeRun,
   type RuntimeProject,
   type RuntimeProjectOperation,
+  type RuntimePlugin,
   type RuntimeSkill,
   type SkillProjectRoots,
   type SkillPreviewResponse,
@@ -233,6 +236,15 @@ export type RuntimeClient = {
   deleteSkill: (request: DeleteSkillRequest) => Promise<DeleteSkillResponse>;
   disableSkill: (id: string) => Promise<void>;
   enableSkill: (id: string) => Promise<void>;
+  listPlugins: () => Promise<RuntimePlugin[]>;
+  getPlugin: (name: string) => Promise<RuntimePlugin>;
+  installPlugin: (request: InstallPluginRequest) => Promise<InstallPluginResponse>;
+  enablePlugin: (name: string) => Promise<RuntimePlugin>;
+  disablePlugin: (name: string) => Promise<RuntimePlugin>;
+  upgradePlugin: (name: string) => Promise<InstallPluginResponse>;
+  uninstallPlugin: (name: string) => Promise<{ trashedPath?: string; message: string }>;
+  enablePluginServer: (name: string, shortName: string) => Promise<RuntimePlugin>;
+  disablePluginServer: (name: string, shortName: string) => Promise<RuntimePlugin>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
   getModelPurposeRouting?: () => Promise<ModelPurposeRouting>;
@@ -502,6 +514,15 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     deleteSkill: (request) => bridge.deleteSkill(request),
     disableSkill: (id) => bridge.disableSkill(id),
     enableSkill: (id) => bridge.enableSkill(id),
+    listPlugins: () => bridge.listPlugins(),
+    getPlugin: (name) => bridge.getPlugin(name),
+    installPlugin: (request) => bridge.installPlugin(request),
+    enablePlugin: (name) => bridge.enablePlugin(name),
+    disablePlugin: (name) => bridge.disablePlugin(name),
+    upgradePlugin: (name) => bridge.upgradePlugin(name),
+    uninstallPlugin: (name) => bridge.uninstallPlugin(name),
+    enablePluginServer: (name, shortName) => bridge.enablePluginServer(name, shortName),
+    disablePluginServer: (name, shortName) => bridge.disablePluginServer(name, shortName),
     listModelProviders: () => bridge.listModelProviders(),
     listModelProfiles: () => bridge.listModelProfiles(),
     getModelPurposeRouting: () => bridge.getModelPurposeRouting(),

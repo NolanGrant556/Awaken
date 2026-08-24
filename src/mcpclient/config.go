@@ -47,6 +47,10 @@ type StdioTransportConfig struct {
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
 	Cwd     string            `json:"cwd,omitempty"`
+	// PluginRoot and PluginData are host-owned reserved environment values
+	// injected after configured env. They are never persisted.
+	PluginRoot string `json:"-"`
+	PluginData string `json:"-"`
 }
 
 // HTTPTransportConfig covers streamable HTTP, SSE, and WebSocket variants.
@@ -234,19 +238,20 @@ func loadConfigFile(path string) (ConfigFile, error) {
 	return cfg, nil
 }
 
-// MergeScoped combines user, project, and dynamic-scoped server lists.
-// Project scope overrides user scope on name collision; dynamic scope is
-// applied last and overrides both. Invalid entries are dropped with a
+// MergeScoped combines plugin, user, project, and dynamic-scoped server lists.
+// Later scopes override earlier ones on name collision: plugin is lowest,
+// then user, then project, then dynamic. Invalid entries are dropped with a
 // warning logged via the provided logger (or silently if nil). Disabled
 // entries are retained so the manager can restore their disabled state after
 // a process restart without attempting a connection.
 func MergeScoped(
+	plugin []ScopedMcpServerConfig,
 	user []ScopedMcpServerConfig,
 	project []ScopedMcpServerConfig,
 	dynamic []ScopedMcpServerConfig,
 	logger Logger,
 ) []ScopedMcpServerConfig {
-	merged := make(map[string]ScopedMcpServerConfig, len(user)+len(project)+len(dynamic))
+	merged := make(map[string]ScopedMcpServerConfig, len(plugin)+len(user)+len(project)+len(dynamic))
 	add := func(scoped []ScopedMcpServerConfig) {
 		for _, entry := range scoped {
 			if !entry.Config.Valid() {
@@ -263,6 +268,7 @@ func MergeScoped(
 			merged[entry.Name] = expandEnvInScoped(entry)
 		}
 	}
+	add(plugin)
 	add(user)
 	add(project)
 	add(dynamic)

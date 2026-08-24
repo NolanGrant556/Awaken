@@ -111,6 +111,24 @@ describe("execution trace disclosures", () => {
     expect(row?.getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("keeps the official MCP mark visible while an MCP tool is active or terminal", async () => {
+    for (const status of ["active", "done", "error"] as const) {
+      await act(async () => {
+        root.render(
+          <AwakenToolTraceLine
+            title="调用 MCP 工具"
+            kind="mcp"
+            status={status}
+          />,
+        );
+      });
+      const icon = container.querySelector(".tool-trace-line-icon");
+      expect(icon?.getAttribute("data-icon-kind")).toBe("source");
+      expect(icon?.querySelector(".aw-icon--mcp-mark")?.getAttribute("width")).toBe("14");
+      expect(icon?.querySelector(".aw-icon--spinner")).toBeNull();
+    }
+  });
+
   it("renders structured selectable detail sections and invokes the copy callback", async () => {
     const onCopyDetail = vi.fn();
     await act(async () => {

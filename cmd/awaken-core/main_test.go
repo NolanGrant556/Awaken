@@ -107,7 +107,7 @@ func TestMCPManagerAndConnectorsExistWithoutStaticConfig(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("AWAKEN_HOME", home)
 
-	manager := buildMCPManager(workspace)
+	manager := buildMCPManager(workspace, nil)
 	if manager == nil {
 		t.Fatal("expected empty MCP manager without static config")
 	}
@@ -138,7 +138,7 @@ func TestBuildConnectorRegistryRestoresPersistedBuiltinOwnership(t *testing.T) {
 		t.Fatalf("save user config: %v", err)
 	}
 
-	manager := buildMCPManager("")
+	manager := buildMCPManager("", nil)
 	t.Cleanup(func() { manager.Shutdown(context.Background()) })
 	registry := buildConnectorRegistry(manager, "", nil)
 	status, err := registry.Status("playwright")

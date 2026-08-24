@@ -21,15 +21,20 @@ export function folderBody(
   width = 14,
   height = 10.7,
 ): GeomOp {
+  // 文件夹页签不从顶边直接拉一条长对角线：先用短圆肩离开顶边，
+  // 再以紧凑斜肩落到主体顶边，保留熟悉的桌面文件夹比例。
+  const shoulderX = Math.min(0.9, tabHeight * 0.32);
+  const shoulderY = Math.min(0.45, tabHeight * 0.16);
   const pts: Vec[] = [
     [0, 0],
     [tabWidth, 0],
+    [tabWidth + shoulderX, shoulderY],
     [tabWidth + tabHeight, tabHeight],
     [width, tabHeight],
     [width, height],
     [0, height],
   ];
-  return poly(pts, [1.35, 0.9, 0.6, 1.35, 1.35, 1.35], true);
+  return poly(pts, [1.35, 0.8, 0.55, 0.7, 1.35, 1.35, 1.35], true);
 }
 
 /** 文件主体：右上角折角。折角边长同时是 45 度斜边。 */
@@ -258,30 +263,35 @@ export function triangle(cx = 8, cy = 8, half = 6.1, height = 10.5): GeomOp {
   );
 }
 
-/** 显示器轮廓加底座。屏幕与底座是两段，底座延长到光学边界。 */
-export function display(cx = 8, cy = 8, w = 12.6, h = 9.2): GeomOp[] {
+/**
+ * 显示器轮廓加底座。屏幕与底座是两段，底座延长到光学边界。
+ *
+ * 屏幕主体扩大、细腿缩短，让 display 系列在 14–20px 的产品尺寸下更饱满，
+ * 同时仍由一个原语约束跟随系统、演示和 Computer Use 三个图标的家族比例。
+ */
+export function display(cx = 8, cy = 8, w = 13.5, h = 9.9): GeomOp[] {
   return [
     poly(
       [
-        [cx - w / 2, cy - h / 2 - 1],
-        [cx + w / 2, cy - h / 2 - 1],
-        [cx + w / 2, cy + h / 2 - 1],
-        [cx - w / 2, cy + h / 2 - 1],
+        [cx - w / 2, cy - h / 2 - 0.8],
+        [cx + w / 2, cy - h / 2 - 0.8],
+        [cx + w / 2, cy + h / 2 - 0.8],
+        [cx - w / 2, cy + h / 2 - 0.8],
       ],
       1.7,
       true,
     ),
     poly(
       [
-        [cx - 3.2, cy + h / 2 + 2.4],
-        [cx + 3.2, cy + h / 2 + 2.4],
+        [cx - 3.4, cy + h / 2 + 2.1],
+        [cx + 3.4, cy + h / 2 + 2.1],
       ],
       0,
     ),
     poly(
       [
-        [cx, cy + h / 2 - 1],
-        [cx, cy + h / 2 + 2.4],
+        [cx, cy + h / 2 - 0.8],
+        [cx, cy + h / 2 + 2.1],
       ],
       0,
     ),

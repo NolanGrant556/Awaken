@@ -21,7 +21,8 @@ func TestSkillListAcceptsOrderedProjectFolderRoots(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv(skills.EnvManagedSkillDirs, filepath.Join(t.TempDir(), "managed"))
 	t.Setenv(skills.EnvAdditionalSkillDirs, "")
-	t.Setenv(skills.EnvPluginSkillDirs, "")
+	t.Cleanup(func() { skills.SetPluginSkillRoots(nil) })
+	skills.SetPluginSkillRoots(nil)
 	t.Setenv(skills.EnvBundledSkillDirs, "")
 	t.Setenv(skills.EnvLegacyCommandDirs, "")
 	for _, fixture := range []struct {
@@ -78,7 +79,8 @@ func TestSkillPreviewHandlerReadsExactCatalogEntry(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv(skills.EnvAdditionalSkillDirs, "")
-	t.Setenv(skills.EnvPluginSkillDirs, "")
+	t.Cleanup(func() { skills.SetPluginSkillRoots(nil) })
+	skills.SetPluginSkillRoots(nil)
 	t.Setenv(skills.EnvBundledSkillDirs, "")
 	t.Setenv(skills.EnvLegacyCommandDirs, "")
 
@@ -168,7 +170,8 @@ func TestSkillListExposesBundledPreviewIdentity(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv(skills.EnvAdditionalSkillDirs, "")
-	t.Setenv(skills.EnvPluginSkillDirs, "")
+	t.Cleanup(func() { skills.SetPluginSkillRoots(nil) })
+	skills.SetPluginSkillRoots(nil)
 	t.Setenv(skills.EnvBundledSkillDirs, bundledRoot)
 	t.Setenv(skills.EnvLegacyCommandDirs, "")
 

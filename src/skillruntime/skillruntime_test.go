@@ -184,7 +184,8 @@ func TestResourceReadToolReadsWithinSkillPackage(t *testing.T) {
 }
 
 func TestResourceReadToolUsesRecordedDiscoveryRootForPluginPackage(t *testing.T) {
-	sourceRoot := filepath.Join(t.TempDir(), "plugin-skills")
+	pluginRoot := filepath.Join(t.TempDir(), "packages", "acme.tools")
+	sourceRoot := filepath.Join(pluginRoot, "skills")
 	packageRoot := filepath.Join(sourceRoot, "plugin-report")
 	if err := os.MkdirAll(filepath.Join(packageRoot, "assets"), 0o755); err != nil {
 		t.Fatal(err)
@@ -197,12 +198,13 @@ func TestResourceReadToolUsesRecordedDiscoveryRootForPluginPackage(t *testing.T)
 	}
 	registry := skills.NewSkillRegistry(nil)
 	registry.LoadFromSources(map[skills.SourceOrigin]string{skills.SourcePlugin: sourceRoot})
-	definition := registry.Get("plugin-report")
+	skillID := "plugin__acme-tools__plugin-report"
+	definition := registry.Get(skillID)
 	if definition == nil || definition.SourceRoot == "" || definition.State != skills.StateLoaded {
 		t.Fatalf("plugin Skill did not retain its discovery root: %+v", definition)
 	}
 	reader := &ResourceReadTool{registry: registry}
-	result, err := reader.Execute(context.Background(), `{"skill_id":"plugin-report","path":"assets/template.txt"}`)
+	result, err := reader.Execute(context.Background(), `{"skill_id":"`+skillID+`","path":"assets/template.txt"}`)
 	if err != nil || !strings.Contains(result, "plugin template") {
 		t.Fatalf("plugin resource did not use recorded local boundary: result=%q err=%v", result, err)
 	}

@@ -363,7 +363,7 @@ export type WorkbenchNavSection = ExtensionSection | "scheduled-tasks";
 export function workbenchNavSectionForNavId(
   activeNavId: string | undefined,
 ): WorkbenchNavSection | undefined {
-  if (activeNavId === "connectors" || activeNavId === "skills") {
+  if (activeNavId === "connectors" || activeNavId === "skills" || activeNavId === "plugins") {
     return activeNavId;
   }
   if (activeNavId === "scheduled-tasks") {
@@ -3849,6 +3849,11 @@ export function App() {
       icon: <AwakenIcon concept="skill" size={20} />,
     },
     {
+      id: "plugins",
+      label: "插件",
+      icon: <AwakenIcon concept="skill" size={20} />,
+    },
+    {
       id: "scheduled-tasks",
       label: "定时任务",
       icon: <AwakenIcon concept="scheduled-task" size={20} />,
@@ -4429,7 +4434,9 @@ export function App() {
   const showTurnMarkerRail = !fileWorkspaceSurfaceActive && turnMarkerDisplay.mode !== "hidden";
   const activeNavSection = workbenchNavSectionForNavId(activeNavId);
   const activeExtensionSection: ExtensionSection | undefined =
-    activeNavSection === "connectors" || activeNavSection === "skills"
+    activeNavSection === "connectors" ||
+    activeNavSection === "skills" ||
+    activeNavSection === "plugins"
       ? activeNavSection
       : undefined;
   const scheduledTasksNavActive = activeNavSection === "scheduled-tasks";

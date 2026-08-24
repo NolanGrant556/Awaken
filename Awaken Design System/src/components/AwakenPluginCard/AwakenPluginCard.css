@@ -1,0 +1,92 @@
+@import "../../tokens/components.css";
+
+.aw-plugin-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 86px;
+  overflow: hidden;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-panel);
+}
+
+.aw-plugin-card[data-enabled="false"] {
+  background: color-mix(in srgb, var(--aw-surface-panel) 74%, var(--aw-bg-main));
+}
+
+.aw-plugin-card__main {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--aw-space-4);
+  min-width: 0;
+  padding: var(--aw-space-3) var(--aw-space-5);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.aw-plugin-card__main--static {
+  cursor: default;
+}
+
+.aw-plugin-card__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-secondary);
+}
+
+.aw-plugin-card__copy {
+  display: grid;
+  gap: var(--aw-space-1);
+  min-width: 0;
+}
+
+.aw-plugin-card__title-row {
+  display: flex;
+  gap: var(--aw-space-3);
+  min-width: 0;
+}
+
+.aw-plugin-card__name {
+  overflow: hidden;
+  color: var(--aw-text-primary);
+  font-weight: var(--aw-font-weight-heavy);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-plugin-card__version,
+.aw-plugin-card__meta {
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-plugin-card__description,
+.aw-plugin-card__diagnostic {
+  overflow: hidden;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-plugin-card__diagnostic {
+  color: var(--aw-error);
+}
+
+.aw-plugin-card__actions {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  padding-right: var(--aw-space-4);
+}

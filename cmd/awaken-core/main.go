@@ -30,6 +30,7 @@ import (
 	"awaken/src/memory"
 	"awaken/src/modelprofile"
 	"awaken/src/networkroute"
+	"awaken/src/plugins"
 	"awaken/src/runtime"
 	"awaken/src/scheduledtask"
 	"awaken/src/server"
@@ -78,9 +79,27 @@ func main() {
 		log.Printf("[connectors] Playwright MCP log routing prepared under AWAKEN_HOME")
 	}
 
-	manager := buildMCPManager(defaultWorkspace)
+	pluginStore, err := plugins.NewStore()
+	if err != nil {
+		log.Printf("[plugins] store unavailable: %v", err)
+	} else if avail := pluginStore.Available(); avail != nil {
+		log.Printf("[plugins] store fail closed: %v", avail)
+	} else {
+		skills.SetPluginSkillRoots(pluginStore.EnabledSkillRoots())
+	}
+	manager := buildMCPManager(defaultWorkspace, pluginStore)
 	connRegistry := buildConnectorRegistry(manager, defaultWorkspace, legacyCLIReport.ReviewRequired)
 	skillRegistry := buildSkillRegistry(manager, defaultWorkspace)
+	if pluginStore != nil {
+		pluginStore.SetOnChange(func() {
+			if pluginStore.Available() != nil {
+				skills.SetPluginSkillRoots(nil)
+				return
+			}
+			skills.SetPluginSkillRoots(pluginStore.EnabledSkillRoots())
+			applyPluginMCPServers(manager, pluginStore)
+		})
+	}
 	syncSkillsForWorkspace := func(workspace runtime.WorkspaceConfig) {
 		skillRegistry.ReloadLocalSources(skillSourceDirsForWorkspace(workspace))
 	}
@@ -404,6 +423,7 @@ func main() {
 			syncSkillsForWorkspace,
 			control,
 			schedSvc,
+			pluginStore,
 			shutdownOnce,
 		),
 	}
@@ -516,7 +536,7 @@ func purposeModelConfig(profile *runtime.ModelProfileConfig, purpose string) age
 // starts the manager. Failures are logged but never fatal: the runtime
 // stays up even if no MCP server is configured. The manager is still returned
 // with an empty server set so connectors can inject MCP configs dynamically.
-func buildMCPManager(workspace string) *mcpclient.Manager {
+func buildMCPManager(workspace string, pluginStore *plugins.Store) *mcpclient.Manager {
 	userCfg, err := mcpclient.LoadUserConfig()
 	if err != nil {
 		log.Printf("[mcp] user config load failed: %v", err)
@@ -528,7 +548,12 @@ func buildMCPManager(workspace string) *mcpclient.Manager {
 			log.Printf("[mcp] project config load failed: %v", err)
 		}
 	}
+	var pluginScoped []mcpclient.ScopedMcpServerConfig
+	if pluginStore != nil && pluginStore.Available() == nil {
+		pluginScoped = pluginStore.PluginMCPServers()
+	}
 	merged := mcpclient.MergeScoped(
+		pluginScoped,
 		mcpclient.ToScoped(userCfg, mcpclient.ScopeUser),
 		mcpclient.ToScoped(projectCfg, mcpclient.ScopeProject),
 		nil,
@@ -596,6 +621,30 @@ func buildSkillRegistry(manager *mcpclient.Manager, workspace string) *skills.Sk
 
 	log.Printf("[skills] loaded %d skill definitions", len(registry.ListAll()))
 	return registry
+}
+
+func applyPluginMCPServers(manager *mcpclient.Manager, store *plugins.Store) {
+	if manager == nil || store == nil || store.Available() != nil {
+		return
+	}
+	desired := store.PluginMCPServers()
+	desiredNames := make(map[string]mcpclient.ScopedMcpServerConfig, len(desired))
+	for _, scoped := range desired {
+		desiredNames[scoped.Name] = scoped
+	}
+	for _, snap := range manager.Snapshot() {
+		if plugins.IsPluginServerIdentity(snap.Name) {
+			if _, ok := desiredNames[snap.Name]; !ok {
+				_ = manager.Remove(snap.Name)
+			}
+		}
+	}
+	ctx := context.Background()
+	for _, scoped := range desired {
+		if err := manager.RestartWithConfig(ctx, scoped); err != nil {
+			log.Printf("[plugins] apply MCP server %s: %v", scoped.Name, err)
+		}
+	}
 }
 
 func skillSourceDirsForWorkspace(workspace runtime.WorkspaceConfig) map[skills.SourceOrigin]string {

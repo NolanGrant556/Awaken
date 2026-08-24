@@ -966,6 +966,7 @@ export type InstallPluginResponse = {
 
 export type ComposerTokenType =
   | "skill"
+  | "plugin"
   | "file"
   | "workflow"
   | "prompt"
@@ -979,6 +980,11 @@ export type SkillComposerTokenPayload = {
   rootDir?: string;
 };
 
+export type PluginComposerTokenPayload = {
+  pluginName: string;
+  pluginDigest: string;
+};
+
 export type ProjectPathComposerTokenPayload = {
   path: string;
   entryKind: ProjectEntryKind;
@@ -989,6 +995,11 @@ export type ProjectPathComposerTokenPayload = {
 
 export type ComputerUseComposerTokenPayload = {
   capabilityId: "computer-use";
+};
+
+export type ComposerCatalogEvent = {
+  revision: number;
+  kind: "snapshot" | "skills" | "plugins" | string;
 };
 
 export type ComposerToken = {
@@ -2292,6 +2303,7 @@ export type AwakenBridge = {
   logoutCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
   uninstallManagedCli: (providerId: CliProviderId) => Promise<CliConnectorView>;
   subscribeCliConnectorState: (handler: CliConnectorStateHandler) => () => void;
+  subscribeComposerCatalogEvents: (handler: (event: ComposerCatalogEvent) => void) => () => void;
   listMcpServers: () => Promise<RuntimeMcpServer[]>;
   configureMcpServers: (
     request: ConfigureMcpServersRequest,

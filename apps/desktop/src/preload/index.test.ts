@@ -49,6 +49,7 @@ describe("preload scheduled task bridge", () => {
       "listScheduledTaskExecutions",
       "getSystemTimezone",
       "subscribeScheduledTaskEvents",
+      "subscribeComposerCatalogEvents",
       "onScheduledTaskThreadActivation",
     ]) {
       expect(typeof bridge[key], key).toBe("function");
@@ -127,6 +128,19 @@ describe("preload scheduled task bridge", () => {
 
     unsubscribe();
     dispatch!({}, { type: "task_changed", taskId: "sched_1" });
+    expect(received).toHaveLength(1);
+  });
+
+  it("dispatches composer catalog revisions until unsubscribe", () => {
+    const bridge = exposedBridge as Record<string, (handler: (event: unknown) => void) => () => void>;
+    const received: unknown[] = [];
+    const unsubscribe = bridge.subscribeComposerCatalogEvents((event) => received.push(event));
+    const dispatch = listeners.get("awaken:composer-catalog-event");
+    expect(dispatch).toBeDefined();
+    dispatch!({}, { revision: 2, kind: "plugins" });
+    expect(received).toEqual([{ revision: 2, kind: "plugins" }]);
+    unsubscribe();
+    dispatch!({}, { revision: 3, kind: "skills" });
     expect(received).toHaveLength(1);
   });
 

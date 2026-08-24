@@ -140,6 +140,9 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 	if err != nil {
 		return InstallResult{}, fmt.Errorf("compute plugin digest: %w", err)
 	}
+	if expected := strings.TrimSpace(req.ExpectedDigest); expected != "" && expected != digest {
+		return InstallResult{}, fmt.Errorf("%w: validated %s, materialized %s", ErrSourceChanged, expected, digest)
+	}
 
 	existing, exists := state.Plugins[name]
 	if exists && !req.Replace {
@@ -156,6 +159,8 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 
 	dest := filepath.Join(s.packagesRoot, name)
 	var previousTrash string
+	var previousBackup string
+	var rollbackRoot string
 	if exists {
 		if err := s.rejectUncontrolledPath(dest); err != nil {
 			return InstallResult{}, err
@@ -164,25 +169,40 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 			if info.Mode()&os.ModeSymlink != 0 {
 				return InstallResult{}, fmt.Errorf("%w: existing package is a symlink", ErrReplaceTrashUnavailable)
 			}
-			moved, trashErr := s.trash.TrashPath(dest)
-			if trashErr != nil {
-				return InstallResult{}, fmt.Errorf("%w: %v", ErrReplaceTrashUnavailable, trashErr)
+			rollbackRoot, err = os.MkdirTemp(s.stagingRoot, "replace-*")
+			if err != nil {
+				return InstallResult{}, fmt.Errorf("create replacement rollback directory: %w", err)
 			}
-			previousTrash = moved.TrashedPath
+			defer os.RemoveAll(rollbackRoot)
+			previousBackup = filepath.Join(rollbackRoot, name)
+			if err := os.Rename(dest, previousBackup); err != nil {
+				return InstallResult{}, fmt.Errorf("stage existing plugin package for replacement: %w", err)
+			}
 		} else if !os.IsNotExist(statErr) {
 			return InstallResult{}, statErr
 		}
+	} else if _, statErr := os.Lstat(dest); statErr == nil {
+		return InstallResult{}, fmt.Errorf("%w: unrecorded package already exists at %s", ErrStateCorrupt, dest)
+	} else if !os.IsNotExist(statErr) {
+		return InstallResult{}, statErr
 	}
 
-	if err := os.RemoveAll(dest); err != nil && !os.IsNotExist(err) {
-		return InstallResult{}, err
-	}
 	if err := relocateTree(pluginRoot, dest); err != nil {
+		if restoreErr := restorePluginPackage(dest, previousBackup); restoreErr != nil {
+			return InstallResult{}, fmt.Errorf("activate plugin package: %v; restore previous package: %w", err, restoreErr)
+		}
 		return InstallResult{}, fmt.Errorf("activate plugin package: %w", err)
 	}
 
 	dataDir := filepath.Join(s.dataRoot, name)
+	_, dataStatErr := os.Lstat(dataDir)
+	dataExisted := dataStatErr == nil
+	if dataStatErr != nil && !os.IsNotExist(dataStatErr) {
+		_ = restorePluginPackage(dest, previousBackup)
+		return InstallResult{}, dataStatErr
+	}
 	if err := filestore.EnsureDir(dataDir); err != nil {
+		_ = restorePluginPackage(dest, previousBackup)
 		return InstallResult{}, err
 	}
 
@@ -205,7 +225,26 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 	}
 	state.Plugins[name] = rec
 	if err := s.writeStateUnlocked(state); err != nil {
+		if !dataExisted {
+			_ = os.RemoveAll(dataDir)
+		}
+		if restoreErr := restorePluginPackage(dest, previousBackup); restoreErr != nil {
+			return InstallResult{}, fmt.Errorf("write plugin state: %v; restore previous package: %w", err, restoreErr)
+		}
 		return InstallResult{}, err
+	}
+	if previousBackup != "" {
+		moved, trashErr := s.trash.TrashPath(previousBackup)
+		if trashErr != nil {
+			restoreErr := restorePluginPackage(dest, previousBackup)
+			state.Plugins[name] = existing
+			stateErr := s.writeStateUnlocked(state)
+			if restoreErr != nil || stateErr != nil {
+				return InstallResult{}, fmt.Errorf("%w: %v; package rollback: %v; state rollback: %v", ErrReplaceTrashUnavailable, trashErr, restoreErr, stateErr)
+			}
+			return InstallResult{}, fmt.Errorf("%w: %v", ErrReplaceTrashUnavailable, trashErr)
+		}
+		previousTrash = moved.TrashedPath
 	}
 	plugin := s.loadRecord(name, rec)
 	message := "plugin installed"
@@ -218,6 +257,19 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 		PreviousTrashedPath: previousTrash,
 		Message:             message,
 	}, nil
+}
+
+func restorePluginPackage(dest, previousBackup string) error {
+	if err := os.RemoveAll(dest); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if previousBackup == "" {
+		return nil
+	}
+	if err := os.Rename(previousBackup, dest); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) rejectUncontrolledPath(path string) error {

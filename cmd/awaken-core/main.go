@@ -42,6 +42,7 @@ import (
 	configureacprunner "awaken/src/tools/configure_acp_runner"
 	configurehook "awaken/src/tools/configure_hook"
 	delegateexternalagent "awaken/src/tools/delegate_external_agent"
+	plugintool "awaken/src/tools/plugin"
 )
 
 func main() {
@@ -87,6 +88,7 @@ func main() {
 	} else {
 		skills.SetPluginSkillRoots(pluginStore.EnabledSkillRoots())
 	}
+	plugintool.SetStore(pluginStore)
 	manager := buildMCPManager(defaultWorkspace, pluginStore)
 	connRegistry := buildConnectorRegistry(manager, defaultWorkspace, legacyCLIReport.ReviewRequired)
 	skillRegistry := buildSkillRegistry(manager, defaultWorkspace)
@@ -233,6 +235,12 @@ func main() {
 		configurehook.SetStore(hookStore)
 	}
 	runService.SetSkillActivator(skillManager.Activator())
+	if pluginStore != nil {
+		runService.SetComposerPluginValidator(func(name, digest string) error {
+			_, err := pluginStore.ResolveComposerSelection(name, digest)
+			return err
+		})
+	}
 
 	// Load user Computer Use settings once at startup. Defaults are safe and
 	// disable Computer Use until the user explicitly turns it on.

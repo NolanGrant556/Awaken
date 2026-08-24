@@ -21,17 +21,20 @@ const stateLockTTL = 30 * time.Second
 
 // Store is the user-scope plugin package manager.
 type Store struct {
-	home         string
-	pluginsRoot  string
-	packagesRoot string
-	dataRoot     string
-	stagingRoot  string
-	statePath    string
-	lockPath     string
-	trash        trash.TrashAdapter
-	mu           sync.Mutex
-	corruptErr   error
-	onChange     func()
+	home                 string
+	pluginsRoot          string
+	packagesRoot         string
+	dataRoot             string
+	stagingRoot          string
+	statePath            string
+	lockPath             string
+	trash                trash.TrashAdapter
+	mu                   sync.Mutex
+	changeMu             sync.Mutex
+	corruptErr           error
+	onChange             func()
+	changeListeners      map[uint64]func()
+	nextChangeListenerID uint64
 }
 
 // NewStore opens the production store under AWAKEN_HOME. Missing home fails
@@ -57,14 +60,15 @@ func NewStoreAtWithTrash(home string, adapter trash.TrashAdapter) *Store {
 		adapter = trash.DefaultAdapter()
 	}
 	store := &Store{
-		home:         home,
-		pluginsRoot:  root,
-		packagesRoot: filepath.Join(root, "packages"),
-		dataRoot:     filepath.Join(root, "data"),
-		stagingRoot:  filepath.Join(root, ".staging"),
-		statePath:    desktopdata.PluginsConfigPath(home),
-		lockPath:     desktopdata.PluginsConfigPath(home) + ".lock",
-		trash:        adapter,
+		home:            home,
+		pluginsRoot:     root,
+		packagesRoot:    filepath.Join(root, "packages"),
+		dataRoot:        filepath.Join(root, "data"),
+		stagingRoot:     filepath.Join(root, ".staging"),
+		statePath:       desktopdata.PluginsConfigPath(home),
+		lockPath:        desktopdata.PluginsConfigPath(home) + ".lock",
+		trash:           adapter,
+		changeListeners: make(map[uint64]func()),
 	}
 	if err := store.ensureDirs(); err != nil {
 		store.corruptErr = err
@@ -82,7 +86,30 @@ func (s *Store) SetOnChange(fn func()) {
 	if s == nil {
 		return
 	}
+	s.changeMu.Lock()
 	s.onChange = fn
+	s.changeMu.Unlock()
+}
+
+// SubscribeChanges adds a lifecycle listener without replacing the Core-owned
+// runtime refresh callback installed through SetOnChange.
+func (s *Store) SubscribeChanges(fn func()) func() {
+	if s == nil || fn == nil {
+		return func() {}
+	}
+	s.changeMu.Lock()
+	s.nextChangeListenerID++
+	id := s.nextChangeListenerID
+	s.changeListeners[id] = fn
+	s.changeMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.changeMu.Lock()
+			delete(s.changeListeners, id)
+			s.changeMu.Unlock()
+		})
+	}
 }
 
 // Available reports whether the store can serve plugin operations.
@@ -171,8 +198,18 @@ func (s *Store) writeStateUnlocked(state StateFile) error {
 }
 
 func (s *Store) notify() {
-	if s.onChange != nil {
-		s.onChange()
+	s.changeMu.Lock()
+	primary := s.onChange
+	listeners := make([]func(), 0, len(s.changeListeners))
+	for _, listener := range s.changeListeners {
+		listeners = append(listeners, listener)
+	}
+	s.changeMu.Unlock()
+	if primary != nil {
+		primary()
+	}
+	for _, listener := range listeners {
+		listener()
 	}
 }
 

@@ -114,6 +114,7 @@ describe("focused settings layout", () => {
     expect(settingsStyles).toMatch(
       /\.aw-settings-scroll\s*\{[\s\S]*?overflow-x:\s*hidden;[\s\S]*?overflow-y:\s*auto;/,
     );
+    expect(settingsStyles).toContain("scrollbar-gutter: stable both-edges;");
     expect(settingsStyles).not.toContain(".aw-model-settings-page");
     expect(settingsStyles).toContain(".aw-settings-page__description");
   });

@@ -411,7 +411,7 @@ export function AwakenUserPromptBlock({
   function renderToken(token: AwakenUserPromptToken) {
     const tokenType = token.type ?? "token";
     const tokenConcept = tokenType === "capability"
-      ? "theme-system"
+      ? "computer-use"
       : tokenType === "skill"
         ? "skill"
         : "capability-package";
@@ -422,7 +422,7 @@ export function AwakenUserPromptBlock({
       >
         <AwakenIcon
           concept={tokenConcept}
-          size={14}
+          size={16}
           className="execution-prompt-bubble-token-icon"
         />
         <span className="execution-prompt-bubble-token-label aw-text-selectable">

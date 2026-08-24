@@ -17,6 +17,7 @@ import {
   AwakenScheduledTaskList,
   AwakenScheduledTaskTemplateDialog,
   createEmptyAwakenScheduledTaskDraft,
+  type ComposerBarInputSelection,
   type ComposerBarStructuredInputValue,
   type AwakenScheduledTaskDraft,
   type AwakenScheduledTaskDraftField,
@@ -32,14 +33,20 @@ import type {
 } from "../shared/runtime";
 import {
   actionsFromSlashProviders,
-  clearSlashTriggerFromComposerValue,
+  composerActionTriggerFromDraft,
+  composerPaletteActions,
   composerTokenFromSlashAction,
-  filterSlashActions,
+  computerUseMentionProvider,
   firstSelectableSlashAction,
+  pluginMentionProvider,
   skillSlashProvider,
-  slashTriggerFromComposerValue,
   type SlashAction,
 } from "./composerSlash";
+import {
+  reconcileComposerStructuredInput,
+  removeComposerTextRange,
+  replaceComposerActionTriggerWithToken,
+} from "./composerStructuredDraft";
 import type { RuntimeClient } from "./runtime/client";
 import {
   buildScheduledTaskTemplateCategories,
@@ -103,6 +110,8 @@ const FALLBACK_TIMEZONES = [
   "America/Los_Angeles",
   "UTC",
 ];
+
+const EMPTY_COMPOSER_TOKENS: ComposerToken[] = [];
 
 function supportedTimezones(): string[] {
   try {
@@ -211,9 +220,29 @@ export function ScheduledTasksView({
   const [slashLoading, setSlashLoading] = useState(false);
   const [slashError, setSlashError] = useState<string | null>(null);
   const [slashActiveActionId, setSlashActiveActionId] = useState<string | undefined>();
+  const [composerCatalogRevision, setComposerCatalogRevision] = useState(0);
+  const [composerInputSelection, setComposerInputSelection] =
+    useState<ComposerBarInputSelection>();
+  const [composerFocusRequest, setComposerFocusRequest] = useState(0);
+  const [composerFocusOffset, setComposerFocusOffset] = useState<number>();
   const timezones = useMemo(supportedTimezones, []);
   const slashProviders = useMemo(
     () => [skillSlashProvider((projectRoots) => runtimeClient.listSkills(projectRoots))],
+    [runtimeClient],
+  );
+  const mentionProviders = useMemo(
+    () => [
+      computerUseMentionProvider(),
+      pluginMentionProvider(() => runtimeClient.listPlugins()),
+    ],
+    [runtimeClient],
+  );
+
+  useEffect(
+    () =>
+      runtimeClient.subscribeComposerCatalogEvents((event) => {
+        setComposerCatalogRevision((current) => Math.max(current, event.revision));
+      }),
     [runtimeClient],
   );
 
@@ -318,11 +347,30 @@ export function ScheduledTasksView({
     [editorProject],
   );
   const editorSkillRootsKey = editorSkillRoots.join("\u0000");
+  const editorComposerTokens = editor?.composerTokens ?? EMPTY_COMPOSER_TOKENS;
+  const editorComposerLeadingTexts = useMemo(
+    () =>
+      Object.fromEntries(
+        editorComposerTokens
+          .filter((token) => Boolean(token.leadingText))
+          .map((token) => [token.id, token.leadingText ?? ""]),
+      ),
+    [editorComposerTokens],
+  );
   const slashTrigger =
-    editorActionKind === "agent" ? slashTriggerFromComposerValue(editorContent) : null;
+    editorActionKind === "agent"
+      ? composerActionTriggerFromDraft({
+          value: editorContent,
+          tokens: editorComposerTokens,
+          leadingTexts: editorComposerLeadingTexts,
+          selection: composerInputSelection,
+        })
+      : null;
+  const activeComposerActionProviders =
+    slashTrigger?.marker === "@" ? mentionProviders : slashProviders;
   const slashPaletteOpen = Boolean(editor?.open && slashTrigger && desktopReady);
   const filteredSlashActions = useMemo(
-    () => filterSlashActions(slashActions, slashTrigger?.query ?? "").slice(0, 24),
+    () => composerPaletteActions(slashActions, slashTrigger?.query ?? ""),
     [slashActions, slashTrigger?.query],
   );
   const composerTokens = useMemo(
@@ -335,7 +383,9 @@ export function ScheduledTasksView({
         title:
           typeof token.payload?.skillFilePath === "string"
             ? token.payload.skillFilePath
-            : token.label,
+            : typeof token.payload?.pluginName === "string"
+              ? token.payload.pluginName
+              : token.label,
       })),
     [editor?.composerTokens],
   );
@@ -355,6 +405,12 @@ export function ScheduledTasksView({
       ),
     [filteredSlashActions],
   );
+  const composerSlashEmptyLabel = useMemo(() => {
+    if (slashTrigger?.marker === "@") {
+      return "没有匹配的能力或 Plugin";
+    }
+    return slashActions.length === 0 ? "暂无可用 Skill" : "没有匹配的 Skill";
+  }, [slashActions.length, slashTrigger?.marker]);
 
   useEffect(() => {
     if (!slashPaletteOpen) {
@@ -374,7 +430,7 @@ export function ScheduledTasksView({
     setSlashActions([]);
     setSlashLoading(true);
     setSlashError(null);
-    void actionsFromSlashProviders(slashProviders, {
+    void actionsFromSlashProviders(activeComposerActionProviders, {
       workspaceRootForRun: editorSkillRootsKey ? editorSkillRootsKey.split("\u0000") : [],
     })
       .then((actions) => {
@@ -398,10 +454,11 @@ export function ScheduledTasksView({
       cancelled = true;
     };
   }, [
+    activeComposerActionProviders,
+    composerCatalogRevision,
     editorProject,
     editorSkillRootsKey,
     slashPaletteOpen,
-    slashProviders,
   ]);
 
   useEffect(() => {
@@ -414,6 +471,8 @@ export function ScheduledTasksView({
   }, [filteredSlashActions, slashActiveActionId, slashPaletteOpen]);
 
   function openCreateEditor(draft?: AwakenScheduledTaskDraft): void {
+    setComposerInputSelection(undefined);
+    setComposerFocusOffset(undefined);
     setEditor({
       open: true,
       mode: "create",
@@ -431,6 +490,8 @@ export function ScheduledTasksView({
     if (!task) {
       return;
     }
+    setComposerInputSelection(undefined);
+    setComposerFocusOffset(undefined);
     setEditor({
       open: true,
       mode: "edit",
@@ -458,36 +519,28 @@ export function ScheduledTasksView({
     if (!token) {
       return;
     }
-    setEditor((current) => {
-      if (!current || current.draft.actionKind !== "agent") {
-        return current;
-      }
-      const trigger = slashTriggerFromComposerValue(current.draft.content);
-      if (!trigger) {
-        return current;
-      }
-      if (current.composerTokens.some((candidate) => candidate.id === token.id)) {
-        return {
-          ...current,
-          draft: {
-            ...current.draft,
-            content: clearSlashTriggerFromComposerValue(current.draft.content),
-          },
-        };
-      }
-      const leadingText = current.draft.content.slice(0, trigger.start);
-      return {
-        ...current,
-        draft: {
-          ...current.draft,
-          content: current.draft.content.slice(trigger.end),
-        },
-        composerTokens: [
-          ...current.composerTokens,
-          leadingText ? { ...token, leadingText } : token,
-        ],
-      };
+    if (!editor || editor.draft.actionKind !== "agent" || !slashTrigger) {
+      return;
+    }
+    const nextDraft = replaceComposerActionTriggerWithToken({
+      tokens: editor.composerTokens,
+      placements: {},
+      leadingTexts: editorComposerLeadingTexts,
+      value: editor.draft.content,
+      trigger: slashTrigger,
+      token,
     });
+    setEditor({
+      ...editor,
+      draft: { ...editor.draft, content: nextDraft.value },
+      composerTokens: nextDraft.tokens,
+    });
+    setComposerInputSelection({
+      anchor: nextDraft.focusOffset,
+      focus: nextDraft.focusOffset,
+    });
+    setComposerFocusOffset(nextDraft.focusOffset);
+    setComposerFocusRequest((current) => current + 1);
     setSlashActiveActionId(undefined);
   }
 
@@ -498,26 +551,15 @@ export function ScheduledTasksView({
       if (!current) {
         return current;
       }
-      const currentTokens = new Map(
-        current.composerTokens.map((token) => [token.id, token]),
+      const nextDraft = reconcileComposerStructuredInput(
+        current.composerTokens,
+        {},
+        nextValue,
       );
-      const nextTokens = nextValue.tokens.flatMap((segment) => {
-        const token = currentTokens.get(segment.id);
-        if (!token) {
-          return [];
-        }
-        const nextToken = { ...token };
-        if (segment.leadingText) {
-          nextToken.leadingText = segment.leadingText;
-        } else {
-          delete nextToken.leadingText;
-        }
-        return [nextToken];
-      });
       return {
         ...current,
-        draft: { ...current.draft, content: nextValue.value },
-        composerTokens: nextTokens,
+        draft: { ...current.draft, content: nextDraft.value },
+        composerTokens: nextDraft.tokens,
       };
     });
   }
@@ -561,17 +603,24 @@ export function ScheduledTasksView({
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      setEditor((current) =>
-        current
-          ? {
-              ...current,
-              draft: {
-                ...current.draft,
-                content: clearSlashTriggerFromComposerValue(current.draft.content),
-              },
-            }
-          : current,
-      );
+      if (editor && slashTrigger) {
+        const nextDraft = removeComposerTextRange({
+          tokens: editor.composerTokens,
+          placements: {},
+          leadingTexts: editorComposerLeadingTexts,
+          value: editor.draft.content,
+          start: slashTrigger.start,
+          end: slashTrigger.end,
+        });
+        setEditor({
+          ...editor,
+          draft: { ...editor.draft, content: nextDraft.value },
+          composerTokens: nextDraft.tokens,
+        });
+        setComposerInputSelection({ anchor: slashTrigger.start, focus: slashTrigger.start });
+        setComposerFocusOffset(slashTrigger.start);
+        setComposerFocusRequest((current) => current + 1);
+      }
       setSlashActiveActionId(undefined);
       return;
     }
@@ -869,13 +918,15 @@ export function ScheduledTasksView({
             activeActionId: slashActiveActionId,
             loading: slashLoading,
             error: slashError,
-            emptyLabel: "没有匹配项",
+            emptyLabel: composerSlashEmptyLabel,
             onSelectAction: handleSlashActionSelect,
             onActiveActionChange: setSlashActiveActionId,
           }}
           onOpenChange={(open) => {
             if (!open) {
               setEditor(null);
+              setComposerInputSelection(undefined);
+              setComposerFocusOffset(undefined);
             }
           }}
           onValueChange={(draft) =>
@@ -883,6 +934,9 @@ export function ScheduledTasksView({
           }
           onComposerStructuredInputChange={handleComposerStructuredInputChange}
           onComposerInputKeyDown={handleComposerInputKeyDown}
+          onComposerInputSelectionChange={setComposerInputSelection}
+          composerFocusRequest={composerFocusRequest}
+          composerFocusOffset={composerFocusOffset}
           onRemoveComposerToken={handleRemoveComposerToken}
           onSubmit={(draft) => {
             void handleEditorSubmit(draft);

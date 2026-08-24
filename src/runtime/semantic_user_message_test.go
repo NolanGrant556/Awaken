@@ -206,6 +206,16 @@ func TestSemanticComposerTokensForRunKeepsCapabilityIdentity(t *testing.T) {
 	}
 }
 
+func TestSemanticComposerTokensForRunKeepsPluginIdentity(t *testing.T) {
+	tokens := semanticComposerTokensForRun([]ComposerToken{{
+		ID: "plugin:acme.tools:digest-v1", Type: "plugin", Label: "acme.tools",
+		Payload: ComposerTokenPayload{PluginName: "acme.tools", PluginDigest: "digest-v1"},
+	}})
+	if len(tokens) != 1 || tokens[0].Payload["pluginName"] != "acme.tools" || tokens[0].Payload["pluginDigest"] != "digest-v1" {
+		t.Fatalf("Plugin identity missing from semantic token: %+v", tokens)
+	}
+}
+
 func TestSemanticComposerTokensForRunKeepsProjectPathIdentity(t *testing.T) {
 	tokens := semanticComposerTokensForRun([]ComposerToken{{
 		ID: "file:brief", Type: "file", Label: "brief.md",

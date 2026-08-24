@@ -5,7 +5,7 @@
  * 交汇处留光学缺口。这套参数是在 12/13/14/16px 真实渲染下逐轮筛出来的，
  * 每条注释里的「实测」都指真实抗锯齿结果，不是推断。
  *
- * 94 个用户确认的 Lucide authored 字形由 approvedLucideGlyphs.ts 在 registry 层
+ * 95 个用户确认的 Lucide authored 字形由 approvedLucideGlyphs.ts 在 registry 层
  * 覆盖同名几何；本文件仍为每个 name 提供 purpose、shape、minSize 与 filled 元数据，
  * 并直接拥有 6 个定制几何和 7 个保持既有产品识别的线性字形。
  */
@@ -2032,6 +2032,11 @@ const RAW_DEFINITIONS = {
         0,
       ),
     ],
+  },
+  puzzle: {
+    shape: "square",
+    minSize: 12,
+    purpose: "未提供自定义图标的 Plugin 默认图标",
   },
 
   // ---- Awaken 专有概念 ----

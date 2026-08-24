@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   RuntimeModelProfileSummary,
+  RuntimePlugin,
   RuntimeProject,
   RuntimeSkill,
   ScheduledTask,
@@ -74,8 +75,10 @@ function createRuntimeClientMock(overrides: Partial<RuntimeClient> = {}): Runtim
     listScheduledTasks: vi.fn(async () => []),
     listProjects: vi.fn(async () => [project]),
     listModelProfiles: vi.fn(async () => [readyProfile]),
+    listPlugins: vi.fn(async () => []),
     getSystemTimezone: vi.fn(async () => "Asia/Shanghai"),
     subscribeScheduledTaskEvents: vi.fn(() => () => {}),
+    subscribeComposerCatalogEvents: vi.fn(() => () => {}),
     createScheduledTask: vi.fn(async () => {
       throw new Error("not implemented");
     }),
@@ -136,6 +139,24 @@ async function setFieldValue(
   const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
   await act(async () => {
     setter?.call(element, value);
+    element?.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await settle();
+}
+
+async function setTextAreaValueAtCaret(
+  element: HTMLTextAreaElement | null | undefined,
+  value: string,
+  caret: number,
+): Promise<void> {
+  expect(element, "expected textarea to exist").toBeTruthy();
+  const setter = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype,
+    "value",
+  )?.set;
+  await act(async () => {
+    setter?.call(element, value);
+    element?.setSelectionRange(caret, caret);
     element?.dispatchEvent(new Event("input", { bubbles: true }));
   });
   await settle();
@@ -370,6 +391,186 @@ describe("ScheduledTasksView", () => {
         },
       }),
     );
+  });
+
+  it("opens a scheduled Skill menu at an inserted caret and preserves mixed suffix text", async () => {
+    const created = cronTask({ taskId: "task-middle-skill" });
+    const createScheduledTask = vi.fn(async () => created);
+    await renderView(
+      createRuntimeClientMock({
+        createScheduledTask,
+        listSkills: vi.fn(async () => [dailyReportSkill]),
+      }),
+    );
+
+    await click(buttonByText("创建任务"));
+    await setFieldValue(
+      document.querySelector<HTMLInputElement>('input[aria-label="任务名称"]'),
+      "句中技能任务",
+    );
+    await click(buttonByAriaLabel("运行项目"));
+    await click(document.querySelector<HTMLButtonElement>('button[role="option"]'));
+    await click(buttonByText("Agent"));
+
+    const prompt = document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Agent prompt"]',
+    );
+    await setTextAreaValueAtCaret(prompt, "中文/dailyEnglish123", 8);
+    expect(document.querySelector('[aria-label="Slash actions"]')).toBeNull();
+
+    await setTextAreaValueAtCaret(prompt, "中文 /dailyEnglish123", 9);
+
+    expect(document.querySelector('[aria-label="Slash actions"]')).toBeTruthy();
+    await click(buttonByText("日报 Skill"));
+    const token = document.querySelector<HTMLElement>(
+      '[data-composer-token-id="skill:daily-report:project"]',
+    );
+    expect(token?.previousSibling?.textContent).toBe("中文 ");
+    expect(token?.nextSibling?.textContent).toBe("English123");
+
+    await click(buttonByText("保存任务"));
+    expect(createScheduledTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: expect.objectContaining({
+          kind: "agent",
+          content: "English123",
+          composerTokens: [expect.objectContaining({ leadingText: "中文 " })],
+        }),
+      }),
+    );
+  });
+
+  it("uses the Plugin mention catalog and persists a scheduled Plugin token", async () => {
+    const created = cronTask({ taskId: "task-plugin" });
+    const createScheduledTask = vi.fn(async () => created);
+    const plugin: RuntimePlugin = {
+      name: "acme.tools",
+      version: "1.0.0",
+      description: "Acme workflows",
+      enabled: true,
+      source: { kind: "local_path", path: "/tmp/acme" },
+      digest: "digest-v1",
+      skillCount: 1,
+      serverCount: 1,
+    };
+    const listPlugins = vi.fn(async () => [plugin]);
+    await renderView(
+      createRuntimeClientMock({ createScheduledTask, listPlugins }),
+    );
+
+    await click(buttonByText("创建任务"));
+    await setFieldValue(
+      document.querySelector<HTMLInputElement>('input[aria-label="任务名称"]'),
+      "插件任务",
+    );
+    await click(buttonByAriaLabel("运行项目"));
+    await click(document.querySelector<HTMLButtonElement>('button[role="option"]'));
+    await click(buttonByText("Agent"));
+    await setFieldValue(
+      document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Agent prompt"]'),
+      "@acme",
+    );
+
+    expect(listPlugins).toHaveBeenCalledTimes(1);
+    await click(buttonByText("acme.tools"));
+    expect(document.querySelector('[data-composer-token-id="plugin:acme.tools:digest-v1"]'))
+      .toBeTruthy();
+    await click(buttonByText("保存任务"));
+    expect(createScheduledTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: {
+          kind: "agent",
+          content: "",
+          composerTokens: [
+            {
+              id: "plugin:acme.tools:digest-v1",
+              type: "plugin",
+              label: "acme.tools",
+              payload: { pluginName: "acme.tools", pluginDigest: "digest-v1" },
+            },
+          ],
+        },
+      }),
+    );
+  });
+
+  it("offers and persists the Computer Use capability in a scheduled Agent task", async () => {
+    const created = cronTask({ taskId: "task-computer-use" });
+    const createScheduledTask = vi.fn(async () => created);
+    await renderView(createRuntimeClientMock({ createScheduledTask }));
+
+    await click(buttonByText("创建任务"));
+    await setFieldValue(
+      document.querySelector<HTMLInputElement>('input[aria-label="任务名称"]'),
+      "计算机操作任务",
+    );
+    await click(buttonByAriaLabel("运行项目"));
+    await click(document.querySelector<HTMLButtonElement>('button[role="option"]'));
+    await click(buttonByText("Agent"));
+    await setFieldValue(
+      document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Agent prompt"]'),
+      "@computer",
+    );
+
+    await click(buttonByText("Computer Use"));
+    expect(document.querySelector('[data-composer-token-id="capability:computer-use"]'))
+      .toBeTruthy();
+    await click(buttonByText("保存任务"));
+    expect(createScheduledTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: {
+          kind: "agent",
+          content: "",
+          composerTokens: [
+            {
+              id: "capability:computer-use",
+              type: "capability",
+              label: "Computer Use",
+              payload: { capabilityId: "computer-use" },
+            },
+          ],
+        },
+      }),
+    );
+  });
+
+  it("refreshes an open Plugin mention menu when the catalog revision changes", async () => {
+    let catalogHandler: ((event: { revision: number; kind: string }) => void) | undefined;
+    const plugin: RuntimePlugin = {
+      name: "fresh.plugin",
+      enabled: true,
+      source: { kind: "local_path", path: "/tmp/fresh" },
+      digest: "fresh-digest",
+      skillCount: 1,
+      serverCount: 0,
+    };
+    const listPlugins = vi
+      .fn<() => Promise<RuntimePlugin[]>>()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([plugin]);
+    await renderView(
+      createRuntimeClientMock({
+        listPlugins,
+        subscribeComposerCatalogEvents: vi.fn((handler) => {
+          catalogHandler = handler;
+          return () => {};
+        }),
+      }),
+    );
+    await click(buttonByText("创建任务"));
+    await click(buttonByAriaLabel("运行项目"));
+    await click(document.querySelector<HTMLButtonElement>('button[role="option"]'));
+    await click(buttonByText("Agent"));
+    await setFieldValue(
+      document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Agent prompt"]'),
+      "@fresh",
+    );
+    expect(document.body.textContent).not.toContain("fresh.plugin");
+    expect(document.body.textContent).toContain("没有匹配的能力或 Plugin");
+    await act(async () => catalogHandler?.({ revision: 2, kind: "plugins" }));
+    await settle();
+    expect(listPlugins).toHaveBeenCalledTimes(2);
+    expect(buttonByText("fresh.plugin")).toBeTruthy();
   });
 
   it("uses a searchable project dropdown instead of expanding project cards", async () => {

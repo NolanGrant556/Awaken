@@ -141,6 +141,8 @@ type ComposerToken struct {
 type ComposerTokenPayload struct {
 	CapabilityID  string `json:"capabilityId,omitempty"`
 	SkillID       string `json:"skillId,omitempty"`
+	PluginName    string `json:"pluginName,omitempty"`
+	PluginDigest  string `json:"pluginDigest,omitempty"`
 	SourceOrigin  string `json:"sourceOrigin,omitempty"`
 	SkillFilePath string `json:"skillFilePath,omitempty"`
 	RootDir       string `json:"rootDir,omitempty"`
@@ -202,16 +204,17 @@ type RunService struct {
 	threads  map[string]*Thread
 	// projectFences maps a folder to the projects currently fencing it. A folder
 	// stays fenced while any of them holds a fence.
-	projectFences     map[string]map[string]struct{}
-	defaultWorkspace  WorkspaceConfig
-	newAgent          func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
-	newProfileAgent   func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent
-	newExecutor       func(agent *agentcore.Agent) Executor
-	threadStore       ThreadStore
-	projectService    *ProjectService
-	journals          *journalManager
-	allowNoopRecorder bool
-	skillActivator    *skillruntime.Activator
+	projectFences           map[string]map[string]struct{}
+	defaultWorkspace        WorkspaceConfig
+	newAgent                func(workspace WorkspaceConfig, threadID string) *agentcore.Agent
+	newProfileAgent         func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent
+	newExecutor             func(agent *agentcore.Agent) Executor
+	threadStore             ThreadStore
+	projectService          *ProjectService
+	journals                *journalManager
+	allowNoopRecorder       bool
+	skillActivator          *skillruntime.Activator
+	composerPluginValidator func(name, digest string) error
 	// computerDriverFactory creates a real Computer driver when local CUA is
 	// enabled. If nil or it returns an error, RunService falls back to the
 	// unavailable driver so run startup is not blocked.
@@ -257,6 +260,18 @@ func (s *RunService) SetSkillActivator(activator *skillruntime.Activator) {
 	s.skillActivator = activator
 	s.mu.Unlock()
 	s.restoreSkillInvocationHistory(activator)
+}
+
+// SetComposerPluginValidator installs the host-owned resolver used to prove a
+// structured Plugin token still refers to the same enabled package at run
+// start. The validator never trusts Renderer component lists or paths.
+func (s *RunService) SetComposerPluginValidator(validator func(name, digest string) error) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.composerPluginValidator = validator
+	s.mu.Unlock()
 }
 
 // SetComputerDriverFactory registers a factory that creates the run-bound
@@ -956,6 +971,12 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		return Run{}, err
 	}
 	if err := validateComposerCapabilityTokens(req.ComposerTokens); err != nil {
+		return Run{}, err
+	}
+	s.mu.RLock()
+	composerPluginValidator := s.composerPluginValidator
+	s.mu.RUnlock()
+	if err := validateComposerPluginTokens(req.ComposerTokens, composerPluginValidator); err != nil {
 		return Run{}, err
 	}
 	s.projectMutationMu.RLock()
@@ -2873,6 +2894,10 @@ func cloneAgentComposerSkillSelection(value *agentcore.ComposerSkillSelectionCon
 
 const computerUseComposerInstruction = "请优先使用 Computer Use 观察并操作本机图形界面完成以下任务："
 
+func pluginComposerInstruction(name string) string {
+	return fmt.Sprintf("用户已明确选择已启用的 Awaken Plugin %q。请优先使用该插件提供的 Skill 与 MCP 工具完成以下任务：", name)
+}
+
 func composerTokenModelExpansion(token ComposerToken) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(token.Type)) {
 	case "file":
@@ -2880,6 +2905,10 @@ func composerTokenModelExpansion(token ComposerToken) (string, bool) {
 	case "capability":
 		if strings.EqualFold(strings.TrimSpace(token.Payload.CapabilityID), "computer-use") {
 			return computerUseComposerInstruction + "\n", true
+		}
+	case "plugin":
+		if name := strings.TrimSpace(token.Payload.PluginName); name != "" {
+			return pluginComposerInstruction(name) + "\n", true
 		}
 	}
 	return "", false
@@ -2897,7 +2926,8 @@ func effectiveInputForComposerTokens(input string, tokens []ComposerToken) strin
 			continue
 		}
 		hasModelExpansion = true
-		if strings.EqualFold(strings.TrimSpace(token.Type), "capability") {
+		if strings.EqualFold(strings.TrimSpace(token.Type), "capability") ||
+			strings.EqualFold(strings.TrimSpace(token.Type), "plugin") {
 			fallbackInstructions = append(fallbackInstructions, strings.TrimSpace(expansion))
 		} else {
 			fallbackReferences = append(fallbackReferences, strings.TrimSpace(expansion))
@@ -2966,6 +2996,26 @@ func validateComposerCapabilityTokens(tokens []ComposerToken) error {
 				ErrInvalidInput,
 				token.ID,
 			)
+		}
+	}
+	return nil
+}
+
+func validateComposerPluginTokens(tokens []ComposerToken, validator func(name, digest string) error) error {
+	for _, token := range tokens {
+		if !strings.EqualFold(strings.TrimSpace(token.Type), "plugin") {
+			continue
+		}
+		name := strings.TrimSpace(token.Payload.PluginName)
+		digest := strings.TrimSpace(token.Payload.PluginDigest)
+		if name == "" || digest == "" {
+			return fmt.Errorf("%w: composer Plugin token %q identity is incomplete", ErrInvalidInput, token.ID)
+		}
+		if validator == nil {
+			return fmt.Errorf("%w: composer Plugin validation is unavailable", ErrInvalidInput)
+		}
+		if err := validator(name, digest); err != nil {
+			return fmt.Errorf("%w: composer Plugin %q is unavailable: %v", ErrInvalidInput, name, err)
 		}
 	}
 	return nil

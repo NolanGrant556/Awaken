@@ -168,6 +168,28 @@ func TestValidateAgentComposerTokens(t *testing.T) {
 	if got := task.Action.EffectivePrompt(); got != "请使用" {
 		t.Fatalf("effective prompt = %q, want %q", got, "请使用")
 	}
+	pluginToken := ComposerToken{
+		ID: "plugin:acme.tools:digest-v1", Type: "plugin", Label: "acme.tools",
+		Payload: ComposerTokenPayload{PluginName: "acme.tools", PluginDigest: "digest-v1"},
+	}
+	task.Action = Action{Kind: ActionKindAgent, ComposerTokens: []ComposerToken{pluginToken}}
+	if err := v.ValidateTask(task); err != nil {
+		t.Fatalf("Plugin token Agent action rejected: %v", err)
+	}
+	pluginToken.Payload.PluginDigest = ""
+	task.Action = Action{Kind: ActionKindAgent, ComposerTokens: []ComposerToken{pluginToken}}
+	mustInvalid(t, v.ValidateTask(task), "action.composer_tokens")
+	computerUseToken := ComposerToken{
+		ID: "capability:computer-use", Type: "capability", Label: "Computer Use",
+		Payload: ComposerTokenPayload{CapabilityID: "computer-use"},
+	}
+	task.Action = Action{Kind: ActionKindAgent, ComposerTokens: []ComposerToken{computerUseToken}}
+	if err := v.ValidateTask(task); err != nil {
+		t.Fatalf("Computer Use capability token Agent action rejected: %v", err)
+	}
+	computerUseToken.Payload.CapabilityID = "arbitrary-hidden-prompt"
+	task.Action = Action{Kind: ActionKindAgent, ComposerTokens: []ComposerToken{computerUseToken}}
+	mustInvalid(t, v.ValidateTask(task), "action.composer_tokens")
 
 	task.Action.Kind = ActionKindReminder
 	mustInvalid(t, v.ValidateTask(task), "action.composer_tokens")

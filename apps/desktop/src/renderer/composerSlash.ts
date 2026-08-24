@@ -3,6 +3,8 @@ import { AwakenIcon } from "@awaken/design-system";
 import type {
   ComputerUseComposerTokenPayload,
   ComposerToken,
+  PluginComposerTokenPayload,
+  RuntimePlugin,
   RuntimeSkill,
   SkillProjectRoots,
   SkillComposerTokenPayload,
@@ -10,6 +12,7 @@ import type {
 
 export type SlashActionType =
   | "skill"
+  | "plugin"
   | "file"
   | "workflow"
   | "prompt"
@@ -74,8 +77,13 @@ export type ComposerTokenKeyboardDeleteState = {
   placements: Record<string, ComposerTokenPlacement | undefined>;
 };
 
-const TRAILING_SLASH_TRIGGER_PATTERN = /(^|\s)\/([^\s]*)$/;
-const TRAILING_MENTION_TRIGGER_PATTERN = /(^|\s)@([^\s]*)$/;
+// Composer actions are caret-driven and require a semantic boundary: the
+// marker must start the current text segment or be preceded by whitespace.
+// This keeps ordinary Chinese, Latin, numeric, URL-like, and path-like text
+// from opening the palette while still allowing users to move the caret back
+// into an existing sentence, insert a space, and then type / or @.
+const TRAILING_SLASH_TRIGGER_PATTERN = /\/([^\s/@]*)$/u;
+const TRAILING_MENTION_TRIGGER_PATTERN = /@([^\s/@]*)$/u;
 
 function actionTriggerFromComposerValue(
   value: string,
@@ -86,11 +94,13 @@ function actionTriggerFromComposerValue(
   if (!match || match.index === undefined) {
     return null;
   }
-  const leading = match[1] ?? "";
+  if (match.index > 0 && !/\s/u.test(value[match.index - 1] ?? "")) {
+    return null;
+  }
   return {
     marker,
-    query: match[2] ?? "",
-    start: match.index + leading.length,
+    query: match[1] ?? "",
+    start: match.index,
     end: value.length,
   };
 }
@@ -224,6 +234,19 @@ function skillComposerTokenFromAction(
   };
 }
 
+function pluginComposerTokenFromAction(plugin: RuntimePlugin): ComposerToken {
+  const payload: PluginComposerTokenPayload = {
+    pluginName: plugin.name,
+    pluginDigest: plugin.digest ?? "",
+  };
+  return {
+    id: `plugin:${plugin.name}:${plugin.digest ?? ""}`,
+    type: "plugin",
+    label: plugin.name,
+    payload: payload as unknown as Record<string, unknown>,
+  };
+}
+
 function cloneComposerToken(token: ComposerToken): ComposerToken {
   return {
     ...token,
@@ -314,6 +337,47 @@ export function computerUseMentionProvider(): SlashProvider {
   };
 }
 
+export function pluginMentionProvider(
+  listPlugins: () => Promise<RuntimePlugin[]>,
+): SlashProvider {
+  return {
+    id: "plugins",
+    label: "Plugins",
+    async getActions() {
+      const plugins = await listPlugins();
+      return plugins
+        .filter((plugin) => plugin.enabled && Boolean(plugin.digest))
+        .map((plugin) => {
+          const token = pluginComposerTokenFromAction(plugin);
+          const componentCount = plugin.skillCount + plugin.serverCount;
+          const disabled = componentCount === 0;
+          return {
+            id: token.id,
+            type: "plugin",
+            label: plugin.name,
+            description:
+              plugin.description ||
+              `${plugin.skillCount} Skills · ${plugin.serverCount} MCP Servers`,
+            keywords: [
+              plugin.name,
+              plugin.version,
+              plugin.description,
+              ...(plugin.keywords ?? []),
+            ].filter((value): value is string => Boolean(value)),
+            icon: createElement(AwakenIcon, { concept: "plugin", size: 14 }),
+            disabled,
+            disabledReason: disabled
+              ? "该 Plugin 当前没有可用的 Skill 或 MCP Server"
+              : undefined,
+            preview: { description: plugin.description },
+            payload: plugin,
+            composerToken: token,
+          };
+        });
+    },
+  };
+}
+
 export async function actionsFromSlashProviders(
   providers: SlashProvider[],
   context: SlashProviderContext,
@@ -343,6 +407,15 @@ export function filterSlashActions(
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(normalized));
   });
+}
+
+// Keep the complete filtered catalog. Rendering windows, scrolling and future
+// virtualization must never become capability-discovery limits.
+export function composerPaletteActions(
+  actions: SlashAction[],
+  query: string,
+): SlashAction[] {
+  return filterSlashActions(actions, query);
 }
 
 export function firstSelectableSlashAction(

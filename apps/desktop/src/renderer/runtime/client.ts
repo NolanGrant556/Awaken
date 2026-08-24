@@ -23,6 +23,7 @@ import {
   type CliConnectorStateHandler,
   type CliConnectorView,
   type CliProviderId,
+  type ComposerCatalogEvent,
   type ComputerHostStatus,
   type ComputerSettingsDocument,
   type ComputerSettingsSaveRequest,
@@ -216,6 +217,7 @@ export type RuntimeClient = {
   logoutCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
   uninstallManagedCli: (providerId: CliProviderId) => Promise<CliConnectorView>;
   subscribeCliConnectorState: (handler: CliConnectorStateHandler) => () => void;
+  subscribeComposerCatalogEvents: (handler: (event: ComposerCatalogEvent) => void) => () => void;
   listMcpServers: () => Promise<RuntimeMcpServer[]>;
   configureMcpServers: (
     request: ConfigureMcpServersRequest,
@@ -499,6 +501,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     logoutCliConnector: (providerId) => bridge.logoutCliConnector(providerId),
     uninstallManagedCli: (providerId) => bridge.uninstallManagedCli(providerId),
     subscribeCliConnectorState: (handler) => bridge.subscribeCliConnectorState(handler),
+    subscribeComposerCatalogEvents: (handler) => bridge.subscribeComposerCatalogEvents(handler),
     listMcpServers: () => bridge.listMcpServers(),
     configureMcpServers: (request) => bridge.configureMcpServers(request),
     getMcpServerConfig: (name) => bridge.getMcpServerConfig(name),

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestSkillRegistryDisabledStorePersistsAcrossReloads(t *testing.T) {
@@ -40,5 +41,25 @@ func TestSkillRegistryDisabledStorePersistsAcrossReloads(t *testing.T) {
 	fresh.SetDisabledStorePath(storePath)
 	if _, ok := fresh.disabledByPolicy["test-skill"]; !ok {
 		t.Fatalf("expected fresh registry to load disabled skill from store")
+	}
+}
+
+func TestSkillRegistryCatalogListenerDoesNotReplaceToolChangeOwner(t *testing.T) {
+	registry := NewSkillRegistry(nil)
+	toolChanged := make(chan struct{}, 1)
+	catalogChanged := make(chan struct{}, 1)
+	registry.SetOnChange(func() { toolChanged <- struct{}{} })
+	unsubscribe := registry.SubscribeCatalogChanges(func() { catalogChanged <- struct{}{} })
+	defer unsubscribe()
+	registry.RegisterSkill(&SkillDefinition{
+		ID: "dynamic-skill", Name: "dynamic-skill", Description: "Dynamic Skill",
+		State: StateLoaded, Source: SourceUser, UserInvocable: true,
+	})
+	for name, ch := range map[string]<-chan struct{}{"tool": toolChanged, "catalog": catalogChanged} {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("%s listener was not called", name)
+		}
 	}
 }

@@ -1,14 +1,14 @@
 import "./AwakenDropdown.css";
 import type { ReactNode } from "react";
+import type { Placement } from "@floating-ui/react";
 import { AwakenPopover } from "../AwakenPopover";
-import type { ModelSelectorPlacement } from "../../types";
 
 export type AwakenDropdownProps = {
   trigger: ReactNode;
   children: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  placement?: ModelSelectorPlacement;
+  placement?: Placement;
   offset?: number;
 };
 

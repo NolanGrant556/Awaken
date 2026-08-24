@@ -9,6 +9,7 @@ import {
 import { AwakenButton } from "../AwakenButton";
 import {
   AwakenComposerBar,
+  type ComposerBarInputSelection,
   type ComposerBarSlashPalette,
   type ComposerBarStructuredInputValue,
   type ComposerBarToken,
@@ -98,12 +99,15 @@ export type AwakenScheduledTaskEditorDialogProps = {
   fieldErrors?: Partial<Record<AwakenScheduledTaskDraftField, string>>;
   composerTokens?: ComposerBarToken[];
   slashPalette?: ComposerBarSlashPalette;
+  composerFocusRequest?: number;
+  composerFocusOffset?: number;
   onOpenChange: (open: boolean) => void;
   onValueChange: (draft: AwakenScheduledTaskDraft) => void;
   onComposerStructuredInputChange?: (value: ComposerBarStructuredInputValue) => void;
   onComposerInputKeyDown?: (
     event: ReactKeyboardEvent<HTMLTextAreaElement | ComposerInlineInputElement>,
   ) => void;
+  onComposerInputSelectionChange?: (selection: ComposerBarInputSelection) => void;
   onRemoveComposerToken?: (tokenId: string) => void;
   onSubmit: (draft: AwakenScheduledTaskDraft) => void;
 };
@@ -232,10 +236,13 @@ export function AwakenScheduledTaskEditorDialog({
   fieldErrors,
   composerTokens = [],
   slashPalette,
+  composerFocusRequest = 0,
+  composerFocusOffset,
   onOpenChange,
   onValueChange,
   onComposerStructuredInputChange,
   onComposerInputKeyDown,
+  onComposerInputSelectionChange,
   onRemoveComposerToken,
   onSubmit,
 }: AwakenScheduledTaskEditorDialogProps) {
@@ -636,12 +643,15 @@ export function AwakenScheduledTaskEditorDialog({
                   tokens={composerTokens}
                   slashPalette={slashPalette}
                   inputAriaLabel="Agent prompt"
-                  placeholder="输入任务，键入 / 选择 Skill"
+                  placeholder="输入任务，键入 / 选择 Skill，或 @ 选择 Plugin"
                   disabled={busy}
                   submitOnEnter={false}
+                  focusRequest={composerFocusRequest}
+                  focusOffset={composerFocusOffset}
                   onChange={(content) => update({ content })}
                   onStructuredInputChange={onComposerStructuredInputChange}
                   onInputKeyDown={onComposerInputKeyDown}
+                  onInputSelectionChange={onComposerInputSelectionChange}
                   onRemoveToken={onRemoveComposerToken}
                 />
               </div>

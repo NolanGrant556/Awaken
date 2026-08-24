@@ -40,6 +40,28 @@ func TestRuntimeComposerTokensPreserveScheduledSkillIdentity(t *testing.T) {
 	}
 }
 
+func TestRuntimeComposerTokensPreserveScheduledPluginIdentity(t *testing.T) {
+	tokens := []ComposerToken{{
+		ID: "plugin:acme.tools:digest-v1", Type: "plugin", Label: "acme.tools",
+		Payload: ComposerTokenPayload{PluginName: "acme.tools", PluginDigest: "digest-v1"},
+	}}
+	converted := runtimeComposerTokens(tokens)
+	if len(converted) != 1 || converted[0].Payload.PluginName != "acme.tools" || converted[0].Payload.PluginDigest != "digest-v1" {
+		t.Fatalf("converted Plugin token lost identity: %+v", converted)
+	}
+}
+
+func TestRuntimeComposerTokensPreserveScheduledComputerUseIdentity(t *testing.T) {
+	tokens := []ComposerToken{{
+		ID: "capability:computer-use", Type: "capability", Label: "Computer Use",
+		Payload: ComposerTokenPayload{CapabilityID: "computer-use"},
+	}}
+	converted := runtimeComposerTokens(tokens)
+	if len(converted) != 1 || converted[0].Payload.CapabilityID != "computer-use" {
+		t.Fatalf("converted Computer Use token lost identity: %+v", converted)
+	}
+}
+
 // executorProbe captures what the RunService agent factory saw and holds the
 // configurable fake run behaviour.
 type executorProbe struct {

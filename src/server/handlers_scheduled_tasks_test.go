@@ -317,6 +317,38 @@ func TestScheduledTaskCreatePreservesAgentComposerTokens(t *testing.T) {
 	}
 }
 
+func TestScheduledTaskCreatePreservesComputerUseCapabilityToken(t *testing.T) {
+	f := newScheduledTaskFixture(t)
+	body := scheduledTaskRequestBody("")
+	body["action"] = map[string]any{
+		"kind":    "agent",
+		"content": "整理桌面信息",
+		"composer_tokens": []any{map[string]any{
+			"id":    "capability:computer-use",
+			"type":  "capability",
+			"label": "Computer Use",
+			"payload": map[string]any{
+				"capabilityId": "computer-use",
+			},
+		}},
+	}
+
+	created := createScheduledTask(t, f.router, body)
+	action, ok := created["action"].(map[string]any)
+	if !ok {
+		t.Fatalf("action response = %#v", created["action"])
+	}
+	tokens, ok := action["composer_tokens"].([]any)
+	if !ok || len(tokens) != 1 {
+		t.Fatalf("composer_tokens response = %#v", action["composer_tokens"])
+	}
+	token := tokens[0].(map[string]any)
+	payload := token["payload"].(map[string]any)
+	if token["id"] != "capability:computer-use" || payload["capabilityId"] != "computer-use" {
+		t.Fatalf("Computer Use token identity changed: %#v", token)
+	}
+}
+
 func TestScheduledTaskCreateValidationAndIdentity(t *testing.T) {
 	f := newScheduledTaskFixture(t)
 

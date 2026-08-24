@@ -4,6 +4,7 @@ import type { ComponentProps } from "react";
 import type {
   AwakenComposerBar,
   ComposerBarMetaItem,
+  ComposerBarPluginPicker,
 } from "./AwakenComposerBar";
 
 export type AwakenComposerBarState = {
@@ -85,6 +86,28 @@ const composerMetaItems: ComposerBarMetaItem[] = [
   { id: "repo", label: "Awaken" },
 ];
 
+const pluginPicker: ComposerBarPluginPicker = {
+  options: [
+    {
+      id: "plugin:documents:digest",
+      label: "Documents",
+    },
+    {
+      id: "plugin:spreadsheets:digest",
+      label: "Spreadsheets",
+    },
+    {
+      id: "plugin:presentations:digest",
+      label: "Presentations",
+    },
+    {
+      id: "plugin:sites:digest",
+      label: "Sites",
+    },
+  ],
+  onSelectOption: noop,
+};
+
 export const AwakenComposerBarStates: AwakenComposerBarState[] = [
   {
     id: "dock-empty",
@@ -100,6 +123,7 @@ export const AwakenComposerBarStates: AwakenComposerBarState[] = [
       submitMode: "send",
       variant: "dock",
       metaItems: composerMetaItems,
+      pluginPicker,
     } as unknown as Partial<ComponentProps<typeof AwakenComposerBar>>,
   },
   {
@@ -111,6 +135,7 @@ export const AwakenComposerBarStates: AwakenComposerBarState[] = [
       isReady: false,
       variant: "center",
       metaItems: composerMetaItems,
+      pluginPicker,
       projectPicker: {
         label: "选择项目",
         placeholder: "选择项目",
@@ -189,6 +214,35 @@ export const AwakenComposerBarStates: AwakenComposerBarState[] = [
           label: "docx",
           leadingText:
             "不行，报告过于简单了，缺乏对资料完整性，你可以直接把资料的内容写进 word 里面的。另外不需要说明基于什么文档而得来的什么说明。而且排版不好看，你使用 ",
+        },
+      ],
+    } as unknown as Partial<ComponentProps<typeof AwakenComposerBar>>,
+  },
+  {
+    id: "inline-mixed-token-typography",
+    label: "中英文、数字与多种 Token 混排",
+    props: {
+      value: "nimen 123",
+      variant: "center",
+      isReady: true,
+      tokens: [
+        {
+          id: "capability:computer-use",
+          type: "capability",
+          label: "Computer Use",
+          leadingText: "",
+        },
+        {
+          id: "skill:code-search:user",
+          type: "skill",
+          label: "code-search",
+          leadingText: "我们 women ",
+        },
+        {
+          id: "plugin:business-review:digest",
+          type: "plugin",
+          label: "Business Review",
+          leadingText: "2026 ",
         },
       ],
     } as unknown as Partial<ComponentProps<typeof AwakenComposerBar>>,

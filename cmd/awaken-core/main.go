@@ -110,7 +110,8 @@ func main() {
 	delegateexternalagent.SetManager(acpManager)
 	configureacprunner.SetRegistry(acpManager.Registry())
 
-	runService := runtime.NewRunServiceWithModelProfiles(
+	var runService *runtime.RunService
+	runService = runtime.NewRunServiceWithModelProfiles(
 		func(workspace runtime.WorkspaceConfig, threadID string, profile *runtime.ModelProfileConfig) *agentcore.Agent {
 			modelCfg := modelConfigFromProfile(profile)
 			workspaceRoot := workspace.WorkspaceRoot
@@ -143,6 +144,7 @@ func main() {
 					}
 					return memory.BuildIndexContext(workspaceRoot)
 				},
+				ArchivedHistoryService: runService,
 				MemoryRecallStart: func(ctx context.Context, query string, recentTools []string) {
 					if recallManager != nil {
 						recallManager.StartTurnWithTools(ctx, query, recentTools)

@@ -50,6 +50,10 @@ type AgentConfig struct {
 	// Runner to the run-scoped RunPlanService; empty content skips the block.
 	// Child configs never inherit it (root-only contract).
 	RunPlanContextProvider func() (string, error)
+	// ArchivedHistoryService is the host-owned, read-only bridge used by the
+	// root Agent to list archived threads and read bounded transcript pages.
+	// It never exposes the FileStore path and is not inherited by Subagents.
+	ArchivedHistoryService tool.ArchivedHistoryService
 	// MemoryRecallStart launches non-blocking manifest selection for a user
 	// turn. MemoryContextProvider exposes a completed result later.
 	MemoryRecallStart        func(stdcontext.Context, string, []string)

@@ -98,6 +98,15 @@ describe("focused settings layout", () => {
     );
   });
 
+  it("anchors Settings toast feedback at the top without affecting page layout", () => {
+    expect(settingsStyles).toMatch(
+      /\.aw-settings-toast\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?top:\s*16px;[\s\S]*?pointer-events:\s*none;[\s\S]*?transform:\s*translateX\(-50%\);/,
+    );
+    expect(settingsStyles).not.toMatch(
+      /\.aw-settings-toast\s*\{[\s\S]*?top:\s*50%;/,
+    );
+  });
+
   it("uses the standard settings page as the model scroll owner", () => {
     expect(settingsStyles).toMatch(
       /\.aw-settings-main\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?overflow:\s*hidden;/,

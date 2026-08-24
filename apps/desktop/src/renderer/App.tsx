@@ -3892,7 +3892,7 @@ export function App() {
     {
       id: "plugins",
       label: "插件",
-      icon: <AwakenIcon concept="skill" size={20} />,
+      icon: <AwakenIcon concept="plugin" size={20} />,
     },
     {
       id: "scheduled-tasks",

@@ -1,6 +1,8 @@
 import "./AwakenPluginInstallDialog.css";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
+import { AwakenIcon } from "../AwakenIcon";
+import { useId } from "react";
 
 export type AwakenPluginInstallMode = "local" | "url";
 
@@ -52,6 +54,7 @@ export function AwakenPluginInstallDialog({
   onConfirmChange,
   onSubmit,
 }: AwakenPluginInstallDialogProps) {
+  const riskTitleId = useId();
   const canSubmit = confirm && (mode === "local" ? localPath.trim() !== "" : url.trim() !== "");
   return (
     <AwakenDialog
@@ -71,7 +74,15 @@ export function AwakenPluginInstallDialog({
       }
     >
       <div className="aw-plugin-install-dialog__body">
-        {errorMessage ? <div role="alert">{errorMessage}</div> : null}
+        <div className="aw-plugin-install-dialog__intro">
+          <h3>选择插件来源</h3>
+          <p>支持本地目录、zip 文件，以及 HTTPS zip 或 Git 仓库。</p>
+        </div>
+        {errorMessage ? (
+          <div className="aw-plugin-install-dialog__error" role="alert">
+            {errorMessage}
+          </div>
+        ) : null}
         <div className="aw-plugin-install-dialog__modes" role="tablist" aria-label="插件安装来源">
           <button
             type="button"
@@ -81,6 +92,7 @@ export function AwakenPluginInstallDialog({
             disabled={busy}
             onClick={() => onModeChange("local")}
           >
+            <AwakenIcon concept="project" size={16} />
             本地目录 / zip
           </button>
           <button
@@ -91,60 +103,113 @@ export function AwakenPluginInstallDialog({
             disabled={busy}
             onClick={() => onModeChange("url")}
           >
+            <AwakenIcon concept="provider-link" size={16} />
             URL
           </button>
         </div>
-        {mode === "local" ? (
-          <label>
-            本地路径
-            <span className="aw-plugin-install-dialog__path">
-              <input
-                value={localPath}
-                disabled={busy}
-                onChange={(event) => onLocalPathChange(event.target.value)}
-              />
-              {onPickLocal ? (
-                <AwakenButton variant="default" size="sm" disabled={busy} onClick={onPickLocal}>
-                  浏览
-                </AwakenButton>
-              ) : null}
-            </span>
-          </label>
-        ) : (
-          <>
-            <label>
-              HTTPS URL
-              <input value={url} disabled={busy} onChange={(event) => onUrlChange(event.target.value)} />
+        <div className="aw-plugin-install-dialog__fields">
+          {mode === "local" ? (
+            <label className="aw-plugin-install-dialog__field">
+              <span>本地路径</span>
+              <span className="aw-plugin-install-dialog__path">
+                <input
+                  value={localPath}
+                  placeholder="选择插件目录，或输入 zip 文件路径"
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={busy}
+                  onChange={(event) => onLocalPathChange(event.target.value)}
+                />
+                {onPickLocal ? (
+                  <AwakenButton
+                    variant="default"
+                    size="lg"
+                    disabled={busy}
+                    onClick={onPickLocal}
+                  >
+                    浏览
+                  </AwakenButton>
+                ) : null}
+              </span>
             </label>
-            <label>
-              Git ref（可选）
-              <input value={refValue} disabled={busy} onChange={(event) => onRefChange?.(event.target.value)} />
-            </label>
-            <label>
-              子目录（可选）
-              <input value={subpath} disabled={busy} onChange={(event) => onSubpathChange?.(event.target.value)} />
-            </label>
-          </>
-        )}
-        <label className="aw-plugin-install-dialog__check">
+          ) : (
+            <>
+              <label className="aw-plugin-install-dialog__field">
+                <span>HTTPS URL</span>
+                <input
+                  value={url}
+                  placeholder="https://example.com/plugin.zip"
+                  inputMode="url"
+                  autoComplete="url"
+                  spellCheck={false}
+                  disabled={busy}
+                  onChange={(event) => onUrlChange(event.target.value)}
+                />
+              </label>
+              <div className="aw-plugin-install-dialog__optional-fields">
+                <label className="aw-plugin-install-dialog__field">
+                  <span>
+                    Git ref <small>可选</small>
+                  </span>
+                  <input
+                    value={refValue}
+                    placeholder="main 或版本标签"
+                    autoComplete="off"
+                    spellCheck={false}
+                    disabled={busy}
+                    onChange={(event) => onRefChange?.(event.target.value)}
+                  />
+                </label>
+                <label className="aw-plugin-install-dialog__field">
+                  <span>
+                    子目录 <small>可选</small>
+                  </span>
+                  <input
+                    value={subpath}
+                    placeholder="plugins/example"
+                    autoComplete="off"
+                    spellCheck={false}
+                    disabled={busy}
+                    onChange={(event) => onSubpathChange?.(event.target.value)}
+                  />
+                </label>
+              </div>
+            </>
+          )}
+        </div>
+        <label className="aw-plugin-install-dialog__option">
           <input
             type="checkbox"
             checked={replace}
             disabled={busy}
             onChange={(event) => onReplaceChange?.(event.target.checked)}
           />
-          同名时替换已安装插件
+          <span>
+            <strong>同名时替换已安装插件</strong>
+            <small>旧插件包会先移入回收站；插件数据在升级时保留。</small>
+          </span>
         </label>
-        <p className="aw-plugin-install-dialog__risk">{RISK_TEXT}</p>
-        <label className="aw-plugin-install-dialog__check">
-          <input
-            type="checkbox"
-            checked={confirm}
-            disabled={busy}
-            onChange={(event) => onConfirmChange?.(event.target.checked)}
-          />
-          我已了解 MCP 子进程无沙盒，并以当前用户身份运行
-        </label>
+        <section
+          className="aw-plugin-install-dialog__risk"
+          aria-labelledby={riskTitleId}
+        >
+          <span className="aw-plugin-install-dialog__risk-icon" aria-hidden="true">
+            <AwakenIcon concept="warning" size={16} />
+          </span>
+          <div className="aw-plugin-install-dialog__risk-copy">
+            <h3 id={riskTitleId}>插件可访问你的电脑</h3>
+            <p>{RISK_TEXT}</p>
+          </div>
+          <label className="aw-plugin-install-dialog__risk-confirm">
+            <input
+              type="checkbox"
+              checked={confirm}
+              disabled={busy}
+              onChange={(event) => onConfirmChange?.(event.target.checked)}
+            />
+            <span>我已了解 MCP 子进程无沙盒，并以当前用户身份运行</span>
+          </label>
+        </section>
       </div>
     </AwakenDialog>
   );

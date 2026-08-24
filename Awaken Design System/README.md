@@ -88,7 +88,7 @@ http://127.0.0.1:5173/#/components/awaken-memory-settings
 
 ## 图标库契约
 
-Awaken 的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是唯一渲染出口，Gallery 入口是 `awaken-icon`。当前 107 个线性字形由 94 个经用户确认并静态固化的 Lucide authored 母形、6 个本轮 Awaken 定制几何，以及 7 个保持既有产品识别的字形组成；另有 1 个 MCP 官方品牌标记。
+Awaken 的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是唯一渲染出口，Gallery 入口是 `awaken-icon`。当前 107 个线性字形由 94 个经用户确认并静态固化的 Lucide authored 母形、6 个本轮 Awaken 定制几何，以及 7 个保持既有产品识别的字形组成；另有 MCP 和 Agent Plugins 两个官方品牌标记。
 
 ### 分层与 owner
 
@@ -144,13 +144,15 @@ Awaken 自行构造的新圆弧使用 `arcThroughChord` 按弦与拱高反解圆
 
 ### 能力与连接器图形
 
-一级入口使用直接、彼此可区分的比喻：`connector` 是清晰的双插脚 Plug 轮廓；`skill` 与 `skill-active` 统一映射 `book-open`；CLI 使用 `terminal`；Hook 使用 Webhook 路由结构表达事件挂接。产品调用点只消费这些概念映射，不自行复制 SVG。
+一级入口使用直接、彼此可区分的比喻或官方标记：`connector` 是清晰的双插脚 Plug 轮廓；`skill` 与 `skill-active` 统一映射 `book-open`；`plugin` 映射 Agent Plugins 官方标记 `agent-plugins-mark`；CLI 使用 `terminal`；Hook 使用 Webhook 路由结构表达事件挂接。产品调用点只消费这些概念映射，不自行复制 SVG。
 
 ### 品牌标记
 
 第三方官方标记不进入 16 网格构造体系，保留 authored paths；Design System 可以只在 viewBox 外围增加对称透明留白，让它与线性图标共用光学包围盒，不得改写原始 path。名字带 `-mark` 后缀与自绘图标区分，并各自声明来源、许可、商标归属与 `minSize`。
 
 MCP 使用官方标记 `mcp-mark`，对称留白后的可读下限为 14px。连接器 MCP/CLI 分类共用 16px 请求尺寸，MCP 目录卡使用 20px 卡片尺寸，MCP 工具轨迹与其它工具共用 14px 请求尺寸。三处都消费同一官方标记，不使用自绘伴随字形。
+
+Agent Plugins 使用官方文档站 `app/icon.svg` 的 authored paths，在注册表中命名为 `agent-plugins-mark`。路径本身不改动，仅在原 18×17 viewBox 外增加对称透明留白；Desktop 插件一级入口以 20px 请求尺寸消费，实际标记宽约 17.5px，与同屏主导航图标的光学尺寸一致。该标记的可读下限为 20px，不得在更小调用点复用。
 
 ### 概念优先
 
@@ -202,9 +204,11 @@ Gallery 左栏按“原子组件”“左侧栏组件”“设置页组件”“
 
 “设置页组件”拥有独立顶层目录：`AwakenSettings` 是覆盖 Desktop 内容窗口的左右分栏框架，保留原生窗口 chrome，左侧提供“返回应用”以及模型、搜索、记忆、全局规则、外观、宠物、计算机操作、钩子、ACP 导航和固定末项“已归档的聊天”（带“已归档”分组标题），右侧由各页面组件独立拥有内容与滚动。模型、搜索、记忆、外观、宠物、计算机操作、已归档的聊天分别注册 `awaken-model-settings`、`awaken-search-settings`、`awaken-memory-settings`、`awaken-appearance-settings`、`awaken-pets-settings`、`awaken-computer-settings`、`awaken-archived-chats-settings`；全局 AGENTS.md、Hook 和 ACP 页面由 Desktop 拥有业务状态，Design System 只提供导航 item 与设置框架。旧 `awaken-memory-light-flow` URL 重定向到记忆设置。每个设置页的一级标题都从当前左侧导航项继承同一个 `concept` 图标；标准页头由 `AwakenSettings` 直接投影，full-bleed 记忆页通过设置分区上下文继承，调用点不得再独立选择一份标题图标。标准设置页继续保留全宽一级标题，宠物、计算机操作和 ACP 的实际配置主体共用 820px focused content width，在右侧工作区内水平居中并使用紧凑卡片密度；标准内容区滚动条使用透明轨道、低对比圆角 thumb，与 Workbench 的轻量滚动表面保持一致，窄窗口仍回退为可用宽度。设置框架本身不套 `AwakenDialog`，没有 backdrop、外层圆角卡片、右上角关闭按钮或底部关闭栏；ACP runner 的添加与编辑属于页面内任务，复用 `AwakenDialog` 在屏幕中央承载表单、内部滚动、底部操作、Escape/遮罩关闭和焦点恢复。Gallery 只注入 mock 数据；Desktop 的 `DesktopSettingsDialog` 保留运行时读取、保存和副作用，并直接消费这些 UI-only 组件。跨组件族复用的 `AwakenButton` 保留独立源码和公开导出，原 `awaken-button` URL 跳转到设置页框架。
 
+设置页的短暂操作反馈统一由 `AwakenSettings` 的顶部居中 Toast 承载；它脱离右侧页面的布局和滚动并使用 polite live region。具体样式与 consumer 边界只在 [AwakenSettings 组件说明](src/components/AwakenSettings/README.md) 维护。
+
 “「连接器」组件库”集中展示 Desktop 直接消费的 `AwakenConnectors` 完整 MCP/CLI 组合，以及连接器卡片、品牌图标、server 开关、CLI 详情、MCP 配置和 MCP 设置弹窗。Gallery 只注入 mock 状态；连接器目录、MCP server snapshot、CLI readiness、安装/授权、配置保存、日志读取与持久化仍由 Desktop Main/Core/Renderer 对应 owner 负责。
 
-“「插件」组件库”集中展示 Desktop 插件页消费的 `AwakenPluginCard`、`AwakenPluginDetailDialog` 与 `AwakenPluginInstallDialog`。Gallery 只注入 mock 状态；安装来源、启停、升级、卸载、Skill 预览和 MCP readiness 仍由 Desktop Renderer 通过 Main `requestRuntime` 调用 Core `/v1/plugins*`。安装弹窗的无沙盒风险说明是固定文案。
+“「插件」组件库”集中展示 Desktop 插件页消费的 `AwakenPlugins` Catalog 组合、`AwakenPluginCard`、`AwakenPluginDetailDialog` 与 `AwakenPluginInstallDialog`。`AwakenPlugins` 统一拥有标题、操作、搜索、双列卡片和空/错误状态；Gallery 只注入 mock 状态。安装来源、启停、升级、卸载、Skill 预览和 MCP readiness 仍由 Desktop Renderer 通过 Main `requestRuntime` 调用 Core `/v1/plugins*`。安装弹窗的无沙盒风险说明是固定文案，并与强制确认保持在同一警示区。
 
 ## 组件文件夹契约
 

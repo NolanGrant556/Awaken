@@ -11,7 +11,12 @@ export const AwakenIconStates = [
   { id: "min", label: "可读下限 12px", props: { name: "wrench", size: 12 } },
   { id: "compact", label: "紧凑 14px", props: { name: "subagent", size: 14 } },
   { id: "large", label: "24px", props: { name: "book-open", size: 24 } },
-  { id: "brand", label: "品牌标记 24px", props: { name: "mcp-mark", size: 24 } },
+  { id: "brand-mcp", label: "MCP 品牌标记 24px", props: { name: "mcp-mark", size: 24 } },
+  {
+    id: "brand-agent-plugins",
+    label: "Agent Plugins 品牌标记 20px",
+    props: { name: "agent-plugins-mark", size: 20 },
+  },
   { id: "labelled", label: "带无障碍名", props: { name: "trash", label: "删除" } },
 ] satisfies Array<{ id: string; label: string; props: AwakenIconProps }>;
 

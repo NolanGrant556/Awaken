@@ -29,6 +29,7 @@ export {
   opticalVisual,
 } from "./definitions";
 export {
+  AGENT_PLUGINS_OFFICIAL_MARK,
   MCP_OFFICIAL_MARK,
   type BrandMark,
 } from "./brandMarks";

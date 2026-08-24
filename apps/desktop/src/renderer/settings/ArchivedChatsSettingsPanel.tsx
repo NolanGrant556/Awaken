@@ -14,6 +14,8 @@ type ArchivedChatsSettingsPanelProps = {
   runtimeClient: RuntimeClient;
   /** 取消归档/删除完成后刷新 active 侧栏列表。 */
   onThreadsChanged: () => void;
+  /** 取消归档结果交给 Settings 顶层 Toast，避免提示参与列表布局。 */
+  onToast: (message: string) => void;
 };
 
 const ALL_PROJECTS_FILTER = "all";
@@ -121,6 +123,7 @@ export function filterArchivedChatGroups(
 export function ArchivedChatsSettingsPanel({
   runtimeClient,
   onThreadsChanged,
+  onToast,
 }: ArchivedChatsSettingsPanelProps) {
   const [threads, setThreads] = useState<RuntimeThread[] | null>(null);
   const [projects, setProjects] = useState<RuntimeProject[]>([]);
@@ -206,7 +209,7 @@ export function ArchivedChatsSettingsPanel({
     try {
       const result = await runtimeClient.setThreadArchived(threadId, false);
       if (!result.ok) {
-        setNotice(result.message);
+        onToast(result.message);
         return;
       }
       const thread = threads?.find((item) => item.threadId === threadId);
@@ -215,13 +218,13 @@ export function ArchivedChatsSettingsPanel({
         : undefined;
       setThreads((current) => current?.filter((item) => item.threadId !== threadId) ?? current);
       onThreadsChanged();
-      setNotice(
+      onToast(
         project && project.state !== "active"
           ? "已取消归档；重新添加项目后可在侧栏查看"
           : "已取消归档",
       );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "取消归档失败，请稍后重试");
+      onToast(error instanceof Error ? error.message : "取消归档失败，请稍后重试");
     } finally {
       setThreadBusy(threadId, false);
     }

@@ -166,7 +166,9 @@ func ToolCallSemanticRecord(threadID, runID, turnID, sessionID, parentID string,
 
 func ToolResultSemanticRecord(threadID, runID, turnID, sessionID string, result ToolExecutionResult) SemanticRecord {
 	content := result.Content
+	var registeredRuntime tool.Tool
 	if registered, err := tool.GetRegisteredTool(result.Name); err == nil {
+		registeredRuntime = registered.Runtime
 		if sanitizer, ok := registered.Runtime.(tool.SemanticJournalSanitizer); ok {
 			content = sanitizer.SemanticJournalResult(content)
 		}
@@ -178,7 +180,15 @@ func ToolResultSemanticRecord(threadID, runID, turnID, sessionID string, result 
 		"is_error":     result.IsError,
 	}
 	if result.Outcome.Status != "" {
-		payload["outcome"] = outcomeToMap(result.Outcome)
+		durableOutcome := result.Outcome
+		if sanitizer, ok := registeredRuntime.(tool.SemanticJournalOutcomeSanitizer); ok {
+			durableOutcome = sanitizer.SemanticJournalOutcome(durableOutcome, content)
+			// The result sanitizer remains the single owner of durable content.
+			// Outcome sanitizers may remove additional fields but cannot restore a
+			// different body into canonical outcome.content.
+			durableOutcome.Content = content
+		}
+		payload["outcome"] = outcomeToMap(durableOutcome)
 	}
 	if len(result.TrashedPaths) > 0 {
 		payload["trashed_paths"] = append([]string(nil), result.TrashedPaths...)

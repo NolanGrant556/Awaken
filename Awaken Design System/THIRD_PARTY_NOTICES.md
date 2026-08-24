@@ -22,3 +22,13 @@ WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
+
+## Agent Plugins official mark
+
+Awaken Design System includes the authored SVG path data from
+`agentplugins/agent-plugins-site/app/icon.svg` at commit
+`c4a3a8dc683838f14d178392aaeaabeba4533377`. The paths are unchanged;
+Awaken only adds symmetric transparent viewBox padding for optical alignment.
+
+Copyright 2026 Vercel, Inc. Licensed under the Creative Commons Attribution
+4.0 International License: https://creativecommons.org/licenses/by/4.0/

@@ -8,7 +8,11 @@
  * authored 字形已经离线固化为同名 16-grid path，并在这里覆盖基础定义而不改变 API。
  * 品牌标记保留自己的 authored paths 与 viewBox。
  */
-import { MCP_OFFICIAL_MARK, type BrandMark } from "./brandMarks";
+import {
+  AGENT_PLUGINS_OFFICIAL_MARK,
+  MCP_OFFICIAL_MARK,
+  type BrandMark,
+} from "./brandMarks";
 import {
   APPROVED_LUCIDE_GLYPHS,
   type ApprovedLucideGlyph,
@@ -162,6 +166,7 @@ const LINE_ICONS = compileLineIcons();
 
 /** 第三方官方品牌标记。名字带 `-mark` 后缀，和自绘线性图标明确区分。 */
 export const BRAND_ICONS = {
+  "agent-plugins-mark": compileBrandMark(AGENT_PLUGINS_OFFICIAL_MARK),
   "mcp-mark": compileBrandMark(MCP_OFFICIAL_MARK),
 } as const;
 

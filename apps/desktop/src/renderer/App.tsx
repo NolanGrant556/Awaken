@@ -61,6 +61,7 @@ import {
   type ProjectFolderRow,
   type ProjectHoverCard,
   type ProjectItem,
+  type ProjectMenuItem,
   type ToolTraceAction,
   type ToolTraceDetailCard,
 } from "@awaken/design-system";
@@ -1004,6 +1005,46 @@ export function shouldShowSidebarThreadSpinner(thread: ThreadItem): boolean {
     return false;
   }
   return Boolean(thread.activeRunId);
+}
+
+export function sidebarThreadArchiveMenuState(thread: ThreadItem): {
+  disabled: boolean;
+  disabledReason?: string;
+} {
+  if (shouldShowSidebarThreadSpinner(thread)) {
+    return { disabled: true, disabledReason: "请先停止正在运行的任务" };
+  }
+  if (thread.source === "scheduled_task") {
+    return { disabled: true, disabledReason: "定时任务会话由定时任务管理" };
+  }
+  return { disabled: false };
+}
+
+export function sidebarThreadMenuItems(
+  thread: ThreadItem,
+  actions: { onRename: () => void; onArchive: () => void; onDelete: () => void },
+): ProjectMenuItem[] {
+  const archiveState = sidebarThreadArchiveMenuState(thread);
+  return [
+    {
+      id: "rename-thread",
+      label: "重命名",
+      onSelect: actions.onRename,
+    },
+    {
+      id: "archive-thread",
+      label: "归档",
+      disabled: archiveState.disabled,
+      disabledReason: archiveState.disabledReason,
+      onSelect: actions.onArchive,
+    },
+    {
+      id: "delete-thread",
+      label: "删除会话",
+      tone: "danger",
+      onSelect: actions.onDelete,
+    },
+  ];
 }
 
 export function shouldResetActiveThreadForWorkspaceChange(
@@ -4189,23 +4230,17 @@ export function App() {
         kind: "thread",
         label: thread.label,
         isLoading: shouldShowSidebarThreadSpinner(thread),
-        menuItems: [
-          {
-            id: "rename-thread",
-            label: "重命名",
-            onSelect: () => {
-              void handleRenameThread(thread.threadId);
-            },
+        menuItems: sidebarThreadMenuItems(thread, {
+          onRename: () => {
+            void handleRenameThread(thread.threadId);
           },
-          {
-            id: "delete-thread",
-            label: "删除会话",
-            tone: "danger",
-            onSelect: () => {
-              requestThreadDelete([thread.threadId], "single");
-            },
+          onArchive: () => {
+            void handleArchiveThread(thread.threadId);
           },
-        ],
+          onDelete: () => {
+            requestThreadDelete([thread.threadId], "single");
+          },
+        }),
       };
     });
   }
@@ -5196,6 +5231,35 @@ export function App() {
     setRenamingThreadId(threadId);
     setRenameDraft(thread.label);
     setRenameDialogOpen(true);
+  }
+
+  async function handleArchiveThread(threadId: string): Promise<void> {
+    if (!desktopReady) {
+      return;
+    }
+
+    setNotice(null);
+    try {
+      const result = await runtimeClient.setThreadArchived(threadId, true);
+      if (!result.ok) {
+        // 失败保留原行，不做无法核实的乐观删除。
+        setNotice(result.message);
+        return;
+      }
+
+      if (threadId === runtimeState.activeThreadId) {
+        handleCloseFileWorkspace();
+        setSelectedSubagentTaskId(undefined);
+        setOpenSubagentTaskId(undefined);
+      }
+      clearThreadComposerDraft(composerDraftOwnerKey(threadId));
+      // active authority 列表不再包含该 thread；若它是当前 thread，
+      // refreshAfterThreadMutation 会经 reducer 回到“新建任务”空态，项目选择保持不变。
+      await refreshAfterThreadMutation([threadId]);
+      setNotice("已归档会话");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "归档会话失败，请稍后重试");
+    }
   }
 
   async function handleConfirmRename(): Promise<void> {
@@ -8332,6 +8396,9 @@ export function App() {
         initialModelSection={modelSettingsInitialModelSection}
         onProfilesChanged={() => {
           void refreshRuntimeInfoNow();
+        }}
+        onThreadsChanged={() => {
+          void refreshThreads();
         }}
       />
       <ProfileBalancePopover

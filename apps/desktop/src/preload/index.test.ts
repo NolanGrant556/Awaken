@@ -221,3 +221,19 @@ describe("preload project directory watch bridge", () => {
     expect(listeners.has("awaken:project-directory-changed")).toBe(false);
   });
 });
+
+describe("preload thread archive bridge", () => {
+  it("exposes the narrow archive entry points and forwards typed channels", async () => {
+    const bridge = exposedBridge as Record<string, (...args: unknown[]) => unknown>;
+    expect(typeof bridge.setThreadArchived).toBe("function");
+    expect(typeof bridge.listThreads).toBe("function");
+
+    invokeMock.mockResolvedValue([]);
+    await bridge.listThreads("archived");
+    expect(invokeMock).toHaveBeenLastCalledWith("awaken:list-threads", "archived");
+
+    invokeMock.mockResolvedValue({ ok: true });
+    await bridge.setThreadArchived("thread-1", true);
+    expect(invokeMock).toHaveBeenLastCalledWith("awaken:set-thread-archived", "thread-1", true);
+  });
+});

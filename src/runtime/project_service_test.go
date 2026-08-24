@@ -34,7 +34,7 @@ func TestProjectDetachIsIdempotentAndKeepsThreads(t *testing.T) {
 	if first.OperationID != second.OperationID {
 		t.Fatalf("expected idempotent operation id, got %q and %q", first.OperationID, second.OperationID)
 	}
-	if got := service.ListThreads(); len(got) != 1 {
+	if got := service.ListThreads(ThreadListViewActive); len(got) != 1 {
 		t.Fatalf("detach must keep thread history, got %+v", got)
 	}
 	visible, err := projects.ListProjects(false)
@@ -100,7 +100,7 @@ func TestProjectHistoryDeleteSoftDeletesOneHundredThreadsAndCleansUp(t *testing.
 	if operation.MatchedThreads != 100 || operation.PendingCleanup != 100 {
 		t.Fatalf("unexpected bulk operation: %+v", operation)
 	}
-	if got := service.ListThreads(); len(got) != 0 {
+	if got := service.ListThreads(ThreadListViewActive); len(got) != 0 {
 		t.Fatalf("soft-deleted threads must disappear immediately, got %d", len(got))
 	}
 	replayed, err := projects.DeleteProjectThreads(project.ProjectID, "bulk-delete-1")
@@ -175,7 +175,7 @@ func TestProjectHistoryDeleteCancelsBusyRunAndCleansAfterTerminal(t *testing.T) 
 	if _, err := projects.ProcessCleanupJobs(context.Background(), 16); err != nil {
 		t.Fatal(err)
 	}
-	if got := service.ListThreads(); len(got) != 0 {
+	if got := service.ListThreads(ThreadListViewActive); len(got) != 0 {
 		t.Fatalf("expected busy thread to be purged after terminal, got %+v", got)
 	}
 }
@@ -195,7 +195,7 @@ func TestTrashTwoPhaseFailureRestoresFolderAndSuccessDetachesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := service.ListThreads(); len(got) != 1 {
+	if got := service.ListThreads(ThreadListViewActive); len(got) != 1 {
 		t.Fatalf("prepare must not delete history, got %+v", got)
 	}
 	claimed, err := projects.ClaimTrashOperation(prepared.OperationID, "desktop-main", time.Second)
@@ -212,7 +212,7 @@ func TestTrashTwoPhaseFailureRestoresFolderAndSuccessDetachesIt(t *testing.T) {
 	if failed.Status != ProjectOperationFailed {
 		t.Fatalf("expected failed operation, got %+v", failed)
 	}
-	if got := service.ListThreads(); len(got) != 1 {
+	if got := service.ListThreads(ThreadListViewActive); len(got) != 1 {
 		t.Fatalf("trash failure must keep history, got %+v", got)
 	}
 	visible, err := projects.ListProjects(false)
@@ -257,7 +257,7 @@ func TestTrashTwoPhaseFailureRestoresFolderAndSuccessDetachesIt(t *testing.T) {
 	}
 	// Folder trash only removes the directory and its binding; deleting Awaken
 	// history is a separate project-level action.
-	if got := service.ListThreads(); len(got) != 1 {
+	if got := service.ListThreads(ThreadListViewActive); len(got) != 1 {
 		t.Fatalf("successful folder trash must keep history, got %+v", got)
 	}
 	surviving, err := projects.ListProjects(false)
@@ -374,7 +374,7 @@ func TestTrashFailureAfterStagingAtomicallyRestoresProject(t *testing.T) {
 	if _, err := os.Stat(staged.TrashStagingPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("staging path must be gone after restore, got %v", err)
 	}
-	if got := service.ListThreads(); len(got) != 1 {
+	if got := service.ListThreads(ThreadListViewActive); len(got) != 1 {
 		t.Fatalf("failed system trash must preserve history, got %+v", got)
 	}
 	visible, err := projects.ListProjects(false)

@@ -41,6 +41,8 @@ var (
 	ErrThreadNotFound               = errors.New("thread not found")
 	ErrThreadWorkspaceMismatch      = errors.New("thread workspace mismatch")
 	ErrThreadBusy                   = errors.New("thread already has an active run")
+	ErrThreadArchived               = errors.New("thread is archived")
+	ErrThreadArchiveUnsupported     = errors.New("thread does not support archiving")
 	ErrThreadLabelInvalid           = errors.New("thread label is required")
 	ErrThreadModelPreferenceInvalid = errors.New("thread model preference is invalid")
 	ErrMissingModelProfile          = errors.New("model profile is required")
@@ -360,7 +362,7 @@ func (s *RunService) restoreSkillInvocationHistory(activator *skillruntime.Activ
 			return
 		}
 	}
-	threads, err := s.threadStore.ListThreads()
+	threads, err := s.threadStore.ListThreads(ThreadListViewAll)
 	if err != nil {
 		return
 	}
@@ -401,6 +403,8 @@ type Thread struct {
 	reasoningEffortByProfile map[string]string
 	createdAt                time.Time
 	updatedAt                time.Time
+	archived                 bool
+	archivedAt               time.Time
 	deletionRequested        bool
 	source                   string
 	clientName               string
@@ -442,6 +446,8 @@ type ThreadSnapshot struct {
 	Workspace                WorkspaceConfig   `json:"workspace"`
 	CreatedAt                time.Time         `json:"created_at"`
 	UpdatedAt                time.Time         `json:"updated_at"`
+	Archived                 bool              `json:"archived"`
+	ArchivedAt               time.Time         `json:"archived_at,omitempty"`
 	Source                   string            `json:"source,omitempty"`
 	ClientName               string            `json:"client_name,omitempty"`
 	ClientVersion            string            `json:"client_version,omitempty"`
@@ -1043,9 +1049,26 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if hasRequestedThread {
 		thread, ok := s.threads[threadID]
 		if !ok {
-			if restored == nil {
+			// Restore again while holding the RunService mutation lock. The
+			// optimistic read above hydrates large transcript state without
+			// blocking unrelated mutations, but archive/delete may have won in
+			// between. This second read is the authority check that serializes a
+			// durable-only thread with SetThreadArchived.
+			latestMeta, latestRestored, latestErr := s.threadStore.RestoreThread(threadID)
+			if latestErr != nil {
 				s.mu.Unlock()
-				return rollbackStart(ErrThreadNotFound, false)
+				if errors.Is(latestErr, ErrThreadNotFound) {
+					return rollbackStart(ErrThreadNotFound, false)
+				}
+				return rollbackStart(latestErr, false)
+			}
+			restoredMeta = &latestMeta
+			restored = &latestRestored
+			// Archived threads reject new runs even when the caller bypasses
+			// the UI; the user must unarchive first (archive contract §4.4).
+			if restoredMeta.Snapshot.Archived {
+				s.mu.Unlock()
+				return rollbackStart(ErrThreadArchived, false)
 			}
 			agent = s.createAgent(workspace, threadID, req.ModelProfile)
 			if agent != nil {
@@ -1081,6 +1104,8 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				reasoningEffortByProfile: cloneStringMap(restoredMeta.Snapshot.ReasoningEffortByProfile),
 				createdAt:                firstNonZeroTime(restored.CreatedAt, restoredMeta.Snapshot.CreatedAt, now),
 				updatedAt:                now,
+				archived:                 restoredMeta.Snapshot.Archived,
+				archivedAt:               restoredMeta.Snapshot.ArchivedAt,
 				source:                   restoredMeta.Snapshot.Source,
 				clientName:               restoredMeta.Snapshot.ClientName,
 				clientVersion:            restoredMeta.Snapshot.ClientVersion,
@@ -1120,6 +1145,12 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		if thread.deletionRequested {
 			s.mu.Unlock()
 			return rollbackStart(ErrThreadNotFound, false)
+		}
+		// Archived threads reject new runs even when the caller bypasses the
+		// UI; the user must unarchive first (archive contract §4.4).
+		if thread.archived {
+			s.mu.Unlock()
+			return rollbackStart(ErrThreadArchived, false)
 		}
 		if thread.activeRunID != "" {
 			s.mu.Unlock()
@@ -1807,7 +1838,7 @@ func hashSecret(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (s *RunService) ListThreads() []ThreadSnapshot {
+func (s *RunService) ListThreads(view ThreadListView) []ThreadSnapshot {
 	s.mu.RLock()
 	threads := make([]ThreadSnapshot, 0, len(s.threads))
 	seen := make(map[string]bool, len(s.threads))
@@ -1815,13 +1846,23 @@ func (s *RunService) ListThreads() []ThreadSnapshot {
 		if thread.deletionRequested {
 			continue
 		}
+		switch view {
+		case ThreadListViewActive:
+			if thread.archived {
+				continue
+			}
+		case ThreadListViewArchived:
+			if !thread.archived {
+				continue
+			}
+		}
 		snapshot := thread.snapshot()
 		threads = append(threads, snapshot)
 		seen[snapshot.ThreadID] = true
 	}
 	s.mu.RUnlock()
 
-	durableThreads, err := s.threadStore.ListThreads()
+	durableThreads, err := s.threadStore.ListThreads(view)
 	if err == nil {
 		for _, thread := range durableThreads {
 			if seen[thread.ThreadID] {
@@ -1832,12 +1873,68 @@ func (s *RunService) ListThreads() []ThreadSnapshot {
 		}
 	}
 	sort.Slice(threads, func(i, j int) bool {
+		if view == ThreadListViewArchived && !threads[i].ArchivedAt.Equal(threads[j].ArchivedAt) {
+			return threads[i].ArchivedAt.After(threads[j].ArchivedAt)
+		}
 		if !threads[i].UpdatedAt.Equal(threads[j].UpdatedAt) {
 			return threads[i].UpdatedAt.After(threads[j].UpdatedAt)
 		}
-		return threads[i].CreatedAt.After(threads[j].CreatedAt)
+		if !threads[i].CreatedAt.Equal(threads[j].CreatedAt) {
+			return threads[i].CreatedAt.After(threads[j].CreatedAt)
+		}
+		return threads[i].ThreadID < threads[j].ThreadID
 	})
 	return threads
+}
+
+// SetThreadArchived flips one thread's archived state with memory/disk
+// consistency: the RunService mutation lock stays held across the durable
+// write, so StartRun cannot observe a half-applied archive state. The same
+// target state is idempotent, a thread with an active run reports
+// ErrThreadBusy (running|cancelling both hold activeRunID), scheduled-task
+// dedicated threads reject with ErrThreadArchiveUnsupported, and archiving
+// never moves updated_at.
+func (s *RunService) SetThreadArchived(threadID string, archived bool) (ThreadSnapshot, error) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return ThreadSnapshot{}, ErrThreadNotFound
+	}
+	now := time.Now().UTC()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if thread, ok := s.threads[threadID]; ok {
+		if thread.deletionRequested {
+			return ThreadSnapshot{}, ErrThreadNotFound
+		}
+		if thread.activeRunID != "" {
+			return ThreadSnapshot{}, ErrThreadBusy
+		}
+		if thread.source == ScheduledClientSource {
+			return ThreadSnapshot{}, ErrThreadArchiveUnsupported
+		}
+		if thread.archived == archived {
+			return thread.snapshot(), nil
+		}
+		durable, err := s.threadStore.SetThreadArchived(threadID, archived, now)
+		if err != nil {
+			return ThreadSnapshot{}, err
+		}
+		thread.archived = durable.Archived
+		thread.archivedAt = durable.ArchivedAt
+		return thread.snapshot(), nil
+	}
+
+	// Durable-only thread: keeping s.mu held across restore + mutation makes
+	// this pair atomic with StartRun's locked authority re-read.
+	record, _, err := s.threadStore.RestoreThread(threadID)
+	if err != nil {
+		return ThreadSnapshot{}, err
+	}
+	if record.Snapshot.Source == ScheduledClientSource {
+		return ThreadSnapshot{}, ErrThreadArchiveUnsupported
+	}
+	return s.threadStore.SetThreadArchived(threadID, archived, now)
 }
 
 func (s *RunService) RenameThread(threadID, label string) (ThreadSnapshot, error) {
@@ -3094,6 +3191,8 @@ func (t *Thread) snapshot() ThreadSnapshot {
 		Workspace:                t.workspace,
 		CreatedAt:                t.createdAt,
 		UpdatedAt:                t.updatedAt,
+		Archived:                 t.archived,
+		ArchivedAt:               t.archivedAt,
 		Source:                   t.source,
 		ClientName:               t.clientName,
 		ClientVersion:            t.clientVersion,

@@ -147,6 +147,8 @@ func (s *RunService) PublishScheduledNotice(ctx context.Context, req ScheduledNo
 				runIDs:         append(append([]string(nil), restored.RunIDs...), runID),
 				createdAt:      firstNonZeroTime(restored.CreatedAt, meta.Snapshot.CreatedAt, now),
 				updatedAt:      now,
+				archived:       meta.Snapshot.Archived,
+				archivedAt:     meta.Snapshot.ArchivedAt,
 				source:         meta.Snapshot.Source,
 				clientName:     meta.Snapshot.ClientName,
 				clientVersion:  meta.Snapshot.ClientVersion,

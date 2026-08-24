@@ -175,6 +175,7 @@ function createMockRuntimeClient(): RuntimeClient {
     getThreadTranscript: vi.fn(async () => ({ thread: {} as never, runs: [] })),
     listThreads: vi.fn(async () => []),
     renameThread: vi.fn(async () => ({
+      archived: false,
       threadId: "",
       label: "",
       workspace: {} as never,
@@ -185,6 +186,7 @@ function createMockRuntimeClient(): RuntimeClient {
       throw new Error("not implemented");
     }),
     deleteThread: vi.fn(async () => ({ ok: true as const })),
+    setThreadArchived: vi.fn(async () => ({ ok: true as const, thread: {} as never })),
     deleteThreads: vi.fn(async (threadIds: string[]) => ({
       ok: true as const,
       deletedThreadIds: threadIds,

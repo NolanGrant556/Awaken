@@ -10,6 +10,7 @@ const routeBySection: Record<string, string> = {
   appearance: "awaken-appearance-settings",
   pets: "awaken-pets-settings",
   computer: "awaken-computer-settings",
+  "archived-chats": "awaken-archived-chats-settings",
 };
 
 export function AwakenSettingsSectionPreview({

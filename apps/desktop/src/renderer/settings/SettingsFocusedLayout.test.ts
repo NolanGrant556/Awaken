@@ -31,6 +31,13 @@ const searchStyles = readFileSync(
   ),
   "utf8",
 );
+const archivedChatsStyles = readFileSync(
+  new URL(
+    "../../../../../Awaken Design System/src/components/AwakenArchivedChatsSettings/AwakenArchivedChatsSettings.css",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const desktopStyles = readFileSync(
   new URL("../styles.css", import.meta.url),
   "utf8",
@@ -77,6 +84,18 @@ describe("focused settings layout", () => {
       "max-height: min(720px, calc(100vh - 56px));",
     );
     expect(desktopStyles).not.toContain(".acp-runner-drawer");
+  });
+
+  it("keeps the archived-chat search field from collapsing beside the project filter", () => {
+    expect(archivedChatsStyles).toMatch(
+      /\.aw-archived-chats__toolbar\s*\{[\s\S]*?display:\s*grid;[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) minmax\(180px, 240px\);/,
+    );
+    expect(archivedChatsStyles).toMatch(
+      /\.aw-archived-chats__search\s*\{[\s\S]*?min-height:\s*40px;/,
+    );
+    expect(archivedChatsStyles).toContain(
+      ".aw-archived-chats__project-filter { width: 100%; }",
+    );
   });
 
   it("uses the standard settings page as the model scroll owner", () => {

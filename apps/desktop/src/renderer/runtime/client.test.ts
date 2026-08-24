@@ -291,3 +291,44 @@ describe("electron runtime client", () => {
     expect(subscriptions).toHaveLength(1);
   });
 });
+
+describe("electron runtime client thread archive", () => {
+  it("forwards the thread list view through the typed bridge", async () => {
+    const { bridge } = createElectronBridge({ status: "running" });
+    bridge.listThreads = vi.fn(async () => []);
+    installBridge(bridge);
+
+    const client = createRuntimeClient();
+    await client.listThreads("archived");
+    expect(bridge.listThreads).toHaveBeenCalledWith("archived");
+
+    await client.listThreads();
+    expect(bridge.listThreads).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it("forwards archive mutations and preserves structured error codes", async () => {
+    const { bridge } = createElectronBridge({ status: "running" });
+    bridge.setThreadArchived = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, thread: { threadId: "thread-1", archived: true } })
+      .mockResolvedValueOnce({
+        ok: false,
+        code: "THREAD_BUSY",
+        message: "请先停止正在运行的任务",
+      });
+    installBridge(bridge);
+
+    const client = createRuntimeClient();
+    await expect(client.setThreadArchived("thread-1", true)).resolves.toEqual({
+      ok: true,
+      thread: { threadId: "thread-1", archived: true },
+    });
+    expect(bridge.setThreadArchived).toHaveBeenCalledWith("thread-1", true);
+
+    await expect(client.setThreadArchived("thread-1", false)).resolves.toEqual({
+      ok: false,
+      code: "THREAD_BUSY",
+      message: "请先停止正在运行的任务",
+    });
+  });
+});

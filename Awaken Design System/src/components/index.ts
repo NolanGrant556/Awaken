@@ -1,6 +1,7 @@
 export * from "./AwakenAccount";
 export * from "./AwakenAppearanceSettings";
 export * from "./AwakenAppShell";
+export * from "./AwakenArchivedChatsSettings";
 export * from "./AwakenDeliverableCard";
 export * from "./AwakenDeliverableList";
 export * from "./AwakenAssistantMessage";

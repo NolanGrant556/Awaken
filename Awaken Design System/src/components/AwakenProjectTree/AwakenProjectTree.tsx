@@ -501,6 +501,12 @@ function ProjectNode({
                       ].filter(Boolean).join(" ")}
                       role="menuitem"
                       disabled={menuItem.disabled}
+                      title={menuItem.disabled ? menuItem.disabledReason : undefined}
+                      aria-label={
+                        menuItem.disabled && menuItem.disabledReason
+                          ? `${menuItem.label}，${menuItem.disabledReason}`
+                          : undefined
+                      }
                       onClick={(event) => {
                         event.stopPropagation();
                         setMenuOpen(false);

@@ -22,6 +22,7 @@ export const AWAKEN_ICON_CONCEPTS = {
   close: "x",
   collapse: "minus",
   delete: "trash",
+  archive: "archive",
   "more-actions": "dots-horizontal",
   "expand-all": "chevrons-up-down",
   "collapse-all": "chevrons-down-up",

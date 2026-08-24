@@ -8,10 +8,10 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 
 当前主产品是 Electron + React 的 Awaken Desktop，主界面为 Run Workbench：
 
-- 左侧栏负责项目与线程入口；
+- 左侧栏负责项目与线程入口，并提供已停止会话的归档入口；
 - 中间工作区负责输入、运行叙事、状态反馈和最终交付物；
 - 右侧 Inspector 当前提供项目文件工作区、文件夹组选择、筛选、只读目录树以及 Office、代码/文本、PDF、图片和 HTML 只读预览；从项目文件树打开的 Markdown 可在同一文件工作区切换预览与编辑并写回原文件，从交付卡打开的临时 Artifact Markdown 标签当前只读；HTML 统一进入隔离的“浏览器”入口；当前 thread 存在原生 Subagent 记录时，还提供子任务详情、状态、活动、结果、错误与单任务取消；项目 Markdown 以外的文件编辑与通用工具详情尚未接通；
-- Settings 承载模型、搜索、长期记忆、外观、桌面宠物、计算机操作、Hook 和 ACP runner 等配置面；设置界面的用户可见标题显示为“钩子”；
+- Settings 承载模型、搜索、长期记忆、全局规则、外观、桌面宠物、计算机操作、Hook、ACP runner 和固定末项“已归档的聊天”等配置与管理界面；设置界面的用户可见标题显示为“钩子”；
 - Desktop 负责启动、监督和关闭本地 `awaken-core`，用户不需要单独运行 Core；
 - `Awaken Design System` 是纯 UI 组件包和 Gallery，不拥有产品状态、后端策略或运行时协议。
 
@@ -21,7 +21,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 
 | 功能域 | 当前能力摘要 | 权威入口 |
 | --- | --- | --- |
-| 桌面工作台 | 项目与线程导航、Workbench 输入和运行叙事、附件、交付物、全局/项目 AGENTS.md 入口、外观、宠物与 Desktop 生命周期 | [01 桌面工作台](docs/01_桌面工作台/索引.md) |
+| 桌面工作台 | 项目与线程导航、会话归档与恢复、Workbench 输入和运行叙事、附件、交付物、全局/项目 AGENTS.md 入口、外观、宠物与 Desktop 生命周期 | [01 桌面工作台](docs/01_桌面工作台/索引.md) |
 | 主智能体闭环 | thread/run、多轮上下文、AGENTS.md 运行快照、压缩、主动提问、取消和失败终止；主 run 支持 root-only `update_plan`、耐久运行计划、实时进度入口与终态历史；原生 Subagent 支持 explore/plan/review/general、shared_readonly/shared/git_worktree、每 run 8 个任务/4 并发、终态自动交接、status/wait/cancel/message、Memory snapshot 继承、orphan interrupted、耐久事件与 Desktop 任务组/Inspector | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
 | 运行时与本地服务 | Desktop 托管本地服务、SemanticJournal、工具媒体 blob、当前用户执行环境观察与历史回放 | [03 运行时与本地服务](docs/03_运行时与本地服务/索引.md) |
 | 工具、权限与安全执行 | 七个模型基础工具、provider/capability/dependency、每 run 可用性快照、零审批、TaskScope/Trash；user/project/project-local Hook、自然语言配置工具、command/受控 HTTP/prompt/只读 agent 执行器、十一类边界、阻断/输入更新、耐久回执与显式 Skill 激活注册；以及保留工具的窄 broker 合同 | [04 工具、权限与安全执行](docs/04_工具权限与审批/索引.md) |

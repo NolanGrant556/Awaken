@@ -25,6 +25,7 @@ describe("artifact media manager", () => {
     const transcript: RuntimeThreadTranscript = {
       thread: {
         threadId: "thread-1",
+          archived: false,
         label: "media",
         workspace: { workspaceRoot: root, writableRoots: [root], outputRoots: [output] },
         createdAt: new Date(0).toISOString(),

@@ -87,6 +87,8 @@ export type ProjectMenuItem = {
   label: string;
   tone?: "neutral" | "danger";
   disabled?: boolean;
+  /** 禁用时通过 title 暴露的辅助说明（如“请先停止正在运行的任务”）。 */
+  disabledReason?: string;
   onSelect?: () => void;
 };
 

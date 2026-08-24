@@ -10,6 +10,16 @@
   overflow-y: auto;
 }
 
+.aw-settings-nav__group-label {
+  margin-top: 10px;
+  padding: 4px 10px 2px;
+  color: var(--aw-text-tertiary);
+  font-size: 12px;
+  font-weight: var(--aw-font-weight-semibold);
+}
+
+.aw-settings-nav__group-label:first-child { margin-top: 0; }
+
 .aw-settings-nav__item {
   display: flex;
   align-items: center;

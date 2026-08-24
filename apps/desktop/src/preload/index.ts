@@ -98,6 +98,8 @@ import {
   type SkillPreviewResponse,
   type RuntimeThreadTranscript,
   type RuntimeThread,
+  type RuntimeThreadListView,
+  type SetThreadArchivedResult,
   type RuntimeToolInfo,
   type ScheduledTask,
   type ScheduledTaskCreateInput,
@@ -251,9 +253,16 @@ const bridge: AwakenBridge = {
       "awaken:get-thread-transcript",
       threadId,
     ) as Promise<RuntimeThreadTranscript>,
-  listThreads: () => ipcRenderer.invoke("awaken:list-threads") as Promise<RuntimeThread[]>,
+  listThreads: (view?: RuntimeThreadListView) =>
+    ipcRenderer.invoke("awaken:list-threads", view) as Promise<RuntimeThread[]>,
   renameThread: (threadId: string, label: string) =>
     ipcRenderer.invoke("awaken:rename-thread", threadId, label) as Promise<RuntimeThread>,
+  setThreadArchived: (threadId: string, archived: boolean) =>
+    ipcRenderer.invoke(
+      "awaken:set-thread-archived",
+      threadId,
+      archived,
+    ) as Promise<SetThreadArchivedResult>,
   updateThreadModelPreference: (threadId: string, request: ThreadModelPreferenceRequest) =>
     ipcRenderer.invoke(
       "awaken:update-thread-model-preference",

@@ -91,6 +91,8 @@ import {
   type SkillPreviewResponse,
   type RuntimeThreadTranscript,
   type RuntimeThread,
+  type RuntimeThreadListView,
+  type SetThreadArchivedResult,
   type RuntimeToolInfo,
   type SearchSettings,
   type SearchSettingsSaveRequest,
@@ -260,8 +262,9 @@ export type RuntimeClient = {
   getModelProfileBalances: () => Promise<ModelProfileBalancesResult>;
   getRun: (runId: string) => Promise<RuntimeRun>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
-  listThreads: () => Promise<RuntimeThread[]>;
+  listThreads: (view?: RuntimeThreadListView) => Promise<RuntimeThread[]>;
   renameThread: (threadId: string, label: string) => Promise<RuntimeThread>;
+  setThreadArchived: (threadId: string, archived: boolean) => Promise<SetThreadArchivedResult>;
   updateThreadModelPreference: (
     threadId: string,
     request: ThreadModelPreferenceRequest,
@@ -526,8 +529,9 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getModelProfileBalances: () => bridge.getModelProfileBalances(),
     getRun: (runId) => bridge.getRun(runId),
     getThreadTranscript: (threadId) => bridge.getThreadTranscript(threadId),
-    listThreads: () => bridge.listThreads(),
+    listThreads: (view) => bridge.listThreads(view),
     renameThread: (threadId, label) => bridge.renameThread(threadId, label),
+    setThreadArchived: (threadId, archived) => bridge.setThreadArchived(threadId, archived),
     updateThreadModelPreference: (threadId, request) =>
       bridge.updateThreadModelPreference(threadId, request),
     deleteThread: (threadId) => bridge.deleteThread(threadId),

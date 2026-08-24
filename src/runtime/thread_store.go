@@ -10,16 +10,35 @@ import (
 	"awaken/src/desktopdata"
 )
 
+// ThreadListView selects which non-deleted threads a list query returns.
+// Deleted records are excluded from every view; deletion always wins over
+// archiving. Callers pass the explicit enum instead of raw boolean
+// combinations (archive contract §4.2).
+type ThreadListView string
+
+const (
+	// ThreadListViewActive returns threads that are neither deleted nor
+	// archived; it is the default sidebar authority.
+	ThreadListViewActive ThreadListView = "active"
+	// ThreadListViewArchived returns threads that are archived but not
+	// deleted.
+	ThreadListViewArchived ThreadListView = "archived"
+	// ThreadListViewAll returns every non-deleted thread; it exists for
+	// internal reconciliation and tests, not for the regular sidebar.
+	ThreadListViewAll ThreadListView = "all"
+)
+
 type ThreadStore interface {
 	CreateThread(snapshot ThreadSnapshot, modelProfileKey, preview string) error
 	AppendRunInput(snapshot ThreadSnapshot, run Run, sessionID string, input string, attachments []RunInputAttachment) error
 	AppendConversation(snapshot ThreadSnapshot, run Run, messages []convcontext.Message) error
 	AppendRunEvents(snapshot ThreadSnapshot, run Run, events []Event) error
-	ListThreads() ([]ThreadSnapshot, error)
+	ListThreads(view ThreadListView) ([]ThreadSnapshot, error)
 	RestoreThread(threadID string) (storedThreadRecord, restoredTranscript, error)
 	GetTranscript(threadID string) (ThreadTranscript, error)
 	RenameThread(threadID, label string, updatedAt time.Time) (ThreadSnapshot, error)
 	UpdateThreadTitleMetadata(threadID, label string, source ThreadTitleSource, status ThreadTitleStatus, seedRunID string, updatedAt time.Time) (ThreadSnapshot, error)
+	SetThreadArchived(threadID string, archived bool, now time.Time) (ThreadSnapshot, error)
 	DeleteThread(threadID string) error
 }
 

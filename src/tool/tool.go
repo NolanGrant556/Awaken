@@ -136,6 +136,15 @@ type SemanticJournalSanitizer interface {
 	SemanticJournalResult(output string) string
 }
 
+// SemanticJournalOutcomeSanitizer lets a tool remove bodies that also appear
+// inside the canonical ExecutionOutcome. SemanticJournalSanitizer only owns
+// the call/result strings for compatibility; tools whose live Outcome carries
+// the same protected body in Content, Details, ModelContent, or Environment
+// must implement this interface as well.
+type SemanticJournalOutcomeSanitizer interface {
+	SemanticJournalOutcome(outcome ExecutionOutcome, sanitizedResult string) ExecutionOutcome
+}
+
 type ReadOnlyTool interface {
 	IsReadOnly() bool
 }

@@ -46,6 +46,7 @@ const DS_SRC = path.join(REPO_ROOT, "Awaken Design System", "src");
 const DESKTOP_SRC = path.join(REPO_ROOT, "apps", "desktop", "src");
 
 const PRODUCT_APPROVED_ICON_DIGESTS = {
+  "agent-plugins-mark": "440d25a0fce1e7a0c22aa8af66ba7c6407b498b093ffdcf14e4f46b048491ac4",
   brain: "07158d2f25e925e3e36db7aee89b77d4f973ce758458e0d99a5d458c59783a4e",
   connector: "050aeec594e18aee075e2b302bf5af350a475b38e1c95f9262d60d3bcc066071",
   folder: "bc3ca3cdb88518eb7b3b8f60623627c23ba7bb9f64bb6adffa85614648262175",
@@ -230,11 +231,12 @@ describe("概念表", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it("连接器、Skill、CLI 与 MCP 使用当前确定的图形", () => {
+  it("连接器、Skill、Plugin、CLI 与 MCP 使用当前确定的图形", () => {
     expect(AWAKEN_ICON_CONCEPTS.connector).toBe("connector");
     expect(AWAKEN_ICON_CONCEPTS.skill).toBe("book-open");
     expect(AWAKEN_ICON_CONCEPTS["skill-active"]).toBe("book-open");
     expect(AWAKEN_ICON_CONCEPTS["tool-terminal"]).toBe("terminal");
+    expect(AWAKEN_ICON_CONCEPTS.plugin).toBe("agent-plugins-mark");
     expect(AWAKEN_ICON_CONCEPTS["mcp-brand"]).toBe("mcp-mark");
     expect(AWAKEN_ICON_CONCEPTS["mcp-source"]).toBe("mcp-mark");
   });
@@ -249,7 +251,7 @@ describe("概念表", () => {
 });
 
 describe("已确认产品字形保护", () => {
-  it("文件夹、记忆、连接器、MCP、Skill 与 CLI 字形保持已确认版本", () => {
+  it("文件夹、记忆、连接器、Plugin、MCP、Skill 与 CLI 字形保持已确认版本", () => {
     for (const [name, expected] of Object.entries(PRODUCT_APPROVED_ICON_DIGESTS)) {
       const icon = getAwakenIcon(name as keyof typeof PRODUCT_APPROVED_ICON_DIGESTS);
       const value = JSON.stringify({

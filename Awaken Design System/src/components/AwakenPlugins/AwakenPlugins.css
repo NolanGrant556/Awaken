@@ -1,0 +1,272 @@
+@import "../../tokens/components.css";
+
+.aw-plugins {
+  container-type: inline-size;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--aw-surface-work);
+  color: var(--aw-text-primary);
+}
+
+.aw-plugins__inner {
+  display: grid;
+  align-content: start;
+  gap: var(--aw-space-8);
+  min-width: 0;
+  min-height: 0;
+  width: min(920px, calc(100% - 64px));
+  margin: 0 auto;
+  padding: var(--aw-space-13) 0 var(--aw-space-15);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 46%, transparent)
+    transparent;
+  scrollbar-width: thin;
+}
+
+.aw-plugins__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--aw-space-8);
+  min-width: 0;
+}
+
+.aw-plugins__heading {
+  min-width: 0;
+}
+
+.aw-plugins__heading h1 {
+  margin: 0;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-xl);
+  font-weight: var(--aw-font-weight-heavy);
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+}
+
+.aw-plugins__heading p {
+  max-width: 620px;
+  margin: var(--aw-space-2) 0 0;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-base);
+}
+
+.aw-plugins__header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--aw-space-3);
+}
+
+.aw-plugins__refresh {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-secondary);
+  cursor: pointer;
+  transition:
+    border-color var(--aw-transition-fast),
+    color var(--aw-transition-fast),
+    box-shadow var(--aw-transition-fast);
+}
+
+.aw-plugins__refresh:hover:enabled {
+  border-color: var(--aw-border-control-hover);
+  color: var(--aw-text-primary);
+}
+
+.aw-plugins__refresh:focus-visible {
+  outline: none;
+  box-shadow: var(--aw-shadow-focus);
+}
+
+.aw-plugins__refresh:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
+.aw-plugins__refresh:disabled svg,
+.aw-plugins__empty[data-kind="loading"] .aw-plugins__empty-icon svg {
+  animation: aw-plugins-spin 900ms linear infinite;
+}
+
+.aw-plugins__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.aw-plugins__search {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--aw-space-3);
+  width: min(320px, 100%);
+  height: 36px;
+  padding: 0 var(--aw-space-5);
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-tertiary);
+  transition:
+    border-color var(--aw-transition-fast),
+    box-shadow var(--aw-transition-fast);
+}
+
+.aw-plugins__search:hover,
+.aw-plugins__search:has(input:focus-visible) {
+  border-color: var(--aw-border-control-hover);
+}
+
+.aw-plugins__search:has(input:focus-visible) {
+  box-shadow: var(--aw-shadow-focus);
+}
+
+.aw-plugins__search input {
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--aw-text-primary);
+  font: inherit;
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-plugins__search input::placeholder {
+  color: var(--aw-text-tertiary);
+}
+
+.aw-plugins__message {
+  padding: var(--aw-space-4) var(--aw-space-5);
+  border: 1px solid var(--aw-error-soft-border);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-error-soft-bg);
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-base);
+}
+
+.aw-plugins__content {
+  min-width: 0;
+}
+
+.aw-plugins__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: var(--aw-space-5) var(--aw-space-6);
+  min-width: 0;
+}
+
+.aw-plugins__empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--aw-space-5);
+  min-height: 240px;
+  padding: var(--aw-space-10) var(--aw-space-8);
+  border: 1px dashed var(--aw-border-main);
+  border-radius: var(--aw-radius-md);
+  background: color-mix(in srgb, var(--aw-surface-panel) 58%, transparent);
+  text-align: center;
+}
+
+.aw-plugins__empty-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-secondary);
+  box-shadow: var(--aw-shadow-raised);
+}
+
+.aw-plugins__empty-copy {
+  display: grid;
+  gap: var(--aw-space-2);
+  max-width: 430px;
+}
+
+.aw-plugins__empty-copy h2,
+.aw-plugins__empty-copy p {
+  margin: 0;
+}
+
+.aw-plugins__empty-copy h2 {
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  font-weight: var(--aw-font-weight-bold);
+  line-height: var(--aw-line-height-base);
+}
+
+.aw-plugins__empty-copy p {
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-base);
+}
+
+.aw-plugins__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes aw-plugins-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@container (max-width: 720px) {
+  .aw-plugins__inner {
+    width: min(100% - 32px, 920px);
+    padding-top: var(--aw-space-11);
+  }
+
+  .aw-plugins__header {
+    display: grid;
+  }
+
+  .aw-plugins__header-actions {
+    justify-content: flex-start;
+  }
+
+  .aw-plugins__toolbar,
+  .aw-plugins__search {
+    width: 100%;
+  }
+
+  .aw-plugins__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-plugins__refresh:disabled svg,
+  .aw-plugins__empty[data-kind="loading"] .aw-plugins__empty-icon svg {
+    animation: none;
+  }
+}

@@ -14,11 +14,28 @@ import (
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
 	"awaken/src/tool"
+	_ "awaken/src/tools/archived_history"
 	_ "awaken/src/tools/bash"
 	_ "awaken/src/tools/computer"
 	_ "awaken/src/tools/edit"
 	_ "awaken/src/tools/write"
 )
+
+func TestRequestBuilderExposesArchivedHistoryCapabilityAndBoundary(t *testing.T) {
+	request := NewRequestBuilder(AgentConfig{}).Build(convcontext.New(), nil)
+	for _, schema := range request.Tools {
+		if schema.Function.Name != "archived_history" {
+			continue
+		}
+		for _, expected := range []string{"thread_id", "host-managed session store", "untrusted historical data", "~/.awaken"} {
+			if !strings.Contains(schema.Function.Description, expected) {
+				t.Fatalf("archived_history model description missing %q: %s", expected, schema.Function.Description)
+			}
+		}
+		return
+	}
+	t.Fatal("archived_history must be present in the root model-visible tool pool")
+}
 
 type requestBuilderDefinitionTool struct{}
 

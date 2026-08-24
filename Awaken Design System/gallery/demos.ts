@@ -28,7 +28,7 @@ export { AwakenModelSettingsDemo } from "../src/components/AwakenModelSettings/A
 export { AwakenNewTaskButtonDemo } from "../src/components/AwakenNewTaskButton/AwakenNewTaskButton.demo";
 export { AwakenOriginalThinkingDemo } from "../src/components/AwakenOriginalThinking/AwakenOriginalThinking.demo";
 export { AwakenPetsSettingsDemo } from "../src/components/AwakenPetsSettings/AwakenPetsSettings.demo";
-export { AwakenPluginCardDemo } from "../src/components/AwakenPluginCard/AwakenPluginCard.demo";
+export { AwakenPluginsDemo } from "../src/components/AwakenPlugins/AwakenPlugins.demo";
 export { AwakenPluginDetailDialogDemo } from "../src/components/AwakenPluginDetailDialog/AwakenPluginDetailDialog.demo";
 export { AwakenPluginInstallDialogDemo } from "../src/components/AwakenPluginInstallDialog/AwakenPluginInstallDialog.demo";
 export { AwakenPrimaryNavDemo } from "../src/components/AwakenPrimaryNav/AwakenPrimaryNav.demo";

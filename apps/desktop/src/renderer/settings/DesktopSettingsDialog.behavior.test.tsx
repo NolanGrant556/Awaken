@@ -174,6 +174,71 @@ describe("DesktopSettingsDialog model connection feedback", () => {
     vi.restoreAllMocks();
   });
 
+  it("routes unarchive feedback through the top Settings toast", async () => {
+    const archivedThread = {
+      threadId: "thread-archived",
+      label: "待恢复的会话",
+      projectId: "project-1",
+      archived: true,
+      archivedAt: "2026-08-24T01:00:00Z",
+      workspace: { workspaceRoot: "/tmp/project-1", writableRoots: ["/tmp/project-1"] },
+      createdAt: "2026-08-23T01:00:00Z",
+      updatedAt: "2026-08-24T01:00:00Z",
+    };
+    const runtimeClient = {
+      listModelProviders: vi.fn(async () => [deepSeekProvider]),
+      listModelProfiles: vi.fn(async () => []),
+      getAgentPlanAccount: vi.fn(async () => null),
+      syncModelCapabilities: vi.fn(async () => [deepSeekProvider]),
+      listThreads: vi.fn(async () => [archivedThread]),
+      listProjects: vi.fn(async () => [{
+        projectId: "project-1",
+        workspaceRoot: "/tmp/project-1",
+        folders: [],
+        displayName: "项目一",
+        state: "active",
+        createdAt: "2026-08-01T00:00:00Z",
+        updatedAt: "2026-08-01T00:00:00Z",
+        version: 1,
+      }]),
+      setThreadArchived: vi.fn(async () => ({ ok: true, thread: archivedThread })),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <DesktopSettingsDialog
+          open
+          runtimeClient={runtimeClient}
+          theme="light"
+          themePreference="system"
+          themeSaving={false}
+          themeMessage={null}
+          onThemePreferenceChange={vi.fn()}
+          onOpenChange={vi.fn()}
+          onProfilesChanged={vi.fn()}
+          onThreadsChanged={vi.fn()}
+          initialSection="archived-chats"
+        />,
+      );
+    });
+    await settle();
+
+    const unarchiveButton = Array.from(
+      container.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent?.trim() === "取消归档");
+    expect(unarchiveButton).toBeDefined();
+
+    await act(async () => unarchiveButton?.click());
+
+    const toast = container.querySelector(".aw-settings-toast");
+    expect(toast?.textContent).toBe("已取消归档");
+    expect(toast?.getAttribute("role")).toBe("status");
+    expect(toast?.getAttribute("aria-live")).toBe("polite");
+    expect(toast?.getAttribute("aria-atomic")).toBe("true");
+    expect(container.querySelector(".aw-archived-chats + .aw-archived-chats__status-text"))
+      .toBeNull();
+  });
+
   it("keeps progress and the successful result visible inside the provider modal", async () => {
     let resolveTest: ((result: ModelProfileTestResult) => void) | undefined;
     const testModelProfile = vi.fn(

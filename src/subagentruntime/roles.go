@@ -21,6 +21,9 @@ const (
 	// runPlanHidden keeps the root-only update_plan tool out of child tool
 	// pools; child progress uses native Subagent facts (运行计划契约 §6.1).
 	runPlanHidden = "update_plan"
+	// archivedHistoryHidden keeps cross-thread private history in the root
+	// Agent. Children receive only the task context their parent delegates.
+	archivedHistoryHidden = "archived_history"
 )
 
 var mutationTools = []string{
@@ -28,15 +31,15 @@ var mutationTools = []string{
 }
 
 var orchestrationTools = []string{
-	orchestrationHidden, askUserHidden, acpHidden, acpConfigHidden, hookConfigHidden, runPlanHidden,
+	orchestrationHidden, askUserHidden, acpHidden, acpConfigHidden, hookConfigHidden, runPlanHidden, archivedHistoryHidden,
 }
 
 func RoleCatalog() map[string]Role {
 	return map[string]Role{
 		AgentTypeExplore: {
-			Type:     AgentTypeExplore,
+			Type:      AgentTypeExplore,
 			WhenToUse: "快速只读搜索代码、定位入口、梳理事实；不修改文件。",
-			ReadOnly: true,
+			ReadOnly:  true,
 			SystemPrompt: "You are a local Awaken Subagent acting as a codebase explorer. " +
 				"Work only on the assigned task. You are strictly READ-ONLY: do not edit, write, or delete files, " +
 				"do not run mutating shell commands against the project tree, cannot ask the user questions, " +
@@ -45,9 +48,9 @@ func RoleCatalog() map[string]Role {
 			DisallowedTools: append(append([]string{}, orchestrationTools...), mutationTools...),
 		},
 		AgentTypePlan: {
-			Type:     AgentTypePlan,
+			Type:      AgentTypePlan,
 			WhenToUse: "只读规划实现路径，列出必须改动的关键文件和顺序；不修改文件。",
-			ReadOnly: true,
+			ReadOnly:  true,
 			SystemPrompt: "You are a local Awaken Subagent acting as a planning agent. " +
 				"You are strictly READ-ONLY. Explore the codebase only as needed to produce an implementation plan. " +
 				"You cannot ask the user questions, cannot spawn another Subagent, and must not modify files. " +
@@ -56,9 +59,9 @@ func RoleCatalog() map[string]Role {
 			DisallowedTools: append(append([]string{}, orchestrationTools...), mutationTools...),
 		},
 		AgentTypeReview: {
-			Type:     AgentTypeReview,
+			Type:      AgentTypeReview,
 			WhenToUse: "独立复核风险、测试缺口或实现是否满足任务；项目目录只读。",
-			ReadOnly: true,
+			ReadOnly:  true,
 			SystemPrompt: "You are a local Awaken Subagent acting as an independent reviewer. " +
 				"The project workspace is READ-ONLY. Do not edit or write project files. " +
 				"You cannot ask the user questions or spawn another Subagent. " +
@@ -67,9 +70,9 @@ func RoleCatalog() map[string]Role {
 			DisallowedTools: append(append([]string{}, orchestrationTools...), mutationTools...),
 		},
 		AgentTypeGeneral: {
-			Type:     AgentTypeGeneral,
+			Type:      AgentTypeGeneral,
 			WhenToUse: "需要在隔离或共享工作区中独立实现并改文件时。",
-			ReadOnly: false,
+			ReadOnly:  false,
 			SystemPrompt: "You are a local Awaken Subagent acting as a general-purpose coding agent. " +
 				"Complete the assigned implementation. You may use the inherited file and shell tools inside the granted workspace. " +
 				"You cannot ask the user questions, cannot spawn another Subagent, and cannot widen permissions. " +

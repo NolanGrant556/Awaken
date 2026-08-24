@@ -3,7 +3,11 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RuntimeProject, RuntimeSkill } from "../shared/runtime";
+import type {
+  RuntimePlugin,
+  RuntimeProject,
+  RuntimeSkill,
+} from "../shared/runtime";
 import {
   ExtensionsView,
   SKILL_CATALOG_SYNC_INTERVAL_MS,
@@ -151,6 +155,100 @@ describe("ExtensionsView behavior", () => {
     await settle();
 
     expect(refreshButton?.disabled).toBe(false);
+  });
+
+  it("renders the Design System plugin catalog and keeps install risk confirmation required", async () => {
+    const plugin: RuntimePlugin = {
+      name: "acme.tools",
+      version: "1.2.0",
+      description: "团队代码检查工具",
+      enabled: true,
+      source: {
+        kind: "remote_git",
+        url: "https://example.test/acme.tools.git",
+      },
+      skillCount: 2,
+      serverCount: 1,
+    };
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => [runtimeProject]),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => []),
+      listPlugins: vi.fn(async () => [plugin]),
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="plugins"
+          desktopReady
+          runtimeClient={runtimeClient}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={vi.fn()}
+        />,
+      );
+    });
+    await settle();
+
+    expect(document.querySelector(".aw-plugins")).not.toBeNull();
+    expect(document.querySelector(".extension-view")).toBeNull();
+    expect(document.querySelector(".aw-plugin-card")?.textContent).toContain(
+      "acme.tools",
+    );
+    expect(
+      document.querySelector(".aw-plugin-card__icon .aw-icon--agent-plugins-mark"),
+    ).not.toBeNull();
+
+    const searchInput = document.querySelector<HTMLInputElement>(
+      '.aw-plugins__search input[placeholder="搜索插件…"]',
+    );
+    await act(async () => {
+      searchInput?.focus();
+      if (searchInput) {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        )?.set;
+        setter?.call(searchInput, "missing");
+        searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    expect(document.body.textContent).toContain("没有匹配的插件");
+    expect(document.querySelector(".aw-plugin-card")).toBeNull();
+
+    await act(async () => buttonByText("安装插件")?.click());
+    const installDialog = document.querySelector<HTMLElement>(
+      ".aw-plugin-install-dialog[role=\"dialog\"]",
+    );
+    expect(installDialog?.textContent).toContain("选择插件来源");
+    expect(installDialog?.textContent).toContain("插件可访问你的电脑");
+    expect(installDialog?.textContent).toContain(
+      "我已了解 MCP 子进程无沙盒，并以当前用户身份运行",
+    );
+    expect(buttonByText("确认安装")?.disabled).toBe(true);
+
+    const localPathInput = installDialog?.querySelector<HTMLInputElement>(
+      'input[placeholder="选择插件目录，或输入 zip 文件路径"]',
+    );
+    const riskConfirm = installDialog?.querySelector<HTMLInputElement>(
+      ".aw-plugin-install-dialog__risk-confirm input",
+    );
+    await act(async () => {
+      if (localPathInput) {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        )?.set;
+        setter?.call(localPathInput, "/tmp/acme-plugin");
+        localPathInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      riskConfirm?.click();
+    });
+    expect(buttonByText("确认安装")?.disabled).toBe(false);
   });
 
   it("opens a project window, previews SKILL.md, and deletes through confirmation", async () => {

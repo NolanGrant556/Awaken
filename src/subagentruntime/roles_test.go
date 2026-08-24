@@ -91,3 +91,21 @@ func TestAllRolesHideUpdatePlan(t *testing.T) {
 		}
 	}
 }
+
+func TestAllRolesHideArchivedHistory(t *testing.T) {
+	for agentType := range RoleCatalog() {
+		role, ok := LookupRole(agentType)
+		if !ok {
+			t.Fatalf("%s role missing", agentType)
+		}
+		hidden := false
+		for _, name := range role.DisallowedTools {
+			if name == "archived_history" {
+				hidden = true
+			}
+		}
+		if !hidden {
+			t.Fatalf("%s must hide archived_history", agentType)
+		}
+	}
+}

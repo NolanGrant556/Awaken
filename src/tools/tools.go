@@ -1,6 +1,7 @@
 package tools
 
 import (
+	_ "awaken/src/tools/archived_history"
 	_ "awaken/src/tools/artifact_publish"
 	_ "awaken/src/tools/ask_user"
 	_ "awaken/src/tools/bash"

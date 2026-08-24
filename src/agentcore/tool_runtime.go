@@ -62,6 +62,9 @@ type ToolRuntime struct {
 	// the root Runner after the final run identity exists; child runtimes
 	// never receive one (root-only contract).
 	runPlanService tool.RunPlanService
+	// archivedHistoryService is a root-Agent-only, read-only bridge to Runtime's
+	// protected thread store. The model receives thread identities, never paths.
+	archivedHistoryService tool.ArchivedHistoryService
 }
 
 type ToolRuntimeConfig struct {
@@ -82,12 +85,13 @@ type ToolRuntimeConfig struct {
 	SubagentBoundary *subagent.ParentBoundary
 	// SubagentOrigin, when set, is propagated into every ExecutionIntent
 	// so the decision layer can attribute the call.
-	SubagentOrigin    *profile.SubagentOrigin
-	SubagentTaskID    string
-	ModelProfileID    string
-	ModelCapabilities tool.ModelCapabilities
-	ToolSessionState  *tool.ToolSessionState
-	ModelContentStore tool.ModelContentStore
+	SubagentOrigin         *profile.SubagentOrigin
+	SubagentTaskID         string
+	ModelProfileID         string
+	ModelCapabilities      tool.ModelCapabilities
+	ToolSessionState       *tool.ToolSessionState
+	ModelContentStore      tool.ModelContentStore
+	ArchivedHistoryService tool.ArchivedHistoryService
 	// ComputerExecutor, when set, is wired into the Router so that
 	// computer_lane tools are dispatched to the run-bound Computer runtime.
 	// If nil, computer_lane calls fail closed with a needs-runtime outcome.
@@ -194,23 +198,24 @@ func NewToolRuntimeWithConfig(sink EventSink, config ToolRuntimeConfig) *ToolRun
 		router = router.WithComputerExecutor(config.ComputerExecutor)
 	}
 	return &ToolRuntime{
-		sink:              normalizeEventSink(sink),
-		permissionContext: config.PermissionContext.Normalize(),
-		autoPolicy:        policy,
-		serverConnected:   config.ServerConnected,
-		auditSink:         auditSink,
-		runID:             config.RunID,
-		toolSnapshot:      pinnedToolSnapshot,
-		environment:       pinnedEnvironment,
-		profile:           execProfile,
-		subagentBoundary:  config.SubagentBoundary,
-		subagentOrigin:    config.SubagentOrigin,
-		subagentTaskID:    strings.TrimSpace(config.SubagentTaskID),
-		router:            router,
-		modelCapabilities: config.ModelCapabilities,
-		toolSessionState:  config.ToolSessionState,
-		modelContentStore: config.ModelContentStore,
-		modelProfileID:    strings.TrimSpace(config.ModelProfileID),
+		sink:                   normalizeEventSink(sink),
+		permissionContext:      config.PermissionContext.Normalize(),
+		autoPolicy:             policy,
+		serverConnected:        config.ServerConnected,
+		auditSink:              auditSink,
+		runID:                  config.RunID,
+		toolSnapshot:           pinnedToolSnapshot,
+		environment:            pinnedEnvironment,
+		profile:                execProfile,
+		subagentBoundary:       config.SubagentBoundary,
+		subagentOrigin:         config.SubagentOrigin,
+		subagentTaskID:         strings.TrimSpace(config.SubagentTaskID),
+		router:                 router,
+		modelCapabilities:      config.ModelCapabilities,
+		toolSessionState:       config.ToolSessionState,
+		modelContentStore:      config.ModelContentStore,
+		archivedHistoryService: config.ArchivedHistoryService,
+		modelProfileID:         strings.TrimSpace(config.ModelProfileID),
 	}
 }
 
@@ -489,6 +494,9 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	toolCtx = tool.ContextWithToolExecutionIdentity(toolCtx, identity)
 	if rt.runPlanService != nil {
 		toolCtx = tool.ContextWithRunPlanService(toolCtx, rt.runPlanService)
+	}
+	if rt.archivedHistoryService != nil {
+		toolCtx = tool.ContextWithArchivedHistoryService(toolCtx, rt.archivedHistoryService)
 	}
 	if rt.toolSnapshot != nil && rt.environment != nil {
 		toolCtx = tool.ContextWithRunAvailability(toolCtx, *rt.toolSnapshot, *rt.environment)

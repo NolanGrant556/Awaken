@@ -705,6 +705,7 @@ func toolRuntimeConfigFromAgentConfig(config AgentConfig) ToolRuntimeConfig {
 		ModelCapabilities:            config.ModelConfig.Capabilities,
 		ToolSessionState:             config.ToolSessionState,
 		ModelContentStore:            config.ModelContentStore,
+		ArchivedHistoryService:       config.ArchivedHistoryService,
 	}
 	if config.ComputerRuntime != nil {
 		cfg.ComputerExecutor = executors.NewComputerExecutor(config.ComputerRuntime)

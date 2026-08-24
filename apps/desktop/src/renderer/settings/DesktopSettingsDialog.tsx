@@ -1367,6 +1367,7 @@ export function DesktopSettingsDialog({
         <ArchivedChatsSettingsPanel
           runtimeClient={runtimeClient}
           onThreadsChanged={onThreadsChanged}
+          onToast={showToast}
         />
       ) : (
         <AwakenModelSettings

@@ -50,6 +50,7 @@ export * from "./AwakenPetsSettings";
 export * from "./AwakenPluginCard";
 export * from "./AwakenPluginDetailDialog";
 export * from "./AwakenPluginInstallDialog";
+export * from "./AwakenPlugins";
 export * from "./AwakenPopover";
 export * from "./AwakenPrimaryNav";
 export * from "./AwakenProductLogo";

@@ -180,12 +180,17 @@ describe("ArchivedChatsSettingsPanel", () => {
     document.body.replaceChildren();
   });
 
-  async function renderPanel(client: RuntimeClient, onThreadsChanged = vi.fn()) {
+  async function renderPanel(
+    client: RuntimeClient,
+    onThreadsChanged = vi.fn(),
+    onToast = vi.fn(),
+  ) {
     await act(async () => {
       root.render(
         <ArchivedChatsSettingsPanel
           runtimeClient={client}
           onThreadsChanged={onThreadsChanged}
+          onToast={onToast}
         />,
       );
     });
@@ -242,7 +247,8 @@ describe("ArchivedChatsSettingsPanel", () => {
 
   it("unarchives a row, refreshes the sidebar and keeps other rows", async () => {
     const client = makeClient();
-    const onThreadsChanged = await renderPanel(client);
+    const onToast = vi.fn();
+    const onThreadsChanged = await renderPanel(client, vi.fn(), onToast);
 
     await act(async () => {
       buttonByText(container, "取消归档").click();
@@ -251,7 +257,8 @@ describe("ArchivedChatsSettingsPanel", () => {
     expect(client.setThreadArchived).toHaveBeenCalledWith("thread-1", false);
     expect(onThreadsChanged).toHaveBeenCalledTimes(1);
     expect(container.textContent).not.toContain("归档会话");
-    expect(container.textContent).toContain("已取消归档");
+    expect(container.textContent).not.toContain("已取消归档");
+    expect(onToast).toHaveBeenCalledWith("已取消归档");
   });
 
   it("explains the removed-project case after unarchive", async () => {
@@ -259,13 +266,15 @@ describe("ArchivedChatsSettingsPanel", () => {
       listThreads: vi.fn(async () => [makeThread({ projectId: "project-1" })]),
       listProjects: vi.fn(async () => [makeProject({ state: "removed" })]),
     });
-    await renderPanel(client);
+    const onToast = vi.fn();
+    await renderPanel(client, vi.fn(), onToast);
 
     await act(async () => {
       buttonByText(container, "取消归档").click();
     });
 
-    expect(container.textContent).toContain("已取消归档；重新添加项目后可在侧栏查看");
+    expect(container.textContent).not.toContain("已取消归档；重新添加项目后可在侧栏查看");
+    expect(onToast).toHaveBeenCalledWith("已取消归档；重新添加项目后可在侧栏查看");
   });
 
   it("keeps the row and shows the failure notice when unarchive fails", async () => {
@@ -276,14 +285,16 @@ describe("ArchivedChatsSettingsPanel", () => {
         message: "请先停止正在运行的任务",
       })),
     });
-    await renderPanel(client);
+    const onToast = vi.fn();
+    await renderPanel(client, vi.fn(), onToast);
 
     await act(async () => {
       buttonByText(container, "取消归档").click();
     });
 
     expect(container.textContent).toContain("归档会话");
-    expect(container.textContent).toContain("请先停止正在运行的任务");
+    expect(container.textContent).not.toContain("请先停止正在运行的任务");
+    expect(onToast).toHaveBeenCalledWith("请先停止正在运行的任务");
   });
 
   it("keeps the row when the unarchive bridge rejects", async () => {
@@ -292,14 +303,16 @@ describe("ArchivedChatsSettingsPanel", () => {
         throw new Error("运行时连接已断开");
       }),
     });
-    await renderPanel(client);
+    const onToast = vi.fn();
+    await renderPanel(client, vi.fn(), onToast);
 
     await act(async () => {
       buttonByText(container, "取消归档").click();
     });
 
     expect(container.textContent).toContain("归档会话");
-    expect(container.textContent).toContain("运行时连接已断开");
+    expect(container.textContent).not.toContain("运行时连接已断开");
+    expect(onToast).toHaveBeenCalledWith("运行时连接已断开");
   });
 
   it("confirms deletion through the shared dialog and reloads", async () => {

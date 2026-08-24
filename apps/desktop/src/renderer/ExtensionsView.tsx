@@ -8,9 +8,9 @@ import {
   AwakenFolder,
   AwakenMcpConfigDialog,
   AwakenMcpSettingsDialog,
-  AwakenPluginCard,
   AwakenPluginDetailDialog,
   AwakenPluginInstallDialog,
+  AwakenPlugins,
   AwakenProjectSkillsDialog,
   AwakenSkillCard,
   type AwakenCliConnectorAction,
@@ -1732,72 +1732,34 @@ export function ExtensionsView({
   }
 
   if (section === "plugins") {
-    const visiblePlugins = plugins.filter((plugin) =>
-      matchesQuery(plugin.name, normalizedQuery) ||
-      matchesQuery(plugin.description, normalizedQuery) ||
-      matchesQuery(plugin.version, normalizedQuery),
-    );
     return (
-      <section className="extension-view" aria-label="插件">
-        <div className="extension-view-inner">
-          <header className="extension-header">
-            <div>
-              <h1>插件</h1>
-              <p>安装符合 Agent Plugins 1.0.0 的第三方插件包，统一管理其中的 Skills 与 MCP servers。</p>
-            </div>
-            <div className="extension-header-actions">
-              <button
-                type="button"
-                className="extension-icon-button"
-                aria-label="刷新"
-                disabled={loading}
-                onClick={() => { void refresh(); }}
-              >
-                <AwakenIcon concept="refresh" size={16} />
-              </button>
-              <Button
-                variant="primary"
-                size="md"
-                onClick={() => {
-                  setPluginConfirm(false);
-                  setPluginDialogOpen(true);
-                }}
-              >
-                <AwakenIcon concept="import" size={16} />
-                安装插件
-              </Button>
-            </div>
-          </header>
-        <div className="extension-toolbar">
-          <input
-            value={query}
-            placeholder="搜索插件..."
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </div>
-        {errorMessage ? <p className="extension-error" role="alert">{errorMessage}</p> : null}
-          {loading && visiblePlugins.length === 0 ? <p>正在加载插件…</p> : null}
-          {!loading && visiblePlugins.length === 0 ? <p>还没有安装插件。</p> : null}
-          <div className="extension-card-list">
-            {visiblePlugins.map((plugin) => (
-              <AwakenPluginCard
-                key={plugin.name}
-                plugin={{
-                  name: plugin.name,
-                  version: plugin.version,
-                  description: plugin.description,
-                  skillCount: plugin.skillCount,
-                  serverCount: plugin.serverCount,
-                  enabled: plugin.enabled,
-                  busy: busyPluginName === plugin.name,
-                  diagnostic: plugin.diagnostics?.[0]?.message,
-                }}
-                onOpen={() => { void openPluginDetail(plugin.name); }}
-                onEnabledChange={(enabled) => { void handleTogglePlugin(plugin, enabled); }}
-              />
-            ))}
-          </div>
-        </div>
+      <>
+        <AwakenPlugins
+          searchValue={query}
+          plugins={plugins.map((plugin) => ({
+            name: plugin.name,
+            version: plugin.version,
+            description: plugin.description,
+            skillCount: plugin.skillCount,
+            serverCount: plugin.serverCount,
+            enabled: plugin.enabled,
+            busy: busyPluginName === plugin.name,
+            diagnostic: plugin.diagnostics?.[0]?.message,
+          }))}
+          loading={loading}
+          errorMessage={errorMessage}
+          onSearchChange={setQuery}
+          onRefresh={() => { void refresh(); }}
+          onInstall={() => {
+            setPluginConfirm(false);
+            setPluginDialogOpen(true);
+          }}
+          onPluginOpen={(plugin) => { void openPluginDetail(plugin.name); }}
+          onPluginEnabledChange={(plugin, enabled) => {
+            const runtimePlugin = plugins.find((item) => item.name === plugin.name);
+            if (runtimePlugin) void handleTogglePlugin(runtimePlugin, enabled);
+          }}
+        />
         <AwakenPluginInstallDialog
           open={pluginDialogOpen}
           mode={pluginInstallMode}
@@ -1931,7 +1893,7 @@ export function ExtensionsView({
             if (!open) setSkillPreviewTarget(null);
           }}
         />
-      </section>
+      </>
     );
   }
 

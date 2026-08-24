@@ -5,3 +5,5 @@
 每个一级标题都读取 `activeSectionId` 对应导航 item 的 `concept`，以 24px 图标与标题文字同行显示；因此左侧入口与右侧标题不会维护两份图形映射。full-bleed 子页面从 `AwakenSettingsSectionContext` 继承同一标题与 concept，记忆光流页头是当前消费方。装饰图标不进入标题的可访问名称。
 
 设置框架默认禁止选择标题、导航、标签、说明和其他界面文案，避免双击空白区域时出现网页式文字高亮；`input`、`textarea`、可编辑区域及显式标记为 `.aw-text-selectable` 的正文仍可选择复制。该规则由共享外壳统一提供，Gallery 与 Desktop 行为一致。
+
+`toast` 是设置工作区统一的短暂操作反馈：固定在右侧工作区顶部居中，使用高对比浮层与阴影，不进入标准页面或 full-bleed 页面的布局和滚动计算，也不接管鼠标事件。容器使用 `role="status"`、`aria-live="polite"` 与 `aria-atomic="true"`；显示时长和消息生命周期仍由 Desktop consumer 负责。

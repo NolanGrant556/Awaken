@@ -69,7 +69,12 @@ export function AwakenSettings({
         tabIndex={-1}
       >
         {toast ? (
-          <div className="aw-settings-toast" role="status" aria-live="polite">
+          <div
+            className="aw-settings-toast"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
             {toast}
           </div>
         ) : null}

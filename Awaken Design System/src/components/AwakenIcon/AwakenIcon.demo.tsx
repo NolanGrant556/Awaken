@@ -1,4 +1,5 @@
 import {
+  AGENT_PLUGINS_OFFICIAL_MARK,
   AWAKEN_BRAND_ICON_NAMES,
   AWAKEN_ICON_CONCEPTS,
   AWAKEN_ICON_SIZES,
@@ -119,11 +120,19 @@ export function AwakenIconDemo() {
       <div className="aw-icon-demo__block">
         <h3>官方品牌标记</h3>
         <p className="aw-icon-demo__hint">
-          MCP 使用官方标记（{MCP_OFFICIAL_MARK.source}），保留 authored paths，只用对称透明留白对齐光学包围盒。它的可读下限是{" "}
-          {MCP_OFFICIAL_MARK.minSize}px；连接器分类、MCP 卡片与 MCP 工具轨迹统一使用这份标记，不再以自绘图形替代。商标归{" "}
-          {MCP_OFFICIAL_MARK.trademark}。
+          MCP 与 Agent Plugins 都使用各自官方 authored paths，只通过对称透明留白对齐 Awaken 的光学尺寸。MCP
+          标记可读下限是 {MCP_OFFICIAL_MARK.minSize}px；Agent Plugins 标记因节点与括号密度较高，可读下限是{" "}
+          {AGENT_PLUGINS_OFFICIAL_MARK.minSize}px，用于 Desktop 插件一级入口。
         </p>
         <div className="aw-icon-demo__family">
+          <div className="aw-icon-demo__family-item">
+            <AwakenIcon name="agent-plugins-mark" size={24} label="Agent Plugins" />
+            <div className="aw-icon-demo__family-small">
+              <AwakenIcon name="agent-plugins-mark" size={20} />
+            </div>
+            <code>agent-plugins-mark</code>
+            <span>官方标记 · 仅 ≥{AGENT_PLUGINS_OFFICIAL_MARK.minSize}px</span>
+          </div>
           <div className="aw-icon-demo__family-item">
             <AwakenIcon name="mcp-mark" size={24} label="Model Context Protocol" />
             <div className="aw-icon-demo__family-small">

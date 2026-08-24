@@ -1,0 +1,13 @@
+.aw-archived-chats-settings-demo__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  color: var(--aw-text-secondary);
+  font-size: 12px;
+}
+
+.aw-archived-chats-settings-demo__theme-toggle {
+  display: flex;
+  gap: 4px;
+}

@@ -63,7 +63,7 @@ func scheduledProfile() *ModelProfileConfig {
 
 func threadSnapshotOf(t *testing.T, service *RunService, threadID string) ThreadSnapshot {
 	t.Helper()
-	for _, snapshot := range service.ListThreads() {
+	for _, snapshot := range service.ListThreads(ThreadListViewActive) {
 		if snapshot.ThreadID == threadID {
 			return snapshot
 		}
@@ -483,7 +483,7 @@ func TestUpdateScheduledThreadTitleUnknownThreadNoop(t *testing.T) {
 	}
 	// Give the deferred title persistence a moment; nothing should appear.
 	time.Sleep(50 * time.Millisecond)
-	if got := len(service.ListThreads()); got != 0 {
+	if got := len(service.ListThreads(ThreadListViewActive)); got != 0 {
 		t.Fatalf("no-op title update created %d threads", got)
 	}
 }

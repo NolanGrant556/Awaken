@@ -6,7 +6,7 @@ export function AwakenSettingsNavDemo() {
     <section className="ads-component-demo" aria-label="设置导航 AwakenSettingsNav 组件演示">
       <header className="ads-component-demo-header">
         <h2>设置导航 <code>AwakenSettingsNav</code></h2>
-        <p>承载模型、搜索、记忆、外观、宠物与 ACP 六个一级设置入口。</p>
+        <p>承载各设置分区入口与固定末项「已归档的聊天」（含「已归档」分组标题）。</p>
       </header>
       <div className="ads-component-demo-grid">
         {AwakenSettingsNavStates.map((state) => (

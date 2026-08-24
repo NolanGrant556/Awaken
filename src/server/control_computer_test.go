@@ -362,7 +362,7 @@ func waitForRunTerminalServer(t *testing.T, service *awruntime.RunService, runID
 			switch r.Status {
 			case awruntime.RunStatusFinished, awruntime.RunStatusError, awruntime.RunStatusCancelled:
 				active := false
-				for _, thread := range service.ListThreads() {
+				for _, thread := range service.ListThreads(awruntime.ThreadListViewActive) {
 					if thread.ThreadID == run.ThreadID && thread.ActiveRunID == runID {
 						active = true
 						break

@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import { AwakenAccountDemo } from "../src/components/AwakenAccount/AwakenAccount.demo";
+import { AwakenArchivedChatsSettingsDemo } from "../src/components/AwakenArchivedChatsSettings/AwakenArchivedChatsSettings.demo";
 import { AwakenDeliverableListDemo } from "../src/components/AwakenDeliverableList/AwakenDeliverableList.demo";
 import { AwakenAssistantMessageDemo } from "../src/components/AwakenAssistantMessage/AwakenAssistantMessage.demo";
 import { AwakenAvatarDemo } from "../src/components/AwakenAvatar/AwakenAvatar.demo";
@@ -75,6 +76,7 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-appearance-settings", name: "AwakenAppearanceSettings", displayName: "外观设置", demo: AwakenAppearanceSettingsDemo, category: "settings", aliases: ["awaken-theme-choice-group"] },
   { id: "awaken-pets-settings", name: "AwakenPetsSettings", displayName: "宠物设置", demo: AwakenPetsSettingsDemo, category: "settings" },
   { id: "awaken-computer-settings", name: "AwakenComputerSettings", displayName: "计算机操作设置", demo: AwakenComputerSettingsDemo, category: "settings" },
+  { id: "awaken-archived-chats-settings", name: "AwakenArchivedChatsSettings", displayName: "已归档的聊天设置", demo: AwakenArchivedChatsSettingsDemo, category: "settings" },
   {
     id: "awaken-deliverables",
     name: "AwakenDeliverableList",

@@ -254,6 +254,9 @@ export type ThreadItem = {
   workspaceRoot?: string;
   runStatus?: RuntimeRunStatus;
   artifactCount?: number;
+  archived?: boolean;
+  archivedAt?: string;
+  source?: string;
 };
 
 type ThreadViewState = {
@@ -746,6 +749,9 @@ export function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
     workspaceRoot: thread.workspace.workspaceRoot,
     runStatus: thread.activeRunId ? "running" : undefined,
     artifactCount: 0,
+    archived: thread.archived,
+    ...(thread.archivedAt ? { archivedAt: thread.archivedAt } : {}),
+    ...(thread.source ? { source: thread.source } : {}),
     ...(thread.titleSource ? { titleSource: thread.titleSource } : {}),
     ...(thread.titleStatus ? { titleStatus: thread.titleStatus } : {}),
     ...(thread.titleUpdatedAt

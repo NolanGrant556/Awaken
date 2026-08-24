@@ -33,6 +33,7 @@ describe("DesktopSettingsDialog", () => {
         onThemePreferenceChange: vi.fn(),
         onOpenChange: vi.fn(),
         onProfilesChanged: vi.fn(),
+        onThreadsChanged: vi.fn(),
       }),
     );
 
@@ -318,5 +319,46 @@ describe("model protocol recommendations", () => {
       "responses-ready",
       "future-model",
     ]);
+  });
+});
+
+describe("DesktopSettingsDialog archived chats entry", () => {
+  function renderDialog(props: Partial<Parameters<typeof DesktopSettingsDialog>[0]> = {}) {
+    return renderToString(
+      React.createElement(DesktopSettingsDialog, {
+        open: true,
+        runtimeClient: {} as RuntimeClient,
+        theme: "light",
+        themePreference: "system",
+        themeSaving: false,
+        themeMessage: null,
+        onThemePreferenceChange: vi.fn(),
+        onOpenChange: vi.fn(),
+        onProfilesChanged: vi.fn(),
+        onThreadsChanged: vi.fn(),
+        ...props,
+      }),
+    );
+  }
+
+  it("pins 已归档的聊天 as the last nav item behind the 已归档 group label", () => {
+    const html = renderDialog();
+
+    expect(html).toContain("已归档的聊天");
+    expect(html).toContain("aw-settings-nav__group-label");
+    expect(html).toContain("已归档");
+    // 固定末项：归档入口必须出现在所有普通设置入口之后。
+    expect(html.lastIndexOf("已归档的聊天")).toBeGreaterThan(html.lastIndexOf("ACP"));
+    expect(html.lastIndexOf("aw-settings-nav__group-label")).toBeLessThan(
+      html.lastIndexOf("已归档的聊天"),
+    );
+  });
+
+  it("renders the archived chats section title and panel", () => {
+    const html = renderDialog({ initialSection: "archived-chats" });
+
+    expect(html).toContain("已归档的聊天");
+    expect(html).toContain("aw-archived-chats");
+    expect(html).toContain("正在加载已归档的聊天");
   });
 });

@@ -289,6 +289,10 @@ export type RuntimeThreadWire = {
   workspace: WorkspaceConfigWire;
   created_at: string;
   updated_at: string;
+  archived?: boolean;
+  /** Go zero time serializes as "0001-01-01T00:00:00Z" and means absent. */
+  archived_at?: string;
+  source?: string;
 };
 
 export type RuntimeThread = {
@@ -306,7 +310,16 @@ export type RuntimeThread = {
   workspace: WorkspaceConfig;
   createdAt: string;
   updatedAt: string;
+  archived: boolean;
+  archivedAt?: string;
+  source?: string;
 };
+
+export type RuntimeThreadListView = "active" | "archived";
+
+export type SetThreadArchivedResult =
+  | { ok: true; thread: RuntimeThread }
+  | { ok: false; code: string; message: string };
 
 export type RuntimeProjectState = "active" | "removed" | "trash_pending";
 
@@ -2130,8 +2143,9 @@ export type AwakenBridge = {
   probeACPRunner: (runnerId: string) => Promise<ACPRunnerProbeResult>;
   getRun: (runId: string) => Promise<RuntimeRun>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
-  listThreads: () => Promise<RuntimeThread[]>;
+  listThreads: (view?: RuntimeThreadListView) => Promise<RuntimeThread[]>;
   renameThread: (threadId: string, label: string) => Promise<RuntimeThread>;
+  setThreadArchived: (threadId: string, archived: boolean) => Promise<SetThreadArchivedResult>;
   updateThreadModelPreference: (
     threadId: string,
     request: ThreadModelPreferenceRequest,
@@ -2458,6 +2472,12 @@ export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread
     },
     createdAt: thread.created_at,
     updatedAt: thread.updated_at,
+    archived: Boolean(thread.archived),
+    archivedAt:
+      thread.archived_at && thread.archived_at !== "0001-01-01T00:00:00Z"
+        ? thread.archived_at
+        : undefined,
+    source: thread.source || undefined,
   };
 }
 

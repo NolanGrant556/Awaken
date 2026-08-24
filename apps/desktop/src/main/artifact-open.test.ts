@@ -48,6 +48,7 @@ async function fixture(options?: { role?: "deliverable" | "preview" | "support" 
   const transcript: RuntimeThreadTranscript = {
     thread: {
       threadId: "thread-1",
+          archived: false,
       label: "test",
       workspace: {
         workspaceRoot: root,
@@ -112,6 +113,7 @@ describe("artifact open authorization", () => {
     const transcript: RuntimeThreadTranscript = {
       thread: {
         threadId: "thread-media",
+          archived: false,
         label: "media",
         workspace: { workspaceRoot: root, writableRoots: [root], outputRoots: [output] },
         createdAt: new Date(0).toISOString(),

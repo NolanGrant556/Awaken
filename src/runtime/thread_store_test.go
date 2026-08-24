@@ -29,7 +29,7 @@ func TestThreadStoreStalePendingSnapshotDoesNotOverwriteGeneratedTitle(t *testin
 		t.Fatalf("stale CreateThread returned error: %v", err)
 	}
 
-	threads, err := store.ListThreads()
+	threads, err := store.ListThreads(ThreadListViewActive)
 	if err != nil {
 		t.Fatalf("ListThreads returned error: %v", err)
 	}

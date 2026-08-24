@@ -51,6 +51,7 @@ function createMockRuntimeClient(): RuntimeClient {
     logoutCliConnector: vi.fn(),
     uninstallManagedCli: vi.fn(),
     subscribeCliConnectorState: vi.fn(() => () => {}),
+    subscribeComposerCatalogEvents: vi.fn(() => () => {}),
     listMcpServers: vi.fn(async () => []),
     configureMcpServers: vi.fn(async () => ({ serverNames: [], message: "" })),
     getMcpServerConfig: vi.fn(async () => ({

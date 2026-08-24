@@ -56,7 +56,7 @@ const createWeeklyDraft: AwakenScheduledTaskDraft = {
   cronTime: "08:30",
   cronWeekdays: [5],
   actionKind: "agent",
-  content: "请基于最近一周的 memory，生成本周工作总结。",
+  content: "整理 women 2026 数据并生成本周工作总结。",
   profileId: "profile_kimi",
 };
 
@@ -98,6 +98,12 @@ export const AwakenScheduledTaskEditorDialogStates: AwakenScheduledTaskEditorDia
         type: "skill",
         label: "weekly-summary",
         title: "/Awaken/.awaken/skills/weekly-summary/SKILL.md",
+      },
+      {
+        id: "plugin:business-review:digest",
+        type: "plugin",
+        label: "Business Review",
+        leadingText: "请结合我们 ",
       },
     ],
   },

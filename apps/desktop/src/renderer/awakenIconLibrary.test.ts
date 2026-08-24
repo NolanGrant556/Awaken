@@ -172,8 +172,8 @@ describe("光学与网格不变量", () => {
     }
   });
 
-  it("94 个确认候选全部静态固化并保留 Lucide 来源与许可", () => {
-    expect(APPROVED_LUCIDE_ICON_NAMES).toHaveLength(94);
+  it("95 个确认候选全部静态固化并保留 Lucide 来源与许可", () => {
+    expect(APPROVED_LUCIDE_ICON_NAMES).toHaveLength(95);
     expect(Object.keys(APPROVED_LUCIDE_SOURCES).sort()).toEqual(APPROVED_LUCIDE_ICON_NAMES);
     for (const name of APPROVED_LUCIDE_ICON_NAMES) {
       const icon = getAwakenIcon(name);
@@ -237,6 +237,7 @@ describe("概念表", () => {
     expect(AWAKEN_ICON_CONCEPTS["skill-active"]).toBe("book-open");
     expect(AWAKEN_ICON_CONCEPTS["tool-terminal"]).toBe("terminal");
     expect(AWAKEN_ICON_CONCEPTS.plugin).toBe("agent-plugins-mark");
+    expect(AWAKEN_ICON_CONCEPTS["plugin-default"]).toBe("puzzle");
     expect(AWAKEN_ICON_CONCEPTS["mcp-brand"]).toBe("mcp-mark");
     expect(AWAKEN_ICON_CONCEPTS["mcp-source"]).toBe("mcp-mark");
   });

@@ -174,8 +174,36 @@ describe("AwakenComposerBar unified token editing", () => {
     );
 
     expect(token?.textContent).toBe("Computer Use");
-    expect(token?.querySelector("svg")?.classList.contains("aw-icon--display-pointer")).toBe(true);
+    const icon = token?.querySelector("svg");
+    expect(icon?.classList.contains("aw-icon--display-pointer")).toBe(true);
+    expect(icon?.getAttribute("width")).toBe("16");
+    expect(icon?.getAttribute("height")).toBe("16");
     expect(token?.querySelectorAll("path").length).toBeGreaterThan(0);
+  });
+
+  it("uses the same readable line icon size for Plugin tokens", () => {
+    const { editor } = renderComposer({
+      tokens: [{ id: "plugin:business-review:digest", type: "plugin", label: "Business Review" }],
+    });
+    const icon = editor.querySelector('[data-composer-token-id="plugin:business-review:digest"] svg');
+
+    expect(icon?.classList.contains("aw-icon--package")).toBe(true);
+    expect(icon?.getAttribute("width")).toBe("16");
+    expect(icon?.getAttribute("height")).toBe("16");
+  });
+
+  it("keeps the same token geometry in home, conversation and embedded composers", () => {
+    const { editor, rerender } = renderComposer({ variant: "center" });
+    expect(editor.closest(".composer-bar")?.classList).toContain("composer-bar-center");
+    expect(editor.querySelector("svg")?.getAttribute("width")).toBe("16");
+
+    rerender({ variant: "dock" });
+    expect(host.querySelector(".composer-bar")?.classList).toContain("composer-bar-dock");
+    expect(host.querySelector(".composer-bar-token svg")?.getAttribute("width")).toBe("16");
+
+    rerender({ variant: "embedded" });
+    expect(host.querySelector(".composer-bar")?.classList).toContain("composer-bar-embedded");
+    expect(host.querySelector(".composer-bar-token svg")?.getAttribute("width")).toBe("16");
   });
 
   it("renders file tokens from the Awaken package icon registry", () => {
@@ -402,6 +430,41 @@ describe("AwakenComposerBar unified token editing", () => {
     collapseSelection(selectRoot, selectRoot.childNodes.length);
     act(() => document.dispatchEvent(new Event("selectionchange")));
     expect(token.hasAttribute("data-prompt-token-selected")).toBe(false);
+  });
+
+  it("uses the same 16px token icon contract in the submitted message card", () => {
+    root ??= createRoot(host);
+    act(() => {
+      root?.render(
+        <AwakenUserPromptBlock
+          text="nimen 123"
+          tokens={[
+            { id: "capability:computer-use", type: "capability", label: "Computer Use" },
+            {
+              id: "skill:code-search:user",
+              type: "skill",
+              label: "code-search",
+              leadingText: "我们 women ",
+            },
+            {
+              id: "plugin:business-review:digest",
+              type: "plugin",
+              label: "Business Review",
+              leadingText: "2026 ",
+            },
+          ]}
+        />,
+      );
+    });
+
+    const icons = Array.from(
+      host.querySelectorAll<SVGElement>(".execution-prompt-bubble-token-icon"),
+    );
+    expect(icons).toHaveLength(3);
+    expect(icons.every((icon) => icon.getAttribute("width") === "16")).toBe(true);
+    expect(icons[0]?.classList).toContain("aw-icon--display-pointer");
+    expect(icons[1]?.classList).toContain("aw-icon--book-open");
+    expect(icons[2]?.classList).toContain("aw-icon--package");
   });
 
   it("copies visible plaintext with token labels and no soft-wrap breaks", () => {
@@ -805,6 +868,66 @@ describe("AwakenComposerBar unified token editing", () => {
     });
 
     expect(host.querySelector(".composer-bar-project-shelf")).toBeNull();
+  });
+
+  it("previews at most three plugin icons and selects from the compact full list", () => {
+    const onSelectOption = vi.fn();
+    const { rerender } = renderComposer({
+      variant: "center",
+      pluginPicker: {
+        options: [
+          { id: "documents", label: "Documents" },
+          { id: "pdf", label: "PDF" },
+          { id: "spreadsheets", label: "Spreadsheets" },
+          { id: "sites", label: "Sites" },
+        ],
+        onSelectOption,
+      },
+    });
+
+    const trigger = host.querySelector<HTMLButtonElement>(".composer-bar-plugin-trigger");
+    expect(trigger?.getAttribute("aria-label")).toBe("插件，4 个可用");
+    expect(trigger?.querySelectorAll(".composer-bar-plugin-badge")).toHaveLength(3);
+    expect(trigger?.querySelectorAll(".aw-icon--puzzle")).toHaveLength(3);
+
+    act(() => {
+      trigger?.click();
+    });
+    expect(document.querySelectorAll(".composer-bar-plugin-option")).toHaveLength(4);
+    expect(document.querySelector(".composer-bar-plugin-search")).toBeNull();
+    expect(document.querySelectorAll(".composer-bar-plugin-option .aw-icon--puzzle")).toHaveLength(
+      4,
+    );
+    const sitesOption = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(".composer-bar-plugin-option"),
+    ).find((option) => option.textContent?.includes("Sites"));
+    act(() => {
+      sitesOption?.click();
+    });
+    expect(onSelectOption).toHaveBeenCalledWith("sites");
+    expect(document.querySelector(".composer-bar-plugin-menu")).toBeNull();
+
+    rerender({ variant: "embedded" });
+    expect(host.querySelector(".composer-bar-plugin-trigger")).toBeNull();
+  });
+
+  it("keeps the plugin entry visible and explains the empty installed state", () => {
+    renderComposer({
+      pluginPicker: {
+        options: [],
+      },
+    });
+
+    const trigger = host.querySelector<HTMLButtonElement>(".composer-bar-plugin-trigger");
+    expect(trigger?.getAttribute("aria-label")).toBe("插件，暂无可用插件");
+    expect(trigger?.querySelectorAll(".aw-icon--puzzle")).toHaveLength(1);
+    act(() => {
+      trigger?.click();
+    });
+    expect(document.querySelector(".composer-bar-plugin-search")).toBeNull();
+    expect(document.querySelector(".composer-bar-plugin-empty")?.textContent).toBe(
+      "还没有安装插件",
+    );
   });
 
   it("renders the selected model logo in the composer trigger", () => {

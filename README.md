@@ -28,14 +28,14 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | 模型与供应商 | 模型 profile、能力与余额、调用链、安全凭据存储及故障恢复 | [05 模型与供应商配置](docs/05_模型与供应商配置/索引.md) |
 | MCP runtime | user/project/dynamic 配置、stdio/http/sse、动态工具直通、可选 Artifact metadata、认证与 prompt/resource Skill bridge | [06 MCP 运行时](docs/06_MCP运行时/索引.md) |
 | 连接器 | MCP/CLI provider 目录、官方 CLI 安装与授权、生命周期、readiness 与重启 ownership 边界 | [07 连接器](docs/07_连接器/索引.md) |
-| 技能 | 多来源 Universal Skill 发现、按需正文/资源、composer 当前选择的 run-scoped 确定性绑定、统一 catalog、inline/真实 child fork、MCP 动态来源与恢复；composer 显式激活后可注册包内受控 Hook；以及随 App 分发的 word/excel/ppt/pdf/code-search/PDF_Max 内置 Skill 包 | [08 技能](docs/08_技能/索引.md) |
+| 技能 | 多来源 Universal Skill 发现、按需正文/资源、composer 当前选择的 run-scoped 确定性绑定、统一 catalog、inline/真实 child fork、MCP 动态来源与恢复；composer 显式激活后可注册包内受控 Hook；模型可 dry-run 校验、受控导出、安装或 Trash 替换用户 Skill；以及随 App 分发的 word/excel/ppt/pdf/code-search/PDF_Max/skill-creator/plugin-creator 八个内置 Skill 包 | [08 技能](docs/08_技能/索引.md) |
 | ACP Client/Agent | ACP Client（Phase 0–4）：runner 配置、probe 与 Desktop 设置页；`delegate_external_agent` 工具、会话生命周期与权限处理已在 Core 实现；Workbench 嵌套进度与 permission gate UI 已实现。ACP Agent（Phase 5）：`cmd/awaken-acp` 与 `src/acp/agentbridge` 已实现 stdio transport、launcher lease、authenticated control routes、Core 事件投影、模型 profile selector/default fallback 与 cancel/close；Desktop-owned 与 core-only 的真实 stdio prompt 已通过，第三方 client、headless 多进程验收与跨 Core 重启恢复仍是已知缺口 | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
 | AG-UI 与 A2UI | Awaken 自有事件到 AG-UI-compatible wire 的映射；A2UI 仅作参考 | [09 AG-UI 与 A2UI 协议](docs/09_AGUI与A2UI协议/索引.md) |
 | Computer Use | CUA Host、观察/动作/验证工具、复核、暂停/接管/交还、媒体策略与发布准入 | [10 计算机操作能力](docs/10_计算机操作能力/索引.md) |
 | 长期记忆与 Dream | Markdown Memory、主模型相关性召回、受控工具、无正文事件、Settings 查看/删除、手动/空闲期 Dream、Workbench 紧凑回执与 Dream 重启恢复 | [11 长期记忆](docs/11_长期记忆/索引.md) |
-| 定时任务 | 首版已支持：左侧一级入口、循环/日程任务、10 个内置模板、创建/编辑/启停/删除/立即执行/取消、专属线程、执行历史、Core 内调度器与 misfire 恢复、Agent 与固定提醒两类任务；Desktop 完全退出后不运行 | [12 定时任务](docs/12_定时任务/索引.md) |
+| 定时任务 | 首版已支持：左侧一级入口、循环/日程任务、10 个内置模板、创建/编辑/启停/删除/立即执行/取消、专属线程、执行历史、Core 内调度器与 misfire 恢复、Agent 与固定提醒两类任务；Agent 编辑器支持 `/` Skill 与 `@` Computer Use/Plugin 结构化选择；Desktop 完全退出后不运行 | [12 定时任务](docs/12_定时任务/索引.md) |
 | 移动端 | 当前不支持；已确认目标设计为 Desktop/Core 继续拥有本机执行与耐久事实，手机通过受控 Gateway 与可自托管 relay 查看和控制任务，不直接连接或暴露 loopback Core | [13 移动端](docs/13_移动端/索引.md) |
-| 插件 | 首期已支持：Desktop 插件页按 Agent Plugins 1.0.0 安装 user-scope 第三方插件（root `plugin.json` + `skills/` + `mcp.json`），Core `src/plugins` 把启用包内 Skills/MCP 以 `plugin__` identity 注入既有 08/06 运行时，支持启停、升级与 Trash 卸载。marketplace / legacy manifest / 插件自动 Hook / 模型 `plugin_install` 当前不支持；真实 Desktop 2.1 验收尚未完成 | [14 插件](docs/14_插件/索引.md) |
+| 插件 | Desktop 插件页与模型 `plugin` 工具共同管理 Agent Plugins 1.0.0 user-scope 包（root `plugin.json` + `skills/` + `mcp.json`）；Core 可无写入校验、受控导出候选、安装/Trash 替换，并把启用包内 Skills/MCP 以 `plugin__` identity 注入既有 08/06 运行时，另支持启停、升级与 Trash 卸载。Workbench 与定时任务 Agent 编辑器可通过动态 `@` 目录形成经 digest 复验的 Plugin token；Plugin `@` 目录、选择和定时任务选择已在真实 macOS Desktop 复验。marketplace / legacy manifest / 插件自动 Hook 当前不支持，Creator、带真实模型执行和重启恢复仍待实机证据 | [14 插件](docs/14_插件/索引.md) |
 
 各入口的 `索引.md` 只负责路由。产品行为、代码 owner、状态/数据/事件流、异常恢复和验收方法以索引指向的专项文档为准。
 

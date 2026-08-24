@@ -25,15 +25,19 @@ const (
 )
 
 var (
-	ErrUnsupportedSchema      = errors.New("plugin_unsupported_schema")
-	ErrManifestInvalid        = errors.New("plugin_manifest_invalid")
-	ErrMCPInvalid             = errors.New("plugin_mcp_invalid")
-	ErrAlreadyExists          = errors.New("plugin already exists")
+	ErrUnsupportedSchema       = errors.New("plugin_unsupported_schema")
+	ErrManifestInvalid         = errors.New("plugin_manifest_invalid")
+	ErrMCPInvalid              = errors.New("plugin_mcp_invalid")
+	ErrAlreadyExists           = errors.New("plugin already exists")
 	ErrReplaceTrashUnavailable = errors.New("plugin replacement Trash unavailable")
-	ErrNotFound               = errors.New("plugin not found")
-	ErrStateCorrupt           = errors.New("plugins.json is corrupt")
-	ErrHomeRequired           = errors.New("AWAKEN_HOME is required")
-	ErrPathEscapes            = errors.New("path escapes the plugin root")
+	ErrNotFound                = errors.New("plugin not found")
+	ErrStateCorrupt            = errors.New("plugins.json is corrupt")
+	ErrHomeRequired            = errors.New("AWAKEN_HOME is required")
+	ErrPathEscapes             = errors.New("path escapes the plugin root")
+	ErrSourceChanged           = errors.New("plugin source changed after validation")
+	ErrDisabled                = errors.New("plugin is disabled")
+	ErrDigestChanged           = errors.New("plugin digest changed")
+	ErrNoUsableComponents      = errors.New("plugin has no usable Skill or MCP component")
 )
 
 // Diagnostic is a component-level or non-fatal loader finding.
@@ -126,18 +130,49 @@ type InstalledPlugin struct {
 	Diagnostics []Diagnostic
 }
 
+// ComposerSelection is the host-resolved identity of an enabled Plugin chosen
+// from a Composer. It is intentionally metadata-only: Skills and MCP keep
+// their existing runtimes and the Plugin layer only proves which components
+// belong to the selected package.
+type ComposerSelection struct {
+	Name        string
+	Version     string
+	Description string
+	Digest      string
+	SkillIDs    []string
+	ServerIDs   []string
+}
+
 // InstallRequest is the user-facing install input.
 type InstallRequest struct {
-	Source  Source
-	Replace bool
+	Source         Source
+	Replace        bool
+	ExpectedDigest string
 }
 
 // InstallResult reports a successful install or replace.
 type InstallResult struct {
-	Plugin               *InstalledPlugin
-	Replaced             bool
-	PreviousTrashedPath  string
-	Message              string
+	Plugin              *InstalledPlugin
+	Replaced            bool
+	PreviousTrashedPath string
+	Message             string
+}
+
+// ValidationResult is an authoring-time dry-run produced by the same
+// materialization, manifest, containment, Skill discovery, MCP parsing, and
+// digest code used by installation and runtime loading.
+type ValidationResult struct {
+	Valid       bool         `json:"valid"`
+	Source      Source       `json:"source"`
+	Manifest    Manifest     `json:"-"`
+	Name        string       `json:"name"`
+	Version     string       `json:"version,omitempty"`
+	Description string       `json:"description,omitempty"`
+	Digest      string       `json:"digest"`
+	TargetRoot  string       `json:"targetRoot"`
+	SkillCount  int          `json:"skillCount"`
+	ServerCount int          `json:"serverCount"`
+	Diagnostics []Diagnostic `json:"diagnostics"`
 }
 
 func warning(code, message string) Diagnostic {

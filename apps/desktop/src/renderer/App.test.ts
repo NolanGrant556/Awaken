@@ -65,12 +65,14 @@ import {
   clearSlashTriggerFromComposerValue,
   composerActionTriggerFromDraft,
   composerActionTriggerFromComposerValue,
+  composerPaletteActions,
   computerUseMentionProvider,
   composerTokenIdForKeyboardDelete,
   composerTokenPlacementForSlashTrigger,
   composerTokenFromSlashAction,
   filterSlashActions,
   mentionTriggerFromComposerValue,
+  pluginMentionProvider,
   skillSlashProvider,
   skillSlashActionsFromSkills,
   slashTriggerFromComposerValue,
@@ -83,7 +85,7 @@ import {
 } from "./useThreadComposerDraft";
 import { promptAttachmentViews } from "./composerAttachments";
 import { MACOS_WINDOW_CHROME_GEOMETRY } from "../shared/window-chrome";
-import type { RuntimeSkill } from "../shared/runtime";
+import type { RuntimePlugin, RuntimeSkill } from "../shared/runtime";
 import type { RunNarrativeItem } from "./run-narrative";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
@@ -697,6 +699,7 @@ function stubElectronBridge(): void {
       logoutCliConnector: vi.fn(),
       uninstallManagedCli: vi.fn(),
       subscribeCliConnectorState: vi.fn(() => () => {}),
+      subscribeComposerCatalogEvents: vi.fn(() => () => {}),
       listMcpServers: vi.fn(async () => []),
       configureMcpServers: vi.fn(),
       getMcpServerConfig: vi.fn(),
@@ -1506,7 +1509,7 @@ describe("Composer Slash Palette helpers", () => {
     },
   ];
 
-  it("only opens for slash queries and filters skill actions by metadata", () => {
+  it("opens slash and mention queries only at the start or after whitespace", () => {
     expect(slashTriggerFromComposerValue("/")).toMatchObject({ query: "" });
     expect(slashTriggerFromComposerValue("/daily")).toMatchObject({
       query: "daily",
@@ -1522,6 +1525,7 @@ describe("Composer Slash Palette helpers", () => {
       end: 7,
     });
     expect(slashTriggerFromComposerValue("hello/")).toBeNull();
+    expect(slashTriggerFromComposerValue("我们/")).toBeNull();
     expect(slashTriggerFromComposerValue("hello /daily later")).toBeNull();
     expect(slashTriggerFromComposerValue("daily")).toBeNull();
     expect(mentionTriggerFromComposerValue("@")).toMatchObject({
@@ -1535,6 +1539,13 @@ describe("Composer Slash Palette helpers", () => {
       end: 15,
     });
     expect(mentionTriggerFromComposerValue("hello@computer")).toBeNull();
+    expect(mentionTriggerFromComposerValue("我们@computer")).toBeNull();
+    expect(composerActionTriggerFromComposerValue("中文123/code-search")).toBeNull();
+    expect(composerActionTriggerFromComposerValue("中文123 /code-search")).toMatchObject({
+      marker: "/",
+      query: "code-search",
+      start: 6,
+    });
     expect(composerActionTriggerFromComposerValue("/daily")?.marker).toBe("/");
     expect(composerActionTriggerFromComposerValue("@computer")?.marker).toBe("@");
 
@@ -1567,6 +1578,22 @@ describe("Composer Slash Palette helpers", () => {
         selection: { anchor: 11, focus: 11 },
       }),
     ).toBeNull();
+    expect(
+      composerActionTriggerFromDraft({
+        value: "中文/code-searchEnglish123",
+        tokens: [],
+        leadingTexts: {},
+        selection: { anchor: 14, focus: 14 },
+      }),
+    ).toBeNull();
+    expect(
+      composerActionTriggerFromDraft({
+        value: "中文 /code-searchEnglish123",
+        tokens: [],
+        leadingTexts: {},
+        selection: { anchor: 15, focus: 15 },
+      }),
+    ).toEqual({ marker: "/", query: "code-search", start: 3, end: 15 });
     expect(
       composerActionTriggerFromDraft({
         value: " 后文",
@@ -1712,6 +1739,53 @@ describe("Composer Slash Palette helpers", () => {
       type: "capability",
       payload: { capabilityId: "computer-use" },
     });
+  });
+
+  it("offers enabled Plugins as structured mention tokens", async () => {
+    const plugins: RuntimePlugin[] = [
+      {
+        name: "acme.tools",
+        version: "1.0.0",
+        description: "Acme workflows",
+        enabled: true,
+        source: { kind: "local_path", path: "/tmp/acme" },
+        digest: "digest-v1",
+        skillCount: 2,
+        serverCount: 1,
+      },
+      {
+        name: "disabled.tools",
+        enabled: false,
+        source: { kind: "local_path", path: "/tmp/disabled" },
+        digest: "digest-v2",
+        skillCount: 1,
+        serverCount: 0,
+      },
+    ];
+    const actions = await actionsFromSlashProviders(
+      [pluginMentionProvider(async () => plugins)],
+      { workspaceRootForRun: "/workspace" },
+    );
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      type: "plugin",
+      label: "acme.tools",
+      composerToken: {
+        type: "plugin",
+        payload: { pluginName: "acme.tools", pluginDigest: "digest-v1" },
+      },
+    });
+  });
+
+  it("keeps every filtered catalog action beyond the visible popup height", () => {
+    const actions = Array.from({ length: 40 }, (_, index) => ({
+      id: `skill:${index}`,
+      type: "skill",
+      label: `Skill ${String(index).padStart(2, "0")}`,
+      payload: {},
+    }));
+    expect(composerPaletteActions(actions, "")).toHaveLength(40);
+    expect(composerPaletteActions(actions, "Skill 39")[0]?.id).toBe("skill:39");
   });
 
   it("lets non-skill providers define their own composer token payload", () => {
@@ -2995,7 +3069,29 @@ describe("AwakenUserPromptBlock layout contract", () => {
 
     expect(html).toContain("execution-prompt-bubble-token-capability");
     expect(html).toContain("Computer Use");
-    expect(html).toContain("aw-icon--display");
+    expect(html).toContain("aw-icon--display-pointer");
+    expect(html).toContain('width="16"');
+    expect(html).toContain('height="16"');
+  });
+
+  it("renders Plugin prompt tokens with the shared inline package icon", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "nimen 123",
+        tokens: [
+          {
+            id: "plugin:business-review:digest",
+            type: "plugin",
+            label: "Business Review",
+            leadingText: "我们 ",
+          },
+        ],
+      }),
+    );
+
+    expect(html).toContain("execution-prompt-bubble-token-plugin");
+    expect(html).toContain("aw-icon--package");
+    expect(html).not.toContain("aw-icon--agent-plugins-mark");
   });
 
   it("renders selected skill tokens before text when no inline position is present", () => {
@@ -3873,7 +3969,7 @@ describe("App workbench presentation", () => {
     expect(html).toContain('aria-label="Resize inspector"');
     expect(html).toContain("aw-task-welcome__logo");
     expect(html).toContain("把任务交给 Awaken，自主执行，唤醒自由。");
-    expect(html).toContain('placeholder="描述任务，或 / 选择技能"');
+    expect(html).toContain('placeholder="描述任务，或 / 选择 Skill、@ 选择 Plugin"');
     expect(html).toContain('rows="3"');
     expect(html).toContain("新建任务");
     expect(html).not.toContain("⌘N");

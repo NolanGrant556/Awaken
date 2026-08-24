@@ -44,6 +44,9 @@ func NewManager(reg *skills.SkillRegistry, logger Logger) *Manager {
 	if err := tool.RegisterToolForceWithMode(&SkillInstallTool{registry: reg}, tool.DefinitionValidationStrictBuiltin); err != nil {
 		logger.Warnf("failed to register skill installer: %v", err)
 	}
+	if err := tool.RegisterToolForceWithMode(&SkillPackageExportTool{registry: reg}, tool.DefinitionValidationStrictBuiltin); err != nil {
+		logger.Warnf("failed to register skill package exporter: %v", err)
+	}
 	m.refreshTools()
 	return m
 }

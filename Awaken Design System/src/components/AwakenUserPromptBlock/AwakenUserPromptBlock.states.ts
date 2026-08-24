@@ -30,6 +30,32 @@ export const AwakenUserPromptBlockStates: AwakenUserPromptBlockState[] = [
     } as unknown as Partial<ComponentProps<typeof AwakenUserPromptBlock>>,
   },
   {
+    id: "mixed-token-typography",
+    label: "中英文、数字与多种 Token 混排",
+    props: {
+      text: "nimen 123",
+      tokens: [
+        {
+          id: "capability:computer-use",
+          type: "capability",
+          label: "Computer Use",
+        },
+        {
+          id: "skill:code-search:user",
+          type: "skill",
+          label: "code-search",
+          leadingText: "我们 women ",
+        },
+        {
+          id: "plugin:business-review:digest",
+          type: "plugin",
+          label: "Business Review",
+          leadingText: "2026 ",
+        },
+      ],
+    } as unknown as Partial<ComponentProps<typeof AwakenUserPromptBlock>>,
+  },
+  {
     id: "long-content",
     label: "长提示",
     props: {

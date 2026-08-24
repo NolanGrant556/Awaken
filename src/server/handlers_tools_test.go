@@ -75,6 +75,7 @@ func TestMigratedCoreToolsPassStrictDefinitionValidation(t *testing.T) {
 		"dependency_install": false,
 		"git_remote":         false,
 		"trash_file":         false,
+		"plugin":             false,
 	}
 	for _, registered := range tool.ListRegisteredTools() {
 		if _, selected := expected[registered.Definition.Name]; !selected {

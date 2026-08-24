@@ -158,6 +158,24 @@ export type ComposerBarSlashPalette = {
   onActiveActionChange?: (actionId: string) => void;
 };
 
+export type ComposerBarPluginOption = {
+  id: string;
+  label: string;
+  selected?: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
+};
+
+export type ComposerBarPluginPicker = {
+  label?: string;
+  emptyLabel?: string;
+  options: ComposerBarPluginOption[];
+  loading?: boolean;
+  error?: string | null;
+  disabled?: boolean;
+  onSelectOption?: (optionId: string) => void;
+};
+
 type SlashPreviewState = {
   actionId: string;
   style: CSSProperties;
@@ -269,6 +287,7 @@ export type AwakenComposerBarProps = {
   attachmentWarning?: ReactNode;
   tokens?: ComposerBarToken[];
   slashPalette?: ComposerBarSlashPalette;
+  pluginPicker?: ComposerBarPluginPicker;
   onRemoveAttachment?: (attachmentId: string) => void;
   onRemoveToken?: (tokenId: string) => void;
   onPasteImages?: (files: File[]) => void;
@@ -388,6 +407,7 @@ export function AwakenComposerBar({
   attachmentWarning,
   tokens = [],
   slashPalette,
+  pluginPicker,
   onRemoveAttachment,
   onRemoveToken,
   onPasteImages,
@@ -399,6 +419,7 @@ export function AwakenComposerBar({
   const modelEffortDraggingRef = useRef(false);
   const modelEffortValueRef = useRef<"low" | "high" | "max" | null>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [pluginPickerOpen, setPluginPickerOpen] = useState(false);
   const [slashPreviewState, setSlashPreviewState] = useState<SlashPreviewState | null>(null);
   const [slashPaletteStyle, setSlashPaletteStyle] = useState<SlashPaletteStyle>({});
   const [inputSelection, setInputSelection] = useState<ComposerBarInputSelection>();
@@ -424,6 +445,8 @@ export function AwakenComposerBar({
   });
   const selectedProjectOption = projectPicker?.options.find((option) => option.selected);
   const showProjectPicker = variant === "center" && Boolean(projectPicker);
+  const pluginOptions = pluginPicker?.options ?? [];
+  const showPluginPicker = variant !== "embedded" && Boolean(pluginPicker);
   const topMetaItems: ComposerBarMetaItem[] = [];
   const bottomMetaItems = variant === "dock" ? metaItems.filter((item) => item.id !== "model") : [];
   const slashActions = slashPalette?.actions ?? [];
@@ -480,6 +503,12 @@ export function AwakenComposerBar({
   }, [showProjectPicker]);
 
   useEffect(() => {
+    if (!showPluginPicker) {
+      setPluginPickerOpen(false);
+    }
+  }, [showPluginPicker]);
+
+  useEffect(() => {
     if (openMetaMenuId && activeModelOptionId) return;
     modelEffortDraggingRef.current = false;
   }, [activeModelOptionId, openMetaMenuId]);
@@ -515,6 +544,16 @@ export function AwakenComposerBar({
     window.addEventListener("resize", updateSlashPaletteStyle);
     return () => window.removeEventListener("resize", updateSlashPaletteStyle);
   }, [inputSelection, slashPalette?.open, slashActions.length, value, tokens.length]);
+
+  useEffect(() => {
+    if (!slashPalette?.open || !slashPalette.activeActionId) {
+      return;
+    }
+    const activeOption = slashPaletteRef.current?.querySelector<HTMLElement>(
+      '.composer-bar-slash-option[aria-selected="true"]',
+    );
+    activeOption?.scrollIntoView?.({ block: "nearest" });
+  }, [slashActions.length, slashPalette?.activeActionId, slashPalette?.open]);
 
   function renderContextUsageRing(progressPercent: number) {
     const dashOffset =
@@ -1171,6 +1210,103 @@ export function AwakenComposerBar({
     );
   }
 
+  function renderPluginPicker() {
+    if (!showPluginPicker || !pluginPicker) {
+      return null;
+    }
+    const triggerLabel = pluginPicker.label ?? "插件";
+    const previewOptions = pluginOptions.slice(0, 3);
+
+    return (
+      <AwakenDropdown
+        open={pluginPickerOpen}
+        onOpenChange={setPluginPickerOpen}
+        placement="top-start"
+        offset={8}
+        trigger={
+          <button
+            type="button"
+            className="composer-bar-plugin-trigger"
+            aria-label={
+              pluginOptions.length > 0
+                ? `${triggerLabel}，${pluginOptions.length} 个可用`
+                : `${triggerLabel}，暂无可用插件`
+            }
+            aria-haspopup="dialog"
+            aria-expanded={pluginPickerOpen}
+            disabled={disabled || pluginPicker.disabled}
+          >
+            {previewOptions.length > 0 ? (
+              <span className="composer-bar-plugin-preview" aria-hidden="true">
+                {previewOptions.map((option) => (
+                  <span
+                    key={option.id}
+                    className="composer-bar-plugin-badge"
+                    title={option.label}
+                  >
+                    <AwakenIcon concept="plugin-default" size={12} />
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span className="composer-bar-plugin-preview" aria-hidden="true">
+                <span className="composer-bar-plugin-badge">
+                  <AwakenIcon concept="plugin-default" size={12} />
+                </span>
+              </span>
+            )}
+            <span className="composer-bar-plugin-trigger-label">{triggerLabel}</span>
+          </button>
+        }
+      >
+        <div className="composer-bar-plugin-menu" aria-label="选择插件">
+          <div className="composer-bar-plugin-options" role="listbox" aria-label="可用插件">
+            {pluginPicker.loading && pluginOptions.length === 0 ? (
+              <div className="composer-bar-plugin-empty" role="status">
+                加载中…
+              </div>
+            ) : pluginPicker.error ? (
+              <div className="composer-bar-plugin-empty composer-bar-plugin-empty-error" role="status">
+                {pluginPicker.error}
+              </div>
+            ) : pluginOptions.length === 0 ? (
+              <div className="composer-bar-plugin-empty" role="status">
+                {pluginPicker.emptyLabel ?? "还没有安装插件"}
+              </div>
+            ) : (
+              pluginOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`composer-bar-plugin-option${
+                    option.selected ? " composer-bar-plugin-option-selected" : ""
+                  }`}
+                  role="option"
+                  aria-selected={option.selected ?? false}
+                  aria-disabled={option.disabled || undefined}
+                  disabled={option.disabled}
+                  title={option.disabledReason}
+                  onClick={() => {
+                    setPluginPickerOpen(false);
+                    pluginPicker.onSelectOption?.(option.id);
+                  }}
+                >
+                  <span className="composer-bar-plugin-option-badge" aria-hidden="true">
+                    <AwakenIcon concept="plugin-default" size={14} />
+                  </span>
+                  <span className="composer-bar-plugin-option-label">{option.label}</span>
+                  {option.selected ? (
+                    <AwakenIcon concept="step-done" size={16} />
+                  ) : null}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </AwakenDropdown>
+    );
+  }
+
   function showSlashPreview(
     action: ComposerBarSlashAction,
     event: ReactMouseEvent<HTMLButtonElement>,
@@ -1345,6 +1481,7 @@ export function AwakenComposerBar({
           <div className="composer-bar-toolbar">
             <div className="composer-bar-context">
               <AwakenContextButton onClick={onAddContext} disabled={disabled} />
+              {renderPluginPicker()}
             </div>
             {modelMetaItem ? renderModelMetaItem(modelMetaItem) : null}
             <div className="composer-bar-submit">

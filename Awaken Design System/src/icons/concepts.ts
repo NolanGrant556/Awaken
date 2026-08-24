@@ -153,6 +153,7 @@ export const AWAKEN_ICON_CONCEPTS = {
   skill: "book-open",
   "skill-active": "book-open",
   plugin: "agent-plugins-mark",
+  "plugin-default": "puzzle",
   hook: "hook",
   connector: "connector",
   subagent: "subagent",

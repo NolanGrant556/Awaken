@@ -289,6 +289,8 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("PUT /v1/connectors/{id}/cli-readiness", connH.handleCLIReadiness)
 	}
 	pluginH := pluginHandlers{store: cfg.pluginStore, manager: cfg.manager, skillRegistry: cfg.skillRegistry}
+	composerCatalogH := newComposerCatalogHandlers(cfg.skillRegistry, cfg.pluginStore)
+	mux.HandleFunc("GET /v1/composer-catalog/events", composerCatalogH.handleEvents)
 	mux.HandleFunc("GET /v1/plugins", pluginH.handleList)
 	mux.HandleFunc("POST /v1/plugins/install", pluginH.handleInstall)
 	mux.HandleFunc("GET /v1/plugins/{name}", pluginH.handleGet)

@@ -63,6 +63,7 @@ import {
   type CliConnectorReadiness,
   type CliConnectorView,
   type CliProviderId,
+  type ComposerCatalogEvent,
   type DesktopPreferencesSaveRequest,
   type DesktopPlatform,
   type DeleteSkillRequest,
@@ -202,6 +203,10 @@ import {
   startScheduledTaskEventStream,
   type ScheduledTaskEventStream,
 } from "./scheduled-tasks.js";
+import {
+  startComposerCatalogEventStream,
+  type ComposerCatalogEventStream,
+} from "./composer-catalog.js";
 // electron-updater 是 CommonJS；按 electron-builder 官方 interop 形式取 autoUpdater，
 // 只在 index.ts 获取一次并注入 DesktopUpdateManager，不在多个模块重复绑定 listener。
 import electronUpdaterPkg from "electron-updater";
@@ -1292,6 +1297,33 @@ function broadcastPetCatalogChanged(): void {
 // ---------------------------------------------------------------------------
 
 let scheduledTaskEventStream: ScheduledTaskEventStream | null = null;
+let composerCatalogEventStream: ComposerCatalogEventStream | null = null;
+
+function broadcastComposerCatalogEvent(event: ComposerCatalogEvent): void {
+  for (const wc of webContents.getAllWebContents()) {
+    if (!wc.isDestroyed()) {
+      wc.send("awaken:composer-catalog-event", event);
+    }
+  }
+}
+
+function startComposerCatalogEventStreamIfNeeded(): void {
+  if (composerCatalogEventStream || !runtimeBaseUrl) {
+    return;
+  }
+  composerCatalogEventStream = startComposerCatalogEventStream({
+    baseUrl: runtimeBaseUrl,
+    onEvent: broadcastComposerCatalogEvent,
+    onError: (message) => {
+      console.error("[awaken-desktop] composer catalog event stream", { message });
+    },
+  });
+}
+
+function stopComposerCatalogEventStream(): void {
+  composerCatalogEventStream?.stop();
+  composerCatalogEventStream = null;
+}
 
 function broadcastScheduledTaskEvent(event: ScheduledTaskEvent): void {
   for (const wc of webContents.getAllWebContents()) {
@@ -4338,11 +4370,13 @@ app.whenReady().then(async () => {
       runtimeBaseUrl = info.runtimeBaseUrl;
       startProjectTrashWorker();
       startScheduledTaskEventStreamIfNeeded();
+      startComposerCatalogEventStreamIfNeeded();
       void cliConnectorManager?.refreshAll();
       void synchronizeNetworkRoute();
     } else if (info.status !== "running") {
       runtimeBaseUrl = null;
       stopScheduledTaskEventStream();
+      stopComposerCatalogEventStream();
       stopComputerRunMonitors();
     }
     for (const wc of webContents.getAllWebContents()) {
@@ -4362,6 +4396,7 @@ app.whenReady().then(async () => {
       runtimeBaseUrl = statusInfo.runtimeBaseUrl;
       startProjectTrashWorker();
       startScheduledTaskEventStreamIfNeeded();
+      startComposerCatalogEventStreamIfNeeded();
       void cliConnectorManager?.refreshAll();
     }
   });
@@ -4388,6 +4423,7 @@ app.on("window-all-closed", () => {
 function stopSyncShutdownOwners(): void {
   stopProjectTrashWorker();
   stopScheduledTaskEventStream();
+  stopComposerCatalogEventStream();
   stopComputerRunMonitors();
   if (memoryDreamSchedulerTimer) clearInterval(memoryDreamSchedulerTimer);
   memoryDreamSchedulerTimer = null;

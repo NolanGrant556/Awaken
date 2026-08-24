@@ -29,6 +29,7 @@ import {
   type CliConnectorStateEvent,
   type CliConnectorView,
   type CliProviderId,
+  type ComposerCatalogEvent,
   type ComputerHostStatus,
   type ComputerPermission,
   type ComputerRuntimeSetupResult,
@@ -141,12 +142,17 @@ ipcRenderer.on(DESKTOP_UPDATE_CHANNELS.stateChanged, (_event, payload: DesktopUp
 
 const subscriptions = new Map<string, RunStreamHandlers>();
 const cliConnectorStateHandlers = new Set<(event: CliConnectorStateEvent) => void>();
+const composerCatalogEventHandlers = new Set<(event: ComposerCatalogEvent) => void>();
 const memoryDreamReceiptHandlers = new Set<(task: MemoryDreamTask) => void>();
 const scheduledTaskEventHandlers = new Set<(event: ScheduledTaskEvent) => void>();
 const scheduledTaskThreadActivationHandlers = new Set<(threadId: string) => void>();
 
 ipcRenderer.on("awaken:cli-connector-state", (_event, payload: CliConnectorStateEvent) => {
   for (const handler of cliConnectorStateHandlers) handler(payload);
+});
+ipcRenderer.on("awaken:composer-catalog-event", (_event, payload: ComposerCatalogEvent) => {
+  if (!payload || !Number.isFinite(payload.revision)) return;
+  for (const handler of composerCatalogEventHandlers) handler(payload);
 });
 ipcRenderer.on("awaken:memory-dream-receipt", (_event, task: MemoryDreamTask) => {
   for (const handler of memoryDreamReceiptHandlers) handler(task);
@@ -547,6 +553,10 @@ const bridge: AwakenBridge = {
   subscribeCliConnectorState: (handler) => {
     cliConnectorStateHandlers.add(handler);
     return () => cliConnectorStateHandlers.delete(handler);
+  },
+  subscribeComposerCatalogEvents: (handler) => {
+    composerCatalogEventHandlers.add(handler);
+    return () => composerCatalogEventHandlers.delete(handler);
   },
   listMcpServers: () =>
     ipcRenderer.invoke("awaken:list-mcp-servers") as Promise<RuntimeMcpServer[]>,

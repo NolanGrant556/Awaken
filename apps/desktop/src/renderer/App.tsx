@@ -213,14 +213,30 @@ import {
 import {
   actionsFromSlashProviders,
   composerActionTriggerFromDraft,
+  composerPaletteActions,
   computerUseMentionProvider,
   composerTokenFromSlashAction,
-  filterSlashActions,
   firstSelectableSlashAction,
+  pluginMentionProvider,
   skillSlashProvider,
   type ComposerTokenPlacement,
   type SlashAction,
 } from "./composerSlash";
+import {
+  composerStructuredDraftLength,
+  composerTokenLeadingText,
+  insertComposerTokenAtOffset,
+  reconcileComposerStructuredInput,
+  removeComposerTextRange,
+  replaceComposerActionTriggerWithToken,
+} from "./composerStructuredDraft";
+export {
+  composerStructuredDraftLength,
+  insertComposerTokenAtOffset,
+  reconcileComposerStructuredInput,
+  removeComposerTextRange,
+  replaceComposerActionTriggerWithToken,
+} from "./composerStructuredDraft";
 import {
   DEFAULT_INSPECTOR_WIDTH,
   FILE_WORKSPACE_INSPECTOR_CAP,
@@ -446,64 +462,6 @@ export function promptNarrativeTokensForComposer(
   });
 }
 
-export function reconcileComposerStructuredInput(
-  tokens: ComposerToken[],
-  placements: Record<string, ComposerTokenPlacement>,
-  nextValue: ComposerBarStructuredInputValue,
-): {
-  tokens: ComposerToken[];
-  placements: Record<string, ComposerTokenPlacement>;
-  leadingTexts: Record<string, string>;
-  value: string;
-} {
-  const leadingTextByTokenId = new Map(
-    nextValue.tokens.map((token) => [token.id, token.leadingText]),
-  );
-  const currentTokenIds = new Set(tokens.map((token) => token.id));
-  const remainingTokenIds = new Set(
-    nextValue.tokens.map((token) => token.id).filter((tokenId) => currentTokenIds.has(tokenId)),
-  );
-  const nextTokens = tokens
-    .filter((token) => remainingTokenIds.has(token.id))
-    .map((token) => {
-      const leadingText = leadingTextByTokenId.get(token.id) ?? "";
-      const tokenWithoutLeadingText = { ...token };
-      delete tokenWithoutLeadingText.leadingText;
-      return leadingText ? { ...tokenWithoutLeadingText, leadingText } : tokenWithoutLeadingText;
-    });
-
-  return {
-    tokens: nextTokens,
-    placements: Object.fromEntries(
-      Object.entries(placements).filter(([tokenId]) => remainingTokenIds.has(tokenId)),
-    ),
-    leadingTexts: Object.fromEntries(
-      nextValue.tokens
-        .filter((token) => remainingTokenIds.has(token.id) && token.leadingText)
-        .map((token) => [token.id, token.leadingText]),
-    ),
-    value: nextValue.value,
-  };
-}
-
-function composerTokenLeadingText(
-  token: ComposerToken,
-  leadingTexts: Record<string, string>,
-): string {
-  return token.leadingText ?? leadingTexts[token.id] ?? "";
-}
-
-export function composerStructuredDraftLength(
-  tokens: ComposerToken[],
-  leadingTexts: Record<string, string>,
-  value: string,
-): number {
-  return tokens.reduce(
-    (length, token) => length + composerTokenLeadingText(token, leadingTexts).length + 1,
-    value.length,
-  );
-}
-
 function composerTokenEndOffset(
   tokens: ComposerToken[],
   leadingTexts: Record<string, string>,
@@ -515,163 +473,6 @@ function composerTokenEndOffset(
     if (token.id === tokenId) return offset;
   }
   return undefined;
-}
-
-export function insertComposerTokenAtOffset(args: {
-  tokens: ComposerToken[];
-  placements: Record<string, ComposerTokenPlacement>;
-  leadingTexts: Record<string, string>;
-  value: string;
-  offset: number;
-  token: ComposerToken;
-}): {
-  tokens: ComposerToken[];
-  placements: Record<string, ComposerTokenPlacement>;
-  leadingTexts: Record<string, string>;
-  value: string;
-  focusOffset: number;
-} {
-  const totalLength = composerStructuredDraftLength(args.tokens, args.leadingTexts, args.value);
-  const offset = Math.max(0, Math.min(args.offset, totalLength));
-  const nextTokens: ComposerToken[] = [];
-  let consumed = 0;
-  let inserted = false;
-
-  for (const currentToken of args.tokens) {
-    const leadingText = composerTokenLeadingText(currentToken, args.leadingTexts);
-    if (!inserted && offset <= consumed + leadingText.length) {
-      const splitOffset = offset - consumed;
-      const before = leadingText.slice(0, splitOffset);
-      const after = leadingText.slice(splitOffset);
-      nextTokens.push(
-        before ? { ...args.token, leadingText: before } : { ...args.token },
-        after
-          ? { ...currentToken, leadingText: after }
-          : (() => {
-              const token = { ...currentToken };
-              delete token.leadingText;
-              return token;
-            })(),
-      );
-      inserted = true;
-    } else {
-      nextTokens.push(
-        leadingText
-          ? { ...currentToken, leadingText }
-          : (() => {
-              const token = { ...currentToken };
-              delete token.leadingText;
-              return token;
-            })(),
-      );
-    }
-    consumed += leadingText.length + 1;
-  }
-
-  let value = args.value;
-  if (!inserted) {
-    const tailOffset = Math.max(0, Math.min(offset - consumed, value.length));
-    const before = value.slice(0, tailOffset);
-    value = value.slice(tailOffset);
-    nextTokens.push(before ? { ...args.token, leadingText: before } : { ...args.token });
-  }
-
-  return {
-    tokens: nextTokens,
-    placements: Object.fromEntries(
-      nextTokens.map((token) => [
-        token.id,
-        token.id === args.token.id ? "after" : (args.placements[token.id] ?? "after"),
-      ]),
-    ),
-    leadingTexts: Object.fromEntries(
-      nextTokens
-        .filter((token) => Boolean(token.leadingText))
-        .map((token) => [token.id, token.leadingText ?? ""]),
-    ),
-    value,
-    focusOffset: offset + 1,
-  };
-}
-
-export function removeComposerTextRange(args: {
-  tokens: ComposerToken[];
-  placements: Record<string, ComposerTokenPlacement>;
-  leadingTexts: Record<string, string>;
-  value: string;
-  start: number;
-  end: number;
-}): {
-  tokens: ComposerToken[];
-  placements: Record<string, ComposerTokenPlacement>;
-  leadingTexts: Record<string, string>;
-  value: string;
-} {
-  const start = Math.max(0, Math.min(args.start, args.end));
-  const end = Math.max(start, args.end);
-  let logicalOffset = 0;
-  const tokens = args.tokens.map((token) => {
-    const leadingText = composerTokenLeadingText(token, args.leadingTexts);
-    const leadingEnd = logicalOffset + leadingText.length;
-    if (start >= logicalOffset && end <= leadingEnd) {
-      const nextLeadingText = `${leadingText.slice(0, start - logicalOffset)}${leadingText.slice(
-        end - logicalOffset,
-      )}`;
-      logicalOffset = leadingEnd + 1;
-      const nextToken = { ...token };
-      if (nextLeadingText) {
-        nextToken.leadingText = nextLeadingText;
-      } else {
-        delete nextToken.leadingText;
-      }
-      return nextToken;
-    }
-    logicalOffset = leadingEnd + 1;
-    return leadingText ? { ...token, leadingText } : { ...token };
-  });
-
-  let value = args.value;
-  const tailEnd = logicalOffset + value.length;
-  if (start >= logicalOffset && end <= tailEnd) {
-    value = `${value.slice(0, start - logicalOffset)}${value.slice(end - logicalOffset)}`;
-  }
-
-  return {
-    tokens,
-    placements: { ...args.placements },
-    leadingTexts: Object.fromEntries(
-      tokens
-        .filter((token) => Boolean(token.leadingText))
-        .map((token) => [token.id, token.leadingText ?? ""]),
-    ),
-    value,
-  };
-}
-
-export function replaceComposerActionTriggerWithToken(args: {
-  tokens: ComposerToken[];
-  placements: Record<string, ComposerTokenPlacement>;
-  leadingTexts: Record<string, string>;
-  value: string;
-  trigger: { start: number; end: number };
-  token: ComposerToken;
-}) {
-  const withoutTrigger = removeComposerTextRange({
-    tokens: args.tokens,
-    placements: args.placements,
-    leadingTexts: args.leadingTexts,
-    value: args.value,
-    start: args.trigger.start,
-    end: args.trigger.end,
-  });
-  if (withoutTrigger.tokens.some((token) => token.id === args.token.id)) {
-    return { ...withoutTrigger, focusOffset: args.trigger.start };
-  }
-  return insertComposerTokenAtOffset({
-    ...withoutTrigger,
-    offset: args.trigger.start,
-    token: args.token,
-  });
 }
 
 export function promptTokenViews(tokens?: PromptNarrativeToken[]) {
@@ -2329,7 +2130,14 @@ export function App() {
     () => [skillSlashProvider((workspaceRoot) => runtimeClient.listSkills(workspaceRoot))],
     [runtimeClient],
   );
-  const mentionProviders = useMemo(() => [computerUseMentionProvider()], []);
+  const pluginProvider = useMemo(
+    () => pluginMentionProvider(() => runtimeClient.listPlugins()),
+    [runtimeClient],
+  );
+  const mentionProviders = useMemo(
+    () => [computerUseMentionProvider(), pluginProvider],
+    [pluginProvider],
+  );
 
   const [runtimeState, dispatch] = useReducer(
     reduceRuntimeState,
@@ -2647,6 +2455,17 @@ export function App() {
   const [slashLoading, setSlashLoading] = useState(false);
   const [slashError, setSlashError] = useState<string | null>(null);
   const [slashActiveActionId, setSlashActiveActionId] = useState<string | undefined>();
+  const [composerPluginActions, setComposerPluginActions] = useState<SlashAction[]>([]);
+  const [composerPluginsLoading, setComposerPluginsLoading] = useState(false);
+  const [composerPluginsError, setComposerPluginsError] = useState<string | null>(null);
+  const [composerCatalogRevision, setComposerCatalogRevision] = useState(0);
+  useEffect(
+    () =>
+      runtimeClient.subscribeComposerCatalogEvents((event) => {
+        setComposerCatalogRevision((current) => Math.max(current, event.revision));
+      }),
+    [runtimeClient],
+  );
   const isBusy =
     runtimeState.phase === "starting" ||
     runtimeState.phase === "running" ||
@@ -3780,7 +3599,7 @@ export function App() {
   const slashPaletteOpen =
     Boolean(composerActionTrigger) && desktopReady && isWorkspaceValid && !isBusy;
   const filteredSlashActions = useMemo(
-    () => filterSlashActions(slashActions, composerActionTrigger?.query ?? "").slice(0, 24),
+    () => composerPaletteActions(slashActions, composerActionTrigger?.query ?? ""),
     [composerActionTrigger?.query, slashActions],
   );
   const composerBarTokens = useMemo(
@@ -3794,7 +3613,9 @@ export function App() {
         title:
           typeof token.payload?.skillFilePath === "string"
             ? token.payload.skillFilePath
-            : token.label,
+            : typeof token.payload?.pluginName === "string"
+              ? token.payload.pluginName
+              : token.label,
       })),
     [composerTokenLeadingTexts, composerTokenPlacements, composerTokens],
   );
@@ -3823,6 +3644,21 @@ export function App() {
     emptyLabel: "没有匹配项",
     onSelectAction: handleSlashActionSelect,
     onActiveActionChange: setSlashActiveActionId,
+  };
+  const composerBarPluginPicker = {
+    label: "插件",
+    emptyLabel: "还没有安装插件",
+    loading: composerPluginsLoading,
+    error: composerPluginsError,
+    disabled: composerBarState.disabled,
+    options: composerPluginActions.map((action) => ({
+      id: action.id,
+      label: action.label,
+      disabled: action.disabled,
+      disabledReason: action.disabledReason,
+      selected: composerTokens.some((token) => token.id === action.composerToken?.id),
+    })),
+    onSelectOption: handleComposerPluginSelect,
   };
 
   useEffect(() => {
@@ -3860,7 +3696,12 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeComposerActionProviders, slashPaletteOpen, workspaceRootForRun]);
+  }, [
+    activeComposerActionProviders,
+    composerCatalogRevision,
+    slashPaletteOpen,
+    workspaceRootForRun,
+  ]);
 
   useEffect(() => {
     if (!slashPaletteOpen) {
@@ -3873,6 +3714,42 @@ export function App() {
       setSlashActiveActionId(firstSelectableSlashAction(filteredSlashActions)?.id);
     }
   }, [filteredSlashActions, slashActiveActionId, slashPaletteOpen]);
+
+  useEffect(() => {
+    if (!desktopReady) {
+      setComposerPluginActions([]);
+      setComposerPluginsLoading(false);
+      setComposerPluginsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setComposerPluginsLoading(true);
+    setComposerPluginsError(null);
+    void Promise.resolve(pluginProvider.getActions({ workspaceRootForRun }))
+      .then((actions) => {
+        if (!cancelled) {
+          setComposerPluginActions(actions);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setComposerPluginActions([]);
+          setComposerPluginsError(
+            error instanceof Error ? error.message : "插件列表加载失败",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setComposerPluginsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [composerCatalogRevision, desktopReady, pluginProvider, workspaceRootForRun]);
 
   const activeUserQuestion = runtimeState.userQuestions[0];
   const activeExternalInteraction = runtimeState.externalInteractions[0];
@@ -4740,6 +4617,55 @@ export function App() {
       focus: nextDraft.focusOffset,
     });
     setSlashActiveActionId(undefined);
+    requestComposerFocus(nextDraft.focusOffset);
+  }
+
+  function handleComposerPluginSelect(actionId: string): void {
+    const action = composerPluginActions.find((item) => item.id === actionId);
+    if (!action || action.disabled) {
+      return;
+    }
+    const token = composerTokenFromSlashAction(action);
+    if (!token) {
+      return;
+    }
+
+    const existingTokenOffset = composerTokenEndOffset(
+      composerTokens,
+      composerTokenLeadingTexts,
+      token.id,
+    );
+    if (existingTokenOffset !== undefined) {
+      setComposerInputSelection({
+        anchor: existingTokenOffset,
+        focus: existingTokenOffset,
+      });
+      requestComposerFocus(existingTokenOffset);
+      return;
+    }
+
+    const draftLength = composerStructuredDraftLength(
+      composerTokens,
+      composerTokenLeadingTexts,
+      composerValue,
+    );
+    const offset = composerInputSelection?.focus ?? draftLength;
+    const nextDraft = insertComposerTokenAtOffset({
+      tokens: composerTokens,
+      placements: composerTokenPlacements,
+      leadingTexts: composerTokenLeadingTexts,
+      value: composerValue,
+      offset,
+      token,
+    });
+    setComposerTokens(nextDraft.tokens);
+    setComposerTokenPlacements(nextDraft.placements);
+    setComposerTokenLeadingTexts(nextDraft.leadingTexts);
+    setComposerValue(nextDraft.value);
+    setComposerInputSelection({
+      anchor: nextDraft.focusOffset,
+      focus: nextDraft.focusOffset,
+    });
     requestComposerFocus(nextDraft.focusOffset);
   }
 
@@ -7811,6 +7737,7 @@ export function App() {
                                   attachments={composerBarAttachments}
                                   tokens={composerBarTokens}
                                   slashPalette={composerBarSlashPalette}
+                                  pluginPicker={composerBarPluginPicker}
                                   onInputKeyDown={handleComposerInputKeyDown}
                                   onRemoveAttachment={handleRemoveComposerAttachment}
                                   onRemoveToken={handleRemoveComposerToken}
@@ -7840,7 +7767,7 @@ export function App() {
                               void handleComposerSubmit();
                             }}
                             onAddContext={handleAddContext}
-                            placeholder="描述任务，或 / 选择技能"
+                            placeholder="描述任务，或 / 选择 Skill、@ 选择 Plugin"
                             disabled={composerBarState.disabled}
                             isReady={composerBarState.isReady}
                             submitMode={composerBarState.submitMode}
@@ -7859,6 +7786,7 @@ export function App() {
                             attachments={composerBarAttachments}
                             tokens={composerBarTokens}
                             slashPalette={composerBarSlashPalette}
+                            pluginPicker={composerBarPluginPicker}
                             onInputKeyDown={handleComposerInputKeyDown}
                             onRemoveAttachment={handleRemoveComposerAttachment}
                             onRemoveToken={handleRemoveComposerToken}

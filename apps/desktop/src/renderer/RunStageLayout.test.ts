@@ -91,6 +91,37 @@ describe("RunStage layout", () => {
       "line-height: var(--aw-line-height-md) !important;",
     );
 
+    const composerToken = cssRule(composerStyles, ".composer-bar-token");
+    expect(composerToken).toContain("vertical-align: middle;");
+    expect(composerToken).toContain("gap: 5px;");
+    expect(composerToken).toContain("min-height: var(--aw-line-height-md);");
+    expect(composerToken).toContain("margin-inline-end: var(--aw-space-3);");
+    expect(composerToken).toContain("font-weight: var(--aw-font-weight-medium);");
+
+    const composerTokenIcon = cssRule(composerStyles, ".composer-bar-token-icon");
+    expect(composerTokenIcon).toContain("width: var(--aw-icon-size-16);");
+    expect(composerTokenIcon).toContain("height: var(--aw-icon-size-16);");
+    expect(composerTokenIcon).not.toContain("transform:");
+
+    const promptBubble = cssRule(designSystemStyles, ".execution-prompt-bubble");
+    expect(promptBubble).toContain("--execution-prompt-collapsed-content-height: 60px;");
+    expect(promptBubble).toContain("font-size: var(--aw-font-size-base);");
+    expect(promptBubble).toContain("line-height: var(--aw-line-height-base);");
+
+    const promptToken = cssRule(designSystemStyles, ".execution-prompt-bubble-token");
+    expect(promptToken).toContain("vertical-align: middle;");
+    expect(promptToken).toContain("gap: 5px;");
+    expect(promptToken).toContain("margin-inline-end: var(--aw-space-3);");
+    expect(promptToken).toContain("font-weight: var(--aw-font-weight-medium);");
+
+    const promptTokenIcon = cssRule(
+      designSystemStyles,
+      ".execution-prompt-bubble-token-icon",
+    );
+    expect(promptTokenIcon).toContain("width: var(--aw-icon-size-16);");
+    expect(promptTokenIcon).toContain("height: var(--aw-icon-size-16);");
+    expect(promptTokenIcon).not.toContain("transform:");
+
     const projectShelf = cssRule(composerStyles, ".composer-bar-project-shelf");
     expect(projectShelf).toContain("width: 100%;");
     expect(projectShelf).toContain("margin: -28px 0 0;");

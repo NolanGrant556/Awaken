@@ -365,6 +365,119 @@ func TestSkillInstallToolInstallsContentProjectSkillAndReloads(t *testing.T) {
 	}
 }
 
+func TestSkillInstallToolValidateOnlyDoesNotWriteOrReload(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	workspace := t.TempDir()
+	reg := skills.NewSkillRegistry(nil)
+	installer := &SkillInstallTool{registry: reg}
+	ctx := tool.ContextWithPermissionContext(
+		context.Background(),
+		tool.NewPermissionContext(workspace, []string{workspace}),
+	)
+
+	outcome, err := installer.ExecuteOutcome(ctx, `{
+		"source_type": "content",
+		"file_name": "SKILL.md",
+		"content": "---\nname: validate-only\ndescription: Validate only.\n---\nDo not install me.",
+		"scope": "project",
+		"validate_only": true
+	}`, nil)
+	if err != nil {
+		t.Fatalf("validate skill: %v", err)
+	}
+	if outcome.Status != tool.OutcomeSucceeded || outcome.Operation == nil || outcome.Operation.SideEffectState != tool.OutcomeSideEffectNone {
+		t.Fatalf("dry-run validation reported mutation: %+v", outcome)
+	}
+	if outcome.Details["install_status"] != "validated" || outcome.Details["file_count"] != 1 || outcome.Details["total_bytes"] == int64(0) {
+		t.Fatalf("unexpected validation details: %+v", outcome.Details)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".awaken", "skills", "validate-only")); !os.IsNotExist(err) {
+		t.Fatalf("validate_only created the Skill package: %v", err)
+	}
+	if reg.Get("validate-only") != nil {
+		t.Fatal("validate_only reloaded the Skill registry")
+	}
+	if len(outcome.NextActions) != 1 || outcome.NextActions[0].InputHint["path"] != nil {
+		t.Fatalf("dry-run guidance must not invent a candidate source path: %+v", outcome.NextActions)
+	}
+}
+
+func TestSkillInstallToolValidateOnlyHonorsAbortAndReviewedReplace(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	workspace := t.TempDir()
+	reg := skills.NewSkillRegistry(nil)
+	installer := &SkillInstallTool{registry: reg}
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(workspace, []string{workspace}))
+	base := `{"source_type":"content","file_name":"SKILL.md","content":"---\nname: existing\ndescription: Existing.\n---\nBody.","scope":"project"}`
+	if _, err := installer.Execute(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	abortOutcome, err := installer.ExecuteOutcome(ctx, `{"source_type":"content","file_name":"SKILL.md","content":"---\nname: existing\ndescription: Changed.\n---\nChanged.","scope":"project","validate_only":true}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if abortOutcome.ErrorCode != "skill_install_already_exists" || abortOutcome.Operation == nil || abortOutcome.Operation.SideEffectState != tool.OutcomeSideEffectNotStarted {
+		t.Fatalf("dry-run abort ignored existing target: %+v", abortOutcome)
+	}
+	replaceOutcome, err := installer.ExecuteOutcome(ctx, `{"source_type":"content","file_name":"SKILL.md","content":"---\nname: existing\ndescription: Changed.\n---\nChanged.","scope":"project","overwrite_policy":"replace","validate_only":true}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaceOutcome.Status != tool.OutcomeSucceeded || replaceOutcome.Details["target_exists"] != true || replaceOutcome.Details["would_replace"] != true {
+		t.Fatalf("reviewed replacement dry-run=%+v", replaceOutcome)
+	}
+	current, err := os.ReadFile(filepath.Join(workspace, ".awaken", "skills", "existing", "SKILL.md"))
+	if err != nil || strings.Contains(string(current), "Changed.") {
+		t.Fatalf("replacement dry-run changed live package: %v %q", err, current)
+	}
+}
+
+func TestSkillPackageExportToolCopiesCompleteCandidateOutsideLiveRoot(t *testing.T) {
+	workspace := t.TempDir()
+	sourceRoot := t.TempDir()
+	skillRoot := filepath.Join(sourceRoot, "export-me")
+	if err := os.MkdirAll(filepath.Join(skillRoot, "assets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillRoot, "SKILL.md"), []byte("---\nname: export-me\ndescription: Export me.\n---\nBody.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	asset := []byte{0x00, 0x01, 0xfe, 0xff}
+	if err := os.WriteFile(filepath.Join(skillRoot, "assets", "binary.dat"), asset, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(skillRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := skills.NewSkillRegistry(nil)
+	reg.RegisterSkill(&skills.SkillDefinition{ID: "export-me", Name: "export-me", Description: "Export me.", Source: skills.SourceUser, Scope: skills.SourceUser, RootDir: skillRoot, ResolvedRootDir: resolvedRoot, SourceRoot: sourceRoot, SkillFilePath: filepath.Join(skillRoot, "SKILL.md"), State: skills.StateLoaded})
+	exporter := &SkillPackageExportTool{registry: reg}
+	if err := tool.ValidateToolWithMode(exporter, tool.DefinitionValidationStrictBuiltin); err != nil {
+		t.Fatalf("skill export definition: %v", err)
+	}
+	ctx := tool.ContextWithPermissionContext(context.Background(), tool.NewPermissionContext(workspace, []string{workspace}))
+	outcome, err := exporter.ExecuteOutcome(ctx, `{"skill_id":"export-me","destination":"authoring/export-me"}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Status != tool.OutcomeSucceeded || outcome.Operation == nil || outcome.Operation.SideEffectState != tool.OutcomeSideEffectApplied {
+		t.Fatalf("outcome=%+v", outcome)
+	}
+	candidate := filepath.Join(workspace, "authoring", "export-me")
+	copied, err := os.ReadFile(filepath.Join(candidate, "assets", "binary.dat"))
+	if err != nil || string(copied) != string(asset) {
+		t.Fatalf("binary asset was not preserved: %v %v", copied, err)
+	}
+	original, err := os.ReadFile(filepath.Join(skillRoot, "SKILL.md"))
+	if err != nil || !strings.Contains(string(original), "Body.") {
+		t.Fatalf("installed package changed: %v %q", err, original)
+	}
+	if _, err := exporter.Execute(ctx, `{"skill_id":"export-me","destination":"authoring/export-me"}`); err == nil {
+		t.Fatal("export must not overwrite an existing candidate")
+	}
+}
+
 func TestSkillInstallToolStrictDefinitionAndStructuredOutcome(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	tooltrash.SetAdapter(skillInstallTrashAdapter{dir: filepath.Join(t.TempDir(), "Trash")})
@@ -586,6 +699,7 @@ func TestSafeGitEnvironmentDropsAmbientExecutionConfiguration(t *testing.T) {
 func TestManagerRegistersSkillInstallThroughStrictGate(t *testing.T) {
 	previous, previousErr := tool.GetRegisteredTool(SkillInstallToolName)
 	previousResource, previousResourceErr := tool.GetRegisteredTool(ResourceReadToolName)
+	previousExport, previousExportErr := tool.GetRegisteredTool(SkillPackageExportToolName)
 	defer func() {
 		if previousErr == nil {
 			_ = tool.RegisterToolForce(previous.Runtime)
@@ -596,6 +710,11 @@ func TestManagerRegistersSkillInstallThroughStrictGate(t *testing.T) {
 			_ = tool.RegisterToolForce(previousResource.Runtime)
 		} else {
 			tool.UnregisterTool(ResourceReadToolName)
+		}
+		if previousExportErr == nil {
+			_ = tool.RegisterToolForce(previousExport.Runtime)
+		} else {
+			tool.UnregisterTool(SkillPackageExportToolName)
 		}
 	}()
 
@@ -620,6 +739,16 @@ func TestManagerRegistersSkillInstallThroughStrictGate(t *testing.T) {
 	}
 	if _, ok := resource.Runtime.(tool.OutcomeTool); !ok {
 		t.Fatal("skill_resource_read must execute through the structured OutcomeTool path")
+	}
+	exporter, err := tool.GetRegisteredTool(SkillPackageExportToolName)
+	if err != nil {
+		t.Fatalf("skill_package_export was not registered: %v", err)
+	}
+	if exporter.Origin != tool.SourceBuiltin || exporter.Quality != tool.DefinitionQualityStrict {
+		t.Fatalf("skill_package_export must be a strict builtin: origin=%s quality=%s warnings=%v", exporter.Origin, exporter.Quality, exporter.Warnings)
+	}
+	if _, ok := exporter.Runtime.(tool.OutcomeTool); !ok {
+		t.Fatal("skill_package_export must execute through the structured OutcomeTool path")
 	}
 }
 

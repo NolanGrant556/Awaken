@@ -8,7 +8,8 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
-	"strings"
+
+	"awaken/src/pluginidentity"
 )
 
 func digestTree(root string) (string, error) {
@@ -59,14 +60,10 @@ func digestTree(root string) (string, error) {
 	return "sha256:" + hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-func normalizePluginNameForID(name string) string {
-	return strings.ReplaceAll(name, ".", "-")
-}
-
 func SkillCatalogID(pluginName, skillID string) string {
-	return PluginIdentityPrefix + normalizePluginNameForID(pluginName) + "__" + skillID
+	return pluginidentity.SkillCatalogID(pluginName, skillID)
 }
 
 func PluginNameFromSkillsRoot(skillsRoot string) string {
-	return filepath.Base(filepath.Dir(filepath.Clean(skillsRoot)))
+	return pluginidentity.PluginNameFromSkillsRoot(skillsRoot)
 }

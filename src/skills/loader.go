@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"awaken/src/plugins"
+	"awaken/src/pluginidentity"
 )
 
 const reservedSystemSkillsDirName = "system-skills"
@@ -283,7 +283,7 @@ func namespacedSkillID(source SourceOrigin, skillsRoot, skillID string) string {
 	if source != SourcePlugin {
 		return skillID
 	}
-	return plugins.SkillCatalogID(plugins.PluginNameFromSkillsRoot(skillsRoot), skillID)
+	return pluginidentity.SkillCatalogID(pluginidentity.PluginNameFromSkillsRoot(skillsRoot), skillID)
 }
 
 func SkillIDFromNameOrFallback(fallback string, skillName string) string {

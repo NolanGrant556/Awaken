@@ -55,6 +55,15 @@ type InstallResult struct {
 	PreviousPackageTrash *trash.TrashResult
 }
 
+// SkillPackageValidation is the canonical authoring-time view of a package.
+// It is produced by the same parser and schema checks used immediately before
+// installation, so a dry-run cannot drift into a second Skill format.
+type SkillPackageValidation struct {
+	Skill      *SkillDefinition
+	FileCount  int
+	TotalBytes int64
+}
+
 func PackageFromBytes(fileName string, data []byte) (SkillPackage, error) {
 	lowerName := strings.ToLower(strings.TrimSpace(fileName))
 	if strings.HasSuffix(lowerName, ".zip") {
@@ -96,29 +105,107 @@ func PackageFromPath(sourcePath string) (SkillPackage, error) {
 	return packageFromDirectory(sourcePath)
 }
 
-func InstallSkillPackage(req InstallRequest) (InstallResult, error) {
-	pkg := req.Package
+// ValidateSkillPackage parses and validates a materialized package without
+// writing it to a project or user Skill root.
+func ValidateSkillPackage(pkg SkillPackage) (SkillPackageValidation, error) {
 	if len(bytes.TrimSpace(pkg.rawSkill)) == 0 {
-		return InstallResult{}, fmt.Errorf("SKILL.md is empty")
+		return SkillPackageValidation{}, fmt.Errorf("SKILL.md is empty")
 	}
 
 	def, err := ParseFrontmatter(string(pkg.rawSkill))
 	if err != nil {
-		return InstallResult{}, err
+		return SkillPackageValidation{}, err
 	}
 	def.ID = SkillIDFromNameOrFallback(pkg.fallbackName, def.Name)
 	if strings.TrimSpace(def.Name) == "" {
 		def.Name = def.ID
 	}
 	if err := ValidateNameReserved(def.Name); err != nil {
-		return InstallResult{}, err
+		return SkillPackageValidation{}, err
 	}
 	if err := ValidateSchema(def); err != nil {
-		return InstallResult{}, err
+		return SkillPackageValidation{}, err
 	}
 	if def.Context == "" {
 		def.Context = ContextInline
 	}
+
+	var totalBytes int64
+	for _, file := range pkg.files {
+		totalBytes += int64(len(file.data))
+	}
+	return SkillPackageValidation{Skill: def, FileCount: len(pkg.files), TotalBytes: totalBytes}, nil
+}
+
+// ExportSkillPackage writes a validated package to a previously absent
+// authoring directory. It is intentionally separate from installation so an
+// Agent can modify a complete candidate outside the protected live Skill
+// roots without dropping bundled scripts, references, or binary assets.
+func ExportSkillPackage(pkg SkillPackage, destination string) (SkillPackageValidation, error) {
+	validation, err := ValidateSkillPackage(pkg)
+	if err != nil {
+		return SkillPackageValidation{}, err
+	}
+	destination = filepath.Clean(strings.TrimSpace(destination))
+	if destination == "" || destination == "." || filepath.Dir(destination) == destination {
+		return SkillPackageValidation{}, fmt.Errorf("skill export destination is required")
+	}
+	if _, err := os.Lstat(destination); err == nil {
+		return SkillPackageValidation{}, fmt.Errorf("skill export destination already exists: %s", destination)
+	} else if !os.IsNotExist(err) {
+		return SkillPackageValidation{}, err
+	}
+	parent := filepath.Dir(destination)
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return SkillPackageValidation{}, fmt.Errorf("create skill export parent: %w", err)
+	}
+	tempDir, err := os.MkdirTemp(parent, "."+filepath.Base(destination)+".tmp-*")
+	if err != nil {
+		return SkillPackageValidation{}, fmt.Errorf("create skill export staging directory: %w", err)
+	}
+	tempPresent := true
+	defer func() {
+		if tempPresent {
+			_ = os.RemoveAll(tempDir)
+		}
+	}()
+	root, err := os.OpenRoot(tempDir)
+	if err != nil {
+		return SkillPackageValidation{}, fmt.Errorf("open skill export staging directory: %w", err)
+	}
+	for _, file := range pkg.files {
+		rel, cleanErr := cleanPackageRelPath(file.relPath)
+		if cleanErr != nil {
+			root.Close()
+			return SkillPackageValidation{}, cleanErr
+		}
+		target := filepath.FromSlash(rel)
+		if err := root.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			root.Close()
+			return SkillPackageValidation{}, fmt.Errorf("create exported Skill directory: %w", err)
+		}
+		if err := root.WriteFile(target, file.data, file.mode); err != nil {
+			root.Close()
+			return SkillPackageValidation{}, fmt.Errorf("write exported Skill file %s: %w", rel, err)
+		}
+	}
+	if err := root.Close(); err != nil {
+		return SkillPackageValidation{}, err
+	}
+	if err := os.Rename(tempDir, destination); err != nil {
+		return SkillPackageValidation{}, fmt.Errorf("activate exported Skill candidate: %w", err)
+	}
+	tempPresent = false
+	return validation, nil
+}
+
+func InstallSkillPackage(req InstallRequest) (InstallResult, error) {
+	pkg := req.Package
+	validation, err := ValidateSkillPackage(pkg)
+	if err != nil {
+		return InstallResult{}, err
+	}
+	def := validation.Skill
 
 	scope, projectRoot, dir, source, err := ResolveInstallTarget(InstallTargetRequest{
 		Scope:            req.Scope,

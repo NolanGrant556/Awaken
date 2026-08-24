@@ -135,18 +135,22 @@ type Schedule struct {
 }
 
 // ComposerTokenPayload is the durable identity carried by a user-selected
-// slash action. Scheduled tasks currently persist only Skill tokens, but the
-// shape mirrors runtime.ComposerToken so the host can reuse StartRun's
-// registry/path revalidation instead of trusting Renderer paths.
+// Composer action. The shape mirrors runtime.ComposerToken so the host can
+// reuse StartRun's Skill/Plugin/capability revalidation instead of trusting
+// Renderer paths or package metadata.
 type ComposerTokenPayload struct {
+	CapabilityID  string `json:"capabilityId,omitempty"`
 	SkillID       string `json:"skillId,omitempty"`
+	PluginName    string `json:"pluginName,omitempty"`
+	PluginDigest  string `json:"pluginDigest,omitempty"`
 	SourceOrigin  string `json:"sourceOrigin,omitempty"`
 	SkillFilePath string `json:"skillFilePath,omitempty"`
 	RootDir       string `json:"rootDir,omitempty"`
 }
 
-// ComposerToken preserves the structured Skill selection and the text that
-// preceded it in the editor. Content stores the remaining trailing text.
+// ComposerToken preserves the structured Skill, Plugin, or capability
+// selection and the text that preceded it in the editor. Content stores the
+// remaining trailing text.
 type ComposerToken struct {
 	ID          string               `json:"id"`
 	Type        string               `json:"type"`
@@ -166,8 +170,9 @@ type Action struct {
 }
 
 // EffectivePrompt reconstructs the same visible text accepted by the home
-// Composer while keeping Skill identity structured for deterministic
-// pre-activation. Token-only actions intentionally return an empty prompt.
+// Composer while keeping every token identity structured for host-side
+// validation and expansion. Token-only actions intentionally return an empty
+// prompt.
 func (a Action) EffectivePrompt() string {
 	var prompt strings.Builder
 	for _, token := range a.ComposerTokens {

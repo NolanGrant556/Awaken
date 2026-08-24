@@ -122,6 +122,108 @@ func TestInstallLocalPluginAndList(t *testing.T) {
 	}
 }
 
+func TestStoreChangeSubscribersDoNotReplaceRuntimeRefreshOwner(t *testing.T) {
+	store := testStore(t)
+	primaryCalls := 0
+	listenerCalls := 0
+	store.SetOnChange(func() { primaryCalls++ })
+	unsubscribe := store.SubscribeChanges(func() { listenerCalls++ })
+	src := t.TempDir()
+	writePluginFixture(t, src, "subscriber.plugin", false)
+	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}}); err != nil {
+		t.Fatal(err)
+	}
+	if primaryCalls != 1 || listenerCalls != 1 {
+		t.Fatalf("primary=%d listener=%d", primaryCalls, listenerCalls)
+	}
+	unsubscribe()
+	if _, err := store.SetEnabled("subscriber.plugin", false); err != nil {
+		t.Fatal(err)
+	}
+	if primaryCalls != 2 || listenerCalls != 1 {
+		t.Fatalf("after unsubscribe primary=%d listener=%d", primaryCalls, listenerCalls)
+	}
+}
+
+func TestResolveComposerSelectionRevalidatesEnabledDigestAndComponents(t *testing.T) {
+	store := testStore(t)
+	src := t.TempDir()
+	writePluginFixture(t, src, "composer.plugin", true)
+	installed, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection, err := store.ResolveComposerSelection(installed.Plugin.Name, installed.Plugin.Digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selection.SkillIDs) != 1 || selection.SkillIDs[0] != "plugin__composer-plugin__lint" {
+		t.Fatalf("skills=%v", selection.SkillIDs)
+	}
+	if len(selection.ServerIDs) != 1 || selection.ServerIDs[0] != "plugin__composer.plugin__local" {
+		t.Fatalf("servers=%v", selection.ServerIDs)
+	}
+	if _, err := store.ResolveComposerSelection(installed.Plugin.Name, "stale"); !errors.Is(err, ErrDigestChanged) {
+		t.Fatalf("stale digest err=%v", err)
+	}
+	if _, err := store.SetEnabled(installed.Plugin.Name, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ResolveComposerSelection(installed.Plugin.Name, installed.Plugin.Digest); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("disabled err=%v", err)
+	}
+}
+
+func TestValidateLocalPluginDoesNotInstall(t *testing.T) {
+	store := testStore(t)
+	src := t.TempDir()
+	writePluginFixture(t, src, "validate.only", true)
+
+	validation, err := store.Validate(context.Background(), Source{Kind: SourceLocalPath, Path: src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validation.Valid || validation.Name != "validate.only" || validation.SkillCount != 1 || validation.ServerCount != 1 || validation.Digest == "" || validation.TargetRoot != filepath.Join(store.packagesRoot, "validate.only") {
+		t.Fatalf("validation=%+v", validation)
+	}
+	installed, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(installed) != 0 {
+		t.Fatalf("validation mutated installed state: %+v", installed)
+	}
+	if _, err := os.Stat(filepath.Join(store.packagesRoot, "validate.only")); !os.IsNotExist(err) {
+		t.Fatalf("validation created a live package: %v", err)
+	}
+}
+
+func TestValidatePluginReportsInvalidEmbeddedSkill(t *testing.T) {
+	store := testStore(t)
+	src := t.TempDir()
+	writePluginFixture(t, src, "invalid.skill", false)
+	if err := os.WriteFile(filepath.Join(src, "skills", "lint", "SKILL.md"), []byte("---\nname: lint\n---\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	validation, err := store.Validate(context.Background(), Source{Kind: SourceLocalPath, Path: src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validation.Valid {
+		t.Fatalf("invalid embedded Skill passed validation: %+v", validation)
+	}
+	found := false
+	for _, diagnostic := range validation.Diagnostics {
+		if diagnostic.Code == "plugin_skill_invalid" && diagnostic.Severity == "error" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing embedded Skill diagnostic: %+v", validation.Diagnostics)
+	}
+}
+
 func TestInstallSameNameAbortsWithoutReplace(t *testing.T) {
 	store := testStore(t)
 	src := t.TempDir()
@@ -131,6 +233,26 @@ func TestInstallSameNameAbortsWithoutReplace(t *testing.T) {
 	}
 	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}}); !errors.Is(err, ErrAlreadyExists) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestInstallRejectsSourceChangedAfterValidation(t *testing.T) {
+	store := testStore(t)
+	src := t.TempDir()
+	writePluginFixture(t, src, "source.changed", false)
+	validation, err := store.Validate(context.Background(), Source{Kind: SourceLocalPath, Path: src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "changed.txt"), []byte("changed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}, ExpectedDigest: validation.Digest})
+	if !errors.Is(err, ErrSourceChanged) {
+		t.Fatalf("err=%v", err)
+	}
+	if listed, listErr := store.List(); listErr != nil || len(listed) != 0 {
+		t.Fatalf("changed source mutated store: list=%v err=%v", listed, listErr)
 	}
 }
 
@@ -180,6 +302,9 @@ func TestReplaceFailsClosedWhenTrashUnavailable(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(store.packagesRoot, "sample", "plugin.json")); err != nil {
 		t.Fatalf("original package should remain: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(store.packagesRoot, "sample", "extra.txt")); !os.IsNotExist(err) {
+		t.Fatalf("failed replacement leaked the new package: %v", err)
 	}
 }
 

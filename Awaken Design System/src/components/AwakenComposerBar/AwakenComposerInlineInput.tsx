@@ -71,6 +71,7 @@ export type AwakenComposerInlineInputProps = {
 
 const COMPOSER_TOKEN_ATTRIBUTE = "data-composer-token-id";
 const COMPOSER_TOKEN_SELECTED_ATTRIBUTE = "data-composer-token-selected";
+const COMPOSER_TOKEN_ICON_SIZE = 16;
 const BLOCK_TAG_NAMES = new Set([
   "ADDRESS",
   "ARTICLE",
@@ -242,8 +243,8 @@ function appendAwakenLineIcon(
   const namespace = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(namespace, "svg");
   svg.setAttribute("class", `composer-bar-token-icon aw-icon aw-icon--${name}`);
-  svg.setAttribute("width", "14");
-  svg.setAttribute("height", "14");
+  svg.setAttribute("width", String(COMPOSER_TOKEN_ICON_SIZE));
+  svg.setAttribute("height", String(COMPOSER_TOKEN_ICON_SIZE));
   svg.setAttribute("viewBox", icon.viewBox);
   svg.setAttribute("fill", icon.filled ? "currentColor" : "none");
   svg.setAttribute("stroke", icon.filled ? "none" : "currentColor");

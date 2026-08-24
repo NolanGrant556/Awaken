@@ -118,6 +118,8 @@ POST   /v1/plugins/{name}/servers/{short}/disable
 
 `/v1/plugins*` 始终注册；`PluginStore` 缺失返回 503 `PLUGINS_UNAVAILABLE`，`plugins.json` 损坏返回 503 `PLUGIN_STATE_CORRUPT`。业务合同由 [14 插件](../14_插件/索引.md) 拥有。Renderer 只通过 Main `requestRuntime` 调用，不直接读写插件目录或状态文件。
 
+`GET /v1/composer-catalog/events` 是 Main 常驻消费的 SSE 失效流。每次连接先发送当前 `{revision, kind:"snapshot"}`；Skill Registry 或 Plugin Store 的成功 catalog mutation 使 revision 单调递增并发送 `kind=skills|plugins`。事件不携带 Skill/Plugin 数据、路径或配置，Renderer 收到后只能通过 typed `listSkills/listPlugins` 按当前 workspace 与 marker 重读权威目录；重新连接不回放历史 mutation，因为 snapshot revision 与每次打开直接重读共同保证当前状态。
+
 ### 3.4 Memory 与 Dream
 
 ```text

@@ -619,8 +619,8 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .execution-prompt-bubble {
-  --execution-prompt-collapsed-content-height: 54px;
-  --execution-prompt-expanded-content-height: 162px;
+  --execution-prompt-collapsed-content-height: 60px;
+  --execution-prompt-expanded-content-height: 180px;
   --execution-prompt-attachment-size: 52px;
   --execution-prompt-attachment-gap: 8px;
   width: 100%;
@@ -632,8 +632,8 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   border-radius: var(--aw-radius-control);
   background: var(--aw-bg-white);
   color: var(--aw-text-primary);
-  font-size: var(--aw-font-size-sm);
-  line-height: var(--aw-line-height-sm);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
   cursor: text;
   overflow: hidden;
 }
@@ -666,27 +666,28 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 
 .execution-prompt-bubble-token {
   display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
+  align-items: center;
+  vertical-align: middle;
+  gap: 5px;
   min-width: 0;
+  min-height: var(--aw-line-height-base);
   max-width: min(220px, 100%);
-  margin-inline-end: 0.35em;
-  padding: 0 1px;
+  margin-inline-end: var(--aw-space-3);
+  padding: 0;
   border-radius: 4px;
   background: transparent;
   color: var(--aw-text-blue);
   font-size: inherit;
-  font-weight: var(--aw-font-weight-semibold);
+  font-weight: var(--aw-font-weight-medium);
   line-height: inherit;
 }
 
 .execution-prompt-bubble-token-icon {
   display: block;
   flex: 0 0 auto;
+  width: var(--aw-icon-size-16);
+  height: var(--aw-icon-size-16);
   color: currentColor;
-  /* Prompt tokens sit on the surrounding text baseline; lower the 14px
-     visible stroke to the 12/18px glyph baseline without moving the label. */
-  transform: translateY(3px);
 }
 
 .execution-prompt-bubble-token[data-prompt-token-selected] {
@@ -695,8 +696,8 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 
 .execution-prompt-bubble-inline-text {
   color: var(--aw-text-primary);
-  font-size: var(--aw-font-size-sm);
-  line-height: var(--aw-line-height-sm);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
   white-space: pre-wrap;
 }
 

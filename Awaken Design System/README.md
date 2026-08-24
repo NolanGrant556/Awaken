@@ -88,7 +88,7 @@ http://127.0.0.1:5173/#/components/awaken-memory-settings
 
 ## 图标库契约
 
-Awaken 的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是唯一渲染出口，Gallery 入口是 `awaken-icon`。当前 107 个线性字形由 94 个经用户确认并静态固化的 Lucide authored 母形、6 个本轮 Awaken 定制几何，以及 7 个保持既有产品识别的字形组成；另有 MCP 和 Agent Plugins 两个官方品牌标记。
+Awaken 的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是唯一渲染出口，Gallery 入口是 `awaken-icon`。当前 108 个线性字形由 95 个经用户确认并静态固化的 Lucide authored 母形、6 个本轮 Awaken 定制几何，以及 7 个保持既有产品识别的字形组成；另有 MCP 和 Agent Plugins 两个官方品牌标记。
 
 ### 分层与 owner
 
@@ -144,7 +144,7 @@ Awaken 自行构造的新圆弧使用 `arcThroughChord` 按弦与拱高反解圆
 
 ### 能力与连接器图形
 
-一级入口使用直接、彼此可区分的比喻或官方标记：`connector` 是清晰的双插脚 Plug 轮廓；`skill` 与 `skill-active` 统一映射 `book-open`；`plugin` 映射 Agent Plugins 官方标记 `agent-plugins-mark`；CLI 使用 `terminal`；Hook 使用 Webhook 路由结构表达事件挂接。产品调用点只消费这些概念映射，不自行复制 SVG。
+一级入口使用直接、彼此可区分的比喻或官方标记：`connector` 是清晰的双插脚 Plug 轮廓；`skill` 与 `skill-active` 统一映射 `book-open`；`plugin` 映射 Agent Plugins 官方标记 `agent-plugins-mark`；单个 Plugin 未提供自定义图标时使用 `plugin-default` 对应的 `puzzle` 线性图标；CLI 使用 `terminal`；Hook 使用 Webhook 路由结构表达事件挂接。产品调用点只消费这些概念映射，不自行复制 SVG。
 
 ### 品牌标记
 

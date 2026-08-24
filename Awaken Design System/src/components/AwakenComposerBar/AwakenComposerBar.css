@@ -44,29 +44,237 @@
   pointer-events: none;
 }
 
+.composer-bar-context {
+  gap: 6px;
+}
+
+.composer-bar-plugin-trigger {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px 0 5px;
+  border: 0;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-main);
+  color: var(--aw-text-secondary);
+  font-family: var(--aw-font-sans);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-medium);
+  line-height: var(--aw-line-height-xs);
+  cursor: pointer;
+  transition:
+    background-color var(--aw-transition-fast),
+    color var(--aw-transition-fast);
+}
+
+.composer-bar-plugin-trigger:hover,
+.composer-bar-plugin-trigger:focus-visible,
+.composer-bar-plugin-trigger[aria-expanded="true"] {
+  background: var(--aw-bg-fill-dark);
+  color: var(--aw-text-primary);
+}
+
+.composer-bar-plugin-trigger:focus-visible {
+  outline: 2px solid var(--aw-focus-ring);
+  outline-offset: 1px;
+}
+
+.composer-bar-plugin-trigger:disabled {
+  color: var(--aw-text-disabled);
+  cursor: not-allowed;
+}
+
+.composer-bar-plugin-preview {
+  display: inline-flex;
+  align-items: center;
+  min-width: 18px;
+}
+
+.composer-bar-plugin-badge,
+.composer-bar-plugin-option-badge {
+  box-sizing: border-box;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 0;
+  background: color-mix(in srgb, var(--aw-text-blue) 10%, var(--aw-bg-white));
+  color: var(--aw-text-blue);
+}
+
+.composer-bar-plugin-badge {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+}
+
+.composer-bar-plugin-badge + .composer-bar-plugin-badge {
+  margin-left: -2px;
+  box-shadow: -1px 0 0 var(--aw-bg-fill-main);
+}
+
+.composer-bar-plugin-trigger:hover .composer-bar-plugin-badge + .composer-bar-plugin-badge,
+.composer-bar-plugin-trigger:focus-visible .composer-bar-plugin-badge + .composer-bar-plugin-badge,
+.composer-bar-plugin-trigger[aria-expanded="true"]
+  .composer-bar-plugin-badge
+  + .composer-bar-plugin-badge {
+  box-shadow: -1px 0 0 var(--aw-bg-fill-dark);
+}
+
+.composer-bar-plugin-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-bar-plugin-menu {
+  display: grid;
+  width: min(252px, calc(100vw - 32px));
+}
+
+.composer-bar-plugin-options {
+  display: grid;
+  gap: 1px;
+  max-height: min(244px, calc(100vh - 72px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 32%, transparent)
+    transparent;
+  scrollbar-width: thin;
+}
+
+.composer-bar-plugin-option {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: var(--aw-radius-control);
+  background: transparent;
+  color: var(--aw-text-primary);
+  font-family: var(--aw-font-sans);
+  text-align: left;
+  cursor: pointer;
+}
+
+.composer-bar-plugin-option:hover,
+.composer-bar-plugin-option:focus-visible,
+.composer-bar-plugin-option-selected {
+  background: var(--aw-bg-fill-main);
+}
+
+.composer-bar-plugin-option:focus-visible {
+  outline: 2px solid var(--aw-focus-ring);
+  outline-offset: -2px;
+}
+
+.composer-bar-plugin-option:disabled {
+  color: var(--aw-text-disabled);
+  cursor: not-allowed;
+}
+
+.composer-bar-plugin-option-badge {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.composer-bar-plugin-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-medium);
+  line-height: var(--aw-line-height-sm);
+}
+
+.composer-bar-plugin-empty {
+  padding: 14px 10px;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+  text-align: center;
+}
+
+.composer-bar-plugin-empty-error {
+  color: var(--aw-status-danger-text);
+}
+
+.composer-bar-dock .composer-bar-plugin-trigger {
+  height: 24px;
+  padding-right: 7px;
+  padding-left: 4px;
+}
+
+.composer-bar-dock .composer-bar-plugin-badge {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+}
+
+.composer-bar-center .composer-bar-context .composer-bar-plugin-trigger {
+  width: auto !important;
+  height: 26px !important;
+  padding: 0 8px 0 5px !important;
+  border-radius: var(--aw-radius-pill) !important;
+  background: var(--aw-bg-fill-main) !important;
+  color: var(--aw-text-secondary) !important;
+}
+
+.composer-bar-dock .composer-bar-context .composer-bar-plugin-trigger {
+  width: auto !important;
+  height: 24px !important;
+  padding: 0 7px 0 4px !important;
+  border-radius: var(--aw-radius-pill) !important;
+  background: var(--aw-bg-fill-main) !important;
+  color: var(--aw-text-secondary) !important;
+}
+
+.composer-bar-center .composer-bar-context .composer-bar-plugin-trigger:hover,
+.composer-bar-center .composer-bar-context .composer-bar-plugin-trigger:focus-visible,
+.composer-bar-center
+  .composer-bar-context
+  .composer-bar-plugin-trigger[aria-expanded="true"],
+.composer-bar-dock .composer-bar-context .composer-bar-plugin-trigger:hover,
+.composer-bar-dock .composer-bar-context .composer-bar-plugin-trigger:focus-visible,
+.composer-bar-dock
+  .composer-bar-context
+  .composer-bar-plugin-trigger[aria-expanded="true"] {
+  background: var(--aw-bg-fill-dark) !important;
+  color: var(--aw-text-primary) !important;
+}
+
 .composer-bar-token {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  vertical-align: middle;
+  gap: 5px;
   min-width: 0;
+  min-height: var(--aw-line-height-md);
   max-width: min(220px, 100%);
-  padding: 0 1px;
+  padding: 0;
   border-radius: 4px;
   background: transparent;
   color: var(--aw-text-blue);
   font-size: inherit;
-  font-weight: var(--aw-font-weight-semibold);
+  font-weight: var(--aw-font-weight-medium);
   line-height: inherit;
-  margin-inline-end: var(--aw-space-2);
+  margin-inline-end: var(--aw-space-3);
 }
 
 .composer-bar-token-icon {
   display: block;
   flex: 0 0 auto;
+  width: var(--aw-icon-size-16);
+  height: var(--aw-icon-size-16);
   color: currentColor;
-  /* The 14px SVG box is mathematically centered in the 20px text line box,
-     but its visible stroke otherwise sits above the glyph baseline. */
-  transform: translateY(2px);
 }
 
 .composer-bar-token[data-composer-token-selected] {

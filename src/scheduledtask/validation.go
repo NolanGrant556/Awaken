@@ -102,7 +102,7 @@ func ValidateName(name string) error {
 
 // ValidateAction enforces a known kind and a prompt/body of at most 32 KiB.
 // Reminder actions cannot carry Composer tokens. Agent actions may be
-// token-only, matching the home Composer's structured Skill selection.
+// token-only, matching the home Composer's structured selections.
 func ValidateAction(action Action) error {
 	switch action.Kind {
 	case ActionKindReminder:
@@ -126,12 +126,22 @@ func ValidateAction(action Action) error {
 	metadataBytes := 0
 	seenTokenIDs := make(map[string]struct{}, len(action.ComposerTokens))
 	for _, token := range action.ComposerTokens {
-		if !strings.EqualFold(strings.TrimSpace(token.Type), "skill") {
-			return invalid("action.composer_tokens", "must contain only skill tokens")
+		tokenType := strings.ToLower(strings.TrimSpace(token.Type))
+		if tokenType != "skill" && tokenType != "plugin" && tokenType != "capability" {
+			return invalid("action.composer_tokens", "must contain only skill, plugin, or capability tokens")
 		}
 		tokenID := strings.TrimSpace(token.ID)
-		if tokenID == "" || strings.TrimSpace(token.Payload.SkillID) == "" {
+		if tokenID == "" {
+			return invalid("action.composer_tokens", "token identity is required")
+		}
+		if tokenType == "skill" && strings.TrimSpace(token.Payload.SkillID) == "" {
 			return invalid("action.composer_tokens", "skill identity is required")
+		}
+		if tokenType == "plugin" && (strings.TrimSpace(token.Payload.PluginName) == "" || strings.TrimSpace(token.Payload.PluginDigest) == "") {
+			return invalid("action.composer_tokens", "plugin identity is required")
+		}
+		if tokenType == "capability" && !strings.EqualFold(strings.TrimSpace(token.Payload.CapabilityID), "computer-use") {
+			return invalid("action.composer_tokens", "unsupported capability identity")
 		}
 		if _, duplicate := seenTokenIDs[tokenID]; duplicate {
 			return invalid("action.composer_tokens", "token IDs must be unique")
@@ -139,7 +149,8 @@ func ValidateAction(action Action) error {
 		seenTokenIDs[tokenID] = struct{}{}
 		promptBytes += len(token.LeadingText)
 		metadataBytes += len(token.ID) + len(token.Type) + len(token.Label) +
-			len(token.Payload.SkillID) + len(token.Payload.SourceOrigin) +
+			len(token.Payload.CapabilityID) + len(token.Payload.SkillID) + len(token.Payload.PluginName) + len(token.Payload.PluginDigest) +
+			len(token.Payload.SourceOrigin) +
 			len(token.Payload.SkillFilePath) + len(token.Payload.RootDir)
 	}
 	if promptBytes > MaxContentBytes {

@@ -527,6 +527,46 @@ func TestEffectiveInputForComputerUseCapabilityAddsHiddenInstruction(t *testing.
 	}
 }
 
+func TestEffectiveInputForPluginAddsHostOwnedInstruction(t *testing.T) {
+	token := ComposerToken{
+		ID: "plugin:acme.tools:digest-v1", Type: "plugin", Label: "acme.tools",
+		LeadingText: "请使用 ",
+		Payload:     ComposerTokenPayload{PluginName: "acme.tools", PluginDigest: "digest-v1"},
+	}
+	want := "请使用 " + pluginComposerInstruction("acme.tools") + "\n完成检查"
+	if got := effectiveInputForComposerTokens("请使用 完成检查", []ComposerToken{token}); got != want {
+		t.Fatalf("effective input=%q want=%q", got, want)
+	}
+}
+
+func TestValidateComposerPluginTokensRechecksCurrentPackageIdentity(t *testing.T) {
+	tokens := []ComposerToken{{
+		ID: "plugin:acme.tools:digest-v1", Type: "plugin", Label: "acme.tools",
+		Payload: ComposerTokenPayload{PluginName: "acme.tools", PluginDigest: "digest-v1"},
+	}}
+	called := false
+	if err := validateComposerPluginTokens(tokens, func(name, digest string) error {
+		called = true
+		if name != "acme.tools" || digest != "digest-v1" {
+			t.Fatalf("identity=%q digest=%q", name, digest)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("validator was not called")
+	}
+	if err := validateComposerPluginTokens(tokens, func(string, string) error { return errors.New("disabled") }); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("disabled plugin err=%v", err)
+	}
+	missing := append([]ComposerToken(nil), tokens...)
+	missing[0].Payload.PluginDigest = ""
+	if err := validateComposerPluginTokens(missing, func(string, string) error { return nil }); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("missing digest err=%v", err)
+	}
+}
+
 func TestValidateComposerCapabilityTokensRejectsUnknownCapability(t *testing.T) {
 	err := validateComposerCapabilityTokens([]ComposerToken{{
 		ID:      "capability:unknown",

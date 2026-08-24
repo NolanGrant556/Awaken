@@ -18,20 +18,23 @@ import (
 // based on connector presence and MCP server state, and exposes a stable
 // snapshot for consumers.
 type SkillRegistry struct {
-	mu                sync.RWMutex
-	skills            map[string]*SkillDefinition
-	logger            Logger
-	onChange          func()
-	connectors        map[string]bool // available connector names
-	mcpServers        map[string]bool // available MCP server names
-	disabledByPolicy  map[string]string
-	disabledStorePath string
-	lastInvoked       map[string]time.Time
+	mu                    sync.RWMutex
+	skills                map[string]*SkillDefinition
+	logger                Logger
+	onChange              func()
+	catalogListeners      map[uint64]func()
+	nextCatalogListenerID uint64
+	connectors            map[string]bool // available connector names
+	mcpServers            map[string]bool // available MCP server names
+	disabledByPolicy      map[string]string
+	disabledStorePath     string
+	lastInvoked           map[string]time.Time
 	// toolStateFingerprint is the last model-visible Catalog and invocation
 	// binding state published through onChange. Keeping the previous digest is
 	// important: by the time a reload starts, an edited SKILL.md has already
 	// replaced the bytes reachable through the old registry paths.
-	toolStateFingerprint string
+	toolStateFingerprint       string
+	composerCatalogFingerprint string
 }
 
 // Logger is the minimal logging surface consumed by the skills package.
@@ -58,8 +61,10 @@ func NewSkillRegistry(logger Logger) *SkillRegistry {
 		mcpServers:       make(map[string]bool),
 		disabledByPolicy: make(map[string]string),
 		lastInvoked:      make(map[string]time.Time),
+		catalogListeners: make(map[uint64]func()),
 	}
 	registry.toolStateFingerprint = registry.computeToolStateFingerprintLocked()
+	registry.composerCatalogFingerprint = registry.computeComposerCatalogFingerprintLocked()
 	return registry
 }
 
@@ -70,6 +75,28 @@ func (r *SkillRegistry) SetOnChange(fn func()) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.onChange = fn
+}
+
+// SubscribeCatalogChanges registers a presentation-catalog listener without
+// replacing the model-facing Manager callback owned by SetOnChange. The
+// returned function is idempotent and removes only this listener.
+func (r *SkillRegistry) SubscribeCatalogChanges(fn func()) func() {
+	if r == nil || fn == nil {
+		return func() {}
+	}
+	r.mu.Lock()
+	r.nextCatalogListenerID++
+	id := r.nextCatalogListenerID
+	r.catalogListeners[id] = fn
+	r.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			r.mu.Lock()
+			delete(r.catalogListeners, id)
+			r.mu.Unlock()
+		})
+	}
 }
 
 // LoadFromSources clears the registry and loads skills from the given source
@@ -525,12 +552,72 @@ func (r *SkillRegistry) fireOnChangeLocked() {
 // invocation. UI-only metadata such as LastInvokedAt and readiness diagnostics
 // deliberately does not churn the process tool registry.
 func (r *SkillRegistry) fireOnToolStateChangeLocked() {
+	r.fireComposerCatalogChangeLocked()
 	next := r.computeToolStateFingerprintLocked()
 	if next == r.toolStateFingerprint {
 		return
 	}
 	r.toolStateFingerprint = next
 	r.fireOnChangeLocked()
+}
+
+type skillComposerCatalogState struct {
+	CatalogEntryID    string
+	ID                string
+	Name              string
+	DisplayName       string
+	Description       string
+	WhenToUse         string
+	State             SkillState
+	UnavailableReason string
+	Source            SourceOrigin
+	RootDir           string
+	SkillFilePath     string
+	ProjectPath       string
+	UserInvocable     bool
+	ModelInvocable    bool
+}
+
+func (r *SkillRegistry) computeComposerCatalogFingerprintLocked() string {
+	states := make([]skillComposerCatalogState, 0, len(r.skills))
+	for _, definition := range r.skills {
+		if definition == nil {
+			continue
+		}
+		states = append(states, skillComposerCatalogState{
+			CatalogEntryID: CatalogEntryID(definition),
+			ID:             definition.ID, Name: definition.Name, DisplayName: definition.DisplayName,
+			Description: definition.Description, WhenToUse: definition.WhenToUse,
+			State: definition.State, UnavailableReason: definition.UnavailableReason,
+			Source: definition.Source, RootDir: definition.RootDir,
+			SkillFilePath: definition.SkillFilePath, ProjectPath: definition.ProjectPath,
+			UserInvocable: definition.UserInvocable, ModelInvocable: !definition.DisableModelInvocation,
+		})
+	}
+	sort.Slice(states, func(i, j int) bool {
+		if states[i].CatalogEntryID != states[j].CatalogEntryID {
+			return states[i].CatalogEntryID < states[j].CatalogEntryID
+		}
+		return states[i].ID < states[j].ID
+	})
+	encoded, _ := json.Marshal(states)
+	sum := sha256.Sum256(encoded)
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func (r *SkillRegistry) fireComposerCatalogChangeLocked() {
+	next := r.computeComposerCatalogFingerprintLocked()
+	if next == r.composerCatalogFingerprint {
+		return
+	}
+	r.composerCatalogFingerprint = next
+	listeners := make([]func(), 0, len(r.catalogListeners))
+	for _, listener := range r.catalogListeners {
+		listeners = append(listeners, listener)
+	}
+	for _, listener := range listeners {
+		go listener()
+	}
 }
 
 type skillToolState struct {

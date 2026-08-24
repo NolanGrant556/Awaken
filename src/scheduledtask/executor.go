@@ -225,7 +225,10 @@ func runtimeComposerTokens(tokens []ComposerToken) []runtime.ComposerToken {
 			LeadingText: token.LeadingText,
 			Label:       token.Label,
 			Payload: runtime.ComposerTokenPayload{
+				CapabilityID:  token.Payload.CapabilityID,
 				SkillID:       token.Payload.SkillID,
+				PluginName:    token.Payload.PluginName,
+				PluginDigest:  token.Payload.PluginDigest,
 				SourceOrigin:  token.Payload.SourceOrigin,
 				SkillFilePath: token.Payload.SkillFilePath,
 				RootDir:       token.Payload.RootDir,

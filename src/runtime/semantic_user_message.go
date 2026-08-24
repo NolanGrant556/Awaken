@@ -20,6 +20,12 @@ func semanticComposerTokensForRun(tokens []ComposerToken) []agentcore.SemanticCo
 		if value := strings.TrimSpace(token.Payload.SkillID); value != "" {
 			payload["skillId"] = value
 		}
+		if value := strings.TrimSpace(token.Payload.PluginName); value != "" {
+			payload["pluginName"] = value
+		}
+		if value := strings.TrimSpace(token.Payload.PluginDigest); value != "" {
+			payload["pluginDigest"] = value
+		}
 		if value := strings.TrimSpace(token.Payload.SourceOrigin); value != "" {
 			payload["sourceOrigin"] = value
 		}

@@ -17,6 +17,7 @@ import (
 	_ "awaken/src/tools/grep"
 	_ "awaken/src/tools/media_generate"
 	_ "awaken/src/tools/memory"
+	_ "awaken/src/tools/plugin"
 	_ "awaken/src/tools/read"
 	_ "awaken/src/tools/subagent"
 	_ "awaken/src/tools/trash_file"

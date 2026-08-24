@@ -118,6 +118,7 @@
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
   scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent) transparent;
   scrollbar-width: thin;
 }

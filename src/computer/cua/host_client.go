@@ -43,6 +43,9 @@ type HostClient interface {
 	// GetDesktopState captures the current desktop/window state.
 	GetDesktopState(ctx context.Context, sessionID string) (HostDesktopState, error)
 
+	// GetWindowState captures one exact pid/window pair without activating it.
+	GetWindowState(ctx context.Context, sessionID string, target computer.TargetRef) (HostDesktopState, error)
+
 	// GetSessionState returns the SDK session state without capturing media.
 	GetSessionState(ctx context.Context, sessionID string) (HostSessionState, error)
 
@@ -77,14 +80,16 @@ type HostSessionResult struct {
 
 // HostDesktopState carries the host response from GetDesktopState.
 type HostDesktopState struct {
-	Text             string              `json:"text"`
-	Images           []HostImage         `json:"images"`
-	StructuredJSON   string              `json:"structured_json,omitempty"`
-	RawJSON          string              `json:"raw_json,omitempty"`
-	IsError          bool                `json:"is_error"`
-	Degraded         bool                `json:"degraded"`
-	ObservationToken string              `json:"observation_token"`
-	CoordinateSpace  HostCoordinateSpace `json:"coordinate_space"`
+	Text             string               `json:"text"`
+	Images           []HostImage          `json:"images"`
+	StructuredJSON   string               `json:"structured_json,omitempty"`
+	RawJSON          string               `json:"raw_json,omitempty"`
+	IsError          bool                 `json:"is_error"`
+	Degraded         bool                 `json:"degraded"`
+	ObservationToken string               `json:"observation_token"`
+	CoordinateSpace  HostCoordinateSpace  `json:"coordinate_space"`
+	Target           computer.TargetRef   `json:"target"`
+	AvailableWindows []computer.WindowRef `json:"available_windows,omitempty"`
 }
 
 // HostCoordinateSpace is the desktop geometry resolved by the trusted Host.
@@ -494,6 +499,29 @@ func (c *stdioHostClient) GetDesktopState(ctx context.Context, sessionID string)
 	var res HostDesktopState
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return HostDesktopState{}, fmt.Errorf("decode getDesktopState: %w", err)
+	}
+	return res, nil
+}
+
+func (c *stdioHostClient) GetWindowState(ctx context.Context, sessionID string, target computer.TargetRef) (HostDesktopState, error) {
+	windowID, err := strconv.ParseUint(target.WindowID, 10, 53)
+	if err != nil || windowID == 0 {
+		return HostDesktopState{}, fmt.Errorf("window target requires a positive safe window_id")
+	}
+	if target.PID <= 0 {
+		return HostDesktopState{}, fmt.Errorf("window target requires a positive pid")
+	}
+	raw, err := c.request(ctx, "getWindowState", map[string]any{
+		"sessionID": sessionID,
+		"pid":       target.PID,
+		"windowID":  windowID,
+	})
+	if err != nil {
+		return HostDesktopState{}, err
+	}
+	var res HostDesktopState
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return HostDesktopState{}, fmt.Errorf("decode getWindowState: %w", err)
 	}
 	return res, nil
 }

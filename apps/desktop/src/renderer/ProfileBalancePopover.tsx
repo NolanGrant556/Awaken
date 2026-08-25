@@ -50,19 +50,35 @@ export function ProfileBalancePopover({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  const [position, setPosition] = useState<{ left: number; bottom: number }>({
+  const [position, setPosition] = useState<{ left: number; bottom: number; width: number }>({
     left: 0,
     bottom: 0,
+    width: 0,
   });
 
   useLayoutEffect(() => {
     if (!open || !anchorRef.current) return;
-    const rect = anchorRef.current.getBoundingClientRect();
-    const gap = 8;
-    setPosition({
-      left: rect.left,
-      bottom: window.innerHeight - rect.top + gap,
-    });
+    const anchor = anchorRef.current;
+    const updatePosition = (): void => {
+      const rect = anchor.getBoundingClientRect();
+      const gap = 8;
+      setPosition({
+        left: rect.left,
+        bottom: window.innerHeight - rect.top + gap,
+        width: rect.width,
+      });
+    };
+    updatePosition();
+
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(updatePosition);
+    resizeObserver?.observe(anchor);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updatePosition);
+    };
   }, [open, anchorRef]);
 
   useEffect(() => {
@@ -136,9 +152,11 @@ export function ProfileBalancePopover({
         <div
           ref={popoverRef}
           className="profile-balance-popover"
-          style={{ left: position.left, bottom: position.bottom }}
+          style={{ left: position.left, bottom: position.bottom, width: position.width }}
         >
           <AwakenProfileMenuPanel
+            id="aw-profile-menu-panel"
+            style={{ width: "100%" }}
             themePreference={themePreference}
             themeSaving={themeSaving}
             onOpenUsage={handleOpenUsage}

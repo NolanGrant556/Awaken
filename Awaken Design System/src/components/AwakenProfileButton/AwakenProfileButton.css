@@ -1,3 +1,16 @@
 @import "../../tokens/components.css";
 
-/* AwakenProfileButton currently uses shared Awaken Design System tokens and component classes. */
+.aw-profile-button__chevron {
+  transform: rotate(180deg);
+  transition: transform var(--aw-transition-fast);
+}
+
+button[aria-expanded="true"] > .aw-profile-button__chevron {
+  transform: rotate(0deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-profile-button__chevron {
+    transition: none;
+  }
+}

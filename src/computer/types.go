@@ -147,6 +147,19 @@ type TargetRef struct {
 	CoordinateSpace string `json:"coordinate_space"`
 }
 
+// WindowRef is an exact, model-visible window candidate returned by the
+// trusted Host. TargetRef is the canonical opaque string accepted by a later
+// window-scoped observation; callers must not reconstruct it from titles.
+type WindowRef struct {
+	TargetRef   string `json:"target_ref"`
+	PID         int32  `json:"pid"`
+	AppName     string `json:"app_name"`
+	WindowID    string `json:"window_id"`
+	WindowTitle string `json:"window_title"`
+	Minimized   bool   `json:"minimized"`
+	ZIndex      *int   `json:"z_index,omitempty"`
+}
+
 // ElementRef binds an action target to a specific observation and session.
 type ElementRef struct {
 	ObservationID    string `json:"observation_id"`

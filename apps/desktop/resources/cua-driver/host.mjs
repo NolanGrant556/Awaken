@@ -98,7 +98,7 @@ async function listOnScreenWindows() {
   let lastError = "unknown list_windows failure";
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      const result = await driver.callTool(
+      const result = await windowDiscoveryDriver.callTool(
         "list_windows",
         JSON.stringify({ on_screen_only: true }),
       );
@@ -123,6 +123,9 @@ async function listOnScreenWindows() {
       lastError = error instanceof Error ? error.message : String(error);
     }
     if (attempt < 2) {
+      if (isEndedSessionMessage(lastError)) {
+        await replaceWindowDiscoveryDriver();
+      }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
@@ -130,8 +133,36 @@ async function listOnScreenWindows() {
 }
 
 let driver;
+let windowDiscoveryDriver;
 let shuttingDown = false;
 const sessions = new Map();
+
+function isEndedSessionMessage(message) {
+  const normalized = String(message || "").toLowerCase();
+  return (
+    normalized.includes("session") &&
+    (normalized.includes("has ended") ||
+      normalized.includes("already ended") ||
+      normalized.includes("session ended"))
+  );
+}
+
+async function replaceWindowDiscoveryDriver() {
+  const expiredDriver = windowDiscoveryDriver;
+  windowDiscoveryDriver = CuaDriver.create(undefined);
+  if (expiredDriver) {
+    try {
+      await expiredDriver.shutdown();
+    } catch (error) {
+      log("warn", `expired window discovery driver shutdown error: ${error.message}`);
+    }
+    try {
+      expiredDriver.uniffiDestroy();
+    } catch (error) {
+      log("warn", `expired window discovery driver destroy error: ${error.message}`);
+    }
+  }
+}
 
 function log(level, message) {
   // Keep stderr separate from stdout JSON-RPC traffic.
@@ -1014,6 +1045,11 @@ function enqueueLine(line) {
 async function main() {
   log("info", "initializing CUA driver...");
   driver = CuaDriver.create(undefined);
+  // list_windows has no explicit session argument in CUA 0.22.0 and therefore
+  // uses the SDK's idle-expiring implicit session. Isolate it from Awaken's
+  // run-bound named sessions so discovery can be safely rebuilt without
+  // invalidating an active capture/action session.
+  windowDiscoveryDriver = CuaDriver.create(undefined);
   log("info", `driver available: ${driver.isAvailable()}`);
 
   const metadata = await driver.metadata();
@@ -1063,6 +1099,16 @@ async function shutdown() {
     await driver.shutdown();
   } catch (err) {
     log("warn", `shutdown error: ${err.message}`);
+  }
+  try {
+    await windowDiscoveryDriver?.shutdown();
+  } catch (err) {
+    log("warn", `window discovery shutdown error: ${err.message}`);
+  }
+  try {
+    windowDiscoveryDriver?.uniffiDestroy();
+  } catch (err) {
+    log("warn", `window discovery destroy error: ${err.message}`);
   }
   try {
     driver.uniffiDestroy();

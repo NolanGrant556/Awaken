@@ -131,8 +131,15 @@ func TestComputerExecutorObserveDefaultsToDesktop(t *testing.T) {
 	if sess.CaptureScope != computer.CaptureDesktop {
 		t.Fatalf("expected default desktop scope, got %s", sess.CaptureScope)
 	}
-	if _, ok := out.Outcome.Details["available_windows"]; !ok {
+	windows, ok := out.Outcome.Details["available_windows"].([]computer.WindowRef)
+	if !ok {
 		t.Fatal("desktop observation must always expose available_windows, even when discovery is empty")
+	}
+	if windows == nil || len(windows) != 0 {
+		t.Fatalf("expected a non-nil empty available_windows array, got %#v", windows)
+	}
+	if !strings.Contains(out.Content, `"available_windows":[]`) {
+		t.Fatalf("model-visible desktop observation must encode an empty array, got %s", out.Content)
 	}
 }
 
@@ -328,6 +335,80 @@ func TestComputerExecutorActUsesObservedObservation(t *testing.T) {
 	}
 	if actOut.Outcome.Details["observation_id"] == "" || actOut.Outcome.Details["observation_id"] == obsID {
 		t.Fatalf("act should return a fresh post-action observation id")
+	}
+}
+
+func TestComputerExecutorActExposesFreshPostActionAccessibilityTokens(t *testing.T) {
+	ctx := context.Background()
+	policy, _ := computer.NewPolicySnapshot(computer.DefaultPolicy())
+	bind, _ := computer.NewBinding("run-1", "thread-1", "agent-1", "", policy)
+	driver := fake.NewDriver()
+	runtime := computer.NewRuntime(bind, driver)
+	exec := NewComputerExecutor(runtime)
+
+	sess, err := runtime.OpenSession(ctx, computer.CaptureWindow, computer.TargetRef{
+		PID: 42, WindowID: "84", AppName: "FakeApp", Generation: 1,
+	})
+	if err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+	axPath := filepath.Join(t.TempDir(), "accessibility.json")
+	driver.OnObserve = func(_ computer.SessionID, scope computer.CaptureScope, target computer.TargetRef, opts computer.ObserveOptions) (computer.Observation, error) {
+		obs, err := computer.NewObservation(sess, scope, target, computer.Freshness{
+			CapturedAt: time.Now().UTC(), FreshUntil: time.Now().UTC().Add(time.Minute),
+		})
+		if err != nil {
+			return computer.Observation{}, err
+		}
+		if opts.IncludeAccessibility {
+			contents := fmt.Sprintf(`{"snapshot_id":%q,"elements":[{"element_token":%q,"name":"Next"}]}`, "snapshot-"+string(obs.ObservationID), "token-"+string(obs.ObservationID))
+			if err := os.WriteFile(axPath, []byte(contents), 0o600); err != nil {
+				return computer.Observation{}, err
+			}
+			obs.AccessibilityTree = &computer.MediaRef{StorageKey: axPath, MIMEType: "application/json", ByteSize: int64(len(contents))}
+		}
+		return obs, nil
+	}
+
+	observeOut := mustExecute(t, exec, "computer_observe", `{"scope":"window","include":["accessibility"]}`)
+	sourceObservationID := observeOut.Outcome.Details["observation_id"].(string)
+	actInput := fmt.Sprintf(`{"observation_id":%q,"action":"wait","parameters":{"ms":1},"target":{},"intent":"wait","expected_effect":"state remains actionable"}`, sourceObservationID)
+	actOut := mustExecute(t, exec, "computer_act", actInput)
+	if actOut.Outcome.Status != tool.OutcomeSucceeded {
+		t.Fatalf("expected act succeeded, got %+v", actOut.Outcome)
+	}
+	post, ok := actOut.Outcome.Details["post_action_observation"].(map[string]any)
+	if !ok {
+		t.Fatalf("post-action observation missing from model-visible details: %+v", actOut.Outcome.Details)
+	}
+	if post["observation_id"] == "" || post["observation_id"] == sourceObservationID {
+		t.Fatalf("post-action observation must replace source observation: %+v", post)
+	}
+	accessibility, ok := post["accessibility"].(map[string]any)
+	if !ok {
+		t.Fatalf("post-action accessibility missing: %+v", post)
+	}
+	elements := accessibility["elements"].([]any)
+	if token := elements[0].(map[string]any)["element_token"].(string); !strings.Contains(token, post["observation_id"].(string)) {
+		t.Fatalf("fresh token %q is not bound to replacement observation %q", token, post["observation_id"])
+	}
+	if !strings.Contains(actOut.Content, "post_action_observation") || !strings.Contains(actOut.Content, "element_token") {
+		t.Fatalf("compatibility content omitted fresh accessibility: %s", actOut.Content)
+	}
+}
+
+func TestShouldCaptureAfterActionDoesNotSupersedeTokensForPreInputFailure(t *testing.T) {
+	for _, result := range []computer.ActionResult{
+		{Status: computer.ActionFailed, ErrorCode: "stale_element_token"},
+		{Status: computer.ActionFailed, ErrorCode: "invalid_action_parameters"},
+		{Status: computer.ActionFailed, ErrorCategory: "validation"},
+	} {
+		if shouldCaptureAfterAction(result) {
+			t.Fatalf("pre-input failure should preserve the current accessibility snapshot: %+v", result)
+		}
+	}
+	if !shouldCaptureAfterAction(computer.ActionResult{Status: computer.ActionSucceeded}) {
+		t.Fatal("successful action must still capture a fresh post-action observation")
 	}
 }
 

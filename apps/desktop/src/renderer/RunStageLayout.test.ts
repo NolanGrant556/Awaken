@@ -296,6 +296,24 @@ describe("RunStage layout", () => {
     expect(actions).toContain("flex: 0 0 auto;");
   });
 
+  it("keeps the inspector toggle on the same right-side anchor when collapsed", () => {
+    const designSystemStyles = readFileSync(
+      new URL(
+        "../../../../Awaken Design System/src/tokens/components.css",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const expandedChrome = cssRule(designSystemStyles, ".workbench-chrome-right");
+    const collapsedChrome = cssRule(
+      designSystemStyles,
+      ".desktop-root-inspector-collapsed .workbench-chrome-right",
+    );
+
+    expect(expandedChrome).toContain("padding: 0 12px;");
+    expect(collapsedChrome).toContain("padding: 0 12px 0 8px;");
+  });
+
   it("renders provider reconnect as a narrative item instead of a timer chrome slot", () => {
     const appSource = readFileSync(
       new URL("./App.tsx", import.meta.url),

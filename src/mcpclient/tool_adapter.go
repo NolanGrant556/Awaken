@@ -262,7 +262,7 @@ func (a *McpToolAdapter) ExecuteOutcome(ctx context.Context, input string, _ too
 		outcome := a.callFailureOutcome(err)
 		return outcome.WithTiming(started, time.Now().UTC()), err
 	}
-	result, err := a.manager.CallTool(ctx, a.prefixedName, arguments)
+	result, err := a.manager.callServerTool(ctx, a.serverName, a.toolName, a.prefixedName, arguments)
 	if err != nil {
 		outcome := a.callFailureOutcome(err)
 		return outcome.WithTiming(started, time.Now().UTC()), err

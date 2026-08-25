@@ -117,17 +117,19 @@ type LoadedServer struct {
 
 // InstalledPlugin is the runtime view of one installed package.
 type InstalledPlugin struct {
-	Name        string
-	Root        string
-	DataDir     string
-	Manifest    Manifest
-	Enabled     bool
-	Source      Source
-	Digest      string
-	InstalledAt time.Time
-	SkillRoot   string
-	MCPServers  []LoadedServer
-	Diagnostics []Diagnostic
+	Name           string
+	Root           string
+	DataDir        string
+	Manifest       Manifest
+	Enabled        bool
+	Source         Source
+	Digest         string
+	ActualDigest   string
+	IntegrityValid bool
+	InstalledAt    time.Time
+	SkillRoot      string
+	MCPServers     []LoadedServer
+	Diagnostics    []Diagnostic
 }
 
 // ComposerSelection is the host-resolved identity of an enabled Plugin chosen

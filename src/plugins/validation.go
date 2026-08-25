@@ -48,7 +48,12 @@ func (s *Store) Validate(ctx context.Context, source Source) (ValidationResult, 
 		return ValidationResult{}, fmt.Errorf("compute plugin digest: %w", err)
 	}
 
-	loaded := LoadPackage(pluginRoot, filepath.Join(s.dataRoot, parsed.Manifest.Name), Record{Enabled: true, Source: source})
+	validationData, err := os.MkdirTemp(s.stagingRoot, "validate-data-*")
+	if err != nil {
+		return ValidationResult{}, fmt.Errorf("create validation plugin data directory: %w", err)
+	}
+	defer os.RemoveAll(validationData)
+	loaded := LoadPackage(pluginRoot, validationData, Record{Enabled: true, Source: source})
 	diagnostics := append([]Diagnostic(nil), loaded.Diagnostics...)
 	skillCount := 0
 	if loaded.SkillRoot != "" {
@@ -77,7 +82,13 @@ func (s *Store) Validate(ctx context.Context, source Source) (ValidationResult, 
 			}
 		}
 	}
-	if skillCount == 0 && len(loaded.MCPServers) == 0 {
+	serverCount := 0
+	for _, server := range loaded.MCPServers {
+		if server.Invalid == nil {
+			serverCount++
+		}
+	}
+	if skillCount == 0 && serverCount == 0 {
 		diagnostics = append(diagnostics, warning("plugin_no_components", "plugin contains no loadable Skills or MCP servers"))
 	}
 	valid := true
@@ -91,6 +102,6 @@ func (s *Store) Validate(ctx context.Context, source Source) (ValidationResult, 
 		Valid: valid, Source: source, Manifest: parsed.Manifest,
 		Name: parsed.Manifest.Name, Version: parsed.Manifest.Version, Description: parsed.Manifest.Description,
 		Digest: digest, TargetRoot: filepath.Join(s.packagesRoot, parsed.Manifest.Name),
-		SkillCount: skillCount, ServerCount: len(loaded.MCPServers), Diagnostics: diagnostics,
+		SkillCount: skillCount, ServerCount: serverCount, Diagnostics: diagnostics,
 	}, nil
 }

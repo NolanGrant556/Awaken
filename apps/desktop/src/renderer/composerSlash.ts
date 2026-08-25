@@ -346,11 +346,14 @@ export function pluginMentionProvider(
     async getActions() {
       const plugins = await listPlugins();
       return plugins
-        .filter((plugin) => plugin.enabled && Boolean(plugin.digest))
+        .filter(
+          (plugin) =>
+            plugin.enabled &&
+            Boolean(plugin.digest) &&
+            plugin.skillCount + plugin.serverCount > 0,
+        )
         .map((plugin) => {
           const token = pluginComposerTokenFromAction(plugin);
-          const componentCount = plugin.skillCount + plugin.serverCount;
-          const disabled = componentCount === 0;
           return {
             id: token.id,
             type: "plugin",
@@ -365,10 +368,6 @@ export function pluginMentionProvider(
               ...(plugin.keywords ?? []),
             ].filter((value): value is string => Boolean(value)),
             icon: createElement(AwakenIcon, { concept: "plugin", size: 14 }),
-            disabled,
-            disabledReason: disabled
-              ? "该 Plugin 当前没有可用的 Skill 或 MCP Server"
-              : undefined,
             preview: { description: plugin.description },
             payload: plugin,
             composerToken: token,

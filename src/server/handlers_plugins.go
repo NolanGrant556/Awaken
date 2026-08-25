@@ -19,24 +19,24 @@ type pluginHandlers struct {
 }
 
 type pluginInfo struct {
-	Name         string                 `json:"name"`
-	Version      string                 `json:"version,omitempty"`
-	Description  string                 `json:"description,omitempty"`
-	Author       *plugins.Author        `json:"author,omitempty"`
-	Homepage     string                 `json:"homepage,omitempty"`
-	Repository   string                 `json:"repository,omitempty"`
-	License      string                 `json:"license,omitempty"`
-	Keywords     []string               `json:"keywords,omitempty"`
-	Enabled      bool                   `json:"enabled"`
-	Source       plugins.Source         `json:"source"`
-	Digest       string                 `json:"digest,omitempty"`
-	InstalledAt  string                 `json:"installedAt,omitempty"`
-	SkillRoot    string                 `json:"skillRoot,omitempty"`
-	Skills       []skillInfo            `json:"skills,omitempty"`
-	Servers      []pluginServerInfo     `json:"servers,omitempty"`
-	Diagnostics  []plugins.Diagnostic   `json:"diagnostics,omitempty"`
-	SkillCount   int                    `json:"skillCount"`
-	ServerCount  int                    `json:"serverCount"`
+	Name        string               `json:"name"`
+	Version     string               `json:"version,omitempty"`
+	Description string               `json:"description,omitempty"`
+	Author      *plugins.Author      `json:"author,omitempty"`
+	Homepage    string               `json:"homepage,omitempty"`
+	Repository  string               `json:"repository,omitempty"`
+	License     string               `json:"license,omitempty"`
+	Keywords    []string             `json:"keywords,omitempty"`
+	Enabled     bool                 `json:"enabled"`
+	Source      plugins.Source       `json:"source"`
+	Digest      string               `json:"digest,omitempty"`
+	InstalledAt string               `json:"installedAt,omitempty"`
+	SkillRoot   string               `json:"skillRoot,omitempty"`
+	Skills      []skillInfo          `json:"skills,omitempty"`
+	Servers     []pluginServerInfo   `json:"servers,omitempty"`
+	Diagnostics []plugins.Diagnostic `json:"diagnostics,omitempty"`
+	SkillCount  int                  `json:"skillCount"`
+	ServerCount int                  `json:"serverCount"`
 }
 
 type pluginServerInfo struct {
@@ -201,6 +201,8 @@ func (h pluginHandlers) writeStoreError(w http.ResponseWriter, err error) {
 		writeErrorJSON(w, http.StatusNotFound, "PLUGIN_NOT_FOUND", err.Error())
 	case errors.Is(err, plugins.ErrAlreadyExists):
 		writeErrorJSON(w, http.StatusConflict, "PLUGIN_ALREADY_EXISTS", err.Error())
+	case errors.Is(err, plugins.ErrDigestChanged):
+		writeErrorJSON(w, http.StatusConflict, "PLUGIN_DIGEST_CHANGED", err.Error())
 	case errors.Is(err, plugins.ErrReplaceTrashUnavailable):
 		writeErrorJSON(w, http.StatusConflict, "PLUGIN_TRASH_UNAVAILABLE", err.Error())
 	case errors.Is(err, plugins.ErrUnsupportedSchema), errors.Is(err, plugins.ErrManifestInvalid), errors.Is(err, plugins.ErrMCPInvalid):

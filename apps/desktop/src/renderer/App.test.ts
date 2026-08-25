@@ -1761,6 +1761,21 @@ describe("Composer Slash Palette helpers", () => {
         skillCount: 1,
         serverCount: 0,
       },
+      {
+        name: "invalid.tools",
+        enabled: true,
+        source: { kind: "local_path", path: "/tmp/invalid" },
+        digest: "digest-v3",
+        skillCount: 0,
+        serverCount: 0,
+        diagnostics: [
+          {
+            code: "plugin_digest_changed",
+            message: "installed package changed",
+            severity: "error",
+          },
+        ],
+      },
     ];
     const actions = await actionsFromSlashProviders(
       [pluginMentionProvider(async () => plugins)],

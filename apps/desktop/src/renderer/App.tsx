@@ -3775,7 +3775,7 @@ export function App() {
   };
   const composerBarPluginPicker = {
     label: "插件",
-    emptyLabel: "还没有安装插件",
+    emptyLabel: "没有可用插件",
     loading: composerPluginsLoading,
     error: composerPluginsError,
     disabled: composerBarState.disabled,

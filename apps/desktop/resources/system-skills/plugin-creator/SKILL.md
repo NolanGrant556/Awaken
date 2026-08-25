@@ -1,6 +1,6 @@
 ---
 name: plugin-creator
-version: 1.0.0
+version: 1.0.1
 description: 创建、校验或修改 Awaken Agent Plugins 1.0.0 包；支持内含 Skills 与 MCP 配置，始终在任务工作区维护完整候选包并通过 Core PluginStore 安全安装或替换。
 when_to_use: 用户要求创建、编写、验证、修复、更新或修改 Awaken Plugin，或询问候选 Plugin 及其安装路径、Skills、MCP 配置是否合规时。
 user-invocable: true
@@ -69,15 +69,17 @@ Awaken Plugin 是一个包管理与来源容器，不是第二套 Skill 或 MCP 
 - `${PLUGIN_ROOT}` / `${PLUGIN_DATA}` 仅用于 `args`、`env` 值和 `cwd`；不在 `command`、`url`、headers、env 键中展开。
 - `cwd` 只接受 `./...`、`${PLUGIN_ROOT}...`、`${PLUGIN_DATA}...`。不要在 env 中覆盖 `PLUGIN_ROOT` 或 `PLUGIN_DATA`。
 - HTTPS remote MCP 不内嵌密钥；需要认证时说明宿主侧配置要求，不把 token 写进候选包。
+- `./` stdio command 必须指向包内已存在的普通文件；在 macOS/Linux 候选中必须带执行位。Core 安装会把普通文件规范化为 owner-only `0600`，把带执行意图的文件规范化为 owner-only `0700`，ZIP/Git/导出也遵守同一规则。
 
 ## 创建流程
 
 1. 明确插件要承载哪些 Skills、哪些 MCP servers，以及为什么需要一个 Plugin 而不是单独 Skill。没有组件也可以形成包，但校验会给出 warning。
 2. 选择合规 name，在普通候选目录写最小 `plugin.json`；只创建真实需要的 `skills/`、`mcp.json`、脚本或资源。
 3. 对内含 Skill 使用 `skill-creator` 的包编写原则：入口说明有辨识度、资源按需、脚本实际测试。Plugin 级 `validate` 会用当前 Skill parser 复核这些直接子包。
-4. 调用 `plugin`：`{"action":"validate","source":{"kind":"local_path","path":"<candidate>"}}`。
-5. 修复所有 error diagnostics，并逐条判断 warning 是否符合用户意图。记录 manifest identity、digest、Skill 数和 MCP server 数。
-6. 安装前向用户总结来源、组件、stdio command、remote URL、数据目录保留和 MCP 权限边界。用户请求本身包含创建并安装时，以同一候选调用 `action=install` 且 `replace=false`；同名冲突时停止。
+4. 实际从候选目录执行每个新增或变化的 `./` stdio command，确认其可执行、能完成 MCP initialize/tools list，且没有依赖作者机器绝对路径或未声明秘密。
+5. 调用 `plugin`：`{"action":"validate","source":{"kind":"local_path","path":"<candidate>"}}`。
+6. 修复所有 error diagnostics，并逐条判断 warning 是否符合用户意图。记录 manifest identity、digest、Skill 数和 MCP server 数。
+7. 安装前向用户总结来源、组件、stdio command、remote URL、数据目录保留和 MCP 权限边界。用户请求本身包含创建并安装时，以同一候选调用 `action=install` 且 `replace=false`；同名冲突时停止。
 
 ## 修改流程
 
@@ -91,7 +93,10 @@ Awaken Plugin 是一个包管理与来源容器，不是第二套 Skill 或 MCP 
 ## 生效与验收
 
 - install/replace 完成只证明包、状态与 live roots 已更新；已开始 run 的 Skill/工具快照不变。
-- 在新 run 中验证新增或修改的 Plugin Skill 能被选择；MCP server 需要验证连接、工具发现和一次无害调用。
+- 安装后不得再修改候选并把旧安装包写成“最新”；候选若有任何变化，必须重新 validate 并显式 replace。
+- 安装结果存在 `plugin_digest_changed`、`plugin_data_invalid` 或 stdio command 诊断时立即停止，不能手工改 `~/.awaken/plugins`、不能以 `chmod` 绕过 PluginStore。
+- 当前 run 不会获得刚安装的 Skill/MCP 快照。完成安装摘要后停止本 run，在新 run 中通过结构化 `@ Plugin` 选择验证 Skill；MCP server 必须完成连接、工具发现和至少一次无害的真实 MCP tool call。
+- 新 run 没有目标 MCP 工具时，报告安装/runtime readiness 问题；不得退回 Bash、直接运行包内二进制或调用 ERP HTTP 来冒充 Plugin 验收。
 - 验收失败时区分包结构、组件配置、外部依赖/认证和业务行为，不通过改 manifest 隐藏错误。
 - 交付时报告：候选路径、安装 root、digest、组件清单、是否替换、旧包废纸篓 receipt、已执行验证和未执行项。
 

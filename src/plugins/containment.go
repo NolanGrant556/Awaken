@@ -59,7 +59,7 @@ func resolvePluginRelativePath(root, raw, field string) (string, error) {
 }
 
 func pluginRelative(raw, field string) (string, error) {
-	path := strings.TrimSpace(raw)
+	path := raw
 	if path == "" {
 		return "", fmt.Errorf("%s is empty", field)
 	}
@@ -67,9 +67,6 @@ func pluginRelative(raw, field string) (string, error) {
 		return "", fmt.Errorf("%s must start with `./`", field)
 	}
 	rel := strings.TrimPrefix(path, "./")
-	if rel == "" {
-		return "", fmt.Errorf("%s must not be `./`", field)
-	}
 	if hasParentComponent(rel) {
 		return "", fmt.Errorf("%s must not contain '..'", field)
 	}

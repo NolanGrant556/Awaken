@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -626,48 +627,51 @@ func (m *Manager) Session(name string) (Session, error) {
 // NeedsAuthError when the server is in the needs-auth state so the agent
 // layer can translate it to the needs_auth stage.
 func (m *Manager) CallTool(ctx context.Context, prefixedName string, arguments map[string]any) (*mcp.CallToolResult, error) {
-	serverName, _, ok := splitMcpToolName(prefixedName)
+	serverName, toolName, ok := m.resolveMcpToolName(prefixedName)
 	if !ok {
 		return nil, &ToolNotFoundError{ToolName: prefixedName}
 	}
+	return m.callServerTool(ctx, serverName, toolName, prefixedName, arguments)
+}
+
+func (m *Manager) callServerTool(ctx context.Context, serverName, toolName, displayName string, arguments map[string]any) (*mcp.CallToolResult, error) {
 	m.mu.RLock()
 	server, exists := m.servers[serverName]
 	m.mu.RUnlock()
 	if !exists {
-		return nil, &ToolNotFoundError{ToolName: prefixedName}
+		return nil, &ToolNotFoundError{ToolName: displayName}
 	}
 	if server.state == StateNeedsAuth {
 		return nil, &NeedsAuthError{ServerName: serverName, Reason: server.errorReason}
 	}
 	if server.state != StateConnected || server.session == nil {
-		return nil, fmt.Errorf("mcp server %q is %s; cannot call %s", serverName, server.state, prefixedName)
+		return nil, fmt.Errorf("mcp server %q is %s; cannot call %s", serverName, server.state, displayName)
 	}
-	_, toolName, _ := splitMcpToolName(prefixedName)
 	return server.session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: arguments,
 	})
 }
 
-// splitMcpToolName splits an mcp__{server}__{tool} identifier into its
-// server and tool components. The tool name may itself contain underscores;
-// only the first two segments are split.
-func splitMcpToolName(prefixed string) (server, tool string, ok bool) {
-	if len(prefixed) < len("mcp__") || prefixed[:len("mcp__")] != "mcp__" {
+// resolveMcpToolName uses the live server registry to disambiguate server
+// identities that themselves contain "__" (notably Agent Plugin identities).
+// The longest matching server prefix wins, leaving the complete MCP-authored
+// tool name untouched even when it also contains underscores.
+func (m *Manager) resolveMcpToolName(prefixed string) (server, toolName string, ok bool) {
+	if !strings.HasPrefix(prefixed, "mcp__") {
 		return "", "", false
 	}
-	rest := prefixed[len("mcp__"):]
-	idx := -1
-	for i := 0; i < len(rest); i++ {
-		if rest[i] == '_' && i+1 < len(rest) && rest[i+1] == '_' {
-			idx = i
-			break
+	rest := strings.TrimPrefix(prefixed, "mcp__")
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for candidate := range m.servers {
+		prefix := candidate + "__"
+		if strings.HasPrefix(rest, prefix) && len(candidate) > len(server) {
+			server = candidate
+			toolName = strings.TrimPrefix(rest, prefix)
 		}
 	}
-	if idx < 0 {
-		return "", "", false
-	}
-	return rest[:idx], rest[idx+2:], true
+	return server, toolName, server != "" && toolName != ""
 }
 
 // InjectDynamic creates or replaces a server entry in the manager from a

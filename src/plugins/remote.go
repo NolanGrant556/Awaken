@@ -31,7 +31,18 @@ func materializeRemoteURL(ctx context.Context, rawURL, staging string) error {
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{
+		Timeout: 60 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("remote_url stopped after 10 redirects")
+			}
+			if err := validateHTTPSURL(req.URL.String(), "remote_url redirect"); err != nil {
+				return err
+			}
+			return nil
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("download plugin archive: %w", err)

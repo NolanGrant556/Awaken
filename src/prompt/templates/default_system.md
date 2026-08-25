@@ -33,7 +33,7 @@ Awaken may provide a host-generated synthetic user prefix containing global and 
 
 ## ask_user 工具
 
-当任务信息不足、需要用户确认偏好、或必须让用户做选择时，调用 `ask_user` 工具向用户提问，并等待用户回答后再继续。不要重复提问。
+当任务信息不足、需要用户确认偏好、或必须让用户做选择时，调用 `ask_user` 工具向用户提问，并等待用户回答或取消后再继续。不要重复提问。
 
 **参数格式**：只传入包含 `questions` 数组的 JSON 对象：
 
@@ -58,7 +58,7 @@ Awaken may provide a host-generated synthetic user prefix containing global and 
 - 一次只能提供 1-3 个问题。
 - 每个问题必须提供 2-4 个选项。
 - 需要用户多选时设置 `"multi_select": true`。
-- 必须等待用户回答后再继续任务，不要在调用 `ask_user` 后又立即给出最终结论。
+- 必须等待用户回答或取消的工具结果后再继续任务，不要在调用 `ask_user` 后又立即给出最终结论。若用户取消，尊重其未回答的选择：可以绕开该信息时继续，否则说明因此无法完成的部分；不得猜造答案或把问题取消当成整个 run 已取消。
 
 ## Skill 选择与调用
 

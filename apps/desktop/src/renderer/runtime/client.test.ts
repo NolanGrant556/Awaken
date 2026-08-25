@@ -28,6 +28,8 @@ function createElectronBridge(
     deleteThreads: vi.fn(),
     startRun: vi.fn(),
     cancelRun: vi.fn(),
+    answerUserQuestion: vi.fn(),
+    cancelUserQuestion: vi.fn(),
     subscribeRun: vi.fn(async () => "subscription-1"),
     unsubscribeRun: vi.fn(),
     getRuntimeInfo: vi.fn(),
@@ -61,6 +63,17 @@ function installBridge(bridge: AwakenBridge): void {
 }
 
 describe("electron runtime client", () => {
+  it("forwards question cancellation through the dedicated bridge", async () => {
+    const { bridge } = createElectronBridge({ status: "running" });
+    installBridge(bridge);
+    const client = createRuntimeClient();
+
+    await client.cancelUserQuestion("run-1", "question-1");
+
+    expect(bridge.cancelUserQuestion).toHaveBeenCalledWith("run-1", "question-1");
+    expect(bridge.cancelRun).not.toHaveBeenCalled();
+  });
+
   it("recovers the structured credential issue attached by the preload bridge", () => {
     const error = Object.assign(new Error("模型密钥无法读取"), {
       code: "credential_unreadable",

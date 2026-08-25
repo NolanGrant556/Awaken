@@ -591,7 +591,7 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 			return result
 		}
 
-		answer, err := awaiter.AwaitUserQuestion(ctx, request)
+		resolution, err := awaiter.AwaitUserQuestion(ctx, request)
 		if err != nil {
 			result = synthesizeAskUserAwaitFailure(result, ctx, err)
 			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
@@ -600,10 +600,28 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 			return result
 		}
 
-		result.Content = askuser.FormatAnswerTextResult(questions, answer)
+		if resolution.Status == UserQuestionCancelled {
+			result.Content = askuser.FormatCancelledResult()
+			result.Outcome = tool.SucceededOutcome(result.Content)
+			result.Outcome.Summary = "User cancelled the clarification without ending the run."
+			result.Outcome.Details = map[string]any{
+				"resolution":     string(UserQuestionCancelled),
+				"question_count": len(questions),
+			}
+			result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
+			result = finalizeToolResult(result)
+			rt.writeAudit(def, result, permission, string(decision.Source), auditOutcomeLabel(result), terminalAuditError(result))
+			return result
+		}
+
+		result.Content = askuser.FormatAnswerTextResult(questions, resolution.Answer)
 		result.Outcome = tool.SucceededOutcome(result.Content)
 		result.Outcome.Summary = "User answered the requested clarification."
-		result.Outcome.Details = map[string]any{"answer_text": answer, "question_count": len(questions)}
+		result.Outcome.Details = map[string]any{
+			"resolution":     string(UserQuestionAnswered),
+			"answer_text":    resolution.Answer,
+			"question_count": len(questions),
+		}
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 		result = finalizeToolResult(result)
 		rt.writeAudit(def, result, permission, string(decision.Source), auditOutcomeLabel(result), terminalAuditError(result))

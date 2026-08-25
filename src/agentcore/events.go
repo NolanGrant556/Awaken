@@ -207,6 +207,7 @@ type AwakenEvent struct {
 	RuntimeVersion             string
 	QuestionID                 string
 	QuestionAnswer             string
+	QuestionResolution         string
 	InteractionID              string
 	InteractionResolution      string
 	InteractionTitle           string

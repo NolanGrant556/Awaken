@@ -62,6 +62,38 @@ function runStatusChanged(
 }
 
 describe("projectAguiEventToNarrative", () => {
+  it("settles a cancelled user question without presenting a fabricated answer", () => {
+    let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
+      type: "AWAKEN_USER_QUESTION_REQUESTED",
+      runId: "run-1",
+      toolCallId: "tool-ask-1",
+      toolCallName: "ask_user",
+      questionId: "question-1",
+      content:
+        '{"questions":[{"question":"Choose a theme","options":[{"label":"Dark"},{"label":"Light"}]}]}',
+    });
+    state = projectAguiEventToNarrative(state, {
+      type: "AWAKEN_USER_QUESTION_RESOLVED",
+      runId: "run-1",
+      toolCallId: "tool-ask-1",
+      toolCallName: "ask_user",
+      questionId: "question-1",
+      questionResolution: "cancelled",
+    });
+
+    expect(state.activeItem).toBeUndefined();
+    expect(state.committedItems).toContainEqual(
+      expect.objectContaining({
+        title: "Question cancelled",
+        detail: "The user chose not to answer; the run continues.",
+        status: "done",
+      }),
+    );
+    expect(state.committedItems).not.toContainEqual(
+      expect.objectContaining({ title: "Answer received" }),
+    );
+  });
+
   it("projects only Core-derived Write/Edit preparation while keeping raw deltas private", () => {
     let normal = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
       type: "TOOL_CALL_ARGS_DELTA",

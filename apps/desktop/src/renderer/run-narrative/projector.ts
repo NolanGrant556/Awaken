@@ -355,14 +355,19 @@ export function projectAguiEventToNarrative(
           detail = event.content ?? "";
         }
       } else {
-        detail = event.questionAnswer ?? "";
+        detail =
+          event.questionResolution === "cancelled"
+            ? "The user chose not to answer; the run continues."
+            : event.questionAnswer ?? "";
       }
       return commitRuntimeNotice(
         base,
         event,
         "user-question",
         event.type === "AWAKEN_USER_QUESTION_RESOLVED"
-          ? "Answer received"
+          ? event.questionResolution === "cancelled"
+            ? "Question cancelled"
+            : "Answer received"
           : "Waiting for your answer",
         detail,
         event.type === "AWAKEN_USER_QUESTION_REQUESTED" ? "active" : "done",

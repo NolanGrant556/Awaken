@@ -46,6 +46,42 @@ function makeRun(overrides: Partial<RuntimeRun> = {}): RuntimeRun {
   };
 }
 
+describe("runtime reducer user question resolution", () => {
+  it("removes a cancelled question while keeping the run active", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "需要一个选择" },
+      runEvent({
+        type: "AWAKEN_USER_QUESTION_REQUESTED",
+        runId: "run-1",
+        threadId: "thread-1",
+        toolCallId: "tool-ask-1",
+        toolCallName: "ask_user",
+        questionId: "question-1",
+        content:
+          '{"questions":[{"question":"Choose a theme","options":[{"label":"Dark"},{"label":"Light"}]}]}',
+      }),
+      runEvent({
+        type: "AWAKEN_USER_QUESTION_RESOLVED",
+        runId: "run-1",
+        threadId: "thread-1",
+        toolCallId: "tool-ask-1",
+        toolCallName: "ask_user",
+        questionId: "question-1",
+        questionResolution: "cancelled",
+      }),
+    ]);
+
+    expect(state.userQuestions).toEqual([]);
+    expect(state.phase).toBe("starting");
+    expect(state.status).not.toBe("cancelled");
+    expect(state.steps.find((step) => step.id === "user-question:question-1")).toMatchObject({
+      title: "Question cancelled",
+      description: "The user chose not to answer; the run continues.",
+      status: "done",
+    });
+  });
+});
+
 describe("runtime reducer cancel handling", () => {
   it("restores transcript actions in one reducer transition and marks only replayed narrative items", () => {
     const replayed = reduceRuntimeState(createInitialRuntimeState(), {

@@ -266,6 +266,7 @@ function createMockRuntimeClient(): RuntimeClient {
       updatedAt: new Date().toISOString(),
     })),
     answerUserQuestion: vi.fn(async () => undefined),
+    cancelUserQuestion: vi.fn(async () => undefined),
     resolveExternalInteraction: vi.fn(async () => undefined),
     resolveACPPermission: vi.fn(async () => undefined),
     resolveComputerReview: vi.fn(async () => undefined),

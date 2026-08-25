@@ -399,9 +399,9 @@ func (s *artifactBufferingSink) Emit(event AwakenEvent) {
 	}
 }
 
-func (s *artifactBufferingSink) AwaitUserQuestion(ctx context.Context, request AwakenEvent) (string, error) {
+func (s *artifactBufferingSink) AwaitUserQuestion(ctx context.Context, request AwakenEvent) (UserQuestionResolution, error) {
 	if awaiter, ok := s.inner.(UserQuestionAwaiter); ok {
 		return awaiter.AwaitUserQuestion(ctx, request)
 	}
-	return "", context.Canceled
+	return UserQuestionResolution{}, context.Canceled
 }

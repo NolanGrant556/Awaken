@@ -341,6 +341,7 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ToolCallName = event.ToolName
 		base.QuestionID = event.QuestionID
 		base.QuestionAnswer = event.QuestionAnswer
+		base.QuestionResolution = event.QuestionResolution
 		return []Event{base}
 	case agentcore.ExternalInteractionRequestedType:
 		base.Type = EventAwakenExternalInteractionRequested

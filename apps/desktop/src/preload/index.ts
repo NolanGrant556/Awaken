@@ -445,6 +445,11 @@ const bridge: AwakenBridge = {
       questionId,
       answer,
     }) as Promise<void>,
+  cancelUserQuestion: (runId: string, questionId: string) =>
+    ipcRenderer.invoke("awaken:cancel-user-question", {
+      runId,
+      questionId,
+    }) as Promise<void>,
   resolveExternalInteraction: (
     runId: string,
     interactionId: string,

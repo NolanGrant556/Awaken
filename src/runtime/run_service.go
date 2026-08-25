@@ -2443,6 +2443,16 @@ func (s *RunService) ResolveUserQuestion(runID, questionID, answer string) error
 	return session.ResolveUserQuestion(questionID, answer)
 }
 
+func (s *RunService) CancelUserQuestion(runID, questionID string) error {
+	s.mu.RLock()
+	session, ok := s.sessions[runID]
+	s.mu.RUnlock()
+	if !ok {
+		return ErrRunNotFound
+	}
+	return session.CancelUserQuestion(questionID)
+}
+
 func (s *RunService) ResolveExternalInteraction(runID, interactionID string, resolution agentcore.ExternalInteractionResolution) error {
 	s.mu.RLock()
 	session, ok := s.sessions[runID]
@@ -3367,9 +3377,9 @@ func (s sessionEventSink) Emit(event agentcore.AwakenEvent) {
 	s.session.RecordAgentEvent(event)
 }
 
-func (s sessionEventSink) AwaitUserQuestion(ctx context.Context, request agentcore.AwakenEvent) (string, error) {
+func (s sessionEventSink) AwaitUserQuestion(ctx context.Context, request agentcore.AwakenEvent) (agentcore.UserQuestionResolution, error) {
 	if s.session == nil {
-		return "", ErrRunNotFound
+		return agentcore.UserQuestionResolution{}, ErrRunNotFound
 	}
 	return s.session.AwaitUserQuestion(ctx, request)
 }

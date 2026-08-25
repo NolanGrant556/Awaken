@@ -201,6 +201,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("POST /v1/runs/{run_id}/subagents/{task_id}/messages", handlers.handleMessageSubagent)
 		mux.HandleFunc("POST /v1/runs/{run_id}/subagents/{task_id}/cancel", handlers.handleCancelSubagent)
 		mux.HandleFunc("POST /v1/runs/{run_id}/user-questions/{question_id}/answer", handlers.handleAnswerUserQuestion)
+		mux.HandleFunc("POST /v1/runs/{run_id}/user-questions/{question_id}/cancel", handlers.handleCancelUserQuestion)
 		mux.HandleFunc("POST /v1/runs/{run_id}/external-interactions/{interaction_id}/resolve", handlers.handleResolveExternalInteraction)
 		mux.HandleFunc("GET /v1/runs/{run_id}/audit", handlers.handleGetRunAudit)
 		instructionH := instructionHandlers{service: cfg.runService}

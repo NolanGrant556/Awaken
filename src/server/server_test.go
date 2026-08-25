@@ -86,6 +86,25 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestCancelUserQuestionEndpointIsDistinctFromRunCancel(t *testing.T) {
+	router := NewRouter(awruntime.NewRunService(nil, nil), nil)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/runs/missing-run/user-questions/missing-question/cancel",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected question-specific 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "USER_QUESTION_NOT_FOUND") {
+		t.Fatalf("question cancel route returned the wrong error: %s", rec.Body.String())
+	}
+}
+
 func TestAGUIDemoEndpoint(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/agui/demo", nil)
 	rec := httptest.NewRecorder()

@@ -134,8 +134,8 @@ func (s *Session) ComputerRuntime() *computer.Runtime {
 }
 
 type pendingUserQuestion struct {
-	request agentcore.AwakenEvent
-	answer  chan string
+	request    agentcore.AwakenEvent
+	resolution chan agentcore.UserQuestionResolution
 }
 
 type pendingExternalInteraction struct {
@@ -408,7 +408,7 @@ func (s *Session) StreamSnapshot() ([]Event, uint64) {
 	return s.bus.Snapshot()
 }
 
-func (s *Session) AwaitUserQuestion(ctx context.Context, request agentcore.AwakenEvent) (string, error) {
+func (s *Session) AwaitUserQuestion(ctx context.Context, request agentcore.AwakenEvent) (agentcore.UserQuestionResolution, error) {
 	timestamp := request.Timestamp.UTC()
 	if request.Timestamp.IsZero() {
 		timestamp = time.Now().UTC()
@@ -420,14 +420,14 @@ func (s *Session) AwaitUserQuestion(ctx context.Context, request agentcore.Awake
 	}
 
 	pending := &pendingUserQuestion{
-		request: request,
-		answer:  make(chan string, 1),
+		request:    request,
+		resolution: make(chan agentcore.UserQuestionResolution, 1),
 	}
 
 	s.mu.Lock()
 	if isTerminalStatus(s.run.Status) {
 		s.mu.Unlock()
-		return "", ErrRunTerminal
+		return agentcore.UserQuestionResolution{}, ErrRunTerminal
 	}
 	request.ThreadID = s.run.ThreadID
 	request.RunID = s.run.RunID
@@ -447,24 +447,47 @@ func (s *Session) AwaitUserQuestion(ctx context.Context, request agentcore.Awake
 	bus.Append(wrapped, false)
 
 	select {
-	case answer := <-pending.answer:
-		return answer, nil
+	case resolution := <-pending.resolution:
+		return resolution, nil
 	case <-ctx.Done():
 		s.mu.Lock()
 		delete(s.userQuestions, request.QuestionID)
 		s.mu.Unlock()
-		return "", ctx.Err()
+		return agentcore.UserQuestionResolution{}, ctx.Err()
 	}
 }
 
 func (s *Session) ResolveUserQuestion(questionID string, answer string) error {
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return ErrUserQuestionNotFound
+	}
+	return s.resolveUserQuestion(questionID, agentcore.UserQuestionResolution{
+		Status: agentcore.UserQuestionAnswered,
+		Answer: answer,
+	})
+}
+
+func (s *Session) CancelUserQuestion(questionID string) error {
+	return s.resolveUserQuestion(questionID, agentcore.UserQuestionResolution{
+		Status: agentcore.UserQuestionCancelled,
+	})
+}
+
+func (s *Session) resolveUserQuestion(questionID string, resolution agentcore.UserQuestionResolution) error {
 	questionID = strings.TrimSpace(questionID)
 	if questionID == "" {
 		return ErrUserQuestionNotFound
 	}
-	answer = strings.TrimSpace(answer)
-	if answer == "" {
+	if resolution.Status != agentcore.UserQuestionAnswered && resolution.Status != agentcore.UserQuestionCancelled {
 		return ErrUserQuestionNotFound
+	}
+	resolution.Answer = strings.TrimSpace(resolution.Answer)
+	if resolution.Status == agentcore.UserQuestionAnswered && resolution.Answer == "" {
+		return ErrUserQuestionNotFound
+	}
+	if resolution.Status == agentcore.UserQuestionCancelled {
+		resolution.Answer = ""
 	}
 
 	now := time.Now().UTC()
@@ -482,7 +505,8 @@ func (s *Session) ResolveUserQuestion(questionID string, answer string) error {
 	resolved := pending.request
 	resolved.Type = agentcore.UserQuestionResolvedType
 	resolved.Timestamp = now
-	resolved.QuestionAnswer = answer
+	resolved.QuestionAnswer = resolution.Answer
+	resolved.QuestionResolution = string(resolution.Status)
 	resolved.ThreadID = s.run.ThreadID
 	resolved.RunID = s.run.RunID
 	s.run.UpdatedAt = now
@@ -497,7 +521,7 @@ func (s *Session) ResolveUserQuestion(questionID string, answer string) error {
 	s.mu.Unlock()
 
 	bus.Append(wrapped, false)
-	pending.answer <- answer
+	pending.resolution <- resolution
 	return nil
 }
 

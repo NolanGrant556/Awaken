@@ -578,18 +578,25 @@ func mustJSONQuote(t *testing.T, value string) string {
 }
 
 type userQuestionTestSink struct {
-	events []AwakenEvent
-	answer string
-	err    error
+	events     []AwakenEvent
+	answer     string
+	resolution *UserQuestionResolution
+	err        error
 }
 
 func (s *userQuestionTestSink) Emit(event AwakenEvent) {
 	s.events = append(s.events, event)
 }
 
-func (s *userQuestionTestSink) AwaitUserQuestion(ctx context.Context, request AwakenEvent) (string, error) {
+func (s *userQuestionTestSink) AwaitUserQuestion(ctx context.Context, request AwakenEvent) (UserQuestionResolution, error) {
 	s.Emit(request)
-	return s.answer, s.err
+	if s.err != nil {
+		return UserQuestionResolution{}, s.err
+	}
+	if s.resolution != nil {
+		return *s.resolution, nil
+	}
+	return UserQuestionResolution{Status: UserQuestionAnswered, Answer: s.answer}, nil
 }
 
 func TestToolRuntimeInterceptsAskUser(t *testing.T) {
@@ -691,6 +698,30 @@ func TestToolRuntimeAskUserPreservesMultiQuestionAnswer(t *testing.T) {
 	expected := "User has answered your questions:\n" + answer
 	if result.Content != expected {
 		t.Fatalf("expected %q, got %q", expected, result.Content)
+	}
+}
+
+func TestToolRuntimeAskUserReturnsCancellationToModelWithoutCancellingRun(t *testing.T) {
+	sink := &userQuestionTestSink{resolution: &UserQuestionResolution{Status: UserQuestionCancelled}}
+	result := NewToolRuntime(sink).Execute(context.Background(), convcontext.ToolCall{
+		ID: "call_ask_cancelled_by_user", Type: "function", Function: convcontext.FunctionCall{
+			Name:      "ask_user",
+			Arguments: `{"questions":[{"question":"Choose a theme","options":[{"label":"Dark"},{"label":"Light"}]}]}`,
+		},
+	})
+
+	if result.IsError || result.Status != ToolExecutionSucceeded || result.Outcome.Status != tool.OutcomeSucceeded {
+		t.Fatalf("user question cancellation must resolve the tool without cancelling the run: %+v", result)
+	}
+	if !strings.Contains(result.Content, "User cancelled this question without answering") ||
+		!strings.Contains(result.Content, "The run is still active") {
+		t.Fatalf("model did not receive explicit cancellation guidance: %q", result.Content)
+	}
+	if got := result.Outcome.Details["resolution"]; got != string(UserQuestionCancelled) {
+		t.Fatalf("expected cancelled resolution detail, got %#v", got)
+	}
+	if _, exists := result.Outcome.Details["answer_text"]; exists {
+		t.Fatalf("cancelled question must not fabricate answer_text: %+v", result.Outcome.Details)
 	}
 }
 

@@ -99,6 +99,41 @@ describe("ProfileBalancePopover", () => {
     expect(document.querySelector(".aw-profile-usage-dialog")).toBeNull();
   });
 
+  it("matches the account button width and inset position", async () => {
+    vi.spyOn(anchor, "getBoundingClientRect").mockReturnValue({
+      x: 14,
+      y: 700,
+      left: 14,
+      top: 700,
+      right: 242,
+      bottom: 744,
+      width: 228,
+      height: 44,
+      toJSON: () => ({}),
+    });
+
+    await act(async () => {
+      root.render(
+        <ProfileBalancePopover
+          open
+          anchorRef={{ current: anchor }}
+          runtimeClient={{} as RuntimeClient}
+          themePreference="light"
+          themeSaving={false}
+          onThemePreferenceChange={() => {}}
+          onOpenSettings={() => {}}
+          onClose={() => {}}
+        />,
+      );
+    });
+
+    const popover = document.querySelector<HTMLElement>(".profile-balance-popover");
+    const panel = document.querySelector<HTMLElement>("#aw-profile-menu-panel");
+    expect(popover?.style.left).toBe("14px");
+    expect(popover?.style.width).toBe("228px");
+    expect(panel?.style.width).toBe("100%");
+  });
+
   it("keeps only the usage entry in the personal popover and defers querying until click", async () => {
     const getModelProfileBalances = vi.fn(async () => ({ balances: mockBalances }));
     const onClose = vi.fn();

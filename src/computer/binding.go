@@ -11,29 +11,30 @@ import (
 // Binding is created once per root run. It captures the immutable policy,
 // resource identity and media readiness that the run's tool snapshot pins.
 type Binding struct {
-	BindingID          BindingID        `json:"binding_id"`
-	ThreadID           string           `json:"thread_id"`
-	RunID              string           `json:"run_id"`
-	RootAgentID        string           `json:"root_agent_id"`
-	EnvironmentID      string           `json:"environment_id"`
-	ResourceKey        string           `json:"resource_key"`
-	HostVersion        string           `json:"host_version"`
-	ProtocolVersion    int              `json:"protocol_version"`
-	DriverVersion      string           `json:"driver_version"`
-	PolicySnapshotID   PolicySnapshotID `json:"policy_snapshot_id"`
-	AllowedApps        []string         `json:"allowed_apps,omitempty"`
-	AllowedWindows     []string         `json:"allowed_windows,omitempty"`
-	AllowedScopes      []CaptureScope   `json:"allowed_scopes,omitempty"`
-	AllowedActionKinds []ActionKind     `json:"allowed_action_kinds,omitempty"`
-	RequireReviewFor   []ActionKind     `json:"require_review_for,omitempty"`
-	ForbiddenKinds     []ActionKind     `json:"forbidden_kinds,omitempty"`
-	FenceToken         FenceToken       `json:"fence_token"`
-	ControlEpoch       ControlEpoch     `json:"control_epoch"`
-	MediaPolicyReady   bool             `json:"media_policy_ready"`
-	ToolCallingReady   bool             `json:"tool_calling_ready"`
-	VisionReady        bool             `json:"vision_ready"`
-	CreatedAt          time.Time        `json:"created_at"`
-	ExpiresAt          time.Time        `json:"expires_at"`
+	BindingID                    BindingID        `json:"binding_id"`
+	ThreadID                     string           `json:"thread_id"`
+	RunID                        string           `json:"run_id"`
+	RootAgentID                  string           `json:"root_agent_id"`
+	EnvironmentID                string           `json:"environment_id"`
+	ResourceKey                  string           `json:"resource_key"`
+	HostVersion                  string           `json:"host_version"`
+	ProtocolVersion              int              `json:"protocol_version"`
+	DriverVersion                string           `json:"driver_version"`
+	PolicySnapshotID             PolicySnapshotID `json:"policy_snapshot_id"`
+	AllowedApps                  []string         `json:"allowed_apps,omitempty"`
+	AllowedWindows               []string         `json:"allowed_windows,omitempty"`
+	AllowedScopes                []CaptureScope   `json:"allowed_scopes,omitempty"`
+	AllowedActionKinds           []ActionKind     `json:"allowed_action_kinds,omitempty"`
+	AllowBackgroundWindowActions bool             `json:"allow_background_window_actions"`
+	RequireReviewFor             []ActionKind     `json:"require_review_for,omitempty"`
+	ForbiddenKinds               []ActionKind     `json:"forbidden_kinds,omitempty"`
+	FenceToken                   FenceToken       `json:"fence_token"`
+	ControlEpoch                 ControlEpoch     `json:"control_epoch"`
+	MediaPolicyReady             bool             `json:"media_policy_ready"`
+	ToolCallingReady             bool             `json:"tool_calling_ready"`
+	VisionReady                  bool             `json:"vision_ready"`
+	CreatedAt                    time.Time        `json:"created_at"`
+	ExpiresAt                    time.Time        `json:"expires_at"`
 }
 
 // NewBinding creates a run-scoped binding. It does not contact the Host.
@@ -50,23 +51,24 @@ func NewBinding(runID, threadID, rootAgentID, resourceKey string, policy PolicyS
 	}
 	now := time.Now().UTC()
 	return Binding{
-		BindingID:          BindingID("bind_" + hex.EncodeToString(id)),
-		ThreadID:           threadID,
-		RunID:              runID,
-		RootAgentID:        rootAgentID,
-		EnvironmentID:      policy.EnvironmentID,
-		ResourceKey:        resourceKey,
-		PolicySnapshotID:   policy.ID,
-		AllowedApps:        append([]string(nil), policy.AllowedApps...),
-		AllowedWindows:     append([]string(nil), policy.AllowedWindows...),
-		AllowedScopes:      append([]CaptureScope(nil), policy.AllowedScopes...),
-		AllowedActionKinds: append([]ActionKind(nil), policy.AllowedActionKinds...),
-		RequireReviewFor:   append([]ActionKind(nil), policy.RequireReviewFor...),
-		ForbiddenKinds:     append([]ActionKind(nil), policy.ForbiddenKinds...),
-		FenceToken:         NewFenceToken(0),
-		ControlEpoch:       NewControlEpoch(0),
-		CreatedAt:          now,
-		ExpiresAt:          now.Add(policy.MaxDuration),
+		BindingID:                    BindingID("bind_" + hex.EncodeToString(id)),
+		ThreadID:                     threadID,
+		RunID:                        runID,
+		RootAgentID:                  rootAgentID,
+		EnvironmentID:                policy.EnvironmentID,
+		ResourceKey:                  resourceKey,
+		PolicySnapshotID:             policy.ID,
+		AllowedApps:                  append([]string(nil), policy.AllowedApps...),
+		AllowedWindows:               append([]string(nil), policy.AllowedWindows...),
+		AllowedScopes:                append([]CaptureScope(nil), policy.AllowedScopes...),
+		AllowedActionKinds:           append([]ActionKind(nil), policy.AllowedActionKinds...),
+		AllowBackgroundWindowActions: policy.AllowBackgroundWindowActions,
+		RequireReviewFor:             append([]ActionKind(nil), policy.RequireReviewFor...),
+		ForbiddenKinds:               append([]ActionKind(nil), policy.ForbiddenKinds...),
+		FenceToken:                   NewFenceToken(0),
+		ControlEpoch:                 NewControlEpoch(0),
+		CreatedAt:                    now,
+		ExpiresAt:                    now.Add(policy.MaxDuration),
 	}, nil
 }
 

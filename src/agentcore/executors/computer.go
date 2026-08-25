@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +70,33 @@ type observeInput struct {
 	Reason    string   `json:"reason,omitempty"`
 }
 
+func parseWindowTargetRef(value string) (computer.TargetRef, error) {
+	value = strings.TrimSpace(value)
+	const pidPrefix = "pid:"
+	const windowSeparator = "/window:"
+	if !strings.HasPrefix(value, pidPrefix) {
+		return computer.TargetRef{}, fmt.Errorf("target_ref must use pid:<pid>/window:<window_id>")
+	}
+	parts := strings.SplitN(strings.TrimPrefix(value, pidPrefix), windowSeparator, 2)
+	if len(parts) != 2 {
+		return computer.TargetRef{}, fmt.Errorf("target_ref must use pid:<pid>/window:<window_id>")
+	}
+	pid, err := strconv.ParseInt(parts[0], 10, 32)
+	if err != nil || pid <= 0 {
+		return computer.TargetRef{}, fmt.Errorf("target_ref pid must be a positive integer")
+	}
+	windowID, err := strconv.ParseUint(parts[1], 10, 53)
+	if err != nil || windowID == 0 {
+		return computer.TargetRef{}, fmt.Errorf("target_ref window_id must be a positive safe integer")
+	}
+	return computer.TargetRef{
+		PID:             int32(pid),
+		WindowID:        strconv.FormatUint(windowID, 10),
+		Generation:      1,
+		CoordinateSpace: string(computer.CaptureWindow),
+	}, nil
+}
+
 func (e *ComputerExecutor) executeObserve(ctx context.Context, input string) (ToolExecutionOutput, error) {
 	var in observeInput
 	if err := json.Unmarshal([]byte(input), &in); err != nil {
@@ -82,19 +110,29 @@ func (e *ComputerExecutor) executeObserve(ctx context.Context, input string) (To
 	if in.Scope != "" {
 		scope = computer.CaptureScope(in.Scope)
 	}
-	target := computer.TargetRef{
-		WindowID:        strings.TrimSpace(in.TargetRef),
-		Generation:      1,
-		CoordinateSpace: string(scope),
+	target := computer.TargetRef{Generation: 1, CoordinateSpace: string(scope)}
+	if scope == computer.CaptureWindow && strings.TrimSpace(in.TargetRef) != "" {
+		parsed, err := parseWindowTargetRef(in.TargetRef)
+		if err != nil {
+			return validationOutput("invalid window target_ref: " + err.Error()), nil
+		}
+		target = parsed
 	}
-	if current, active := e.runtime.Session(); active {
-		if in.TargetRef == "" {
+	current, active := e.runtime.Session()
+	if active {
+		if in.TargetRef == "" && current.CaptureScope == scope {
 			target = current.Target
 			target.CoordinateSpace = string(scope)
 		}
 	}
-	if current, active := e.runtime.Session(); active && current.CaptureScope != scope {
-		if err := e.runtime.Close(ctx, "capture_scope_changed"); err != nil {
+	targetChanged := active && scope == computer.CaptureWindow &&
+		(current.Target.PID != target.PID || current.Target.WindowID != target.WindowID)
+	if active && (current.CaptureScope != scope || targetChanged) {
+		closeReason := "capture_scope_changed"
+		if targetChanged {
+			closeReason = "capture_target_changed"
+		}
+		if err := e.runtime.Close(ctx, closeReason); err != nil {
 			return computerErrorOutput(err, "computer_session_scope_change_failed"), nil
 		}
 	}
@@ -141,9 +179,45 @@ func (e *ComputerExecutor) executeObserve(ctx context.Context, input string) (To
 		payloadValue["backing_scale_x"] = space.ScaleX
 		payloadValue["backing_scale_y"] = space.ScaleY
 	}
+	if obs.Scope == computer.CaptureDesktop {
+		// Desktop observation is also the exact-window discovery response. Keep
+		// the field present even when there are zero candidates so the model can
+		// distinguish an empty discovery from an old/invalid response shape.
+		payloadValue["available_windows"] = obs.AvailableWindows
+	}
+	if obs.Target.PID > 0 && obs.Target.WindowID != "" {
+		payloadValue["target_ref"] = fmt.Sprintf("pid:%d/window:%s", obs.Target.PID, obs.Target.WindowID)
+		payloadValue["target_pid"] = obs.Target.PID
+		payloadValue["target_window_id"] = obs.Target.WindowID
+	}
+	var accessibilityWarning *tool.OutcomeNotice
+	if obs.AccessibilityTree != nil {
+		if data, readErr := e.runtime.ReadMedia(ctx, *obs.AccessibilityTree); readErr == nil {
+			var accessibility any
+			if parseErr := json.Unmarshal(data, &accessibility); parseErr == nil {
+				// Accessibility element_token values are observation-bound action
+				// locators. They must be model-visible; otherwise a background
+				// window click can only fall back to best-effort synthetic pixels.
+				payloadValue["accessibility"] = accessibility
+			} else {
+				accessibilityWarning = &tool.OutcomeNotice{
+					Code:    "observe_accessibility_invalid",
+					Message: fmt.Sprintf("Accessibility was captured but is not valid JSON: %v", parseErr),
+				}
+			}
+		} else if contains(in.Include, "accessibility") {
+			accessibilityWarning = &tool.OutcomeNotice{
+				Code:    "observe_accessibility_unavailable",
+				Message: fmt.Sprintf("Accessibility was requested but could not be read: %v", readErr),
+			}
+		}
+	}
 	payload, _ := json.Marshal(payloadValue)
 	outcome := tool.SucceededOutcome(string(payload))
 	outcome.Details = payloadValue
+	if accessibilityWarning != nil {
+		outcome.Warnings = append(outcome.Warnings, *accessibilityWarning)
+	}
 	if obs.Screenshot != nil {
 		// Read through the runtime so session ownership and access audit are
 		// enforced. Tests without a media store may use a direct local path.
@@ -355,6 +429,15 @@ func (e *ComputerExecutor) actionResultOutput(ctx context.Context, prepared comp
 	if res.CUAStatus != "" {
 		payloadValue["cua_status"] = res.CUAStatus
 	}
+	if res.CUAEffect != "" {
+		payloadValue["cua_effect"] = res.CUAEffect
+	}
+	if res.CUARoute != "" {
+		payloadValue["cua_route"] = res.CUARoute
+	}
+	if res.CUADeliveryMode != "" {
+		payloadValue["cua_delivery_mode"] = res.CUADeliveryMode
+	}
 	if reviewID != "" {
 		payloadValue["review_id"] = string(reviewID)
 	}
@@ -390,6 +473,15 @@ func (e *ComputerExecutor) actionResultOutput(ctx context.Context, prepared comp
 	}
 	if res.CUAStatus != "" {
 		outcome.Details["cua_status"] = res.CUAStatus
+	}
+	if res.CUAEffect != "" {
+		outcome.Details["cua_effect"] = res.CUAEffect
+	}
+	if res.CUARoute != "" {
+		outcome.Details["cua_route"] = res.CUARoute
+	}
+	if res.CUADeliveryMode != "" {
+		outcome.Details["cua_delivery_mode"] = res.CUADeliveryMode
 	}
 	if reviewID != "" {
 		outcome.Details["review_id"] = string(reviewID)

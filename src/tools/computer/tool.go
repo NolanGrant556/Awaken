@@ -28,7 +28,7 @@ func (t *observeTool) Description() string {
 func (t *observeTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{Name: "scope", Description: "Capture scope: window or desktop.", Type: "string"},
-		{Name: "target_ref", Description: "Optional resolved window reference.", Type: "string"},
+		{Name: "target_ref", Description: "Exact pid:<pid>/window:<window_id> reference returned by a desktop observation.", Type: "string"},
 		{Name: "include", Description: "List of what to include: screenshot, accessibility.", Type: "array"},
 		{Name: "reason", Description: "Why this observation is needed.", Type: "string"},
 	}
@@ -45,14 +45,14 @@ func (t *observeTool) Definition() tool.ToolDefinition {
 			Type: "object",
 			Properties: map[string]tool.ToolParam{
 				"scope":      {Type: "string", Description: "Capture scope: window or desktop.", Enum: []any{"window", "desktop"}},
-				"target_ref": {Type: "string", Description: "Optional resolved window reference."},
+				"target_ref": {Type: "string", Description: "Required for window scope. Use the exact pid:<pid>/window:<window_id> value returned in a desktop observation's available_windows."},
 				"include":    {Type: "array", Description: "List of what to include: screenshot, accessibility.", Items: &tool.ToolParam{Type: "string", Enum: []any{"screenshot", "accessibility"}}},
 				"reason":     {Type: "string", Description: "Why this observation is needed."},
 			},
 			AdditionalProperties: tool.BoolPtr(false),
 		},
 		OutputSchema: tool.ToolParam{
-			Type: "object", Description: "Observation ID, session, scope, target generation and capture timestamp.",
+			Type: "object", Description: "Observation ID, session, scope, target generation, capture timestamp and requested accessibility elements.",
 			AdditionalProperties: tool.BoolPtr(false),
 			Properties: map[string]tool.ToolParam{
 				"observation_id":           {Type: "string", Description: "Fresh observation identifier."},
@@ -67,6 +67,11 @@ func (t *observeTool) Definition() tool.ToolDefinition {
 				"source_screenshot_height": {Type: "integer", Description: "Original native screenshot height before coordinate normalization."},
 				"backing_scale_x":          {Type: "number", Description: "Native backing-pixel scale applied by the trusted Host."},
 				"backing_scale_y":          {Type: "number", Description: "Native backing-pixel scale applied by the trusted Host."},
+				"target_ref":               {Type: "string", Description: "Exact target bound to a window observation."},
+				"target_pid":               {Type: "integer", Description: "Exact process ID bound to a window observation."},
+				"target_window_id":         {Type: "string", Description: "Exact native window ID bound to a window observation."},
+				"available_windows":        {Type: "array", Description: "On-screen exact window candidates returned by a desktop observation. Select one target_ref before requesting window scope.", Items: &tool.ToolParam{Type: "object", AdditionalProperties: tool.BoolPtr(true)}},
+				"accessibility":            {Type: "object", Description: "Requested structured accessibility state. For reliable background window clicks, select an element by label/role and pass its exact element_token as target.locator with the same observation_id.", AdditionalProperties: tool.BoolPtr(true)},
 			},
 			Required: []string{"observation_id", "session_id", "scope", "target_generation", "captured_at"},
 		},
@@ -124,8 +129,8 @@ func (t *actTool) Definition() tool.ToolDefinition {
 			Properties: map[string]tool.ToolParam{
 				"observation_id": {Type: "string", Description: "ID of the observation this action is based on."},
 				"action":         {Type: "string", Description: "Action kind.", Enum: []any{"click", "double_click", "scroll", "drag", "key", "hotkey", "type_text", "move_cursor", "wait"}},
-				"target": {Type: "object", Description: "Target element or coordinates. Pointer actions require a complete x/y pair or pixel_fallback point; locator-only execution is not supported by the current host.", AdditionalProperties: tool.BoolPtr(true), Properties: map[string]tool.ToolParam{
-					"locator": {Type: "string", Description: "Accessibility locator when available."},
+				"target": {Type: "object", Description: "Target element or coordinates. Background window click/double-click requires the exact element_token from that observation as locator; foreground pointer actions use a complete x/y pair or pixel_fallback point.", AdditionalProperties: tool.BoolPtr(true), Properties: map[string]tool.ToolParam{
+					"locator": {Type: "string", Description: "Required for a background window click/double-click. Use the exact element_token from the bound accessibility observation."},
 					"x":       {Type: "integer", Minimum: tool.FloatPtr(0), Description: "Horizontal coordinate in the model-visible screenshot. Use that screenshot's full pixel width directly; the Host applies any platform DPI/backing transform."},
 					"y":       {Type: "integer", Minimum: tool.FloatPtr(0), Description: "Vertical coordinate in the model-visible screenshot. Use that screenshot's full pixel height directly; the Host applies any platform DPI/backing transform."},
 					"pixel_fallback": {Type: "object", Description: "Explicit complete screen-point fallback.", Required: []string{"x", "y"}, AdditionalProperties: tool.BoolPtr(false), Properties: map[string]tool.ToolParam{
@@ -133,7 +138,7 @@ func (t *actTool) Definition() tool.ToolDefinition {
 						"y": {Type: "integer", Minimum: tool.FloatPtr(0), Description: "Vertical screen-point coordinate."},
 					}},
 				}},
-				"parameters":       {Type: "object", Description: "Action-specific parameters. Pointer coordinates always come from the full model-visible screenshot: logical desktop pixels on Windows and normalized screen points on macOS. The Host applies Windows DPI scale or macOS backing scale exactly once. Use click/move_cursor x/y; scroll x/y/direction/amount; drag from_x/from_y/to_x/to_y. Keyboard: key key; hotkey keys; type_text text. Windows Shell global hotkeys containing win/windows/meta/cmd/command are rejected because the current desktop route cannot verify that the Shell handled them; use screenshot-guided visible system UI. Wait: ms. Required fields are validated for the selected action before any OS input.", AdditionalProperties: tool.BoolPtr(true)},
+				"parameters":       {Type: "object", Description: "Action-specific parameters. Window observations default to delivery_mode=background, which must not move the physical cursor, raise the target, or change foreground. Background click/double-click requires target.locator with the exact element_token from the same observation; screenshot-coordinate background clicks fail closed because synthetic event delivery cannot prove the target handled the input. Foreground pointer actions use window-local screenshot pixels. Desktop observations use full-screen coordinates and foreground delivery only. Use click/move_cursor x/y; scroll x/y/direction/amount; drag from_x/from_y/to_x/to_y. Keyboard: key key; hotkey keys; type_text text. Optional delivery_mode is background or foreground. Windows Shell global hotkeys containing win/windows/meta/cmd/command are rejected on the desktop route. Wait: ms. Required fields are validated before any OS input.", AdditionalProperties: tool.BoolPtr(true)},
 				"expected_context": {Type: "object", Description: "Expected context after the action.", AdditionalProperties: tool.BoolPtr(true)},
 				"intent":           {Type: "string", Description: "What the action is trying to accomplish."},
 				"expected_effect":  {Type: "string", Description: "Expected external effect."},
@@ -159,17 +164,20 @@ func (t *actTool) Definition() tool.ToolDefinition {
 				"host_error_category":   {Type: "string", Description: "Host failure category when the checked action fails."},
 				"host_error_message":    {Type: "string", Description: "Diagnostic failure message returned by the CUA host."},
 				"cua_status":            {Type: "string", Description: "Raw bounded CUA result text for diagnostics."},
+				"cua_effect":            {Type: "string", Description: "CUA-confirmed effect classification."},
+				"cua_route":             {Type: "string", Description: "CUA delivery route such as accessibility or synthetic_events."},
+				"cua_delivery_mode":     {Type: "string", Description: "Actual CUA delivery mode: background, foreground, not_applicable, or unknown."},
 			},
 		},
 		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectExecute, Resources: []string{"authorized GUI target"}, Description: "May inject mouse/keyboard input into the authorized scope.", Reversibility: tool.ReversibilityUnknown}},
 		Examples: []tool.ToolExample{
-			{Scenario: "Click an OK button", Input: map[string]any{"observation_id": "obs_xxx", "action": "click", "target": map[string]any{"locator": "button:OK", "x": 640, "y": 420}, "intent": "Dismiss the dialog", "expected_effect": "Dialog closes", "idempotency_key": "idemp-1"}, Outcome: "Returns action_id and execution status."},
+			{Scenario: "Background-click an OK button", Input: map[string]any{"observation_id": "obs_xxx", "action": "click", "target": map[string]any{"locator": "s00000001:12"}, "parameters": map[string]any{"delivery_mode": "background"}, "intent": "Dismiss the dialog", "expected_effect": "Dialog closes", "idempotency_key": "idemp-1"}, Outcome: "Returns action_id and actual CUA delivery diagnostics."},
 		},
 		FailureModes: []tool.ToolFailureMode{
 			{Code: "computer_unsupported", Cause: "Computer runtime is not bound", Retryable: false, Recovery: []string{"enable_computer_runtime", "use_typed_tools"}},
 			{Code: "computer_action_forbidden", Cause: "Action violates policy", Retryable: false, Recovery: []string{"change_approach", "ask_user"}},
 			{Code: "computer_stale_observation", Cause: "The observation changed before perform", Retryable: true, Recovery: []string{"computer_observe", "retry"}},
-			{Code: tool.ErrorCodeValidationError, Cause: "The selected action is missing required parameters or contains an incomplete coordinate set", Retryable: false, Recovery: []string{"correct_action_parameters", "observe_again_if_the_screen_changed"}},
+			{Code: tool.ErrorCodeValidationError, Cause: "The selected action is missing required parameters, contains an incomplete coordinate set, or attempts a background click without an observation-bound element token", Retryable: false, Recovery: []string{"request_accessibility_if_background_clicking", "correct_action_parameters", "observe_again_if_the_screen_changed"}},
 		},
 		Annotations:  tool.ToolAnnotations{ReadOnly: false, Destructive: true, CapabilityClass: tool.CapabilityClassComputerAct, TrustedOrigin: tool.TrustedOriginBuiltin},
 		Permissions:  tool.ToolPermissionSpec{CapabilityClass: tool.CapabilityClassComputerAct, NetworkScope: tool.NetworkScopeNone, RequiresReview: "high-risk GUI actions"},

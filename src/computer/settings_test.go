@@ -47,3 +47,21 @@ func TestComputerDefaultsAllowBothScopesAndUseFixedMediaRetention(t *testing.T) 
 		t.Fatalf("max bytes = %d, want 500 MiB", retention.MaxTotalBytes)
 	}
 }
+
+func TestPolicyAndBindingPinBackgroundWindowPreference(t *testing.T) {
+	policy := PolicyFromSettings(Settings{Enabled: true, AllowBackgroundWindowActions: true})
+	if !policy.AllowBackgroundWindowActions {
+		t.Fatal("policy did not pin enabled background window delivery")
+	}
+	policy, err := NewPolicySnapshot(policy)
+	if err != nil {
+		t.Fatalf("new policy snapshot: %v", err)
+	}
+	binding, err := NewBinding("run", "thread", "agent", "host://local/desktop", policy)
+	if err != nil {
+		t.Fatalf("new binding: %v", err)
+	}
+	if !binding.AllowBackgroundWindowActions {
+		t.Fatal("binding did not preserve background window delivery preference")
+	}
+}

@@ -131,6 +131,9 @@ func TestComputerExecutorObserveDefaultsToDesktop(t *testing.T) {
 	if sess.CaptureScope != computer.CaptureDesktop {
 		t.Fatalf("expected default desktop scope, got %s", sess.CaptureScope)
 	}
+	if _, ok := out.Outcome.Details["available_windows"]; !ok {
+		t.Fatal("desktop observation must always expose available_windows, even when discovery is empty")
+	}
 }
 
 func TestComputerExecutorObserveReopensWhenScopeChanges(t *testing.T) {
@@ -253,6 +256,47 @@ func TestComputerExecutorObserveIncludesScreenshotModelContent(t *testing.T) {
 	}
 	if part.DataBase64 == "" {
 		t.Fatal("expected screenshot base64 data")
+	}
+}
+
+func TestComputerExecutorObserveExposesAccessibilityElementTokens(t *testing.T) {
+	ctx := context.Background()
+	policy, _ := computer.NewPolicySnapshot(computer.DefaultPolicy())
+	bind, _ := computer.NewBinding("run-1", "thread-1", "agent-1", "", policy)
+	driver := fake.NewDriver()
+	runtime := computer.NewRuntime(bind, driver)
+	exec := NewComputerExecutor(runtime)
+
+	sess, err := runtime.OpenSession(ctx, computer.CaptureWindow, computer.TargetRef{AppName: "FakeApp"})
+	if err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+	workDir := t.TempDir()
+	accessibilityPath := filepath.Join(workDir, "accessibility.json")
+	accessibilityJSON := []byte(`{"elements":[{"role":"button","label":"Five","element_token":"s00000001:5"}],"elements_complete":true}`)
+	if err := os.WriteFile(accessibilityPath, accessibilityJSON, 0600); err != nil {
+		t.Fatalf("write accessibility state: %v", err)
+	}
+	driver.OnObserve = func(sessionID computer.SessionID, scope computer.CaptureScope, target computer.TargetRef, opts computer.ObserveOptions) (computer.Observation, error) {
+		now := time.Now().UTC()
+		obs, _ := computer.NewObservation(sess, scope, target, computer.Freshness{CapturedAt: now, FreshUntil: now.Add(30 * time.Second)})
+		obs.AccessibilityTree = &computer.MediaRef{
+			StorageKey: accessibilityPath,
+			MIMEType:   "application/json",
+			ByteSize:   int64(len(accessibilityJSON)),
+		}
+		return obs, nil
+	}
+
+	out := mustExecute(t, exec, "computer_observe", `{"scope":"window","include":["accessibility"]}`)
+	if out.Outcome.Status != tool.OutcomeSucceeded {
+		t.Fatalf("observe failed: %s", out.Outcome.ErrorMessage)
+	}
+	if !strings.Contains(out.Content, `"element_token":"s00000001:5"`) {
+		t.Fatalf("model-facing observation omitted the element token: %s", out.Content)
+	}
+	if _, ok := out.Outcome.Details["accessibility"].(map[string]any); !ok {
+		t.Fatalf("accessibility details missing or malformed: %#v", out.Outcome.Details["accessibility"])
 	}
 }
 

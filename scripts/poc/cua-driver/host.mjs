@@ -10,7 +10,7 @@
 import {
   CuaDriver,
   CaptureScope,
-  DesktopScope,
+  ActionTarget,
   ClickButton,
   ScrollDirection,
   ScrollBy,
@@ -51,6 +51,10 @@ const BY_MAP = {
   line: ScrollBy.Line,
   page: ScrollBy.Page,
 };
+
+function primaryDesktopTarget() {
+  return ActionTarget.Desktop.new({ displayId: "primary" });
+}
 
 let driver;
 let shuttingDown = false;
@@ -195,7 +199,6 @@ function optionalStringArray(value, name) {
 
 async function handlePerform({ sessionID, action, parameters }) {
   const params = parameters || {};
-  const scope = DesktopScope.Desktop;
   let result;
 
   switch (action) {
@@ -207,7 +210,7 @@ async function handlePerform({ sessionID, action, parameters }) {
         session: sessionID,
         x: requireNumber(params.x, "x"),
         y: requireNumber(params.y, "y"),
-        scope,
+        target: primaryDesktopTarget(),
         button,
         count,
       });
@@ -220,7 +223,7 @@ async function handlePerform({ sessionID, action, parameters }) {
         x: requireNumber(params.x, "x"),
         y: requireNumber(params.y, "y"),
         direction: DIRECTION_MAP[params.direction] ?? ScrollDirection.Down,
-        scope,
+        target: primaryDesktopTarget(),
         by: params.by ? BY_MAP[params.by] : ScrollBy.Line,
         amount: optionalBigInt(params.amount, "amount") ?? BigInt(1),
       });
@@ -234,7 +237,7 @@ async function handlePerform({ sessionID, action, parameters }) {
         fromY: requireNumber(params.from_y, "from_y"),
         toX: requireNumber(params.to_x, "to_x"),
         toY: requireNumber(params.to_y, "to_y"),
-        scope,
+        target: primaryDesktopTarget(),
         durationMs: optionalBigInt(params.duration_ms, "duration_ms") ?? BigInt(500),
         steps: optionalBigInt(params.steps, "steps") ?? BigInt(10),
         button: params.button ? BUTTON_MAP[params.button] : ClickButton.Left,
@@ -247,7 +250,7 @@ async function handlePerform({ sessionID, action, parameters }) {
       const input = PressKeyInput.new({
         session: sessionID,
         key: optionalString(params.key, "key") || "",
-        scope,
+        target: primaryDesktopTarget(),
         modifiers: optionalStringArray(params.modifiers, "modifiers"),
       });
       result = await driver.pressKey(input);
@@ -257,7 +260,7 @@ async function handlePerform({ sessionID, action, parameters }) {
       const input = HotkeyInput.new({
         session: sessionID,
         keys: optionalStringArray(params.keys, "keys") || [],
-        scope,
+        target: primaryDesktopTarget(),
       });
       result = await driver.hotkey(input);
       break;
@@ -266,7 +269,7 @@ async function handlePerform({ sessionID, action, parameters }) {
       const input = TypeTextInput.new({
         session: sessionID,
         text: optionalString(params.text, "text") || "",
-        scope,
+        target: primaryDesktopTarget(),
       });
       result = await driver.typeText(input);
       break;
@@ -276,7 +279,7 @@ async function handlePerform({ sessionID, action, parameters }) {
         session: sessionID,
         x: requireNumber(params.x, "x"),
         y: requireNumber(params.y, "y"),
-        scope,
+        target: primaryDesktopTarget(),
       });
       result = await driver.moveCursor(input);
       break;

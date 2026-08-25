@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"awaken/src/filestore"
@@ -512,7 +511,7 @@ func rejectUnsafeFile(path string, info os.FileInfo) error {
 		return fmt.Errorf("plugin package cannot contain special files: %s", path)
 	}
 	if info.Mode().IsRegular() {
-		if sys, ok := info.Sys().(*syscall.Stat_t); ok && sys.Nlink > 1 {
+		if hasMultipleHardlinks(info) {
 			return fmt.Errorf("plugin package cannot contain hardlinks: %s", path)
 		}
 	}

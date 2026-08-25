@@ -649,6 +649,7 @@ describe("thread transcript replay helpers", () => {
       kind: "hint",
       id: "hint:run-cancelled:run-cancelled",
       text: "你停止了生成本次回答",
+      isTerminal: true,
     });
   });
 

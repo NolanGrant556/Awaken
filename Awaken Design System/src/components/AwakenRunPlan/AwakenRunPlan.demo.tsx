@@ -159,6 +159,7 @@ export function AwakenRunPlanDemo() {
                     paused={state.paused}
                     open={false}
                     onToggle={noop}
+                    onDismiss={state.id === "all-completed" ? noop : undefined}
                   />
                   <div style={{ height: 340, width: "min(640px, 100%)", display: "flex" }}>
                     <AwakenRunPlanPanel

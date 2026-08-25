@@ -811,14 +811,16 @@ const runPlanCompletedTriggerHtml = renderToString(
     allCompleted: true,
     open: true,
     onToggle: () => undefined,
+    onDismiss: () => undefined,
   }),
 );
 
 if (
   !runPlanCompletedTriggerHtml.includes("3/3 · 计划已完成") ||
-  !runPlanCompletedTriggerHtml.includes("全部完成")
+  !runPlanCompletedTriggerHtml.includes("全部完成") ||
+  !runPlanCompletedTriggerHtml.includes("隐藏已完成的运行计划")
 ) {
-  throw new Error("AwakenRunPlanTrigger must render the M/M completion summary when all steps are completed");
+  throw new Error("AwakenRunPlanTrigger must render completion summary and the optional live-entry dismiss action");
 }
 
 const runPlanPausedTriggerHtml = renderToString(

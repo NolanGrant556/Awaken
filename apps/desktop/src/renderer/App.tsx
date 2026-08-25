@@ -2483,6 +2483,10 @@ export function App() {
   const runPlanEntry = useRunPlanEntry({
     threadId: runtimeState.activeThreadId,
     plan: activeRunPlan,
+    currentRunId: runtimeState.runId,
+    phase: runtimeState.phase,
+    runStartedAtMs: runtimeState.runStartedAtMs,
+    runCompletedAtMs: runtimeState.runCompletedAtMs,
   });
   const runPlanPaused = Boolean(
     activeRunPlan &&
@@ -7725,6 +7729,11 @@ export function App() {
                                   allCompleted={activeRunPlan.allCompleted}
                                   paused={runPlanPaused}
                                   open={runPlanEntry.panelOpen}
+                                  onDismiss={
+                                    activeRunPlan.allCompleted
+                                      ? runPlanEntry.dismissCompletedEntry
+                                      : undefined
+                                  }
                                   onToggle={() => {
                                     if (!runPlanEntry.panelOpen) {
                                       setContextUsagePanelOpen(false);

@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import type { RunPlanView } from "./runtime/reducer";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { RunPlanView, RuntimePhase } from "./runtime/reducer";
+
+export const RUN_PLAN_COMPLETED_GRACE_MS = 5_000;
 
 export type RunPlanEntryController = {
   /** Whether the compact trigger should render inside the composer dock stack. */
@@ -10,6 +12,8 @@ export type RunPlanEntryController = {
   togglePanel: () => void;
   /** Close the panel; `returnFocus` moves focus back to the trigger. */
   closePanel: (returnFocus: boolean) => void;
+  /** Hide the current completed snapshot until a newer version replaces it. */
+  dismissCompletedEntry: () => void;
   triggerRef: React.RefObject<HTMLButtonElement | null>;
   panelRef: React.RefObject<HTMLDivElement | null>;
 };
@@ -20,21 +24,51 @@ export type RunPlanEntryController = {
  * restore; the scroll controller is untouched because the trigger is a
  * passive layout change inside the measured composer dock stack).
  *
- * The entry is the sole task-plan projection. Once a thread has a durable
- * plan snapshot it remains anchored above the composer through pause,
- * continuation, terminal replay and restart. A later snapshot updates the
- * same surface; plan history never moves into the narrative feed.
+ * The entry is the sole live task-plan projection. Durable snapshots remain in
+ * runtime state for replay and audit, while this hook owns whether the newest
+ * snapshot still belongs above the active composer: incomplete plans survive
+ * pause/error/continuation, completed plans stay visible until a successful
+ * terminal event and then receive a short grace period before disappearing.
+ * A newer plan version always becomes visible again. Plan history never moves
+ * into the narrative feed.
  */
 export function useRunPlanEntry({
   threadId,
   plan,
+  currentRunId,
+  phase,
+  runStartedAtMs,
+  runCompletedAtMs,
 }: {
   threadId?: string;
   plan?: RunPlanView;
+  currentRunId?: string;
+  phase: RuntimePhase;
+  runStartedAtMs?: number;
+  runCompletedAtMs?: number;
 }): RunPlanEntryController {
   const [panelOpen, setPanelOpen] = useState(false);
+  const [hiddenCompletedPlanKey, setHiddenCompletedPlanKey] = useState<string>();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  const planKey =
+    threadId && plan
+      ? `${threadId}:${plan.runId}:${plan.planId}:${plan.version}`
+      : undefined;
+  const completedPlanBelongsToOlderRun = Boolean(
+    plan?.allCompleted &&
+      ((currentRunId && plan.runId !== currentRunId) ||
+        (!currentRunId && phase === "starting") ||
+        (!currentRunId &&
+          runStartedAtMs !== undefined &&
+          (plan.updatedAtMs ?? 0) < runStartedAtMs)),
+  );
+  const entryVisible = Boolean(
+    planKey &&
+      hiddenCompletedPlanKey !== planKey &&
+      !completedPlanBelongsToOlderRun,
+  );
 
   // The plan itself is thread-scoped, but an overlay opened in one thread must
   // never remain open after switching to another thread.
@@ -42,15 +76,71 @@ export function useRunPlanEntry({
     setPanelOpen(false);
   }, [threadId]);
 
-  const entryVisible = Boolean(plan);
-
   // The panel cannot outlive its entry (for example when switching to a
-  // thread that has never created a plan).
+  // thread that has never created a plan or after completion grace expires).
   useEffect(() => {
     if (!entryVisible) {
       setPanelOpen(false);
     }
   }, [entryVisible]);
+
+  const dismissCompletedEntry = useCallback((): void => {
+    if (!planKey || !plan?.allCompleted) {
+      return;
+    }
+    setHiddenCompletedPlanKey(planKey);
+    setPanelOpen(false);
+  }, [plan?.allCompleted, planKey]);
+
+  // A completed plan remains visible while the agent is still producing the
+  // final answer. Only a successful terminal state starts the five-second
+  // completion grace. `useLayoutEffect` makes an already-expired replay hide
+  // before paint instead of flashing an old M/M entry during thread restore.
+  useLayoutEffect(() => {
+    const isCurrentCompletedTerminalPlan = Boolean(
+      planKey &&
+        plan?.allCompleted &&
+        phase === "done" &&
+        (!currentRunId || plan.runId === currentRunId),
+    );
+    if (
+      !planKey ||
+      !isCurrentCompletedTerminalPlan ||
+      hiddenCompletedPlanKey === planKey
+    ) {
+      return;
+    }
+
+    const completedPresentationStartedAtMs = Math.max(
+      plan?.updatedAtMs ?? 0,
+      runCompletedAtMs ?? 0,
+    );
+    const remainingMs =
+      completedPresentationStartedAtMs > 0
+        ? completedPresentationStartedAtMs + RUN_PLAN_COMPLETED_GRACE_MS - Date.now()
+        : RUN_PLAN_COMPLETED_GRACE_MS;
+
+    if (remainingMs <= 0) {
+      setHiddenCompletedPlanKey(planKey);
+      setPanelOpen(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setHiddenCompletedPlanKey(planKey);
+      setPanelOpen(false);
+    }, remainingMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    currentRunId,
+    hiddenCompletedPlanKey,
+    phase,
+    plan?.allCompleted,
+    plan?.runId,
+    plan?.updatedAtMs,
+    planKey,
+    runCompletedAtMs,
+  ]);
 
   function closePanel(returnFocus: boolean): void {
     setPanelOpen(false);
@@ -101,6 +191,7 @@ export function useRunPlanEntry({
     panelOpen,
     togglePanel,
     closePanel,
+    dismissCompletedEntry,
     triggerRef,
     panelRef,
   };

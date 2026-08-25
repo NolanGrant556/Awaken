@@ -889,6 +889,11 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(trigger?.getAttribute("aria-label")).toBe("插件，4 个可用");
     expect(trigger?.querySelectorAll(".composer-bar-plugin-badge")).toHaveLength(3);
     expect(trigger?.querySelectorAll(".aw-icon--puzzle")).toHaveLength(3);
+    expect(
+      Array.from(trigger?.querySelectorAll<SVGElement>(".aw-icon--puzzle") ?? []).every(
+        (icon) => icon.getAttribute("width") === "12",
+      ),
+    ).toBe(true);
 
     act(() => {
       trigger?.click();
@@ -898,6 +903,11 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(document.querySelectorAll(".composer-bar-plugin-option .aw-icon--puzzle")).toHaveLength(
       4,
     );
+    expect(
+      Array.from(
+        document.querySelectorAll<SVGElement>(".composer-bar-plugin-option .aw-icon--puzzle"),
+      ).every((icon) => icon.getAttribute("width") === "12"),
+    ).toBe(true);
     const sitesOption = Array.from(
       document.querySelectorAll<HTMLButtonElement>(".composer-bar-plugin-option"),
     ).find((option) => option.textContent?.includes("Sites"));

@@ -38,7 +38,7 @@ import {
   type SubagentNarrativeTask,
 } from "../run-narrative";
 
-type RuntimePhase =
+export type RuntimePhase =
   | "idle"
   | "starting"
   | "running"
@@ -128,6 +128,7 @@ export type RunPlanItemView = {
  * within one planId only a strictly higher version may replace it.
  */
 export type RunPlanView = {
+  runId: string;
   planId: string;
   version: number;
   explanation?: string;
@@ -967,6 +968,7 @@ function upsertRunPlanView(
     return state;
   }
   const next: RunPlanView = {
+    runId,
     planId,
     version,
     explanation: event.planExplanation?.trim() || undefined,

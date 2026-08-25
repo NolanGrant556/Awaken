@@ -158,6 +158,9 @@ describe("ProjectFilesWorkspace", () => {
       /\.project-files-navigator:has\(> \.project-files-create-agents\)\s*\{\s*grid-template-rows:\s*auto auto auto minmax\(0, 1fr\);/,
     );
     expect(projectFileStyles).toMatch(
+      /\.project-files-create-agents\s*\{[^}]*margin:\s*9px 10px 6px;/s,
+    );
+    expect(projectFileStyles).toMatch(
       /\.project-files-filter\s*\{[^}]*height:\s*36px;[^}]*max-height:\s*36px;/s,
     );
   });

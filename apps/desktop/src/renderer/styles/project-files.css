@@ -1671,7 +1671,7 @@ body.is-project-file-list-resizing .project-files-workspace__body {
   align-items: center;
   gap: 7px;
   min-height: 34px;
-  margin: 0 10px 6px;
+  margin: 9px 10px 6px;
   padding: 6px 10px;
   border: 1px dashed var(--aw-border-main);
   border-radius: 8px;

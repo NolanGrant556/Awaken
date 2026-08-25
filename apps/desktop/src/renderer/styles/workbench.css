@@ -798,6 +798,23 @@
   padding-top: 0;
 }
 
+/* Historical records remain complete and scrollable. Chromium may skip
+   layout/paint only for collapsed trace rows that are outside the viewport;
+   open content and all durable narrative data stay untouched. */
+@supports (content-visibility: auto) {
+  .execution-process-disclosure-body
+    > :is(
+      .thought-trace:not(.thought-trace-open),
+      .tool-trace-group:not(.tool-trace-group-open),
+      .tool-trace-item:not(:has(.tool-trace-line-open))
+    ),
+  .tool-trace-group-lines
+    > .tool-trace-item:not(:has(.tool-trace-line-open)) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 30px;
+  }
+}
+
 .execution-feed {
   width: 100%;
   max-width: 100%;

@@ -1,11 +1,12 @@
 import "./AwakenToolTraceGroup.css";
 import { AwakenIcon } from "../AwakenIcon";
-import { useId, useState, type ReactNode } from "react";
+import { Fragment, memo, useId, useState, type ReactNode } from "react";
 import {
   AwakenToolTraceLine,
   type AwakenToolTraceLineProps,
   type ToolTraceStatus,
 } from "../AwakenToolTraceLine";
+import { useAwakenDisclosurePresence } from "../../hooks/useAwakenDisclosurePresence";
 
 export type ToolTraceAction = Omit<AwakenToolTraceLineProps, "onSelect"> & {
   id: string;
@@ -23,9 +24,13 @@ export type AwakenToolTraceGroupProps = {
   /** Disable child mount animations when revealing already-finished history. */
   animateItems?: boolean;
   onSelectAction?: (action: ToolTraceAction) => void;
+  renderAction?: (
+    action: ToolTraceAction,
+    lineProps: AwakenToolTraceLineProps,
+  ) => ReactNode;
 };
 
-export function AwakenToolTraceGroup({
+export const AwakenToolTraceGroup = memo(function AwakenToolTraceGroup({
   actions,
   label,
   detail: detailProp,
@@ -35,6 +40,7 @@ export function AwakenToolTraceGroup({
   icon,
   animateItems = true,
   onSelectAction,
+  renderAction,
 }: AwakenToolTraceGroupProps) {
   const bodyId = useId();
   const active = actions.some((action) => action.status === "active");
@@ -43,11 +49,16 @@ export function AwakenToolTraceGroup({
     defaultOpen ?? null,
   );
   const expanded = open ?? manualExpanded ?? active;
+  const { present: linesPresent, prepareOpen } = useAwakenDisclosurePresence(
+    expanded,
+    340,
+  );
   const summary = label || `${actions.length} 个工具调用`;
   const detail = detailProp ?? (failed > 0 ? `${failed} 个异常` : undefined);
 
   function toggleOpen() {
     const nextOpen = !(open ?? manualExpanded ?? active);
+    if (nextOpen) prepareOpen();
     if (open === undefined) setManualExpanded(nextOpen);
     onOpenChange?.(nextOpen);
   }
@@ -79,23 +90,30 @@ export function AwakenToolTraceGroup({
         aria-hidden={!expanded}
         inert={!expanded}
       >
-        <div className="tool-trace-group-lines">
-          {actions.map((action) => (
-            <AwakenToolTraceLine
-              key={action.id}
-              {...action}
-              animateEntry={animateItems && action.animateEntry !== false}
-              onSelect={
-                onSelectAction
+        {linesPresent ? (
+          <div className="tool-trace-group-lines">
+            {actions.map((action) => {
+              const { id, ...actionProps } = action;
+              const lineProps: AwakenToolTraceLineProps = {
+                ...actionProps,
+                animateEntry: animateItems && action.animateEntry !== false,
+                onSelect: onSelectAction
                   ? () => {
                       onSelectAction(action);
                     }
-                  : undefined
-              }
-            />
-          ))}
-        </div>
+                  : undefined,
+              };
+              return renderAction ? (
+                <Fragment key={id}>
+                  {renderAction(action, lineProps)}
+                </Fragment>
+              ) : (
+                <AwakenToolTraceLine key={id} {...lineProps} />
+              );
+            })}
+          </div>
+        ) : null}
       </div>
     </article>
   );
-}
+});

@@ -11,6 +11,7 @@ import {
 
 function planView(overrides: Partial<RunPlanView> = {}): RunPlanView {
   return {
+    runId: "run-1",
     planId: "plan-1",
     version: 1,
     items: [
@@ -21,6 +22,7 @@ function planView(overrides: Partial<RunPlanView> = {}): RunPlanView {
     totalCount: 2,
     currentStep: 1,
     allCompleted: false,
+    updatedAtMs: 9_000,
     ...overrides,
   };
 }
@@ -28,11 +30,15 @@ function planView(overrides: Partial<RunPlanView> = {}): RunPlanView {
 type HarnessProps = {
   threadId?: string;
   plan?: RunPlanView;
+  currentRunId?: string;
+  phase?: "idle" | "starting" | "running" | "reconnecting" | "cancelling" | "done" | "error" | "cancelled";
+  runStartedAtMs?: number;
+  runCompletedAtMs?: number;
 };
 
 const EntryHarness = forwardRef<RunPlanEntryController, HarnessProps>(
   function EntryHarness(props, ref) {
-    const controller = useRunPlanEntry(props);
+    const controller = useRunPlanEntry({ phase: "running", ...props });
     useImperativeHandle(ref, () => controller);
     return (
       <div>
@@ -64,6 +70,8 @@ describe("useRunPlanEntry", () => {
   }
 
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
     (
       globalThis as typeof globalThis & {
         IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -81,6 +89,7 @@ describe("useRunPlanEntry", () => {
     act(() => root?.unmount());
     root = undefined;
     host.remove();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -92,12 +101,14 @@ describe("useRunPlanEntry", () => {
     expect(controller().entryVisible).toBe(true);
   });
 
-  it("keeps the entry and open panel through pause, continuation and completion updates", () => {
-    renderHarness({ threadId: "t-1", plan: planView() });
+  it("keeps the entry and open panel through active, paused and pre-terminal completion updates", () => {
+    renderHarness({ threadId: "t-1", currentRunId: "run-1", plan: planView() });
     act(() => controller().togglePanel());
 
     renderHarness({
       threadId: "t-1",
+      currentRunId: "run-1",
+      phase: "cancelled",
       plan: planView({ version: 2, completedCount: 1, currentStep: 2 }),
     });
     expect(controller().entryVisible).toBe(true);
@@ -105,9 +116,10 @@ describe("useRunPlanEntry", () => {
 
     renderHarness({
       threadId: "t-1",
+      currentRunId: "run-1",
+      phase: "running",
       plan: planView({
-        planId: "plan-continuation",
-        version: 1,
+        version: 3,
         completedCount: 2,
         currentStep: 2,
         allCompleted: true,
@@ -117,10 +129,116 @@ describe("useRunPlanEntry", () => {
     expect(controller().panelOpen).toBe(true);
   });
 
-  it("shows a replayed completed plan after returning to or restarting a thread", () => {
+  it("keeps a completed plan for five seconds after successful terminal, then hides it", () => {
     renderHarness({
       threadId: "t-1",
-      plan: planView({ completedCount: 2, allCompleted: true }),
+      currentRunId: "run-1",
+      phase: "done",
+      runCompletedAtMs: 10_000,
+      plan: planView({
+        completedCount: 2,
+        currentStep: 2,
+        allCompleted: true,
+      }),
+    });
+    expect(controller().entryVisible).toBe(true);
+    act(() => controller().togglePanel());
+
+    act(() => vi.advanceTimersByTime(4_999));
+    expect(controller().entryVisible).toBe(true);
+    expect(controller().panelOpen).toBe(true);
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(controller().entryVisible).toBe(false);
+    expect(controller().panelOpen).toBe(false);
+  });
+
+  it("hides an already-expired completed replay before it can remain in the composer", () => {
+    renderHarness({
+      threadId: "t-1",
+      currentRunId: "run-1",
+      phase: "done",
+      runCompletedAtMs: 2_000,
+      plan: planView({
+        completedCount: 2,
+        currentStep: 2,
+        allCompleted: true,
+        updatedAtMs: 1_000,
+      }),
+    });
+    expect(controller().entryVisible).toBe(false);
+  });
+
+  it("cancels completion hiding and reappears when a newer active snapshot arrives", () => {
+    renderHarness({
+      threadId: "t-1",
+      currentRunId: "run-1",
+      phase: "done",
+      runCompletedAtMs: 10_000,
+      plan: planView({
+        completedCount: 2,
+        currentStep: 2,
+        allCompleted: true,
+      }),
+    });
+    act(() => vi.advanceTimersByTime(2_000));
+
+    renderHarness({
+      threadId: "t-1",
+      currentRunId: "run-1",
+      phase: "running",
+      plan: planView({ version: 2, updatedAtMs: 12_000 }),
+    });
+    expect(controller().entryVisible).toBe(true);
+
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(controller().entryVisible).toBe(true);
+  });
+
+  it("does not revive a completed previous plan while a new run is starting", () => {
+    renderHarness({
+      threadId: "t-1",
+      phase: "starting",
+      runStartedAtMs: 10_000,
+      plan: planView({
+        completedCount: 2,
+        currentStep: 2,
+        allCompleted: true,
+        updatedAtMs: 9_000,
+      }),
+    });
+    expect(controller().entryVisible).toBe(false);
+
+    renderHarness({
+      threadId: "t-1",
+      phase: "starting",
+      runStartedAtMs: 10_000,
+      plan: planView({ updatedAtMs: 9_000 }),
+    });
+    expect(controller().entryVisible).toBe(true);
+  });
+
+  it("allows completed entry dismissal and shows the next version again", () => {
+    renderHarness({
+      threadId: "t-1",
+      currentRunId: "run-1",
+      phase: "running",
+      plan: planView({ completedCount: 2, currentStep: 2, allCompleted: true }),
+    });
+    act(() => controller().dismissCompletedEntry());
+    expect(controller().entryVisible).toBe(false);
+
+    renderHarness({
+      threadId: "t-1",
+      currentRunId: "run-1",
+      phase: "running",
+      plan: planView({
+        version: 2,
+        completedCount: 2,
+        currentStep: 2,
+        allCompleted: true,
+        updatedAtMs: 10_000,
+      }),
     });
     expect(controller().entryVisible).toBe(true);
   });

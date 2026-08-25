@@ -131,7 +131,7 @@
 
 .composer-bar-plugin-menu {
   display: grid;
-  width: min(252px, calc(100vw - 32px));
+  width: min(216px, calc(100vw - 32px));
 }
 
 .composer-bar-plugin-options {
@@ -147,13 +147,13 @@
 
 .composer-bar-plugin-option {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 16px;
+  grid-template-columns: 20px minmax(0, 1fr) 12px;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
   min-width: 0;
-  min-height: 36px;
-  padding: 4px 7px;
+  min-height: 30px;
+  padding: 2px 6px;
   border: 0;
   border-radius: var(--aw-radius-control);
   background: transparent;
@@ -180,9 +180,9 @@
 }
 
 .composer-bar-plugin-option-badge {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
 }
 
 .composer-bar-plugin-option-label {
@@ -190,9 +190,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--aw-font-size-sm);
+  font-size: var(--aw-font-size-xs);
   font-weight: var(--aw-font-weight-medium);
-  line-height: var(--aw-line-height-sm);
+  line-height: var(--aw-line-height-xs);
 }
 
 .composer-bar-plugin-empty {

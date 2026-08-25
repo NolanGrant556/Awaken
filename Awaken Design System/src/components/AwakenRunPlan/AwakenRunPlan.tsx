@@ -95,6 +95,8 @@ export type AwakenRunPlanTriggerProps = {
   paused?: boolean;
   open: boolean;
   onToggle: () => void;
+  /** Optional completion-only action that removes the live composer entry. */
+  onDismiss?: () => void;
 };
 
 // AwakenRunPlanTrigger is the compact entry inside the ComposerDock stack. It
@@ -114,6 +116,7 @@ export const AwakenRunPlanTrigger = forwardRef<
     paused = false,
     open,
     onToggle,
+    onDismiss,
   },
   forwardedRef,
 ) {
@@ -134,7 +137,7 @@ export const AwakenRunPlanTrigger = forwardRef<
       ? "in_progress"
       : "pending";
 
-  return (
+  const trigger = (
     <button
       ref={forwardedRef}
       type="button"
@@ -149,6 +152,25 @@ export const AwakenRunPlanTrigger = forwardRef<
       </span>
       <span className="aw-run-plan-trigger__text">{summaryText}</span>
     </button>
+  );
+
+  if (!onDismiss) {
+    return trigger;
+  }
+
+  return (
+    <div className="aw-run-plan-trigger-group">
+      {trigger}
+      <button
+        type="button"
+        className="aw-run-plan-trigger__dismiss"
+        aria-label="隐藏已完成的运行计划"
+        title="隐藏已完成的运行计划"
+        onClick={onDismiss}
+      >
+        <AwakenIcon concept="close" size={14} />
+      </button>
+    </div>
   );
 });
 

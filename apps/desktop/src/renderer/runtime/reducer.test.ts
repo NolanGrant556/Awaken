@@ -3589,6 +3589,7 @@ describe("runtime reducer run plan snapshots", () => {
 
     const plan = after.runPlansById["run-1"];
     expect(plan).toMatchObject({
+      runId: "run-1",
       planId: "plan-1",
       version: 1,
       completedCount: 1,

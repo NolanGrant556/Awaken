@@ -1292,11 +1292,11 @@ export function AwakenComposerBar({
                   }}
                 >
                   <span className="composer-bar-plugin-option-badge" aria-hidden="true">
-                    <AwakenIcon concept="plugin-default" size={14} />
+                    <AwakenIcon concept="plugin-default" size={12} />
                   </span>
                   <span className="composer-bar-plugin-option-label">{option.label}</span>
                   {option.selected ? (
-                    <AwakenIcon concept="step-done" size={16} />
+                    <AwakenIcon concept="step-done" size={12} />
                   ) : null}
                 </button>
               ))

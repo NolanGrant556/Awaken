@@ -25,5 +25,8 @@
     "gallery",
     "smoke"
   ],
+  "exclude": [
+    "src/**/*.test.ts"
+  ],
   "references": []
 }

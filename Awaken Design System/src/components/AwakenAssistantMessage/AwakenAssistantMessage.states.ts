@@ -117,6 +117,24 @@ export const AwakenAssistantMessageStates: AwakenAssistantMessageState[] = [
     } as unknown as Partial<ComponentProps<typeof AwakenAssistantMessage>>,
   },
   {
+    id: "malformed-minimax-table",
+    label: "模型输出列数错位的表格",
+    props: {
+      markdown: [
+        "当前可用的内置工具如下：",
+        "",
+        "| 类别 | 工具 |",
+        "|------|",
+        "| 文件 | Read / Write / Edit |",
+        "| 搜索 | Glob / Grep |",
+        "",
+        "规范表格仍按 GFM 渲染，复制按钮继续给出模型原文。",
+      ].join("\n"),
+      status: "done",
+      elapsedMs: 18000,
+    } as unknown as Partial<ComponentProps<typeof AwakenAssistantMessage>>,
+  },
+  {
     id: "rich-markdown",
     label: "富 Markdown 与流程图",
     props: {

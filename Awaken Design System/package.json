@@ -28,6 +28,7 @@
     "copy:assets": "node ../scripts/copy-design-system-assets.mjs",
     "preview": "npm run build:gallery && vite preview --host 127.0.0.1",
     "smoke:render": "npm run build && tsx smoke/render-smoke.ts",
+    "test": "tsx --test src/components/AwakenMarkdownRenderer/repairGfmTableDelimiters.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

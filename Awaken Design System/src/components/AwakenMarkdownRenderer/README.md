@@ -7,6 +7,7 @@
 ## 规则
 
 - 不渲染任意 raw HTML。
+- 进入 `remark-gfm` 前，只对紧随表头的分隔行列数不一致做显示纠偏；不改传入的 `markdown` 原文，也不进入 fence 内。
 - 普通 fenced code block 只按显式 `language-*` 声明高亮，不自动猜测语言；未知语言保留原始代码与语言标签。
 - 语法着色由 `rehype-highlight` 在 HAST 上生成 token，随后仍经过扩展了 token class 白名单的 `rehype-sanitize`；组件不注入来自模型的 HTML。
 - Mermaid 只从 `mermaid` 代码块进入 `AwakenMermaidDiagram`。

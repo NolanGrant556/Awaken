@@ -4,6 +4,7 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import { AwakenMermaidDiagram } from "../AwakenMermaidDiagram";
+import { repairGfmTableDelimiters } from "./repairGfmTableDelimiters";
 import "./AwakenMarkdownRenderer.css";
 
 export type AwakenMarkdownRendererProps = {
@@ -106,7 +107,10 @@ export function AwakenMarkdownRenderer({
   renderImages = true,
   allowedLinkProtocols,
 }: AwakenMarkdownRendererProps) {
-  const source = markdown || fallback;
+  const source = useMemo(
+    () => repairGfmTableDelimiters(markdown || fallback),
+    [fallback, markdown],
+  );
   const closedMermaidSources = useMemo(
     () => renderMermaid ? findClosedMermaidSources(source) : new Set<string>(),
     [renderMermaid, source],

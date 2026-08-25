@@ -516,6 +516,35 @@ if (unsafeMarkdownHtml.includes("<script") || unsafeMarkdownHtml.includes("alert
   throw new Error("AwakenMarkdownRenderer should keep raw HTML inert after adding highlighting");
 }
 
+const malformedMiniMaxTable = [
+  "| 类别 | 工具 |",
+  "|------|",
+  "| 文件 | Read / Write / Edit |",
+  "| 搜索 | Glob / Grep |",
+].join("\n");
+
+const malformedMiniMaxTableHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenMarkdownRenderer, {
+    markdown: malformedMiniMaxTable,
+  }),
+);
+
+if (!malformedMiniMaxTableHtml.includes("assistant-message-table-wrap")) {
+  throw new Error("AwakenMarkdownRenderer should repair MiniMax delimiter column mismatch into a GFM table");
+}
+
+if (
+  !malformedMiniMaxTableHtml.includes("类别") ||
+  !malformedMiniMaxTableHtml.includes("工具") ||
+  !malformedMiniMaxTableHtml.includes("Read / Write / Edit")
+) {
+  throw new Error("AwakenMarkdownRenderer lost MiniMax table cell text after delimiter repair");
+}
+
+if (malformedMiniMaxTableHtml.includes("|------|") || malformedMiniMaxTableHtml.includes("| 类别 | 工具 |")) {
+  throw new Error("AwakenMarkdownRenderer still rendered the MiniMax table as pipe text");
+}
+
 const scheduledTaskListHtml = renderToString(
   React.createElement(AwakenDesignSystem.AwakenScheduledTaskList, {
     items: [

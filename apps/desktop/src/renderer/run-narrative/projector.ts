@@ -13,8 +13,6 @@ import type {
   RunAction,
   RunNarrativeItem,
   RunNarrativeState,
-  RunPlanNarrativeSnapshot,
-  RunPlanStepStatus,
   SubagentNarrativeTask,
 } from "./types";
 import { describeGlobPattern } from "./tool-display";
@@ -29,7 +27,6 @@ export function createInitialRunNarrativeState(): RunNarrativeState {
     committedItems: [],
     seenEventKeys: [],
     replayedItemIds: [],
-    runPlanSnapshotsByRunId: {},
     runPlanReceiptToolIds: [],
   };
 }
@@ -105,6 +102,7 @@ export function addRunErrorToNarrative(
     id: `answer:error:${id}`,
     markdown: message || "Runtime returned an error",
     status: "error",
+    isFinal: true,
   };
   return {
     ...settledState,
@@ -416,41 +414,32 @@ export function projectAguiEventToNarrative(
     case "AWAKEN_SUBAGENT_MESSAGE_QUEUED":
       return upsertSubagentGroup(base, event);
     case "AWAKEN_PLAN_UPDATED":
-      return recordRunPlanSnapshot(base, event);
+      return recordRunPlanReceipt(base, event);
     case "RUN_FINISHED":
       return markLatestAnswerFinal(
-        commitActive(
-          projectTerminalRunPlan(clearProviderReconnectItems(base), event),
-          "done",
-        ),
+        commitActive(clearProviderReconnectItems(base), "done"),
         event,
       );
     case "RUN_ERROR":
       if (event.code === "RUN_CANCELLED") {
         return commitRunCancelledHint(
-          projectTerminalRunPlan(clearProviderReconnectItems(base), event),
+          clearProviderReconnectItems(base),
           event,
           "你停止了生成本次回答",
         );
       }
-      return commitErrorAnswer(
-        projectTerminalRunPlan(clearProviderReconnectItems(base), event),
-        event,
-      );
+      return commitErrorAnswer(clearProviderReconnectItems(base), event);
     case "RUN_STATUS_CHANGED":
       if (event.status === "cancelled") {
         return commitRunCancelledHint(
-          projectTerminalRunPlan(clearProviderReconnectItems(base), event),
+          clearProviderReconnectItems(base),
           event,
           event.message || "你停止生成了本次回答",
         );
       }
       if (event.status === "finished") {
         return markLatestAnswerFinal(
-          commitActive(
-            projectTerminalRunPlan(clearProviderReconnectItems(base), event),
-            "done",
-          ),
+          commitActive(clearProviderReconnectItems(base), "done"),
           event,
         );
       }
@@ -855,55 +844,27 @@ function commitDreamReceipt(
   };
 }
 
-function runPlanStepStatus(value?: string): RunPlanStepStatus {
-  return value === "in_progress" || value === "completed"
-    ? value
-    : "pending";
-}
-
 /**
- * Records the latest full plan snapshot of a run and removes the generic
- * Tool row of the successful update_plan call that produced this receipt
- * (contract §8.2: the typed plan projection owns that row). Live frames never
- * create a turn-body item; the snapshot becomes a `runPlan` item only at run
- * terminal via projectTerminalRunPlan. Version-upsert mirrors the reducer
- * slice: same planId needs a strictly higher version to replace, a different
- * planId is a new plan in the same run.
+ * Removes the generic Tool row of a successful update_plan call and remembers
+ * its receipt identity so a later RESULT cannot recreate it. The task plan is
+ * owned exclusively by the ComposerDock projection; neither live nor terminal
+ * plan frames create narrative items.
  */
-function recordRunPlanSnapshot(
+function recordRunPlanReceipt(
   state: RunNarrativeState,
   event: AguiEvent,
 ): RunNarrativeState {
   const planId = event.planId?.trim();
-  // Plan snapshots are run-scoped like the reducer slice; a frame without a
-  // resolvable runId (after reducer scoping) is dropped, never keyed by
-  // thread.
   const runId = event.runId?.trim();
   if (!planId || !runId || !Array.isArray(event.planItems)) {
     return state;
   }
-  const version = event.planVersion ?? 0;
-  const previous = state.runPlanSnapshotsByRunId[runId];
-  const replaceSnapshot =
-    !previous || previous.planId !== planId || version > previous.version;
-  const snapshot: RunPlanNarrativeSnapshot = {
-    planId,
-    version,
-    explanation: event.planExplanation?.trim() || undefined,
-    items: event.planItems.map((item) => ({
-      step: item.step,
-      activeForm: item.activeForm,
-      status: runPlanStepStatus(item.status),
-    })),
-    completedCount: event.planCompletedCount ?? 0,
-    totalCount: event.planTotalCount ?? event.planItems.length,
-  };
 
-  // A plan receipt is the single user-facing owner for this update_plan
-  // call. TOOL_CALL_START/RESULT stay on the wire for model/runtime
-  // correctness, but the generic tool row is removed once the typed receipt
-  // arrives (same ownership rule as commitMemoryReceipt), and the receipt
-  // toolCallId is remembered so a later RESULT cannot recreate the row.
+  // The ComposerDock task surface is the single user-facing owner for this
+  // update_plan call. TOOL_CALL_START/RESULT stay on the wire for
+  // model/runtime correctness, but the generic tool row is removed once the
+  // typed receipt arrives, and the receipt toolCallId is remembered so a
+  // later RESULT cannot recreate the row.
   const receiptToolId = event.toolCallId ? toolId(event) : undefined;
   const committedItems = receiptToolId
     ? state.committedItems.filter((candidate) => candidate.id !== receiptToolId)
@@ -920,51 +881,11 @@ function recordRunPlanSnapshot(
       receiptToolId && state.inspectorSelection?.id === receiptToolId
         ? undefined
         : state.inspectorSelection,
-    runPlanSnapshotsByRunId: replaceSnapshot
-      ? { ...state.runPlanSnapshotsByRunId, [runId]: snapshot }
-      : state.runPlanSnapshotsByRunId,
     runPlanReceiptToolIds: receiptToolId
       ? [...state.runPlanReceiptToolIds, receiptToolId].slice(
           -MAX_RUN_PLAN_RECEIPT_TOOL_IDS,
         )
       : state.runPlanReceiptToolIds,
-  };
-}
-
-/**
- * Terminal projection of the run's latest plan snapshot (contract §5.4):
- * success, error, cancel and interrupt all keep the real three-state step
- * statuses of the last snapshot. The stable id `run-plan:<runId>:<planId>`
- * makes repeated terminal frames and live/replay overlap idempotent.
- */
-function projectTerminalRunPlan(
-  state: RunNarrativeState,
-  event: AguiEvent,
-): RunNarrativeState {
-  const runId = event.runId?.trim();
-  const snapshot = runId ? state.runPlanSnapshotsByRunId[runId] : undefined;
-  if (!runId || !snapshot) {
-    return state;
-  }
-  const item: RunNarrativeItem = {
-    kind: "runPlan",
-    id: `run-plan:${runId}:${snapshot.planId}`,
-    runId,
-    planId: snapshot.planId,
-    version: snapshot.version,
-    title: `执行计划 · ${snapshot.completedCount}/${snapshot.totalCount}`,
-    explanation: snapshot.explanation,
-    items: snapshot.items.map((planItem) => ({ ...planItem })),
-    completedCount: snapshot.completedCount,
-    totalCount: snapshot.totalCount,
-  };
-  return {
-    ...state,
-    committedItems: upsertCommittedBeforeRunAnswer(
-      state.committedItems,
-      item,
-      event,
-    ),
   };
 }
 
@@ -1201,10 +1122,20 @@ function upsertCommittedBeforeRunAnswer(
     return updated;
   }
 
-  const answerIndex = items.findIndex(
-    (candidate) =>
-      candidate.kind === "answer" && isAnswerForEvent(candidate.id, event),
-  );
+  const scopeThinkingToTurn = item.kind === "thinking" && Boolean(event.turnId);
+  const turnAnswerIndex = scopeThinkingToTurn
+    ? items.findIndex(
+        (candidate) =>
+          candidate.kind === "answer" && candidate.turnId === event.turnId,
+      )
+    : -1;
+  const answerIndex = scopeThinkingToTurn
+    ? turnAnswerIndex
+    : items.findIndex(
+          (candidate) =>
+            candidate.kind === "answer" &&
+            isAnswerForEvent(candidate.id, event),
+        );
   if (answerIndex < 0) {
     return [...items, item];
   }
@@ -1367,6 +1298,7 @@ function commitRunCancelledHint(
     kind: "hint",
     id: `hint:run-cancelled:${eventScope(event)}`,
     text,
+    isTerminal: true,
   };
   return {
     ...settledState,
@@ -1482,7 +1414,6 @@ function applyStatus(
     case "compactBoundary":
     case "deliverables":
     case "subagentGroup":
-    case "runPlan":
       return item;
     case "mediaGeneration":
       return status === "error" ? { ...item, status: "error" } : item;
@@ -2442,6 +2373,7 @@ function activateAnswer(
   const item: RunNarrativeItem = {
     kind: "answer",
     id,
+    ...(event.turnId ? { turnId: event.turnId } : {}),
     markdown:
       state.activeItem?.id === id && state.activeItem.kind === "answer"
         ? state.activeItem.markdown
@@ -2492,6 +2424,7 @@ function appendAnswer(
         committedItems: upsertCommitted(withThinking.committedItems, {
           kind: "answer",
           id,
+          ...(event.turnId ? { turnId: event.turnId } : {}),
           markdown: legacy.answer,
           status: "done",
         }),
@@ -2507,6 +2440,7 @@ function appendAnswer(
       committedItems: upsertCommitted(settledState.committedItems, {
         kind: "answer",
         id,
+        ...(event.turnId ? { turnId: event.turnId } : {}),
         markdown: delta,
         status: "done",
       }),
@@ -2523,6 +2457,7 @@ function appendAnswer(
   return setActive(state, {
     kind: "answer",
     id,
+    ...(event.turnId ? { turnId: event.turnId } : {}),
     markdown: current + delta,
     status: "active",
   });

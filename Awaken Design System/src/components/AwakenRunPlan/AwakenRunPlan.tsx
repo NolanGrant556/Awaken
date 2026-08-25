@@ -53,15 +53,16 @@ function RunPlanStatusIcon({
   return <AwakenIcon concept="step-pending" size={16} />;
 }
 
-// RunPlanItemList is the shared read-only step list used by both the expanded
-// panel and the historical variant. It exposes each status as visible text in
-// addition to the icon, never by color alone.
+// RunPlanItemList is the expanded panel's read-only step list. It exposes each
+// status as visible text in addition to the icon, never by color alone.
 function RunPlanItemList({
   items,
   animated,
+  paused = false,
 }: {
   items: AwakenRunPlanItemView[];
   animated: boolean;
+  paused?: boolean;
 }) {
   return (
     <ol className="aw-run-plan-list">
@@ -75,7 +76,9 @@ function RunPlanItemList({
           </span>
           <span className="aw-run-plan-item__step">{item.step}</span>
           <span className="aw-run-plan-item__status">
-            {statusLabels[item.status]}
+            {paused && item.status === "in_progress"
+              ? "已暂停"
+              : statusLabels[item.status]}
           </span>
         </li>
       ))}
@@ -89,6 +92,7 @@ export type AwakenRunPlanTriggerProps = {
   totalCount: number;
   currentStep: number;
   allCompleted: boolean;
+  paused?: boolean;
   open: boolean;
   onToggle: () => void;
 };
@@ -101,16 +105,27 @@ export const AwakenRunPlanTrigger = forwardRef<
   HTMLButtonElement,
   AwakenRunPlanTriggerProps
 >(function AwakenRunPlanTrigger(
-  { items, completedCount, totalCount, currentStep, allCompleted, open, onToggle },
+  {
+    items,
+    completedCount,
+    totalCount,
+    currentStep,
+    allCompleted,
+    paused = false,
+    open,
+    onToggle,
+  },
   forwardedRef,
 ) {
   const currentLabel = allCompleted ? null : resolveCurrentStepLabel(items);
   const summaryText = allCompleted
     ? `${totalCount}/${totalCount} · 计划已完成`
-    : `第 ${currentStep}/${totalCount} 步 · ${currentLabel ?? ""}`;
+    : paused
+      ? `已暂停 · ${currentLabel ?? `第 ${currentStep}/${totalCount} 步`}`
+      : `第 ${currentStep}/${totalCount} 步 · ${currentLabel ?? ""}`;
   const accessibleLabel = allCompleted
     ? `运行计划，共 ${totalCount} 步，全部完成`
-    : `运行计划，第 ${currentStep} 步，共 ${totalCount} 步，已完成 ${completedCount} 步${
+    : `运行计划，${paused ? "已暂停，" : ""}第 ${currentStep} 步，共 ${totalCount} 步，已完成 ${completedCount} 步${
         currentLabel ? `，当前：${currentLabel}` : ""
       }`;
   const iconStatus: AwakenRunPlanItemStatus = allCompleted
@@ -130,7 +145,7 @@ export const AwakenRunPlanTrigger = forwardRef<
       onClick={onToggle}
     >
       <span className="aw-run-plan-trigger__icon">
-        <RunPlanStatusIcon status={iconStatus} animated />
+        <RunPlanStatusIcon status={iconStatus} animated={!paused} />
       </span>
       <span className="aw-run-plan-trigger__text">{summaryText}</span>
     </button>
@@ -141,6 +156,7 @@ export type AwakenRunPlanPanelProps = {
   id?: string;
   items: AwakenRunPlanItemView[];
   explanation?: string;
+  paused?: boolean;
   onClose: () => void;
 };
 
@@ -152,7 +168,7 @@ export const AwakenRunPlanPanel = forwardRef<
   HTMLDivElement,
   AwakenRunPlanPanelProps
 >(function AwakenRunPlanPanel(
-  { id, items, explanation, onClose },
+  { id, items, explanation, paused = false, onClose },
   forwardedRef,
 ) {
   const titleId = useId();
@@ -169,7 +185,7 @@ export const AwakenRunPlanPanel = forwardRef<
       >
         <header className="aw-run-plan-panel__header">
           <h2 id={titleId} className="aw-run-plan-panel__title">
-            运行计划
+            {paused ? "运行计划 · 已暂停" : "运行计划"}
           </h2>
           <button
             type="button"
@@ -184,41 +200,9 @@ export const AwakenRunPlanPanel = forwardRef<
           <p className="aw-run-plan-panel__explanation">{explanation}</p>
         ) : null}
         <div className="aw-run-plan-panel__scroll">
-          <RunPlanItemList items={items} animated />
+          <RunPlanItemList items={items} animated={!paused} paused={paused} />
         </div>
       </div>
     </div>
-  );
-});
-
-export type AwakenRunPlanHistoricalProps = {
-  items: AwakenRunPlanItemView[];
-  completedCount: number;
-  totalCount: number;
-};
-
-// AwakenRunPlanHistorical is the read-only terminal snapshot shown inside a
-// turn's execution process. It renders the same step list without animation
-// or interaction, preserving the real tri-state at run terminal.
-export const AwakenRunPlanHistorical = forwardRef<
-  HTMLDivElement,
-  AwakenRunPlanHistoricalProps
->(function AwakenRunPlanHistorical(
-  { items, completedCount, totalCount },
-  forwardedRef,
-) {
-  const titleId = useId();
-
-  return (
-    <section
-      ref={forwardedRef}
-      className="aw-run-plan-historical"
-      aria-labelledby={titleId}
-    >
-      <h3 id={titleId} className="aw-run-plan-historical__title">
-        {`执行计划 · ${completedCount}/${totalCount}`}
-      </h3>
-      <RunPlanItemList items={items} animated={false} />
-    </section>
   );
 });

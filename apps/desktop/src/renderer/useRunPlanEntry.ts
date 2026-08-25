@@ -1,15 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunPlanView } from "./runtime/reducer";
 
-/**
- * Local display delay before the live run-plan entry disappears after its run
- * reaches a terminal state (contract 运行计划与任务进度设计契约 §5.4). The
- * delay is pure Renderer behavior: it is never written to the journal and
- * replay/restart never shows the live entry for an already-terminal run —
- * the terminal history is owned by the narrative `runPlan` item.
- */
-export const RUN_PLAN_TERMINAL_HIDE_DELAY_MS = 5000;
-
 export type RunPlanEntryController = {
   /** Whether the compact trigger should render inside the composer dock stack. */
   entryVisible: boolean;
@@ -24,72 +15,37 @@ export type RunPlanEntryController = {
 };
 
 /**
- * Owns the live run-plan entry state for the active run (contract §8.3:
+ * Owns the task-plan entry state for the active thread (contract §8.3:
  * App.tsx owns open state, trigger ref, overlay composition and focus
  * restore; the scroll controller is untouched because the trigger is a
  * passive layout change inside the measured composer dock stack).
  *
- * Visibility rules (contract §5.2/§5.4):
- * - the entry appears once the active run has a plan snapshot and the run is
- *   live (first successful update_plan);
- * - a fully completed plan keeps showing `M/M · 计划已完成` until run
- *   terminal;
- * - after a live-observed terminal the entry lingers
- *   RUN_PLAN_TERMINAL_HIDE_DELAY_MS and then hides;
- * - a terminal plan that was never observed live (thread reopen, transcript
- *   replay, restart) never shows the live entry.
+ * The entry is the sole task-plan projection. Once a thread has a durable
+ * plan snapshot it remains anchored above the composer through pause,
+ * continuation, terminal replay and restart. A later snapshot updates the
+ * same surface; plan history never moves into the narrative feed.
  */
 export function useRunPlanEntry({
   threadId,
-  runId,
   plan,
-  isBusy,
 }: {
   threadId?: string;
-  runId?: string;
   plan?: RunPlanView;
-  isBusy: boolean;
 }): RunPlanEntryController {
   const [panelOpen, setPanelOpen] = useState(false);
-  const [entryHidden, setEntryHidden] = useState(false);
-  const observedLiveRef = useRef(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Run-scoped and thread-scoped reset: a new run or a thread switch must not
-  // inherit the previous entry's open state, hide timer or live observation.
+  // The plan itself is thread-scoped, but an overlay opened in one thread must
+  // never remain open after switching to another thread.
   useEffect(() => {
-    observedLiveRef.current = false;
-    setEntryHidden(false);
     setPanelOpen(false);
-  }, [threadId, runId]);
+  }, [threadId]);
 
-  // Only a plan seen while its run is live counts as live-observed; replayed
-  // or restored terminal snapshots never pass through a busy phase.
-  useEffect(() => {
-    if (plan && isBusy) {
-      observedLiveRef.current = true;
-    }
-  }, [plan, isBusy]);
+  const entryVisible = Boolean(plan);
 
-  // Terminal grace period: hide the live entry 5s after a live-observed run
-  // reaches terminal. Pure local setTimeout — nothing is journaled.
-  useEffect(() => {
-    if (!plan || isBusy || !observedLiveRef.current) {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      observedLiveRef.current = false;
-      setEntryHidden(true);
-      setPanelOpen(false);
-    }, RUN_PLAN_TERMINAL_HIDE_DELAY_MS);
-    return () => window.clearTimeout(timer);
-  }, [plan, isBusy]);
-
-  const entryVisible =
-    Boolean(plan) && !entryHidden && (isBusy || observedLiveRef.current);
-
-  // The panel cannot outlive its entry (plan reset, terminal hide).
+  // The panel cannot outlive its entry (for example when switching to a
+  // thread that has never created a plan).
   useEffect(() => {
     if (!entryVisible) {
       setPanelOpen(false);

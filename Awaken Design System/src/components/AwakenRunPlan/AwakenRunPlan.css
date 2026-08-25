@@ -237,27 +237,6 @@
   color: var(--aw-text-tertiary);
 }
 
-/* Historical variant: terminal snapshot inside a turn's execution process.
-   Static icons, no interaction. */
-.aw-run-plan-historical {
-  display: grid;
-  gap: var(--aw-space-3);
-  padding: var(--aw-space-4) var(--aw-space-5);
-  border: 1px solid var(--aw-border-light);
-  border-radius: var(--aw-radius-md);
-  background: var(--aw-surface-raised);
-  color: var(--aw-text-primary);
-}
-
-.aw-run-plan-historical__title {
-  margin: 0;
-  color: var(--aw-text-secondary);
-  font-size: var(--aw-font-size-sm);
-  font-weight: var(--aw-font-weight-semibold);
-  line-height: var(--aw-line-height-base);
-  font-variant-numeric: tabular-nums;
-}
-
 @keyframes aw-run-plan-spin {
   to {
     transform: rotate(360deg);

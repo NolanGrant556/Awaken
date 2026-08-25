@@ -125,30 +125,6 @@ export type SubagentNarrativeTask = {
   errorMessage?: string;
 };
 
-export type RunPlanStepStatus = "pending" | "in_progress" | "completed";
-
-export type RunPlanNarrativeStep = {
-  step: string;
-  activeForm: string;
-  status: RunPlanStepStatus;
-};
-
-/**
- * Latest durable plan snapshot of one run as recorded by the narrative
- * projector from AWAKEN_PLAN_UPDATED frames. It is internal projection
- * bookkeeping: live frames never become turn-body items; the snapshot is
- * projected as a `runPlan` item only when the run reaches a terminal event
- * (contract: 运行计划与任务进度设计契约 §5.4/§8.2).
- */
-export type RunPlanNarrativeSnapshot = {
-  planId: string;
-  version: number;
-  explanation?: string;
-  items: RunPlanNarrativeStep[];
-  completedCount: number;
-  totalCount: number;
-};
-
 export type RunNarrativeItem =
   | {
       kind: "prompt";
@@ -239,36 +215,18 @@ export type RunNarrativeItem =
       terminalStatus: "finished" | "error" | "cancelled";
       files: DeliverableFile[];
     }
-  | {
-      /**
-       * Terminal historical projection of a run plan snapshot (id
-       * `run-plan:<runId>:<planId>`). Inserted before the run's final answer
-       * so it renders inside the turn's 执行过程; keeps the real three-state
-       * step statuses of the last snapshot, never auto-completing unfinished
-       * steps (contract §5.4/§8.2).
-       */
-      kind: "runPlan";
-      id: string;
-      runId: string;
-      planId: string;
-      version: number;
-      /** `执行计划 · N/M` */
-      title: string;
-      explanation?: string;
-      items: RunPlanNarrativeStep[];
-      completedCount: number;
-      totalCount: number;
-    }
   | CompactBoundaryItem
   | {
       kind: "answer";
       id: string;
+      /** Durable/live model-turn identity used to restore replay ordering. */
+      turnId?: string;
       markdown: string;
       status: "active" | "done" | "error";
       isFinal?: boolean;
       elapsedMs?: number;
     }
-  | { kind: "hint"; id: string; text: string }
+  | { kind: "hint"; id: string; text: string; isTerminal?: boolean }
   | {
       /**
        * Live-only provider reconnect row at the current execution cursor.
@@ -300,8 +258,6 @@ export type RunNarrativeState = {
   inspectorSelection?: InspectorSelection;
   seenEventKeys: string[];
   replayedItemIds: string[];
-  /** Latest AWAKEN_PLAN_UPDATED snapshot per run, version-upserted. */
-  runPlanSnapshotsByRunId: Record<string, RunPlanNarrativeSnapshot>;
   /**
    * Generic tool-row ids (`tool:<runId>:<toolCallId>`) of update_plan calls
    * that produced a plan_updated receipt. The typed plan projection owns

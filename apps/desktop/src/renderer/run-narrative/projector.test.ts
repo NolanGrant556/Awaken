@@ -551,6 +551,142 @@ describe("projectAguiEventToNarrative", () => {
     expect(state.committedItems[1]).toMatchObject({ markdown: "最终回答" });
   });
 
+  it("restores each durable reasoning snapshot before its matching model turn", () => {
+    let state = createInitialRunNarrativeState();
+    const durableEvents: AguiEvent[] = [];
+
+    for (const turn of [1, 2]) {
+      const turnId = `turn-${turn}`;
+      const messageId = `answer-${turn}`;
+      const reasoningId = `reasoning-${turn}`;
+      const toolCallId = `tool-${turn}`;
+      const baseSeq = turn * 100;
+      durableEvents.push(
+        {
+          type: "TEXT_MESSAGE_START",
+          runId: "run-1",
+          turnId,
+          messageId,
+          seq: baseSeq,
+          recordId: `answer-record-${turn}`,
+        },
+        {
+          type: "TEXT_MESSAGE_CONTENT",
+          runId: "run-1",
+          turnId,
+          messageId,
+          delta: `说明 ${turn}`,
+          seq: baseSeq + 1,
+          recordId: `answer-record-${turn}`,
+        },
+        {
+          type: "TEXT_MESSAGE_END",
+          runId: "run-1",
+          turnId,
+          messageId,
+          seq: baseSeq + 2,
+          recordId: `answer-record-${turn}`,
+        },
+        {
+          type: "REASONING_MESSAGE_START",
+          runId: "run-1",
+          turnId,
+          messageId: reasoningId,
+          seq: baseSeq + 10,
+          recordId: `reasoning-record-${turn}`,
+        },
+        {
+          type: "REASONING_MESSAGE_CONTENT",
+          runId: "run-1",
+          turnId,
+          messageId: reasoningId,
+          delta: `思考 ${turn}`,
+          seq: baseSeq + 11,
+          recordId: `reasoning-record-${turn}`,
+        },
+        {
+          type: "REASONING_MESSAGE_END",
+          runId: "run-1",
+          turnId,
+          messageId: reasoningId,
+          seq: baseSeq + 12,
+          recordId: `reasoning-record-${turn}`,
+        },
+        {
+          type: "TOOL_CALL_START",
+          runId: "run-1",
+          turnId,
+          toolCallId,
+          toolCallName: "Bash",
+          seq: baseSeq + 20,
+          recordId: `tool-call-record-${turn}`,
+        },
+        {
+          type: "TOOL_CALL_RESULT",
+          runId: "run-1",
+          turnId,
+          toolCallId,
+          toolCallName: "Bash",
+          toolStatus: "succeeded",
+          content: `工具结果 ${turn}`,
+          seq: baseSeq + 21,
+          recordId: `tool-result-record-${turn}`,
+        },
+      );
+    }
+
+    for (const event of durableEvents) {
+      state = projectAguiEventToNarrative(state, event);
+    }
+
+    for (const event of [
+      {
+        type: "REASONING_MESSAGE_CONTENT",
+        runId: "run-1",
+        turnId: "turn-3",
+        messageId: "reasoning-3",
+        delta: "思考 3",
+        seq: 310,
+        recordId: "reasoning-record-3",
+      },
+      {
+        type: "TOOL_CALL_START",
+        runId: "run-1",
+        turnId: "turn-3",
+        toolCallId: "tool-3",
+        toolCallName: "Bash",
+        seq: 320,
+        recordId: "tool-call-record-3",
+      },
+      {
+        type: "TOOL_CALL_RESULT",
+        runId: "run-1",
+        turnId: "turn-3",
+        toolCallId: "tool-3",
+        toolCallName: "Bash",
+        toolStatus: "succeeded",
+        content: "工具结果 3",
+        seq: 321,
+        recordId: "tool-result-record-3",
+      },
+    ] satisfies AguiEvent[]) {
+      state = projectAguiEventToNarrative(state, event);
+    }
+
+    expect(
+      state.committedItems.map((item) => [item.kind, item.id]),
+    ).toEqual([
+      ["thinking", "thinking:run-1:reasoning-1"],
+      ["answer", "answer:run-1:answer-1"],
+      ["tool", "tool:run-1:tool-1"],
+      ["thinking", "thinking:run-1:reasoning-2"],
+      ["answer", "answer:run-1:answer-2"],
+      ["tool", "tool:run-1:tool-2"],
+      ["thinking", "thinking:run-1:reasoning-3"],
+      ["tool", "tool:run-1:tool-3"],
+    ]);
+  });
+
   it("reconciles terminal durable snapshots without reactivating rendered thought or answer rows", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(state, {
@@ -682,7 +818,29 @@ describe("projectAguiEventToNarrative", () => {
 
     const hint = state.committedItems.find((item) => item.kind === "hint");
     expect(hint).toBeDefined();
-    expect(hint?.kind === "hint" && hint.text).toBe("你停止了生成本次回答");
+    expect(hint).toMatchObject({
+      kind: "hint",
+      text: "你停止了生成本次回答",
+      isTerminal: true,
+    });
+  });
+
+  it("marks a terminal error answer as the execution-process boundary", () => {
+    let state = createInitialRunNarrativeState();
+    state = projectAguiEventToNarrative(state, textMessageStart());
+    state = projectAguiEventToNarrative(state, textMessageContent("partial"));
+
+    state = projectAguiEventToNarrative(
+      state,
+      runError("PROVIDER_ERROR", "供应商请求失败"),
+    );
+
+    expect(state.committedItems.at(-1)).toMatchObject({
+      kind: "answer",
+      markdown: "供应商请求失败",
+      status: "error",
+      isFinal: true,
+    });
   });
 
   it("adds a hint item from message when run status changes to cancelled", () => {
@@ -1639,14 +1797,10 @@ describe("projectAguiEventToNarrative", () => {
   });
 });
 
-describe("run plan terminal projection (RP-D03)", () => {
+describe("run plan narrative ownership (RP-D03)", () => {
   const planItemsV1 = [
     { step: "实现运行计划投影", activeForm: "正在实现运行计划投影", status: "in_progress" },
     { step: "补齐自动化验收", activeForm: "正在补齐自动化验收", status: "pending" },
-  ];
-  const planItemsV2 = [
-    { step: "实现运行计划投影", activeForm: "正在实现运行计划投影", status: "completed" },
-    { step: "补齐自动化验收", activeForm: "正在补齐自动化验收", status: "completed" },
   ];
 
   function planUpdated(overrides: Partial<AguiEvent> = {}): AguiEvent {
@@ -1692,88 +1846,34 @@ describe("run plan terminal projection (RP-D03)", () => {
     };
   }
 
-  function answerSequence(state: ReturnType<typeof createInitialRunNarrativeState>) {
-    let next = projectAguiEventToNarrative(state, {
-      ...textMessageStart(),
-      semanticSeq: 20,
-    });
-    next = projectAguiEventToNarrative(next, {
-      ...textMessageContent("done"),
-      semanticSeq: 21,
-    });
-    next = projectAguiEventToNarrative(next, {
-      ...textMessageEnd(),
-      semanticSeq: 22,
-    });
-    return next;
-  }
-
-  function runPlanItems(state: { committedItems: { kind: string }[] }) {
-    return state.committedItems.filter((item) => item.kind === "runPlan");
-  }
-
-  it("projects the terminal snapshot before the final answer with real step states", () => {
+  it("keeps live and terminal plan snapshots out of the narrative feed", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(state, updatePlanStart());
     state = projectAguiEventToNarrative(state, planUpdated());
     state = projectAguiEventToNarrative(state, updatePlanResult("succeeded"));
-    state = answerSequence(state);
+    state = projectAguiEventToNarrative(state, {
+      ...textMessageStart(),
+      semanticSeq: 20,
+    });
+    state = projectAguiEventToNarrative(state, {
+      ...textMessageContent("done"),
+      semanticSeq: 21,
+    });
+    state = projectAguiEventToNarrative(state, {
+      ...textMessageEnd(),
+      semanticSeq: 22,
+    });
     state = projectAguiEventToNarrative(state, {
       type: "RUN_FINISHED",
       runId: "run-1",
       semanticSeq: 30,
     });
 
-    const plans = runPlanItems(state);
-    expect(plans).toHaveLength(1);
-    expect(plans[0]).toMatchObject({
-      kind: "runPlan",
-      id: "run-plan:run-1:plan-1",
-      runId: "run-1",
-      planId: "plan-1",
-      version: 1,
-      title: "执行计划 · 0/2",
-      completedCount: 0,
-      totalCount: 2,
-      items: planItemsV1,
-    });
-    const kinds = state.committedItems.map((item) => item.kind);
-    expect(kinds.indexOf("runPlan")).toBeLessThan(kinds.lastIndexOf("answer"));
+    expect(state.committedItems.some((item) => item.kind === "tool")).toBe(false);
     expect(state.committedItems.at(-1)).toMatchObject({
       kind: "answer",
       isFinal: true,
     });
-  });
-
-  it("keeps a stable id so duplicate terminal frames and replay do not duplicate the item", () => {
-    const script: AguiEvent[] = [
-      updatePlanStart(),
-      planUpdated(),
-      updatePlanResult("succeeded"),
-      { ...textMessageStart(), semanticSeq: 20 },
-      { ...textMessageContent("done"), semanticSeq: 21 },
-      { ...textMessageEnd(), semanticSeq: 22 },
-      { type: "RUN_FINISHED", runId: "run-1", semanticSeq: 30 },
-    ];
-    let state = createInitialRunNarrativeState();
-    for (const event of script) {
-      state = projectAguiEventToNarrative(state, event);
-    }
-    // Replay overlap: the same frames arrive again (same seq, deduped) and a
-    // second terminal frame with a fresh seq must upsert onto the stable id.
-    for (const event of script) {
-      state = projectAguiEventToNarrative(state, event);
-    }
-    state = projectAguiEventToNarrative(state, {
-      type: "RUN_FINISHED",
-      runId: "run-1",
-      semanticSeq: 31,
-    });
-
-    expect(runPlanItems(state)).toHaveLength(1);
-    expect(
-      state.committedItems.filter((item) => item.id === "run-plan:run-1:plan-1"),
-    ).toHaveLength(1);
   });
 
   it("removes the generic tool row of a successful update_plan", () => {
@@ -1826,10 +1926,12 @@ describe("run plan terminal projection (RP-D03)", () => {
           item.status === "error",
       ),
     ).toBe(true);
-    expect(runPlanItems(state)).toHaveLength(0);
+    expect(
+      state.committedItems.some((item) => item.id.startsWith("run-plan:")),
+    ).toBe(false);
   });
 
-  it("keeps unfinished steps pending/in_progress when the run is cancelled", () => {
+  it("keeps a cancelled plan out of narrative and commits only the terminal hint", () => {
     let state = createInitialRunNarrativeState();
     state = projectAguiEventToNarrative(
       state,
@@ -1848,51 +1950,12 @@ describe("run plan terminal projection (RP-D03)", () => {
       runError("RUN_CANCELLED", "cancelled"),
     );
 
-    const plans = runPlanItems(state);
-    expect(plans).toHaveLength(1);
-    expect(plans[0]).toMatchObject({
-      title: "执行计划 · 1/3",
-      items: [
-        { step: "第一步", status: "completed" },
-        { step: "第二步", status: "in_progress" },
-        { step: "第三步", status: "pending" },
-      ],
-    });
-  });
-
-  it("keeps only the latest snapshot across multiple versions", () => {
-    let state = createInitialRunNarrativeState();
-    state = projectAguiEventToNarrative(state, planUpdated());
-    state = projectAguiEventToNarrative(
-      state,
-      planUpdated({
-        planVersion: 2,
-        planItems: planItemsV2,
-        planCompletedCount: 2,
-        planAllCompleted: true,
-        toolCallId: "call-plan-2",
-        semanticSeq: 12,
-        planExplanation: "提前完成",
-      }),
-    );
-    // A stale lower-version frame must not roll the snapshot back.
-    state = projectAguiEventToNarrative(
-      state,
-      planUpdated({ semanticSeq: 13 }),
-    );
-    state = projectAguiEventToNarrative(state, {
-      type: "RUN_FINISHED",
-      runId: "run-1",
-      semanticSeq: 30,
-    });
-
-    const plans = runPlanItems(state);
-    expect(plans).toHaveLength(1);
-    expect(plans[0]).toMatchObject({
-      version: 2,
-      title: "执行计划 · 2/2",
-      explanation: "提前完成",
-      items: planItemsV2,
+    expect(
+      state.committedItems.some((item) => item.id.startsWith("run-plan:")),
+    ).toBe(false);
+    expect(state.committedItems.at(-1)).toMatchObject({
+      kind: "hint",
+      isTerminal: true,
     });
   });
 

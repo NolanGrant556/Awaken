@@ -1,7 +1,8 @@
 import "./AwakenToolTraceLine.css";
-import { useId, useState, type ReactNode } from "react";
+import { memo, useId, useState, type ReactNode } from "react";
 
 import { AwakenIcon } from "../AwakenIcon";
+import { useAwakenDisclosurePresence } from "../../hooks/useAwakenDisclosurePresence";
 
 export type ToolTraceStatus =
   | "active"
@@ -75,7 +76,7 @@ function statusIcon(status: ToolTraceStatus, kind: ToolTraceKind) {
   }
 }
 
-export function AwakenToolTraceLine({
+export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
   title,
   detail,
   output,
@@ -101,6 +102,10 @@ export function AwakenToolTraceLine({
     defaultOpen ?? null,
   );
   const expanded = hasDetail && (open ?? manualExpanded ?? autoExpanded);
+  const { present: detailPresent, prepareOpen } = useAwakenDisclosurePresence(
+    expanded,
+    320,
+  );
   const interactive = hasDetail || Boolean(onSelect);
   const lineClassName = `tool-trace-line tool-trace-line-${status} tool-trace-line-${kind}${
     expanded ? " tool-trace-line-open" : ""
@@ -109,6 +114,7 @@ export function AwakenToolTraceLine({
   function activate() {
     if (hasDetail) {
       const nextOpen = !(open ?? manualExpanded ?? autoExpanded);
+      if (nextOpen) prepareOpen();
       if (open === undefined) setManualExpanded(nextOpen);
       onOpenChange?.(nextOpen);
     }
@@ -169,60 +175,62 @@ export function AwakenToolTraceLine({
           aria-hidden={!expanded}
           inert={!expanded}
         >
-          <div className="tool-trace-output-rail">
-            <section
-              className="tool-trace-output-card"
-              aria-label={detailLabel}
-              data-output-truncated={outputTruncated ? "true" : "false"}
-            >
-              {outputTruncated || (detailCard?.copyText && onCopyDetail) ? (
-                <div className="tool-trace-output-actions">
-                  {outputTruncated ? (
-                    <span className="tool-trace-output-truncated">内容已截断</span>
-                  ) : null}
-                  {detailCard?.copyText && onCopyDetail ? (
-                    <button
-                      type="button"
-                      className="tool-trace-output-copy"
-                      aria-label="复制详情"
-                      onClick={() => onCopyDetail(detailCard.copyText || "")}
-                    >
-                      <AwakenIcon concept="copy" size={14} />
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-              {detailCard ? (
-                <div
-                  className="tool-trace-detail-sections"
-                  data-aw-run-stage-scroll-boundary=""
-                  tabIndex={0}
-                >
-                  {detailCard.sections.map((section, index) => (
-                    <section
-                      key={`${section.label}:${index}`}
-                      className="tool-trace-detail-section"
-                      data-format={section.format}
-                      data-tone={section.tone || "default"}
-                    >
-                      <div className="tool-trace-detail-label">{section.label}</div>
-                      <pre>{section.content}</pre>
-                    </section>
-                  ))}
-                </div>
-              ) : (
-                <pre
-                  className="tool-trace-output-scroll"
-                  data-aw-run-stage-scroll-boundary=""
-                  tabIndex={0}
-                >
-                  {output}
-                </pre>
-              )}
-            </section>
-          </div>
+          {detailPresent ? (
+            <div className="tool-trace-output-rail">
+              <section
+                className="tool-trace-output-card"
+                aria-label={detailLabel}
+                data-output-truncated={outputTruncated ? "true" : "false"}
+              >
+                {outputTruncated || (detailCard?.copyText && onCopyDetail) ? (
+                  <div className="tool-trace-output-actions">
+                    {outputTruncated ? (
+                      <span className="tool-trace-output-truncated">内容已截断</span>
+                    ) : null}
+                    {detailCard?.copyText && onCopyDetail ? (
+                      <button
+                        type="button"
+                        className="tool-trace-output-copy"
+                        aria-label="复制详情"
+                        onClick={() => onCopyDetail(detailCard.copyText || "")}
+                      >
+                        <AwakenIcon concept="copy" size={14} />
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                {detailCard ? (
+                  <div
+                    className="tool-trace-detail-sections"
+                    data-aw-run-stage-scroll-boundary=""
+                    tabIndex={0}
+                  >
+                    {detailCard.sections.map((section, index) => (
+                      <section
+                        key={`${section.label}:${index}`}
+                        className="tool-trace-detail-section"
+                        data-format={section.format}
+                        data-tone={section.tone || "default"}
+                      >
+                        <div className="tool-trace-detail-label">{section.label}</div>
+                        <pre>{section.content}</pre>
+                      </section>
+                    ))}
+                  </div>
+                ) : (
+                  <pre
+                    className="tool-trace-output-scroll"
+                    data-aw-run-stage-scroll-boundary=""
+                    tabIndex={0}
+                  >
+                    {output}
+                  </pre>
+                )}
+              </section>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </article>
   );
-}
+});

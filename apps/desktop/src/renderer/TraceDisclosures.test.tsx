@@ -51,6 +51,24 @@ describe("execution trace disclosures", () => {
     expect(heading?.getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("does not mount completed Thought text until the user opens it", async () => {
+    await act(async () => {
+      root.render(
+        <AwakenThoughtTrace text="Complete historical reasoning" status="done" />,
+      );
+    });
+    const heading = container.querySelector<HTMLButtonElement>(
+      ".thought-trace-heading",
+    );
+    expect(container.querySelector(".thought-trace-body p")).toBeNull();
+
+    await act(async () => heading?.click());
+
+    expect(container.querySelector(".thought-trace-body p")?.textContent).toBe(
+      "Complete historical reasoning",
+    );
+  });
+
   it("does not hide a completed Thought label or reserve fading body height", () => {
     const componentStyles = readFileSync(
       resolve(
@@ -89,9 +107,7 @@ describe("execution trace disclosures", () => {
       "button.tool-trace-line",
     );
     expect(row?.getAttribute("aria-expanded")).toBe("false");
-    expect(
-      container.querySelector(".tool-trace-output-card")?.textContent,
-    ).toContain("running suite");
+    expect(container.querySelector(".tool-trace-output-card")).toBeNull();
 
     await act(async () => {
       root.render(
@@ -106,9 +122,74 @@ describe("execution trace disclosures", () => {
       );
     });
     expect(row?.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector(".tool-trace-output-card")).toBeNull();
 
     await act(async () => row?.click());
     expect(row?.getAttribute("aria-expanded")).toBe("true");
+    expect(
+      container.querySelector(".tool-trace-output-card")?.textContent,
+    ).toContain("4 tests passed");
+  });
+
+  it("keeps a large collapsed trace DOM bounded while preserving full on-demand output", async () => {
+    const fullOutput = `unique-start-${"x".repeat(20_000)}-unique-end`;
+    await act(async () => {
+      root.render(
+        <>
+          {Array.from({ length: 120 }, (_, index) => (
+            <AwakenToolTraceLine
+              key={index}
+              title={`Historical tool ${index + 1}`}
+              output={fullOutput}
+              status="done"
+              animateEntry={false}
+            />
+          ))}
+        </>,
+      );
+    });
+
+    expect(container.querySelectorAll(".tool-trace-item")).toHaveLength(120);
+    expect(container.querySelectorAll(".tool-trace-output-card")).toHaveLength(0);
+    expect(container.textContent).not.toContain("unique-end");
+
+    const firstRow = container.querySelector<HTMLButtonElement>(
+      "button.tool-trace-line",
+    );
+    await act(async () => firstRow?.click());
+
+    expect(container.querySelectorAll(".tool-trace-output-card")).toHaveLength(1);
+    expect(container.querySelector(".tool-trace-output-card")?.textContent).toBe(
+      fullOutput,
+    );
+  });
+
+  it("keeps detail mounted for the close animation, then removes the hidden DOM", async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        root.render(
+          <AwakenToolTraceLine
+            title="Historical tool"
+            output="complete output"
+            status="done"
+            defaultOpen
+          />,
+        );
+      });
+      const row = container.querySelector<HTMLButtonElement>(
+        "button.tool-trace-line",
+      );
+
+      await act(async () => row?.click());
+      expect(row?.getAttribute("aria-expanded")).toBe("false");
+      expect(container.querySelector(".tool-trace-output-card")).not.toBeNull();
+
+      await act(async () => vi.advanceTimersByTime(321));
+      expect(container.querySelector(".tool-trace-output-card")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps the official MCP mark visible while an MCP tool is active or terminal", async () => {
@@ -227,6 +308,44 @@ describe("execution trace disclosures", () => {
     ).not.toBeNull();
     await act(async () => heading?.click());
     expect(onOpenChange).toHaveBeenCalledWith(true);
+  });
+
+  it("does not mount collapsed group rows until the group is opened", async () => {
+    await act(async () => {
+      root.render(
+        <AwakenToolTraceGroup
+          actions={[
+            { id: "read", title: "Read files", status: "done" },
+            { id: "search", title: "Search files", status: "done" },
+          ]}
+        />,
+      );
+    });
+    const heading = container.querySelector<HTMLButtonElement>(
+      ".tool-trace-group-heading",
+    );
+    expect(container.querySelectorAll(".tool-trace-item")).toHaveLength(0);
+
+    await act(async () => heading?.click());
+
+    expect(container.querySelectorAll(".tool-trace-item")).toHaveLength(2);
+  });
+
+  it("lets Chromium skip only offscreen collapsed trace layout", () => {
+    const workbenchStyles = readFileSync(
+      resolve(process.cwd(), "src/renderer/styles/workbench.css"),
+      "utf8",
+    );
+
+    expect(workbenchStyles).toMatch(
+      /\.thought-trace:not\(\.thought-trace-open\)[\s\S]*?content-visibility:\s*auto;/,
+    );
+    expect(workbenchStyles).toMatch(
+      /contain-intrinsic-size:\s*auto 30px;/,
+    );
+    expect(workbenchStyles).not.toMatch(
+      /\.execution-process-disclosure-body\s*\{[^}]*content-visibility:\s*hidden;/,
+    );
   });
 
   it("collapses a finished tool group and ready media while preserving their summary rows", async () => {

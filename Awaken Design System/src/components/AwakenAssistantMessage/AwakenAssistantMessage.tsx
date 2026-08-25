@@ -1,4 +1,5 @@
 import "./AwakenAssistantMessage.css";
+import { memo } from "react";
 import { AwakenCopyButton } from "../AwakenCopyButton";
 import { AwakenMarkdownRenderer } from "../AwakenMarkdownRenderer";
 
@@ -33,7 +34,7 @@ function formatElapsedMs(elapsedMs: number): string {
   return `${seconds}s`;
 }
 
-export function AwakenAssistantMessage({
+export const AwakenAssistantMessage = memo(function AwakenAssistantMessage({
   markdown,
   status = "active",
   elapsedMs,
@@ -79,4 +80,4 @@ export function AwakenAssistantMessage({
       ) : null}
     </article>
   );
-}
+});

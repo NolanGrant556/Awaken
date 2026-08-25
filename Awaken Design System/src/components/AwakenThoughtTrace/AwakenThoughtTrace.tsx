@@ -1,10 +1,11 @@
 import "./AwakenThoughtTrace.css";
 import { AwakenIcon } from "../AwakenIcon";
-import { useId, useState } from "react";
+import { memo, useId, useState } from "react";
 import {
   AwakenThinkingOrbStatus,
   type AwakenThinkingOrbTheme,
 } from "../AwakenThinkingOrb";
+import { useAwakenDisclosurePresence } from "../../hooks/useAwakenDisclosurePresence";
 
 type ThoughtTraceStatus = "active" | "done" | "error";
 
@@ -18,7 +19,7 @@ export type AwakenThoughtTraceProps = {
   animateEntry?: boolean;
 };
 
-export function AwakenThoughtTrace({
+export const AwakenThoughtTrace = memo(function AwakenThoughtTrace({
   text,
   status = "active",
   label,
@@ -33,6 +34,10 @@ export function AwakenThoughtTrace({
   );
   const autoExpanded = status === "active";
   const expanded = manualExpanded ?? autoExpanded;
+  const { present: bodyPresent, prepareOpen } = useAwakenDisclosurePresence(
+    expanded,
+    400,
+  );
   const statusLabel =
     label ??
     (status === "active"
@@ -55,7 +60,11 @@ export function AwakenThoughtTrace({
         className="thought-trace-heading"
         aria-expanded={expanded}
         aria-controls={bodyId}
-        onClick={() => setManualExpanded((current) => !(current ?? autoExpanded))}
+        onClick={() => {
+          const nextExpanded = !(manualExpanded ?? autoExpanded);
+          if (nextExpanded) prepareOpen();
+          setManualExpanded(nextExpanded);
+        }}
       >
         {status === "active" ? (
           <AwakenThinkingOrbStatus
@@ -83,10 +92,12 @@ export function AwakenThoughtTrace({
         aria-hidden={!expanded}
         inert={!expanded}
       >
-        <div className="thought-trace-body-inner">
-          {text ? <p>{text}</p> : null}
-        </div>
+        {bodyPresent ? (
+          <div className="thought-trace-body-inner">
+            {text ? <p>{text}</p> : null}
+          </div>
+        ) : null}
       </div>
     </section>
   );
-}
+});

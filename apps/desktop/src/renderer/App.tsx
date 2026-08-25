@@ -2416,7 +2416,7 @@ export function App() {
   const artifactMediaSourceGenerationRef = useRef(0);
   const artifactMediaSourceRetryRef = useRef<Map<string, number>>(new Map());
   const workbenchMediaSurfaceActiveRef = useRef(true);
-  const [answeringUserQuestionId, setAnsweringUserQuestionId] = useState<string | null>(null);
+  const [resolvingUserQuestionId, setResolvingUserQuestionId] = useState<string | null>(null);
   const [resolvingComputerReviewId, setResolvingComputerReviewId] = useState<string | null>(null);
   const [controllingComputerHandoffId, setControllingComputerHandoffId] = useState<string | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
@@ -5845,7 +5845,7 @@ export function App() {
     if (!runtimeState.runId || !activeUserQuestion) {
       return;
     }
-    if (answeringUserQuestionId === activeUserQuestion.id) {
+    if (resolvingUserQuestionId === activeUserQuestion.id) {
       return;
     }
 
@@ -5855,13 +5855,32 @@ export function App() {
     }
 
     setNotice(null);
-    setAnsweringUserQuestionId(activeUserQuestion.id);
+    setResolvingUserQuestionId(activeUserQuestion.id);
     try {
       await runtimeClient.answerUserQuestion(runtimeState.runId, activeUserQuestion.id, trimmed);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to answer user question");
     } finally {
-      setAnsweringUserQuestionId(null);
+      setResolvingUserQuestionId(null);
+    }
+  }
+
+  async function handleCancelUserQuestion(): Promise<void> {
+    if (!runtimeState.runId || !activeUserQuestion) {
+      return;
+    }
+    if (resolvingUserQuestionId === activeUserQuestion.id) {
+      return;
+    }
+
+    setNotice(null);
+    setResolvingUserQuestionId(activeUserQuestion.id);
+    try {
+      await runtimeClient.cancelUserQuestion(runtimeState.runId, activeUserQuestion.id);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Failed to cancel user question");
+    } finally {
+      setResolvingUserQuestionId(null);
     }
   }
 
@@ -7131,13 +7150,13 @@ export function App() {
     if (!activeUserQuestion) {
       return null;
     }
-    const answering = answeringUserQuestionId === activeUserQuestion.id;
+    const resolving = resolvingUserQuestionId === activeUserQuestion.id;
     return (
       <UserQuestionPrompt
         question={activeUserQuestion}
-        disabled={answering}
+        disabled={resolving}
         onCancel={() => {
-          void handleCancel();
+          void handleCancelUserQuestion();
         }}
         onSubmit={(answer) => {
           void handleAnswerUserQuestion(answer);

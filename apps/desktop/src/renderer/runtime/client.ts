@@ -358,6 +358,7 @@ export type RuntimeClient = {
     idempotencyKey?: string,
   ) => Promise<void>;
   answerUserQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
+  cancelUserQuestion: (runId: string, questionId: string) => Promise<void>;
   resolveExternalInteraction: (
     runId: string,
     interactionId: string,
@@ -613,6 +614,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
           bridge.messageSubagent!(runId, taskId, content, idempotencyKey)
       : undefined,
     answerUserQuestion: bridge.answerUserQuestion,
+    cancelUserQuestion: bridge.cancelUserQuestion,
     resolveExternalInteraction: bridge.resolveExternalInteraction,
     resolveACPPermission: bridge.resolveACPPermission,
     resolveComputerReview: bridge.resolveComputerReview,

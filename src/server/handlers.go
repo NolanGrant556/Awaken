@@ -688,6 +688,24 @@ func (h runHandlers) handleAnswerUserQuestion(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h runHandlers) handleCancelUserQuestion(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("run_id")
+	questionID := r.PathValue("question_id")
+	if err := h.runService.CancelUserQuestion(runID, questionID); err != nil {
+		switch {
+		case errors.Is(err, awruntime.ErrRunNotFound), errors.Is(err, awruntime.ErrUserQuestionNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "USER_QUESTION_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrRunTerminal):
+			writeErrorJSON(w, http.StatusConflict, "RUN_TERMINAL", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to cancel user question")
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h runHandlers) handleResolveExternalInteraction(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("run_id")
 	interactionID := r.PathValue("interaction_id")

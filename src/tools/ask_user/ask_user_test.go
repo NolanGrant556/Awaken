@@ -91,6 +91,15 @@ func TestFormatAnswerTextResultKeepsMultiQuestionLines(t *testing.T) {
 	}
 }
 
+func TestFormatCancelledResultKeepsRunActiveAndDoesNotInventAnswer(t *testing.T) {
+	result := FormatCancelledResult()
+	if !strings.Contains(result, "cancelled this question without answering") ||
+		!strings.Contains(result, "run is still active") ||
+		!strings.Contains(result, "do not infer or fabricate an answer") {
+		t.Fatalf("unexpected cancellation result: %q", result)
+	}
+}
+
 func TestToolDefinition(t *testing.T) {
 	askTool := &AskUserTool{}
 	if askTool.Name() != ToolName {

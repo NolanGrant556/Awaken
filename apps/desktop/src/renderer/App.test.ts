@@ -678,6 +678,7 @@ function stubElectronBridge(): void {
       startRun: vi.fn(),
       cancelRun: vi.fn(),
       answerUserQuestion: vi.fn(),
+      cancelUserQuestion: vi.fn(),
       subscribeRun: vi.fn(),
       unsubscribeRun: vi.fn(),
       getDesktopPreferences: vi.fn(async () => ({ theme: "light" as const })),

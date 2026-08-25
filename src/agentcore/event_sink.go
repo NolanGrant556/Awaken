@@ -6,8 +6,20 @@ type EventSink interface {
 	Emit(AwakenEvent)
 }
 
+type UserQuestionResolutionStatus string
+
+const (
+	UserQuestionAnswered  UserQuestionResolutionStatus = "answered"
+	UserQuestionCancelled UserQuestionResolutionStatus = "cancelled"
+)
+
+type UserQuestionResolution struct {
+	Status UserQuestionResolutionStatus
+	Answer string
+}
+
 type UserQuestionAwaiter interface {
-	AwaitUserQuestion(ctx context.Context, request AwakenEvent) (string, error)
+	AwaitUserQuestion(ctx context.Context, request AwakenEvent) (UserQuestionResolution, error)
 }
 
 type ExternalInteractionAwaiter interface {

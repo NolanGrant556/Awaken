@@ -17,15 +17,15 @@ func TestSessionAwaitAndResolveUserQuestion(t *testing.T) {
 		Content:    `{"questions":[{"question":"Choose a theme","options":[{"label":"Dark"},{"label":"Light"}]}]}`,
 	}
 
-	answerCh := make(chan string, 1)
+	resolutionCh := make(chan agentcore.UserQuestionResolution, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		answer, err := session.AwaitUserQuestion(context.Background(), request)
+		resolution, err := session.AwaitUserQuestion(context.Background(), request)
 		if err != nil {
 			errCh <- err
 			return
 		}
-		answerCh <- answer
+		resolutionCh <- resolution
 	}()
 
 	// Give AwaitUserQuestion time to register the pending question.
@@ -36,9 +36,9 @@ func TestSessionAwaitAndResolveUserQuestion(t *testing.T) {
 	}
 
 	select {
-	case answer := <-answerCh:
-		if answer != "Dark" {
-			t.Fatalf("expected answer Dark, got %q", answer)
+	case resolution := <-resolutionCh:
+		if resolution.Status != agentcore.UserQuestionAnswered || resolution.Answer != "Dark" {
+			t.Fatalf("expected answered/Dark, got %+v", resolution)
 		}
 	case err := <-errCh:
 		t.Fatalf("AwaitUserQuestion returned error: %v", err)
@@ -56,6 +56,9 @@ func TestSessionAwaitAndResolveUserQuestion(t *testing.T) {
 		}
 		if event.AgentEvent.Type == agentcore.UserQuestionResolvedType {
 			foundResolved = true
+			if event.AgentEvent.QuestionResolution != string(agentcore.UserQuestionAnswered) {
+				t.Fatalf("resolved event status mismatch: %q", event.AgentEvent.QuestionResolution)
+			}
 			if event.AgentEvent.QuestionAnswer != "Dark" {
 				t.Fatalf("resolved event answer mismatch: %q", event.AgentEvent.QuestionAnswer)
 			}
@@ -67,6 +70,58 @@ func TestSessionAwaitAndResolveUserQuestion(t *testing.T) {
 	if !foundResolved {
 		t.Fatalf("resolved event not found in history")
 	}
+}
+
+func TestSessionCancelUserQuestionResolvesWaitWithoutCancellingRun(t *testing.T) {
+	session := NewSession("run-1", "thread-1", "hello", nil, nil, func() {})
+	request := agentcore.AwakenEvent{
+		Type:       agentcore.UserQuestionRequestedType,
+		QuestionID: "q-cancel",
+		Content:    `{"questions":[{"question":"Choose a theme","options":[{"label":"Dark"},{"label":"Light"}]}]}`,
+	}
+
+	resolutionCh := make(chan agentcore.UserQuestionResolution, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		resolution, err := session.AwaitUserQuestion(context.Background(), request)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		resolutionCh <- resolution
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	if err := session.CancelUserQuestion("q-cancel"); err != nil {
+		t.Fatalf("CancelUserQuestion failed: %v", err)
+	}
+
+	select {
+	case resolution := <-resolutionCh:
+		if resolution.Status != agentcore.UserQuestionCancelled || resolution.Answer != "" {
+			t.Fatalf("expected cancelled resolution without answer, got %+v", resolution)
+		}
+	case err := <-errCh:
+		t.Fatalf("AwaitUserQuestion returned error: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("AwaitUserQuestion did not resolve after user cancellation")
+	}
+
+	if run := session.Snapshot(); run.Status != RunStatusRunning || run.CancelRequested {
+		t.Fatalf("cancelling a question must leave the run active: %+v", run)
+	}
+
+	history := session.History(0)
+	for _, event := range history {
+		if event.AgentEvent.Type != agentcore.UserQuestionResolvedType {
+			continue
+		}
+		if event.AgentEvent.QuestionResolution != string(agentcore.UserQuestionCancelled) || event.AgentEvent.QuestionAnswer != "" {
+			t.Fatalf("cancelled resolved event mismatch: %+v", event.AgentEvent)
+		}
+		return
+	}
+	t.Fatal("cancelled resolved event not found in history")
 }
 
 func TestSessionResolveUserQuestionMissing(t *testing.T) {

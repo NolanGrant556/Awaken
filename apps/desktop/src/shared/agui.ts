@@ -435,6 +435,7 @@ export type AguiEvent = {
   skillDiagnostics?: string[];
   questionId?: string;
   questionAnswer?: string;
+  questionResolution?: "answered" | "cancelled";
   interactionId?: string;
   interactionResolution?: string;
   interactionTitle?: string;

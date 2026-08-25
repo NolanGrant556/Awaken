@@ -8,7 +8,7 @@
 
 当前没有通用逐工具 Approval、消息发送审核，也没有 `awaiting_approval` run 状态。工具执行过程可触发的交互 gate 是：
 
-- `ask_user`：补充任务所需用户输入；
+- `ask_user`：补充任务所需用户输入；用户可回答，也可取消本次回答。取消问题作为无答案的正常 resolution 返回模型，主 run 继续，不等同于 runtime 取消；
 - `interaction_required`：等待用户完成浏览器/手机等外部操作（首个使用者为官方 CLI 授权）。run 保持非终态，原 tool call 不丢失；Desktop 以 Workbench `ExternalActionGate` 展示安全 HTTPS 链接/受控二维码；用户完成后由 host 验证，同一调用最多自动重放一次。再次返回相同授权要求时停止循环并给出可恢复错误。device code、token、secret、原始 CLI 输出不得进入模型、Journal 或 transcript。
 
 消息发送无论目标是个人、多人、群、频道、广播还是批量扩展，都按普通工具调用处理；Awaken 不解析收件人、不签发一次性发送 grant，也不在 transport 前等待人工批准。工具和 provider 自己负责远端权限、幂等性与副作用。
@@ -33,7 +33,7 @@ provider `needs_runtime` 的 host-generated plan 仍可投影为 `dependency_ins
 
 UI 文案、模型 payload 和 canonical outcome 是不同投影，不能相互反推。工具自报成功但输出 schema 不匹配、transport 未完成或 side effect 未验证时，normalizer 必须降为结构化失败/unknown；不得生成伪 artifact 或伪 change。
 
-`succeeded` 必须与 `transport=completed` 一致，但 semantic 可以是 success 或 neutral；例如无匹配查询、diff 发现差异，或 Subagent `wait` 到期后返回 `retrieval_status=timeout` 与当前 snapshots，都属于“transport 完成、语义中性”，不得只因 non-zero exit 或尚未取得 terminal child 就把整个 run 猜成失败。`denied`/auth/runtime/unsupported 在 executor 前终止时必须是 `transport=not_started`。
+`succeeded` 必须与 `transport=completed` 一致，但 semantic 可以是 success 或 neutral；例如无匹配查询、diff 发现差异、`ask_user` 返回 `resolution=cancelled`，或 Subagent `wait` 到期后返回 `retrieval_status=timeout` 与当前 snapshots，都属于“transport 完成、语义中性”，不得只因用户没有回答、non-zero exit 或尚未取得 terminal child 就把整个 run 猜成失败。`denied`/auth/runtime/unsupported 在 executor 前终止时必须是 `transport=not_started`。
 
 side-effect 事实与工具成败分离：
 

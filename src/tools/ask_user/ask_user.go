@@ -34,7 +34,7 @@ func (t *AskUserTool) Name() string {
 }
 
 func (t *AskUserTool) Description() string {
-	return "当任务信息不足、需要用户确认偏好、或必须让用户做选择时，向用户提问并等待回答。提供清晰的问题和 2-4 个选项；用户回答后你方可继续。示例：{\"questions\":[{\"question\":\"选择主题\",\"options\":[{\"label\":\"深色\"},{\"label\":\"浅色\"}],\"multi_select\":false}]}。"
+	return "当任务信息不足、需要用户确认偏好、或必须让用户做选择时，向用户提问并等待用户回答或取消。提供清晰的问题和 2-4 个选项；runtime 会把回答或取消作为工具结果返回，然后你方可继续。示例：{\"questions\":[{\"question\":\"选择主题\",\"options\":[{\"label\":\"深色\"},{\"label\":\"浅色\"}],\"multi_select\":false}]}。"
 }
 
 func (t *AskUserTool) Parameters() []tool.ToolParameter {
@@ -84,7 +84,7 @@ func (t *AskUserTool) Definition() tool.ToolDefinition {
 		Name:        ToolName,
 		DisplayName: "Ask User",
 		Description: t.Description(),
-		Purpose:     "在无法安全推断关键选择时暂停执行，向用户提出少量结构化问题并等待回答。",
+		Purpose:     "在无法安全推断关键选择时暂停当前工具调用，向用户提出少量结构化问题并等待回答或取消。",
 		WhenToUse: []string{
 			"缺失信息会实质改变结果、权限、外部副作用或不可逆实现方向时",
 			"用户必须在 2-4 个明确选项中做选择后任务才能继续时",
@@ -95,15 +95,16 @@ func (t *AskUserTool) Definition() tool.ToolDefinition {
 			"不要把普通进度更新或最终答复包装成工具调用",
 		},
 		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
-			"answer_text":    {Type: "string", Description: "用户返回的原始回答文本"},
-			"question_count": {Type: "integer", Description: "已回答的问题数量"},
+			"resolution":     {Type: "string", Description: "用户处理问题的结果：answered 或 cancelled"},
+			"answer_text":    {Type: "string", Description: "answered 时用户返回的原始回答文本；cancelled 时为空"},
+			"question_count": {Type: "integer", Description: "本次向用户展示的问题数量"},
 		}},
-		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectNone, Description: "暂停当前 run 等待用户回答，不修改 workspace 或外部系统。", Reversibility: tool.ReversibilityNotApplicable}},
-		Examples:    []tool.ToolExample{{Scenario: "实现方向需要用户选择", Input: map[string]any{"questions": []any{map[string]any{"question": "选择数据迁移策略", "options": []any{map[string]any{"label": "兼容迁移", "description": "保留旧格式并渐进升级"}, map[string]any{"label": "一次切换", "description": "立即要求新格式"}}}}}, Outcome: "runtime 发出用户问题并在回答前暂停"}},
+		SideEffects: []tool.ToolSideEffect{{Kind: tool.SideEffectNone, Description: "暂停当前工具调用等待用户回答或取消，不修改 workspace 或外部系统；问题取消不终止 run。", Reversibility: tool.ReversibilityNotApplicable}},
+		Examples:    []tool.ToolExample{{Scenario: "实现方向需要用户选择", Input: map[string]any{"questions": []any{map[string]any{"question": "选择数据迁移策略", "options": []any{map[string]any{"label": "兼容迁移", "description": "保留旧格式并渐进升级"}, map[string]any{"label": "一次切换", "description": "立即要求新格式"}}}}}, Outcome: "runtime 发出用户问题并在 answered 或 cancelled resolution 前暂停当前工具调用"}},
 		FailureModes: []tool.ToolFailureMode{
 			{Code: "ask_user_invalid_input", Cause: "问题或选项不符合数量和结构约束", Retryable: false, Recovery: []string{"修正问题结构"}},
 			{Code: "ask_user_no_awaiter", Cause: "当前 runtime 不支持等待用户回答", Retryable: false, Recovery: []string{"向用户直接说明阻塞信息"}},
-			{Code: "ask_user_aborted", Cause: "用户取消或等待被中断", Retryable: false, Recovery: []string{"尊重取消并停止依赖该选择的操作"}},
+			{Code: "ask_user_aborted", Cause: "run 取消、超时或等待通道被中断", Retryable: false, Recovery: []string{"尊重运行中断并停止依赖该选择的操作"}},
 		},
 		Annotations: tool.ToolAnnotations{
 			ReadOnly:        true,
@@ -253,6 +254,10 @@ func FormatAnswerTextResult(questions []Question, answer string) string {
 		}
 	}
 	return "User has answered your questions:\n" + answer
+}
+
+func FormatCancelledResult() string {
+	return "User cancelled this question without answering. The run is still active. Continue without this clarification when possible; otherwise explain what cannot be completed, and do not infer or fabricate an answer."
 }
 
 func init() {

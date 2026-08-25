@@ -290,6 +290,27 @@ func TestMapEventToolProgress(t *testing.T) {
 	}
 }
 
+func TestMapEventUserQuestionCancelledResolution(t *testing.T) {
+	events := MapEvent(agentcore.AwakenEvent{
+		Type:               agentcore.UserQuestionResolvedType,
+		ThreadID:           "thread-1",
+		RunID:              "run-1",
+		ToolCallID:         "tool-ask-1",
+		ToolName:           "ask_user",
+		QuestionID:         "question-1",
+		QuestionResolution: string(agentcore.UserQuestionCancelled),
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	got := events[0]
+	if got.Type != EventAwakenUserQuestionResolved || got.QuestionID != "question-1" ||
+		got.QuestionResolution != string(agentcore.UserQuestionCancelled) || got.QuestionAnswer != "" {
+		t.Fatalf("unexpected cancelled question event: %+v", got)
+	}
+}
+
 func TestMapEventToolPermissionDecided(t *testing.T) {
 	events := MapEvent(agentcore.AwakenEvent{
 		Type:                     agentcore.ToolPermissionDecidedEventType,

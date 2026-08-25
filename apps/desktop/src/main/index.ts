@@ -3778,6 +3778,16 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  "awaken:cancel-user-question",
+  async (_event, payload: { runId: string; questionId: string }) => {
+    await requestRuntimeOK(
+      `/v1/runs/${encodeURIComponent(payload.runId)}/user-questions/${encodeURIComponent(payload.questionId)}/cancel`,
+      { method: "POST" },
+    );
+  },
+);
+
+ipcMain.handle(
   "awaken:resolve-external-interaction",
   async (
     _event,

@@ -420,6 +420,7 @@ type Event struct {
 	HookOutputPreview          string           `json:"hookOutputPreview,omitempty"`
 	QuestionID                 string           `json:"questionId,omitempty"`
 	QuestionAnswer             string           `json:"questionAnswer,omitempty"`
+	QuestionResolution         string           `json:"questionResolution,omitempty"`
 	InteractionID              string           `json:"interactionId,omitempty"`
 	InteractionResolution      string           `json:"interactionResolution,omitempty"`
 	InteractionTitle           string           `json:"interactionTitle,omitempty"`

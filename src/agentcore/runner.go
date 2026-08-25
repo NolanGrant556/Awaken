@@ -2275,15 +2275,15 @@ func (s runScopedEventSink) Emit(event AwakenEvent) {
 	s.emitter.emit(event)
 }
 
-func (s runScopedEventSink) AwaitUserQuestion(ctx stdcontext.Context, request AwakenEvent) (string, error) {
+func (s runScopedEventSink) AwaitUserQuestion(ctx stdcontext.Context, request AwakenEvent) (UserQuestionResolution, error) {
 	if s.emitter == nil {
-		return "", stdcontext.Canceled
+		return UserQuestionResolution{}, stdcontext.Canceled
 	}
 	s.emitter.fillIDs(&request)
 	if awaiter, ok := s.emitter.sink.(UserQuestionAwaiter); ok {
 		return awaiter.AwaitUserQuestion(ctx, request)
 	}
-	return "", stdcontext.Canceled
+	return UserQuestionResolution{}, stdcontext.Canceled
 }
 
 func (s runScopedEventSink) AwaitExternalInteraction(ctx stdcontext.Context, request AwakenEvent) (ExternalInteractionResolution, error) {

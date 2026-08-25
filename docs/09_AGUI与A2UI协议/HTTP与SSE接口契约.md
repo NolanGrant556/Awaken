@@ -40,6 +40,7 @@ GET    /v1/runs/{run_id}/subagents/{task_id}
 POST   /v1/runs/{run_id}/subagents/{task_id}/messages
 POST   /v1/runs/{run_id}/subagents/{task_id}/cancel
 POST   /v1/runs/{run_id}/user-questions/{question_id}/answer
+POST   /v1/runs/{run_id}/user-questions/{question_id}/cancel
 GET    /v1/runs/{run_id}/audit
 POST   /v1/shutdown
 ```

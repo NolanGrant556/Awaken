@@ -2238,6 +2238,7 @@ export type AwakenBridge = {
     idempotencyKey?: string,
   ) => Promise<void>;
   answerUserQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
+  cancelUserQuestion: (runId: string, questionId: string) => Promise<void>;
   resolveExternalInteraction: (
     runId: string,
     interactionId: string,

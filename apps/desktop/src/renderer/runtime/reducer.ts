@@ -3241,13 +3241,16 @@ export function reduceRuntimeState(
         }
         case "AWAKEN_USER_QUESTION_RESOLVED": {
           const questionId = action.event.questionId ?? action.event.toolCallId ?? "user-question";
+          const cancelled = action.event.questionResolution === "cancelled";
           nextState.userQuestions = removeUserQuestion(
             nextState.userQuestions,
             questionId,
           );
           records = upsertStep(records, `user-question:${questionId}`, {
-            title: "Answer received",
-            description: action.event.questionAnswer,
+            title: cancelled ? "Question cancelled" : "Answer received",
+            description: cancelled
+              ? "The user chose not to answer; the run continues."
+              : action.event.questionAnswer,
             status: "done",
             tag: "user-question",
           });

@@ -748,6 +748,7 @@ if (sidebarProfileIndex === -1 || sidebarUpdateIndex === -1 || sidebarUpdateInde
 
 const expectedRunPlanStateIds = [
   "in-progress",
+  "paused",
   "first-step",
   "last-step",
   "all-completed",
@@ -820,6 +821,26 @@ if (
   throw new Error("AwakenRunPlanTrigger must render the M/M completion summary when all steps are completed");
 }
 
+const runPlanPausedTriggerHtml = renderToString(
+  React.createElement(AwakenDesignSystem.AwakenRunPlanTrigger, {
+    items: runPlanSmokeItems,
+    completedCount: 1,
+    totalCount: 3,
+    currentStep: 2,
+    allCompleted: false,
+    paused: true,
+    open: false,
+    onToggle: () => undefined,
+  }),
+);
+
+if (
+  !runPlanPausedTriggerHtml.includes("已暂停 · 正在实现运行计划协议") ||
+  runPlanPausedTriggerHtml.includes("aw-run-plan-spin")
+) {
+  throw new Error("AwakenRunPlanTrigger must keep the task visible without animation while paused");
+}
+
 const runPlanPanelHtml = renderToString(
   React.createElement(AwakenDesignSystem.AwakenRunPlanPanel, {
     items: runPlanSmokeItems,
@@ -840,26 +861,10 @@ if (
   throw new Error("AwakenRunPlanPanel must render the dialog, explanation and textual tri-state for every step");
 }
 
-const runPlanHistoricalHtml = renderToString(
-  React.createElement(AwakenDesignSystem.AwakenRunPlanHistorical, {
-    items: runPlanSmokeItems,
-    completedCount: 1,
-    totalCount: 3,
-  }),
-);
-
-if (
-  !runPlanHistoricalHtml.includes("执行计划 · 1/3") ||
-  runPlanHistoricalHtml.includes("aw-run-plan-spin")
-) {
-  throw new Error("AwakenRunPlanHistorical must render the terminal title without animated icons");
-}
-
 if (
   !productionCss.includes(".aw-run-plan-trigger") ||
   !productionCss.includes("min-height:44px") ||
   !productionCss.includes(".aw-run-plan-panel") ||
-  !productionCss.includes(".aw-run-plan-historical") ||
   !productionCss.includes("aw-run-plan-spin")
 ) {
   throw new Error("Production CSS is missing AwakenRunPlan component surfaces");

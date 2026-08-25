@@ -531,10 +531,12 @@ export function projectNarrativeTurnBodySegments({
     return [];
   }
 
-  const firstAnswerIndex = items.findIndex(
-    (item) => item.kind === "answer" && item.isFinal === true,
+  const terminalBoundaryIndex = items.findIndex(
+    (item) =>
+      (item.kind === "answer" && item.isFinal === true) ||
+      (item.kind === "hint" && item.isTerminal === true),
   );
-  if (firstAnswerIndex <= 0) {
+  if (terminalBoundaryIndex <= 0) {
     return [
       {
         kind: "items",
@@ -544,8 +546,8 @@ export function projectNarrativeTurnBodySegments({
     ];
   }
 
-  const executionProcessItems = items.slice(0, firstAnswerIndex);
-  const answerAndAfterItems = items.slice(firstAnswerIndex);
+  const executionProcessItems = items.slice(0, terminalBoundaryIndex);
+  const answerAndAfterItems = items.slice(terminalBoundaryIndex);
   const elapsedMs = narrativeTurnElapsedMs(items);
   const segments: NarrativeTurnBodySegment[] = [
     {

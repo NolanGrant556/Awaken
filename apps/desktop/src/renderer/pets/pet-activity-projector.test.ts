@@ -24,7 +24,6 @@ function emptyViewState(): RuntimeViewState {
       activeItem: undefined,
       seenEventKeys: [],
       replayedItemIds: [],
-      runPlanSnapshotsByRunId: {},
       runPlanReceiptToolIds: [],
     },
     subagentsById: {},

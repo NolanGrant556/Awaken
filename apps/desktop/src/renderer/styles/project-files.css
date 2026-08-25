@@ -1256,11 +1256,39 @@ body.is-project-file-list-resizing .project-files-workspace__body {
 .workbench-chrome-file-mode {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 0;
   width: 100%;
   min-width: 0;
   -webkit-app-region: drag;
+}
+
+.project-files-tab-rail {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.project-files-tab-rail > span {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 32px;
+}
+
+.project-files-chrome-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.project-files-chrome-actions > span {
+  display: inline-flex;
+  flex: 0 0 auto;
 }
 
 .workbench-conversation-tabs {
@@ -1313,7 +1341,7 @@ body.is-project-file-list-resizing .project-files-workspace__body {
 
 .project-files-tabs {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   align-items: center;
   gap: 4px;
   min-width: 0;
@@ -1362,6 +1390,24 @@ body.is-project-file-list-resizing .project-files-workspace__body {
 
 .workbench-chrome-expand-toggle {
   flex: 0 0 auto;
+}
+
+.project-files-tab-add {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  -webkit-app-region: no-drag;
+}
+
+.project-files-tab-add:not(:disabled):hover,
+.project-files-tab-add:focus-visible {
+  background: var(--aw-bg-fill-light);
+}
+
+.project-files-tab-add:disabled {
+  cursor: default;
+  opacity: 0.42;
 }
 
 .project-files-tab__activate {
@@ -1413,7 +1459,7 @@ body.is-project-file-list-resizing .project-files-workspace__body {
   color: var(--aw-text-primary);
 }
 
-.desktop-root-inspector-collapsed .project-files-tabs {
+.desktop-root-inspector-collapsed .project-files-tab-rail {
   display: none;
 }
 

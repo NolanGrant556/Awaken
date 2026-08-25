@@ -250,6 +250,52 @@ describe("RunStage layout", () => {
     expect(appSource).toContain('<ComposerBar\n                                  value={composerValue}');
   });
 
+  it("keeps the file-tab add button beside the scrollable tabs and outside fixed chrome actions", () => {
+    const appSource = readFileSync(
+      new URL("./App.tsx", import.meta.url),
+      "utf8",
+    );
+    const projectFileStyles = readFileSync(
+      new URL("./styles/project-files.css", import.meta.url),
+      "utf8",
+    );
+    const railStart = appSource.indexOf(
+      '<div className="project-files-tab-rail">',
+    );
+    const tabsStart = appSource.indexOf(
+      '<div className="project-files-tabs"',
+      railStart,
+    );
+    const addStart = appSource.indexOf('aria-label="新建文件标签"', tabsStart);
+    const actionsStart = appSource.indexOf(
+      '<div className="project-files-chrome-actions">',
+      addStart,
+    );
+
+    expect(railStart).toBeGreaterThan(-1);
+    expect(tabsStart).toBeGreaterThan(railStart);
+    expect(addStart).toBeGreaterThan(tabsStart);
+    expect(actionsStart).toBeGreaterThan(addStart);
+
+    const rail = cssRule(projectFileStyles, ".project-files-tab-rail");
+    const tabs = cssRule(projectFileStyles, ".project-files-tabs");
+    const actions = cssRule(
+      projectFileStyles,
+      ".project-files-chrome-actions",
+    );
+    const addWrapper = cssRule(
+      projectFileStyles,
+      ".project-files-tab-rail > span",
+    );
+
+    expect(rail).toContain("flex: 1 1 auto;");
+    expect(rail).toContain("overflow: hidden;");
+    expect(tabs).toContain("flex: 0 1 auto;");
+    expect(tabs).toContain("overflow-x: auto;");
+    expect(addWrapper).toContain("flex: 0 0 auto;");
+    expect(actions).toContain("flex: 0 0 auto;");
+  });
+
   it("renders provider reconnect as a narrative item instead of a timer chrome slot", () => {
     const appSource = readFileSync(
       new URL("./App.tsx", import.meta.url),

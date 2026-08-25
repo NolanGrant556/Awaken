@@ -45,7 +45,6 @@ import {
   AwakenWorkbenchChrome as WorkbenchChrome,
   AwakenWorkbenchShell as WorkbenchShell,
   AwakenWorkbenchSidebarFrame as WorkbenchSidebarFrame,
-  AwakenRunPlanHistorical as RunPlanHistorical,
   AwakenRunPlanPanel as RunPlanPanel,
   AwakenRunPlanTrigger as RunPlanTrigger,
   AwakenRunStage as RunStage,
@@ -146,6 +145,7 @@ import {
 } from "./useThreadComposerDraft";
 import { useRunStageScrollController } from "./useRunStageScrollController";
 import { useRunPlanEntry } from "./useRunPlanEntry";
+import { latestThreadRunPlan } from "./runtime/reducer";
 import { MACOS_WINDOW_CHROME_GEOMETRY } from "../shared/window-chrome";
 import {
   actionsForThreadTranscript,
@@ -189,8 +189,10 @@ import type { ProjectFileWorkspaceMode } from "./file-preview/FilePreviewHost";
 import type { ArtifactPreviewSelection } from "./file-preview/ArtifactPreviewHost";
 import {
   activeProjectFileTab,
+  activeProjectFileTabSlot,
   createProjectFileTabsState,
   projectFileTabsReducer,
+  type ProjectFileTabSlot,
   type ProjectFileWorkspaceTab,
 } from "./projectFileTabs";
 import { projectFileIconKind } from "./projectFiles";
@@ -2471,18 +2473,22 @@ export function App() {
     runtimeState.phase === "running" ||
     runtimeState.phase === "reconnecting" ||
     runtimeState.phase === "cancelling";
-  // Latest plan snapshot of the active run (contract 运行计划与任务进度设计
-  // 契约 §8.2/§8.3): live frames only feed this slice; the trigger/panel are
-  // its sole live projection and the terminal history lives in the narrative.
-  const activeRunPlan = runtimeState.runId
-    ? runtimeState.runPlansById[runtimeState.runId]
-    : undefined;
+  // The task surface follows the newest durable plan across runs in the
+  // active thread. Pause, continuation and replay update this one ComposerDock
+  // projection; plans never move into the narrative execution process.
+  const activeRunPlan = useMemo(
+    () => latestThreadRunPlan(runtimeState.runPlansById),
+    [runtimeState.runPlansById],
+  );
   const runPlanEntry = useRunPlanEntry({
     threadId: runtimeState.activeThreadId,
-    runId: runtimeState.runId,
     plan: activeRunPlan,
-    isBusy,
   });
+  const runPlanPaused = Boolean(
+    activeRunPlan &&
+      !activeRunPlan.allCompleted &&
+      (runtimeState.phase === "cancelling" || !isBusy),
+  );
   const activeRunPlanItems = useMemo(
     () =>
       (activeRunPlan?.items ?? []).map((item) => ({
@@ -5870,10 +5876,21 @@ export function App() {
     handleShowFileWorkspaceSurface();
   }
 
-  function handleActivateProjectFileTab(tab: ProjectFileWorkspaceTab): void {
+  function handleAddProjectFileTab(): void {
+    if (!fileWorkspaceProjectId) return;
     setDeliverablePreview(undefined);
-    dispatchFileWorkspaceTabs({ type: "activate", tabId: tab.id });
-    setFileWorkspaceMode(tab.mode);
+    dispatchFileWorkspaceTabs({
+      type: "add",
+      projectId: fileWorkspaceProjectId,
+    });
+    setFileWorkspaceMode("files");
+    handleShowFileWorkspaceSurface();
+  }
+
+  function handleActivateProjectFileTab(slot: ProjectFileTabSlot): void {
+    setDeliverablePreview(undefined);
+    dispatchFileWorkspaceTabs({ type: "activate", tabId: slot.id });
+    setFileWorkspaceMode(slot.tab?.mode ?? "files");
     handleShowFileWorkspaceSurface();
   }
 
@@ -6395,17 +6412,6 @@ export function App() {
         />
       );
     }
-    if (item.kind === "runPlan") {
-      return (
-        <div key={key} className="narrative-run-plan">
-          <RunPlanHistorical
-            items={item.items}
-            completedCount={item.completedCount}
-            totalCount={item.totalCount}
-          />
-        </div>
-      );
-    }
     if (item.kind === "compactBoundary") {
       return null;
     }
@@ -6879,14 +6885,21 @@ export function App() {
         isPrimary: folder.isPrimary,
       }))
     : [];
+  const activeFileWorkspaceTabSlotCandidate = activeProjectFileTabSlot(fileWorkspaceTabsState);
   const activeFileWorkspaceTabCandidate = activeProjectFileTab(fileWorkspaceTabsState);
   const activeFileWorkspaceTab =
     activeFileWorkspaceTabCandidate?.projectId === fileWorkspaceProjectId
       ? activeFileWorkspaceTabCandidate
       : undefined;
-  const visibleFileWorkspaceTabs = fileWorkspaceTabsState.tabs.filter(
-    (tab) => tab.projectId === fileWorkspaceProjectId,
+  const activeFileWorkspaceTabSlot =
+    activeFileWorkspaceTabSlotCandidate?.projectId === fileWorkspaceProjectId
+      ? activeFileWorkspaceTabSlotCandidate
+      : undefined;
+  const visibleFileWorkspaceTabSlots = fileWorkspaceTabsState.tabs.filter(
+    (slot) => slot.projectId === fileWorkspaceProjectId,
   );
+  const showFileWorkspacePlaceholder =
+    !deliverablePreview && visibleFileWorkspaceTabSlots.length === 0;
   const fileWorkspaceTabsAreActive =
     !fileWorkspaceExpandedActive || expandedWorkspaceSurface === "file";
   const currentConversationLabel = activeThread?.label?.trim() || "新建任务";
@@ -7130,7 +7143,8 @@ export function App() {
               right={
                 fileWorkspaceOpen && inspectorPresentation.available ? (
                   <div className="workbench-chrome-file-mode">
-                    <div className="project-files-tabs" role="tablist" aria-label="打开的文件">
+                    <div className="project-files-tab-rail">
+                      <div className="project-files-tabs" role="tablist" aria-label="打开的文件">
                       {deliverablePreview ? (() => {
                         const iconKind = projectFileIconKind({
                           kind: "file",
@@ -7173,19 +7187,25 @@ export function App() {
                           </div>
                         );
                       })() : null}
-                      {visibleFileWorkspaceTabs.map((tab) => {
+                      {visibleFileWorkspaceTabSlots.map((slot) => {
+                        const tab = slot.tab;
                         const active =
                           !deliverablePreview &&
                           fileWorkspaceTabsAreActive &&
-                          tab.id === activeFileWorkspaceTab?.id;
-                        const iconKind = projectFileIconKind({
-                          kind: "file",
-                          name: tab.name,
-                        });
+                          slot.id === activeFileWorkspaceTabSlot?.id;
+                        const iconKind = tab
+                          ? projectFileIconKind({
+                              kind: "file",
+                              name: tab.name,
+                            })
+                          : "file";
+                        const label = tab?.name ?? "打开文件";
                         return (
                           <div
-                            key={tab.id}
-                            className={`project-files-tab${active ? " is-active" : ""}`}
+                            key={slot.id}
+                            className={`project-files-tab${tab ? "" : " is-placeholder"}${
+                              active ? " is-active" : ""
+                            }`}
                             role="presentation"
                           >
                             <button
@@ -7193,30 +7213,34 @@ export function App() {
                               className="project-files-tab__activate"
                               role="tab"
                               aria-selected={active}
-                              title={tab.name}
-                              onClick={() => handleActivateProjectFileTab(tab)}
+                              title={label}
+                              onClick={() => handleActivateProjectFileTab(slot)}
                             >
                               <span
                                 className="project-files-tab__file-icon"
                                 data-file-icon={iconKind}
                               >
-                                <ProjectFileIcon kind={iconKind} size={16} />
+                                {tab ? (
+                                  <ProjectFileIcon kind={iconKind} size={16} />
+                                ) : (
+                                  <AwakenIcon concept="file-generic" size={16} />
+                                )}
                               </span>
-                              <span className="project-files-tab__label">{tab.name}</span>
+                              <span className="project-files-tab__label">{label}</span>
                             </button>
                             <button
                               type="button"
                               className="project-files-tab__close"
-                              aria-label={`关闭 ${tab.name}`}
-                              title={`关闭 ${tab.name}`}
-                              onClick={() => handleCloseProjectFileTab(tab.id)}
+                              aria-label={`关闭 ${label}`}
+                              title={`关闭 ${label}`}
+                              onClick={() => handleCloseProjectFileTab(slot.id)}
                             >
                               <AwakenIcon concept="close" size={16} />
                             </button>
                           </div>
                         );
                       })}
-                      {!deliverablePreview && visibleFileWorkspaceTabs.length === 0 ? (
+                      {showFileWorkspacePlaceholder ? (
                         <div
                           className={`project-files-tab is-placeholder${
                             fileWorkspaceTabsAreActive ? " is-active" : ""
@@ -7245,31 +7269,45 @@ export function App() {
                           </button>
                         </div>
                       ) : null}
-                    </div>
-                    {fileWorkspaceExpandedActive ? (
-                      <Tooltip label="收起面板" placement="bottom">
+                      </div>
+                      <Tooltip label="新建文件标签" placement="bottom">
                         <button
                           type="button"
-                          className="workbench-chrome-icon workbench-chrome-expand-toggle"
-                          aria-label="收起面板"
-                          onClick={handleContractFileWorkspace}
+                          className="workbench-chrome-icon project-files-tab-add"
+                          aria-label="新建文件标签"
+                          disabled={!fileWorkspaceProjectId}
+                          onClick={handleAddProjectFileTab}
                         >
-                          <AwakenIcon concept="exit-full" size={14} />
+                          <AwakenIcon concept="add" size={14} />
                         </button>
                       </Tooltip>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="workbench-chrome-icon workbench-chrome-panel-toggle"
-                      aria-label={inspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
-                      onClick={handleToggleInspectorCollapsed}
-                    >
-                      {inspectorCollapsed ? (
-                        <AwakenIcon concept="toggle-right-panel" size={14} />
-                      ) : (
-                        <AwakenIcon concept="toggle-right-panel" size={14} />
-                      )}
-                    </button>
+                    </div>
+                    <div className="project-files-chrome-actions">
+                      {fileWorkspaceExpandedActive ? (
+                        <Tooltip label="收起面板" placement="bottom">
+                          <button
+                            type="button"
+                            className="workbench-chrome-icon workbench-chrome-expand-toggle"
+                            aria-label="收起面板"
+                            onClick={handleContractFileWorkspace}
+                          >
+                            <AwakenIcon concept="exit-full" size={14} />
+                          </button>
+                        </Tooltip>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="workbench-chrome-icon workbench-chrome-panel-toggle"
+                        aria-label={inspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
+                        onClick={handleToggleInspectorCollapsed}
+                      >
+                        {inspectorCollapsed ? (
+                          <AwakenIcon concept="toggle-right-panel" size={14} />
+                        ) : (
+                          <AwakenIcon concept="toggle-right-panel" size={14} />
+                        )}
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="workbench-chrome-status">
@@ -7536,6 +7574,7 @@ export function App() {
                                 ref={runPlanEntry.panelRef}
                                 items={activeRunPlanItems}
                                 explanation={activeRunPlan.explanation}
+                                paused={runPlanPaused}
                                 onClose={() => runPlanEntry.closePanel(true)}
                               />
                             </div>
@@ -7684,6 +7723,7 @@ export function App() {
                                   totalCount={activeRunPlan.totalCount}
                                   currentStep={activeRunPlan.currentStep}
                                   allCompleted={activeRunPlan.allCompleted}
+                                  paused={runPlanPaused}
                                   open={runPlanEntry.panelOpen}
                                   onToggle={() => {
                                     if (!runPlanEntry.panelOpen) {

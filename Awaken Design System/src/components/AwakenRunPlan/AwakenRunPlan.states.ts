@@ -5,12 +5,35 @@ export type AwakenRunPlanState = {
   label: string;
   items: AwakenRunPlanItemView[];
   explanation?: string;
+  paused?: boolean;
 };
 
 export const AwakenRunPlanStates: AwakenRunPlanState[] = [
   {
     id: "in-progress",
     label: "进行中（含 activeForm）",
+    items: [
+      {
+        step: "梳理运行计划的 Core 快照与校验规则",
+        activeForm: "正在梳理运行计划的 Core 快照与校验规则",
+        status: "completed",
+      },
+      {
+        step: "实现运行计划协议与 Desktop 投影",
+        activeForm: "正在实现运行计划协议",
+        status: "in_progress",
+      },
+      {
+        step: "补齐自动化与真实 Desktop 验收",
+        activeForm: "正在补齐自动化与真实 Desktop 验收",
+        status: "pending",
+      },
+    ],
+  },
+  {
+    id: "paused",
+    label: "用户暂停（保留当前步骤）",
+    paused: true,
     items: [
       {
         step: "梳理运行计划的 Core 快照与校验规则",

@@ -123,10 +123,9 @@ export type RunPlanItemView = {
 };
 
 /**
- * Latest durable plan snapshot of one root run, keyed by runId in
- * `runPlansById`. Rebuilt from AWAKEN_PLAN_UPDATED full-snapshot frames;
- * only a strictly higher version of the same planId may replace it
- * (contract: 运行计划与任务进度设计契约 §8.2/§10).
+ * Latest durable plan fact of one root run, keyed by runId in
+ * `runPlansById`. The thread-level task surface selects the newest fact;
+ * within one planId only a strictly higher version may replace it.
  */
 export type RunPlanView = {
   planId: string;
@@ -140,6 +139,26 @@ export type RunPlanView = {
   toolCallId?: string;
   updatedAtMs?: number;
 };
+
+/**
+ * Selects the latest durable plan snapshot visible in one thread. Core keeps
+ * immutable per-run facts; the Desktop task surface follows the newest fact
+ * across pause/continue runs instead of moving old snapshots into narrative.
+ */
+export function latestThreadRunPlan(
+  runPlansById: Record<string, RunPlanView>,
+): RunPlanView | undefined {
+  let latest: RunPlanView | undefined;
+  for (const candidate of Object.values(runPlansById)) {
+    if (
+      !latest ||
+      (candidate.updatedAtMs ?? 0) >= (latest.updatedAtMs ?? 0)
+    ) {
+      latest = candidate;
+    }
+  }
+  return latest;
+}
 
 export type ProviderReconnectAttempt = {
   phase: Exclude<AguiProviderReconnect["phase"], "recovered">;
@@ -927,8 +946,7 @@ function upsertSubagentTaskView(
  * replay/overlap, a lower version is a stale late frame, and only a strictly
  * higher version — or a different planId, i.e. a new plan in that run — may
  * replace the stored snapshot in place. Frames without runId fall back to the
- * active run. Live frames never enter the turn body; terminal narrative
- * projection is a separate concern.
+ * active run. Plan frames never enter the narrative turn body.
  */
 function upsertRunPlanView(
   state: RuntimeViewState,
@@ -2007,9 +2025,10 @@ export function reduceRuntimeState(
             ),
         subagentsById: state.subagentsById,
         subagentOrder: state.subagentOrder,
-        // Plan snapshots are run-scoped: a new run starts without a plan and
-        // must not inherit the previous run's live progress entry.
-        runPlansById: {},
+        // Keep the thread's durable plan facts while a follow-up/continuation
+        // starts. The task-level ComposerDock surface keeps showing the latest
+        // snapshot until the new run publishes an updated one.
+        runPlansById: state.runPlansById,
         supervisorStatus: state.supervisorStatus,
         threads: state.threads,
         activeThreadId: state.activeThreadId,
@@ -2318,10 +2337,9 @@ export function reduceRuntimeState(
         return saveActiveThreadView(subagentNarrativeState);
       }
       if (action.event.type === "AWAKEN_PLAN_UPDATED") {
-        // Plan full snapshots update the run-scoped plan store and reach the
-        // narrative projector, which records the latest snapshot for terminal
-        // projection and removes the successful update_plan generic tool row.
-        // Live frames still produce no turn-body item.
+        // Plan full snapshots update the per-run durable fact store. The
+        // narrative projector only removes the successful update_plan generic
+        // tool row; plans never become turn-body items.
         const planState = upsertRunPlanView(
           state,
           action.event,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activeProjectFileTab,
+  activeProjectFileTabSlot,
   createProjectFileTabsState,
   projectFileTabId,
   projectFileTabsReducer,
@@ -19,7 +20,7 @@ function tab(name: string): ProjectFileWorkspaceTab {
 }
 
 describe("projectFileTabsReducer", () => {
-  it("adds new files and activates an existing file without duplicating it", () => {
+  it("reuses the active slot when different files are opened", () => {
     const readme = tab("README.md");
     const image = tab("page-07.png");
     let state = projectFileTabsReducer(createProjectFileTabsState(), {
@@ -27,29 +28,42 @@ describe("projectFileTabsReducer", () => {
       tab: readme,
     });
     state = projectFileTabsReducer(state, { type: "open", tab: image });
-    state = projectFileTabsReducer(state, { type: "open", tab: readme });
 
-    expect(state.tabs.map((item) => item.name)).toEqual([
-      "README.md",
-      "page-07.png",
-    ]);
-    expect(activeProjectFileTab(state)?.name).toBe("README.md");
+    expect(state.tabs).toHaveLength(1);
+    expect(activeProjectFileTab(state)?.name).toBe("page-07.png");
+    expect(activeProjectFileTabSlot(state)?.id).toBe("project-file-slot:1");
   });
 
-  it("closes one tab and selects the nearest remaining tab", () => {
+  it("adds an empty slot explicitly and fills only the active slot", () => {
     const first = tab("first.md");
     const second = tab("second.pdf");
     const third = tab("third.html");
-    let state = [first, second, third].reduce(
-      (current, item) => projectFileTabsReducer(current, { type: "open", tab: item }),
-      createProjectFileTabsState(),
-    );
+    let state = projectFileTabsReducer(createProjectFileTabsState(), {
+      type: "open",
+      tab: first,
+    });
+    state = projectFileTabsReducer(state, { type: "add", projectId: "project-1" });
+    expect(activeProjectFileTab(state)).toBeUndefined();
+    state = projectFileTabsReducer(state, { type: "open", tab: second });
+    state = projectFileTabsReducer(state, { type: "add", projectId: "project-1" });
+    state = projectFileTabsReducer(state, { type: "open", tab: third });
 
-    state = projectFileTabsReducer(state, { type: "close", tabId: second.id });
+    expect(state.tabs.map((slot) => slot.tab?.name)).toEqual([
+      "first.md",
+      "second.pdf",
+      "third.html",
+    ]);
+
+    state = projectFileTabsReducer(state, {
+      type: "close",
+      tabId: "project-file-slot:2",
+    });
     expect(activeProjectFileTab(state)?.id).toBe(third.id);
-    expect(state.tabs.map((item) => item.id)).toEqual([first.id, third.id]);
 
-    state = projectFileTabsReducer(state, { type: "close", tabId: third.id });
+    state = projectFileTabsReducer(state, {
+      type: "close",
+      tabId: "project-file-slot:3",
+    });
     expect(activeProjectFileTab(state)?.id).toBe(first.id);
   });
 
@@ -60,10 +74,17 @@ describe("projectFileTabsReducer", () => {
       type: "open",
       tab: first,
     });
+    state = projectFileTabsReducer(state, { type: "add", projectId: "project-1" });
     state = projectFileTabsReducer(state, { type: "open", tab: second });
-    state = projectFileTabsReducer(state, { type: "close", tabId: first.id });
+    state = projectFileTabsReducer(state, {
+      type: "close",
+      tabId: "project-file-slot:1",
+    });
 
     expect(activeProjectFileTab(state)?.id).toBe(second.id);
-    expect(projectFileTabsReducer(state, { type: "reset" })).toEqual({ tabs: [] });
+    expect(projectFileTabsReducer(state, { type: "reset" })).toEqual({
+      tabs: [],
+      nextTabOrdinal: 1,
+    });
   });
 });

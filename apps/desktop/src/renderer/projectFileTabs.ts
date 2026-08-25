@@ -9,19 +9,27 @@ export type ProjectFileWorkspaceTab = {
   mode: ProjectFileWorkspaceMode;
 };
 
+export type ProjectFileTabSlot = {
+  id: string;
+  projectId: string;
+  tab?: ProjectFileWorkspaceTab;
+};
+
 export type ProjectFileTabsState = {
-  tabs: ProjectFileWorkspaceTab[];
+  tabs: ProjectFileTabSlot[];
   activeTabId?: string;
+  nextTabOrdinal: number;
 };
 
 export type ProjectFileTabsAction =
   | { type: "open"; tab: ProjectFileWorkspaceTab }
+  | { type: "add"; projectId: string }
   | { type: "activate"; tabId: string }
   | { type: "close"; tabId: string }
   | { type: "reset" };
 
 export function createProjectFileTabsState(): ProjectFileTabsState {
-  return { tabs: [] };
+  return { tabs: [], nextTabOrdinal: 1 };
 }
 
 export function projectFileTabId(
@@ -30,6 +38,18 @@ export function projectFileTabId(
   relativePath: string,
 ): string {
   return JSON.stringify([projectId, folderPath, relativePath]);
+}
+
+function nextProjectFileTabSlot(
+  state: ProjectFileTabsState,
+  projectId: string,
+  tab?: ProjectFileWorkspaceTab,
+): ProjectFileTabSlot {
+  return {
+    id: `project-file-slot:${state.nextTabOrdinal}`,
+    projectId,
+    tab,
+  };
 }
 
 export function projectFileTabsReducer(
@@ -41,14 +61,35 @@ export function projectFileTabsReducer(
   }
 
   if (action.type === "open") {
-    const existingIndex = state.tabs.findIndex((tab) => tab.id === action.tab.id);
-    const tabs =
-      existingIndex === -1
-        ? [...state.tabs, action.tab]
-        : state.tabs.map((tab, index) =>
-            index === existingIndex ? action.tab : tab,
-          );
-    return { tabs, activeTabId: action.tab.id };
+    const activeIndex = state.tabs.findIndex(
+      (slot) =>
+        slot.id === state.activeTabId && slot.projectId === action.tab.projectId,
+    );
+    if (activeIndex >= 0) {
+      const tabs = state.tabs.map((slot, index) =>
+        index === activeIndex ? { ...slot, tab: action.tab } : slot,
+      );
+      return { ...state, tabs };
+    }
+    const slot = nextProjectFileTabSlot(
+      state,
+      action.tab.projectId,
+      action.tab,
+    );
+    return {
+      tabs: [...state.tabs, slot],
+      activeTabId: slot.id,
+      nextTabOrdinal: state.nextTabOrdinal + 1,
+    };
+  }
+
+  if (action.type === "add") {
+    const slot = nextProjectFileTabSlot(state, action.projectId);
+    return {
+      tabs: [...state.tabs, slot],
+      activeTabId: slot.id,
+      nextTabOrdinal: state.nextTabOrdinal + 1,
+    };
   }
 
   if (action.type === "activate") {
@@ -60,16 +101,23 @@ export function projectFileTabsReducer(
   if (closingIndex === -1) return state;
   const tabs = state.tabs.filter((tab) => tab.id !== action.tabId);
   if (state.activeTabId !== action.tabId) {
-    return { tabs, activeTabId: state.activeTabId };
+    return { ...state, tabs };
   }
   return {
+    ...state,
     tabs,
     activeTabId: tabs[closingIndex]?.id ?? tabs[closingIndex - 1]?.id,
   };
 }
 
+export function activeProjectFileTabSlot(
+  state: ProjectFileTabsState,
+): ProjectFileTabSlot | undefined {
+  return state.tabs.find((tab) => tab.id === state.activeTabId);
+}
+
 export function activeProjectFileTab(
   state: ProjectFileTabsState,
 ): ProjectFileWorkspaceTab | undefined {
-  return state.tabs.find((tab) => tab.id === state.activeTabId);
+  return activeProjectFileTabSlot(state)?.tab;
 }

@@ -4447,6 +4447,42 @@ describe("App workbench presentation", () => {
     ]);
   });
 
+  it("collapses cancelled execution before the terminal hint", () => {
+    const thinking = {
+      kind: "thinking",
+      id: "thinking:cancelled",
+      text: "正在执行",
+      status: "done",
+    } as const;
+    const hint = {
+      kind: "hint",
+      id: "hint:run-cancelled:run-1",
+      text: "你停止了生成本次回答",
+      isTerminal: true,
+    } as const;
+
+    expect(
+      projectNarrativeTurnBodySegments({
+        turnId: "prompt:cancelled",
+        items: [thinking, hint],
+        executionProcessOpen: false,
+      }),
+    ).toEqual([
+      {
+        kind: "executionProcess",
+        id: "execution-process:prompt:cancelled",
+        title: "执行过程",
+        items: [thinking],
+        open: false,
+      },
+      {
+        kind: "items",
+        id: "answer-and-after:prompt:cancelled",
+        items: [hint],
+      },
+    ]);
+  });
+
   it.each(["image", "video"] as const)(
     "folds a ready %s result and every surrounding process item into execution process",
     (mediaKind) => {

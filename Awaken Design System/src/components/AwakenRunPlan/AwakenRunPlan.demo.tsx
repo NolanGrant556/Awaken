@@ -8,11 +8,7 @@ import { AwakenThoughtTrace } from "../AwakenThoughtTrace/AwakenThoughtTrace";
 import { AwakenToolTraceLine } from "../AwakenToolTraceLine/AwakenToolTraceLine";
 import { AwakenUserPromptBlock } from "../AwakenUserPromptBlock/AwakenUserPromptBlock";
 import { AwakenRunStage } from "../AwakenRunStage/AwakenRunStage";
-import {
-  AwakenRunPlanHistorical,
-  AwakenRunPlanPanel,
-  AwakenRunPlanTrigger,
-} from "./AwakenRunPlan";
+import { AwakenRunPlanPanel, AwakenRunPlanTrigger } from "./AwakenRunPlan";
 import type { AwakenRunPlanItemView } from "./AwakenRunPlan";
 import { AwakenRunPlanStates } from "./AwakenRunPlan.states";
 
@@ -45,8 +41,8 @@ export function AwakenRunPlanDemo() {
           运行计划 <code>AwakenRunPlan</code>
         </h2>
         <p>
-          UI-only 的运行计划/任务进度组件族：ComposerDock stack 内的紧凑入口、RunStage.overlay
-          内的只读展开面板，以及执行过程内的历史快照。
+          UI-only 的运行计划/任务进度组件族：ComposerDock stack 内的持续入口与
+          RunStage.overlay 内的只读展开面板。暂停、继续和完成都在同一位置更新。
         </p>
       </header>
       <div className="ads-component-demo-grid">
@@ -128,7 +124,7 @@ export function AwakenRunPlanDemo() {
                         />
                         <AwakenToolTraceLine
                           title="读取运行计划设计契约"
-                          detail="已确认入口、面板与历史快照的 ownership。"
+                          detail="已确认入口与面板的持续 ownership。"
                           status="done"
                         />
                         <AwakenAssistantMessage
@@ -160,6 +156,7 @@ export function AwakenRunPlanDemo() {
                   <AwakenRunPlanTrigger
                     items={state.items}
                     {...counts}
+                    paused={state.paused}
                     open={false}
                     onToggle={noop}
                   />
@@ -167,14 +164,10 @@ export function AwakenRunPlanDemo() {
                     <AwakenRunPlanPanel
                       items={state.items}
                       explanation={state.explanation}
+                      paused={state.paused}
                       onClose={noop}
                     />
                   </div>
-                  <AwakenRunPlanHistorical
-                    items={state.items}
-                    completedCount={counts.completedCount}
-                    totalCount={counts.totalCount}
-                  />
                 </div>
               </div>
             </article>

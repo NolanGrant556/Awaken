@@ -7,6 +7,7 @@ import type {
 } from "../../shared/runtime";
 import {
   createInitialRuntimeState,
+  latestThreadRunPlan,
   reduceRuntimeState,
   type RuntimeAction,
 } from "./reducer";
@@ -2906,6 +2907,7 @@ describe("runtime reducer run narrative projection", () => {
       id: "answer:error:1",
       markdown: "API key 缺失，请在 Settings > Models 配置模型 API key",
       status: "error",
+      isFinal: true,
     });
     expect(
       state.narrative.committedItems.some(
@@ -3597,17 +3599,11 @@ describe("runtime reducer run plan snapshots", () => {
       updatedAtMs: 1_700_000_000_000,
     });
     expect(plan?.items).toEqual(planItemsV1);
-    // Live plan frames record the projector snapshot for terminal projection
-    // but must not enter the turn body or the step timeline.
+    // Plan frames update only the task-plan store; neither live nor terminal
+    // snapshots enter the narrative body or step timeline.
     expect(after.narrative.committedItems).toEqual(
       before.narrative.committedItems,
     );
-    expect(after.narrative.runPlanSnapshotsByRunId["run-1"]).toMatchObject({
-      planId: "plan-1",
-      version: 1,
-      completedCount: 1,
-      totalCount: 3,
-    });
     expect(after.steps).toBe(before.steps);
   });
 
@@ -3706,7 +3702,6 @@ describe("runtime reducer run plan snapshots", () => {
     expect(noPlanId.narrative.committedItems).toEqual(
       before.narrative.committedItems,
     );
-    expect(noPlanId.narrative.runPlanSnapshotsByRunId).toEqual({});
 
     const idle = createInitialRuntimeState();
     // No frame runId and no active run: there is no run scope to store under.
@@ -3715,10 +3710,9 @@ describe("runtime reducer run plan snapshots", () => {
       runEvent(planEvent({ runId: undefined })),
     );
     expect(noRun.runPlansById).toEqual({});
-    expect(noRun.narrative.runPlanSnapshotsByRunId).toEqual({});
   });
 
-  it("clears run-scoped plans when a new run is requested", () => {
+  it("keeps the latest task plan when a continuation run is requested", () => {
     let state = reduceRuntimeState(stateWithActiveRun(), runEvent(planEvent()));
     expect(state.runPlansById["run-1"]).toBeDefined();
 
@@ -3726,7 +3720,43 @@ describe("runtime reducer run plan snapshots", () => {
       type: "run/requested",
       prompt: "下一个任务",
     });
-    expect(state.runPlansById).toEqual({});
+    expect(state.runPlansById["run-1"]).toMatchObject({
+      planId: "plan-1",
+      completedCount: 1,
+    });
+  });
+
+  it("selects the newest durable plan across interrupted and continued runs", () => {
+    const interrupted = {
+      ...planEvent(),
+      runId: "run-1",
+      planCompletedCount: 2,
+      timestamp: 1_700_000_000_000,
+    };
+    const completed = {
+      ...planEvent(),
+      runId: "run-2",
+      planId: "plan-2",
+      planCompletedCount: 10,
+      planTotalCount: 10,
+      planAllCompleted: true,
+      timestamp: 1_700_000_010_000,
+    };
+    const state = dispatch([
+      { type: "run/requested", prompt: "开始任务" },
+      { type: "run/created", run: makeRun({ runId: "run-1" }) },
+      runEvent(interrupted),
+      { type: "run/requested", prompt: "继续" },
+      { type: "run/created", run: makeRun({ runId: "run-2" }) },
+      runEvent(completed),
+    ]);
+
+    expect(latestThreadRunPlan(state.runPlansById)).toMatchObject({
+      planId: "plan-2",
+      completedCount: 10,
+      totalCount: 10,
+      allCompleted: true,
+    });
   });
 
   it("upserts through the replay batch path with the same version rules", () => {

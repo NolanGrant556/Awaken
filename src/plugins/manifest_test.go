@@ -60,7 +60,11 @@ func TestParseManifestFatalCases(t *testing.T) {
 		{"wrong schema", `{"$schema":"https://example.test/plugin.json","name":"sample"}`, ErrUnsupportedSchema},
 		{"unsupported version", `{"$schema":"https://agent-plugins.org/schemas/2.0.0/plugin.schema.json","name":"sample"}`, ErrUnsupportedSchema},
 		{"bad name", `{"$schema":"` + SchemaPluginV1 + `","name":"My-Plugin"}`, ErrManifestInvalid},
+		{"schema whitespace", `{"$schema":" ` + SchemaPluginV1 + ` ","name":"sample"}`, ErrUnsupportedSchema},
+		{"name whitespace", `{"$schema":"` + SchemaPluginV1 + `","name":" sample "}`, ErrManifestInvalid},
 		{"null version", `{"$schema":"` + SchemaPluginV1 + `","name":"sample","version":null}`, ErrManifestInvalid},
+		{"null keywords", `{"$schema":"` + SchemaPluginV1 + `","name":"sample","keywords":null}`, ErrManifestInvalid},
+		{"null author", `{"$schema":"` + SchemaPluginV1 + `","name":"sample","author":null}`, ErrManifestInvalid},
 		{"author extra", `{"$schema":"` + SchemaPluginV1 + `","name":"sample","author":{"org":"x"}}`, ErrManifestInvalid},
 		{"not object", `[]`, ErrManifestInvalid},
 	}

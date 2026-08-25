@@ -28,6 +28,9 @@ func (s *Store) ResolveComposerSelection(name, digest string) (ComposerSelection
 	if !plugin.Enabled {
 		return ComposerSelection{}, fmt.Errorf("%w: %s", ErrDisabled, name)
 	}
+	if !plugin.IntegrityValid {
+		return ComposerSelection{}, fmt.Errorf("%w: %s", ErrDigestChanged, name)
+	}
 	if strings.TrimSpace(plugin.Digest) != digest {
 		return ComposerSelection{}, fmt.Errorf("%w: %s", ErrDigestChanged, name)
 	}

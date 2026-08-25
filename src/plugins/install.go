@@ -148,16 +148,18 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 	if exists && !req.Replace {
 		return InstallResult{}, fmt.Errorf("%w: %s", ErrAlreadyExists, name)
 	}
+	dest := filepath.Join(s.packagesRoot, name)
 	if exists && req.Replace && existing.Digest == digest {
-		plugin := s.loadRecord(name, existing)
-		return InstallResult{
-			Plugin:   plugin,
-			Replaced: false,
-			Message:  "plugin digest unchanged",
-		}, nil
+		if _, matches, verifyErr := verifyTreeDigest(dest, existing.Digest); verifyErr == nil && matches {
+			plugin := s.loadRecord(name, existing)
+			return InstallResult{
+				Plugin:   plugin,
+				Replaced: false,
+				Message:  "plugin digest unchanged",
+			}, nil
+		}
 	}
 
-	dest := filepath.Join(s.packagesRoot, name)
 	var previousTrash string
 	var previousBackup string
 	var rollbackRoot string
@@ -195,15 +197,26 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 	}
 
 	dataDir := filepath.Join(s.dataRoot, name)
-	_, dataStatErr := os.Lstat(dataDir)
+	dataInfo, dataStatErr := os.Lstat(dataDir)
 	dataExisted := dataStatErr == nil
 	if dataStatErr != nil && !os.IsNotExist(dataStatErr) {
 		_ = restorePluginPackage(dest, previousBackup)
 		return InstallResult{}, dataStatErr
 	}
+	if dataExisted && (dataInfo.Mode()&os.ModeSymlink != 0 || !dataInfo.IsDir()) {
+		_ = restorePluginPackage(dest, previousBackup)
+		return InstallResult{}, fmt.Errorf("plugin data path must be a regular directory")
+	}
 	if err := filestore.EnsureDir(dataDir); err != nil {
 		_ = restorePluginPackage(dest, previousBackup)
 		return InstallResult{}, err
+	}
+	if err := resolvedStayWithin(s.dataRoot, dataDir); err != nil {
+		if !dataExisted {
+			_ = os.RemoveAll(dataDir)
+		}
+		_ = restorePluginPackage(dest, previousBackup)
+		return InstallResult{}, fmt.Errorf("plugin data path escapes the managed data root: %w", err)
 	}
 
 	now := time.Now().UTC()
@@ -424,7 +437,7 @@ func copyTree(src, dest string) error {
 		if err := filestore.EnsureDir(filepath.Dir(target)); err != nil {
 			return err
 		}
-		return os.WriteFile(target, data, 0o600)
+		return os.WriteFile(target, data, safePluginFileMode(info.Mode()))
 	})
 }
 
@@ -490,11 +503,18 @@ func extractZip(data []byte, dest string) error {
 		if err := filestore.EnsureDir(filepath.Dir(target)); err != nil {
 			return err
 		}
-		if err := os.WriteFile(target, contents, 0o600); err != nil {
+		if err := os.WriteFile(target, contents, safePluginFileMode(mode)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func safePluginFileMode(source os.FileMode) os.FileMode {
+	if source.Perm()&0o111 != 0 {
+		return 0o700
+	}
+	return 0o600
 }
 
 func rejectZipName(name string) error {

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"awaken/src/mcpclient"
@@ -73,10 +74,26 @@ func parseMCPJSON(raw []byte, pluginRoot, dataDir, pluginName string, toggles ma
 	if !ok {
 		return mcpLoadResult{Invalid: diagPtr(errorDiag("plugin_mcp_invalid", "mcpServers must be an object"))}
 	}
+	resolvedPluginRoot, err := filepath.EvalSymlinks(pluginRoot)
+	if err != nil {
+		return mcpLoadResult{Invalid: diagPtr(errorDiag("plugin_mcp_invalid", "resolve plugin root: "+err.Error()))}
+	}
+	resolvedPluginRoot, err = filepath.Abs(resolvedPluginRoot)
+	if err != nil {
+		return mcpLoadResult{Invalid: diagPtr(errorDiag("plugin_mcp_invalid", "make plugin root absolute: "+err.Error()))}
+	}
+	resolvedDataDir, err := filepath.EvalSymlinks(dataDir)
+	if err != nil {
+		return mcpLoadResult{Invalid: diagPtr(errorDiag("plugin_mcp_invalid", "resolve plugin data directory: "+err.Error()))}
+	}
+	resolvedDataDir, err = filepath.Abs(resolvedDataDir)
+	if err != nil {
+		return mcpLoadResult{Invalid: diagPtr(errorDiag("plugin_mcp_invalid", "make plugin data directory absolute: "+err.Error()))}
+	}
 
 	result := mcpLoadResult{}
 	for shortName, rawServer := range serversObject {
-		server, invalid := parseServerEntry(shortName, rawServer, pluginRoot, dataDir, pluginName)
+		server, invalid := parseServerEntry(shortName, rawServer, resolvedPluginRoot, resolvedDataDir, pluginName)
 		if invalid != nil {
 			result.Diagnostics = append(result.Diagnostics, *invalid)
 			result.Servers = append(result.Servers, LoadedServer{
@@ -127,12 +144,8 @@ func parseStdioServer(shortName string, object map[string]any, pluginRoot, dataD
 		}
 	}
 	command, ok := object["command"].(string)
-	if !ok || strings.TrimSpace(command) == "" {
+	if !ok || command == "" {
 		return LoadedServer{}, diagPtr(errorDiag("plugin_mcp_server_invalid", shortName+": command is required"))
-	}
-	command = strings.TrimSpace(command)
-	if strings.ContainsAny(command, " \t") {
-		return LoadedServer{}, diagPtr(errorDiag("plugin_mcp_server_invalid", shortName+": command must be a single executable token"))
 	}
 	resolvedCommand := command
 	if strings.HasPrefix(command, "./") {
@@ -142,6 +155,16 @@ func parseStdioServer(shortName string, object map[string]any, pluginRoot, dataD
 		}
 		if err := resolvedStayWithin(pluginRoot, abs); err != nil {
 			return LoadedServer{}, diagPtr(errorDiag("plugin_mcp_server_invalid", shortName+": command escapes the plugin root"))
+		}
+		info, err := os.Lstat(abs)
+		if err != nil {
+			return LoadedServer{}, diagPtr(errorDiag("plugin_mcp_server_invalid", shortName+": bundled command is unavailable: "+err.Error()))
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return LoadedServer{}, diagPtr(errorDiag("plugin_mcp_server_invalid", shortName+": bundled command must be a regular file"))
+		}
+		if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+			return LoadedServer{}, diagPtr(errorDiag("plugin_mcp_server_invalid", shortName+": bundled command is not executable"))
 		}
 		resolvedCommand = abs
 	} else if strings.Contains(command, "/") || strings.Contains(command, "\\") {
@@ -157,13 +180,19 @@ func parseStdioServer(shortName string, object map[string]any, pluginRoot, dataD
 		return LoadedServer{}, diagPtr(errorDiag("plugin_mcp_server_invalid", shortName+": "+err.Error()))
 	}
 	for key := range env {
-		if strings.EqualFold(key, "PLUGIN_ROOT") || strings.EqualFold(key, "PLUGIN_DATA") {
+		if environmentNameEqual(key, "PLUGIN_ROOT") || environmentNameEqual(key, "PLUGIN_DATA") {
 			return LoadedServer{}, diagPtr(errorDiag("plugin_mcp_server_invalid", shortName+": env must not contain PLUGIN_ROOT or PLUGIN_DATA"))
 		}
 	}
-	cwdRaw, err := optionalString(object, "cwd")
-	if err != nil {
-		return LoadedServer{}, diagPtr(errorDiag("plugin_mcp_server_invalid", shortName+": "+err.Error()))
+	cwdRaw := ""
+	cwdPresent := false
+	if raw, exists := object["cwd"]; exists {
+		cwdPresent = true
+		text, ok := raw.(string)
+		if !ok {
+			return LoadedServer{}, diagPtr(errorDiag("plugin_mcp_server_invalid", shortName+": cwd must be a string"))
+		}
+		cwdRaw = text
 	}
 
 	expandedArgs := make([]string, len(args))
@@ -174,7 +203,7 @@ func parseStdioServer(shortName string, object map[string]any, pluginRoot, dataD
 	for key, value := range env {
 		expandedEnv[key] = expandPluginPlaceholders(value, pluginRoot, dataDir)
 	}
-	cwd, err := resolveStdioCwd(cwdRaw, pluginRoot, dataDir)
+	cwd, err := resolveStdioCwd(cwdRaw, cwdPresent, pluginRoot, dataDir)
 	if err != nil {
 		return LoadedServer{}, diagPtr(errorDiag("plugin_mcp_server_invalid", shortName+": "+err.Error()))
 	}
@@ -204,7 +233,7 @@ func parseRemoteServer(shortName string, object map[string]any, pluginName strin
 		}
 	}
 	rawURL, ok := object["url"].(string)
-	if !ok || strings.TrimSpace(rawURL) == "" {
+	if !ok || rawURL == "" {
 		return LoadedServer{}, diagPtr(errorDiag("plugin_mcp_server_invalid", shortName+": url is required"))
 	}
 	if err := validateRemoteMCPURL(rawURL); err != nil {
@@ -217,7 +246,7 @@ func parseRemoteServer(shortName string, object map[string]any, pluginName strin
 	if err := validateHeaders(headers); err != nil {
 		return LoadedServer{}, diagPtr(errorDiag("plugin_mcp_server_invalid", shortName+": "+err.Error()))
 	}
-	httpCfg := &mcpclient.HTTPTransportConfig{URL: strings.TrimSpace(rawURL), Headers: headers}
+	httpCfg := &mcpclient.HTTPTransportConfig{URL: rawURL, Headers: headers}
 	cfg := mcpclient.McpServerConfig{}
 	if sse {
 		cfg.SSE = httpCfg
@@ -231,9 +260,12 @@ func parseRemoteServer(shortName string, object map[string]any, pluginName strin
 	}, nil
 }
 
-func resolveStdioCwd(raw, pluginRoot, dataDir string) (string, error) {
-	if strings.TrimSpace(raw) == "" {
+func resolveStdioCwd(raw string, present bool, pluginRoot, dataDir string) (string, error) {
+	if !present {
 		return pluginRoot, nil
+	}
+	if raw == "" {
+		return "", fmt.Errorf("cwd must not be empty")
 	}
 	expanded := expandPluginPlaceholders(raw, pluginRoot, dataDir)
 	switch {
@@ -255,7 +287,7 @@ func resolveStdioCwd(raw, pluginRoot, dataDir string) (string, error) {
 		if dataDir == "" {
 			return "", fmt.Errorf("cwd references PLUGIN_DATA but the data directory is missing")
 		}
-		if err := stayWithin(dataDir, expanded); err != nil {
+		if err := resolvedStayWithin(dataDir, expanded); err != nil {
 			return "", fmt.Errorf("cwd escapes the plugin data directory")
 		}
 		return expanded, nil
@@ -265,14 +297,31 @@ func resolveStdioCwd(raw, pluginRoot, dataDir string) (string, error) {
 }
 
 func expandPluginPlaceholders(value, pluginRoot, dataDir string) string {
-	replaced := strings.ReplaceAll(value, "${PLUGIN_ROOT}", pluginRoot)
-	return strings.ReplaceAll(replaced, "${PLUGIN_DATA}", dataDir)
+	var expanded strings.Builder
+	expanded.Grow(len(value))
+	for index := 0; index < len(value); {
+		switch {
+		case strings.HasPrefix(value[index:], "${PLUGIN_ROOT}"):
+			expanded.WriteString(pluginRoot)
+			index += len("${PLUGIN_ROOT}")
+		case strings.HasPrefix(value[index:], "${PLUGIN_DATA}"):
+			expanded.WriteString(dataDir)
+			index += len("${PLUGIN_DATA}")
+		default:
+			expanded.WriteByte(value[index])
+			index++
+		}
+	}
+	return expanded.String()
 }
 
 func optionalStringMap(object map[string]any, field string) (map[string]string, error) {
 	raw, ok := object[field]
-	if !ok || raw == nil {
+	if !ok {
 		return nil, nil
+	}
+	if raw == nil {
+		return nil, fmt.Errorf("%s must use its declared type when present", field)
 	}
 	items, ok := raw.(map[string]any)
 	if !ok {
@@ -290,7 +339,7 @@ func optionalStringMap(object map[string]any, field string) (map[string]string, 
 }
 
 func validateRemoteMCPURL(raw string) error {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
+	parsed, err := url.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("url is not a valid URL")
 	}
@@ -316,9 +365,12 @@ func isLoopbackHost(host string) bool {
 
 func validateHeaders(headers map[string]string) error {
 	seen := map[string]string{}
-	for name := range headers {
-		if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "\r\n") {
+	for name, value := range headers {
+		if !validHTTPHeaderName(name) {
 			return fmt.Errorf("header name %q is invalid", name)
+		}
+		if !validHTTPHeaderValue(value) {
+			return fmt.Errorf("header %q value is invalid", name)
 		}
 		folded := strings.ToLower(name)
 		if previous, ok := seen[folded]; ok && previous != name {
@@ -327,6 +379,39 @@ func validateHeaders(headers map[string]string) error {
 		seen[folded] = name
 	}
 	return nil
+}
+
+func environmentNameEqual(left, right string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
+}
+
+func validHTTPHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for index := 0; index < len(name); index++ {
+		character := name[index]
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') || strings.ContainsRune("!#$%&'*+-.^_`|~", rune(character)) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validHTTPHeaderValue(value string) bool {
+	for index := 0; index < len(value); index++ {
+		character := value[index]
+		if character == '\t' || (character >= 0x20 && character != 0x7f) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func ServerIdentity(pluginName, serverName string) string {

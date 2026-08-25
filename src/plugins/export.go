@@ -45,6 +45,11 @@ func (s *Store) Export(name, destination string) (*InstalledPlugin, error) {
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("installed plugin package is not a regular directory")
 		}
+		if _, matches, verifyErr := verifyTreeDigest(source, rec.Digest); verifyErr != nil {
+			return fmt.Errorf("verify installed plugin package before export: %w", verifyErr)
+		} else if !matches {
+			return fmt.Errorf("%w: installed plugin package changed before export", ErrDigestChanged)
+		}
 		if _, err := os.Lstat(destination); err == nil {
 			return fmt.Errorf("plugin export destination already exists: %s", destination)
 		} else if !os.IsNotExist(err) {

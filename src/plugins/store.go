@@ -256,17 +256,50 @@ func (s *Store) Get(name string) (*InstalledPlugin, error) {
 func (s *Store) loadRecord(name string, rec Record) *InstalledPlugin {
 	root := filepath.Join(s.packagesRoot, name)
 	dataDir := filepath.Join(s.dataRoot, name)
+	actualDigest, matches, digestErr := verifyTreeDigest(root, rec.Digest)
+	if digestErr != nil || !matches {
+		message := fmt.Sprintf("installed plugin package digest changed: recorded %s, actual %s", rec.Digest, actualDigest)
+		if digestErr != nil {
+			message = "verify installed plugin package digest: " + digestErr.Error()
+		}
+		return &InstalledPlugin{
+			Name: name, Root: root, DataDir: dataDir, Enabled: rec.Enabled,
+			Source: rec.Source, Digest: rec.Digest, ActualDigest: actualDigest,
+			InstalledAt: rec.InstalledAt,
+			Diagnostics: []Diagnostic{errorDiag("plugin_digest_changed", message)},
+		}
+	}
 	plugin := LoadPackage(root, dataDir, rec)
+	if dataErr := validateManagedPluginDataDir(s.dataRoot, dataDir); dataErr != nil {
+		plugin.MCPServers = nil
+		plugin.Diagnostics = append(plugin.Diagnostics, errorDiag("plugin_data_invalid", dataErr.Error()))
+	}
 	if plugin.Name == "" {
 		plugin.Name = name
 	}
 	plugin.Enabled = rec.Enabled
 	plugin.Source = rec.Source
 	plugin.Digest = rec.Digest
+	plugin.ActualDigest = actualDigest
+	plugin.IntegrityValid = true
 	if rec.Version != "" && plugin.Manifest.Version == "" {
 		plugin.Manifest.Version = rec.Version
 	}
 	return plugin
+}
+
+func validateManagedPluginDataDir(root, dataDir string) error {
+	info, err := os.Lstat(dataDir)
+	if err != nil {
+		return fmt.Errorf("plugin data directory is unavailable: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("plugin data path must be a regular directory")
+	}
+	if err := resolvedStayWithin(root, dataDir); err != nil {
+		return fmt.Errorf("plugin data path escapes the managed data root: %w", err)
+	}
+	return nil
 }
 
 // EnabledSkillRoots returns skills/ directories for enabled plugins.
@@ -322,6 +355,12 @@ func (s *Store) SetEnabled(name string, enabled bool) (*InstalledPlugin, error) 
 		rec, ok := state.Plugins[name]
 		if !ok {
 			return fmt.Errorf("%w: %s", ErrNotFound, name)
+		}
+		if enabled {
+			loaded := s.loadRecord(name, rec)
+			if !loaded.IntegrityValid {
+				return fmt.Errorf("%w: %s", ErrDigestChanged, name)
+			}
 		}
 		rec.Enabled = enabled
 		state.Plugins[name] = rec

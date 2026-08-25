@@ -265,7 +265,15 @@ func MergeScoped(
 					logger.Debugf("mcp server %q overridden by %s scope (was %s)", entry.Name, entry.Scope, existing.Scope)
 				}
 			}
-			merged[entry.Name] = expandEnvInScoped(entry)
+			if entry.Scope == ScopePlugin {
+				// Agent Plugins configuration has already received the only two
+				// portable substitutions permitted by the specification. Keeping
+				// it literal here prevents native-config ${VAR} expansion from
+				// mutating plugin commands, URLs, headers, args, env, or cwd.
+				merged[entry.Name] = entry
+			} else {
+				merged[entry.Name] = expandEnvInScoped(entry)
+			}
 		}
 	}
 	add(plugin)

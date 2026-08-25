@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -56,7 +58,7 @@ func buildTransport(cfg McpServerConfig, registry *InProcRegistry, authHandler a
 		cmd.Env = stdioChildEnv(cfg.Stdio, childEnvironment)
 		return &mcp.CommandTransport{Command: cmd}, TransportStdio, nil
 	case TransportHTTP:
-		httpClient := buildHTTPClient(cfg.InsecureSkipVerify)
+		httpClient := buildHTTPClient(cfg.InsecureSkipVerify, cfg.HTTP.URL, cfg.HTTP.Headers)
 		t := &mcp.StreamableClientTransport{
 			Endpoint:   cfg.HTTP.URL,
 			HTTPClient: httpClient,
@@ -66,7 +68,7 @@ func buildTransport(cfg McpServerConfig, registry *InProcRegistry, authHandler a
 		}
 		return t, TransportHTTP, nil
 	case TransportSSE:
-		httpClient := buildHTTPClient(cfg.InsecureSkipVerify)
+		httpClient := buildHTTPClient(cfg.InsecureSkipVerify, cfg.SSE.URL, cfg.SSE.Headers)
 		return &mcp.SSEClientTransport{
 			Endpoint:   cfg.SSE.URL,
 			HTTPClient: httpClient,
@@ -95,7 +97,7 @@ func buildTransport(cfg McpServerConfig, registry *InProcRegistry, authHandler a
 
 // buildHTTPClient returns an *http.Client honouring the insecureSkipVerify
 // flag. The timeout matches the agent's default tool-call timeout.
-func buildHTTPClient(insecure bool) *http.Client {
+func buildHTTPClient(insecure bool, endpoint string, headers map[string]string) *http.Client {
 	transport := &http.Transport{
 		Proxy:       networkroute.DefaultProxyForRequest,
 		DialContext: networkroute.WithRouteFailureFeedback((&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext),
@@ -113,11 +115,78 @@ func buildHTTPClient(insecure bool) *http.Client {
 		tlsConfig.InsecureSkipVerify = true //nolint:gosec -- explicit user MCP config compatibility
 		transport.TLSClientConfig = tlsConfig
 	}
+	var roundTripper http.RoundTripper = transport
+	if len(headers) > 0 {
+		if parsedEndpoint, err := url.Parse(endpoint); err == nil && parsedEndpoint.IsAbs() {
+			roundTripper = &fixedOriginHeadersTransport{
+				base: transport, origin: parsedEndpoint, headers: cloneStringMap(headers),
+			}
+		}
+	}
 	client := &http.Client{
 		Timeout:   60 * time.Second,
-		Transport: transport,
+		Transport: roundTripper,
 	}
 	return client
+}
+
+type fixedOriginHeadersTransport struct {
+	base    http.RoundTripper
+	origin  *url.URL
+	headers map[string]string
+}
+
+func (t *fixedOriginHeadersTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if request == nil {
+		return nil, fmt.Errorf("fixed-origin header transport received a nil request")
+	}
+	if !sameHTTPOrigin(request.URL, t.origin) {
+		return base.RoundTrip(request)
+	}
+	cloned := request.Clone(request.Context())
+	cloned.Header = request.Header.Clone()
+	for name, value := range t.headers {
+		if _, exists := cloned.Header[http.CanonicalHeaderKey(name)]; !exists {
+			cloned.Header.Set(name, value)
+		}
+	}
+	return base.RoundTrip(cloned)
+}
+
+func sameHTTPOrigin(left, right *url.URL) bool {
+	if left == nil || right == nil || !strings.EqualFold(left.Scheme, right.Scheme) ||
+		!strings.EqualFold(left.Hostname(), right.Hostname()) {
+		return false
+	}
+	return effectiveHTTPPort(left) == effectiveHTTPPort(right)
+}
+
+func effectiveHTTPPort(value *url.URL) string {
+	if value == nil {
+		return ""
+	}
+	if port := value.Port(); port != "" {
+		return port
+	}
+	if strings.EqualFold(value.Scheme, "https") {
+		return "443"
+	}
+	if strings.EqualFold(value.Scheme, "http") {
+		return "80"
+	}
+	return ""
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 // connectAndInitialize performs the MCP handshake and returns the live
@@ -206,12 +275,19 @@ func stripReservedPluginEnv(env map[string]string) map[string]string {
 	}
 	out := make(map[string]string, len(env))
 	for key, value := range env {
-		if strings.EqualFold(key, "PLUGIN_ROOT") || strings.EqualFold(key, "PLUGIN_DATA") {
+		if environmentKeyEqual(key, "PLUGIN_ROOT") || environmentKeyEqual(key, "PLUGIN_DATA") {
 			continue
 		}
 		out[key] = value
 	}
 	return out
+}
+
+func environmentKeyEqual(left, right string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }
 
 func stdioChildEnv(cfg *StdioTransportConfig, childEnvironment []string) []string {

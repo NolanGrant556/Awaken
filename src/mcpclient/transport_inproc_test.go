@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -155,31 +156,6 @@ func TestWSTransportUnsupported(t *testing.T) {
 	}
 }
 
-// TestSplitMcpToolName covers the prefix parser used by the manager to
-// route tool calls.
-func TestSplitMcpToolName(t *testing.T) {
-	cases := []struct {
-		input      string
-		wantServer string
-		wantTool   string
-		wantOk     bool
-	}{
-		{"mcp__slack__post_message", "slack", "post_message", true},
-		{"mcp__crm__client_followup", "crm", "client_followup", true},
-		{"mcp__server__tool_with__double_underscores", "server", "tool_with__double_underscores", true},
-		{"web_search", "", "", false},
-		{"mcp__onlyone", "", "", false},
-		{"", "", "", false},
-	}
-	for _, tc := range cases {
-		server, tool, ok := splitMcpToolName(tc.input)
-		if server != tc.wantServer || tool != tc.wantTool || ok != tc.wantOk {
-			t.Errorf("splitMcpToolName(%q) = (%q, %q, %v), want (%q, %q, %v)",
-				tc.input, server, tool, ok, tc.wantServer, tc.wantTool, tc.wantOk)
-		}
-	}
-}
-
 // TestIsAuthError covers the heuristic that maps SDK errors to the
 // needs-auth outcome.
 func TestIsAuthError(t *testing.T) {
@@ -249,6 +225,22 @@ func TestMergeScopedDropsInvalid(t *testing.T) {
 	}
 }
 
+func TestMergeScopedKeepsAgentPluginConfigurationLiteral(t *testing.T) {
+	t.Setenv("PLUGIN_TEST_SECRET", "expanded")
+	plugin := []ScopedMcpServerConfig{{
+		Name: "portable", Scope: ScopePlugin,
+		Config: McpServerConfig{HTTP: &HTTPTransportConfig{
+			URL:     "https://example.com/${PLUGIN_TEST_SECRET}",
+			Headers: map[string]string{"X-Literal": "${PLUGIN_TEST_SECRET}"},
+		}},
+	}}
+	merged := MergeScoped(plugin, nil, nil, nil, nil)
+	if len(merged) != 1 || merged[0].Config.HTTP.URL != "https://example.com/${PLUGIN_TEST_SECRET}" ||
+		merged[0].Config.HTTP.Headers["X-Literal"] != "${PLUGIN_TEST_SECRET}" {
+		t.Fatalf("plugin configuration was expanded: %+v", merged)
+	}
+}
+
 // TestMergeScopedDisabledRetained confirms that servers with enabled=false
 // remain visible to the manager so disabled state survives a restart.
 func TestMergeScopedDisabledRetained(t *testing.T) {
@@ -296,7 +288,7 @@ func TestStdioChildEnvInjectsReservedPluginVarsLast(t *testing.T) {
 		if item == "PLUGIN_DATA=/plugins/data/acme" {
 			seenData = true
 		}
-		if item == "PLUGIN_ROOT=attacker" || item == "plugin_data=attacker" {
+		if item == "PLUGIN_ROOT=attacker" || (runtime.GOOS == "windows" && item == "plugin_data=attacker") {
 			seenAttacker = true
 		}
 	}

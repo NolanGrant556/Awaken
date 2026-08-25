@@ -111,7 +111,8 @@ func parseManifest(raw []byte) (manifestParseResult, error) {
 	if err != nil {
 		return manifestParseResult{}, fmt.Errorf("%w: %v", ErrManifestInvalid, err)
 	}
-	author, err := optionalAuthor(object["author"])
+	authorRaw, authorPresent := object["author"]
+	author, err := optionalAuthor(authorRaw, authorPresent)
 	if err != nil {
 		return manifestParseResult{}, fmt.Errorf("%w: %v", ErrManifestInvalid, err)
 	}
@@ -143,7 +144,6 @@ func requiredString(object map[string]any, field string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("%s must be a string", field)
 	}
-	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", fmt.Errorf("%s must not be empty", field)
 	}
@@ -162,13 +162,16 @@ func optionalString(object map[string]any, field string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("%s must be a string", field)
 	}
-	return strings.TrimSpace(value), nil
+	return value, nil
 }
 
 func optionalStringArray(object map[string]any, field string) ([]string, error) {
 	raw, ok := object[field]
-	if !ok || raw == nil {
+	if !ok {
 		return nil, nil
+	}
+	if raw == nil {
+		return nil, fmt.Errorf("%s must use its declared type when present", field)
 	}
 	items, ok := raw.([]any)
 	if !ok {
@@ -185,9 +188,12 @@ func optionalStringArray(object map[string]any, field string) ([]string, error) 
 	return out, nil
 }
 
-func optionalAuthor(raw any) (*Author, error) {
-	if raw == nil {
+func optionalAuthor(raw any, present bool) (*Author, error) {
+	if !present {
 		return nil, nil
+	}
+	if raw == nil {
+		return nil, fmt.Errorf("author must use its declared type when present")
 	}
 	object, ok := raw.(map[string]any)
 	if !ok {
@@ -204,7 +210,6 @@ func optionalAuthor(raw any) (*Author, error) {
 			if !ok {
 				return nil, fmt.Errorf("author.%s must be a string", field)
 			}
-			text = strings.TrimSpace(text)
 			switch field {
 			case "name":
 				author.Name = text

@@ -6,10 +6,14 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"awaken/src/desktopdata"
 	"awaken/src/mcpclient"
@@ -71,6 +75,24 @@ func writePluginFixture(t *testing.T, root string, name string, extraMCP bool) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func writeBundledExecutablePluginFixture(t *testing.T, root, name string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "plugin.json"), []byte(`{"$schema":"`+SchemaPluginV1+`","name":"`+name+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command := filepath.Join(root, "bin", "server")
+	if err := os.WriteFile(command, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "mcp.json"), []byte(`{"$schema":"`+SchemaMCPV1+`","mcpServers":{"local":{"type":"stdio","command":"./bin/server"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return command
 }
 
 func TestNewStoreRequiresAwakenHome(t *testing.T) {
@@ -196,6 +218,220 @@ func TestValidateLocalPluginDoesNotInstall(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(store.packagesRoot, "validate.only")); !os.IsNotExist(err) {
 		t.Fatalf("validation created a live package: %v", err)
 	}
+}
+
+func TestInstallAndExportPreserveBundledExecutable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix executable mode is not applicable on Windows")
+	}
+	store := testStore(t)
+	src := t.TempDir()
+	writeBundledExecutablePluginFixture(t, src, "executable.local")
+	validation, err := store.Validate(context.Background(), Source{Kind: SourceLocalPath, Path: src})
+	if err != nil || !validation.Valid {
+		t.Fatalf("validation=%+v err=%v", validation, err)
+	}
+	installed, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}, ExpectedDigest: validation.Digest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installedCommand := filepath.Join(installed.Plugin.Root, "bin", "server")
+	if info, err := os.Stat(installedCommand); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("installed command mode=%v err=%v", infoMode(info), err)
+	}
+	if err := exec.Command(installedCommand).Run(); err != nil {
+		t.Fatalf("installed command did not launch: %v", err)
+	}
+	exported := filepath.Join(t.TempDir(), "exported")
+	if _, err := store.Export("executable.local", exported); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(filepath.Join(exported, "bin", "server")); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("exported command mode=%v err=%v", infoMode(info), err)
+	}
+}
+
+func TestInstalledPluginStdioEndToEnd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping installed stdio integration in short mode")
+	}
+	store := testStore(t)
+	src := t.TempDir()
+	name := "installed.stdio"
+	if err := os.MkdirAll(filepath.Join(src, "bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "plugin.json"), []byte(`{"$schema":"`+SchemaPluginV1+`","name":"`+name+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commandName := "server"
+	if runtime.GOOS == "windows" {
+		commandName += ".exe"
+	}
+	testBinary, err := os.ReadFile(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "bin", commandName), testBinary, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mcpConfig := `{"$schema":"` + SchemaMCPV1 + `","mcpServers":{"echo":{"type":"stdio","command":"./bin/` + commandName + `","args":["-test.run=TestInstalledPluginStdioHelper","--"],"env":{"AWAKEN_PLUGIN_STDIO_HELPER":"1"}}}}`
+	if err := os.WriteFile(filepath.Join(src, "mcp.json"), []byte(mcpConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	validation, err := store.Validate(context.Background(), Source{Kind: SourceLocalPath, Path: src})
+	if err != nil || !validation.Valid {
+		t.Fatalf("validation=%+v err=%v", validation, err)
+	}
+	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}, ExpectedDigest: validation.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	manager := mcpclient.NewManager()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	manager.Start(ctx, store.PluginMCPServers())
+	defer manager.Shutdown(context.Background())
+	serverName := ServerIdentity(name, "echo")
+	deadline := time.Now().Add(8 * time.Second)
+	for {
+		snapshot, snapshotErr := manager.SnapshotServer(serverName)
+		if snapshotErr == nil && snapshot.State == mcpclient.StateConnected {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("installed MCP server did not connect: snapshot=%+v err=%v", snapshot, snapshotErr)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	result, err := manager.CallTool(ctx, "mcp__"+serverName+"__echo", map[string]any{"message": "installed-ping"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Content) != 1 {
+		t.Fatalf("tool result=%+v", result)
+	}
+	textContent, ok := result.Content[0].(*mcp.TextContent)
+	if !ok || textContent.Text != "installed-ping" {
+		t.Fatalf("tool content=%+v", result.Content[0])
+	}
+}
+
+func TestInstalledPluginStdioHelper(t *testing.T) {
+	if os.Getenv("AWAKEN_PLUGIN_STDIO_HELPER") != "1" {
+		t.Skip("installed plugin stdio helper not requested")
+	}
+	readOnly := true
+	destructive := false
+	openWorld := false
+	server := mcp.NewServer(&mcp.Implementation{Name: "installed-plugin-echo", Version: "1.0.0"}, nil)
+	mcp.AddTool(server, &mcp.Tool{
+		Name: "echo", Description: "Echo a message",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: readOnly, DestructiveHint: &destructive, OpenWorldHint: &openWorld},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, input map[string]string) (*mcp.CallToolResult, map[string]string, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: input["message"]}}}, input, nil
+	})
+	if err := server.Run(t.Context(), &mcp.StdioTransport{}); err != nil {
+		t.Fatalf("stdio helper: %v", err)
+	}
+}
+
+func TestInstallZipPreservesBundledExecutable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix executable mode is not applicable on Windows")
+	}
+	store := testStore(t)
+	src := t.TempDir()
+	writeBundledExecutablePluginFixture(t, src, "executable.zip")
+	zipPath := filepath.Join(t.TempDir(), "plugin.zip")
+	if err := zipDir(src, zipPath); err != nil {
+		t.Fatal(err)
+	}
+	validation, err := store.Validate(context.Background(), Source{Kind: SourceLocalPath, Path: zipPath})
+	if err != nil || !validation.Valid {
+		t.Fatalf("validation=%+v err=%v", validation, err)
+	}
+	installed, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: zipPath}, ExpectedDigest: validation.Digest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(installed.Plugin.Root, "bin", "server"))
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("installed zip command mode=%v err=%v", infoMode(info), err)
+	}
+	if err := exec.Command(filepath.Join(installed.Plugin.Root, "bin", "server")).Run(); err != nil {
+		t.Fatalf("installed zip command did not launch: %v", err)
+	}
+}
+
+func TestValidationDigestPinsExecutableIntent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix executable mode is not applicable on Windows")
+	}
+	store := testStore(t)
+	src := t.TempDir()
+	command := writeBundledExecutablePluginFixture(t, src, "mode.changed")
+	validation, err := store.Validate(context.Background(), Source{Kind: SourceLocalPath, Path: src})
+	if err != nil || !validation.Valid {
+		t.Fatalf("validation=%+v err=%v", validation, err)
+	}
+	if err := os.Chmod(command, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}, ExpectedDigest: validation.Digest}); !errors.Is(err, ErrSourceChanged) {
+		t.Fatalf("mode-only source change err=%v", err)
+	}
+}
+
+func TestInstalledDigestDriftFailsClosed(t *testing.T) {
+	store := testStore(t)
+	src := t.TempDir()
+	writePluginFixture(t, src, "integrity.plugin", true)
+	installed, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installed.Plugin.Root, "tampered.txt"), []byte("changed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plugin, err := store.Get("integrity.plugin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plugin.IntegrityValid || plugin.SkillRoot != "" || len(plugin.MCPServers) != 0 {
+		t.Fatalf("tampered plugin remained active: %+v", plugin)
+	}
+	if roots := store.EnabledSkillRoots(); len(roots) != 0 {
+		t.Fatalf("tampered plugin exported skills: %v", roots)
+	}
+	if servers := store.PluginMCPServers(); len(servers) != 0 {
+		t.Fatalf("tampered plugin exported MCP servers: %+v", servers)
+	}
+	if _, err := store.ResolveComposerSelection("integrity.plugin", installed.Plugin.Digest); !errors.Is(err, ErrDigestChanged) {
+		t.Fatalf("composer integrity err=%v", err)
+	}
+}
+
+func TestManagedPluginDataSymlinkFailsClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink fixture is Unix-oriented")
+	}
+	store := testStore(t)
+	src := t.TempDir()
+	writeBundledExecutablePluginFixture(t, src, "data.boundary")
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(store.dataRoot, "data.boundary")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}}); err == nil {
+		t.Fatal("managed plugin data symlink should block installation")
+	}
+}
+
+func infoMode(info os.FileInfo) os.FileMode {
+	if info == nil {
+		return 0
+	}
+	return info.Mode().Perm()
 }
 
 func TestValidatePluginReportsInvalidEmbeddedSkill(t *testing.T) {
@@ -471,6 +707,41 @@ func TestDigestStableAcrossCopy(t *testing.T) {
 	}
 }
 
+func TestDigestIncludesExecutableIntentAndReadsLegacyRecords(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix executable mode is not applicable on Windows")
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "tool")
+	if err := os.WriteFile(path, []byte("same"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := digestTree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := digestTreeLegacy(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, matches, err := verifyTreeDigest(root, legacy); err != nil || !matches {
+		t.Fatalf("legacy digest compatibility matches=%v err=%v", matches, err)
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	after, err := digestTree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Fatalf("executable intent did not change digest: %s", before)
+	}
+	if _, matches, err := verifyTreeDigest(root, legacy); err != nil || !matches {
+		t.Fatalf("legacy content-only digest should remain readable matches=%v err=%v", matches, err)
+	}
+}
+
 func zipDir(src, dest string) error {
 	file, err := os.Create(dest)
 	if err != nil {
@@ -490,11 +761,22 @@ func zipDir(src, dest string) error {
 		if rel == "." {
 			return nil
 		}
-		if entry.IsDir() {
-			_, err := writer.Create(rel + "/")
+		info, err := entry.Info()
+		if err != nil {
 			return err
 		}
-		header, err := writer.Create(rel)
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+		header.Name = rel
+		if entry.IsDir() {
+			header.Name += "/"
+			_, err = writer.CreateHeader(header)
+			return err
+		}
+		header.Method = zip.Deflate
+		entryWriter, err := writer.CreateHeader(header)
 		if err != nil {
 			return err
 		}
@@ -502,7 +784,7 @@ func zipDir(src, dest string) error {
 		if err != nil {
 			return err
 		}
-		_, err = header.Write(data)
+		_, err = entryWriter.Write(data)
 		return err
 	})
 	if err != nil {

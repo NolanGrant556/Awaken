@@ -138,6 +138,7 @@ func (t *Tool) Definition() tool.ToolDefinition {
 			{Code: "plugin_source_unavailable", Cause: "A declared remote package source could not be fetched.", Retryable: true, Recovery: []string{"Inspect the remote source and retry with bounded backoff."}},
 			{Code: "plugin_package_invalid", Cause: "Dry-run validation found component-level errors; installation did not start.", Retryable: false, Recovery: []string{"Resolve every error diagnostic and validate the candidate again."}},
 			{Code: "plugin_source_changed", Cause: "The source digest changed between dry-run validation and installation materialization.", Retryable: false, Recovery: []string{"Stop, inspect the changed candidate, and validate it again before any install."}},
+			{Code: "plugin_digest_changed", Cause: "The installed package no longer matches its recorded digest.", Retryable: false, Recovery: []string{"Do not use or export the changed package; reinstall or replace it from a freshly validated source."}},
 			{Code: "plugin_not_found", Cause: "The named installed plugin does not exist.", Retryable: false, Recovery: []string{"Refresh installed Plugin state and choose the exact current name."}},
 			{Code: "plugin_already_exists", Cause: "A same-name plugin exists and replace was not explicitly requested.", Retryable: false, Recovery: []string{"Keep the existing plugin or request a reviewed replacement."}},
 			{Code: "plugin_export_destination_exists", Cause: "The requested authoring candidate already exists.", Retryable: false, Recovery: []string{"Choose a new export destination or inspect the existing candidate before continuing."}},
@@ -397,6 +398,8 @@ func classifyError(err error) (string, tool.ErrorCategory, bool) {
 		return "plugin_package_invalid", tool.ErrorCategoryValidation, false
 	case errors.Is(err, plugins.ErrSourceChanged):
 		return "plugin_source_changed", tool.ErrorCategoryValidation, false
+	case errors.Is(err, plugins.ErrDigestChanged):
+		return "plugin_digest_changed", tool.ErrorCategoryDomain, false
 	case errors.Is(err, plugins.ErrNotFound):
 		return "plugin_not_found", tool.ErrorCategoryDomain, false
 	case errors.Is(err, plugins.ErrAlreadyExists):

@@ -333,6 +333,58 @@ describe("RunStage layout", () => {
     );
   });
 
+  it("keeps chrome icons raster-stable at press and toggle time", () => {
+    const designSystemStyles = readFileSync(
+      new URL(
+        "../../../../Awaken Design System/src/tokens/components.css",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    // Fractional offsets park the 22px icon buttons off the device pixel
+    // grid; any re-rasterization then shifts stroke anti-aliasing and reads
+    // as a subtle jump on Retina displays.
+    const icon = cssRule(designSystemStyles, ".workbench-chrome-icon");
+    expect(icon).toContain("top: var(--aw-window-control-top-offset, -1px);");
+    expect(designSystemStyles).not.toContain(
+      "var(--aw-window-control-top-offset, -0.75px)",
+    );
+
+    // Idle dimming must stay on the status text: animating opacity on the
+    // container that owns the toggle button promotes/demotes a compositor
+    // layer around pointer interaction and re-rasterizes the icon.
+    const statusContainer = cssRule(designSystemStyles, ".workbench-chrome-status");
+    expect(statusContainer).not.toContain("opacity");
+    const statusText = cssRule(designSystemStyles, ".workbench-chrome-state");
+    expect(statusText).toContain("opacity: 0.56;");
+    expect(statusText).toContain("transition: opacity 140ms ease;");
+    expect(designSystemStyles).toContain(
+      ".workbench-chrome-status:hover .workbench-chrome-state,",
+    );
+    expect(designSystemStyles).toContain(
+      ".workbench-chrome-status:focus-within .workbench-chrome-state {",
+    );
+  });
+
+  it("fades the inspector resize-handle line in only after the panel expansion arrives", () => {
+    const designSystemStyles = readFileSync(
+      new URL(
+        "../../../../Awaken Design System/src/tokens/components.css",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(designSystemStyles).toMatch(
+      /\.aw-workbench-inspector-resize-handle::before \{\s*opacity: 0;\s*animation: aw-inspector-handle-line-in 120ms ease 180ms forwards;\s*\}/,
+    );
+    expect(designSystemStyles).toContain("@keyframes aw-inspector-handle-line-in");
+    expect(designSystemStyles).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{\s*\.aw-workbench-inspector-resize-handle::before \{\s*opacity: 1;\s*animation: none;/,
+    );
+  });
+
   it("uses semantic disclosure identities instead of mutable render positions", () => {
     const appSource = readFileSync(
       new URL("./App.tsx", import.meta.url),

@@ -15,6 +15,7 @@ import type { RuntimeClient } from "../runtime/client";
 import ImagePreview from "./ImagePreview";
 import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 import PreviewErrorBoundary from "./PreviewErrorBoundary";
+import { useProjectFilePreviewPrimaryClick } from "./useProjectFilePreviewPrimaryClick";
 import WebviewPreview from "./WebviewPreview";
 
 const MarkdownPreview = lazy(() => import("./MarkdownPreview"));
@@ -158,23 +159,15 @@ export default function FilePreviewHost({
     [closeActivePreview],
   );
 
-  useEffect(() => {
-    if (
-      state.status !== "ready" ||
-      state.preview.kind !== "office" ||
-      !onPreviewPrimaryClick
-    ) {
-      return;
-    }
-    return runtimeClient.onProjectFilePreviewInteraction?.((interaction) => {
-      if (
-        interaction.previewId === state.preview.previewId &&
-        interaction.type === "primary-click"
-      ) {
-        onPreviewPrimaryClick();
-      }
-    });
-  }, [onPreviewPrimaryClick, runtimeClient, state]);
+  const officePreviewId =
+    state.status === "ready" && state.preview.kind === "office"
+      ? state.preview.previewId
+      : undefined;
+  useProjectFilePreviewPrimaryClick({
+    runtimeClient,
+    previewId: officePreviewId,
+    onPreviewPrimaryClick,
+  });
 
   const actionRequest: ProjectFilePreviewActionRequest | undefined =
     projectId && folderPath && selection

@@ -267,6 +267,72 @@ describe("ProjectFilesWorkspace", () => {
     );
   });
 
+  it("forwards an Artifact Office guest primary click to the shared composer collapse callback", async () => {
+    let interactionHandler:
+      | ((interaction: { previewId: string; type: "primary-click" }) => void)
+      | undefined;
+    const onPreviewPrimaryClick = vi.fn();
+    const runtimeClient = {
+      ...previewRuntimeClient(),
+      listProjectDirectory: vi.fn(async () => ({
+        ok: true as const,
+        relativePath: "",
+        entries: [],
+      })),
+      startArtifactPreview: vi.fn(async (request) => ({
+        ok: true as const,
+        preview: {
+          previewId: "artifact-preview-office",
+          requestId: request.requestId,
+          kind: "office" as const,
+          transport: "url" as const,
+          displayName: "交付报告.docx",
+          relativePath: "交付报告.docx",
+          byteLength: 256,
+          src: "awaken-preview://artifact-preview-office/index.html",
+          partition: "awaken-preview-artifact-preview-office",
+        },
+      })),
+      onProjectFilePreviewInteraction: vi.fn((handler) => {
+        interactionHandler = handler;
+        return vi.fn();
+      }),
+    };
+
+    await act(async () => {
+      root.render(
+        <ProjectFilesWorkspace
+          runtimeClient={runtimeClient}
+          projectId="project-1"
+          projectLabel="Awaken"
+          folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
+          artifactPreview={{
+            threadId: "thread-1",
+            runId: "run-1",
+            artifactId: "artifact-1",
+            title: "交付报告.docx",
+          }}
+          expanded
+          onPreviewPrimaryClick={onPreviewPrimaryClick}
+        />,
+      );
+    });
+    await settleUntil(() => container.querySelector("webview") !== null);
+
+    expect(runtimeClient.onProjectFilePreviewInteraction).toHaveBeenCalledOnce();
+    await act(async () => {
+      interactionHandler?.({
+        previewId: "another-preview",
+        type: "primary-click",
+      });
+      interactionHandler?.({
+        previewId: "artifact-preview-office",
+        type: "primary-click",
+      });
+    });
+    expect(onPreviewPrimaryClick).toHaveBeenCalledOnce();
+  });
+
   it("renders the browser empty state without a project or active file tab", async () => {
     await act(async () => {
       root.render(

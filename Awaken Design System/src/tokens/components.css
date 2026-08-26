@@ -1165,9 +1165,9 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   width: fit-content;
   max-width: 100%;
   min-width: 0;
-  gap: 7px;
+  gap: 5px;
   min-height: 28px;
-  padding: 4px 6px;
+  padding: 4px 6px 4px 0;
   border: 0;
   border-radius: 9px;
   background: transparent;
@@ -1292,7 +1292,6 @@ button.tool-trace-line:focus-visible {
 
 .tool-trace-output-rail {
   min-height: 0;
-  padding: 2px 0 7px;
   overflow: hidden;
 }
 
@@ -1302,6 +1301,7 @@ button.tool-trace-line:focus-visible {
   width: min(760px, 100%);
   min-width: 0;
   max-height: 320px;
+  margin: 2px 0 7px;
   border: 1px solid color-mix(in srgb, var(--aw-text-primary) 15%, transparent);
   border-radius: 10px;
   background: var(--aw-surface-code);

@@ -102,10 +102,11 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
     defaultOpen ?? null,
   );
   const expanded = hasDetail && (open ?? manualExpanded ?? autoExpanded);
-  const { present: detailPresent, prepareOpen } = useAwakenDisclosurePresence(
-    expanded,
-    320,
-  );
+  const {
+    present: detailPresent,
+    prepareOpen,
+    onTransitionEnd,
+  } = useAwakenDisclosurePresence(expanded, 320);
   const interactive = hasDetail || Boolean(onSelect);
   const lineClassName = `tool-trace-line tool-trace-line-${status} tool-trace-line-${kind}${
     expanded ? " tool-trace-line-open" : ""
@@ -151,6 +152,9 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
       data-status={status}
       data-kind={kind}
       data-animate-entry={animateEntry ? "true" : "false"}
+      data-disclosure-state={
+        expanded ? "open" : detailPresent ? "closing" : "closed"
+      }
     >
       {interactive ? (
         <button
@@ -174,6 +178,7 @@ export const AwakenToolTraceLine = memo(function AwakenToolTraceLine({
           data-expanded={expanded ? "true" : "false"}
           aria-hidden={!expanded}
           inert={!expanded}
+          onTransitionEnd={onTransitionEnd}
         >
           {detailPresent ? (
             <div className="tool-trace-output-rail">

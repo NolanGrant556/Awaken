@@ -34,10 +34,11 @@ export const AwakenThoughtTrace = memo(function AwakenThoughtTrace({
   );
   const autoExpanded = status === "active";
   const expanded = manualExpanded ?? autoExpanded;
-  const { present: bodyPresent, prepareOpen } = useAwakenDisclosurePresence(
-    expanded,
-    400,
-  );
+  const {
+    present: bodyPresent,
+    prepareOpen,
+    onTransitionEnd,
+  } = useAwakenDisclosurePresence(expanded, 400);
   const statusLabel =
     label ??
     (status === "active"
@@ -54,6 +55,9 @@ export const AwakenThoughtTrace = memo(function AwakenThoughtTrace({
       }`}
       data-state={status}
       data-animate-entry={animateEntry ? "true" : "false"}
+      data-disclosure-state={
+        expanded ? "open" : bodyPresent ? "closing" : "closed"
+      }
     >
       <button
         type="button"
@@ -91,6 +95,7 @@ export const AwakenThoughtTrace = memo(function AwakenThoughtTrace({
         data-expanded={expanded ? "true" : "false"}
         aria-hidden={!expanded}
         inert={!expanded}
+        onTransitionEnd={onTransitionEnd}
       >
         {bodyPresent ? (
           <div className="thought-trace-body-inner">

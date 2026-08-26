@@ -49,10 +49,11 @@ export const AwakenToolTraceGroup = memo(function AwakenToolTraceGroup({
     defaultOpen ?? null,
   );
   const expanded = open ?? manualExpanded ?? active;
-  const { present: linesPresent, prepareOpen } = useAwakenDisclosurePresence(
-    expanded,
-    340,
-  );
+  const {
+    present: linesPresent,
+    prepareOpen,
+    onTransitionEnd,
+  } = useAwakenDisclosurePresence(expanded, 340);
   const summary = label || `${actions.length} 个工具调用`;
   const detail = detailProp ?? (failed > 0 ? `${failed} 个异常` : undefined);
 
@@ -66,6 +67,9 @@ export const AwakenToolTraceGroup = memo(function AwakenToolTraceGroup({
   return (
     <article
       className={`tool-trace-group${expanded ? " tool-trace-group-open" : ""}${active ? " tool-trace-group-active" : ""}`}
+      data-disclosure-state={
+        expanded ? "open" : linesPresent ? "closing" : "closed"
+      }
     >
       <button
         type="button"
@@ -89,6 +93,7 @@ export const AwakenToolTraceGroup = memo(function AwakenToolTraceGroup({
         data-expanded={expanded ? "true" : "false"}
         aria-hidden={!expanded}
         inert={!expanded}
+        onTransitionEnd={onTransitionEnd}
       >
         {linesPresent ? (
           <div className="tool-trace-group-lines">

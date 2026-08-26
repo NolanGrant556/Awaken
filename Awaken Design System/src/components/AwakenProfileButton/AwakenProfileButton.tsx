@@ -95,7 +95,11 @@ export function AwakenProfileButton({
         <span style={nameStyle}>{name}</span>
         {subtitle ? <span style={subtitleStyle}>{subtitle}</span> : null}
       </span>
-      <span style={{ display: "inline-flex", color: "var(--aw-text-tertiary)" }}>
+      <span
+        className="aw-profile-button__chevron"
+        aria-hidden="true"
+        style={{ display: "inline-flex", color: "var(--aw-text-tertiary)" }}
+      >
         <AwakenIcon concept="collapse-up" size={16} />
       </span>
     </button>

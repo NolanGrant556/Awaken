@@ -7662,7 +7662,9 @@ export function App() {
                 projectReorderDisabled={!desktopReady || projectReorderSubmitting}
                 onExpandedChange={setExpandedProjectIds}
                 onNewTask={handleNewTask}
-                onProfileClick={() => setProfilePopoverOpen(true)}
+                profileExpanded={profilePopoverOpen}
+                profileControls="aw-profile-menu-panel"
+                onProfileClick={() => setProfilePopoverOpen((open) => !open)}
                 profileButtonRef={profileButtonRef}
                 profileUpdateAction={sidebarUpdateAction}
               />

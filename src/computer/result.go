@@ -7,17 +7,20 @@ import (
 
 // ActionResult records what happened after a PerformChecked call.
 type ActionResult struct {
-	ActionID          ActionID         `json:"action_id"`
-	HostRequestID     HostRequestID    `json:"host_request_id,omitempty"`
-	SessionID         SessionID        `json:"session_id"`
-	Status            ActionResultStatus `json:"status"`
-	CUAStatus         string           `json:"cua_status,omitempty"`
-	StartedAt         time.Time        `json:"started_at"`
-	FinishedAt        time.Time        `json:"finished_at"`
-	ErrorCode         string           `json:"error_code,omitempty"`
-	ErrorCategory     string           `json:"error_category,omitempty"`
-	ErrorMessage      string           `json:"error_message,omitempty"`
-	AfterObservation  *ObservationID   `json:"after_observation,omitempty"`
+	ActionID         ActionID           `json:"action_id"`
+	HostRequestID    HostRequestID      `json:"host_request_id,omitempty"`
+	SessionID        SessionID          `json:"session_id"`
+	Status           ActionResultStatus `json:"status"`
+	CUAStatus        string             `json:"cua_status,omitempty"`
+	CUAEffect        string             `json:"cua_effect,omitempty"`
+	CUARoute         string             `json:"cua_route,omitempty"`
+	CUADeliveryMode  string             `json:"cua_delivery_mode,omitempty"`
+	StartedAt        time.Time          `json:"started_at"`
+	FinishedAt       time.Time          `json:"finished_at"`
+	ErrorCode        string             `json:"error_code,omitempty"`
+	ErrorCategory    string             `json:"error_category,omitempty"`
+	ErrorMessage     string             `json:"error_message,omitempty"`
+	AfterObservation *ObservationID     `json:"after_observation,omitempty"`
 }
 
 // NewActionResult builds a result with the required fields.
@@ -35,14 +38,14 @@ func NewActionResult(actionID ActionID, sessionID SessionID, status ActionResult
 // VerificationResult is an independent assessment of whether the expected
 // effect occurred.
 type VerificationResult struct {
-	ActionID       ActionID           `json:"action_id"`
-	ObservationID  ObservationID      `json:"observation_id"`
-	SessionID      SessionID          `json:"session_id"`
-	Status         VerificationStatus `json:"status"`
-	Assertions     []Assertion        `json:"assertions"`
-	EvidenceRefs   []string           `json:"evidence_refs,omitempty"`
-	VerifiedAt     time.Time          `json:"verified_at"`
-	Reason         string             `json:"reason,omitempty"`
+	ActionID      ActionID           `json:"action_id"`
+	ObservationID ObservationID      `json:"observation_id"`
+	SessionID     SessionID          `json:"session_id"`
+	Status        VerificationStatus `json:"status"`
+	Assertions    []Assertion        `json:"assertions"`
+	EvidenceRefs  []string           `json:"evidence_refs,omitempty"`
+	VerifiedAt    time.Time          `json:"verified_at"`
+	Reason        string             `json:"reason,omitempty"`
 }
 
 // Assertion is a single machine-checkable expectation.

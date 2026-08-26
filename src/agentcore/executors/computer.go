@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +70,33 @@ type observeInput struct {
 	Reason    string   `json:"reason,omitempty"`
 }
 
+func parseWindowTargetRef(value string) (computer.TargetRef, error) {
+	value = strings.TrimSpace(value)
+	const pidPrefix = "pid:"
+	const windowSeparator = "/window:"
+	if !strings.HasPrefix(value, pidPrefix) {
+		return computer.TargetRef{}, fmt.Errorf("target_ref must use pid:<pid>/window:<window_id>")
+	}
+	parts := strings.SplitN(strings.TrimPrefix(value, pidPrefix), windowSeparator, 2)
+	if len(parts) != 2 {
+		return computer.TargetRef{}, fmt.Errorf("target_ref must use pid:<pid>/window:<window_id>")
+	}
+	pid, err := strconv.ParseInt(parts[0], 10, 32)
+	if err != nil || pid <= 0 {
+		return computer.TargetRef{}, fmt.Errorf("target_ref pid must be a positive integer")
+	}
+	windowID, err := strconv.ParseUint(parts[1], 10, 53)
+	if err != nil || windowID == 0 {
+		return computer.TargetRef{}, fmt.Errorf("target_ref window_id must be a positive safe integer")
+	}
+	return computer.TargetRef{
+		PID:             int32(pid),
+		WindowID:        strconv.FormatUint(windowID, 10),
+		Generation:      1,
+		CoordinateSpace: string(computer.CaptureWindow),
+	}, nil
+}
+
 func (e *ComputerExecutor) executeObserve(ctx context.Context, input string) (ToolExecutionOutput, error) {
 	var in observeInput
 	if err := json.Unmarshal([]byte(input), &in); err != nil {
@@ -82,19 +110,29 @@ func (e *ComputerExecutor) executeObserve(ctx context.Context, input string) (To
 	if in.Scope != "" {
 		scope = computer.CaptureScope(in.Scope)
 	}
-	target := computer.TargetRef{
-		WindowID:        strings.TrimSpace(in.TargetRef),
-		Generation:      1,
-		CoordinateSpace: string(scope),
+	target := computer.TargetRef{Generation: 1, CoordinateSpace: string(scope)}
+	if scope == computer.CaptureWindow && strings.TrimSpace(in.TargetRef) != "" {
+		parsed, err := parseWindowTargetRef(in.TargetRef)
+		if err != nil {
+			return validationOutput("invalid window target_ref: " + err.Error()), nil
+		}
+		target = parsed
 	}
-	if current, active := e.runtime.Session(); active {
-		if in.TargetRef == "" {
+	current, active := e.runtime.Session()
+	if active {
+		if in.TargetRef == "" && current.CaptureScope == scope {
 			target = current.Target
 			target.CoordinateSpace = string(scope)
 		}
 	}
-	if current, active := e.runtime.Session(); active && current.CaptureScope != scope {
-		if err := e.runtime.Close(ctx, "capture_scope_changed"); err != nil {
+	targetChanged := active && scope == computer.CaptureWindow &&
+		(current.Target.PID != target.PID || current.Target.WindowID != target.WindowID)
+	if active && (current.CaptureScope != scope || targetChanged) {
+		closeReason := "capture_scope_changed"
+		if targetChanged {
+			closeReason = "capture_target_changed"
+		}
+		if err := e.runtime.Close(ctx, closeReason); err != nil {
 			return computerErrorOutput(err, "computer_session_scope_change_failed"), nil
 		}
 	}
@@ -141,9 +179,45 @@ func (e *ComputerExecutor) executeObserve(ctx context.Context, input string) (To
 		payloadValue["backing_scale_x"] = space.ScaleX
 		payloadValue["backing_scale_y"] = space.ScaleY
 	}
+	if obs.Scope == computer.CaptureDesktop {
+		// Desktop observation is also the exact-window discovery response. Keep
+		// the field present even when there are zero candidates so the model can
+		// distinguish an empty discovery from an old/invalid response shape.
+		payloadValue["available_windows"] = modelVisibleWindows(obs.AvailableWindows)
+	}
+	if obs.Target.PID > 0 && obs.Target.WindowID != "" {
+		payloadValue["target_ref"] = fmt.Sprintf("pid:%d/window:%s", obs.Target.PID, obs.Target.WindowID)
+		payloadValue["target_pid"] = obs.Target.PID
+		payloadValue["target_window_id"] = obs.Target.WindowID
+	}
+	var accessibilityWarning *tool.OutcomeNotice
+	if obs.AccessibilityTree != nil {
+		if data, readErr := e.runtime.ReadMedia(ctx, *obs.AccessibilityTree); readErr == nil {
+			var accessibility any
+			if parseErr := json.Unmarshal(data, &accessibility); parseErr == nil {
+				// Accessibility element_token values are observation-bound action
+				// locators. They must be model-visible; otherwise a background
+				// window click can only fall back to best-effort synthetic pixels.
+				payloadValue["accessibility"] = accessibility
+			} else {
+				accessibilityWarning = &tool.OutcomeNotice{
+					Code:    "observe_accessibility_invalid",
+					Message: fmt.Sprintf("Accessibility was captured but is not valid JSON: %v", parseErr),
+				}
+			}
+		} else if contains(in.Include, "accessibility") {
+			accessibilityWarning = &tool.OutcomeNotice{
+				Code:    "observe_accessibility_unavailable",
+				Message: fmt.Sprintf("Accessibility was requested but could not be read: %v", readErr),
+			}
+		}
+	}
 	payload, _ := json.Marshal(payloadValue)
 	outcome := tool.SucceededOutcome(string(payload))
 	outcome.Details = payloadValue
+	if accessibilityWarning != nil {
+		outcome.Warnings = append(outcome.Warnings, *accessibilityWarning)
+	}
 	if obs.Screenshot != nil {
 		// Read through the runtime so session ownership and access audit are
 		// enforced. Tests without a media store may use a direct local path.
@@ -331,7 +405,7 @@ func isEndedHostSessionError(err error) bool {
 
 func (e *ComputerExecutor) actionResultOutput(ctx context.Context, prepared computer.PreparedAction, res computer.ActionResult, reviewID computer.ReviewID) (ToolExecutionOutput, error) {
 	var afterObservation *computer.Observation
-	if res.Status != computer.ActionUnknownOutcome && res.Status != computer.ActionCancelledBeforePerform {
+	if shouldCaptureAfterAction(res) {
 		if observed, err := e.runtime.Observe(ctx, computer.ObserveOptions{
 			IncludeScreenshot:    true,
 			IncludeAccessibility: true,
@@ -355,11 +429,24 @@ func (e *ComputerExecutor) actionResultOutput(ctx context.Context, prepared comp
 	if res.CUAStatus != "" {
 		payloadValue["cua_status"] = res.CUAStatus
 	}
+	if res.CUAEffect != "" {
+		payloadValue["cua_effect"] = res.CUAEffect
+	}
+	if res.CUARoute != "" {
+		payloadValue["cua_route"] = res.CUARoute
+	}
+	if res.CUADeliveryMode != "" {
+		payloadValue["cua_delivery_mode"] = res.CUADeliveryMode
+	}
 	if reviewID != "" {
 		payloadValue["review_id"] = string(reviewID)
 	}
+	var observationWarnings []tool.OutcomeNotice
 	if afterObservation != nil {
 		payloadValue["observation_id"] = string(afterObservation.ObservationID)
+		postActionObservation, warnings := e.modelVisibleObservation(ctx, *afterObservation)
+		payloadValue["post_action_observation"] = postActionObservation
+		observationWarnings = warnings
 	}
 	payload, _ := json.Marshal(payloadValue)
 	var outcome tool.ExecutionOutcome
@@ -391,11 +478,22 @@ func (e *ComputerExecutor) actionResultOutput(ctx context.Context, prepared comp
 	if res.CUAStatus != "" {
 		outcome.Details["cua_status"] = res.CUAStatus
 	}
+	if res.CUAEffect != "" {
+		outcome.Details["cua_effect"] = res.CUAEffect
+	}
+	if res.CUARoute != "" {
+		outcome.Details["cua_route"] = res.CUARoute
+	}
+	if res.CUADeliveryMode != "" {
+		outcome.Details["cua_delivery_mode"] = res.CUADeliveryMode
+	}
 	if reviewID != "" {
 		outcome.Details["review_id"] = string(reviewID)
 	}
 	if afterObservation != nil {
 		outcome.Details["observation_id"] = string(afterObservation.ObservationID)
+		outcome.Details["post_action_observation"] = payloadValue["post_action_observation"]
+		outcome.Warnings = append(outcome.Warnings, observationWarnings...)
 		e.attachObservationMedia(ctx, &outcome, *afterObservation)
 	} else if res.Status == computer.ActionSucceeded {
 		outcome.Warnings = append(outcome.Warnings, tool.OutcomeNotice{
@@ -404,6 +502,83 @@ func (e *ComputerExecutor) actionResultOutput(ctx context.Context, prepared comp
 		})
 	}
 	return ToolExecutionOutput{Outcome: outcome, Content: string(payload)}, nil
+}
+
+func shouldCaptureAfterAction(res computer.ActionResult) bool {
+	if res.Status == computer.ActionSucceeded {
+		return true
+	}
+	if res.Status != computer.ActionFailed {
+		return false
+	}
+	// These failures are confirmed before OS input. Capturing another CUA
+	// accessibility snapshot would only supersede the model's current element
+	// tokens without providing any new UI evidence.
+	if res.ErrorCategory == "validation" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(res.ErrorCode)) {
+	case "stale_element_token", "invalid_action_parameters":
+		return false
+	default:
+		return true
+	}
+}
+
+func (e *ComputerExecutor) modelVisibleObservation(ctx context.Context, obs computer.Observation) (map[string]any, []tool.OutcomeNotice) {
+	payload := map[string]any{
+		"observation_id":    string(obs.ObservationID),
+		"session_id":        string(obs.SessionID),
+		"scope":             string(obs.Scope),
+		"target_generation": obs.Target.Generation,
+		"captured_at":       obs.Freshness.CapturedAt.Format(time.RFC3339Nano),
+	}
+	if space := obs.CoordinateSpace; space != nil {
+		payload["coordinate_unit"] = space.Unit
+		payload["screen_width"] = space.Width
+		payload["screen_height"] = space.Height
+		payload["source_screenshot_width"] = space.SourceScreenshotWidth
+		payload["source_screenshot_height"] = space.SourceScreenshotHeight
+		payload["backing_scale_x"] = space.ScaleX
+		payload["backing_scale_y"] = space.ScaleY
+	}
+	if obs.Scope == computer.CaptureDesktop {
+		payload["available_windows"] = modelVisibleWindows(obs.AvailableWindows)
+	}
+	if obs.Target.PID > 0 && obs.Target.WindowID != "" {
+		payload["target_ref"] = fmt.Sprintf("pid:%d/window:%s", obs.Target.PID, obs.Target.WindowID)
+		payload["target_pid"] = obs.Target.PID
+		payload["target_window_id"] = obs.Target.WindowID
+	}
+	if obs.AccessibilityTree == nil {
+		return payload, nil
+	}
+	data, err := e.runtime.ReadMedia(ctx, *obs.AccessibilityTree)
+	if err != nil {
+		return payload, []tool.OutcomeNotice{{
+			Code:    "computer_after_accessibility_unavailable",
+			Message: fmt.Sprintf("Post-action accessibility was captured but could not be read: %v", err),
+		}}
+	}
+	var accessibility any
+	if err := json.Unmarshal(data, &accessibility); err != nil {
+		return payload, []tool.OutcomeNotice{{
+			Code:    "computer_after_accessibility_invalid",
+			Message: fmt.Sprintf("Post-action accessibility was captured but is not valid JSON: %v", err),
+		}}
+	}
+	// CUA element tokens are snapshot-bound. Returning the replacement tree in
+	// the same action result makes the new observation immediately actionable
+	// and prevents callers from reusing superseded source-observation tokens.
+	payload["accessibility"] = accessibility
+	return payload, nil
+}
+
+func modelVisibleWindows(windows []computer.WindowRef) []computer.WindowRef {
+	if windows == nil {
+		return []computer.WindowRef{}
+	}
+	return windows
 }
 
 func (e *ComputerExecutor) attachObservationMedia(ctx context.Context, outcome *tool.ExecutionOutcome, obs computer.Observation) {

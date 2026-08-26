@@ -23,6 +23,10 @@ import {
   prepareComputerRuntime,
 } from "./computer-setup.js";
 
+function normalizedPath(path: string): string {
+  return path.replaceAll("\\", "/");
+}
+
 describe("prepareComputerRuntime", () => {
   beforeEach(() => {
     mocks.accessSync.mockReset();
@@ -34,7 +38,8 @@ describe("prepareComputerRuntime", () => {
       "/Applications/Awaken.app/Contents/Resources/app.asar",
     );
     mocks.existsSync.mockImplementation(
-      (path: string) => !path.endsWith("scripts/prepare-node-runtime.mjs"),
+      (path: string) =>
+        !normalizedPath(path).endsWith("scripts/prepare-node-runtime.mjs"),
     );
   });
 
@@ -47,8 +52,9 @@ describe("prepareComputerRuntime", () => {
 
   it("uses the same IPC contract when packaged resources are missing", async () => {
     mocks.existsSync.mockImplementation((path: string) => {
-      if (path.endsWith("scripts/prepare-node-runtime.mjs")) return false;
-      return !path.includes("cua-driver");
+      const normalized = normalizedPath(path);
+      if (normalized.endsWith("scripts/prepare-node-runtime.mjs")) return false;
+      return !normalized.includes("cua-driver");
     });
 
     await expect(prepareComputerRuntime()).resolves.toEqual({

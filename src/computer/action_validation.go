@@ -13,6 +13,12 @@ import (
 // provider-sensitive oneOf schema.
 func ValidateActionSpec(spec ActionSpec) error {
 	parameters := CloneActionParameters(spec.Parameters)
+	if value, ok := parameters["delivery_mode"]; ok {
+		mode, valid := value.(string)
+		if !valid || (mode != "background" && mode != "foreground") {
+			return fmt.Errorf("parameters.delivery_mode must be background or foreground for %s", spec.Kind)
+		}
+	}
 	if point := spec.Target.PixelFallback; point != nil {
 		if _, ok := parameters["x"]; !ok {
 			parameters["x"] = point.X
@@ -23,7 +29,15 @@ func ValidateActionSpec(spec ActionSpec) error {
 	}
 
 	switch spec.Kind {
-	case ActionClick, ActionDoubleClick, ActionScroll, ActionMoveCursor:
+	case ActionClick, ActionDoubleClick:
+		if strings.TrimSpace(spec.Target.Locator) != "" {
+			return nil
+		}
+		if err := requireScreenCoordinate(parameters, "x", spec.Kind); err != nil {
+			return err
+		}
+		return requireScreenCoordinate(parameters, "y", spec.Kind)
+	case ActionScroll, ActionMoveCursor:
 		if err := requireScreenCoordinate(parameters, "x", spec.Kind); err != nil {
 			return err
 		}

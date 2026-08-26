@@ -10,6 +10,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@trycua/cua-driver": "0.12.5"
+    "@trycua/cua-driver": "0.22.0"
   }
 }

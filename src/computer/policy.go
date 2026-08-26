@@ -9,32 +9,34 @@ import (
 
 // PolicySnapshot is an immutable version of the Computer policy at run start.
 type PolicySnapshot struct {
-	ID                 PolicySnapshotID `json:"id"`
-	Version            string           `json:"version"`
-	EnvironmentID      string           `json:"environment_id"`
-	AllowedApps        []string         `json:"allowed_apps,omitempty"`
-	AllowedWindows     []string         `json:"allowed_windows,omitempty"`
-	AllowedScopes      []CaptureScope   `json:"allowed_scopes,omitempty"`
-	AllowedActionKinds []ActionKind     `json:"allowed_action_kinds,omitempty"`
-	DefaultScope       CaptureScope     `json:"default_scope"`
-	RequireReviewFor   []ActionKind     `json:"require_review_for,omitempty"`
-	ForbiddenKinds     []ActionKind     `json:"forbidden_kinds,omitempty"`
-	MaxDuration        time.Duration    `json:"max_duration"`
-	CreatedAt          time.Time        `json:"created_at"`
+	ID                           PolicySnapshotID `json:"id"`
+	Version                      string           `json:"version"`
+	EnvironmentID                string           `json:"environment_id"`
+	AllowedApps                  []string         `json:"allowed_apps,omitempty"`
+	AllowedWindows               []string         `json:"allowed_windows,omitempty"`
+	AllowedScopes                []CaptureScope   `json:"allowed_scopes,omitempty"`
+	AllowedActionKinds           []ActionKind     `json:"allowed_action_kinds,omitempty"`
+	AllowBackgroundWindowActions bool             `json:"allow_background_window_actions"`
+	DefaultScope                 CaptureScope     `json:"default_scope"`
+	RequireReviewFor             []ActionKind     `json:"require_review_for,omitempty"`
+	ForbiddenKinds               []ActionKind     `json:"forbidden_kinds,omitempty"`
+	MaxDuration                  time.Duration    `json:"max_duration"`
+	CreatedAt                    time.Time        `json:"created_at"`
 }
 
 // DefaultPolicy returns a restrictive default policy for development/testing.
 func DefaultPolicy() PolicySnapshot {
 	return PolicySnapshot{
-		Version:            "0.1.0",
-		EnvironmentID:      "host://local/desktop",
-		AllowedApps:        []string{},
-		AllowedWindows:     []string{},
-		AllowedScopes:      []CaptureScope{CaptureWindow, CaptureDesktop},
-		AllowedActionKinds: []ActionKind{ActionClick, ActionDoubleClick, ActionScroll, ActionDrag, ActionKey, ActionTypeText, ActionMoveCursor, ActionHotkey, ActionWait},
-		DefaultScope:       CaptureWindow,
-		MaxDuration:        30 * time.Minute,
-		CreatedAt:          time.Now().UTC(),
+		Version:                      "0.1.0",
+		EnvironmentID:                "host://local/desktop",
+		AllowedApps:                  []string{},
+		AllowedWindows:               []string{},
+		AllowedScopes:                []CaptureScope{CaptureWindow, CaptureDesktop},
+		AllowedActionKinds:           []ActionKind{ActionClick, ActionDoubleClick, ActionScroll, ActionDrag, ActionKey, ActionTypeText, ActionMoveCursor, ActionHotkey, ActionWait},
+		AllowBackgroundWindowActions: false,
+		DefaultScope:                 CaptureWindow,
+		MaxDuration:                  30 * time.Minute,
+		CreatedAt:                    time.Now().UTC(),
 	}
 }
 
@@ -44,16 +46,17 @@ func DefaultPolicy() PolicySnapshot {
 func PolicyFromSettings(settings Settings) PolicySnapshot {
 	defaultPolicy := DefaultPolicy()
 	return PolicySnapshot{
-		Version:            defaultPolicy.Version,
-		EnvironmentID:      defaultPolicy.EnvironmentID,
-		AllowedApps:        defaultPolicy.AllowedApps,
-		AllowedWindows:     defaultPolicy.AllowedWindows,
-		AllowedScopes:      append([]CaptureScope(nil), defaultPolicy.AllowedScopes...),
-		AllowedActionKinds: defaultPolicy.AllowedActionKinds,
-		DefaultScope:       CaptureWindow,
-		RequireReviewFor:   append([]ActionKind(nil), defaultPolicy.RequireReviewFor...),
-		MaxDuration:        defaultPolicy.MaxDuration,
-		CreatedAt:          time.Now().UTC(),
+		Version:                      defaultPolicy.Version,
+		EnvironmentID:                defaultPolicy.EnvironmentID,
+		AllowedApps:                  defaultPolicy.AllowedApps,
+		AllowedWindows:               defaultPolicy.AllowedWindows,
+		AllowedScopes:                append([]CaptureScope(nil), defaultPolicy.AllowedScopes...),
+		AllowedActionKinds:           defaultPolicy.AllowedActionKinds,
+		AllowBackgroundWindowActions: settings.AllowBackgroundWindowActions,
+		DefaultScope:                 CaptureWindow,
+		RequireReviewFor:             append([]ActionKind(nil), defaultPolicy.RequireReviewFor...),
+		MaxDuration:                  defaultPolicy.MaxDuration,
+		CreatedAt:                    time.Now().UTC(),
 	}
 }
 

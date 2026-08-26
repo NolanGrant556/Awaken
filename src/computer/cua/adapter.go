@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"awaken/src/computer"
@@ -130,16 +132,31 @@ func (d *cuaDriverAdapter) Observe(ctx context.Context, sessionID computer.Sessi
 		return computer.Observation{}, fmt.Errorf("session %s not found", sessionID)
 	}
 
-	state, err := d.host.GetDesktopState(ctx, string(sessionID))
+	var state HostDesktopState
+	var err error
+	if scope == computer.CaptureWindow {
+		state, err = d.host.GetWindowState(ctx, string(sessionID), target)
+	} else {
+		state, err = d.host.GetDesktopState(ctx, string(sessionID))
+	}
 	if err != nil {
-		return computer.Observation{}, fmt.Errorf("get desktop state: %w", err)
+		return computer.Observation{}, fmt.Errorf("get %s state: %w", scope, err)
 	}
 	if state.IsError {
 		message := state.Text
 		if message == "" {
-			message = "CUA host returned an unsuccessful desktop observation"
+			message = "CUA host returned an unsuccessful observation"
 		}
-		return computer.Observation{}, fmt.Errorf("get desktop state: %s", message)
+		return computer.Observation{}, fmt.Errorf("get %s state: %s", scope, message)
+	}
+	if scope == computer.CaptureWindow {
+		if state.Target.PID <= 0 || state.Target.WindowID == "" {
+			return computer.Observation{}, fmt.Errorf("get window state: host omitted exact window identity")
+		}
+		state.Target.Generation = target.Generation
+		state.Target.AppName = target.AppName
+		state.Target.WindowTitle = target.WindowTitle
+		target = state.Target
 	}
 
 	now := time.Now().UTC()
@@ -150,6 +167,7 @@ func (d *cuaDriverAdapter) Observe(ctx context.Context, sessionID computer.Sessi
 	if err != nil {
 		return computer.Observation{}, err
 	}
+	obs.AvailableWindows = append([]computer.WindowRef(nil), state.AvailableWindows...)
 	if state.CoordinateSpace.Width > 0 && state.CoordinateSpace.Height > 0 {
 		obs.CoordinateSpace = &computer.CoordinateSpace{
 			Unit:                   state.CoordinateSpace.Unit,
@@ -183,13 +201,42 @@ func (d *cuaDriverAdapter) Observe(ctx context.Context, sessionID computer.Sessi
 	return obs, nil
 }
 
-func (d *cuaDriverAdapter) Prepare(ctx context.Context, sessionID computer.SessionID, obs computer.Observation, spec computer.ActionSpec) (computer.PreparedAction, error) {
-	if err := computer.ValidateActionSpec(spec); err != nil {
-		return computer.PreparedAction{}, fmt.Errorf("invalid action parameters: %w", err)
+func normalizeActionDelivery(bind computer.Binding, obs computer.Observation, spec computer.ActionSpec) (computer.ActionSpec, error) {
+	spec.Parameters = computer.CloneActionParameters(spec.Parameters)
+	deliveryMode, hasDeliveryMode := spec.Parameters["delivery_mode"]
+	if obs.Scope == computer.CaptureWindow && spec.Kind != computer.ActionWait {
+		if !hasDeliveryMode {
+			if bind.AllowBackgroundWindowActions {
+				spec.Parameters["delivery_mode"] = "background"
+			} else {
+				spec.Parameters["delivery_mode"] = "foreground"
+			}
+		} else if deliveryMode == "background" && !bind.AllowBackgroundWindowActions {
+			return computer.ActionSpec{}, fmt.Errorf("background window actions are disabled by the run binding")
+		}
+	} else if deliveryMode == "background" {
+		return computer.ActionSpec{}, fmt.Errorf("background delivery requires a window-scoped observation")
 	}
+	if mode, _ := spec.Parameters["delivery_mode"].(string); mode == "background" &&
+		(spec.Kind == computer.ActionClick || spec.Kind == computer.ActionDoubleClick) &&
+		strings.TrimSpace(spec.Target.Locator) == "" {
+		return computer.ActionSpec{}, fmt.Errorf("background window %s requires target.locator with an exact element_token from the same accessibility observation; screenshot coordinates use an unverified synthetic-event route", spec.Kind)
+	}
+	return spec, nil
+}
+
+func (d *cuaDriverAdapter) Prepare(ctx context.Context, sessionID computer.SessionID, obs computer.Observation, spec computer.ActionSpec) (computer.PreparedAction, error) {
 	rec, ok := d.sessions[sessionID]
 	if !ok {
 		return computer.PreparedAction{}, fmt.Errorf("session %s not found", sessionID)
+	}
+	var err error
+	spec, err = normalizeActionDelivery(rec.bind, obs, spec)
+	if err != nil {
+		return computer.PreparedAction{}, err
+	}
+	if err := computer.ValidateActionSpec(spec); err != nil {
+		return computer.PreparedAction{}, fmt.Errorf("invalid action parameters: %w", err)
 	}
 	risk := computer.RiskForAction(rec.bind, spec.Kind, spec.Target, spec.Intent, spec.Parameters)
 	if policyRisk := rec.policy.RiskForKind(spec.Kind); policyRisk == computer.RiskForbidden || policyRisk == computer.RiskReview {
@@ -226,6 +273,11 @@ func (d *cuaDriverAdapter) PerformChecked(ctx context.Context, sessionID compute
 	}
 
 	parameters := computer.CloneActionParameters(action.Parameters)
+	if action.Target.Locator != "" {
+		if _, ok := parameters["element_token"]; !ok {
+			parameters["element_token"] = action.Target.Locator
+		}
+	}
 	if point := action.Target.PixelFallback; point != nil {
 		if _, ok := parameters["x"]; !ok {
 			parameters["x"] = point.X
@@ -255,6 +307,22 @@ func (d *cuaDriverAdapter) PerformChecked(ctx context.Context, sessionID compute
 	}
 	res := computer.NewActionResult(action.ActionID, sessionID, status)
 	res.CUAStatus = result.Text
+	if result.StructuredJSON != "" {
+		var details struct {
+			Effect   string `json:"effect"`
+			Route    string `json:"route"`
+			Delivery *struct {
+				Mode string `json:"mode"`
+			} `json:"delivery"`
+		}
+		if json.Unmarshal([]byte(result.StructuredJSON), &details) == nil {
+			res.CUAEffect = details.Effect
+			res.CUARoute = details.Route
+			if details.Delivery != nil {
+				res.CUADeliveryMode = details.Delivery.Mode
+			}
+		}
+	}
 	if result.IsError && status != computer.ActionUnknownOutcome {
 		res.ErrorCode = result.ErrorCode
 		if res.ErrorCode == "" {

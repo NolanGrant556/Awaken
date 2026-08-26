@@ -326,8 +326,7 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
   cursor: pointer;
   transition:
     background-color 140ms ease,
-    color 140ms ease,
-    transform 140ms ease;
+    color 140ms ease;
   -webkit-app-region: no-drag;
 }
 
@@ -342,10 +341,6 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
 .workbench-chrome-icon.is-active {
   background: var(--aw-bg-fill-main);
   color: var(--aw-text-primary);
-}
-
-.workbench-chrome-icon:active {
-  transform: translateY(1px);
 }
 
 .workbench-chrome-right {

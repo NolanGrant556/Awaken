@@ -327,6 +327,36 @@ describe("RunStage layout", () => {
 
     expect(expandedChrome).toContain("padding: 0 12px;");
     expect(collapsedChrome).toContain("padding: 0 12px 0 8px;");
+    expect(expandedChrome).not.toContain("transform");
+    expect(designSystemStyles).not.toMatch(
+      /\.workbench-chrome-icon:active\s*\{[^}]*transform\s*:/,
+    );
+  });
+
+  it("uses semantic disclosure identities instead of mutable render positions", () => {
+    const appSource = readFileSync(
+      new URL("./App.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(appSource).toContain(
+      "`${disclosureScope}:segment:${segment.id}`",
+    );
+    expect(appSource).toContain(
+      "`${disclosureKey}:action:${action.id}`",
+    );
+    expect(appSource).toContain(
+      '}:turn:${turn.id}`;',
+    );
+    expect(appSource).toContain(
+      "`${turnDisclosureScope}:body:${segment.id}`",
+    );
+    expect(appSource).not.toContain(
+      "`${disclosureScope}:segment:${segmentIndex}`",
+    );
+    expect(appSource).not.toContain(
+      "`${disclosureKey}:action:${actionIndex}`",
+    );
   });
 
   it("renders provider reconnect as a narrative item instead of a timer chrome slot", () => {

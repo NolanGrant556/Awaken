@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createWorkbenchDisclosureStore,
   rendererWorkbenchDisclosureStore,
+  useAutomaticWorkbenchDisclosure,
   useWorkbenchDisclosure,
   type WorkbenchDisclosureStore,
 } from "./workbenchDisclosureStore";
@@ -86,6 +87,80 @@ describe("Workbench disclosure store", () => {
     expect(afterNavigation.getSnapshot("thread:one:turn:3:execution")).toBe(true);
     expect(afterNavigation.getSnapshot("thread:one:turn:3:tool:0")).toBe(false);
     expect(afterNavigation.getSnapshot("thread:one:turn:4:execution")).toBeUndefined();
+  });
+
+  it("preserves a live batch's automatic open state across replay remount", async () => {
+    const store = createWorkbenchDisclosureStore();
+    const disclosureKey = "thread:one:turn:run-1:batch:tool-1";
+
+    function Batch({ active, replayed }: { active: boolean; replayed: boolean }) {
+      const [open] = useAutomaticWorkbenchDisclosure(store, disclosureKey, {
+        active,
+        replayed,
+      });
+      return createElement("span", null, String(open ?? active));
+    }
+
+    const firstContainer = document.createElement("div");
+    const firstRoot = createRoot(firstContainer);
+    await act(async () => {
+      firstRoot.render(createElement(Batch, { active: true, replayed: false }));
+    });
+    expect(firstContainer.textContent).toBe("true");
+    expect(store.getSnapshot(disclosureKey)).toBe(true);
+    await act(async () => firstRoot.unmount());
+
+    const replayContainer = document.createElement("div");
+    const replayRoot = createRoot(replayContainer);
+    await act(async () => {
+      replayRoot.render(createElement(Batch, { active: false, replayed: true }));
+    });
+    expect(replayContainer.textContent).toBe("true");
+    expect(store.getSnapshot(disclosureKey)).toBe(true);
+    await act(async () => replayRoot.unmount());
+  });
+
+  it("keeps live automatic completion and explicit user choices authoritative", async () => {
+    const store = createWorkbenchDisclosureStore();
+    const disclosureKey = "thread:one:turn:run-2:batch:tool-2";
+
+    function Batch({ active }: { active: boolean }) {
+      const [open, setOpen] = useAutomaticWorkbenchDisclosure(store, disclosureKey, {
+        active,
+        replayed: false,
+      });
+      return createElement(
+        "button",
+        { type: "button", onClick: () => setOpen(false) },
+        String(open ?? active),
+      );
+    }
+
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(Batch, { active: true }));
+    });
+    expect(container.textContent).toBe("true");
+
+    await act(async () => {
+      root.render(createElement(Batch, { active: false }));
+    });
+    expect(container.textContent).toBe("false");
+
+    await act(async () => {
+      root.render(createElement(Batch, { active: true }));
+    });
+    await act(async () => {
+      container.querySelector("button")?.click();
+    });
+    expect(store.getSnapshot(disclosureKey)).toBe(false);
+
+    await act(async () => {
+      root.render(createElement(Batch, { active: true }));
+    });
+    expect(container.textContent).toBe("false");
+    await act(async () => root.unmount());
   });
 
   it("does not notify when the value is unchanged", () => {

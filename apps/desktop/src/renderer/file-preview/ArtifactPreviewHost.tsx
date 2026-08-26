@@ -5,6 +5,7 @@ import type { RuntimeClient } from "../runtime/client";
 import ImagePreview from "./ImagePreview";
 import PreviewErrorBoundary from "./PreviewErrorBoundary";
 import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
+import { useProjectFilePreviewPrimaryClick } from "./useProjectFilePreviewPrimaryClick";
 import WebviewPreview from "./WebviewPreview";
 
 const MarkdownPreview = lazy(() => import("./MarkdownPreview"));
@@ -22,8 +23,10 @@ export type ArtifactPreviewHostProps = {
     | "closeProjectFilePreview"
     | "openArtifact"
     | "revealArtifact"
-  >;
+  > &
+    Partial<Pick<RuntimeClient, "onProjectFilePreviewInteraction">>;
   selection: ArtifactPreviewSelection;
+  onPreviewPrimaryClick?: () => void;
 };
 
 type ArtifactPreviewState =
@@ -41,6 +44,7 @@ function previewRequestId(): string {
 export default function ArtifactPreviewHost({
   runtimeClient,
   selection,
+  onPreviewPrimaryClick,
 }: ArtifactPreviewHostProps) {
   const [retryGeneration, setRetryGeneration] = useState(0);
   const [guestLoading, setGuestLoading] = useState(false);
@@ -103,6 +107,16 @@ export default function ArtifactPreviewHost({
     },
     [closeActivePreview],
   );
+
+  const officePreviewId =
+    state.status === "ready" && state.preview.kind === "office"
+      ? state.preview.previewId
+      : undefined;
+  useProjectFilePreviewPrimaryClick({
+    runtimeClient,
+    previewId: officePreviewId,
+    onPreviewPrimaryClick,
+  });
 
   function runArtifactAction(
     action: (request: ArtifactOpenRequest) => Promise<{ ok: boolean; message?: string }>,

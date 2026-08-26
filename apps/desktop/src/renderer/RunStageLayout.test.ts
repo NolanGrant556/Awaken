@@ -296,6 +296,21 @@ describe("RunStage layout", () => {
     expect(actions).toContain("flex: 0 0 auto;");
   });
 
+  it("keeps Artifact tabs mounted while project-file slots become active", () => {
+    const appSource = readFileSync(
+      new URL("./App.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(appSource).toContain(
+      "artifactPreviewTabsState.tabs.map((artifactTab) =>",
+    );
+    expect(appSource).toContain(
+      'dispatchArtifactPreviewTabs({ type: "deactivate" });\n    dispatchFileWorkspaceTabs({ type: "open", tab });',
+    );
+    expect(appSource).not.toContain("setDeliverablePreview");
+  });
+
   it("keeps the inspector toggle on the same right-side anchor when collapsed", () => {
     const designSystemStyles = readFileSync(
       new URL(

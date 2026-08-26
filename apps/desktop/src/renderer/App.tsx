@@ -196,7 +196,12 @@ import {
 import { ProjectFilesWorkspace } from "./ProjectFilesWorkspace";
 import ProjectFileIcon from "./ProjectFileIcon";
 import type { ProjectFileWorkspaceMode } from "./file-preview/FilePreviewHost";
-import type { ArtifactPreviewSelection } from "./file-preview/ArtifactPreviewHost";
+import {
+  activeArtifactPreviewTab,
+  artifactPreviewTabsReducer,
+  createArtifactPreviewTabsState,
+  type ArtifactPreviewTab,
+} from "./artifactPreviewTabs";
 import {
   activeProjectFileTab,
   activeProjectFileTabSlot,
@@ -2544,8 +2549,14 @@ export function App() {
     undefined,
     createProjectFileTabsState,
   );
-  const [deliverablePreview, setDeliverablePreview] =
-    useState<ArtifactPreviewSelection>();
+  const [artifactPreviewTabsState, dispatchArtifactPreviewTabs] = useReducer(
+    artifactPreviewTabsReducer,
+    undefined,
+    createArtifactPreviewTabsState,
+  );
+  const deliverablePreview = activeArtifactPreviewTab(
+    artifactPreviewTabsState,
+  )?.selection;
   const [selectedSubagentTaskId, setSelectedSubagentTaskId] = useState<string | undefined>();
   const [openSubagentTaskId, setOpenSubagentTaskId] = useState<string | undefined>();
   const [cancellingSubagentTaskId, setCancellingSubagentTaskId] = useState<string | undefined>();
@@ -2686,7 +2697,7 @@ export function App() {
     setArtifactMediaMetadata({});
     setMediaPreview(null);
     setPinnedMedia(null);
-    setDeliverablePreview(undefined);
+    dispatchArtifactPreviewTabs({ type: "reset" });
   }, [runtimeState.activeThreadId]);
 
   useEffect(() => {
@@ -6006,12 +6017,12 @@ export function App() {
     setExpandedFileComposerIdleMode("full");
     setExpandedFileComposerTrackedRun(undefined);
     dispatchFileWorkspaceTabs({ type: "reset" });
-    setDeliverablePreview(undefined);
+    dispatchArtifactPreviewTabs({ type: "reset" });
     setFileWorkspaceInspectorWidth(undefined);
   }
 
   function handleOpenProjectFileTab(tab: ProjectFileWorkspaceTab): void {
-    setDeliverablePreview(undefined);
+    dispatchArtifactPreviewTabs({ type: "deactivate" });
     dispatchFileWorkspaceTabs({ type: "open", tab });
     setFileWorkspaceMode(tab.mode);
     handleShowFileWorkspaceSurface();
@@ -6019,7 +6030,7 @@ export function App() {
 
   function handleAddProjectFileTab(): void {
     if (!fileWorkspaceProjectId) return;
-    setDeliverablePreview(undefined);
+    dispatchArtifactPreviewTabs({ type: "deactivate" });
     dispatchFileWorkspaceTabs({
       type: "add",
       projectId: fileWorkspaceProjectId,
@@ -6029,7 +6040,7 @@ export function App() {
   }
 
   function handleActivateProjectFileTab(slot: ProjectFileTabSlot): void {
-    setDeliverablePreview(undefined);
+    dispatchArtifactPreviewTabs({ type: "deactivate" });
     dispatchFileWorkspaceTabs({ type: "activate", tabId: slot.id });
     setFileWorkspaceMode(slot.tab?.mode ?? "files");
     handleShowFileWorkspaceSurface();
@@ -6041,7 +6052,57 @@ export function App() {
       tabId,
     });
     dispatchFileWorkspaceTabs({ type: "close", tabId });
-    setFileWorkspaceMode(activeProjectFileTab(nextState)?.mode ?? "files");
+    const nextProjectSlot = activeProjectFileTabSlot(nextState);
+    if (nextProjectSlot) {
+      setFileWorkspaceMode(nextProjectSlot.tab?.mode ?? "files");
+      return;
+    }
+    const previousArtifactTab = artifactPreviewTabsState.tabs.at(-1);
+    if (previousArtifactTab) {
+      dispatchArtifactPreviewTabs({
+        type: "activate",
+        tabId: previousArtifactTab.id,
+      });
+    }
+    setFileWorkspaceMode("files");
+  }
+
+  function handleActivateArtifactPreviewTab(tab: ArtifactPreviewTab): void {
+    dispatchArtifactPreviewTabs({ type: "activate", tabId: tab.id });
+    setFileWorkspaceMode("files");
+    handleShowFileWorkspaceSurface();
+  }
+
+  function handleCloseArtifactPreviewTab(tabId: string): void {
+    const closingIndex = artifactPreviewTabsState.tabs.findIndex(
+      (tab) => tab.id === tabId,
+    );
+    const closingActive = artifactPreviewTabsState.activeTabId === tabId;
+    const hasRightArtifact = closingIndex >= 0 && Boolean(
+      artifactPreviewTabsState.tabs[closingIndex + 1],
+    );
+    const firstProjectSlot = fileWorkspaceTabsState.tabs.find(
+      (slot) => slot.projectId === fileWorkspaceProjectId,
+    );
+    const nextState = artifactPreviewTabsReducer(artifactPreviewTabsState, {
+      type: "close",
+      tabId,
+    });
+    dispatchArtifactPreviewTabs({ type: "close", tabId });
+    if (closingActive && !hasRightArtifact && firstProjectSlot) {
+      dispatchArtifactPreviewTabs({ type: "deactivate" });
+      dispatchFileWorkspaceTabs({
+        type: "activate",
+        tabId: firstProjectSlot.id,
+      });
+      setFileWorkspaceMode(firstProjectSlot.tab?.mode ?? "files");
+      return;
+    }
+    if (!activeArtifactPreviewTab(nextState)) {
+      setFileWorkspaceMode(
+        activeProjectFileTab(fileWorkspaceTabsState)?.mode ?? "files",
+      );
+    }
   }
 
   function handleOpenDeliverablePreview(
@@ -6052,11 +6113,14 @@ export function App() {
     },
     threadId: string,
   ): void {
-    setDeliverablePreview({
-      threadId,
-      runId: file.runId,
-      artifactId: file.artifactId,
-      title: file.title,
+    dispatchArtifactPreviewTabs({
+      type: "open",
+      selection: {
+        threadId,
+        runId: file.runId,
+        artifactId: file.artifactId,
+        title: file.title,
+      },
     });
     setPinnedMedia(null);
     handleOpenFileWorkspace("files");
@@ -7109,7 +7173,8 @@ export function App() {
     (slot) => slot.projectId === fileWorkspaceProjectId,
   );
   const showFileWorkspacePlaceholder =
-    !deliverablePreview && visibleFileWorkspaceTabSlots.length === 0;
+    artifactPreviewTabsState.tabs.length === 0 &&
+    visibleFileWorkspaceTabSlots.length === 0;
   const fileWorkspaceTabsAreActive =
     !fileWorkspaceExpandedActive || expandedWorkspaceSurface === "file";
   const currentConversationLabel = activeThread?.label?.trim() || "新建任务";
@@ -7355,15 +7420,21 @@ export function App() {
                   <div className="workbench-chrome-file-mode">
                     <div className="project-files-tab-rail">
                       <div className="project-files-tabs" role="tablist" aria-label="打开的文件">
-                      {deliverablePreview ? (() => {
+                      {artifactPreviewTabsState.tabs.map((artifactTab) => {
+                        const artifactSelection = artifactTab.selection;
                         const iconKind = projectFileIconKind({
                           kind: "file",
-                          name: deliverablePreview.title,
+                          name: artifactSelection.title,
                         });
                         return (
                           <div
+                            key={artifactTab.id}
                             className={`project-files-tab${
-                              fileWorkspaceTabsAreActive ? " is-active" : ""
+                              deliverablePreview &&
+                              artifactTab.id === artifactPreviewTabsState.activeTabId &&
+                              fileWorkspaceTabsAreActive
+                                ? " is-active"
+                                : ""
                             }`}
                             role="presentation"
                           >
@@ -7371,9 +7442,12 @@ export function App() {
                               type="button"
                               className="project-files-tab__activate"
                               role="tab"
-                              aria-selected={fileWorkspaceTabsAreActive}
-                              title={deliverablePreview.title}
-                              onClick={handleShowFileWorkspaceSurface}
+                              aria-selected={
+                                artifactTab.id === artifactPreviewTabsState.activeTabId &&
+                                fileWorkspaceTabsAreActive
+                              }
+                              title={artifactSelection.title}
+                              onClick={() => handleActivateArtifactPreviewTab(artifactTab)}
                             >
                               <span
                                 className="project-files-tab__file-icon"
@@ -7382,21 +7456,21 @@ export function App() {
                                 <ProjectFileIcon kind={iconKind} size={16} />
                               </span>
                               <span className="project-files-tab__label">
-                                {deliverablePreview.title}
+                                {artifactSelection.title}
                               </span>
                             </button>
                             <button
                               type="button"
                               className="project-files-tab__close"
-                              aria-label={`关闭 ${deliverablePreview.title}`}
-                              title={`关闭 ${deliverablePreview.title}`}
-                              onClick={() => setDeliverablePreview(undefined)}
+                              aria-label={`关闭 ${artifactSelection.title}`}
+                              title={`关闭 ${artifactSelection.title}`}
+                              onClick={() => handleCloseArtifactPreviewTab(artifactTab.id)}
                             >
                               <AwakenIcon concept="close" size={16} />
                             </button>
                           </div>
                         );
-                      })() : null}
+                      })}
                       {visibleFileWorkspaceTabSlots.map((slot) => {
                         const tab = slot.tab;
                         const active =
@@ -8161,7 +8235,9 @@ export function App() {
                         expanded={fileWorkspaceExpandedActive}
                         onWorkspaceModeChange={(mode) => {
                           setFileWorkspaceMode(mode);
-                          if (mode === "browser") setDeliverablePreview(undefined);
+                          if (mode === "browser") {
+                            dispatchArtifactPreviewTabs({ type: "deactivate" });
+                          }
                         }}
                         onOpenTab={handleOpenProjectFileTab}
                         onExpand={handleExpandFileWorkspace}

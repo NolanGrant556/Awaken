@@ -804,12 +804,12 @@
 @supports (content-visibility: auto) {
   .execution-process-disclosure-body
     > :is(
-      .thought-trace:not(.thought-trace-open),
-      .tool-trace-group:not(.tool-trace-group-open),
-      .tool-trace-item:not(:has(.tool-trace-line-open))
+      .thought-trace[data-disclosure-state="closed"],
+      .tool-trace-group[data-disclosure-state="closed"],
+      .tool-trace-item[data-disclosure-state="closed"]
     ),
   .tool-trace-group-lines
-    > .tool-trace-item:not(:has(.tool-trace-line-open)) {
+    > .tool-trace-item[data-disclosure-state="closed"] {
     content-visibility: auto;
     contain-intrinsic-size: auto 30px;
   }

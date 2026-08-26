@@ -51,7 +51,13 @@ export type ProjectFilesWorkspaceProps = {
     | "saveProjectMarkdownFile"
     | "openArtifact"
     | "revealArtifact"
-  > & Partial<Pick<RuntimeClient, "createProjectAgentsFile">>;
+  > &
+    Partial<
+      Pick<
+        RuntimeClient,
+        "createProjectAgentsFile" | "onProjectFilePreviewInteraction"
+      >
+    >;
   projectId?: string;
   projectLabel?: string;
   folders: ProjectFilesFolder[];
@@ -959,6 +965,7 @@ export function ProjectFilesWorkspace({
             <ArtifactPreviewHost
               runtimeClient={runtimeClient}
               selection={artifactPreview}
+              onPreviewPrimaryClick={onPreviewPrimaryClick}
             />
           ) : activeTab || workspaceMode === "browser" ? (
             <FilePreviewHost

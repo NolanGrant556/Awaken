@@ -30,6 +30,16 @@ describe("execution trace disclosures", () => {
     container.remove();
   });
 
+  function finishGridDisclosureTransition(element: Element | null): void {
+    if (!element) return;
+    const event = new Event("transitionend", { bubbles: true });
+    Object.defineProperty(event, "propertyName", {
+      configurable: true,
+      value: "grid-template-rows",
+    });
+    element.dispatchEvent(event);
+  }
+
   it("keeps thinking open while active, collapses it when done, and honors a manual reopen", async () => {
     await act(async () => {
       root.render(<AwakenThoughtTrace text="Inspecting" status="active" />);
@@ -164,7 +174,7 @@ describe("execution trace disclosures", () => {
     );
   });
 
-  it("keeps detail mounted for the close animation, then removes the hidden DOM", async () => {
+  it("keeps detail mounted until the close transition finishes", async () => {
     vi.useFakeTimers();
     try {
       await act(async () => {
@@ -186,9 +196,74 @@ describe("execution trace disclosures", () => {
       expect(container.querySelector(".tool-trace-output-card")).not.toBeNull();
 
       await act(async () => vi.advanceTimersByTime(321));
+      expect(container.querySelector(".tool-trace-output-card")).not.toBeNull();
+
+      const opacityEvent = new Event("transitionend", { bubbles: true });
+      Object.defineProperty(opacityEvent, "propertyName", {
+        configurable: true,
+        value: "opacity",
+      });
+      await act(async () =>
+        container
+          .querySelector(".tool-trace-output-disclosure")
+          ?.dispatchEvent(opacityEvent),
+      );
+      expect(container.querySelector(".tool-trace-output-card")).not.toBeNull();
+
+      await act(async () =>
+        finishGridDisclosureTransition(
+          container.querySelector(".tool-trace-output-disclosure"),
+        ),
+      );
       expect(container.querySelector(".tool-trace-output-card")).toBeNull();
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it("removes closing detail immediately when reduced motion is requested", async () => {
+    const originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn(() => ({
+        matches: true,
+        media: "(prefers-reduced-motion: reduce)",
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+    try {
+      await act(async () => {
+        root.render(
+          <AwakenToolTraceLine
+            title="Reduced motion tool"
+            output="complete output"
+            status="done"
+            defaultOpen
+          />,
+        );
+      });
+      const row = container.querySelector<HTMLButtonElement>(
+        "button.tool-trace-line",
+      );
+
+      await act(async () => row?.click());
+
+      expect(container.querySelector(".tool-trace-output-card")).toBeNull();
+      expect(
+        container.querySelector(".tool-trace-item")?.getAttribute(
+          "data-disclosure-state",
+        ),
+      ).toBe("closed");
+    } finally {
+      Object.defineProperty(window, "matchMedia", {
+        configurable: true,
+        value: originalMatchMedia,
+      });
     }
   });
 
@@ -272,6 +347,15 @@ describe("execution trace disclosures", () => {
       /\.tool-trace-output-card\s*\{[\s\S]*?max-height:\s*320px;[\s\S]*?overflow:\s*hidden;/,
     );
     expect(componentStyles).toMatch(
+      /\.tool-trace-output-rail\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?overflow:\s*hidden;/,
+    );
+    expect(componentStyles).not.toMatch(
+      /\.tool-trace-output-rail\s*\{[^}]*padding:/,
+    );
+    expect(componentStyles).toMatch(
+      /\.tool-trace-output-card\s*\{[\s\S]*?margin:\s*2px 0 7px;/,
+    );
+    expect(componentStyles).toMatch(
       /\.tool-trace-output-card\s*\{[\s\S]*?background:\s*var\(--aw-surface-code\);/,
     );
     expect(componentStyles).toMatch(
@@ -331,6 +415,39 @@ describe("execution trace disclosures", () => {
     expect(container.querySelectorAll(".tool-trace-item")).toHaveLength(2);
   });
 
+  it("keeps group rows mounted until the group close transition finishes", async () => {
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        root.render(
+          <AwakenToolTraceGroup
+            actions={[
+              { id: "read", title: "Read files", status: "done" },
+              { id: "search", title: "Search files", status: "done" },
+            ]}
+            defaultOpen
+          />,
+        );
+      });
+      const heading = container.querySelector<HTMLButtonElement>(
+        ".tool-trace-group-heading",
+      );
+
+      await act(async () => heading?.click());
+      await act(async () => vi.advanceTimersByTime(341));
+      expect(container.querySelectorAll(".tool-trace-item")).toHaveLength(2);
+
+      await act(async () =>
+        finishGridDisclosureTransition(
+          container.querySelector(".tool-trace-group-disclosure"),
+        ),
+      );
+      expect(container.querySelectorAll(".tool-trace-item")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("lets Chromium skip only offscreen collapsed trace layout", () => {
     const workbenchStyles = readFileSync(
       resolve(process.cwd(), "src/renderer/styles/workbench.css"),
@@ -338,7 +455,10 @@ describe("execution trace disclosures", () => {
     );
 
     expect(workbenchStyles).toMatch(
-      /\.thought-trace:not\(\.thought-trace-open\)[\s\S]*?content-visibility:\s*auto;/,
+      /\.thought-trace\[data-disclosure-state="closed"\][\s\S]*?content-visibility:\s*auto;/,
+    );
+    expect(workbenchStyles).not.toMatch(
+      /data-disclosure-state="closing"[\s\S]*?content-visibility:\s*auto;/,
     );
     expect(workbenchStyles).toMatch(
       /contain-intrinsic-size:\s*auto 30px;/,
@@ -551,10 +671,19 @@ describe("execution trace disclosures", () => {
       /\.tool-trace-line\s*\{[\s\S]*?width:\s*fit-content;/,
     );
     expect(componentStyles).toMatch(
-      /\.tool-trace-group-lines\s*\{[\s\S]*?padding-left:\s*0;/,
+      /\.tool-trace-group-heading\s*\{[\s\S]*?grid-template-columns:\s*18px minmax\(0, auto\) minmax\(0, auto\) 16px;[\s\S]*?gap:\s*5px;[\s\S]*?padding:\s*3px 6px 3px 0;/,
     );
     expect(componentStyles).toMatch(
-      /\.tool-trace-output-rail\s*\{[\s\S]*?padding:\s*2px 0 7px;/,
+      /\.tool-trace-line\s*\{[\s\S]*?grid-template-columns:\s*18px minmax\(0, auto\) 16px;[\s\S]*?gap:\s*5px;[\s\S]*?padding:\s*4px 6px 4px 0;/,
+    );
+    expect(componentStyles).toMatch(
+      /\.tool-trace-group-lines\s*\{[\s\S]*?padding-left:\s*0;/,
+    );
+    expect(componentStyles).not.toMatch(
+      /\.tool-trace-output-rail\s*\{[^}]*padding:/,
+    );
+    expect(componentStyles).toMatch(
+      /\.tool-trace-output-card\s*\{[\s\S]*?margin:\s*2px 0 7px;/,
     );
     expect(componentStyles).not.toContain(".tool-trace-output-rail::before");
     expect(componentStyles).toMatch(

@@ -1,6 +1,6 @@
 # AwakenSkillCard
 
-所有来源共用的紧凑 Skill 卡片。卡片固定为 `78px` 高，描述限制为单行，图标为 `36px`，开关使用 compact 规格；Awaken、项目、全局与 Agents 来源不得各自覆盖另一套卡片高度。来源以小字紧跟 Skill 名称，卡片不显示“可预览”提示和删除入口；卡片主体负责进入统一 `SKILL.md` 预览，右侧原子 `AwakenSwitch` 独立请求启停。
+所有来源共用的紧凑 Skill 卡片。卡片固定为 `78px` 高，描述限制为单行，图标为 `36px`，开关使用 compact 规格；Awaken、项目、全局与 Agents 来源不得各自覆盖另一套卡片高度。来源以小字紧跟 Skill 名称，卡片不显示“可预览”提示和删除入口；卡片主体负责进入统一 Skill 包预览，右侧原子 `AwakenSwitch` 独立请求启停。
 
 ## Props
 

@@ -80,7 +80,7 @@ function useSkillPreviewDocument(
           return;
         }
         setErrorMessage(
-          error instanceof Error ? error.message : "无法读取这个 Skill 的 SKILL.md",
+          error instanceof Error ? error.message : "无法读取这个 Skill 包",
         );
       })
       .finally(() => {
@@ -113,6 +113,8 @@ export function SkillPreviewContent({
     <AwakenSkillPreviewContent
       frontmatterRaw={preview?.frontmatterRaw}
       markdown={preview?.bodyMarkdown}
+      resources={preview?.resources}
+      resourcesTruncated={preview?.resourcesTruncated}
       loading={loading}
       errorMessage={errorMessage}
       skill={presentation ?? undefined}
@@ -138,10 +140,12 @@ export function SkillPreviewDialog({
   return (
     <AwakenSkillPreviewDialogComponent
       open={target !== null}
-      title={presentation ? `${presentation.name} 的 SKILL.md` : "SKILL.md 预览"}
+      title={presentation ? `${presentation.name} 的 Skill 包` : "Skill 包预览"}
       contentKey={target ? `${target.catalogEntryId}:${target.projectRoot ?? ""}` : undefined}
       frontmatterRaw={preview?.frontmatterRaw}
       markdown={preview?.bodyMarkdown}
+      resources={preview?.resources}
+      resourcesTruncated={preview?.resourcesTruncated}
       loading={loading}
       errorMessage={errorMessage}
       skill={presentation ?? undefined}

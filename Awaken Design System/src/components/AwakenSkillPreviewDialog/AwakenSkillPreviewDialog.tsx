@@ -1,6 +1,6 @@
 import "./AwakenSkillPreviewDialog.css";
 import { AwakenIcon } from "../AwakenIcon";
-import { useEffect, useRef, type ReactNode, type Ref } from "react";
+import { useEffect, useRef, type CSSProperties, type ReactNode, type Ref } from "react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
 import { AwakenMarkdownRenderer } from "../AwakenMarkdownRenderer";
@@ -57,7 +57,7 @@ export function AwakenSkillPreviewSurface({
         ref={documentRef}
         className="aw-skill-preview-document"
         tabIndex={0}
-        aria-label="SKILL.md 内容"
+        aria-label="Skill 包内容"
       >
         {children}
       </div>
@@ -68,6 +68,8 @@ export function AwakenSkillPreviewSurface({
 export type AwakenSkillPreviewContentProps = {
   frontmatterRaw?: string;
   markdown?: string;
+  resources?: AwakenSkillPreviewResource[];
+  resourcesTruncated?: boolean;
   loading?: boolean;
   errorMessage?: string | null;
   skill?: AwakenSkillPreviewMeta;
@@ -76,9 +78,23 @@ export type AwakenSkillPreviewContentProps = {
   onEnabledChange?: (enabled: boolean) => void;
 };
 
+export type AwakenSkillPreviewResource = {
+  path: string;
+  kind: "file" | "directory" | "symlink" | "other";
+  sizeBytes: number;
+};
+
+function resourceSizeLabel(resource: AwakenSkillPreviewResource): string {
+  if (resource.kind !== "file") return "";
+  if (resource.sizeBytes < 1024) return `${resource.sizeBytes} B`;
+  return `${(resource.sizeBytes / 1024).toFixed(resource.sizeBytes < 10 * 1024 ? 1 : 0)} KB`;
+}
+
 export function AwakenSkillPreviewContent({
   frontmatterRaw,
   markdown,
+  resources = [],
+  resourcesTruncated = false,
   loading = false,
   errorMessage,
   skill,
@@ -90,14 +106,40 @@ export function AwakenSkillPreviewContent({
     <div className="aw-skill-preview__content">
       {loading ? (
         <div className="aw-skill-preview__status" role="status" aria-live="polite">
-          正在读取 SKILL.md…
+          正在读取 Skill 包…
         </div>
       ) : null}
       {errorMessage ? (
         <div className="aw-skill-preview__error" role="alert">
-          <strong>无法预览 SKILL.md</strong>
+          <strong>无法预览 Skill 包</strong>
           <span>{errorMessage}</span>
         </div>
+      ) : null}
+      {!loading && !errorMessage && resources.length > 0 ? (
+        <section className="aw-skill-preview__resources" aria-label="Skill 包文件">
+          <div className="aw-skill-preview__resources-head">
+            <strong>包内文件</strong>
+            <span>{resources.length} 项{resourcesTruncated ? "，仅显示前 512 项" : ""}</span>
+          </div>
+          <ul className="aw-skill-preview__resource-tree">
+            {resources.map((resource) => {
+              const depth = Math.max(0, resource.path.split("/").length - 1);
+              return (
+                <li
+                  key={`${resource.kind}:${resource.path}`}
+                  className={`aw-skill-preview__resource aw-skill-preview__resource--${resource.kind}`}
+                  aria-label={resource.path}
+                  style={{ "--aw-skill-resource-depth": depth } as CSSProperties}
+                >
+                  <AwakenIcon concept={resource.kind === "directory" ? "folder-expanded" : "file-text"} size={14} />
+                  <code>{resource.path.split("/").at(-1)}</code>
+                  {resource.kind === "symlink" ? <span>链接</span> : null}
+                  {resourceSizeLabel(resource) ? <span>{resourceSizeLabel(resource)}</span> : null}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       ) : null}
       {!loading && !errorMessage && frontmatterRaw ? (
         <pre className="aw-skill-preview__frontmatter" aria-label="YAML frontmatter">
@@ -131,7 +173,7 @@ export function AwakenSkillPreviewContent({
       ref={documentRef}
       className="aw-skill-preview-document"
       tabIndex={0}
-      aria-label="SKILL.md 内容"
+      aria-label="Skill 包内容"
     >
       {previewContent}
     </div>
@@ -165,6 +207,8 @@ export type AwakenSkillPreviewDialogProps = {
   contentKey?: string;
   frontmatterRaw?: string;
   markdown?: string;
+  resources?: AwakenSkillPreviewResource[];
+  resourcesTruncated?: boolean;
   loading?: boolean;
   errorMessage?: string | null;
   skill?: AwakenSkillPreviewMeta;
@@ -177,10 +221,12 @@ export type AwakenSkillPreviewDialogProps = {
 
 export function AwakenSkillPreviewDialog({
   open,
-  title = "SKILL.md 预览",
+  title = "Skill 包预览",
   contentKey,
   frontmatterRaw,
   markdown,
+  resources,
+  resourcesTruncated,
   loading = false,
   errorMessage,
   skill,
@@ -215,6 +261,8 @@ export function AwakenSkillPreviewDialog({
       <AwakenSkillPreviewContent
         frontmatterRaw={frontmatterRaw}
         markdown={markdown}
+        resources={resources}
+        resourcesTruncated={resourcesTruncated}
         loading={loading}
         errorMessage={errorMessage}
         skill={skill}

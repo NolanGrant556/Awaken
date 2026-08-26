@@ -41,6 +41,9 @@ func NewManager(reg *skills.SkillRegistry, logger Logger) *Manager {
 	if err := tool.RegisterToolForceWithMode(&ResourceReadTool{registry: reg}, tool.DefinitionValidationStrictAll); err != nil {
 		logger.Warnf("failed to register skill resource reader: %v", err)
 	}
+	if err := tool.RegisterToolForceWithMode(&ResourceListTool{registry: reg}, tool.DefinitionValidationStrictAll); err != nil {
+		logger.Warnf("failed to register skill resource lister: %v", err)
+	}
 	if err := tool.RegisterToolForceWithMode(&SkillInstallTool{registry: reg}, tool.DefinitionValidationStrictBuiltin); err != nil {
 		logger.Warnf("failed to register skill installer: %v", err)
 	}
@@ -180,6 +183,7 @@ func (m *Manager) Shutdown() {
 	m.closed = true
 	m.mu.Unlock()
 	tool.UnregisterTool(CatalogToolName)
+	tool.UnregisterTool(ResourceListToolName)
 	tool.UnregisterTool(ResourceReadToolName)
 	tool.UnregisterTool(SkillInstallToolName)
 }

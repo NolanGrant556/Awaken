@@ -86,6 +86,14 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 			result[fallbackID] = base
 			continue
 		}
+		if source == SourcePlugin {
+			if err := ValidateAgentSkillEntrypoint(string(raw), dirName); err != nil {
+				base.UnavailableReason = err.Error()
+				base.Diagnostics = []SkillDiagnostic{{Code: "skill_agent_spec_invalid", Message: base.UnavailableReason, Severity: "error"}}
+				result[fallbackID] = base
+				continue
+			}
+		}
 
 		def, err := ParseFrontmatter(string(raw))
 		if err != nil {

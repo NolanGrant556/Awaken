@@ -19,6 +19,12 @@ func TestReadSkillPreviewPreservesFrontmatterAndBody(t *testing.T) {
 	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(packageRoot, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packageRoot, "references", "guide.md"), []byte("guide"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	defs := LoadDir(root, SourceUser)
 	def := defs["preview-skill"]
 	if def == nil {
@@ -34,6 +40,12 @@ func TestReadSkillPreviewPreservesFrontmatterAndBody(t *testing.T) {
 	}
 	if preview.BodyMarkdown != "\n# Preview\n\n- one\n- two\n" {
 		t.Fatalf("unexpected body: %q", preview.BodyMarkdown)
+	}
+	if len(preview.Resources) != 3 || preview.Resources[0].Path != "SKILL.md" || preview.Resources[1].Path != "references" || preview.Resources[1].Kind != "directory" || preview.Resources[2].Path != "references/guide.md" {
+		t.Fatalf("unexpected package resources: %+v", preview.Resources)
+	}
+	if preview.ResourcesTruncated {
+		t.Fatal("small package inventory should not be truncated")
 	}
 	if CatalogEntryID(def) == "" || strings.Contains(CatalogEntryID(def), packageRoot) {
 		t.Fatalf("catalog entry identity must be non-empty and opaque: %q", CatalogEntryID(def))
@@ -74,6 +86,9 @@ func TestReadSkillPreviewSupportsFlatLegacyMarkdown(t *testing.T) {
 	}
 	if preview.FrontmatterRaw != "" || preview.BodyMarkdown != raw {
 		t.Fatalf("unexpected legacy preview: %#v", preview)
+	}
+	if len(preview.Resources) != 1 || preview.Resources[0].Path != "review.md" {
+		t.Fatalf("legacy preview should expose its one entrypoint: %+v", preview.Resources)
 	}
 }
 

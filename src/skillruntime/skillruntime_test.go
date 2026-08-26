@@ -3,6 +3,7 @@ package skillruntime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -180,6 +181,86 @@ func TestResourceReadToolReadsWithinSkillPackage(t *testing.T) {
 	binaryOutcome, err := reader.ExecuteOutcome(context.Background(), `{"skill_id":"sample","path":"references/asset.bin"}`, nil)
 	if err != nil || binaryOutcome.ErrorCode != "skill_resource_binary" {
 		t.Fatalf("binary resource should route to file/artifact tools: outcome=%+v err=%v", binaryOutcome, err)
+	}
+}
+
+func TestResourceListToolDiscoversCompleteSkillPackage(t *testing.T) {
+	workspace := t.TempDir()
+	sourceRoot := filepath.Join(workspace, ".awaken", "skills")
+	skillRoot := filepath.Join(sourceRoot, "sample")
+	if err := os.MkdirAll(filepath.Join(skillRoot, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(skillRoot, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(skillRoot, "bulk"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillRoot, "SKILL.md"), []byte("---\nname: sample\ndescription: List package resources when testing.\n---\nUse references/guide.md.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillRoot, "references", "guide.md"), []byte("guide body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillRoot, "assets", "template.txt"), []byte("template"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Keep references/ alphabetically after more than one inventory page. A
+	// prefix request must apply its filter before the 512-entry budget.
+	for index := 0; index < skills.MaxSkillResourceInventoryEntries; index++ {
+		name := fmt.Sprintf("entry-%03d.txt", index)
+		if err := os.WriteFile(filepath.Join(skillRoot, "bulk", name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	registry := skills.NewSkillRegistry(nil)
+	registry.LoadFromSources(map[skills.SourceOrigin]string{skills.SourceProject: sourceRoot})
+	lister := &ResourceListTool{registry: registry}
+	if err := tool.ValidateToolWithMode(lister, tool.DefinitionValidationStrictAll); err != nil {
+		t.Fatalf("skill_resource_list must pass strict validation: %v", err)
+	}
+	outcome, err := lister.ExecuteOutcome(context.Background(), `{"skill_id":"sample","prefix":"references"}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := tool.ResolveDefinition(lister)
+	outcome = outcome.Normalize(tool.OutcomeNormalizationContext{
+		OperationType: ResourceListToolName, OutputSchema: definition.OutputSchema,
+		StrictOutputSchema: true, DeclaredSideEffects: definition.SideEffects,
+	})
+	if outcome.Status != tool.OutcomeSucceeded || outcome.Operation == nil || outcome.Operation.SideEffectState != tool.OutcomeSideEffectNone {
+		t.Fatalf("unexpected resource list outcome: %+v", outcome)
+	}
+	entries, ok := outcome.Details["entries"].([]any)
+	if !ok || len(entries) != 2 {
+		t.Fatalf("unexpected filtered resource entries: %#v", outcome.Details["entries"])
+	}
+	first, firstOK := entries[0].(map[string]any)
+	second, secondOK := entries[1].(map[string]any)
+	if !firstOK || !secondOK || first["path"] != "references" || first["kind"] != "directory" || second["path"] != "references/guide.md" || second["kind"] != "file" {
+		t.Fatalf("resource list did not preserve the package tree: %#v", entries)
+	}
+	if outcome.Details["prefix"] != "references" || outcome.Details["inventory_truncated"] != false {
+		t.Fatalf("resource list details incomplete: %+v", outcome.Details)
+	}
+	fullOutcome, err := lister.ExecuteOutcome(context.Background(), `{"skill_id":"sample"}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullOutcome = fullOutcome.Normalize(tool.OutcomeNormalizationContext{
+		OperationType: ResourceListToolName, OutputSchema: definition.OutputSchema,
+		StrictOutputSchema: true, DeclaredSideEffects: definition.SideEffects,
+	})
+	fullEntries, ok := fullOutcome.Details["entries"].([]any)
+	if !ok || len(fullEntries) != skills.MaxSkillResourceInventoryEntries || fullOutcome.Details["inventory_truncated"] != true {
+		t.Fatalf("full inventory must be bounded and marked truncated: entries=%d details=%+v", len(fullEntries), fullOutcome.Details)
+	}
+
+	denied, err := lister.ExecuteOutcome(context.Background(), `{"skill_id":"sample","prefix":"../outside"}`, nil)
+	if err != nil || denied.ErrorCode != "skill_resource_list_invalid_input" {
+		t.Fatalf("resource list traversal should be rejected: outcome=%+v err=%v", denied, err)
 	}
 }
 
@@ -699,6 +780,7 @@ func TestSafeGitEnvironmentDropsAmbientExecutionConfiguration(t *testing.T) {
 func TestManagerRegistersSkillInstallThroughStrictGate(t *testing.T) {
 	previous, previousErr := tool.GetRegisteredTool(SkillInstallToolName)
 	previousResource, previousResourceErr := tool.GetRegisteredTool(ResourceReadToolName)
+	previousResourceList, previousResourceListErr := tool.GetRegisteredTool(ResourceListToolName)
 	previousExport, previousExportErr := tool.GetRegisteredTool(SkillPackageExportToolName)
 	defer func() {
 		if previousErr == nil {
@@ -710,6 +792,11 @@ func TestManagerRegistersSkillInstallThroughStrictGate(t *testing.T) {
 			_ = tool.RegisterToolForce(previousResource.Runtime)
 		} else {
 			tool.UnregisterTool(ResourceReadToolName)
+		}
+		if previousResourceListErr == nil {
+			_ = tool.RegisterToolForce(previousResourceList.Runtime)
+		} else {
+			tool.UnregisterTool(ResourceListToolName)
 		}
 		if previousExportErr == nil {
 			_ = tool.RegisterToolForce(previousExport.Runtime)
@@ -739,6 +826,16 @@ func TestManagerRegistersSkillInstallThroughStrictGate(t *testing.T) {
 	}
 	if _, ok := resource.Runtime.(tool.OutcomeTool); !ok {
 		t.Fatal("skill_resource_read must execute through the structured OutcomeTool path")
+	}
+	resourceList, err := tool.GetRegisteredTool(ResourceListToolName)
+	if err != nil {
+		t.Fatalf("skill_resource_list was not registered: %v", err)
+	}
+	if resourceList.Origin != tool.SourceSkill || resourceList.Quality != tool.DefinitionQualityStrict {
+		t.Fatalf("skill_resource_list must be a strict first-party Skill tool: origin=%s quality=%s warnings=%v", resourceList.Origin, resourceList.Quality, resourceList.Warnings)
+	}
+	if _, ok := resourceList.Runtime.(tool.OutcomeTool); !ok {
+		t.Fatal("skill_resource_list must execute through the structured OutcomeTool path")
 	}
 	exporter, err := tool.GetRegisteredTool(SkillPackageExportToolName)
 	if err != nil {

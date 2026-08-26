@@ -61,6 +61,12 @@ describe("SkillPreviewDialog", () => {
             getSkillPreview: vi.fn().mockResolvedValue({
               frontmatterRaw: "---\nname: skill\n---",
               bodyMarkdown: "# Skill body",
+              resources: [
+                { path: "SKILL.md", kind: "file", sizeBytes: 120 },
+                { path: "references", kind: "directory", sizeBytes: 0 },
+                { path: "references/guide.md", kind: "file", sizeBytes: 640 },
+              ],
+              resourcesTruncated: true,
             }),
           }}
           onEnabledChange={vi.fn()}
@@ -77,6 +83,9 @@ describe("SkillPreviewDialog", () => {
     );
     expect(document.querySelector(".aw-skill-preview__delete")).not.toBeNull();
     expect(document.querySelector(".aw-skill-preview-document")).not.toBeNull();
+    expect(document.querySelector(".aw-skill-preview__resources")?.textContent).toContain("包内文件");
+    expect(document.querySelector(".aw-skill-preview__resources")?.textContent).toContain("仅显示前 512 项");
+    expect(document.querySelector(".aw-skill-preview__resource-tree")?.textContent).toContain("guide.md");
     expect(closeButton?.getAttribute("title")).toBeNull();
 
     await act(async () => closeButton?.focus());

@@ -434,7 +434,7 @@ func infoMode(info os.FileInfo) os.FileMode {
 	return info.Mode().Perm()
 }
 
-func TestValidatePluginReportsInvalidEmbeddedSkill(t *testing.T) {
+func TestValidatePluginIsolatesInvalidEmbeddedSkill(t *testing.T) {
 	store := testStore(t)
 	src := t.TempDir()
 	writePluginFixture(t, src, "invalid.skill", false)
@@ -446,12 +446,15 @@ func TestValidatePluginReportsInvalidEmbeddedSkill(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if validation.Valid {
-		t.Fatalf("invalid embedded Skill passed validation: %+v", validation)
+	if !validation.Valid {
+		t.Fatalf("one invalid Skill should not invalidate the Agent Plugin package: %+v", validation)
+	}
+	if validation.SkillCount != 0 {
+		t.Fatalf("invalid embedded Skill was counted as loadable: %+v", validation)
 	}
 	found := false
 	for _, diagnostic := range validation.Diagnostics {
-		if diagnostic.Code == "plugin_skill_invalid" && diagnostic.Severity == "error" {
+		if diagnostic.Code == "plugin_skill_invalid" && diagnostic.Severity == "warning" {
 			found = true
 		}
 	}

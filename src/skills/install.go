@@ -27,9 +27,10 @@ var (
 )
 
 type SkillPackage struct {
-	rawSkill     []byte
-	fallbackName string
-	files        []SkillPackageFile
+	rawSkill              []byte
+	fallbackName          string
+	expectedDirectoryName string
+	files                 []SkillPackageFile
 }
 
 type SkillPackageFile struct {
@@ -110,6 +111,9 @@ func PackageFromPath(sourcePath string) (SkillPackage, error) {
 func ValidateSkillPackage(pkg SkillPackage) (SkillPackageValidation, error) {
 	if len(bytes.TrimSpace(pkg.rawSkill)) == 0 {
 		return SkillPackageValidation{}, fmt.Errorf("SKILL.md is empty")
+	}
+	if err := ValidateAgentSkillEntrypoint(string(pkg.rawSkill), pkg.expectedDirectoryName); err != nil {
+		return SkillPackageValidation{}, err
 	}
 
 	def, err := ParseFrontmatter(string(pkg.rawSkill))
@@ -384,7 +388,9 @@ func packageFromDirectory(sourceDir string) (SkillPackage, error) {
 	if len(bytes.TrimSpace(rawSkill)) == 0 {
 		return SkillPackage{}, fmt.Errorf("SKILL.md is empty")
 	}
-	return SkillPackage{rawSkill: rawSkill, fallbackName: filepath.Base(root), files: files}, nil
+	return SkillPackage{
+		rawSkill: rawSkill, fallbackName: filepath.Base(root), expectedDirectoryName: filepath.Base(root), files: files,
+	}, nil
 }
 
 func resolvePackageRoot(sourceDir string) (string, error) {
@@ -500,7 +506,13 @@ func extractZipSkillPackage(fileName string, data []byte) (SkillPackage, error) 
 	if len(bytes.TrimSpace(rawSkill)) == 0 {
 		return SkillPackage{}, fmt.Errorf("SKILL.md is empty")
 	}
-	return SkillPackage{rawSkill: rawSkill, fallbackName: fallbackName, files: files}, nil
+	expectedDirectoryName := ""
+	if packageRoot != "" {
+		expectedDirectoryName = path.Base(packageRoot)
+	}
+	return SkillPackage{
+		rawSkill: rawSkill, fallbackName: fallbackName, expectedDirectoryName: expectedDirectoryName, files: files,
+	}, nil
 }
 
 func cleanZipPath(name string) (string, error) {

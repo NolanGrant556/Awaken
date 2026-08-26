@@ -331,6 +331,34 @@ describe("RunStage layout", () => {
     expect(designSystemStyles).not.toMatch(
       /\.workbench-chrome-icon:active\s*\{[^}]*transform\s*:/,
     );
+
+    const panelToggle = cssRule(
+      designSystemStyles,
+      ".workbench-chrome-panel-toggle",
+    );
+    expect(panelToggle).toContain("position: absolute;");
+    expect(panelToggle).toContain(
+      "top: calc(50% - 11px + var(--aw-window-control-top-offset, -1px));",
+    );
+    expect(panelToggle).toContain("right: 12px;");
+    expect(panelToggle).toContain("appearance: none;");
+    expect(panelToggle).toContain("-webkit-appearance: none;");
+    expect(panelToggle).not.toContain("transform");
+
+    expect(designSystemStyles).toMatch(
+      /\.desktop-root-inspector-expanded\s+\.workbench-chrome-right:has\(\.workbench-chrome-panel-toggle\)\s*\{\s*padding-right: 42px;/,
+    );
+    expect(designSystemStyles).toMatch(
+      /\.workbench-chrome-panel-toggle:hover,\s*\.workbench-chrome-panel-toggle:focus-visible\s*\{\s*box-shadow: var\(--aw-shadow-control\);/,
+    );
+    expect(designSystemStyles).not.toMatch(
+      /\.workbench-chrome-panel-toggle::(?:before|after)/,
+    );
+
+    const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    expect(appSource).toContain(
+      "fileWorkspaceExpandedActive && !inspectorCollapsed ? (",
+    );
   });
 
   it("keeps chrome icons raster-stable at press and toggle time", () => {

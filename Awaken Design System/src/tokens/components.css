@@ -369,6 +369,16 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
   padding: 0 12px 0 8px;
 }
 
+/* Keep the Inspector toggle outside the flex item whose width animates from
+   the 42px collapsed rail to the user-resized Inspector width. Its visual
+   position is owned by the fixed 44px chrome instead, so fractional widths
+   during the 170ms panel transition cannot re-rasterize the icon at a moving
+   local origin. The expanded slot reserves the button plus its 8px gap. */
+.desktop-root-inspector-expanded
+  .workbench-chrome-right:has(.workbench-chrome-panel-toggle) {
+  padding-right: 42px;
+}
+
 .workbench-chrome-status {
   display: inline-flex;
   align-items: center;
@@ -396,7 +406,19 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
 }
 
 .workbench-chrome-panel-toggle {
+  position: absolute;
+  z-index: 1;
+  top: calc(50% - 11px + var(--aw-window-control-top-offset, -1px));
+  right: 12px;
   flex: 0 0 auto;
+  appearance: none;
+  -webkit-appearance: none;
+  box-shadow: none;
+}
+
+.workbench-chrome-panel-toggle:hover,
+.workbench-chrome-panel-toggle:focus-visible {
+  box-shadow: var(--aw-shadow-control);
 }
 
 .aw-workbench-shell {

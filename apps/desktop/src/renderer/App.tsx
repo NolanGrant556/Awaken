@@ -7595,7 +7595,7 @@ export function App() {
                       </Tooltip>
                     </div>
                     <div className="project-files-chrome-actions">
-                      {fileWorkspaceExpandedActive ? (
+                      {fileWorkspaceExpandedActive && !inspectorCollapsed ? (
                         <Tooltip label="收起面板" placement="bottom">
                           <button
                             type="button"

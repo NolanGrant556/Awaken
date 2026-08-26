@@ -228,8 +228,9 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 			return llmReq, hookErr
 		}
 	}
+	tailBudget := compactRetainedTailBudget(state, llmReq.Messages)
 	if !reactive {
-		if compactable := compactableHistoryTokens(llmReq.Messages, state.CompactTarget, state.ConservativeProjectedTokens()); compactable < minCompactableHistoryTokens {
+		if compactable := compactableHistoryTokens(llmReq.Messages, tailBudget, state.ConservativeProjectedTokens()); compactable < minCompactableHistoryTokens {
 			err := errNotEnoughCompactableHistory
 			g.recordCompactFailure(err)
 			failedState := g.withRunState(llmReq.ContextWindowState)
@@ -243,7 +244,7 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 		Mode:            mode,
 		Envelope:        *llmReq.EnvelopeDebug,
 		Messages:        llmReq.Messages,
-		TargetTokens:    llmReq.ContextWindowState.CompactTarget,
+		TargetTokens:    tailBudget,
 		HookInstruction: hookInstruction,
 	}
 	if emitter, ok := events.(*runEventEmitter); ok && emitter != nil {
@@ -375,6 +376,40 @@ func (g *contextGovernor) evaluateCompactPostcondition(llmReq LLMRequest, preSta
 		return fmt.Errorf("%w: post=%d pre=%d", errInsufficientReduction, postMessages, preMessages)
 	}
 	return nil
+}
+
+// compactRetainedTailBudget converts the whole-request CompactTarget into the
+// conversation-tail budget handed to the compactor. CompactTarget is defined
+// against the effective input window, but splitCompactGroups only constrains
+// the retained message tail: the stable prefix (system prompt, tools, MCP,
+// Skill catalog, Memory, instruction prefix) and the new summary re-enter the
+// post-compact request on top of that tail. Subtracting them keeps the target
+// meaning "post-compact request size", not "retained tail size".
+//
+// When the provider reported more tokens for the last sent request than the
+// local estimate captured at send time, the budget is additionally deflated by
+// that ratio: the local estimator is not a provider tokenizer, and right after
+// a compact the provider anchor is reset, so this is the only moment the known
+// under-estimation bias can be applied. The deflation never inflates the
+// budget and the result never drops below one token, which still retains the
+// protected latest group.
+func compactRetainedTailBudget(state ContextWindowState, messages []convcontext.Message) int {
+	budget := state.CompactTarget
+	if budget <= 0 {
+		return budget
+	}
+	if state.LastAPIUsageTokens > 0 && state.LastSentEstimatedInputTokens > 0 &&
+		state.LastAPIUsageTokens > state.LastSentEstimatedInputTokens {
+		budget = int(int64(budget) * int64(state.LastSentEstimatedInputTokens) / int64(state.LastAPIUsageTokens))
+	}
+	if overhead := state.EstimatedTokens - estimateMessagesTokens(messages); overhead > 0 {
+		budget -= overhead
+	}
+	budget -= compactSummaryDefaultMaxTokens
+	if budget < 1 {
+		return 1
+	}
+	return budget
 }
 
 func compactableHistoryTokens(messages []convcontext.Message, targetTokens, projectedTokens int) int {

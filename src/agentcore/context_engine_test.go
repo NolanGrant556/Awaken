@@ -427,6 +427,102 @@ func minInt(a, b int) int {
 	return b
 }
 
+func TestCompactRetainedTailBudgetTargetsWholeRequest(t *testing.T) {
+	// 40_000 单字符正文按 chars/4 估算为 10_000 token 的对话部分。
+	messages := []convcontext.Message{{Role: convcontext.RoleUser, Content: strings.Repeat("a", 40_000)}}
+
+	t.Run("subtracts stable prefix overhead and summary reserve", func(t *testing.T) {
+		state := ContextWindowState{CompactTarget: 75_000, EstimatedTokens: 43_227}
+		if got := compactRetainedTailBudget(state, messages); got != 33_581 {
+			t.Fatalf("budget=%d, want 75000-33227-8192=33581", got)
+		}
+	})
+
+	t.Run("deflates by provider anchor when the provider counted more", func(t *testing.T) {
+		state := ContextWindowState{
+			CompactTarget: 75_000, EstimatedTokens: 20_000,
+			LastAPIUsageTokens: 200_000, LastSentEstimatedInputTokens: 100_000,
+		}
+		if got := compactRetainedTailBudget(state, messages); got != 19_308 {
+			t.Fatalf("budget=%d, want 75000/2-10000-8192=19308", got)
+		}
+	})
+
+	t.Run("never inflates when the provider counted less", func(t *testing.T) {
+		state := ContextWindowState{
+			CompactTarget: 75_000, EstimatedTokens: 20_000,
+			LastAPIUsageTokens: 90_000, LastSentEstimatedInputTokens: 100_000,
+		}
+		if got := compactRetainedTailBudget(state, messages); got != 56_808 {
+			t.Fatalf("budget=%d, want 75000-10000-8192=56808", got)
+		}
+	})
+
+	t.Run("clamps to one token instead of flipping to a default window", func(t *testing.T) {
+		state := ContextWindowState{CompactTarget: 9_000, EstimatedTokens: 30_000}
+		if got := compactRetainedTailBudget(state, messages); got != 1 {
+			t.Fatalf("budget=%d, want 1", got)
+		}
+	})
+
+	t.Run("passes non-positive targets through unchanged", func(t *testing.T) {
+		if got := compactRetainedTailBudget(ContextWindowState{}, messages); got != 0 {
+			t.Fatalf("budget=%d, want 0", got)
+		}
+	})
+}
+
+func TestContextGovernorHandsWholeRequestBudgetToCompactor(t *testing.T) {
+	// 10 条 36_000 字符正文各 ≈ 9_000 token，对话共 90_000 token，
+	// 总估算 92_000，因此稳定前缀开销为 2_000。
+	originalMessages := make([]convcontext.Message, 0, 10)
+	for i := 0; i < 10; i++ {
+		originalMessages = append(originalMessages, convcontext.Message{
+			Role: convcontext.RoleUser, Content: strings.Repeat("a", 36_000),
+		})
+	}
+	compactedMessages := []convcontext.Message{{
+		Role: convcontext.RoleUser, Content: "summary", CompactBoundaryID: "compact-budget",
+	}}
+	originalEnvelope := ContextEnvelope{Messages: originalMessages}
+	compactedEnvelope := ContextEnvelope{Messages: compactedMessages}
+
+	var seenTargets []int
+	engine := &fakeContextEngine{
+		evaluateFn: func(envelope ContextEnvelope) ContextWindowState {
+			if len(envelope.Messages) > 0 && envelope.Messages[0].CompactBoundaryID != "" {
+				return testContextWindowState(5400)
+			}
+			return testContextWindowState(92_000)
+		},
+		compactFn: func(ctx stdcontext.Context, req CompactRequest) (CompactResult, error) {
+			seenTargets = append(seenTargets, req.TargetTokens)
+			return CompactResult{
+				BoundaryID:     "compact-budget",
+				SummaryMessage: convcontext.Message{Role: convcontext.RoleUser, Content: "summary"},
+				Messages:       compactedMessages,
+			}, nil
+		},
+	}
+	governor := newContextGovernor(engine, func() (LLMRequest, error) {
+		return LLMRequest{Messages: compactedMessages, EnvelopeDebug: &compactedEnvelope}, nil
+	}, func(_ stdcontext.Context, result CompactResult) error { return nil })
+	// 上一请求供应商实报是发送时估算的两倍：预算按 2 倍通缩。
+	governor.RecordSentRequestEstimate(80_000)
+	governor.RecordResponseUsage(160_000)
+
+	if _, err := governor.PrepareRequest(stdcontext.Background(), LLMRequest{
+		Messages:      originalMessages,
+		EnvelopeDebug: &originalEnvelope,
+	}, &fakeContextEventSink{}); err != nil {
+		t.Fatalf("PrepareRequest returned error: %v", err)
+	}
+	// CompactTarget 30_000 ×(80_000/160_000) − 前缀开销 2_000 − 摘要预算 8_192。
+	if len(seenTargets) == 0 || seenTargets[0] != 4_808 {
+		t.Fatalf("compactor received %v, want first target 4808", seenTargets)
+	}
+}
+
 func TestContextGovernorRejectsCompactThatStaysAboveAutoThreshold(t *testing.T) {
 	envelope := ContextEnvelope{
 		Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: "large context"}},

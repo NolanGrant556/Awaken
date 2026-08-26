@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"awaken/src/agentcore"
@@ -74,6 +76,77 @@ func TestRefreshThreadContextSnapshotPersistsV4ForDurableHistory(t *testing.T) {
 	}
 	if again.Persisted {
 		t.Fatal("unchanged replay projection must not append duplicate snapshots")
+	}
+}
+
+// The transcript-triggered rebuild must assemble the same provider-visible
+// request sources as StartRun. A rebuild that drops the AGENTS instruction
+// snapshot fabricates an `agents_instructions_changed` epoch rotation without
+// any real change, and the next live run then rotates back — silently
+// invalidating provider usage display twice per open/run cycle.
+func TestRefreshThreadContextSnapshotKeepsInstructionEpochIdentity(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	workspace := t.TempDir()
+	agentsPath := filepath.Join(workspace, ".awaken", "AGENTS.md")
+	if err := os.MkdirAll(filepath.Dir(agentsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agentsPath, []byte("# 项目规则\n输出保持简洁。\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var agents []*agentcore.Agent
+	service := newContextRefreshTestServiceWithObserver(func(agent *agentcore.Agent) {
+		agents = append(agents, agent)
+	})
+	profile := &ModelProfileConfig{
+		ProfileID: "profile-deepseek", ProviderID: "deepseek", ModelID: "deepseek-v4-pro",
+		BaseURL: "https://api.deepseek.com", Protocol: "openai_chat", APIKey: "secret",
+		CredentialRevision: 1, ContextWindow: 256_000, MaxTokens: 16_000,
+	}
+	run, err := service.StartRun(StartRunRequest{
+		Input: "seed 会话", Workspace: WorkspaceConfig{WorkspaceRoot: workspace}, ModelProfile: profile,
+	})
+	if err != nil {
+		t.Fatalf("start seed run: %v", err)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+	if len(agents) != 1 {
+		t.Fatalf("expected one live agent, got %d", len(agents))
+	}
+	live := agents[0]
+	liveConfig := live.GetConfig()
+	if liveConfig.InstructionSnapshot == nil || liveConfig.InstructionSnapshot.Digest == "" {
+		t.Fatal("live run must carry a non-empty instruction digest")
+	}
+	_, liveEpoch, err := live.ProjectCurrentContextUsage(context.Background())
+	if err != nil {
+		t.Fatalf("project live context: %v", err)
+	}
+	if liveEpoch == nil || liveEpoch.State != "created" {
+		t.Fatalf("expected created live epoch, got %+v", liveEpoch)
+	}
+
+	result, err := service.RefreshThreadContextSnapshot(context.Background(), run.ThreadID, profile)
+	if err != nil {
+		t.Fatalf("refresh thread context: %v", err)
+	}
+	if result.Snapshot.ContextEpochBoundaryReason == "agents_instructions_changed" {
+		t.Fatal("thread replay fabricated agents_instructions_changed while AGENTS.md was untouched")
+	}
+	if result.Snapshot.ContextEpochID != liveEpoch.EpochID {
+		t.Fatalf("replay projection switched epochs: live=%s replay=%s reason=%q",
+			liveEpoch.EpochID, result.Snapshot.ContextEpochID, result.Snapshot.ContextEpochBoundaryReason)
+	}
+
+	// The next fully assembled live projection must also stay on the epoch:
+	// no rotate-back cycle.
+	_, nextEpoch, err := live.ProjectCurrentContextUsage(context.Background())
+	if err != nil {
+		t.Fatalf("project post-refresh live context: %v", err)
+	}
+	if nextEpoch == nil || nextEpoch.State != "unchanged" || nextEpoch.EpochID != liveEpoch.EpochID {
+		t.Fatalf("post-refresh live projection rotated the epoch: %+v", nextEpoch)
 	}
 }
 

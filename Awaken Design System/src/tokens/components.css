@@ -312,7 +312,11 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
 
 .workbench-chrome-icon {
   position: relative;
-  top: var(--aw-window-control-top-offset, -0.75px);
+  /* The optical offset must stay on an integer CSS pixel. A fractional value
+     (e.g. -0.75px) parks the 22px button and its 1.2px-stroke icon off the
+     device pixel grid, so every re-rasterization redistributes the stroke
+     anti-aliasing and reads as a subtle jump on Retina displays. */
+  top: var(--aw-window-control-top-offset, -1px);
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
@@ -370,20 +374,25 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  opacity: 0.56;
-  transition: opacity 140ms ease;
 }
 
-.workbench-chrome-status:hover,
-.workbench-chrome-status:focus-within {
-  opacity: 1;
-}
-
+/* Idle dimming is scoped to the status text. Animating opacity on the whole
+   status container would keep the inspector toggle inside a stacking context
+   that gets promoted/demoted around hover and press, re-rasterizing the
+   stroke icon exactly when the user clicks. The icon button keeps the same
+   resting appearance as its file-mode siblings instead. */
 .workbench-chrome-state {
   color: var(--aw-text-tertiary);
   font-size: var(--aw-font-size-xs);
   line-height: var(--aw-line-height-xs);
   white-space: nowrap;
+  opacity: 0.56;
+  transition: opacity 140ms ease;
+}
+
+.workbench-chrome-status:hover .workbench-chrome-state,
+.workbench-chrome-status:focus-within .workbench-chrome-state {
+  opacity: 1;
 }
 
 .workbench-chrome-panel-toggle {
@@ -556,6 +565,27 @@ body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
   touch-action: none;
   -webkit-app-region: no-drag;
   transition: right 170ms ease;
+}
+
+/* The handle mounts at its final position the moment the inspector starts its
+   170ms expansion, so its 1px line would float over the stage ahead of the
+   moving panel edge. Fade the line in only after the panel has arrived. */
+.aw-workbench-inspector-resize-handle::before {
+  opacity: 0;
+  animation: aw-inspector-handle-line-in 120ms ease 180ms forwards;
+}
+
+@keyframes aw-inspector-handle-line-in {
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-workbench-inspector-resize-handle::before {
+    opacity: 1;
+    animation: none;
+  }
 }
 
 .aw-workbench-inspector-resize-handle:hover::after,

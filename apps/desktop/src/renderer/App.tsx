@@ -1382,8 +1382,14 @@ function providerCurrentInputTokens(usage: RuntimeModelUsage | undefined): numbe
   return safeTokenSum(cached, uncached, cacheWrite);
 }
 
+// Source/tool rebuild boundaries do not change the provider/model identity of
+// the last successful request, so its inclusive input remains displayable.
+// `agents_instructions_changed` is a prefix-source change like
+// `system_prompt_changed`; hard boundaries (provider/model/credential/
+// reasoning/compact) stay outside this set and force the local fallback.
 const PROVIDER_INPUT_COMPATIBLE_EPOCH_BOUNDARIES = new Set([
   "system_prompt_changed",
+  "agents_instructions_changed",
   "tool_removed",
   "tool_schema_changed",
   "canonical_tool_added",
@@ -1658,7 +1664,12 @@ export function contextUsagePanelData(
     autoCompactThresholdTokens:
       snapshot?.autoCompactThresholdTokens ?? contextWindow.autoCompactThreshold ?? 0,
     contributions,
-    latestModelUsage: contextWindow.latestModelUsage
+    // The usage-details section must share the exact compatibility decision
+    // used for the current-total above. Rendering an identity/epoch-
+    // incompatible record next to a local-estimate total would show a panel
+    // whose "输入 Token" exceeds its own current total.
+    latestModelUsage: contextWindow.latestModelUsage &&
+      usageMatchesSnapshot(contextWindow.latestModelUsage, snapshot, currentModel)
       ? {
           status: contextWindow.latestModelUsage.status,
           cacheMode: contextWindow.latestModelUsage.cacheMode,

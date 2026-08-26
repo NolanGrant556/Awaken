@@ -152,6 +152,7 @@ import { useRunStageScrollController } from "./useRunStageScrollController";
 import { useRunPlanEntry } from "./useRunPlanEntry";
 import {
   rendererWorkbenchDisclosureStore,
+  useAutomaticWorkbenchDisclosure,
   useWorkbenchDisclosure,
   type WorkbenchDisclosureStore,
 } from "./workbenchDisclosureStore";
@@ -309,6 +310,7 @@ type StoredToolTraceGroupProps = Omit<
   "open" | "onOpenChange" | "renderAction"
 > & {
   disclosureKey: string;
+  replayed: boolean;
   store: WorkbenchDisclosureStore;
 };
 
@@ -318,6 +320,7 @@ function storedToolTraceGroupPropsEqual(
 ): boolean {
   return (
     previous.disclosureKey === next.disclosureKey &&
+    previous.replayed === next.replayed &&
     previous.store === next.store &&
     previous.label === next.label &&
     previous.detail === next.detail &&
@@ -333,25 +336,30 @@ function storedToolTraceGroupPropsEqual(
 const StoredToolTraceGroup = memo(function StoredToolTraceGroup({
   actions,
   disclosureKey,
+  replayed,
   store,
   ...props
 }: StoredToolTraceGroupProps) {
-  const [open, setOpen] = useWorkbenchDisclosure(store, disclosureKey);
+  const active = actions.some((action) => action.status === "active");
+  const [open, setOpen] = useAutomaticWorkbenchDisclosure(
+    store,
+    disclosureKey,
+    { active, replayed },
+  );
   const renderAction = useCallback(
     (action: ToolTraceAction, lineProps: AwakenToolTraceLineProps) => {
-      const actionIndex = actions.indexOf(action);
       const storedLineProps = { ...lineProps };
       delete storedLineProps.open;
       delete storedLineProps.onOpenChange;
       return (
         <StoredToolTraceLine
           {...storedLineProps}
-          disclosureKey={`${disclosureKey}:action:${actionIndex}`}
+          disclosureKey={`${disclosureKey}:action:${action.id}`}
           store={store}
         />
       );
     },
-    [actions, disclosureKey, store],
+    [disclosureKey, store],
   );
   return (
     <ToolTraceGroup
@@ -6576,8 +6584,8 @@ export function App() {
     animateToolEntry = true,
     disclosureScope = turnId,
   ) {
-    return projectNarrativeActivitySegments({ turnId, items }).map((segment, segmentIndex) => {
-      const segmentDisclosureKey = `${disclosureScope}:segment:${segmentIndex}`;
+    return projectNarrativeActivitySegments({ turnId, items }).map((segment) => {
+      const segmentDisclosureKey = `${disclosureScope}:segment:${segment.id}`;
       if (segment.kind === "item") {
         return renderNarrativeItem(
           segment.item,
@@ -6587,6 +6595,11 @@ export function App() {
         );
       }
       const actions = actionsForActivityBatch(segment, animateToolEntry);
+      const replayed = segment.items.every((item) =>
+        item.kind === "exploring"
+          ? item.actions.every((action) => replayedNarrativeItemIds.has(action.id))
+          : replayedNarrativeItemIds.has(item.id),
+      );
       const searchOnly = segment.items.every(
         (item) =>
           item.kind === "exploring" &&
@@ -6607,6 +6620,7 @@ export function App() {
           disclosureKey={`${segmentDisclosureKey}:batch`}
           store={workbenchDisclosureStore}
           actions={actions}
+          replayed={replayed}
           label={summary.label}
           detail={summary.detail}
           icon={searchOnly ? SEARCH_TRACE_GROUP_ICON : undefined}
@@ -6696,6 +6710,9 @@ export function App() {
           disclosureKey={`${disclosureKey}:batch`}
           store={workbenchDisclosureStore}
           actions={actions}
+          replayed={item.actions.every((action) =>
+            replayedNarrativeItemIds.has(action.id),
+          )}
           animateItems={animateToolEntry}
         />
       );
@@ -8130,16 +8147,16 @@ export function App() {
 
                       {showCenterComposer ? null : (
                         <ExecutionFeed>
-                          {narrativeSections.leadItems.map((item, index) =>
+                          {narrativeSections.leadItems.map((item) =>
                             renderNarrativeItem(
                               item,
-                              `lead:${item.id}:${index}`,
+                              `lead:${item.id}`,
                               true,
-                              `thread:${runtimeState.activeThreadId ?? runtimeState.threadId ?? "draft"}:lead:${index}`,
+                              `thread:${runtimeState.activeThreadId ?? runtimeState.threadId ?? "draft"}:lead:${item.id}`,
                             ),
                           )}
                           {narrativeSections.turns.map((turn, index) => {
-                            const turnDisclosureScope = `thread:${runtimeState.activeThreadId ?? runtimeState.threadId ?? "draft"}:turn:${index}`;
+                            const turnDisclosureScope = `thread:${runtimeState.activeThreadId ?? runtimeState.threadId ?? "draft"}:turn:${turn.id}`;
                             const isLatestPrompt = turn.id === latestPromptId;
                             const isActiveTurn = turn.id === activeWorkbenchTurnId;
                             const settledElapsedMs = narrativeTurnElapsedMs(turn.items);
@@ -8171,7 +8188,7 @@ export function App() {
 
                             return (
                               <section
-                                key={`${turn.id}:${index}`}
+                                key={turn.id}
                                 data-execution-turn-id={turn.id}
                                 className={`execution-turn-section${
                                   isLatestPrompt ? " execution-turn-section-latest" : ""
@@ -8204,12 +8221,12 @@ export function App() {
                                         {...turnTiming}
                                       />
                                     )}
-                                    {turnBodySegments.flatMap((segment, segmentIndex) =>
+                                    {turnBodySegments.flatMap((segment) =>
                                       renderTurnBodySegment(
                                         turn.id,
                                         segment,
                                         turnTiming,
-                                        `${turnDisclosureScope}:body:${segmentIndex}`,
+                                        `${turnDisclosureScope}:body:${segment.id}`,
                                       ),
                                     )}
                                   </div>

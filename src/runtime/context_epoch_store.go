@@ -212,7 +212,13 @@ func contextEpochBoundaryReason(current contextEpochSidecar, candidate agentcore
 	switch {
 	case current.SchemaVersion != agentcore.ContextEpochSchemaVersion || current.PromptSchemaVersion != candidate.PromptSchemaVersion:
 		return "prompt_schema_incompatible"
-	case current.InstructionDigest != candidate.InstructionDigest:
+	// An empty candidate digest means the projection did not evaluate the
+	// instruction snapshot (for example a partial replay assembly). It is not
+	// evidence that the AGENTS instructions changed: a real load always
+	// produces a non-empty digest, even when zero sources exist. Rotating on
+	// it would fabricate an `agents_instructions_changed` boundary and
+	// invalidate provider usage without any real change.
+	case candidate.InstructionDigest != "" && current.InstructionDigest != candidate.InstructionDigest:
 		return "agents_instructions_changed"
 	case current.WorkspaceRoot != candidate.WorkspaceRoot:
 		return "workspace_moved"

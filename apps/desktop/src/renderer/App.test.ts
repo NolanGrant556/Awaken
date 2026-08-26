@@ -2418,6 +2418,99 @@ describe("context usage presentation", () => {
     expect(data?.currentInputTokens).toBe(27_200);
   });
 
+  it("keeps provider input and usage details across an agents-instructions epoch rotation", () => {
+    const data = contextUsagePanelData({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      snapshot: {
+        schemaVersion: 4,
+        snapshotId: "ctx-agents-epoch-b",
+        estimatorId: "awaken_leaf_v4",
+        basis: "current_projection",
+        modelId: "MiniMax-M3",
+        protocolFamily: "openai_chat",
+        contextEpochId: "epoch-b",
+        contextEpochBoundaryReason: "agents_instructions_changed",
+        modelWindowTokens: 267_307,
+        outputReserveTokens: 16_000,
+        effectiveInputWindowTokens: 251_307,
+        estimatedInputTokens: 120_689,
+        warningThresholdTokens: 213_610,
+        autoCompactThresholdTokens: 226_176,
+        compactTargetTokens: 75_392,
+        contributions: [{ kind: "conversation", estimatedTokens: 120_689, sourceCount: 8 }],
+        generatedAt: "2026-08-26T00:00:02Z",
+      },
+      latestModelUsage: {
+        schemaVersion: 1,
+        requestId: "req-minimax",
+        purpose: "agent_turn",
+        modelId: "MiniMax-M3",
+        protocolFamily: "openai_chat",
+        contextEpochId: "epoch-a",
+        cacheMode: "affinity",
+        cacheKeyApplied: true,
+        inputTokens: 155_489,
+        cachedInputTokens: 149_622,
+        uncachedInputTokens: 5_867,
+        outputTokens: 1_200,
+        usageComplete: true,
+        latencyMs: 20,
+        status: "succeeded",
+        completedAt: "2026-08-26T00:00:01Z",
+      },
+    });
+
+    expect(data?.currentInputTokens).toBe(155_489);
+    expect(data?.latestModelUsage?.inputTokens).toBe(155_489);
+    expect(data?.latestModelUsage?.cachedInputTokens).toBe(149_622);
+  });
+
+  it("hides usage details together with the provider total across an incompatible epoch", () => {
+    const data = contextUsagePanelData({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      snapshot: {
+        schemaVersion: 4,
+        snapshotId: "ctx-compact-epoch-b",
+        estimatorId: "awaken_leaf_v4",
+        basis: "current_projection",
+        modelId: "model-a",
+        protocolFamily: "openai_chat",
+        contextEpochId: "epoch-b",
+        contextEpochBoundaryReason: "compact_succeeded",
+        modelWindowTokens: 128_000,
+        outputReserveTokens: 16_000,
+        effectiveInputWindowTokens: 112_000,
+        estimatedInputTokens: 24_000,
+        warningThresholdTokens: 95_000,
+        autoCompactThresholdTokens: 100_800,
+        compactTargetTokens: 40_000,
+        contributions: [{ kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 }],
+        generatedAt: "2026-07-19T00:00:02Z",
+      },
+      latestModelUsage: {
+        schemaVersion: 1,
+        requestId: "req-pre-compact",
+        purpose: "agent_turn",
+        modelId: "model-a",
+        protocolFamily: "openai_chat",
+        contextEpochId: "epoch-a",
+        cacheMode: "automatic_prefix",
+        inputTokens: 155_489,
+        cachedInputTokens: 149_622,
+        uncachedInputTokens: 5_867,
+        usageComplete: true,
+        latencyMs: 20,
+        status: "succeeded",
+        completedAt: "2026-07-19T00:00:01Z",
+      },
+    });
+
+    // 总量回退本地估算时，缓存/输入明细必须跟随同一兼容性判定隐藏，
+    // 不得出现“总用量小于输入与缓存”的自相矛盾面板。
+    expect(data?.currentInputTokens).toBe(24_000);
+    expect(data?.latestModelUsage).toBeNull();
+  });
+
   it("does not add local post-request deltas to provider input after tools are removed", () => {
     const data = contextUsagePanelData({
       eventType: "AWAKEN_CONTEXT_SNAPSHOT",

@@ -3634,8 +3634,12 @@ describe("macOS window chrome geometry", () => {
       chromeHeightPx: 44,
       trafficLightPosition: { x: 18, y: 14 },
       sidebarSpacerPx: 88,
-      controlTopOffsetPx: -0.75,
+      controlTopOffsetPx: -1,
     });
+  });
+
+  it("keeps the chrome control offset on an integer pixel to stay on the device pixel grid", () => {
+    expect(Number.isInteger(MACOS_WINDOW_CHROME_GEOMETRY.controlTopOffsetPx)).toBe(true);
   });
 });
 

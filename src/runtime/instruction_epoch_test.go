@@ -48,7 +48,9 @@ func TestContextEpochRotatesWhenInstructionDigestChanges(t *testing.T) {
 	if compacted.Receipt.State != "rotated" || compacted.Receipt.BoundaryReason != "compact_succeeded" || len(compacted.PrefixMessages) != 1 || compacted.PrefixMessages[0].Content != "second" {
 		t.Fatalf("successful compact did not inherit the frozen instruction prefix: %+v", compacted)
 	}
-	candidate.InstructionDigest = ""
+	// Real removal is observed through the loader as a different non-empty
+	// digest (the loader digests zero sources too); it still rotates.
+	candidate.InstructionDigest = "digest-after-removal"
 	candidate.PrefixMessages = nil
 	removed, err := store.Project(context.Background(), candidate)
 	if err != nil {
@@ -56,6 +58,50 @@ func TestContextEpochRotatesWhenInstructionDigestChanges(t *testing.T) {
 	}
 	if removed.Receipt.BoundaryReason != "agents_instructions_changed" || len(removed.PrefixMessages) != 0 {
 		t.Fatalf("removed instruction source left old content in the new epoch: %+v", removed)
+	}
+}
+
+// An empty candidate digest means the projection did not evaluate the
+// instruction snapshot (partial replay assembly), not that the AGENTS
+// instructions changed. It must never fabricate a rotation.
+func TestContextEpochIgnoresUnevaluatedInstructionDigest(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	store := NewContextEpochStore()
+	candidate := agentcore.ContextEpochCandidate{
+		ThreadID: "thread-agents-unevaluated", WorkspaceRoot: t.TempDir(), ProviderID: "provider", ProfileID: "profile",
+		ModelID: "model", ProtocolFamily: "openai_responses", PromptSchemaVersion: "awaken_prompt_v2",
+		ExactSystemPrompt: "system", InstructionDigest: "digest-live",
+		PrefixMessages: []convcontext.Message{{Role: convcontext.RoleUser, Content: "frozen", Origin: convcontext.MessageOriginSynthetic}},
+	}
+	first, err := store.Project(context.Background(), candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Receipt.State != "created" {
+		t.Fatalf("first=%+v", first.Receipt)
+	}
+	candidate.InstructionDigest = ""
+	candidate.PrefixMessages = nil
+	unevaluated, err := store.Project(context.Background(), candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unevaluated.Receipt.State != "unchanged" || unevaluated.Receipt.EpochID != first.Receipt.EpochID {
+		t.Fatalf("unevaluated instruction digest fabricated an epoch change: %+v", unevaluated.Receipt)
+	}
+	if len(unevaluated.PrefixMessages) != 1 || unevaluated.PrefixMessages[0].Content != "frozen" {
+		t.Fatalf("unchanged epoch lost its frozen instruction prefix: %+v", unevaluated.PrefixMessages)
+	}
+	// The next fully assembled projection with the original digest stays on
+	// the same epoch instead of rotating back and forth.
+	candidate.InstructionDigest = "digest-live"
+	candidate.PrefixMessages = []convcontext.Message{{Role: convcontext.RoleUser, Content: "frozen", Origin: convcontext.MessageOriginSynthetic}}
+	restored, err := store.Project(context.Background(), candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Receipt.State != "unchanged" || restored.Receipt.EpochID != first.Receipt.EpochID {
+		t.Fatalf("restored projection rotated instead of reusing the epoch: %+v", restored.Receipt)
 	}
 }
 

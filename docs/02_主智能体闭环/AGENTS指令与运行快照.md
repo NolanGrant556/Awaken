@@ -31,6 +31,8 @@ RequestBuilder 使用 `ContextEnvelope.UserContextItems` 生成 request-only syn
 
 Context Epoch schema v4 把 synthetic prefix messages 和 instruction digest 保存到 thread 的 epoch sidecar，与 conversation history 分离。指令 digest 变化、来源删除或切换主文件夹时冷旋转；指令变化的边界原因为 `agents_instructions_changed`，workspace identity 变化仍使用 `workspace_moved`。旧正文不会出现在新 Epoch 请求中。
 
+`src/instructions` 的加载结果永远携带非空 digest（零来源也对空来源集合求 digest），因此“来源删除”表现为 digest 变为另一个非空值。candidate 上的**空** digest 只能来自没有装配指令快照的投影（例如部分 replay 装配），语义是“未评估”而不是“已删除”：Epoch 比较器跳过该维度、保持当前 Epoch 与冻结 prefix，不得伪造 `agents_instructions_changed`。transcript 触发的上下文重建（`RefreshThreadContextSnapshot`）必须与 `StartRun` 一样装配指令快照，使重建投影与下一次真实请求同 identity；该合同由 `TestRefreshThreadContextSnapshotKeepsInstructionEpochIdentity` 固定。
+
 compact 成功后以 `compact_succeeded` 创建的新 Epoch继续携带当前 run 的同一 prefix；compact 失败或取消不切 Epoch。Provider retry 使用同一个 prepared request，不重新读取文件。Context Epoch pointer/sidecar/digest 损坏时阻止模型请求并保留原数据，不回退到猜测的旧规则；唯一自动归一化例外是可由 current value digest 与同 sequence 的完整 append delta 精确证明的“晚加入 source 缺少空 baseline digest”旧 v4 writer 形态，其他不一致仍 fail-stop。
 
 ## 5. 耐久、断线与重启

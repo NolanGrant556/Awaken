@@ -62,6 +62,13 @@ func (s *RunService) RefreshThreadContextSnapshot(ctx context.Context, threadID 
 	agent.GetConversation().Context.SetMessages(restored.Messages)
 	cfg := agent.GetConfig()
 	cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), restored.SkillContextBlocks...)
+	// The replay projection must assemble the same provider-visible request
+	// sources as StartRun. A projection built without the AGENTS instruction
+	// snapshot carries an empty instruction digest, which the epoch store
+	// would treat as a real change and fabricate an `agents_instructions_changed`
+	// rotation, silently invalidating the provider usage shown by Desktop.
+	instructionSnapshot := s.instructionLoader.Load(meta.Snapshot.Workspace.WorkspaceRoot, meta.Snapshot.Workspace.SessionWorkspace)
+	cfg.InstructionSnapshot = &instructionSnapshot
 	agent.Reconfigure(cfg)
 	agent.RefreshProjectedRunAvailabilityWithReason(ctx, "thread_replay", s.projectedComputerEnabled(ctx, profile))
 

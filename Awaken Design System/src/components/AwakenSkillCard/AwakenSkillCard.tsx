@@ -53,7 +53,7 @@ export function AwakenSkillCard({
         <button
           type="button"
           className="aw-skill-card__main"
-          aria-label={`查看 ${skill.name} 的 SKILL.md`}
+          aria-label={`查看 ${skill.name} 的 Skill 包`}
           onClick={onPreview}
         >
           {cardBody}

@@ -253,7 +253,7 @@ export function AwakenSkillsDemo() {
             <header>
               <h4>Skill 预览窗口</h4>
               <code>AwakenSkillPreviewDialog</code>
-              <p>展示完整 frontmatter 和安全 Markdown 正文。</p>
+              <p>展示包内文件树、完整 frontmatter 和安全 Markdown 正文。</p>
             </header>
             <div className="aw-skills-demo__part-canvas">
               <AwakenButton
@@ -263,7 +263,7 @@ export function AwakenSkillsDemo() {
                   }
                 }}
               >
-                打开 SKILL.md 预览
+                打开 Skill 包预览
               </AwakenButton>
             </div>
           </article>
@@ -283,10 +283,11 @@ export function AwakenSkillsDemo() {
 
       <AwakenSkillPreviewDialog
         open={previewSkill !== null}
-        title={previewSkill ? `${previewSkill.name} 的 SKILL.md` : "SKILL.md 预览"}
+        title={previewSkill ? `${previewSkill.name} 的 Skill 包` : "Skill 包预览"}
         contentKey={previewSkill?.id}
         frontmatterRaw={preview?.frontmatterRaw}
         markdown={preview?.markdown}
+        resources={preview?.resources}
         skill={previewSkill ? {
           name: previewSkill.name,
           sourceLabel: previewSkill.sourceLabel ?? "Skill",

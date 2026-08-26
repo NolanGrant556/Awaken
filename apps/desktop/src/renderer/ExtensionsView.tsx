@@ -2146,7 +2146,7 @@ export function ExtensionsView({
         project={openProjectSkillDialog}
         detailView={projectSkillPreviewTarget && projectSkillPreviewSkill ? {
           mode: "preview",
-          title: `${projectSkillPreviewSkill.displayName || projectSkillPreviewSkill.name} 的 SKILL.md`,
+          title: `${projectSkillPreviewSkill.displayName || projectSkillPreviewSkill.name} 的 Skill 包`,
           titleVisuallyHidden: true,
           initialFocusRef: projectSkillPreviewScrollRef,
           content: (

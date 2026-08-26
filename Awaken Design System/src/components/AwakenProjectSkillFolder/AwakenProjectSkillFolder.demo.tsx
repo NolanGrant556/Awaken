@@ -98,7 +98,7 @@ export function AwakenProjectSkillFolderDemo() {
               {activeProject.skills.map((skill) => (
                 <article className="aw-project-skill-folder-demo__skill" key={skill}>
                   <strong>{skill}</strong>
-                  <span>点击后由 Desktop 打开只读 SKILL.md 预览</span>
+                  <span>点击后由 Desktop 打开只读 Skill 包预览</span>
                 </article>
               ))}
             </div>

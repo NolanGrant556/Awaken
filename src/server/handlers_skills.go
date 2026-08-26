@@ -92,8 +92,16 @@ type previewSkillRequest struct {
 }
 
 type previewSkillResponse struct {
-	FrontmatterRaw string `json:"frontmatterRaw"`
-	BodyMarkdown   string `json:"bodyMarkdown"`
+	FrontmatterRaw     string                     `json:"frontmatterRaw"`
+	BodyMarkdown       string                     `json:"bodyMarkdown"`
+	Resources          []previewSkillResourceInfo `json:"resources"`
+	ResourcesTruncated bool                       `json:"resourcesTruncated"`
+}
+
+type previewSkillResourceInfo struct {
+	Path      string `json:"path"`
+	Kind      string `json:"kind"`
+	SizeBytes int64  `json:"sizeBytes"`
 }
 
 type skillStateResponse struct {
@@ -166,9 +174,17 @@ func (h skillHandlers) handlePreviewSkill(w http.ResponseWriter, r *http.Request
 		}
 		return
 	}
+	resources := make([]previewSkillResourceInfo, 0, len(preview.Resources))
+	for _, resource := range preview.Resources {
+		resources = append(resources, previewSkillResourceInfo{
+			Path: resource.Path, Kind: resource.Kind, SizeBytes: resource.SizeBytes,
+		})
+	}
 	writeJSON(w, http.StatusOK, previewSkillResponse{
-		FrontmatterRaw: preview.FrontmatterRaw,
-		BodyMarkdown:   preview.BodyMarkdown,
+		FrontmatterRaw:     preview.FrontmatterRaw,
+		BodyMarkdown:       preview.BodyMarkdown,
+		Resources:          resources,
+		ResourcesTruncated: preview.ResourcesTruncated,
 	})
 }
 

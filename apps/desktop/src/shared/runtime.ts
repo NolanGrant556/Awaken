@@ -1050,6 +1050,14 @@ export type GetSkillPreviewRequest = {
 export type SkillPreviewResponse = {
   frontmatterRaw: string;
   bodyMarkdown: string;
+  resources?: SkillPreviewResource[];
+  resourcesTruncated?: boolean;
+};
+
+export type SkillPreviewResource = {
+  path: string;
+  kind: "file" | "directory" | "symlink" | "other";
+  sizeBytes: number;
 };
 
 export type ModelProviderWire = {

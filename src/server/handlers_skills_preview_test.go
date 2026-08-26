@@ -146,6 +146,9 @@ func TestSkillPreviewHandlerReadsExactCatalogEntry(t *testing.T) {
 		if preview.BodyMarkdown != expectedHeading {
 			t.Fatalf("%s body=%q", source, preview.BodyMarkdown)
 		}
+		if len(preview.Resources) != 1 || preview.Resources[0].Path != "SKILL.md" || preview.Resources[0].Kind != "file" || preview.ResourcesTruncated {
+			t.Fatalf("%s package resources=%+v truncated=%v", source, preview.Resources, preview.ResourcesTruncated)
+		}
 	}
 }
 
@@ -229,5 +232,8 @@ func TestSkillListExposesBundledPreviewIdentity(t *testing.T) {
 	}
 	if preview.BodyMarkdown != "# Bundled\n" {
 		t.Fatalf("unexpected bundled preview body: %q", preview.BodyMarkdown)
+	}
+	if len(preview.Resources) != 1 || preview.Resources[0].Path != "SKILL.md" {
+		t.Fatalf("unexpected bundled preview resources: %+v", preview.Resources)
 	}
 }

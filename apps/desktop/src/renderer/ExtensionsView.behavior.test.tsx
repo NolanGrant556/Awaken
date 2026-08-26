@@ -344,7 +344,7 @@ describe("ExtensionsView behavior", () => {
     const projectBackdrop = projectDialog?.closest(".aw-dialog-backdrop");
 
     const previewButton = document.querySelector<HTMLButtonElement>(
-      '[aria-label="查看 项目报告 的 SKILL.md"]',
+      '[aria-label="查看 项目报告 的 Skill 包"]',
     );
     await act(async () => previewButton?.click());
     await settle();
@@ -375,12 +375,12 @@ describe("ExtensionsView behavior", () => {
     expect(returnedProjectDialog?.closest(".aw-dialog-backdrop")).toBe(projectBackdrop);
     expect(returnedProjectDialog?.textContent).toContain("项目报告");
     expect(document.activeElement?.getAttribute("aria-label")).toBe(
-      "查看 项目报告 的 SKILL.md",
+      "查看 项目报告 的 Skill 包",
     );
 
     expect(document.querySelector('[aria-label="删除 项目报告"]')).toBeNull();
     const reopenedPreviewButton = document.querySelector<HTMLButtonElement>(
-      '[aria-label="查看 项目报告 的 SKILL.md"]',
+      '[aria-label="查看 项目报告 的 Skill 包"]',
     );
     await act(async () => reopenedPreviewButton?.click());
     await settle();
@@ -614,7 +614,7 @@ describe("ExtensionsView behavior", () => {
     await act(async () => folder?.click());
     const projectDialog = document.querySelector<HTMLElement>('[role="dialog"]');
     const previewButton = document.querySelector<HTMLButtonElement>(
-      '[aria-label="查看 项目报告 的 SKILL.md"]',
+      '[aria-label="查看 项目报告 的 Skill 包"]',
     );
     await act(async () => previewButton?.click());
     await settle();

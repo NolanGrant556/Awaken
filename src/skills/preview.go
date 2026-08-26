@@ -24,8 +24,10 @@ var (
 // installed local SKILL.md. FrontmatterRaw includes its --- delimiters so the
 // Desktop can render the complete source without reconstructing metadata.
 type SkillPreview struct {
-	FrontmatterRaw string
-	BodyMarkdown   string
+	FrontmatterRaw     string
+	BodyMarkdown       string
+	Resources          []SkillResourceEntry
+	ResourcesTruncated bool
 }
 
 // CatalogEntryID returns an opaque, deterministic identity for one concrete
@@ -137,7 +139,16 @@ func ReadSkillPreview(def *SkillDefinition) (SkillPreview, error) {
 		return SkillPreview{}, ErrSkillPreviewNotUTF8
 	}
 	frontmatter, body := SplitSkillPreview(string(raw))
-	return SkillPreview{FrontmatterRaw: frontmatter, BodyMarkdown: body}, nil
+	inventory, err := ListSkillPackageResources(def)
+	if err != nil {
+		return SkillPreview{}, err
+	}
+	return SkillPreview{
+		FrontmatterRaw:     frontmatter,
+		BodyMarkdown:       body,
+		Resources:          inventory.Entries,
+		ResourcesTruncated: inventory.Truncated,
+	}, nil
 }
 
 func skillPreviewResolveError(label string, err error) error {

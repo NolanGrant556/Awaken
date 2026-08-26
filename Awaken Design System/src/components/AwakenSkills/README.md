@@ -9,7 +9,7 @@ Skills 管理页的 UI-only 组合组件。Gallery 中只注册“「技能」�
 - `AwakenSwitch`：原子目录中的受控 switch；Skill 卡片通过兼容外壳消费同一视觉实现。
 - `AwakenFolder`：原子目录中的项目入口，项目窗口打开期间通过 `open` 保持展开。
 - `AwakenProjectSkillsDialog`：独立目录中的项目 Skills 窗口，组合统一卡片列表。
-- `AwakenSkillPreviewDialog`：独立目录中的只读 `SKILL.md` 阅读窗口，展示原始 YAML frontmatter 与安全 Markdown 正文。
+- `AwakenSkillPreviewDialog`：独立目录中的只读 Skill 包阅读窗口，展示包内文件树、原始 YAML frontmatter 与安全 Markdown 正文。
 
 ## 受控状态
 
@@ -21,7 +21,7 @@ Skills 管理页的 UI-only 组合组件。Gallery 中只注册“「技能」�
 - `onSkillToggle`
 - `onProjectOpenChange`
 
-`AwakenProjectSkillsDialog` 和 `AwakenSkillPreviewDialog` 同样不加载项目或文件；项目数据、`frontmatterRaw`、`markdown`、`loading` 和 `errorMessage` 均由 consumer 提供。
+`AwakenProjectSkillsDialog` 和 `AwakenSkillPreviewDialog` 同样不加载项目或文件；项目数据、`resources`、`resourcesTruncated`、`frontmatterRaw`、`markdown`、`loading` 和 `errorMessage` 均由 consumer 提供。
 
 ## 交互与可访问性
 
@@ -30,7 +30,7 @@ Skills 管理页的 UI-only 组合组件。Gallery 中只注册“「技能」�
 - Skill 卡片主体与开关是两个独立可聚焦控件，切换开关不会打开预览。
 - 开关使用 `role="switch"` 与 `aria-checked`；busy 和 disabled 状态不会触发回调。
 - 项目文件夹的展开状态与项目 Dialog 保持一致。
-- 预览正文是 Dialog 内唯一纵向滚动容器；Markdown 禁止 raw HTML、Mermaid 与外部图片请求。
+- 预览包内容是 Dialog 内唯一纵向滚动容器；文件树、frontmatter 与正文共享同一内容流，Markdown 禁止 raw HTML、Mermaid 与外部图片请求。
 - 浅色与暗色全部继承 `--aw-*` tokens，并尊重 `prefers-reduced-motion`。
 
 ## 边界

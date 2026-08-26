@@ -76,7 +76,10 @@ func (s *Store) Validate(ctx context.Context, source Source) (ValidationResult, 
 				if message == "" {
 					message = "invalid Skill package"
 				}
-				diagnostics = append(diagnostics, errorDiag("plugin_skill_invalid", def.Name+": "+message))
+				// Agent Plugins isolates one invalid Skill from its siblings and
+				// independent MCP components. Report the skipped component without
+				// turning it into a package-fatal installation error.
+				diagnostics = append(diagnostics, warning("plugin_skill_invalid", def.Name+": "+message))
 			case skills.StateShadowed:
 				diagnostics = append(diagnostics, warning("plugin_skill_shadowed", def.Name+" is shadowed inside the plugin package"))
 			}
@@ -93,7 +96,7 @@ func (s *Store) Validate(ctx context.Context, source Source) (ValidationResult, 
 	}
 	valid := true
 	for _, diagnostic := range diagnostics {
-		if diagnostic.Severity == "error" {
+		if diagnostic.Severity == "error" && validationDiagnosticBlocksInstall(diagnostic.Code) {
 			valid = false
 			break
 		}
@@ -104,4 +107,13 @@ func (s *Store) Validate(ctx context.Context, source Source) (ValidationResult, 
 		Digest: digest, TargetRoot: filepath.Join(s.packagesRoot, parsed.Manifest.Name),
 		SkillCount: skillCount, ServerCount: serverCount, Diagnostics: diagnostics,
 	}, nil
+}
+
+func validationDiagnosticBlocksInstall(code string) bool {
+	switch code {
+	case "plugin_skills_invalid", "plugin_skill_invalid", "plugin_mcp_invalid", "plugin_mcp_server_invalid", "plugin_mcp_server_unsupported":
+		return false
+	default:
+		return true
+	}
 }

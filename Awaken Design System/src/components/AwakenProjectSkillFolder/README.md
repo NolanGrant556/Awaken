@@ -24,4 +24,4 @@
 ## 边界
 
 - 不依赖 Electron、runtime、项目路径或 `window.awaken`。
-- Gallery 里的项目 Skills 弹窗只用于 mock 观测；真实项目数据、弹窗以及 `SKILL.md`/Memory Markdown 预览仍由 Desktop 拥有。
+- Gallery 里的项目 Skills 弹窗只用于 mock 观测；真实项目数据、弹窗以及 Skill 包/Memory Markdown 预览仍由 Desktop 拥有。

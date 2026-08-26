@@ -2902,7 +2902,7 @@ func cloneAgentComposerSkillSelection(value *agentcore.ComposerSkillSelectionCon
 	}
 }
 
-const computerUseComposerInstruction = "请优先使用 Computer Use 观察并操作本机图形界面完成以下任务："
+const computerUseComposerInstruction = "请优先使用 Computer Use 观察并操作本机图形界面完成以下任务。对 window scope 的后台 click/double-click，观察时必须请求 accessibility，并使用同一 observation 返回的 element_token；不得把 synthetic_events 的消息投递当作目标已处理点击："
 
 func pluginComposerInstruction(name string) string {
 	return fmt.Sprintf("用户已明确选择已启用的 Awaken Plugin %q。请优先使用该插件提供的 Skill 与 MCP 工具完成以下任务：", name)

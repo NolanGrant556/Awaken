@@ -2,6 +2,7 @@
 
 .aw-profile-menu-panel {
   position: relative;
+  box-sizing: border-box;
   width: 280px;
   overflow: visible;
   border: 1px solid var(--aw-border-main);

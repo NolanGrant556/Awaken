@@ -20,6 +20,7 @@ func TestValidateActionSpecRequiresCompleteActionParameters(t *testing.T) {
 		{name: "key missing", spec: ActionSpec{Kind: ActionKey}, want: "parameters.key is required"},
 		{name: "hotkey empty", spec: ActionSpec{Kind: ActionHotkey, Parameters: map[string]any{"keys": []string{}}}, want: "non-empty array"},
 		{name: "type text empty", spec: ActionSpec{Kind: ActionTypeText, Parameters: map[string]any{"text": ""}}, want: "non-empty string"},
+		{name: "invalid delivery mode", spec: ActionSpec{Kind: ActionClick, Parameters: map[string]any{"x": 1, "y": 2, "delivery_mode": "auto"}}, want: "delivery_mode must be background or foreground"},
 		{name: "wait negative", spec: ActionSpec{Kind: ActionWait, Parameters: map[string]any{"ms": -1}}, want: "must be non-negative"},
 		{name: "unknown action", spec: ActionSpec{Kind: "teleport"}, want: "unsupported action"},
 	}
@@ -36,6 +37,7 @@ func TestValidateActionSpecRequiresCompleteActionParameters(t *testing.T) {
 func TestValidateActionSpecAcceptsZeroCoordinateAndValidKeyboardActions(t *testing.T) {
 	tests := []ActionSpec{
 		{Kind: ActionClick, Target: ElementRef{PixelFallback: &Point{X: 0, Y: 0}}},
+		{Kind: ActionClick, Target: ElementRef{Locator: "s00000001:4"}, Parameters: map[string]any{"delivery_mode": "background"}},
 		{Kind: ActionMoveCursor, Parameters: map[string]any{"x": float64(0), "y": float64(10)}},
 		{Kind: ActionDrag, Parameters: map[string]any{"from_x": 0, "from_y": 1, "to_x": 2, "to_y": 3}},
 		{Kind: ActionKey, Parameters: map[string]any{"key": "Enter"}},

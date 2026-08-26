@@ -10,7 +10,7 @@
 import {
   CuaDriver,
   CaptureScope,
-  DesktopScope,
+  ActionTarget,
   ClickButton,
   ScrollDirection,
   ScrollBy,
@@ -54,9 +54,115 @@ const BY_MAP = {
   page: ScrollBy.Page,
 };
 
+function primaryDesktopTarget() {
+  return ActionTarget.Desktop.new({ displayId: "primary" });
+}
+
+function exactWindowTarget(pid, windowID) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    throw new Error("window target pid must be a positive integer");
+  }
+  if (!Number.isSafeInteger(windowID) || windowID <= 0) {
+    throw new Error("window target windowID must be a positive safe integer");
+  }
+  return { kind: "window", pid, window_id: windowID };
+}
+
+function toolResultEnvelope(result) {
+  return {
+    text: result.text,
+    images: result.images.map((img) => ({
+      mime_type: img.mimeType,
+      data_base64: img.dataBase64,
+    })),
+    structured_json: result.structuredJson,
+    raw_json: result.rawJson,
+    is_error: result.isError,
+    error_code: result.errorCode,
+    degraded: result.degraded,
+  };
+}
+
+function parseStructuredJSON(result) {
+  if (typeof result.structuredJson !== "string" || result.structuredJson === "") {
+    return {};
+  }
+  try {
+    return JSON.parse(result.structuredJson);
+  } catch {
+    return {};
+  }
+}
+
+async function listOnScreenWindows() {
+  let lastError = "unknown list_windows failure";
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const result = await windowDiscoveryDriver.callTool(
+        "list_windows",
+        JSON.stringify({ on_screen_only: true }),
+      );
+      if (result.isError) {
+        lastError = result.text || result.errorCode || "CUA list_windows failed";
+      } else {
+        const parsed = parseStructuredJSON(result);
+        if (Array.isArray(parsed.windows)) {
+          return parsed.windows.map((window) => ({
+            target_ref: `pid:${window.pid}/window:${window.window_id}`,
+            pid: window.pid,
+            app_name: window.app_name || "",
+            window_id: String(window.window_id),
+            window_title: window.title || "",
+            minimized: Boolean(window.minimized),
+            z_index: Number.isInteger(window.z_index) ? window.z_index : null,
+          }));
+        }
+        lastError = "CUA list_windows omitted its windows array";
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    if (attempt < 2) {
+      if (isEndedSessionMessage(lastError)) {
+        await replaceWindowDiscoveryDriver();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  throw new Error(`desktop window discovery failed after retry: ${lastError}`);
+}
+
 let driver;
+let windowDiscoveryDriver;
 let shuttingDown = false;
 const sessions = new Map();
+
+function isEndedSessionMessage(message) {
+  const normalized = String(message || "").toLowerCase();
+  return (
+    normalized.includes("session") &&
+    (normalized.includes("has ended") ||
+      normalized.includes("already ended") ||
+      normalized.includes("session ended"))
+  );
+}
+
+async function replaceWindowDiscoveryDriver() {
+  const expiredDriver = windowDiscoveryDriver;
+  windowDiscoveryDriver = CuaDriver.create(undefined);
+  if (expiredDriver) {
+    try {
+      await expiredDriver.shutdown();
+    } catch (error) {
+      log("warn", `expired window discovery driver shutdown error: ${error.message}`);
+    }
+    try {
+      expiredDriver.uniffiDestroy();
+    } catch (error) {
+      log("warn", `expired window discovery driver destroy error: ${error.message}`);
+    }
+  }
+}
 
 function log(level, message) {
   // Keep stderr separate from stdout JSON-RPC traffic.
@@ -156,19 +262,59 @@ async function handleGetDesktopState({ sessionID }) {
   record.observations.set(observationToken, {
     capturedAt: Date.now(),
     targetGeneration: record.targetGeneration,
+    target: { kind: "desktop", displayId: "primary" },
   });
   return {
-    text: result.text,
-    images: result.images.map((img) => ({
-      mime_type: img.mimeType,
-      data_base64: img.dataBase64,
-    })),
-    structured_json: result.structuredJson,
-    raw_json: result.rawJson,
-    is_error: result.isError,
-    degraded: result.degraded,
+    ...toolResultEnvelope(result),
     observation_token: observationToken,
     coordinate_space: coordinateSpace,
+    available_windows: await listOnScreenWindows(),
+  };
+}
+
+async function handleGetWindowState({ sessionID, pid, windowID }) {
+  const record = requireSession(sessionID);
+  if (record.state !== "ready") {
+    throw new Error(`session ${sessionID} cannot capture while ${record.state}`);
+  }
+  const target = exactWindowTarget(pid, windowID);
+  const result = await driver.callTool(
+    "get_window_state",
+    JSON.stringify({
+      session: sessionID,
+      pid: target.pid,
+      window_id: target.window_id,
+      include_screenshot: true,
+    }),
+  );
+  const parsed = parseStructuredJSON(result);
+  const screenshotWidth = Number(parsed.screenshot_width) || 0;
+  const screenshotHeight = Number(parsed.screenshot_height) || 0;
+  record.coordinateScaleX = 1;
+  record.coordinateScaleY = 1;
+  const observationToken = randomUUID();
+  record.observations.set(observationToken, {
+    capturedAt: Date.now(),
+    targetGeneration: record.targetGeneration,
+    target,
+  });
+  return {
+    ...toolResultEnvelope(result),
+    observation_token: observationToken,
+    coordinate_space: {
+      unit: "window_pixel",
+      width: screenshotWidth,
+      height: screenshotHeight,
+      source_screenshot_width: screenshotWidth,
+      source_screenshot_height: screenshotHeight,
+      scale_x: 1,
+      scale_y: 1,
+    },
+    target: {
+      pid: target.pid,
+      window_id: String(target.window_id),
+      coordinate_space: "window",
+    },
   };
 }
 
@@ -337,6 +483,7 @@ async function handleRegisterPreparedAction(params) {
     fenceToken: params.fenceToken,
     controlEpoch: params.controlEpoch,
     targetGeneration: params.targetGeneration,
+    target: observation.target,
     expiresAt,
     consumed: false,
   });
@@ -366,7 +513,11 @@ async function handlePerformChecked(params, signal) {
     throw new Error("prepared action authorization is stale or mismatched");
   }
   try {
-    validatePerformParameters(params.action, params.parameters || {});
+    validatePerformParameters(
+      params.action,
+      params.parameters || {},
+      prepared.target,
+    );
   } catch (err) {
     // Parameter validation happens before the prepared action reaches the CUA
     // driver. This is a confirmed no-input failure, not an unknown outcome.
@@ -387,7 +538,10 @@ async function handlePerformChecked(params, signal) {
   }
   prepared.consumed = true;
   try {
-    const result = await handlePerform(params, signal);
+    const result = await handlePerform(
+      { ...params, authorizedTarget: prepared.target },
+      signal,
+    );
     const normalized = { ...result, status: result.is_error ? "failed" : "succeeded" };
     record.actionResults.set(params.actionID, normalized);
     return normalized;
@@ -516,10 +670,20 @@ function requireScreenCoordinate(value, name) {
   return number;
 }
 
-function validatePerformParameters(action, parameters) {
+function validatePerformParameters(action, parameters, authorizedTarget) {
   switch (action) {
     case "click":
     case "double_click":
+      if (
+        authorizedTarget?.kind === "window" &&
+        (typeof parameters.element_token === "string" ||
+          (parameters.snapshot_id !== undefined && parameters.element_index !== undefined))
+      ) {
+        return;
+      }
+      requireScreenCoordinate(parameters.x, "x");
+      requireScreenCoordinate(parameters.y, "y");
+      return;
     case "scroll":
     case "move_cursor":
       requireScreenCoordinate(parameters.x, "x");
@@ -578,16 +742,96 @@ function abortableDelay(ms, signal) {
   });
 }
 
-async function handlePerform({ sessionID, action, parameters }, signal) {
+function windowActionArguments(sessionID, action, params, authorizedTarget) {
+  const deliveryMode = optionalString(params.delivery_mode, "delivery_mode") || "background";
+  if (deliveryMode !== "background" && deliveryMode !== "foreground") {
+    throw new Error("delivery_mode must be background or foreground");
+  }
+  const args = {
+    session: sessionID,
+    target: authorizedTarget,
+    delivery_mode: deliveryMode,
+  };
+  if (params.element_token !== undefined) {
+    args.element_token = optionalString(params.element_token, "element_token");
+  }
+  if (params.snapshot_id !== undefined) {
+    args.snapshot_id = optionalString(params.snapshot_id, "snapshot_id");
+  }
+  if (params.element_index !== undefined) {
+    args.element_index = requireNumber(params.element_index, "element_index");
+  }
+  switch (action) {
+    case "click":
+    case "double_click":
+      args.x = params.x === undefined ? undefined : requireNumber(params.x, "x");
+      args.y = params.y === undefined ? undefined : requireNumber(params.y, "y");
+      args.button = optionalString(params.button, "button") || "left";
+      args.count = action === "double_click" ? 2 : (params.count ?? 1);
+      return { tool: "click", args };
+    case "scroll":
+      args.x = params.x === undefined ? undefined : requireNumber(params.x, "x");
+      args.y = params.y === undefined ? undefined : requireNumber(params.y, "y");
+      args.direction = optionalString(params.direction, "direction") || "down";
+      args.by = optionalString(params.by, "by") || "line";
+      args.amount = optionalNumber(params.amount, "amount") ?? 1;
+      return { tool: "scroll", args };
+    case "drag":
+      args.from_x = requireNumber(params.from_x, "from_x");
+      args.from_y = requireNumber(params.from_y, "from_y");
+      args.to_x = requireNumber(params.to_x, "to_x");
+      args.to_y = requireNumber(params.to_y, "to_y");
+      args.duration_ms = optionalNumber(params.duration_ms, "duration_ms") ?? 500;
+      args.steps = optionalNumber(params.steps, "steps") ?? 10;
+      args.button = optionalString(params.button, "button") || "left";
+      args.modifier = optionalStringArray(params.modifier, "modifier");
+      return { tool: "drag", args };
+    case "key":
+      args.key = optionalString(params.key, "key") || "";
+      args.modifiers = optionalStringArray(params.modifiers, "modifiers");
+      return { tool: "press_key", args };
+    case "hotkey":
+      args.keys = optionalStringArray(params.keys, "keys") || [];
+      return { tool: "hotkey", args };
+    case "type_text":
+      args.text = optionalString(params.text, "text") || "";
+      return { tool: "type_text", args };
+    case "move_cursor":
+      args.x = requireNumber(params.x, "x");
+      args.y = requireNumber(params.y, "y");
+      return { tool: "move_cursor", args };
+    default:
+      throw new Error(`unsupported window action: ${action}`);
+  }
+}
+
+async function handlePerform({ sessionID, action, parameters, authorizedTarget }, signal) {
   const record = requireSession(sessionID);
   const params = parameters || {};
-  const scope = DesktopScope.Desktop;
   let result;
   const desktopX = (value, name) =>
     requireNumber(value, name) * record.coordinateScaleX;
   const desktopY = (value, name) =>
     requireNumber(value, name) * record.coordinateScaleY;
   signal.throwIfAborted();
+
+  if (authorizedTarget?.kind === "window" && action !== "wait") {
+    const request = windowActionArguments(
+      sessionID,
+      action,
+      params,
+      authorizedTarget,
+    );
+    result = await driver.callTool(request.tool, JSON.stringify(request.args));
+    signal.throwIfAborted();
+    return toolResultEnvelope(result);
+  }
+  if (authorizedTarget?.kind !== "desktop" && action !== "wait") {
+    throw new Error("prepared action has no exact authorized target");
+  }
+  if (params.delivery_mode === "background") {
+    throw new Error("desktop target does not support background delivery");
+  }
 
   switch (action) {
     case "click":
@@ -598,7 +842,7 @@ async function handlePerform({ sessionID, action, parameters }, signal) {
         session: sessionID,
         x: desktopX(params.x, "x"),
         y: desktopY(params.y, "y"),
-        scope,
+        target: primaryDesktopTarget(),
         button,
         count,
       });
@@ -611,7 +855,7 @@ async function handlePerform({ sessionID, action, parameters }, signal) {
         x: desktopX(params.x, "x"),
         y: desktopY(params.y, "y"),
         direction: DIRECTION_MAP[params.direction] ?? ScrollDirection.Down,
-        scope,
+        target: primaryDesktopTarget(),
         by: params.by ? BY_MAP[params.by] : ScrollBy.Line,
         amount: optionalBigInt(params.amount, "amount") ?? BigInt(1),
       });
@@ -625,7 +869,7 @@ async function handlePerform({ sessionID, action, parameters }, signal) {
         fromY: desktopY(params.from_y, "from_y"),
         toX: desktopX(params.to_x, "to_x"),
         toY: desktopY(params.to_y, "to_y"),
-        scope,
+        target: primaryDesktopTarget(),
         durationMs: optionalBigInt(params.duration_ms, "duration_ms") ?? BigInt(500),
         steps: optionalBigInt(params.steps, "steps") ?? BigInt(10),
         button: params.button ? BUTTON_MAP[params.button] : ClickButton.Left,
@@ -638,7 +882,7 @@ async function handlePerform({ sessionID, action, parameters }, signal) {
       const input = PressKeyInput.new({
         session: sessionID,
         key: optionalString(params.key, "key") || "",
-        scope,
+        target: primaryDesktopTarget(),
         modifiers: optionalStringArray(params.modifiers, "modifiers"),
       });
       result = await driver.pressKey(input);
@@ -648,7 +892,7 @@ async function handlePerform({ sessionID, action, parameters }, signal) {
       const input = HotkeyInput.new({
         session: sessionID,
         keys: optionalStringArray(params.keys, "keys") || [],
-        scope,
+        target: primaryDesktopTarget(),
       });
       result = await driver.hotkey(input);
       break;
@@ -657,7 +901,7 @@ async function handlePerform({ sessionID, action, parameters }, signal) {
       const input = TypeTextInput.new({
         session: sessionID,
         text: optionalString(params.text, "text") || "",
-        scope,
+        target: primaryDesktopTarget(),
       });
       result = await driver.typeText(input);
       break;
@@ -667,7 +911,7 @@ async function handlePerform({ sessionID, action, parameters }, signal) {
         session: sessionID,
         x: desktopX(params.x, "x"),
         y: desktopY(params.y, "y"),
-        scope,
+        target: primaryDesktopTarget(),
       });
       result = await driver.moveCursor(input);
       break;
@@ -689,17 +933,7 @@ async function handlePerform({ sessionID, action, parameters }, signal) {
   }
   signal.throwIfAborted();
 
-  return {
-    text: result.text,
-    images: result.images.map((img) => ({
-      mime_type: img.mimeType,
-      data_base64: img.dataBase64,
-    })),
-    structured_json: result.structuredJson,
-    raw_json: result.rawJson,
-    is_error: result.isError,
-    degraded: result.degraded,
-  };
+  return toolResultEnvelope(result);
 }
 
 async function dispatch(method, params, signal) {
@@ -712,6 +946,8 @@ async function dispatch(method, params, signal) {
       return await handleStartSession(params);
     case "getDesktopState":
       return await handleGetDesktopState(params);
+    case "getWindowState":
+      return await handleGetWindowState(params);
     case "getSessionState":
       return await handleGetSessionState(params);
     case "registerPreparedAction":
@@ -809,6 +1045,11 @@ function enqueueLine(line) {
 async function main() {
   log("info", "initializing CUA driver...");
   driver = CuaDriver.create(undefined);
+  // list_windows has no explicit session argument in CUA 0.22.0 and therefore
+  // uses the SDK's idle-expiring implicit session. Isolate it from Awaken's
+  // run-bound named sessions so discovery can be safely rebuilt without
+  // invalidating an active capture/action session.
+  windowDiscoveryDriver = CuaDriver.create(undefined);
   log("info", `driver available: ${driver.isAvailable()}`);
 
   const metadata = await driver.metadata();
@@ -858,6 +1099,16 @@ async function shutdown() {
     await driver.shutdown();
   } catch (err) {
     log("warn", `shutdown error: ${err.message}`);
+  }
+  try {
+    await windowDiscoveryDriver?.shutdown();
+  } catch (err) {
+    log("warn", `window discovery shutdown error: ${err.message}`);
+  }
+  try {
+    windowDiscoveryDriver?.uniffiDestroy();
+  } catch (err) {
+    log("warn", `window discovery destroy error: ${err.message}`);
   }
   try {
     driver.uniffiDestroy();

@@ -22,6 +22,7 @@ type Observation struct {
 	Screenshot        *MediaRef        `json:"screenshot,omitempty"`
 	AccessibilityTree *MediaRef        `json:"accessibility_tree,omitempty"`
 	Elements          []ElementRef     `json:"elements,omitempty"`
+	AvailableWindows  []WindowRef      `json:"available_windows,omitempty"`
 	CoordinateSpace   *CoordinateSpace `json:"coordinate_space,omitempty"`
 	MissingReason     string           `json:"missing_reason,omitempty"`
 	PolicySnapshotID  PolicySnapshotID `json:"policy_snapshot_id"`

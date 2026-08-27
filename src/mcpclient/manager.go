@@ -583,6 +583,7 @@ func (m *Manager) SnapshotServer(name string) (ServerSnapshot, error) {
 func (m *Manager) snapshotServerLocked(server *managedServer) ServerSnapshot {
 	snap := ServerSnapshot{
 		Name:        server.name,
+		DisplayName: server.config.DisplayName,
 		State:       server.state,
 		Transport:   server.transport,
 		Scope:       server.scope,

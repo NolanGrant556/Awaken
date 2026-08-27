@@ -30,7 +30,7 @@ export function AwakenMcpConfigDialog({
 }: AwakenMcpConfigDialogProps) {
   const modeDescription = mode === "stdio"
     ? <>粘贴通过 <code>command</code> / <code>args</code> 启动的本地 MCP 配置 JSON。</>
-    : <>粘贴远程 MCP URL 配置；兼容 <code>type: "streamable-http"</code>、<code>type: "http"</code> 或省略 type。</>;
+    : <>粘贴远程 MCP 的完整 URL 或 JSON 配置；兼容 <code>type: "streamable-http"</code>、<code>type: "http"</code> 或省略 type。</>;
   const safetyNote = mode === "stdio"
     ? "配置前确认命令来源和启动参数，避免运行不可信程序。"
     : "确认远程地址来源与访问权限；URL 中的 key、token 等凭据不要公开分享。";
@@ -76,7 +76,7 @@ export function AwakenMcpConfigDialog({
         </div>
         <p>{modeDescription} 支持 <code>mcpServers</code> 简写和 Awaken <code>servers</code> 配置。</p>
         <textarea
-          aria-label={mode === "stdio" ? "本地进程 MCP 配置 JSON" : "Streamable HTTP MCP 配置 JSON"}
+          aria-label={mode === "stdio" ? "本地进程 MCP 配置 JSON" : "Streamable HTTP MCP 配置或 URL"}
           value={value}
           spellCheck={false}
           onChange={(event) => onValueChange(event.target.value)}

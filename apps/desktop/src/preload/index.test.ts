@@ -46,6 +46,37 @@ describe("preload local picker bridge", () => {
   });
 });
 
+describe("preload project entry actions bridge", () => {
+  it("forwards local-path reveal through its dedicated typed IPC channel", async () => {
+    const bridge = exposedBridge as Record<string, (...args: unknown[]) => unknown>;
+    const request = {
+      projectId: "project-1",
+      folderPath: "/workspace/app",
+      relativePath: "README.md",
+      kind: "file",
+    };
+    invokeMock.mockResolvedValue({ ok: true });
+
+    await bridge.revealProjectEntry(request);
+
+    expect(invokeMock).toHaveBeenLastCalledWith("awaken:reveal-project-entry", request);
+  });
+});
+
+describe("preload project rename bridge", () => {
+  it("forwards the stable project id and display name", async () => {
+    const bridge = exposedBridge as Record<string, (...args: unknown[]) => unknown>;
+    invokeMock.mockResolvedValue({ ok: true });
+
+    await bridge.renameProject("project-1", "季度复盘");
+
+    expect(invokeMock).toHaveBeenLastCalledWith("awaken:rename-project", {
+      projectId: "project-1",
+      displayName: "季度复盘",
+    });
+  });
+});
+
 describe("preload scheduled task bridge", () => {
   it("exposes only narrow scheduled task methods", () => {
     expect(exposedBridge).toBeDefined();

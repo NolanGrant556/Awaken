@@ -1,10 +1,86 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   openProjectEntryWithApplication,
   projectEntryOpenBundleIds,
   projectEntryOpenWindowsExecutableNames,
+  revealProjectEntryInFileManager,
   windowsRegistryExecutablePath,
 } from "./project-entry-actions.js";
+
+describe("project entry local path", () => {
+  it("reveals a file using its verified real path", async () => {
+    const openPath = vi.fn(async () => "");
+    const showItemInFolder = vi.fn();
+
+    await expect(
+      revealProjectEntryInFileManager("/real/project/report.pdf", "file", {
+        openPath,
+        showItemInFolder,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(showItemInFolder).toHaveBeenCalledWith("/real/project/report.pdf");
+    expect(openPath).not.toHaveBeenCalled();
+  });
+
+  it("opens a directory using its verified real path", async () => {
+    const openPath = vi.fn(async () => "");
+    const showItemInFolder = vi.fn();
+
+    await expect(
+      revealProjectEntryInFileManager("/real/project/docs", "directory", {
+        openPath,
+        showItemInFolder,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(openPath).toHaveBeenCalledWith("/real/project/docs");
+    expect(showItemInFolder).not.toHaveBeenCalled();
+  });
+
+  it("passes Windows paths with spaces and UNC paths to Electron without shell rewriting", async () => {
+    const filePath = String.raw`C:\Users\Nolan\Awaken Project\季度报告.pdf`;
+    const directoryPath = String.raw`\\server\team share\Awaken 素材`;
+    const openPath = vi.fn(async () => "");
+    const showItemInFolder = vi.fn();
+
+    await expect(
+      revealProjectEntryInFileManager(filePath, "file", { openPath, showItemInFolder }),
+    ).resolves.toEqual({ ok: true });
+    await expect(
+      revealProjectEntryInFileManager(directoryPath, "directory", { openPath, showItemInFolder }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(showItemInFolder).toHaveBeenCalledWith(filePath);
+    expect(openPath).toHaveBeenCalledWith(directoryPath);
+  });
+
+  it("returns stable file and directory errors", async () => {
+    await expect(
+      revealProjectEntryInFileManager("/real/project/report.pdf", "file", {
+        openPath: async () => "",
+        showItemInFolder: () => {
+          throw new Error("native failure");
+        },
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      code: "ENTRY_REVEAL_FAILED",
+      message: "暂时无法在文件管理器中显示这个文件。",
+    });
+
+    await expect(
+      revealProjectEntryInFileManager("/real/project/docs", "directory", {
+        openPath: async () => "native failure",
+        showItemInFolder: () => undefined,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      code: "ENTRY_REVEAL_FAILED",
+      message: "暂时无法打开这个文件夹。",
+    });
+  });
+});
 
 describe("project entry application mapping", () => {
   it("maps supported productivity and development applications to fixed bundle ids", () => {

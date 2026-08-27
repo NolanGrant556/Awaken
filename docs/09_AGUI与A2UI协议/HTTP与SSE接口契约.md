@@ -45,7 +45,7 @@ GET    /v1/runs/{run_id}/audit
 POST   /v1/shutdown
 ```
 
-`POST /v1/runs` 的 `workspace` 对象即 TaskScope wire。`workspace_root` 是已绑定项目的主文件夹；只给 `project_id` 表示零文件夹项目；两者都为空表示独立对话。Core 在规范化 workspace 前确定 thread ID：新对话生成 ID，follow-up 使用请求的 `thread_id`，然后解析到 thread 专属 session 工作目录。业务数据根不可用或 managed owner ID 不安全时返回 `INVALID_INPUT`。可选的 `project_name` 只用于让模型说得出自己在哪个项目里，Core 不从它解析路径或权限。`session_workspace` 由服务端派生并回写，客户端传入值一律被覆盖。roots 的语义与形状名单由 [TaskScope 与路径安全](../04_工具权限与审批/TaskScope与路径安全.md) 唯一拥有。
+`POST /v1/runs` 的 `workspace` 对象即 TaskScope wire。`workspace_root` 是已绑定项目的主文件夹；只给 `project_id` 表示零文件夹项目；两者都为空表示独立对话。Core 在规范化 workspace 前确定 thread ID：新对话生成 ID，follow-up 使用请求的 `thread_id`，然后解析到 thread 专属 session 工作目录。业务数据根不可用或 managed owner ID 不安全时返回 `INVALID_INPUT`。项目 run 的 `project_name` 使用当前 project authority 的最新 `display_name`，只用于让模型说得出自己在哪个项目里；Core 不从它解析路径、权限或身份，名称变化使后续 run 重建上下文。`session_workspace` 由服务端派生并回写，客户端传入值一律被覆盖。roots 的语义与形状名单由 [TaskScope 与路径安全](../04_工具权限与审批/TaskScope与路径安全.md) 唯一拥有。
 
 `GET /v1/instructions/global` 返回 `GlobalAgentsDocument{exists,revision,digest,content,byte_count,updated_at,max_bytes}`。`PUT /v1/instructions/global` 接受 `{expected_revision,content}`，`DELETE` 接受 `{expected_revision}`；revision 不匹配返回 409 `INSTRUCTION_REVISION_CONFLICT`。三条 route 只在 RunService 存在时注册。Renderer 不可通过 `POST /v1/runs` 提交 AGENTS 正文或路径。业务优先级、截断与恢复见 [02 AGENTS 指令与运行快照](../02_主智能体闭环/AGENTS指令与运行快照.md)。
 
@@ -62,6 +62,7 @@ Subagent list/detail/cancel/message route 只操作请求 run 的当前 task reg
 ```text
 GET    /v1/projects
 POST   /v1/projects
+PATCH  /v1/projects/{project_id}
 PUT    /v1/projects/order
 DELETE /v1/projects/{project_id}
 DELETE /v1/projects/{project_id}/threads
@@ -80,7 +81,7 @@ POST   /v1/project-operations/{operation_id}/complete-trash
 POST   /v1/project-operations/{operation_id}/fail-trash
 ```
 
-只有 ProjectService 存在时注册。`POST /v1/projects` 同时承担单文件夹 upsert（body 带 `workspace_root`）与多文件夹创建（body 带 `folders`）；废纸篓是文件夹粒度，`POST /v1/projects/{project_id}/folders/trash` 的 body 必须指明目标 `path`。请求与响应字段、错误码由 [项目生命周期与删除：API 与持久化](../01_桌面工作台/左侧栏/项目生命周期与删除/API与持久化.md) 唯一拥有。
+只有 ProjectService 存在时注册。`POST /v1/projects` 同时承担单文件夹 upsert（body 带 `workspace_root`）与多文件夹创建（body 带 `folders`）；`PATCH /v1/projects/{project_id}` 按稳定 ID 重命名且不要求 idempotency key；废纸篓是文件夹粒度，`POST /v1/projects/{project_id}/folders/trash` 的 body 必须指明目标 `path`。请求与响应字段、错误码由 [项目生命周期与删除：API 与持久化](../01_桌面工作台/左侧栏/项目生命周期与删除/API与持久化.md) 唯一拥有。
 
 ### 3.3 Tool、MCP、Connector、Skill 和 Plugin
 

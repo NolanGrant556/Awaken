@@ -23,6 +23,7 @@ import "./AwakenIcon.demo.css";
 const CAPABILITY_FAMILY: Array<{ name: AwakenIconName; label: string }> = [
   { name: "connector", label: "连接器" },
   { name: "book-open", label: "技能" },
+  { name: "puzzle", label: "插件" },
   { name: "terminal", label: "CLI" },
   { name: "hook", label: "钩子" },
 ];
@@ -99,7 +100,7 @@ export function AwakenIconDemo() {
       <div className="aw-icon-demo__block">
         <h3>能力与连接器入口</h3>
         <p className="aw-icon-demo__hint">
-          产品一级入口优先使用熟悉、彼此可区分的比喻：连接器使用插头，Skill 使用打开的书，CLI 使用终端；Hook 使用 Webhook 路由结构。
+          产品一级入口优先使用熟悉、彼此可区分的比喻：连接器使用插头，Skill 使用打开的书，插件使用四边凸榫拼图块，CLI 使用终端；Hook 使用 Webhook 路由结构。
         </p>
         <div className="aw-icon-demo__family">
           {CAPABILITY_FAMILY.map(({ name, label }) => (
@@ -122,7 +123,7 @@ export function AwakenIconDemo() {
         <p className="aw-icon-demo__hint">
           MCP 与 Agent Plugins 都使用各自官方 authored paths，只通过对称透明留白对齐 Awaken 的光学尺寸。MCP
           标记可读下限是 {MCP_OFFICIAL_MARK.minSize}px；Agent Plugins 标记因节点与括号密度较高，可读下限是{" "}
-          {AGENT_PLUGINS_OFFICIAL_MARK.minSize}px，用于 Desktop 插件一级入口。
+          {AGENT_PLUGINS_OFFICIAL_MARK.minSize}px。产品插件入口已改用线性 <code>puzzle</code>，本标记只按名字取用。
         </p>
         <div className="aw-icon-demo__family">
           <div className="aw-icon-demo__family-item">

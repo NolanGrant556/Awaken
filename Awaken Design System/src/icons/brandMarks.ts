@@ -62,7 +62,8 @@ export const MCP_OFFICIAL_MARK: BrandMark = {
  * 实际标记宽约 17.5px，与同一主导航中的 20px 线性图标光学宽度一致。
  *
  * 标记包含两个节点、连接线和上下括号，16px 下会明显粘连，因此当前
- * 产品可读下限定为 20px。Desktop 插件一级入口只在 20px 档消费它。
+ * 产品可读下限定为 20px。产品 `plugin` 概念已改用线性 `puzzle`；本标记
+ * 仍保留官方 authored paths，只供 Gallery 或明确按名字取用的调用点使用。
  */
 export const AGENT_PLUGINS_OFFICIAL_MARK: BrandMark = {
   // 原始 viewBox 为 0 0 18 17；仅在四周增加对称透明留白，path 未改动。

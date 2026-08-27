@@ -152,6 +152,40 @@ export function nextMcpConfigTextForMode(
   return nextMode === "stdio" ? MCP_STDIO_EXAMPLE : MCP_STREAMABLE_HTTP_EXAMPLE;
 }
 
+export function inferMcpConfigMode(value: string): AwakenMcpConfigMode | null {
+  const normalized = value.trim();
+  if (/^https?:\/\//i.test(normalized)) {
+    return "streamable-http";
+  }
+  if (!normalized.startsWith("{")) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(normalized) as {
+      servers?: Record<string, unknown>;
+      mcpServers?: Record<string, unknown>;
+    };
+    const entries = [
+      ...Object.values(payload.servers ?? {}),
+      ...Object.values(payload.mcpServers ?? {}),
+    ];
+    let hasStdio = false;
+    let hasRemote = false;
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const config = entry as Record<string, unknown>;
+      hasStdio ||= typeof config.command === "string" || config.stdio !== undefined;
+      hasRemote ||= typeof config.url === "string" || config.http !== undefined || config.sse !== undefined;
+    }
+    if (hasRemote && !hasStdio) return "streamable-http";
+    if (hasStdio && !hasRemote) return "stdio";
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export const DEFAULT_SKILL_VIEW: SkillView = "awaken";
 
 export const SKILL_VIEW_TABS: Array<{ id: SkillView; label: string }> = [
@@ -331,14 +365,14 @@ function mcpConnectorCardItem(
   };
 }
 
-function mcpServerCardItem(
+export function mcpServerCardItem(
   server: RuntimeMcpServer,
   busyMcpServerName: string | null,
 ): AwakenConnectorCardItem {
   return {
     id: server.name,
     variant: "server",
-    displayName: server.name,
+    displayName: server.displayName?.trim() || server.name,
     description: server.errorReason || `${server.transport} · ${server.scope}`,
     state: server.state,
     stateLabel: stateLabel(server.state),
@@ -1279,7 +1313,7 @@ export function ExtensionsView({
 
   async function handleConfigureMcp(): Promise<void> {
     if (mcpConfigText.trim() === "") {
-      setErrorMessage("请粘贴 MCP 配置 JSON");
+      setErrorMessage("请粘贴 MCP 配置 JSON 或 Streamable HTTP URL");
       return;
     }
     setConfiguringMcp(true);
@@ -1300,6 +1334,15 @@ export function ExtensionsView({
     setMcpConfigText((currentValue) =>
       nextMcpConfigTextForMode(currentValue, nextMode));
     setMcpConfigMode(nextMode);
+    setErrorMessage(null);
+  }
+
+  function handleMcpConfigTextChange(nextValue: string): void {
+    setMcpConfigText(nextValue);
+    const inferredMode = inferMcpConfigMode(nextValue);
+    if (inferredMode) {
+      setMcpConfigMode(inferredMode);
+    }
     setErrorMessage(null);
   }
 
@@ -2104,13 +2147,13 @@ export function ExtensionsView({
           busy={configuringMcp}
           onOpenChange={setMcpDialogOpen}
           onModeChange={handleMcpConfigModeChange}
-          onValueChange={setMcpConfigText}
+          onValueChange={handleMcpConfigTextChange}
           onSubmit={() => { void handleConfigureMcp(); }}
         />
 
         <AwakenMcpSettingsDialog
           open={mcpSettingsOpen}
-          serverName={selectedMcpServer?.name}
+          serverName={selectedMcpServer?.displayName?.trim() || selectedMcpServer?.name}
           scopeLabel={mcpSettingsScope ? sourceLabel(mcpSettingsScope) : ""}
           configValue={mcpSettingsConfigText}
           tools={mcpTools}

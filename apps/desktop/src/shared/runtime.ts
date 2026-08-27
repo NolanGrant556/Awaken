@@ -832,6 +832,7 @@ export type RuntimeMcpServerState = "pending" | "connected" | "failed" | "needs-
 
 export type RuntimeMcpServer = {
   name: string;
+  displayName?: string;
   state: RuntimeMcpServerState;
   transport: string;
   scope: string;

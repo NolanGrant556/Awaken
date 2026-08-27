@@ -39,6 +39,82 @@ func TestParseMCPServersConfigAcceptsStreamableHTTPAlias(t *testing.T) {
 	}
 }
 
+func TestParseMCPServersConfigAcceptsUnicodeOnlyServerName(t *testing.T) {
+	configs, err := parseMCPServersConfig(`{
+		"mcpServers": {
+			"钉钉文档": {
+				"type": "streamable-http",
+				"url": "https://mcp.example.test/mcp"
+			}
+		}
+	}`)
+	if err != nil {
+		t.Fatalf("parse Unicode server name: %v", err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected one config, got %+v", configs)
+	}
+	for name, cfg := range configs {
+		if !strings.HasPrefix(name, "server_") {
+			t.Fatalf("expected stable safe fallback name, got %q", name)
+		}
+		if cfg.DisplayName != "钉钉文档" {
+			t.Fatalf("expected original display name, got %q", cfg.DisplayName)
+		}
+		if cfg.TransportKind() != mcpclient.TransportHTTP || cfg.HTTP == nil {
+			t.Fatalf("expected HTTP transport, got %+v", cfg)
+		}
+	}
+}
+
+func TestParseMCPServersConfigStillRejectsPunctuationOnlyServerName(t *testing.T) {
+	_, err := parseMCPServersConfig(`{"mcpServers":{"---":{"url":"https://mcp.example.test/mcp"}}}`)
+	if err == nil || !strings.Contains(err.Error(), "server name") {
+		t.Fatalf("expected invalid server name error, got %v", err)
+	}
+}
+
+func TestParseMCPServersConfigAcceptsBareStreamableHTTPURL(t *testing.T) {
+	const endpoint = "https://mcp-gw.example.test/server/sample?key=placeholder"
+	configs, err := parseMCPServersConfig(endpoint)
+	if err != nil {
+		t.Fatalf("parse bare Streamable HTTP URL: %v", err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected one config, got %+v", configs)
+	}
+	for name, cfg := range configs {
+		if !strings.HasPrefix(name, "remote_") {
+			t.Fatalf("expected stable remote name, got %q", name)
+		}
+		if cfg.DisplayName != "mcp-gw.example.test" {
+			t.Fatalf("expected host display name, got %q", cfg.DisplayName)
+		}
+		if cfg.HTTP == nil || cfg.HTTP.URL != endpoint {
+			t.Fatalf("expected endpoint to be preserved, got %+v", cfg.HTTP)
+		}
+	}
+}
+
+func TestParseMCPServersConfigBareURLNameIgnoresQueryCredentials(t *testing.T) {
+	first, err := parseMCPServersConfig("https://mcp.example.test/server/sample?key=first")
+	if err != nil {
+		t.Fatalf("parse first URL: %v", err)
+	}
+	second, err := parseMCPServersConfig("https://mcp.example.test/server/sample?key=rotated")
+	if err != nil {
+		t.Fatalf("parse rotated URL: %v", err)
+	}
+	var firstName, secondName string
+	for firstName = range first {
+	}
+	for secondName = range second {
+	}
+	if firstName != secondName {
+		t.Fatalf("query credential rotation changed identity: %q != %q", firstName, secondName)
+	}
+}
+
 func TestParseMCPServersConfigKeepsHTTPAsCanonicalStreamableTransport(t *testing.T) {
 	for _, configText := range []string{
 		`{"mcpServers":{"remote":{"type":"http","url":"https://mcp.example.test/mcp"}}}`,
@@ -101,5 +177,44 @@ func TestConfigureMCPServersPersistsStreamableHTTPAliasAsCanonicalHTTP(t *testin
 	}
 	if strings.Contains(string(encoded), "streamable-http") {
 		t.Fatalf("persisted config retained input alias: %s", encoded)
+	}
+}
+
+func TestConfigureMCPServersPersistsBareURLAsCanonicalHTTP(t *testing.T) {
+	awakenHome := t.TempDir()
+	t.Setenv("AWAKEN_HOME", awakenHome)
+	mgr := mcpclient.NewManager(mcpclient.WithLogger(testLogger{}))
+	router := NewRouterWithWorkspace(nil, nil, mgr, nil, nil, "")
+	const endpoint = "http://127.0.0.1:1/mcp?key=placeholder"
+	body, err := json.Marshal(configureMCPServersRequest{ConfigText: endpoint})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/mcp/servers", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	storedConfig, err := mcpclient.LoadUserConfig()
+	if err != nil {
+		t.Fatalf("load persisted user config: %v", err)
+	}
+	if len(storedConfig.Servers) != 1 {
+		t.Fatalf("expected one persisted server, got %+v", storedConfig.Servers)
+	}
+	for name, stored := range storedConfig.Servers {
+		if !strings.HasPrefix(name, "remote_") {
+			t.Fatalf("expected generated remote identity, got %q", name)
+		}
+		if stored.DisplayName != "127.0.0.1" {
+			t.Fatalf("expected endpoint host display name, got %q", stored.DisplayName)
+		}
+		if stored.HTTP == nil || stored.HTTP.URL != endpoint {
+			t.Fatalf("expected canonical HTTP config, got %+v", stored)
+		}
 	}
 }

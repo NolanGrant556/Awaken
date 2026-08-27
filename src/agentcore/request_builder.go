@@ -14,6 +14,10 @@ type RequestBuilder struct {
 	config      AgentConfig
 	runtimeInfo prompt.RuntimeInfo
 	threadID    string
+	// mcpDisclosure caches the deterministic progressive-disclosure decision
+	// for this builder's pinned snapshot/window/activated set. Builders are
+	// rebuilt whenever the activated set changes.
+	mcpDisclosure *mcpDisclosureProjection
 }
 
 const conversationContinuityBlockID = "conversation_continuity"
@@ -376,6 +380,11 @@ func (rb *RequestBuilder) attributeToolSchemas(schemas []tool.ToolSchema) []Attr
 		if provenance.Origin == tool.SourceSkill {
 			provenance.SkillCatalog = contextUsageSkillCatalog(runtime, rb.config.ModelConfig.ContextWindow)
 		}
+		if schema.Function.Name == tool.MCPFindToolName {
+			if disclosure := rb.mcpDisclosureProjection(); disclosure.Enabled {
+				provenance.MCPCatalog = disclosure.Catalog
+			}
+		}
 		result = append(result, AttributedToolSchema{Schema: schema, Provenance: provenance})
 	}
 	return result
@@ -387,6 +396,7 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 		return nil
 	}
 	if rb.config.ToolAvailabilitySnapshot != nil {
+		disclosure := rb.mcpDisclosureProjection()
 		entries := rb.config.ToolAvailabilitySnapshot.Entries()
 		definitions := make([]tool.ToolSchema, 0, len(entries))
 		for _, entry := range entries {
@@ -396,10 +406,31 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 			if isComputerToolDefinition(entry.Definition) && entry.Readiness.Readiness != tool.ProviderReady {
 				continue
 			}
+			name := entry.Definition.Name
+			if name == tool.MCPFindToolName {
+				// mcp_find is only offered while progressive disclosure is
+				// active; its model description then carries the deferred
+				// server/tool catalog rendered from this same snapshot.
+				if !disclosure.Enabled {
+					continue
+				}
+				definitions = append(definitions, tool.ToolSchema{
+					Type: "function",
+					Function: tool.ToolFunctionSchema{
+						Name:        name,
+						Description: disclosure.Description,
+						Parameters:  entry.Definition.InputSchema,
+					},
+				})
+				continue
+			}
+			if disclosure.Enabled && disclosure.Deferred[name] {
+				continue
+			}
 			definitions = append(definitions, tool.ToolSchema{
 				Type: "function",
 				Function: tool.ToolFunctionSchema{
-					Name:        entry.Definition.Name,
+					Name:        name,
 					Description: requestToolModelDescription(entry.Runtime, entry.Definition, rb.config.ModelConfig.ContextWindow),
 					Parameters:  entry.Definition.InputSchema,
 				},
@@ -412,6 +443,11 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 
 	for _, t := range tools {
 		definition := requestToolDefinition(t)
+		// Progressive disclosure requires a pinned run snapshot; the registry
+		// fallback path never offers the search tool.
+		if definition.Name == tool.MCPFindToolName {
+			continue
+		}
 		if isComputerToolDefinition(definition) {
 			environment := rb.config.ExecutionEnvironmentSnapshot
 			if environment == nil || !environment.ComputerEnabled {
@@ -428,6 +464,22 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 		})
 	}
 	return definitions
+}
+
+// mcpDisclosureProjection memoizes the deterministic per-run disclosure
+// decision (pinned snapshot + model window + activated set + policy).
+func (rb *RequestBuilder) mcpDisclosureProjection() mcpDisclosureProjection {
+	if rb.mcpDisclosure != nil {
+		return *rb.mcpDisclosure
+	}
+	projection := buildMCPDisclosureProjection(
+		rb.config.ToolAvailabilitySnapshot,
+		rb.config.ModelConfig,
+		rb.config.MCPActivatedTools,
+		tool.MCPDisclosurePolicyFromEnv(),
+	)
+	rb.mcpDisclosure = &projection
+	return projection
 }
 
 func isComputerToolDefinition(definition tool.ToolDefinition) bool {

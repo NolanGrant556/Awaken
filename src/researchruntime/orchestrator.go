@@ -284,22 +284,12 @@ func (o *Orchestrator) verify(ctx context.Context, intent Intent, claims []Claim
 			Host: spawnOptions(intent),
 		})
 		if err != nil {
-			coverage = append(coverage, "verifier shard failed")
-			for i := range claims {
-				if expected[claims[i].ID] {
-					claims[i].VerificationStatus = "rejected"
-				}
-			}
+			coverage = keepShardPartial(claims, expected, coverage, "verifier shard failed; shard kept as partial")
 			continue
 		}
 		var parsed VerifierOutput
 		if err := parseJSON(raw, &parsed); err != nil {
-			coverage = append(coverage, "verifier returned invalid JSON")
-			for i := range claims {
-				if expected[claims[i].ID] {
-					claims[i].VerificationStatus = "rejected"
-				}
-			}
+			coverage = keepShardPartial(claims, expected, coverage, "verifier returned invalid JSON; shard kept as partial")
 			continue
 		}
 		seen := map[string]string{}
@@ -312,12 +302,7 @@ func (o *Orchestrator) verify(ctx context.Context, intent Intent, claims []Claim
 			seen[verdict.ClaimID] = strings.ToLower(strings.TrimSpace(verdict.Verdict))
 		}
 		if !valid || len(seen) != len(expected) {
-			coverage = append(coverage, "verifier claim-id mismatch; shard kept as partial")
-			for i := range claims {
-				if expected[claims[i].ID] && claims[i].VerificationStatus == "verified" {
-					claims[i].VerificationStatus = "partial"
-				}
-			}
+			coverage = keepShardPartial(claims, expected, coverage, "verifier claim-id mismatch; shard kept as partial")
 			continue
 		}
 		for i := range claims {
@@ -352,7 +337,11 @@ func (o *Orchestrator) report(ctx context.Context, intent Intent, claims []Claim
 		}
 	}
 	if len(usable) == 0 {
-		return Result{Outcome: OutcomeFailed, Coverage: append(coverage, "no usable claims"), Claims: claims}
+		coverage = append(coverage, "no usable claims")
+		answer := "No verified claims were produced."
+		markdown := renderReport(intent, string(OutcomePartial), answer, nil, evidence, uniqueStrings(coverage))
+		_ = o.append(ctx, "research_report", map[string]any{"outcome": string(OutcomePartial)})
+		return Result{Outcome: OutcomePartial, Answer: answer, Markdown: markdown, Coverage: uniqueStrings(coverage), Claims: claims}
 	}
 	answer := ""
 	if o.Synth != nil {
@@ -396,6 +385,16 @@ func (o *Orchestrator) report(ctx context.Context, intent Intent, claims []Claim
 	markdown := renderReport(intent, string(outcome), answer, usable, evidence, uniqueStrings(coverage))
 	_ = o.append(ctx, "research_report", map[string]any{"outcome": string(outcome)})
 	return Result{Outcome: outcome, Answer: answer, Markdown: markdown, Coverage: uniqueStrings(coverage), Claims: usable}
+}
+
+func keepShardPartial(claims []Claim, expected map[string]bool, coverage []string, note string) []string {
+	coverage = append(coverage, note)
+	for i := range claims {
+		if expected[claims[i].ID] && claims[i].VerificationStatus == "verified" {
+			claims[i].VerificationStatus = "partial"
+		}
+	}
+	return coverage
 }
 
 func compactCoverageNotes(values []string) []string {

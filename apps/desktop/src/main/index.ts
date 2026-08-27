@@ -158,6 +158,7 @@ import {
   normalizeAgentPlanMediaTools,
 } from "../shared/runtime.js";
 import { updateMainWindowBackground, windowBackgroundColor } from "./window-background.js";
+import { pickPluginSource } from "./plugin-source-picker.js";
 import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
 import { ensureConfigDir } from "./config-bootstrap.js";
 import { DesktopPreferencesStore } from "./desktop-preferences-store.js";
@@ -4025,6 +4026,10 @@ ipcMain.handle("awaken:pick-directory", async (_event, defaultPath?: string) => 
   } catch {
     return { canceled: true, error: "Cannot access selected directory" };
   }
+});
+
+ipcMain.handle("awaken:pick-plugin-source", async (_event, defaultPath?: string) => {
+  return pickPluginSource(dialog, { defaultPath });
 });
 
 ipcMain.handle(

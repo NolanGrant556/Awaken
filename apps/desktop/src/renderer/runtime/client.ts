@@ -415,6 +415,7 @@ export type RuntimeClient = {
   ) => Promise<() => void>;
   pickAttachments: (defaultPath?: string) => Promise<AttachmentPickResult>;
   pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
+  pickPluginSource: (defaultPath?: string) => Promise<WorkspacePickResult>;
   pickProjectFolders: (defaultPath?: string) => Promise<ProjectFoldersPickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
@@ -740,6 +741,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     },
     pickAttachments: (defaultPath) => bridge.pickAttachments(defaultPath),
     pickDirectory: (defaultPath) => bridge.pickDirectory(defaultPath),
+    pickPluginSource: (defaultPath) => bridge.pickPluginSource(defaultPath),
     pickProjectFolders: (defaultPath) => bridge.pickProjectFolders(defaultPath),
     validateWorkspace: (path) => bridge.validateWorkspace(path),
     getSupervisorStatus: () => bridge.getSupervisorStatus(),

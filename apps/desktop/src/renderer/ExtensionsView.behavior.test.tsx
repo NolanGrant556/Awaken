@@ -170,6 +170,10 @@ describe("ExtensionsView behavior", () => {
       skillCount: 2,
       serverCount: 1,
     };
+    const pickPluginSource = vi.fn(async () => ({
+      canceled: false as const,
+      path: "/tmp/acme-plugin.zip",
+    }));
     const runtimeClient = {
       getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
       listProjects: vi.fn(async () => [runtimeProject]),
@@ -178,6 +182,7 @@ describe("ExtensionsView behavior", () => {
       listMcpServers: vi.fn(async () => []),
       listSkills: vi.fn(async () => []),
       listPlugins: vi.fn(async () => [plugin]),
+      pickPluginSource,
       subscribeCliConnectorState: vi.fn(() => () => undefined),
     } as unknown as RuntimeClient;
 
@@ -237,6 +242,11 @@ describe("ExtensionsView behavior", () => {
     const riskConfirm = installDialog?.querySelector<HTMLInputElement>(
       ".aw-plugin-install-dialog__risk-confirm input",
     );
+    await act(async () => buttonByText("浏览")?.click());
+    await settle();
+    expect(pickPluginSource).toHaveBeenCalledWith(undefined);
+    expect(localPathInput?.value).toBe("/tmp/acme-plugin.zip");
+
     await act(async () => {
       if (localPathInput) {
         const setter = Object.getOwnPropertyDescriptor(

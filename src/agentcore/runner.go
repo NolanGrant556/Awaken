@@ -264,6 +264,9 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		}
 	}
 	events.afterTerminal = r.runEndHookCallback()
+	if r.config.ResearchIntent != nil && r.config.SubagentOrigin == nil {
+		return r.runDeepResearch(ctx, events)
+	}
 	turnState := newTurnState(events.threadID, events.runID, r.effectiveMaxThoughts(), r.config.ModelConfig.Model)
 	transition := TransitionInitial
 	maxOutputContinuations := 0
@@ -1828,7 +1831,16 @@ func (r *Runner) startNativeChildConfigured(
 	childConfig.MaxThoughts = minPositive(childConfig.MaxThoughts, 32)
 	childConfig.MaxToolExecutions = minPositive(childConfig.MaxToolExecutions, 128)
 	applyChildRole(&childConfig, request.Task)
-	inheritParentMemorySnapshot(&childConfig, r.memoryRecallSnapshot, parentConfig.Workspace.Root)
+	applyHostSpawnOptions(&childConfig, request.Host)
+	if request.Host == nil || !request.Host.SkipMemory {
+		inheritParentMemorySnapshot(&childConfig, r.memoryRecallSnapshot, parentConfig.Workspace.Root)
+	} else {
+		childConfig.MemoryRecallStart = nil
+		childConfig.MemoryRecallDrain = nil
+		childConfig.MemoryRecallReset = nil
+		childConfig.CaptureMemoryRecallSnapshot = nil
+		childConfig.MemoryContextProvider = nil
+	}
 
 	conversation := context.NewConversation(nil)
 	conversation.UserInput(request.Prompt)
@@ -1878,6 +1890,38 @@ func applyChildRole(child *AgentConfig, task subagentruntime.TaskSnapshot) {
 	}
 	child.ToolExposure.ExtraHidden = appendUniqueStrings(child.ToolExposure.ExtraHidden, role.DisallowedTools...)
 	child.SystemPrompt = strings.TrimSpace(child.SystemPrompt) + "\n\n" + role.SystemPrompt
+}
+
+func applyHostSpawnOptions(child *AgentConfig, host *subagentruntime.HostSpawnOptions) {
+	if child == nil || host == nil {
+		return
+	}
+	if host.MaxThoughts > 0 {
+		child.MaxThoughts = host.MaxThoughts
+	}
+	if host.MaxToolExecutions > 0 {
+		child.MaxToolExecutions = host.MaxToolExecutions
+	}
+	if strings.TrimSpace(host.SystemPrompt) != "" {
+		child.SystemPrompt = strings.TrimSpace(child.SystemPrompt) + "\n\n" + strings.TrimSpace(host.SystemPrompt)
+	}
+	hidden := append([]string(nil), host.ExtraHidden...)
+	if len(host.ToolAllowlist) > 0 {
+		allowed := map[string]bool{}
+		for _, name := range host.ToolAllowlist {
+			if name = strings.TrimSpace(name); name != "" {
+				allowed[name] = true
+			}
+		}
+		if child.ToolAvailabilitySnapshot != nil {
+			for _, entry := range child.ToolAvailabilitySnapshot.Entries() {
+				if !allowed[entry.Definition.Name] {
+					hidden = append(hidden, entry.Definition.Name)
+				}
+			}
+		}
+	}
+	child.ToolExposure.ExtraHidden = appendUniqueStrings(child.ToolExposure.ExtraHidden, hidden...)
 }
 
 func inheritParentMemorySnapshot(child *AgentConfig, snapshot *MemoryRecallSnapshot, parentWorkspaceRoot string) {

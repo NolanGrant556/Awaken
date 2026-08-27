@@ -1361,6 +1361,21 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 				},
 			))
 		}
+		var mcpToolsLoadedByFind []string
+		if call.Function.Name == tool.MCPFindToolName {
+			executionCtx = tool.ContextWithMCPActivationObserver(executionCtx,
+				func(observerCtx stdcontext.Context, names []string) error {
+					newly := r.newlyActivatedMCPToolNames(names)
+					if len(newly) == 0 {
+						return nil
+					}
+					if err := r.persistMCPToolActivation(observerCtx, events, call, newly, "mcp_find"); err != nil {
+						return err
+					}
+					mcpToolsLoadedByFind = append(mcpToolsLoadedByFind, newly...)
+					return nil
+				})
+		}
 		result := r.toolRuntime.Execute(executionCtx, hookCall)
 		if offloadErr := r.offloadLargeToolResult(runCtx, &result); offloadErr != nil {
 			cancel()
@@ -1401,6 +1416,7 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 		}
 
 		r.applyImplicitSkillActivation(call.Function.Name, result, activationPlan)
+		r.applyMCPToolActivation(runCtx, events, call, mcpToolsLoadedByFind)
 		results = append(results, result)
 		if events != nil {
 			artifacts := []AwakenEvent{}
@@ -1666,6 +1682,127 @@ func (r *Runner) applyImplicitSkillActivation(
 		}
 	}
 	r.rebuildRequestBuilder()
+}
+
+// newlyActivatedMCPToolNames filters candidate names down to MCP-origin tools
+// present in the pinned run snapshot that are not activated yet.
+func (r *Runner) newlyActivatedMCPToolNames(names []string) []string {
+	if r == nil || r.config.ToolAvailabilitySnapshot == nil {
+		return nil
+	}
+	existing := make(map[string]bool, len(r.config.MCPActivatedTools))
+	for _, name := range r.config.MCPActivatedTools {
+		existing[name] = true
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" || existing[name] || seen[name] {
+			continue
+		}
+		entry, err := r.config.ToolAvailabilitySnapshot.Lookup(name)
+		if err != nil || !tool.IsMCPToolEntry(entry) {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+// persistMCPToolActivation appends the durable activation fact before the
+// in-memory tool pool changes; restore replays it into MCPActivatedTools.
+func (r *Runner) persistMCPToolActivation(
+	ctx stdcontext.Context,
+	events *runEventEmitter,
+	call context.ToolCall,
+	names []string,
+	source string,
+) error {
+	if r == nil || len(names) == 0 {
+		return nil
+	}
+	turnID := ""
+	threadID := r.threadID
+	runID := r.runID
+	if events != nil {
+		turnID = events.turnID()
+		threadID = events.threadID
+		runID = events.runID
+	}
+	payload := map[string]any{
+		"tools":        append([]string(nil), names...),
+		"source":       source,
+		"activated_at": time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if r.config.SubagentOrigin != nil {
+		payload["agent_id"] = r.config.SubagentOrigin.AgentID
+	}
+	records := []SemanticRecord{NewSemanticRecord(
+		SemanticKindMCPToolsActivated,
+		threadID,
+		runID,
+		turnID,
+		call.ID,
+		r.sessionID,
+		payload,
+	)}
+	if events != nil && events.recorder != nil {
+		return events.persistDurableBatch(ctx, "mcp_tool_activation", records)
+	}
+	if r.recorder != nil {
+		persistCtx, cancel := durablePersistenceContext(ctx)
+		defer cancel()
+		if err := r.recorder.AppendBatch(persistCtx, records); err != nil {
+			return fmt.Errorf("%w: phase=mcp_tool_activation: %v", ErrPersistenceFailed, err)
+		}
+	}
+	return nil
+}
+
+// applyMCPToolActivation merges freshly loaded deferred MCP tools into the
+// run config so the next request projects their full definitions. A direct
+// call to a still-deferred MCP tool auto-loads it (lenient semantics): the
+// call already executed through the pinned snapshot, so withholding the
+// schema would only force retry churn.
+func (r *Runner) applyMCPToolActivation(
+	ctx stdcontext.Context,
+	events *runEventEmitter,
+	call context.ToolCall,
+	loadedByFind []string,
+) {
+	if r == nil {
+		return
+	}
+	names := loadedByFind
+	if call.Function.Name != tool.MCPFindToolName && len(names) == 0 {
+		newly := r.newlyActivatedMCPToolNames([]string{call.Function.Name})
+		if len(newly) > 0 && r.reqBuilder != nil && r.reqBuilder.mcpDisclosureProjection().Enabled {
+			if err := r.persistMCPToolActivation(ctx, events, call, newly, "direct_call"); err == nil {
+				names = newly
+			}
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	existing := make(map[string]bool, len(r.config.MCPActivatedTools))
+	for _, name := range r.config.MCPActivatedTools {
+		existing[name] = true
+	}
+	changed := false
+	for _, name := range names {
+		if name == "" || existing[name] {
+			continue
+		}
+		r.config.MCPActivatedTools = append(r.config.MCPActivatedTools, name)
+		existing[name] = true
+		changed = true
+	}
+	if changed {
+		r.rebuildRequestBuilder()
+	}
 }
 
 func (r *Runner) startSkillChild(

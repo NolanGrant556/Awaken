@@ -47,6 +47,11 @@ type ToolSchemaProvenance struct {
 	// unified Skill tool description. It remains host-owned provenance: the
 	// provider sees only the ordinary lowered tool definition.
 	SkillCatalog string `json:"skill_catalog,omitempty"`
+	// MCPCatalog is the exact deferred MCP tool directory embedded in the
+	// mcp_find description while progressive disclosure is active. Like
+	// SkillCatalog it is host-owned provenance used only for context usage
+	// attribution; the provider sees the ordinary lowered definition.
+	MCPCatalog string `json:"mcp_catalog,omitempty"`
 }
 
 type AttributedToolSchema struct {

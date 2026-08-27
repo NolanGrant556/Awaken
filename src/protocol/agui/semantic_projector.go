@@ -506,7 +506,11 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		agentcore.SemanticKindComputerSessionClosed:
 		return projectComputerEvent(base, record.Kind, payload)
 	case agentcore.SemanticKindThread,
-		agentcore.SemanticKindFileChange:
+		agentcore.SemanticKindFileChange,
+		// MCP progressive-disclosure activation is host-internal bookkeeping:
+		// the mcp_find tool call/result already carries the user-visible
+		// story, and the loaded set only shapes the next request projection.
+		agentcore.SemanticKindMCPToolsActivated:
 		return nil
 	default:
 		unknown := base

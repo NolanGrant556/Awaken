@@ -18,8 +18,8 @@ type mcpDisclosureAgentFakeTool struct {
 	description string
 }
 
-func (t *mcpDisclosureAgentFakeTool) Name() string                { return t.name }
-func (t *mcpDisclosureAgentFakeTool) Description() string         { return t.description }
+func (t *mcpDisclosureAgentFakeTool) Name() string                     { return t.name }
+func (t *mcpDisclosureAgentFakeTool) Description() string              { return t.description }
 func (t *mcpDisclosureAgentFakeTool) Parameters() []tool.ToolParameter { return nil }
 func (t *mcpDisclosureAgentFakeTool) Execute(stdcontext.Context, string) (string, error) {
 	return "ok", nil
@@ -206,6 +206,65 @@ func TestContextUsageSplitsMCPFindCatalogIntoMCPCategory(t *testing.T) {
 	}
 	if total != snapshot.EstimatedInputTokens {
 		t.Fatalf("contribution sum invariant broken: %d != %d", total, snapshot.EstimatedInputTokens)
+	}
+}
+
+// TestMCPFindThroughToolRuntimeKeepsStrictOutcome runs mcp_find through the
+// full ToolRuntime pipeline (permission, input schema validation, execution,
+// strict v2 outcome finalization). A details/output-schema mismatch would
+// rewrite the success into tool_output_schema_mismatch, which unit tests that
+// call Execute directly can never catch.
+func TestMCPFindThroughToolRuntimeKeepsStrictOutcome(t *testing.T) {
+	snapshot := registerAgentMCPDisclosureFixture(t)
+	environment := tool.ExecutionEnvironmentSnapshot{SnapshotID: "env_mcp_agent"}
+	runtime := NewToolRuntimeWithConfig(nil, ToolRuntimeConfig{
+		ToolAvailabilitySnapshot:     snapshot,
+		ExecutionEnvironmentSnapshot: &environment,
+	})
+
+	call := convcontext.ToolCall{ID: "call_rt"}
+	call.Function.Name = tool.MCPFindToolName
+	call.Function.Arguments = `{"query":"ghfix create issue","limit":2}`
+	result := runtime.Execute(stdcontext.Background(), call)
+	if result.IsError || result.Outcome.IsError() {
+		t.Fatalf("strict runtime execution downgraded: status=%s code=%s message=%s",
+			result.Outcome.Status, result.Outcome.ErrorCode, result.Outcome.ErrorMessage)
+	}
+	if !strings.Contains(result.Content, "mcp__ghfix__create_issue") {
+		t.Fatalf("result content missing match: %s", result.Content)
+	}
+	for _, warning := range result.Outcome.Warnings {
+		if warning.Code == "tool_output_schema_mismatch" {
+			t.Fatalf("output schema mismatch warning: %+v", result.Outcome.Warnings)
+		}
+	}
+
+	// The structured failure path must also survive strict finalization as a
+	// semantic failure, not a validation crash.
+	invalid := convcontext.ToolCall{ID: "call_rt_bad"}
+	invalid.Function.Name = tool.MCPFindToolName
+	invalid.Function.Arguments = `{"query":"   "}`
+	failed := runtime.Execute(stdcontext.Background(), invalid)
+	if !failed.Outcome.IsError() || failed.Outcome.ErrorCode != "mcp_find_query_required" {
+		t.Fatalf("empty query must fail with typed code: %+v", failed.Outcome)
+	}
+}
+
+// TestCreateSubagentInheritsMCPActivatedTools proves children sharing the
+// parent's pinned snapshot also inherit the parent's on-demand loaded MCP set
+// (an independent copy, so child-local growth never mutates the parent).
+func TestCreateSubagentInheritsMCPActivatedTools(t *testing.T) {
+	parent := AgentConfig{MCPActivatedTools: []string{"mcp__ghfix__create_issue"}}
+	child, err := CreateSubagent(parent, SpawnConfig{AgentID: "child-mcp", ParentAgentID: "root"})
+	if err != nil {
+		t.Fatalf("create subagent: %v", err)
+	}
+	if len(child.MCPActivatedTools) != 1 || child.MCPActivatedTools[0] != "mcp__ghfix__create_issue" {
+		t.Fatalf("child must inherit parent activations: %+v", child.MCPActivatedTools)
+	}
+	child.MCPActivatedTools = append(child.MCPActivatedTools, "mcp__ghfix__list_issues")
+	if len(parent.MCPActivatedTools) != 1 {
+		t.Fatalf("child growth must not mutate parent: %+v", parent.MCPActivatedTools)
 	}
 }
 

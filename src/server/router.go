@@ -295,6 +295,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	mux.HandleFunc("GET /v1/plugins", pluginH.handleList)
 	mux.HandleFunc("POST /v1/plugins/install", pluginH.handleInstall)
 	mux.HandleFunc("GET /v1/plugins/{name}", pluginH.handleGet)
+	mux.HandleFunc("POST /v1/plugins/{name}/commit", pluginH.handleCommit)
 	mux.HandleFunc("POST /v1/plugins/{name}/enable", pluginH.handleEnable)
 	mux.HandleFunc("POST /v1/plugins/{name}/disable", pluginH.handleDisable)
 	mux.HandleFunc("POST /v1/plugins/{name}/upgrade", pluginH.handleUpgrade)

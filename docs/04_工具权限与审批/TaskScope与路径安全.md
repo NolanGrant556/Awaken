@@ -10,7 +10,7 @@
 
 之所以不用 root 围栏：`Bash` 的 `CheckPermission` 从来不做路径检查，围栏只约束 `Read`/`Write`/`Edit`/`Glob`/`Grep`，因此它不构成边界，只会把越界工作赶进 shell 调用——那样反而丢掉结构化工具的 diff 记录与结果规范。
 
-写入侧保留的是**按形状**判定的固定拒绝名单，与所在 root 无关：`.git` 内部、`.env`、私钥与凭据文件（`id_rsa`、`*.pem`、`credentials`、`secrets` 等）、home 下的 shell 配置、以及 `~/.awaken` 与运行时 config 目录。理由是写坏这些从来不是指令的本意，而 `~/.awaken` 承载 Awaken 自身的 store generations、config 与 credentials。**读取不套用这份名单**，与围栏时期项目内可读 `.env` 的行为保持一致。
+写入侧保留的是**按形状**判定的固定拒绝名单，与所在 root 无关：`.git` 内部、`.env`、私钥与凭据文件（`id_rsa`、`*.pem`、`credentials`、`secrets` 等）、home 下的 shell 配置、以及 `~/.awaken` 与运行时 config 目录。理由是写坏这些从来不是指令的本意，而 `~/.awaken` 承载 Awaken 自身的 store generations、config 与 credentials。两个明确例外是 run 自己的 managed session 工作区和 Agent 可创作的 `<AWAKEN_HOME>/plugins` 仓库；插件状态文件 `<AWAKEN_HOME>/config/plugins.json` 不在例外内，仍只能由 PluginStore 原子更新。**读取不套用这份名单**，与围栏时期项目内可读 `.env` 的行为保持一致。
 
 三个 roots 数组本来就是多根的。一个项目有多个文件夹时，Desktop 用 `[主文件夹, ...次文件夹]` 填这三个数组，`WorkspaceRoot` 是主文件夹。线程锚定在次文件夹时，那个文件夹排在数组首位并成为该 run 的 `WorkspaceRoot`。
 
@@ -22,7 +22,7 @@ roots 要生效，模型必须知道它们存在。scope 通过 `workspace.proje
 
 `ProtectedRoots` 按 **每个** root 生成 `.git` / `.awaken` / `.vscode` / `.idea` 保护项，不只为主文件夹生成；否则次文件夹仓库的 `.git` 会变成可写。
 
-`ProtectedRootExceptions` 是受保护子树内部的窄口子，只为 session 工作目录存在：`~/.awaken` 整体受保护，而 session 目录在它下面。只有当本次 scope 的某个 root 落在 `<AWAKEN_HOME>/sessions` 里时才放行这一条子树，`config`、`credentials`、`store-generations`、`memory` 依旧不可写。例外内部仍然适用上述形状规则。
+`ProtectedRootExceptions` 是受保护子树内部的窄口子。每个 run 固定放行 `<AWAKEN_HOME>/plugins`，使 `Edit` / `Write` 能修改已安装包和插件数据；这不等于签收 package digest，未 commit 的包仍由 PluginStore fail closed。只有当本次 scope 的某个 root 落在 `<AWAKEN_HOME>/sessions` 里时，才额外放行 sessions 子树。`config`、`credentials`、`store-generations`、`memory` 依旧不可写，例外内部仍适用 `.git`、`.env`、密钥与凭据等形状规则。例外自身与其任一祖先/叶子 symlink 的 real path 都必须留在同一个例外和原受保护根内；不能借插件仓库里的 symlink 把写权限投射到外部，也不能从仓库外的 symlink 别名反向写入例外。
 
 `Glob` 和 `Grep` 默认使用 `scope_mode=project`。调用方没有显式给 `path` 时覆盖全部 readable roots：cwd 在前，其余按 scope 顺序跟随，嵌套与重复 root 会被去掉，同一个文件不会出现两次。合并多个 root 的结果时输出绝对路径（`path_style=absolute`），只有一个 root 时保持原来的 root 相对路径（`path_style=root_relative`）。project 模式显式收到多个 roots 的共同父目录或项目外路径时返回 `PROJECT_SCOPE_PATH_MISMATCH`，提示省略 `path`；用户明确要求项目外路径时，模型必须使用 `scope_mode=explicit_path`，该模式仍按开放权限合同直接搜索，不触发审批。回执同时记录 `scope_mode/scope_relation/scope_source`，区分 `inside_project/common_ancestor/outside_project` 与默认/显式来源。
 
@@ -36,6 +36,8 @@ roots 要生效，模型必须知道它们存在。scope 通过 `workspace.proje
 - home、根目录、credential、SSH、Git 配置等敏感位置有独立 hard gate；
 - recoverable delete 额外拒绝 symlink、特殊文件、根/受保护路径。
 
+上述检查会拒绝调用开始前已经存在的 exception-root、祖先或叶子 symlink 逃逸；当前 typed 文件工具仍是“校验后再以普通路径原子写入”，尚未统一到 dirfd/openat no-follow 事务，因此不能把它写成能抵御另一个本机进程在校验与写入之间并发替换祖先目录。PluginStore 的 snapshot/live digest 复算会阻止把这种不稳定 package 签收为有效状态，但不能撤销已经发生在插件树之外的外部写入；这是当前已知缺口。
+
 Desktop 右侧项目文件树与预览使用另一条更窄的只读边界，不继承“工具可读任意绝对路径”的 Agent 语义。Renderer 只能请求当前 active `projectId` 已绑定文件夹中的一个相对目录或文件；Electron Main 每次从 Core 刷新项目事实，核对精确 folder membership，并同时执行 lexical containment 与 realpath containment。目录 symlink 可以作为叶子显示，但不能继续遍历或预览；未绑定文件夹、`..`、绝对路径和 symlink escape 全部 fail closed。目录 bridge 只返回目录项元数据；文本预览使用有界 typed IPC，二进制/HTML 预览使用 Main-owned 短生命周 opaque handle 和受控协议，不提供任意 `readFile(path)`。
 
 WorkspaceRoot 是 typed 文件/Artifact/provider 的默认 run 范围，不是当前登录用户 `Bash` 的操作系统边界。Bash 可通过 thread cwd 进入 workspace 外目录，也可读写 Skill root/用户 cache；Outcome 只证明进程事实，不声称这些副作用经过 TaskScope 观测或提交。外部 provider 的远程资源不伪装成本地路径；其 scope 由 provider manifest 与 typed input/output 契约表达。
@@ -45,7 +47,7 @@ WorkspaceRoot 是 typed 文件/Artifact/provider 的默认 run 范围，不是�
 | 操作 | 当前边界 |
 | --- | --- |
 | 读 | 任意路径。相对路径按主文件夹解析，绝对路径指哪读哪；形状名单不套用于读 |
-| `Edit`/`Write` | 任意路径，但形状名单（`.git` 内部、`.env`、密钥/凭据、shell 配置、`~/.awaken`）在任何位置都拒绝；父路径和 symlink 链校验；覆盖还要求当前 thread 的未过期 Read 快照 |
+| `Edit`/`Write` | 任意路径，但形状名单（`.git` 内部、`.env`、密钥/凭据、shell 配置、`~/.awaken` 的非例外区）在任何位置都拒绝；`<AWAKEN_HOME>/plugins` 可写但 package 修改后仍须 PluginStore commit；父路径和 symlink 链校验；覆盖还要求当前 thread 的未过期 Read 快照 |
 | 删除 | 仅明确普通文件/目录，且必须由 recoverable-delete 路径处理 |
 | `Bash` | cwd 可在 workspace 外，以当前登录用户的操作系统权限直接执行；TaskScope 只作运行上下文，不冒充全部副作用门禁 |
 | 保留的 Workspace broker | 只服务 dependency/git/MCP Artifact；每个 staged delta 依据 canonical writable/protected roots 验证，Trash/发布前 fail closed |
@@ -60,7 +62,7 @@ WorkspaceRoot 是 typed 文件/Artifact/provider 的默认 run 范围，不是�
 - Workspace broker 将 `WritableRoots` 与 `ProtectedRoots` 用于提交门禁；MCP Artifact bridge 在进入 broker 前还必须满足 `OutputRoots`。
 - `git_remote ls_remote` 显式声明零 writable roots；`git_remote clone` 不继承整个 workspace 的可写范围，而是把 broker request 再收窄为唯一 canonical destination。remote checkout 产生 destination 外 delta 或 symlink 时整批拒绝。
 - `ProtectedRoots` 必须覆盖 scope 里的每一个 root；只为 `WorkspaceRoot` 生成保护项是不安全的。
-- `ProtectedRootExceptions` 只能是 `<AWAKEN_HOME>/sessions` 这一条子树，且只在本次 scope 真有 root 落在其中时出现。没有例外时 `~/.awaken` 全域保护不得被削弱，例外内部的形状规则也不得跳过。
+- `ProtectedRootExceptions` 必须始终只包含 `<AWAKEN_HOME>/plugins`，以及在本次 scope 真有 root 落入时才出现的 `<AWAKEN_HOME>/sessions`。插件例外不覆盖 `<AWAKEN_HOME>/config/plugins.json`；两个例外内部的形状规则都不得跳过。
 - roots 不得被重新当成路径围栏。越界访问由用户指令驱动，不引入审批；要收紧只能通过形状名单，而形状名单只作用于写，不作用于读。
 - `Glob`/`Grep` 的 `project` 模式纠正共同父目录和项目外路径只约束默认意图，不是权限拒绝；`explicit_path` 必须继续允许用户点名的外部绝对路径。
 - 第三方提议的路径与用户指令不同源，但当前**不**因此额外收紧：MCP Artifact bridge 已放开 `writable ∩ output` 约束，仅保留 `relative_path` 格式校验（相对、canonical、禁止 `..`）、symlink 组件拒绝和 `ProtectedRoots`。
@@ -74,7 +76,7 @@ WorkspaceRoot 是 typed 文件/Artifact/provider 的默认 run 范围，不是�
 
 - `src/tool/permission.go`、`sensitive.go`：TaskScope、敏感路径与 `ProtectedRootExceptions`。
 - `src/runtime/run_service.go`：`normalizeWorkspace` / `normalizeWorkspaceForThread`、`scopeProjectID`、`buildProtectedRoots`、`buildProtectedRootExceptions`。
-- `src/desktopdata/paths.go`：`SessionsRoot` / `SessionWorkspacePath` / `SessionOutputPath`，session 工作目录路径的唯一构造点。
+- `src/desktopdata/paths.go`：`PluginsRoot`、`SessionsRoot` / `SessionWorkspacePath` / `SessionOutputPath`，插件仓库与 session 工作目录路径的唯一构造点。
 - `src/tools/internal/searchroots`：只读搜索工具的多根解析与展示路径规则。
 - `src/prompt/system_prompt.go`、`runtime.go`、`templates/default_system.md`：项目名、文件夹组与作业范围约定的模型可见渲染。
 - `src/agentcore/request_builder.go`：`projectFolderObservations`，把 scope 的 readable roots 投影成模型侧文件夹组。

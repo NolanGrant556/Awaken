@@ -102,6 +102,21 @@ func TestNewStoreRequiresAwakenHome(t *testing.T) {
 	}
 }
 
+func TestPluginStoreRejectsSymlinkedRepositoryRoot(t *testing.T) {
+	home := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(home, "plugins")); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStoreAt(home)
+	if err := store.Available(); err == nil {
+		t.Fatal("a symlinked Plugin repository root must make the store unavailable")
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "packages")); !os.IsNotExist(err) {
+		t.Fatalf("store initialization followed the symlinked repository root: %v", err)
+	}
+}
+
 func TestInstallLocalPluginAndList(t *testing.T) {
 	store := testStore(t)
 	src := t.TempDir()

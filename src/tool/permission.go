@@ -629,9 +629,39 @@ func (c PermissionContext) resolveMutationPath(path string) (string, error) {
 	if err := c.checkSensitiveAbsolutePath(resolved); err != nil {
 		return "", err
 	}
+	lexicalException := narrowestContainingRoot(resolved, c.ProtectedRootExceptions)
 	realPath, err := ResolvePathWithExistingAncestor(resolved)
 	if err != nil {
 		return "", fmt.Errorf("path %q cannot be resolved safely for mutation: %w", path, err)
+	}
+	if lexicalException == "" {
+		for _, exception := range c.ProtectedRootExceptions {
+			realException, resolveErr := ResolvePathWithExistingAncestor(exception)
+			if resolveErr == nil && PathWithinRoot(realPath, realException) {
+				return "", &SensitivePathError{Path: resolved, Reason: "protected-root exception must be addressed through its lexical root"}
+			}
+		}
+	}
+	if lexicalException != "" {
+		realException, resolveErr := ResolvePathWithExistingAncestor(lexicalException)
+		if resolveErr != nil {
+			return "", fmt.Errorf("protected-root exception %q cannot be resolved safely: %w", lexicalException, resolveErr)
+		}
+		if !PathWithinRoot(realPath, realException) {
+			return "", &SensitivePathError{Path: resolved, Reason: "protected-root exception symlink escape"}
+		}
+		// An exception nested in a protected root must resolve inside that same
+		// protected root. Otherwise replacing the exception directory itself
+		// with a symlink would turn the carve-out into an arbitrary write grant.
+		for _, protectedRoot := range c.ProtectedRoots {
+			if !PathWithinRoot(lexicalException, protectedRoot) {
+				continue
+			}
+			realProtectedRoot, protectedErr := ResolvePathWithExistingAncestor(protectedRoot)
+			if protectedErr != nil || !PathWithinRoot(realException, realProtectedRoot) {
+				return "", &SensitivePathError{Path: resolved, Reason: "protected-root exception resolves outside its protected root"}
+			}
+		}
 	}
 	if err := c.checkResolvedSensitiveAbsolutePath(realPath); err != nil {
 		return "", err

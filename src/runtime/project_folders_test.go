@@ -512,8 +512,9 @@ func TestTaskScopeProtectsMetadataDirectoriesOfEverySecondaryRoot(t *testing.T) 
 			}
 		}
 	}
-	if len(scope.ProtectedRootExceptions) != 0 {
-		t.Fatalf("a scope made of user folders must not receive a carve-out, got %+v", scope.ProtectedRootExceptions)
+	wantPluginRoot := filepath.Clean(desktopdata.PluginsRoot(os.Getenv(awakenHomeEnv)))
+	if len(scope.ProtectedRootExceptions) != 1 || scope.ProtectedRootExceptions[0] != wantPluginRoot {
+		t.Fatalf("every run must receive exactly the Plugin repository carve-out, got %+v", scope.ProtectedRootExceptions)
 	}
 }
 
@@ -591,8 +592,17 @@ func TestFolderlessProjectResolvesToItsSessionWorkspace(t *testing.T) {
 	if scope.ProjectID != "project_folderless" {
 		t.Fatalf("the scope must carry the project identity, got %q", scope.ProjectID)
 	}
-	if len(scope.ProtectedRootExceptions) != 1 {
-		t.Fatalf("a session workspace needs the carve-out to be writable, got %+v", scope.ProtectedRootExceptions)
+	wantExceptions := map[string]bool{
+		filepath.Clean(desktopdata.PluginsRoot(home)):  true,
+		filepath.Clean(desktopdata.SessionsRoot(home)): true,
+	}
+	if len(scope.ProtectedRootExceptions) != len(wantExceptions) {
+		t.Fatalf("a session workspace needs the Plugin and sessions carve-outs, got %+v", scope.ProtectedRootExceptions)
+	}
+	for _, exception := range scope.ProtectedRootExceptions {
+		if !wantExceptions[exception] {
+			t.Fatalf("unexpected protected-root exception %q in %+v", exception, scope.ProtectedRootExceptions)
+		}
 	}
 }
 
@@ -648,7 +658,7 @@ func TestManagedWorkspaceRejectsUnsafeOwnerID(t *testing.T) {
 	}
 }
 
-func TestTaskScopeCarvesOutOnlyTheSessionsSubtree(t *testing.T) {
+func TestTaskScopeCarvesOutPluginRepositoryAndManagedSessions(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(awakenHomeEnv, home)
 	session := desktopdata.SessionWorkspacePath(home, "project_folderless")
@@ -660,9 +670,17 @@ func TestTaskScopeCarvesOutOnlyTheSessionsSubtree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := filepath.Clean(desktopdata.SessionsRoot(home))
-	if len(scope.ProtectedRootExceptions) != 1 || scope.ProtectedRootExceptions[0] != expected {
-		t.Fatalf("expected exactly the sessions subtree as carve-out, got %+v", scope.ProtectedRootExceptions)
+	expected := map[string]bool{
+		filepath.Clean(desktopdata.PluginsRoot(home)):  true,
+		filepath.Clean(desktopdata.SessionsRoot(home)): true,
+	}
+	if len(scope.ProtectedRootExceptions) != len(expected) {
+		t.Fatalf("expected Plugin and sessions subtrees as carve-outs, got %+v", scope.ProtectedRootExceptions)
+	}
+	for _, exception := range scope.ProtectedRootExceptions {
+		if !expected[exception] {
+			t.Fatalf("unexpected protected-root exception %q in %+v", exception, scope.ProtectedRootExceptions)
+		}
 	}
 }
 

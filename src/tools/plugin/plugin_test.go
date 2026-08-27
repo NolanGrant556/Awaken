@@ -96,6 +96,28 @@ func TestPluginToolValidateInstallInspectAndReplace(t *testing.T) {
 	if err != nil || !strings.Contains(inspectRaw, `"installed": true`) {
 		t.Fatalf("inspect=%s err=%v", inspectRaw, err)
 	}
+	recordedDigest := installed.Digest
+	if err := os.WriteFile(filepath.Join(installed.RootDir, "skills", "helper", "SKILL.md"), []byte("---\nname: helper\ndescription: Updated helper skill.\n---\nUpdated help.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commitRaw, err := pluginTool.Execute(ctx, `{"action":"commit","name":"creator.test","expected_digest":"`+recordedDigest+`"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var committed result
+	if err := json.Unmarshal([]byte(commitRaw), &committed); err != nil {
+		t.Fatal(err)
+	}
+	if committed.Action != "commit" || !committed.Valid || !committed.Installed || !committed.Changed || committed.Digest == recordedDigest || committed.PreviousDigest != recordedDigest || committed.SkillCount != 1 {
+		t.Fatalf("committed=%+v", committed)
+	}
+	stale, err := pluginTool.ExecuteOutcome(ctx, `{"action":"commit","name":"creator.test","expected_digest":"`+recordedDigest+`"}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale.ErrorCode != "plugin_recorded_digest_changed" || stale.Retryable {
+		t.Fatalf("stale commit outcome=%+v", stale)
+	}
 	if err := os.WriteFile(filepath.Join(candidate, "changed.txt"), []byte("replacement"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -109,5 +131,44 @@ func TestPluginToolValidateInstallInspectAndReplace(t *testing.T) {
 	}
 	if !replaced.Replaced || replaced.PreviousTrashedPath == "" {
 		t.Fatalf("replaced=%+v", replaced)
+	}
+}
+
+func TestPluginToolCommitRequiresNameAndExpectedDigest(t *testing.T) {
+	pluginTool := New(plugins.NewStoreAt(t.TempDir()))
+	for _, raw := range []string{
+		`{"action":"commit","name":"creator.test"}`,
+		`{"action":"commit","expected_digest":"sha256-v2:recorded"}`,
+	} {
+		outcome, err := pluginTool.ExecuteOutcome(context.Background(), raw, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if outcome.ErrorCode != "plugin_invalid_input" {
+			t.Fatalf("raw=%s outcome=%+v", raw, outcome)
+		}
+	}
+}
+
+func TestPluginToolCommitMapsInvalidInstalledPackage(t *testing.T) {
+	home := t.TempDir()
+	store := plugins.NewStoreAt(home)
+	src := t.TempDir()
+	writePlugin(t, src, "Before invalid edit")
+	installed, err := store.Install(t.Context(), plugins.InstallRequest{Source: plugins.Source{Kind: plugins.SourceLocalPath, Path: src}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installed.Plugin.Root, "plugin.json"), []byte(`{"name":"creator.test"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pluginTool := New(store)
+	raw := `{"action":"commit","name":"creator.test","expected_digest":"` + installed.Plugin.Digest + `"}`
+	outcome, err := pluginTool.ExecuteOutcome(context.Background(), raw, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.ErrorCode != "plugin_source_invalid" || outcome.Retryable {
+		t.Fatalf("invalid commit outcome=%+v", outcome)
 	}
 }

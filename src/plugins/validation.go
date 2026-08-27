@@ -39,6 +39,20 @@ func (s *Store) Validate(ctx context.Context, source Source) (ValidationResult, 
 	if err != nil {
 		return ValidationResult{}, err
 	}
+
+	validationData, err := os.MkdirTemp(s.stagingRoot, "validate-data-*")
+	if err != nil {
+		return ValidationResult{}, fmt.Errorf("create validation plugin data directory: %w", err)
+	}
+	defer os.RemoveAll(validationData)
+	return s.validatePackageTree(pluginRoot, validationData, Record{Enabled: true, Source: source})
+}
+
+// validatePackageTree applies the parser and component failure-isolation
+// contract to an already-materialized package tree. Callers are responsible
+// for ensuring the tree is a stable snapshot and the data directory is
+// controlled by the appropriate lifecycle.
+func (s *Store) validatePackageTree(pluginRoot, dataDir string, rec Record) (ValidationResult, error) {
 	parsed, err := loadManifestFile(pluginRoot)
 	if err != nil {
 		return ValidationResult{}, err
@@ -48,12 +62,7 @@ func (s *Store) Validate(ctx context.Context, source Source) (ValidationResult, 
 		return ValidationResult{}, fmt.Errorf("compute plugin digest: %w", err)
 	}
 
-	validationData, err := os.MkdirTemp(s.stagingRoot, "validate-data-*")
-	if err != nil {
-		return ValidationResult{}, fmt.Errorf("create validation plugin data directory: %w", err)
-	}
-	defer os.RemoveAll(validationData)
-	loaded := LoadPackage(pluginRoot, validationData, Record{Enabled: true, Source: source})
+	loaded := LoadPackage(pluginRoot, dataDir, rec)
 	diagnostics := append([]Diagnostic(nil), loaded.Diagnostics...)
 	skillCount := 0
 	if loaded.SkillRoot != "" {
@@ -102,7 +111,7 @@ func (s *Store) Validate(ctx context.Context, source Source) (ValidationResult, 
 		}
 	}
 	return ValidationResult{
-		Valid: valid, Source: source, Manifest: parsed.Manifest,
+		Valid: valid, Source: rec.Source, Manifest: parsed.Manifest,
 		Name: parsed.Manifest.Name, Version: parsed.Manifest.Version, Description: parsed.Manifest.Description,
 		Digest: digest, TargetRoot: filepath.Join(s.packagesRoot, parsed.Manifest.Name),
 		SkillCount: skillCount, ServerCount: serverCount, Diagnostics: diagnostics,

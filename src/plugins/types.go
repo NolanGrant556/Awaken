@@ -35,6 +35,7 @@ var (
 	ErrHomeRequired            = errors.New("AWAKEN_HOME is required")
 	ErrPathEscapes             = errors.New("path escapes the plugin root")
 	ErrSourceChanged           = errors.New("plugin source changed after validation")
+	ErrRecordedDigestChanged   = errors.New("plugin recorded digest changed")
 	ErrDisabled                = errors.New("plugin is disabled")
 	ErrDigestChanged           = errors.New("plugin digest changed")
 	ErrNoUsableComponents      = errors.New("plugin has no usable Skill or MCP component")
@@ -158,6 +159,17 @@ type InstallResult struct {
 	Replaced            bool
 	PreviousTrashedPath string
 	Message             string
+}
+
+// CommitInstalledChangesResult reports an authorized signing of the current
+// installed package tree. Changed is false when the live tree and manifest
+// version were already represented by the recorded state.
+type CommitInstalledChangesResult struct {
+	Plugin         *InstalledPlugin
+	PreviousDigest string
+	Digest         string
+	Changed        bool
+	Message        string
 }
 
 // ValidationResult is an authoring-time dry-run produced by the same

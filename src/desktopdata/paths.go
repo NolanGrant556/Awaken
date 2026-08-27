@@ -42,15 +42,17 @@ func PluginsConfigPath(root string) string {
 	return filepath.Join(filepath.Clean(root), "config", "plugins.json")
 }
 
-// PluginsRoot returns the installed plugin packages/data tree.
+// PluginsRoot returns the Agent-editable installed plugin packages/data tree.
+// Plugin lifecycle state stays outside this root under config/plugins.json and
+// remains writable only through PluginStore.
 func PluginsRoot(root string) string {
 	return filepath.Join(filepath.Clean(root), "plugins")
 }
 
-// SessionsRoot is the single subtree of the Awaken business-data root that the
-// agent is allowed to mutate. Everything else under the root (config,
-// credentials, store generations, user memory) stays protected, so this path is
-// the only carve-out the task-scope protected-root check honours.
+// SessionsRoot is the managed workspace subtree of the Awaken business-data
+// root. TaskScope also carves out PluginsRoot for Agent-authored Plugin package
+// changes; config, credentials, store generations and user memory stay
+// protected.
 func SessionsRoot(root string) string {
 	return filepath.Join(filepath.Clean(root), "sessions")
 }

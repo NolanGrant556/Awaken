@@ -136,12 +136,15 @@ func (o *Orchestrator) Run(ctx context.Context, intent Intent) (Result, error) {
 		if err != nil {
 			result.Outcome = OutcomeFailed
 			result.Coverage = append(result.Coverage, "report publish failed")
+			_ = o.append(ctx, "research_terminal", map[string]any{"outcome": string(result.Outcome)})
 			return result, err
 		}
 		result.ReportPath = path
 		result.ArtifactID = artifactID
 	}
-	_ = o.setPlan(ctx, "completed", "completed", "completed", "completed")
+	if result.Outcome != OutcomeFailed {
+		_ = o.setPlan(ctx, "completed", "completed", "completed", "completed")
+	}
 	_ = o.append(ctx, "research_terminal", map[string]any{"outcome": string(result.Outcome)})
 	return result, nil
 }
@@ -226,10 +229,7 @@ func (o *Orchestrator) research(ctx context.Context, intent Intent, questions []
 				coverage = append(coverage, "claim cap reached")
 				break
 			}
-			id := strings.TrimSpace(rawClaim.ID)
-			if id == "" {
-				id = fmt.Sprintf("claim-%d", claimSeq)
-			}
+			id := fmt.Sprintf("claim-%d", claimSeq)
 			claimSeq++
 			claim := Claim{ID: id, QuestionID: question.ID, Statement: strings.TrimSpace(rawClaim.Statement), Confidence: rawClaim.Confidence, VerificationStatus: "partial"}
 			for _, rawEv := range rawClaim.Evidence {
@@ -250,7 +250,7 @@ func (o *Orchestrator) research(ctx context.Context, intent Intent, questions []
 			claims = append(claims, claim)
 			kept++
 		}
-		coverage = append(coverage, item.parsed.Uncertainties...)
+		coverage = append(coverage, compactCoverageNotes(item.parsed.Uncertainties)...)
 	}
 	_ = o.append(ctx, "research_claim_batch", map[string]any{"claim_count": len(claims), "evidence_count": len(evidence)})
 	return claims, evidence, coverage
@@ -312,10 +312,10 @@ func (o *Orchestrator) verify(ctx context.Context, intent Intent, claims []Claim
 			seen[verdict.ClaimID] = strings.ToLower(strings.TrimSpace(verdict.Verdict))
 		}
 		if !valid || len(seen) != len(expected) {
-			coverage = append(coverage, "verifier claim-id mismatch; shard excluded")
+			coverage = append(coverage, "verifier claim-id mismatch; shard kept as partial")
 			for i := range claims {
-				if expected[claims[i].ID] {
-					claims[i].VerificationStatus = "rejected"
+				if expected[claims[i].ID] && claims[i].VerificationStatus == "verified" {
+					claims[i].VerificationStatus = "partial"
 				}
 			}
 			continue
@@ -396,6 +396,22 @@ func (o *Orchestrator) report(ctx context.Context, intent Intent, claims []Claim
 	markdown := renderReport(intent, string(outcome), answer, usable, evidence, uniqueStrings(coverage))
 	_ = o.append(ctx, "research_report", map[string]any{"outcome": string(outcome)})
 	return Result{Outcome: outcome, Answer: answer, Markdown: markdown, Coverage: uniqueStrings(coverage), Claims: usable}
+}
+
+func compactCoverageNotes(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		note := strings.TrimSpace(value)
+		if note == "" {
+			continue
+		}
+		runes := []rune(note)
+		if len(runes) > 180 {
+			note = string(runes[:180]) + "…"
+		}
+		out = append(out, note)
+	}
+	return out
 }
 
 func spawnOptions(intent Intent) *subagentruntime.HostSpawnOptions {

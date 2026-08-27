@@ -67,7 +67,7 @@ func (r *Runner) runDeepResearch(ctx stdcontext.Context, events *runEventEmitter
 	}
 	if result.Outcome == researchruntime.OutcomeFailed {
 		err := fmt.Errorf("deep research failed")
-		if notes := strings.TrimSpace(strings.Join(result.Coverage, "; ")); notes != "" {
+		if notes := strings.TrimSpace(strings.Join(compactFailedNotes(result.Coverage), "; ")); notes != "" {
 			err = fmt.Errorf("deep research failed: %s", notes)
 		}
 		events.turnFinished(ctx, terminalReasonForError(err), "")
@@ -99,6 +99,22 @@ func (r *Runner) runDeepResearch(ctx stdcontext.Context, events *runEventEmitter
 	events.turnFinished(ctx, TerminalReasonCompleted, "")
 	events.runFinished(ctx, answer, finalState, TerminalReasonCompleted)
 	return answer, nil
+}
+
+func compactFailedNotes(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		note := strings.TrimSpace(value)
+		if note == "" {
+			continue
+		}
+		runes := []rune(note)
+		if len(runes) > 160 {
+			note = string(runes[:160]) + "…"
+		}
+		out = append(out, note)
+	}
+	return out
 }
 
 type researchChildClient struct {

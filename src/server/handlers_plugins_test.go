@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"awaken/src/plugins"
@@ -49,6 +50,156 @@ func TestPluginsUnavailableWithoutStore(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
+}
+
+func TestPluginValidateDoesNotInstall(t *testing.T) {
+	home := t.TempDir()
+	store := plugins.NewStoreAt(home)
+	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil, store)
+	src := t.TempDir()
+	writeHTTPPluginFixture(t, src, "validate-plugin")
+
+	body, _ := json.Marshal(map[string]any{
+		"source": map[string]any{"kind": "local_path", "path": src},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/plugins/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("validate status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var validation plugins.ValidationResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &validation); err != nil {
+		t.Fatal(err)
+	}
+	if !validation.Valid || validation.Name != "validate-plugin" || validation.SkillCount != 1 || validation.Digest == "" {
+		t.Fatalf("validation=%+v", validation)
+	}
+	if validation.Diagnostics == nil {
+		t.Fatalf("diagnostics must be a non-null array: %s", rec.Body.String())
+	}
+	listed, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("validation installed plugins: %+v", listed)
+	}
+	if _, err := os.Stat(validation.TargetRoot); !os.IsNotExist(err) {
+		t.Fatalf("validation created live package: %v", err)
+	}
+}
+
+func TestPluginValidateReportsInvalidAgentSkillOptionalField(t *testing.T) {
+	home := t.TempDir()
+	store := plugins.NewStoreAt(home)
+	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil, store)
+	src := t.TempDir()
+	writeHTTPPluginFixture(t, src, "invalid-skill-field")
+	if err := os.WriteFile(filepath.Join(src, "skills", "lint", "SKILL.md"), []byte("---\nname: lint\ndescription: lint files\nmetadata:\n  version: 2\n---\nBody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	validation := validateHTTPPlugin(t, router, src)
+	if !validation.Valid || validation.SkillCount != 0 {
+		t.Fatalf("invalid Skill must be isolated from the installable plugin: %+v", validation)
+	}
+	found := false
+	for _, diagnostic := range validation.Diagnostics {
+		if diagnostic.Code == "plugin_skill_invalid" && diagnostic.Severity == "warning" && strings.Contains(diagnostic.Message, "metadata[\"version\"] must be a string") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("missing optional-field diagnostic: %+v", validation.Diagnostics)
+	}
+}
+
+func TestPluginInstallAcceptsValidatedDigest(t *testing.T) {
+	home := t.TempDir()
+	store := plugins.NewStoreAt(home)
+	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil, store)
+	src := t.TempDir()
+	writeHTTPPluginFixture(t, src, "digest-pinned-plugin")
+
+	validation := validateHTTPPlugin(t, router, src)
+	body, _ := json.Marshal(map[string]any{
+		"source":         map[string]any{"kind": "local_path", "path": src},
+		"expectedDigest": validation.Digest,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/plugins/install", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("install status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var installed installPluginResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &installed); err != nil {
+		t.Fatal(err)
+	}
+	if installed.Plugin.Name != "digest-pinned-plugin" || installed.Plugin.Digest != validation.Digest {
+		t.Fatalf("installed=%+v validation=%+v", installed, validation)
+	}
+}
+
+func TestPluginInstallRejectsSourceChangedAfterValidation(t *testing.T) {
+	home := t.TempDir()
+	store := plugins.NewStoreAt(home)
+	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil, store)
+	src := t.TempDir()
+	writeHTTPPluginFixture(t, src, "changed-source-plugin")
+
+	validation := validateHTTPPlugin(t, router, src)
+	if err := os.WriteFile(filepath.Join(src, "skills", "lint", "SKILL.md"), []byte("---\nname: lint\ndescription: changed files\n---\nChanged\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"source":         map[string]any{"kind": "local_path", "path": src},
+		"expectedDigest": validation.Digest,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/plugins/install", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("changed source status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var failure errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.Error != "PLUGIN_SOURCE_CHANGED" {
+		t.Fatalf("changed source error=%+v", failure)
+	}
+	listed, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 0 {
+		t.Fatalf("changed source installed plugins: %+v", listed)
+	}
+}
+
+func validateHTTPPlugin(t *testing.T, router http.Handler, sourcePath string) plugins.ValidationResult {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{
+		"source": map[string]any{"kind": "local_path", "path": sourcePath},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/plugins/validate", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("validate status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var result plugins.ValidationResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
 }
 
 func TestPluginsInstallListEnableUninstall(t *testing.T) {

@@ -106,6 +106,7 @@ DELETE /v1/skills/{id}
 POST   /v1/skills/{id}/enable
 POST   /v1/skills/{id}/disable
 GET    /v1/plugins
+POST   /v1/plugins/validate
 POST   /v1/plugins/install
 GET    /v1/plugins/{name}
 POST   /v1/plugins/{name}/commit
@@ -119,7 +120,7 @@ POST   /v1/plugins/{name}/servers/{short}/disable
 
 `/v1/mcp/servers*` 依赖 MCP manager；connector routes 依赖 registry。Skill list/install/preview/delete/enable/disable 始终注册，registry 缺失时返回 503。`GET /v1/skills` 可按主文件夹优先重复提交 `projectRoot` query；Core 把这些值视为同一个项目的有序文件夹组，在一次 discovery 中合并并返回每条 project Skill 的实际 `projectPath`。只提交一次保持原单文件夹语义。`POST /v1/skills/{id}/execute` 未注册，只是保留 handler。Skill 预览与删除的业务合同由 [08 技能](../08_技能/索引.md) 拥有。
 
-`/v1/plugins*` 始终注册；`PluginStore` 缺失返回 503 `PLUGINS_UNAVAILABLE`，`plugins.json` 损坏返回 503 `PLUGIN_STATE_CORRUPT`。`POST /v1/plugins/{name}/commit` 只接受修改前记录的 `expectedDigest`，CAS 冲突返回 409 `PLUGIN_RECORDED_DIGEST_CHANGED`，非法或不稳定的在线树返回 400 `PLUGIN_INVALID`。业务合同由 [14 插件](../14_插件/索引.md) 拥有。Renderer 只通过 Main `requestRuntime` 调用，不直接读写插件目录或状态文件。
+`/v1/plugins*` 始终注册；`PluginStore` 缺失返回 503 `PLUGINS_UNAVAILABLE`，`plugins.json` 损坏返回 503 `PLUGIN_STATE_CORRUPT`。`POST /v1/plugins/validate` 只隔离物化并校验 `source`，返回 identity、digest、组件计数与 diagnostics，不写安装树或刷新运行时；Desktop 随后的 `POST /v1/plugins/install` 携带该 `expectedDigest`，来源变化返回 409 `PLUGIN_SOURCE_CHANGED`。未携带 `expectedDigest` 的既有安装调用保持兼容。`POST /v1/plugins/{name}/commit` 只接受修改前记录的 `expectedDigest`，CAS 冲突返回 409 `PLUGIN_RECORDED_DIGEST_CHANGED`，非法或不稳定的在线树返回 400 `PLUGIN_INVALID`。业务合同由 [14 插件](../14_插件/索引.md) 拥有。Renderer 只通过 Main `requestRuntime` 调用，不直接读写插件目录或状态文件。
 
 `GET /v1/composer-catalog/events` 是 Main 常驻消费的 SSE 失效流。每次连接先发送当前 `{revision, kind:"snapshot"}`；Skill Registry 或 Plugin Store 的成功 catalog mutation 使 revision 单调递增并发送 `kind=skills|plugins`。事件不携带 Skill/Plugin 数据、路径或配置，Renderer 收到后只能通过 typed `listSkills/listPlugins` 按当前 workspace 与 marker 重读权威目录；重新连接不回放历史 mutation，因为 snapshot revision 与每次打开直接重读共同保证当前状态。
 

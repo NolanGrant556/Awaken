@@ -49,6 +49,82 @@ func TestMcpToolAdapterDoesNotTrustOfficialLookingServerName(t *testing.T) {
 	}
 }
 
+func TestMcpToolAdapterCanonicalizesDottedPluginServerNames(t *testing.T) {
+	serverName := "plugin__awaken.acceptance.20260827__local-smoke"
+	adapter := NewMcpToolAdapter(nil, serverName, &mcp.Tool{Name: "echo"})
+	if got, want := adapter.Name(), "mcp__plugin__awaken_acceptance_20260827__local-smoke__echo"; got != want {
+		t.Fatalf("adapter name = %q, want %q", got, want)
+	}
+	if strings.Contains(adapter.Name(), ".") {
+		t.Fatalf("canonical MCP tool name must not contain dots: %q", adapter.Name())
+	}
+	if err := tool.RegisterToolForce(adapter); err != nil {
+		t.Fatalf("register canonical MCP tool: %v", err)
+	}
+	t.Cleanup(func() { tool.UnregisterTool(adapter.Name()) })
+	if _, err := tool.GetTool(adapter.Name()); err != nil {
+		t.Fatalf("registry lookup failed for canonical MCP tool name: %v", err)
+	}
+	definition := adapter.Definition()
+	if definition.Annotations.ServerName != serverName || definition.Annotations.CanonicalServerName != "plugin__awaken_acceptance_20260827__local-smoke" || definition.Annotations.ToolName != "echo" {
+		t.Fatalf("raw MCP identity was not preserved in annotations: %+v", definition.Annotations)
+	}
+}
+
+func TestMcpToolNameEncodesUnsafeComponentsReversibly(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{name: "dot", raw: "read.item"},
+		{name: "unicode", raw: "读取"},
+		{name: "reserved sentinel", raw: "x0_echo"},
+		{name: "space", raw: "read item"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			encoded := encodeMCPNameComponent(test.raw)
+			if !strings.HasPrefix(encoded, mcpEncodedSentinel) {
+				t.Fatalf("encoded component %q does not carry sentinel", encoded)
+			}
+			if strings.ContainsAny(encoded, ". ") {
+				t.Fatalf("encoded component is not model-safe: %q", encoded)
+			}
+			decoded, ok := decodeMCPNameComponent(encoded)
+			if !ok || decoded != test.raw {
+				t.Fatalf("decode(%q) = %q, %v; want %q, true", encoded, decoded, ok, test.raw)
+			}
+		})
+	}
+
+	if got := encodeMCPNameComponent("read_item"); got != "read_item" {
+		t.Fatalf("safe component changed: %q", got)
+	}
+	if encodeMCPNameComponent("x0_echo") == encodeMCPNameComponent("echo") {
+		t.Fatal("reserved-sentinel raw name collided with ordinary raw name")
+	}
+	if got := modelFacingMCPServerName("plugin__acme.tools__server.v1"); !strings.HasPrefix(got, "plugin__acme_tools__x0_") {
+		t.Fatalf("plugin/server component mapping is wrong: %q", got)
+	}
+	if dotted, invalidUnderscore := modelFacingMCPServerName("plugin__acme.tools__server"), modelFacingMCPServerName("plugin__acme_tools__server"); dotted == invalidUnderscore {
+		t.Fatalf("valid dotted plugin name collided with out-of-spec underscore name: %q", dotted)
+	}
+
+	serverName := "plugin__acme.tools__server.v1"
+	for _, rawToolName := range []string{"read.item", "x0_echo"} {
+		t.Run("register "+rawToolName, func(t *testing.T) {
+			adapter := NewMcpToolAdapter(nil, serverName, &mcp.Tool{Name: rawToolName})
+			if err := tool.RegisterToolForce(adapter); err != nil {
+				t.Fatalf("register encoded raw MCP tool %q as %q: %v", rawToolName, adapter.Name(), err)
+			}
+			t.Cleanup(func() { tool.UnregisterTool(adapter.Name()) })
+			if definition := adapter.Definition(); definition.Annotations.ServerName != serverName || definition.Annotations.ToolName != rawToolName {
+				t.Fatalf("raw identity for %q was not preserved: %+v", rawToolName, definition.Annotations)
+			}
+		})
+	}
+}
+
 func TestMcpToolAdapterPreservesOutputSchemaAsDetailsContract(t *testing.T) {
 	additionalProperties := false
 	adapter := NewMcpToolAdapter(nil, "schema-server", &mcp.Tool{

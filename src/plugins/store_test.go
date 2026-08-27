@@ -17,6 +17,7 @@ import (
 
 	"awaken/src/desktopdata"
 	"awaken/src/mcpclient"
+	"awaken/src/tool"
 	"awaken/src/tool/trash"
 )
 
@@ -307,6 +308,7 @@ func TestInstalledPluginStdioEndToEnd(t *testing.T) {
 	manager.Start(ctx, store.PluginMCPServers())
 	defer manager.Shutdown(context.Background())
 	serverName := ServerIdentity(name, "echo")
+	defer mcpclient.UnregisterMcpToolsForTest(serverName)
 	deadline := time.Now().Add(8 * time.Second)
 	for {
 		snapshot, snapshotErr := manager.SnapshotServer(serverName)
@@ -318,16 +320,49 @@ func TestInstalledPluginStdioEndToEnd(t *testing.T) {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	result, err := manager.CallTool(ctx, "mcp__"+serverName+"__echo", map[string]any{"message": "installed-ping"})
+	modelToolName := mcpclient.McpToolName(serverName, "echo")
+	if modelToolName != "mcp__plugin__installed_stdio__echo__echo" {
+		t.Fatalf("unexpected model-facing dotted plugin tool name %q", modelToolName)
+	}
+	registered, err := tool.GetRegisteredTool(modelToolName)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("dotted plugin MCP tool was not registered: %v", err)
 	}
-	if len(result.Content) != 1 {
-		t.Fatalf("tool result=%+v", result)
+	if registered.Definition.Annotations.ServerName != serverName || registered.Definition.Annotations.ToolName != "echo" {
+		t.Fatalf("raw plugin MCP identity was not preserved: %+v", registered.Definition.Annotations)
 	}
-	textContent, ok := result.Content[0].(*mcp.TextContent)
-	if !ok || textContent.Text != "installed-ping" {
-		t.Fatalf("tool content=%+v", result.Content[0])
+
+	snapshot := tool.NewRunToolAvailabilitySnapshot(tool.ExecutionEnvironmentSnapshot{SnapshotID: "installed_plugin_stdio"})
+	entry, err := snapshot.Lookup(modelToolName)
+	if err != nil {
+		t.Fatalf("dotted plugin MCP tool missing from run snapshot: %v", err)
+	}
+	servers := tool.CollectMCPCatalog(&snapshot, tool.DefaultToolExposurePolicy())
+	var catalogToolFound bool
+	for _, catalogServer := range servers {
+		if catalogServer.Server != serverName {
+			continue
+		}
+		for _, catalogTool := range catalogServer.Tools {
+			if catalogTool.Name == modelToolName && catalogTool.RawName == "echo" {
+				catalogToolFound = true
+			}
+		}
+	}
+	if !catalogToolFound {
+		t.Fatalf("dotted plugin MCP tool missing from deferred catalog: %+v", servers)
+	}
+	matches := tool.SearchDeferredTools(tool.DeferredToolSearchSpace{Servers: servers}, "select:"+modelToolName, 5)
+	if len(matches) != 1 || matches[0].Name != modelToolName || matches[0].Server != serverName {
+		t.Fatalf("tool_find search could not select dotted plugin MCP tool: %+v", matches)
+	}
+
+	content, err := entry.Runtime.Execute(ctx, `{"message":"installed-ping"}`)
+	if err != nil {
+		t.Fatalf("execute registry-pinned MCP runtime: %v", err)
+	}
+	if content != "installed-ping" {
+		t.Fatalf("registry-pinned MCP runtime content=%q", content)
 	}
 }
 

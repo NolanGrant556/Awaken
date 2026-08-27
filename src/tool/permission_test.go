@@ -23,6 +23,28 @@ func TestDecideAllowsMessageSendWithoutHostReview(t *testing.T) {
 	}
 }
 
+func TestDecideWithOverrideAcceptsCanonicalAndRawMCPServerWildcards(t *testing.T) {
+	definition := ToolDefinition{
+		Name: "mcp__plugin__acme_tools__local__echo",
+		Annotations: ToolAnnotations{
+			ServerName:          "plugin__acme.tools__local",
+			CanonicalServerName: "plugin__acme_tools__local",
+		},
+	}
+	for _, wildcard := range []string{
+		"mcp__plugin__acme_tools__local__*",
+		"mcp__plugin__acme.tools__local__*",
+	} {
+		decision := DecideWithOverride(context.Background(), definition, map[string]PermissionPolicy{
+			"*":      PolicyAlwaysDeny,
+			wildcard: PolicyAlwaysAllow,
+		})
+		if decision.Behavior != PermissionAllow {
+			t.Fatalf("wildcard %q did not match: %+v", wildcard, decision)
+		}
+	}
+}
+
 func TestPermissionContextDefaultsWritableRootsToWorkspaceRoot(t *testing.T) {
 	root := t.TempDir()
 	ctx := NewPermissionContext(root, nil)

@@ -1,6 +1,6 @@
 # AwakenPluginCard
 
-插件页列表卡。通过 Design System `plugin-default` 概念显示 20px 线性拼图图标，展示插件名、版本、描述或诊断、组件计数和 compact 启停开关。卡片主体只负责打开详情；开关是独立兄弟操作。
+插件页列表卡。通过 Design System `plugin-default` 概念显示 20px 实心拼图图标，展示插件名、版本、描述或诊断、组件计数和 compact 启停开关。卡片主体只负责打开详情；开关是独立兄弟操作。
 
 ## Props
 

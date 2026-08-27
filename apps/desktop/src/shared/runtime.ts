@@ -997,6 +997,10 @@ export type ComputerUseComposerTokenPayload = {
   capabilityId: "computer-use";
 };
 
+export type WorkflowComposerTokenPayload = {
+  workflowId: "deep-research" | string;
+};
+
 export type ComposerCatalogEvent = {
   revision: number;
   kind: "snapshot" | "skills" | "plugins" | string;

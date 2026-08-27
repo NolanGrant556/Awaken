@@ -578,6 +578,24 @@ func TestValidateComposerCapabilityTokensRejectsUnknownCapability(t *testing.T) 
 	}
 }
 
+func TestValidateComposerWorkflowTokensAcceptsDeepResearch(t *testing.T) {
+	if err := validateComposerWorkflowTokens([]ComposerToken{{
+		ID:      "workflow:deep-research",
+		Type:    "workflow",
+		Payload: ComposerTokenPayload{WorkflowID: "deep-research"},
+	}}); err != nil {
+		t.Fatalf("expected deep-research workflow token to be valid, got %v", err)
+	}
+	err := validateComposerWorkflowTokens([]ComposerToken{{
+		ID:      "workflow:unknown",
+		Type:    "workflow",
+		Payload: ComposerTokenPayload{WorkflowID: "unknown"},
+	}})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
+	}
+}
+
 func TestDisplayConversationMessagesForRunHidesCapabilityInstruction(t *testing.T) {
 	run := Run{
 		Input: "打开计算器",

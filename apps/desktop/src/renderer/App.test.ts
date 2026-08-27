@@ -70,6 +70,7 @@ import {
   composerTokenIdForKeyboardDelete,
   composerTokenPlacementForSlashTrigger,
   composerTokenFromSlashAction,
+  deepResearchMentionProvider,
   filterSlashActions,
   mentionTriggerFromComposerValue,
   pluginMentionProvider,
@@ -1740,6 +1741,31 @@ describe("Composer Slash Palette helpers", () => {
     expect(composerTokenFromSlashAction(actions[0]!)).toMatchObject({
       type: "capability",
       payload: { capabilityId: "computer-use" },
+    });
+  });
+
+  it("offers Deep Research as a Workbench mention workflow token", async () => {
+    const actions = await actionsFromSlashProviders(
+      [deepResearchMentionProvider()],
+      { workspaceRootForRun: "/workspace" },
+    );
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      id: "workflow:deep-research",
+      type: "workflow",
+      label: "深度研究",
+      composerToken: {
+        id: "workflow:deep-research",
+        type: "workflow",
+        label: "深度研究",
+        payload: { workflowId: "deep-research" },
+      },
+    });
+    expect(filterSlashActions(actions, "研究")).toHaveLength(1);
+    expect(filterSlashActions(actions, "deep-research")).toHaveLength(1);
+    expect(composerTokenFromSlashAction(actions[0]!)).toMatchObject({
+      type: "workflow",
+      payload: { workflowId: "deep-research" },
     });
   });
 

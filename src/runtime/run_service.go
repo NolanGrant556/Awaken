@@ -25,6 +25,7 @@ import (
 	"awaken/src/hookruntime"
 	"awaken/src/instructions"
 	"awaken/src/llm"
+	"awaken/src/researchruntime"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
 	"awaken/src/subagentruntime"
@@ -151,6 +152,7 @@ type ComposerTokenPayload struct {
 	ProjectID     string `json:"projectId,omitempty"`
 	FolderPath    string `json:"folderPath,omitempty"`
 	RelativePath  string `json:"relativePath,omitempty"`
+	WorkflowID    string `json:"workflowId,omitempty"`
 }
 
 type ModelProfileConfig struct {
@@ -978,6 +980,12 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	s.mu.RUnlock()
 	if err := validateComposerPluginTokens(req.ComposerTokens, composerPluginValidator); err != nil {
 		return Run{}, err
+	}
+	if err := validateComposerWorkflowTokens(req.ComposerTokens); err != nil {
+		return Run{}, err
+	}
+	if researchruntime.HasWorkflowToken(researchComposerTokens(req.ComposerTokens)) && strings.TrimSpace(req.Input) == "" {
+		return Run{}, fmt.Errorf("%w: research query is required", ErrInvalidInput)
 	}
 	s.projectMutationMu.RLock()
 	defer s.projectMutationMu.RUnlock()
@@ -2557,6 +2565,10 @@ func (s *RunService) executeWithMediaArtifactReferences(session *Session, execut
 			session.CompleteError(err.Error(), skillActivationErrorCode(err))
 			return
 		}
+		if err := bindResearchIntent(agent, snapshot); err != nil {
+			session.CompleteError(err.Error(), "invalid_input")
+			return
+		}
 	}
 
 	result, err := executor.Run(ctx, input, sessionEventSink{session: session})
@@ -3030,6 +3042,43 @@ func validateComposerPluginTokens(tokens []ComposerToken, validator func(name, d
 			return fmt.Errorf("%w: composer Plugin %q is unavailable: %v", ErrInvalidInput, name, err)
 		}
 	}
+	return nil
+}
+
+func validateComposerWorkflowTokens(tokens []ComposerToken) error {
+	for _, token := range tokens {
+		if !strings.EqualFold(strings.TrimSpace(token.Type), "workflow") {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(token.Payload.WorkflowID), researchruntime.WorkflowID) {
+			return fmt.Errorf("%w: composer workflow token %q is unsupported", ErrInvalidInput, token.ID)
+		}
+	}
+	return nil
+}
+
+func researchComposerTokens(tokens []ComposerToken) []researchruntime.ComposerToken {
+	converted := make([]researchruntime.ComposerToken, 0, len(tokens))
+	for _, token := range tokens {
+		converted = append(converted, researchruntime.ComposerToken{
+			Type:    token.Type,
+			Payload: researchruntime.WorkflowPayload{WorkflowID: token.Payload.WorkflowID},
+		})
+	}
+	return converted
+}
+
+func bindResearchIntent(agent *agentcore.Agent, snapshot Run) error {
+	if agent == nil {
+		return nil
+	}
+	intent, err := researchruntime.ParseIntent(researchComposerTokens(snapshot.ComposerTokens), snapshot.Input)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+	cfg := agent.GetConfig()
+	cfg.ResearchIntent = intent
+	agent.Reconfigure(cfg)
 	return nil
 }
 

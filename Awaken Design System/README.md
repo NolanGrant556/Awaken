@@ -144,7 +144,7 @@ Awaken 自行构造的新圆弧使用 `arcThroughChord` 按弦与拱高反解圆
 
 ### 能力与连接器图形
 
-一级入口使用直接、彼此可区分的比喻或官方标记：`connector` 是清晰的双插脚 Plug 轮廓；`skill` 与 `skill-active` 统一映射 `book-open`；`plugin` 映射 Agent Plugins 官方标记 `agent-plugins-mark`；单个 Plugin 未提供自定义图标时使用 `plugin-default` 对应的 Heroicons v2 solid 拼图块 `puzzle`，覆盖插件列表卡、Composer 快捷胶囊和下拉行；CLI 使用 `terminal`；Hook 使用 Webhook 路由结构表达事件挂接。产品调用点只消费这些概念映射，不自行复制 SVG。
+一级入口使用直接、彼此可区分的比喻或官方标记：`connector` 是清晰的双插脚 Plug 轮廓；`skill` 与 `skill-active` 统一映射 `book-open`；`plugin` 映射 Agent Plugins 官方标记 `agent-plugins-mark`；单个 Plugin 未提供自定义图标时使用 `plugin-default` 对应的 Heroicons v2 solid 拼图块 `puzzle`，覆盖插件列表卡、Composer 快捷胶囊、下拉行、输入区 Plugin token、提交后的 Prompt token，以及 `@` 目录里的 Plugin 项；CLI 使用 `terminal`；Hook 使用 Webhook 路由结构表达事件挂接。产品调用点只消费这些概念映射，不自行复制 SVG。
 
 ### 品牌标记
 

@@ -233,7 +233,7 @@ describe("ExtensionsView behavior", () => {
       "acme.tools",
     );
     expect(
-      document.querySelector(".aw-plugin-card__icon .aw-icon--agent-plugins-mark"),
+      document.querySelector(".aw-plugin-card__icon .aw-icon--puzzle"),
     ).not.toBeNull();
 
     const searchInput = document.querySelector<HTMLInputElement>(

@@ -78,7 +78,6 @@ export const APPROVED_LUCIDE_SOURCES = {
   play: "Play",
   "plug-slash": "Unplug",
   plus: "Plus",
-  puzzle: "Puzzle",
   "question-circle": "CircleHelp",
   "rect-magnifying-glass": "ScanSearch",
   robot: "Bot",

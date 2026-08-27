@@ -10,6 +10,7 @@ import (
 type stubChildren struct {
 	mu        sync.Mutex
 	responses []string
+	errs      []error
 	calls     []ChildSpec
 }
 
@@ -17,12 +18,17 @@ func (s *stubChildren) Run(_ context.Context, spec ChildSpec) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, spec)
+	var err error
+	if len(s.errs) > 0 {
+		err = s.errs[0]
+		s.errs = s.errs[1:]
+	}
 	if len(s.responses) == 0 {
-		return "", nil
+		return "", err
 	}
 	next := s.responses[0]
 	s.responses = s.responses[1:]
-	return next, nil
+	return next, err
 }
 
 type memJournal struct{ kinds []string }
@@ -95,6 +101,50 @@ func TestOrchestratorProducesCitedPartialReport(t *testing.T) {
 	}
 	if len(journal.kinds) == 0 || journal.kinds[0] != "research_accepted" {
 		t.Fatalf("journal=%v", journal.kinds)
+	}
+}
+
+func TestVerifierRunErrorKeepsShardPartial(t *testing.T) {
+	children := &stubChildren{
+		responses: []string{
+			`{"questions":[{"id":"q1","text":"q"}]}`,
+			`{"claims":[{"id":"claim-0","question_id":"q1","statement":"WebSearch uses Exa.","confidence":"high","evidence":[{"kind":"workspace","title":"web_search.go","locator":"src/tools/web_search/web_search.go:22","source_type":"primary"}]}],"uncertainties":[]}`,
+		},
+		errs: []error{nil, nil, context.Canceled},
+	}
+	publisher := &memPublisher{}
+	orch := &Orchestrator{Children: children, PublishFn: publisher}
+	result, err := orch.Run(context.Background(), Intent{Query: "q", Breadth: 2, SourceHint: SourceWorkspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome != OutcomePartial {
+		t.Fatalf("outcome=%s coverage=%v", result.Outcome, result.Coverage)
+	}
+	if len(result.Claims) == 0 || publisher.markdown == "" {
+		t.Fatal("verifier LLM failure must still publish a partial report")
+	}
+	if !strings.Contains(result.Markdown, "web_search.go") {
+		t.Fatalf("markdown=%s", result.Markdown)
+	}
+}
+
+func TestEmptyClaimsStillPublishesPartial(t *testing.T) {
+	children := &stubChildren{responses: []string{
+		`{"questions":[{"id":"q1","text":"q"}]}`,
+		`{"claims":[],"uncertainties":["nothing found"]}`,
+	}}
+	publisher := &memPublisher{}
+	orch := &Orchestrator{Children: children, PublishFn: publisher}
+	result, err := orch.Run(context.Background(), Intent{Query: "q", Breadth: 2, SourceHint: SourceWorkspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome != OutcomePartial {
+		t.Fatalf("outcome=%s coverage=%v", result.Outcome, result.Coverage)
+	}
+	if publisher.markdown == "" || !strings.Contains(result.Markdown, "No verified claims were produced.") {
+		t.Fatalf("markdown=%s", result.Markdown)
 	}
 }
 

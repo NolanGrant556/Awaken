@@ -62,6 +62,7 @@ func (s *RunService) RefreshThreadContextSnapshot(ctx context.Context, threadID 
 	agent.GetConversation().Context.SetMessages(restored.Messages)
 	cfg := agent.GetConfig()
 	cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), restored.SkillContextBlocks...)
+	cfg.MCPActivatedTools = append([]string(nil), restored.MCPActivatedTools...)
 	// The replay projection must assemble the same provider-visible request
 	// sources as StartRun. A projection built without the AGENTS instruction
 	// snapshot carries an empty instruction digest, which the epoch store

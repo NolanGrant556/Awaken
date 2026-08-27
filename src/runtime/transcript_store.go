@@ -49,7 +49,10 @@ type restoredTranscript struct {
 	Messages           []convcontext.Message
 	SkillContextBlocks []agentcore.ContextBlock
 	SkillInvokedAt     map[string]time.Time
-	RunIDs             []string
+	// MCPActivatedTools is the ordered on-demand loaded MCP tool set rebuilt
+	// from mcp_tools_activated records (root agent only).
+	MCPActivatedTools []string
+	RunIDs            []string
 	// RunPlanSnapshots holds the latest root run plan snapshot per run
 	// rebuilt from durable plan_updated records (historical facts; a new run
 	// always starts without a plan and creates its own plan_id).

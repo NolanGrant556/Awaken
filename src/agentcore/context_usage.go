@@ -212,6 +212,14 @@ func buildContextUsageSnapshot(req LLMRequest, basis, requestID, protocol, shape
 			add(ContextContributionSkills, skillTokens)
 			add(ContextContributionBuiltinTools, tokens-skillTokens)
 		default:
+			// The deferred MCP directory embedded in the mcp_find description
+			// describes MCP servers/tools, so it counts toward the MCP
+			// category; only the wrapper stays builtin (Skill catalog rule).
+			if mcpCatalogTokens := estimateEmbeddedCatalogTokens(preparedTools, preparedToolsOK, index, attributed.Provenance.MCPCatalog, tokens); mcpCatalogTokens > 0 {
+				add(ContextContributionMCP, mcpCatalogTokens)
+				add(ContextContributionBuiltinTools, tokens-mcpCatalogTokens)
+				continue
+			}
 			add(ContextContributionBuiltinTools, tokens)
 		}
 	}
@@ -332,7 +340,14 @@ func preparedToolJSONLeaves(body []byte, expected int) ([]json.RawMessage, bool)
 }
 
 func estimateSkillCatalogTokens(preparedTools []json.RawMessage, preparedToolsOK bool, index int, attributed AttributedToolSchema, total int) int {
-	catalog := strings.TrimSpace(attributed.Provenance.SkillCatalog)
+	return estimateEmbeddedCatalogTokens(preparedTools, preparedToolsOK, index, attributed.Provenance.SkillCatalog, total)
+}
+
+// estimateEmbeddedCatalogTokens measures how many of one tool definition's
+// tokens belong to a host-embedded catalog listing (Skill catalog or the
+// deferred MCP directory), preferring the provider-lowered JSON leaf.
+func estimateEmbeddedCatalogTokens(preparedTools []json.RawMessage, preparedToolsOK bool, index int, rawCatalog string, total int) int {
+	catalog := strings.TrimSpace(rawCatalog)
 	if catalog == "" || total <= 0 {
 		return 0
 	}

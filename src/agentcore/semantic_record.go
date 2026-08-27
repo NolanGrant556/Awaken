@@ -28,6 +28,11 @@ const (
 	SemanticKindTurnDiff                SemanticKind = "turn_diff"
 	SemanticKindPermissionDecision      SemanticKind = "permission_decision"
 	SemanticKindSkillActivated          SemanticKind = "skill_activated"
+	// SemanticKindMCPToolsActivated records that deferred MCP tool
+	// definitions were loaded on demand (via mcp_find or a direct call while
+	// progressive disclosure is active). The payload carries only tool names,
+	// the activation source and time — never schemas or arguments.
+	SemanticKindMCPToolsActivated       SemanticKind = "mcp_tools_activated"
 	SemanticKindResourceReceipt         SemanticKind = "resource_receipt"
 	SemanticKindRuntimeNotice           SemanticKind = "runtime_notice"
 	SemanticKindContextCompacted        SemanticKind = "context_compacted"

@@ -72,15 +72,18 @@ func TestExecuteSearchLoadsMatchesAndReportsPendingServers(t *testing.T) {
 		return nil
 	})
 
-	raw, err := (&Tool{}).Execute(ctx, `{"query":"create issue"}`)
+	outcome, err := (&Tool{}).ExecuteOutcome(ctx, `{"query":"create issue"}`, nil)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
+	if outcome.IsError() {
+		t.Fatalf("execute outcome failed: %+v", outcome)
+	}
+	raw := outcome.Content
 	var output struct {
 		Matches []struct {
-			Name        string          `json:"name"`
-			Server      string          `json:"server"`
-			InputSchema json.RawMessage `json:"input_schema"`
+			Name   string `json:"name"`
+			Server string `json:"server"`
 		} `json:"matches"`
 		Loaded         []string `json:"loaded"`
 		TotalMCPTools  int      `json:"total_mcp_tools"`
@@ -93,8 +96,11 @@ func TestExecuteSearchLoadsMatchesAndReportsPendingServers(t *testing.T) {
 	if len(output.Matches) == 0 || output.Matches[0].Name != "mcp__issues__create_issue" {
 		t.Fatalf("top match wrong: %+v", output.Matches)
 	}
-	if !strings.Contains(string(output.Matches[0].InputSchema), "title") {
-		t.Fatalf("match must carry the full input schema: %s", output.Matches[0].InputSchema)
+	if strings.Contains(raw, "input_schema") || strings.Contains(raw, "Create a tracked issue") {
+		t.Fatalf("compact result must not duplicate deferred schemas or descriptions: %s", raw)
+	}
+	if payload := outcome.ModelPayload(); strings.Contains(payload, "input_schema") || strings.Contains(payload, "Create a tracked issue") {
+		t.Fatalf("model payload must not duplicate deferred schemas or descriptions: %s", payload)
 	}
 	if len(output.Loaded) == 0 || output.Loaded[0] != "mcp__issues__create_issue" {
 		t.Fatalf("loaded names missing: %+v", output.Loaded)

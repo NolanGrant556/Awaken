@@ -652,6 +652,7 @@ func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restored
 		RunIDs:             runIDsFromSemanticRecords(records),
 		SkillContextBlocks: skillContextBlocksFromSemanticRecords(records),
 		SkillInvokedAt:     skillInvocationTimesFromSemanticRecords(records),
+		MCPActivatedTools:  mcpActivatedToolsFromSemanticRecords(records),
 		RunPlanSnapshots:   runPlanSnapshotsFromSemanticRecords(records),
 	}
 	for _, record := range records {
@@ -672,6 +673,46 @@ func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restored
 		restored.UpdatedAt = restored.CreatedAt
 	}
 	return restored
+}
+
+// mcpActivatedToolsFromSemanticRecords rebuilds the thread's on-demand loaded
+// MCP tool set. Subagent activations stay child-local (mirroring Skill
+// restore): only records without agent_id shape the root tool projection.
+func mcpActivatedToolsFromSemanticRecords(records []agentcore.SemanticRecord) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, record := range records {
+		if record.Kind != agentcore.SemanticKindMCPToolsActivated {
+			continue
+		}
+		if strings.TrimSpace(stringPayload(record.Payload, "agent_id")) != "" {
+			continue
+		}
+		rawTools, ok := record.Payload["tools"]
+		if !ok {
+			continue
+		}
+		var names []string
+		switch typed := rawTools.(type) {
+		case []string:
+			names = typed
+		case []any:
+			for _, item := range typed {
+				if name, ok := item.(string); ok {
+					names = append(names, name)
+				}
+			}
+		}
+		for _, name := range names {
+			name = strings.TrimSpace(name)
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func skillContextBlocksFromSemanticRecords(records []agentcore.SemanticRecord) []agentcore.ContextBlock {

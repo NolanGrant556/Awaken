@@ -117,12 +117,17 @@ func CreateSubagent(parent AgentConfig, spawn SpawnConfig) (AgentConfig, error) 
 		HookDispatcher:               parent.HookDispatcher,
 		HookSecretResolver:           parent.HookSecretResolver,
 		SkillContextBlocks:           append([]ContextBlock(nil), parent.SkillContextBlocks...),
-		ToolSessionState:             tool.NewToolSessionState(parent.Workspace.Root),
-		ModelContentStore:            parent.ModelContentStore,
-		ToolResultOffloadStore:       parent.ToolResultOffloadStore,
-		SubagentBoundary:             &childBoundary,
-		SubagentOrigin:               childOrigin,
-		SubagentController:           nil,
+		// Children share the parent's pinned tool snapshot, so the parent's
+		// on-demand loaded MCP set carries over instead of forcing every
+		// child to re-discover the same definitions. Child-local activations
+		// persist with agent_id and never flow back into the root set.
+		MCPActivatedTools:      append([]string(nil), parent.MCPActivatedTools...),
+		ToolSessionState:       tool.NewToolSessionState(parent.Workspace.Root),
+		ModelContentStore:      parent.ModelContentStore,
+		ToolResultOffloadStore: parent.ToolResultOffloadStore,
+		SubagentBoundary:       &childBoundary,
+		SubagentOrigin:         childOrigin,
+		SubagentController:     nil,
 	}
 	// Step 5: set the effective profile. Guardians are forced to
 	// GuardianReadOnly regardless of what the boundary resolution produced.

@@ -1,7 +1,7 @@
 ---
 name: plugin-creator
-version: 1.1.0
-description: 创建、校验或修改 Awaken Agent Plugins 1.0.0 完整目录包；显式规划每个内含 Skill 的 SKILL.md、references、scripts、assets 与其他资源，并通过 Core PluginStore 安全安装或替换。
+version: 1.2.0
+description: 创建、校验或修改 Awaken Agent Plugins 1.0.0 完整目录包；显式规划每个内含 Skill 的 SKILL.md、references、scripts、assets 与其他资源，并通过 Core PluginStore 安全安装、替换或提交已授权的在线修改。
 when_to_use: 用户要求创建、编写、验证、修复、更新或修改 Awaken Plugin，或询问候选 Plugin 及其安装路径、Skills、MCP 配置是否合规时。
 user-invocable: true
 context: inline
@@ -13,11 +13,12 @@ Awaken Plugin 是一个包管理与来源容器，不是第二套 Skill 或 MCP 
 
 ## 安全边界
 
-- 候选包放在任务工作区的普通目录，例如 `plugin-authoring/<plugin-name>/`；不要在 `~/.awaken/plugins` 内创作。
-- 修改已安装 Plugin 时，先用 `plugin` 的 `inspect` 确认身份，再用 `export` 导出完整候选包。不要只复制 manifest 或直接编辑 `root_dir`。
+- 新建和默认修改都在任务工作区的普通候选目录完成，例如 `plugin-authoring/<plugin-name>/`。默认修改先用 `plugin action=inspect` 确认身份，再用 `export` 导出完整候选包；不要只复制 manifest。
+- 只有用户在当前请求明确授权直接修改某个已安装 Plugin 时，才可以编辑 inspect 返回的准确 `root_dir`。普通的「修改/修复插件」请求不自动授权在线直改，仍走候选 export/replace。
+- 在线直改必须在第一次写入前保留 inspect 返回的 recorded digest，写入只限该 `PLUGIN_ROOT`；TaskScope 已把 `<AWAKEN_HOME>/plugins` 作为文件工具可写例外，因此优先用 `Read` + `Edit` / `Write` 保留宿主快照与 diff，必要时才用当前用户 `Bash`。授权不包含 `PLUGIN_DATA`、`~/.awaken/config/plugins.json` 或其他插件。所有修改完成后必须调用 `plugin action=commit` 且传入该旧 digest 作为 `expected_digest`；直接写入本身不代表已生效。
 - `plugin action=validate` 是同一 PluginStore/runtime parser 的无写入校验；安装前必须成功且没有 error diagnostics。
 - 同名安装默认 abort。只有用户明确要求修改该插件、完整候选已复核时才可 `replace: true`；旧包由 Core 移入系统废纸篓，`PLUGIN_DATA` 跨替换保留。
-- Plugin 中的 stdio MCP 子进程以当前用户身份运行，当前没有额外 Seatbelt/WorkspaceExecutionBroker 沙盒。安装前必须向用户列出 command、网络端点和这一权限事实。
+- Plugin 中的 stdio MCP 子进程以当前用户身份运行，当前没有额外 Seatbelt/WorkspaceExecutionBroker 沙盒。安装、替换或签收修改过的 server 前，必须向用户列出 command、网络端点和这一权限事实。
 
 ## 完整包结构
 
@@ -124,7 +125,7 @@ python3 "${AWAKEN_SKILL_DIR}/scripts/validate_plugin.py" <candidate-plugin-root>
 7. 确认所有意图中的 Skill/server 都进入 loadable 计数；标准故障隔离产生的 component diagnostic 也必须修复，不能只看顶层 `valid`。记录 manifest identity、digest、完整文件树、Skill 数和 MCP server 数。
 8. 安装前向用户总结来源、组件、stdio command、remote URL、数据目录保留和 MCP 权限边界。用户请求本身包含创建并安装时，以同一候选调用 `action=install` 且 `replace=false`；同名冲突时停止。
 
-## 修改流程
+## 默认修改流程（候选替换）
 
 1. 调用 `plugin action=inspect`，确认准确 name、版本、digest、组件与当前 root；不要根据用户口语名称猜包身份。
 2. 调用 `plugin action=export`，把完整包导出到一个不存在的工作区候选目录。在线 package/data/state 均保持不变。
@@ -134,15 +135,34 @@ python3 "${AWAKEN_SKILL_DIR}/scripts/validate_plugin.py" <candidate-plugin-root>
 6. 对完整候选调用 `plugin action=validate`；若校验结果 identity 与原 name 不同，将其视为新插件而不是替换。
 7. 只有用户明确要求修改原插件、候选 identity 相同、校验与全部意图组件均通过且安全摘要已复核时，调用 `plugin action=install` 并设置 `replace=true`。
 
+## 授权在线修改流程（直改 + commit）
+
+1. 确认用户在当前请求明确授权直接修改准确的已安装 Plugin；未明确授权就使用默认候选替换流程。
+2. 调用 `plugin action=inspect`，确认准确 `name`、recorded `digest`、`root_dir`、版本、组件与诊断。基线已有 `plugin_digest_changed`、identity 异常或其他包级损坏时不得把它冒充本次修改的旧状态；停止并报告。
+3. 在第一次写入前固定 inspect 返回的 recorded digest 为 `expected_digest`，盘点 `root_dir` 内完整文件树。只对用户请求的 Plugin 做最小修改，保留 name、未涉及字段、Skills、scripts、assets 和其他资源；优先先 `Read` 目标文件再以 `Edit` / `Write` 修改，文件工具对插件仓库的放行不构成修改其他 Plugin、`PLUGIN_DATA` 或 `plugins.json` 的授权。
+4. 完成全部文件写入后，直接对 `root_dir` 运行 `validate_plugin.py`，并实际运行新增/变化的脚本或 stdio command。在 commit 完成前，该包会因 digest 未签收而 fail closed；不要在这个窗口宣称插件可用或用旧 Plugin 快照验收。
+5. 确认 manifest identity 仍与 inspect 的 `name` 相同、所有意图 Skill/server 都完整且没有未处置诊断后，调用：
+
+```json
+{
+  "action": "commit",
+  "name": "<installed-plugin-name>",
+  "expected_digest": "<recorded-digest-from-pre-edit-inspect>"
+}
+```
+
+6. commit 会在 Store 锁内 CAS 对比旧 recorded digest，再对当前安装树完整校验。`plugin_recorded_digest_changed` 表示该插件状态已被其他 mutation 推进；不要换用漂移树的 digest 强行重试，应重新 inspect 并停止本轮以免覆盖并发变更。校验失败会保留旧 recorded digest 并继续 fail closed；只能修正当前树后以原 `expected_digest` 重试，不得直接修改状态文件。
+7. 只在 commit 返回 `valid=true`、`installed=true`、新 `digest`、正确组件计数且没有未处置诊断后声明签收成功。成功会刷新 Skill/MCP/catalog，但已开始 run 的固定快照不变；停止当前 run，在新 run 验收。
+
 ## 生效与验收
 
-- install/replace 完成只证明包、状态与 live roots 已更新；已开始 run 的 Skill/工具快照不变。
+- install/replace/commit 完成只证明包、状态与 live roots 已更新；已开始 run 的 Skill/工具快照不变。
 - 安装后不得再修改候选并把旧安装包写成“最新”；候选若有任何变化，必须重新 validate 并显式 replace。
-- 安装结果存在 `plugin_digest_changed`、`plugin_data_invalid` 或 stdio command 诊断时立即停止，不能手工改 `~/.awaken/plugins`、不能以 `chmod` 绕过 PluginStore。
-- 当前 run 不会获得刚安装的 Skill/MCP 快照。完成安装摘要后停止本 run，在新 run 中通过结构化 `@ Plugin` 选择验证 Skill；先用 `skill_resource_list` 复核包内文件树，再按入口路由用 `skill_resource_read` 读取资源。MCP server 必须完成连接、工具发现和至少一次无害的真实 MCP tool call。
+- 在线写入后、commit 成功前出现 `plugin_digest_changed` 是未签收漂移的预期 fail-closed 状态，不是成功。commit 成功后若仍有该诊断，或任一路径存在 `plugin_data_invalid`、stdio command 异常或意图组件缺失，立即停止并分类报告；不能手工改 `plugins.json` 或以 `chmod` 绕过 PluginStore。
+- 当前 run 不会获得刚 install/replace/commit 的 Skill/MCP 快照。完成 mutation 摘要后停止本 run，在新 run 中通过结构化 `@ Plugin` 选择验证 Skill；先用 `skill_resource_list` 复核包内文件树，再按入口路由用 `skill_resource_read` 读取资源。MCP server 必须完成连接、工具发现和至少一次无害的真实 MCP tool call。
 - 新 run 没有目标 MCP 工具时，报告安装/runtime readiness 问题；不得退回 Bash、直接运行包内二进制或调用 ERP HTTP 来冒充 Plugin 验收。
 - 验收失败时区分包结构、组件配置、外部依赖/认证和业务行为，不通过改 manifest 隐藏错误。
-- 交付时报告：候选路径、安装 root、digest、组件清单、是否替换、旧包废纸篓 receipt、已执行验证和未执行项。
+- 交付时报告：使用候选替换还是授权在线 commit、候选路径（如有）、安装 root、旧/新 digest、组件清单、是否替换、旧包废纸篓 receipt（如有）、已执行验证和未执行项。
 
 ## 停止条件
 
@@ -151,6 +171,8 @@ python3 "${AWAKEN_SKILL_DIR}/scripts/validate_plugin.py" <candidate-plugin-root>
 - 任一意图中的 Skill 或 MCP server 未被加载、被严格标准校验跳过，或仍有未处置 diagnostic；
 - 同名插件存在但用户未授权替换；
 - 包含未披露的 stdio 命令、远程端点、密钥、外部下载或生产写入；
-- 用户要求直接编辑 `~/.awaken/plugins/packages`、`data` 或 `plugins.json`。
+- 用户未在当前请求明确授权在线直改，却要求跳过候选替换；
+- 在线直改前无法 inspect 一个无 digest 漂移的旧基线，或 commit 返回 `plugin_recorded_digest_changed`；
+- 用户要求编辑 `PLUGIN_DATA`、`plugins.json` 或未授权的其他插件。
 
-保留候选包并报告阻塞；不要手工覆盖在线目录、永久删除旧包或绕开 PluginStore。
+候选路径保留候选包并报告阻塞；授权在线路径保留当前树和旧 recorded digest，使其继续 fail closed 并报告阻塞。不要手工覆盖状态、永久删除旧包或绕开 PluginStore。

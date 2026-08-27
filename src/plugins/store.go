@@ -129,12 +129,23 @@ func (s *Store) Available() error {
 func (s *Store) ensureDirs() error {
 	for _, dir := range []string{
 		filepath.Dir(s.statePath),
+		s.pluginsRoot,
 		s.packagesRoot,
 		s.dataRoot,
 		s.stagingRoot,
 	} {
 		if err := filestore.EnsureDir(dir); err != nil {
 			return err
+		}
+		info, err := os.Lstat(dir)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("plugin store directory must be a regular directory: %s", dir)
+		}
+		if err := resolvedStayWithin(s.home, dir); err != nil {
+			return fmt.Errorf("plugin store directory escapes AWAKEN_HOME: %s: %w", dir, err)
 		}
 	}
 	return nil

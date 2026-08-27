@@ -94,6 +94,52 @@ func TestPluginsInstallListEnableUninstall(t *testing.T) {
 	if detail.SkillCount != 1 || len(detail.Skills) != 1 || detail.Skills[0].ID != "plugin__http-plugin__lint" {
 		t.Fatalf("detail skills=%+v", detail.Skills)
 	}
+	installed, err := store.Get("http-plugin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordedDigest := detail.Digest
+	if err := os.WriteFile(filepath.Join(installed.Root, "skills", "lint", "SKILL.md"), []byte("---\nname: lint\ndescription: updated lint files\n---\nUpdated body\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	commitBody, _ := json.Marshal(map[string]any{"expectedDigest": recordedDigest})
+	req = httptest.NewRequest(http.MethodPost, "/v1/plugins/http-plugin/commit", bytes.NewReader(commitBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("commit status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var committed installPluginResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &committed); err != nil {
+		t.Fatal(err)
+	}
+	if committed.Plugin.Digest == recordedDigest || committed.Plugin.SkillCount != 1 || len(committed.Plugin.Skills) != 1 || committed.Plugin.Name != "http-plugin" || committed.Plugin.Version != "1.0.0" || committed.Plugin.Source.Path == "" || committed.Message == "" {
+		t.Fatalf("commit response=%+v", committed)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/plugins/http-plugin/commit", bytes.NewReader(commitBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("stale commit status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var conflict errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &conflict); err != nil {
+		t.Fatal(err)
+	}
+	if conflict.Error != "PLUGIN_RECORDED_DIGEST_CHANGED" {
+		t.Fatalf("stale commit error=%+v", conflict)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/plugins/http-plugin/commit", bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing expectedDigest status=%d body=%s", rec.Code, rec.Body.String())
+	}
 
 	req = httptest.NewRequest(http.MethodPost, "/v1/plugins/http-plugin/disable", nil)
 	rec = httptest.NewRecorder()
@@ -107,5 +153,50 @@ func TestPluginsInstallListEnableUninstall(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPluginCommitRejectsInvalidInstalledPackage(t *testing.T) {
+	home := t.TempDir()
+	store := plugins.NewStoreAt(home)
+	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil, store)
+	src := t.TempDir()
+	writeHTTPPluginFixture(t, src, "invalid-commit-plugin")
+	installed, err := store.Install(t.Context(), plugins.InstallRequest{Source: plugins.Source{Kind: plugins.SourceLocalPath, Path: src}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(installed.Plugin.Root, "plugin.json"), []byte(`{"name":"invalid-commit-plugin"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"expectedDigest": installed.Plugin.Digest})
+	req := httptest.NewRequest(http.MethodPost, "/v1/plugins/invalid-commit-plugin/commit", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid commit status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var failure errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.Error != "PLUGIN_INVALID" {
+		t.Fatalf("invalid commit error=%+v", failure)
+	}
+}
+
+func TestPluginCommitMapsUnstableInstalledPackageToInvalid(t *testing.T) {
+	rec := httptest.NewRecorder()
+	pluginHandlers{}.writeStoreError(rec, plugins.ErrSourceChanged)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unstable commit status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var failure errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.Error != "PLUGIN_INVALID" {
+		t.Fatalf("unstable commit error=%+v", failure)
 	}
 }

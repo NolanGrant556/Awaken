@@ -24,11 +24,12 @@ type sourceInput struct {
 }
 
 type input struct {
-	Action      string       `json:"action"`
-	Name        string       `json:"name,omitempty"`
-	Destination string       `json:"destination,omitempty"`
-	Source      *sourceInput `json:"source,omitempty"`
-	Replace     bool         `json:"replace,omitempty"`
+	Action         string       `json:"action"`
+	Name           string       `json:"name,omitempty"`
+	ExpectedDigest string       `json:"expected_digest,omitempty"`
+	Destination    string       `json:"destination,omitempty"`
+	Source         *sourceInput `json:"source,omitempty"`
+	Replace        bool         `json:"replace,omitempty"`
 }
 
 type result struct {
@@ -42,6 +43,8 @@ type result struct {
 	Description         string               `json:"description,omitempty"`
 	RootDir             string               `json:"root_dir,omitempty"`
 	Digest              string               `json:"digest,omitempty"`
+	PreviousDigest      string               `json:"previous_digest,omitempty"`
+	Changed             bool                 `json:"changed"`
 	SkillCount          int                  `json:"skill_count"`
 	ServerCount         int                  `json:"server_count"`
 	Diagnostics         []plugins.Diagnostic `json:"diagnostics"`
@@ -60,7 +63,7 @@ func SetStore(store *plugins.Store) { defaultTool.store = store }
 func (t *Tool) Name() string { return ToolName }
 
 func (t *Tool) Description() string {
-	return "Inspect or export installed Awaken Plugins, validate authored Agent Plugins 1.0.0 packages without mutation, or install a digest-pinned local/HTTPS package with recoverable replacement."
+	return "Inspect or export installed Awaken Plugins, commit an authorized and validated in-place package edit with digest compare-and-swap, validate authored Agent Plugins 1.0.0 packages, or install a digest-pinned local/HTTPS package with recoverable replacement."
 }
 
 func (t *Tool) Parameters() []tool.ToolParameter { return nil }
@@ -70,9 +73,10 @@ func (t *Tool) InputSchema() tool.ToolParametersSchema {
 	return tool.ToolParametersSchema{
 		Type: "object", AdditionalProperties: &closed, Required: []string{"action"},
 		Properties: map[string]tool.ToolParam{
-			"action":      {Type: "string", Enum: []any{"inspect", "export", "validate", "install"}, Description: "Plugin package operation."},
-			"name":        {Type: "string", Description: "Installed plugin name for inspect or export."},
-			"destination": {Type: "string", Description: "Previously absent authoring directory for export; relative paths resolve from the task workspace."},
+			"action":          {Type: "string", Enum: []any{"inspect", "export", "commit", "validate", "install"}, Description: "Plugin package operation."},
+			"name":            {Type: "string", Description: "Installed plugin name for inspect, export, or commit."},
+			"expected_digest": {Type: "string", Description: "Recorded installed-package digest observed before an authorized in-place edit; required for commit compare-and-swap."},
+			"destination":     {Type: "string", Description: "Previously absent authoring directory for export; relative paths resolve from the task workspace."},
 			"source": {Type: "object", AdditionalProperties: &closed, Required: []string{"kind"}, Properties: map[string]tool.ToolParam{
 				"kind":    {Type: "string", Enum: []any{"local_path", "remote_url", "remote_git"}, Description: "Package source adapter."},
 				"path":    {Type: "string", Description: "Local plugin directory or zip path."},
@@ -88,22 +92,24 @@ func (t *Tool) InputSchema() tool.ToolParametersSchema {
 func (t *Tool) Definition() tool.ToolDefinition {
 	return tool.BuildBuiltinDefinition(t, tool.ToolDefinition{
 		Name: ToolName, DisplayName: "Plugin", Description: t.Description(),
-		Purpose: "Give the Agent a typed authoring boundary for inspecting, exporting, dry-run validating, installing, and safely replacing Awaken Agent Plugin packages without directly editing the protected live store.",
+		Purpose: "Give the Agent a typed lifecycle boundary for inspecting, exporting, validating, installing, safely replacing, and atomically accepting authorized in-place changes to Awaken Agent Plugin packages.",
 		WhenToUse: []string{
 			"The user asks to create, validate, install, or modify an Awaken Plugin.",
 			"Use inspect and export before modifying an installed plugin, then edit the complete candidate outside the live store, validate it, and install with replace=true only after review.",
+			"When the user authorizes an in-place edit, retain the recorded digest observed before editing and use commit after the complete package edit so the runtime validates, accepts, and reloads the new contents.",
 			"Use validate before every creator-authored install so manifest, package paths, embedded Skills, MCP configuration, and digest are checked by the runtime owners.",
 		},
 		WhenNotToUse: []string{
 			"Do not use for an unrelated code package, browser extension, or editor extension.",
-			"Do not directly edit ~/.awaken/plugins/packages or plugins.json; installed state is owned by this tool, the Desktop plugin page, and PluginStore.",
+			"Do not directly edit plugins.json; recorded state is owned by this tool, the Desktop plugin page, and PluginStore.",
+			"Do not commit an in-place edit that the user did not authorize, that is only partially written, or whose recorded digest was not captured before editing.",
 			"Do not set replace=true unless the user asked to modify or replace the same installed plugin and the full candidate package was reviewed.",
 		},
 		InputSchema: t.InputSchema(),
 		OutputSchema: tool.ToolParam{Type: "object", AdditionalProperties: tool.BoolPtr(false), Required: []string{
 			"action", "valid", "installed", "exported", "replaced", "name", "skill_count", "server_count", "diagnostics", "message",
 		}, Properties: map[string]tool.ToolParam{
-			"action":                {Type: "string", Enum: []any{"inspect", "export", "validate", "install"}},
+			"action":                {Type: "string", Enum: []any{"inspect", "export", "commit", "validate", "install"}},
 			"valid":                 {Type: "boolean"},
 			"installed":             {Type: "boolean"},
 			"exported":              {Type: "boolean"},
@@ -113,6 +119,8 @@ func (t *Tool) Definition() tool.ToolDefinition {
 			"description":           {Type: "string"},
 			"root_dir":              {Type: "string"},
 			"digest":                {Type: "string"},
+			"previous_digest":       {Type: "string"},
+			"changed":               {Type: "boolean"},
 			"skill_count":           {Type: "integer"},
 			"server_count":          {Type: "integer"},
 			"diagnostics":           {Type: "array", Items: &tool.ToolParam{Type: "object", AdditionalProperties: tool.BoolPtr(true)}},
@@ -123,27 +131,29 @@ func (t *Tool) Definition() tool.ToolDefinition {
 			{Kind: tool.SideEffectRead, Resources: []string{"authored or installed Plugin package"}, Description: "Inspects or dry-run validates a bounded plugin package without executing package code.", Reversibility: tool.ReversibilityNotApplicable},
 			{Kind: tool.SideEffectCreate, Resources: []string{"workspace Plugin authoring candidate"}, Description: "Exports a complete installed package to a new candidate directory without changing live state.", Reversibility: tool.ReversibilityReversible},
 			{Kind: tool.SideEffectCreate, Resources: []string{"Awaken user Plugin package and plugins.json entry"}, Description: "Installs a validated Plugin into the Core-owned user package store.", Reversibility: tool.ReversibilityReversible},
-			{Kind: tool.SideEffectUpdate, Resources: []string{"installed Plugin package and live Skill/MCP roots"}, Description: "Replaces an installed package, preserves Plugin data, and refreshes the existing Skill/MCP runtimes.", Reversibility: tool.ReversibilityConditional},
+			{Kind: tool.SideEffectUpdate, Resources: []string{"installed Plugin state and live Skill/MCP roots"}, Description: "Accepts a fully validated in-place package edit or replaces an installed package, preserves Plugin data, and refreshes the existing Skill/MCP runtimes.", Reversibility: tool.ReversibilityConditional},
 			{Kind: tool.SideEffectDelete, Resources: []string{"previous Plugin package"}, Description: "Replacement moves the previous package to operating-system Trash after the new package and state are ready.", Reversibility: tool.ReversibilityReversible},
 			{Kind: tool.SideEffectNetwork, Resources: []string{"declared HTTPS package source"}, Description: "Remote validation or installation reads only the declared HTTPS source.", Reversibility: tool.ReversibilityNotApplicable},
 		},
 		Examples: []tool.ToolExample{
 			{Scenario: "Validate a creator-authored local plugin", Input: map[string]any{"action": "validate", "source": map[string]any{"kind": "local_path", "path": "output/plugin-authoring/acme-tools"}}, Outcome: "Returns valid, digest, component counts, and diagnostics without installing anything."},
+			{Scenario: "Commit an authorized in-place plugin edit", Input: map[string]any{"action": "commit", "name": "acme-tools", "expected_digest": "sha256-v2:recorded-before-edit"}, Outcome: "Validates the complete installed tree, compare-and-swaps the recorded digest, refreshes live roots, and returns the accepted digest and component counts."},
 			{Scenario: "Replace a reviewed installed plugin", Input: map[string]any{"action": "install", "source": map[string]any{"kind": "local_path", "path": "output/plugin-authoring/acme-tools"}, "replace": true}, Outcome: "Installs the validated package, preserves Plugin data, moves the previous package to Trash, and refreshes live roots."},
 		},
 		FailureModes: []tool.ToolFailureMode{
 			{Code: "plugin_invalid_input", Cause: "The action, name, or source-specific fields are invalid.", Retryable: false, Recovery: []string{"Correct the structured plugin request."}},
 			{Code: "plugin_store_unavailable", Cause: "The protected Plugin store is unavailable or corrupt.", Retryable: true, Recovery: []string{"Restart Awaken or repair the store before retrying."}},
-			{Code: "plugin_source_invalid", Cause: "The package source, archive, manifest, component, or path is invalid.", Retryable: false, Recovery: []string{"Fix the complete candidate package and validate again."}},
+			{Code: "plugin_source_invalid", Cause: "The package source, installed tree, archive, manifest, component, or path is invalid.", Retryable: false, Recovery: []string{"Fix the complete candidate or authorized installed package, then validate or commit again."}},
 			{Code: "plugin_source_unavailable", Cause: "A declared remote package source could not be fetched.", Retryable: true, Recovery: []string{"Inspect the remote source and retry with bounded backoff."}},
 			{Code: "plugin_package_invalid", Cause: "Dry-run validation found component-level errors; installation did not start.", Retryable: false, Recovery: []string{"Resolve every error diagnostic and validate the candidate again."}},
-			{Code: "plugin_source_changed", Cause: "The source digest changed between dry-run validation and installation materialization.", Retryable: false, Recovery: []string{"Stop, inspect the changed candidate, and validate it again before any install."}},
-			{Code: "plugin_digest_changed", Cause: "The installed package no longer matches its recorded digest.", Retryable: false, Recovery: []string{"Do not use or export the changed package; reinstall or replace it from a freshly validated source."}},
+			{Code: "plugin_source_changed", Cause: "The source or installed tree changed while a validation or commit snapshot was being verified.", Retryable: false, Recovery: []string{"Stop concurrent writes, inspect the complete package again, and retry from a fresh stable snapshot."}},
+			{Code: "plugin_digest_changed", Cause: "The installed package no longer matches its recorded digest.", Retryable: false, Recovery: []string{"If the complete change was authorized, commit it with the previously observed recorded digest; otherwise reinstall or replace it from a freshly validated source."}},
+			{Code: "plugin_recorded_digest_changed", Cause: "The recorded digest changed after the caller observed it, so commit compare-and-swap was rejected.", Retryable: false, Recovery: []string{"Refresh Plugin state, inspect the new owner of the change, and never retry with the stale expected digest."}},
 			{Code: "plugin_not_found", Cause: "The named installed plugin does not exist.", Retryable: false, Recovery: []string{"Refresh installed Plugin state and choose the exact current name."}},
 			{Code: "plugin_already_exists", Cause: "A same-name plugin exists and replace was not explicitly requested.", Retryable: false, Recovery: []string{"Keep the existing plugin or request a reviewed replacement."}},
 			{Code: "plugin_export_destination_exists", Cause: "The requested authoring candidate already exists.", Retryable: false, Recovery: []string{"Choose a new export destination or inspect the existing candidate before continuing."}},
 			{Code: "plugin_trash_unavailable", Cause: "The previous package could not be moved to Trash and replacement was rolled back or stopped.", Retryable: false, Recovery: []string{"Restore operating-system Trash availability and issue a fresh replacement."}},
-			{Code: "plugin_operation_failed", Cause: "The inspected or validated package could not be installed or encoded.", Retryable: false, Recovery: []string{"Inspect the returned error and current Plugin state before retrying."}},
+			{Code: "plugin_operation_failed", Cause: "The inspected or validated package could not be installed, committed, or encoded.", Retryable: false, Recovery: []string{"Inspect the returned error and current Plugin state before retrying."}},
 		},
 		Annotations: tool.ToolAnnotations{
 			ReadOnly: false, Destructive: false, OpenWorld: true,
@@ -200,27 +210,33 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, raw string, _ tool.ToolObserv
 	outcome := tool.SucceededOutcome(string(encoded))
 	outcome.Summary = value.Message
 	state := tool.OutcomeSideEffectNone
-	if value.Action == "install" || value.Action == "export" {
-		state = tool.OutcomeSideEffectApplied
-		outcome.AffectedPaths = []string{value.RootDir}
+	if value.Action == "install" || value.Action == "export" || value.Action == "commit" {
+		if value.Action != "commit" || value.Changed {
+			state = tool.OutcomeSideEffectApplied
+			outcome.AffectedPaths = []string{value.RootDir}
+		}
 		action := "created"
 		kind := "plugin_package"
 		if value.Action == "export" {
 			kind = "plugin_authoring_candidate"
 			outcome.NextActions = []tool.NextAction{{ID: "validate_exported_plugin", Description: "Edit the complete candidate, then validate it before replacement.", Tool: ToolName, Preconditions: []string{"The candidate retains every required package resource."}, InputHint: map[string]any{"action": "validate", "source": map[string]any{"kind": "local_path", "path": value.RootDir}}}}
 		} else {
-			if value.Replaced {
+			if value.Replaced || value.Action == "commit" {
 				action = "updated"
 			}
-			outcome.NextActions = []tool.NextAction{{
-				ID: "use_plugin_in_new_run", Description: "Start a new run before relying on the changed Plugin Skills or MCP tools.",
-				Preconditions: []string{"The Plugin install completed and live roots were refreshed."},
+			if value.Action != "commit" || value.Changed {
+				outcome.NextActions = []tool.NextAction{{
+					ID: "use_plugin_in_new_run", Description: "Start a new run before relying on the changed Plugin Skills or MCP tools.",
+					Preconditions: []string{"The Plugin lifecycle operation completed and live roots were refreshed."},
+				}}
+			}
+		}
+		if value.Action != "commit" || value.Changed {
+			outcome.Changes = []tool.ResourceChange{{
+				Kind: kind, Action: action, Resource: value.RootDir, Summary: value.Message,
+				Certainty: tool.ChangeObserved, Reversibility: tool.ChangeConditional,
 			}}
 		}
-		outcome.Changes = []tool.ResourceChange{{
-			Kind: kind, Action: action, Resource: value.RootDir, Summary: value.Message,
-			Certainty: tool.ChangeObserved, Reversibility: tool.ChangeConditional,
-		}}
 	}
 	outcome.Operation = &tool.OperationDescriptor{Type: ToolName, Target: value.RootDir, SideEffectState: state}
 	outcome.Details = resultDetails(value)
@@ -257,6 +273,18 @@ func (t *Tool) execute(ctx context.Context, raw string) (result, error) {
 		value := resultFromInstalled("export", installed, false, false, "Exported a complete Plugin authoring candidate without changing the installed package")
 		value.Exported = true
 		value.RootDir = destination
+		return value, nil
+	}
+	if request.Action == "commit" {
+		committed, err := t.store.CommitInstalledChanges(request.Name, request.ExpectedDigest)
+		if err != nil {
+			return result{}, err
+		}
+		value := resultFromInstalled("commit", committed.Plugin, false, false, committed.Message)
+		value.Installed = true
+		value.Changed = committed.Changed
+		value.PreviousDigest = committed.PreviousDigest
+		value.Digest = committed.Digest
 		return value, nil
 	}
 	source := toSource(request.Source)
@@ -303,6 +331,12 @@ func parseInput(raw string) (input, error) {
 		request.Destination = strings.TrimSpace(request.Destination)
 		if request.Name == "" || request.Destination == "" {
 			return request, fmt.Errorf("name and destination are required for export")
+		}
+	case "commit":
+		request.Name = strings.TrimSpace(request.Name)
+		request.ExpectedDigest = strings.TrimSpace(request.ExpectedDigest)
+		if request.Name == "" || request.ExpectedDigest == "" {
+			return request, fmt.Errorf("name and expected_digest are required for commit")
 		}
 	case "validate", "install":
 		if request.Source == nil {
@@ -379,7 +413,7 @@ func resultDetails(value result) map[string]any {
 	return map[string]any{
 		"action": value.Action, "valid": value.Valid, "installed": value.Installed, "exported": value.Exported, "replaced": value.Replaced,
 		"name": value.Name, "version": value.Version, "description": value.Description,
-		"root_dir": value.RootDir, "digest": value.Digest, "skill_count": value.SkillCount,
+		"root_dir": value.RootDir, "digest": value.Digest, "previous_digest": value.PreviousDigest, "changed": value.Changed, "skill_count": value.SkillCount,
 		"server_count": value.ServerCount, "diagnostics": value.Diagnostics, "message": value.Message,
 		"previous_trashed_path": value.PreviousTrashedPath,
 	}
@@ -400,6 +434,8 @@ func classifyError(err error) (string, tool.ErrorCategory, bool) {
 		return "plugin_source_changed", tool.ErrorCategoryValidation, false
 	case errors.Is(err, plugins.ErrDigestChanged):
 		return "plugin_digest_changed", tool.ErrorCategoryDomain, false
+	case errors.Is(err, plugins.ErrRecordedDigestChanged):
+		return "plugin_recorded_digest_changed", tool.ErrorCategoryDomain, false
 	case errors.Is(err, plugins.ErrNotFound):
 		return "plugin_not_found", tool.ErrorCategoryDomain, false
 	case errors.Is(err, plugins.ErrAlreadyExists):
@@ -408,7 +444,7 @@ func classifyError(err error) (string, tool.ErrorCategory, bool) {
 		return "plugin_export_destination_exists", tool.ErrorCategoryDomain, false
 	case errors.Is(err, plugins.ErrReplaceTrashUnavailable):
 		return "plugin_trash_unavailable", tool.ErrorCategoryUnsupported, false
-	case errors.Is(err, plugins.ErrUnsupportedSchema), errors.Is(err, plugins.ErrManifestInvalid), errors.Is(err, plugins.ErrMCPInvalid), strings.Contains(message, "plugin_source_invalid"):
+	case errors.Is(err, plugins.ErrUnsupportedSchema), errors.Is(err, plugins.ErrManifestInvalid), errors.Is(err, plugins.ErrMCPInvalid), errors.Is(err, plugins.ErrPathEscapes), strings.Contains(message, "plugin_source_invalid"):
 		return "plugin_source_invalid", tool.ErrorCategoryValidation, false
 	case strings.Contains(message, "download"), strings.Contains(message, "clone"), strings.Contains(message, "remote"):
 		return "plugin_source_unavailable", tool.ErrorCategoryRuntime, true

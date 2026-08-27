@@ -251,6 +251,172 @@ describe("ExtensionsView behavior", () => {
     expect(buttonByText("确认安装")?.disabled).toBe(false);
   });
 
+  it("refreshes an open Plugin catalog after a committed store revision", async () => {
+    const before: RuntimePlugin = {
+      name: "acme.tools",
+      version: "1.0.0",
+      enabled: true,
+      source: { kind: "local_path", path: "/tmp/acme.tools" },
+      digest: "sha256-v2:before",
+      skillCount: 0,
+      serverCount: 0,
+      diagnostics: [{
+        code: "plugin_digest_changed",
+        message: "installed plugin package digest changed",
+        severity: "error",
+      }],
+    };
+    const after: RuntimePlugin = {
+      ...before,
+      version: "1.1.0",
+      digest: "sha256-v2:after",
+      skillCount: 1,
+      diagnostics: [],
+    };
+    const listPlugins = vi.fn()
+      .mockResolvedValueOnce([before])
+      .mockResolvedValue([after]);
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => []),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => []),
+      listPlugins,
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="plugins"
+          desktopReady
+          runtimeClient={runtimeClient}
+          onNotice={vi.fn()}
+          composerCatalogRevision={1}
+        />,
+      );
+    });
+    await settle();
+    expect(document.body.textContent).toContain("installed plugin package digest changed");
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="plugins"
+          desktopReady
+          runtimeClient={runtimeClient}
+          onNotice={vi.fn()}
+          composerCatalogRevision={2}
+        />,
+      );
+    });
+    await settle();
+
+    expect(listPlugins).toHaveBeenCalledTimes(2);
+    expect(document.body.textContent).toContain("1.1.0");
+    expect(document.body.textContent).not.toContain("installed plugin package digest changed");
+  });
+
+  it("catches up a Plugin catalog revision published while another section is open", async () => {
+    const listPlugins = vi.fn(async () => []);
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => []),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => []),
+      listPlugins,
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="skills"
+          desktopReady
+          runtimeClient={runtimeClient}
+          onNotice={vi.fn()}
+          composerCatalogRevision={1}
+        />,
+      );
+    });
+    await settle();
+    expect(listPlugins).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="skills"
+          desktopReady
+          runtimeClient={runtimeClient}
+          onNotice={vi.fn()}
+          composerCatalogRevision={2}
+        />,
+      );
+    });
+    await settle();
+    expect(listPlugins).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="plugins"
+          desktopReady
+          runtimeClient={runtimeClient}
+          onNotice={vi.fn()}
+          composerCatalogRevision={2}
+        />,
+      );
+    });
+    await settle();
+    expect(listPlugins).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not refresh an open Plugin catalog when its revision is unchanged", async () => {
+    const listPlugins = vi.fn(async () => []);
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => []),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => []),
+      listPlugins,
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="plugins"
+          desktopReady
+          runtimeClient={runtimeClient}
+          onNotice={vi.fn()}
+          composerCatalogRevision={3}
+        />,
+      );
+    });
+    await settle();
+    expect(listPlugins).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="plugins"
+          desktopReady
+          runtimeClient={runtimeClient}
+          onNotice={vi.fn()}
+          composerCatalogRevision={3}
+        />,
+      );
+    });
+    await settle();
+    expect(listPlugins).toHaveBeenCalledTimes(1);
+  });
+
   it("opens a project window, previews SKILL.md, and deletes through confirmation", async () => {
     let deleted = false;
     const listSkills = vi.fn(async () =>

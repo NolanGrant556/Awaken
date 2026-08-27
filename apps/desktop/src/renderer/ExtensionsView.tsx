@@ -88,6 +88,7 @@ type ExtensionsViewProps = {
   runtimeClient: RuntimeClient;
   onNotice: (message: string) => void;
   activeWorkspaceRoot?: string;
+  composerCatalogRevision?: number;
 };
 
 const MCP_STDIO_EXAMPLE = `{
@@ -655,6 +656,7 @@ export function ExtensionsView({
   runtimeClient,
   onNotice,
   activeWorkspaceRoot,
+  composerCatalogRevision = 0,
 }: ExtensionsViewProps) {
   const [connectors, setConnectors] = useState<RuntimeConnector[]>([]);
   const [cliConnectors, setCliConnectors] = useState<CliConnectorView[]>([]);
@@ -694,6 +696,7 @@ export function ExtensionsView({
   const skillSyncInFlightRef = useRef(false);
   const refreshGenerationRef = useRef(0);
   const visibleRefreshGenerationRef = useRef(0);
+  const appliedPluginCatalogRevisionRef = useRef(composerCatalogRevision);
   const busyMcpServerNameRef = useRef<string | null>(null);
   const [skillToggleStates, setSkillToggleStates] = useState<Record<string, boolean>>({});
   const [busySkillId, setBusySkillId] = useState<string | null>(null);
@@ -862,6 +865,22 @@ export function ExtensionsView({
     void refresh(false, activeWorkspaceRoot);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkspaceRoot]);
+
+  useEffect(() => {
+    if (
+      !desktopReady ||
+      section !== "plugins" ||
+      composerCatalogRevision <= appliedPluginCatalogRevisionRef.current
+    ) {
+      return;
+    }
+    appliedPluginCatalogRevisionRef.current = composerCatalogRevision;
+    void refresh(false);
+    // Store mutations publish this revision only after Plugin state and live
+    // roots are committed, so the visible catalog never has to preserve an
+    // earlier digest diagnostic after an authorized commit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerCatalogRevision, desktopReady, section]);
 
   useEffect(() => {
     if (!desktopReady || section !== "connectors") {

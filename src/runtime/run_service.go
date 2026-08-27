@@ -3526,22 +3526,28 @@ func dedupeTaskScopeRoots(workspaceRoot string, groups ...[]string) []string {
 	return roots
 }
 
-// buildProtectedRootExceptions releases the session workspace subtree, and only
-// when this scope actually runs inside it. A scope made of user folders never
-// receives a carve-out, so the business-data root stays fully protected by
-// default.
+// buildProtectedRootExceptions releases the Agent-editable Plugin repository
+// for every run. The PluginStore state file remains under AWAKEN_HOME/config
+// and is therefore outside this carve-out; package changes still fail closed
+// until the typed Plugin lifecycle validates and commits a new digest.
+//
+// The session workspace subtree is additionally released only when this scope
+// actually runs inside it. All ordinary sensitive path-shape rules continue to
+// apply inside both carve-outs.
 func buildProtectedRootExceptions(scopeRoots []string) []string {
 	home := desktopdata.AwakenHomeRoot()
 	if home == "" {
 		return nil
 	}
+	exceptions := []string{filepath.Clean(desktopdata.PluginsRoot(home))}
 	sessionsRoot := filepath.Clean(desktopdata.SessionsRoot(home))
 	for _, root := range scopeRoots {
 		if tool.PathWithinRoot(root, sessionsRoot) {
-			return []string{sessionsRoot}
+			exceptions = append(exceptions, sessionsRoot)
+			break
 		}
 	}
-	return nil
+	return normalizeTaskScopeRoots(exceptions, home)
 }
 
 func normalizeTaskScopeRoots(values []string, workspaceRoot string) []string {

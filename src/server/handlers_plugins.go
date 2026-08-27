@@ -54,6 +54,10 @@ type installPluginRequest struct {
 	Replace bool           `json:"replace"`
 }
 
+type commitPluginRequest struct {
+	ExpectedDigest string `json:"expectedDigest"`
+}
+
 type installPluginResponse struct {
 	Plugin  pluginInfo `json:"plugin"`
 	Message string     `json:"message"`
@@ -103,6 +107,36 @@ func (h pluginHandlers) handleInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.refreshRuntime()
+	writeJSON(w, http.StatusOK, installPluginResponse{
+		Plugin:  h.toPluginInfo(result.Plugin, true),
+		Message: result.Message,
+	})
+}
+
+func (h pluginHandlers) handleCommit(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureStore(w) {
+		return
+	}
+	var req commitPluginRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("name"))
+	expectedDigest := strings.TrimSpace(req.ExpectedDigest)
+	if name == "" || expectedDigest == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "name and expectedDigest are required")
+		return
+	}
+	result, err := h.store.CommitInstalledChanges(name, expectedDigest)
+	if err != nil {
+		h.writeStoreError(w, err)
+		return
+	}
+	// CommitInstalledChanges publishes the Store change only after the new
+	// digest is durably recorded. The Core-owned Store callback is the single
+	// runtime refresh authority, and the catalog subscriber publishes the UI
+	// revision from the same notification.
 	writeJSON(w, http.StatusOK, installPluginResponse{
 		Plugin:  h.toPluginInfo(result.Plugin, true),
 		Message: result.Message,
@@ -203,9 +237,11 @@ func (h pluginHandlers) writeStoreError(w http.ResponseWriter, err error) {
 		writeErrorJSON(w, http.StatusConflict, "PLUGIN_ALREADY_EXISTS", err.Error())
 	case errors.Is(err, plugins.ErrDigestChanged):
 		writeErrorJSON(w, http.StatusConflict, "PLUGIN_DIGEST_CHANGED", err.Error())
+	case errors.Is(err, plugins.ErrRecordedDigestChanged):
+		writeErrorJSON(w, http.StatusConflict, "PLUGIN_RECORDED_DIGEST_CHANGED", err.Error())
 	case errors.Is(err, plugins.ErrReplaceTrashUnavailable):
 		writeErrorJSON(w, http.StatusConflict, "PLUGIN_TRASH_UNAVAILABLE", err.Error())
-	case errors.Is(err, plugins.ErrUnsupportedSchema), errors.Is(err, plugins.ErrManifestInvalid), errors.Is(err, plugins.ErrMCPInvalid):
+	case errors.Is(err, plugins.ErrUnsupportedSchema), errors.Is(err, plugins.ErrManifestInvalid), errors.Is(err, plugins.ErrMCPInvalid), errors.Is(err, plugins.ErrPathEscapes), errors.Is(err, plugins.ErrSourceChanged):
 		writeErrorJSON(w, http.StatusBadRequest, "PLUGIN_INVALID", err.Error())
 	case errors.Is(err, plugins.ErrStateCorrupt):
 		writeErrorJSON(w, http.StatusServiceUnavailable, "PLUGIN_STATE_CORRUPT", err.Error())

@@ -7783,6 +7783,7 @@ export function App() {
                     runtimeClient={runtimeClient}
                     onNotice={setNotice}
                     activeWorkspaceRoot={workspacePath}
+                    composerCatalogRevision={composerCatalogRevision}
                   />
                 </>
               ) : scheduledTasksNavActive ? (

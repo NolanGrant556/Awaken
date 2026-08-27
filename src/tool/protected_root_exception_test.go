@@ -107,3 +107,133 @@ func TestWithoutAnExceptionTheAwakenHomeRemainsFullyProtected(t *testing.T) {
 		t.Fatal("without the carve-out the managed workspace must be denied like the rest of the root")
 	}
 }
+
+func TestPluginRepositoryExceptionAllowsPackageAndDataWritesButNotStateOrSensitiveShapes(t *testing.T) {
+	home := t.TempDir()
+	awakenHome := filepath.Join(home, ".awaken")
+	pluginsRoot := filepath.Join(awakenHome, "plugins")
+	workspace := filepath.Join(home, "workspace")
+	for _, dir := range []string{
+		workspace,
+		filepath.Join(pluginsRoot, "packages", "acme", "skills", "helper"),
+		filepath.Join(pluginsRoot, "data", "acme"),
+		filepath.Join(awakenHome, "config"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	permission := PermissionContext{
+		ScopeID:                 "scope_plugin_authoring",
+		WorkspaceRoot:           workspace,
+		ReadableRoots:           []string{workspace},
+		WritableRoots:           []string{workspace},
+		OutputRoots:             []string{workspace},
+		ProtectedRoots:          []string{awakenHome},
+		ProtectedRootExceptions: []string{pluginsRoot},
+		TemporaryWorkRoot:       filepath.Join(t.TempDir(), "scope"),
+	}.Normalize()
+
+	for _, target := range []string{
+		filepath.Join(pluginsRoot, "packages", "acme", "plugin.json"),
+		filepath.Join(pluginsRoot, "packages", "acme", "skills", "helper", "SKILL.md"),
+		filepath.Join(pluginsRoot, "data", "acme", "cache.json"),
+	} {
+		if _, err := permission.ResolveMutationPathChecked(target); err != nil {
+			t.Fatalf("Plugin repository target %q must be writable: %v", target, err)
+		}
+	}
+
+	for _, target := range []string{
+		filepath.Join(awakenHome, "config", "plugins.json"),
+		filepath.Join(pluginsRoot, "packages", "acme", ".env"),
+		filepath.Join(pluginsRoot, "packages", "acme", ".git", "config"),
+		filepath.Join(pluginsRoot, "data", "acme", "credentials.json"),
+	} {
+		if _, err := permission.ResolveMutationPathChecked(target); err == nil {
+			t.Fatalf("sensitive or Store-owned target %q must stay protected", target)
+		}
+	}
+
+	outside := t.TempDir()
+	ancestorEscape := filepath.Join(pluginsRoot, "packages", "escape")
+	if err := os.Symlink(outside, ancestorEscape); err != nil {
+		t.Fatal(err)
+	}
+	outsideFile := filepath.Join(outside, "outside.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	leafEscape := filepath.Join(pluginsRoot, "packages", "leaf-escape.txt")
+	if err := os.Symlink(outsideFile, leafEscape); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{
+		filepath.Join(ancestorEscape, "new.txt"),
+		leafEscape,
+	} {
+		if _, err := permission.ResolveMutationPathChecked(target); err == nil {
+			t.Fatalf("Plugin repository symlink escape %q must stay protected", target)
+		}
+	}
+}
+
+func TestPluginRepositoryExceptionRootCannotBeReplacedBySymlink(t *testing.T) {
+	home := t.TempDir()
+	awakenHome := filepath.Join(home, ".awaken")
+	if err := os.MkdirAll(awakenHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	pluginsRoot := filepath.Join(awakenHome, "plugins")
+	if err := os.Symlink(outside, pluginsRoot); err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(home, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	permission := PermissionContext{
+		ScopeID:                 "scope_plugin_root_symlink",
+		WorkspaceRoot:           workspace,
+		ReadableRoots:           []string{workspace},
+		WritableRoots:           []string{workspace},
+		OutputRoots:             []string{workspace},
+		ProtectedRoots:          []string{awakenHome},
+		ProtectedRootExceptions: []string{pluginsRoot},
+		TemporaryWorkRoot:       filepath.Join(t.TempDir(), "scope"),
+	}.Normalize()
+	if _, err := permission.ResolveMutationPathChecked(filepath.Join(pluginsRoot, "packages", "escape", "plugin.json")); err == nil {
+		t.Fatal("a symlinked Plugin repository root must not project write access outside AWAKEN_HOME")
+	}
+}
+
+func TestPluginRepositoryExceptionRejectsExternalSymlinkIngress(t *testing.T) {
+	home := t.TempDir()
+	awakenHome := filepath.Join(home, ".awaken")
+	pluginsRoot := filepath.Join(awakenHome, "plugins")
+	packageRoot := filepath.Join(pluginsRoot, "packages", "acme")
+	workspace := filepath.Join(home, "workspace")
+	for _, dir := range []string{packageRoot, workspace} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	alias := filepath.Join(home, "plugins-alias")
+	if err := os.Symlink(pluginsRoot, alias); err != nil {
+		t.Fatal(err)
+	}
+	permission := PermissionContext{
+		ScopeID:                 "scope_plugin_symlink_ingress",
+		WorkspaceRoot:           workspace,
+		ReadableRoots:           []string{workspace},
+		WritableRoots:           []string{workspace},
+		OutputRoots:             []string{workspace},
+		ProtectedRoots:          []string{awakenHome},
+		ProtectedRootExceptions: []string{pluginsRoot},
+		TemporaryWorkRoot:       filepath.Join(t.TempDir(), "scope"),
+	}.Normalize()
+	if _, err := permission.ResolveMutationPathChecked(filepath.Join(alias, "packages", "acme", "plugin.json")); err == nil {
+		t.Fatal("an external symlink must not provide an alternate lexical path into the Plugin repository")
+	}
+}

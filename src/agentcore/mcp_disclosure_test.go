@@ -2,10 +2,12 @@ package agentcore
 
 import (
 	stdcontext "context"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	convcontext "awaken/src/context"
+	"awaken/src/llm"
 	"awaken/src/tool"
 
 	_ "awaken/src/tools/mcp_find"
@@ -96,9 +98,9 @@ func TestBuildMCPDisclosureProjectionModes(t *testing.T) {
 	}
 }
 
-func TestRequestBuilderGetToolsDefersMCPUntilActivated(t *testing.T) {
+func TestRequestBuilderGetToolsDefersMCPByDefaultUntilActivated(t *testing.T) {
 	snapshot := registerAgentMCPDisclosureFixture(t)
-	t.Setenv(tool.MCPDisclosureEnvVar, "always")
+	t.Setenv(tool.MCPDisclosureEnvVar, "")
 
 	config := AgentConfig{
 		ModelConfig:              ModelConfig{ContextWindow: 128000},
@@ -157,6 +159,123 @@ func TestRequestBuilderGetToolsDefersMCPUntilActivated(t *testing.T) {
 	if _, visible := names["mcp__ghfix__list_issues"]; !visible {
 		t.Fatalf("off policy must project every MCP tool: %v", keysOf(names))
 	}
+}
+
+func TestMCPDisclosurePreparedRequestMatrixBeforeAndAfterActivation(t *testing.T) {
+	snapshot := registerAgentMCPDisclosureFixture(t)
+	t.Setenv(tool.MCPDisclosureEnvVar, "")
+
+	config := AgentConfig{
+		ModelConfig:              ModelConfig{Model: "test-model", ContextWindow: 128000},
+		ToolAvailabilitySnapshot: snapshot,
+	}
+	conversation := convcontext.New()
+	conversation.AddUserMessage("hello")
+	before := NewRequestBuilder(config).Build(conversation, nil)
+
+	config.MCPActivatedTools = []string{"mcp__ghfix__create_issue"}
+	after := NewRequestBuilder(config).Build(conversation, nil)
+
+	for _, protocol := range []llm.Protocol{
+		llm.ProtocolOpenAIChat,
+		llm.ProtocolOpenAIResponses,
+		llm.ProtocolAnthropicMessages,
+	} {
+		t.Run(string(protocol), func(t *testing.T) {
+			beforeTools := preparedMCPDisclosureTools(t, protocol, before)
+			if beforeTools[tool.MCPFindToolName] == nil {
+				t.Fatalf("default disclosure request omitted mcp_find: %v", keysOfPreparedTools(beforeTools))
+			}
+			for _, deferred := range []string{"mcp__ghfix__create_issue", "mcp__ghfix__list_issues"} {
+				if beforeTools[deferred] != nil {
+					t.Fatalf("default disclosure leaked deferred tool %q: %v", deferred, keysOfPreparedTools(beforeTools))
+				}
+			}
+
+			afterTools := preparedMCPDisclosureTools(t, protocol, after)
+			activated := afterTools["mcp__ghfix__create_issue"]
+			if activated == nil {
+				t.Fatalf("activated MCP tool missing from request: %v", keysOfPreparedTools(afterTools))
+			}
+			if afterTools["mcp__ghfix__list_issues"] != nil {
+				t.Fatalf("non-activated MCP tool leaked into request: %v", keysOfPreparedTools(afterTools))
+			}
+			if afterTools[tool.MCPFindToolName] == nil {
+				t.Fatalf("mcp_find must remain available after one activation: %v", keysOfPreparedTools(afterTools))
+			}
+			if beforeTools[tool.MCPFindToolName]["description"] != afterTools[tool.MCPFindToolName]["description"] {
+				t.Fatal("mcp_find catalog description changed after activation")
+			}
+
+			schemaKey := "parameters"
+			if protocol == llm.ProtocolAnthropicMessages {
+				schemaKey = "input_schema"
+			}
+			schema, ok := activated[schemaKey].(map[string]any)
+			if !ok {
+				t.Fatalf("activated tool missing %s schema: %+v", schemaKey, activated)
+			}
+			properties, ok := schema["properties"].(map[string]any)
+			if !ok {
+				t.Fatalf("activated tool properties missing: %+v", schema)
+			}
+			value, ok := properties["value"].(map[string]any)
+			if !ok || value["type"] != "string" {
+				t.Fatalf("activated tool schema was not preserved: %+v", properties)
+			}
+		})
+	}
+}
+
+func preparedMCPDisclosureTools(t *testing.T, protocol llm.Protocol, request LLMRequest) map[string]map[string]any {
+	t.Helper()
+	prepared, err := llm.PrepareRequest(llm.Config{
+		APIKey: "test", BaseURL: "https://example.test/v1", Model: "test-model", Protocol: protocol,
+	}, llm.Request{
+		SystemPrompt: request.SystemPrompt,
+		Messages:     request.Messages,
+		Tools:        request.Tools,
+		Model:        request.Model,
+	}, false)
+	if err != nil {
+		t.Fatalf("prepare %s request: %v", protocol, err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(prepared.Body, &body); err != nil {
+		t.Fatalf("decode %s request: %v", protocol, err)
+	}
+	rawTools, ok := body["tools"].([]any)
+	if !ok {
+		t.Fatalf("%s request omitted tools array: %s", protocol, prepared.Body)
+	}
+	result := make(map[string]map[string]any, len(rawTools))
+	for _, raw := range rawTools {
+		wireTool, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("%s request contains malformed tool: %+v", protocol, raw)
+		}
+		if protocol == llm.ProtocolOpenAIChat {
+			function, ok := wireTool["function"].(map[string]any)
+			if !ok {
+				t.Fatalf("chat request contains malformed function tool: %+v", wireTool)
+			}
+			wireTool = function
+		}
+		name, _ := wireTool["name"].(string)
+		if name == "" {
+			t.Fatalf("%s request contains unnamed tool: %+v", protocol, wireTool)
+		}
+		result[name] = wireTool
+	}
+	return result
+}
+
+func keysOfPreparedTools(values map[string]map[string]any) []string {
+	out := make([]string, 0, len(values))
+	for key := range values {
+		out = append(out, key)
+	}
+	return out
 }
 
 func keysOf(values map[string]string) []string {

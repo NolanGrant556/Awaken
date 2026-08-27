@@ -37,8 +37,8 @@ const mcpFindGuidancePrefix = `Search deferred MCP tools and load their full def
 
 The MCP servers below are connected, but their tool definitions are NOT loaded into context yet. To use one:
 1. Call this tool with keywords (for example "github create issue"), "select:<full tool name>[,<more>]", or one exact tool name.
-2. The result returns each match's full definition (name, description, input schema) and loads it into your tool list for the following turns.
-3. Call the loaded tool directly by its full name afterwards.
+2. The result confirms the matched names and loads their full definitions into your tool list for the following turns.
+3. On the next model turn, call the loaded tool directly by its full name using the schema in your tool list.
 Calling a listed MCP tool directly without loading also works — its definition loads automatically for later turns — but prefer searching first so the exact input schema is known.
 
 Connected MCP servers and deferred tools:

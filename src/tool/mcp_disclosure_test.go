@@ -12,7 +12,7 @@ func TestResolveMCPDisclosurePolicy(t *testing.T) {
 		mode    MCPDisclosureMode
 		percent int
 	}{
-		{"", MCPDisclosureAuto, DefaultMCPDeferralThresholdPercent},
+		{"", MCPDisclosureAlways, 0},
 		{"auto", MCPDisclosureAuto, DefaultMCPDeferralThresholdPercent},
 		{"AUTO:25", MCPDisclosureAuto, 25},
 		{"auto:0", MCPDisclosureAlways, 0},
@@ -23,8 +23,8 @@ func TestResolveMCPDisclosurePolicy(t *testing.T) {
 		{"always", MCPDisclosureAlways, 0},
 		{"true", MCPDisclosureAlways, 0},
 		{"1", MCPDisclosureAlways, 0},
-		{"auto:abc", MCPDisclosureAuto, DefaultMCPDeferralThresholdPercent},
-		{"garbage", MCPDisclosureAuto, DefaultMCPDeferralThresholdPercent},
+		{"auto:abc", MCPDisclosureAlways, 0},
+		{"garbage", MCPDisclosureAlways, 0},
 	}
 	for _, testCase := range cases {
 		policy := ResolveMCPDisclosurePolicy(testCase.raw)
@@ -138,7 +138,7 @@ func TestMCPServerFromToolNameFallsBackWithoutAnnotations(t *testing.T) {
 	}
 }
 
-func TestRenderMCPCatalogDegradesWithinBudget(t *testing.T) {
+func TestRenderMCPCatalogUsesNamesOnlyAndDegradesWithinBudget(t *testing.T) {
 	snapshot := registerMCPDisclosureFixture(t)
 	servers := CollectMCPCatalog(snapshot)
 	keep := servers[:0]
@@ -150,17 +150,17 @@ func TestRenderMCPCatalogDegradesWithinBudget(t *testing.T) {
 	servers = keep
 
 	full := RenderMCPCatalog(servers, DefaultMCPCatalogBudgetRunes)
-	if !strings.Contains(full, "create_issue: Create a new GitHub issue") {
-		t.Fatalf("full catalog should include per-tool descriptions: %q", full)
+	if !strings.Contains(full, "create_issue") || !strings.Contains(full, "list_issues") {
+		t.Fatalf("full catalog should include tool names: %q", full)
+	}
+	if strings.Contains(full, "Create a new GitHub issue") {
+		t.Fatalf("model-facing catalog must not include deferred descriptions: %q", full)
 	}
 	if !strings.Contains(full, "needs_auth") {
 		t.Fatalf("non-ready server state must be visible: %q", full)
 	}
 
 	nameOnly := RenderMCPCatalog(servers, 150)
-	if strings.Contains(nameOnly, "Create a new GitHub issue") {
-		t.Fatalf("tight budget should drop descriptions: %q", nameOnly)
-	}
 	if !strings.Contains(nameOnly, "create_issue") && !strings.Contains(nameOnly, "(2 tools)") {
 		t.Fatalf("tight budget should keep names or counts: %q", nameOnly)
 	}

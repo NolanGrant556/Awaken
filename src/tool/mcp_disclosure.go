@@ -15,8 +15,8 @@ const MCPFindToolName = "mcp_find"
 // MCPDisclosureEnvVar overrides the progressive-disclosure policy:
 // "off"/"false"/"0" disables deferral, "always"/"true"/"1" always defers,
 // "auto" or "auto:<percent>" defers only when the estimated MCP definition
-// size exceeds <percent> of the model context window. Empty uses auto with
-// DefaultMCPDeferralThresholdPercent.
+// size exceeds <percent> of the model context window. Empty defaults to always
+// deferring MCP definitions; auto remains an explicit compatibility mode.
 const MCPDisclosureEnvVar = "AWAKEN_MCP_DEFERRED_TOOLS"
 
 const (
@@ -47,12 +47,14 @@ type MCPDisclosurePolicy struct {
 }
 
 // ResolveMCPDisclosurePolicy parses a raw policy value. Unknown values fall
-// back to the default auto policy so a typo can never silently disable MCP
-// tools entirely.
+// back to the default always-on policy so a typo cannot silently restore the
+// full MCP schema set to every model request.
 func ResolveMCPDisclosurePolicy(raw string) MCPDisclosurePolicy {
 	value := strings.ToLower(strings.TrimSpace(raw))
 	switch value {
-	case "", "auto":
+	case "":
+		return MCPDisclosurePolicy{Mode: MCPDisclosureAlways}
+	case "auto":
 		return MCPDisclosurePolicy{Mode: MCPDisclosureAuto, ThresholdPercent: DefaultMCPDeferralThresholdPercent}
 	case "off", "false", "0", "disabled":
 		return MCPDisclosurePolicy{Mode: MCPDisclosureOff}
@@ -83,7 +85,7 @@ func ResolveMCPDisclosurePolicy(raw string) MCPDisclosurePolicy {
 			}
 		}
 	}
-	return MCPDisclosurePolicy{Mode: MCPDisclosureAuto, ThresholdPercent: DefaultMCPDeferralThresholdPercent}
+	return MCPDisclosurePolicy{Mode: MCPDisclosureAlways}
 }
 
 // MCPDisclosurePolicyFromEnv resolves the policy from MCPDisclosureEnvVar.
@@ -176,10 +178,10 @@ func mcpServerFromToolName(name string) string {
 	return trimmed
 }
 
-// RenderMCPCatalog renders the deferred-tool directory with a rune budget.
-// It degrades deterministically: per-tool descriptions shrink first, then
-// drop to name-only listings, then to per-server counts, and finally trailing
-// servers are omitted with an explicit truncation marker.
+// RenderMCPCatalog renders a name-only deferred-tool directory with a rune
+// budget. Full descriptions and schemas stay in the local search index. The
+// model-facing directory degrades deterministically from names to per-server
+// counts, then omits trailing servers with an explicit truncation marker.
 func RenderMCPCatalog(servers []MCPCatalogServer, budgetRunes int) string {
 	if len(servers) == 0 {
 		return ""
@@ -187,19 +189,17 @@ func RenderMCPCatalog(servers []MCPCatalogServer, budgetRunes int) string {
 	if budgetRunes <= 0 {
 		budgetRunes = DefaultMCPCatalogBudgetRunes
 	}
-	for _, descriptionLimit := range []int{120, 64, 0} {
-		rendered := renderMCPCatalogLevel(servers, descriptionLimit, false)
-		if len([]rune(rendered)) <= budgetRunes {
-			return rendered
-		}
+	rendered := renderMCPCatalogLevel(servers, false)
+	if len([]rune(rendered)) <= budgetRunes {
+		return rendered
 	}
-	rendered := renderMCPCatalogLevel(servers, 0, true)
+	rendered = renderMCPCatalogLevel(servers, true)
 	if len([]rune(rendered)) <= budgetRunes {
 		return rendered
 	}
 	// Even count-only lines exceed the budget: keep leading servers and mark
 	// the truncation instead of silently dropping the rest.
-	lines := strings.Split(renderMCPCatalogLevel(servers, 0, true), "\n")
+	lines := strings.Split(renderMCPCatalogLevel(servers, true), "\n")
 	var kept []string
 	used := 0
 	const truncationMarker = "- …(catalog truncated; more MCP servers exist — search by keyword)"
@@ -216,7 +216,7 @@ func RenderMCPCatalog(servers []MCPCatalogServer, budgetRunes int) string {
 	return strings.Join(kept, "\n")
 }
 
-func renderMCPCatalogLevel(servers []MCPCatalogServer, descriptionLimit int, countsOnly bool) string {
+func renderMCPCatalogLevel(servers []MCPCatalogServer, countsOnly bool) string {
 	var builder strings.Builder
 	for serverIndex, server := range servers {
 		if serverIndex > 0 {
@@ -239,38 +239,14 @@ func renderMCPCatalogLevel(servers []MCPCatalogServer, descriptionLimit int, cou
 		if countsOnly {
 			continue
 		}
-		if descriptionLimit <= 0 {
-			names := make([]string, 0, len(server.Tools))
-			for _, item := range server.Tools {
-				names = append(names, item.RawName)
-			}
-			builder.WriteString(": ")
-			builder.WriteString(strings.Join(names, ", "))
-			continue
-		}
+		names := make([]string, 0, len(server.Tools))
 		for _, item := range server.Tools {
-			builder.WriteString("\n  - ")
-			builder.WriteString(item.RawName)
-			description := compactWhitespace(item.Description)
-			if description != "" {
-				builder.WriteString(": ")
-				builder.WriteString(truncateRunes(description, descriptionLimit))
-			}
+			names = append(names, item.RawName)
 		}
+		builder.WriteString(": ")
+		builder.WriteString(strings.Join(names, ", "))
 	}
 	return builder.String()
-}
-
-func compactWhitespace(value string) string {
-	return strings.Join(strings.Fields(value), " ")
-}
-
-func truncateRunes(value string, limit int) string {
-	runes := []rune(value)
-	if limit <= 0 || len(runes) <= limit {
-		return value
-	}
-	return string(runes[:limit]) + "…"
 }
 
 func itoa(value int) string {

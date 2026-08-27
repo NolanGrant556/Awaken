@@ -14,8 +14,9 @@ import (
 )
 
 // Tool searches deferred MCP tools by keyword or exact selection. It never
-// executes MCP calls itself: results carry the full definitions, and the
-// runner-owned activation observer makes them callable by name afterwards.
+// executes MCP calls itself: results carry compact matched names, and the
+// runner-owned activation observer adds the full definitions to the next
+// model request's tool list.
 type Tool struct{}
 
 func (t *Tool) Name() string { return tool.MCPFindToolName }
@@ -65,8 +66,14 @@ func (t *Tool) Definition() tool.ToolDefinition {
 			AdditionalProperties: tool.BoolPtr(false),
 		},
 		OutputSchema: tool.ToolParam{Type: "object", Properties: map[string]tool.ToolParam{
-			"query":           {Type: "string", Description: "The executed query."},
-			"matches":         {Type: "array", Description: "Matched tools with full name, server, description and input schema.", Items: &tool.ToolParam{Type: "object", AdditionalProperties: tool.BoolPtr(true)}},
+			"query": {Type: "string", Description: "The executed query."},
+			"matches": {Type: "array", Description: "Matched tools by full name, server and readiness; full schemas are injected into the next model request.", Items: &tool.ToolParam{
+				Type: "object", Properties: map[string]tool.ToolParam{
+					"name":      {Type: "string", Description: "Full registered MCP tool name."},
+					"server":    {Type: "string", Description: "Owning MCP server identity."},
+					"readiness": {Type: "string", Description: "Non-ready state when applicable."},
+				}, Required: []string{"name", "server"}, AdditionalProperties: tool.BoolPtr(false),
+			}},
 			"loaded":          {Type: "array", Description: "Tool names loaded into the model tool list for subsequent turns.", Items: &tool.ToolParam{Type: "string"}},
 			"total_mcp_tools": {Type: "integer", Description: "Total MCP tools in the current run snapshot."},
 			"pending_servers": {Type: "array", Description: "Servers that are not ready (needs auth or unavailable).", Items: &tool.ToolParam{Type: "string"}},
@@ -87,12 +94,12 @@ func (t *Tool) Definition() tool.ToolDefinition {
 			{
 				Scenario: "Find GitHub issue tools",
 				Input:    map[string]any{"query": "github create issue"},
-				Outcome:  "Returns matched mcp__github__* definitions and loads them for direct calls.",
+				Outcome:  "Returns matched mcp__github__* names and loads their definitions for direct calls.",
 			},
 			{
 				Scenario: "Load two exact tools",
 				Input:    map[string]any{"query": "select:mcp__github__create_issue,mcp__github__list_issues"},
-				Outcome:  "Returns both definitions and loads them.",
+				Outcome:  "Returns both names and loads their definitions.",
 			},
 		},
 		FailureModes: []tool.ToolFailureMode{
@@ -117,11 +124,9 @@ type findInput struct {
 }
 
 type matchPayload struct {
-	Name        string                    `json:"name"`
-	Server      string                    `json:"server"`
-	Description string                    `json:"description,omitempty"`
-	Readiness   string                    `json:"readiness,omitempty"`
-	InputSchema tool.ToolParametersSchema `json:"input_schema"`
+	Name      string `json:"name"`
+	Server    string `json:"server"`
+	Readiness string `json:"readiness,omitempty"`
 }
 
 type findOutput struct {
@@ -196,11 +201,9 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 			readiness = string(match.Tool.Readiness)
 		}
 		output.Matches = append(output.Matches, matchPayload{
-			Name:        match.Tool.Name,
-			Server:      match.Tool.Server,
-			Description: match.Tool.Description,
-			Readiness:   readiness,
-			InputSchema: match.Tool.InputSchema,
+			Name:      match.Tool.Name,
+			Server:    match.Tool.Server,
+			Readiness: readiness,
 		})
 		loaded = append(loaded, match.Tool.Name)
 	}
@@ -220,9 +223,9 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 				return outcome.WithTiming(started, time.Now().UTC()), nil
 			}
 			output.Loaded = loaded
-			output.Note = "The matched tool definitions are loaded and callable by full name from the next turn onward."
+			output.Note = "The matched tool definitions are loaded into the next model request and callable by full name."
 		} else {
-			output.Note = "Matched tool definitions returned; call them by full name."
+			output.Note = "Matched tool names found, but this execution has no activation observer to load their definitions."
 		}
 	}
 	if len(pending) > 0 {

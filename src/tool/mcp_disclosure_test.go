@@ -192,6 +192,10 @@ func TestSearchMCPToolsKeywordSelectAndRequiredTerms(t *testing.T) {
 	if len(matches) != 2 || matches[0].Tool.Name != "mcp__github__list_issues" || matches[1].Tool.Name != "mcp__plugin__pack-tools__notes__write_note" {
 		t.Fatalf("select multi-resolution wrong: %+v", matches)
 	}
+	matches = SearchMCPTools(servers, "select:mcp__github__list_issues, write_note", 1)
+	if len(matches) != 1 || matches[0].Tool.Name != "mcp__github__list_issues" {
+		t.Fatalf("select must honor limit: %+v", matches)
+	}
 
 	matches = SearchMCPTools(servers, "create_issue", 5)
 	if len(matches) != 1 || matches[0].Tool.Name != "mcp__github__create_issue" {

@@ -15,7 +15,7 @@ import (
 	_ "awaken/src/tools/git_remote"
 	_ "awaken/src/tools/glob"
 	_ "awaken/src/tools/grep"
-	_ "awaken/src/tools/mcp_find"
+	_ "awaken/src/tools/tool_find"
 	_ "awaken/src/tools/media_generate"
 	_ "awaken/src/tools/memory"
 	_ "awaken/src/tools/plugin"

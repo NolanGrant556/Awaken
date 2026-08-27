@@ -507,9 +507,11 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		return projectComputerEvent(base, record.Kind, payload)
 	case agentcore.SemanticKindThread,
 		agentcore.SemanticKindFileChange,
-		// MCP progressive-disclosure activation is host-internal bookkeeping:
-		// the mcp_find tool call/result already carries the user-visible
+		// Progressive-disclosure activation is host-internal bookkeeping:
+		// the tool_find tool call/result already carries the user-visible
 		// story, and the loaded set only shapes the next request projection.
+		// The legacy MCP-only kind stays suppressed for replayed journals.
+		agentcore.SemanticKindDeferredToolsActivated,
 		agentcore.SemanticKindMCPToolsActivated:
 		return nil
 	default:

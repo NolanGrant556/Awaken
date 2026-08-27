@@ -48,10 +48,17 @@ type ToolSchemaProvenance struct {
 	// provider sees only the ordinary lowered tool definition.
 	SkillCatalog string `json:"skill_catalog,omitempty"`
 	// MCPCatalog is the exact deferred MCP tool directory embedded in the
-	// mcp_find description while progressive disclosure is active. Like
+	// tool_find description while progressive disclosure is active. Like
 	// SkillCatalog it is host-owned provenance used only for context usage
-	// attribution; the provider sees the ordinary lowered definition.
+	// attribution; the provider sees the ordinary lowered definition. The
+	// deferred builtin catalog section stays with the builtin wrapper.
 	MCPCatalog string `json:"mcp_catalog,omitempty"`
+	// LoadedOnDemand marks a builtin definition from the deferrable auxiliary
+	// group that is projected because it was activated on demand (this run or
+	// restored from durable activation records). Context Epoch treats such
+	// definitions as append-only dynamic tools; the flag never reaches the
+	// provider and does not participate in tool digests.
+	LoadedOnDemand bool `json:"loaded_on_demand,omitempty"`
 }
 
 type AttributedToolSchema struct {

@@ -193,5 +193,11 @@ func ContextEpochSourceDigest(content string) string {
 }
 
 func ContextEpochToolIsDynamic(value ContextEpochToolCandidate) bool {
+	if value.Provenance.LoadedOnDemand {
+		// Deferrable builtin auxiliary definitions loaded on demand join the
+		// tool list append-only, like activated MCP definitions, so an
+		// activation cannot force a new Context Epoch.
+		return true
+	}
 	return value.Provenance.Origin != "" && value.Provenance.Origin != tool.SourceBuiltin
 }

@@ -1361,18 +1361,22 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 				},
 			))
 		}
-		var mcpToolsLoadedByFind []string
-		if call.Function.Name == tool.MCPFindToolName {
-			executionCtx = tool.ContextWithMCPActivationObserver(executionCtx,
+		var deferredToolsLoadedByFind []string
+		if call.Function.Name == tool.ToolFindToolName {
+			if r.reqBuilder != nil {
+				executionCtx = tool.ContextWithDeferredToolSearchSpace(executionCtx,
+					r.reqBuilder.toolDisclosureProjection().SearchSpace)
+			}
+			executionCtx = tool.ContextWithDeferredToolActivationObserver(executionCtx,
 				func(observerCtx stdcontext.Context, names []string) error {
-					newly := r.newlyActivatedMCPToolNames(names)
+					newly := r.newlyActivatedDeferredToolNames(names)
 					if len(newly) == 0 {
 						return nil
 					}
-					if err := r.persistMCPToolActivation(observerCtx, events, call, newly, "mcp_find"); err != nil {
+					if err := r.persistDeferredToolActivation(observerCtx, events, call, newly, "tool_find"); err != nil {
 						return err
 					}
-					mcpToolsLoadedByFind = append(mcpToolsLoadedByFind, newly...)
+					deferredToolsLoadedByFind = append(deferredToolsLoadedByFind, newly...)
 					return nil
 				})
 		}
@@ -1416,7 +1420,7 @@ func (r *Runner) executeToolCalls(ctx stdcontext.Context, toolCalls []context.To
 		}
 
 		r.applyImplicitSkillActivation(call.Function.Name, result, activationPlan)
-		r.applyMCPToolActivation(runCtx, events, call, mcpToolsLoadedByFind)
+		r.applyDeferredToolActivation(runCtx, events, call, deferredToolsLoadedByFind)
 		results = append(results, result)
 		if events != nil {
 			artifacts := []AwakenEvent{}
@@ -1684,15 +1688,25 @@ func (r *Runner) applyImplicitSkillActivation(
 	r.rebuildRequestBuilder()
 }
 
-// newlyActivatedMCPToolNames filters candidate names down to MCP-origin tools
-// present in the pinned run snapshot that are not activated yet.
-func (r *Runner) newlyActivatedMCPToolNames(names []string) []string {
+// newlyActivatedDeferredToolNames filters candidate names down to deferrable
+// tools (MCP-origin or the builtin auxiliary deferral group) present in the
+// pinned run snapshot, visible under the run's exposure policy, and not
+// activated yet. The per-group enablement gate stays with the callers.
+func (r *Runner) newlyActivatedDeferredToolNames(names []string) []string {
 	if r == nil || r.config.ToolAvailabilitySnapshot == nil {
 		return nil
 	}
-	existing := make(map[string]bool, len(r.config.MCPActivatedTools))
-	for _, name := range r.config.MCPActivatedTools {
+	existing := make(map[string]bool, len(r.config.ActivatedDeferredTools))
+	for _, name := range r.config.ActivatedDeferredTools {
 		existing[name] = true
+	}
+	exposure := r.config.ToolExposure
+	if exposure.Mode == "" && len(exposure.ExtraVisible) == 0 && len(exposure.ExtraHidden) == 0 {
+		exposure = tool.DefaultToolExposurePolicy()
+	}
+	var disclosure toolDisclosureProjection
+	if r.reqBuilder != nil {
+		disclosure = r.reqBuilder.toolDisclosureProjection()
 	}
 	seen := map[string]bool{}
 	out := make([]string, 0, len(names))
@@ -1702,7 +1716,22 @@ func (r *Runner) newlyActivatedMCPToolNames(names []string) []string {
 			continue
 		}
 		entry, err := r.config.ToolAvailabilitySnapshot.Lookup(name)
-		if err != nil || !tool.IsMCPToolEntry(entry) {
+		if err != nil {
+			continue
+		}
+		switch {
+		case tool.IsMCPToolEntry(entry):
+			if !disclosure.MCPEnabled {
+				continue
+			}
+		case tool.IsDeferrableBuiltinEntry(entry):
+			if !disclosure.BuiltinEnabled {
+				continue
+			}
+		default:
+			continue
+		}
+		if !tool.IsToolExposed(name, exposure) {
 			continue
 		}
 		seen[name] = true
@@ -1711,9 +1740,10 @@ func (r *Runner) newlyActivatedMCPToolNames(names []string) []string {
 	return out
 }
 
-// persistMCPToolActivation appends the durable activation fact before the
-// in-memory tool pool changes; restore replays it into MCPActivatedTools.
-func (r *Runner) persistMCPToolActivation(
+// persistDeferredToolActivation appends the durable activation fact before
+// the in-memory tool pool changes; restore replays it into
+// ActivatedDeferredTools.
+func (r *Runner) persistDeferredToolActivation(
 	ctx stdcontext.Context,
 	events *runEventEmitter,
 	call context.ToolCall,
@@ -1740,7 +1770,7 @@ func (r *Runner) persistMCPToolActivation(
 		payload["agent_id"] = r.config.SubagentOrigin.AgentID
 	}
 	records := []SemanticRecord{NewSemanticRecord(
-		SemanticKindMCPToolsActivated,
+		SemanticKindDeferredToolsActivated,
 		threadID,
 		runID,
 		turnID,
@@ -1749,24 +1779,24 @@ func (r *Runner) persistMCPToolActivation(
 		payload,
 	)}
 	if events != nil && events.recorder != nil {
-		return events.persistDurableBatch(ctx, "mcp_tool_activation", records)
+		return events.persistDurableBatch(ctx, "deferred_tool_activation", records)
 	}
 	if r.recorder != nil {
 		persistCtx, cancel := durablePersistenceContext(ctx)
 		defer cancel()
 		if err := r.recorder.AppendBatch(persistCtx, records); err != nil {
-			return fmt.Errorf("%w: phase=mcp_tool_activation: %v", ErrPersistenceFailed, err)
+			return fmt.Errorf("%w: phase=deferred_tool_activation: %v", ErrPersistenceFailed, err)
 		}
 	}
 	return nil
 }
 
-// applyMCPToolActivation merges freshly loaded deferred MCP tools into the
+// applyDeferredToolActivation merges freshly loaded deferred tools into the
 // run config so the next request projects their full definitions. A direct
-// call to a still-deferred MCP tool auto-loads it (lenient semantics): the
-// call already executed through the pinned snapshot, so withholding the
-// schema would only force retry churn.
-func (r *Runner) applyMCPToolActivation(
+// call to a still-deferred tool auto-loads it (lenient semantics): the call
+// already executed through the pinned snapshot, so withholding the schema
+// would only force retry churn.
+func (r *Runner) applyDeferredToolActivation(
 	ctx stdcontext.Context,
 	events *runEventEmitter,
 	call context.ToolCall,
@@ -1776,10 +1806,10 @@ func (r *Runner) applyMCPToolActivation(
 		return
 	}
 	names := loadedByFind
-	if call.Function.Name != tool.MCPFindToolName && len(names) == 0 {
-		newly := r.newlyActivatedMCPToolNames([]string{call.Function.Name})
-		if len(newly) > 0 && r.reqBuilder != nil && r.reqBuilder.mcpDisclosureProjection().Enabled {
-			if err := r.persistMCPToolActivation(ctx, events, call, newly, "direct_call"); err == nil {
+	if call.Function.Name != tool.ToolFindToolName && len(names) == 0 {
+		newly := r.newlyActivatedDeferredToolNames([]string{call.Function.Name})
+		if len(newly) > 0 {
+			if err := r.persistDeferredToolActivation(ctx, events, call, newly, "direct_call"); err == nil {
 				names = newly
 			}
 		}
@@ -1787,8 +1817,8 @@ func (r *Runner) applyMCPToolActivation(
 	if len(names) == 0 {
 		return
 	}
-	existing := make(map[string]bool, len(r.config.MCPActivatedTools))
-	for _, name := range r.config.MCPActivatedTools {
+	existing := make(map[string]bool, len(r.config.ActivatedDeferredTools))
+	for _, name := range r.config.ActivatedDeferredTools {
 		existing[name] = true
 	}
 	changed := false
@@ -1796,7 +1826,7 @@ func (r *Runner) applyMCPToolActivation(
 		if name == "" || existing[name] {
 			continue
 		}
-		r.config.MCPActivatedTools = append(r.config.MCPActivatedTools, name)
+		r.config.ActivatedDeferredTools = append(r.config.ActivatedDeferredTools, name)
 		existing[name] = true
 		changed = true
 	}

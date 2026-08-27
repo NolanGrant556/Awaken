@@ -648,12 +648,12 @@ func runIDsFromSemanticRecords(records []agentcore.SemanticRecord) []string {
 
 func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restoredTranscript {
 	restored := restoredTranscript{
-		Messages:           messagesFromSemanticRecords(records),
-		RunIDs:             runIDsFromSemanticRecords(records),
-		SkillContextBlocks: skillContextBlocksFromSemanticRecords(records),
-		SkillInvokedAt:     skillInvocationTimesFromSemanticRecords(records),
-		MCPActivatedTools:  mcpActivatedToolsFromSemanticRecords(records),
-		RunPlanSnapshots:   runPlanSnapshotsFromSemanticRecords(records),
+		Messages:               messagesFromSemanticRecords(records),
+		RunIDs:                 runIDsFromSemanticRecords(records),
+		SkillContextBlocks:     skillContextBlocksFromSemanticRecords(records),
+		SkillInvokedAt:         skillInvocationTimesFromSemanticRecords(records),
+		ActivatedDeferredTools: activatedDeferredToolsFromSemanticRecords(records),
+		RunPlanSnapshots:       runPlanSnapshotsFromSemanticRecords(records),
 	}
 	for _, record := range records {
 		if restored.CreatedAt.IsZero() || record.Timestamp.Before(restored.CreatedAt) {
@@ -675,14 +675,17 @@ func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restored
 	return restored
 }
 
-// mcpActivatedToolsFromSemanticRecords rebuilds the thread's on-demand loaded
-// MCP tool set. Subagent activations stay child-local (mirroring Skill
+// activatedDeferredToolsFromSemanticRecords rebuilds the thread's on-demand
+// loaded deferred tool set from deferred_tools_activated records, merging the
+// legacy mcp_tools_activated kind written before the disclosure
+// generalization. Subagent activations stay child-local (mirroring Skill
 // restore): only records without agent_id shape the root tool projection.
-func mcpActivatedToolsFromSemanticRecords(records []agentcore.SemanticRecord) []string {
+func activatedDeferredToolsFromSemanticRecords(records []agentcore.SemanticRecord) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, record := range records {
-		if record.Kind != agentcore.SemanticKindMCPToolsActivated {
+		if record.Kind != agentcore.SemanticKindDeferredToolsActivated &&
+			record.Kind != agentcore.SemanticKindMCPToolsActivated {
 			continue
 		}
 		if strings.TrimSpace(stringPayload(record.Payload, "agent_id")) != "" {

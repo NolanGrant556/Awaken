@@ -40,6 +40,12 @@ describe("model capabilities", () => {
   });
 
   it("keeps confirmed model protocols separate from provider-wide compatibility", () => {
+    expect(capabilityForModel("qwen", "qwen3.7-plus")).toMatchObject({
+      supported_protocols: ["openai_chat", "openai_responses", "anthropic_messages"],
+      context_window: 1_000_000,
+      max_input_tokens: 983_616,
+      max_output_tokens: 131_072,
+    });
     expect(capabilityForModel("qwen", "qwen3.8-max")).toMatchObject({
       supported_protocols: ["openai_chat", "openai_responses", "anthropic_messages"],
     });
@@ -309,6 +315,8 @@ describe("model capabilities", () => {
         default_level: "max",
         display_labels: { low: "low", high: "medium", max: "xhigh" },
       });
+    expect(capabilityForModel("qwen", "qwen3.7-plus")?.reasoning_effort)
+      .toBeUndefined();
     expect(capabilityForModel("qwen", "qwen3.8-max")?.reasoning_effort)
       .toEqual({
         levels: ["low", "high", "max"],
@@ -332,6 +340,7 @@ describe("model capabilities", () => {
       "当前模型不支持推理强度 low",
     );
     expect(() => validateReasoningEffort("glm", "glm-5.2", "high")).not.toThrow();
+    expect(() => validateReasoningEffort("qwen", "qwen3.7-plus", "max")).toThrow();
     expect(() => validateReasoningEffort("qwen", "qwen3.7-max", "max")).toThrow();
   });
 

@@ -13,7 +13,7 @@ import (
 // need a clean slate before driving the manager through a fresh connect
 // cycle. Safe to call when no tools are registered.
 func UnregisterMcpToolsForTest(serverName string) {
-	tool.UnregisterToolsByPrefix("mcp__" + serverName + "__")
+	tool.UnregisterMCPToolsByServer(serverName)
 }
 
 // WaitForServerStateForTest polls SnapshotServer until the named server

@@ -301,6 +301,9 @@ func SearchMCPTools(servers []MCPCatalogServer, query string, limit int) []MCPSe
 	if limit <= 0 {
 		limit = 5
 	}
+	if limit > 20 {
+		limit = 20
+	}
 	flattened := make([]MCPCatalogTool, 0)
 	for _, server := range servers {
 		flattened = append(flattened, server.Tools...)
@@ -315,6 +318,9 @@ func SearchMCPTools(servers []MCPCatalogServer, query string, limit int) []MCPSe
 		var matches []MCPSearchMatch
 		seen := map[string]bool{}
 		for _, requested := range strings.Split(selected, ",") {
+			if len(matches) >= limit {
+				break
+			}
 			requested = strings.TrimSpace(requested)
 			if requested == "" {
 				continue

@@ -81,6 +81,7 @@ const (
 	// started/item/finished delta events; the whole sanitized snapshot travels
 	// on every frame so reconnect, dedup and replay never depend on lost frames.
 	EventAwakenPlanUpdated             EventType = "AWAKEN_PLAN_UPDATED"
+	EventAwakenResearchPhase           EventType = "AWAKEN_RESEARCH_PHASE"
 	EventAwakenComputerReviewRequested EventType = "AWAKEN_COMPUTER_REVIEW_REQUESTED"
 	EventAwakenComputerReviewResolved  EventType = "AWAKEN_COMPUTER_REVIEW_RESOLVED"
 	EventAwakenComputerSessionChanged  EventType = "AWAKEN_COMPUTER_SESSION_CHANGED"
@@ -481,17 +482,24 @@ type Event struct {
 	// Run-plan full-snapshot fields, surfaced on AWAKEN_PLAN_UPDATED (contract
 	// 运行计划与任务进度设计契约 §8.1). toolCallId/threadId/runId/turnId/
 	// recordId/semanticSeq reuse the existing Event identity fields above.
-	PlanID             string               `json:"planId,omitempty"`
-	PlanVersion        uint64               `json:"planVersion,omitempty"`
-	PlanExplanation    string               `json:"planExplanation,omitempty"`
-	PlanItems          []RunPlanItemReceipt `json:"planItems,omitempty"`
-	PlanCompletedCount int                  `json:"planCompletedCount,omitempty"`
-	PlanTotalCount     int                  `json:"planTotalCount,omitempty"`
-	PlanCurrentStep    int                  `json:"planCurrentStep,omitempty"`
-	PlanAllCompleted   bool                 `json:"planAllCompleted,omitempty"`
-	Outcome            *RunOutcome          `json:"outcome,omitempty"`
-	RawType            string               `json:"rawType,omitempty"`
-	RawEvent           any                  `json:"rawEvent,omitempty"`
+	PlanID                string               `json:"planId,omitempty"`
+	PlanVersion           uint64               `json:"planVersion,omitempty"`
+	PlanExplanation       string               `json:"planExplanation,omitempty"`
+	PlanItems             []RunPlanItemReceipt `json:"planItems,omitempty"`
+	PlanCompletedCount    int                  `json:"planCompletedCount,omitempty"`
+	PlanTotalCount        int                  `json:"planTotalCount,omitempty"`
+	PlanCurrentStep       int                  `json:"planCurrentStep,omitempty"`
+	PlanAllCompleted      bool                 `json:"planAllCompleted,omitempty"`
+	ResearchPhase         string               `json:"researchPhase,omitempty"`
+	ResearchRevision      int                  `json:"researchRevision,omitempty"`
+	ResearchQuestionCount int                  `json:"researchQuestionCount,omitempty"`
+	ResearchClaimCount    int                  `json:"researchClaimCount,omitempty"`
+	ResearchVerifiedCount int                  `json:"researchVerifiedCount,omitempty"`
+	ResearchPartialCount  int                  `json:"researchPartialCount,omitempty"`
+	ResearchRejectedCount int                  `json:"researchRejectedCount,omitempty"`
+	Outcome               *RunOutcome          `json:"outcome,omitempty"`
+	RawType               string               `json:"rawType,omitempty"`
+	RawEvent              any                  `json:"rawEvent,omitempty"`
 	// Computer Use review/handoff fields, surfaced on AWAKEN_COMPUTER_* events.
 	ComputerReviewID           string   `json:"computerReviewId,omitempty"`
 	ComputerActionID           string   `json:"computerActionId,omitempty"`

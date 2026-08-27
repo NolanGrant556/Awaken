@@ -123,6 +123,7 @@ func CreateSubagent(parent AgentConfig, spawn SpawnConfig) (AgentConfig, error) 
 		SubagentBoundary:             &childBoundary,
 		SubagentOrigin:               childOrigin,
 		SubagentController:           nil,
+		ResearchIntent:               nil,
 	}
 	// Step 5: set the effective profile. Guardians are forced to
 	// GuardianReadOnly regardless of what the boundary resolution produced.

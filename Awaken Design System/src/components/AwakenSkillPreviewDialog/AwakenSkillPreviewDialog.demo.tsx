@@ -13,7 +13,7 @@ export function AwakenSkillPreviewDialogDemo() {
     <section className="ads-component-demo" aria-label="Skill 预览窗口 AwakenSkillPreviewDialog 组件演示">
       <header className="ads-component-demo-header">
         <h2>Skill 预览窗口 <code>AwakenSkillPreviewDialog</code></h2>
-        <p>只读展示包内文件树、完整 YAML frontmatter 与安全 Markdown，并提供加载和错误状态。</p>
+        <p>用独立卡片分别只读展示包内文件树与 <code>SKILL.md</code> 的完整 YAML frontmatter、安全 Markdown，并提供加载和错误状态。</p>
       </header>
       <div className="ads-component-demo-grid">
         <article className="ads-component-demo-state">

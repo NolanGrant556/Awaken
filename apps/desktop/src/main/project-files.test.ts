@@ -3,7 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RuntimeProject } from "../shared/runtime.js";
-import { listProjectDirectory, resolveProjectEntry, resolveProjectFile } from "./project-files.js";
+import {
+  listProjectDirectory,
+  resolveProjectEntry,
+  resolveProjectFile,
+  sameProjectFolderPath,
+} from "./project-files.js";
 
 const temporaryRoots: string[] = [];
 
@@ -33,6 +38,40 @@ afterEach(async () => {
 });
 
 describe("project file directory listing", () => {
+  it("matches Windows drive and UNC paths with native case-insensitive semantics", () => {
+    expect(
+      sameProjectFolderPath(
+        String.raw`C:\Users\Nolan\Awaken Project`,
+        "c:/users/nolan/awaken project/",
+        "win32",
+      ),
+    ).toBe(true);
+    expect(
+      sameProjectFolderPath(
+        String.raw`\\Server\Team Share\Awaken`,
+        `${String.raw`\\server\team share\awaken`}\\`,
+        "win32",
+      ),
+    ).toBe(true);
+    expect(
+      sameProjectFolderPath(String.raw`C:\Awaken`, String.raw`D:\Awaken`, "win32"),
+    ).toBe(false);
+    expect(
+      sameProjectFolderPath(
+        String.raw`\\?\C:\Users\Nolan\Awaken`,
+        String.raw`C:\Users\Nolan\Awaken`,
+        "win32",
+      ),
+    ).toBe(true);
+    expect(
+      sameProjectFolderPath(
+        String.raw`\\?\UNC\Server\Team Share\Awaken`,
+        String.raw`\\server\team share\awaken`,
+        "win32",
+      ),
+    ).toBe(true);
+  });
+
   it("lists attached project folders with directories first", async () => {
     const root = await temporaryRoot();
     await fs.mkdir(path.join(root, "src"));

@@ -182,7 +182,10 @@ import {
 } from "./system-skills-importer.js";
 import { CliConnectorManager } from "./cli-connectors/manager.js";
 import { MemoryDreamSchedulerStore } from "./memory-dream-scheduler-store.js";
-import { openProjectEntryWithApplication } from "./project-entry-actions.js";
+import {
+  openProjectEntryWithApplication,
+  revealProjectEntryInFileManager,
+} from "./project-entry-actions.js";
 import {
   openComputerPermissionSettings,
   prepareComputerRuntime,
@@ -707,6 +710,7 @@ function upsertProjectFailureMessage(error: unknown): string {
     PROJECT_OPERATION_CONFLICT: "该文件夹正在处理其他操作（例如移除），请稍后再试。",
     PROJECT_RUNS_BUSY: "项目中有正在运行的任务，请等待任务结束后再打开。",
     PROJECT_PATH_INVALID: "该文件夹不能作为 Awaken 项目。",
+    PROJECT_NAME_INVALID: "项目名称不能为空。",
     PROJECT_PATH_FINGERPRINT_CHANGED: "文件夹内容已发生变化，Awaken 已停止本次操作以避免误操作。",
   };
   return messages[error.code] ?? "打开项目失败，请稍后重试。";
@@ -3079,6 +3083,29 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  "awaken:reveal-project-entry",
+  async (event, request: ProjectEntryActionRequest): Promise<ProjectEntryActionResult> => {
+    if (
+      !mainWindowRef ||
+      mainWindowRef.isDestroyed() ||
+      event.sender.id !== mainWindowRef.webContents.id
+    ) {
+      return {
+        ok: false,
+        code: "UNAUTHORIZED",
+        message: "本地路径请求来源无效。",
+      };
+    }
+    const result = await resolveCurrentProjectEntry(request);
+    if (!result.ok) return result;
+    return revealProjectEntryInFileManager(result.entry.realPath, result.entry.kind, {
+      openPath: (realPath) => shell.openPath(realPath),
+      showItemInFolder: (realPath) => shell.showItemInFolder(realPath),
+    });
+  },
+);
+
+ipcMain.handle(
   "awaken:open-project-entry-with",
   async (event, request: ProjectEntryOpenWithRequest): Promise<ProjectEntryActionResult> => {
     if (
@@ -3365,7 +3392,7 @@ ipcMain.handle(
 // an Awaken-managed working directory.
 async function requestProjectWrite(
   pathname: string,
-  method: "POST" | "PUT" | "DELETE",
+  method: "POST" | "PATCH" | "PUT" | "DELETE",
   body: unknown,
   logContext: Record<string, unknown>,
 ): Promise<UpsertProjectResult> {
@@ -3405,6 +3432,20 @@ ipcMain.handle(
         display_name: request.displayName,
       },
       { folderCount: request.folders?.length ?? 0 },
+    ),
+);
+
+ipcMain.handle(
+  "awaken:rename-project",
+  async (
+    _event,
+    request: { projectId: string; displayName: string },
+  ): Promise<UpsertProjectResult> =>
+    requestProjectWrite(
+      `/v1/projects/${encodeURIComponent(request.projectId)}`,
+      "PATCH",
+      { display_name: request.displayName },
+      { projectId: request.projectId },
     ),
 );
 

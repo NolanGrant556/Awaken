@@ -68,6 +68,7 @@ function previewRuntimeClient() {
     unwatchProjectDirectory: vi.fn(async () => undefined),
     onProjectDirectoryChanged: vi.fn(() => () => {}),
     copyProjectEntryPath: vi.fn(async () => ({ ok: true as const })),
+    revealProjectEntry: vi.fn(async () => ({ ok: true as const })),
     openProjectEntryWith: vi.fn(async () => ({ ok: true as const })),
     startArtifactPreview: vi.fn(async () => ({
       ok: false as const,
@@ -267,6 +268,52 @@ describe("ProjectFilesWorkspace", () => {
     );
   });
 
+  it("renders a video Artifact from the media source and keeps its controls interactive", async () => {
+    const onPreviewPrimaryClick = vi.fn();
+    const startArtifactPreview = vi.fn();
+    const runtimeClient = {
+      ...previewRuntimeClient(),
+      listProjectDirectory: vi.fn(async () => ({
+        ok: true as const,
+        relativePath: "",
+        entries: [],
+      })),
+      startArtifactPreview,
+    };
+
+    await act(async () => {
+      root.render(
+        <ProjectFilesWorkspace
+          runtimeClient={runtimeClient}
+          projectId="project-1"
+          projectLabel="Awaken"
+          folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
+          artifactPreview={{
+            threadId: "thread-1",
+            runId: "run-1",
+            artifactId: "video-1",
+            title: "成片.mp4",
+            mediaKind: "video",
+          }}
+          artifactMediaSource="awaken-artifact://media/video-1/clip.mp4"
+          artifactMediaMetadata={{ width: 1920, height: 1080, durationSeconds: 12.4 }}
+          onPreviewPrimaryClick={onPreviewPrimaryClick}
+        />,
+      );
+    });
+
+    const video = container.querySelector<HTMLVideoElement>("video");
+    expect(video?.controls).toBe(true);
+    expect(startArtifactPreview).not.toHaveBeenCalled();
+
+    await act(async () => {
+      if (!video) return;
+      dispatchPreviewPointerEvent(video, "pointerdown", { clientX: 20 });
+      dispatchPreviewPointerEvent(video, "pointerup", { clientX: 20 });
+    });
+    expect(onPreviewPrimaryClick).not.toHaveBeenCalled();
+  });
+
   it("forwards an Artifact Office guest primary click to the shared composer collapse callback", async () => {
     let interactionHandler:
       | ((interaction: { previewId: string; type: "primary-click" }) => void)
@@ -312,7 +359,6 @@ describe("ProjectFilesWorkspace", () => {
             artifactId: "artifact-1",
             title: "交付报告.docx",
           }}
-          expanded
           onPreviewPrimaryClick={onPreviewPrimaryClick}
         />,
       );
@@ -446,8 +492,7 @@ describe("ProjectFilesWorkspace", () => {
     expect(container.textContent).toContain("README.md");
   });
 
-  it("requests the expanded panel from the pathbar without replacing the file-list control", async () => {
-    const onExpand = vi.fn();
+  it("keeps panel expansion out of the pathbar without replacing the file-list control", async () => {
     const listProjectDirectory = vi.fn(async () => ({
       ok: true as const,
       relativePath: "",
@@ -460,30 +505,11 @@ describe("ProjectFilesWorkspace", () => {
           runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
           projectId="project-1"
           folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
-          onExpand={onExpand}
         />,
       );
     });
     await settle();
 
-    const expand = container.querySelector<HTMLButtonElement>('[aria-label="展开面板"]');
-    expect(expand).not.toBeNull();
-    expect(container.querySelector('[aria-label="收起文件列表"]')).not.toBeNull();
-
-    await act(async () => expand?.click());
-    expect(onExpand).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      root.render(
-        <ProjectFilesWorkspace
-          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
-          projectId="project-1"
-          folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
-          expanded
-          onExpand={onExpand}
-        />,
-      );
-    });
     expect(container.querySelector('[aria-label="展开面板"]')).toBeNull();
     expect(container.querySelector('[aria-label="收起文件列表"]')).not.toBeNull();
   });
@@ -502,7 +528,6 @@ describe("ProjectFilesWorkspace", () => {
           runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
           projectId="project-1"
           folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
-          expanded
           onPreviewPrimaryClick={onPreviewPrimaryClick}
         />,
       );
@@ -945,16 +970,23 @@ describe("ProjectFilesWorkspace", () => {
       openWith?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
       openWith?.click();
     });
+    const submenu = menu?.querySelector<HTMLElement>(".project-files-context-submenu");
+    expect(submenu?.getAttribute("aria-label")).toBe("选择打开方式");
+    expect(submenu?.textContent).toContain("本地路径");
     expect(menu?.textContent).toContain("WPS");
     expect(menu?.textContent).toContain("Microsoft Office");
     expect(menu?.textContent).toContain("VS Code");
     expect(menu?.textContent).toContain("Cursor");
     expect(menu?.textContent).toContain("TRAE");
     expect(menu?.textContent).toContain("Xcode");
-    const applicationButtons = Array.from(
+    const submenuButtons = Array.from(
       menu?.querySelectorAll<HTMLButtonElement>(".project-files-context-submenu [role=menuitem]") ??
         [],
     );
+    expect(submenuButtons).toHaveLength(7);
+    expect(submenuButtons[0]?.textContent?.trim()).toBe("本地路径");
+    expect(submenuButtons[0]?.querySelector("svg.aw-icon--folder-search")).not.toBeNull();
+    const applicationButtons = submenuButtons.slice(1);
     expect(applicationButtons).toHaveLength(6);
     expect(
       applicationButtons.every(
@@ -965,8 +997,28 @@ describe("ProjectFilesWorkspace", () => {
       ),
     ).toBe(true);
 
+    await act(async () => submenuButtons[0]?.click());
+    await settle();
+    expect(runtimeActions.revealProjectEntry).toHaveBeenCalledWith({
+      projectId: "project-1",
+      folderPath: "/workspace/app",
+      relativePath: "README.md",
+      kind: "file",
+    });
+    expect(container.querySelector(".project-files-context-status")).toBeNull();
+    expect(container.textContent).not.toContain("已打开本地路径");
+
+    await act(async () => {
+      row?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, button: 2 }));
+    });
+    const reopenedMenu = container.querySelector<HTMLElement>(".project-files-context-menu");
+    const reopenedOpenWith = Array.from(
+      reopenedMenu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
+    ).find((button) => button.textContent?.includes("打开方式"));
+    await act(async () => reopenedOpenWith?.click());
+
     const cursor = Array.from(
-      menu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
+      reopenedMenu?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
     ).find((button) => button.textContent?.trim() === "Cursor");
     await act(async () => cursor?.click());
     expect(runtimeActions.openProjectEntryWith).toHaveBeenCalledWith({
@@ -990,6 +1042,60 @@ describe("ProjectFilesWorkspace", () => {
       relativePath: "README.md",
       kind: "file",
     });
+  });
+
+  it("keeps local-path success silent but still reports a Windows reveal failure", async () => {
+    const windowsFolder = String.raw`C:\Users\Nolan\Awaken Project`;
+    const listProjectDirectory = vi.fn(async () => ({
+      ok: true as const,
+      relativePath: "",
+      entries: [{ name: "季度报告.pdf", relativePath: "季度报告.pdf", kind: "file" as const }],
+    }));
+    const runtimeActions = {
+      ...previewRuntimeClient(),
+      revealProjectEntry: vi.fn(async () => ({
+        ok: false as const,
+        code: "ENTRY_REVEAL_FAILED" as const,
+        message: "暂时无法在文件管理器中显示这个文件。",
+      })),
+    };
+
+    await act(async () => {
+      root.render(
+        <ProjectFilesWorkspace
+          runtimeClient={{ listProjectDirectory, ...runtimeActions }}
+          projectId="project-1"
+          folders={[{ path: windowsFolder, label: "Awaken Project", isPrimary: true }]}
+        />,
+      );
+    });
+    await settle();
+
+    const row = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="treeitem"]')).find(
+      (button) => button.textContent?.includes("季度报告.pdf"),
+    );
+    await act(async () => {
+      row?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, button: 2 }));
+    });
+    const openWith = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".project-files-context-menu [role=menuitem]"),
+    ).find((button) => button.textContent?.includes("打开方式"));
+    await act(async () => openWith?.click());
+    const localPath = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".project-files-context-submenu [role=menuitem]"),
+    ).find((button) => button.textContent?.trim() === "本地路径");
+    await act(async () => localPath?.click());
+    await settle();
+
+    expect(runtimeActions.revealProjectEntry).toHaveBeenCalledWith({
+      projectId: "project-1",
+      folderPath: windowsFolder,
+      relativePath: "季度报告.pdf",
+      kind: "file",
+    });
+    const alert = container.querySelector<HTMLElement>(".project-files-context-status.is-error");
+    expect(alert?.getAttribute("role")).toBe("alert");
+    expect(alert?.textContent).toBe("暂时无法在文件管理器中显示这个文件。");
   });
 
   it("shows an alert when the selected application is not installed", async () => {

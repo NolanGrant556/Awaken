@@ -445,7 +445,8 @@ export type ProjectEntryActionErrorCode =
   | "UNSUPPORTED_PLATFORM"
   | "UNSUPPORTED_APPLICATION"
   | "APPLICATION_UNAVAILABLE"
-  | "APPLICATION_OPEN_FAILED";
+  | "APPLICATION_OPEN_FAILED"
+  | "ENTRY_REVEAL_FAILED";
 
 export type ProjectEntryReference = {
   projectId: string;
@@ -2186,6 +2187,7 @@ export type AwakenBridge = {
     request: ProjectEntryActionRequest,
   ) => Promise<ProjectEntryResolveResult>;
   copyProjectEntryPath: (request: ProjectEntryActionRequest) => Promise<ProjectEntryActionResult>;
+  revealProjectEntry: (request: ProjectEntryActionRequest) => Promise<ProjectEntryActionResult>;
   openProjectEntryWith: (request: ProjectEntryOpenWithRequest) => Promise<ProjectEntryActionResult>;
   startProjectFilePreview: (
     request: ProjectFilePreviewStartRequest,
@@ -2215,6 +2217,7 @@ export type AwakenBridge = {
     folders: ProjectFolderSelection[],
     displayName?: string,
   ) => Promise<UpsertProjectResult>;
+  renameProject: (projectId: string, displayName: string) => Promise<UpsertProjectResult>;
   attachProjectFolder: (projectId: string, path: string) => Promise<UpsertProjectResult>;
   detachProjectFolder: (projectId: string, path: string) => Promise<UpsertProjectResult>;
   setPrimaryProjectFolder: (projectId: string, path: string) => Promise<UpsertProjectResult>;

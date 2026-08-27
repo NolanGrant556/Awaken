@@ -216,6 +216,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 			projects := projectHandlers{service: projectService}
 			mux.HandleFunc("GET /v1/projects", projects.handleListProjects)
 			mux.HandleFunc("POST /v1/projects", projects.handleUpsertProject)
+			mux.HandleFunc("PATCH /v1/projects/{project_id}", projects.handleRenameProject)
 			mux.HandleFunc("PUT /v1/projects/order", projects.handleReorderProjects)
 			mux.HandleFunc("DELETE /v1/projects/{project_id}", projects.handleDetachProject)
 			mux.HandleFunc("DELETE /v1/projects/{project_id}/threads", projects.handleDeleteProjectThreads)

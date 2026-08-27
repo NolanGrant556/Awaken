@@ -64,6 +64,23 @@ describe("artifactPreviewTabsReducer", () => {
     );
   });
 
+  it("keeps media routing with the durable identity without storing an opaque source", () => {
+    const image = { ...artifact("image-1", "主视觉.png"), mediaKind: "image" as const };
+    const video = { ...artifact("video-1", "成片.mp4"), mediaKind: "video" as const };
+    let state = artifactPreviewTabsReducer(createArtifactPreviewTabsState(), {
+      type: "open",
+      selection: image,
+    });
+    state = artifactPreviewTabsReducer(state, {
+      type: "open",
+      selection: video,
+    });
+
+    expect(state.tabs.map((tab) => tab.selection.mediaKind)).toEqual(["image", "video"]);
+    expect(state.tabs.every((tab) => !("src" in tab.selection))).toBe(true);
+    expect(activeArtifactPreviewTab(state)?.selection).toEqual(video);
+  });
+
   it("selects the right Artifact neighbor, then the left, when closing", () => {
     const first = artifact("artifact-1");
     const second = artifact("artifact-2");

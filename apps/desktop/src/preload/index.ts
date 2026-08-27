@@ -312,6 +312,11 @@ const bridge: AwakenBridge = {
       "awaken:copy-project-entry-path",
       request,
     ) as Promise<ProjectEntryActionResult>,
+  revealProjectEntry: (request: ProjectEntryActionRequest) =>
+    ipcRenderer.invoke(
+      "awaken:reveal-project-entry",
+      request,
+    ) as Promise<ProjectEntryActionResult>,
   openProjectEntryWith: (request: ProjectEntryOpenWithRequest) =>
     ipcRenderer.invoke(
       "awaken:open-project-entry-with",
@@ -366,6 +371,11 @@ const bridge: AwakenBridge = {
   createProject: (folders: ProjectFolderSelection[], displayName?: string) =>
     ipcRenderer.invoke("awaken:create-project", {
       folders,
+      displayName,
+    }) as Promise<UpsertProjectResult>,
+  renameProject: (projectId: string, displayName: string) =>
+    ipcRenderer.invoke("awaken:rename-project", {
+      projectId,
       displayName,
     }) as Promise<UpsertProjectResult>,
   attachProjectFolder: (projectId: string, path: string) =>

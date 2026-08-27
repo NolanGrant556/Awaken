@@ -6,7 +6,10 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import {
-  AwakenIcon, AwakenPopover as Popover, AwakenTooltip as Tooltip } from "@awaken/design-system";
+  AwakenIcon,
+  AwakenPopover as Popover,
+  type AwakenMediaMetadata,
+} from "@awaken/design-system";
 import type {
   ProjectDirectoryEntry,
   ProjectEntryActionRequest,
@@ -42,6 +45,7 @@ export type ProjectFilesWorkspaceProps = {
     | "unwatchProjectDirectory"
     | "onProjectDirectoryChanged"
     | "copyProjectEntryPath"
+    | "revealProjectEntry"
     | "openProjectEntryWith"
     | "startArtifactPreview"
     | "startProjectFilePreview"
@@ -64,10 +68,14 @@ export type ProjectFilesWorkspaceProps = {
   initialMode?: ProjectFileWorkspaceMode;
   activeTab?: ProjectFileWorkspaceTab;
   artifactPreview?: ArtifactPreviewSelection;
-  expanded?: boolean;
+  artifactMediaSource?: string;
+  artifactMediaSourceUnavailable?: boolean;
+  artifactMediaMetadata?: AwakenMediaMetadata;
+  revealLabel?: string;
+  onArtifactMediaError?: () => void;
+  onArtifactMediaMetadata?: (metadata: AwakenMediaMetadata) => void;
   onWorkspaceModeChange?: (mode: ProjectFileWorkspaceMode) => void;
   onOpenTab?: (tab: ProjectFileWorkspaceTab) => void;
-  onExpand?: () => void;
   onPreviewPrimaryClick?: () => void;
   addTaskDisabled?: boolean;
   onAddTaskContext?: (
@@ -225,10 +233,14 @@ export function ProjectFilesWorkspace({
   initialMode = "files",
   activeTab,
   artifactPreview,
-  expanded = false,
+  artifactMediaSource,
+  artifactMediaSourceUnavailable = false,
+  artifactMediaMetadata,
+  revealLabel,
+  onArtifactMediaError,
+  onArtifactMediaMetadata,
   onWorkspaceModeChange,
   onOpenTab,
-  onExpand,
   onPreviewPrimaryClick,
   addTaskDisabled = false,
   onAddTaskContext,
@@ -747,7 +759,7 @@ export function ProjectFilesWorkspace({
       target instanceof Element &&
       Boolean(
         target.closest(
-          "button, a, input, textarea, select, [role='button'], [contenteditable='true']",
+          "button, a, input, textarea, select, video, [role='button'], [contenteditable='true']",
         ),
       )
     );
@@ -882,6 +894,24 @@ export function ProjectFilesWorkspace({
     }
   }
 
+  async function revealContextMenuEntry(): Promise<void> {
+    const current = contextMenu;
+    setContextMenu(undefined);
+    if (!current) return;
+    setContextStatus(undefined);
+    try {
+      const result = await runtimeClient.revealProjectEntry(current.request);
+      if (!result.ok) {
+        setContextStatus({ message: result.message, tone: "error" });
+      }
+    } catch {
+      setContextStatus({
+        message: "暂时无法打开这个条目的本地路径。",
+        tone: "error",
+      });
+    }
+  }
+
   return (
     <section className="project-files-workspace" aria-label="项目文件">
       <header className="project-files-pathbar">
@@ -906,18 +936,6 @@ export function ProjectFilesWorkspace({
           </button>
         </div>
         <div className="project-files-pathbar__actions">
-          {!expanded && onExpand ? (
-            <Tooltip label="展开面板" placement="bottom">
-              <button
-                type="button"
-                className="project-files-pathbar__icon"
-                aria-label="展开面板"
-                onClick={onExpand}
-              >
-                <AwakenIcon concept="expand-full" size={16} />
-              </button>
-            </Tooltip>
-          ) : null}
           <button
             type="button"
             className={`project-files-pathbar__icon${fileListExpanded ? " is-expanded" : ""}`}
@@ -965,6 +983,12 @@ export function ProjectFilesWorkspace({
             <ArtifactPreviewHost
               runtimeClient={runtimeClient}
               selection={artifactPreview}
+              mediaSource={artifactMediaSource}
+              mediaSourceUnavailable={artifactMediaSourceUnavailable}
+              mediaMetadata={artifactMediaMetadata}
+              revealLabel={revealLabel}
+              onMediaError={onArtifactMediaError}
+              onMediaMetadata={onArtifactMediaMetadata}
               onPreviewPrimaryClick={onPreviewPrimaryClick}
             />
           ) : activeTab || workspaceMode === "browser" ? (
@@ -1241,9 +1265,17 @@ export function ProjectFilesWorkspace({
                   contextMenu.submenuSide === "left" ? " is-left" : ""
                 }`}
                 role="menu"
-                aria-label="选择打开应用"
+                aria-label="选择打开方式"
                 style={{ top: contextMenu.submenuTop }}
               >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => void revealContextMenuEntry()}
+                >
+                  <AwakenIcon concept="locate-folder" size={16} />
+                  <span>本地路径</span>
+                </button>
                 {PROJECT_ENTRY_OPEN_APPLICATIONS.map((application) => {
                   const officeApplication = application.id === "wps" || application.id === "office";
                   return (

@@ -21,6 +21,7 @@ var (
 	ErrIdempotencyKeyConflict   = errors.New("idempotency key already belongs to another operation")
 	ErrProjectPathInvalid       = errors.New("project path is invalid")
 	ErrProjectOrderInvalid      = errors.New("project order must contain every active project exactly once")
+	ErrProjectNameInvalid       = errors.New("project name is required")
 
 	ErrProjectFolderNotFound = errors.New("folder is not attached to this project")
 )
@@ -47,6 +48,8 @@ func ProjectErrorCode(err error) string {
 		return "PROJECT_PATH_INVALID"
 	case errors.Is(err, ErrProjectOrderInvalid):
 		return "PROJECT_ORDER_INVALID"
+	case errors.Is(err, ErrProjectNameInvalid):
+		return "PROJECT_NAME_INVALID"
 	case errors.Is(err, ErrProjectFolderNotFound):
 		return "PROJECT_FOLDER_NOT_FOUND"
 	default:
@@ -178,6 +181,20 @@ func (s *ProjectService) CreateProject(folders []ProjectFolder, displayName stri
 		s.runService.clearProjectDeletionFences(root)
 	}
 	return project, nil
+}
+
+// RenameProject changes only the user-visible name of a stable project. It is
+// not an operation: there is no external side effect to coordinate and callers
+// do not need an idempotency key. The repository keeps equal-name retries a
+// no-op and rejects a project while its folder is being moved to the trash.
+func (s *ProjectService) RenameProject(projectID, displayName string) (Project, error) {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		return Project{}, ErrProjectNameInvalid
+	}
+	s.runService.lockProjectMutation()
+	defer s.runService.unlockProjectMutation()
+	return s.store.RenameProject(projectID, displayName, time.Now().UTC())
 }
 
 // AttachProjectFolder adds one more readable/writable folder to a project. The

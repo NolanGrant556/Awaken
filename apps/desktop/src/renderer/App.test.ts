@@ -776,6 +776,7 @@ function stubElectronBridge(): void {
       getModelProfileBalances: vi.fn(async () => ({ balances: [] })),
       pickAttachments: vi.fn(async () => ({ canceled: true as const })),
       pickDirectory: vi.fn(async () => ({ canceled: true as const })),
+      pickPluginSource: vi.fn(async () => ({ canceled: true as const })),
       pickProjectFolders: vi.fn(async () => ({ canceled: true as const })),
       validateWorkspace: vi.fn(async () => ({ valid: true as const })),
       getSupervisorStatus: vi.fn(async () => ({ status: "running" as const })),

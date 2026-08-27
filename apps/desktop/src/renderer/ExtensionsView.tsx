@@ -1461,6 +1461,22 @@ export function ExtensionsView({
     }
   }
 
+  async function handlePickPluginSource(): Promise<void> {
+    setErrorMessage(null);
+    try {
+      const result = await runtimeClient.pickPluginSource(
+        pluginLocalPath.trim() || undefined,
+      );
+      if (result.canceled) {
+        if (result.error) setErrorMessage(result.error);
+        return;
+      }
+      setPluginLocalPath(result.path);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "插件来源选择失败");
+    }
+  }
+
   async function openCliConnectorDetail(providerId: CliProviderId): Promise<void> {
     setCliDetailConnectorId(providerId);
     setCliDetailLoading(true);
@@ -1798,11 +1814,7 @@ export function ExtensionsView({
           onSubpathChange={setPluginSubpath}
           onReplaceChange={setPluginReplace}
           onConfirmChange={setPluginConfirm}
-          onPickLocal={() => {
-            void runtimeClient.pickDirectory().then((result) => {
-              if (!result.canceled) setPluginLocalPath(result.path);
-            });
-          }}
+          onPickLocal={() => { void handlePickPluginSource(); }}
           onSubmit={() => { void handleInstallPlugin(); }}
         />
         <AwakenPluginDetailDialog

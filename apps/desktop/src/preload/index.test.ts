@@ -32,6 +32,20 @@ beforeAll(async () => {
   await import("./index.js");
 });
 
+describe("preload local picker bridge", () => {
+  it("forwards plugin source browsing to its dedicated typed IPC channel", async () => {
+    const bridge = exposedBridge as Record<string, (...args: unknown[]) => unknown>;
+    invokeMock.mockResolvedValue({ canceled: true });
+
+    await bridge.pickPluginSource("/Users/test/Desktop");
+
+    expect(invokeMock).toHaveBeenLastCalledWith(
+      "awaken:pick-plugin-source",
+      "/Users/test/Desktop",
+    );
+  });
+});
+
 describe("preload scheduled task bridge", () => {
   it("exposes only narrow scheduled task methods", () => {
     expect(exposedBridge).toBeDefined();

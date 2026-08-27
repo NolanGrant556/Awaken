@@ -34,6 +34,7 @@ function createElectronBridge(
     unsubscribeRun: vi.fn(),
     getRuntimeInfo: vi.fn(),
     pickDirectory: vi.fn(async () => ({ canceled: true as const })),
+    pickPluginSource: vi.fn(async () => ({ canceled: true as const })),
     pickProjectFolders: vi.fn(async () => ({ canceled: true as const })),
     validateWorkspace: vi.fn(async () => ({ valid: true as const })),
     deleteMcpServer: vi.fn(async () => undefined),
@@ -141,6 +142,22 @@ describe("electron runtime client", () => {
 
     const client = createRuntimeClient();
     await expect(client.getSupervisorStatus()).resolves.toEqual({ status: "running" });
+  });
+
+  it("forwards plugin source browsing through the dedicated bridge", async () => {
+    const { bridge } = createElectronBridge({ status: "running" });
+    bridge.pickPluginSource = vi.fn(async () => ({
+      canceled: false as const,
+      path: "/Users/test/Desktop/acme.zip",
+    }));
+    installBridge(bridge);
+
+    const client = createRuntimeClient();
+    await expect(client.pickPluginSource("/Users/test/Desktop")).resolves.toEqual({
+      canceled: false,
+      path: "/Users/test/Desktop/acme.zip",
+    });
+    expect(bridge.pickPluginSource).toHaveBeenCalledWith("/Users/test/Desktop");
   });
 
   it("forwards batch thread deletion through the typed bridge", async () => {

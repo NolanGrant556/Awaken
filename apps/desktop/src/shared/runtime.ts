@@ -2377,6 +2377,7 @@ export type AwakenBridge = {
   getModelProfileBalances: () => Promise<ModelProfileBalancesResult>;
   pickAttachments: (defaultPath?: string) => Promise<AttachmentPickResult>;
   pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
+  pickPluginSource: (defaultPath?: string) => Promise<WorkspacePickResult>;
   pickProjectFolders: (defaultPath?: string) => Promise<ProjectFoldersPickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;

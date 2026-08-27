@@ -684,6 +684,8 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:pick-attachments", defaultPath) as Promise<AttachmentPickResult>,
   pickDirectory: (defaultPath?: string) =>
     ipcRenderer.invoke("awaken:pick-directory", defaultPath) as Promise<WorkspacePickResult>,
+  pickPluginSource: (defaultPath?: string) =>
+    ipcRenderer.invoke("awaken:pick-plugin-source", defaultPath) as Promise<WorkspacePickResult>,
   pickProjectFolders: (defaultPath?: string) =>
     ipcRenderer.invoke(
       "awaken:pick-project-folders",

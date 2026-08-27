@@ -84,6 +84,7 @@ type SpawnRequest struct {
 	RunID            string   `json:"-"`
 	TurnID           string   `json:"-"`
 	WritableRoots    []string `json:"-"`
+	Host             *HostSpawnOptions `json:"-"`
 }
 
 type WaitRequest struct {
@@ -172,9 +173,21 @@ func (s TaskSnapshot) Terminal() bool {
 type StartRequest struct {
 	Task           TaskSnapshot
 	Prompt         string
+	Host           *HostSpawnOptions
 	ReportProgress ProgressReporter
 	DrainMessages  func() []QueuedMessage
 	AttachWorktree func(*WorktreeReceipt)
+}
+
+// HostSpawnOptions are host-only child constraints. They never enter the
+// model-visible subagent tool schema.
+type HostSpawnOptions struct {
+	ToolAllowlist     []string
+	ExtraHidden       []string
+	MaxThoughts       int
+	MaxToolExecutions int
+	SkipMemory        bool
+	SystemPrompt      string
 }
 
 // ProgressUpdate is emitted only after the corresponding child tool_call or
@@ -207,6 +220,7 @@ type Persister func(context.Context, PersistEvent) error
 
 type Controller interface {
 	Spawn(context.Context, SpawnRequest) (TaskSnapshot, error)
+	SpawnFromHost(context.Context, SpawnRequest) (TaskSnapshot, error)
 	Status(string) (TaskSnapshot, error)
 	List() []TaskSnapshot
 	Wait(context.Context, WaitRequest) (WaitResult, error)

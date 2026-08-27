@@ -17,6 +17,7 @@ const (
 	CapabilityFileDelete         Capability = "file.delete"
 	CapabilityShellExecute       Capability = "shell.execute"
 	CapabilityWebSearch          Capability = "web.search"
+	CapabilityWebFetch           Capability = "web.fetch"
 	CapabilityBrowserInteractV2  Capability = "browser.interact"
 	CapabilityPDFRead            Capability = "pdf.read"
 	CapabilityPDFRender          Capability = "pdf.render"
@@ -90,6 +91,8 @@ func inferCapabilitiesFromDefinition(def ToolDefinition) []Capability {
 		capabilities = append(capabilities, CapabilityShellExecute)
 	case "websearch":
 		capabilities = append(capabilities, CapabilityWebSearch)
+	case "webfetch":
+		capabilities = append(capabilities, CapabilityWebFetch)
 	case "dependency_install":
 		capabilities = append(capabilities, CapabilityDependencyInstall)
 	case "git_remote":

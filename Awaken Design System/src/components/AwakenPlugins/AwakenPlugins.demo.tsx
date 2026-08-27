@@ -3,9 +3,20 @@ import { AwakenPluginDetailDialog } from "../AwakenPluginDetailDialog";
 import {
   AwakenPluginInstallDialog,
   type AwakenPluginInstallMode,
+  type AwakenPluginValidationSummary,
 } from "../AwakenPluginInstallDialog";
 import { AwakenPlugins } from "./AwakenPlugins";
 import { awakenPluginsDemoItems } from "./AwakenPlugins.states";
+
+const installValidation: AwakenPluginValidationSummary = {
+  valid: true,
+  name: "acme.tools",
+  version: "1.2.0",
+  digest: "sha256-v2:9320952a413947fc9afbd85f09dd98c3f6172ace924cb25dcd1c44ac85d5921f",
+  skillCount: 2,
+  serverCount: 1,
+  diagnostics: [],
+};
 
 export function AwakenPluginsDemo() {
   const [items, setItems] = useState(awakenPluginsDemoItems);
@@ -17,6 +28,7 @@ export function AwakenPluginsDemo() {
   const [url, setUrl] = useState("");
   const [replace, setReplace] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [validation, setValidation] = useState<AwakenPluginValidationSummary | null>(null);
 
   return (
     <section className="ads-component-demo" aria-label="插件组件族演示">
@@ -49,12 +61,26 @@ export function AwakenPluginsDemo() {
         url={url}
         replace={replace}
         confirm={confirm}
+        validation={validation}
         onOpenChange={setInstallOpen}
-        onModeChange={setMode}
-        onLocalPathChange={setLocalPath}
-        onUrlChange={setUrl}
-        onReplaceChange={setReplace}
+        onModeChange={(value) => {
+          setMode(value);
+          setValidation(null);
+        }}
+        onLocalPathChange={(value) => {
+          setLocalPath(value);
+          setValidation(null);
+        }}
+        onUrlChange={(value) => {
+          setUrl(value);
+          setValidation(null);
+        }}
+        onReplaceChange={(value) => {
+          setReplace(value);
+          setValidation(null);
+        }}
         onConfirmChange={setConfirm}
+        onValidate={() => setValidation(installValidation)}
         onSubmit={() => setInstallOpen(false)}
       />
       <AwakenPluginDetailDialog

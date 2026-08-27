@@ -955,9 +955,23 @@ export type RuntimePlugin = {
   serverCount: number;
 };
 
+export type RuntimePluginValidation = {
+  valid: boolean;
+  source: RuntimePluginSource;
+  name: string;
+  version?: string;
+  description?: string;
+  digest: string;
+  targetRoot: string;
+  skillCount: number;
+  serverCount: number;
+  diagnostics: RuntimePluginDiagnostic[];
+};
+
 export type InstallPluginRequest = {
   source: RuntimePluginSource;
   replace?: boolean;
+  expectedDigest?: string;
 };
 
 export type InstallPluginResponse = {
@@ -2338,6 +2352,7 @@ export type AwakenBridge = {
   enableSkill: (id: string) => Promise<void>;
   listPlugins: () => Promise<RuntimePlugin[]>;
   getPlugin: (name: string) => Promise<RuntimePlugin>;
+  validatePlugin: (source: RuntimePluginSource) => Promise<RuntimePluginValidation>;
   installPlugin: (request: InstallPluginRequest) => Promise<InstallPluginResponse>;
   enablePlugin: (name: string) => Promise<RuntimePlugin>;
   disablePlugin: (name: string) => Promise<RuntimePlugin>;

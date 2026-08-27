@@ -90,6 +90,8 @@ import {
   type RuntimeProject,
   type RuntimeProjectOperation,
   type RuntimePlugin,
+  type RuntimePluginSource,
+  type RuntimePluginValidation,
   type RuntimeSkill,
   type SkillProjectRoots,
   type SkillPreviewResponse,
@@ -240,6 +242,7 @@ export type RuntimeClient = {
   enableSkill: (id: string) => Promise<void>;
   listPlugins: () => Promise<RuntimePlugin[]>;
   getPlugin: (name: string) => Promise<RuntimePlugin>;
+  validatePlugin: (source: RuntimePluginSource) => Promise<RuntimePluginValidation>;
   installPlugin: (request: InstallPluginRequest) => Promise<InstallPluginResponse>;
   enablePlugin: (name: string) => Promise<RuntimePlugin>;
   disablePlugin: (name: string) => Promise<RuntimePlugin>;
@@ -523,6 +526,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     enableSkill: (id) => bridge.enableSkill(id),
     listPlugins: () => bridge.listPlugins(),
     getPlugin: (name) => bridge.getPlugin(name),
+    validatePlugin: (source) => bridge.validatePlugin(source),
     installPlugin: (request) => bridge.installPlugin(request),
     enablePlugin: (name) => bridge.enablePlugin(name),
     disablePlugin: (name) => bridge.disablePlugin(name),

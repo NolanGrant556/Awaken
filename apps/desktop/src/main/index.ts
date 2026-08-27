@@ -113,6 +113,8 @@ import {
   type RuntimeProjectOperationWire,
   type RuntimeProjectWire,
   type RuntimePlugin,
+  type RuntimePluginSource,
+  type RuntimePluginValidation,
   type RuntimeSkill,
   type SkillProjectRoots,
   type SkillPreviewResponse,
@@ -2315,6 +2317,14 @@ ipcMain.handle("awaken:get-plugin", async (_event, name: string) => {
   }
   return requestRuntime<RuntimePlugin>(`/v1/plugins/${encodeURIComponent(trimmed)}`, {
     method: "GET",
+  });
+});
+
+ipcMain.handle("awaken:validate-plugin", async (_event, source: RuntimePluginSource) => {
+  return requestRuntime<RuntimePluginValidation>("/v1/plugins/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source }),
   });
 });
 

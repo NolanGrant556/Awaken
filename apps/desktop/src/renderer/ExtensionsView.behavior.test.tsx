@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   RuntimePlugin,
+  RuntimePluginSource,
   RuntimeProject,
   RuntimeSkill,
 } from "../shared/runtime";
@@ -157,7 +158,7 @@ describe("ExtensionsView behavior", () => {
     expect(refreshButton?.disabled).toBe(false);
   });
 
-  it("renders the Design System plugin catalog and keeps install risk confirmation required", async () => {
+  it("requires a current Plugin validation before risk-confirmed installation", async () => {
     const plugin: RuntimePlugin = {
       name: "acme.tools",
       version: "1.2.0",
@@ -170,10 +171,35 @@ describe("ExtensionsView behavior", () => {
       skillCount: 2,
       serverCount: 1,
     };
-    const pickPluginSource = vi.fn(async () => ({
-      canceled: false as const,
-      path: "/tmp/acme-plugin.zip",
+    const pickPluginSource = vi
+      .fn()
+      .mockResolvedValueOnce({
+        canceled: false as const,
+        path: "/tmp/acme-plugin.zip",
+      })
+      .mockResolvedValueOnce({
+        canceled: false as const,
+        path: "/tmp/acme-plugin-v2.zip",
+      });
+    const validatePlugin = vi.fn(async (source: RuntimePluginSource) => ({
+      valid: true,
+      source,
+      name: "acme.tools",
+      version: "1.2.0",
+      description: "团队代码检查工具",
+      digest: "sha256-v2:validated",
+      targetRoot: "/tmp/validation/acme.tools",
+      skillCount: 2,
+      serverCount: 1,
+      diagnostics: [],
     }));
+    const installPlugin = vi.fn()
+      .mockRejectedValueOnce(new Error("PLUGIN_SOURCE_CHANGED: plugin source changed"))
+      .mockResolvedValueOnce({
+        plugin,
+        message: "plugin installed",
+      });
+    const onNotice = vi.fn();
     const runtimeClient = {
       getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
       listProjects: vi.fn(async () => [runtimeProject]),
@@ -183,6 +209,8 @@ describe("ExtensionsView behavior", () => {
       listSkills: vi.fn(async () => []),
       listPlugins: vi.fn(async () => [plugin]),
       pickPluginSource,
+      validatePlugin,
+      installPlugin,
       subscribeCliConnectorState: vi.fn(() => () => undefined),
     } as unknown as RuntimeClient;
 
@@ -193,7 +221,7 @@ describe("ExtensionsView behavior", () => {
           desktopReady
           runtimeClient={runtimeClient}
           activeWorkspaceRoot={projectRoot}
-          onNotice={vi.fn()}
+          onNotice={onNotice}
         />,
       );
     });
@@ -234,6 +262,7 @@ describe("ExtensionsView behavior", () => {
     expect(installDialog?.textContent).toContain(
       "我已了解 MCP 子进程无沙盒，并以当前用户身份运行",
     );
+    expect(buttonByText("检查插件")?.disabled).toBe(true);
     expect(buttonByText("确认安装")?.disabled).toBe(true);
 
     const localPathInput = installDialog?.querySelector<HTMLInputElement>(
@@ -246,6 +275,34 @@ describe("ExtensionsView behavior", () => {
     await settle();
     expect(pickPluginSource).toHaveBeenCalledWith(undefined);
     expect(localPathInput?.value).toBe("/tmp/acme-plugin.zip");
+    expect(buttonByText("检查插件")?.disabled).toBe(false);
+
+    await act(async () => {
+      riskConfirm?.click();
+    });
+    expect(buttonByText("确认安装")?.disabled).toBe(true);
+
+    await act(async () => buttonByText("检查插件")?.click());
+    await settle();
+    expect(validatePlugin).toHaveBeenLastCalledWith({
+      kind: "local_path",
+      path: "/tmp/acme-plugin.zip",
+    });
+    expect(installDialog?.textContent).toContain("检查通过");
+    expect(installDialog?.textContent).toContain("acme.tools");
+    expect(installDialog?.textContent).toContain("2 Skills · 1 MCP Servers");
+    expect(buttonByText("确认安装")?.disabled).toBe(false);
+
+    await act(async () => buttonByText("浏览")?.click());
+    await settle();
+    expect(pickPluginSource).toHaveBeenLastCalledWith("/tmp/acme-plugin.zip");
+    expect(localPathInput?.value).toBe("/tmp/acme-plugin-v2.zip");
+    expect(installDialog?.textContent).not.toContain("检查通过");
+    expect(buttonByText("确认安装")?.disabled).toBe(true);
+
+    await act(async () => buttonByText("检查插件")?.click());
+    await settle();
+    expect(buttonByText("确认安装")?.disabled).toBe(false);
 
     await act(async () => {
       if (localPathInput) {
@@ -256,9 +313,29 @@ describe("ExtensionsView behavior", () => {
         setter?.call(localPathInput, "/tmp/acme-plugin");
         localPathInput.dispatchEvent(new Event("input", { bubbles: true }));
       }
-      riskConfirm?.click();
     });
-    expect(buttonByText("确认安装")?.disabled).toBe(false);
+    expect(installDialog?.textContent).not.toContain("检查通过");
+    expect(buttonByText("确认安装")?.disabled).toBe(true);
+
+    await act(async () => buttonByText("检查插件")?.click());
+    await settle();
+    await act(async () => buttonByText("确认安装")?.click());
+    await settle();
+    expect(installDialog?.textContent).toContain("插件来源已变化，请重新检查后再安装");
+    expect(installDialog?.textContent).not.toContain("检查通过");
+    expect(buttonByText("确认安装")?.disabled).toBe(true);
+
+    await act(async () => buttonByText("检查插件")?.click());
+    await settle();
+    await act(async () => buttonByText("确认安装")?.click());
+    await settle();
+    expect(installPlugin).toHaveBeenCalledWith({
+      source: { kind: "local_path", path: "/tmp/acme-plugin" },
+      replace: false,
+      expectedDigest: "sha256-v2:validated",
+    });
+    expect(installPlugin).toHaveBeenCalledTimes(2);
+    expect(onNotice).toHaveBeenCalledWith("插件已安装，将在新任务中生效");
   });
 
   it("refreshes an open Plugin catalog after a committed store revision", async () => {

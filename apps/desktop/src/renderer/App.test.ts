@@ -743,6 +743,7 @@ function stubElectronBridge(): void {
       enableSkill: vi.fn(),
       listPlugins: vi.fn(async () => []),
       getPlugin: vi.fn(),
+      validatePlugin: vi.fn(),
       installPlugin: vi.fn(),
       enablePlugin: vi.fn(),
       disablePlugin: vi.fn(),

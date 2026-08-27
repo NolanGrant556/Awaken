@@ -97,6 +97,8 @@ import {
   type ProjectReorderResult,
   type RuntimeProjectOperation,
   type RuntimePlugin,
+  type RuntimePluginSource,
+  type RuntimePluginValidation,
   type RuntimeSkill,
   type SkillProjectRoots,
   type SkillPreviewResponse,
@@ -612,6 +614,8 @@ const bridge: AwakenBridge = {
   listPlugins: () => ipcRenderer.invoke("awaken:list-plugins") as Promise<RuntimePlugin[]>,
   getPlugin: (name: string) =>
     ipcRenderer.invoke("awaken:get-plugin", name) as Promise<RuntimePlugin>,
+  validatePlugin: (source: RuntimePluginSource) =>
+    ipcRenderer.invoke("awaken:validate-plugin", source) as Promise<RuntimePluginValidation>,
   installPlugin: (request: InstallPluginRequest) =>
     ipcRenderer.invoke("awaken:install-plugin", request) as Promise<InstallPluginResponse>,
   enablePlugin: (name: string) =>

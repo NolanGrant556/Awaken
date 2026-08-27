@@ -138,7 +138,7 @@ func decodeKnownFrontmatter(fields map[string]any, def *SkillDefinition) error {
 		allowedKey = "allowedTools"
 	}
 	if raw, ok := fields[allowedKey]; ok {
-		allowed, err := decodeStringList(raw)
+		allowed, err := decodeAllowedTools(raw)
 		if err != nil {
 			def.DeprecatedWarnings = append(def.DeprecatedWarnings, fmt.Sprintf("ignored invalid %s hint: %v", allowedKey, err))
 		} else {
@@ -189,6 +189,34 @@ func decodeKnownFrontmatter(fields map[string]any, def *SkillDefinition) error {
 		_ = decodeAny(raw, &def.Hooks) // compatibility view; unknown hook keys remain in HooksRaw.
 	}
 	return nil
+}
+
+func decodeAllowedTools(value any) ([]string, error) {
+	switch typed := value.(type) {
+	case nil:
+		return nil, nil
+	case string:
+		normalized := strings.NewReplacer(",", " ", "\n", " ").Replace(typed)
+		return strings.Fields(normalized), nil
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("expected string list item, got %T", item)
+			}
+			if text = strings.TrimSpace(text); text != "" {
+				out = append(out, text)
+			}
+		}
+		return out, nil
+	default:
+		var out []string
+		if err := decodeAny(value, &out); err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
 }
 
 func firstField(fields map[string]any, keys ...string) (any, bool) {

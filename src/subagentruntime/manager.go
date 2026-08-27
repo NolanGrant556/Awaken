@@ -45,7 +45,6 @@ type managedTask struct {
 	seenModelRequests  map[string]struct{}
 	messages           []QueuedMessage
 	writableRoots      []string
-	host               *HostSpawnOptions
 	terminalPersistErr error
 }
 
@@ -158,7 +157,7 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 	task := &managedTask{
 		snapshot: snapshot, prompt: request.Prompt, cancel: cancel,
 		seenToolCalls: make(map[string]struct{}), seenModelRequests: make(map[string]struct{}),
-		writableRoots: writableRoots, host: request.Host,
+		writableRoots: writableRoots,
 	}
 	m.mu.Lock()
 	m.reserved--
@@ -170,14 +169,6 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 	m.wg.Add(1)
 	go m.runTask(taskCtx, taskID)
 	return snapshot, nil
-}
-
-// SpawnFromHost is the host-owned spawn entry used by Deep Research and the
-// model-visible subagent tool. It writes the same subagent_spawned record as
-// Spawn and does not change the model schema.
-func (m *Manager) SpawnFromHost(ctx context.Context, request SpawnRequest) (TaskSnapshot, error) {
-	request.ParentAgentID = firstNonBlank(request.ParentAgentID, "root")
-	return m.Spawn(ctx, request)
 }
 
 func (m *Manager) runTask(ctx context.Context, taskID string) {
@@ -221,7 +212,7 @@ func (m *Manager) runTask(ctx context.Context, taskID string) {
 	task.mutationMu.Unlock()
 
 	result, err := m.cfg.Starter(ctx, StartRequest{
-		Task: snapshot, Prompt: m.prompt(taskID), Host: m.hostOptions(taskID),
+		Task: snapshot, Prompt: m.prompt(taskID),
 		ReportProgress: func(progressCtx context.Context, update ProgressUpdate) error {
 			return m.reportProgress(progressCtx, taskID, update)
 		},
@@ -771,15 +762,6 @@ func (m *Manager) prompt(taskID string) string {
 		return task.prompt
 	}
 	return ""
-}
-
-func (m *Manager) hostOptions(taskID string) *HostSpawnOptions {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if task := m.tasks[taskID]; task != nil {
-		return task.host
-	}
-	return nil
 }
 
 func (m *Manager) signal() {

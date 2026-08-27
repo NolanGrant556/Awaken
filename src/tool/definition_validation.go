@@ -21,7 +21,7 @@ const (
 var builtinNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 var canonicalModelToolNames = map[string]struct{}{
-	"Bash": {}, "Read": {}, "Edit": {}, "Write": {}, "Glob": {}, "Grep": {}, "WebSearch": {}, "WebFetch": {},
+	"Bash": {}, "Read": {}, "Edit": {}, "Write": {}, "Glob": {}, "Grep": {}, "WebSearch": {},
 }
 
 var canonicalOutcomeFields = map[string]struct{}{

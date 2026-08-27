@@ -445,22 +445,6 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 			}
 		}
 		return []Event{plan}
-	case agentcore.SemanticKindResearchAccepted,
-		agentcore.SemanticKindResearchPlan,
-		agentcore.SemanticKindResearchClaimBatch,
-		agentcore.SemanticKindResearchVerification,
-		agentcore.SemanticKindResearchReport,
-		agentcore.SemanticKindResearchTerminal:
-		phase := base
-		phase.Type = EventAwakenResearchPhase
-		phase.ResearchPhase = firstNonEmpty(stringFromAny(payload["phase"]), researchPhaseFromKind(record.Kind))
-		phase.ResearchRevision = intFromAny(payload["revision"])
-		phase.ResearchQuestionCount = intFromAny(payload["question_count"])
-		phase.ResearchClaimCount = intFromAny(payload["claim_count"])
-		phase.ResearchVerifiedCount = intFromAny(payload["verified_count"])
-		phase.ResearchPartialCount = intFromAny(payload["partial_count"])
-		phase.ResearchRejectedCount = intFromAny(payload["rejected_count"])
-		return []Event{phase}
 	case agentcore.SemanticKindRecoveryDecision:
 		recovery := base
 		if boolFromAny(payload["blocked"]) {
@@ -1059,24 +1043,5 @@ func rawModelUsageRecordFromWire(value RawModelUsage) agentcore.RawModelUsage {
 		CachedTokens: cloneIntPointer(value.CachedTokens), PromptCacheHitTokens: cloneIntPointer(value.PromptCacheHitTokens),
 		PromptCacheMissTokens: cloneIntPointer(value.PromptCacheMissTokens), CacheReadInputTokens: cloneIntPointer(value.CacheReadInputTokens),
 		CacheCreationInputTokens: cloneIntPointer(value.CacheCreationInputTokens),
-	}
-}
-
-func researchPhaseFromKind(kind agentcore.SemanticKind) string {
-	switch kind {
-	case agentcore.SemanticKindResearchAccepted:
-		return "accepted"
-	case agentcore.SemanticKindResearchPlan:
-		return "planning"
-	case agentcore.SemanticKindResearchClaimBatch:
-		return "researching"
-	case agentcore.SemanticKindResearchVerification:
-		return "verifying"
-	case agentcore.SemanticKindResearchReport:
-		return "reporting"
-	case agentcore.SemanticKindResearchTerminal:
-		return "terminal"
-	default:
-		return ""
 	}
 }

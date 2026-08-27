@@ -9,7 +9,7 @@ import (
 func TestBuiltInToolNamesAreProviderSafe(t *testing.T) {
 	expected := map[string]bool{
 		"Bash": false, "Read": false, "Edit": false, "Write": false,
-		"Glob": false, "Grep": false, "WebSearch": false, "WebFetch": false,
+		"Glob": false, "Grep": false, "WebSearch": false,
 		"artifact_publish": false, "trash_file": false, "calculator": false,
 		"ask_user": false, "dependency_install": false, "git_remote": false,
 		"configure_hook":   false,

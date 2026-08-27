@@ -62,7 +62,6 @@ func TestCoreModelDescriptionsDeclareNeighborToolBoundaries(t *testing.T) {
 		"Grep":      {"Glob", "Read"},
 		"Bash":      {"Read", "Edit", "Write", "Glob", "Grep", "trash_file"},
 		"WebSearch": {"Grep"},
-		"WebFetch":  {"WebSearch", "Grep"},
 	}
 	for name, boundaries := range cases {
 		entry, err := tool.GetRegisteredTool(name)

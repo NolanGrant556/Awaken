@@ -253,7 +253,7 @@ export function AwakenSkillsDemo() {
             <header>
               <h4>Skill 预览窗口</h4>
               <code>AwakenSkillPreviewDialog</code>
-              <p>展示包内文件树、完整 frontmatter 和安全 Markdown 正文。</p>
+              <p>以两张独立卡片分别展示包内文件树，以及 <code>SKILL.md</code> 的完整 frontmatter 和安全 Markdown 正文。</p>
             </header>
             <div className="aw-skills-demo__part-canvas">
               <AwakenButton

@@ -89,6 +89,20 @@ function buttonByText(text: string): HTMLButtonElement | undefined {
   );
 }
 
+function assertSplitPreviewCards(root: ParentNode): void {
+  const content = root.querySelector(".aw-skill-preview__content");
+  const resourceCard = root.querySelector(".aw-skill-preview__card--resources");
+  const documentCard = root.querySelector(".aw-skill-preview__card--document");
+  expect(content).not.toBeNull();
+  expect(resourceCard).not.toBeNull();
+  expect(documentCard).not.toBeNull();
+  expect(resourceCard?.parentElement).toBe(content);
+  expect(documentCard?.parentElement).toBe(content);
+  expect(resourceCard?.nextElementSibling).toBe(documentCard);
+  expect(documentCard?.querySelector(".aw-skill-preview__card--resources")).toBeNull();
+  expect(documentCard?.textContent).toContain("SKILL.md");
+}
+
 describe("ExtensionsView behavior", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -512,6 +526,10 @@ describe("ExtensionsView behavior", () => {
     const getSkillPreview = vi.fn(async () => ({
       frontmatterRaw: "---\nname: project-report\n---",
       bodyMarkdown: "# 项目报告正文",
+      resources: [
+        { path: "SKILL.md", kind: "file", sizeBytes: 128 },
+        { path: "references", kind: "directory", sizeBytes: 0 },
+      ],
     }));
     const deleteSkill = vi.fn(async () => {
       deleted = true;
@@ -617,6 +635,7 @@ describe("ExtensionsView behavior", () => {
       "项目报告项目",
     );
     expect(previewDialog?.querySelector(".aw-skill-preview__delete")).not.toBeNull();
+    assertSplitPreviewCards(previewDialog as ParentNode);
 
     const previewClose = document.querySelector<HTMLButtonElement>(
       '.aw-project-skills-dialog--preview button[aria-label="关闭"]',

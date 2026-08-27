@@ -64,6 +64,36 @@ func TestManagerSpawnWaitAndDurableOrdering(t *testing.T) {
 	}
 }
 
+func TestManagerSpawnFromHostMatchesSpawnJournal(t *testing.T) {
+	var kinds []string
+	manager := NewManager(context.Background(), Config{
+		Starter: func(_ context.Context, request StartRequest) (string, error) {
+			if request.Host == nil || !request.Host.SkipMemory || request.Host.MaxThoughts != 12 {
+				t.Fatalf("host options not forwarded: %+v", request.Host)
+			}
+			return `{"ok":true}`, nil
+		},
+		Persist: func(_ context.Context, event PersistEvent) error {
+			kinds = append(kinds, event.Kind)
+			return nil
+		},
+	})
+	task, err := manager.SpawnFromHost(context.Background(), SpawnRequest{
+		Description: "research q1", Prompt: "research q1",
+		AgentType: AgentTypeExplore, WorkspaceMode: WorkspaceSharedReadOnly,
+		Host: &HostSpawnOptions{SkipMemory: true, MaxThoughts: 12, MaxToolExecutions: 16},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Wait(context.Background(), WaitRequest{TaskIDs: []string{task.TaskID}, ReturnWhen: "all", Timeout: time.Second}); err != nil {
+		t.Fatal(err)
+	}
+	if len(kinds) == 0 || kinds[0] != "subagent_spawned" {
+		t.Fatalf("kinds=%v", kinds)
+	}
+}
+
 func TestManagerUsesHostResolvedModelProfileIdentity(t *testing.T) {
 	started := make(chan TaskSnapshot, 1)
 	manager := NewManager(context.Background(), Config{

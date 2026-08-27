@@ -140,11 +140,11 @@ Awaken 自行构造的新圆弧使用 `arcThroughChord` 按弦与拱高反解圆
 
 ### 实心字形
 
-只给产品真正需要实心的概念做实心版。当前仅 `play` 与 `stop`：播放三角和停止方块在 16px 下使用约定俗成的实心轮廓，避免被读成方向箭头或空框。允许清单在图标契约测试里显式登记，新增必须同时改测试。
+只给产品真正需要实心的概念做实心版。当前仅 `play`、`stop` 与 `puzzle`：播放三角和停止方块在 16px 下使用约定俗成的实心轮廓，避免被读成方向箭头或空框；`puzzle` 是单个 Plugin 的默认图标，空心描边在 12px 胶囊里读成线框。允许清单在图标契约测试里显式登记，新增必须同时改测试。
 
 ### 能力与连接器图形
 
-一级入口使用直接、彼此可区分的比喻或官方标记：`connector` 是清晰的双插脚 Plug 轮廓；`skill` 与 `skill-active` 统一映射 `book-open`；`plugin` 映射 Agent Plugins 官方标记 `agent-plugins-mark`；单个 Plugin 未提供自定义图标时使用 `plugin-default` 对应的 Heroicons v2 outline 拼图块 `puzzle`，覆盖插件列表卡、Composer 快捷胶囊和下拉行；CLI 使用 `terminal`；Hook 使用 Webhook 路由结构表达事件挂接。产品调用点只消费这些概念映射，不自行复制 SVG。
+一级入口使用直接、彼此可区分的比喻或官方标记：`connector` 是清晰的双插脚 Plug 轮廓；`skill` 与 `skill-active` 统一映射 `book-open`；`plugin` 映射 Agent Plugins 官方标记 `agent-plugins-mark`；单个 Plugin 未提供自定义图标时使用 `plugin-default` 对应的 Heroicons v2 solid 拼图块 `puzzle`，覆盖插件列表卡、Composer 快捷胶囊和下拉行；CLI 使用 `terminal`；Hook 使用 Webhook 路由结构表达事件挂接。产品调用点只消费这些概念映射，不自行复制 SVG。
 
 ### 品牌标记
 

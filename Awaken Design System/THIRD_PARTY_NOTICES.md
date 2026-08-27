@@ -23,13 +23,12 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 
-## Heroicons 2 outline PuzzlePiece
+## Heroicons 2 solid PuzzlePiece
 
 Awaken Design System includes a 16-grid static SVG path derived from the
-Heroicons v2 24×24 outline `PuzzlePiece` icon. Near-straight, very large
-radius arcs were replaced with line segments so the glyph stays inside the
-16-grid audit; the authored silhouette is otherwise unchanged. The product
-runtime does not import or execute Heroicons.
+Heroicons v2 24×24 solid `PuzzlePiece` icon. The authored fill path is
+uniformly scaled into the 16-grid and centered; the product runtime does
+not import or execute Heroicons.
 
 ```text
 MIT License

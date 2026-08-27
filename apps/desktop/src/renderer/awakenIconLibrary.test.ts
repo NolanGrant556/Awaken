@@ -48,7 +48,7 @@ const DESKTOP_SRC = path.join(REPO_ROOT, "apps", "desktop", "src");
 const PRODUCT_APPROVED_ICON_DIGESTS = {
   "agent-plugins-mark": "440d25a0fce1e7a0c22aa8af66ba7c6407b498b093ffdcf14e4f46b048491ac4",
   brain: "07158d2f25e925e3e36db7aee89b77d4f973ce758458e0d99a5d458c59783a4e",
-  puzzle: "79a002f6eace9a0d74387aeb8a758759c0779fc56871d9d79a4e2cd525fd4d74",
+  puzzle: "90b660ea76811915ff1666b7ba2681bec4e69ceda34c173ffaa9f97eaef17430",
   connector: "050aeec594e18aee075e2b302bf5af350a475b38e1c95f9262d60d3bcc066071",
   folder: "bc3ca3cdb88518eb7b3b8f60623627c23ba7bb9f64bb6adffa85614648262175",
   "folder-open": "74988aa27f3440fc2f92bed23b3acd81b1fef864aa18707602c73ad87123fdcc",
@@ -201,11 +201,12 @@ describe("光学与网格不变量", () => {
       const icon = getAwakenIcon(name);
       return icon.mode === "line" && icon.filled;
     });
-    // 只有两个概念需要实心：
+    // 只有这些概念需要实心：
     // - stop：描边版在 16px 下读起来像一个空框，与「发送」的视觉重量不成对比；
-    // - play：播放三角是约定俗成的实心形，描边版会被读成「下一个」箭头。
+    // - play：播放三角是约定俗成的实心形，描边版会被读成「下一个」箭头；
+    // - puzzle：单个 Plugin 默认图标，空心描边在 12px 胶囊里读成线框。
     // 新增实心字形必须在这里显式登记，避免实心层悄悄长大。
-    expect(filled).toEqual(["play", "stop"]);
+    expect(filled).toEqual(["play", "puzzle", "stop"]);
   });
 
   it("品牌标记保留 authored paths，并声明可读下限", () => {
@@ -254,9 +255,16 @@ describe("概念表", () => {
   it("插件默认图标使用 Heroicons 拼图块，并由 Design System 持有来源", () => {
     const puzzle = ICON_DEFINITIONS.puzzle;
     expect(puzzle.build).toBeUndefined();
-    expect(puzzle.authored?.source).toContain("heroicons v2");
+    expect(puzzle.authored?.source).toContain("heroicons v2 solid");
     expect(puzzle.authored?.license).toBe("MIT");
-    expect(getAwakenIcon("puzzle").minSize).toBe(12);
+    expect(puzzle.filled).toBe(true);
+    const compiled = getAwakenIcon("puzzle");
+    expect(compiled.minSize).toBe(12);
+    expect(compiled.mode).toBe("line");
+    if (compiled.mode === "line") {
+      expect(compiled.filled).toBe(true);
+      expect(compiled.strokeWidth).toBe(0);
+    }
   });
 });
 

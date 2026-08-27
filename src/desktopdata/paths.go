@@ -67,3 +67,9 @@ func SessionWorkspacePath(root, ownerID string) string {
 func SessionOutputPath(root, ownerID string) string {
 	return filepath.Join(SessionWorkspacePath(root, ownerID), "output")
 }
+
+// ResearchLedgerPath is the rebuildable Deep Research ledger view for one run.
+// SemanticJournal remains the durability authority; this file is derived.
+func ResearchLedgerPath(root, threadID, runID string) string {
+	return filepath.Join(filepath.Clean(root), "research", strings.TrimSpace(threadID), strings.TrimSpace(runID), "ledger.json")
+}

@@ -98,7 +98,7 @@ func TestOrchestratorProducesCitedPartialReport(t *testing.T) {
 	}
 }
 
-func TestVerifierIDMismatchExcludesShard(t *testing.T) {
+func TestVerifierIDMismatchKeepsShardPartial(t *testing.T) {
 	children := &stubChildren{responses: []string{
 		`{"questions":[{"id":"q1","text":"q"}]}`,
 		`{"claims":[{"id":"claim-0","question_id":"q1","statement":"A","confidence":"low","evidence":[{"kind":"web","title":"t","locator":"https://example.com","source_type":"secondary"}]}],"uncertainties":[]}`,
@@ -109,8 +109,11 @@ func TestVerifierIDMismatchExcludesShard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Outcome != OutcomeFailed && result.Outcome != OutcomePartial {
+	if result.Outcome != OutcomePartial {
 		t.Fatalf("outcome=%s coverage=%v", result.Outcome, result.Coverage)
+	}
+	if len(result.Claims) == 0 {
+		t.Fatal("mismatch must keep claims as partial, not drop the report")
 	}
 }
 

@@ -152,7 +152,7 @@ export const AWAKEN_ICON_CONCEPTS = {
   "tool-terminal": "terminal",
   skill: "book-open",
   "skill-active": "book-open",
-  plugin: "puzzle",
+  plugin: "agent-plugins-mark",
   "plugin-default": "puzzle",
   hook: "hook",
   connector: "connector",

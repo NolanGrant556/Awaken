@@ -144,7 +144,7 @@ Awaken 自行构造的新圆弧使用 `arcThroughChord` 按弦与拱高反解圆
 
 ### 能力与连接器图形
 
-一级入口使用直接、彼此可区分的比喻或官方标记：`connector` 是清晰的双插脚 Plug 轮廓；`skill` 与 `skill-active` 统一映射 `book-open`；`plugin` 与 `plugin-default` 统一映射 Heroicons v2 outline 拼图块 `puzzle`，覆盖扩展导航一级入口、插件列表卡、空状态和 Composer 快捷胶囊；CLI 使用 `terminal`；Hook 使用 Webhook 路由结构表达事件挂接。产品调用点只消费这些概念映射，不自行复制 SVG。
+一级入口使用直接、彼此可区分的比喻或官方标记：`connector` 是清晰的双插脚 Plug 轮廓；`skill` 与 `skill-active` 统一映射 `book-open`；`plugin` 映射 Agent Plugins 官方标记 `agent-plugins-mark`；单个 Plugin 未提供自定义图标时使用 `plugin-default` 对应的 Heroicons v2 outline 拼图块 `puzzle`，覆盖插件列表卡、Composer 快捷胶囊和下拉行；CLI 使用 `terminal`；Hook 使用 Webhook 路由结构表达事件挂接。产品调用点只消费这些概念映射，不自行复制 SVG。
 
 ### 品牌标记
 
@@ -152,7 +152,7 @@ Awaken 自行构造的新圆弧使用 `arcThroughChord` 按弦与拱高反解圆
 
 MCP 使用官方标记 `mcp-mark`，对称留白后的可读下限为 14px。连接器 MCP/CLI 分类共用 16px 请求尺寸，MCP 目录卡使用 20px 卡片尺寸，MCP 工具轨迹与其它工具共用 14px 请求尺寸。三处都消费同一官方标记，不使用自绘伴随字形。
 
-Agent Plugins 官方文档站 `app/icon.svg` 的 authored paths 仍注册为 `agent-plugins-mark`。路径本身不改动，仅在原 18×17 viewBox 外增加对称透明留白，可读下限为 20px。产品 `plugin` 概念不再消费该标记；需要品牌原标时必须按名字取用且不得低于 20px。
+Agent Plugins 使用官方文档站 `app/icon.svg` 的 authored paths，在注册表中命名为 `agent-plugins-mark`。路径本身不改动，仅在原 18×17 viewBox 外增加对称透明留白；Desktop 插件一级入口以 20px 请求尺寸消费，实际标记宽约 17.5px，与同屏主导航图标的光学尺寸一致。该标记的可读下限为 20px，不得在更小调用点复用。
 
 ### 概念优先
 

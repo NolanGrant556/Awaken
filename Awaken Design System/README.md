@@ -88,7 +88,7 @@ http://127.0.0.1:5173/#/components/awaken-memory-settings
 
 ## 图标库契约
 
-Awaken 的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是唯一渲染出口，Gallery 入口是 `awaken-icon`。当前 108 个线性字形由 95 个经用户确认并静态固化的 Lucide authored 母形、6 个本轮 Awaken 定制几何，以及 7 个保持既有产品识别的字形组成；另有 MCP 和 Agent Plugins 两个官方品牌标记。
+Awaken 的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是唯一渲染出口，Gallery 入口是 `awaken-icon`。当前 108 个线性字形由 94 个经用户确认并静态固化的 Lucide authored 母形、6 个本轮 Awaken 定制几何，以及 8 个保持既有产品识别的字形组成；另有 MCP 和 Agent Plugins 两个官方品牌标记。
 
 ### 分层与 owner
 
@@ -128,7 +128,7 @@ Awaken 的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是唯一�
 
 长期记忆保留 PR #36 前 Desktop 使用的 `lucide-react v0.468.0` Brain 轮廓；用户辨认的是带脑回曲线的脑袋，直线倒角版和 `stack` 都没有保留原有识别性。`settings-memory` 继续映射 `brain`，这份产品恢复字形使用 `1.25` 描边并记录 ISC 来源。
 
-authored 有两类：一类是用户在独立 Icon Lab 中逐项确认的 licensed mother form，统一由 `approvedLucideSources.ts` 与静态 glyph 文件审计；另一类是 `brain` 这种已形成稳定产品识别的恢复字形。两类都必须记录来源、版本、许可与 `minSize`，通过概念表、path 快照、尺寸和运行时依赖守卫；不能在调用点粘贴 SVG。完整 ISC 文本同时保存在 `THIRD_PARTY_NOTICES.md` 和 Desktop 打包资源。
+authored 有两类：一类是用户在独立 Icon Lab 中逐项确认的 licensed mother form，统一由 `approvedLucideSources.ts` 与静态 glyph 文件审计；另一类是 `brain`、`puzzle` 这种已形成稳定产品识别的恢复字形。两类都必须记录来源、版本、许可与 `minSize`，通过概念表、path 快照、尺寸和运行时依赖守卫；不能在调用点粘贴 SVG。Lucide 的 ISC 与 Heroicons 的 MIT 全文同时保存在 `THIRD_PARTY_NOTICES.md` 和 Desktop 打包资源。
 
 换比喻必须写在图标定义的注释里，包含试过哪些版本、为什么不可辨。否则下一个人会把它改回去。
 
@@ -144,7 +144,7 @@ Awaken 自行构造的新圆弧使用 `arcThroughChord` 按弦与拱高反解圆
 
 ### 能力与连接器图形
 
-一级入口使用直接、彼此可区分的比喻或官方标记：`connector` 是清晰的双插脚 Plug 轮廓；`skill` 与 `skill-active` 统一映射 `book-open`；`plugin` 映射 Agent Plugins 官方标记 `agent-plugins-mark`；单个 Plugin 未提供自定义图标时使用 `plugin-default` 对应的 `puzzle` 线性图标；CLI 使用 `terminal`；Hook 使用 Webhook 路由结构表达事件挂接。产品调用点只消费这些概念映射，不自行复制 SVG。
+一级入口使用直接、彼此可区分的比喻或官方标记：`connector` 是清晰的双插脚 Plug 轮廓；`skill` 与 `skill-active` 统一映射 `book-open`；`plugin` 与 `plugin-default` 统一映射 Heroicons v2 outline 拼图块 `puzzle`，覆盖扩展导航一级入口、插件列表卡、空状态和 Composer 快捷胶囊；CLI 使用 `terminal`；Hook 使用 Webhook 路由结构表达事件挂接。产品调用点只消费这些概念映射，不自行复制 SVG。
 
 ### 品牌标记
 
@@ -152,7 +152,7 @@ Awaken 自行构造的新圆弧使用 `arcThroughChord` 按弦与拱高反解圆
 
 MCP 使用官方标记 `mcp-mark`，对称留白后的可读下限为 14px。连接器 MCP/CLI 分类共用 16px 请求尺寸，MCP 目录卡使用 20px 卡片尺寸，MCP 工具轨迹与其它工具共用 14px 请求尺寸。三处都消费同一官方标记，不使用自绘伴随字形。
 
-Agent Plugins 使用官方文档站 `app/icon.svg` 的 authored paths，在注册表中命名为 `agent-plugins-mark`。路径本身不改动，仅在原 18×17 viewBox 外增加对称透明留白；Desktop 插件一级入口以 20px 请求尺寸消费，实际标记宽约 17.5px，与同屏主导航图标的光学尺寸一致。该标记的可读下限为 20px，不得在更小调用点复用。
+Agent Plugins 官方文档站 `app/icon.svg` 的 authored paths 仍注册为 `agent-plugins-mark`。路径本身不改动，仅在原 18×17 viewBox 外增加对称透明留白，可读下限为 20px。产品 `plugin` 概念不再消费该标记；需要品牌原标时必须按名字取用且不得低于 20px。
 
 ### 概念优先
 
@@ -160,7 +160,7 @@ Agent Plugins 使用官方文档站 `app/icon.svg` 的 authored paths，在注�
 
 ### 图标库的验证
 
-图标层的契约测试在 `apps/desktop/src/renderer/awakenIconLibrary.test.ts`（desktop Vitest alias 直接指向本包源码）。覆盖 94 项来源完整性、path 快照、Awaken 构造几何光学盒、16 网格边界、两档内建描边、KeyRound 子路径填充、概念表、八个已确认产品字形摘要，以及「运行时源码与 dependencies 不依赖 lucide-react」「调用点只用尺寸档且不低于 minSize」守卫。
+图标层的契约测试在 `apps/desktop/src/renderer/awakenIconLibrary.test.ts`（desktop Vitest alias 直接指向本包源码）。覆盖 94 项来源完整性、path 快照、Awaken 构造几何光学盒、16 网格边界、两档内建描边、KeyRound 子路径填充、概念表、九个已确认产品字形摘要，以及「运行时源码与 dependencies 不依赖 lucide-react」「调用点只用尺寸档且不低于 minSize」守卫。
 
 ## 组件 URL 规则
 

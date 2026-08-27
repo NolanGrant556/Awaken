@@ -48,6 +48,7 @@ const DESKTOP_SRC = path.join(REPO_ROOT, "apps", "desktop", "src");
 const PRODUCT_APPROVED_ICON_DIGESTS = {
   "agent-plugins-mark": "440d25a0fce1e7a0c22aa8af66ba7c6407b498b093ffdcf14e4f46b048491ac4",
   brain: "07158d2f25e925e3e36db7aee89b77d4f973ce758458e0d99a5d458c59783a4e",
+  puzzle: "79a002f6eace9a0d74387aeb8a758759c0779fc56871d9d79a4e2cd525fd4d74",
   connector: "050aeec594e18aee075e2b302bf5af350a475b38e1c95f9262d60d3bcc066071",
   folder: "bc3ca3cdb88518eb7b3b8f60623627c23ba7bb9f64bb6adffa85614648262175",
   "folder-open": "74988aa27f3440fc2f92bed23b3acd81b1fef864aa18707602c73ad87123fdcc",
@@ -172,8 +173,8 @@ describe("光学与网格不变量", () => {
     }
   });
 
-  it("95 个确认候选全部静态固化并保留 Lucide 来源与许可", () => {
-    expect(APPROVED_LUCIDE_ICON_NAMES).toHaveLength(95);
+  it("94 个确认候选全部静态固化并保留 Lucide 来源与许可", () => {
+    expect(APPROVED_LUCIDE_ICON_NAMES).toHaveLength(94);
     expect(Object.keys(APPROVED_LUCIDE_SOURCES).sort()).toEqual(APPROVED_LUCIDE_ICON_NAMES);
     for (const name of APPROVED_LUCIDE_ICON_NAMES) {
       const icon = getAwakenIcon(name);
@@ -236,7 +237,7 @@ describe("概念表", () => {
     expect(AWAKEN_ICON_CONCEPTS.skill).toBe("book-open");
     expect(AWAKEN_ICON_CONCEPTS["skill-active"]).toBe("book-open");
     expect(AWAKEN_ICON_CONCEPTS["tool-terminal"]).toBe("terminal");
-    expect(AWAKEN_ICON_CONCEPTS.plugin).toBe("agent-plugins-mark");
+    expect(AWAKEN_ICON_CONCEPTS.plugin).toBe("puzzle");
     expect(AWAKEN_ICON_CONCEPTS["plugin-default"]).toBe("puzzle");
     expect(AWAKEN_ICON_CONCEPTS["mcp-brand"]).toBe("mcp-mark");
     expect(AWAKEN_ICON_CONCEPTS["mcp-source"]).toBe("mcp-mark");
@@ -248,6 +249,14 @@ describe("概念表", () => {
     expect(brain.build).toBeUndefined();
     expect(brain.authored?.source).toContain("lucide-react v0.468.0");
     expect(brain.authored?.license).toBe("ISC");
+  });
+
+  it("插件入口使用 Heroicons 拼图块，并由 Design System 持有来源", () => {
+    const puzzle = ICON_DEFINITIONS.puzzle;
+    expect(puzzle.build).toBeUndefined();
+    expect(puzzle.authored?.source).toContain("heroicons v2");
+    expect(puzzle.authored?.license).toBe("MIT");
+    expect(getAwakenIcon("puzzle").minSize).toBe(12);
   });
 });
 

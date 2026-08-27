@@ -112,7 +112,8 @@ func (t *Tool) IsReadOnly() bool { return true }
 
 type findInput struct {
 	Query string `json:"query"`
-	Limit int    `json:"limit"`
+	// Limit tolerates providers that emit integers as JSON floats (e.g. 5.0).
+	Limit float64 `json:"limit"`
 }
 
 type matchPayload struct {
@@ -158,7 +159,7 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 		outcome.RecoveryOptions = []string{"provide_keywords_or_select_names"}
 		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
-	limit := request.Limit
+	limit := int(request.Limit)
 	if limit <= 0 {
 		limit = 5
 	}

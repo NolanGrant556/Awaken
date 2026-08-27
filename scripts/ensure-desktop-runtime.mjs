@@ -110,27 +110,20 @@ if (!reason) {
   }
 }
 
-const officeCliTargets = new Set(["darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64"]);
-if (!officeCliTargets.has(target)) {
-  console.log(
-    `[ensure-desktop-runtime] skipping OfficeCLI for ${target}; missing preview binaries must not block Desktop/Core`,
+try {
+  execFileSync("node", ["scripts/prepare-officecli.mjs", `--targets=${target}`], {
+    cwd: root,
+    env: {
+      ...process.env,
+      AWAKEN_BINARY_TARGETS: target,
+    },
+    stdio: "inherit",
+  });
+} catch {
+  console.error(
+    `[ensure-desktop-runtime] failed to prepare OfficeCLI. Run npm run prepare:officecli for full output.`,
   );
-} else {
-  try {
-    execFileSync("node", ["scripts/prepare-officecli.mjs", `--targets=${target}`], {
-      cwd: root,
-      env: {
-        ...process.env,
-        AWAKEN_BINARY_TARGETS: target,
-      },
-      stdio: "inherit",
-    });
-  } catch {
-    console.error(
-      `[ensure-desktop-runtime] failed to prepare OfficeCLI. Run npm run prepare:officecli for full output.`,
-    );
-    process.exit(1);
-  }
+  process.exit(1);
 }
 
 try {

@@ -68,15 +68,6 @@ const (
 	// never model reasoning or raw unvalidated JSON.
 	SemanticKindPlanUpdated SemanticKind = "plan_updated"
 
-	// Deep Research host-orchestration facts (docs/16_深度研究). Payloads stay
-	// identity/count/locator sized; full pages and raw child JSON are offloaded.
-	SemanticKindResearchAccepted     SemanticKind = "research_accepted"
-	SemanticKindResearchPlan         SemanticKind = "research_plan"
-	SemanticKindResearchClaimBatch   SemanticKind = "research_claim_batch"
-	SemanticKindResearchVerification SemanticKind = "research_verification"
-	SemanticKindResearchReport       SemanticKind = "research_report"
-	SemanticKindResearchTerminal     SemanticKind = "research_terminal"
-
 	// Computer Use semantic kinds (docs/10_计算机操作能力/)
 	SemanticKindComputerSessionOpened            SemanticKind = "computer_session_opened"
 	SemanticKindComputerStateChanged             SemanticKind = "computer_state_changed"

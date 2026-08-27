@@ -142,7 +142,7 @@ func (t *SubagentTool) Execute(ctx context.Context, raw string) (string, error) 
 	switch request.Action {
 	case "spawn":
 		modelProfileID := strings.TrimSpace(identity.ModelProfileID)
-		snapshot, err := controller.SpawnFromHost(ctx, subagentruntime.SpawnRequest{
+		snapshot, err := controller.Spawn(ctx, subagentruntime.SpawnRequest{
 			Description: request.Description, Prompt: request.Prompt,
 			AgentType: request.AgentType, WorkspaceMode: request.WorkspaceMode,
 			ModelProfileID: modelProfileID, ParentAgentID: "root",

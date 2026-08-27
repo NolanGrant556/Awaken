@@ -74,7 +74,6 @@ export type AguiEventType =
   | "AWAKEN_MEMORY_DREAM_INTERRUPTED"
   | "AWAKEN_SCHEDULED_NOTICE"
   | "AWAKEN_PLAN_UPDATED"
-  | "AWAKEN_RESEARCH_PHASE"
   | "AWAKEN_COMPUTER_REVIEW_REQUESTED"
   | "AWAKEN_COMPUTER_REVIEW_RESOLVED"
   | "AWAKEN_COMPUTER_SESSION_CHANGED"
@@ -334,13 +333,6 @@ export type AguiEvent = {
   planTotalCount?: number;
   planCurrentStep?: number;
   planAllCompleted?: boolean;
-  researchPhase?: string;
-  researchRevision?: number;
-  researchQuestionCount?: number;
-  researchClaimCount?: number;
-  researchVerifiedCount?: number;
-  researchPartialCount?: number;
-  researchRejectedCount?: number;
   terminalReason?: string;
   transitionReason?: string;
   contextModelWindow?: number;

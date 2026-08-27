@@ -420,8 +420,6 @@ export function projectAguiEventToNarrative(
       return upsertSubagentGroup(base, event);
     case "AWAKEN_PLAN_UPDATED":
       return recordRunPlanReceipt(base, event);
-    case "AWAKEN_RESEARCH_PHASE":
-      return base;
     case "RUN_FINISHED":
       return markLatestAnswerFinal(
         commitActive(clearProviderReconnectItems(base), "done"),

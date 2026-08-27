@@ -11,15 +11,11 @@ import {
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const screenName = "awaken-dev-desktop";
 const rendererUrl = "http://127.0.0.1:5174/";
-const readyTimeoutMs = 180_000;
+const readyTimeoutMs = 60_000;
 const pollIntervalMs = 500;
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-const electronExecutable =
-  process.platform === "darwin"
-    ? join(rootDir, "node_modules/electron/dist/Electron.app/Contents/MacOS/Electron")
-    : process.platform === "win32"
-      ? join(rootDir, "node_modules/electron/dist/electron.exe")
-      : join(rootDir, "node_modules/electron/dist/electron");
+const electronAppPath = join(rootDir, "node_modules/electron/dist/Electron.app");
+const electronExecutable = join(electronAppPath, "Contents/MacOS/Electron");
 const statusOnly = process.argv.includes("--status");
 
 function run(command, args, options = {}) {
@@ -90,14 +86,11 @@ function processInfo() {
         row.args.includes("--host 127.0.0.1") &&
         row.args.includes("--port 5174"),
     ),
-    electron: rows.filter((row) => {
-      const isDevLaunch = row.args.includes(". --dev");
-      const isElectron =
-        row.args.includes(electronExecutable) ||
-        row.args.includes("/electron/dist/electron") ||
-        row.args.includes("/electron/cli.js");
-      return isDevLaunch && isElectron;
-    }),
+    electron: rows.filter(
+      (row) =>
+        row.args.includes(electronExecutable) &&
+        row.args.includes(". --dev"),
+    ),
     core: rows.filter(
       (row) =>
         row.args.includes("/awaken-core") &&
@@ -108,26 +101,8 @@ function processInfo() {
 }
 
 function startDesktopScreen() {
-  const display = process.env.DISPLAY || ":1";
-  const pathValue = process.env.PATH || "/usr/bin";
-  const logFile = "/tmp/awaken-dev-desktop.log";
-  const command = [
-    `cd ${shellQuote(rootDir)}`,
-    `export PATH=${shellQuote(pathValue)}`,
-    `export DISPLAY=${shellQuote(display)}`,
-    "export ELECTRON_OZONE_PLATFORM=x11",
-    "export ELECTRON_DISABLE_SANDBOX=1",
-    `npm run dev:desktop:managed > ${shellQuote(logFile)} 2>&1`,
-  ].join(" && ");
-  const result = run("screen", ["-dmS", screenName, "bash", "-c", command], {
-    env: {
-      ...process.env,
-      PATH: pathValue,
-      DISPLAY: display,
-      ELECTRON_OZONE_PLATFORM: "x11",
-      ELECTRON_DISABLE_SANDBOX: "1",
-    },
-  });
+  const command = `cd ${shellQuote(rootDir)} && npm run dev:desktop:managed`;
+  const result = run("screen", ["-dmS", screenName, "bash", "-lc", command]);
   if (!result.ok) {
     throw new Error(
       [

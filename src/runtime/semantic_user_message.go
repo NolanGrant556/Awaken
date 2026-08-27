@@ -50,9 +50,6 @@ func semanticComposerTokensForRun(tokens []ComposerToken) []agentcore.SemanticCo
 		if value := strings.TrimSpace(token.Payload.RelativePath); value != "" {
 			payload["relativePath"] = value
 		}
-		if value := strings.TrimSpace(token.Payload.WorkflowID); value != "" {
-			payload["workflowId"] = value
-		}
 		if len(payload) == 0 {
 			payload = nil
 		}

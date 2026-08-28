@@ -16,12 +16,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// toolRegisterForce and toolUnregisterByPrefix are package-level
+// toolRegisterForce and toolUnregisterByServer are package-level
 // indirections over the tool registry so tests can substitute fakes.
 // The default values route to the real registry in awaken/src/tool.
 var (
 	toolRegisterForce      = func(t tool.Tool) error { return tool.RegisterToolForce(t) }
-	toolUnregisterByPrefix = tool.UnregisterToolsByPrefix
+	toolUnregisterByServer = tool.UnregisterMCPToolsByServer
 	toolRegistryHooksMu    sync.RWMutex
 )
 
@@ -32,28 +32,28 @@ func registerToolThroughHook(value tool.Tool) error {
 	return hook(value)
 }
 
-func unregisterToolsThroughHook(prefix string) int {
+func unregisterToolsThroughHook(serverName string) int {
 	toolRegistryHooksMu.RLock()
-	hook := toolUnregisterByPrefix
+	hook := toolUnregisterByServer
 	toolRegistryHooksMu.RUnlock()
-	return hook(prefix)
+	return hook(serverName)
 }
 
 func setToolRegistryHooksForTest(register func(tool.Tool) error, unregister func(string) int) func() {
 	toolRegistryHooksMu.Lock()
 	previousRegister := toolRegisterForce
-	previousUnregister := toolUnregisterByPrefix
+	previousUnregister := toolUnregisterByServer
 	if register != nil {
 		toolRegisterForce = register
 	}
 	if unregister != nil {
-		toolUnregisterByPrefix = unregister
+		toolUnregisterByServer = unregister
 	}
 	toolRegistryHooksMu.Unlock()
 	return func() {
 		toolRegistryHooksMu.Lock()
 		toolRegisterForce = previousRegister
-		toolUnregisterByPrefix = previousUnregister
+		toolUnregisterByServer = previousUnregister
 		toolRegistryHooksMu.Unlock()
 	}
 }
@@ -656,20 +656,41 @@ func (m *Manager) callServerTool(ctx context.Context, serverName, toolName, disp
 
 // resolveMcpToolName uses the live server registry to disambiguate server
 // identities that themselves contain "__" (notably Agent Plugin identities).
-// The longest matching server prefix wins, leaving the complete MCP-authored
-// tool name untouched even when it also contains underscores.
+// The longest matching model-facing server prefix wins, and the final
+// component is decoded back to the exact MCP-authored tool name.
 func (m *Manager) resolveMcpToolName(prefixed string) (server, toolName string, ok bool) {
 	if !strings.HasPrefix(prefixed, "mcp__") {
 		return "", "", false
 	}
-	rest := strings.TrimPrefix(prefixed, "mcp__")
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	matchedPrefixLength := 0
+	for candidate := range m.servers {
+		prefix := McpToolPrefix(candidate)
+		if !strings.HasPrefix(prefixed, prefix) || len(prefix) <= matchedPrefixLength {
+			continue
+		}
+		decodedToolName, decoded := decodeMCPNameComponent(strings.TrimPrefix(prefixed, prefix))
+		if decoded {
+			server = candidate
+			toolName = decodedToolName
+			matchedPrefixLength = len(prefix)
+		}
+	}
+	if server != "" && toolName != "" {
+		return server, toolName, true
+	}
+
+	// Compatibility for callers that persisted or constructed the historical
+	// raw-qualified mcp__<raw server>__<raw tool> spelling.
+	rest := strings.TrimPrefix(prefixed, "mcp__")
+	matchedPrefixLength = 0
 	for candidate := range m.servers {
 		prefix := candidate + "__"
-		if strings.HasPrefix(rest, prefix) && len(candidate) > len(server) {
+		if strings.HasPrefix(rest, prefix) && len(prefix) > matchedPrefixLength {
 			server = candidate
 			toolName = strings.TrimPrefix(rest, prefix)
+			matchedPrefixLength = len(prefix)
 		}
 	}
 	return server, toolName, server != "" && toolName != ""
@@ -890,8 +911,7 @@ func (m *Manager) registerTools(ctx context.Context, server *managedServer) erro
 // unregisterTools removes every tool registered by the named server. It
 // is a no-op when the server has no tools registered.
 func (m *Manager) unregisterTools(serverName string) {
-	prefix := "mcp__" + serverName + "__"
-	unregisterToolsThroughHook(prefix)
+	unregisterToolsThroughHook(serverName)
 }
 
 // RefreshTools re-queries the server's tool list and updates the

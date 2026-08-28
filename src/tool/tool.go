@@ -16,16 +16,17 @@ const (
 
 // ToolAnnotations carries the behavioural hints every tool must declare.
 type ToolAnnotations struct {
-	ReadOnly        bool
-	Destructive     bool
-	OpenWorld       bool
-	RequiresAuth    bool
-	ServerName      string
-	ToolName        string
-	CapabilityClass CapabilityClass
-	TrustedOrigin   TrustedOrigin
-	FileBridgeScope FileBridgeScope
-	NetworkScope    NetworkScope
+	ReadOnly            bool
+	Destructive         bool
+	OpenWorld           bool
+	RequiresAuth        bool
+	ServerName          string
+	CanonicalServerName string
+	ToolName            string
+	CapabilityClass     CapabilityClass
+	TrustedOrigin       TrustedOrigin
+	FileBridgeScope     FileBridgeScope
+	NetworkScope        NetworkScope
 }
 
 // RiskHints summarises the risk profile of a tool invocation.

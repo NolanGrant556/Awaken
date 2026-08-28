@@ -15,6 +15,18 @@ type catalogTestTool struct {
 	executeErr error
 }
 
+type mcpServerCatalogTestTool struct {
+	catalogTestTool
+	serverName string
+}
+
+func (t mcpServerCatalogTestTool) Definition() ToolDefinition {
+	definition := t.catalogTestTool.Definition()
+	definition.Source = SourceMCP
+	definition.Annotations.ServerName = t.serverName
+	return definition
+}
+
 func (t catalogTestTool) Name() string {
 	return t.name
 }
@@ -185,6 +197,35 @@ func TestUnregisterToolsByPrefix(t *testing.T) {
 	}
 	// Clean up the remaining mcp__other__gamma.
 	UnregisterToolsByPrefix("mcp__other__")
+}
+
+func TestUnregisterMCPToolsByServerDoesNotRemoveExtendedIdentity(t *testing.T) {
+	shortServer := "plugin__acme.tools__local"
+	longServer := shortServer + "__nested"
+	shortName := "mcp__plugin__acme_tools__local__echo"
+	longName := "mcp__plugin__acme_tools__local__nested__echo"
+	for _, runtime := range []Tool{
+		mcpServerCatalogTestTool{catalogTestTool: catalogTestTool{name: shortName}, serverName: shortServer},
+		mcpServerCatalogTestTool{catalogTestTool: catalogTestTool{name: longName}, serverName: longServer},
+	} {
+		if err := RegisterToolForce(runtime); err != nil {
+			t.Fatalf("register %s: %v", runtime.Name(), err)
+		}
+	}
+	t.Cleanup(func() {
+		UnregisterTool(shortName)
+		UnregisterTool(longName)
+	})
+
+	if removed := UnregisterMCPToolsByServer(shortServer); removed != 1 {
+		t.Fatalf("removed %d tools for exact server, want 1", removed)
+	}
+	if _, err := GetTool(shortName); !errors.Is(err, ErrToolNotFound) {
+		t.Fatalf("short server tool still registered: %v", err)
+	}
+	if _, err := GetTool(longName); err != nil {
+		t.Fatalf("extended server tool was removed: %v", err)
+	}
 }
 
 // TestListToolNames verifies the helper returns a sorted snapshot of all

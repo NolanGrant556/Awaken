@@ -41,15 +41,16 @@ func (f *fakeRegistry) register(t tool.Tool) error {
 	return nil
 }
 
-func (f *fakeRegistry) unregisterByPrefix(prefix string) int {
+func (f *fakeRegistry) unregisterByServer(serverName string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	removed := 0
-	for name := range f.tools {
-		if strings.HasPrefix(name, prefix) {
-			delete(f.tools, name)
-			removed++
+	for name, runtime := range f.tools {
+		if runtime.Definition().Annotations.ServerName != serverName {
+			continue
 		}
+		delete(f.tools, name)
+		removed++
 	}
 	f.unregCnt++
 	return removed
@@ -78,6 +79,39 @@ func (s *stubTool) Execute(ctx context.Context, input string) (string, error) {
 	return "ok", nil
 }
 func (s *stubTool) IsReadOnly() bool { return s.readonly }
+
+type callToolSession struct {
+	t       *testing.T
+	last    *mcp.CallToolParams
+	results *mcp.CallToolResult
+}
+
+func (s *callToolSession) ListTools(context.Context, *mcp.ListToolsParams) (*mcp.ListToolsResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *callToolSession) CallTool(_ context.Context, params *mcp.CallToolParams) (*mcp.CallToolResult, error) {
+	s.last = params
+	if s.results != nil {
+		return s.results, nil
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ok"}}}, nil
+}
+
+func (s *callToolSession) ListPrompts(context.Context, *mcp.ListPromptsParams) (*mcp.ListPromptsResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *callToolSession) GetPrompt(context.Context, *mcp.GetPromptParams) (*mcp.GetPromptResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *callToolSession) ListResources(context.Context, *mcp.ListResourcesParams) (*mcp.ListResourcesResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *callToolSession) Close() error { return nil }
+func (s *callToolSession) Wait() error  { return nil }
 
 // echoServerWithTools returns an in-proc factory that exposes N tools named
 // echo1..echoN, all read-only. Used to verify the manager registers each
@@ -183,6 +217,70 @@ func TestManagerStateMachineInvalidTransport(t *testing.T) {
 	}
 	if !strings.Contains(snap.ErrorReason, "invalid transport") {
 		t.Errorf("expected invalid transport reason, got %q", snap.ErrorReason)
+	}
+}
+
+func TestManagerCallToolResolvesCanonicalDottedPluginName(t *testing.T) {
+	serverName := "plugin__awaken.acceptance.20260827__local-smoke"
+	mgr := NewManager(WithLogger(noopLogger{}))
+	session := &callToolSession{t: t}
+	mgr.servers[serverName] = &managedServer{
+		name:      serverName,
+		state:     StateConnected,
+		session:   session,
+		transport: TransportHTTP,
+	}
+	defer mgr.unregisterTools(serverName)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	for _, test := range []struct {
+		name      string
+		qualified string
+		rawTool   string
+	}{
+		{name: "safe", qualified: McpToolName(serverName, "echo"), rawTool: "echo"},
+		{name: "dotted tool", qualified: McpToolName(serverName, "echo.v1"), rawTool: "echo.v1"},
+		{name: "reserved sentinel", qualified: McpToolName(serverName, "x0_echo"), rawTool: "x0_echo"},
+		{name: "legacy raw-qualified", qualified: "mcp__" + serverName + "__legacy.echo", rawTool: "legacy.echo"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			session.last = nil
+			result, err := mgr.CallTool(ctx, test.qualified, map[string]any{"message": "hi"})
+			if err != nil {
+				t.Fatalf("call tool: %v", err)
+			}
+			if session.last == nil {
+				t.Fatal("manager did not call the MCP session")
+			}
+			if session.last.Name != test.rawTool {
+				t.Fatalf("manager recovered tool name %q, want %q", session.last.Name, test.rawTool)
+			}
+			if len(result.Content) != 1 {
+				t.Fatalf("unexpected call result: %+v", result)
+			}
+			text, ok := result.Content[0].(*mcp.TextContent)
+			if !ok || text.Text != "ok" {
+				t.Fatalf("unexpected call result content: %+v", result.Content[0])
+			}
+		})
+	}
+}
+
+func TestResolveMcpToolNameUsesLongestEncodedServerPrefix(t *testing.T) {
+	shortServer := "plugin__acme.tools__local"
+	longServer := shortServer + "__nested"
+	mgr := NewManager(WithLogger(noopLogger{}))
+	mgr.servers[shortServer] = &managedServer{name: shortServer}
+	mgr.servers[longServer] = &managedServer{name: longServer}
+
+	serverName, toolName, ok := mgr.resolveMcpToolName(McpToolName(longServer, "echo.v1"))
+	if !ok || serverName != longServer || toolName != "echo.v1" {
+		t.Fatalf("resolve longest encoded prefix = (%q, %q, %v)", serverName, toolName, ok)
+	}
+	serverName, toolName, ok = mgr.resolveMcpToolName("mcp__" + longServer + "__legacy.echo")
+	if !ok || serverName != longServer || toolName != "legacy.echo" {
+		t.Fatalf("resolve longest legacy prefix = (%q, %q, %v)", serverName, toolName, ok)
 	}
 }
 
@@ -314,7 +412,7 @@ func TestManagerStateMachineWSRejected(t *testing.T) {
 // and unregisters its tools; Enable re-arms the connect loop.
 func TestManagerDisableEnable(t *testing.T) {
 	fakeReg := newFakeRegistry()
-	restoreHooks := setToolRegistryHooksForTest(fakeReg.register, fakeReg.unregisterByPrefix)
+	restoreHooks := setToolRegistryHooksForTest(fakeReg.register, fakeReg.unregisterByServer)
 	defer restoreHooks()
 
 	registry := NewInProcRegistry()
@@ -454,7 +552,7 @@ func TestManagerCallToolRouting(t *testing.T) {
 // the correct prefixed names and unregisters them on shutdown.
 func TestManagerToolRegistration(t *testing.T) {
 	fakeReg := newFakeRegistry()
-	restoreHooks := setToolRegistryHooksForTest(fakeReg.register, fakeReg.unregisterByPrefix)
+	restoreHooks := setToolRegistryHooksForTest(fakeReg.register, fakeReg.unregisterByServer)
 	defer restoreHooks()
 
 	registry := NewInProcRegistry()

@@ -33,6 +33,7 @@ type ProjectRepository interface {
 
 	EnsureProjectActive(root, displayName string, now time.Time) (Project, error)
 	CreateProject(folders []ProjectFolder, displayName string, now time.Time) (Project, error)
+	RenameProject(projectID, displayName string, now time.Time) (Project, error)
 	AttachProjectFolder(projectID, path string, now time.Time) (Project, error)
 	DetachProjectFolder(projectID, path string, now time.Time) (Project, error)
 	SetPrimaryProjectFolder(projectID, path string, now time.Time) (Project, error)

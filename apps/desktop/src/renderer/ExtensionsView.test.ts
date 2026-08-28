@@ -12,6 +12,7 @@ import {
   connectorOwnedMcpServerNames,
   dedupeSkills,
   findConnectorOwnedMcpServer,
+  inferMcpConfigMode,
   isUserInstalledMcpServer,
   pluginOwnerFromSkillId,
   skillSourceLabel,
@@ -20,6 +21,7 @@ import {
   loadSkillListsForRoots,
   loadSkillListsForProjects,
   nextMcpConfigTextForMode,
+  mcpServerCardItem,
   skillDiagnosticText,
   withMcpServerToggleState,
 } from "./ExtensionsView";
@@ -37,6 +39,21 @@ describe("MCP configuration modes", () => {
   it("does not discard pasted configuration when the user changes mode", () => {
     const pasted = '{"mcpServers":{"private":{"url":"https://private.example.test/mcp"}}}';
     expect(nextMcpConfigTextForMode(pasted, "streamable-http")).toBe(pasted);
+  });
+
+  it("recognizes remote JSON and bare URLs without changing their content", () => {
+    expect(inferMcpConfigMode('{"mcpServers":{"钉钉 AI 表格":{"type":"streamable-http","url":"https://mcp.example.test/mcp"}}}'))
+      .toBe("streamable-http");
+    expect(inferMcpConfigMode("https://mcp.example.test/mcp?key=placeholder"))
+      .toBe("streamable-http");
+    expect(inferMcpConfigMode('{"mcpServers":{"local":{"command":"npx"}}}'))
+      .toBe("stdio");
+  });
+
+  it("does not infer one mode for mixed or incomplete configuration", () => {
+    expect(inferMcpConfigMode('{"mcpServers":')).toBeNull();
+    expect(inferMcpConfigMode('{"mcpServers":{"local":{"command":"npx"},"remote":{"url":"https://mcp.example.test"}}}'))
+      .toBeNull();
   });
 });
 
@@ -82,6 +99,18 @@ describe("MCP source grouping", () => {
     } satisfies RuntimeMcpServer;
 
     expect(isUserInstalledMcpServer(standalone, ownedNames)).toBe(true);
+  });
+
+  it("shows the configured display name while retaining the internal server id", () => {
+    const card = mcpServerCardItem({
+      name: "ai",
+      displayName: "钉钉 AI 表格",
+      state: "connected",
+      transport: "http",
+      scope: "user",
+    }, null);
+
+    expect(card).toMatchObject({ id: "ai", displayName: "钉钉 AI 表格" });
   });
 
   it("labels plugin skills with the owning plugin name", () => {

@@ -250,7 +250,7 @@ describe("RunStage layout", () => {
     expect(appSource).toContain('<ComposerBar\n                                  value={composerValue}');
   });
 
-  it("keeps the file-tab add button beside the scrollable tabs and outside fixed chrome actions", () => {
+  it("keeps file tabs scrollable while panel controls stay in fixed chrome actions", () => {
     const appSource = readFileSync(
       new URL("./App.tsx", import.meta.url),
       "utf8",
@@ -271,11 +271,21 @@ describe("RunStage layout", () => {
       '<div className="project-files-chrome-actions">',
       addStart,
     );
+    const expandToggleStart = appSource.indexOf(
+      'className="workbench-chrome-icon workbench-chrome-expand-toggle"',
+      actionsStart,
+    );
+    const inspectorToggleStart = appSource.indexOf(
+      'className="workbench-chrome-icon workbench-chrome-panel-toggle"',
+      expandToggleStart,
+    );
 
     expect(railStart).toBeGreaterThan(-1);
     expect(tabsStart).toBeGreaterThan(railStart);
     expect(addStart).toBeGreaterThan(tabsStart);
     expect(actionsStart).toBeGreaterThan(addStart);
+    expect(expandToggleStart).toBeGreaterThan(actionsStart);
+    expect(inspectorToggleStart).toBeGreaterThan(expandToggleStart);
 
     const rail = cssRule(projectFileStyles, ".project-files-tab-rail");
     const tabs = cssRule(projectFileStyles, ".project-files-tabs");
@@ -287,6 +297,10 @@ describe("RunStage layout", () => {
       projectFileStyles,
       ".project-files-tab-rail > span",
     );
+    const expandToggle = cssRule(
+      projectFileStyles,
+      ".workbench-chrome-expand-toggle",
+    );
 
     expect(rail).toContain("flex: 1 1 auto;");
     expect(rail).toContain("overflow: hidden;");
@@ -294,6 +308,7 @@ describe("RunStage layout", () => {
     expect(tabs).toContain("overflow-x: auto;");
     expect(addWrapper).toContain("flex: 0 0 auto;");
     expect(actions).toContain("flex: 0 0 auto;");
+    expect(expandToggle).toContain("flex: 0 0 auto;");
   });
 
   it("keeps Artifact tabs mounted while project-file slots become active", () => {
@@ -306,8 +321,24 @@ describe("RunStage layout", () => {
       "artifactPreviewTabsState.tabs.map((artifactTab) =>",
     );
     expect(appSource).toContain(
+      "artifactPreviewTabMediaIconConcept(\n                          artifactSelection.mediaKind,",
+    );
+    expect(appSource).toContain(
+      '<AwakenIcon concept={mediaIconConcept} size={16} />',
+    );
+    expect(appSource).toContain(
+      "data-file-icon={mediaIconConcept ?? iconKind}",
+    );
+    expect(appSource).toContain(
       'dispatchArtifactPreviewTabs({ type: "deactivate" });\n    dispatchFileWorkspaceTabs({ type: "open", tab });',
     );
+    expect(appSource).toContain("handleOpenDeliverablePreview(file, threadId)");
+    expect(appSource).toContain("isMedia && threadId\n                  ? () => handleOpenDeliverablePreview");
+    expect(appSource).not.toContain(
+      'isMedia && typeof mediaSourceState === "string" && threadId',
+    );
+    expect(appSource).not.toContain("pinnedMedia");
+    expect(appSource).not.toContain("MediaInspector");
     expect(appSource).not.toContain("setDeliverablePreview");
   });
 
@@ -356,8 +387,9 @@ describe("RunStage layout", () => {
     );
 
     const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    expect(appSource).toContain("fileWorkspacePanelActionForState({");
     expect(appSource).toContain(
-      "fileWorkspaceExpandedActive && !inspectorCollapsed ? (",
+      'fileWorkspacePanelAction === "contract"\n                                ? handleContractFileWorkspace\n                                : handleExpandFileWorkspace',
     );
   });
 

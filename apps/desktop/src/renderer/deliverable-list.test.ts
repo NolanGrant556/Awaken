@@ -81,6 +81,7 @@ describe("final deliverable list", () => {
         extension: "png",
         fileType: "image",
         previewUnavailable: true,
+        onPreview: () => undefined,
         onOpen: () => undefined,
         onReveal: () => undefined,
       }),
@@ -89,6 +90,8 @@ describe("final deliverable list", () => {
     expect(html).toContain('data-status="error"');
     expect(html).toContain("预览不可用");
     expect(html).not.toContain("<img");
+    expect(html).toContain('aria-label="预览 失效图.png"');
+    expect(html).not.toContain("aw-media-item-card-surface\" disabled");
   });
 
   it("renders a 15-image generation batch as 15 independent compact cards", () => {

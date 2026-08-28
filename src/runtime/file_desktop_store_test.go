@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -471,6 +472,135 @@ func TestFileStoreProjectOrderPersistsAcrossRestart(t *testing.T) {
 	}
 	if got := projectIDs(withNewest); len(got) != 4 || got[0] != newest.ProjectID || strings.Join(got[1:], ",") != strings.Join(wanted, ",") {
 		t.Fatalf("new project must prepend without disturbing saved order: got %v", got)
+	}
+}
+
+func TestFileStoreProjectRenameChangesOnlyTheTargetAndPersistsAcrossRestart(t *testing.T) {
+	root := setFileStoreTestRoots(t)
+	store, err := newFileDesktopStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 8, 27, 9, 0, 0, 0, time.UTC)
+	primary, secondary := t.TempDir(), t.TempDir()
+	target, err := store.CreateProject([]ProjectFolder{
+		{Path: primary, Role: ProjectFolderRoleUser, IsPrimary: true},
+		{Path: secondary, Role: ProjectFolderRoleUser},
+	}, "Before", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedHolder, err := store.CreateProject([]ProjectFolder{
+		{Path: primary, Role: ProjectFolderRoleUser, IsPrimary: true},
+	}, "Shared holder", base.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	threadBefore := ThreadSnapshot{
+		ThreadID: "thread_rename_project",
+		Label:    "rename project keeps thread",
+		RunID:    "run_rename_project",
+		Workspace: WorkspaceConfig{
+			ProjectID:     target.ProjectID,
+			ProjectName:   target.DisplayName,
+			WorkspaceRoot: primary,
+		},
+		CreatedAt: base,
+		UpdatedAt: base,
+	}
+	if err := store.CreateThread(threadBefore, "", "rename project keeps thread"); err != nil {
+		t.Fatal(err)
+	}
+	orderBefore, err := store.ListProjects(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	threadsBefore, err := store.ListThreads(ThreadListViewActive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordsBefore, err := store.journal.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	renameAt := base.Add(2 * time.Minute)
+	renamed, err := store.RenameProject(target.ProjectID, "  After  ", renameAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed.DisplayName != "After" || renamed.ProjectID != target.ProjectID {
+		t.Fatalf("rename must trim the new name and keep identity: %+v", renamed)
+	}
+	if renamed.WorkspaceRoot != target.WorkspaceRoot || !reflect.DeepEqual(renamed.Folders, target.Folders) ||
+		renamed.State != target.State || renamed.RemovalReason != target.RemovalReason || renamed.RemovedAt != target.RemovedAt ||
+		!renamed.CreatedAt.Equal(target.CreatedAt) {
+		t.Fatalf("rename changed non-name project facts: before=%+v after=%+v", target, renamed)
+	}
+	if renamed.Version != target.Version+1 || !renamed.UpdatedAt.Equal(renameAt) {
+		t.Fatalf("material rename must advance version and update time once: before=%+v after=%+v", target, renamed)
+	}
+	unchangedHolder, err := store.ProjectByID(sharedHolder.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(unchangedHolder, sharedHolder) {
+		t.Fatalf("renaming one holder changed the project sharing its folder: before=%+v after=%+v", sharedHolder, unchangedHolder)
+	}
+	orderAfter, err := store.ListProjects(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(projectIDs(orderAfter), projectIDs(orderBefore)) {
+		t.Fatalf("rename changed project order: before=%v after=%v", projectIDs(orderBefore), projectIDs(orderAfter))
+	}
+	threadsAfter, err := store.ListThreads(ThreadListViewActive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(threadsAfter, threadsBefore) {
+		t.Fatalf("rename changed thread metadata: before=%+v after=%+v", threadsBefore, threadsAfter)
+	}
+
+	noOp, err := store.RenameProject(target.ProjectID, " After ", base.Add(3*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(noOp, renamed) {
+		t.Fatalf("equal normalized name must be a no-op: renamed=%+v no-op=%+v", renamed, noOp)
+	}
+	recordsAfter, err := store.journal.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recordsAfter) != len(recordsBefore)+1 {
+		t.Fatalf("rename must append exactly one mutation and equal retry none: before=%d after=%d", len(recordsBefore), len(recordsAfter))
+	}
+
+	reopened, err := newFileDesktopStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := reopened.ProjectByID(target.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(persisted, renamed) {
+		t.Fatalf("renamed project did not replay after restart: renamed=%+v persisted=%+v", renamed, persisted)
+	}
+	restartedOrder, err := reopened.ListProjects(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(projectIDs(restartedOrder), projectIDs(orderBefore)) {
+		t.Fatalf("restart changed order after rename: before=%v after=%v", projectIDs(orderBefore), projectIDs(restartedOrder))
+	}
+	restartedThreads, err := reopened.ListThreads(ThreadListViewActive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(restartedThreads, threadsBefore) {
+		t.Fatalf("restart changed thread metadata after rename: before=%+v after=%+v", threadsBefore, restartedThreads)
 	}
 }
 

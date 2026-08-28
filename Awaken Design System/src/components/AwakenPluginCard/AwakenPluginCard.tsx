@@ -34,7 +34,7 @@ export function AwakenPluginCard({
   const body = (
     <>
       <span className="aw-plugin-card__icon" aria-hidden="true">
-        <AwakenIcon concept="plugin" size={20} />
+        <AwakenIcon concept="plugin-default" size={20} />
       </span>
       <span className="aw-plugin-card__copy">
         <span className="aw-plugin-card__title-row">

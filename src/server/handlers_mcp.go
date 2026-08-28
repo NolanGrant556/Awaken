@@ -2,12 +2,15 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"awaken/src/mcpclient"
 	"awaken/src/tool"
@@ -22,6 +25,7 @@ type mcpHandlers struct {
 // mcpServerInfo is the wire shape for entries returned by GET /v1/mcp/servers.
 type mcpServerInfo struct {
 	Name              string                      `json:"name"`
+	DisplayName       string                      `json:"displayName,omitempty"`
 	State             mcpclient.ServerState       `json:"state"`
 	Transport         mcpclient.TransportKind     `json:"transport"`
 	Scope             mcpclient.Scope             `json:"scope"`
@@ -101,6 +105,7 @@ func (h mcpHandlers) handleListServers(w http.ResponseWriter, r *http.Request) {
 	for _, snap := range snapshots {
 		info := mcpServerInfo{
 			Name:              snap.Name,
+			DisplayName:       snap.DisplayName,
 			State:             snap.State,
 			Transport:         snap.Transport,
 			Scope:             snap.Scope,
@@ -431,7 +436,10 @@ func (h mcpHandlers) handleDeleteServer(w http.ResponseWriter, r *http.Request) 
 func parseMCPServersConfig(configText string) (map[string]mcpclient.McpServerConfig, error) {
 	trimmed := strings.TrimSpace(configText)
 	if trimmed == "" {
-		return nil, fmt.Errorf("config JSON is required")
+		return nil, fmt.Errorf("config JSON or Streamable HTTP URL is required")
+	}
+	if standalone, matched, err := parseStandaloneStreamableHTTPConfig(trimmed); matched {
+		return standalone, err
 	}
 	var payload mcpConfigPayload
 	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
@@ -469,6 +477,35 @@ func parseMCPServersConfig(configText string) (map[string]mcpclient.McpServerCon
 		return nil, fmt.Errorf("expected top-level servers or mcpServers")
 	}
 	return servers, nil
+}
+
+func parseStandaloneStreamableHTTPConfig(configText string) (map[string]mcpclient.McpServerConfig, bool, error) {
+	lower := strings.ToLower(configText)
+	if !strings.HasPrefix(lower, "https://") && !strings.HasPrefix(lower, "http://") {
+		return nil, false, nil
+	}
+	endpoint, err := url.ParseRequestURI(configText)
+	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "https" && endpoint.Scheme != "http") {
+		if err == nil {
+			err = fmt.Errorf("URL must use http or https and include a host")
+		}
+		return nil, true, fmt.Errorf("invalid Streamable HTTP URL: %w", err)
+	}
+
+	identityURL := *endpoint
+	identityURL.RawQuery = ""
+	identityURL.Fragment = ""
+	name := "remote_" + shortMCPConfigHash(identityURL.String())
+	displayName := endpoint.Hostname()
+	if displayName == "" {
+		displayName = "Streamable HTTP MCP"
+	}
+	return map[string]mcpclient.McpServerConfig{
+		name: {
+			HTTP:        &mcpclient.HTTPTransportConfig{URL: configText},
+			DisplayName: displayName,
+		},
+	}, true, nil
 }
 
 func parseMCPServerEntry(raw json.RawMessage) (mcpclient.McpServerConfig, error) {
@@ -530,8 +567,9 @@ func parseMCPServerEntry(raw json.RawMessage) (mcpclient.McpServerConfig, error)
 }
 
 func safeMCPServerName(name string) string {
+	rawName := strings.TrimSpace(name)
 	var b strings.Builder
-	for _, r := range strings.TrimSpace(name) {
+	for _, r := range rawName {
 		switch {
 		case r >= 'a' && r <= 'z':
 			b.WriteRune(r)
@@ -549,7 +587,25 @@ func safeMCPServerName(name string) string {
 			}
 		}
 	}
-	return strings.Trim(b.String(), "_")
+	normalized := strings.Trim(b.String(), "_")
+	if normalized == "" && hasUnicodeServerNameRune(rawName) {
+		return "server_" + shortMCPConfigHash(rawName)
+	}
+	return normalized
+}
+
+func hasUnicodeServerNameRune(value string) bool {
+	for _, r := range value {
+		if r > unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			return true
+		}
+	}
+	return false
+}
+
+func shortMCPConfigHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("%x", sum[:6])
 }
 
 func (h mcpHandlers) handleServerDisable(w http.ResponseWriter, r *http.Request) {

@@ -22,7 +22,7 @@
     "dist:desktop:release": "npm run build:ui && npm --workspace @awaken/desktop run dist:release",
     "test:desktop-lifecycle": "node --test scripts/tests/desktop-lifecycle.test.mjs",
     "test:desktop-release": "node --test scripts/tests/desktop-release.test.mjs",
-    "test:system-skills": "python3 -B -m unittest scripts/tests/system_skills_office_test.py",
+    "test:system-skills": "python3 -B -m unittest discover -s scripts/tests -p 'system_skills_*_test.py'",
     "test:mermaid-electron:contract": "node --test scripts/tests/mermaid-electron-regression.test.mjs",
     "test:mermaid-electron": "node scripts/mermaid-electron-regression.mjs",
     "build:binary": "node scripts/build-binary.mjs",

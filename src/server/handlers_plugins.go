@@ -50,8 +50,9 @@ type pluginServerInfo struct {
 }
 
 type installPluginRequest struct {
-	Source  plugins.Source `json:"source"`
-	Replace bool           `json:"replace"`
+	Source         plugins.Source `json:"source"`
+	Replace        bool           `json:"replace"`
+	ExpectedDigest string         `json:"expectedDigest,omitempty"`
 }
 
 type commitPluginRequest struct {
@@ -101,8 +102,16 @@ func (h pluginHandlers) handleInstall(w http.ResponseWriter, r *http.Request) {
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
-	result, err := h.store.Install(r.Context(), plugins.InstallRequest{Source: req.Source, Replace: req.Replace})
+	result, err := h.store.Install(r.Context(), plugins.InstallRequest{
+		Source:         req.Source,
+		Replace:        req.Replace,
+		ExpectedDigest: req.ExpectedDigest,
+	})
 	if err != nil {
+		if errors.Is(err, plugins.ErrSourceChanged) {
+			writeErrorJSON(w, http.StatusConflict, "PLUGIN_SOURCE_CHANGED", err.Error())
+			return
+		}
 		h.writeStoreError(w, err)
 		return
 	}
@@ -111,6 +120,28 @@ func (h pluginHandlers) handleInstall(w http.ResponseWriter, r *http.Request) {
 		Plugin:  h.toPluginInfo(result.Plugin, true),
 		Message: result.Message,
 	})
+}
+
+func (h pluginHandlers) handleValidate(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureStore(w) {
+		return
+	}
+	var req struct {
+		Source plugins.Source `json:"source"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	result, err := h.store.Validate(r.Context(), req.Source)
+	if err != nil {
+		h.writeStoreError(w, err)
+		return
+	}
+	if result.Diagnostics == nil {
+		result.Diagnostics = make([]plugins.Diagnostic, 0)
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h pluginHandlers) handleCommit(w http.ResponseWriter, r *http.Request) {

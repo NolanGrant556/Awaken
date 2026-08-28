@@ -64,6 +64,7 @@ context: inline
 - `name` 与 `description` 必须在 frontmatter 中显式存在；不能依赖运行时从目录或正文推导。
 - `name` 必须与父目录名完全一致，长度为 1–64，只使用小写 ASCII 字母、数字和单连字符，不能有首尾或连续连字符。
 - `description` 长度为 1–1024，并同时写清“做什么”和“何时使用”。
+- 标准可选字段中，`license` 必须是字符串，`compatibility` 必须是非空的 1–500 字符字符串，`metadata` 必须是 string->string map，`allowed-tools` 必须是空格分隔字符串；不要用 `null` 冒充省略。
 - `context` 只可为 `inline` 或 `fork`；没有经过真实子 Agent 验收时优先保留 `inline`。
 - 参数类型只使用 `string`、`number`、`integer`、`boolean`。
 - 保留用户已有且 Awaken 能解析的 frontmatter；不要为了统一风格删除未知字段。
@@ -97,8 +98,8 @@ python3 "${AWAKEN_SKILL_DIR}/scripts/validate_skill.py" <candidate-skill-root>
 2. 选定 `project`（默认、只服务当前项目）或 `global`（用户明确要求跨项目复用）范围。
 3. 完成资源规划；复杂工作流需要只有一个 `SKILL.md` 时记录具体理由。
 4. 使用包内脚手架或 `Write`/`Edit` 在普通候选目录创建完整包，填充真实资源，并在入口中写清按需路由。
-5. 运行 `validate_skill.py`，修复 error，并处置空目录、未引用资源等 warning。
-6. 调用 `skill_install`，传同一候选目录、目标 scope、`overwrite_policy: "abort"`、`validate_only: true`。
+5. 运行零外部依赖的 `validate_skill.py`，修复包结构、基础入口与资源引用 error，并处置空目录、未引用资源等 warning。
+6. 调用 `skill_install`，传同一候选目录、目标 scope、`overwrite_policy: "abort"`、`validate_only: true`。Core 以真实 YAML parser 按 Agent Skills 规范完整校验 `name`、`description`、`license`、`compatibility`、`metadata` 和 `allowed-tools`；脚本预检不能替代这道权威门禁。
 7. 若校验失败，只修改候选包并重验；不得绕过错误直接落盘。若成功，向用户说明 Skill ID、完整文件树、文件数、总大小与 Core 返回的 proposed target。
 8. 用户请求本身包含创建并安装时，使用完全相同的候选源再次调用 `skill_install`，保持 `overwrite_policy: "abort"`、`validate_only: false`。同名冲突时停止，不擅自改为 replace。
 

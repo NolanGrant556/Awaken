@@ -151,7 +151,8 @@ func TestManagerStateMachineConnected(t *testing.T) {
 	defer cancel()
 	mgr.Start(ctx, []ScopedMcpServerConfig{
 		{Name: "echo", Scope: ScopeProject, Config: McpServerConfig{
-			InProc: &InProcTransportConfig{ServerName: "echo"},
+			InProc:      &InProcTransportConfig{ServerName: "echo"},
+			DisplayName: "中文 Echo",
 		}},
 	})
 	defer mgr.Shutdown(context.Background())
@@ -169,6 +170,9 @@ func TestManagerStateMachineConnected(t *testing.T) {
 	}
 	if snap.Scope != ScopeProject {
 		t.Errorf("expected project scope, got %s", snap.Scope)
+	}
+	if snap.DisplayName != "中文 Echo" {
+		t.Errorf("expected display name to survive snapshot, got %q", snap.DisplayName)
 	}
 	if snap.Capabilities == nil || !snap.Capabilities.SupportsTools {
 		t.Errorf("expected SupportsTools=true, got %+v", snap.Capabilities)

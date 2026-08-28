@@ -52,7 +52,7 @@ Awaken Plugin 是一个包管理与来源容器，不是第二套 Skill 或 MCP 
 
 - `name` 为 1–64 字符，只用 `a-z`、`0-9`、`.`、`-`，首尾必须是字母或数字，禁止 `--` 和 `..`；它同时决定安装目录与身份。
 - 可选字段仅按当前合同使用：`version`、`description`、`author`、`homepage`、`repository`、`license`、`keywords`、`extensions`。未知字段会被报告并忽略，不要依赖它们。
-- `skills/` 中每个直接子目录必须是严格 Agent Skills 包：`name`/`description` 显式存在，`name` 与目录完全一致，并按需携带 supporting resources；不要递归嵌套成另一层插件结构。
+- `skills/` 中每个直接子目录必须是严格 Agent Skills 包：`name`/`description` 显式存在，`name` 与目录完全一致；可选 `license` 为字符串、`compatibility` 为非空的 1–500 字符字符串、`metadata` 为 string->string map、`allowed-tools` 为空格分隔字符串，不能以显式 `null` 冒充省略。按需携带 supporting resources；不要递归嵌套成另一层插件结构。
 
 `mcp.json` 必须是 closed schema：
 
@@ -119,9 +119,9 @@ python3 "${AWAKEN_SKILL_DIR}/scripts/validate_plugin.py" <candidate-plugin-root>
 1. 明确插件要承载哪些完整 Skills、哪些 MCP servers，以及为什么需要一个 Plugin 而不是单独 Skill。没有组件也可以形成包，但校验会给出 warning。
 2. 对每个 Skill 完成资源规划；复杂流程只有入口文件时记录理由。
 3. 使用 `init_plugin.py` 或普通文件工具创建候选，再填充真实 `references/`、`scripts/`、`assets/`、`bin/` 和 `mcp.json`。不要保留脚手架占位正文或空目录。
-4. 运行 `validate_plugin.py`；修复全部 error，并处置空资源目录、未引用资源等 warning。
+4. 运行零外部依赖的 `validate_plugin.py`；修复包结构、基础入口、manifest/MCP 与资源引用 error，并处置空资源目录、未引用资源等 warning。
 5. 实际从候选目录执行每个新增或变化的 `./` stdio command，确认其可执行、能完成 MCP initialize/tools list，且没有依赖作者机器绝对路径或未声明秘密。
-6. 调用 `plugin`：`{"action":"validate","source":{"kind":"local_path","path":"<candidate>"}}`。
+6. 调用 `plugin`：`{"action":"validate","source":{"kind":"local_path","path":"<candidate>"}}`。Core 以真实 YAML parser 按 Agent Skills 规范完整校验每个内含 Skill 的 `name`、`description`、`license`、`compatibility`、`metadata` 和 `allowed-tools`；脚本预检不能替代这道权威门禁。
 7. 确认所有意图中的 Skill/server 都进入 loadable 计数；标准故障隔离产生的 component diagnostic 也必须修复，不能只看顶层 `valid`。记录 manifest identity、digest、完整文件树、Skill 数和 MCP server 数。
 8. 安装前向用户总结来源、组件、stdio command、remote URL、数据目录保留和 MCP 权限边界。用户请求本身包含创建并安装时，以同一候选调用 `action=install` 且 `replace=false`；同名冲突时停止。
 

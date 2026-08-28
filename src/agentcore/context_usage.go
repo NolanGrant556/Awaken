@@ -212,9 +212,10 @@ func buildContextUsageSnapshot(req LLMRequest, basis, requestID, protocol, shape
 			add(ContextContributionSkills, skillTokens)
 			add(ContextContributionBuiltinTools, tokens-skillTokens)
 		default:
-			// The deferred MCP directory embedded in the mcp_find description
-			// describes MCP servers/tools, so it counts toward the MCP
-			// category; only the wrapper stays builtin (Skill catalog rule).
+			// The deferred MCP directory embedded in the tool_find
+			// description describes MCP servers/tools, so it counts toward
+			// the MCP category; the wrapper and the deferred builtin catalog
+			// section stay builtin (Skill catalog rule).
 			if mcpCatalogTokens := estimateEmbeddedCatalogTokens(preparedTools, preparedToolsOK, index, attributed.Provenance.MCPCatalog, tokens); mcpCatalogTokens > 0 {
 				add(ContextContributionMCP, mcpCatalogTokens)
 				add(ContextContributionBuiltinTools, tokens-mcpCatalogTokens)

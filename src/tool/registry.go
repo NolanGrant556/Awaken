@@ -164,6 +164,27 @@ func UnregisterToolsByPrefix(prefix string) int {
 	return removed
 }
 
+// UnregisterMCPToolsByServer removes only MCP registrations whose immutable
+// definition names the exact raw server identity. Prefix matching is unsafe
+// because one legal server identity may extend another with additional "__"
+// segments (notably Agent Plugin servers).
+func UnregisterMCPToolsByServer(serverName string) int {
+	mu.Lock()
+	defer mu.Unlock()
+	removed := 0
+	for name, registered := range toolRegistry {
+		if registered.Origin != SourceMCP || registered.Definition.Annotations.ServerName != serverName {
+			continue
+		}
+		delete(toolRegistry, name)
+		removed++
+	}
+	if removed > 0 {
+		nextRegistryVersionLocked()
+	}
+	return removed
+}
+
 // ListToolNames returns the names of all currently registered tools, sorted.
 // Used by tests and by the /v1/tools endpoint.
 func ListToolNames() []string {

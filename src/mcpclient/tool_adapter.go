@@ -2,6 +2,7 @@ package mcpclient
 
 import (
 	"context"
+	"encoding/base32"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,13 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+const (
+	pluginIdentityPrefix = "plugin__"
+	mcpEncodedSentinel   = "x0_"
+)
+
+var mcpNameEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
 // McpToolAdapter wraps a single MCP-sourced tool so it satisfies Awaken's
 // tool.Tool interface. The adapter forwards Execute calls to the owning
@@ -121,7 +129,94 @@ func NewMcpToolAdapter(manager *Manager, serverName string, mcpTool *mcp.Tool, o
 
 // McpToolName formats the namespaced identifier for an MCP tool.
 func McpToolName(serverName, toolName string) string {
-	return "mcp__" + serverName + "__" + toolName
+	return McpToolPrefix(serverName) + encodeMCPNameComponent(toolName)
+}
+
+// McpToolPrefix returns the registry-safe prefix shared by every tool from a
+// raw MCP server identity. Agent Plugin server identities retain the
+// plugin__<plugin>__<server> structure, while each model-facing component is
+// made safe for provider function-name contracts.
+func McpToolPrefix(serverName string) string {
+	return "mcp__" + modelFacingMCPServerName(serverName) + "__"
+}
+
+func modelFacingMCPServerName(serverName string) string {
+	rest, isPlugin := strings.CutPrefix(serverName, pluginIdentityPrefix)
+	if !isPlugin {
+		return encodeMCPNameComponent(serverName)
+	}
+	pluginName, serverShortName, ok := strings.Cut(rest, "__")
+	if !ok || pluginName == "" || serverShortName == "" {
+		return encodeMCPNameComponent(serverName)
+	}
+
+	return pluginIdentityPrefix + modelFacingPluginName(pluginName) + "__" + encodeMCPNameComponent(serverShortName)
+}
+
+// modelFacingPluginName uses the Agent Plugins manifest grammar to keep the
+// common dotted name readable and length-stable. Underscore is not legal in a
+// manifest name, so replacing dots with underscores cannot collide with a
+// different valid plugin name. Inputs outside that grammar use the generic,
+// reversible component encoding instead.
+func modelFacingPluginName(pluginName string) string {
+	if isAgentPluginNameComponent(pluginName) {
+		return strings.ReplaceAll(pluginName, ".", "_")
+	}
+	return forceEncodeMCPNameComponent(pluginName)
+}
+
+func isAgentPluginNameComponent(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		b := value[i]
+		if (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '.' || b == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func encodeMCPNameComponent(component string) string {
+	if isSafeMCPNameComponent(component) && !strings.HasPrefix(component, mcpEncodedSentinel) {
+		return component
+	}
+	return forceEncodeMCPNameComponent(component)
+}
+
+func forceEncodeMCPNameComponent(component string) string {
+	return mcpEncodedSentinel + mcpNameEncoding.EncodeToString([]byte(component))
+}
+
+func decodeMCPNameComponent(component string) (string, bool) {
+	if !strings.HasPrefix(component, mcpEncodedSentinel) {
+		return component, component != ""
+	}
+	decoded, err := mcpNameEncoding.DecodeString(strings.TrimPrefix(component, mcpEncodedSentinel))
+	if err != nil {
+		return "", false
+	}
+	raw := string(decoded)
+	if encodeMCPNameComponent(raw) != component {
+		return "", false
+	}
+	return raw, raw != ""
+}
+
+func isSafeMCPNameComponent(component string) bool {
+	if component == "" {
+		return false
+	}
+	for i := 0; i < len(component); i++ {
+		b := component[i]
+		if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '-' || b == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // Name implements tool.Tool.
@@ -179,16 +274,17 @@ func (a *McpToolAdapter) Definition() tool.ToolDefinition {
 		Dependencies: append([]tool.DependencyRequirement(nil), a.providerManifest.Dependencies...),
 		SideEffects:  append([]tool.ToolSideEffect(nil), a.providerManifest.SideEffects...),
 		Annotations: tool.ToolAnnotations{
-			ReadOnly:        a.readOnly,
-			Destructive:     a.destructive,
-			OpenWorld:       a.openWorld,
-			RequiresAuth:    a.requiresAuth,
-			ServerName:      a.serverName,
-			ToolName:        a.toolName,
-			CapabilityClass: a.capabilityClass,
-			TrustedOrigin:   a.trustedOrigin,
-			FileBridgeScope: a.fileBridgeScope,
-			NetworkScope:    a.networkScope,
+			ReadOnly:            a.readOnly,
+			Destructive:         a.destructive,
+			OpenWorld:           a.openWorld,
+			RequiresAuth:        a.requiresAuth,
+			ServerName:          a.serverName,
+			CanonicalServerName: modelFacingMCPServerName(a.serverName),
+			ToolName:            a.toolName,
+			CapabilityClass:     a.capabilityClass,
+			TrustedOrigin:       a.trustedOrigin,
+			FileBridgeScope:     a.fileBridgeScope,
+			NetworkScope:        a.networkScope,
 		},
 	}
 }

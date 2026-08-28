@@ -22,6 +22,7 @@ import {
   composerStructuredDraftLength,
   contextUsageMeta,
   contextUsagePanelData,
+  fileWorkspacePanelActionForState,
   isUserQuestionSelectionAnswered,
   insertComposerTokenAtOffset,
   modelProfileLabel,
@@ -29,6 +30,8 @@ import {
   modelPreferenceChangeForOption,
   modelPreferenceRecoveryKey,
   mediaRevealLabelForPlatform,
+  artifactPreviewTabMediaIconConcept,
+  shouldSubmitProjectNameInputKey,
   mediaFormatLabelForPath,
   mediaArtifactRequestForPath,
   nextUserQuestionPromptIndex,
@@ -90,6 +93,7 @@ import type { RunNarrativeItem } from "./run-narrative";
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
   canReconcileTrackedTrashOperation,
+  isSameWorkspacePath,
   normalizeWorkspacePath,
   parseTrackedTrashOperations,
   projectIdForThread,
@@ -153,6 +157,22 @@ describe("media reveal platform copy", () => {
     expect(mediaRevealLabelForPlatform("macos")).toBe("在 Finder 中显示");
     expect(mediaRevealLabelForPlatform("windows")).toBe("在文件资源管理器中显示");
     expect(mediaRevealLabelForPlatform("linux")).toBe("在文件管理器中显示");
+  });
+});
+
+describe("Artifact preview tab media icons", () => {
+  it("uses standalone image and video concepts instead of the generic file family", () => {
+    expect(artifactPreviewTabMediaIconConcept("image")).toBe("media-image");
+    expect(artifactPreviewTabMediaIconConcept("video")).toBe("media-video");
+    expect(artifactPreviewTabMediaIconConcept()).toBeUndefined();
+  });
+});
+
+describe("project name input keyboard behavior", () => {
+  it("does not submit while a Windows or macOS IME is confirming composition", () => {
+    expect(shouldSubmitProjectNameInputKey({ key: "Enter" })).toBe(true);
+    expect(shouldSubmitProjectNameInputKey({ key: "Enter", isComposing: true })).toBe(false);
+    expect(shouldSubmitProjectNameInputKey({ key: "a", isComposing: false })).toBe(false);
   });
 });
 
@@ -637,6 +657,7 @@ function stubElectronBridge(): void {
         message: "not found",
       })),
       copyProjectEntryPath: vi.fn(async () => ({ ok: true as const })),
+      revealProjectEntry: vi.fn(async () => ({ ok: true as const })),
       openProjectEntryWith: vi.fn(async () => ({ ok: true as const })),
       startProjectFilePreview: vi.fn(async () => ({
         ok: false as const,
@@ -657,6 +678,7 @@ function stubElectronBridge(): void {
         byteLength: 0,
       })),
       upsertProject: vi.fn(),
+      renameProject: vi.fn(),
       reorderProjects: vi.fn(),
       detachProject: vi.fn(),
       deleteProjectThreads: vi.fn(),
@@ -721,6 +743,7 @@ function stubElectronBridge(): void {
       enableSkill: vi.fn(),
       listPlugins: vi.fn(async () => []),
       getPlugin: vi.fn(),
+      validatePlugin: vi.fn(),
       installPlugin: vi.fn(),
       enablePlugin: vi.fn(),
       disablePlugin: vi.fn(),
@@ -1304,6 +1327,23 @@ describe("resolveRunProjectForRun", () => {
     ).toEqual({ projectId: "project-multi", projectName: "研发项目" });
   });
 
+  it("keeps the renamed project identity across Windows case and separator changes", () => {
+    expect(
+      resolveRunProjectForRun({
+        workspaceRoot: "c:/users/nolan/awaken project",
+        selectedProjectId: "project-windows",
+        projectsFromWorkspace: [
+          {
+            id: "project-windows",
+            label: "Windows 客户项目",
+            path: String.raw`C:\Users\Nolan\Awaken Project`,
+            folders: userFolders(String.raw`C:\Users\Nolan\Awaken Project`),
+          },
+        ],
+      }),
+    ).toEqual({ projectId: "project-windows", projectName: "Windows 客户项目" });
+  });
+
   it("carries the identity of a folder-less project that has no root at all", () => {
     expect(
       resolveRunProjectForRun({
@@ -1329,6 +1369,22 @@ describe("resolveRunProjectForRun", () => {
     ).toEqual({
       projectId: DEFAULT_WORKSPACE_PROJECT_ID,
       projectName: "awaken-default",
+    });
+  });
+
+  it("uses the persisted display name for a renamed default workspace project", () => {
+    expect(
+      resolveRunProjectForRun({
+        workspaceRoot: "/tmp/awaken-default",
+        selectedProjectId: DEFAULT_WORKSPACE_PROJECT_ID,
+        defaultWorkspacePath: "/tmp/awaken-default",
+        defaultProjectName: "客户交付项目",
+        effectiveDefaultWorkspacePath: "/tmp/awaken-default",
+        projectsFromWorkspace: [multiFolderProject],
+      }),
+    ).toEqual({
+      projectId: DEFAULT_WORKSPACE_PROJECT_ID,
+      projectName: "客户交付项目",
     });
   });
 
@@ -3184,7 +3240,7 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).toContain('height="16"');
   });
 
-  it("renders Plugin prompt tokens with the shared inline package icon", () => {
+  it("renders Plugin prompt tokens with the shared inline puzzle icon", () => {
     const html = renderToString(
       React.createElement(AwakenUserPromptBlock, {
         text: "nimen 123",
@@ -3200,7 +3256,8 @@ describe("AwakenUserPromptBlock layout contract", () => {
     );
 
     expect(html).toContain("execution-prompt-bubble-token-plugin");
-    expect(html).toContain("aw-icon--package");
+    expect(html).toContain("aw-icon--puzzle");
+    expect(html).not.toContain("aw-icon--package");
     expect(html).not.toContain("aw-icon--agent-plugins-mark");
   });
 
@@ -3739,6 +3796,43 @@ describe("project workspace helpers", () => {
   it("normalizes workspace paths and labels them by folder name", () => {
     expect(normalizeWorkspacePath("/Users/nolangrant/Awaken/")).toBe("/Users/nolangrant/Awaken");
     expect(workspaceLabelForPath("/Users/nolangrant/Awaken/")).toBe("Awaken");
+    expect(
+      isSameWorkspacePath(
+        `${String.raw`C:\Users\Nolan\Awaken Project`}\\`,
+        "c:/users/nolan/awaken project",
+      ),
+    ).toBe(true);
+    expect(
+      isSameWorkspacePath(
+        String.raw`\\Server\Team Share\Awaken`,
+        "//server/team share/awaken/",
+      ),
+    ).toBe(true);
+    expect(
+      isSameWorkspacePath(
+        String.raw`\\?\C:\Users\Nolan\Awaken Project`,
+        "c:/users/nolan/awaken project",
+      ),
+    ).toBe(true);
+    expect(isSameWorkspacePath("/Users/Nolan/Awaken", "/users/nolan/awaken")).toBe(false);
+    expect(isSameWorkspacePath("//Server/Share/Awaken", "//server/share/awaken")).toBe(false);
+    expect(
+      workspaceProjectRunRoots({
+        path: String.raw`C:\Users\Nolan\Awaken Project`,
+        folders: [
+          {
+            path: String.raw`C:\Users\Nolan\Awaken Project`,
+            role: "user",
+            isPrimary: true,
+          },
+          {
+            path: "c:/users/nolan/awaken project/",
+            role: "user",
+            isPrimary: false,
+          },
+        ],
+      }),
+    ).toEqual([String.raw`C:\Users\Nolan\Awaken Project`]);
   });
 
   it("uses only stable runtime project IDs", () => {
@@ -3955,6 +4049,37 @@ describe("App workbench presentation", () => {
         expandedWorkspaceSurface: "file",
       }),
     ).toBe(true);
+  });
+
+  it("shows the file-workspace panel action only beside an expanded inspector", () => {
+    expect(
+      fileWorkspacePanelActionForState({
+        fileWorkspaceOpen: true,
+        fileWorkspaceExpanded: false,
+        inspectorCollapsed: false,
+      }),
+    ).toBe("expand");
+    expect(
+      fileWorkspacePanelActionForState({
+        fileWorkspaceOpen: true,
+        fileWorkspaceExpanded: true,
+        inspectorCollapsed: false,
+      }),
+    ).toBe("contract");
+    expect(
+      fileWorkspacePanelActionForState({
+        fileWorkspaceOpen: true,
+        fileWorkspaceExpanded: false,
+        inspectorCollapsed: true,
+      }),
+    ).toBeUndefined();
+    expect(
+      fileWorkspacePanelActionForState({
+        fileWorkspaceOpen: false,
+        fileWorkspaceExpanded: false,
+        inspectorCollapsed: false,
+      }),
+    ).toBeUndefined();
   });
 
   it("pauses the outer inspector resize handle only while the file workspace is expanded", () => {

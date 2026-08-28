@@ -136,7 +136,8 @@ export function AwakenMediaItemCard({
   const ready = status === "ready";
   const transient =
     !ready && status !== "unknown" && status !== "error" && status !== "cancelled";
-  const previewEnabled = ready && loaded && Boolean(onPreview) && !disabled;
+  const previewEnabled =
+    (ready || (status === "error" && Boolean(onPreview))) && !disabled;
   const menuAvailable = Boolean(onViewInInspector || onOpenExternal || onReveal);
   const fallbackRatio = kind === "video" ? 16 / 9 : 4 / 3;
   const cardStyle = {

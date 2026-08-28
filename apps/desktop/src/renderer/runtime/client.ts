@@ -90,6 +90,8 @@ import {
   type RuntimeProject,
   type RuntimeProjectOperation,
   type RuntimePlugin,
+  type RuntimePluginSource,
+  type RuntimePluginValidation,
   type RuntimeSkill,
   type SkillProjectRoots,
   type SkillPreviewResponse,
@@ -240,6 +242,7 @@ export type RuntimeClient = {
   enableSkill: (id: string) => Promise<void>;
   listPlugins: () => Promise<RuntimePlugin[]>;
   getPlugin: (name: string) => Promise<RuntimePlugin>;
+  validatePlugin: (source: RuntimePluginSource) => Promise<RuntimePluginValidation>;
   installPlugin: (request: InstallPluginRequest) => Promise<InstallPluginResponse>;
   enablePlugin: (name: string) => Promise<RuntimePlugin>;
   disablePlugin: (name: string) => Promise<RuntimePlugin>;
@@ -300,6 +303,7 @@ export type RuntimeClient = {
     request: ProjectEntryActionRequest,
   ) => Promise<ProjectEntryResolveResult>;
   copyProjectEntryPath: (request: ProjectEntryActionRequest) => Promise<ProjectEntryActionResult>;
+  revealProjectEntry: (request: ProjectEntryActionRequest) => Promise<ProjectEntryActionResult>;
   openProjectEntryWith: (request: ProjectEntryOpenWithRequest) => Promise<ProjectEntryActionResult>;
   startProjectFilePreview: (
     request: ProjectFilePreviewStartRequest,
@@ -329,6 +333,7 @@ export type RuntimeClient = {
     folders: ProjectFolderSelection[],
     displayName?: string,
   ) => Promise<UpsertProjectResult>;
+  renameProject: (projectId: string, displayName: string) => Promise<UpsertProjectResult>;
   attachProjectFolder: (projectId: string, path: string) => Promise<UpsertProjectResult>;
   detachProjectFolder: (projectId: string, path: string) => Promise<UpsertProjectResult>;
   setPrimaryProjectFolder: (projectId: string, path: string) => Promise<UpsertProjectResult>;
@@ -521,6 +526,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     enableSkill: (id) => bridge.enableSkill(id),
     listPlugins: () => bridge.listPlugins(),
     getPlugin: (name) => bridge.getPlugin(name),
+    validatePlugin: (source) => bridge.validatePlugin(source),
     installPlugin: (request) => bridge.installPlugin(request),
     enablePlugin: (name) => bridge.enablePlugin(name),
     disablePlugin: (name) => bridge.disablePlugin(name),
@@ -569,6 +575,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     onProjectDirectoryChanged: (handler) => bridge.onProjectDirectoryChanged(handler),
     resolveProjectEntryForTask: (request) => bridge.resolveProjectEntryForTask(request),
     copyProjectEntryPath: (request) => bridge.copyProjectEntryPath(request),
+    revealProjectEntry: (request) => bridge.revealProjectEntry(request),
     openProjectEntryWith: (request) => bridge.openProjectEntryWith(request),
     startProjectFilePreview: (request) => bridge.startProjectFilePreview(request),
     startArtifactPreview: (request) => bridge.startArtifactPreview(request),
@@ -591,6 +598,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
 			: undefined,
     upsertProject: (workspaceRoot, displayName) => bridge.upsertProject(workspaceRoot, displayName),
     createProject: (folders, displayName) => bridge.createProject(folders, displayName),
+    renameProject: (projectId, displayName) => bridge.renameProject(projectId, displayName),
     attachProjectFolder: (projectId, path) => bridge.attachProjectFolder(projectId, path),
     detachProjectFolder: (projectId, path) => bridge.detachProjectFolder(projectId, path),
     setPrimaryProjectFolder: (projectId, path) => bridge.setPrimaryProjectFolder(projectId, path),

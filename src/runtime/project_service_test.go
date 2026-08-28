@@ -49,6 +49,48 @@ func TestProjectDetachIsIdempotentAndKeepsThreads(t *testing.T) {
 	}
 }
 
+func TestProjectRenameSupportsFolderlessProjectsAndRejectsInvalidStates(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	projects := newDurableThreadTestService().ProjectService()
+
+	folderless, err := projects.CreateProject(nil, "Before")
+	if err != nil {
+		t.Fatal(err)
+	}
+	renamed, err := projects.RenameProject(folderless.ProjectID, "  Folderless after  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed.DisplayName != "Folderless after" || renamed.WorkspaceRoot != "" || len(renamed.Folders) != 0 {
+		t.Fatalf("folderless rename changed the project shape: %+v", renamed)
+	}
+	if _, err := projects.RenameProject(folderless.ProjectID, " \t\n "); !errors.Is(err, ErrProjectNameInvalid) {
+		t.Fatalf("blank project name must be rejected, got %v", err)
+	}
+	if _, err := projects.RenameProject("project_missing", "Exists"); !errors.Is(err, ErrProjectNotFound) {
+		t.Fatalf("unknown project must be rejected, got %v", err)
+	}
+
+	trashRoot := t.TempDir()
+	pending, err := projects.UpsertProject(trashRoot, "Pending")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projects.PrepareTrash(pending.ProjectID, trashRoot, "rename-pending-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projects.RenameProject(pending.ProjectID, "Must not change"); !errors.Is(err, ErrProjectOperationConflict) {
+		t.Fatalf("trash-pending project rename must conflict, got %v", err)
+	}
+	stillPending, err := projects.store.ProjectByID(pending.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stillPending.DisplayName != pending.DisplayName || stillPending.State != ProjectStateTrashPending {
+		t.Fatalf("rejected rename changed the pending project: before=%+v after=%+v", pending, stillPending)
+	}
+}
+
 func TestProjectUpsertCannotReactivateTrashPendingOrClearFence(t *testing.T) {
 	t.Setenv(awakenHomeEnv, t.TempDir())
 	workspaceRoot := t.TempDir()

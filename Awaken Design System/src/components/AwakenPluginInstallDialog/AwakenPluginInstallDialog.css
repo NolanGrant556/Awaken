@@ -1,7 +1,7 @@
 @import "../../tokens/components.css";
 
 .aw-plugin-install-dialog {
-  width: min(620px, calc(100vw - 48px));
+  width: min(680px, calc(100vw - 48px));
 }
 
 .aw-plugin-install-dialog__body {
@@ -43,6 +43,198 @@
   color: var(--aw-text-primary);
   font-size: var(--aw-font-size-sm);
   line-height: var(--aw-line-height-base);
+}
+
+.aw-plugin-install-dialog__validation {
+  display: grid;
+  gap: var(--aw-space-5);
+  padding: var(--aw-space-6);
+  border: 1px solid var(--aw-error-soft-border);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-error-soft-bg);
+}
+
+.aw-plugin-install-dialog__validation[data-valid="true"] {
+  border-color: var(--aw-success-soft-border);
+  background: var(--aw-success-soft-bg);
+}
+
+.aw-plugin-install-dialog__validation-header {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--aw-space-4);
+}
+
+.aw-plugin-install-dialog__validation-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--aw-radius-sm);
+  background: color-mix(in srgb, var(--aw-error) 12%, transparent);
+  color: var(--aw-status-danger-text);
+}
+
+.aw-plugin-install-dialog__validation[data-valid="true"]
+  .aw-plugin-install-dialog__validation-icon {
+  background: color-mix(in srgb, var(--aw-success) 14%, transparent);
+  color: var(--aw-status-success-text);
+}
+
+.aw-plugin-install-dialog__validation-header > div {
+  display: grid;
+  gap: var(--aw-space-1);
+  min-width: 0;
+}
+
+.aw-plugin-install-dialog__validation h3,
+.aw-plugin-install-dialog__validation h4,
+.aw-plugin-install-dialog__validation p,
+.aw-plugin-install-dialog__validation dl,
+.aw-plugin-install-dialog__validation dd {
+  margin: 0;
+}
+
+.aw-plugin-install-dialog__validation h3 {
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  font-weight: var(--aw-font-weight-bold);
+  line-height: var(--aw-line-height-base);
+}
+
+.aw-plugin-install-dialog__validation-header p {
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-plugin-install-dialog__validation-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--aw-space-4) var(--aw-space-6);
+  padding: var(--aw-space-5);
+  border: 1px solid color-mix(in srgb, var(--aw-border-main) 72%, transparent);
+  border-radius: var(--aw-radius-sm);
+  background: color-mix(in srgb, var(--aw-surface-raised) 76%, transparent);
+}
+
+.aw-plugin-install-dialog__validation-facts > div {
+  display: grid;
+  gap: var(--aw-space-1);
+  min-width: 0;
+}
+
+.aw-plugin-install-dialog__validation-facts dt,
+.aw-plugin-install-dialog__diagnostics h4 {
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: var(--aw-line-height-xs);
+}
+
+.aw-plugin-install-dialog__validation-facts dd {
+  display: flex;
+  align-items: baseline;
+  gap: var(--aw-space-2);
+  min-width: 0;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-sm);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-plugin-install-dialog__validation-facts dd strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-plugin-install-dialog__validation-facts dd span {
+  flex: 0 0 auto;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-plugin-install-dialog__validation-facts
+  .aw-plugin-install-dialog__validation-digest {
+  grid-column: 1 / -1;
+}
+
+.aw-plugin-install-dialog__validation-digest dd {
+  display: block;
+  overflow: hidden;
+  color: var(--aw-text-secondary);
+  font-family: var(--aw-font-mono);
+  font-size: var(--aw-font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-plugin-install-dialog__diagnostics {
+  display: grid;
+  gap: var(--aw-space-3);
+  padding-top: var(--aw-space-4);
+  border-top: 1px solid color-mix(in srgb, var(--aw-border-main) 72%, transparent);
+}
+
+.aw-plugin-install-dialog__diagnostics ul {
+  display: grid;
+  gap: var(--aw-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.aw-plugin-install-dialog__diagnostics li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--aw-space-3);
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-sm);
+}
+
+.aw-plugin-install-dialog__diagnostics li > span {
+  min-width: 34px;
+  padding: 1px var(--aw-space-2);
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-main);
+  color: var(--aw-text-secondary);
+  text-align: center;
+  font-weight: var(--aw-font-weight-semibold);
+}
+
+.aw-plugin-install-dialog__diagnostics li[data-severity="error"] > span {
+  background: var(--aw-status-danger-bg);
+  color: var(--aw-status-danger-text);
+}
+
+.aw-plugin-install-dialog__diagnostics li[data-severity="warning"] > span {
+  background: var(--aw-status-waiting-bg);
+  color: var(--aw-status-waiting-text);
+}
+
+.aw-plugin-install-dialog__diagnostics li p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--aw-space-1) var(--aw-space-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.aw-plugin-install-dialog__diagnostics code {
+  color: var(--aw-text-primary);
+  font-family: var(--aw-font-mono);
+  font-size: inherit;
+}
+
+.aw-plugin-install-dialog__diagnostics-more,
+.aw-plugin-install-dialog__diagnostics-empty {
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
 }
 
 .aw-plugin-install-dialog__modes {
@@ -290,8 +482,14 @@
 }
 
 @media (max-width: 620px) {
+  .aw-plugin-install-dialog__validation-facts,
   .aw-plugin-install-dialog__optional-fields {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aw-plugin-install-dialog__validation-facts
+    .aw-plugin-install-dialog__validation-digest {
+    grid-column: auto;
   }
 
   .aw-plugin-install-dialog__path {

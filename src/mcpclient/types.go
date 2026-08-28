@@ -42,6 +42,7 @@ const (
 // /v1/mcp/servers endpoint.
 type ServerSnapshot struct {
 	Name            string            `json:"name"`
+	DisplayName     string            `json:"displayName,omitempty"`
 	State           ServerState       `json:"state"`
 	Transport       TransportKind     `json:"transport"`
 	Scope           Scope             `json:"scope"`

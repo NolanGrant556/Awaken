@@ -9,6 +9,7 @@ export type PreviewFrameProps = {
   onReload: () => void;
   onOpenExternal: () => void;
   onReveal: () => void;
+  revealLabel?: string;
   children: ReactNode;
 };
 
@@ -20,6 +21,7 @@ export default function PreviewFrame({
   onReload,
   onOpenExternal,
   onReveal,
+  revealLabel = "在文件管理器中显示",
   children,
 }: PreviewFrameProps) {
   return (
@@ -56,8 +58,8 @@ export default function PreviewFrame({
             </button>
             <button
               type="button"
-              aria-label="在文件管理器中显示"
-              title="在文件管理器中显示"
+              aria-label={revealLabel}
+              title={revealLabel}
               onClick={onReveal}
             >
               <AwakenIcon concept="locate-folder" size={16} />

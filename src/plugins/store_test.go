@@ -236,6 +236,62 @@ func TestValidateLocalPluginDoesNotInstall(t *testing.T) {
 	}
 }
 
+func TestValidateLocalPluginSkipsBadSkillButKeepsValidServer(t *testing.T) {
+	store := testStore(t)
+	src := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(src, "skills", "bad-flow"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(src, "skills", "good-flow"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "plugin.json"), []byte(`{
+		"$schema":"`+SchemaPluginV1+`",
+		"name":"validate.isolated",
+		"version":"1.0.0"
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "skills", "bad-flow", "SKILL.md"), []byte("---\nname: bad-flow\ndescription: Bad skill.\nmetadata:\n  attempts: 2\n---\nBody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "skills", "good-flow", "SKILL.md"), []byte("---\nname: good-flow\ndescription: Good skill.\n---\nBody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "mcp.json"), []byte(`{
+		"$schema":"`+SchemaMCPV1+`",
+		"mcpServers":{
+			"local":{"type":"stdio","command":"npx","args":["--version"]}
+		}
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	validation, err := store.Validate(context.Background(), Source{Kind: SourceLocalPath, Path: src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validation.Valid {
+		t.Fatalf("validation unexpectedly failed: %+v", validation)
+	}
+	if validation.SkillCount != 1 {
+		t.Fatalf("expected one loadable skill after isolating the bad skill, got %+v", validation)
+	}
+	if validation.ServerCount != 1 {
+		t.Fatalf("expected one valid server, got %+v", validation)
+	}
+	found := false
+	for _, diagnostic := range validation.Diagnostics {
+		if diagnostic.Code == "plugin_skill_invalid" && diagnostic.Severity == "warning" && strings.Contains(diagnostic.Message, "metadata[\"attempts\"] must be a string") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected isolated invalid skill diagnostic, got %+v", validation.Diagnostics)
+	}
+}
+
 func TestInstallAndExportPreserveBundledExecutable(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix executable mode is not applicable on Windows")

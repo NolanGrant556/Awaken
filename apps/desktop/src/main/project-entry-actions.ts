@@ -62,6 +62,47 @@ type OpenProjectEntryDependencies = {
   launchWindowsApplication: (executablePath: string, absolutePath: string) => Promise<boolean>;
 };
 
+type RevealProjectEntryDependencies = {
+  openPath: (realPath: string) => Promise<string>;
+  showItemInFolder: (realPath: string) => void;
+};
+
+export async function revealProjectEntryInFileManager(
+  realPath: string,
+  kind: ProjectEntryKind,
+  dependencies: RevealProjectEntryDependencies,
+): Promise<ProjectEntryActionResult> {
+  if (kind === "directory") {
+    try {
+      const errorMessage = await dependencies.openPath(realPath);
+      return errorMessage
+        ? {
+            ok: false,
+            code: "ENTRY_REVEAL_FAILED",
+            message: "暂时无法打开这个文件夹。",
+          }
+        : { ok: true };
+    } catch {
+      return {
+        ok: false,
+        code: "ENTRY_REVEAL_FAILED",
+        message: "暂时无法打开这个文件夹。",
+      };
+    }
+  }
+
+  try {
+    dependencies.showItemInFolder(realPath);
+    return { ok: true };
+  } catch {
+    return {
+      ok: false,
+      code: "ENTRY_REVEAL_FAILED",
+      message: "暂时无法在文件管理器中显示这个文件。",
+    };
+  }
+}
+
 function entryExtension(absolutePath: string): string {
   return path.win32.extname(absolutePath).toLowerCase();
 }

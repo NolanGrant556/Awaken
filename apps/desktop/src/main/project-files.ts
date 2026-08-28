@@ -41,8 +41,21 @@ function isPathInside(root: string, candidate: string): boolean {
   );
 }
 
-function sameResolvedPath(left: string, right: string): boolean {
-  return path.resolve(left) === path.resolve(right);
+export function sameProjectFolderPath(
+  left: string,
+  right: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  const pathApi = platform === "win32" ? path.win32 : path;
+  const resolvedLeft = pathApi.resolve(left);
+  const resolvedRight = pathApi.resolve(right);
+  if (platform !== "win32") return resolvedLeft === resolvedRight;
+  const comparisonKey = (value: string): string => {
+    const lower = value.toLowerCase();
+    if (lower.startsWith("\\\\?\\unc\\")) return `\\\\${value.slice(8)}`.toLowerCase();
+    return (lower.startsWith("\\\\?\\") ? value.slice(4) : value).toLowerCase();
+  };
+  return comparisonKey(resolvedLeft) === comparisonKey(resolvedRight);
 }
 
 export type ResolvedProjectFile = {
@@ -133,7 +146,7 @@ export async function resolveProjectEntry(
   }
 
   const folder = project.folders.find((candidate) =>
-    sameResolvedPath(candidate.path, request.folderPath),
+    sameProjectFolderPath(candidate.path, request.folderPath),
   );
   if (!folder) {
     return {
@@ -301,7 +314,7 @@ export async function listProjectDirectory(
   }
 
   const folder = project.folders.find((candidate) =>
-    sameResolvedPath(candidate.path, request.folderPath),
+    sameProjectFolderPath(candidate.path, request.folderPath),
   );
   if (!folder) {
     return {

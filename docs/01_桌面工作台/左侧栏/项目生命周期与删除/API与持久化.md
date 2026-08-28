@@ -18,7 +18,7 @@
 
 ## 3. 公共 API 动作
 
-具体 method、path 与注册条件只查 09 域。项目域提供：列出项目（默认排除 removed）、创建或 upsert 项目、挂载文件夹、解绑文件夹、切换主文件夹、以完整active project id序列替换侧栏顺序、detach 且保留历史和目录、逻辑删除项目历史、prepare 文件夹级 trash-and-purge、列出未终态 trash operation、查询 operation，以及只在合法等待阶段取消 operation。
+具体 method、path 与注册条件只查 09 域。项目域提供：列出项目（默认排除 removed）、创建或 upsert 项目、按稳定 ID 重命名、挂载文件夹、解绑文件夹、切换主文件夹、以完整active project id序列替换侧栏顺序、detach 且保留历史和目录、逻辑删除项目历史、prepare 文件夹级 trash-and-purge、列出未终态 trash operation、查询 operation，以及只在合法等待阶段取消 operation。
 
 ### 3.1 创建与文件夹组成
 
@@ -41,7 +41,15 @@
 
 `POST /v1/projects/{id}/folders/trash` 的 body 是 `{"path": "..."}`，指明本次进废纸篓的那个用户文件夹。它创建 operation，因此仍然要求 `Idempotency-Key`。
 
-### 3.2 幂等与排序
+### 3.2 重命名
+
+`PATCH /v1/projects/{id}` 接受 `{"display_name":"..."}`，返回 `200` 与更新后的完整 project。Core 去掉名称首尾空白；结果为空返回 `400 PROJECT_NAME_INVALID`。项目不存在返回 `404 PROJECT_NOT_FOUND`，项目处于 `trash_pending` 返回 `409 PROJECT_OPERATION_CONFLICT`。
+
+重命名按稳定 `project_id` 原子 set，不创建 operation，也不需要 `Idempotency-Key`。新名称与当前名称相同是 no-op，不推进 `version` / `updated_at`，也不追加空 mutation；真正变化只推进这三个名称相关事实，不改变 `folders`、`workspace_root`、`state`、`project_order`、thread metadata 或历史。共享同一个文件夹的其他项目不受影响。零文件夹项目使用完全相同的合同。
+
+Desktop 后续创建或继续 run 时，把当前 project authority 的最新 `display_name` 作为 `workspace.project_name` 送入 TaskScope；该字段进入模型上下文，但不参与路径、权限或 identity 解析。名称变化会让后续 run 重建 scope 上下文，不回写既有 transcript。
+
+### 3.3 幂等与排序
 
 创建operation的修改请求必须带 `Idempotency-Key`。同 key/同 project/action 返回同 operation；同 key 被其他 operation 占用返回冲突。“删除会话”内部使用稳定 `thread-delete:<thread-id>`，重复请求不重复创建 job。项目排序使用幂等的完整替换 `PUT`，body为 `{"project_ids":[...]}`，不创建operation，也不修改project `version/updated_at`；请求必须包含当前每个active project且每个id恰好一次。
 
@@ -76,6 +84,7 @@ operation 的目标是一个文件夹，不是整个项目：`complete-trash` �
 | `IDEMPOTENCY_KEY_REQUIRED` | 400 | 修改请求缺 key |
 | `PROJECT_PATH_INVALID` | 400 | workspace path 无效 |
 | `PROJECT_ORDER_INVALID` | 400 | 排序缺少active project、包含重复/空id或非active project |
+| `PROJECT_NAME_INVALID` | 400 | 重命名去掉首尾空白后为空 |
 | `PROJECT_FOLDER_NOT_FOUND` | 404 | 目标文件夹不在这个项目里 |
 
 未知错误返回 `INTERNAL_ERROR`；详细错误只写带 operation id 的结构化日志，Renderer 显示稳定 notice。
@@ -94,6 +103,8 @@ operation 的目标是一个文件夹，不是整个项目：`complete-trash` �
 ```
 
 `state.json` 是可重建快照，不是第二 authority；启动从 journal seq 重放到最新。
+
+`RenameProject` mutation携带重命名后的完整 project post-state。它不携带 `project_order`、thread side-file mutation 或 operation/job，因此重启只重放名称及该次 material change 的 `version/updated_at`；同名 no-op 不写 journal。
 
 文件夹归属只有一处事实：每个 project 自己的 `folders`。存储层不再维护路径到 project 的反向索引；「这个目录属于哪些项目」由 `ProjectsHoldingFolder` 按侧栏顺序扫描 project 得出，可能返回多个。旧 `state.json` 里遗留的 `workspace_index` 字段不再被读取，解码时忽略，无需迁移。禁止先删除 session 目录再提交逻辑 mutation，否则 crash 会造成 UI 历史与物理文件不一致。operation/job ID、时间和 cutoff 必须先生成并写进 mutation，重放不得重新生成。
 
@@ -141,12 +152,13 @@ Renderer 启动无条件调用项目列表 API，并只把返回的 stable `proj
 9. Renderer与localStorage不得成为项目顺序authority；拖拽只产生乐观UI，Core拒绝后必须按FileStore回滚。
 10. 项目的文件夹数可以为零；有文件夹时恰好一个是 primary。零文件夹项目的 run 由 `workspace.project_id` 解析到项目 session 工作目录。`workspace_root` 与 `project_id` 同时为空属于独立对话，不创建 project row，也不进入项目生命周期状态机；其 thread/session 契约由 02、03、04 域拥有。
 11. 一个磁盘路径可以属于任意多个项目；归属只从各 project 的 `folders` 派生，不存在需要维护一致性的反向索引。判断「这个文件夹还能不能开 run」必须聚合它的全部持有者，而不是任取一个。
+12. 项目名称是模型可见上下文而不是授权事实；重命名不得改变 `project_id`、路径 scope、文件夹归属、项目顺序或 thread ownership。
 
 ## 11. 验证
 
-- `src/runtime/file_desktop_store_test.go`、`project_service_test.go`：状态、项目排序完整性与restart replay、idempotency、cutoff、lease、fingerprint、crash recovery、cleanup。
+- `src/runtime/file_desktop_store_test.go`、`project_service_test.go`：状态、项目重命名的原子性/no-op/restart replay、项目排序完整性与restart replay、idempotency、cutoff、lease、fingerprint、crash recovery、cleanup。
 - `src/runtime/project_folders_test.go`：多文件夹创建与 primary 指定、只凭名字创建零文件夹项目、跨项目 attach 冲突、primary 切换、解绑最后一个文件夹后项目仍存活且回到零文件夹、次文件夹 trash 后项目存活、旧 snapshot 合成单 primary、多根 TaskScope 保护项、session 工作目录解析与 sessions 子树例外。
-- `src/server/project_handlers_test.go`：routes、HTTP 错误、attempt 链。
+- `src/server/project_handlers_test.go`：routes、重命名 trim/错误映射、HTTP 错误、attempt 链。
 - `apps/desktop/src/main/project-trash-worker.test.ts`：claim、path replacement、invocation boundary、attempt、vanished staging。
 - `apps/desktop/src/renderer/App.test.ts`、`projectWorkspace` tests：多根 run scope、folder tracker 与 reconcile。
 

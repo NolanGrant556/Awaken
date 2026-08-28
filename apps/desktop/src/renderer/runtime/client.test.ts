@@ -160,6 +160,47 @@ describe("electron runtime client", () => {
     expect(bridge.pickPluginSource).toHaveBeenCalledWith("/Users/test/Desktop");
   });
 
+  it("forwards project-entry reveal through the dedicated bridge", async () => {
+    const { bridge } = createElectronBridge({ status: "running" });
+    bridge.revealProjectEntry = vi.fn(async () => ({ ok: true as const }));
+    installBridge(bridge);
+    const request = {
+      projectId: "project-1",
+      folderPath: "/workspace/app",
+      relativePath: "README.md",
+      kind: "file" as const,
+    };
+
+    const client = createRuntimeClient();
+    await expect(client.revealProjectEntry(request)).resolves.toEqual({ ok: true });
+    expect(bridge.revealProjectEntry).toHaveBeenCalledWith(request);
+  });
+
+  it("forwards project rename through the dedicated bridge", async () => {
+    const { bridge } = createElectronBridge({ status: "running" });
+    bridge.renameProject = vi.fn(async () => ({
+      ok: true as const,
+      project: {
+        projectId: "project-1",
+        workspaceRoot: "",
+        folders: [],
+        displayName: "季度复盘",
+        state: "active" as const,
+        createdAt: "2026-08-27T00:00:00Z",
+        updatedAt: "2026-08-27T00:01:00Z",
+        version: 2,
+      },
+    }));
+    installBridge(bridge);
+
+    const client = createRuntimeClient();
+    await expect(client.renameProject("project-1", "季度复盘")).resolves.toMatchObject({
+      ok: true,
+      project: { projectId: "project-1", displayName: "季度复盘" },
+    });
+    expect(bridge.renameProject).toHaveBeenCalledWith("project-1", "季度复盘");
+  });
+
   it("forwards batch thread deletion through the typed bridge", async () => {
     const { bridge } = createElectronBridge({ status: "running" });
     bridge.deleteThreads = vi.fn(async () => ({

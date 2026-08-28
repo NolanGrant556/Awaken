@@ -380,9 +380,17 @@ func TestInstalledPluginStdioEndToEnd(t *testing.T) {
 	if modelToolName != "mcp__plugin__installed_stdio__echo__echo" {
 		t.Fatalf("unexpected model-facing dotted plugin tool name %q", modelToolName)
 	}
-	registered, err := tool.GetRegisteredTool(modelToolName)
-	if err != nil {
-		t.Fatalf("dotted plugin MCP tool was not registered: %v", err)
+	var registered tool.RegisteredTool
+	toolDeadline := time.Now().Add(8 * time.Second)
+	for {
+		registered, err = tool.GetRegisteredTool(modelToolName)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, tool.ErrToolNotFound) || time.Now().After(toolDeadline) {
+			t.Fatalf("dotted plugin MCP tool was not registered: %v", err)
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 	if registered.Definition.Annotations.ServerName != serverName || registered.Definition.Annotations.ToolName != "echo" {
 		t.Fatalf("raw plugin MCP identity was not preserved: %+v", registered.Definition.Annotations)

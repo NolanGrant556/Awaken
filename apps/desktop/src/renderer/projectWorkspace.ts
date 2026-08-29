@@ -9,6 +9,7 @@ export type WorkspaceProjectFolder = {
 export type WorkspaceProject = {
   id: string;
   backendProjectId?: string;
+  displayName?: string;
   label: string;
   /** 主文件夹路径；Core 始终保证项目恰好有一个主文件夹。 */
   path: string;
@@ -157,6 +158,20 @@ export function normalizeWorkspacePath(path: string): string {
   return trimmed.replace(/[\\/]+$/, "");
 }
 
+function usesWindowsWorkspacePathSemantics(value: string): boolean {
+  return /^[A-Za-z]:(?:[\\/]|$)/.test(value) || /^\\\\[^\\]+\\[^\\]+/.test(value);
+}
+
+function workspacePathComparisonKey(value: string, windowsSemantics: boolean): string {
+  const normalized = normalizeWorkspacePath(value);
+  if (!windowsSemantics) return normalized;
+  const portable = normalized.replaceAll("\\", "/");
+  if (portable.toLowerCase().startsWith("//?/unc/")) {
+    return `//${portable.slice(8)}`.toLowerCase();
+  }
+  return (portable.startsWith("//?/") ? portable.slice(4) : portable).toLowerCase();
+}
+
 export function workspaceLabelForPath(path: string): string {
   const normalized = normalizeWorkspacePath(path);
   if (!normalized) {
@@ -170,7 +185,12 @@ export function isSameWorkspacePath(a?: string, b?: string): boolean {
   if (!a || !b) {
     return false;
   }
-  return normalizeWorkspacePath(a) === normalizeWorkspacePath(b);
+  const windowsSemantics =
+    usesWindowsWorkspacePathSemantics(a) || usesWindowsWorkspacePathSemantics(b);
+  return (
+    workspacePathComparisonKey(a, windowsSemantics) ===
+    workspacePathComparisonKey(b, windowsSemantics)
+  );
 }
 
 export function projectIdForThread(
@@ -217,7 +237,7 @@ export function workspaceProjectRunRoots(
   const roots = primary ? [primary] : [];
   for (const folder of project.folders) {
     const path = normalizeWorkspacePath(folder.path);
-    if (path && !roots.includes(path)) {
+    if (path && !roots.some((root) => isSameWorkspacePath(root, path))) {
       roots.push(path);
     }
   }

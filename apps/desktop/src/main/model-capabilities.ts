@@ -534,6 +534,16 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
     },
   },
   qwen: {
+    "qwen3.7-plus": {
+      supported_protocols: ["openai_chat", "openai_responses", "anthropic_messages"],
+      context_window: 1_000_000,
+      max_input_tokens: 983_616,
+      max_output_tokens: 131_072,
+      default_max_tokens: 32_000,
+      supports_vision: true,
+      supports_video: true,
+      supports_tools: "ready",
+    },
     "qwen3.8-max": {
       supported_protocols: ["openai_chat", "openai_responses", "anthropic_messages"],
       max_input_tokens: 983_616,

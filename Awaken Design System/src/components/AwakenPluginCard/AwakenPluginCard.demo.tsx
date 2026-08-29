@@ -1,12 +1,26 @@
 import { useState } from "react";
 import { AwakenPluginCard, type AwakenPluginCardItem } from "./AwakenPluginCard";
 import { AwakenPluginDetailDialog } from "../AwakenPluginDetailDialog";
-import { AwakenPluginInstallDialog, type AwakenPluginInstallMode } from "../AwakenPluginInstallDialog";
+import {
+  AwakenPluginInstallDialog,
+  type AwakenPluginInstallMode,
+  type AwakenPluginValidationSummary,
+} from "../AwakenPluginInstallDialog";
 
 const initial: AwakenPluginCardItem[] = [
   { name: "acme.tools", version: "1.2.0", description: "Tools", skillCount: 1, serverCount: 2, enabled: true },
   { name: "lint-kit", version: "0.9.0", description: "诊断示例", skillCount: 0, serverCount: 1, enabled: false, diagnostic: "mcp.json invalid" },
 ];
+
+const installValidation: AwakenPluginValidationSummary = {
+  valid: true,
+  name: "acme.tools",
+  version: "1.2.0",
+  digest: "sha256-v2:9320952a413947fc9afbd85f09dd98c3f6172ace924cb25dcd1c44ac85d5921f",
+  skillCount: 1,
+  serverCount: 2,
+  diagnostics: [],
+};
 
 export function AwakenPluginCardDemo() {
   const [items, setItems] = useState(initial);
@@ -16,6 +30,7 @@ export function AwakenPluginCardDemo() {
   const [localPath, setLocalPath] = useState("");
   const [url, setUrl] = useState("");
   const [confirm, setConfirm] = useState(false);
+  const [validation, setValidation] = useState<AwakenPluginValidationSummary | null>(null);
   return (
     <section className="ads-component-demo" aria-label="Plugin 组件族演示">
       <header className="ads-component-demo-header">
@@ -42,11 +57,22 @@ export function AwakenPluginCardDemo() {
         localPath={localPath}
         url={url}
         confirm={confirm}
+        validation={validation}
         onOpenChange={setInstallOpen}
-        onModeChange={setMode}
-        onLocalPathChange={setLocalPath}
-        onUrlChange={setUrl}
+        onModeChange={(value) => {
+          setMode(value);
+          setValidation(null);
+        }}
+        onLocalPathChange={(value) => {
+          setLocalPath(value);
+          setValidation(null);
+        }}
+        onUrlChange={(value) => {
+          setUrl(value);
+          setValidation(null);
+        }}
         onConfirmChange={setConfirm}
+        onValidate={() => setValidation(installValidation)}
         onSubmit={() => setInstallOpen(false)}
       />
       <AwakenPluginDetailDialog

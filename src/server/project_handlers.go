@@ -35,6 +35,10 @@ type projectFolderRequest struct {
 	Path string `json:"path"`
 }
 
+type renameProjectRequest struct {
+	DisplayName string `json:"display_name"`
+}
+
 type reorderProjectsRequest struct {
 	ProjectIDs []string `json:"project_ids"`
 }
@@ -95,6 +99,20 @@ func (h projectHandlers) handleUpsertProject(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusCreated, project)
+}
+
+func (h projectHandlers) handleRenameProject(w http.ResponseWriter, r *http.Request) {
+	var request renameProjectRequest
+	if err := decodeJSON(r, &request); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	project, err := h.service.RenameProject(r.PathValue("project_id"), request.DisplayName)
+	if err != nil {
+		writeProjectServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, project)
 }
 
 func (h projectHandlers) handleAttachProjectFolder(w http.ResponseWriter, r *http.Request) {
@@ -329,7 +347,7 @@ func writeProjectServiceError(w http.ResponseWriter, err error) {
 		status = http.StatusNotFound
 	case "PROJECT_OPERATION_CONFLICT", "PROJECT_RUNS_BUSY", "IDEMPOTENCY_KEY_CONFLICT", "PROJECT_PATH_FINGERPRINT_CHANGED", "PROJECT_TRASH_ATTEMPT_INVALID":
 		status = http.StatusConflict
-	case "IDEMPOTENCY_KEY_REQUIRED", "PROJECT_PATH_INVALID", "PROJECT_ORDER_INVALID":
+	case "IDEMPOTENCY_KEY_REQUIRED", "PROJECT_PATH_INVALID", "PROJECT_ORDER_INVALID", "PROJECT_NAME_INVALID":
 		status = http.StatusBadRequest
 	}
 	if status >= 500 {

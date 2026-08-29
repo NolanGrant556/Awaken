@@ -76,6 +76,70 @@ func TestProjectLifecycleRESTCreateDetachAndIdempotency(t *testing.T) {
 	}
 }
 
+func TestProjectLifecycleRESTRenamesByStableIDWithoutIdempotencyKey(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	service := awruntime.NewRunService(nil, nil)
+	router := NewRouter(service, nil)
+
+	create := projectJSONRequest(t, router, http.MethodPost, "/v1/projects", map[string]any{
+		"display_name": "Before",
+	}, "")
+	if create.Code != http.StatusCreated {
+		t.Fatalf("expected create 201, got %d: %s", create.Code, create.Body.String())
+	}
+	var project awruntime.Project
+	if err := json.Unmarshal(create.Body.Bytes(), &project); err != nil {
+		t.Fatal(err)
+	}
+
+	rename := projectJSONRequest(t, router, http.MethodPatch, "/v1/projects/"+project.ProjectID, map[string]any{
+		"display_name": "  After  ",
+	}, "")
+	if rename.Code != http.StatusOK {
+		t.Fatalf("expected rename without idempotency key to return 200, got %d: %s", rename.Code, rename.Body.String())
+	}
+	var renamed awruntime.Project
+	if err := json.Unmarshal(rename.Body.Bytes(), &renamed); err != nil {
+		t.Fatal(err)
+	}
+	if renamed.ProjectID != project.ProjectID || renamed.DisplayName != "After" || renamed.WorkspaceRoot != "" || len(renamed.Folders) != 0 {
+		t.Fatalf("unexpected renamed project: before=%+v after=%+v", project, renamed)
+	}
+
+	blank := projectJSONRequest(t, router, http.MethodPatch, "/v1/projects/"+project.ProjectID, map[string]any{
+		"display_name": " \t ",
+	}, "")
+	assertProjectRESTError(t, blank, http.StatusBadRequest, "PROJECT_NAME_INVALID")
+
+	missing := projectJSONRequest(t, router, http.MethodPatch, "/v1/projects/project_missing", map[string]any{
+		"display_name": "Exists",
+	}, "")
+	assertProjectRESTError(t, missing, http.StatusNotFound, "PROJECT_NOT_FOUND")
+
+	trashRoot := t.TempDir()
+	createPending := projectJSONRequest(t, router, http.MethodPost, "/v1/projects", map[string]any{
+		"workspace_root": trashRoot,
+		"display_name":   "Pending",
+	}, "")
+	if createPending.Code != http.StatusCreated {
+		t.Fatalf("expected pending project create 201, got %d: %s", createPending.Code, createPending.Body.String())
+	}
+	var pending awruntime.Project
+	if err := json.Unmarshal(createPending.Body.Bytes(), &pending); err != nil {
+		t.Fatal(err)
+	}
+	prepare := projectJSONRequest(t, router, http.MethodPost, "/v1/projects/"+pending.ProjectID+"/folders/trash", map[string]any{
+		"path": trashRoot,
+	}, "rename-pending-rest-1")
+	if prepare.Code != http.StatusAccepted {
+		t.Fatalf("expected trash prepare 202, got %d: %s", prepare.Code, prepare.Body.String())
+	}
+	conflict := projectJSONRequest(t, router, http.MethodPatch, "/v1/projects/"+pending.ProjectID, map[string]any{
+		"display_name": "Must not change",
+	}, "")
+	assertProjectRESTError(t, conflict, http.StatusConflict, "PROJECT_OPERATION_CONFLICT")
+}
+
 func TestProjectLifecycleRESTReordersEveryActiveProject(t *testing.T) {
 	t.Setenv("AWAKEN_HOME", t.TempDir())
 	service := awruntime.NewRunService(nil, nil)
@@ -356,4 +420,18 @@ func projectJSONRequest(t *testing.T, router http.Handler, method, path string, 
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	return recorder
+}
+
+func assertProjectRESTError(t *testing.T, response *httptest.ResponseRecorder, status int, code string) {
+	t.Helper()
+	if response.Code != status {
+		t.Fatalf("expected %d %s, got %d: %s", status, code, response.Code, response.Body.String())
+	}
+	var apiError errorResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &apiError); err != nil {
+		t.Fatal(err)
+	}
+	if apiError.Error != code {
+		t.Fatalf("expected error %s, got %+v", code, apiError)
+	}
 }

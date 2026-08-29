@@ -414,7 +414,7 @@ export const BUILTIN_MODEL_PROVIDERS: ModelProviderWire[] = [
     },
     key_env_name: "DASHSCOPE_API_KEY",
     default_model: "qwen3.8-max",
-    models: ["qwen3.8-max"],
+    models: ["qwen3.7-plus", "qwen3.8-max"],
     docs_url: "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions",
     api_docs_url: "https://bailian.console.aliyun.com/",
     access_type: "api",

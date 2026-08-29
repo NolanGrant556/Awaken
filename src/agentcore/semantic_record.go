@@ -28,10 +28,16 @@ const (
 	SemanticKindTurnDiff                SemanticKind = "turn_diff"
 	SemanticKindPermissionDecision      SemanticKind = "permission_decision"
 	SemanticKindSkillActivated          SemanticKind = "skill_activated"
-	// SemanticKindMCPToolsActivated records that deferred MCP tool
-	// definitions were loaded on demand (via mcp_find or a direct call while
-	// progressive disclosure is active). The payload carries only tool names,
-	// the activation source and time — never schemas or arguments.
+	// SemanticKindDeferredToolsActivated records that deferred tool
+	// definitions (builtin auxiliary or MCP) were loaded on demand (via
+	// tool_find or a direct call while progressive disclosure is active).
+	// The payload carries only tool names, the activation source and time —
+	// never schemas or arguments.
+	SemanticKindDeferredToolsActivated SemanticKind = "deferred_tools_activated"
+	// SemanticKindMCPToolsActivated is the legacy activation record kind
+	// written before the disclosure generalization. Restore still merges it
+	// into the activated set; new activations write
+	// SemanticKindDeferredToolsActivated.
 	SemanticKindMCPToolsActivated      SemanticKind = "mcp_tools_activated"
 	SemanticKindResourceReceipt        SemanticKind = "resource_receipt"
 	SemanticKindRuntimeNotice          SemanticKind = "runtime_notice"

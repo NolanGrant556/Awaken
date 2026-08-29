@@ -108,24 +108,35 @@ function processInfo() {
 }
 
 function startDesktopScreen() {
-  const display = process.env.DISPLAY || ":1";
   const pathValue = process.env.PATH || "/usr/bin";
   const logFile = "/tmp/awaken-dev-desktop.log";
+  const isLinux = process.platform === "linux";
+  const display = process.env.DISPLAY || ":1";
+  // Linux containers/VMs run headless X servers: pin the X11 platform, keep
+  // DISPLAY across the detached screen session, and disable the Chromium
+  // sandbox that cannot start without user namespaces. macOS/Windows keep
+  // their default Electron behavior.
+  const linuxExports = isLinux
+    ? [
+        `export DISPLAY=${shellQuote(display)}`,
+        "export ELECTRON_OZONE_PLATFORM=x11",
+        "export ELECTRON_DISABLE_SANDBOX=1",
+      ]
+    : [];
   const command = [
     `cd ${shellQuote(rootDir)}`,
     `export PATH=${shellQuote(pathValue)}`,
-    `export DISPLAY=${shellQuote(display)}`,
-    "export ELECTRON_OZONE_PLATFORM=x11",
-    "export ELECTRON_DISABLE_SANDBOX=1",
+    ...linuxExports,
     `npm run dev:desktop:managed > ${shellQuote(logFile)} 2>&1`,
   ].join(" && ");
+  const linuxEnv = isLinux
+    ? { DISPLAY: display, ELECTRON_OZONE_PLATFORM: "x11", ELECTRON_DISABLE_SANDBOX: "1" }
+    : {};
   const result = run("screen", ["-dmS", screenName, "bash", "-c", command], {
     env: {
       ...process.env,
       PATH: pathValue,
-      DISPLAY: display,
-      ELECTRON_OZONE_PLATFORM: "x11",
-      ELECTRON_DISABLE_SANDBOX: "1",
+      ...linuxEnv,
     },
   });
   if (!result.ok) {

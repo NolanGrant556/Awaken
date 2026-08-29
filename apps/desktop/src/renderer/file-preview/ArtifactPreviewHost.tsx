@@ -1,7 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { AwakenIcon } from "@awaken/design-system";
+import { AwakenIcon, type AwakenMediaMetadata } from "@awaken/design-system";
 import type { ArtifactOpenRequest, ProjectFilePreviewHandle } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
+import ArtifactMediaPreview from "./ArtifactMediaPreview";
 import ImagePreview from "./ImagePreview";
 import PreviewErrorBoundary from "./PreviewErrorBoundary";
 import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
@@ -14,6 +15,7 @@ const PdfPreview = lazy(() => import("./PdfPreview"));
 
 export type ArtifactPreviewSelection = ArtifactOpenRequest & {
   title: string;
+  mediaKind?: "image" | "video";
 };
 
 export type ArtifactPreviewHostProps = {
@@ -26,6 +28,12 @@ export type ArtifactPreviewHostProps = {
   > &
     Partial<Pick<RuntimeClient, "onProjectFilePreviewInteraction">>;
   selection: ArtifactPreviewSelection;
+  mediaSource?: string;
+  mediaSourceUnavailable?: boolean;
+  mediaMetadata?: AwakenMediaMetadata;
+  revealLabel?: string;
+  onMediaError?: () => void;
+  onMediaMetadata?: (metadata: AwakenMediaMetadata) => void;
   onPreviewPrimaryClick?: () => void;
 };
 
@@ -41,9 +49,37 @@ function previewRequestId(): string {
   );
 }
 
-export default function ArtifactPreviewHost({
+export default function ArtifactPreviewHost(props: ArtifactPreviewHostProps) {
+  const { selection } = props;
+  if (selection.mediaKind) {
+    const request: ArtifactOpenRequest = {
+      threadId: selection.threadId,
+      runId: selection.runId,
+      artifactId: selection.artifactId,
+      artifactPath: selection.artifactPath,
+    };
+    return (
+      <ArtifactMediaPreview
+        runtimeClient={props.runtimeClient}
+        request={request}
+        title={selection.title}
+        kind={selection.mediaKind}
+        src={props.mediaSource}
+        sourceUnavailable={props.mediaSourceUnavailable}
+        metadata={props.mediaMetadata}
+        revealLabel={props.revealLabel}
+        onMediaError={props.onMediaError}
+        onMetadata={props.onMediaMetadata}
+      />
+    );
+  }
+  return <ArtifactDocumentPreviewHost {...props} />;
+}
+
+function ArtifactDocumentPreviewHost({
   runtimeClient,
   selection,
+  revealLabel = "在文件管理器中显示",
   onPreviewPrimaryClick,
 }: ArtifactPreviewHostProps) {
   const [retryGeneration, setRetryGeneration] = useState(0);
@@ -165,7 +201,7 @@ export default function ArtifactPreviewHost({
           </button>
           <button type="button" onClick={() => runArtifactAction(runtimeClient.revealArtifact)}>
             <AwakenIcon concept="locate-folder" size={16} />
-            在文件管理器中显示
+            {revealLabel}
           </button>
         </div>
       </div>
@@ -182,6 +218,7 @@ export default function ArtifactPreviewHost({
     onReload: () => setRetryGeneration((value) => value + 1),
     onOpenExternal: () => runArtifactAction(runtimeClient.openArtifact),
     onReveal: () => runArtifactAction(runtimeClient.revealArtifact),
+    revealLabel,
   };
 
   return (

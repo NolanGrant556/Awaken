@@ -27,6 +27,8 @@ import type {
   RuntimeMcpServer,
   RuntimeMcpServerConfigResponse,
   RuntimePlugin,
+  RuntimePluginSource,
+  RuntimePluginValidation,
   RuntimeProject,
   RuntimeSkill,
   RuntimeToolInfo,
@@ -50,6 +52,30 @@ export type McpToolInfo = {
 };
 
 export type ExtensionSection = "connectors" | "skills" | "plugins";
+
+function buildPluginInstallSource(
+  mode: "local" | "url",
+  localPath: string,
+  url: string,
+  refValue: string,
+  subpath: string,
+): RuntimePluginSource {
+  if (mode === "local") {
+    return { kind: "local_path", path: localPath.trim() };
+  }
+  const normalizedUrl = url.trim();
+  const normalizedRef = refValue.trim();
+  const normalizedSubpath = subpath.trim();
+  if (normalizedUrl.includes(".git") || normalizedRef || normalizedSubpath) {
+    return {
+      kind: "remote_git",
+      url: normalizedUrl,
+      ref: normalizedRef || undefined,
+      subpath: normalizedSubpath || undefined,
+    };
+  }
+  return { kind: "remote_url", url: normalizedUrl };
+}
 
 type ConnectorKind = "mcp" | "cli";
 export type SkillView = "awaken" | "project" | "user" | "agents";
@@ -124,6 +150,40 @@ export function nextMcpConfigTextForMode(
     return currentValue;
   }
   return nextMode === "stdio" ? MCP_STDIO_EXAMPLE : MCP_STREAMABLE_HTTP_EXAMPLE;
+}
+
+export function inferMcpConfigMode(value: string): AwakenMcpConfigMode | null {
+  const normalized = value.trim();
+  if (/^https?:\/\//i.test(normalized)) {
+    return "streamable-http";
+  }
+  if (!normalized.startsWith("{")) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(normalized) as {
+      servers?: Record<string, unknown>;
+      mcpServers?: Record<string, unknown>;
+    };
+    const entries = [
+      ...Object.values(payload.servers ?? {}),
+      ...Object.values(payload.mcpServers ?? {}),
+    ];
+    let hasStdio = false;
+    let hasRemote = false;
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const config = entry as Record<string, unknown>;
+      hasStdio ||= typeof config.command === "string" || config.stdio !== undefined;
+      hasRemote ||= typeof config.url === "string" || config.http !== undefined || config.sse !== undefined;
+    }
+    if (hasRemote && !hasStdio) return "streamable-http";
+    if (hasStdio && !hasRemote) return "stdio";
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 export const DEFAULT_SKILL_VIEW: SkillView = "awaken";
@@ -305,14 +365,14 @@ function mcpConnectorCardItem(
   };
 }
 
-function mcpServerCardItem(
+export function mcpServerCardItem(
   server: RuntimeMcpServer,
   busyMcpServerName: string | null,
 ): AwakenConnectorCardItem {
   return {
     id: server.name,
     variant: "server",
-    displayName: server.name,
+    displayName: server.displayName?.trim() || server.name,
     description: server.errorReason || `${server.transport} · ${server.scope}`,
     state: server.state,
     stateLabel: stateLabel(server.state),
@@ -697,6 +757,7 @@ export function ExtensionsView({
   const refreshGenerationRef = useRef(0);
   const visibleRefreshGenerationRef = useRef(0);
   const appliedPluginCatalogRevisionRef = useRef(composerCatalogRevision);
+  const pluginValidationGenerationRef = useRef(0);
   const busyMcpServerNameRef = useRef<string | null>(null);
   const [skillToggleStates, setSkillToggleStates] = useState<Record<string, boolean>>({});
   const [busySkillId, setBusySkillId] = useState<string | null>(null);
@@ -722,6 +783,9 @@ export function ExtensionsView({
   const [pluginSubpath, setPluginSubpath] = useState("");
   const [pluginReplace, setPluginReplace] = useState(false);
   const [pluginConfirm, setPluginConfirm] = useState(false);
+  const [pluginValidation, setPluginValidation] =
+    useState<RuntimePluginValidation | null>(null);
+  const [validatingPlugin, setValidatingPlugin] = useState(false);
   const [installingPlugin, setInstallingPlugin] = useState(false);
   const [selectedPlugin, setSelectedPlugin] = useState<RuntimePlugin | null>(null);
   const [busyPluginName, setBusyPluginName] = useState<string | null>(null);
@@ -1249,7 +1313,7 @@ export function ExtensionsView({
 
   async function handleConfigureMcp(): Promise<void> {
     if (mcpConfigText.trim() === "") {
-      setErrorMessage("请粘贴 MCP 配置 JSON");
+      setErrorMessage("请粘贴 MCP 配置 JSON 或 Streamable HTTP URL");
       return;
     }
     setConfiguringMcp(true);
@@ -1270,6 +1334,15 @@ export function ExtensionsView({
     setMcpConfigText((currentValue) =>
       nextMcpConfigTextForMode(currentValue, nextMode));
     setMcpConfigMode(nextMode);
+    setErrorMessage(null);
+  }
+
+  function handleMcpConfigTextChange(nextValue: string): void {
+    setMcpConfigText(nextValue);
+    const inferredMode = inferMcpConfigMode(nextValue);
+    if (inferredMode) {
+      setMcpConfigMode(inferredMode);
+    }
     setErrorMessage(null);
   }
 
@@ -1462,6 +1535,7 @@ export function ExtensionsView({
   }
 
   async function handlePickPluginSource(): Promise<void> {
+    invalidatePluginValidation();
     setErrorMessage(null);
     try {
       const result = await runtimeClient.pickPluginSource(
@@ -1475,6 +1549,13 @@ export function ExtensionsView({
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "插件来源选择失败");
     }
+  }
+
+  function invalidatePluginValidation(): void {
+    pluginValidationGenerationRef.current += 1;
+    setPluginValidation(null);
+    setValidatingPlugin(false);
+    setErrorMessage(null);
   }
 
   async function openCliConnectorDetail(providerId: CliProviderId): Promise<void> {
@@ -1713,28 +1794,63 @@ export function ExtensionsView({
     ? cliConnectorProductCopy(selectedCliConnector.id)
     : null;
 
+  function currentPluginInstallSource(): RuntimePluginSource {
+    return buildPluginInstallSource(
+      pluginInstallMode,
+      pluginLocalPath,
+      pluginUrl,
+      pluginRef,
+      pluginSubpath,
+    );
+  }
+
+  async function handleValidatePlugin(): Promise<void> {
+    const generation = pluginValidationGenerationRef.current + 1;
+    pluginValidationGenerationRef.current = generation;
+    setPluginValidation(null);
+    setValidatingPlugin(true);
+    setErrorMessage(null);
+    try {
+      const result = await runtimeClient.validatePlugin(currentPluginInstallSource());
+      if (pluginValidationGenerationRef.current !== generation) return;
+      setPluginValidation(result);
+    } catch (error) {
+      if (pluginValidationGenerationRef.current !== generation) return;
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (pluginValidationGenerationRef.current === generation) {
+        setValidatingPlugin(false);
+      }
+    }
+  }
+
   async function handleInstallPlugin(): Promise<void> {
+    const expectedDigest = pluginValidation?.digest?.trim();
+    if (!pluginConfirm || pluginValidation?.valid !== true || !expectedDigest) {
+      setErrorMessage("请先完成插件检查，并确认当前来源通过校验");
+      return;
+    }
     setInstallingPlugin(true);
     setErrorMessage(null);
     try {
-      const source =
-        pluginInstallMode === "local"
-          ? { kind: "local_path" as const, path: pluginLocalPath.trim() }
-          : pluginUrl.includes(".git") || pluginRef.trim() || pluginSubpath.trim()
-            ? {
-                kind: "remote_git" as const,
-                url: pluginUrl.trim(),
-                ref: pluginRef.trim() || undefined,
-                subpath: pluginSubpath.trim() || undefined,
-              }
-            : { kind: "remote_url" as const, url: pluginUrl.trim() };
-      await runtimeClient.installPlugin({ source, replace: pluginReplace });
+      await runtimeClient.installPlugin({
+        source: currentPluginInstallSource(),
+        replace: pluginReplace,
+        expectedDigest,
+      });
       setPluginDialogOpen(false);
       setPluginConfirm(false);
-      onNotice("插件已安装");
+      invalidatePluginValidation();
+      onNotice("插件已安装，将在新任务中生效");
       await refresh();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("PLUGIN_SOURCE_CHANGED")) {
+        invalidatePluginValidation();
+        setErrorMessage("插件来源已变化，请重新检查后再安装");
+      } else {
+        setErrorMessage(message);
+      }
     } finally {
       setInstallingPlugin(false);
     }
@@ -1787,6 +1903,7 @@ export function ExtensionsView({
           onRefresh={() => { void refresh(); }}
           onInstall={() => {
             setPluginConfirm(false);
+            invalidatePluginValidation();
             setPluginDialogOpen(true);
           }}
           onPluginOpen={(plugin) => { void openPluginDetail(plugin.name); }}
@@ -1804,17 +1921,41 @@ export function ExtensionsView({
           subpath={pluginSubpath}
           replace={pluginReplace}
           confirm={pluginConfirm}
+          validation={pluginValidation}
+          validating={validatingPlugin}
           errorMessage={pluginDialogOpen ? errorMessage : null}
           busy={installingPlugin}
-          onOpenChange={setPluginDialogOpen}
-          onModeChange={setPluginInstallMode}
-          onLocalPathChange={setPluginLocalPath}
-          onUrlChange={setPluginUrl}
-          onRefChange={setPluginRef}
-          onSubpathChange={setPluginSubpath}
-          onReplaceChange={setPluginReplace}
+          onOpenChange={(open) => {
+            setPluginDialogOpen(open);
+            if (!open) invalidatePluginValidation();
+          }}
+          onModeChange={(mode) => {
+            invalidatePluginValidation();
+            setPluginInstallMode(mode);
+          }}
+          onLocalPathChange={(value) => {
+            invalidatePluginValidation();
+            setPluginLocalPath(value);
+          }}
+          onUrlChange={(value) => {
+            invalidatePluginValidation();
+            setPluginUrl(value);
+          }}
+          onRefChange={(value) => {
+            invalidatePluginValidation();
+            setPluginRef(value);
+          }}
+          onSubpathChange={(value) => {
+            invalidatePluginValidation();
+            setPluginSubpath(value);
+          }}
+          onReplaceChange={(value) => {
+            invalidatePluginValidation();
+            setPluginReplace(value);
+          }}
           onConfirmChange={setPluginConfirm}
           onPickLocal={() => { void handlePickPluginSource(); }}
+          onValidate={() => { void handleValidatePlugin(); }}
           onSubmit={() => { void handleInstallPlugin(); }}
         />
         <AwakenPluginDetailDialog
@@ -2006,13 +2147,13 @@ export function ExtensionsView({
           busy={configuringMcp}
           onOpenChange={setMcpDialogOpen}
           onModeChange={handleMcpConfigModeChange}
-          onValueChange={setMcpConfigText}
+          onValueChange={handleMcpConfigTextChange}
           onSubmit={() => { void handleConfigureMcp(); }}
         />
 
         <AwakenMcpSettingsDialog
           open={mcpSettingsOpen}
-          serverName={selectedMcpServer?.name}
+          serverName={selectedMcpServer?.displayName?.trim() || selectedMcpServer?.name}
           scopeLabel={mcpSettingsScope ? sourceLabel(mcpSettingsScope) : ""}
           configValue={mcpSettingsConfigText}
           tools={mcpTools}

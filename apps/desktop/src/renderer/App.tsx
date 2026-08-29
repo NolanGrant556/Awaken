@@ -26,7 +26,6 @@ import {
   AwakenExecutionFeed as ExecutionFeed,
   AwakenIcon,
   AwakenMediaGenerationCard as MediaGenerationCard,
-  AwakenMediaInspector as MediaInspector,
   AwakenMediaPreviewOverlay as MediaPreviewOverlay,
   AwakenInspectorRail as InspectorRail,
   AwakenSubagentGroup as SubagentGroup,
@@ -116,6 +115,7 @@ import {
 } from "./runtime/reducer";
 import type {
   ACPDisplayStatus,
+  DeliverableFile,
   PromptNarrativeToken,
   RunNarrativeItem,
   SubagentNarrativeTask,
@@ -430,6 +430,14 @@ export function mediaFormatLabelForPath(path?: string): string | undefined {
   return extension?.trim().toUpperCase() || undefined;
 }
 
+export function artifactPreviewTabMediaIconConcept(
+  mediaKind?: "image" | "video",
+): "media-image" | "media-video" | undefined {
+  if (mediaKind === "image") return "media-image";
+  if (mediaKind === "video") return "media-video";
+  return undefined;
+}
+
 const MAX_ARTIFACT_MEDIA_SOURCE_RETRIES = 2;
 
 export type UserQuestionSelection = {
@@ -473,6 +481,13 @@ export function mediaRevealLabelForPlatform(platform: PlatformKind): string {
   return "在文件管理器中显示";
 }
 
+export function shouldSubmitProjectNameInputKey(event: {
+  key: string;
+  isComposing?: boolean;
+}): boolean {
+  return event.key === "Enter" && !event.isComposing;
+}
+
 export function shouldUseCenterComposerWithFileWorkspace({
   standardCenterComposer,
   fileWorkspaceOpen,
@@ -488,6 +503,21 @@ export function shouldUseCenterComposerWithFileWorkspace({
     !(fileWorkspaceOpen && fileWorkspaceExpanded && expandedWorkspaceSurface === "file") &&
     standardCenterComposer
   );
+}
+
+export type FileWorkspacePanelAction = "expand" | "contract";
+
+export function fileWorkspacePanelActionForState({
+  fileWorkspaceOpen,
+  fileWorkspaceExpanded,
+  inspectorCollapsed,
+}: {
+  fileWorkspaceOpen: boolean;
+  fileWorkspaceExpanded: boolean;
+  inspectorCollapsed: boolean;
+}): FileWorkspacePanelAction | undefined {
+  if (!fileWorkspaceOpen || inspectorCollapsed) return undefined;
+  return fileWorkspaceExpanded ? "contract" : "expand";
 }
 
 export function shouldEnableInspectorResizeHandle({
@@ -1164,6 +1194,7 @@ export function resolveRunProjectForRun(args: {
   workspaceRoot: string;
   selectedProjectId?: string;
   defaultWorkspacePath?: string;
+  defaultProjectName?: string;
   effectiveDefaultWorkspacePath?: string;
   projectsFromWorkspace: WorkspaceProject[];
 }): { projectId?: string; projectName?: string } {
@@ -1171,6 +1202,7 @@ export function resolveRunProjectForRun(args: {
     workspaceRoot,
     selectedProjectId,
     defaultWorkspacePath,
+    defaultProjectName,
     effectiveDefaultWorkspacePath,
     projectsFromWorkspace,
   } = args;
@@ -1194,7 +1226,9 @@ export function resolveRunProjectForRun(args: {
   if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
     return {
       projectId,
-      projectName: defaultWorkspacePath ? workspaceLabelForPath(defaultWorkspacePath) : "awaken",
+      projectName:
+        defaultProjectName?.trim() ||
+        (defaultWorkspacePath ? workspaceLabelForPath(defaultWorkspacePath) : "awaken"),
     };
   }
   return {
@@ -1228,6 +1262,7 @@ function sameWorkspaceProjects(current: WorkspaceProject[], next: WorkspaceProje
       return (
         existing?.id === project.id &&
         existing.backendProjectId === project.backendProjectId &&
+        existing.displayName === project.displayName &&
         existing.path === project.path &&
         existing.label === project.label &&
         sameWorkspaceProjectFolders(existing.folders, project.folders)
@@ -2430,7 +2465,6 @@ export function App() {
   >(null);
   const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(null);
   const [mediaPreview, setMediaPreview] = useState<MediaArtifactPreviewState | null>(null);
-  const [pinnedMedia, setPinnedMedia] = useState<MediaArtifactPreviewItem | null>(null);
   const [artifactMediaSources, setArtifactMediaSources] = useState<Record<string, string | null>>({});
   const [artifactMediaMetadata, setArtifactMediaMetadata] = useState<
     Record<string, AwakenMediaMetadata>
@@ -2483,6 +2517,8 @@ export function App() {
   const [draftProjectName, setDraftProjectName] = useState<string>("");
   const [createProjectSubmitting, setCreateProjectSubmitting] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingProjectName, setEditingProjectName] = useState("");
+  const [projectRenameSubmitting, setProjectRenameSubmitting] = useState(false);
   const [projectFolderBusyPath, setProjectFolderBusyPath] = useState<string | undefined>(undefined);
   const [projectsFromWorkspace, setProjectsFromWorkspace] = useState<WorkspaceProject[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(undefined);
@@ -2518,6 +2554,9 @@ export function App() {
   const projectReorderSubmittingRef = useRef(false);
   const [removedProjectIds, setRemovedProjectIds] = useState<string[]>([]);
   const [defaultBackendProjectId, setDefaultBackendProjectId] = useState<string | undefined>(
+    undefined,
+  );
+  const [defaultProjectDisplayName, setDefaultProjectDisplayName] = useState<string | undefined>(
     undefined,
   );
   const [defaultProjectFolders, setDefaultProjectFolders] = useState<WorkspaceProjectFolder[]>([]);
@@ -2716,7 +2755,6 @@ export function App() {
     setArtifactMediaSources({});
     setArtifactMediaMetadata({});
     setMediaPreview(null);
-    setPinnedMedia(null);
     dispatchArtifactPreviewTabs({ type: "reset" });
   }, [runtimeState.activeThreadId]);
 
@@ -3107,6 +3145,7 @@ export function App() {
       isSameWorkspacePath(project.workspaceRoot, configuredDefaultWorkspacePath),
     );
     setDefaultBackendProjectId(defaultProject?.projectId);
+    setDefaultProjectDisplayName(defaultProject?.displayName.trim() || undefined);
     const nextDefaultFolders =
       defaultProject?.folders.map<WorkspaceProjectFolder>((folder) => ({
         path: folder.path,
@@ -3143,6 +3182,7 @@ export function App() {
       .map<WorkspaceProject>((project) => ({
         id: project.projectId,
         backendProjectId: project.projectId,
+        displayName: project.displayName,
         label: project.displayName || workspaceLabelForPath(project.workspaceRoot),
         path: project.workspaceRoot,
         folders: project.folders.map<WorkspaceProjectFolder>((folder) => ({
@@ -3975,9 +4015,14 @@ export function App() {
   const projectLabelById = new Map<string, string>([
     [
       DEFAULT_WORKSPACE_PROJECT_ID,
-      defaultWorkspacePath ? workspaceLabelForPath(defaultWorkspacePath) : "awaken",
+      defaultProjectDisplayName ||
+        (defaultWorkspacePath ? workspaceLabelForPath(defaultWorkspacePath) : "awaken"),
     ],
     ...projectsFromWorkspace.map((project) => [project.id, project.label] as const),
+  ]);
+  const projectDisplayNameById = new Map<string, string | undefined>([
+    [DEFAULT_WORKSPACE_PROJECT_ID, defaultProjectDisplayName],
+    ...projectsFromWorkspace.map((project) => [project.id, project.displayName] as const),
   ]);
   const removedProjectIdSet = new Set(removedProjectIds);
   const workspaceLabelProjectId = activeThreadProjectId ?? selectedProjectId;
@@ -4169,6 +4214,68 @@ export function App() {
     return project?.backendProjectId;
   }
 
+  function openProjectEditor(projectId: string): void {
+    setEditingProjectId(projectId);
+    setEditingProjectName(projectLabelById.get(projectId) ?? "");
+    setNotice(null);
+  }
+
+  function closeProjectEditor(): void {
+    setEditingProjectId(null);
+    setEditingProjectName("");
+  }
+
+  async function handleFinishEditingProject(): Promise<void> {
+    const projectId = editingProjectId;
+    if (!projectId || projectRenameSubmitting || projectFolderBusyPath) {
+      return;
+    }
+    const displayName = editingProjectName.trim();
+    if (!displayName) {
+      setNotice("项目名称不能为空。");
+      return;
+    }
+    if (displayName === projectDisplayNameById.get(projectId)?.trim()) {
+      closeProjectEditor();
+      return;
+    }
+    const backendProjectId = backendProjectIdFor(projectId);
+    if (!backendProjectId) {
+      setNotice("项目正在初始化，请稍后重试。");
+      return;
+    }
+
+    setProjectRenameSubmitting(true);
+    setNotice(null);
+    try {
+      const result = await runtimeClient.renameProject(backendProjectId, displayName);
+      if (!result.ok) {
+        setNotice(result.message);
+        return;
+      }
+
+      const renamedName = result.project.displayName;
+      if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
+        setDefaultProjectDisplayName(renamedName);
+      } else {
+        setProjectsFromWorkspace((current) =>
+          current.map((project) =>
+            project.id === projectId
+              ? { ...project, displayName: renamedName, label: renamedName }
+              : project,
+          ),
+        );
+      }
+      closeProjectEditor();
+      setNotice(`项目已重命名为“${renamedName}”。`);
+      await refreshProjects().catch(() => []);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "项目重命名暂时失败。");
+    } finally {
+      setProjectRenameSubmitting(false);
+    }
+  }
+
   function requestProjectDelete(projectId: string, action: ProjectDeleteAction): void {
     const backendProjectId = backendProjectIdFor(projectId);
     if (!backendProjectId) {
@@ -4214,8 +4321,7 @@ export function App() {
         void handleRevealFolder(path);
       },
       onAction: () => {
-        setEditingProjectId(projectId);
-        setNotice(null);
+        openProjectEditor(projectId);
       },
     };
   }
@@ -4237,8 +4343,7 @@ export function App() {
         id: "edit-project",
         label: "编辑项目",
         onSelect: () => {
-          setEditingProjectId(projectId);
-          setNotice(null);
+          openProjectEditor(projectId);
         },
       },
       {
@@ -4528,6 +4633,11 @@ export function App() {
     activeNavSection,
     inspectorCollapsed,
   );
+  const fileWorkspacePanelAction = fileWorkspacePanelActionForState({
+    fileWorkspaceOpen,
+    fileWorkspaceExpanded: fileWorkspaceExpandedActive,
+    inspectorCollapsed: inspectorPresentation.effectiveCollapsed,
+  });
   const inspectorCap = inspectorWidthCap({
     fileWorkspaceOpen,
     preferenceWidth: inspectorWidth,
@@ -5046,6 +5156,7 @@ export function App() {
         workspaceRoot,
         selectedProjectId,
         defaultWorkspacePath,
+        defaultProjectName: defaultProjectDisplayName,
         effectiveDefaultWorkspacePath,
         projectsFromWorkspace,
       });
@@ -6135,11 +6246,7 @@ export function App() {
   }
 
   function handleOpenDeliverablePreview(
-    file: {
-      artifactId: string;
-      runId: string;
-      title: string;
-    },
+    file: Pick<DeliverableFile, "artifactId" | "runId" | "title" | "fileType">,
     threadId: string,
   ): void {
     dispatchArtifactPreviewTabs({
@@ -6149,9 +6256,12 @@ export function App() {
         runId: file.runId,
         artifactId: file.artifactId,
         title: file.title,
+        mediaKind:
+          file.fileType === "image" || file.fileType === "video"
+            ? file.fileType
+            : undefined,
       },
     });
-    setPinnedMedia(null);
     handleOpenFileWorkspace("files");
   }
 
@@ -6165,7 +6275,6 @@ export function App() {
     if (fileWorkspaceOpen) {
       handleCloseFileWorkspace();
     }
-    setPinnedMedia(null);
     setSelectedSubagentTaskId((currentTaskId) =>
       nextSubagentInspectorTaskId(
         currentTaskId,
@@ -6361,18 +6470,6 @@ export function App() {
     setContextUsagePanelOpen(false);
     setOpenSubagentTaskId(undefined);
     runPlanEntry.closePanel(false);
-  }
-
-  function pinMediaInInspector(item: MediaArtifactPreviewItem): void {
-    if (fileWorkspaceOpen) {
-      handleCloseFileWorkspace();
-    }
-    setSelectedSubagentTaskId(undefined);
-    setPinnedMedia(item);
-    setInspectorCollapsed(false);
-    if (inspectorCollapsedBeforeResponsiveRef.current !== null) {
-      inspectorCollapsedBeforeResponsiveRef.current = false;
-    }
   }
 
   function recordArtifactMediaMetadata(
@@ -6856,19 +6953,6 @@ export function App() {
               ? (metadata: AwakenMediaMetadata) =>
                   recordArtifactMediaMetadata(sourceKey, metadata)
               : undefined,
-          onViewInInspector:
-            entry.src && entry.request && sourceKey
-              ? () =>
-                  pinMediaInInspector({
-                    id: entry.id,
-                    kind: item.mediaKind,
-                    title: entry.title,
-                    alt: entry.title,
-                    formatLabel: entry.formatLabel,
-                    sourceKey,
-                    request: entry.request!,
-                  })
-              : undefined,
         };
       });
       return (
@@ -6992,17 +7076,8 @@ export function App() {
                   ? artifactMediaMetadata[mediaSourceKey]
                   : undefined,
               onPreview:
-                isMedia && typeof mediaSourceState === "string" && mediaRequest && mediaSourceKey
-                  ? () =>
-                      pinMediaInInspector({
-                        id: file.artifactId,
-                        kind: file.fileType as "image" | "video",
-                        title: file.title,
-                        alt: file.title,
-                        formatLabel: file.extension,
-                        sourceKey: mediaSourceKey,
-                        request: mediaRequest,
-                      })
+                isMedia && threadId
+                  ? () => handleOpenDeliverablePreview(file, threadId)
                   : undefined,
               onMediaError:
                 mediaRequest && mediaSourceKey
@@ -7170,18 +7245,14 @@ export function App() {
         metadata: artifactMediaMetadata[activeMediaPreviewRecord.sourceKey],
       }
     : undefined;
-  const pinnedMediaSourceState = pinnedMedia
-    ? artifactMediaSources[pinnedMedia.sourceKey]
+  const deliverablePreviewMediaSourceKey = deliverablePreview?.mediaKind
+    ? artifactMediaSourceKey(deliverablePreview)
     : undefined;
-  const pinnedMediaItem = pinnedMedia
-    ? {
-        ...pinnedMedia,
-        src:
-          typeof pinnedMediaSourceState === "string"
-            ? pinnedMediaSourceState
-            : undefined,
-        metadata: artifactMediaMetadata[pinnedMedia.sourceKey],
-      }
+  const deliverablePreviewMediaSourceState = deliverablePreviewMediaSourceKey
+    ? artifactMediaSources[deliverablePreviewMediaSourceKey]
+    : undefined;
+  const deliverablePreviewMediaMetadata = deliverablePreviewMediaSourceKey
+    ? artifactMediaMetadata[deliverablePreviewMediaSourceKey]
     : undefined;
   const composerBarAttachments = composerAttachmentViews(composerAttachments);
   const fileWorkspaceProjectId = workspaceLabelProjectId
@@ -7460,6 +7531,9 @@ export function App() {
                       <div className="project-files-tabs" role="tablist" aria-label="打开的文件">
                       {artifactPreviewTabsState.tabs.map((artifactTab) => {
                         const artifactSelection = artifactTab.selection;
+                        const mediaIconConcept = artifactPreviewTabMediaIconConcept(
+                          artifactSelection.mediaKind,
+                        );
                         const iconKind = projectFileIconKind({
                           kind: "file",
                           name: artifactSelection.title,
@@ -7489,9 +7563,13 @@ export function App() {
                             >
                               <span
                                 className="project-files-tab__file-icon"
-                                data-file-icon={iconKind}
+                                data-file-icon={mediaIconConcept ?? iconKind}
                               >
-                                <ProjectFileIcon kind={iconKind} size={16} />
+                                {mediaIconConcept ? (
+                                  <AwakenIcon concept={mediaIconConcept} size={16} />
+                                ) : (
+                                  <ProjectFileIcon kind={iconKind} size={16} />
+                                )}
                               </span>
                               <span className="project-files-tab__label">
                                 {artifactSelection.title}
@@ -7605,15 +7683,37 @@ export function App() {
                       </Tooltip>
                     </div>
                     <div className="project-files-chrome-actions">
-                      {fileWorkspaceExpandedActive && !inspectorCollapsed ? (
-                        <Tooltip label="收起面板" placement="bottom">
+                      {fileWorkspacePanelAction ? (
+                        <Tooltip
+                          label={
+                            fileWorkspacePanelAction === "contract"
+                              ? "收起面板"
+                              : "展开面板"
+                          }
+                          placement="bottom"
+                        >
                           <button
                             type="button"
                             className="workbench-chrome-icon workbench-chrome-expand-toggle"
-                            aria-label="收起面板"
-                            onClick={handleContractFileWorkspace}
+                            aria-label={
+                              fileWorkspacePanelAction === "contract"
+                                ? "收起面板"
+                                : "展开面板"
+                            }
+                            onClick={
+                              fileWorkspacePanelAction === "contract"
+                                ? handleContractFileWorkspace
+                                : handleExpandFileWorkspace
+                            }
                           >
-                            <AwakenIcon concept="exit-full" size={14} />
+                            <AwakenIcon
+                              concept={
+                                fileWorkspacePanelAction === "contract"
+                                  ? "exit-full"
+                                  : "expand-full"
+                              }
+                              size={14}
+                            />
                           </button>
                         </Tooltip>
                       ) : null}
@@ -8271,7 +8371,34 @@ export function App() {
                         initialMode={fileWorkspaceMode}
                         activeTab={activeFileWorkspaceTab}
                         artifactPreview={deliverablePreview}
-                        expanded={fileWorkspaceExpandedActive}
+                        artifactMediaSource={
+                          typeof deliverablePreviewMediaSourceState === "string"
+                            ? deliverablePreviewMediaSourceState
+                            : undefined
+                        }
+                        artifactMediaSourceUnavailable={
+                          deliverablePreviewMediaSourceState === null
+                        }
+                        artifactMediaMetadata={deliverablePreviewMediaMetadata}
+                        revealLabel={mediaRevealLabel}
+                        onArtifactMediaError={
+                          deliverablePreviewMediaSourceKey && deliverablePreview
+                            ? () =>
+                                refreshArtifactMediaSource(
+                                  deliverablePreviewMediaSourceKey,
+                                  deliverablePreview,
+                                )
+                            : undefined
+                        }
+                        onArtifactMediaMetadata={
+                          deliverablePreviewMediaSourceKey
+                            ? (metadata) =>
+                                recordArtifactMediaMetadata(
+                                  deliverablePreviewMediaSourceKey,
+                                  metadata,
+                                )
+                            : undefined
+                        }
                         onWorkspaceModeChange={(mode) => {
                           setFileWorkspaceMode(mode);
                           if (mode === "browser") {
@@ -8279,33 +8406,16 @@ export function App() {
                           }
                         }}
                         onOpenTab={handleOpenProjectFileTab}
-                        onExpand={handleExpandFileWorkspace}
                         onPreviewPrimaryClick={handleExpandedFilePreviewPrimaryClick}
                         addTaskDisabled={isBusy}
                         onAddTaskContext={handleAddProjectEntryToTask}
                       />
                     ) : (
                       <InspectorRail
-                        ariaLabel={pinnedMedia ? "媒体" : selectedSubagentTaskId ? "子任务" : "文件"}
-                        activeId={
-                          pinnedMedia
-                            ? "media"
-                            : selectedSubagentTaskId
-                              ? "subagents"
-                              : undefined
-                        }
+                        ariaLabel={selectedSubagentTaskId ? "子任务" : "文件"}
+                        activeId={selectedSubagentTaskId ? "subagents" : undefined}
                         items={[
                           ...INSPECTOR_FILE_ITEMS,
-                          ...(pinnedMedia
-                            ? [
-                                {
-                                  id: "media",
-                                  label: "媒体",
-                                  tone: "neutral" as const,
-                                  icon: <AwakenIcon concept="media-image" size={16} />,
-                                },
-                              ]
-                            : []),
                           ...(subagentTasks.length
                             ? [
                                 {
@@ -8327,39 +8437,10 @@ export function App() {
                             handleOpenFileWorkspace("browser");
                           } else if (id === "subagents") {
                             handleToggleSubagentInspector();
-                          } else if (id === "media") {
-                            setSelectedSubagentTaskId(undefined);
-                            setInspectorCollapsed(false);
                           }
                         }}
                       >
-                        {pinnedMedia && pinnedMediaItem ? (
-                          <MediaInspector
-                            item={pinnedMediaItem}
-                            sourceUnavailable={pinnedMediaSourceState === null}
-                            openingExternal={
-                              openingArtifactId === pinnedMedia.request.artifactId
-                            }
-                            localOpenLabel="使用本地应用打开"
-                            revealLabel={mediaRevealLabel}
-                            onClose={() => setPinnedMedia(null)}
-                            onMediaError={() =>
-                              refreshArtifactMediaSource(
-                                pinnedMedia.sourceKey,
-                                pinnedMedia.request,
-                              )
-                            }
-                            onMetadata={(metadata) =>
-                              recordArtifactMediaMetadata(pinnedMedia.sourceKey, metadata)
-                            }
-                            onOpenExternal={() => {
-                              void openArtifactExternally(pinnedMedia.request);
-                            }}
-                            onReveal={() => {
-                              void revealArtifact(pinnedMedia.request);
-                            }}
-                          />
-                        ) : selectedSubagentTaskId && selectedSubagent ? (
+                        {selectedSubagentTaskId && selectedSubagent ? (
                           <div className="subagent-inspector">
                             <header className="subagent-inspector__header">
                               <div>
@@ -8514,7 +8595,12 @@ export function App() {
               value={draftProjectName}
               onChange={(event) => setDraftProjectName(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter") {
+                if (
+                  shouldSubmitProjectNameInputKey({
+                    key: event.key,
+                    isComposing: event.nativeEvent.isComposing,
+                  })
+                ) {
                   event.preventDefault();
                   void handleCreateProject();
                 }
@@ -8542,25 +8628,53 @@ export function App() {
         open={Boolean(editingProjectId)}
         title="编辑项目"
         onOpenChange={(open) => {
-          if (!open && !projectFolderBusyPath) {
-            setEditingProjectId(null);
+          if (!open && !projectFolderBusyPath && !projectRenameSubmitting) {
+            closeProjectEditor();
           }
         }}
         footer={
           <Button
             variant="primary"
             size="md"
+            loading={projectRenameSubmitting}
             disabled={Boolean(projectFolderBusyPath)}
-            onClick={() => setEditingProjectId(null)}
+            onClick={() => {
+              void handleFinishEditingProject();
+            }}
           >
             完成
           </Button>
         }
       >
         <div className="create-project-dialog-body">
+          <label className="create-project-dialog-field">
+            <span className="create-project-dialog-label">项目名称</span>
+            <input
+              type="text"
+              className="create-project-dialog-input"
+              value={editingProjectName}
+              onChange={(event) => setEditingProjectName(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  shouldSubmitProjectNameInputKey({
+                    key: event.key,
+                    isComposing: event.nativeEvent.isComposing,
+                  })
+                ) {
+                  event.preventDefault();
+                  void handleFinishEditingProject();
+                }
+              }}
+              placeholder="例如：季度复盘"
+              disabled={projectRenameSubmitting}
+              autoFocus
+            />
+          </label>
           <ProjectFoldersEditor
             folders={editingProjectId ? projectFolderRows(editingProjectId) : []}
-            addDisabled={pickingWorkspace || Boolean(projectFolderBusyPath)}
+            addDisabled={
+              pickingWorkspace || Boolean(projectFolderBusyPath) || projectRenameSubmitting
+            }
             busyPath={projectFolderBusyPath}
             emptyHint="这个项目还没有文件夹。"
             onAddFolder={() => {

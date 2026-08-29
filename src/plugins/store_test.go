@@ -17,6 +17,7 @@ import (
 
 	"awaken/src/desktopdata"
 	"awaken/src/mcpclient"
+	"awaken/src/tool"
 	"awaken/src/tool/trash"
 )
 
@@ -235,6 +236,62 @@ func TestValidateLocalPluginDoesNotInstall(t *testing.T) {
 	}
 }
 
+func TestValidateLocalPluginSkipsBadSkillButKeepsValidServer(t *testing.T) {
+	store := testStore(t)
+	src := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(src, "skills", "bad-flow"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(src, "skills", "good-flow"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "plugin.json"), []byte(`{
+		"$schema":"`+SchemaPluginV1+`",
+		"name":"validate.isolated",
+		"version":"1.0.0"
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "skills", "bad-flow", "SKILL.md"), []byte("---\nname: bad-flow\ndescription: Bad skill.\nmetadata:\n  attempts: 2\n---\nBody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "skills", "good-flow", "SKILL.md"), []byte("---\nname: good-flow\ndescription: Good skill.\n---\nBody\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "mcp.json"), []byte(`{
+		"$schema":"`+SchemaMCPV1+`",
+		"mcpServers":{
+			"local":{"type":"stdio","command":"npx","args":["--version"]}
+		}
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	validation, err := store.Validate(context.Background(), Source{Kind: SourceLocalPath, Path: src})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validation.Valid {
+		t.Fatalf("validation unexpectedly failed: %+v", validation)
+	}
+	if validation.SkillCount != 1 {
+		t.Fatalf("expected one loadable skill after isolating the bad skill, got %+v", validation)
+	}
+	if validation.ServerCount != 1 {
+		t.Fatalf("expected one valid server, got %+v", validation)
+	}
+	found := false
+	for _, diagnostic := range validation.Diagnostics {
+		if diagnostic.Code == "plugin_skill_invalid" && diagnostic.Severity == "warning" && strings.Contains(diagnostic.Message, "metadata[\"attempts\"] must be a string") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected isolated invalid skill diagnostic, got %+v", validation.Diagnostics)
+	}
+}
+
 func TestInstallAndExportPreserveBundledExecutable(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix executable mode is not applicable on Windows")
@@ -307,6 +364,7 @@ func TestInstalledPluginStdioEndToEnd(t *testing.T) {
 	manager.Start(ctx, store.PluginMCPServers())
 	defer manager.Shutdown(context.Background())
 	serverName := ServerIdentity(name, "echo")
+	defer mcpclient.UnregisterMcpToolsForTest(serverName)
 	deadline := time.Now().Add(8 * time.Second)
 	for {
 		snapshot, snapshotErr := manager.SnapshotServer(serverName)
@@ -318,16 +376,57 @@ func TestInstalledPluginStdioEndToEnd(t *testing.T) {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	result, err := manager.CallTool(ctx, "mcp__"+serverName+"__echo", map[string]any{"message": "installed-ping"})
+	modelToolName := mcpclient.McpToolName(serverName, "echo")
+	if modelToolName != "mcp__plugin__installed_stdio__echo__echo" {
+		t.Fatalf("unexpected model-facing dotted plugin tool name %q", modelToolName)
+	}
+	var registered tool.RegisteredTool
+	toolDeadline := time.Now().Add(8 * time.Second)
+	for {
+		registered, err = tool.GetRegisteredTool(modelToolName)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, tool.ErrToolNotFound) || time.Now().After(toolDeadline) {
+			t.Fatalf("dotted plugin MCP tool was not registered: %v", err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if registered.Definition.Annotations.ServerName != serverName || registered.Definition.Annotations.ToolName != "echo" {
+		t.Fatalf("raw plugin MCP identity was not preserved: %+v", registered.Definition.Annotations)
+	}
+
+	snapshot := tool.NewRunToolAvailabilitySnapshot(tool.ExecutionEnvironmentSnapshot{SnapshotID: "installed_plugin_stdio"})
+	entry, err := snapshot.Lookup(modelToolName)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("dotted plugin MCP tool missing from run snapshot: %v", err)
 	}
-	if len(result.Content) != 1 {
-		t.Fatalf("tool result=%+v", result)
+	servers := tool.CollectMCPCatalog(&snapshot, tool.DefaultToolExposurePolicy())
+	var catalogToolFound bool
+	for _, catalogServer := range servers {
+		if catalogServer.Server != serverName {
+			continue
+		}
+		for _, catalogTool := range catalogServer.Tools {
+			if catalogTool.Name == modelToolName && catalogTool.RawName == "echo" {
+				catalogToolFound = true
+			}
+		}
 	}
-	textContent, ok := result.Content[0].(*mcp.TextContent)
-	if !ok || textContent.Text != "installed-ping" {
-		t.Fatalf("tool content=%+v", result.Content[0])
+	if !catalogToolFound {
+		t.Fatalf("dotted plugin MCP tool missing from deferred catalog: %+v", servers)
+	}
+	matches := tool.SearchDeferredTools(tool.DeferredToolSearchSpace{Servers: servers}, "select:"+modelToolName, 5)
+	if len(matches) != 1 || matches[0].Name != modelToolName || matches[0].Server != serverName {
+		t.Fatalf("tool_find search could not select dotted plugin MCP tool: %+v", matches)
+	}
+
+	content, err := entry.Runtime.Execute(ctx, `{"message":"installed-ping"}`)
+	if err != nil {
+		t.Fatalf("execute registry-pinned MCP runtime: %v", err)
+	}
+	if content != "installed-ping" {
+		t.Fatalf("registry-pinned MCP runtime content=%q", content)
 	}
 }
 

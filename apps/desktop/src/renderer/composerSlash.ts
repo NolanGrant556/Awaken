@@ -408,7 +408,7 @@ export function pluginMentionProvider(
               plugin.description,
               ...(plugin.keywords ?? []),
             ].filter((value): value is string => Boolean(value)),
-            icon: createElement(AwakenIcon, { concept: "plugin", size: 14 }),
+            icon: createElement(AwakenIcon, { concept: "plugin-default", size: 14 }),
             preview: { description: plugin.description },
             payload: plugin,
             composerToken: token,

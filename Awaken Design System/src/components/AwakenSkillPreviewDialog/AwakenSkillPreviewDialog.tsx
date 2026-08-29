@@ -102,6 +102,9 @@ export function AwakenSkillPreviewContent({
   documentRef,
   onEnabledChange,
 }: AwakenSkillPreviewContentProps) {
+  const hasResources = resources.length > 0;
+  const hasSkillDocument = Boolean(frontmatterRaw || markdown);
+
   const previewContent = (
     <div className="aw-skill-preview__content">
       {loading ? (
@@ -115,9 +118,13 @@ export function AwakenSkillPreviewContent({
           <span>{errorMessage}</span>
         </div>
       ) : null}
-      {!loading && !errorMessage && resources.length > 0 ? (
-        <section className="aw-skill-preview__resources" aria-label="Skill 包文件">
-          <div className="aw-skill-preview__resources-head">
+
+      {!loading && !errorMessage && hasResources ? (
+        <section
+          className="aw-skill-preview__card aw-skill-preview__card--resources aw-skill-preview__resources"
+          aria-label="Skill 包文件"
+        >
+          <div className="aw-skill-preview__card-head aw-skill-preview__resources-head">
             <strong>包内文件</strong>
             <span>{resources.length} 项{resourcesTruncated ? "，仅显示前 512 项" : ""}</span>
           </div>
@@ -141,20 +148,31 @@ export function AwakenSkillPreviewContent({
           </ul>
         </section>
       ) : null}
-      {!loading && !errorMessage && frontmatterRaw ? (
-        <pre className="aw-skill-preview__frontmatter" aria-label="YAML frontmatter">
-          <code className="language-yaml">{frontmatterRaw}</code>
-        </pre>
-      ) : null}
-      {!loading && !errorMessage && markdown ? (
-        <AwakenMarkdownRenderer
-          className="assistant-message assistant-message-markdown aw-skill-preview__markdown"
-          markdown={markdown}
-          fallback=""
-          renderMermaid={false}
-          renderImages={false}
-          allowedLinkProtocols={["http", "https"]}
-        />
+
+      {!loading && !errorMessage && hasSkillDocument ? (
+        <section
+          className="aw-skill-preview__card aw-skill-preview__card--document"
+          aria-label="SKILL.md 内容"
+        >
+          <div className="aw-skill-preview__card-head aw-skill-preview__document-head">
+            <strong>SKILL.md</strong>
+          </div>
+          {frontmatterRaw ? (
+            <pre className="aw-skill-preview__frontmatter" aria-label="YAML frontmatter">
+              <code className="language-yaml">{frontmatterRaw}</code>
+            </pre>
+          ) : null}
+          {markdown ? (
+            <AwakenMarkdownRenderer
+              className="assistant-message assistant-message-markdown aw-skill-preview__markdown"
+              markdown={markdown}
+              fallback=""
+              renderMermaid={false}
+              renderImages={false}
+              allowedLinkProtocols={["http", "https"]}
+            />
+          ) : null}
+        </section>
       ) : null}
     </div>
   );

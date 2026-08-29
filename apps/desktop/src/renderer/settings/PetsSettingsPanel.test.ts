@@ -88,6 +88,7 @@ function createMockRuntimeClient(): RuntimeClient {
     enableSkill: vi.fn(async () => undefined),
     listPlugins: vi.fn(async () => []),
     getPlugin: vi.fn(),
+    validatePlugin: vi.fn(),
     installPlugin: vi.fn(),
     enablePlugin: vi.fn(),
     disablePlugin: vi.fn(),
@@ -211,6 +212,7 @@ function createMockRuntimeClient(): RuntimeClient {
       message: "not found",
     })),
     copyProjectEntryPath: vi.fn(async () => ({ ok: true as const })),
+    revealProjectEntry: vi.fn(async () => ({ ok: true as const })),
     openProjectEntryWith: vi.fn(async () => ({ ok: true as const })),
     startProjectFilePreview: vi.fn(async () => ({
       ok: false as const,
@@ -231,6 +233,7 @@ function createMockRuntimeClient(): RuntimeClient {
       byteLength: 0,
     })),
     upsertProject: vi.fn(async () => ({}) as never),
+    renameProject: vi.fn(async () => ({}) as never),
     reorderProjects: vi.fn(async () => ({}) as never),
     detachProject: vi.fn(async () => ({}) as never),
     deleteProjectThreads: vi.fn(async () => ({}) as never),

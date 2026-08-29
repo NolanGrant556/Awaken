@@ -216,6 +216,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 			projects := projectHandlers{service: projectService}
 			mux.HandleFunc("GET /v1/projects", projects.handleListProjects)
 			mux.HandleFunc("POST /v1/projects", projects.handleUpsertProject)
+			mux.HandleFunc("PATCH /v1/projects/{project_id}", projects.handleRenameProject)
 			mux.HandleFunc("PUT /v1/projects/order", projects.handleReorderProjects)
 			mux.HandleFunc("DELETE /v1/projects/{project_id}", projects.handleDetachProject)
 			mux.HandleFunc("DELETE /v1/projects/{project_id}/threads", projects.handleDeleteProjectThreads)
@@ -293,6 +294,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	composerCatalogH := newComposerCatalogHandlers(cfg.skillRegistry, cfg.pluginStore)
 	mux.HandleFunc("GET /v1/composer-catalog/events", composerCatalogH.handleEvents)
 	mux.HandleFunc("GET /v1/plugins", pluginH.handleList)
+	mux.HandleFunc("POST /v1/plugins/validate", pluginH.handleValidate)
 	mux.HandleFunc("POST /v1/plugins/install", pluginH.handleInstall)
 	mux.HandleFunc("GET /v1/plugins/{name}", pluginH.handleGet)
 	mux.HandleFunc("POST /v1/plugins/{name}/commit", pluginH.handleCommit)

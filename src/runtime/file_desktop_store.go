@@ -1303,6 +1303,46 @@ func (s *FileDesktopStore) CreateProject(folders []ProjectFolder, displayName st
 	return s.state.Projects[projectID], nil
 }
 
+// RenameProject atomically sets the display name of a stable project. A
+// material change is journaled before the in-memory projection and rebuildable
+// snapshot move forward; an equal normalized name does not advance version or
+// time and does not append a lifecycle record.
+func (s *FileDesktopStore) RenameProject(projectID, displayName string, now time.Time) (Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return Project{}, err
+	}
+	defer lock.Release()
+
+	project, ok := s.state.Projects[strings.TrimSpace(projectID)]
+	if !ok {
+		return Project{}, ErrProjectNotFound
+	}
+	if project.State == ProjectStateTrashPending {
+		return Project{}, ErrProjectOperationConflict
+	}
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		return Project{}, ErrProjectNameInvalid
+	}
+	if project.DisplayName == displayName {
+		return project, nil
+	}
+	project.DisplayName = displayName
+	project.UpdatedAt = now
+	project.Version++
+	if err := s.commitMutation(fileLifecycleMutation{
+		Kind:     "RenameProject",
+		Now:      now,
+		Projects: []Project{project},
+	}); err != nil {
+		return Project{}, err
+	}
+	return s.state.Projects[project.ProjectID], nil
+}
+
 // AttachProjectFolder adds a readable/writable folder to an existing project.
 // The folder may already belong to other projects: a directory is shared work,
 // not property. Attaching the first folder of a folder-less project promotes it

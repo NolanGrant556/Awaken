@@ -70,11 +70,12 @@ type AgentConfig struct {
 	// ToolExposure selects the model-visible tool pool. Empty Mode uses
 	// DefaultToolExposurePolicy applies generic explicit hide/show rules.
 	ToolExposure tool.ToolExposurePolicy
-	// MCPActivatedTools is the thread-durable set of MCP tool names whose
-	// full definitions were loaded on demand while progressive disclosure is
-	// active. It is rebuilt from mcp_tools_activated journal records on
-	// restore and only ever grows within a thread.
-	MCPActivatedTools []string
+	// ActivatedDeferredTools is the thread-durable set of deferred tool names
+	// (builtin auxiliary or MCP) whose full definitions were loaded on demand
+	// while progressive disclosure is active. It is rebuilt from
+	// deferred_tools_activated (and legacy mcp_tools_activated) journal
+	// records on restore and only ever grows within a thread.
+	ActivatedDeferredTools []string
 	// ToolAvailabilitySnapshot pins the exact executable instances and
 	// definitions available for one run. Request compilation and execution must
 	// consume the same snapshot so registry refreshes cannot create TOCTOU drift.

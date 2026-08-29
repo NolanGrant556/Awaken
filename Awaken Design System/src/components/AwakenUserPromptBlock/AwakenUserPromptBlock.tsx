@@ -414,7 +414,9 @@ export function AwakenUserPromptBlock({
       ? "computer-use"
       : tokenType === "skill"
         ? "skill"
-        : "capability-package";
+        : tokenType === "plugin"
+          ? "plugin-default"
+          : "capability-package";
     return (
       <span
         className={`execution-prompt-bubble-token execution-prompt-bubble-token-${tokenType}`}

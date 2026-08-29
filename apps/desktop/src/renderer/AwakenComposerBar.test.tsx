@@ -187,7 +187,7 @@ describe("AwakenComposerBar unified token editing", () => {
     });
     const icon = editor.querySelector('[data-composer-token-id="plugin:business-review:digest"] svg');
 
-    expect(icon?.classList.contains("aw-icon--package")).toBe(true);
+    expect(icon?.classList.contains("aw-icon--puzzle")).toBe(true);
     expect(icon?.getAttribute("width")).toBe("16");
     expect(icon?.getAttribute("height")).toBe("16");
   });
@@ -464,7 +464,7 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(icons.every((icon) => icon.getAttribute("width") === "16")).toBe(true);
     expect(icons[0]?.classList).toContain("aw-icon--display-pointer");
     expect(icons[1]?.classList).toContain("aw-icon--book-open");
-    expect(icons[2]?.classList).toContain("aw-icon--package");
+    expect(icons[2]?.classList).toContain("aw-icon--puzzle");
   });
 
   it("copies visible plaintext with token labels and no soft-wrap breaks", () => {

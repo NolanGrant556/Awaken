@@ -275,6 +275,8 @@ function composerTokenElement(document: Document, token: ComposerInlineToken): H
     appendAwakenLineIcon(document, element, "display-pointer");
   } else if (token.type === "skill") {
     appendAwakenLineIcon(document, element, "book-open");
+  } else if (token.type === "plugin") {
+    appendAwakenLineIcon(document, element, "puzzle");
   } else {
     appendAwakenLineIcon(document, element, "package");
   }

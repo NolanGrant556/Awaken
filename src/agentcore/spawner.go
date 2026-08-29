@@ -121,7 +121,7 @@ func CreateSubagent(parent AgentConfig, spawn SpawnConfig) (AgentConfig, error) 
 		// on-demand loaded MCP set carries over instead of forcing every
 		// child to re-discover the same definitions. Child-local activations
 		// persist with agent_id and never flow back into the root set.
-		MCPActivatedTools:      append([]string(nil), parent.MCPActivatedTools...),
+		ActivatedDeferredTools: append([]string(nil), parent.ActivatedDeferredTools...),
 		ToolSessionState:       tool.NewToolSessionState(parent.Workspace.Root),
 		ModelContentStore:      parent.ModelContentStore,
 		ToolResultOffloadStore: parent.ToolResultOffloadStore,

@@ -14,10 +14,10 @@ type RequestBuilder struct {
 	config      AgentConfig
 	runtimeInfo prompt.RuntimeInfo
 	threadID    string
-	// mcpDisclosure caches the deterministic progressive-disclosure decision
+	// toolDisclosure caches the deterministic progressive-disclosure decision
 	// for this builder's pinned snapshot/window/activated set. Builders are
 	// rebuilt whenever the activated set changes.
-	mcpDisclosure *mcpDisclosureProjection
+	toolDisclosure *toolDisclosureProjection
 }
 
 const conversationContinuityBlockID = "conversation_continuity"
@@ -380,9 +380,18 @@ func (rb *RequestBuilder) attributeToolSchemas(schemas []tool.ToolSchema) []Attr
 		if provenance.Origin == tool.SourceSkill {
 			provenance.SkillCatalog = contextUsageSkillCatalog(runtime, rb.config.ModelConfig.ContextWindow)
 		}
-		if schema.Function.Name == tool.MCPFindToolName {
-			if disclosure := rb.mcpDisclosureProjection(); disclosure.Enabled {
-				provenance.MCPCatalog = disclosure.Catalog
+		if schema.Function.Name == tool.ToolFindToolName {
+			if disclosure := rb.toolDisclosureProjection(); disclosure.MCPEnabled {
+				provenance.MCPCatalog = disclosure.MCPCatalog
+			}
+		}
+		if provenance.Origin == tool.SourceBuiltin && tool.IsDeferrableBuiltinToolName(schema.Function.Name) {
+			// A projected deferrable builtin definition was loaded on demand
+			// (activated after run start or restored from durable activation
+			// records). Context Epoch treats it as an append-only dynamic
+			// tool instead of a canonical builtin addition.
+			if disclosure := rb.toolDisclosureProjection(); disclosure.BuiltinEnabled {
+				provenance.LoadedOnDemand = true
 			}
 		}
 		result = append(result, AttributedToolSchema{Schema: schema, Provenance: provenance})
@@ -396,7 +405,7 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 		return nil
 	}
 	if rb.config.ToolAvailabilitySnapshot != nil {
-		disclosure := rb.mcpDisclosureProjection()
+		disclosure := rb.toolDisclosureProjection()
 		entries := rb.config.ToolAvailabilitySnapshot.Entries()
 		definitions := make([]tool.ToolSchema, 0, len(entries))
 		for _, entry := range entries {
@@ -407,11 +416,11 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 				continue
 			}
 			name := entry.Definition.Name
-			if name == tool.MCPFindToolName {
-				// mcp_find is only offered while progressive disclosure is
+			if name == tool.ToolFindToolName {
+				// tool_find is only offered while progressive disclosure is
 				// active; its model description then carries the deferred
-				// server/tool catalog rendered from this same snapshot.
-				if !disclosure.Enabled {
+				// builtin and MCP catalogs rendered from this same snapshot.
+				if !disclosure.Enabled() {
 					continue
 				}
 				definitions = append(definitions, tool.ToolSchema{
@@ -424,7 +433,7 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 				})
 				continue
 			}
-			if disclosure.Enabled && disclosure.Deferred[name] {
+			if disclosure.Deferred(name) {
 				continue
 			}
 			definitions = append(definitions, tool.ToolSchema{
@@ -445,7 +454,7 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 		definition := requestToolDefinition(t)
 		// Progressive disclosure requires a pinned run snapshot; the registry
 		// fallback path never offers the search tool.
-		if definition.Name == tool.MCPFindToolName {
+		if definition.Name == tool.ToolFindToolName {
 			continue
 		}
 		if isComputerToolDefinition(definition) {
@@ -466,19 +475,22 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 	return definitions
 }
 
-// mcpDisclosureProjection memoizes the deterministic per-run disclosure
-// decision (pinned snapshot + model window + activated set + policy).
-func (rb *RequestBuilder) mcpDisclosureProjection() mcpDisclosureProjection {
-	if rb.mcpDisclosure != nil {
-		return *rb.mcpDisclosure
+// toolDisclosureProjection memoizes the deterministic per-run disclosure
+// decision (pinned snapshot + model window + activated set + exposure +
+// policies).
+func (rb *RequestBuilder) toolDisclosureProjection() toolDisclosureProjection {
+	if rb.toolDisclosure != nil {
+		return *rb.toolDisclosure
 	}
-	projection := buildMCPDisclosureProjection(
+	projection := buildToolDisclosureProjection(
 		rb.config.ToolAvailabilitySnapshot,
 		rb.config.ModelConfig,
-		rb.config.MCPActivatedTools,
+		rb.config.ActivatedDeferredTools,
+		rb.toolExposurePolicy(),
 		tool.MCPDisclosurePolicyFromEnv(),
+		tool.BuiltinDisclosurePolicyFromEnv(),
 	)
-	rb.mcpDisclosure = &projection
+	rb.toolDisclosure = &projection
 	return projection
 }
 

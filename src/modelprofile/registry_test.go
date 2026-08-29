@@ -108,6 +108,19 @@ func TestBuiltinProvidersIncludeRequiredDefaults(t *testing.T) {
 	if got := seen["qwen"].ModelCapabilities["qwen3.8-max"].SupportedProtocols; !reflect.DeepEqual(got, allLLMProtocols()) {
 		t.Fatalf("Qwen model protocol contract mismatch: %v", got)
 	}
+	qwen37Plus := seen["qwen"].ModelCapabilities["qwen3.7-plus"]
+	if got := qwen37Plus.SupportedProtocols; !reflect.DeepEqual(got, allLLMProtocols()) {
+		t.Fatalf("Qwen 3.7 Plus protocol contract mismatch: %v", got)
+	}
+	if qwen37Plus.ContextWindow != 1000000 || qwen37Plus.MaxInputTokens != 983616 || qwen37Plus.MaxOutputTokens != 131072 {
+		t.Fatalf("Qwen 3.7 Plus token contract mismatch: %+v", qwen37Plus)
+	}
+	if !qwen37Plus.SupportsVision || !qwen37Plus.SupportsVideo || qwen37Plus.SupportsTools != "ready" || qwen37Plus.ReasoningEffort != nil {
+		t.Fatalf("Qwen 3.7 Plus capability contract mismatch: %+v", qwen37Plus)
+	}
+	if got := seen["qwen"].Models; !reflect.DeepEqual(got, []string{"qwen3.7-plus", "qwen3.8-max"}) {
+		t.Fatalf("Qwen built-in models mismatch: %v", got)
+	}
 	if seen["openai"].CatalogStrategy != "openai" {
 		t.Fatalf("OpenAI must keep its live model catalog strategy, got %q", seen["openai"].CatalogStrategy)
 	}

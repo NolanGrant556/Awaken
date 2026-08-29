@@ -6,6 +6,22 @@ import { useId } from "react";
 
 export type AwakenPluginInstallMode = "local" | "url";
 
+export type AwakenPluginValidationDiagnostic = {
+  code?: string;
+  message?: string;
+  severity?: string;
+};
+
+export type AwakenPluginValidationSummary = {
+  valid: boolean;
+  name?: string;
+  version?: string;
+  digest?: string;
+  skillCount: number;
+  serverCount: number;
+  diagnostics?: AwakenPluginValidationDiagnostic[];
+};
+
 export type AwakenPluginInstallDialogProps = {
   open: boolean;
   mode: AwakenPluginInstallMode;
@@ -17,6 +33,8 @@ export type AwakenPluginInstallDialogProps = {
   confirm?: boolean;
   errorMessage?: string | null;
   busy?: boolean;
+  validation?: AwakenPluginValidationSummary | null;
+  validating?: boolean;
   onOpenChange: (open: boolean) => void;
   onModeChange: (mode: AwakenPluginInstallMode) => void;
   onLocalPathChange: (value: string) => void;
@@ -26,11 +44,120 @@ export type AwakenPluginInstallDialogProps = {
   onReplaceChange?: (value: boolean) => void;
   onPickLocal?: () => void;
   onConfirmChange?: (value: boolean) => void;
+  onValidate: () => void;
   onSubmit: () => void;
 };
 
 const RISK_TEXT =
   "安装后，插件内的 MCP 子进程将以当前用户身份运行，可以读写本机文件并联网，不受沙盒约束。只安装你信任的来源。";
+const MAX_VISIBLE_DIAGNOSTICS = 4;
+const MAX_DIAGNOSTIC_CHARACTERS = 180;
+
+function diagnosticText(diagnostic: AwakenPluginValidationDiagnostic): string {
+  return diagnostic.message?.trim() || diagnostic.code?.trim() || "未知诊断";
+}
+
+function boundedDiagnosticText(value: string): string {
+  if (value.length <= MAX_DIAGNOSTIC_CHARACTERS) {
+    return value;
+  }
+  return `${value.slice(0, MAX_DIAGNOSTIC_CHARACTERS - 1)}…`;
+}
+
+function diagnosticSeverityLabel(severity?: string): string {
+  switch (severity?.toLowerCase()) {
+    case "error":
+      return "错误";
+    case "warning":
+      return "警告";
+    default:
+      return "提示";
+  }
+}
+
+function PluginValidationResult({
+  validation,
+}: {
+  validation: AwakenPluginValidationSummary;
+}) {
+  const diagnostics = validation.diagnostics ?? [];
+  const visibleDiagnostics = diagnostics.slice(0, MAX_VISIBLE_DIAGNOSTICS);
+  const hiddenDiagnosticCount = diagnostics.length - visibleDiagnostics.length;
+  const digest = validation.digest?.trim() ?? "";
+
+  return (
+    <section
+      className="aw-plugin-install-dialog__validation"
+      data-valid={validation.valid ? "true" : "false"}
+      role="status"
+      aria-live="polite"
+    >
+      <header className="aw-plugin-install-dialog__validation-header">
+        <span className="aw-plugin-install-dialog__validation-icon" aria-hidden="true">
+          <AwakenIcon concept={validation.valid ? "success" : "error"} size={16} />
+        </span>
+        <div>
+          <h3>{validation.valid ? "检查通过" : "检查未通过"}</h3>
+          <p>
+            {validation.valid
+              ? "插件包可以安装，请核对可加载组件数量是否符合预期。"
+              : "请修正插件包后重新检查。"}
+          </p>
+        </div>
+      </header>
+      <dl className="aw-plugin-install-dialog__validation-facts">
+        <div>
+          <dt>插件</dt>
+          <dd>
+            <strong>{validation.name?.trim() || "未识别"}</strong>
+            <span>{validation.version?.trim() ? `v${validation.version.trim()}` : "未提供版本"}</span>
+          </dd>
+        </div>
+        <div>
+          <dt>可加载组件</dt>
+          <dd>
+            {validation.skillCount} Skills · {validation.serverCount} MCP Servers
+          </dd>
+        </div>
+        <div className="aw-plugin-install-dialog__validation-digest">
+          <dt>Digest</dt>
+          <dd title={digest || undefined}>{digest || "未生成"}</dd>
+        </div>
+      </dl>
+      {visibleDiagnostics.length > 0 ? (
+        <div className="aw-plugin-install-dialog__diagnostics">
+          <h4>诊断（{diagnostics.length}）</h4>
+          <ul>
+            {visibleDiagnostics.map((diagnostic, index) => {
+              const fullText = diagnosticText(diagnostic);
+              return (
+                <li
+                  key={`${diagnostic.code ?? "diagnostic"}-${index}`}
+                  data-severity={diagnostic.severity?.toLowerCase() ?? "info"}
+                >
+                  <span>{diagnosticSeverityLabel(diagnostic.severity)}</span>
+                  <p title={fullText}>
+                    {diagnostic.code?.trim() ? <code>{diagnostic.code}</code> : null}
+                    {fullText !== diagnostic.code?.trim() ? (
+                      <span>{boundedDiagnosticText(fullText)}</span>
+                    ) : null}
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
+          {hiddenDiagnosticCount > 0 ? (
+            <p className="aw-plugin-install-dialog__diagnostics-more">
+              另有 {hiddenDiagnosticCount} 条诊断未展开
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <p className="aw-plugin-install-dialog__diagnostics-empty">没有诊断</p>
+      )}
+    </section>
+  );
+}
 
 export function AwakenPluginInstallDialog({
   open,
@@ -43,6 +170,8 @@ export function AwakenPluginInstallDialog({
   confirm = false,
   errorMessage,
   busy = false,
+  validation,
+  validating = false,
   onOpenChange,
   onModeChange,
   onLocalPathChange,
@@ -52,10 +181,19 @@ export function AwakenPluginInstallDialog({
   onReplaceChange,
   onPickLocal,
   onConfirmChange,
+  onValidate,
   onSubmit,
 }: AwakenPluginInstallDialogProps) {
   const riskTitleId = useId();
-  const canSubmit = confirm && (mode === "local" ? localPath.trim() !== "" : url.trim() !== "");
+  const sourcePresent = mode === "local" ? localPath.trim() !== "" : url.trim() !== "";
+  const formLocked = busy || validating;
+  const canSubmit = Boolean(
+    validation?.valid
+      && validation.digest?.trim()
+      && sourcePresent
+      && confirm
+      && !formLocked,
+  );
   return (
     <AwakenDialog
       open={open}
@@ -64,11 +202,20 @@ export function AwakenPluginInstallDialog({
       onOpenChange={onOpenChange}
       footer={
         <>
-          <AwakenButton variant="default" size="md" disabled={busy} onClick={() => onOpenChange(false)}>
+          <AwakenButton variant="default" size="md" disabled={formLocked} onClick={() => onOpenChange(false)}>
             取消
           </AwakenButton>
+          <AwakenButton
+            variant="default"
+            size="md"
+            loading={validating}
+            disabled={!sourcePresent || formLocked}
+            onClick={onValidate}
+          >
+            {validating ? "检查中…" : "检查插件"}
+          </AwakenButton>
           <AwakenButton variant="primary" size="md" loading={busy} disabled={!canSubmit} onClick={onSubmit}>
-            确认安装
+            {busy ? "安装中…" : "确认安装"}
           </AwakenButton>
         </>
       }
@@ -89,7 +236,7 @@ export function AwakenPluginInstallDialog({
             role="tab"
             aria-selected={mode === "local"}
             data-active={mode === "local" ? "true" : "false"}
-            disabled={busy}
+            disabled={formLocked}
             onClick={() => onModeChange("local")}
           >
             <AwakenIcon concept="project" size={16} />
@@ -100,7 +247,7 @@ export function AwakenPluginInstallDialog({
             role="tab"
             aria-selected={mode === "url"}
             data-active={mode === "url" ? "true" : "false"}
-            disabled={busy}
+            disabled={formLocked}
             onClick={() => onModeChange("url")}
           >
             <AwakenIcon concept="provider-link" size={16} />
@@ -117,14 +264,14 @@ export function AwakenPluginInstallDialog({
                   placeholder="选择插件目录，或输入 zip 文件路径"
                   autoComplete="off"
                   spellCheck={false}
-                  disabled={busy}
+                  disabled={formLocked}
                   onChange={(event) => onLocalPathChange(event.target.value)}
                 />
                 {onPickLocal ? (
                   <AwakenButton
                     variant="default"
                     size="lg"
-                    disabled={busy}
+                    disabled={formLocked}
                     onClick={onPickLocal}
                   >
                     浏览
@@ -142,7 +289,7 @@ export function AwakenPluginInstallDialog({
                   inputMode="url"
                   autoComplete="url"
                   spellCheck={false}
-                  disabled={busy}
+                  disabled={formLocked}
                   onChange={(event) => onUrlChange(event.target.value)}
                 />
               </label>
@@ -156,7 +303,7 @@ export function AwakenPluginInstallDialog({
                     placeholder="main 或版本标签"
                     autoComplete="off"
                     spellCheck={false}
-                    disabled={busy}
+                    disabled={formLocked}
                     onChange={(event) => onRefChange?.(event.target.value)}
                   />
                 </label>
@@ -169,7 +316,7 @@ export function AwakenPluginInstallDialog({
                     placeholder="plugins/example"
                     autoComplete="off"
                     spellCheck={false}
-                    disabled={busy}
+                    disabled={formLocked}
                     onChange={(event) => onSubpathChange?.(event.target.value)}
                   />
                 </label>
@@ -177,11 +324,12 @@ export function AwakenPluginInstallDialog({
             </>
           )}
         </div>
+        {validation ? <PluginValidationResult validation={validation} /> : null}
         <label className="aw-plugin-install-dialog__option">
           <input
             type="checkbox"
             checked={replace}
-            disabled={busy}
+            disabled={formLocked}
             onChange={(event) => onReplaceChange?.(event.target.checked)}
           />
           <span>
@@ -204,7 +352,7 @@ export function AwakenPluginInstallDialog({
             <input
               type="checkbox"
               checked={confirm}
-              disabled={busy}
+              disabled={formLocked}
               onChange={(event) => onConfirmChange?.(event.target.checked)}
             />
             <span>我已了解 MCP 子进程无沙盒，并以当前用户身份运行</span>

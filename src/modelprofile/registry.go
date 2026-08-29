@@ -583,11 +583,12 @@ func BuiltinProviders() []Provider {
 		{
 			ID: "qwen", DisplayName: "Qwen API", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
 			Protocol: "openai_chat", SupportedProtocols: allLLMProtocols(), CatalogStrategy: "openai", AuthScheme: "bearer", KeyEnvName: "DASHSCOPE_API_KEY",
-			DefaultModel: "qwen3.8-max", Models: []string{"qwen3.8-max"}, AllowCustomModel: true,
+			DefaultModel: "qwen3.8-max", Models: []string{"qwen3.7-plus", "qwen3.8-max"}, AllowCustomModel: true,
 			DocsURL: "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions", APIDocsURL: "https://bailian.console.aliyun.com/", AccessType: "api",
 			ModelCapabilities: map[string]ModelCapability{
-				"qwen3.8-max": {SupportedProtocols: allLLMProtocols(), MaxInputTokens: 983616, ContextWindow: 1024 * 1024, MaxOutputTokens: 64000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: false, SupportsTools: "ready", ReasoningEffort: effortWithLabels([]string{"low", "high", "max"}, "max", map[string]string{"low": "low", "high": "medium", "max": "xhigh"})},
-				"qwen3.7-max": {ContextWindow: 256000, MaxOutputTokens: 64000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready"},
+				"qwen3.7-plus": {SupportedProtocols: allLLMProtocols(), MaxInputTokens: 983616, ContextWindow: 1000000, MaxOutputTokens: 131072, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready"},
+				"qwen3.8-max":  {SupportedProtocols: allLLMProtocols(), MaxInputTokens: 983616, ContextWindow: 1024 * 1024, MaxOutputTokens: 64000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: false, SupportsTools: "ready", ReasoningEffort: effortWithLabels([]string{"low", "high", "max"}, "max", map[string]string{"low": "low", "high": "medium", "max": "xhigh"})},
+				"qwen3.7-max":  {ContextWindow: 256000, MaxOutputTokens: 64000, DefaultMaxTokens: 32000, SupportsVision: true, SupportsVideo: true, SupportsTools: "ready"},
 			},
 		},
 		{

@@ -112,11 +112,11 @@ export function AwakenDeliverableCard({
         formatLabel={normalizedExtension}
         disabled={disabled}
         openingExternal={opening}
-        onPreview={previewUnavailable ? undefined : onPreview ?? onOpen}
+        onPreview={onPreview ?? onOpen}
         onMediaError={onMediaError}
         onMetadata={onMediaMetadata}
         onViewInInspector={onViewInInspector}
-        onOpenExternal={onPreview ? onOpen : undefined}
+        onOpenExternal={onOpen}
         onReveal={onReveal}
         localOpenLabel={localOpenLabel}
         revealLabel={revealLabel}

@@ -1104,7 +1104,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				agent.GetConversation().Context.SetMessages(restored.Messages)
 				cfg := agent.GetConfig()
 				cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), restored.SkillContextBlocks...)
-				cfg.MCPActivatedTools = append([]string(nil), restored.MCPActivatedTools...)
+				cfg.ActivatedDeferredTools = append([]string(nil), restored.ActivatedDeferredTools...)
 				agent.Reconfigure(cfg)
 			}
 			runIDs := append([]string(nil), restored.RunIDs...)
@@ -1193,7 +1193,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				agent.GetConversation().Context.SetMessages(thread.agent.GetConversation().Context.GetMessages())
 				cfg := agent.GetConfig()
 				cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), thread.agent.GetConfig().SkillContextBlocks...)
-				cfg.MCPActivatedTools = append([]string(nil), thread.agent.GetConfig().MCPActivatedTools...)
+				cfg.ActivatedDeferredTools = append([]string(nil), thread.agent.GetConfig().ActivatedDeferredTools...)
 				agent.Reconfigure(cfg)
 			}
 			thread.agent = agent

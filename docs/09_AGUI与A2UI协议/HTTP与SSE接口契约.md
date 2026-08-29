@@ -45,7 +45,7 @@ GET    /v1/runs/{run_id}/audit
 POST   /v1/shutdown
 ```
 
-`POST /v1/runs` 的 `workspace` 对象即 TaskScope wire。`workspace_root` 是已绑定项目的主文件夹；只给 `project_id` 表示零文件夹项目；两者都为空表示独立对话。Core 在规范化 workspace 前确定 thread ID：新对话生成 ID，follow-up 使用请求的 `thread_id`，然后解析到 thread 专属 session 工作目录。业务数据根不可用或 managed owner ID 不安全时返回 `INVALID_INPUT`。可选的 `project_name` 只用于让模型说得出自己在哪个项目里，Core 不从它解析路径或权限。`session_workspace` 由服务端派生并回写，客户端传入值一律被覆盖。roots 的语义与形状名单由 [TaskScope 与路径安全](../04_工具权限与审批/TaskScope与路径安全.md) 唯一拥有。
+`POST /v1/runs` 的 `workspace` 对象即 TaskScope wire。`workspace_root` 是已绑定项目的主文件夹；只给 `project_id` 表示零文件夹项目；两者都为空表示独立对话。Core 在规范化 workspace 前确定 thread ID：新对话生成 ID，follow-up 使用请求的 `thread_id`，然后解析到 thread 专属 session 工作目录。业务数据根不可用或 managed owner ID 不安全时返回 `INVALID_INPUT`。项目 run 的 `project_name` 使用当前 project authority 的最新 `display_name`，只用于让模型说得出自己在哪个项目里；Core 不从它解析路径、权限或身份，名称变化使后续 run 重建上下文。`session_workspace` 由服务端派生并回写，客户端传入值一律被覆盖。roots 的语义与形状名单由 [TaskScope 与路径安全](../04_工具权限与审批/TaskScope与路径安全.md) 唯一拥有。
 
 `GET /v1/instructions/global` 返回 `GlobalAgentsDocument{exists,revision,digest,content,byte_count,updated_at,max_bytes}`。`PUT /v1/instructions/global` 接受 `{expected_revision,content}`，`DELETE` 接受 `{expected_revision}`；revision 不匹配返回 409 `INSTRUCTION_REVISION_CONFLICT`。三条 route 只在 RunService 存在时注册。Renderer 不可通过 `POST /v1/runs` 提交 AGENTS 正文或路径。业务优先级、截断与恢复见 [02 AGENTS 指令与运行快照](../02_主智能体闭环/AGENTS指令与运行快照.md)。
 
@@ -62,6 +62,7 @@ Subagent list/detail/cancel/message route 只操作请求 run 的当前 task reg
 ```text
 GET    /v1/projects
 POST   /v1/projects
+PATCH  /v1/projects/{project_id}
 PUT    /v1/projects/order
 DELETE /v1/projects/{project_id}
 DELETE /v1/projects/{project_id}/threads
@@ -80,7 +81,7 @@ POST   /v1/project-operations/{operation_id}/complete-trash
 POST   /v1/project-operations/{operation_id}/fail-trash
 ```
 
-只有 ProjectService 存在时注册。`POST /v1/projects` 同时承担单文件夹 upsert（body 带 `workspace_root`）与多文件夹创建（body 带 `folders`）；废纸篓是文件夹粒度，`POST /v1/projects/{project_id}/folders/trash` 的 body 必须指明目标 `path`。请求与响应字段、错误码由 [项目生命周期与删除：API 与持久化](../01_桌面工作台/左侧栏/项目生命周期与删除/API与持久化.md) 唯一拥有。
+只有 ProjectService 存在时注册。`POST /v1/projects` 同时承担单文件夹 upsert（body 带 `workspace_root`）与多文件夹创建（body 带 `folders`）；`PATCH /v1/projects/{project_id}` 按稳定 ID 重命名且不要求 idempotency key；废纸篓是文件夹粒度，`POST /v1/projects/{project_id}/folders/trash` 的 body 必须指明目标 `path`。请求与响应字段、错误码由 [项目生命周期与删除：API 与持久化](../01_桌面工作台/左侧栏/项目生命周期与删除/API与持久化.md) 唯一拥有。
 
 ### 3.3 Tool、MCP、Connector、Skill 和 Plugin
 
@@ -105,6 +106,7 @@ DELETE /v1/skills/{id}
 POST   /v1/skills/{id}/enable
 POST   /v1/skills/{id}/disable
 GET    /v1/plugins
+POST   /v1/plugins/validate
 POST   /v1/plugins/install
 GET    /v1/plugins/{name}
 POST   /v1/plugins/{name}/commit
@@ -118,7 +120,7 @@ POST   /v1/plugins/{name}/servers/{short}/disable
 
 `/v1/mcp/servers*` 依赖 MCP manager；connector routes 依赖 registry。Skill list/install/preview/delete/enable/disable 始终注册，registry 缺失时返回 503。`GET /v1/skills` 可按主文件夹优先重复提交 `projectRoot` query；Core 把这些值视为同一个项目的有序文件夹组，在一次 discovery 中合并并返回每条 project Skill 的实际 `projectPath`。只提交一次保持原单文件夹语义。`POST /v1/skills/{id}/execute` 未注册，只是保留 handler。Skill 预览与删除的业务合同由 [08 技能](../08_技能/索引.md) 拥有。
 
-`/v1/plugins*` 始终注册；`PluginStore` 缺失返回 503 `PLUGINS_UNAVAILABLE`，`plugins.json` 损坏返回 503 `PLUGIN_STATE_CORRUPT`。`POST /v1/plugins/{name}/commit` 只接受修改前记录的 `expectedDigest`，CAS 冲突返回 409 `PLUGIN_RECORDED_DIGEST_CHANGED`，非法或不稳定的在线树返回 400 `PLUGIN_INVALID`。业务合同由 [14 插件](../14_插件/索引.md) 拥有。Renderer 只通过 Main `requestRuntime` 调用，不直接读写插件目录或状态文件。
+`/v1/plugins*` 始终注册；`PluginStore` 缺失返回 503 `PLUGINS_UNAVAILABLE`，`plugins.json` 损坏返回 503 `PLUGIN_STATE_CORRUPT`。`POST /v1/plugins/validate` 只隔离物化并校验 `source`，返回 identity、digest、组件计数与 diagnostics，不写安装树或刷新运行时；Desktop 随后的 `POST /v1/plugins/install` 携带该 `expectedDigest`，来源变化返回 409 `PLUGIN_SOURCE_CHANGED`。未携带 `expectedDigest` 的既有安装调用保持兼容。`POST /v1/plugins/{name}/commit` 只接受修改前记录的 `expectedDigest`，CAS 冲突返回 409 `PLUGIN_RECORDED_DIGEST_CHANGED`，非法或不稳定的在线树返回 400 `PLUGIN_INVALID`。业务合同由 [14 插件](../14_插件/索引.md) 拥有。Renderer 只通过 Main `requestRuntime` 调用，不直接读写插件目录或状态文件。
 
 `GET /v1/composer-catalog/events` 是 Main 常驻消费的 SSE 失效流。每次连接先发送当前 `{revision, kind:"snapshot"}`；Skill Registry 或 Plugin Store 的成功 catalog mutation 使 revision 单调递增并发送 `kind=skills|plugins`。事件不携带 Skill/Plugin 数据、路径或配置，Renderer 收到后只能通过 typed `listSkills/listPlugins` 按当前 workspace 与 marker 重读权威目录；重新连接不回放历史 mutation，因为 snapshot revision 与每次打开直接重读共同保证当前状态。
 

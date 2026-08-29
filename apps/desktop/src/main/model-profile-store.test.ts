@@ -138,6 +138,20 @@ describe("ModelProfileStore", () => {
         "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/models",
       allow_custom_model: true,
     });
+    expect(providers.find((provider) => provider.id === "qwen")).toMatchObject({
+      default_model: "qwen3.8-max",
+      models: ["qwen3.7-plus", "qwen3.8-max"],
+      model_capabilities: {
+        "qwen3.7-plus": expect.objectContaining({
+          supported_protocols: THREE_LLM_PROTOCOLS,
+          context_window: 1_000_000,
+          max_input_tokens: 983_616,
+          max_output_tokens: 131_072,
+          supports_tools: "ready",
+        }),
+        "qwen3.8-max": expect.any(Object),
+      },
+    });
     expect(providers.find((provider) => provider.id === "doubao")).toMatchObject({
       base_url: "https://ark.cn-beijing.volces.com/api/v3",
       default_model: "doubao-seed-2-1-pro-260628",

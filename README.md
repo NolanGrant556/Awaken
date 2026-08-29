@@ -10,7 +10,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 
 - 左侧栏负责项目与线程入口，并提供已停止会话的归档入口；root Agent 可通过受控只读工具按 `thread_id` 列出和分页读取归档历史，物理 FileStore 路径不进入模型权限；
 - 中间工作区负责输入、运行叙事、状态反馈和最终交付物；
-- 右侧 Inspector 当前提供项目文件工作区、文件夹组选择、筛选、只读目录树以及 Office、代码/文本、PDF、图片和 HTML 只读预览；从项目文件树打开的 Markdown 可在同一文件工作区切换预览与编辑并写回原文件，从交付卡打开的临时 Artifact Markdown 标签当前只读；HTML 统一进入隔离的“浏览器”入口；当前 thread 存在原生 Subagent 记录时，还提供子任务详情、状态、活动、结果、错误与单任务取消；项目 Markdown 以外的文件编辑与通用工具详情尚未接通；
+- 右侧 Inspector 当前提供项目文件工作区、文件夹组选择、筛选、只读目录树以及 Office、代码/文本、PDF、图片和 HTML 只读预览；从项目文件树打开的 Markdown 可在同一文件工作区切换预览与编辑并写回原文件。交付物中的 Markdown、图片和视频分别落入三种 Artifact 标签：Markdown 临时标签只读，运行过程媒体继续留在 `RunStage.overlay`，终态 ready 媒体在右侧文件工作区打开临时 Artifact 文件标签。HTML 统一进入隔离的“浏览器”入口；当前 thread 存在原生 Subagent 记录时，还提供子任务详情、状态、活动、结果、错误与单任务取消；项目 Markdown 以外的文件编辑与通用工具详情尚未接通；
 - Settings 承载模型、搜索、长期记忆、全局规则、外观、桌面宠物、计算机操作、Hook、ACP runner 和固定末项“已归档的聊天”等配置与管理界面；设置界面的用户可见标题显示为“钩子”；
 - Desktop 负责启动、监督和关闭本地 `awaken-core`，用户不需要单独运行 Core；
 - `Awaken Design System` 是纯 UI 组件包和 Gallery，不拥有产品状态、后端策略或运行时协议。
@@ -24,7 +24,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | 桌面工作台 | 项目与线程导航、会话归档与恢复、Workbench 输入和运行叙事、附件、交付物、全局/项目 AGENTS.md 入口、外观、宠物与 Desktop 生命周期 | [01 桌面工作台](docs/01_桌面工作台/索引.md) |
 | 主智能体闭环 | thread/run、多轮上下文、AGENTS.md 运行快照、压缩、主动提问、取消和失败终止；主 run 支持 root-only `update_plan`、耐久运行计划、实时进度入口与终态历史，并可通过 `archived_history` 只读查询归档会话；原生 Subagent 支持 explore/plan/review/general、shared_readonly/shared/git_worktree、每 run 8 个任务/4 并发、终态自动交接、status/wait/cancel/message、Memory snapshot 继承、orphan interrupted、耐久事件与 Desktop 任务组/Inspector | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
 | 运行时与本地服务 | Desktop 托管本地服务、SemanticJournal、工具媒体 blob、当前用户执行环境观察与历史回放 | [03 运行时与本地服务](docs/03_运行时与本地服务/索引.md) |
-| 工具、权限与安全执行 | 七个模型基础工具、provider/capability/dependency、每 run 可用性快照、零审批、TaskScope/Trash；MCP 工具渐进披露（定义按需经 `mcp_find` 检索加载，不长期占用上下文）；root-only 归档历史只读桥；user/project/project-local Hook、自然语言配置工具、command/受控 HTTP/prompt/只读 agent 执行器、十一类边界、阻断/输入更新、耐久回执与显式 Skill 激活注册；以及保留工具的窄 broker 合同 | [04 工具、权限与安全执行](docs/04_工具权限与审批/索引.md) |
+| 工具、权限与安全执行 | 七个模型基础工具、provider/capability/dependency、每 run 可用性快照、零审批、TaskScope/Trash；工具渐进披露（低频内建辅助工具与 MCP 工具的定义按需经 `tool_find` 检索加载，不长期占用上下文）；root-only 归档历史只读桥；user/project/project-local Hook、自然语言配置工具、command/受控 HTTP/prompt/只读 agent 执行器、十一类边界、阻断/输入更新、耐久回执与显式 Skill 激活注册；以及保留工具的窄 broker 合同 | [04 工具、权限与安全执行](docs/04_工具权限与审批/索引.md) |
 | 模型与供应商 | 模型 profile、能力与余额、调用链、安全凭据存储及故障恢复 | [05 模型与供应商配置](docs/05_模型与供应商配置/索引.md) |
 | MCP runtime | user/project/dynamic 配置、stdio/http/sse、动态工具直通、可选 Artifact metadata、认证与 prompt/resource Skill bridge | [06 MCP 运行时](docs/06_MCP运行时/索引.md) |
 | 连接器 | MCP/CLI provider 目录、官方 CLI 安装与授权、生命周期、readiness 与重启 ownership 边界 | [07 连接器](docs/07_连接器/索引.md) |
@@ -35,7 +35,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | 长期记忆与 Dream | Markdown Memory、主模型相关性召回、受控工具、无正文事件、Settings 查看/删除、手动/空闲期 Dream、Workbench 紧凑回执与 Dream 重启恢复 | [11 长期记忆](docs/11_长期记忆/索引.md) |
 | 定时任务 | 首版已支持：左侧一级入口、循环/日程任务、10 个内置模板、创建/编辑/启停/删除/立即执行/取消、专属线程、执行历史、Core 内调度器与 misfire 恢复、Agent 与固定提醒两类任务；Agent 编辑器支持 `/` Skill 与 `@` Computer Use/Plugin 结构化选择；Desktop 完全退出后不运行 | [12 定时任务](docs/12_定时任务/索引.md) |
 | 移动端 | 当前不支持；已确认目标设计为 Desktop/Core 继续拥有本机执行与耐久事实，手机通过受控 Gateway 与可自托管 relay 查看和控制任务，不直接连接或暴露 loopback Core | [13 移动端](docs/13_移动端/索引.md) |
-| 插件 | Desktop 插件页与模型 `plugin` 工具共同管理 Agent Plugins 1.0.0 user-scope 包（root `plugin.json` + `skills/` + `mcp.json`）；Core 可无写入校验、受控导出候选、安装/Trash 替换，并可在用户明确授权在线修改后通过 digest CAS `commit` 完整校验、签收并刷新运行时；启用包内 Skills/MCP 以 `plugin__` identity 注入既有 08/06 运行时，另支持启停、升级与 Trash 卸载。Workbench 与定时任务 Agent 编辑器可通过动态 `@` 目录形成经 digest 复验的 Plugin token；Plugin `@` 目录、选择和定时任务选择已在真实 macOS Desktop 复验。marketplace / legacy manifest / 插件自动 Hook 当前不支持，Creator、带真实模型执行和重启恢复仍待实机证据 | [14 插件](docs/14_插件/索引.md) |
+| 插件 | Desktop 插件页以“检查插件 → digest 锁定安装”管理 Agent Plugins 1.0.0 user-scope 包（root `plugin.json` + `skills/` + `mcp.json`），模型 `plugin` 工具复用同一无写入校验、受控导出、安装/Trash 替换与 CAS `commit`；启用包内 Skills/MCP 以 `plugin__` identity 注入既有 08/06 运行时，另支持启停、升级与 Trash 卸载。插件 MCP 保持当前用户完全访问，不增加沙盒或降权。Workbench 与定时任务 Agent 编辑器可通过动态 `@` 目录形成经 digest 复验的 Plugin token；本地目录预检门禁、Plugin `@` 目录、选择和定时任务选择已在真实 macOS Desktop 复验。marketplace / legacy manifest / 插件自动 Hook 当前不支持，Creator、带真实模型执行和重启恢复仍待实机证据 | [14 插件](docs/14_插件/索引.md) |
 | 编码工作台 | 当前不支持；已确认目标设计为 checkpoint 式代码撤回、右侧栏“变更”diff 面板、typed 只读 `git_workspace` 工具与 Git 状态条、内置 Git 防护 Hook preset，以及项目 `.awaken/coding.json` 编码环境契约；当前可用的编码相关底座（typed 文件工具、`Bash`、`git_remote`、Subagent `git_worktree`）仍由 04/02 域拥有 | [15 编码工作台](docs/15_编码工作台/索引.md) |
 | 深度研究 | 当前不支持；已确认目标设计为 Composer `@deep-research`（`@研究`）宿主编排的只读多源研究报告（公开网页 + 当前工作区），四阶段规划/调研/核验/报告；任意远程 Git clone、用户 Skill 编排和不经 `WebFetch` 的 URL 核验均不在范围。当前可用的检索与只读调研底座（`WebSearch`、`WebFetch`、typed 文件工具、只读 Subagent）仍由 04/02 域拥有 | [16 深度研究](docs/16_深度研究/索引.md) |
 

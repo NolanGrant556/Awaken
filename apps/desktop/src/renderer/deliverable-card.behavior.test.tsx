@@ -57,4 +57,27 @@ describe("deliverable card behavior", () => {
     expect(onReveal).toHaveBeenCalledTimes(1);
     expect(host.querySelector('[role="menu"]')).toBeNull();
   });
+
+  it("opens the Artifact file tab even when the ready media source needs a retry", () => {
+    const onPreview = vi.fn();
+    act(() => {
+      root.render(
+        <AwakenDeliverableCard
+          title="待续签图片.png"
+          extension="png"
+          fileType="image"
+          previewUnavailable
+          onPreview={onPreview}
+          onOpen={() => undefined}
+        />,
+      );
+    });
+
+    const preview = host.querySelector<HTMLButtonElement>(
+      '[aria-label="预览 待续签图片.png"]',
+    );
+    expect(preview?.disabled).toBe(false);
+    act(() => preview?.click());
+    expect(onPreview).toHaveBeenCalledOnce();
+  });
 });

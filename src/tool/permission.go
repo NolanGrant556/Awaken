@@ -26,7 +26,14 @@ func DecideWithOverride(ctx context.Context, def ToolDefinition, overrides map[s
 		if policy, ok := overrides[def.Name]; ok {
 			return policyToDecision(policy)
 		}
-		// Check server prefix match (e.g., "mcp__notion__*")
+		// Check the model-facing canonical server prefix first, then retain the
+		// historical raw-server spelling as a compatibility alias.
+		if def.Annotations.CanonicalServerName != "" {
+			prefix := "mcp__" + def.Annotations.CanonicalServerName + "__*"
+			if policy, ok := overrides[prefix]; ok {
+				return policyToDecision(policy)
+			}
+		}
 		if def.Annotations.ServerName != "" {
 			prefix := "mcp__" + def.Annotations.ServerName + "__*"
 			if policy, ok := overrides[prefix]; ok {

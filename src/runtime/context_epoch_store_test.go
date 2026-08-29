@@ -368,6 +368,46 @@ func TestContextEpochDynamicToolsAppendByFirstDiscoveryAndUnsafeChangesRotate(t 
 	}
 }
 
+// TestContextEpochOnDemandBuiltinToolAppendsWithoutRotation proves a deferred
+// builtin auxiliary definition loaded on demand (LoadedOnDemand provenance)
+// joins the tool list append-only like an activated MCP definition, while a
+// plain canonical builtin addition still rotates the epoch.
+func TestContextEpochOnDemandBuiltinToolAppendsWithoutRotation(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	store := NewContextEpochStore()
+	candidate := testContextEpochCandidate()
+	first, err := store.Project(context.Background(), candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	activated := testEpochTool("configure_hook", tool.SourceBuiltin, "builtin-hook-v1")
+	activated.Provenance.LoadedOnDemand = true
+	withActivated := candidate
+	withActivated.Tools = append(append([]agentcore.ContextEpochToolCandidate(nil), candidate.Tools...), activated)
+	second, err := store.Project(context.Background(), withActivated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Receipt.EpochID != first.Receipt.EpochID {
+		t.Fatalf("on-demand builtin activation rotated epoch: %+v", second.Receipt)
+	}
+	if got := contextEpochToolNames(second.Tools); strings.Join(got, ",") != "alpha,beta,mcp-zulu,configure_hook" {
+		t.Fatalf("on-demand builtin did not append in discovery order: %v", got)
+	}
+
+	canonical := withActivated
+	canonical.Tools = append(append([]agentcore.ContextEpochToolCandidate(nil), withActivated.Tools...),
+		testEpochTool("gamma", tool.SourceBuiltin, "builtin-gamma-v1"))
+	third, err := store.Project(context.Background(), canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Receipt.EpochID == second.Receipt.EpochID || third.Receipt.BoundaryReason != "canonical_tool_added" {
+		t.Fatalf("plain canonical builtin addition must rotate the epoch: %+v", third.Receipt)
+	}
+}
+
 func TestContextEpochIgnoresHostOnlyToolRegistrationIdentity(t *testing.T) {
 	t.Setenv(awakenHomeEnv, t.TempDir())
 	store := NewContextEpochStore()

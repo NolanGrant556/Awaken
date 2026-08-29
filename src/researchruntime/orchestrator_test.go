@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"awaken/src/subagentruntime"
 )
 
 type stubChildren struct {
@@ -12,9 +14,10 @@ type stubChildren struct {
 	responses []string
 	errs      []error
 	calls     []ChildSpec
+	receipts  [][]subagentruntime.HostToolReceipt
 }
 
-func (s *stubChildren) Run(_ context.Context, spec ChildSpec) (string, error) {
+func (s *stubChildren) Run(_ context.Context, spec ChildSpec) (ChildResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, spec)
@@ -24,11 +27,31 @@ func (s *stubChildren) Run(_ context.Context, spec ChildSpec) (string, error) {
 		s.errs = s.errs[1:]
 	}
 	if len(s.responses) == 0 {
-		return "", err
+		return ChildResult{}, err
 	}
 	next := s.responses[0]
 	s.responses = s.responses[1:]
-	return next, err
+	var receipts []subagentruntime.HostToolReceipt
+	if len(s.receipts) > 0 {
+		receipts = s.receipts[0]
+		s.receipts = s.receipts[1:]
+	} else {
+		receipts = testReceipts(next + "\n" + spec.Prompt)
+	}
+	return ChildResult{Output: next, Receipts: receipts}, err
+}
+
+func testReceipts(value string) []subagentruntime.HostToolReceipt {
+	var receipts []subagentruntime.HostToolReceipt
+	for _, path := range []string{"docs/04_工具权限与审批/工具定义与暴露.md", "src/tools/web_search/web_search.go"} {
+		if strings.Contains(value, path) {
+			receipts = append(receipts, subagentruntime.HostToolReceipt{ToolCallID: "read-" + path, ToolName: "Read", Details: map[string]any{"file_path": "/workspace/" + path, "sha256": digestOf(path)}})
+		}
+	}
+	if strings.Contains(value, "https://example.com") {
+		receipts = append(receipts, subagentruntime.HostToolReceipt{ToolCallID: "fetch-example", ToolName: "WebFetch", Details: map[string]any{"final_url": "https://example.com", "content_sha256": digestOf("example"), "title": "Example", "fetched_at": "2026-08-27T00:00:00Z"}})
+	}
+	return receipts
 }
 
 type memJournal struct{ kinds []string }
@@ -49,6 +72,18 @@ type stubSynth struct{ raw string }
 
 func (s *stubSynth) Synthesize(_ context.Context, _ string) (string, error) {
 	return s.raw, nil
+}
+
+type stubPrefetcher struct {
+	urls   []string
+	result PrefetchedSource
+}
+
+func (s *stubPrefetcher) Fetch(_ context.Context, url string) (PrefetchedSource, error) {
+	s.urls = append(s.urls, url)
+	result := s.result
+	result.URL = url
+	return result, nil
 }
 
 func TestParseIntentRequiresQuery(t *testing.T) {
@@ -207,6 +242,79 @@ func TestHostDowngradesVerifiedWithoutIndependentSources(t *testing.T) {
 	}})
 	if claims[0].VerificationStatus != "partial" {
 		t.Fatalf("status=%s", claims[0].VerificationStatus)
+	}
+}
+
+func TestExplicitURLPrefetchPreservesLoopbackRedirectQuery(t *testing.T) {
+	const exact = "https://httpbin.org/redirect-to?url=http://127.0.0.1/"
+	prefetcher := &stubPrefetcher{result: PrefetchedSource{ErrorCode: "web_fetch_blocked_target"}}
+	children := &stubChildren{responses: []string{
+		`{"questions":[{"id":"q1","text":"q"}]}`,
+		`{"claims":[],"uncertainties":["blocked"]}`,
+	}}
+	result, err := (&Orchestrator{Children: children, Prefetch: prefetcher}).Run(context.Background(), Intent{Query: "check " + exact, Breadth: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prefetcher.urls) != 1 || prefetcher.urls[0] != exact {
+		t.Fatalf("prefetched=%v", prefetcher.urls)
+	}
+	if !strings.Contains(strings.Join(result.Coverage, "\n"), "web_fetch_blocked_target") || strings.Contains(result.Markdown, "## Sources\n\n- ") {
+		t.Fatalf("coverage=%v markdown=%s", result.Coverage, result.Markdown)
+	}
+}
+
+func TestGroundEvidenceUsesExplicitHostReceiptID(t *testing.T) {
+	receipt := subagentruntime.HostToolReceipt{
+		ToolCallID: "host-fetch-1",
+		ToolName:   "WebFetch",
+		Details: map[string]any{
+			"final_url":      "https://example.com/base64/exact",
+			"content_sha256": "digest",
+			"title":          "Fixture",
+		},
+	}
+	evidence, ok := groundEvidence(RawEvidence{
+		Kind:      "web",
+		Locator:   "https://example.com/base64/model-reencoded",
+		ReceiptID: "host-fetch-1",
+	}, []subagentruntime.HostToolReceipt{receipt})
+	if !ok || evidence.Locator != "https://example.com/base64/exact" || evidence.Digest != "digest" {
+		t.Fatalf("evidence=%+v ok=%v", evidence, ok)
+	}
+	if _, ok := groundEvidence(RawEvidence{Kind: "web", Locator: "https://example.com/base64/model-reencoded", ReceiptID: "wrong"}, []subagentruntime.HostToolReceipt{receipt}); ok {
+		t.Fatal("mismatched receipt ID must not ground evidence")
+	}
+}
+
+func TestHostRejectsClaimsWithoutGroundedEvidence(t *testing.T) {
+	claims := applyHostVerificationRules([]Claim{{ID: "claim-0", Statement: "ungrounded", VerificationStatus: "partial"}}, nil)
+	if claims[0].VerificationStatus != "rejected" {
+		t.Fatalf("claims=%+v", claims)
+	}
+}
+
+func TestExplicitHTTPSURLsTrimsSentencePunctuation(t *testing.T) {
+	got := ExplicitHTTPSURLs("核验 https://example.com/a?x=1。以及 https://example.org/b)")
+	if len(got) != 2 || got[0] != "https://example.com/a?x=1" || got[1] != "https://example.org/b" {
+		t.Fatalf("urls=%v", got)
+	}
+}
+
+func TestResearchDropsEvidenceWithoutSuccessfulToolReceipt(t *testing.T) {
+	children := &stubChildren{
+		responses: []string{
+			`{"questions":[{"id":"q1","text":"q"}]}`,
+			`{"claims":[{"statement":"Loopback is trusted.","evidence":[{"kind":"web","title":"local","locator":"http://127.0.0.1/","source_type":"primary"}]}],"uncertainties":[]}`,
+		},
+		receipts: [][]subagentruntime.HostToolReceipt{nil, nil},
+	}
+	result, err := (&Orchestrator{Children: children}).Run(context.Background(), Intent{Query: "q", Breadth: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Markdown, "127.0.0.1") || result.Outcome != OutcomePartial {
+		t.Fatalf("outcome=%s markdown=%s", result.Outcome, result.Markdown)
 	}
 }
 

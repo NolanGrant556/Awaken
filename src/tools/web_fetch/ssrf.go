@@ -2,6 +2,7 @@ package webfetch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -12,6 +13,8 @@ import (
 )
 
 const maxURLBytes = 2048
+
+var errBlockedTarget = errors.New("web fetch target blocked")
 
 var credentialQueryKeys = map[string]struct{}{
 	"token": {}, "key": {}, "signature": {}, "access_token": {}, "accesstoken": {},
@@ -170,7 +173,7 @@ func (t *Tool) resolvePublicIPs(ctx context.Context, host string, allowLoopback 
 			return []net.IP{address}, nil
 		}
 		if isForbiddenRemoteIP(address) {
-			return nil, fmt.Errorf("resolved address is not a public unicast target")
+			return nil, fmt.Errorf("%w: resolved address is not a public unicast target", errBlockedTarget)
 		}
 		return []net.IP{address}, nil
 	}
@@ -187,19 +190,19 @@ func (t *Tool) resolvePublicIPs(ctx context.Context, host string, allowLoopback 
 	var allowed []net.IP
 	for _, address := range addresses {
 		if address == nil {
-			return nil, fmt.Errorf("resolved address is not a public unicast target")
+			return nil, fmt.Errorf("%w: resolved address is not a public unicast target", errBlockedTarget)
 		}
 		if allowLoopback && address.IsLoopback() {
 			allowed = append(allowed, address)
 			continue
 		}
 		if isForbiddenRemoteIP(address) {
-			return nil, fmt.Errorf("resolved address is not a public unicast target")
+			return nil, fmt.Errorf("%w: resolved address is not a public unicast target", errBlockedTarget)
 		}
 		allowed = append(allowed, address)
 	}
 	if len(allowed) == 0 {
-		return nil, fmt.Errorf("resolved address is not a public unicast target")
+		return nil, fmt.Errorf("%w: resolved address is not a public unicast target", errBlockedTarget)
 	}
 	return allowed, nil
 }

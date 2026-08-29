@@ -79,7 +79,7 @@ func TestRunnerHandsControlToDeepResearchWithoutRootLLM(t *testing.T) {
 	if !finished {
 		t.Fatal("expected RUN_FINISHED")
 	}
-	if !strings.Contains(answer, "Partial") || !strings.Contains(answer, "Exa") {
+	if !strings.Contains(answer, "Partial") || !strings.Contains(answer, "No verified claims were produced") {
 		t.Fatalf("answer=%q", answer)
 	}
 	kinds := map[SemanticKind]bool{}
@@ -92,5 +92,23 @@ func TestRunnerHandsControlToDeepResearchWithoutRootLLM(t *testing.T) {
 	report := filepath.Join(output, "research-run_research.md")
 	if _, err := os.Stat(report); err != nil {
 		t.Fatalf("expected published report %s: %v", report, err)
+	}
+}
+
+func TestResearchReceiptDetailsExcludeFetchedBody(t *testing.T) {
+	details := researchReceiptDetails("WebFetch", map[string]any{
+		"final_url":      "https://example.com/",
+		"content_sha256": "abc",
+		"text":           "untrusted page body",
+		"redirects":      []any{"private"},
+	})
+	if details["final_url"] != "https://example.com/" || details["content_sha256"] != "abc" {
+		t.Fatalf("missing evidence metadata: %+v", details)
+	}
+	if _, ok := details["text"]; ok {
+		t.Fatalf("page body entered host receipt: %+v", details)
+	}
+	if _, ok := details["redirects"]; ok {
+		t.Fatalf("redirect details entered host receipt: %+v", details)
 	}
 }

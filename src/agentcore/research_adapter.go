@@ -46,6 +46,7 @@ func (r *Runner) runDeepResearch(ctx stdcontext.Context, events *runEventEmitter
 		},
 		PublishFn: &researchPublisher{runner: r, events: events},
 		Synth:     &researchSynthesizer{runner: r},
+		Prefetch:  &researchSourcePrefetcher{runner: r, events: events},
 		Journal:   &researchJournal{runner: r, events: events},
 		Cancelled: func() bool { return ctx.Err() != nil },
 	}
@@ -101,6 +102,44 @@ func (r *Runner) runDeepResearch(ctx stdcontext.Context, events *runEventEmitter
 	return answer, nil
 }
 
+type researchSourcePrefetcher struct {
+	runner *Runner
+	events *runEventEmitter
+}
+
+func (p *researchSourcePrefetcher) Fetch(ctx stdcontext.Context, url string) (researchruntime.PrefetchedSource, error) {
+	if p == nil || p.runner == nil || p.runner.toolRuntime == nil {
+		return researchruntime.PrefetchedSource{}, fmt.Errorf("research source prefetcher is unavailable")
+	}
+	arguments, err := json.Marshal(map[string]any{"url": url})
+	if err != nil {
+		return researchruntime.PrefetchedSource{}, err
+	}
+	results := p.runner.executeToolCalls(ctx, []convcontext.ToolCall{{
+		ID:   convcontext.GenerateToolCallID(),
+		Type: "function",
+		Function: convcontext.FunctionCall{
+			Name:      "WebFetch",
+			Arguments: string(arguments),
+		},
+	}}, p.events)
+	if len(results) == 0 {
+		return researchruntime.PrefetchedSource{}, fmt.Errorf("WebFetch returned no result")
+	}
+	result := results[0]
+	prefetched := researchruntime.PrefetchedSource{URL: url, Content: result.Content}
+	if result.IsError {
+		prefetched.ErrorCode = firstNonEmpty(result.ErrorCode, result.Outcome.ErrorCode, "web_fetch_failed")
+		return prefetched, nil
+	}
+	prefetched.Receipt = &subagentruntime.HostToolReceipt{
+		ToolCallID: result.ToolCallID,
+		ToolName:   result.Name,
+		Details:    researchReceiptDetails(result.Name, result.Outcome.Details),
+	}
+	return prefetched, nil
+}
+
 func compactFailedNotes(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
@@ -124,12 +163,12 @@ type researchChildClient struct {
 	turnID     string
 }
 
-func (c *researchChildClient) Run(ctx stdcontext.Context, spec researchruntime.ChildSpec) (string, error) {
+func (c *researchChildClient) Run(ctx stdcontext.Context, spec researchruntime.ChildSpec) (researchruntime.ChildResult, error) {
 	if c == nil || c.controller == nil {
-		return "", fmt.Errorf("research child controller is unavailable")
+		return researchruntime.ChildResult{}, fmt.Errorf("research child controller is unavailable")
 	}
 	if ctx.Err() != nil {
-		return "", ctx.Err()
+		return researchruntime.ChildResult{}, ctx.Err()
 	}
 	host := spec.Host
 	if host == nil {
@@ -147,12 +186,12 @@ func (c *researchChildClient) Run(ctx stdcontext.Context, spec researchruntime.C
 		Host:          host,
 	})
 	if err != nil {
-		return "", err
+		return researchruntime.ChildResult{}, err
 	}
 	for {
 		if ctx.Err() != nil {
 			_, _ = c.controller.Cancel(ctx, snapshot.TaskID, "research_stop")
-			return "", ctx.Err()
+			return researchruntime.ChildResult{}, ctx.Err()
 		}
 		wait, waitErr := c.controller.Wait(ctx, subagentruntime.WaitRequest{
 			TaskIDs:    []string{snapshot.TaskID},
@@ -160,7 +199,7 @@ func (c *researchChildClient) Run(ctx stdcontext.Context, spec researchruntime.C
 			Timeout:    60 * time.Second,
 		})
 		if waitErr != nil {
-			return "", waitErr
+			return researchruntime.ChildResult{}, waitErr
 		}
 		if wait.RetrievalStatus != subagentruntime.RetrievalCompleted || len(wait.Tasks) == 0 {
 			continue
@@ -168,15 +207,15 @@ func (c *researchChildClient) Run(ctx stdcontext.Context, spec researchruntime.C
 		task := wait.Tasks[0]
 		switch task.Status {
 		case subagentruntime.StatusCompleted:
-			return task.ResultPreview, nil
+			return researchruntime.ChildResult{Output: task.ResultPreview, Receipts: task.HostToolReceipts}, nil
 		case subagentruntime.StatusCancelled, subagentruntime.StatusInterrupted:
-			return "", stdcontext.Canceled
+			return researchruntime.ChildResult{}, stdcontext.Canceled
 		default:
 			msg := strings.TrimSpace(task.ErrorMessage)
 			if msg == "" {
 				msg = string(task.Status)
 			}
-			return "", fmt.Errorf("%s", msg)
+			return researchruntime.ChildResult{}, fmt.Errorf("%s", msg)
 		}
 	}
 }
@@ -332,32 +371,49 @@ func (j *researchJournal) Append(ctx stdcontext.Context, kind string, payload ma
 	if !ok {
 		return nil
 	}
-	j.revision++
-	if payload == nil {
-		payload = map[string]any{}
+	nextRevision := j.revision + 1
+	nextPayload := cloneResearchMap(payload)
+	if nextPayload == nil {
+		nextPayload = map[string]any{}
 	}
-	payload["revision"] = j.revision
-	payload["phase"] = researchPhaseForKind(semanticKind)
-	if j.ledger == nil {
-		j.ledger = map[string]any{
+	nextPayload["revision"] = nextRevision
+	nextPayload["phase"] = researchPhaseForKind(semanticKind)
+	nextLedger := cloneResearchMap(j.ledger)
+	if nextLedger == nil {
+		nextLedger = map[string]any{
 			"schema_version": 1,
 			"run_id":         j.events.runID,
 			"thread_id":      j.events.threadID,
 		}
 	}
-	for key, value := range payload {
-		j.ledger[key] = value
+	for key, value := range nextPayload {
+		nextLedger[key] = value
 	}
-	record := NewSemanticRecord(semanticKind, j.events.threadID, j.events.runID, j.events.turnID(), "", j.events.sessionID, payload)
+	record := NewSemanticRecord(semanticKind, j.events.threadID, j.events.runID, j.events.turnID(), "", j.events.sessionID, nextPayload)
 	if j.events.recorder == nil {
-		writeResearchLedger(j.runner, j.ledger)
+		j.revision = nextRevision
+		j.ledger = nextLedger
+		writeResearchLedger(j.runner, nextLedger)
 		return nil
 	}
 	if err := j.events.persistDurable(ctx, kind, record); err != nil {
 		return err
 	}
-	writeResearchLedger(j.runner, j.ledger)
+	j.revision = nextRevision
+	j.ledger = nextLedger
+	writeResearchLedger(j.runner, nextLedger)
 	return nil
+}
+
+func cloneResearchMap(source map[string]any) map[string]any {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func researchSemanticKind(kind string) (SemanticKind, bool) {

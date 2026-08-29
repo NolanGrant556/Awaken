@@ -303,6 +303,21 @@ func (m *Manager) reportProgress(ctx context.Context, taskID string, update Prog
 			}
 		}
 	}
+	if receipt := update.HostToolReceipt; receipt != nil && strings.TrimSpace(receipt.ToolCallID) != "" {
+		found := false
+		for _, existing := range snapshot.HostToolReceipts {
+			if existing.ToolCallID == receipt.ToolCallID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			copied := *receipt
+			copied.Details = cloneAnyMap(receipt.Details)
+			snapshot.HostToolReceipts = append(snapshot.HostToolReceipts, copied)
+			changed = true
+		}
+	}
 	if requestID := strings.TrimSpace(update.ModelRequestID); requestID != "" {
 		if _, seen := task.seenModelRequests[requestID]; !seen {
 			task.seenModelRequests[requestID] = struct{}{}
@@ -745,7 +760,7 @@ func (m *Manager) snapshot(taskID string) (TaskSnapshot, bool) {
 	if task == nil {
 		return TaskSnapshot{}, false
 	}
-	return task.snapshot, true
+	return cloneTaskSnapshot(task.snapshot), true
 }
 
 func (m *Manager) replaceSnapshot(taskID string, snapshot TaskSnapshot) bool {
@@ -762,6 +777,25 @@ func (m *Manager) replaceSnapshot(taskID string, snapshot TaskSnapshot) bool {
 	m.mu.Unlock()
 	m.signal()
 	return true
+}
+
+func cloneTaskSnapshot(snapshot TaskSnapshot) TaskSnapshot {
+	snapshot.HostToolReceipts = append([]HostToolReceipt(nil), snapshot.HostToolReceipts...)
+	for i := range snapshot.HostToolReceipts {
+		snapshot.HostToolReceipts[i].Details = cloneAnyMap(snapshot.HostToolReceipts[i].Details)
+	}
+	return snapshot
+}
+
+func cloneAnyMap(source map[string]any) map[string]any {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (m *Manager) prompt(taskID string) string {

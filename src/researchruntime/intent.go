@@ -2,9 +2,24 @@ package researchruntime
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 )
+
+var explicitHTTPSURLPattern = regexp.MustCompile(`https://[^\s<>"'，。；！？、（）【】]+`)
+
+func ExplicitHTTPSURLs(query string) []string {
+	matches := explicitHTTPSURLPattern.FindAllString(query, 4)
+	urls := make([]string, 0, len(matches))
+	for _, match := range matches {
+		match = strings.TrimRight(match, "，。；！？、,;!?)）】}")
+		if match != "" {
+			urls = append(urls, match)
+		}
+	}
+	return uniqueStrings(urls)
+}
 
 const (
 	WorkflowID           = "deep-research"

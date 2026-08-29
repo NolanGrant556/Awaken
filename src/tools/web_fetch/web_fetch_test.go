@@ -105,6 +105,46 @@ func TestWebFetchRedirectToPrivateFailsClosed(t *testing.T) {
 	if outcome.Status == "succeeded" {
 		t.Fatalf("redirect to metadata must fail: %+v", outcome.Details)
 	}
+	if outcome.ErrorCode != "web_fetch_blocked_target" || outcome.Retryable {
+		t.Fatalf("code=%s retryable=%v", outcome.ErrorCode, outcome.Retryable)
+	}
+}
+
+func TestWebFetchRejectsNonSuccessStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, "not evidence")
+	}))
+	defer server.Close()
+	outcome, err := (&Tool{AllowTestHTTP: true}).ExecuteOutcome(context.Background(), `{"url":"`+server.URL+`"}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.ErrorCode != "web_fetch_http_status" || outcome.Status == "succeeded" {
+		t.Fatalf("status=%s code=%s", outcome.Status, outcome.ErrorCode)
+	}
+}
+
+func TestWebFetchRejectsMissingContentType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	outcome, err := (&Tool{AllowTestHTTP: true}).ExecuteOutcome(context.Background(), `{"url":"`+server.URL+`"}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.ErrorCode != "web_fetch_unsupported_type" {
+		t.Fatalf("code=%s", outcome.ErrorCode)
+	}
+}
+
+func TestPageTextTruncatesAtUTF8Boundary(t *testing.T) {
+	_, text, truncated := pageText("text/plain", []byte("你好吗"), 4)
+	if !truncated || text != "你" || !utf8ValidString(text) {
+		t.Fatalf("text=%q truncated=%v", text, truncated)
+	}
 }
 
 func TestWebFetchUnsupportedType(t *testing.T) {

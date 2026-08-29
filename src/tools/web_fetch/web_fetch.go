@@ -20,13 +20,13 @@ import (
 )
 
 const (
-	ToolName             = "WebFetch"
-	defaultMaxBytes      = 256 * 1024
-	hardMaxBytes         = 1 * 1024 * 1024
-	maxCompressedBytes   = 4 * 1024 * 1024
-	maxRedirects         = 5
-	totalTimeout         = 30 * time.Second
-	searchProvidersEnv   = "AWAKEN_WEB_SEARCH_PROVIDERS"
+	ToolName           = "WebFetch"
+	defaultMaxBytes    = 256 * 1024
+	hardMaxBytes       = 1 * 1024 * 1024
+	maxCompressedBytes = 4 * 1024 * 1024
+	maxRedirects       = 5
+	totalTimeout       = 30 * time.Second
+	searchProvidersEnv = "AWAKEN_WEB_SEARCH_PROVIDERS"
 )
 
 // Tool opens a public HTTPS page as bounded UTF-8 text. Tests may inject a
@@ -80,7 +80,7 @@ func (t *Tool) Definition() tool.ToolDefinition {
 		},
 		SideEffects: []tool.ToolSideEffect{{
 			Kind: tool.SideEffectNetwork, Resources: []string{"public HTTPS origin"},
-			Description: "Sends a GET request to the requested URL and follows a bounded number of revalidated redirects.",
+			Description:   "Sends a GET request to the requested URL and follows a bounded number of revalidated redirects.",
 			Reversibility: tool.ReversibilityNotApplicable,
 		}},
 		Examples: []tool.ToolExample{{
@@ -93,6 +93,7 @@ func (t *Tool) Definition() tool.ToolDefinition {
 			{Code: "web_fetch_blocked_target", Cause: "SSRF, private, metadata, userinfo, or credential query rejected", Retryable: false},
 			{Code: "web_fetch_unsupported_type", Cause: "Response is not HTML, Markdown, or UTF-8 plain text", Retryable: false},
 			{Code: "web_fetch_network_failed", Cause: "Transport, DNS, or timeout failed", Retryable: true},
+			{Code: "web_fetch_http_status", Cause: "Upstream returned a non-success HTTP status", Retryable: true},
 			{Code: "web_fetch_cancelled", Cause: "Caller cancelled the request", Retryable: true},
 			{Code: "web_fetch_disabled", Cause: "Search channels are disabled so WebFetch is unavailable", Retryable: false},
 		},
@@ -150,17 +151,20 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 			return fmt.Errorf("too many redirects")
 		}
 		if next.URL.User != nil {
-			return fmt.Errorf("redirect userinfo is not allowed")
+			return fmt.Errorf("%w: redirect userinfo is not allowed", errBlockedTarget)
 		}
 		next.Header.Del("Authorization")
 		next.Header.Del("Cookie")
 		next.Header.Del("Referer")
 		redirectTarget, parseErr := parseFetchURL(next.URL.String(), t.AllowTestHTTP)
 		if parseErr != nil {
-			return parseErr
+			return fmt.Errorf("%w: %v", errBlockedTarget, parseErr)
 		}
 		if _, resolveErr := t.resolvePublicIPs(next.Context(), redirectTarget.Host, t.AllowTestHTTP && redirectTarget.Loopback); resolveErr != nil {
-			return resolveErr
+			if errors.Is(resolveErr, errBlockedTarget) {
+				return resolveErr
+			}
+			return fmt.Errorf("redirect target resolution failed: %w", resolveErr)
 		}
 		status := 0
 		if len(via) > 0 && via[len(via)-1].Response != nil {
@@ -178,9 +182,16 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 			outcome.Status = tool.OutcomeCancelled
 			return outcome.WithTiming(started, time.Now().UTC()), nil
 		}
+		if errors.Is(err, errBlockedTarget) {
+			return tool.FailedOutcome("WebFetch blocked an unsafe redirect target.", "web_fetch_blocked_target", tool.ErrorCategoryPolicy, false).WithTiming(started, time.Now().UTC()), nil
+		}
 		return tool.FailedOutcome("WebFetch network request failed.", "web_fetch_network_failed", tool.ErrorCategoryRuntime, true).WithTiming(started, time.Now().UTC()), nil
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		retryable := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError
+		return tool.FailedOutcome(fmt.Sprintf("WebFetch upstream returned HTTP %d.", resp.StatusCode), "web_fetch_http_status", tool.ErrorCategoryRuntime, retryable).WithTiming(started, time.Now().UTC()), nil
+	}
 
 	decoded, truncated, err := decodeResponseBody(resp, int64(hardMaxBytes))
 	if err != nil {
@@ -211,17 +222,17 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 	outcome.Truncated = truncated
 	outcome.Summary = fmt.Sprintf("Fetched %s", finalURL)
 	outcome.Details = map[string]any{
-		"requested_url":   params.URL,
-		"final_url":       finalURL,
-		"title":           title,
-		"text":            text,
-		"truncated":       truncated,
-		"fetched_at":      fetchedAt.Format(time.RFC3339),
-		"content_sha256":  hex.EncodeToString(sum[:]),
-		"http_status":     resp.StatusCode,
-		"content_type":    contentType,
-		"redirects":       hops,
-		"untrusted":       true,
+		"requested_url":  params.URL,
+		"final_url":      finalURL,
+		"title":          title,
+		"text":           text,
+		"truncated":      truncated,
+		"fetched_at":     fetchedAt.Format(time.RFC3339),
+		"content_sha256": hex.EncodeToString(sum[:]),
+		"http_status":    resp.StatusCode,
+		"content_type":   contentType,
+		"redirects":      hops,
+		"untrusted":      true,
 	}
 	outcome.Diagnostic = map[string]any{
 		"http_status": resp.StatusCode, "content_type": contentType, "truncated": truncated,
@@ -305,7 +316,7 @@ func decodeResponseBody(resp *http.Response, maxBytes int64) ([]byte, bool, erro
 
 func acceptedContentType(contentType string) bool {
 	switch contentType {
-	case "", "text/html", "application/xhtml+xml", "text/plain", "text/markdown", "text/x-markdown":
+	case "text/html", "application/xhtml+xml", "text/plain", "text/markdown", "text/x-markdown":
 		return true
 	default:
 		return false
@@ -314,7 +325,7 @@ func acceptedContentType(contentType string) bool {
 
 func pageText(contentType string, body []byte, maxBytes int) (title, text string, truncated bool) {
 	switch {
-	case contentType == "text/html" || contentType == "application/xhtml+xml" || contentType == "":
+	case contentType == "text/html" || contentType == "application/xhtml+xml":
 		title, text = extractHTML(body)
 	default:
 		decoded, ok := decodeUTF8(body)
@@ -328,10 +339,24 @@ func pageText(contentType string, body []byte, maxBytes int) (title, text string
 		return title, "", false
 	}
 	if len(text) > maxBytes {
-		text = string([]byte(text)[:maxBytes])
+		text = truncateUTF8(text, maxBytes)
 		truncated = true
 	}
 	return title, text, truncated
+}
+
+func truncateUTF8(text string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(text) <= maxBytes {
+		return text
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8ValidString(text[:cut]) {
+		cut--
+	}
+	return text[:cut]
 }
 
 func utf8ValidString(text string) bool {

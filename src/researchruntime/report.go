@@ -1,9 +1,12 @@
 package researchruntime
 
 import (
+	"awaken/src/subagentruntime"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -25,6 +28,7 @@ type Evidence struct {
 	SourceType      string
 	IndependenceKey string
 	Digest          string
+	FetchedAt       string
 }
 
 func assignCitations(evidence []Evidence) map[string]string {
@@ -100,7 +104,11 @@ func renderReport(intent Intent, outcome string, answer string, claims []Claim, 
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].marker < rows[j].marker })
 	for _, row := range rows {
-		fmt.Fprintf(&b, "- [%s] %s — %s\n", row.marker, emptyTitle(row.ev.Title), row.ev.Locator)
+		when := ""
+		if strings.TrimSpace(row.ev.FetchedAt) != "" {
+			when = " — fetched " + row.ev.FetchedAt
+		}
+		fmt.Fprintf(&b, "- [%s] %s — %s%s\n", row.marker, escapeMarkdownText(emptyTitle(row.ev.Title)), row.ev.Locator, when)
 	}
 	return b.String()
 }
@@ -124,6 +132,10 @@ func applyHostVerificationRules(claims []Claim, evidence []Evidence) []Claim {
 		byID[ev.ID] = ev
 	}
 	for i, claim := range claims {
+		if len(claim.EvidenceIDs) == 0 {
+			claims[i].VerificationStatus = "rejected"
+			continue
+		}
 		if claim.VerificationStatus != "verified" {
 			continue
 		}
@@ -168,6 +180,11 @@ func emptyTitle(title string) string {
 	return title
 }
 
+func escapeMarkdownText(value string) string {
+	replacer := strings.NewReplacer("\\", "\\\\", "[", "\\[", "]", "\\]", "<", "&lt;", ">", "&gt;", "\n", " ", "\r", " ")
+	return replacer.Replace(strings.TrimSpace(value))
+}
+
 func digestOf(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
@@ -193,4 +210,93 @@ func independenceKey(ev RawEvidence) string {
 		host = strings.Join(parts[len(parts)-2:], ".")
 	}
 	return "web:" + host
+}
+
+func groundEvidence(raw RawEvidence, receipts []subagentruntime.HostToolReceipt) (Evidence, bool) {
+	kind := strings.ToLower(strings.TrimSpace(raw.Kind))
+	for _, receipt := range receipts {
+		switch kind {
+		case "web":
+			if receipt.ToolName != "WebFetch" {
+				continue
+			}
+			finalURL := detailString(receipt.Details, "final_url")
+			digest := detailString(receipt.Details, "content_sha256")
+			receiptMatch := strings.TrimSpace(raw.ReceiptID) != "" && raw.ReceiptID == receipt.ToolCallID
+			if digest == "" || (!receiptMatch && !sameWebLocator(raw.Locator, finalURL)) {
+				continue
+			}
+			title := detailString(receipt.Details, "title")
+			if title == "" {
+				title = raw.Title
+			}
+			return Evidence{Kind: kind, Title: title, Locator: finalURL, SourceType: raw.SourceType, IndependenceKey: independenceKey(RawEvidence{Kind: kind, Locator: finalURL}), Digest: digest, FetchedAt: detailString(receipt.Details, "fetched_at")}, true
+		case "workspace":
+			if receipt.ToolName != "Read" {
+				continue
+			}
+			path := detailString(receipt.Details, "file_path")
+			digest := detailString(receipt.Details, "sha256")
+			if digest == "" || !sameWorkspaceLocator(raw.Locator, path) {
+				continue
+			}
+			return Evidence{Kind: kind, Title: raw.Title, Locator: raw.Locator, SourceType: raw.SourceType, IndependenceKey: independenceKey(raw), Digest: digest}, true
+		}
+	}
+	return Evidence{}, false
+}
+
+func receiptsSupportClaim(claim Claim, evidence []Evidence, receipts []subagentruntime.HostToolReceipt) bool {
+	wanted := map[string]bool{}
+	for _, id := range claim.EvidenceIDs {
+		wanted[id] = true
+	}
+	for _, ev := range evidence {
+		if !wanted[ev.ID] {
+			continue
+		}
+		for _, receipt := range receipts {
+			if ev.Kind == "web" && receipt.ToolName == "WebFetch" && sameWebLocator(ev.Locator, detailString(receipt.Details, "final_url")) && ev.Digest == detailString(receipt.Details, "content_sha256") {
+				return true
+			}
+			if ev.Kind == "workspace" && receipt.ToolName == "Read" && sameWorkspaceLocator(ev.Locator, detailString(receipt.Details, "file_path")) && ev.Digest == detailString(receipt.Details, "sha256") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func detailString(details map[string]any, key string) string {
+	value, _ := details[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func sameWebLocator(left, right string) bool {
+	canonical := func(raw string) string {
+		parsed, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Host == "" {
+			return ""
+		}
+		parsed.Scheme = "https"
+		parsed.Host = strings.ToLower(parsed.Host)
+		parsed.Fragment = ""
+		parsed.RawFragment = ""
+		return parsed.String()
+	}
+	a, b := canonical(left), canonical(right)
+	return a != "" && a == b
+}
+
+func sameWorkspaceLocator(locator, canonicalPath string) bool {
+	locator = strings.TrimSpace(locator)
+	if index := strings.LastIndex(locator, ":"); index >= 0 {
+		lineSpec := locator[index+1:]
+		if lineSpec != "" && strings.IndexFunc(lineSpec, func(r rune) bool { return (r < '0' || r > '9') && r != '-' }) < 0 {
+			locator = locator[:index]
+		}
+	}
+	locator = filepath.ToSlash(filepath.Clean(locator))
+	canonicalPath = filepath.ToSlash(filepath.Clean(canonicalPath))
+	return locator != "." && canonicalPath != "." && (canonicalPath == locator || strings.HasSuffix(canonicalPath, "/"+strings.TrimPrefix(locator, "./")))
 }

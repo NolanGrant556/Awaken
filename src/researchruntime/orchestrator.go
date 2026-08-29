@@ -38,7 +38,12 @@ type ChildSpec struct {
 }
 
 type ChildClient interface {
-	Run(ctx context.Context, spec ChildSpec) (string, error)
+	Run(ctx context.Context, spec ChildSpec) (ChildResult, error)
+}
+
+type ChildResult struct {
+	Output   string
+	Receipts []subagentruntime.HostToolReceipt
 }
 
 type PlanWriter interface {
@@ -58,6 +63,17 @@ type Synthesizer interface {
 	Synthesize(ctx context.Context, prompt string) (string, error)
 }
 
+type PrefetchedSource struct {
+	URL       string
+	Content   string
+	ErrorCode string
+	Receipt   *subagentruntime.HostToolReceipt
+}
+
+type SourcePrefetcher interface {
+	Fetch(ctx context.Context, url string) (PrefetchedSource, error)
+}
+
 type Journal interface {
 	Append(ctx context.Context, kind string, payload map[string]any) error
 }
@@ -67,6 +83,7 @@ type Orchestrator struct {
 	Plan      PlanWriter
 	PublishFn Publisher
 	Synth     Synthesizer
+	Prefetch  SourcePrefetcher
 	Journal   Journal
 	Cancelled func() bool
 }
@@ -89,8 +106,12 @@ func (o *Orchestrator) Run(ctx context.Context, intent Intent) (Result, error) {
 	}
 	if intent.SourceHint == SourceWeb && !SearchChannelsEnabled() {
 		coverage := []string{"search channels are disabled; enable Settings > Search"}
-		_ = o.append(ctx, "research_accepted", map[string]any{"query": intent.Query, "breadth": intent.Breadth})
-		_ = o.append(ctx, "research_terminal", map[string]any{"outcome": string(OutcomeFailed)})
+		if err := o.append(ctx, "research_accepted", map[string]any{"query": intent.Query, "breadth": intent.Breadth}); err != nil {
+			return Result{}, err
+		}
+		if err := o.append(ctx, "research_terminal", map[string]any{"outcome": string(OutcomeFailed)}); err != nil {
+			return Result{}, err
+		}
 		return Result{Outcome: OutcomeFailed, Coverage: coverage}, nil
 	}
 	if err := o.append(ctx, "research_accepted", map[string]any{"query": intent.Query, "breadth": intent.Breadth}); err != nil {
@@ -99,8 +120,19 @@ func (o *Orchestrator) Run(ctx context.Context, intent Intent) (Result, error) {
 	if err := o.setPlan(ctx, "in_progress", "pending", "pending", "pending"); err != nil {
 		return Result{}, err
 	}
+	prefetched, prefetchCoverage, err := o.prefetchExplicitSources(ctx, intent)
+	if err != nil {
+		return Result{}, err
+	}
 
-	questions, coverage := o.plan(ctx, intent)
+	questions, coverage, err := o.plan(ctx, intent)
+	if err != nil {
+		return Result{}, err
+	}
+	coverage = append(coverage, prefetchCoverage...)
+	if len(prefetched) > 0 && len(questions) > 0 {
+		questions[0].Text = "Inspect the exact user-provided URL without changing or dropping its query string, summarize its content, and assess source trust: " + prefetched[0].URL
+	}
 	if intent.SourceHint == SourceBoth && !SearchChannelsEnabled() {
 		coverage = append(coverage, "search channels unavailable; continuing workspace-only")
 	}
@@ -111,7 +143,10 @@ func (o *Orchestrator) Run(ctx context.Context, intent Intent) (Result, error) {
 		return Result{}, err
 	}
 
-	claims, evidence, coverage := o.research(ctx, intent, questions, coverage)
+	claims, evidence, coverage, err := o.research(ctx, intent, questions, prefetched, coverage)
+	if err != nil {
+		return Result{}, err
+	}
 	if o.stopped(ctx) {
 		return Result{Outcome: OutcomeCancelled, Coverage: coverage, Claims: claims}, nil
 	}
@@ -119,7 +154,10 @@ func (o *Orchestrator) Run(ctx context.Context, intent Intent) (Result, error) {
 		return Result{}, err
 	}
 
-	claims, coverage = o.verify(ctx, intent, claims, evidence, coverage)
+	claims, coverage, err = o.verify(ctx, intent, claims, evidence, coverage)
+	if err != nil {
+		return Result{}, err
+	}
 	if o.stopped(ctx) {
 		return Result{Outcome: OutcomeCancelled, Coverage: coverage, Claims: claims}, nil
 	}
@@ -127,7 +165,10 @@ func (o *Orchestrator) Run(ctx context.Context, intent Intent) (Result, error) {
 		return Result{}, err
 	}
 
-	result := o.report(ctx, intent, claims, evidence, coverage)
+	result, err := o.report(ctx, intent, claims, evidence, coverage)
+	if err != nil {
+		return Result{}, err
+	}
 	if result.Outcome == OutcomeCancelled || o.stopped(ctx) {
 		return Result{Outcome: OutcomeCancelled, Coverage: uniqueStrings(append(coverage, result.Coverage...)), Claims: result.Claims}, nil
 	}
@@ -136,33 +177,62 @@ func (o *Orchestrator) Run(ctx context.Context, intent Intent) (Result, error) {
 		if err != nil {
 			result.Outcome = OutcomeFailed
 			result.Coverage = append(result.Coverage, "report publish failed")
-			_ = o.append(ctx, "research_terminal", map[string]any{"outcome": string(result.Outcome)})
+			if appendErr := o.append(ctx, "research_terminal", map[string]any{"outcome": string(result.Outcome)}); appendErr != nil {
+				return result, appendErr
+			}
 			return result, err
 		}
 		result.ReportPath = path
 		result.ArtifactID = artifactID
 	}
 	if result.Outcome != OutcomeFailed {
-		_ = o.setPlan(ctx, "completed", "completed", "completed", "completed")
+		if err := o.setPlan(ctx, "completed", "completed", "completed", "completed"); err != nil {
+			return result, err
+		}
 	}
-	_ = o.append(ctx, "research_terminal", map[string]any{"outcome": string(result.Outcome)})
+	if err := o.append(ctx, "research_terminal", map[string]any{"outcome": string(result.Outcome)}); err != nil {
+		return result, err
+	}
 	return result, nil
 }
 
-func (o *Orchestrator) plan(ctx context.Context, intent Intent) ([]Question, []string) {
-	raw, err := o.Children.Run(ctx, ChildSpec{
+func (o *Orchestrator) prefetchExplicitSources(ctx context.Context, intent Intent) ([]PrefetchedSource, []string, error) {
+	if o.Prefetch == nil || intent.SourceHint == SourceWorkspace {
+		return nil, nil, nil
+	}
+	urls := ExplicitHTTPSURLs(intent.Query)
+	results := make([]PrefetchedSource, 0, len(urls))
+	var coverage []string
+	for _, url := range urls {
+		if o.stopped(ctx) {
+			return results, coverage, nil
+		}
+		result, err := o.Prefetch.Fetch(ctx, url)
+		if err != nil {
+			return results, coverage, err
+		}
+		results = append(results, result)
+		if strings.TrimSpace(result.ErrorCode) != "" {
+			coverage = append(coverage, "exact user URL fetch failed ("+result.ErrorCode+"): "+url)
+		}
+	}
+	return results, coverage, nil
+}
+
+func (o *Orchestrator) plan(ctx context.Context, intent Intent) ([]Question, []string, error) {
+	child, err := o.Children.Run(ctx, ChildSpec{
 		Description: "研究规划", Prompt: plannerPrompt(intent), AgentType: subagentruntime.AgentTypePlan,
 		Host: spawnOptions(intent),
 	})
 	coverage := []string{}
 	if err != nil {
 		coverage = append(coverage, "planner failed; using the original query")
-		return []Question{{ID: "q1", Text: intent.Query}}, coverage
+		return []Question{{ID: "q1", Text: intent.Query}}, coverage, nil
 	}
 	var parsed PlannerOutput
-	if err := parseJSON(raw, &parsed); err != nil || len(parsed.Questions) == 0 {
+	if err := parseJSON(child.Output, &parsed); err != nil || len(parsed.Questions) == 0 {
 		coverage = append(coverage, "planner output was invalid; using the original query")
-		return []Question{{ID: "q1", Text: intent.Query}}, coverage
+		return []Question{{ID: "q1", Text: intent.Query}}, coverage, nil
 	}
 	if len(parsed.Questions) > intent.Breadth {
 		parsed.Questions = parsed.Questions[:intent.Breadth]
@@ -172,15 +242,18 @@ func (o *Orchestrator) plan(ctx context.Context, intent Intent) ([]Question, []s
 			parsed.Questions[i].ID = fmt.Sprintf("q%d", i+1)
 		}
 	}
-	_ = o.append(ctx, "research_plan", map[string]any{"question_count": len(parsed.Questions)})
-	return parsed.Questions, coverage
+	if err := o.append(ctx, "research_plan", map[string]any{"question_count": len(parsed.Questions)}); err != nil {
+		return nil, coverage, err
+	}
+	return parsed.Questions, coverage, nil
 }
 
-func (o *Orchestrator) research(ctx context.Context, intent Intent, questions []Question, coverage []string) ([]Claim, []Evidence, []string) {
+func (o *Orchestrator) research(ctx context.Context, intent Intent, questions []Question, prefetched []PrefetchedSource, coverage []string) ([]Claim, []Evidence, []string, error) {
 	type waveResult struct {
-		parsed ResearcherOutput
-		err    error
-		failed string
+		parsed   ResearcherOutput
+		receipts []subagentruntime.HostToolReceipt
+		err      error
+		failed   string
 	}
 	results := make([]waveResult, len(questions))
 	var wg sync.WaitGroup
@@ -191,8 +264,16 @@ func (o *Orchestrator) research(ctx context.Context, intent Intent, questions []
 		wg.Add(1)
 		go func(index int, question Question) {
 			defer wg.Done()
-			raw, err := o.Children.Run(ctx, ChildSpec{
-				Description: "调研 " + question.ID, Prompt: researcherPrompt(intent, question), AgentType: subagentruntime.AgentTypeExplore,
+			prompt := researcherPrompt(intent, question)
+			var seedReceipts []subagentruntime.HostToolReceipt
+			if index == 0 && len(prefetched) > 0 {
+				prompt += prefetchedSourcePrompt(prefetched[0])
+				if prefetched[0].Receipt != nil {
+					seedReceipts = append(seedReceipts, *prefetched[0].Receipt)
+				}
+			}
+			child, err := o.Children.Run(ctx, ChildSpec{
+				Description: "调研 " + question.ID, Prompt: prompt, AgentType: subagentruntime.AgentTypeExplore,
 				Host: spawnOptions(intent),
 			})
 			if err != nil {
@@ -200,11 +281,11 @@ func (o *Orchestrator) research(ctx context.Context, intent Intent, questions []
 				return
 			}
 			var parsed ResearcherOutput
-			if err := parseJSON(raw, &parsed); err != nil {
+			if err := parseJSON(child.Output, &parsed); err != nil {
 				results[index] = waveResult{failed: "question " + question.ID + " returned invalid claims"}
 				return
 			}
-			results[index] = waveResult{parsed: parsed}
+			results[index] = waveResult{parsed: parsed, receipts: append(seedReceipts, child.Receipts...)}
 		}(i, question)
 	}
 	wg.Wait()
@@ -236,12 +317,15 @@ func (o *Orchestrator) research(ctx context.Context, intent Intent, questions []
 				if len(evidence) >= MaxEvidenceTotal {
 					break
 				}
+				grounded, ok := groundEvidence(rawEv, item.receipts)
+				if !ok {
+					coverage = append(coverage, "question "+question.ID+" returned evidence without a successful Read/WebFetch receipt")
+					continue
+				}
 				evID := fmt.Sprintf("ev-%d", evSeq)
 				evSeq++
-				evidence = append(evidence, Evidence{
-					ID: evID, Kind: rawEv.Kind, Title: rawEv.Title, Locator: rawEv.Locator,
-					SourceType: rawEv.SourceType, IndependenceKey: independenceKey(rawEv), Digest: digestOf(rawEv.Locator),
-				})
+				grounded.ID = evID
+				evidence = append(evidence, grounded)
 				claim.EvidenceIDs = append(claim.EvidenceIDs, evID)
 			}
 			if strings.TrimSpace(claim.Statement) == "" {
@@ -252,13 +336,15 @@ func (o *Orchestrator) research(ctx context.Context, intent Intent, questions []
 		}
 		coverage = append(coverage, compactCoverageNotes(item.parsed.Uncertainties)...)
 	}
-	_ = o.append(ctx, "research_claim_batch", map[string]any{"claim_count": len(claims), "evidence_count": len(evidence)})
-	return claims, evidence, coverage
+	if err := o.append(ctx, "research_claim_batch", map[string]any{"claim_count": len(claims), "evidence_count": len(evidence)}); err != nil {
+		return claims, evidence, coverage, err
+	}
+	return claims, evidence, coverage, nil
 }
 
-func (o *Orchestrator) verify(ctx context.Context, intent Intent, claims []Claim, evidence []Evidence, coverage []string) ([]Claim, []string) {
+func (o *Orchestrator) verify(ctx context.Context, intent Intent, claims []Claim, evidence []Evidence, coverage []string) ([]Claim, []string, error) {
 	if len(claims) == 0 {
-		return claims, coverage
+		return claims, coverage, nil
 	}
 	byID := map[string][]Evidence{}
 	for _, ev := range evidence {
@@ -267,7 +353,7 @@ func (o *Orchestrator) verify(ctx context.Context, intent Intent, claims []Claim
 	shards := shardClaims(claims, 2)
 	for _, shard := range shards {
 		if o.stopped(ctx) {
-			return claims, coverage
+			return claims, coverage, nil
 		}
 		expected := map[string]bool{}
 		prompt := ""
@@ -279,7 +365,7 @@ func (o *Orchestrator) verify(ctx context.Context, intent Intent, claims []Claim
 			}
 			prompt += verifierPrompt(claim, flattenEvidence(evs)) + "\n"
 		}
-		raw, err := o.Children.Run(ctx, ChildSpec{
+		child, err := o.Children.Run(ctx, ChildSpec{
 			Description: "核验", Prompt: prompt, AgentType: subagentruntime.AgentTypeReview,
 			Host: spawnOptions(intent),
 		})
@@ -288,7 +374,7 @@ func (o *Orchestrator) verify(ctx context.Context, intent Intent, claims []Claim
 			continue
 		}
 		var parsed VerifierOutput
-		if err := parseJSON(raw, &parsed); err != nil {
+		if err := parseJSON(child.Output, &parsed); err != nil {
 			coverage = keepShardPartial(claims, expected, coverage, "verifier returned invalid JSON; shard kept as partial")
 			continue
 		}
@@ -307,6 +393,11 @@ func (o *Orchestrator) verify(ctx context.Context, intent Intent, claims []Claim
 		}
 		for i := range claims {
 			if status, ok := seen[claims[i].ID]; ok {
+				if !receiptsSupportClaim(claims[i], evidence, child.Receipts) {
+					claims[i].VerificationStatus = "partial"
+					coverage = append(coverage, "verifier did not re-read evidence for "+claims[i].ID+"; claim kept as partial")
+					continue
+				}
 				switch status {
 				case "verified", "partial", "rejected":
 					claims[i].VerificationStatus = status
@@ -317,13 +408,15 @@ func (o *Orchestrator) verify(ctx context.Context, intent Intent, claims []Claim
 		}
 	}
 	claims = applyHostVerificationRules(claims, evidence)
-	_ = o.append(ctx, "research_verification", map[string]any{"claim_count": len(claims)})
-	return claims, coverage
+	if err := o.append(ctx, "research_verification", map[string]any{"claim_count": len(claims)}); err != nil {
+		return claims, coverage, err
+	}
+	return claims, coverage, nil
 }
 
-func (o *Orchestrator) report(ctx context.Context, intent Intent, claims []Claim, evidence []Evidence, coverage []string) Result {
+func (o *Orchestrator) report(ctx context.Context, intent Intent, claims []Claim, evidence []Evidence, coverage []string) (Result, error) {
 	if o.stopped(ctx) {
-		return Result{Outcome: OutcomeCancelled, Coverage: coverage, Claims: claims}
+		return Result{Outcome: OutcomeCancelled, Coverage: coverage, Claims: claims}, nil
 	}
 	usable := make([]Claim, 0, len(claims))
 	verified := 0
@@ -340,8 +433,10 @@ func (o *Orchestrator) report(ctx context.Context, intent Intent, claims []Claim
 		coverage = append(coverage, "no usable claims")
 		answer := "No verified claims were produced."
 		markdown := renderReport(intent, string(OutcomePartial), answer, nil, evidence, uniqueStrings(coverage))
-		_ = o.append(ctx, "research_report", map[string]any{"outcome": string(OutcomePartial)})
-		return Result{Outcome: OutcomePartial, Answer: answer, Markdown: markdown, Coverage: uniqueStrings(coverage), Claims: claims}
+		if err := o.append(ctx, "research_report", map[string]any{"outcome": string(OutcomePartial)}); err != nil {
+			return Result{}, err
+		}
+		return Result{Outcome: OutcomePartial, Answer: answer, Markdown: markdown, Coverage: uniqueStrings(coverage), Claims: claims}, nil
 	}
 	answer := ""
 	if o.Synth != nil {
@@ -376,15 +471,17 @@ func (o *Orchestrator) report(ctx context.Context, intent Intent, claims []Claim
 		coverage = append(coverage, "synthesis fell back to the verified claim list")
 	}
 	if o.stopped(ctx) {
-		return Result{Outcome: OutcomeCancelled, Coverage: coverage, Claims: usable}
+		return Result{Outcome: OutcomeCancelled, Coverage: coverage, Claims: usable}, nil
 	}
 	outcome := OutcomePartial
 	if verified == len(usable) && coverageEmpty(coverage) {
 		outcome = OutcomeVerified
 	}
 	markdown := renderReport(intent, string(outcome), answer, usable, evidence, uniqueStrings(coverage))
-	_ = o.append(ctx, "research_report", map[string]any{"outcome": string(outcome)})
-	return Result{Outcome: outcome, Answer: answer, Markdown: markdown, Coverage: uniqueStrings(coverage), Claims: usable}
+	if err := o.append(ctx, "research_report", map[string]any{"outcome": string(outcome)}); err != nil {
+		return Result{}, err
+	}
+	return Result{Outcome: outcome, Answer: answer, Markdown: markdown, Coverage: uniqueStrings(coverage), Claims: usable}, nil
 }
 
 func keepShardPartial(claims []Claim, expected map[string]bool, coverage []string, note string) []string {

@@ -73,17 +73,17 @@ func ErrorCode(err error) string {
 }
 
 type SpawnRequest struct {
-	Description      string `json:"description"`
-	Prompt           string `json:"prompt"`
-	AgentType        string `json:"agent_type"`
-	WorkspaceMode    string `json:"workspace_mode"`
-	ModelProfileID   string `json:"model_profile_id,omitempty"`
-	ParentAgentID    string   `json:"-"`
-	ParentToolCallID string   `json:"-"`
-	ThreadID         string   `json:"-"`
-	RunID            string   `json:"-"`
-	TurnID           string   `json:"-"`
-	WritableRoots    []string `json:"-"`
+	Description      string            `json:"description"`
+	Prompt           string            `json:"prompt"`
+	AgentType        string            `json:"agent_type"`
+	WorkspaceMode    string            `json:"workspace_mode"`
+	ModelProfileID   string            `json:"model_profile_id,omitempty"`
+	ParentAgentID    string            `json:"-"`
+	ParentToolCallID string            `json:"-"`
+	ThreadID         string            `json:"-"`
+	RunID            string            `json:"-"`
+	TurnID           string            `json:"-"`
+	WritableRoots    []string          `json:"-"`
 	Host             *HostSpawnOptions `json:"-"`
 }
 
@@ -114,32 +114,42 @@ type MessageReceipt struct {
 }
 
 type TaskSnapshot struct {
-	TaskID           string     `json:"task_id"`
-	AgentID          string     `json:"agent_id"`
-	ParentAgentID    string     `json:"parent_agent_id"`
-	ParentToolCallID string     `json:"parent_tool_call_id,omitempty"`
-	ThreadID         string     `json:"thread_id"`
-	RunID            string     `json:"run_id"`
-	TurnID           string     `json:"turn_id,omitempty"`
-	Description      string     `json:"description"`
-	AgentType        string     `json:"agent_type"`
-	WorkspaceMode    string     `json:"workspace_mode"`
-	ModelProfileID   string     `json:"model_profile_id,omitempty"`
-	Status           TaskStatus `json:"status"`
-	CurrentActivity  string     `json:"current_activity,omitempty"`
-	ToolUseCount     int        `json:"tool_use_count"`
-	EstimatedTokens  int        `json:"estimated_tokens,omitempty"`
-	InputTokens      int        `json:"input_tokens,omitempty"`
-	OutputTokens     int        `json:"output_tokens,omitempty"`
-	TotalTokens      int        `json:"total_tokens,omitempty"`
-	ResultPreview    string     `json:"result_preview,omitempty"`
-	ErrorCode        string     `json:"error_code,omitempty"`
-	ErrorMessage     string     `json:"error_message,omitempty"`
+	TaskID           string           `json:"task_id"`
+	AgentID          string           `json:"agent_id"`
+	ParentAgentID    string           `json:"parent_agent_id"`
+	ParentToolCallID string           `json:"parent_tool_call_id,omitempty"`
+	ThreadID         string           `json:"thread_id"`
+	RunID            string           `json:"run_id"`
+	TurnID           string           `json:"turn_id,omitempty"`
+	Description      string           `json:"description"`
+	AgentType        string           `json:"agent_type"`
+	WorkspaceMode    string           `json:"workspace_mode"`
+	ModelProfileID   string           `json:"model_profile_id,omitempty"`
+	Status           TaskStatus       `json:"status"`
+	CurrentActivity  string           `json:"current_activity,omitempty"`
+	ToolUseCount     int              `json:"tool_use_count"`
+	EstimatedTokens  int              `json:"estimated_tokens,omitempty"`
+	InputTokens      int              `json:"input_tokens,omitempty"`
+	OutputTokens     int              `json:"output_tokens,omitempty"`
+	TotalTokens      int              `json:"total_tokens,omitempty"`
+	ResultPreview    string           `json:"result_preview,omitempty"`
+	ErrorCode        string           `json:"error_code,omitempty"`
+	ErrorMessage     string           `json:"error_message,omitempty"`
 	SideEffectState  string           `json:"side_effect_state,omitempty"`
 	Worktree         *WorktreeReceipt `json:"worktree,omitempty"`
 	CreatedAt        time.Time        `json:"created_at"`
 	StartedAt        *time.Time       `json:"started_at,omitempty"`
 	FinishedAt       *time.Time       `json:"finished_at,omitempty"`
+	// HostToolReceipts are host-only, successful read receipts used to ground
+	// Deep Research evidence. They are intentionally excluded from the public
+	// subagent snapshot and are persisted by the research journal instead.
+	HostToolReceipts []HostToolReceipt `json:"-"`
+}
+
+type HostToolReceipt struct {
+	ToolCallID string
+	ToolName   string
+	Details    map[string]any
 }
 
 // WorktreeReceipt is the host-owned isolation record for a git_worktree child.
@@ -204,6 +214,7 @@ type ProgressUpdate struct {
 	HasInputTokens  bool
 	HasOutputTokens bool
 	HasTotalTokens  bool
+	HostToolReceipt *HostToolReceipt
 }
 
 type ProgressReporter func(context.Context, ProgressUpdate) error

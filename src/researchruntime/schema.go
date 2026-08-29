@@ -33,6 +33,7 @@ type RawEvidence struct {
 	Title      string `json:"title"`
 	Locator    string `json:"locator"`
 	SourceType string `json:"source_type"`
+	ReceiptID  string `json:"receipt_id,omitempty"`
 }
 
 type VerifierOutput struct {

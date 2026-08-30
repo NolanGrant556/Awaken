@@ -6,13 +6,19 @@
   min-width: 0;
   min-height: 0;
   height: 100%;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--aw-surface-work);
   color: var(--aw-text-primary);
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 46%, transparent)
+    transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .aw-plugins__inner {
   display: grid;
+  align-self: start;
   align-content: start;
   gap: var(--aw-space-8);
   min-width: 0;
@@ -20,11 +26,7 @@
   width: min(920px, calc(100% - 64px));
   margin: 0 auto;
   padding: var(--aw-space-13) 0 var(--aw-space-15);
-  overflow-x: hidden;
-  overflow-y: auto;
-  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 46%, transparent)
-    transparent;
-  scrollbar-width: thin;
+  overflow: visible;
 }
 
 .aw-plugins__header {

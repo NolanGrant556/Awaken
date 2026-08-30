@@ -281,6 +281,7 @@ pre {
 
 .extension-view-inner {
   display: grid;
+  align-self: start;
   align-content: start;
   gap: 22px;
   min-width: 0;

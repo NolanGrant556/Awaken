@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"awaken/src/tool"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -37,6 +39,31 @@ func echoToolHandler(ctx context.Context, req *mcp.CallToolRequest, input map[st
 	}, input, nil
 }
 
+func elicitingInProcServer() InProcServerFactory {
+	return func() *mcp.Server {
+		server := mcp.NewServer(&mcp.Implementation{Name: "elicit", Version: "v1"}, nil)
+		mcp.AddTool(server, &mcp.Tool{Name: "confirm"}, func(ctx context.Context, req *mcp.CallToolRequest, _ map[string]any) (*mcp.CallToolResult, map[string]any, error) {
+			result, err := req.Session.Elicit(ctx, &mcp.ElicitParams{
+				Mode: "form", Message: "Choose a destination",
+				RequestedSchema: map[string]any{
+					"type":       "object",
+					"properties": map[string]any{"targetPath": map[string]any{"type": "string", "default": ".env.local"}},
+					"required":   []string{"targetPath"},
+				},
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			text := result.Action
+			if target, _ := result.Content["targetPath"].(string); target != "" {
+				text += ":" + target
+			}
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, nil, nil
+		})
+		return server
+	}
+}
+
 func boolPtr(b bool) *bool { return &b }
 
 // TestInProcTransportHandshake verifies the in-memory transport pair
@@ -57,7 +84,7 @@ func TestInProcTransportHandshake(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	session, capability, err := connectAndInitialize(ctx, transport, &mcp.Implementation{Name: "test", Version: "v0"}, nil, nil, nil)
+	session, capability, err := connectAndInitialize(ctx, transport, &mcp.Implementation{Name: "test", Version: "v0"}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -85,7 +112,7 @@ func TestInProcTransportCallTool(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	session, _, err := connectAndInitialize(ctx, transport, &mcp.Implementation{Name: "test", Version: "v0"}, nil, nil, nil)
+	session, _, err := connectAndInitialize(ctx, transport, &mcp.Implementation{Name: "test", Version: "v0"}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -107,6 +134,38 @@ func TestInProcTransportCallTool(t *testing.T) {
 	}
 }
 
+func TestManagerRoutesElicitationToActiveCallContext(t *testing.T) {
+	registry := NewInProcRegistry()
+	if err := registry.Register("elicit", elicitingInProcServer()); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(WithInProcRegistry(registry), WithLogger(noopLogger{}))
+	type contextKey struct{}
+	localHandler := func(ctx context.Context, request tool.ElicitationRequest) (tool.ElicitationAnswer, error) {
+		if ctx.Value(contextKey{}) != "active-call" || request.Provider != "elicit" || request.Message != "Choose a destination" {
+			t.Fatalf("request=%#v context=%v", request, ctx.Value(contextKey{}))
+		}
+		return tool.ElicitationAnswer{Action: "accept", Content: map[string]any{"targetPath": ".env.accepted"}}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	manager.Start(ctx, []ScopedMcpServerConfig{{Name: "elicit", Scope: ScopePlugin, Config: McpServerConfig{InProc: &InProcTransportConfig{ServerName: "elicit"}}}})
+	defer manager.Shutdown(context.Background())
+	if err := waitForState(manager, "elicit", StateConnected, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	callContext := context.WithValue(ctx, contextKey{}, "active-call")
+	callContext = tool.ContextWithElicitationHandler(callContext, localHandler)
+	result, err := manager.CallTool(callContext, "mcp__elicit__confirm", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok || text.Text != "accept:.env.accepted" {
+		t.Fatalf("result=%#v", result)
+	}
+}
+
 // TestInProcTransportPanicRecovery ensures a panicking in-proc server
 // factory does not crash the host process.
 func TestInProcTransportPanicRecovery(t *testing.T) {
@@ -125,7 +184,7 @@ func TestInProcTransportPanicRecovery(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_, _, err = connectAndInitialize(ctx, transport, &mcp.Implementation{Name: "test", Version: "v0"}, nil, nil, nil)
+	_, _, err = connectAndInitialize(ctx, transport, &mcp.Implementation{Name: "test", Version: "v0"}, nil, nil, nil, nil)
 	// The connect should fail or the session should terminate; either way
 	// the test process must survive.
 	_ = err

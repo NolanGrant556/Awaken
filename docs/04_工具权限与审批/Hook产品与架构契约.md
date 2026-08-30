@@ -49,10 +49,15 @@ Hook 允许用户在确定的任务生命周期边界执行本机命令、受控
 - `hook_snapshot`、`hook_invocation_started`、`hook_invocation_completed` 耐久事实；
 - live/replay 共用的独立 Hook trace，不伪造模型 tool call；
 - composer 明确激活 Skill 后注册包内 Hook，discovery/预览/模型侧激活不注册。
+- 安装后完整性有效、已启用且映射可运行的 Plugin Hook 以 `SourcePlugin` 进入后续新 run snapshot；stable identity 绑定 plugin name/digest/logicalId/revisionId；
+- Plugin command 的 Claude/Codex/Cursor 输入输出 adapter、包根变量、argv 拆分与隐式 shell 拒绝；
+- Plugin `mcp_tool` handler 只能调用同一插件已注册、ready 且未被逐 tool 停用的 MCP tool；
+- Plugin Hook 回执继续写既有 started/completed Journal，并有当前 Core 进程内的有界查询缓存和无原 run 上下文的诊断性重试。
 
 ### 3.2 当前不支持或未完成验证
 
-- 不提供设置表单编辑器、managed/CLI settings、Plugin 自动 Hook、SDK callback、任意 session function Hook、`once`、并行/后台 Hook、异步唤醒和 child 内部 tool Hook；
+- 不提供设置表单编辑器、managed/CLI settings、SDK callback、任意 session function Hook、`once`、通用并行 Hook、自动发起新模型 run 的异步唤醒和 child 内部 tool Hook；
+- 当前异步执行只适用于 Plugin command Hook；prompt/agent/http/mcp_tool 仍同步。Claude `asyncRewake` 的完成反馈进入同一 thread 的下一次 run，不在没有用户请求时擅自启动模型；进程重启前尚未被下一次 run 消费的异步反馈不持久化；
 - stdout/stderr 超限时直接形成 protocol failure，不保存大型 result blob；
 - 模型调用 `skill`、fork Skill 或仅发现 Skill 不注册包内 Hook；
 - HTTP proxy-only DNS 不能工作：当前在交给代理前仍要求本机解析目标；
@@ -60,6 +65,16 @@ Hook 允许用户在确定的任务生命周期边界执行本机命令、受控
 - 代理实际解析和连接的目标 IP 没有 Awaken 自有连接级 pinning；
 - redirect/proxy-only/`NO_PROXY` 尚无完整真实网络矩阵；
 - Windows amd64/arm64 可以交叉编译，但尚无当前版本的真实 Desktop 准入；user config 和 secret store 仍使用 POSIX mode 判断，在原生 Windows 上不能作为用户 ACL 的正确实现，因此不能宣称 Windows Hook 可用。
+
+### 3.3 Plugin Hook 当前边界
+
+只把安装后已归一化、完整性有效、组件启用且配置完整的 Hook 编译进后续新 run。`SourcePlugin` 绑定插件名、安装摘要、`logicalId` 和 `revisionId`；现有 run 不热更新。方言 adapter 显式映射事件和输入输出协议，尤其不得为 Cursor 构造不存在的 `postCompact`。
+
+插件 command 在编译期完成变量解析和 argv 拆分，不把厂商 command 交给隐式 shell。tool event 的厂商 handler 条件必须进入统一 matcher；例如 Claude `Bash(git commit:*)` 只匹配对应 Bash command，不能退化成所有 Bash 调用。无法安全解析的 handler 条件使该 Hook 不可运行。`mcp_tool` 只调用该插件已注册、当前 ready 且未被逐 tool 停用的 MCP tool。Plugin Hook 的普通事件未声明 timeout 时默认 600 秒，厂商声明正数时按原值编译；`SessionEnd` 退出事件单独默认 1.5 秒并限制为最多 3 秒。超时记录 `timed_out` 回执并按 failure policy 继续或阻断。所有执行复用本域 Dispatcher、每 run 64 次、单事件 16 次、累计墙钟 120 秒的 admission gate、取消、失败策略与耐久事实，不建立第二套 Hook runtime；累计墙钟只决定后续 invocation 是否获准开始，不会把已经开始的单次 Hook timeout 改写回 10 秒。
+
+Plugin command Hook 声明 `async`/`asyncRewake`，或 Claude command 首个 JSON 行声明 `{"async":true,"asyncTimeout":...}` 时，Dispatcher 在进程成功启动后立即把本次 invocation 标记为 `scheduled` 并放行触发它的操作；后台进程仍受取消、输出预算和最多 10 分钟的异步 timeout 约束。异步 handler 永远不能追溯阻断、改写已启动操作或改变已返回的 candidate；完成后才写 `hook_invocation_completed` 和 Plugin 回执。后台任务开始前会引用 run 的 Plugin generation lease，run terminal 只提出释放请求，最后一个异步 Hook 完成或取消后才真正释放，避免插件包在子进程仍执行时被替换或卸载。`SessionEnd`/`sessionEnd` 一律强制同步并服从退出预算。
+
+Claude stdout adapter 按厂商协议逐行读取 JSON：异步声明只负责切换执行模式，完成后采用第一个非 async JSON 响应；metrics-only 完成结果视为 `continue`，`hookSpecificOutput.additionalContext`、或 `asyncRewake` exit 2 的 reason/stderr 作为不可信 Hook data 写入有界 thread 队列。下一次同 thread run 在首个模型请求前一次性消费该队列；静态 `rewakeMessage` 只作为插件数据前缀，不获得 host instruction 权限。该队列每 thread 最多 32 项/32 KiB，只存在当前 Core 进程内，不自动创建新 run。
 
 ## 4. 配置、来源与信任
 
@@ -70,6 +85,8 @@ Hook 允许用户在确定的任务生命周期边界执行本机命令、受控
 | user | `~/.awaken/config/hooks.json` | schema 和文件约束有效时启用；Unix 要求不授予 group/other 权限 |
 | project shared | 每个项目文件夹的 `<folder>/.awaken/hooks.json` | 未信任时只允许检查，不进入执行快照；适合随项目共享 |
 | project local | 每个项目文件夹的 `<folder>/.awaken/hooks.local.json` | 未信任时只允许检查，不进入执行快照；AI 写入时使用 `0600`，适合本机差异 |
+
+Plugin Hook 不属于上述持久配置文件：它来自 immutable installed package，由 Plugin Store 的 digest、component override 和 run generation lease 授权，只进入新 run snapshot，也不写入用户/项目 `hooks.json`。
 
 项目按已保存文件夹顺序发现，主文件夹在前；每个文件夹内 shared 先于 local。不向父目录递归搜索，不从 cwd 猜项目，不扫描独立对话或 managed session workspace。symlink、非普通文件、超过 1 MiB、非 UTF-8、JSON/schema 错误均 fail closed。
 
@@ -195,6 +212,8 @@ flowchart TD
 | `src/protocol/agui` | 耐久语义到安全 Hook wire 的映射 |
 | `apps/desktop` | Main/Preload transport、设置页和 Workbench 展示 |
 | `src/skillruntime` | composer 激活后的 Skill Hook 注册 |
+| `src/pluginhooks` | Plugin Hook 方言事件、handler、argv 与 protocol 编译；不执行 |
+| `src/plugins` | installed digest、component state 与新 run Plugin Hook entry 供给 |
 
 `Store.BuildSnapshot` 只产生执行所需的 immutable snapshot；`Store.Inspect` 在相同解析和信任结果上附加 `ReviewHook`。`ReviewHook` 不参与 snapshot digest，也不进入 `hook_snapshot` Journal。设置 DTO 可以包含静态命令、URL、matcher 或 prompt 供当前用户审查，但不得包含 secret 引用值、环境、运行输入、stdout/stderr 或模型/provider credential。
 
@@ -206,7 +225,7 @@ Renderer 不能读取配置文件再自行拼详情；否则会绕过 canonical 
 
 ### 7.1 command
 
-command 不复用模型 `Bash` tool，不生成伪 tool card。进程使用固定 argv、host 解析 cwd 和最小环境；不继承模型/MCP/connector secret。Hook 与 Bash 一样以当前登录用户 OS 权限运行，其副作用不保证受 TaskScope 完整观测、可回滚或可恢复。
+command 不复用模型 `Bash` tool，不生成伪 tool card。进程使用固定 argv、host 解析 cwd 和最小环境；不继承模型/MCP/connector secret。最小环境固定写入 `PYTHONDONTWRITEBYTECODE=1`，避免 Python handler 在 immutable Plugin package 内生成 `__pycache__` 并触发 digest drift；需要缓存或业务状态的 Hook 必须写入获准的数据目录。Hook 与 Bash 一样以当前登录用户 OS 权限运行，其副作用不保证受 TaskScope 完整观测、可回滚或可恢复。
 
 timeout/cancel 必须收敛进程树：Unix 使用独立进程组；Windows 创建新进程组并优先调用 `taskkill /T /F`。Windows 路径只有交叉编译证据时不能声明实机通过。
 
@@ -226,7 +245,7 @@ HTTP 固定 POST JSON、TLS 最低 1.2、最多五次重定向和受限响应体
 
 ## 8. Skill Hook
 
-只有 composer 明确选择并成功耐久激活的 Skill 才能向当前 run 注册 Hook。命令入口必须是包内相对路径，经 realpath 固定后不能逃出 package root。授权绑定当次激活的 catalog identity/source/root/entrypoint，不是永久项目信任，也不延续到下一个 run。
+只有 composer 明确选择并成功耐久激活的 Skill 才能向当前 run 动态注册 Skill Hook。命令入口必须是包内相对路径，经 realpath 固定后不能逃出 package root。授权绑定当次激活的 catalog identity/source/root/entrypoint，不是永久项目信任，也不延续到下一个 run。Plugin package-level Hook 则由 Plugin Store 在 run start 编译进 snapshot，两条路径都复用同一个 Dispatcher。
 
 目录发现、预览、安装、bundled 同步、模型调用 `skill` 和 fork Skill 当前都不注册 Hook。Skill Hook复用同一 schema、dispatcher、Outcome、Journal、预算和递归门禁，不能建立第二套执行器或扩大权限。
 

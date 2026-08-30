@@ -59,3 +59,22 @@ func TestInheritParentMemorySnapshotProvidesFrozenContent(t *testing.T) {
 		t.Fatalf("selector must not run during inherit")
 	}
 }
+
+func TestApplyPluginChildRoleEnforcesAllowlistAndMaxTurns(t *testing.T) {
+	subagentruntime.SetRoleResolver(func(agentType string) (subagentruntime.Role, bool) {
+		if agentType != "plugin__acme__reader" {
+			return subagentruntime.Role{}, false
+		}
+		return subagentruntime.Role{Type: agentType, SystemPrompt: "Plugin prompt", ReadOnly: true, AllowedTools: []string{"Read"}, MaxTurns: 3}, true
+	})
+	t.Cleanup(func() { subagentruntime.SetRoleResolver(nil) })
+	child := AgentConfig{MaxThoughts: 20, ToolExposure: tool.ToolExposurePolicy{Mode: tool.ExposureAll}}
+	applyChildRole(&child, subagentruntime.TaskSnapshot{AgentType: "plugin__acme__reader"})
+	if child.MaxThoughts != 3 || !strings.Contains(child.SystemPrompt, "Plugin prompt") {
+		t.Fatalf("child=%#v", child)
+	}
+	hidden := strings.Join(child.ToolExposure.ExtraHidden, ",")
+	if !strings.Contains(hidden, "configure_hook") || !strings.Contains(hidden, "Bash") {
+		t.Fatalf("allowlist did not hide non-allowed tools: %s", hidden)
+	}
+}

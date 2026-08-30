@@ -26,6 +26,17 @@ type ExternalInteractionAwaiter interface {
 	AwaitExternalInteraction(ctx context.Context, request AwakenEvent) (ExternalInteractionResolution, error)
 }
 
+type ExternalInteractionAnswer struct {
+	Resolution ExternalInteractionResolution
+	// Content is kept in memory and returned only to the waiting protocol
+	// handler. It is never copied into AG-UI events or the durable Journal.
+	Content map[string]any
+}
+
+type ExternalInteractionFormAwaiter interface {
+	AwaitExternalInteractionForm(ctx context.Context, request AwakenEvent) (ExternalInteractionAnswer, error)
+}
+
 type EventSinkFunc func(AwakenEvent)
 
 func (f EventSinkFunc) Emit(event AwakenEvent) {

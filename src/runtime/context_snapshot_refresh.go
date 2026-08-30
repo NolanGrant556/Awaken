@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/instructions"
 )
 
 type ContextSnapshotRefreshResult struct {
@@ -68,7 +69,17 @@ func (s *RunService) RefreshThreadContextSnapshot(ctx context.Context, threadID 
 	// snapshot carries an empty instruction digest, which the epoch store
 	// would treat as a real change and fabricate an `agents_instructions_changed`
 	// rotation, silently invalidating the provider usage shown by Desktop.
-	instructionSnapshot := s.instructionLoader.Load(meta.Snapshot.Workspace.WorkspaceRoot, meta.Snapshot.Workspace.SessionWorkspace)
+	s.mu.RLock()
+	pluginRuleProvider := s.pluginRuleProvider
+	s.mu.RUnlock()
+	var pluginRuleSources []instructions.ExtraSource
+	if pluginRuleProvider != nil {
+		pluginRuleSources, err = pluginRuleProvider(nil, meta.Snapshot.Workspace)
+		if err != nil {
+			return ContextSnapshotRefreshResult{}, err
+		}
+	}
+	instructionSnapshot := s.instructionLoader.LoadWithExtraSources(meta.Snapshot.Workspace.WorkspaceRoot, meta.Snapshot.Workspace.SessionWorkspace, pluginRuleSources)
 	cfg.InstructionSnapshot = &instructionSnapshot
 	agent.Reconfigure(cfg)
 	agent.RefreshProjectedRunAvailabilityWithReason(ctx, "thread_replay", s.projectedComputerEnabled(ctx, profile))

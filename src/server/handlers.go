@@ -73,7 +73,8 @@ type answerUserQuestionRequest struct {
 }
 
 type resolveExternalInteractionRequest struct {
-	Resolution string `json:"resolution"`
+	Resolution string         `json:"resolution"`
+	Content    map[string]any `json:"content,omitempty"`
 }
 
 type refreshThreadContextSnapshotRequest struct {
@@ -726,7 +727,7 @@ func (h runHandlers) handleResolveExternalInteraction(w http.ResponseWriter, r *
 		return
 	}
 
-	if err := h.runService.ResolveExternalInteraction(runID, interactionID, resolution); err != nil {
+	if err := h.runService.ResolveExternalInteractionWithContent(runID, interactionID, resolution, req.Content); err != nil {
 		switch {
 		case errors.Is(err, awruntime.ErrRunNotFound), errors.Is(err, awruntime.ErrExternalInteractionNotFound):
 			writeErrorJSON(w, http.StatusNotFound, "EXTERNAL_INTERACTION_NOT_FOUND", err.Error())

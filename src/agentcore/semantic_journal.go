@@ -405,3 +405,17 @@ func (s *artifactBufferingSink) AwaitUserQuestion(ctx context.Context, request A
 	}
 	return UserQuestionResolution{}, context.Canceled
 }
+
+func (s *artifactBufferingSink) AwaitExternalInteraction(ctx context.Context, request AwakenEvent) (ExternalInteractionResolution, error) {
+	if awaiter, ok := s.inner.(ExternalInteractionAwaiter); ok {
+		return awaiter.AwaitExternalInteraction(ctx, request)
+	}
+	return "", context.Canceled
+}
+
+func (s *artifactBufferingSink) AwaitExternalInteractionForm(ctx context.Context, request AwakenEvent) (ExternalInteractionAnswer, error) {
+	if awaiter, ok := s.inner.(ExternalInteractionFormAwaiter); ok {
+		return awaiter.AwaitExternalInteractionForm(ctx, request)
+	}
+	return ExternalInteractionAnswer{}, context.Canceled
+}

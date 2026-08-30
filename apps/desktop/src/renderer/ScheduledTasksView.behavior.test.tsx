@@ -393,6 +393,60 @@ describe("ScheduledTasksView", () => {
     );
   });
 
+  it("refreshes the shared scheduled slash menu without exposing Plugin Skills", async () => {
+    let catalogHandler: ((event: { revision: number; kind: string }) => void) | undefined;
+    const pluginOnlySkill: RuntimeSkill = {
+      ...dailyReportSkill,
+      id: "plugin__acme-tools__fresh-review",
+      name: "fresh-review",
+      displayName: "插件 Fresh Review",
+      sourceOrigin: "plugin",
+      rootDir: "/home/.awaken/plugins/packages/acme.tools/skills/fresh-review",
+      skillFilePath:
+        "/home/.awaken/plugins/packages/acme.tools/skills/fresh-review/SKILL.md",
+    };
+    const freshUserSkill: RuntimeSkill = {
+      ...dailyReportSkill,
+      id: "fresh-user-review",
+      name: "fresh-user-review",
+      displayName: "普通 Fresh Review",
+      sourceOrigin: "user",
+      rootDir: "/home/.awaken/skills/fresh-user-review",
+      skillFilePath: "/home/.awaken/skills/fresh-user-review/SKILL.md",
+    };
+    const listSkills = vi
+      .fn<() => Promise<RuntimeSkill[]>>()
+      .mockResolvedValueOnce([pluginOnlySkill])
+      .mockResolvedValue([pluginOnlySkill, freshUserSkill]);
+    await renderView(
+      createRuntimeClientMock({
+        listSkills,
+        subscribeComposerCatalogEvents: vi.fn((handler) => {
+          catalogHandler = handler;
+          return () => {};
+        }),
+      }),
+    );
+
+    await click(buttonByText("创建任务"));
+    await click(buttonByAriaLabel("运行项目"));
+    await click(document.querySelector<HTMLButtonElement>('button[role="option"]'));
+    await click(buttonByText("Agent"));
+    await setFieldValue(
+      document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Agent prompt"]'),
+      "/fresh",
+    );
+
+    expect(document.body.textContent).not.toContain("插件 Fresh Review");
+    expect(document.body.textContent).not.toContain("普通 Fresh Review");
+    await act(async () => catalogHandler?.({ revision: 2, kind: "skills" }));
+    await settle();
+
+    expect(listSkills).toHaveBeenCalledTimes(2);
+    expect(buttonByText("普通 Fresh Review")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("插件 Fresh Review");
+  });
+
   it("opens a scheduled Skill menu at an inserted caret and preserves mixed suffix text", async () => {
     const created = cronTask({ taskId: "task-middle-skill" });
     const createScheduledTask = vi.fn(async () => created);

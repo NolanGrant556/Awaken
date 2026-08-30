@@ -200,8 +200,15 @@ func connectAndInitialize(
 	onToolListChanged func(),
 	onPromptListChanged func(),
 	onResourceListChanged func(),
+	onElicitation func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error),
 ) (Session, *ServerCapability, error) {
 	clientOpts := &mcp.ClientOptions{}
+	if onElicitation != nil {
+		clientOpts.Capabilities = &mcp.ClientCapabilities{Elicitation: &mcp.ElicitationCapabilities{
+			Form: &mcp.FormElicitationCapabilities{}, URL: &mcp.URLElicitationCapabilities{},
+		}}
+		clientOpts.ElicitationHandler = onElicitation
+	}
 	if onToolListChanged != nil {
 		clientOpts.ToolListChangedHandler = func(ctx context.Context, req *mcp.ToolListChangedRequest) {
 			onToolListChanged()

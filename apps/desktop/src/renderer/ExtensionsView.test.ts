@@ -339,15 +339,17 @@ describe("Skill views", () => {
     ]);
   });
 
-  it("routes bundled Skills only to Awaken without changing other source views", () => {
+  it("routes ordinary Skills to their views and excludes Plugin Skills from every view", () => {
     expect(isSkillVisibleInView({ sourceOrigin: "bundled" }, "awaken")).toBe(true);
     expect(isSkillVisibleInView({ sourceOrigin: "bundled" }, "user")).toBe(false);
     expect(isSkillVisibleInView({ sourceOrigin: "project" }, "project")).toBe(true);
     expect(isSkillVisibleInView({ sourceOrigin: "user" }, "user")).toBe(true);
     expect(isSkillVisibleInView({ sourceOrigin: "mcp" }, "user")).toBe(true);
-    expect(isSkillVisibleInView({ sourceOrigin: "plugin" }, "user")).toBe(true);
     expect(isSkillVisibleInView({ sourceOrigin: "agents" }, "agents")).toBe(true);
     expect(isSkillVisibleInView({ sourceOrigin: "agents" }, "user")).toBe(false);
+    for (const view of SKILL_VIEW_TABS) {
+      expect(isSkillVisibleInView({ sourceOrigin: "plugin" }, view.id)).toBe(false);
+    }
   });
 
 });

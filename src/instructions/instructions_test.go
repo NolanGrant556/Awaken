@@ -29,6 +29,32 @@ func TestLoaderCombinesGlobalThenPrimaryProject(t *testing.T) {
 	}
 }
 
+func TestLoaderPlacesPluginRulesAroundExistingAuthorities(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	writeTestFile(t, filepath.Join(home, "AGENTS.md"), "global")
+	writeTestFile(t, filepath.Join(project, ".awaken", "AGENTS.md"), "project")
+	snapshot := NewLoader(home).LoadWithExtraSources(project, false, []ExtraSource{
+		{Scope: ScopePluginManual, DisplayPath: "plugin:manual", ScopeRoot: project, Content: "manual", Placement: ExtraAfterProject},
+		{Scope: ScopePluginUser, DisplayPath: "plugin:auto", ScopeRoot: home, Content: "auto", Placement: ExtraBeforeGlobal},
+	})
+	prefix := snapshot.ModelPrefix()
+	positions := []int{
+		strings.Index(prefix, "\n\nauto\n"),
+		strings.Index(prefix, "\n\nglobal\n"),
+		strings.Index(prefix, "\n\nproject\n"),
+		strings.Index(prefix, "\n\nmanual\n"),
+	}
+	for index, position := range positions {
+		if position < 0 || index > 0 && position <= positions[index-1] {
+			t.Fatalf("priority order=%v prefix=%q", positions, prefix)
+		}
+	}
+	if snapshot.Digest == "" || len(snapshot.Summary.Sources) != 4 {
+		t.Fatalf("snapshot=%#v", snapshot.Summary)
+	}
+}
+
 func TestLoaderUsesOnlyPrimaryProjectFolder(t *testing.T) {
 	home := t.TempDir()
 	primary := t.TempDir()

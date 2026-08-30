@@ -24,6 +24,7 @@ const (
 var (
 	ErrSkillAlreadyExists           = errors.New("skill already exists")
 	ErrSkillReplaceTrashUnavailable = errors.New("skill replacement Trash unavailable")
+	ErrPluginPackageSelected        = errors.New("plugin package selected in Skill installer")
 )
 
 type SkillPackage struct {
@@ -331,6 +332,13 @@ func publicScopeForSource(source SourceOrigin) string {
 }
 
 func packageFromDirectory(sourceDir string) (SkillPackage, error) {
+	pluginPackage, err := directoryLooksLikePluginPackage(sourceDir)
+	if err != nil {
+		return SkillPackage{}, err
+	}
+	if pluginPackage {
+		return SkillPackage{}, fmt.Errorf("%w: use the Plugin installer for this package", ErrPluginPackageSelected)
+	}
 	root, err := resolvePackageRoot(sourceDir)
 	if err != nil {
 		return SkillPackage{}, err
@@ -455,6 +463,13 @@ func extractZipSkillPackage(fileName string, data []byte) (SkillPackage, error) 
 			skillFiles = append(skillFiles, file)
 		}
 	}
+	fileNames := make([]string, 0, len(cleanNames))
+	for _, clean := range cleanNames {
+		fileNames = append(fileNames, clean)
+	}
+	if fileListLooksLikePluginPackage(fileNames) {
+		return SkillPackage{}, fmt.Errorf("%w: use the Plugin installer for this package", ErrPluginPackageSelected)
+	}
 	if len(skillFiles) == 0 {
 		return SkillPackage{}, fmt.Errorf("zip must contain exactly one SKILL.md")
 	}
@@ -513,6 +528,129 @@ func extractZipSkillPackage(fileName string, data []byte) (SkillPackage, error) 
 	return SkillPackage{
 		rawSkill: rawSkill, fallbackName: fallbackName, expectedDirectoryName: expectedDirectoryName, files: files,
 	}, nil
+}
+
+func directoryLooksLikePluginPackage(sourceDir string) (bool, error) {
+	var fileNames []string
+	err := filepath.WalkDir(sourceDir, func(filePath string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(sourceDir, filePath)
+		if err != nil {
+			return err
+		}
+		fileNames = append(fileNames, filepath.ToSlash(relative))
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return fileListLooksLikePluginPackage(fileNames), nil
+}
+
+func fileListLooksLikePluginPackage(fileNames []string) bool {
+	normalized := make(map[string]struct{}, len(fileNames))
+	var skillPaths []string
+	for _, fileName := range fileNames {
+		clean := strings.ToLower(path.Clean(strings.ReplaceAll(fileName, "\\", "/")))
+		normalized[clean] = struct{}{}
+		if path.Base(clean) == "skill.md" {
+			skillPaths = append(skillPaths, clean)
+		}
+	}
+	if fileListHasRootPluginShape(normalized) {
+		return true
+	}
+	manifestPaths := []string{
+		"plugin.json",
+		".codex-plugin/plugin.json",
+		".claude-plugin/plugin.json",
+		".cursor-plugin/plugin.json",
+	}
+	for _, skillPath := range skillPaths {
+		for ancestor := path.Dir(skillPath); ; ancestor = path.Dir(ancestor) {
+			for _, manifestPath := range manifestPaths {
+				candidate := manifestPath
+				if ancestor != "." {
+					candidate = path.Join(ancestor, manifestPath)
+				}
+				if _, ok := normalized[candidate]; ok {
+					return true
+				}
+			}
+			if ancestor == "." {
+				break
+			}
+		}
+
+		parts := strings.Split(skillPath, "/")
+		for index, part := range parts {
+			if part == "skills" && index+2 < len(parts) {
+				return true
+			}
+		}
+
+		packageRoot := path.Dir(skillPath)
+		rootPrefix := ""
+		if packageRoot != "." {
+			rootPrefix = packageRoot + "/"
+		}
+		for candidate := range normalized {
+			relative := strings.TrimPrefix(candidate, rootPrefix)
+			if relative == candidate && rootPrefix != "" {
+				continue
+			}
+			if relative == ".mcp.json" || relative == "hooks/hooks.json" ||
+				strings.HasPrefix(relative, "commands/") || strings.HasPrefix(relative, "agents/") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func fileListHasRootPluginShape(fileNames map[string]struct{}) bool {
+	roots := []string{""}
+	wrapper := ""
+	for fileName := range fileNames {
+		parts := strings.SplitN(fileName, "/", 2)
+		if len(parts) != 2 {
+			wrapper = ""
+			break
+		}
+		if wrapper == "" {
+			wrapper = parts[0]
+			continue
+		}
+		if parts[0] != wrapper {
+			wrapper = ""
+			break
+		}
+	}
+	if wrapper != "" {
+		roots = append(roots, wrapper+"/")
+	}
+	for fileName := range fileNames {
+		for _, root := range roots {
+			if root != "" && !strings.HasPrefix(fileName, root) {
+				continue
+			}
+			relative := strings.TrimPrefix(fileName, root)
+			switch relative {
+			case "plugin.json", ".codex-plugin/plugin.json", ".claude-plugin/plugin.json", ".cursor-plugin/plugin.json", ".mcp.json", "hooks/hooks.json":
+				return true
+			}
+			if strings.HasPrefix(relative, "commands/") || strings.HasPrefix(relative, "agents/") ||
+				(strings.HasPrefix(relative, "skills/") && strings.HasSuffix(relative, "/skill.md")) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func cleanZipPath(name string) (string, error) {

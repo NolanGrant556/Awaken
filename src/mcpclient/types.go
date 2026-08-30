@@ -1,6 +1,7 @@
 package mcpclient
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -49,6 +50,8 @@ type ServerSnapshot struct {
 	ErrorReason     string            `json:"errorReason,omitempty"`
 	LastConnectedAt *time.Time        `json:"lastConnectedAt,omitempty"`
 	Capabilities    *ServerCapability `json:"capabilities,omitempty"`
+	ToolsLoaded     bool              `json:"toolsLoaded"`
+	ToolCount       int               `json:"toolCount"`
 
 	// SourceConnectorID is set when this server was injected by a connector.
 	// It holds the connector's ID (e.g. "notion", "slack"). Empty/nil means
@@ -70,6 +73,31 @@ type ServerCapability struct {
 	SupportsPrompts   bool   `json:"supportsPrompts,omitempty"`
 	SupportsResources bool   `json:"supportsResources,omitempty"`
 }
+
+type ServerToolSnapshot struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Enabled     bool   `json:"enabled"`
+}
+
+// ElicitationRequest is the safe host-facing projection of an MCP
+// elicitation/create request. RequestedSchema is the SDK-validated flat form
+// schema supplied by the server.
+type ElicitationRequest struct {
+	ServerName      string         `json:"serverName"`
+	Mode            string         `json:"mode"`
+	Message         string         `json:"message"`
+	RequestedSchema map[string]any `json:"requestedSchema,omitempty"`
+	URL             string         `json:"url,omitempty"`
+	ElicitationID   string         `json:"elicitationId,omitempty"`
+}
+
+type ElicitationResult struct {
+	Action  string         `json:"action"`
+	Content map[string]any `json:"content,omitempty"`
+}
+
+type ElicitationHandler func(context.Context, ElicitationRequest) (ElicitationResult, error)
 
 // NeedsAuthError is returned when a tool call cannot proceed because the
 // owning server requires authentication. The agent layer maps this to the

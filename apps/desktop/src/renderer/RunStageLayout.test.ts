@@ -16,6 +16,22 @@ function cssRule(source: string, selector: string): string {
 }
 
 describe("RunStage layout", () => {
+  it("keeps global operation feedback floating at the centered top edge", () => {
+    const workbenchStyles = readFileSync(
+      new URL("./styles/workbench.css", import.meta.url),
+      "utf8",
+    );
+    const toast = cssRule(workbenchStyles, ".desktop-toast");
+
+    expect(toast).toContain("position: absolute;");
+    expect(toast).toContain("top: 16px;");
+    expect(toast).toContain("left: 50%;");
+    expect(toast).toContain("transform: translateX(-50%);");
+    expect(toast).toContain("pointer-events: none;");
+    expect(toast).not.toContain("right:");
+    expect(toast).not.toContain("bottom:");
+  });
+
   it("keeps the model trigger responsive and animates only its visible chevron", () => {
     const designSystemStyles = readFileSync(
       new URL(

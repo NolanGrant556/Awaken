@@ -109,3 +109,45 @@ func TestAllRolesHideArchivedHistory(t *testing.T) {
 		}
 	}
 }
+
+func TestPluginRoleResolverUsesNativeValidationAndDefaults(t *testing.T) {
+	SetRoleResolver(func(agentType string) (Role, bool) {
+		if agentType != "plugin__acme__reviewer" {
+			return Role{}, false
+		}
+		return Role{Type: agentType, ReadOnly: true, SystemPrompt: "review", AllowedTools: []string{"Read"}}, true
+	})
+	t.Cleanup(func() { SetRoleResolver(nil) })
+	role, ok := LookupRole("plugin__acme__reviewer")
+	if !ok || !role.ReadOnly || NormalizeWorkspaceMode(role.Type, "") != WorkspaceSharedReadOnly {
+		t.Fatalf("role=%#v ok=%v", role, ok)
+	}
+	if err := ValidateSpawnCombo(role.Type, WorkspaceSharedReadOnly); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateSpawnCombo(role.Type, WorkspaceShared); err == nil {
+		t.Fatal("read-only Plugin Agent gained write mode")
+	}
+}
+
+func TestPluginRoleResolverAcceptsVendorAliasButKeepsCanonicalIdentityStrict(t *testing.T) {
+	SetRoleResolver(func(agentType string) (Role, bool) {
+		switch agentType {
+		case "agents-memory-updater", "plugin__continual-learning__agents-memory-updater":
+			return Role{Type: "plugin__continual-learning__agents-memory-updater", ReadOnly: false}, true
+		case "plugin__forged__agents-memory-updater":
+			return Role{Type: "plugin__continual-learning__agents-memory-updater", ReadOnly: false}, true
+		default:
+			return Role{}, false
+		}
+	})
+	t.Cleanup(func() { SetRoleResolver(nil) })
+
+	role, ok := LookupRole("agents-memory-updater")
+	if !ok || role.Type != "plugin__continual-learning__agents-memory-updater" {
+		t.Fatalf("vendor alias did not resolve to canonical Plugin Agent: %#v, %v", role, ok)
+	}
+	if role, ok := LookupRole("plugin__forged__agents-memory-updater"); ok {
+		t.Fatalf("canonical identity mismatch must be rejected: %#v", role)
+	}
+}

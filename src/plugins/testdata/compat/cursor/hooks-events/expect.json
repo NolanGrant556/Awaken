@@ -1,0 +1,1 @@
+{"dialect":"cursor","name":"cursor-hooks","counts":{"hook":3},"mappings":{"adapted":2,"recognized_unsupported":1},"forbiddenEvents":["postCompact"],"hookEventOrder":["postToolUseFailure","sessionEnd","beforeShellExecution"]}

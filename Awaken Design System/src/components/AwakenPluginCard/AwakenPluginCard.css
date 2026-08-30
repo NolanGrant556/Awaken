@@ -75,11 +75,13 @@
 .aw-plugin-card__title-row {
   display: flex;
   align-items: baseline;
+  flex-wrap: nowrap;
   gap: var(--aw-space-3);
   min-width: 0;
 }
 
 .aw-plugin-card__name {
+  min-width: 0;
   overflow: hidden;
   color: var(--aw-text-primary);
   font-weight: var(--aw-font-weight-heavy);
@@ -87,15 +89,14 @@
   white-space: nowrap;
 }
 
-.aw-plugin-card__version,
-.aw-plugin-card__meta {
+.aw-plugin-card__badge {
+  flex: 0 0 auto;
+  padding: 1px var(--aw-space-2);
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-pill);
   color: var(--aw-text-tertiary);
   font-size: var(--aw-font-size-xs);
   line-height: var(--aw-line-height-xs);
-}
-
-.aw-plugin-card__version {
-  flex: 0 0 auto;
 }
 
 .aw-plugin-card__description,

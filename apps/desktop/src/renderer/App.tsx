@@ -85,6 +85,8 @@ import type {
   ModelProvider,
   ReasoningEffortLevel,
   RuntimeProject,
+  RuntimePlugin,
+  RuntimePluginComponent,
   RunInputAttachment,
   RuntimeModelProfileSummary,
   RuntimeRunStatus,
@@ -236,6 +238,11 @@ import {
   composerTokenFromSlashAction,
   firstSelectableSlashAction,
   pluginMentionProvider,
+  pluginAgentComposerTokenFromAction,
+  pluginCommandComposerTokenFromAction,
+  pluginComposerTokenFromAction,
+  pluginSkillComposerTokenFromAction,
+  pluginRuleComposerTokenFromAction,
   skillSlashProvider,
   type ComposerTokenPlacement,
   type SlashAction,
@@ -2458,6 +2465,7 @@ export function App() {
   };
 
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
+  const [extensionNavigationEpoch, setExtensionNavigationEpoch] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [resolvingExternalInteractionId, setResolvingExternalInteractionId] = useState<
     string | null
@@ -3532,6 +3540,7 @@ export function App() {
 
   async function resolveActiveExternalInteraction(
     resolution: "completed" | "cancelled" | "expired" | "failed",
+    content?: Record<string, unknown>,
   ): Promise<void> {
     if (!runtimeState.runId || !activeExternalInteraction) {
       return;
@@ -3546,6 +3555,7 @@ export function App() {
         runtimeState.runId,
         activeExternalInteraction.id,
         resolution,
+        content,
       );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Failed to resolve external interaction");
@@ -4937,6 +4947,69 @@ export function App() {
     requestComposerFocus(nextDraft.focusOffset);
   }
 
+  function insertComposerTokenFromExtensions(token: ComposerToken): void {
+    const existingTokenOffset = composerTokenEndOffset(
+      composerTokens,
+      composerTokenLeadingTexts,
+      token.id,
+    );
+    if (existingTokenOffset !== undefined) {
+      setActiveNavId(undefined);
+      setComposerInputSelection({ anchor: existingTokenOffset, focus: existingTokenOffset });
+      requestComposerFocus(existingTokenOffset);
+      return;
+    }
+    const draftLength = composerStructuredDraftLength(
+      composerTokens,
+      composerTokenLeadingTexts,
+      composerValue,
+    );
+    const offset = composerInputSelection?.focus ?? draftLength;
+    const nextDraft = insertComposerTokenAtOffset({
+      tokens: composerTokens,
+      placements: composerTokenPlacements,
+      leadingTexts: composerTokenLeadingTexts,
+      value: composerValue,
+      offset,
+      token,
+    });
+    setComposerTokens(nextDraft.tokens);
+    setComposerTokenPlacements(nextDraft.placements);
+    setComposerTokenLeadingTexts(nextDraft.leadingTexts);
+    setComposerValue(nextDraft.value);
+    setComposerInputSelection({ anchor: nextDraft.focusOffset, focus: nextDraft.focusOffset });
+    setActiveNavId(undefined);
+    requestComposerFocus(nextDraft.focusOffset);
+  }
+
+  function handleUsePluginFromExtensions(plugin: RuntimePlugin): void {
+    insertComposerTokenFromExtensions(pluginComposerTokenFromAction(plugin));
+  }
+
+  function handleUsePluginComponentFromExtensions(
+    plugin: RuntimePlugin,
+    component: RuntimePluginComponent,
+    commandArguments: string[],
+  ): void {
+    if (component.kind === "skill") {
+      insertComposerTokenFromExtensions(pluginSkillComposerTokenFromAction(plugin, component));
+      return;
+    }
+    if (component.kind === "rule") {
+      insertComposerTokenFromExtensions(pluginRuleComposerTokenFromAction(plugin, component));
+      return;
+    }
+    if (component.kind === "command") {
+      insertComposerTokenFromExtensions(
+        pluginCommandComposerTokenFromAction(plugin, component, commandArguments),
+      );
+      return;
+    }
+    if (component.kind === "agent") {
+      insertComposerTokenFromExtensions(pluginAgentComposerTokenFromAction(plugin, component));
+    }
+  }
+
   function handleRemoveComposerToken(tokenId: string): void {
     const removedTokenIndex = composerTokens.findIndex((item) => item.id === tokenId);
     const removedToken = composerTokens[removedTokenIndex];
@@ -6055,6 +6128,9 @@ export function App() {
 
   function handleSelectNav(id: string): void {
     exitConversationBatchMode();
+    if (id === activeNavId && workbenchNavSectionForNavId(id)) {
+      setExtensionNavigationEpoch((current) => current + 1);
+    }
     setActiveNavId(id);
   }
 
@@ -7294,6 +7370,9 @@ export function App() {
           onConfirmDone={() => {
             void resolveActiveExternalInteraction("completed");
           }}
+          onSubmitForm={(content) => {
+            void resolveActiveExternalInteraction("completed", content);
+          }}
           onCancel={() => {
             if (isACPPermission) {
               void resolveActiveACPPermission("", true);
@@ -7884,6 +7963,10 @@ export function App() {
                     onNotice={setNotice}
                     activeWorkspaceRoot={workspacePath}
                     composerCatalogRevision={composerCatalogRevision}
+                    navigationEpoch={extensionNavigationEpoch}
+                    onNavigateSection={setActiveNavId}
+                    onUsePlugin={handleUsePluginFromExtensions}
+                    onUsePluginComponent={handleUsePluginComponentFromExtensions}
                   />
                 </>
               ) : scheduledTasksNavActive ? (

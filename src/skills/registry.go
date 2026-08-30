@@ -172,6 +172,9 @@ func (r *SkillRegistry) buildLocalSourcesLocked(dirs map[SourceOrigin]string) ma
 			continue
 		}
 		loaded := LoadDir(root.dir, root.src)
+		if root.src == SourcePlugin {
+			loaded = LoadPluginSkillSource(root.dir)
+		}
 		if root.src == SourceLegacy {
 			loaded = LoadLegacyCommandsDir(root.dir)
 		}

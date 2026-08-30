@@ -79,7 +79,7 @@ Awaken Plugin 是一个包管理与来源容器，不是第二套 Skill 或 MCP 
 - `${PLUGIN_ROOT}` / `${PLUGIN_DATA}` 仅用于 `args`、`env` 值和 `cwd`；不在 `command`、`url`、headers、env 键中展开。
 - `cwd` 只接受 `./...`、`${PLUGIN_ROOT}...`、`${PLUGIN_DATA}...`。不要在 env 中覆盖 `PLUGIN_ROOT` 或 `PLUGIN_DATA`。
 - HTTPS remote MCP 不内嵌密钥；需要认证时说明宿主侧配置要求，不把 token 写进候选包。
-- `./` stdio command 必须指向包内已存在的普通文件；在 macOS/Linux 候选中必须带执行位。Core 安装会把普通文件规范化为 owner-only `0600`，把带执行意图的文件规范化为 owner-only `0700`，ZIP/Git/导出也遵守同一规则。
+- `./` stdio command 必须指向包内已存在的普通文件；在 macOS/Linux 候选中必须带执行位。Core 安装会把普通文件规范化为 owner-only `0600`，把带执行意图的文件规范化为 owner-only `0700`，ZIP、受控候选目录和导出也遵守同一规则。
 
 ## 资源规划门
 

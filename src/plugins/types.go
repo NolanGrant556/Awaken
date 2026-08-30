@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"awaken/src/mcpclient"
+	"awaken/src/plugins/ir"
 )
 
 const (
@@ -17,11 +18,12 @@ const (
 	SchemaPrefix = "https://agent-plugins.org/schemas/"
 
 	PluginIdentityPrefix = "plugin__"
-	StateVersion         = 1
+	StateVersion         = 2
 
-	MaxDownloadBytes = 100 << 20
-	MaxExtractBytes  = 500 << 20
-	MaxPackageFiles  = 10000
+	MaxArchiveBytes         = 100 << 20
+	MaxExtractBytes         = 500 << 20
+	MaxPackageFiles         = 10000
+	MaxComponentSourceBytes = 2 << 20
 )
 
 var (
@@ -39,14 +41,19 @@ var (
 	ErrDisabled                = errors.New("plugin is disabled")
 	ErrDigestChanged           = errors.New("plugin digest changed")
 	ErrNoUsableComponents      = errors.New("plugin has no usable Skill or MCP component")
+	ErrRuntimeLeaseActive      = errors.New("plugin runtime generation is in use")
+	ErrSkillPackageSelected    = errors.New("Skill package selected in Plugin installer")
 )
 
-// Diagnostic is a component-level or non-fatal loader finding.
-type Diagnostic struct {
-	Code     string `json:"code"`
-	Message  string `json:"message"`
-	Severity string `json:"severity"`
+type RuntimeLease struct {
+	ID         string `json:"id"`
+	Generation string `json:"generation"`
 }
+
+// Diagnostic is the additive v2 component finding shared with dialect IR.
+// The alias preserves the existing Agent Plugins API while allowing richer
+// source and remediation metadata in new validation responses.
+type Diagnostic = ir.Diagnostic
 
 // Author is the optional plugin.json author object.
 type Author struct {
@@ -73,17 +80,14 @@ type SourceKind string
 
 const (
 	SourceLocalPath SourceKind = "local_path"
-	SourceRemoteURL SourceKind = "remote_url"
-	SourceRemoteGit SourceKind = "remote_git"
 )
 
 // Source is the durable install origin recorded in plugins.json.
 type Source struct {
-	Kind    SourceKind `json:"kind"`
-	Path    string     `json:"path,omitempty"`
-	URL     string     `json:"url,omitempty"`
-	Ref     string     `json:"ref,omitempty"`
-	Subpath string     `json:"subpath,omitempty"`
+	Kind            SourceKind `json:"kind"`
+	Path            string     `json:"path,omitempty"`
+	DialectHint     ir.Dialect `json:"dialectHint,omitempty"`
+	SelectedDialect ir.Dialect `json:"selectedDialect,omitempty"`
 }
 
 // MCPServerToggle is the per-server enable override stored in plugins.json.
@@ -93,12 +97,33 @@ type MCPServerToggle struct {
 
 // Record is one plugins.json entry.
 type Record struct {
-	Enabled     bool                       `json:"enabled"`
-	Version     string                     `json:"version,omitempty"`
-	Source      Source                     `json:"source"`
-	InstalledAt time.Time                  `json:"installedAt"`
-	Digest      string                     `json:"digest"`
-	MCPServers  map[string]MCPServerToggle `json:"mcpServers,omitempty"`
+	Enabled            bool                         `json:"enabled"`
+	Version            string                       `json:"version,omitempty"`
+	Source             Source                       `json:"source"`
+	InstalledAt        time.Time                    `json:"installedAt"`
+	Digest             string                       `json:"digest"`
+	MCPServers         map[string]MCPServerToggle   `json:"mcpServers,omitempty"`
+	Dialect            ir.Dialect                   `json:"dialect"`
+	ManifestPath       string                       `json:"manifestPath"`
+	InstallationID     string                       `json:"installationId"`
+	DisplayName        string                       `json:"displayName,omitempty"`
+	Components         map[string]ComponentOverride `json:"components,omitempty"`
+	Variables          map[string]VariableValueRef  `json:"variables,omitempty"`
+	SecondaryManifests []string                     `json:"secondaryManifests,omitempty"`
+	MigrationConflicts []string                     `json:"migrationConflicts,omitempty"`
+}
+
+type ComponentOverride struct {
+	Desired            string          `json:"desired"`
+	ActivationOverride string          `json:"activationOverride,omitempty"`
+	ToolOverrides      map[string]bool `json:"toolOverrides,omitempty"`
+	BaseRevisionID     string          `json:"baseRevisionId"`
+}
+
+type VariableValueRef struct {
+	Value     any       `json:"value,omitempty"`
+	SecretRef string    `json:"secretRef,omitempty"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // StateFile is the on-disk plugins.json shape.
@@ -118,19 +143,27 @@ type LoadedServer struct {
 
 // InstalledPlugin is the runtime view of one installed package.
 type InstalledPlugin struct {
-	Name           string
-	Root           string
-	DataDir        string
-	Manifest       Manifest
-	Enabled        bool
-	Source         Source
-	Digest         string
-	ActualDigest   string
-	IntegrityValid bool
-	InstalledAt    time.Time
-	SkillRoot      string
-	MCPServers     []LoadedServer
-	Diagnostics    []Diagnostic
+	Name               string
+	Root               string
+	DataDir            string
+	Manifest           Manifest
+	Enabled            bool
+	Source             Source
+	Digest             string
+	ActualDigest       string
+	IntegrityValid     bool
+	InstalledAt        time.Time
+	SkillRoot          string
+	MCPServers         []LoadedServer
+	Dialect            ir.Dialect
+	ManifestPath       string
+	InstallationID     string
+	DisplayName        string
+	Components         []ir.Component
+	ComponentState     []ComponentState
+	ConfigurationState string
+	CompatibilityState string
+	Diagnostics        []Diagnostic
 }
 
 // ComposerSelection is the host-resolved identity of an enabled Plugin chosen
@@ -151,6 +184,49 @@ type InstallRequest struct {
 	Source         Source
 	Replace        bool
 	ExpectedDigest string
+	InstallName    string
+}
+
+type ComponentState struct {
+	Component      ir.Component    `json:"component"`
+	DesiredState   string          `json:"desiredState"`
+	RuleActivation string          `json:"ruleActivation,omitempty"`
+	Configuration  string          `json:"configurationState"`
+	Runtime        string          `json:"runtimeState"`
+	Integrity      string          `json:"integrityState"`
+	Mapping        ir.MappingState `json:"mappingState"`
+	Switchable     bool            `json:"switchable"`
+}
+
+type ComponentDetail struct {
+	State          ComponentState `json:"state"`
+	Preview        string         `json:"preview,omitempty"`
+	Source         string         `json:"source,omitempty"`
+	SourceEditable bool           `json:"sourceEditable"`
+	Properties     map[string]any `json:"properties,omitempty"`
+	Resources      []string       `json:"resources,omitempty"`
+}
+
+type UpdateComponentSourceResult struct {
+	Plugin         *InstalledPlugin
+	PreviousDigest string
+	Digest         string
+	Changed        bool
+}
+
+type VariableField struct {
+	Key          string               `json:"key"`
+	Schema       ir.VariableSpec      `json:"schema"`
+	Configured   bool                 `json:"configured"`
+	Masked       bool                 `json:"masked"`
+	Value        any                  `json:"value,omitempty"`
+	Dependencies []VariableDependency `json:"dependencies,omitempty"`
+}
+
+type VariableDependency struct {
+	LogicalID string           `json:"logicalId"`
+	Kind      ir.ComponentKind `json:"kind"`
+	Name      string           `json:"name"`
 }
 
 // InstallResult reports a successful install or replace.
@@ -176,17 +252,42 @@ type CommitInstalledChangesResult struct {
 // materialization, manifest, containment, Skill discovery, MCP parsing, and
 // digest code used by installation and runtime loading.
 type ValidationResult struct {
-	Valid       bool         `json:"valid"`
-	Source      Source       `json:"source"`
-	Manifest    Manifest     `json:"-"`
-	Name        string       `json:"name"`
-	Version     string       `json:"version,omitempty"`
-	Description string       `json:"description,omitempty"`
-	Digest      string       `json:"digest"`
-	TargetRoot  string       `json:"targetRoot"`
-	SkillCount  int          `json:"skillCount"`
-	ServerCount int          `json:"serverCount"`
-	Diagnostics []Diagnostic `json:"diagnostics"`
+	Valid             bool                   `json:"valid"`
+	Source            Source                 `json:"source"`
+	Manifest          Manifest               `json:"-"`
+	Name              string                 `json:"name"`
+	Version           string                 `json:"version,omitempty"`
+	Description       string                 `json:"description,omitempty"`
+	Digest            string                 `json:"digest"`
+	TargetRoot        string                 `json:"targetRoot"`
+	SkillCount        int                    `json:"skillCount"`
+	ServerCount       int                    `json:"serverCount"`
+	Dialect           ir.Dialect             `json:"dialect,omitempty"`
+	ManifestPath      string                 `json:"manifestPath,omitempty"`
+	Components        []ir.Component         `json:"components,omitempty"`
+	ComponentTotals   ComponentTotals        `json:"componentTotals"`
+	Candidates        []ir.ManifestCandidate `json:"candidates,omitempty"`
+	RequiresSelection bool                   `json:"requiresSelection,omitempty"`
+	SelectedDialect   ir.Dialect             `json:"selectedDialect,omitempty"`
+	RequiredVariables []string               `json:"requiredVariables,omitempty"`
+	ProcessIntents    []ProcessIntent        `json:"processIntents,omitempty"`
+	Diagnostics       []Diagnostic           `json:"diagnostics"`
+	Normalized        ir.NormalizedPlugin    `json:"-"`
+}
+
+type ComponentTotals struct {
+	Total       int `json:"total"`
+	Runnable    int `json:"runnable"`
+	NeedsConfig int `json:"needsConfiguration"`
+	Invalid     int `json:"invalid"`
+	Unsupported int `json:"unsupported"`
+	Ignored     int `json:"ignored"`
+}
+
+type ProcessIntent struct {
+	ComponentID string `json:"componentId"`
+	Kind        string `json:"kind"`
+	Summary     string `json:"summary"`
 }
 
 func warning(code, message string) Diagnostic {

@@ -1,6 +1,8 @@
 package skills
 
 import (
+	"archive/zip"
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +11,73 @@ import (
 
 	"awaken/src/tool/trash"
 )
+
+func TestSkillPackageRejectsPluginTreesAndArchives(t *testing.T) {
+	pluginRoot := t.TempDir()
+	writeFile(t, pluginRoot, "plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"example-plugin"}`)
+	writeFile(t, pluginRoot, filepath.Join("skills", "example-command", "SKILL.md"), "---\nname: example-command\ndescription: Plugin component.\n---\nBody.\n")
+	if _, err := PackageFromPath(pluginRoot); !errors.Is(err, ErrPluginPackageSelected) {
+		t.Fatalf("plugin directory error=%v, want ErrPluginPackageSelected", err)
+	}
+
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	for name, content := range map[string]string{
+		"example-plugin/.cursor-plugin/plugin.json": `{"name":"example-plugin"}`,
+		"example-plugin/SKILL.md":                   "---\nname: example-command\ndescription: Plugin root Skill.\n---\nBody.\n",
+	} {
+		entry, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PackageFromBytes("example-plugin.zip", archive.Bytes()); !errors.Is(err, ErrPluginPackageSelected) {
+		t.Fatalf("plugin archive error=%v, want ErrPluginPackageSelected", err)
+	}
+
+	var mcpOnlyArchive bytes.Buffer
+	mcpWriter := zip.NewWriter(&mcpOnlyArchive)
+	manifest, err := mcpWriter.Create("mcp-only/plugin.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manifest.Write([]byte(`{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"mcp-only"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := mcpWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PackageFromBytes("mcp-only.zip", mcpOnlyArchive.Bytes()); !errors.Is(err, ErrPluginPackageSelected) {
+		t.Fatalf("MCP-only plugin archive error=%v, want ErrPluginPackageSelected", err)
+	}
+
+	var ordinarySkill bytes.Buffer
+	ordinaryWriter := zip.NewWriter(&ordinarySkill)
+	for name, content := range map[string]string{
+		"ordinary/SKILL.md":           "---\nname: ordinary\ndescription: Ordinary Skill.\n---\nBody.\n",
+		"ordinary/assets/plugin.json": `{"example":true}`,
+	} {
+		entry, err := ordinaryWriter.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ordinaryWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PackageFromBytes("ordinary.zip", ordinarySkill.Bytes()); err != nil {
+		t.Fatalf("ordinary Skill resource was misclassified as Plugin: %v", err)
+	}
+}
 
 type installTrashAdapter struct {
 	dir  string

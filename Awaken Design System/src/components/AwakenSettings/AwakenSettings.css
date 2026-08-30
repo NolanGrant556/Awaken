@@ -72,7 +72,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  width: fit-content;
+  width: 100%;
   min-height: 30px;
   padding: 0 6px;
   border: 0;

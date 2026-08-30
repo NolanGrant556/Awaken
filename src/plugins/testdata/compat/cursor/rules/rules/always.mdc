@@ -1,0 +1,5 @@
+---
+description: Always use the fixture rule.
+alwaysApply: true
+---
+Apply the fixture rule.

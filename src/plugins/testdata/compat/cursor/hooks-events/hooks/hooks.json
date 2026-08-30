@@ -1,0 +1,8 @@
+{
+  "version":1,
+  "hooks":{
+    "postToolUseFailure":[{"command":"true"}],
+    "sessionEnd":[{"command":"true"}],
+    "beforeShellExecution":[{"command":"true"}]
+  }
+}

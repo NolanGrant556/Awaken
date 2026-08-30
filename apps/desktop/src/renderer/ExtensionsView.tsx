@@ -8,7 +8,6 @@ import {
   AwakenFolder,
   AwakenMcpConfigDialog,
   AwakenMcpSettingsDialog,
-  AwakenPluginDetailDialog,
   AwakenPluginInstallDialog,
   AwakenPlugins,
   AwakenProjectSkillsDialog,
@@ -27,6 +26,7 @@ import type {
   RuntimeMcpServer,
   RuntimeMcpServerConfigResponse,
   RuntimePlugin,
+  RuntimePluginComponent,
   RuntimePluginSource,
   RuntimePluginValidation,
   RuntimeProject,
@@ -42,6 +42,8 @@ import {
   type SkillPreviewTarget,
 } from "./SkillPreviewDialog";
 import { cliConnectorProductCopy } from "./cliConnectorProduct";
+import { PluginConsole } from "./plugins/PluginConsole";
+import { pluginErrorCode, pluginErrorMessage } from "./plugins/pluginErrors";
 import dingtalkLogo from "./assets/brands/dingtalk.png";
 import feishuLogo from "./assets/brands/feishu.png";
 
@@ -53,33 +55,20 @@ export type McpToolInfo = {
 
 export type ExtensionSection = "connectors" | "skills" | "plugins";
 
-function buildPluginInstallSource(
-  mode: "local" | "url",
-  localPath: string,
-  url: string,
-  refValue: string,
-  subpath: string,
-): RuntimePluginSource {
-  if (mode === "local") {
-    return { kind: "local_path", path: localPath.trim() };
-  }
-  const normalizedUrl = url.trim();
-  const normalizedRef = refValue.trim();
-  const normalizedSubpath = subpath.trim();
-  if (normalizedUrl.includes(".git") || normalizedRef || normalizedSubpath) {
-    return {
-      kind: "remote_git",
-      url: normalizedUrl,
-      ref: normalizedRef || undefined,
-      subpath: normalizedSubpath || undefined,
-    };
-  }
-  return { kind: "remote_url", url: normalizedUrl };
-}
-
 type ConnectorKind = "mcp" | "cli";
 export type SkillView = "awaken" | "project" | "user" | "agents";
 type SkillInstallScope = "project" | "global";
+
+function pluginValidationErrorMessage(error: unknown): string {
+  switch (pluginErrorCode(error)) {
+    case "PLUGIN_INVALID":
+    case "PLUGIN_REQUEST_FAILED":
+    case "PACKAGE_NO_USABLE_COMPONENTS":
+      return "插件 ZIP 格式不符合要求";
+    default:
+      return pluginErrorMessage(error);
+  }
+}
 
 type SkillProjectGroup = {
   id: string;
@@ -115,7 +104,22 @@ type ExtensionsViewProps = {
   onNotice: (message: string) => void;
   activeWorkspaceRoot?: string;
   composerCatalogRevision?: number;
+  navigationEpoch?: number;
+  onNavigateSection?: (section: ExtensionSection) => void;
+  onUsePlugin?: (plugin: RuntimePlugin) => void;
+  onUsePluginComponent?: (
+    plugin: RuntimePlugin,
+    component: RuntimePluginComponent,
+    commandArguments: string[],
+  ) => void;
 };
+
+const NOOP_USE_PLUGIN = (_plugin: RuntimePlugin): void => undefined;
+const NOOP_USE_PLUGIN_COMPONENT = (
+  _plugin: RuntimePlugin,
+  _component: RuntimePluginComponent,
+  _commandArguments: string[],
+): void => undefined;
 
 const MCP_STDIO_EXAMPLE = `{
   "mcpServers": {
@@ -456,6 +460,9 @@ export function isSkillVisibleInView(
   skill: Pick<RuntimeSkill, "sourceOrigin">,
   view: SkillView,
 ): boolean {
+  if (skill.sourceOrigin === "plugin") {
+    return false;
+  }
   switch (view) {
     case "awaken":
       return skill.sourceOrigin === "bundled";
@@ -633,7 +640,9 @@ function buildSkillCatalogSnapshot(
   const skills = dedupeSkills([
     ...results.flatMap((result) => result.skills),
     ...fallbackSkills,
-  ]);
+  ]).filter((skill) =>
+    SKILL_VIEW_TABS.some((view) => isSkillVisibleInView(skill, view.id)),
+  );
   const projectGroups = results.map(({ project, skills: projectSkills, errorMessage }) => {
     const roots = orderedProjectRoots(project);
     const primaryRoot = roots[0] ?? "";
@@ -710,6 +719,11 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+function fileNameFromLocalPath(value: string): string {
+  const normalized = value.trim().replace(/\\/g, "/");
+  return normalized.split("/").pop() || normalized;
+}
+
 export function ExtensionsView({
   section,
   desktopReady,
@@ -717,6 +731,10 @@ export function ExtensionsView({
   onNotice,
   activeWorkspaceRoot,
   composerCatalogRevision = 0,
+  navigationEpoch = 0,
+  onNavigateSection,
+  onUsePlugin = NOOP_USE_PLUGIN,
+  onUsePluginComponent = NOOP_USE_PLUGIN_COMPONENT,
 }: ExtensionsViewProps) {
   const [connectors, setConnectors] = useState<RuntimeConnector[]>([]);
   const [cliConnectors, setCliConnectors] = useState<CliConnectorView[]>([]);
@@ -742,6 +760,8 @@ export function ExtensionsView({
   const [configuringMcp, setConfiguringMcp] = useState(false);
   const [skillDialogOpen, setSkillDialogOpen] = useState(false);
   const [skillFile, setSkillFile] = useState<File | null>(null);
+  const [skillSourcePath, setSkillSourcePath] = useState("");
+  const [classifyingSkillPackage, setClassifyingSkillPackage] = useState(false);
   const [skillDragActive, setSkillDragActive] = useState(false);
   const [installingSkill, setInstallingSkill] = useState(false);
   const [skillProjectRoot, setSkillProjectRoot] = useState("");
@@ -758,6 +778,7 @@ export function ExtensionsView({
   const visibleRefreshGenerationRef = useRef(0);
   const appliedPluginCatalogRevisionRef = useRef(composerCatalogRevision);
   const pluginValidationGenerationRef = useRef(0);
+  const skillPackageRoutingGenerationRef = useRef(0);
   const busyMcpServerNameRef = useRef<string | null>(null);
   const [skillToggleStates, setSkillToggleStates] = useState<Record<string, boolean>>({});
   const [busySkillId, setBusySkillId] = useState<string | null>(null);
@@ -776,19 +797,20 @@ export function ExtensionsView({
   const [loadingMcpSettings, setLoadingMcpSettings] = useState(false);
   const [plugins, setPlugins] = useState<RuntimePlugin[]>([]);
   const [pluginDialogOpen, setPluginDialogOpen] = useState(false);
-  const [pluginInstallMode, setPluginInstallMode] = useState<"local" | "url">("local");
   const [pluginLocalPath, setPluginLocalPath] = useState("");
-  const [pluginUrl, setPluginUrl] = useState("");
-  const [pluginRef, setPluginRef] = useState("");
-  const [pluginSubpath, setPluginSubpath] = useState("");
-  const [pluginReplace, setPluginReplace] = useState(false);
-  const [pluginConfirm, setPluginConfirm] = useState(false);
   const [pluginValidation, setPluginValidation] =
     useState<RuntimePluginValidation | null>(null);
   const [validatingPlugin, setValidatingPlugin] = useState(false);
   const [installingPlugin, setInstallingPlugin] = useState(false);
   const [selectedPlugin, setSelectedPlugin] = useState<RuntimePlugin | null>(null);
+  const [pendingPluginUninstall, setPendingPluginUninstall] = useState<RuntimePlugin | null>(null);
   const [busyPluginName, setBusyPluginName] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedPlugin(null);
+    setPluginDialogOpen(false);
+    setPendingPluginUninstall(null);
+  }, [navigationEpoch]);
 
   const normalizedQuery = query.trim().toLowerCase();
   function applySkillCatalogSnapshot(snapshot: SkillCatalogSnapshot): void {
@@ -868,6 +890,11 @@ export function ExtensionsView({
       setConnectors(nextConnectors);
       setCliConnectors(nextCliConnectors);
       setPlugins(nextPlugins);
+      setSelectedPlugin((current) =>
+        current
+          ? nextPlugins.find((plugin) => plugin.name === current.name) ?? null
+          : null,
+      );
       const busyServerName = busyMcpServerNameRef.current;
       setMcpServers((current) => {
         if (!busyServerName) {
@@ -1098,8 +1125,12 @@ export function ExtensionsView({
 
   const visibleSkills = useMemo(
     () =>
-      skills.filter((skill) => skillMatchesQuery(skill, normalizedQuery)),
-    [skills, normalizedQuery],
+      skills.filter(
+        (skill) =>
+          isSkillVisibleInView(skill, activeSkillView) &&
+          skillMatchesQuery(skill, normalizedQuery),
+      ),
+    [activeSkillView, skills, normalizedQuery],
   );
 
   const visibleProjectSkillGroups = useMemo<VisibleSkillProjectGroup[]>(
@@ -1449,7 +1480,7 @@ export function ExtensionsView({
   }
 
   async function handleInstallSkill(): Promise<void> {
-    if (!skillFile) {
+    if (!skillFile && !skillSourcePath) {
       setErrorMessage("请选择 SKILL.md 文件或 skill 文件夹 zip");
       return;
     }
@@ -1461,21 +1492,30 @@ export function ExtensionsView({
     setInstallingSkill(true);
     setErrorMessage(null);
     try {
-      const contentBase64 = await fileToBase64(skillFile);
+      const contentBase64 = skillFile ? await fileToBase64(skillFile) : undefined;
       const result = await runtimeClient.installSkill({
-        fileName: skillFile.name,
+        fileName: skillFile?.name ?? fileNameFromLocalPath(skillSourcePath),
         contentBase64,
+        sourcePath: skillSourcePath || undefined,
         scope: skillInstallScope,
         projectRoot: targetProjectRoot || undefined,
       });
       setSkillDialogOpen(false);
       setSkillFile(null);
+      setSkillSourcePath("");
       if (skillInstallScope === "project") {
         setSkillProjectRoot(targetProjectRoot);
       }
       onNotice(`已安装 ${result.skill.displayName || result.skill.name}`);
       await refresh(true, targetProjectRoot || undefined);
     } catch (error) {
+      if (
+        pluginErrorCode(error) === "PLUGIN_PACKAGE_SELECTED" &&
+        skillFile &&
+        await openPluginInstallerForSkillFile(skillFile, true)
+      ) {
+        return;
+      }
       setErrorMessage(error instanceof Error ? error.message : "Skill 安装失败");
     } finally {
       setInstallingSkill(false);
@@ -1534,20 +1574,117 @@ export function ExtensionsView({
     }
   }
 
-  async function handlePickPluginSource(): Promise<void> {
+  function openRoutedSkillInstaller(sourcePath: string): void {
     invalidatePluginValidation();
+    setPluginDialogOpen(false);
+    setPluginLocalPath("");
+    setSkillFile(null);
+    setSkillSourcePath(sourcePath);
+    setSkillInstallScope("project");
+    setSkillInstallProjectRoot(skillProjectRoot);
+    setSkillDialogOpen(true);
+    setErrorMessage(null);
+    onNavigateSection?.("skills");
+    onNotice("已识别为 Skill 包，请确认安装范围");
+  }
+
+  async function openPluginInstallerForSkillFile(
+    file: File,
+    forcePluginRoute = false,
+  ): Promise<boolean> {
+    if (!file.name.toLowerCase().endsWith(".zip")) return false;
+    const generation = ++skillPackageRoutingGenerationRef.current;
+    setClassifyingSkillPackage(true);
+    try {
+      const resolved = await runtimeClient.resolveDroppedPluginSource(file);
+      if (generation !== skillPackageRoutingGenerationRef.current || resolved.canceled) {
+        return false;
+      }
+      if (!forcePluginRoute) {
+        try {
+          const validation = await runtimeClient.validatePlugin(pluginInstallSource(resolved.path));
+          if (generation !== skillPackageRoutingGenerationRef.current) return false;
+          setSkillDialogOpen(false);
+          setSkillFile(null);
+          setSkillSourcePath("");
+          setPluginLocalPath(resolved.path);
+          setPluginValidation(validation);
+          setErrorMessage(validation.valid ? null : "插件 ZIP 格式不符合要求");
+          setPluginDialogOpen(true);
+          onNavigateSection?.("plugins");
+          onNotice("已识别为插件包，已切换到插件安装");
+          return true;
+        } catch (error) {
+          if (pluginErrorCode(error) === "SKILL_PACKAGE_SELECTED") return false;
+          return false;
+        }
+      }
+      setSkillDialogOpen(false);
+      setSkillFile(null);
+      setSkillSourcePath("");
+      setPluginDialogOpen(true);
+      onNavigateSection?.("plugins");
+      await selectAndValidatePluginSource(resolved.path);
+      onNotice("已识别为插件包，已切换到插件安装");
+      return true;
+    } catch (error) {
+      if (forcePluginRoute) {
+        setErrorMessage(pluginErrorMessage(error));
+      }
+      return false;
+    } finally {
+      if (generation === skillPackageRoutingGenerationRef.current) {
+        setClassifyingSkillPackage(false);
+      }
+    }
+  }
+
+  async function handleSkillFileSelected(file: File | null): Promise<void> {
+    skillPackageRoutingGenerationRef.current += 1;
+    setClassifyingSkillPackage(false);
+    setSkillFile(file);
+    setSkillSourcePath("");
+    setErrorMessage(null);
+    if (file) {
+      await openPluginInstallerForSkillFile(file);
+    }
+  }
+
+  async function selectAndValidatePluginSource(path: string): Promise<void> {
+    invalidatePluginValidation();
+    setPluginLocalPath(path);
+    await handleValidatePlugin(path);
+  }
+
+  async function handlePickPluginSource(): Promise<void> {
     setErrorMessage(null);
     try {
       const result = await runtimeClient.pickPluginSource(
         pluginLocalPath.trim() || undefined,
       );
       if (result.canceled) {
-        if (result.error) setErrorMessage(result.error);
+        if (result.error) setErrorMessage(pluginErrorMessage(result.error));
         return;
       }
-      setPluginLocalPath(result.path);
+      await selectAndValidatePluginSource(result.path);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "插件来源选择失败");
+      setErrorMessage(pluginErrorMessage(error));
+    }
+  }
+
+  async function handleDropPluginSource(file: File): Promise<void> {
+    invalidatePluginValidation();
+    try {
+      const result = await runtimeClient.resolveDroppedPluginSource(file);
+      if (result.canceled) {
+        setPluginLocalPath("");
+        setErrorMessage(result.error ? pluginErrorMessage(result.error) : "插件 ZIP 格式不符合要求");
+        return;
+      }
+      await selectAndValidatePluginSource(result.path);
+    } catch (error) {
+      setPluginLocalPath("");
+      setErrorMessage(pluginErrorMessage(error));
     }
   }
 
@@ -1794,29 +1931,30 @@ export function ExtensionsView({
     ? cliConnectorProductCopy(selectedCliConnector.id)
     : null;
 
-  function currentPluginInstallSource(): RuntimePluginSource {
-    return buildPluginInstallSource(
-      pluginInstallMode,
-      pluginLocalPath,
-      pluginUrl,
-      pluginRef,
-      pluginSubpath,
-    );
+  function pluginInstallSource(path: string): RuntimePluginSource {
+    return { kind: "local_path", path: path.trim() };
   }
 
-  async function handleValidatePlugin(): Promise<void> {
+  async function handleValidatePlugin(path: string): Promise<void> {
     const generation = pluginValidationGenerationRef.current + 1;
     pluginValidationGenerationRef.current = generation;
     setPluginValidation(null);
     setValidatingPlugin(true);
     setErrorMessage(null);
     try {
-      const result = await runtimeClient.validatePlugin(currentPluginInstallSource());
+      const result = await runtimeClient.validatePlugin(pluginInstallSource(path));
       if (pluginValidationGenerationRef.current !== generation) return;
       setPluginValidation(result);
+      if (!result.valid) {
+        setErrorMessage("插件 ZIP 格式不符合要求");
+      }
     } catch (error) {
       if (pluginValidationGenerationRef.current !== generation) return;
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      if (pluginErrorCode(error) === "SKILL_PACKAGE_SELECTED") {
+        openRoutedSkillInstaller(path);
+        return;
+      }
+      setErrorMessage(pluginValidationErrorMessage(error));
     } finally {
       if (pluginValidationGenerationRef.current === generation) {
         setValidatingPlugin(false);
@@ -1826,30 +1964,32 @@ export function ExtensionsView({
 
   async function handleInstallPlugin(): Promise<void> {
     const expectedDigest = pluginValidation?.digest?.trim();
-    if (!pluginConfirm || pluginValidation?.valid !== true || !expectedDigest) {
-      setErrorMessage("请先完成插件检查，并确认当前来源通过校验");
+    if (pluginValidation?.valid !== true || !expectedDigest) {
+      setErrorMessage("请先选择格式正确的插件 ZIP");
       return;
     }
     setInstallingPlugin(true);
     setErrorMessage(null);
     try {
-      await runtimeClient.installPlugin({
-        source: currentPluginInstallSource(),
-        replace: pluginReplace,
+      const result = await runtimeClient.installPlugin({
+        source: pluginInstallSource(pluginLocalPath),
+        replace: true,
         expectedDigest,
       });
       setPluginDialogOpen(false);
-      setPluginConfirm(false);
       invalidatePluginValidation();
+      setSelectedPlugin(result.plugin);
+      setPlugins((current) => [
+        ...current.filter((item) => item.name !== result.plugin.name),
+        result.plugin,
+      ]);
       onNotice("插件已安装，将在新任务中生效");
       await refresh();
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("PLUGIN_SOURCE_CHANGED")) {
-        invalidatePluginValidation();
-        setErrorMessage("插件来源已变化，请重新检查后再安装");
+      if (pluginErrorCode(error) === "PLUGIN_SOURCE_CHANGED") {
+        await handleValidatePlugin(pluginLocalPath);
       } else {
-        setErrorMessage(message);
+        setErrorMessage(pluginErrorMessage(error));
       }
     } finally {
       setInstallingPlugin(false);
@@ -1868,7 +2008,7 @@ export function ExtensionsView({
       }
       await refresh(false);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(pluginErrorMessage(error));
     } finally {
       setBusyPluginName(null);
     }
@@ -1878,32 +2018,83 @@ export function ExtensionsView({
     try {
       setSelectedPlugin(await runtimeClient.getPlugin(name));
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(pluginErrorMessage(error));
     }
   }
 
   if (section === "plugins") {
+    if (selectedPlugin) {
+      return (
+        <>
+          <PluginConsole
+            plugin={selectedPlugin}
+            runtimeClient={runtimeClient}
+            busy={busyPluginName === selectedPlugin.name}
+            onBack={() => setSelectedPlugin(null)}
+            onPluginUpdated={(next) => {
+              setSelectedPlugin(next);
+              setPlugins((current) =>
+                current.map((item) => (item.name === next.name ? next : item)),
+              );
+            }}
+            onUninstall={() => setPendingPluginUninstall(selectedPlugin)}
+            onUsePlugin={onUsePlugin}
+            onUsePluginComponent={onUsePluginComponent}
+            onNotice={onNotice}
+          />
+          <Dialog
+            open={pendingPluginUninstall !== null}
+            title="卸载插件"
+            onOpenChange={(open) => { if (!open) setPendingPluginUninstall(null); }}
+            footer={pendingPluginUninstall ? <>
+              <Button variant="ghost" onClick={() => setPendingPluginUninstall(null)}>取消</Button>
+              <Button
+                variant="primary"
+                loading={busyPluginName === pendingPluginUninstall.name}
+                onClick={() => {
+                  const plugin = pendingPluginUninstall;
+                  void (async () => {
+                    setBusyPluginName(plugin.name);
+                    try {
+                      await runtimeClient.uninstallPlugin(plugin.name);
+                      setPendingPluginUninstall(null);
+                      setSelectedPlugin(null);
+                      onNotice("插件已移入回收站");
+                      await refresh(false);
+                    } catch (error) {
+                      setErrorMessage(pluginErrorMessage(error));
+                    } finally {
+                      setBusyPluginName(null);
+                    }
+                  })();
+                }}
+              >确认卸载</Button>
+            </> : undefined}
+          >
+            <p>卸载「{pendingPluginUninstall?.name}」会把插件包和数据目录移入回收站，可从系统回收站恢复。</p>
+          </Dialog>
+        </>
+      );
+    }
     return (
       <>
         <AwakenPlugins
           searchValue={query}
           plugins={plugins.map((plugin) => ({
             name: plugin.name,
-            version: plugin.version,
             description: plugin.description,
-            skillCount: plugin.skillCount,
-            serverCount: plugin.serverCount,
+            dialect: plugin.dialect,
             enabled: plugin.enabled,
             busy: busyPluginName === plugin.name,
             diagnostic: plugin.diagnostics?.[0]?.message,
           }))}
           loading={loading}
-          errorMessage={errorMessage}
+          errorMessage={pluginDialogOpen ? null : errorMessage}
           onSearchChange={setQuery}
           onRefresh={() => { void refresh(); }}
           onInstall={() => {
-            setPluginConfirm(false);
             invalidatePluginValidation();
+            setPluginLocalPath("");
             setPluginDialogOpen(true);
           }}
           onPluginOpen={(plugin) => { void openPluginDetail(plugin.name); }}
@@ -1914,13 +2105,7 @@ export function ExtensionsView({
         />
         <AwakenPluginInstallDialog
           open={pluginDialogOpen}
-          mode={pluginInstallMode}
           localPath={pluginLocalPath}
-          url={pluginUrl}
-          refValue={pluginRef}
-          subpath={pluginSubpath}
-          replace={pluginReplace}
-          confirm={pluginConfirm}
           validation={pluginValidation}
           validating={validatingPlugin}
           errorMessage={pluginDialogOpen ? errorMessage : null}
@@ -1929,141 +2114,9 @@ export function ExtensionsView({
             setPluginDialogOpen(open);
             if (!open) invalidatePluginValidation();
           }}
-          onModeChange={(mode) => {
-            invalidatePluginValidation();
-            setPluginInstallMode(mode);
-          }}
-          onLocalPathChange={(value) => {
-            invalidatePluginValidation();
-            setPluginLocalPath(value);
-          }}
-          onUrlChange={(value) => {
-            invalidatePluginValidation();
-            setPluginUrl(value);
-          }}
-          onRefChange={(value) => {
-            invalidatePluginValidation();
-            setPluginRef(value);
-          }}
-          onSubpathChange={(value) => {
-            invalidatePluginValidation();
-            setPluginSubpath(value);
-          }}
-          onReplaceChange={(value) => {
-            invalidatePluginValidation();
-            setPluginReplace(value);
-          }}
-          onConfirmChange={setPluginConfirm}
           onPickLocal={() => { void handlePickPluginSource(); }}
-          onValidate={() => { void handleValidatePlugin(); }}
+          onDropFile={(file) => { void handleDropPluginSource(file); }}
           onSubmit={() => { void handleInstallPlugin(); }}
-        />
-        <AwakenPluginDetailDialog
-          open={selectedPlugin !== null}
-          name={selectedPlugin?.name ?? ""}
-          version={selectedPlugin?.version}
-          description={selectedPlugin?.description}
-          sourceLabel={selectedPlugin ? `${selectedPlugin.source.kind}${selectedPlugin.source.url ? ` ${selectedPlugin.source.url}` : selectedPlugin.source.path ? ` ${selectedPlugin.source.path}` : ""}` : undefined}
-          digest={selectedPlugin?.digest}
-          skills={(selectedPlugin?.skills ?? []).map((skill) => ({
-            id: skill.id,
-            name: skill.name,
-            description: skill.description,
-            previewable: canPreviewSkill(skill),
-          }))}
-          servers={(selectedPlugin?.servers ?? []).map((server) => ({
-            shortName: server.shortName,
-            identity: server.identity,
-            state: server.state,
-            enabled: server.enabled,
-            errorReason: server.errorReason,
-            invalid: server.invalid?.message,
-          }))}
-          diagnostics={(selectedPlugin?.diagnostics ?? []).map((item) => item.message ?? item.code ?? "")}
-          busy={busyPluginName === selectedPlugin?.name}
-          onOpenChange={(open) => {
-            if (!open) setSelectedPlugin(null);
-          }}
-          onPreviewSkill={(skillId) => {
-            const skill = selectedPlugin?.skills?.find((item) => item.id === skillId);
-            if (skill && canPreviewSkill(skill)) {
-              setSkillPreviewTarget({
-                catalogEntryId: skill.catalogEntryId ?? "",
-                skillId: skill.id,
-              });
-            }
-          }}
-          onServerEnabledChange={(shortName, enabled) => {
-            if (!selectedPlugin) return;
-            void (async () => {
-              setBusyPluginName(selectedPlugin.name);
-              try {
-                const next = enabled
-                  ? await runtimeClient.enablePluginServer(selectedPlugin.name, shortName)
-                  : await runtimeClient.disablePluginServer(selectedPlugin.name, shortName);
-                setSelectedPlugin(next);
-                setPlugins((current) => current.map((item) => (item.name === next.name ? next : item)));
-              } catch (error) {
-                setErrorMessage(error instanceof Error ? error.message : String(error));
-              } finally {
-                setBusyPluginName(null);
-              }
-            })();
-          }}
-          onUpgrade={() => {
-            if (!selectedPlugin) return;
-            void (async () => {
-              setBusyPluginName(selectedPlugin.name);
-              try {
-                const result = await runtimeClient.upgradePlugin(selectedPlugin.name);
-                setSelectedPlugin(result.plugin);
-                onNotice(result.message);
-                await refresh(false);
-              } catch (error) {
-                setErrorMessage(error instanceof Error ? error.message : String(error));
-              } finally {
-                setBusyPluginName(null);
-              }
-            })();
-          }}
-          onUninstall={() => {
-            if (!selectedPlugin) return;
-            if (!window.confirm(`卸载「${selectedPlugin.name}」会把插件包和数据目录移入回收站。确定继续？`)) {
-              return;
-            }
-            void (async () => {
-              setBusyPluginName(selectedPlugin.name);
-              try {
-                await runtimeClient.uninstallPlugin(selectedPlugin.name);
-                setSelectedPlugin(null);
-                onNotice("插件已移入回收站");
-                await refresh(false);
-              } catch (error) {
-                setErrorMessage(error instanceof Error ? error.message : String(error));
-              } finally {
-                setBusyPluginName(null);
-              }
-            })();
-          }}
-        />
-        <SkillPreviewDialog
-          target={skillPreviewTarget}
-          presentation={
-            selectedPlugin?.skills?.find((skill) => skill.id === skillPreviewTarget?.skillId)
-              ? {
-                  name: selectedPlugin.skills.find((skill) => skill.id === skillPreviewTarget?.skillId)?.name ?? "",
-                  sourceLabel: "插件",
-                  description: selectedPlugin.skills.find((skill) => skill.id === skillPreviewTarget?.skillId)?.description ?? "",
-                  enabled: true,
-                  toggleDisabled: true,
-                  deletable: false,
-                }
-              : null
-          }
-          runtimeClient={runtimeClient}
-          onOpenChange={(open) => {
-            if (!open) setSkillPreviewTarget(null);
-          }}
         />
       </>
     );
@@ -2209,6 +2262,8 @@ export function ExtensionsView({
               onClick={() => {
                 setSkillInstallScope("project");
                 setSkillInstallProjectRoot(skillProjectRoot);
+                setSkillFile(null);
+                setSkillSourcePath("");
                 setSkillDialogOpen(true);
               }}
             >
@@ -2254,7 +2309,9 @@ export function ExtensionsView({
                     visibleAwakenSkills.map((skill) => renderSkillCard(skill))
                   ) : (
                     <div className="extension-empty">
-                      内置 Skills 未就绪，重启 Awaken 后重试
+                      {normalizedQuery
+                        ? "未找到匹配的 Skill"
+                        : "内置 Skills 未就绪，重启 Awaken 后重试"}
                     </div>
                   )}
                 </div>
@@ -2266,7 +2323,9 @@ export function ExtensionsView({
                     {visibleProjectSkillGroups.map(renderProjectSkillFolder)}
                   </div>
                 ) : (
-                  <div className="extension-empty">暂无项目 Skills</div>
+                  <div className="extension-empty">
+                    {normalizedQuery ? "未找到匹配的 Skill" : "暂无项目 Skills"}
+                  </div>
                 )}
               </section>
             ) : activeSkillView === "agents" ? (
@@ -2277,7 +2336,9 @@ export function ExtensionsView({
                       renderSkillCard(skill, projectRoot),
                     )
                   ) : (
-                    <div className="extension-empty">暂无 Agents Skills</div>
+                    <div className="extension-empty">
+                      {normalizedQuery ? "未找到匹配的 Skill" : "暂无 Agents Skills"}
+                    </div>
                   )}
                 </div>
               </section>
@@ -2288,7 +2349,9 @@ export function ExtensionsView({
                     {visibleUserSkills.length > 0 ? (
                       visibleUserSkills.map((skill) => renderSkillCard(skill))
                     ) : (
-                      <div className="extension-empty">暂无全局 Skills</div>
+                      <div className="extension-empty">
+                        {normalizedQuery ? "未找到匹配的 Skill" : "暂无全局 Skills"}
+                      </div>
                     )}
                   </div>
                 </section>
@@ -2516,6 +2579,8 @@ export function ExtensionsView({
         onOpenChange={(open) => {
           setSkillDialogOpen(open);
           if (!open) {
+            skillPackageRoutingGenerationRef.current += 1;
+            setClassifyingSkillPackage(false);
             setSkillDragActive(false);
           }
         }}
@@ -2533,7 +2598,7 @@ export function ExtensionsView({
               variant="primary"
               size="md"
               loading={installingSkill}
-              disabled={!skillFile}
+              disabled={(!skillFile && !skillSourcePath) || classifyingSkillPackage}
               onClick={() => {
                 void handleInstallSkill();
               }}
@@ -2601,16 +2666,22 @@ export function ExtensionsView({
             onDrop={(event) => {
               event.preventDefault();
               setSkillDragActive(false);
-              setSkillFile(event.dataTransfer.files.item(0));
+              void handleSkillFileSelected(event.dataTransfer.files.item(0));
             }}
           >
             <input
               type="file"
               accept=".md,.zip"
-              onChange={(event) => setSkillFile(event.target.files?.item(0) ?? null)}
+              onChange={(event) => {
+                void handleSkillFileSelected(event.target.files?.item(0) ?? null);
+              }}
             />
             <AwakenIcon concept="import" size={24} />
-            <strong>{skillFile ? skillFile.name : "拖放或点击上传"}</strong>
+            <strong>
+              {classifyingSkillPackage
+                ? "正在识别安装包…"
+                : skillFile?.name || fileNameFromLocalPath(skillSourcePath) || "拖放或点击上传"}
+            </strong>
           </label>
           <p>支持 SKILL.md 文件，或包含 SKILL.md 的 skill 文件夹 zip。</p>
           <p className="extension-dialog-note">

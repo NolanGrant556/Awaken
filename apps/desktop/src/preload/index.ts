@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron";
 import type { AguiEvent } from "../shared/agui.js";
 import { DESKTOP_SELECT_ALL_REQUESTED_CHANNEL } from "../shared/desktop-selection.js";
 import {
@@ -25,6 +25,7 @@ import {
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
+  type CommitPluginRequest,
   type CliActivation,
   type CliConnectorStateEvent,
   type CliConnectorView,
@@ -97,6 +98,14 @@ import {
   type ProjectReorderResult,
   type RuntimeProjectOperation,
   type RuntimePlugin,
+  type RuntimePluginComponentDetail,
+  type RuntimePluginComponentKind,
+  type RuntimePluginComponentSourceResponse,
+  type RuntimePluginComponentState,
+  type RuntimePluginComponentStateResponse,
+  type RuntimePluginHookReceipt,
+  type RuntimePluginHookReceiptResponse,
+  type RuntimePluginConfigurationResponse,
   type RuntimePluginSource,
   type RuntimePluginValidation,
   type RuntimeSkill,
@@ -118,6 +127,8 @@ import {
   type ThreadBatchDeleteResult,
   type ThreadModelPreferenceRequest,
   type UpdateMcpServerConfigRequest,
+  type UpdatePluginConfigurationRequest,
+  type UpdatePluginComponentSourceRequest,
   type ProjectFoldersPickResult,
   type UpsertProjectResult,
   type WorkspacePickResult,
@@ -466,11 +477,13 @@ const bridge: AwakenBridge = {
     runId: string,
     interactionId: string,
     resolution: "completed" | "cancelled" | "expired" | "failed",
+    content?: Record<string, unknown>,
   ) =>
     ipcRenderer.invoke("awaken:resolve-external-interaction", {
       runId,
       interactionId,
       resolution,
+      content,
     }) as Promise<void>,
   resolveACPPermission: (
     runId: string,
@@ -618,12 +631,12 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:validate-plugin", source) as Promise<RuntimePluginValidation>,
   installPlugin: (request: InstallPluginRequest) =>
     ipcRenderer.invoke("awaken:install-plugin", request) as Promise<InstallPluginResponse>,
+  commitPlugin: (name: string, request: CommitPluginRequest) =>
+    ipcRenderer.invoke("awaken:commit-plugin", name, request) as Promise<InstallPluginResponse>,
   enablePlugin: (name: string) =>
     ipcRenderer.invoke("awaken:enable-plugin", name) as Promise<RuntimePlugin>,
   disablePlugin: (name: string) =>
     ipcRenderer.invoke("awaken:disable-plugin", name) as Promise<RuntimePlugin>,
-  upgradePlugin: (name: string) =>
-    ipcRenderer.invoke("awaken:upgrade-plugin", name) as Promise<InstallPluginResponse>,
   uninstallPlugin: (name: string) =>
     ipcRenderer.invoke("awaken:uninstall-plugin", name) as Promise<{
       trashedPath?: string;
@@ -633,6 +646,93 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:enable-plugin-server", name, shortName) as Promise<RuntimePlugin>,
   disablePluginServer: (name: string, shortName: string) =>
     ipcRenderer.invoke("awaken:disable-plugin-server", name, shortName) as Promise<RuntimePlugin>,
+  listPluginComponents: (name: string) =>
+    ipcRenderer.invoke("awaken:list-plugin-components", name) as Promise<
+      RuntimePluginComponentState[]
+    >,
+  getPluginComponent: (
+    name: string,
+    kind: RuntimePluginComponentKind,
+    logicalIdEncoded: string,
+  ) =>
+    ipcRenderer.invoke(
+      "awaken:get-plugin-component",
+      name,
+      kind,
+      logicalIdEncoded,
+    ) as Promise<RuntimePluginComponentDetail>,
+  updatePluginComponentSource: (
+    name: string,
+    kind: RuntimePluginComponentKind,
+    logicalIdEncoded: string,
+    request: UpdatePluginComponentSourceRequest,
+  ) =>
+    ipcRenderer.invoke(
+      "awaken:update-plugin-component-source",
+      name,
+      kind,
+      logicalIdEncoded,
+      request,
+    ) as Promise<RuntimePluginComponentSourceResponse>,
+  setPluginComponentState: (
+    name: string,
+    kind: RuntimePluginComponentKind,
+    logicalIdEncoded: string,
+    enabled: boolean,
+  ) =>
+    ipcRenderer.invoke(
+      "awaken:set-plugin-component-state",
+      name,
+      kind,
+      logicalIdEncoded,
+      enabled,
+    ) as Promise<RuntimePluginComponentStateResponse>,
+  setPluginMcpToolState: (
+    name: string,
+    logicalIdEncoded: string,
+    toolName: string,
+    enabled: boolean,
+  ) =>
+    ipcRenderer.invoke(
+      "awaken:set-plugin-mcp-tool-state",
+      name,
+      logicalIdEncoded,
+      toolName,
+      enabled,
+    ) as Promise<RuntimePluginComponentStateResponse>,
+  setPluginRuleActivation: (
+    name: string,
+    logicalIdEncoded: string,
+    activation: "always" | "file_globs" | "manual" | "model_decides",
+  ) =>
+    ipcRenderer.invoke(
+      "awaken:set-plugin-rule-activation",
+      name,
+      logicalIdEncoded,
+      activation,
+    ) as Promise<{ plugin: RuntimePlugin; revision: number }>,
+  listPluginHookReceipts: (name: string, logicalIdEncoded: string, revisionId?: string) =>
+    ipcRenderer.invoke(
+      "awaken:list-plugin-hook-receipts",
+      name,
+      logicalIdEncoded,
+      revisionId,
+    ) as Promise<RuntimePluginHookReceiptResponse>,
+  retryPluginHookReceipt: (name: string, logicalIdEncoded: string, receiptId: string) =>
+    ipcRenderer.invoke(
+      "awaken:retry-plugin-hook-receipt",
+      name,
+      logicalIdEncoded,
+      receiptId,
+    ) as Promise<{ receipt: RuntimePluginHookReceipt; diagnosticOnly: true }>,
+  getPluginConfiguration: (name: string) =>
+    ipcRenderer.invoke("awaken:get-plugin-configuration", name) as Promise<
+      RuntimePluginConfigurationResponse
+    >,
+  updatePluginConfiguration: (name: string, request: UpdatePluginConfigurationRequest) =>
+    ipcRenderer.invoke("awaken:update-plugin-configuration", name, request) as Promise<
+      RuntimePluginConfigurationResponse
+    >,
   listModelProviders: () =>
     ipcRenderer.invoke("awaken:list-model-providers") as Promise<ModelProvider[]>,
   listModelProfiles: () =>
@@ -700,6 +800,11 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:pick-directory", defaultPath) as Promise<WorkspacePickResult>,
   pickPluginSource: (defaultPath?: string) =>
     ipcRenderer.invoke("awaken:pick-plugin-source", defaultPath) as Promise<WorkspacePickResult>,
+  resolveDroppedPluginSource: (file: File) =>
+    ipcRenderer.invoke(
+      "awaken:resolve-dropped-plugin-source",
+      webUtils.getPathForFile(file),
+    ) as Promise<WorkspacePickResult>,
   pickProjectFolders: (defaultPath?: string) =>
     ipcRenderer.invoke(
       "awaken:pick-project-folders",

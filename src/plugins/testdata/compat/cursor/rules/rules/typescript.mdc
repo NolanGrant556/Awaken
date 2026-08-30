@@ -1,0 +1,6 @@
+---
+description: TypeScript fixture rule.
+globs:
+  - "**/*.ts"
+---
+Apply for TypeScript files.

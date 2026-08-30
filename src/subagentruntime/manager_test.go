@@ -426,6 +426,37 @@ func TestManagerPersistsDeduplicatedToolAndTokenProgress(t *testing.T) {
 	}
 }
 
+func TestManagerPersistsProgressAfterProducerContextCancellation(t *testing.T) {
+	manager := NewManager(context.Background(), Config{
+		Starter: func(ctx context.Context, request StartRequest) (string, error) {
+			progressCtx, cancel := context.WithCancel(ctx)
+			cancel()
+			if err := request.ReportProgress(progressCtx, ProgressUpdate{
+				ModelRequestID: "request-cancelled", TotalTokens: 42, HasTotalTokens: true,
+			}); err != nil {
+				return "", err
+			}
+			return "done", nil
+		},
+		Persist: func(ctx context.Context, _ PersistEvent) error {
+			return ctx.Err()
+		},
+	})
+	task, err := manager.Spawn(context.Background(), SpawnRequest{
+		Description: "stats", Prompt: "stats", AgentType: "review", WorkspaceMode: "shared_readonly",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	result, err := manager.Wait(context.Background(), WaitRequest{TaskIDs: []string{task.TaskID}, Timeout: time.Second})
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+	if len(result.Tasks) != 1 || result.Tasks[0].Status != StatusCompleted || result.Tasks[0].TotalTokens != 42 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
 func TestManagerCancelQueuedTaskNeverStartsIt(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan string, 2)

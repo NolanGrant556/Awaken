@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -139,18 +140,27 @@ type ComposerToken struct {
 }
 
 type ComposerTokenPayload struct {
-	CapabilityID  string `json:"capabilityId,omitempty"`
-	SkillID       string `json:"skillId,omitempty"`
-	PluginName    string `json:"pluginName,omitempty"`
-	PluginDigest  string `json:"pluginDigest,omitempty"`
-	SourceOrigin  string `json:"sourceOrigin,omitempty"`
-	SkillFilePath string `json:"skillFilePath,omitempty"`
-	RootDir       string `json:"rootDir,omitempty"`
-	Path          string `json:"path,omitempty"`
-	EntryKind     string `json:"entryKind,omitempty"`
-	ProjectID     string `json:"projectId,omitempty"`
-	FolderPath    string `json:"folderPath,omitempty"`
-	RelativePath  string `json:"relativePath,omitempty"`
+	CapabilityID         string `json:"capabilityId,omitempty"`
+	SkillID              string `json:"skillId,omitempty"`
+	PluginName           string `json:"pluginName,omitempty"`
+	PluginDigest         string `json:"pluginDigest,omitempty"`
+	RuleLogicalID        string `json:"ruleLogicalId,omitempty"`
+	CommandLogicalID     string `json:"commandLogicalId,omitempty"`
+	CommandArgumentsJSON string `json:"commandArguments,omitempty"`
+	// CommandPrompt is populated only after the host has revalidated and
+	// expanded a digest-bound command. It is deliberately not persisted.
+	CommandPrompt  string `json:"-"`
+	AgentLogicalID string `json:"agentLogicalId,omitempty"`
+	AgentType      string `json:"-"`
+	AgentReadOnly  bool   `json:"-"`
+	SourceOrigin   string `json:"sourceOrigin,omitempty"`
+	SkillFilePath  string `json:"skillFilePath,omitempty"`
+	RootDir        string `json:"rootDir,omitempty"`
+	Path           string `json:"path,omitempty"`
+	EntryKind      string `json:"entryKind,omitempty"`
+	ProjectID      string `json:"projectId,omitempty"`
+	FolderPath     string `json:"folderPath,omitempty"`
+	RelativePath   string `json:"relativePath,omitempty"`
 }
 
 type ModelProfileConfig struct {
@@ -215,6 +225,14 @@ type RunService struct {
 	allowNoopRecorder       bool
 	skillActivator          *skillruntime.Activator
 	composerPluginValidator func(name, digest string) error
+	pluginRuleProvider      func(tokens []ComposerToken, workspace WorkspaceConfig) ([]instructions.ExtraSource, error)
+	pluginCommandExpander   func(name, digest, logicalID string, arguments []string) (string, error)
+	pluginHookProvider      func(workspace WorkspaceConfig) ([]hookruntime.CompiledHook, []hookruntime.SourceReceipt, []hookruntime.Diagnostic, error)
+	pluginMCPToolExecutor   hookruntime.MCPToolExecutor
+	pluginHookReceipts      *hookruntime.ReceiptStore
+	asyncHookCompletions    *hookruntime.AsyncCompletionStore
+	pluginAgentResolver     func(name, digest, logicalID string) (PluginAgentSelection, error)
+	pluginLeaseAcquire      func() (generation string, release func(), err error)
 	// computerDriverFactory creates a real Computer driver when local CUA is
 	// enabled. If nil or it returns an error, RunService falls back to the
 	// unavailable driver so run startup is not blocked.
@@ -271,6 +289,71 @@ func (s *RunService) SetComposerPluginValidator(validator func(name, digest stri
 	}
 	s.mu.Lock()
 	s.composerPluginValidator = validator
+	s.mu.Unlock()
+}
+
+// SetPluginRuleProvider installs the host assembler that projects enabled
+// Plugin Rules into src/instructions. The instruction Loader remains the only
+// owner of priority, budget, digest and per-run freeze semantics.
+func (s *RunService) SetPluginRuleProvider(provider func(tokens []ComposerToken, workspace WorkspaceConfig) ([]instructions.ExtraSource, error)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.pluginRuleProvider = provider
+	s.mu.Unlock()
+}
+
+// SetPluginCommandExpander installs the host-owned command resolver. The
+// resolver revalidates package digest and component state at every run start;
+// Renderer-provided prompt text is never trusted.
+func (s *RunService) SetPluginCommandExpander(expander func(name, digest, logicalID string, arguments []string) (string, error)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.pluginCommandExpander = expander
+	s.mu.Unlock()
+}
+
+func (s *RunService) SetPluginHookProvider(provider func(workspace WorkspaceConfig) ([]hookruntime.CompiledHook, []hookruntime.SourceReceipt, []hookruntime.Diagnostic, error)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.pluginHookProvider = provider
+	s.mu.Unlock()
+}
+
+func (s *RunService) SetPluginMCPToolExecutor(executor hookruntime.MCPToolExecutor) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.pluginMCPToolExecutor = executor
+	s.mu.Unlock()
+}
+
+type PluginAgentSelection struct {
+	AgentType string
+	ReadOnly  bool
+}
+
+func (s *RunService) SetPluginAgentResolver(resolver func(name, digest, logicalID string) (PluginAgentSelection, error)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.pluginAgentResolver = resolver
+	s.mu.Unlock()
+}
+
+func (s *RunService) SetPluginRuntimeLeaseProvider(acquire func() (generation string, release func(), err error)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.pluginLeaseAcquire = acquire
 	s.mu.Unlock()
 }
 
@@ -505,6 +588,8 @@ func NewRunService(
 		computerLeaseManager: computer.NewLeaseManager(),
 		instructionLoader:    instructions.NewLoader(""),
 		globalInstructions:   instructions.NewGlobalDocumentStore(""),
+		pluginHookReceipts:   hookruntime.NewReceiptStore(),
+		asyncHookCompletions: hookruntime.NewAsyncCompletionStore(),
 	}
 	// Project lifecycle is available whenever the thread store also satisfies
 	// the domain repository contract; no concrete storage type checks.
@@ -586,11 +671,98 @@ func hookProjectRoots(workspace WorkspaceConfig) []string {
 func (s *RunService) buildHookSnapshot(workspace WorkspaceConfig) (hookruntime.AvailabilitySnapshot, error) {
 	s.mu.RLock()
 	store := s.hookStore
+	pluginHookProvider := s.pluginHookProvider
+	mcpToolExecutor := s.pluginMCPToolExecutor
 	s.mu.RUnlock()
+	var snapshot hookruntime.AvailabilitySnapshot
+	var err error
 	if store == nil {
-		return hookruntime.EmptySnapshot(), nil
+		snapshot = hookruntime.EmptySnapshot()
+	} else {
+		snapshot, err = store.BuildSnapshot(scopeProjectID(workspace), hookProjectRoots(workspace), workspace.SessionWorkspace)
+		if err != nil {
+			return snapshot, err
+		}
 	}
-	return store.BuildSnapshot(scopeProjectID(workspace), hookProjectRoots(workspace), workspace.SessionWorkspace)
+	if pluginHookProvider != nil {
+		hooks, sources, diagnostics, providerErr := pluginHookProvider(workspace)
+		if providerErr != nil {
+			return snapshot, providerErr
+		}
+		snapshot.Diagnostics = append(snapshot.Diagnostics, diagnostics...)
+		snapshot, err = hookruntime.MergePluginHooks(snapshot, hooks, sources)
+		if err != nil {
+			return snapshot, err
+		}
+	}
+	snapshot.MCPToolExecutor = mcpToolExecutor
+	snapshot.ReceiptSink = s.pluginHookReceipts
+	return snapshot, nil
+}
+
+func (s *RunService) PluginHookReceipts(pluginName, logicalID, revisionID string, offset, limit int) ([]hookruntime.Receipt, int) {
+	if s == nil || s.pluginHookReceipts == nil {
+		return nil, 0
+	}
+	return s.pluginHookReceipts.List(strings.TrimSpace(pluginName), strings.TrimSpace(logicalID), strings.TrimSpace(revisionID), offset, limit)
+}
+
+type diagnosticHookRecorder struct{}
+
+func (diagnosticHookRecorder) InvocationStarted(context.Context, hookruntime.InputEnvelope, hookruntime.CompiledHook) error {
+	return nil
+}
+
+func (diagnosticHookRecorder) InvocationCompleted(context.Context, hookruntime.Outcome) error {
+	return nil
+}
+
+func (s *RunService) RetryPluginHook(ctx context.Context, pluginName, logicalID, receiptID string) (hookruntime.Receipt, error) {
+	if s == nil || s.pluginHookReceipts == nil {
+		return hookruntime.Receipt{}, errors.New("Plugin Hook receipts are unavailable")
+	}
+	original, ok := s.pluginHookReceipts.Get(strings.TrimSpace(receiptID))
+	if !ok || original.PluginName != strings.TrimSpace(pluginName) || original.LogicalID != strings.TrimSpace(logicalID) {
+		return hookruntime.Receipt{}, errors.New("Plugin Hook receipt was not found")
+	}
+	if original.Status != "failed" && original.Status != "timed_out" && original.Status != "cancelled" {
+		return hookruntime.Receipt{}, errors.New("only failed Plugin Hook diagnostics can be retried")
+	}
+	s.mu.RLock()
+	provider := s.pluginHookProvider
+	executor := s.pluginMCPToolExecutor
+	workspace := s.defaultWorkspace
+	s.mu.RUnlock()
+	if provider == nil {
+		return hookruntime.Receipt{}, errors.New("Plugin Hook provider is unavailable")
+	}
+	hooks, _, _, err := provider(workspace)
+	if err != nil {
+		return hookruntime.Receipt{}, err
+	}
+	var selected *hookruntime.CompiledHook
+	for index := range hooks {
+		if hooks[index].PluginName == original.PluginName && hooks[index].LogicalID == original.LogicalID && hooks[index].RevisionID == original.RevisionID {
+			selected = &hooks[index]
+			break
+		}
+	}
+	if selected == nil {
+		return hookruntime.Receipt{}, errors.New("Plugin Hook revision is no longer installed")
+	}
+	dispatcher := hookruntime.NewDispatcher(hookruntime.EmptySnapshot(), os.Getenv("PATH"))
+	dispatcher.SetMCPToolExecutor(executor)
+	dispatcher.SetReceiptSink(s.pluginHookReceipts)
+	outcome, err := dispatcher.DispatchDiagnostic(ctx, *selected, hookruntime.InvocationIdentity{ThreadID: "diagnostic", RunID: "diagnostic", ProjectID: scopeProjectID(workspace), WorkspaceRoot: workspace.WorkspaceRoot, WorkspaceRoots: hookProjectRoots(workspace)}, diagnosticHookRecorder{})
+	if err != nil {
+		return hookruntime.Receipt{}, err
+	}
+	s.pluginHookReceipts.LinkRetry(outcome.InvocationID, original.ID)
+	receipt, ok := s.pluginHookReceipts.Get(outcome.InvocationID)
+	if !ok {
+		return hookruntime.Receipt{}, errors.New("Plugin Hook retry receipt was not recorded")
+	}
+	return receipt, nil
 }
 
 func (s *RunService) HookStatus(projectID string) (hookruntime.AvailabilitySnapshot, error) {
@@ -962,7 +1134,23 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if err != nil {
 		return Run{}, err
 	}
-	instructionSnapshot := s.instructionLoader.Load(workspace.WorkspaceRoot, workspace.SessionWorkspace)
+	s.mu.RLock()
+	pluginLeaseAcquire := s.pluginLeaseAcquire
+	s.mu.RUnlock()
+	pluginGeneration := ""
+	pluginLeaseRelease := func() {}
+	pluginLeaseTransferred := false
+	if pluginLeaseAcquire != nil {
+		pluginGeneration, pluginLeaseRelease, err = pluginLeaseAcquire()
+		if err != nil {
+			return Run{}, fmt.Errorf("acquire Plugin runtime generation: %w", err)
+		}
+	}
+	defer func() {
+		if !pluginLeaseTransferred {
+			pluginLeaseRelease()
+		}
+	}()
 	hookSnapshot, err := s.buildHookSnapshot(workspace)
 	if err != nil {
 		return Run{}, fmt.Errorf("build hook snapshot: %w", err)
@@ -975,10 +1163,29 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	}
 	s.mu.RLock()
 	composerPluginValidator := s.composerPluginValidator
+	pluginRuleProvider := s.pluginRuleProvider
+	pluginCommandExpander := s.pluginCommandExpander
+	pluginAgentResolver := s.pluginAgentResolver
 	s.mu.RUnlock()
 	if err := validateComposerPluginTokens(req.ComposerTokens, composerPluginValidator); err != nil {
 		return Run{}, err
 	}
+	var pluginRuleSources []instructions.ExtraSource
+	if pluginRuleProvider != nil {
+		pluginRuleSources, err = pluginRuleProvider(req.ComposerTokens, workspace)
+		if err != nil {
+			return Run{}, err
+		}
+	}
+	resolvedComposerTokens, err := resolvePluginCommandTokens(req.ComposerTokens, pluginCommandExpander)
+	if err != nil {
+		return Run{}, err
+	}
+	resolvedComposerTokens, err = resolvePluginAgentTokens(resolvedComposerTokens, pluginAgentResolver)
+	if err != nil {
+		return Run{}, err
+	}
+	instructionSnapshot := s.instructionLoader.LoadWithExtraSources(workspace.WorkspaceRoot, workspace.SessionWorkspace, pluginRuleSources)
 	s.projectMutationMu.RLock()
 	defer s.projectMutationMu.RUnlock()
 	if s.projectService != nil {
@@ -1033,11 +1240,14 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		return Run{}, err
 	}
 	workspace = mergeTaskScopeAttachments(workspace, persistedAttachments)
-	effectiveInput := effectiveInputForComposerTokens(trimmed, req.ComposerTokens)
+	effectiveInput := effectiveInputForComposerTokens(trimmed, resolvedComposerTokens)
 	effectiveInput = effectiveInputForMediaArtifactReferences(effectiveInput, mediaArtifactReferences)
 	threadLabel := threadLabelForInputAndTokens(trimmed, persistedAttachments, req.ComposerTokens)
 	ctx, cancel := context.WithCancel(context.Background())
 	session := NewSession(runID, threadID, trimmed, persistedAttachments, req.ComposerTokens, cancel)
+	session.SetPluginRuntimeLease(pluginGeneration, pluginLeaseRelease)
+	hookSnapshot.AsyncSink = s.asyncHookCompletions
+	hookSnapshot.AsyncLifecycle = session
 	session.SetHookSnapshotID(hookSnapshot.SnapshotID)
 	session.SetInstructionSnapshot(instructionSnapshot.SafeSummary())
 	if req.ModelProfile != nil {
@@ -1157,6 +1367,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				defer s.runWG.Done()
 				s.executeWithMediaArtifactReferences(session, executor, agent, effectiveInput, trimmed, persistedAttachments, mediaArtifactReferences, ctx)
 			}()
+			pluginLeaseTransferred = true
 			return session.Snapshot(), nil
 		}
 		previousThread = cloneThread(thread)
@@ -1326,6 +1537,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		defer s.runWG.Done()
 		s.executeWithMediaArtifactReferences(session, executor, agent, effectiveInput, trimmed, persistedAttachments, mediaArtifactReferences, ctx)
 	}()
+	pluginLeaseTransferred = true
 
 	return session.Snapshot(), nil
 }
@@ -2396,6 +2608,22 @@ func (s *RunService) ListSubagents(runID string) ([]subagentruntime.TaskSnapshot
 	return controller.List(), nil
 }
 
+func (s *RunService) SpawnSubagent(ctx context.Context, runID string, request subagentruntime.SpawnRequest) (subagentruntime.TaskSnapshot, error) {
+	session, err := s.session(runID)
+	if err != nil {
+		return subagentruntime.TaskSnapshot{}, err
+	}
+	controller := session.SubagentController()
+	manager, ok := controller.(*subagentruntime.Manager)
+	if !ok || manager == nil {
+		return subagentruntime.TaskSnapshot{}, &subagentruntime.Error{Code: subagentruntime.ErrorRuntimeUnavailable, Message: "subagent runtime is unavailable"}
+	}
+	run := session.Snapshot()
+	request.ParentAgentID = "root"
+	request.ThreadID, request.RunID = run.ThreadID, run.RunID
+	return manager.Spawn(ctx, request)
+}
+
 func (s *RunService) GetSubagent(runID, taskID string) (subagentruntime.TaskSnapshot, error) {
 	session, err := s.session(runID)
 	if err != nil {
@@ -2456,13 +2684,27 @@ func (s *RunService) CancelUserQuestion(runID, questionID string) error {
 }
 
 func (s *RunService) ResolveExternalInteraction(runID, interactionID string, resolution agentcore.ExternalInteractionResolution) error {
+	return s.ResolveExternalInteractionWithContent(runID, interactionID, resolution, nil)
+}
+
+func (s *RunService) ResolveExternalInteractionWithContent(runID, interactionID string, resolution agentcore.ExternalInteractionResolution, content map[string]any) error {
 	s.mu.RLock()
 	session, ok := s.sessions[runID]
 	s.mu.RUnlock()
 	if !ok {
 		return ErrRunNotFound
 	}
-	return session.ResolveExternalInteraction(interactionID, resolution)
+	return session.ResolveExternalInteractionWithContent(interactionID, resolution, content)
+}
+
+func (s *RunService) AwaitExternalInteractionForm(ctx context.Context, runID string, request agentcore.AwakenEvent) (agentcore.ExternalInteractionAnswer, error) {
+	s.mu.RLock()
+	session, ok := s.sessions[runID]
+	s.mu.RUnlock()
+	if !ok {
+		return agentcore.ExternalInteractionAnswer{}, ErrRunNotFound
+	}
+	return session.AwaitExternalInteractionForm(ctx, request)
 }
 
 func partialAssistantResult(agent *agentcore.Agent) string {
@@ -2484,6 +2726,7 @@ func (s *RunService) execute(session *Session, executor Executor, agent *agentco
 }
 
 func (s *RunService) executeWithMediaArtifactReferences(session *Session, executor Executor, agent *agentcore.Agent, input string, displayInput string, attachments []RunInputAttachment, mediaArtifactReferences []tool.ScopedMediaArtifact, ctx context.Context) {
+	defer session.ReleasePluginRuntimeLease()
 	snapshot := session.Snapshot()
 	baselineSkillConfig, hasBaselineSkillConfig := snapshotAgentSkillConfig(agent)
 	var baselineMediaArtifactReferences []tool.ScopedMediaArtifact
@@ -2922,8 +3165,75 @@ func composerTokenModelExpansion(token ComposerToken) (string, bool) {
 		if name := strings.TrimSpace(token.Payload.PluginName); name != "" {
 			return pluginComposerInstruction(name) + "\n", true
 		}
+	case "command":
+		if prompt := strings.TrimSpace(token.Payload.CommandPrompt); prompt != "" {
+			return prompt, true
+		}
+	case "agent":
+		if agentType := strings.TrimSpace(token.Payload.AgentType); agentType != "" {
+			workspaceMode := "shared"
+			if token.Payload.AgentReadOnly {
+				workspaceMode = "shared_readonly"
+			}
+			return fmt.Sprintf("Use the native Subagent runtime with agent_type %q and workspace_mode %q for the following delegated work. After spawning it, wait for that child to reach a terminal state and use its result before answering; do not finish the root run while the child is still active:", agentType, workspaceMode), true
+		}
 	}
 	return "", false
+}
+
+func resolvePluginAgentTokens(tokens []ComposerToken, resolver func(name, digest, logicalID string) (PluginAgentSelection, error)) ([]ComposerToken, error) {
+	resolved := cloneComposerTokens(tokens)
+	for index := range resolved {
+		token := &resolved[index]
+		if !strings.EqualFold(strings.TrimSpace(token.Type), "agent") {
+			continue
+		}
+		name, digest, logicalID := strings.TrimSpace(token.Payload.PluginName), strings.TrimSpace(token.Payload.PluginDigest), strings.TrimSpace(token.Payload.AgentLogicalID)
+		if name == "" || digest == "" || logicalID == "" || resolver == nil {
+			return nil, fmt.Errorf("%w: composer Plugin Agent token %q identity is incomplete", ErrInvalidInput, token.ID)
+		}
+		selection, err := resolver(name, digest, logicalID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: composer Plugin Agent %q is unavailable: %v", ErrInvalidInput, logicalID, err)
+		}
+		if strings.TrimSpace(selection.AgentType) == "" {
+			return nil, fmt.Errorf("%w: composer Plugin Agent %q resolved without an agent type", ErrInvalidInput, logicalID)
+		}
+		token.Payload.AgentType = selection.AgentType
+		token.Payload.AgentReadOnly = selection.ReadOnly
+	}
+	return resolved, nil
+}
+
+func resolvePluginCommandTokens(tokens []ComposerToken, expander func(name, digest, logicalID string, arguments []string) (string, error)) ([]ComposerToken, error) {
+	resolved := cloneComposerTokens(tokens)
+	for index := range resolved {
+		token := &resolved[index]
+		if !strings.EqualFold(strings.TrimSpace(token.Type), "command") {
+			continue
+		}
+		name := strings.TrimSpace(token.Payload.PluginName)
+		digest := strings.TrimSpace(token.Payload.PluginDigest)
+		logicalID := strings.TrimSpace(token.Payload.CommandLogicalID)
+		if name == "" || digest == "" || logicalID == "" {
+			return nil, fmt.Errorf("%w: composer Plugin Command token %q identity is incomplete", ErrInvalidInput, token.ID)
+		}
+		if expander == nil {
+			return nil, fmt.Errorf("%w: composer Plugin Command expansion is unavailable", ErrInvalidInput)
+		}
+		var arguments []string
+		if encoded := strings.TrimSpace(token.Payload.CommandArgumentsJSON); encoded != "" {
+			if err := json.Unmarshal([]byte(encoded), &arguments); err != nil {
+				return nil, fmt.Errorf("%w: composer Plugin Command token %q arguments are invalid", ErrInvalidInput, token.ID)
+			}
+		}
+		prompt, err := expander(name, digest, logicalID, arguments)
+		if err != nil {
+			return nil, fmt.Errorf("%w: composer Plugin Command %q is unavailable: %v", ErrInvalidInput, logicalID, err)
+		}
+		token.Payload.CommandPrompt = prompt
+	}
+	return resolved, nil
 }
 
 func effectiveInputForComposerTokens(input string, tokens []ComposerToken) string {
@@ -2939,7 +3249,9 @@ func effectiveInputForComposerTokens(input string, tokens []ComposerToken) strin
 		}
 		hasModelExpansion = true
 		if strings.EqualFold(strings.TrimSpace(token.Type), "capability") ||
-			strings.EqualFold(strings.TrimSpace(token.Type), "plugin") {
+			strings.EqualFold(strings.TrimSpace(token.Type), "plugin") ||
+			strings.EqualFold(strings.TrimSpace(token.Type), "command") ||
+			strings.EqualFold(strings.TrimSpace(token.Type), "agent") {
 			fallbackInstructions = append(fallbackInstructions, strings.TrimSpace(expansion))
 		} else {
 			fallbackReferences = append(fallbackReferences, strings.TrimSpace(expansion))
@@ -3391,6 +3703,13 @@ func (s sessionEventSink) AwaitExternalInteraction(ctx context.Context, request 
 		return "", ErrRunNotFound
 	}
 	return s.session.AwaitExternalInteraction(ctx, request)
+}
+
+func (s sessionEventSink) AwaitExternalInteractionForm(ctx context.Context, request agentcore.AwakenEvent) (agentcore.ExternalInteractionAnswer, error) {
+	if s.session == nil {
+		return agentcore.ExternalInteractionAnswer{}, ErrRunNotFound
+	}
+	return s.session.AwaitExternalInteractionForm(ctx, request)
 }
 
 // scopeProjectID prefers the project identity the caller supplied. Deriving it

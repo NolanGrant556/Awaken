@@ -348,12 +348,14 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ToolCallID = event.ToolCallID
 		base.ToolCallName = event.ToolName
 		base.InteractionID = event.InteractionID
+		base.InteractionKind = event.InteractionKind
 		base.InteractionTitle = event.InteractionTitle
 		base.InteractionSafeMessage = event.InteractionSafeMessage
 		base.InteractionVerificationURL = event.InteractionVerificationURL
 		base.InteractionQRImageURL = event.InteractionQRImageURL
 		base.InteractionProvider = event.InteractionProvider
 		base.InteractionRecoveries = append([]string(nil), event.InteractionRecoveries...)
+		base.InteractionFormSchema = event.InteractionFormSchema
 		base.AuthProvider = event.AuthProvider
 		base.AuthURL = event.AuthURL
 		return []Event{base}
@@ -362,6 +364,7 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		base.ToolCallID = event.ToolCallID
 		base.ToolCallName = event.ToolName
 		base.InteractionID = event.InteractionID
+		base.InteractionKind = event.InteractionKind
 		base.InteractionResolution = event.InteractionResolution
 		base.InteractionProvider = event.InteractionProvider
 		return []Event{base}

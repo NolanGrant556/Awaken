@@ -3586,6 +3586,39 @@ describe("runtime reducer ACP permission gate", () => {
   });
 });
 
+describe("runtime reducer MCP elicitation gate", () => {
+  it("preserves the validated flat form schema", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "call plugin MCP" },
+      { type: "run/created", run: makeRun() },
+      runEvent({
+        type: "AWAKEN_EXTERNAL_INTERACTION_REQUESTED",
+        runId: "run-1",
+        interactionId: "mcp-elicit-1",
+        interactionKind: "mcp-elicitation",
+        interactionTitle: "MCP 请求确认",
+        interactionSafeMessage: "Choose a destination",
+        interactionProvider: "plugin__demo__server",
+        interactionRecoveries: ["submit_form", "cancel"],
+        interactionFormSchema: {
+          type: "object",
+          properties: { targetPath: { type: "string", default: ".env.local" } },
+          required: ["targetPath"],
+        },
+      }),
+    ]);
+
+    expect(state.externalInteractions[0]).toMatchObject({
+      id: "mcp-elicit-1",
+      kind: "mcp-elicitation",
+      provider: "plugin__demo__server",
+      formSchema: {
+        properties: { targetPath: { default: ".env.local" } },
+      },
+    });
+  });
+});
+
 describe("runtime reducer run plan snapshots", () => {
   const planItemsV1 = [
     { step: "调查现状", activeForm: "正在调查现状", status: "completed" },

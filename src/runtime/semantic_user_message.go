@@ -26,6 +26,18 @@ func semanticComposerTokensForRun(tokens []ComposerToken) []agentcore.SemanticCo
 		if value := strings.TrimSpace(token.Payload.PluginDigest); value != "" {
 			payload["pluginDigest"] = value
 		}
+		if value := strings.TrimSpace(token.Payload.RuleLogicalID); value != "" {
+			payload["ruleLogicalId"] = value
+		}
+		if value := strings.TrimSpace(token.Payload.CommandLogicalID); value != "" {
+			payload["commandLogicalId"] = value
+		}
+		if value := strings.TrimSpace(token.Payload.AgentLogicalID); value != "" {
+			payload["agentLogicalId"] = value
+		}
+		if value := strings.TrimSpace(token.Payload.CommandArgumentsJSON); value != "" {
+			payload["commandArguments"] = value
+		}
 		if value := strings.TrimSpace(token.Payload.SourceOrigin); value != "" {
 			payload["sourceOrigin"] = value
 		}

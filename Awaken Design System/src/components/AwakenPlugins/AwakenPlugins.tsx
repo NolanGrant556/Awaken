@@ -41,8 +41,8 @@ export function AwakenPlugins({
     ? plugins.filter(
         (plugin) =>
           normalizedIncludes(plugin.name, query) ||
-          normalizedIncludes(plugin.version, query) ||
           normalizedIncludes(plugin.description, query) ||
+          normalizedIncludes(plugin.dialect, query) ||
           normalizedIncludes(plugin.diagnostic, query),
       )
     : plugins;
@@ -55,7 +55,7 @@ export function AwakenPlugins({
           <div className="aw-plugins__heading">
             <h1>插件</h1>
             <p>
-              安装符合 Agent Plugins 1.0.0 的第三方插件包，统一管理其中的 Skills 与 MCP servers。
+              安装和管理 Agent Plugins、Codex、Claude Code 与 Cursor 插件包中的真实组件。
             </p>
           </div>
           <div className="aw-plugins__header-actions">
@@ -131,7 +131,7 @@ export function AwakenPlugins({
                     ? "正在读取已安装的插件列表…"
                     : hasSearchResultGap
                       ? "尝试使用插件名称、版本或描述中的其他关键词。"
-                      : "从本地目录、zip 文件或 HTTPS URL 安装你信任的插件。"}
+                      : "从本地 ZIP 包安装你信任的插件。"}
                 </p>
               </div>
               {!loading && !hasSearchResultGap ? (

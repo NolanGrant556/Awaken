@@ -16,11 +16,8 @@ import (
 const ToolName = "plugin"
 
 type sourceInput struct {
-	Kind    string `json:"kind"`
-	Path    string `json:"path,omitempty"`
-	URL     string `json:"url,omitempty"`
-	Ref     string `json:"ref,omitempty"`
-	Subpath string `json:"subpath,omitempty"`
+	Kind string `json:"kind"`
+	Path string `json:"path,omitempty"`
 }
 
 type input struct {
@@ -78,11 +75,8 @@ func (t *Tool) InputSchema() tool.ToolParametersSchema {
 			"expected_digest": {Type: "string", Description: "Recorded installed-package digest observed before an authorized in-place edit; required for commit compare-and-swap."},
 			"destination":     {Type: "string", Description: "Previously absent authoring directory for export; relative paths resolve from the task workspace."},
 			"source": {Type: "object", AdditionalProperties: &closed, Required: []string{"kind"}, Properties: map[string]tool.ToolParam{
-				"kind":    {Type: "string", Enum: []any{"local_path", "remote_url", "remote_git"}, Description: "Package source adapter."},
-				"path":    {Type: "string", Description: "Local plugin directory or zip path."},
-				"url":     {Type: "string", Description: "HTTPS zip URL or HTTPS Git repository URL without inline credentials."},
-				"ref":     {Type: "string", Description: "Optional safe Git ref."},
-				"subpath": {Type: "string", Description: "Optional safe relative plugin subdirectory inside the Git repository."},
+				"kind": {Type: "string", Enum: []any{"local_path"}, Description: "Local package source adapter."},
+				"path": {Type: "string", Description: "Local plugin directory or zip path."},
 			}, Description: "Source to validate or install."},
 			"replace": {Type: "boolean", Description: "Replace the same-name installed package after validation, moving the previous package to operating-system Trash. Defaults to false."},
 		},
@@ -357,8 +351,7 @@ func toSource(source *sourceInput) plugins.Source {
 		return plugins.Source{}
 	}
 	return plugins.Source{
-		Kind: plugins.SourceKind(source.Kind), Path: strings.TrimSpace(source.Path), URL: strings.TrimSpace(source.URL),
-		Ref: strings.TrimSpace(source.Ref), Subpath: strings.TrimSpace(source.Subpath),
+		Kind: plugins.SourceKind(source.Kind), Path: strings.TrimSpace(source.Path),
 	}
 }
 

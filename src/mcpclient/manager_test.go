@@ -179,6 +179,34 @@ func TestManagerStateMachineConnected(t *testing.T) {
 	}
 }
 
+func TestManagerDisabledToolsStayVisibleButAreNotRegistered(t *testing.T) {
+	fakeReg := newFakeRegistry()
+	restoreHooks := setToolRegistryHooksForTest(fakeReg.register, fakeReg.unregisterByServer)
+	defer restoreHooks()
+	registry := NewInProcRegistry()
+	if err := registry.Register("echo-filtered", echoServerWithTools("alpha", "beta")); err != nil {
+		t.Fatal(err)
+	}
+	mgr := NewManager(WithInProcRegistry(registry), WithLogger(noopLogger{}))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	mgr.Start(ctx, []ScopedMcpServerConfig{{Name: "filtered", Scope: ScopePlugin, Config: McpServerConfig{
+		InProc: &InProcTransportConfig{ServerName: "echo-filtered"}, DisabledTools: []string{"beta"},
+	}}})
+	defer mgr.Shutdown(context.Background())
+	if err := waitForState(mgr, "filtered", StateConnected, 3*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	names := fakeReg.names()
+	if !slices.Contains(names, McpToolName("filtered", "alpha")) || slices.Contains(names, McpToolName("filtered", "beta")) {
+		t.Fatalf("registered tools=%v", names)
+	}
+	tools, err := mgr.ServerTools("filtered")
+	if err != nil || len(tools) != 2 || tools[0].Name != "alpha" || !tools[0].Enabled || tools[1].Name != "beta" || tools[1].Enabled {
+		t.Fatalf("management tools=%#v err=%v", tools, err)
+	}
+}
+
 // TestManagerStateMachineFailed verifies a server with no factory resolves
 // to failed state rather than hanging.
 func TestManagerStateMachineFailed(t *testing.T) {

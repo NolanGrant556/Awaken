@@ -195,6 +195,9 @@ func (m *Manager) lookupAuthFetcher(serverName string) auth.AuthorizationCodeFet
 // server config. For stdio and in-proc transports there is none; the
 // caller is expected to not invoke StartAuth on those.
 func serverAuthURL(cfg McpServerConfig) string {
+	if resource := strings.TrimSpace(cfg.OAuthResource); resource != "" {
+		return resource
+	}
 	if cfg.HTTP != nil {
 		return cfg.HTTP.URL
 	}

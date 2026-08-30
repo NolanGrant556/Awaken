@@ -29,7 +29,7 @@ func (s *Store) commitInstalledChanges(name, expectedRecordedDigest string, befo
 	}
 
 	var result CommitInstalledChangesResult
-	err := s.withLock(func() error {
+	err := s.withMutationLock(func() error {
 		state, err := s.readStateUnlocked()
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
@@ -78,6 +78,12 @@ func (s *Store) commitInstalledChanges(name, expectedRecordedDigest string, befo
 		validation, err := s.validatePackageTree(snapshotRoot, dataDir, rec)
 		if err != nil {
 			return err
+		}
+		// Manifestless Claude packages derive identity from their materialized
+		// directory. The commit snapshot has a temporary directory name, while
+		// the durable installation identity remains the Store key.
+		if rec.ManifestPath == "" && rec.Dialect == "claude_code" {
+			validation.Name = name
 		}
 		if validation.Name != name {
 			return fmt.Errorf("%w: plugin.json name changed from %q to %q", ErrManifestInvalid, name, validation.Name)

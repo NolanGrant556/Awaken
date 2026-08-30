@@ -28,6 +28,18 @@ type failingRecorder struct {
 	batches        [][]SemanticKind
 }
 
+type externalInteractionForwardingSink struct {
+	request AwakenEvent
+	answer  ExternalInteractionAnswer
+}
+
+func (*externalInteractionForwardingSink) Emit(AwakenEvent) {}
+
+func (s *externalInteractionForwardingSink) AwaitExternalInteractionForm(_ context.Context, request AwakenEvent) (ExternalInteractionAnswer, error) {
+	s.request = request
+	return s.answer, nil
+}
+
 func (r *failingRecorder) Append(ctx context.Context, record SemanticRecord) error {
 	return r.AppendBatch(ctx, []SemanticRecord{record})
 }
@@ -297,6 +309,23 @@ func TestBufferedPermissionAndRuntimeFactsPersistWithToolResult(t *testing.T) {
 		if recorder.batches[0][i] != kind {
 			t.Fatalf("batch[%d]=%s want %s: %+v", i, recorder.batches[0][i], kind, recorder.batches)
 		}
+	}
+}
+
+func TestArtifactBufferingSinkForwardsExternalInteractionForm(t *testing.T) {
+	inner := &externalInteractionForwardingSink{answer: ExternalInteractionAnswer{
+		Resolution: ExternalInteractionCompleted,
+		Content:    map[string]any{"targetPath": ".env.local"},
+	}}
+	buffer := &artifactBufferingSink{inner: inner}
+	request := AwakenEvent{InteractionID: "mcp_form", InteractionKind: "mcp-elicitation"}
+
+	answer, err := buffer.AwaitExternalInteractionForm(context.Background(), request)
+	if err != nil {
+		t.Fatalf("AwaitExternalInteractionForm: %v", err)
+	}
+	if inner.request.InteractionID != request.InteractionID || answer.Resolution != ExternalInteractionCompleted || answer.Content["targetPath"] != ".env.local" {
+		t.Fatalf("external interaction form was not forwarded intact: request=%+v answer=%+v", inner.request, answer)
 	}
 }
 

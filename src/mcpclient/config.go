@@ -28,6 +28,13 @@ type McpServerConfig struct {
 	DisplayName        string `json:"displayName,omitempty"`
 	HeadersHelper      string `json:"headersHelper,omitempty"`
 	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitempty"`
+	// OAuthResource is the protected resource URI declared by an MCP source.
+	// It affects OAuth discovery and credential identity, not the transport endpoint.
+	OAuthResource string `json:"oauthResource,omitempty"`
+	// DisabledTools is a host-owned per-server projection used by Plugin
+	// component overrides. Disabled tools remain visible to management APIs but
+	// are not registered into the next run's central Tool Catalog snapshot.
+	DisabledTools []string `json:"disabledTools,omitempty"`
 	// Provider is stable connector/provider identity. Host-mediated Artifact
 	// publication remains per-tool MCP _meta and must never be inherited from
 	// this server-level declaration.

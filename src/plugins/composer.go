@@ -41,8 +41,8 @@ func (s *Store) ResolveComposerSelection(name, digest string) (ComposerSelection
 		Description: plugin.Manifest.Description,
 		Digest:      plugin.Digest,
 	}
-	if plugin.SkillRoot != "" {
-		for _, definition := range skills.LoadDir(plugin.SkillRoot, skills.SourcePlugin) {
+	for _, skillSelection := range enabledSkillSelectionsForPlugin(plugin) {
+		for _, definition := range skills.LoadPluginSkillSelection(skillSelection) {
 			if definition != nil && definition.State == skills.StateLoaded {
 				selection.SkillIDs = append(selection.SkillIDs, definition.ID)
 			}

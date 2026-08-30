@@ -53,6 +53,21 @@ function nextFieldValue<T>(current: T, action: SetStateAction<T>): T {
   return typeof action === "function" ? (action as (value: T) => T)(current) : action;
 }
 
+export function composerSelectionsEqual(
+  left: ComposerBarInputSelection | undefined,
+  right: ComposerBarInputSelection | undefined,
+): boolean {
+  if (left === right) return true;
+  if (!left || !right || left.anchor !== right.anchor || left.focus !== right.focus) return false;
+  if (left.caretRect === right.caretRect) return true;
+  if (!left.caretRect || !right.caretRect) return false;
+  return (
+    left.caretRect.left === right.caretRect.left &&
+    left.caretRect.top === right.caretRect.top &&
+    left.caretRect.bottom === right.caretRect.bottom
+  );
+}
+
 export function useThreadComposerDraft(ownerKey: string) {
   const [drafts, setDrafts] = useState<Record<string, ThreadComposerDraft>>({});
   const draft = threadComposerDraftForOwner(drafts, ownerKey);
@@ -87,7 +102,11 @@ export function useThreadComposerDraft(ownerKey: string) {
     [updateField],
   );
   const setSelection = useCallback<Dispatch<SetStateAction<ComposerBarInputSelection | undefined>>>(
-    (action) => updateField("selection", action),
+    (action) =>
+      updateField("selection", (current) => {
+        const next = nextFieldValue(current, action);
+        return composerSelectionsEqual(current, next) ? current : next;
+      }),
     [updateField],
   );
 

@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,10 @@ import (
 	"awaken/src/desktopdata"
 	"awaken/src/filestore"
 	"awaken/src/mcpclient"
+	"awaken/src/plugins/dialect"
+	"awaken/src/plugins/ir"
+	pluginvariables "awaken/src/plugins/variables"
+	"awaken/src/skills"
 	"awaken/src/tool/trash"
 )
 
@@ -29,12 +34,17 @@ type Store struct {
 	statePath            string
 	lockPath             string
 	trash                trash.TrashAdapter
+	secrets              pluginvariables.SecretStore
 	mu                   sync.Mutex
 	changeMu             sync.Mutex
 	corruptErr           error
 	onChange             func()
 	changeListeners      map[uint64]func()
 	nextChangeListenerID uint64
+	revision             uint64
+	leaseMu              sync.Mutex
+	activeLeases         map[string]RuntimeLease
+	nextLeaseID          uint64
 }
 
 // NewStore opens the production store under AWAKEN_HOME. Missing home fails
@@ -54,6 +64,12 @@ func NewStoreAt(home string) *Store {
 
 // NewStoreAtWithTrash is the testable constructor.
 func NewStoreAtWithTrash(home string, adapter trash.TrashAdapter) *Store {
+	return NewStoreAtWithTrashAndSecrets(home, adapter, pluginvariables.NewPersistentSecretStore())
+}
+
+// NewStoreAtWithTrashAndSecrets is the fully injectable constructor used by
+// variable lifecycle tests so test secrets never reach the OS keychain.
+func NewStoreAtWithTrashAndSecrets(home string, adapter trash.TrashAdapter, secrets pluginvariables.SecretStore) *Store {
 	home = filepath.Clean(home)
 	root := desktopdata.PluginsRoot(home)
 	if adapter == nil {
@@ -68,7 +84,9 @@ func NewStoreAtWithTrash(home string, adapter trash.TrashAdapter) *Store {
 		statePath:       desktopdata.PluginsConfigPath(home),
 		lockPath:        desktopdata.PluginsConfigPath(home) + ".lock",
 		trash:           adapter,
+		secrets:         secrets,
 		changeListeners: make(map[uint64]func()),
+		activeLeases:    make(map[string]RuntimeLease),
 	}
 	if err := store.ensureDirs(); err != nil {
 		store.corruptErr = err
@@ -175,6 +193,59 @@ func (s *Store) withLock(fn func() error) error {
 	return fn()
 }
 
+func (s *Store) withMutationLock(fn func() error) error {
+	return s.withLock(func() error {
+		s.leaseMu.Lock()
+		active := len(s.activeLeases)
+		s.leaseMu.Unlock()
+		if active > 0 {
+			return fmt.Errorf("%w: %d active run lease(s); cancel or finish them before changing plugins", ErrRuntimeLeaseActive, active)
+		}
+		return fn()
+	})
+}
+
+func (s *Store) AcquireRuntimeLease() (RuntimeLease, error) {
+	if s == nil {
+		return RuntimeLease{}, ErrHomeRequired
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, err := s.readStateUnlocked()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return RuntimeLease{}, err
+	}
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		return RuntimeLease{}, err
+	}
+	generation := sha256.Sum256(encoded)
+	s.leaseMu.Lock()
+	s.nextLeaseID++
+	lease := RuntimeLease{ID: fmt.Sprintf("pluginlease_%d", s.nextLeaseID), Generation: fmt.Sprintf("sha256:%x", generation[:])}
+	s.activeLeases[lease.ID] = lease
+	s.leaseMu.Unlock()
+	return lease, nil
+}
+
+func (s *Store) ReleaseRuntimeLease(id string) {
+	if s == nil || strings.TrimSpace(id) == "" {
+		return
+	}
+	s.leaseMu.Lock()
+	delete(s.activeLeases, id)
+	s.leaseMu.Unlock()
+}
+
+func (s *Store) ActiveRuntimeLeases() int {
+	if s == nil {
+		return 0
+	}
+	s.leaseMu.Lock()
+	defer s.leaseMu.Unlock()
+	return len(s.activeLeases)
+}
+
 func (s *Store) readStateUnlocked() (StateFile, error) {
 	data, err := os.ReadFile(s.statePath)
 	if err != nil {
@@ -187,13 +258,36 @@ func (s *Store) readStateUnlocked() (StateFile, error) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return StateFile{}, fmt.Errorf("%w: %v", ErrStateCorrupt, err)
 	}
-	if state.Version != StateVersion {
+	if state.Version == 1 {
+		state = migrateStateV1(state)
+	} else if state.Version != StateVersion {
 		return StateFile{}, fmt.Errorf("%w: unsupported version %d", ErrStateCorrupt, state.Version)
 	}
 	if state.Plugins == nil {
 		state.Plugins = map[string]Record{}
 	}
 	return state, nil
+}
+
+func migrateStateV1(state StateFile) StateFile {
+	state.Version = StateVersion
+	for name, record := range state.Plugins {
+		if record.Dialect == "" {
+			record.Dialect = "agent_plugins"
+		}
+		if record.ManifestPath == "" {
+			record.ManifestPath = "plugin.json"
+		}
+		if record.InstallationID == "" {
+			sum := sha256.Sum256([]byte(name + "\n" + record.Digest))
+			record.InstallationID = fmt.Sprintf("migrated-%x", sum[:8])
+		}
+		if record.DisplayName == "" {
+			record.DisplayName = name
+		}
+		state.Plugins[name] = record
+	}
+	return state
 }
 
 func (s *Store) writeStateUnlocked(state StateFile) error {
@@ -210,6 +304,7 @@ func (s *Store) writeStateUnlocked(state StateFile) error {
 
 func (s *Store) notify() {
 	s.changeMu.Lock()
+	s.revision++
 	primary := s.onChange
 	listeners := make([]func(), 0, len(s.changeListeners))
 	for _, listener := range s.changeListeners {
@@ -222,6 +317,15 @@ func (s *Store) notify() {
 	for _, listener := range listeners {
 		listener()
 	}
+}
+
+func (s *Store) Revision() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.changeMu.Lock()
+	defer s.changeMu.Unlock()
+	return s.revision
 }
 
 // List returns every recorded plugin, including disabled and invalid packages.
@@ -280,7 +384,37 @@ func (s *Store) loadRecord(name string, rec Record) *InstalledPlugin {
 			Diagnostics: []Diagnostic{errorDiag("plugin_digest_changed", message)},
 		}
 	}
-	plugin := LoadPackage(root, dataDir, rec)
+	var plugin *InstalledPlugin
+	if rec.Dialect == "" || rec.Dialect == ir.DialectAgentPlugins {
+		plugin = LoadPackage(root, dataDir, rec)
+		plugin.Dialect = ir.DialectAgentPlugins
+		plugin.ManifestPath = "plugin.json"
+	} else {
+		candidate := ir.ManifestCandidate{Dialect: rec.Dialect, ManifestPath: rec.ManifestPath, Manifestless: rec.ManifestPath == "", IdentityHint: name, Valid: true}
+		normalized, parseErr := dialect.NewDefaultRegistry().Parse(root, candidate, dialect.ParseOptions{PluginDigest: actualDigest})
+		if parseErr != nil {
+			return &InstalledPlugin{
+				Name: name, Root: root, DataDir: dataDir, Enabled: rec.Enabled, Source: rec.Source,
+				Digest: rec.Digest, ActualDigest: actualDigest, InstalledAt: rec.InstalledAt,
+				Dialect: rec.Dialect, ManifestPath: rec.ManifestPath, InstallationID: rec.InstallationID,
+				Diagnostics: []Diagnostic{errorDiag("plugin_manifest_invalid", parseErr.Error())},
+			}
+		}
+		manifest := Manifest{
+			Name: name, Version: normalized.Identity.Version, Description: normalized.Identity.Description,
+			Homepage: normalized.Identity.Homepage, Repository: normalized.Identity.Repository, License: normalized.Identity.License,
+			Keywords: append([]string(nil), normalized.Identity.Keywords...),
+		}
+		if normalized.Identity.Author != nil {
+			manifest.Author = &Author{Name: normalized.Identity.Author.Name, Email: normalized.Identity.Author.Email, URL: normalized.Identity.Author.URL}
+		}
+		plugin = &InstalledPlugin{
+			Name: name, Root: root, DataDir: dataDir, Enabled: rec.Enabled, Source: rec.Source,
+			Digest: rec.Digest, InstalledAt: rec.InstalledAt, Manifest: manifest,
+			Dialect: rec.Dialect, ManifestPath: rec.ManifestPath, InstallationID: rec.InstallationID,
+			DisplayName: normalized.Identity.DisplayName, Components: normalized.Components, Diagnostics: normalized.Diagnostics,
+		}
+	}
 	if dataErr := validateManagedPluginDataDir(s.dataRoot, dataDir); dataErr != nil {
 		plugin.MCPServers = nil
 		plugin.Diagnostics = append(plugin.Diagnostics, errorDiag("plugin_data_invalid", dataErr.Error()))
@@ -293,10 +427,69 @@ func (s *Store) loadRecord(name string, rec Record) *InstalledPlugin {
 	plugin.Digest = rec.Digest
 	plugin.ActualDigest = actualDigest
 	plugin.IntegrityValid = true
+	plugin.Dialect = rec.Dialect
+	if plugin.Dialect == "" {
+		plugin.Dialect = ir.DialectAgentPlugins
+	}
+	plugin.ManifestPath = rec.ManifestPath
+	if plugin.ManifestPath == "" && plugin.Dialect == ir.DialectAgentPlugins {
+		plugin.ManifestPath = "plugin.json"
+	}
+	plugin.InstallationID = rec.InstallationID
+	plugin.DisplayName = firstNonEmptyPlugin(rec.DisplayName, plugin.DisplayName, plugin.Manifest.Name)
+	if len(plugin.Components) == 0 {
+		candidate := ir.ManifestCandidate{Dialect: plugin.Dialect, ManifestPath: plugin.ManifestPath, Manifestless: plugin.ManifestPath == "", IdentityHint: name, Valid: true}
+		if normalized, parseErr := dialect.NewDefaultRegistry().Parse(root, candidate, dialect.ParseOptions{PluginDigest: actualDigest}); parseErr == nil {
+			plugin.Components = normalized.Components
+		}
+	}
+	if plugin.Dialect != ir.DialectAgentPlugins {
+		servers, diagnostics := s.loadVendorMCPServers(plugin, rec)
+		plugin.MCPServers = servers
+		plugin.Diagnostics = append(plugin.Diagnostics, diagnostics...)
+	} else {
+		for index := range plugin.MCPServers {
+			server := &plugin.MCPServers[index]
+			for _, component := range plugin.Components {
+				if component.Kind != ir.KindMCPServer || component.MCP == nil || component.MCP.ShortName != server.ShortName {
+					continue
+				}
+				if override, ok := rec.Components[component.LogicalID]; ok {
+					if override.Desired != "" {
+						server.Enabled = override.Desired == "enabled"
+						server.Config.Enabled = boolPointer(server.Enabled)
+					}
+					for toolName, toolEnabled := range override.ToolOverrides {
+						if !toolEnabled {
+							server.Config.DisabledTools = append(server.Config.DisabledTools, toolName)
+						}
+					}
+					sort.Strings(server.Config.DisabledTools)
+				}
+				break
+			}
+		}
+	}
+	if !rec.Enabled {
+		for index := range plugin.MCPServers {
+			plugin.MCPServers[index].Enabled = false
+			plugin.MCPServers[index].Config.Enabled = boolPointer(false)
+		}
+	}
+	plugin.ComponentState, plugin.ConfigurationState, plugin.CompatibilityState = componentStates(plugin.Components, rec)
 	if rec.Version != "" && plugin.Manifest.Version == "" {
 		plugin.Manifest.Version = rec.Version
 	}
 	return plugin
+}
+
+func firstNonEmptyPlugin(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func validateManagedPluginDataDir(root, dataDir string) error {
@@ -313,20 +506,53 @@ func validateManagedPluginDataDir(root, dataDir string) error {
 	return nil
 }
 
-// EnabledSkillRoots returns skills/ directories for enabled plugins.
-func (s *Store) EnabledSkillRoots() []string {
+// EnabledSkillSelections returns exact Skill package roots after applying the
+// plugin and component desired-state layers. This is the production source
+// for vendor layouts; Skill discovery remains the parser/runtime owner.
+func (s *Store) EnabledSkillSelections() []skills.PluginSkillSelection {
 	plugins, err := s.List()
 	if err != nil {
 		return nil
 	}
-	var roots []string
+	seen := map[string]bool{}
+	var selections []skills.PluginSkillSelection
 	for _, plugin := range plugins {
-		if plugin == nil || !plugin.Enabled || plugin.SkillRoot == "" {
+		for _, selection := range enabledSkillSelectionsForPlugin(plugin) {
+			root := selection.PackageRoot
+			key := plugin.Name + "\x00" + filepath.Clean(root)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			selections = append(selections, selection)
+		}
+	}
+	sort.Slice(selections, func(i, j int) bool {
+		if selections[i].PluginName != selections[j].PluginName {
+			return selections[i].PluginName < selections[j].PluginName
+		}
+		return selections[i].PackageRoot < selections[j].PackageRoot
+	})
+	return selections
+}
+
+func enabledSkillSelectionsForPlugin(plugin *InstalledPlugin) []skills.PluginSkillSelection {
+	if plugin == nil || !plugin.Enabled || !plugin.IntegrityValid {
+		return nil
+	}
+	var selections []skills.PluginSkillSelection
+	for _, state := range plugin.ComponentState {
+		component := state.Component
+		if component.Kind != ir.KindSkill || component.Skill == nil || state.DesiredState != "enabled" || !state.Switchable || state.Configuration != "ready" {
 			continue
 		}
-		roots = append(roots, plugin.SkillRoot)
+		root := filepath.Join(plugin.Root, filepath.FromSlash(component.Skill.Path))
+		if err := resolvedStayWithin(plugin.Root, root); err != nil || !isDirectory(root) {
+			continue
+		}
+		selections = append(selections, skills.PluginSkillSelection{PluginName: plugin.Name, PackageRoot: root})
 	}
-	return roots
+	return selections
 }
 
 // PluginMCPServers returns plugin-scope MCP configs for enabled plugins.
@@ -358,7 +584,7 @@ func (s *Store) PluginMCPServers() []mcpclient.ScopedMcpServerConfig {
 // SetEnabled toggles the whole plugin.
 func (s *Store) SetEnabled(name string, enabled bool) (*InstalledPlugin, error) {
 	var plugin *InstalledPlugin
-	err := s.withLock(func() error {
+	err := s.withMutationLock(func() error {
 		state, err := s.readStateUnlocked()
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
@@ -390,7 +616,7 @@ func (s *Store) SetEnabled(name string, enabled bool) (*InstalledPlugin, error) 
 // SetServerEnabled toggles one MCP server inside an installed plugin.
 func (s *Store) SetServerEnabled(name, shortName string, enabled bool) (*InstalledPlugin, error) {
 	var plugin *InstalledPlugin
-	err := s.withLock(func() error {
+	err := s.withMutationLock(func() error {
 		state, err := s.readStateUnlocked()
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err

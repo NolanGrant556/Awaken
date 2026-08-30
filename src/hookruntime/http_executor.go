@@ -28,7 +28,8 @@ func (d *Dispatcher) executeHTTP(parent context.Context, envelope InputEnvelope,
 		elapsed = time.Since(started)
 		out.DurationMS = elapsed.Milliseconds()
 	}()
-	out = Outcome{InvocationID: envelope.InvocationID, HookID: hook.StableID, Event: envelope.Event, SourceKind: hook.SourceKind, Status: "failed", SpawnState: "not_started", ProcessState: "unknown", Action: "continue"}
+	out = outcomeForHook(hook)
+	out.InvocationID, out.Status, out.SpawnState, out.ProcessState, out.Action = envelope.InvocationID, "failed", "not_started", "unknown", "continue"
 	ctx, cancel := context.WithTimeout(parent, time.Duration(hook.Command.TimeoutMS)*time.Millisecond)
 	defer cancel()
 	body, _ := json.Marshal(envelope)

@@ -55,6 +55,32 @@ describe("desktop operation result boundary", () => {
     ).toBe("Awaken 操作未完成，请稍后重试。");
   });
 
+  it("maps stale Skill selection failures without exposing Core paths", () => {
+    const error = Object.assign(new Error("selected skill source changed: /secret/path"), {
+      name: "RuntimeDomainError",
+      code: "INVALID_COMPOSER_TOKEN",
+      status: 400,
+    });
+    expect(desktopOperationIssue(error)).toEqual({
+      code: "composer_selection_invalid",
+      message: "选择的 Skill 已不可用或已经发生变化，请重新选择后再运行。",
+      retryable: false,
+      actions: [],
+    });
+  });
+
+  it("distinguishes unavailable Plugin components from generic input failures", () => {
+    const error = Object.assign(new Error("input is required: composer Plugin Agent is unavailable"), {
+      name: "RuntimeDomainError",
+      code: "INVALID_INPUT",
+      status: 400,
+    });
+    expect(desktopOperationIssue(error)).toMatchObject({
+      code: "plugin_component_unavailable",
+      retryable: false,
+    });
+  });
+
   it("returns a serializable result instead of throwing across Electron IPC", async () => {
     await expect(
       runDesktopOperation(async () => {

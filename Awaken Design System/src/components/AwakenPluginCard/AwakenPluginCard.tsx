@@ -5,10 +5,8 @@ import { AwakenSwitch } from "../AwakenSwitch";
 
 export type AwakenPluginCardItem = {
   name: string;
-  version?: string;
   description?: string;
-  skillCount: number;
-  serverCount: number;
+  dialect?: string;
   enabled: boolean;
   busy?: boolean;
   diagnostic?: string;
@@ -30,7 +28,12 @@ export function AwakenPluginCard({
   className,
   ...props
 }: AwakenPluginCardProps) {
-  const summary = `${plugin.skillCount} skills / ${plugin.serverCount} servers`;
+  const dialectLabels: Record<string, string> = {
+    agent_plugins: "Agent Plugins",
+    codex: "Codex",
+    claude_code: "Claude Code",
+    cursor: "Cursor",
+  };
   const body = (
     <>
       <span className="aw-plugin-card__icon" aria-hidden="true">
@@ -39,14 +42,15 @@ export function AwakenPluginCard({
       <span className="aw-plugin-card__copy">
         <span className="aw-plugin-card__title-row">
           <span className="aw-plugin-card__name">{plugin.name}</span>
-          {plugin.version ? <span className="aw-plugin-card__version">{plugin.version}</span> : null}
+          {plugin.dialect ? (
+            <span className="aw-plugin-card__badge">{dialectLabels[plugin.dialect] ?? plugin.dialect}</span>
+          ) : null}
         </span>
         {plugin.diagnostic ? (
           <span className="aw-plugin-card__diagnostic">{plugin.diagnostic}</span>
-        ) : (
-          <span className="aw-plugin-card__description">{plugin.description || summary}</span>
-        )}
-        <span className="aw-plugin-card__meta">{summary}</span>
+        ) : plugin.description ? (
+          <span className="aw-plugin-card__description">{plugin.description}</span>
+        ) : null}
       </span>
     </>
   );

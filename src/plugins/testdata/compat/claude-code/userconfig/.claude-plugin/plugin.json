@@ -1,0 +1,7 @@
+{
+  "name":"claude-config",
+  "userConfig":{
+    "ENDPOINT":{"type":"string","title":"Endpoint","description":"Service endpoint","required":true},
+    "TOKEN":{"type":"string","title":"Token","description":"Secret token","sensitive":true,"required":true}
+  }
+}

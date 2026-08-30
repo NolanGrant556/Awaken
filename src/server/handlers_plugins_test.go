@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"testing"
 
 	"awaken/src/plugins"
+	"awaken/src/plugins/ir"
+	awruntime "awaken/src/runtime"
 	"awaken/src/tool/trash"
 )
 
@@ -42,6 +45,16 @@ func writeHTTPPluginFixture(t *testing.T, root, name string) {
 	}
 }
 
+func writePluginTestFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPluginsUnavailableWithoutStore(t *testing.T) {
 	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/v1/plugins", nil)
@@ -49,6 +62,27 @@ func TestPluginsUnavailableWithoutStore(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPluginHookReceiptsUsesEmptyArrayWhenNoReceiptsExist(t *testing.T) {
+	runService := awruntime.NewRunService(nil, nil)
+	router := NewRouterWithScheduledTasks(runService, nil, nil, nil, nil, nil, "", nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/plugins/hookify/hooks/"+ir.EncodeLogicalID("hook/hooks.json#fixture")+"/receipts", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Items     []json.RawMessage `json:"items"`
+		Retention string            `json:"retention"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Items == nil || len(response.Items) != 0 || response.Retention != "memory_only" {
+		t.Fatalf("response=%s", rec.Body.String())
 	}
 }
 
@@ -142,6 +176,105 @@ func TestPluginInstallAcceptsValidatedDigest(t *testing.T) {
 	}
 	if installed.Plugin.Name != "digest-pinned-plugin" || installed.Plugin.Digest != validation.Digest {
 		t.Fatalf("installed=%+v validation=%+v", installed, validation)
+	}
+}
+
+func TestPluginComponentListOmitsBodiesAndExecutionSpecs(t *testing.T) {
+	home := t.TempDir()
+	store := plugins.NewStoreAt(home)
+	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil, store)
+	src := t.TempDir()
+	writeHTTPPluginFixture(t, src, "safe-component-list")
+	if _, err := store.Install(t.Context(), plugins.InstallRequest{
+		Source: plugins.Source{Kind: plugins.SourceLocalPath, Path: src},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/plugins/safe-component-list/components", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("components status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, forbidden := range []string{"Body", "promptTemplate", "rawFrontmatter", "allowedTools", `"command"`, `"args"`} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("component list leaked %q: %s", forbidden, body)
+		}
+	}
+	if !strings.Contains(body, `"logicalId"`) || !strings.Contains(body, `"mappingState"`) {
+		t.Fatalf("component list omitted safe summary fields: %s", body)
+	}
+	if !strings.Contains(body, `"catalogId":"plugin__safe-component-list__lint"`) {
+		t.Fatalf("component list omitted exact Plugin Skill catalog identity: %s", body)
+	}
+}
+
+func TestPluginComponentDetailOmitsUndeclaredAgentLimits(t *testing.T) {
+	properties := map[string]any{
+		"agent": map[string]any{"maxTurns": 0, "timeoutSeconds": 0, "model": "fast"},
+	}
+	applyEffectiveComponentBudget(ir.Component{Agent: &ir.AgentSpec{}}, properties)
+	agentProperties := properties["agent"].(map[string]any)
+	if _, exists := agentProperties["maxTurns"]; exists {
+		t.Fatalf("raw maxTurns remained visible: %#v", properties)
+	}
+	if _, exists := agentProperties["timeoutSeconds"]; exists {
+		t.Fatalf("raw timeoutSeconds remained visible: %#v", properties)
+	}
+	if _, exists := properties["runtimeBudget"]; exists {
+		t.Fatalf("Plugin Agent must not expose a host-only runtime budget: %#v", properties)
+	}
+}
+
+func TestPluginComponentDetailPreservesDeclaredAgentLimits(t *testing.T) {
+	properties := map[string]any{
+		"agent": map[string]any{"maxTurns": 99, "timeoutSeconds": 3600, "model": "fast"},
+	}
+	applyEffectiveComponentBudget(ir.Component{Agent: &ir.AgentSpec{MaxTurns: 99, TimeoutSeconds: 3600}}, properties)
+	agentProperties := properties["agent"].(map[string]any)
+	if agentProperties["declaredMaxTurns"] != 99 || agentProperties["declaredTimeoutSeconds"] != 3600 {
+		t.Fatalf("declared limits were not preserved: %#v", properties)
+	}
+	if _, exists := properties["runtimeBudget"]; exists {
+		t.Fatalf("unexpected Plugin Agent runtime budget: %#v", properties)
+	}
+}
+
+func TestPluginComponentDetailShowsVendorCompatibleHookTimeout(t *testing.T) {
+	properties := map[string]any{
+		"hook": map[string]any{"timeoutSeconds": 180},
+	}
+	applyEffectiveComponentBudget(ir.Component{Hook: &ir.HookSpec{SourceEvent: "SessionStart", TimeoutSeconds: 180}}, properties)
+	if _, exists := properties["hook"].(map[string]any)["timeoutSeconds"]; exists {
+		t.Fatalf("raw Hook timeout remained duplicated: %#v", properties)
+	}
+	budget := properties["runtimeBudget"].(map[string]any)
+	if budget["timeoutSeconds"] != float64(180) {
+		t.Fatalf("effective Hook timeout=%#v", budget)
+	}
+}
+
+func TestPluginMarketplaceRoutesAreNotRegistered(t *testing.T) {
+	store := plugins.NewStoreAt(t.TempDir())
+	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil, store)
+	req := httptest.NewRequest(http.MethodGet, "/v1/plugin-marketplaces", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("removed Marketplace route status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPluginSkillForkRouteIsNotRegistered(t *testing.T) {
+	store := plugins.NewStoreAt(t.TempDir())
+	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil, store)
+	req := httptest.NewRequest(http.MethodPost, "/v1/plugins/example/components/skill/example/fork", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("removed Plugin Skill fork route status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -349,5 +482,181 @@ func TestPluginCommitMapsUnstableInstalledPackageToInvalid(t *testing.T) {
 	}
 	if failure.Error != "PLUGIN_INVALID" {
 		t.Fatalf("unstable commit error=%+v", failure)
+	}
+}
+
+func TestPluginHandlerMapsStandaloneSkillPackageForDesktopRouting(t *testing.T) {
+	rec := httptest.NewRecorder()
+	pluginHandlers{}.writeStoreError(rec, plugins.ErrSkillPackageSelected)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("standalone Skill status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var failure errorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if failure.Error != "SKILL_PACKAGE_SELECTED" {
+		t.Fatalf("standalone Skill error=%+v", failure)
+	}
+}
+
+func TestPluginVariableErrorsKeepTheirDomainCode(t *testing.T) {
+	for _, code := range []string{
+		"VARIABLE_FORBIDDEN_POSITION",
+		"VARIABLE_MISSING",
+		"VARIABLE_REQUIRED",
+		"VARIABLE_TYPE_INVALID",
+		"VARIABLE_RANGE_INVALID",
+		"VARIABLE_VALUE_NOT_ALLOWED",
+		"VARIABLE_SECRET_SAVE_FAILED",
+	} {
+		rec := httptest.NewRecorder()
+		pluginHandlers{}.writeStoreError(rec, errors.New(code+": fixture"))
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"error":"`+code+`"`) {
+			t.Fatalf("%s response=%d %s", code, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestPluginConfigurationUsesEmptyArrayForPluginWithoutVariables(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AWAKEN_HOME", home)
+	store := plugins.NewStoreAtWithTrash(home, pluginTestTrash{dir: filepath.Join(t.TempDir(), "trash")})
+	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil, store)
+	src := t.TempDir()
+	writeHTTPPluginFixture(t, src, "no-variables")
+	if _, err := store.Install(t.Context(), plugins.InstallRequest{Source: plugins.Source{Kind: plugins.SourceLocalPath, Path: src}}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/plugins/no-variables/configuration", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("configuration status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Fields json.RawMessage `json:"fields"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if string(response.Fields) != "[]" {
+		t.Fatalf("fields must be an array, body=%s", rec.Body.String())
+	}
+}
+
+func TestPluginMCPSourceRouteReturnsRawTextAndSavesThroughDigestCAS(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AWAKEN_HOME", home)
+	store := plugins.NewStoreAtWithTrash(home, pluginTestTrash{dir: filepath.Join(t.TempDir(), "trash")})
+	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil, store)
+	src := t.TempDir()
+	writeHTTPPluginFixture(t, src, "source-route")
+	originalSource := `{
+  "$schema": "` + plugins.SchemaMCPV1 + `",
+  "mcpServers": {
+    "local": {"type": "stdio", "command": "npx", "args": ["--token", "literal-value"]}
+  }
+}`
+	writePluginTestFile(t, filepath.Join(src, "mcp.json"), originalSource)
+	installed, err := store.Install(t.Context(), plugins.InstallRequest{Source: plugins.Source{Kind: plugins.SourceLocalPath, Path: src}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var component plugins.ComponentState
+	for _, state := range installed.Plugin.ComponentState {
+		if state.Component.Kind == ir.KindMCPServer {
+			component = state
+			break
+		}
+	}
+	if component.Component.LogicalID == "" {
+		t.Fatal("installed fixture has no MCP component")
+	}
+	componentPath := "/v1/plugins/source-route/components/mcp_server/" + component.Component.LogicalIDEncoded
+
+	get := httptest.NewRequest(http.MethodGet, componentPath, nil)
+	getRec := httptest.NewRecorder()
+	router.ServeHTTP(getRec, get)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get source status=%d body=%s", getRec.Code, getRec.Body.String())
+	}
+	var detail struct {
+		Source         string `json:"source"`
+		SourceEditable bool   `json:"sourceEditable"`
+	}
+	if err := json.Unmarshal(getRec.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if !detail.SourceEditable || detail.Source != originalSource || strings.Contains(detail.Source, "<configured>") {
+		t.Fatalf("detail=%+v body=%s", detail, getRec.Body.String())
+	}
+
+	unchangedBody, _ := json.Marshal(map[string]any{"expectedDigest": installed.Plugin.Digest, "source": originalSource})
+	unchangedPut := httptest.NewRequest(http.MethodPut, componentPath+"/source", bytes.NewReader(unchangedBody))
+	unchangedPut.Header.Set("Content-Type", "application/json")
+	unchangedRec := httptest.NewRecorder()
+	router.ServeHTTP(unchangedRec, unchangedPut)
+	if unchangedRec.Code != http.StatusOK {
+		t.Fatalf("unchanged source status=%d body=%s", unchangedRec.Code, unchangedRec.Body.String())
+	}
+	var unchangedResponse struct {
+		Plugin struct {
+			Digest string `json:"digest"`
+		} `json:"plugin"`
+		Changed bool `json:"changed"`
+	}
+	if err := json.Unmarshal(unchangedRec.Body.Bytes(), &unchangedResponse); err != nil {
+		t.Fatal(err)
+	}
+	if unchangedResponse.Changed || unchangedResponse.Plugin.Digest != installed.Plugin.Digest {
+		t.Fatalf("unchanged response=%s", unchangedRec.Body.String())
+	}
+
+	editedSource := strings.Replace(originalSource, `"command": "npx"`, `"command": "node"`, 1)
+	body, _ := json.Marshal(map[string]any{"expectedDigest": installed.Plugin.Digest, "source": editedSource})
+	put := httptest.NewRequest(http.MethodPut, componentPath+"/source", bytes.NewReader(body))
+	put.Header.Set("Content-Type", "application/json")
+	putRec := httptest.NewRecorder()
+	router.ServeHTTP(putRec, put)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("put source status=%d body=%s", putRec.Code, putRec.Body.String())
+	}
+	var response struct {
+		Plugin struct {
+			Digest string `json:"digest"`
+		} `json:"plugin"`
+		Revision uint64 `json:"revision"`
+		Changed  bool   `json:"changed"`
+	}
+	if err := json.Unmarshal(putRec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Changed || response.Plugin.Digest == "" || response.Plugin.Digest == installed.Plugin.Digest || response.Revision == 0 {
+		t.Fatalf("response=%s", putRec.Body.String())
+	}
+	written, err := os.ReadFile(filepath.Join(installed.Plugin.Root, "mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(written) != editedSource {
+		t.Fatalf("written source=%s", written)
+	}
+
+	invalidBody, _ := json.Marshal(map[string]any{"expectedDigest": response.Plugin.Digest, "source": `{not-json`})
+	invalidPut := httptest.NewRequest(http.MethodPut, componentPath+"/source", bytes.NewReader(invalidBody))
+	invalidPut.Header.Set("Content-Type", "application/json")
+	invalidRec := httptest.NewRecorder()
+	router.ServeHTTP(invalidRec, invalidPut)
+	if invalidRec.Code != http.StatusBadRequest || !strings.Contains(invalidRec.Body.String(), `"error":"MCP_SOURCE_INVALID"`) {
+		t.Fatalf("invalid source status=%d body=%s", invalidRec.Code, invalidRec.Body.String())
+	}
+	stillWritten, err := os.ReadFile(filepath.Join(installed.Plugin.Root, "mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(stillWritten) != editedSource {
+		t.Fatalf("invalid source changed live file=%s", stillWritten)
 	}
 }

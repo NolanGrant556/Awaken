@@ -581,6 +581,8 @@ export function AwakenComposerInlineInput({
   const isComposingRef = useRef(false);
   const compositionGenerationRef = useRef(0);
   const renderedTokenSignatureRef = useRef("");
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
   const tokenIds = new Set(tokens.map((token) => token.id));
   const desiredValue = structuredValueForProps(tokens, value);
   const style: ComposerInlineInputStyle = {
@@ -592,9 +594,9 @@ export function AwakenComposerInlineInput({
     const editor = editorRef.current;
     const selection = editor ? composerInlineInputSelection(editor) : null;
     if (selection) {
-      onSelectionChange?.(selection);
+      onSelectionChangeRef.current?.(selection);
     }
-  }, [onSelectionChange]);
+  }, []);
 
   useLayoutEffect(() => {
     const editor = editorRef.current;
@@ -626,7 +628,7 @@ export function AwakenComposerInlineInput({
       return;
     }
     const selection = focusInlineInputAtOffset(editor, focusOffset);
-    onSelectionChange?.(selection);
+    onSelectionChangeRef.current?.(selection);
     // A new request is the only command to reposition the logical caret.
     // Callback identity and draft rerenders must leave the live selection in
     // browser ownership.

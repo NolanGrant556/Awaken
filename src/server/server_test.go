@@ -4502,6 +4502,65 @@ func TestInstallSkillZipRejectsInvalidPackages(t *testing.T) {
 	}
 }
 
+func TestInstallSkillZipRoutesPluginPackageWithoutWritingSkillTree(t *testing.T) {
+	workspace := t.TempDir()
+	registry := skills.NewSkillRegistry(testLogger{})
+	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, workspace)
+	zipData := makeSkillZip(t, map[string]string{
+		"example-plugin/plugin.json":                     `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"example-plugin"}`,
+		"example-plugin/skills/example-command/SKILL.md": "---\nname: example-command\ndescription: Plugin component.\n---\nBody.\n",
+	})
+	body, err := json.Marshal(installSkillRequest{
+		FileName:      "example-plugin.zip",
+		ContentBase64: base64.StdEncoding.EncodeToString(zipData),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/skills/install", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "PLUGIN_PACKAGE_SELECTED") {
+		t.Fatalf("plugin package status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".awaken", "skills")); !os.IsNotExist(err) {
+		t.Fatalf("wrong installer wrote a Skill tree: %v", err)
+	}
+}
+
+func TestInstallSkillFromRoutedPluginPickerPathWritesSelectedSkillScope(t *testing.T) {
+	workspace := t.TempDir()
+	registry := skills.NewSkillRegistry(testLogger{})
+	router := NewRouterWithWorkspace(nil, nil, nil, nil, registry, workspace)
+	zipPath := filepath.Join(t.TempDir(), "daily-report.zip")
+	zipData := makeSkillZip(t, map[string]string{
+		"daily-report/SKILL.md": "---\nname: daily-report\ndescription: Daily report.\n---\nBody.\n",
+	})
+	if err := os.WriteFile(zipPath, zipData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(installSkillRequest{
+		FileName:    filepath.Base(zipPath),
+		SourcePath:  zipPath,
+		Scope:       "project",
+		ProjectRoot: workspace,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/skills/install", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("routed Skill install status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".awaken", "skills", "daily-report", "SKILL.md")); err != nil {
+		t.Fatalf("routed Skill was not installed in project scope: %v", err)
+	}
+}
+
 func makeSkillZip(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buf bytes.Buffer

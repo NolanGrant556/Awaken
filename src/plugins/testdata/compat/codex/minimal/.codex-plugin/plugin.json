@@ -1,0 +1,6 @@
+{
+  "name": "codex-minimal",
+  "version": "1.0.0",
+  "skills": "./skills/",
+  "interface": {"displayName":"Codex Minimal"}
+}

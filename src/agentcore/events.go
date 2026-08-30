@@ -209,6 +209,7 @@ type AwakenEvent struct {
 	QuestionAnswer             string
 	QuestionResolution         string
 	InteractionID              string
+	InteractionKind            string
 	InteractionResolution      string
 	InteractionTitle           string
 	InteractionSafeMessage     string
@@ -216,6 +217,7 @@ type AwakenEvent struct {
 	InteractionQRImageURL      string
 	InteractionProvider        string
 	InteractionRecoveries      []string
+	InteractionFormSchema      map[string]any
 	InteractionRequiresReplay  bool
 	ArtifactContractVersion    int
 	ArtifactRole               tool.ArtifactRole

@@ -1,0 +1,1 @@
+{"hooks":{"Stop":[{"type":"command","command":"true"},{"type":"http","url":"https://example.test/hook"},{"type":"mcp_tool","server":"fixture","tool":"echo"},{"type":"prompt","prompt":"Review the result"},{"type":"agent","prompt":"Audit the result"}]}}

@@ -373,9 +373,9 @@
 
 .desktop-toast {
   position: absolute;
-  top: 24px;
+  top: 16px;
   left: 50%;
-  z-index: 6;
+  z-index: var(--aw-z-popover);
   box-sizing: border-box;
   max-width: min(520px, calc(100% - 64px));
   padding: 10px 14px;
@@ -389,13 +389,13 @@
   pointer-events: none;
   text-align: center;
   transform: translateX(-50%);
-  animation: desktop-toast-in 120ms ease-out;
+  animation: desktop-toast-in 160ms ease-out;
 }
 
 @keyframes desktop-toast-in {
   from {
     opacity: 0;
-    transform: translate(-50%, -6px);
+    transform: translate(-50%, -8px);
   }
 
   to {
@@ -583,7 +583,7 @@
   width: 32px;
   height: 32px;
   pointer-events: none;
-  transform: translateX(-50%);
+    transform: translateY(0);
 }
 
 .context-usage-overlay {

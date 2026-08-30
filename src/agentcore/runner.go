@@ -264,6 +264,9 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		}
 	}
 	events.afterTerminal = r.runEndHookCallback()
+	if r.config.ResearchIntent != nil && r.config.SubagentOrigin == nil {
+		return r.runDeepResearch(ctx, events)
+	}
 	turnState := newTurnState(events.threadID, events.runID, r.effectiveMaxThoughts(), r.config.ModelConfig.Model)
 	transition := TransitionInitial
 	maxOutputContinuations := 0
@@ -2031,7 +2034,16 @@ func (r *Runner) startNativeChildConfigured(
 	childConfig.MaxThoughts = minPositive(childConfig.MaxThoughts, 32)
 	childConfig.MaxToolExecutions = minPositive(childConfig.MaxToolExecutions, 128)
 	applyChildRole(&childConfig, request.Task)
-	inheritParentMemorySnapshot(&childConfig, r.memoryRecallSnapshot, parentConfig.Workspace.Root)
+	applyHostSpawnOptions(&childConfig, request.Host)
+	if request.Host == nil || !request.Host.SkipMemory {
+		inheritParentMemorySnapshot(&childConfig, r.memoryRecallSnapshot, parentConfig.Workspace.Root)
+	} else {
+		childConfig.MemoryRecallStart = nil
+		childConfig.MemoryRecallDrain = nil
+		childConfig.MemoryRecallReset = nil
+		childConfig.CaptureMemoryRecallSnapshot = nil
+		childConfig.MemoryContextProvider = nil
+	}
 
 	conversation := context.NewConversation(nil)
 	conversation.UserInput(request.Prompt)
@@ -2095,6 +2107,38 @@ func applyChildRole(child *AgentConfig, task subagentruntime.TaskSnapshot) {
 		child.MaxThoughts = minPositive(child.MaxThoughts, role.MaxTurns)
 	}
 	child.SystemPrompt = strings.TrimSpace(child.SystemPrompt) + "\n\n" + role.SystemPrompt
+}
+
+func applyHostSpawnOptions(child *AgentConfig, host *subagentruntime.HostSpawnOptions) {
+	if child == nil || host == nil {
+		return
+	}
+	if host.MaxThoughts > 0 {
+		child.MaxThoughts = host.MaxThoughts
+	}
+	if host.MaxToolExecutions > 0 {
+		child.MaxToolExecutions = host.MaxToolExecutions
+	}
+	if strings.TrimSpace(host.SystemPrompt) != "" {
+		child.SystemPrompt = strings.TrimSpace(child.SystemPrompt) + "\n\n" + strings.TrimSpace(host.SystemPrompt)
+	}
+	hidden := append([]string(nil), host.ExtraHidden...)
+	if len(host.ToolAllowlist) > 0 {
+		allowed := map[string]bool{}
+		for _, name := range host.ToolAllowlist {
+			if name = strings.TrimSpace(name); name != "" {
+				allowed[name] = true
+			}
+		}
+		if child.ToolAvailabilitySnapshot != nil {
+			for _, entry := range child.ToolAvailabilitySnapshot.Entries() {
+				if !allowed[entry.Definition.Name] {
+					hidden = append(hidden, entry.Definition.Name)
+				}
+			}
+		}
+	}
+	child.ToolExposure.ExtraHidden = appendUniqueStrings(child.ToolExposure.ExtraHidden, hidden...)
 }
 
 func inheritParentMemorySnapshot(child *AgentConfig, snapshot *MemoryRecallSnapshot, parentWorkspaceRoot string) {
@@ -3143,10 +3187,48 @@ func (e *runEventEmitter) emitToolResultBatch(
 		live = append(live, artifact)
 	}
 	if e.recorder != nil {
-		return e.persistDurableBatch(ctx, "tool_result", records, live...)
+		if err := e.persistDurableBatch(ctx, "tool_result", records, live...); err != nil {
+			return err
+		}
+		return e.reportToolResult(ctx, result)
 	}
 	emitLive(e.sink, live...)
+	return e.reportToolResult(ctx, result)
+}
+
+func (e *runEventEmitter) reportToolResult(ctx stdcontext.Context, result ToolExecutionResult) error {
+	if e == nil || e.subagentProgress == nil || result.IsError {
+		return nil
+	}
+	if result.Name != "WebFetch" && result.Name != "Read" {
+		return nil
+	}
+	receipt := &subagentruntime.HostToolReceipt{
+		ToolCallID: result.ToolCallID,
+		ToolName:   result.Name,
+		Details:    researchReceiptDetails(result.Name, result.Outcome.Details),
+	}
+	if err := e.subagentProgress(ctx, subagentruntime.ProgressUpdate{HostToolReceipt: receipt}); err != nil {
+		return e.notePersistenceFailure("subagent_tool_receipt", err)
+	}
 	return nil
+}
+
+func researchReceiptDetails(toolName string, details map[string]any) map[string]any {
+	keys := []string(nil)
+	switch toolName {
+	case "WebFetch":
+		keys = []string{"requested_url", "final_url", "title", "fetched_at", "content_sha256", "http_status", "content_type", "truncated"}
+	case "Read":
+		keys = []string{"file_path", "sha256", "mime_type", "size", "mtime"}
+	}
+	filtered := make(map[string]any, len(keys))
+	for _, key := range keys {
+		if value, ok := details[key]; ok {
+			filtered[key] = value
+		}
+	}
+	return filtered
 }
 
 func isACPEventType(t AwakenEventType) bool {

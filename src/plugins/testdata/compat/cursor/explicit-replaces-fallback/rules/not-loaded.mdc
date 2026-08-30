@@ -1,0 +1,5 @@
+---
+description: Default rule replaced by manifest.
+alwaysApply: true
+---
+Do not load.

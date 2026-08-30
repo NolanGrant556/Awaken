@@ -25,7 +25,7 @@ type hookModelDecision struct {
 
 func (r *Runner) executeModelHook(ctx context.Context, input hookruntime.InputEnvelope, hook hookruntime.CompiledHook) (hookruntime.Response, hookruntime.Outcome, error) {
 	started := time.Now()
-	out := hookruntime.Outcome{InvocationID: input.InvocationID, HookID: input.HookID, Event: input.Event, SourceKind: hook.SourceKind, Status: "failed", SpawnState: "started", ProcessState: "running", Action: "continue"}
+	out := hookruntime.Outcome{InvocationID: input.InvocationID, HookID: input.HookID, Event: input.Event, SourceKind: hook.SourceKind, PluginName: hook.PluginName, PluginDigest: hook.PluginDigest, LogicalID: hook.LogicalID, RevisionID: hook.RevisionID, Status: "failed", SpawnState: "started", ProcessState: "running", Action: "continue"}
 	var decision hookModelDecision
 	var err error
 	if hook.Command.Type == "prompt" {

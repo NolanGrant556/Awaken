@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -108,6 +109,36 @@ func TestRunServiceReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("run did not reach finished state")
+}
+
+func TestRunServicePinsAndReleasesPluginGeneration(t *testing.T) {
+	releaseRun := make(chan struct{})
+	started := make(chan struct{})
+	var released atomic.Int32
+	service := NewRunService(nil, func(*agentcore.Agent) Executor {
+		return ExecutorFunc(func(context.Context, string, agentcore.EventSink) (string, error) {
+			close(started)
+			<-releaseRun
+			return "done", nil
+		})
+	})
+	service.SetPluginRuntimeLeaseProvider(func() (string, func(), error) {
+		return "generation-1", func() { released.Add(1) }, nil
+	})
+	run, err := service.StartRun(StartRunRequest{Input: "hello", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	if snapshot, _ := service.GetRun(run.RunID); snapshot.PluginGeneration != "generation-1" || released.Load() != 0 {
+		t.Fatalf("run=%#v released=%d", snapshot, released.Load())
+	}
+	close(releaseRun)
+	waitForRunTerminal(t, service, run.RunID)
+	service.drainRunWorkers()
+	if released.Load() != 1 {
+		t.Fatalf("release count=%d", released.Load())
+	}
 }
 
 func TestRunServiceUsesModelProfileForNewAndExistingThreads(t *testing.T) {

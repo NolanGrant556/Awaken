@@ -16,9 +16,18 @@ const (
 )
 
 var (
-	pluginSkillRootsMu sync.RWMutex
-	pluginSkillRoots   []string
+	pluginSkillRootsMu    sync.RWMutex
+	pluginSkillRoots      []string
+	pluginSkillSelections map[string]PluginSkillSelection
 )
+
+// PluginSkillSelection identifies one exact Skill package contributed by an
+// installed Plugin. Plugin Store owns selection and enablement; discovery
+// owns parsing the package at this immutable path.
+type PluginSkillSelection struct {
+	PluginName  string
+	PackageRoot string
+}
 
 // SetPluginSkillRoots replaces the plugin source roots consumed by local
 // discovery. The unique owner is the Core plugin store; tests inject roots
@@ -27,6 +36,29 @@ func SetPluginSkillRoots(roots []string) {
 	pluginSkillRootsMu.Lock()
 	defer pluginSkillRootsMu.Unlock()
 	pluginSkillRoots = append([]string(nil), roots...)
+	pluginSkillSelections = nil
+}
+
+// SetPluginSkillSelections replaces the exact package selections contributed
+// by Plugin Store. It supports vendor layouts where Skill packages are not
+// direct children of a fixed <plugin>/skills directory.
+func SetPluginSkillSelections(selections []PluginSkillSelection) {
+	pluginSkillRootsMu.Lock()
+	defer pluginSkillRootsMu.Unlock()
+	pluginSkillRoots = pluginSkillRoots[:0]
+	pluginSkillSelections = make(map[string]PluginSkillSelection, len(selections))
+	for _, selection := range selections {
+		root := cleanAbsoluteDir(selection.PackageRoot, "")
+		if root == "" || strings.TrimSpace(selection.PluginName) == "" {
+			continue
+		}
+		selection.PackageRoot = root
+		if _, exists := pluginSkillSelections[root]; exists {
+			continue
+		}
+		pluginSkillSelections[root] = selection
+		pluginSkillRoots = append(pluginSkillRoots, root)
+	}
 }
 
 // PluginSkillRoots returns a copy of the current plugin source roots.
@@ -34,6 +66,13 @@ func PluginSkillRoots() []string {
 	pluginSkillRootsMu.RLock()
 	defer pluginSkillRootsMu.RUnlock()
 	return append([]string(nil), pluginSkillRoots...)
+}
+
+func pluginSkillSelection(root string) (PluginSkillSelection, bool) {
+	pluginSkillRootsMu.RLock()
+	defer pluginSkillRootsMu.RUnlock()
+	selection, ok := pluginSkillSelections[filepath.Clean(root)]
+	return selection, ok
 }
 
 // LocalSourceDirs builds the complete production discovery contract consumed

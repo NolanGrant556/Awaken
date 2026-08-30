@@ -139,13 +139,17 @@ type Schedule struct {
 // reuse StartRun's Skill/Plugin/capability revalidation instead of trusting
 // Renderer paths or package metadata.
 type ComposerTokenPayload struct {
-	CapabilityID  string `json:"capabilityId,omitempty"`
-	SkillID       string `json:"skillId,omitempty"`
-	PluginName    string `json:"pluginName,omitempty"`
-	PluginDigest  string `json:"pluginDigest,omitempty"`
-	SourceOrigin  string `json:"sourceOrigin,omitempty"`
-	SkillFilePath string `json:"skillFilePath,omitempty"`
-	RootDir       string `json:"rootDir,omitempty"`
+	CapabilityID         string `json:"capabilityId,omitempty"`
+	SkillID              string `json:"skillId,omitempty"`
+	PluginName           string `json:"pluginName,omitempty"`
+	PluginDigest         string `json:"pluginDigest,omitempty"`
+	RuleLogicalID        string `json:"ruleLogicalId,omitempty"`
+	CommandLogicalID     string `json:"commandLogicalId,omitempty"`
+	CommandArgumentsJSON string `json:"commandArguments,omitempty"`
+	AgentLogicalID       string `json:"agentLogicalId,omitempty"`
+	SourceOrigin         string `json:"sourceOrigin,omitempty"`
+	SkillFilePath        string `json:"skillFilePath,omitempty"`
+	RootDir              string `json:"rootDir,omitempty"`
 }
 
 // ComposerToken preserves the structured Skill, Plugin, or capability

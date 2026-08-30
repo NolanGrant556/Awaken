@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -25,17 +26,20 @@ import (
 	"awaken/src/desktopdata"
 	"awaken/src/filestore"
 	"awaken/src/hookruntime"
+	"awaken/src/instructions"
 	"awaken/src/llm"
 	"awaken/src/mcpclient"
 	"awaken/src/memory"
 	"awaken/src/modelprofile"
 	"awaken/src/networkroute"
+	"awaken/src/pluginrules"
 	"awaken/src/plugins"
 	"awaken/src/runtime"
 	"awaken/src/scheduledtask"
 	"awaken/src/server"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
+	"awaken/src/subagentruntime"
 	"awaken/src/tool"
 	_ "awaken/src/tools"
 	bashtool "awaken/src/tools/bash"
@@ -86,7 +90,8 @@ func main() {
 	} else if avail := pluginStore.Available(); avail != nil {
 		log.Printf("[plugins] store fail closed: %v", avail)
 	} else {
-		skills.SetPluginSkillRoots(pluginStore.EnabledSkillRoots())
+		skills.SetPluginSkillSelections(pluginStore.EnabledSkillSelections())
+		subagentruntime.SetRoleResolver(pluginStore.ResolvePluginAgentRole)
 	}
 	plugintool.SetStore(pluginStore)
 	manager := buildMCPManager(defaultWorkspace, pluginStore)
@@ -95,10 +100,10 @@ func main() {
 	if pluginStore != nil {
 		pluginStore.SetOnChange(func() {
 			if pluginStore.Available() != nil {
-				skills.SetPluginSkillRoots(nil)
+				skills.SetPluginSkillSelections(nil)
 				return
 			}
-			skills.SetPluginSkillRoots(pluginStore.EnabledSkillRoots())
+			skills.SetPluginSkillSelections(pluginStore.EnabledSkillSelections())
 			applyPluginMCPServers(manager, pluginStore)
 		})
 	}
@@ -228,6 +233,39 @@ func main() {
 			})
 		},
 	)
+	manager.SetElicitationHandler(func(ctx context.Context, request mcpclient.ElicitationRequest) (mcpclient.ElicitationResult, error) {
+		identity, ok := tool.ToolExecutionIdentityFromContext(ctx)
+		if !ok || strings.TrimSpace(identity.RunID) == "" {
+			return mcpclient.ElicitationResult{Action: "cancel"}, nil
+		}
+		mode := strings.TrimSpace(request.Mode)
+		if mode == "" {
+			mode = "form"
+		}
+		recoveries := []string{"submit_form", "cancel"}
+		if mode == "url" {
+			recoveries = []string{"open_url", "confirm_done", "cancel"}
+		}
+		answer, err := runService.AwaitExternalInteractionForm(ctx, identity.RunID, agentcore.AwakenEvent{
+			Type: agentcore.ExternalInteractionRequestedType, Timestamp: time.Now().UTC(),
+			InteractionID:   fmt.Sprintf("mcp_elicitation_%d", time.Now().UnixNano()),
+			InteractionKind: "mcp-elicitation", InteractionTitle: "MCP 请求确认",
+			InteractionSafeMessage: request.Message, InteractionVerificationURL: request.URL,
+			InteractionProvider: request.ServerName, InteractionRecoveries: recoveries,
+			InteractionFormSchema: request.RequestedSchema,
+		})
+		if err != nil {
+			return mcpclient.ElicitationResult{}, err
+		}
+		switch answer.Resolution {
+		case agentcore.ExternalInteractionCompleted:
+			return mcpclient.ElicitationResult{Action: "accept", Content: answer.Content}, nil
+		case agentcore.ExternalInteractionCancelled:
+			return mcpclient.ElicitationResult{Action: "cancel"}, nil
+		default:
+			return mcpclient.ElicitationResult{Action: "decline"}, nil
+		}
+	})
 	if hookStore, hookErr := hookruntime.NewStore(desktopdata.AwakenHomeRoot()); hookErr != nil {
 		log.Printf("[hooks] configuration store unavailable: %v", hookErr)
 	} else {
@@ -239,6 +277,74 @@ func main() {
 		runService.SetComposerPluginValidator(func(name, digest string) error {
 			_, err := pluginStore.ResolveComposerSelection(name, digest)
 			return err
+		})
+		runService.SetPluginRuleProvider(func(tokens []runtime.ComposerToken, workspace runtime.WorkspaceConfig) ([]instructions.ExtraSource, error) {
+			var manual []pluginrules.Selection
+			var filePaths []string
+			for _, token := range tokens {
+				switch token.Type {
+				case "rule":
+					selection := pluginrules.Selection{PluginName: strings.TrimSpace(token.Payload.PluginName), PluginDigest: strings.TrimSpace(token.Payload.PluginDigest), LogicalID: strings.TrimSpace(token.Payload.RuleLogicalID)}
+					if selection.PluginName == "" || selection.PluginDigest == "" || selection.LogicalID == "" {
+						return nil, runtime.ErrInvalidInput
+					}
+					if err := pluginStore.ResolveRuleSelection(selection.PluginName, selection.PluginDigest, selection.LogicalID); err != nil {
+						return nil, err
+					}
+					manual = append(manual, selection)
+				case "file":
+					if token.Payload.RelativePath != "" {
+						filePaths = append(filePaths, token.Payload.RelativePath)
+					} else if token.Payload.Path != "" && workspace.WorkspaceRoot != "" {
+						if relative, err := filepath.Rel(workspace.WorkspaceRoot, token.Payload.Path); err == nil {
+							filePaths = append(filePaths, relative)
+						}
+					}
+				}
+			}
+			return pluginStore.RuleInstructionSources(manual, filePaths), nil
+		})
+		runService.SetPluginCommandExpander(func(name, digest, logicalID string, arguments []string) (string, error) {
+			expansion, err := pluginStore.ExpandCommand(name, digest, logicalID, arguments)
+			if err != nil {
+				return "", err
+			}
+			return expansion.Prompt, nil
+		})
+		runService.SetPluginHookProvider(func(workspace runtime.WorkspaceConfig) ([]hookruntime.CompiledHook, []hookruntime.SourceReceipt, []hookruntime.Diagnostic, error) {
+			return pluginStore.CompilePluginHooks(workspace.WorkspaceRoot)
+		})
+		runService.SetPluginMCPToolExecutor(hookruntime.MCPToolExecutorFunc(func(ctx context.Context, hook hookruntime.CompiledHook, arguments map[string]any) (string, error) {
+			identity, err := pluginStore.ResolveHookMCPTool(hook.PluginName, hook.PluginDigest, hook.Command.MCPServer, hook.Command.MCPTool)
+			if err != nil {
+				return "", err
+			}
+			result, err := manager.CallTool(ctx, mcpclient.McpToolName(identity, hook.Command.MCPTool), arguments)
+			if err != nil {
+				return "", err
+			}
+			encoded, err := json.Marshal(result)
+			if err != nil {
+				return "", err
+			}
+			if len(encoded) > 8*1024 {
+				encoded = append(encoded[:8*1024], []byte("...")...)
+			}
+			return string(encoded), nil
+		}))
+		runService.SetPluginAgentResolver(func(name, digest, logicalID string) (runtime.PluginAgentSelection, error) {
+			role, err := pluginStore.ResolveAgentSelection(name, digest, logicalID)
+			if err != nil {
+				return runtime.PluginAgentSelection{}, err
+			}
+			return runtime.PluginAgentSelection{AgentType: role.Type, ReadOnly: role.ReadOnly}, nil
+		})
+		runService.SetPluginRuntimeLeaseProvider(func() (string, func(), error) {
+			lease, err := pluginStore.AcquireRuntimeLease()
+			if err != nil {
+				return "", nil, err
+			}
+			return lease.Generation, func() { pluginStore.ReleaseRuntimeLease(lease.ID) }, nil
 		})
 	}
 

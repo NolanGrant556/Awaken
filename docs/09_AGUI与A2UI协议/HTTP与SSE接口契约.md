@@ -41,6 +41,7 @@ POST   /v1/runs/{run_id}/subagents/{task_id}/messages
 POST   /v1/runs/{run_id}/subagents/{task_id}/cancel
 POST   /v1/runs/{run_id}/user-questions/{question_id}/answer
 POST   /v1/runs/{run_id}/user-questions/{question_id}/cancel
+POST   /v1/runs/{run_id}/external-interactions/{interaction_id}/resolve
 GET    /v1/runs/{run_id}/audit
 POST   /v1/shutdown
 ```
@@ -56,6 +57,8 @@ POST   /v1/shutdown
 Hook routes 只有 `RunService` 注入时注册，业务合同由 [Hook 产品与架构契约](../04_工具权限与审批/Hook产品与架构契约.md)拥有。GET 的 Settings 检查 DTO 返回 snapshot identity、enabled count、来源 receipt/诊断，以及 Core 严格解析和归一化后的静态 Hook 详情；详情可以包含命令 argv、URL、matcher 或 prompt 供当前用户在信任前审查，但不包含 secret 引用值、运行输入、环境或输出，也不进入 run snapshot/Journal。trust 绑定 `projectId + canonical sourcePath + digest`，revoke 绑定 project/source，均只影响后续 run。run 内 `hook_invocation_started/completed` 分别投影为 `AWAKEN_HOOK_STARTED/COMPLETED`；wire 只含 invocation/Hook/event/source identity、status/action/reason、duration 与有界 preview，不含 command、配置路径、输入正文、secret env 或完整 stdout/stderr。
 
 Subagent list/detail/cancel/message route 只操作请求 run 的当前 task registry；run/task 不匹配返回 404。message body 只接受 `{content, idempotency_key}`，先耐久再入队；终态 task 返回 409 `subagent_not_running`。完整状态、取消和恢复边界见 [02 原生 Subagent 产品与架构契约](../02_主智能体闭环/原生Subagent产品与架构契约.md)。
+
+外部交互 resolve 接受 `resolution=completed|cancelled|expired|failed` 和可选 `content`。`content` 只用于把 MCP form 答案交还当前 run 中正在等待的协议调用，不进入 resolved AG-UI event 或 Journal；普通外部授权不提交该字段。`external_interaction_requested` 对 MCP 表单携带 `interactionKind="mcp-elicitation"` 与 `interactionFormSchema`，schema 只描述输入控件，不携带用户填写值。不存在、已终态或已解析的 interaction 分别按当前 handler 返回 404/409，Renderer 不得乐观移除失败项。
 
 ### 3.2 项目与可恢复删除
 
@@ -112,15 +115,27 @@ GET    /v1/plugins/{name}
 POST   /v1/plugins/{name}/commit
 POST   /v1/plugins/{name}/enable
 POST   /v1/plugins/{name}/disable
-POST   /v1/plugins/{name}/upgrade
 DELETE /v1/plugins/{name}
 POST   /v1/plugins/{name}/servers/{short}/enable
 POST   /v1/plugins/{name}/servers/{short}/disable
+GET    /v1/plugins/{name}/components
+GET    /v1/plugins/{name}/components/{kind}/{logicalId}
+PUT    /v1/plugins/{name}/components/{kind}/{logicalId}/source
+PATCH  /v1/plugins/{name}/components/{kind}/{logicalId}/state
+PATCH  /v1/plugins/{name}/components/rule/{logicalId}/activation
+POST   /v1/plugins/{name}/commands/{logicalId}/expand
+POST   /v1/plugins/{name}/commands/{logicalId}/invoke
+POST   /v1/plugins/{name}/agents/{logicalId}/invoke
+GET    /v1/plugins/{name}/hooks/{logicalId}/receipts
+POST   /v1/plugins/{name}/hooks/{logicalId}/receipts/{receiptId}/retry
+PATCH  /v1/plugins/{name}/mcp/{logicalId}/tools/{toolName}/state
+GET    /v1/plugins/{name}/configuration
+PUT    /v1/plugins/{name}/configuration
 ```
 
 `/v1/mcp/servers*` 依赖 MCP manager；connector routes 依赖 registry。Skill list/install/preview/delete/enable/disable 始终注册，registry 缺失时返回 503。`GET /v1/skills` 可按主文件夹优先重复提交 `projectRoot` query；Core 把这些值视为同一个项目的有序文件夹组，在一次 discovery 中合并并返回每条 project Skill 的实际 `projectPath`。只提交一次保持原单文件夹语义。`POST /v1/skills/{id}/execute` 未注册，只是保留 handler。Skill 预览与删除的业务合同由 [08 技能](../08_技能/索引.md) 拥有。
 
-`/v1/plugins*` 始终注册；`PluginStore` 缺失返回 503 `PLUGINS_UNAVAILABLE`，`plugins.json` 损坏返回 503 `PLUGIN_STATE_CORRUPT`。`POST /v1/plugins/validate` 只隔离物化并校验 `source`，返回 identity、digest、组件计数与 diagnostics，不写安装树或刷新运行时；Desktop 随后的 `POST /v1/plugins/install` 携带该 `expectedDigest`，来源变化返回 409 `PLUGIN_SOURCE_CHANGED`。未携带 `expectedDigest` 的既有安装调用保持兼容。`POST /v1/plugins/{name}/commit` 只接受修改前记录的 `expectedDigest`，CAS 冲突返回 409 `PLUGIN_RECORDED_DIGEST_CHANGED`，非法或不稳定的在线树返回 400 `PLUGIN_INVALID`。业务合同由 [14 插件](../14_插件/索引.md) 拥有。Renderer 只通过 Main `requestRuntime` 调用，不直接读写插件目录或状态文件。
+`/v1/plugins*` 始终注册；Store 缺失返回 503，状态损坏 fail closed。validate/install 的 source kind 只接受 `local_path`，`remote_url` 与 `remote_git` 明确拒绝；Desktop bridge 的 `local_path` 只能来自 Main 的 ZIP-only picker，受控 Plugin Creator 才能提交候选目录。validate 只隔离物化，不写安装树或运行组件；install 同时复验 expected Plugin digest。logicalId path 参数使用 Core 返回的 base64url 值，server 不接受 Renderer 自造路径。component source PUT 当前只接受 `kind=mcp_server`，body 为 `{expectedDigest, source}`；Core 根据 logicalId 解析精确文件，在 staging 完整校验后以 digest CAS 原子保存，Renderer 不提交路径。成功响应为 `{plugin, revision, changed}`；提交与当前文件完全相同的文本返回 `changed=false`，不改 digest、revision 或运行时。源文件内容、manifest/identity 或 containment 校验失败返回 400 `MCP_SOURCE_INVALID`，stale digest 与 active generation 分别保持 409。component/config mutation 都返回 revision；活动 run lease 期间返回 409 `RUNTIME_GENERATION_IN_USE`。Hook receipt GET 的 retention 当前为 `memory_only`；retry 是无原 run context 的诊断执行。业务语义由 [14 插件](../14_插件/索引.md) 与相应 runtime 域拥有。
 
 `GET /v1/composer-catalog/events` 是 Main 常驻消费的 SSE 失效流。每次连接先发送当前 `{revision, kind:"snapshot"}`；Skill Registry 或 Plugin Store 的成功 catalog mutation 使 revision 单调递增并发送 `kind=skills|plugins`。事件不携带 Skill/Plugin 数据、路径或配置，Renderer 收到后只能通过 typed `listSkills/listPlugins` 按当前 workspace 与 marker 重读权威目录；重新连接不回放历史 mutation，因为 snapshot revision 与每次打开直接重读共同保证当前状态。
 

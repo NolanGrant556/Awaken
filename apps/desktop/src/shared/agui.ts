@@ -437,6 +437,7 @@ export type AguiEvent = {
   questionAnswer?: string;
   questionResolution?: "answered" | "cancelled";
   interactionId?: string;
+  interactionKind?: string;
   interactionResolution?: string;
   interactionTitle?: string;
   interactionSafeMessage?: string;
@@ -444,6 +445,7 @@ export type AguiEvent = {
   interactionQrImageUrl?: string;
   interactionProvider?: string;
   interactionRecoveries?: string[];
+  interactionFormSchema?: Record<string, unknown>;
   subagentTaskId?: string;
   subagentAgentId?: string;
   subagentParentAgentId?: string;

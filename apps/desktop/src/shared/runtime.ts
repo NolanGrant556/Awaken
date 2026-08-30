@@ -5,7 +5,15 @@ import type { DesktopUpdateSnapshot } from "./desktop-update.js";
 
 export type DesktopPlatform = "macos" | "windows" | "linux";
 
-export type DesktopOperationIssueCode = "credential_unreadable" | "operation_failed";
+export type DesktopOperationIssueCode =
+  | "credential_unreadable"
+  | "composer_selection_invalid"
+  | "plugin_component_unavailable"
+  | "plugin_selection_invalid"
+  | "run_conflict"
+  | "run_input_invalid"
+  | "runtime_unavailable"
+  | "operation_failed";
 
 export type DesktopOperationRecoveryAction = "retry" | "relaunch" | "reenter";
 
@@ -915,14 +923,157 @@ export type RuntimePluginDiagnostic = {
   code?: string;
   message?: string;
   severity?: string;
+  phase?: string;
+  componentKind?: RuntimePluginComponentKind;
+  componentId?: string;
+  sourcePath?: string;
+  sourceDialect?: RuntimePluginDialect;
+  remediation?: string;
+  rawField?: string;
 };
 
+export type RuntimePluginDialect = "agent_plugins" | "codex" | "claude_code" | "cursor" | string;
+
+export type RuntimePluginComponentKind =
+  | "skill"
+  | "mcp_server"
+  | "rule"
+  | "agent"
+  | "command"
+  | "hook"
+  | "variable"
+  | "app"
+  | "unknown"
+  | string;
+
+export type RuntimePluginMappingState =
+  | "native"
+  | "adapted"
+  | "recognized_unsupported"
+  | "ignored_by_dialect"
+  | "invalid"
+  | string;
+
 export type RuntimePluginSource = {
-  kind: "local_path" | "remote_url" | "remote_git" | string;
-  path?: string;
-  url?: string;
-  ref?: string;
-  subpath?: string;
+  kind: "local_path";
+  path: string;
+  dialectHint?: RuntimePluginDialect;
+  selectedDialect?: RuntimePluginDialect;
+};
+
+export type RuntimePluginVariableSpec = {
+  key: string;
+  type: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  default?: unknown;
+  enum?: unknown[];
+  const?: unknown;
+  secret?: boolean;
+  multiple?: boolean;
+  minimum?: number;
+  maximum?: number;
+};
+
+export type RuntimePluginComponent = {
+  logicalId: string;
+  logicalIdEncoded: string;
+  revisionId?: string;
+  kind: RuntimePluginComponentKind;
+  declaredName?: string;
+  derivedName?: string;
+  displayName?: string;
+  description?: string;
+  sourceDialect: RuntimePluginDialect;
+  sourceManifestPath?: string;
+  sourcePath?: string;
+  sourceDigest?: string;
+  mappingState: RuntimePluginMappingState;
+  validation: string;
+  canonicalProvenance?: string;
+  secondaryProvenance?: string[];
+  diagnostics?: RuntimePluginDiagnostic[];
+  skill?: { path: string; catalogId?: string };
+  mcp?: { shortName?: string; transport?: string; connectionState?: string; toolsLoaded?: boolean; toolCount?: number };
+  rule?: { activation?: string; globs?: string[]; scope?: string };
+  agent?: { model?: string; readOnly?: boolean; maxTurns?: number; timeoutSeconds?: number };
+  command?: { invocationName?: string; argumentHint?: string; acceptsArguments?: boolean; argumentsRequired?: boolean };
+  hook?: { sourceEvent?: string; mappedEvent?: string; matcher?: string; condition?: string; handlerType?: string; scope?: string; timeoutSeconds?: number; async?: boolean; asyncRewake?: boolean };
+  variable?: RuntimePluginVariableSpec;
+  app?: Record<string, unknown>;
+};
+
+export type RuntimePluginComponentState = {
+  component: RuntimePluginComponent;
+  desiredState: string;
+  ruleActivation?: "always" | "file_globs" | "manual" | "model_decides" | string;
+  configurationState: string;
+  runtimeState: string;
+  integrityState: string;
+  mappingState: RuntimePluginMappingState;
+  switchable: boolean;
+};
+
+export type RuntimePluginComponentDetail = {
+  state: RuntimePluginComponentState;
+  preview?: string;
+  source?: string;
+  sourceEditable: boolean;
+  properties?: Record<string, unknown>;
+  resources?: string[];
+  hookReceipts?: RuntimePluginHookReceipt[];
+  hookReceiptRetention?: string;
+};
+
+export type UpdatePluginComponentSourceRequest = {
+  expectedDigest: string;
+  source: string;
+};
+
+export type RuntimePluginComponentSourceResponse = {
+  plugin: RuntimePlugin;
+  revision: number;
+  changed: boolean;
+};
+
+export type RuntimePluginHookReceipt = {
+  id: string;
+  pluginName: string;
+  pluginDigest: string;
+  logicalId: string;
+  revisionId: string;
+  event: string;
+  status: string;
+  action: string;
+  reasonCode?: string;
+  durationMs: number;
+  createdAt: string;
+  retryOf?: string;
+};
+
+export type RuntimePluginHookReceiptResponse = {
+  items: RuntimePluginHookReceipt[];
+  nextCursor?: string;
+  retention: "memory_only" | string;
+};
+
+export type RuntimePluginComponentTotals = {
+  total: number;
+  runnable: number;
+  needsConfiguration: number;
+  invalid: number;
+  unsupported: number;
+  ignored: number;
+};
+
+export type RuntimePluginVariableField = {
+  key: string;
+  schema: RuntimePluginVariableSpec;
+  configured: boolean;
+  masked: boolean;
+  value?: unknown;
+  dependencies?: Array<{ logicalId: string; kind: RuntimePluginComponentKind; name: string }>;
 };
 
 export type RuntimePluginServer = {
@@ -937,6 +1088,7 @@ export type RuntimePluginServer = {
 
 export type RuntimePlugin = {
   name: string;
+  displayName?: string;
   version?: string;
   description?: string;
   author?: { name?: string; email?: string; url?: string };
@@ -945,6 +1097,13 @@ export type RuntimePlugin = {
   license?: string;
   keywords?: string[];
   enabled: boolean;
+  dialect?: RuntimePluginDialect;
+  manifestPath?: string;
+  installationId?: string;
+  configurationState?: string;
+  compatibilityState?: string;
+  componentTotals?: RuntimePluginComponentTotals;
+  componentCounts?: Record<string, number>;
   source: RuntimePluginSource;
   digest?: string;
   installedAt?: string;
@@ -966,6 +1125,22 @@ export type RuntimePluginValidation = {
   targetRoot: string;
   skillCount: number;
   serverCount: number;
+  dialect?: RuntimePluginDialect;
+  manifestPath?: string;
+  components?: RuntimePluginComponent[];
+  componentTotals?: RuntimePluginComponentTotals;
+  candidates?: Array<{
+    dialect: RuntimePluginDialect;
+    manifestPath: string;
+    manifestless?: boolean;
+    identityHint?: string;
+    valid: boolean;
+    reason?: string;
+  }>;
+  requiresSelection?: boolean;
+  selectedDialect?: RuntimePluginDialect;
+  requiredVariables?: string[];
+  processIntents?: Array<{ componentId: string; kind: string; summary: string }>;
   diagnostics: RuntimePluginDiagnostic[];
 };
 
@@ -973,6 +1148,11 @@ export type InstallPluginRequest = {
   source: RuntimePluginSource;
   replace?: boolean;
   expectedDigest?: string;
+  installName?: string;
+};
+
+export type CommitPluginRequest = {
+  expectedDigest: string;
 };
 
 export type InstallPluginResponse = {
@@ -980,9 +1160,33 @@ export type InstallPluginResponse = {
   message: string;
 };
 
+export type RuntimePluginConfigurationResponse = {
+  fields: RuntimePluginVariableField[];
+  revision: number;
+};
+
+export type UpdatePluginConfigurationRequest = {
+  values: Record<string, unknown>;
+  reset?: string[];
+};
+
+export type RuntimePluginComponentStateResponse = {
+  plugin: RuntimePlugin;
+  revision: number;
+};
+
+export type RuntimePluginMcpTool = {
+  name: string;
+  description?: string;
+  enabled: boolean;
+};
+
 export type ComposerTokenType =
   | "skill"
   | "plugin"
+  | "rule"
+  | "command"
+  | "agent"
   | "file"
   | "workflow"
   | "prompt"
@@ -999,6 +1203,19 @@ export type SkillComposerTokenPayload = {
 export type PluginComposerTokenPayload = {
   pluginName: string;
   pluginDigest: string;
+};
+
+export type PluginRuleComposerTokenPayload = PluginComposerTokenPayload & {
+  ruleLogicalId: string;
+};
+
+export type PluginCommandComposerTokenPayload = PluginComposerTokenPayload & {
+  commandLogicalId: string;
+  commandArguments?: string;
+};
+
+export type PluginAgentComposerTokenPayload = PluginComposerTokenPayload & {
+  agentLogicalId: string;
 };
 
 export type ProjectPathComposerTokenPayload = {
@@ -1034,6 +1251,7 @@ export type InstallSkillRequest = {
   fileName: string;
   content?: string;
   contentBase64?: string;
+  sourcePath?: string;
   scope?: "project" | "global";
   projectRoot?: string;
 };
@@ -2269,6 +2487,7 @@ export type AwakenBridge = {
     runId: string,
     interactionId: string,
     resolution: "completed" | "cancelled" | "expired" | "failed",
+    content?: Record<string, unknown>,
   ) => Promise<void>;
   resolveACPPermission: (
     runId: string,
@@ -2355,12 +2574,56 @@ export type AwakenBridge = {
   getPlugin: (name: string) => Promise<RuntimePlugin>;
   validatePlugin: (source: RuntimePluginSource) => Promise<RuntimePluginValidation>;
   installPlugin: (request: InstallPluginRequest) => Promise<InstallPluginResponse>;
+  commitPlugin: (name: string, request: CommitPluginRequest) => Promise<InstallPluginResponse>;
   enablePlugin: (name: string) => Promise<RuntimePlugin>;
   disablePlugin: (name: string) => Promise<RuntimePlugin>;
-  upgradePlugin: (name: string) => Promise<InstallPluginResponse>;
   uninstallPlugin: (name: string) => Promise<{ trashedPath?: string; message: string }>;
   enablePluginServer: (name: string, shortName: string) => Promise<RuntimePlugin>;
   disablePluginServer: (name: string, shortName: string) => Promise<RuntimePlugin>;
+  listPluginComponents: (name: string) => Promise<RuntimePluginComponentState[]>;
+  getPluginComponent: (
+    name: string,
+    kind: RuntimePluginComponentKind,
+    logicalIdEncoded: string,
+  ) => Promise<RuntimePluginComponentDetail>;
+  updatePluginComponentSource: (
+    name: string,
+    kind: RuntimePluginComponentKind,
+    logicalIdEncoded: string,
+    request: UpdatePluginComponentSourceRequest,
+  ) => Promise<RuntimePluginComponentSourceResponse>;
+  setPluginComponentState: (
+    name: string,
+    kind: RuntimePluginComponentKind,
+    logicalIdEncoded: string,
+    enabled: boolean,
+  ) => Promise<RuntimePluginComponentStateResponse>;
+  setPluginMcpToolState: (
+    name: string,
+    logicalIdEncoded: string,
+    toolName: string,
+    enabled: boolean,
+  ) => Promise<RuntimePluginComponentStateResponse>;
+  setPluginRuleActivation: (
+    name: string,
+    logicalIdEncoded: string,
+    activation: "always" | "file_globs" | "manual" | "model_decides",
+  ) => Promise<{ plugin: RuntimePlugin; revision: number }>;
+  listPluginHookReceipts: (
+    name: string,
+    logicalIdEncoded: string,
+    revisionId?: string,
+  ) => Promise<RuntimePluginHookReceiptResponse>;
+  retryPluginHookReceipt: (
+    name: string,
+    logicalIdEncoded: string,
+    receiptId: string,
+  ) => Promise<{ receipt: RuntimePluginHookReceipt; diagnosticOnly: true }>;
+  getPluginConfiguration: (name: string) => Promise<RuntimePluginConfigurationResponse>;
+  updatePluginConfiguration: (
+    name: string,
+    request: UpdatePluginConfigurationRequest,
+  ) => Promise<RuntimePluginConfigurationResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
   getModelPurposeRouting: () => Promise<ModelPurposeRouting>;
@@ -2397,6 +2660,7 @@ export type AwakenBridge = {
   pickAttachments: (defaultPath?: string) => Promise<AttachmentPickResult>;
   pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
   pickPluginSource: (defaultPath?: string) => Promise<WorkspacePickResult>;
+  resolveDroppedPluginSource: (file: File) => Promise<WorkspacePickResult>;
   pickProjectFolders: (defaultPath?: string) => Promise<ProjectFoldersPickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;

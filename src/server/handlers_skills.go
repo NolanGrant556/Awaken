@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -62,6 +64,7 @@ type installSkillRequest struct {
 	FileName        string `json:"fileName"`
 	Content         string `json:"content,omitempty"`
 	ContentBase64   string `json:"contentBase64,omitempty"`
+	SourcePath      string `json:"sourcePath,omitempty"`
 	Scope           string `json:"scope,omitempty"`
 	ProjectRoot     string `json:"projectRoot,omitempty"`
 	OverwritePolicy string `json:"overwritePolicy,omitempty"`
@@ -241,13 +244,24 @@ func (h skillHandlers) handleInstallSkill(w http.ResponseWriter, r *http.Request
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
-	data, err := skillUploadBytes(req)
-	if err != nil {
-		writeErrorJSON(w, http.StatusBadRequest, "INVALID_SKILL_UPLOAD", err.Error())
-		return
+	var pkg skills.SkillPackage
+	var err error
+	if strings.TrimSpace(req.SourcePath) != "" {
+		pkg, err = skillPackageFromSourcePath(req)
+	} else {
+		var data []byte
+		data, err = skillUploadBytes(req)
+		if err != nil {
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_SKILL_UPLOAD", err.Error())
+			return
+		}
+		pkg, err = skills.PackageFromBytes(req.FileName, data)
 	}
-	pkg, err := skills.PackageFromBytes(req.FileName, data)
 	if err != nil {
+		if errors.Is(err, skills.ErrPluginPackageSelected) {
+			writeErrorJSON(w, http.StatusBadRequest, "PLUGIN_PACKAGE_SELECTED", err.Error())
+			return
+		}
 		writeErrorJSON(w, http.StatusBadRequest, "INVALID_SKILL_PACKAGE", err.Error())
 		return
 	}
@@ -502,4 +516,29 @@ func skillUploadBytes(req installSkillRequest) ([]byte, error) {
 		return nil, fmt.Errorf("content is required")
 	}
 	return []byte(req.Content), nil
+}
+
+func skillPackageFromSourcePath(req installSkillRequest) (skills.SkillPackage, error) {
+	if req.Content != "" || req.ContentBase64 != "" {
+		return skills.SkillPackage{}, fmt.Errorf("sourcePath cannot be combined with uploaded content")
+	}
+	clean := filepath.Clean(strings.TrimSpace(req.SourcePath))
+	if !strings.EqualFold(filepath.Ext(clean), ".zip") {
+		return skills.SkillPackage{}, fmt.Errorf("routed Skill source must be a .zip archive")
+	}
+	info, err := os.Lstat(clean)
+	if err != nil {
+		return skills.SkillPackage{}, fmt.Errorf("stat routed Skill source: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return skills.SkillPackage{}, fmt.Errorf("routed Skill source must be a regular .zip archive")
+	}
+	if info.Size() > skills.MaxSkillPackageBytes {
+		return skills.SkillPackage{}, fmt.Errorf("routed Skill source exceeds %d bytes", skills.MaxSkillPackageBytes)
+	}
+	data, err := os.ReadFile(clean)
+	if err != nil {
+		return skills.SkillPackage{}, fmt.Errorf("read routed Skill source: %w", err)
+	}
+	return skills.PackageFromBytes(filepath.Base(clean), data)
 }

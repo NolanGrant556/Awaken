@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,5 +64,33 @@ func TestSessionResolveExternalInteractionMissing(t *testing.T) {
 	session := NewSession("run-1", "thread-1", "input", nil, nil, func() {})
 	if err := session.ResolveExternalInteraction("missing", agentcore.ExternalInteractionCompleted); err != ErrExternalInteractionNotFound {
 		t.Fatalf("expected ErrExternalInteractionNotFound, got %v", err)
+	}
+}
+
+func TestSessionMCPFormAnswerIsReturnedButNotJournaled(t *testing.T) {
+	session := NewSession("run-1", "thread-1", "input", nil, nil, func() {})
+	request := agentcore.AwakenEvent{
+		Type: agentcore.ExternalInteractionRequestedType, InteractionID: "mcp-elicit-1",
+		InteractionKind: "mcp-elicitation", InteractionSafeMessage: "Choose a destination",
+		InteractionFormSchema: map[string]any{"type": "object", "properties": map[string]any{"targetPath": map[string]any{"type": "string"}}},
+	}
+	done := make(chan agentcore.ExternalInteractionAnswer, 1)
+	go func() {
+		answer, _ := session.AwaitExternalInteractionForm(context.Background(), request)
+		done <- answer
+	}()
+	time.Sleep(20 * time.Millisecond)
+	if err := session.ResolveExternalInteractionWithContent("mcp-elicit-1", agentcore.ExternalInteractionCompleted, map[string]any{"targetPath": ".env.local"}); err != nil {
+		t.Fatal(err)
+	}
+	answer := <-done
+	if answer.Resolution != agentcore.ExternalInteractionCompleted || answer.Content["targetPath"] != ".env.local" {
+		t.Fatalf("answer=%#v", answer)
+	}
+	events, _ := session.StreamSnapshot()
+	for _, event := range events {
+		if event.AgentEvent.InteractionResolution == string(agentcore.ExternalInteractionCompleted) && strings.Contains(event.AgentEvent.Content, ".env.local") {
+			t.Fatalf("form content leaked into event: %#v", event.AgentEvent)
+		}
 	}
 }

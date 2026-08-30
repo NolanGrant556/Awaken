@@ -55,4 +55,35 @@ describe("ExternalActionGate", () => {
     expect(html).toContain("取消");
     expect(html).not.toContain("cli-auth-qr-frame");
   });
+
+  it("renders an MCP elicitation flat form with defaults", () => {
+    const html = renderToString(
+      <ExternalActionGate
+        interaction={{
+          id: "mcp-elicit-1",
+          kind: "mcp-elicitation",
+          title: "MCP 请求确认",
+          safeMessage: "Choose where to save the file",
+          provider: "plugin__openai-developers__local",
+          recoveries: ["submit_form", "cancel"],
+          formSchema: {
+            type: "object",
+            properties: {
+              targetPath: { type: "string", title: "Save location", default: ".env.local" },
+            },
+            required: ["targetPath"],
+          },
+        }}
+        onConfirmDone={vi.fn()}
+        onCancel={vi.fn()}
+        onSubmitForm={vi.fn()}
+      />,
+    );
+    expect(html).toContain("mcp-elicitation-form");
+    expect(html).toContain("Save location");
+    expect(html).toContain(".env.local");
+    expect(html).toContain("确认");
+    expect(html).toContain("取消");
+    expect(html).not.toContain("cli-auth-qr-frame");
+  });
 });

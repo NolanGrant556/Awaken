@@ -422,6 +422,7 @@ type Event struct {
 	QuestionAnswer             string           `json:"questionAnswer,omitempty"`
 	QuestionResolution         string           `json:"questionResolution,omitempty"`
 	InteractionID              string           `json:"interactionId,omitempty"`
+	InteractionKind            string           `json:"interactionKind,omitempty"`
 	InteractionResolution      string           `json:"interactionResolution,omitempty"`
 	InteractionTitle           string           `json:"interactionTitle,omitempty"`
 	InteractionSafeMessage     string           `json:"interactionSafeMessage,omitempty"`
@@ -429,6 +430,7 @@ type Event struct {
 	InteractionQRImageURL      string           `json:"interactionQrImageUrl,omitempty"`
 	InteractionProvider        string           `json:"interactionProvider,omitempty"`
 	InteractionRecoveries      []string         `json:"interactionRecoveries,omitempty"`
+	InteractionFormSchema      map[string]any   `json:"interactionFormSchema,omitempty"`
 	// Native run-scoped Subagent fields.
 	SubagentTaskID           string `json:"subagentTaskId,omitempty"`
 	SubagentAgentID          string `json:"subagentAgentId,omitempty"`

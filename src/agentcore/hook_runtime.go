@@ -71,6 +71,7 @@ func (r *Runner) runEndHookCallback() func(context.Context, string, TerminalReas
 
 func (r semanticHookRecorder) InvocationStarted(ctx context.Context, input hookruntime.InputEnvelope, hook hookruntime.CompiledHook) error {
 	payload := map[string]any{"invocation_id": input.InvocationID, "hook_id": input.HookID, "event": input.Event, "source_kind": hook.SourceKind, "status": "started"}
+	addPluginHookIdentity(payload, hook.PluginName, hook.PluginDigest, hook.LogicalID, hook.RevisionID)
 	if r.subagentTaskID != "" {
 		payload["subagent_task_id"] = r.subagentTaskID
 	}
@@ -78,6 +79,7 @@ func (r semanticHookRecorder) InvocationStarted(ctx context.Context, input hookr
 }
 func (r semanticHookRecorder) InvocationCompleted(ctx context.Context, outcome hookruntime.Outcome) error {
 	payload := map[string]any{"invocation_id": outcome.InvocationID, "hook_id": outcome.HookID, "event": outcome.Event, "source_kind": outcome.SourceKind, "status": outcome.Status, "spawn_state": outcome.SpawnState, "process_state": outcome.ProcessState, "action": outcome.Action, "reason_code": outcome.ReasonCode, "reason": outcome.Reason, "duration_ms": outcome.DurationMS, "stdout_digest": outcome.StdoutDigest, "stderr_digest": outcome.StderrDigest, "output_preview": outcome.OutputPreview, "input_digest": outcome.InputDigest, "updated_input_digest": outcome.UpdatedInputDigest}
+	addPluginHookIdentity(payload, outcome.PluginName, outcome.PluginDigest, outcome.LogicalID, outcome.RevisionID)
 	if outcome.ExitCode != nil {
 		payload["exit_code"] = *outcome.ExitCode
 	}
@@ -85,6 +87,14 @@ func (r semanticHookRecorder) InvocationCompleted(ctx context.Context, outcome h
 		payload["subagent_task_id"] = r.subagentTaskID
 	}
 	return r.appendFlushed(ctx, NewSemanticRecord(SemanticKindHookInvocationCompleted, r.threadID, r.runID, r.currentTurn(), "", r.sessionID, payload))
+}
+
+func addPluginHookIdentity(payload map[string]any, name, digest, logicalID, revisionID string) {
+	for key, value := range map[string]string{"plugin_name": name, "plugin_digest": digest, "logical_id": logicalID, "revision_id": revisionID} {
+		if strings.TrimSpace(value) != "" {
+			payload[key] = value
+		}
+	}
 }
 func (r semanticHookRecorder) currentTurn() string {
 	if r.turnID != nil {
@@ -224,6 +234,8 @@ func (a *Agent) ConfigureHookDispatcher() {
 		}
 		dispatcher := hookruntime.NewDispatcher(*cfg.HookAvailabilitySnapshot, path)
 		dispatcher.SetSecretResolver(cfg.HookSecretResolver)
+		dispatcher.SetMCPToolExecutor(cfg.HookAvailabilitySnapshot.MCPToolExecutor)
+		dispatcher.SetReceiptSink(cfg.HookAvailabilitySnapshot.ReceiptSink)
 		// Keep an empty run-scoped dispatcher alive: an explicitly activated
 		// composer Skill may register package-owned Hooks later in this run.
 		cfg.HookDispatcher = dispatcher
@@ -234,11 +246,11 @@ func (a *Agent) ConfigureHookDispatcher() {
 }
 
 func (a *Agent) HookPreflightRequiresPreparedUserMessage() bool {
-	return a != nil && a.config.HookDispatcher != nil && a.config.HookDispatcher.HasHooks()
+	return a != nil && a.config.HookDispatcher != nil && (a.config.HookDispatcher.HasHooks() || a.config.HookDispatcher.HasPendingAsyncContext(a.threadID))
 }
 
 func (a *Agent) RunHookPreflight(ctx context.Context, sink EventSink, userInput string) error {
-	if a == nil || a.config.HookDispatcher == nil || !a.config.HookDispatcher.HasHooks() {
+	if a == nil || a.config.HookDispatcher == nil || !a.config.HookDispatcher.HasHooks() && !a.config.HookDispatcher.HasPendingAsyncContext(a.threadID) {
 		return nil
 	}
 	runner := NewRunner(a.config, a.conversation, a.reqBuilder)
@@ -256,6 +268,18 @@ func (a *Agent) RunHookPreflight(ctx context.Context, sink EventSink, userInput 
 	}
 	if err := runner.persistHookSnapshot(ctx); err != nil {
 		return err
+	}
+	if pending := a.config.HookDispatcher.DrainPendingAsyncContext(a.threadID); len(pending) > 0 {
+		values := make([]string, 0, len(pending))
+		for _, completion := range pending {
+			if value := strings.TrimSpace(completion.AdditionalContext); value != "" {
+				values = append(values, value)
+			}
+		}
+		if len(values) > 0 {
+			runner.installHookContext(hookruntime.Event("AsyncCompletion"), values)
+			runner.rebuildRequestBuilder()
+		}
 	}
 	runStart, err := runner.dispatchHook(ctx, events, hookruntime.EventRunStart, map[string]any{"modelProfileId": a.config.ModelConfig.ProfileID, "hookSnapshotId": a.config.HookAvailabilitySnapshot.SnapshotID})
 	if err != nil {

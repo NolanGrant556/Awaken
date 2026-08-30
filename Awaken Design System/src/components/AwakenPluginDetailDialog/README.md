@@ -6,6 +6,6 @@
 
 - `name` / `version` / `description` / `sourceLabel` / `digest`：只读展示。
 - `skills` / `servers` / `diagnostics`：UI-only 列表。
-- `onPreviewSkill`、`onServerEnabledChange`、`onUpgrade`、`onUninstall`：回调；缺省时对应操作不可用或仅展示。
+- `onPreviewSkill`、`onServerEnabledChange`、`onUninstall`：回调；缺省时对应操作不可用或仅展示。
 
 组件不读取 runtime、不执行安装或卸载。

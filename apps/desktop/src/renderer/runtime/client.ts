@@ -19,6 +19,7 @@ import {
   type AwakenBridge,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
+  type CommitPluginRequest,
   type CliActivation,
   type CliConnectorStateHandler,
   type CliConnectorView,
@@ -90,6 +91,14 @@ import {
   type RuntimeProject,
   type RuntimeProjectOperation,
   type RuntimePlugin,
+  type RuntimePluginComponentDetail,
+  type RuntimePluginComponentKind,
+  type RuntimePluginComponentSourceResponse,
+  type RuntimePluginComponentState,
+  type RuntimePluginComponentStateResponse,
+  type RuntimePluginHookReceipt,
+  type RuntimePluginHookReceiptResponse,
+  type RuntimePluginConfigurationResponse,
   type RuntimePluginSource,
   type RuntimePluginValidation,
   type RuntimeSkill,
@@ -116,6 +125,8 @@ import {
   type ThreadBatchDeleteResult,
   type ThreadModelPreferenceRequest,
   type UpdateMcpServerConfigRequest,
+  type UpdatePluginComponentSourceRequest,
+  type UpdatePluginConfigurationRequest,
   type ProjectFoldersPickResult,
   type UpsertProjectResult,
   type WorkspacePickResult,
@@ -139,6 +150,12 @@ export type SubscribeHandlers = {
 
 const DESKTOP_OPERATION_ISSUE_CODES = new Set<DesktopOperationIssue["code"]>([
   "credential_unreadable",
+  "composer_selection_invalid",
+  "plugin_component_unavailable",
+  "plugin_selection_invalid",
+  "run_conflict",
+  "run_input_invalid",
+  "runtime_unavailable",
   "operation_failed",
 ]);
 const DESKTOP_OPERATION_RECOVERY_ACTIONS = new Set<DesktopOperationRecoveryAction>([
@@ -244,12 +261,56 @@ export type RuntimeClient = {
   getPlugin: (name: string) => Promise<RuntimePlugin>;
   validatePlugin: (source: RuntimePluginSource) => Promise<RuntimePluginValidation>;
   installPlugin: (request: InstallPluginRequest) => Promise<InstallPluginResponse>;
+  commitPlugin: (name: string, request: CommitPluginRequest) => Promise<InstallPluginResponse>;
   enablePlugin: (name: string) => Promise<RuntimePlugin>;
   disablePlugin: (name: string) => Promise<RuntimePlugin>;
-  upgradePlugin: (name: string) => Promise<InstallPluginResponse>;
   uninstallPlugin: (name: string) => Promise<{ trashedPath?: string; message: string }>;
   enablePluginServer: (name: string, shortName: string) => Promise<RuntimePlugin>;
   disablePluginServer: (name: string, shortName: string) => Promise<RuntimePlugin>;
+  listPluginComponents: (name: string) => Promise<RuntimePluginComponentState[]>;
+  getPluginComponent: (
+    name: string,
+    kind: RuntimePluginComponentKind,
+    logicalIdEncoded: string,
+  ) => Promise<RuntimePluginComponentDetail>;
+  updatePluginComponentSource: (
+    name: string,
+    kind: RuntimePluginComponentKind,
+    logicalIdEncoded: string,
+    request: UpdatePluginComponentSourceRequest,
+  ) => Promise<RuntimePluginComponentSourceResponse>;
+  setPluginComponentState: (
+    name: string,
+    kind: RuntimePluginComponentKind,
+    logicalIdEncoded: string,
+    enabled: boolean,
+  ) => Promise<RuntimePluginComponentStateResponse>;
+  setPluginMcpToolState: (
+    name: string,
+    logicalIdEncoded: string,
+    toolName: string,
+    enabled: boolean,
+  ) => Promise<RuntimePluginComponentStateResponse>;
+  setPluginRuleActivation: (
+    name: string,
+    logicalIdEncoded: string,
+    activation: "always" | "file_globs" | "manual" | "model_decides",
+  ) => Promise<{ plugin: RuntimePlugin; revision: number }>;
+  listPluginHookReceipts: (
+    name: string,
+    logicalIdEncoded: string,
+    revisionId?: string,
+  ) => Promise<RuntimePluginHookReceiptResponse>;
+  retryPluginHookReceipt: (
+    name: string,
+    logicalIdEncoded: string,
+    receiptId: string,
+  ) => Promise<{ receipt: RuntimePluginHookReceipt; diagnosticOnly: true }>;
+  getPluginConfiguration: (name: string) => Promise<RuntimePluginConfigurationResponse>;
+  updatePluginConfiguration: (
+    name: string,
+    request: UpdatePluginConfigurationRequest,
+  ) => Promise<RuntimePluginConfigurationResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
   getModelPurposeRouting?: () => Promise<ModelPurposeRouting>;
@@ -368,6 +429,7 @@ export type RuntimeClient = {
     runId: string,
     interactionId: string,
     resolution: "completed" | "cancelled" | "expired" | "failed",
+    content?: Record<string, unknown>,
   ) => Promise<void>;
   resolveACPPermission: (
     runId: string,
@@ -421,6 +483,7 @@ export type RuntimeClient = {
   pickAttachments: (defaultPath?: string) => Promise<AttachmentPickResult>;
   pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
   pickPluginSource: (defaultPath?: string) => Promise<WorkspacePickResult>;
+  resolveDroppedPluginSource: (file: File) => Promise<WorkspacePickResult>;
   pickProjectFolders: (defaultPath?: string) => Promise<ProjectFoldersPickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
@@ -528,12 +591,30 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getPlugin: (name) => bridge.getPlugin(name),
     validatePlugin: (source) => bridge.validatePlugin(source),
     installPlugin: (request) => bridge.installPlugin(request),
+    commitPlugin: (name, request) => bridge.commitPlugin(name, request),
     enablePlugin: (name) => bridge.enablePlugin(name),
     disablePlugin: (name) => bridge.disablePlugin(name),
-    upgradePlugin: (name) => bridge.upgradePlugin(name),
     uninstallPlugin: (name) => bridge.uninstallPlugin(name),
     enablePluginServer: (name, shortName) => bridge.enablePluginServer(name, shortName),
     disablePluginServer: (name, shortName) => bridge.disablePluginServer(name, shortName),
+    listPluginComponents: (name) => bridge.listPluginComponents(name),
+    getPluginComponent: (name, kind, logicalIdEncoded) =>
+      bridge.getPluginComponent(name, kind, logicalIdEncoded),
+    updatePluginComponentSource: (name, kind, logicalIdEncoded, request) =>
+      bridge.updatePluginComponentSource(name, kind, logicalIdEncoded, request),
+    setPluginComponentState: (name, kind, logicalIdEncoded, enabled) =>
+      bridge.setPluginComponentState(name, kind, logicalIdEncoded, enabled),
+    setPluginMcpToolState: (name, logicalIdEncoded, toolName, enabled) =>
+      bridge.setPluginMcpToolState(name, logicalIdEncoded, toolName, enabled),
+    setPluginRuleActivation: (name, logicalIdEncoded, activation) =>
+      bridge.setPluginRuleActivation(name, logicalIdEncoded, activation),
+    listPluginHookReceipts: (name, logicalIdEncoded, revisionId) =>
+      bridge.listPluginHookReceipts(name, logicalIdEncoded, revisionId),
+    retryPluginHookReceipt: (name, logicalIdEncoded, receiptId) =>
+      bridge.retryPluginHookReceipt(name, logicalIdEncoded, receiptId),
+    getPluginConfiguration: (name) => bridge.getPluginConfiguration(name),
+    updatePluginConfiguration: (name, request) =>
+      bridge.updatePluginConfiguration(name, request),
     listModelProviders: () => bridge.listModelProviders(),
     listModelProfiles: () => bridge.listModelProfiles(),
     getModelPurposeRouting: () => bridge.getModelPurposeRouting(),
@@ -750,6 +831,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     pickAttachments: (defaultPath) => bridge.pickAttachments(defaultPath),
     pickDirectory: (defaultPath) => bridge.pickDirectory(defaultPath),
     pickPluginSource: (defaultPath) => bridge.pickPluginSource(defaultPath),
+    resolveDroppedPluginSource: (file) => bridge.resolveDroppedPluginSource(file),
     pickProjectFolders: (defaultPath) => bridge.pickProjectFolders(defaultPath),
     validateWorkspace: (path) => bridge.validateWorkspace(path),
     getSupervisorStatus: () => bridge.getSupervisorStatus(),

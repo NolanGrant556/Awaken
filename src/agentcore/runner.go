@@ -354,6 +354,18 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 			transition = TransitionSubagentNotification
 			continue
 		}
+		// A root response cannot become terminal while a child is still active.
+		// Preserve the attempted answer as context and add a host-owned wait
+		// instruction so the next model boundary must observe the child result.
+		if !response.MaxOutputReached && r.injectActiveSubagentWaitInstruction() > 0 {
+			if response.Content != "" {
+				r.conversation.AssistantOutputWithProviderState(response.Content, nil, response.ProviderOpaqueState)
+			}
+			events.turnFinished(ctx, "", TransitionSubagentNotification)
+			events.resetTurn()
+			transition = TransitionSubagentNotification
+			continue
+		}
 
 		if response.MaxOutputReached {
 			if response.Content != "" {
@@ -496,6 +508,30 @@ func (r *Runner) injectSubagentTerminalNotifications() int {
 		r.conversation.SyntheticUserInput(content, "subagent_terminal_"+snapshot.TaskID)
 	}
 	return len(snapshots)
+}
+
+func (r *Runner) injectActiveSubagentWaitInstruction() int {
+	if r == nil || r.config.SubagentOrigin != nil || r.subagentController == nil {
+		return 0
+	}
+	active := make([]subagentruntime.TaskSnapshot, 0)
+	for _, snapshot := range r.subagentController.List() {
+		if !snapshot.Terminal() {
+			active = append(active, snapshot)
+		}
+	}
+	if len(active) == 0 {
+		return 0
+	}
+	payload, err := json.Marshal(active)
+	if err != nil {
+		return 0
+	}
+	r.conversation.SyntheticUserInput(
+		"Host notification: Subagents are still active. Do not finish the root run yet. Use the native Subagent status/wait actions, wait for terminal results, and integrate them before answering. Active tasks: "+string(payload),
+		"subagent_active_"+r.runID,
+	)
+	return len(active)
 }
 
 func (r *Runner) injectSubagentQueuedMessages() {
@@ -2044,6 +2080,20 @@ func applyChildRole(child *AgentConfig, task subagentruntime.TaskSnapshot) {
 		role, _ = subagentruntime.LookupRole(subagentruntime.AgentTypeExplore)
 	}
 	child.ToolExposure.ExtraHidden = appendUniqueStrings(child.ToolExposure.ExtraHidden, role.DisallowedTools...)
+	if len(role.AllowedTools) > 0 {
+		allowed := map[string]bool{}
+		for _, name := range role.AllowedTools {
+			allowed[strings.TrimSpace(name)] = true
+		}
+		for _, registered := range tool.ListTools() {
+			if !allowed[registered.Name()] {
+				child.ToolExposure.ExtraHidden = appendUniqueStrings(child.ToolExposure.ExtraHidden, registered.Name())
+			}
+		}
+	}
+	if role.MaxTurns > 0 {
+		child.MaxThoughts = minPositive(child.MaxThoughts, role.MaxTurns)
+	}
 	child.SystemPrompt = strings.TrimSpace(child.SystemPrompt) + "\n\n" + role.SystemPrompt
 }
 
@@ -2462,6 +2512,17 @@ func (s runScopedEventSink) AwaitExternalInteraction(ctx stdcontext.Context, req
 		return awaiter.AwaitExternalInteraction(ctx, request)
 	}
 	return "", stdcontext.Canceled
+}
+
+func (s runScopedEventSink) AwaitExternalInteractionForm(ctx stdcontext.Context, request AwakenEvent) (ExternalInteractionAnswer, error) {
+	if s.emitter == nil {
+		return ExternalInteractionAnswer{}, stdcontext.Canceled
+	}
+	s.emitter.fillIDs(&request)
+	if awaiter, ok := s.emitter.sink.(ExternalInteractionFormAwaiter); ok {
+		return awaiter.AwaitExternalInteractionForm(ctx, request)
+	}
+	return ExternalInteractionAnswer{}, stdcontext.Canceled
 }
 
 func (e *runEventEmitter) scopedSink() EventSink {

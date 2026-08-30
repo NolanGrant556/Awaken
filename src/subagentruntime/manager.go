@@ -211,7 +211,13 @@ func (m *Manager) runTask(ctx context.Context, taskID string) {
 	}
 	task.mutationMu.Unlock()
 
-	result, err := m.cfg.Starter(ctx, StartRequest{
+	startCtx := ctx
+	cancel := func() {}
+	if role, ok := LookupRole(snapshot.AgentType); ok && role.Timeout > 0 {
+		startCtx, cancel = context.WithTimeout(ctx, role.Timeout)
+	}
+	defer cancel()
+	result, err := m.cfg.Starter(startCtx, StartRequest{
 		Task: snapshot, Prompt: m.prompt(taskID),
 		ReportProgress: func(progressCtx context.Context, update ProgressUpdate) error {
 			return m.reportProgress(progressCtx, taskID, update)
@@ -223,7 +229,11 @@ func (m *Manager) runTask(ctx context.Context, taskID string) {
 			m.attachWorktree(taskID, receipt)
 		},
 	})
-	if ctx.Err() != nil {
+	if startCtx.Err() != nil {
+		if errors.Is(startCtx.Err(), context.DeadlineExceeded) {
+			m.finish(taskID, StatusFailed, "", "subagent_timeout", "subagent exceeded its role timeout")
+			return
+		}
 		m.finishCancelled(taskID)
 		return
 	}
@@ -326,7 +336,14 @@ func (m *Manager) reportProgress(ctx context.Context, taskID string, update Prog
 	if !changed {
 		return nil
 	}
-	if err := m.persist(ctx, "subagent_progress", snapshot); err != nil {
+	base := context.Background()
+	if ctx != nil {
+		base = context.WithoutCancel(ctx)
+	}
+	persistCtx, cancel := context.WithTimeout(base, 2*time.Second)
+	err := m.persist(persistCtx, "subagent_progress", snapshot)
+	cancel()
+	if err != nil {
 		return err
 	}
 	m.replaceSnapshot(taskID, snapshot)

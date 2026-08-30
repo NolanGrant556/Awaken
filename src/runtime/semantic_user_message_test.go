@@ -181,6 +181,18 @@ func TestComposerTokenLeadingTextSurvivesDurableServiceRestart(t *testing.T) {
 	}
 }
 
+func TestPluginRuleAndCommandTokenIdentityRoundTripsSemanticPayload(t *testing.T) {
+	tokens := []ComposerToken{
+		{ID: "rule", Type: "rule", Label: "rule", Payload: ComposerTokenPayload{PluginName: "acme", PluginDigest: "d1", RuleLogicalID: "rule:ts"}},
+		{ID: "command", Type: "command", Label: "command", Payload: ComposerTokenPayload{PluginName: "acme", PluginDigest: "d1", CommandLogicalID: "command:review", CommandArgumentsJSON: `["app.ts"]`}},
+	}
+	semantic := semanticComposerTokensForRun(tokens)
+	decoded := composerTokensFromSemanticUserMessage(map[string]any{"composer_tokens": semantic})
+	if len(decoded) != 2 || decoded[0] != tokens[0] || decoded[1] != tokens[1] {
+		t.Fatalf("decoded=%#v", decoded)
+	}
+}
+
 func TestSemanticComposerTokensForRunKeepsLeadingText(t *testing.T) {
 	tokens := semanticComposerTokensForRun([]ComposerToken{{
 		ID:          "skill:pptx:user",

@@ -9,10 +9,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"awaken/src/filestore"
+	"awaken/src/plugins/dialect"
+	"awaken/src/plugins/ir"
+	"github.com/google/uuid"
 )
 
 // Install copies a plugin package into the store. Same-name installs abort
@@ -22,33 +26,8 @@ func (s *Store) Install(ctx context.Context, req InstallRequest) (InstallResult,
 		return InstallResult{}, err
 	}
 	var result InstallResult
-	err := s.withLock(func() error {
+	err := s.withMutationLock(func() error {
 		installed, err := s.installLocked(ctx, req)
-		if err != nil {
-			return err
-		}
-		result = installed
-		return nil
-	})
-	if err == nil {
-		s.notify()
-	}
-	return result, err
-}
-
-// Upgrade re-fetches the recorded source. Identical digest is a no-op.
-func (s *Store) Upgrade(ctx context.Context, name string) (InstallResult, error) {
-	var result InstallResult
-	err := s.withLock(func() error {
-		state, err := s.readStateUnlocked()
-		if err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		rec, ok := state.Plugins[name]
-		if !ok {
-			return fmt.Errorf("%w: %s", ErrNotFound, name)
-		}
-		installed, err := s.installLocked(ctx, InstallRequest{Source: rec.Source, Replace: true})
 		if err != nil {
 			return err
 		}
@@ -64,12 +43,13 @@ func (s *Store) Upgrade(ctx context.Context, name string) (InstallResult, error)
 // Uninstall moves the package and data directories to Trash, then drops the record.
 func (s *Store) Uninstall(name string) (string, error) {
 	var trashed string
-	err := s.withLock(func() error {
+	err := s.withMutationLock(func() error {
 		state, err := s.readStateUnlocked()
 		if err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		if _, ok := state.Plugins[name]; !ok {
+		record, ok := state.Plugins[name]
+		if !ok {
 			return fmt.Errorf("%w: %s", ErrNotFound, name)
 		}
 		pkg := filepath.Join(s.packagesRoot, name)
@@ -82,29 +62,83 @@ func (s *Store) Uninstall(name string) (string, error) {
 				return err
 			}
 		}
+		rollbackRoot, err := os.MkdirTemp(s.stagingRoot, "uninstall-*")
+		if err != nil {
+			return fmt.Errorf("create uninstall rollback directory: %w", err)
+		}
+		defer os.RemoveAll(rollbackRoot)
+		packageBackup := filepath.Join(rollbackRoot, "package")
+		dataBackup := filepath.Join(rollbackRoot, "data")
+		packageStaged, dataStaged := false, false
+		restore := func() error {
+			var restoreErrors []string
+			if packageStaged {
+				if restoreErr := restorePluginPackage(pkg, packageBackup); restoreErr != nil {
+					restoreErrors = append(restoreErrors, "package: "+restoreErr.Error())
+				}
+			}
+			if dataStaged {
+				if restoreErr := restorePluginPackage(data, dataBackup); restoreErr != nil {
+					restoreErrors = append(restoreErrors, "data: "+restoreErr.Error())
+				}
+			}
+			if len(restoreErrors) > 0 {
+				return fmt.Errorf("restore uninstalled plugin: %s", strings.Join(restoreErrors, "; "))
+			}
+			return nil
+		}
 		if info, statErr := os.Lstat(pkg); statErr == nil {
 			if info.Mode()&os.ModeSymlink != 0 {
 				return fmt.Errorf("%w: package is a symlink", ErrReplaceTrashUnavailable)
 			}
-			moved, trashErr := s.trash.TrashPath(pkg)
-			if trashErr != nil {
-				return fmt.Errorf("%w: %v", ErrReplaceTrashUnavailable, trashErr)
+			if err := os.Rename(pkg, packageBackup); err != nil {
+				return fmt.Errorf("stage plugin package for uninstall: %w", err)
 			}
-			trashed = moved.TrashedPath
+			packageStaged = true
 		} else if !os.IsNotExist(statErr) {
 			return statErr
 		}
-		if _, statErr := os.Lstat(data); statErr == nil {
-			moved, trashErr := s.trash.TrashPath(data)
-			if trashErr != nil {
-				return fmt.Errorf("%w: %v", ErrReplaceTrashUnavailable, trashErr)
+		if info, statErr := os.Lstat(data); statErr == nil {
+			if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+				_ = restore()
+				return fmt.Errorf("%w: plugin data is not a regular directory", ErrReplaceTrashUnavailable)
 			}
-			if trashed == "" {
-				trashed = moved.TrashedPath
+			if err := os.Rename(data, dataBackup); err != nil {
+				restoreErr := restore()
+				if restoreErr != nil {
+					return fmt.Errorf("stage plugin data for uninstall: %v; %w", err, restoreErr)
+				}
+				return fmt.Errorf("stage plugin data for uninstall: %w", err)
 			}
+			dataStaged = true
+		} else if !os.IsNotExist(statErr) {
+			_ = restore()
+			return statErr
 		}
 		delete(state.Plugins, name)
-		return s.writeStateUnlocked(state)
+		if err := s.writeStateUnlocked(state); err != nil {
+			if restoreErr := restore(); restoreErr != nil {
+				return fmt.Errorf("write plugin state: %v; %w", err, restoreErr)
+			}
+			return err
+		}
+		moved, trashErr := s.trash.TrashPath(rollbackRoot)
+		if trashErr != nil {
+			restoreErr := restore()
+			state.Plugins[name] = record
+			stateErr := s.writeStateUnlocked(state)
+			if restoreErr != nil || stateErr != nil {
+				return fmt.Errorf("%w: %v; package rollback: %v; state rollback: %v", ErrReplaceTrashUnavailable, trashErr, restoreErr, stateErr)
+			}
+			return fmt.Errorf("%w: %v", ErrReplaceTrashUnavailable, trashErr)
+		}
+		trashed = moved.TrashedPath
+		if s.secrets != nil {
+			for _, value := range record.Variables {
+				_ = s.secrets.Delete(value.SecretRef)
+			}
+		}
+		return nil
 	})
 	if err == nil {
 		s.notify()
@@ -123,21 +157,48 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 	}
 	defer os.RemoveAll(staging)
 
-	if err := materializeSource(ctx, req.Source, staging); err != nil {
+	if err := materializeSource(req.Source, staging); err != nil {
 		return InstallResult{}, err
 	}
-	pluginRoot, err := locatePluginRoot(staging)
+	resolved, err := resolvePackage(staging, ResolveOptions{
+		DialectHint: req.Source.DialectHint, SelectedDialect: req.Source.SelectedDialect,
+		AllowManifestless: req.Source.DialectHint == "claude_code" || req.Source.SelectedDialect == "claude_code",
+	})
 	if err != nil {
 		return InstallResult{}, err
 	}
-	parsed, err := loadManifestFile(pluginRoot)
-	if err != nil {
-		return InstallResult{}, err
+	if resolved.RequiresSelection {
+		return InstallResult{}, fmt.Errorf("%w: multiple plugin manifests require an explicit dialect selection", ErrManifestInvalid)
 	}
-	name := parsed.Manifest.Name
+	pluginRoot := resolved.Root
 	digest, err := digestTree(pluginRoot)
 	if err != nil {
 		return InstallResult{}, fmt.Errorf("compute plugin digest: %w", err)
+	}
+	normalized, err := dialect.NewDefaultRegistry().Parse(pluginRoot, resolved.Candidate, dialect.ParseOptions{PluginDigest: digest})
+	if err != nil {
+		return InstallResult{}, err
+	}
+	name := normalized.Identity.Name
+	if resolved.Candidate.Manifestless {
+		name = strings.TrimSpace(req.InstallName)
+		if name == "" {
+			return InstallResult{}, fmt.Errorf("%w: manifestless plugin requires installName", ErrManifestInvalid)
+		}
+	}
+	if !isValidPluginName(name) {
+		return InstallResult{}, fmt.Errorf("%w: invalid install name %q", ErrManifestInvalid, name)
+	}
+	manifest := Manifest{
+		Name: name, Version: normalized.Identity.Version, Description: normalized.Identity.Description,
+		Homepage: normalized.Identity.Homepage, Repository: normalized.Identity.Repository, License: normalized.Identity.License,
+		Keywords: append([]string(nil), normalized.Identity.Keywords...),
+	}
+	if normalized.Layout.Dialect == ir.DialectAgentPlugins {
+		manifest.Schema = SchemaPluginV1
+	}
+	if normalized.Identity.Author != nil {
+		manifest.Author = &Author{Name: normalized.Identity.Author.Name, Email: normalized.Identity.Author.Email, URL: normalized.Identity.Author.URL}
 	}
 	if expected := strings.TrimSpace(req.ExpectedDigest); expected != "" && expected != digest {
 		return InstallResult{}, fmt.Errorf("%w: validated %s, materialized %s", ErrSourceChanged, expected, digest)
@@ -146,6 +207,12 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 	existing, exists := state.Plugins[name]
 	if exists && !req.Replace {
 		return InstallResult{}, fmt.Errorf("%w: %s", ErrAlreadyExists, name)
+	}
+	var existingComponents []ir.Component
+	if exists {
+		if current := s.loadRecord(name, existing); current != nil && current.IntegrityValid {
+			existingComponents = append([]ir.Component(nil), current.Components...)
+		}
 	}
 	dest := filepath.Join(s.packagesRoot, name)
 	if exists && req.Replace && existing.Digest == digest {
@@ -220,15 +287,18 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 
 	now := time.Now().UTC()
 	rec := Record{
-		Enabled:     true,
-		Version:     parsed.Manifest.Version,
-		Source:      req.Source,
-		InstalledAt: now,
-		Digest:      digest,
+		Enabled: true, Version: manifest.Version, Source: req.Source, InstalledAt: now, Digest: digest,
+		Dialect: normalized.Layout.Dialect, ManifestPath: normalized.Layout.ManifestPath,
+		InstallationID: uuid.NewString(), DisplayName: normalized.Identity.DisplayName,
+	}
+	for _, secondary := range resolved.Secondary {
+		rec.SecondaryManifests = append(rec.SecondaryManifests, secondary.ManifestPath)
 	}
 	if exists {
 		rec.Enabled = existing.Enabled
 		rec.MCPServers = existing.MCPServers
+		rec.InstallationID = existing.InstallationID
+		rec.Components, rec.Variables, rec.MigrationConflicts = migrateOverrides(existing, existingComponents, normalized.Components)
 		if existing.InstalledAt.IsZero() {
 			rec.InstalledAt = now
 		} else {
@@ -271,6 +341,54 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 	}, nil
 }
 
+func migrateOverrides(existing Record, previousComponents, components []ir.Component) (map[string]ComponentOverride, map[string]VariableValueRef, []string) {
+	componentByID := make(map[string]ir.Component, len(components))
+	variableKeys := map[string]bool{}
+	variableTypes := map[string]string{}
+	previousVariableTypes := map[string]string{}
+	for _, component := range previousComponents {
+		if component.Variable != nil {
+			previousVariableTypes[component.Variable.Key] = component.Variable.Type
+		}
+	}
+	for _, component := range components {
+		componentByID[component.LogicalID] = component
+		if component.Variable != nil {
+			variableKeys[component.Variable.Key] = true
+			variableTypes[component.Variable.Key] = component.Variable.Type
+		}
+	}
+	migratedComponents := map[string]ComponentOverride{}
+	var conflicts []string
+	for logicalID, override := range existing.Components {
+		component, ok := componentByID[logicalID]
+		if !ok {
+			conflicts = append(conflicts, "component override no longer has a matching logicalId: "+logicalID)
+			continue
+		}
+		override.BaseRevisionID = component.RevisionID
+		migratedComponents[logicalID] = override
+	}
+	if len(migratedComponents) == 0 {
+		migratedComponents = nil
+	}
+	migratedVariables := map[string]VariableValueRef{}
+	for key, value := range existing.Variables {
+		if variableKeys[key] && (previousVariableTypes[key] == "" || previousVariableTypes[key] == variableTypes[key]) {
+			migratedVariables[key] = value
+		} else if variableKeys[key] {
+			conflicts = append(conflicts, "variable value type changed and was not migrated: "+key+" ("+previousVariableTypes[key]+" -> "+variableTypes[key]+")")
+		} else {
+			conflicts = append(conflicts, "variable value no longer has a matching schema: "+key)
+		}
+	}
+	if len(migratedVariables) == 0 {
+		migratedVariables = nil
+	}
+	sort.Strings(conflicts)
+	return migratedComponents, migratedVariables, conflicts
+}
+
 func restorePluginPackage(dest, previousBackup string) error {
 	if err := os.RemoveAll(dest); err != nil && !os.IsNotExist(err) {
 		return err
@@ -302,41 +420,20 @@ func (s *Store) rejectUncontrolledPath(path string) error {
 }
 
 func validateSource(source Source) error {
-	switch source.Kind {
-	case SourceLocalPath:
-		if strings.TrimSpace(source.Path) == "" {
-			return fmt.Errorf("%w: local_path requires path", ErrManifestInvalid)
-		}
-		return nil
-	case SourceRemoteURL:
-		return validateHTTPSURL(source.URL, "remote_url")
-	case SourceRemoteGit:
-		if _, err := cleanRemoteGitURL(source.URL); err != nil {
-			return err
-		}
-		if _, err := cleanGitRef(source.Ref); err != nil {
-			return err
-		}
-		if _, err := cleanGitSubpath(source.Subpath); err != nil {
-			return err
-		}
-		return nil
-	default:
+	if source.Kind != SourceLocalPath {
 		return fmt.Errorf("unsupported plugin source %q", source.Kind)
 	}
+	if strings.TrimSpace(source.Path) == "" {
+		return fmt.Errorf("%w: local_path requires path", ErrManifestInvalid)
+	}
+	return nil
 }
 
-func materializeSource(ctx context.Context, source Source, staging string) error {
-	switch source.Kind {
-	case SourceLocalPath:
-		return materializeLocalPath(source.Path, staging)
-	case SourceRemoteURL:
-		return materializeRemoteURL(ctx, source.URL, staging)
-	case SourceRemoteGit:
-		return materializeRemoteGit(ctx, source, staging)
-	default:
+func materializeSource(source Source, staging string) error {
+	if source.Kind != SourceLocalPath {
 		return fmt.Errorf("unsupported plugin source %q", source.Kind)
 	}
+	return materializeLocalPath(source.Path, staging)
 }
 
 func materializeLocalPath(raw, staging string) error {
@@ -361,8 +458,8 @@ func materializeLocalPath(raw, staging string) error {
 	if err != nil {
 		return err
 	}
-	if int64(len(data)) > MaxDownloadBytes {
-		return fmt.Errorf("plugin archive exceeds %d bytes", MaxDownloadBytes)
+	if int64(len(data)) > MaxArchiveBytes {
+		return fmt.Errorf("plugin archive exceeds %d bytes", MaxArchiveBytes)
 	}
 	return extractZip(data, staging)
 }

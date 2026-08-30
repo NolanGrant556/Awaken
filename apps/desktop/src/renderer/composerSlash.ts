@@ -3,8 +3,12 @@ import { AwakenIcon } from "@awaken/design-system";
 import type {
   ComputerUseComposerTokenPayload,
   ComposerToken,
+  PluginAgentComposerTokenPayload,
+  PluginCommandComposerTokenPayload,
   PluginComposerTokenPayload,
+  PluginRuleComposerTokenPayload,
   RuntimePlugin,
+  RuntimePluginComponent,
   RuntimeSkill,
   SkillProjectRoots,
   SkillComposerTokenPayload,
@@ -234,7 +238,7 @@ function skillComposerTokenFromAction(
   };
 }
 
-function pluginComposerTokenFromAction(plugin: RuntimePlugin): ComposerToken {
+export function pluginComposerTokenFromAction(plugin: RuntimePlugin): ComposerToken {
   const payload: PluginComposerTokenPayload = {
     pluginName: plugin.name,
     pluginDigest: plugin.digest ?? "",
@@ -243,6 +247,84 @@ function pluginComposerTokenFromAction(plugin: RuntimePlugin): ComposerToken {
     id: `plugin:${plugin.name}:${plugin.digest ?? ""}`,
     type: "plugin",
     label: plugin.name,
+    payload: payload as unknown as Record<string, unknown>,
+  };
+}
+
+export function pluginSkillComposerTokenFromAction(
+  plugin: RuntimePlugin,
+  component: RuntimePluginComponent,
+): ComposerToken {
+  const catalogId = component.skill?.catalogId?.trim();
+  if (!catalogId) {
+    throw new Error("PLUGIN_SKILL_ID_UNAVAILABLE: Core did not provide a catalog identity");
+  }
+  const payload: SkillComposerTokenPayload = {
+    skillId: catalogId,
+    sourceOrigin: "plugin",
+    skillFilePath: "",
+  };
+  return {
+    id: `skill:${catalogId}:plugin`,
+    type: "skill",
+    label:
+      component.displayName ||
+      component.declaredName ||
+      component.derivedName ||
+      component.logicalId,
+    payload: payload as unknown as Record<string, unknown>,
+  };
+}
+
+export function pluginRuleComposerTokenFromAction(
+  plugin: RuntimePlugin,
+  component: RuntimePluginComponent,
+): ComposerToken {
+  const payload: PluginRuleComposerTokenPayload = {
+    pluginName: plugin.name,
+    pluginDigest: plugin.digest ?? "",
+    ruleLogicalId: component.logicalId,
+  };
+  return {
+    id: `plugin-rule:${plugin.name}:${component.logicalId}:${plugin.digest ?? ""}`,
+    type: "rule",
+    label: component.displayName || component.declaredName || component.derivedName || component.logicalId,
+    payload: payload as unknown as Record<string, unknown>,
+  };
+}
+
+export function pluginCommandComposerTokenFromAction(
+  plugin: RuntimePlugin,
+  component: RuntimePluginComponent,
+  commandArguments: string[],
+): ComposerToken {
+  const payload: PluginCommandComposerTokenPayload = {
+    pluginName: plugin.name,
+    pluginDigest: plugin.digest ?? "",
+    commandLogicalId: component.logicalId,
+    commandArguments: JSON.stringify(commandArguments),
+  };
+  return {
+    id: `plugin-command:${plugin.name}:${component.logicalId}:${plugin.digest ?? ""}:${JSON.stringify(commandArguments)}`,
+    type: "command",
+    label: component.displayName || component.declaredName || component.derivedName || component.logicalId,
+    payload: payload as unknown as Record<string, unknown>,
+  };
+}
+
+export function pluginAgentComposerTokenFromAction(
+  plugin: RuntimePlugin,
+  component: RuntimePluginComponent,
+): ComposerToken {
+  const payload: PluginAgentComposerTokenPayload = {
+    pluginName: plugin.name,
+    pluginDigest: plugin.digest ?? "",
+    agentLogicalId: component.logicalId,
+  };
+  return {
+    id: `plugin-agent:${plugin.name}:${component.logicalId}:${plugin.digest ?? ""}`,
+    type: "agent",
+    label: component.displayName || component.declaredName || component.derivedName || component.logicalId,
     payload: payload as unknown as Record<string, unknown>,
   };
 }
@@ -259,7 +341,10 @@ export function skillSlashActionsFromSkills(
 ): SlashAction[] {
   return skills
     .filter(
-      (skill) => skill.state === "loaded" && skill.userInvocable !== false,
+      (skill) =>
+        skill.sourceOrigin !== "plugin" &&
+        skill.state === "loaded" &&
+        skill.userInvocable !== false,
     )
     .map((skill) => {
       const label = skill.displayName || skill.name || skill.id;

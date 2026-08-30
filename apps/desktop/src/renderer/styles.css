@@ -15,6 +15,40 @@ body {
   background: var(--aw-surface-canvas);
 }
 
+.desktop-error-boundary {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  box-sizing: border-box;
+  padding: 32px;
+  color: var(--aw-text-primary);
+  background: var(--aw-surface-canvas);
+}
+
+.desktop-error-boundary > section {
+  width: min(440px, 100%);
+  box-sizing: border-box;
+  padding: 28px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: 18px;
+  background: var(--aw-surface-main);
+  box-shadow: var(--aw-shadow-raised);
+}
+
+.desktop-error-boundary h1 { margin: 0 0 10px; font-size: 22px; }
+.desktop-error-boundary p { margin: 0 0 20px; color: var(--aw-text-secondary); line-height: 1.6; }
+.desktop-error-boundary button {
+  min-height: 38px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--aw-text-onblack);
+  background: var(--aw-button-black);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 button,
 input,
 textarea {
@@ -494,6 +528,43 @@ pre {
 .cli-auth-card-copy strong {
   color: var(--aw-text-primary);
   font-size: 13px;
+}
+
+.mcp-elicitation-form {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mcp-elicitation-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--aw-text-secondary);
+  font-size: 12px;
+}
+
+.mcp-elicitation-field > span {
+  color: var(--aw-text-primary);
+  font-weight: var(--aw-font-weight-heavy);
+}
+
+.mcp-elicitation-field small {
+  color: var(--aw-text-tertiary);
+}
+
+.mcp-elicitation-field input:not([type="checkbox"]),
+.mcp-elicitation-field select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface-raised);
+  color: var(--aw-text-primary);
+  font: inherit;
 }
 
 .cli-auth-qr-frame {

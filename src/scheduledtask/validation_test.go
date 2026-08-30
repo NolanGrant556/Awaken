@@ -179,6 +179,19 @@ func TestValidateAgentComposerTokens(t *testing.T) {
 	pluginToken.Payload.PluginDigest = ""
 	task.Action = Action{Kind: ActionKindAgent, ComposerTokens: []ComposerToken{pluginToken}}
 	mustInvalid(t, v.ValidateTask(task), "action.composer_tokens")
+	for _, structured := range []ComposerToken{
+		{ID: "rule:acme:strict", Type: "rule", Label: "strict", Payload: ComposerTokenPayload{PluginName: "acme", PluginDigest: "digest-v1", RuleLogicalID: "rule/rules/strict.mdc"}},
+		{ID: "command:acme:review", Type: "command", Label: "review", Payload: ComposerTokenPayload{PluginName: "acme", PluginDigest: "digest-v1", CommandLogicalID: "command/commands/review.md", CommandArgumentsJSON: `["app.ts"]`}},
+		{ID: "agent:acme:reviewer", Type: "agent", Label: "reviewer", Payload: ComposerTokenPayload{PluginName: "acme", PluginDigest: "digest-v1", AgentLogicalID: "agent/agents/reviewer.md"}},
+	} {
+		task.Action = Action{Kind: ActionKindAgent, ComposerTokens: []ComposerToken{structured}}
+		if err := v.ValidateTask(task); err != nil {
+			t.Fatalf("%s token Agent action rejected: %v", structured.Type, err)
+		}
+	}
+	invalidCommand := ComposerToken{ID: "command:bad", Type: "command", Label: "bad", Payload: ComposerTokenPayload{PluginName: "acme", PluginDigest: "digest-v1", CommandLogicalID: "command/commands/bad.md", CommandArgumentsJSON: "not-json"}}
+	task.Action = Action{Kind: ActionKindAgent, ComposerTokens: []ComposerToken{invalidCommand}}
+	mustInvalid(t, v.ValidateTask(task), "action.composer_tokens")
 	computerUseToken := ComposerToken{
 		ID: "capability:computer-use", Type: "capability", Label: "Computer Use",
 		Payload: ComposerTokenPayload{CapabilityID: "computer-use"},

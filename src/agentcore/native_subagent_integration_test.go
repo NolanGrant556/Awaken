@@ -259,6 +259,87 @@ func TestRootAutomaticallyReceivesTerminalHandoffAfterWaitTimeout(t *testing.T) 
 	}
 }
 
+func TestRootDefersFinalAnswerWhileSubagentIsStillRunning(t *testing.T) {
+	releaseChild := make(chan struct{})
+	terminalPersisted := make(chan struct{})
+	var terminalOnce sync.Once
+	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
+		Starter: func(_ context.Context, _ subagentruntime.StartRequest) (string, error) {
+			<-releaseChild
+			return "child result", nil
+		},
+		Persist: func(_ context.Context, event subagentruntime.PersistEvent) error {
+			if event.Kind == "subagent_terminal" {
+				terminalOnce.Do(func() { close(terminalPersisted) })
+			}
+			return nil
+		},
+	})
+	config := AgentConfig{
+		MaxThoughts:        6,
+		SubagentController: manager,
+		ToolExposure:       tool.ToolExposurePolicy{Mode: tool.ExposureAll},
+	}
+	conversation := convcontext.NewConversation(nil)
+	conversation.UserInput("delegate and use the result")
+	runner := NewRunner(config, conversation, NewRequestBuilder(config))
+	runner.threadID = "thread-active-child"
+	runner.runID = "run-active-child"
+
+	turn := 0
+	runner.streamLLMFunc = func(_ context.Context, _ *runEventEmitter) (*llm.Response, error) {
+		turn++
+		switch turn {
+		case 1:
+			return &llm.Response{ToolCalls: []llm.ToolCall{{
+				ID: "spawn-review", Name: "subagent",
+				Input: `{"action":"spawn","description":"review","prompt":"review","agent_type":"review","workspace_mode":"shared_readonly"}`,
+			}}}, nil
+		case 2:
+			return &llm.Response{Content: "premature answer"}, nil
+		case 3:
+			var sawActiveNotice bool
+			for _, message := range conversation.Context.GetMessages() {
+				if message.Origin == convcontext.MessageOriginSynthetic && strings.Contains(message.Content, "Subagents are still active") {
+					sawActiveNotice = true
+				}
+			}
+			if !sawActiveNotice {
+				t.Fatal("missing host-owned active Subagent wait instruction")
+			}
+			close(releaseChild)
+			select {
+			case <-terminalPersisted:
+			case <-time.After(time.Second):
+				t.Fatal("child terminal state was not persisted")
+			}
+			return &llm.Response{Content: "waiting for handoff"}, nil
+		case 4:
+			var sawTerminalHandoff bool
+			for _, message := range conversation.Context.GetMessages() {
+				if message.Origin == convcontext.MessageOriginSynthetic && strings.Contains(message.Content, "child result") {
+					sawTerminalHandoff = true
+				}
+			}
+			if !sawTerminalHandoff {
+				t.Fatal("missing terminal Subagent handoff")
+			}
+			return &llm.Response{Content: "final answer with child result"}, nil
+		default:
+			t.Fatalf("unexpected model turn %d", turn)
+			return nil, nil
+		}
+	}
+
+	answer, err := runner.RunStreamWithEvents(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RunStreamWithEvents: %v", err)
+	}
+	if answer != "final answer with child result" || turn != 4 {
+		t.Fatalf("answer=%q turns=%d", answer, turn)
+	}
+}
+
 func TestRunScopedEventSinkStampsImmediateChildToolEvents(t *testing.T) {
 	var captured AwakenEvent
 	emitter := newRunEventEmitter("thread_child", EventSinkFunc(func(event AwakenEvent) {

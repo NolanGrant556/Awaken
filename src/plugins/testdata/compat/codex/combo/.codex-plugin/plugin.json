@@ -1,0 +1,1 @@
+{"name":"codex-combo","version":"1.0.0","skills":"./skills/","mcpServers":{"local":{"command":"node","args":["server.mjs"]}},"hooks":"./hooks/hooks.json"}

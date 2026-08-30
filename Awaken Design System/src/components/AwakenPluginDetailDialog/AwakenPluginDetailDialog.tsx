@@ -33,7 +33,6 @@ export type AwakenPluginDetailDialogProps = {
   onOpenChange: (open: boolean) => void;
   onPreviewSkill?: (skillId: string) => void;
   onServerEnabledChange?: (shortName: string, enabled: boolean) => void;
-  onUpgrade?: () => void;
   onUninstall?: () => void;
 };
 
@@ -51,7 +50,6 @@ export function AwakenPluginDetailDialog({
   onOpenChange,
   onPreviewSkill,
   onServerEnabledChange,
-  onUpgrade,
   onUninstall,
 }: AwakenPluginDetailDialogProps) {
   return (
@@ -62,14 +60,9 @@ export function AwakenPluginDetailDialog({
       title={name}
       onOpenChange={onOpenChange}
       footer={
-        <>
-          <AwakenButton variant="default" size="md" disabled={busy} onClick={onUninstall}>
-            卸载
-          </AwakenButton>
-          <AwakenButton variant="primary" size="md" loading={busy} onClick={onUpgrade}>
-            升级
-          </AwakenButton>
-        </>
+        <AwakenButton variant="default" size="md" disabled={busy} onClick={onUninstall}>
+          卸载
+        </AwakenButton>
       }
     >
       <div className="aw-plugin-detail-dialog__body">

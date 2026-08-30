@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	convcontext "awaken/src/context"
 	"awaken/src/hookruntime"
@@ -50,6 +51,32 @@ func TestEmptyDispatcherAcceptsActivatedComposerSkillHooks(t *testing.T) {
 	}
 	if !agent.config.HookDispatcher.HasEvent(hookruntime.EventRunEnd) {
 		t.Fatal("activated Skill Hook was not registered")
+	}
+}
+
+func TestHookPreflightDrainsLateAsyncContextForSameThread(t *testing.T) {
+	store := hookruntime.NewAsyncCompletionStore()
+	store.RecordAsyncHookCompletion("thread_async", hookruntime.AsyncCompletion{
+		InvocationID: "hook_async", Event: hookruntime.EventBeforeFinish,
+		AdditionalContext: "后台审查发现需要补充鉴权测试", CompletedAt: time.Now().UTC(),
+	})
+	snapshot := hookruntime.EmptySnapshot()
+	snapshot.AsyncSink = store
+	agent := NewAgent(AgentConfig{Workspace: WorkspaceConfig{Root: t.TempDir()}, HookAvailabilitySnapshot: &snapshot})
+	agent.threadID, agent.runID, agent.sessionID = "thread_async", "run_next", "session_next"
+	agent.recorder = &forkCaptureRecorder{}
+	agent.ConfigureHookDispatcher()
+	if !agent.HookPreflightRequiresPreparedUserMessage() {
+		t.Fatal("pending async Hook context did not require preflight")
+	}
+	if err := agent.RunHookPreflight(t.Context(), EventSinkFunc(func(AwakenEvent) {}), "继续"); err != nil {
+		t.Fatal(err)
+	}
+	if len(agent.config.HookContextBlocks) != 1 || !strings.Contains(agent.config.HookContextBlocks[0].Content, "后台审查发现需要补充鉴权测试") {
+		t.Fatalf("context blocks=%#v", agent.config.HookContextBlocks)
+	}
+	if store.HasAsyncHookCompletions("thread_async") {
+		t.Fatal("async Hook context was not drained")
 	}
 }
 

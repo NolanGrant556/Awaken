@@ -119,6 +119,34 @@ func (s *Store) Inspect(projectID string, projectRoots []string, sessionWorkspac
 	return s.buildSnapshot(projectID, projectRoots, sessionWorkspace, true)
 }
 
+// MergePluginHooks adds host-compiled Plugin hooks to a newly built run
+// snapshot and recomputes its immutable identity. It never mutates a snapshot
+// already owned by an active run.
+func MergePluginHooks(snapshot AvailabilitySnapshot, hooks []CompiledHook, sources []SourceReceipt) (AvailabilitySnapshot, error) {
+	if snapshot.HooksByEvent == nil {
+		snapshot.HooksByEvent = map[Event][]CompiledHook{}
+	}
+	seen := map[string]struct{}{}
+	for _, existing := range snapshot.HooksByEvent {
+		for _, hook := range existing {
+			seen[hook.StableID] = struct{}{}
+		}
+	}
+	for _, hook := range hooks {
+		if !validEvent(hook.Event) || strings.TrimSpace(hook.StableID) == "" {
+			return snapshot, fmt.Errorf("hookruntime: invalid compiled Plugin hook %q", hook.StableID)
+		}
+		if _, duplicate := seen[hook.StableID]; duplicate {
+			return snapshot, fmt.Errorf("hookruntime: duplicate hook identity %q", hook.StableID)
+		}
+		seen[hook.StableID] = struct{}{}
+		snapshot.HooksByEvent[hook.Event] = append(snapshot.HooksByEvent[hook.Event], hook)
+	}
+	snapshot.Sources = append(snapshot.Sources, sources...)
+	snapshot.SnapshotID = digestSnapshot(snapshot)
+	return snapshot, nil
+}
+
 func (s *Store) loadCandidate(projectID string, candidate sourceCandidate) (SourceReceipt, *Config, error) {
 	receipt := SourceReceipt{Kind: candidate.kind, Path: candidate.path, ProjectRoot: candidate.projectRoot}
 	data, canonical, err := readConfigFile(candidate.path)

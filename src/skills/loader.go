@@ -156,6 +156,83 @@ func LoadDir(dir string, source SourceOrigin) map[string]*SkillDefinition {
 	return result
 }
 
+// LoadPluginSkillSource loads either one exact Store-selected Skill package
+// or, for legacy test/compatibility callers, a fixed Skill collection root.
+func LoadPluginSkillSource(dir string) map[string]*SkillDefinition {
+	selection, ok := pluginSkillSelection(dir)
+	if !ok {
+		return LoadDir(dir, SourcePlugin)
+	}
+	return LoadPluginSkillSelection(selection)
+}
+
+// LoadPluginSkillSelection parses one exact Plugin-owned Skill package without
+// consulting mutable discovery globals. Callers use it for digest-bound token
+// revalidation while registry discovery uses LoadPluginSkillSource.
+func LoadPluginSkillSelection(selection PluginSkillSelection) map[string]*SkillDefinition {
+	rootDir := filepath.Clean(selection.PackageRoot)
+	skillPath := filepath.Join(rootDir, "SKILL.md")
+	resolvedRoot, resolveErr := filepath.EvalSymlinks(rootDir)
+	resolvedSourceRoot, sourceErr := filepath.EvalSymlinks(filepath.Dir(rootDir))
+	fallbackName := SkillIDFromNameOrFallback(filepath.Base(rootDir), "")
+	fallbackID := pluginidentity.SkillCatalogID(selection.PluginName, fallbackName)
+	base := &SkillDefinition{
+		ID: fallbackID, Name: fallbackName, Source: SourcePlugin, Scope: SourcePlugin,
+		RootDir: rootDir, SourceRoot: resolvedSourceRoot, ResolvedRootDir: resolvedRoot,
+		SkillFilePath: skillPath, FilePath: skillPath, State: StateInvalid,
+		Context: ContextInline, UserInvocable: true,
+	}
+	if resolveErr != nil || sourceErr != nil || !pathWithinRoot(resolvedRoot, resolvedSourceRoot) {
+		base.UnavailableReason = "resolve selected plugin Skill package root"
+		base.Diagnostics = []SkillDiagnostic{{Code: "skill_package_root_invalid", Message: base.UnavailableReason, Severity: "error"}}
+		return map[string]*SkillDefinition{fallbackID: base}
+	}
+	info, statErr := os.Stat(skillPath)
+	if statErr != nil || !info.Mode().IsRegular() {
+		base.UnavailableReason = "selected plugin Skill entrypoint is not a regular SKILL.md"
+		base.Diagnostics = []SkillDiagnostic{{Code: "skill_file_unreadable", Message: base.UnavailableReason, Severity: "error"}}
+		return map[string]*SkillDefinition{fallbackID: base}
+	}
+	raw, readErr := os.ReadFile(skillPath)
+	if readErr != nil {
+		base.UnavailableReason = fmt.Sprintf("read SKILL.md: %v", readErr)
+		base.Diagnostics = []SkillDiagnostic{{Code: "skill_file_unreadable", Message: base.UnavailableReason, Severity: "error"}}
+		return map[string]*SkillDefinition{fallbackID: base}
+	}
+	if err := ValidateAgentSkillEntrypoint(string(raw), filepath.Base(rootDir)); err != nil {
+		base.UnavailableReason = err.Error()
+		base.Diagnostics = []SkillDiagnostic{{Code: "skill_agent_spec_invalid", Message: err.Error(), Severity: "error"}}
+		return map[string]*SkillDefinition{fallbackID: base}
+	}
+	def, parseErr := ParseFrontmatter(string(raw))
+	if parseErr != nil {
+		base.UnavailableReason = parseErr.Error()
+		base.Diagnostics = []SkillDiagnostic{{Code: "skill_frontmatter_invalid", Message: parseErr.Error(), Severity: "error"}}
+		return map[string]*SkillDefinition{fallbackID: base}
+	}
+	name := SkillIDFromNameOrFallback(filepath.Base(rootDir), def.Name)
+	if strings.TrimSpace(def.Name) == "" {
+		def.Name = name
+	}
+	def.ID = pluginidentity.SkillCatalogID(selection.PluginName, name)
+	def.Source, def.Scope = SourcePlugin, SourcePlugin
+	def.RootDir, def.SourceRoot, def.ResolvedRootDir = rootDir, resolvedSourceRoot, resolvedRoot
+	def.SkillFilePath, def.FilePath = skillPath, skillPath
+	def.State = StateLoaded
+	if err := ValidateNameReserved(def.Name); err != nil {
+		def.State, def.UnavailableReason = StateInvalid, err.Error()
+		def.Diagnostics = append(def.Diagnostics, SkillDiagnostic{Code: "skill_reserved_name", Message: err.Error(), Severity: "error"})
+	} else if err := ValidateSchema(def); err != nil {
+		def.State, def.UnavailableReason = StateInvalid, err.Error()
+		def.Diagnostics = append(def.Diagnostics, SkillDiagnostic{Code: "skill_schema_invalid", Message: err.Error(), Severity: "error"})
+	}
+	if def.Context == "" {
+		def.Context = ContextInline
+	}
+	def.Body = ""
+	return map[string]*SkillDefinition{def.ID: def}
+}
+
 func pathWithinRoot(path, root string) bool {
 	path = filepath.Clean(path)
 	root = filepath.Clean(root)

@@ -1,0 +1,4 @@
+---
+description: Manifestless hello.
+---
+Hello.

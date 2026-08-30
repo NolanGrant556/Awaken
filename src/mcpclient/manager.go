@@ -2,6 +2,7 @@ package mcpclient
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -79,6 +80,10 @@ type Manager struct {
 	// in-memory store; persistent stores can be installed via
 	// Manager.SetCredentialStore.
 	credentials CredentialStore
+	// elicitationHandler bridges server-initiated MCP form/URL requests into
+	// the active interactive run. Calls without an interactive run are safely
+	// cancelled by the host handler.
+	elicitationHandler ElicitationHandler
 	// subscribers is the set of active ServerEvent subscribers. Each
 	// subscriber has a buffered channel that receives ServerEvent values.
 	// The channel is closed when the subscriber's context is cancelled.
@@ -111,13 +116,21 @@ type managedServer struct {
 
 	// shadowedBy is set when another server with higher priority covers the
 	// same name. Holds the winning connector ID.
-	shadowedBy string
+	shadowedBy  string
+	tools       []*mcp.Tool
+	toolsLoaded bool
 
 	session     Session
 	cancelCtx   context.CancelFunc
 	authHandler auth.OAuthHandler
 	// running guards the connect goroutine so we never double-start.
 	running bool
+	// MCP does not include a parent tool-call id on elicitation/create. Calls
+	// are serialized per server so an incoming elicitation can be bound to the
+	// exact active CallTool context without cross-run leakage.
+	callMu            sync.Mutex
+	elicitationMu     sync.RWMutex
+	activeCallContext context.Context
 }
 
 // ManagerOption configures a Manager at construction.
@@ -171,6 +184,12 @@ func (m *Manager) SetCredentialStore(store CredentialStore) {
 	}
 	m.mu.Lock()
 	m.credentials = store
+	m.mu.Unlock()
+}
+
+func (m *Manager) SetElicitationHandler(handler ElicitationHandler) {
+	m.mu.Lock()
+	m.elicitationHandler = handler
 	m.mu.Unlock()
 }
 
@@ -322,7 +341,10 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 			m.logger.Debugf("mcp server %q signalled resources/list_changed", server.name)
 			m.emitEvent(ServerEvent{Type: EventResourcesListChanged, ServerName: server.name})
 		}
-		session, capability, err := connectAndInitialize(ctx, transport, m.clientImpl, onToolListChanged, onPromptListChanged, onResourceListChanged)
+		onElicitation := func(_ context.Context, request *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+			return m.handleElicitation(server, request)
+		}
+		session, capability, err := connectAndInitialize(ctx, transport, m.clientImpl, onToolListChanged, onPromptListChanged, onResourceListChanged, onElicitation)
 		if err == nil {
 			m.mu.Lock()
 			server.session = session
@@ -344,6 +366,8 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 			_ = session.Wait()
 			m.mu.Lock()
 			server.session = nil
+			server.tools = nil
+			server.toolsLoaded = false
 			if server.state == StateConnected {
 				server.state = StateFailed
 				server.errorReason = "session ended"
@@ -359,6 +383,8 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 		if isAuthError(err) {
 			m.mu.Lock()
 			server.session = nil
+			server.tools = nil
+			server.toolsLoaded = false
 			server.state = StateNeedsAuth
 			server.errorReason = err.Error()
 			m.mu.Unlock()
@@ -395,6 +421,8 @@ func (m *Manager) recordFailure(server *managedServer, err error) {
 		return
 	}
 	server.session = nil
+	server.tools = nil
+	server.toolsLoaded = false
 	server.state = StateFailed
 	server.errorReason = err.Error()
 	m.mu.Unlock()
@@ -425,6 +453,8 @@ func (m *Manager) Disable(name string) error {
 		_ = server.session.Close()
 		server.session = nil
 	}
+	server.tools = nil
+	server.toolsLoaded = false
 	server.state = StateDisabled
 	server.errorReason = ""
 	disabled := false
@@ -580,6 +610,30 @@ func (m *Manager) SnapshotServer(name string) (ServerSnapshot, error) {
 	return m.snapshotServerLocked(server), nil
 }
 
+// ServerTools returns the last successful tools/list projection for one
+// server, including host-disabled tools that are intentionally absent from
+// the central registry.
+func (m *Manager) ServerTools(name string) ([]ServerToolSnapshot, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	server, ok := m.servers[name]
+	if !ok {
+		return nil, fmt.Errorf("mcp server %q not found", name)
+	}
+	disabled := make(map[string]bool, len(server.config.DisabledTools))
+	for _, toolName := range server.config.DisabledTools {
+		disabled[toolName] = true
+	}
+	out := make([]ServerToolSnapshot, 0, len(server.tools))
+	for _, item := range server.tools {
+		if item == nil {
+			continue
+		}
+		out = append(out, ServerToolSnapshot{Name: item.Name, Description: item.Description, Enabled: !disabled[item.Name]})
+	}
+	return out, nil
+}
+
 func (m *Manager) snapshotServerLocked(server *managedServer) ServerSnapshot {
 	snap := ServerSnapshot{
 		Name:        server.name,
@@ -589,6 +643,8 @@ func (m *Manager) snapshotServerLocked(server *managedServer) ServerSnapshot {
 		Scope:       server.scope,
 		ErrorReason: server.errorReason,
 		ShadowedBy:  server.shadowedBy,
+		ToolsLoaded: server.toolsLoaded,
+		ToolCount:   len(server.tools),
 	}
 	if server.sourceConnectorID != "" {
 		cid := server.sourceConnectorID
@@ -648,10 +704,74 @@ func (m *Manager) callServerTool(ctx context.Context, serverName, toolName, disp
 	if server.state != StateConnected || server.session == nil {
 		return nil, fmt.Errorf("mcp server %q is %s; cannot call %s", serverName, server.state, displayName)
 	}
+	server.callMu.Lock()
+	defer server.callMu.Unlock()
+	server.elicitationMu.Lock()
+	server.activeCallContext = ctx
+	server.elicitationMu.Unlock()
+	defer func() {
+		server.elicitationMu.Lock()
+		server.activeCallContext = nil
+		server.elicitationMu.Unlock()
+	}()
 	return server.session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: arguments,
 	})
+}
+
+func (m *Manager) handleElicitation(server *managedServer, request *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+	if server == nil || request == nil || request.Params == nil {
+		return &mcp.ElicitResult{Action: "cancel"}, nil
+	}
+	server.elicitationMu.RLock()
+	callContext := server.activeCallContext
+	server.elicitationMu.RUnlock()
+	m.mu.RLock()
+	handler := m.elicitationHandler
+	m.mu.RUnlock()
+	if callContext == nil {
+		m.logger.Warnf("mcp server %q requested elicitation without an active tool call", server.name)
+		return &mcp.ElicitResult{Action: "cancel"}, nil
+	}
+	var schema map[string]any
+	if request.Params.RequestedSchema != nil {
+		raw, err := json.Marshal(request.Params.RequestedSchema)
+		if err != nil {
+			return nil, fmt.Errorf("encode MCP elicitation schema: %w", err)
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			return nil, fmt.Errorf("decode MCP elicitation schema: %w", err)
+		}
+	}
+	mode := strings.TrimSpace(request.Params.Mode)
+	if mode == "" {
+		mode = "form"
+	}
+	if local, ok := tool.ElicitationHandlerFromContext(callContext); ok {
+		m.logger.Debugf("mcp server %q routed elicitation to the active run", server.name)
+		answer, err := local(callContext, tool.ElicitationRequest{
+			Provider: server.name, Mode: mode, Message: request.Params.Message,
+			RequestedSchema: schema, URL: request.Params.URL, RequestID: request.Params.ElicitationID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &mcp.ElicitResult{Action: answer.Action, Content: answer.Content}, nil
+	}
+	if handler == nil {
+		m.logger.Warnf("mcp server %q requested elicitation outside an interactive run", server.name)
+		return &mcp.ElicitResult{Action: "cancel"}, nil
+	}
+	m.logger.Debugf("mcp server %q routed elicitation to the host fallback", server.name)
+	result, err := handler(callContext, ElicitationRequest{
+		ServerName: server.name, Mode: mode, Message: request.Params.Message,
+		RequestedSchema: schema, URL: request.Params.URL, ElicitationID: request.Params.ElicitationID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &mcp.ElicitResult{Action: result.Action, Content: result.Content}, nil
 }
 
 // resolveMcpToolName uses the live server registry to disambiguate server
@@ -898,7 +1018,18 @@ func (m *Manager) registerTools(ctx context.Context, server *managedServer) erro
 	// Clear any prior registrations for this server before re-registering
 	// so the registry reflects exactly the server's current tool list.
 	m.unregisterTools(server.name)
+	m.mu.Lock()
+	server.tools = append([]*mcp.Tool(nil), result.Tools...)
+	server.toolsLoaded = true
+	m.mu.Unlock()
+	disabled := make(map[string]bool, len(server.config.DisabledTools))
+	for _, toolName := range server.config.DisabledTools {
+		disabled[toolName] = true
+	}
 	for _, mcpTool := range result.Tools {
+		if mcpTool == nil || disabled[mcpTool.Name] {
+			continue
+		}
 		adapter := NewMcpToolAdapter(m, server.name, mcpTool)
 		if err := registerToolThroughHook(adapter); err != nil {
 			m.logger.Warnf("register mcp tool %q failed: %v", adapter.Name(), err)

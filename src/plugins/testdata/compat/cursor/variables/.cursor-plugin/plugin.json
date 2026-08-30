@@ -1,0 +1,11 @@
+{
+  "name":"cursor-variables",
+  "variables":{
+    "type":"object",
+    "properties":{
+      "API_TOKEN":{"type":"string","title":"API token","description":"Secret token"},
+      "MODE":{"type":"string","enum":["safe","fast"],"default":"safe"}
+    },
+    "required":["API_TOKEN"]
+  }
+}

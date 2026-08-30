@@ -1,6 +1,7 @@
 package scheduledtask
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -127,8 +128,8 @@ func ValidateAction(action Action) error {
 	seenTokenIDs := make(map[string]struct{}, len(action.ComposerTokens))
 	for _, token := range action.ComposerTokens {
 		tokenType := strings.ToLower(strings.TrimSpace(token.Type))
-		if tokenType != "skill" && tokenType != "plugin" && tokenType != "capability" {
-			return invalid("action.composer_tokens", "must contain only skill, plugin, or capability tokens")
+		if tokenType != "skill" && tokenType != "plugin" && tokenType != "rule" && tokenType != "command" && tokenType != "agent" && tokenType != "capability" {
+			return invalid("action.composer_tokens", "must contain only skill, plugin, rule, command, agent, or capability tokens")
 		}
 		tokenID := strings.TrimSpace(token.ID)
 		if tokenID == "" {
@@ -137,8 +138,25 @@ func ValidateAction(action Action) error {
 		if tokenType == "skill" && strings.TrimSpace(token.Payload.SkillID) == "" {
 			return invalid("action.composer_tokens", "skill identity is required")
 		}
-		if tokenType == "plugin" && (strings.TrimSpace(token.Payload.PluginName) == "" || strings.TrimSpace(token.Payload.PluginDigest) == "") {
+		if (tokenType == "plugin" || tokenType == "rule" || tokenType == "command" || tokenType == "agent") && (strings.TrimSpace(token.Payload.PluginName) == "" || strings.TrimSpace(token.Payload.PluginDigest) == "") {
 			return invalid("action.composer_tokens", "plugin identity is required")
+		}
+		if tokenType == "rule" && strings.TrimSpace(token.Payload.RuleLogicalID) == "" {
+			return invalid("action.composer_tokens", "rule identity is required")
+		}
+		if tokenType == "command" {
+			if strings.TrimSpace(token.Payload.CommandLogicalID) == "" {
+				return invalid("action.composer_tokens", "command identity is required")
+			}
+			if encoded := strings.TrimSpace(token.Payload.CommandArgumentsJSON); encoded != "" {
+				var arguments []string
+				if json.Unmarshal([]byte(encoded), &arguments) != nil {
+					return invalid("action.composer_tokens", "command arguments must be a JSON string array")
+				}
+			}
+		}
+		if tokenType == "agent" && strings.TrimSpace(token.Payload.AgentLogicalID) == "" {
+			return invalid("action.composer_tokens", "agent identity is required")
 		}
 		if tokenType == "capability" && !strings.EqualFold(strings.TrimSpace(token.Payload.CapabilityID), "computer-use") {
 			return invalid("action.composer_tokens", "unsupported capability identity")
@@ -150,6 +168,7 @@ func ValidateAction(action Action) error {
 		promptBytes += len(token.LeadingText)
 		metadataBytes += len(token.ID) + len(token.Type) + len(token.Label) +
 			len(token.Payload.CapabilityID) + len(token.Payload.SkillID) + len(token.Payload.PluginName) + len(token.Payload.PluginDigest) +
+			len(token.Payload.RuleLogicalID) + len(token.Payload.CommandLogicalID) + len(token.Payload.CommandArgumentsJSON) + len(token.Payload.AgentLogicalID) +
 			len(token.Payload.SourceOrigin) +
 			len(token.Payload.SkillFilePath) + len(token.Payload.RootDir)
 	}

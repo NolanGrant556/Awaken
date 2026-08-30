@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   RuntimePlugin,
+  RuntimePluginComponentDetail,
+  RuntimePluginComponentState,
   RuntimePluginSource,
   RuntimeProject,
   RuntimeSkill,
@@ -12,6 +14,7 @@ import type {
 import {
   ExtensionsView,
   SKILL_CATALOG_SYNC_INTERVAL_MS,
+  type ExtensionSection,
 } from "./ExtensionsView";
 import type { RuntimeClient } from "./runtime/client";
 
@@ -41,6 +44,28 @@ const runtimeProject: RuntimeProject = {
   updatedAt: "2026-07-27T00:00:00Z",
   version: 1,
 };
+
+function RoutedInstallHarness({
+  initialSection,
+  runtimeClient,
+  onNotice,
+}: {
+  initialSection: "skills" | "plugins";
+  runtimeClient: RuntimeClient;
+  onNotice: (message: string) => void;
+}) {
+  const [section, setSection] = useState<ExtensionSection>(initialSection);
+  return (
+    <ExtensionsView
+      section={section}
+      desktopReady
+      runtimeClient={runtimeClient}
+      activeWorkspaceRoot={projectRoot}
+      onNotice={onNotice}
+      onNavigateSection={setSection}
+    />
+  );
+}
 
 const bundledSkill: RuntimeSkill = {
   ...projectSkill,
@@ -77,6 +102,20 @@ const projectAgentsSkill: RuntimeSkill = {
   skillFilePath: `${projectRoot}/.agents/skills/project-review/SKILL.md`,
 };
 
+const pluginSkill: RuntimeSkill = {
+  ...projectSkill,
+  id: "plugin__console-plugin__private-review",
+  catalogEntryId: "catalog-plugin-private-review",
+  name: "private-review",
+  displayName: "插件私有复核",
+  description: "只在 Plugin Console 中管理的插件 Skill",
+  sourceOrigin: "plugin",
+  rootDir: "/Users/test/.awaken/plugins/packages/console.plugin/skills/private-review",
+  skillFilePath:
+    "/Users/test/.awaken/plugins/packages/console.plugin/skills/private-review/SKILL.md",
+  projectPath: undefined,
+};
+
 async function settle(): Promise<void> {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -87,6 +126,22 @@ function buttonByText(text: string): HTMLButtonElement | undefined {
   return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
     (button) => button.textContent?.trim() === text,
   );
+}
+
+async function setInputValue(
+  input: HTMLInputElement | null,
+  value: string,
+): Promise<void> {
+  await act(async () => {
+    if (!input) return;
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set;
+    setter?.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await settle();
 }
 
 function assertSplitPreviewCards(root: ParentNode): void {
@@ -172,15 +227,20 @@ describe("ExtensionsView behavior", () => {
     expect(refreshButton?.disabled).toBe(false);
   });
 
-  it("requires a current Plugin validation before risk-confirmed installation", async () => {
+  it("automatically validates a selected ZIP and replaces a same-name Plugin", async () => {
     const plugin: RuntimePlugin = {
       name: "acme.tools",
       version: "1.2.0",
       description: "团队代码检查工具",
+      dialect: "cursor",
+      manifestPath: ".cursor-plugin/plugin.json",
+      compatibilityState: "partial",
+      componentTotals: { total: 23, runnable: 13, needsConfiguration: 0, unsupported: 1, ignored: 5, invalid: 4 },
+      componentCounts: { skill: 12, mcp: 1, rule: 5, agent: 2, command: 1, hook: 2 },
       enabled: true,
       source: {
-        kind: "remote_git",
-        url: "https://example.test/acme.tools.git",
+        kind: "local_path",
+        path: "/tmp/acme.tools.zip",
       },
       skillCount: 2,
       serverCount: 1,
@@ -205,7 +265,14 @@ describe("ExtensionsView behavior", () => {
       targetRoot: "/tmp/validation/acme.tools",
       skillCount: 2,
       serverCount: 1,
-      diagnostics: [],
+      dialect: "cursor" as const,
+      manifestPath: ".cursor-plugin/plugin.json",
+      componentTotals: { total: 23, runnable: 13, needsConfiguration: 0, unsupported: 1, ignored: 5, invalid: 4 },
+      processIntents: [
+        { componentId: "mcp/browser", kind: "process", summary: "启动本地 browser MCP server" },
+        { componentId: "hook/audit", kind: "network", summary: "连接审计端点" },
+      ],
+      diagnostics: [{ code: "component_invalid", message: "4 个组件无效", severity: "error" as const }],
     }));
     const installPlugin = vi.fn()
       .mockRejectedValueOnce(new Error("PLUGIN_SOURCE_CHANGED: plugin source changed"))
@@ -225,6 +292,8 @@ describe("ExtensionsView behavior", () => {
       pickPluginSource,
       validatePlugin,
       installPlugin,
+      listPluginComponents: vi.fn(async () => []),
+      getPluginConfiguration: vi.fn(async () => ({ fields: [], revision: 1 })),
       subscribeCliConnectorState: vi.fn(() => () => undefined),
     } as unknown as RuntimeClient;
 
@@ -243,12 +312,24 @@ describe("ExtensionsView behavior", () => {
 
     expect(document.querySelector(".aw-plugins")).not.toBeNull();
     expect(document.querySelector(".extension-view")).toBeNull();
-    expect(document.querySelector(".aw-plugin-card")?.textContent).toContain(
+    const installedPluginCard = document.querySelector<HTMLElement>(".aw-plugin-card");
+    expect(installedPluginCard?.textContent).toContain(
       "acme.tools",
     );
+    expect(installedPluginCard?.textContent).not.toContain("1.2.0");
+    expect(installedPluginCard?.textContent).not.toContain("兼容");
+    expect(installedPluginCard?.textContent).not.toContain("部分可用");
+    expect(installedPluginCard?.textContent).not.toContain("技能");
+    expect(installedPluginCard?.textContent).not.toContain("MCP");
+    expect(installedPluginCard?.querySelector(".aw-plugin-card__meta")).toBeNull();
+    expect(
+      [...(installedPluginCard?.querySelector(".aw-plugin-card__title-row")?.children ?? [])]
+        .map((item) => item.textContent),
+    ).toEqual(["acme.tools", "Cursor"]);
     expect(
       document.querySelector(".aw-plugin-card__icon .aw-icon--puzzle"),
     ).not.toBeNull();
+    expect(buttonByText("Marketplace")).toBeUndefined();
 
     const searchInput = document.querySelector<HTMLInputElement>(
       '.aw-plugins__search input[placeholder="搜索插件…"]',
@@ -271,85 +352,473 @@ describe("ExtensionsView behavior", () => {
     const installDialog = document.querySelector<HTMLElement>(
       ".aw-plugin-install-dialog[role=\"dialog\"]",
     );
-    expect(installDialog?.textContent).toContain("选择插件来源");
-    expect(installDialog?.textContent).toContain("插件可访问你的电脑");
+    const dropzone = installDialog?.querySelector<HTMLButtonElement>(
+      ".aw-plugin-install-dialog__dropzone",
+    );
     expect(installDialog?.textContent).toContain(
-      "我已了解 MCP 子进程无沙盒，并以当前用户身份运行",
+      "兼容 Codex、Cursor、Claude Code、Agent Plugins 格式",
     );
-    expect(buttonByText("检查插件")?.disabled).toBe(true);
-    expect(buttonByText("确认安装")?.disabled).toBe(true);
+    expect(installDialog?.textContent).toContain("点击选择或拖放插件 ZIP");
+    expect(installDialog?.textContent).not.toContain("检查插件");
+    expect(installDialog?.textContent).not.toContain("同名时替换");
+    expect(installDialog?.textContent).not.toContain("插件可访问你的电脑");
+    expect(installDialog?.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    expect(buttonByText("安装")?.disabled).toBe(true);
 
-    const localPathInput = installDialog?.querySelector<HTMLInputElement>(
-      'input[placeholder="选择插件目录，或输入 zip 文件路径"]',
-    );
-    const riskConfirm = installDialog?.querySelector<HTMLInputElement>(
-      ".aw-plugin-install-dialog__risk-confirm input",
-    );
-    await act(async () => buttonByText("浏览")?.click());
+    await act(async () => dropzone?.click());
     await settle();
     expect(pickPluginSource).toHaveBeenCalledWith(undefined);
-    expect(localPathInput?.value).toBe("/tmp/acme-plugin.zip");
-    expect(buttonByText("检查插件")?.disabled).toBe(false);
-
-    await act(async () => {
-      riskConfirm?.click();
-    });
-    expect(buttonByText("确认安装")?.disabled).toBe(true);
-
-    await act(async () => buttonByText("检查插件")?.click());
-    await settle();
     expect(validatePlugin).toHaveBeenLastCalledWith({
       kind: "local_path",
       path: "/tmp/acme-plugin.zip",
     });
-    expect(installDialog?.textContent).toContain("检查通过");
-    expect(installDialog?.textContent).toContain("acme.tools");
-    expect(installDialog?.textContent).toContain("2 Skills · 1 MCP Servers");
-    expect(buttonByText("确认安装")?.disabled).toBe(false);
+    expect(dropzone?.dataset.state).toBe("valid");
+    expect(installDialog?.textContent).toContain("插件 ZIP 格式正确");
+    expect(installDialog?.textContent).toContain("acme.tools · v1.2.0");
+    expect(installDialog?.textContent).not.toContain("component_invalid");
+    expect(buttonByText("安装")?.disabled).toBe(false);
 
-    await act(async () => buttonByText("浏览")?.click());
+    await act(async () => dropzone?.click());
     await settle();
     expect(pickPluginSource).toHaveBeenLastCalledWith("/tmp/acme-plugin.zip");
-    expect(localPathInput?.value).toBe("/tmp/acme-plugin-v2.zip");
-    expect(installDialog?.textContent).not.toContain("检查通过");
-    expect(buttonByText("确认安装")?.disabled).toBe(true);
-
-    await act(async () => buttonByText("检查插件")?.click());
-    await settle();
-    expect(buttonByText("确认安装")?.disabled).toBe(false);
-
-    await act(async () => {
-      if (localPathInput) {
-        const setter = Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype,
-          "value",
-        )?.set;
-        setter?.call(localPathInput, "/tmp/acme-plugin");
-        localPathInput.dispatchEvent(new Event("input", { bubbles: true }));
-      }
+    expect(validatePlugin).toHaveBeenLastCalledWith({
+      kind: "local_path",
+      path: "/tmp/acme-plugin-v2.zip",
     });
-    expect(installDialog?.textContent).not.toContain("检查通过");
-    expect(buttonByText("确认安装")?.disabled).toBe(true);
+    expect(dropzone?.dataset.state).toBe("valid");
 
-    await act(async () => buttonByText("检查插件")?.click());
+    await act(async () => buttonByText("安装")?.click());
     await settle();
-    await act(async () => buttonByText("确认安装")?.click());
-    await settle();
-    expect(installDialog?.textContent).toContain("插件来源已变化，请重新检查后再安装");
-    expect(installDialog?.textContent).not.toContain("检查通过");
-    expect(buttonByText("确认安装")?.disabled).toBe(true);
+    expect(validatePlugin).toHaveBeenCalledTimes(3);
+    expect(dropzone?.dataset.state).toBe("valid");
+    expect(buttonByText("安装")?.disabled).toBe(false);
 
-    await act(async () => buttonByText("检查插件")?.click());
-    await settle();
-    await act(async () => buttonByText("确认安装")?.click());
+    await act(async () => buttonByText("安装")?.click());
     await settle();
     expect(installPlugin).toHaveBeenCalledWith({
-      source: { kind: "local_path", path: "/tmp/acme-plugin" },
-      replace: false,
+      source: { kind: "local_path", path: "/tmp/acme-plugin-v2.zip" },
+      replace: true,
       expectedDigest: "sha256-v2:validated",
     });
     expect(installPlugin).toHaveBeenCalledTimes(2);
     expect(onNotice).toHaveBeenCalledWith("插件已安装，将在新任务中生效");
+    expect(document.querySelector(".aw-plugin-console")).not.toBeNull();
+
+    await act(async () => buttonByText("返回插件")?.click());
+    await settle();
+    expect(document.querySelector(".aw-plugin-console")).toBeNull();
+    expect(document.querySelector(".aw-plugins")).not.toBeNull();
+  });
+
+  it("routes a Plugin ZIP selected in Skills to the Plugin installer", async () => {
+    const onNotice = vi.fn();
+    const pluginValidation = {
+      valid: true,
+      source: { kind: "local_path" as const, path: "/tmp/example-plugin.zip" },
+      name: "example-plugin",
+      version: "1.0.0",
+      digest: "sha256-v2:plugin",
+      targetRoot: "/tmp/validation/example-plugin",
+      skillCount: 1,
+      serverCount: 0,
+      diagnostics: [],
+    };
+    const installSkill = vi.fn();
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => [runtimeProject]),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => []),
+      listPlugins: vi.fn(async () => []),
+      resolveDroppedPluginSource: vi.fn(async () => ({
+        canceled: false as const,
+        path: "/tmp/example-plugin.zip",
+      })),
+      validatePlugin: vi.fn(async () => pluginValidation),
+      installSkill,
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <RoutedInstallHarness
+          initialSection="skills"
+          runtimeClient={runtimeClient}
+          onNotice={onNotice}
+        />,
+      );
+    });
+    await settle();
+    await act(async () => buttonByText("安装 Skill")?.click());
+
+    const input = document.querySelector<HTMLInputElement>(
+      '.extension-dropzone input[type="file"]',
+    );
+    const pluginZip = new File(["zip"], "example-plugin.zip", {
+      type: "application/zip",
+    });
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      value: { 0: pluginZip, length: 1, item: () => pluginZip },
+    });
+    await act(async () => input?.dispatchEvent(new Event("change", { bubbles: true })));
+    await settle();
+
+    const pluginDialog = document.querySelector<HTMLElement>(
+      '.aw-plugin-install-dialog[role="dialog"]',
+    );
+    expect(pluginDialog).not.toBeNull();
+    expect(pluginDialog?.textContent).toContain("插件 ZIP 格式正确");
+    expect(pluginDialog?.textContent).toContain("example-plugin · v1.0.0");
+    expect(installSkill).not.toHaveBeenCalled();
+    expect(onNotice).toHaveBeenCalledWith("已识别为插件包，已切换到插件安装");
+  });
+
+  it("routes a Skill ZIP selected in Plugins and installs it only in the chosen Skill scope", async () => {
+    const onNotice = vi.fn();
+    const installedSkill: RuntimeSkill = {
+      ...projectSkill,
+      id: "daily-report",
+      catalogEntryId: "catalog-daily-report",
+      name: "daily-report",
+      displayName: "日报",
+      rootDir: `${projectRoot}/.awaken/skills/daily-report`,
+      skillFilePath: `${projectRoot}/.awaken/skills/daily-report/SKILL.md`,
+    };
+    const installSkill = vi.fn(async () => ({
+      skill: installedSkill,
+      path: installedSkill.rootDir ?? "",
+      message: "project skill installed",
+    }));
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => [runtimeProject]),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => []),
+      listPlugins: vi.fn(async () => []),
+      pickPluginSource: vi.fn(async () => ({
+        canceled: false as const,
+        path: "/tmp/daily-report.zip",
+      })),
+      validatePlugin: vi.fn(async () => {
+        throw new Error("SKILL_PACKAGE_SELECTED: use the Skill installer");
+      }),
+      installSkill,
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <RoutedInstallHarness
+          initialSection="plugins"
+          runtimeClient={runtimeClient}
+          onNotice={onNotice}
+        />,
+      );
+    });
+    await settle();
+    await act(async () => buttonByText("安装插件")?.click());
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>(
+        ".aw-plugin-install-dialog__dropzone",
+      )?.click();
+    });
+    await settle();
+
+    const skillDialog = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]'))
+      .find((dialog) => dialog.textContent?.includes("安装 Skill"));
+    expect(skillDialog).not.toBeNull();
+    expect(skillDialog?.textContent).toContain("daily-report.zip");
+    expect(onNotice).toHaveBeenCalledWith("已识别为 Skill 包，请确认安装范围");
+
+    await act(async () => buttonByText("安装")?.click());
+    await settle();
+    expect(installSkill).toHaveBeenCalledWith({
+      fileName: "daily-report.zip",
+      contentBase64: undefined,
+      sourcePath: "/tmp/daily-report.zip",
+      scope: "project",
+      projectRoot,
+    });
+    expect(onNotice).toHaveBeenCalledWith("已安装 日报");
+    expect(document.querySelector(".aw-plugin-install-dialog")).toBeNull();
+  });
+
+  it("sanitizes direct Plugin validation errors before rendering them", async () => {
+    const validatePlugin = vi.fn(async () => {
+      throw new Error(
+        "Error invoking remote method 'awaken:validate-plugin': Error: PLUGIN_INVALID: open /Users/test/private/plugin.json",
+      );
+    });
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => [runtimeProject]),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => []),
+      listPlugins: vi.fn(async () => []),
+      pickPluginSource: vi.fn(async () => ({
+        canceled: false as const,
+        path: "/missing/plugin.zip",
+      })),
+      validatePlugin,
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="plugins"
+          desktopReady
+          runtimeClient={runtimeClient}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={vi.fn()}
+        />,
+      );
+    });
+    await settle();
+
+    await act(async () => buttonByText("安装插件")?.click());
+    const dropzone = document.querySelector<HTMLButtonElement>(
+      ".aw-plugin-install-dialog__dropzone",
+    );
+    await act(async () => dropzone?.click());
+    await settle();
+
+    expect(validatePlugin).toHaveBeenCalledWith({
+      kind: "local_path",
+      path: "/missing/plugin.zip",
+    });
+    expect(dropzone?.dataset.state).toBe("invalid");
+    expect(document.body.textContent).toContain("插件 ZIP 格式不符合要求");
+    expect(document.body.textContent).not.toContain("PLUGIN_INVALID");
+    expect(document.body.textContent).not.toContain("invoking remote method");
+    expect(document.body.textContent).not.toContain("/Users/");
+  });
+
+  it("keeps Plugin Console Skill inventory, direct preview, toggle, and exact use action without a user-copy entry", async () => {
+    const plugin: RuntimePlugin = {
+      name: "console.plugin",
+      version: "1.0.0",
+      description: "Plugin Console 回归夹具",
+      dialect: "codex",
+      compatibilityState: "compatible",
+      enabled: true,
+      source: { kind: "local_path", path: "/tmp/console.plugin.zip" },
+      digest: "digest-console-v1",
+      skillCount: 1,
+      serverCount: 0,
+      componentTotals: {
+        total: 1,
+        runnable: 1,
+        needsConfiguration: 0,
+        unsupported: 0,
+        ignored: 0,
+        invalid: 0,
+      },
+    };
+    const componentState: RuntimePluginComponentState = {
+      component: {
+        logicalId: "skills/private-review",
+        logicalIdEncoded: "c2tpbGxzL3ByaXZhdGUtcmV2aWV3",
+        revisionId: "revision-skill-v1",
+        kind: "skill",
+        displayName: "插件私有复核",
+        description: "只通过 Plugin Console 管理",
+        sourceDialect: "codex",
+        sourcePath: "skills/private-review/SKILL.md",
+        mappingState: "native",
+        validation: "valid",
+        diagnostics: [
+          { code: "skill_notice", message: "测试诊断", severity: "info" },
+        ],
+        skill: { path: "skills/private-review" },
+      },
+      desiredState: "enabled",
+      configurationState: "ready",
+      runtimeState: "loaded",
+      integrityState: "intact",
+      mappingState: "native",
+      switchable: true,
+    };
+    const componentDetail: RuntimePluginComponentDetail = {
+      state: componentState,
+      preview: "# 插件 Skill 预览",
+      source: "---\nname: private-review\ndescription: review\n---",
+      sourceEditable: false,
+      resources: ["SKILL.md", "references/checklist.md"],
+      properties: { skill: { packagePath: "skills/private-review" } },
+    };
+    const onUsePlugin = vi.fn();
+    const onUsePluginComponent = vi.fn();
+    const onNotice = vi.fn();
+    const setPluginComponentState = vi.fn(async () => ({ plugin, revision: 2 }));
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => [runtimeProject]),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => []),
+      listPlugins: vi.fn(async () => [plugin]),
+      getPlugin: vi.fn(async () => plugin),
+      listPluginComponents: vi.fn(async () => [componentState]),
+      getPluginComponent: vi.fn(async () => componentDetail),
+      setPluginComponentState,
+      getPluginConfiguration: vi.fn(async () => ({ fields: [], revision: 1 })),
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="plugins"
+          desktopReady
+          runtimeClient={runtimeClient}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={onNotice}
+          onUsePlugin={onUsePlugin}
+          onUsePluginComponent={onUsePluginComponent}
+        />,
+      );
+    });
+    await settle();
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>(".aw-plugin-card__main")?.click();
+    });
+    await settle();
+    expect(document.querySelector(".aw-plugin-console")?.textContent).toContain("技能");
+    expect(document.querySelector(".aw-plugin-console")?.textContent).toContain("插件私有复核");
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>(".aw-plugin-component-row__main")?.click();
+    });
+    await settle();
+    const componentDialog = document.querySelector<HTMLElement>(
+      '.aw-plugin-component-dialog[role="dialog"]',
+    );
+    expect(componentDialog).not.toBeNull();
+    expect(document.querySelector(".aw-plugin-inspector")).toBeNull();
+    expect(componentDialog?.textContent).toContain("插件 Skill 预览");
+    const useInChatButton = buttonByText("在对话中使用");
+    expect(useInChatButton).toBeTruthy();
+    expect(useInChatButton?.closest(".aw-dialog__foot")).not.toBeNull();
+    expect(useInChatButton?.closest(".aw-dialog__body")).toBeNull();
+    expect(componentDialog?.querySelector(".aw-plugin-component-dialog__title small")).toBeNull();
+    expect(buttonByText("创建完整用户副本")).toBeUndefined();
+    expect(componentDialog?.querySelector('[role="tablist"]')).toBeNull();
+    expect(buttonByText("详情")).toBeUndefined();
+    expect(buttonByText("预览")).toBeUndefined();
+    expect(buttonByText("源文件")).toBeUndefined();
+    expect(componentDialog?.textContent).not.toContain("references/checklist.md");
+    expect(componentDialog?.textContent).not.toContain("name: private-review");
+    expect(componentDialog?.textContent).not.toContain("测试诊断");
+
+    await act(async () => buttonByText("在对话中使用")?.click());
+    expect(onUsePlugin).not.toHaveBeenCalled();
+    expect(onUsePluginComponent).toHaveBeenCalledWith(plugin, componentState.component, []);
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>(
+        '[role="switch"][aria-label="关闭插件私有复核"]',
+      )?.click();
+    });
+    await settle();
+    expect(setPluginComponentState).toHaveBeenCalledWith(
+      "console.plugin",
+      "skill",
+      "c2tpbGxzL3ByaXZhdGUtcmV2aWV3",
+      false,
+    );
+
+  });
+
+  it("accepts a dropped ZIP and rejects a dropped non-ZIP before Core validation", async () => {
+    const resolveDroppedPluginSource = vi
+      .fn()
+      .mockResolvedValueOnce({ canceled: true as const, error: "请选择 .zip 插件包" })
+      .mockResolvedValueOnce({ canceled: false as const, path: "/tmp/dropped-plugin.zip" });
+    const validatePlugin = vi.fn(async (source: RuntimePluginSource) => ({
+      valid: true,
+      source,
+      name: "dropped.plugin",
+      version: "1.0.0",
+      digest: "sha256-v2:dropped",
+      targetRoot: "/tmp/validation/dropped.plugin",
+      skillCount: 1,
+      serverCount: 0,
+      diagnostics: [],
+    }));
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => [runtimeProject]),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => []),
+      listPlugins: vi.fn(async () => []),
+      resolveDroppedPluginSource,
+      validatePlugin,
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="plugins"
+          desktopReady
+          runtimeClient={runtimeClient}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={vi.fn()}
+        />,
+      );
+    });
+    await settle();
+    await act(async () => buttonByText("安装插件")?.click());
+
+    const dropzone = document.querySelector<HTMLButtonElement>(
+      ".aw-plugin-install-dialog__dropzone",
+    );
+    const drop = async (file: File): Promise<void> => {
+      const event = new Event("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "dataTransfer", {
+        value: {
+          dropEffect: "none",
+          files: {
+            0: file,
+            length: 1,
+            item: () => file,
+          },
+        },
+      });
+      await act(async () => {
+        dropzone?.dispatchEvent(event);
+      });
+      await settle();
+    };
+
+    const textFile = new File(["not a zip"], "plugin.txt", { type: "text/plain" });
+    await drop(textFile);
+    expect(resolveDroppedPluginSource).toHaveBeenLastCalledWith(textFile);
+    expect(validatePlugin).not.toHaveBeenCalled();
+    expect(dropzone?.dataset.state).toBe("invalid");
+    expect(document.body.textContent).toContain("请选择 .zip 插件包");
+
+    const zipFile = new File(["zip"], "plugin.zip", { type: "application/zip" });
+    await drop(zipFile);
+    expect(resolveDroppedPluginSource).toHaveBeenLastCalledWith(zipFile);
+    expect(validatePlugin).toHaveBeenCalledWith({
+      kind: "local_path",
+      path: "/tmp/dropped-plugin.zip",
+    });
+    expect(dropzone?.dataset.state).toBe("valid");
+    expect(document.body.textContent).toContain("插件 ZIP 格式正确");
   });
 
   it("refreshes an open Plugin catalog after a committed store revision", async () => {
@@ -370,6 +839,7 @@ describe("ExtensionsView behavior", () => {
     const after: RuntimePlugin = {
       ...before,
       version: "1.1.0",
+      description: "Catalog 已刷新",
       digest: "sha256-v2:after",
       skillCount: 1,
       diagnostics: [],
@@ -416,7 +886,8 @@ describe("ExtensionsView behavior", () => {
     await settle();
 
     expect(listPlugins).toHaveBeenCalledTimes(2);
-    expect(document.body.textContent).toContain("1.1.0");
+    expect(document.body.textContent).toContain("Catalog 已刷新");
+    expect(document.body.textContent).not.toContain("1.1.0");
     expect(document.body.textContent).not.toContain("installed plugin package digest changed");
   });
 
@@ -516,6 +987,58 @@ describe("ExtensionsView behavior", () => {
     });
     await settle();
     expect(listPlugins).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Plugin Skills out of every Skills view, search result, count, and preview state", async () => {
+    const getSkillPreview = vi.fn();
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => [runtimeProject]),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => [pluginSkill]),
+      listPlugins: vi.fn(async () => []),
+      getSkillPreview,
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="skills"
+          desktopReady
+          runtimeClient={runtimeClient}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={vi.fn()}
+        />,
+      );
+    });
+    await settle();
+
+    expect(document.body.textContent).not.toContain("插件私有复核");
+    await act(async () => buttonByText("项目 Skills")?.click());
+    expect(
+      document.querySelector('[aria-label="打开营销项目 项目 Skills"]')?.textContent,
+    ).toContain("0 Skill");
+
+    const search = document.querySelector<HTMLInputElement>(
+      '.extension-toolbar input[placeholder="搜索..."]',
+    );
+    await setInputValue(search, "插件私有复核");
+    for (const label of [
+      "Awaken Skills",
+      "项目 Skills",
+      "全局 Skills",
+      "Agents Skills",
+    ]) {
+      await act(async () => buttonByText(label)?.click());
+      expect(document.body.textContent).not.toContain("插件私有复核");
+      expect(document.body.textContent).not.toContain("其他来源");
+      expect(document.body.textContent).toContain("未找到匹配的 Skill");
+    }
+    expect(document.querySelector('[aria-label="查看 插件私有复核 的 Skill 包"]')).toBeNull();
+    expect(getSkillPreview).not.toHaveBeenCalled();
   });
 
   it("opens a project window, previews SKILL.md, and deletes through confirmation", async () => {

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,7 @@ type Run struct {
 	ReasoningEffort     string                `json:"reasoning_effort,omitempty"`
 	HookSnapshotID      string                `json:"hook_snapshot_id,omitempty"`
 	InstructionSnapshot *instructions.Summary `json:"instruction_snapshot,omitempty"`
+	PluginGeneration    string                `json:"plugin_generation,omitempty"`
 }
 
 func (s *Session) SetHookSnapshotID(snapshotID string) {
@@ -95,6 +97,69 @@ type Session struct {
 	userQuestions        map[string]*pendingUserQuestion
 	externalInteractions map[string]*pendingExternalInteraction
 	computerRuntime      *computer.Runtime
+	pluginLeaseRelease   func()
+	pluginLeaseOnce      sync.Once
+	pluginLeaseRequested bool
+	asyncHookRetains     int
+}
+
+func (s *Session) SetPluginRuntimeLease(generation string, release func()) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.run.PluginGeneration = strings.TrimSpace(generation)
+	s.pluginLeaseRelease = release
+	s.mu.Unlock()
+}
+
+func (s *Session) ReleasePluginRuntimeLease() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.pluginLeaseRequested = true
+	release := s.pluginLeaseRelease
+	ready := s.asyncHookRetains == 0
+	s.mu.Unlock()
+	if ready {
+		s.releasePluginRuntimeLease(release)
+	}
+}
+
+// RetainAsyncHook keeps the run's immutable Plugin generation alive while a
+// background Hook still executes from that package. The returned release is
+// idempotent and may complete after the run itself reached terminal state.
+func (s *Session) RetainAsyncHook() func() {
+	if s == nil {
+		return func() {}
+	}
+	s.mu.Lock()
+	s.asyncHookRetains++
+	s.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			if s.asyncHookRetains > 0 {
+				s.asyncHookRetains--
+			}
+			ready := s.pluginLeaseRequested && s.asyncHookRetains == 0
+			release := s.pluginLeaseRelease
+			s.mu.Unlock()
+			if ready {
+				s.releasePluginRuntimeLease(release)
+			}
+		})
+	}
+}
+
+func (s *Session) releasePluginRuntimeLease(release func()) {
+	s.pluginLeaseOnce.Do(func() {
+		if release != nil {
+			release()
+		}
+	})
 }
 
 func (s *Session) SetSubagentController(controller subagentruntime.Controller) {
@@ -140,7 +205,7 @@ type pendingUserQuestion struct {
 
 type pendingExternalInteraction struct {
 	request agentcore.AwakenEvent
-	answer  chan agentcore.ExternalInteractionResolution
+	answer  chan agentcore.ExternalInteractionAnswer
 }
 
 func NewSession(runID, threadID, input string, attachments []RunInputAttachment, composerTokens []ComposerToken, cancel context.CancelFunc) *Session {
@@ -526,6 +591,15 @@ func (s *Session) resolveUserQuestion(questionID string, resolution agentcore.Us
 }
 
 func (s *Session) AwaitExternalInteraction(ctx context.Context, request agentcore.AwakenEvent) (agentcore.ExternalInteractionResolution, error) {
+	answer, err := s.awaitExternalInteractionAnswer(ctx, request)
+	return answer.Resolution, err
+}
+
+func (s *Session) AwaitExternalInteractionForm(ctx context.Context, request agentcore.AwakenEvent) (agentcore.ExternalInteractionAnswer, error) {
+	return s.awaitExternalInteractionAnswer(ctx, request)
+}
+
+func (s *Session) awaitExternalInteractionAnswer(ctx context.Context, request agentcore.AwakenEvent) (agentcore.ExternalInteractionAnswer, error) {
 	timestamp := request.Timestamp.UTC()
 	if request.Timestamp.IsZero() {
 		timestamp = time.Now().UTC()
@@ -538,13 +612,13 @@ func (s *Session) AwaitExternalInteraction(ctx context.Context, request agentcor
 
 	pending := &pendingExternalInteraction{
 		request: request,
-		answer:  make(chan agentcore.ExternalInteractionResolution, 1),
+		answer:  make(chan agentcore.ExternalInteractionAnswer, 1),
 	}
 
 	s.mu.Lock()
 	if isTerminalStatus(s.run.Status) {
 		s.mu.Unlock()
-		return "", ErrRunTerminal
+		return agentcore.ExternalInteractionAnswer{}, ErrRunTerminal
 	}
 	request.ThreadID = s.run.ThreadID
 	request.RunID = s.run.RunID
@@ -570,11 +644,15 @@ func (s *Session) AwaitExternalInteraction(ctx context.Context, request agentcor
 		s.mu.Lock()
 		delete(s.externalInteractions, request.InteractionID)
 		s.mu.Unlock()
-		return "", ctx.Err()
+		return agentcore.ExternalInteractionAnswer{}, ctx.Err()
 	}
 }
 
 func (s *Session) ResolveExternalInteraction(interactionID string, resolution agentcore.ExternalInteractionResolution) error {
+	return s.ResolveExternalInteractionWithContent(interactionID, resolution, nil)
+}
+
+func (s *Session) ResolveExternalInteractionWithContent(interactionID string, resolution agentcore.ExternalInteractionResolution, content map[string]any) error {
 	interactionID = strings.TrimSpace(interactionID)
 	if interactionID == "" {
 		return ErrExternalInteractionNotFound
@@ -618,8 +696,23 @@ func (s *Session) ResolveExternalInteraction(interactionID string, resolution ag
 	s.mu.Unlock()
 
 	bus.Append(wrapped, false)
-	pending.answer <- resolution
+	pending.answer <- agentcore.ExternalInteractionAnswer{Resolution: resolution, Content: cloneInteractionContent(content)}
 	return nil
+}
+
+func cloneInteractionContent(content map[string]any) map[string]any {
+	if content == nil {
+		return nil
+	}
+	raw, err := json.Marshal(content)
+	if err != nil {
+		return nil
+	}
+	var cloned map[string]any
+	if json.Unmarshal(raw, &cloned) != nil {
+		return nil
+	}
+	return cloned
 }
 
 func (s *Session) CompleteCancelled(message, result string) {

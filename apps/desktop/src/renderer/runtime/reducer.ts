@@ -400,7 +400,7 @@ export type UserQuestionItem = {
 
 export type ExternalInteractionItem = {
   id: string;
-  kind: "external" | "acp-permission";
+  kind: "external" | "acp-permission" | "mcp-elicitation";
   title?: string;
   safeMessage?: string;
   verificationUrl?: string;
@@ -410,6 +410,7 @@ export type ExternalInteractionItem = {
   sourceTool?: string;
   /** ACP permission options surfaced when kind is "acp-permission". */
   options?: AguiACPPermissionOption[];
+  formSchema?: Record<string, unknown>;
 };
 
 export type ComputerReviewItem = {
@@ -3271,7 +3272,10 @@ export function reduceRuntimeState(
             nextState.externalInteractions,
             {
               id: interactionId,
-              kind: "external",
+              kind:
+                action.event.interactionKind === "mcp-elicitation"
+                  ? "mcp-elicitation"
+                  : "external",
               title: action.event.interactionTitle,
               safeMessage: action.event.interactionSafeMessage,
               verificationUrl: action.event.interactionVerificationUrl ?? action.event.authUrl,
@@ -3281,6 +3285,7 @@ export function reduceRuntimeState(
                 ? action.event.interactionRecoveries
                 : ["confirm_done", "cancel"],
               sourceTool: action.event.toolCallName,
+              formSchema: action.event.interactionFormSchema,
             },
           );
           break;

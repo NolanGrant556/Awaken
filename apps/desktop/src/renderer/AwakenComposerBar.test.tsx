@@ -603,6 +603,7 @@ describe("AwakenComposerBar unified token editing", () => {
   });
 
   it("does not reposition the inline caret when only the selection callback identity changes", () => {
+    const replacementSelectionChange = vi.fn();
     const { editor, rerender } = renderComposer({
       value: "后文",
       focusRequest: 1,
@@ -613,11 +614,12 @@ describe("AwakenComposerBar unified token editing", () => {
     editor.focus();
     collapseSelection(trailingText, trailingText.data.length);
 
-    rerender({ onInputSelectionChange: vi.fn() });
+    rerender({ onInputSelectionChange: replacementSelectionChange });
 
     const selection = window.getSelection();
     expect(selection?.anchorNode).toBe(trailingText);
     expect(selection?.anchorOffset).toBe(trailingText.data.length);
+    expect(replacementSelectionChange).not.toHaveBeenCalled();
   });
 
   it("does not reset a textarea caret on controlled rerenders with the same focus request", () => {

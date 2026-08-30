@@ -22,6 +22,7 @@ import { AwakenSearchSettingsDemo } from "../src/components/AwakenSearchSettings
 import { AwakenSelectDemo } from "../src/components/AwakenSelect/AwakenSelect.demo";
 import { AwakenPetsSettingsDemo } from "../src/components/AwakenPetsSettings/AwakenPetsSettings.demo";
 import { AwakenPluginsDemo } from "../src/components/AwakenPlugins/AwakenPlugins.demo";
+import { AwakenPluginConsoleDemo } from "../src/components/AwakenPluginConsole/AwakenPluginConsole.demo";
 import { AwakenSidebarDemo } from "../src/components/AwakenSidebar/AwakenSidebar.demo";
 import { AwakenSkillsDemo } from "../src/components/AwakenSkills/AwakenSkills.demo";
 import { AwakenSwitchDemo } from "../src/components/AwakenSwitch/AwakenSwitch.demo";
@@ -53,6 +54,7 @@ export const awakenGalleryEntries: AwakenGalleryEntry[] = [
   { id: "awaken-sidebar", name: "AwakenSidebar", displayName: "「左侧栏」组件库", demo: AwakenSidebarDemo, category: "sidebar", aliases: ["awaken-dialog", "awaken-dropdown", "awaken-selectable-card"] },
   { id: "awaken-skills", name: "AwakenSkills", displayName: "「技能」组件库", demo: AwakenSkillsDemo, category: "sidebar" },
   { id: "awaken-plugins", name: "AwakenPlugins", displayName: "「插件」组件库", demo: AwakenPluginsDemo, category: "sidebar", aliases: ["awaken-plugin-card", "awaken-plugin-detail-dialog", "awaken-plugin-install-dialog"] },
+  { id: "awaken-plugin-console", name: "AwakenPluginConsole", displayName: "插件管理台", demo: AwakenPluginConsoleDemo, category: "sidebar", aliases: ["plugin-component-row", "plugin-component-detail-dialog", "variable-editor"] },
   { id: "awaken-account", name: "AwakenAccount", displayName: "「账户」组件库", demo: AwakenAccountDemo, category: "sidebar", aliases: ["awaken-popover"] },
   { id: "awaken-connectors", name: "AwakenConnectors", displayName: "「连接器」组件库", demo: AwakenConnectorsDemo, category: "sidebar" },
   {

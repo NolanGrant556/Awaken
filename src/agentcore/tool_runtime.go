@@ -488,6 +488,38 @@ func (rt *ToolRuntime) Execute(ctx stdcontext.Context, call convcontext.ToolCall
 	toolCtx = tool.ContextWithToolSessionState(toolCtx, rt.toolSessionState)
 	toolCtx = tool.ContextWithModelContentStore(toolCtx, rt.modelContentStore)
 	toolCtx = ContextWithEventSink(toolCtx, rt.sink)
+	toolCtx = tool.ContextWithElicitationHandler(toolCtx, func(ctx stdcontext.Context, request tool.ElicitationRequest) (tool.ElicitationAnswer, error) {
+		awaiter, ok := rt.sink.(ExternalInteractionFormAwaiter)
+		if !ok {
+			return tool.ElicitationAnswer{Action: "cancel"}, nil
+		}
+		mode := strings.TrimSpace(request.Mode)
+		if mode == "" {
+			mode = "form"
+		}
+		recoveries := []string{"submit_form", "cancel"}
+		if mode == "url" {
+			recoveries = []string{"open_url", "confirm_done", "cancel"}
+		}
+		answer, err := awaiter.AwaitExternalInteractionForm(ctx, AwakenEvent{
+			Type: ExternalInteractionRequestedType, Timestamp: timeNowUTC(),
+			InteractionID: newAwakenID("mcp_elicitation"), InteractionKind: "mcp-elicitation",
+			InteractionTitle: "MCP 请求确认", InteractionSafeMessage: request.Message,
+			InteractionVerificationURL: request.URL, InteractionProvider: request.Provider,
+			InteractionRecoveries: recoveries, InteractionFormSchema: request.RequestedSchema,
+		})
+		if err != nil {
+			return tool.ElicitationAnswer{}, err
+		}
+		switch answer.Resolution {
+		case ExternalInteractionCompleted:
+			return tool.ElicitationAnswer{Action: "accept", Content: answer.Content}, nil
+		case ExternalInteractionCancelled:
+			return tool.ElicitationAnswer{Action: "cancel"}, nil
+		default:
+			return tool.ElicitationAnswer{Action: "decline"}, nil
+		}
+	})
 	toolCtx = tool.ContextWithACPEventEmitter(toolCtx, func(e tool.ACPEvent) {
 		rt.sink.Emit(MapACPEvent(e))
 	})

@@ -76,12 +76,14 @@ import {
   filterSlashActions,
   mentionTriggerFromComposerValue,
   pluginMentionProvider,
+  pluginSkillComposerTokenFromAction,
   skillSlashProvider,
   skillSlashActionsFromSkills,
   slashTriggerFromComposerValue,
 } from "./composerSlash";
 import { composerRuntimePanelsForStatus } from "./useComposerLifecycle";
 import {
+  composerSelectionsEqual,
   composerDraftOwnerKey,
   threadComposerDraftForOwner,
   updateThreadComposerDraftField,
@@ -745,12 +747,22 @@ function stubElectronBridge(): void {
       getPlugin: vi.fn(),
       validatePlugin: vi.fn(),
       installPlugin: vi.fn(),
+      commitPlugin: vi.fn(),
+      updatePluginComponentSource: vi.fn(),
       enablePlugin: vi.fn(),
       disablePlugin: vi.fn(),
-      upgradePlugin: vi.fn(),
       uninstallPlugin: vi.fn(),
       enablePluginServer: vi.fn(),
       disablePluginServer: vi.fn(),
+      listPluginComponents: vi.fn(async () => []),
+      getPluginComponent: vi.fn(),
+      setPluginComponentState: vi.fn(),
+      setPluginMcpToolState: vi.fn(),
+      setPluginRuleActivation: vi.fn(),
+      listPluginHookReceipts: vi.fn(),
+      retryPluginHookReceipt: vi.fn(),
+      getPluginConfiguration: vi.fn(async () => ({ fields: [], revision: 0 })),
+      updatePluginConfiguration: vi.fn(),
       listModelProviders: vi.fn(async () => []),
       listModelProfiles: vi.fn(async () => []),
       getModelPurposeRouting: vi.fn(async () => ({})),
@@ -800,6 +812,7 @@ function stubElectronBridge(): void {
       pickAttachments: vi.fn(async () => ({ canceled: true as const })),
       pickDirectory: vi.fn(async () => ({ canceled: true as const })),
       pickPluginSource: vi.fn(async () => ({ canceled: true as const })),
+      resolveDroppedPluginSource: vi.fn(async () => ({ canceled: true as const })),
       pickProjectFolders: vi.fn(async () => ({ canceled: true as const })),
       validateWorkspace: vi.fn(async () => ({ valid: true as const })),
       getSupervisorStatus: vi.fn(async () => ({ status: "running" as const })),
@@ -1619,6 +1632,44 @@ describe("Composer Slash Palette helpers", () => {
     expect(filterSlashActions(actions, "follow-up")[0]?.id).toContain("daily-followup");
   });
 
+  it("keeps ordinary Skill sources in slash while excluding user-invocable Plugin Skills", () => {
+    const ordinarySources: RuntimeSkill[] = [
+      ["project-skill", "project"],
+      ["user-skill", "user"],
+      ["bundled-skill", "bundled"],
+      ["agents-skill", "agents"],
+      ["mcp-skill-visible", "mcp"],
+    ].map(([id, sourceOrigin]) => ({
+      id,
+      name: id,
+      description: `${sourceOrigin} Skill`,
+      state: "loaded" as const,
+      userInvocable: true,
+      sourceOrigin,
+      context: "inline" as const,
+    }));
+    const pluginSkill: RuntimeSkill = {
+      id: "plugin__acme-tools__review",
+      name: "review",
+      displayName: "Acme Plugin Review",
+      description: "Review from an installed Plugin.",
+      state: "loaded",
+      userInvocable: true,
+      modelInvocable: true,
+      sourceOrigin: "plugin",
+      rootDir: "/home/.awaken/plugins/packages/acme.tools/skills/review",
+      skillFilePath: "/home/.awaken/plugins/packages/acme.tools/skills/review/SKILL.md",
+      context: "inline",
+    };
+
+    const actions = skillSlashActionsFromSkills([...ordinarySources, pluginSkill]);
+
+    expect(actions.map((action) => action.label)).toEqual(
+      ordinarySources.map((skill) => skill.name),
+    );
+    expect(actions.some((action) => action.label === "Acme Plugin Review")).toBe(false);
+  });
+
   it("opens a slash query at the collapsed logical caret and keeps later text outside it", () => {
     expect(
       composerActionTriggerFromDraft({
@@ -1740,6 +1791,41 @@ describe("Composer Slash Palette helpers", () => {
     });
   });
 
+  it("builds an exact plugin Skill token from the Core-owned catalog id", () => {
+    expect(
+      pluginSkillComposerTokenFromAction(
+        {
+          name: "acme.tools",
+          enabled: true,
+          source: { kind: "local_path", path: "/tmp/acme" },
+          digest: "digest-v1",
+          skillCount: 1,
+          serverCount: 0,
+        },
+        {
+          logicalId: "skill/skills/review/SKILL.md",
+          logicalIdEncoded: "encoded",
+          kind: "skill",
+          displayName: "review",
+          sourceDialect: "claude_code",
+          sourcePath: "skills/review/SKILL.md",
+          mappingState: "adapted",
+          validation: "valid",
+          skill: { path: "skills/review/SKILL.md", catalogId: "plugin__acme-tools__review" },
+        },
+      ),
+    ).toMatchObject({
+      id: "skill:plugin__acme-tools__review:plugin",
+      type: "skill",
+      label: "review",
+      payload: {
+        skillId: "plugin__acme-tools__review",
+        sourceOrigin: "plugin",
+        skillFilePath: "",
+      },
+    });
+  });
+
   it("aggregates slash actions from providers without binding the palette to skills", async () => {
     const skillProvider = skillSlashProvider(async (workspaceRoot) => {
       expect(workspaceRoot).toBe("/workspace");
@@ -1799,7 +1885,7 @@ describe("Composer Slash Palette helpers", () => {
     });
   });
 
-  it("offers enabled Plugins as structured mention tokens", async () => {
+  it("offers enabled mixed, Skill-only, and MCP-only Plugins as structured mention tokens", async () => {
     const plugins: RuntimePlugin[] = [
       {
         name: "acme.tools",
@@ -1809,6 +1895,22 @@ describe("Composer Slash Palette helpers", () => {
         source: { kind: "local_path", path: "/tmp/acme" },
         digest: "digest-v1",
         skillCount: 2,
+        serverCount: 1,
+      },
+      {
+        name: "skill-only.tools",
+        enabled: true,
+        source: { kind: "local_path", path: "/tmp/skill-only" },
+        digest: "digest-skill-only",
+        skillCount: 1,
+        serverCount: 0,
+      },
+      {
+        name: "mcp-only.tools",
+        enabled: true,
+        source: { kind: "local_path", path: "/tmp/mcp-only" },
+        digest: "digest-mcp-only",
+        skillCount: 0,
         serverCount: 1,
       },
       {
@@ -1839,7 +1941,11 @@ describe("Composer Slash Palette helpers", () => {
       [pluginMentionProvider(async () => plugins)],
       { workspaceRootForRun: "/workspace" },
     );
-    expect(actions).toHaveLength(1);
+    expect(actions.map((action) => action.label)).toEqual([
+      "acme.tools",
+      "skill-only.tools",
+      "mcp-only.tools",
+    ]);
     expect(actions[0]).toMatchObject({
       type: "plugin",
       label: "acme.tools",
@@ -3683,6 +3789,18 @@ describe("thread-scoped Composer drafts", () => {
       selection: { anchor: 4, focus: 4 },
     });
     expect(threadComposerDraftForOwner(drafts, composerDraftOwnerKey()).value).toBe("");
+  });
+
+  it("treats equal logical and caret geometry selections as the same state", () => {
+    expect(composerSelectionsEqual({
+      anchor: 3,
+      focus: 3,
+      caretRect: { left: 1, top: 2, bottom: 3 },
+    }, {
+      anchor: 3,
+      focus: 3,
+      caretRect: { left: 1, top: 2, bottom: 3 },
+    })).toBe(true);
   });
 });
 

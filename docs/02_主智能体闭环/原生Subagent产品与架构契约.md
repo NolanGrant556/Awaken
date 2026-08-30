@@ -12,12 +12,15 @@
 - `context: fork` Skill 已能通过 `Runner.startSkillChild` 同步运行真实 child，child 的模型消息、工具调用和压缩记录带 `agent_id`，父模型历史恢复会排除 child records；
 - 父 run 的取消上下文可以终止当前同步 Skill child。
 - 正式模型工具 `subagent(action=spawn|status|wait|cancel|message)` 已注册；host-owned 角色为 `explore` / `plan` / `review` / `general`。只读角色强制 `shared_readonly` 且隐藏 mutation 工具；`general` 默认 `shared` 可写父工作区，或可选 `git_worktree`。child 不暴露 Subagent、主动提问、ACP 或 Hook 配置工具；
+- 已启用、完整性有效的 Claude Code/Cursor Plugin Agent 可经 host resolver 追加为 `plugin__<plugin>__<agent>` 角色；插件明确声明的 `maxTurns`/`timeoutSeconds` 原值进入 role，未声明时保持 unset，不再叠加 Plugin 专属 8 turn/32 tool/5 分钟限制；它仍服从所有原生 child 共用的 32 turn/128 tool、4 并发、root-only、取消和 terminal barrier。Plugin prompt、read-only、tool allowlist/denylist 也只收窄 child，digest/logicalId 在 Composer 或 invoke 时复验；后台/隔离/model hint 不扩大父边界；
 - child 模型由 Host 解析：默认继承父 Agent profile；Host 内部存在有效 `subagent` route 时可先解析该 route，Renderer 不提供用途模型选择器；模型可见 spawn schema 不含 `model_profile_id`、endpoint 或凭据；
 - `src/subagentruntime` 提供 run-scoped task registry、事件驱动 wait、单任务取消、每 run 最多 8 个任务和最多 4 个并发执行；父 run 终态前会收敛非终态 child；
 - child 使用独立 conversation、agent/task identity 和取消上下文，生命周期与有界结果写入 SemanticJournal；live Agent event 与 durable reasoning/message/tool frame 都携带同一 `subagentTaskId/subagentAgentId`，Renderer 将它们路由到 child 自己的 narrative，不再混入 root；
 - child 的每个耐久 `tool_call` 与 `model_usage` 会按稳定 ID 去重后生成 `subagent_progress`，累计工具次数、provider-reported input/output/total tokens；中心 group 与右侧 Inspector 同时显示工具数、token 与按耐久起止时间计算的耗时；
 - `wait` 到期属于中性检索结果：返回 `retrieval_status=timeout` 和当前 snapshots，不产生失败 Outcome，也不取消 child；
 - child terminal 先耐久，再进入 manager 的一次性交接队列；若 root 未通过成功 `wait` 或 terminal `status` 显式消费，Runner 会在下一模型请求边界自动注入有界结构化终态。若 child 在 root 模型生成期间完成，旧响应不能直接成为 run final，Runner 会保留该响应并追加一次带终态的新模型边界；
+- root 产生候选最终回答时只要仍有 queued/running/cancelling child，Runner 就保留该回答为上下文并注入 host-owned wait 指令，要求下一模型边界通过 status/wait 等待并整合 terminal handoff；不得先结束 root run 再由 terminal barrier 取消尚未完成的 Plugin Agent。Composer 精确 Agent token 同样携带“等待 child terminal 后再回答”的 host 指令，并由 Core 按已复验 role 明确指定只读 `shared_readonly` 或可写 `shared`，不让模型猜测 workspace mode。上游 Skill 按 manifest Agent 名称调用同包 Agent 时，runtime 仅在该裸名称对所有已启用 Plugin Agent 唯一时解析到 `plugin__<plugin>__<agent>`；同名冲突必须拒绝，不能任意选择插件；
+- child 已经耐久的 tool/model usage 进度使用脱离 producer cancel signal、最长 2 秒的持久化上下文更新 task summary，避免 root terminal/cancel 与 provider usage 回调竞态产生 `subagent_persistence_failed: context canceled`；这不让尚未完成的模型或工具绕过取消，只保护已经形成的耐久事实；
 - Core 已提供 run-scoped Subagent list/detail/cancel/message route；message 先写 `subagent_message_queued` 再入队，child 只在下一模型轮次边界 drain，终态任务返回 `subagent_not_running` 且不复活；
 - Desktop reducer 已以 `subagentsById/subagentOrder` 独立保存 task truth；当前 turn 显示 Subagent group，点击 row 在 dock Composer 上方打开可关闭/重开的独立执行详情浮层，卡内按 child semantic 顺序展示思考、工具与 Markdown 结果并有独立滚动和单任务停止，且不改变主对话流布局；右侧 Inspector 继续提供任务切换、统计和控制；
 - root/child 的 tool text/media blob 使用 agent/task + run + turn + tool-call 复合命名空间；超过 32 KiB 的文本只在 journal 留 digest/size/preview 票据，下一次 provider request 在 Core 内校验并水合完整内容，Renderer 与模型都不需要读取 `~/.awaken` 路径；
@@ -29,7 +32,7 @@
 **当前不支持：**
 
 - 不支持递归 Subagent、省略类型的隐式 full-context fork、由模型或 child prompt 任意指定 profile、detached/cross-run worker；
-- 不支持自定义 markdown/JSON agent 目录、teammate 广播、自动 merge worktree；
+- 不支持任意用户自定义 markdown/JSON agent 目录；只支持 Plugin Store 已归一化并签名的 Plugin Agent。仍不支持 teammate 广播、自动 merge worktree；
 - 两个并发 `shared` 可写 child 若 writable root 重叠会被拒绝；不会静默共享同一可写根；
 - root/child 原子共享 token/tool/cost 预算和 child 完整 cost 统计尚未接通；provider 未报告 usage 时不伪造 child token；
 - 窄屏专用 Subagent sheet、跨重启 Inspector selection、review 的 `/tmp` 写例外尚未提供；
@@ -285,6 +288,9 @@ src/subagentruntime/
 src/tools/subagent/
   tool.go           # action schema 与 canonical Outcome
   tool_test.go
+
+src/pluginagents/
+  agents.go         # Normalized AgentSpec -> host Role；不创建第二套 task runtime
 ```
 
 主要集成点：
@@ -296,6 +302,8 @@ src/tools/subagent/
 - `src/agentcore/semantic_record.go`、journal restore：增加稳定 child kinds 与 orphan recovery；
 - `src/protocol/agui`、`src/server`：wire 和 control route；
 - Desktop reducer/projector/App/Design System：消费并展示。
+- `src/subagentruntime/roles.go`：内置角色优先、`plugin__` resolver 扩展、workspace 组合校验；resolver 不允许覆盖内置角色；
+- `src/plugins/agents.go`：只从 enabled + digest-valid + switchable component 提供 Plugin Role。
 
 不得：
 
@@ -405,6 +413,8 @@ max concurrent children 4
 max depth               1
 child max turns         32
 child max tool calls    128
+Plugin Agent declaration preserved when present
+Plugin Agent undeclared limits inherit ordinary child boundaries
 wait timeout            60s/call
 cancel grace            2s
 ```
@@ -413,6 +423,7 @@ cancel grace            2s
 
 - root 仍按现有默认值独立受限于 128 turn / 512 tool execution；
 - 每个 child 的 32 turn / 128 tool execution 是单 task 上限，但尚不会从同一个 root + children 全局计数器原子扣减；
+- Plugin Agent role 不再额外设置固定 8 turn / 32 tool / 5 分钟；厂商声明的 `maxTurns`/`timeoutSeconds` 继续作为 role 收窄条件，未声明时沿用普通 child 的 32/128 与父 run 取消边界；
 - root 调用 spawn/status/wait/message/cancel 工具仍计入 root 自身的 tool execution；排队和等待不会额外消耗 child 的 model/tool 预算；
 - 任一 child 达到自身上限只终止该 child，不直接伪造 root run error；root 终态 barrier 仍负责收敛未终态 child；
 - “root 与所有 child 共享 token / tool / cost 预算”仍是明确已知缺口，不得从并发上限、child 子上限或 terminal barrier 推导为已实现。

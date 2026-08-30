@@ -2,7 +2,6 @@ import { useState } from "react";
 import { AwakenPluginDetailDialog } from "../AwakenPluginDetailDialog";
 import {
   AwakenPluginInstallDialog,
-  type AwakenPluginInstallMode,
   type AwakenPluginValidationSummary,
 } from "../AwakenPluginInstallDialog";
 import { AwakenPlugins } from "./AwakenPlugins";
@@ -13,8 +12,6 @@ const installValidation: AwakenPluginValidationSummary = {
   name: "acme.tools",
   version: "1.2.0",
   digest: "sha256-v2:9320952a413947fc9afbd85f09dd98c3f6172ace924cb25dcd1c44ac85d5921f",
-  skillCount: 2,
-  serverCount: 1,
   diagnostics: [],
 };
 
@@ -23,12 +20,12 @@ export function AwakenPluginsDemo() {
   const [searchValue, setSearchValue] = useState("");
   const [detailName, setDetailName] = useState<string | null>(null);
   const [installOpen, setInstallOpen] = useState(false);
-  const [mode, setMode] = useState<AwakenPluginInstallMode>("local");
   const [localPath, setLocalPath] = useState("");
-  const [url, setUrl] = useState("");
-  const [replace, setReplace] = useState(false);
-  const [confirm, setConfirm] = useState(false);
   const [validation, setValidation] = useState<AwakenPluginValidationSummary | null>(null);
+  function selectDemoZip(path: string): void {
+    setLocalPath(path);
+    setValidation(installValidation);
+  }
 
   return (
     <section className="ads-component-demo" aria-label="插件组件族演示">
@@ -56,31 +53,11 @@ export function AwakenPluginsDemo() {
       </div>
       <AwakenPluginInstallDialog
         open={installOpen}
-        mode={mode}
         localPath={localPath}
-        url={url}
-        replace={replace}
-        confirm={confirm}
         validation={validation}
         onOpenChange={setInstallOpen}
-        onModeChange={(value) => {
-          setMode(value);
-          setValidation(null);
-        }}
-        onLocalPathChange={(value) => {
-          setLocalPath(value);
-          setValidation(null);
-        }}
-        onUrlChange={(value) => {
-          setUrl(value);
-          setValidation(null);
-        }}
-        onReplaceChange={(value) => {
-          setReplace(value);
-          setValidation(null);
-        }}
-        onConfirmChange={setConfirm}
-        onValidate={() => setValidation(installValidation)}
+        onPickLocal={() => selectDemoZip("/tmp/acme.tools.zip")}
+        onDropFile={(file) => selectDemoZip(file.name)}
         onSubmit={() => setInstallOpen(false)}
       />
       <AwakenPluginDetailDialog
@@ -88,7 +65,7 @@ export function AwakenPluginsDemo() {
         name={detailName ?? ""}
         version="1.2.0"
         description="示例插件"
-        sourceLabel="remote_git https://example.test/acme-tools.git"
+        sourceLabel="local_path · acme-tools.zip"
         digest="sha256:demo"
         skills={[
           {
@@ -110,7 +87,6 @@ export function AwakenPluginsDemo() {
         }}
         onPreviewSkill={() => undefined}
         onServerEnabledChange={() => undefined}
-        onUpgrade={() => undefined}
         onUninstall={() => setDetailName(null)}
       />
     </section>

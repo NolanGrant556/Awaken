@@ -9,34 +9,43 @@ import (
 
 	"awaken/src/mcpclient"
 	"awaken/src/plugins"
+	awruntime "awaken/src/runtime"
 	"awaken/src/skills"
 )
 
 type pluginHandlers struct {
-	store         *plugins.Store
-	manager       *mcpclient.Manager
-	skillRegistry *skills.SkillRegistry
+	store      *plugins.Store
+	manager    *mcpclient.Manager
+	runService *awruntime.RunService
 }
 
 type pluginInfo struct {
-	Name        string               `json:"name"`
-	Version     string               `json:"version,omitempty"`
-	Description string               `json:"description,omitempty"`
-	Author      *plugins.Author      `json:"author,omitempty"`
-	Homepage    string               `json:"homepage,omitempty"`
-	Repository  string               `json:"repository,omitempty"`
-	License     string               `json:"license,omitempty"`
-	Keywords    []string             `json:"keywords,omitempty"`
-	Enabled     bool                 `json:"enabled"`
-	Source      plugins.Source       `json:"source"`
-	Digest      string               `json:"digest,omitempty"`
-	InstalledAt string               `json:"installedAt,omitempty"`
-	SkillRoot   string               `json:"skillRoot,omitempty"`
-	Skills      []skillInfo          `json:"skills,omitempty"`
-	Servers     []pluginServerInfo   `json:"servers,omitempty"`
-	Diagnostics []plugins.Diagnostic `json:"diagnostics,omitempty"`
-	SkillCount  int                  `json:"skillCount"`
-	ServerCount int                  `json:"serverCount"`
+	Name               string                  `json:"name"`
+	Version            string                  `json:"version,omitempty"`
+	Description        string                  `json:"description,omitempty"`
+	Author             *plugins.Author         `json:"author,omitempty"`
+	Homepage           string                  `json:"homepage,omitempty"`
+	Repository         string                  `json:"repository,omitempty"`
+	License            string                  `json:"license,omitempty"`
+	Keywords           []string                `json:"keywords,omitempty"`
+	DisplayName        string                  `json:"displayName,omitempty"`
+	Dialect            string                  `json:"dialect,omitempty"`
+	ManifestPath       string                  `json:"manifestPath,omitempty"`
+	InstallationID     string                  `json:"installationId,omitempty"`
+	ConfigurationState string                  `json:"configurationState,omitempty"`
+	CompatibilityState string                  `json:"compatibilityState,omitempty"`
+	ComponentTotals    plugins.ComponentTotals `json:"componentTotals"`
+	ComponentCounts    map[string]int          `json:"componentCounts"`
+	Enabled            bool                    `json:"enabled"`
+	Source             plugins.Source          `json:"source"`
+	Digest             string                  `json:"digest,omitempty"`
+	InstalledAt        string                  `json:"installedAt,omitempty"`
+	SkillRoot          string                  `json:"skillRoot,omitempty"`
+	Skills             []skillInfo             `json:"skills,omitempty"`
+	Servers            []pluginServerInfo      `json:"servers,omitempty"`
+	Diagnostics        []plugins.Diagnostic    `json:"diagnostics,omitempty"`
+	SkillCount         int                     `json:"skillCount"`
+	ServerCount        int                     `json:"serverCount"`
 }
 
 type pluginServerInfo struct {
@@ -53,6 +62,7 @@ type installPluginRequest struct {
 	Source         plugins.Source `json:"source"`
 	Replace        bool           `json:"replace"`
 	ExpectedDigest string         `json:"expectedDigest,omitempty"`
+	InstallName    string         `json:"installName,omitempty"`
 }
 
 type commitPluginRequest struct {
@@ -106,6 +116,7 @@ func (h pluginHandlers) handleInstall(w http.ResponseWriter, r *http.Request) {
 		Source:         req.Source,
 		Replace:        req.Replace,
 		ExpectedDigest: req.ExpectedDigest,
+		InstallName:    req.InstallName,
 	})
 	if err != nil {
 		if errors.Is(err, plugins.ErrSourceChanged) {
@@ -195,22 +206,6 @@ func (h pluginHandlers) setEnabled(w http.ResponseWriter, r *http.Request, enabl
 	writeJSON(w, http.StatusOK, h.toPluginInfo(plugin, true))
 }
 
-func (h pluginHandlers) handleUpgrade(w http.ResponseWriter, r *http.Request) {
-	if !h.ensureStore(w) {
-		return
-	}
-	result, err := h.store.Upgrade(r.Context(), strings.TrimSpace(r.PathValue("name")))
-	if err != nil {
-		h.writeStoreError(w, err)
-		return
-	}
-	h.refreshRuntime()
-	writeJSON(w, http.StatusOK, installPluginResponse{
-		Plugin:  h.toPluginInfo(result.Plugin, true),
-		Message: result.Message,
-	})
-}
-
 func (h pluginHandlers) handleDelete(w http.ResponseWriter, r *http.Request) {
 	if !h.ensureStore(w) {
 		return
@@ -262,6 +257,9 @@ func (h pluginHandlers) ensureStore(w http.ResponseWriter) bool {
 
 func (h pluginHandlers) writeStoreError(w http.ResponseWriter, err error) {
 	switch {
+	case strings.HasPrefix(err.Error(), "VARIABLE_"):
+		code := strings.SplitN(err.Error(), ":", 2)[0]
+		writeErrorJSON(w, http.StatusBadRequest, code, err.Error())
 	case errors.Is(err, plugins.ErrNotFound):
 		writeErrorJSON(w, http.StatusNotFound, "PLUGIN_NOT_FOUND", err.Error())
 	case errors.Is(err, plugins.ErrAlreadyExists):
@@ -272,6 +270,18 @@ func (h pluginHandlers) writeStoreError(w http.ResponseWriter, err error) {
 		writeErrorJSON(w, http.StatusConflict, "PLUGIN_RECORDED_DIGEST_CHANGED", err.Error())
 	case errors.Is(err, plugins.ErrReplaceTrashUnavailable):
 		writeErrorJSON(w, http.StatusConflict, "PLUGIN_TRASH_UNAVAILABLE", err.Error())
+	case errors.Is(err, plugins.ErrRuntimeLeaseActive):
+		writeErrorJSON(w, http.StatusConflict, "RUNTIME_GENERATION_IN_USE", err.Error())
+	case errors.Is(err, plugins.ErrComponentNotSwitchable):
+		writeErrorJSON(w, http.StatusConflict, "COMPONENT_NOT_SWITCHABLE", err.Error())
+	case errors.Is(err, plugins.ErrToolNotFound):
+		writeErrorJSON(w, http.StatusNotFound, "MCP_TOOL_NOT_FOUND", err.Error())
+	case errors.Is(err, plugins.ErrNoUsableComponents):
+		writeErrorJSON(w, http.StatusBadRequest, "PACKAGE_NO_USABLE_COMPONENTS", err.Error())
+	case errors.Is(err, plugins.ErrSkillPackageSelected):
+		writeErrorJSON(w, http.StatusBadRequest, "SKILL_PACKAGE_SELECTED", err.Error())
+	case errors.Is(err, plugins.ErrDisabled):
+		writeErrorJSON(w, http.StatusConflict, "PLUGIN_DISABLED", err.Error())
 	case errors.Is(err, plugins.ErrUnsupportedSchema), errors.Is(err, plugins.ErrManifestInvalid), errors.Is(err, plugins.ErrMCPInvalid), errors.Is(err, plugins.ErrPathEscapes), errors.Is(err, plugins.ErrSourceChanged):
 		writeErrorJSON(w, http.StatusBadRequest, "PLUGIN_INVALID", err.Error())
 	case errors.Is(err, plugins.ErrStateCorrupt):
@@ -283,10 +293,10 @@ func (h pluginHandlers) writeStoreError(w http.ResponseWriter, err error) {
 
 func (h pluginHandlers) refreshRuntime() {
 	if h.store == nil || h.store.Available() != nil {
-		skills.SetPluginSkillRoots(nil)
+		skills.SetPluginSkillSelections(nil)
 		return
 	}
-	skills.SetPluginSkillRoots(h.store.EnabledSkillRoots())
+	skills.SetPluginSkillSelections(h.store.EnabledSkillSelections())
 	if h.manager == nil {
 		return
 	}
@@ -310,20 +320,44 @@ func (h pluginHandlers) refreshRuntime() {
 
 func (h pluginHandlers) toPluginInfo(plugin *plugins.InstalledPlugin, includeDetails bool) pluginInfo {
 	info := pluginInfo{
-		Name:        plugin.Name,
-		Version:     plugin.Manifest.Version,
-		Description: plugin.Manifest.Description,
-		Author:      plugin.Manifest.Author,
-		Homepage:    plugin.Manifest.Homepage,
-		Repository:  plugin.Manifest.Repository,
-		License:     plugin.Manifest.License,
-		Keywords:    plugin.Manifest.Keywords,
-		Enabled:     plugin.Enabled,
-		Source:      plugin.Source,
-		Digest:      plugin.Digest,
-		SkillRoot:   plugin.SkillRoot,
-		Diagnostics: plugin.Diagnostics,
-		ServerCount: len(plugin.MCPServers),
+		Name:               plugin.Name,
+		Version:            plugin.Manifest.Version,
+		Description:        plugin.Manifest.Description,
+		Author:             plugin.Manifest.Author,
+		Homepage:           plugin.Manifest.Homepage,
+		Repository:         plugin.Manifest.Repository,
+		License:            plugin.Manifest.License,
+		Keywords:           plugin.Manifest.Keywords,
+		DisplayName:        plugin.DisplayName,
+		Dialect:            string(plugin.Dialect),
+		ManifestPath:       plugin.ManifestPath,
+		InstallationID:     plugin.InstallationID,
+		ConfigurationState: plugin.ConfigurationState,
+		CompatibilityState: plugin.CompatibilityState,
+		ComponentCounts:    map[string]int{},
+		Enabled:            plugin.Enabled,
+		Source:             plugin.Source,
+		Digest:             plugin.Digest,
+		SkillRoot:          plugin.SkillRoot,
+		Diagnostics:        plugin.Diagnostics,
+		ServerCount:        len(plugin.MCPServers),
+	}
+	for _, state := range plugin.ComponentState {
+		info.ComponentTotals.Total++
+		info.ComponentCounts[string(state.Component.Kind)]++
+		switch state.Mapping {
+		case "native", "adapted":
+			info.ComponentTotals.Runnable++
+		case "recognized_unsupported":
+			info.ComponentTotals.Unsupported++
+		case "ignored_by_dialect":
+			info.ComponentTotals.Ignored++
+		case "invalid":
+			info.ComponentTotals.Invalid++
+		}
+		if state.Configuration == "needs_configuration" {
+			info.ComponentTotals.NeedsConfig++
+		}
 	}
 	if !plugin.InstalledAt.IsZero() {
 		info.InstalledAt = plugin.InstalledAt.UTC().Format(time.RFC3339)
@@ -340,17 +374,27 @@ func (h pluginHandlers) toPluginInfo(plugin *plugins.InstalledPlugin, includeDet
 }
 
 func (h pluginHandlers) pluginSkillCount(plugin *plugins.InstalledPlugin) int {
-	return len(h.pluginSkills(plugin))
+	count := 0
+	for _, state := range plugin.ComponentState {
+		if state.Component.Kind == "skill" && state.DesiredState == "enabled" && state.Switchable && state.Configuration == "ready" {
+			count++
+		}
+	}
+	return count
 }
 
 func (h pluginHandlers) pluginSkills(plugin *plugins.InstalledPlugin) []skillInfo {
-	if plugin == nil || plugin.SkillRoot == "" {
+	if plugin == nil || h.store == nil {
 		return nil
 	}
-	defs := skills.LoadDir(plugin.SkillRoot, skills.SourcePlugin)
-	out := make([]skillInfo, 0, len(defs))
-	for _, def := range defs {
-		out = append(out, skillInfoFromDefinition(def))
+	var out []skillInfo
+	for _, selection := range h.store.EnabledSkillSelections() {
+		if selection.PluginName != plugin.Name {
+			continue
+		}
+		for _, def := range skills.LoadPluginSkillSelection(selection) {
+			out = append(out, skillInfoFromDefinition(def))
+		}
 	}
 	return out
 }

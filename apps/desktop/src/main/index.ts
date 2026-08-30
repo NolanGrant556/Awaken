@@ -59,6 +59,7 @@ import {
   type ArtifactPreviewStartRequest,
   type ConfigureMcpServersRequest,
   type ConfigureMcpServersResponse,
+  type CommitPluginRequest,
   type CliActivation,
   type CliConnectorReadiness,
   type CliConnectorView,
@@ -113,6 +114,14 @@ import {
   type RuntimeProjectOperationWire,
   type RuntimeProjectWire,
   type RuntimePlugin,
+  type RuntimePluginComponentDetail,
+  type RuntimePluginComponentKind,
+  type RuntimePluginComponentSourceResponse,
+  type RuntimePluginComponentState,
+  type RuntimePluginComponentStateResponse,
+  type RuntimePluginHookReceipt,
+  type RuntimePluginHookReceiptResponse,
+  type RuntimePluginConfigurationResponse,
   type RuntimePluginSource,
   type RuntimePluginValidation,
   type RuntimeSkill,
@@ -125,6 +134,8 @@ import {
   type RuntimeThreadListView,
   type SetThreadArchivedResult,
   type RuntimeToolInfo,
+  type UpdatePluginConfigurationRequest,
+  type UpdatePluginComponentSourceRequest,
   type SearchSettings,
   type SearchSettingsSaveRequest,
   type SearchSettingsSaveResult,
@@ -160,7 +171,10 @@ import {
   normalizeAgentPlanMediaTools,
 } from "../shared/runtime.js";
 import { updateMainWindowBackground, windowBackgroundColor } from "./window-background.js";
-import { pickPluginSource } from "./plugin-source-picker.js";
+import {
+  pickPluginSource,
+  resolveDroppedPluginSourcePath,
+} from "./plugin-source-picker.js";
 import { RuntimeSupervisor, type SupervisorStatusInfo } from "./runtime-supervisor.js";
 import { ensureConfigDir } from "./config-bootstrap.js";
 import { DesktopPreferencesStore } from "./desktop-preferences-store.js";
@@ -2336,6 +2350,24 @@ ipcMain.handle("awaken:install-plugin", async (_event, request: InstallPluginReq
   });
 });
 
+ipcMain.handle(
+  "awaken:commit-plugin",
+  async (_event, name: string, request: CommitPluginRequest) => {
+    const trimmed = String(name ?? "").trim();
+    if (!trimmed || !request?.expectedDigest?.trim()) {
+      throw new Error("Plugin name and expected digest are required");
+    }
+    return requestRuntime<InstallPluginResponse>(
+      `/v1/plugins/${encodeURIComponent(trimmed)}/commit`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      },
+    );
+  },
+);
+
 ipcMain.handle("awaken:enable-plugin", async (_event, name: string) => {
   return requestRuntime<RuntimePlugin>(`/v1/plugins/${encodeURIComponent(name)}/enable`, {
     method: "POST",
@@ -2344,12 +2376,6 @@ ipcMain.handle("awaken:enable-plugin", async (_event, name: string) => {
 
 ipcMain.handle("awaken:disable-plugin", async (_event, name: string) => {
   return requestRuntime<RuntimePlugin>(`/v1/plugins/${encodeURIComponent(name)}/disable`, {
-    method: "POST",
-  });
-});
-
-ipcMain.handle("awaken:upgrade-plugin", async (_event, name: string) => {
-  return requestRuntime<InstallPluginResponse>(`/v1/plugins/${encodeURIComponent(name)}/upgrade`, {
     method: "POST",
   });
 });
@@ -2377,6 +2403,153 @@ ipcMain.handle(
     return requestRuntime<RuntimePlugin>(
       `/v1/plugins/${encodeURIComponent(name)}/servers/${encodeURIComponent(shortName)}/disable`,
       { method: "POST" },
+    );
+  },
+);
+
+ipcMain.handle("awaken:list-plugin-components", async (_event, name: string) => {
+  const trimmed = String(name ?? "").trim();
+  if (!trimmed) {
+    throw new Error("Plugin name is required");
+  }
+  return requestRuntime<RuntimePluginComponentState[]>(
+    `/v1/plugins/${encodeURIComponent(trimmed)}/components`,
+    { method: "GET" },
+  );
+});
+
+ipcMain.handle(
+  "awaken:get-plugin-component",
+  async (_event, name: string, kind: RuntimePluginComponentKind, logicalIdEncoded: string) => {
+    return requestRuntime<RuntimePluginComponentDetail>(
+      `/v1/plugins/${encodeURIComponent(name)}/components/${encodeURIComponent(kind)}/${encodeURIComponent(logicalIdEncoded)}`,
+      { method: "GET" },
+    );
+  },
+);
+
+ipcMain.handle(
+  "awaken:update-plugin-component-source",
+  async (
+    _event,
+    name: string,
+    kind: RuntimePluginComponentKind,
+    logicalIdEncoded: string,
+    request: UpdatePluginComponentSourceRequest,
+  ) => {
+    const trimmedName = String(name ?? "").trim();
+    const trimmedLogicalId = String(logicalIdEncoded ?? "").trim();
+    if (!trimmedName || !trimmedLogicalId || !request?.expectedDigest?.trim()) {
+      throw new Error("Plugin name, component identity, and expected digest are required");
+    }
+    return requestRuntime<RuntimePluginComponentSourceResponse>(
+      `/v1/plugins/${encodeURIComponent(trimmedName)}/components/${encodeURIComponent(kind)}/${encodeURIComponent(trimmedLogicalId)}/source`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      },
+    );
+  },
+);
+
+ipcMain.handle(
+  "awaken:set-plugin-component-state",
+  async (
+    _event,
+    name: string,
+    kind: RuntimePluginComponentKind,
+    logicalIdEncoded: string,
+    enabled: boolean,
+  ) => {
+    return requestRuntime<RuntimePluginComponentStateResponse>(
+      `/v1/plugins/${encodeURIComponent(name)}/components/${encodeURIComponent(kind)}/${encodeURIComponent(logicalIdEncoded)}/state`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      },
+    );
+  },
+);
+
+ipcMain.handle(
+  "awaken:set-plugin-mcp-tool-state",
+  async (
+    _event,
+    name: string,
+    logicalIdEncoded: string,
+    toolName: string,
+    enabled: boolean,
+  ) => {
+    return requestRuntime<RuntimePluginComponentStateResponse>(
+      `/v1/plugins/${encodeURIComponent(name)}/mcp/${encodeURIComponent(logicalIdEncoded)}/tools/${encodeURIComponent(toolName)}/state`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      },
+    );
+  },
+);
+
+ipcMain.handle(
+  "awaken:set-plugin-rule-activation",
+  async (
+    _event,
+    name: string,
+    logicalIdEncoded: string,
+    activation: "always" | "file_globs" | "manual" | "model_decides",
+  ) => {
+    return requestRuntime<{ plugin: RuntimePlugin; revision: number }>(
+      `/v1/plugins/${encodeURIComponent(name)}/components/rule/${encodeURIComponent(logicalIdEncoded)}/activation`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activation }),
+      },
+    );
+  },
+);
+
+ipcMain.handle(
+  "awaken:list-plugin-hook-receipts",
+  async (_event, name: string, logicalIdEncoded: string, revisionId?: string) => {
+    const query = revisionId ? `?revisionId=${encodeURIComponent(revisionId)}` : "";
+    return requestRuntime<RuntimePluginHookReceiptResponse>(
+      `/v1/plugins/${encodeURIComponent(name)}/hooks/${encodeURIComponent(logicalIdEncoded)}/receipts${query}`,
+      { method: "GET" },
+    );
+  },
+);
+
+ipcMain.handle(
+  "awaken:retry-plugin-hook-receipt",
+  async (_event, name: string, logicalIdEncoded: string, receiptId: string) => {
+    return requestRuntime<{ receipt: RuntimePluginHookReceipt; diagnosticOnly: true }>(
+      `/v1/plugins/${encodeURIComponent(name)}/hooks/${encodeURIComponent(logicalIdEncoded)}/receipts/${encodeURIComponent(receiptId)}/retry`,
+      { method: "POST" },
+    );
+  },
+);
+
+ipcMain.handle("awaken:get-plugin-configuration", async (_event, name: string) => {
+  return requestRuntime<RuntimePluginConfigurationResponse>(
+    `/v1/plugins/${encodeURIComponent(name)}/configuration`,
+    { method: "GET" },
+  );
+});
+
+ipcMain.handle(
+  "awaken:update-plugin-configuration",
+  async (_event, name: string, request: UpdatePluginConfigurationRequest) => {
+    return requestRuntime<RuntimePluginConfigurationResponse>(
+      `/v1/plugins/${encodeURIComponent(name)}/configuration`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      },
     );
   },
 );
@@ -3757,7 +3930,7 @@ ipcMain.handle("awaken:start-run", async (_event, request: StartRunRequest) => {
     body.model_profile_id = undefined;
     body.reasoning_effort = undefined;
     await prepareNetworkRoute("model-run");
-    const run = await requestRuntime("/v1/runs", {
+    const run = await requestRuntimeDomain<RuntimeRunWire>("/v1/runs", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -3847,6 +4020,7 @@ ipcMain.handle(
       runId: string;
       interactionId: string;
       resolution: "completed" | "cancelled" | "expired" | "failed";
+      content?: Record<string, unknown>;
     },
   ) => {
     await requestRuntimeOK(
@@ -3856,7 +4030,7 @@ ipcMain.handle(
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ resolution: payload.resolution }),
+        body: JSON.stringify({ resolution: payload.resolution, content: payload.content }),
       },
     );
   },
@@ -4081,6 +4255,10 @@ ipcMain.handle("awaken:pick-directory", async (_event, defaultPath?: string) => 
 
 ipcMain.handle("awaken:pick-plugin-source", async (_event, defaultPath?: string) => {
   return pickPluginSource(dialog, { defaultPath });
+});
+
+ipcMain.handle("awaken:resolve-dropped-plugin-source", async (_event, droppedPath?: string) => {
+  return resolveDroppedPluginSourcePath(droppedPath);
 });
 
 ipcMain.handle(

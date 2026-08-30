@@ -15,7 +15,7 @@ export function AwakenPluginDetailDialogDemo() {
         name="acme.tools"
         version="1.2.0"
         description="示例插件"
-        sourceLabel="remote_git"
+        sourceLabel="local_path · acme-tools.zip"
         digest="sha256:demo"
         skills={[{ id: "plugin__acme-tools__lint", name: "lint", description: "Lint files", previewable: true }]}
         servers={[{ shortName: "validator", identity: "plugin__acme.tools__validator", state: "connected", enabled: true }]}

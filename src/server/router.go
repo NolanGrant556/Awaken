@@ -290,7 +290,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("POST /v1/connectors/{id}/disconnect", connH.handleDisconnect)
 		mux.HandleFunc("PUT /v1/connectors/{id}/cli-readiness", connH.handleCLIReadiness)
 	}
-	pluginH := pluginHandlers{store: cfg.pluginStore, manager: cfg.manager, skillRegistry: cfg.skillRegistry}
+	pluginH := pluginHandlers{store: cfg.pluginStore, manager: cfg.manager, runService: cfg.runService}
 	composerCatalogH := newComposerCatalogHandlers(cfg.skillRegistry, cfg.pluginStore)
 	mux.HandleFunc("GET /v1/composer-catalog/events", composerCatalogH.handleEvents)
 	mux.HandleFunc("GET /v1/plugins", pluginH.handleList)
@@ -300,10 +300,22 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	mux.HandleFunc("POST /v1/plugins/{name}/commit", pluginH.handleCommit)
 	mux.HandleFunc("POST /v1/plugins/{name}/enable", pluginH.handleEnable)
 	mux.HandleFunc("POST /v1/plugins/{name}/disable", pluginH.handleDisable)
-	mux.HandleFunc("POST /v1/plugins/{name}/upgrade", pluginH.handleUpgrade)
 	mux.HandleFunc("DELETE /v1/plugins/{name}", pluginH.handleDelete)
 	mux.HandleFunc("POST /v1/plugins/{name}/servers/{short}/enable", pluginH.handleServerEnable)
 	mux.HandleFunc("POST /v1/plugins/{name}/servers/{short}/disable", pluginH.handleServerDisable)
+	mux.HandleFunc("GET /v1/plugins/{name}/components", pluginH.handleComponents)
+	mux.HandleFunc("GET /v1/plugins/{name}/components/{kind}/{logicalId}", pluginH.handleComponentDetail)
+	mux.HandleFunc("PUT /v1/plugins/{name}/components/{kind}/{logicalId}/source", pluginH.handleComponentSource)
+	mux.HandleFunc("PATCH /v1/plugins/{name}/components/{kind}/{logicalId}/state", pluginH.handleComponentState)
+	mux.HandleFunc("PATCH /v1/plugins/{name}/components/rule/{logicalId}/activation", pluginH.handleRuleActivation)
+	mux.HandleFunc("POST /v1/plugins/{name}/commands/{logicalId}/expand", pluginH.handleCommandExpand)
+	mux.HandleFunc("POST /v1/plugins/{name}/commands/{logicalId}/invoke", pluginH.handleCommandInvoke)
+	mux.HandleFunc("POST /v1/plugins/{name}/agents/{logicalId}/invoke", pluginH.handleAgentInvoke)
+	mux.HandleFunc("GET /v1/plugins/{name}/hooks/{logicalId}/receipts", pluginH.handleHookReceipts)
+	mux.HandleFunc("POST /v1/plugins/{name}/hooks/{logicalId}/receipts/{receiptId}/retry", pluginH.handleHookReceiptRetry)
+	mux.HandleFunc("PATCH /v1/plugins/{name}/mcp/{logicalId}/tools/{toolName}/state", pluginH.handleMCPToolState)
+	mux.HandleFunc("GET /v1/plugins/{name}/configuration", pluginH.handleConfiguration)
+	mux.HandleFunc("PUT /v1/plugins/{name}/configuration", pluginH.handleConfiguration)
 	skillH := skillHandlers{registry: cfg.skillRegistry, workspaceRoot: cfg.workspaceRoot, trashAdapter: cfg.skillTrashAdapter}
 	mux.HandleFunc("GET /v1/skills", skillH.handleListSkills)
 	mux.HandleFunc("POST /v1/skills/preview", skillH.handlePreviewSkill)

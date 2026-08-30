@@ -10,7 +10,7 @@ Agent Plugins 1.0.0 的便携核心只有：
 - `skills/` 的直接子 Skill 包；
 - 根 `mcp.json`。
 
-安装来源、升级、权限确认、UI、OAuth、marketplace 和客户端扩展行为由宿主拥有。Awaken 不把 `.codex-plugin`、`.claude-plugin` 或 `.cursor-plugin` 当作便携 manifest。
+安装来源、升级、权限确认、UI、OAuth 和客户端扩展行为由宿主拥有。Awaken 不把 `.codex-plugin`、`.claude-plugin` 或 `.cursor-plugin` 当作便携 manifest。
 
 ## 内含 Skill 不是单文件
 

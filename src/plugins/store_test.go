@@ -142,9 +142,9 @@ func TestInstallLocalPluginAndList(t *testing.T) {
 	if err != nil || len(listed) != 1 {
 		t.Fatalf("list=%v err=%v", listed, err)
 	}
-	roots := store.EnabledSkillRoots()
-	if len(roots) != 1 || !strings.HasSuffix(roots[0], filepath.Join("acme.tools", "skills")) {
-		t.Fatalf("roots=%v", roots)
+	selections := store.EnabledSkillSelections()
+	if len(selections) != 1 || !strings.HasSuffix(selections[0].PackageRoot, filepath.Join("acme.tools", "skills", "lint")) {
+		t.Fatalf("selections=%v", selections)
 	}
 	servers := store.PluginMCPServers()
 	if len(servers) != 1 || servers[0].Scope != mcpclient.ScopePlugin {
@@ -157,6 +157,48 @@ func TestInstallLocalPluginAndList(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"acme.tools"`) {
 		t.Fatalf("state=%s", raw)
+	}
+}
+
+func TestAgentPluginPerToolOverrideProjectsWithoutServerOverride(t *testing.T) {
+	store := testStore(t)
+	src := t.TempDir()
+	writePluginFixture(t, src, "tool.override", true)
+	installed, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logicalID string
+	for _, component := range installed.Plugin.Components {
+		if component.Kind == "mcp_server" && component.MCP != nil {
+			logicalID = component.LogicalID
+			break
+		}
+	}
+	if logicalID == "" {
+		t.Fatal("Agent Plugin MCP component missing")
+	}
+	if _, err := store.SetMCPToolEnabled(installed.Plugin.Name, logicalID, "search", false); err != nil {
+		t.Fatal(err)
+	}
+
+	assertDisabled := func(t *testing.T, current *Store) {
+		t.Helper()
+		servers := current.PluginMCPServers()
+		if len(servers) != 1 || (servers[0].Config.Enabled != nil && !*servers[0].Config.Enabled) || len(servers[0].Config.DisabledTools) != 1 || servers[0].Config.DisabledTools[0] != "search" {
+			t.Fatalf("Agent Plugin tool-only override not projected: %#v", servers)
+		}
+	}
+	assertDisabled(t, store)
+
+	reloaded := NewStoreAtWithTrash(store.home, testTrashAdapter{dir: filepath.Join(t.TempDir(), "Trash")})
+	assertDisabled(t, reloaded)
+	if _, err := reloaded.SetMCPToolEnabled(installed.Plugin.Name, logicalID, "search", true); err != nil {
+		t.Fatal(err)
+	}
+	servers := reloaded.PluginMCPServers()
+	if len(servers) != 1 || len(servers[0].Config.DisabledTools) != 0 {
+		t.Fatalf("re-enabled Agent Plugin tool remained disabled: %#v", servers)
 	}
 }
 
@@ -514,14 +556,41 @@ func TestInstalledDigestDriftFailsClosed(t *testing.T) {
 	if plugin.IntegrityValid || plugin.SkillRoot != "" || len(plugin.MCPServers) != 0 {
 		t.Fatalf("tampered plugin remained active: %+v", plugin)
 	}
-	if roots := store.EnabledSkillRoots(); len(roots) != 0 {
-		t.Fatalf("tampered plugin exported skills: %v", roots)
+	if selections := store.EnabledSkillSelections(); len(selections) != 0 {
+		t.Fatalf("tampered plugin exported skills: %v", selections)
 	}
 	if servers := store.PluginMCPServers(); len(servers) != 0 {
 		t.Fatalf("tampered plugin exported MCP servers: %+v", servers)
 	}
 	if _, err := store.ResolveComposerSelection("integrity.plugin", installed.Plugin.Digest); !errors.Is(err, ErrDigestChanged) {
 		t.Fatalf("composer integrity err=%v", err)
+	}
+}
+
+func TestRuntimeLeaseBlocksPluginGenerationMutation(t *testing.T) {
+	store := testStore(t)
+	sourceRoot := t.TempDir()
+	writePluginFixture(t, sourceRoot, "leased.plugin", false)
+	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: sourceRoot}}); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := store.AcquireRuntimeLease()
+	if err != nil || lease.Generation == "" || store.ActiveRuntimeLeases() != 1 {
+		t.Fatalf("lease=%#v count=%d err=%v", lease, store.ActiveRuntimeLeases(), err)
+	}
+	if _, err := store.SetEnabled("leased.plugin", false); !errors.Is(err, ErrRuntimeLeaseActive) {
+		t.Fatalf("mutation while leased err=%v", err)
+	}
+	if _, err := store.Uninstall("leased.plugin"); !errors.Is(err, ErrRuntimeLeaseActive) {
+		t.Fatalf("uninstall while leased err=%v", err)
+	}
+	store.ReleaseRuntimeLease(lease.ID)
+	store.ReleaseRuntimeLease(lease.ID)
+	if store.ActiveRuntimeLeases() != 0 {
+		t.Fatalf("leases=%d", store.ActiveRuntimeLeases())
+	}
+	if _, err := store.SetEnabled("leased.plugin", false); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -661,23 +730,6 @@ func TestReplaceFailsClosedWhenTrashUnavailable(t *testing.T) {
 	}
 }
 
-func TestUpgradeNoopOnSameDigest(t *testing.T) {
-	store := testStore(t)
-	src := t.TempDir()
-	writePluginFixture(t, src, "sample", false)
-	first, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := store.Upgrade(context.Background(), "sample")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.Replaced || second.Plugin.Digest != first.Plugin.Digest {
-		t.Fatalf("expected no-op upgrade: %+v", second)
-	}
-}
-
 func TestUninstallMovesPackageAndData(t *testing.T) {
 	store := testStore(t)
 	src := t.TempDir()
@@ -701,6 +753,33 @@ func TestUninstallMovesPackageAndData(t *testing.T) {
 	listed, err := store.List()
 	if err != nil || len(listed) != 0 {
 		t.Fatalf("list after uninstall: %v %v", listed, err)
+	}
+}
+
+func TestUninstallTrashFailureRollsBackPackageDataAndState(t *testing.T) {
+	home := t.TempDir()
+	store := NewStoreAtWithTrash(home, testTrashAdapter{fail: true})
+	src := t.TempDir()
+	writePluginFixture(t, src, "sample", false)
+	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}}); err != nil {
+		t.Fatal(err)
+	}
+	dataFile := filepath.Join(store.dataRoot, "sample", "kept.txt")
+	if err := os.WriteFile(dataFile, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Uninstall("sample"); !errors.Is(err, ErrReplaceTrashUnavailable) {
+		t.Fatalf("uninstall err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(store.packagesRoot, "sample", "plugin.json")); err != nil {
+		t.Fatalf("package rollback failed: %v", err)
+	}
+	if content, err := os.ReadFile(dataFile); err != nil || string(content) != "keep" {
+		t.Fatalf("data rollback content=%q err=%v", content, err)
+	}
+	listed, err := store.List()
+	if err != nil || len(listed) != 1 || listed[0].Name != "sample" {
+		t.Fatalf("state rollback plugins=%#v err=%v", listed, err)
 	}
 }
 
@@ -744,11 +823,69 @@ func TestEnableDisableAndServerToggle(t *testing.T) {
 	if _, err := store.SetEnabled("sample", false); err != nil {
 		t.Fatal(err)
 	}
-	if roots := store.EnabledSkillRoots(); len(roots) != 0 {
-		t.Fatalf("disabled plugin still exported skills: %v", roots)
+	if selections := store.EnabledSkillSelections(); len(selections) != 0 {
+		t.Fatalf("disabled plugin still exported skills: %v", selections)
 	}
 	if servers := store.PluginMCPServers(); len(servers) != 0 {
 		t.Fatalf("disabled plugin still exported MCP: %+v", servers)
+	}
+}
+
+func TestDisabledPluginForcesChildComponentsOffAndRestoresPreferences(t *testing.T) {
+	store := testStore(t)
+	src := t.TempDir()
+	writePluginFixture(t, src, "parent.lifecycle", true)
+	installed, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var skillID string
+	for _, state := range installed.Plugin.ComponentState {
+		if state.Component.Kind == "skill" {
+			skillID = state.Component.LogicalID
+			break
+		}
+	}
+	if skillID == "" {
+		t.Fatal("Skill component missing")
+	}
+	if _, err := store.SetComponentDesired(installed.Plugin.Name, skillID, false); err != nil {
+		t.Fatal(err)
+	}
+
+	disabled, err := store.SetEnabled(installed.Plugin.Name, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range disabled.ComponentState {
+		if state.DesiredState != "disabled" {
+			t.Fatalf("disabled plugin exposed enabled child: %#v", state)
+		}
+	}
+	for _, server := range disabled.MCPServers {
+		if server.Enabled || server.Config.Enabled == nil || *server.Config.Enabled {
+			t.Fatalf("disabled plugin exposed enabled MCP server: %#v", server)
+		}
+	}
+	if servers := store.PluginMCPServers(); len(servers) != 0 {
+		t.Fatalf("disabled plugin exported MCP servers: %#v", servers)
+	}
+
+	reenabled, err := store.SetEnabled(installed.Plugin.Name, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range reenabled.ComponentState {
+		switch state.Component.Kind {
+		case "skill":
+			if state.DesiredState != "disabled" {
+				t.Fatalf("Skill preference was not restored: %#v", state)
+			}
+		case "mcp_server":
+			if state.DesiredState != "enabled" {
+				t.Fatalf("MCP preference was not restored: %#v", state)
+			}
+		}
 	}
 }
 
@@ -781,6 +918,23 @@ func TestInstallZipAndRejectZipSlip(t *testing.T) {
 	}
 }
 
+func TestPluginStoreRejectsStandaloneSkillArchive(t *testing.T) {
+	store := testStore(t)
+	skillRoot := t.TempDir()
+	writeTestFile(t, filepath.Join(skillRoot, "SKILL.md"), "---\nname: standalone\ndescription: Standalone Skill.\n---\nBody.\n")
+	writeTestFile(t, filepath.Join(skillRoot, "references", "guide.md"), "guide")
+	zipPath := filepath.Join(t.TempDir(), "standalone-skill.zip")
+	if err := zipDir(skillRoot, zipPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Validate(context.Background(), Source{Kind: SourceLocalPath, Path: zipPath}); !errors.Is(err, ErrSkillPackageSelected) {
+		t.Fatalf("validate standalone Skill error=%v, want ErrSkillPackageSelected", err)
+	}
+	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: zipPath}}); !errors.Is(err, ErrSkillPackageSelected) {
+		t.Fatalf("install standalone Skill error=%v, want ErrSkillPackageSelected", err)
+	}
+}
+
 func TestInstallRejectsSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink fixture is unix-oriented")
@@ -796,15 +950,11 @@ func TestInstallRejectsSymlink(t *testing.T) {
 	}
 }
 
-func TestRemoteURLConstraints(t *testing.T) {
-	if err := validateHTTPSURL("http://example.com/p.zip", "remote_url"); err == nil {
-		t.Fatal("http remote_url should be rejected")
-	}
-	if err := validateHTTPSURL("https://user:pass@example.com/p.zip", "remote_url"); err == nil {
-		t.Fatal("credential URL should be rejected")
-	}
-	if _, err := cleanRemoteGitURL("git@github.com:acme/tools.git"); err == nil {
-		t.Fatal("ssh git URL should be rejected")
+func TestRemotePluginSourcesAreUnsupported(t *testing.T) {
+	for _, kind := range []SourceKind{"remote_url", "remote_git"} {
+		if err := validateSource(Source{Kind: kind}); err == nil {
+			t.Fatalf("%s source should be rejected", kind)
+		}
 	}
 }
 

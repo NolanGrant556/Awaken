@@ -1,6 +1,10 @@
 package subagentruntime
 
-import "strings"
+import (
+	"strings"
+	"sync"
+	"time"
+)
 
 // Role is a host-owned child definition. Models cannot submit arbitrary
 // system prompts, permission profiles, or extra tool names.
@@ -10,6 +14,27 @@ type Role struct {
 	SystemPrompt    string
 	ReadOnly        bool
 	DisallowedTools []string
+	AllowedTools    []string
+	ModelHint       string
+	MaxTurns        int
+	Timeout         time.Duration
+	PluginName      string
+	PluginDigest    string
+	LogicalID       string
+	RevisionID      string
+}
+
+type RoleResolver func(agentType string) (Role, bool)
+
+var roleResolverState struct {
+	sync.RWMutex
+	resolver RoleResolver
+}
+
+func SetRoleResolver(resolver RoleResolver) {
+	roleResolverState.Lock()
+	roleResolverState.resolver = resolver
+	roleResolverState.Unlock()
 }
 
 const (
@@ -84,8 +109,29 @@ func RoleCatalog() map[string]Role {
 }
 
 func LookupRole(agentType string) (Role, bool) {
-	role, ok := RoleCatalog()[NormalizeAgentType(agentType)]
-	return role, ok
+	normalized := NormalizeAgentType(agentType)
+	if role, ok := RoleCatalog()[normalized]; ok {
+		return role, true
+	}
+	roleResolverState.RLock()
+	resolver := roleResolverState.resolver
+	roleResolverState.RUnlock()
+	if resolver == nil {
+		return Role{}, false
+	}
+	role, ok := resolver(normalized)
+	resolvedType := NormalizeAgentType(role.Type)
+	if !ok || !strings.HasPrefix(resolvedType, "plugin__") {
+		return Role{}, false
+	}
+	// Canonical Plugin Agent identities must match exactly. A resolver may also
+	// accept a vendor manifest name and return its canonical namespaced role;
+	// the resolver owns uniqueness and collision rejection for that alias.
+	if strings.HasPrefix(normalized, "plugin__") && resolvedType != normalized {
+		return Role{}, false
+	}
+	role.DisallowedTools = appendUniqueRoleStrings(role.DisallowedTools, orchestrationTools...)
+	return role, true
 }
 
 func NormalizeAgentType(agentType string) string {
@@ -101,7 +147,7 @@ func NormalizeWorkspaceMode(agentType, workspaceMode string) string {
 	if workspaceMode != "" {
 		return workspaceMode
 	}
-	if NormalizeAgentType(agentType) == AgentTypeGeneral {
+	if role, ok := LookupRole(agentType); ok && !role.ReadOnly {
 		return WorkspaceShared
 	}
 	return WorkspaceSharedReadOnly
@@ -121,9 +167,23 @@ func ValidateSpawnCombo(agentType, workspaceMode string) error {
 		return nil
 	}
 	if workspaceMode != WorkspaceShared && workspaceMode != WorkspaceGitWorktree {
-		return runtimeError(ErrorWorkspaceMode, "general requires shared or git_worktree")
+		return runtimeError(ErrorWorkspaceMode, "write-capable agent types require shared or git_worktree")
 	}
 	return nil
+}
+
+func appendUniqueRoleStrings(values []string, extras ...string) []string {
+	seen := map[string]bool{}
+	for _, value := range values {
+		seen[value] = true
+	}
+	for _, value := range extras {
+		if !seen[value] {
+			values = append(values, value)
+			seen[value] = true
+		}
+	}
+	return values
 }
 
 func IsReadOnlyType(agentType string) bool {

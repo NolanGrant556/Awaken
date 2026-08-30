@@ -52,6 +52,15 @@ const globalAgentsComponent = readFileSync(
 );
 
 describe("focused settings layout", () => {
+  it("uses the full back row as the Settings return target", () => {
+    expect(settingsStyles).toMatch(
+      /\.aw-settings-back\s*\{[\s\S]*?width:\s*100%;/,
+    );
+    expect(settingsStyles).not.toMatch(
+      /\.aw-settings-back\s*\{[\s\S]*?width:\s*fit-content;/,
+    );
+  });
+
   it("centers the compact settings pages on one shared width", () => {
     expect(settingsStyles).toContain(
       "--aw-settings-focused-content-width: 820px;",

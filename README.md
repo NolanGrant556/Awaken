@@ -37,6 +37,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | 移动端 | 当前不支持；已确认目标设计为 Desktop/Core 继续拥有本机执行与耐久事实，手机通过受控 Gateway 与可自托管 relay 查看和控制任务，不直接连接或暴露 loopback Core | [13 移动端](docs/13_移动端/索引.md) |
 | 插件 | Desktop 以自动校验/digest 锁定安装管理 Agent Plugins 1.0.0、Codex、Claude Code、Cursor user-scope ZIP 包；统一控制台展示 Skills、MCP、Rules、Agents、Commands、Hooks、Variables、Apps，并把可运行组件接入现有 Skill/MCP/instructions/Hook/Subagent runtime。安装入口只接受点击选择或拖入的本地 ZIP，同名插件自动安全替换，不提供 URL/Git 安装、Marketplace 或插件目录聚合；另支持组件与 tool override、变量/Secret、Hook 回执、Plugin Agent/Command/Rule Composer token、升级迁移、Trash 与 run generation lease。插件进程默认保持当前用户完全访问。Apps、project scope、跨重启 Hook receipt 索引和 Windows/Linux 实机仍不支持或未验收 | [14 插件](docs/14_插件/索引.md) |
 | 编码工作台 | 当前不支持；已确认目标设计为 checkpoint 式代码撤回、右侧栏“变更”diff 面板、typed 只读 `git_workspace` 工具与 Git 状态条、内置 Git 防护 Hook preset，以及项目 `.awaken/coding.json` 编码环境契约；当前可用的编码相关底座（typed 文件工具、`Bash`、`git_remote`、Subagent `git_worktree`）仍由 04/02 域拥有 | [15 编码工作台](docs/15_编码工作台/索引.md) |
+| 深度研究 | Workbench `@deep-research`（`@研究`）已支持宿主编排的只读多源研究报告（公开 HTTPS 网页 + 当前工作区），固定走规划/调研/核验/报告四阶段，以成功的 `Read`/`WebFetch` 回执约束证据并输出 Verified/Partial 报告卡；显式 URL 由宿主按原值抓取，逐跳 SSRF 检查 fail closed。任意远程 Git clone、用户 Skill 编排和不经 `WebFetch` 的 URL 核验不在范围 | [16 深度研究](docs/16_深度研究/索引.md) |
 
 各入口的 `索引.md` 只负责路由。产品行为、代码 owner、状态/数据/事件流、异常恢复和验收方法以索引指向的专项文档为准。
 

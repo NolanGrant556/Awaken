@@ -11,6 +11,7 @@ import (
 	"awaken/src/instructions"
 	"awaken/src/llm"
 	"awaken/src/prompt"
+	"awaken/src/researchruntime"
 	"awaken/src/subagentruntime"
 	"awaken/src/tool"
 	"awaken/src/tool/profile"
@@ -151,6 +152,10 @@ type AgentConfig struct {
 	// environment snapshot is probed with ComputerEnabled=true and the
 	// ToolRuntime is wired with a ComputerExecutor. nil disables Computer Use.
 	ComputerRuntime *computer.Runtime
+	// ResearchIntent is a run-scoped host binding for Deep Research. When
+	// set, the root runner hands control to researchruntime before the free
+	// thought loop. Child configs never inherit it.
+	ResearchIntent *researchruntime.Intent
 }
 
 type ToolResultOffloadReceipt struct {

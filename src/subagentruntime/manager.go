@@ -45,6 +45,7 @@ type managedTask struct {
 	seenModelRequests  map[string]struct{}
 	messages           []QueuedMessage
 	writableRoots      []string
+	host               *HostSpawnOptions
 	terminalPersistErr error
 }
 
@@ -157,7 +158,7 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 	task := &managedTask{
 		snapshot: snapshot, prompt: request.Prompt, cancel: cancel,
 		seenToolCalls: make(map[string]struct{}), seenModelRequests: make(map[string]struct{}),
-		writableRoots: writableRoots,
+		writableRoots: writableRoots, host: request.Host,
 	}
 	m.mu.Lock()
 	m.reserved--
@@ -169,6 +170,14 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 	m.wg.Add(1)
 	go m.runTask(taskCtx, taskID)
 	return snapshot, nil
+}
+
+// SpawnFromHost is the host-owned spawn entry used by Deep Research and the
+// model-visible subagent tool. It writes the same subagent_spawned record as
+// Spawn and does not change the model schema.
+func (m *Manager) SpawnFromHost(ctx context.Context, request SpawnRequest) (TaskSnapshot, error) {
+	request.ParentAgentID = firstNonBlank(request.ParentAgentID, "root")
+	return m.Spawn(ctx, request)
 }
 
 func (m *Manager) runTask(ctx context.Context, taskID string) {
@@ -218,7 +227,7 @@ func (m *Manager) runTask(ctx context.Context, taskID string) {
 	}
 	defer cancel()
 	result, err := m.cfg.Starter(startCtx, StartRequest{
-		Task: snapshot, Prompt: m.prompt(taskID),
+		Task: snapshot, Prompt: m.prompt(taskID), Host: m.hostOptions(taskID),
 		ReportProgress: func(progressCtx context.Context, update ProgressUpdate) error {
 			return m.reportProgress(progressCtx, taskID, update)
 		},
@@ -302,6 +311,21 @@ func (m *Manager) reportProgress(ctx context.Context, taskID string, update Prog
 			if toolName := strings.TrimSpace(update.ToolName); toolName != "" {
 				snapshot.CurrentActivity = bounded("正在使用 "+toolName, 160)
 			}
+		}
+	}
+	if receipt := update.HostToolReceipt; receipt != nil && strings.TrimSpace(receipt.ToolCallID) != "" {
+		found := false
+		for _, existing := range snapshot.HostToolReceipts {
+			if existing.ToolCallID == receipt.ToolCallID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			copied := *receipt
+			copied.Details = cloneAnyMap(receipt.Details)
+			snapshot.HostToolReceipts = append(snapshot.HostToolReceipts, copied)
+			changed = true
 		}
 	}
 	if requestID := strings.TrimSpace(update.ModelRequestID); requestID != "" {
@@ -753,7 +777,7 @@ func (m *Manager) snapshot(taskID string) (TaskSnapshot, bool) {
 	if task == nil {
 		return TaskSnapshot{}, false
 	}
-	return task.snapshot, true
+	return cloneTaskSnapshot(task.snapshot), true
 }
 
 func (m *Manager) replaceSnapshot(taskID string, snapshot TaskSnapshot) bool {
@@ -772,6 +796,25 @@ func (m *Manager) replaceSnapshot(taskID string, snapshot TaskSnapshot) bool {
 	return true
 }
 
+func cloneTaskSnapshot(snapshot TaskSnapshot) TaskSnapshot {
+	snapshot.HostToolReceipts = append([]HostToolReceipt(nil), snapshot.HostToolReceipts...)
+	for i := range snapshot.HostToolReceipts {
+		snapshot.HostToolReceipts[i].Details = cloneAnyMap(snapshot.HostToolReceipts[i].Details)
+	}
+	return snapshot
+}
+
+func cloneAnyMap(source map[string]any) map[string]any {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(source))
+	for key, value := range source {
+		cloned[key] = value
+	}
+	return cloned
+}
+
 func (m *Manager) prompt(taskID string) string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -779,6 +822,15 @@ func (m *Manager) prompt(taskID string) string {
 		return task.prompt
 	}
 	return ""
+}
+
+func (m *Manager) hostOptions(taskID string) *HostSpawnOptions {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if task := m.tasks[taskID]; task != nil {
+		return task.host
+	}
+	return nil
 }
 
 func (m *Manager) signal() {

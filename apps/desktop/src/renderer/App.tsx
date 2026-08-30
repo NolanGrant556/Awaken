@@ -243,6 +243,7 @@ import {
   pluginComposerTokenFromAction,
   pluginSkillComposerTokenFromAction,
   pluginRuleComposerTokenFromAction,
+  deepResearchMentionProvider,
   skillSlashProvider,
   type ComposerTokenPlacement,
   type SlashAction,
@@ -2330,7 +2331,7 @@ export function App() {
     [runtimeClient],
   );
   const mentionProviders = useMemo(
-    () => [computerUseMentionProvider(), pluginProvider],
+    () => [deepResearchMentionProvider(), computerUseMentionProvider(), pluginProvider],
     [pluginProvider],
   );
 
@@ -5168,6 +5169,15 @@ export function App() {
     const runInputAttachments = draftAttachments.map(toRunInputAttachment);
     if (!prompt && runInputAttachments.length === 0 && draftComposerTokens.length === 0) {
       setNotice("请输入内容或添加附件");
+      return;
+    }
+    const hasDeepResearchToken = draftComposerTokens.some(
+      (token) =>
+        token.type === "workflow" &&
+        String(token.payload?.workflowId ?? "") === "deep-research",
+    );
+    if (hasDeepResearchToken && !prompt) {
+      setNotice("请输入研究问题");
       return;
     }
     if (isBusy && !forceNewThread) {

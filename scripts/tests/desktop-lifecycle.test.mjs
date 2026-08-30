@@ -135,8 +135,9 @@ describe("desktop managed entrypoint", () => {
     assert.equal(rootPackage.scripts["predev:desktop:managed"], undefined);
     assert.match(
       openDesktopSource,
-      /const command = `cd \$\{shellQuote\(rootDir\)\} && npm run dev:desktop:managed`;/,
+      /`npm run dev:desktop:managed > \$\{shellQuote\(logFile\)\} 2>&1`,/,
     );
+    assert.doesNotMatch(openDesktopSource, /npm run close:desktop/);
   });
 });
 

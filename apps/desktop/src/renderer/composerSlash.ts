@@ -12,6 +12,7 @@ import type {
   RuntimeSkill,
   SkillProjectRoots,
   SkillComposerTokenPayload,
+  WorkflowComposerTokenPayload,
 } from "../shared/runtime";
 
 export type SlashActionType =
@@ -413,6 +414,46 @@ export function computerUseMentionProvider(): SlashProvider {
           preview: {
             description:
               "选择 Computer Use 能力；提交时由运行时向模型提供引导，不在用户输入中显示提示词。",
+          },
+          payload,
+          composerToken: token,
+        },
+      ];
+    },
+  };
+}
+
+export function deepResearchMentionProvider(): SlashProvider {
+  const payload: WorkflowComposerTokenPayload = {
+    workflowId: "deep-research",
+  };
+  const token: ComposerToken = {
+    id: "workflow:deep-research",
+    type: "workflow",
+    label: "深度研究",
+    payload: payload as unknown as Record<string, unknown>,
+  };
+  return {
+    id: "deep-research",
+    label: "深度研究",
+    getActions() {
+      return [
+        {
+          id: token.id,
+          type: "workflow",
+          label: "深度研究",
+          description: "宿主编排的只读多源研究报告",
+          keywords: [
+            "deep-research",
+            "deep research",
+            "研究",
+            "调研",
+            "research",
+          ],
+          icon: createElement(AwakenIcon, { concept: "search", size: 14 }),
+          preview: {
+            description:
+              "插入 @deep-research token 后输入研究问题。无问题不会启动。定时任务编辑器不提供该入口。",
           },
           payload,
           composerToken: token,

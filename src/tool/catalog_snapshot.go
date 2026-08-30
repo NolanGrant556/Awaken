@@ -45,6 +45,12 @@ var (
 	ErrCandidateInstallPlanInvalid  = errors.New("candidate install plan is invalid for pinned run snapshot")
 )
 
+// RunSnapshotFilter lets a builtin omit itself from a run availability
+// snapshot. WebFetch uses this when search channels are disabled.
+type RunSnapshotFilter interface {
+	IncludeInRunSnapshot(ExecutionEnvironmentSnapshot) bool
+}
+
 // InstallPlanProviderProvenance identifies every pinned provider/tool whose
 // dependency observation produced an install plan. Identical dependencies may
 // legitimately produce the same plan for several tools, so provenance is a
@@ -91,6 +97,9 @@ func NewRunToolAvailabilitySnapshot(environment ExecutionEnvironmentSnapshot) Ru
 		order:                 make([]string, 0, len(registered)),
 	}
 	for _, registeredTool := range registered {
+		if filter, ok := registeredTool.Runtime.(RunSnapshotFilter); ok && !filter.IncludeInRunSnapshot(environment) {
+			continue
+		}
 		provider := cloneProviderManifest(registeredTool.Provider)
 		readiness := resolveProviderReadiness(registeredTool.Runtime, provider, environment)
 		provider.Readiness = readiness.Readiness

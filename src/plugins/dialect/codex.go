@@ -132,6 +132,9 @@ func (codexAdapter) Parse(root string, candidate ir.ManifestCandidate, options P
 		plugin.Components = append(plugin.Components, ignored...)
 		plugin.Diagnostics = append(plugin.Diagnostics, ignoredDiagnostics...)
 	}
+	if err := appendSetupDeclarations(root, object, manifestPath, ir.DialectCodex, &plugin); err != nil {
+		return ir.NormalizedPlugin{}, err
+	}
 	_ = options
 	return plugin, nil
 }
@@ -163,10 +166,22 @@ func parseAppComponents(root, relative, manifestPath string) []ir.Component {
 		}}
 	}
 	var value any
-	_ = json.Unmarshal(raw, &value)
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return []ir.Component{{
+			LogicalID: ir.LogicalID(ir.KindApp, relative, "invalid"), Kind: ir.KindApp, SourceDialect: ir.DialectCodex,
+			SourceManifestPath: manifestPath, SourcePath: relative, Mapping: ir.MappingInvalid, Validation: "invalid",
+			Diagnostics: []ir.Diagnostic{{Code: "plugin_app_invalid", Message: err.Error(), Severity: "error", Phase: "parse", ComponentKind: ir.KindApp, SourcePath: relative, SourceDialect: ir.DialectCodex}},
+		}}
+	}
 	entries := map[string]any{"app": value}
 	if object, ok := value.(map[string]any); ok {
 		entries = object
+		// Codex .app.json files use an `apps` envelope whose children are the
+		// actual named App declarations. Keep accepting the older direct object
+		// shape, but never turn the envelope itself into a synthetic App.
+		if appEntries, ok := object["apps"].(map[string]any); ok {
+			entries = appEntries
+		}
 	}
 	keys := make([]string, 0, len(entries))
 	for key := range entries {

@@ -31,16 +31,31 @@ func (rt *ToolRuntime) maybeAwaitCLIAuthInteraction(
 	}
 	view, ok := DetectCLIAuthInteraction(result.Name, outcome)
 	if !ok {
+		view, ok = DetectPluginAuthInteraction(result.Name, outcome)
+	}
+	if !ok {
+		view, ok = DetectConnectorAuthInteraction(result.Name, outcome)
+	}
+	if !ok {
 		return result, false
 	}
 	if alreadyReplayed {
+		code := "cli_auth_replay_exhausted"
+		message := "授权后原命令仍需要授权。请检查权限范围后重试，或前往连接器完成配置。"
+		if strings.HasPrefix(view.Provider, "plugin:") {
+			code = "plugin_auth_replay_exhausted"
+			message = "授权后插件调用仍需要授权。请检查该插件的账号和权限范围后重试。"
+		} else if strings.HasPrefix(view.Provider, "connector:") {
+			code = "connector_auth_replay_exhausted"
+			message = "授权后连接器调用仍需要授权。请检查 Outlook 账号和权限范围后重试。"
+		}
 		result = synthesizeFailedToolResult(
 			result,
-			"cli_auth_replay_exhausted",
-			"授权后原命令仍需要授权。请检查权限范围后重试，或前往连接器完成配置。",
+			code,
+			message,
 		)
 		result.Outcome.Retryable = true
-		result.Outcome.RecoveryOptions = []string{"complete_cli_authorization", "retry_with_required_scopes"}
+		result.Outcome.RecoveryOptions = []string{"complete_external_authorization", "retry_with_required_scopes"}
 		result.ResultSummary = excerptString(strings.TrimSpace(result.Content), 200)
 		return rt.finalizeExecutedToolResult(result, def, permission, string(decision.Source), selectedTool, input, result.Content), true
 	}

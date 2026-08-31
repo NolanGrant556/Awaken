@@ -7,11 +7,13 @@ import (
 	"awaken/src/acp"
 	"awaken/src/agentcore"
 	"awaken/src/computer"
+	"awaken/src/connectorauth"
 	"awaken/src/connectors"
 	"awaken/src/mcpclient"
 	"awaken/src/memory"
 	"awaken/src/modelprofile"
 	"awaken/src/networkroute"
+	"awaken/src/pluginauth"
 	"awaken/src/plugins"
 	"awaken/src/protocol/agui"
 	awruntime "awaken/src/runtime"
@@ -138,6 +140,8 @@ type ControlConfig struct {
 	ACPSessionManager *awruntime.ACPSessionManager
 	ModelProfileStore ACPModelProfileStore
 	NetworkRoute      *networkroute.Manager
+	PluginAuth        *pluginauth.Service
+	ConnectorAuth     *connectorauth.Service
 }
 
 type ACPModelProfileStore interface {
@@ -159,6 +163,8 @@ type routerConfig struct {
 	control                *ControlConfig
 	scheduledTasks         *scheduledtask.Service
 	pluginStore            *plugins.Store
+	pluginAuth             *pluginauth.Service
+	connectorAuth          *connectorauth.Service
 }
 
 func newRouterInternal(cfg routerConfig) http.Handler {
@@ -279,18 +285,33 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("GET /v1/mcp/servers/{name}/config", mcpH.handleGetServerConfig)
 		mux.HandleFunc("PATCH /v1/mcp/servers/{name}/config", mcpH.handleUpdateServerConfig)
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/auth", mcpH.handleServerAuth)
+		mux.HandleFunc("GET /v1/mcp/auth/sessions/{sessionId}", mcpH.handleAuthSession)
+		mux.HandleFunc("POST /v1/mcp/auth/sessions/{sessionId}/cancel", mcpH.handleCancelAuthSession)
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/disable", mcpH.handleServerDisable)
 		mux.HandleFunc("POST /v1/mcp/servers/{name}/enable", mcpH.handleServerEnable)
 		mux.HandleFunc("DELETE /v1/mcp/servers/{name}", mcpH.handleDeleteServer)
 	}
-	connH := connectorHandlers{registry: cfg.connectorRegistry}
+	connectorAuth := cfg.connectorAuth
+	if connectorAuth == nil && cfg.control != nil {
+		connectorAuth = cfg.control.ConnectorAuth
+	}
+	connH := connectorHandlers{registry: cfg.connectorRegistry, auth: connectorAuth}
 	if cfg.connectorRegistry != nil {
 		mux.HandleFunc("GET /v1/connectors", connH.handleListConnectors)
 		mux.HandleFunc("POST /v1/connectors/{id}/connect", connH.handleConnect)
 		mux.HandleFunc("POST /v1/connectors/{id}/disconnect", connH.handleDisconnect)
+		mux.HandleFunc("GET /v1/connectors/auth/sessions/{sessionId}", connH.handleAuthSession)
+		mux.HandleFunc("POST /v1/connectors/auth/sessions/{sessionId}/cancel", connH.handleCancelAuthSession)
 		mux.HandleFunc("PUT /v1/connectors/{id}/cli-readiness", connH.handleCLIReadiness)
 	}
-	pluginH := pluginHandlers{store: cfg.pluginStore, manager: cfg.manager, runService: cfg.runService}
+	pluginAuth := cfg.pluginAuth
+	if pluginAuth == nil && cfg.control != nil {
+		pluginAuth = cfg.control.PluginAuth
+	}
+	if pluginAuth == nil && cfg.pluginStore != nil {
+		pluginAuth = pluginauth.NewService(cfg.pluginStore, cfg.manager, cfg.connectorRegistry, nil)
+	}
+	pluginH := pluginHandlers{store: cfg.pluginStore, manager: cfg.manager, runService: cfg.runService, auth: pluginAuth}
 	composerCatalogH := newComposerCatalogHandlers(cfg.skillRegistry, cfg.pluginStore)
 	mux.HandleFunc("GET /v1/composer-catalog/events", composerCatalogH.handleEvents)
 	mux.HandleFunc("GET /v1/plugins", pluginH.handleList)
@@ -301,6 +322,12 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	mux.HandleFunc("POST /v1/plugins/{name}/enable", pluginH.handleEnable)
 	mux.HandleFunc("POST /v1/plugins/{name}/disable", pluginH.handleDisable)
 	mux.HandleFunc("DELETE /v1/plugins/{name}", pluginH.handleDelete)
+	mux.HandleFunc("GET /v1/plugins/{name}/setup", pluginH.handleSetup)
+	mux.HandleFunc("POST /v1/plugins/{name}/setup/{setupId}/sessions", pluginH.handleStartSetupSession)
+	mux.HandleFunc("GET /v1/plugins/{name}/setup/sessions/{sessionId}", pluginH.handleSetupSession)
+	mux.HandleFunc("POST /v1/plugins/{name}/setup/sessions/{sessionId}/cancel", pluginH.handleCancelSetupSession)
+	mux.HandleFunc("POST /v1/plugins/{name}/setup/{setupId}/probe", pluginH.handleProbeSetup)
+	mux.HandleFunc("DELETE /v1/plugins/{name}/setup/{setupId}/credential", pluginH.handleDisconnectSetup)
 	mux.HandleFunc("POST /v1/plugins/{name}/servers/{short}/enable", pluginH.handleServerEnable)
 	mux.HandleFunc("POST /v1/plugins/{name}/servers/{short}/disable", pluginH.handleServerDisable)
 	mux.HandleFunc("GET /v1/plugins/{name}/components", pluginH.handleComponents)

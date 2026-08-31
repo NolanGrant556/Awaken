@@ -81,6 +81,7 @@ import {
   type ProjectReorderResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
+  type RuntimeConnectorAuthSession,
   type RuntimeInfo,
   type RuntimeLogEntry,
   type RuntimeMcpServer,
@@ -99,6 +100,9 @@ import {
   type RuntimePluginHookReceipt,
   type RuntimePluginHookReceiptResponse,
   type RuntimePluginConfigurationResponse,
+  type RuntimePluginAuthSession,
+  type RuntimePluginSetupMutationRequest,
+  type RuntimePluginSetupResponse,
   type RuntimePluginSource,
   type RuntimePluginValidation,
   type RuntimeSkill,
@@ -222,6 +226,8 @@ export type RuntimeClient = {
   listConnectors: () => Promise<RuntimeConnector[]>;
   connectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
   disconnectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
+  getConnectorAuthSession?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
+  cancelConnectorAuthSession?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
   listCliConnectors: () => Promise<CliConnectorView[]>;
   refreshCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
   installCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
@@ -311,6 +317,24 @@ export type RuntimeClient = {
     name: string,
     request: UpdatePluginConfigurationRequest,
   ) => Promise<RuntimePluginConfigurationResponse>;
+  getPluginSetup?: (name: string) => Promise<RuntimePluginSetupResponse>;
+  startPluginSetup?: (
+    name: string,
+    setupId: string,
+    request: RuntimePluginSetupMutationRequest,
+  ) => Promise<RuntimePluginAuthSession>;
+  getPluginAuthSession?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
+  cancelPluginAuthSession?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
+  probePluginSetup?: (
+    name: string,
+    setupId: string,
+    request: RuntimePluginSetupMutationRequest,
+  ) => Promise<RuntimePluginSetupResponse>;
+  disconnectPluginSetup?: (
+    name: string,
+    setupId: string,
+    request: RuntimePluginSetupMutationRequest,
+  ) => Promise<RuntimePluginSetupResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
   getModelPurposeRouting?: () => Promise<ModelPurposeRouting>;
@@ -559,6 +583,12 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     listConnectors: () => bridge.listConnectors(),
     connectConnector: (connectorId) => bridge.connectConnector(connectorId),
     disconnectConnector: (connectorId) => bridge.disconnectConnector(connectorId),
+    getConnectorAuthSession: bridge.getConnectorAuthSession
+      ? (sessionId) => bridge.getConnectorAuthSession!(sessionId)
+      : undefined,
+    cancelConnectorAuthSession: bridge.cancelConnectorAuthSession
+      ? (sessionId) => bridge.cancelConnectorAuthSession!(sessionId)
+      : undefined,
     listCliConnectors: () => bridge.listCliConnectors(),
     refreshCliConnector: (providerId) => bridge.refreshCliConnector(providerId),
     installCliConnector: (providerId) => bridge.installCliConnector(providerId),
@@ -615,6 +645,24 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getPluginConfiguration: (name) => bridge.getPluginConfiguration(name),
     updatePluginConfiguration: (name, request) =>
       bridge.updatePluginConfiguration(name, request),
+    getPluginSetup: bridge.getPluginSetup
+      ? (name) => bridge.getPluginSetup!(name)
+      : undefined,
+    startPluginSetup: bridge.startPluginSetup
+      ? (name, setupId, request) => bridge.startPluginSetup!(name, setupId, request)
+      : undefined,
+    getPluginAuthSession: bridge.getPluginAuthSession
+      ? (name, sessionId) => bridge.getPluginAuthSession!(name, sessionId)
+      : undefined,
+    cancelPluginAuthSession: bridge.cancelPluginAuthSession
+      ? (name, sessionId) => bridge.cancelPluginAuthSession!(name, sessionId)
+      : undefined,
+    probePluginSetup: bridge.probePluginSetup
+      ? (name, setupId, request) => bridge.probePluginSetup!(name, setupId, request)
+      : undefined,
+    disconnectPluginSetup: bridge.disconnectPluginSetup
+      ? (name, setupId, request) => bridge.disconnectPluginSetup!(name, setupId, request)
+      : undefined,
     listModelProviders: () => bridge.listModelProviders(),
     listModelProfiles: () => bridge.listModelProfiles(),
     getModelPurposeRouting: () => bridge.getModelPurposeRouting(),

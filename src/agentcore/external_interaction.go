@@ -131,6 +131,48 @@ func DetectCLIAuthInteraction(toolName string, outcome tool.ExecutionOutcome) (E
 	return ExternalInteractionView{}, false
 }
 
+// DetectPluginAuthInteraction maps an explicit MCP needs-auth result into the
+// same host wait gate used by CLI login. It never treats timeouts, disconnects
+// or ambiguous failures as authorization, and therefore never replays them.
+func DetectPluginAuthInteraction(toolName string, outcome tool.ExecutionOutcome) (ExternalInteractionView, bool) {
+	name := strings.TrimSpace(toolName)
+	if outcome.Status != tool.OutcomeNeedsAuth || !strings.HasPrefix(name, "mcp__plugin__") {
+		return ExternalInteractionView{}, false
+	}
+	provider := strings.TrimPrefix(name, "mcp__plugin__")
+	if index := strings.Index(provider, "__"); index >= 0 {
+		provider = provider[:index]
+	}
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		provider = "plugin"
+	}
+	return ExternalInteractionView{
+		Title:          "插件账号授权",
+		SafeMessage:    "请在插件详情的“待完成设置”中连接账号；完成后返回这里继续。",
+		Provider:       "plugin:" + provider,
+		Recoveries:     []string{"confirm_done", "cancel"},
+		RequiresReplay: true,
+	}, true
+}
+
+// DetectConnectorAuthInteraction maps explicit authorization failures from a
+// Core-owned host Connector into the external-action gate. Transport failures,
+// timeouts and Graph business errors are deliberately excluded.
+func DetectConnectorAuthInteraction(toolName string, outcome tool.ExecutionOutcome) (ExternalInteractionView, bool) {
+	name := strings.TrimSpace(toolName)
+	if outcome.Status != tool.OutcomeNeedsAuth || !strings.HasPrefix(name, "mcp__awaken-outlook__") {
+		return ExternalInteractionView{}, false
+	}
+	return ExternalInteractionView{
+		Title:          "Outlook 账号授权",
+		SafeMessage:    "请在 Awaken 的“连接器”中连接 Outlook 账号；完成后返回这里继续。",
+		Provider:       "connector:awaken.microsoft.outlook",
+		Recoveries:     []string{"confirm_done", "cancel"},
+		RequiresReplay: true,
+	}, true
+}
+
 func parseBashPayload(raw string) map[string]any {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

@@ -73,13 +73,13 @@ type Manager struct {
 	// refresh its MCP-sourced entries without coupling to the manager.
 	onToolsChanged func(serverName string)
 	clientImpl     *mcp.Implementation
-	// authFetchers holds the per-server AuthorizationCodeFetcher installed
-	// by the desktop UI. Populated via Manager.InstallAuthFetcher.
-	authFetchers map[string]auth.AuthorizationCodeFetcher
+	authSessionMu  sync.RWMutex
+	authSessions   map[string]*oauthAuthSession
 	// credentials holds per-server OAuth token sources. Defaults to an
 	// in-memory store; persistent stores can be installed via
 	// Manager.SetCredentialStore.
-	credentials CredentialStore
+	credentials    CredentialStore
+	secretResolver RuntimeSecretResolver
 	// elicitationHandler bridges server-initiated MCP form/URL requests into
 	// the active interactive run. Calls without an interactive run are safely
 	// cancelled by the host handler.
@@ -94,6 +94,16 @@ type Manager struct {
 	// were added to the manager. It is incremented atomically when a server is
 	// created so Snapshot can return servers in installation order.
 	nextSeq atomic.Uint64
+}
+
+type RuntimeSecretResolver interface {
+	ResolveMCPSecret(context.Context, string) (string, error)
+}
+
+func (m *Manager) SetRuntimeSecretResolver(resolver RuntimeSecretResolver) {
+	m.mu.Lock()
+	m.secretResolver = resolver
+	m.mu.Unlock()
 }
 
 // managedServer holds the per-server mutable state under the manager's lock.
@@ -163,9 +173,10 @@ func WithToolsChangedCallback(fn func(serverName string)) ManagerOption {
 // Start is called.
 func NewManager(opts ...ManagerOption) *Manager {
 	m := &Manager{
-		logger:      noopLogger{},
-		servers:     make(map[string]*managedServer),
-		credentials: NewInMemoryCredentialStore(),
+		logger:       noopLogger{},
+		servers:      make(map[string]*managedServer),
+		credentials:  NewInMemoryCredentialStore(),
+		authSessions: make(map[string]*oauthAuthSession),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -317,7 +328,21 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 	}
 	m.mu.Unlock()
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		transport, _, err := buildTransport(server.config, m.registry, authHandler, func(panicMsg string) {
+		m.mu.RLock()
+		secretResolver := m.secretResolver
+		m.mu.RUnlock()
+		runtimeConfig, err := resolveRuntimeSecrets(ctx, server.name, server.config, secretResolver)
+		if err != nil {
+			m.mu.Lock()
+			server.state = StateNeedsAuth
+			server.errorReason = err.Error()
+			m.mu.Unlock()
+			if m.onToolsChanged != nil {
+				m.onToolsChanged(server.name)
+			}
+			return
+		}
+		transport, _, err := buildTransport(runtimeConfig, m.registry, authHandler, func(panicMsg string) {
 			m.recordFailure(server, fmt.Errorf("%s", panicMsg))
 		})
 		if err != nil {
@@ -412,6 +437,71 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 		}
 		backoff *= 2
 	}
+}
+
+func resolveRuntimeSecrets(ctx context.Context, serverName string, cfg McpServerConfig, resolver RuntimeSecretResolver) (McpServerConfig, error) {
+	if len(cfg.SecretBindings) == 0 {
+		return cfg, nil
+	}
+	if resolver == nil {
+		return McpServerConfig{}, &NeedsAuthError{ServerName: serverName, Reason: "plugin credential resolver is unavailable"}
+	}
+	copy := cfg
+	if cfg.Stdio != nil {
+		stdio := *cfg.Stdio
+		stdio.Env = cloneStringMap(cfg.Stdio.Env)
+		copy.Stdio = &stdio
+	}
+	for _, source := range []*HTTPTransportConfig{cfg.HTTP, cfg.SSE, cfg.WS} {
+		if source == nil {
+			continue
+		}
+		cloned := *source
+		cloned.Headers = cloneStringMap(source.Headers)
+		switch source {
+		case cfg.HTTP:
+			copy.HTTP = &cloned
+		case cfg.SSE:
+			copy.SSE = &cloned
+		case cfg.WS:
+			copy.WS = &cloned
+		}
+	}
+	for _, binding := range cfg.SecretBindings {
+		value, err := resolver.ResolveMCPSecret(ctx, binding.Ref)
+		if err != nil || strings.ContainsAny(value, "\r\n\x00") {
+			return McpServerConfig{}, &NeedsAuthError{ServerName: serverName, Reason: "plugin credential is unavailable"}
+		}
+		switch binding.Target {
+		case "process_env":
+			if copy.Stdio == nil {
+				return McpServerConfig{}, fmt.Errorf("secret process_env binding requires stdio")
+			}
+			if copy.Stdio.Env == nil {
+				copy.Stdio.Env = map[string]string{}
+			}
+			copy.Stdio.Env[binding.Name] = value
+		case "http_header", "mcp_transport":
+			target := copy.HTTP
+			if target == nil {
+				target = copy.SSE
+			}
+			if target == nil {
+				return McpServerConfig{}, fmt.Errorf("secret HTTP binding requires a remote transport")
+			}
+			if target.Headers == nil {
+				target.Headers = map[string]string{}
+			}
+			name := binding.Name
+			if name == "" {
+				name = "Authorization"
+			}
+			target.Headers[name] = value
+		default:
+			return McpServerConfig{}, fmt.Errorf("unsupported secret binding target %q", binding.Target)
+		}
+	}
+	return copy, nil
 }
 
 func (m *Manager) recordFailure(server *managedServer, err error) {
@@ -514,6 +604,34 @@ func (m *Manager) Reconnect(ctx context.Context, name string) error {
 	return m.Enable(ctx, name)
 }
 
+// InstallServerAuthHandler installs a host-owned OAuth handler without putting
+// a token or secret into the server config. The handler is preserved by the
+// following restart and consulted immediately before remote requests.
+func (m *Manager) InstallServerAuthHandler(name string, handler auth.OAuthHandler) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	server, ok := m.servers[name]
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrServerNotFound, name)
+	}
+	server.authHandler = handler
+	return nil
+}
+
+// ForceReconnect rebuilds a server even when its current state is needs-auth.
+// It is used after a user completes an explicit account setup flow.
+func (m *Manager) ForceReconnect(ctx context.Context, name string) error {
+	m.mu.RLock()
+	server, ok := m.servers[name]
+	if !ok {
+		m.mu.RUnlock()
+		return fmt.Errorf("%w: %q", ErrServerNotFound, name)
+	}
+	scoped := ScopedMcpServerConfig{Name: name, Scope: server.scope, Config: server.config}
+	m.mu.RUnlock()
+	return m.RestartWithConfig(ctx, scoped)
+}
+
 // ReconnectFailedForNetworkRoute re-arms failed network-sensitive servers
 // after the host reports a route change. Pending servers already rebuild their
 // transport on every retry, and connected servers keep their current session;
@@ -608,6 +726,22 @@ func (m *Manager) SnapshotServer(name string) (ServerSnapshot, error) {
 		return ServerSnapshot{}, fmt.Errorf("mcp server %q not found", name)
 	}
 	return m.snapshotServerLocked(server), nil
+}
+
+// MarkServerNeedsAuth lets a host-owned in-process connector report an
+// explicit provider 401 without smuggling credentials through the MCP result.
+// The current session remains allocated for diagnostics, but CallTool fails
+// closed before any later provider request until authorization reconnects it.
+func (m *Manager) MarkServerNeedsAuth(name, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	server, ok := m.servers[name]
+	if !ok {
+		return fmt.Errorf("mcp server %q not found", name)
+	}
+	server.state = StateNeedsAuth
+	server.errorReason = strings.TrimSpace(reason)
+	return nil
 }
 
 // ServerTools returns the last successful tools/list projection for one
@@ -714,10 +848,22 @@ func (m *Manager) callServerTool(ctx context.Context, serverName, toolName, disp
 		server.activeCallContext = nil
 		server.elicitationMu.Unlock()
 	}()
-	return server.session.CallTool(ctx, &mcp.CallToolParams{
+	result, err := server.session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: arguments,
 	})
+	// In-process handlers are converted by the MCP SDK into an error result,
+	// not necessarily a Go error. A Core-owned runtime can atomically mark the
+	// server needs-auth while the call is in flight; inspect that state for both
+	// return shapes so the agent layer receives one typed authorization signal.
+	m.mu.RLock()
+	state := server.state
+	reason := server.errorReason
+	m.mu.RUnlock()
+	if state == StateNeedsAuth {
+		return nil, &NeedsAuthError{ServerName: serverName, Reason: reason}
+	}
+	return result, err
 }
 
 func (m *Manager) handleElicitation(server *managedServer, request *mcp.ElicitRequest) (*mcp.ElicitResult, error) {

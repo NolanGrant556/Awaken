@@ -86,6 +86,7 @@ import {
 	type ProjectAgentsCreateResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
+  type RuntimeConnectorAuthSession,
   type RunStreamHandlers,
   type RuntimeInfo,
   type RuntimeLogEntry,
@@ -106,6 +107,9 @@ import {
   type RuntimePluginHookReceipt,
   type RuntimePluginHookReceiptResponse,
   type RuntimePluginConfigurationResponse,
+  type RuntimePluginAuthSession,
+  type RuntimePluginSetupMutationRequest,
+  type RuntimePluginSetupResponse,
   type RuntimePluginSource,
   type RuntimePluginValidation,
   type RuntimeSkill,
@@ -556,6 +560,16 @@ const bridge: AwakenBridge = {
       "awaken:disconnect-connector",
       connectorId,
     ) as Promise<RuntimeConnectorActionResponse>,
+  getConnectorAuthSession: (sessionId: string) =>
+    ipcRenderer.invoke(
+      "awaken:get-connector-auth-session",
+      sessionId,
+    ) as Promise<RuntimeConnectorAuthSession>,
+  cancelConnectorAuthSession: (sessionId: string) =>
+    ipcRenderer.invoke(
+      "awaken:cancel-connector-auth-session",
+      sessionId,
+    ) as Promise<RuntimeConnectorAuthSession>,
   listCliConnectors: () =>
     ipcRenderer.invoke("awaken:list-cli-connectors") as Promise<CliConnectorView[]>,
   refreshCliConnector: (providerId: CliProviderId) =>
@@ -733,6 +747,30 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:update-plugin-configuration", name, request) as Promise<
       RuntimePluginConfigurationResponse
     >,
+  getPluginSetup: (name: string) =>
+    ipcRenderer.invoke("awaken:get-plugin-setup", name) as Promise<RuntimePluginSetupResponse>,
+  startPluginSetup: (
+    name: string,
+    setupId: string,
+    request: RuntimePluginSetupMutationRequest,
+  ) =>
+    ipcRenderer.invoke("awaken:start-plugin-setup", name, setupId, request) as Promise<RuntimePluginAuthSession>,
+  getPluginAuthSession: (name: string, sessionId: string) =>
+    ipcRenderer.invoke("awaken:get-plugin-auth-session", name, sessionId) as Promise<RuntimePluginAuthSession>,
+  cancelPluginAuthSession: (name: string, sessionId: string) =>
+    ipcRenderer.invoke("awaken:cancel-plugin-auth-session", name, sessionId) as Promise<RuntimePluginAuthSession>,
+  probePluginSetup: (
+    name: string,
+    setupId: string,
+    request: RuntimePluginSetupMutationRequest,
+  ) =>
+    ipcRenderer.invoke("awaken:probe-plugin-setup", name, setupId, request) as Promise<RuntimePluginSetupResponse>,
+  disconnectPluginSetup: (
+    name: string,
+    setupId: string,
+    request: RuntimePluginSetupMutationRequest,
+  ) =>
+    ipcRenderer.invoke("awaken:disconnect-plugin-setup", name, setupId, request) as Promise<RuntimePluginSetupResponse>,
   listModelProviders: () =>
     ipcRenderer.invoke("awaken:list-model-providers") as Promise<ModelProvider[]>,
   listModelProfiles: () =>

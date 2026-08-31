@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"awaken/src/connectorauth"
 	"awaken/src/connectors"
 	"awaken/src/mcpclient"
 )
@@ -20,6 +21,31 @@ func (cliConnectorTestRuntime) Remove(string) error                             
 func (cliConnectorTestRuntime) Snapshot() []mcpclient.ServerSnapshot                     { return nil }
 func (cliConnectorTestRuntime) SnapshotServer(string) (mcpclient.ServerSnapshot, error) {
 	return mcpclient.ServerSnapshot{}, mcpclient.ErrServerNotFound
+}
+
+func TestOutlookConnectorAuthFailsClosedWithoutHostClientID(t *testing.T) {
+	registry := connectors.NewRegistry(cliConnectorTestRuntime{}, nil)
+	if err := registry.LoadSources(context.Background(), []connectors.ConnectorSource{connectors.NewBuiltinSource()}); err != nil {
+		t.Fatal(err)
+	}
+	auth := connectorauth.NewService(registry, mcpclient.NewInMemoryCredentialStore())
+	registry.SetAccountReadinessProvider(auth)
+	handler := newRouterInternal(routerConfig{connectorRegistry: registry, connectorAuth: auth})
+
+	list := httptest.NewRequest(http.MethodGet, "/v1/connectors", nil)
+	listRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(listRecorder, list)
+	if listRecorder.Code != http.StatusOK || !strings.Contains(listRecorder.Body.String(), `"id":"awaken.microsoft.outlook"`) || !strings.Contains(listRecorder.Body.String(), `"state":"failed"`) {
+		t.Fatalf("Outlook catalog state: status=%d body=%s", listRecorder.Code, listRecorder.Body.String())
+	}
+
+	connect := httptest.NewRequest(http.MethodPost, "/v1/connectors/awaken.microsoft.outlook/connect", strings.NewReader(`{}`))
+	connect.Header.Set("Content-Type", "application/json")
+	connectRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(connectRecorder, connect)
+	if connectRecorder.Code != http.StatusServiceUnavailable || !strings.Contains(connectRecorder.Body.String(), "CONNECTOR_OAUTH_CLIENT_ID_REQUIRED") {
+		t.Fatalf("Outlook connect did not fail closed: status=%d body=%s", connectRecorder.Code, connectRecorder.Body.String())
+	}
 }
 func (cliConnectorTestRuntime) ClearCredentialsFor(mcpclient.ScopedMcpServerConfig) error { return nil }
 

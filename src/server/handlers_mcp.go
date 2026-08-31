@@ -359,14 +359,28 @@ func (h mcpHandlers) handleServerAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.manager.StartAuth(r.Context(), name, req)
 	if err != nil {
-		if errors.Is(err, mcpclient.ErrAuthFetcherNotInstalled) {
-			writeErrorJSON(w, http.StatusConflict, "AUTH_FETCHER_REQUIRED", err.Error())
-			return
-		}
 		writeErrorJSON(w, http.StatusBadRequest, "AUTH_FAILED", err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (h mcpHandlers) handleAuthSession(w http.ResponseWriter, r *http.Request) {
+	view, err := h.manager.AuthSession(strings.TrimSpace(r.PathValue("sessionId")))
+	if err != nil {
+		writeErrorJSON(w, http.StatusNotFound, "AUTH_SESSION_NOT_FOUND", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (h mcpHandlers) handleCancelAuthSession(w http.ResponseWriter, r *http.Request) {
+	view, err := h.manager.CancelAuthSession(strings.TrimSpace(r.PathValue("sessionId")))
+	if err != nil {
+		writeErrorJSON(w, http.StatusNotFound, "AUTH_SESSION_NOT_FOUND", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 func (h mcpHandlers) handleDeleteServer(w http.ResponseWriter, r *http.Request) {

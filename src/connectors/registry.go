@@ -51,12 +51,19 @@ type Registry struct {
 	logger  Logger
 	manager RuntimeManager
 
-	mu              sync.RWMutex
-	active          map[string]*activeEntry        // connectorID -> runtime state
-	defs            map[string]ConnectorDefinition // resolved+merged definitions
-	cliReadiness    map[string]CLIConnectorReadiness
-	legacyCLIReview map[string]bool
-	cliControlToken string
+	mu               sync.RWMutex
+	active           map[string]*activeEntry        // connectorID -> runtime state
+	defs             map[string]ConnectorDefinition // resolved+merged definitions
+	cliReadiness     map[string]CLIConnectorReadiness
+	legacyCLIReview  map[string]bool
+	cliControlToken  string
+	accountReadiness AccountReadinessProvider
+}
+
+func (r *Registry) SetAccountReadinessProvider(provider AccountReadinessProvider) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.accountReadiness = provider
 }
 
 // activeEntry tracks runtime state for a connector that has been connected.
@@ -237,6 +244,7 @@ func (r *Registry) Connect(ctx context.Context, connectorID string) error {
 		// the card's Connect action to restore an enabled runtime.
 		stale := false
 		allDisabled := false
+		recoverable := false
 		if def.SourceOrigin == SourceBuiltin {
 			stale = true
 			allDisabled = true
@@ -246,10 +254,13 @@ func (r *Registry) Connect(ctx context.Context, connectorID string) error {
 					if snapshot.State != mcpclient.StateDisabled {
 						allDisabled = false
 					}
+					if snapshot.State == mcpclient.StateNeedsAuth || snapshot.State == mcpclient.StateFailed {
+						recoverable = true
+					}
 				}
 			}
 		}
-		if !stale && !allDisabled {
+		if !stale && !allDisabled && !recoverable {
 			return ErrConnectorAlreadyConnected
 		}
 		entry.connected = false
@@ -468,6 +479,18 @@ func (r *Registry) List() []ConnectorStatus {
 			continue
 		}
 
+		if def.OAuth != nil && r.accountReadiness != nil {
+			account := r.accountReadiness.AccountReadiness(def)
+			status.Account = account.Account
+			if account.State != StateConnected {
+				status.State = account.State
+				status.ProviderReadiness = connectorProviderReadiness(account.State)
+				status.LastError = account.LastError
+				out = append(out, status)
+				continue
+			}
+		}
+
 		entry := r.active[id]
 		if entry != nil && entry.connected {
 			status.ServerNames = entry.serverKeys
@@ -579,6 +602,16 @@ func (r *Registry) Status(connectorID string) (ConnectorStatus, error) {
 			}
 		}
 		return status, nil
+	}
+	if def.OAuth != nil && r.accountReadiness != nil {
+		account := r.accountReadiness.AccountReadiness(def)
+		status.Account = account.Account
+		if account.State != StateConnected {
+			status.State = account.State
+			status.ProviderReadiness = connectorProviderReadiness(account.State)
+			status.LastError = account.LastError
+			return status, nil
+		}
 	}
 
 	entry := r.active[connectorID]

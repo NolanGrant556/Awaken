@@ -91,6 +91,9 @@ export function AwakenConnectorCard({
         {showDescription ? (
           <span className="aw-connector-card__description">{item.description}</span>
         ) : null}
+        {item.errors?.map((error) => (
+          <span className="aw-connector-card__error" key={error}>{error}</span>
+        ))}
         {item.tags?.length ? (
           <span className="aw-connector-card__tags">
             {item.tags.map((tag) => <span key={tag}>{tag}</span>)}
@@ -119,11 +122,11 @@ export function AwakenConnectorCard({
         <button
           type="button"
           className="aw-connector-card__action"
-          aria-label={item.connected ? `断开 ${item.displayName}` : `连接 ${item.displayName}`}
+          aria-label={item.authorizing ? `取消连接 ${item.displayName}` : item.connected ? `断开 ${item.displayName}` : `连接 ${item.displayName}`}
           disabled={item.busy}
           onClick={() => onPrimaryAction?.(item)}
         >
-          {item.connected ? <AwakenIcon concept="close" size={16} /> : <AwakenIcon concept="add" size={16} />}
+          {item.connected || item.authorizing ? <AwakenIcon concept="close" size={16} /> : <AwakenIcon concept="add" size={16} />}
         </button>
       )}
     </article>

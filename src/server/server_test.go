@@ -4977,9 +4977,10 @@ func TestValidateComposerTokensKeepsLegacyNoTokenRequestsCompatible(t *testing.T
 	}
 }
 
-// TestMCPAuthFetcherNotInstalledReturns409 verifies POST /v1/mcp/servers/{name}/auth
-// returns 409 Conflict when the manager has no auth fetcher installed.
-func TestMCPAuthFetcherNotInstalledReturns409(t *testing.T) {
+// TestMCPAuthRejectsNonRemoteTransport verifies the Core-owned auth broker no
+// longer requires a Desktop-installed fetcher and rejects only transports that
+// cannot participate in remote OAuth.
+func TestMCPAuthRejectsNonRemoteTransport(t *testing.T) {
 	registry := mcpclient.NewInProcRegistry()
 	if err := registry.Register("echo", func() *mcp.Server {
 		server := mcp.NewServer(&mcp.Implementation{Name: "echo", Version: "v1"}, nil)
@@ -5005,15 +5006,18 @@ func TestMCPAuthFetcherNotInstalledReturns409(t *testing.T) {
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("expected 409 AUTH_FETCHER_REQUIRED, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 AUTH_FAILED, got %d: %s", rec.Code, rec.Body.String())
 	}
 	var errResp errorResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
 		t.Fatalf("expected JSON error response: %v", err)
 	}
-	if errResp.Error != "AUTH_FETCHER_REQUIRED" {
-		t.Errorf("expected AUTH_FETCHER_REQUIRED error code, got %q", errResp.Error)
+	if errResp.Error != "AUTH_FAILED" {
+		t.Errorf("expected AUTH_FAILED error code, got %q", errResp.Error)
+	}
+	if strings.Contains(rec.Body.String(), "AUTH_FETCHER_REQUIRED") {
+		t.Fatal("legacy Desktop auth fetcher prerequisite leaked into response")
 	}
 }
 

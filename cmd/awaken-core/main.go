@@ -22,6 +22,7 @@ import (
 	"awaken/src/agentcore"
 	"awaken/src/computer"
 	"awaken/src/computer/cua"
+	"awaken/src/connectorauth"
 	"awaken/src/connectors"
 	"awaken/src/desktopdata"
 	"awaken/src/filestore"
@@ -32,6 +33,8 @@ import (
 	"awaken/src/memory"
 	"awaken/src/modelprofile"
 	"awaken/src/networkroute"
+	"awaken/src/outlook"
+	"awaken/src/pluginauth"
 	"awaken/src/pluginrules"
 	"awaken/src/plugins"
 	"awaken/src/runtime"
@@ -48,6 +51,11 @@ import (
 	delegateexternalagent "awaken/src/tools/delegate_external_agent"
 	plugintool "awaken/src/tools/plugin"
 )
+
+// microsoftOutlookClientID is a public OAuth client identifier. Release builds
+// may set it with -X main.microsoftOutlookClientID=...; development can use
+// AWAKEN_MICROSOFT_CLIENT_ID without rebuilding Core.
+var microsoftOutlookClientID string
 
 func main() {
 	ownerMode := flag.String("owner-mode", "desktop", "Core owner mode: desktop or headless")
@@ -94,8 +102,30 @@ func main() {
 		subagentruntime.SetRoleResolver(pluginStore.ResolvePluginAgentRole)
 	}
 	plugintool.SetStore(pluginStore)
-	manager := buildMCPManager(defaultWorkspace, pluginStore)
+	credentialStore := mcpclient.NewPersistentCredentialStore()
+	inProcRegistry := mcpclient.NewInProcRegistry()
+	outlookRuntime := outlook.NewRuntime(nil)
+	if err := inProcRegistry.Register(outlook.ServerName, outlookRuntime.Factory()); err != nil {
+		log.Fatalf("[outlook] register in-process MCP runtime: %v", err)
+	}
+	manager := buildMCPManager(defaultWorkspace, pluginStore, inProcRegistry, credentialStore)
 	connRegistry := buildConnectorRegistry(manager, defaultWorkspace, legacyCLIReport.ReviewRequired)
+	connectorAuth := connectorauth.NewService(connRegistry, credentialStore)
+	if connRegistry != nil {
+		connRegistry.SetAccountReadinessProvider(connectorAuth)
+	}
+	outlookRuntime.SetTokenProvider(connectorAuth)
+	outlookRuntime.SetNeedsAuthCallback(manager.MarkServerNeedsAuth)
+	pluginAuth := pluginauth.NewService(pluginStore, manager, connRegistry, credentialStore)
+	pluginAuth.SetHostConnectorAuth(connectorAuth)
+	manager.SetRuntimeSecretResolver(pluginAuth)
+	fileHookSecrets := hookruntime.NewFileSecretStore(desktopdata.AwakenHomeRoot())
+	hookSecrets := hookruntime.SecretResolverFunc(func(ctx context.Context, ref string) (string, error) {
+		if strings.HasPrefix(ref, "plugin-auth:") {
+			return pluginAuth.ResolveHookSecret(ctx, ref)
+		}
+		return fileHookSecrets.ResolveHookSecret(ctx, ref)
+	})
 	skillRegistry := buildSkillRegistry(manager, defaultWorkspace)
 	if pluginStore != nil {
 		pluginStore.SetOnChange(func() {
@@ -106,6 +136,7 @@ func main() {
 			skills.SetPluginSkillSelections(pluginStore.EnabledSkillSelections())
 			applyPluginMCPServers(manager, pluginStore)
 		})
+		applyPluginMCPServers(manager, pluginStore)
 	}
 	syncSkillsForWorkspace := func(workspace runtime.WorkspaceConfig) {
 		skillRegistry.ReloadLocalSources(skillSourceDirsForWorkspace(workspace))
@@ -223,7 +254,7 @@ func main() {
 				ModelContentStore:      runtime.NewToolResultStore(),
 				ToolResultOffloadStore: runtime.NewToolResultStore(),
 				ContextEpochStore:      runtime.NewContextEpochStore(),
-				HookSecretResolver:     hookruntime.NewFileSecretStore(desktopdata.AwakenHomeRoot()),
+				HookSecretResolver:     hookSecrets,
 			}
 			return agentcore.NewAgentWithThreadID(agentCfg, threadID)
 		},
@@ -524,6 +555,8 @@ func main() {
 			ACPSessionManager: acpSessionManager,
 			ModelProfileStore: modelprofile.NewUserStore(desktopdata.AwakenHomeRoot()),
 			NetworkRoute:      routeManager,
+			PluginAuth:        pluginAuth,
+			ConnectorAuth:     connectorAuth,
 		}
 	}
 
@@ -652,7 +685,7 @@ func purposeModelConfig(profile *runtime.ModelProfileConfig, purpose string) age
 // starts the manager. Failures are logged but never fatal: the runtime
 // stays up even if no MCP server is configured. The manager is still returned
 // with an empty server set so connectors can inject MCP configs dynamically.
-func buildMCPManager(workspace string, pluginStore *plugins.Store) *mcpclient.Manager {
+func buildMCPManager(workspace string, pluginStore *plugins.Store, inProcRegistry *mcpclient.InProcRegistry, credentialStore mcpclient.CredentialStore) *mcpclient.Manager {
 	userCfg, err := mcpclient.LoadUserConfig()
 	if err != nil {
 		log.Printf("[mcp] user config load failed: %v", err)
@@ -675,8 +708,15 @@ func buildMCPManager(workspace string, pluginStore *plugins.Store) *mcpclient.Ma
 		nil,
 		mcpclient.StdLogger{},
 	)
-	manager := mcpclient.NewManager(mcpclient.WithLogger(mcpclient.StdLogger{}))
-	manager.SetCredentialStore(mcpclient.NewPersistentCredentialStore())
+	options := []mcpclient.ManagerOption{mcpclient.WithLogger(mcpclient.StdLogger{})}
+	if inProcRegistry != nil {
+		options = append(options, mcpclient.WithInProcRegistry(inProcRegistry))
+	}
+	manager := mcpclient.NewManager(options...)
+	if credentialStore == nil {
+		credentialStore = mcpclient.NewPersistentCredentialStore()
+	}
+	manager.SetCredentialStore(credentialStore)
 	if len(merged) > 0 {
 		go manager.Start(context.Background(), merged)
 	}
@@ -698,7 +738,9 @@ func buildConnectorRegistry(manager *mcpclient.Manager, _ string, legacyCLIRevie
 	}
 
 	var sources []connectors.ConnectorSource
-	sources = append(sources, connectors.NewBuiltinSource())
+	sources = append(sources, connectors.NewBuiltinSource(connectors.BuiltinOptions{
+		MicrosoftClientID: resolvedMicrosoftOutlookClientID(),
+	}))
 	if localSource != nil {
 		sources = append(sources, localSource)
 	}
@@ -720,6 +762,13 @@ func buildConnectorRegistry(manager *mcpclient.Manager, _ string, legacyCLIRevie
 
 	log.Printf("[connectors] loaded %d connector definitions", len(registry.List()))
 	return registry
+}
+
+func resolvedMicrosoftOutlookClientID() string {
+	if value := strings.TrimSpace(os.Getenv("AWAKEN_MICROSOFT_CLIENT_ID")); value != "" {
+		return value
+	}
+	return strings.TrimSpace(microsoftOutlookClientID)
 }
 
 func buildSkillRegistry(manager *mcpclient.Manager, workspace string) *skills.SkillRegistry {

@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -93,6 +92,9 @@ type AuthFlowConfig struct {
 	RedirectURL string
 	// ClientID is the OAuth client_id, when pre-registered.
 	ClientID string
+	// ClientMetadataURL is a public HTTPS Client ID Metadata Document used
+	// when the authorization server advertises CIMD support.
+	ClientMetadataURL string
 	// ClientSecret is the OAuth client_secret, when pre-registered.
 	ClientSecret string
 	// Scopes requested from the authorization server.
@@ -109,86 +111,26 @@ type AuthResult struct {
 	AuthorizationURL string     `json:"authorizationUrl"`
 	State            string     `json:"state,omitempty"`
 	ServerName       string     `json:"serverName"`
+	SessionID        string     `json:"sessionId"`
 	ExpiresAt        *time.Time `json:"expiresAt,omitempty"`
 }
 
 // AuthRequest is the wire payload accepted by POST /v1/mcp/servers/{name}/auth.
 type AuthRequest struct {
-	RedirectURL  string   `json:"redirectUrl"`
-	ClientID     string   `json:"clientId,omitempty"`
-	ClientSecret string   `json:"clientSecret,omitempty"`
-	Scopes       []string `json:"scopes,omitempty"`
-	// AuthorizationCodeFetcher cannot be serialized; it is supplied out of
-	// band by the desktop UI via Manager.InstallAuthFetcher.
+	RedirectURL       string   `json:"redirectUrl,omitempty"`
+	ClientID          string   `json:"clientId,omitempty"`
+	ClientMetadataURL string   `json:"clientMetadataUrl,omitempty"`
+	ClientSecret      string   `json:"clientSecret,omitempty"`
+	Scopes            []string `json:"scopes,omitempty"`
 }
 
 // StartAuth initiates the OAuth flow for the named server. It returns the
 // authorization URL the desktop UI should open in a browser. The resulting
 // token source is persisted via the configured CredentialStore so Desktop
 // restarts can rebuild the authenticated transport.
-//
-// In v1, StartAuth requires that InstallAuthFetcher has been called for
-// the server; otherwise it returns an error directing the caller to
-// register a fetcher.
 func (m *Manager) StartAuth(ctx context.Context, serverName string, req AuthRequest) (AuthResult, error) {
-	m.mu.Lock()
-	server, ok := m.servers[serverName]
-	m.mu.Unlock()
-	if !ok {
-		return AuthResult{}, fmt.Errorf("mcp server %q not found", serverName)
-	}
-	fetcher := m.lookupAuthFetcher(serverName)
-	if fetcher == nil {
-		return AuthResult{}, fmt.Errorf("%w: server %q; install one via Manager.InstallAuthFetcher", ErrAuthFetcherNotInstalled, serverName)
-	}
-	cfg := AuthFlowConfig{
-		ServerURL:                serverAuthURL(server.config),
-		RedirectURL:              req.RedirectURL,
-		ClientID:                 req.ClientID,
-		ClientSecret:             req.ClientSecret,
-		Scopes:                   req.Scopes,
-		AuthorizationCodeFetcher: fetcher,
-	}
-	captureHandler, err := buildOAuthHandler(cfg)
-	if err != nil {
-		return AuthResult{}, fmt.Errorf("build oauth handler: %w", err)
-	}
-	// Trigger an Authorize round-trip so we can capture the authorize URL.
-	// The SDK's Authorize is expected to invoke the fetcher, which itself
-	// returns the URL plus the eventual code. We expose the URL via the
-	// fetcher's first call.
-	authURL, err := captureAuthorizeURL(ctx, captureHandler, cfg)
-	if err != nil {
-		return AuthResult{}, err
-	}
-	handler := newPersistentOAuthHandler(CredentialIdentity(server.scope, serverName, server.config), cfg, m.credentials)
-	// Install the handler on the server so the next Connect/CallTool picks
-	// it up. We do not block on the flow here; the desktop UI drives it.
-	m.mu.Lock()
-	server.authHandler = handler
-	m.mu.Unlock()
-	return AuthResult{
-		AuthorizationURL: authURL,
-		ServerName:       serverName,
-	}, nil
-}
-
-// InstallAuthFetcher registers the AuthorizationCodeFetcher the desktop UI
-// supplies for a server. The fetcher is responsible for opening the
-// system browser and serving the loopback redirect.
-func (m *Manager) InstallAuthFetcher(serverName string, fetcher auth.AuthorizationCodeFetcher) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.authFetchers == nil {
-		m.authFetchers = make(map[string]auth.AuthorizationCodeFetcher)
-	}
-	m.authFetchers[serverName] = fetcher
-}
-
-func (m *Manager) lookupAuthFetcher(serverName string) auth.AuthorizationCodeFetcher {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.authFetchers[serverName]
+	_ = ctx
+	return m.startCoreAuthSession(serverName, req)
 }
 
 // serverAuthURL extracts the URL the OAuth flow should protect from the
@@ -215,7 +157,13 @@ func serverAuthURL(cfg McpServerConfig) string {
 // names while keeping the identity deterministic across restarts.
 func CredentialIdentity(scope Scope, serverName string, cfg McpServerConfig) string {
 	endpoint := canonicalServerURL(serverAuthURL(cfg))
-	sum := sha256.Sum256([]byte(endpoint))
+	material := strings.Join([]string{
+		endpoint,
+		strings.TrimSpace(cfg.OAuthClientID),
+		strings.TrimSpace(cfg.OAuthClientMetadataURL),
+		strings.Join(cfg.OAuthScopes, " "),
+	}, "\x00")
+	sum := sha256.Sum256([]byte(material))
 	return fmt.Sprintf("%s:%s:%x", scope, serverName, sum[:])
 }
 
@@ -247,71 +195,29 @@ func buildOAuthHandler(cfg AuthFlowConfig) (*auth.AuthorizationCodeHandler, erro
 	handlerCfg := &auth.AuthorizationCodeHandlerConfig{
 		RedirectURL:              cfg.RedirectURL,
 		AuthorizationCodeFetcher: cfg.AuthorizationCodeFetcher,
+		Client:                   oauthSafeHTTPClient(),
 	}
-	if cfg.ClientID != "" {
+	if cfg.ClientMetadataURL != "" {
+		handlerCfg.ClientIDMetadataDocumentConfig = &auth.ClientIDMetadataDocumentConfig{URL: cfg.ClientMetadataURL}
+	} else if cfg.ClientID != "" {
 		creds := &oauthex.ClientCredentials{ClientID: cfg.ClientID}
 		if cfg.ClientSecret != "" {
 			creds.ClientSecretAuth = &oauthex.ClientSecretAuth{ClientSecret: cfg.ClientSecret}
 		}
 		handlerCfg.PreregisteredClient = creds
+	} else {
+		handlerCfg.DynamicClientRegistrationConfig = &auth.DynamicClientRegistrationConfig{
+			Metadata: &oauthex.ClientRegistrationMetadata{
+				ClientName:              "Awaken",
+				RedirectURIs:            []string{cfg.RedirectURL},
+				TokenEndpointAuthMethod: "none",
+				GrantTypes:              []string{"authorization_code", "refresh_token"},
+				ResponseTypes:           []string{"code"},
+				Scope:                   strings.Join(cfg.Scopes, " "),
+			},
+		}
 	}
 	return auth.NewAuthorizationCodeHandler(handlerCfg)
-}
-
-// captureAuthorizeURL triggers the SDK handler's Authorize flow via a
-// synthetic 401 response so we can capture the authorization URL the
-// fetcher is about to open. The fetcher is expected to surface the URL
-// through its args parameter.
-func captureAuthorizeURL(ctx context.Context, handler *auth.AuthorizationCodeHandler, cfg AuthFlowConfig) (string, error) {
-	// The SDK's Authorize expects the failed request and response. We
-	// synthesize a 401 against the configured server URL so the handler
-	// can introspect WWW-Authenticate challenges. Real challenges are
-	// typically present in production; for v1 we accept that the flow may
-	// fall back to the configured endpoints.
-	fakeReq, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.ServerURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("build synthetic request: %w", err)
-	}
-	fakeResp := &http.Response{
-		StatusCode: http.StatusUnauthorized,
-		Header:     make(http.Header),
-		Body:       http.NoBody,
-		Request:    fakeReq,
-	}
-	// Install a capture fetcher that records the URL before delegating to
-	// the user-supplied fetcher.
-	var capturedURL string
-	capture := func(ctx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
-		capturedURL = args.URL
-		// We don't actually complete the flow here; the desktop UI will
-		// re-invoke the real fetcher when it renders the auth URL. Return
-		// a benign error so the SDK doesn't try to exchange a missing code.
-		return nil, errors.New("auth url captured; awaiting desktop-driven completion")
-	}
-	original := cfg.AuthorizationCodeFetcher
-	cfg.AuthorizationCodeFetcher = capture
-	// Rebuild handler with the capture fetcher to grab the URL.
-	captureCfg := &auth.AuthorizationCodeHandlerConfig{
-		RedirectURL:              cfg.RedirectURL,
-		AuthorizationCodeFetcher: capture,
-	}
-	if cfg.ClientID != "" {
-		creds := &oauthex.ClientCredentials{ClientID: cfg.ClientID}
-		if cfg.ClientSecret != "" {
-			creds.ClientSecretAuth = &oauthex.ClientSecretAuth{ClientSecret: cfg.ClientSecret}
-		}
-		captureCfg.PreregisteredClient = creds
-	}
-	captureHandler, err := auth.NewAuthorizationCodeHandler(captureCfg)
-	if err != nil {
-		return "", fmt.Errorf("build capture handler: %w", err)
-	}
-	_ = captureHandler.Authorize(ctx, fakeReq, fakeResp)
-	cfg.AuthorizationCodeFetcher = original
-	if capturedURL == "" {
-		return "", errors.New("oauth handler did not surface an authorization url")
-	}
-	return capturedURL, nil
 }
 
 // serverAuthHandler returns the installed OAuthHandler for the server, or
@@ -331,7 +237,3 @@ func (m *Manager) serverAuthHandler(serverName string) auth.OAuthHandler {
 // Ensure auth.OAuthHandler is referenced so the import stays used in the
 // case the manager's transport.go is the only consumer.
 var _ auth.OAuthHandler = (*auth.AuthorizationCodeHandler)(nil)
-
-// ErrAuthFetcherNotInstalled is returned by StartAuth when no
-// AuthorizationCodeFetcher has been installed for the server.
-var ErrAuthFetcherNotInstalled = errors.New("auth fetcher not installed")

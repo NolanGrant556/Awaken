@@ -20,27 +20,104 @@ import (
 var ErrComponentNotSwitchable = errors.New("component is not switchable")
 var ErrToolNotFound = errors.New("plugin MCP tool not found")
 
-func componentConfiguration(component ir.Component, record Record) string {
-	if component.Variable == nil || !component.Variable.Required {
-		return "ready"
+func variableConfigured(record Record, spec *ir.VariableSpec) bool {
+	if spec == nil {
+		return true
 	}
-	value, ok := record.Variables[component.Variable.Key]
-	if !ok || value.Value == nil && value.SecretRef == "" {
+	if spec.Default != nil {
+		return true
+	}
+	value, ok := record.Variables[spec.Key]
+	return ok && (value.Value != nil || value.SecretRef != "")
+}
+
+func componentConfiguration(component ir.Component, setup []ir.SetupRequirement, record Record) string {
+	if component.Variable != nil && component.Variable.Required && !variableConfigured(record, component.Variable) {
 		return "needs_configuration"
+	}
+	for _, requirement := range setup {
+		if requirement.Kind != ir.SetupConfiguration && requirement.Kind != ir.SetupSecret || !requirement.Required || requirement.Field == nil {
+			continue
+		}
+		if variableConfigured(record, requirement.Field) {
+			continue
+		}
+		if component.Variable != nil && component.Variable.Key == requirement.Field.Key || setupContainsComponent(requirement.ComponentIDs, component.LogicalID) {
+			return "needs_configuration"
+		}
 	}
 	return "ready"
 }
 
-func componentSwitchable(component ir.Component, record Record) bool {
+func componentAuthentication(pluginName string, component ir.Component, setup []ir.SetupRequirement, provider SetupReadinessProvider) string {
+	state := "not_required"
+	for _, requirement := range setup {
+		if requirement.Kind == ir.SetupConfiguration || requirement.Kind == ir.SetupSecret || !setupContainsComponent(requirement.ComponentIDs, component.LogicalID) {
+			continue
+		}
+		status := SetupReady
+		if requirement.Kind == ir.SetupAppConnector {
+			status = SetupUnsupported
+		} else if provider != nil {
+			status, _ = provider.SetupStatus(pluginName, requirement)
+		} else if requirement.Required || requirement.Kind != ir.SetupMCPOAuth {
+			status = SetupNeedsAuth
+		}
+		candidate := string(status)
+		if candidate == string(SetupReady) {
+			if state == "not_required" {
+				state = "ready"
+			}
+			continue
+		}
+		if authStatePriority(candidate) > authStatePriority(state) {
+			state = candidate
+		}
+	}
+	return state
+}
+
+func setupContainsComponent(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func authStatePriority(state string) int {
+	switch state {
+	case string(SetupFailed):
+		return 7
+	case string(SetupExpired):
+		return 6
+	case string(SetupNeedsAuth):
+		return 5
+	case string(SetupAuthorizing), string(SetupVerifying):
+		return 4
+	case string(SetupUnsupported):
+		return 3
+	case string(SetupReady):
+		return 2
+	default:
+		return 1
+	}
+}
+
+func componentSwitchable(pluginName string, component ir.Component, setup []ir.SetupRequirement, record Record, provider SetupReadinessProvider) bool {
+	authentication := componentAuthentication(pluginName, component, setup, provider)
 	return component.Validation != "invalid" &&
-		componentConfiguration(component, record) == "ready" &&
+		componentConfiguration(component, setup, record) == "ready" &&
+		(authentication == "ready" || authentication == "not_required") &&
 		component.Kind != ir.KindVariable &&
 		(component.Mapping == ir.MappingNative || component.Mapping == ir.MappingAdapted)
 }
 
-func componentStates(components []ir.Component, record Record) ([]ComponentState, string, string) {
+func (s *Store) componentStates(pluginName string, components []ir.Component, setup []ir.SetupRequirement, record Record) ([]ComponentState, string, string, string) {
 	states := make([]ComponentState, 0, len(components))
 	configurationState := "ready"
+	authenticationState := "ready"
 	compatibilityState := "compatible"
 	for _, component := range components {
 		desired := "enabled"
@@ -68,24 +145,28 @@ func componentStates(components []ir.Component, record Record) ([]ComponentState
 		if !record.Enabled {
 			desired = "disabled"
 		}
-		configuration := componentConfiguration(component, record)
+		configuration := componentConfiguration(component, setup, record)
 		if configuration == "needs_configuration" {
 			configurationState = "needs_configuration"
+		}
+		authentication := componentAuthentication(pluginName, component, setup, s.setupReadiness)
+		if authentication != "ready" && authentication != "not_required" && authStatePriority(authentication) >= authStatePriority(authenticationState) {
+			authenticationState = authentication
 		}
 		runtime := "not_applicable"
 		if component.Kind == ir.KindMCPServer {
 			runtime = "stopped"
 		}
-		switchable := componentSwitchable(component, record)
+		switchable := componentSwitchable(pluginName, component, setup, record, s.setupReadiness)
 		if component.Mapping == ir.MappingRecognizedUnsupported || component.Mapping == ir.MappingInvalid {
 			compatibilityState = "partial"
 		}
 		states = append(states, ComponentState{
-			Component: component, DesiredState: desired, RuleActivation: ruleActivation, Configuration: configuration, Runtime: runtime,
+			Component: component, DesiredState: desired, RuleActivation: ruleActivation, Configuration: configuration, Authentication: authentication, Runtime: runtime,
 			Integrity: "intact", Mapping: component.Mapping, Switchable: switchable,
 		})
 	}
-	return states, configurationState, compatibilityState
+	return states, configurationState, authenticationState, compatibilityState
 }
 
 func (s *Store) ComponentInventory(name string) ([]ComponentState, error) {
@@ -97,6 +178,97 @@ func (s *Store) ComponentInventory(name string) ([]ComponentState, error) {
 		return nil, ErrDigestChanged
 	}
 	return append([]ComponentState(nil), plugin.ComponentState...), nil
+}
+
+func (s *Store) SetupItems(name string) ([]SetupItem, SetupSummary, error) {
+	name = strings.TrimSpace(name)
+	var items []SetupItem
+	err := s.withLock(func() error {
+		state, err := s.readStateUnlocked()
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		record, ok := state.Plugins[name]
+		if !ok {
+			return fmt.Errorf("%w: %s", ErrNotFound, name)
+		}
+		plugin := s.loadRecord(name, record)
+		items = make([]SetupItem, 0, len(plugin.Setup))
+		for _, requirement := range plugin.Setup {
+			item := SetupItem{Requirement: requirement, Status: SetupReady, Actions: []SetupAction{}}
+			switch requirement.Kind {
+			case ir.SetupConfiguration, ir.SetupSecret:
+				if requirement.Field != nil && requirement.Required && !variableConfigured(record, requirement.Field) {
+					item.Status = SetupNeedsConfiguration
+					item.ReasonCode = "PLUGIN_CONFIGURATION_REQUIRED"
+					item.Message = "完成必填配置后，关联组件才能运行。"
+				}
+				item.Actions = []SetupAction{SetupActionConfigure}
+			case ir.SetupAppConnector:
+				item.Status = SetupUnsupported
+				item.ReasonCode = "APP_CONNECTOR_UNSUPPORTED"
+				item.Message = "Awaken 当前没有该 Connector ID 的目录、账号授权和工具运行时。"
+				item.Actions = []SetupAction{SetupActionInspectOnly}
+			default:
+				if s.setupReadiness != nil {
+					item.Status, item.Message = s.setupReadiness.SetupStatus(name, requirement)
+				} else if requirement.Required || requirement.Kind != ir.SetupMCPOAuth {
+					item.Status = SetupNeedsAuth
+					item.Message = "需要连接账号或完成外部设置。"
+				}
+				item.Actions = setupActions(item.Status, requirement.Kind)
+			}
+			items = append(items, item)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, SetupSummary{}, err
+	}
+	return items, SummarizeSetup(items), nil
+}
+
+func setupActions(status SetupStatus, kind ir.SetupKind) []SetupAction {
+	switch status {
+	case SetupAuthorizing, SetupVerifying:
+		return []SetupAction{SetupActionCancel}
+	case SetupReady:
+		if kind == ir.SetupExternal || kind == ir.SetupCLILogin {
+			return []SetupAction{SetupActionProbe}
+		}
+		return []SetupAction{SetupActionDisconnect}
+	case SetupFailed, SetupExpired:
+		return []SetupAction{SetupActionRetry}
+	case SetupUnsupported:
+		return []SetupAction{SetupActionInspectOnly}
+	default:
+		if kind == ir.SetupExternal {
+			return []SetupAction{SetupActionAuthorize, SetupActionProbe}
+		}
+		return []SetupAction{SetupActionAuthorize}
+	}
+}
+
+func SummarizeSetup(items []SetupItem) SetupSummary {
+	var summary SetupSummary
+	for _, item := range items {
+		summary.Total++
+		switch item.Status {
+		case SetupReady:
+			summary.Ready++
+		case SetupNeedsConfiguration:
+			summary.NeedsConfiguration++
+		case SetupNeedsAuth, SetupExpired:
+			summary.NeedsAuth++
+		case SetupAuthorizing, SetupVerifying:
+			summary.InProgress++
+		case SetupUnsupported:
+			summary.Unsupported++
+		case SetupFailed:
+			summary.Failed++
+		}
+	}
+	return summary
 }
 
 func (s *Store) ComponentDetail(name, logicalID string) (ComponentDetail, error) {
@@ -310,7 +482,7 @@ func (s *Store) SetComponentDesired(name, logicalID string, enabled bool) (*Inst
 		if target == nil {
 			return fmt.Errorf("%w: component %s", ErrNotFound, logicalID)
 		}
-		if !componentSwitchable(*target, record) {
+		if !componentSwitchable(name, *target, loaded.Setup, record, s.setupReadiness) {
 			return fmt.Errorf("%w: %s", ErrComponentNotSwitchable, logicalID)
 		}
 		if record.Components == nil {

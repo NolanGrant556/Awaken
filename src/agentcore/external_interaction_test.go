@@ -53,3 +53,34 @@ func TestDetectCLIAuthInteractionRejectsHTTP(t *testing.T) {
 		t.Fatal("http URLs must be rejected")
 	}
 }
+
+func TestDetectPluginAuthInteractionOnlyAcceptsExplicitNeedsAuth(t *testing.T) {
+	view, ok := DetectPluginAuthInteraction("mcp__plugin__outlook__mail__create", tool.ExecutionOutcome{Status: tool.OutcomeNeedsAuth})
+	if !ok || view.Provider != "plugin:outlook" || !view.RequiresReplay {
+		t.Fatalf("unexpected plugin auth view: ok=%v view=%+v", ok, view)
+	}
+	if view.VerificationURL != "" || !strings.Contains(view.SafeMessage, "插件详情") {
+		t.Fatalf("plugin gate leaked or omitted guidance: %+v", view)
+	}
+	for _, status := range []tool.OutcomeStatus{tool.OutcomeFailed, tool.OutcomeCancelled, tool.OutcomeInterrupted} {
+		if _, detected := DetectPluginAuthInteraction("mcp__plugin__outlook__mail__create", tool.ExecutionOutcome{Status: status}); detected {
+			t.Fatalf("ambiguous status %s must not be treated as auth", status)
+		}
+	}
+}
+
+func TestDetectConnectorAuthInteractionOnlyAcceptsOutlookNeedsAuth(t *testing.T) {
+	view, ok := DetectConnectorAuthInteraction("mcp__awaken-outlook__send_mail", tool.ExecutionOutcome{Status: tool.OutcomeNeedsAuth})
+	if !ok || view.Provider != "connector:awaken.microsoft.outlook" || !view.RequiresReplay {
+		t.Fatalf("unexpected connector auth view: ok=%v view=%+v", ok, view)
+	}
+	if view.VerificationURL != "" || !strings.Contains(view.SafeMessage, "连接器") {
+		t.Fatalf("connector gate leaked or omitted guidance: %+v", view)
+	}
+	if _, detected := DetectConnectorAuthInteraction("mcp__awaken-outlook__send_mail", tool.ExecutionOutcome{Status: tool.OutcomeFailed}); detected {
+		t.Fatal("ordinary Graph failure must not be treated as authorization")
+	}
+	if _, detected := DetectConnectorAuthInteraction("mcp__other__send_mail", tool.ExecutionOutcome{Status: tool.OutcomeNeedsAuth}); detected {
+		t.Fatal("other MCP providers must not be classified as Outlook")
+	}
+}

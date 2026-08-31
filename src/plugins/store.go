@@ -35,6 +35,7 @@ type Store struct {
 	lockPath             string
 	trash                trash.TrashAdapter
 	secrets              pluginvariables.SecretStore
+	setupReadiness       SetupReadinessProvider
 	mu                   sync.Mutex
 	changeMu             sync.Mutex
 	corruptErr           error
@@ -45,6 +46,18 @@ type Store struct {
 	leaseMu              sync.Mutex
 	activeLeases         map[string]RuntimeLease
 	nextLeaseID          uint64
+}
+
+// SetSetupReadinessProvider installs the host-owned readiness projection used
+// for OAuth, CLI and external setup requirements. The provider exposes state
+// only; credentials remain in their owning runtime.
+func (s *Store) SetSetupReadinessProvider(provider SetupReadinessProvider) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.setupReadiness = provider
+	s.mu.Unlock()
 }
 
 // NewStore opens the production store under AWAKEN_HOME. Missing home fails
@@ -412,7 +425,7 @@ func (s *Store) loadRecord(name string, rec Record) *InstalledPlugin {
 			Name: name, Root: root, DataDir: dataDir, Enabled: rec.Enabled, Source: rec.Source,
 			Digest: rec.Digest, InstalledAt: rec.InstalledAt, Manifest: manifest,
 			Dialect: rec.Dialect, ManifestPath: rec.ManifestPath, InstallationID: rec.InstallationID,
-			DisplayName: normalized.Identity.DisplayName, Components: normalized.Components, Diagnostics: normalized.Diagnostics,
+			DisplayName: normalized.Identity.DisplayName, Components: normalized.Components, Setup: normalized.Setup, Diagnostics: normalized.Diagnostics,
 		}
 	}
 	if dataErr := validateManagedPluginDataDir(s.dataRoot, dataDir); dataErr != nil {
@@ -441,6 +454,13 @@ func (s *Store) loadRecord(name string, rec Record) *InstalledPlugin {
 		candidate := ir.ManifestCandidate{Dialect: plugin.Dialect, ManifestPath: plugin.ManifestPath, Manifestless: plugin.ManifestPath == "", IdentityHint: name, Valid: true}
 		if normalized, parseErr := dialect.NewDefaultRegistry().Parse(root, candidate, dialect.ParseOptions{PluginDigest: actualDigest}); parseErr == nil {
 			plugin.Components = normalized.Components
+			plugin.Setup = normalized.Setup
+		}
+	}
+	if len(plugin.Setup) == 0 {
+		candidate := ir.ManifestCandidate{Dialect: plugin.Dialect, ManifestPath: plugin.ManifestPath, Manifestless: plugin.ManifestPath == "", IdentityHint: name, Valid: true}
+		if normalized, parseErr := dialect.NewDefaultRegistry().Parse(root, candidate, dialect.ParseOptions{PluginDigest: actualDigest}); parseErr == nil {
+			plugin.Setup = normalized.Setup
 		}
 	}
 	if plugin.Dialect != ir.DialectAgentPlugins {
@@ -476,11 +496,84 @@ func (s *Store) loadRecord(name string, rec Record) *InstalledPlugin {
 			plugin.MCPServers[index].Config.Enabled = boolPointer(false)
 		}
 	}
-	plugin.ComponentState, plugin.ConfigurationState, plugin.CompatibilityState = componentStates(plugin.Components, rec)
+	s.attachMCPSetupBindings(name, plugin)
+	plugin.ComponentState, plugin.ConfigurationState, plugin.AuthenticationState, plugin.CompatibilityState = s.componentStates(name, plugin.Components, plugin.Setup, rec)
+	for index := range plugin.MCPServers {
+		server := &plugin.MCPServers[index]
+		for _, state := range plugin.ComponentState {
+			if state.Component.MCP == nil || state.Component.MCP.ShortName != server.ShortName {
+				continue
+			}
+			if state.Configuration != "ready" || state.Authentication != "ready" && state.Authentication != "not_required" {
+				server.Enabled = false
+				server.Config.Enabled = boolPointer(false)
+			}
+			break
+		}
+	}
 	if rec.Version != "" && plugin.Manifest.Version == "" {
 		plugin.Manifest.Version = rec.Version
 	}
 	return plugin
+}
+
+func (s *Store) attachMCPSetupBindings(pluginName string, plugin *InstalledPlugin) {
+	provider, ok := s.setupReadiness.(SetupCredentialReferenceProvider)
+	if !ok || plugin == nil {
+		return
+	}
+	componentByID := make(map[string]ir.Component, len(plugin.Components))
+	for _, component := range plugin.Components {
+		componentByID[component.LogicalID] = component
+	}
+	serverByShortName := make(map[string]*LoadedServer, len(plugin.MCPServers))
+	for index := range plugin.MCPServers {
+		serverByShortName[plugin.MCPServers[index].ShortName] = &plugin.MCPServers[index]
+	}
+	for _, requirement := range plugin.Setup {
+		for _, binding := range requirement.Bindings {
+			component := componentByID[binding.ComponentID]
+			if component.MCP == nil {
+				continue
+			}
+			// Generic OAuth mcp_transport is attached as an OAuthHandler by the
+			// broker. Header/env bindings and Secret transport bindings use the
+			// runtime secret resolver below.
+			if binding.Target == ir.SetupBindingMCPTransport && requirement.Kind != ir.SetupSecret {
+				continue
+			}
+			server := serverByShortName[component.MCP.ShortName]
+			if server == nil || server.Invalid != nil {
+				continue
+			}
+			ref, err := provider.SetupCredentialReference(pluginName, requirement, binding)
+			if err != nil {
+				continue
+			}
+			server.Config.SecretBindings = append(server.Config.SecretBindings, mcpclient.RuntimeSecretBinding{Target: string(binding.Target), Name: binding.Name, Ref: ref})
+			switch binding.Target {
+			case ir.SetupBindingProcessEnv:
+				if server.Config.Stdio != nil {
+					delete(server.Config.Stdio.Env, binding.Name)
+				}
+			case ir.SetupBindingHTTPHeader:
+				if server.Config.HTTP != nil {
+					delete(server.Config.HTTP.Headers, binding.Name)
+				}
+				if server.Config.SSE != nil {
+					delete(server.Config.SSE.Headers, binding.Name)
+				}
+			}
+		}
+	}
+}
+
+// RefreshSetupReadiness republishes runtime projections after a host-owned
+// authorization state changes. It does not mutate the installed plugin record.
+func (s *Store) RefreshSetupReadiness() {
+	if s != nil {
+		s.notify()
+	}
 }
 
 func firstNonEmptyPlugin(values ...string) string {

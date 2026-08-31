@@ -199,7 +199,7 @@ func (s *Store) validateResolvedPackage(resolved ResolvedPackage, dataDir string
 		Name: normalized.Identity.Name, Version: normalized.Identity.Version, Description: normalized.Identity.Description,
 		Digest: digest, TargetRoot: filepath.Join(s.packagesRoot, normalized.Identity.Name),
 		SkillCount: skillCount, ServerCount: serverCount, Dialect: normalized.Layout.Dialect,
-		ManifestPath: normalized.Layout.ManifestPath, Components: normalized.Components, ComponentTotals: totals,
+		ManifestPath: normalized.Layout.ManifestPath, Components: normalized.Components, Setup: normalized.Setup, ComponentTotals: totals,
 		Candidates: resolved.Candidates, SelectedDialect: normalized.Layout.Dialect,
 		RequiredVariables: requiredVariables, ProcessIntents: intents, Diagnostics: diagnostics, Normalized: normalized,
 	}, nil

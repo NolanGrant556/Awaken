@@ -111,6 +111,9 @@ func (cursorAdapter) Parse(root string, candidate ir.ManifestCandidate, options 
 	} else if _, present := object["variables"]; present {
 		plugin.Diagnostics = append(plugin.Diagnostics, ir.Diagnostic{Code: "variable_schema_invalid", Message: "Cursor variables must be a JSON Schema object", Severity: "error", Phase: "parse", ComponentKind: ir.KindVariable, SourcePath: manifestPath, SourceDialect: ir.DialectCursor})
 	}
+	if err := appendSetupDeclarations(root, object, manifestPath, ir.DialectCursor, &plugin); err != nil {
+		return ir.NormalizedPlugin{}, err
+	}
 	_ = options
 	return plugin, nil
 }

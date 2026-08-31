@@ -171,6 +171,46 @@ function setTextAreaValue(element: HTMLTextAreaElement, value: string): void {
 }
 
 describe("AwakenPluginConsole compact component flow", () => {
+  it("shows setup actions only in plugin details and keeps Apps inspect-only", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const onSetupAction = vi.fn();
+    await act(async () => {
+      root.render(
+        <AwakenPluginConsole
+          name="setup-plugin"
+          enabled
+          components={[skill]}
+          setupItems={[
+            { id: "account", kind: "oauth_pkce", title: "Outlook 账号", status: "needs_auth", message: "需要连接账号", actions: ["authorize"] },
+            { id: "app", kind: "app_connector", title: "Codex App", status: "unsupported", connectorId: "connector_openai_mail", actions: ["inspect_only"] },
+          ]}
+          selectedDetail={null}
+          activeDetailTab="overview"
+          onBack={() => undefined}
+          onEnabledChange={() => undefined}
+          onUninstall={() => undefined}
+          onComponentOpen={() => undefined}
+          onComponentEnabledChange={() => undefined}
+          onSetupAction={onSetupAction}
+          onDetailTabChange={() => undefined}
+          onDetailClose={() => undefined}
+        />,
+      );
+    });
+    expect(container.textContent).toContain("待完成设置");
+    expect(container.textContent).toContain("Outlook 账号");
+    expect(container.textContent).toContain("当前不支持");
+    const connect = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "连接账号");
+    expect(connect).not.toBeNull();
+    expect(container.textContent).not.toContain("连接 Codex App");
+    await act(async () => connect?.click());
+    expect(onSetupAction).toHaveBeenCalledWith(expect.objectContaining({ id: "account" }), "authorize");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
   it("keeps component keyboard focus on the rounded row instead of drawing an inner blue box", () => {
     const styles = readFileSync(
       resolve(

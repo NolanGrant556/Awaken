@@ -47,6 +47,9 @@ func (agentPluginsAdapter) Parse(root string, candidate ir.ManifestCandidate, op
 			keys = append(keys, key)
 		}
 		for _, key := range keys {
+			if key == awakenSetupExtension {
+				continue
+			}
 			rawExtension, _ := json.Marshal(extensions[key])
 			component := ir.Component{
 				LogicalID: ir.LogicalID(ir.KindUnknown, "plugin.json", "extensions/"+key), Kind: ir.KindUnknown,
@@ -58,6 +61,9 @@ func (agentPluginsAdapter) Parse(root string, candidate ir.ManifestCandidate, op
 			component.Diagnostics = append(component.Diagnostics, componentDiagnostic("plugin_extension_unsupported", "client extension namespace is preserved but not implemented", "info", component))
 			plugin.Components = append(plugin.Components, component)
 		}
+	}
+	if err := appendSetupDeclarations(root, object, "plugin.json", ir.DialectAgentPlugins, &plugin); err != nil {
+		return ir.NormalizedPlugin{}, err
 	}
 	_ = candidate
 	_ = options

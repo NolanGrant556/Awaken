@@ -31,6 +31,12 @@ type McpServerConfig struct {
 	// OAuthResource is the protected resource URI declared by an MCP source.
 	// It affects OAuth discovery and credential identity, not the transport endpoint.
 	OAuthResource string `json:"oauthResource,omitempty"`
+	// OAuthClientID is an optional public pre-registered client identifier.
+	OAuthClientID string `json:"oauthClientId,omitempty"`
+	// OAuthClientMetadataURL is an optional public HTTPS Client ID Metadata
+	// Document URL used only when the authorization server advertises CIMD.
+	OAuthClientMetadataURL string   `json:"oauthClientMetadataUrl,omitempty"`
+	OAuthScopes            []string `json:"oauthScopes,omitempty"`
 	// DisabledTools is a host-owned per-server projection used by Plugin
 	// component overrides. Disabled tools remain visible to management APIs but
 	// are not registered into the next run's central Tool Catalog snapshot.
@@ -39,6 +45,16 @@ type McpServerConfig struct {
 	// publication remains per-tool MCP _meta and must never be inherited from
 	// this server-level declaration.
 	Provider *ServerProviderManifest `json:"provider,omitempty"`
+	// SecretBindings are Core-owned opaque references resolved immediately
+	// before a transport or child process starts. They are never persisted or
+	// returned by management DTOs.
+	SecretBindings []RuntimeSecretBinding `json:"-"`
+}
+
+type RuntimeSecretBinding struct {
+	Target string
+	Name   string
+	Ref    string
 }
 
 // ScopedMcpServerConfig pairs a server config with the scope it came from.

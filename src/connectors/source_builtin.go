@@ -3,6 +3,7 @@ package connectors
 import (
 	"context"
 	"runtime"
+	"strings"
 
 	"awaken/src/mcpclient"
 	"awaken/src/tool"
@@ -24,15 +25,27 @@ type builtinSource struct {
 	defs []ConnectorDefinition
 }
 
+// BuiltinOptions contains public, release-owned connector configuration.
+// OAuth client IDs are intentionally supplied by the host build/environment;
+// they are not plugin-authored and are not secrets.
+type BuiltinOptions struct {
+	MicrosoftClientID string
+}
+
 // NewBuiltinSource returns a ConnectorSource populated with all first-party
 // connector definitions. Add new builtins here.
-func NewBuiltinSource() ConnectorSource {
-	return newBuiltinSource()
+func NewBuiltinSource(options ...BuiltinOptions) ConnectorSource {
+	return newBuiltinSource(options...)
 }
 
 // newBuiltinSource returns a ConnectorSource populated with all first-party
 // connector definitions. Add new builtins here.
-func newBuiltinSource() *builtinSource {
+
+func newBuiltinSource(options ...BuiltinOptions) *builtinSource {
+	var configured BuiltinOptions
+	if len(options) > 0 {
+		configured = options[0]
+	}
 	return &builtinSource{
 		defs: []ConnectorDefinition{
 			puppeteerConnector(),
@@ -42,6 +55,7 @@ func newBuiltinSource() *builtinSource {
 			dingTalkConnector(),
 			larkConnector(),
 			context7Connector(),
+			outlookConnector(configured),
 		},
 	}
 }
@@ -182,6 +196,50 @@ func context7Connector() ConnectorDefinition {
 		SourceOrigin:     SourceBuiltin,
 		McpConfigFactory: context7ConfigFactory,
 	}
+}
+
+func outlookConnector(options BuiltinOptions) ConnectorDefinition {
+	const graphResource = "https://graph.microsoft.com/"
+	scopes := []string{"openid", "profile", "offline_access", "Mail.ReadWrite", "Mail.Send"}
+	return ConnectorDefinition{
+		ID:           "awaken.microsoft.outlook",
+		Kind:         KindMCP,
+		DisplayName:  "Outlook",
+		Description:  "连接 Microsoft Outlook，读取、整理、起草、回复、发送和删除邮件。",
+		Category:     CategoryChat,
+		Provider:     "Microsoft",
+		ProviderID:   tool.ProviderID("connector:awaken.microsoft.outlook"),
+		Capabilities: []tool.Capability{tool.CapabilityMessageSend},
+		Dependencies: []tool.DependencyRequirement{{
+			Kind: tool.DependencyNetworkService, Name: "graph.microsoft.com", ProbeID: "network.microsoft-graph", Source: "connector",
+		}},
+		AuthType:       AuthOAuth2,
+		RequiredScopes: append([]string(nil), scopes...),
+		OAuth: &OAuthConnectorSpec{
+			AuthorizationEndpoint: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+			TokenEndpoint:         "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+			ClientID:              strings.TrimSpace(options.MicrosoftClientID),
+			Scopes:                append([]string(nil), scopes...),
+			Resource:              graphResource,
+			AuthorizationParams:   map[string]string{"prompt": "select_account"},
+		},
+		TrustLevel:       TrustBuiltin,
+		SourceOrigin:     SourceBuiltin,
+		McpConfigFactory: outlookConfigFactory,
+	}
+}
+
+func outlookConfigFactory(def ConnectorDefinition, _ []string) (map[string]mcpclient.ScopedMcpServerConfig, error) {
+	return map[string]mcpclient.ScopedMcpServerConfig{
+		"awaken-outlook": {
+			Name:  "awaken-outlook",
+			Scope: mcpclient.ScopeUser,
+			Config: mcpclient.McpServerConfig{
+				InProc:      &mcpclient.InProcTransportConfig{ServerName: "awaken-outlook"},
+				DisplayName: def.DisplayName,
+			},
+		},
+	}, nil
 }
 
 func npxDependency(source string) tool.DependencyRequirement {

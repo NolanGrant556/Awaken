@@ -37,16 +37,23 @@ func (s *Store) CompilePluginHooks(projectRoot string) ([]hookruntime.CompiledHo
 				continue
 			}
 			values, _ := s.pluginVariableValues(plugin, record)
+			for _, component := range plugin.Components {
+				if component.Variable != nil && component.Variable.Secret {
+					delete(values, component.Variable.Key)
+				}
+			}
 			count := 0
 			for _, componentState := range plugin.ComponentState {
 				component := componentState.Component
 				if component.Kind != ir.KindHook || component.Hook == nil || componentState.DesiredState != "enabled" || !componentState.Switchable || componentState.Configuration != "ready" {
 					continue
 				}
+				secretHeaders, secretEnvironment := s.setupHookCredentialReferences(name, plugin.Setup, component.LogicalID)
 				entries = append(entries, pluginhooks.Entry{
 					PluginName: name, PluginDigest: plugin.Digest, PluginRoot: plugin.Root,
 					PluginData: plugin.DataDir, ProjectRoot: strings.TrimSpace(projectRoot),
 					Dialect: plugin.Dialect, Values: values, Component: component,
+					SecretHeaders: secretHeaders, SecretEnvironment: secretEnvironment,
 				})
 				count++
 			}
@@ -65,6 +72,39 @@ func (s *Store) CompilePluginHooks(projectRoot string) ([]hookruntime.CompiledHo
 	}
 	hooks, diagnostics := pluginhooks.Compile(entries)
 	return hooks, receipts, diagnostics, nil
+}
+
+func (s *Store) setupHookCredentialReferences(pluginName string, setup []ir.SetupRequirement, logicalID string) (map[string]string, map[string]string) {
+	provider, ok := s.setupReadiness.(SetupCredentialReferenceProvider)
+	if !ok {
+		return nil, nil
+	}
+	headers := map[string]string{}
+	environment := map[string]string{}
+	for _, requirement := range setup {
+		for _, binding := range requirement.Bindings {
+			if binding.ComponentID != logicalID {
+				continue
+			}
+			ref, err := provider.SetupCredentialReference(pluginName, requirement, binding)
+			if err != nil {
+				continue
+			}
+			switch binding.Target {
+			case ir.SetupBindingHTTPHeader:
+				headers[binding.Name] = ref
+			case ir.SetupBindingProcessEnv:
+				environment[binding.Name] = ref
+			}
+		}
+	}
+	if len(headers) == 0 {
+		headers = nil
+	}
+	if len(environment) == 0 {
+		environment = nil
+	}
+	return headers, environment
 }
 
 func (s *Store) ResolveHookMCPTool(name, digest, serverShort, toolName string) (string, error) {

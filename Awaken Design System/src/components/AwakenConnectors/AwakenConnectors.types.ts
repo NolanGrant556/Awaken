@@ -23,6 +23,7 @@ export type AwakenConnectorCardItem = {
   stateLabel?: string;
   tags?: string[];
   connected?: boolean;
+  authorizing?: boolean;
   enabled?: boolean;
   mcpServerName?: string;
   busy?: boolean;

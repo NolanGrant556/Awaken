@@ -106,8 +106,8 @@ func TestBuiltinConnectorDefinitionsDeclareProviderFacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list builtins: %v", err)
 	}
-	if len(definitions) != 7 {
-		t.Fatalf("expected seven builtins, got %d", len(definitions))
+	if len(definitions) != 8 {
+		t.Fatalf("expected eight builtins, got %d", len(definitions))
 	}
 	for _, definition := range definitions {
 		if definition.ProviderID == "" {
@@ -126,6 +126,35 @@ func TestBuiltinConnectorDefinitionsDeclareProviderFacts(t *testing.T) {
 				t.Errorf("%s missing message capability", definition.ID)
 			}
 		}
+		if definition.ID == "awaken.microsoft.outlook" {
+			if definition.Kind != KindMCP || definition.AuthType != AuthOAuth2 || definition.OAuth == nil || definition.McpConfigFactory == nil {
+				t.Errorf("Outlook must be a host-authenticated in-process MCP connector: %+v", definition)
+			}
+		}
+	}
+}
+
+type providerTestAccountReadiness struct{ state ConnectorState }
+
+func (p providerTestAccountReadiness) AccountReadiness(ConnectorDefinition) AccountReadiness {
+	return AccountReadiness{State: p.state}
+}
+
+func TestOAuthConnectorAccountReadinessPrecedesTransportState(t *testing.T) {
+	runtime := &providerTestRuntime{}
+	registry := NewRegistry(runtime, nil)
+	definition := ConnectorDefinition{
+		ID: "oauth-mail", DisplayName: "Mail", Category: CategoryChat, Provider: "Mail",
+		AuthType: AuthOAuth2, OAuth: &OAuthConnectorSpec{ClientID: "public"},
+		MCPRawConfig: &mcpclient.McpServerConfig{InProc: &mcpclient.InProcTransportConfig{ServerName: "mail"}},
+	}
+	if err := registry.LoadSources(context.Background(), []ConnectorSource{providerTestSource{definition: definition}}); err != nil {
+		t.Fatal(err)
+	}
+	registry.SetAccountReadinessProvider(providerTestAccountReadiness{state: StateNeedsAuth})
+	status, err := registry.Status(definition.ID)
+	if err != nil || status.State != StateNeedsAuth || status.ProviderReadiness != tool.ProviderNeedsAuth {
+		t.Fatalf("account readiness was not projected: status=%+v err=%v", status, err)
 	}
 }
 

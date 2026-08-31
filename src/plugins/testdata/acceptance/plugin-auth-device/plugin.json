@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "awaken-device-auth-acceptance",
+  "version": "1.0.0",
+  "description": "Local Device Authorization acceptance fixture for the Awaken plugin setup platform"
+}

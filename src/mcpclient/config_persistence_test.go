@@ -32,6 +32,20 @@ func TestCredentialIdentitySeparatesScopeAndEndpoint(t *testing.T) {
 	}
 }
 
+func TestCredentialIdentityChangesWithOAuthRegistrationFingerprint(t *testing.T) {
+	base := McpServerConfig{HTTP: &HTTPTransportConfig{URL: "https://mcp.example/mcp"}, OAuthResource: "https://mcp.example/mcp", OAuthClientID: "client-a", OAuthScopes: []string{"read"}}
+	changedClient := base
+	changedClient.OAuthClientID = "client-b"
+	changedScopes := base
+	changedScopes.OAuthScopes = []string{"read", "write"}
+	if CredentialIdentity(ScopePlugin, "server", base) == CredentialIdentity(ScopePlugin, "server", changedClient) {
+		t.Fatal("OAuth client change reused credential identity")
+	}
+	if CredentialIdentity(ScopePlugin, "server", base) == CredentialIdentity(ScopePlugin, "server", changedScopes) {
+		t.Fatal("OAuth scope change reused credential identity")
+	}
+}
+
 func TestPersistentOAuthHandlerClearsMismatchedEndpointCredential(t *testing.T) {
 	store := NewInMemoryCredentialStore()
 	identity := CredentialIdentity(ScopeUser, "example", McpServerConfig{HTTP: &HTTPTransportConfig{URL: "https://new.example/mcp"}})

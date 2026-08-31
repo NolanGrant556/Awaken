@@ -1,5 +1,5 @@
 import "./AwakenComposerBar.css";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -137,6 +137,7 @@ export type ComposerBarSlashAction = {
   id: string;
   type: string;
   label: string;
+  sectionLabel?: string;
   description?: string;
   icon?: ReactNode;
   disabled?: boolean;
@@ -184,6 +185,28 @@ type SlashPreviewState = {
 type SlashPaletteStyle = CSSProperties & {
   "--composer-bar-slash-max-height"?: string;
 };
+
+const HIDDEN_SLASH_PALETTE_STYLE: SlashPaletteStyle = { visibility: "hidden" };
+
+type ComposerBarSlashActionSection = {
+  label?: string;
+  actions: ComposerBarSlashAction[];
+};
+
+function slashActionSections(
+  actions: ComposerBarSlashAction[],
+): ComposerBarSlashActionSection[] {
+  return actions.reduce<ComposerBarSlashActionSection[]>((sections, action) => {
+    const label = action.sectionLabel?.trim() || undefined;
+    const current = sections[sections.length - 1];
+    if (current && current.label === label) {
+      current.actions.push(action);
+      return sections;
+    }
+    sections.push({ label, actions: [action] });
+    return sections;
+  }, []);
+}
 
 export type SlashPreviewAnchorRect = {
   left: number;
@@ -421,7 +444,9 @@ export function AwakenComposerBar({
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [pluginPickerOpen, setPluginPickerOpen] = useState(false);
   const [slashPreviewState, setSlashPreviewState] = useState<SlashPreviewState | null>(null);
-  const [slashPaletteStyle, setSlashPaletteStyle] = useState<SlashPaletteStyle>({});
+  const [slashPaletteStyle, setSlashPaletteStyle] = useState<SlashPaletteStyle>(
+    HIDDEN_SLASH_PALETTE_STYLE,
+  );
   const [inputSelection, setInputSelection] = useState<ComposerBarInputSelection>();
   const inputWrapRef = useRef<HTMLDivElement | null>(null);
   const slashPaletteRef = useRef<HTMLDivElement | null>(null);
@@ -450,6 +475,7 @@ export function AwakenComposerBar({
   const topMetaItems: ComposerBarMetaItem[] = [];
   const bottomMetaItems = variant === "dock" ? metaItems.filter((item) => item.id !== "model") : [];
   const slashActions = slashPalette?.actions ?? [];
+  const slashSections = slashActionSections(slashActions);
   const slashPreviewAction = slashActions.find(
     (action) => action.id === slashPreviewState?.actionId,
   );
@@ -516,28 +542,28 @@ export function AwakenComposerBar({
   useEffect(() => {
     if (!slashPalette?.open) {
       setSlashPreviewState(null);
-      setSlashPaletteStyle({});
     }
   }, [slashPalette?.open]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!slashPalette?.open) {
+      setSlashPaletteStyle(HIDDEN_SLASH_PALETTE_STYLE);
       return;
     }
 
     function updateSlashPaletteStyle(): void {
       const rect = inputWrapRef.current?.getBoundingClientRect();
       if (!rect) {
+        setSlashPaletteStyle(HIDDEN_SLASH_PALETTE_STYLE);
         return;
       }
-      setSlashPaletteStyle(
-        inputSelection?.caretRect
-          ? slashPaletteStyleForCaret(inputSelection.caretRect, rect, {
-              width: window.innerWidth,
-              height: window.innerHeight,
-            })
-          : slashPaletteStyleForAnchor(rect.top, window.innerHeight),
-      );
+      const positionedStyle = inputSelection?.caretRect
+        ? slashPaletteStyleForCaret(inputSelection.caretRect, rect, {
+            width: window.innerWidth,
+            height: window.innerHeight,
+          })
+        : slashPaletteStyleForAnchor(rect.top, window.innerHeight);
+      setSlashPaletteStyle({ ...positionedStyle, visibility: "visible" });
     }
 
     updateSlashPaletteStyle();
@@ -1358,38 +1384,52 @@ export function AwakenComposerBar({
               {slashPalette.emptyLabel ?? "没有可用项"}
             </div>
           ) : (
-            slashActions.map((action) => {
-              const active = action.id === slashPalette.activeActionId;
-              return (
-                <button
-                  key={action.id}
-                  type="button"
-                  className={`composer-bar-slash-option${
-                    active ? " composer-bar-slash-option-active" : ""
-                  }${action.disabled ? " composer-bar-slash-option-disabled" : ""}`}
-                  role="option"
-                  aria-selected={active}
-                  aria-disabled={action.disabled || undefined}
-                  onMouseEnter={(event) => {
-                    slashPalette.onActiveActionChange?.(action.id);
-                    showSlashPreview(action, event);
-                  }}
-                  onFocus={() => slashPalette.onActiveActionChange?.(action.id)}
-                  onClick={() => {
-                    if (!action.disabled) {
-                      slashPalette.onSelectAction?.(action.id);
-                    }
-                  }}
-                >
-                  <span className="composer-bar-slash-option-main">
-                    <span className="composer-bar-slash-option-icon" aria-hidden="true">
-                      {action.icon}
-                    </span>
-                    <span className="composer-bar-slash-option-label">{action.label}</span>
-                  </span>
-                </button>
-              );
-            })
+            slashSections.map((section, sectionIndex) => (
+              <div
+                key={`${section.label ?? "actions"}:${sectionIndex}`}
+                className="composer-bar-slash-section"
+                role="group"
+                aria-label={section.label}
+              >
+                {section.label ? (
+                  <div className="composer-bar-slash-section-label" aria-hidden="true">
+                    {section.label}
+                  </div>
+                ) : null}
+                {section.actions.map((action) => {
+                  const active = action.id === slashPalette.activeActionId;
+                  return (
+                    <button
+                      key={action.id}
+                      type="button"
+                      className={`composer-bar-slash-option${
+                        active ? " composer-bar-slash-option-active" : ""
+                      }${action.disabled ? " composer-bar-slash-option-disabled" : ""}`}
+                      role="option"
+                      aria-selected={active}
+                      aria-disabled={action.disabled || undefined}
+                      onMouseEnter={(event) => {
+                        slashPalette.onActiveActionChange?.(action.id);
+                        showSlashPreview(action, event);
+                      }}
+                      onFocus={() => slashPalette.onActiveActionChange?.(action.id)}
+                      onClick={() => {
+                        if (!action.disabled) {
+                          slashPalette.onSelectAction?.(action.id);
+                        }
+                      }}
+                    >
+                      <span className="composer-bar-slash-option-main">
+                        <span className="composer-bar-slash-option-icon" aria-hidden="true">
+                          {action.icon}
+                        </span>
+                        <span className="composer-bar-slash-option-label">{action.label}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))
           )}
         </div>
         {slashPreviewState && (slashPreviewDescription || slashPreviewPath) ? (

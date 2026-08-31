@@ -643,7 +643,7 @@ export function AwakenScheduledTaskEditorDialog({
                   tokens={composerTokens}
                   slashPalette={slashPalette}
                   inputAriaLabel="Agent prompt"
-                  placeholder="输入任务，键入 / 选择 Skill，或 @ 选择 Plugin"
+                  placeholder="输入任务，键入 / 选择 Skill，或 @ 选择内置功能或插件"
                   disabled={busy}
                   submitOnEnter={false}
                   focusRequest={composerFocusRequest}

@@ -392,10 +392,21 @@ export function ScheduledTasksView({
   const composerSlashActions = useMemo(
     () =>
       filteredSlashActions.map(
-        ({ id, type, label, description, icon, disabled, disabledReason, preview }) => ({
+        ({
           id,
           type,
           label,
+          sectionLabel,
+          description,
+          icon,
+          disabled,
+          disabledReason,
+          preview,
+        }) => ({
+          id,
+          type,
+          label,
+          sectionLabel,
           description,
           icon,
           disabled,

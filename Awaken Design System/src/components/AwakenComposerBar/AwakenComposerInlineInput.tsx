@@ -9,7 +9,8 @@ import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { getAwakenIcon, type AwakenLineIconName } from "../../icons";
+import { getAwakenIcon, iconForConcept, type AwakenIconName } from "../../icons";
+import { composerTokenIconConcept } from "../../composerTokenIcon";
 import {
   type ComposerInputCaretRect,
   pastedImageFilesFromClipboardData,
@@ -234,7 +235,7 @@ function tokenRenderSignature(tokens: ComposerInlineToken[]): string {
 function appendAwakenLineIcon(
   document: Document,
   token: HTMLElement,
-  name: AwakenLineIconName,
+  name: AwakenIconName,
 ): void {
   const icon = getAwakenIcon(name);
   if (icon.mode !== "line") {
@@ -271,15 +272,11 @@ function composerTokenElement(document: Document, token: ComposerInlineToken): H
   element.setAttribute("contenteditable", "false");
   element.setAttribute("draggable", "false");
   element.title = token.title ?? token.label;
-  if (token.type === "capability") {
-    appendAwakenLineIcon(document, element, "display-pointer");
-  } else if (token.type === "skill") {
-    appendAwakenLineIcon(document, element, "book-open");
-  } else if (token.type === "plugin") {
-    appendAwakenLineIcon(document, element, "puzzle");
-  } else {
-    appendAwakenLineIcon(document, element, "package");
-  }
+  appendAwakenLineIcon(
+    document,
+    element,
+    iconForConcept(composerTokenIconConcept(token.type)),
+  );
 
   const label = document.createElement("span");
   label.className = "composer-bar-token-label";

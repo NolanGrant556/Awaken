@@ -108,6 +108,43 @@ const pluginPicker: ComposerBarPluginPicker = {
   onSelectOption: noop,
 };
 
+const mentionPalette = {
+  open: true,
+  activeActionId: "workflow:deep-research",
+  actions: [
+    {
+      id: "workflow:deep-research",
+      type: "workflow",
+      label: "深度研究",
+      sectionLabel: "内置",
+      icon: createElement(AwakenIcon, { concept: "search", size: 14 }),
+    },
+    {
+      id: "capability:computer-use",
+      type: "capability",
+      label: "Computer Use",
+      sectionLabel: "内置",
+      icon: createElement(AwakenIcon, { concept: "computer-use", size: 14 }),
+    },
+    {
+      id: "plugin:documents:digest",
+      type: "plugin",
+      label: "Documents",
+      sectionLabel: "插件",
+      icon: createElement(AwakenIcon, { concept: "plugin-default", size: 14 }),
+    },
+    {
+      id: "plugin:presentations:digest",
+      type: "plugin",
+      label: "Presentations",
+      sectionLabel: "插件",
+      icon: createElement(AwakenIcon, { concept: "plugin-default", size: 14 }),
+    },
+  ],
+  onSelectAction: noop,
+  onActiveActionChange: noop,
+};
+
 export const AwakenComposerBarStates: AwakenComposerBarState[] = [
   {
     id: "dock-empty",
@@ -245,6 +282,32 @@ export const AwakenComposerBarStates: AwakenComposerBarState[] = [
           leadingText: "2026 ",
         },
       ],
+    } as unknown as Partial<ComponentProps<typeof AwakenComposerBar>>,
+  },
+  {
+    id: "inline-workflow-token",
+    label: "深度研究 Workflow Token",
+    props: {
+      value: "核验这项技术变化。",
+      variant: "center",
+      isReady: true,
+      tokens: [
+        {
+          id: "workflow:deep-research",
+          type: "workflow",
+          label: "深度研究",
+        },
+      ],
+    } as unknown as Partial<ComponentProps<typeof AwakenComposerBar>>,
+  },
+  {
+    id: "mention-sections",
+    label: "内置与插件分组",
+    props: {
+      value: "@",
+      variant: "center",
+      isReady: true,
+      slashPalette: mentionPalette,
     } as unknown as Partial<ComponentProps<typeof AwakenComposerBar>>,
   },
 ];

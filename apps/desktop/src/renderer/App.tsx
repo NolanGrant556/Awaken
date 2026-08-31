@@ -3831,10 +3831,21 @@ export function App() {
   const composerBarSlashActions = useMemo(
     () =>
       filteredSlashActions.map(
-        ({ id, type, label, description, icon, disabled, disabledReason, preview }) => ({
+        ({
           id,
           type,
           label,
+          sectionLabel,
+          description,
+          icon,
+          disabled,
+          disabledReason,
+          preview,
+        }) => ({
+          id,
+          type,
+          label,
+          sectionLabel,
           description,
           icon,
           disabled,
@@ -8320,7 +8331,7 @@ export function App() {
                               void handleComposerSubmit();
                             }}
                             onAddContext={handleAddContext}
-                            placeholder="描述任务，或 / 选择 Skill、@ 选择 Plugin"
+                            placeholder="描述任务，或 / 选择 Skill、@ 选择内置功能或插件"
                             disabled={composerBarState.disabled}
                             isReady={composerBarState.isReady}
                             submitMode={composerBarState.submitMode}

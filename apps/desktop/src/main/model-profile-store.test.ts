@@ -648,6 +648,45 @@ describe("ModelProfileStore", () => {
     );
   });
 
+  it("preserves the Kimi Code Messages base URL for testing and saving", async () => {
+    const fetchMock = vi.fn(
+      async () => ({ ok: true, status: 200 }) as Response,
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const store = new ModelProfileStore(configDir);
+    const request = {
+      providerId: "kimi-coding-plan",
+      displayName: "Kimi Coding Plan",
+      modelId: "k3",
+      baseURL: "https://api.kimi.com/coding",
+      protocol: "anthropic_messages",
+      authScheme: "bearer",
+      apiKey: "test-key",
+      enabled: true,
+      isDefault: true,
+    };
+
+    await expect(store.testProfile(request)).resolves.toEqual({
+      ok: true,
+      message: "连接测试通过：Kimi Code 已响应 messages。",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.kimi.com/coding/v1/messages",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer test-key" }),
+        body: expect.stringContaining('"model":"k3"'),
+      }),
+    );
+
+    await expect(store.saveProfile(request)).resolves.toMatchObject({
+      base_url: "https://api.kimi.com/coding",
+      protocol: "anthropic_messages",
+      model_id: "k3",
+    });
+  });
+
   it("tests a direct Doubao Ark Model ID without requiring an endpoint", async () => {
     const fetchMock = vi.fn(
       async () => new Response(JSON.stringify({ choices: [] }), { status: 200 }),

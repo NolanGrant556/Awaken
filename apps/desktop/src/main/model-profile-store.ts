@@ -612,9 +612,14 @@ function inferenceSelector(
 function normalizeProviderBaseURL(
   provider: ModelProviderWire | undefined,
   baseURL: string | undefined,
+  protocol?: string,
 ): string {
   const normalized = trimTrailingSlash(baseURL || provider?.base_url || "");
-  if (provider?.id === "kimi-coding-plan" && normalized === "https://api.kimi.com/coding") {
+  if (
+    provider?.id === "kimi-coding-plan" &&
+    normalized === "https://api.kimi.com/coding" &&
+    protocol !== "anthropic_messages"
+  ) {
     return "https://api.kimi.com/coding/v1";
   }
   if (provider?.id === "volcengine" && normalized === "https://ark.cn-beijing.volces.com/api/v3") {
@@ -990,7 +995,8 @@ function agentPlanReasoningCandidate(modelId: string): AgentPlanReasoningCandida
 
 function providerTestSuccessMessage(provider: ModelProviderWire, protocol: string): string {
   if (provider.id === "kimi-coding-plan") {
-    return "连接测试通过：Kimi Code 已响应 chat/completions。";
+    const endpoint = protocol === "anthropic_messages" ? "messages" : "chat/completions";
+    return `连接测试通过：Kimi Code 已响应 ${endpoint}。`;
   }
   if (provider.id === "volcengine") {
     return "连接测试通过：火山 Coding Plan 已响应 chat/completions。";
@@ -1131,7 +1137,7 @@ function toSummary(
 ): RuntimeModelProfileSummaryWire {
   const provider = providerById(profile.providerId);
   const modelId = normalizeProviderModelId(provider, profile.modelId);
-  const baseURL = normalizeProviderBaseURL(provider, profile.baseURL);
+  const baseURL = normalizeProviderBaseURL(provider, profile.baseURL, profile.protocol);
   const advanced = normalizeAdvancedWithModelCapability(
     profile.advanced,
     profile.providerId,
@@ -1210,10 +1216,10 @@ function storedProfileIdentityKey(profile: StoredModelProfile): string {
   const provider = providerById(profile.providerId);
   const modelId = normalizeProviderModelId(provider, profile.modelId);
   const selector = inferenceSelector(provider, modelId, profile.advanced);
-  const baseURL = normalizeCapabilityBaseURL(
-    normalizeProviderBaseURL(provider, profile.baseURL),
-  );
   const protocol = normalizeProtocol(provider, profile.protocol);
+  const baseURL = normalizeCapabilityBaseURL(
+    normalizeProviderBaseURL(provider, profile.baseURL, protocol),
+  );
   return `${profile.providerId}::${baseURL}::${selector}::${protocol}`;
 }
 
@@ -1266,7 +1272,7 @@ function normalizeStoredProfile(profile: StoredModelProfile): StoredModelProfile
     provider &&
     knownProviderBaseURLs.has(normalizeCapabilityBaseURL(profile.baseURL))
       ? provider.protocol_base_urls?.[protocol] ?? provider.base_url
-      : normalizeProviderBaseURL(provider, profile.baseURL);
+      : normalizeProviderBaseURL(provider, profile.baseURL, protocol);
   const knownProviderAuthSchemes = new Set(
     provider
       ? [
@@ -1390,7 +1396,7 @@ export class ModelProfileStore {
         continue;
       }
       if (!credential.apiKey && profile.authScheme !== "none") continue;
-      const baseURL = normalizeProviderBaseURL(provider, profile.baseURL);
+      const baseURL = normalizeProviderBaseURL(provider, profile.baseURL, profile.protocol);
       const capabilityModelId = normalizeProviderModelId(provider, profile.modelId);
       const selector = inferenceSelector(provider, capabilityModelId, profile.advanced);
       if (!selector) continue;
@@ -1489,7 +1495,8 @@ export class ModelProfileStore {
     if (!apiKey && authScheme !== "none") {
       throw new Error("请先填写 API key，再刷新模型目录。");
     }
-    const baseURL = normalizeProviderBaseURL(provider, request.baseURL);
+    const protocol = normalizeProtocol(provider, request.protocol);
+    const baseURL = normalizeProviderBaseURL(provider, request.baseURL, protocol);
     if (!baseURL) throw new Error("请先填写 Base URL，再刷新模型目录。");
 
     const controller = new AbortController();
@@ -1503,7 +1510,6 @@ export class ModelProfileStore {
         controller.signal,
         provider.catalog_url,
       );
-      const protocol = normalizeProtocol(provider, request.protocol);
       const selector = inferenceSelector(provider, request.modelId, request.advanced);
       if (storedProfile && selector) {
         const resolution = capabilityResolutionForIdentity(
@@ -1715,8 +1721,8 @@ export class ModelProfileStore {
       ? store.profiles.findIndex((profile) => profile.id === request.id)
       : -1;
     const modelId = normalizeProviderModelId(provider, request.modelId);
-    const baseURL = normalizeProviderBaseURL(provider, request.baseURL);
     const protocol = normalizeProtocol(provider, request.protocol);
+    const baseURL = normalizeProviderBaseURL(provider, request.baseURL, protocol);
     const authScheme = normalizeAuthScheme(provider, request.authScheme);
     if (!baseURL) throw new Error("请填写 Base URL。");
     if (!modelId && !provider.endpoint_model) throw new Error("请填写模型 ID。");
@@ -1973,7 +1979,7 @@ export class ModelProfileStore {
     if (!profile) return undefined;
     const provider = providerById(profile.providerId);
     const capabilityModelId = normalizeProviderModelId(provider, profile.modelId);
-    const baseURL = normalizeProviderBaseURL(provider, profile.baseURL);
+    const baseURL = normalizeProviderBaseURL(provider, profile.baseURL, profile.protocol);
     const credential = await this.readProfileCredential(profile);
     const apiKey = credential.apiKey;
     if (!apiKey && profile.authScheme !== "none") {
@@ -2052,7 +2058,7 @@ export class ModelProfileStore {
     const provider = providerById(profile.providerId);
     if (!provider) return undefined;
     const capabilityModelId = normalizeProviderModelId(provider, profile.modelId);
-    const baseURL = normalizeProviderBaseURL(provider, profile.baseURL);
+    const baseURL = normalizeProviderBaseURL(provider, profile.baseURL, profile.protocol);
     const credential = await this.readProfileCredential(profile);
     const credentialRevision =
       credential.credentialRevision ?? profile.credentialRevision ?? 1;
@@ -2124,7 +2130,7 @@ export class ModelProfileStore {
     if (!apiKey && authScheme !== "none") {
       return { ok: false, message: "连接测试失败：请先填写 API key。" };
     }
-    const baseURL = normalizeProviderBaseURL(provider, request.baseURL);
+    const baseURL = normalizeProviderBaseURL(provider, request.baseURL, protocol);
     const modelId = inferenceSelector(provider, request.modelId, request.advanced);
     if (!modelId) {
       return {
@@ -2601,7 +2607,7 @@ export class ModelProfileStore {
       credentialRevision ?? profile.credentialRevision ?? 1;
     const provider = providerById(profile.providerId);
     const capabilityModelId = normalizeProviderModelId(provider, profile.modelId);
-    const baseURL = normalizeProviderBaseURL(provider, profile.baseURL);
+    const baseURL = normalizeProviderBaseURL(provider, profile.baseURL, profile.protocol);
     const selector = inferenceSelector(provider, capabilityModelId, profile.advanced);
     const resolution = provider && selector
       ? capabilityResolutionForIdentity(

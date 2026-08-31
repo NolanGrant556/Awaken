@@ -56,6 +56,20 @@ export const AwakenUserPromptBlockStates: AwakenUserPromptBlockState[] = [
     } as unknown as Partial<ComponentProps<typeof AwakenUserPromptBlock>>,
   },
   {
+    id: "workflow-token",
+    label: "深度研究 Workflow Token",
+    props: {
+      text: "核验这项技术变化。",
+      tokens: [
+        {
+          id: "workflow:deep-research",
+          type: "workflow",
+          label: "深度研究",
+        },
+      ],
+    } as unknown as Partial<ComponentProps<typeof AwakenUserPromptBlock>>,
+  },
+  {
     id: "long-content",
     label: "长提示",
     props: {

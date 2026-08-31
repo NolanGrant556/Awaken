@@ -181,6 +181,26 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(token?.querySelectorAll("path").length).toBeGreaterThan(0);
   });
 
+  it("renders Deep Research workflow tokens with the same search icon as the mention menu", () => {
+    const { editor } = renderComposer({
+      tokens: [
+        {
+          id: "workflow:deep-research",
+          type: "workflow",
+          label: "深度研究",
+        },
+      ],
+    });
+    const icon = editor.querySelector(
+      '[data-composer-token-id="workflow:deep-research"] svg',
+    );
+
+    expect(icon?.classList.contains("aw-icon--magnifying-glass")).toBe(true);
+    expect(icon?.classList.contains("aw-icon--package")).toBe(false);
+    expect(icon?.getAttribute("width")).toBe("16");
+    expect(icon?.getAttribute("height")).toBe("16");
+  });
+
   it("uses the same readable line icon size for Plugin tokens", () => {
     const { editor } = renderComposer({
       tokens: [{ id: "plugin:business-review:digest", type: "plugin", label: "Business Review" }],
@@ -190,6 +210,55 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(icon?.classList.contains("aw-icon--puzzle")).toBe(true);
     expect(icon?.getAttribute("width")).toBe("16");
     expect(icon?.getAttribute("height")).toBe("16");
+  });
+
+  it("groups mention actions under the visible built-in and plugin section labels", () => {
+    renderComposer({
+      value: "@",
+      slashPalette: {
+        open: true,
+        activeActionId: "workflow:deep-research",
+        actions: [
+          {
+            id: "workflow:deep-research",
+            type: "workflow",
+            label: "深度研究",
+            sectionLabel: "内置",
+          },
+          {
+            id: "capability:computer-use",
+            type: "capability",
+            label: "Computer Use",
+            sectionLabel: "内置",
+          },
+          {
+            id: "plugin:documents:digest",
+            type: "plugin",
+            label: "Documents",
+            sectionLabel: "插件",
+          },
+        ],
+      },
+    });
+
+    const sections = Array.from(
+      host.querySelectorAll<HTMLElement>(".composer-bar-slash-section"),
+    );
+    expect(sections.map((section) => section.getAttribute("aria-label"))).toEqual([
+      "内置",
+      "插件",
+    ]);
+    expect(
+      sections[0]?.querySelectorAll(".composer-bar-slash-option"),
+    ).toHaveLength(2);
+    expect(
+      sections[1]?.querySelectorAll(".composer-bar-slash-option"),
+    ).toHaveLength(1);
+    expect(
+      Array.from(host.querySelectorAll(".composer-bar-slash-section-label")).map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(["内置", "插件"]);
   });
 
   it("keeps the same token geometry in home, conversation and embedded composers", () => {

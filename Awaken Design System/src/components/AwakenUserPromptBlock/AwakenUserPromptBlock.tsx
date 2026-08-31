@@ -1,4 +1,5 @@
 import "./AwakenUserPromptBlock.css";
+import { composerTokenIconConcept } from "../../composerTokenIcon";
 import { AwakenIcon } from "../AwakenIcon";
 import {
   Fragment,
@@ -410,13 +411,7 @@ export function AwakenUserPromptBlock({
 
   function renderToken(token: AwakenUserPromptToken) {
     const tokenType = token.type ?? "token";
-    const tokenConcept = tokenType === "capability"
-      ? "computer-use"
-      : tokenType === "skill"
-        ? "skill"
-        : tokenType === "plugin"
-          ? "plugin-default"
-          : "capability-package";
+    const tokenConcept = composerTokenIconConcept(tokenType);
     return (
       <span
         className={`execution-prompt-bubble-token execution-prompt-bubble-token-${tokenType}`}

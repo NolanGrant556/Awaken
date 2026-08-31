@@ -620,6 +620,26 @@
   color: var(--aw-status-danger-text);
 }
 
+.composer-bar-slash-section {
+  display: grid;
+}
+
+.composer-bar-slash-section + .composer-bar-slash-section {
+  margin-top: 4px;
+}
+
+.composer-bar-slash-section-label {
+  min-width: 0;
+  padding: 4px 6px 3px;
+  overflow: hidden;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-medium);
+  line-height: var(--aw-line-height-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer-bar-slash-option {
   position: relative;
   display: block;

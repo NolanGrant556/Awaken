@@ -1871,6 +1871,7 @@ describe("Composer Slash Palette helpers", () => {
       id: "capability:computer-use",
       type: "capability",
       label: "Computer Use",
+      sectionLabel: "内置",
       composerToken: {
         id: "capability:computer-use",
         type: "capability",
@@ -1896,6 +1897,7 @@ describe("Composer Slash Palette helpers", () => {
       id: "workflow:deep-research",
       type: "workflow",
       label: "深度研究",
+      sectionLabel: "内置",
       composerToken: {
         id: "workflow:deep-research",
         type: "workflow",
@@ -1975,6 +1977,7 @@ describe("Composer Slash Palette helpers", () => {
     expect(actions[0]).toMatchObject({
       type: "plugin",
       label: "acme.tools",
+      sectionLabel: "插件",
       composerToken: {
         type: "plugin",
         payload: { pluginName: "acme.tools", pluginDigest: "digest-v1" },
@@ -2236,6 +2239,7 @@ describe("AwakenComposerBar layout contract", () => {
 
     expect(html).toContain("composer-bar-inline-editor");
     expect(html).toContain("composer-bar-slash-palette");
+    expect(html).toContain('style="visibility:hidden"');
     expect(html).toContain('role="listbox"');
     expect(html).toContain("pptx");
     expect(html).not.toContain("composer-bar-token-remove");
@@ -3372,6 +3376,25 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).toContain('height="16"');
   });
 
+  it("renders Deep Research workflow tokens with the shared search icon", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "请核验来源",
+        tokens: [
+          {
+            id: "workflow:deep-research",
+            type: "workflow",
+            label: "深度研究",
+          },
+        ],
+      }),
+    );
+
+    expect(html).toContain("execution-prompt-bubble-token-workflow");
+    expect(html).toContain("aw-icon--magnifying-glass");
+    expect(html).not.toContain("aw-icon--package");
+  });
+
   it("renders Plugin prompt tokens with the shared inline puzzle icon", () => {
     const html = renderToString(
       React.createElement(AwakenUserPromptBlock, {
@@ -4352,7 +4375,9 @@ describe("App workbench presentation", () => {
     expect(html).toContain('aria-label="Resize inspector"');
     expect(html).toContain("aw-task-welcome__logo");
     expect(html).toContain("把任务交给 Awaken，自主执行，唤醒自由。");
-    expect(html).toContain('placeholder="描述任务，或 / 选择 Skill、@ 选择 Plugin"');
+    expect(html).toContain(
+      'placeholder="描述任务，或 / 选择 Skill、@ 选择内置功能或插件"',
+    );
     expect(html).toContain('rows="3"');
     expect(html).toContain("新建任务");
     expect(html).not.toContain("⌘N");

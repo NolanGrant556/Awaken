@@ -28,6 +28,7 @@ export type SlashAction = {
   id: string;
   type: SlashActionType | string;
   label: string;
+  sectionLabel?: string;
   description?: string;
   keywords?: string[];
   icon?: ReactNode;
@@ -408,6 +409,7 @@ export function computerUseMentionProvider(): SlashProvider {
           id: token.id,
           type: "capability",
           label: "Computer Use",
+          sectionLabel: "内置",
           description: "引导模型观察并操作本机图形界面",
           keywords: ["computer", "computer use", "计算机", "电脑", "GUI", "桌面"],
           icon: createElement(AwakenIcon, { concept: "computer-use", size: 14 }),
@@ -442,6 +444,7 @@ export function deepResearchMentionProvider(): SlashProvider {
           id: token.id,
           type: "workflow",
           label: "深度研究",
+          sectionLabel: "内置",
           description: "宿主编排的只读多源研究报告",
           keywords: [
             "deep-research",
@@ -484,6 +487,7 @@ export function pluginMentionProvider(
             id: token.id,
             type: "plugin",
             label: plugin.name,
+            sectionLabel: "插件",
             description:
               plugin.description ||
               `${plugin.skillCount} Skills · ${plugin.serverCount} MCP Servers`,

@@ -207,6 +207,14 @@ export type CompactRecord = ContextWindowRecord & {
   summarySourceHadUser?: boolean;
   summaryLatestUserPinned?: boolean;
   fallbackMarker?: string;
+  failureReason?: string;
+  mandatoryFloorTokens?: number;
+  localProjectedTokens?: number;
+  conservativeProjectedTokens?: number;
+  contributionTokens?: Record<string, number>;
+  nativeAttempted?: boolean;
+  nativeUsed?: boolean;
+  nativeReason?: string;
 };
 
 export type ToolDecisionRecord = {
@@ -1577,6 +1585,14 @@ function compactRecord(
     summarySourceHadUser: event.compactSummarySourceHadUser,
     summaryLatestUserPinned: event.compactSummaryLatestUserPinned,
     fallbackMarker: event.compactFallbackMarker,
+    failureReason: event.compactFailureReason,
+    mandatoryFloorTokens: event.compactMandatoryFloor,
+    localProjectedTokens: event.compactLocalProjected,
+    conservativeProjectedTokens: event.compactConservativeProjected,
+    contributionTokens: event.compactContributionTokens,
+    nativeAttempted: event.compactNativeAttempted,
+    nativeUsed: event.compactNativeUsed,
+    nativeReason: event.compactNativeReason,
   };
 }
 

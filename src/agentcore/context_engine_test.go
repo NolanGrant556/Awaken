@@ -53,7 +53,7 @@ func (s *fakeContextEventSink) emitCompactFinished(state ContextWindowState, res
 	s.operations = append(s.operations, "compact_finished")
 }
 
-func (s *fakeContextEventSink) emitCompactFailed(state ContextWindowState, mode CompactMode, message string, failureReason string) {
+func (s *fakeContextEventSink) emitCompactFailed(state ContextWindowState, mode CompactMode, message string, failureReason string, _ error) {
 	s.operations = append(s.operations, "compact_failed")
 	s.failed = append(s.failed, message)
 }
@@ -410,7 +410,7 @@ func testContextWindowState(estimatedTokens int) ContextWindowState {
 		EstimatedTokens:      estimatedTokens,
 		WarningThreshold:     85000,
 		AutoCompactThreshold: 90000,
-		CompactTarget:        30000,
+		CompactTarget:        10000,
 	}
 }
 
@@ -434,7 +434,7 @@ func TestCompactRetainedTailBudgetTargetsWholeRequest(t *testing.T) {
 	t.Run("subtracts stable prefix overhead and summary reserve", func(t *testing.T) {
 		state := ContextWindowState{CompactTarget: 75_000, EstimatedTokens: 43_227}
 		if got := compactRetainedTailBudget(state, messages); got != 33_581 {
-			t.Fatalf("budget=%d, want 75000-33227-8192=33581", got)
+			t.Fatalf("budget=%d, want 75000-33227-4096-4096=33581", got)
 		}
 	})
 
@@ -444,7 +444,18 @@ func TestCompactRetainedTailBudgetTargetsWholeRequest(t *testing.T) {
 			LastAPIUsageTokens: 200_000, LastSentEstimatedInputTokens: 100_000,
 		}
 		if got := compactRetainedTailBudget(state, messages); got != 19_308 {
-			t.Fatalf("budget=%d, want 75000/2-10000-8192=19308", got)
+			t.Fatalf("budget=%d, want 75000/2-10000-4096-4096=19308", got)
+		}
+	})
+
+	t.Run("deflates summary reserve when calibrated fixed overhead is tight", func(t *testing.T) {
+		state := ContextWindowState{
+			CompactTarget: 27_200, EstimatedTokens: 24_000,
+			LastAPIUsageTokens: 336_000, LastSentEstimatedInputTokens: 192_000,
+		}
+		messages := []convcontext.Message{{Role: convcontext.RoleUser, Content: strings.Repeat("a", 40_000)}}
+		if got := compactSummaryBudget(state, messages); got != 1_024 {
+			t.Fatalf("summary budget=%d, want calibrated minimum 1024", got)
 		}
 	})
 
@@ -454,7 +465,7 @@ func TestCompactRetainedTailBudgetTargetsWholeRequest(t *testing.T) {
 			LastAPIUsageTokens: 90_000, LastSentEstimatedInputTokens: 100_000,
 		}
 		if got := compactRetainedTailBudget(state, messages); got != 56_808 {
-			t.Fatalf("budget=%d, want 75000-10000-8192=56808", got)
+			t.Fatalf("budget=%d, want 75000-10000-4096-4096=56808", got)
 		}
 	})
 
@@ -517,9 +528,10 @@ func TestContextGovernorHandsWholeRequestBudgetToCompactor(t *testing.T) {
 	}, &fakeContextEventSink{}); err != nil {
 		t.Fatalf("PrepareRequest returned error: %v", err)
 	}
-	// CompactTarget 30_000 ×(80_000/160_000) − 前缀开销 2_000 − 摘要预算 8_192。
-	if len(seenTargets) == 0 || seenTargets[0] != 4_808 {
-		t.Fatalf("compactor received %v, want first target 4808", seenTargets)
+	// CompactTarget 10_000 ×(80_000/160_000) − 前缀开销 2_000 − 校准后动态摘要预算 1_050
+	// − checkpoint projection reserve 1_250，剩余 tail 700 tokens。
+	if len(seenTargets) == 0 || seenTargets[0] != 700 {
+		t.Fatalf("compactor received %v, want first target 700", seenTargets)
 	}
 }
 
@@ -568,6 +580,28 @@ func TestContextGovernorRejectsCompactThatStaysAboveAutoThreshold(t *testing.T) 
 	}
 	if len(sink.blocked) != 0 {
 		t.Fatalf("must not emit CONTEXT_BLOCKED before three failures, got %v", sink.blocked)
+	}
+}
+
+func TestContextGovernorRejectsCompactAboveHardTargetEvenBelowAutoThreshold(t *testing.T) {
+	envelope := ContextEnvelope{Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: strings.Repeat("x", 20_000)}}}
+	engine := &fakeContextEngine{
+		evaluateFn: func(value ContextEnvelope) ContextWindowState {
+			state := testContextWindowState(20_000)
+			state.HardCompactTarget = true
+			return state
+		},
+	}
+	governor := newContextGovernor(engine, nil, nil)
+	preState := testContextWindowState(80_000)
+	preState.HardCompactTarget = true
+	summary := convcontext.Message{Role: convcontext.RoleUser, Content: "summary", CompactBoundaryID: "compact_hard_post"}
+	err := governor.evaluateCompactPostcondition(
+		LLMRequest{Messages: envelope.Messages, EnvelopeDebug: &envelope}, preState,
+		CompactResult{Mode: CompactModeAuto, BoundaryID: "compact_hard_post", SummaryMessage: summary, Messages: []convcontext.Message{summary}},
+	)
+	if err == nil || !errors.Is(err, ErrCompactTargetUnachievable) {
+		t.Fatalf("expected hard-target failure, got %v", err)
 	}
 }
 

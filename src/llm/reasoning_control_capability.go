@@ -8,8 +8,9 @@ import (
 type ReasoningControlWireStrategy string
 
 const (
-	ReasoningControlThinkingType   ReasoningControlWireStrategy = "thinking_type"
-	ReasoningControlEnableThinking ReasoningControlWireStrategy = "enable_thinking"
+	ReasoningControlThinkingType        ReasoningControlWireStrategy = "thinking_type"
+	ReasoningControlEnableThinking      ReasoningControlWireStrategy = "enable_thinking"
+	ReasoningControlResponsesEffortNone ReasoningControlWireStrategy = "responses_effort_none"
 )
 
 // ReasoningControlCapability is deliberately independent from prompt-cache
@@ -27,6 +28,11 @@ type ReasoningControlCapability struct {
 }
 
 var reasoningControlCapabilities = []ReasoningControlCapability{
+	{
+		ID: "deepseek_responses_effort_none_v1", ProviderID: "deepseek", BaseURL: "https://api.deepseek.com",
+		ProtocolFamily: ProtocolOpenAIResponses, Models: []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+		WireStrategy: ReasoningControlResponsesEffortNone,
+	},
 	{
 		ID: "deepseek_thinking_type_v1", ProviderID: "deepseek", BaseURL: "https://api.deepseek.com",
 		ProtocolFamily: ProtocolOpenAIChat, Models: []string{"deepseek-v4-flash", "deepseek-v4-pro"},

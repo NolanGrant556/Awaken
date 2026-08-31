@@ -378,6 +378,13 @@ export type AguiEvent = {
   compactSummaryLatestUserPinned?: boolean;
   compactFallbackMarker?: string;
   compactFailureReason?: string;
+  compactMandatoryFloor?: number;
+  compactLocalProjected?: number;
+  compactConservativeProjected?: number;
+  compactContributionTokens?: Record<string, number>;
+  compactNativeAttempted?: boolean;
+  compactNativeUsed?: boolean;
+  compactNativeReason?: string;
   staticPermissionBehavior?: string;
   staticPermissionReason?: string;
   toolDecisionAction?: string;

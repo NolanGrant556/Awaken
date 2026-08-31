@@ -63,7 +63,13 @@ func (s *RunService) RefreshThreadContextSnapshot(ctx context.Context, threadID 
 	agent.GetConversation().Context.SetMessages(restored.Messages)
 	cfg := agent.GetConfig()
 	cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), restored.SkillContextBlocks...)
+	cfg.CompactContextBlocks = append([]agentcore.ContextBlock(nil), restored.CompactContextBlocks...)
+	cfg.CompactedMemoryContext = agentcore.CompactedMemoryContextFromBundleV2(restored.LatestContextBundleV2)
+	if cfg.MemoryRecallMarkCompacted != nil {
+		cfg.MemoryRecallMarkCompacted(agentcore.CompactedMemoryIDsFromBundleV2(restored.LatestContextBundleV2))
+	}
 	cfg.ActivatedDeferredTools = append([]string(nil), restored.ActivatedDeferredTools...)
+	cfg.RestoredContextBundleV2 = restored.LatestContextBundleV2
 	// The replay projection must assemble the same provider-visible request
 	// sources as StartRun. A projection built without the AGENTS instruction
 	// snapshot carries an empty instruction digest, which the epoch store

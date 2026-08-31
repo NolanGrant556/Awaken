@@ -1795,6 +1795,14 @@ describe("runtime reducer run narrative projection", () => {
         compactSummarySourceHadUser: true,
         compactSummaryLatestUserPinned: true,
         compactFallbackMarker: "[COMPACT_FALLBACK:llm_summary_failed]",
+        compactMandatoryFloor: 3100,
+        compactLocalProjected: 4400,
+        compactConservativeProjected: 4800,
+        compactContributionTokens: { system_prompt: 1200, conversation: 3200 },
+        compactNativeAttempted: true,
+        compactNativeUsed: false,
+        compactNativeReason: "native_projection_fallback",
+        compactFailureReason: "provider_timeout",
       }),
       runEvent({
         type: "AWAKEN_TURN_FINISHED",
@@ -1847,6 +1855,14 @@ describe("runtime reducer run narrative projection", () => {
       summarySourceHadUser: true,
       summaryLatestUserPinned: true,
       fallbackMarker: "[COMPACT_FALLBACK:llm_summary_failed]",
+      mandatoryFloorTokens: 3100,
+      localProjectedTokens: 4400,
+      conservativeProjectedTokens: 4800,
+      contributionTokens: { system_prompt: 1200, conversation: 3200 },
+      nativeAttempted: true,
+      nativeUsed: false,
+      nativeReason: "native_projection_fallback",
+      failureReason: "provider_timeout",
     });
     expect(state.inspectorSummary.terminalReason).toBe("completed");
     expect(state.inspectorSummary.terminalMessage).toBe("done");

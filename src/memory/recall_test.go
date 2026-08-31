@@ -75,6 +75,40 @@ func TestRecallManagerIsNonBlockingAndPromotesOnlyOnContextBuild(t *testing.T) {
 	}
 }
 
+func TestRecallManagerCompactedRefsExcludeOldBodiesAndFutureReselection(t *testing.T) {
+	store := testStore(t)
+	records := createRecallRecords(t, store, 1)
+	manager := NewRecallManagerWithSelector(store, func(_ context.Context, _ string, candidates []Candidate) ([]Selection, error) {
+		return []Selection{{Scope: candidates[0].Scope, Filename: candidates[0].Filename}}, nil
+	})
+	manager.StartTurn(context.Background(), "decision")
+	waitPending(t, manager)
+	before, err := manager.Context()
+	if err != nil || !strings.Contains(before, "Decision body 0") {
+		t.Fatalf("initial recall missing: context=%q err=%v", before, err)
+	}
+	manager.MarkCompacted([]string{records[0].MemoryID})
+	after, err := manager.Context()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(after, "Decision body 0") || len(manager.Snapshot("workspace").Items) != 0 {
+		t.Fatalf("compacted Memory body remained in provider/snapshot projection: %s", after)
+	}
+
+	restartedCalls := atomic.Int32{}
+	restarted := NewRecallManagerWithSelector(store, func(_ context.Context, _ string, candidates []Candidate) ([]Selection, error) {
+		restartedCalls.Add(1)
+		return nil, nil
+	})
+	restarted.MarkCompacted([]string{records[0].MemoryID})
+	restarted.StartTurn(context.Background(), "decision")
+	time.Sleep(30 * time.Millisecond)
+	if restartedCalls.Load() != 0 {
+		t.Fatalf("restart reselected an identity restored from compact refs")
+	}
+}
+
 func TestRecallManagerValidatesAllowlistDeduplicatesAndCapsFive(t *testing.T) {
 	store := testStore(t)
 	createRecallRecords(t, store, 7)

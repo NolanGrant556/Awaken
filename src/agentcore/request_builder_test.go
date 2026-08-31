@@ -142,7 +142,7 @@ func TestRequestBuilderBuildsCompleteRequest(t *testing.T) {
 	if req.ContextWindowState.EstimatedTokens == 0 {
 		t.Fatalf("expected context window estimate on request")
 	}
-	if req.ContextWindowState.ModelWindow != 400000 {
+	if req.ContextWindowState.ModelWindow != 400000 || req.ContextWindowState.EffectiveWindow != 400000 {
 		t.Fatalf("expected configured context window, got %+v", req.ContextWindowState)
 	}
 	if !strings.Contains(req.SystemPrompt, "test-model") || !strings.Contains(req.SystemPrompt, "test-entry") {
@@ -527,6 +527,24 @@ func TestRequestBuilderInjectsSkillTriggerRulesAndCatalogIntoFinalToolSchema(t *
 	}
 }
 
+func TestRequestBuilderUsesHardCompactTargetForContextSensitiveToolDescriptions(t *testing.T) {
+	bundle := &PostCompactContextBundleV2{SchemaVersion: PostCompactContextBundleSchemaVersion, BoundaryID: "compact_tool_budget"}
+	config := AgentConfig{
+		ModelConfig:             ModelConfig{ContextWindow: 272_000, MaxInputTokens: 272_000},
+		RestoredContextBundleV2: bundle,
+	}
+	builder := NewRequestBuilder(config)
+	if got := builder.toolContextWindowTokens(); got != 27_200 {
+		t.Fatalf("post-compact tool context budget=%d, want hard target 27200", got)
+	}
+
+	config.RestoredContextBundleV2 = nil
+	builder = NewRequestBuilder(config)
+	if got := builder.toolContextWindowTokens(); got != 272_000 {
+		t.Fatalf("pre-compact tool context budget=%d, want configured window 272000", got)
+	}
+}
+
 func TestRequestBuilderDefaultExposureContainsCanonicalFileTools(t *testing.T) {
 	for _, name := range []string{"Edit", "Write"} {
 		if _, err := tool.GetTool(name); err != nil {
@@ -644,6 +662,26 @@ func TestRequestBuilderDegradesWhenMemoryProviderFails(t *testing.T) {
 		if block.ID == "memory_context" {
 			t.Fatalf("failed provider injected a block: %+v", block)
 		}
+	}
+}
+
+func TestRequestBuilderKeepsCompactedMemoryRefsAndNewRecall(t *testing.T) {
+	builder := NewRequestBuilder(AgentConfig{
+		CompactedMemoryContext: "<awaken_memory_refs_v2>old-ref</awaken_memory_refs_v2>",
+		MemoryContextProvider: func() (string, error) {
+			return "<awaken_memory_context>newly recalled fact</awaken_memory_context>", nil
+		},
+	})
+	envelope := builder.BuildContextEnvelope(convcontext.New(), []tool.ToolSchema{})
+	var memoryBlock string
+	for _, block := range envelope.SystemBlocks {
+		if block.ID == "memory_context" {
+			memoryBlock = block.Content
+			break
+		}
+	}
+	if !strings.Contains(memoryBlock, "old-ref") || !strings.Contains(memoryBlock, "newly recalled fact") {
+		t.Fatalf("post-compact Memory projection hid refs or new recall: %q", memoryBlock)
 	}
 }
 

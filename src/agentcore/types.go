@@ -46,6 +46,11 @@ type AgentConfig struct {
 	// MemoryContextProvider reads the current host-owned Memory indexes at
 	// request build time. Failures degrade to no Memory block.
 	MemoryContextProvider func() (string, error)
+	// CompactedMemoryContext is the bounded, reference-only Memory projection
+	// installed by a successful V2 compact. When non-empty it replaces the
+	// full recalled body block; exact bodies remain available through Memory
+	// authority and are not duplicated into the compact journal.
+	CompactedMemoryContext string
 	// RunPlanContextProvider renders the host-owned CurrentRunPlan block of
 	// the current root run at request build time. It is bound by the root
 	// Runner to the run-scoped RunPlanService; empty content skips the block.
@@ -62,6 +67,10 @@ type AgentConfig struct {
 	MemoryRecallEnd          func()
 	MemoryRecallDrain        func() []MemoryRecallReceipt
 	MemoryRecallReset        func()
+	// MemoryRecallMarkCompacted keeps compacted identities excluded from future
+	// selector candidates while removing their old bodies from the default
+	// provider projection. It is root-only and never inherited by Subagents.
+	MemoryRecallMarkCompacted func([]string)
 	// CaptureMemoryRecallSnapshot returns the parent run's already-recalled
 	// Memory identities and frozen content. Child agents inherit a compatible
 	// subset and must not run a user-scope selector.
@@ -101,6 +110,10 @@ type AgentConfig struct {
 	// HookContextBlocks are host-owned untrusted data admitted from successful
 	// Hook responses. They are separate from Skill activation authority.
 	HookContextBlocks []ContextBlock
+	// CompactContextBlocks are host-owned, durable task-continuity projections
+	// rebuilt from the latest validated PostCompactContextBundleV2. They are
+	// distinct from free-form model summary messages and from long-term Memory.
+	CompactContextBlocks []ContextBlock
 	// SkillContextBlocks are typed system context blocks injected from
 	// explicit or model-selected Skill activation. Package resources stay
 	// on-demand and are not preloaded here.
@@ -148,6 +161,11 @@ type AgentConfig struct {
 	// snapshots beneath the owning thread. nil keeps lightweight unit runners
 	// storage-free.
 	ContextEpochStore ContextEpochStore
+	// RestoredContextBundleV2 is the latest validated provider-neutral compact
+	// bundle replayed from the owning thread. It seeds parent/generation
+	// identity for repeated compaction; executable authorities remain supplied
+	// by the current Runtime snapshots rather than deserialized from Journal.
+	RestoredContextBundleV2 *PostCompactContextBundleV2
 	// ComputerRuntime is the run-bound Computer coordinator. When set, the
 	// environment snapshot is probed with ComputerEnabled=true and the
 	// ToolRuntime is wired with a ComputerExecutor. nil disables Computer Use.

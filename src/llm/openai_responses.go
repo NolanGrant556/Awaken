@@ -129,14 +129,13 @@ func prepareOpenAIResponsesRequest(cfg Config, req Request, stream bool) (Prepar
 	if err != nil {
 		return PreparedRequest{}, err
 	}
+	input = prependCompatibleNativeCompactionInput(cfg, req, input)
 	body := openAIResponsesRequest{
 		Model: resolveModel(cfg, req), Instructions: req.SystemPrompt, Input: input,
 		Tools: convertToolsToOpenAIResponses(req.Tools), Temperature: resolveTemperature(cfg, req),
 		MaxOutputTokens: resolveMaxTokens(cfg, req), Stream: stream, Store: false,
 	}
-	if effort := nativeReasoningEffort(cfg, req); effort != "" {
-		body.Reasoning = &openAIResponsesReasoning{Effort: effort}
-	}
+	body.Reasoning = openAIResponsesReasoningForRequest(cfg, req)
 	if affinityKey != "" {
 		body.PromptCacheKey = affinityKey
 	}
@@ -147,6 +146,19 @@ func prepareOpenAIResponsesRequest(cfg Config, req Request, stream bool) (Prepar
 	prepared := newPreparedRequest(req, ProtocolOpenAIResponses, buildOpenAIResponsesURL(cfg), encoded, stream)
 	prepared.Cache = cacheMetadata
 	return prepared, nil
+}
+
+func openAIResponsesReasoningForRequest(cfg Config, req Request) *openAIResponsesReasoning {
+	if req.DisableReasoning {
+		capability, ok := ResolveReasoningControlCapability(cfg, req)
+		if ok && capability.WireStrategy == ReasoningControlResponsesEffortNone {
+			return &openAIResponsesReasoning{Effort: "none"}
+		}
+	}
+	if effort := nativeReasoningEffort(cfg, req); effort != "" {
+		return &openAIResponsesReasoning{Effort: effort}
+	}
+	return nil
 }
 
 func (t *openAIResponsesTransport) invokePrepared(ctx stdctx.Context, cfg Config, prepared PreparedRequest) (*Response, error) {

@@ -28,6 +28,7 @@ const (
 	// content, not catalog metadata.
 	ContextContributionSkillActivation ContextContributionKind = "skill_activation"
 	ContextContributionMemory          ContextContributionKind = "memory"
+	ContextContributionTaskCheckpoint  ContextContributionKind = "task_checkpoint"
 	ContextContributionConversation    ContextContributionKind = "conversation"
 	// ContextContributionSkillsMemory remains read-compatible with v1 records.
 	// New snapshots never emit it because Skill and Memory are independently attributed.
@@ -46,6 +47,7 @@ var contextContributionOrder = []ContextContributionKind{
 	ContextContributionMCP,
 	ContextContributionSkills,
 	ContextContributionMemory,
+	ContextContributionTaskCheckpoint,
 	ContextContributionConversation,
 	// A v1 combined value can only appear through compatibility inputs. Keep it
 	// balanced without pretending it can be split into Skill and Memory.
@@ -303,6 +305,8 @@ func contextUsageKindForPromptSection(kind ContextContributionKind) ContextContr
 		return ContextContributionConversation
 	case ContextContributionMemory:
 		return ContextContributionMemory
+	case ContextContributionTaskCheckpoint:
+		return ContextContributionTaskCheckpoint
 	case ContextContributionSkillsMemory:
 		return ContextContributionSkillsMemory
 	default:

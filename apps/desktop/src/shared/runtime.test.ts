@@ -43,11 +43,11 @@ describe("runtime shared model provider normalization", () => {
     expect(provider.allowCustomModel).toBe(true);
   });
 
-  it("calculates the auto compact threshold from effective context window", () => {
-    expect(effectiveContextWindow(1_000_000)).toBe(984_000);
-    expect(calculateAutoCompactThreshold(1_000_000)).toBe(885_600);
-    expect(calculateAutoCompactThreshold(8_000)).toBe(0);
-    expect(calculateAutoCompactThreshold(12_000, 20_000)).toBe(0);
+  it("treats the configured context window as the available input budget", () => {
+    expect(effectiveContextWindow(1_000_000)).toBe(1_000_000);
+    expect(calculateAutoCompactThreshold(1_000_000)).toBe(900_000);
+    expect(calculateAutoCompactThreshold(8_000)).toBe(7_200);
+    expect(effectiveContextWindow(undefined)).toBe(0);
   });
 
   it("defaults legacy credential revisions to 1 and sends explicit run revisions", () => {

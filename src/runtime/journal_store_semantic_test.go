@@ -118,6 +118,133 @@ func TestSkillInvocationHistoryRestoresLatestTimestampWithoutLeakingForkContext(
 	}
 }
 
+func TestContextCompactedV2RestoresSameMessagesAndBoundedSkillProjection(t *testing.T) {
+	invokedAt := time.Date(2026, 8, 31, 1, 2, 3, 0, time.UTC)
+	skillRef := agentcore.SkillContextRef{
+		ID: "skill_activation_inline", SkillID: "inline", SourcePath: "/skills/inline/SKILL.md",
+		InvokedAt: invokedAt, Compacted: true, ProjectedContent: "bounded skill body",
+	}
+	if err := skillRef.Seal(); err != nil {
+		t.Fatalf("seal Skill ref: %v", err)
+	}
+	bundle := phase1RuntimeTestBundle(t, "compact_v2_restore", []agentcore.SemanticCompactedMessage{{
+		Role: string(convcontext.RoleUser), Content: "V2 summary", CompactBoundaryID: "compact_v2_restore",
+	}}, []agentcore.SkillContextRef{skillRef})
+	records := []agentcore.SemanticRecord{
+		{Kind: agentcore.SemanticKindSkillActivated, Timestamp: invokedAt.Add(-time.Hour), Payload: map[string]any{
+			"skill_id": "inline", "content": "unbounded original body", "context": "inline",
+		}},
+		{Kind: agentcore.SemanticKindContextCompactedV2, Timestamp: invokedAt, Payload: map[string]any{"bundle_v2": bundle}},
+	}
+	restored := restoredTranscriptFromSemantic(records)
+	if restored.LatestContextBundleV2 == nil || restored.LatestContextBundleV2.BundleDigest != bundle.BundleDigest {
+		t.Fatalf("latest V2 bundle was not restored: %+v", restored.LatestContextBundleV2)
+	}
+	if len(restored.Messages) != 1 || restored.Messages[0].Content != "V2 summary" || restored.Messages[0].CompactBoundaryID != bundle.BoundaryID {
+		t.Fatalf("V2 conversation projection mismatch: %+v", restored.Messages)
+	}
+	if len(restored.SkillContextBlocks) != 1 || restored.SkillContextBlocks[0].Content != "bounded skill body" || !restored.SkillContextBlocks[0].Compacted {
+		t.Fatalf("V2 Skill projection mismatch: %+v", restored.SkillContextBlocks)
+	}
+}
+
+func TestContextCompactedV2ThenV1DoesNotRestoreStaleV2Authorities(t *testing.T) {
+	skillRef := agentcore.SkillContextRef{
+		ID: "skill_activation_inline", SkillID: "inline", SourcePath: "/skills/inline/SKILL.md",
+		InvokedAt: time.Now().UTC(), Compacted: true, ProjectedContent: "bounded V2 skill ref",
+	}
+	if err := skillRef.Seal(); err != nil {
+		t.Fatalf("seal Skill ref: %v", err)
+	}
+	bundle := phase1RuntimeTestBundle(t, "compact_v2_before_rollback", []agentcore.SemanticCompactedMessage{{
+		Role: string(convcontext.RoleUser), Content: "V2 summary", CompactBoundaryID: "compact_v2_before_rollback",
+	}}, []agentcore.SkillContextRef{skillRef})
+	v1Boundary := "compact_v1_after_rollback"
+	records := []agentcore.SemanticRecord{
+		{Kind: agentcore.SemanticKindSkillActivated, Payload: map[string]any{
+			"skill_id": "inline", "content": "original activation body", "context": "inline",
+		}},
+		{Kind: agentcore.SemanticKindContextCompactedV2, Payload: map[string]any{"bundle_v2": bundle}},
+		{Kind: agentcore.SemanticKindContextCompacted, Payload: map[string]any{
+			"compact_boundary_id": v1Boundary,
+			"messages":            []agentcore.SemanticCompactedMessage{{Role: string(convcontext.RoleUser), Content: "latest V1 summary", CompactBoundaryID: v1Boundary}},
+		}},
+	}
+	restored := restoredTranscriptFromSemantic(records)
+	if restored.LatestContextBundleV2 != nil || len(restored.CompactContextBlocks) != 0 {
+		t.Fatalf("stale V2 authority survived a later V1 boundary: %+v", restored.LatestContextBundleV2)
+	}
+	if len(restored.Messages) != 1 || restored.Messages[0].Content != "latest V1 summary" {
+		t.Fatalf("latest V1 conversation was not restored: %+v", restored.Messages)
+	}
+	if len(restored.SkillContextBlocks) != 1 || restored.SkillContextBlocks[0].Content != "original activation body" || restored.SkillContextBlocks[0].Compacted {
+		t.Fatalf("V1 rollback did not restore legacy Skill activation authority: %+v", restored.SkillContextBlocks)
+	}
+}
+
+func TestContextCompactedV1ThenV2RestoresLatestV2Authority(t *testing.T) {
+	v1Boundary := "compact_v1_before_v2"
+	bundle := phase1RuntimeTestBundle(t, "compact_v2_latest", []agentcore.SemanticCompactedMessage{{
+		Role: string(convcontext.RoleUser), Content: "latest V2 summary", CompactBoundaryID: "compact_v2_latest",
+	}}, nil)
+	records := []agentcore.SemanticRecord{
+		{Kind: agentcore.SemanticKindContextCompacted, Payload: map[string]any{
+			"compact_boundary_id": v1Boundary,
+			"messages":            []agentcore.SemanticCompactedMessage{{Role: string(convcontext.RoleUser), Content: "old V1 summary", CompactBoundaryID: v1Boundary}},
+		}},
+		{Kind: agentcore.SemanticKindContextCompactedV2, Payload: map[string]any{"bundle_v2": bundle}},
+	}
+	restored := restoredTranscriptFromSemantic(records)
+	if restored.LatestContextBundleV2 == nil || restored.LatestContextBundleV2.BoundaryID != bundle.BoundaryID {
+		t.Fatalf("latest V2 authority was not restored: %+v", restored.LatestContextBundleV2)
+	}
+	if len(restored.Messages) != 1 || restored.Messages[0].Content != "latest V2 summary" {
+		t.Fatalf("latest V2 conversation was not restored: %+v", restored.Messages)
+	}
+}
+
+func TestContextCompactedV2DigestMismatchKeepsLastKnownGoodConversation(t *testing.T) {
+	bundle := phase1RuntimeTestBundle(t, "compact_v2_corrupt", []agentcore.SemanticCompactedMessage{{
+		Role: string(convcontext.RoleUser), Content: "V2 summary", CompactBoundaryID: "compact_v2_corrupt",
+	}}, nil)
+	bundle.BundleDigest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	records := []agentcore.SemanticRecord{
+		agentcore.NewSemanticRecord(agentcore.SemanticKindUserMessage, "thread_1", "run_1", "turn_1", "", "", map[string]any{"content": "last known good"}),
+		{Kind: agentcore.SemanticKindContextCompactedV2, Payload: map[string]any{"bundle_v2": bundle}},
+	}
+	messages := messagesFromSemanticRecords(records)
+	if len(messages) != 1 || messages[0].Content != "last known good" || messages[0].CompactBoundaryID != "" {
+		t.Fatalf("corrupt V2 bundle erased last known-good conversation: %+v", messages)
+	}
+}
+
+func phase1RuntimeTestBundle(t *testing.T, boundaryID string, messages []agentcore.SemanticCompactedMessage, skills []agentcore.SkillContextRef) agentcore.PostCompactContextBundleV2 {
+	t.Helper()
+	bundle := agentcore.PostCompactContextBundleV2{
+		SchemaVersion: agentcore.PostCompactContextBundleSchemaVersion,
+		BoundaryID:    boundaryID, Generation: 1, Mode: string(agentcore.CompactModeAuto),
+		ConversationProjection: agentcore.CompactConversationProjectionV2{Format: agentcore.CompactProjectionV1Messages, Messages: messages},
+		TaskCheckpoint:         agentcore.NotMaterializedSection[agentcore.TaskCheckpointV2](),
+		SemanticSummary:        agentcore.NotMaterializedSection[string](),
+		RecentTurns:            agentcore.NotMaterializedSection[[]agentcore.CompactTurnV2](),
+		InstructionSnapshotRef: agentcore.UnavailableSnapshotRef("instruction_snapshot_unavailable"),
+		MemorySnapshot:         agentcore.UnavailableMemorySnapshotRef("memory_snapshot_unavailable"),
+		RunPlanRef:             agentcore.UnavailableSnapshotRef("run_plan_unavailable"),
+		SkillRefs:              skills,
+		ToolSnapshotRef:        agentcore.UnavailableSnapshotRef("tool_snapshot_unavailable"),
+		HookSnapshotRef:        agentcore.UnavailableSnapshotRef("hook_snapshot_unavailable"),
+		ActiveGateRefs:         []agentcore.GateRef{}, PendingSubagents: []agentcore.SubagentHandoffRef{}, ArtifactRefs: []agentcore.ArtifactRef{},
+		TranscriptLocator:   agentcore.NotMaterializedSection[agentcore.TranscriptLocator](),
+		ProviderOpaqueState: agentcore.NotMaterializedSection[agentcore.ProviderOpaqueCompactionRef](),
+		BudgetReceipt:       agentcore.NotMaterializedSection[agentcore.CompactBudgetReceipt](),
+		CoverageReceipt:     agentcore.NotMaterializedSection[agentcore.CompactCoverageReceipt](),
+	}
+	if err := bundle.Seal(); err != nil {
+		t.Fatalf("seal test bundle: %v", err)
+	}
+	return bundle
+}
+
 func TestMessagesFromSemanticRecordsRestoresToolMediaMetadataWithoutHydrating(t *testing.T) {
 	outcome := tool.ExecutionOutcome{
 		Content: "page image",

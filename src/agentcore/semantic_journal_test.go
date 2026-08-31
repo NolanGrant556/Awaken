@@ -591,15 +591,22 @@ func TestContextCompactionIsFlushedBeforeConversationChanges(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("persistContextCompacted: %v", err)
 	}
-	if recorder.flushes != 1 || len(recorder.records) != 1 || recorder.records[0].Kind != SemanticKindContextCompacted {
+	if recorder.flushes != 1 || len(recorder.records) != 1 || recorder.records[0].Kind != SemanticKindContextCompactedV2 {
 		t.Fatalf("compaction was not appended and flushed exactly once: records=%+v flushes=%d", recorder.records, recorder.flushes)
+	}
+	bundle, err := DecodePostCompactContextBundleV2(recorder.records[0].Payload["bundle_v2"])
+	if err != nil || bundle.BoundaryID != "compact_durable" || bundle.ConversationProjection.Format != CompactProjectionV1Messages {
+		t.Fatalf("invalid durable V2 compact bundle: bundle=%+v err=%v", bundle, err)
 	}
 
 	failing := &failingRecorder{failFlush: true}
 	runner.recorder = failing
 	if err := runner.contextGovernor.applyCompactResult(context.Background(), CompactResult{
+		Mode:       CompactModeAuto,
 		BoundaryID: "compact_unconfirmed",
-		Messages:   compacted,
+		Messages: []convcontext.Message{{
+			Role: convcontext.RoleUser, Content: "unconfirmed summary", CompactBoundaryID: "compact_unconfirmed",
+		}},
 	}); err == nil {
 		t.Fatal("expected compaction flush failure")
 	}

@@ -5,17 +5,16 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 )
 
-func TestCompactInvokedSkillContextEnforcesBudgetsAndKeepsNewest(t *testing.T) {
+func TestCompactInvokedSkillContextUsesDurableReferencesWithoutDroppingActiveSkills(t *testing.T) {
 	base := time.Date(2026, 7, 12, 0, 0, 0, 0, time.UTC)
 	blocks := make([]ContextBlock, 0, 6)
 	for index := 0; index < 6; index++ {
 		marker := fmt.Sprintf("skill-%d", index)
 		blocks = append(blocks, ContextBlock{
 			ID: marker, SkillID: marker, SourcePath: "/skills/" + marker + "/SKILL.md",
-			Content:   marker + "\n" + strings.Repeat(string(rune('a'+index)), postCompactMaxTokensPerSkill*compactCharsPerToken+200),
+			Content:   marker + "\n" + strings.Repeat(string(rune('a'+index)), 25_000),
 			InvokedAt: base.Add(time.Duration(index) * time.Minute),
 		})
 	}
@@ -23,27 +22,21 @@ func TestCompactInvokedSkillContextEnforcesBudgetsAndKeepsNewest(t *testing.T) {
 	runner.compactInvokedSkillContext()
 
 	kept := runner.config.SkillContextBlocks
-	if len(kept) != 5 {
-		t.Fatalf("total 25k-token budget should keep only the five newest 5k-token Skills, got %d", len(kept))
+	if len(kept) != 6 {
+		t.Fatalf("reference compaction dropped active Skills, got %d", len(kept))
 	}
-	if kept[0].ID != "skill-1" || kept[len(kept)-1].ID != "skill-5" {
-		t.Fatalf("compaction did not prioritize recent invocations then restore chronology: %+v", kept)
+	if kept[0].ID != "skill-0" || kept[len(kept)-1].ID != "skill-5" {
+		t.Fatalf("reference compaction changed invocation order: %+v", kept)
 	}
-	totalRunes := 0
 	for _, block := range kept {
 		if !block.Compacted {
 			t.Fatalf("kept Skill was not marked compacted: %+v", block)
 		}
-		if !strings.Contains(block.Content, "use Read on "+block.SourcePath) {
-			t.Fatalf("truncated Skill lacks an exact reread path: %s", block.Content)
+		if !strings.Contains(block.Content, "use Read on "+block.SourcePath) || !strings.Contains(block.Content, "content_digest=") {
+			t.Fatalf("Skill ref lacks exact reread path/digest: %s", block.Content)
 		}
-		contentBeforeNotice := strings.SplitN(block.Content, "\n\n[... skill content truncated", 2)[0]
-		if utf8.RuneCountInString(contentBeforeNotice) > postCompactMaxTokensPerSkill*compactCharsPerToken {
-			t.Fatalf("per-Skill 5k-token budget exceeded: %d", utf8.RuneCountInString(contentBeforeNotice))
+		if len(block.Content) > 1024 {
+			t.Fatalf("Skill ref is unexpectedly large: %d", len(block.Content))
 		}
-		totalRunes += utf8.RuneCountInString(contentBeforeNotice)
-	}
-	if totalRunes > postCompactSkillsTokenBudget*compactCharsPerToken {
-		t.Fatalf("total 25k-token content budget exceeded: %d", totalRunes)
 	}
 }

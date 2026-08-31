@@ -158,6 +158,13 @@ type AwakenEvent struct {
 	CompactSummaryLatestUserPinned   *bool
 	CompactFallbackMarker            string
 	CompactFailureReason             string
+	CompactMandatoryFloor            int
+	CompactLocalProjected            int
+	CompactConservativeProjected     int
+	CompactContributionTokens        map[string]int
+	CompactNativeAttempted           *bool
+	CompactNativeUsed                *bool
+	CompactNativeReason              string
 	MemoryReceipts                   []MemoryRecallReceipt
 	StaticPermissionBehavior         string
 	StaticPermissionReason           string

@@ -49,6 +49,7 @@ type RecallManager struct {
 	mu                sync.RWMutex
 	generation        uint64
 	recalled          map[string]bool
+	compacted         map[string]bool
 	records           []Record
 	sessionBytes      int
 	pending           []Record
@@ -66,7 +67,7 @@ func NewRecallManager(workspaceRoot string, cfg llm.Config) (*RecallManager, err
 	if err != nil {
 		return nil, err
 	}
-	manager := &RecallManager{store: store, recalled: map[string]bool{}}
+	manager := &RecallManager{store: store, recalled: map[string]bool{}, compacted: map[string]bool{}}
 	manager.settings, _ = NewSettingsStore()
 	manager.modelInvoker = func(ctx context.Context, cfg llm.Config, req llm.Request, _ int, _ bool) (*llm.Response, error) {
 		return llm.Invoke(ctx, cfg, req)
@@ -76,7 +77,7 @@ func NewRecallManager(workspaceRoot string, cfg llm.Config) (*RecallManager, err
 }
 
 func NewRecallManagerWithSelector(store *Store, selector Selector) *RecallManager {
-	return &RecallManager{store: store, selector: selector, recalled: map[string]bool{}}
+	return &RecallManager{store: store, selector: selector, recalled: map[string]bool{}, compacted: map[string]bool{}}
 }
 
 func (m *RecallManager) SetModelInvoker(invoker ModelInvoker) {
@@ -259,7 +260,12 @@ func (m *RecallManager) Context() (string, error) {
 		m.pendingBytes = 0
 		m.pendingGeneration = 0
 	}
-	records := append([]Record(nil), m.records...)
+	records := make([]Record, 0, len(m.records))
+	for _, record := range m.records {
+		if !m.compacted[record.MemoryID] {
+			records = append(records, record)
+		}
+	}
 	callback := m.onRecalled
 	m.mu.Unlock()
 	if callback != nil && len(promoted) > 0 {
@@ -310,6 +316,9 @@ func (m *RecallManager) Snapshot(workspaceRoot string) RecallSnapshot {
 	defer m.mu.RUnlock()
 	items := make([]RecallSnapshotItem, 0, len(m.records))
 	for _, record := range m.records {
+		if m.compacted[record.MemoryID] {
+			continue
+		}
 		content := formatRecallRecord(record)
 		items = append(items, RecallSnapshotItem{
 			MemoryID: record.MemoryID, Scope: string(record.Scope), Type: string(record.Type),
@@ -317,6 +326,31 @@ func (m *RecallManager) Snapshot(workspaceRoot string) RecallSnapshot {
 		})
 	}
 	return RecallSnapshot{WorkspaceRoot: workspaceRoot, Items: items}
+}
+
+// MarkCompacted converts recalled bodies into identity-only continuity. The
+// recalled set remains populated so selectors cannot immediately reselect and
+// re-inline the same Memory after a compact boundary or restart.
+func (m *RecallManager) MarkCompacted(memoryIDs []string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.recalled == nil {
+		m.recalled = map[string]bool{}
+	}
+	if m.compacted == nil {
+		m.compacted = map[string]bool{}
+	}
+	for _, memoryID := range memoryIDs {
+		memoryID = strings.TrimSpace(memoryID)
+		if memoryID == "" {
+			continue
+		}
+		m.recalled[memoryID] = true
+		m.compacted[memoryID] = true
+	}
 }
 
 func (m *RecallManager) Receipts() []RecallReceipt {
@@ -334,6 +368,7 @@ func (m *RecallManager) ResetAfterCompaction() {
 	defer m.mu.Unlock()
 	m.generation++
 	m.recalled = map[string]bool{}
+	m.compacted = map[string]bool{}
 	m.records = nil
 	m.pending = nil
 	m.pendingReceipts = nil

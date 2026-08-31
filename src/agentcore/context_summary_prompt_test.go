@@ -3,6 +3,8 @@ package agentcore
 import (
 	"strings"
 	"testing"
+
+	convcontext "awaken/src/context"
 )
 
 func TestNormalizeCompactSummaryProducesFixedSectionOrder(t *testing.T) {
@@ -59,5 +61,27 @@ func TestNormalizeCompactSummaryStripsAnalysisWrapper(t *testing.T) {
 	if !strings.Contains(normalized, "Active Task\n- Continue low distortion compact.") ||
 		!strings.Contains(normalized, "Critical Context\n- legacy canary survives.") {
 		t.Fatalf("expected numbered headings inside summary wrapper to normalize, got %q", normalized)
+	}
+}
+
+func TestBoundCompactSummaryToBudgetEnforcesHostLimitAndCriticalBreadth(t *testing.T) {
+	canary := "DS-V2-R4-20260901-靛青量尺-5539"
+	sections := map[string][]string{}
+	for _, section := range compactSummarySections {
+		sections[section] = []string{"- " + canary + " " + strings.Repeat(section+" detail ", 120)}
+	}
+	bounded := boundCompactSummaryToBudget(renderCompactSummarySections(sections), 1024)
+	if got, limit := convcontext.EstimateTokens(bounded), 1024-compactSummaryHostHeaderReserveTokens; got > limit {
+		t.Fatalf("bounded summary tokens=%d, limit=%d", got, limit)
+	}
+	if !strings.Contains(bounded, canary) ||
+		!compactSummarySectionHasMeaning(parseCompactSummarySections(bounded)["Active Task"]) ||
+		!compactSummarySectionHasMeaning(parseCompactSummarySections(bounded)["Critical Context"]) {
+		t.Fatalf("host budget lost critical continuity: %s", bounded)
+	}
+	for _, section := range compactSummarySections {
+		if !strings.Contains(bounded, section+"\n") {
+			t.Fatalf("bounded summary lost section %q: %s", section, bounded)
+		}
 	}
 }

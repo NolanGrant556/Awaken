@@ -88,6 +88,15 @@ export type CompactBoundaryItem = {
   preEstimate?: number;
   postEstimate?: number;
   fallbackUsed?: boolean;
+  targetTokens?: number;
+  mandatoryFloorTokens?: number;
+  localProjectedTokens?: number;
+  conservativeProjectedTokens?: number;
+  contributionTokens?: Record<string, number>;
+  nativeAttempted?: boolean;
+  nativeUsed?: boolean;
+  nativeReason?: string;
+  failureReason?: string;
 };
 
 export type InspectorSelection =

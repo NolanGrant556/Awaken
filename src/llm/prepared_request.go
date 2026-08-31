@@ -14,6 +14,7 @@ func newPreparedRequest(req Request, protocol Protocol, endpoint string, body []
 		RequestID: req.RequestID, Protocol: protocol, Endpoint: endpoint,
 		Body: append([]byte(nil), body...), RequestShapeDigest: hex.EncodeToString(digest[:]),
 		Stream: stream, StreamIdleTimeout: req.StreamIdleTimeout,
+		Operation: PreparedOperationModelResponse,
 	}
 }
 
@@ -24,6 +25,12 @@ func PrepareRequest(cfg Config, req Request, stream bool) (PreparedRequest, erro
 	}
 	if resolveModel(cfg, req) == "" {
 		return PreparedRequest{}, ErrMissingModel
+	}
+	if req.NativeCompaction {
+		if stream {
+			return PreparedRequest{}, fmt.Errorf("native compaction does not support streaming")
+		}
+		return prepareOpenAIResponsesCompactRequest(cfg, req)
 	}
 	switch resolveProtocol(cfg) {
 	case ProtocolAnthropicMessages:
@@ -40,6 +47,9 @@ func PrepareRequest(cfg Config, req Request, stream bool) (PreparedRequest, erro
 func InvokePrepared(ctx stdctx.Context, cfg Config, prepared PreparedRequest) (*Response, error) {
 	if prepared.Stream {
 		return nil, fmt.Errorf("prepared request is streaming")
+	}
+	if prepared.Operation == PreparedOperationNativeCompaction {
+		return newOpenAIResponsesTransport().invokeNativeCompactPrepared(ctx, cfg, prepared)
 	}
 	switch prepared.Protocol {
 	case ProtocolAnthropicMessages:

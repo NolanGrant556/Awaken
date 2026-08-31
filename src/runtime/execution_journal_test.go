@@ -12,6 +12,7 @@ import (
 
 	"awaken/src/agentcore"
 	convcontext "awaken/src/context"
+	"awaken/src/filestore"
 	"awaken/src/tool"
 )
 
@@ -125,6 +126,85 @@ func TestExecutionJournalFlushRetryEventuallySucceeds(t *testing.T) {
 	}
 	if journal.PendingCount() != 0 {
 		t.Fatalf("expected pending cleared after flush")
+	}
+}
+
+func TestExecutionJournalAppendFlushedKeepsOldFileAndSequenceOnAtomicWriteFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "thread_transactional_compact.jsonl")
+	journal, err := NewExecutionJournal(path, "thread_transactional_compact")
+	if err != nil {
+		t.Fatalf("NewExecutionJournal: %v", err)
+	}
+	defer journal.Close()
+	if err := journal.Append(context.Background(), agentcore.NewSemanticRecord(
+		agentcore.SemanticKindUserMessage, "thread_transactional_compact", "run_1", "turn_1", "", "", map[string]any{"content": "known good"},
+	)); err != nil {
+		t.Fatalf("append baseline: %v", err)
+	}
+	if err := journal.Flush(context.Background()); err != nil {
+		t.Fatalf("flush baseline: %v", err)
+	}
+	beforeSeq := journal.NextSeq()
+	journal.atomicWriteHook = func(string, []byte) error { return errors.New("injected atomic write failure") }
+	_, err = journal.AppendFlushed(context.Background(), agentcore.NewSemanticRecord(
+		agentcore.SemanticKindContextCompactedV2, "thread_transactional_compact", "run_1", "", "", "", map[string]any{"bundle_v2": map[string]any{"invalid": "not relevant"}},
+	))
+	if err == nil {
+		t.Fatal("expected transactional atomic write failure")
+	}
+	journal.atomicWriteHook = nil
+	if journal.NextSeq() != beforeSeq || journal.PendingCount() != 0 {
+		t.Fatalf("transaction state was not restored: next=%d pending=%d", journal.NextSeq(), journal.PendingCount())
+	}
+	records, readErr := ReadExecutionJournal(path)
+	if readErr != nil {
+		t.Fatalf("read rolled-back journal: %v", readErr)
+	}
+	if len(records) != 1 || records[0].Kind != agentcore.SemanticKindUserMessage {
+		t.Fatalf("failed compact leaked into durable journal: %+v", records)
+	}
+	if err := journal.Append(context.Background(), agentcore.NewSemanticRecord(
+		agentcore.SemanticKindAssistantMessage, "thread_transactional_compact", "run_1", "turn_1", "", "", map[string]any{"content": "continued"},
+	)); err != nil {
+		t.Fatalf("append after rollback: %v", err)
+	}
+	if err := journal.Flush(context.Background()); err != nil {
+		t.Fatalf("flush after rollback: %v", err)
+	}
+	records, readErr = ReadExecutionJournal(path)
+	if readErr != nil || len(records) != 2 || records[1].Kind != agentcore.SemanticKindAssistantMessage {
+		t.Fatalf("journal did not continue from rolled-back sequence: records=%+v err=%v", records, readErr)
+	}
+}
+
+func TestExecutionJournalAppendFlushedTreatsPostRenameErrorAsCommitted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "thread_post_rename_compact.jsonl")
+	journal, err := NewExecutionJournal(path, "thread_post_rename_compact")
+	if err != nil {
+		t.Fatalf("NewExecutionJournal: %v", err)
+	}
+	defer journal.Close()
+	journal.atomicWriteHook = func(path string, data []byte) error {
+		if err := filestore.WriteFileAtomic(path, data); err != nil {
+			return err
+		}
+		return errors.New("injected error after durable rename")
+	}
+	assigned, err := journal.AppendFlushed(context.Background(), agentcore.NewSemanticRecord(
+		agentcore.SemanticKindContextCompactedV2, "thread_post_rename_compact", "run", "", "", "", map[string]any{"bundle_v2": "test"},
+	))
+	if err != nil || assigned.Seq != 1 {
+		t.Fatalf("durably renamed record was reported as failed: assigned=%+v err=%v", assigned, err)
+	}
+	journal.atomicWriteHook = nil
+	records, readErr := ReadExecutionJournal(path)
+	if readErr != nil || len(records) != 1 || records[0].RecordID != assigned.RecordID {
+		t.Fatalf("committed boundary was not restart-readable exactly once: records=%+v err=%v", records, readErr)
+	}
+	if appendErr := journal.Append(context.Background(), agentcore.NewSemanticRecord(
+		agentcore.SemanticKindUserMessage, "thread_post_rename_compact", "run", "", "", "", map[string]any{"content": "continue"},
+	)); appendErr != nil {
+		t.Fatalf("journal could not continue after committed boundary: %v", appendErr)
 	}
 }
 

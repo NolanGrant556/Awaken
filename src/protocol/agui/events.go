@@ -347,6 +347,13 @@ type Event struct {
 	CompactSummaryLatestUserPinned   *bool                       `json:"compactSummaryLatestUserPinned,omitempty"`
 	CompactFallbackMarker            string                      `json:"compactFallbackMarker,omitempty"`
 	CompactFailureReason             string                      `json:"compactFailureReason,omitempty"`
+	CompactMandatoryFloor            int                         `json:"compactMandatoryFloor,omitempty"`
+	CompactLocalProjected            int                         `json:"compactLocalProjected,omitempty"`
+	CompactConservativeProjected     int                         `json:"compactConservativeProjected,omitempty"`
+	CompactContributionTokens        map[string]int              `json:"compactContributionTokens,omitempty"`
+	CompactNativeAttempted           *bool                       `json:"compactNativeAttempted,omitempty"`
+	CompactNativeUsed                *bool                       `json:"compactNativeUsed,omitempty"`
+	CompactNativeReason              string                      `json:"compactNativeReason,omitempty"`
 	Memories                         []MemoryReceipt             `json:"memories,omitempty"`
 	StaticPermissionBehavior         string                      `json:"staticPermissionBehavior,omitempty"`
 	StaticPermissionReason           string                      `json:"staticPermissionReason,omitempty"`

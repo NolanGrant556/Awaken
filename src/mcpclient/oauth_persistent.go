@@ -20,7 +20,9 @@ type persistentOAuthHandler struct {
 	store              CredentialStore
 
 	mu          sync.Mutex
+	authorizeMu sync.Mutex
 	tokenSource oauth2.TokenSource
+	generation  uint64
 }
 
 func newPersistentOAuthHandler(credentialIdentity string, cfg AuthFlowConfig, store CredentialStore) *persistentOAuthHandler {
@@ -61,10 +63,25 @@ func (h *persistentOAuthHandler) TokenSource(ctx context.Context) (oauth2.TokenS
 		return nil, err
 	}
 	h.tokenSource = ts
+	h.generation++
 	return h.tokenSource, nil
 }
 
 func (h *persistentOAuthHandler) Authorize(ctx context.Context, req *http.Request, resp *http.Response) error {
+	h.mu.Lock()
+	startedGeneration := h.generation
+	h.mu.Unlock()
+	h.authorizeMu.Lock()
+	defer h.authorizeMu.Unlock()
+	h.mu.Lock()
+	completedByConcurrentFlow := h.generation != startedGeneration
+	h.mu.Unlock()
+	if completedByConcurrentFlow {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		return nil
+	}
 	discovered := discoverPersistentAuthState(ctx, req, resp, h.cfg)
 	handler, err := buildOAuthHandler(h.cfg)
 	if err != nil {
@@ -94,6 +111,7 @@ func (h *persistentOAuthHandler) Authorize(ctx context.Context, req *http.Reques
 	}
 	h.mu.Lock()
 	h.tokenSource = wrapped
+	h.generation++
 	h.mu.Unlock()
 	return nil
 }
@@ -179,7 +197,7 @@ func discoverPersistentAuthState(ctx context.Context, req *http.Request, resp *h
 	stored := StoredTokenSource{
 		ServerURL:    firstNonEmpty(strings.TrimSpace(cfg.ServerURL), requestURLString(req)),
 		RedirectURL:  strings.TrimSpace(cfg.RedirectURL),
-		ClientID:     strings.TrimSpace(cfg.ClientID),
+		ClientID:     firstNonEmpty(strings.TrimSpace(cfg.ClientID), strings.TrimSpace(cfg.ClientMetadataURL)),
 		ClientSecret: strings.TrimSpace(cfg.ClientSecret),
 		Scopes:       append([]string(nil), cfg.Scopes...),
 	}

@@ -134,6 +134,9 @@ func (claudeCodeAdapter) Parse(root string, candidate ir.ManifestCandidate, opti
 			plugin.Components = append(plugin.Components, component)
 		}
 	}
+	if err := appendSetupDeclarations(root, object, manifestPath, ir.DialectClaudeCode, &plugin); err != nil {
+		return ir.NormalizedPlugin{}, err
+	}
 	_ = options
 	return plugin, nil
 }

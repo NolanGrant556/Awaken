@@ -227,6 +227,84 @@ describe("ExtensionsView behavior", () => {
     expect(refreshButton?.disabled).toBe(false);
   });
 
+  it("connects an OAuth host connector through a browser session without exposing MCP server settings", async () => {
+    let connected = false;
+    const onNotice = vi.fn();
+    const listConnectors = vi.fn(async () => [{
+      id: "awaken.microsoft.outlook",
+      kind: "mcp" as const,
+      displayName: "Outlook",
+      description: "Outlook 邮件",
+      category: "chat",
+      provider: "Microsoft",
+      state: connected ? "connected" as const : "needs-auth" as const,
+      sourceOrigin: "builtin",
+      authType: "oauth2",
+      serverNames: ["awaken-outlook"],
+    }]);
+    const connectConnector = vi.fn(async () => ({
+      connectorId: "awaken.microsoft.outlook",
+      connectorState: "authorizing",
+      sessionId: "connector-session",
+      authStatus: "authorizing" as const,
+      message: "请在浏览器完成 Outlook 授权",
+    }));
+    const getConnectorAuthSession = vi.fn(async () => {
+      connected = true;
+      return {
+        sessionId: "connector-session",
+        connectorId: "awaken.microsoft.outlook",
+        status: "ready" as const,
+      };
+    });
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => [runtimeProject]),
+      listConnectors,
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => [{
+        name: "awaken-outlook",
+        displayName: "Outlook",
+        state: connected ? "connected" as const : "needs-auth" as const,
+        transport: "in-process",
+        scope: "user",
+        sourceConnectorId: "awaken.microsoft.outlook",
+      }]),
+      listSkills: vi.fn(async () => []),
+      listPlugins: vi.fn(async () => []),
+      connectConnector,
+      disconnectConnector: vi.fn(),
+      getConnectorAuthSession,
+      cancelConnectorAuthSession: vi.fn(),
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="connectors"
+          desktopReady
+          runtimeClient={runtimeClient}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={onNotice}
+        />,
+      );
+    });
+    await settle();
+
+    expect(document.querySelector('button[aria-label="设置 Outlook"]')).toBeNull();
+    const connectButton = document.querySelector<HTMLButtonElement>('button[aria-label="连接 Outlook"]');
+    expect(connectButton).not.toBeNull();
+    await act(async () => connectButton?.click());
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 850)));
+
+    expect(connectConnector).toHaveBeenCalledWith("awaken.microsoft.outlook");
+    expect(getConnectorAuthSession).toHaveBeenCalledWith("connector-session");
+    expect(onNotice).toHaveBeenCalledWith("Outlook 已连接");
+    expect(document.querySelector('button[aria-label="设置 Outlook"]')).toBeNull();
+    expect(document.querySelector('button[aria-label="断开 Outlook"]')).not.toBeNull();
+  });
+
   it("automatically validates a selected ZIP and replaces a same-name Plugin", async () => {
     const plugin: RuntimePlugin = {
       name: "acme.tools",

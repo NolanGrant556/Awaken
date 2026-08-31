@@ -88,20 +88,21 @@ type Config struct {
 }
 
 type CompiledHook struct {
-	StableID     string            `json:"stableId"`
-	Event        Event             `json:"event"`
-	Matcher      Matcher           `json:"matcher"`
-	Command      CommandHook       `json:"command"`
-	SourceKind   SourceKind        `json:"sourceKind"`
-	SourcePath   string            `json:"sourcePath"`
-	ProjectRoot  string            `json:"projectRoot,omitempty"`
-	PluginName   string            `json:"pluginName,omitempty"`
-	PluginDigest string            `json:"pluginDigest,omitempty"`
-	LogicalID    string            `json:"logicalId,omitempty"`
-	RevisionID   string            `json:"revisionId,omitempty"`
-	SourceEvent  string            `json:"sourceEvent,omitempty"`
-	Protocol     string            `json:"protocol,omitempty"`
-	Environment  map[string]string `json:"-"`
+	StableID          string            `json:"stableId"`
+	Event             Event             `json:"event"`
+	Matcher           Matcher           `json:"matcher"`
+	Command           CommandHook       `json:"command"`
+	SourceKind        SourceKind        `json:"sourceKind"`
+	SourcePath        string            `json:"sourcePath"`
+	ProjectRoot       string            `json:"projectRoot,omitempty"`
+	PluginName        string            `json:"pluginName,omitempty"`
+	PluginDigest      string            `json:"pluginDigest,omitempty"`
+	LogicalID         string            `json:"logicalId,omitempty"`
+	RevisionID        string            `json:"revisionId,omitempty"`
+	SourceEvent       string            `json:"sourceEvent,omitempty"`
+	Protocol          string            `json:"protocol,omitempty"`
+	Environment       map[string]string `json:"-"`
+	SecretEnvironment map[string]string `json:"-"`
 }
 
 type Diagnostic struct {

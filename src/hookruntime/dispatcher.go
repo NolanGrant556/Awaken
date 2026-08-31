@@ -293,6 +293,14 @@ func (d *Dispatcher) execute(parent context.Context, envelope InputEnvelope, hoo
 	cmd := exec.CommandContext(processCtx, hook.Command.Command[0], hook.Command.Command[1:]...)
 	configureProcessTree(cmd)
 	cmd.Dir = cwd
+	resolvedEnvironment, secretErr := d.resolveHookEnvironment(processCtx, hook)
+	if secretErr != nil {
+		timer.Stop()
+		cancel()
+		out.ReasonCode = "hook_secret_unavailable"
+		return out, Response{Action: "continue"}, time.Since(started), nil
+	}
+	hook.Environment = resolvedEnvironment
 	cmd.Env = minimalEnvironment(d.path, envelope, hook)
 	input, inputErr := commandInput(envelope, hook)
 	if inputErr != nil {
@@ -346,6 +354,24 @@ func (d *Dispatcher) execute(parent context.Context, envelope InputEnvelope, hoo
 		finalOut, response, elapsed := execution.finalize(waitErr)
 		return finalOut, response, elapsed, nil
 	}
+}
+
+func (d *Dispatcher) resolveHookEnvironment(ctx context.Context, hook CompiledHook) (map[string]string, error) {
+	values := make(map[string]string, len(hook.Environment)+len(hook.SecretEnvironment))
+	for key, value := range hook.Environment {
+		values[key] = value
+	}
+	for key, ref := range hook.SecretEnvironment {
+		if d.secretResolver == nil {
+			return nil, errors.New("Hook secret resolver unavailable")
+		}
+		value, err := d.secretResolver.ResolveHookSecret(ctx, ref)
+		if err != nil || strings.ContainsRune(value, '\x00') {
+			return nil, errors.New("Hook secret unavailable")
+		}
+		values[key] = value
+	}
+	return values, nil
 }
 
 type asyncDeclaration struct {

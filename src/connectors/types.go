@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"context"
+	"time"
 
 	"awaken/src/mcpclient"
 	"awaken/src/tool"
@@ -35,6 +36,18 @@ const (
 	AuthAPIKey AuthType = "api_key"
 	AuthNone   AuthType = "none"
 )
+
+// OAuthConnectorSpec is the host-owned authorization contract for a built-in
+// connector. Public client identifiers are configuration, not secrets; access
+// and refresh tokens never live in the definition or cross the Core boundary.
+type OAuthConnectorSpec struct {
+	AuthorizationEndpoint string            `json:"authorizationEndpoint"`
+	TokenEndpoint         string            `json:"tokenEndpoint"`
+	ClientID              string            `json:"-"`
+	Scopes                []string          `json:"scopes,omitempty"`
+	Resource              string            `json:"resource,omitempty"`
+	AuthorizationParams   map[string]string `json:"-"`
+}
 
 // TrustLevel indicates the trust classification of a connector source.
 type TrustLevel string
@@ -108,6 +121,10 @@ type ConnectorDefinition struct {
 	// RequiredScopes lists the OAuth scopes needed for this connector to function.
 	RequiredScopes []string `json:"requiredScopes,omitempty"`
 
+	// OAuth is present only for host-owned OAuth connectors. It is consumed by
+	// Core's connector account service and is never returned to Renderer.
+	OAuth *OAuthConnectorSpec `json:"-"`
+
 	// TrustLevel indicates the trust classification of the source.
 	TrustLevel TrustLevel `json:"trustLevel"`
 
@@ -174,6 +191,42 @@ type ConnectorStatus struct {
 	// LegacyMCPReviewRequired is true when a same-name user MCP record did not
 	// exactly match the retired built-in factory and was therefore preserved.
 	LegacyMCPReviewRequired bool `json:"legacyMcpReviewRequired,omitempty"`
+
+	// Account is a deliberately small, non-sensitive connected-account view.
+	Account *ConnectorAccountProfile `json:"account,omitempty"`
+}
+
+type ConnectorAccountProfile struct {
+	DisplayName string `json:"displayName,omitempty"`
+	TenantName  string `json:"tenantName,omitempty"`
+}
+
+// AccountReadiness is supplied by the Core-owned connector account service.
+// Registry uses it to keep OAuth readiness separate from MCP transport state.
+type AccountReadiness struct {
+	State     ConnectorState
+	LastError string
+	Account   *ConnectorAccountProfile
+}
+
+type AccountReadinessProvider interface {
+	AccountReadiness(definition ConnectorDefinition) AccountReadiness
+}
+
+type ConnectorAuthStartResult struct {
+	SessionID        string     `json:"sessionId,omitempty"`
+	ConnectorID      string     `json:"connectorId"`
+	Status           string     `json:"status"`
+	AuthorizationURL string     `json:"authorizationUrl,omitempty"`
+	ExpiresAt        *time.Time `json:"expiresAt,omitempty"`
+}
+
+type ConnectorAuthSession struct {
+	SessionID    string     `json:"sessionId"`
+	ConnectorID  string     `json:"connectorId"`
+	Status       string     `json:"status"`
+	ErrorMessage string     `json:"errorMessage,omitempty"`
+	ExpiresAt    *time.Time `json:"expiresAt,omitempty"`
 }
 
 type CLIActivation string

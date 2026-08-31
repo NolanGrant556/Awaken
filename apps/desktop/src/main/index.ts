@@ -104,6 +104,7 @@ import {
   type ProjectReorderResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
+  type RuntimeConnectorAuthSession,
   type RuntimeInfoWire,
   type RuntimeLogEntry,
   type RuntimeMcpServer,
@@ -122,6 +123,9 @@ import {
   type RuntimePluginHookReceipt,
   type RuntimePluginHookReceiptResponse,
   type RuntimePluginConfigurationResponse,
+  type RuntimePluginAuthSession,
+  type RuntimePluginSetupMutationRequest,
+  type RuntimePluginSetupResponse,
   type RuntimePluginSource,
   type RuntimePluginValidation,
   type RuntimeSkill,
@@ -171,6 +175,11 @@ import {
   normalizeAgentPlanMediaTools,
 } from "../shared/runtime.js";
 import { updateMainWindowBackground, windowBackgroundColor } from "./window-background.js";
+import {
+  sanitizedPluginAuthSession,
+  validatePluginAuthBrowserUrl,
+  type CorePluginAuthStartResult,
+} from "./plugin-auth-browser.js";
 import {
   pickPluginSource,
   resolveDroppedPluginSourcePath,
@@ -2109,13 +2118,18 @@ ipcMain.handle("awaken:list-connectors", async () => {
 
 ipcMain.handle("awaken:connect-connector", async (_event, connectorId: string) => {
   await prepareNetworkRoute("connector-connect");
-  return requestRuntime<RuntimeConnectorActionResponse>(`/v1/connectors/${connectorId}/connect`, {
+  const result = await requestRuntime<RuntimeConnectorActionResponse & { authorizationUrl?: string }>(`/v1/connectors/${connectorId}/connect`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({}),
   });
+  if (result.authorizationUrl) {
+    await shell.openExternal(validatePluginAuthBrowserUrl(result.authorizationUrl));
+  }
+  const { authorizationUrl: _authorizationUrl, ...sanitized } = result;
+  return sanitized;
 });
 
 ipcMain.handle("awaken:disconnect-connector", async (_event, connectorId: string) => {
@@ -2124,6 +2138,20 @@ ipcMain.handle("awaken:disconnect-connector", async (_event, connectorId: string
     {
       method: "POST",
     },
+  );
+});
+
+ipcMain.handle("awaken:get-connector-auth-session", async (_event, sessionId: string) => {
+  return requestRuntime<RuntimeConnectorAuthSession>(
+    `/v1/connectors/auth/sessions/${encodeURIComponent(String(sessionId ?? "").trim())}`,
+    { method: "GET" },
+  );
+});
+
+ipcMain.handle("awaken:cancel-connector-auth-session", async (_event, sessionId: string) => {
+  return requestRuntime<RuntimeConnectorAuthSession>(
+    `/v1/connectors/auth/sessions/${encodeURIComponent(String(sessionId ?? "").trim())}/cancel`,
+    { method: "POST" },
   );
 });
 
@@ -2550,6 +2578,86 @@ ipcMain.handle(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request),
       },
+    );
+  },
+);
+
+ipcMain.handle("awaken:get-plugin-setup", async (_event, name: string) => {
+  return requestRuntime<RuntimePluginSetupResponse>(
+    `/v1/plugins/${encodeURIComponent(String(name ?? "").trim())}/setup`,
+    { method: "GET" },
+  );
+});
+
+ipcMain.handle(
+  "awaken:start-plugin-setup",
+  async (
+    _event,
+    name: string,
+    setupId: string,
+    request: RuntimePluginSetupMutationRequest,
+  ): Promise<RuntimePluginAuthSession> => {
+    const pluginName = String(name ?? "").trim();
+    const requirementId = String(setupId ?? "").trim();
+    if (!pluginName || !requirementId || !request?.pluginDigest?.trim() || !request?.requirementFingerprint?.trim()) {
+      throw new Error("插件、设置项和版本指纹不能为空");
+    }
+    const result = await requestRuntime<CorePluginAuthStartResult>(
+      `/v1/plugins/${encodeURIComponent(pluginName)}/setup/${encodeURIComponent(requirementId)}/sessions`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      },
+    );
+    const browserUrl = result.authorizationUrl || result.verificationUrl;
+    if (browserUrl) {
+      await shell.openExternal(validatePluginAuthBrowserUrl(browserUrl));
+    }
+    if (result.displayUserCode && result.userCode) {
+      await dialog.showMessageBox({
+        type: "info",
+        title: "连接插件账号",
+        message: "在浏览器中输入此临时代码",
+        detail: result.userCode,
+        buttons: ["我知道了"],
+        noLink: true,
+      });
+    }
+    return sanitizedPluginAuthSession(pluginName, requirementId, result);
+  },
+);
+
+ipcMain.handle("awaken:get-plugin-auth-session", async (_event, name: string, sessionId: string) => {
+  return requestRuntime<RuntimePluginAuthSession>(
+    `/v1/plugins/${encodeURIComponent(String(name ?? "").trim())}/setup/sessions/${encodeURIComponent(String(sessionId ?? "").trim())}`,
+    { method: "GET" },
+  );
+});
+
+ipcMain.handle("awaken:cancel-plugin-auth-session", async (_event, name: string, sessionId: string) => {
+  return requestRuntime<RuntimePluginAuthSession>(
+    `/v1/plugins/${encodeURIComponent(String(name ?? "").trim())}/setup/sessions/${encodeURIComponent(String(sessionId ?? "").trim())}/cancel`,
+    { method: "POST" },
+  );
+});
+
+ipcMain.handle(
+  "awaken:probe-plugin-setup",
+  async (_event, name: string, setupId: string, request: RuntimePluginSetupMutationRequest) => {
+    return requestRuntime<RuntimePluginSetupResponse>(
+      `/v1/plugins/${encodeURIComponent(String(name ?? "").trim())}/setup/${encodeURIComponent(String(setupId ?? "").trim())}/probe`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) },
+    );
+  },
+);
+
+ipcMain.handle(
+  "awaken:disconnect-plugin-setup",
+  async (_event, name: string, setupId: string, request: RuntimePluginSetupMutationRequest) => {
+    return requestRuntime<RuntimePluginSetupResponse>(
+      `/v1/plugins/${encodeURIComponent(String(name ?? "").trim())}/setup/${encodeURIComponent(String(setupId ?? "").trim())}/credential`,
+      { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) },
     );
   },
 );

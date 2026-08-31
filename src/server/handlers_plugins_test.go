@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -16,6 +17,55 @@ import (
 	awruntime "awaken/src/runtime"
 	"awaken/src/tool/trash"
 )
+
+func TestPluginSetupAPIUsesDigestAndRequirementFingerprintCAS(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AWAKEN_HOME", home)
+	store := plugins.NewStoreAt(home)
+	source := t.TempDir()
+	writeHTTPPluginFixture(t, source, "setup-plugin")
+	writePluginTestFile(t, filepath.Join(source, ".awaken", "setup.json"), `{
+  "version": 1,
+  "requirements": [{
+    "id": "mail-api-key",
+    "kind": "secret",
+    "title": "Mail API Key",
+    "required": true,
+    "field": {"key":"MAIL_API_KEY","type":"string","required":true}
+  }]
+}`)
+	installed, err := store.Install(context.Background(), plugins.InstallRequest{Source: plugins.Source{Kind: plugins.SourceLocalPath, Path: source}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil, store)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/plugins/setup-plugin/setup", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("setup status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var setupResponse struct {
+		Items   []plugins.SetupItem  `json:"items"`
+		Summary plugins.SetupSummary `json:"summary"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &setupResponse); err != nil {
+		t.Fatal(err)
+	}
+	if len(setupResponse.Items) != 1 || setupResponse.Items[0].Status != plugins.SetupNeedsConfiguration || setupResponse.Summary.NeedsConfiguration != 1 {
+		t.Fatalf("setup response=%s", recorder.Body.String())
+	}
+	probeBody, _ := json.Marshal(map[string]string{
+		"pluginDigest":           installed.Plugin.Digest,
+		"requirementFingerprint": "stale-fingerprint",
+	})
+	recorder = httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/plugins/setup-plugin/setup/mail-api-key/probe", bytes.NewReader(probeBody))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), "PLUGIN_SETUP_STALE") {
+		t.Fatalf("stale setup mutation was not rejected: status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
 
 type pluginTestTrash struct {
 	dir string

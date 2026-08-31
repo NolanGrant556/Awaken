@@ -679,6 +679,20 @@ func TestVendorMCPPreservesOAuthResource(t *testing.T) {
 	}
 }
 
+func TestVendorMCPPreservesPublicOAuthClientRegistration(t *testing.T) {
+	component := ir.Component{
+		DisplayName: "remote", SourceDialect: ir.DialectCodex,
+		MCP: &ir.MCPSpec{
+			ShortName: "remote", Transport: "streamable-http", URL: "https://mcp.example.test/rpc",
+			OAuthClientID: "public-client", OAuthClientMetadataURL: "https://awaken.example/oauth/client.json", OAuthScopes: []string{"mcp.read"},
+		},
+	}
+	loaded, diagnostic := translateVendorMCP(component, &InstalledPlugin{Name: "oauth", Root: t.TempDir(), DataDir: t.TempDir(), Dialect: ir.DialectCodex}, pluginvariables.InterpolationContext{})
+	if diagnostic != nil || loaded.Config.OAuthClientID != "public-client" || loaded.Config.OAuthClientMetadataURL != "https://awaken.example/oauth/client.json" || len(loaded.Config.OAuthScopes) != 1 {
+		t.Fatalf("loaded=%#v diagnostic=%#v", loaded, diagnostic)
+	}
+}
+
 func writeTestFile(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

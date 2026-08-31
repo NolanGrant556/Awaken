@@ -29,6 +29,7 @@ export type AwakenPluginConsoleComponent = {
   desiredState: string;
   ruleActivation?: string;
   configurationState: string;
+  authenticationState?: string;
   runtimeState: string;
   integrityState: string;
   switchable: boolean;
@@ -39,6 +40,19 @@ export type AwakenPluginConsoleComponent = {
   command?: { invocationName?: string; argumentHint?: string; acceptsArguments?: boolean; argumentsRequired?: boolean };
   hook?: { sourceEvent?: string; mappedEvent?: string; matcher?: string; condition?: string; handlerType?: string; scope?: string; timeoutSeconds?: number; async?: boolean; asyncRewake?: boolean };
   variable?: { key?: string; type?: string; required?: boolean; secret?: boolean };
+};
+
+export type AwakenPluginSetupItem = {
+  id: string;
+  kind: string;
+  title: string;
+  description?: string;
+  status: string;
+  message?: string;
+  required?: boolean;
+  sourcePath?: string;
+  connectorId?: string;
+  actions: string[];
 };
 
 export type AwakenPluginConsoleDetail = {
@@ -109,6 +123,7 @@ export type AwakenPluginConsoleProps = {
   version?: string;
   enabled: boolean;
   components: AwakenPluginConsoleComponent[];
+  setupItems?: AwakenPluginSetupItem[];
   selectedDetail?: AwakenPluginConsoleDetail | null;
   detailLoading?: boolean;
   activeDetailTab: "overview" | "preview" | "source" | "diagnostics";
@@ -123,6 +138,7 @@ export type AwakenPluginConsoleProps = {
   onUninstall: () => void;
   onComponentOpen: (component: AwakenPluginConsoleComponent) => void;
   onComponentEnabledChange: (component: AwakenPluginConsoleComponent, enabled: boolean) => void;
+  onSetupAction?: (item: AwakenPluginSetupItem, action: string) => void;
   onDetailTabChange: (tab: AwakenPluginConsoleProps["activeDetailTab"]) => void;
   onDetailClose: () => void;
   onMcpToolEnabledChange?: (
@@ -197,6 +213,7 @@ function readOnlyReason(component: AwakenPluginConsoleComponent): string {
   if (component.validation === "invalid") return "修复无效的清单或源文件后才能操作";
   if (component.integrityState !== "intact") return "安装包完整性异常，运行已阻止";
   if (component.configurationState === "needs_configuration") return "完成必填配置后才能启用";
+  if ((component.authenticationState ?? "not_required") !== "ready" && (component.authenticationState ?? "not_required") !== "not_required") return "完成账号连接后才能启用";
   if (component.mappingState === "recognized_unsupported") return "Awaken 当前没有安全的运行适配器";
   if (component.mappingState === "ignored_by_dialect") return "此来源方言不会加载该文件";
   if (component.kind === "variable") return "请打开详情管理配置";
@@ -209,7 +226,77 @@ function componentCanUseInChat(component: AwakenPluginConsoleComponent): boolean
     component.validation !== "invalid" &&
     component.integrityState === "intact" &&
     component.configurationState !== "needs_configuration" &&
+    ((component.authenticationState ?? "not_required") === "ready" || (component.authenticationState ?? "not_required") === "not_required") &&
     (component.mappingState === "native" || component.mappingState === "adapted")
+  );
+}
+
+const SETUP_STATUS_LABELS: Record<string, string> = {
+  ready: "已就绪",
+  needs_configuration: "待配置",
+  needs_auth: "待连接",
+  authorizing: "等待授权",
+  verifying: "正在验证",
+  expired: "已过期",
+  failed: "失败",
+  unsupported: "当前不支持",
+};
+
+const SETUP_ACTION_LABELS: Record<string, string> = {
+  configure: "配置",
+  authorize: "连接账号",
+  cancel: "取消",
+  retry: "重试",
+  probe: "重新检测",
+  disconnect: "退出登录",
+};
+
+function PluginSetupSection({
+  items,
+  busy,
+  onAction,
+}: {
+  items: AwakenPluginSetupItem[];
+  busy?: boolean;
+  onAction?: (item: AwakenPluginSetupItem, action: string) => void;
+}) {
+  if (items.length === 0) return null;
+  const pending = items.filter((item) => item.status !== "ready");
+  const visible = pending.length > 0 ? pending : items;
+  return (
+    <section className="aw-plugin-setup" aria-label="插件设置">
+      <header>
+        <span>
+          <h2>待完成设置</h2>
+          <p>{pending.length > 0 ? `${pending.length} 项需要处理，依赖这些设置的组件暂不可用` : "插件所需设置均已完成"}</p>
+        </span>
+      </header>
+      <div className="aw-plugin-setup__items">
+        {visible.map((item) => {
+          const actions = item.actions.filter((action) => action !== "inspect_only");
+          return (
+            <article key={item.id} className="aw-plugin-setup__item" data-status={item.status}>
+              <span className="aw-plugin-setup__copy">
+                <span className="aw-plugin-setup__title">
+                  <strong>{item.title}</strong>
+                  <em>{SETUP_STATUS_LABELS[item.status] ?? item.status}</em>
+                </span>
+                <small>{item.message || item.description || (item.connectorId ? `Connector ID：${item.connectorId}` : item.sourcePath)}</small>
+              </span>
+              {actions.length > 0 ? (
+                <span className="aw-plugin-setup__actions">
+                  {actions.map((action) => (
+                    <AwakenButton key={action} size="sm" variant={action === "authorize" || action === "configure" ? "primary" : "default"} disabled={busy || !onAction} onClick={() => onAction?.(item, action)}>
+                      {SETUP_ACTION_LABELS[action] ?? action}
+                    </AwakenButton>
+                  ))}
+                </span>
+              ) : null}
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -755,6 +842,7 @@ export function AwakenPluginConsole({
   version,
   enabled,
   components,
+  setupItems = [],
   selectedDetail,
   detailLoading,
   activeDetailTab,
@@ -769,6 +857,7 @@ export function AwakenPluginConsole({
   onUninstall,
   onComponentOpen,
   onComponentEnabledChange,
+  onSetupAction,
   onDetailTabChange,
   onDetailClose,
   onMcpToolEnabledChange,
@@ -825,6 +914,7 @@ export function AwakenPluginConsole({
           </div>
         </header>
         {errorMessage ? <div className="aw-plugin-console__error" role="alert">{errorMessage}</div> : null}
+        <PluginSetupSection items={setupItems} busy={busy} onAction={onSetupAction} />
         <div className="aw-plugin-console__groups" aria-busy={loading}>
           {loading ? <div className="aw-plugin-console__loading" role="status" aria-label="正在加载插件组件">
             <span /><span /><span />

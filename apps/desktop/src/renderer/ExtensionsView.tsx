@@ -346,8 +346,10 @@ function mcpConnectorCardItem(
   busyConnectorId: string | null,
   ownedServer: RuntimeMcpServer | undefined,
   busyMcpServerName: string | null,
+  authorizing = false,
 ): AwakenConnectorCardItem {
-  const renderedState = ownedServer?.state ?? connector.state;
+  const managedServer = connector.authType === "oauth2" ? undefined : ownedServer;
+  const renderedState = managedServer?.state ?? connector.state;
   return {
     id: connector.id,
     variant: "catalog",
@@ -360,12 +362,14 @@ function mcpConnectorCardItem(
       sourceLabel(connector.sourceOrigin),
       ...(connector.serverNames ?? []),
     ],
+    errors: connector.lastError?.trim() ? [connector.lastError.trim()] : undefined,
     connected: connector.state === "connected",
-    enabled: ownedServer ? ownedServer.state !== "disabled" : undefined,
-    mcpServerName: ownedServer?.name,
+    authorizing,
+    enabled: managedServer ? managedServer.state !== "disabled" : undefined,
+    mcpServerName: managedServer?.name,
     busy:
       busyConnectorId === connector.id ||
-      (ownedServer !== undefined && busyMcpServerName === ownedServer.name),
+      (managedServer !== undefined && busyMcpServerName === managedServer.name),
   };
 }
 
@@ -751,6 +755,7 @@ export function ExtensionsView({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [busyConnectorId, setBusyConnectorId] = useState<string | null>(null);
+  const [connectorAuthSessions, setConnectorAuthSessions] = useState<Record<string, string>>({});
   const [cliDetailConnectorId, setCliDetailConnectorId] = useState<CliProviderId | null>(null);
   const [cliDetailLoading, setCliDetailLoading] = useState(false);
   const [busyMcpServerName, setBusyMcpServerName] = useState<string | null>(null);
@@ -1287,18 +1292,73 @@ export function ExtensionsView({
     setBusyConnectorId(connector.id);
     setErrorMessage(null);
     try {
+      const activeSessionId = connectorAuthSessions[connector.id];
+      if (activeSessionId) {
+        if (!runtimeClient.cancelConnectorAuthSession) {
+          throw new Error("当前 Desktop 不支持取消连接器授权");
+        }
+        await runtimeClient.cancelConnectorAuthSession(activeSessionId);
+        setConnectorAuthSessions((current) => {
+          const next = { ...current };
+          delete next[connector.id];
+          return next;
+        });
+        onNotice(`${connector.displayName} 授权已取消`);
+        await refresh();
+        return;
+      }
       if (connector.state === "connected") {
         const result = await runtimeClient.disconnectConnector(connector.id);
         onNotice(result.message ?? `${connector.displayName} 已断开`);
       } else {
         const result = await runtimeClient.connectConnector(connector.id);
         onNotice(result.message ?? `${connector.displayName} 已连接`);
+        if (result.sessionId) {
+          setConnectorAuthSessions((current) => ({ ...current, [connector.id]: result.sessionId! }));
+          void pollConnectorAuthSession(connector, result.sessionId);
+        }
       }
       await refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "连接器操作失败");
     } finally {
       setBusyConnectorId(null);
+    }
+  }
+
+  async function pollConnectorAuthSession(connector: RuntimeConnector, sessionId: string): Promise<void> {
+    if (!runtimeClient.getConnectorAuthSession) {
+      setErrorMessage("当前 Desktop 不支持连接器授权会话");
+      return;
+    }
+    for (;;) {
+      await new Promise((resolve) => window.setTimeout(resolve, 750));
+      try {
+        const session = await runtimeClient.getConnectorAuthSession(sessionId);
+        if (session.status === "authorizing" || session.status === "verifying") continue;
+        setConnectorAuthSessions((current) => {
+          if (current[connector.id] !== sessionId) return current;
+          const next = { ...current };
+          delete next[connector.id];
+          return next;
+        });
+        if (session.status === "ready") {
+          onNotice(`${connector.displayName} 已连接`);
+        } else if (session.status !== "cancelled") {
+          setErrorMessage(session.errorMessage?.trim() || `${connector.displayName} 授权未完成`);
+        }
+        await refresh();
+        return;
+      } catch (error) {
+        setConnectorAuthSessions((current) => {
+          if (current[connector.id] !== sessionId) return current;
+          const next = { ...current };
+          delete next[connector.id];
+          return next;
+        });
+        setErrorMessage(error instanceof Error ? error.message : "连接器授权状态读取失败");
+        return;
+      }
     }
   }
 
@@ -1908,6 +1968,7 @@ export function ExtensionsView({
         busyConnectorId,
         findConnectorOwnedMcpServer(connector, mcpServers),
         busyMcpServerName,
+        Boolean(connectorAuthSessions[connector.id]),
       ),
   );
   const userMcpConnectorItems = [
@@ -1917,6 +1978,7 @@ export function ExtensionsView({
         busyConnectorId,
         findConnectorOwnedMcpServer(connector, mcpServers),
         busyMcpServerName,
+        Boolean(connectorAuthSessions[connector.id]),
       ),
     ),
     ...visibleMcpServers.map((server) => mcpServerCardItem(server, busyMcpServerName)),

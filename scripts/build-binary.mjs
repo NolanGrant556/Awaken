@@ -12,6 +12,19 @@ const targets = process.env.AWAKEN_BINARY_TARGETS
   : process.platform === "darwin"
     ? ["darwin-arm64", "darwin-x64"]
     : [currentTarget];
+const microsoftOutlookClientId = (process.env.AWAKEN_MICROSOFT_CLIENT_ID ?? "").trim();
+if (microsoftOutlookClientId && !/^[A-Za-z0-9._-]+$/.test(microsoftOutlookClientId)) {
+  throw new Error("AWAKEN_MICROSOFT_CLIENT_ID contains unsupported characters");
+}
+
+function coreBuildArgs(outputPath) {
+  const args = ["build"];
+  if (microsoftOutlookClientId) {
+    args.push("-ldflags", `-X=main.microsoftOutlookClientID=${microsoftOutlookClientId}`);
+  }
+  args.push("-o", outputPath, "./cmd/awaken-core");
+  return args;
+}
 
 function parseTarget(target) {
   const [platform, arch] = target.split("-");
@@ -46,7 +59,7 @@ for (const target of targets) {
 
   console.log(`[build-binary] building awaken-core for ${target} -> ${outputPath}`);
   try {
-    execFileSync("go", ["build", "-o", outputPath, "./cmd/awaken-core"], {
+    execFileSync("go", coreBuildArgs(outputPath), {
       cwd: root,
       env: {
         ...process.env,

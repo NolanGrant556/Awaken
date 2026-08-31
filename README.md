@@ -27,7 +27,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | 工具、权限与安全执行 | 七个模型基础工具、provider/capability/dependency、每 run 可用性快照、零审批、TaskScope/Trash；工具渐进披露（低频内建辅助工具与 MCP 工具的定义按需经 `tool_find` 检索加载，不长期占用上下文）；root-only 归档历史只读桥；user/project/project-local Hook、自然语言配置工具、command/受控 HTTP/prompt/只读 agent 执行器、十一类边界、阻断/输入更新、耐久回执与显式 Skill 激活注册；以及保留工具的窄 broker 合同 | [04 工具、权限与安全执行](docs/04_工具权限与审批/索引.md) |
 | 模型与供应商 | 模型 profile、能力与余额、调用链、安全凭据存储及故障恢复 | [05 模型与供应商配置](docs/05_模型与供应商配置/索引.md) |
 | MCP runtime | user/project/dynamic 配置、stdio/http/sse、动态工具直通、可选 Artifact metadata、认证与 prompt/resource Skill bridge | [06 MCP 运行时](docs/06_MCP运行时/索引.md) |
-| 连接器 | MCP/CLI provider 目录、官方 CLI 安装与授权、生命周期、readiness 与重启 ownership 边界 | [07 连接器](docs/07_连接器/索引.md) |
+| 连接器 | MCP/CLI provider 目录、官方 CLI 安装与授权、host Connector 本地 OAuth 账号、生命周期、readiness 与重启 ownership 边界；当前 Awaken Outlook 通过系统浏览器 PKCE 与本地 Microsoft Graph MCP 提供邮件 CRUD | [07 连接器](docs/07_连接器/索引.md) |
 | 技能 | 多来源 Universal Skill 完整目录包发现、按需文件树/正文/资源、composer 当前选择的 run-scoped 确定性绑定、统一 catalog、inline/真实 child fork、MCP 动态来源与恢复；composer 显式激活后可注册包内受控 Hook；模型可用内置 Creator 脚手架生成完整候选，并 dry-run 校验、受控导出、安装或 Trash 替换用户 Skill；以及随 App 分发的 word/excel/ppt/pdf/code-search/PDF_Max/skill-creator/plugin-creator 八个内置 Skill 包 | [08 技能](docs/08_技能/索引.md) |
 | ACP Client/Agent | ACP Client（Phase 0–4）：runner 配置、probe 与 Desktop 设置页；`delegate_external_agent` 工具、会话生命周期与权限处理已在 Core 实现；Workbench 嵌套进度与 permission gate UI 已实现。ACP Agent（Phase 5）：`cmd/awaken-acp` 与 `src/acp/agentbridge` 已实现 stdio transport、launcher lease、authenticated control routes、Core 事件投影、模型 profile selector/default fallback 与 cancel/close；Desktop-owned 与 core-only 的真实 stdio prompt 已通过，第三方 client、headless 多进程验收与跨 Core 重启恢复仍是已知缺口 | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
 | AG-UI 与 A2UI | Awaken 自有事件到 AG-UI-compatible wire 的映射；A2UI 仅作参考 | [09 AG-UI 与 A2UI 协议](docs/09_AGUI与A2UI协议/索引.md) |
@@ -35,7 +35,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 | 长期记忆与 Dream | Markdown Memory、主模型相关性召回、受控工具、无正文事件、Settings 查看/删除、手动/空闲期 Dream、Workbench 紧凑回执与 Dream 重启恢复 | [11 长期记忆](docs/11_长期记忆/索引.md) |
 | 定时任务 | 首版已支持：左侧一级入口、循环/日程任务、10 个内置模板、创建/编辑/启停/删除/立即执行/取消、专属线程、执行历史、Core 内调度器与 misfire 恢复、Agent 与固定提醒两类任务；Agent 编辑器支持 `/` Skill 与 `@` Computer Use/Plugin 结构化选择；Desktop 完全退出后不运行 | [12 定时任务](docs/12_定时任务/索引.md) |
 | 移动端 | 当前不支持；已确认目标设计为 Desktop/Core 继续拥有本机执行与耐久事实，手机通过受控 Gateway 与可自托管 relay 查看和控制任务，不直接连接或暴露 loopback Core | [13 移动端](docs/13_移动端/索引.md) |
-| 插件 | Desktop 以自动校验/digest 锁定安装管理 Agent Plugins 1.0.0、Codex、Claude Code、Cursor user-scope ZIP 包；统一控制台展示 Skills、MCP、Rules、Agents、Commands、Hooks、Variables、Apps，并把可运行组件接入现有 Skill/MCP/instructions/Hook/Subagent runtime。安装入口只接受点击选择或拖入的本地 ZIP，同名插件自动安全替换，不提供 URL/Git 安装、Marketplace 或插件目录聚合；另支持组件与 tool override、变量/Secret、Hook 回执、Plugin Agent/Command/Rule Composer token、升级迁移、Trash 与 run generation lease。插件进程默认保持当前用户完全访问。Apps、project scope、跨重启 Hook receipt 索引和 Windows/Linux 实机仍不支持或未验收 | [14 插件](docs/14_插件/索引.md) |
+| 插件 | Desktop 以自动校验/digest 锁定安装管理 Agent Plugins 1.0.0、Codex、Claude Code、Cursor user-scope ZIP 包；统一控制台展示 Skills、MCP、Rules、Agents、Commands、Hooks、Variables、Apps，并把可运行组件接入现有 Skill/MCP/instructions/Hook/Subagent runtime。安装入口只接受点击选择或拖入的本地 ZIP，同名插件自动安全替换，不提供 URL/Git 安装、Marketplace 或插件目录聚合；另支持组件与 tool override、Variable/Secret、插件 OAuth/Device/MCP OAuth、宿主 CLI/host Connector 引用、Hook 回执、Plugin Agent/Command/Rule Composer token、升级迁移、Trash 与 run generation lease。插件进程默认保持当前用户完全访问，但不能读取宿主或其他插件凭据。Codex Apps 仍只识别不运行；project scope、跨重启 Hook receipt 索引和 Windows/Linux 实机仍不支持或未验收 | [14 插件](docs/14_插件/索引.md) |
 | 编码工作台 | 当前不支持；已确认目标设计为 checkpoint 式代码撤回、右侧栏“变更”diff 面板、typed 只读 `git_workspace` 工具与 Git 状态条、内置 Git 防护 Hook preset，以及项目 `.awaken/coding.json` 编码环境契约；当前可用的编码相关底座（typed 文件工具、`Bash`、`git_remote`、Subagent `git_worktree`）仍由 04/02 域拥有 | [15 编码工作台](docs/15_编码工作台/索引.md) |
 | 深度研究 | Workbench `@deep-research`（`@研究`）已支持宿主编排的只读多源研究报告（公开 HTTPS 网页 + 当前工作区），固定走规划/调研/核验/报告四阶段，以成功的 `Read`/`WebFetch` 回执约束证据并输出 Verified/Partial 报告卡；显式 URL 由宿主按原值抓取，逐跳 SSRF 检查 fail closed。任意远程 Git clone、用户 Skill 编排和不经 `WebFetch` 的 URL 核验不在范围 | [16 深度研究](docs/16_深度研究/索引.md) |
 
@@ -128,6 +128,7 @@ Gallery 使用 mock state，只能证明组件渲染，不能替代 Awaken Deskt
 | `src/protocol/agui` | Awaken 语义事件到 AG-UI-compatible wire 的映射 |
 | `src/tool`、`src/tools` | 工具合同、暴露、权限、Outcome 与内置工具 |
 | `src/mcpclient` | MCP 配置、连接、认证和动态工具桥接 |
+| `src/connectors`、`src/connectorauth`、`src/outlook` | Connector 目录/生命周期、宿主账号 OAuth 与 Outlook Graph 本地 MCP |
 | `src/skills`、`src/skillruntime` | Skill 发现、激活和执行 |
 | `src/plugins` | Agent Plugins 包格式、安装生命周期，以及向 08/06 提供 root 与 plugin-scope 配置 |
 | `scripts` | Desktop、构建与验收自动化 |

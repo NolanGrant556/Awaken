@@ -143,27 +143,29 @@ type LoadedServer struct {
 
 // InstalledPlugin is the runtime view of one installed package.
 type InstalledPlugin struct {
-	Name               string
-	Root               string
-	DataDir            string
-	Manifest           Manifest
-	Enabled            bool
-	Source             Source
-	Digest             string
-	ActualDigest       string
-	IntegrityValid     bool
-	InstalledAt        time.Time
-	SkillRoot          string
-	MCPServers         []LoadedServer
-	Dialect            ir.Dialect
-	ManifestPath       string
-	InstallationID     string
-	DisplayName        string
-	Components         []ir.Component
-	ComponentState     []ComponentState
-	ConfigurationState string
-	CompatibilityState string
-	Diagnostics        []Diagnostic
+	Name                string
+	Root                string
+	DataDir             string
+	Manifest            Manifest
+	Enabled             bool
+	Source              Source
+	Digest              string
+	ActualDigest        string
+	IntegrityValid      bool
+	InstalledAt         time.Time
+	SkillRoot           string
+	MCPServers          []LoadedServer
+	Dialect             ir.Dialect
+	ManifestPath        string
+	InstallationID      string
+	DisplayName         string
+	Components          []ir.Component
+	Setup               []ir.SetupRequirement
+	ComponentState      []ComponentState
+	ConfigurationState  string
+	AuthenticationState string
+	CompatibilityState  string
+	Diagnostics         []Diagnostic
 }
 
 // ComposerSelection is the host-resolved identity of an enabled Plugin chosen
@@ -192,10 +194,67 @@ type ComponentState struct {
 	DesiredState   string          `json:"desiredState"`
 	RuleActivation string          `json:"ruleActivation,omitempty"`
 	Configuration  string          `json:"configurationState"`
+	Authentication string          `json:"authenticationState"`
 	Runtime        string          `json:"runtimeState"`
 	Integrity      string          `json:"integrityState"`
 	Mapping        ir.MappingState `json:"mappingState"`
 	Switchable     bool            `json:"switchable"`
+}
+
+type SetupStatus string
+
+const (
+	SetupReady              SetupStatus = "ready"
+	SetupNeedsConfiguration SetupStatus = "needs_configuration"
+	SetupNeedsAuth          SetupStatus = "needs_auth"
+	SetupAuthorizing        SetupStatus = "authorizing"
+	SetupVerifying          SetupStatus = "verifying"
+	SetupExpired            SetupStatus = "expired"
+	SetupFailed             SetupStatus = "failed"
+	SetupUnsupported        SetupStatus = "unsupported"
+)
+
+type SetupAction string
+
+const (
+	SetupActionConfigure   SetupAction = "configure"
+	SetupActionAuthorize   SetupAction = "authorize"
+	SetupActionCancel      SetupAction = "cancel"
+	SetupActionRetry       SetupAction = "retry"
+	SetupActionProbe       SetupAction = "probe"
+	SetupActionDisconnect  SetupAction = "disconnect"
+	SetupActionInspectOnly SetupAction = "inspect_only"
+)
+
+type SetupItem struct {
+	Requirement ir.SetupRequirement `json:"requirement"`
+	Status      SetupStatus         `json:"status"`
+	ReasonCode  string              `json:"reasonCode,omitempty"`
+	Message     string              `json:"message,omitempty"`
+	Actions     []SetupAction       `json:"actions"`
+}
+
+type SetupSummary struct {
+	Total              int `json:"total"`
+	Ready              int `json:"ready"`
+	NeedsConfiguration int `json:"needsConfiguration"`
+	NeedsAuth          int `json:"needsAuth"`
+	InProgress         int `json:"inProgress"`
+	Failed             int `json:"failed"`
+	Unsupported        int `json:"unsupported"`
+}
+
+// SetupReadinessProvider supplies host-owned authentication and external
+// dependency readiness without giving the Plugin Store access to credentials.
+type SetupReadinessProvider interface {
+	SetupStatus(pluginName string, requirement ir.SetupRequirement) (SetupStatus, string)
+}
+
+// SetupCredentialReferenceProvider creates opaque Core-only references for
+// targeted runtime bindings. Store and compiler layers never resolve the
+// referenced credential value.
+type SetupCredentialReferenceProvider interface {
+	SetupCredentialReference(pluginName string, requirement ir.SetupRequirement, binding ir.SetupBinding) (string, error)
 }
 
 type ComponentDetail struct {
@@ -265,6 +324,7 @@ type ValidationResult struct {
 	Dialect           ir.Dialect             `json:"dialect,omitempty"`
 	ManifestPath      string                 `json:"manifestPath,omitempty"`
 	Components        []ir.Component         `json:"components,omitempty"`
+	Setup             []ir.SetupRequirement  `json:"setupItems,omitempty"`
 	ComponentTotals   ComponentTotals        `json:"componentTotals"`
 	Candidates        []ir.ManifestCandidate `json:"candidates,omitempty"`
 	RequiresSelection bool                   `json:"requiresSelection,omitempty"`

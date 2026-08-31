@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"awaken/src/mcpclient"
+	"awaken/src/pluginauth"
 	"awaken/src/plugins"
 	awruntime "awaken/src/runtime"
 	"awaken/src/skills"
@@ -17,35 +18,39 @@ type pluginHandlers struct {
 	store      *plugins.Store
 	manager    *mcpclient.Manager
 	runService *awruntime.RunService
+	auth       *pluginauth.Service
 }
 
 type pluginInfo struct {
-	Name               string                  `json:"name"`
-	Version            string                  `json:"version,omitempty"`
-	Description        string                  `json:"description,omitempty"`
-	Author             *plugins.Author         `json:"author,omitempty"`
-	Homepage           string                  `json:"homepage,omitempty"`
-	Repository         string                  `json:"repository,omitempty"`
-	License            string                  `json:"license,omitempty"`
-	Keywords           []string                `json:"keywords,omitempty"`
-	DisplayName        string                  `json:"displayName,omitempty"`
-	Dialect            string                  `json:"dialect,omitempty"`
-	ManifestPath       string                  `json:"manifestPath,omitempty"`
-	InstallationID     string                  `json:"installationId,omitempty"`
-	ConfigurationState string                  `json:"configurationState,omitempty"`
-	CompatibilityState string                  `json:"compatibilityState,omitempty"`
-	ComponentTotals    plugins.ComponentTotals `json:"componentTotals"`
-	ComponentCounts    map[string]int          `json:"componentCounts"`
-	Enabled            bool                    `json:"enabled"`
-	Source             plugins.Source          `json:"source"`
-	Digest             string                  `json:"digest,omitempty"`
-	InstalledAt        string                  `json:"installedAt,omitempty"`
-	SkillRoot          string                  `json:"skillRoot,omitempty"`
-	Skills             []skillInfo             `json:"skills,omitempty"`
-	Servers            []pluginServerInfo      `json:"servers,omitempty"`
-	Diagnostics        []plugins.Diagnostic    `json:"diagnostics,omitempty"`
-	SkillCount         int                     `json:"skillCount"`
-	ServerCount        int                     `json:"serverCount"`
+	Name                string                  `json:"name"`
+	Version             string                  `json:"version,omitempty"`
+	Description         string                  `json:"description,omitempty"`
+	Author              *plugins.Author         `json:"author,omitempty"`
+	Homepage            string                  `json:"homepage,omitempty"`
+	Repository          string                  `json:"repository,omitempty"`
+	License             string                  `json:"license,omitempty"`
+	Keywords            []string                `json:"keywords,omitempty"`
+	DisplayName         string                  `json:"displayName,omitempty"`
+	Dialect             string                  `json:"dialect,omitempty"`
+	ManifestPath        string                  `json:"manifestPath,omitempty"`
+	InstallationID      string                  `json:"installationId,omitempty"`
+	ConfigurationState  string                  `json:"configurationState,omitempty"`
+	AuthenticationState string                  `json:"authenticationState,omitempty"`
+	CompatibilityState  string                  `json:"compatibilityState,omitempty"`
+	SetupItems          []plugins.SetupItem     `json:"setupItems"`
+	SetupSummary        plugins.SetupSummary    `json:"setupSummary"`
+	ComponentTotals     plugins.ComponentTotals `json:"componentTotals"`
+	ComponentCounts     map[string]int          `json:"componentCounts"`
+	Enabled             bool                    `json:"enabled"`
+	Source              plugins.Source          `json:"source"`
+	Digest              string                  `json:"digest,omitempty"`
+	InstalledAt         string                  `json:"installedAt,omitempty"`
+	SkillRoot           string                  `json:"skillRoot,omitempty"`
+	Skills              []skillInfo             `json:"skills,omitempty"`
+	Servers             []pluginServerInfo      `json:"servers,omitempty"`
+	Diagnostics         []plugins.Diagnostic    `json:"diagnostics,omitempty"`
+	SkillCount          int                     `json:"skillCount"`
+	ServerCount         int                     `json:"serverCount"`
 }
 
 type pluginServerInfo struct {
@@ -210,7 +215,14 @@ func (h pluginHandlers) handleDelete(w http.ResponseWriter, r *http.Request) {
 	if !h.ensureStore(w) {
 		return
 	}
-	trashed, err := h.store.Uninstall(strings.TrimSpace(r.PathValue("name")))
+	name := strings.TrimSpace(r.PathValue("name"))
+	if h.auth != nil {
+		if err := h.auth.CleanupPlugin(name); err != nil {
+			writeErrorJSON(w, http.StatusInternalServerError, "PLUGIN_CREDENTIAL_CLEANUP_FAILED", err.Error())
+			return
+		}
+	}
+	trashed, err := h.store.Uninstall(name)
 	if err != nil {
 		h.writeStoreError(w, err)
 		return
@@ -320,27 +332,34 @@ func (h pluginHandlers) refreshRuntime() {
 
 func (h pluginHandlers) toPluginInfo(plugin *plugins.InstalledPlugin, includeDetails bool) pluginInfo {
 	info := pluginInfo{
-		Name:               plugin.Name,
-		Version:            plugin.Manifest.Version,
-		Description:        plugin.Manifest.Description,
-		Author:             plugin.Manifest.Author,
-		Homepage:           plugin.Manifest.Homepage,
-		Repository:         plugin.Manifest.Repository,
-		License:            plugin.Manifest.License,
-		Keywords:           plugin.Manifest.Keywords,
-		DisplayName:        plugin.DisplayName,
-		Dialect:            string(plugin.Dialect),
-		ManifestPath:       plugin.ManifestPath,
-		InstallationID:     plugin.InstallationID,
-		ConfigurationState: plugin.ConfigurationState,
-		CompatibilityState: plugin.CompatibilityState,
-		ComponentCounts:    map[string]int{},
-		Enabled:            plugin.Enabled,
-		Source:             plugin.Source,
-		Digest:             plugin.Digest,
-		SkillRoot:          plugin.SkillRoot,
-		Diagnostics:        plugin.Diagnostics,
-		ServerCount:        len(plugin.MCPServers),
+		Name:                plugin.Name,
+		Version:             plugin.Manifest.Version,
+		Description:         plugin.Manifest.Description,
+		Author:              plugin.Manifest.Author,
+		Homepage:            plugin.Manifest.Homepage,
+		Repository:          plugin.Manifest.Repository,
+		License:             plugin.Manifest.License,
+		Keywords:            plugin.Manifest.Keywords,
+		DisplayName:         plugin.DisplayName,
+		Dialect:             string(plugin.Dialect),
+		ManifestPath:        plugin.ManifestPath,
+		InstallationID:      plugin.InstallationID,
+		ConfigurationState:  plugin.ConfigurationState,
+		AuthenticationState: plugin.AuthenticationState,
+		CompatibilityState:  plugin.CompatibilityState,
+		ComponentCounts:     map[string]int{},
+		Enabled:             plugin.Enabled,
+		Source:              plugin.Source,
+		Digest:              plugin.Digest,
+		SkillRoot:           plugin.SkillRoot,
+		Diagnostics:         plugin.Diagnostics,
+		ServerCount:         len(plugin.MCPServers),
+	}
+	if h.store != nil {
+		if items, summary, err := h.store.SetupItems(plugin.Name); err == nil {
+			info.SetupItems = items
+			info.SetupSummary = summary
+		}
 	}
 	for _, state := range plugin.ComponentState {
 		info.ComponentTotals.Total++

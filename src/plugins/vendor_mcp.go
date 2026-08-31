@@ -194,6 +194,18 @@ func translateVendorMCP(component ir.Component, plugin *InstalledPlugin, context
 			}
 			loaded.Config.OAuthResource = expandedResource
 		}
+		loaded.Config.OAuthClientID = strings.TrimSpace(spec.OAuthClientID)
+		if metadataURL := strings.TrimSpace(spec.OAuthClientMetadataURL); metadataURL != "" {
+			parsedMetadataURL, parseErr := url.Parse(metadataURL)
+			if parseErr != nil || parsedMetadataURL.Scheme != "https" || parsedMetadataURL.Host == "" || parsedMetadataURL.Path == "" || parsedMetadataURL.Path == "/" || parsedMetadataURL.User != nil || parsedMetadataURL.Fragment != "" {
+				return invalid(fmt.Errorf("invalid OAuth client metadata URL: must be a non-root public HTTPS URL"))
+			}
+			if err := validateRemoteMCPURL(metadataURL); err != nil {
+				return invalid(fmt.Errorf("invalid OAuth client metadata URL: %w", err))
+			}
+			loaded.Config.OAuthClientMetadataURL = metadataURL
+		}
+		loaded.Config.OAuthScopes = append([]string(nil), spec.OAuthScopes...)
 		if spec.Transport == "sse" {
 			loaded.Config.SSE = remote
 		} else {

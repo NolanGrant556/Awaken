@@ -55,14 +55,16 @@ func EffectiveAsync(spec *ir.HookSpec) (async bool, asyncRewake bool) {
 }
 
 type Entry struct {
-	PluginName   string
-	PluginDigest string
-	PluginRoot   string
-	PluginData   string
-	ProjectRoot  string
-	Dialect      ir.Dialect
-	Values       map[string]string
-	Component    ir.Component
+	PluginName        string
+	PluginDigest      string
+	PluginRoot        string
+	PluginData        string
+	ProjectRoot       string
+	Dialect           ir.Dialect
+	Values            map[string]string
+	SecretHeaders     map[string]string
+	SecretEnvironment map[string]string
+	Component         ir.Component
 }
 
 func Compile(entries []Entry) ([]hookruntime.CompiledHook, []hookruntime.Diagnostic) {
@@ -126,7 +128,19 @@ func compileOne(entry Entry) (hookruntime.CompiledHook, error) {
 		PluginName: entry.PluginName, PluginDigest: entry.PluginDigest,
 		LogicalID: component.LogicalID, RevisionID: component.RevisionID,
 		SourceEvent: component.Hook.SourceEvent, Protocol: protocol, Environment: environment,
+		SecretEnvironment: cloneStrings(entry.SecretEnvironment),
 	}, nil
+}
+
+func cloneStrings(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	copy := make(map[string]string, len(values))
+	for key, value := range values {
+		copy[key] = value
+	}
+	return copy
 }
 
 func compileHandler(entry Entry) (hookruntime.CommandHook, error) {
@@ -152,6 +166,7 @@ func compileHandler(entry Entry) (hookruntime.CommandHook, error) {
 		command.Type, command.Command = "command", argv
 	case "http":
 		command.URL = spec.URL
+		command.SecretHeaders = cloneStrings(entry.SecretHeaders)
 	case "prompt", "agent":
 		expanded, err := pluginvariables.Expand(spec.Prompt, entry.Dialect, "hook.prompt", context)
 		if err != nil {

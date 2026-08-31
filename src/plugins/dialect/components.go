@@ -138,7 +138,10 @@ func parseMCPServerMap(servers map[string]any, raw []byte, shape, sourcePath str
 		spec := &ir.MCPSpec{
 			ShortName: short, SourceShape: shape, SourceTransport: sourceTransport, Transport: transport,
 			Command: stringField(config, "command"), Args: stringList(config["args"]), Cwd: stringField(config, "cwd"),
-			URL: stringField(config, "url"), OAuthResource: stringField(config, "oauth_resource"), Raw: serverRaw,
+			URL: stringField(config, "url"), OAuthResource: firstNonEmpty(stringField(config, "oauth_resource"), stringField(config, "oauthResource")),
+			OAuthClientID:          firstNonEmpty(stringField(config, "oauth_client_id"), stringField(config, "oauthClientId")),
+			OAuthClientMetadataURL: firstNonEmpty(stringField(config, "oauth_client_metadata_url"), stringField(config, "oauthClientMetadataUrl")),
+			OAuthScopes:            stringList(firstValue(config, "oauth_scopes", "oauthScopes")), Raw: serverRaw,
 			Env: stringMap(config["env"]), Headers: stringMap(config["headers"]),
 		}
 		component.MCP = spec

@@ -828,12 +828,35 @@ export type RuntimeConnector = {
   shadowedBy?: string;
   cliReadiness?: CliConnectorReadiness;
   legacyMcpReviewRequired?: boolean;
+  account?: {
+    displayName?: string;
+    tenantName?: string;
+  };
 };
 
 export type RuntimeConnectorActionResponse = {
   connectorId: string;
   connectorState: RuntimeConnectorState | string;
+  sessionId?: string;
+  authStatus?: RuntimeConnectorAuthStatus;
+  expiresAt?: string;
   message?: string;
+};
+
+export type RuntimeConnectorAuthStatus =
+  | "authorizing"
+  | "verifying"
+  | "ready"
+  | "failed"
+  | "expired"
+  | "cancelled";
+
+export type RuntimeConnectorAuthSession = {
+  sessionId: string;
+  connectorId: string;
+  status: RuntimeConnectorAuthStatus;
+  errorMessage?: string;
+  expiresAt?: string;
 };
 
 export type RuntimeMcpServerState = "pending" | "connected" | "failed" | "needs-auth" | "disabled";
@@ -1009,10 +1032,95 @@ export type RuntimePluginComponentState = {
   desiredState: string;
   ruleActivation?: "always" | "file_globs" | "manual" | "model_decides" | string;
   configurationState: string;
+  authenticationState?: string;
   runtimeState: string;
   integrityState: string;
   mappingState: RuntimePluginMappingState;
   switchable: boolean;
+};
+
+export type RuntimePluginSetupKind =
+  | "configuration"
+  | "secret"
+  | "oauth_pkce"
+  | "oauth_device"
+  | "mcp_oauth"
+  | "cli_login"
+  | "external_setup"
+  | "host_connector"
+  | "app_connector";
+
+export type RuntimePluginSetupStatus =
+  | "ready"
+  | "needs_configuration"
+  | "needs_auth"
+  | "authorizing"
+  | "verifying"
+  | "expired"
+  | "failed"
+  | "unsupported";
+
+export type RuntimePluginSetupAction =
+  | "configure"
+  | "authorize"
+  | "cancel"
+  | "retry"
+  | "probe"
+  | "disconnect"
+  | "inspect_only";
+
+export type RuntimePluginSetupRequirement = {
+  id: string;
+  fingerprint: string;
+  kind: RuntimePluginSetupKind;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  componentIds?: string[];
+  mcpServerName?: string;
+  field?: RuntimePluginVariableSpec;
+  providerId?: string;
+  externalUrl?: string;
+  connectorId?: string;
+  sourceDialect: RuntimePluginDialect;
+  sourcePath?: string;
+};
+
+export type RuntimePluginSetupItem = {
+  requirement: RuntimePluginSetupRequirement;
+  status: RuntimePluginSetupStatus;
+  reasonCode?: string;
+  message?: string;
+  actions: RuntimePluginSetupAction[];
+};
+
+export type RuntimePluginSetupSummary = {
+  total: number;
+  ready: number;
+  needsConfiguration: number;
+  needsAuth: number;
+  inProgress: number;
+  failed: number;
+  unsupported: number;
+};
+
+export type RuntimePluginSetupResponse = {
+  items: RuntimePluginSetupItem[];
+  summary: RuntimePluginSetupSummary;
+};
+
+export type RuntimePluginSetupMutationRequest = {
+  pluginDigest: string;
+  requirementFingerprint: string;
+};
+
+export type RuntimePluginAuthSession = {
+  sessionId: string;
+  pluginName: string;
+  setupId: string;
+  status: RuntimePluginSetupStatus | "cancelled";
+  errorMessage?: string;
+  expiresAt?: string;
 };
 
 export type RuntimePluginComponentDetail = {
@@ -1101,7 +1209,10 @@ export type RuntimePlugin = {
   manifestPath?: string;
   installationId?: string;
   configurationState?: string;
+  authenticationState?: string;
   compatibilityState?: string;
+  setupItems?: RuntimePluginSetupItem[];
+  setupSummary?: RuntimePluginSetupSummary;
   componentTotals?: RuntimePluginComponentTotals;
   componentCounts?: Record<string, number>;
   source: RuntimePluginSource;
@@ -2539,6 +2650,8 @@ export type AwakenBridge = {
   listConnectors: () => Promise<RuntimeConnector[]>;
   connectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
   disconnectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
+  getConnectorAuthSession?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
+  cancelConnectorAuthSession?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
   listCliConnectors: () => Promise<CliConnectorView[]>;
   refreshCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
   installCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
@@ -2628,6 +2741,24 @@ export type AwakenBridge = {
     name: string,
     request: UpdatePluginConfigurationRequest,
   ) => Promise<RuntimePluginConfigurationResponse>;
+  getPluginSetup?: (name: string) => Promise<RuntimePluginSetupResponse>;
+  startPluginSetup?: (
+    name: string,
+    setupId: string,
+    request: RuntimePluginSetupMutationRequest,
+  ) => Promise<RuntimePluginAuthSession>;
+  getPluginAuthSession?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
+  cancelPluginAuthSession?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
+  probePluginSetup?: (
+    name: string,
+    setupId: string,
+    request: RuntimePluginSetupMutationRequest,
+  ) => Promise<RuntimePluginSetupResponse>;
+  disconnectPluginSetup?: (
+    name: string,
+    setupId: string,
+    request: RuntimePluginSetupMutationRequest,
+  ) => Promise<RuntimePluginSetupResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
   getModelPurposeRouting: () => Promise<ModelPurposeRouting>;

@@ -107,7 +107,7 @@ func TestMCPManagerAndConnectorsExistWithoutStaticConfig(t *testing.T) {
 	workspace := t.TempDir()
 	t.Setenv("AWAKEN_HOME", home)
 
-	manager := buildMCPManager(workspace, nil)
+	manager := buildMCPManager(workspace, nil, nil, nil)
 	if manager == nil {
 		t.Fatal("expected empty MCP manager without static config")
 	}
@@ -138,7 +138,7 @@ func TestBuildConnectorRegistryRestoresPersistedBuiltinOwnership(t *testing.T) {
 		t.Fatalf("save user config: %v", err)
 	}
 
-	manager := buildMCPManager("", nil)
+	manager := buildMCPManager("", nil, nil, nil)
 	t.Cleanup(func() { manager.Shutdown(context.Background()) })
 	registry := buildConnectorRegistry(manager, "", nil)
 	status, err := registry.Status("playwright")
@@ -157,5 +157,19 @@ func TestBuildConnectorRegistryRestoresPersistedBuiltinOwnership(t *testing.T) {
 	}
 	if _, ok := userCfg.Servers["playwright"]; ok {
 		t.Fatal("disconnect did not remove restored builtin config")
+	}
+}
+
+func TestResolvedMicrosoftOutlookClientIDUsesDevelopmentOverrideAndReleaseFallback(t *testing.T) {
+	previous := microsoftOutlookClientID
+	microsoftOutlookClientID = "release-client"
+	t.Cleanup(func() { microsoftOutlookClientID = previous })
+	t.Setenv("AWAKEN_MICROSOFT_CLIENT_ID", "")
+	if got := resolvedMicrosoftOutlookClientID(); got != "release-client" {
+		t.Fatalf("release fallback = %q", got)
+	}
+	t.Setenv("AWAKEN_MICROSOFT_CLIENT_ID", "development-client")
+	if got := resolvedMicrosoftOutlookClientID(); got != "development-client" {
+		t.Fatalf("development override = %q", got)
 	}
 }

@@ -3,6 +3,7 @@ import {
   AwakenPluginConsole,
   type AwakenPluginConsoleComponent,
   type AwakenPluginConsoleDetail,
+  type AwakenPluginSetupItem,
 } from "@awaken/design-system";
 import type {
   RuntimePlugin,
@@ -10,6 +11,8 @@ import type {
   RuntimePluginComponentDetail,
   RuntimePluginComponentState,
   RuntimePluginVariableField,
+  RuntimePluginSetupItem,
+  CliProviderId,
 } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
 import { pluginErrorMessage } from "./pluginErrors";
@@ -54,6 +57,7 @@ function toConsoleComponent(state: RuntimePluginComponentState): AwakenPluginCon
     desiredState: state.desiredState,
     ruleActivation: state.ruleActivation,
     configurationState: state.configurationState,
+    authenticationState: state.authenticationState ?? "not_required",
     runtimeState: state.runtimeState,
     integrityState: state.integrityState,
     switchable: state.switchable,
@@ -205,6 +209,7 @@ export function isPluginComponentUsableInChat(
     state.component.validation !== "invalid" &&
     state.integrityState === "intact" &&
     state.configurationState !== "needs_configuration" &&
+    ((state.authenticationState ?? "not_required") === "ready" || (state.authenticationState ?? "not_required") === "not_required") &&
     (state.mappingState === "native" || state.mappingState === "adapted")
   );
 }
@@ -223,6 +228,8 @@ export function PluginConsole({
   const detailGenerationRef = useRef(0);
   const [components, setComponents] = useState<RuntimePluginComponentState[]>([]);
   const [variables, setVariables] = useState<RuntimePluginVariableField[]>([]);
+  const [setupItems, setSetupItems] = useState<RuntimePluginSetupItem[]>(plugin.setupItems ?? []);
+  const [activeSetupSessions, setActiveSetupSessions] = useState<Record<string, string>>({});
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [commandArguments, setCommandArguments] = useState("");
   const [sourceEditing, setSourceEditing] = useState(false);
@@ -248,6 +255,23 @@ export function PluginConsole({
     onNotice(message);
   }
 
+  function loadPluginSetup() {
+    return runtimeClient.getPluginSetup
+      ? runtimeClient.getPluginSetup(plugin.name)
+      : Promise.resolve({
+          items: plugin.setupItems ?? [],
+          summary: plugin.setupSummary ?? {
+            total: 0,
+            ready: 0,
+            needsConfiguration: 0,
+            needsAuth: 0,
+            inProgress: 0,
+            failed: 0,
+            unsupported: 0,
+          },
+        });
+  }
+
   useEffect(() => {
     const generation = ++loadGenerationRef.current;
     setComponentsLoading(true);
@@ -259,12 +283,14 @@ export function PluginConsole({
     void Promise.all([
       runtimeClient.listPluginComponents(plugin.name),
       runtimeClient.getPluginConfiguration(plugin.name),
+      loadPluginSetup(),
     ])
-      .then(([nextComponents, configuration]) => {
+      .then(([nextComponents, configuration, setup]) => {
         if (generation !== loadGenerationRef.current) return;
         setComponents(nextComponents ?? []);
         setVariables(configuration.fields ?? []);
         setVariableValues({});
+        setSetupItems(setup.items ?? []);
       })
       .catch((error: unknown) => {
         if (generation === loadGenerationRef.current) {
@@ -279,6 +305,109 @@ export function PluginConsole({
       detailGenerationRef.current += 1;
     };
   }, [plugin.name, runtimeClient]);
+
+  async function refreshSetupAndRuntime(): Promise<void> {
+    const [setup, nextPlugin, nextComponents] = await Promise.all([
+      loadPluginSetup(),
+      runtimeClient.getPlugin(plugin.name),
+      runtimeClient.listPluginComponents(plugin.name),
+    ]);
+    setSetupItems(setup.items ?? []);
+    setComponents(nextComponents ?? []);
+    onPluginUpdated(nextPlugin);
+  }
+
+  async function pollSetupSession(setupId: string, sessionId: string): Promise<void> {
+    for (let attempt = 0; attempt < 600; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      if (!runtimeClient.getPluginAuthSession) throw new Error("当前 Desktop 不支持插件授权会话");
+      const session = await runtimeClient.getPluginAuthSession(plugin.name, sessionId);
+      if (session.status === "authorizing" || session.status === "verifying") continue;
+      setActiveSetupSessions((current) => {
+        const next = { ...current };
+        delete next[setupId];
+        return next;
+      });
+      await refreshSetupAndRuntime();
+      if (session.status === "ready") {
+        onNotice("插件账号已连接，关联组件状态已刷新");
+      } else if (session.errorMessage) {
+        setErrorMessage(session.errorMessage);
+      }
+      return;
+    }
+  }
+
+  function setupMutation(item: RuntimePluginSetupItem) {
+    const pluginDigest = plugin.digest?.trim();
+    if (!pluginDigest) throw new Error("插件完整性摘要不可用，请重新打开插件后再试");
+    return {
+      pluginDigest,
+      requirementFingerprint: item.requirement.fingerprint,
+    };
+  }
+
+  async function handleSetupAction(itemView: AwakenPluginSetupItem, action: string): Promise<void> {
+    const item = setupItems.find((candidate) => candidate.requirement.id === itemView.id);
+    if (!item) {
+      setErrorMessage("设置项已经变化，请重新打开插件");
+      return;
+    }
+    if (action === "configure") {
+      const key = item.requirement.field?.key;
+      const component = components.find((candidate) => candidate.component.variable?.key === key);
+      if (component) await handleComponentOpen(toConsoleComponent(component));
+      return;
+    }
+    setLocalBusy(true);
+    setErrorMessage(null);
+    try {
+      const request = setupMutation(item);
+      if (action === "cancel") {
+        const sessionId = activeSetupSessions[item.requirement.id];
+        if (sessionId) {
+          if (!runtimeClient.cancelPluginAuthSession) throw new Error("当前 Desktop 不支持取消插件授权");
+          await runtimeClient.cancelPluginAuthSession(plugin.name, sessionId);
+        }
+        await refreshSetupAndRuntime();
+        return;
+      }
+      if (action === "disconnect") {
+        if (!runtimeClient.disconnectPluginSetup) throw new Error("当前 Desktop 不支持退出插件账号");
+        const response = await runtimeClient.disconnectPluginSetup(plugin.name, item.requirement.id, request);
+        setSetupItems(response.items ?? []);
+        await refreshSetupAndRuntime();
+        return;
+      }
+      if (action === "probe") {
+        if (!runtimeClient.probePluginSetup) throw new Error("当前 Desktop 不支持重新检测插件设置");
+        const response = await runtimeClient.probePluginSetup(plugin.name, item.requirement.id, request);
+        setSetupItems(response.items ?? []);
+        await refreshSetupAndRuntime();
+        return;
+      }
+      if (item.requirement.kind === "cli_login" && item.requirement.providerId) {
+		if (!runtimeClient.startPluginSetup) throw new Error("当前 Desktop 不支持插件账号连接");
+		await runtimeClient.startPluginSetup(plugin.name, item.requirement.id, request);
+        await runtimeClient.startCliAuth(item.requirement.providerId as CliProviderId);
+        await refreshSetupAndRuntime();
+        return;
+      }
+      if (!runtimeClient.startPluginSetup) throw new Error("当前 Desktop 不支持插件账号连接");
+      const session = await runtimeClient.startPluginSetup(plugin.name, item.requirement.id, request);
+      if (session.sessionId) {
+        setActiveSetupSessions((current) => ({ ...current, [item.requirement.id]: session.sessionId }));
+        void pollSetupSession(item.requirement.id, session.sessionId).catch((error) => {
+          setErrorMessage(pluginErrorMessage(error));
+        });
+      }
+      await refreshSetupAndRuntime();
+    } catch (error) {
+      setErrorMessage(pluginErrorMessage(error));
+    } finally {
+      setLocalBusy(false);
+    }
+  }
 
   async function handleComponentOpen(component: AwakenPluginConsoleComponent): Promise<void> {
     const generation = ++detailGenerationRef.current;
@@ -573,6 +702,18 @@ export function PluginConsole({
       version={plugin.version}
       enabled={plugin.enabled}
       components={components.map(toConsoleComponent)}
+      setupItems={setupItems.map((item) => ({
+        id: item.requirement.id,
+        kind: item.requirement.kind,
+        title: item.requirement.title || item.requirement.id,
+        description: item.requirement.description,
+        status: item.status,
+        message: item.message,
+        required: item.requirement.required,
+        sourcePath: item.requirement.sourcePath,
+        connectorId: item.requirement.connectorId,
+        actions: item.actions,
+      }))}
       selectedDetail={selectedDetail ? toConsoleDetail(selectedDetail) : null}
       detailLoading={detailLoading}
       activeDetailTab={activeDetailTab}
@@ -606,6 +747,7 @@ export function PluginConsole({
       onComponentEnabledChange={(component, enabled) =>
         void handleComponentEnabledChange(component, enabled)
       }
+      onSetupAction={(item, action) => void handleSetupAction(item, action)}
       onDetailTabChange={(tab) => {
         setActiveDetailTab(tab);
         setErrorMessage(null);

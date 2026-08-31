@@ -1,7 +1,10 @@
 import { EditorState } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 
-import { codePreviewLineSelection } from "./CodePreview";
+import {
+  codePreviewCommentHighlightSelection,
+  codePreviewLineSelection,
+} from "./CodePreview";
 
 describe("codePreviewLineSelection", () => {
   it("projects a cursor to its complete source line", () => {
@@ -28,5 +31,32 @@ describe("codePreviewLineSelection", () => {
       endLine: 2,
       selectedText: "alpha\nbeta",
     });
+  });
+});
+
+describe("codePreviewCommentHighlightSelection", () => {
+  it("keeps the original multi-line range while the comment editor has focus", () => {
+    const editing = {
+      startLine: 9,
+      endLine: 14,
+      selectedText: "line 9\nline 10\nline 11\nline 12\nline 13\nline 14",
+    };
+    const collapsedSelection = {
+      startLine: 14,
+      endLine: 14,
+      selectedText: "line 14",
+    };
+
+    expect(codePreviewCommentHighlightSelection(collapsedSelection, editing)).toBe(editing);
+  });
+
+  it("uses the live CodeMirror selection when no comment is being edited", () => {
+    const selection = {
+      startLine: 3,
+      endLine: 5,
+      selectedText: "line 3\nline 4\nline 5",
+    };
+
+    expect(codePreviewCommentHighlightSelection(selection, undefined)).toBe(selection);
   });
 });

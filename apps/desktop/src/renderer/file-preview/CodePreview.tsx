@@ -280,6 +280,13 @@ export function codePreviewLineSelection(state: EditorState): CodePreviewLineSel
   return { startLine, endLine, selectedText: selectedText.join("\n") };
 }
 
+export function codePreviewCommentHighlightSelection(
+  selection: CodePreviewLineSelection | undefined,
+  editing: CodePreviewLineSelection | undefined,
+): CodePreviewLineSelection | undefined {
+  return editing ?? selection;
+}
+
 export default function CodePreview({
   preview,
   frameProps,
@@ -403,7 +410,7 @@ export default function CodePreview({
     editor.dispatch({
       effects: setCommentWidgetConfig.of({
         comments: fileComments,
-        selection: lineSelection,
+        selection: codePreviewCommentHighlightSelection(lineSelection, editingSelection),
         editing: editingSelection,
         onSubmit: (selection, comment) => {
           onCreateCommentRef.current?.(selection, comment);

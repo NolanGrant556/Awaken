@@ -213,7 +213,7 @@ const MODEL_CAPABILITIES: Record<string, Record<string, ModelCapabilityWire>> = 
   },
   deepseek: {
     "deepseek-v4-pro": {
-      supported_protocols: ["openai_chat", "anthropic_messages"],
+      supported_protocols: ["openai_chat", "openai_responses", "anthropic_messages"],
       context_window: 1_000_000,
       max_output_tokens: 384_000,
       default_max_tokens: DEFAULT_MAX_TOKENS,

@@ -54,6 +54,7 @@ describe("model capabilities", () => {
     });
     expect(capabilityForModel("deepseek", "deepseek-v4-pro")?.supported_protocols).toEqual([
       "openai_chat",
+      "openai_responses",
       "anthropic_messages",
     ]);
     expect(capabilityForModel("deepseek", "deepseek-v4-flash")?.supported_protocols).toEqual([

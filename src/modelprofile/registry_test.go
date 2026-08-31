@@ -99,7 +99,7 @@ func TestBuiltinProvidersIncludeRequiredDefaults(t *testing.T) {
 	if got := seen["glm-coding-plan"].ModelCapabilities["glm-5.2"].ReasoningEffort; got == nil || !reflect.DeepEqual(got.Levels, []string{"high", "max"}) || got.DefaultLevel != "max" {
 		t.Fatalf("GLM Coding Plan reasoning effort contract mismatch: %+v", got)
 	}
-	if got := seen["deepseek"].ModelCapabilities["deepseek-v4-pro"].SupportedProtocols; !reflect.DeepEqual(got, []string{"openai_chat", "anthropic_messages"}) {
+	if got := seen["deepseek"].ModelCapabilities["deepseek-v4-pro"].SupportedProtocols; !reflect.DeepEqual(got, allLLMProtocols()) {
 		t.Fatalf("DeepSeek V4 Pro protocol contract mismatch: %v", got)
 	}
 	if got := seen["deepseek"].ModelCapabilities["deepseek-v4-flash"].SupportedProtocols; !reflect.DeepEqual(got, allLLMProtocols()) {

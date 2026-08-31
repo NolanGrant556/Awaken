@@ -189,7 +189,7 @@ func BuiltinProviders() []Provider {
 			AccessType: "api",
 			ModelCapabilities: map[string]ModelCapability{
 				"deepseek-v4-pro": {
-					SupportedProtocols: []string{"openai_chat", "anthropic_messages"},
+					SupportedProtocols: allLLMProtocols(),
 					ContextWindow:      1000000,
 					MaxOutputTokens:    384000,
 					DefaultMaxTokens:   8192,

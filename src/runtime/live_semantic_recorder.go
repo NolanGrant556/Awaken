@@ -24,6 +24,21 @@ func newLiveSemanticRecorder(base agentcore.AssignedSemanticRecorder, session *S
 
 func (r *liveSemanticRecorder) BroadcastsCanonicalSemanticRecords() bool { return true }
 
+func (r *liveSemanticRecorder) LastAssignedSequence() uint64 {
+	if reader, ok := r.base.(agentcore.SemanticSequenceReader); ok {
+		return reader.LastAssignedSequence()
+	}
+	return 0
+}
+
+func (r *liveSemanticRecorder) SemanticRecords(fromSeq, toSeq uint64) ([]agentcore.SemanticRecord, error) {
+	reader, ok := r.base.(agentcore.SemanticRecordRangeReader)
+	if !ok {
+		return nil, agentcore.ErrPersistenceUnavailable
+	}
+	return reader.SemanticRecords(fromSeq, toSeq)
+}
+
 func (r *liveSemanticRecorder) Append(ctx context.Context, record agentcore.SemanticRecord) error {
 	_, err := r.AppendAssigned(ctx, record)
 	return err
@@ -39,11 +54,17 @@ func (r *liveSemanticRecorder) AppendBatch(ctx context.Context, records []agentc
 // action-start facts use this path so UI visibility and input injection cannot
 // get ahead of durable truth.
 func (r *liveSemanticRecorder) AppendFlushed(ctx context.Context, record agentcore.SemanticRecord) (agentcore.SemanticRecord, error) {
-	assigned, err := r.base.AppendAssigned(ctx, record)
-	if err != nil {
-		return agentcore.SemanticRecord{}, err
+	var assigned agentcore.SemanticRecord
+	var err error
+	if transactional, ok := r.base.(agentcore.FlushedSemanticRecorder); ok {
+		assigned, err = transactional.AppendFlushed(ctx, record)
+	} else {
+		assigned, err = r.base.AppendAssigned(ctx, record)
+		if err == nil {
+			err = r.base.Flush(ctx)
+		}
 	}
-	if err := r.base.Flush(ctx); err != nil {
+	if err != nil {
 		return agentcore.SemanticRecord{}, err
 	}
 	if r.session != nil {
@@ -113,4 +134,6 @@ func (r *liveSemanticRecorder) Flush(ctx context.Context) error {
 }
 
 var _ agentcore.AssignedSemanticRecorder = (*liveSemanticRecorder)(nil)
+var _ agentcore.FlushedSemanticRecorder = (*liveSemanticRecorder)(nil)
+var _ agentcore.SemanticRecordRangeReader = (*liveSemanticRecorder)(nil)
 var _ agentcore.CanonicalLiveSemanticRecorder = (*liveSemanticRecorder)(nil)

@@ -1375,7 +1375,12 @@ type RuntimeContextWindow = ReturnType<
   typeof createInitialRuntimeState
 >["inspectorSummary"]["contextWindow"];
 
-type RuntimeModelUsage = NonNullable<NonNullable<RuntimeContextWindow>["latestModelUsage"]>;
+type RuntimeModelUsage = NonNullable<
+  NonNullable<RuntimeContextWindow>["latestModelUsage"]
+>;
+type RuntimeCompact = ReturnType<
+  typeof createInitialRuntimeState
+>["inspectorSummary"]["compact"];
 
 type RuntimeModelIdentity = {
   id?: string;
@@ -1580,15 +1585,24 @@ const CONTEXT_PANEL_CONTRIBUTIONS = [
   { id: "mcp", label: "MCP" },
   { id: "skills", label: "技能" },
   { id: "memory", label: "记忆" },
+  { id: "task_checkpoint", label: "任务检查点" },
   { id: "conversation", label: "对话" },
 ] as const;
+
+const LEGACY_V3_CONTEXT_PANEL_CONTRIBUTIONS =
+  CONTEXT_PANEL_CONTRIBUTIONS.filter(
+    (contribution) => contribution.id !== "task_checkpoint",
+  );
 
 const CONTEXT_PANEL_OTHER_CONTRIBUTION = {
   id: "other",
   label: "其他/协议开销",
 } as const;
 
-function proportionallyAllocateTokens(values: number[], target: number): number[] {
+function proportionallyAllocateTokens(
+  values: number[],
+  target: number,
+): number[] {
   const sourceTotal = values.reduce((sum, value) => sum + value, 0);
   if (target <= 0) {
     return values.map(() => 0);
@@ -1630,14 +1644,17 @@ function reconcileContributionTokens(
 export function contextUsagePanelData(
   contextWindow: RuntimeContextWindow,
   currentModel?: RuntimeModelIdentity,
+  compact?: RuntimeCompact,
 ): Omit<AwakenContextUsagePanelProps, "id" | "onClose"> | undefined {
   if (!contextWindow) {
     return undefined;
   }
   const snapshot = contextWindow.snapshot;
   const currentInputTokens = currentContextTokens(contextWindow, currentModel);
-  const outputReserveTokens = snapshot?.outputReserveTokens ?? contextWindow.outputReserve ?? 0;
-  const modelWindowTokens = snapshot?.modelWindowTokens ?? contextWindow.modelWindow;
+  const outputReserveTokens =
+    snapshot?.outputReserveTokens ?? contextWindow.outputReserve ?? 0;
+  const modelWindowTokens =
+    snapshot?.modelWindowTokens ?? contextWindow.modelWindow;
   const effectiveInputWindowTokens =
     snapshot?.effectiveInputWindowTokens ??
     contextWindow.effectiveWindow ??
@@ -1652,19 +1669,28 @@ export function contextUsagePanelData(
     return undefined;
   }
   const rawContributions = snapshot?.contributions ?? [];
+  const panelContributions =
+    snapshot?.schemaVersion === 3 && snapshot.estimatorId === "awaken_leaf_v3"
+      ? LEGACY_V3_CONTEXT_PANEL_CONTRIBUTIONS
+      : CONTEXT_PANEL_CONTRIBUTIONS;
   const supportedKinds = new Set<string>(
-    CONTEXT_PANEL_CONTRIBUTIONS.map((contribution) => contribution.id),
+    panelContributions.map((contribution) => contribution.id),
   );
   const hasRetainedContributionContract =
-    ((snapshot?.schemaVersion === 4 && snapshot.estimatorId === "awaken_leaf_v4") ||
-      (snapshot?.schemaVersion === 3 && snapshot.estimatorId === "awaken_leaf_v3")) &&
-    rawContributions.every((contribution) => supportedKinds.has(contribution.kind));
+    ((snapshot?.schemaVersion === 4 &&
+      snapshot.estimatorId === "awaken_leaf_v4") ||
+      (snapshot?.schemaVersion === 3 &&
+        snapshot.estimatorId === "awaken_leaf_v3")) &&
+    rawContributions.every((contribution) =>
+      supportedKinds.has(contribution.kind),
+    );
   const tokensByKind = new Map<string, number>();
   if (hasRetainedContributionContract) {
     for (const contribution of rawContributions) {
       tokensByKind.set(
         contribution.kind,
-        (tokensByKind.get(contribution.kind) ?? 0) + contribution.estimatedTokens,
+        (tokensByKind.get(contribution.kind) ?? 0) +
+          contribution.estimatedTokens,
       );
     }
   }
@@ -1678,7 +1704,9 @@ export function contextUsagePanelData(
     classifiedTokens === snapshot?.estimatedInputTokens;
   const reconciled = hasCompleteBreakdown
     ? reconcileContributionTokens(
-        CONTEXT_PANEL_CONTRIBUTIONS.map((contribution) => tokensByKind.get(contribution.id) ?? 0),
+        panelContributions.map(
+          (contribution) => tokensByKind.get(contribution.id) ?? 0,
+        ),
         currentInputTokens,
       )
     : { values: [], otherTokens: 0 };
@@ -1688,7 +1716,7 @@ export function contextUsagePanelData(
     label: string;
     estimatedTokens: number;
   }> = hasCompleteBreakdown
-    ? CONTEXT_PANEL_CONTRIBUTIONS.map((contribution, index) => ({
+    ? panelContributions.map((contribution, index) => ({
         ...contribution,
         estimatedTokens: reconciled.values[index],
       }))
@@ -1705,20 +1733,53 @@ export function contextUsagePanelData(
     modelWindowTokens,
     outputReserveTokens,
     autoCompactThresholdTokens:
-      snapshot?.autoCompactThresholdTokens ?? contextWindow.autoCompactThreshold ?? 0,
+      snapshot?.autoCompactThresholdTokens ??
+      contextWindow.autoCompactThreshold ??
+      0,
     contributions,
+    compactDiagnostics: compact
+      ? {
+          status: compact.status,
+          targetTokens: compact.compactTarget,
+          preCompactTokens: compact.preCompactEstimatedTokens,
+          postCompactTokens:
+            compact.conservativeProjectedTokens ??
+            compact.postCompactEstimatedTokens,
+          mandatoryFloorTokens: compact.mandatoryFloorTokens,
+          contributionTokens: Object.entries(compact.contributionTokens ?? {})
+            .filter(([, tokens]) => Number.isFinite(tokens) && tokens > 0)
+            .map(([id, tokens]) => ({
+              id,
+              label:
+                CONTEXT_PANEL_CONTRIBUTIONS.find((item) => item.id === id)
+                  ?.label ??
+                (id === "other" ? CONTEXT_PANEL_OTHER_CONTRIBUTION.label : id),
+              estimatedTokens: tokens,
+            })),
+          nativeAttempted: compact.nativeAttempted,
+          nativeUsed: compact.nativeUsed,
+          nativeReason: compact.nativeReason,
+          failureReason: compact.failureReason,
+        }
+      : null,
     // The usage-details section must share the exact compatibility decision
     // used for the current-total above. Rendering an identity/epoch-
     // incompatible record next to a local-estimate total would show a panel
     // whose "输入 Token" exceeds its own current total.
-    latestModelUsage: contextWindow.latestModelUsage &&
-      usageMatchesSnapshot(contextWindow.latestModelUsage, snapshot, currentModel)
+    latestModelUsage:
+      contextWindow.latestModelUsage &&
+      usageMatchesSnapshot(
+        contextWindow.latestModelUsage,
+        snapshot,
+        currentModel,
+      )
       ? {
           status: contextWindow.latestModelUsage.status,
           cacheMode: contextWindow.latestModelUsage.cacheMode,
           cacheKeyApplied: contextWindow.latestModelUsage.cacheKeyApplied,
           cachedInputTokens: contextWindow.latestModelUsage.cachedInputTokens,
-          uncachedInputTokens: contextWindow.latestModelUsage.uncachedInputTokens,
+            uncachedInputTokens:
+              contextWindow.latestModelUsage.uncachedInputTokens,
           cacheWriteTokens: contextWindow.latestModelUsage.cacheWriteTokens,
           inputTokens: contextWindow.latestModelUsage.inputTokens,
           outputTokens: contextWindow.latestModelUsage.outputTokens,
@@ -4073,13 +4134,16 @@ export function App() {
   const contextPanelData = contextUsagePanelData(
     runtimeState.inspectorSummary.contextWindow,
     selectedRuntimeModelIdentity,
+    runtimeState.inspectorSummary.compact,
   );
   const contextUsagePanelId = "awaken-context-usage-panel";
 
   function closeContextUsagePanel(returnFocus: boolean): void {
     setContextUsagePanelOpen(false);
     if (returnFocus && typeof window !== "undefined") {
-      window.requestAnimationFrame(() => contextUsageTriggerRef.current?.focus());
+      window.requestAnimationFrame(() =>
+        contextUsageTriggerRef.current?.focus(),
+      );
     }
   }
 

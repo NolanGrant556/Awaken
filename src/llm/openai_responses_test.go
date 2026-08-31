@@ -36,6 +36,46 @@ func TestPrepareOpenAIResponsesRequestIsStatelessAndProtocolSpecific(t *testing.
 	}
 }
 
+func TestPrepareDeepSeekResponsesAuxiliaryRequestDisablesReasoning(t *testing.T) {
+	prepared, err := PrepareRequest(Config{
+		APIKey: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro",
+		ProviderID: "deepseek", Protocol: ProtocolOpenAIResponses,
+	}, Request{Purpose: RequestPurposeCompactSummary, DisableReasoning: true}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Reasoning *openAIResponsesReasoning `json:"reasoning"`
+	}
+	if err := json.Unmarshal(prepared.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Reasoning == nil || body.Reasoning.Effort != "none" {
+		t.Fatalf("DeepSeek compact summary must explicitly disable default reasoning: %s", prepared.Body)
+	}
+}
+
+func TestPrepareOpenAIResponsesAuxiliaryRequestDoesNotLeakDeepSeekPrivateControl(t *testing.T) {
+	tests := []Config{
+		{APIKey: "test", BaseURL: "https://api.openai.com/v1", Model: "gpt-test", ProviderID: "openai", Protocol: ProtocolOpenAIResponses},
+		{APIKey: "test", BaseURL: "https://proxy.example/v1", Model: "deepseek-v4-pro", ProviderID: "deepseek", Protocol: ProtocolOpenAIResponses},
+		{APIKey: "test", BaseURL: "https://api.deepseek.com", Model: "custom-model", ProviderID: "deepseek", Protocol: ProtocolOpenAIResponses},
+	}
+	for _, cfg := range tests {
+		prepared, err := PrepareRequest(cfg, Request{Purpose: RequestPurposeCompactSummary, DisableReasoning: true}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(prepared.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := body["reasoning"]; exists {
+			t.Fatalf("unmatched Responses endpoint inherited DeepSeek control: %s", prepared.Body)
+		}
+	}
+}
+
 func TestInvokeOpenAIResponsesNormalizesTextToolsAndUsage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/responses" {

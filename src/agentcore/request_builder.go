@@ -109,10 +109,16 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		ContextEpochSourceCandidate{SourceKey: "system_prompt", Kind: ContextContributionSystemPrompt, Content: strings.ReplaceAll(staticContent, "{{.RuntimeInfo}}", ""), State: ContextEpochSourceUpdated},
 		ContextEpochSourceCandidate{SourceKey: "runtime_context", Kind: ContextContributionRuntimeContext, Content: prompt.FormatRuntimeInfo(snapshot.ToRuntimeInfo()), State: ContextEpochSourceUpdated},
 	)
-	if rb.config.MemoryContextProvider != nil {
-		content, err := rb.config.MemoryContextProvider()
+	if rb.config.MemoryContextProvider != nil || strings.TrimSpace(rb.config.CompactedMemoryContext) != "" {
+		compactedRefs := strings.TrimSpace(rb.config.CompactedMemoryContext)
+		currentRecall := ""
+		var err error
+		if rb.config.MemoryContextProvider != nil {
+			currentRecall, err = rb.config.MemoryContextProvider()
+		}
+		content := joinDistinctContext(compactedRefs, strings.TrimSpace(currentRecall))
 		switch {
-		case err != nil:
+		case err != nil && content == "":
 			envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{SourceKey: "memory_context", Kind: ContextContributionMemory, State: ContextEpochSourceUnavailable})
 		case strings.TrimSpace(content) == "":
 			envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{SourceKey: "memory_context", Kind: ContextContributionMemory, State: ContextEpochSourceRemoved})
@@ -141,6 +147,20 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 			envelope.SystemContextItems = append(envelope.SystemContextItems, ContextItem{ID: block.ID, Type: "current_run_plan", Content: content})
 			envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{SourceKey: "current_run_plan", Kind: ContextContributionRuntimeContext, Content: content, State: ContextEpochSourceUpdated})
 		}
+	}
+	for _, block := range rb.config.CompactContextBlocks {
+		if strings.TrimSpace(block.Content) == "" {
+			continue
+		}
+		block.Kind = ContextContributionTaskCheckpoint
+		envelope.SystemBlocks = append(envelope.SystemBlocks, block)
+		envelope.SystemContextItems = append(envelope.SystemContextItems, ContextItem{
+			ID: firstNonEmptyAttachmentValue(block.ID, "task_checkpoint_v2"), Type: "task_checkpoint_v2", Content: block.Content,
+		})
+		envelope.EpochSources = append(envelope.EpochSources, ContextEpochSourceCandidate{
+			SourceKey: firstNonEmptyAttachmentValue(block.ID, "task_checkpoint_v2"), Kind: ContextContributionTaskCheckpoint,
+			Content: block.Content, State: ContextEpochSourceUpdated,
+		})
 	}
 	for _, block := range rb.config.SkillContextBlocks {
 		if strings.TrimSpace(block.Content) == "" {
@@ -201,6 +221,20 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 	})
 	envelope.ContextWindowState = NewContextEngine(contextWindowConfigFromModelConfig(rb.config.ModelConfig)).Evaluate(envelope)
 	return envelope
+}
+
+func joinDistinctContext(values ...string) string {
+	seen := map[string]bool{}
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		parts = append(parts, value)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func hostConversationContinuityBlock() ContextBlock {
@@ -362,6 +396,7 @@ func attributeContextMessages(messages []convcontext.Message) []convcontext.Mess
 
 func (rb *RequestBuilder) attributeToolSchemas(schemas []tool.ToolSchema) []AttributedToolSchema {
 	result := make([]AttributedToolSchema, 0, len(schemas))
+	toolContextWindowTokens := rb.toolContextWindowTokens()
 	for _, schema := range schemas {
 		provenance := ToolSchemaProvenance{}
 		var runtime tool.Tool
@@ -378,7 +413,7 @@ func (rb *RequestBuilder) attributeToolSchemas(schemas []tool.ToolSchema) []Attr
 			}
 		}
 		if provenance.Origin == tool.SourceSkill {
-			provenance.SkillCatalog = contextUsageSkillCatalog(runtime, rb.config.ModelConfig.ContextWindow)
+			provenance.SkillCatalog = contextUsageSkillCatalog(runtime, toolContextWindowTokens)
 		}
 		if schema.Function.Name == tool.ToolFindToolName {
 			if disclosure := rb.toolDisclosureProjection(); disclosure.MCPEnabled {
@@ -406,6 +441,7 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 	}
 	if rb.config.ToolAvailabilitySnapshot != nil {
 		disclosure := rb.toolDisclosureProjection()
+		toolContextWindowTokens := rb.toolContextWindowTokens()
 		entries := rb.config.ToolAvailabilitySnapshot.Entries()
 		definitions := make([]tool.ToolSchema, 0, len(entries))
 		for _, entry := range entries {
@@ -440,7 +476,7 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 				Type: "function",
 				Function: tool.ToolFunctionSchema{
 					Name:        name,
-					Description: requestToolModelDescription(entry.Runtime, entry.Definition, rb.config.ModelConfig.ContextWindow),
+					Description: requestToolModelDescription(entry.Runtime, entry.Definition, toolContextWindowTokens),
 					Parameters:  entry.Definition.InputSchema,
 				},
 			})
@@ -449,6 +485,7 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 	}
 	tools := tool.FilterToolsForExposure(tool.ListTools(), rb.toolExposurePolicy())
 	definitions := make([]tool.ToolSchema, 0, len(tools))
+	toolContextWindowTokens := rb.toolContextWindowTokens()
 
 	for _, t := range tools {
 		definition := requestToolDefinition(t)
@@ -467,12 +504,29 @@ func (rb *RequestBuilder) getTools() []tool.ToolSchema {
 			Type: "function",
 			Function: tool.ToolFunctionSchema{
 				Name:        definition.Name,
-				Description: requestToolModelDescription(t, definition, rb.config.ModelConfig.ContextWindow),
+				Description: requestToolModelDescription(t, definition, toolContextWindowTokens),
 				Parameters:  definition.InputSchema,
 			},
 		})
 	}
 	return definitions
+}
+
+// toolContextWindowTokens returns the budget visible to context-sensitive
+// tool descriptions. Before compaction they use the configured full window;
+// after a validated V2 boundary they use the hard 10% target because their
+// schemas are part of that rebuilt provider-visible envelope.
+func (rb *RequestBuilder) toolContextWindowTokens() int {
+	if rb != nil && rb.config.RestoredContextBundleV2 != nil {
+		state := NewContextWindowStateWithConfig(ContextEnvelope{}, contextWindowConfigFromModelConfig(rb.config.ModelConfig))
+		if state.CompactTarget > 0 {
+			return state.CompactTarget
+		}
+	}
+	if rb == nil {
+		return 0
+	}
+	return rb.config.ModelConfig.ContextWindow
 }
 
 // toolDisclosureProjection memoizes the deterministic per-run disclosure

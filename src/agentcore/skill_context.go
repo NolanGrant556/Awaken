@@ -2,17 +2,9 @@ package agentcore
 
 import (
 	"fmt"
-	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"awaken/src/skillruntime"
-)
-
-const (
-	postCompactMaxTokensPerSkill = 5_000
-	postCompactSkillsTokenBudget = 25_000
-	compactCharsPerToken         = 4
 )
 
 func skillActivationSourcePath(plan *skillruntime.SkillActivationPlan) string {
@@ -26,61 +18,38 @@ func skillActivationSourcePath(plan *skillruntime.SkillActivationPlan) string {
 	return strings.TrimRight(root, "/\\") + "/SKILL.md"
 }
 
-// compactInvokedSkillContext enforces Awaken's recovery budget: most recent
-// invocations first, at most 5k estimated tokens per Skill and 25k in total.
-// The source path remains in the recovery notice so the model can use Read
-// when it needs the full package instructions again.
+// compactInvokedSkillContext replaces full Skill bodies with durable,
+// on-demand references. The global V2 allocator owns the whole request budget;
+// independent 5k/25k Skill quotas would make a hard 10% postcondition
+// impossible for multi-Skill tasks.
 func (r *Runner) compactInvokedSkillContext() {
 	if r == nil || len(r.config.SkillContextBlocks) == 0 {
 		return
 	}
-	blocks := append([]ContextBlock(nil), r.config.SkillContextBlocks...)
-	sort.SliceStable(blocks, func(i, j int) bool {
-		if blocks[i].InvokedAt.Equal(blocks[j].InvokedAt) {
-			return i > j
-		}
-		return blocks[i].InvokedAt.After(blocks[j].InvokedAt)
-	})
-
-	perSkillChars := postCompactMaxTokensPerSkill * compactCharsPerToken
-	totalChars := postCompactSkillsTokenBudget * compactCharsPerToken
-	used := 0
-	kept := make([]ContextBlock, 0, len(blocks))
-	for _, block := range blocks {
-		content := strings.TrimSpace(block.Content)
-		if content == "" || used >= totalChars {
-			continue
-		}
-		limit := perSkillChars
-		if remaining := totalChars - used; remaining < limit {
-			limit = remaining
-		}
-		content, truncated := truncateSkillContext(content, limit)
-		if truncated {
-			path := strings.TrimSpace(block.SourcePath)
-			if path == "" {
-				path = "the Skill package path recorded by the host"
-			}
-			content += fmt.Sprintf("\n\n[... skill content truncated for compaction; use Read on %s if you need the full text]", path)
-		}
-		block.Content = content
-		block.Compacted = true
-		used += utf8.RuneCountInString(content)
-		kept = append(kept, block)
-	}
-	// System blocks keep invocation order even though selection used recency.
-	sort.SliceStable(kept, func(i, j int) bool { return kept[i].InvokedAt.Before(kept[j].InvokedAt) })
-	r.config.SkillContextBlocks = kept
+	r.config.SkillContextBlocks = compactInvokedSkillContextBlocks(r.config.SkillContextBlocks)
 	r.rebuildRequestBuilder()
 }
 
-func truncateSkillContext(value string, maxRunes int) (string, bool) {
-	if maxRunes <= 0 {
-		return "", strings.TrimSpace(value) != ""
+// compactInvokedSkillContextBlocks computes the bounded post-compact Skill
+// projection without mutating Runner state. V2 compaction uses this draft for
+// validation and durable persistence before installing it atomically.
+func compactInvokedSkillContextBlocks(input []ContextBlock) []ContextBlock {
+	kept := make([]ContextBlock, 0, len(input))
+	for _, block := range input {
+		content := strings.TrimSpace(block.Content)
+		if content == "" {
+			continue
+		}
+		path := strings.TrimSpace(block.SourcePath)
+		if path == "" {
+			path = "the Skill package path recorded by the host"
+		}
+		block.Content = fmt.Sprintf(
+			"Active Skill reference after context compaction.\nskill_id=%s\nsource_path=%s\ncontent_digest=%s\nBefore applying this Skill again, use Read on %s to reload its full SKILL.md instructions.",
+			strings.TrimSpace(block.SkillID), path, digestText(content), path,
+		)
+		block.Compacted = true
+		kept = append(kept, block)
 	}
-	runes := []rune(value)
-	if len(runes) <= maxRunes {
-		return value, false
-	}
-	return strings.TrimSpace(string(runes[:maxRunes])), true
+	return kept
 }

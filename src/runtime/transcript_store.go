@@ -46,9 +46,11 @@ type TranscriptRecord struct {
 }
 
 type restoredTranscript struct {
-	Messages           []convcontext.Message
-	SkillContextBlocks []agentcore.ContextBlock
-	SkillInvokedAt     map[string]time.Time
+	Messages              []convcontext.Message
+	SkillContextBlocks    []agentcore.ContextBlock
+	CompactContextBlocks  []agentcore.ContextBlock
+	LatestContextBundleV2 *agentcore.PostCompactContextBundleV2
+	SkillInvokedAt        map[string]time.Time
 	// ActivatedDeferredTools is the ordered on-demand loaded deferred tool
 	// set rebuilt from deferred_tools_activated records, including the legacy
 	// mcp_tools_activated kind (root agent only).

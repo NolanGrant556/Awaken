@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"awaken/src/agentcore"
+	"awaken/src/filestore"
 )
 
 var (
@@ -39,6 +40,10 @@ type ExecutionJournal struct {
 	pending  []agentcore.SemanticRecord
 	seenIDs  map[string]struct{}
 	closed   bool
+	// syncHook is a test-only fault injection point. Production leaves it nil
+	// and uses os.File.Sync directly.
+	syncHook        func() error
+	atomicWriteHook func(path string, data []byte) error
 }
 
 func NewExecutionJournal(path, threadID string) (*ExecutionJournal, error) {
@@ -72,6 +77,34 @@ func (j *ExecutionJournal) ThreadID() string {
 	return j.threadID
 }
 
+func (j *ExecutionJournal) LastAssignedSequence() uint64 {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.nextSeq == 0 {
+		return 0
+	}
+	return j.nextSeq - 1
+}
+
+func (j *ExecutionJournal) SemanticRecords(fromSeq, toSeq uint64) ([]agentcore.SemanticRecord, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if fromSeq == 0 || toSeq < fromSeq {
+		return nil, fmt.Errorf("invalid semantic record range %d..%d", fromSeq, toSeq)
+	}
+	records, err := ReadExecutionJournal(j.path)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]agentcore.SemanticRecord, 0)
+	for _, record := range records {
+		if record.Seq >= fromSeq && record.Seq <= toSeq {
+			result = append(result, record)
+		}
+	}
+	return result, nil
+}
+
 func (j *ExecutionJournal) Append(ctx context.Context, record agentcore.SemanticRecord) error {
 	_, err := j.appendBatchAssigned(ctx, []agentcore.SemanticRecord{record})
 	return err
@@ -102,6 +135,80 @@ func (j *ExecutionJournal) AppendAssigned(ctx context.Context, record agentcore.
 	return prepared[0], nil
 }
 
+// AppendFlushed assigns and durably replaces the complete journal with one
+// additional safety-sensitive record. A same-directory temp + fsync + rename
+// means failure before commit leaves the old complete file intact; failure
+// reported after rename is recognized as a committed success by comparing the
+// target with the exact transaction bytes. No failed boundary can later be
+// resurrected by a flush or restart.
+func (j *ExecutionJournal) AppendFlushed(ctx context.Context, record agentcore.SemanticRecord) (agentcore.SemanticRecord, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.closed {
+		return agentcore.SemanticRecord{}, fmt.Errorf("journal closed")
+	}
+	if err := j.writePendingWithRetry(ctx, true); err != nil {
+		return agentcore.SemanticRecord{}, err
+	}
+	prepared, err := j.prepareRecords([]agentcore.SemanticRecord{record})
+	if err != nil {
+		return agentcore.SemanticRecord{}, err
+	}
+	if len(prepared) != 1 {
+		return agentcore.SemanticRecord{}, fmt.Errorf("%w: record %q was not prepared", ErrJournalEncoding, record.RecordID)
+	}
+	records, err := ReadExecutionJournal(j.path)
+	if err != nil {
+		return agentcore.SemanticRecord{}, err
+	}
+	records = append(records, prepared[0])
+	data, err := encodeExecutionJournal(records)
+	if err != nil {
+		return agentcore.SemanticRecord{}, err
+	}
+	if j.file != nil {
+		if err := j.file.Close(); err != nil {
+			return agentcore.SemanticRecord{}, err
+		}
+		j.file = nil
+	}
+	writeErr := j.writeJournalAtomically(data)
+	if writeErr != nil {
+		committed, readErr := os.ReadFile(j.path)
+		if readErr != nil || !bytes.Equal(committed, data) {
+			_ = j.reopenForAppend()
+			return agentcore.SemanticRecord{}, writeErr
+		}
+	}
+	j.seenIDs[prepared[0].RecordID] = struct{}{}
+	if prepared[0].Seq+1 > j.nextSeq {
+		j.nextSeq = prepared[0].Seq + 1
+	}
+	// The transaction is already committed. Reopening is an operational
+	// optimization; a later append will retry it if this attempt fails.
+	_ = j.reopenForAppend()
+	return prepared[0], nil
+}
+
+func (j *ExecutionJournal) writeJournalAtomically(data []byte) error {
+	if j.atomicWriteHook != nil {
+		return j.atomicWriteHook(j.path, data)
+	}
+	return filestore.WriteFileAtomic(j.path, data)
+}
+
+func encodeExecutionJournal(records []agentcore.SemanticRecord) ([]byte, error) {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	for _, record := range records {
+		if err := encoder.Encode(record); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrJournalEncoding, err)
+		}
+	}
+	return buf.Bytes(), nil
+}
+
 func (j *ExecutionJournal) appendBatchAssigned(ctx context.Context, records []agentcore.SemanticRecord) ([]agentcore.SemanticRecord, error) {
 	if len(records) == 0 {
 		return nil, nil
@@ -111,7 +218,6 @@ func (j *ExecutionJournal) appendBatchAssigned(ctx context.Context, records []ag
 	if j.closed {
 		return nil, fmt.Errorf("journal closed")
 	}
-
 	prepared, err := j.prepareRecords(records)
 	if err != nil {
 		return nil, err
@@ -271,7 +377,7 @@ func (j *ExecutionJournal) writePendingWithRetry(ctx context.Context, syncFile b
 			}
 		}
 		if written && syncFile {
-			if err := j.file.Sync(); err != nil {
+			if err := j.syncCurrentFile(); err != nil {
 				lastErr = err
 				if !isRetryableJournalError(err) {
 					return err
@@ -327,7 +433,7 @@ func (j *ExecutionJournal) syncFile(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := j.file.Sync(); err == nil {
+		if err := j.syncCurrentFile(); err == nil {
 			return nil
 		} else {
 			lastErr = err
@@ -352,6 +458,16 @@ func (j *ExecutionJournal) syncFile(ctx context.Context) error {
 	}
 	return lastErr
 }
+
+func (j *ExecutionJournal) syncCurrentFile() error {
+	if j.syncHook != nil {
+		return j.syncHook()
+	}
+	return j.file.Sync()
+}
+
+var _ agentcore.FlushedSemanticRecorder = (*ExecutionJournal)(nil)
+var _ agentcore.SemanticRecordRangeReader = (*ExecutionJournal)(nil)
 
 func (j *ExecutionJournal) openAndScan() error {
 	file, err := os.OpenFile(j.path, os.O_CREATE|os.O_RDWR, 0o644)

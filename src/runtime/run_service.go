@@ -1314,7 +1314,13 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				agent.GetConversation().Context.SetMessages(restored.Messages)
 				cfg := agent.GetConfig()
 				cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), restored.SkillContextBlocks...)
+				cfg.CompactContextBlocks = append([]agentcore.ContextBlock(nil), restored.CompactContextBlocks...)
+				cfg.CompactedMemoryContext = agentcore.CompactedMemoryContextFromBundleV2(restored.LatestContextBundleV2)
+				if cfg.MemoryRecallMarkCompacted != nil {
+					cfg.MemoryRecallMarkCompacted(agentcore.CompactedMemoryIDsFromBundleV2(restored.LatestContextBundleV2))
+				}
 				cfg.ActivatedDeferredTools = append([]string(nil), restored.ActivatedDeferredTools...)
+				cfg.RestoredContextBundleV2 = restored.LatestContextBundleV2
 				agent.Reconfigure(cfg)
 			}
 			runIDs := append([]string(nil), restored.RunIDs...)

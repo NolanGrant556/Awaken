@@ -59,6 +59,13 @@ func MapEvent(event agentcore.AwakenEvent) []Event {
 		CompactSummaryLatestUserPinned:   cloneBoolPointer(event.CompactSummaryLatestUserPinned),
 		CompactFallbackMarker:            event.CompactFallbackMarker,
 		CompactFailureReason:             event.CompactFailureReason,
+		CompactMandatoryFloor:            event.CompactMandatoryFloor,
+		CompactLocalProjected:            event.CompactLocalProjected,
+		CompactConservativeProjected:     event.CompactConservativeProjected,
+		CompactContributionTokens:        cloneCompactContributionTokens(event.CompactContributionTokens),
+		CompactNativeAttempted:           cloneBoolPointer(event.CompactNativeAttempted),
+		CompactNativeUsed:                cloneBoolPointer(event.CompactNativeUsed),
+		CompactNativeReason:              event.CompactNativeReason,
 	}
 
 	switch event.Type {
@@ -756,6 +763,17 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func cloneCompactContributionTokens(input map[string]int) map[string]int {
+	if input == nil {
+		return nil
+	}
+	result := make(map[string]int, len(input))
+	for key, value := range input {
+		result[key] = value
+	}
+	return result
 }
 
 func toUnixMillis(ts time.Time) int64 {

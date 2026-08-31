@@ -1215,11 +1215,19 @@ func TestRunEventEmitterCompactStructuredFields(t *testing.T) {
 			Marker: "[COMPACT_FALLBACK:llm_summary_failed]",
 			Reason: "provider_timeout",
 		},
+		BudgetReceipt: &CompactBudgetReceipt{
+			CompactTargetTokens: 36, MandatoryFloorTokens: 12,
+			LocalProjectedTokens: 30, ConservativeProjected: 33,
+			ContributionTokens: map[string]int{"system_prompt": 9, "conversation": 21},
+		},
+		NativeCompactionAttempted: true,
+		NativeCompactionUsed:      true,
+		NativeCompactionReason:    "native_compaction_succeeded",
 	}
 
 	emitter.emitCompactStarted(state, CompactModeReactive)
 	emitter.emitCompactFinished(state, result, "gpt-5-mini")
-	emitter.emitCompactFailed(state, CompactModeReactive, "compact failed", "provider_timeout")
+	emitter.emitCompactFailed(state, CompactModeReactive, "compact failed", "provider_timeout", errors.New("provider timeout"))
 
 	if len(gotEvents) != 3 {
 		t.Fatalf("expected 3 events, got %d", len(gotEvents))
@@ -1260,7 +1268,14 @@ func TestRunEventEmitterCompactStructuredFields(t *testing.T) {
 		finished.CompactSummaryLatestUserPinned == nil ||
 		!*finished.CompactSummaryLatestUserPinned ||
 		finished.CompactFallbackMarker != "[COMPACT_FALLBACK:llm_summary_failed]" ||
-		finished.CompactFailureReason != "provider_timeout" {
+		finished.CompactFailureReason != "provider_timeout" ||
+		finished.CompactMandatoryFloor != 12 ||
+		finished.CompactLocalProjected != 30 ||
+		finished.CompactConservativeProjected != 33 ||
+		finished.CompactContributionTokens["conversation"] != 21 ||
+		finished.CompactNativeAttempted == nil || !*finished.CompactNativeAttempted ||
+		finished.CompactNativeUsed == nil || !*finished.CompactNativeUsed ||
+		finished.CompactNativeReason != "native_compaction_succeeded" {
 		t.Fatalf("unexpected compact finished event: %+v", finished)
 	}
 

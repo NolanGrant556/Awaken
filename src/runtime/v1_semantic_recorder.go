@@ -57,15 +57,62 @@ func (r *v1SemanticRecorder) Flush(ctx context.Context) error {
 
 func (r *v1SemanticRecorder) Close() error { return nil }
 
+func (r *v1SemanticRecorder) UsesLegacyContextCompactionRecord() bool { return true }
+
 func (r *v1SemanticRecorder) flushPending() error {
 	if len(r.pending) == 0 {
 		return nil
 	}
+	existing, err := readTranscriptRecords(r.path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	nextMessageIndex := transcriptMessageCount(existing)
+	lastMessageID := ""
+	for _, record := range existing {
+		if record.RecordType == transcriptRecordTypeMessage && strings.TrimSpace(record.MessageID) != "" {
+			lastMessageID = record.MessageID
+		}
+	}
 	out := make([]TranscriptRecord, 0, len(r.pending))
 	for _, record := range r.pending {
+		if record.Kind == agentcore.SemanticKindContextCompacted {
+			compacted, ok := compactedMessagesFromSemanticRecord(record.ThreadID, record.Payload)
+			if !ok {
+				return fmt.Errorf("invalid legacy context compaction payload")
+			}
+			timestamp := record.Timestamp
+			if timestamp.IsZero() {
+				timestamp = time.Now().UTC()
+			}
+			for _, message := range compacted {
+				converted := transcriptRecordForMessage(
+					firstNonEmpty(record.ThreadID, r.threadID),
+					record.RunID,
+					record.SessionID,
+					nextMessageIndex,
+					message,
+					timestamp,
+				)
+				converted.ParentMessageID = lastMessageID
+				lastMessageID = converted.MessageID
+				out = append(out, converted)
+				nextMessageIndex++
+			}
+			continue
+		}
 		converted, ok := semanticRecordToV1Transcript(record)
 		if !ok {
 			continue
+		}
+		for index := range converted {
+			if converted[index].RecordType != transcriptRecordTypeMessage {
+				continue
+			}
+			converted[index].MessageID = transcriptMessageID(firstNonEmpty(record.ThreadID, r.threadID), nextMessageIndex)
+			converted[index].ParentMessageID = lastMessageID
+			lastMessageID = converted[index].MessageID
+			nextMessageIndex++
 		}
 		out = append(out, converted...)
 	}
@@ -79,6 +126,8 @@ func (r *v1SemanticRecorder) flushPending() error {
 	r.pending = r.pending[:0]
 	return nil
 }
+
+var _ agentcore.LegacyContextCompactionRecorder = (*v1SemanticRecorder)(nil)
 
 func semanticRecordToV1Transcript(record agentcore.SemanticRecord) ([]TranscriptRecord, bool) {
 	ts := record.Timestamp

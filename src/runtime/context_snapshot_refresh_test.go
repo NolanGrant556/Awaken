@@ -47,7 +47,7 @@ func TestRefreshThreadContextSnapshotPersistsV4ForDurableHistory(t *testing.T) {
 	if result.Snapshot.SchemaVersion != 4 || result.Snapshot.EstimatorID != "awaken_leaf_v4" {
 		t.Fatalf("expected current v4 estimator, got %+v", result.Snapshot)
 	}
-	if result.Snapshot.ModelWindowTokens != 1_000_000 || result.Snapshot.EffectiveInputWindowTokens != 984_000 {
+	if result.Snapshot.ModelWindowTokens != 1_000_000 || result.Snapshot.EffectiveInputWindowTokens != 1_000_000 {
 		t.Fatalf("selected model window was not applied: %+v", result.Snapshot)
 	}
 	total := 0

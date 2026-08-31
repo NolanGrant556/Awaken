@@ -254,10 +254,35 @@ func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convconte
 			messages = compacted
 			pendingAssistant = map[string]int{}
 			pendingProviderState = map[string]*convcontext.ProviderOpaqueMessageState{}
+		case agentcore.SemanticKindContextCompactedV2:
+			bundle, ok := postCompactContextBundleV2FromSemanticRecord(record.Payload)
+			if !ok {
+				// V2 is also fail-closed: a corrupt or partially written bundle
+				// never erases the last known-good conversation projection.
+				continue
+			}
+			compacted, ok := compactedMessagesFromSemanticRecord(record.ThreadID, map[string]any{
+				"compact_boundary_id": bundle.BoundaryID,
+				"messages":            bundle.ConversationProjection.Messages,
+			})
+			if !ok {
+				continue
+			}
+			messages = compacted
+			pendingAssistant = map[string]int{}
+			pendingProviderState = map[string]*convcontext.ProviderOpaqueMessageState{}
 		}
 	}
 	_ = pendingAssistant
 	return messages
+}
+
+func postCompactContextBundleV2FromSemanticRecord(payload map[string]any) (*agentcore.PostCompactContextBundleV2, bool) {
+	if payload == nil || payload["bundle_v2"] == nil {
+		return nil, false
+	}
+	bundle, err := agentcore.DecodePostCompactContextBundleV2(payload["bundle_v2"])
+	return bundle, err == nil
 }
 
 func compactedMessagesFromSemanticRecord(_ string, payload map[string]any) ([]convcontext.Message, bool) {
@@ -651,9 +676,11 @@ func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restored
 		Messages:               messagesFromSemanticRecords(records),
 		RunIDs:                 runIDsFromSemanticRecords(records),
 		SkillContextBlocks:     skillContextBlocksFromSemanticRecords(records),
+		CompactContextBlocks:   agentcore.CompactContextBlocksFromBundleV2(latestContextBundleV2FromSemanticRecords(records)),
 		SkillInvokedAt:         skillInvocationTimesFromSemanticRecords(records),
 		ActivatedDeferredTools: activatedDeferredToolsFromSemanticRecords(records),
 		RunPlanSnapshots:       runPlanSnapshotsFromSemanticRecords(records),
+		LatestContextBundleV2:  latestContextBundleV2FromSemanticRecords(records),
 	}
 	for _, record := range records {
 		if restored.CreatedAt.IsZero() || record.Timestamp.Before(restored.CreatedAt) {
@@ -673,6 +700,27 @@ func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restored
 		restored.UpdatedAt = restored.CreatedAt
 	}
 	return restored
+}
+
+func latestContextBundleV2FromSemanticRecords(records []agentcore.SemanticRecord) *agentcore.PostCompactContextBundleV2 {
+	var latest *agentcore.PostCompactContextBundleV2
+	for _, record := range records {
+		if strings.TrimSpace(stringPayload(record.Payload, "agent_id")) != "" {
+			continue
+		}
+		switch record.Kind {
+		case agentcore.SemanticKindContextCompacted:
+			if _, ok := compactedMessagesFromSemanticRecord(record.ThreadID, record.Payload); ok {
+				latest = nil
+			}
+		case agentcore.SemanticKindContextCompactedV2:
+			bundle, ok := postCompactContextBundleV2FromSemanticRecord(record.Payload)
+			if ok {
+				latest = bundle
+			}
+		}
+	}
+	return latest
 }
 
 // activatedDeferredToolsFromSemanticRecords rebuilds the thread's on-demand
@@ -721,7 +769,43 @@ func activatedDeferredToolsFromSemanticRecords(records []agentcore.SemanticRecor
 func skillContextBlocksFromSemanticRecords(records []agentcore.SemanticRecord) []agentcore.ContextBlock {
 	latest := make(map[string]agentcore.ContextBlock)
 	order := make([]string, 0)
+	activations := make(map[string]agentcore.ContextBlock)
+	activationOrder := make([]string, 0)
+	restoreActivations := func() {
+		latest = make(map[string]agentcore.ContextBlock, len(activations))
+		order = append([]string(nil), activationOrder...)
+		for skillID, block := range activations {
+			latest[skillID] = block
+		}
+	}
 	for _, record := range records {
+		if record.Kind == agentcore.SemanticKindContextCompacted && strings.TrimSpace(stringPayload(record.Payload, "agent_id")) == "" {
+			if _, ok := compactedMessagesFromSemanticRecord(record.ThreadID, record.Payload); ok {
+				restoreActivations()
+			}
+			continue
+		}
+		if record.Kind == agentcore.SemanticKindContextCompactedV2 {
+			if strings.TrimSpace(stringPayload(record.Payload, "agent_id")) != "" {
+				continue
+			}
+			bundle, ok := postCompactContextBundleV2FromSemanticRecord(record.Payload)
+			if !ok {
+				continue
+			}
+			latest = make(map[string]agentcore.ContextBlock)
+			order = order[:0]
+			for _, block := range agentcore.SkillContextBlocksFromBundleV2(bundle) {
+				if strings.TrimSpace(block.SkillID) == "" {
+					continue
+				}
+				if _, exists := latest[block.SkillID]; !exists {
+					order = append(order, block.SkillID)
+				}
+				latest[block.SkillID] = block
+			}
+			continue
+		}
 		if record.Kind != agentcore.SemanticKindSkillActivated {
 			continue
 		}
@@ -737,16 +821,13 @@ func skillContextBlocksFromSemanticRecords(records []agentcore.SemanticRecord) [
 		if skillID == "" || content == "" {
 			continue
 		}
-		if _, exists := latest[skillID]; !exists {
-			order = append(order, skillID)
-		}
 		invokedAt := record.Timestamp
 		if raw := strings.TrimSpace(stringPayload(record.Payload, "invoked_at")); raw != "" {
 			if parsed, err := time.Parse(time.RFC3339Nano, raw); err == nil {
 				invokedAt = parsed
 			}
 		}
-		latest[skillID] = agentcore.ContextBlock{
+		block := agentcore.ContextBlock{
 			ID:         "skill_activation_" + skillID,
 			SkillID:    skillID,
 			SourcePath: stringPayload(record.Payload, "skill_path"),
@@ -754,6 +835,14 @@ func skillContextBlocksFromSemanticRecords(records []agentcore.SemanticRecord) [
 			InvokedAt:  invokedAt,
 			Content:    content,
 		}
+		if _, exists := activations[skillID]; !exists {
+			activationOrder = append(activationOrder, skillID)
+		}
+		activations[skillID] = block
+		if _, exists := latest[skillID]; !exists {
+			order = append(order, skillID)
+		}
+		latest[skillID] = block
 	}
 	blocks := make([]agentcore.ContextBlock, 0, len(order))
 	for _, skillID := range order {

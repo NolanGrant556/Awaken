@@ -8,7 +8,7 @@ SemanticJournal v2 是 run 内容与恢复的耐久事实源；09 域拥有 wire
 thread, run_started, user_message, reasoning_summary, assistant_message,
 tool_call, tool_result, artifact, file_change, turn_diff,
 permission_decision, skill_activated, resource_receipt,
-runtime_notice, recovery_decision, context_compacted, turn_boundary,
+runtime_notice, recovery_decision, context_compacted, context_compacted_v2, turn_boundary,
 run_terminal, persistence_warning, memory_recalled, memory_mutated,
 context_snapshot, model_request, model_usage, context_epoch, instruction_snapshot,
 provider_opaque_state, hook_snapshot, hook_invocation_started,
@@ -38,7 +38,7 @@ computer_session_closed, computer_media_accessed
 - Skill 成功激活在正文进入执行上下文或 child 启动前写 `skill_activated`/`resource_receipt`；失败不写伪 activation；
 - observed changes、artifacts 与 canonical `tool_result` 成批写入；
 - Computer session/observation/action/review/control/media-access 事实由 run-bound recorder 写入同一 Journal；review requested/resolved 与 action started 在 UI 展示或 Driver perform 前 append 并 flush，写入失败必须阻止对应展示或输入；
-- 上下文压缩结果在替换内存消息前写并 flush `context_compacted`；
+- 上下文压缩结果在替换任何内存 authority 前写并 flush `context_compacted_v2`；feature flag 回退与尚未迁移的 v1 transcript thread 仍写并读取 v1 `context_compacted`，不能把 V2 section 写进不支持它的 recorder 后静默丢弃；
 - 每次 thread-bound 模型调用在 transport 前写并 flush 脱敏 `model_request`，结束后以同一 request ID 写 `model_usage`；对话状态变化后写当前下一请求的 `context_snapshot`；
 - 统一 LLM observer 发出的可展示 reasoning 在该段结束时 append `reasoning_summary`，再发布其 canonical live record；该记录只含展示正文、reasoning role 与稳定 message ID，并随 run terminal 的 flush 进入稳定存储；
 - Context Epoch 的 exact baseline/source/tool 内容写 sidecar；journal 的 `context_epoch` 只写 epoch ID、digest、状态和边界原因；
@@ -55,9 +55,13 @@ append 或 flush 失败必须 fail-stop；不能继续副作用、模型 transpo
 
 Skill 预激活失败仍保留已写入的 `user_message`；成功的多 Skill records 成批写入，批次失败不保留部分 activation。
 
-## 4. `context_compacted` 契约
+## 4. `context_compacted_v2` 与 v1 兼容契约
 
-`context_compacted` payload 保存：
+新压缩默认写 `context_compacted_v2`，payload 只以 `bundle_v2` 承载稳定 `PostCompactContextBundleV2` envelope。envelope schema version 固定为 2，包含 boundary/parent/generation/source sequence、`v1_messages|checkpoint_v2` conversation projection、TaskCheckpoint/SemanticSummary/RecentTurns、Instruction/Memory/RunPlan/Skill/Tool/Hook/gate/Subagent/Artifact refs、TranscriptLocator、ProviderOpaqueState、Budget/Coverage receipt 和完整 `BundleDigest`。未启用 section 必须显式为 `not_materialized + null + EMPTY_SECTION_DIGEST`，不可用 section 必须带稳定 reason；字段缺失、未知 state、value/digest 不一致均 fail closed。
+
+当前 V2 已物化 TaskCheckpoint、SemanticSummary、最多三个 recent user-task turns、可用时的 TranscriptLocator、Coverage，以及 profile 有明确输入上限时的硬 10% BudgetReceipt。ProviderOpaqueState 默认仍为 `not_materialized`；只有 exact official OpenAI Responses native compact 成功、opaque output 结构/digest 合法且完整 prepared-body 通过同一硬 10% receipt 时才物化。该 section 保存 canonical encrypted output 与 provider/profile/credential/model/protocol/endpoint-contract identity；重启后只在 identity 全匹配时重新附加到 Responses input，变化时忽略并继续 provider-neutral checkpoint。Memory 只保存 identity/scope/type/revision/bytes/content digest，不复制正文；Skill ref 保存压后有界投影、正文 digest 与可重读路径。bundle digest 覆盖完整 canonical envelope。
+
+旧 `context_compacted` payload 继续兼容：
 
 ```text
 compact_boundary_id
@@ -70,7 +74,7 @@ agent_id               # 仅 child runner
 
 每条 compacted message 保存 role、content、tool calls/result pairing、name、error 标志、boundary ID、无 blob 的 attachment identity/storage key，以及 tool result 的 `model_content` metadata/storage key。第一条消息必须带与 payload 一致的 boundary；role 只允许 user/assistant/tool；完整消息集必须通过 tool-result pairing 校验。
 
-重放按 journal seq 处理：遇到合法 `context_compacted` 时，用其完整 `messages` 替换之前累计的模型上下文，并清空待合并 assistant 片段；之后的记录继续追加。记录缺 messages、boundary 不一致、role 非法或 tool pairing 非法时，保留压缩前最后一份有效上下文，不让坏记录擦除历史。该记录仍留在 journal 供诊断。
+重放按 journal seq 处理：合法 V2 先校验完整 bundle digest/section/ref/pairing，再用 conversation projection 替换之前累计的模型上下文，并从同一 bundle 恢复压后 Skill、TaskCheckpoint 与 Memory refs；合法 v1 仍按 `messages` 替换。authority 以最后一个合法 boundary 为准：V2→v1 会撤销旧 V2-only refs 并恢复 legacy Skill activation，v1→V2 则安装最新完整 bundle。坏 V2/v1 均保留此前最后一份 known-good context。V2 的 journal 提交使用可回滚 append+fsync，失败字节不会在后续 flush/restart 变成有效 boundary。完整 Journal 记录不删除，`thread_history_read` 只从当前 thread 返回带总字符预算和 secret/store-path 遮蔽的安全投影，provider opaque 与原始工具参数不进入结果。
 
 父 runner 与 child runner 各自持久化自己的压缩边界；child payload 带 `agent_id`，不能把 child body 注入父上下文。
 
@@ -100,7 +104,7 @@ tool call/result payload 持久保存 tool/environment snapshot ID、provider ID
 
 ## 7. Skill 与任务输入恢复
 
-`skill_activated` 保存锚定路径、正文、来源、调用模式和 receipt；服务重建时按 run 恢复 inline SkillContextBlocks。压缩按恢复后的最近调用顺序保留，单 Skill 约 5,000 tokens、合计约 25,000 tokens；6 个满预算块保留最新 5 个。截断块必须保留精确 `Read` 源路径。
+`skill_activated` 保存锚定路径、正文、来源、调用模式和 receipt；服务重建先恢复 activation，遇到合法 V2 bundle 后以其压后 Skill refs 替换当前投影，边界之后的新 activation 再追加。压后不再使用独立 5K/25K 配额或按最近顺序丢弃 active Skill；每个 ref 必须保留 Skill ID、正文 digest 和精确 `Read` 源路径。
 
 消息发送不写 requested/resolved 审核记录，也不在重启恢复时重建 pending review；它只保留普通 tool call/result 与 provider outcome 事实。
 

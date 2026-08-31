@@ -96,6 +96,116 @@ func normalizeCompactSummary(raw string) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
+const compactSummaryHostHeaderReserveTokens = 160
+
+// boundCompactSummaryToBudget enforces the host allocation even when a
+// provider ignores MaxTokens. The typed TaskCheckpoint and Journal remain the
+// exact authority; this narrative projection keeps breadth-first critical
+// continuity, then admits supporting bullets only while the budget allows.
+func boundCompactSummaryToBudget(summary string, maxTokens int) string {
+	if maxTokens <= 0 {
+		return summary
+	}
+	bodyBudget := maxTokens - compactSummaryHostHeaderReserveTokens
+	if bodyBudget < 256 {
+		bodyBudget = 256
+	}
+	if convcontext.EstimateTokens(summary) <= bodyBudget {
+		return summary
+	}
+
+	parsed := parseCompactSummarySections(summary)
+	available := make(map[string][]string, len(compactSummarySections))
+	selected := make(map[string][]string, len(compactSummarySections))
+	for _, section := range compactSummarySections {
+		for _, line := range sanitizeCompactSummaryBody(parsed[section]) {
+			if !compactSummaryLineIsNone(line) {
+				available[section] = append(available[section], line)
+			}
+		}
+	}
+	priority := []string{
+		"Active Task", "Pending User Asks", "Constraints & Preferences", "In Progress", "Blocked",
+		"Remaining Work", "Critical Context", "Goal", "Key Decisions", "Completed Actions",
+		"Active State", "Relevant Files", "Resolved Questions",
+	}
+	maxDepth := 0
+	for _, section := range priority {
+		if len(available[section]) > maxDepth {
+			maxDepth = len(available[section])
+		}
+	}
+	for depth := 0; depth < maxDepth; depth++ {
+		for _, section := range priority {
+			if depth >= len(available[section]) {
+				continue
+			}
+			candidate := boundedCheckpointValue(available[section][depth], 320)
+			trial := cloneCompactSummarySections(selected)
+			trial[section] = append(trial[section], candidate)
+			if convcontext.EstimateTokens(renderCompactSummarySections(trial)) <= bodyBudget {
+				selected = trial
+				continue
+			}
+			// Preserve a bounded fragment of the first fact in a critical
+			// section when the whole bullet does not fit.
+			if depth == 0 && compactSummaryCriticalSection(section) {
+				if fragment := fitCompactSummaryLine(selected, section, candidate, bodyBudget); fragment != "" {
+					selected[section] = append(selected[section], fragment)
+				}
+			}
+		}
+	}
+	return renderCompactSummarySections(selected)
+}
+
+func cloneCompactSummarySections(input map[string][]string) map[string][]string {
+	output := make(map[string][]string, len(input))
+	for section, lines := range input {
+		output[section] = append([]string(nil), lines...)
+	}
+	return output
+}
+
+func compactSummaryCriticalSection(section string) bool {
+	switch section {
+	case "Active Task", "Pending User Asks", "Constraints & Preferences", "In Progress", "Blocked", "Remaining Work", "Critical Context":
+		return true
+	default:
+		return false
+	}
+}
+
+func fitCompactSummaryLine(selected map[string][]string, section string, line string, budget int) string {
+	runes := []rune(singleLineCompactText(line))
+	low, high := 0, len(runes)
+	best := ""
+	for low <= high {
+		mid := low + (high-low)/2
+		fragment := ""
+		if mid > 0 {
+			fragment = strings.TrimSpace(string(runes[:mid]))
+			if mid < len(runes) {
+				fragment = strings.TrimSpace(fragment) + "…"
+			}
+			if !strings.HasPrefix(fragment, "- ") {
+				fragment = "- " + strings.TrimLeft(fragment, "- ")
+			}
+		}
+		trial := cloneCompactSummarySections(selected)
+		if fragment != "" {
+			trial[section] = append(trial[section], fragment)
+		}
+		if convcontext.EstimateTokens(renderCompactSummarySections(trial)) <= budget {
+			best = fragment
+			low = mid + 1
+		} else {
+			high = mid - 1
+		}
+	}
+	return best
+}
+
 func parseCompactSummarySections(raw string) map[string][]string {
 	result := make(map[string][]string, len(compactSummarySections))
 	valid := make(map[string]struct{}, len(compactSummarySections))

@@ -2521,12 +2521,58 @@ describe("context usage presentation", () => {
       { id: "mcp", label: "MCP", estimatedTokens: 8_000 },
       { id: "skills", label: "技能", estimatedTokens: 1_000 },
       { id: "memory", label: "记忆", estimatedTokens: 500 },
+      { id: "task_checkpoint", label: "任务检查点", estimatedTokens: 0 },
       { id: "conversation", label: "对话", estimatedTokens: 6_500 },
       { id: "other", label: "其他/协议开销", estimatedTokens: 3_200 },
     ]);
     expect(
-      data?.contributions?.reduce((sum, contribution) => sum + contribution.estimatedTokens, 0),
+      data?.contributions?.reduce(
+        (sum, contribution) => sum + contribution.estimatedTokens,
+        0,
+      ),
     ).toBe(27_200);
+  });
+
+  it("projects the latest compact diagnostics into the context panel", () => {
+    const data = contextUsagePanelData(
+      {
+        eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+        modelWindow: 200_000,
+        effectiveWindow: 200_000,
+        estimatedTokens: 18_000,
+      },
+      undefined,
+      {
+        eventType: "AWAKEN_COMPACT_FINISHED",
+        status: "finished",
+        compactTarget: 20_000,
+        preCompactEstimatedTokens: 176_000,
+        postCompactEstimatedTokens: 17_500,
+        conservativeProjectedTokens: 18_000,
+        mandatoryFloorTokens: 11_200,
+        contributionTokens: { system_prompt: 4_000, conversation: 14_000 },
+        nativeAttempted: true,
+        nativeUsed: false,
+        nativeReason: "native_projection_fallback",
+        failureReason: "native_projection_fallback",
+      },
+    );
+
+    expect(data?.compactDiagnostics).toEqual({
+      status: "finished",
+      targetTokens: 20_000,
+      preCompactTokens: 176_000,
+      postCompactTokens: 18_000,
+      mandatoryFloorTokens: 11_200,
+      contributionTokens: [
+        { id: "system_prompt", label: "系统提示词", estimatedTokens: 4_000 },
+        { id: "conversation", label: "对话", estimatedTokens: 14_000 },
+      ],
+      nativeAttempted: true,
+      nativeUsed: false,
+      nativeReason: "native_projection_fallback",
+      failureReason: "native_projection_fallback",
+    });
   });
 
   it("does not reuse provider usage after an incompatible context identity change", () => {
@@ -2990,6 +3036,7 @@ describe("context usage presentation", () => {
       { id: "mcp", label: "MCP", estimatedTokens: 8_000 },
       { id: "skills", label: "技能", estimatedTokens: 1_000 },
       { id: "memory", label: "记忆", estimatedTokens: 500 },
+      { id: "task_checkpoint", label: "任务检查点", estimatedTokens: 0 },
       { id: "conversation", label: "对话", estimatedTokens: 6_500 },
     ]);
     const html = renderToString(

@@ -1553,28 +1553,16 @@ export type ModelCapability = {
   fieldSources?: Partial<Record<ModelCapabilityField, ModelCapabilityFieldSource>>;
 };
 
-export const DEFAULT_CONTEXT_OUTPUT_RESERVE = 16_000;
-
-export function effectiveContextWindow(
-  contextWindow?: number,
-  outputReserve: number = DEFAULT_CONTEXT_OUTPUT_RESERVE,
-): number {
+export function effectiveContextWindow(contextWindow?: number): number {
   const normalizedContextWindow =
     typeof contextWindow === "number" && Number.isFinite(contextWindow)
       ? Math.max(0, Math.round(contextWindow))
       : 0;
-  const normalizedOutputReserve =
-    typeof outputReserve === "number" && Number.isFinite(outputReserve)
-      ? Math.max(0, Math.round(outputReserve))
-      : DEFAULT_CONTEXT_OUTPUT_RESERVE;
-  return Math.max(0, normalizedContextWindow - normalizedOutputReserve);
+  return normalizedContextWindow;
 }
 
-export function calculateAutoCompactThreshold(
-  contextWindow?: number,
-  outputReserve: number = DEFAULT_CONTEXT_OUTPUT_RESERVE,
-): number {
-  return Math.floor(effectiveContextWindow(contextWindow, outputReserve) * 0.9);
+export function calculateAutoCompactThreshold(contextWindow?: number): number {
+  return Math.floor(effectiveContextWindow(contextWindow) * 0.9);
 }
 
 export type ModelProfileAdvancedWire = {

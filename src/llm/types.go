@@ -2,6 +2,7 @@ package llm
 
 import (
 	stdctx "context"
+	"encoding/json"
 	"os"
 	"strings"
 	"time"
@@ -51,6 +52,7 @@ const (
 	RequestPurposeScheduledTask     RequestPurpose = "scheduled_task"
 	RequestPurposeThreadTitle       RequestPurpose = "thread_title"
 	RequestPurposeCompactSummary    RequestPurpose = "compact_summary"
+	RequestPurposeNativeCompaction  RequestPurpose = "native_compaction"
 	RequestPurposeMemoryRecall      RequestPurpose = "memory_recall"
 	RequestPurposeMemoryMaintenance RequestPurpose = "memory_maintenance"
 	RequestPurposeConnectionTest    RequestPurpose = "connection_test"
@@ -76,6 +78,26 @@ type Request struct {
 	ReasoningPolicy     string
 	Messages            []context.Message
 	Tools               []tool.ToolSchema
+	// NativeCompaction asks the exact OpenAI Responses transport to invoke
+	// POST /responses/compact instead of generating an assistant response.
+	// It is ignored by protocols and endpoints without an explicit capability.
+	NativeCompaction bool
+	// NativeCompactionState is opaque provider output from a previous native
+	// compaction. Compatible OpenAI Responses requests prepend these items to
+	// input; incompatible identities are ignored and the host checkpoint remains
+	// authoritative.
+	NativeCompactionState *NativeCompactionState
+}
+
+type NativeCompactionState struct {
+	ProviderID         string
+	ProfileID          string
+	CredentialRevision uint64
+	ModelID            string
+	ProtocolFamily     Protocol
+	EndpointContractID string
+	Output             []json.RawMessage
+	Digest             string
 }
 
 // PreparedRequest is the immutable, protocol-lowered HTTP request. Callers
@@ -90,7 +112,15 @@ type PreparedRequest struct {
 	Stream             bool
 	StreamIdleTimeout  time.Duration
 	Cache              PreparedPromptCache
+	Operation          PreparedOperation
 }
+
+type PreparedOperation string
+
+const (
+	PreparedOperationModelResponse    PreparedOperation = "model_response"
+	PreparedOperationNativeCompaction PreparedOperation = "native_compaction"
+)
 
 type PreparedPromptCache struct {
 	CapabilityID     string
@@ -102,16 +132,17 @@ type PreparedPromptCache struct {
 
 // Response 是统一响应结构
 type Response struct {
-	Content              string
-	Thinking             string
-	ToolCalls            []ToolCall
-	Usage                *Usage
-	IsFinished           bool
-	StopReason           string
-	MaxOutputReached     bool
-	ProviderRequestID    string
-	RateLimitObservation *RateLimitObservation
-	ProviderOpaqueState  *context.ProviderOpaqueMessageState
+	Content               string
+	Thinking              string
+	ToolCalls             []ToolCall
+	Usage                 *Usage
+	IsFinished            bool
+	StopReason            string
+	MaxOutputReached      bool
+	ProviderRequestID     string
+	RateLimitObservation  *RateLimitObservation
+	ProviderOpaqueState   *context.ProviderOpaqueMessageState
+	NativeCompactionState *NativeCompactionState
 }
 
 // RateLimitObservation preserves the most recent provider response-header

@@ -40,25 +40,26 @@ var (
 )
 
 type Runner struct {
-	config               AgentConfig
-	conversation         *context.Conversation
-	reqBuilder           *RequestBuilder
-	toolRuntime          *ToolRuntime
-	failureSupervisor    *FailureSupervisor
-	threadID             string
-	runID                string
-	sessionID            string
-	recorder             SemanticRecorder
-	contextGovernor      *contextGovernor
-	streamLLMFunc        func(stdcontext.Context, *runEventEmitter) (*llm.Response, error)
-	llmRetrySleep        func(stdcontext.Context, time.Duration) error
-	suppressRunLifecycle bool
-	subagentController   subagentruntime.Controller
-	subagentProgress     subagentruntime.ProgressReporter
-	subagentMessages     func() []subagentruntime.QueuedMessage
-	memoryRecallSnapshot *MemoryRecallSnapshot
-	configureEmitter     func(*runEventEmitter)
-	runPlanService       tool.RunPlanService
+	config                  AgentConfig
+	conversation            *context.Conversation
+	reqBuilder              *RequestBuilder
+	toolRuntime             *ToolRuntime
+	failureSupervisor       *FailureSupervisor
+	threadID                string
+	runID                   string
+	sessionID               string
+	recorder                SemanticRecorder
+	contextGovernor         *contextGovernor
+	streamLLMFunc           func(stdcontext.Context, *runEventEmitter) (*llm.Response, error)
+	llmRetrySleep           func(stdcontext.Context, time.Duration) error
+	suppressRunLifecycle    bool
+	subagentController      subagentruntime.Controller
+	subagentProgress        subagentruntime.ProgressReporter
+	subagentMessages        func() []subagentruntime.QueuedMessage
+	memoryRecallSnapshot    *MemoryRecallSnapshot
+	configureEmitter        func(*runEventEmitter)
+	runPlanService          tool.RunPlanService
+	nativeCompactionInvoker func(stdcontext.Context, ModelCallAuthority, llm.Config, llm.Request) (*llm.Response, error)
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
@@ -73,17 +74,55 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 		NewContextEngine(contextWindowConfigFromModelConfig(config.ModelConfig)),
 		func() (LLMRequest, error) { return runner.buildLLMRequest() },
 		func(ctx stdcontext.Context, result CompactResult) error {
-			// Journal-first: persist the compacted conversation before it
-			// becomes the in-memory truth so a restart replays the same
-			// post-compact context instead of the pre-compact history.
-			if err := runner.persistContextCompacted(ctx, result); err != nil {
+			if !contextCompactionV2Enabled() || usesLegacyContextCompactionRecorder(runner.recorder) {
+				if err := runner.persistContextCompactedV1(ctx, result); err != nil {
+					return err
+				}
+				runner.conversation.Context.SetMessages(stripProviderOpaqueCompactionState(result.Messages))
+				runner.compactInvokedSkillContext()
+				if runner.config.MemoryRecallReset != nil {
+					runner.config.MemoryRecallReset()
+				}
+				runner.config.RestoredContextBundleV2 = nil
+				runner.config.CompactContextBlocks = nil
+				runner.config.CompactedMemoryContext = ""
+				runner.memoryRecallSnapshot = nil
+				return nil
+			}
+			// Build every post-compact projection before persistence. The V2
+			// bundle is then appended and flushed as one durable boundary; only
+			// after that succeeds may any in-memory authority be installed.
+			result = runner.tryProviderNativeCompaction(ctx, result)
+			skillBlocks := compactInvokedSkillContextBlocks(runner.config.SkillContextBlocks)
+			bundle, err := runner.buildPostCompactContextBundleV2(result, skillBlocks)
+			if err != nil && result.NativeCompactionState != nil {
+				// Native opaque output is optional. If its exact prepared-body
+				// projection cannot satisfy the same hard 10% gate (or the opaque
+				// section is otherwise invalid), retry the draft with the local V2
+				// checkpoint only. No boundary has been persisted yet.
+				result.NativeCompactionState = nil
+				result.NativeCompactionUsed = false
+				result.NativeCompactionReason = "native_projection_fallback"
+				bundle, err = runner.buildPostCompactContextBundleV2(result, skillBlocks)
+			}
+			if err != nil {
 				return err
 			}
-			runner.conversation.Context.SetMessages(result.Messages)
-			runner.compactInvokedSkillContext()
-			if runner.config.MemoryRecallReset != nil {
-				runner.config.MemoryRecallReset()
+			runner.contextGovernor.captureCompactDiagnostics(result, bundle)
+			if err := runner.persistContextCompactedV2(ctx, bundle); err != nil {
+				return err
 			}
+			runner.conversation.Context.SetMessages(stripProviderOpaqueCompactionState(result.Messages))
+			runner.config.SkillContextBlocks = SkillContextBlocksFromBundleV2(&bundle)
+			runner.config.RestoredContextBundleV2 = &bundle
+			runner.config.CompactContextBlocks = CompactContextBlocksFromBundleV2(&bundle)
+			runner.config.CompactedMemoryContext = CompactedMemoryContextFromBundleV2(&bundle)
+			compactedMemoryIDs := CompactedMemoryIDsFromBundleV2(&bundle)
+			runner.dropCompactedMemoryBodies(compactedMemoryIDs)
+			if runner.config.MemoryRecallMarkCompacted != nil {
+				runner.config.MemoryRecallMarkCompacted(compactedMemoryIDs)
+			}
+			runner.rebuildRequestBuilder()
 			return nil
 		},
 	)
@@ -110,6 +149,20 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 		return err
 	}
 	return runner
+}
+
+func contextCompactionV2Enabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("AWAKEN_CONTEXT_COMPACTION_V2"))) {
+	case "0", "false", "off", "disabled":
+		return false
+	default:
+		return true
+	}
+}
+
+func usesLegacyContextCompactionRecorder(recorder SemanticRecorder) bool {
+	legacy, ok := recorder.(LegacyContextCompactionRecorder)
+	return ok && legacy.UsesLegacyContextCompactionRecord()
 }
 
 // SemanticCompactedMessage is the durable, blob-free form of one message in a
@@ -147,25 +200,63 @@ func semanticCompactedMessages(messages []context.Message) []SemanticCompactedMe
 			Origin:              message.Origin,
 			MessageID:           message.MessageID,
 			TurnID:              message.TurnID,
-			ProviderOpaqueState: message.ProviderOpaqueState,
+			ProviderOpaqueState: nil,
 		})
 	}
 	return out
 }
 
-// persistContextCompacted appends the context_compacted semantic record that
-// makes a compaction durable. Without a recorder (bare unit runners) the
-// compaction stays in-memory only, matching the run's overall durability.
+// persistContextCompacted remains the narrow test/helper entrypoint. New
+// production compactions persist the stable V2 bundle; legacy v1 records are
+// read-only compatibility input.
 func (r *Runner) persistContextCompacted(ctx stdcontext.Context, result CompactResult) error {
+	skillBlocks := compactInvokedSkillContextBlocks(r.config.SkillContextBlocks)
+	bundle, err := r.buildPostCompactContextBundleV2(result, skillBlocks)
+	if err != nil {
+		return err
+	}
+	return r.persistContextCompactedV2(ctx, bundle)
+}
+
+func (r *Runner) persistContextCompactedV2(ctx stdcontext.Context, bundle PostCompactContextBundleV2) error {
+	if r == nil || r.recorder == nil {
+		return nil
+	}
+	if err := bundle.Validate(); err != nil {
+		return fmt.Errorf("validate context compaction v2: %w", err)
+	}
+	payload := map[string]any{
+		"bundle_v2": bundle,
+	}
+	if r.config.SubagentOrigin != nil && strings.TrimSpace(r.config.SubagentOrigin.AgentID) != "" {
+		payload["agent_id"] = r.config.SubagentOrigin.AgentID
+	}
+	record := NewSemanticRecord(SemanticKindContextCompactedV2, r.threadID, r.runID, "", "", r.sessionID, payload)
+	persistCtx, cancel := durablePersistenceContext(ctx)
+	defer cancel()
+	if flushed, ok := r.recorder.(FlushedSemanticRecorder); ok {
+		if _, err := flushed.AppendFlushed(persistCtx, record); err != nil {
+			return fmt.Errorf("append+flush context compaction: %w", err)
+		}
+		return nil
+	}
+	if err := r.recorder.Append(persistCtx, record); err != nil {
+		return fmt.Errorf("persist context compaction: %w", err)
+	}
+	if err := r.recorder.Flush(persistCtx); err != nil {
+		return fmt.Errorf("flush context compaction: %w", err)
+	}
+	return nil
+}
+
+func (r *Runner) persistContextCompactedV1(ctx stdcontext.Context, result CompactResult) error {
 	if r == nil || r.recorder == nil {
 		return nil
 	}
 	payload := map[string]any{
-		"compact_boundary_id":  result.BoundaryID,
-		"mode":                 string(result.Mode),
-		"messages":             semanticCompactedMessages(result.Messages),
-		"pre_estimate_tokens":  result.PreEstimateTokens,
-		"post_estimate_tokens": result.PostEstimateTokens,
+		"compact_boundary_id": result.BoundaryID, "mode": string(result.Mode),
+		"messages":            semanticCompactedMessages(result.Messages),
+		"pre_estimate_tokens": result.PreEstimateTokens, "post_estimate_tokens": result.PostEstimateTokens,
 	}
 	if r.config.SubagentOrigin != nil && strings.TrimSpace(r.config.SubagentOrigin.AgentID) != "" {
 		payload["agent_id"] = r.config.SubagentOrigin.AgentID
@@ -174,10 +265,10 @@ func (r *Runner) persistContextCompacted(ctx stdcontext.Context, result CompactR
 	persistCtx, cancel := durablePersistenceContext(ctx)
 	defer cancel()
 	if err := r.recorder.Append(persistCtx, record); err != nil {
-		return fmt.Errorf("persist context compaction: %w", err)
+		return fmt.Errorf("persist v1 context compaction: %w", err)
 	}
 	if err := r.recorder.Flush(persistCtx); err != nil {
-		return fmt.Errorf("flush context compaction: %w", err)
+		return fmt.Errorf("flush v1 context compaction: %w", err)
 	}
 	return nil
 }
@@ -571,6 +662,32 @@ func (r *Runner) mergeMemoryRecallSnapshot() {
 	r.memoryRecallSnapshot.MergePreserveExisting(incoming)
 }
 
+func (r *Runner) dropCompactedMemoryBodies(memoryIDs []string) {
+	if r == nil || r.memoryRecallSnapshot == nil || len(memoryIDs) == 0 {
+		return
+	}
+	compacted := make(map[string]struct{}, len(memoryIDs))
+	for _, memoryID := range memoryIDs {
+		if memoryID = strings.TrimSpace(memoryID); memoryID != "" {
+			compacted[memoryID] = struct{}{}
+		}
+	}
+	if len(compacted) == 0 {
+		return
+	}
+	items := r.memoryRecallSnapshot.Items[:0]
+	for _, item := range r.memoryRecallSnapshot.Items {
+		if _, exists := compacted[strings.TrimSpace(item.MemoryID)]; exists {
+			continue
+		}
+		items = append(items, item)
+	}
+	r.memoryRecallSnapshot.Items = items
+	if len(items) == 0 {
+		r.memoryRecallSnapshot = nil
+	}
+}
+
 func (r *Runner) streamLLMWithTransientRetry(
 	ctx stdcontext.Context,
 	events *runEventEmitter,
@@ -826,8 +943,9 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		RequestID: requestID, SystemPrompt: llmReq.SystemPrompt, Messages: messages,
 		Tools: llmReq.Tools, Model: llmReq.Model, Temperature: llmReq.Temperature,
 		MaxTokens: llmReq.MaxTokens, Purpose: r.modelRequestPurpose(),
-		AffinityScopeID: r.threadID,
-		ReasoningPolicy: r.config.ModelConfig.ReasoningEffort,
+		AffinityScopeID:       r.threadID,
+		ReasoningPolicy:       r.config.ModelConfig.ReasoningEffort,
+		NativeCompactionState: nativeCompactionStateFromBundle(r.config.ModelConfig, r.config.RestoredContextBundleV2),
 	}
 	prepared, err := llm.PrepareRequest(config, request, true)
 	if err != nil {
@@ -914,23 +1032,27 @@ func (e *runEventEmitter) providerOpaqueState(ctx stdcontext.Context, state *con
 }
 
 func (r *Runner) transportConfig(llmReq LLMRequest) llm.Config {
+	return transportConfigForAgentConfig(r.config, llmReq)
+}
+
+func transportConfigForAgentConfig(config AgentConfig, llmReq LLMRequest) llm.Config {
 	return llm.Config{
-		APIKey:              r.config.ModelConfig.APIKey,
-		BaseURL:             r.config.ModelConfig.BaseURL,
-		InferenceEndpoint:   r.config.ModelConfig.InferenceEndpoint,
+		APIKey:              config.ModelConfig.APIKey,
+		BaseURL:             config.ModelConfig.BaseURL,
+		InferenceEndpoint:   config.ModelConfig.InferenceEndpoint,
 		Model:               llmReq.Model,
-		CapabilityModelID:   r.config.ModelConfig.CapabilityModelID,
-		EndpointSelector:    r.config.ModelConfig.EndpointSelector,
-		ModelSelectorKind:   r.config.ModelConfig.ModelSelectorKind,
-		Protocol:            llm.Protocol(r.config.ModelConfig.Protocol),
-		ProviderID:          r.config.ModelConfig.ProviderID,
-		ProfileID:           r.config.ModelConfig.ProfileID,
-		CredentialRevision:  r.config.ModelConfig.CredentialRevision,
+		CapabilityModelID:   config.ModelConfig.CapabilityModelID,
+		EndpointSelector:    config.ModelConfig.EndpointSelector,
+		ModelSelectorKind:   config.ModelConfig.ModelSelectorKind,
+		Protocol:            llm.Protocol(config.ModelConfig.Protocol),
+		ProviderID:          config.ModelConfig.ProviderID,
+		ProfileID:           config.ModelConfig.ProfileID,
+		CredentialRevision:  config.ModelConfig.CredentialRevision,
 		Temperature:         llmReq.Temperature,
 		MaxTokens:           llmReq.MaxTokens,
-		AuthScheme:          r.config.ModelConfig.AuthScheme,
-		SupportsPromptCache: r.config.ModelConfig.SupportsPromptCache,
-		ReasoningEffort:     r.config.ModelConfig.ReasoningEffort,
+		AuthScheme:          config.ModelConfig.AuthScheme,
+		SupportsPromptCache: config.ModelConfig.SupportsPromptCache,
+		ReasoningEffort:     config.ModelConfig.ReasoningEffort,
 	}
 }
 
@@ -2039,6 +2161,7 @@ func (r *Runner) startNativeChildConfigured(
 		inheritParentMemorySnapshot(&childConfig, r.memoryRecallSnapshot, parentConfig.Workspace.Root)
 	} else {
 		childConfig.MemoryRecallStart = nil
+		childConfig.MemoryRecallMarkCompacted = nil
 		childConfig.MemoryRecallDrain = nil
 		childConfig.MemoryRecallReset = nil
 		childConfig.CaptureMemoryRecallSnapshot = nil
@@ -2143,6 +2266,7 @@ func applyHostSpawnOptions(child *AgentConfig, host *subagentruntime.HostSpawnOp
 
 func inheritParentMemorySnapshot(child *AgentConfig, snapshot *MemoryRecallSnapshot, parentWorkspaceRoot string) {
 	child.MemoryRecallStart = nil
+	child.MemoryRecallMarkCompacted = nil
 	child.MemoryRecallDrain = nil
 	child.MemoryRecallReset = nil
 	child.CaptureMemoryRecallSnapshot = nil
@@ -3524,16 +3648,35 @@ func (e *runEventEmitter) emitCompactFinished(state ContextWindowState, result C
 		event.CompactSummaryLatestUserPinned = boolPointer(result.SummaryLatestUserPinned)
 	}
 	event.CompactFallbackMarker = firstNonEmptyCompactValue(result.FallbackMarker, result.Fallback.Marker)
+	if result.BudgetReceipt != nil {
+		event.ContextCompactTarget = result.BudgetReceipt.CompactTargetTokens
+		event.CompactMandatoryFloor = result.BudgetReceipt.MandatoryFloorTokens
+		event.CompactLocalProjected = result.BudgetReceipt.LocalProjectedTokens
+		event.CompactConservativeProjected = result.BudgetReceipt.ConservativeProjected
+		event.CompactContributionTokens = cloneStringIntMap(result.BudgetReceipt.ContributionTokens)
+	}
+	if result.NativeCompactionAttempted || result.NativeCompactionUsed || result.NativeCompactionReason != "" {
+		event.CompactNativeAttempted = boolPointer(result.NativeCompactionAttempted)
+		event.CompactNativeUsed = boolPointer(result.NativeCompactionUsed)
+		event.CompactNativeReason = result.NativeCompactionReason
+	}
 	if result.Fallback.Used {
 		event.CompactFailureReason = result.Fallback.Reason
 	}
 	e.emit(event)
 }
 
-func (e *runEventEmitter) emitCompactFailed(state ContextWindowState, mode CompactMode, message string, failureReason string) {
+func (e *runEventEmitter) emitCompactFailed(state ContextWindowState, mode CompactMode, message string, failureReason string, failure error) {
 	event := contextWindowEvent(CompactFailedEventType, state, message)
 	event.CompactMode = mode
 	event.CompactFailureReason = failureReason
+	var targetErr *CompactTargetUnachievableError
+	if errors.As(failure, &targetErr) && targetErr != nil {
+		event.ContextCompactTarget = targetErr.Target
+		event.CompactMandatoryFloor = targetErr.MandatoryFloor
+		event.CompactConservativeProjected = targetErr.Projected
+		event.CompactContributionTokens = cloneStringIntMap(targetErr.CategoryBreakdown)
+	}
 	e.emit(event)
 }
 

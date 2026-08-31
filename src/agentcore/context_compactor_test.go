@@ -534,7 +534,7 @@ func TestCompactConversationUsesDedicatedSummaryBudget(t *testing.T) {
 	if result.SummaryMaxTokens != compactSummaryDefaultMaxTokens {
 		t.Fatalf("expected result to record summary budget, got %+v", result)
 	}
-	if !strings.Contains(result.SummaryMessage.Content, "Compact summary max tokens: 8192.") {
+	if !strings.Contains(result.SummaryMessage.Content, "Compact summary max tokens: 4096.") {
 		t.Fatalf("expected summary header to record budget, got %q", result.SummaryMessage.Content)
 	}
 }
@@ -1002,6 +1002,55 @@ func TestCompactOversizedUnclosedPairingIsRejected(t *testing.T) {
 	})
 	if !errors.Is(err, errOversizedProtectedTail) {
 		t.Fatalf("expected oversized protected tail, got %v", err)
+	}
+}
+
+func TestCompactTailLimitHonorsGlobalAllocatedTailBudget(t *testing.T) {
+	tail := []convcontext.Message{{
+		Role: convcontext.RoleTool, Name: "Bash", ToolCallID: "call-closed",
+		Content: strings.Repeat("office text ", 2000),
+	}}
+	over, limit := compactTailExceedsBudget(CompactRequest{
+		TargetTokens: 100,
+		Envelope:     ContextEnvelope{CompactModelConfig: ModelConfig{ContextWindow: 100000}},
+	}, tail)
+	if !over || limit != 100 {
+		t.Fatalf("tail allocator was overridden by the larger whole-request target: over=%v limit=%d", over, limit)
+	}
+}
+
+func TestCompactConversationDropsProviderOpaqueReplayState(t *testing.T) {
+	state := &convcontext.ProviderOpaqueMessageState{
+		ProviderID: "openai", ProfileID: "profile", CredentialRevision: 1,
+		ModelID: "model", ProtocolFamily: "openai_chat", EndpointContractID: "official",
+		Content: strings.Repeat("private-reasoning", 100),
+	}
+	messages := []convcontext.Message{
+		{Role: convcontext.RoleUser, Content: strings.Repeat("old task context ", 1200)},
+		{Role: convcontext.RoleAssistant, Content: "old answer", ProviderOpaqueState: state},
+		{Role: convcontext.RoleUser, Content: "latest request"},
+		{Role: convcontext.RoleAssistant, Content: "latest answer", ProviderOpaqueState: state},
+	}
+	result, err := CompactConversationWithRequest(stdcontext.Background(), CompactRequest{
+		Mode: CompactModeAuto, Messages: messages, Envelope: ContextEnvelope{Messages: messages}, TargetTokens: 400,
+		summaryInvoker: func(stdcontext.Context, llm.Config, llm.Request) (string, error) {
+			return renderCompactSummarySections(map[string][]string{
+				"Active Task": {"- Keep the current task."}, "Goal": {"- Continue safely."},
+				"Constraints & Preferences": {"- None."}, "Completed Actions": {"- None."},
+				"Active State": {"- None."}, "In Progress": {"- None."}, "Blocked": {"- None."},
+				"Key Decisions": {"- None."}, "Resolved Questions": {"- None."},
+				"Pending User Asks": {"- latest request"}, "Relevant Files": {"- None."},
+				"Remaining Work": {"- Answer the latest request."}, "Critical Context": {"- Opaque reasoning is not portable."},
+			}), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("compact conversation: %v", err)
+	}
+	for index, message := range result.Messages {
+		if message.ProviderOpaqueState != nil {
+			t.Fatalf("message %d retained provider opaque replay state", index)
+		}
 	}
 }
 

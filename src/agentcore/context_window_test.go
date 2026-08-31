@@ -128,6 +128,65 @@ func TestNewContextWindowStateUsesConfiguredWindow(t *testing.T) {
 	}
 }
 
+func TestConfiguredCompactTargetIsHardTenPercentAcrossWindowSizes(t *testing.T) {
+	for _, inputWindow := range []int{32_000, 64_000, 128_000, 200_000, 256_000, 1_000_000} {
+		t.Run(fmt.Sprintf("context_%d", inputWindow), func(t *testing.T) {
+			config := contextWindowConfigFromModelConfig(ModelConfig{ContextWindow: inputWindow})
+			state := NewContextWindowStateWithConfig(ContextEnvelope{}, config)
+			if state.EffectiveWindow != inputWindow || state.CompactTarget != inputWindow/10 || !state.HardCompactTarget {
+				t.Fatalf("context window %d produced target=%d effective=%d hard=%v", inputWindow, state.CompactTarget, state.EffectiveWindow, state.HardCompactTarget)
+			}
+		})
+	}
+
+	for _, maxInput := range []int{32_000, 64_000, 128_000, 200_000, 256_000, 1_000_000} {
+		t.Run(fmt.Sprintf("max_input_%d", maxInput), func(t *testing.T) {
+			config := contextWindowConfigFromModelConfig(ModelConfig{MaxInputTokens: maxInput})
+			state := NewContextWindowStateWithConfig(ContextEnvelope{}, config)
+			if state.EffectiveWindow != maxInput || state.CompactTarget != maxInput/10 || !state.HardCompactTarget {
+				t.Fatalf("max input %d produced target=%d effective=%d hard=%v", maxInput, state.CompactTarget, state.EffectiveWindow, state.HardCompactTarget)
+			}
+		})
+	}
+}
+
+func TestDefaultWindowDoesNotClaimProviderHardTarget(t *testing.T) {
+	state := NewContextWindowStateWithConfig(ContextEnvelope{}, contextWindowConfigFromModelConfig(ModelConfig{}))
+	if state.HardCompactTarget {
+		t.Fatalf("default host estimate must not be presented as a provider hard limit: %+v", state)
+	}
+	if state.CompactTarget != (defaultModelWindow-defaultOutputReserve)/10 {
+		t.Fatalf("unexpected default advisory target: %+v", state)
+	}
+}
+
+func TestProfileMaxTokensDoesNotReduceConfiguredInputWindow(t *testing.T) {
+	state := NewContextWindowStateWithConfig(ContextEnvelope{}, contextWindowConfigFromModelConfig(ModelConfig{
+		ContextWindow: 267_307,
+		MaxTokens:     128_000,
+	}))
+	if state.ModelWindow != 267_307 || state.OutputReserve != 128_000 || state.EffectiveWindow != 267_307 || state.CompactTarget != 26_730 {
+		t.Fatalf("profile output cap reduced the configured input window: %+v", state)
+	}
+
+	inputOnly := NewContextWindowStateWithConfig(ContextEnvelope{}, contextWindowConfigFromModelConfig(ModelConfig{
+		MaxInputTokens: 200_000,
+		MaxTokens:      32_000,
+	}))
+	if inputOnly.ModelWindow != 200_000 || inputOnly.OutputReserve != 32_000 || inputOnly.EffectiveWindow != 200_000 || inputOnly.CompactTarget != 20_000 {
+		t.Fatalf("input-only limit was normalized incorrectly: %+v", inputOnly)
+	}
+
+	capped := NewContextWindowStateWithConfig(ContextEnvelope{}, contextWindowConfigFromModelConfig(ModelConfig{
+		ContextWindow:  267_307,
+		MaxInputTokens: 200_000,
+		MaxTokens:      32_000,
+	}))
+	if capped.EffectiveWindow != 200_000 || capped.CompactTarget != 20_000 {
+		t.Fatalf("explicit input ceiling did not cap the configured input window: %+v", capped)
+	}
+}
+
 func TestCompactConversationKeepsPairingAndBoundary(t *testing.T) {
 	messages := []convcontext.Message{
 		{Role: convcontext.RoleUser, Content: "please use tool"},

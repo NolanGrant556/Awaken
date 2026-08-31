@@ -219,6 +219,11 @@ func main() {
 						recallManager.ResetAfterCompaction()
 					}
 				},
+				MemoryRecallMarkCompacted: func(memoryIDs []string) {
+					if recallManager != nil {
+						recallManager.MarkCompacted(memoryIDs)
+					}
+				},
 				CaptureMemoryRecallSnapshot: func() *agentcore.MemoryRecallSnapshot {
 					if recallManager == nil {
 						return nil

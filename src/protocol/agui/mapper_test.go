@@ -454,6 +454,8 @@ func TestMapEventCompactMetadataOptionalFields(t *testing.T) {
 	toolResultsPruned := true
 	sourceHadUser := true
 	latestUserPinned := true
+	nativeAttempted := true
+	nativeUsed := false
 
 	events := MapEvent(agentcore.AwakenEvent{
 		Type:                             agentcore.CompactFailedEventType,
@@ -480,6 +482,13 @@ func TestMapEventCompactMetadataOptionalFields(t *testing.T) {
 		CompactSummaryLatestUserPinned:   &latestUserPinned,
 		CompactFallbackMarker:            "[COMPACT_FALLBACK:llm_summary_failed]",
 		CompactFailureReason:             "provider_timeout",
+		CompactMandatoryFloor:            24,
+		CompactLocalProjected:            44,
+		CompactConservativeProjected:     48,
+		CompactContributionTokens:        map[string]int{"system_prompt": 12, "conversation": 32},
+		CompactNativeAttempted:           &nativeAttempted,
+		CompactNativeUsed:                &nativeUsed,
+		CompactNativeReason:              "native_projection_fallback",
 	})
 
 	if len(events) != 1 {
@@ -508,7 +517,14 @@ func TestMapEventCompactMetadataOptionalFields(t *testing.T) {
 		got.CompactSummaryLatestUserPinned == nil ||
 		!*got.CompactSummaryLatestUserPinned ||
 		got.CompactFallbackMarker != "[COMPACT_FALLBACK:llm_summary_failed]" ||
-		got.CompactFailureReason != "provider_timeout" {
+		got.CompactFailureReason != "provider_timeout" ||
+		got.CompactMandatoryFloor != 24 ||
+		got.CompactLocalProjected != 44 ||
+		got.CompactConservativeProjected != 48 ||
+		got.CompactContributionTokens["conversation"] != 32 ||
+		got.CompactNativeAttempted == nil || !*got.CompactNativeAttempted ||
+		got.CompactNativeUsed == nil || *got.CompactNativeUsed ||
+		got.CompactNativeReason != "native_projection_fallback" {
 		t.Fatalf("unexpected compact string metadata: %+v", got)
 	}
 	if got.CompactPreEstimate == nil ||

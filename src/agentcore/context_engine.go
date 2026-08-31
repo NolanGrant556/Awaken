@@ -45,7 +45,7 @@ type contextWindowEventSink interface {
 	emitContextBlocked(state ContextWindowState, message string)
 	emitCompactStarted(state ContextWindowState, mode CompactMode)
 	emitCompactFinished(state ContextWindowState, result CompactResult, summaryModel string)
-	emitCompactFailed(state ContextWindowState, mode CompactMode, message string, failureReason string)
+	emitCompactFailed(state ContextWindowState, mode CompactMode, message string, failureReason string, failure error)
 }
 
 type contextGovernor struct {
@@ -61,6 +61,10 @@ type contextGovernor struct {
 	lastSentEstimatedInputTokens    int
 	pendingSentEstimatedInputTokens int
 	lastCompactFailureReason        string
+	lastCompactBudgetReceipt        *CompactBudgetReceipt
+	lastCompactNativeAttempted      bool
+	lastCompactNativeUsed           bool
+	lastCompactNativeReason         string
 }
 
 func NewContextEngine(config ContextWindowConfig) ContextEngine {
@@ -208,7 +212,7 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 	if g.compactCircuitOpen {
 		err := g.compactCircuitOpenError()
 		if events != nil {
-			events.emitCompactFailed(state, mode, err.Error(), err.Error())
+			events.emitCompactFailed(state, mode, err.Error(), err.Error(), err)
 		}
 		return llmReq, err
 	}
@@ -223,7 +227,7 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 			g.recordCompactFailure(hookErr)
 			failedState := g.withRunState(llmReq.ContextWindowState)
 			if events != nil {
-				events.emitCompactFailed(failedState, mode, hookErr.Error(), hookErr.Error())
+				events.emitCompactFailed(failedState, mode, hookErr.Error(), hookErr.Error(), hookErr)
 			}
 			return llmReq, hookErr
 		}
@@ -235,17 +239,18 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 			g.recordCompactFailure(err)
 			failedState := g.withRunState(llmReq.ContextWindowState)
 			if events != nil {
-				events.emitCompactFailed(failedState, mode, err.Error(), compactFailureReason(err))
+				events.emitCompactFailed(failedState, mode, err.Error(), compactFailureReason(err), err)
 			}
 			return llmReq, err
 		}
 	}
 	compactRequest := CompactRequest{
-		Mode:            mode,
-		Envelope:        *llmReq.EnvelopeDebug,
-		Messages:        llmReq.Messages,
-		TargetTokens:    tailBudget,
-		HookInstruction: hookInstruction,
+		Mode:             mode,
+		Envelope:         *llmReq.EnvelopeDebug,
+		Messages:         llmReq.Messages,
+		TargetTokens:     tailBudget,
+		SummaryMaxTokens: compactSummaryBudget(state, llmReq.Messages),
+		HookInstruction:  hookInstruction,
 	}
 	if emitter, ok := events.(*runEventEmitter); ok && emitter != nil {
 		compactRequest.summaryInvoker = emitter.invokeCompactSummary
@@ -281,23 +286,28 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 			message = fmt.Sprintf("%s: %v", g.compactCircuitOpenError(), err)
 		}
 		if events != nil {
-			events.emitCompactFailed(failedState, mode, message, compactFailureReason(err))
+			events.emitCompactFailed(failedState, mode, message, compactFailureReason(err), err)
 		}
 		return llmReq, err
 	}
 	// Journal-first: the compacted conversation must be durable before it
 	// replaces the in-memory truth. A persistence failure is a compact
 	// failure and keeps the pre-compact messages authoritative.
+	g.resetCompactDiagnostics()
 	if g.applyCompactResult != nil {
 		if applyErr := g.applyCompactResult(ctx, result); applyErr != nil {
 			g.recordCompactFailure(applyErr)
 			failedState := g.withRunState(llmReq.ContextWindowState)
 			if events != nil {
-				events.emitCompactFailed(failedState, mode, applyErr.Error(), applyErr.Error())
+				events.emitCompactFailed(failedState, mode, applyErr.Error(), applyErr.Error(), applyErr)
 			}
 			return llmReq, applyErr
 		}
 	}
+	result.BudgetReceipt = cloneCompactBudgetReceipt(g.lastCompactBudgetReceipt)
+	result.NativeCompactionAttempted = g.lastCompactNativeAttempted
+	result.NativeCompactionUsed = g.lastCompactNativeUsed
+	result.NativeCompactionReason = g.lastCompactNativeReason
 	g.consecutiveCompactFailures = 0
 	g.lastCompactFailureReason = ""
 	// A successful compact changes the conversation, so the previous
@@ -325,9 +335,58 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 	return g.evaluateRequest(rebuilt), nil
 }
 
+func (g *contextGovernor) resetCompactDiagnostics() {
+	if g == nil {
+		return
+	}
+	g.lastCompactBudgetReceipt = nil
+	g.lastCompactNativeAttempted = false
+	g.lastCompactNativeUsed = false
+	g.lastCompactNativeReason = ""
+}
+
+func (g *contextGovernor) captureCompactDiagnostics(result CompactResult, bundle PostCompactContextBundleV2) {
+	if g == nil {
+		return
+	}
+	g.lastCompactNativeAttempted = result.NativeCompactionAttempted
+	g.lastCompactNativeUsed = result.NativeCompactionUsed
+	g.lastCompactNativeReason = result.NativeCompactionReason
+	if bundle.BudgetReceipt.State == MaterializationMaterialized && bundle.BudgetReceipt.Value != nil {
+		receipt := *bundle.BudgetReceipt.Value
+		receipt.ContributionTokens = cloneStringIntMap(receipt.ContributionTokens)
+		g.lastCompactBudgetReceipt = &receipt
+	}
+}
+
+func cloneCompactBudgetReceipt(receipt *CompactBudgetReceipt) *CompactBudgetReceipt {
+	if receipt == nil {
+		return nil
+	}
+	cloned := *receipt
+	cloned.ContributionTokens = cloneStringIntMap(receipt.ContributionTokens)
+	return &cloned
+}
+
+func cloneStringIntMap(input map[string]int) map[string]int {
+	if input == nil {
+		return nil
+	}
+	result := make(map[string]int, len(input))
+	for key, value := range input {
+		result[key] = value
+	}
+	return result
+}
+
 func (g *contextGovernor) recordCompactFailure(err error) {
-	g.consecutiveCompactFailures++
-	g.lastCompactFailureReason = compactFailureReason(err)
+	reason := compactFailureReason(err)
+	if reason == g.lastCompactFailureReason {
+		g.consecutiveCompactFailures++
+	} else {
+		g.consecutiveCompactFailures = 1
+		g.lastCompactFailureReason = reason
+	}
 	if g.consecutiveCompactFailures >= 3 {
 		g.compactCircuitOpen = true
 	}
@@ -356,6 +415,15 @@ func (g *contextGovernor) evaluateCompactPostcondition(llmReq LLMRequest, preSta
 	postState.LastAPIUsageTokens = 0
 	postState.LastSentEstimatedInputTokens = 0
 	post := postState.ConservativeProjectedTokens()
+	target := preState.CompactTarget
+	if postState.CompactTarget > 0 {
+		target = postState.CompactTarget
+	}
+	if preState.HardCompactTarget && target > 0 && post > target {
+		return &CompactTargetUnachievableError{
+			Reason: "post_compact_projection_exceeds_target", Projected: post, Target: target, MandatoryFloor: post - estimateMessagesTokens(result.Messages),
+		}
+	}
 	autoThreshold := preState.AutoCompactThreshold
 	if postState.AutoCompactThreshold > 0 {
 		autoThreshold = postState.AutoCompactThreshold
@@ -394,20 +462,55 @@ func (g *contextGovernor) evaluateCompactPostcondition(llmReq LLMRequest, preSta
 // budget and the result never drops below one token, which still retains the
 // protected latest group.
 func compactRetainedTailBudget(state ContextWindowState, messages []convcontext.Message) int {
-	budget := state.CompactTarget
+	budget := calibratedCompactTarget(state)
 	if budget <= 0 {
 		return budget
-	}
-	if state.LastAPIUsageTokens > 0 && state.LastSentEstimatedInputTokens > 0 &&
-		state.LastAPIUsageTokens > state.LastSentEstimatedInputTokens {
-		budget = int(int64(budget) * int64(state.LastSentEstimatedInputTokens) / int64(state.LastAPIUsageTokens))
 	}
 	if overhead := state.EstimatedTokens - estimateMessagesTokens(messages); overhead > 0 {
 		budget -= overhead
 	}
-	budget -= compactSummaryDefaultMaxTokens
+	budget -= compactSummaryBudget(state, messages)
+	budget -= compactCheckpointProjectionReserve(state)
 	if budget < 1 {
 		return 1
+	}
+	return budget
+}
+
+func calibratedCompactTarget(state ContextWindowState) int {
+	target := state.CompactTarget
+	if target > 0 && state.LastAPIUsageTokens > 0 && state.LastSentEstimatedInputTokens > 0 &&
+		state.LastAPIUsageTokens > state.LastSentEstimatedInputTokens {
+		target = int(int64(target) * int64(state.LastSentEstimatedInputTokens) / int64(state.LastAPIUsageTokens))
+	}
+	return target
+}
+
+func compactCheckpointProjectionReserve(state ContextWindowState) int {
+	if state.CompactTarget <= 0 {
+		return 0
+	}
+	reserve := state.CompactTarget / 8
+	if reserve < 1024 {
+		reserve = 1024
+	}
+	if reserve > 4096 {
+		reserve = 4096
+	}
+	return reserve
+}
+
+func compactSummaryBudget(state ContextWindowState, messages []convcontext.Message) int {
+	remaining := calibratedCompactTarget(state)
+	if overhead := state.EstimatedTokens - estimateMessagesTokens(messages); overhead > 0 && overhead < remaining {
+		remaining -= overhead
+	}
+	budget := int(float64(remaining) * 0.35)
+	if budget < 1024 {
+		budget = 1024
+	}
+	if budget > 4096 {
+		budget = 4096
 	}
 	return budget
 }
@@ -437,6 +540,8 @@ func compactFailureReason(err error) string {
 		return compactFailureOversizedProtectedTail
 	case errors.Is(err, errNotEnoughCompactableHistory):
 		return compactFailureNotEnoughHistory
+	case errors.Is(err, ErrCompactTargetUnachievable):
+		return "compact_target_unachievable"
 	default:
 		return err.Error()
 	}
@@ -447,16 +552,20 @@ func (g *contextGovernor) compactCircuitOpenError() error {
 }
 
 func contextWindowConfigFromModelConfig(config ModelConfig) ContextWindowConfig {
-	modelWindow := config.ContextWindow
-	// Some provider catalogs report an input-only ceiling while others report
-	// a total context window. Convert the input-only ceiling into the engine's
-	// total-window representation so the output reserve is not subtracted twice.
-	if config.MaxInputTokens > 0 && (modelWindow <= 0 || config.MaxInputTokens < modelWindow) {
-		modelWindow = config.MaxInputTokens + defaultOutputReserve
+	outputReserve := defaultOutputReserve
+	if config.MaxTokens > 0 {
+		outputReserve = config.MaxTokens
+	}
+	inputWindow := config.ContextWindow
+	if config.MaxInputTokens > 0 && (inputWindow <= 0 || config.MaxInputTokens < inputWindow) {
+		inputWindow = config.MaxInputTokens
 	}
 	return ContextWindowConfig{
-		ModelWindow:           modelWindow,
+		ModelWindow:           inputWindow,
+		OutputReserve:         outputReserve,
+		EffectiveInputWindow:  inputWindow,
 		AutoCompactTokenLimit: config.AutoCompactTokenLimit,
+		HardCompactTarget:     config.ContextWindow > 0 || config.MaxInputTokens > 0,
 	}
 }
 

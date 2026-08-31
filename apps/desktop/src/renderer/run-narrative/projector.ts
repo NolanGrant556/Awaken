@@ -1717,6 +1717,12 @@ function commitCompactBoundary(
   const preEstimate = compactPreEstimate(event);
   const postEstimate = compactPostEstimate(event);
   const fallbackUsed = event.compactFallbackUsed;
+  const targetTokens = finiteNumber(event.contextCompactTarget);
+  const mandatoryFloorTokens = finiteNumber(event.compactMandatoryFloor);
+  const localProjectedTokens = finiteNumber(event.compactLocalProjected);
+  const conservativeProjectedTokens = finiteNumber(
+    event.compactConservativeProjected,
+  );
   const item: CompactBoundaryItem = {
     kind: "compactBoundary",
     id: compactBoundaryId(event),
@@ -1734,6 +1740,15 @@ function commitCompactBoundary(
     preEstimate,
     postEstimate,
     fallbackUsed,
+    targetTokens,
+    mandatoryFloorTokens,
+    localProjectedTokens,
+    conservativeProjectedTokens,
+    contributionTokens: event.compactContributionTokens,
+    nativeAttempted: event.compactNativeAttempted,
+    nativeUsed: event.compactNativeUsed,
+    nativeReason: event.compactNativeReason,
+    failureReason: event.compactFailureReason,
   };
   const compactPlanningActive =
     state.activeItem?.kind === "planning" &&

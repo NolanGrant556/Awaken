@@ -42,6 +42,7 @@ const (
 	SemanticKindResourceReceipt        SemanticKind = "resource_receipt"
 	SemanticKindRuntimeNotice          SemanticKind = "runtime_notice"
 	SemanticKindContextCompacted       SemanticKind = "context_compacted"
+	SemanticKindContextCompactedV2     SemanticKind = "context_compacted_v2"
 	SemanticKindRecoveryDecision       SemanticKind = "recovery_decision"
 	SemanticKindTurnBoundary           SemanticKind = "turn_boundary"
 	SemanticKindRunTerminal            SemanticKind = "run_terminal"
@@ -156,6 +157,16 @@ type SemanticRecorder interface {
 	Flush(ctx context.Context) error
 }
 
+// LegacyContextCompactionRecorder marks a recorder whose durable format can
+// only represent the legacy compacted conversation projection. V2 callers
+// must keep writing the v1 boundary until the thread is migrated to the
+// semantic journal; silently dropping V2-only sections would make live and
+// restart state diverge.
+type LegacyContextCompactionRecorder interface {
+	SemanticRecorder
+	UsesLegacyContextCompactionRecord() bool
+}
+
 // AssignedSemanticRecorder exposes the exact records accepted by durable
 // storage, including the sequence assigned while holding the journal lock.
 // Production live projection must use these returned values rather than the
@@ -164,6 +175,21 @@ type AssignedSemanticRecorder interface {
 	SemanticRecorder
 	AppendAssigned(ctx context.Context, record SemanticRecord) (SemanticRecord, error)
 	AppendBatchAssigned(ctx context.Context, records []SemanticRecord) ([]SemanticRecord, error)
+}
+
+// SemanticSequenceReader exposes the last sequence already assigned before a
+// new compact boundary is appended. It lets the V2 bundle bind the exact
+// journal range it summarizes without guessing from transport cursors.
+type SemanticSequenceReader interface {
+	LastAssignedSequence() uint64
+}
+
+// SemanticRecordRangeReader exposes durable source facts to the host-owned
+// checkpoint builder. It is intentionally range-bounded and never becomes a
+// model tool; coverage must be derived from Journal authority rather than
+// from the checkpoint it is supposed to verify.
+type SemanticRecordRangeReader interface {
+	SemanticRecords(fromSeq, toSeq uint64) ([]SemanticRecord, error)
 }
 
 // FlushedSemanticRecorder appends one safety-sensitive fact, flushes durable

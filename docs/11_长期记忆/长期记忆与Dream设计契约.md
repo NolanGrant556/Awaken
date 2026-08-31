@@ -4,7 +4,7 @@
 
 本文是 Awaken 长期记忆与 Dream 的当前事实与目标设计权威。
 
-**当前支持：** Core 已实现 user/project Markdown topic、`MEMORY.md` 索引、受控 `memory` 工具、host 注入来源 identity、revision/敏感内容/重复门禁、请求构建期索引注入、复用当前 profile 的凭据/endpoint 并按 provider 辅助模型策略执行非阻塞 selector、最多 5 条有界主题召回和 compact 后预算复位。主动记忆默认开启，由主模型在正常任务推理中决定是否调用工具。Memory 调用与 recall 进入 SemanticJournal/AG-UI 前转为无正文 receipt；Workbench 已投影 recall/mutation 紧凑回执。Desktop Settings 使用覆盖内容窗口的全窗口左右分栏，并已提供四个开关、按用户/项目集合浏览主题、正文与来源查看、revision 删除、手动 Dream 和取消；记忆分区由 `MemorySettingsPanel` 通过 `AwakenMemoryLightFlowLayout` 组合纯装饰 `AwakenMemoryLightFlow` 与现有 `AwakenMemorySettings`，Gallery 与 Desktop 共用该 UI 布局且不增加设置项、业务状态或 Memory 请求。Settings 不提供搜索或筛选入口，不影响 Core 内部的 selector、受控 `memory` search 或召回能力。Auto Dream 已接入持久化活动计数、24 小时、5 分钟 idle、active-run gate 和新 run 取消；不提供人工创建、编辑或 supersede。Dream task/report 已原子持久化，其独立 authority 同时保存 `memory_maintenance` request/usage；Core 重启会把未完成 task 和没有终态 usage 的请求恢复为 `interrupted`/`usage_unknown`。Desktop 对 live 终态回执保存纯展示用的 `taskId -> threadId` 绑定，任务列表只把已绑定回执重放到原线程，无绑定的历史任务只在 Settings 中可见；scope lock 定期 heartbeat，批量 Apply 使用 staged transaction、活动 marker、失败关闭读取和 crash rollback，主题与 `MEMORY.md` 不会以半套状态参与召回。
+**当前支持：** Core 已实现 user/project Markdown topic、`MEMORY.md` 索引、受控 `memory` 工具、host 注入来源 identity、revision/敏感内容/重复门禁、请求构建期索引注入、复用当前 profile 的凭据/endpoint 并按 provider 辅助模型策略执行非阻塞 selector、最多 5 条有界主题召回，以及 Context Compaction V2 的无正文 Memory refs。主动记忆默认开启，由主模型在正常任务推理中决定是否调用工具。Memory 调用与 recall 进入 SemanticJournal/AG-UI 前转为无正文 receipt；Workbench 已投影 recall/mutation 紧凑回执。Desktop Settings 使用覆盖内容窗口的全窗口左右分栏，并已提供四个开关、按用户/项目集合浏览主题、正文与来源查看、revision 删除、手动 Dream 和取消；记忆分区由 `MemorySettingsPanel` 通过 `AwakenMemoryLightFlowLayout` 组合纯装饰 `AwakenMemoryLightFlow` 与现有 `AwakenMemorySettings`，Gallery 与 Desktop 共用该 UI 布局且不增加设置项、业务状态或 Memory 请求。Settings 不提供搜索或筛选入口，不影响 Core 内部的 selector、受控 `memory` search 或召回能力。Auto Dream 已接入持久化活动计数、24 小时、5 分钟 idle、active-run gate 和新 run 取消；不提供人工创建、编辑或 supersede。Dream task/report 已原子持久化，其独立 authority 同时保存 `memory_maintenance` request/usage；Core 重启会把未完成 task 和没有终态 usage 的请求恢复为 `interrupted`/`usage_unknown`。Desktop 对 live 终态回执保存纯展示用的 `taskId -> threadId` 绑定，任务列表只把已绑定回执重放到原线程，无绑定的历史任务只在 Settings 中可见；scope lock 定期 heartbeat，批量 Apply 使用 staged transaction、活动 marker、失败关闭读取和 crash rollback，主题与 `MEMORY.md` 不会以半套状态参与召回。
 
 **当前支持：** 原生 Subagent child 继承父 run 已召回且冻结的 `MemoryRecallSnapshot` 子集；child 不运行 user-scope selector，不把 worktree 当成新 project。
 
@@ -163,7 +163,7 @@ source_record_id: record_...
 
 ## 5. 召回合同
 
-5.1 与 5.2 的请求期索引、递归候选扫描、主模型 selector、最近成功工具名、非阻塞预取、allowlist、自动注入和 session accounting 当前已接入主 run；compact 成功会复位召回预算。5.3 的父 `MemoryRecallSnapshot` 继承已接入原生 child。当前也尚未把显式 `memory get/update` 接触记录并入自动召回去重集合。
+5.1 与 5.2 的请求期索引、递归候选扫描、主模型 selector、最近成功工具名、非阻塞预取、allowlist、自动注入和 session accounting 当前已接入主 run。Context Compaction V2 成功后不再清空当前 run 已召回集合；RecallManager 把 bundle 中旧 identity 标记为 compacted，继续排除 selector 重选，但从 `Context()` 和 child snapshot 去掉旧正文。重启时同样从 bundle refs 恢复该排除集；重复压缩把 prior refs 与压后新增 recall refs 合并。精确旧正文需要时通过 `memory` 工具按 authority 重读，压后 selector 的新召回仍与旧 refs 一起进入请求。feature flag 回退到 v1 时仍使用旧的预算复位行为。5.3 的父 `MemoryRecallSnapshot` 继承已接入原生 child。当前也尚未把显式 `memory get/update` 接触记录并入自动召回去重集合。
 
 ### 5.1 常驻索引
 
@@ -188,7 +188,7 @@ run 建立时读取允许 scope 的 `MEMORY.md`，按合计预算形成 host-own
 
 - 每 turn 最多 5 个主题、20 KiB；
 - 同一未压缩 session 累计最多 60 KiB；
-- compact 移除旧 Memory block 后，允许在后续 turn 重新召回；
+- V2 compact 把旧 Memory body 降为 refs 且保留 run 内去重集合，不让压缩边界后的同一任务突然失去已召回 identity；精确正文按需重读；
 - selector prefetch 不阻塞首个模型请求；准备完成时在当前 run 的下一次模型迭代消费，run 已结束则丢弃；
 - selector、扫描或读取失败均降级为本 turn 零召回并产生有界 diagnostic，不伪造命中；
 - selector 不调用 embedding，不依赖数据库；未来增加 lexical/vector 粗排时不得改变 Markdown authority、最多 5 条和 host allowlist 复核。

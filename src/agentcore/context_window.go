@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	convcontext "awaken/src/context"
+	"awaken/src/llm"
 )
 
 const (
@@ -28,7 +29,9 @@ const (
 type ContextWindowConfig struct {
 	ModelWindow           int
 	OutputReserve         int
+	EffectiveInputWindow  int
 	AutoCompactTokenLimit int
+	HardCompactTarget     bool
 }
 
 type ContextWindowState struct {
@@ -39,6 +42,7 @@ type ContextWindowState struct {
 	WarningThreshold             int
 	AutoCompactThreshold         int
 	CompactTarget                int
+	HardCompactTarget            bool
 	LastAPIUsageTokens           int
 	LastSentEstimatedInputTokens int
 	EstimatedDeltaTokens         int
@@ -73,6 +77,11 @@ type CompactResult struct {
 	SummaryLatestUserPinned   bool
 	FallbackMarker            string
 	Fallback                  CompactFallback
+	NativeCompactionState     *llm.NativeCompactionState
+	NativeCompactionAttempted bool
+	NativeCompactionUsed      bool
+	NativeCompactionReason    string
+	BudgetReceipt             *CompactBudgetReceipt
 }
 
 type CompactFallback struct {
@@ -106,6 +115,12 @@ func NewContextWindowStateWithConfig(envelope ContextEnvelope, config ContextWin
 		outputReserve = config.OutputReserve
 	}
 	effectiveWindow := modelWindow - outputReserve
+	if config.EffectiveInputWindow > 0 {
+		effectiveWindow = config.EffectiveInputWindow
+		if config.ModelWindow <= 0 {
+			modelWindow = effectiveWindow
+		}
+	}
 	if effectiveWindow < 0 {
 		effectiveWindow = 0
 	}
@@ -123,7 +138,8 @@ func NewContextWindowStateWithConfig(envelope ContextEnvelope, config ContextWin
 		EffectiveWindow:       effectiveWindow,
 		WarningThreshold:      int(float64(effectiveWindow) * 0.85),
 		AutoCompactThreshold:  autoCompactThreshold,
-		CompactTarget:         int(float64(effectiveWindow) * 0.30),
+		CompactTarget:         int(float64(effectiveWindow) * 0.10),
+		HardCompactTarget:     config.HardCompactTarget,
 		EstimatedTokens:       EstimateContextEnvelopeTokens(envelope),
 		EstimatedDeltaTokens:  estimateContextDeltaTokens(envelope),
 		LastCompactBoundaryID: lastCompactBoundaryID(envelope.Messages),

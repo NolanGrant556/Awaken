@@ -1,6 +1,6 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
 import type { ComposerBarInputSelection } from "@awaken/design-system";
-import type { ComposerToken } from "../shared/runtime";
+import type { ComposerToken, FileLineComment } from "../shared/runtime";
 import type { ComposerDraftAttachment } from "./composerAttachments";
 import type { ComposerTokenPlacement } from "./composerSlash";
 
@@ -8,6 +8,7 @@ export type ThreadComposerDraft = {
   value: string;
   attachments: ComposerDraftAttachment[];
   tokens: ComposerToken[];
+  comments: FileLineComment[];
   tokenPlacements: Record<string, ComposerTokenPlacement>;
   tokenLeadingTexts: Record<string, string>;
   selection?: ComposerBarInputSelection;
@@ -17,6 +18,7 @@ const EMPTY_COMPOSER_DRAFT: ThreadComposerDraft = {
   value: "",
   attachments: [],
   tokens: [],
+  comments: [],
   tokenPlacements: {},
   tokenLeadingTexts: {},
 };
@@ -94,6 +96,10 @@ export function useThreadComposerDraft(ownerKey: string) {
     (action) => updateField("tokens", action),
     [updateField],
   );
+  const setComments = useCallback<Dispatch<SetStateAction<FileLineComment[]>>>(
+    (action) => updateField("comments", action),
+    [updateField],
+  );
   const setTokenPlacements = useCallback<
     Dispatch<SetStateAction<Record<string, ComposerTokenPlacement>>>
   >((action) => updateField("tokenPlacements", action), [updateField]);
@@ -129,6 +135,7 @@ export function useThreadComposerDraft(ownerKey: string) {
     setValue,
     setAttachments,
     setTokens,
+    setComments,
     setTokenPlacements,
     setTokenLeadingTexts,
     setSelection,

@@ -39,6 +39,7 @@ type Run struct {
 	Input               string                `json:"input,omitempty"`
 	InputAttachments    []RunInputAttachment  `json:"input_attachments,omitempty"`
 	ComposerTokens      []ComposerToken       `json:"composer_tokens,omitempty"`
+	FileComments        []FileLineComment     `json:"file_comments,omitempty"`
 	Status              RunStatus             `json:"status"`
 	Result              string                `json:"result,omitempty"`
 	Error               string                `json:"error,omitempty"`
@@ -209,6 +210,10 @@ type pendingExternalInteraction struct {
 }
 
 func NewSession(runID, threadID, input string, attachments []RunInputAttachment, composerTokens []ComposerToken, cancel context.CancelFunc) *Session {
+	return NewSessionWithFileComments(runID, threadID, input, attachments, composerTokens, nil, cancel)
+}
+
+func NewSessionWithFileComments(runID, threadID, input string, attachments []RunInputAttachment, composerTokens []ComposerToken, fileComments []FileLineComment, cancel context.CancelFunc) *Session {
 	now := time.Now().UTC()
 	return &Session{
 		run: Run{
@@ -217,6 +222,7 @@ func NewSession(runID, threadID, input string, attachments []RunInputAttachment,
 			Input:            strings.TrimSpace(input),
 			InputAttachments: cloneRunInputAttachments(attachments),
 			ComposerTokens:   cloneComposerTokens(composerTokens),
+			FileComments:     cloneFileLineComments(fileComments),
 			Status:           RunStatusRunning,
 			CreatedAt:        now,
 			UpdatedAt:        now,
@@ -269,6 +275,7 @@ func (s *Session) Snapshot() Run {
 	snapshot := s.run
 	snapshot.InputAttachments = cloneRunInputAttachments(snapshot.InputAttachments)
 	snapshot.ComposerTokens = cloneComposerTokens(snapshot.ComposerTokens)
+	snapshot.FileComments = cloneFileLineComments(snapshot.FileComments)
 	return snapshot
 }
 

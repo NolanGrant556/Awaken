@@ -160,6 +160,8 @@ const DESKTOP_OPERATION_ISSUE_CODES = new Set<DesktopOperationIssue["code"]>([
   "run_conflict",
   "run_input_invalid",
   "runtime_unavailable",
+  "file_comment_stale",
+  "invalid_file_comment",
   "operation_failed",
 ]);
 const DESKTOP_OPERATION_RECOVERY_ACTIONS = new Set<DesktopOperationRecoveryAction>([
@@ -174,6 +176,8 @@ export function desktopOperationIssueFromError(error: unknown): DesktopOperation
     code?: unknown;
     retryable?: unknown;
     actions?: unknown;
+    commentId?: unknown;
+    reason?: unknown;
   };
   if (
     typeof candidate.code !== "string" ||
@@ -193,6 +197,8 @@ export function desktopOperationIssueFromError(error: unknown): DesktopOperation
     message: candidate.message,
     retryable: candidate.retryable === true,
     actions,
+    commentId: typeof candidate.commentId === "string" ? candidate.commentId : undefined,
+    reason: typeof candidate.reason === "string" ? candidate.reason : undefined,
   };
 }
 
@@ -206,6 +212,8 @@ async function unwrapDesktopOperation<T>(
     code: result.issue.code,
     retryable: result.issue.retryable,
     actions: result.issue.actions,
+    commentId: result.issue.commentId,
+    reason: result.issue.reason,
   });
   throw error;
 }

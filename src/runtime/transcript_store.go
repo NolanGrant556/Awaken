@@ -35,6 +35,7 @@ type TranscriptRecord struct {
 	Content           string                        `json:"content,omitempty"`
 	Attachments       []transcriptMessageAttachment `json:"attachments,omitempty"`
 	ComposerTokens    []ComposerToken               `json:"composer_tokens,omitempty"`
+	FileComments      []FileLineComment             `json:"file_comments,omitempty"`
 	ToolCalls         []convcontext.ToolCall        `json:"tool_calls,omitempty"`
 	ToolCallID        string                        `json:"tool_call_id,omitempty"`
 	ToolName          string                        `json:"tool_name,omitempty"`
@@ -67,7 +68,7 @@ type restoredTranscript struct {
 }
 
 func appendUserTranscriptRecordAtPath(path string, run Run, sessionID string, input string, attachments []RunInputAttachment) error {
-	if strings.TrimSpace(input) == "" && len(attachments) == 0 {
+	if strings.TrimSpace(input) == "" && len(attachments) == 0 && len(run.FileComments) == 0 {
 		return nil
 	}
 	records, err := readTranscriptRecords(path)
@@ -79,7 +80,8 @@ func appendUserTranscriptRecordAtPath(path string, run Run, sessionID string, in
 			record.RunID == run.RunID &&
 			record.Role == string(convcontext.RoleUser) &&
 			record.Content == input &&
-			transcriptAttachmentsEqual(record.Attachments, contextAttachmentsToTranscriptAttachments(inputAttachmentsToContextAttachments(attachments))) {
+			transcriptAttachmentsEqual(record.Attachments, contextAttachmentsToTranscriptAttachments(inputAttachmentsToContextAttachments(attachments))) &&
+			fileLineCommentsEqual(record.FileComments, run.FileComments) {
 			return nil
 		}
 	}
@@ -90,6 +92,7 @@ func appendUserTranscriptRecordAtPath(path string, run Run, sessionID string, in
 		Attachments: inputAttachmentsToContextAttachments(attachments),
 	}, time.Now().UTC())
 	record.ComposerTokens = cloneComposerTokens(run.ComposerTokens)
+	record.FileComments = cloneFileLineComments(run.FileComments)
 	return appendTranscriptRecords(path, []TranscriptRecord{record})
 }
 
@@ -295,6 +298,7 @@ func loadDurableTranscriptRunsAtPath(path string, threadID string) (map[string]T
 			current.run.Input = record.Content
 			current.run.InputAttachments = transcriptAttachmentsToRunInputAttachments(record.Attachments)
 			current.run.ComposerTokens = cloneComposerTokens(record.ComposerTokens)
+			current.run.FileComments = cloneFileLineComments(record.FileComments)
 		}
 		if record.RecordType == transcriptRecordTypeEvent && record.Event != nil {
 			event := Event{
@@ -322,6 +326,18 @@ func loadDurableTranscriptRunsAtPath(path string, threadID string) (map[string]T
 		}
 	}
 	return result, nil
+}
+
+func fileLineCommentsEqual(left []FileLineComment, right []FileLineComment) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func readTranscriptRecords(path string) ([]TranscriptRecord, error) {

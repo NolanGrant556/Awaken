@@ -861,6 +861,7 @@ func durableRunsFromSemanticRecords(threadID string, records []agentcore.Semanti
 					transcriptAttachmentsFromSemanticUserMessage(record.Payload),
 				)
 				run.ComposerTokens = composerTokensFromSemanticUserMessage(record.Payload)
+				run.FileComments = fileLineCommentsFromSemanticUserMessage(record.Payload)
 				seenUserInput[record.RunID] = true
 			}
 		case agentcore.SemanticKindRunStarted:

@@ -309,12 +309,131 @@ export type AwakenComposerBarProps = {
   attachments?: ComposerBarAttachment[];
   attachmentWarning?: ReactNode;
   tokens?: ComposerBarToken[];
+  fileComments?: ComposerBarFileComment[];
   slashPalette?: ComposerBarSlashPalette;
   pluginPicker?: ComposerBarPluginPicker;
   onRemoveAttachment?: (attachmentId: string) => void;
   onRemoveToken?: (tokenId: string) => void;
+  onRemoveFileComment?: (commentId: string) => void;
+  onClearFileComments?: () => void;
   onPasteImages?: (files: File[]) => void;
 };
+
+export type ComposerBarFileComment = {
+  id: string;
+  displayName: string;
+  relativePath: string;
+  startLine: number;
+  endLine: number;
+  selectedText: string;
+  comment: string;
+  validationState?: "ready" | "stale";
+};
+
+export type AwakenFileCommentSummaryProps = {
+  comments: ComposerBarFileComment[];
+  onRemoveComment?: (commentId: string) => void;
+  onClear?: () => void;
+  className?: string;
+};
+
+function fileCommentRangeLabel(comment: ComposerBarFileComment): string {
+  return comment.startLine === comment.endLine
+    ? `第 ${comment.startLine} 行`
+    : `第 ${comment.startLine}–${comment.endLine} 行`;
+}
+
+export function AwakenFileCommentSummary({
+  comments,
+  onRemoveComment,
+  onClear,
+  className,
+}: AwakenFileCommentSummaryProps) {
+  const [open, setOpen] = useState(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+  }, []);
+
+  if (comments.length === 0) return null;
+
+  const cancelClose = () => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimerRef.current = setTimeout(() => setOpen(false), 120);
+  };
+
+  return (
+    <span
+      className={`composer-file-comments${className ? ` ${className}` : ""}`}
+      onPointerEnter={() => {
+        cancelClose();
+        setOpen(true);
+      }}
+      onPointerLeave={scheduleClose}
+      onFocusCapture={() => {
+        cancelClose();
+        setOpen(true);
+      }}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) scheduleClose();
+      }}
+    >
+      <button
+        type="button"
+        className="composer-file-comments-trigger"
+        aria-label={`${comments.length} 个文件评论`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen(true)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setOpen(false);
+        }}
+      >
+        <AwakenIcon concept="file-comment" size={16} />
+        <span>{comments.length} 个评论</span>
+      </button>
+      {open ? (
+        <span className="composer-file-comments-popover" role="dialog" aria-label="文件评论详情">
+          <span className="composer-file-comments-header">
+            <strong>文件评论</strong>
+            {onClear ? (
+              <button type="button" onClick={onClear}>全部移除</button>
+            ) : null}
+          </span>
+          <span className="composer-file-comments-list">
+            {comments.map((comment) => (
+              <span key={comment.id} className="composer-file-comment-card">
+                <span className="composer-file-comment-location">
+                  <strong>{comment.relativePath || comment.displayName}</strong>
+                  <span>{fileCommentRangeLabel(comment)}</span>
+                </span>
+                <code>{comment.selectedText}</code>
+                <span className="composer-file-comment-body">{comment.comment}</span>
+                {comment.validationState === "stale" ? (
+                  <span className="composer-file-comment-stale">文件已变化，需要重新选择</span>
+                ) : null}
+                {onRemoveComment ? (
+                  <button
+                    type="button"
+                    className="composer-file-comment-remove"
+                    aria-label={`移除 ${comment.relativePath} ${fileCommentRangeLabel(comment)} 评论`}
+                    onClick={() => onRemoveComment(comment.id)}
+                  >
+                    移除
+                  </button>
+                ) : null}
+              </span>
+            ))}
+          </span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
 export function shouldActivateComposerMetaItemKey(key: string): boolean {
   return key === " " || key === "Spacebar";
@@ -429,10 +548,13 @@ export function AwakenComposerBar({
   attachments = [],
   attachmentWarning,
   tokens = [],
+  fileComments = [],
   slashPalette,
   pluginPicker,
   onRemoveAttachment,
   onRemoveToken,
+  onRemoveFileComment,
+  onClearFileComments,
   onPasteImages,
 }: AwakenComposerBarProps) {
   const canSubmit = submitMode === "stop" || (!disabled && !submitDisabled);
@@ -1470,6 +1592,11 @@ export function AwakenComposerBar({
               {attachments.map((attachment) => renderAttachment(attachment))}
             </div>
           ) : null}
+          <AwakenFileCommentSummary
+            comments={fileComments}
+            onRemoveComment={onRemoveFileComment}
+            onClear={onClearFileComments}
+          />
           <div className="composer-bar-input-wrap" ref={inputWrapRef}>
             {renderSlashPalette()}
             {tokens.length > 0 ? (

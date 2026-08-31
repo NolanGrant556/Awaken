@@ -261,6 +261,50 @@ describe("runtime shared start run normalization", () => {
     expect(wire.workspace.project_id).toBe("project_1");
   });
 
+  it("maps structured file comments onto the start-run wire contract", () => {
+    const wire = normalizeStartRunRequest({
+      input: "",
+      fileComments: [{
+        id: "comment-1",
+        projectId: "project-1",
+        folderPath: "/workspace",
+        relativePath: "src/main.ts",
+        displayName: "main.ts",
+        contentDigest: "a".repeat(64),
+        startLine: 4,
+        endLine: 6,
+        selectedText: "const value = 1;",
+        comment: "请提取为常量",
+        createdAt: "2026-08-31T00:00:00.000Z",
+        validationState: "ready",
+      }],
+      workspace: {
+        projectId: "project-1",
+        workspaceRoot: "/workspace",
+        readableRoots: ["/workspace"],
+      },
+      client: {
+        sessionId: "session-comments",
+        requestId: "request-comments",
+        entrypoint: "desktop",
+      },
+    });
+
+    expect(wire.file_comments).toEqual([{
+      id: "comment-1",
+      project_id: "project-1",
+      folder_path: "/workspace",
+      relative_path: "src/main.ts",
+      display_name: "main.ts",
+      content_digest: "a".repeat(64),
+      start_line: 4,
+      end_line: 6,
+      selected_text: "const value = 1;",
+      comment: "请提取为常量",
+      created_at: "2026-08-31T00:00:00.000Z",
+    }]);
+  });
+
   it("passes composer tokens through the wire request without mutating input text", () => {
     expect(
       normalizeStartRunRequest({

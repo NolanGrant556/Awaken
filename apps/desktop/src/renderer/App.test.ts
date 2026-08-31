@@ -3325,6 +3325,28 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).toContain('aria-expanded="false"');
   });
 
+  it("renders structured prompt content inside the user message bubble", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "",
+        structuredContent: React.createElement(
+          "span",
+          { className: "test-file-comment-summary" },
+          "1 个评论",
+        ),
+      }),
+    );
+
+    const bubbleStart = html.indexOf('class="execution-prompt-bubble');
+    const bubbleEnd = html.indexOf("</article>", bubbleStart);
+    const bubbleHtml = html.slice(bubbleStart, bubbleEnd);
+    expect(bubbleHtml).toContain("execution-prompt-bubble-structured-content");
+    expect(bubbleHtml).toContain("execution-prompt-bubble-has-structured-content");
+    expect(bubbleHtml).toContain("test-file-comment-summary");
+    expect(bubbleHtml).toContain("1 个评论");
+    expect(bubbleHtml).toContain('role="button"');
+  });
+
   it("renders selected skill tokens in their inline prompt position", () => {
     const html = renderToString(
       React.createElement(AwakenUserPromptBlock, {

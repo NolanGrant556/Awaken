@@ -1,4 +1,4 @@
-import type { ComposerToken, RunInputAttachment } from "../../shared/runtime";
+import type { ComposerToken, FileLineComment, RunInputAttachment } from "../../shared/runtime";
 import type { ToolDisplayState } from "../../shared/toolStatus";
 
 export type { ToolDisplayState };
@@ -132,6 +132,7 @@ export type RunNarrativeItem =
       text: string;
       attachments?: RunInputAttachment[];
       tokens?: PromptNarrativeToken[];
+      fileComments?: FileLineComment[];
     }
   | {
       kind: "planning";

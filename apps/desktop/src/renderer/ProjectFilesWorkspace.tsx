@@ -11,6 +11,7 @@ import {
   type AwakenMediaMetadata,
 } from "@awaken/design-system";
 import type {
+  FileLineComment,
   ProjectDirectoryEntry,
   ProjectEntryActionRequest,
   ProjectEntryOpenApplication,
@@ -77,6 +78,9 @@ export type ProjectFilesWorkspaceProps = {
   onWorkspaceModeChange?: (mode: ProjectFileWorkspaceMode) => void;
   onOpenTab?: (tab: ProjectFileWorkspaceTab) => void;
   onPreviewPrimaryClick?: () => void;
+  fileComments?: FileLineComment[];
+  onCreateFileComment?: (comment: FileLineComment) => void;
+  onDeleteFileComment?: (commentId: string) => void;
   addTaskDisabled?: boolean;
   onAddTaskContext?: (
     request: ProjectEntryActionRequest,
@@ -242,6 +246,9 @@ export function ProjectFilesWorkspace({
   onWorkspaceModeChange,
   onOpenTab,
   onPreviewPrimaryClick,
+  fileComments = [],
+  onCreateFileComment,
+  onDeleteFileComment,
   addTaskDisabled = false,
   onAddTaskContext,
 }: ProjectFilesWorkspaceProps) {
@@ -1000,6 +1007,10 @@ export function ProjectFilesWorkspace({
               mode={workspaceMode}
               onModeChange={changeWorkspaceMode}
               onPreviewPrimaryClick={onPreviewPrimaryClick}
+              fileComments={fileComments}
+              onCreateFileComment={onCreateFileComment}
+              onDeleteFileComment={onDeleteFileComment}
+              fileCommentDisabled={addTaskDisabled}
             />
           ) : (
             <div className="project-files-preview-empty is-centered">

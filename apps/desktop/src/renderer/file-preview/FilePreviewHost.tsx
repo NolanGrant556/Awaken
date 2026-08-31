@@ -8,6 +8,7 @@ import {
 } from "react";
 import { AwakenIcon } from "@awaken/design-system";
 import type {
+  FileLineComment,
   ProjectFilePreviewActionRequest,
   ProjectFilePreviewHandle,
 } from "../../shared/runtime";
@@ -46,6 +47,10 @@ export type FilePreviewHostProps = {
   onModeChange: (mode: ProjectFileWorkspaceMode) => void;
   onPreviewLabelChange?: (label: string) => void;
   onPreviewPrimaryClick?: () => void;
+  fileComments?: FileLineComment[];
+  onCreateFileComment?: (comment: FileLineComment) => void;
+  onDeleteFileComment?: (commentId: string) => void;
+  fileCommentDisabled?: boolean;
 };
 
 type PreviewState =
@@ -70,6 +75,10 @@ export default function FilePreviewHost({
   onModeChange,
   onPreviewLabelChange,
   onPreviewPrimaryClick,
+  fileComments = [],
+  onCreateFileComment,
+  onDeleteFileComment,
+  fileCommentDisabled = false,
 }: FilePreviewHostProps) {
   const [state, setState] = useState<PreviewState>({ status: "idle" });
   const [retryGeneration, setRetryGeneration] = useState(0);
@@ -333,7 +342,42 @@ export default function FilePreviewHost({
                 }
               />
             ) : preview.transport === "text" && preview.kind === "code" ? (
-              <CodePreview preview={preview} frameProps={frameProps} />
+              <CodePreview
+                preview={preview}
+                frameProps={frameProps}
+                fileComments={fileComments.filter(
+                  (comment) =>
+                    comment.projectId === projectId &&
+                    comment.folderPath === folderPath &&
+                    comment.relativePath === selection?.relativePath,
+                )}
+                onCreateComment={(selectionRange, commentText) => {
+                  if (
+                    !projectId ||
+                    !folderPath ||
+                    !selection ||
+                    !preview.contentDigest ||
+                    !onCreateFileComment
+                  ) return;
+                  onCreateFileComment({
+                    id: globalThis.crypto?.randomUUID?.() ??
+                      `file-comment-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                    projectId,
+                    folderPath,
+                    relativePath: selection.relativePath,
+                    displayName: preview.displayName,
+                    contentDigest: preview.contentDigest,
+                    startLine: selectionRange.startLine,
+                    endLine: selectionRange.endLine,
+                    selectedText: selectionRange.selectedText,
+                    comment: commentText.trim(),
+                    createdAt: new Date().toISOString(),
+                    validationState: "ready",
+                  });
+                }}
+                onDeleteComment={onDeleteFileComment}
+                commentDisabled={fileCommentDisabled}
+              />
             ) : preview.transport === "url" && preview.kind === "image" ? (
               <ImagePreview
                 preview={preview}

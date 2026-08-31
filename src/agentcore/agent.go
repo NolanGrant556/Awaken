@@ -27,6 +27,7 @@ type Agent struct {
 	recorder               SemanticRecorder
 	pendingUserAttachments []context.MessageAttachment
 	pendingComposerTokens  []SemanticComposerToken
+	pendingFileComments    []SemanticFileLineComment
 	preparedUserTurn       *preparedUserTurn
 }
 
@@ -34,6 +35,7 @@ type preparedUserTurn struct {
 	content        string
 	attachments    []context.MessageAttachment
 	composerTokens []SemanticComposerToken
+	fileComments   []SemanticFileLineComment
 }
 
 func NewAgent(config AgentConfig) *Agent {
@@ -297,7 +299,7 @@ func (a *Agent) RunNativeSubagent(ctx stdcontext.Context, request subagentruntim
 func (a *Agent) RunStreamWithEvents(ctx stdcontext.Context, userInput string, sink EventSink) (string, error) {
 	attachments, composerTokens, alreadyPersisted := a.consumeUserTurn(userInput)
 	if !alreadyPersisted {
-		if err := a.persistUserMessage(ctx, userInput, attachments, composerTokens, sink); err != nil {
+		if err := a.persistUserMessage(ctx, userInput, attachments, composerTokens, a.consumePendingFileComments(), sink); err != nil {
 			return "", err
 		}
 	}
@@ -376,13 +378,15 @@ func (a *Agent) PrepareUserMessageWithDisplayInput(
 	}
 	attachments := a.consumePendingUserAttachments()
 	composerTokens := a.consumePendingComposerTokens()
-	if err := a.persistUserMessage(ctx, displayInput, attachments, composerTokens, sink); err != nil {
+	fileComments := a.consumePendingFileComments()
+	if err := a.persistUserMessage(ctx, displayInput, attachments, composerTokens, fileComments, sink); err != nil {
 		a.preparedUserTurn = nil
 		return err
 	}
 	a.preparedUserTurn = &preparedUserTurn{
 		content: modelInput, attachments: append([]context.MessageAttachment(nil), attachments...),
 		composerTokens: cloneSemanticComposerTokens(composerTokens),
+		fileComments:   cloneSemanticFileLineComments(fileComments),
 	}
 	return nil
 }
@@ -405,7 +409,7 @@ func (a *Agent) consumeUserTurn(userInput string) ([]context.MessageAttachment, 
 	return a.consumePendingUserAttachments(), a.consumePendingComposerTokens(), false
 }
 
-func (a *Agent) persistUserMessage(ctx stdcontext.Context, userInput string, attachments []context.MessageAttachment, composerTokens []SemanticComposerToken, sink EventSink) error {
+func (a *Agent) persistUserMessage(ctx stdcontext.Context, userInput string, attachments []context.MessageAttachment, composerTokens []SemanticComposerToken, fileComments []SemanticFileLineComment, sink EventSink) error {
 	if a == nil || a.recorder == nil {
 		return nil
 	}
@@ -416,6 +420,9 @@ func (a *Agent) persistUserMessage(ctx stdcontext.Context, userInput string, att
 	}
 	if len(composerTokens) > 0 {
 		payload["composer_tokens"] = composerTokens
+	}
+	if len(fileComments) > 0 {
+		payload["file_comments"] = fileComments
 	}
 	record := NewSemanticRecord(SemanticKindUserMessage, a.threadID, a.runID, "", "", a.sessionID, payload)
 	if err := a.recorder.Append(ctx, record); err != nil {
@@ -438,6 +445,26 @@ func (a *Agent) SetPendingUserAttachments(attachments []context.MessageAttachmen
 // accepted user input and must survive Desktop restart.
 func (a *Agent) SetPendingComposerTokens(tokens []SemanticComposerToken) {
 	a.pendingComposerTokens = cloneSemanticComposerTokens(tokens)
+}
+
+func (a *Agent) SetPendingFileComments(comments []SemanticFileLineComment) {
+	a.pendingFileComments = cloneSemanticFileLineComments(comments)
+}
+
+func (a *Agent) consumePendingFileComments() []SemanticFileLineComment {
+	if len(a.pendingFileComments) == 0 {
+		return nil
+	}
+	comments := cloneSemanticFileLineComments(a.pendingFileComments)
+	a.pendingFileComments = nil
+	return comments
+}
+
+func cloneSemanticFileLineComments(comments []SemanticFileLineComment) []SemanticFileLineComment {
+	if len(comments) == 0 {
+		return nil
+	}
+	return append([]SemanticFileLineComment(nil), comments...)
 }
 
 func (a *Agent) consumePendingUserAttachments() []context.MessageAttachment {

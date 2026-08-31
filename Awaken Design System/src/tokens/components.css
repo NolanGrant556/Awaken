@@ -711,6 +711,28 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   min-width: 0;
 }
 
+.execution-prompt-bubble-structured-content {
+  display: flex;
+  min-width: 0;
+}
+
+.execution-prompt-bubble-structured-content-separated {
+  margin-top: var(--execution-prompt-attachment-gap);
+}
+
+.execution-prompt-bubble-structured-content > .composer-file-comments {
+  margin-bottom: 0;
+}
+
+.execution-prompt-bubble-has-structured-content {
+  overflow: visible;
+}
+
+.execution-prompt-bubble-structured-content .composer-file-comments-popover {
+  top: calc(100% + 8px);
+  bottom: auto;
+}
+
 .execution-prompt-bubble-token {
   display: inline-flex;
   align-items: center;

@@ -16,7 +16,31 @@ const SAFE_OPERATION_MESSAGES = new Set([
 
 function runtimeDomainIssue(error: unknown): DesktopOperationIssue | null {
   if (!(error instanceof Error) || error.name !== "RuntimeDomainError") return null;
-  const code = String((error as Error & { code?: unknown }).code ?? "");
+  const domainError = error as Error & {
+    code?: unknown;
+    details?: { comment_id?: unknown; reason?: unknown };
+  };
+  const code = String(domainError.code ?? "");
+  if (code === "FILE_COMMENT_STALE" || code === "INVALID_FILE_COMMENT") {
+    const commentId = typeof domainError.details?.comment_id === "string"
+      ? domainError.details.comment_id
+      : undefined;
+    const reason = typeof domainError.details?.reason === "string"
+      ? domainError.details.reason
+      : undefined;
+    return {
+      code: code === "FILE_COMMENT_STALE"
+        ? "file_comment_stale"
+        : "invalid_file_comment",
+      message: code === "FILE_COMMENT_STALE"
+        ? "文件内容已变化，请重新选择行并添加评论。"
+        : "文件评论无效，请检查所选文件和行号。",
+      retryable: true,
+      actions: ["retry"],
+      commentId,
+      reason,
+    };
+  }
   if (code === "INVALID_COMPOSER_TOKEN") {
     return {
       code: "composer_selection_invalid",

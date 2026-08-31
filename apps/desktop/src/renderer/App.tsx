@@ -19,6 +19,7 @@ import {
   AwakenAssistantMessage as AssistantMessage,
   AwakenButton as Button,
   AwakenComposerBar as ComposerBar,
+  AwakenFileCommentSummary as FileCommentSummary,
   AwakenContextUsagePanel as ContextUsagePanel,
   AwakenDisclosure as Disclosure,
   AwakenDialog as Dialog,
@@ -77,6 +78,7 @@ import type {
   AwakenTheme,
   AwakenThemePreference,
   ComposerToken,
+  FileLineComment,
   MemoryDreamTask,
   ProjectEntryActionRequest,
   ProjectPathComposerTokenPayload,
@@ -2637,6 +2639,7 @@ export function App() {
     setValue: setComposerValue,
     setAttachments: setComposerAttachments,
     setTokens: setComposerTokens,
+    setComments: setComposerComments,
     setTokenPlacements: setComposerTokenPlacements,
     setTokenLeadingTexts: setComposerTokenLeadingTexts,
     setSelection: setComposerInputSelection,
@@ -2646,6 +2649,7 @@ export function App() {
   const composerValue = composerDraft.value;
   const composerAttachments = composerDraft.attachments;
   const composerTokens = composerDraft.tokens;
+  const composerComments = composerDraft.comments;
   const composerTokenPlacements = composerDraft.tokenPlacements;
   const composerTokenLeadingTexts = composerDraft.tokenLeadingTexts;
   const composerInputSelection = composerDraft.selection;
@@ -3786,7 +3790,8 @@ export function App() {
     desktopNeedsRestart,
     isBusy,
     isWorkspaceValid,
-    hasAttachments: composerAttachments.length > 0 || composerTokens.length > 0,
+    hasAttachments:
+      composerAttachments.length > 0 || composerTokens.length > 0 || composerComments.length > 0,
     inputAttachmentBlocked: false,
   });
   const composerInlineTextPrefix = useMemo(
@@ -4576,6 +4581,7 @@ export function App() {
     effectiveText: trimmedEffectiveComposerValue,
     attachmentCount: composerAttachments.length,
     tokenCount: composerTokens.length,
+    commentCount: composerComments.length,
   });
   const dockComposerMetaItems = composerMetaItemsForFileWorkspaceSurface(
     composerMetaItems,
@@ -5161,12 +5167,14 @@ export function App() {
       ...token,
       payload: token.payload ? { ...token.payload } : undefined,
     }));
+    const draftFileComments = composerComments.map((comment) => ({ ...comment }));
     const draftComposerTokenPlacements = { ...composerTokenPlacements };
     const draftComposerTokenLeadingTexts = { ...composerTokenLeadingTexts };
     const draftComposerState: ThreadComposerDraft = {
       value: draftComposerValue,
       attachments: draftAttachments,
       tokens: draftComposerTokens,
+      comments: draftFileComments,
       tokenPlacements: draftComposerTokenPlacements,
       tokenLeadingTexts: draftComposerTokenLeadingTexts,
       selection: composerInputSelection
@@ -5178,8 +5186,13 @@ export function App() {
       draftComposerTokenLeadingTexts,
     );
     const runInputAttachments = draftAttachments.map(toRunInputAttachment);
-    if (!prompt && runInputAttachments.length === 0 && draftComposerTokens.length === 0) {
-      setNotice("请输入内容或添加附件");
+    if (
+      !prompt &&
+      runInputAttachments.length === 0 &&
+      draftComposerTokens.length === 0 &&
+      draftFileComments.length === 0
+    ) {
+      setNotice("请输入内容、添加附件或文件评论");
       return;
     }
     const hasDeepResearchToken = draftComposerTokens.some(
@@ -5231,6 +5244,7 @@ export function App() {
       prompt,
       promptAttachments: forceNewThread ? [] : runInputAttachments,
       promptTokens: forceNewThread ? [] : draftPromptTokens,
+      promptFileComments: forceNewThread ? [] : draftFileComments,
       startedAtMs: Date.now(),
     });
     clearThreadComposerDraft();
@@ -5263,6 +5277,7 @@ export function App() {
         input: prompt,
         attachments: forceNewThread ? [] : runInputAttachments,
         composerTokens: forceNewThread ? [] : draftComposerTokens,
+        fileComments: forceNewThread ? [] : draftFileComments,
         threadId: forceNewThread ? undefined : runtimeState.activeThreadId || undefined,
         modelProfileId: selectedModelProfile?.id,
         reasoningEffort: selectedReasoningEffort,
@@ -5316,7 +5331,18 @@ export function App() {
       unsubscribeRef.current = unsubscribe;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to create run";
-      replaceComposerDraft(draftComposerState, composerDraftKey);
+      const issue = error as Error & { code?: string; commentId?: string };
+      const restoredComposerState = issue.code === "file_comment_stale"
+        ? {
+            ...draftComposerState,
+            comments: draftComposerState.comments.map((comment) =>
+              !issue.commentId || comment.id === issue.commentId
+                ? { ...comment, validationState: "stale" as const }
+                : comment,
+            ),
+          }
+        : draftComposerState;
+      replaceComposerDraft(restoredComposerState, composerDraftKey);
       dispatch({ type: "run/createFailed", message });
     }
   }
@@ -6448,6 +6474,23 @@ export function App() {
     setComposerAttachments((current) =>
       current.filter((attachment) => attachment.id !== attachmentId),
     );
+    setNotice(null);
+  }
+
+  function handleCreateFileLineComment(comment: FileLineComment): void {
+    if (composerComments.length >= 20) {
+      setNotice("每次任务最多添加 20 条文件评论");
+      return;
+    }
+    setComposerComments((current) => {
+      if (current.some((item) => item.id === comment.id)) return current;
+      return [...current, { ...comment, validationState: "ready" }];
+    });
+    setNotice(null);
+  }
+
+  function handleRemoveFileLineComment(commentId: string): void {
+    setComposerComments((current) => current.filter((comment) => comment.id !== commentId));
     setNotice(null);
   }
 
@@ -8299,11 +8342,14 @@ export function App() {
                                     });
                                   }}
                                   attachments={composerBarAttachments}
+                                  fileComments={composerComments}
                                   tokens={composerBarTokens}
                                   slashPalette={composerBarSlashPalette}
                                   pluginPicker={composerBarPluginPicker}
                                   onInputKeyDown={handleComposerInputKeyDown}
                                   onRemoveAttachment={handleRemoveComposerAttachment}
+                                  onRemoveFileComment={handleRemoveFileLineComment}
+                                  onClearFileComments={() => setComposerComments([])}
                                   onRemoveToken={handleRemoveComposerToken}
                                   onPasteImages={(files) => {
                                     void handlePasteImages(files);
@@ -8348,11 +8394,14 @@ export function App() {
                               });
                             }}
                             attachments={composerBarAttachments}
+                            fileComments={composerComments}
                             tokens={composerBarTokens}
                             slashPalette={composerBarSlashPalette}
                             pluginPicker={composerBarPluginPicker}
                             onInputKeyDown={handleComposerInputKeyDown}
                             onRemoveAttachment={handleRemoveComposerAttachment}
+                            onRemoveFileComment={handleRemoveFileLineComment}
+                            onClearFileComments={() => setComposerComments([])}
                             onRemoveToken={handleRemoveComposerToken}
                             onPasteImages={(files) => {
                               void handlePasteImages(files);
@@ -8421,6 +8470,12 @@ export function App() {
                                       )}
                                       tokens={promptTokenViews(turn.prompt.tokens)}
                                       attachments={promptAttachmentViews(turn.prompt.attachments)}
+                                      structuredContent={(
+                                        <FileCommentSummary
+                                          comments={turn.prompt.fileComments ?? []}
+                                          className="execution-turn-file-comments"
+                                        />
+                                      )}
                                       expanded={promptBubbleModeByTurnId[turn.id] === "expanded"}
                                       onExpandedChange={(expanded) => {
                                         setPromptBubbleModeByTurnId((current) => ({
@@ -8502,6 +8557,9 @@ export function App() {
                         onOpenTab={handleOpenProjectFileTab}
                         onPreviewPrimaryClick={handleExpandedFilePreviewPrimaryClick}
                         addTaskDisabled={isBusy}
+                        fileComments={composerComments}
+                        onCreateFileComment={handleCreateFileLineComment}
+                        onDeleteFileComment={handleRemoveFileLineComment}
                         onAddTaskContext={handleAddProjectEntryToTask}
                       />
                     ) : (

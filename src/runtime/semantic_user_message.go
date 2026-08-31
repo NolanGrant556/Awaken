@@ -79,6 +79,23 @@ func semanticComposerTokensForRun(tokens []ComposerToken) []agentcore.SemanticCo
 	return converted
 }
 
+func semanticFileLineCommentsForRun(comments []FileLineComment) []agentcore.SemanticFileLineComment {
+	if len(comments) == 0 {
+		return nil
+	}
+	converted := make([]agentcore.SemanticFileLineComment, 0, len(comments))
+	for _, comment := range comments {
+		converted = append(converted, agentcore.SemanticFileLineComment{
+			ID: comment.ID, ProjectID: comment.ProjectID, FolderPath: comment.FolderPath,
+			RelativePath: comment.RelativePath, DisplayName: comment.DisplayName,
+			ContentDigest: comment.ContentDigest, StartLine: comment.StartLine,
+			EndLine: comment.EndLine, SelectedText: comment.SelectedText,
+			Comment: comment.Comment, CreatedAt: comment.CreatedAt,
+		})
+	}
+	return converted
+}
+
 func transcriptAttachmentsFromSemanticUserMessage(payload map[string]any) []transcriptMessageAttachment {
 	var attachments []transcriptMessageAttachment
 	if !decodeSemanticUserMessageField(payload, "attachments", &attachments) {
@@ -116,6 +133,22 @@ func composerTokensFromSemanticUserMessage(payload map[string]any) []ComposerTok
 		return nil
 	}
 	return cloneComposerTokens(valid)
+}
+
+func fileLineCommentsFromSemanticUserMessage(payload map[string]any) []FileLineComment {
+	var comments []FileLineComment
+	if !decodeSemanticUserMessageField(payload, "file_comments", &comments) {
+		return nil
+	}
+	valid := comments[:0]
+	for _, comment := range comments {
+		if strings.TrimSpace(comment.ID) == "" || strings.TrimSpace(comment.RelativePath) == "" ||
+			comment.StartLine < 1 || comment.EndLine < comment.StartLine {
+			continue
+		}
+		valid = append(valid, comment)
+	}
+	return cloneFileLineComments(valid)
 }
 
 func decodeSemanticUserMessageField(payload map[string]any, key string, target any) bool {

@@ -41,6 +41,7 @@ export const AWAKEN_ICON_CONCEPTS = {
   "computer-use": "display-pointer",
   back: "chevron-left",
   copy: "copy",
+  "file-comment": "comment-lines",
 
   // 运行状态。迁移前这一族是散的：错误有四个同义图标，unsupported 与 error
   // 共用一个，loading 有两个。现在每个状态只有一个图形。

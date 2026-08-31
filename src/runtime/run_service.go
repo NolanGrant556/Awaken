@@ -114,6 +114,7 @@ type StartRunRequest struct {
 	Input          string               `json:"input"`
 	Attachments    []RunInputAttachment `json:"attachments,omitempty"`
 	ComposerTokens []ComposerToken      `json:"composer_tokens,omitempty"`
+	FileComments   []FileLineComment    `json:"file_comments,omitempty"`
 	Workspace      WorkspaceConfig      `json:"workspace"`
 	Client         ClientInfo           `json:"client"`
 	ThreadID       string               `json:"thread_id,omitempty"`
@@ -1107,7 +1108,7 @@ func (s *RunService) SetDefaultWorkspace(workspace WorkspaceConfig) error {
 
 func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	trimmed := strings.TrimSpace(req.Input)
-	if trimmed == "" && len(req.Attachments) == 0 && len(req.ComposerTokens) == 0 {
+	if trimmed == "" && len(req.Attachments) == 0 && len(req.ComposerTokens) == 0 && len(req.FileComments) == 0 {
 		return Run{}, ErrInvalidInput
 	}
 	if s.newExecutor == nil {
@@ -1194,6 +1195,10 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 		return Run{}, err
 	}
 	instructionSnapshot := s.instructionLoader.LoadWithExtraSources(workspace.WorkspaceRoot, workspace.SessionWorkspace, pluginRuleSources)
+	canonicalFileComments, err := validateFileLineComments(req.FileComments, workspace)
+	if err != nil {
+		return Run{}, err
+	}
 	s.projectMutationMu.RLock()
 	defer s.projectMutationMu.RUnlock()
 	if s.projectService != nil {
@@ -1249,10 +1254,14 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	}
 	workspace = mergeTaskScopeAttachments(workspace, persistedAttachments)
 	effectiveInput := effectiveInputForComposerTokens(trimmed, resolvedComposerTokens)
+	effectiveInput = effectiveInputForFileLineComments(effectiveInput, canonicalFileComments)
 	effectiveInput = effectiveInputForMediaArtifactReferences(effectiveInput, mediaArtifactReferences)
 	threadLabel := threadLabelForInputAndTokens(trimmed, persistedAttachments, req.ComposerTokens)
+	if strings.TrimSpace(trimmed) == "" && len(persistedAttachments) == 0 && len(req.ComposerTokens) == 0 {
+		threadLabel = threadLabelForFileLineComments(canonicalFileComments)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
-	session := NewSession(runID, threadID, trimmed, persistedAttachments, req.ComposerTokens, cancel)
+	session := NewSessionWithFileComments(runID, threadID, trimmed, persistedAttachments, req.ComposerTokens, canonicalFileComments, cancel)
 	session.SetPluginRuntimeLease(pluginGeneration, pluginLeaseRelease)
 	hookSnapshot.AsyncSink = s.asyncHookCompletions
 	hookSnapshot.AsyncLifecycle = session
@@ -1537,7 +1546,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				titleProfile = routed
 			}
 		}
-		go s.scheduleThreadTitleGeneration(context.Background(), threadID, runID, trimmed, persistedAttachments, req.ComposerTokens, titleProfile)
+		go s.scheduleThreadTitleGeneration(context.Background(), threadID, runID, firstNonEmpty(trimmed, threadLabelForFileLineComments(canonicalFileComments)), persistedAttachments, req.ComposerTokens, titleProfile)
 	}
 	executor := s.newExecutor(agent)
 	s.runWG.Add(1)
@@ -2772,7 +2781,8 @@ func (s *RunService) executeWithMediaArtifactReferences(session *Session, execut
 	if agent != nil {
 		agent.SetPendingUserAttachments(inputAttachmentsToContextAttachments(attachments))
 		agent.SetPendingComposerTokens(semanticComposerTokensForRun(snapshot.ComposerTokens))
-		if input != displayInput || len(snapshot.ComposerTokens) > 0 {
+		agent.SetPendingFileComments(semanticFileLineCommentsForRun(snapshot.FileComments))
+		if input != displayInput || len(snapshot.ComposerTokens) > 0 || len(snapshot.FileComments) > 0 {
 			if err := agent.PrepareUserMessageWithDisplayInput(
 				ctx,
 				input,
@@ -2788,7 +2798,7 @@ func (s *RunService) executeWithMediaArtifactReferences(session *Session, execut
 			}
 		}
 		agent.ConfigureHookDispatcher()
-		if agent.HookPreflightRequiresPreparedUserMessage() && input == displayInput && len(snapshot.ComposerTokens) == 0 {
+		if agent.HookPreflightRequiresPreparedUserMessage() && input == displayInput && len(snapshot.ComposerTokens) == 0 && len(snapshot.FileComments) == 0 {
 			if err := agent.PrepareUserMessageWithDisplayInput(ctx, input, displayInput, sessionEventSink{session: session}); err != nil {
 				session.CompleteError(err.Error(), "persistence_error")
 				return

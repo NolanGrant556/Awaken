@@ -116,17 +116,19 @@ export function actionsForThreadTranscript(
   transcript.runs.forEach((entry, index) => {
     const hasPromptAttachments = (entry.run.inputAttachments?.length ?? 0) > 0;
     const hasPromptTokens = (entry.run.composerTokens?.length ?? 0) > 0;
+    const hasPromptFileComments = (entry.run.fileComments?.length ?? 0) > 0;
     const prompt =
       entry.run.input?.trim() ||
-      (!hasPromptAttachments && !hasPromptTokens && index === 0
+      (!hasPromptAttachments && !hasPromptTokens && !hasPromptFileComments && index === 0
         ? transcript.thread.label
         : "");
-    if (prompt || hasPromptAttachments || hasPromptTokens) {
+    if (prompt || hasPromptAttachments || hasPromptTokens || hasPromptFileComments) {
       actions.push({
         type: "run/requested",
         prompt,
         promptAttachments: entry.run.inputAttachments,
         promptTokens: entry.run.composerTokens,
+        promptFileComments: entry.run.fileComments,
         startedAtMs: timestampMs(entry.run.createdAt),
       });
     }

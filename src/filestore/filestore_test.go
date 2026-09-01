@@ -358,6 +358,33 @@ func TestJournalAppendRecoverAndTailTruncation(t *testing.T) {
 	reopened.Close()
 }
 
+func TestJournalOpenHandlesRefreshSequenceBeforeAppend(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "journal.jsonl")
+	first, _, err := OpenJournal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, _, err := OpenJournal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+
+	firstRecord, err := first.Append(map[string]int{"writer": 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondRecord, err := second.Append(map[string]int{"writer": 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstRecord.Seq != 1 || secondRecord.Seq != 2 {
+		t.Fatalf("stale handles reused a sequence: first=%d second=%d", firstRecord.Seq, secondRecord.Seq)
+	}
+}
+
 func TestJournalMiddleCorruptionFailsStop(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "journal.jsonl")

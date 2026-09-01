@@ -1299,6 +1299,26 @@ const RAW_DEFINITIONS = {
       ),
     ],
   },
+  "comment-lines": {
+    shape: "square",
+    minSize: 14,
+    purpose: "文件评论",
+    build: () => [
+      poly(
+        [
+          [0, 0],
+          [12.6, 0],
+          [12.6, 9.4],
+          [3.6, 9.4],
+          [0, 12.6],
+        ],
+        [1.9, 1.9, 1.9, 0.4, 0.4],
+        true,
+      ),
+      poly([[3.1, 3.5], [9.5, 3.5]], 0),
+      poly([[3.1, 6.4], [7.7, 6.4]], 0),
+    ],
+  },
   "book-open": {
     shape: "horizontal",
     minSize: 14,

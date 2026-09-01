@@ -365,6 +365,7 @@ export type RuntimeAction =
       prompt: string;
       promptAttachments?: RunInputAttachment[];
       promptTokens?: PromptNarrativeToken[];
+      promptFileComments?: import("../../shared/runtime").FileLineComment[];
       startedAtMs?: number;
     }
   | { type: "run/created"; run: RuntimeRun }
@@ -2106,12 +2107,14 @@ export function reduceRuntimeState(
               action.promptAttachments,
               nextNarrativeScope(state),
               action.promptTokens,
+              action.promptFileComments,
             )
           : createRunRequestedNarrative(
               action.prompt,
               action.promptAttachments,
               nextNarrativeScope(state),
               action.promptTokens,
+              action.promptFileComments,
             ),
         subagentsById: state.subagentsById,
         subagentOrder: state.subagentOrder,

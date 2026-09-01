@@ -1,5 +1,5 @@
 import type { AguiEvent } from "../../shared/agui";
-import type { RunInputAttachment } from "../../shared/runtime";
+import type { FileLineComment, RunInputAttachment } from "../../shared/runtime";
 import {
   toolDisplayStateFromStatus,
   type ToolDisplayState,
@@ -37,6 +37,7 @@ export function createRunRequestedNarrative(
   attachments?: RunInputAttachment[],
   scopeId = "current",
   tokens?: PromptNarrativeToken[],
+  fileComments?: FileLineComment[],
 ): RunNarrativeState {
   return appendRunRequestedNarrative(
     createInitialRunNarrativeState(),
@@ -44,6 +45,7 @@ export function createRunRequestedNarrative(
     attachments,
     scopeId,
     tokens,
+    fileComments,
   );
 }
 
@@ -53,6 +55,7 @@ export function appendRunRequestedNarrative(
   attachments?: RunInputAttachment[],
   scopeId = "current",
   tokens?: PromptNarrativeToken[],
+  fileComments?: FileLineComment[],
 ): RunNarrativeState {
   const trimmed = prompt.trim();
   const settledState = state.activeItem ? commitActive(state, "done") : state;
@@ -67,14 +70,19 @@ export function appendRunRequestedNarrative(
         payload: token.payload ? { ...token.payload } : undefined,
       }))
     : undefined;
+  const promptFileComments =
+    fileComments && fileComments.length > 0
+      ? fileComments.map((comment) => ({ ...comment }))
+      : undefined;
   const committedItems =
-    trimmed || promptAttachments || promptTokens
+    trimmed || promptAttachments || promptTokens || promptFileComments
     ? upsertCommitted(settledState.committedItems, {
         kind: "prompt",
         id: `prompt:${scopeId}`,
         text: trimmed,
         ...(promptAttachments ? { attachments: promptAttachments } : {}),
         ...(promptTokens ? { tokens: promptTokens } : {}),
+        ...(promptFileComments ? { fileComments: promptFileComments } : {}),
       })
     : settledState.committedItems;
 

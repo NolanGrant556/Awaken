@@ -16,13 +16,15 @@ export function hasExpandedFileComposerDraft({
   effectiveText,
   attachmentCount,
   tokenCount,
+  commentCount = 0,
 }: {
   effectiveText: string;
   attachmentCount: number;
   tokenCount: number;
+  commentCount?: number;
 }): boolean {
   return Boolean(
-    effectiveText.trim() || attachmentCount > 0 || tokenCount > 0,
+    effectiveText.trim() || attachmentCount > 0 || tokenCount > 0 || commentCount > 0,
   );
 }
 

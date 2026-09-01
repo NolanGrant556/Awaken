@@ -14,6 +14,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 
 import { AwakenCopyButton } from "../AwakenCopyButton";
@@ -156,6 +157,7 @@ export type AwakenUserPromptBlockProps = {
   copyText?: string;
   tokens?: AwakenUserPromptToken[];
   attachments?: AwakenUserPromptAttachment[];
+  structuredContent?: ReactNode;
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
 };
@@ -194,6 +196,7 @@ export function AwakenUserPromptBlock({
   copyText,
   tokens = [],
   attachments = [],
+  structuredContent,
   expanded,
   onExpandedChange,
 }: AwakenUserPromptBlockProps) {
@@ -213,8 +216,9 @@ export function AwakenUserPromptBlock({
     visiblePromptText.split(/\r\n|\r|\n/).length > 3 ||
     visiblePromptText.trim().length > 160;
   const hasHiddenAttachments = attachments.length > collapsedAttachmentLimit;
-  const isInteractive =
+  const hasPromptPayload =
     text.trim().length > 0 || tokens.length > 0 || attachments.length > 0;
+  const isInteractive = hasPromptPayload || Boolean(structuredContent);
   const isExpanded = expanded ?? uncontrolledExpanded;
   const visibleAttachments = isExpanded
     ? attachments
@@ -451,7 +455,9 @@ export function AwakenUserPromptBlock({
       }${isExpanded ? " execution-prompt-block-expanded" : ""}`}
     >
       <div
-        className="execution-prompt-bubble"
+        className={`execution-prompt-bubble${
+          structuredContent ? " execution-prompt-bubble-has-structured-content" : ""
+        }`}
         role={isInteractive && !isExpanded ? "button" : undefined}
         tabIndex={isInteractive && !isExpanded ? 0 : undefined}
         aria-expanded={isInteractive && !isExpanded ? isExpanded : undefined}
@@ -499,6 +505,18 @@ export function AwakenUserPromptBlock({
             </div>
           ) : null}
         </div>
+        {structuredContent ? (
+          <div
+            className={`execution-prompt-bubble-structured-content${
+              hasPromptPayload ? " execution-prompt-bubble-structured-content-separated" : ""
+            }`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            {structuredContent}
+          </div>
+        ) : null}
         {isExpanded ? (
           <div
             className="execution-prompt-bubble-toolbar"

@@ -81,6 +81,23 @@ describe("desktop operation result boundary", () => {
     });
   });
 
+  it("preserves a typed stale file comment without exposing file content", () => {
+    expect(
+      desktopOperationIssue(Object.assign(new Error("internal path must not cross IPC"), {
+        name: "RuntimeDomainError",
+        code: "FILE_COMMENT_STALE",
+        details: { comment_id: "comment-1", reason: "digest_mismatch" },
+      })),
+    ).toEqual({
+      code: "file_comment_stale",
+      message: "文件内容已变化，请重新选择行并添加评论。",
+      retryable: true,
+      actions: ["retry"],
+      commentId: "comment-1",
+      reason: "digest_mismatch",
+    });
+  });
+
   it("returns a serializable result instead of throwing across Electron IPC", async () => {
     await expect(
       runDesktopOperation(async () => {

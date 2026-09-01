@@ -149,6 +149,20 @@ type SemanticComposerToken struct {
 	Payload     map[string]any `json:"payload,omitempty"`
 }
 
+type SemanticFileLineComment struct {
+	ID            string    `json:"id"`
+	ProjectID     string    `json:"project_id"`
+	FolderPath    string    `json:"folder_path"`
+	RelativePath  string    `json:"relative_path"`
+	DisplayName   string    `json:"display_name"`
+	ContentDigest string    `json:"content_digest"`
+	StartLine     int       `json:"start_line"`
+	EndLine       int       `json:"end_line"`
+	SelectedText  string    `json:"selected_text"`
+	Comment       string    `json:"comment"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 // SemanticRecorder persists durable semantic facts. All methods return error.
 // EventSink remains fire-and-forget for live broadcast after successful append.
 type SemanticRecorder interface {

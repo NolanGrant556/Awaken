@@ -683,6 +683,7 @@ class RuntimeDomainError extends Error {
     readonly code: string,
     message: string,
     readonly status: number,
+    readonly details?: unknown,
   ) {
     super(message);
     this.name = "RuntimeDomainError";
@@ -694,20 +695,23 @@ async function throwRuntimeDomainError(response: Response): Promise<never> {
   const raw = (await response.text()).trim();
   let code = "INTERNAL_ERROR";
   let message = raw || fallback;
+  let details: unknown;
   if (raw) {
     try {
       const parsed = JSON.parse(raw) as {
         code?: string;
         error?: string;
         message?: string;
+        details?: unknown;
       };
       code = parsed.code ?? parsed.error ?? code;
       message = parsed.message ?? message;
+      details = parsed.details;
     } catch {
       // Keep the raw body for internal logs. Renderer-facing callers map it.
     }
   }
-  throw new RuntimeDomainError(code, message, response.status);
+  throw new RuntimeDomainError(code, message, response.status, details);
 }
 
 async function requestRuntimeDomain<T>(pathname: string, init?: RequestInit): Promise<T> {

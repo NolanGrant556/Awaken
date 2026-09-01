@@ -80,6 +80,23 @@ export class RuntimeControlClient {
     return (await resp.json()) as NetworkRouteSnapshot;
   }
 
+  async reloadAgentPlanMediaTool(capability: string): Promise<void> {
+    const resp = await fetch(
+      `${this.baseUrl}/v1/control/agent-plan/media-tools/reload`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ capability }),
+      },
+    );
+    if (!resp.ok) {
+      throw new Error(`Agent Plan media tool reload failed: ${resp.status}`);
+    }
+  }
+
   async createLease(ownerID: string, ownerKind: "desktop" | "bridge" = "desktop"): Promise<RuntimeLease> {
     const resp = await fetch(`${this.baseUrl}/v1/control/leases`, {
       method: "POST",

@@ -51,6 +51,19 @@ const imageConfiguration: AgentPlanMediaToolConfiguration = {
   displayState: "ready_unverified",
 };
 
+const videoConfiguration: AgentPlanMediaToolConfiguration = {
+  id: "volcengine-agent-plan-video",
+  providerId: "volcengine-agent-plan",
+  accountId: "volcengine-agent-plan-default",
+  capability: "media.video.generate",
+  modelId: "doubao-seedance-2.0",
+  modelKind: "video",
+  enabled: true,
+  configurationRevision: 1,
+  credentialRevision: 1,
+  displayState: "ready_unverified",
+};
+
 async function settle(): Promise<void> {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -83,7 +96,7 @@ describe("AgentPlanMediaToolsPanel", () => {
   it("shows compact image and video cards without another API key form", async () => {
     const saveAgentPlanMediaTool = vi.fn(async () => ({
       settings: { configurations: [imageConfiguration] },
-      restartStatus: "restarted" as const,
+      applyStatus: "applied" as const,
     }));
     const runtimeClient = {
       getAgentPlanMediaTools: vi.fn(async () => emptySettings),
@@ -97,7 +110,6 @@ describe("AgentPlanMediaToolsPanel", () => {
           account={account}
           runtimeClient={runtimeClient}
           onConfigureAccount={vi.fn()}
-          onSettingsChanged={vi.fn()}
           onToast={toast}
         />,
       );
@@ -231,7 +243,6 @@ describe("AgentPlanMediaToolsPanel", () => {
           account={account}
           runtimeClient={runtimeClient}
           onConfigureAccount={vi.fn()}
-          onSettingsChanged={vi.fn()}
           onToast={vi.fn()}
         />,
       );
@@ -250,6 +261,122 @@ describe("AgentPlanMediaToolsPanel", () => {
     ).not.toBeNull();
   });
 
+  it("applies a configured tool toggle without reloading the settings catalog", async () => {
+    const disabledConfiguration = { ...imageConfiguration, enabled: false };
+    const saveAgentPlanMediaTool = vi.fn(async () => ({
+      settings: { configurations: [disabledConfiguration] },
+      applyStatus: "applied" as const,
+    }));
+    const runtimeClient = {
+      getAgentPlanMediaTools: vi.fn(async () => ({
+        configurations: [imageConfiguration],
+      })),
+      saveAgentPlanMediaTool,
+    } as unknown as RuntimeClient;
+    const toast = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <AgentPlanMediaToolsPanel
+          account={account}
+          runtimeClient={runtimeClient}
+          onConfigureAccount={vi.fn()}
+          onToast={toast}
+        />,
+      );
+    });
+    await settle();
+
+    const imageSwitch = container.querySelector<HTMLButtonElement>(
+      '[role="switch"][aria-label*="图片生成"]',
+    );
+    await act(async () => imageSwitch?.click());
+    await settle();
+
+    expect(saveAgentPlanMediaTool).toHaveBeenCalledWith({
+      capability: "media.image.generate",
+      modelId: "doubao-seedream-test",
+      enabled: false,
+    });
+    expect(imageSwitch?.getAttribute("aria-checked")).toBe("false");
+    expect(toast).toHaveBeenCalledWith("工具已停用");
+  });
+
+  it("keeps model selector typography stable while a toggle is applying", async () => {
+    let resolveSave:
+      | ((value: {
+          settings: { configurations: typeof imageConfiguration[] };
+          applyStatus: "applied";
+        }) => void)
+      | undefined;
+    const saveAgentPlanMediaTool = vi.fn(
+      () =>
+        new Promise<{
+          settings: { configurations: typeof imageConfiguration[] };
+          applyStatus: "applied";
+        }>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    const runtimeClient = {
+      getAgentPlanMediaTools: vi.fn(async () => ({
+        configurations: [imageConfiguration, videoConfiguration],
+      })),
+      saveAgentPlanMediaTool,
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <AgentPlanMediaToolsPanel
+          account={account}
+          runtimeClient={runtimeClient}
+          onConfigureAccount={vi.fn()}
+          onToast={vi.fn()}
+        />,
+      );
+    });
+    await settle();
+
+    const imageSwitch = container.querySelector<HTMLButtonElement>(
+      '[role="switch"][aria-label*="图片生成"]',
+    );
+    await act(async () => {
+      imageSwitch?.click();
+      await Promise.resolve();
+    });
+
+    expect(
+      container.querySelector<HTMLButtonElement>(
+        '[aria-label="图片生成模型"]',
+      )?.disabled,
+    ).toBe(false);
+    expect(
+      container.querySelector<HTMLButtonElement>(
+        '[aria-label="视频生成模型"]',
+      )?.disabled,
+    ).toBe(false);
+    expect(
+      container.querySelector<HTMLButtonElement>(
+        '[role="switch"][aria-label*="图片生成"]',
+      )?.dataset.busy,
+    ).toBe("true");
+    expect(
+      container.querySelector<HTMLButtonElement>(
+        '[role="switch"][aria-label*="视频生成"]',
+      )?.dataset.busy,
+    ).toBe("true");
+
+    await act(async () => {
+      resolveSave?.({
+        settings: {
+          configurations: [{ ...imageConfiguration, enabled: false }],
+        },
+        applyStatus: "applied",
+      });
+    });
+    await settle();
+  });
+
   it("routes an unconfigured account back to account setup", async () => {
     const onConfigureAccount = vi.fn();
     const runtimeClient = {
@@ -262,7 +389,6 @@ describe("AgentPlanMediaToolsPanel", () => {
           account={{ ...account, hasKey: false, maskedKey: undefined }}
           runtimeClient={runtimeClient}
           onConfigureAccount={onConfigureAccount}
-          onSettingsChanged={vi.fn()}
           onToast={vi.fn()}
         />,
       );

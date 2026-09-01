@@ -14,11 +14,12 @@ import (
 // controlHandlers serves bridge-only control routes protected by the control
 // token middleware.
 type controlHandlers struct {
-	identity     *runtime.RuntimeIdentity
-	leaseManager *runtime.LeaseManager
-	runService   *runtime.RunService
-	networkRoute *networkroute.Manager
-	mcpManager   *mcpclient.Manager
+	identity                 *runtime.RuntimeIdentity
+	leaseManager             *runtime.LeaseManager
+	runService               *runtime.RunService
+	networkRoute             *networkroute.Manager
+	mcpManager               *mcpclient.Manager
+	reloadAgentPlanMediaTool func(capability string) error
 }
 
 func (h *controlHandlers) handleRuntimeIdentity(w http.ResponseWriter, r *http.Request) {
@@ -33,6 +34,36 @@ func (h *controlHandlers) handleRuntimeIdentity(w http.ResponseWriter, r *http.R
 		"base_url":         h.identity.BaseURL,
 		"started_at":       h.identity.StartedAt.Format(time.RFC3339Nano),
 	})
+}
+
+func (h *controlHandlers) handleReloadAgentPlanMediaTool(w http.ResponseWriter, r *http.Request) {
+	if h.reloadAgentPlanMediaTool == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "MEDIA_TOOL_RELOAD_UNAVAILABLE", "Agent Plan media tool reload is unavailable")
+		return
+	}
+	if h.runService != nil && h.runService.ActiveRunCount() > 0 {
+		writeErrorJSON(w, http.StatusConflict, "RUN_ACTIVE", "an active run blocks Agent Plan media tool reload")
+		return
+	}
+
+	var request struct {
+		Capability string `json:"capability"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	if request.Capability == "" {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", "capability is required")
+		return
+	}
+	if err := h.reloadAgentPlanMediaTool(request.Capability); err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "MEDIA_TOOL_RELOAD_FAILED", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "reloaded"})
 }
 
 func (h *controlHandlers) handleCreateLease(w http.ResponseWriter, r *http.Request) {

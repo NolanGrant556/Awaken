@@ -1818,7 +1818,7 @@ export type AgentPlanMediaToolSaveRequest = {
 
 export type AgentPlanMediaToolsSaveResult = {
   settings: AgentPlanMediaTools;
-  restartStatus: "restarted" | "restart_failed";
+  applyStatus: "applied" | "apply_failed";
   message?: string;
 };
 

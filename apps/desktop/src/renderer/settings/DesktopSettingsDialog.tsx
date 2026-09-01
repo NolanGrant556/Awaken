@@ -1722,7 +1722,6 @@ export function DesktopSettingsDialog({
                     setActiveModelView("connections");
                     if (provider) selectProvider(provider);
                   }}
-                  onSettingsChanged={loadModelSettings}
                   onToast={showToast}
                 />
               ) : null}

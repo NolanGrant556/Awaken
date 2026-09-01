@@ -135,13 +135,14 @@ func NewRouterWithScheduledTasks(runService *awruntime.RunService, infoProvider 
 // ControlConfig groups the runtime identity and lease manager used for bridge-only
 // control routes.
 type ControlConfig struct {
-	Identity          *awruntime.RuntimeIdentity
-	LeaseManager      *awruntime.LeaseManager
-	ACPSessionManager *awruntime.ACPSessionManager
-	ModelProfileStore ACPModelProfileStore
-	NetworkRoute      *networkroute.Manager
-	PluginAuth        *pluginauth.Service
-	ConnectorAuth     *connectorauth.Service
+	Identity                 *awruntime.RuntimeIdentity
+	LeaseManager             *awruntime.LeaseManager
+	ACPSessionManager        *awruntime.ACPSessionManager
+	ModelProfileStore        ACPModelProfileStore
+	NetworkRoute             *networkroute.Manager
+	ReloadAgentPlanMediaTool func(capability string) error
+	PluginAuth               *pluginauth.Service
+	ConnectorAuth            *connectorauth.Service
 }
 
 type ACPModelProfileStore interface {
@@ -384,11 +385,12 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	}
 	if cfg.control != nil && cfg.control.Identity != nil {
 		ctrl := controlHandlers{
-			identity:     cfg.control.Identity,
-			leaseManager: cfg.control.LeaseManager,
-			runService:   cfg.runService,
-			networkRoute: cfg.control.NetworkRoute,
-			mcpManager:   cfg.manager,
+			identity:                 cfg.control.Identity,
+			leaseManager:             cfg.control.LeaseManager,
+			runService:               cfg.runService,
+			networkRoute:             cfg.control.NetworkRoute,
+			mcpManager:               cfg.manager,
+			reloadAgentPlanMediaTool: cfg.control.ReloadAgentPlanMediaTool,
 		}
 		controlMux := http.NewServeMux()
 		controlMux.HandleFunc("GET /v1/control/runtime/identity", ctrl.handleRuntimeIdentity)
@@ -397,6 +399,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		controlMux.HandleFunc("DELETE /v1/control/leases/{lease_id}", ctrl.handleReleaseLease)
 		controlMux.HandleFunc("GET /v1/control/network-route", ctrl.handleGetNetworkRoute)
 		controlMux.HandleFunc("PUT /v1/control/network-route", ctrl.handleUpdateNetworkRoute)
+		controlMux.HandleFunc("POST /v1/control/agent-plan/media-tools/reload", ctrl.handleReloadAgentPlanMediaTool)
 		acpSessionCtrl := acpSessionControlHandlers{
 			runService:        cfg.runService,
 			acpSessionManager: cfg.control.ACPSessionManager,

@@ -2,11 +2,13 @@ package mediagenerate
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"awaken/src/modelprofile"
+	"awaken/src/tool"
 )
 
 const (
@@ -98,4 +100,34 @@ func loadRuntimeConfigurations() []runtimeConfiguration {
 		})
 	}
 	return result
+}
+
+// ReloadRuntimeTool refreshes exactly one media tool registration from the
+// persisted Agent Plan configuration. Existing runs keep their pinned runtime
+// instance; only snapshots created after this registry mutation observe the
+// new binding or removal.
+func ReloadRuntimeTool(capability string) error {
+	capability = strings.TrimSpace(capability)
+	toolName := ""
+	switch capability {
+	case "media.image.generate":
+		toolName = imageToolName
+	case "media.video.generate":
+		toolName = videoToolName
+	default:
+		return fmt.Errorf("unsupported Agent Plan media capability %q", capability)
+	}
+
+	for _, configuration := range loadRuntimeConfigurations() {
+		if configuration.Capability != capability {
+			continue
+		}
+		return tool.RegisterToolForceWithMode(
+			newMediaTool(configuration),
+			tool.DefinitionValidationStrictBuiltin,
+		)
+	}
+
+	tool.UnregisterTool(toolName)
+	return nil
 }

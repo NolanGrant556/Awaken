@@ -46,6 +46,36 @@ func TestNetworkRouteControlRequiresTokenAndHotUpdatesManager(t *testing.T) {
 	}
 }
 
+func TestAgentPlanMediaToolReloadControlRequiresTokenAndCallsHotReloader(t *testing.T) {
+	var reloadedCapability string
+	router := newRouterInternal(routerConfig{control: &ControlConfig{
+		Identity: &awruntime.RuntimeIdentity{ControlToken: "media-reload-token"},
+		ReloadAgentPlanMediaTool: func(capability string) error {
+			reloadedCapability = capability
+			return nil
+		},
+	}})
+	body := []byte(`{"capability":"media.image.generate"}`)
+
+	unauthorized := httptest.NewRequest(http.MethodPost, "/v1/control/agent-plan/media-tools/reload", bytes.NewReader(body))
+	unauthorizedResult := httptest.NewRecorder()
+	router.ServeHTTP(unauthorizedResult, unauthorized)
+	if unauthorizedResult.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized status = %d", unauthorizedResult.Code)
+	}
+
+	authorized := httptest.NewRequest(http.MethodPost, "/v1/control/agent-plan/media-tools/reload", bytes.NewReader(body))
+	authorized.Header.Set("Authorization", "Bearer media-reload-token")
+	authorizedResult := httptest.NewRecorder()
+	router.ServeHTTP(authorizedResult, authorized)
+	if authorizedResult.Code != http.StatusOK {
+		t.Fatalf("authorized status = %d body=%s", authorizedResult.Code, authorizedResult.Body.String())
+	}
+	if reloadedCapability != "media.image.generate" {
+		t.Fatalf("reloaded capability = %q", reloadedCapability)
+	}
+}
+
 func TestNetworkRouteControlRejectsUnknownFieldsAndCredentials(t *testing.T) {
 	manager := networkroute.NewFromEnvironment(nil)
 	handler := controlHandlers{networkRoute: manager}

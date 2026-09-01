@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RuntimeControlClient } from "./runtime-control.js";
 
 describe("RuntimeControlClient", () => {
@@ -38,6 +38,35 @@ describe("RuntimeControlClient", () => {
       expect(read).toBeUndefined();
     } finally {
       await rm(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("hot reloads one Agent Plan media capability through the control route", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const client = new RuntimeControlClient({
+        schema_version: 1,
+        runtime_identity: "packaged:abc",
+        instance_id: "core_test",
+        pid: 1,
+        owner_mode: "desktop",
+        base_url: "http://127.0.0.1:9999",
+        control_token: "secret",
+        started_at: new Date().toISOString(),
+      });
+
+      await client.reloadAgentPlanMediaTool("media.video.generate");
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://127.0.0.1:9999/v1/control/agent-plan/media-tools/reload",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ capability: "media.video.generate" }),
+        }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 });

@@ -109,14 +109,15 @@ func (m *Manager) SetRuntimeSecretResolver(resolver RuntimeSecretResolver) {
 
 // managedServer holds the per-server mutable state under the manager's lock.
 type managedServer struct {
-	name        string
-	scope       Scope
-	config      McpServerConfig
-	transport   TransportKind
-	state       ServerState
-	capability  *ServerCapability
-	errorReason string
-	lastConn    *time.Time
+	name           string
+	scope          Scope
+	sourceRevision string
+	config         McpServerConfig
+	transport      TransportKind
+	state          ServerState
+	capability     *ServerCapability
+	errorReason    string
+	lastConn       *time.Time
 
 	// seq records the order in which this server was added to the manager.
 	seq uint64
@@ -235,12 +236,13 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig, se
 	if kind == "" {
 		m.mu.Lock()
 		m.servers[scoped.Name] = &managedServer{
-			name:        scoped.Name,
-			scope:       scoped.Scope,
-			config:      scoped.Config,
-			state:       StateFailed,
-			errorReason: "invalid transport config",
-			seq:         seq,
+			name:           scoped.Name,
+			scope:          scoped.Scope,
+			sourceRevision: scoped.SourceRevision,
+			config:         scoped.Config,
+			state:          StateFailed,
+			errorReason:    "invalid transport config",
+			seq:            seq,
 		}
 		m.mu.Unlock()
 		m.logger.Warnf("mcp server %q has invalid transport, marking failed", scoped.Name)
@@ -249,12 +251,13 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig, se
 	if scoped.Config.Enabled != nil && !*scoped.Config.Enabled {
 		m.mu.Lock()
 		m.servers[scoped.Name] = &managedServer{
-			name:      scoped.Name,
-			scope:     scoped.Scope,
-			config:    scoped.Config,
-			transport: kind,
-			state:     StateDisabled,
-			seq:       seq,
+			name:           scoped.Name,
+			scope:          scoped.Scope,
+			sourceRevision: scoped.SourceRevision,
+			config:         scoped.Config,
+			transport:      kind,
+			state:          StateDisabled,
+			seq:            seq,
 		}
 		m.mu.Unlock()
 		m.logger.Debugf("mcp server %q restored in disabled state", scoped.Name)
@@ -263,13 +266,14 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig, se
 	if kind == TransportWS {
 		m.mu.Lock()
 		m.servers[scoped.Name] = &managedServer{
-			name:        scoped.Name,
-			scope:       scoped.Scope,
-			config:      scoped.Config,
-			transport:   kind,
-			state:       StateFailed,
-			errorReason: "ws transport not supported in v1",
-			seq:         seq,
+			name:           scoped.Name,
+			scope:          scoped.Scope,
+			sourceRevision: scoped.SourceRevision,
+			config:         scoped.Config,
+			transport:      kind,
+			state:          StateFailed,
+			errorReason:    "ws transport not supported in v1",
+			seq:            seq,
 		}
 		m.mu.Unlock()
 		m.logger.Warnf("mcp server %q uses unsupported ws transport, marking failed", scoped.Name)
@@ -277,12 +281,13 @@ func (m *Manager) startOne(ctx context.Context, scoped ScopedMcpServerConfig, se
 	}
 
 	server := &managedServer{
-		name:      scoped.Name,
-		scope:     scoped.Scope,
-		config:    scoped.Config,
-		transport: kind,
-		state:     StatePending,
-		seq:       seq,
+		name:           scoped.Name,
+		scope:          scoped.Scope,
+		sourceRevision: scoped.SourceRevision,
+		config:         scoped.Config,
+		transport:      kind,
+		state:          StatePending,
+		seq:            seq,
 	}
 	m.mu.Lock()
 	m.servers[scoped.Name] = server
@@ -628,7 +633,7 @@ func (m *Manager) ForceReconnect(ctx context.Context, name string) error {
 		m.mu.RUnlock()
 		return fmt.Errorf("%w: %q", ErrServerNotFound, name)
 	}
-	scoped := ScopedMcpServerConfig{Name: name, Scope: server.scope, Config: server.config}
+	scoped := ScopedMcpServerConfig{Name: name, Scope: server.scope, SourceRevision: server.sourceRevision, Config: server.config}
 	m.mu.RUnlock()
 	return m.RestartWithConfig(ctx, scoped)
 }
@@ -700,19 +705,19 @@ func (m *Manager) RestartWithConfig(ctx context.Context, scoped ScopedMcpServerC
 	return nil
 }
 
-// ApplyConfig starts or restarts a server only when its effective scope or
-// configuration changed. Runtime refreshers use this instead of
-// RestartWithConfig so an unrelated catalog mutation cannot interrupt an
-// already-connected server.
+// ApplyConfig starts or restarts a server only when its effective scope,
+// source revision, or configuration changed. Runtime refreshers use this
+// instead of RestartWithConfig so an unrelated catalog mutation cannot
+// interrupt an already-connected server.
 func (m *Manager) ApplyConfig(ctx context.Context, scoped ScopedMcpServerConfig) (bool, error) {
 	m.mu.RLock()
 	server, exists := m.servers[scoped.Name]
-	unchanged := exists && server.scope == scoped.Scope && reflect.DeepEqual(server.config, scoped.Config)
+	unchanged := exists && server.scope == scoped.Scope && server.sourceRevision == scoped.SourceRevision && reflect.DeepEqual(server.config, scoped.Config)
 	m.mu.RUnlock()
 	if unchanged {
 		return false, nil
 	}
-	m.logger.Debugf("mcp server %q scope/config changed; rebuilding", scoped.Name)
+	m.logger.Debugf("mcp server %q scope/source/config changed; rebuilding", scoped.Name)
 	return true, m.RestartWithConfig(ctx, scoped)
 }
 

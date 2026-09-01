@@ -59,9 +59,14 @@ type RuntimeSecretBinding struct {
 
 // ScopedMcpServerConfig pairs a server config with the scope it came from.
 type ScopedMcpServerConfig struct {
-	Name   string
-	Scope  Scope
-	Config McpServerConfig
+	Name  string
+	Scope Scope
+	// SourceRevision identifies runtime-affecting source material that is not
+	// represented in Config. Plugin projections use the package digest so a
+	// same-path binary replacement rebuilds the server, while unrelated catalog
+	// mutations with the same package digest preserve the live session.
+	SourceRevision string
+	Config         McpServerConfig
 }
 
 // StdioTransportConfig describes a child-process MCP server.

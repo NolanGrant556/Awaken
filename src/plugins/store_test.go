@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -94,6 +95,56 @@ func writeBundledExecutablePluginFixture(t *testing.T, root, name string) string
 		t.Fatal(err)
 	}
 	return command
+}
+
+func TestSetupConfigurationProcessEnvProjectsIntoPluginMCPConfig(t *testing.T) {
+	store := testStore(t)
+	root := t.TempDir()
+	writePluginFixture(t, root, "setup-config-env", true)
+	if err := os.MkdirAll(filepath.Join(root, ".awaken"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	setup := `{
+		"version":1,
+		"requirements":[{
+			"id":"api-base",
+			"kind":"configuration",
+			"required":true,
+			"componentIds":["mcp_server/mcp.json#local"],
+			"field":{"key":"API_BASE","type":"string","required":true},
+			"bindings":[{"componentId":"mcp_server/mcp.json#local","target":"process_env","name":"API_BASE"}]
+		}]
+	}`
+	if err := os.WriteFile(filepath.Join(root, ".awaken", "setup.json"), []byte(setup), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	validated, err := store.Validate(context.Background(), Source{Kind: SourceLocalPath, Path: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: root}, ExpectedDigest: validated.Digest}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateConfiguration("setup-config-env", map[string]any{"API_BASE": "https://erp.example.test/backend/project"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	plugin, err := store.Get("setup-config-env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plugin.ConfigurationState != "ready" || len(plugin.MCPServers) != 1 || plugin.MCPServers[0].Config.Stdio == nil {
+		t.Fatalf("plugin state=%+v servers=%+v", plugin.ConfigurationState, plugin.MCPServers)
+	}
+	if got := plugin.MCPServers[0].Config.Stdio.Env["API_BASE"]; got != "https://erp.example.test/backend/project" {
+		t.Fatalf("setup configuration process_env=%q", got)
+	}
+	_, summary, err := store.SetupItems("setup-config-env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Ready != 1 || summary.Total != 1 {
+		t.Fatalf("setup summary=%+v; ready must agree with runtime env projection", summary)
+	}
 }
 
 func TestNewStoreRequiresAwakenHome(t *testing.T) {
@@ -704,6 +755,35 @@ func TestReplaceUsesTrashAndKeepsData(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(store.packagesRoot, "sample", "extra.txt")); err != nil {
 		t.Fatalf("new file missing: %v", err)
+	}
+}
+
+func TestPluginMCPSourceRevisionChangesOnPackageReplace(t *testing.T) {
+	store := testStore(t)
+	src := t.TempDir()
+	writePluginFixture(t, src, "runtime-revision", true)
+	installed, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := store.PluginMCPServers()
+	if len(before) != 1 || before[0].SourceRevision == "" || before[0].SourceRevision != installed.Plugin.Digest {
+		t.Fatalf("initial runtime projection=%+v digest=%q", before, installed.Plugin.Digest)
+	}
+
+	if err := os.WriteFile(filepath.Join(src, "runtime-v2.txt"), []byte("replacement"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := store.Install(context.Background(), InstallRequest{Source: Source{Kind: SourceLocalPath, Path: src}, Replace: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := store.PluginMCPServers()
+	if len(after) != 1 || after[0].SourceRevision != replaced.Plugin.Digest || after[0].SourceRevision == before[0].SourceRevision {
+		t.Fatalf("replacement runtime projection=%+v digest=%q", after, replaced.Plugin.Digest)
+	}
+	if !reflect.DeepEqual(before[0].Config, after[0].Config) {
+		t.Fatalf("package-only replacement unexpectedly changed MCP config: before=%+v after=%+v", before[0].Config, after[0].Config)
 	}
 }
 

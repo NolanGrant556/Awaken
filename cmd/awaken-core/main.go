@@ -49,6 +49,7 @@ import (
 	configureacprunner "awaken/src/tools/configure_acp_runner"
 	configurehook "awaken/src/tools/configure_hook"
 	delegateexternalagent "awaken/src/tools/delegate_external_agent"
+	mediagenerate "awaken/src/tools/media_generate"
 	plugintool "awaken/src/tools/plugin"
 )
 
@@ -566,13 +567,14 @@ func main() {
 		}
 		acpSessionManager = runtime.NewACPSessionManager(runService, runService.ProjectService())
 		control = &server.ControlConfig{
-			Identity:          runtimeIdentity,
-			LeaseManager:      leaseManager,
-			ACPSessionManager: acpSessionManager,
-			ModelProfileStore: modelprofile.NewUserStore(desktopdata.AwakenHomeRoot()),
-			NetworkRoute:      routeManager,
-			PluginAuth:        pluginAuth,
-			ConnectorAuth:     connectorAuth,
+			Identity:                 runtimeIdentity,
+			LeaseManager:             leaseManager,
+			ACPSessionManager:        acpSessionManager,
+			ModelProfileStore:        modelprofile.NewUserStore(desktopdata.AwakenHomeRoot()),
+			NetworkRoute:             routeManager,
+			ReloadAgentPlanMediaTool: mediagenerate.ReloadRuntimeTool,
+			PluginAuth:               pluginAuth,
+			ConnectorAuth:            connectorAuth,
 		}
 	}
 

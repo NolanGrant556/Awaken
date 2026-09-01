@@ -2801,26 +2801,22 @@ ipcMain.handle("awaken:get-agent-plan-media-tools", async () => {
 });
 
 async function mutateAgentPlanMediaTools(
+  capability: AgentPlanMediaCapability,
   operation: () => Promise<AgentPlanMediaToolsWire>,
 ): Promise<AgentPlanMediaToolsSaveResult> {
   if (!supervisor) throw new Error("Core supervisor unavailable");
   await ensureNoActiveRunsForSettingsChange();
   const settings = normalizeAgentPlanMediaTools(await operation());
   try {
-    const status = await supervisor.restart();
-    if (status.status !== "running" || !status.runtimeBaseUrl) {
-      return {
-        settings,
-        restartStatus: "restart_failed",
-        message: "生成工具配置已保存，但 Core 重启失败。请稍后重试重启。",
-      };
-    }
-    return { settings, restartStatus: "restarted" };
+    const client = supervisor.getControlClient();
+    if (!client) throw new Error("Core control client unavailable");
+    await client.reloadAgentPlanMediaTool(capability);
+    return { settings, applyStatus: "applied" };
   } catch {
     return {
       settings,
-      restartStatus: "restart_failed",
-      message: "生成工具配置已保存，但 Core 重启失败。请稍后重试重启。",
+      applyStatus: "apply_failed",
+      message: "生成工具配置已保存，但运行时刷新失败。请重启 Awaken 后再使用该工具。",
     };
   }
 }
@@ -2829,7 +2825,7 @@ ipcMain.handle(
   "awaken:save-agent-plan-media-tool",
   async (_event, request: AgentPlanMediaToolSaveRequest) => {
     if (!modelProfileStore) throw new Error("Model profile store unavailable");
-    return mutateAgentPlanMediaTools(() =>
+    return mutateAgentPlanMediaTools(request.capability, () =>
       modelProfileStore!.saveAgentPlanMediaTool(request),
     );
   },
@@ -2839,7 +2835,7 @@ ipcMain.handle(
   "awaken:delete-agent-plan-media-tool",
   async (_event, capability: AgentPlanMediaCapability) => {
     if (!modelProfileStore) throw new Error("Model profile store unavailable");
-    return mutateAgentPlanMediaTools(() =>
+    return mutateAgentPlanMediaTools(capability, () =>
       modelProfileStore!.deleteAgentPlanMediaTool(capability),
     );
   },

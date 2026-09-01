@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
@@ -794,5 +795,62 @@ func TestLoadRuntimeConfigurationsRequiresEnabledTypedConfigAndCredential(t *tes
 	configurations := loadRuntimeConfigurations()
 	if len(configurations) != 1 || configurations[0].ModelKind != "image" || configurations[0].CredentialRevision != 4 {
 		t.Fatalf("unexpected runtime configurations: %+v", configurations)
+	}
+}
+
+func TestReloadRuntimeToolHotAppliesEnabledStateAndPreservesPinnedSnapshot(t *testing.T) {
+	originalImage, originalImageErr := tool.GetRegisteredTool(imageToolName)
+	t.Cleanup(func() {
+		if originalImageErr == nil {
+			if err := tool.RegisterToolForceWithMode(originalImage.Runtime, tool.DefinitionValidationStrictBuiltin); err != nil {
+				t.Fatalf("restore original image tool: %v", err)
+			}
+			return
+		}
+		tool.UnregisterTool(imageToolName)
+	})
+
+	root := t.TempDir()
+	t.Setenv("AWAKEN_HOME", root)
+	if err := os.MkdirAll(filepath.Join(root, "config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	account := `{"version":2,"accountId":"volcengine-agent-plan-default","credentialRevision":4,"catalog":[{"id":"doubao-seedream-test","kind":"image"}]}`
+	if err := os.WriteFile(filepath.Join(root, "config", "agent-plan-account.json"), []byte(account), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("AWAKEN_AGENT_PLAN_API_KEY_volcengine-agent-plan-default=secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mediaPath := filepath.Join(root, "config", "agent-plan-media-tools.json")
+	enabled := `{"version":1,"configurations":[{"id":"image","providerId":"volcengine-agent-plan","accountId":"volcengine-agent-plan-default","capability":"media.image.generate","modelId":"doubao-seedream-test","modelKind":"image","enabled":true,"configurationRevision":2}]}`
+	if err := os.WriteFile(mediaPath, []byte(enabled), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReloadRuntimeTool("media.image.generate"); err != nil {
+		t.Fatalf("enable image tool: %v", err)
+	}
+	pinned := tool.NewRunToolAvailabilitySnapshot(tool.ExecutionEnvironmentSnapshot{SnapshotID: "media-enabled"})
+	if _, err := pinned.Lookup(imageToolName); err != nil {
+		t.Fatalf("enabled image tool missing from pinned snapshot: %v", err)
+	}
+
+	disabled := strings.Replace(enabled, `"enabled":true`, `"enabled":false`, 1)
+	if err := os.WriteFile(mediaPath, []byte(disabled), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReloadRuntimeTool("media.image.generate"); err != nil {
+		t.Fatalf("disable image tool: %v", err)
+	}
+	if _, err := tool.GetTool(imageToolName); !errors.Is(err, tool.ErrToolNotFound) {
+		t.Fatalf("disabled image tool remained in live registry: %v", err)
+	}
+	if _, err := pinned.Lookup(imageToolName); err != nil {
+		t.Fatalf("live reload mutated the existing run snapshot: %v", err)
+	}
+	fresh := tool.NewRunToolAvailabilitySnapshot(tool.ExecutionEnvironmentSnapshot{SnapshotID: "media-disabled"})
+	if _, err := fresh.Lookup(imageToolName); !errors.Is(err, tool.ErrToolNotFound) {
+		t.Fatalf("disabled image tool entered a new run snapshot: %v", err)
 	}
 }

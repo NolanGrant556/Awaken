@@ -40,7 +40,6 @@ type Props = {
   account: AgentPlanAccount | null;
   runtimeClient: RuntimeClient;
   onConfigureAccount: () => void;
-  onSettingsChanged: () => Promise<void> | void;
   onToast: (message: string) => void;
 };
 
@@ -48,7 +47,6 @@ export function AgentPlanMediaToolsPanel({
   account,
   runtimeClient,
   onConfigureAccount,
-  onSettingsChanged,
   onToast,
 }: Props) {
   const [settings, setSettings] = useState<AgentPlanMediaTools>({
@@ -147,7 +145,9 @@ export function AgentPlanMediaToolsPanel({
         enabled: existing?.enabled ?? true,
       });
       setSettings(result.settings);
-      await onSettingsChanged();
+      if (result.applyStatus !== "applied") {
+        throw new Error(result.message ?? "生成工具运行时刷新失败");
+      }
       onToast(`${title}工具已保存`);
     });
   }
@@ -163,7 +163,9 @@ export function AgentPlanMediaToolsPanel({
         enabled,
       });
       setSettings(result.settings);
-      await onSettingsChanged();
+      if (result.applyStatus !== "applied") {
+        throw new Error(result.message ?? "生成工具运行时刷新失败");
+      }
       onToast(enabled ? "工具已启用" : "工具已停用");
     });
   }
@@ -182,7 +184,9 @@ export function AgentPlanMediaToolsPanel({
         ...current,
         [configuration.capability]: "",
       }));
-      await onSettingsChanged();
+      if (result.applyStatus !== "applied") {
+        throw new Error(result.message ?? "生成工具运行时刷新失败");
+      }
       onToast(`${title}工具已删除`);
     });
   }
@@ -213,6 +217,7 @@ export function AgentPlanMediaToolsPanel({
           const configuration = configuredByCapability.get(option.capability);
           const models = modelsByKind[option.modelKind];
           const actionBusy = busyAction?.startsWith(option.capability) === true;
+          const toggleBusy = busyAction?.endsWith(":toggle") === true;
           const saveBusy = busyAction === `${option.capability}:save`;
           return (
             <article
@@ -232,9 +237,10 @@ export function AgentPlanMediaToolsPanel({
                     variant="control"
                     label={`${option.title}启用状态`}
                     checked={configuration.enabled}
-                    busy={actionBusy}
+                    busy={actionBusy || toggleBusy}
                     disabled={
-                      !account?.hasKey || (busyAction !== null && !actionBusy)
+                      !account?.hasKey ||
+                      (busyAction !== null && !actionBusy && !toggleBusy)
                     }
                     onCheckedChange={(enabled) =>
                       void toggleConfiguration(configuration, enabled)
@@ -251,7 +257,7 @@ export function AgentPlanMediaToolsPanel({
                     disabled={
                       !account?.hasKey ||
                       models.length === 0 ||
-                      busyAction !== null
+                      (busyAction !== null && !toggleBusy)
                     }
                     ariaLabel={`${option.title}模型`}
                     placeholder={

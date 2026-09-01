@@ -1,5 +1,5 @@
 import "./AwakenTooltip.css";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   autoUpdate,
   flip,
@@ -33,6 +33,12 @@ export function AwakenTooltip({
 }: AwakenTooltipProps) {
   const [open, setOpen] = useState(false);
   const isOpen = open && !disabled;
+
+  useEffect(() => {
+    if (disabled) {
+      setOpen(false);
+    }
+  }, [disabled]);
 
   const { refs, floatingStyles, context } = useFloating({
     open: isOpen,

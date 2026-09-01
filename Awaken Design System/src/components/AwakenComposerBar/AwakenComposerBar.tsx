@@ -331,6 +331,7 @@ function ComposerContextUsageMeter({
 }) {
   const [suppressTooltip, setSuppressTooltip] = useState(false);
   const panelWasOpenRef = useRef(false);
+  const pointerInsideRef = useRef(false);
 
   useEffect(() => {
     if (item.ariaExpanded) {
@@ -339,7 +340,8 @@ function ComposerContextUsageMeter({
       return;
     }
     if (panelWasOpenRef.current) {
-      setSuppressTooltip(true);
+      panelWasOpenRef.current = false;
+      setSuppressTooltip(pointerInsideRef.current);
     }
   }, [item.ariaExpanded]);
 
@@ -356,7 +358,11 @@ function ComposerContextUsageMeter({
   return (
     <span
       className="composer-bar-meta-meter-anchor"
+      onPointerEnter={() => {
+        pointerInsideRef.current = true;
+      }}
       onPointerLeave={() => {
+        pointerInsideRef.current = false;
         if (!item.ariaExpanded) {
           panelWasOpenRef.current = false;
           setSuppressTooltip(false);

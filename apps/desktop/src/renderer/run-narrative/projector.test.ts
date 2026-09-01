@@ -62,6 +62,22 @@ function runStatusChanged(
 }
 
 describe("projectAguiEventToNarrative", () => {
+  it("hides internal compaction diagnostics from narrative answers", () => {
+    const state = projectAguiEventToNarrative(
+      createInitialRunNarrativeState(),
+      runError(
+        "",
+        "LLM stream call failed: COMPACT_TARGET_UNACHIEVABLE: projected=13745 target=3200 mandatory_floor=13065",
+      ),
+    );
+    const answer = state.committedItems.find((item) => item.kind === "answer");
+    expect(answer).toMatchObject({
+      kind: "answer",
+      markdown: "本次任务未能继续，请重试。",
+      status: "error",
+    });
+  });
+
   it("settles a cancelled user question without presenting a fabricated answer", () => {
     let state = projectAguiEventToNarrative(createInitialRunNarrativeState(), {
       type: "AWAKEN_USER_QUESTION_REQUESTED",

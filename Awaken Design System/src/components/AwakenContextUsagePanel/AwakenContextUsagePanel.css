@@ -211,33 +211,6 @@
   padding: 0 0 var(--aw-space-5);
 }
 
-.aw-context-usage-panel__compact-diagnostics {
-  padding: var(--aw-space-5) 0;
-  border-top: 1px solid var(--aw-border-light);
-}
-
-.aw-context-usage-panel__compact-diagnostics h3 {
-  margin: 0 0 var(--aw-space-3);
-  color: var(--aw-text-primary);
-  font-size: var(--aw-font-size-sm);
-  font-weight: var(--aw-font-weight-semibold);
-  line-height: var(--aw-line-height-base);
-}
-
-.aw-context-usage-panel__compact-diagnostics dl {
-  display: grid;
-  gap: var(--aw-space-3);
-  margin: 0;
-}
-
-.aw-context-usage-panel__diagnostic-code {
-  max-width: 360px;
-  overflow-wrap: anywhere;
-  color: var(--aw-text-secondary) !important;
-  font-family: var(--aw-font-mono);
-  text-align: right;
-}
-
 .aw-context-usage-panel__usage-details dl {
   display: grid;
   gap: var(--aw-space-3);

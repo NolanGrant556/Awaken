@@ -36,6 +36,99 @@ func TestPrepareOpenAIResponsesRequestIsStatelessAndProtocolSpecific(t *testing.
 	}
 }
 
+func TestPrepareOpenAIResponsesRequestMarksHistoricalOutputItemsCompleted(t *testing.T) {
+	prepared, err := PrepareRequest(Config{
+		APIKey: "test", BaseURL: "https://ark.cn-beijing.volces.com/api/v3",
+		Model: "doubao-seed-2-1-pro-260628", ProviderID: "doubao", Protocol: ProtocolOpenAIResponses,
+	}, Request{Messages: []convcontext.Message{
+		{Role: convcontext.RoleUser, Content: "first"},
+		{
+			Role: convcontext.RoleAssistant, Content: "checking",
+			ToolCalls: []convcontext.ToolCall{{
+				ID: "call_1", Type: "function",
+				Function: convcontext.FunctionCall{Name: "Read", Arguments: `{"file_path":"README.md"}`},
+			}},
+		},
+		{Role: convcontext.RoleTool, ToolCallID: "call_1", Name: "Read", Content: "done"},
+		{Role: convcontext.RoleUser, Content: "second"},
+	}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Input []map[string]any `json:"input"`
+	}
+	if err := json.Unmarshal(prepared.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Input) != 5 {
+		t.Fatalf("expected five Responses input items, got %d: %s", len(body.Input), prepared.Body)
+	}
+	if body.Input[0]["type"] != "message" || body.Input[0]["role"] != "user" {
+		t.Fatalf("user history must be an explicit input message: %#v", body.Input[0])
+	}
+	if _, exists := body.Input[0]["status"]; exists {
+		t.Fatalf("user input message must not invent output status: %#v", body.Input[0])
+	}
+	if body.Input[1]["type"] != "message" || body.Input[1]["role"] != "assistant" || body.Input[1]["status"] != "completed" {
+		t.Fatalf("assistant history must be a completed output message: %#v", body.Input[1])
+	}
+	if body.Input[2]["type"] != "function_call" || body.Input[2]["status"] != "completed" {
+		t.Fatalf("historical function call must be completed: %#v", body.Input[2])
+	}
+	if body.Input[3]["type"] != "function_call_output" {
+		t.Fatalf("tool result must remain a function call output: %#v", body.Input[3])
+	}
+	if _, exists := body.Input[3]["status"]; exists {
+		t.Fatalf("function call output must not invent status: %#v", body.Input[3])
+	}
+	if body.Input[4]["type"] != "message" || body.Input[4]["role"] != "user" {
+		t.Fatalf("current user turn must be an explicit input message: %#v", body.Input[4])
+	}
+}
+
+func TestPrepareOpenAIResponsesRequestKeepsCompletedHistoryAcrossPurposes(t *testing.T) {
+	purposes := []RequestPurpose{
+		RequestPurposeAgentTurn,
+		RequestPurposeSubagent,
+		RequestPurposeScheduledTask,
+		RequestPurposeThreadTitle,
+		RequestPurposeCompactSummary,
+		RequestPurposeMemoryRecall,
+		RequestPurposeMemoryMaintenance,
+		RequestPurposeConnectionTest,
+		RequestPurposeHookPrompt,
+		RequestPurposeHookAgent,
+	}
+	for _, purpose := range purposes {
+		t.Run(string(purpose), func(t *testing.T) {
+			prepared, err := PrepareRequest(Config{
+				APIKey: "test", BaseURL: "https://ark.cn-beijing.volces.com/api/v3",
+				Model: "doubao-seed-2-1-pro-260628", ProviderID: "doubao", Protocol: ProtocolOpenAIResponses,
+			}, Request{
+				Purpose: purpose,
+				Messages: []convcontext.Message{
+					{Role: convcontext.RoleUser, Content: "first"},
+					{Role: convcontext.RoleAssistant, Content: "reply"},
+					{Role: convcontext.RoleUser, Content: "second"},
+				},
+			}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var body struct {
+				Input []map[string]any `json:"input"`
+			}
+			if err := json.Unmarshal(prepared.Body, &body); err != nil {
+				t.Fatal(err)
+			}
+			if len(body.Input) != 3 || body.Input[1]["type"] != "message" || body.Input[1]["status"] != "completed" {
+				t.Fatalf("purpose %s lost completed assistant history: %s", purpose, prepared.Body)
+			}
+		})
+	}
+}
+
 func TestPrepareDeepSeekResponsesAuxiliaryRequestDisablesReasoning(t *testing.T) {
 	prepared, err := PrepareRequest(Config{
 		APIKey: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro",

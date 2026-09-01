@@ -1493,9 +1493,6 @@ type RuntimeContextWindow = ReturnType<
 type RuntimeModelUsage = NonNullable<
   NonNullable<RuntimeContextWindow>["latestModelUsage"]
 >;
-type RuntimeCompact = ReturnType<
-  typeof createInitialRuntimeState
->["inspectorSummary"]["compact"];
 
 type RuntimeModelIdentity = {
   id?: string;
@@ -1771,7 +1768,6 @@ function reconcileContributionTokens(
 export function contextUsagePanelData(
   contextWindow: RuntimeContextWindow,
   currentModel?: RuntimeModelIdentity,
-  compact?: RuntimeCompact,
 ): Omit<AwakenContextUsagePanelProps, "id" | "onClose"> | undefined {
   if (!contextWindow) {
     return undefined;
@@ -1864,31 +1860,6 @@ export function contextUsagePanelData(
       contextWindow.autoCompactThreshold ??
       0,
     contributions,
-    compactDiagnostics: compact
-      ? {
-          status: compact.status,
-          targetTokens: compact.compactTarget,
-          preCompactTokens: compact.preCompactEstimatedTokens,
-          postCompactTokens:
-            compact.conservativeProjectedTokens ??
-            compact.postCompactEstimatedTokens,
-          mandatoryFloorTokens: compact.mandatoryFloorTokens,
-          contributionTokens: Object.entries(compact.contributionTokens ?? {})
-            .filter(([, tokens]) => Number.isFinite(tokens) && tokens > 0)
-            .map(([id, tokens]) => ({
-              id,
-              label:
-                CONTEXT_PANEL_CONTRIBUTIONS.find((item) => item.id === id)
-                  ?.label ??
-                (id === "other" ? CONTEXT_PANEL_OTHER_CONTRIBUTION.label : id),
-              estimatedTokens: tokens,
-            })),
-          nativeAttempted: compact.nativeAttempted,
-          nativeUsed: compact.nativeUsed,
-          nativeReason: compact.nativeReason,
-          failureReason: compact.failureReason,
-        }
-      : null,
     // The usage-details section must share the exact compatibility decision
     // used for the current-total above. Rendering an identity/epoch-
     // incompatible record next to a local-estimate total would show a panel
@@ -1914,12 +1885,6 @@ export function contextUsagePanelData(
           totalTokens: contextWindow.latestModelUsage.totalTokens,
           calculatedCostUsd: contextWindow.latestModelUsage.calculatedCostUsd,
           currency: contextWindow.latestModelUsage.currency,
-          invalidationReason:
-            contextWindow.latestModelUsage.cacheMode &&
-              contextWindow.latestModelUsage.invalidationReason !==
-                "initial_baseline"
-              ? contextWindow.latestModelUsage.invalidationReason
-              : undefined,
           purpose: contextWindow.latestModelUsage.purpose,
           errorCode: contextWindow.latestModelUsage.errorCode,
         }
@@ -4668,7 +4633,6 @@ export function App() {
   const contextPanelData = contextUsagePanelData(
     runtimeState.inspectorSummary.contextWindow,
     selectedRuntimeModelIdentity,
-    runtimeState.inspectorSummary.compact,
   );
   const contextUsagePanelId = "awaken-context-usage-panel";
 

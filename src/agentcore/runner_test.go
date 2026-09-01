@@ -1183,6 +1183,52 @@ func TestLastAPIUsageTokensFallsBackToInputUsage(t *testing.T) {
 	}
 }
 
+func TestNewRunnerRestoresCompatibleContextWindowUsageAnchor(t *testing.T) {
+	cfg := AgentConfig{
+		ModelConfig: ModelConfig{
+			ProviderID: "doubao", ProfileID: "profile-a", CredentialRevision: 7,
+			Model: "ep-1", CapabilityModelID: "doubao-seed-2.1-pro", EndpointSelector: "ep-1",
+			ModelSelectorKind: "endpoint", Protocol: "openai_chat", ReasoningEffort: " MAX ",
+		},
+		RestoredContextWindowUsageAnchor: &ContextWindowUsageAnchor{
+			ProviderID: "doubao", ProfileID: "profile-a", CredentialRevision: 7,
+			ModelID: "ep-1", CapabilityModelID: "doubao-seed-2.1-pro", EndpointSelector: "ep-1",
+			ModelSelectorKind: "endpoint", ProtocolFamily: "openai_chat", ReasoningPolicy: "max",
+			UsageTokens: 96_000, SentEstimatedInputTokens: 74_000,
+		},
+	}
+
+	runner := NewRunner(cfg, convcontext.NewConversation(nil), NewRequestBuilder(cfg))
+	state := runner.contextGovernor.withRunState(ContextWindowState{})
+	if state.LastAPIUsageTokens != 96_000 || state.LastSentEstimatedInputTokens != 74_000 {
+		t.Fatalf("expected restored usage anchor in governor, got %+v", state)
+	}
+
+	cfg.RestoredContextWindowUsageAnchor.ReasoningPolicy = "high"
+	incompatible := NewRunner(cfg, convcontext.NewConversation(nil), NewRequestBuilder(cfg))
+	state = incompatible.contextGovernor.withRunState(ContextWindowState{})
+	if state.LastAPIUsageTokens != 0 || state.LastSentEstimatedInputTokens != 0 {
+		t.Fatalf("incompatible anchor must be ignored, got %+v", state)
+	}
+}
+
+func TestRunnerSyncsContextWindowUsageAnchorBackIntoConfig(t *testing.T) {
+	cfg := AgentConfig{
+		ModelConfig: ModelConfig{
+			Model: "test-model", ProviderID: "minimax", ProfileID: "profile-a",
+			CredentialRevision: 3, Protocol: "openai_chat", ReasoningEffort: "high",
+		},
+	}
+	runner := NewRunner(cfg, convcontext.NewConversation(nil), NewRequestBuilder(cfg))
+	runner.contextGovernor.lastAPIUsageTokens = 92_000
+	runner.contextGovernor.lastSentEstimatedInputTokens = 81_000
+	runner.syncRestoredContextWindowUsageAnchor()
+	anchor := runner.config.RestoredContextWindowUsageAnchor
+	if anchor == nil || anchor.UsageTokens != 92_000 || anchor.SentEstimatedInputTokens != 81_000 {
+		t.Fatalf("expected runner config to retain latest usage anchor, got %+v", anchor)
+	}
+}
+
 func TestRunEventEmitterCompactStructuredFields(t *testing.T) {
 	var gotEvents []AwakenEvent
 	emitter := newRunEventEmitter("thread-1", EventSinkFunc(func(event AwakenEvent) {
@@ -1553,6 +1599,50 @@ func TestRunnerPropagatesAuthSchemeInStream(t *testing.T) {
 
 	if got := capturedHeaders.Get("x-api-key"); got != "test-key" {
 		t.Fatalf("expected x-api-key 'test-key' in stream, got %q", got)
+	}
+}
+
+func TestAgentCarriesProviderUsageAnchorAcrossRuns(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeRunnerStreamEvent(t, w, map[string]interface{}{
+			"choices": []map[string]interface{}{{
+				"delta": map[string]interface{}{"content": "ok"},
+			}},
+		})
+		writeRunnerStreamEvent(t, w, map[string]interface{}{
+			"choices": []map[string]interface{}{},
+			"usage": map[string]interface{}{
+				"prompt_tokens":     1234,
+				"completion_tokens": 12,
+				"total_tokens":      1246,
+			},
+		})
+		writeRunnerStreamLines(t, w, []string{"data: [DONE]"})
+	}))
+	defer server.Close()
+
+	cfg := testAgentConfig(server.URL, 1)
+	cfg.ModelConfig.ProviderID = "minimax-token-plan"
+	cfg.ModelConfig.ProfileID = "profile-a"
+	cfg.ModelConfig.CredentialRevision = 1
+	cfg.ModelConfig.Protocol = "openai_chat"
+	cfg.ModelConfig.ModelSelectorKind = "model"
+	agent := NewAgent(cfg)
+	if _, err := agent.RunStreamWithEvents(context.Background(), "hi", nil); err != nil {
+		t.Fatalf("RunStreamWithEvents returned error: %v", err)
+	}
+
+	anchor := agent.GetConfig().RestoredContextWindowUsageAnchor
+	if anchor == nil {
+		t.Fatal("expected agent config to retain provider usage anchor for the next run")
+	}
+	if anchor.UsageTokens != 1246 || anchor.SentEstimatedInputTokens <= 0 {
+		t.Fatalf("unexpected provider usage anchor: %+v", anchor)
+	}
+	nextRunner := NewRunner(agent.GetConfig(), agent.GetConversation(), NewRequestBuilder(agent.GetConfig()))
+	state := nextRunner.contextGovernor.withRunState(ContextWindowState{})
+	if state.LastAPIUsageTokens != 1246 || state.LastSentEstimatedInputTokens != anchor.SentEstimatedInputTokens {
+		t.Fatalf("expected next run to restore provider usage anchor, got %+v", state)
 	}
 }
 

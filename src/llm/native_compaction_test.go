@@ -19,7 +19,11 @@ func TestPrepareNativeCompactionRequiresExactOfficialCapability(t *testing.T) {
 	}
 	request := Request{
 		NativeCompaction: true, Purpose: RequestPurposeNativeCompaction,
-		SystemPrompt: "system", Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: "hello"}},
+		SystemPrompt: "system", Messages: []convcontext.Message{
+			{Role: convcontext.RoleUser, Content: "hello"},
+			{Role: convcontext.RoleAssistant, Content: "reply"},
+			{Role: convcontext.RoleUser, Content: "continue"},
+		},
 	}
 	prepared, err := PrepareRequest(base, request, false)
 	if err != nil {
@@ -28,12 +32,20 @@ func TestPrepareNativeCompactionRequiresExactOfficialCapability(t *testing.T) {
 	if prepared.Operation != PreparedOperationNativeCompaction || prepared.Endpoint != "https://api.openai.com/v1/responses/compact" {
 		t.Fatalf("unexpected native route: %+v", prepared)
 	}
-	var body map[string]any
+	var body struct {
+		Model          string           `json:"model"`
+		Instructions   string           `json:"instructions"`
+		PromptCacheKey string           `json:"prompt_cache_key"`
+		Input          []map[string]any `json:"input"`
+	}
 	if err := json.Unmarshal(prepared.Body, &body); err != nil {
 		t.Fatal(err)
 	}
-	if body["model"] != "gpt-5.6-sol" || body["instructions"] != "system" || body["prompt_cache_key"] == "" {
+	if body.Model != "gpt-5.6-sol" || body.Instructions != "system" || body.PromptCacheKey == "" {
 		t.Fatalf("unexpected native body: %s", prepared.Body)
+	}
+	if len(body.Input) != 3 || body.Input[1]["type"] != "message" || body.Input[1]["status"] != "completed" {
+		t.Fatalf("native compaction lost completed assistant history: %s", prepared.Body)
 	}
 
 	tests := []Config{

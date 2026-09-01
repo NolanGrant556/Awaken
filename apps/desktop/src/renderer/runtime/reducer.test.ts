@@ -332,6 +332,22 @@ describe("runtime reducer cancel handling", () => {
     expect(errorStep?.description).toContain("Provider 请求失败：");
     expect(errorStep?.tag).toBe("PROVIDER_REQUEST_FAILED");
   });
+
+  it("RUN_ERROR hides internal compaction diagnostics from UI state", () => {
+    const state = dispatch([
+      runEvent({
+        type: "RUN_ERROR",
+        message:
+          "LLM stream call failed: COMPACT_TARGET_UNACHIEVABLE: projected=13745 target=3200 mandatory_floor=13065",
+      }),
+    ]);
+    expect(state.phase).toBe("error");
+    expect(state.errorMessage).toBe("本次任务未能继续，请重试。");
+    expect(state.errorMessage).not.toContain("COMPACT_TARGET_UNACHIEVABLE");
+    expect(state.steps.find((step) => step.id === "run-error")?.description).toBe(
+      "本次任务未能继续，请重试。",
+    );
+  });
 });
 
 describe("runtime reducer native subagent isolation", () => {
@@ -1831,11 +1847,9 @@ describe("runtime reducer run narrative projection", () => {
       terminalReason: "final_response",
     });
     expect(state.inspectorSummary.contextWindow).toMatchObject({
-      eventType: "AWAKEN_COMPACT_FINISHED",
-      estimatedTokens: 5200,
-      actualTokens: 4310,
+      eventType: "AWAKEN_CONTEXT_WARNING",
+      estimatedTokens: 9600,
       effectiveWindow: 12000,
-      estimatedDeltaTokens: -4800,
     });
     expect(state.inspectorSummary.compact).toMatchObject({
       status: "finished",
@@ -2018,10 +2032,9 @@ describe("runtime reducer run narrative projection", () => {
       fallbackState: "legacy",
     });
     expect(state.inspectorSummary.contextWindow).toMatchObject({
-      eventType: "AWAKEN_COMPACT_FINISHED",
-      estimatedTokens: 4800,
+      eventType: "AWAKEN_CONTEXT_WARNING",
+      estimatedTokens: 9600,
       effectiveWindow: 12000,
-      estimatedDeltaTokens: -4800,
     });
     expect(
       state.narrative.committedItems.find(
@@ -2035,6 +2048,419 @@ describe("runtime reducer run narrative projection", () => {
       boundaryId: "compact_legacy",
       postEstimate: 4800,
     });
+  });
+
+  it("keeps the last complete context snapshot visible while compaction starts or fails", () => {
+    const state = dispatch([
+      runEvent({
+        type: "AWAKEN_CONTEXT_SNAPSHOT",
+        seq: 1,
+        contextUsageSnapshot: {
+          schemaVersion: 4,
+          snapshotId: "ctx-before-compact",
+          estimatorId: "awaken_leaf_v4",
+          basis: "sent_request",
+          requestId: "req-before-compact",
+          modelWindowTokens: 256000,
+          outputReserveTokens: 16000,
+          effectiveInputWindowTokens: 240000,
+          estimatedInputTokens: 92000,
+          warningThresholdTokens: 204000,
+          autoCompactThresholdTokens: 216000,
+          compactTargetTokens: 72000,
+          generatedAt: "2026-08-31T00:00:00Z",
+          contributions: [
+            {
+              kind: "conversation",
+              estimatedTokens: 92000,
+              sourceCount: 20,
+            },
+          ],
+        },
+        modelUsage: {
+          schemaVersion: 1,
+          requestId: "req-before-compact",
+          purpose: "agent_turn",
+          inputTokens: 88400,
+          outputTokens: 2100,
+          totalTokens: 90500,
+          usageComplete: true,
+          latencyMs: 30,
+          status: "succeeded",
+          completedAt: "2026-08-31T00:00:01Z",
+        },
+      }),
+      runEvent({
+        type: "AWAKEN_COMPACT_STARTED",
+        seq: 2,
+        contextEstimatedTokens: 18100,
+        contextCompactMode: "auto",
+        contextCompactPreEstimateTokens: 92000,
+        message: "compact started: auto",
+      }),
+      runEvent({
+        type: "AWAKEN_COMPACT_FAILED",
+        seq: 3,
+        contextEstimatedTokens: 24000,
+        contextCompactMode: "auto",
+        compactFailureReason: "still_above_auto_threshold",
+        message: "compact failed: auto",
+      }),
+      runEvent({
+        type: "AWAKEN_CONTEXT_SNAPSHOT",
+        seq: 4,
+        contextUsageSnapshot: {
+          schemaVersion: 4,
+          snapshotId: "ctx-after-failed-compact",
+          estimatorId: "awaken_leaf_v4",
+          basis: "current_projection",
+          modelWindowTokens: 256000,
+          outputReserveTokens: 16000,
+          effectiveInputWindowTokens: 240000,
+          estimatedInputTokens: 24000,
+          warningThresholdTokens: 204000,
+          autoCompactThresholdTokens: 216000,
+          compactTargetTokens: 24000,
+          generatedAt: "2026-08-31T00:00:04Z",
+          contributions: [
+            {
+              kind: "conversation",
+              estimatedTokens: 24000,
+              sourceCount: 5,
+            },
+          ],
+        },
+      }),
+      runEvent({
+        type: "RUN_FINISHED",
+        seq: 5,
+        contextEstimatedTokens: 23000,
+        terminalReason: "completed",
+      }),
+    ]);
+
+    expect(state.inspectorSummary.contextWindow).toMatchObject({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      estimatedTokens: 92000,
+      snapshot: {
+        snapshotId: "ctx-before-compact",
+      },
+      latestModelUsage: {
+        requestId: "req-before-compact",
+        inputTokens: 88400,
+      },
+    });
+    expect(state.inspectorSummary.compact).toMatchObject({
+      status: "failed",
+      mode: "auto",
+      preCompactEstimatedTokens: 92000,
+      failureReason: "still_above_auto_threshold",
+    });
+  });
+
+  it("waits for a complete post-compact snapshot before replacing visible context usage", () => {
+    const beforePostSnapshot = dispatch([
+      runEvent({
+        type: "AWAKEN_CONTEXT_SNAPSHOT",
+        seq: 1,
+        contextUsageSnapshot: {
+          schemaVersion: 4,
+          snapshotId: "ctx-before-compact-finished",
+          estimatorId: "awaken_leaf_v4",
+          basis: "sent_request",
+          requestId: "req-before-compact-finished",
+          modelWindowTokens: 256000,
+          outputReserveTokens: 16000,
+          effectiveInputWindowTokens: 240000,
+          estimatedInputTokens: 92000,
+          warningThresholdTokens: 204000,
+          autoCompactThresholdTokens: 216000,
+          compactTargetTokens: 24000,
+          generatedAt: "2026-08-31T00:00:00Z",
+          contributions: [
+            {
+              kind: "conversation",
+              estimatedTokens: 92000,
+              sourceCount: 20,
+            },
+          ],
+        },
+      }),
+      runEvent({
+        type: "AWAKEN_COMPACT_STARTED",
+        seq: 2,
+        contextEstimatedTokens: 92000,
+        contextCompactMode: "auto",
+        contextCompactPreEstimateTokens: 92000,
+      }),
+      runEvent({
+        type: "AWAKEN_COMPACT_FINISHED",
+        seq: 3,
+        contextEstimatedTokens: 18000,
+        contextCompactMode: "auto",
+        contextCompactPreEstimateTokens: 92000,
+        contextCompactPostEstimateTokens: 18000,
+        contextCompactBoundaryId: "compact-atomic-refresh",
+      }),
+      runEvent({
+        type: "RUN_FINISHED",
+        seq: 4,
+        contextEstimatedTokens: 18000,
+        contextActualTokens: 17600,
+        terminalReason: "completed",
+      }),
+    ]);
+
+    expect(beforePostSnapshot.inspectorSummary.contextWindow).toMatchObject({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      estimatedTokens: 92000,
+      snapshot: { snapshotId: "ctx-before-compact-finished" },
+    });
+    expect(beforePostSnapshot.inspectorSummary.compact).toMatchObject({
+      status: "finished",
+      boundaryId: "compact-atomic-refresh",
+      postCompactEstimatedTokens: 18000,
+    });
+
+    const afterPostSnapshot = dispatch([
+      runEvent({
+        type: "AWAKEN_CONTEXT_SNAPSHOT",
+        seq: 1,
+        contextUsageSnapshot: {
+          schemaVersion: 4,
+          snapshotId: "ctx-before-compact-finished",
+          estimatorId: "awaken_leaf_v4",
+          basis: "sent_request",
+          requestId: "req-before-compact-finished",
+          modelWindowTokens: 256000,
+          outputReserveTokens: 16000,
+          effectiveInputWindowTokens: 240000,
+          estimatedInputTokens: 92000,
+          warningThresholdTokens: 204000,
+          autoCompactThresholdTokens: 216000,
+          compactTargetTokens: 24000,
+          generatedAt: "2026-08-31T00:00:00Z",
+          contributions: [
+            {
+              kind: "conversation",
+              estimatedTokens: 92000,
+              sourceCount: 20,
+            },
+          ],
+        },
+      }),
+      runEvent({
+        type: "AWAKEN_COMPACT_FINISHED",
+        seq: 2,
+        contextEstimatedTokens: 18000,
+        contextCompactMode: "auto",
+        contextCompactPostEstimateTokens: 18000,
+        contextCompactBoundaryId: "compact-atomic-refresh",
+      }),
+      runEvent({
+        type: "AWAKEN_CONTEXT_SNAPSHOT",
+        seq: 3,
+        contextUsageSnapshot: {
+          schemaVersion: 4,
+          snapshotId: "ctx-after-compact-finished",
+          estimatorId: "awaken_leaf_v4",
+          basis: "current_projection",
+          modelWindowTokens: 256000,
+          outputReserveTokens: 16000,
+          effectiveInputWindowTokens: 240000,
+          estimatedInputTokens: 18000,
+          warningThresholdTokens: 204000,
+          autoCompactThresholdTokens: 216000,
+          compactTargetTokens: 24000,
+          generatedAt: "2026-08-31T00:00:03Z",
+          contributions: [
+            {
+              kind: "conversation",
+              estimatedTokens: 18000,
+              sourceCount: 4,
+            },
+          ],
+        },
+      }),
+    ]);
+
+    expect(afterPostSnapshot.inspectorSummary.contextWindow).toMatchObject({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      estimatedTokens: 18000,
+      snapshot: { snapshotId: "ctx-after-compact-finished" },
+    });
+  });
+
+  it("reconstructs failed compact freezing from durable compact model usage", () => {
+    const state = dispatch([
+      runEvent({ type: "RUN_STARTED", seq: 1, runId: "run-before-failure" }),
+      runEvent({
+        type: "AWAKEN_CONTEXT_SNAPSHOT",
+        seq: 2,
+        contextUsageSnapshot: {
+          schemaVersion: 4,
+          snapshotId: "ctx-before-replayed-failure",
+          estimatorId: "awaken_leaf_v4",
+          basis: "sent_request",
+          modelWindowTokens: 267307,
+          outputReserveTokens: 0,
+          effectiveInputWindowTokens: 267307,
+          estimatedInputTokens: 147700,
+          warningThresholdTokens: 227210,
+          autoCompactThresholdTokens: 240576,
+          compactTargetTokens: 26730,
+          generatedAt: "2026-09-01T00:00:00Z",
+          contributions: [
+            {
+              kind: "conversation",
+              estimatedTokens: 130000,
+              sourceCount: 40,
+            },
+          ],
+        },
+      }),
+      runEvent({
+        type: "AWAKEN_MODEL_USAGE",
+        seq: 3,
+        modelUsage: {
+          schemaVersion: 1,
+          requestId: "req-agent-before-failure",
+          purpose: "agent_turn",
+          inputTokens: 193000,
+          outputTokens: 300,
+          totalTokens: 193300,
+          usageComplete: true,
+          latencyMs: 10,
+          status: "succeeded",
+          completedAt: "2026-09-01T00:00:01Z",
+        },
+      }),
+      runEvent({
+        type: "AWAKEN_MODEL_USAGE",
+        seq: 4,
+        modelUsage: {
+          schemaVersion: 1,
+          requestId: "req-compact-summary",
+          purpose: "compact_summary",
+          inputTokens: 17404,
+          outputTokens: 1000,
+          totalTokens: 18404,
+          usageComplete: true,
+          latencyMs: 10,
+          status: "succeeded",
+          completedAt: "2026-09-01T00:00:02Z",
+        },
+      }),
+      runEvent({
+        type: "AWAKEN_CONTEXT_SNAPSHOT",
+        seq: 5,
+        contextUsageSnapshot: {
+          schemaVersion: 4,
+          snapshotId: "ctx-after-replayed-failure",
+          estimatorId: "awaken_leaf_v4",
+          basis: "sent_request",
+          modelWindowTokens: 267307,
+          outputReserveTokens: 0,
+          effectiveInputWindowTokens: 267307,
+          estimatedInputTokens: 205802,
+          warningThresholdTokens: 227210,
+          autoCompactThresholdTokens: 240576,
+          compactTargetTokens: 26730,
+          generatedAt: "2026-09-01T00:00:03Z",
+          contributions: [
+            {
+              kind: "conversation",
+              estimatedTokens: 188000,
+              sourceCount: 48,
+            },
+          ],
+        },
+      }),
+      runEvent({
+        type: "RUN_ERROR",
+        seq: 6,
+        code: "PROVIDER_REQUEST_FAILED",
+        message: "compact continuation failed",
+      }),
+    ]);
+
+    expect(state.inspectorSummary.contextWindow).toMatchObject({
+      snapshot: { snapshotId: "ctx-before-replayed-failure" },
+      estimatedTokens: 147700,
+      latestModelUsage: {
+        requestId: "req-agent-before-failure",
+        inputTokens: 193000,
+      },
+    });
+    expect(
+      state.inspectorSummary.awaitingContextRefreshAfterCompact,
+    ).toBe(true);
+  });
+
+  it("accepts a hard-target post-compact snapshot during journal replay", () => {
+    const state = dispatch([
+      runEvent({ type: "RUN_STARTED", seq: 1, runId: "run-replay-success" }),
+      runEvent({
+        type: "AWAKEN_CONTEXT_SNAPSHOT",
+        seq: 2,
+        contextUsageSnapshot: {
+          schemaVersion: 4,
+          snapshotId: "ctx-before-replay-success",
+          estimatorId: "awaken_leaf_v4",
+          basis: "sent_request",
+          modelWindowTokens: 267307,
+          outputReserveTokens: 0,
+          effectiveInputWindowTokens: 267307,
+          estimatedInputTokens: 240000,
+          warningThresholdTokens: 227210,
+          autoCompactThresholdTokens: 240576,
+          compactTargetTokens: 26730,
+          generatedAt: "2026-09-01T00:00:00Z",
+        },
+      }),
+      runEvent({
+        type: "AWAKEN_MODEL_USAGE",
+        seq: 3,
+        modelUsage: {
+          schemaVersion: 1,
+          requestId: "req-replay-compact",
+          purpose: "compact_summary",
+          inputTokens: 17000,
+          outputTokens: 1000,
+          totalTokens: 18000,
+          usageComplete: true,
+          latencyMs: 10,
+          status: "succeeded",
+          completedAt: "2026-09-01T00:00:01Z",
+        },
+      }),
+      runEvent({
+        type: "AWAKEN_CONTEXT_SNAPSHOT",
+        seq: 4,
+        contextUsageSnapshot: {
+          schemaVersion: 4,
+          snapshotId: "ctx-after-replay-success",
+          estimatorId: "awaken_leaf_v4",
+          basis: "sent_request",
+          modelWindowTokens: 267307,
+          outputReserveTokens: 0,
+          effectiveInputWindowTokens: 267307,
+          estimatedInputTokens: 18872,
+          warningThresholdTokens: 227210,
+          autoCompactThresholdTokens: 240576,
+          compactTargetTokens: 26730,
+          generatedAt: "2026-09-01T00:00:02Z",
+        },
+      }),
+    ]);
+
+    expect(state.inspectorSummary.contextWindow).toMatchObject({
+      snapshot: { snapshotId: "ctx-after-replay-success" },
+      estimatedTokens: 18872,
+    });
+    expect(
+      state.inspectorSummary.awaitingContextRefreshAfterCompact,
+    ).toBe(false);
   });
 
   it("keeps unknown runtime events visible without failing projection", () => {

@@ -229,8 +229,23 @@ func TestConservativeProjectedTokensAnchorsProviderUsageToCurrentEstimate(t *tes
 	state.LastAPIUsageTokens = 20224
 	state.LastSentEstimatedInputTokens = 16501
 
-	if got := state.ConservativeProjectedTokens(); got != 18295 {
-		t.Fatalf("ConservativeProjectedTokens=%d, want 18295", got)
+	if got := state.ConservativeProjectedTokens(); got != 20224 {
+		t.Fatalf("ConservativeProjectedTokens=%d, want monotonic provider anchor 20224", got)
+	}
+}
+
+func TestConservativeProjectedTokensDoesNotTreatProjectionPhaseMismatchAsShrink(t *testing.T) {
+	state := testContextWindowState(146023)
+	state.AutoCompactThreshold = 240576
+	state.LastAPIUsageTokens = 254928
+	state.LastSentEstimatedInputTokens = 162363
+	state.EstimatedDeltaTokens = 143
+
+	if got := state.ConservativeProjectedTokens(); got != 255071 {
+		t.Fatalf("ConservativeProjectedTokens=%d, want provider anchor plus current delta 255071", got)
+	}
+	if !state.ShouldAutoCompactByActualUsage() {
+		t.Fatalf("expected phase-mismatched projection to trigger proactive compact: %+v", state)
 	}
 }
 

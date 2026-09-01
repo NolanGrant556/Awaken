@@ -37,6 +37,7 @@ import {
   type RunNarrativeState,
   type SubagentNarrativeTask,
 } from "../run-narrative";
+import { runtimeErrorMessageForDisplay } from "./error-display";
 
 export type RuntimePhase =
   | "idle"
@@ -254,6 +255,7 @@ export type InspectorSummary = {
   lastToolDecision?: ToolDecisionRecord;
   contextWindow?: ContextWindowRecord;
   compact?: CompactRecord;
+	awaitingContextRefreshAfterCompact?: boolean;
 	instructionSnapshot?: InstructionSnapshotSummary;
   terminalReason?: string;
   terminalMessage?: string;
@@ -1489,6 +1491,45 @@ function hasContextWindowPayload(event: AguiEvent): boolean {
   );
 }
 
+function hasCompleteContextUsageSnapshot(event: AguiEvent): boolean {
+  const snapshot = event.contextUsageSnapshot;
+  return Boolean(
+    snapshot &&
+      Number.isFinite(snapshot.schemaVersion) &&
+      snapshot.schemaVersion > 0 &&
+      typeof snapshot.snapshotId === "string" &&
+      snapshot.snapshotId.trim() !== "" &&
+      typeof snapshot.estimatorId === "string" &&
+      snapshot.estimatorId.trim() !== "" &&
+      typeof snapshot.generatedAt === "string" &&
+      snapshot.generatedAt.trim() !== "" &&
+      Number.isFinite(snapshot.modelWindowTokens) &&
+      Number.isFinite(snapshot.outputReserveTokens) &&
+      Number.isFinite(snapshot.effectiveInputWindowTokens) &&
+      Number.isFinite(snapshot.estimatedInputTokens) &&
+      Number.isFinite(snapshot.warningThresholdTokens) &&
+      Number.isFinite(snapshot.autoCompactThresholdTokens) &&
+      Number.isFinite(snapshot.compactTargetTokens),
+  );
+}
+
+function isVerifiedPostCompactSnapshot(event: AguiEvent): boolean {
+  const snapshot = event.contextUsageSnapshot;
+  return Boolean(
+    hasCompleteContextUsageSnapshot(event) &&
+      snapshot &&
+      snapshot.compactTargetTokens > 0 &&
+      snapshot.estimatedInputTokens <= snapshot.compactTargetTokens,
+  );
+}
+
+function isCompactionModelUsage(event: AguiEvent): boolean {
+  return (
+    event.modelUsage?.purpose === "compact_summary" ||
+    event.modelUsage?.purpose === "native_compaction"
+  );
+}
+
 function mergeContextWindowRecord(
   previous: ContextWindowRecord | undefined,
   event: AguiEvent,
@@ -2435,6 +2476,17 @@ export function reduceRuntimeState(
 
       switch (action.event.type) {
         case "RUN_STARTED":
+          if (
+            action.event.runId &&
+            nextState.runId &&
+            action.event.runId !== nextState.runId
+          ) {
+            nextState.inspectorSummary = {
+              ...nextState.inspectorSummary,
+              compact: undefined,
+              awaitingContextRefreshAfterCompact: false,
+            };
+          }
           nextState.phase = "running";
           nextState.timelineStatus = "running";
           nextState.runId = action.event.runId ?? nextState.runId;
@@ -2603,7 +2655,9 @@ export function reduceRuntimeState(
               : action.receivedAtMs);
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
-            contextWindow: hasContextWindowPayload(action.event)
+            contextWindow:
+              !nextState.inspectorSummary.awaitingContextRefreshAfterCompact &&
+              hasContextWindowPayload(action.event)
               ? mergeContextWindowRecord(
                   nextState.inspectorSummary.contextWindow,
                   action.event,
@@ -3008,12 +3062,30 @@ export function reduceRuntimeState(
           // the canonical TOOL_CALL_RESULT arrives.
           break;
         case "AWAKEN_CONTEXT_SNAPSHOT": {
+          const completeSnapshot = hasCompleteContextUsageSnapshot(
+            action.event,
+          );
+          const compactStatus = nextState.inspectorSummary.compact?.status;
+          const acceptsPostCompactSnapshot =
+            completeSnapshot &&
+            (compactStatus === "finished" ||
+              (compactStatus === undefined &&
+                isVerifiedPostCompactSnapshot(action.event)));
+          if (
+            nextState.inspectorSummary.awaitingContextRefreshAfterCompact &&
+            !acceptsPostCompactSnapshot
+          ) {
+            break;
+          }
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
             contextWindow: mergeContextWindowRecord(
               nextState.inspectorSummary.contextWindow,
               action.event,
             ),
+            awaitingContextRefreshAfterCompact: completeSnapshot
+              ? false
+              : nextState.inspectorSummary.awaitingContextRefreshAfterCompact,
           };
           break;
         }
@@ -3027,6 +3099,20 @@ export function reduceRuntimeState(
 			break;
 		}
         case "AWAKEN_MODEL_USAGE": {
+          if (isCompactionModelUsage(action.event)) {
+            nextState.inspectorSummary = {
+              ...nextState.inspectorSummary,
+              compact:
+                nextState.inspectorSummary.compact?.status === "started"
+                  ? nextState.inspectorSummary.compact
+                  : undefined,
+              awaitingContextRefreshAfterCompact: true,
+            };
+            break;
+          }
+          if (nextState.inspectorSummary.awaitingContextRefreshAfterCompact) {
+            break;
+          }
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
             contextWindow: mergeContextWindowRecord(
@@ -3039,14 +3125,16 @@ export function reduceRuntimeState(
         case "AWAKEN_CONTEXT_ESTIMATED":
         case "AWAKEN_CONTEXT_WARNING":
         case "AWAKEN_CONTEXT_BLOCKED": {
-          const contextWindow = mergeContextWindowRecord(
-            nextState.inspectorSummary.contextWindow,
-            action.event,
-          );
-          nextState.inspectorSummary = {
-            ...nextState.inspectorSummary,
-            contextWindow,
-          };
+          if (!nextState.inspectorSummary.awaitingContextRefreshAfterCompact) {
+            const contextWindow = mergeContextWindowRecord(
+              nextState.inspectorSummary.contextWindow,
+              action.event,
+            );
+            nextState.inspectorSummary = {
+              ...nextState.inspectorSummary,
+              contextWindow,
+            };
+          }
           records = upsertStep(records, "context-window", {
             title:
               action.event.type === "AWAKEN_CONTEXT_BLOCKED"
@@ -3073,8 +3161,8 @@ export function reduceRuntimeState(
           );
           nextState.inspectorSummary = {
             ...nextState.inspectorSummary,
-            contextWindow: compact,
             compact,
+            awaitingContextRefreshAfterCompact: true,
           };
           records = upsertStep(records, "compact", {
             title:
@@ -3595,19 +3683,10 @@ export function reduceRuntimeState(
             nextState.phase = "error";
             nextState.status = "error";
             nextState.timelineStatus = "error";
-            const rawMessage =
-              action.event.message || "Runtime returned an error";
-            let errorMessage = rawMessage;
-            let errorDescription = rawMessage;
-            if (action.event.code === "PROVIDER_AUTH_MISSING") {
-              errorMessage =
-                "API key 缺失，请在 Settings > Models 配置模型 API key";
-              errorDescription =
-                "API key 缺失，请在 Settings > Models 配置模型 API key";
-            } else if (action.event.code === "PROVIDER_REQUEST_FAILED") {
-              errorMessage = `Provider 请求失败：${rawMessage}`;
-              errorDescription = `Provider 请求失败：${rawMessage}`;
-            }
+            const errorMessage = runtimeErrorMessageForDisplay(
+              action.event.code,
+              action.event.message,
+            );
             nextState.errorMessage = errorMessage;
             nextState.userQuestions = [];
             nextState.externalInteractions = [];
@@ -3615,7 +3694,7 @@ export function reduceRuntimeState(
             nextState.computerHandoffs = [];
             records = upsertStep(records, "run-error", {
               title: "Run failed",
-              description: errorDescription,
+              description: errorMessage,
               status: "error",
               tag: action.event.code || "error",
             });

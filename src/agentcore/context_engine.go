@@ -96,6 +96,22 @@ func newContextGovernor(engine ContextEngine, rebuildRequest func() (LLMRequest,
 	}
 }
 
+func (g *contextGovernor) RestoreUsageAnchor(anchor *ContextWindowUsageAnchor, config ModelConfig) {
+	if g == nil || !ContextWindowUsageAnchorCompatibleWithModelConfig(anchor, config) {
+		return
+	}
+	g.lastAPIUsageTokens = anchor.UsageTokens
+	g.lastSentEstimatedInputTokens = anchor.SentEstimatedInputTokens
+	g.pendingSentEstimatedInputTokens = 0
+}
+
+func (g *contextGovernor) ExportUsageAnchor(config ModelConfig) *ContextWindowUsageAnchor {
+	if g == nil {
+		return nil
+	}
+	return ContextWindowUsageAnchorFromModelConfig(config, g.lastAPIUsageTokens, g.lastSentEstimatedInputTokens)
+}
+
 func (g *contextGovernor) PrepareRequest(ctx stdcontext.Context, llmReq LLMRequest, events contextWindowEventSink) (LLMRequest, error) {
 	llmReq = g.evaluateRequest(llmReq)
 	if events != nil {

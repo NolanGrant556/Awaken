@@ -1321,6 +1321,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				}
 				cfg.ActivatedDeferredTools = append([]string(nil), restored.ActivatedDeferredTools...)
 				cfg.RestoredContextBundleV2 = restored.LatestContextBundleV2
+				cfg.RestoredContextWindowUsageAnchor = agentcore.CloneContextWindowUsageAnchor(restored.RestoredContextWindowUsageAnchor)
 				agent.Reconfigure(cfg)
 			}
 			runIDs := append([]string(nil), restored.RunIDs...)
@@ -1411,6 +1412,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				cfg := agent.GetConfig()
 				cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), thread.agent.GetConfig().SkillContextBlocks...)
 				cfg.ActivatedDeferredTools = append([]string(nil), thread.agent.GetConfig().ActivatedDeferredTools...)
+				cfg.RestoredContextWindowUsageAnchor = agentcore.CloneContextWindowUsageAnchor(thread.agent.GetConfig().RestoredContextWindowUsageAnchor)
 				agent.Reconfigure(cfg)
 			}
 			thread.agent = agent

@@ -16,6 +16,7 @@ import type {
   SubagentNarrativeTask,
 } from "./types";
 import { describeGlobPattern } from "./tool-display";
+import { runtimeErrorMessageForDisplay } from "../runtime/error-display";
 
 const MAX_SEEN_EVENTS = 1000;
 const MAX_RUN_PLAN_RECEIPT_TOOL_IDS = 200;
@@ -1526,14 +1527,7 @@ function answerId(state: RunNarrativeState, event: AguiEvent): string {
 }
 
 function narrativeErrorMessage(event: AguiEvent): string {
-  const rawMessage = event.message || "Runtime returned an error";
-  if (event.code === "PROVIDER_AUTH_MISSING") {
-    return "API key 缺失，请在 Settings > Models 配置模型 API key";
-  }
-  if (event.code === "PROVIDER_REQUEST_FAILED") {
-    return `Provider 请求失败：${rawMessage}`;
-  }
-  return rawMessage;
+  return runtimeErrorMessageForDisplay(event.code, event.message);
 }
 
 function toolId(event: AguiEvent): string {

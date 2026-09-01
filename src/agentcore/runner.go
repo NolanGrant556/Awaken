@@ -126,6 +126,7 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 			return nil
 		},
 	)
+	runner.contextGovernor.RestoreUsageAnchor(config.RestoredContextWindowUsageAnchor, config.ModelConfig)
 	runner.contextGovernor.preCompactHook = func(ctx stdcontext.Context, sink contextWindowEventSink, mode CompactMode, state ContextWindowState) (string, error) {
 		events, _ := sink.(*runEventEmitter)
 		result, err := runner.dispatchHookScoped(ctx, events, hookruntime.EventPreCompact, map[string]any{
@@ -275,6 +276,7 @@ func (r *Runner) persistContextCompactedV1(ctx stdcontext.Context, result Compac
 
 func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (answer string, runErr error) {
 	events := newRunEventEmitter(r.threadID, sink)
+	defer r.syncRestoredContextWindowUsageAnchor()
 	if r.configureEmitter != nil {
 		r.configureEmitter(events)
 	}
@@ -1128,6 +1130,17 @@ func normalizedModelUsageReasoningPolicy(config llm.Config, purpose llm.RequestP
 		return "provider_default"
 	}
 	return value
+}
+
+func (r *Runner) syncRestoredContextWindowUsageAnchor() {
+	if r == nil {
+		return
+	}
+	if r.contextGovernor == nil {
+		r.config.RestoredContextWindowUsageAnchor = nil
+		return
+	}
+	r.config.RestoredContextWindowUsageAnchor = r.contextGovernor.ExportUsageAnchor(r.config.ModelConfig)
 }
 
 // BuildModelUsageRecord is shared by non-thread authorities such as DreamTask.

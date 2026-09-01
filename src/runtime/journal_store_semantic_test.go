@@ -218,6 +218,80 @@ func TestContextCompactedV2DigestMismatchKeepsLastKnownGoodConversation(t *testi
 	}
 }
 
+func TestLatestContextWindowUsageAnchorFromSemanticRecordsFallsBackToInput(t *testing.T) {
+	sentEstimate := 74_000
+	inputTokens := 96_000
+	record := agentcore.ModelUsageSemanticRecord("thread-1", "run-1", "turn-1", "session-1", agentcore.ModelUsageRecord{
+		SchemaVersion: 1, RequestID: "req-1", Purpose: "agent_turn",
+		ProviderID: "minimax", ProfileID: "profile-a", CredentialRevision: 3,
+		ModelID: "ep-1", CapabilityModelID: "MiniMax-M1", EndpointSelector: "ep-1",
+		ModelSelectorKind: "endpoint", ProtocolFamily: "openai_chat", ReasoningPolicy: "high",
+		Status: agentcore.ModelUsageSucceeded, UsageComplete: true,
+		SentEstimatedInputTokens: &sentEstimate,
+		InputTokens:              &inputTokens,
+	})
+
+	anchor := latestContextWindowUsageAnchorFromSemanticRecords([]agentcore.SemanticRecord{record})
+	if anchor == nil || anchor.UsageTokens != inputTokens || anchor.SentEstimatedInputTokens != sentEstimate {
+		t.Fatalf("expected input-token fallback anchor, got %+v", anchor)
+	}
+}
+
+func TestLatestContextWindowUsageAnchorFromSemanticRecordsStopsAtCompactBoundary(t *testing.T) {
+	sentEstimate := 74_000
+	totalTokens := 101_000
+	usage := agentcore.ModelUsageSemanticRecord("thread-1", "run-1", "turn-1", "session-1", agentcore.ModelUsageRecord{
+		SchemaVersion: 1, RequestID: "req-1", Purpose: "agent_turn",
+		ProviderID: "minimax", ProfileID: "profile-a", CredentialRevision: 3,
+		ModelID: "ep-1", CapabilityModelID: "MiniMax-M1", EndpointSelector: "ep-1",
+		ModelSelectorKind: "endpoint", ProtocolFamily: "openai_chat", ReasoningPolicy: "high",
+		Status: agentcore.ModelUsageSucceeded, UsageComplete: true,
+		SentEstimatedInputTokens: &sentEstimate,
+		TotalTokens:              &totalTokens,
+	})
+	records := []agentcore.SemanticRecord{
+		usage,
+		{Kind: agentcore.SemanticKindContextCompactedV2, Payload: map[string]any{"bundle_v2": phase1RuntimeTestBundle(t, "compact-after-usage", []agentcore.SemanticCompactedMessage{{
+			Role: string(convcontext.RoleUser), Content: "summary", CompactBoundaryID: "compact-after-usage",
+		}}, nil)}},
+	}
+	if anchor := latestContextWindowUsageAnchorFromSemanticRecords(records); anchor != nil {
+		t.Fatalf("compact boundary must clear usage anchor, got %+v", anchor)
+	}
+}
+
+func TestLatestContextWindowUsageAnchorFromSemanticRecordsStopsAtHardEpochBoundaryAndMissingFields(t *testing.T) {
+	sentEstimate := 74_000
+	totalTokens := 101_000
+	older := agentcore.ModelUsageSemanticRecord("thread-1", "run-1", "turn-1", "session-1", agentcore.ModelUsageRecord{
+		SchemaVersion: 1, RequestID: "req-old", Purpose: "agent_turn",
+		ProviderID: "minimax", ProfileID: "profile-a", CredentialRevision: 3,
+		ModelID: "ep-1", CapabilityModelID: "MiniMax-M1", EndpointSelector: "ep-1",
+		ModelSelectorKind: "endpoint", ProtocolFamily: "openai_chat", ReasoningPolicy: "high",
+		Status: agentcore.ModelUsageSucceeded, UsageComplete: true,
+		SentEstimatedInputTokens: &sentEstimate,
+		TotalTokens:              &totalTokens,
+	})
+	missingSent := agentcore.ModelUsageSemanticRecord("thread-1", "run-2", "turn-2", "session-2", agentcore.ModelUsageRecord{
+		SchemaVersion: 1, RequestID: "req-new", Purpose: "agent_turn",
+		ProviderID: "minimax", ProfileID: "profile-a", CredentialRevision: 3,
+		ModelID: "ep-1", CapabilityModelID: "MiniMax-M1", EndpointSelector: "ep-1",
+		ModelSelectorKind: "endpoint", ProtocolFamily: "openai_chat", ReasoningPolicy: "high",
+		Status: agentcore.ModelUsageSucceeded, UsageComplete: true,
+		TotalTokens: &totalTokens,
+	})
+	if anchor := latestContextWindowUsageAnchorFromSemanticRecords([]agentcore.SemanticRecord{older, missingSent}); anchor != nil {
+		t.Fatalf("missing sent estimate must not reuse an older anchor, got %+v", anchor)
+	}
+
+	epochBoundary := agentcore.ContextEpochSemanticRecord("thread-1", "run-2", "turn-2", "session-2", agentcore.ContextEpochReceipt{
+		EpochID: "epoch-2", BaselineDigest: "digest", State: "rotated", BoundaryReason: "model_changed", CreationBoundaryReason: "model_changed", BaselineSequence: 2,
+	})
+	if anchor := latestContextWindowUsageAnchorFromSemanticRecords([]agentcore.SemanticRecord{older, epochBoundary}); anchor != nil {
+		t.Fatalf("hard epoch boundary must prevent older usage reuse, got %+v", anchor)
+	}
+}
+
 func phase1RuntimeTestBundle(t *testing.T, boundaryID string, messages []agentcore.SemanticCompactedMessage, skills []agentcore.SkillContextRef) agentcore.PostCompactContextBundleV2 {
 	t.Helper()
 	bundle := agentcore.PostCompactContextBundleV2{

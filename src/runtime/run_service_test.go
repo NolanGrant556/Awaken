@@ -2314,6 +2314,127 @@ func TestRunServiceRestoresThreadConversationFromTranscript(t *testing.T) {
 	}
 }
 
+func TestRunServiceRestoresContextWindowUsageAnchorForRestartedThread(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	root := t.TempDir()
+	inputTokens := 91_000
+	totalTokens := 97_000
+	sentEstimate := 73_000
+	captured := make(chan *agentcore.ContextWindowUsageAnchor, 1)
+	profile := &ModelProfileConfig{
+		ProfileID:          "profile-a",
+		ProviderID:         "minimax",
+		ModelID:            "ep-1",
+		CapabilityModelID:  "MiniMax-M1",
+		EndpointSelector:   "ep-1",
+		ModelSelectorKind:  "endpoint",
+		BaseURL:            "https://api.minimax.chat/v1",
+		Protocol:           "openai_chat",
+		CredentialRevision: 3,
+		ContextWindow:      267_307,
+		ReasoningEffort:    "high",
+	}
+
+	newService := func(captureAnchor bool) *RunService {
+		return NewRunServiceWithModelProfiles(
+			func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
+				modelCfg := agentcore.ModelConfig{}
+				if profile != nil {
+					modelCfg = agentcore.ModelConfig{
+						Model:              profile.ModelID,
+						ProviderID:         profile.ProviderID,
+						ProfileID:          profile.ProfileID,
+						CredentialRevision: profile.CredentialRevision,
+						CapabilityModelID:  profile.CapabilityModelID,
+						EndpointSelector:   profile.EndpointSelector,
+						ModelSelectorKind:  profile.ModelSelectorKind,
+						Protocol:           profile.Protocol,
+						ContextWindow:      profile.ContextWindow,
+						ReasoningEffort:    profile.ReasoningEffort,
+					}
+				}
+				return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+					ModelConfig: modelCfg,
+					Workspace: agentcore.WorkspaceConfig{
+						Root:          workspace.WorkspaceRoot,
+						WritableRoots: workspace.WritableRoots,
+					},
+				}, threadID)
+			},
+			func(agent *agentcore.Agent) Executor {
+				return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+					if captureAnchor {
+						captured <- agentcore.CloneContextWindowUsageAnchor(agent.GetConfig().RestoredContextWindowUsageAnchor)
+					}
+					recorder := agent.SemanticRecorder()
+					threadID, runID, sessionID := agent.ExecutionIdentity()
+					usage := agentcore.ModelUsageRecord{
+						SchemaVersion: 1, RequestID: "req-" + runID, Purpose: "agent_turn",
+						ProviderID: profile.ProviderID, ProfileID: profile.ProfileID, CredentialRevision: profile.CredentialRevision,
+						ModelID: profile.ModelID, CapabilityModelID: profile.CapabilityModelID, EndpointSelector: profile.EndpointSelector,
+						ModelSelectorKind: profile.ModelSelectorKind, ProtocolFamily: profile.Protocol, ReasoningPolicy: profile.ReasoningEffort,
+						Status: agentcore.ModelUsageSucceeded, UsageComplete: true,
+						SentEstimatedInputTokens: &sentEstimate,
+						InputTokens:              &inputTokens,
+						TotalTokens:              &totalTokens,
+					}
+					records := []agentcore.SemanticRecord{
+						agentcore.NewSemanticRecord(agentcore.SemanticKindUserMessage, threadID, runID, "", "", sessionID, map[string]any{"content": input, "role": "user"}),
+						agentcore.NewSemanticRecord(agentcore.SemanticKindRunStarted, threadID, runID, "", "", sessionID, map[string]any{}),
+						agentcore.NewSemanticRecord(agentcore.SemanticKindAssistantMessage, threadID, runID, "", "", sessionID, map[string]any{"content": "answer: " + input, "role": "assistant"}),
+						agentcore.ModelUsageSemanticRecord(threadID, runID, "", sessionID, usage),
+						agentcore.NewSemanticRecord(agentcore.SemanticKindRunTerminal, threadID, runID, "", "", sessionID, map[string]any{"status": "finished", "result": "answer: " + input}),
+					}
+					if recorder != nil {
+						if err := recorder.AppendBatch(ctx, records); err != nil {
+							return "", err
+						}
+						if err := recorder.Flush(ctx); err != nil {
+							return "", err
+						}
+					}
+					sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+					sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunFinishedEventType, Content: "answer: " + input, TerminalReason: agentcore.TerminalReasonCompleted})
+					return "answer: " + input, nil
+				})
+			},
+		)
+	}
+
+	firstService := newService(false)
+	firstRun, err := firstService.StartRun(StartRunRequest{
+		Input:        "hello",
+		Workspace:    WorkspaceConfig{WorkspaceRoot: root},
+		ModelProfile: profile,
+	})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, firstService, firstRun.RunID)
+
+	secondService := newService(true)
+	secondRun, err := secondService.StartRun(StartRunRequest{
+		Input:        "follow up",
+		ThreadID:     firstRun.ThreadID,
+		Workspace:    WorkspaceConfig{WorkspaceRoot: root},
+		ModelProfile: profile,
+	})
+	if err != nil {
+		t.Fatalf("second StartRun returned error: %v", err)
+	}
+
+	var anchor *agentcore.ContextWindowUsageAnchor
+	select {
+	case anchor = <-captured:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for restored usage anchor capture")
+	}
+	if anchor == nil || anchor.UsageTokens != totalTokens || anchor.SentEstimatedInputTokens != sentEstimate {
+		t.Fatalf("expected restarted run to restore durable usage anchor, got %+v", anchor)
+	}
+	waitForRunTerminal(t, secondService, secondRun.RunID)
+}
+
 func TestRunServiceRestoresCancelledThreadUserTranscript(t *testing.T) {
 	setRuntimeUserDataDir(t)
 	root := t.TempDir()

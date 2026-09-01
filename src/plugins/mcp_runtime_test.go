@@ -60,3 +60,37 @@ func TestReconcileMCPServersPreservesMatchingSessionsAndRemovesOnlyPluginOwnedSe
 		t.Fatalf("remove notifications=%v", changes)
 	}
 }
+
+func TestReconcileMCPServersRebuildsPluginServerWhenSourceRevisionChanges(t *testing.T) {
+	disabled := false
+	var changesMu sync.Mutex
+	var changes []string
+	manager := mcpclient.NewManager(mcpclient.WithToolsChangedCallback(func(name string) {
+		changesMu.Lock()
+		changes = append(changes, name)
+		changesMu.Unlock()
+	}))
+	original := mcpclient.ScopedMcpServerConfig{
+		Name:           "plugin__fixture__local",
+		Scope:          mcpclient.ScopePlugin,
+		SourceRevision: "sha256:old",
+		Config: mcpclient.McpServerConfig{
+			HTTP:    &mcpclient.HTTPTransportConfig{URL: "https://fixture.invalid/mcp"},
+			Enabled: &disabled,
+		},
+	}
+	manager.Start(context.Background(), []mcpclient.ScopedMcpServerConfig{original})
+	t.Cleanup(func() { manager.Shutdown(context.Background()) })
+
+	replacement := original
+	replacement.SourceRevision = "sha256:new"
+	if err := ReconcileMCPServers(context.Background(), manager, []mcpclient.ScopedMcpServerConfig{replacement}); err != nil {
+		t.Fatal(err)
+	}
+
+	changesMu.Lock()
+	defer changesMu.Unlock()
+	if len(changes) != 1 || changes[0] != original.Name {
+		t.Fatalf("source revision replacement notifications=%v", changes)
+	}
+}

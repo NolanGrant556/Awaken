@@ -503,7 +503,7 @@ func (s *Store) loadRecord(name string, rec Record) *InstalledPlugin {
 			plugin.MCPServers[index].Config.Enabled = boolPointer(false)
 		}
 	}
-	s.attachMCPSetupBindings(name, plugin)
+	s.attachMCPSetupBindings(name, plugin, rec)
 	plugin.ComponentState, plugin.ConfigurationState, plugin.AuthenticationState, plugin.CompatibilityState = s.componentStates(name, plugin.Components, plugin.Setup, rec)
 	for index := range plugin.MCPServers {
 		server := &plugin.MCPServers[index]
@@ -524,11 +524,11 @@ func (s *Store) loadRecord(name string, rec Record) *InstalledPlugin {
 	return plugin
 }
 
-func (s *Store) attachMCPSetupBindings(pluginName string, plugin *InstalledPlugin) {
-	provider, ok := s.setupReadiness.(SetupCredentialReferenceProvider)
-	if !ok || plugin == nil {
+func (s *Store) attachMCPSetupBindings(pluginName string, plugin *InstalledPlugin, record Record) {
+	if plugin == nil {
 		return
 	}
+	provider, _ := s.setupReadiness.(SetupCredentialReferenceProvider)
 	componentByID := make(map[string]ir.Component, len(plugin.Components))
 	for _, component := range plugin.Components {
 		componentByID[component.LogicalID] = component
@@ -553,6 +553,38 @@ func (s *Store) attachMCPSetupBindings(pluginName string, plugin *InstalledPlugi
 			if server == nil || server.Invalid != nil {
 				continue
 			}
+			if requirement.Kind == ir.SetupConfiguration {
+				value, ok := setupConfigurationValue(record, requirement.Field)
+				if !ok {
+					continue
+				}
+				switch binding.Target {
+				case ir.SetupBindingProcessEnv:
+					if server.Config.Stdio == nil {
+						continue
+					}
+					if server.Config.Stdio.Env == nil {
+						server.Config.Stdio.Env = map[string]string{}
+					}
+					server.Config.Stdio.Env[binding.Name] = value
+				case ir.SetupBindingHTTPHeader:
+					target := server.Config.HTTP
+					if target == nil {
+						target = server.Config.SSE
+					}
+					if target == nil {
+						continue
+					}
+					if target.Headers == nil {
+						target.Headers = map[string]string{}
+					}
+					target.Headers[binding.Name] = value
+				}
+				continue
+			}
+			if provider == nil {
+				continue
+			}
 			ref, err := provider.SetupCredentialReference(pluginName, requirement, binding)
 			if err != nil {
 				continue
@@ -573,6 +605,19 @@ func (s *Store) attachMCPSetupBindings(pluginName string, plugin *InstalledPlugi
 			}
 		}
 	}
+}
+
+func setupConfigurationValue(record Record, field *ir.VariableSpec) (string, bool) {
+	if field == nil {
+		return "", false
+	}
+	if stored, ok := record.Variables[field.Key]; ok && stored.Value != nil {
+		return variableString(stored.Value), true
+	}
+	if field.Default != nil {
+		return variableString(field.Default), true
+	}
+	return "", false
 }
 
 // RefreshSetupReadiness republishes runtime projections after a host-owned
@@ -672,9 +717,10 @@ func (s *Store) PluginMCPServers() []mcpclient.ScopedMcpServerConfig {
 				continue
 			}
 			out = append(out, mcpclient.ScopedMcpServerConfig{
-				Name:   server.Identity,
-				Scope:  mcpclient.ScopePlugin,
-				Config: server.Config,
+				Name:           server.Identity,
+				Scope:          mcpclient.ScopePlugin,
+				SourceRevision: plugin.Digest,
+				Config:         server.Config,
 			})
 		}
 	}

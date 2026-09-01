@@ -102,7 +102,7 @@ func (m *Manager) startCoreAuthSession(serverName string, req AuthRequest) (Auth
 		m.mu.RUnlock()
 		return AuthResult{}, fmt.Errorf("mcp server %q not found", serverName)
 	}
-	scoped := ScopedMcpServerConfig{Name: serverName, Scope: server.scope, Config: server.config}
+	scoped := ScopedMcpServerConfig{Name: serverName, Scope: server.scope, SourceRevision: server.sourceRevision, Config: server.config}
 	serverURL := serverAuthURL(server.config)
 	serverConfig := server.config
 	m.mu.RUnlock()

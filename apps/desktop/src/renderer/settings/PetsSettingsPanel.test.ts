@@ -136,11 +136,11 @@ function createMockRuntimeClient(): RuntimeClient {
     getAgentPlanMediaTools: vi.fn(async () => ({ configurations: [] })),
     saveAgentPlanMediaTool: vi.fn(async () => ({
       settings: { configurations: [] },
-      restartStatus: "restarted" as const,
+      applyStatus: "applied" as const,
     })),
     deleteAgentPlanMediaTool: vi.fn(async () => ({
       settings: { configurations: [] },
-      restartStatus: "restarted" as const,
+      applyStatus: "applied" as const,
     })),
     saveModelProfile: vi.fn(async () => ({
       id: "",

@@ -358,7 +358,7 @@ export function projectAguiEventToNarrative(
         detail =
           event.questionResolution === "cancelled"
             ? "The user chose not to answer; the run continues."
-            : event.questionAnswer ?? "";
+            : (event.questionAnswer ?? "");
       }
       return commitRuntimeNotice(
         base,
@@ -705,15 +705,33 @@ function commitHookTrace(
   event: AguiEvent,
 ): RunNarrativeState {
   const hookId = event.hookId?.trim() || "unknown-hook";
-  const invocationId = event.hookInvocationId?.trim() || event.recordId || String(event.seq ?? hookId);
+  const invocationId =
+    event.hookInvocationId?.trim() ||
+    event.recordId ||
+    String(event.seq ?? hookId);
   const completed = event.type === "AWAKEN_HOOK_COMPLETED";
-  const failed = completed && event.status !== "success" && event.status !== "blocked";
-  const blocked = ["block_run", "block_tool", "block_compact", "block_subagent", "block_finish"].includes(event.hookAction ?? "");
+  const failed =
+    completed && event.status !== "success" && event.status !== "blocked";
+  const blocked = [
+    "block_run",
+    "block_tool",
+    "block_compact",
+    "block_subagent",
+    "block_finish",
+  ].includes(event.hookAction ?? "");
   const interrupted = event.status === "interrupted";
-  const detail = [event.hookEvent, event.hookSourceKind, event.durationMs != null ? `${event.durationMs} ms` : ""]
+  const detail = [
+    event.hookEvent,
+    event.hookSourceKind,
+    event.durationMs != null ? `${event.durationMs} ms` : "",
+  ]
     .filter(Boolean)
     .join(" · ");
-  const output = [event.hookReasonCode, event.hookReason, event.hookOutputPreview]
+  const output = [
+    event.hookReasonCode,
+    event.hookReason,
+    event.hookOutputPreview,
+  ]
     .filter(Boolean)
     .join("\n");
   const item: RunNarrativeItem = {
@@ -722,9 +740,20 @@ function commitHookTrace(
     title: `Hook · ${hookId}`,
     detail: detail || undefined,
     output: output || undefined,
-    status: interrupted ? "interrupted" : blocked ? "blocked" : failed ? "error" : completed ? "done" : "active",
+    status: interrupted
+      ? "interrupted"
+      : blocked
+        ? "blocked"
+        : failed
+          ? "error"
+          : completed
+            ? "done"
+            : "active",
   };
-  return { ...state, committedItems: upsertCommitted(state.committedItems, item) };
+  return {
+    ...state,
+    committedItems: upsertCommitted(state.committedItems, item),
+  };
 }
 
 function commitScheduledNotice(
@@ -1140,8 +1169,7 @@ function upsertCommittedBeforeRunAnswer(
     ? turnAnswerIndex
     : items.findIndex(
           (candidate) =>
-            candidate.kind === "answer" &&
-            isAnswerForEvent(candidate.id, event),
+          candidate.kind === "answer" && isAnswerForEvent(candidate.id, event),
         );
   if (answerIndex < 0) {
     return [...items, item];

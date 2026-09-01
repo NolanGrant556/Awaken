@@ -17,6 +17,7 @@ export type AwakenConnectorsProps = {
   onRefresh: () => void;
   onConfigureMcp: () => void;
   onConnectorAction: (item: AwakenConnectorCardItem) => void;
+  onConnectorAdminApprovalRequired?: (item: AwakenConnectorCardItem) => void;
   onMcpServerEnabledChange: (item: AwakenConnectorCardItem, enabled: boolean) => void;
   onMcpServerSettings: (item: AwakenConnectorCardItem) => void;
 };
@@ -25,12 +26,14 @@ function ConnectorGrid({
   items,
   emptyMessage,
   onConnectorAction,
+  onConnectorAdminApprovalRequired,
   onMcpServerEnabledChange,
   onMcpServerSettings,
 }: {
   items: AwakenConnectorCardItem[];
   emptyMessage: string;
   onConnectorAction: AwakenConnectorsProps["onConnectorAction"];
+  onConnectorAdminApprovalRequired: AwakenConnectorsProps["onConnectorAdminApprovalRequired"];
   onMcpServerEnabledChange: AwakenConnectorsProps["onMcpServerEnabledChange"];
   onMcpServerSettings: AwakenConnectorsProps["onMcpServerSettings"];
 }) {
@@ -41,6 +44,7 @@ function ConnectorGrid({
           key={`${item.variant}:${item.id}`}
           item={item}
           onPrimaryAction={onConnectorAction}
+          onAdminApprovalRequired={onConnectorAdminApprovalRequired}
           onEnabledChange={onMcpServerEnabledChange}
           onSettings={onMcpServerSettings}
         />
@@ -62,6 +66,7 @@ export function AwakenConnectors({
   onRefresh,
   onConfigureMcp,
   onConnectorAction,
+  onConnectorAdminApprovalRequired,
   onMcpServerEnabledChange,
   onMcpServerSettings,
 }: AwakenConnectorsProps) {
@@ -121,6 +126,7 @@ export function AwakenConnectors({
                   items={builtInMcpConnectors}
                   emptyMessage="暂无内置 MCP"
                   onConnectorAction={onConnectorAction}
+                  onConnectorAdminApprovalRequired={onConnectorAdminApprovalRequired}
                   onMcpServerEnabledChange={onMcpServerEnabledChange}
                   onMcpServerSettings={onMcpServerSettings}
                 />
@@ -131,6 +137,7 @@ export function AwakenConnectors({
                   items={userMcpConnectors}
                   emptyMessage="暂无用户安装 MCP"
                   onConnectorAction={onConnectorAction}
+                  onConnectorAdminApprovalRequired={onConnectorAdminApprovalRequired}
                   onMcpServerEnabledChange={onMcpServerEnabledChange}
                   onMcpServerSettings={onMcpServerSettings}
                 />
@@ -142,6 +149,7 @@ export function AwakenConnectors({
                 items={cliConnectors}
                 emptyMessage="暂无 CLI"
                 onConnectorAction={onConnectorAction}
+                onConnectorAdminApprovalRequired={onConnectorAdminApprovalRequired}
                 onMcpServerEnabledChange={onMcpServerEnabledChange}
                 onMcpServerSettings={onMcpServerSettings}
               />

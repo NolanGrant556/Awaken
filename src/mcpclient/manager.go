@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -697,6 +698,22 @@ func (m *Manager) RestartWithConfig(ctx context.Context, scoped ScopedMcpServerC
 
 	m.Start(ctx, []ScopedMcpServerConfig{scoped})
 	return nil
+}
+
+// ApplyConfig starts or restarts a server only when its effective scope or
+// configuration changed. Runtime refreshers use this instead of
+// RestartWithConfig so an unrelated catalog mutation cannot interrupt an
+// already-connected server.
+func (m *Manager) ApplyConfig(ctx context.Context, scoped ScopedMcpServerConfig) (bool, error) {
+	m.mu.RLock()
+	server, exists := m.servers[scoped.Name]
+	unchanged := exists && server.scope == scoped.Scope && reflect.DeepEqual(server.config, scoped.Config)
+	m.mu.RUnlock()
+	if unchanged {
+		return false, nil
+	}
+	m.logger.Debugf("mcp server %q scope/config changed; rebuilding", scoped.Name)
+	return true, m.RestartWithConfig(ctx, scoped)
 }
 
 // Snapshot returns the current state of every server, sorted by installation

@@ -34,6 +34,9 @@ extraResources:
   - from: resources/system-skills
     to: system-skills
     filter: ["**/*"]
+  - from: resources/builtin-plugins
+    to: builtin-plugins
+    filter: ["**/*"]
   - from: resources/pets
     to: pets
     filter: ["**/*"]

@@ -22,6 +22,7 @@ type connectorAuthService interface {
 	Start(context.Context, string) (connectors.ConnectorAuthStartResult, error)
 	Session(string) (connectors.ConnectorAuthSession, error)
 	Cancel(string) (connectors.ConnectorAuthSession, error)
+	MarkAdminApprovalPending(string) (connectors.ConnectorAuthSession, error)
 	Disconnect(context.Context, string) error
 }
 
@@ -35,6 +36,7 @@ type connectorInfo struct {
 	Provider                string                              `json:"provider,omitempty"`
 	State                   connectors.ConnectorState           `json:"state"`
 	SourceOrigin            connectors.SourceOrigin             `json:"sourceOrigin"`
+	CatalogPlacement        connectors.CatalogPlacement         `json:"catalogPlacement"`
 	AuthType                connectors.AuthType                 `json:"authType"`
 	LastError               string                              `json:"lastError,omitempty"`
 	ServerNames             []string                            `json:"serverNames,omitempty"`
@@ -78,6 +80,9 @@ func (h connectorHandlers) handleListConnectors(w http.ResponseWriter, r *http.R
 	statuses := h.registry.List()
 	out := make([]connectorInfo, 0, len(statuses))
 	for _, s := range statuses {
+		if s.CatalogPlacement == connectors.CatalogPluginOnly {
+			continue
+		}
 		out = append(out, connectorInfo{
 			ID:                      s.ID,
 			Kind:                    s.Kind,
@@ -87,6 +92,7 @@ func (h connectorHandlers) handleListConnectors(w http.ResponseWriter, r *http.R
 			Provider:                s.Provider,
 			State:                   s.State,
 			SourceOrigin:            s.SourceOrigin,
+			CatalogPlacement:        s.CatalogPlacement,
 			AuthType:                s.AuthType,
 			LastError:               s.LastError,
 			ServerNames:             s.ServerNames,
@@ -258,6 +264,23 @@ func (h connectorHandlers) handleCancelAuthSession(w http.ResponseWriter, r *htt
 			return
 		}
 		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "connector authorization session could not be cancelled")
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (h connectorHandlers) handleAdminApprovalPending(w http.ResponseWriter, r *http.Request) {
+	if h.auth == nil {
+		writeErrorJSON(w, http.StatusServiceUnavailable, "CONNECTOR_AUTH_UNAVAILABLE", "connector account service is unavailable")
+		return
+	}
+	view, err := h.auth.MarkAdminApprovalPending(r.PathValue("sessionId"))
+	if err != nil {
+		if errors.Is(err, connectorauth.ErrSessionNotFound) {
+			writeErrorJSON(w, http.StatusNotFound, "CONNECTOR_AUTH_SESSION_NOT_FOUND", err.Error())
+			return
+		}
+		writeErrorJSON(w, http.StatusInternalServerError, "CONNECTOR_APPROVAL_STATE_FAILED", "administrator approval state could not be saved")
 		return
 	}
 	writeJSON(w, http.StatusOK, view)

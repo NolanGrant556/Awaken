@@ -6,7 +6,7 @@
 
 ## Props 契约
 
-- identity：`name`、`displayName`、`version`；厂商方言、来源、digest 和插件状态矩阵不属于常驻 UI；
+- identity：`name`、`displayName`、`version`；名称完整显示并可自然换行，不能使用 ellipsis 截断或裁切字形；厂商方言、来源、digest 和插件状态矩阵不属于常驻 UI；
 - state：`enabled`、`components`、`variables`、`loading`、`busy`、`errorMessage`；
 - dialog：`selectedDetail`、`detailLoading`、`activeDetailTab`，正文与 source 只在宿主按需读取后传入；
 - source edit：`sourceEditing`、`sourceDraft` 与 `onSourceEditStart/onSourceDraftChange/onSourceEditCancel/onSourceSave` 只负责编辑态展示；校验、digest CAS 和原子保存由宿主/Core 拥有；

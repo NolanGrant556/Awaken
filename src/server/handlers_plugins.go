@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"awaken/src/connectors"
 	"awaken/src/mcpclient"
 	"awaken/src/pluginauth"
 	"awaken/src/plugins"
@@ -15,10 +16,11 @@ import (
 )
 
 type pluginHandlers struct {
-	store      *plugins.Store
-	manager    *mcpclient.Manager
-	runService *awruntime.RunService
-	auth       *pluginauth.Service
+	store             *plugins.Store
+	manager           *mcpclient.Manager
+	connectorRegistry *connectors.Registry
+	runService        *awruntime.RunService
+	auth              *pluginauth.Service
 }
 
 type pluginInfo struct {
@@ -31,6 +33,9 @@ type pluginInfo struct {
 	License             string                  `json:"license,omitempty"`
 	Keywords            []string                `json:"keywords,omitempty"`
 	DisplayName         string                  `json:"displayName,omitempty"`
+	Builtin             bool                    `json:"builtin"`
+	BrandIcon           string                  `json:"brandIcon,omitempty"`
+	BuiltinOrder        int                     `json:"builtinOrder"`
 	Dialect             string                  `json:"dialect,omitempty"`
 	ManifestPath        string                  `json:"manifestPath,omitempty"`
 	InstallationID      string                  `json:"installationId,omitempty"`
@@ -284,6 +289,8 @@ func (h pluginHandlers) writeStoreError(w http.ResponseWriter, err error) {
 		writeErrorJSON(w, http.StatusConflict, "PLUGIN_TRASH_UNAVAILABLE", err.Error())
 	case errors.Is(err, plugins.ErrRuntimeLeaseActive):
 		writeErrorJSON(w, http.StatusConflict, "RUNTIME_GENERATION_IN_USE", err.Error())
+	case errors.Is(err, plugins.ErrBuiltinImmutable):
+		writeErrorJSON(w, http.StatusConflict, "BUILTIN_PLUGIN_IMMUTABLE", err.Error())
 	case errors.Is(err, plugins.ErrComponentNotSwitchable):
 		writeErrorJSON(w, http.StatusConflict, "COMPONENT_NOT_SWITCHABLE", err.Error())
 	case errors.Is(err, plugins.ErrToolNotFound):
@@ -313,21 +320,7 @@ func (h pluginHandlers) refreshRuntime() {
 		return
 	}
 	desired := h.store.PluginMCPServers()
-	desiredNames := make(map[string]mcpclient.ScopedMcpServerConfig, len(desired))
-	for _, scoped := range desired {
-		desiredNames[scoped.Name] = scoped
-	}
-	for _, snap := range h.manager.Snapshot() {
-		if plugins.IsPluginServerIdentity(snap.Name) {
-			if _, ok := desiredNames[snap.Name]; !ok {
-				_ = h.manager.Remove(snap.Name)
-			}
-		}
-	}
-	ctx := context.Background()
-	for _, scoped := range desired {
-		_ = h.manager.RestartWithConfig(ctx, scoped)
-	}
+	_ = plugins.ReconcileMCPServers(context.Background(), h.manager, desired)
 }
 
 func (h pluginHandlers) toPluginInfo(plugin *plugins.InstalledPlugin, includeDetails bool) pluginInfo {
@@ -341,6 +334,9 @@ func (h pluginHandlers) toPluginInfo(plugin *plugins.InstalledPlugin, includeDet
 		License:             plugin.Manifest.License,
 		Keywords:            plugin.Manifest.Keywords,
 		DisplayName:         plugin.DisplayName,
+		Builtin:             plugin.Builtin,
+		BrandIcon:           plugin.BrandIcon,
+		BuiltinOrder:        plugin.BuiltinOrder,
 		Dialect:             string(plugin.Dialect),
 		ManifestPath:        plugin.ManifestPath,
 		InstallationID:      plugin.InstallationID,

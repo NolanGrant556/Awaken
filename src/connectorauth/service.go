@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"awaken/src/authapproval"
 	"awaken/src/connectors"
 	"awaken/src/mcpclient"
 
@@ -27,18 +28,21 @@ import (
 )
 
 const sessionTTL = 10 * time.Minute
+const accountReadinessCacheTTL = 30 * time.Second
 
 var (
-	ErrUnsupported       = errors.New("connector authorization is unsupported")
-	ErrClientIDRequired  = errors.New("connector public client ID is not configured")
-	ErrSessionNotFound   = errors.New("connector authorization session not found")
-	ErrNeedsAuth         = errors.New("connector account requires authorization")
-	ErrCredentialChanged = errors.New("connector authorization contract changed")
+	ErrUnsupported        = errors.New("connector authorization is unsupported")
+	ErrClientIDRequired   = errors.New("connector public client ID is not configured")
+	ErrSessionNotFound    = errors.New("connector authorization session not found")
+	ErrNeedsAuth          = errors.New("connector account requires authorization")
+	ErrCredentialChanged  = errors.New("connector authorization contract changed")
+	ErrRefreshUnavailable = errors.New("connector account refresh is temporarily unavailable")
 )
 
 type registry interface {
 	Definition(connectorID string) (connectors.ConnectorDefinition, error)
 	Status(connectorID string) (connectors.ConnectorStatus, error)
+	RuntimeStatus(connectorID string) (connectors.ConnectorStatus, error)
 	Connect(ctx context.Context, connectorID string) error
 	Disconnect(ctx context.Context, connectorID string) error
 }
@@ -80,13 +84,43 @@ func (s *session) finish(status, safeError string) bool {
 	return true
 }
 
+func (s *session) markAdminApprovalPending() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.status != "authorizing" && s.status != "verifying" {
+		return false
+	}
+	s.status = "pending_admin_approval"
+	s.errorText = "等待组织管理员批准；批准后请重新连接。"
+	return true
+}
+
+func (s *session) cancelSession() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.status == "ready" || s.status == "failed" || s.status == "expired" || s.status == "cancelled" {
+		return false
+	}
+	s.status = "cancelled"
+	s.errorText = "授权已取消。"
+	return true
+}
+
 type Service struct {
 	registry    registry
 	credentials mcpclient.CredentialStore
 	httpClient  *http.Client
+	approvals   *authapproval.Store
 
-	mu       sync.RWMutex
-	sessions map[string]*session
+	mu             sync.RWMutex
+	sessions       map[string]*session
+	readinessCache map[string]cachedAccountReadiness
+}
+
+type cachedAccountReadiness struct {
+	fingerprint string
+	value       connectors.AccountReadiness
+	expiresAt   time.Time
 }
 
 func NewService(registry registry, credentials mcpclient.CredentialStore) *Service {
@@ -95,7 +129,8 @@ func NewService(registry registry, credentials mcpclient.CredentialStore) *Servi
 	}
 	return &Service{
 		registry: registry, credentials: credentials, httpClient: newSafeHTTPClient(),
-		sessions: make(map[string]*session),
+		approvals: authapproval.NewStore("connector-approvals.json"),
+		sessions:  make(map[string]*session), readinessCache: make(map[string]cachedAccountReadiness),
 	}
 }
 
@@ -124,20 +159,79 @@ func (s *Service) AccountReadiness(definition connectors.ConnectorDefinition) co
 			return connectors.AccountReadiness{State: connectors.StateFailed, LastError: view.ErrorMessage}
 		}
 	}
+	approvalPending, approvalErr := s.approvals.Matches(definition.ID, connectorFingerprint(definition))
+	if approvalErr != nil {
+		return connectors.AccountReadiness{State: connectors.StateFailed, LastError: "无法读取管理员审批状态。"}
+	}
+	if approvalPending {
+		return connectors.AccountReadiness{
+			State: connectors.StateApprovalRequired, LastError: "等待组织管理员批准；批准后请重新连接。",
+		}
+	}
+	fingerprint := connectorFingerprint(definition)
+	if cached, ok := s.cachedAccountReadiness(definition.ID, fingerprint); ok {
+		return cached
+	}
+	readiness := connectors.AccountReadiness{State: connectors.StateNeedsAuth}
 	stored, err := s.credentials.LoadTokenSource(connectorCredentialIdentity(definition.ID))
 	if err != nil {
 		if errors.Is(err, mcpclient.ErrCredentialNotFound) {
-			return connectors.AccountReadiness{State: connectors.StateNeedsAuth}
+			s.cacheAccountReadiness(definition.ID, fingerprint, readiness)
+			return readiness
 		}
-		return connectors.AccountReadiness{State: connectors.StateFailed, LastError: "无法读取本机账号凭据状态。"}
+		readiness = connectors.AccountReadiness{State: connectors.StateFailed, LastError: "无法读取本机账号凭据状态。"}
+		s.cacheAccountReadiness(definition.ID, fingerprint, readiness)
+		return readiness
 	}
-	if !storedMatchesDefinition(stored, definition) || stored.NeedsReauth || stored.Token == nil {
-		return connectors.AccountReadiness{State: connectors.StateNeedsAuth}
+	if !storedMatchesDefinition(stored, definition) || stored.Token == nil {
+		s.cacheAccountReadiness(definition.ID, fingerprint, readiness)
+		return readiness
+	}
+	if stored.NeedsReauth {
+		if stored.ReauthReason == "provider_rejected" || strings.TrimSpace(stored.Token.RefreshToken) == "" {
+			s.cacheAccountReadiness(definition.ID, fingerprint, readiness)
+			return readiness
+		}
+		// access_token_rejected and legacy empty-reason records still hold a
+		// refresh token. Keep the component usable so AccessToken can force a
+		// safe refresh instead of requiring another interactive login.
+		readiness = connectors.AccountReadiness{State: connectors.StateConnected}
+		s.cacheAccountReadiness(definition.ID, fingerprint, readiness)
+		return readiness
 	}
 	if !stored.Token.Expiry.IsZero() && time.Now().After(stored.Token.Expiry) && stored.Token.RefreshToken == "" {
-		return connectors.AccountReadiness{State: connectors.StateNeedsAuth}
+		s.cacheAccountReadiness(definition.ID, fingerprint, readiness)
+		return readiness
 	}
-	return connectors.AccountReadiness{State: connectors.StateConnected}
+	readiness = connectors.AccountReadiness{State: connectors.StateConnected}
+	s.cacheAccountReadiness(definition.ID, fingerprint, readiness)
+	return readiness
+}
+
+func (s *Service) cachedAccountReadiness(connectorID, fingerprint string) (connectors.AccountReadiness, bool) {
+	s.mu.RLock()
+	cached, ok := s.readinessCache[connectorID]
+	s.mu.RUnlock()
+	if !ok || cached.fingerprint != fingerprint || time.Now().After(cached.expiresAt) {
+		return connectors.AccountReadiness{}, false
+	}
+	return cached.value, true
+}
+
+func (s *Service) cacheAccountReadiness(connectorID, fingerprint string, value connectors.AccountReadiness) {
+	s.mu.Lock()
+	s.readinessCache[connectorID] = cachedAccountReadiness{
+		fingerprint: fingerprint,
+		value:       value,
+		expiresAt:   time.Now().Add(accountReadinessCacheTTL),
+	}
+	s.mu.Unlock()
+}
+
+func (s *Service) invalidateAccountReadiness(connectorID string) {
+	s.mu.Lock()
+	delete(s.readinessCache, strings.TrimSpace(connectorID))
+	s.mu.Unlock()
 }
 
 // ConnectorReadiness resolves a host Connector by stable ID and reports its
@@ -165,6 +259,18 @@ func (s *Service) ConnectorStatus(connectorID string) (connectors.ConnectorStatu
 }
 
 func (s *Service) Start(ctx context.Context, connectorID string) (connectors.ConnectorAuthStartResult, error) {
+	return s.start(ctx, connectorID, false)
+}
+
+// Reauthorize starts a fresh interactive login even when a valid shared
+// account already exists. The existing credential remains usable until a new
+// token exchange succeeds, so closing the browser does not silently sign the
+// user out.
+func (s *Service) Reauthorize(ctx context.Context, connectorID string) (connectors.ConnectorAuthStartResult, error) {
+	return s.start(ctx, connectorID, true)
+}
+
+func (s *Service) start(ctx context.Context, connectorID string, force bool) (connectors.ConnectorAuthStartResult, error) {
 	if s.registry == nil {
 		return connectors.ConnectorAuthStartResult{}, ErrUnsupported
 	}
@@ -182,7 +288,7 @@ func (s *Service) Start(ctx context.Context, connectorID string) (connectors.Con
 			SessionID: view.SessionID, ConnectorID: view.ConnectorID, Status: view.Status, ExpiresAt: view.ExpiresAt,
 		}, nil
 	}
-	if readiness := s.AccountReadiness(definition); readiness.State == connectors.StateConnected {
+	if readiness := s.AccountReadiness(definition); !force && readiness.State == connectors.StateConnected {
 		if connectErr := s.registry.Connect(context.WithoutCancel(ctx), definition.ID); connectErr != nil && !errors.Is(connectErr, connectors.ErrConnectorAlreadyConnected) {
 			return connectors.ConnectorAuthStartResult{}, connectErr
 		}
@@ -190,6 +296,9 @@ func (s *Service) Start(ctx context.Context, connectorID string) (connectors.Con
 			return connectors.ConnectorAuthStartResult{}, runtimeErr
 		}
 		return connectors.ConnectorAuthStartResult{ConnectorID: definition.ID, Status: "ready"}, nil
+	}
+	if err := s.approvals.Clear(definition.ID); err != nil {
+		return connectors.ConnectorAuthStartResult{}, fmt.Errorf("clear connector approval state: %w", err)
 	}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -256,8 +365,20 @@ func (s *Service) Start(ctx context.Context, connectorID string) (connectors.Con
 			return
 		}
 		if providerError := strings.TrimSpace(request.URL.Query().Get("error")); providerError != "" {
+			providerDescription := strings.TrimSpace(request.URL.Query().Get("error_description"))
 			entry.callbackConsumed = true
 			entry.mu.Unlock()
+			if authapproval.RequiredByProvider(providerError, providerDescription) {
+				if _, markErr := s.markAdminApprovalPending(entry); markErr != nil {
+					entry.finish("failed", "无法保存管理员审批状态，请重试。")
+					go entry.closeServer()
+					http.Error(w, "authorization approval state could not be saved", http.StatusInternalServerError)
+				} else {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					_, _ = w.Write([]byte("<!doctype html><meta charset=\"utf-8\"><title>Awaken</title><p>已记录管理员审批请求。批准后请返回 Awaken 重新连接。</p>"))
+				}
+				return
+			}
 			entry.finish("failed", "账号提供方未完成授权，请重试。")
 			http.Error(w, "authorization was not completed", http.StatusBadRequest)
 			go entry.closeServer()
@@ -296,8 +417,10 @@ func (s *Service) Start(ctx context.Context, connectorID string) (connectors.Con
 			http.Error(w, "credential persistence failed", http.StatusInternalServerError)
 			return
 		}
+		s.cacheAccountReadiness(definition.ID, connectorFingerprint(definition), connectors.AccountReadiness{State: connectors.StateConnected})
 		if view := entry.view(); view.Status != "verifying" {
 			_ = s.credentials.ClearTokenSource(connectorCredentialIdentity(definition.ID))
+			s.invalidateAccountReadiness(definition.ID)
 			http.Error(w, "authorization session was cancelled", http.StatusConflict)
 			return
 		}
@@ -314,6 +437,7 @@ func (s *Service) Start(ctx context.Context, connectorID string) (connectors.Con
 		if !entry.finish("ready", "") {
 			_ = s.registry.Disconnect(context.Background(), definition.ID)
 			_ = s.credentials.ClearTokenSource(connectorCredentialIdentity(definition.ID))
+			s.invalidateAccountReadiness(definition.ID)
 			http.Error(w, "authorization session was cancelled", http.StatusConflict)
 			return
 		}
@@ -355,7 +479,7 @@ func (s *Service) waitForRuntime(connectorID string) error {
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		status, err := s.registry.Status(connectorID)
+		status, err := s.registry.RuntimeStatus(connectorID)
 		if err != nil {
 			return err
 		}
@@ -390,8 +514,42 @@ func (s *Service) Cancel(sessionID string) (connectors.ConnectorAuthSession, err
 	if entry == nil {
 		return connectors.ConnectorAuthSession{}, ErrSessionNotFound
 	}
-	entry.finish("cancelled", "授权已取消。")
+	if entry.view().Status == "pending_admin_approval" {
+		if err := s.approvals.Clear(entry.connectorID); err != nil {
+			return connectors.ConnectorAuthSession{}, err
+		}
+	}
+	entry.cancelSession()
 	entry.closeServer()
+	return entry.view(), nil
+}
+
+// MarkAdminApprovalPending records a user-observed external browser result.
+// OAuth providers do not consistently redirect approval-request pages back to
+// loopback clients, so this explicit transition is the only portable signal.
+func (s *Service) MarkAdminApprovalPending(sessionID string) (connectors.ConnectorAuthSession, error) {
+	s.mu.RLock()
+	entry := s.sessions[strings.TrimSpace(sessionID)]
+	s.mu.RUnlock()
+	if entry == nil {
+		return connectors.ConnectorAuthSession{}, ErrSessionNotFound
+	}
+	return s.markAdminApprovalPending(entry)
+}
+
+func (s *Service) markAdminApprovalPending(entry *session) (connectors.ConnectorAuthSession, error) {
+	if entry == nil {
+		return connectors.ConnectorAuthSession{}, ErrSessionNotFound
+	}
+	view := entry.view()
+	if view.Status != "authorizing" && view.Status != "verifying" {
+		return view, nil
+	}
+	if err := s.approvals.Mark(entry.connectorID, entry.fingerprint); err != nil {
+		return connectors.ConnectorAuthSession{}, err
+	}
+	entry.markAdminApprovalPending()
+	go entry.closeServer()
 	return entry.view(), nil
 }
 
@@ -412,13 +570,18 @@ func (s *Service) Disconnect(ctx context.Context, connectorID string) error {
 	}
 	s.mu.RUnlock()
 	for _, entry := range active {
-		entry.finish("cancelled", "授权已取消。")
+		entry.cancelSession()
 		entry.closeServer()
 	}
 	if err := s.registry.Disconnect(ctx, connectorID); err != nil && !errors.Is(err, connectors.ErrConnectorNotConnected) {
 		return err
 	}
-	return s.credentials.ClearTokenSource(connectorCredentialIdentity(connectorID))
+	err := errors.Join(
+		s.credentials.ClearTokenSource(connectorCredentialIdentity(connectorID)),
+		s.approvals.Clear(connectorID),
+	)
+	s.invalidateAccountReadiness(connectorID)
+	return err
 }
 
 func (s *Service) AccessToken(ctx context.Context, connectorID string) (string, error) {
@@ -435,6 +598,7 @@ func (s *Service) AccessToken(ctx context.Context, connectorID string) (string, 
 	identity := connectorCredentialIdentity(definition.ID)
 	stored, err := s.credentials.LoadTokenSource(identity)
 	if err != nil {
+		s.invalidateAccountReadiness(definition.ID)
 		if errors.Is(err, mcpclient.ErrCredentialNotFound) {
 			return "", ErrNeedsAuth
 		}
@@ -442,9 +606,10 @@ func (s *Service) AccessToken(ctx context.Context, connectorID string) (string, 
 	}
 	if !storedMatchesDefinition(stored, definition) {
 		_ = s.credentials.ClearTokenSource(identity)
+		s.invalidateAccountReadiness(definition.ID)
 		return "", ErrCredentialChanged
 	}
-	if stored.NeedsReauth || stored.Token == nil {
+	if stored.Token == nil || (stored.NeedsReauth && strings.TrimSpace(stored.Token.RefreshToken) == "") {
 		return "", ErrNeedsAuth
 	}
 	clientCtx := context.WithValue(ctx, oauth2.HTTPClient, s.httpClient)
@@ -453,19 +618,40 @@ func (s *Service) AccessToken(ctx context.Context, connectorID string) (string, 
 		Scopes:   append([]string(nil), definition.OAuth.Scopes...),
 		Endpoint: oauth2.Endpoint{AuthURL: definition.OAuth.AuthorizationEndpoint, TokenURL: definition.OAuth.TokenEndpoint},
 	}
-	token, err := config.TokenSource(clientCtx, stored.Token).Token()
-	if err != nil || token == nil || strings.TrimSpace(token.AccessToken) == "" {
+	sourceToken := cloneOAuthToken(stored.Token)
+	if stored.NeedsReauth {
+		// Older builds marked every refresh transport failure as needs_reauth.
+		// A retained refresh token is still recoverable: force one provider
+		// refresh so a transient proxy outage does not require another login.
+		sourceToken.Expiry = time.Now().Add(-time.Hour)
+	}
+	token, err := config.TokenSource(clientCtx, sourceToken).Token()
+	if err != nil {
+		if !tokenErrorRequiresReauth(err) {
+			return "", fmt.Errorf("%w: %v", ErrRefreshUnavailable, err)
+		}
 		stored.NeedsReauth = true
+		stored.ReauthReason = "provider_rejected"
 		_ = s.credentials.SaveTokenSource(identity, stored)
+		s.invalidateAccountReadiness(definition.ID)
 		return "", ErrNeedsAuth
 	}
-	if tokenSignature(token) != tokenSignature(stored.Token) {
+	if token == nil || strings.TrimSpace(token.AccessToken) == "" {
+		stored.NeedsReauth = true
+		stored.ReauthReason = "provider_rejected"
+		_ = s.credentials.SaveTokenSource(identity, stored)
+		s.invalidateAccountReadiness(definition.ID)
+		return "", ErrNeedsAuth
+	}
+	if stored.NeedsReauth || tokenSignature(token) != tokenSignature(stored.Token) {
 		stored.Token = token
 		stored.NeedsReauth = false
+		stored.ReauthReason = ""
 		if err := s.credentials.SaveTokenSource(identity, stored); err != nil {
 			return "", err
 		}
 	}
+	s.cacheAccountReadiness(definition.ID, connectorFingerprint(definition), connectors.AccountReadiness{State: connectors.StateConnected})
 	return token.AccessToken, nil
 }
 
@@ -476,7 +662,12 @@ func (s *Service) MarkNeedsReauth(connectorID string) error {
 		return err
 	}
 	stored.NeedsReauth = true
-	return s.credentials.SaveTokenSource(identity, stored)
+	stored.ReauthReason = "access_token_rejected"
+	if err := s.credentials.SaveTokenSource(identity, stored); err != nil {
+		return err
+	}
+	s.invalidateAccountReadiness(connectorID)
+	return nil
 }
 
 func (s *Service) activeSession(connectorID, fingerprint string) *session {
@@ -495,7 +686,7 @@ func (s *Service) putSession(entry *session) {
 	s.mu.Lock()
 	for _, existing := range s.sessions {
 		if existing.connectorID == entry.connectorID {
-			existing.finish("cancelled", "已由新的授权会话替换。")
+			existing.cancelSession()
 			existing.closeServer()
 		}
 	}
@@ -590,4 +781,25 @@ func tokenSignature(token *oauth2.Token) string {
 		return ""
 	}
 	return strings.Join([]string{token.AccessToken, token.TokenType, token.RefreshToken, token.Expiry.UTC().Format(time.RFC3339Nano)}, "\x00")
+}
+
+func cloneOAuthToken(token *oauth2.Token) *oauth2.Token {
+	if token == nil {
+		return nil
+	}
+	clone := *token
+	return &clone
+}
+
+func tokenErrorRequiresReauth(err error) bool {
+	var retrieveErr *oauth2.RetrieveError
+	if !errors.As(err, &retrieveErr) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(retrieveErr.ErrorCode)) {
+	case "invalid_grant", "invalid_client", "unauthorized_client", "interaction_required", "consent_required", "admin_consent_required":
+		return true
+	default:
+		return false
+	}
 }

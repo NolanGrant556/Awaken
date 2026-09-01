@@ -4,7 +4,7 @@
 
 ## 用途
 
-`AwakenComposerBar` 用于提供紧凑任务输入栏，可作为中心入口、底部 dock 输入栏或表单内嵌 prompt 编辑器使用，并展示 repo/model/status 等元信息。它适合运行中的追加输入、首屏快速开始、停靠 composer 和需要复用 Slash/token 编辑语义的受控表单；父级负责受控输入、结构化 token、metaItems、提交/停止和添加上下文动作，本组件负责选择原生 `AwakenComposerInput` 或统一 plaintext token editor，并布局由 `AwakenIconButton` 实现的 `AwakenContextButton`、`AwakenSendButton` 和两者的 `AwakenTooltip`。`center` / `dock` 还可通过受控 `pluginPicker` 在 `+` 右侧显示插件快捷胶囊：最多预览三个统一的拼图默认图标，点击后展开只含默认图标与插件名的紧凑可滚动列表并回调 option id；弹层内容宽度为 `216px`，列表项最小高度 `30px`、内边距 `2px 6px`，内部使用 `20px` 图标底板、`12px` 图标和 `11/16px` 文字，快捷胶囊本身的尺寸保持独立不变；没有已安装插件时入口仍常驻，弹层明确显示空状态。组件只保存弹层开合，不读取插件目录或创建 token，`embedded` 不渲染该入口。带 `progress` 的上下文用量入口渲染为圆环占比指示，仅指针 hover 用 `AwakenTooltip` 展示「N% 当前使用」与父级传入的 `value`；打开面板期间与关闭后焦点回到入口时不展示 tip，指针离开后再 hover 才出现。点击仍由父级打开 `AwakenContextUsagePanel`，组件本身不拥有用量数据或面板内容。
+`AwakenComposerBar` 用于提供紧凑任务输入栏，可作为中心入口、底部 dock 输入栏或表单内嵌 prompt 编辑器使用，并展示 repo/model/status 等元信息。它适合运行中的追加输入、首屏快速开始、停靠 composer 和需要复用 Slash/token 编辑语义的受控表单；父级负责受控输入、结构化 token、metaItems、提交/停止和添加上下文动作，本组件负责选择原生 `AwakenComposerInput` 或统一 plaintext token editor，并布局由 `AwakenIconButton` 实现的 `AwakenContextButton`、`AwakenSendButton` 和两者的 `AwakenTooltip`。`center` / `dock` 还可通过受控 `pluginPicker` 在 `+` 右侧显示插件快捷胶囊：最多预览三个插件自有图标或拼图回退图标，点击后按父级传入的 `sectionLabel` 显示连续的轻量分区，并在紧凑可滚动列表中展示同一图标与插件名后回调 option id；弹层内容宽度为 `216px`，列表项最小高度 `30px`、内边距 `2px 6px`，内部使用 `20px` 图标底板、最大 `14px` 品牌图标和 `11/16px` 文字，快捷胶囊本身的尺寸保持独立不变；没有已安装插件时入口仍常驻，弹层明确显示空状态。组件只保存弹层开合，不读取插件目录、推断来源或创建 token，`embedded` 不渲染该入口。带 `progress` 的上下文用量入口渲染为圆环占比指示，仅指针 hover 用 `AwakenTooltip` 展示「N% 当前使用」与父级传入的 `value`；打开面板期间与关闭后焦点回到入口时不展示 tip，指针离开后再 hover 才出现。点击仍由父级打开 `AwakenContextUsagePanel`，组件本身不拥有用量数据或面板内容。
 
 `variant="embedded"` 只渲染输入 surface，不渲染上下文与发送工具栏；`submitOnEnter={false}` 保留普通多行编辑，`inputAriaLabel` 由宿主表单提供准确名称。内嵌形态仍复用同一 `slashPalette`、结构化 token 和 `onStructuredInputChange`，不建立第二套 Slash UI 或 token DOM。`slashPalette.actions[].sectionLabel` 可为同一列表提供连续的轻量分区标题；Desktop 当前用它把 `@` 目录区分为 `内置` 与 `插件`，组件不根据 action type 自行推断产品来源。
 
@@ -32,7 +32,7 @@
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
 - 通过 props 输入，通过回调输出。
 - `projectPicker` 只属于 `center` 首页视觉；无项目/项目 authority、项目排序、选择清理和创建弹窗均留在 Desktop。
-- `pluginPicker` 只拥有弹层开合；目录刷新、已选判断、Plugin token identity、逻辑 caret 插入与去重均留在 Desktop。只要父级传入该受控能力，入口就常驻；没有 options/loading/error 时弹层显示“还没有安装插件”。
+- `pluginPicker` 只拥有弹层开合，并逐项投影父级传入的 `sectionLabel` 与 `icon`；目录刷新、来源判定、已选判断、Plugin token identity、逻辑 caret 插入与去重均留在 Desktop。只要父级传入该受控能力，入口就常驻；没有 options/loading/error 时弹层显示“还没有安装插件”。
 - `slashPalette` 只按父级传入的 `sectionLabel` 投影分区，不维护第二份 action 列表，也不推断哪些能力属于内置或插件。
 - token label/source/path 不进入 `value`；selection、复制、持久化和提交均只使用结构化 segment。
 - 不使用 zero-width caret sentinel；空 segment 由真实空文本节点表示。

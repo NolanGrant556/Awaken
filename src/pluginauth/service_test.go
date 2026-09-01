@@ -24,6 +24,7 @@ type fakeHostConnectorAuth struct {
 	status       connectors.ConnectorStatus
 	session      connectors.ConnectorAuthSession
 	started      string
+	reauthorized string
 	cancelled    string
 	disconnected string
 }
@@ -37,12 +38,23 @@ func (f *fakeHostConnectorAuth) Start(_ context.Context, connectorID string) (co
 	f.session = connectors.ConnectorAuthSession{SessionID: "host-session", ConnectorID: connectorID, Status: "authorizing", ExpiresAt: &expires}
 	return connectors.ConnectorAuthStartResult{SessionID: f.session.SessionID, ConnectorID: connectorID, Status: f.session.Status, AuthorizationURL: "https://login.example.test/authorize", ExpiresAt: &expires}, nil
 }
+func (f *fakeHostConnectorAuth) Reauthorize(_ context.Context, connectorID string) (connectors.ConnectorAuthStartResult, error) {
+	f.reauthorized = connectorID
+	return f.Start(context.Background(), connectorID)
+}
 func (f *fakeHostConnectorAuth) Session(string) (connectors.ConnectorAuthSession, error) {
 	return f.session, nil
 }
 func (f *fakeHostConnectorAuth) Cancel(sessionID string) (connectors.ConnectorAuthSession, error) {
 	f.cancelled = sessionID
 	f.session.Status = "cancelled"
+	return f.session, nil
+}
+func (f *fakeHostConnectorAuth) MarkAdminApprovalPending(sessionID string) (connectors.ConnectorAuthSession, error) {
+	f.session.Status = "pending_admin_approval"
+	f.session.ErrorMessage = "等待组织管理员批准；批准后请重新连接。"
+	f.status.State = connectors.StateApprovalRequired
+	f.status.LastError = f.session.ErrorMessage
 	return f.session, nil
 }
 func (f *fakeHostConnectorAuth) Disconnect(_ context.Context, connectorID string) error {
@@ -193,6 +205,64 @@ func TestValidateActionURLRejectsUnsafeTargets(t *testing.T) {
 	}
 }
 
+func TestPluginPKCEAdminApprovalObservationPersistsWithoutCredential(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	credentials := mcpclient.NewInMemoryCredentialStore()
+	service := NewService(nil, nil, nil, credentials)
+	requirement := ir.SetupRequirement{
+		ID: "mail", Fingerprint: "approval-fingerprint", Kind: ir.SetupOAuthPKCE,
+		OAuth: &ir.OAuthSetupSpec{AuthorizationEndpoint: server.URL + "/authorize", TokenEndpoint: server.URL + "/token", ClientID: "public-client"},
+	}
+	started, err := service.startPKCE("mail-plugin", requirement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := service.MarkAdminApprovalPending(started.SessionID)
+	if err != nil || view.Status != "pending_admin_approval" {
+		t.Fatalf("pending view=%+v err=%v", view, err)
+	}
+	if status, _ := NewService(nil, nil, nil, credentials).SetupStatus("mail-plugin", requirement); status != plugins.SetupPendingAdminApproval {
+		t.Fatalf("persisted setup status=%s", status)
+	}
+	if present, _ := credentials.HasTokenSource(pluginCredentialIdentity("mail-plugin", requirement)); present {
+		t.Fatal("approval observation created a credential")
+	}
+}
+
+func TestPluginPKCEExplicitProviderApprovalErrorMapsToPending(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+	service := NewService(nil, nil, nil, mcpclient.NewInMemoryCredentialStore())
+	requirement := ir.SetupRequirement{
+		ID: "mail", Fingerprint: "approval-callback", Kind: ir.SetupOAuthPKCE,
+		OAuth: &ir.OAuthSetupSpec{AuthorizationEndpoint: server.URL + "/authorize", TokenEndpoint: server.URL + "/token", ClientID: "public-client"},
+	}
+	started, err := service.startPKCE("mail-plugin", requirement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizationURL, _ := url.Parse(started.AuthorizationURL)
+	callback := authorizationURL.Query().Get("redirect_uri")
+	state := authorizationURL.Query().Get("state")
+	response, err := http.Get(callback + "?error=admin_consent_required&state=" + url.QueryEscape(state))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("callback status=%d", response.StatusCode)
+	}
+	view := waitPluginAuthSession(t, service, started.SessionID)
+	if view.Status != "pending_admin_approval" {
+		t.Fatalf("view=%+v", view)
+	}
+}
+
 func TestCancelDeviceSessionIsTerminal(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -249,23 +319,65 @@ func TestHostConnectorSetupReusesHostOwnedAccountSession(t *testing.T) {
 	if status, _ := service.SetupStatus("mail-plugin", requirement); status != "needs_auth" {
 		t.Fatalf("status = %s", status)
 	}
-	started, err := service.startHostConnector(context.Background(), "mail-plugin", requirement)
+	started, err := service.startHostConnector(context.Background(), "mail-plugin", requirement, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if started.SessionID == "" || started.AuthorizationURL == "" || host.started != requirement.ConnectorID {
 		t.Fatalf("started = %+v host = %+v", started, host)
 	}
+	active, found, err := service.ActiveSession("mail-plugin", requirement.ID, requirement.Fingerprint)
+	if err != nil || !found || active.SessionID != started.SessionID || active.Status != "authorizing" {
+		t.Fatalf("active session = %+v found=%v err=%v", active, found, err)
+	}
+	if _, found, err := service.ActiveSession("mail-plugin", requirement.ID, "stale-fingerprint"); err != nil || found {
+		t.Fatalf("stale fingerprint recovered a session: found=%v err=%v", found, err)
+	}
 	view, err := service.Cancel(started.SessionID)
 	if err != nil || view.Status != "cancelled" || host.cancelled != "host-session" {
 		t.Fatalf("view = %+v err = %v host = %+v", view, err, host)
+	}
+	if _, found, err := service.ActiveSession("mail-plugin", requirement.ID, requirement.Fingerprint); err != nil || found {
+		t.Fatalf("cancelled session remained active: found=%v err=%v", found, err)
+	}
+}
+
+func TestHostConnectorSetupProjectsAdminApprovalPending(t *testing.T) {
+	host := &fakeHostConnectorAuth{status: connectors.ConnectorStatus{State: connectors.StateNeedsAuth}}
+	service := NewService(nil, nil, nil, mcpclient.NewInMemoryCredentialStore())
+	service.SetHostConnectorAuth(host)
+	requirement := ir.SetupRequirement{ID: "outlook", Fingerprint: "fp", Kind: ir.SetupHostConnector, ConnectorID: "awaken.microsoft.outlook", Required: true}
+	started, err := service.startHostConnector(context.Background(), "mail-plugin", requirement, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := service.MarkAdminApprovalPending(started.SessionID)
+	if err != nil || view.Status != "pending_admin_approval" {
+		t.Fatalf("view=%+v err=%v", view, err)
+	}
+	if status, _ := service.SetupStatus("mail-plugin", requirement); status != plugins.SetupPendingAdminApproval {
+		t.Fatalf("setup status=%s", status)
+	}
+}
+
+func TestHostConnectorSetupCanForceReauthorization(t *testing.T) {
+	host := &fakeHostConnectorAuth{status: connectors.ConnectorStatus{State: connectors.StateConnected}}
+	service := NewService(nil, nil, nil, mcpclient.NewInMemoryCredentialStore())
+	service.SetHostConnectorAuth(host)
+	requirement := ir.SetupRequirement{ID: "outlook", Fingerprint: "fp", Kind: ir.SetupHostConnector, ConnectorID: "awaken.microsoft.outlook", Required: true}
+	started, err := service.startHostConnector(context.Background(), "mail-plugin", requirement, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.SessionID == "" || host.reauthorized != requirement.ConnectorID {
+		t.Fatalf("started=%+v host=%+v", started, host)
 	}
 }
 
 func TestCleanupPluginDoesNotDisconnectSharedHostConnectorAccount(t *testing.T) {
 	t.Setenv("AWAKEN_HOME", t.TempDir())
 	pluginStore := plugins.NewStoreAt(t.TempDir())
-	root, err := filepath.Abs(filepath.Join("..", "..", "examples", "plugins", "awaken-outlook"))
+	root, err := filepath.Abs(filepath.Join("..", "..", "apps", "desktop", "resources", "builtin-plugins", "awaken-outlook"))
 	if err != nil {
 		t.Fatal(err)
 	}

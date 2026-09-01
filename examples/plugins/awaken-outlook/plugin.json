@@ -1,6 +1,0 @@
-{
-  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "awaken-outlook",
-  "version": "1.0.0",
-  "description": "Awaken 官方 Outlook 邮箱插件，通过宿主连接器安全访问 Microsoft Graph。"
-}

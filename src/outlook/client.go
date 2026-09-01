@@ -3,15 +3,20 @@ package outlook
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"awaken/src/connectorauth"
+	"awaken/src/networkroute"
 )
 
 const (
@@ -37,6 +42,7 @@ type Client struct {
 	baseURL     string
 	tokens      TokenProvider
 	onNeedsAuth func(serverName, reason string) error
+	scheduler   *MailScheduler
 }
 
 func NewClient(tokens TokenProvider) *Client {
@@ -71,17 +77,28 @@ type Recipient struct {
 
 type Message struct {
 	ID               string       `json:"id"`
+	ConversationID   string       `json:"conversationId,omitempty"`
 	Subject          string       `json:"subject,omitempty"`
 	BodyPreview      string       `json:"bodyPreview,omitempty"`
 	Body             MessageBody  `json:"body,omitempty"`
 	From             EmailParty   `json:"from,omitempty"`
+	Sender           EmailParty   `json:"sender,omitempty"`
 	ToRecipients     []EmailParty `json:"toRecipients,omitempty"`
 	CCRecipients     []EmailParty `json:"ccRecipients,omitempty"`
+	BCCRecipients    []EmailParty `json:"bccRecipients,omitempty"`
+	ReplyTo          []EmailParty `json:"replyTo,omitempty"`
 	ReceivedDateTime string       `json:"receivedDateTime,omitempty"`
 	SentDateTime     string       `json:"sentDateTime,omitempty"`
 	IsRead           bool         `json:"isRead"`
+	IsDraft          bool         `json:"isDraft"`
+	HasAttachments   bool         `json:"hasAttachments"`
 	Categories       []string     `json:"categories,omitempty"`
 	WebLink          string       `json:"webLink,omitempty"`
+}
+
+type InternetHeader struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 type MessageBody struct {
@@ -94,8 +111,10 @@ type EmailParty struct {
 }
 
 type MessageList struct {
-	Messages []Message `json:"messages"`
-	NextLink string    `json:"nextLink,omitempty"`
+	Messages   []Message `json:"messages"`
+	HasMore    bool      `json:"hasMore"`
+	NextCursor string    `json:"nextCursor,omitempty"`
+	NextLink   string    `json:"-"`
 }
 
 type graphMessageList struct {
@@ -128,6 +147,18 @@ func (e *GraphError) Error() string {
 }
 
 func (c *Client) ListMessages(ctx context.Context, folder, query string, top int, unreadOnly bool) (MessageList, error) {
+	return c.ListMessagesInMailbox(ctx, "", folder, query, top, unreadOnly)
+}
+
+func (c *Client) ListMessagesInMailbox(ctx context.Context, mailbox, folder, query string, top int, unreadOnly bool) (MessageList, error) {
+	return c.ListMessagesInMailboxPage(ctx, mailbox, folder, query, top, "", unreadOnly)
+}
+
+func (c *Client) ListMessagesInMailboxPage(ctx context.Context, mailbox, folder, query string, top int, cursor string, unreadOnly bool) (MessageList, error) {
+	root, err := mailboxRoot(mailbox)
+	if err != nil {
+		return MessageList{}, err
+	}
 	folder = strings.TrimSpace(folder)
 	if folder == "" {
 		folder = "inbox"
@@ -138,9 +169,21 @@ func (c *Client) ListMessages(ctx context.Context, folder, query string, top int
 	if top > 50 {
 		top = 50
 	}
+	resourcePath := root + "/mailFolders/" + url.PathEscape(folder) + "/messages"
+	if strings.TrimSpace(cursor) != "" {
+		path, cursorErr := c.continuationPath(cursor, resourcePath)
+		if cursorErr != nil {
+			return MessageList{}, cursorErr
+		}
+		var response graphMessageList
+		if err := c.do(ctx, http.MethodGet, path, nil, &response); err != nil {
+			return MessageList{}, err
+		}
+		return messageListPage(response.Value, response.NextLink), nil
+	}
 	values := url.Values{}
 	values.Set("$top", strconv.Itoa(top))
-	values.Set("$select", "id,subject,bodyPreview,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isRead,categories,webLink")
+	values.Set("$select", "id,conversationId,subject,bodyPreview,from,sender,toRecipients,ccRecipients,bccRecipients,replyTo,receivedDateTime,sentDateTime,isRead,isDraft,hasAttachments,categories,webLink")
 	values.Set("$orderby", "receivedDateTime DESC")
 	if unreadOnly && strings.TrimSpace(query) == "" {
 		values.Set("$filter", "isRead eq false")
@@ -152,7 +195,7 @@ func (c *Client) ListMessages(ctx context.Context, folder, query string, top int
 		values.Set("$search", `"`+strings.ReplaceAll(query, `"`, `\"`)+`"`)
 		values.Del("$orderby")
 	}
-	path := "/me/mailFolders/" + url.PathEscape(folder) + "/messages?" + values.Encode()
+	path := resourcePath + "?" + values.Encode()
 	var response graphMessageList
 	if err := c.do(ctx, http.MethodGet, path, nil, &response); err != nil {
 		return MessageList{}, err
@@ -166,53 +209,356 @@ func (c *Client) ListMessages(ctx context.Context, folder, query string, top int
 		}
 		response.Value = filtered
 	}
-	return MessageList{Messages: response.Value, NextLink: response.NextLink}, nil
+	return messageListPage(response.Value, response.NextLink), nil
+}
+
+func (c *Client) SearchMessagesInMailbox(ctx context.Context, mailbox, folder, query string, size int, cursor string) (MessageList, error) {
+	root, err := mailboxRoot(mailbox)
+	if err != nil {
+		return MessageList{}, err
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return MessageList{}, fmt.Errorf("query is required; use list_messages or get_recent_emails for recent inbox mail")
+	}
+	if len(query) > 256 {
+		return MessageList{}, fmt.Errorf("search query exceeds 256 characters")
+	}
+	if size <= 0 {
+		size = 20
+	}
+	if size > 50 {
+		size = 50
+	}
+	path := root + "/messages"
+	if folder = strings.TrimSpace(folder); folder != "" {
+		path = root + "/mailFolders/" + url.PathEscape(folder) + "/messages"
+	}
+	if strings.TrimSpace(cursor) != "" {
+		continuation, cursorErr := c.continuationPath(cursor, path)
+		if cursorErr != nil {
+			return MessageList{}, cursorErr
+		}
+		var response graphMessageList
+		if err := c.do(ctx, http.MethodGet, continuation, nil, &response); err != nil {
+			return MessageList{}, err
+		}
+		return messageListPage(response.Value, response.NextLink), nil
+	}
+	values := url.Values{}
+	values.Set("$top", strconv.Itoa(size))
+	values.Set("$select", "id,conversationId,subject,bodyPreview,from,sender,toRecipients,ccRecipients,bccRecipients,replyTo,receivedDateTime,sentDateTime,isRead,isDraft,hasAttachments,categories,webLink")
+	values.Set("$search", `"`+strings.ReplaceAll(query, `"`, `\"`)+`"`)
+	var response graphMessageList
+	if err := c.do(ctx, http.MethodGet, path+"?"+values.Encode(), nil, &response); err != nil {
+		return MessageList{}, err
+	}
+	return messageListPage(response.Value, response.NextLink), nil
+}
+
+func messageListPage(messages []Message, nextLink string) MessageList {
+	result := MessageList{Messages: messages, HasMore: strings.TrimSpace(nextLink) != "", NextLink: nextLink}
+	if result.HasMore {
+		result.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(nextLink))
+	}
+	return result
+}
+
+func (c *Client) continuationPath(cursor, expectedResourcePath string) (string, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(cursor))
+	if err != nil || len(decoded) == 0 || len(decoded) > 16*1024 {
+		return "", fmt.Errorf("pagination cursor is invalid")
+	}
+	next, err := url.Parse(string(decoded))
+	if err != nil || next.Scheme == "" || next.Host == "" || next.User != nil || next.Fragment != "" {
+		return "", fmt.Errorf("pagination cursor is invalid")
+	}
+	base, err := url.Parse(c.baseURL)
+	if err != nil || !strings.EqualFold(next.Scheme, base.Scheme) || !strings.EqualFold(next.Host, base.Host) {
+		return "", fmt.Errorf("pagination cursor origin is invalid")
+	}
+	path := next.EscapedPath()
+	basePath := strings.TrimSuffix(base.EscapedPath(), "/")
+	if basePath != "" {
+		if !strings.HasPrefix(path, basePath+"/") {
+			return "", fmt.Errorf("pagination cursor path is invalid")
+		}
+		path = strings.TrimPrefix(path, basePath)
+	}
+	decodedPath, pathErr := url.PathUnescape(path)
+	decodedExpected, expectedErr := url.PathUnescape(expectedResourcePath)
+	if pathErr != nil || expectedErr != nil || canonicalGraphResourcePath(decodedPath) != canonicalGraphResourcePath(decodedExpected) {
+		return "", fmt.Errorf("pagination cursor does not belong to this mailbox resource")
+	}
+	if next.RawQuery == "" {
+		return "", fmt.Errorf("pagination cursor query is missing")
+	}
+	return path + "?" + next.RawQuery, nil
+}
+
+var graphODataKeySegment = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9]*)\('((?:[^']|'')*)'\)$`)
+
+// Microsoft Graph can canonicalize a collection item from slash notation
+// (`/mailFolders/inbox`) to OData key notation (`/mailFolders('inbox')`) in
+// @odata.nextLink. Both forms identify the same resource. Normalize only this
+// narrowly defined syntax before comparing the cursor with the originating
+// mailbox resource; origin, mailbox and full remaining path still have to
+// match exactly.
+func canonicalGraphResourcePath(path string) string {
+	parts := strings.Split(strings.TrimSpace(path), "/")
+	canonical := make([]string, 0, len(parts)+2)
+	for _, part := range parts {
+		matches := graphODataKeySegment.FindStringSubmatch(part)
+		if len(matches) != 3 {
+			canonical = append(canonical, part)
+			continue
+		}
+		canonical = append(canonical, matches[1], strings.ReplaceAll(matches[2], "''", "'"))
+	}
+	return strings.Join(canonical, "/")
 }
 
 func (c *Client) GetMessage(ctx context.Context, messageID string) (Message, error) {
-	messageID, err := requiredIdentifier("messageId", messageID)
+	return c.GetMessageInMailbox(ctx, "", messageID)
+}
+
+func (c *Client) GetMessageInMailbox(ctx context.Context, mailbox, messageID string) (Message, error) {
+	root, err := mailboxRoot(mailbox)
+	if err != nil {
+		return Message{}, err
+	}
+	messageID, err = requiredIdentifier("messageId", messageID)
 	if err != nil {
 		return Message{}, err
 	}
 	values := url.Values{}
-	values.Set("$select", "id,subject,body,bodyPreview,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isRead,categories,webLink")
+	values.Set("$select", "id,conversationId,subject,body,bodyPreview,from,sender,toRecipients,ccRecipients,bccRecipients,replyTo,receivedDateTime,sentDateTime,isRead,isDraft,hasAttachments,categories,webLink")
 	var message Message
-	if err := c.do(ctx, http.MethodGet, "/me/messages/"+url.PathEscape(messageID)+"?"+values.Encode(), nil, &message); err != nil {
+	if err := c.do(ctx, http.MethodGet, root+"/messages/"+url.PathEscape(messageID)+"?"+values.Encode(), nil, &message); err != nil {
 		return Message{}, err
+	}
+	return message, nil
+}
+
+type MessageBatchFailure struct {
+	MessageID  string `json:"messageId"`
+	StatusCode int    `json:"statusCode"`
+	Code       string `json:"code,omitempty"`
+	Message    string `json:"message,omitempty"`
+	RetryAfter string `json:"retryAfter,omitempty"`
+}
+
+type MessageBatch struct {
+	Messages []Message             `json:"messages"`
+	Failures []MessageBatchFailure `json:"failures,omitempty"`
+}
+
+type graphBatchRequest struct {
+	Requests []graphBatchRequestItem `json:"requests"`
+}
+
+type graphBatchRequestItem struct {
+	ID     string `json:"id"`
+	Method string `json:"method"`
+	URL    string `json:"url"`
+}
+
+type graphBatchResponse struct {
+	Responses []graphBatchResponseItem `json:"responses"`
+}
+
+type graphBatchResponseItem struct {
+	ID      string            `json:"id"`
+	Status  int               `json:"status"`
+	Headers map[string]string `json:"headers"`
+	Body    json.RawMessage   `json:"body"`
+}
+
+func (c *Client) GetMessagesBatchInMailbox(ctx context.Context, mailbox string, messageIDs []string) (MessageBatch, error) {
+	root, err := mailboxRoot(mailbox)
+	if err != nil {
+		return MessageBatch{}, err
+	}
+	if len(messageIDs) == 0 {
+		return MessageBatch{}, fmt.Errorf("at least one messageId is required")
+	}
+	if len(messageIDs) > 20 {
+		return MessageBatch{}, fmt.Errorf("messageIds cannot contain more than 20 items")
+	}
+	requests := make([]graphBatchRequestItem, 0, len(messageIDs))
+	requestToMessage := make(map[string]string, len(messageIDs))
+	seen := make(map[string]struct{}, len(messageIDs))
+	values := url.Values{}
+	values.Set("$select", "id,conversationId,subject,body,bodyPreview,from,sender,toRecipients,ccRecipients,bccRecipients,replyTo,receivedDateTime,sentDateTime,isRead,isDraft,hasAttachments,categories,webLink")
+	for index, rawID := range messageIDs {
+		messageID, idErr := requiredIdentifier("messageId", rawID)
+		if idErr != nil {
+			return MessageBatch{}, idErr
+		}
+		if _, duplicate := seen[messageID]; duplicate {
+			return MessageBatch{}, fmt.Errorf("messageIds must be unique")
+		}
+		seen[messageID] = struct{}{}
+		requestID := strconv.Itoa(index + 1)
+		requestToMessage[requestID] = messageID
+		requests = append(requests, graphBatchRequestItem{
+			ID: requestID, Method: http.MethodGet,
+			URL: root + "/messages/" + url.PathEscape(messageID) + "?" + values.Encode(),
+		})
+	}
+	var response graphBatchResponse
+	if err := c.do(ctx, http.MethodPost, "/$batch", graphBatchRequest{Requests: requests}, &response); err != nil {
+		return MessageBatch{}, err
+	}
+	byRequestID := make(map[string]graphBatchResponseItem, len(response.Responses))
+	for _, item := range response.Responses {
+		byRequestID[item.ID] = item
+	}
+	result := MessageBatch{Messages: make([]Message, 0, len(messageIDs))}
+	for _, request := range requests {
+		item, ok := byRequestID[request.ID]
+		messageID := requestToMessage[request.ID]
+		if !ok {
+			result.Failures = append(result.Failures, MessageBatchFailure{MessageID: messageID, Message: "Microsoft Graph batch response omitted this message"})
+			continue
+		}
+		if item.Status == http.StatusUnauthorized {
+			_ = c.tokens.MarkNeedsReauth(ConnectorID)
+			if c.onNeedsAuth != nil {
+				_ = c.onNeedsAuth(ServerName, "Microsoft Outlook authorization expired")
+			}
+			return MessageBatch{}, ErrNeedsAuth
+		}
+		if item.Status >= 200 && item.Status < 300 {
+			var message Message
+			if err := json.Unmarshal(item.Body, &message); err != nil {
+				result.Failures = append(result.Failures, MessageBatchFailure{MessageID: messageID, StatusCode: item.Status, Message: "decode Microsoft Graph batch item"})
+				continue
+			}
+			result.Messages = append(result.Messages, message)
+			continue
+		}
+		var envelope graphErrorEnvelope
+		_ = json.Unmarshal(item.Body, &envelope)
+		result.Failures = append(result.Failures, MessageBatchFailure{
+			MessageID: messageID, StatusCode: item.Status,
+			Code: safeGraphText(envelope.Error.Code, 120), Message: safeGraphText(envelope.Error.Message, 512),
+			RetryAfter: batchHeader(item.Headers, "Retry-After"),
+		})
+	}
+	return result, nil
+}
+
+func batchHeader(headers map[string]string, name string) string {
+	for key, value := range headers {
+		if strings.EqualFold(key, name) {
+			return safeGraphText(value, 120)
+		}
+	}
+	return ""
+}
+
+type graphMessageWithHeaders struct {
+	Message
+	InternetHeaders []InternetHeader `json:"internetMessageHeaders,omitempty"`
+}
+
+func (c *Client) getMessageWithHeaders(ctx context.Context, mailbox, messageID string) (graphMessageWithHeaders, error) {
+	root, err := mailboxRoot(mailbox)
+	if err != nil {
+		return graphMessageWithHeaders{}, err
+	}
+	messageID, err = requiredIdentifier("messageId", messageID)
+	if err != nil {
+		return graphMessageWithHeaders{}, err
+	}
+	values := url.Values{}
+	values.Set("$select", "id,subject,from,receivedDateTime,internetMessageHeaders")
+	var message graphMessageWithHeaders
+	if err := c.do(ctx, http.MethodGet, root+"/messages/"+url.PathEscape(messageID)+"?"+values.Encode(), nil, &message); err != nil {
+		return graphMessageWithHeaders{}, err
 	}
 	return message, nil
 }
 
 type ComposeMessage struct {
-	Subject string
-	Body    string
-	To      []Recipient
-	CC      []Recipient
+	Subject         string
+	Body            string
+	To              []Recipient
+	CC              []Recipient
+	BCC             []Recipient
+	From            *Recipient
+	AttachmentPaths []string
 }
 
 func (c *Client) CreateDraft(ctx context.Context, input ComposeMessage) (Message, error) {
+	return c.CreateDraftInMailbox(ctx, "", input)
+}
+
+func (c *Client) CreateDraftInMailbox(ctx context.Context, mailbox string, input ComposeMessage) (Message, error) {
+	root, err := mailboxRoot(mailbox)
+	if err != nil {
+		return Message{}, err
+	}
+	if input.From == nil && strings.TrimSpace(mailbox) != "" {
+		from := Recipient{Address: strings.TrimSpace(mailbox)}
+		input.From = &from
+	}
 	payload, err := composePayload(input)
 	if err != nil {
 		return Message{}, err
 	}
 	var message Message
-	if err := c.do(ctx, http.MethodPost, "/me/messages", payload, &message); err != nil {
+	if err := c.do(ctx, http.MethodPost, root+"/messages", payload, &message); err != nil {
 		return Message{}, err
+	}
+	if err := c.AddAttachments(ctx, mailbox, message.ID, input.AttachmentPaths); err != nil {
+		return Message{}, fmt.Errorf("draft %s was created but attachments could not be added: %w", message.ID, err)
 	}
 	return message, nil
 }
 
 func (c *Client) SendMail(ctx context.Context, input ComposeMessage) error {
+	return c.SendMailFromMailbox(ctx, "", input)
+}
+
+func (c *Client) SendMailFromMailbox(ctx context.Context, mailbox string, input ComposeMessage) error {
+	root, err := mailboxRoot(mailbox)
+	if err != nil {
+		return err
+	}
+	if input.From == nil && strings.TrimSpace(mailbox) != "" {
+		from := Recipient{Address: strings.TrimSpace(mailbox)}
+		input.From = &from
+	}
+	if len(input.AttachmentPaths) > 0 {
+		draft, err := c.CreateDraftInMailbox(ctx, mailbox, input)
+		if err != nil {
+			return err
+		}
+		if err := c.SendDraft(ctx, mailbox, draft.ID); err != nil {
+			return fmt.Errorf("draft %s contains the prepared message but could not be sent: %w", draft.ID, err)
+		}
+		return nil
+	}
 	payload, err := composePayload(input)
 	if err != nil {
 		return err
 	}
 	body := map[string]any{"message": payload, "saveToSentItems": true}
-	return c.do(ctx, http.MethodPost, "/me/sendMail", body, nil)
+	return c.do(ctx, http.MethodPost, root+"/sendMail", body, nil)
 }
 
 func (c *Client) ReplyMessage(ctx context.Context, messageID, comment string) error {
-	messageID, err := requiredIdentifier("messageId", messageID)
+	return c.ReplyMessageInMailbox(ctx, "", messageID, comment, false)
+}
+
+func (c *Client) ReplyMessageInMailbox(ctx context.Context, mailbox, messageID, comment string, replyAll bool) error {
+	root, err := mailboxRoot(mailbox)
+	if err != nil {
+		return err
+	}
+	messageID, err = requiredIdentifier("messageId", messageID)
 	if err != nil {
 		return err
 	}
@@ -223,11 +569,23 @@ func (c *Client) ReplyMessage(ctx context.Context, messageID, comment string) er
 	if len(comment) > 100_000 {
 		return fmt.Errorf("comment exceeds 100000 characters")
 	}
-	return c.do(ctx, http.MethodPost, "/me/messages/"+url.PathEscape(messageID)+"/reply", map[string]string{"comment": comment}, nil)
+	action := "reply"
+	if replyAll {
+		action = "replyAll"
+	}
+	return c.do(ctx, http.MethodPost, root+"/messages/"+url.PathEscape(messageID)+"/"+action, map[string]string{"comment": comment}, nil)
 }
 
 func (c *Client) UpdateMessage(ctx context.Context, messageID string, isRead *bool, categories []string) (Message, error) {
-	messageID, err := requiredIdentifier("messageId", messageID)
+	return c.UpdateMessageInMailbox(ctx, "", messageID, isRead, categories)
+}
+
+func (c *Client) UpdateMessageInMailbox(ctx context.Context, mailbox, messageID string, isRead *bool, categories []string) (Message, error) {
+	root, err := mailboxRoot(mailbox)
+	if err != nil {
+		return Message{}, err
+	}
+	messageID, err = requiredIdentifier("messageId", messageID)
 	if err != nil {
 		return Message{}, err
 	}
@@ -253,14 +611,22 @@ func (c *Client) UpdateMessage(ctx context.Context, messageID string, isRead *bo
 		return Message{}, fmt.Errorf("isRead or categories is required")
 	}
 	var message Message
-	if err := c.do(ctx, http.MethodPatch, "/me/messages/"+url.PathEscape(messageID), payload, &message); err != nil {
+	if err := c.do(ctx, http.MethodPatch, root+"/messages/"+url.PathEscape(messageID), payload, &message); err != nil {
 		return Message{}, err
 	}
 	return message, nil
 }
 
 func (c *Client) MoveMessage(ctx context.Context, messageID, destinationID string) (Message, error) {
-	messageID, err := requiredIdentifier("messageId", messageID)
+	return c.MoveMessageInMailbox(ctx, "", messageID, destinationID)
+}
+
+func (c *Client) MoveMessageInMailbox(ctx context.Context, mailbox, messageID, destinationID string) (Message, error) {
+	root, err := mailboxRoot(mailbox)
+	if err != nil {
+		return Message{}, err
+	}
+	messageID, err = requiredIdentifier("messageId", messageID)
 	if err != nil {
 		return Message{}, err
 	}
@@ -269,18 +635,26 @@ func (c *Client) MoveMessage(ctx context.Context, messageID, destinationID strin
 		return Message{}, err
 	}
 	var message Message
-	if err := c.do(ctx, http.MethodPost, "/me/messages/"+url.PathEscape(messageID)+"/move", map[string]string{"destinationId": destinationID}, &message); err != nil {
+	if err := c.do(ctx, http.MethodPost, root+"/messages/"+url.PathEscape(messageID)+"/move", map[string]string{"destinationId": destinationID}, &message); err != nil {
 		return Message{}, err
 	}
 	return message, nil
 }
 
 func (c *Client) DeleteMessage(ctx context.Context, messageID string) error {
-	messageID, err := requiredIdentifier("messageId", messageID)
+	return c.DeleteMessageInMailbox(ctx, "", messageID)
+}
+
+func (c *Client) DeleteMessageInMailbox(ctx context.Context, mailbox, messageID string) error {
+	root, err := mailboxRoot(mailbox)
 	if err != nil {
 		return err
 	}
-	return c.do(ctx, http.MethodDelete, "/me/messages/"+url.PathEscape(messageID), nil, nil)
+	messageID, err = requiredIdentifier("messageId", messageID)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodDelete, root+"/messages/"+url.PathEscape(messageID), nil, nil)
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any, output any) error {
@@ -289,7 +663,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, output a
 	}
 	token, err := c.tokens.AccessToken(ctx, ConnectorID)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrNeedsAuth, err)
+		return outlookAccessTokenError(err)
 	}
 	if strings.TrimSpace(token) == "" {
 		return ErrNeedsAuth
@@ -311,7 +685,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, output a
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
-	response, err := c.httpClient.Do(request)
+	response, err := c.performRequest(request)
 	if err != nil {
 		return fmt.Errorf("call Microsoft Graph: %w", err)
 	}
@@ -342,6 +716,40 @@ func (c *Client) do(ctx context.Context, method, path string, body any, output a
 		return fmt.Errorf("decode Microsoft Graph response: %w", err)
 	}
 	return nil
+}
+
+func outlookAccessTokenError(err error) error {
+	if errors.Is(err, connectorauth.ErrNeedsAuth) || errors.Is(err, connectorauth.ErrCredentialChanged) {
+		return fmt.Errorf("%w: %v", ErrNeedsAuth, err)
+	}
+	return fmt.Errorf("resolve Outlook access token: %w", err)
+}
+
+func (c *Client) performRequest(request *http.Request) (*http.Response, error) {
+	response, err := c.httpClient.Do(request)
+	if err == nil {
+		return response, nil
+	}
+	proxyFailed := networkroute.ReportDefaultProxyFailure(request)
+	if !proxyFailed || !safeGraphRetryMethod(request.Method) || request.Body != nil {
+		return nil, err
+	}
+	// A loopback proxy can keep accepting TCP while its CONNECT/TLS path is
+	// broken. GET/HEAD/OPTIONS have no external side effect, so auto policy may
+	// retry once through the newly selected direct route. Writes remain
+	// do-not-retry because their remote result can be unknown.
+	c.httpClient.CloseIdleConnections()
+	retry := request.Clone(request.Context())
+	return c.httpClient.Do(retry)
+}
+
+func safeGraphRetryMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	default:
+		return false
+	}
 }
 
 func safeGraphText(value string, limit int) string {
@@ -379,7 +787,36 @@ func composePayload(input ComposeMessage) (map[string]any, error) {
 	if len(cc) > 0 {
 		payload["ccRecipients"] = cc
 	}
+	bcc, err := recipientPayload(input.BCC)
+	if err != nil {
+		return nil, err
+	}
+	if len(bcc) > 0 {
+		payload["bccRecipients"] = bcc
+	}
+	if input.From != nil {
+		from, err := recipientPayload([]Recipient{*input.From})
+		if err != nil {
+			return nil, err
+		}
+		payload["from"] = from[0]
+	}
 	return payload, nil
+}
+
+func mailboxRoot(mailbox string) (string, error) {
+	mailbox = strings.TrimSpace(mailbox)
+	if mailbox == "" {
+		return "/me", nil
+	}
+	mailbox, err := requiredIdentifier("mailbox", mailbox)
+	if err != nil {
+		return "", err
+	}
+	if !strings.Contains(mailbox, "@") || strings.ContainsAny(mailbox, " /\\?#") {
+		return "", fmt.Errorf("mailbox must be an exact email address or user principal name")
+	}
+	return "/users/" + url.PathEscape(mailbox), nil
 }
 
 func recipientPayload(values []Recipient) ([]map[string]any, error) {

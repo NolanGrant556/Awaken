@@ -43,6 +43,7 @@ var (
 	ErrNoUsableComponents      = errors.New("plugin has no usable Skill or MCP component")
 	ErrRuntimeLeaseActive      = errors.New("plugin runtime generation is in use")
 	ErrSkillPackageSelected    = errors.New("Skill package selected in Plugin installer")
+	ErrBuiltinImmutable        = errors.New("built-in plugin is managed by Awaken")
 )
 
 type RuntimeLease struct {
@@ -107,6 +108,9 @@ type Record struct {
 	ManifestPath       string                       `json:"manifestPath"`
 	InstallationID     string                       `json:"installationId"`
 	DisplayName        string                       `json:"displayName,omitempty"`
+	Builtin            bool                         `json:"builtin,omitempty"`
+	BrandIcon          string                       `json:"brandIcon,omitempty"`
+	BuiltinOrder       int                          `json:"builtinOrder,omitempty"`
 	Components         map[string]ComponentOverride `json:"components,omitempty"`
 	Variables          map[string]VariableValueRef  `json:"variables,omitempty"`
 	SecondaryManifests []string                     `json:"secondaryManifests,omitempty"`
@@ -159,6 +163,9 @@ type InstalledPlugin struct {
 	ManifestPath        string
 	InstallationID      string
 	DisplayName         string
+	Builtin             bool
+	BrandIcon           string
+	BuiltinOrder        int
 	Components          []ir.Component
 	Setup               []ir.SetupRequirement
 	ComponentState      []ComponentState
@@ -187,6 +194,16 @@ type InstallRequest struct {
 	Replace        bool
 	ExpectedDigest string
 	InstallName    string
+	Builtin        *BuiltinPresentation
+}
+
+// BuiltinPresentation is trusted release metadata read only from the
+// Desktop-bundled plugin catalog. Ordinary plugin packages cannot opt into
+// built-in ownership through their portable manifest.
+type BuiltinPresentation struct {
+	DisplayName string `json:"displayName"`
+	BrandIcon   string `json:"brandIcon"`
+	Order       int    `json:"order"`
 }
 
 type ComponentState struct {
@@ -204,26 +221,28 @@ type ComponentState struct {
 type SetupStatus string
 
 const (
-	SetupReady              SetupStatus = "ready"
-	SetupNeedsConfiguration SetupStatus = "needs_configuration"
-	SetupNeedsAuth          SetupStatus = "needs_auth"
-	SetupAuthorizing        SetupStatus = "authorizing"
-	SetupVerifying          SetupStatus = "verifying"
-	SetupExpired            SetupStatus = "expired"
-	SetupFailed             SetupStatus = "failed"
-	SetupUnsupported        SetupStatus = "unsupported"
+	SetupReady                SetupStatus = "ready"
+	SetupNeedsConfiguration   SetupStatus = "needs_configuration"
+	SetupNeedsAuth            SetupStatus = "needs_auth"
+	SetupAuthorizing          SetupStatus = "authorizing"
+	SetupVerifying            SetupStatus = "verifying"
+	SetupPendingAdminApproval SetupStatus = "pending_admin_approval"
+	SetupExpired              SetupStatus = "expired"
+	SetupFailed               SetupStatus = "failed"
+	SetupUnsupported          SetupStatus = "unsupported"
 )
 
 type SetupAction string
 
 const (
-	SetupActionConfigure   SetupAction = "configure"
-	SetupActionAuthorize   SetupAction = "authorize"
-	SetupActionCancel      SetupAction = "cancel"
-	SetupActionRetry       SetupAction = "retry"
-	SetupActionProbe       SetupAction = "probe"
-	SetupActionDisconnect  SetupAction = "disconnect"
-	SetupActionInspectOnly SetupAction = "inspect_only"
+	SetupActionConfigure         SetupAction = "configure"
+	SetupActionAuthorize         SetupAction = "authorize"
+	SetupActionCancel            SetupAction = "cancel"
+	SetupActionMarkAdminApproval SetupAction = "mark_admin_approval"
+	SetupActionRetry             SetupAction = "retry"
+	SetupActionProbe             SetupAction = "probe"
+	SetupActionDisconnect        SetupAction = "disconnect"
+	SetupActionInspectOnly       SetupAction = "inspect_only"
 )
 
 type SetupItem struct {
@@ -239,6 +258,7 @@ type SetupSummary struct {
 	Ready              int `json:"ready"`
 	NeedsConfiguration int `json:"needsConfiguration"`
 	NeedsAuth          int `json:"needsAuth"`
+	NeedsAdminApproval int `json:"needsAdminApproval"`
 	InProgress         int `json:"inProgress"`
 	Failed             int `json:"failed"`
 	Unsupported        int `json:"unsupported"`

@@ -83,16 +83,22 @@ func TestSetupDocumentAcceptsAwakenHostConnectorReference(t *testing.T) {
 		Mapping: ir.MappingNative, Validation: "valid", Skill: &ir.SkillSpec{Path: "skills/outlook-email"},
 	}
 	raw := []byte(`{"version":1,"requirements":[{"id":"outlook-account","kind":"host_connector","title":"Connect Outlook","required":true,"connectorId":"awaken.microsoft.outlook","componentIds":["skill/skills/outlook-email"]}]}`)
-	requirements, _, err := parseSetupDocument(raw, ".awaken/setup.json", ir.DialectAgentPlugins, []ir.Component{component})
+	requirements, declared, err := parseSetupDocument(raw, ".awaken/setup.json", ir.DialectAgentPlugins, []ir.Component{component})
 	if err != nil {
 		t.Fatal(err)
 	}
-	plugin := &ir.NormalizedPlugin{Components: []ir.Component{component}, Setup: requirements}
+	if len(declared) != 1 || declared[0].MCP == nil || declared[0].MCP.HostConnectorID != "awaken.microsoft.outlook" {
+		t.Fatalf("host connector MCP component was not projected: %+v", declared)
+	}
+	plugin := &ir.NormalizedPlugin{Components: append([]ir.Component{component}, declared...), Setup: requirements}
 	if err := finalizeSetupRequirements(plugin); err != nil {
 		t.Fatal(err)
 	}
 	if got := plugin.Setup[0]; got.Kind != ir.SetupHostConnector || got.ConnectorID != "awaken.microsoft.outlook" || got.Fingerprint == "" {
 		t.Fatalf("host connector setup was not normalized: %+v", got)
+	}
+	if !containsString(plugin.Setup[0].ComponentIDs, declared[0].LogicalID) {
+		t.Fatalf("host MCP component is not gated by its setup requirement: %+v", plugin.Setup[0])
 	}
 	if _, _, err := parseSetupDocument([]byte(`{"version":1,"requirements":[{"id":"missing","kind":"host_connector"}]}`), ".awaken/setup.json", ir.DialectAgentPlugins, nil); err == nil {
 		t.Fatal("host_connector without connectorId should fail")

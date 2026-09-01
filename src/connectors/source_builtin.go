@@ -200,12 +200,15 @@ func context7Connector() ConnectorDefinition {
 
 func outlookConnector(options BuiltinOptions) ConnectorDefinition {
 	const graphResource = "https://graph.microsoft.com/"
-	scopes := []string{"openid", "profile", "offline_access", "Mail.ReadWrite", "Mail.Send"}
+	scopes := []string{
+		"openid", "profile", "offline_access",
+		"Mail.ReadWrite", "Mail.Send", "Mail.ReadWrite.Shared", "Mail.Send.Shared", "MailboxSettings.ReadWrite",
+	}
 	return ConnectorDefinition{
 		ID:           "awaken.microsoft.outlook",
 		Kind:         KindMCP,
 		DisplayName:  "Outlook",
-		Description:  "连接 Microsoft Outlook，读取、整理、起草、回复、发送和删除邮件。",
+		Description:  "连接 Microsoft Outlook，管理个人与共享邮箱、草稿、附件、文件夹、分类、回复、转发、退订和定时发送。",
 		Category:     CategoryChat,
 		Provider:     "Microsoft",
 		ProviderID:   tool.ProviderID("connector:awaken.microsoft.outlook"),
@@ -215,6 +218,7 @@ func outlookConnector(options BuiltinOptions) ConnectorDefinition {
 		}},
 		AuthType:       AuthOAuth2,
 		RequiredScopes: append([]string(nil), scopes...),
+		ServerNames:    []string{"awaken-outlook"},
 		OAuth: &OAuthConnectorSpec{
 			AuthorizationEndpoint: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
 			TokenEndpoint:         "https://login.microsoftonline.com/common/oauth2/v2.0/token",
@@ -225,6 +229,7 @@ func outlookConnector(options BuiltinOptions) ConnectorDefinition {
 		},
 		TrustLevel:       TrustBuiltin,
 		SourceOrigin:     SourceBuiltin,
+		CatalogPlacement: CatalogPluginOnly,
 		McpConfigFactory: outlookConfigFactory,
 	}
 }

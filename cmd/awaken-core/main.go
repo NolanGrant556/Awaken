@@ -98,6 +98,13 @@ func main() {
 	} else if avail := pluginStore.Available(); avail != nil {
 		log.Printf("[plugins] store fail closed: %v", avail)
 	} else {
+		if builtinRoot := strings.TrimSpace(os.Getenv(plugins.EnvBuiltinPluginDir)); builtinRoot != "" {
+			synced, syncErr := pluginStore.SyncBuiltinPlugins(context.Background(), builtinRoot)
+			if syncErr != nil {
+				log.Printf("[plugins] built-in plugin sync incomplete: %v", syncErr)
+			}
+			log.Printf("[plugins] synchronized %d built-in plugin(s)", len(synced))
+		}
 		skills.SetPluginSkillSelections(pluginStore.EnabledSkillSelections())
 		subagentruntime.SetRoleResolver(pluginStore.ResolvePluginAgentRole)
 	}
@@ -116,6 +123,10 @@ func main() {
 	}
 	outlookRuntime.SetTokenProvider(connectorAuth)
 	outlookRuntime.SetNeedsAuthCallback(manager.MarkServerNeedsAuth)
+	if err := outlookRuntime.Start(); err != nil {
+		log.Printf("[outlook] scheduled mail unavailable: %v", err)
+	}
+	defer outlookRuntime.Close()
 	pluginAuth := pluginauth.NewService(pluginStore, manager, connRegistry, credentialStore)
 	pluginAuth.SetHostConnectorAuth(connectorAuth)
 	manager.SetRuntimeSecretResolver(pluginAuth)
@@ -797,23 +808,8 @@ func applyPluginMCPServers(manager *mcpclient.Manager, store *plugins.Store) {
 	if manager == nil || store == nil || store.Available() != nil {
 		return
 	}
-	desired := store.PluginMCPServers()
-	desiredNames := make(map[string]mcpclient.ScopedMcpServerConfig, len(desired))
-	for _, scoped := range desired {
-		desiredNames[scoped.Name] = scoped
-	}
-	for _, snap := range manager.Snapshot() {
-		if plugins.IsPluginServerIdentity(snap.Name) {
-			if _, ok := desiredNames[snap.Name]; !ok {
-				_ = manager.Remove(snap.Name)
-			}
-		}
-	}
-	ctx := context.Background()
-	for _, scoped := range desired {
-		if err := manager.RestartWithConfig(ctx, scoped); err != nil {
-			log.Printf("[plugins] apply MCP server %s: %v", scoped.Name, err)
-		}
+	if err := plugins.ReconcileMCPServers(context.Background(), manager, store.PluginMCPServers()); err != nil {
+		log.Printf("[plugins] reconcile MCP runtime: %v", err)
 	}
 }
 

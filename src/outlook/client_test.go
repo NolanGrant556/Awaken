@@ -3,11 +3,16 @@ package outlook
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"awaken/src/connectorauth"
+	"awaken/src/networkroute"
 )
 
 type fakeTokens struct {
@@ -15,6 +20,31 @@ type fakeTokens struct {
 	err         error
 	marked      int
 	connectorID string
+}
+
+type routeAwareGraphTransport struct {
+	requests int
+	proxied  int
+	direct   int
+}
+
+func (transport *routeAwareGraphTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	transport.requests++
+	proxyURL, err := networkroute.DefaultProxyForRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	if proxyURL != nil {
+		transport.proxied++
+		return nil, io.EOF
+	}
+	transport.direct++
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(`{"value":[]}`)),
+		Request:    request,
+	}, nil
 }
 
 func (f *fakeTokens) AccessToken(context.Context, string) (string, error) { return f.token, f.err }
@@ -107,6 +137,48 @@ func TestClientGraphCRUDUsesBearerTokenAndBoundedPaths(t *testing.T) {
 	}
 }
 
+func TestClientRetriesSafeGraphReadDirectAfterBrokenLoopbackProxy(t *testing.T) {
+	previous := networkroute.DefaultManager()
+	defer networkroute.SetDefaultManager(previous)
+	manager := networkroute.NewFromEnvironment([]string{
+		"HTTPS_PROXY=http://127.0.0.1:7897",
+	}, networkroute.WithEndpointProbe(func(context.Context, string) bool { return true }),
+		networkroute.WithNow(func() time.Time { return time.Unix(1_000, 0) }),
+		networkroute.WithProxyFailureCooldown(time.Minute))
+	networkroute.SetDefaultManager(manager)
+	transport := &routeAwareGraphTransport{}
+	client := NewClient(&fakeTokens{token: "access-token"})
+	client.SetHTTPClientForTest(&http.Client{Transport: transport}, defaultGraphBaseURL)
+
+	if _, err := client.ListMailFolders(context.Background(), "", "", 10, false); err != nil {
+		t.Fatal(err)
+	}
+	if transport.requests != 2 || transport.proxied != 1 || transport.direct != 1 {
+		t.Fatalf("requests=%d proxied=%d direct=%d", transport.requests, transport.proxied, transport.direct)
+	}
+}
+
+func TestClientDoesNotReplayGraphWriteAfterBrokenLoopbackProxy(t *testing.T) {
+	previous := networkroute.DefaultManager()
+	defer networkroute.SetDefaultManager(previous)
+	manager := networkroute.NewFromEnvironment([]string{
+		"HTTPS_PROXY=http://127.0.0.1:7897",
+	}, networkroute.WithEndpointProbe(func(context.Context, string) bool { return true }))
+	networkroute.SetDefaultManager(manager)
+	transport := &routeAwareGraphTransport{}
+	client := NewClient(&fakeTokens{token: "access-token"})
+	client.SetHTTPClientForTest(&http.Client{Transport: transport}, defaultGraphBaseURL)
+
+	err := client.SendMail(context.Background(), ComposeMessage{
+		Subject: "safe replay boundary",
+		Body:    "body",
+		To:      []Recipient{{Address: "person@example.com"}},
+	})
+	if err == nil || transport.requests != 1 || transport.proxied != 1 || transport.direct != 0 {
+		t.Fatalf("err=%v requests=%d proxied=%d direct=%d", err, transport.requests, transport.proxied, transport.direct)
+	}
+}
+
 func TestClientMarksConnectorNeedsAuthOnGraph401(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -139,9 +211,17 @@ func TestClientRejectsInvalidComposeInputBeforeNetwork(t *testing.T) {
 	if err := client.SendMail(context.Background(), ComposeMessage{To: []Recipient{{Address: "bad\n@example.com"}}}); err == nil {
 		t.Fatal("expected invalid recipient error")
 	}
-	client.SetTokenProvider(&fakeTokens{err: errors.New("not authorized")})
+	client.SetTokenProvider(&fakeTokens{err: connectorauth.ErrNeedsAuth})
 	_, err := client.GetMessage(context.Background(), "m1")
 	if !errors.Is(err, ErrNeedsAuth) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestClientDoesNotMisclassifyTransientTokenRefreshAsNeedsAuth(t *testing.T) {
+	client := NewClient(&fakeTokens{err: connectorauth.ErrRefreshUnavailable})
+	_, err := client.GetMessage(context.Background(), "m1")
+	if err == nil || errors.Is(err, ErrNeedsAuth) || !errors.Is(err, connectorauth.ErrRefreshUnavailable) {
 		t.Fatalf("err = %v", err)
 	}
 }

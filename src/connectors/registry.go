@@ -460,6 +460,7 @@ func (r *Registry) List() []ConnectorStatus {
 			Capabilities:      append([]tool.Capability(nil), def.Capabilities...),
 			Dependencies:      append([]tool.DependencyRequirement(nil), def.Dependencies...),
 			SourceOrigin:      def.SourceOrigin,
+			CatalogPlacement:  def.CatalogPlacement,
 			AuthType:          def.AuthType,
 			State:             StateDisconnected,
 			ProviderReadiness: tool.ProviderUnavailable,
@@ -525,9 +526,31 @@ func normalizeConnectorDefinition(def ConnectorDefinition) ConnectorDefinition {
 	if def.ProviderID == "" {
 		def.ProviderID = tool.ProviderID("connector:" + def.ID)
 	}
+	if def.CatalogPlacement == "" {
+		def.CatalogPlacement = CatalogConnectors
+	}
 	def.Capabilities = tool.NormalizeCapabilities(def.Capabilities)
 	def.Dependencies = normalizeConnectorDependencies(def.Dependencies)
+	def.ServerNames = normalizeConnectorServerNames(def.ServerNames)
 	return def
+}
+
+func normalizeConnectorServerNames(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func normalizeConnectorDependencies(values []tool.DependencyRequirement) []tool.DependencyRequirement {
@@ -552,7 +575,7 @@ func connectorProviderReadiness(state ConnectorState) tool.ProviderReadiness {
 	switch state {
 	case StateConnected:
 		return tool.ProviderReady
-	case StateNeedsAuth:
+	case StateNeedsAuth, StateApprovalRequired:
 		return tool.ProviderNeedsAuth
 	case StatePending, StateFailed, StateDisconnected:
 		return tool.ProviderUnavailable
@@ -565,6 +588,20 @@ func connectorProviderReadiness(state ConnectorState) tool.ProviderReadiness {
 func (r *Registry) Status(connectorID string) (ConnectorStatus, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	return r.statusLocked(connectorID, true)
+}
+
+// RuntimeStatus reports only the Connector-owned MCP runtime state. It
+// deliberately skips account readiness so an OAuth session in "verifying"
+// can wait for its newly started runtime without observing its own pending
+// authorization state and deadlocking until timeout.
+func (r *Registry) RuntimeStatus(connectorID string) (ConnectorStatus, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.statusLocked(connectorID, false)
+}
+
+func (r *Registry) statusLocked(connectorID string, includeAccount bool) (ConnectorStatus, error) {
 
 	def, ok := r.defs[connectorID]
 	if !ok {
@@ -589,6 +626,7 @@ func (r *Registry) Status(connectorID string) (ConnectorStatus, error) {
 		Dependencies:      append([]tool.DependencyRequirement(nil), def.Dependencies...),
 		ProviderReadiness: tool.ProviderUnavailable,
 		SourceOrigin:      def.SourceOrigin,
+		CatalogPlacement:  def.CatalogPlacement,
 		AuthType:          def.AuthType,
 		State:             StateDisconnected,
 	}
@@ -603,7 +641,7 @@ func (r *Registry) Status(connectorID string) (ConnectorStatus, error) {
 		}
 		return status, nil
 	}
-	if def.OAuth != nil && r.accountReadiness != nil {
+	if includeAccount && def.OAuth != nil && r.accountReadiness != nil {
 		account := r.accountReadiness.AccountReadiness(def)
 		status.Account = account.Account
 		if account.State != StateConnected {

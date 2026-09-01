@@ -12,7 +12,14 @@ const targets = process.env.AWAKEN_BINARY_TARGETS
   : process.platform === "darwin"
     ? ["darwin-arm64", "darwin-x64"]
     : [currentTarget];
-const microsoftOutlookClientId = (process.env.AWAKEN_MICROSOFT_CLIENT_ID ?? "").trim();
+// Microsoft native/desktop OAuth client identifiers are public application
+// metadata, not credentials. Keep Awaken's production identity in the release
+// build so every packaged Desktop can start Outlook PKCE without asking the
+// end user for configuration. Development and private distributions may still
+// override it explicitly.
+const defaultMicrosoftOutlookClientId = "1bdaadb2-a9d3-44a9-99cf-806172ca83af";
+const microsoftOutlookClientId =
+  (process.env.AWAKEN_MICROSOFT_CLIENT_ID ?? "").trim() || defaultMicrosoftOutlookClientId;
 if (microsoftOutlookClientId && !/^[A-Za-z0-9._-]+$/.test(microsoftOutlookClientId)) {
   throw new Error("AWAKEN_MICROSOFT_CLIENT_ID contains unsupported characters");
 }

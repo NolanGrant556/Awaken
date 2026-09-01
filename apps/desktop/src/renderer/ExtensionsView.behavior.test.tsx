@@ -231,29 +231,29 @@ describe("ExtensionsView behavior", () => {
     let connected = false;
     const onNotice = vi.fn();
     const listConnectors = vi.fn(async () => [{
-      id: "awaken.microsoft.outlook",
+      id: "host.mail.oauth",
       kind: "mcp" as const,
-      displayName: "Outlook",
-      description: "Outlook 邮件",
+      displayName: "企业邮箱",
+      description: "企业邮箱连接器",
       category: "chat",
-      provider: "Microsoft",
+      provider: "Mail Provider",
       state: connected ? "connected" as const : "needs-auth" as const,
       sourceOrigin: "builtin",
       authType: "oauth2",
-      serverNames: ["awaken-outlook"],
+      serverNames: ["host-mail"],
     }]);
     const connectConnector = vi.fn(async () => ({
-      connectorId: "awaken.microsoft.outlook",
+      connectorId: "host.mail.oauth",
       connectorState: "authorizing",
       sessionId: "connector-session",
       authStatus: "authorizing" as const,
-      message: "请在浏览器完成 Outlook 授权",
+      message: "请在浏览器完成企业邮箱授权",
     }));
     const getConnectorAuthSession = vi.fn(async () => {
       connected = true;
       return {
         sessionId: "connector-session",
-        connectorId: "awaken.microsoft.outlook",
+        connectorId: "host.mail.oauth",
         status: "ready" as const,
       };
     });
@@ -263,12 +263,12 @@ describe("ExtensionsView behavior", () => {
       listConnectors,
       listCliConnectors: vi.fn(async () => []),
       listMcpServers: vi.fn(async () => [{
-        name: "awaken-outlook",
-        displayName: "Outlook",
+        name: "host-mail",
+        displayName: "企业邮箱",
         state: connected ? "connected" as const : "needs-auth" as const,
         transport: "in-process",
         scope: "user",
-        sourceConnectorId: "awaken.microsoft.outlook",
+        sourceConnectorId: "host.mail.oauth",
       }]),
       listSkills: vi.fn(async () => []),
       listPlugins: vi.fn(async () => []),
@@ -292,17 +292,139 @@ describe("ExtensionsView behavior", () => {
     });
     await settle();
 
-    expect(document.querySelector('button[aria-label="设置 Outlook"]')).toBeNull();
-    const connectButton = document.querySelector<HTMLButtonElement>('button[aria-label="连接 Outlook"]');
+    expect(document.querySelector('button[aria-label="设置 企业邮箱"]')).toBeNull();
+    const connectButton = document.querySelector<HTMLButtonElement>('button[aria-label="连接 企业邮箱"]');
     expect(connectButton).not.toBeNull();
     await act(async () => connectButton?.click());
     await act(async () => new Promise((resolve) => setTimeout(resolve, 850)));
 
-    expect(connectConnector).toHaveBeenCalledWith("awaken.microsoft.outlook");
+    expect(connectConnector).toHaveBeenCalledWith("host.mail.oauth");
     expect(getConnectorAuthSession).toHaveBeenCalledWith("connector-session");
-    expect(onNotice).toHaveBeenCalledWith("Outlook 已连接");
-    expect(document.querySelector('button[aria-label="设置 Outlook"]')).toBeNull();
-    expect(document.querySelector('button[aria-label="断开 Outlook"]')).not.toBeNull();
+    expect(onNotice).toHaveBeenCalledWith("企业邮箱 已连接");
+    expect(document.querySelector('button[aria-label="设置 企业邮箱"]')).toBeNull();
+    expect(document.querySelector('button[aria-label="断开 企业邮箱"]')).not.toBeNull();
+  });
+
+  it("records an external administrator approval page instead of leaving OAuth spinning", async () => {
+    let approvalPending = false;
+    const onNotice = vi.fn();
+    const listConnectors = vi.fn(async () => [{
+      id: "host.mail.oauth",
+      kind: "mcp" as const,
+      displayName: "企业邮箱",
+      description: "企业邮箱连接器",
+      category: "chat",
+      provider: "Mail Provider",
+      state: approvalPending ? "approval-required" as const : "needs-auth" as const,
+      lastError: approvalPending ? "等待组织管理员批准；批准后请重新连接。" : undefined,
+      sourceOrigin: "builtin",
+      authType: "oauth2",
+    }]);
+    const markConnectorAdminApprovalPending = vi.fn(async () => {
+      approvalPending = true;
+      return {
+        sessionId: "approval-session",
+        connectorId: "host.mail.oauth",
+        status: "pending_admin_approval" as const,
+      };
+    });
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => [runtimeProject]),
+      listConnectors,
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => []),
+      listPlugins: vi.fn(async () => []),
+      connectConnector: vi.fn(async () => ({
+        connectorId: "host.mail.oauth",
+        connectorState: "authorizing",
+        sessionId: "approval-session",
+        authStatus: "authorizing" as const,
+      })),
+      disconnectConnector: vi.fn(),
+      getConnectorAuthSession: vi.fn(async () => ({
+        sessionId: "approval-session",
+        connectorId: "host.mail.oauth",
+        status: approvalPending ? "pending_admin_approval" as const : "authorizing" as const,
+      })),
+      cancelConnectorAuthSession: vi.fn(),
+      markConnectorAdminApprovalPending,
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="connectors"
+          desktopReady
+          runtimeClient={runtimeClient}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={onNotice}
+        />,
+      );
+    });
+    await settle();
+    await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="连接 企业邮箱"]')?.click());
+    await settle();
+    const approvalButton = [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent === "页面要求管理员审批");
+    expect(approvalButton).not.toBeNull();
+    await act(async () => approvalButton?.click());
+    await settle();
+
+    expect(markConnectorAdminApprovalPending).toHaveBeenCalledWith("approval-session");
+    expect(document.body.textContent).toContain("等待管理员审批");
+    expect(onNotice).toHaveBeenCalledWith("企业邮箱 已记录为等待组织管理员审批");
+  });
+
+  it("keeps plugin-only host connectors out of the Connector catalog", async () => {
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => [runtimeProject]),
+      listConnectors: vi.fn(async () => [{
+        id: "awaken.microsoft.outlook",
+        kind: "mcp" as const,
+        displayName: "Outlook",
+        description: "Outlook 邮件",
+        category: "chat",
+        provider: "Microsoft",
+        state: "needs-auth" as const,
+        sourceOrigin: "builtin",
+        authType: "oauth2",
+        catalogPlacement: "plugin_only" as const,
+        serverNames: ["awaken-outlook"],
+      }]),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => [{
+        name: "awaken-outlook",
+        displayName: "Outlook",
+        state: "needs-auth" as const,
+        transport: "in-process",
+        scope: "user",
+        sourceConnectorId: "awaken.microsoft.outlook",
+      }]),
+      listSkills: vi.fn(async () => []),
+      listPlugins: vi.fn(async () => []),
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="connectors"
+          desktopReady
+          runtimeClient={runtimeClient}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={vi.fn()}
+        />,
+      );
+    });
+    await settle();
+
+    expect(document.body.textContent).not.toContain("Outlook 邮件");
+    expect(document.querySelector('[aria-label="连接 Outlook"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("awaken-outlook");
   });
 
   it("automatically validates a selected ZIP and replaces a same-name Plugin", async () => {
@@ -387,6 +509,8 @@ describe("ExtensionsView behavior", () => {
       );
     });
     await settle();
+
+    await act(async () => buttonByText("已安装插件")?.click());
 
     expect(document.querySelector(".aw-plugins")).not.toBeNull();
     expect(document.querySelector(".extension-view")).toBeNull();
@@ -486,6 +610,151 @@ describe("ExtensionsView behavior", () => {
     await settle();
     expect(document.querySelector(".aw-plugin-console")).toBeNull();
     expect(document.querySelector(".aw-plugins")).not.toBeNull();
+  });
+
+  it("separates built-in Plugins, renders the Outlook brand, and enables them in place", async () => {
+    const outlook: RuntimePlugin = {
+      name: "awaken-outlook",
+      displayName: "Outlook 邮箱",
+      version: "1.0.0",
+      description: "Awaken 官方 Outlook 邮箱插件",
+      builtin: true,
+      brandIcon: "outlook",
+      builtinOrder: 0,
+      enabled: false,
+      source: { kind: "local_path", path: "/app/builtin-plugins/awaken-outlook" },
+      skillCount: 4,
+      serverCount: 1,
+    };
+    const installed: RuntimePlugin = {
+      name: "team.plugin",
+      description: "团队插件",
+      enabled: true,
+      source: { kind: "local_path", path: "/tmp/team.plugin.zip" },
+      skillCount: 1,
+      serverCount: 0,
+    };
+    let resolveEnable: ((plugin: RuntimePlugin) => void) | undefined;
+    const pendingEnable = new Promise<RuntimePlugin>((resolvePromise) => {
+      resolveEnable = resolvePromise;
+    });
+    const enablePlugin = vi.fn(() => pendingEnable);
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => [runtimeProject]),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => []),
+      listPlugins: vi.fn(async () => [installed, outlook]),
+      enablePlugin,
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="plugins"
+          desktopReady
+          runtimeClient={runtimeClient}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={vi.fn()}
+        />,
+      );
+    });
+    await settle();
+
+    expect(buttonByText("内置插件")?.getAttribute("aria-selected")).toBe("true");
+    expect(document.querySelector(".aw-plugin-card")?.textContent).toContain("Outlook 邮箱");
+    expect(document.querySelector(".aw-plugin-card")?.textContent).toContain("Awaken 内置");
+    expect(document.body.textContent).not.toContain("团队插件");
+    expect(
+      document.querySelector('.aw-plugin-card__icon .aw-plugin-brand-icon[data-brand="outlook"][data-size="card"] img'),
+    ).not.toBeNull();
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="开启Outlook 邮箱"]')?.click();
+      await Promise.resolve();
+    });
+    expect(
+      document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="关闭Outlook 邮箱"]')
+        ?.getAttribute("aria-checked"),
+    ).toBe("true");
+    await act(async () => {
+      resolveEnable?.({ ...outlook, enabled: true });
+      await pendingEnable;
+    });
+    await settle();
+    expect(enablePlugin).toHaveBeenCalledWith("awaken-outlook");
+
+    await act(async () => buttonByText("已安装插件")?.click());
+    expect(document.querySelector(".aw-plugin-card")?.textContent).toContain("team.plugin");
+    expect(document.body.textContent).not.toContain("Outlook 邮箱");
+  });
+
+  it("renders the cached Plugin catalog and opens details before background requests finish", async () => {
+    const outlook: RuntimePlugin = {
+      name: "awaken-outlook",
+      displayName: "Outlook 邮箱",
+      version: "1.0.0",
+      description: "Awaken 官方 Outlook 邮箱插件",
+      builtin: true,
+      brandIcon: "outlook",
+      builtinOrder: 0,
+      enabled: true,
+      source: { kind: "local_path", path: "/app/builtin-plugins/awaken-outlook" },
+      skillCount: 4,
+      serverCount: 1,
+    };
+    let resolvePlugins: ((plugins: RuntimePlugin[]) => void) | undefined;
+    let resolvePluginDetail: ((plugin: RuntimePlugin) => void) | undefined;
+    const pluginRefresh = new Promise<RuntimePlugin[]>((resolve) => {
+      resolvePlugins = resolve;
+    });
+    const pluginDetail = new Promise<RuntimePlugin>((resolve) => {
+      resolvePluginDetail = resolve;
+    });
+    const runtimeClient = {
+      getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
+      listProjects: vi.fn(async () => [runtimeProject]),
+      listConnectors: vi.fn(async () => []),
+      listCliConnectors: vi.fn(async () => []),
+      listMcpServers: vi.fn(async () => []),
+      listSkills: vi.fn(async () => []),
+      listPlugins: vi.fn(() => pluginRefresh),
+      getPlugin: vi.fn(() => pluginDetail),
+      listPluginComponents: vi.fn(async () => []),
+      getPluginConfiguration: vi.fn(async () => ({ fields: [], revision: 1 })),
+      subscribeCliConnectorState: vi.fn(() => () => undefined),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <ExtensionsView
+          section="plugins"
+          desktopReady
+          runtimeClient={runtimeClient}
+          initialPlugins={[outlook]}
+          activeWorkspaceRoot={projectRoot}
+          onNotice={vi.fn()}
+        />,
+      );
+    });
+
+    expect(document.querySelector(".aw-plugin-card")?.textContent).toContain("Outlook 邮箱");
+    expect(document.body.textContent).not.toContain("正在加载插件");
+
+    await act(async () => {
+      document.querySelector<HTMLButtonElement>('[aria-label="查看插件 Outlook 邮箱"]')?.click();
+    });
+    expect(document.querySelector(".aw-plugin-console h1")?.textContent).toBe("Outlook 邮箱");
+
+    await act(async () => {
+      resolvePlugins?.([outlook]);
+      resolvePluginDetail?.(outlook);
+      await Promise.all([pluginRefresh, pluginDetail]);
+    });
+    await settle();
   });
 
   it("routes a Plugin ZIP selected in Skills to the Plugin installer", async () => {
@@ -767,6 +1036,8 @@ describe("ExtensionsView behavior", () => {
     });
     await settle();
 
+    await act(async () => buttonByText("已安装插件")?.click());
+
     await act(async () => {
       document.querySelector<HTMLButtonElement>(".aw-plugin-card__main")?.click();
     });
@@ -948,6 +1219,7 @@ describe("ExtensionsView behavior", () => {
       );
     });
     await settle();
+    await act(async () => buttonByText("已安装插件")?.click());
     expect(document.body.textContent).toContain("installed plugin package digest changed");
 
     await act(async () => {

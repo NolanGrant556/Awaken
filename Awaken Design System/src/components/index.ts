@@ -48,6 +48,7 @@ export * from "./AwakenNewTaskButton";
 export * from "./AwakenOriginalThinking";
 export * from "./AwakenPetsSettings";
 export * from "./AwakenPluginCard";
+export * from "./AwakenPluginBrandIcon";
 export * from "./AwakenPluginConsole";
 export * from "./AwakenPluginDetailDialog";
 export * from "./AwakenPluginInstallDialog";

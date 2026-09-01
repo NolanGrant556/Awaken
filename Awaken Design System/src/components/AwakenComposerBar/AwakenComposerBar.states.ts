@@ -91,18 +91,23 @@ const pluginPicker: ComposerBarPluginPicker = {
     {
       id: "plugin:documents:digest",
       label: "Documents",
+      sectionLabel: "内置",
+      icon: createElement(AwakenIcon, { concept: "plugin-default", size: 12 }),
     },
     {
       id: "plugin:spreadsheets:digest",
       label: "Spreadsheets",
+      sectionLabel: "插件",
     },
     {
       id: "plugin:presentations:digest",
       label: "Presentations",
+      sectionLabel: "插件",
     },
     {
       id: "plugin:sites:digest",
       label: "Sites",
+      sectionLabel: "插件",
     },
   ],
   onSelectOption: noop,

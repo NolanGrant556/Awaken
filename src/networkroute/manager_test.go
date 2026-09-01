@@ -64,6 +64,49 @@ func TestDialFailureInvalidatesLoopbackProbeCache(t *testing.T) {
 	}
 }
 
+func TestProxyFailureTemporarilyFallsBackDirectWhenListenerStillAcceptsTCP(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	manager := NewFromEnvironment([]string{
+		"HTTPS_PROXY=http://127.0.0.1:7897",
+	}, WithEndpointProbe(func(context.Context, string) bool {
+		return true
+	}), WithNow(func() time.Time { return now }), WithProxyFailureCooldown(30*time.Second))
+	request, _ := http.NewRequest(http.MethodGet, "https://graph.microsoft.com/v1.0/me/mailFolders", nil)
+
+	proxyURL, err := manager.ProxyForRequest(request)
+	if err != nil || proxyURL == nil {
+		t.Fatalf("initial loopback proxy should be selected, proxy=%v err=%v", proxyURL, err)
+	}
+	if !manager.ReportProxyFailure(request) {
+		t.Fatal("loopback proxy failure should be accepted in auto policy")
+	}
+	proxyURL, err = manager.ProxyForRequest(request)
+	if err != nil || proxyURL != nil {
+		t.Fatalf("failed loopback proxy should temporarily fall back direct, proxy=%v err=%v", proxyURL, err)
+	}
+
+	now = now.Add(31 * time.Second)
+	proxyURL, err = manager.ProxyForRequest(request)
+	if err != nil || proxyURL == nil {
+		t.Fatalf("proxy should be reconsidered after cooldown, proxy=%v err=%v", proxyURL, err)
+	}
+}
+
+func TestProxyFailureNeverBypassesProxyOnlyPolicy(t *testing.T) {
+	manager := NewFromEnvironment([]string{
+		"AWAKEN_PROXY_POLICY=proxy",
+		"HTTPS_PROXY=http://127.0.0.1:7897",
+	}, WithEndpointProbe(func(context.Context, string) bool { return true }))
+	request, _ := http.NewRequest(http.MethodGet, "https://graph.microsoft.com/v1.0/me/mailFolders", nil)
+	if manager.ReportProxyFailure(request) {
+		t.Fatal("proxy-only policy must not accept a direct fallback")
+	}
+	proxyURL, err := manager.ProxyForRequest(request)
+	if err != nil || proxyURL == nil {
+		t.Fatalf("proxy-only policy should keep the proxy, proxy=%v err=%v", proxyURL, err)
+	}
+}
+
 func TestDialFailureFeedbackInvalidatesDefaultRouteCache(t *testing.T) {
 	previous := DefaultManager()
 	defer SetDefaultManager(previous)

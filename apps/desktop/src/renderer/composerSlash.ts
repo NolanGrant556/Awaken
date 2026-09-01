@@ -1,5 +1,9 @@
 import { createElement, type ReactNode } from "react";
-import { AwakenIcon } from "@awaken/design-system";
+import {
+  AwakenIcon,
+  AwakenPluginBrandIcon,
+  isAwakenPluginBrand,
+} from "@awaken/design-system";
 import type {
   ComputerUseComposerTokenPayload,
   ComposerToken,
@@ -248,7 +252,7 @@ export function pluginComposerTokenFromAction(plugin: RuntimePlugin): ComposerTo
   return {
     id: `plugin:${plugin.name}:${plugin.digest ?? ""}`,
     type: "plugin",
-    label: plugin.name,
+    label: plugin.displayName?.trim() || plugin.name,
     payload: payload as unknown as Record<string, unknown>,
   };
 }
@@ -390,7 +394,7 @@ export function skillSlashProvider(
   };
 }
 
-export function computerUseMentionProvider(): SlashProvider {
+function computerUseMentionAction(): SlashAction {
   const payload: ComputerUseComposerTokenPayload = {
     capabilityId: "computer-use",
   };
@@ -401,31 +405,23 @@ export function computerUseMentionProvider(): SlashProvider {
     payload: payload as unknown as Record<string, unknown>,
   };
   return {
-    id: "computer-use",
+    id: token.id,
+    type: "capability",
     label: "Computer Use",
-    getActions() {
-      return [
-        {
-          id: token.id,
-          type: "capability",
-          label: "Computer Use",
-          sectionLabel: "内置",
-          description: "引导模型观察并操作本机图形界面",
-          keywords: ["computer", "computer use", "计算机", "电脑", "GUI", "桌面"],
-          icon: createElement(AwakenIcon, { concept: "computer-use", size: 14 }),
-          preview: {
-            description:
-              "选择 Computer Use 能力；提交时由运行时向模型提供引导，不在用户输入中显示提示词。",
-          },
-          payload,
-          composerToken: token,
-        },
-      ];
+    sectionLabel: "内置",
+    description: "引导模型观察并操作本机图形界面",
+    keywords: ["computer", "computer use", "计算机", "电脑", "GUI", "桌面"],
+    icon: createElement(AwakenIcon, { concept: "computer-use", size: 14 }),
+    preview: {
+      description:
+        "选择 Computer Use 能力；提交时由运行时向模型提供引导，不在用户输入中显示提示词。",
     },
+    payload,
+    composerToken: token,
   };
 }
 
-export function deepResearchMentionProvider(): SlashProvider {
+function deepResearchMentionAction(): SlashAction {
   const payload: WorkflowComposerTokenPayload = {
     workflowId: "deep-research",
   };
@@ -436,34 +432,110 @@ export function deepResearchMentionProvider(): SlashProvider {
     payload: payload as unknown as Record<string, unknown>,
   };
   return {
+    id: token.id,
+    type: "workflow",
+    label: "深度研究",
+    sectionLabel: "内置",
+    description: "宿主编排的只读多源研究报告",
+    keywords: [
+      "deep-research",
+      "deep research",
+      "研究",
+      "调研",
+      "research",
+    ],
+    icon: createElement(AwakenIcon, { concept: "search", size: 14 }),
+    preview: {
+      description:
+        "插入 @deep-research token 后输入研究问题。无问题不会启动。定时任务编辑器不提供该入口。",
+    },
+    payload,
+    composerToken: token,
+  };
+}
+
+export function builtinMentionActions(): SlashAction[] {
+  return [deepResearchMentionAction(), computerUseMentionAction()];
+}
+
+export function computerUseMentionProvider(): SlashProvider {
+  return {
+    id: "computer-use",
+    label: "Computer Use",
+    getActions: () => [computerUseMentionAction()],
+  };
+}
+
+export function deepResearchMentionProvider(): SlashProvider {
+  return {
     id: "deep-research",
     label: "深度研究",
-    getActions() {
-      return [
-        {
-          id: token.id,
-          type: "workflow",
-          label: "深度研究",
-          sectionLabel: "内置",
-          description: "宿主编排的只读多源研究报告",
-          keywords: [
-            "deep-research",
-            "deep research",
-            "研究",
-            "调研",
-            "research",
-          ],
-          icon: createElement(AwakenIcon, { concept: "search", size: 14 }),
-          preview: {
-            description:
-              "插入 @deep-research token 后输入研究问题。无问题不会启动。定时任务编辑器不提供该入口。",
-          },
-          payload,
-          composerToken: token,
-        },
-      ];
-    },
+    getActions: () => [deepResearchMentionAction()],
   };
+}
+
+export function pluginMentionActionsFromPlugins(
+  plugins: RuntimePlugin[],
+): SlashAction[] {
+  return plugins
+    .filter((plugin) => {
+      if (!plugin.enabled || !plugin.digest) return false;
+      const usableCount = plugin.skillCount + plugin.serverCount;
+      if (!plugin.builtin) return usableCount > 0;
+      const declaredCount =
+        (plugin.componentCounts?.skill ?? 0) +
+        (plugin.componentCounts?.mcp_server ?? plugin.componentCounts?.mcp ?? 0);
+      return usableCount > 0 || declaredCount > 0;
+    })
+    .toSorted((left, right) => {
+      if (Boolean(left.builtin) !== Boolean(right.builtin)) {
+        return left.builtin ? -1 : 1;
+      }
+      if (left.builtin && right.builtin) {
+        const order = (left.builtinOrder ?? 0) - (right.builtinOrder ?? 0);
+        if (order !== 0) return order;
+        return (left.displayName || left.name).localeCompare(
+          right.displayName || right.name,
+          "zh-CN",
+        );
+      }
+      return 0;
+    })
+    .map((plugin) => {
+      const token = pluginComposerTokenFromAction(plugin);
+      const label = plugin.displayName?.trim() || plugin.name;
+      const usable = plugin.skillCount + plugin.serverCount > 0;
+      const description =
+        (!usable && plugin.builtin
+          ? "请先在插件详情完成账号连接或必填配置。"
+          : plugin.description) ||
+        `${plugin.skillCount} Skills · ${plugin.serverCount} MCP Servers`;
+      return {
+        id: token.id,
+        type: "plugin",
+        label,
+        sectionLabel: plugin.builtin ? "内置" : "插件",
+        description,
+        keywords: [
+          plugin.name,
+          plugin.displayName,
+          plugin.version,
+          plugin.description,
+          ...(plugin.keywords ?? []),
+        ].filter((value): value is string => Boolean(value)),
+        icon: isAwakenPluginBrand(plugin.brandIcon)
+          ? createElement(AwakenPluginBrandIcon, {
+              brand: plugin.brandIcon,
+              size: "menu",
+            })
+          : createElement(AwakenIcon, { concept: "plugin-default", size: 14 }),
+        preview: { description },
+        disabled: !usable,
+        disabledReason: !usable ? "请先完成插件设置" : undefined,
+        payload: plugin,
+        composerToken: token,
+      };
+    });
 }
 
 export function pluginMentionProvider(
@@ -474,35 +546,7 @@ export function pluginMentionProvider(
     label: "Plugins",
     async getActions() {
       const plugins = await listPlugins();
-      return plugins
-        .filter(
-          (plugin) =>
-            plugin.enabled &&
-            Boolean(plugin.digest) &&
-            plugin.skillCount + plugin.serverCount > 0,
-        )
-        .map((plugin) => {
-          const token = pluginComposerTokenFromAction(plugin);
-          return {
-            id: token.id,
-            type: "plugin",
-            label: plugin.name,
-            sectionLabel: "插件",
-            description:
-              plugin.description ||
-              `${plugin.skillCount} Skills · ${plugin.serverCount} MCP Servers`,
-            keywords: [
-              plugin.name,
-              plugin.version,
-              plugin.description,
-              ...(plugin.keywords ?? []),
-            ].filter((value): value is string => Boolean(value)),
-            icon: createElement(AwakenIcon, { concept: "plugin-default", size: 14 }),
-            preview: { description: plugin.description },
-            payload: plugin,
-            composerToken: token,
-          };
-        });
+      return pluginMentionActionsFromPlugins(plugins);
     },
   };
 }
@@ -545,6 +589,14 @@ export function composerPaletteActions(
   query: string,
 ): SlashAction[] {
   return filterSlashActions(actions, query);
+}
+
+export function activeComposerPaletteActions(
+  marker: ComposerActionTrigger["marker"] | undefined,
+  slashActions: SlashAction[],
+  mentionActions: SlashAction[],
+): SlashAction[] {
+  return marker === "@" ? mentionActions : slashActions;
 }
 
 export function firstSelectableSlashAction(

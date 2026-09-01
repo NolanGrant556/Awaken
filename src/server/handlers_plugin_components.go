@@ -46,7 +46,12 @@ func componentSummary(pluginName string, component ir.Component) map[string]any 
 		}
 	}
 	if component.MCP != nil {
-		summary["mcp"] = map[string]any{"shortName": component.MCP.ShortName, "transport": component.MCP.Transport}
+		mcpSummary := map[string]any{"shortName": component.MCP.ShortName, "transport": component.MCP.Transport}
+		if component.MCP.HostConnectorID != "" {
+			mcpSummary["hostManaged"] = true
+			mcpSummary["connectorId"] = component.MCP.HostConnectorID
+		}
+		summary["mcp"] = mcpSummary
 	}
 	if component.Rule != nil {
 		summary["rule"] = map[string]any{"activation": component.Rule.Activation, "globs": component.Rule.Globs, "scope": component.Rule.Scope}
@@ -83,15 +88,68 @@ func componentSummary(pluginName string, component ir.Component) map[string]any 
 
 func componentStateSummary(pluginName string, state plugins.ComponentState) map[string]any {
 	return map[string]any{
-		"component":          componentSummary(pluginName, state.Component),
-		"desiredState":       state.DesiredState,
-		"ruleActivation":     state.RuleActivation,
-		"configurationState": state.Configuration,
-		"runtimeState":       state.Runtime,
-		"integrityState":     state.Integrity,
-		"mappingState":       state.Mapping,
-		"switchable":         state.Switchable,
+		"component":           componentSummary(pluginName, state.Component),
+		"desiredState":        state.DesiredState,
+		"ruleActivation":      state.RuleActivation,
+		"configurationState":  state.Configuration,
+		"authenticationState": state.Authentication,
+		"runtimeState":        state.Runtime,
+		"integrityState":      state.Integrity,
+		"mappingState":        state.Mapping,
+		"switchable":          state.Switchable,
 	}
+}
+
+func (h pluginHandlers) projectMCPRuntime(pluginName string, state plugins.ComponentState) (plugins.ComponentState, string) {
+	component := &state.Component
+	if component.MCP == nil {
+		return state, ""
+	}
+	if component.MCP.HostConnectorID == "" {
+		return state, plugins.ServerIdentity(pluginName, component.MCP.ShortName)
+	}
+	if h.connectorRegistry == nil {
+		return state, ""
+	}
+	declaredServerNames := []string(nil)
+	if definition, err := h.connectorRegistry.Definition(component.MCP.HostConnectorID); err == nil {
+		if strings.TrimSpace(definition.DisplayName) != "" {
+			component.DisplayName = strings.TrimSpace(definition.DisplayName) + " MCP"
+		}
+		if strings.TrimSpace(definition.Description) != "" {
+			component.Description = definition.Description
+		}
+		declaredServerNames = append(declaredServerNames, definition.ServerNames...)
+	}
+	status, err := h.connectorRegistry.Status(component.MCP.HostConnectorID)
+	if err != nil {
+		return state, ""
+	}
+	serverName := ""
+	for _, candidate := range status.ServerNames {
+		if candidate == component.MCP.ShortName {
+			serverName = candidate
+			break
+		}
+	}
+	if serverName == "" && len(status.ServerNames) == 1 {
+		serverName = status.ServerNames[0]
+	}
+	if serverName == "" {
+		for _, candidate := range declaredServerNames {
+			if candidate == component.MCP.ShortName {
+				serverName = candidate
+				break
+			}
+		}
+	}
+	if serverName == "" && len(declaredServerNames) == 1 {
+		serverName = declaredServerNames[0]
+	}
+	if serverName != "" {
+		component.MCP.ShortName = serverName
+	}
+	return state, serverName
 }
 
 func applyEffectiveComponentBudget(component ir.Component, properties map[string]any) {
@@ -131,9 +189,9 @@ func (h pluginHandlers) handleComponents(w http.ResponseWriter, r *http.Request)
 	out := make([]map[string]any, 0, len(components))
 	pluginName := strings.TrimSpace(r.PathValue("name"))
 	for _, component := range components {
-		summary := componentStateSummary(pluginName, component)
-		if component.Component.MCP != nil && h.manager != nil {
-			identity := plugins.ServerIdentity(pluginName, component.Component.MCP.ShortName)
+		projected, identity := h.projectMCPRuntime(pluginName, component)
+		summary := componentStateSummary(pluginName, projected)
+		if projected.Component.MCP != nil && h.manager != nil && identity != "" {
 			componentSummaryValue, _ := summary["component"].(map[string]any)
 			mcpSummary, _ := componentSummaryValue["mcp"].(map[string]any)
 			if snapshot, snapshotErr := h.manager.SnapshotServer(identity); snapshotErr == nil {
@@ -169,13 +227,26 @@ func (h pluginHandlers) handleComponentDetail(w http.ResponseWriter, r *http.Req
 	if detail.Properties == nil {
 		detail.Properties = map[string]any{}
 	}
+	projectedState, runtimeIdentity := h.projectMCPRuntime(strings.TrimSpace(r.PathValue("name")), detail.State)
+	detail.State = projectedState
+	if detail.State.Component.MCP != nil && detail.State.Component.MCP.HostConnectorID != "" {
+		mcpProperties, _ := detail.Properties["mcp"].(map[string]any)
+		if mcpProperties == nil {
+			mcpProperties = map[string]any{}
+			detail.Properties["mcp"] = mcpProperties
+		}
+		mcpProperties["shortName"] = detail.State.Component.MCP.ShortName
+		mcpProperties["transport"] = "in-process"
+		mcpProperties["environment"] = "local_process"
+		mcpProperties["hostManaged"] = true
+		mcpProperties["connectorId"] = detail.State.Component.MCP.HostConnectorID
+	}
 	applyEffectiveComponentBudget(detail.State.Component, detail.Properties)
-	if detail.State.Component.MCP != nil && h.manager != nil {
-		identity := plugins.ServerIdentity(strings.TrimSpace(r.PathValue("name")), detail.State.Component.MCP.ShortName)
-		if snapshot, snapErr := h.manager.SnapshotServer(identity); snapErr == nil {
+	if detail.State.Component.MCP != nil && h.manager != nil && runtimeIdentity != "" {
+		if snapshot, snapErr := h.manager.SnapshotServer(runtimeIdentity); snapErr == nil {
 			detail.Properties["connection"] = snapshot
 			if snapshot.ToolsLoaded {
-				if tools, toolsErr := h.manager.ServerTools(identity); toolsErr == nil {
+				if tools, toolsErr := h.manager.ServerTools(runtimeIdentity); toolsErr == nil {
 					detail.Properties["tools"] = tools
 				}
 			} else {
@@ -470,6 +541,10 @@ func (h pluginHandlers) handleMCPToolState(w http.ResponseWriter, r *http.Reques
 		}
 		if detail.State.Component.MCP == nil {
 			writeErrorJSON(w, http.StatusBadRequest, "COMPONENT_NOT_SWITCHABLE", "component is not an MCP server")
+			return
+		}
+		if detail.State.Component.MCP.HostConnectorID != "" {
+			writeErrorJSON(w, http.StatusConflict, "COMPONENT_NOT_SWITCHABLE", "host connector MCP tools are managed by the connector")
 			return
 		}
 		identity := plugins.ServerIdentity(name, detail.State.Component.MCP.ShortName)

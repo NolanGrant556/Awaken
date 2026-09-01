@@ -145,6 +145,27 @@
   scrollbar-width: thin;
 }
 
+.composer-bar-plugin-section {
+  display: grid;
+  gap: 1px;
+}
+
+.composer-bar-plugin-section + .composer-bar-plugin-section {
+  margin-top: 4px;
+}
+
+.composer-bar-plugin-section-label {
+  min-width: 0;
+  padding: 4px 6px 3px;
+  overflow: hidden;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-medium);
+  line-height: var(--aw-line-height-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer-bar-plugin-option {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) 12px;
@@ -275,6 +296,10 @@
   width: var(--aw-icon-size-16);
   height: var(--aw-icon-size-16);
   color: currentColor;
+}
+
+.composer-bar-token-brand-icon {
+  object-fit: contain;
 }
 
 .composer-bar-token[data-composer-token-selected] {

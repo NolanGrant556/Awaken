@@ -1,9 +1,14 @@
 import "./AwakenPluginConsole.css";
-import { Fragment, useMemo, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { AwakenButton } from "../AwakenButton";
 import { AwakenDialog } from "../AwakenDialog";
+import { AwakenDropdown } from "../AwakenDropdown";
 import { AwakenIcon } from "../AwakenIcon";
 import { AwakenMarkdownRenderer } from "../AwakenMarkdownRenderer";
+import {
+  AwakenPluginBrandIcon,
+  isAwakenPluginBrand,
+} from "../AwakenPluginBrandIcon";
 import { AwakenSwitch } from "../AwakenSwitch";
 
 const SOURCE_ACTION_BUTTON_STYLE = { transition: "none" } as const;
@@ -34,7 +39,7 @@ export type AwakenPluginConsoleComponent = {
   integrityState: string;
   switchable: boolean;
   diagnosticCount?: number;
-  mcp?: { shortName?: string; transport?: string; connectionState?: string; toolsLoaded?: boolean; toolCount?: number };
+  mcp?: { shortName?: string; transport?: string; connectionState?: string; toolsLoaded?: boolean; toolCount?: number; hostManaged?: boolean; connectorId?: string };
   rule?: { activation?: string; globs?: string[]; scope?: string };
   agent?: { model?: string; readOnly?: boolean; maxTurns?: number; timeoutSeconds?: number };
   command?: { invocationName?: string; argumentHint?: string; acceptsArguments?: boolean; argumentsRequired?: boolean };
@@ -71,6 +76,8 @@ export type AwakenPluginConsoleDetail = {
     errorReason?: string;
     toolsLoaded: boolean;
     tools: Array<{ name: string; description?: string; enabled: boolean }>;
+	hostManaged?: boolean;
+	connectorId?: string;
   };
   hook?: {
     sourceEvent: string;
@@ -120,6 +127,8 @@ export type AwakenPluginConsoleFeedback = {
 export type AwakenPluginConsoleProps = {
   name: string;
   displayName?: string;
+  builtin?: boolean;
+  brandIcon?: string;
   version?: string;
   enabled: boolean;
   components: AwakenPluginConsoleComponent[];
@@ -135,7 +144,7 @@ export type AwakenPluginConsoleProps = {
   detailFeedback?: AwakenPluginConsoleFeedback | null;
   onBack: () => void;
   onEnabledChange: (enabled: boolean) => void;
-  onUninstall: () => void;
+  onUninstall?: () => void;
   onComponentOpen: (component: AwakenPluginConsoleComponent) => void;
   onComponentEnabledChange: (component: AwakenPluginConsoleComponent, enabled: boolean) => void;
   onSetupAction?: (item: AwakenPluginSetupItem, action: string) => void;
@@ -217,6 +226,7 @@ function readOnlyReason(component: AwakenPluginConsoleComponent): string {
   if (component.mappingState === "recognized_unsupported") return "Awaken 当前没有安全的运行适配器";
   if (component.mappingState === "ignored_by_dialect") return "此来源方言不会加载该文件";
   if (component.kind === "variable") return "请打开详情管理配置";
+  if (component.mcp?.hostManaged) return "运行和账号由 Awaken 连接器统一管理";
   return "此组件仅供查看";
 }
 
@@ -237,6 +247,7 @@ const SETUP_STATUS_LABELS: Record<string, string> = {
   needs_auth: "待连接",
   authorizing: "等待授权",
   verifying: "正在验证",
+  pending_admin_approval: "等待管理员审批",
   expired: "已过期",
   failed: "失败",
   unsupported: "当前不支持",
@@ -246,33 +257,124 @@ const SETUP_ACTION_LABELS: Record<string, string> = {
   configure: "配置",
   authorize: "连接账号",
   cancel: "取消",
+  mark_admin_approval: "页面要求管理员审批",
   retry: "重试",
   probe: "重新检测",
   disconnect: "退出登录",
+  reauthorize: "重新连接",
 };
+
+function setupActionLabel(item: AwakenPluginSetupItem, action: string): string {
+  if (item.status === "pending_admin_approval" && action === "retry") {
+    return "批准后重新连接";
+  }
+  return SETUP_ACTION_LABELS[action] ?? action;
+}
 
 function PluginSetupSection({
   items,
+  displayName,
+  brandIcon,
   busy,
   onAction,
 }: {
   items: AwakenPluginSetupItem[];
+  displayName: string;
+  brandIcon?: string;
   busy?: boolean;
   onAction?: (item: AwakenPluginSetupItem, action: string) => void;
 }) {
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   if (items.length === 0) return null;
   const pending = items.filter((item) => item.status !== "ready");
-  const visible = pending.length > 0 ? pending : items;
+  if (pending.length === 0) {
+    const accountItem = items.find((item) =>
+      item.actions.includes("disconnect") &&
+      ["host_connector", "oauth_pkce", "oauth_device", "mcp_oauth", "cli_login"].includes(item.kind),
+    );
+    if (!accountItem) return null;
+    const accountTitle = brandIcon === "outlook" ? "Microsoft Outlook Email" : displayName;
+    const accountDescription = brandIcon === "outlook"
+      ? "搜索、读取和管理你的 Microsoft Outlook 邮件。"
+      : accountItem.description || accountItem.message || "账号已连接，可供插件安全使用。";
+    return (
+      <section className="aw-plugin-account" aria-label="已连接账号">
+        <header><h2>应用</h2><span>1</span></header>
+        <div className="aw-plugin-account__row">
+          <span className="aw-plugin-account__identity">
+            <span className="aw-plugin-account__logo">
+              {isAwakenPluginBrand(brandIcon) ? (
+                <AwakenPluginBrandIcon brand={brandIcon} size="card" />
+              ) : (
+                <AwakenIcon concept="plugin-default" size={20} />
+              )}
+            </span>
+            <span className="aw-plugin-account__copy">
+              <strong>{accountTitle}</strong>
+              <small>{accountDescription}</small>
+            </span>
+          </span>
+          <AwakenDropdown
+            open={accountMenuOpen}
+            onOpenChange={setAccountMenuOpen}
+            trigger={(
+              <button
+                type="button"
+                className="aw-plugin-account__trigger"
+                aria-label={`${accountTitle} 已连接，打开账号操作`}
+                aria-haspopup="menu"
+                disabled={busy || !onAction}
+              >
+                <span className="aw-plugin-account__status-dot" />
+                已连接
+                <AwakenIcon concept="dropdown" size={14} />
+              </button>
+            )}
+          >
+            {onAction ? (
+              <div className="aw-plugin-account__menu" role="menu" aria-label={`${accountTitle} 账号操作`}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={busy}
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    onAction(accountItem, "reauthorize");
+                  }}
+                >
+                  <AwakenIcon concept="refresh" size={16} />
+                  重新连接
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="is-danger"
+                  disabled={busy}
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    onAction(accountItem, "disconnect");
+                  }}
+                >
+                  <AwakenIcon concept="close" size={16} />
+                  断开连接
+                </button>
+              </div>
+            ) : null}
+          </AwakenDropdown>
+        </div>
+      </section>
+    );
+  }
   return (
     <section className="aw-plugin-setup" aria-label="插件设置">
       <header>
         <span>
           <h2>待完成设置</h2>
-          <p>{pending.length > 0 ? `${pending.length} 项需要处理，依赖这些设置的组件暂不可用` : "插件所需设置均已完成"}</p>
+          <p>{`${pending.length} 项需要处理，依赖这些设置的组件暂不可用`}</p>
         </span>
       </header>
       <div className="aw-plugin-setup__items">
-        {visible.map((item) => {
+        {pending.map((item) => {
           const actions = item.actions.filter((action) => action !== "inspect_only");
           return (
             <article key={item.id} className="aw-plugin-setup__item" data-status={item.status}>
@@ -287,7 +389,7 @@ function PluginSetupSection({
                 <span className="aw-plugin-setup__actions">
                   {actions.map((action) => (
                     <AwakenButton key={action} size="sm" variant={action === "authorize" || action === "configure" ? "primary" : "default"} disabled={busy || !onAction} onClick={() => onAction?.(item, action)}>
-                      {SETUP_ACTION_LABELS[action] ?? action}
+                      {setupActionLabel(item, action)}
                     </AwakenButton>
                   ))}
                 </span>
@@ -393,7 +495,7 @@ const PROPERTY_VALUE_LABELS: Record<string, Record<string, string>> = {
   componentType: GROUP_LABELS,
   validationState: { valid: "有效", invalid: "无效", warning: "需要关注" },
   activation: { always: "始终启用", file_globs: "匹配文件时启用", manual: "手动加入", model_decides: "由模型判断" },
-  transport: { stdio: "本地进程", http: "HTTP", sse: "SSE", streamable_http: "流式 HTTP" },
+  transport: { stdio: "本地进程", "in-process": "本机内置", http: "HTTP", sse: "SSE", streamable_http: "流式 HTTP" },
   environment: { local_process: "本地进程", remote_endpoint: "远程服务" },
   handlerType: { command: "命令", http: "HTTP", prompt: "提示词", agent: "子任务智能体", mcp_tool: "MCP 工具" },
   failurePolicy: { continue: "记录错误并继续", stop: "停止运行" },
@@ -428,6 +530,7 @@ function productPropertyRows(properties?: Record<string, unknown>): Array<[strin
     "componentType",
     "displayName",
     "mappingState",
+	"hostManaged",
     "packagePath",
     "sourceDialect",
     "sourcePath",
@@ -437,6 +540,7 @@ function productPropertyRows(properties?: Record<string, unknown>): Array<[strin
     if (hiddenTechnicalState.has(key)) continue;
     if (value && typeof value === "object" && !Array.isArray(value)) {
       for (const [nestedKey, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+		if (hiddenTechnicalState.has(nestedKey)) continue;
         rows.push([nestedKey, PROPERTY_LABELS[nestedKey] ?? nestedKey, nestedValue]);
       }
     } else {
@@ -692,6 +796,7 @@ export function PluginComponentDetailDialog({
               <section className="aw-plugin-mcp-configurator">
                 <header>
                   <div><h3>MCP 运行状态</h3><p>{detail.mcp.environment === "local_process" ? "本机进程" : "远程服务"} · {RUNTIME_LABELS[detail.mcp.connectionState] ?? detail.mcp.connectionState}</p></div>
+				  {detail.mcp.hostManaged ? <span className="aw-plugin-mcp-configurator__owner">由 Awaken 连接器管理</span> : null}
                 </header>
                 {detail.mcp.errorReason ? <p className="aw-plugin-mcp-configurator__error">{detail.mcp.errorReason}</p> : null}
                 <div className="aw-plugin-mcp-configurator__tools">
@@ -699,7 +804,7 @@ export function PluginComponentDetailDialog({
                   {detail.mcp.tools.map((tool) => (
                     <label key={tool.name}>
                       <span><strong>{tool.name}</strong><small>{tool.description || "没有描述"}</small></span>
-                      <AwakenSwitch checked={!componentControlsDisabled && tool.enabled} label={tool.name} size="compact" busy={busy} disabled={componentControlsDisabled || !onMcpToolEnabledChange} onCheckedChange={(enabled) => onMcpToolEnabledChange?.(detail, tool.name, enabled)} />
+                      <AwakenSwitch checked={!componentControlsDisabled && tool.enabled} label={tool.name} size="compact" busy={busy} disabled={componentControlsDisabled || detail.mcp?.hostManaged || !onMcpToolEnabledChange} onCheckedChange={(enabled) => onMcpToolEnabledChange?.(detail, tool.name, enabled)} />
                     </label>
                   ))}
                 </div>
@@ -839,6 +944,8 @@ export function VariableEditor({
 export function AwakenPluginConsole({
   name,
   displayName,
+  builtin = false,
+  brandIcon,
   version,
   enabled,
   components,
@@ -902,19 +1009,32 @@ export function AwakenPluginConsole({
             }}
           ><AwakenIcon concept="back" size={16} />返回插件</button>
           <div className="aw-plugin-console__identity-row">
-            <span className="aw-plugin-console__logo"><AwakenIcon concept="plugin-default" size={24} /></span>
+            <span className="aw-plugin-console__logo">
+              {isAwakenPluginBrand(brandIcon) ? (
+                <AwakenPluginBrandIcon brand={brandIcon} size="detail" />
+              ) : (
+                <AwakenIcon concept="plugin-default" size={24} />
+              )}
+            </span>
             <div className="aw-plugin-console__title">
               <h1>{displayName || name}</h1>
+              {builtin ? <span>Awaken 内置</span> : null}
               {version ? <span>v{version}</span> : null}
             </div>
             <div className="aw-plugin-console__actions">
-              <AwakenButton size="sm" variant="ghost" disabled={busy} onClick={onUninstall}>卸载</AwakenButton>
+              {onUninstall ? <AwakenButton size="sm" variant="ghost" disabled={busy} onClick={onUninstall}>卸载</AwakenButton> : null}
               <AwakenSwitch checked={enabled} label={displayName || name} busy={busy} onCheckedChange={onEnabledChange} />
             </div>
           </div>
         </header>
         {errorMessage ? <div className="aw-plugin-console__error" role="alert">{errorMessage}</div> : null}
-        <PluginSetupSection items={setupItems} busy={busy} onAction={onSetupAction} />
+        <PluginSetupSection
+          items={setupItems}
+          displayName={displayName || name}
+          brandIcon={brandIcon}
+          busy={busy}
+          onAction={onSetupAction}
+        />
         <div className="aw-plugin-console__groups" aria-busy={loading}>
           {loading ? <div className="aw-plugin-console__loading" role="status" aria-label="正在加载插件组件">
             <span /><span /><span />

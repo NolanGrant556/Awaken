@@ -22,7 +22,7 @@ func (s *Store) loadVendorMCPServers(plugin *InstalledPlugin, record Record) ([]
 	context := pluginvariables.InterpolationContext{PluginRoot: plugin.Root, PluginData: plugin.DataDir, Values: values}
 	var servers []LoadedServer
 	for _, component := range plugin.Components {
-		if component.Kind != ir.KindMCPServer || component.MCP == nil || component.Validation == "invalid" || component.Mapping != ir.MappingAdapted && component.Mapping != ir.MappingNative {
+		if component.Kind != ir.KindMCPServer || component.MCP == nil || component.MCP.HostConnectorID != "" || component.Validation == "invalid" || component.Mapping != ir.MappingAdapted && component.Mapping != ir.MappingNative {
 			continue
 		}
 		loaded, invalid := translateVendorMCP(component, plugin, context)

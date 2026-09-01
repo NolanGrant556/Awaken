@@ -74,7 +74,9 @@ describe("runtime reducer user question resolution", () => {
     expect(state.userQuestions).toEqual([]);
     expect(state.phase).toBe("starting");
     expect(state.status).not.toBe("cancelled");
-    expect(state.steps.find((step) => step.id === "user-question:question-1")).toMatchObject({
+    expect(
+      state.steps.find((step) => step.id === "user-question:question-1"),
+    ).toMatchObject({
       title: "Question cancelled",
       description: "The user chose not to answer; the run continues.",
       status: "done",
@@ -3638,8 +3640,16 @@ describe("runtime reducer MCP elicitation gate", () => {
 describe("runtime reducer run plan snapshots", () => {
   const planItemsV1 = [
     { step: "调查现状", activeForm: "正在调查现状", status: "completed" },
-    { step: "实现运行计划协议", activeForm: "正在实现运行计划协议", status: "in_progress" },
-    { step: "补齐自动化验收", activeForm: "正在补齐自动化验收", status: "pending" },
+    {
+      step: "实现运行计划协议",
+      activeForm: "正在实现运行计划协议",
+      status: "in_progress",
+    },
+    {
+      step: "补齐自动化验收",
+      activeForm: "正在补齐自动化验收",
+      status: "pending",
+    },
   ];
 
   function planEvent(overrides: Partial<AguiEvent> = {}): AguiEvent {
@@ -3712,7 +3722,10 @@ describe("runtime reducer run plan snapshots", () => {
   });
 
   it("treats a duplicate same-version frame as idempotent", () => {
-    const first = reduceRuntimeState(stateWithActiveRun(), runEvent(planEvent()));
+    const first = reduceRuntimeState(
+      stateWithActiveRun(),
+      runEvent(planEvent()),
+    );
     const second = reduceRuntimeState(first, runEvent(planEvent()));
 
     expect(second).toBe(first);
@@ -3904,7 +3917,8 @@ describe("runtime reducer run plan snapshots", () => {
 			snapshotId: "instructions-1",
 			capturedAt: "2026-08-20T10:00:00Z",
 			partial: true,
-			sources: [{
+      sources: [
+        {
 				scope: "project" as const,
 				displayPath: ".awaken/AGENTS.md",
 				scopeRoot: "/project",
@@ -3912,7 +3926,8 @@ describe("runtime reducer run plan snapshots", () => {
 				appliedBytes: 10,
 				truncated: false,
 				status: "applied" as const,
-			}],
+        },
+      ],
 			diagnostics: [],
 		};
 		let state = reduceRuntimeState(createInitialRuntimeState(), {
@@ -3929,11 +3944,20 @@ describe("runtime reducer run plan snapshots", () => {
 		});
 		expect(state.inspectorSummary.instructionSnapshot).toEqual(summary);
 
-		state = reduceRuntimeState(state, runEvent({
+    state = reduceRuntimeState(
+      state,
+      runEvent({
 			type: "AWAKEN_INSTRUCTION_SNAPSHOT",
-			instructionSnapshot: { ...summary, snapshotId: "instructions-replayed", partial: false },
-		}));
-		expect(state.inspectorSummary.instructionSnapshot?.snapshotId).toBe("instructions-replayed");
+        instructionSnapshot: {
+          ...summary,
+          snapshotId: "instructions-replayed",
+          partial: false,
+        },
+      }),
+    );
+    expect(state.inspectorSummary.instructionSnapshot?.snapshotId).toBe(
+      "instructions-replayed",
+    );
 	});
 
   it("keeps the run running and records live provider reconnect attempts", () => {

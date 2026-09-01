@@ -21,4 +21,19 @@ describe("Plugin list layout", () => {
       /\.aw-plugins__grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(280px,\s*1fr\)\);/,
     );
   });
+
+  it("uses the same lightweight segmented-tab treatment as Connectors", () => {
+    expect(pluginListStyles).toMatch(
+      /\.aw-plugins__tabs\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?gap:\s*4px;/,
+    );
+    expect(pluginListStyles).toMatch(
+      /\.aw-plugins__tab\s*\{[\s\S]*?height:\s*32px;[\s\S]*?border:\s*0;[\s\S]*?background:\s*transparent;/,
+    );
+    expect(pluginListStyles).toMatch(
+      /\.aw-plugins__tab\[data-active="true"\]\s*\{[\s\S]*?background:\s*var\(--aw-bg-fill-light\);/,
+    );
+    expect(pluginListStyles).not.toMatch(
+      /\.aw-plugins__tabs\s*\{[^}]*background:/,
+    );
+  });
 });

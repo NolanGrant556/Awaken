@@ -302,6 +302,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 		mux.HandleFunc("POST /v1/connectors/{id}/disconnect", connH.handleDisconnect)
 		mux.HandleFunc("GET /v1/connectors/auth/sessions/{sessionId}", connH.handleAuthSession)
 		mux.HandleFunc("POST /v1/connectors/auth/sessions/{sessionId}/cancel", connH.handleCancelAuthSession)
+		mux.HandleFunc("POST /v1/connectors/auth/sessions/{sessionId}/admin-approval", connH.handleAdminApprovalPending)
 		mux.HandleFunc("PUT /v1/connectors/{id}/cli-readiness", connH.handleCLIReadiness)
 	}
 	pluginAuth := cfg.pluginAuth
@@ -311,7 +312,7 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	if pluginAuth == nil && cfg.pluginStore != nil {
 		pluginAuth = pluginauth.NewService(cfg.pluginStore, cfg.manager, cfg.connectorRegistry, nil)
 	}
-	pluginH := pluginHandlers{store: cfg.pluginStore, manager: cfg.manager, runService: cfg.runService, auth: pluginAuth}
+	pluginH := pluginHandlers{store: cfg.pluginStore, manager: cfg.manager, connectorRegistry: cfg.connectorRegistry, runService: cfg.runService, auth: pluginAuth}
 	composerCatalogH := newComposerCatalogHandlers(cfg.skillRegistry, cfg.pluginStore)
 	mux.HandleFunc("GET /v1/composer-catalog/events", composerCatalogH.handleEvents)
 	mux.HandleFunc("GET /v1/plugins", pluginH.handleList)
@@ -323,9 +324,11 @@ func newRouterInternal(cfg routerConfig) http.Handler {
 	mux.HandleFunc("POST /v1/plugins/{name}/disable", pluginH.handleDisable)
 	mux.HandleFunc("DELETE /v1/plugins/{name}", pluginH.handleDelete)
 	mux.HandleFunc("GET /v1/plugins/{name}/setup", pluginH.handleSetup)
+	mux.HandleFunc("GET /v1/plugins/{name}/active-setup-sessions/{setupId}", pluginH.handleActiveSetupSession)
 	mux.HandleFunc("POST /v1/plugins/{name}/setup/{setupId}/sessions", pluginH.handleStartSetupSession)
 	mux.HandleFunc("GET /v1/plugins/{name}/setup/sessions/{sessionId}", pluginH.handleSetupSession)
 	mux.HandleFunc("POST /v1/plugins/{name}/setup/sessions/{sessionId}/cancel", pluginH.handleCancelSetupSession)
+	mux.HandleFunc("POST /v1/plugins/{name}/setup/sessions/{sessionId}/admin-approval", pluginH.handleSetupAdminApprovalPending)
 	mux.HandleFunc("POST /v1/plugins/{name}/setup/{setupId}/probe", pluginH.handleProbeSetup)
 	mux.HandleFunc("DELETE /v1/plugins/{name}/setup/{setupId}/credential", pluginH.handleDisconnectSetup)
 	mux.HandleFunc("POST /v1/plugins/{name}/servers/{short}/enable", pluginH.handleServerEnable)

@@ -2155,6 +2155,13 @@ ipcMain.handle("awaken:cancel-connector-auth-session", async (_event, sessionId:
   );
 });
 
+ipcMain.handle("awaken:mark-connector-admin-approval", async (_event, sessionId: string) => {
+  return requestRuntime<RuntimeConnectorAuthSession>(
+    `/v1/connectors/auth/sessions/${encodeURIComponent(String(sessionId ?? "").trim())}/admin-approval`,
+    { method: "POST" },
+  );
+});
+
 ipcMain.handle("awaken:list-cli-connectors", async () => cliConnectorManager?.list() ?? []);
 ipcMain.handle("awaken:refresh-cli-connector", async (_event, providerId: CliProviderId) => {
   if (!cliConnectorManager) throw new Error("CLI connector manager unavailable");
@@ -2628,6 +2635,30 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle(
+  "awaken:get-active-plugin-auth-session",
+  async (
+    _event,
+    name: string,
+    setupId: string,
+    request: RuntimePluginSetupMutationRequest,
+  ): Promise<RuntimePluginAuthSession | null> => {
+    const pluginName = String(name ?? "").trim();
+    const requirementId = String(setupId ?? "").trim();
+    const pluginDigest = String(request?.pluginDigest ?? "").trim();
+    const requirementFingerprint = String(request?.requirementFingerprint ?? "").trim();
+    if (!pluginName || !requirementId || !pluginDigest || !requirementFingerprint) {
+      throw new Error("插件、设置项和版本指纹不能为空");
+    }
+    const query = new URLSearchParams({ pluginDigest, requirementFingerprint });
+    const result = await requestRuntime<{ session?: RuntimePluginAuthSession | null }>(
+      `/v1/plugins/${encodeURIComponent(pluginName)}/active-setup-sessions/${encodeURIComponent(requirementId)}?${query.toString()}`,
+      { method: "GET" },
+    );
+    return result.session ?? null;
+  },
+);
+
 ipcMain.handle("awaken:get-plugin-auth-session", async (_event, name: string, sessionId: string) => {
   return requestRuntime<RuntimePluginAuthSession>(
     `/v1/plugins/${encodeURIComponent(String(name ?? "").trim())}/setup/sessions/${encodeURIComponent(String(sessionId ?? "").trim())}`,
@@ -2638,6 +2669,13 @@ ipcMain.handle("awaken:get-plugin-auth-session", async (_event, name: string, se
 ipcMain.handle("awaken:cancel-plugin-auth-session", async (_event, name: string, sessionId: string) => {
   return requestRuntime<RuntimePluginAuthSession>(
     `/v1/plugins/${encodeURIComponent(String(name ?? "").trim())}/setup/sessions/${encodeURIComponent(String(sessionId ?? "").trim())}/cancel`,
+    { method: "POST" },
+  );
+});
+
+ipcMain.handle("awaken:mark-plugin-admin-approval", async (_event, name: string, sessionId: string) => {
+  return requestRuntime<RuntimePluginAuthSession>(
+    `/v1/plugins/${encodeURIComponent(String(name ?? "").trim())}/setup/sessions/${encodeURIComponent(String(sessionId ?? "").trim())}/admin-approval`,
     { method: "POST" },
   );
 });

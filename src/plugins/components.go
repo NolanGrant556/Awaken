@@ -49,10 +49,10 @@ func componentConfiguration(component ir.Component, setup []ir.SetupRequirement,
 	return "ready"
 }
 
-func componentAuthentication(pluginName string, component ir.Component, setup []ir.SetupRequirement, provider SetupReadinessProvider) string {
-	state := "not_required"
+func setupReadinessSnapshot(pluginName string, setup []ir.SetupRequirement, provider SetupReadinessProvider) map[string]SetupStatus {
+	statuses := make(map[string]SetupStatus, len(setup))
 	for _, requirement := range setup {
-		if requirement.Kind == ir.SetupConfiguration || requirement.Kind == ir.SetupSecret || !setupContainsComponent(requirement.ComponentIDs, component.LogicalID) {
+		if requirement.Kind == ir.SetupConfiguration || requirement.Kind == ir.SetupSecret {
 			continue
 		}
 		status := SetupReady
@@ -63,6 +63,18 @@ func componentAuthentication(pluginName string, component ir.Component, setup []
 		} else if requirement.Required || requirement.Kind != ir.SetupMCPOAuth {
 			status = SetupNeedsAuth
 		}
+		statuses[requirement.ID] = status
+	}
+	return statuses
+}
+
+func componentAuthentication(component ir.Component, setup []ir.SetupRequirement, statuses map[string]SetupStatus) string {
+	state := "not_required"
+	for _, requirement := range setup {
+		if requirement.Kind == ir.SetupConfiguration || requirement.Kind == ir.SetupSecret || !setupContainsComponent(requirement.ComponentIDs, component.LogicalID) {
+			continue
+		}
+		status := statuses[requirement.ID]
 		candidate := string(status)
 		if candidate == string(SetupReady) {
 			if state == "not_required" {
@@ -94,6 +106,8 @@ func authStatePriority(state string) int {
 		return 6
 	case string(SetupNeedsAuth):
 		return 5
+	case string(SetupPendingAdminApproval):
+		return 5
 	case string(SetupAuthorizing), string(SetupVerifying):
 		return 4
 	case string(SetupUnsupported):
@@ -105,16 +119,18 @@ func authStatePriority(state string) int {
 	}
 }
 
-func componentSwitchable(pluginName string, component ir.Component, setup []ir.SetupRequirement, record Record, provider SetupReadinessProvider) bool {
-	authentication := componentAuthentication(pluginName, component, setup, provider)
+func componentSwitchable(component ir.Component, setup []ir.SetupRequirement, record Record, statuses map[string]SetupStatus) bool {
+	authentication := componentAuthentication(component, setup, statuses)
 	return component.Validation != "invalid" &&
 		componentConfiguration(component, setup, record) == "ready" &&
 		(authentication == "ready" || authentication == "not_required") &&
 		component.Kind != ir.KindVariable &&
+		(component.MCP == nil || component.MCP.HostConnectorID == "") &&
 		(component.Mapping == ir.MappingNative || component.Mapping == ir.MappingAdapted)
 }
 
 func (s *Store) componentStates(pluginName string, components []ir.Component, setup []ir.SetupRequirement, record Record) ([]ComponentState, string, string, string) {
+	statuses := setupReadinessSnapshot(pluginName, setup, s.setupReadiness)
 	states := make([]ComponentState, 0, len(components))
 	configurationState := "ready"
 	authenticationState := "ready"
@@ -149,7 +165,7 @@ func (s *Store) componentStates(pluginName string, components []ir.Component, se
 		if configuration == "needs_configuration" {
 			configurationState = "needs_configuration"
 		}
-		authentication := componentAuthentication(pluginName, component, setup, s.setupReadiness)
+		authentication := componentAuthentication(component, setup, statuses)
 		if authentication != "ready" && authentication != "not_required" && authStatePriority(authentication) >= authStatePriority(authenticationState) {
 			authenticationState = authentication
 		}
@@ -157,7 +173,7 @@ func (s *Store) componentStates(pluginName string, components []ir.Component, se
 		if component.Kind == ir.KindMCPServer {
 			runtime = "stopped"
 		}
-		switchable := componentSwitchable(pluginName, component, setup, record, s.setupReadiness)
+		switchable := componentSwitchable(component, setup, record, statuses)
 		if component.Mapping == ir.MappingRecognizedUnsupported || component.Mapping == ir.MappingInvalid {
 			compatibilityState = "partial"
 		}
@@ -231,7 +247,12 @@ func (s *Store) SetupItems(name string) ([]SetupItem, SetupSummary, error) {
 func setupActions(status SetupStatus, kind ir.SetupKind) []SetupAction {
 	switch status {
 	case SetupAuthorizing, SetupVerifying:
+		if kind == ir.SetupOAuthPKCE || kind == ir.SetupOAuthDevice || kind == ir.SetupMCPOAuth || kind == ir.SetupHostConnector {
+			return []SetupAction{SetupActionMarkAdminApproval, SetupActionCancel}
+		}
 		return []SetupAction{SetupActionCancel}
+	case SetupPendingAdminApproval:
+		return []SetupAction{SetupActionRetry}
 	case SetupReady:
 		if kind == ir.SetupExternal || kind == ir.SetupCLILogin {
 			return []SetupAction{SetupActionProbe}
@@ -260,6 +281,8 @@ func SummarizeSetup(items []SetupItem) SetupSummary {
 			summary.NeedsConfiguration++
 		case SetupNeedsAuth, SetupExpired:
 			summary.NeedsAuth++
+		case SetupPendingAdminApproval:
+			summary.NeedsAdminApproval++
 		case SetupAuthorizing, SetupVerifying:
 			summary.InProgress++
 		case SetupUnsupported:
@@ -294,9 +317,11 @@ func (s *Store) ComponentDetail(name, logicalID string) (ComponentDetail, error)
 		if stayErr := resolvedStayWithin(plugin.Root, path); stayErr == nil && isRegularFile(path) {
 			raw, readErr := os.ReadFile(path)
 			if readErr == nil {
-				if state.Component.Kind == ir.KindMCPServer {
+				if !plugin.Builtin && state.Component.Kind == ir.KindMCPServer && (state.Component.MCP == nil || state.Component.MCP.HostConnectorID == "") {
 					detail.Source = string(raw)
 					detail.SourceEditable = true
+				} else if state.Component.Kind == ir.KindMCPServer {
+					detail.Source = string(raw)
 				} else if state.Component.Kind == ir.KindHook {
 					detail.Source = redactHookSource(raw)
 				} else {
@@ -340,6 +365,11 @@ func componentProperties(component ir.Component) map[string]any {
 			"transport":               component.MCP.Transport,
 			"environment":             map[bool]string{true: "local_process", false: "remote_endpoint"}[component.MCP.Transport == "stdio"],
 			"oauthResourceConfigured": strings.TrimSpace(component.MCP.OAuthResource) != "",
+		}
+		if component.MCP.HostConnectorID != "" {
+			properties["mcp"].(map[string]any)["hostManaged"] = true
+			properties["mcp"].(map[string]any)["connectorId"] = component.MCP.HostConnectorID
+			properties["mcp"].(map[string]any)["environment"] = "local_process"
 		}
 	}
 	if component.Rule != nil {
@@ -482,7 +512,8 @@ func (s *Store) SetComponentDesired(name, logicalID string, enabled bool) (*Inst
 		if target == nil {
 			return fmt.Errorf("%w: component %s", ErrNotFound, logicalID)
 		}
-		if !componentSwitchable(name, *target, loaded.Setup, record, s.setupReadiness) {
+		statuses := setupReadinessSnapshot(name, loaded.Setup, s.setupReadiness)
+		if !componentSwitchable(*target, loaded.Setup, record, statuses) {
 			return fmt.Errorf("%w: %s", ErrComponentNotSwitchable, logicalID)
 		}
 		if record.Components == nil {
@@ -534,6 +565,9 @@ func (s *Store) SetMCPToolEnabled(name, logicalID, toolName string, enabled bool
 		}
 		if target == nil || target.Kind != ir.KindMCPServer || target.MCP == nil {
 			return fmt.Errorf("%w: component %s", ErrNotFound, logicalID)
+		}
+		if target.MCP.HostConnectorID != "" {
+			return fmt.Errorf("%w: host connector MCP controls are owned by the connector", ErrComponentNotSwitchable)
 		}
 		if target.Validation == "invalid" || target.Mapping != ir.MappingNative && target.Mapping != ir.MappingAdapted {
 			return fmt.Errorf("%w: %s", ErrComponentNotSwitchable, logicalID)

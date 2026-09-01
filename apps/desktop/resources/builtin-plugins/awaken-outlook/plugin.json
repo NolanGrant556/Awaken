@@ -1,0 +1,7 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "awaken-outlook",
+  "version": "1.4.0",
+  "description": "Awaken 官方 Outlook 邮箱插件，通过宿主连接器搜索、批量读取和管理个人与共享邮箱、草稿、附件、文件夹、分类、退订和本地定时发送。",
+  "keywords": ["Outlook", "邮箱", "邮件", "Microsoft"]
+}

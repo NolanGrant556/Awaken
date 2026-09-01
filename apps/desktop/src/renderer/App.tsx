@@ -69,10 +69,7 @@ import {
   type AwakenToolTraceLineProps,
 } from "@awaken/design-system";
 import { providerBrandForId } from "./model-provider-brand";
-import {
-  createRuntimeClient,
-  type SubscribeHandlers,
-} from "./runtime/client";
+import { createRuntimeClient, type SubscribeHandlers } from "./runtime/client";
 import type {
   AwakenTheme,
   AwakenThemePreference,
@@ -231,19 +228,19 @@ import {
   toRunInputAttachment,
 } from "./composerAttachments";
 import {
+  activeComposerPaletteActions,
   actionsFromSlashProviders,
+  builtinMentionActions,
   composerActionTriggerFromDraft,
   composerPaletteActions,
-  computerUseMentionProvider,
   composerTokenFromSlashAction,
   firstSelectableSlashAction,
-  pluginMentionProvider,
+  pluginMentionActionsFromPlugins,
   pluginAgentComposerTokenFromAction,
   pluginCommandComposerTokenFromAction,
   pluginComposerTokenFromAction,
   pluginSkillComposerTokenFromAction,
   pluginRuleComposerTokenFromAction,
-  deepResearchMentionProvider,
   skillSlashProvider,
   type ComposerTokenPlacement,
   type SlashAction,
@@ -281,7 +278,10 @@ type UserQuestionPromptProps = {
   onSubmit: (answer: string) => void;
 };
 
-type MediaArtifactPreviewItem = Omit<AwakenMediaPreviewItem, "src" | "metadata"> & {
+type MediaArtifactPreviewItem = Omit<
+  AwakenMediaPreviewItem,
+  "src" | "metadata"
+> & {
   sourceKey: string;
   request: ArtifactOpenRequest;
 };
@@ -433,7 +433,9 @@ function artifactMediaSourceKey(request: ArtifactOpenRequest): string {
 
 export function mediaFormatLabelForPath(path?: string): string | undefined {
   const filename = path?.trim().split(/[\\/]/).pop();
-  const extension = filename?.includes(".") ? filename.split(".").pop() : undefined;
+  const extension = filename?.includes(".")
+    ? filename.split(".").pop()
+    : undefined;
   return extension?.trim().toUpperCase() || undefined;
 }
 
@@ -507,8 +509,11 @@ export function shouldUseCenterComposerWithFileWorkspace({
   expandedWorkspaceSurface: ExpandedWorkspaceSurface;
 }): boolean {
   return (
-    !(fileWorkspaceOpen && fileWorkspaceExpanded && expandedWorkspaceSurface === "file") &&
-    standardCenterComposer
+    !(
+      fileWorkspaceOpen &&
+      fileWorkspaceExpanded &&
+      expandedWorkspaceSurface === "file"
+    ) && standardCenterComposer
   );
 }
 
@@ -541,7 +546,9 @@ export function composerMetaItemsForFileWorkspaceSurface(
   metaItems: ComposerBarMetaItem[],
   fileWorkspaceSurfaceActive: boolean,
 ): ComposerBarMetaItem[] {
-  return fileWorkspaceSurfaceActive ? metaItems.filter((item) => item.id === "model") : metaItems;
+  return fileWorkspaceSurfaceActive
+    ? metaItems.filter((item) => item.id === "model")
+    : metaItems;
 }
 
 export type WorkbenchNavSection = ExtensionSection | "scheduled-tasks";
@@ -550,7 +557,11 @@ export type WorkbenchNavSection = ExtensionSection | "scheduled-tasks";
 export function workbenchNavSectionForNavId(
   activeNavId: string | undefined,
 ): WorkbenchNavSection | undefined {
-  if (activeNavId === "connectors" || activeNavId === "skills" || activeNavId === "plugins") {
+  if (
+    activeNavId === "connectors" ||
+    activeNavId === "skills" ||
+    activeNavId === "plugins"
+  ) {
     return activeNavId;
   }
   if (activeNavId === "scheduled-tasks") {
@@ -592,26 +603,41 @@ const emptyUserQuestionSelection = (): UserQuestionSelection => ({
   otherText: "",
 });
 
-export function selectedUserQuestionLabels(selection: UserQuestionSelection): string[] {
-  const labels = selection.selected.filter((label) => label !== USER_QUESTION_OTHER_OPTION);
-  if (selection.selected.includes(USER_QUESTION_OTHER_OPTION) && selection.otherText.trim()) {
+export function selectedUserQuestionLabels(
+  selection: UserQuestionSelection,
+): string[] {
+  const labels = selection.selected.filter(
+    (label) => label !== USER_QUESTION_OTHER_OPTION,
+  );
+  if (
+    selection.selected.includes(USER_QUESTION_OTHER_OPTION) &&
+    selection.otherText.trim()
+  ) {
     labels.push(selection.otherText.trim());
   }
   return labels;
 }
 
-export function isUserQuestionSelectionAnswered(selection: UserQuestionSelection): boolean {
+export function isUserQuestionSelectionAnswered(
+  selection: UserQuestionSelection,
+): boolean {
   return selectedUserQuestionLabels(selection).length > 0;
 }
 
-export function nextUserQuestionPromptIndex(currentIndex: number, questionCount: number): number {
+export function nextUserQuestionPromptIndex(
+  currentIndex: number,
+  questionCount: number,
+): number {
   if (questionCount <= 0) {
     return 0;
   }
   return Math.min(currentIndex + 1, questionCount - 1);
 }
 
-function clampUserQuestionPromptIndex(index: number, questionCount: number): number {
+function clampUserQuestionPromptIndex(
+  index: number,
+  questionCount: number,
+): number {
   if (questionCount <= 0) {
     return 0;
   }
@@ -645,14 +671,23 @@ function composerTokenEndOffset(
   return undefined;
 }
 
-export function promptTokenViews(tokens?: PromptNarrativeToken[]) {
+export function promptTokenViews(
+  tokens?: PromptNarrativeToken[],
+  pluginBrandByName?: ReadonlyMap<string, string>,
+) {
   return tokens?.map((token) => ({
     id: token.id,
     type: token.type,
     label: token.label,
     leadingText: token.leadingText || undefined,
     title:
-      typeof token.payload?.skillFilePath === "string" ? token.payload.skillFilePath : token.label,
+      typeof token.payload?.skillFilePath === "string"
+        ? token.payload.skillFilePath
+        : token.label,
+    brandIcon:
+      token.type === "plugin" && typeof token.payload?.pluginName === "string"
+        ? pluginBrandByName?.get(token.payload.pluginName)
+        : undefined,
   }));
 }
 
@@ -676,9 +711,12 @@ export function promptTextAfterTokenLeadingText(
       leadingText.trimEnd(),
       leadingText.trim(),
     ].filter(
-      (candidate, index, values) => candidate.length > 0 && values.indexOf(candidate) === index,
+      (candidate, index, values) =>
+        candidate.length > 0 && values.indexOf(candidate) === index,
     );
-    const matchedLeadingText = candidates.find((candidate) => remainingText.startsWith(candidate));
+    const matchedLeadingText = candidates.find((candidate) =>
+      remainingText.startsWith(candidate),
+    );
     if (!matchedLeadingText) {
       return text;
     }
@@ -693,7 +731,9 @@ export function UserQuestionPrompt({
   onCancel,
   onSubmit,
 }: UserQuestionPromptProps) {
-  const [answers, setAnswers] = useState<Record<number, UserQuestionSelection>>({});
+  const [answers, setAnswers] = useState<Record<number, UserQuestionSelection>>(
+    {},
+  );
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const otherInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const questions = question.questions;
@@ -704,7 +744,9 @@ export function UserQuestionPrompt({
   }, [question.id]);
 
   useEffect(() => {
-    setActiveQuestionIndex((current) => clampUserQuestionPromptIndex(current, questions.length));
+    setActiveQuestionIndex((current) =>
+      clampUserQuestionPromptIndex(current, questions.length),
+    );
   }, [questions.length]);
 
   if (questions.length === 0) {
@@ -712,7 +754,10 @@ export function UserQuestionPrompt({
   }
 
   const questionCount = questions.length;
-  const currentPageIndex = clampUserQuestionPromptIndex(activeQuestionIndex, questionCount);
+  const currentPageIndex = clampUserQuestionPromptIndex(
+    activeQuestionIndex,
+    questionCount,
+  );
   const activeQuestion = questions[currentPageIndex];
   const hasPreviousQuestion = currentPageIndex > 0;
   const hasNextQuestion = currentPageIndex < questionCount - 1;
@@ -758,7 +803,9 @@ export function UserQuestionPrompt({
     if (!multiSelect && label !== USER_QUESTION_OTHER_OPTION) {
       window.setTimeout(() => {
         setActiveQuestionIndex((current) =>
-          current === index ? nextUserQuestionPromptIndex(index, questionCount) : current,
+          current === index
+            ? nextUserQuestionPromptIndex(index, questionCount)
+            : current,
         );
       }, 120);
     }
@@ -778,8 +825,12 @@ export function UserQuestionPrompt({
     return selectedUserQuestionLabels(currentAnswer(index));
   };
 
-  const canSubmit = questions.every((_item, index) => selectedLabelsForQuestion(index).length > 0);
-  const currentQuestionAnswered = isUserQuestionSelectionAnswered(currentAnswer(currentPageIndex));
+  const canSubmit = questions.every(
+    (_item, index) => selectedLabelsForQuestion(index).length > 0,
+  );
+  const currentQuestionAnswered = isUserQuestionSelectionAnswered(
+    currentAnswer(currentPageIndex),
+  );
   const answeredCount = questions.filter((_item, index) =>
     isUserQuestionSelectionAnswered(currentAnswer(index)),
   ).length;
@@ -812,7 +863,9 @@ export function UserQuestionPrompt({
   };
 
   const isMulti = activeQuestion.multiSelect ?? false;
-  const options = Array.isArray(activeQuestion.options) ? activeQuestion.options : [];
+  const options = Array.isArray(activeQuestion.options)
+    ? activeQuestion.options
+    : [];
   const hasOther = isSelected(currentPageIndex, USER_QUESTION_OTHER_OPTION);
   const primaryActionDisabled =
     disabled || (hasNextQuestion ? !currentQuestionAnswered : !canSubmit);
@@ -826,9 +879,13 @@ export function UserQuestionPrompt({
       <div className="user-question-card__topbar">
         <div className="user-question-card__heading">
           {activeQuestion.header ? (
-            <div className="user-question-card__header">{activeQuestion.header}</div>
+            <div className="user-question-card__header">
+              {activeQuestion.header}
+            </div>
           ) : null}
-          <div className="user-question-card__title">{activeQuestion.question}</div>
+          <div className="user-question-card__title">
+            {activeQuestion.question}
+          </div>
         </div>
         <div className="user-question-card__topbar-actions">
           {hasMultipleQuestions ? (
@@ -885,10 +942,14 @@ export function UserQuestionPrompt({
                     ? " user-question-card__option--selected"
                     : ""
                 }`}
-                onClick={() => toggleOption(currentPageIndex, isMulti, option.label)}
+                onClick={() =>
+                  toggleOption(currentPageIndex, isMulti, option.label)
+                }
                 disabled={disabled}
               >
-                <span className="user-question-card__option-label">{option.label}</span>
+                <span className="user-question-card__option-label">
+                  {option.label}
+                </span>
                 {option.description ? (
                   <span className="user-question-card__option-description">
                     {option.description}
@@ -902,7 +963,11 @@ export function UserQuestionPrompt({
               }${disabled ? " user-question-card__option--disabled" : ""}`}
               onClick={() => {
                 if (!disabled) {
-                  toggleOption(currentPageIndex, isMulti, USER_QUESTION_OTHER_OPTION);
+                  toggleOption(
+                    currentPageIndex,
+                    isMulti,
+                    USER_QUESTION_OTHER_OPTION,
+                  );
                 }
               }}
               onKeyDown={(event) => {
@@ -910,13 +975,19 @@ export function UserQuestionPrompt({
                   return;
                 }
                 event.preventDefault();
-                toggleOption(currentPageIndex, isMulti, USER_QUESTION_OTHER_OPTION);
+                toggleOption(
+                  currentPageIndex,
+                  isMulti,
+                  USER_QUESTION_OTHER_OPTION,
+                );
               }}
               role="button"
               aria-pressed={hasOther}
               tabIndex={disabled ? -1 : 0}
             >
-              <span className="user-question-card__option-label">其他（输入你的答案）</span>
+              <span className="user-question-card__option-label">
+                其他（输入你的答案）
+              </span>
               {hasOther ? (
                 <input
                   ref={(node) => {
@@ -926,7 +997,9 @@ export function UserQuestionPrompt({
                   className="user-question-card__other-input"
                   placeholder="请输入你的回答..."
                   value={currentAnswer(currentPageIndex).otherText}
-                  onChange={(event) => setOtherText(currentPageIndex, event.target.value)}
+                  onChange={(event) =>
+                    setOtherText(currentPageIndex, event.target.value)
+                  }
                   disabled={disabled}
                   onClick={(event) => event.stopPropagation()}
                   onKeyDown={(event) => {
@@ -949,7 +1022,12 @@ export function UserQuestionPrompt({
             已回答 {answeredCount} / {questionCount}
           </span>
         ) : null}
-        <Button variant="default" size="sm" disabled={disabled} onClick={onCancel}>
+        <Button
+          variant="default"
+          size="sm"
+          disabled={disabled}
+          onClick={onCancel}
+        >
           取消
         </Button>
         <Button
@@ -993,7 +1071,11 @@ export function sidebarThreadArchiveMenuState(thread: ThreadItem): {
 
 export function sidebarThreadMenuItems(
   thread: ThreadItem,
-  actions: { onRename: () => void; onArchive: () => void; onDelete: () => void },
+  actions: {
+    onRename: () => void;
+    onArchive: () => void;
+    onDelete: () => void;
+  },
 ): ProjectMenuItem[] {
   const archiveState = sidebarThreadArchiveMenuState(thread);
   return [
@@ -1062,9 +1144,12 @@ export function resolveWorkspaceRootForRun(args: {
   }
 
   const selectedProject =
-    selectedProjectId === undefined || selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID
+    selectedProjectId === undefined ||
+    selectedProjectId === DEFAULT_WORKSPACE_PROJECT_ID
       ? undefined
-      : projectsFromWorkspace.find((project) => project.id === selectedProjectId);
+      : projectsFromWorkspace.find(
+          (project) => project.id === selectedProjectId,
+        );
 
   // A project the user created without picking a folder anchors nothing on disk.
   // Returning empty lets Core resolve that project's session workspace, instead
@@ -1114,7 +1199,9 @@ export function partitionPickedProjectFolders(args: {
   for (const candidate of args.candidates) {
     const label = workspaceLabelForPath(candidate);
     if (
-      [...args.attachedPaths, ...accepted].some((taken) => isSameWorkspacePath(taken, candidate))
+      [...args.attachedPaths, ...accepted].some((taken) =>
+        isSameWorkspacePath(taken, candidate),
+      )
     ) {
       skipped.push(`“${label}”已经在这个项目里。`);
       continue;
@@ -1142,7 +1229,9 @@ export function sharedFolderTrashWarning(args: {
     .filter(
       (project) =>
         project.id !== args.actingProjectId &&
-        project.folders.some((folder) => isSameWorkspacePath(folder.path, args.folderPath)),
+        project.folders.some((folder) =>
+          isSameWorkspacePath(folder.path, args.folderPath),
+        ),
     )
     .map((project) => `“${project.label}”`);
   if (others.length === 0) {
@@ -1175,7 +1264,9 @@ export function resolveRunRootsForRun(args: {
     args.projectsFromWorkspace.find(
       (candidate) =>
         candidate.id === args.projectId &&
-        candidate.folders.some((folder) => isSameWorkspacePath(folder.path, root)),
+        candidate.folders.some((folder) =>
+          isSameWorkspacePath(folder.path, root),
+        ),
     ) ?? workspaceProjectForFolderPath(args.projectsFromWorkspace, root);
   if (!project) {
     return [root];
@@ -1218,7 +1309,9 @@ export function resolveRunProjectForRun(args: {
     selectedProjectId !== DEFAULT_WORKSPACE_PROJECT_ID &&
     projectsFromWorkspace
       .find((project) => project.id === selectedProjectId)
-      ?.folders.some((folder) => isSameWorkspacePath(folder.path, workspaceRoot)) === true;
+      ?.folders.some((folder) =>
+        isSameWorkspacePath(folder.path, workspaceRoot),
+      ) === true;
   // 没有根就只能靠选中项来定身份，那正是零文件夹项目的情形。
   const projectId = !workspaceRoot
     ? selectedProjectId
@@ -1226,7 +1319,8 @@ export function resolveRunProjectForRun(args: {
       ? selectedProjectId
       : isSameWorkspacePath(workspaceRoot, effectiveDefaultWorkspacePath)
         ? DEFAULT_WORKSPACE_PROJECT_ID
-        : workspaceProjectForFolderPath(projectsFromWorkspace, workspaceRoot)?.id;
+        : workspaceProjectForFolderPath(projectsFromWorkspace, workspaceRoot)
+            ?.id;
   if (!projectId) {
     return {};
   }
@@ -1235,12 +1329,16 @@ export function resolveRunProjectForRun(args: {
       projectId,
       projectName:
         defaultProjectName?.trim() ||
-        (defaultWorkspacePath ? workspaceLabelForPath(defaultWorkspacePath) : "awaken"),
+        (defaultWorkspacePath
+          ? workspaceLabelForPath(defaultWorkspacePath)
+          : "awaken"),
     };
   }
   return {
     projectId,
-    projectName: projectsFromWorkspace.find((project) => project.id === projectId)?.label,
+    projectName: projectsFromWorkspace.find(
+      (project) => project.id === projectId,
+    )?.label,
   };
 }
 
@@ -1261,7 +1359,10 @@ function sameWorkspaceProjectFolders(
   );
 }
 
-function sameWorkspaceProjects(current: WorkspaceProject[], next: WorkspaceProject[]): boolean {
+function sameWorkspaceProjects(
+  current: WorkspaceProject[],
+  next: WorkspaceProject[],
+): boolean {
   return (
     next.length === current.length &&
     next.every((project, index) => {
@@ -1283,11 +1384,17 @@ export function resolveBackendProjectOrder(
   defaultBackendProjectId: string | undefined,
   projects: WorkspaceProject[],
 ): string[] | undefined {
-  const backendById = new Map(projects.map((project) => [project.id, project.backendProjectId]));
-  const backendIds = ids.map((id) =>
-    id === DEFAULT_WORKSPACE_PROJECT_ID ? defaultBackendProjectId : backendById.get(id),
+  const backendById = new Map(
+    projects.map((project) => [project.id, project.backendProjectId]),
   );
-  return backendIds.every((id): id is string => Boolean(id)) ? backendIds : undefined;
+  const backendIds = ids.map((id) =>
+    id === DEFAULT_WORKSPACE_PROJECT_ID
+      ? defaultBackendProjectId
+      : backendById.get(id),
+  );
+  return backendIds.every((id): id is string => Boolean(id))
+    ? backendIds
+    : undefined;
 }
 
 function formatTokenCount(value?: number): string | undefined {
@@ -1311,7 +1418,11 @@ export function subagentElapsedMs(
 ): number | undefined {
   const startedAt = task.startedAt ? Date.parse(task.startedAt) : Number.NaN;
   const finishedAt = task.finishedAt ? Date.parse(task.finishedAt) : nowMs;
-  if (!Number.isFinite(startedAt) || !Number.isFinite(finishedAt) || finishedAt < startedAt) {
+  if (
+    !Number.isFinite(startedAt) ||
+    !Number.isFinite(finishedAt) ||
+    finishedAt < startedAt
+  ) {
     return undefined;
   }
   return finishedAt - startedAt;
@@ -1331,7 +1442,11 @@ export function subagentWorkspaceModeLabel(mode?: string): string | undefined {
 }
 
 function formatSubagentElapsed(elapsedMs?: number): string | undefined {
-  if (typeof elapsedMs !== "number" || !Number.isFinite(elapsedMs) || elapsedMs < 0) {
+  if (
+    typeof elapsedMs !== "number" ||
+    !Number.isFinite(elapsedMs) ||
+    elapsedMs < 0
+  ) {
     return undefined;
   }
   const totalSeconds = Math.max(1, Math.round(elapsedMs / 1000));
@@ -1406,7 +1521,9 @@ function safeTokenSum(...values: number[]): number | undefined {
   return Number.isSafeInteger(total) && total >= 0 ? total : undefined;
 }
 
-function providerCurrentInputTokens(usage: RuntimeModelUsage | undefined): number | undefined {
+function providerCurrentInputTokens(
+  usage: RuntimeModelUsage | undefined,
+): number | undefined {
   if (
     !usage ||
     usage.purpose !== "agent_turn" ||
@@ -1453,14 +1570,18 @@ function usageMatchesSnapshot(
   }
   if (
     currentModel &&
-    ((usage.profileId && currentModel.id && usage.profileId !== currentModel.id) ||
+    ((usage.profileId &&
+      currentModel.id &&
+      usage.profileId !== currentModel.id) ||
       (usage.providerId &&
         currentModel.providerId &&
         usage.providerId !== currentModel.providerId) ||
       (usage.credentialRevision !== undefined &&
         currentModel.credentialRevision !== undefined &&
         usage.credentialRevision !== currentModel.credentialRevision) ||
-      (usage.modelId && currentModel.modelId && usage.modelId !== currentModel.modelId) ||
+      (usage.modelId &&
+        currentModel.modelId &&
+        usage.modelId !== currentModel.modelId) ||
       (usage.capabilityModelId &&
         currentModel.capabilityModelId &&
         usage.capabilityModelId !== currentModel.capabilityModelId) ||
@@ -1554,7 +1675,10 @@ export function contextUsageMeta(
     contextWindow?.snapshot?.effectiveInputWindowTokens ??
     contextWindow?.effectiveWindow ??
     (typeof contextWindow?.modelWindow === "number"
-      ? Math.max(0, contextWindow.modelWindow - (contextWindow.outputReserve ?? 0))
+      ? Math.max(
+          0,
+          contextWindow.modelWindow - (contextWindow.outputReserve ?? 0),
+        )
       : undefined);
   const effectiveWindow = formatTokenCount(effectiveWindowValue);
   if (usage && effectiveWindow) {
@@ -1616,7 +1740,10 @@ function proportionallyAllocateTokens(
   let remainder = target - allocated.reduce((sum, value) => sum + value, 0);
   const byFraction = exact
     .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
-    .sort((left, right) => right.fraction - left.fraction || left.index - right.index);
+    .sort(
+      (left, right) =>
+        right.fraction - left.fraction || left.index - right.index,
+    );
   for (let index = 0; remainder > 0; index += 1, remainder -= 1) {
     allocated[byFraction[index % byFraction.length].index] += 1;
   }
@@ -1789,7 +1916,8 @@ export function contextUsagePanelData(
           currency: contextWindow.latestModelUsage.currency,
           invalidationReason:
             contextWindow.latestModelUsage.cacheMode &&
-            contextWindow.latestModelUsage.invalidationReason !== "initial_baseline"
+              contextWindow.latestModelUsage.invalidationReason !==
+                "initial_baseline"
               ? contextWindow.latestModelUsage.invalidationReason
               : undefined,
           purpose: contextWindow.latestModelUsage.purpose,
@@ -1812,7 +1940,9 @@ export function modelPreferenceChangeForOption(
   profileId: string,
   selectedProfileId: string,
   reasoningEffort?: ReasoningEffortLevel,
-): { modelProfileId: string; reasoningEffort?: ReasoningEffortLevel } | undefined {
+):
+  | { modelProfileId: string; reasoningEffort?: ReasoningEffortLevel }
+  | undefined {
   if (profileId === selectedProfileId) return undefined;
   return { modelProfileId: profileId, reasoningEffort };
 }
@@ -1827,7 +1957,8 @@ export function modelPreferenceRecoveryKey(
   if (!threadId || !selectedModelProfileId) return "";
 
   const persistedModelIsUnavailable =
-    persistedModelProfileId !== undefined && persistedModelProfileId !== selectedModelProfileId;
+    persistedModelProfileId !== undefined &&
+    persistedModelProfileId !== selectedModelProfileId;
   const persistedEffortIsUnavailable =
     persistedReasoningEffort !== undefined &&
     persistedReasoningEffort !== selectedReasoningEffort;
@@ -1840,7 +1971,9 @@ function modelProfileIcon(profile: RuntimeModelProfileSummary) {
   const brand = providerBrandForId(profile.providerId);
   return brand ? (
     <AwakenProviderLogo brand={brand} name={profile.displayName} />
-  ) : profile.displayName.trim().slice(0, 1) || "M";
+  ) : (
+    profile.displayName.trim().slice(0, 1) || "M"
+  );
 }
 
 function firstContentLine(value?: string): string | undefined {
@@ -1852,7 +1985,8 @@ function firstContentLine(value?: string): string | undefined {
 
 function compactToolContext(value?: string): string | undefined {
   const line = firstContentLine(value);
-  if (!line || line === "{" || line === "[" || /^[\[{]\s*"/.test(line)) return undefined;
+  if (!line || line === "{" || line === "[" || /^[\[{]\s*"/.test(line))
+    return undefined;
   return line;
 }
 
@@ -1881,10 +2015,12 @@ type ToolTraceActionCacheEntry = {
   action: ToolTraceAction;
 };
 
-const SENSITIVE_TOOL_KEY = /(?:password|token|secret|api[_-]?key|authorization|cookie)/i;
+const SENSITIVE_TOOL_KEY =
+  /(?:password|token|secret|api[_-]?key|authorization|cookie)/i;
 const SHELL_TOOL_TITLE = /(?:bash|shell|terminal|command|命令)/i;
 const READ_TOOL_TITLE = /(?:read|读取|list|列出|search|搜索|grep|glob|find)/i;
-const FILE_TOOL_TITLE = /(?:write|edit|patch|create|delete|move|copy|写入|编辑|修改|创建|删除)/i;
+const FILE_TOOL_TITLE =
+  /(?:write|edit|patch|create|delete|move|copy|写入|编辑|修改|创建|删除)/i;
 
 function parseToolArguments(value?: string): unknown {
   if (!value?.trim()) return undefined;
@@ -1897,13 +2033,16 @@ function parseToolArguments(value?: string): unknown {
 
 function redactSensitiveValue(value: unknown, key = ""): unknown {
   if (SENSITIVE_TOOL_KEY.test(key)) return "••••";
-  if (Array.isArray(value)) return value.map((entry) => redactSensitiveValue(entry));
+  if (Array.isArray(value))
+    return value.map((entry) => redactSensitiveValue(entry));
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([childKey, childValue]) => [
+      Object.entries(value as Record<string, unknown>).map(
+        ([childKey, childValue]) => [
         childKey,
         redactSensitiveValue(childValue, childKey),
-      ]),
+        ],
+      ),
     );
   }
   return value;
@@ -1937,7 +2076,12 @@ function firstStringArgument(
 function safeFileToolArguments(
   args: Record<string, unknown> | undefined,
 ): Record<string, string> | undefined {
-  const path = firstStringArgument(args, ["path", "file_path", "filePath", "target"]);
+  const path = firstStringArgument(args, [
+    "path",
+    "file_path",
+    "filePath",
+    "target",
+  ]);
   return path ? { path } : undefined;
 }
 
@@ -1980,7 +2124,9 @@ function detailCardFromSections(
   return {
     title,
     sections: visible,
-    copyText: visible.map((section) => `${section.label}\n${section.content}`).join("\n\n"),
+    copyText: visible
+      .map((section) => `${section.label}\n${section.content}`)
+      .join("\n\n"),
   };
 }
 
@@ -1990,7 +2136,11 @@ function naturalToolTitle(
   args?: Record<string, unknown>,
 ): string {
   if (kind === "terminal") {
-    const description = firstStringArgument(args, ["description", "label", "summary"]);
+    const description = firstStringArgument(args, [
+      "description",
+      "label",
+      "summary",
+    ]);
     if (description) return `运行 ${compactInlineLabel(description)}`;
     const command = firstStringArgument(args, ["command", "cmd", "script"]);
     if (command) return `运行 ${compactInlineLabel(redactShellText(command))}`;
@@ -2028,8 +2178,16 @@ function naturalToolTitle(
     return /list|列出/i.test(title) ? "列出文件" : "读取文件";
   }
   if (FILE_TOOL_TITLE.test(title)) {
-    const target = firstStringArgument(args, ["path", "file_path", "filePath", "target"]);
-    if (!target && /^(?:写入|编辑|修改|创建|删除|移动|复制)(?:文件|\s)/.test(title)) {
+    const target = firstStringArgument(args, [
+      "path",
+      "file_path",
+      "filePath",
+      "target",
+    ]);
+    if (
+      !target &&
+      /^(?:写入|编辑|修改|创建|删除|移动|复制)(?:文件|\s)/.test(title)
+    ) {
       return compactInlineLabel(title);
     }
     const action = /delete|删除/i.test(title)
@@ -2064,23 +2222,32 @@ export function toolTracePresentation(
     const statusNeedsContext = Boolean(
       options.status && options.status !== "done",
     );
-    const detailCard = options.allowLegacyFallbackOutput && legacyContent
+    const detailCard =
+      options.allowLegacyFallbackOutput && legacyContent
       ? detailCardFromSections("工具详情", [
           {
-            label: options.status && options.status !== "active" && options.status !== "done"
+              label:
+                options.status &&
+                options.status !== "active" &&
+                options.status !== "done"
               ? "错误与恢复信息"
               : "结果",
             content: legacyContent,
             format: "text",
-            ...(options.status && options.status !== "active" && options.status !== "done"
+              ...(options.status &&
+              options.status !== "active" &&
+              options.status !== "done"
               ? { tone: "danger" as const }
               : {}),
           },
         ])
       : undefined;
     return {
-      ...(options.title ? { title: options.title.replace(/\s*\{\s*$/, "").trim() } : {}),
-      detail: options.status === "active"
+      ...(options.title
+        ? { title: options.title.replace(/\s*\{\s*$/, "").trim() }
+        : {}),
+      detail:
+        options.status === "active"
         ? compactToolContext(fallback)
         : statusNeedsContext
           ? compactToolFailureContext(fallback)
@@ -2088,13 +2255,15 @@ export function toolTracePresentation(
       output: undefined,
       outputLabel: "工具输出",
       detailCard,
-      kind: requestedMcpIdentity ? "mcp" as const : "tool" as const,
+      kind: requestedMcpIdentity ? ("mcp" as const) : ("tool" as const),
     };
   }
   const commandOutput = tool.commandOutput?.trim();
   const result = tool.content?.trim();
   const active = !tool.status || tool.status === "active";
-  const failed = Boolean(tool.status && tool.status !== "active" && tool.status !== "done");
+  const failed = Boolean(
+    tool.status && tool.status !== "active" && tool.status !== "done",
+  );
   const output = active
     ? commandOutput || undefined
     : commandOutput || result || undefined;
@@ -2107,19 +2276,25 @@ export function toolTracePresentation(
     /^(?:mcp|connector):/i.test(providerId) ||
     /^mcp__.+__/i.test(sourceTitle);
   const args = argumentRecord(tool.args);
-  const shellTool = Boolean(commandOutput) || SHELL_TOOL_TITLE.test(sourceTitle);
+  const shellTool =
+    Boolean(commandOutput) || SHELL_TOOL_TITLE.test(sourceTitle);
   const kind = mcpProvider ? "mcp" : shellTool ? "terminal" : "tool";
   const providerLabel = mcpProvider
     ? providerId.replace(/^(mcp|connector):/i, "")
     : undefined;
   const progress = active
-    ? compactToolContext(fallback) || compactToolContext(commandOutput) || compactToolContext(result)
-    : compactToolContext(result) || compactToolContext(commandOutput) || compactToolContext(fallback);
+    ? compactToolContext(fallback) ||
+      compactToolContext(commandOutput) ||
+      compactToolContext(result)
+    : compactToolContext(result) ||
+      compactToolContext(commandOutput) ||
+      compactToolContext(fallback);
   const command = shellTool
     ? firstStringArgument(args, ["command", "cmd", "script"])
     : undefined;
   const knownReadableTool = READ_TOOL_TITLE.test(sourceTitle);
-  const knownFileTool = FILE_TOOL_TITLE.test(sourceTitle) || Boolean(options.patch);
+  const knownFileTool =
+    FILE_TOOL_TITLE.test(sourceTitle) || Boolean(options.patch);
   const sanitizedArgs = mcpProvider
     ? args
       ? redactSensitiveValue(args)
@@ -2129,8 +2304,12 @@ export function toolTracePresentation(
       : args
         ? redactSensitiveValue(args)
         : undefined;
-  const argumentContent = sanitizedArgs ? JSON.stringify(sanitizedArgs, null, 2) : "";
-  const errorContent = tool.diagnostic ? JSON.stringify(redactSensitiveValue(tool.diagnostic), null, 2) : "";
+  const argumentContent = sanitizedArgs
+    ? JSON.stringify(sanitizedArgs, null, 2)
+    : "";
+  const errorContent = tool.diagnostic
+    ? JSON.stringify(redactSensitiveValue(tool.diagnostic), null, 2)
+    : "";
   const sections: ToolTraceDetailCard["sections"] = [];
 
   if (command) {
@@ -2140,8 +2319,15 @@ export function toolTracePresentation(
       format: "code",
       tone: "command",
     });
-  } else if ((mcpProvider || knownReadableTool || knownFileTool) && argumentContent) {
-    sections.push({ label: mcpProvider ? "脱敏参数" : "目标与参数", content: argumentContent, format: "json" });
+  } else if (
+    (mcpProvider || knownReadableTool || knownFileTool) &&
+    argumentContent
+  ) {
+    sections.push({
+      label: mcpProvider ? "脱敏参数" : "目标与参数",
+      content: argumentContent,
+      format: "json",
+    });
   }
   if (options.patch) {
     if (options.patch.affectedPaths.length > 0) {
@@ -2151,12 +2337,24 @@ export function toolTracePresentation(
         format: "text",
       });
     }
-    sections.push({ label: "变更", content: options.patch.patch, format: "diff" });
+    sections.push({
+      label: "变更",
+      content: options.patch.patch,
+      format: "diff",
+    });
   }
   if (commandOutput) {
-    sections.push({ label: "stdout / stderr", content: redactShellText(commandOutput), format: "code" });
+    sections.push({
+      label: "stdout / stderr",
+      content: redactShellText(commandOutput),
+      format: "code",
+    });
   } else if (result) {
-    sections.push({ label: mcpProvider ? "结果" : knownReadableTool ? "匹配摘要" : "结果", content: result, format: "text" });
+    sections.push({
+      label: mcpProvider ? "结果" : knownReadableTool ? "匹配摘要" : "结果",
+      content: result,
+      format: "text",
+    });
   }
   if (errorContent) {
     sections.push({
@@ -2167,23 +2365,33 @@ export function toolTracePresentation(
     });
   }
   const detailCard = detailCardFromSections(
-    kind === "terminal" ? "Shell 详情" : mcpProvider ? `${providerLabel || "MCP"} 详情` : "工具详情",
+    kind === "terminal"
+      ? "Shell 详情"
+      : mcpProvider
+        ? `${providerLabel || "MCP"} 详情`
+        : "工具详情",
     sections,
   );
-  const patchStats = options.patch ? diffLineStats(options.patch.patch) : undefined;
+  const patchStats = options.patch
+    ? diffLineStats(options.patch.patch)
+    : undefined;
   const lineChangeDetail = patchStats
     ? `+${patchStats.added} −${patchStats.removed} 行`
     : undefined;
-  const preparationDetail = active && /^\+\d+(?: −\d+)? 行$/.test(progress ?? "")
+  const preparationDetail =
+    active && /^\+\d+(?: −\d+)? 行$/.test(progress ?? "")
     ? progress
     : undefined;
   return {
     title: naturalToolTitle(sourceTitle, kind, args),
     detail:
       providerLabel ||
-      (failed ? compactToolFailureContext(progress) : lineChangeDetail || preparationDetail),
+      (failed
+        ? compactToolFailureContext(progress)
+        : lineChangeDetail || preparationDetail),
     output,
-    outputLabel: kind === "terminal" ? "终端输出" : mcpProvider ? "MCP 输出" : "工具输出",
+    outputLabel:
+      kind === "terminal" ? "终端输出" : mcpProvider ? "MCP 输出" : "工具输出",
     outputTruncated: tool.commandOutputTruncated,
     detailCard,
     kind: kind as "tool" | "mcp" | "terminal",
@@ -2202,25 +2410,45 @@ export function activityBatchSummary(actions: ActivitySummaryInput[]): {
   detail?: string;
 } {
   const active = actions.some((action) => action.status === "active");
-  const failed = actions.filter((action) => action.status !== "active" && action.status !== "done").length;
-  const commandCount = actions.filter((action) => action.kind === "terminal").length;
+  const failed = actions.filter(
+    (action) => action.status !== "active" && action.status !== "done",
+  ).length;
+  const commandCount = actions.filter(
+    (action) => action.kind === "terminal",
+  ).length;
   const skillActions = actions.filter((action) => action.kind === "skill");
-  const checkedCount = actions.filter((action) => READ_TOOL_TITLE.test(action.title)).length;
-  const editedFiles = actions.reduce((count, action) => count + (action.fileCount || 0), 0);
+  const checkedCount = actions.filter((action) =>
+    READ_TOOL_TITLE.test(action.title),
+  ).length;
+  const editedFiles = actions.reduce(
+    (count, action) => count + (action.fileCount || 0),
+    0,
+  );
   let label: string;
   if (commandCount === actions.length) {
-    label = active ? `正在运行 ${commandCount} 条命令` : `运行了 ${commandCount} 条命令`;
+    label = active
+      ? `正在运行 ${commandCount} 条命令`
+      : `运行了 ${commandCount} 条命令`;
   } else if (checkedCount === actions.length) {
-    label = active ? `正在检查 ${checkedCount} 项` : `检查了 ${checkedCount} 项`;
-  } else if (editedFiles > 0 && actions.every((action) => FILE_TOOL_TITLE.test(action.title))) {
-    label = active ? `正在编辑 ${editedFiles} 个文件` : `编辑了 ${editedFiles} 个文件`;
+    label = active
+      ? `正在检查 ${checkedCount} 项`
+      : `检查了 ${checkedCount} 项`;
+  } else if (
+    editedFiles > 0 &&
+    actions.every((action) => FILE_TOOL_TITLE.test(action.title))
+  ) {
+    label = active
+      ? `正在编辑 ${editedFiles} 个文件`
+      : `编辑了 ${editedFiles} 个文件`;
   } else if (skillActions.length > 0) {
     const skillName = skillActions[0].title.replace(/^使用\s*/i, "");
     const toolCount = actions.length - skillActions.length;
     const toolSuffix = toolCount > 0 ? ` · ${toolCount} 个工具` : "";
     label = `${active ? "正在使用" : "使用了"} ${skillName}${toolSuffix}`;
   } else {
-    label = active ? `正在运行 ${actions.length} 个工具` : `使用了 ${actions.length} 个工具`;
+    label = active
+      ? `正在运行 ${actions.length} 个工具`
+      : `使用了 ${actions.length} 个工具`;
   }
   return { label, detail: failed > 0 ? `${failed} 个异常` : undefined };
 }
@@ -2266,14 +2494,20 @@ const INSPECTOR_FILE_ITEMS = [
 const SEARCH_TRACE_GROUP_ICON = <AwakenIcon concept="search" size={14} />;
 const STORED_THEME_KEY = "awaken:appearance:theme";
 const LEGACY_STORED_FONT_SCALE_KEY = "awaken:appearance:fontScale";
-const DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY = "awaken:memory:dreamReceiptThreadAssignments";
+const DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY =
+  "awaken:memory:dreamReceiptThreadAssignments";
 const SYSTEM_THEME_QUERY = "(prefers-color-scheme: dark)";
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function readStoredNumber(key: string, fallback: number, min: number, max: number): number {
+function readStoredNumber(
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
   if (typeof window === "undefined" || !window.localStorage) {
     return fallback;
   }
@@ -2353,7 +2587,9 @@ function writeStoredValue(key: string, value: string): void {
 }
 
 function dreamTaskReceiptEvent(task: MemoryDreamTask): AguiEvent | undefined {
-  if (!["completed", "failed", "cancelled", "interrupted"].includes(task.status)) {
+  if (
+    !["completed", "failed", "cancelled", "interrupted"].includes(task.status)
+  ) {
     return undefined;
   }
   const suffix = task.status.toUpperCase();
@@ -2378,23 +2614,20 @@ export function App() {
   const projectOperationPollFailuresRef = useRef<Set<string>>(new Set());
   const threadTitlePollsRef = useRef<Map<string, () => void>>(new Map());
   const workspaceTargetPathRef = useRef("");
-  const toolTraceActionCacheRef = useRef<Map<string, ToolTraceActionCacheEntry>>(
-    new Map(),
-  );
+  const toolTraceActionCacheRef = useRef<
+    Map<string, ToolTraceActionCacheEntry>
+  >(new Map());
   const workbenchDisclosureStore = rendererWorkbenchDisclosureStore;
   const runtimeClient = runtimeClientRef.current;
   const slashProviders = useMemo(
-    () => [skillSlashProvider((workspaceRoot) => runtimeClient.listSkills(workspaceRoot))],
+    () => [
+      skillSlashProvider((workspaceRoot) =>
+        runtimeClient.listSkills(workspaceRoot),
+      ),
+    ],
     [runtimeClient],
   );
-  const pluginProvider = useMemo(
-    () => pluginMentionProvider(() => runtimeClient.listPlugins()),
-    [runtimeClient],
-  );
-  const mentionProviders = useMemo(
-    () => [deepResearchMentionProvider(), computerUseMentionProvider(), pluginProvider],
-    [pluginProvider],
-  );
+  const builtinMentionCatalog = useMemo(() => builtinMentionActions(), []);
 
   const [runtimeState, dispatch] = useReducer(
     reduceRuntimeState,
@@ -2403,12 +2636,15 @@ export function App() {
   );
   const activeThreadIdRef = useRef(runtimeState.activeThreadId);
   activeThreadIdRef.current = runtimeState.activeThreadId;
-  const dreamReceiptThreadAssignmentsRef = useRef<DreamReceiptThreadAssignments>(
+  const dreamReceiptThreadAssignmentsRef =
+    useRef<DreamReceiptThreadAssignments>(
     parseDreamReceiptThreadAssignments(
       readStoredString(DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY),
     ),
   );
-  const backgroundThreadActivationRef = useRef<(threadId: string) => void>(() => {});
+  const backgroundThreadActivationRef = useRef<(threadId: string) => void>(
+    () => {},
+  );
   backgroundThreadActivationRef.current = async (threadId: string) => {
     // Refresh the thread authority before selecting: scheduled tasks can create
     // a dedicated thread in the background while other pages are mounted.
@@ -2461,12 +2697,14 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     let pushReceived = false;
-    const unsubscribe = runtimeClient.onDesktopUpdateStateChanged((snapshot) => {
+    const unsubscribe = runtimeClient.onDesktopUpdateStateChanged(
+      (snapshot) => {
       pushReceived = true;
       if (!cancelled) {
         setDesktopUpdateSnapshot(snapshot);
       }
-    });
+      },
+    );
     runtimeClient
       .getDesktopUpdateState()
       .then((snapshot) => {
@@ -2505,9 +2743,12 @@ export function App() {
     [desktopUpdateSnapshot, runtimeClient],
   );
 
-  const updateInstallBlockedNotice = desktopUpdateInstallBlockedMessage(updateInstallBlockedCode);
+  const updateInstallBlockedNotice = desktopUpdateInstallBlockedMessage(
+    updateInstallBlockedCode,
+  );
   const updateInstallRetryBlocked =
-    updateInstallBlockedCode === "active_runs" || updateInstallBlockedCode === "shutdown_failed";
+    updateInstallBlockedCode === "active_runs" ||
+    updateInstallBlockedCode === "shutdown_failed";
 
   const handleConfirmUpdateRestart = async () => {
     setUpdateInstallStarting(true);
@@ -2529,26 +2770,38 @@ export function App() {
   const [activeNavId, setActiveNavId] = useState<string | undefined>();
   const [extensionNavigationEpoch, setExtensionNavigationEpoch] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
-  const [resolvingExternalInteractionId, setResolvingExternalInteractionId] = useState<
-    string | null
-  >(null);
-  const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(null);
-  const [mediaPreview, setMediaPreview] = useState<MediaArtifactPreviewState | null>(null);
-  const [artifactMediaSources, setArtifactMediaSources] = useState<Record<string, string | null>>({});
+  const [resolvingExternalInteractionId, setResolvingExternalInteractionId] =
+    useState<string | null>(null);
+  const [openingArtifactId, setOpeningArtifactId] = useState<string | null>(
+    null,
+  );
+  const [mediaPreview, setMediaPreview] =
+    useState<MediaArtifactPreviewState | null>(null);
+  const [artifactMediaSources, setArtifactMediaSources] = useState<
+    Record<string, string | null>
+  >({});
   const [artifactMediaMetadata, setArtifactMediaMetadata] = useState<
     Record<string, AwakenMediaMetadata>
   >({});
-  const [artifactMediaHydrationEpoch, setArtifactMediaHydrationEpoch] = useState(0);
+  const [artifactMediaHydrationEpoch, setArtifactMediaHydrationEpoch] =
+    useState(0);
   const artifactMediaSourcesRef = useRef<Record<string, string | null>>({});
   const artifactMediaSourcePendingRef = useRef<Set<string>>(new Set());
   const artifactMediaSourceGenerationRef = useRef(0);
   const artifactMediaSourceRetryRef = useRef<Map<string, number>>(new Map());
   const workbenchMediaSurfaceActiveRef = useRef(true);
-  const [resolvingUserQuestionId, setResolvingUserQuestionId] = useState<string | null>(null);
-  const [resolvingComputerReviewId, setResolvingComputerReviewId] = useState<string | null>(null);
-  const [controllingComputerHandoffId, setControllingComputerHandoffId] = useState<string | null>(null);
+  const [resolvingUserQuestionId, setResolvingUserQuestionId] = useState<
+    string | null
+  >(null);
+  const [resolvingComputerReviewId, setResolvingComputerReviewId] = useState<
+    string | null
+  >(null);
+  const [controllingComputerHandoffId, setControllingComputerHandoffId] =
+    useState<string | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null);
-  const [modelProfiles, setModelProfiles] = useState<RuntimeModelProfileSummary[]>([]);
+  const [modelProfiles, setModelProfiles] = useState<
+    RuntimeModelProfileSummary[]
+  >([]);
   const [modelProviders, setModelProviders] = useState<ModelProvider[]>([]);
   const [newThreadModelPreference, setNewThreadModelPreference] = useState<{
     selectedModelProfileId?: string;
@@ -2556,17 +2809,22 @@ export function App() {
   }>({ reasoningEffortByProfile: {} });
   const recoveredModelPreferenceRef = useRef<string>("");
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
-  const [modelSettingsInitialModelSection, setModelSettingsInitialModelSection] =
-    useState<ModelAccessType>("coding_plan");
+  const [
+    modelSettingsInitialModelSection,
+    setModelSettingsInitialModelSection,
+  ] = useState<ModelAccessType>("coding_plan");
   const [appearanceThemePreference, setAppearanceThemePreference] =
     useState<AwakenThemePreference>(readStoredThemePreference);
-  const [systemAppearanceTheme, setSystemAppearanceTheme] = useState<AwakenTheme>(readSystemTheme);
+  const [systemAppearanceTheme, setSystemAppearanceTheme] =
+    useState<AwakenTheme>(readSystemTheme);
   const appearanceTheme = effectiveThemeForPreference(
     appearanceThemePreference,
     systemAppearanceTheme,
   );
   const [appearanceSaving, setAppearanceSaving] = useState(false);
-  const [appearanceMessage, setAppearanceMessage] = useState<string | null>(null);
+  const [appearanceMessage, setAppearanceMessage] = useState<string | null>(
+    null,
+  );
   const [profilePopoverOpen, setProfilePopoverOpen] = useState(false);
   const profileButtonRef = useRef<HTMLButtonElement>(null);
   const [contextUsagePanelOpen, setContextUsagePanelOpen] = useState(false);
@@ -2579,7 +2837,8 @@ export function App() {
   const [renameDraft, setRenameDraft] = useState("");
   const [renameSubmitting, setRenameSubmitting] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null);
-  const [pendingProjectMode, setPendingProjectMode] = useState<"local">("local");
+  const [pendingProjectMode, setPendingProjectMode] =
+    useState<"local">("local");
   const [pickingWorkspace, setPickingWorkspace] = useState(false);
   const [draftProjectFolders, setDraftProjectFolders] = useState<string[]>([]);
   const [draftPrimaryFolder, setDraftPrimaryFolder] = useState<string>("");
@@ -2588,9 +2847,15 @@ export function App() {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingProjectName, setEditingProjectName] = useState("");
   const [projectRenameSubmitting, setProjectRenameSubmitting] = useState(false);
-  const [projectFolderBusyPath, setProjectFolderBusyPath] = useState<string | undefined>(undefined);
-  const [projectsFromWorkspace, setProjectsFromWorkspace] = useState<WorkspaceProject[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(undefined);
+  const [projectFolderBusyPath, setProjectFolderBusyPath] = useState<
+    string | undefined
+  >(undefined);
+  const [projectsFromWorkspace, setProjectsFromWorkspace] = useState<
+    WorkspaceProject[]
+  >([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<
+    string | undefined
+  >(undefined);
   const [conversationScope, setConversationScope] = useState(true);
   useEffect(
     () =>
@@ -2604,39 +2869,52 @@ export function App() {
           threadId,
         );
         dreamReceiptThreadAssignmentsRef.current = assignments;
-        writeStoredValue(DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(assignments));
+        writeStoredValue(
+          DREAM_RECEIPT_THREAD_ASSIGNMENTS_STORAGE_KEY,
+          JSON.stringify(assignments),
+        );
         const event = dreamTaskReceiptEvent(task);
-        if (event) dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
+        if (event)
+          dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
       }),
     [runtimeClient, selectedProjectId],
   );
   const [expandedProjectIds, setExpandedProjectIds] = useState<string[]>([]);
-  const [conversationSectionExpanded, setConversationSectionExpanded] = useState(true);
+  const [conversationSectionExpanded, setConversationSectionExpanded] =
+    useState(true);
   const [conversationBatchMode, setConversationBatchMode] = useState(false);
-  const [selectedConversationThreadIds, setSelectedConversationThreadIds] = useState<string[]>(
-    [],
-  );
-  const [pendingThreadDelete, setPendingThreadDelete] = useState<PendingThreadDelete | null>(null);
+  const [selectedConversationThreadIds, setSelectedConversationThreadIds] =
+    useState<string[]>([]);
+  const [pendingThreadDelete, setPendingThreadDelete] =
+    useState<PendingThreadDelete | null>(null);
   const [threadDeleteSubmitting, setThreadDeleteSubmitting] = useState(false);
   const [projectOrderIds, setProjectOrderIds] = useState<string[]>([]);
-  const [projectReorderSubmitting, setProjectReorderSubmitting] = useState(false);
+  const [projectReorderSubmitting, setProjectReorderSubmitting] =
+    useState(false);
   const projectReorderSubmittingRef = useRef(false);
   const [removedProjectIds, setRemovedProjectIds] = useState<string[]>([]);
-  const [defaultBackendProjectId, setDefaultBackendProjectId] = useState<string | undefined>(
-    undefined,
-  );
-  const [defaultProjectDisplayName, setDefaultProjectDisplayName] = useState<string | undefined>(
-    undefined,
-  );
-  const [defaultProjectFolders, setDefaultProjectFolders] = useState<WorkspaceProjectFolder[]>([]);
-  const [pendingProjectDelete, setPendingProjectDelete] = useState<PendingProjectDelete | null>(
-    null,
-  );
+  const [defaultBackendProjectId, setDefaultBackendProjectId] = useState<
+    string | undefined
+  >(undefined);
+  const [defaultProjectDisplayName, setDefaultProjectDisplayName] = useState<
+    string | undefined
+  >(undefined);
+  const [defaultProjectFolders, setDefaultProjectFolders] = useState<
+    WorkspaceProjectFolder[]
+  >([]);
+  const [pendingProjectDelete, setPendingProjectDelete] =
+    useState<PendingProjectDelete | null>(null);
   const [projectDeleteSubmitting, setProjectDeleteSubmitting] = useState(false);
-  const [trackedTrashOperations, setTrackedTrashOperations] = useState<TrackedTrashOperation[]>(
-    () => parseTrackedTrashOperations(readStoredString(TRACKED_TRASH_OPERATIONS_STORAGE_KEY)),
+  const [trackedTrashOperations, setTrackedTrashOperations] = useState<
+    TrackedTrashOperation[]
+  >(() =>
+    parseTrackedTrashOperations(
+      readStoredString(TRACKED_TRASH_OPERATIONS_STORAGE_KEY),
+    ),
   );
-  const defaultProjectRemoved = removedProjectIds.includes(DEFAULT_WORKSPACE_PROJECT_ID);
+  const defaultProjectRemoved = removedProjectIds.includes(
+    DEFAULT_WORKSPACE_PROJECT_ID,
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     readStoredNumber(
@@ -2656,9 +2934,8 @@ export function App() {
       ),
     ),
   );
-  const [fileWorkspaceInspectorWidth, setFileWorkspaceInspectorWidth] = useState<
-    number | undefined
-  >();
+  const [fileWorkspaceInspectorWidth, setFileWorkspaceInspectorWidth] =
+    useState<number | undefined>();
   const [windowWidth, setWindowWidth] = useState(readWindowWidth);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(() =>
     readStoredBoolean("awaken:layout:inspectorCollapsed", false),
@@ -2671,7 +2948,8 @@ export function App() {
     useState<ExpandedFileComposerIdleMode>("full");
   const [expandedFileComposerTrackedRun, setExpandedFileComposerTrackedRun] =
     useState<ExpandedFileComposerTrackedRun>();
-  const [fileWorkspaceMode, setFileWorkspaceMode] = useState<ProjectFileWorkspaceMode>("files");
+  const [fileWorkspaceMode, setFileWorkspaceMode] =
+    useState<ProjectFileWorkspaceMode>("files");
   const [fileWorkspaceTabsState, dispatchFileWorkspaceTabs] = useReducer(
     projectFileTabsReducer,
     undefined,
@@ -2685,9 +2963,15 @@ export function App() {
   const deliverablePreview = activeArtifactPreviewTab(
     artifactPreviewTabsState,
   )?.selection;
-  const [selectedSubagentTaskId, setSelectedSubagentTaskId] = useState<string | undefined>();
-  const [openSubagentTaskId, setOpenSubagentTaskId] = useState<string | undefined>();
-  const [cancellingSubagentTaskId, setCancellingSubagentTaskId] = useState<string | undefined>();
+  const [selectedSubagentTaskId, setSelectedSubagentTaskId] = useState<
+    string | undefined
+  >();
+  const [openSubagentTaskId, setOpenSubagentTaskId] = useState<
+    string | undefined
+  >();
+  const [cancellingSubagentTaskId, setCancellingSubagentTaskId] = useState<
+    string | undefined
+  >();
   const [subagentNowMs, setSubagentNowMs] = useState(() => Date.now());
   const [promptBubbleModeByTurnId, setPromptBubbleModeByTurnId] = useState<
     Record<string, "collapsed" | "expanded">
@@ -2713,15 +2997,41 @@ export function App() {
   const [slashActions, setSlashActions] = useState<SlashAction[]>([]);
   const [slashLoading, setSlashLoading] = useState(false);
   const [slashError, setSlashError] = useState<string | null>(null);
-  const [slashActiveActionId, setSlashActiveActionId] = useState<string | undefined>();
-  const [composerPluginActions, setComposerPluginActions] = useState<SlashAction[]>([]);
+  const [slashActiveActionId, setSlashActiveActionId] = useState<
+    string | undefined
+  >();
+  const [composerPluginCatalog, setComposerPluginCatalog] = useState<
+    RuntimePlugin[]
+  >([]);
+  const composerPluginCatalogRef = useRef<RuntimePlugin[]>([]);
+  const composerPluginActions = useMemo(
+    () => pluginMentionActionsFromPlugins(composerPluginCatalog),
+    [composerPluginCatalog],
+  );
+  const composerPluginBrandByName = useMemo(
+    () =>
+      new Map(
+        composerPluginCatalog.flatMap((plugin) =>
+          plugin.brandIcon ? [[plugin.name, plugin.brandIcon] as const] : [],
+        ),
+      ),
+    [composerPluginCatalog],
+  );
+  const immediateMentionActions = useMemo(
+    () => [...builtinMentionCatalog, ...composerPluginActions],
+    [builtinMentionCatalog, composerPluginActions],
+  );
   const [composerPluginsLoading, setComposerPluginsLoading] = useState(false);
-  const [composerPluginsError, setComposerPluginsError] = useState<string | null>(null);
+  const [composerPluginsError, setComposerPluginsError] = useState<
+    string | null
+  >(null);
   const [composerCatalogRevision, setComposerCatalogRevision] = useState(0);
   useEffect(
     () =>
       runtimeClient.subscribeComposerCatalogEvents((event) => {
-        setComposerCatalogRevision((current) => Math.max(current, event.revision));
+        setComposerCatalogRevision((current) =>
+          Math.max(current, event.revision),
+        );
       }),
     [runtimeClient],
   );
@@ -2763,7 +3073,9 @@ export function App() {
   const visibleNarrativeItems = useMemo<RunNarrativeItem[]>(() => {
     const narrativeItems: RunNarrativeItem[] = [
       ...runtimeState.narrative.committedItems,
-      ...(runtimeState.narrative.activeItem ? [runtimeState.narrative.activeItem] : []),
+      ...(runtimeState.narrative.activeItem
+        ? [runtimeState.narrative.activeItem]
+        : []),
     ];
     return projectVisibleNarrativeItems({ items: narrativeItems, isBusy });
   }, [isBusy, runtimeState.narrative]);
@@ -2772,11 +3084,15 @@ export function App() {
     [runtimeState.narrative.replayedItemIds],
   );
   const toolResultsById = useMemo(
-    () => new Map(runtimeState.toolResults.map((record) => [record.id, record])),
+    () =>
+      new Map(runtimeState.toolResults.map((record) => [record.id, record])),
     [runtimeState.toolResults],
   );
   const patchPreviewsById = useMemo(
-    () => new Map(runtimeState.patchPreviews.map((preview) => [preview.id, preview])),
+    () =>
+      new Map(
+        runtimeState.patchPreviews.map((preview) => [preview.id, preview]),
+      ),
     [runtimeState.patchPreviews],
   );
   const artifactMediaRequests = useMemo(() => {
@@ -2785,9 +3101,15 @@ export function App() {
     const byPath = new Map(
       runtimeState.artifacts
         .filter((artifact) => artifact.path)
-        .map((artifact) => [artifact.path!.replace(/\\/g, "/").toLowerCase(), artifact]),
+        .map((artifact) => [
+          artifact.path!.replace(/\\/g, "/").toLowerCase(),
+          artifact,
+        ]),
     );
-    const requests = new Map<string, { threadId: string; runId: string; artifactId: string }>();
+    const requests = new Map<
+      string,
+      { threadId: string; runId: string; artifactId: string }
+    >();
     for (const item of visibleNarrativeItems) {
       if (
         item.kind === "mediaGeneration" &&
@@ -2796,12 +3118,21 @@ export function App() {
       ) {
         const readyPaths = item.mediaItems?.length
           ? item.mediaItems.flatMap((mediaItem) =>
-              mediaItem.status === "ready" && mediaItem.path ? [mediaItem.path] : [],
+              mediaItem.status === "ready" && mediaItem.path
+                ? [mediaItem.path]
+                : [],
             )
           : item.artifactPaths;
         for (const artifactPath of readyPaths) {
-          const artifact = byPath.get(artifactPath.replace(/\\/g, "/").toLowerCase());
-          const request = mediaArtifactRequestForPath(threadId, item.runId, artifactPath, artifact);
+          const artifact = byPath.get(
+            artifactPath.replace(/\\/g, "/").toLowerCase(),
+          );
+          const request = mediaArtifactRequestForPath(
+            threadId,
+            item.runId,
+            artifactPath,
+            artifact,
+          );
           requests.set(artifactMediaSourceKey(request), request);
         }
       }
@@ -2809,12 +3140,21 @@ export function App() {
         for (const file of item.files) {
           if (file.fileType !== "image" && file.fileType !== "video") continue;
           const key = `${threadId}:${file.runId}:${file.artifactId}`;
-          requests.set(key, { threadId, runId: file.runId, artifactId: file.artifactId });
+          requests.set(key, {
+            threadId,
+            runId: file.runId,
+            artifactId: file.artifactId,
+          });
         }
       }
     }
     return [...requests.entries()].map(([key, request]) => ({ key, request }));
-  }, [runtimeState.activeThreadId, runtimeState.artifacts, runtimeState.threadId, visibleNarrativeItems]);
+  }, [
+    runtimeState.activeThreadId,
+    runtimeState.artifacts,
+    runtimeState.threadId,
+    visibleNarrativeItems,
+  ]);
 
   useEffect(() => {
     artifactMediaSourceGenerationRef.current += 1;
@@ -2830,14 +3170,21 @@ export function App() {
   useEffect(() => {
     const sourceGeneration = artifactMediaSourceGenerationRef.current;
     for (const { key, request } of artifactMediaRequests) {
-      if (Object.prototype.hasOwnProperty.call(artifactMediaSourcesRef.current, key)) continue;
+      if (
+        Object.prototype.hasOwnProperty.call(
+          artifactMediaSourcesRef.current,
+          key,
+        )
+      )
+        continue;
       if (artifactMediaSourcePendingRef.current.has(key)) continue;
       artifactMediaSourcePendingRef.current.add(key);
       void runtimeClient
         .getArtifactMediaSource(request)
         .then((result) => {
           artifactMediaSourcePendingRef.current.delete(key);
-          if (sourceGeneration !== artifactMediaSourceGenerationRef.current) return;
+          if (sourceGeneration !== artifactMediaSourceGenerationRef.current)
+            return;
           const nextSource = result.ok ? result.src : null;
           if (result.ok) {
             artifactMediaSourceRetryRef.current.delete(key);
@@ -2853,7 +3200,8 @@ export function App() {
         })
         .catch(() => {
           artifactMediaSourcePendingRef.current.delete(key);
-          if (sourceGeneration !== artifactMediaSourceGenerationRef.current) return;
+          if (sourceGeneration !== artifactMediaSourceGenerationRef.current)
+            return;
           artifactMediaSourcesRef.current = {
             ...artifactMediaSourcesRef.current,
             [key]: null,
@@ -2872,7 +3220,9 @@ export function App() {
   );
   const selectedSubagent =
     subagentTasks.find((task) => task.taskId === selectedSubagentTaskId) ??
-    (selectedSubagentTaskId ? undefined : subagentTasks[subagentTasks.length - 1]);
+    (selectedSubagentTaskId
+      ? undefined
+      : subagentTasks[subagentTasks.length - 1]);
   const openSubagent = openSubagentTaskId
     ? runtimeState.subagentsById[openSubagentTaskId]
     : undefined;
@@ -2880,9 +3230,13 @@ export function App() {
     ? projectVisibleNarrativeItems({
         items: [
           ...openSubagent.narrative.committedItems,
-          ...(openSubagent.narrative.activeItem ? [openSubagent.narrative.activeItem] : []),
+          ...(openSubagent.narrative.activeItem
+            ? [openSubagent.narrative.activeItem]
+            : []),
         ],
-        isBusy: ["queued", "running", "cancelling"].includes(openSubagent.status),
+        isBusy: ["queued", "running", "cancelling"].includes(
+          openSubagent.status,
+        ),
       })
     : [];
   const openSubagentHasAnswer = openSubagentNarrativeItems.some(
@@ -2890,7 +3244,9 @@ export function App() {
   );
   const openSubagentMetrics = openSubagent
     ? [
-        openSubagent.toolUseCount > 0 ? `${openSubagent.toolUseCount} 次工具` : undefined,
+        openSubagent.toolUseCount > 0
+          ? `${openSubagent.toolUseCount} 次工具`
+          : undefined,
         (openSubagent.totalTokens ?? openSubagent.estimatedTokens)
           ? `${new Intl.NumberFormat("zh-CN").format(
               openSubagent.totalTokens ?? openSubagent.estimatedTokens ?? 0,
@@ -2906,10 +3262,14 @@ export function App() {
   useEffect(() => {
     setSubagentNowMs(Date.now());
     if (runningSubagentCount === 0) return undefined;
-    const interval = window.setInterval(() => setSubagentNowMs(Date.now()), 1000);
+    const interval = window.setInterval(
+      () => setSubagentNowMs(Date.now()),
+      1000,
+    );
     return () => window.clearInterval(interval);
   }, [runningSubagentCount]);
-  const desktopReady = runtimeState.supervisorStatus === "running" && runtimeInfo !== null;
+  const desktopReady =
+    runtimeState.supervisorStatus === "running" && runtimeInfo !== null;
   const desktopStarting =
     runtimeState.supervisorStatus === null ||
     runtimeState.supervisorStatus === "starting" ||
@@ -2922,9 +3282,11 @@ export function App() {
       return;
     }
     document.documentElement.dataset.awTheme = appearanceTheme;
-    document.documentElement.dataset.awThemePreference = appearanceThemePreference;
+    document.documentElement.dataset.awThemePreference =
+      appearanceThemePreference;
     delete document.documentElement.dataset.awFontScale;
-    document.documentElement.style.colorScheme = appearanceTheme === "dark" ? "dark" : "light";
+    document.documentElement.style.colorScheme =
+      appearanceTheme === "dark" ? "dark" : "light";
     writeStoredValue(STORED_THEME_KEY, appearanceThemePreference);
     try {
       window.localStorage.removeItem(LEGACY_STORED_FONT_SCALE_KEY);
@@ -2934,7 +3296,10 @@ export function App() {
   }, [appearanceTheme, appearanceThemePreference]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    ) {
       return;
     }
 
@@ -3010,12 +3375,18 @@ export function App() {
   }, [inspectorWidth]);
 
   useEffect(() => {
-    writeStoredValue("awaken:layout:inspectorCollapsed", String(inspectorCollapsed));
+    writeStoredValue(
+      "awaken:layout:inspectorCollapsed",
+      String(inspectorCollapsed),
+    );
     inspectorCollapsedValueRef.current = inspectorCollapsed;
   }, [inspectorCollapsed]);
 
   useEffect(() => {
-    writeStoredValue(TRACKED_TRASH_OPERATIONS_STORAGE_KEY, JSON.stringify(trackedTrashOperations));
+    writeStoredValue(
+      TRACKED_TRASH_OPERATIONS_STORAGE_KEY,
+      JSON.stringify(trackedTrashOperations),
+    );
   }, [trackedTrashOperations]);
 
   useEffect(() => {
@@ -3023,7 +3394,10 @@ export function App() {
   }, [workspacePath]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    ) {
       return;
     }
 
@@ -3031,7 +3405,8 @@ export function App() {
     const handleResponsiveInspector = (matches: boolean) => {
       if (matches) {
         if (inspectorCollapsedBeforeResponsiveRef.current === null) {
-          inspectorCollapsedBeforeResponsiveRef.current = inspectorCollapsedValueRef.current;
+          inspectorCollapsedBeforeResponsiveRef.current =
+            inspectorCollapsedValueRef.current;
           setInspectorCollapsed(true);
         }
         return;
@@ -3141,7 +3516,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (rendererReadyNotifiedRef.current || (!desktopReady && !desktopNeedsRestart)) {
+    if (
+      rendererReadyNotifiedRef.current ||
+      (!desktopReady && !desktopNeedsRestart)
+    ) {
       return;
     }
 
@@ -3154,8 +3532,12 @@ export function App() {
       } catch {
         // Font readiness is a polish signal only; rendering should continue.
       }
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
       if (!cancelled) {
         runtimeClient.notifyRendererReady();
       }
@@ -3209,12 +3591,18 @@ export function App() {
   }, []);
 
   function applyRuntimeProjects(projects: RuntimeProject[]): void {
-    const configuredDefaultWorkspacePath = runtimeInfo?.defaultWorkspace ?? workspacePath;
+    const configuredDefaultWorkspacePath =
+      runtimeInfo?.defaultWorkspace ?? workspacePath;
     const defaultProject = projects.find((project) =>
-      isSameWorkspacePath(project.workspaceRoot, configuredDefaultWorkspacePath),
+      isSameWorkspacePath(
+        project.workspaceRoot,
+        configuredDefaultWorkspacePath,
+      ),
     );
     setDefaultBackendProjectId(defaultProject?.projectId);
-    setDefaultProjectDisplayName(defaultProject?.displayName.trim() || undefined);
+    setDefaultProjectDisplayName(
+      defaultProject?.displayName.trim() || undefined,
+    );
     const nextDefaultFolders =
       defaultProject?.folders.map<WorkspaceProjectFolder>((folder) => ({
         path: folder.path,
@@ -3222,16 +3610,23 @@ export function App() {
         isPrimary: folder.isPrimary,
       })) ?? [];
     setDefaultProjectFolders((current) =>
-      sameWorkspaceProjectFolders(current, nextDefaultFolders) ? current : nextDefaultFolders,
+      sameWorkspaceProjectFolders(current, nextDefaultFolders)
+        ? current
+        : nextDefaultFolders,
     );
     setRemovedProjectIds(
-      defaultProject && defaultProject.state !== "active" ? [DEFAULT_WORKSPACE_PROJECT_ID] : [],
+      defaultProject && defaultProject.state !== "active"
+        ? [DEFAULT_WORKSPACE_PROJECT_ID]
+        : [],
     );
 
     const nextProjectOrderIds = projects
       .filter((project) => project.state === "active")
       .map((project) =>
-        isSameWorkspacePath(project.workspaceRoot, configuredDefaultWorkspacePath)
+        isSameWorkspacePath(
+          project.workspaceRoot,
+          configuredDefaultWorkspacePath,
+        )
           ? DEFAULT_WORKSPACE_PROJECT_ID
           : project.projectId,
       );
@@ -3246,13 +3641,17 @@ export function App() {
       .filter(
         (project) =>
           project.state === "active" &&
-          !isSameWorkspacePath(project.workspaceRoot, configuredDefaultWorkspacePath),
+          !isSameWorkspacePath(
+            project.workspaceRoot,
+            configuredDefaultWorkspacePath,
+          ),
       )
       .map<WorkspaceProject>((project) => ({
         id: project.projectId,
         backendProjectId: project.projectId,
         displayName: project.displayName,
-        label: project.displayName || workspaceLabelForPath(project.workspaceRoot),
+        label:
+          project.displayName || workspaceLabelForPath(project.workspaceRoot),
         path: project.workspaceRoot,
         folders: project.folders.map<WorkspaceProjectFolder>((folder) => ({
           path: folder.path,
@@ -3301,12 +3700,16 @@ export function App() {
         if (!cancelled) {
           dispatch({ type: "run/threadsLoaded", threads });
           if (startedThreadId) {
-            const startedThread = threads.find((thread) => thread.threadId === startedThreadId);
+            const startedThread = threads.find(
+              (thread) => thread.threadId === startedThreadId,
+            );
             if (startedThread) {
               const projectId = startedThread.projectId;
               if (projectId) {
                 setExpandedProjectIds((current) =>
-                  current.includes(projectId) ? current : [...current, projectId],
+                  current.includes(projectId)
+                    ? current
+                    : [...current, projectId],
                 );
               } else {
                 setConversationSectionExpanded(true);
@@ -3322,7 +3725,8 @@ export function App() {
     void reconcileScheduledThreads();
     const unsubscribe = runtimeClient.subscribeScheduledTaskEvents((event) => {
       if (
-        (event.type === "execution_started" || event.type === "execution_finished") &&
+        (event.type === "execution_started" ||
+          event.type === "execution_finished") &&
         event.threadId
       ) {
         void reconcileScheduledThreads(event.threadId);
@@ -3346,7 +3750,9 @@ export function App() {
       const checked = await Promise.all(
         trackedTrashOperations.map(async (tracked) => {
           try {
-            const operation = await runtimeClient.getProjectOperation(tracked.operationId);
+            const operation = await runtimeClient.getProjectOperation(
+              tracked.operationId,
+            );
             projectOperationPollFailuresRef.current.delete(tracked.operationId);
             return {
               tracked,
@@ -3354,7 +3760,9 @@ export function App() {
               state: projectOperationReconciliationState(operation),
             };
           } catch (error) {
-            if (!projectOperationPollFailuresRef.current.has(tracked.operationId)) {
+            if (
+              !projectOperationPollFailuresRef.current.has(tracked.operationId)
+            ) {
               projectOperationPollFailuresRef.current.add(tracked.operationId);
               console.warn("project_operation_poll_failed", {
                 operationId: tracked.operationId,
@@ -3383,18 +3791,27 @@ export function App() {
             const project = projects.find(
               (candidate) => candidate.projectId === tracked.backendProjectId,
             );
-            return canReconcileTrackedTrashOperation(state, project, tracked.folderPath);
+            return canReconcileTrackedTrashOperation(
+              state,
+              project,
+              tracked.folderPath,
+            );
           });
 
           if (reconciled.length > 0) {
             applyRuntimeProjects(projects);
-            const reconciledIds = new Set(reconciled.map(({ tracked }) => tracked.operationId));
+            const reconciledIds = new Set(
+              reconciled.map(({ tracked }) => tracked.operationId),
+            );
             const failed = reconciled.filter(({ state }) => state === "failed");
             if (failed.length > 0) {
               setExpandedProjectIds((current) => {
                 const next = [...current];
                 for (const { tracked } of failed) {
-                  if (tracked.wasExpanded && !next.includes(tracked.projectId)) {
+                  if (
+                    tracked.wasExpanded &&
+                    !next.includes(tracked.projectId)
+                  ) {
                     next.push(tracked.projectId);
                   }
                 }
@@ -3409,7 +3826,9 @@ export function App() {
               );
             }
             setTrackedTrashOperations((current) =>
-              current.filter((tracked) => !reconciledIds.has(tracked.operationId)),
+              current.filter(
+                (tracked) => !reconciledIds.has(tracked.operationId),
+              ),
             );
             for (const operationId of reconciledIds) {
               projectOperationPollFailuresRef.current.delete(operationId);
@@ -3503,7 +3922,9 @@ export function App() {
 
     threadTitlePollsRef.current.set(threadId, cancel);
 
-    const delays = [500, 1000, 2000, 4000, 8000, 12000, 20000, 30000, 60000, 90000];
+    const delays = [
+      500, 1000, 2000, 4000, 8000, 12000, 20000, 30000, 60000, 90000,
+    ];
 
     async function pollOnce(): Promise<void> {
       for (const delay of delays) {
@@ -3576,11 +3997,15 @@ export function App() {
         }));
       }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to switch model");
+      setNotice(
+        error instanceof Error ? error.message : "Failed to switch model",
+      );
     }
   }
 
-  async function handleAppearanceThemeChange(theme: AwakenThemePreference): Promise<void> {
+  async function handleAppearanceThemeChange(
+    theme: AwakenThemePreference,
+  ): Promise<void> {
     if (theme === appearanceThemePreference || appearanceSaving) {
       return;
     }
@@ -3594,7 +4019,9 @@ export function App() {
       setAppearanceThemePreference(preferences.theme);
     } catch (error) {
       setAppearanceThemePreference(previousTheme);
-      setAppearanceMessage(error instanceof Error ? error.message : "Failed to save theme");
+      setAppearanceMessage(
+        error instanceof Error ? error.message : "Failed to save theme",
+      );
     } finally {
       setAppearanceSaving(false);
     }
@@ -3620,13 +4047,20 @@ export function App() {
         content,
       );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to resolve external interaction");
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Failed to resolve external interaction",
+      );
     } finally {
       setResolvingExternalInteractionId(null);
     }
   }
 
-  async function resolveActiveACPPermission(optionId: string, cancelled = false): Promise<void> {
+  async function resolveActiveACPPermission(
+    optionId: string,
+    cancelled = false,
+  ): Promise<void> {
     if (!runtimeState.runId || !activeExternalInteraction) {
       return;
     }
@@ -3643,13 +4077,19 @@ export function App() {
         cancelled,
       );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to resolve ACP permission");
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Failed to resolve ACP permission",
+      );
     } finally {
       setResolvingExternalInteractionId(null);
     }
   }
 
-  async function resolveActiveComputerReview(decision: "approved_once" | "denied"): Promise<void> {
+  async function resolveActiveComputerReview(
+    decision: "approved_once" | "denied",
+  ): Promise<void> {
     if (!runtimeState.runId || !activeComputerReview) {
       return;
     }
@@ -3665,7 +4105,11 @@ export function App() {
         decision,
       );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to resolve computer review");
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Failed to resolve computer review",
+      );
     } finally {
       setResolvingComputerReviewId(null);
     }
@@ -3683,7 +4127,11 @@ export function App() {
     try {
       await runtimeClient.computerSessionControl(runtimeState.runId, "return");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to return computer control");
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Failed to return computer control",
+      );
     } finally {
       setControllingComputerHandoffId(null);
     }
@@ -3752,38 +4200,54 @@ export function App() {
     dispatch({ type: "run/reset" });
   }
 
-  const enabledModelProfiles = modelProfiles.filter((profile) => profile.enabled);
+  const enabledModelProfiles = modelProfiles.filter(
+    (profile) => profile.enabled,
+  );
   const activeThread = runtimeState.activeThreadId
-    ? runtimeState.threads.find((thread) => thread.threadId === runtimeState.activeThreadId)
+    ? runtimeState.threads.find(
+        (thread) => thread.threadId === runtimeState.activeThreadId,
+      )
     : undefined;
   const requestedModelProfileId =
-    activeThread?.selectedModelProfileId ?? newThreadModelPreference.selectedModelProfileId;
+    activeThread?.selectedModelProfileId ??
+    newThreadModelPreference.selectedModelProfileId;
   const selectedModelProfile =
-    enabledModelProfiles.find((profile) => profile.id === requestedModelProfileId) ??
-    enabledModelProfiles.find((profile) => profile.id === runtimeInfo?.modelProfile?.id) ??
+    enabledModelProfiles.find(
+      (profile) => profile.id === requestedModelProfileId,
+    ) ??
+    enabledModelProfiles.find(
+      (profile) => profile.id === runtimeInfo?.modelProfile?.id,
+    ) ??
     enabledModelProfiles.find((profile) => profile.isDefault) ??
     enabledModelProfiles[0];
   const selectedModelProvider = selectedModelProfile
-    ? modelProviders.find((provider) => provider.id === selectedModelProfile.providerId)
+    ? modelProviders.find(
+        (provider) => provider.id === selectedModelProfile.providerId,
+      )
     : undefined;
   const selectedReasoningCapability = selectedModelProfile
-    ? selectedModelProfile.effectiveCapability?.reasoningEffort ??
-      selectedModelProvider?.modelCapabilities[selectedModelProfile.modelId]?.reasoningEffort
+    ? (selectedModelProfile.effectiveCapability?.reasoningEffort ??
+      selectedModelProvider?.modelCapabilities[selectedModelProfile.modelId]
+        ?.reasoningEffort)
     : undefined;
   const persistedThreadReasoningEffort = selectedModelProfile
     ? activeThread?.reasoningEffortByProfile?.[selectedModelProfile.id]
     : undefined;
   const storedReasoningEffort = selectedModelProfile
-    ? persistedThreadReasoningEffort ??
-      newThreadModelPreference.reasoningEffortByProfile[selectedModelProfile.id] ??
-      selectedModelProfile.advanced?.defaultReasoningEffort
+    ? (persistedThreadReasoningEffort ??
+      newThreadModelPreference.reasoningEffortByProfile[
+        selectedModelProfile.id
+      ] ??
+      selectedModelProfile.advanced?.defaultReasoningEffort)
     : undefined;
   const selectedReasoningEffort =
-    storedReasoningEffort && selectedReasoningCapability?.levels.includes(storedReasoningEffort)
+    storedReasoningEffort &&
+    selectedReasoningCapability?.levels.includes(storedReasoningEffort)
       ? storedReasoningEffort
       : selectedReasoningCapability?.defaultLevel;
   const selectedReasoningEffortLabel = selectedReasoningEffort
-    ? selectedReasoningCapability?.displayLabels?.[selectedReasoningEffort] ?? selectedReasoningEffort
+    ? (selectedReasoningCapability?.displayLabels?.[selectedReasoningEffort] ??
+      selectedReasoningEffort)
     : undefined;
   const recoveredPreferenceKey = modelPreferenceRecoveryKey(
     activeThread?.threadId,
@@ -3793,17 +4257,24 @@ export function App() {
     selectedReasoningEffort,
   );
   useEffect(() => {
-    if (!recoveredPreferenceKey || recoveredModelPreferenceRef.current === recoveredPreferenceKey) {
+    if (
+      !recoveredPreferenceKey ||
+      recoveredModelPreferenceRef.current === recoveredPreferenceKey
+    ) {
       return;
     }
     recoveredModelPreferenceRef.current = recoveredPreferenceKey;
     setNotice("原会话的模型或 effort 已失效，已恢复为当前可用默认值。");
   }, [recoveredPreferenceKey]);
   const defaultWorkspacePath = runtimeInfo?.defaultWorkspace ?? workspacePath;
-  const effectiveDefaultWorkspacePath = defaultProjectRemoved ? undefined : defaultWorkspacePath;
+  const effectiveDefaultWorkspacePath = defaultProjectRemoved
+    ? undefined
+    : defaultWorkspacePath;
   // Without a user-selected workspace there is no implicit default project;
   // 项目工作区 shows a true empty state until the user opens/adds a project.
-  const hasDefaultWorkspaceProject = Boolean(effectiveDefaultWorkspacePath?.trim());
+  const hasDefaultWorkspaceProject = Boolean(
+    effectiveDefaultWorkspacePath?.trim(),
+  );
   const activeThreadWorkspacePath = activeThread?.workspaceRoot;
   const activeThreadProjectId = activeThread
     ? projectIdForThread(activeThread, effectiveDefaultWorkspacePath)
@@ -3815,7 +4286,9 @@ export function App() {
         ? defaultProjectRemoved
           ? undefined
           : defaultWorkspacePath
-        : projectsFromWorkspace.find((project) => project.id === selectedProjectId)?.path;
+        : projectsFromWorkspace.find(
+            (project) => project.id === selectedProjectId,
+          )?.path;
   const workspaceRootForRun = resolveWorkspaceRootForRun({
     workspacePath,
     workspaceTargetPath: workspaceTargetPathRef.current,
@@ -3829,11 +4302,13 @@ export function App() {
   const selectedFolderlessProject =
     selectedProjectId !== undefined &&
     selectedProjectId !== DEFAULT_WORKSPACE_PROJECT_ID &&
-    projectsFromWorkspace.find((project) => project.id === selectedProjectId)?.folders.length === 0;
+    projectsFromWorkspace.find((project) => project.id === selectedProjectId)
+      ?.folders.length === 0;
   const isWorkspaceValid =
     conversationScope ||
     selectedFolderlessProject ||
-    (workspaceRootForRun !== "" && /^([A-Za-z]:[\\/]|\/)/.test(workspaceRootForRun));
+    (workspaceRootForRun !== "" &&
+      /^([A-Za-z]:[\\/]|\/)/.test(workspaceRootForRun));
   const {
     composerFocusRequest,
     composerFocusOffset,
@@ -3853,24 +4328,38 @@ export function App() {
   const composerInlineTextPrefix = useMemo(
     () =>
       composerTokens
-        .map((token) => token.leadingText ?? composerTokenLeadingTexts[token.id] ?? "")
+        .map(
+          (token) =>
+            token.leadingText ?? composerTokenLeadingTexts[token.id] ?? "",
+        )
         .join(""),
     [composerTokenLeadingTexts, composerTokens],
   );
-  const trimmedEffectiveComposerValue = `${composerInlineTextPrefix}${composerValue}`.trim();
+  const trimmedEffectiveComposerValue =
+    `${composerInlineTextPrefix}${composerValue}`.trim();
   const composerActionTrigger = composerActionTriggerFromDraft({
     value: composerValue,
     tokens: composerTokens,
     leadingTexts: composerTokenLeadingTexts,
     selection: composerInputSelection,
   });
-  const activeComposerActionProviders =
-    composerActionTrigger?.marker === "@" ? mentionProviders : slashProviders;
   const slashPaletteOpen =
-    Boolean(composerActionTrigger) && desktopReady && isWorkspaceValid && !isBusy;
+    Boolean(composerActionTrigger) &&
+    desktopReady &&
+    isWorkspaceValid &&
+    !isBusy;
+  const activePaletteActions = activeComposerPaletteActions(
+    composerActionTrigger?.marker,
+    slashActions,
+    immediateMentionActions,
+  );
   const filteredSlashActions = useMemo(
-    () => composerPaletteActions(slashActions, composerActionTrigger?.query ?? ""),
-    [composerActionTrigger?.query, slashActions],
+    () =>
+      composerPaletteActions(
+        activePaletteActions,
+        composerActionTrigger?.query ?? "",
+      ),
+    [activePaletteActions, composerActionTrigger?.query],
   );
   const composerBarTokens = useMemo(
     () =>
@@ -3886,8 +4375,18 @@ export function App() {
             : typeof token.payload?.pluginName === "string"
               ? token.payload.pluginName
               : token.label,
+        brandIcon:
+          token.type === "plugin" &&
+          typeof token.payload?.pluginName === "string"
+            ? composerPluginBrandByName.get(token.payload.pluginName)
+            : undefined,
       })),
-    [composerTokenLeadingTexts, composerTokenPlacements, composerTokens],
+    [
+      composerPluginBrandByName,
+      composerTokenLeadingTexts,
+      composerTokenPlacements,
+      composerTokens,
+    ],
   );
   const composerBarSlashActions = useMemo(
     () =>
@@ -3935,15 +4434,19 @@ export function App() {
     options: composerPluginActions.map((action) => ({
       id: action.id,
       label: action.label,
+      sectionLabel: action.sectionLabel,
+      icon: action.icon,
       disabled: action.disabled,
       disabledReason: action.disabledReason,
-      selected: composerTokens.some((token) => token.id === action.composerToken?.id),
+      selected: composerTokens.some(
+        (token) => token.id === action.composerToken?.id,
+      ),
     })),
     onSelectOption: handleComposerPluginSelect,
   };
 
   useEffect(() => {
-    if (!slashPaletteOpen) {
+    if (!slashPaletteOpen || composerActionTrigger?.marker !== "/") {
       setSlashLoading(false);
       setSlashError(null);
       setSlashActiveActionId(undefined);
@@ -3954,7 +4457,7 @@ export function App() {
     setSlashLoading(true);
     setSlashError(null);
     setSlashActions([]);
-    void actionsFromSlashProviders(activeComposerActionProviders, { workspaceRootForRun })
+    void actionsFromSlashProviders(slashProviders, { workspaceRootForRun })
       .then((actions) => {
         if (cancelled) {
           return;
@@ -3966,7 +4469,9 @@ export function App() {
           return;
         }
         setSlashActions([]);
-        setSlashError(error instanceof Error ? error.message : "命令菜单加载失败");
+        setSlashError(
+          error instanceof Error ? error.message : "命令菜单加载失败",
+        );
       })
       .finally(() => {
         if (!cancelled) {
@@ -3978,9 +4483,10 @@ export function App() {
       cancelled = true;
     };
   }, [
-    activeComposerActionProviders,
     composerCatalogRevision,
+    composerActionTrigger?.marker,
     slashPaletteOpen,
+    slashProviders,
     workspaceRootForRun,
   ]);
 
@@ -3992,30 +4498,33 @@ export function App() {
       (action) => action.id === slashActiveActionId,
     );
     if (!activeStillVisible) {
-      setSlashActiveActionId(firstSelectableSlashAction(filteredSlashActions)?.id);
+      setSlashActiveActionId(
+        firstSelectableSlashAction(filteredSlashActions)?.id,
+      );
     }
   }, [filteredSlashActions, slashActiveActionId, slashPaletteOpen]);
 
   useEffect(() => {
     if (!desktopReady) {
-      setComposerPluginActions([]);
       setComposerPluginsLoading(false);
       setComposerPluginsError(null);
       return;
     }
 
     let cancelled = false;
-    setComposerPluginsLoading(true);
+    const hasSnapshot = composerPluginCatalogRef.current.length > 0;
+    setComposerPluginsLoading(!hasSnapshot);
     setComposerPluginsError(null);
-    void Promise.resolve(pluginProvider.getActions({ workspaceRootForRun }))
-      .then((actions) => {
+    void runtimeClient
+      .listPlugins()
+      .then((plugins) => {
         if (!cancelled) {
-          setComposerPluginActions(actions);
+          composerPluginCatalogRef.current = plugins;
+          setComposerPluginCatalog(plugins);
         }
       })
       .catch((error) => {
-        if (!cancelled) {
-          setComposerPluginActions([]);
+        if (!cancelled && !hasSnapshot) {
           setComposerPluginsError(
             error instanceof Error ? error.message : "插件列表加载失败",
           );
@@ -4030,12 +4539,14 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [composerCatalogRevision, desktopReady, pluginProvider, workspaceRootForRun]);
+  }, [composerCatalogRevision, desktopReady, runtimeClient]);
 
   const activeUserQuestion = runtimeState.userQuestions[0];
   const activeExternalInteraction = runtimeState.externalInteractions[0];
   const activeComputerReview = runtimeState.computerReviews[0];
-  const activeComputerHandoff = runtimeState.computerHandoffs.find((item) => item.active);
+  const activeComputerHandoff = runtimeState.computerHandoffs.find(
+    (item) => item.active,
+  );
   const navItems: NavItem[] = [
     {
       id: "connectors",
@@ -4064,7 +4575,8 @@ export function App() {
       ? "Starting"
       : undefined;
   useEffect(() => {
-    const defaultProjectAvailable = !defaultProjectRemoved && hasDefaultWorkspaceProject;
+    const defaultProjectAvailable =
+      !defaultProjectRemoved && hasDefaultWorkspaceProject;
     const knownProjectIds = new Set([
       ...(defaultProjectAvailable ? [DEFAULT_WORKSPACE_PROJECT_ID] : []),
       ...projectsFromWorkspace.map((project) => project.id),
@@ -4081,14 +4593,22 @@ export function App() {
     );
     setExpandedProjectIds((current) => {
       const next = current.filter((id) => knownProjectIds.has(id));
-      return !defaultProjectAvailable || next.includes(DEFAULT_WORKSPACE_PROJECT_ID)
+      return !defaultProjectAvailable ||
+        next.includes(DEFAULT_WORKSPACE_PROJECT_ID)
         ? next
         : [DEFAULT_WORKSPACE_PROJECT_ID, ...next];
     });
-  }, [defaultProjectRemoved, hasDefaultWorkspaceProject, projectsFromWorkspace]);
+  }, [
+    defaultProjectRemoved,
+    hasDefaultWorkspaceProject,
+    projectsFromWorkspace,
+  ]);
 
   useEffect(() => {
-    if (pathForSelectedProject && !isSameWorkspacePath(workspacePath, pathForSelectedProject)) {
+    if (
+      pathForSelectedProject &&
+      !isSameWorkspacePath(workspacePath, pathForSelectedProject)
+    ) {
       workspaceTargetPathRef.current = pathForSelectedProject;
       setWorkspacePath(pathForSelectedProject);
     }
@@ -4098,32 +4618,46 @@ export function App() {
     [
       DEFAULT_WORKSPACE_PROJECT_ID,
       defaultProjectDisplayName ||
-        (defaultWorkspacePath ? workspaceLabelForPath(defaultWorkspacePath) : "awaken"),
+        (defaultWorkspacePath
+          ? workspaceLabelForPath(defaultWorkspacePath)
+          : "awaken"),
     ],
-    ...projectsFromWorkspace.map((project) => [project.id, project.label] as const),
+    ...projectsFromWorkspace.map(
+      (project) => [project.id, project.label] as const,
+    ),
   ]);
   const projectDisplayNameById = new Map<string, string | undefined>([
     [DEFAULT_WORKSPACE_PROJECT_ID, defaultProjectDisplayName],
-    ...projectsFromWorkspace.map((project) => [project.id, project.displayName] as const),
+    ...projectsFromWorkspace.map(
+      (project) => [project.id, project.displayName] as const,
+    ),
   ]);
   const removedProjectIdSet = new Set(removedProjectIds);
   const workspaceLabelProjectId = activeThreadProjectId ?? selectedProjectId;
   useEffect(() => {
     dispatchFileWorkspaceTabs({ type: "reset" });
   }, [workspaceLabelProjectId]);
-  const workspaceLabelPath = activeThreadWorkspacePath ?? pathForSelectedProject;
+  const workspaceLabelPath =
+    activeThreadWorkspacePath ?? pathForSelectedProject;
   const activeProjectLabel = conversationScope
     ? "选择项目"
-    : ((workspaceLabelProjectId ? projectLabelById.get(workspaceLabelProjectId) : undefined) ??
-      (workspaceLabelPath ? workspaceLabelForPath(workspaceLabelPath) : "awaken"));
-  const selectedEndpointSelector = selectedModelProfile?.advanced?.endpointId?.trim();
+    : ((workspaceLabelProjectId
+        ? projectLabelById.get(workspaceLabelProjectId)
+        : undefined) ??
+      (workspaceLabelPath
+        ? workspaceLabelForPath(workspaceLabelPath)
+        : "awaken"));
+  const selectedEndpointSelector =
+    selectedModelProfile?.advanced?.endpointId?.trim();
   const selectedRuntimeModelIdentity = selectedModelProfile
     ? {
         ...selectedModelProfile,
         modelId: selectedEndpointSelector || selectedModelProfile.modelId,
         capabilityModelId: selectedModelProfile.modelId,
         endpointSelector: selectedEndpointSelector,
-        modelSelectorKind: selectedEndpointSelector ? ("endpoint" as const) : ("model" as const),
+        modelSelectorKind: selectedEndpointSelector
+          ? ("endpoint" as const)
+          : ("model" as const),
         reasoningEffort: selectedReasoningEffort,
       }
     : undefined;
@@ -4194,7 +4728,9 @@ export function App() {
           icon: modelProfileIcon(selectedModelProfile),
           disabled: isBusy,
           menuItems: enabledModelProfiles.map((profile) => {
-            const provider = modelProviders.find((item) => item.id === profile.providerId);
+            const provider = modelProviders.find(
+              (item) => item.id === profile.providerId,
+            );
             const capability =
               profile.effectiveCapability?.reasoningEffort ??
               provider?.modelCapabilities[profile.modelId]?.reasoningEffort;
@@ -4333,7 +4869,10 @@ export function App() {
     setProjectRenameSubmitting(true);
     setNotice(null);
     try {
-      const result = await runtimeClient.renameProject(backendProjectId, displayName);
+      const result = await runtimeClient.renameProject(
+        backendProjectId,
+        displayName,
+      );
       if (!result.ok) {
         setNotice(result.message);
         return;
@@ -4355,13 +4894,18 @@ export function App() {
       setNotice(`项目已重命名为“${renamedName}”。`);
       await refreshProjects().catch(() => []);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "项目重命名暂时失败。");
+      setNotice(
+        error instanceof Error ? error.message : "项目重命名暂时失败。",
+      );
     } finally {
       setProjectRenameSubmitting(false);
     }
   }
 
-  function requestProjectDelete(projectId: string, action: ProjectDeleteAction): void {
+  function requestProjectDelete(
+    projectId: string,
+    action: ProjectDeleteAction,
+  ): void {
     const backendProjectId = backendProjectIdFor(projectId);
     if (!backendProjectId) {
       setNotice("项目正在初始化，请稍后重试。");
@@ -4476,13 +5020,17 @@ export function App() {
   }
 
   const conversationThreads = runtimeState.threads.filter(
-    (thread) => projectIdForThread(thread, effectiveDefaultWorkspacePath) === undefined,
+    (thread) =>
+      projectIdForThread(thread, effectiveDefaultWorkspacePath) === undefined,
   );
   const eligibleConversationThreadIds = conversationThreads
     .filter((thread) => !shouldShowSidebarThreadSpinner(thread))
     .map((thread) => thread.threadId);
-  const eligibleConversationThreadIdsKey = eligibleConversationThreadIds.join("\u0000");
-  const eligibleConversationThreadIdSet = new Set(eligibleConversationThreadIds);
+  const eligibleConversationThreadIdsKey =
+    eligibleConversationThreadIds.join("\u0000");
+  const eligibleConversationThreadIdSet = new Set(
+    eligibleConversationThreadIds,
+  );
   useEffect(() => {
     if (!conversationBatchMode) {
       return;
@@ -4502,7 +5050,8 @@ export function App() {
   const allEligibleConversationsSelected =
     eligibleConversationThreadIds.length > 0 &&
     selectedConversationCount === eligibleConversationThreadIds.length;
-  const conversationItems = threadItems(conversationThreads).map((item, index) => {
+  const conversationItems = threadItems(conversationThreads).map(
+    (item, index) => {
     if (!conversationBatchMode) {
       return item;
     }
@@ -4513,28 +5062,37 @@ export function App() {
       selection: {
         checked: selectedConversationThreadIdSet.has(thread.threadId),
         disabled: selectionDisabled,
-        disabledReason: selectionDisabled ? "正在运行，停止后可删除" : undefined,
+          disabledReason: selectionDisabled
+            ? "正在运行，停止后可删除"
+            : undefined,
         onChange: (checked: boolean) => {
           setSelectedConversationThreadIds((current) => {
             if (checked) {
-              return current.includes(thread.threadId) ? current : [...current, thread.threadId];
+                return current.includes(thread.threadId)
+                  ? current
+                  : [...current, thread.threadId];
             }
             return current.filter((threadId) => threadId !== thread.threadId);
           });
         },
       },
     };
-  });
+    },
+  );
 
-  const defaultProjectThreads = threadItemsForProject(DEFAULT_WORKSPACE_PROJECT_ID);
+  const defaultProjectThreads = threadItemsForProject(
+    DEFAULT_WORKSPACE_PROJECT_ID,
+  );
   const unorderedRepositoryProjects: ProjectItem[] = [
-    ...(removedProjectIdSet.has(DEFAULT_WORKSPACE_PROJECT_ID) || !hasDefaultWorkspaceProject
+    ...(removedProjectIdSet.has(DEFAULT_WORKSPACE_PROJECT_ID) ||
+    !hasDefaultWorkspaceProject
       ? []
       : [
           {
             id: DEFAULT_WORKSPACE_PROJECT_ID,
             kind: "project" as const,
-            label: projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
+            label:
+              projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
             path: defaultWorkspacePath,
             action: projectAction(
               DEFAULT_WORKSPACE_PROJECT_ID,
@@ -4546,11 +5104,17 @@ export function App() {
               projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
               defaultProjectThreads.length,
             ),
-            children: defaultProjectThreads.length > 0 ? defaultProjectThreads : undefined,
+            children:
+              defaultProjectThreads.length > 0
+                ? defaultProjectThreads
+                : undefined,
           },
         ]),
     ...projectsFromWorkspace
-      .filter((project) => !isSameWorkspacePath(project.path, effectiveDefaultWorkspacePath))
+      .filter(
+        (project) =>
+          !isSameWorkspacePath(project.path, effectiveDefaultWorkspacePath),
+      )
       .map((project) => {
         const threads = threadItemsForProject(project.id);
         return {
@@ -4560,7 +5124,11 @@ export function App() {
           path: project.path,
           action: projectAction(project.id, project.label),
           menuItems: projectMenuItems(project.id),
-          hoverCard: projectHoverCard(project.id, project.label, threads.length),
+          hoverCard: projectHoverCard(
+            project.id,
+            project.label,
+            threads.length,
+          ),
           children: threads.length > 0 ? threads : undefined,
         };
       }),
@@ -4580,7 +5148,9 @@ export function App() {
   ];
   const allProjectsExpanded =
     repositoryProjects.length > 0 &&
-    repositoryProjects.every((project) => expandedProjectIds.includes(project.id));
+    repositoryProjects.every((project) =>
+      expandedProjectIds.includes(project.id),
+    );
   const composerProjectPicker = {
     label: "选择项目",
     placeholder: "选择项目",
@@ -4616,17 +5186,22 @@ export function App() {
   const activeProjectId = runtimeState.activeThreadId
     ? `thread:${runtimeState.activeThreadId}`
     : selectedProjectId;
-  const fileWorkspaceExpandedActive = fileWorkspaceOpen && fileWorkspaceExpanded;
+  const fileWorkspaceExpandedActive =
+    fileWorkspaceOpen && fileWorkspaceExpanded;
   const fileWorkspaceSurfaceActive =
     fileWorkspaceExpandedActive && expandedWorkspaceSurface === "file";
-  const expandedFileComposerCompletionKeyValue = expandedFileComposerCompletionKey({
+  const expandedFileComposerCompletionKeyValue =
+    expandedFileComposerCompletionKey({
     trackedRun: expandedFileComposerTrackedRun,
-    currentThreadId: runtimeState.activeThreadId ?? runtimeState.threadId ?? undefined,
+      currentThreadId:
+        runtimeState.activeThreadId ?? runtimeState.threadId ?? undefined,
     currentRunId: runtimeState.runId ?? undefined,
     status: runtimeState.status,
     completedAtMs: runtimeState.runCompletedAtMs,
   });
-  const expandedFileComposerCompleted = Boolean(expandedFileComposerCompletionKeyValue);
+  const expandedFileComposerCompleted = Boolean(
+    expandedFileComposerCompletionKeyValue,
+  );
   const expandedFileComposerElapsedMs =
     expandedFileComposerCompletionKeyValue &&
     typeof runtimeState.runStartedAtMs === "number" &&
@@ -4634,7 +5209,9 @@ export function App() {
       ? Math.max(0, runtimeState.runCompletedAtMs - runtimeState.runStartedAtMs)
       : undefined;
   const expandedFileComposerForceFull = Boolean(
-    composerRuntimePanels.length > 0 || activeUserQuestion || activeExternalInteraction,
+    composerRuntimePanels.length > 0 ||
+    activeUserQuestion ||
+    activeExternalInteraction,
   );
   const expandedFileComposerHasDraft = hasExpandedFileComposerDraft({
     effectiveText: trimmedEffectiveComposerValue,
@@ -4692,7 +5269,8 @@ export function App() {
       bottomSafeArea: composerBarSafeAreaPx,
     }),
   });
-  const showTurnMarkerRail = !fileWorkspaceSurfaceActive && turnMarkerDisplay.mode !== "hidden";
+  const showTurnMarkerRail =
+    !fileWorkspaceSurfaceActive && turnMarkerDisplay.mode !== "hidden";
   const activeNavSection = workbenchNavSectionForNavId(activeNavId);
   const activeExtensionSection: ExtensionSection | undefined =
     activeNavSection === "connectors" ||
@@ -4745,7 +5323,10 @@ export function App() {
           terminalSeenRef.current = true;
           localStorage.removeItem("awaken:runId");
         }
-        if (event.type === "RUN_STATUS_CHANGED" && event.status === "cancelled") {
+        if (
+          event.type === "RUN_STATUS_CHANGED" &&
+          event.status === "cancelled"
+        ) {
           localStorage.removeItem("awaken:runId");
         }
         dispatch({ type: "run/event", event, receivedAtMs });
@@ -4812,7 +5393,8 @@ export function App() {
         );
         for (const task of assignedTasks.slice().reverse()) {
           const event = dreamTaskReceiptEvent(task);
-          if (event) dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
+          if (event)
+            dispatch({ type: "run/event", event, receivedAtMs: Date.now() });
         }
       })
       .catch(() => {
@@ -5031,7 +5613,10 @@ export function App() {
     );
     if (existingTokenOffset !== undefined) {
       setActiveNavId(undefined);
-      setComposerInputSelection({ anchor: existingTokenOffset, focus: existingTokenOffset });
+      setComposerInputSelection({
+        anchor: existingTokenOffset,
+        focus: existingTokenOffset,
+      });
       requestComposerFocus(existingTokenOffset);
       return;
     }
@@ -5053,7 +5638,10 @@ export function App() {
     setComposerTokenPlacements(nextDraft.placements);
     setComposerTokenLeadingTexts(nextDraft.leadingTexts);
     setComposerValue(nextDraft.value);
-    setComposerInputSelection({ anchor: nextDraft.focusOffset, focus: nextDraft.focusOffset });
+    setComposerInputSelection({
+      anchor: nextDraft.focusOffset,
+      focus: nextDraft.focusOffset,
+    });
     setActiveNavId(undefined);
     requestComposerFocus(nextDraft.focusOffset);
   }
@@ -5068,28 +5656,41 @@ export function App() {
     commandArguments: string[],
   ): void {
     if (component.kind === "skill") {
-      insertComposerTokenFromExtensions(pluginSkillComposerTokenFromAction(plugin, component));
+      insertComposerTokenFromExtensions(
+        pluginSkillComposerTokenFromAction(plugin, component),
+      );
       return;
     }
     if (component.kind === "rule") {
-      insertComposerTokenFromExtensions(pluginRuleComposerTokenFromAction(plugin, component));
+      insertComposerTokenFromExtensions(
+        pluginRuleComposerTokenFromAction(plugin, component),
+      );
       return;
     }
     if (component.kind === "command") {
       insertComposerTokenFromExtensions(
-        pluginCommandComposerTokenFromAction(plugin, component, commandArguments),
+        pluginCommandComposerTokenFromAction(
+          plugin,
+          component,
+          commandArguments,
+        ),
       );
       return;
     }
     if (component.kind === "agent") {
-      insertComposerTokenFromExtensions(pluginAgentComposerTokenFromAction(plugin, component));
+      insertComposerTokenFromExtensions(
+        pluginAgentComposerTokenFromAction(plugin, component),
+      );
     }
   }
 
   function handleRemoveComposerToken(tokenId: string): void {
-    const removedTokenIndex = composerTokens.findIndex((item) => item.id === tokenId);
+    const removedTokenIndex = composerTokens.findIndex(
+      (item) => item.id === tokenId,
+    );
     const removedToken = composerTokens[removedTokenIndex];
-    const leadingText = removedToken?.leadingText ?? composerTokenLeadingTexts[tokenId] ?? "";
+    const leadingText =
+      removedToken?.leadingText ?? composerTokenLeadingTexts[tokenId] ?? "";
     const nextToken = composerTokens[removedTokenIndex + 1];
     if (leadingText && nextToken) {
       const nextLeadingText =
@@ -5099,7 +5700,9 @@ export function App() {
         current
           .filter((token) => token.id !== tokenId)
           .map((token) =>
-            token.id === nextToken.id ? { ...token, leadingText: mergedLeadingText } : token,
+            token.id === nextToken.id
+              ? { ...token, leadingText: mergedLeadingText }
+              : token,
           ),
       );
       setComposerTokenLeadingTexts((current) => {
@@ -5109,9 +5712,13 @@ export function App() {
       });
     } else if (leadingText) {
       setComposerValue((current) => `${leadingText}${current}`);
-      setComposerTokens((current) => current.filter((token) => token.id !== tokenId));
+      setComposerTokens((current) =>
+        current.filter((token) => token.id !== tokenId),
+      );
     } else {
-      setComposerTokens((current) => current.filter((token) => token.id !== tokenId));
+      setComposerTokens((current) =>
+        current.filter((token) => token.id !== tokenId),
+      );
     }
     setComposerTokenPlacements((current) => {
       if (!(tokenId in current)) {
@@ -5134,7 +5741,9 @@ export function App() {
     requestComposerFocus();
   }
 
-  function handleComposerStructuredInputChange(nextValue: ComposerBarStructuredInputValue): void {
+  function handleComposerStructuredInputChange(
+    nextValue: ComposerBarStructuredInputValue,
+  ): void {
     const nextDraft = reconcileComposerStructuredInput(
       composerTokens,
       composerTokenPlacements,
@@ -5185,26 +5794,36 @@ export function App() {
       return;
     }
     event.preventDefault();
-    const selectableActions = filteredSlashActions.filter((action) => !action.disabled);
+    const selectableActions = filteredSlashActions.filter(
+      (action) => !action.disabled,
+    );
     if (selectableActions.length === 0) {
       return;
     }
     const activeIndex = Math.max(
       0,
-      selectableActions.findIndex((action) => action.id === slashActiveActionId),
+      selectableActions.findIndex(
+        (action) => action.id === slashActiveActionId,
+      ),
     );
     if (event.key === "ArrowDown") {
-      setSlashActiveActionId(selectableActions[(activeIndex + 1) % selectableActions.length]?.id);
+      setSlashActiveActionId(
+        selectableActions[(activeIndex + 1) % selectableActions.length]?.id,
+      );
       return;
     }
     if (event.key === "ArrowUp") {
       setSlashActiveActionId(
-        selectableActions[(activeIndex - 1 + selectableActions.length) % selectableActions.length]
-          ?.id,
+        selectableActions[
+          (activeIndex - 1 + selectableActions.length) %
+            selectableActions.length
+        ]?.id,
       );
       return;
     }
-    handleSlashActionSelect(slashActiveActionId ?? selectableActions[0]?.id ?? "");
+    handleSlashActionSelect(
+      slashActiveActionId ?? selectableActions[0]?.id ?? "",
+    );
   }
 
   async function handleSubmitWithPrompt(options?: {
@@ -5212,7 +5831,9 @@ export function App() {
     forceNewThread?: boolean;
   }): Promise<void> {
     if (!desktopReady) {
-      setNotice(desktopNeedsRestart ? "Awaken needs restart" : "Awaken is starting");
+      setNotice(
+        desktopNeedsRestart ? "Awaken needs restart" : "Awaken is starting",
+      );
       return;
     }
     const prompt = (options?.prompt ?? trimmedEffectiveComposerValue).trim();
@@ -5234,7 +5855,10 @@ export function App() {
       tokenPlacements: draftComposerTokenPlacements,
       tokenLeadingTexts: draftComposerTokenLeadingTexts,
       selection: composerInputSelection
-        ? { anchor: composerInputSelection.anchor, focus: composerInputSelection.focus }
+        ? {
+            anchor: composerInputSelection.anchor,
+            focus: composerInputSelection.focus,
+          }
         : undefined,
     };
     const draftPromptTokens = promptNarrativeTokensForComposer(
@@ -5242,7 +5866,11 @@ export function App() {
       draftComposerTokenLeadingTexts,
     );
     const runInputAttachments = draftAttachments.map(toRunInputAttachment);
-    if (!prompt && runInputAttachments.length === 0 && draftComposerTokens.length === 0) {
+    if (
+      !prompt &&
+      runInputAttachments.length === 0 &&
+      draftComposerTokens.length === 0
+    ) {
       setNotice("请输入内容或添加附件");
       return;
     }
@@ -5300,7 +5928,8 @@ export function App() {
     clearThreadComposerDraft();
 
     try {
-      const { projectId: runProjectId, projectName: runProjectName } = resolveRunProjectForRun({
+      const { projectId: runProjectId, projectName: runProjectName } =
+        resolveRunProjectForRun({
         workspaceRoot,
         selectedProjectId,
         defaultWorkspacePath,
@@ -5327,14 +5956,18 @@ export function App() {
         input: prompt,
         attachments: forceNewThread ? [] : runInputAttachments,
         composerTokens: forceNewThread ? [] : draftComposerTokens,
-        threadId: forceNewThread ? undefined : runtimeState.activeThreadId || undefined,
+        threadId: forceNewThread
+          ? undefined
+          : runtimeState.activeThreadId || undefined,
         modelProfileId: selectedModelProfile?.id,
         reasoningEffort: selectedReasoningEffort,
         workspace: {
           // projectId is what lets Core place a folder-less run in that
           // project's own session workspace rather than guess an identity from
           // the path. With no folder there is no root to declare either.
-          projectId: runProjectId ? backendProjectIdFor(runProjectId) : undefined,
+          projectId: runProjectId
+            ? backendProjectIdFor(runProjectId)
+            : undefined,
           // The agent is told which project it is in, so it can answer about the
           // folder group as a whole instead of only seeing its cwd.
           projectName: runProjectName,
@@ -5359,7 +5992,9 @@ export function App() {
       }
       if (runProjectId === DEFAULT_WORKSPACE_PROJECT_ID) {
         setRemovedProjectIds((current) =>
-          current.filter((projectId) => projectId !== DEFAULT_WORKSPACE_PROJECT_ID),
+          current.filter(
+            (projectId) => projectId !== DEFAULT_WORKSPACE_PROJECT_ID,
+          ),
         );
       }
       dispatch({ type: "run/created", run });
@@ -5376,10 +6011,14 @@ export function App() {
       }
       void refreshThreads();
       localStorage.setItem("awaken:runId", run.runId);
-      const unsubscribe = await runtimeClient.subscribeRun(run.runId, createSubscribeHandlers());
+      const unsubscribe = await runtimeClient.subscribeRun(
+        run.runId,
+        createSubscribeHandlers(),
+      );
       unsubscribeRef.current = unsubscribe;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to create run";
+      const message =
+        error instanceof Error ? error.message : "Failed to create run";
       replaceComposerDraft(draftComposerState, composerDraftKey);
       dispatch({ type: "run/createFailed", message });
     }
@@ -5431,13 +6070,16 @@ export function App() {
     try {
       await replayThreadTranscript(threadId, loadSeq);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to load thread");
+      setNotice(
+        error instanceof Error ? error.message : "Failed to load thread",
+      );
     }
   }
 
   function threadsForProject(projectId: string): ThreadItem[] {
     return runtimeState.threads.filter(
-      (thread) => projectIdForThread(thread, effectiveDefaultWorkspacePath) === projectId,
+      (thread) =>
+        projectIdForThread(thread, effectiveDefaultWorkspacePath) === projectId,
     );
   }
 
@@ -5447,7 +6089,10 @@ export function App() {
     if (!thread) {
       return;
     }
-    const nextProjectId = projectIdForThread(thread, effectiveDefaultWorkspacePath);
+    const nextProjectId = projectIdForThread(
+      thread,
+      effectiveDefaultWorkspacePath,
+    );
     if (!nextProjectId) {
       setConversationScope(true);
       setSelectedProjectId(undefined);
@@ -5460,8 +6105,11 @@ export function App() {
     setSelectedProjectId(nextProjectId);
     const projectHasNoFolders =
       nextProjectId !== DEFAULT_WORKSPACE_PROJECT_ID &&
-      projectsFromWorkspace.find((project) => project.id === nextProjectId)?.folders.length === 0;
-    const nextWorkspacePath = projectHasNoFolders ? "" : (thread.workspaceRoot ?? "");
+      projectsFromWorkspace.find((project) => project.id === nextProjectId)
+        ?.folders.length === 0;
+    const nextWorkspacePath = projectHasNoFolders
+      ? ""
+      : (thread.workspaceRoot ?? "");
     workspaceTargetPathRef.current = nextWorkspacePath;
     setWorkspacePath(nextWorkspacePath);
     setExpandedProjectIds((current) =>
@@ -5469,7 +6117,9 @@ export function App() {
     );
   }
 
-  async function refreshAfterThreadMutation(removedThreadIds: string[] = []): Promise<void> {
+  async function refreshAfterThreadMutation(
+    removedThreadIds: string[] = [],
+  ): Promise<void> {
     if (removedThreadIds.includes(runtimeState.activeThreadId ?? "")) {
       resetActiveThreadContext();
     }
@@ -5488,9 +6138,15 @@ export function App() {
     try {
       const result =
         pending.action === "detach"
-          ? await runtimeClient.detachProject(pending.backendProjectId, idempotencyKey)
+          ? await runtimeClient.detachProject(
+              pending.backendProjectId,
+              idempotencyKey,
+            )
           : pending.action === "delete_history"
-            ? await runtimeClient.deleteProjectThreads(pending.backendProjectId, idempotencyKey)
+            ? await runtimeClient.deleteProjectThreads(
+                pending.backendProjectId,
+                idempotencyKey,
+              )
             : await runtimeClient.trashProjectFolder(
                 pending.backendProjectId,
                 pending.folderPath ?? "",
@@ -5525,7 +6181,9 @@ export function App() {
             wasExpanded: expandedProjectIds.includes(pending.projectId),
           }),
         );
-        if (isSameWorkspacePath(activeThreadWorkspacePath, pending.folderPath)) {
+        if (
+          isSameWorkspacePath(activeThreadWorkspacePath, pending.folderPath)
+        ) {
           resetActiveThreadContext();
         }
         setPendingProjectDelete(null);
@@ -5536,7 +6194,10 @@ export function App() {
         ]);
         for (const refreshResult of refreshResults) {
           if (refreshResult.status === "rejected") {
-            console.warn("project_operation_initial_refresh_failed", refreshResult.reason);
+            console.warn(
+              "project_operation_initial_refresh_failed",
+              refreshResult.reason,
+            );
           }
         }
         return;
@@ -5551,7 +6212,9 @@ export function App() {
       }
       await Promise.all([refreshProjects(), loadThreadsIntoState()]);
       setExpandedProjectIds((current) =>
-        pending.action === "detach" ? current.filter((id) => id !== pending.projectId) : current,
+        pending.action === "detach"
+          ? current.filter((id) => id !== pending.projectId)
+          : current,
       );
       setPendingProjectDelete(null);
       setNotice(
@@ -5575,7 +6238,9 @@ export function App() {
       return;
     }
 
-    const thread = runtimeState.threads.find((item) => item.threadId === threadId);
+    const thread = runtimeState.threads.find(
+      (item) => item.threadId === threadId,
+    );
     if (!thread) {
       setNotice("会话不存在");
       return;
@@ -5611,7 +6276,9 @@ export function App() {
       await refreshAfterThreadMutation([threadId]);
       setNotice("已归档会话");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "归档会话失败，请稍后重试");
+      setNotice(
+        error instanceof Error ? error.message : "归档会话失败，请稍后重试",
+      );
     }
   }
 
@@ -5626,7 +6293,9 @@ export function App() {
       return;
     }
 
-    const thread = runtimeState.threads.find((item) => item.threadId === threadId);
+    const thread = runtimeState.threads.find(
+      (item) => item.threadId === threadId,
+    );
     if (!thread || nextLabel === thread.label) {
       setRenameDialogOpen(false);
       setRenamingThreadId(null);
@@ -5636,7 +6305,10 @@ export function App() {
 
     setRenameSubmitting(true);
     try {
-      const updatedThread = await runtimeClient.renameThread(threadId, nextLabel);
+      const updatedThread = await runtimeClient.renameThread(
+        threadId,
+        nextLabel,
+      );
       dispatch({ type: "run/threadRenamed", thread: updatedThread });
       setNotice("已重命名会话");
     } catch (error) {
@@ -5674,8 +6346,12 @@ export function App() {
     if (!desktopReady) {
       return;
     }
-    const existingThreadIds = new Set(runtimeState.threads.map((thread) => thread.threadId));
-    const requestedThreadIds = threadIds.filter((threadId) => existingThreadIds.has(threadId));
+    const existingThreadIds = new Set(
+      runtimeState.threads.map((thread) => thread.threadId),
+    );
+    const requestedThreadIds = threadIds.filter((threadId) =>
+      existingThreadIds.has(threadId),
+    );
     if (requestedThreadIds.length === 0) {
       setNotice("没有可删除的会话");
       return;
@@ -5699,7 +6375,9 @@ export function App() {
       }
 
       await refreshAfterThreadMutation(result.deletedThreadIds);
-      const failedThreadIds = result.failures.map((failure) => failure.threadId);
+      const failedThreadIds = result.failures.map(
+        (failure) => failure.threadId,
+      );
       if (pending.source === "batch") {
         setSelectedConversationThreadIds(failedThreadIds);
         if (failedThreadIds.length === 0) {
@@ -5717,7 +6395,8 @@ export function App() {
         const busyCount = result.failures.filter(
           (failure) => failure.code === "THREAD_BUSY",
         ).length;
-        const failureSummary = busyCount === result.failures.length
+        const failureSummary =
+          busyCount === result.failures.length
           ? `${busyCount} 个会话正在运行，停止后可继续删除`
           : `${result.failures.length} 个会话未能删除，请稍后重试`;
         setNotice(
@@ -5751,7 +6430,10 @@ export function App() {
         : projectsFromWorkspace.find((project) => project.id === id)?.path;
     if (
       (runtimeState.activeThreadId && activeThreadProjectId !== id) ||
-      shouldResetActiveThreadForWorkspaceChange(activeThreadWorkspacePath, projectPath)
+      shouldResetActiveThreadForWorkspaceChange(
+        activeThreadWorkspacePath,
+        projectPath,
+      )
     ) {
       resetActiveThreadContext();
     }
@@ -5790,7 +6472,9 @@ export function App() {
     } catch (error) {
       setProjectOrderIds(previousOrder);
       setNotice(
-        error instanceof Error ? error.message : "项目顺序暂时未保存，已恢复原顺序，请稍后重试。",
+        error instanceof Error
+          ? error.message
+          : "项目顺序暂时未保存，已恢复原顺序，请稍后重试。",
       );
       await refreshProjects();
     } finally {
@@ -5812,7 +6496,10 @@ export function App() {
     if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
       return defaultProjectFolders;
     }
-    return projectsFromWorkspace.find((project) => project.id === projectId)?.folders ?? [];
+    return (
+      projectsFromWorkspace.find((project) => project.id === projectId)
+        ?.folders ?? []
+    );
   }
 
   /** 目标项目之外，所有已经占用了某个目录的项目。 */
@@ -5820,7 +6507,9 @@ export function App() {
   async function pickProjectFolders(
     excludedPaths: string[],
   ): Promise<{ paths: string[]; skipped: string[] }> {
-    const result = await runtimeClient.pickProjectFolders(workspacePath || defaultWorkspacePath);
+    const result = await runtimeClient.pickProjectFolders(
+      workspacePath || defaultWorkspacePath,
+    );
     if (result.canceled) {
       if (result.error) {
         setNotice(result.error);
@@ -5834,7 +6523,9 @@ export function App() {
       if (validation.valid) {
         readable.push(candidate);
       } else {
-        skipped.push(`“${workspaceLabelForPath(candidate)}”：${validation.error}`);
+        skipped.push(
+          `“${workspaceLabelForPath(candidate)}”：${validation.error}`,
+        );
       }
     }
     const partition = partitionPickedProjectFolders({
@@ -5864,7 +6555,9 @@ export function App() {
       setDraftProjectFolders((current) => [...current, ...paths]);
       setDraftPrimaryFolder((current) => current || paths[0]);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to select folder");
+      setNotice(
+        error instanceof Error ? error.message : "Failed to select folder",
+      );
     } finally {
       setPickingWorkspace(false);
     }
@@ -5872,7 +6565,9 @@ export function App() {
 
   function handleRemoveDraftProjectFolder(path: string): void {
     setDraftProjectFolders((current) => {
-      const next = current.filter((candidate) => !isSameWorkspacePath(candidate, path));
+      const next = current.filter(
+        (candidate) => !isSameWorkspacePath(candidate, path),
+      );
       setDraftPrimaryFolder((primary) =>
         isSameWorkspacePath(primary, path) ? (next[0] ?? "") : primary,
       );
@@ -5895,11 +6590,15 @@ export function App() {
       // a sensible label, and a project with neither is named by the backend.
       const displayName =
         draftProjectName.trim() ||
-        (draftPrimaryFolder ? workspaceLabelForPath(draftPrimaryFolder) : undefined);
+        (draftPrimaryFolder
+          ? workspaceLabelForPath(draftPrimaryFolder)
+          : undefined);
       const result = await runtimeClient.createProject(folders, displayName);
       if (!result.ok) {
         setNotice(
-          result.code === "PROJECT_OPERATION_CONFLICT" ? "该项目正在移除中" : result.message,
+          result.code === "PROJECT_OPERATION_CONFLICT"
+            ? "该项目正在移除中"
+            : result.message,
         );
         return;
       }
@@ -5913,7 +6612,10 @@ export function App() {
         : project.projectId;
       await refreshProjects();
       if (
-        shouldResetActiveThreadForWorkspaceChange(activeThreadWorkspacePath, project.workspaceRoot)
+        shouldResetActiveThreadForWorkspaceChange(
+          activeThreadWorkspacePath,
+          project.workspaceRoot,
+        )
       ) {
         resetActiveThreadContext();
       }
@@ -5932,7 +6634,9 @@ export function App() {
       setDraftPrimaryFolder("");
       setDraftProjectName("");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to create project");
+      setNotice(
+        error instanceof Error ? error.message : "Failed to create project",
+      );
     } finally {
       setCreateProjectSubmitting(false);
     }
@@ -5968,7 +6672,9 @@ export function App() {
       await refreshProjects();
       setNotice(successNotice);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "项目文件夹操作暂时失败。");
+      setNotice(
+        error instanceof Error ? error.message : "项目文件夹操作暂时失败。",
+      );
       await refreshProjects().catch(() => []);
     } finally {
       setProjectFolderBusyPath(undefined);
@@ -5990,14 +6696,19 @@ export function App() {
       const label = workspaceLabelForPath(path);
       setProjectFolderBusyPath(path);
       try {
-        const result = await runtimeClient.attachProjectFolder(backendProjectId, path);
+        const result = await runtimeClient.attachProjectFolder(
+          backendProjectId,
+          path,
+        );
         if (result.ok) {
           attached.push(label);
         } else {
           failures.push(`“${label}”：${result.message}`);
         }
       } catch (error) {
-        failures.push(`“${label}”：${error instanceof Error ? error.message : "加入失败"}`);
+        failures.push(
+          `“${label}”：${error instanceof Error ? error.message : "加入失败"}`,
+        );
       }
     }
     setProjectFolderBusyPath(undefined);
@@ -6032,13 +6743,18 @@ export function App() {
       }
       await attachProjectFolders(backendProjectId, paths, skipped);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to select folder");
+      setNotice(
+        error instanceof Error ? error.message : "Failed to select folder",
+      );
     } finally {
       setPickingWorkspace(false);
     }
   }
 
-  async function handleSetPrimaryProjectFolder(projectId: string, path: string): Promise<void> {
+  async function handleSetPrimaryProjectFolder(
+    projectId: string,
+    path: string,
+  ): Promise<void> {
     await runProjectFolderMutation(
       projectId,
       path,
@@ -6047,7 +6763,10 @@ export function App() {
     );
   }
 
-  async function handleDetachProjectFolder(projectId: string, path: string): Promise<void> {
+  async function handleDetachProjectFolder(
+    projectId: string,
+    path: string,
+  ): Promise<void> {
     await runProjectFolderMutation(
       projectId,
       path,
@@ -6119,12 +6838,17 @@ export function App() {
     try {
       const run = await runtimeClient.cancelRun(runtimeState.runId);
       dispatch({ type: "run/cancelSync", run });
-      const terminalStatuses: RuntimeRunStatus[] = ["finished", "error", "cancelled"];
+      const terminalStatuses: RuntimeRunStatus[] = [
+        "finished",
+        "error",
+        "cancelled",
+      ];
       if (terminalStatuses.includes(run.status)) {
         localStorage.removeItem("awaken:runId");
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to cancel run";
+      const message =
+        error instanceof Error ? error.message : "Failed to cancel run";
       if (message.includes("RUN_NOT_FOUND")) {
         // The run no longer exists on the server (e.g. runtime restarted or
         // the run already terminated). Reset the local runtime state so the
@@ -6156,9 +6880,17 @@ export function App() {
     setNotice(null);
     setResolvingUserQuestionId(activeUserQuestion.id);
     try {
-      await runtimeClient.answerUserQuestion(runtimeState.runId, activeUserQuestion.id, trimmed);
+      await runtimeClient.answerUserQuestion(
+        runtimeState.runId,
+        activeUserQuestion.id,
+        trimmed,
+      );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to answer user question");
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Failed to answer user question",
+      );
     } finally {
       setResolvingUserQuestionId(null);
     }
@@ -6175,9 +6907,16 @@ export function App() {
     setNotice(null);
     setResolvingUserQuestionId(activeUserQuestion.id);
     try {
-      await runtimeClient.cancelUserQuestion(runtimeState.runId, activeUserQuestion.id);
+      await runtimeClient.cancelUserQuestion(
+        runtimeState.runId,
+        activeUserQuestion.id,
+      );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Failed to cancel user question");
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Failed to cancel user question",
+      );
     } finally {
       setResolvingUserQuestionId(null);
     }
@@ -6234,7 +6973,9 @@ export function App() {
     });
   }
 
-  function handleOpenFileWorkspace(mode: ProjectFileWorkspaceMode = "files"): void {
+  function handleOpenFileWorkspace(
+    mode: ProjectFileWorkspaceMode = "files",
+  ): void {
     setSelectedSubagentTaskId(undefined);
     setOpenSubagentTaskId(undefined);
     runPlanEntry.closePanel(false);
@@ -6369,9 +7110,9 @@ export function App() {
       (tab) => tab.id === tabId,
     );
     const closingActive = artifactPreviewTabsState.activeTabId === tabId;
-    const hasRightArtifact = closingIndex >= 0 && Boolean(
-      artifactPreviewTabsState.tabs[closingIndex + 1],
-    );
+    const hasRightArtifact =
+      closingIndex >= 0 &&
+      Boolean(artifactPreviewTabsState.tabs[closingIndex + 1]);
     const firstProjectSlot = fileWorkspaceTabsState.tabs.find(
       (slot) => slot.projectId === fileWorkspaceProjectId,
     );
@@ -6419,7 +7160,9 @@ export function App() {
   function handleOpenSubagent(taskId?: string): void {
     setContextUsagePanelOpen(false);
     runPlanEntry.closePanel(false);
-    setOpenSubagentTaskId(taskId ?? openSubagentTaskId ?? subagentTasks[0]?.taskId);
+    setOpenSubagentTaskId(
+      taskId ?? openSubagentTaskId ?? subagentTasks[0]?.taskId,
+    );
   }
 
   function handleToggleSubagentInspector(): void {
@@ -6443,7 +7186,11 @@ export function App() {
     setCancellingSubagentTaskId(taskId);
     setNotice(null);
     try {
-      await runtimeClient.cancelSubagent(runtimeState.runId, taskId, "desktop_user");
+      await runtimeClient.cancelSubagent(
+        runtimeState.runId,
+        taskId,
+        "desktop_user",
+      );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "取消子任务失败");
     } finally {
@@ -6466,7 +7213,9 @@ export function App() {
         }
         return;
       }
-      const nextAttachments = result.files.map(composerDraftAttachmentFromPickedFile);
+      const nextAttachments = result.files.map(
+        composerDraftAttachmentFromPickedFile,
+      );
       setComposerAttachments((current) => [...current, ...nextAttachments]);
       if (result.errors?.length) {
         setNotice(result.errors.slice(0, 3).join("；"));
@@ -6491,16 +7240,22 @@ export function App() {
       setNotice("仅支持粘贴 PNG、JPEG 或 WebP 图片");
       return;
     }
-    const oversizedFile = files.find((file) => file.size > MAX_COMPOSER_IMAGE_BYTES);
+    const oversizedFile = files.find(
+      (file) => file.size > MAX_COMPOSER_IMAGE_BYTES,
+    );
     if (oversizedFile) {
-      setNotice(`单张图片不能超过 ${MAX_COMPOSER_IMAGE_BYTES / (1024 * 1024)} MiB`);
+      setNotice(
+        `单张图片不能超过 ${MAX_COMPOSER_IMAGE_BYTES / (1024 * 1024)} MiB`,
+      );
       return;
     }
 
     try {
       const startIndex = composerAttachments.length;
       const nextAttachments = await Promise.all(
-        files.map((file, index) => readComposerDraftImageAttachment(file, startIndex + index)),
+        files.map((file, index) =>
+          readComposerDraftImageAttachment(file, startIndex + index),
+        ),
       );
       setComposerAttachments((current) => [...current, ...nextAttachments]);
     } catch (error) {
@@ -6515,7 +7270,9 @@ export function App() {
     setNotice(null);
   }
 
-  function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>): void {
+  function handleSidebarResizeStart(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void {
     event.preventDefault();
     const target = event.currentTarget;
     target.setPointerCapture?.(event.pointerId);
@@ -6541,7 +7298,10 @@ export function App() {
       } catch {
         // Pointer capture may already be released if the drag ends outside the window.
       }
-      document.body.classList.remove("is-layout-resizing", "is-sidebar-resizing");
+      document.body.classList.remove(
+        "is-layout-resizing",
+        "is-sidebar-resizing",
+      );
     }
 
     document.body.classList.add("is-layout-resizing", "is-sidebar-resizing");
@@ -6550,13 +7310,17 @@ export function App() {
     window.addEventListener("pointercancel", handlePointerUp, { once: true });
   }
 
-  function handleInspectorResizeStart(event: ReactPointerEvent<HTMLDivElement>): void {
+  function handleInspectorResizeStart(
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): void {
     event.preventDefault();
     const target = event.currentTarget;
     target.setPointerCapture?.(event.pointerId);
     const startX = event.clientX;
     const startWidth = effectiveInspectorWidth || inspectorWidth;
-    const resizeMax = fileWorkspaceOpen ? FILE_WORKSPACE_INSPECTOR_CAP : MAX_INSPECTOR_WIDTH;
+    const resizeMax = fileWorkspaceOpen
+      ? FILE_WORKSPACE_INSPECTOR_CAP
+      : MAX_INSPECTOR_WIDTH;
 
     function handlePointerMove(moveEvent: PointerEvent): void {
       moveEvent.preventDefault();
@@ -6581,7 +7345,10 @@ export function App() {
       } catch {
         // Pointer capture may already be released if the drag ends outside the window.
       }
-      document.body.classList.remove("is-layout-resizing", "is-inspector-resizing");
+      document.body.classList.remove(
+        "is-layout-resizing",
+        "is-inspector-resizing",
+      );
     }
 
     document.body.classList.add("is-layout-resizing", "is-inspector-resizing");
@@ -6590,32 +7357,49 @@ export function App() {
     window.addEventListener("pointercancel", handlePointerUp, { once: true });
   }
 
-  function handleSidebarResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+  function handleSidebarResizeKeyDown(
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ): void {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
       return;
     }
     event.preventDefault();
     const delta = event.key === "ArrowRight" ? LAYOUT_STEP : -LAYOUT_STEP;
-    setSidebarWidth((width) => clampNumber(width + delta, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH));
+    setSidebarWidth((width) =>
+      clampNumber(width + delta, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH),
+    );
   }
 
-  function handleInspectorResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+  function handleInspectorResizeKeyDown(
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ): void {
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
       return;
     }
     event.preventDefault();
     const delta = event.key === "ArrowLeft" ? LAYOUT_STEP : -LAYOUT_STEP;
-    const resizeMax = fileWorkspaceOpen ? FILE_WORKSPACE_INSPECTOR_CAP : MAX_INSPECTOR_WIDTH;
+    const resizeMax = fileWorkspaceOpen
+      ? FILE_WORKSPACE_INSPECTOR_CAP
+      : MAX_INSPECTOR_WIDTH;
     if (fileWorkspaceOpen) {
       setFileWorkspaceInspectorWidth((width) =>
-        clampNumber((width ?? FILE_WORKSPACE_INSPECTOR_CAP) + delta, MIN_INSPECTOR_WIDTH, resizeMax),
+        clampNumber(
+          (width ?? FILE_WORKSPACE_INSPECTOR_CAP) + delta,
+          MIN_INSPECTOR_WIDTH,
+          resizeMax,
+        ),
       );
       return;
     }
-    setInspectorWidth((width) => clampNumber(width + delta, MIN_INSPECTOR_WIDTH, resizeMax));
+    setInspectorWidth((width) =>
+      clampNumber(width + delta, MIN_INSPECTOR_WIDTH, resizeMax),
+    );
   }
 
-  function openMediaPreview(items: MediaArtifactPreviewItem[], activeId: string): void {
+  function openMediaPreview(
+    items: MediaArtifactPreviewItem[],
+    activeId: string,
+  ): void {
     if (items.length === 0) return;
     setMediaPreview({ items, activeId });
     setContextUsagePanelOpen(false);
@@ -6640,7 +7424,10 @@ export function App() {
     });
   }
 
-  function refreshArtifactMediaSource(key: string, request: ArtifactOpenRequest): void {
+  function refreshArtifactMediaSource(
+    key: string,
+    request: ArtifactOpenRequest,
+  ): void {
     const retries = artifactMediaSourceRetryRef.current.get(key) ?? 0;
     if (retries >= MAX_ARTIFACT_MEDIA_SOURCE_RETRIES) {
       artifactMediaSourcesRef.current = {
@@ -6659,7 +7446,9 @@ export function App() {
     setArtifactMediaHydrationEpoch((value) => value + 1);
   }
 
-  async function openArtifactExternally(request: ArtifactOpenRequest): Promise<void> {
+  async function openArtifactExternally(
+    request: ArtifactOpenRequest,
+  ): Promise<void> {
     setOpeningArtifactId(request.artifactId);
     try {
       const result = await runtimeClient.openArtifact(request);
@@ -6723,7 +7512,16 @@ export function App() {
     const patch = patchPreviewsById.get(toolId);
     return cachedToolTraceAction(
       `tool:${id}`,
-      [tool, patch, detail, title, visualKind, status, animateEntry, copyToolDetail],
+      [
+        tool,
+        patch,
+        detail,
+        title,
+        visualKind,
+        status,
+        animateEntry,
+        copyToolDetail,
+      ],
       () => {
         const presentation = toolTracePresentation(tool, detail, {
           title,
@@ -6762,10 +7560,18 @@ export function App() {
       () => {
         const sections: ToolTraceDetailCard["sections"] = [];
         if (item.detail?.trim()) {
-          sections.push({ label: "名称、来源与版本", content: item.detail.trim(), format: "text" });
+          sections.push({
+            label: "名称、来源与版本",
+            content: item.detail.trim(),
+            format: "text",
+          });
         }
         if (item.output?.trim()) {
-          sections.push({ label: "结果", content: item.output.trim(), format: "text" });
+          sections.push({
+            label: "结果",
+            content: item.output.trim(),
+            format: "text",
+          });
         }
         return {
           id: item.id,
@@ -6791,12 +7597,26 @@ export function App() {
       [item, animateEntry, copyToolDetail],
       () => {
         const sections: ToolTraceDetailCard["sections"] = [];
-        if (item.detail?.trim()) sections.push({ label: "事件与来源", content: item.detail.trim(), format: "text" });
-        if (item.output?.trim()) sections.push({ label: "安全回执", content: item.output.trim(), format: "text" });
+        if (item.detail?.trim())
+          sections.push({
+            label: "事件与来源",
+            content: item.detail.trim(),
+            format: "text",
+          });
+        if (item.output?.trim())
+          sections.push({
+            label: "安全回执",
+            content: item.output.trim(),
+            format: "text",
+          });
         return {
-          id: item.id, title: item.title, status: item.status, kind: "terminal",
+          id: item.id,
+          title: item.title,
+          status: item.status,
+          kind: "terminal",
           detailCard: detailCardFromSections("Hook 详情", sections),
-          output: item.output, outputLabel: "Hook 回执",
+          output: item.output,
+          outputLabel: "Hook 回执",
           animateEntry,
           onCopyDetail: copyToolDetail,
         };
@@ -6853,7 +7673,8 @@ export function App() {
     animateToolEntry = true,
     disclosureScope = turnId,
   ) {
-    return projectNarrativeActivitySegments({ turnId, items }).map((segment) => {
+    return projectNarrativeActivitySegments({ turnId, items }).map(
+      (segment) => {
       const segmentDisclosureKey = `${disclosureScope}:segment:${segment.id}`;
       if (segment.kind === "item") {
         return renderNarrativeItem(
@@ -6866,7 +7687,9 @@ export function App() {
       const actions = actionsForActivityBatch(segment, animateToolEntry);
       const replayed = segment.items.every((item) =>
         item.kind === "exploring"
-          ? item.actions.every((action) => replayedNarrativeItemIds.has(action.id))
+            ? item.actions.every((action) =>
+                replayedNarrativeItemIds.has(action.id),
+              )
           : replayedNarrativeItemIds.has(item.id),
       );
       const searchOnly = segment.items.every(
@@ -6880,7 +7703,9 @@ export function App() {
           kind: action.kind || "tool",
           title: action.title,
           status: action.status,
-          fileCount: patchPreviewsById.get(toolRecordIdForNarrativeItem(action))?.affectedPaths.length,
+            fileCount: patchPreviewsById.get(
+              toolRecordIdForNarrativeItem(action),
+            )?.affectedPaths.length,
         })),
       );
       return (
@@ -6896,7 +7721,8 @@ export function App() {
           animateItems={animateToolEntry}
         />
       );
-    });
+      },
+    );
   }
 
   function renderNarrativeItem(
@@ -6913,11 +7739,7 @@ export function App() {
           animateEntry={
             animateToolEntry && !replayedNarrativeItemIds.has(item.id)
           }
-          label={
-            item.kind === "planning" && item.phase
-              ? item.text
-              : undefined
-          }
+          label={item.kind === "planning" && item.phase ? item.text : undefined}
           theme={appearanceTheme}
         />
       );
@@ -6971,7 +7793,11 @@ export function App() {
         ),
       );
       if (actions.length === 1) {
-        return renderStoredToolTraceLine(actions[0], key, `${disclosureKey}:tool`);
+        return renderStoredToolTraceLine(
+          actions[0],
+          key,
+          `${disclosureKey}:tool`,
+        );
       }
       return (
         <StoredToolTraceGroup
@@ -7021,7 +7847,10 @@ export function App() {
       const artifactsByPath = new Map(
         runtimeState.artifacts
           .filter((candidate) => Boolean(candidate.path))
-          .map((candidate) => [candidate.path!.replace(/\\/g, "/").toLowerCase(), candidate]),
+          .map((candidate) => [
+            candidate.path!.replace(/\\/g, "/").toLowerCase(),
+            candidate,
+          ]),
       );
       const resultItems =
         item.mediaItems && item.mediaItems.length > 0
@@ -7038,13 +7867,21 @@ export function App() {
           : undefined;
         const request =
           threadId && item.runId && artifactPath
-            ? mediaArtifactRequestForPath(threadId, item.runId, artifactPath, artifact)
+            ? mediaArtifactRequestForPath(
+                threadId,
+                item.runId,
+                artifactPath,
+                artifact,
+              )
             : undefined;
         const sourceKey = request ? artifactMediaSourceKey(request) : undefined;
-        const sourceState = sourceKey ? artifactMediaSources[sourceKey] : undefined;
+        const sourceState = sourceKey
+          ? artifactMediaSources[sourceKey]
+          : undefined;
         const sourceFailed = sourceState === null;
         return {
-          id: artifact?.id || request?.artifactId || `media-${resultItem.index}`,
+          id:
+            artifact?.id || request?.artifactId || `media-${resultItem.index}`,
           index: resultItem.index,
           status:
             resultItem.status === "ready" && sourceFailed
@@ -7058,9 +7895,11 @@ export function App() {
           request,
         };
       });
-      const previewItems: MediaArtifactPreviewItem[] = mediaEntries.flatMap((entry) =>
+      const previewItems: MediaArtifactPreviewItem[] = mediaEntries.flatMap(
+        (entry) =>
         entry.src && entry.request && entry.sourceKey
-          ? [{
+            ? [
+                {
               id: entry.id,
               kind: item.mediaKind,
               title: entry.title,
@@ -7068,7 +7907,8 @@ export function App() {
               formatLabel: entry.formatLabel,
               sourceKey: entry.sourceKey,
               request: entry.request,
-            }]
+                },
+              ]
           : [],
       );
       const mediaSources = mediaEntries.map((entry) => {
@@ -7079,8 +7919,7 @@ export function App() {
           id: entry.id,
           index: entry.index,
           status: entry.status,
-          detail:
-            entry.sourceUnavailable
+          detail: entry.sourceUnavailable
               ? "预览不可用"
               : entry.status === "ready"
               ? "点击预览"
@@ -7099,8 +7938,7 @@ export function App() {
             sourceKey && entry.request
               ? () => refreshArtifactMediaSource(sourceKey, entry.request!)
               : undefined,
-          onMetadata:
-            sourceKey
+          onMetadata: sourceKey
               ? (metadata: AwakenMediaMetadata) =>
                   recordArtifactMediaMetadata(sourceKey, metadata)
               : undefined,
@@ -7137,7 +7975,12 @@ export function App() {
     }
     if (item.kind === "scheduledNotice") {
       return (
-        <div key={key} className="scheduled-notice-card" role="note" aria-label="定时提醒">
+        <div
+          key={key}
+          className="scheduled-notice-card"
+          role="note"
+          aria-label="定时提醒"
+        >
           <span className="scheduled-notice-card__icon" aria-hidden="true">
             <AwakenIcon concept="scheduled-task" size={14} />
           </span>
@@ -7145,10 +7988,14 @@ export function App() {
             <span className="scheduled-notice-card__header">
               <span className="scheduled-notice-card__label">定时提醒</span>
               {item.taskName ? (
-                <span className="scheduled-notice-card__title">{item.taskName}</span>
+                <span className="scheduled-notice-card__title">
+                  {item.taskName}
+                </span>
               ) : null}
             </span>
-            <span className="scheduled-notice-card__text">{item.noticeContent}</span>
+            <span className="scheduled-notice-card__text">
+              {item.noticeContent}
+            </span>
           </span>
         </div>
       );
@@ -7160,7 +8007,9 @@ export function App() {
           title={item.title}
           detail={item.detail}
           status={item.status}
-          animateEntry={animateToolEntry && !replayedNarrativeItemIds.has(item.id)}
+          animateEntry={
+            animateToolEntry && !replayedNarrativeItemIds.has(item.id)
+          }
         />
       );
     }
@@ -7174,7 +8023,9 @@ export function App() {
           title={title}
           detail={item.sessionId}
           status={acpDisplayStatusToToolStatus(item.status)}
-          animateEntry={animateToolEntry && !replayedNarrativeItemIds.has(item.id)}
+          animateEntry={
+            animateToolEntry && !replayedNarrativeItemIds.has(item.id)
+          }
         />
       );
     }
@@ -7185,7 +8036,9 @@ export function App() {
           title={item.title}
           detail={item.detail}
           status={acpDisplayStatusToToolStatus(item.status)}
-          animateEntry={animateToolEntry && !replayedNarrativeItemIds.has(item.id)}
+          animateEntry={
+            animateToolEntry && !replayedNarrativeItemIds.has(item.id)
+          }
         />
       );
     }
@@ -7196,7 +8049,8 @@ export function App() {
           key={key}
           terminalStatus={item.terminalStatus}
           items={item.files.map((file) => {
-            const isMedia = file.fileType === "image" || file.fileType === "video";
+            const isMedia =
+              file.fileType === "image" || file.fileType === "video";
             const mediaRequest =
               threadId && isMedia
                 ? {
@@ -7232,10 +8086,10 @@ export function App() {
                   : undefined,
               onMediaError:
                 mediaRequest && mediaSourceKey
-                  ? () => refreshArtifactMediaSource(mediaSourceKey, mediaRequest)
+                  ? () =>
+                      refreshArtifactMediaSource(mediaSourceKey, mediaRequest)
                   : undefined,
-              onMediaMetadata:
-                mediaSourceKey
+              onMediaMetadata: mediaSourceKey
                   ? (metadata: AwakenMediaMetadata) =>
                       recordArtifactMediaMetadata(mediaSourceKey, metadata)
                   : undefined,
@@ -7243,22 +8097,26 @@ export function App() {
               disabled: !threadId,
               onOpen: threadId
                 ? isMedia
-                  ? () => openArtifactExternally({
+                  ? () =>
+                      openArtifactExternally({
                       threadId,
                       runId: file.runId,
                       artifactId: file.artifactId,
                     })
                   : () => handleOpenDeliverablePreview(file, threadId)
                 : undefined,
-              onOpenExternal: threadId && !isMedia
-                ? () => openArtifactExternally({
+              onOpenExternal:
+                threadId && !isMedia
+                  ? () =>
+                      openArtifactExternally({
                     threadId,
                     runId: file.runId,
                     artifactId: file.artifactId,
                   })
                 : undefined,
               onReveal: threadId
-                ? () => revealArtifact({
+                ? () =>
+                    revealArtifact({
                     threadId,
                     runId: file.runId,
                     artifactId: file.artifactId,
@@ -7357,7 +8215,9 @@ export function App() {
       .join(" ");
   }
 
-  function acpDisplayStatusToToolStatus(status: ACPDisplayStatus): ToolDisplayState {
+  function acpDisplayStatusToToolStatus(
+    status: ACPDisplayStatus,
+  ): ToolDisplayState {
     switch (status) {
       case "started":
       case "active":
@@ -7377,7 +8237,12 @@ export function App() {
   const platform = runtimeClient.platform as PlatformKind;
   const mediaRevealLabel = mediaRevealLabelForPlatform(platform);
   const activeMediaPreviewIndex = mediaPreview
-    ? Math.max(0, mediaPreview.items.findIndex((item) => item.id === mediaPreview.activeId))
+    ? Math.max(
+        0,
+        mediaPreview.items.findIndex(
+          (item) => item.id === mediaPreview.activeId,
+        ),
+      )
     : -1;
   const activeMediaPreviewRecord =
     mediaPreview && activeMediaPreviewIndex >= 0
@@ -7419,8 +8284,12 @@ export function App() {
         isPrimary: folder.isPrimary,
       }))
     : [];
-  const activeFileWorkspaceTabSlotCandidate = activeProjectFileTabSlot(fileWorkspaceTabsState);
-  const activeFileWorkspaceTabCandidate = activeProjectFileTab(fileWorkspaceTabsState);
+  const activeFileWorkspaceTabSlotCandidate = activeProjectFileTabSlot(
+    fileWorkspaceTabsState,
+  );
+  const activeFileWorkspaceTabCandidate = activeProjectFileTab(
+    fileWorkspaceTabsState,
+  );
   const activeFileWorkspaceTab =
     activeFileWorkspaceTabCandidate?.projectId === fileWorkspaceProjectId
       ? activeFileWorkspaceTabCandidate
@@ -7445,8 +8314,10 @@ export function App() {
 
   function renderExternalActionGate() {
     if (activeExternalInteraction) {
-      const resolving = resolvingExternalInteractionId === activeExternalInteraction.id;
-      const isACPPermission = activeExternalInteraction.kind === "acp-permission";
+      const resolving =
+        resolvingExternalInteractionId === activeExternalInteraction.id;
+      const isACPPermission =
+        activeExternalInteraction.kind === "acp-permission";
       return (
         <ExternalActionGate
           compact
@@ -7581,7 +8452,9 @@ export function App() {
                 ...projectsFromWorkspace,
                 {
                   id: DEFAULT_WORKSPACE_PROJECT_ID,
-                  label: projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ?? "awaken",
+                  label:
+                    projectLabelById.get(DEFAULT_WORKSPACE_PROJECT_ID) ??
+                    "awaken",
                   folders: defaultProjectFolders,
                 },
               ],
@@ -7597,17 +8470,21 @@ export function App() {
         : "移到废纸篓";
   const pendingThreadDeleteThreads = pendingThreadDelete
     ? pendingThreadDelete.threadIds.flatMap((threadId) => {
-        const thread = runtimeState.threads.find((item) => item.threadId === threadId);
+        const thread = runtimeState.threads.find(
+          (item) => item.threadId === threadId,
+        );
         return thread ? [thread] : [];
       })
     : [];
   const pendingThreadDeleteCount = pendingThreadDeleteThreads.length;
-  const threadDeleteDialogTitle = pendingThreadDelete?.source === "batch"
+  const threadDeleteDialogTitle =
+    pendingThreadDelete?.source === "batch"
     ? `删除 ${pendingThreadDeleteCount} 个对话？`
     : pendingThreadDeleteThreads[0]
       ? `删除会话“${pendingThreadDeleteThreads[0].label}”？`
       : "删除会话？";
-  const threadDeleteDialogCopy = pendingThreadDelete?.source === "batch"
+  const threadDeleteDialogCopy =
+    pendingThreadDelete?.source === "batch"
     ? "将删除所选对话记录和 Awaken 管理的附件；对话产生的文件不会被删除。此操作无法撤销。"
     : "将删除这条对话记录和 Awaken 管理的附件；对话产生的文件不会被删除。此操作无法撤销。";
 
@@ -7621,7 +8498,9 @@ export function App() {
       >
         <AppShell
           platform={platform}
-          windowChromeGeometry={platform === "macos" ? MACOS_WINDOW_CHROME_GEOMETRY : undefined}
+          windowChromeGeometry={
+            platform === "macos" ? MACOS_WINDOW_CHROME_GEOMETRY : undefined
+          }
           sidebarCollapsed={sidebarCollapsed}
           sidebarResizeHandleProps={{
             role: "separator",
@@ -7657,18 +8536,29 @@ export function App() {
             <WorkbenchChrome
               platform={platform}
               sidebarCollapsed={sidebarCollapsed}
-              onToggleSidebar={() => setSidebarCollapsed((collapsed) => !collapsed)}
+              onToggleSidebar={() =>
+                setSidebarCollapsed((collapsed) => !collapsed)
+              }
               onNewTask={handleNewTask}
               center={
-                fileWorkspaceExpandedActive && inspectorPresentation.available ? (
-                  <div className="workbench-conversation-tabs" role="tablist" aria-label="当前会话">
+                fileWorkspaceExpandedActive &&
+                inspectorPresentation.available ? (
+                  <div
+                    className="workbench-conversation-tabs"
+                    role="tablist"
+                    aria-label="当前会话"
+                  >
                     <button
                       type="button"
                       className={`workbench-conversation-tab${
-                        expandedWorkspaceSurface === "conversation" ? " is-active" : ""
+                        expandedWorkspaceSurface === "conversation"
+                          ? " is-active"
+                          : ""
                       }`}
                       role="tab"
-                      aria-selected={expandedWorkspaceSurface === "conversation"}
+                      aria-selected={
+                        expandedWorkspaceSurface === "conversation"
+                      }
                       title={currentConversationLabel}
                       onClick={handleShowConversationSurface}
                     >
@@ -7682,10 +8572,15 @@ export function App() {
                 fileWorkspaceOpen && inspectorPresentation.available ? (
                   <div className="workbench-chrome-file-mode">
                     <div className="project-files-tab-rail">
-                      <div className="project-files-tabs" role="tablist" aria-label="打开的文件">
+                      <div
+                        className="project-files-tabs"
+                        role="tablist"
+                        aria-label="打开的文件"
+                      >
                       {artifactPreviewTabsState.tabs.map((artifactTab) => {
                         const artifactSelection = artifactTab.selection;
-                        const mediaIconConcept = artifactPreviewTabMediaIconConcept(
+                          const mediaIconConcept =
+                            artifactPreviewTabMediaIconConcept(
                           artifactSelection.mediaKind,
                         );
                         const iconKind = projectFileIconKind({
@@ -7697,7 +8592,8 @@ export function App() {
                             key={artifactTab.id}
                             className={`project-files-tab${
                               deliverablePreview &&
-                              artifactTab.id === artifactPreviewTabsState.activeTabId &&
+                                artifactTab.id ===
+                                  artifactPreviewTabsState.activeTabId &&
                               fileWorkspaceTabsAreActive
                                 ? " is-active"
                                 : ""
@@ -7709,20 +8605,29 @@ export function App() {
                               className="project-files-tab__activate"
                               role="tab"
                               aria-selected={
-                                artifactTab.id === artifactPreviewTabsState.activeTabId &&
+                                  artifactTab.id ===
+                                    artifactPreviewTabsState.activeTabId &&
                                 fileWorkspaceTabsAreActive
                               }
                               title={artifactSelection.title}
-                              onClick={() => handleActivateArtifactPreviewTab(artifactTab)}
+                                onClick={() =>
+                                  handleActivateArtifactPreviewTab(artifactTab)
+                                }
                             >
                               <span
                                 className="project-files-tab__file-icon"
                                 data-file-icon={mediaIconConcept ?? iconKind}
                               >
                                 {mediaIconConcept ? (
-                                  <AwakenIcon concept={mediaIconConcept} size={16} />
+                                    <AwakenIcon
+                                      concept={mediaIconConcept}
+                                      size={16}
+                                    />
                                 ) : (
-                                  <ProjectFileIcon kind={iconKind} size={16} />
+                                    <ProjectFileIcon
+                                      kind={iconKind}
+                                      size={16}
+                                    />
                                 )}
                               </span>
                               <span className="project-files-tab__label">
@@ -7734,7 +8639,9 @@ export function App() {
                               className="project-files-tab__close"
                               aria-label={`关闭 ${artifactSelection.title}`}
                               title={`关闭 ${artifactSelection.title}`}
-                              onClick={() => handleCloseArtifactPreviewTab(artifactTab.id)}
+                                onClick={() =>
+                                  handleCloseArtifactPreviewTab(artifactTab.id)
+                                }
                             >
                               <AwakenIcon concept="close" size={16} />
                             </button>
@@ -7768,26 +8675,38 @@ export function App() {
                               role="tab"
                               aria-selected={active}
                               title={label}
-                              onClick={() => handleActivateProjectFileTab(slot)}
+                                onClick={() =>
+                                  handleActivateProjectFileTab(slot)
+                                }
                             >
                               <span
                                 className="project-files-tab__file-icon"
                                 data-file-icon={iconKind}
                               >
                                 {tab ? (
-                                  <ProjectFileIcon kind={iconKind} size={16} />
+                                    <ProjectFileIcon
+                                      kind={iconKind}
+                                      size={16}
+                                    />
                                 ) : (
-                                  <AwakenIcon concept="file-generic" size={16} />
+                                    <AwakenIcon
+                                      concept="file-generic"
+                                      size={16}
+                                    />
                                 )}
                               </span>
-                              <span className="project-files-tab__label">{label}</span>
+                                <span className="project-files-tab__label">
+                                  {label}
+                                </span>
                             </button>
                             <button
                               type="button"
                               className="project-files-tab__close"
                               aria-label={`关闭 ${label}`}
                               title={`关闭 ${label}`}
-                              onClick={() => handleCloseProjectFileTab(slot.id)}
+                                onClick={() =>
+                                  handleCloseProjectFileTab(slot.id)
+                                }
                             >
                               <AwakenIcon concept="close" size={16} />
                             </button>
@@ -7810,7 +8729,9 @@ export function App() {
                           >
                             <AwakenIcon concept="file-generic" size={16} />
                             <span className="project-files-tab__label">
-                              {fileWorkspaceMode === "browser" ? "浏览器" : "打开文件"}
+                                {fileWorkspaceMode === "browser"
+                                  ? "浏览器"
+                                  : "打开文件"}
                             </span>
                           </button>
                           <button
@@ -7874,7 +8795,11 @@ export function App() {
                       <button
                         type="button"
                         className="workbench-chrome-icon workbench-chrome-panel-toggle"
-                        aria-label={inspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
+                        aria-label={
+                          inspectorCollapsed
+                            ? "Expand inspector"
+                            : "Collapse inspector"
+                        }
                         onClick={handleToggleInspectorCollapsed}
                       >
                         {inspectorCollapsed ? (
@@ -7888,13 +8813,19 @@ export function App() {
                 ) : (
                   <div className="workbench-chrome-status">
                     {topbarStatusLabel ? (
-                      <span className="workbench-chrome-state">{topbarStatusLabel}</span>
+                      <span className="workbench-chrome-state">
+                        {topbarStatusLabel}
+                      </span>
                     ) : null}
                     {inspectorPresentation.available ? (
                       <button
                         type="button"
                         className="workbench-chrome-icon workbench-chrome-panel-toggle"
-                        aria-label={inspectorCollapsed ? "Expand inspector" : "Collapse inspector"}
+                        aria-label={
+                          inspectorCollapsed
+                            ? "Expand inspector"
+                            : "Collapse inspector"
+                        }
                         onClick={handleToggleInspectorCollapsed}
                       >
                         {inspectorCollapsed ? (
@@ -7926,7 +8857,9 @@ export function App() {
                 projectSectionActions={
                   <span className="sidebar-section-actions">
                     <SidebarSectionAction
-                      label={allProjectsExpanded ? "收起全部项目" : "展开全部项目"}
+                      label={
+                        allProjectsExpanded ? "收起全部项目" : "展开全部项目"
+                      }
                       onClick={() =>
                         setExpandedProjectIds(
                           allProjectsExpanded
@@ -7941,13 +8874,18 @@ export function App() {
                         <AwakenIcon concept="expand-all" size={16} />
                       )}
                     </SidebarSectionAction>
-                    <SidebarSectionAction label="创建项目" onClick={handleOpenCreateProject}>
+                    <SidebarSectionAction
+                      label="创建项目"
+                      onClick={handleOpenCreateProject}
+                    >
                       <AwakenIcon concept="project-add" size={16} />
                     </SidebarSectionAction>
                   </span>
                 }
                 conversationSectionLabel={
-                  conversationBatchMode ? `对话 · 已选 ${selectedConversationCount}` : "对话"
+                  conversationBatchMode
+                    ? `对话 · 已选 ${selectedConversationCount}`
+                    : "对话"
                 }
                 conversationSectionExpanded={conversationSectionExpanded}
                 conversationSectionActions={
@@ -7956,12 +8894,16 @@ export function App() {
                       <>
                         <SidebarSectionAction
                           label={
-                            allEligibleConversationsSelected ? "取消全选" : "全选可删除对话"
+                            allEligibleConversationsSelected
+                              ? "取消全选"
+                              : "全选可删除对话"
                           }
                           disabled={eligibleConversationThreadIds.length === 0}
                           onClick={() => {
                             setSelectedConversationThreadIds(
-                              allEligibleConversationsSelected ? [] : eligibleConversationThreadIds,
+                              allEligibleConversationsSelected
+                                ? []
+                                : eligibleConversationThreadIds,
                             );
                           }}
                         >
@@ -7994,8 +8936,16 @@ export function App() {
                     ) : (
                       <>
                         <SidebarSectionAction
-                          label={conversationSectionExpanded ? "收起对话" : "展开对话"}
-                          onClick={() => setConversationSectionExpanded((expanded) => !expanded)}
+                          label={
+                            conversationSectionExpanded
+                              ? "收起对话"
+                              : "展开对话"
+                          }
+                          onClick={() =>
+                            setConversationSectionExpanded(
+                              (expanded) => !expanded,
+                            )
+                          }
                         >
                           {conversationSectionExpanded ? (
                             <AwakenIcon concept="collapse-all" size={16} />
@@ -8010,7 +8960,10 @@ export function App() {
                         >
                           <AwakenIcon concept="select-mode" size={16} />
                         </SidebarSectionAction>
-                        <SidebarSectionAction label="新增对话" onClick={handleNewTask}>
+                        <SidebarSectionAction
+                          label="新增对话"
+                          onClick={handleNewTask}
+                        >
                           <AwakenIcon concept="thread-new" size={16} />
                         </SidebarSectionAction>
                       </>
@@ -8025,7 +8978,9 @@ export function App() {
                 onReorderProjects={(ids) => {
                   void handleReorderProjects(ids);
                 }}
-                projectReorderDisabled={!desktopReady || projectReorderSubmitting}
+                projectReorderDisabled={
+                  !desktopReady || projectReorderSubmitting
+                }
                 onExpandedChange={setExpandedProjectIds}
                 onNewTask={handleNewTask}
                 profileExpanded={profilePopoverOpen}
@@ -8045,13 +9000,16 @@ export function App() {
                     section={activeExtensionSection}
                     desktopReady={desktopReady}
                     runtimeClient={runtimeClient}
+                    initialPlugins={composerPluginCatalog}
                     onNotice={setNotice}
                     activeWorkspaceRoot={workspacePath}
                     composerCatalogRevision={composerCatalogRevision}
                     navigationEpoch={extensionNavigationEpoch}
                     onNavigateSection={setActiveNavId}
                     onUsePlugin={handleUsePluginFromExtensions}
-                    onUsePluginComponent={handleUsePluginComponentFromExtensions}
+                    onUsePluginComponent={
+                      handleUsePluginComponentFromExtensions
+                    }
                   />
                 </>
               ) : scheduledTasksNavActive ? (
@@ -8071,9 +9029,18 @@ export function App() {
                   }
                   stage={
                     <RunStage
-                      contentInactive={fileWorkspaceSurfaceActive || Boolean(activeMediaPreviewItem)}
-                      scrollRef={showCenterComposer ? undefined : setRunStageScrollElement}
-                      onScroll={showCenterComposer ? undefined : handleRunStageScroll}
+                      contentInactive={
+                        fileWorkspaceSurfaceActive ||
+                        Boolean(activeMediaPreviewItem)
+                      }
+                      scrollRef={
+                        showCenterComposer
+                          ? undefined
+                          : setRunStageScrollElement
+                      }
+                      onScroll={
+                        showCenterComposer ? undefined : handleRunStageScroll
+                      }
                       overlay={
                         <>
                           {renderNoticeToast()}
@@ -8095,18 +9062,26 @@ export function App() {
                                       : ""
                                   }`}
                                   aria-current={
-                                    marker.id === activeWorkbenchTurnId ? "true" : undefined
+                                    marker.id === activeWorkbenchTurnId
+                                      ? "true"
+                                      : undefined
                                   }
                                   aria-label={`跳转到第 ${marker.index + 1} 条消息`}
                                   title={`第 ${marker.index + 1} 条消息`}
-                                  onClick={() => handleTurnMarkerClick(marker.id)}
+                                  onClick={() =>
+                                    handleTurnMarkerClick(marker.id)
+                                  }
                                 >
-                                  <span className="turn-marker-bar" aria-hidden="true" />
+                                  <span
+                                    className="turn-marker-bar"
+                                    aria-hidden="true"
+                                  />
                                 </button>
                               ))}
                             </nav>
                           ) : null}
-                          {!fileWorkspaceSurfaceActive && returnToLatestVisible ? (
+                          {!fileWorkspaceSurfaceActive &&
+                          returnToLatestVisible ? (
                             <div
                               className="return-to-latest-overlay"
                               style={{ bottom: returnToLatestBottomPx }}
@@ -8175,7 +9150,9 @@ export function App() {
                             >
                               <SubagentExecutionCard
                                 title={openSubagent.description}
-                                agentLabel={subagentAgentTypeLabel(openSubagent.agentType)}
+                                agentLabel={subagentAgentTypeLabel(
+                                  openSubagent.agentType,
+                                )}
                                 status={openSubagent.status}
                                 activity={openSubagent.activity}
                                 metrics={openSubagentMetrics}
@@ -8184,12 +9161,16 @@ export function App() {
                                   ["queued", "running", "cancelling"].includes(
                                     openSubagent.status,
                                   )
-                                    ? () => void handleCancelSubagent(openSubagent.taskId)
+                                    ? () =>
+                                        void handleCancelSubagent(
+                                          openSubagent.taskId,
+                                        )
                                     : undefined
                                 }
                                 cancelDisabled={
                                   openSubagent.status === "cancelling" ||
-                                  cancellingSubagentTaskId === openSubagent.taskId
+                                  cancellingSubagentTaskId ===
+                                    openSubagent.taskId
                                 }
                               >
                                 {openSubagentNarrativeItems.length > 0 ? (
@@ -8203,16 +9184,26 @@ export function App() {
                                     等待子任务执行记录…
                                   </p>
                                 )}
-                                {!openSubagentHasAnswer && openSubagent.resultPreview ? (
+                                {!openSubagentHasAnswer &&
+                                openSubagent.resultPreview ? (
                                   <AssistantMessage
                                     markdown={openSubagent.resultPreview}
-                                    status={openSubagent.status === "failed" ? "error" : "done"}
+                                    status={
+                                      openSubagent.status === "failed"
+                                        ? "error"
+                                        : "done"
+                                    }
                                     showFooter={false}
                                   />
                                 ) : null}
                                 {openSubagent.errorMessage ? (
-                                  <div className="subagent-execution-error" role="alert">
-                                    <strong>{openSubagent.errorCode || "子任务失败"}</strong>
+                                  <div
+                                    className="subagent-execution-error"
+                                    role="alert"
+                                  >
+                                    <strong>
+                                      {openSubagent.errorCode || "子任务失败"}
+                                    </strong>
                                     <p>{openSubagent.errorMessage}</p>
                                   </div>
                                 ) : null}
@@ -8224,9 +9215,12 @@ export function App() {
                               item={activeMediaPreviewItem}
                               position={activeMediaPreviewIndex}
                               count={mediaPreview.items.length}
-                              sourceUnavailable={activeMediaPreviewSourceState === null}
+                              sourceUnavailable={
+                                activeMediaPreviewSourceState === null
+                              }
                               openingExternal={
-                                openingArtifactId === activeMediaPreviewItem.request.artifactId
+                                openingArtifactId ===
+                                activeMediaPreviewItem.request.artifactId
                               }
                               localOpenLabel="使用本地应用打开"
                               revealLabel={mediaRevealLabel}
@@ -8235,13 +9229,17 @@ export function App() {
                                 mediaPreview.items.length > 1
                                   ? () => {
                                       const previousIndex =
-                                        (activeMediaPreviewIndex - 1 + mediaPreview.items.length) %
+                                        (activeMediaPreviewIndex -
+                                          1 +
+                                          mediaPreview.items.length) %
                                         mediaPreview.items.length;
                                       setMediaPreview((current) =>
                                         current
                                           ? {
                                               ...current,
-                                              activeId: current.items[previousIndex]?.id ?? current.activeId,
+                                              activeId:
+                                                current.items[previousIndex]
+                                                  ?.id ?? current.activeId,
                                             }
                                           : current,
                                       );
@@ -8252,12 +9250,15 @@ export function App() {
                                 mediaPreview.items.length > 1
                                   ? () => {
                                       const nextIndex =
-                                        (activeMediaPreviewIndex + 1) % mediaPreview.items.length;
+                                        (activeMediaPreviewIndex + 1) %
+                                        mediaPreview.items.length;
                                       setMediaPreview((current) =>
                                         current
                                           ? {
                                               ...current,
-                                              activeId: current.items[nextIndex]?.id ?? current.activeId,
+                                              activeId:
+                                                current.items[nextIndex]?.id ??
+                                                current.activeId,
                                             }
                                           : current,
                                       );
@@ -8265,10 +9266,14 @@ export function App() {
                                   : undefined
                               }
                               onOpenExternal={() => {
-                                void openArtifactExternally(activeMediaPreviewItem.request);
+                                void openArtifactExternally(
+                                  activeMediaPreviewItem.request,
+                                );
                               }}
                               onReveal={() => {
-                                void revealArtifact(activeMediaPreviewItem.request);
+                                void revealArtifact(
+                                  activeMediaPreviewItem.request,
+                                );
                               }}
                               onMediaError={() =>
                                 refreshArtifactMediaSource(
@@ -8290,7 +9295,9 @@ export function App() {
                         showCenterComposer ? undefined : (
                           <ComposerDock
                             ref={setComposerDockElement}
-                            interactionInactive={Boolean(activeMediaPreviewItem)}
+                            interactionInactive={Boolean(
+                              activeMediaPreviewItem,
+                            )}
                           >
                             <div className="composer-dock-stack">
                               {renderComposerRuntimePanels()}
@@ -8327,9 +9334,13 @@ export function App() {
                                 idleMode={expandedFileComposerIdleMode}
                                 running={isBusy}
                                 completed={expandedFileComposerCompleted}
-                                completedElapsedMs={expandedFileComposerElapsedMs}
+                                completedElapsedMs={
+                                  expandedFileComposerElapsedMs
+                                }
                                 forceFull={expandedFileComposerForceFull}
-                                onShowCompact={() => setExpandedFileComposerIdleMode("compact")}
+                                onShowCompact={() =>
+                                  setExpandedFileComposerIdleMode("compact")
+                                }
                                 onShowFull={handleShowExpandedFileComposerFull}
                                 onStop={() => {
                                   void handleComposerSubmit();
@@ -8338,7 +9349,9 @@ export function App() {
                                 <ComposerBar
                                   value={composerValue}
                                   onChange={setComposerValue}
-                                  onStructuredInputChange={handleComposerStructuredInputChange}
+                                  onStructuredInputChange={
+                                    handleComposerStructuredInputChange
+                                  }
                                   onSubmit={() => {
                                     void handleComposerSubmit();
                                   }}
@@ -8351,7 +9364,9 @@ export function App() {
                                   disabled={composerBarState.disabled}
                                   isReady={composerBarState.isReady}
                                   submitMode={composerBarState.submitMode}
-                                  submitDisabled={composerBarState.submitDisabled}
+                                  submitDisabled={
+                                    composerBarState.submitDisabled
+                                  }
                                   variant="dock"
                                   metaItems={dockComposerMetaItems}
                                   focusRequest={composerFocusRequest}
@@ -8367,7 +9382,9 @@ export function App() {
                                   slashPalette={composerBarSlashPalette}
                                   pluginPicker={composerBarPluginPicker}
                                   onInputKeyDown={handleComposerInputKeyDown}
-                                  onRemoveAttachment={handleRemoveComposerAttachment}
+                                  onRemoveAttachment={
+                                    handleRemoveComposerAttachment
+                                  }
                                   onRemoveToken={handleRemoveComposerToken}
                                   onPasteImages={(files) => {
                                     void handlePasteImages(files);
@@ -8390,7 +9407,9 @@ export function App() {
                           <ComposerBar
                             value={composerValue}
                             onChange={setComposerValue}
-                            onStructuredInputChange={handleComposerStructuredInputChange}
+                            onStructuredInputChange={
+                              handleComposerStructuredInputChange
+                            }
                             onSubmit={() => {
                               void handleComposerSubmit();
                             }}
@@ -8438,9 +9457,13 @@ export function App() {
                           {narrativeSections.turns.map((turn, index) => {
                             const turnDisclosureScope = `thread:${runtimeState.activeThreadId ?? runtimeState.threadId ?? "draft"}:turn:${turn.id}`;
                             const isLatestPrompt = turn.id === latestPromptId;
-                            const isActiveTurn = turn.id === activeWorkbenchTurnId;
-                            const settledElapsedMs = narrativeTurnElapsedMs(turn.items);
-                            const turnBodySegments = projectNarrativeTurnBodySegments({
+                            const isActiveTurn =
+                              turn.id === activeWorkbenchTurnId;
+                            const settledElapsedMs = narrativeTurnElapsedMs(
+                              turn.items,
+                            );
+                            const turnBodySegments =
+                              projectNarrativeTurnBodySegments({
                               turnId: turn.id,
                               items: turn.items,
                               // The stable disclosure store owns the live open state.
@@ -8471,7 +9494,9 @@ export function App() {
                                 key={turn.id}
                                 data-execution-turn-id={turn.id}
                                 className={`execution-turn-section${
-                                  isLatestPrompt ? " execution-turn-section-latest" : ""
+                                  isLatestPrompt
+                                    ? " execution-turn-section-latest"
+                                    : ""
                                 }${isActiveTurn ? " execution-turn-section-active" : ""}`}
                                 style={turnStyle}
                                 aria-label={`Turn ${index + 1}`}
@@ -8483,14 +9508,26 @@ export function App() {
                                         turn.prompt.text,
                                         turn.prompt.tokens,
                                       )}
-                                      tokens={promptTokenViews(turn.prompt.tokens)}
-                                      attachments={promptAttachmentViews(turn.prompt.attachments)}
-                                      expanded={promptBubbleModeByTurnId[turn.id] === "expanded"}
+                                      tokens={promptTokenViews(
+                                        turn.prompt.tokens,
+                                        composerPluginBrandByName,
+                                      )}
+                                      attachments={promptAttachmentViews(
+                                        turn.prompt.attachments,
+                                      )}
+                                      expanded={
+                                        promptBubbleModeByTurnId[turn.id] ===
+                                        "expanded"
+                                      }
                                       onExpandedChange={(expanded) => {
-                                        setPromptBubbleModeByTurnId((current) => ({
+                                        setPromptBubbleModeByTurnId(
+                                          (current) => ({
                                           ...current,
-                                          [turn.id]: expanded ? "expanded" : "collapsed",
-                                        }));
+                                            [turn.id]: expanded
+                                              ? "expanded"
+                                              : "collapsed",
+                                          }),
+                                        );
                                       }}
                                     />
                                   </div>
@@ -8564,14 +9601,18 @@ export function App() {
                           }
                         }}
                         onOpenTab={handleOpenProjectFileTab}
-                        onPreviewPrimaryClick={handleExpandedFilePreviewPrimaryClick}
+                        onPreviewPrimaryClick={
+                          handleExpandedFilePreviewPrimaryClick
+                        }
                         addTaskDisabled={isBusy}
                         onAddTaskContext={handleAddProjectEntryToTask}
                       />
                     ) : (
                       <InspectorRail
                         ariaLabel={selectedSubagentTaskId ? "子任务" : "文件"}
-                        activeId={selectedSubagentTaskId ? "subagents" : undefined}
+                        activeId={
+                          selectedSubagentTaskId ? "subagents" : undefined
+                        }
                         items={[
                           ...INSPECTOR_FILE_ITEMS,
                           ...(subagentTasks.length
@@ -8579,11 +9620,15 @@ export function App() {
                                 {
                                   id: "subagents",
                                   label: "子任务",
-                                  badge: runningSubagentCount || subagentTasks.length,
+                                  badge:
+                                    runningSubagentCount ||
+                                    subagentTasks.length,
                                   tone: runningSubagentCount
                                     ? ("warning" as const)
                                     : ("neutral" as const),
-                                  icon: <AwakenIcon concept="subagent" size={16} />,
+                                  icon: (
+                                    <AwakenIcon concept="subagent" size={16} />
+                                  ),
                                 },
                               ]
                             : []),
@@ -8603,8 +9648,12 @@ export function App() {
                             <header className="subagent-inspector__header">
                               <div>
                                 <span className="subagent-inspector__eyebrow">
-                                  {subagentAgentTypeLabel(selectedSubagent.agentType)}
-                                  {subagentWorkspaceModeLabel(selectedSubagent.workspaceMode)
+                                  {subagentAgentTypeLabel(
+                                    selectedSubagent.agentType,
+                                  )}
+                                  {subagentWorkspaceModeLabel(
+                                    selectedSubagent.workspaceMode,
+                                  )
                                     ? ` · ${subagentWorkspaceModeLabel(selectedSubagent.workspaceMode)}`
                                     : ""}
                                 </span>
@@ -8613,12 +9662,22 @@ export function App() {
                               <span
                                 className={`subagent-inspector__status subagent-inspector__status--${selectedSubagent.status}`}
                               >
-                                {awakenSubagentStatusLabels[selectedSubagent.status]}
+                                {
+                                  awakenSubagentStatusLabels[
+                                    selectedSubagent.status
+                                  ]
+                                }
                               </span>
                             </header>
-                            <div className="subagent-inspector__metrics" aria-label="子任务统计">
-                              <span>{selectedSubagent.toolUseCount} 次工具</span>
-                              {(selectedSubagent.totalTokens ?? selectedSubagent.estimatedTokens) ? (
+                            <div
+                              className="subagent-inspector__metrics"
+                              aria-label="子任务统计"
+                            >
+                              <span>
+                                {selectedSubagent.toolUseCount} 次工具
+                              </span>
+                              {(selectedSubagent.totalTokens ??
+                              selectedSubagent.estimatedTokens) ? (
                                 <span>
                                   {new Intl.NumberFormat("zh-CN").format(
                                     selectedSubagent.totalTokens ??
@@ -8629,11 +9688,17 @@ export function App() {
                                 </span>
                               ) : null}
                               {formatSubagentElapsed(
-                                subagentElapsedMs(selectedSubagent, subagentNowMs),
+                                subagentElapsedMs(
+                                  selectedSubagent,
+                                  subagentNowMs,
+                                ),
                               ) ? (
                                 <span>
                                   {formatSubagentElapsed(
-                                    subagentElapsedMs(selectedSubagent, subagentNowMs),
+                                    subagentElapsedMs(
+                                      selectedSubagent,
+                                      subagentNowMs,
+                                    ),
                                   )}
                                 </span>
                               ) : null}
@@ -8648,7 +9713,9 @@ export function App() {
                                       ? "is-active"
                                       : undefined
                                   }
-                                  onClick={() => setSelectedSubagentTaskId(task.taskId)}
+                                  onClick={() =>
+                                    setSelectedSubagentTaskId(task.taskId)
+                                  }
                                 >
                                   {task.description}
                                 </button>
@@ -8658,7 +9725,9 @@ export function App() {
                               <h4>最近活动</h4>
                               <p>
                                 {selectedSubagent.activity ||
-                                  awakenSubagentStatusLabels[selectedSubagent.status]}
+                                  awakenSubagentStatusLabels[
+                                    selectedSubagent.status
+                                  ]}
                               </p>
                             </section>
                             {selectedSubagent.resultPreview ? (
@@ -8666,7 +9735,11 @@ export function App() {
                                 <h4>结果</h4>
                                 <AssistantMessage
                                   markdown={selectedSubagent.resultPreview}
-                                  status={selectedSubagent.status === "failed" ? "error" : "done"}
+                                  status={
+                                    selectedSubagent.status === "failed"
+                                      ? "error"
+                                      : "done"
+                                  }
                                   showFooter={false}
                                 />
                               </section>
@@ -8680,14 +9753,24 @@ export function App() {
                                 ) : null}
                               </section>
                             ) : null}
-                            {["queued", "running"].includes(selectedSubagent.status) ? (
+                            {["queued", "running"].includes(
+                              selectedSubagent.status,
+                            ) ? (
                               <Button
                                 variant="default"
                                 size="sm"
-                                disabled={cancellingSubagentTaskId === selectedSubagent.taskId}
-                                onClick={() => void handleCancelSubagent(selectedSubagent.taskId)}
+                                disabled={
+                                  cancellingSubagentTaskId ===
+                                  selectedSubagent.taskId
+                                }
+                                onClick={() =>
+                                  void handleCancelSubagent(
+                                    selectedSubagent.taskId,
+                                  )
+                                }
                               >
-                                {cancellingSubagentTaskId === selectedSubagent.taskId
+                                {cancellingSubagentTaskId ===
+                                selectedSubagent.taskId
                                   ? "正在取消…"
                                   : "取消子任务"}
                               </Button>
@@ -8829,9 +9912,13 @@ export function App() {
             />
           </label>
           <ProjectFoldersEditor
-            folders={editingProjectId ? projectFolderRows(editingProjectId) : []}
+            folders={
+              editingProjectId ? projectFolderRows(editingProjectId) : []
+            }
             addDisabled={
-              pickingWorkspace || Boolean(projectFolderBusyPath) || projectRenameSubmitting
+              pickingWorkspace ||
+              Boolean(projectFolderBusyPath) ||
+              projectRenameSubmitting
             }
             busyPath={projectFolderBusyPath}
             emptyHint="这个项目还没有文件夹。"
@@ -9041,8 +10128,8 @@ export function App() {
       >
         <div className="desktop-update-dialog-body">
           <p>
-            当前版本 v{desktopUpdateSnapshot?.currentVersion ?? "--"}，将更新到 v
-            {desktopUpdateSnapshot?.availableVersion ?? "--"}。
+            当前版本 v{desktopUpdateSnapshot?.currentVersion ?? "--"}，将更新到
+            v{desktopUpdateSnapshot?.availableVersion ?? "--"}。
           </p>
           {desktopUpdateSnapshot?.releaseName ? (
             <p>{desktopUpdateSnapshot.releaseName}</p>

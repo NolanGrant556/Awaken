@@ -329,6 +329,69 @@ func TestPersistentCredentialStoreRoundTripsTokenSource(t *testing.T) {
 	}
 }
 
+func TestPersistentCredentialStoreShardsLargeKeychainPayloadAndRollsBack(t *testing.T) {
+	root := t.TempDir()
+	metadataPath := filepath.Join(root, "auth", "connector-accounts.json")
+	secrets := &limitedSecretBackend{
+		memorySecretBackend: memorySecretBackend{values: map[string]string{}},
+		maxBytes:            2200,
+	}
+	store := &PersistentCredentialStore{metadataPath: metadataPath, secrets: secrets}
+	first := StoredTokenSource{Token: &oauth2.Token{
+		AccessToken:  strings.Repeat("enterprise-access-token-", 220),
+		RefreshToken: strings.Repeat("enterprise-refresh-token-", 180),
+		TokenType:    "Bearer",
+	}}
+	if err := store.SaveTokenSource("enterprise-outlook", first); err != nil {
+		t.Fatalf("save large enterprise credential: %v", err)
+	}
+	loaded, err := store.LoadTokenSource("enterprise-outlook")
+	if err != nil {
+		t.Fatalf("load sharded enterprise credential: %v", err)
+	}
+	if loaded.Token == nil || loaded.Token.AccessToken != first.Token.AccessToken || loaded.Token.RefreshToken != first.Token.RefreshToken {
+		t.Fatal("sharded enterprise credential did not round-trip")
+	}
+	manifestKey := secrets.key(credentialKeyringService, loaded.CredentialRef)
+	if !strings.HasPrefix(secrets.values[manifestKey], credentialSecretManifestPrefix) {
+		t.Fatalf("large credential root is not a chunk manifest: %q", secrets.values[manifestKey])
+	}
+	if len(secrets.values) < 3 {
+		t.Fatalf("large credential was not split across Keychain entries: %d", len(secrets.values))
+	}
+	for key, value := range secrets.values {
+		if len(value) > secrets.maxBytes {
+			t.Fatalf("Keychain entry %q exceeds backend limit: %d", key, len(value))
+		}
+	}
+
+	store.writeMetadataForTest = func(credentialMetadataFile) error {
+		return errors.New("injected metadata write failure")
+	}
+	replacement := StoredTokenSource{Token: &oauth2.Token{
+		AccessToken:  strings.Repeat("replacement-access-token-", 240),
+		RefreshToken: strings.Repeat("replacement-refresh-token-", 190),
+	}}
+	if err := store.SaveTokenSource("enterprise-outlook", replacement); err == nil {
+		t.Fatal("expected metadata failure for replacement credential")
+	}
+	store.writeMetadataForTest = nil
+	rolledBack, err := store.LoadTokenSource("enterprise-outlook")
+	if err != nil {
+		t.Fatalf("load rolled-back enterprise credential: %v", err)
+	}
+	if rolledBack.Token == nil || rolledBack.Token.AccessToken != first.Token.AccessToken || rolledBack.Token.RefreshToken != first.Token.RefreshToken {
+		t.Fatal("metadata failure did not restore the previous sharded credential")
+	}
+
+	if err := store.ClearTokenSource("enterprise-outlook"); err != nil {
+		t.Fatalf("clear sharded enterprise credential: %v", err)
+	}
+	if len(secrets.values) != 0 {
+		t.Fatalf("sharded credential left Keychain entries behind: %d", len(secrets.values))
+	}
+}
+
 func TestPersistentCredentialStoreSerializesMetadataAcrossInstances(t *testing.T) {
 	root := t.TempDir()
 	metadataPath := filepath.Join(root, "auth", "connector-accounts.json")
@@ -469,6 +532,18 @@ func TestPersistentCredentialStoreRemovesNewSecretWhenMetadataWriteFails(t *test
 
 type memorySecretBackend struct {
 	values map[string]string
+}
+
+type limitedSecretBackend struct {
+	memorySecretBackend
+	maxBytes int
+}
+
+func (m *limitedSecretBackend) Set(service, user, secret string) error {
+	if len(secret) > m.maxBytes {
+		return errors.New("secret backend payload too large")
+	}
+	return m.memorySecretBackend.Set(service, user, secret)
 }
 
 func (m *memorySecretBackend) key(service, user string) string {

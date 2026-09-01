@@ -38,6 +38,9 @@ func (s *Store) commitInstalledChanges(name, expectedRecordedDigest string, befo
 		if !ok {
 			return fmt.Errorf("%w: %s", ErrNotFound, name)
 		}
+		if rec.Builtin {
+			return fmt.Errorf("%w: %s", ErrBuiltinImmutable, name)
+		}
 		if rec.Digest != expectedRecordedDigest {
 			return recordedDigestChangedError(expectedRecordedDigest, rec.Digest)
 		}

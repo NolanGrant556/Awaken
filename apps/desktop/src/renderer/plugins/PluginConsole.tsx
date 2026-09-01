@@ -33,6 +33,36 @@ type PluginConsoleProps = {
   onNotice: (message: string) => void;
 };
 
+type PluginConsoleSnapshot = {
+  digest: string;
+  components: RuntimePluginComponentState[];
+  variables: RuntimePluginVariableField[];
+  setupItems: RuntimePluginSetupItem[];
+};
+
+const pluginConsoleSnapshots = new WeakMap<RuntimeClient, Map<string, PluginConsoleSnapshot>>();
+
+function readPluginConsoleSnapshot(
+  runtimeClient: RuntimeClient,
+  plugin: RuntimePlugin,
+): PluginConsoleSnapshot | undefined {
+  const snapshot = pluginConsoleSnapshots.get(runtimeClient)?.get(plugin.name);
+  return snapshot?.digest === (plugin.digest ?? "") ? snapshot : undefined;
+}
+
+function writePluginConsoleSnapshot(
+  runtimeClient: RuntimeClient,
+  plugin: RuntimePlugin,
+  snapshot: Omit<PluginConsoleSnapshot, "digest">,
+): void {
+  let snapshots = pluginConsoleSnapshots.get(runtimeClient);
+  if (!snapshots) {
+    snapshots = new Map();
+    pluginConsoleSnapshots.set(runtimeClient, snapshots);
+  }
+  snapshots.set(plugin.name, { ...snapshot, digest: plugin.digest ?? "" });
+}
+
 function componentName(component: RuntimePluginComponent): string {
   return (
     component.displayName?.trim() ||
@@ -85,6 +115,9 @@ function toConsoleDetail(detail: RuntimePluginComponentDetail): AwakenPluginCons
   const commandSpec = properties.command as
 	| { argumentHint?: string; acceptsArguments?: boolean; argumentsRequired?: boolean }
 	| undefined;
+	const mcpSpec = properties.mcp as
+	  | { hostManaged?: boolean; connectorId?: string }
+	  | undefined;
   delete properties.connection;
   delete properties.tools;
   delete properties.toolsState;
@@ -109,13 +142,18 @@ function toConsoleDetail(detail: RuntimePluginComponentDetail): AwakenPluginCons
       ? {
           shortName: detail.state.component.mcp.shortName ?? componentName(detail.state.component),
           environment:
-            connection?.transport === "stdio" || detail.state.component.mcp.transport === "stdio"
+            connection?.transport === "stdio" ||
+            connection?.transport === "in-process" ||
+            detail.state.component.mcp.transport === "stdio" ||
+            detail.state.component.mcp.transport === "in-process"
               ? "local_process"
               : "remote_endpoint",
           connectionState: connection?.state ?? "not_loaded",
           errorReason: connection?.errorReason,
           toolsLoaded: connection?.toolsLoaded === true,
           tools,
+		  hostManaged: detail.state.component.mcp.hostManaged === true || mcpSpec?.hostManaged === true,
+		  connectorId: detail.state.component.mcp.connectorId ?? mcpSpec?.connectorId,
         }
       : undefined,
     hook: detail.state.component.hook && hookSpec
@@ -226,9 +264,18 @@ export function PluginConsole({
 }: PluginConsoleProps) {
   const loadGenerationRef = useRef(0);
   const detailGenerationRef = useRef(0);
-  const [components, setComponents] = useState<RuntimePluginComponentState[]>([]);
-  const [variables, setVariables] = useState<RuntimePluginVariableField[]>([]);
-  const [setupItems, setSetupItems] = useState<RuntimePluginSetupItem[]>(plugin.setupItems ?? []);
+  const setupPollGenerationRef = useRef(0);
+  const pollingSetupSessionsRef = useRef<Record<string, string>>({});
+  const initialSnapshot = readPluginConsoleSnapshot(runtimeClient, plugin);
+  const [components, setComponents] = useState<RuntimePluginComponentState[]>(
+    () => initialSnapshot?.components ?? [],
+  );
+  const [variables, setVariables] = useState<RuntimePluginVariableField[]>(
+    () => initialSnapshot?.variables ?? [],
+  );
+  const [setupItems, setSetupItems] = useState<RuntimePluginSetupItem[]>(
+    () => initialSnapshot?.setupItems ?? plugin.setupItems ?? [],
+  );
   const [activeSetupSessions, setActiveSetupSessions] = useState<Record<string, string>>({});
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [commandArguments, setCommandArguments] = useState("");
@@ -236,7 +283,8 @@ export function PluginConsole({
   const [sourceDraft, setSourceDraft] = useState("");
   const [selectedDetail, setSelectedDetail] = useState<RuntimePluginComponentDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [componentsLoading, setComponentsLoading] = useState(true);
+  const [componentsLoading, setComponentsLoading] = useState(() => !initialSnapshot);
+  const [optimisticEnabled, setOptimisticEnabled] = useState(plugin.enabled);
   const [activeDetailTab, setActiveDetailTab] = useState<
     "overview" | "preview" | "source" | "diagnostics"
   >("overview");
@@ -247,12 +295,37 @@ export function PluginConsole({
     tone: "info" | "success" | "error";
   } | null>(null);
 
+  useEffect(() => {
+    setOptimisticEnabled(plugin.enabled);
+  }, [plugin.enabled, plugin.name]);
+
   function reportDetailFeedback(message: string, tone: "info" | "success" = "success"): void {
     if (selectedDetail) {
       setDetailFeedback({ message, tone });
       return;
     }
     onNotice(message);
+  }
+
+  function updateSnapshot(
+    partial: Partial<Omit<PluginConsoleSnapshot, "digest">>,
+    snapshotPlugin: RuntimePlugin = plugin,
+  ): void {
+    const current = readPluginConsoleSnapshot(runtimeClient, snapshotPlugin) ?? {
+      digest: snapshotPlugin.digest ?? "",
+      components,
+      variables,
+      setupItems,
+    };
+    const next = {
+      components: partial.components ?? current.components,
+      variables: partial.variables ?? current.variables,
+      setupItems: partial.setupItems ?? current.setupItems,
+    };
+    writePluginConsoleSnapshot(runtimeClient, snapshotPlugin, next);
+    if (partial.components) setComponents(partial.components);
+    if (partial.variables) setVariables(partial.variables);
+    if (partial.setupItems) setSetupItems(partial.setupItems);
   }
 
   function loadPluginSetup() {
@@ -265,6 +338,7 @@ export function PluginConsole({
             ready: 0,
             needsConfiguration: 0,
             needsAuth: 0,
+            needsAdminApproval: 0,
             inProgress: 0,
             failed: 0,
             unsupported: 0,
@@ -274,7 +348,17 @@ export function PluginConsole({
 
   useEffect(() => {
     const generation = ++loadGenerationRef.current;
-    setComponentsLoading(true);
+    const setupPollGeneration = ++setupPollGenerationRef.current;
+    const cached = readPluginConsoleSnapshot(runtimeClient, plugin);
+    if (cached) {
+      setComponents(cached.components);
+      setVariables(cached.variables);
+      setSetupItems(cached.setupItems);
+      setComponentsLoading(false);
+      void restoreActiveSetupSessions(cached.setupItems, setupPollGeneration);
+    } else {
+      setComponentsLoading(true);
+    }
     setErrorMessage(null);
     setDetailFeedback(null);
     setSelectedDetail(null);
@@ -287,10 +371,17 @@ export function PluginConsole({
     ])
       .then(([nextComponents, configuration, setup]) => {
         if (generation !== loadGenerationRef.current) return;
-        setComponents(nextComponents ?? []);
-        setVariables(configuration.fields ?? []);
+        const snapshot = {
+          components: nextComponents ?? [],
+          variables: configuration.fields ?? [],
+          setupItems: setup.items ?? [],
+        };
+        writePluginConsoleSnapshot(runtimeClient, plugin, snapshot);
+        setComponents(snapshot.components);
+        setVariables(snapshot.variables);
         setVariableValues({});
-        setSetupItems(setup.items ?? []);
+        setSetupItems(snapshot.setupItems);
+        void restoreActiveSetupSessions(snapshot.setupItems, setupPollGeneration);
       })
       .catch((error: unknown) => {
         if (generation === loadGenerationRef.current) {
@@ -303,47 +394,119 @@ export function PluginConsole({
     return () => {
       loadGenerationRef.current += 1;
       detailGenerationRef.current += 1;
+      setupPollGenerationRef.current += 1;
+      pollingSetupSessionsRef.current = {};
     };
-  }, [plugin.name, runtimeClient]);
+  }, [plugin.name, plugin.digest, runtimeClient]);
 
-  async function refreshSetupAndRuntime(): Promise<void> {
+  async function refreshSetupAndRuntime(expectedPollGeneration?: number) {
     const [setup, nextPlugin, nextComponents] = await Promise.all([
       loadPluginSetup(),
       runtimeClient.getPlugin(plugin.name),
       runtimeClient.listPluginComponents(plugin.name),
     ]);
-    setSetupItems(setup.items ?? []);
-    setComponents(nextComponents ?? []);
+    if (
+      expectedPollGeneration !== undefined
+      && expectedPollGeneration !== setupPollGenerationRef.current
+    ) {
+      return setup;
+    }
+    updateSnapshot({ setupItems: setup.items ?? [], components: nextComponents ?? [] }, nextPlugin);
     onPluginUpdated(nextPlugin);
+    return setup;
   }
 
-  async function pollSetupSession(setupId: string, sessionId: string): Promise<void> {
-    for (let attempt = 0; attempt < 600; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 1000));
-      if (!runtimeClient.getPluginAuthSession) throw new Error("当前 Desktop 不支持插件授权会话");
-      const session = await runtimeClient.getPluginAuthSession(plugin.name, sessionId);
-      if (session.status === "authorizing" || session.status === "verifying") continue;
-      setActiveSetupSessions((current) => {
-        const next = { ...current };
-        delete next[setupId];
-        return next;
-      });
-      await refreshSetupAndRuntime();
-      if (session.status === "ready") {
-        onNotice("插件账号已连接，关联组件状态已刷新");
-      } else if (session.errorMessage) {
-        setErrorMessage(session.errorMessage);
+  async function restoreActiveSetupSessions(
+    items: RuntimePluginSetupItem[],
+    pollGeneration: number,
+  ): Promise<void> {
+    if (!runtimeClient.getActivePluginAuthSession || !plugin.digest?.trim()) return;
+    const pendingItems = items.filter(
+      (item) => item.status === "authorizing" || item.status === "verifying",
+    );
+    if (pendingItems.length === 0) return;
+    const recovered = await Promise.all(pendingItems.map(async (item) => {
+      try {
+        const session = await runtimeClient.getActivePluginAuthSession!(
+          plugin.name,
+          item.requirement.id,
+          setupMutation(item),
+        );
+        return session ? { setupId: item.requirement.id, session } : null;
+      } catch (error) {
+        if (pollGeneration === setupPollGenerationRef.current) {
+          setErrorMessage(pluginErrorMessage(error));
+        }
+        return null;
       }
-      return;
+    }));
+    if (pollGeneration !== setupPollGenerationRef.current) return;
+    const active = recovered.flatMap((entry) => (entry ? [entry] : []));
+    if (active.length === 0) return;
+    setActiveSetupSessions((current) => {
+      const next = { ...current };
+      for (const entry of active) next[entry.setupId] = entry.session.sessionId;
+      return next;
+    });
+    for (const entry of active) {
+      void pollSetupSession(entry.setupId, entry.session.sessionId, pollGeneration).catch((error) => {
+        if (pollGeneration === setupPollGenerationRef.current) {
+          setErrorMessage(pluginErrorMessage(error));
+        }
+      });
     }
   }
 
-  function setupMutation(item: RuntimePluginSetupItem) {
+  async function pollSetupSession(
+    setupId: string,
+    sessionId: string,
+    pollGeneration = setupPollGenerationRef.current,
+  ): Promise<void> {
+    if (pollingSetupSessionsRef.current[setupId] === sessionId) return;
+    pollingSetupSessionsRef.current[setupId] = sessionId;
+    try {
+      for (let attempt = 0; attempt < 600; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        if (pollGeneration !== setupPollGenerationRef.current) return;
+        if (!runtimeClient.getPluginAuthSession) throw new Error("当前 Desktop 不支持插件授权会话");
+        const session = await runtimeClient.getPluginAuthSession(plugin.name, sessionId);
+        if (pollGeneration !== setupPollGenerationRef.current) return;
+        if (session.status === "authorizing" || session.status === "verifying") continue;
+        setActiveSetupSessions((current) => {
+          if (current[setupId] !== sessionId) return current;
+          const next = { ...current };
+          delete next[setupId];
+          return next;
+        });
+        const refreshedSetup = await refreshSetupAndRuntime(pollGeneration);
+        if (pollGeneration !== setupPollGenerationRef.current) return;
+        const refreshedItem = refreshedSetup.items?.find(
+          (item) => item.requirement.id === setupId,
+        );
+        if (session.status === "ready" || refreshedItem?.status === "ready") {
+          setErrorMessage(null);
+          onNotice("插件账号已连接，关联组件状态已刷新");
+        } else if (session.status === "pending_admin_approval") {
+          onNotice("已记录等待组织管理员审批；批准后请重新连接");
+        } else if (session.errorMessage) {
+          setErrorMessage(session.errorMessage);
+        }
+        return;
+      }
+    } finally {
+      if (pollingSetupSessionsRef.current[setupId] === sessionId) {
+        delete pollingSetupSessionsRef.current[setupId];
+      }
+    }
+  }
+
+  function setupMutation(item: RuntimePluginSetupItem, force = false) {
     const pluginDigest = plugin.digest?.trim();
     if (!pluginDigest) throw new Error("插件完整性摘要不可用，请重新打开插件后再试");
     return {
       pluginDigest,
       requirementFingerprint: item.requirement.fingerprint,
+      force,
     };
   }
 
@@ -362,7 +525,21 @@ export function PluginConsole({
     setLocalBusy(true);
     setErrorMessage(null);
     try {
-      const request = setupMutation(item);
+      const request = setupMutation(item, action === "reauthorize");
+      if (action === "mark_admin_approval") {
+        const sessionId = activeSetupSessions[item.requirement.id];
+        if (!sessionId) throw new Error("当前没有可标记的插件授权会话");
+        if (!runtimeClient.markPluginAdminApprovalPending) throw new Error("当前 Desktop 不支持管理员审批状态");
+        await runtimeClient.markPluginAdminApprovalPending(plugin.name, sessionId);
+        setActiveSetupSessions((current) => {
+          const next = { ...current };
+          delete next[item.requirement.id];
+          return next;
+        });
+        await refreshSetupAndRuntime();
+        onNotice("已记录等待组织管理员审批；批准后请重新连接");
+        return;
+      }
       if (action === "cancel") {
         const sessionId = activeSetupSessions[item.requirement.id];
         if (sessionId) {
@@ -375,20 +552,20 @@ export function PluginConsole({
       if (action === "disconnect") {
         if (!runtimeClient.disconnectPluginSetup) throw new Error("当前 Desktop 不支持退出插件账号");
         const response = await runtimeClient.disconnectPluginSetup(plugin.name, item.requirement.id, request);
-        setSetupItems(response.items ?? []);
+        updateSnapshot({ setupItems: response.items ?? [] });
         await refreshSetupAndRuntime();
         return;
       }
       if (action === "probe") {
         if (!runtimeClient.probePluginSetup) throw new Error("当前 Desktop 不支持重新检测插件设置");
         const response = await runtimeClient.probePluginSetup(plugin.name, item.requirement.id, request);
-        setSetupItems(response.items ?? []);
+        updateSnapshot({ setupItems: response.items ?? [] });
         await refreshSetupAndRuntime();
         return;
       }
       if (item.requirement.kind === "cli_login" && item.requirement.providerId) {
-		if (!runtimeClient.startPluginSetup) throw new Error("当前 Desktop 不支持插件账号连接");
-		await runtimeClient.startPluginSetup(plugin.name, item.requirement.id, request);
+        if (!runtimeClient.startPluginSetup) throw new Error("当前 Desktop 不支持插件账号连接");
+        await runtimeClient.startPluginSetup(plugin.name, item.requirement.id, request);
         await runtimeClient.startCliAuth(item.requirement.providerId as CliProviderId);
         await refreshSetupAndRuntime();
         return;
@@ -397,8 +574,11 @@ export function PluginConsole({
       const session = await runtimeClient.startPluginSetup(plugin.name, item.requirement.id, request);
       if (session.sessionId) {
         setActiveSetupSessions((current) => ({ ...current, [item.requirement.id]: session.sessionId }));
-        void pollSetupSession(item.requirement.id, session.sessionId).catch((error) => {
-          setErrorMessage(pluginErrorMessage(error));
+        const pollGeneration = setupPollGenerationRef.current;
+        void pollSetupSession(item.requirement.id, session.sessionId, pollGeneration).catch((error) => {
+          if (pollGeneration === setupPollGenerationRef.current) {
+            setErrorMessage(pluginErrorMessage(error));
+          }
         });
       }
       await refreshSetupAndRuntime();
@@ -461,7 +641,7 @@ export function PluginConsole({
       );
       onPluginUpdated(response.plugin);
       const nextComponents = await runtimeClient.listPluginComponents(plugin.name);
-      setComponents(nextComponents ?? []);
+      updateSnapshot({ components: nextComponents ?? [] });
       await reloadSelectedDetail();
       reportDetailFeedback("Rule 激活方式已保存，将在新的 run 快照中生效");
     } catch (error) {
@@ -514,7 +694,7 @@ export function PluginConsole({
       );
       onPluginUpdated(result.plugin);
       const nextComponents = await runtimeClient.listPluginComponents(plugin.name);
-      setComponents(nextComponents ?? []);
+      updateSnapshot({ components: nextComponents ?? [] });
       await reloadSelectedDetail();
     } catch (error) {
       setErrorMessage(pluginErrorMessage(error));
@@ -616,7 +796,7 @@ export function PluginConsole({
       );
       onPluginUpdated(response.plugin);
       const nextComponents = await runtimeClient.listPluginComponents(plugin.name);
-      setComponents(nextComponents ?? []);
+      updateSnapshot({ components: nextComponents ?? [] }, response.plugin);
       const matchingComponent = (nextComponents ?? []).find(
         (state) => state.component.logicalId === current.state.component.logicalId,
       );
@@ -648,6 +828,8 @@ export function PluginConsole({
   }
 
   async function handlePluginEnabledChange(enabled: boolean): Promise<void> {
+    const previousEnabled = optimisticEnabled;
+    setOptimisticEnabled(enabled);
     setLocalBusy(true);
     setErrorMessage(null);
     setDetailFeedback(null);
@@ -655,11 +837,13 @@ export function PluginConsole({
       const next = enabled
         ? await runtimeClient.enablePlugin(plugin.name)
         : await runtimeClient.disablePlugin(plugin.name);
+      setOptimisticEnabled(next.enabled);
       onPluginUpdated(next);
       const nextComponents = await runtimeClient.listPluginComponents(plugin.name);
-      setComponents(nextComponents ?? []);
+      updateSnapshot({ components: nextComponents ?? [] }, next);
       await reloadSelectedDetail();
     } catch (error) {
+      setOptimisticEnabled(previousEnabled);
       setErrorMessage(pluginErrorMessage(error));
     } finally {
       setLocalBusy(false);
@@ -679,14 +863,14 @@ export function PluginConsole({
         values[key] = configurationValue(field, raw);
       }
       const response = await runtimeClient.updatePluginConfiguration(plugin.name, { values, reset });
-      setVariables(response.fields ?? []);
+      updateSnapshot({ variables: response.fields ?? [] });
       setVariableValues({});
       const [nextPlugin, nextComponents] = await Promise.all([
         runtimeClient.getPlugin(plugin.name),
         runtimeClient.listPluginComponents(plugin.name),
       ]);
       onPluginUpdated(nextPlugin);
-      setComponents(nextComponents ?? []);
+      updateSnapshot({ components: nextComponents ?? [] }, nextPlugin);
       reportDetailFeedback(reset.length > 0 ? "插件变量已清除" : "插件配置已保存");
     } catch (error) {
       setErrorMessage(pluginErrorMessage(error));
@@ -699,8 +883,10 @@ export function PluginConsole({
     <AwakenPluginConsole
       name={plugin.name}
       displayName={plugin.displayName}
+      builtin={plugin.builtin}
+      brandIcon={plugin.brandIcon}
       version={plugin.version}
-      enabled={plugin.enabled}
+      enabled={optimisticEnabled}
       components={components.map(toConsoleComponent)}
       setupItems={setupItems.map((item) => ({
         id: item.requirement.id,
@@ -742,7 +928,7 @@ export function PluginConsole({
         : detailFeedback}
       onBack={onBack}
       onEnabledChange={(enabled) => void handlePluginEnabledChange(enabled)}
-      onUninstall={onUninstall}
+      onUninstall={plugin.builtin ? undefined : onUninstall}
       onComponentOpen={(component) => void handleComponentOpen(component)}
       onComponentEnabledChange={(component, enabled) =>
         void handleComponentEnabledChange(component, enabled)

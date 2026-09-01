@@ -151,10 +151,7 @@ export function latestThreadRunPlan(
 ): RunPlanView | undefined {
   let latest: RunPlanView | undefined;
   for (const candidate of Object.values(runPlansById)) {
-    if (
-      !latest ||
-      (candidate.updatedAtMs ?? 0) >= (latest.updatedAtMs ?? 0)
-    ) {
+    if (!latest || (candidate.updatedAtMs ?? 0) >= (latest.updatedAtMs ?? 0)) {
       latest = candidate;
     }
   }
@@ -278,7 +275,10 @@ export type ThreadItem = {
   runId?: string;
   activeRunId?: string;
   selectedModelProfileId?: string;
-  reasoningEffortByProfile?: Record<string, import("../../shared/runtime").ReasoningEffortLevel>;
+  reasoningEffortByProfile?: Record<
+    string,
+    import("../../shared/runtime").ReasoningEffortLevel
+  >;
   workspaceRoot?: string;
   runStatus?: RuntimeRunStatus;
   artifactCount?: number;
@@ -645,7 +645,10 @@ function restoreLiveProviderReconnect(
   }
   let next: RuntimeViewState = {
     ...state,
-    narrative: restoreLiveProviderReconnectItems(state.narrative, snapshot.items),
+    narrative: restoreLiveProviderReconnectItems(
+      state.narrative,
+      snapshot.items,
+    ),
     providerReconnectAttempts:
       snapshot.attempts.length > 0
         ? snapshot.attempts
@@ -783,12 +786,8 @@ export function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
     ...(thread.source ? { source: thread.source } : {}),
     ...(thread.titleSource ? { titleSource: thread.titleSource } : {}),
     ...(thread.titleStatus ? { titleStatus: thread.titleStatus } : {}),
-    ...(thread.titleUpdatedAt
-      ? { titleUpdatedAt: thread.titleUpdatedAt }
-      : {}),
-    ...(thread.titleSeedRunId
-      ? { titleSeedRunId: thread.titleSeedRunId }
-      : {}),
+    ...(thread.titleUpdatedAt ? { titleUpdatedAt: thread.titleUpdatedAt } : {}),
+    ...(thread.titleSeedRunId ? { titleSeedRunId: thread.titleSeedRunId } : {}),
   };
 }
 
@@ -885,10 +884,20 @@ function acceptedSubagentStatus(
   if (!previous || previous === incoming) return incoming;
   if (isTerminalSubagentStatus(previous)) return previous;
   const allowed: Record<
-    Exclude<SubagentNarrativeTask["status"], "completed" | "failed" | "cancelled" | "interrupted">,
+    Exclude<
+      SubagentNarrativeTask["status"],
+      "completed" | "failed" | "cancelled" | "interrupted"
+    >,
     SubagentNarrativeTask["status"][]
   > = {
-    queued: ["running", "cancelling", "cancelled", "interrupted", "failed", "completed"],
+    queued: [
+      "running",
+      "cancelling",
+      "cancelled",
+      "interrupted",
+      "failed",
+      "completed",
+    ],
     running: ["cancelling", "completed", "failed", "cancelled", "interrupted"],
     cancelling: ["completed", "failed", "cancelled", "interrupted"],
   };
@@ -909,7 +918,9 @@ function upsertSubagentTaskView(
   const next: SubagentTaskView = {
     taskId,
     description:
-      event.subagentDescription?.trim() || previous?.description || "未命名子任务",
+      event.subagentDescription?.trim() ||
+      previous?.description ||
+      "未命名子任务",
     agentType: event.subagentAgentType ?? previous?.agentType ?? "explore",
     status,
     activity: terminal
@@ -918,8 +929,7 @@ function upsertSubagentTaskView(
         event.toolCallName?.trim() ||
         previous?.activity,
     toolUseCount: event.subagentToolUseCount ?? previous?.toolUseCount ?? 0,
-    estimatedTokens:
-      event.subagentEstimatedTokens ?? previous?.estimatedTokens,
+    estimatedTokens: event.subagentEstimatedTokens ?? previous?.estimatedTokens,
     inputTokens: event.subagentInputTokens ?? previous?.inputTokens,
     outputTokens: event.subagentOutputTokens ?? previous?.outputTokens,
     totalTokens: event.subagentTotalTokens ?? previous?.totalTokens,
@@ -935,10 +945,8 @@ function upsertSubagentTaskView(
     parentToolCallId:
       event.subagentParentToolCallId ?? previous?.parentToolCallId,
     workspaceMode: event.subagentWorkspaceMode ?? previous?.workspaceMode,
-    modelProfileId:
-      event.subagentModelProfileId ?? previous?.modelProfileId,
-    sideEffectState:
-      event.subagentSideEffectState ?? previous?.sideEffectState,
+    modelProfileId: event.subagentModelProfileId ?? previous?.modelProfileId,
+    sideEffectState: event.subagentSideEffectState ?? previous?.sideEffectState,
     narrative: previous?.narrative ?? createInitialRunNarrativeState(),
   };
   return {
@@ -1181,10 +1189,12 @@ const deliverableExtensionTypes = new Map<string, DeliverableFileType>([
   ["mp4", "video"],
 ]);
 
-function deliverableFileType(path: string): {
+function deliverableFileType(path: string):
+  | {
   extension: string;
   fileType: DeliverableFileType;
-} | undefined {
+    }
+  | undefined {
   const filename = path.replace(/\\/g, "/").split("/").pop() ?? "";
   const dot = filename.lastIndexOf(".");
   if (dot <= 0 || dot === filename.length - 1) {
@@ -1204,7 +1214,11 @@ function appendFinalDeliverableSummary(
   const normalizedRunId = runId ?? "current";
   const byPath = new Map<
     string,
-    { artifact: ArtifactRecord; extension?: string; fileType?: DeliverableFileType }
+    {
+      artifact: ArtifactRecord;
+      extension?: string;
+      fileType?: DeliverableFileType;
+    }
   >();
   const pathOrder: string[] = [];
 
@@ -1236,18 +1250,25 @@ function appendFinalDeliverableSummary(
   for (const key of pathOrder) {
     const groupId = byPath.get(key)?.artifact.groupId;
     if (groupId && !groupPosition.has(groupId)) {
-      groupPosition.set(groupId, pathPosition.get(key) ?? Number.MAX_SAFE_INTEGER);
+      groupPosition.set(
+        groupId,
+        pathPosition.get(key) ?? Number.MAX_SAFE_INTEGER,
+      );
     }
   }
   eligiblePaths.sort((leftKey, rightKey) => {
     const left = byPath.get(leftKey)!.artifact;
     const right = byPath.get(rightKey)!.artifact;
     const leftPosition = left.groupId
-      ? groupPosition.get(left.groupId) ?? pathPosition.get(leftKey) ?? Number.MAX_SAFE_INTEGER
-      : pathPosition.get(leftKey) ?? Number.MAX_SAFE_INTEGER;
+      ? (groupPosition.get(left.groupId) ??
+        pathPosition.get(leftKey) ??
+        Number.MAX_SAFE_INTEGER)
+      : (pathPosition.get(leftKey) ?? Number.MAX_SAFE_INTEGER);
     const rightPosition = right.groupId
-      ? groupPosition.get(right.groupId) ?? pathPosition.get(rightKey) ?? Number.MAX_SAFE_INTEGER
-      : pathPosition.get(rightKey) ?? Number.MAX_SAFE_INTEGER;
+      ? (groupPosition.get(right.groupId) ??
+        pathPosition.get(rightKey) ??
+        Number.MAX_SAFE_INTEGER)
+      : (pathPosition.get(rightKey) ?? Number.MAX_SAFE_INTEGER);
     if (leftPosition !== rightPosition) {
       return leftPosition - rightPosition;
     }
@@ -1269,10 +1290,12 @@ function appendFinalDeliverableSummary(
     return {
       ...narrative,
       committedItems: withoutLegacyFileChanges.filter(
-        (candidate) => !(candidate.kind === "deliverables" && candidate.id === id),
+        (candidate) =>
+          !(candidate.kind === "deliverables" && candidate.id === id),
       ),
       activeItem:
-        narrative.activeItem?.kind === "fileChange" || narrative.activeItem?.id === id
+        narrative.activeItem?.kind === "fileChange" ||
+        narrative.activeItem?.id === id
           ? undefined
           : narrative.activeItem,
     };
@@ -1395,7 +1418,9 @@ function upsertPatchPreview(
   return updated;
 }
 
-function normalizeArtifactStatus(value?: string): AguiArtifactStatus | undefined {
+function normalizeArtifactStatus(
+  value?: string,
+): AguiArtifactStatus | undefined {
   switch (value) {
     case "ready":
     case "pending":
@@ -1423,8 +1448,7 @@ function contextWindowRecord(event: AguiEvent): ContextWindowRecord {
     warningThreshold:
       snapshot?.warningThresholdTokens ?? event.contextWarningThreshold,
     autoCompactThreshold:
-      snapshot?.autoCompactThresholdTokens ??
-      event.contextAutoCompactThreshold,
+      snapshot?.autoCompactThresholdTokens ?? event.contextAutoCompactThreshold,
     compactTarget: snapshot?.compactTargetTokens ?? event.contextCompactTarget,
     estimatedDeltaTokens: event.contextEstimatedDeltaTokens,
     snapshot,
@@ -1439,7 +1463,9 @@ function mergeModelUsages(
 ): AguiModelUsageRecord[] {
   const merged = [...(previous ?? [])];
   for (const usage of next ?? []) {
-    const index = merged.findIndex((entry) => entry.requestId === usage.requestId);
+    const index = merged.findIndex(
+      (entry) => entry.requestId === usage.requestId,
+    );
     if (index >= 0) merged[index] = usage;
     else merged.push(usage);
   }
@@ -1447,7 +1473,8 @@ function mergeModelUsages(
 }
 
 function hasContextWindowPayload(event: AguiEvent): boolean {
-  return [
+  return (
+    [
     event.contextModelWindow,
     event.contextOutputReserve,
     event.contextEffectiveWindow,
@@ -1458,7 +1485,8 @@ function hasContextWindowPayload(event: AguiEvent): boolean {
     event.contextCompactTarget,
     event.contextEstimatedDeltaTokens,
   ].some((value) => typeof value === "number" && Number.isFinite(value)) ||
-    Boolean(event.contextUsageSnapshot);
+    Boolean(event.contextUsageSnapshot)
+  );
 }
 
 function mergeContextWindowRecord(
@@ -1817,7 +1845,7 @@ function upsertArtifact(
     event.artifactProducer || event.toolCallName || existing?.producerTool;
   const contractVersion = Number.isFinite(event.artifactContractVersion)
     ? Math.max(1, Number(event.artifactContractVersion))
-    : existing?.contractVersion ?? 1;
+    : (existing?.contractVersion ?? 1);
   const role =
     event.artifactRole ||
     existing?.role ||
@@ -1830,7 +1858,8 @@ function upsertArtifact(
     id,
     groupId: event.artifactGroupId || existing?.groupId,
     groupIndex:
-      Number.isInteger(event.artifactGroupIndex) && Number(event.artifactGroupIndex) > 0
+      Number.isInteger(event.artifactGroupIndex) &&
+      Number(event.artifactGroupIndex) > 0
         ? Number(event.artifactGroupIndex)
         : existing?.groupIndex,
     title: event.artifactTitle || existing?.title || "Artifact",
@@ -1861,7 +1890,8 @@ function syncFromRun(
 		...state,
 		inspectorSummary: {
 			...state.inspectorSummary,
-			instructionSnapshot: run.instructionSnapshot ?? state.inspectorSummary.instructionSnapshot,
+      instructionSnapshot:
+        run.instructionSnapshot ?? state.inspectorSummary.instructionSnapshot,
 		},
 	};
   if (run.status === "cancelling") {
@@ -2114,9 +2144,7 @@ export function reduceRuntimeState(
           runId: action.run.runId,
           status: terminalStatus,
           message:
-            terminalStatus === "cancelled"
-              ? "你停止生成了本次回答"
-              : undefined,
+            terminalStatus === "cancelled" ? "你停止生成了本次回答" : undefined,
         });
       }
       return saveActiveThreadView({
@@ -2215,7 +2243,8 @@ export function reduceRuntimeState(
         syncActiveThreadSummary({
           ...syncFromRun(initialState, action.run),
           prompt,
-          narrative: prompt || hasPromptTokens
+          narrative:
+            prompt || hasPromptTokens
             ? createRunRequestedNarrative(
                 prompt,
                 action.run.inputAttachments,
@@ -2372,7 +2401,10 @@ export function reduceRuntimeState(
           return state;
         }
         return saveActiveThreadView(
-          syncActiveThreadSummary({ ...planState, narrative: projectedNarrative }),
+          syncActiveThreadSummary({
+            ...planState,
+            narrative: projectedNarrative,
+          }),
         );
       }
       if (action.event.type === "TOOL_CALL_ARGS_DELTA") {
@@ -2605,7 +2637,9 @@ export function reduceRuntimeState(
           break;
         case "TEXT_MESSAGE_CONTENT": {
           const delta = action.event.delta ?? "";
-          if (!(action.event.recordId && nextState.assistantText.endsWith(delta))) {
+          if (!(
+            action.event.recordId && nextState.assistantText.endsWith(delta)
+          )) {
             nextState.assistantText += delta;
           }
           records = upsertStep(
@@ -2681,10 +2715,13 @@ export function reduceRuntimeState(
             const id =
               action.event.toolCallId ||
               `tool-result-${nextState.toolResults.length + 1}`;
-            const existing = nextState.toolResults.find((tool) => tool.id === id);
+            const existing = nextState.toolResults.find(
+              (tool) => tool.id === id,
+            );
             nextState.toolResults = upsertToolResult(nextState.toolResults, {
               id,
-              title: action.event.toolCallName || existing?.title || "Tool call",
+              title:
+                action.event.toolCallName || existing?.title || "Tool call",
               content: existing?.content ?? "",
               status: "active",
             });
@@ -3131,7 +3168,9 @@ export function reduceRuntimeState(
           ]
             .filter(Boolean)
             .join(":");
-          const missing = action.event.type === "AWAKEN_RUNTIME_MISSING" || action.event.type === "AWAKEN_RUNTIME_REPAIR_FAILED";
+          const missing =
+            action.event.type === "AWAKEN_RUNTIME_MISSING" ||
+            action.event.type === "AWAKEN_RUNTIME_REPAIR_FAILED";
           const ready = action.event.type === "AWAKEN_RUNTIME_READY";
           records = upsertStep(records, `runtime:${runtimeKey || "tool"}`, {
             title: ready
@@ -3159,7 +3198,8 @@ export function reduceRuntimeState(
         case "AWAKEN_SKILL_EXECUTION_CONTEXT":
         case "AWAKEN_SKILL_FAILED_TO_LOAD": {
           const skillId = action.event.skillId ?? "unknown-skill";
-          const contentLoaded = action.event.type === "AWAKEN_SKILL_CONTENT_LOADED";
+          const contentLoaded =
+            action.event.type === "AWAKEN_SKILL_CONTENT_LOADED";
           const failed = action.event.type === "AWAKEN_SKILL_FAILED_TO_LOAD";
           const active = action.event.type === "AWAKEN_SKILL_INVOKED";
           const stepId = contentLoaded
@@ -3195,13 +3235,27 @@ export function reduceRuntimeState(
         case "AWAKEN_HOOK_STARTED":
         case "AWAKEN_HOOK_COMPLETED": {
           const completed = action.event.type === "AWAKEN_HOOK_COMPLETED";
-          const failed = completed && action.event.status !== "success" && action.event.status !== "blocked";
-          records = upsertStep(records, `hook:${action.event.hookInvocationId ?? action.event.recordId ?? action.event.seq}`, {
+          const failed =
+            completed &&
+            action.event.status !== "success" &&
+            action.event.status !== "blocked";
+          records = upsertStep(
+            records,
+            `hook:${action.event.hookInvocationId ?? action.event.recordId ?? action.event.seq}`,
+            {
             title: completed ? "Hook completed" : "Hook started",
-            description: [action.event.hookId, action.event.hookEvent, action.event.hookAction, action.event.hookReasonCode].filter(Boolean).join(" | "),
+              description: [
+                action.event.hookId,
+                action.event.hookEvent,
+                action.event.hookAction,
+                action.event.hookReasonCode,
+              ]
+                .filter(Boolean)
+                .join(" | "),
             status: failed ? "error" : completed ? "done" : "active",
             tag: "hook",
-          });
+            },
+          );
           break;
         }
         case "AWAKEN_TOOL_RECOVERY_REQUIRED":
@@ -3230,7 +3284,10 @@ export function reduceRuntimeState(
           break;
         }
         case "AWAKEN_USER_QUESTION_REQUESTED": {
-          const questionId = action.event.questionId ?? action.event.toolCallId ?? "user-question";
+          const questionId =
+            action.event.questionId ??
+            action.event.toolCallId ??
+            "user-question";
           let questions: UserQuestion[] = [];
           try {
             const parsed = JSON.parse(action.event.content ?? "{}");
@@ -3257,7 +3314,10 @@ export function reduceRuntimeState(
           break;
         }
         case "AWAKEN_USER_QUESTION_RESOLVED": {
-          const questionId = action.event.questionId ?? action.event.toolCallId ?? "user-question";
+          const questionId =
+            action.event.questionId ??
+            action.event.toolCallId ??
+            "user-question";
           const cancelled = action.event.questionResolution === "cancelled";
           nextState.userQuestions = removeUserQuestion(
             nextState.userQuestions,
@@ -3283,7 +3343,9 @@ export function reduceRuntimeState(
             break;
           }
           const interactionId =
-            action.event.interactionId ?? action.event.toolCallId ?? "external-interaction";
+            action.event.interactionId ??
+            action.event.toolCallId ??
+            "external-interaction";
           nextState.externalInteractions = upsertExternalInteraction(
             nextState.externalInteractions,
             {
@@ -3294,9 +3356,11 @@ export function reduceRuntimeState(
                   : "external",
               title: action.event.interactionTitle,
               safeMessage: action.event.interactionSafeMessage,
-              verificationUrl: action.event.interactionVerificationUrl ?? action.event.authUrl,
+              verificationUrl:
+                action.event.interactionVerificationUrl ?? action.event.authUrl,
               qrImageUrl: action.event.interactionQrImageUrl,
-              provider: action.event.interactionProvider ?? action.event.authProvider,
+              provider:
+                action.event.interactionProvider ?? action.event.authProvider,
               recoveries: Array.isArray(action.event.interactionRecoveries)
                 ? action.event.interactionRecoveries
                 : ["confirm_done", "cancel"],
@@ -3308,7 +3372,9 @@ export function reduceRuntimeState(
         }
         case "AWAKEN_EXTERNAL_INTERACTION_RESOLVED": {
           const interactionId =
-            action.event.interactionId ?? action.event.toolCallId ?? "external-interaction";
+            action.event.interactionId ??
+            action.event.toolCallId ??
+            "external-interaction";
           nextState.externalInteractions = removeExternalInteraction(
             nextState.externalInteractions,
             interactionId,
@@ -3325,7 +3391,9 @@ export function reduceRuntimeState(
             break;
           }
           const interactionId =
-            action.event.interactionId ?? action.event.toolCallId ?? "acp-permission";
+            action.event.interactionId ??
+            action.event.toolCallId ??
+            "acp-permission";
           nextState.externalInteractions = upsertExternalInteraction(
             nextState.externalInteractions,
             {
@@ -3345,7 +3413,9 @@ export function reduceRuntimeState(
         }
         case "AWAKEN_ACP_PERMISSION_RESOLVED": {
           const interactionId =
-            action.event.interactionId ?? action.event.toolCallId ?? "acp-permission";
+            action.event.interactionId ??
+            action.event.toolCallId ??
+            "acp-permission";
           nextState.externalInteractions = removeExternalInteraction(
             nextState.externalInteractions,
             interactionId,
@@ -3360,8 +3430,13 @@ export function reduceRuntimeState(
           ) {
             break;
           }
-          const reviewId = action.event.computerReviewId ?? action.event.toolCallId ?? "computer-review";
-          nextState.computerReviews = upsertComputerReview(nextState.computerReviews, {
+          const reviewId =
+            action.event.computerReviewId ??
+            action.event.toolCallId ??
+            "computer-review";
+          nextState.computerReviews = upsertComputerReview(
+            nextState.computerReviews,
+            {
             id: reviewId,
             runId: action.event.runId ?? nextState.runId,
             reviewId,
@@ -3373,18 +3448,26 @@ export function reduceRuntimeState(
             sessionId: action.event.computerSessionId,
             observationId: action.event.computerObservationId,
             evidenceRefs: action.event.computerEvidenceRefs,
-          });
+            },
+          );
           records = upsertStep(records, `computer-review:${reviewId}`, {
             title: "等待计算机操作确认",
-            description: action.event.computerTargetSummary || "Agent 请求执行计算机操作",
+            description:
+              action.event.computerTargetSummary || "Agent 请求执行计算机操作",
             status: "active",
             tag: "computer-review",
           });
           break;
         }
         case "AWAKEN_COMPUTER_REVIEW_RESOLVED": {
-          const reviewId = action.event.computerReviewId ?? action.event.toolCallId ?? "computer-review";
-          nextState.computerReviews = removeComputerReview(nextState.computerReviews, reviewId);
+          const reviewId =
+            action.event.computerReviewId ??
+            action.event.toolCallId ??
+            "computer-review";
+          nextState.computerReviews = removeComputerReview(
+            nextState.computerReviews,
+            reviewId,
+          );
           records = upsertStep(records, `computer-review:${reviewId}`, {
             title: "计算机操作已确认",
             description: `${action.event.computerDecision ?? "resolved"}${action.event.computerActor ? ` by ${action.event.computerActor}` : ""}`,
@@ -3409,20 +3492,27 @@ export function reduceRuntimeState(
           const actionId = action.event.computerActionId ?? "computer-action";
           records = upsertStep(records, `computer-verification:${actionId}`, {
             title: "计算机操作结果验证",
-            description: action.event.computerVerificationStatus ?? "inconclusive",
+            description:
+              action.event.computerVerificationStatus ?? "inconclusive",
             status: "done",
             tag: "computer-verification",
           });
           break;
         }
         case "AWAKEN_COMPUTER_HANDOFF_STARTED": {
-          const handoffId = action.event.computerSessionId ?? action.event.runId ?? "computer-handoff";
-          nextState.computerHandoffs = upsertComputerHandoff(nextState.computerHandoffs, {
+          const handoffId =
+            action.event.computerSessionId ??
+            action.event.runId ??
+            "computer-handoff";
+          nextState.computerHandoffs = upsertComputerHandoff(
+            nextState.computerHandoffs,
+            {
             id: handoffId,
             runId: action.event.runId ?? nextState.runId,
             sessionId: action.event.computerSessionId,
             active: true,
-          });
+            },
+          );
           nextState.computerSession = {
             runId: action.event.runId ?? nextState.runId,
             sessionId: action.event.computerSessionId,
@@ -3437,13 +3527,19 @@ export function reduceRuntimeState(
           break;
         }
         case "AWAKEN_COMPUTER_HANDOFF_ENDED": {
-          const handoffId = action.event.computerSessionId ?? action.event.runId ?? "computer-handoff";
-          nextState.computerHandoffs = upsertComputerHandoff(nextState.computerHandoffs, {
+          const handoffId =
+            action.event.computerSessionId ??
+            action.event.runId ??
+            "computer-handoff";
+          nextState.computerHandoffs = upsertComputerHandoff(
+            nextState.computerHandoffs,
+            {
             id: handoffId,
             runId: action.event.runId ?? nextState.runId,
             sessionId: action.event.computerSessionId,
             active: false,
-          });
+            },
+          );
           nextState.computerSession = {
             runId: action.event.runId ?? nextState.runId,
             sessionId: action.event.computerSessionId,

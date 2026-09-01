@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"awaken/src/authapproval"
 	"awaken/src/connectors"
 	"awaken/src/mcpclient"
 	"awaken/src/plugins"
@@ -42,6 +43,7 @@ var (
 type StartRequest struct {
 	PluginDigest           string `json:"pluginDigest"`
 	RequirementFingerprint string `json:"requirementFingerprint"`
+	Force                  bool   `json:"force,omitempty"`
 }
 
 // StartResult is consumed only by Electron Main. UserCode is deliberately
@@ -94,8 +96,10 @@ type session struct {
 type hostConnectorAuth interface {
 	ConnectorStatus(connectorID string) (connectors.ConnectorStatus, error)
 	Start(ctx context.Context, connectorID string) (connectors.ConnectorAuthStartResult, error)
+	Reauthorize(ctx context.Context, connectorID string) (connectors.ConnectorAuthStartResult, error)
 	Session(sessionID string) (connectors.ConnectorAuthSession, error)
 	Cancel(sessionID string) (connectors.ConnectorAuthSession, error)
+	MarkAdminApprovalPending(sessionID string) (connectors.ConnectorAuthSession, error)
 	Disconnect(ctx context.Context, connectorID string) error
 }
 
@@ -127,6 +131,7 @@ type Service struct {
 	credentials           mcpclient.CredentialStore
 	httpClient            *http.Client
 	accounts              *accountIndexStore
+	approvals             *authapproval.Store
 	deviceMinimumInterval time.Duration
 
 	mu       sync.RWMutex
@@ -150,7 +155,7 @@ func NewService(pluginStore *plugins.Store, mcp *mcpclient.Manager, registry *co
 	service := &Service{
 		plugins: pluginStore, mcp: mcp, connectors: registry, credentials: credentials,
 		httpClient: newSafeHTTPClient(), sessions: make(map[string]*session),
-		accounts: newAccountIndexStore(), deviceMinimumInterval: 5 * time.Second,
+		accounts: newAccountIndexStore(), approvals: authapproval.NewStore("plugin-approvals.json"), deviceMinimumInterval: 5 * time.Second,
 	}
 	if pluginStore != nil {
 		pluginStore.SetSetupReadinessProvider(service)
@@ -169,6 +174,10 @@ func NewService(pluginStore *plugins.Store, mcp *mcpclient.Manager, registry *co
 	return service
 }
 
+func pluginApprovalKey(pluginName, setupID string) string {
+	return strings.TrimSpace(pluginName) + "\x00" + strings.TrimSpace(setupID)
+}
+
 func (s *Service) recordExistingCredential(pluginName string, requirement ir.SetupRequirement, identity string) error {
 	previous, hadPrevious, err := s.accounts.upsert(pluginName, requirement.ID, requirement.Fingerprint, identity)
 	if err != nil {
@@ -183,6 +192,9 @@ func (s *Service) recordExistingCredential(pluginName string, requirement ir.Set
 }
 
 func (s *Service) saveCredential(pluginName string, requirement ir.SetupRequirement, stored mcpclient.StoredTokenSource) error {
+	if err := s.approvals.Clear(pluginApprovalKey(pluginName, requirement.ID)); err != nil {
+		return err
+	}
 	identity := pluginCredentialIdentity(pluginName, requirement)
 	stored.CredentialRef = ""
 	if err := s.credentials.SaveTokenSource(identity, stored); err != nil {
@@ -441,6 +453,8 @@ func (s *Service) SetupStatus(pluginName string, requirement ir.SetupRequirement
 			return plugins.SetupReady, "宿主连接器账号已连接；多个插件可以安全复用该账号能力。"
 		case connectors.StatePending:
 			return plugins.SetupAuthorizing, "正在连接宿主连接器账号。"
+		case connectors.StateApprovalRequired:
+			return plugins.SetupPendingAdminApproval, "等待组织管理员批准；批准后请重新连接。"
 		case connectors.StateFailed:
 			return plugins.SetupFailed, firstSafeMessage(connectorStatus.LastError, "宿主连接器账号连接失败。")
 		case connectors.StateDisconnected:
@@ -473,8 +487,18 @@ func (s *Service) SetupStatus(pluginName string, requirement ir.SetupRequirement
 		}
 		return plugins.SetupNeedsAuth, "请完成外部网页设置后重新检测。"
 	case ir.SetupMCPOAuth:
+		if pending, err := s.approvals.Matches(pluginApprovalKey(pluginName, requirement.ID), requirement.Fingerprint); err != nil {
+			return plugins.SetupFailed, "无法读取管理员审批状态。"
+		} else if pending {
+			return plugins.SetupPendingAdminApproval, "等待组织管理员批准；批准后请重新连接。"
+		}
 		return s.mcpStatus(pluginName, requirement)
 	case ir.SetupOAuthPKCE, ir.SetupOAuthDevice:
+		if pending, err := s.approvals.Matches(pluginApprovalKey(pluginName, requirement.ID), requirement.Fingerprint); err != nil {
+			return plugins.SetupFailed, "无法读取管理员审批状态。"
+		} else if pending {
+			return plugins.SetupPendingAdminApproval, "等待组织管理员批准；批准后请重新连接。"
+		}
 		if active := s.activeSession(pluginName, requirement.ID, requirement.Fingerprint); active != nil {
 			view := active.view()
 			return statusFromString(view.Status), view.ErrorMessage
@@ -504,6 +528,8 @@ func statusFromString(value string) plugins.SetupStatus {
 		return plugins.SetupAuthorizing
 	case "verifying":
 		return plugins.SetupVerifying
+	case "pending_admin_approval":
+		return plugins.SetupPendingAdminApproval
 	case "ready":
 		return plugins.SetupReady
 	case "expired":
@@ -564,11 +590,16 @@ func (s *Service) Start(ctx context.Context, pluginName, setupID string, request
 	if err != nil {
 		return StartResult{}, errors.Join(ErrStale, err)
 	}
+	if requirement.Kind == ir.SetupMCPOAuth || requirement.Kind == ir.SetupOAuthPKCE || requirement.Kind == ir.SetupOAuthDevice {
+		if err := s.approvals.Clear(pluginApprovalKey(pluginName, requirement.ID)); err != nil {
+			return StartResult{}, fmt.Errorf("clear plugin approval state: %w", err)
+		}
+	}
 	switch requirement.Kind {
 	case ir.SetupMCPOAuth:
 		return s.startMCP(ctx, pluginName, requirement)
 	case ir.SetupHostConnector:
-		return s.startHostConnector(ctx, pluginName, requirement)
+		return s.startHostConnector(ctx, pluginName, requirement, request.Force)
 	case ir.SetupOAuthPKCE:
 		return s.startPKCE(pluginName, requirement)
 	case ir.SetupOAuthDevice:
@@ -588,11 +619,17 @@ func (s *Service) Start(ctx context.Context, pluginName, setupID string, request
 	}
 }
 
-func (s *Service) startHostConnector(ctx context.Context, pluginName string, requirement ir.SetupRequirement) (StartResult, error) {
+func (s *Service) startHostConnector(ctx context.Context, pluginName string, requirement ir.SetupRequirement, force bool) (StartResult, error) {
 	if s.hostConnectors == nil || strings.TrimSpace(requirement.ConnectorID) == "" {
 		return StartResult{}, ErrUnsupported
 	}
-	result, err := s.hostConnectors.Start(ctx, requirement.ConnectorID)
+	var result connectors.ConnectorAuthStartResult
+	var err error
+	if force {
+		result, err = s.hostConnectors.Reauthorize(ctx, requirement.ConnectorID)
+	} else {
+		result, err = s.hostConnectors.Start(ctx, requirement.ConnectorID)
+	}
 	if err != nil {
 		return StartResult{}, err
 	}
@@ -668,8 +705,22 @@ func (s *Service) watchMCPAuthSession(entry *session) {
 		s.scheduleSessionRemoval(entry)
 	}()
 	for {
+		if entry.view().Status == "pending_admin_approval" {
+			return
+		}
 		view, err := s.mcp.AuthSession(entry.mcpSession)
 		if err != nil {
+			return
+		}
+		if view.Status == "failed" && authapproval.RequiredByProvider("", view.ErrorMessage) {
+			if err := s.approvals.Mark(pluginApprovalKey(entry.pluginName, entry.setupID), entry.fingerprint); err != nil {
+				entry.finish("failed", errors.New("无法保存管理员审批状态"))
+			} else {
+				entry.finish("pending_admin_approval", errors.New("等待组织管理员批准；批准后请重新连接。"))
+			}
+			if s.plugins != nil {
+				s.plugins.RefreshSetupReadiness()
+			}
 			return
 		}
 		entry.finish(view.Status, errorFromText(view.ErrorMessage))
@@ -678,6 +729,7 @@ func (s *Service) watchMCPAuthSession(entry *session) {
 			continue
 		}
 		if view.Status == "ready" && s.plugins != nil {
+			_ = s.approvals.Clear(pluginApprovalKey(entry.pluginName, entry.setupID))
 			if plugin, err := s.plugins.Get(entry.pluginName); err == nil {
 				for _, requirement := range plugin.Setup {
 					if requirement.ID != entry.setupID || requirement.Fingerprint != entry.fingerprint {
@@ -740,12 +792,33 @@ func (s *Service) activeSession(pluginName, setupID, fingerprint string) *sessio
 	return nil
 }
 
+// ActiveSession returns the current non-terminal authorization session for a
+// setup requirement. Renderer pages use this to resume observation after
+// navigation or remount; reading it never starts or cancels authorization.
+func (s *Service) ActiveSession(pluginName, setupID, fingerprint string) (SessionView, bool, error) {
+	entry := s.activeSession(strings.TrimSpace(pluginName), strings.TrimSpace(setupID), strings.TrimSpace(fingerprint))
+	if entry == nil {
+		return SessionView{}, false, nil
+	}
+	view, err := s.Session(entry.id)
+	if err != nil {
+		return SessionView{}, false, err
+	}
+	if view.Status != "authorizing" && view.Status != "verifying" {
+		return SessionView{}, false, nil
+	}
+	return view, true, nil
+}
+
 func (s *Service) Session(sessionID string) (SessionView, error) {
 	s.mu.RLock()
 	entry := s.sessions[strings.TrimSpace(sessionID)]
 	s.mu.RUnlock()
 	if entry == nil {
 		return SessionView{}, errors.New("plugin auth session not found")
+	}
+	if entry.view().Status == "pending_admin_approval" {
+		return entry.view(), nil
 	}
 	if entry.mcpSession != "" && s.mcp != nil {
 		view, err := s.mcp.AuthSession(entry.mcpSession)
@@ -788,7 +861,54 @@ func (s *Service) Cancel(sessionID string) (SessionView, error) {
 	if entry.server != nil {
 		_ = entry.server.Close()
 	}
+	if entry.connectorSession == "" {
+		_ = s.approvals.Clear(pluginApprovalKey(entry.pluginName, entry.setupID))
+	}
 	entry.finish("cancelled", errors.New("authorization cancelled"))
+	return entry.view(), nil
+}
+
+// MarkAdminApprovalPending records the user's observation from the external
+// system browser. Providers do not consistently return approval-request pages
+// to the loopback callback, so the browser result cannot be inferred safely.
+func (s *Service) MarkAdminApprovalPending(sessionID string) (SessionView, error) {
+	s.mu.RLock()
+	entry := s.sessions[strings.TrimSpace(sessionID)]
+	s.mu.RUnlock()
+	if entry == nil {
+		return SessionView{}, errors.New("plugin auth session not found")
+	}
+	view := entry.view()
+	if view.Status != "authorizing" && view.Status != "verifying" {
+		return view, nil
+	}
+	if entry.connectorSession != "" {
+		if s.hostConnectors == nil {
+			return SessionView{}, ErrUnsupported
+		}
+		hostView, err := s.hostConnectors.MarkAdminApprovalPending(entry.connectorSession)
+		if err != nil {
+			return SessionView{}, err
+		}
+		entry.finish(hostView.Status, errorFromText(hostView.ErrorMessage))
+	} else {
+		if err := s.approvals.Mark(pluginApprovalKey(entry.pluginName, entry.setupID), entry.fingerprint); err != nil {
+			return SessionView{}, err
+		}
+		if entry.mcpSession != "" && s.mcp != nil {
+			_, _ = s.mcp.CancelAuthSession(entry.mcpSession)
+		}
+		if entry.cancel != nil {
+			entry.cancel()
+		}
+		if entry.server != nil {
+			go func() { _ = entry.server.Close() }()
+		}
+		entry.finish("pending_admin_approval", errors.New("等待组织管理员批准；批准后请重新连接。"))
+	}
+	if s.plugins != nil {
+		s.plugins.RefreshSetupReadiness()
+	}
 	return entry.view(), nil
 }
 
@@ -796,6 +916,11 @@ func (s *Service) Disconnect(pluginName, setupID, digest, fingerprint string) er
 	_, requirement, err := s.plugins.ResolveSetupRequirement(pluginName, setupID, digest, fingerprint)
 	if err != nil {
 		return errors.Join(ErrStale, err)
+	}
+	if requirement.Kind == ir.SetupMCPOAuth || requirement.Kind == ir.SetupOAuthPKCE || requirement.Kind == ir.SetupOAuthDevice {
+		if err := s.approvals.Clear(pluginApprovalKey(pluginName, setupID)); err != nil {
+			return err
+		}
 	}
 	if requirement.Kind == ir.SetupMCPOAuth {
 		serverName := s.mcpServerName(pluginName, requirement)
@@ -862,6 +987,9 @@ func (s *Service) CleanupPlugin(pluginName string) error {
 	}
 	s.mu.RUnlock()
 	var cleanupErrors []error
+	if err := s.approvals.ClearPrefix(strings.TrimSpace(pluginName) + "\x00"); err != nil {
+		cleanupErrors = append(cleanupErrors, err)
+	}
 	for _, id := range activeIDs {
 		if _, cancelErr := s.Cancel(id); cancelErr != nil {
 			cleanupErrors = append(cleanupErrors, cancelErr)
@@ -1083,6 +1211,19 @@ func (s *Service) startPKCE(pluginName string, requirement ir.SetupRequirement) 
 			return
 		}
 		if providerError := strings.TrimSpace(r.URL.Query().Get("error")); providerError != "" {
+			providerDescription := strings.TrimSpace(r.URL.Query().Get("error_description"))
+			if authapproval.RequiredByProvider(providerError, providerDescription) {
+				if err := s.approvals.Mark(pluginApprovalKey(pluginName, requirement.ID), requirement.Fingerprint); err != nil {
+					entry.finish("failed", errors.New("无法保存管理员审批状态"))
+					http.Error(w, "Administrator approval state could not be saved.", http.StatusInternalServerError)
+				} else {
+					entry.finish("pending_admin_approval", errors.New("等待组织管理员批准；批准后请重新连接。"))
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					_, _ = fmt.Fprintf(w, "<!doctype html><meta charset=utf-8><title>Awaken</title><p>%s</p>", html.EscapeString("已记录管理员审批请求。批准后请返回 Awaken 重新连接。"))
+				}
+				cancel()
+				return
+			}
 			entry.finish("failed", fmt.Errorf("OAuth provider returned %s", providerError))
 			http.Error(w, "Authorization failed. You can close this window.", http.StatusBadRequest)
 			cancel()
@@ -1136,7 +1277,7 @@ func (s *Service) startPKCE(pluginName string, requirement ir.SetupRequirement) 
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				entry.finish("expired", errors.New("authorization expired"))
-			} else if entry.view().Status != "failed" {
+			} else if current := entry.view().Status; current != "failed" && current != "pending_admin_approval" {
 				entry.finish("cancelled", errors.New("authorization cancelled"))
 			}
 		}
@@ -1229,7 +1370,7 @@ func (s *Service) pollDevice(ctx context.Context, entry *session, requirement ir
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				entry.finish("expired", errors.New("device authorization expired"))
-			} else if entry.view().Status != "failed" {
+			} else if current := entry.view().Status; current != "failed" && current != "pending_admin_approval" {
 				entry.finish("cancelled", errors.New("device authorization cancelled"))
 			}
 			return
@@ -1279,8 +1420,19 @@ func (s *Service) pollDevice(ctx context.Context, entry *session, requirement ir
 			s.activateMCPBinding(entry.pluginName, requirement)
 			return
 		}
-		var oauthErr oauthErrorResponse
+		var oauthErr struct {
+			Error            string `json:"error"`
+			ErrorDescription string `json:"error_description"`
+		}
 		_ = json.Unmarshal(body, &oauthErr)
+		if authapproval.RequiredByProvider(oauthErr.Error, oauthErr.ErrorDescription) {
+			if err := s.approvals.Mark(pluginApprovalKey(entry.pluginName, entry.setupID), entry.fingerprint); err != nil {
+				entry.finish("failed", errors.New("无法保存管理员审批状态"))
+			} else {
+				entry.finish("pending_admin_approval", errors.New("等待组织管理员批准；批准后请重新连接。"))
+			}
+			return
+		}
 		switch oauthErr.Error {
 		case "authorization_pending":
 			continue

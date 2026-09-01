@@ -15,6 +15,7 @@ import {
   type AwakenCliConnectorAction,
   type AwakenConnectorCardItem,
   type AwakenMcpConfigMode,
+  type AwakenPluginsView,
   type AwakenSkillItem,
   type AwakenSkillProject,
 } from "@awaken/design-system";
@@ -101,6 +102,7 @@ type ExtensionsViewProps = {
   section: ExtensionSection;
   desktopReady: boolean;
   runtimeClient: RuntimeClient;
+  initialPlugins?: RuntimePlugin[];
   onNotice: (message: string) => void;
   activeWorkspaceRoot?: string;
   composerCatalogRevision?: number;
@@ -203,6 +205,12 @@ export function connectorKind(connector: RuntimeConnector): ConnectorKind {
   return connector.kind;
 }
 
+export function isConnectorVisibleInCatalog(
+  connector: Pick<RuntimeConnector, "catalogPlacement">,
+): boolean {
+  return connector.catalogPlacement !== "plugin_only";
+}
+
 export function connectorOwnedMcpServerNames(
   connectors: RuntimeConnector[],
 ): Set<string> {
@@ -292,6 +300,8 @@ function stateLabel(state: string): string {
       return "连接中";
     case "needs-auth":
       return "需授权";
+    case "approval-required":
+      return "等待管理员审批";
     case "failed":
       return "失败";
     case "loaded":
@@ -354,7 +364,9 @@ function mcpConnectorCardItem(
     id: connector.id,
     variant: "catalog",
     displayName: connector.displayName,
-    description: connector.provider || connectorCategoryLabel(connector.category),
+    description: connector.state === "approval-required" && connector.lastError?.trim()
+      ? connector.lastError.trim()
+      : connector.provider || connectorCategoryLabel(connector.category),
     state: renderedState,
     stateLabel: stateLabel(renderedState),
     tags: [
@@ -362,9 +374,10 @@ function mcpConnectorCardItem(
       sourceLabel(connector.sourceOrigin),
       ...(connector.serverNames ?? []),
     ],
-    errors: connector.lastError?.trim() ? [connector.lastError.trim()] : undefined,
+    errors: connector.state !== "approval-required" && connector.lastError?.trim() ? [connector.lastError.trim()] : undefined,
     connected: connector.state === "connected",
     authorizing,
+    showAdminApprovalAction: authorizing,
     enabled: managedServer ? managedServer.state !== "disabled" : undefined,
     mcpServerName: managedServer?.name,
     busy:
@@ -732,6 +745,7 @@ export function ExtensionsView({
   section,
   desktopReady,
   runtimeClient,
+  initialPlugins = [],
   onNotice,
   activeWorkspaceRoot,
   composerCatalogRevision = 0,
@@ -800,7 +814,8 @@ export function ExtensionsView({
   const [mcpLogs, setMcpLogs] = useState<RuntimeLogEntry[]>([]);
   const [savingMcpConfig, setSavingMcpConfig] = useState(false);
   const [loadingMcpSettings, setLoadingMcpSettings] = useState(false);
-  const [plugins, setPlugins] = useState<RuntimePlugin[]>([]);
+  const [plugins, setPlugins] = useState<RuntimePlugin[]>(() => initialPlugins);
+  const [activePluginView, setActivePluginView] = useState<AwakenPluginsView>("builtin");
   const [pluginDialogOpen, setPluginDialogOpen] = useState(false);
   const [pluginLocalPath, setPluginLocalPath] = useState("");
   const [pluginValidation, setPluginValidation] =
@@ -816,6 +831,12 @@ export function ExtensionsView({
     setPluginDialogOpen(false);
     setPendingPluginUninstall(null);
   }, [navigationEpoch]);
+
+  useEffect(() => {
+    if (initialPlugins.length > 0) {
+      setPlugins(initialPlugins);
+    }
+  }, [initialPlugins]);
 
   const normalizedQuery = query.trim().toLowerCase();
   function applySkillCatalogSnapshot(snapshot: SkillCatalogSnapshot): void {
@@ -874,8 +895,8 @@ export function ExtensionsView({
           ? runtimeClient.listSkills(fallbackRoots.length > 0 ? fallbackRoots : undefined)
           : Promise.resolve([]),
         typeof runtimeClient.listPlugins === "function"
-          ? runtimeClient.listPlugins().catch(() => [])
-          : Promise.resolve([]),
+          ? runtimeClient.listPlugins()
+          : Promise.resolve(plugins),
       ]);
       if (generation !== refreshGenerationRef.current) {
         return;
@@ -1072,9 +1093,10 @@ export function ExtensionsView({
     () =>
       connectors.filter(
         (connector) =>
-          matchesQuery(connector.displayName, normalizedQuery) ||
-          matchesQuery(connector.provider, normalizedQuery) ||
-          matchesQuery(connector.id, normalizedQuery),
+          isConnectorVisibleInCatalog(connector) &&
+          (matchesQuery(connector.displayName, normalizedQuery) ||
+            matchesQuery(connector.provider, normalizedQuery) ||
+            matchesQuery(connector.id, normalizedQuery)),
       ),
     [connectors, normalizedQuery],
   );
@@ -1344,6 +1366,8 @@ export function ExtensionsView({
         });
         if (session.status === "ready") {
           onNotice(`${connector.displayName} 已连接`);
+        } else if (session.status === "pending_admin_approval") {
+          onNotice(`${connector.displayName} 正在等待组织管理员批准；批准后请重新连接`);
         } else if (session.status !== "cancelled") {
           setErrorMessage(session.errorMessage?.trim() || `${connector.displayName} 授权未完成`);
         }
@@ -1359,6 +1383,34 @@ export function ExtensionsView({
         setErrorMessage(error instanceof Error ? error.message : "连接器授权状态读取失败");
         return;
       }
+    }
+  }
+
+  async function handleConnectorAdminApprovalRequired(connector: RuntimeConnector): Promise<void> {
+    const sessionId = connectorAuthSessions[connector.id];
+    if (!sessionId) {
+      setErrorMessage("当前没有可标记的连接器授权会话");
+      return;
+    }
+    if (!runtimeClient.markConnectorAdminApprovalPending) {
+      setErrorMessage("当前 Desktop 不支持管理员审批状态");
+      return;
+    }
+    setBusyConnectorId(connector.id);
+    setErrorMessage(null);
+    try {
+      await runtimeClient.markConnectorAdminApprovalPending(sessionId);
+      setConnectorAuthSessions((current) => {
+        const next = { ...current };
+        delete next[connector.id];
+        return next;
+      });
+      onNotice(`${connector.displayName} 已记录为等待组织管理员审批`);
+      await refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "管理员审批状态保存失败");
+    } finally {
+      setBusyConnectorId(null);
     }
   }
 
@@ -2040,6 +2092,7 @@ export function ExtensionsView({
       });
       setPluginDialogOpen(false);
       invalidatePluginValidation();
+      setActivePluginView("installed");
       setSelectedPlugin(result.plugin);
       setPlugins((current) => [
         ...current.filter((item) => item.name !== result.plugin.name),
@@ -2059,6 +2112,11 @@ export function ExtensionsView({
   }
 
   async function handleTogglePlugin(plugin: RuntimePlugin, enabled: boolean): Promise<void> {
+    const optimistic = { ...plugin, enabled };
+    setPlugins((current) => current.map((item) => (item.name === plugin.name ? optimistic : item)));
+    if (selectedPlugin?.name === plugin.name) {
+      setSelectedPlugin(optimistic);
+    }
     setBusyPluginName(plugin.name);
     try {
       const next = enabled
@@ -2068,8 +2126,11 @@ export function ExtensionsView({
       if (selectedPlugin?.name === next.name) {
         setSelectedPlugin(next);
       }
-      await refresh(false);
     } catch (error) {
+      setPlugins((current) => current.map((item) => (item.name === plugin.name ? plugin : item)));
+      if (selectedPlugin?.name === plugin.name) {
+        setSelectedPlugin(plugin);
+      }
       setErrorMessage(pluginErrorMessage(error));
     } finally {
       setBusyPluginName(null);
@@ -2077,10 +2138,18 @@ export function ExtensionsView({
   }
 
   async function openPluginDetail(name: string): Promise<void> {
+    const snapshot = plugins.find((plugin) => plugin.name === name);
+    if (snapshot) {
+      setSelectedPlugin(snapshot);
+    }
     try {
       setSelectedPlugin(await runtimeClient.getPlugin(name));
     } catch (error) {
-      setErrorMessage(pluginErrorMessage(error));
+      const message = pluginErrorMessage(error);
+      setErrorMessage(message);
+      if (!snapshot) {
+        setSelectedPlugin(null);
+      }
     }
   }
 
@@ -2141,11 +2210,16 @@ export function ExtensionsView({
     return (
       <>
         <AwakenPlugins
+          activeView={activePluginView}
           searchValue={query}
           plugins={plugins.map((plugin) => ({
             name: plugin.name,
+            displayName: plugin.displayName,
             description: plugin.description,
             dialect: plugin.dialect,
+            builtin: plugin.builtin,
+            brandIcon: plugin.brandIcon,
+            builtinOrder: plugin.builtinOrder,
             enabled: plugin.enabled,
             busy: busyPluginName === plugin.name,
             diagnostic: plugin.diagnostics?.[0]?.message,
@@ -2153,6 +2227,10 @@ export function ExtensionsView({
           loading={loading}
           errorMessage={pluginDialogOpen ? null : errorMessage}
           onSearchChange={setQuery}
+          onViewChange={(view) => {
+            setActivePluginView(view);
+            setQuery("");
+          }}
           onRefresh={() => { void refresh(); }}
           onInstall={() => {
             invalidatePluginValidation();
@@ -2209,6 +2287,10 @@ export function ExtensionsView({
             }
             const connector = connectors.find((entry) => entry.id === item.id);
             if (connector) void handleConnectorAction(connector);
+          }}
+          onConnectorAdminApprovalRequired={(item) => {
+            const connector = connectors.find((entry) => entry.id === item.id);
+            if (connector) void handleConnectorAdminApprovalRequired(connector);
           }}
           onMcpServerEnabledChange={(item) => {
             const serverName = item.mcpServerName ?? item.id;

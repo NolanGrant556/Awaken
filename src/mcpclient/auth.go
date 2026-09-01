@@ -26,6 +26,7 @@ type StoredTokenSource struct {
 	ClientSecret  string        `json:"clientSecret,omitempty"`
 	Scopes        []string      `json:"scopes,omitempty"`
 	NeedsReauth   bool          `json:"needsReauth,omitempty"`
+	ReauthReason  string        `json:"reauthReason,omitempty"`
 }
 
 var ErrCredentialNotFound = errors.New("credential not found")

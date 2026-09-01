@@ -570,6 +570,11 @@ const bridge: AwakenBridge = {
       "awaken:cancel-connector-auth-session",
       sessionId,
     ) as Promise<RuntimeConnectorAuthSession>,
+  markConnectorAdminApprovalPending: (sessionId: string) =>
+    ipcRenderer.invoke(
+      "awaken:mark-connector-admin-approval",
+      sessionId,
+    ) as Promise<RuntimeConnectorAuthSession>,
   listCliConnectors: () =>
     ipcRenderer.invoke("awaken:list-cli-connectors") as Promise<CliConnectorView[]>,
   refreshCliConnector: (providerId: CliProviderId) =>
@@ -755,10 +760,22 @@ const bridge: AwakenBridge = {
     request: RuntimePluginSetupMutationRequest,
   ) =>
     ipcRenderer.invoke("awaken:start-plugin-setup", name, setupId, request) as Promise<RuntimePluginAuthSession>,
+  getActivePluginAuthSession: (
+    name: string,
+    setupId: string,
+    request: RuntimePluginSetupMutationRequest,
+  ) => ipcRenderer.invoke(
+    "awaken:get-active-plugin-auth-session",
+    name,
+    setupId,
+    request,
+  ) as Promise<RuntimePluginAuthSession | null>,
   getPluginAuthSession: (name: string, sessionId: string) =>
     ipcRenderer.invoke("awaken:get-plugin-auth-session", name, sessionId) as Promise<RuntimePluginAuthSession>,
   cancelPluginAuthSession: (name: string, sessionId: string) =>
     ipcRenderer.invoke("awaken:cancel-plugin-auth-session", name, sessionId) as Promise<RuntimePluginAuthSession>,
+  markPluginAdminApprovalPending: (name: string, sessionId: string) =>
+    ipcRenderer.invoke("awaken:mark-plugin-admin-approval", name, sessionId) as Promise<RuntimePluginAuthSession>,
   probePluginSetup: (
     name: string,
     setupId: string,

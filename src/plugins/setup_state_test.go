@@ -15,6 +15,36 @@ func (f setupReadinessFixture) SetupStatus(_ string, requirement ir.SetupRequire
 	return SetupReady, ""
 }
 
+type countingSetupReadiness struct {
+	status SetupStatus
+	calls  int
+}
+
+func (f *countingSetupReadiness) SetupStatus(_ string, _ ir.SetupRequirement) (SetupStatus, string) {
+	f.calls++
+	return f.status, ""
+}
+
+func TestComponentStatesResolveEachSetupRequirementOnce(t *testing.T) {
+	provider := &countingSetupReadiness{status: SetupReady}
+	store := &Store{setupReadiness: provider}
+	requirement := ir.SetupRequirement{
+		ID: "shared-account", Kind: ir.SetupHostConnector, Required: true,
+		ComponentIDs: []string{"skill/one", "skill/two"},
+	}
+	components := []ir.Component{
+		{LogicalID: "skill/one", Kind: ir.KindSkill, Mapping: ir.MappingNative, Validation: "valid"},
+		{LogicalID: "skill/two", Kind: ir.KindSkill, Mapping: ir.MappingNative, Validation: "valid"},
+	}
+	states, _, _, _ := store.componentStates("fixture", components, []ir.SetupRequirement{requirement}, Record{Enabled: true})
+	if len(states) != 2 || !states[0].Switchable || !states[1].Switchable {
+		t.Fatalf("states=%+v", states)
+	}
+	if provider.calls != 1 {
+		t.Fatalf("setup readiness calls=%d, want 1", provider.calls)
+	}
+}
+
 func TestSetupDependenciesFailClosedWithoutBlockingIndependentComponents(t *testing.T) {
 	mcp := ir.Component{LogicalID: "mcp_server/mail", Kind: ir.KindMCPServer, Mapping: ir.MappingAdapted, Validation: "valid", MCP: &ir.MCPSpec{ShortName: "mail", Transport: "streamable-http"}}
 	hook := ir.Component{LogicalID: "hook/notify", Kind: ir.KindHook, Mapping: ir.MappingAdapted, Validation: "valid", Hook: &ir.HookSpec{HandlerType: "http"}}
@@ -54,5 +84,41 @@ func TestAppSetupAlwaysRemainsRecognizedUnsupported(t *testing.T) {
 	}
 	if authentication != "unsupported" || compatibility != "partial" {
 		t.Fatalf("unexpected aggregate states: auth=%s compatibility=%s", authentication, compatibility)
+	}
+}
+
+func TestPendingAdminApprovalIsDistinctAndRetryable(t *testing.T) {
+	requirement := ir.SetupRequirement{ID: "account", Kind: ir.SetupOAuthPKCE, Required: true}
+	items := []SetupItem{{Requirement: requirement, Status: SetupPendingAdminApproval, Actions: setupActions(SetupPendingAdminApproval, requirement.Kind)}}
+	summary := SummarizeSetup(items)
+	if summary.NeedsAdminApproval != 1 || summary.InProgress != 0 || summary.NeedsAuth != 0 {
+		t.Fatalf("summary=%+v", summary)
+	}
+	if len(items[0].Actions) != 1 || items[0].Actions[0] != SetupActionRetry {
+		t.Fatalf("actions=%v", items[0].Actions)
+	}
+	component := ir.Component{LogicalID: "mcp", Kind: ir.KindMCPServer, Validation: "valid", Mapping: ir.MappingNative}
+	requirement.ComponentIDs = []string{component.LogicalID}
+	store := &Store{setupReadiness: setupReadinessFixture{"account": SetupPendingAdminApproval}}
+	states, _, authentication, _ := store.componentStates("mail", []ir.Component{component}, []ir.SetupRequirement{requirement}, Record{Enabled: true})
+	if authentication != string(SetupPendingAdminApproval) || states[0].Switchable {
+		t.Fatalf("authentication=%s state=%+v", authentication, states[0])
+	}
+}
+
+func TestHostConnectorMCPIsInspectableButNotIndependentlySwitchable(t *testing.T) {
+	component := ir.Component{
+		LogicalID: "mcp_server/.awaken/setup.json#host_connector:outlook", Kind: ir.KindMCPServer,
+		Mapping: ir.MappingAdapted, Validation: "valid",
+		MCP: &ir.MCPSpec{ShortName: "awaken-outlook", HostConnectorID: "awaken.microsoft.outlook", Transport: "in-process"},
+	}
+	requirement := ir.SetupRequirement{
+		ID: "outlook", Kind: ir.SetupHostConnector, Required: true,
+		ConnectorID: "awaken.microsoft.outlook", ComponentIDs: []string{component.LogicalID},
+	}
+	store := &Store{setupReadiness: setupReadinessFixture{"outlook": SetupReady}}
+	states, _, _, _ := store.componentStates("outlook", []ir.Component{component}, []ir.SetupRequirement{requirement}, Record{Enabled: true})
+	if len(states) != 1 || states[0].Authentication != "ready" || states[0].Switchable {
+		t.Fatalf("host connector MCP state = %+v", states)
 	}
 }

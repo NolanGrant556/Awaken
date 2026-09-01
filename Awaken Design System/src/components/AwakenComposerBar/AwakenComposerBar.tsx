@@ -128,6 +128,7 @@ export type ComposerBarToken = {
   title?: string;
   leadingText?: string;
   placement?: "before" | "after";
+  brandIcon?: string;
 };
 
 export type ComposerBarStructuredInputValue = ComposerInlineStructuredValue;
@@ -162,6 +163,8 @@ export type ComposerBarSlashPalette = {
 export type ComposerBarPluginOption = {
   id: string;
   label: string;
+  sectionLabel?: string;
+  icon?: ReactNode;
   selected?: boolean;
   disabled?: boolean;
   disabledReason?: string;
@@ -192,6 +195,26 @@ type ComposerBarSlashActionSection = {
   label?: string;
   actions: ComposerBarSlashAction[];
 };
+
+export type ComposerBarPluginOptionSection = {
+  label?: string;
+  options: ComposerBarPluginOption[];
+};
+
+export function pluginOptionSections(
+  options: ComposerBarPluginOption[],
+): ComposerBarPluginOptionSection[] {
+  return options.reduce<ComposerBarPluginOptionSection[]>((sections, option) => {
+    const label = option.sectionLabel?.trim() || undefined;
+    const current = sections[sections.length - 1];
+    if (current && current.label === label) {
+      current.options.push(option);
+      return sections;
+    }
+    sections.push({ label, options: [option] });
+    return sections;
+  }, []);
+}
 
 function slashActionSections(
   actions: ComposerBarSlashAction[],
@@ -1248,6 +1271,7 @@ export function AwakenComposerBar({
     }
     const triggerLabel = pluginPicker.label ?? "插件";
     const previewOptions = pluginOptions.slice(0, 3);
+    const optionSections = pluginOptionSections(pluginOptions);
 
     return (
       <AwakenDropdown
@@ -1276,7 +1300,7 @@ export function AwakenComposerBar({
                     className="composer-bar-plugin-badge"
                     title={option.label}
                   >
-                    <AwakenIcon concept="plugin-default" size={12} />
+                    {option.icon ?? <AwakenIcon concept="plugin-default" size={12} />}
                   </span>
                 ))}
               </span>
@@ -1306,31 +1330,45 @@ export function AwakenComposerBar({
                 {pluginPicker.emptyLabel ?? "还没有安装插件"}
               </div>
             ) : (
-              pluginOptions.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  className={`composer-bar-plugin-option${
-                    option.selected ? " composer-bar-plugin-option-selected" : ""
-                  }`}
-                  role="option"
-                  aria-selected={option.selected ?? false}
-                  aria-disabled={option.disabled || undefined}
-                  disabled={option.disabled}
-                  title={option.disabledReason}
-                  onClick={() => {
-                    setPluginPickerOpen(false);
-                    pluginPicker.onSelectOption?.(option.id);
-                  }}
+              optionSections.map((section, sectionIndex) => (
+                <div
+                  key={`${section.label ?? "plugins"}:${sectionIndex}`}
+                  className="composer-bar-plugin-section"
+                  role="group"
+                  aria-label={section.label}
                 >
-                  <span className="composer-bar-plugin-option-badge" aria-hidden="true">
-                    <AwakenIcon concept="plugin-default" size={12} />
-                  </span>
-                  <span className="composer-bar-plugin-option-label">{option.label}</span>
-                  {option.selected ? (
-                    <AwakenIcon concept="step-done" size={12} />
+                  {section.label ? (
+                    <div className="composer-bar-plugin-section-label" aria-hidden="true">
+                      {section.label}
+                    </div>
                   ) : null}
-                </button>
+                  {section.options.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`composer-bar-plugin-option${
+                        option.selected ? " composer-bar-plugin-option-selected" : ""
+                      }`}
+                      role="option"
+                      aria-selected={option.selected ?? false}
+                      aria-disabled={option.disabled || undefined}
+                      disabled={option.disabled}
+                      title={option.disabledReason}
+                      onClick={() => {
+                        setPluginPickerOpen(false);
+                        pluginPicker.onSelectOption?.(option.id);
+                      }}
+                    >
+                      <span className="composer-bar-plugin-option-badge" aria-hidden="true">
+                        {option.icon ?? <AwakenIcon concept="plugin-default" size={12} />}
+                      </span>
+                      <span className="composer-bar-plugin-option-label">{option.label}</span>
+                      {option.selected ? (
+                        <AwakenIcon concept="step-done" size={12} />
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
               ))
             )}
           </div>

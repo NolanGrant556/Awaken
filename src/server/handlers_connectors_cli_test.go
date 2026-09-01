@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,43 @@ import (
 	"awaken/src/connectors"
 	"awaken/src/mcpclient"
 )
+
+func TestConnectorAdminApprovalRouteProjectsPersistentState(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	registry := connectors.NewRegistry(cliConnectorTestRuntime{}, nil)
+	if err := registry.LoadSources(context.Background(), []connectors.ConnectorSource{connectors.NewBuiltinSource(connectors.BuiltinOptions{MicrosoftClientID: "public-client"})}); err != nil {
+		t.Fatal(err)
+	}
+	auth := connectorauth.NewService(registry, mcpclient.NewInMemoryCredentialStore())
+	registry.SetAccountReadinessProvider(auth)
+	handler := newRouterInternal(routerConfig{connectorRegistry: registry, connectorAuth: auth})
+
+	started := httptest.NewRecorder()
+	handler.ServeHTTP(started, httptest.NewRequest(http.MethodPost, "/v1/connectors/awaken.microsoft.outlook/connect", strings.NewReader(`{}`)))
+	if started.Code != http.StatusOK {
+		t.Fatalf("start status=%d body=%s", started.Code, started.Body.String())
+	}
+	var payload struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(started.Body.Bytes(), &payload); err != nil || payload.SessionID == "" {
+		t.Fatalf("start payload=%s err=%v", started.Body.String(), err)
+	}
+	pending := httptest.NewRecorder()
+	handler.ServeHTTP(pending, httptest.NewRequest(http.MethodPost, "/v1/connectors/auth/sessions/"+payload.SessionID+"/admin-approval", nil))
+	if pending.Code != http.StatusOK || !strings.Contains(pending.Body.String(), `"status":"pending_admin_approval"`) {
+		t.Fatalf("pending status=%d body=%s", pending.Code, pending.Body.String())
+	}
+	listed := httptest.NewRecorder()
+	handler.ServeHTTP(listed, httptest.NewRequest(http.MethodGet, "/v1/connectors", nil))
+	if listed.Code != http.StatusOK || strings.Contains(listed.Body.String(), `"id":"awaken.microsoft.outlook"`) {
+		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
+	}
+	status, err := registry.Status("awaken.microsoft.outlook")
+	if err != nil || status.State != connectors.StateApprovalRequired {
+		t.Fatalf("Outlook runtime status=%+v err=%v", status, err)
+	}
+}
 
 type cliConnectorTestRuntime struct{}
 
@@ -35,8 +73,12 @@ func TestOutlookConnectorAuthFailsClosedWithoutHostClientID(t *testing.T) {
 	list := httptest.NewRequest(http.MethodGet, "/v1/connectors", nil)
 	listRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(listRecorder, list)
-	if listRecorder.Code != http.StatusOK || !strings.Contains(listRecorder.Body.String(), `"id":"awaken.microsoft.outlook"`) || !strings.Contains(listRecorder.Body.String(), `"state":"failed"`) {
+	if listRecorder.Code != http.StatusOK || strings.Contains(listRecorder.Body.String(), `"id":"awaken.microsoft.outlook"`) {
 		t.Fatalf("Outlook catalog state: status=%d body=%s", listRecorder.Code, listRecorder.Body.String())
+	}
+	status, statusErr := registry.Status("awaken.microsoft.outlook")
+	if statusErr != nil || status.State != connectors.StateFailed {
+		t.Fatalf("Outlook runtime state: status=%+v err=%v", status, statusErr)
 	}
 
 	connect := httptest.NewRequest(http.MethodPost, "/v1/connectors/awaken.microsoft.outlook/connect", strings.NewReader(`{}`))

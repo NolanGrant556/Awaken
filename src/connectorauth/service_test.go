@@ -3,7 +3,9 @@ package connectorauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,10 +19,28 @@ import (
 	"golang.org/x/oauth2"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
+type countingCredentialStore struct {
+	mcpclient.CredentialStore
+	loads atomic.Int32
+}
+
+func (s *countingCredentialStore) LoadTokenSource(identity string) (mcpclient.StoredTokenSource, error) {
+	s.loads.Add(1)
+	return s.CredentialStore.LoadTokenSource(identity)
+}
+
 type fakeRegistry struct {
-	definition  connectors.ConnectorDefinition
-	connects    atomic.Int32
-	disconnects atomic.Int32
+	definition           connectors.ConnectorDefinition
+	connects             atomic.Int32
+	disconnects          atomic.Int32
+	statusOverride       connectors.ConnectorState
+	runtimeStateOverride connectors.ConnectorState
 }
 
 func (r *fakeRegistry) Definition(id string) (connectors.ConnectorDefinition, error) {
@@ -37,6 +57,23 @@ func (r *fakeRegistry) Status(id string) (connectors.ConnectorStatus, error) {
 	state := connectors.StateDisconnected
 	if r.connects.Load() > 0 {
 		state = connectors.StateConnected
+	}
+	if r.statusOverride != "" {
+		state = r.statusOverride
+	}
+	return connectors.ConnectorStatus{ID: id, State: state}, nil
+}
+
+func (r *fakeRegistry) RuntimeStatus(id string) (connectors.ConnectorStatus, error) {
+	if id != r.definition.ID {
+		return connectors.ConnectorStatus{}, connectors.ErrConnectorNotFound
+	}
+	state := connectors.StateDisconnected
+	if r.connects.Load() > 0 {
+		state = connectors.StateConnected
+	}
+	if r.runtimeStateOverride != "" {
+		state = r.runtimeStateOverride
 	}
 	return connectors.ConnectorStatus{ID: id, State: state}, nil
 }
@@ -156,6 +193,142 @@ func TestMissingPublicClientIDFailsWithoutOpeningSession(t *testing.T) {
 	}
 }
 
+func TestAccountReadinessCachesCredentialMetadataAndDisconnectInvalidatesIt(t *testing.T) {
+	registry := &fakeRegistry{definition: testDefinition("https://login.example.test")}
+	base := mcpclient.NewInMemoryCredentialStore()
+	identity := connectorCredentialIdentity(registry.definition.ID)
+	if err := base.SaveTokenSource(identity, mcpclient.StoredTokenSource{
+		Token:     &oauth2.Token{AccessToken: "cached-token", RefreshToken: "cached-refresh", Expiry: time.Now().Add(time.Hour)},
+		ServerURL: connectorContractURI(registry.definition), AuthURL: registry.definition.OAuth.AuthorizationEndpoint,
+		TokenURL: registry.definition.OAuth.TokenEndpoint, ClientID: registry.definition.OAuth.ClientID,
+		Scopes: append([]string(nil), registry.definition.OAuth.Scopes...),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	credentials := &countingCredentialStore{CredentialStore: base}
+	service := NewService(registry, credentials)
+
+	for range 8 {
+		if readiness := service.AccountReadiness(registry.definition); readiness.State != connectors.StateConnected {
+			t.Fatalf("readiness=%+v", readiness)
+		}
+	}
+	if got := credentials.loads.Load(); got != 1 {
+		t.Fatalf("credential loads=%d, want 1", got)
+	}
+
+	if err := service.Disconnect(context.Background(), registry.definition.ID); err != nil {
+		t.Fatal(err)
+	}
+	if readiness := service.AccountReadiness(registry.definition); readiness.State != connectors.StateNeedsAuth {
+		t.Fatalf("post-disconnect readiness=%+v", readiness)
+	}
+	if got := credentials.loads.Load(); got != 2 {
+		t.Fatalf("post-disconnect credential loads=%d, want 2", got)
+	}
+}
+
+func TestReauthorizeStartsFreshSessionWithoutClearingConnectedAccount(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	registry := &fakeRegistry{definition: testDefinition("http://127.0.0.1:12345")}
+	credentials := mcpclient.NewInMemoryCredentialStore()
+	stored := mcpclient.StoredTokenSource{
+		Token:     &oauth2.Token{AccessToken: "existing-token", RefreshToken: "existing-refresh", Expiry: time.Now().Add(time.Hour)},
+		ServerURL: connectorContractURI(registry.definition),
+		AuthURL:   registry.definition.OAuth.AuthorizationEndpoint,
+		TokenURL:  registry.definition.OAuth.TokenEndpoint,
+		ClientID:  registry.definition.OAuth.ClientID,
+		Scopes:    append([]string(nil), registry.definition.OAuth.Scopes...),
+	}
+	if err := credentials.SaveTokenSource(connectorCredentialIdentity(registry.definition.ID), stored); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(registry, credentials)
+	ready, err := service.Start(context.Background(), registry.definition.ID)
+	if err != nil || ready.Status != "ready" || ready.SessionID != "" {
+		t.Fatalf("ready=%+v err=%v", ready, err)
+	}
+	reauth, err := service.Reauthorize(context.Background(), registry.definition.ID)
+	if err != nil || reauth.Status != "authorizing" || reauth.SessionID == "" || reauth.AuthorizationURL == "" {
+		t.Fatalf("reauth=%+v err=%v", reauth, err)
+	}
+	if _, err := credentials.LoadTokenSource(connectorCredentialIdentity(registry.definition.ID)); err != nil {
+		t.Fatalf("existing credential was cleared before reauthorization completed: %v", err)
+	}
+	if _, err := service.Cancel(reauth.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := credentials.LoadTokenSource(connectorCredentialIdentity(registry.definition.ID)); err != nil {
+		t.Fatalf("cancelling reauthorization cleared the existing credential: %v", err)
+	}
+}
+
+func TestWaitForRuntimeIgnoresAuthorizationPendingProjection(t *testing.T) {
+	registry := &fakeRegistry{
+		definition:           testDefinition("http://127.0.0.1:12345"),
+		statusOverride:       connectors.StatePending,
+		runtimeStateOverride: connectors.StateConnected,
+	}
+	service := NewService(registry, mcpclient.NewInMemoryCredentialStore())
+	if err := service.waitForRuntime(registry.definition.ID); err != nil {
+		t.Fatalf("runtime readiness was blocked by the authorization projection: %v", err)
+	}
+}
+
+func TestAdminApprovalObservationPersistsAndRetryStartsFreshSession(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	registry := &fakeRegistry{definition: testDefinition("http://127.0.0.1:12345")}
+	credentials := mcpclient.NewInMemoryCredentialStore()
+	service := NewService(registry, credentials)
+	started, err := service.Start(context.Background(), registry.definition.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := service.MarkAdminApprovalPending(started.SessionID)
+	if err != nil || view.Status != "pending_admin_approval" {
+		t.Fatalf("pending view=%+v err=%v", view, err)
+	}
+	if readiness := service.AccountReadiness(registry.definition); readiness.State != connectors.StateApprovalRequired {
+		t.Fatalf("approval readiness=%+v", readiness)
+	}
+	restarted := NewService(registry, credentials)
+	if readiness := restarted.AccountReadiness(registry.definition); readiness.State != connectors.StateApprovalRequired {
+		t.Fatalf("persisted approval readiness=%+v", readiness)
+	}
+	retry, err := restarted.Start(context.Background(), registry.definition.ID)
+	if err != nil || retry.Status != "authorizing" || retry.SessionID == "" {
+		t.Fatalf("retry=%+v err=%v", retry, err)
+	}
+	if _, err := restarted.Cancel(retry.SessionID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExplicitProviderAdminApprovalErrorMapsToPending(t *testing.T) {
+	t.Setenv("AWAKEN_HOME", t.TempDir())
+	registry := &fakeRegistry{definition: testDefinition("http://127.0.0.1:12345")}
+	service := NewService(registry, mcpclient.NewInMemoryCredentialStore())
+	started, err := service.Start(context.Background(), registry.definition.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizationURL, _ := url.Parse(started.AuthorizationURL)
+	callback := authorizationURL.Query().Get("redirect_uri")
+	state := authorizationURL.Query().Get("state")
+	response, err := http.Get(callback + "?error=admin_consent_required&error_description=administrator+approval+required&state=" + url.QueryEscape(state))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("callback status=%d", response.StatusCode)
+	}
+	view := waitSession(t, service, started.SessionID)
+	if view.Status != "pending_admin_approval" {
+		t.Fatalf("view=%+v", view)
+	}
+}
+
 func TestCancelDuringCodeExchangeCannotPublishCredentialOrRuntime(t *testing.T) {
 	exchangeStarted := make(chan struct{})
 	releaseExchange := make(chan struct{})
@@ -261,6 +434,66 @@ func TestOAuthContractChangeDoesNotReuseHostAccount(t *testing.T) {
 	}
 }
 
+func TestTransientRefreshFailureKeepsRecoverableCredential(t *testing.T) {
+	registry := &fakeRegistry{definition: testDefinition("https://login.example.test")}
+	credentials := mcpclient.NewInMemoryCredentialStore()
+	service := NewService(registry, credentials)
+	service.SetHTTPClientForTest(&http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, io.EOF
+	})})
+	identity := connectorCredentialIdentity(registry.definition.ID)
+	if err := credentials.SaveTokenSource(identity, mcpclient.StoredTokenSource{
+		Token:     &oauth2.Token{AccessToken: "expired", RefreshToken: "still-valid", Expiry: time.Now().Add(-time.Hour)},
+		ServerURL: connectorContractURI(registry.definition), AuthURL: registry.definition.OAuth.AuthorizationEndpoint,
+		TokenURL: registry.definition.OAuth.TokenEndpoint, ClientID: registry.definition.OAuth.ClientID,
+		Scopes: append([]string(nil), registry.definition.OAuth.Scopes...),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := service.AccessToken(context.Background(), registry.definition.ID); !errors.Is(err, ErrRefreshUnavailable) {
+		t.Fatalf("transient refresh error=%v", err)
+	}
+	stored, err := credentials.LoadTokenSource(identity)
+	if err != nil || stored.NeedsReauth || stored.Token == nil || stored.Token.RefreshToken == "" {
+		t.Fatalf("recoverable credential was invalidated: stored=%+v err=%v", stored, err)
+	}
+}
+
+func TestNeedsReauthWithRefreshTokenRecoversAfterTransientFailure(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/token" {
+			http.NotFound(w, request)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"access_token":"recovered-token","refresh_token":"rotated-refresh","token_type":"Bearer","expires_in":3600}`)
+	}))
+	defer provider.Close()
+	registry := &fakeRegistry{definition: testDefinition(provider.URL)}
+	credentials := mcpclient.NewInMemoryCredentialStore()
+	service := NewService(registry, credentials)
+	service.SetHTTPClientForTest(provider.Client())
+	identity := connectorCredentialIdentity(registry.definition.ID)
+	if err := credentials.SaveTokenSource(identity, mcpclient.StoredTokenSource{
+		Token:     &oauth2.Token{AccessToken: "expired", RefreshToken: "recoverable-refresh", Expiry: time.Now().Add(-time.Hour)},
+		ServerURL: connectorContractURI(registry.definition), AuthURL: registry.definition.OAuth.AuthorizationEndpoint,
+		TokenURL: registry.definition.OAuth.TokenEndpoint, ClientID: registry.definition.OAuth.ClientID,
+		Scopes: append([]string(nil), registry.definition.OAuth.Scopes...), NeedsReauth: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	token, err := service.AccessToken(context.Background(), registry.definition.ID)
+	if err != nil || token != "recovered-token" {
+		t.Fatalf("token=%q err=%v", token, err)
+	}
+	stored, err := credentials.LoadTokenSource(identity)
+	if err != nil || stored.NeedsReauth || stored.ReauthReason != "" || stored.Token == nil || stored.Token.AccessToken != "recovered-token" {
+		t.Fatalf("recovered credential was not persisted: stored=%+v err=%v", stored, err)
+	}
+}
+
 func TestConnectorAuthURLPolicyAllowsOnlyPublicHTTPSOrExplicitLoopback(t *testing.T) {
 	for _, candidate := range []string{
 		"http://example.com/authorize",
@@ -279,5 +512,8 @@ func TestConnectorAuthURLPolicyAllowsOnlyPublicHTTPSOrExplicitLoopback(t *testin
 	}
 	if !isLoopbackHost("localhost") || !isLoopbackHost("127.0.0.1") || isLoopbackHost("login.example.com") {
 		t.Fatal("loopback host classification is incorrect")
+	}
+	if !isProxySyntheticAddress(net.ParseIP("198.18.0.29")) || isProxySyntheticAddress(net.ParseIP("192.168.1.5")) {
+		t.Fatal("proxy synthetic DNS classification is incorrect")
 	}
 }

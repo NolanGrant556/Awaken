@@ -64,9 +64,9 @@
   box-shadow: var(--aw-shadow-raised);
 }
 
-.aw-plugin-console__title { display: flex; min-width: 0; align-items: baseline; gap: var(--aw-space-3); }
+.aw-plugin-console__title { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; column-gap: var(--aw-space-3); row-gap: var(--aw-space-1); }
 .aw-plugin-console__title > span { flex: 0 0 auto; color: var(--aw-text-tertiary); font-size: var(--aw-font-size-xs); }
-.aw-plugin-console__title h1 { min-width: 0; margin: 0; overflow: hidden; font-size: var(--aw-font-size-xl); letter-spacing: -0.025em; text-overflow: ellipsis; white-space: nowrap; }
+.aw-plugin-console__title h1 { min-width: 0; max-width: 100%; flex: 0 1 auto; margin: 0; font-size: var(--aw-font-size-xl); letter-spacing: -0.025em; line-height: 1.15; overflow-wrap: anywhere; }
 
 .aw-plugin-console__actions { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--aw-space-2); }
 
@@ -78,6 +78,30 @@
   background: var(--aw-error-soft-bg);
   font-size: var(--aw-font-size-sm);
 }
+
+.aw-plugin-account { display: grid; gap: var(--aw-space-3); margin-top: var(--aw-space-7); }
+.aw-plugin-account > header { display: flex; align-items: baseline; gap: var(--aw-space-2); }
+.aw-plugin-account > header h2 { margin: 0; font-size: var(--aw-font-size-base); }
+.aw-plugin-account > header span { color: var(--aw-text-tertiary); font-size: var(--aw-font-size-sm); }
+.aw-plugin-account__row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--aw-space-5); min-width: 0; padding: var(--aw-space-3) var(--aw-space-4); border-radius: var(--aw-radius-md); background: var(--aw-bg-fill-light); }
+.aw-plugin-account__identity { display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: center; gap: var(--aw-space-3); min-width: 0; }
+.aw-plugin-account__logo { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid var(--aw-border-light); border-radius: var(--aw-radius-sm); background: var(--aw-surface-raised); color: var(--aw-text-secondary); }
+.aw-plugin-account__copy { display: grid; min-width: 0; gap: 2px; }
+.aw-plugin-account__copy strong,
+.aw-plugin-account__copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aw-plugin-account__copy strong { font-size: var(--aw-font-size-sm); font-weight: var(--aw-font-weight-medium); }
+.aw-plugin-account__copy small { color: var(--aw-text-tertiary); font-size: var(--aw-font-size-xs); }
+.aw-plugin-account__trigger { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; gap: var(--aw-space-2); padding: 0 var(--aw-space-3); border: 1px solid var(--aw-border-main); border-radius: var(--aw-radius-sm); background: var(--aw-surface-raised); color: var(--aw-text-secondary); font: inherit; font-size: var(--aw-font-size-xs); cursor: pointer; }
+.aw-plugin-account__trigger:hover { border-color: var(--aw-border-control-hover); color: var(--aw-text-primary); }
+.aw-plugin-account__trigger:focus-visible { outline: none; box-shadow: var(--aw-shadow-focus); }
+.aw-plugin-account__trigger:disabled { cursor: default; opacity: 0.6; }
+.aw-plugin-account__status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--aw-success); }
+.aw-plugin-account__menu { display: grid; gap: 2px; }
+.aw-plugin-account__menu button { display: flex; width: 100%; min-height: 34px; align-items: center; gap: var(--aw-space-2); padding: 0 var(--aw-space-3); border: 0; border-radius: var(--aw-radius-sm); background: transparent; color: var(--aw-text-primary); font: inherit; font-size: var(--aw-font-size-sm); text-align: left; cursor: pointer; }
+.aw-plugin-account__menu button:hover { background: var(--aw-bg-fill-light); }
+.aw-plugin-account__menu button:focus-visible { outline: none; box-shadow: var(--aw-shadow-focus); }
+.aw-plugin-account__menu button.is-danger { color: var(--aw-error); }
+.aw-plugin-account__menu button:disabled { cursor: default; opacity: 0.6; }
 
 .aw-plugin-setup { display: grid; gap: var(--aw-space-3); margin-top: var(--aw-space-6); padding: var(--aw-space-4); border: 1px solid var(--aw-border-main); border-radius: var(--aw-radius-md); background: var(--aw-surface-raised); }
 .aw-plugin-setup > header span { display: grid; gap: 2px; }
@@ -198,6 +222,7 @@
 .aw-plugin-mcp-configurator h3,
 .aw-plugin-mcp-configurator h4 { margin: 0; font-size: var(--aw-font-size-sm); }
 .aw-plugin-mcp-configurator header p { margin: 2px 0 0; color: var(--aw-text-tertiary); font-size: var(--aw-font-size-xs); }
+.aw-plugin-mcp-configurator__owner { flex: 0 0 auto; padding: 3px var(--aw-space-2); border-radius: var(--aw-radius-pill); background: var(--aw-bg-fill-light); color: var(--aw-text-secondary); font-size: var(--aw-font-size-xs); line-height: 1.4; }
 .aw-plugin-mcp-configurator__error { margin: 0; padding: var(--aw-space-2) var(--aw-space-3); border-radius: var(--aw-radius-sm); background: var(--aw-error-soft-bg); color: var(--aw-error); font-size: var(--aw-font-size-xs); }
 .aw-plugin-mcp-configurator__tools { display: grid; gap: var(--aw-space-2); }
 .aw-plugin-mcp-configurator__tools > header { display: flex; align-items: baseline; justify-content: space-between; }
@@ -246,4 +271,6 @@
   .aw-plugin-variable-editor__dependencies { grid-column: 1; }
   .aw-plugin-setup__item { grid-template-columns: minmax(0, 1fr); }
   .aw-plugin-setup__actions { justify-content: flex-start; }
+  .aw-plugin-account__row { grid-template-columns: minmax(0, 1fr); }
+  .aw-plugin-account__row > :last-child { justify-self: start; }
 }

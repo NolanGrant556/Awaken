@@ -102,6 +102,7 @@ type SkillSpec struct {
 
 type MCPSpec struct {
 	ShortName              string            `json:"shortName"`
+	HostConnectorID        string            `json:"hostConnectorId,omitempty"`
 	SourceShape            string            `json:"sourceShape,omitempty"`
 	SourceTransport        string            `json:"sourceTransport,omitempty"`
 	Transport              string            `json:"transport,omitempty"`

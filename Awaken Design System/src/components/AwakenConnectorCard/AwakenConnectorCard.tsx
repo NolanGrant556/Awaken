@@ -7,6 +7,7 @@ import type { AwakenConnectorCardItem } from "../AwakenConnectors/AwakenConnecto
 export type AwakenConnectorCardProps = {
   item: AwakenConnectorCardItem;
   onPrimaryAction?: (item: AwakenConnectorCardItem) => void;
+  onAdminApprovalRequired?: (item: AwakenConnectorCardItem) => void;
   onEnabledChange?: (item: AwakenConnectorCardItem, enabled: boolean) => void;
   onSettings?: (item: AwakenConnectorCardItem) => void;
 };
@@ -14,7 +15,7 @@ export type AwakenConnectorCardProps = {
 function statusTone(state: AwakenConnectorCardItem["state"]): string {
   if (state === "connected" || state === "loaded") return "success";
   if (state === "failed" || state === "invalid") return "error";
-  if (state === "pending" || state === "needs-auth" || state === "shadowed" || state === "disabled_by_policy") {
+  if (state === "pending" || state === "needs-auth" || state === "approval-required" || state === "shadowed" || state === "disabled_by_policy") {
     return "warning";
   }
   return "neutral";
@@ -30,6 +31,7 @@ function hasDistinctDescription(item: AwakenConnectorCardItem): boolean {
 export function AwakenConnectorCard({
   item,
   onPrimaryAction,
+  onAdminApprovalRequired,
   onEnabledChange,
   onSettings,
 }: AwakenConnectorCardProps) {
@@ -119,15 +121,27 @@ export function AwakenConnectorCard({
           </button>
         </span>
       ) : (
-        <button
-          type="button"
-          className="aw-connector-card__action"
-          aria-label={item.authorizing ? `取消连接 ${item.displayName}` : item.connected ? `断开 ${item.displayName}` : `连接 ${item.displayName}`}
-          disabled={item.busy}
-          onClick={() => onPrimaryAction?.(item)}
-        >
-          {item.connected || item.authorizing ? <AwakenIcon concept="close" size={16} /> : <AwakenIcon concept="add" size={16} />}
-        </button>
+        <span className="aw-connector-card__actions">
+          {item.showAdminApprovalAction ? (
+            <button
+              type="button"
+              className="aw-connector-card__approval-action"
+              disabled={item.busy}
+              onClick={() => onAdminApprovalRequired?.(item)}
+            >
+              页面要求管理员审批
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="aw-connector-card__action"
+            aria-label={item.authorizing ? `取消连接 ${item.displayName}` : item.connected ? `断开 ${item.displayName}` : `连接 ${item.displayName}`}
+            disabled={item.busy}
+            onClick={() => onPrimaryAction?.(item)}
+          >
+            {item.connected || item.authorizing ? <AwakenIcon concept="close" size={16} /> : <AwakenIcon concept="add" size={16} />}
+          </button>
+        </span>
       )}
     </article>
   );

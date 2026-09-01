@@ -41,10 +41,19 @@ func parseSkillComponents(root string, paths []string, dialect ir.Dialect, manif
 			}
 			declaredName, _ := frontmatter["name"].(string)
 			description, _ := frontmatter["description"].(string)
+			metadata, _ := frontmatter["metadata"].(map[string]any)
+			displayName := firstNonEmpty(
+				stringField(frontmatter, "displayName"),
+				stringField(frontmatter, "display_name"),
+				stringField(metadata, "display_name"),
+				stringField(metadata, "displayName"),
+				declaredName,
+				derived,
+			)
 			component := ir.Component{
 				LogicalID: ir.LogicalID(ir.KindSkill, identityPath, ""),
 				Kind:      ir.KindSkill, DeclaredName: declaredName, DerivedName: derived,
-				DisplayName: firstNonEmpty(declaredName, derived), Description: description,
+				DisplayName: displayName, Description: description,
 				SourceDialect: dialect, SourceManifestPath: manifestPath, SourcePath: file,
 				SourceDigest: digestBytes(raw), Mapping: mapping, Validation: "valid",
 				CanonicalProvenance: string(dialect), Skill: &ir.SkillSpec{Path: packagePath},

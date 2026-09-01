@@ -413,6 +413,51 @@ func TestManagerRestartWithConfigKeepsServerVisible(t *testing.T) {
 	}
 }
 
+func TestManagerApplyConfigDoesNotRestartUnchangedServer(t *testing.T) {
+	disabled := false
+	var toolChanges atomic.Int32
+	mgr := NewManager(
+		WithLogger(noopLogger{}),
+		WithToolsChangedCallback(func(string) { toolChanges.Add(1) }),
+	)
+	config := ScopedMcpServerConfig{
+		Name:  "plugin__fixture__local",
+		Scope: ScopePlugin,
+		Config: McpServerConfig{
+			HTTP:    &HTTPTransportConfig{URL: "https://fixture.invalid/mcp"},
+			Enabled: &disabled,
+		},
+	}
+	mgr.Start(context.Background(), []ScopedMcpServerConfig{config})
+	t.Cleanup(func() { mgr.Shutdown(context.Background()) })
+
+	changed, err := mgr.ApplyConfig(context.Background(), config)
+	if err != nil || changed {
+		t.Fatalf("unchanged apply: changed=%t err=%v", changed, err)
+	}
+	if got := toolChanges.Load(); got != 0 {
+		t.Fatalf("unchanged apply restarted server: tool changes=%d", got)
+	}
+
+	updated := config
+	updated.Config.DisplayName = "Updated fixture"
+	changed, err = mgr.ApplyConfig(context.Background(), updated)
+	if err != nil || !changed {
+		t.Fatalf("updated apply: changed=%t err=%v", changed, err)
+	}
+	if got := toolChanges.Load(); got != 1 {
+		t.Fatalf("updated apply tool changes=%d, want 1", got)
+	}
+
+	changed, err = mgr.ApplyConfig(context.Background(), updated)
+	if err != nil || changed {
+		t.Fatalf("repeated updated apply: changed=%t err=%v", changed, err)
+	}
+	if got := toolChanges.Load(); got != 1 {
+		t.Fatalf("repeated updated apply restarted server: tool changes=%d", got)
+	}
+}
+
 // TestManagerStateMachineWSRejected confirms the WS transport is marked
 // failed rather than attempted.
 func TestManagerStateMachineWSRejected(t *testing.T) {

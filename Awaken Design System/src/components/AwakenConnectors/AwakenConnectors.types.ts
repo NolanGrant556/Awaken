@@ -5,6 +5,7 @@ export type AwakenConnectorState =
   | "pending"
   | "connected"
   | "needs-auth"
+  | "approval-required"
   | "failed"
   | "loaded"
   | "invalid"
@@ -24,6 +25,7 @@ export type AwakenConnectorCardItem = {
   tags?: string[];
   connected?: boolean;
   authorizing?: boolean;
+  showAdminApprovalAction?: boolean;
   enabled?: boolean;
   mcpServerName?: string;
   busy?: boolean;

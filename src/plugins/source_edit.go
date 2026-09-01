@@ -39,6 +39,9 @@ func (s *Store) UpdateMCPSource(name, logicalID, expectedRecordedDigest, source 
 		if !ok {
 			return fmt.Errorf("%w: %s", ErrNotFound, name)
 		}
+		if record.Builtin {
+			return fmt.Errorf("%w: %s", ErrBuiltinImmutable, name)
+		}
 		if record.Digest != expectedRecordedDigest {
 			return recordedDigestChangedError(expectedRecordedDigest, record.Digest)
 		}
@@ -59,6 +62,9 @@ func (s *Store) UpdateMCPSource(name, logicalID, expectedRecordedDigest, source 
 		}
 		if targetComponent.Kind != ir.KindMCPServer {
 			return fmt.Errorf("%w: only MCP source files are editable", ErrComponentNotSwitchable)
+		}
+		if targetComponent.MCP == nil || targetComponent.MCP.HostConnectorID != "" {
+			return fmt.Errorf("%w: host connector MCP source is managed by Awaken", ErrComponentNotSwitchable)
 		}
 
 		relativeSourcePath := componentSourceRelativePath(plugin, *targetComponent)

@@ -7,6 +7,7 @@ import {
   AwakenUserPromptBlock,
   buildUserPromptCopyText,
   pastedImageFilesFromClipboardData,
+  pluginOptionSections,
   reorderProjectIds,
   shouldSubmitComposerInputKey,
   shouldActivateComposerMetaItemKey,
@@ -63,6 +64,7 @@ import {
   UserQuestionPrompt,
 } from "./App";
 import {
+  activeComposerPaletteActions,
   actionsFromSlashProviders,
   clearComposerActionTriggerFromComposerValue,
   clearSlashTriggerFromComposerValue,
@@ -81,6 +83,7 @@ import {
   skillSlashProvider,
   skillSlashActionsFromSkills,
   slashTriggerFromComposerValue,
+  type SlashAction,
 } from "./composerSlash";
 import { composerRuntimePanelsForStatus } from "./useComposerLifecycle";
 import {
@@ -158,8 +161,28 @@ function userFolders(...paths: string[]): WorkspaceProjectFolder[] {
 describe("media reveal platform copy", () => {
   it("uses the native file manager name on macOS and Windows", () => {
     expect(mediaRevealLabelForPlatform("macos")).toBe("在 Finder 中显示");
-    expect(mediaRevealLabelForPlatform("windows")).toBe("在文件资源管理器中显示");
+    expect(mediaRevealLabelForPlatform("windows")).toBe(
+      "在文件资源管理器中显示",
+    );
     expect(mediaRevealLabelForPlatform("linux")).toBe("在文件管理器中显示");
+  });
+});
+
+describe("composer Plugin picker sections", () => {
+  it("keeps built-in and installed Plugin options in distinct ordered groups", () => {
+    expect(
+      pluginOptionSections([
+        { id: "builtin:outlook", label: "Outlook 邮箱", sectionLabel: "内置" },
+        { id: "plugin:documents", label: "Documents", sectionLabel: "插件" },
+        { id: "plugin:figma", label: "Figma", sectionLabel: "插件" },
+      ]).map((section) => ({
+        label: section.label,
+        options: section.options.map((option) => option.label),
+      })),
+    ).toEqual([
+      { label: "内置", options: ["Outlook 邮箱"] },
+      { label: "插件", options: ["Documents", "Figma"] },
+    ]);
   });
 });
 
@@ -174,15 +197,23 @@ describe("Artifact preview tab media icons", () => {
 describe("project name input keyboard behavior", () => {
   it("does not submit while a Windows or macOS IME is confirming composition", () => {
     expect(shouldSubmitProjectNameInputKey({ key: "Enter" })).toBe(true);
-    expect(shouldSubmitProjectNameInputKey({ key: "Enter", isComposing: true })).toBe(false);
-    expect(shouldSubmitProjectNameInputKey({ key: "a", isComposing: false })).toBe(false);
+    expect(
+      shouldSubmitProjectNameInputKey({ key: "Enter", isComposing: true }),
+    ).toBe(false);
+    expect(
+      shouldSubmitProjectNameInputKey({ key: "a", isComposing: false }),
+    ).toBe(false);
   });
 });
 
 describe("media format labels", () => {
   it("derives an uppercase format from cross-platform artifact paths", () => {
-    expect(mediaFormatLabelForPath("output/generated-media/final.mp4")).toBe("MP4");
-    expect(mediaFormatLabelForPath("output\\generated-media\\look.webp")).toBe("WEBP");
+    expect(mediaFormatLabelForPath("output/generated-media/final.mp4")).toBe(
+      "MP4",
+    );
+    expect(mediaFormatLabelForPath("output\\generated-media\\look.webp")).toBe(
+      "WEBP",
+    );
     expect(mediaFormatLabelForPath("README")).toBeUndefined();
   });
 });
@@ -267,7 +298,8 @@ describe("tool trace presentation", () => {
   it("keeps failed tool paths in the detail card instead of the main row", () => {
     const presentation = toolTracePresentation(
       {
-        content: 'file mutation denied: path "/Users/nolan/private/report.md" is outside writable roots',
+        content:
+          'file mutation denied: path "/Users/nolan/private/report.md" is outside writable roots',
         status: "denied",
       },
       undefined,
@@ -277,7 +309,9 @@ describe("tool trace presentation", () => {
     expect(presentation.title).toBe("写入文件");
     expect(presentation.detail).toBe("权限被拒绝");
     expect(presentation.detail).not.toContain("/Users/");
-    expect(presentation.detailCard?.copyText).toContain("/Users/nolan/private/report.md");
+    expect(presentation.detailCard?.copyText).toContain(
+      "/Users/nolan/private/report.md",
+    );
   });
 
   it("joins run-scoped narrative items through their explicit tool call id", () => {
@@ -308,7 +342,9 @@ describe("tool trace presentation", () => {
     expect(
       toolTracePresentation({
         title: "Read",
-        args: JSON.stringify({ file_path: "/tmp/reports/quarterly-report.pdf" }),
+        args: JSON.stringify({
+          file_path: "/tmp/reports/quarterly-report.pdf",
+        }),
         content: "document parts: pages 1,2,3",
         status: "done",
       }),
@@ -385,11 +421,10 @@ describe("tool trace presentation", () => {
       }).kind,
     ).toBe("mcp");
     expect(
-      toolTracePresentation(
-        undefined,
-        "Preparing tool arguments",
-        { title: "mcp__customer_server__read", status: "active" },
-      ).kind,
+      toolTracePresentation(undefined, "Preparing tool arguments", {
+        title: "mcp__customer_server__read",
+        status: "active",
+      }).kind,
     ).toBe("mcp");
     expect(
       toolTracePresentation({
@@ -432,7 +467,11 @@ describe("tool trace presentation", () => {
     const presentation = toolTracePresentation(
       {
         title: "create_issue",
-        args: JSON.stringify({ repository: "awaken", token: "private", nested: { apiKey: "secret" } }),
+        args: JSON.stringify({
+          repository: "awaken",
+          token: "private",
+          nested: { apiKey: "secret" },
+        }),
         content: "created issue #42",
         status: "done",
         providerId: "connector:github:create_issue",
@@ -472,12 +511,24 @@ describe("tool trace presentation", () => {
 });
 
 describe("activity batch presentation", () => {
-  const tool = (id: string, title: string, status: "active" | "done" | "error" = "done") =>
-    ({ kind: "tool", id, title, status }) satisfies RunNarrativeItem;
+  const tool = (
+    id: string,
+    title: string,
+    status: "active" | "done" | "error" = "done",
+  ) => ({ kind: "tool", id, title, status }) satisfies RunNarrativeItem;
 
   it("bypasses a singleton and uses stable turn plus first-item identity for a batch", () => {
-    expect(projectNarrativeActivitySegments({ turnId: "turn-1", items: [tool("tool:a", "Read")] })).toEqual([
-      { kind: "item", id: "activity-item:turn-1:tool:a", item: tool("tool:a", "Read") },
+    expect(
+      projectNarrativeActivitySegments({
+        turnId: "turn-1",
+        items: [tool("tool:a", "Read")],
+      }),
+    ).toEqual([
+      {
+        kind: "item",
+        id: "activity-item:turn-1:tool:a",
+        item: tool("tool:a", "Read"),
+      },
     ]);
 
     const segments = projectNarrativeActivitySegments({
@@ -505,7 +556,13 @@ describe("activity batch presentation", () => {
     };
     const boundaries: RunNarrativeItem[] = [
       { kind: "thinking", id: "thought:1", text: "next", status: "done" },
-      { kind: "answer", id: "answer:1", markdown: "progress", status: "active", isFinal: false },
+      {
+        kind: "answer",
+        id: "answer:1",
+        markdown: "progress",
+        status: "active",
+        isFinal: false,
+      },
       { kind: "hint", id: "hint:1", text: "waiting" },
       {
         kind: "providerReconnect",
@@ -525,14 +582,24 @@ describe("activity batch presentation", () => {
         artifactPaths: ["output/image.png"],
       },
       { kind: "subagentGroup", id: "subagents:1", tasks: [] },
-      { kind: "answer", id: "answer:2", markdown: "final", status: "done", isFinal: true },
+      {
+        kind: "answer",
+        id: "answer:2",
+        markdown: "final",
+        status: "done",
+        isFinal: true,
+      },
     ];
     const segments = projectNarrativeActivitySegments({
       turnId: "turn-2",
       items: [exploring, ...boundaries, tool("tool:c", "Bash", "active")],
     });
 
-    expect(segments[0]).toMatchObject({ kind: "activityBatch", actionCount: 2, failedCount: 1 });
+    expect(segments[0]).toMatchObject({
+      kind: "activityBatch",
+      actionCount: 2,
+      failedCount: 1,
+    });
     expect(segments.slice(1, 8).map((segment) => segment.kind)).toEqual([
       "item",
       "item",
@@ -546,18 +613,24 @@ describe("activity batch presentation", () => {
   });
 
   it("creates deterministic command, check, skill and error summaries", () => {
-    expect(activityBatchSummary([
+    expect(
+      activityBatchSummary([
       { kind: "terminal", title: "运行 git status", status: "done" },
       { kind: "terminal", title: "运行 npm test", status: "error" },
-    ])).toEqual({ label: "运行了 2 条命令", detail: "1 个异常" });
-    expect(activityBatchSummary([
+      ]),
+    ).toEqual({ label: "运行了 2 条命令", detail: "1 个异常" });
+    expect(
+      activityBatchSummary([
       { kind: "tool", title: "读取 README", status: "done" },
       { kind: "tool", title: "搜索 package.json", status: "done" },
-    ])).toEqual({ label: "检查了 2 项", detail: undefined });
-    expect(activityBatchSummary([
+      ]),
+    ).toEqual({ label: "检查了 2 项", detail: undefined });
+    expect(
+      activityBatchSummary([
       { kind: "skill", title: "PDF Skill", status: "done" },
       { kind: "tool", title: "读取文件", status: "active" },
-    ])).toEqual({ label: "正在使用 PDF Skill · 1 个工具", detail: undefined });
+      ]),
+    ).toEqual({ label: "正在使用 PDF Skill · 1 个工具", detail: undefined });
   });
 });
 
@@ -608,7 +681,11 @@ describe("media artifact request compatibility", () => {
         "output/generated-media/image.png",
         { id: "artifact-1", path: "output/generated-media/image.png" },
       ),
-    ).toEqual({ threadId: "thread-1", runId: "run-1", artifactId: "artifact-1" });
+    ).toEqual({
+      threadId: "thread-1",
+      runId: "run-1",
+      artifactId: "artifact-1",
+    });
   });
 });
 
@@ -813,7 +890,9 @@ function stubElectronBridge(): void {
       pickAttachments: vi.fn(async () => ({ canceled: true as const })),
       pickDirectory: vi.fn(async () => ({ canceled: true as const })),
       pickPluginSource: vi.fn(async () => ({ canceled: true as const })),
-      resolveDroppedPluginSource: vi.fn(async () => ({ canceled: true as const })),
+      resolveDroppedPluginSource: vi.fn(async () => ({
+        canceled: true as const,
+      })),
       pickProjectFolders: vi.fn(async () => ({ canceled: true as const })),
       validateWorkspace: vi.fn(async () => ({ valid: true as const })),
       getSupervisorStatus: vi.fn(async () => ({ status: "running" as const })),
@@ -993,24 +1072,34 @@ function stubElectronBridge(): void {
         tcc_accessibility: false,
       })),
       openComputerPermissionSettings: vi.fn(async () => undefined),
-      setThreadArchived: vi.fn(async () => ({ ok: true as const, thread: {} as never })),
+      setThreadArchived: vi.fn(async () => ({
+        ok: true as const,
+        thread: {} as never,
+      })),
     } satisfies AwakenBridge,
   });
 }
 
 describe("shouldResetActiveThreadForWorkspaceChange", () => {
   it("returns false when no active thread workspace exists", () => {
-    expect(shouldResetActiveThreadForWorkspaceChange(undefined, "/tmp/project")).toBe(false);
+    expect(
+      shouldResetActiveThreadForWorkspaceChange(undefined, "/tmp/project"),
+    ).toBe(false);
   });
 
   it("returns false when switching within the same workspace", () => {
-    expect(shouldResetActiveThreadForWorkspaceChange("/tmp/project", "/tmp/project")).toBe(false);
+    expect(
+      shouldResetActiveThreadForWorkspaceChange("/tmp/project", "/tmp/project"),
+    ).toBe(false);
   });
 
   it("returns true when switching to a different workspace", () => {
-    expect(shouldResetActiveThreadForWorkspaceChange("/tmp/project-a", "/tmp/project-b")).toBe(
-      true,
-    );
+    expect(
+      shouldResetActiveThreadForWorkspaceChange(
+        "/tmp/project-a",
+        "/tmp/project-b",
+      ),
+    ).toBe(true);
   });
 });
 
@@ -1022,12 +1111,9 @@ describe("project ordering", () => {
       "a",
       "d",
     ]);
-    expect(reorderProjectIds(["a", "b", "c", "d"], "d", "b", "before")).toEqual([
-      "a",
-      "d",
-      "b",
-      "c",
-    ]);
+    expect(reorderProjectIds(["a", "b", "c", "d"], "d", "b", "before")).toEqual(
+      ["a", "d", "b", "c"],
+    );
   });
 
   it("keeps the order stable for an invalid or self target", () => {
@@ -1355,7 +1441,10 @@ describe("resolveRunProjectForRun", () => {
           },
         ],
       }),
-    ).toEqual({ projectId: "project-windows", projectName: "Windows 客户项目" });
+    ).toEqual({
+      projectId: "project-windows",
+      projectName: "Windows 客户项目",
+    });
   });
 
   it("carries the identity of a folder-less project that has no root at all", () => {
@@ -1508,8 +1597,12 @@ describe("sharedFolderTrashWarning", () => {
 describe("AwakenComposerInput keyboard behavior", () => {
   it("submits with Enter and keeps Shift+Enter for new lines", () => {
     expect(shouldSubmitComposerInputKey({ key: "Enter" })).toBe(true);
-    expect(shouldSubmitComposerInputKey({ key: "Enter", shiftKey: true })).toBe(false);
-    expect(shouldSubmitComposerInputKey({ key: "Enter", isComposing: true })).toBe(false);
+    expect(shouldSubmitComposerInputKey({ key: "Enter", shiftKey: true })).toBe(
+      false,
+    );
+    expect(
+      shouldSubmitComposerInputKey({ key: "Enter", isComposing: true }),
+    ).toBe(false);
     expect(shouldSubmitComposerInputKey({ key: "a" })).toBe(false);
   });
 
@@ -1612,25 +1705,38 @@ describe("Composer Slash Palette helpers", () => {
     });
     expect(mentionTriggerFromComposerValue("hello@computer")).toBeNull();
     expect(mentionTriggerFromComposerValue("我们@computer")).toBeNull();
-    expect(composerActionTriggerFromComposerValue("中文123/code-search")).toBeNull();
-    expect(composerActionTriggerFromComposerValue("中文123 /code-search")).toMatchObject({
+    expect(
+      composerActionTriggerFromComposerValue("中文123/code-search"),
+    ).toBeNull();
+    expect(
+      composerActionTriggerFromComposerValue("中文123 /code-search"),
+    ).toMatchObject({
       marker: "/",
       query: "code-search",
       start: 6,
     });
     expect(composerActionTriggerFromComposerValue("/daily")?.marker).toBe("/");
-    expect(composerActionTriggerFromComposerValue("@computer")?.marker).toBe("@");
+    expect(composerActionTriggerFromComposerValue("@computer")?.marker).toBe(
+      "@",
+    );
 
     const actions = skillSlashActionsFromSkills(skills);
 
-    expect(actions.map((action) => action.label)).toEqual(["Daily Followup", "mcp-skill"]);
+    expect(actions.map((action) => action.label)).toEqual([
+      "Daily Followup",
+      "mcp-skill",
+    ]);
     expect(actions.every((action) => !action.disabled)).toBe(true);
-    expect(renderToString(React.createElement(React.Fragment, null, actions[0]?.icon))).toContain(
-      "aw-icon--book-open",
-    );
+    expect(
+      renderToString(
+        React.createElement(React.Fragment, null, actions[0]?.icon),
+      ),
+    ).toContain("aw-icon--book-open");
     expect(filterSlashActions(actions, "powerpoint")).toHaveLength(0);
     expect(filterSlashActions(actions, "mcp provided")).toHaveLength(1);
-    expect(filterSlashActions(actions, "follow-up")[0]?.id).toContain("daily-followup");
+    expect(filterSlashActions(actions, "follow-up")[0]?.id).toContain(
+      "daily-followup",
+    );
   });
 
   it("keeps ordinary Skill sources in slash while excluding user-invocable Plugin Skills", () => {
@@ -1659,16 +1765,22 @@ describe("Composer Slash Palette helpers", () => {
       modelInvocable: true,
       sourceOrigin: "plugin",
       rootDir: "/home/.awaken/plugins/packages/acme.tools/skills/review",
-      skillFilePath: "/home/.awaken/plugins/packages/acme.tools/skills/review/SKILL.md",
+      skillFilePath:
+        "/home/.awaken/plugins/packages/acme.tools/skills/review/SKILL.md",
       context: "inline",
     };
 
-    const actions = skillSlashActionsFromSkills([...ordinarySources, pluginSkill]);
+    const actions = skillSlashActionsFromSkills([
+      ...ordinarySources,
+      pluginSkill,
+    ]);
 
     expect(actions.map((action) => action.label)).toEqual(
       ordinarySources.map((skill) => skill.name),
     );
-    expect(actions.some((action) => action.label === "Acme Plugin Review")).toBe(false);
+    expect(
+      actions.some((action) => action.label === "Acme Plugin Review"),
+    ).toBe(false);
   });
 
   it("opens a slash query at the collapsed logical caret and keeps later text outside it", () => {
@@ -1726,17 +1838,25 @@ describe("Composer Slash Palette helpers", () => {
     expect(clearSlashTriggerFromComposerValue("/daily")).toBe("");
     expect(clearSlashTriggerFromComposerValue("hello /daily")).toBe("hello ");
     expect(clearSlashTriggerFromComposerValue("hello /")).toBe("hello ");
-    expect(clearSlashTriggerFromComposerValue("hello/daily")).toBe("hello/daily");
-    expect(clearComposerActionTriggerFromComposerValue("hello @computer")).toBe("hello ");
+    expect(clearSlashTriggerFromComposerValue("hello/daily")).toBe(
+      "hello/daily",
+    );
+    expect(clearComposerActionTriggerFromComposerValue("hello @computer")).toBe(
+      "hello ",
+    );
   });
 
   it("places tokens based on where the slash trigger was typed", () => {
-    expect(composerTokenPlacementForSlashTrigger(slashTriggerFromComposerValue("/doc"))).toBe(
-      "before",
-    );
-    expect(composerTokenPlacementForSlashTrigger(slashTriggerFromComposerValue("hello /doc"))).toBe(
-      "after",
-    );
+    expect(
+      composerTokenPlacementForSlashTrigger(
+        slashTriggerFromComposerValue("/doc"),
+      ),
+    ).toBe("before");
+    expect(
+      composerTokenPlacementForSlashTrigger(
+        slashTriggerFromComposerValue("hello /doc"),
+      ),
+    ).toBe("after");
   });
 
   it("selects adjacent tokens for keyboard deletion", () => {
@@ -1812,7 +1932,10 @@ describe("Composer Slash Palette helpers", () => {
           sourcePath: "skills/review/SKILL.md",
           mappingState: "adapted",
           validation: "valid",
-          skill: { path: "skills/review/SKILL.md", catalogId: "plugin__acme-tools__review" },
+          skill: {
+            path: "skills/review/SKILL.md",
+            catalogId: "plugin__acme-tools__review",
+          },
         },
       ),
     ).toMatchObject({
@@ -1857,8 +1980,28 @@ describe("Composer Slash Palette helpers", () => {
       { workspaceRootForRun: "/workspace" },
     );
 
-    expect(actions.map((action) => action.type)).toEqual(["file", "skill", "skill"]);
+    expect(actions.map((action) => action.type)).toEqual([
+      "file",
+      "skill",
+      "skill",
+    ]);
     expect(actions[0]?.label).toBe("brief.md");
+  });
+
+  it("projects the cached mention catalog immediately when @ opens", () => {
+    const slash: SlashAction[] = [
+      { id: "skill:review", type: "skill", label: "Review", payload: {} },
+    ];
+    const mentions: SlashAction[] = [
+      {
+        id: "plugin:outlook",
+        type: "plugin",
+        label: "Outlook 邮箱",
+        payload: {},
+      },
+    ];
+    expect(activeComposerPaletteActions("@", slash, mentions)).toBe(mentions);
+    expect(activeComposerPaletteActions("/", slash, mentions)).toBe(slash);
   });
 
   it("offers Computer Use as a mention capability token without visible prompt text", async () => {
@@ -1985,6 +2128,93 @@ describe("Composer Slash Palette helpers", () => {
     });
   });
 
+  it("places enabled built-in Plugins in the built-in mention group with the Outlook brand", async () => {
+    const actions = await actionsFromSlashProviders(
+      [
+        pluginMentionProvider(async () => [
+          {
+            name: "later-builtin",
+            displayName: "稍后内置",
+            builtin: true,
+            builtinOrder: 10,
+            enabled: true,
+            source: { kind: "local_path", path: "/app/later" },
+            digest: "digest-later",
+            skillCount: 1,
+            serverCount: 0,
+          },
+          {
+            name: "awaken-outlook",
+            displayName: "Outlook 邮箱",
+            builtin: true,
+            brandIcon: "outlook",
+            builtinOrder: 0,
+            enabled: true,
+            source: { kind: "local_path", path: "/app/outlook" },
+            digest: "digest-outlook",
+            skillCount: 4,
+            serverCount: 1,
+          },
+        ]),
+      ],
+      { workspaceRootForRun: "/workspace" },
+    );
+
+    expect(actions.map((action) => action.label)).toEqual([
+      "Outlook 邮箱",
+      "稍后内置",
+    ]);
+    expect(actions[0]).toMatchObject({
+      sectionLabel: "内置",
+      composerToken: {
+        label: "Outlook 邮箱",
+        payload: {
+          pluginName: "awaken-outlook",
+          pluginDigest: "digest-outlook",
+        },
+      },
+    });
+    expect(renderToString(actions[0]?.icon as React.ReactElement)).toContain(
+      'data-brand="outlook"',
+    );
+    expect(renderToString(actions[0]?.icon as React.ReactElement)).toContain(
+      'data-size="menu"',
+    );
+  });
+
+  it("keeps an enabled built-in Plugin visible but disabled until setup is ready", async () => {
+    const actions = await actionsFromSlashProviders(
+      [
+        pluginMentionProvider(async () => [
+          {
+            name: "awaken-outlook",
+            displayName: "Outlook 邮箱",
+            builtin: true,
+            brandIcon: "outlook",
+            builtinOrder: 0,
+            enabled: true,
+            authenticationState: "needs_auth",
+            componentCounts: { skill: 4, mcp_server: 1 },
+            source: { kind: "local_path", path: "/app/outlook" },
+            digest: "digest-outlook",
+            skillCount: 0,
+            serverCount: 0,
+          },
+        ]),
+      ],
+      { workspaceRootForRun: "/workspace" },
+    );
+
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      label: "Outlook 邮箱",
+      sectionLabel: "内置",
+      disabled: true,
+      disabledReason: "请先完成插件设置",
+      description: "请先在插件详情完成账号连接或必填配置。",
+    });
+  });
+
   it("keeps every filtered catalog action beyond the visible popup height", () => {
     const actions = Array.from({ length: 40 }, (_, index) => ({
       id: `skill:${index}`,
@@ -2044,10 +2274,16 @@ describe("composer lifecycle presentation", () => {
 
 describe("assistant answer footer contract", () => {
   it("shows final answer actions only for completed final answers", () => {
-    expect(shouldShowAssistantAnswerFooter({ status: "done", isFinal: true })).toBe(true);
+    expect(
+      shouldShowAssistantAnswerFooter({ status: "done", isFinal: true }),
+    ).toBe(true);
     expect(shouldShowAssistantAnswerFooter({ status: "done" })).toBe(false);
-    expect(shouldShowAssistantAnswerFooter({ status: "active", isFinal: true })).toBe(false);
-    expect(shouldShowAssistantAnswerFooter({ status: "error", isFinal: true })).toBe(false);
+    expect(
+      shouldShowAssistantAnswerFooter({ status: "active", isFinal: true }),
+    ).toBe(false);
+    expect(
+      shouldShowAssistantAnswerFooter({ status: "error", isFinal: true }),
+    ).toBe(false);
   });
 });
 
@@ -2324,8 +2560,12 @@ describe("AwakenComposerBar layout contract", () => {
   });
 
   it("limits slash palette height to the space above the composer", () => {
-    expect(slashPaletteStyleForAnchor(160, 700)["--composer-bar-slash-max-height"]).toBe("146px");
-    expect(slashPaletteStyleForAnchor(520, 700)["--composer-bar-slash-max-height"]).toBe("210px");
+    expect(
+      slashPaletteStyleForAnchor(160, 700)["--composer-bar-slash-max-height"],
+    ).toBe("146px");
+    expect(
+      slashPaletteStyleForAnchor(520, 700)["--composer-bar-slash-max-height"],
+    ).toBe("210px");
   });
 
   it("anchors the slash palette beside the caret and clamps it inside the viewport", () => {
@@ -2450,7 +2690,9 @@ describe("context usage presentation", () => {
           warningThresholdTokens: 95_000,
           autoCompactThresholdTokens: 100_800,
           compactTargetTokens: 40_000,
-          contributions: [{ kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 }],
+          contributions: [
+            { kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 },
+          ],
           generatedAt: "2026-07-19T00:00:02Z",
         },
         latestModelUsage: {
@@ -2594,7 +2836,9 @@ describe("context usage presentation", () => {
         warningThresholdTokens: 95_000,
         autoCompactThresholdTokens: 100_800,
         compactTargetTokens: 40_000,
-        contributions: [{ kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 }],
+        contributions: [
+          { kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 },
+        ],
         generatedAt: "2026-07-19T00:00:02Z",
       },
       latestModelUsage: {
@@ -2634,7 +2878,9 @@ describe("context usage presentation", () => {
         warningThresholdTokens: 95_000,
         autoCompactThresholdTokens: 100_800,
         compactTargetTokens: 40_000,
-        contributions: [{ kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 }],
+        contributions: [
+          { kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 },
+        ],
         generatedAt: "2026-07-19T00:00:02Z",
       },
       latestModelUsage: {
@@ -2676,7 +2922,9 @@ describe("context usage presentation", () => {
         warningThresholdTokens: 213_610,
         autoCompactThresholdTokens: 226_176,
         compactTargetTokens: 75_392,
-        contributions: [{ kind: "conversation", estimatedTokens: 120_689, sourceCount: 8 }],
+        contributions: [
+          { kind: "conversation", estimatedTokens: 120_689, sourceCount: 8 },
+        ],
         generatedAt: "2026-08-26T00:00:02Z",
       },
       latestModelUsage: {
@@ -2723,7 +2971,9 @@ describe("context usage presentation", () => {
         warningThresholdTokens: 95_000,
         autoCompactThresholdTokens: 100_800,
         compactTargetTokens: 40_000,
-        contributions: [{ kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 }],
+        contributions: [
+          { kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 },
+        ],
         generatedAt: "2026-07-19T00:00:02Z",
       },
       latestModelUsage: {
@@ -2803,7 +3053,10 @@ describe("context usage presentation", () => {
       estimatedTokens: 5_510,
     });
     expect(
-      data?.contributions?.reduce((sum, contribution) => sum + contribution.estimatedTokens, 0),
+      data?.contributions?.reduce(
+        (sum, contribution) => sum + contribution.estimatedTokens,
+        0,
+      ),
     ).toBe(20_082);
   });
 
@@ -2826,7 +3079,9 @@ describe("context usage presentation", () => {
           warningThresholdTokens: 95_000,
           autoCompactThresholdTokens: 100_800,
           compactTargetTokens: 40_000,
-          contributions: [{ kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 }],
+          contributions: [
+            { kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 },
+          ],
           generatedAt: "2026-07-19T00:00:02Z",
         },
         latestModelUsage: {
@@ -2876,7 +3131,9 @@ describe("context usage presentation", () => {
           warningThresholdTokens: 95_000,
           autoCompactThresholdTokens: 100_800,
           compactTargetTokens: 40_000,
-          contributions: [{ kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 }],
+          contributions: [
+            { kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 },
+          ],
           generatedAt: "2026-07-19T00:00:02Z",
         },
         latestModelUsage: {
@@ -2927,7 +3184,9 @@ describe("context usage presentation", () => {
           warningThresholdTokens: 95_000,
           autoCompactThresholdTokens: 100_800,
           compactTargetTokens: 40_000,
-          contributions: [{ kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 }],
+          contributions: [
+            { kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 },
+          ],
           generatedAt: "2026-07-19T00:00:02Z",
         },
         latestModelUsage: {
@@ -3391,7 +3650,9 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).toContain("execution-prompt-bubble-token");
     expect(html).toContain("aw-icon--book-open");
     expect(html).toContain("deep-research");
-    expect(html.indexOf("你好，你看到这个 skill 不?")).toBeLessThan(html.indexOf("deep-research"));
+    expect(html.indexOf("你好，你看到这个 skill 不?")).toBeLessThan(
+      html.indexOf("deep-research"),
+    );
     expect(html.indexOf("deep-research")).toBeLessThan(html.indexOf("请继续"));
     const promptStart = html.indexOf('class="execution-prompt-bubble-text');
     const promptEnd = html.indexOf("</p>", promptStart);
@@ -3478,7 +3739,9 @@ describe("AwakenUserPromptBlock layout contract", () => {
       }),
     );
 
-    expect(html.indexOf("deep-research")).toBeLessThan(html.indexOf("你好，你看到这个 skill 不?"));
+    expect(html.indexOf("deep-research")).toBeLessThan(
+      html.indexOf("你好，你看到这个 skill 不?"),
+    );
   });
 
   it("allows the expanded state to be controlled by the parent renderer", () => {
@@ -3564,7 +3827,9 @@ describe("AwakenUserPromptBlock layout contract", () => {
         expanded: true,
       }),
     );
-    expect(expandedHtml).not.toContain("execution-prompt-bubble-attachment-more");
+    expect(expandedHtml).not.toContain(
+      "execution-prompt-bubble-attachment-more",
+    );
     expect(expandedHtml).toContain("file-5.xlsx");
   });
 
@@ -3604,8 +3869,12 @@ describe("AwakenUserPromptBlock layout contract", () => {
     );
 
     expect(html).toContain("execution-prompt-bubble-text aw-text-selectable");
-    expect(html).toContain("execution-prompt-bubble-token-label aw-text-selectable");
-    expect(html).toContain("execution-prompt-bubble-file-name aw-text-selectable");
+    expect(html).toContain(
+      "execution-prompt-bubble-token-label aw-text-selectable",
+    );
+    expect(html).toContain(
+      "execution-prompt-bubble-file-name aw-text-selectable",
+    );
   });
 
   it("builds copy text from visible attachment names, token labels, and body", () => {
@@ -3669,6 +3938,22 @@ describe("prompt token text projection", () => {
     expect(promptTokenViews(tokens)?.[0]?.leadingText).toBe("请使用 \n");
   });
 
+  it("projects the official brand for durable Outlook plugin tokens", () => {
+    expect(
+      promptTokenViews(
+        [
+          {
+            id: "plugin:awaken-outlook:digest",
+            type: "plugin",
+            label: "Outlook 邮箱",
+            payload: { pluginName: "awaken-outlook", pluginDigest: "digest" },
+          },
+        ],
+        new Map([["awaken-outlook", "outlook"]]),
+      )?.[0]?.brandIcon,
+    ).toBe("outlook");
+  });
+
   it("removes only durable leading segments and keeps suffix whitespace", () => {
     const tokens = [
       {
@@ -3679,7 +3964,9 @@ describe("prompt token text projection", () => {
       },
     ];
 
-    expect(promptTextAfterTokenLeadingText("请使用  这个技能写", tokens)).toBe(" 这个技能写");
+    expect(promptTextAfterTokenLeadingText("请使用  这个技能写", tokens)).toBe(
+      " 这个技能写",
+    );
     expect(promptTextAfterTokenLeadingText("请使用", tokens)).toBe("");
   });
 });
@@ -3708,7 +3995,13 @@ describe("structured Composer draft reconciliation", () => {
       value: "然后总结",
       focusOffset: 4,
     });
-    expect(composerStructuredDraftLength(result.tokens, result.leadingTexts, result.value)).toBe(8);
+    expect(
+      composerStructuredDraftLength(
+        result.tokens,
+        result.leadingTexts,
+        result.value,
+      ),
+    ).toBe(8);
   });
 
   it("preserves existing Skill token order when inserting a file token between text segments", () => {
@@ -3733,7 +4026,10 @@ describe("structured Composer draft reconciliation", () => {
       token: fileToken,
     });
 
-    expect(result.tokens).toEqual([skillToken, { ...fileToken, leadingText: "处理" }]);
+    expect(result.tokens).toEqual([
+      skillToken,
+      { ...fileToken, leadingText: "处理" },
+    ]);
     expect(result.value).toBe("材料");
     expect(result.focusOffset).toBe(6);
   });
@@ -3884,19 +4180,26 @@ describe("thread-scoped Composer drafts", () => {
       value: "B 草稿",
       selection: { anchor: 4, focus: 4 },
     });
-    expect(threadComposerDraftForOwner(drafts, composerDraftOwnerKey()).value).toBe("");
+    expect(
+      threadComposerDraftForOwner(drafts, composerDraftOwnerKey()).value,
+    ).toBe("");
   });
 
   it("treats equal logical and caret geometry selections as the same state", () => {
-    expect(composerSelectionsEqual({
+    expect(
+      composerSelectionsEqual(
+        {
       anchor: 3,
       focus: 3,
       caretRect: { left: 1, top: 2, bottom: 3 },
-    }, {
+        },
+        {
       anchor: 3,
       focus: 3,
       caretRect: { left: 1, top: 2, bottom: 3 },
-    })).toBe(true);
+        },
+      ),
+    ).toBe(true);
   });
 });
 
@@ -3911,7 +4214,9 @@ describe("macOS window chrome geometry", () => {
   });
 
   it("keeps the chrome control offset on an integer pixel to stay on the device pixel grid", () => {
-    expect(Number.isInteger(MACOS_WINDOW_CHROME_GEOMETRY.controlTopOffsetPx)).toBe(true);
+    expect(
+      Number.isInteger(MACOS_WINDOW_CHROME_GEOMETRY.controlTopOffsetPx),
+    ).toBe(true);
   });
 });
 
@@ -3935,7 +4240,9 @@ describe("prompt attachment view models", () => {
       detail: "PDF · 24 KB",
       extension: "PDF",
     });
-    expect(views[0]?.tooltip).toContain("路径: .../nolangrant/Desktop/specification.pdf");
+    expect(views[0]?.tooltip).toContain(
+      "路径: .../nolangrant/Desktop/specification.pdf",
+    );
   });
 });
 
@@ -3947,9 +4254,12 @@ describe("project workspace helpers", () => {
     [{ status: "succeeded", phase: "completed" }, "succeeded"],
     [{ status: "failed", phase: "failed" }, "failed"],
     [{ status: "blocked", phase: "cancelled" }, "failed"],
-  ] as const)("classifies durable project operation %o as %s", (operation, expected) => {
+  ] as const)(
+    "classifies durable project operation %o as %s",
+    (operation, expected) => {
     expect(projectOperationReconciliationState(operation)).toBe(expected);
-  });
+    },
+  );
 
   it("reconciles a folder trash operation by whether the folder is still attached", () => {
     const stillAttached = {
@@ -3968,12 +4278,30 @@ describe("project workspace helpers", () => {
         "/tmp/secondary",
       ),
     ).toBe(false);
-    expect(canReconcileTrackedTrashOperation("failed", stillAttached, "/tmp/secondary")).toBe(true);
-    expect(canReconcileTrackedTrashOperation("failed", detached, "/tmp/secondary")).toBe(false);
-    expect(canReconcileTrackedTrashOperation("succeeded", stillAttached, "/tmp/secondary")).toBe(
-      false,
-    );
-    expect(canReconcileTrackedTrashOperation("succeeded", detached, "/tmp/secondary")).toBe(true);
+    expect(
+      canReconcileTrackedTrashOperation(
+        "failed",
+        stillAttached,
+        "/tmp/secondary",
+      ),
+    ).toBe(true);
+    expect(
+      canReconcileTrackedTrashOperation("failed", detached, "/tmp/secondary"),
+    ).toBe(false);
+    expect(
+      canReconcileTrackedTrashOperation(
+        "succeeded",
+        stillAttached,
+        "/tmp/secondary",
+      ),
+    ).toBe(false);
+    expect(
+      canReconcileTrackedTrashOperation(
+        "succeeded",
+        detached,
+        "/tmp/secondary",
+      ),
+    ).toBe(true);
   });
 
   it("persists valid trash trackers, removes malformed entries, and replaces duplicates", () => {
@@ -3986,11 +4314,15 @@ describe("project workspace helpers", () => {
       wasExpanded: true,
     };
     expect(
-      parseTrackedTrashOperations(JSON.stringify([tracked, { operationId: "broken" }, tracked])),
+      parseTrackedTrashOperations(
+        JSON.stringify([tracked, { operationId: "broken" }, tracked]),
+      ),
     ).toEqual([tracked]);
     expect(parseTrackedTrashOperations("not-json")).toEqual([]);
     expect(
-      parseTrackedTrashOperations(JSON.stringify([{ ...tracked, folderPath: undefined }])),
+      parseTrackedTrashOperations(
+        JSON.stringify([{ ...tracked, folderPath: undefined }]),
+      ),
     ).toEqual([]);
     expect(
       upsertTrackedTrashOperation([tracked], {
@@ -4008,7 +4340,9 @@ describe("project workspace helpers", () => {
   });
 
   it("normalizes workspace paths and labels them by folder name", () => {
-    expect(normalizeWorkspacePath("/Users/nolangrant/Awaken/")).toBe("/Users/nolangrant/Awaken");
+    expect(normalizeWorkspacePath("/Users/nolangrant/Awaken/")).toBe(
+      "/Users/nolangrant/Awaken",
+    );
     expect(workspaceLabelForPath("/Users/nolangrant/Awaken/")).toBe("Awaken");
     expect(
       isSameWorkspacePath(
@@ -4028,8 +4362,12 @@ describe("project workspace helpers", () => {
         "c:/users/nolan/awaken project",
       ),
     ).toBe(true);
-    expect(isSameWorkspacePath("/Users/Nolan/Awaken", "/users/nolan/awaken")).toBe(false);
-    expect(isSameWorkspacePath("//Server/Share/Awaken", "//server/share/awaken")).toBe(false);
+    expect(
+      isSameWorkspacePath("/Users/Nolan/Awaken", "/users/nolan/awaken"),
+    ).toBe(false);
+    expect(
+      isSameWorkspacePath("//Server/Share/Awaken", "//server/share/awaken"),
+    ).toBe(false);
     expect(
       workspaceProjectRunRoots({
         path: String.raw`C:\Users\Nolan\Awaken Project`,
@@ -4061,10 +4399,16 @@ describe("project workspace helpers", () => {
       ),
     ).toBe("project_123");
     expect(
-      projectIdForThread({ threadId: "thread-1", workspaceRoot: "/tmp/demo" }, "/tmp/default"),
+      projectIdForThread(
+        { threadId: "thread-1", workspaceRoot: "/tmp/demo" },
+        "/tmp/default",
+      ),
     ).toBeUndefined();
     expect(
-      projectIdForThread({ threadId: "thread-1", workspaceRoot: "/tmp/default" }, "/tmp/default"),
+      projectIdForThread(
+        { threadId: "thread-1", workspaceRoot: "/tmp/default" },
+        "/tmp/default",
+      ),
     ).toBe(DEFAULT_WORKSPACE_PROJECT_ID);
   });
 
@@ -4327,18 +4671,28 @@ describe("App workbench presentation", () => {
     expect(composerMetaItemsForFileWorkspaceSurface(metaItems, true)).toEqual([
       { id: "model", label: "kimi-for-coding" },
     ]);
-    expect(composerMetaItemsForFileWorkspaceSurface(metaItems, false)).toBe(metaItems);
+    expect(composerMetaItemsForFileWorkspaceSurface(metaItems, false)).toBe(
+      metaItems,
+    );
   });
 
   it("selects the target model even when its effort equals the current model effort", () => {
     expect(
-      modelPreferenceChangeForOption("profile-target", "profile-current", "high"),
+      modelPreferenceChangeForOption(
+        "profile-target",
+        "profile-current",
+        "high",
+      ),
     ).toEqual({
       modelProfileId: "profile-target",
       reasoningEffort: "high",
     });
     expect(
-      modelPreferenceChangeForOption("profile-current", "profile-current", "high"),
+      modelPreferenceChangeForOption(
+        "profile-current",
+        "profile-current",
+        "high",
+      ),
     ).toBeUndefined();
   });
 
@@ -4491,17 +4845,27 @@ describe("App workbench presentation", () => {
   });
 
   it("positions subagent detail above the measured dock composer", () => {
-    expect(subagentDetailPanelBottomOffset({ composerContentInset: 88 })).toBe(100);
-    expect(subagentDetailPanelBottomOffset({ composerContentInset: -20 })).toBe(28);
+    expect(subagentDetailPanelBottomOffset({ composerContentInset: 88 })).toBe(
+      100,
+    );
+    expect(subagentDetailPanelBottomOffset({ composerContentInset: -20 })).toBe(
+      28,
+    );
   });
 
   it("derives live and terminal subagent elapsed time from durable timestamps", () => {
     expect(
-      subagentElapsedMs({ startedAt: "2026-08-02T07:00:00Z" }, Date.parse("2026-08-02T07:00:05Z")),
+      subagentElapsedMs(
+        { startedAt: "2026-08-02T07:00:00Z" },
+        Date.parse("2026-08-02T07:00:05Z"),
+      ),
     ).toBe(5000);
     expect(
       subagentElapsedMs(
-        { startedAt: "2026-08-02T07:00:00Z", finishedAt: "2026-08-02T07:01:05Z" },
+        {
+          startedAt: "2026-08-02T07:00:00Z",
+          finishedAt: "2026-08-02T07:01:05Z",
+        },
         Date.parse("2026-08-02T08:00:00Z"),
       ),
     ).toBe(65000);
@@ -4661,7 +5025,10 @@ describe("App workbench presentation", () => {
   });
 
   it("adapts turn marker density to the available rail height", () => {
-    const eightTurns = Array.from({ length: 8 }, (_, index) => `turn-${index + 1}`);
+    const eightTurns = Array.from(
+      { length: 8 },
+      (_, index) => `turn-${index + 1}`,
+    );
     expect(
       turnMarkerRailDisplay({
         showCenterComposer: false,
@@ -4674,7 +5041,10 @@ describe("App workbench presentation", () => {
       items: eightTurns.map((id, index) => ({ id, index })),
     });
 
-    const twentyTurns = Array.from({ length: 20 }, (_, index) => `turn-${index + 1}`);
+    const twentyTurns = Array.from(
+      { length: 20 },
+      (_, index) => `turn-${index + 1}`,
+    );
     const compactDisplay = turnMarkerRailDisplay({
       showCenterComposer: false,
       turnIds: twentyTurns,
@@ -4686,7 +5056,10 @@ describe("App workbench presentation", () => {
   });
 
   it("samples dense turn markers around the active turn without dropping endpoints", () => {
-    const fortyTurns = Array.from({ length: 40 }, (_, index) => `turn-${index + 1}`);
+    const fortyTurns = Array.from(
+      { length: 40 },
+      (_, index) => `turn-${index + 1}`,
+    );
     const display = turnMarkerRailDisplay({
       showCenterComposer: false,
       turnIds: fortyTurns,
@@ -4698,7 +5071,13 @@ describe("App workbench presentation", () => {
     expect(display.mode).toBe("summary");
     expect(display.items.length).toBeLessThanOrEqual(8);
     expect(display.items.map((item) => item.id)).toEqual(
-      expect.arrayContaining(["turn-1", "turn-19", "turn-20", "turn-21", "turn-40"]),
+      expect.arrayContaining([
+        "turn-1",
+        "turn-19",
+        "turn-20",
+        "turn-21",
+        "turn-40",
+      ]),
     );
   });
 
@@ -4994,7 +5373,8 @@ describe("App workbench presentation", () => {
         isFinal: true,
       } as const;
 
-      expect(projectNarrativeTurnBodySegments({
+      expect(
+        projectNarrativeTurnBodySegments({
         turnId: "prompt:media",
         items: [
           thinking,
@@ -5006,7 +5386,8 @@ describe("App workbench presentation", () => {
           answer,
         ],
         executionProcessOpen: false,
-      })).toEqual([
+        }),
+      ).toEqual([
         {
           kind: "executionProcess",
           id: "execution-process:prompt:media",
@@ -5478,8 +5859,12 @@ describe("App workbench presentation", () => {
         isAtScrollBottom: false,
       }),
     ).toBe(false);
-    expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: 12 })).toBe(true);
-    expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: -12 })).toBe(false);
+    expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: 12 })).toBe(
+      true,
+    );
+    expect(shouldRequestLatestOutputFollowResumeForWheel({ deltaY: -12 })).toBe(
+      false,
+    );
     expect(
       shouldPauseLatestOutputFollowForTouchMove({
         startY: 100,
@@ -5619,7 +6004,11 @@ describe("App workbench presentation", () => {
 });
 
 describe("sidebar thread archive menu", () => {
-  const idleThread = { threadId: "thread-1", label: "会话", runStatus: "finished" as const };
+  const idleThread = {
+    threadId: "thread-1",
+    label: "会话",
+    runStatus: "finished" as const,
+  };
 
   it("orders the menu as rename, archive, delete with danger only on delete", () => {
     const items = sidebarThreadMenuItems(idleThread, {
@@ -5640,20 +6029,29 @@ describe("sidebar thread archive menu", () => {
 
   it("disables archive for running or cancelling threads with guidance", () => {
     for (const runStatus of ["running", "cancelling"] as const) {
-      expect(sidebarThreadArchiveMenuState({ ...idleThread, runStatus })).toEqual({
+      expect(
+        sidebarThreadArchiveMenuState({ ...idleThread, runStatus }),
+      ).toEqual({
         disabled: true,
         disabledReason: "请先停止正在运行的任务",
       });
     }
     // 无 runStatus 时按 activeRunId 兜底。
     expect(
-      sidebarThreadArchiveMenuState({ threadId: "t", label: "x", activeRunId: "run-1" }),
+      sidebarThreadArchiveMenuState({
+        threadId: "t",
+        label: "x",
+        activeRunId: "run-1",
+      }),
     ).toEqual({ disabled: true, disabledReason: "请先停止正在运行的任务" });
   });
 
   it("disables archive for scheduled task threads with guidance", () => {
     expect(
-      sidebarThreadArchiveMenuState({ ...idleThread, source: "scheduled_task" }),
+      sidebarThreadArchiveMenuState({
+        ...idleThread,
+        source: "scheduled_task",
+      }),
     ).toEqual({ disabled: true, disabledReason: "定时任务会话由定时任务管理" });
   });
 
@@ -5665,7 +6063,9 @@ describe("sidebar thread archive menu", () => {
       onDelete: vi.fn(),
     });
 
-    expect(sidebarThreadArchiveMenuState(idleThread)).toEqual({ disabled: false });
+    expect(sidebarThreadArchiveMenuState(idleThread)).toEqual({
+      disabled: false,
+    });
     items[1].onSelect?.();
     expect(onArchive).toHaveBeenCalledTimes(1);
   });

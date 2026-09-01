@@ -106,6 +106,7 @@ POST   /v1/connectors/{id}/connect
 POST   /v1/connectors/{id}/disconnect
 GET    /v1/connectors/auth/sessions/{sessionId}
 POST   /v1/connectors/auth/sessions/{sessionId}/cancel
+POST   /v1/connectors/auth/sessions/{sessionId}/admin-approval
 GET    /v1/skills
 POST   /v1/skills/preview
 POST   /v1/skills/install
@@ -124,6 +125,7 @@ GET    /v1/plugins/{name}/setup
 POST   /v1/plugins/{name}/setup/{setupId}/sessions
 GET    /v1/plugins/{name}/setup/sessions/{sessionId}
 POST   /v1/plugins/{name}/setup/sessions/{sessionId}/cancel
+POST   /v1/plugins/{name}/setup/sessions/{sessionId}/admin-approval
 POST   /v1/plugins/{name}/setup/{setupId}/probe
 DELETE /v1/plugins/{name}/setup/{setupId}/credential
 POST   /v1/plugins/{name}/servers/{short}/enable
@@ -143,9 +145,11 @@ GET    /v1/plugins/{name}/configuration
 PUT    /v1/plugins/{name}/configuration
 ```
 
-`/v1/mcp/servers*` 依赖 MCP manager；connector routes 依赖 registry。Skill list/install/preview/delete/enable/disable 始终注册，registry 缺失时返回 503。`GET /v1/skills` 可按主文件夹优先重复提交 `projectRoot` query；Core 把这些值视为同一个项目的有序文件夹组，在一次 discovery 中合并并返回每条 project Skill 的实际 `projectPath`。只提交一次保持原单文件夹语义。`POST /v1/skills/{id}/execute` 未注册，只是保留 handler。Skill 预览与删除的业务合同由 [08 技能](../08_技能/索引.md) 拥有。
+`/v1/mcp/servers*` 依赖 MCP manager；connector routes 依赖 registry。`GET /v1/connectors` 是顶层连接器目录投影，返回 `catalogPlacement=connectors` 的条目并排除 `plugin_only` host Connector；后者的 definition、状态与 connect/auth/disconnect routes 仍保留给引用插件使用。Skill list/install/preview/delete/enable/disable 始终注册，registry 缺失时返回 503。`GET /v1/skills` 可按主文件夹优先重复提交 `projectRoot` query；Core 把这些值视为同一个项目的有序文件夹组，在一次 discovery 中合并并返回每条 project Skill 的实际 `projectPath`。只提交一次保持原单文件夹语义。`POST /v1/skills/{id}/execute` 未注册，只是保留 handler。Skill 预览与删除的业务合同由 [08 技能](../08_技能/索引.md) 拥有。
 
-`/v1/plugins*` 始终注册；Store 缺失返回 503，状态损坏 fail closed。validate/install 的 source kind 只接受 `local_path`，`remote_url` 与 `remote_git` 明确拒绝；Desktop bridge 的 `local_path` 只能来自 Main 的 ZIP-only picker，受控 Plugin Creator 才能提交候选目录。validate 只隔离物化，不写安装树或运行组件；install 同时复验 expected Plugin digest。logicalId path 参数使用 Core 返回的 base64url 值，server 不接受 Renderer 自造路径。component source PUT 当前只接受 `kind=mcp_server`，body 为 `{expectedDigest, source}`；Core 根据 logicalId 解析精确文件，在 staging 完整校验后以 digest CAS 原子保存，Renderer 不提交路径。成功响应为 `{plugin, revision, changed}`；提交与当前文件完全相同的文本返回 `changed=false`，不改 digest、revision 或运行时。源文件内容、manifest/identity 或 containment 校验失败返回 400 `MCP_SOURCE_INVALID`，stale digest 与 active generation 分别保持 409。component/config mutation 都返回 revision；活动 run lease 期间返回 409 `RUNTIME_GENERATION_IN_USE`。setup list 是脱敏 projection；start/probe/disconnect mutation body 固定为 `{pluginDigest, requirementFingerprint}`，任一不匹配返回 409 `PLUGIN_SETUP_STALE`。start 响应中的 authorization URL 或 device user code 只供 Electron Main 立即消费，Preload/Renderer 只返回脱敏 session DTO。Hook receipt GET 的 retention 当前为 `memory_only`；retry 是无原 run context 的诊断执行。业务语义由 [14 插件](../14_插件/索引.md) 与相应 runtime 域拥有。
+`/v1/plugins*` 始终注册；Store 缺失返回 503，状态损坏 fail closed。validate/install 的 source kind 只接受 `local_path`，`remote_url` 与 `remote_git` 明确拒绝；Desktop bridge 的 `local_path` 只能来自 Main 的 ZIP-only picker，受控 Plugin Creator 才能提交候选目录。validate 只隔离物化，不写安装树或运行组件；install 同时复验 expected Plugin digest。logicalId path 参数使用 Core 返回的 base64url 值，server 不接受 Renderer 自造路径。component source PUT 当前只接受 `kind=mcp_server`，body 为 `{expectedDigest, source}`；Core 根据 logicalId 解析精确文件，在 staging 完整校验后以 digest CAS 原子保存，Renderer 不提交路径。成功响应为 `{plugin, revision, changed}`；提交与当前文件完全相同的文本返回 `changed=false`，不改 digest、revision 或运行时。源文件内容、manifest/identity 或 containment 校验失败返回 400 `MCP_SOURCE_INVALID`，stale digest 与 active generation 分别保持 409。component/config mutation 都返回 revision；活动 run lease 期间返回 409 `RUNTIME_GENERATION_IN_USE`。setup list 是脱敏 projection；start/probe/disconnect mutation body 固定为 `{pluginDigest, requirementFingerprint}`，任一不匹配返回 409 `PLUGIN_SETUP_STALE`。start 响应中的 authorization URL 或 device user code 只供 Electron Main 立即消费，Preload/Renderer 只返回脱敏 session DTO。`admin-approval` 只允许把仍在 authorizing/verifying 的 session 转为非凭据 `pending_admin_approval`，不接受 URL、tenant 或浏览器正文。Hook receipt GET 的 retention 当前为 `memory_only`；retry 是无原 run context 的诊断执行。业务语义由 [14 插件](../14_插件/索引.md) 与相应 runtime 域拥有。
+
+plugin list/get DTO 另固定返回 `builtin:boolean` 与 `builtinOrder:number`，可选返回受控 `brandIcon`；它们只由发布内置目录同步产生，不能由 install request 或普通插件 manifest 声明。内置插件的普通 install/replace、DELETE、commit 和 MCP source mutation 返回 409 `BUILTIN_PLUGIN_IMMUTABLE`，enable/disable 与 setup mutation仍使用原有 route。
 
 `GET /v1/composer-catalog/events` 是 Main 常驻消费的 SSE 失效流。每次连接先发送当前 `{revision, kind:"snapshot"}`；Skill Registry 或 Plugin Store 的成功 catalog mutation 使 revision 单调递增并发送 `kind=skills|plugins`。事件不携带 Skill/Plugin 数据、路径或配置，Renderer 收到后只能通过 typed `listSkills/listPlugins` 按当前 workspace 与 marker 重读权威目录；重新连接不回放历史 mutation，因为 snapshot revision 与每次打开直接重读共同保证当前状态。
 

@@ -164,6 +164,26 @@
   gap: 4px;
 }
 
+.aw-connector-card__approval-action {
+  padding: 4px 7px;
+  border: 0;
+  border-radius: var(--aw-radius-sm);
+  background: transparent;
+  color: var(--aw-text-secondary);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.aw-connector-card__approval-action:hover:enabled {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.aw-connector-card__approval-action:disabled {
+  opacity: 0.44;
+}
+
 .aw-connector-card__action {
   display: inline-grid;
   place-items: center;

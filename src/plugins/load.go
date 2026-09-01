@@ -11,13 +11,16 @@ import (
 // servers are discovered. mcp.json top-level failure only disables MCP.
 func LoadPackage(pluginRoot, dataDir string, rec Record) *InstalledPlugin {
 	plugin := &InstalledPlugin{
-		Name:        recName(pluginRoot, rec),
-		Root:        pluginRoot,
-		DataDir:     dataDir,
-		Enabled:     rec.Enabled,
-		Source:      rec.Source,
-		Digest:      rec.Digest,
-		InstalledAt: rec.InstalledAt,
+		Name:         recName(pluginRoot, rec),
+		Root:         pluginRoot,
+		DataDir:      dataDir,
+		Enabled:      rec.Enabled,
+		Source:       rec.Source,
+		Digest:       rec.Digest,
+		InstalledAt:  rec.InstalledAt,
+		Builtin:      rec.Builtin,
+		BrandIcon:    rec.BrandIcon,
+		BuiltinOrder: rec.BuiltinOrder,
 	}
 	parsed, err := loadManifestFile(pluginRoot)
 	if err != nil {

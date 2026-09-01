@@ -8,7 +8,7 @@ import (
 )
 
 var knownFrontmatterFields = map[string]struct{}{
-	"name": {}, "displayName": {}, "display_name": {}, "description": {},
+	"name": {}, "displayName": {}, "display_name": {}, "description": {}, "metadata": {},
 	"when_to_use": {}, "whenToUse": {}, "version": {},
 	"allowed-tools": {}, "allowedTools": {}, "toolPolicy": {},
 	"user-invocable": {}, "userInvocable": {},
@@ -115,8 +115,14 @@ func decodeKnownFrontmatter(fields map[string]any, def *SkillDefinition) error {
 		if err := decode("display_name", &def.DisplayName); err != nil {
 			return err
 		}
-	} else if err := decode("displayName", &def.DisplayName); err != nil {
-		return err
+	} else if _, ok := fields["displayName"]; ok {
+		if err := decode("displayName", &def.DisplayName); err != nil {
+			return err
+		}
+	} else if metadata, ok := fields["metadata"].(map[string]any); ok {
+		displayName, _ := metadata["display_name"].(string)
+		compatDisplayName, _ := metadata["displayName"].(string)
+		def.DisplayName = firstNonEmpty(displayName, compatDisplayName)
 	}
 
 	if _, canonical := fields["when_to_use"]; canonical {

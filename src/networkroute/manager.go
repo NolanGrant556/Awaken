@@ -15,11 +15,12 @@ import (
 )
 
 const (
-	SystemSnapshotEnvironment = "AWAKEN_SYSTEM_PROXY_SNAPSHOT"
-	ProxyPolicyEnvironment    = "AWAKEN_PROXY_POLICY"
-	snapshotSchemaVersion     = 1
-	defaultProbeTimeout       = 250 * time.Millisecond
-	defaultProbeTTL           = 2 * time.Second
+	SystemSnapshotEnvironment   = "AWAKEN_SYSTEM_PROXY_SNAPSHOT"
+	ProxyPolicyEnvironment      = "AWAKEN_PROXY_POLICY"
+	snapshotSchemaVersion       = 1
+	defaultProbeTimeout         = 250 * time.Millisecond
+	defaultProbeTTL             = 2 * time.Second
+	defaultProxyFailureCooldown = 30 * time.Second
 )
 
 type Policy string
@@ -51,8 +52,9 @@ type endpointProbe func(context.Context, string) bool
 type DialContextFunc func(context.Context, string, string) (net.Conn, error)
 
 type probeObservation struct {
-	reachable bool
-	checkedAt time.Time
+	reachable  bool
+	checkedAt  time.Time
+	retryAfter time.Time
 }
 
 type environmentConfig struct {
@@ -63,16 +65,17 @@ type environmentConfig struct {
 }
 
 type Manager struct {
-	mu             sync.RWMutex
-	environment    environmentConfig
-	system         SystemSnapshot
-	policy         Policy
-	policyExplicit bool
-	probe          endpointProbe
-	now            func() time.Time
-	probeTTL       time.Duration
-	probeMu        sync.Mutex
-	probeCache     map[string]probeObservation
+	mu                   sync.RWMutex
+	environment          environmentConfig
+	system               SystemSnapshot
+	policy               Policy
+	policyExplicit       bool
+	probe                endpointProbe
+	now                  func() time.Time
+	probeTTL             time.Duration
+	proxyFailureCooldown time.Duration
+	probeMu              sync.Mutex
+	probeCache           map[string]probeObservation
 }
 
 type Option func(*Manager)
@@ -101,17 +104,26 @@ func WithNow(now func() time.Time) Option {
 	}
 }
 
+func WithProxyFailureCooldown(cooldown time.Duration) Option {
+	return func(manager *Manager) {
+		if cooldown >= 0 {
+			manager.proxyFailureCooldown = cooldown
+		}
+	}
+}
+
 func NewFromEnvironment(entries []string, options ...Option) *Manager {
 	values := environmentValues(entries)
 	policy, explicit := parsePolicy(values[ProxyPolicyEnvironment])
 	manager := &Manager{
-		environment:    parseEnvironmentConfig(values),
-		policy:         policy,
-		policyExplicit: explicit,
-		probe:          dialEndpoint,
-		now:            time.Now,
-		probeTTL:       defaultProbeTTL,
-		probeCache:     make(map[string]probeObservation),
+		environment:          parseEnvironmentConfig(values),
+		policy:               policy,
+		policyExplicit:       explicit,
+		probe:                dialEndpoint,
+		now:                  time.Now,
+		probeTTL:             defaultProbeTTL,
+		proxyFailureCooldown: defaultProxyFailureCooldown,
+		probeCache:           make(map[string]probeObservation),
 		system: SystemSnapshot{
 			SchemaVersion: snapshotSchemaVersion,
 			Policy:        policy,
@@ -253,9 +265,15 @@ func (manager *Manager) endpointReachable(ctx context.Context, proxyURL *url.URL
 	}
 	now := manager.now()
 	manager.probeMu.Lock()
-	if observation, ok := manager.probeCache[address]; ok && now.Sub(observation.checkedAt) <= manager.probeTTL {
-		manager.probeMu.Unlock()
-		return observation.reachable
+	if observation, ok := manager.probeCache[address]; ok {
+		if !observation.reachable && now.Before(observation.retryAfter) {
+			manager.probeMu.Unlock()
+			return false
+		}
+		if now.Sub(observation.checkedAt) <= manager.probeTTL {
+			manager.probeMu.Unlock()
+			return observation.reachable
+		}
 	}
 	manager.probeMu.Unlock()
 
@@ -273,6 +291,40 @@ func (manager *Manager) ReportDialFailure(address string) {
 	manager.probeMu.Lock()
 	delete(manager.probeCache, address)
 	manager.probeMu.Unlock()
+}
+
+// ReportProxyFailure marks the loopback proxy selected for request unhealthy
+// for a bounded cooldown. A TCP listener can remain reachable while its HTTP
+// CONNECT/TLS path is broken; auto policy may use direct routing during the
+// cooldown. Proxy-only and non-loopback enterprise routes never silently fall
+// back to direct.
+func (manager *Manager) ReportProxyFailure(request *http.Request) bool {
+	if request == nil || request.URL == nil {
+		return false
+	}
+	manager.mu.RLock()
+	policy := manager.policy
+	manager.mu.RUnlock()
+	if policy != PolicyAuto {
+		return false
+	}
+	proxyURL, err := manager.ProxyForRequest(request)
+	if err != nil || proxyURL == nil || !isLoopbackProxy(proxyURL) {
+		return false
+	}
+	address := proxyAddress(proxyURL)
+	if address == "" {
+		return false
+	}
+	now := manager.now()
+	manager.probeMu.Lock()
+	manager.probeCache[address] = probeObservation{
+		reachable:  false,
+		checkedAt:  now,
+		retryAfter: now.Add(manager.proxyFailureCooldown),
+	}
+	manager.probeMu.Unlock()
+	return true
 }
 
 func dialEndpoint(ctx context.Context, address string) bool {
@@ -554,6 +606,10 @@ func DefaultManager() *Manager {
 
 func DefaultProxyForRequest(request *http.Request) (*url.URL, error) {
 	return DefaultManager().ProxyForRequest(request)
+}
+
+func ReportDefaultProxyFailure(request *http.Request) bool {
+	return DefaultManager().ReportProxyFailure(request)
 }
 
 func DefaultEnvironmentForChild(source []string) ([]string, error) {

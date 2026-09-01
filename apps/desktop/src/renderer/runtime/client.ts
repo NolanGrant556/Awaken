@@ -228,6 +228,7 @@ export type RuntimeClient = {
   disconnectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
   getConnectorAuthSession?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
   cancelConnectorAuthSession?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
+  markConnectorAdminApprovalPending?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
   listCliConnectors: () => Promise<CliConnectorView[]>;
   refreshCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
   installCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
@@ -323,8 +324,14 @@ export type RuntimeClient = {
     setupId: string,
     request: RuntimePluginSetupMutationRequest,
   ) => Promise<RuntimePluginAuthSession>;
+  getActivePluginAuthSession?: (
+    name: string,
+    setupId: string,
+    request: RuntimePluginSetupMutationRequest,
+  ) => Promise<RuntimePluginAuthSession | null>;
   getPluginAuthSession?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
   cancelPluginAuthSession?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
+  markPluginAdminApprovalPending?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
   probePluginSetup?: (
     name: string,
     setupId: string,
@@ -589,6 +596,9 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     cancelConnectorAuthSession: bridge.cancelConnectorAuthSession
       ? (sessionId) => bridge.cancelConnectorAuthSession!(sessionId)
       : undefined,
+    markConnectorAdminApprovalPending: bridge.markConnectorAdminApprovalPending
+      ? (sessionId) => bridge.markConnectorAdminApprovalPending!(sessionId)
+      : undefined,
     listCliConnectors: () => bridge.listCliConnectors(),
     refreshCliConnector: (providerId) => bridge.refreshCliConnector(providerId),
     installCliConnector: (providerId) => bridge.installCliConnector(providerId),
@@ -651,11 +661,17 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     startPluginSetup: bridge.startPluginSetup
       ? (name, setupId, request) => bridge.startPluginSetup!(name, setupId, request)
       : undefined,
+    getActivePluginAuthSession: bridge.getActivePluginAuthSession
+      ? (name, setupId, request) => bridge.getActivePluginAuthSession!(name, setupId, request)
+      : undefined,
     getPluginAuthSession: bridge.getPluginAuthSession
       ? (name, sessionId) => bridge.getPluginAuthSession!(name, sessionId)
       : undefined,
     cancelPluginAuthSession: bridge.cancelPluginAuthSession
       ? (name, sessionId) => bridge.cancelPluginAuthSession!(name, sessionId)
+      : undefined,
+    markPluginAdminApprovalPending: bridge.markPluginAdminApprovalPending
+      ? (name, sessionId) => bridge.markPluginAdminApprovalPending!(name, sessionId)
       : undefined,
     probePluginSetup: bridge.probePluginSetup
       ? (name, setupId, request) => bridge.probePluginSetup!(name, setupId, request)

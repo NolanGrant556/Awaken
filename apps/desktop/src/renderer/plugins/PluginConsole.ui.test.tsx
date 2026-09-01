@@ -9,11 +9,13 @@ import {
   AwakenPluginConsole,
   type AwakenPluginConsoleComponent,
   type AwakenPluginConsoleDetail,
+  type AwakenPluginSetupItem,
 } from "@awaken/design-system";
 import type {
   RuntimePlugin,
   RuntimePluginComponentDetail,
   RuntimePluginComponentState,
+  RuntimePluginSetupItem,
 } from "../../shared/runtime";
 import type { RuntimeClient } from "../runtime/client";
 import { isPluginComponentUsableInChat, PluginConsole } from "./PluginConsole";
@@ -171,6 +173,54 @@ function setTextAreaValue(element: HTMLTextAreaElement, value: string): void {
 }
 
 describe("AwakenPluginConsole compact component flow", () => {
+  it("uses the Outlook brand and removes uninstall from a built-in Plugin", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <AwakenPluginConsole
+          name="awaken-outlook"
+          displayName="Outlook 邮箱"
+          builtin
+          brandIcon="outlook"
+          enabled={false}
+          components={[]}
+          selectedDetail={null}
+          activeDetailTab="overview"
+          onBack={() => undefined}
+          onEnabledChange={() => undefined}
+          onComponentOpen={() => undefined}
+          onComponentEnabledChange={() => undefined}
+          onDetailTabChange={() => undefined}
+          onDetailClose={() => undefined}
+        />,
+      );
+    });
+    expect(container.textContent).toContain("Outlook 邮箱");
+    expect(container.textContent).toContain("Awaken 内置");
+    expect([...container.querySelectorAll("button")].some((button) => button.textContent === "卸载")).toBe(false);
+    expect(container.querySelector('.aw-plugin-brand-icon[data-brand="outlook"][data-size="detail"] img')).not.toBeNull();
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("keeps Plugin titles fully visible instead of ellipsizing them", () => {
+    const styles = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../Awaken Design System/src/components/AwakenPluginConsole/AwakenPluginConsole.css",
+      ),
+      "utf8",
+    );
+    const titleRule = styles.match(/\.aw-plugin-console__title h1 \{([^}]*)\}/)?.[1] ?? "";
+    expect(titleRule).toContain("overflow-wrap: anywhere");
+    expect(titleRule).toContain("line-height: 1.15");
+    expect(titleRule).not.toContain("text-overflow: ellipsis");
+    expect(titleRule).not.toContain("white-space: nowrap");
+    expect(titleRule).not.toContain("overflow: hidden");
+  });
+
   it("shows setup actions only in plugin details and keeps Apps inspect-only", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -184,6 +234,7 @@ describe("AwakenPluginConsole compact component flow", () => {
           components={[skill]}
           setupItems={[
             { id: "account", kind: "oauth_pkce", title: "Outlook 账号", status: "needs_auth", message: "需要连接账号", actions: ["authorize"] },
+            { id: "approval", kind: "oauth_pkce", title: "企业邮箱", status: "pending_admin_approval", message: "等待组织管理员批准", actions: ["retry"] },
             { id: "app", kind: "app_connector", title: "Codex App", status: "unsupported", connectorId: "connector_openai_mail", actions: ["inspect_only"] },
           ]}
           selectedDetail={null}
@@ -202,11 +253,71 @@ describe("AwakenPluginConsole compact component flow", () => {
     expect(container.textContent).toContain("待完成设置");
     expect(container.textContent).toContain("Outlook 账号");
     expect(container.textContent).toContain("当前不支持");
+    expect(container.textContent).toContain("等待管理员审批");
+    expect(container.textContent).toContain("批准后重新连接");
     const connect = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "连接账号");
     expect(connect).not.toBeNull();
     expect(container.textContent).not.toContain("连接 Codex App");
     await act(async () => connect?.click());
     expect(onSetupAction).toHaveBeenCalledWith(expect.objectContaining({ id: "account" }), "authorize");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("shows an all-ready account as a separate connection row with account actions", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const onSetupAction = vi.fn();
+    const readyItem: AwakenPluginSetupItem = {
+      id: "outlook-account",
+      kind: "host_connector",
+      title: "连接 Outlook 账号",
+      status: "ready",
+      message: "宿主连接器账号已连接",
+      actions: ["disconnect"],
+    };
+    await act(async () => {
+      root.render(
+        <AwakenPluginConsole
+          name="awaken-outlook"
+          displayName="Outlook 邮箱"
+          brandIcon="outlook"
+          enabled
+          components={[skill]}
+          setupItems={[readyItem]}
+          selectedDetail={null}
+          activeDetailTab="overview"
+          onBack={() => undefined}
+          onEnabledChange={() => undefined}
+          onComponentOpen={() => undefined}
+          onComponentEnabledChange={() => undefined}
+          onSetupAction={onSetupAction}
+          onDetailTabChange={() => undefined}
+          onDetailClose={() => undefined}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("Microsoft Outlook Email");
+    expect(container.textContent).toContain("已连接");
+    expect(container.textContent).not.toContain("待完成设置");
+    expect(container.textContent).not.toContain("宿主连接器账号已连接");
+    expect(container.querySelector('[role="switch"]')?.getAttribute("aria-label")).toBe("关闭Outlook 邮箱");
+    const accountTrigger = container.querySelector<HTMLButtonElement>(".aw-plugin-account__trigger");
+    expect(accountTrigger?.getAttribute("aria-label")).toContain("已连接");
+    await act(async () => accountTrigger?.click());
+    const reconnect = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((button) => button.textContent?.includes("重新连接"));
+    await act(async () => reconnect?.click());
+    expect(onSetupAction).toHaveBeenCalledWith(readyItem, "reauthorize");
+
+    await act(async () => accountTrigger?.click());
+    const disconnect = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((button) => button.textContent?.includes("断开连接"));
+    await act(async () => disconnect?.click());
+    expect(onSetupAction).toHaveBeenCalledWith(readyItem, "disconnect");
+
     await act(async () => root.unmount());
     container.remove();
   });
@@ -416,6 +527,394 @@ describe("AwakenPluginConsole compact component flow", () => {
     container.remove();
   });
 
+  it("reflects the parent Plugin switch immediately while Core persists the mutation", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const plugin: RuntimePlugin = {
+      name: "awaken-outlook",
+      displayName: "Outlook 邮箱",
+      builtin: true,
+      brandIcon: "outlook",
+      enabled: false,
+      source: { kind: "local_path", path: "/tmp/awaken-outlook" },
+      digest: "sha256-v2:outlook-toggle",
+      skillCount: 1,
+      serverCount: 1,
+    };
+    const state: RuntimePluginComponentState = {
+      component: {
+        logicalId: "skill/skills/outlook/SKILL.md",
+        logicalIdEncoded: "outlook-skill",
+        kind: "skill",
+        displayName: "Outlook 邮件",
+        sourceDialect: "agent_plugins",
+        sourcePath: "skills/outlook/SKILL.md",
+        mappingState: "native",
+        validation: "valid",
+      },
+      desiredState: "enabled",
+      configurationState: "ready",
+      runtimeState: "ready",
+      integrityState: "intact",
+      mappingState: "native",
+      switchable: true,
+    };
+    let resolveEnable: ((value: RuntimePlugin) => void) | undefined;
+    const pendingEnable = new Promise<RuntimePlugin>((resolvePromise) => {
+      resolveEnable = resolvePromise;
+    });
+    const runtimeClient = {
+      listPluginComponents: vi.fn(async () => [state]),
+      getPluginConfiguration: vi.fn(async () => ({ fields: [], revision: 1 })),
+      enablePlugin: vi.fn(() => pendingEnable),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <PluginConsole
+          plugin={plugin}
+          runtimeClient={runtimeClient}
+          onBack={() => undefined}
+          onPluginUpdated={() => undefined}
+          onUninstall={() => undefined}
+          onUsePlugin={() => undefined}
+          onUsePluginComponent={() => undefined}
+          onNotice={() => undefined}
+        />,
+      );
+    });
+    await settle();
+    const parentSwitch = container.querySelector<HTMLButtonElement>(
+      '[role="switch"][aria-label="开启Outlook 邮箱"]',
+    );
+    await act(async () => {
+      parentSwitch?.click();
+      await Promise.resolve();
+    });
+
+    const optimisticSwitch = container.querySelector<HTMLButtonElement>(
+      '[role="switch"][aria-label="关闭Outlook 邮箱"]',
+    );
+    expect(optimisticSwitch?.getAttribute("aria-checked")).toBe("true");
+    expect(optimisticSwitch?.disabled).toBe(true);
+
+    await act(async () => {
+      resolveEnable?.({ ...plugin, enabled: true });
+      await pendingEnable;
+    });
+    await settle();
+    expect(runtimeClient.enablePlugin).toHaveBeenCalledWith(plugin.name);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("reopens a previously loaded plugin from its local snapshot without a skeleton", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const plugin: RuntimePlugin = {
+      name: "cached-plugin",
+      displayName: "Cached Plugin",
+      enabled: true,
+      source: { kind: "local_path", path: "/tmp/cached-plugin" },
+      digest: "sha256-v2:cached",
+      skillCount: 1,
+      serverCount: 0,
+    };
+    const state: RuntimePluginComponentState = {
+      component: {
+        logicalId: "skill/skills/cached/SKILL.md",
+        logicalIdEncoded: "cached-skill",
+        kind: "skill",
+        displayName: "即时显示的技能",
+        sourceDialect: "agent_plugins",
+        sourcePath: "skills/cached/SKILL.md",
+        mappingState: "native",
+        validation: "valid",
+      },
+      desiredState: "enabled",
+      configurationState: "ready",
+      runtimeState: "ready",
+      integrityState: "intact",
+      mappingState: "native",
+      switchable: true,
+    };
+    const never = new Promise<never>(() => undefined);
+    const runtimeClient = {
+      listPluginComponents: vi.fn()
+        .mockResolvedValueOnce([state])
+        .mockReturnValueOnce(never),
+      getPluginConfiguration: vi.fn()
+        .mockResolvedValueOnce({ fields: [], revision: 1 })
+        .mockReturnValueOnce(never),
+    } as unknown as RuntimeClient;
+    const props = {
+      plugin,
+      runtimeClient,
+      onBack: () => undefined,
+      onPluginUpdated: () => undefined,
+      onUninstall: () => undefined,
+      onUsePlugin: () => undefined,
+      onUsePluginComponent: () => undefined,
+      onNotice: () => undefined,
+    };
+
+    const firstRoot = createRoot(container);
+    await act(async () => firstRoot.render(<PluginConsole {...props} />));
+    await settle();
+    expect(container.textContent).toContain("即时显示的技能");
+    await act(async () => firstRoot.unmount());
+
+    const secondRoot = createRoot(container);
+    await act(async () => secondRoot.render(<PluginConsole {...props} />));
+    expect(container.textContent).toContain("即时显示的技能");
+    expect(container.querySelector(".aw-plugin-console__loading")).toBeNull();
+
+    await act(async () => secondRoot.unmount());
+    container.remove();
+  });
+
+  it("keeps Core-owned authorization alive across Plugin Console remounts and resumes polling", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const plugin: RuntimePlugin = {
+      name: "awaken-outlook",
+      displayName: "Outlook 邮箱",
+      brandIcon: "outlook",
+      enabled: true,
+      source: { kind: "local_path", path: "/tmp/awaken-outlook" },
+      digest: "sha256-v2:outlook-session",
+      skillCount: 0,
+      serverCount: 1,
+    };
+    const state: RuntimePluginComponentState = {
+      component: {
+        logicalId: "mcp/awaken-outlook",
+        logicalIdEncoded: "outlook-mcp",
+        kind: "mcp_server",
+        displayName: "Outlook MCP",
+        sourceDialect: "agent_plugins",
+        sourcePath: ".awaken/outlook.json",
+        mappingState: "native",
+        validation: "valid",
+        mcp: { shortName: "outlook", transport: "in-process", hostManaged: true },
+      },
+      desiredState: "enabled",
+      configurationState: "ready",
+      authenticationState: "needs_auth",
+      runtimeState: "stopped",
+      integrityState: "intact",
+      mappingState: "native",
+      switchable: false,
+    };
+    const authorizingSetup: RuntimePluginSetupItem = {
+      requirement: {
+        id: "outlook-account",
+        fingerprint: "outlook-session-fingerprint",
+        kind: "host_connector",
+        title: "连接 Outlook 账号",
+        connectorId: "awaken.microsoft.outlook",
+        sourceDialect: "agent_plugins",
+      },
+      status: "authorizing",
+      message: "正在连接 Outlook 账号。",
+      actions: ["cancel", "mark_admin_approval"],
+    };
+    const setupResponse = {
+      items: [authorizingSetup],
+      summary: {
+        total: 1,
+        ready: 0,
+        needsConfiguration: 0,
+        needsAuth: 0,
+        needsAdminApproval: 0,
+        inProgress: 1,
+        failed: 0,
+        unsupported: 0,
+      },
+    };
+    const pendingPolls: Array<Promise<never>> = [];
+    const runtimeClient = {
+      listPluginComponents: vi.fn(async () => [state]),
+      getPluginConfiguration: vi.fn(async () => ({ fields: [], revision: 1 })),
+      getPluginSetup: vi.fn(async () => setupResponse),
+      getPlugin: vi.fn(async () => plugin),
+      getActivePluginAuthSession: vi.fn(async () => ({
+        sessionId: "session-1",
+        pluginName: plugin.name,
+        setupId: authorizingSetup.requirement.id,
+        status: "authorizing",
+      })),
+      getPluginAuthSession: vi.fn(() => {
+        const pending = new Promise<never>(() => undefined);
+        pendingPolls.push(pending);
+        return pending;
+      }),
+      cancelPluginAuthSession: vi.fn(),
+    } as unknown as RuntimeClient;
+    const props = {
+      plugin: { ...plugin, setupItems: [authorizingSetup] },
+      runtimeClient,
+      onBack: () => undefined,
+      onPluginUpdated: () => undefined,
+      onUninstall: () => undefined,
+      onUsePlugin: () => undefined,
+      onUsePluginComponent: () => undefined,
+      onNotice: () => undefined,
+    };
+    const timeoutSpy = vi.spyOn(window, "setTimeout").mockImplementation((handler) => {
+      if (typeof handler === "function") queueMicrotask(() => handler());
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    });
+
+    try {
+      const firstRoot = createRoot(container);
+      await act(async () => firstRoot.render(<PluginConsole {...props} />));
+      await settle();
+      expect(runtimeClient.getActivePluginAuthSession).toHaveBeenCalledWith(
+        plugin.name,
+        authorizingSetup.requirement.id,
+        {
+          pluginDigest: plugin.digest,
+          requirementFingerprint: authorizingSetup.requirement.fingerprint,
+          force: false,
+        },
+      );
+      expect(runtimeClient.getPluginAuthSession).toHaveBeenCalledTimes(1);
+
+      await act(async () => firstRoot.unmount());
+      expect(runtimeClient.cancelPluginAuthSession).not.toHaveBeenCalled();
+
+      const secondRoot = createRoot(container);
+      await act(async () => secondRoot.render(<PluginConsole {...props} />));
+      await settle();
+      expect(runtimeClient.getPluginAuthSession).toHaveBeenCalledTimes(2);
+      expect(pendingPolls).toHaveLength(2);
+      expect(runtimeClient.cancelPluginAuthSession).not.toHaveBeenCalled();
+
+      await act(async () => secondRoot.unmount());
+    } finally {
+      timeoutSpy.mockRestore();
+      container.remove();
+    }
+  });
+
+  it("clears a terminal auth-session error when refreshed setup is already ready", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const plugin: RuntimePlugin = {
+      name: "awaken-outlook",
+      displayName: "Outlook 邮箱",
+      brandIcon: "outlook",
+      enabled: true,
+      source: { kind: "local_path", path: "/tmp/awaken-outlook" },
+      digest: "sha256-v2:outlook",
+      skillCount: 0,
+      serverCount: 1,
+    };
+    const state: RuntimePluginComponentState = {
+      component: {
+        logicalId: "mcp/awaken-outlook",
+        logicalIdEncoded: "outlook-mcp",
+        kind: "mcp_server",
+        displayName: "Outlook MCP",
+        sourceDialect: "agent_plugins",
+        sourcePath: ".awaken/outlook.json",
+        mappingState: "native",
+        validation: "valid",
+        mcp: { shortName: "outlook", transport: "in-process", hostManaged: true },
+      },
+      desiredState: "enabled",
+      configurationState: "ready",
+      authenticationState: "ready",
+      runtimeState: "connected",
+      integrityState: "intact",
+      mappingState: "native",
+      switchable: false,
+    };
+    const readySetup: RuntimePluginSetupItem = {
+      requirement: {
+        id: "outlook-account",
+        fingerprint: "outlook-fingerprint",
+        kind: "host_connector",
+        title: "连接 Outlook 账号",
+        connectorId: "awaken.microsoft.outlook",
+        sourceDialect: "agent_plugins",
+      },
+      status: "ready",
+      message: "Outlook 账号与工具运行时已就绪。",
+      actions: ["disconnect"],
+    };
+    const setupResponse = {
+      items: [readySetup],
+      summary: {
+        total: 1,
+        ready: 1,
+        needsConfiguration: 0,
+        needsAuth: 0,
+        needsAdminApproval: 0,
+        inProgress: 0,
+        failed: 0,
+        unsupported: 0,
+      },
+    };
+    const runtimeClient = {
+      listPluginComponents: vi.fn(async () => [state]),
+      getPluginConfiguration: vi.fn(async () => ({ fields: [], revision: 1 })),
+      getPluginSetup: vi.fn(async () => setupResponse),
+      getPlugin: vi.fn(async () => plugin),
+      startPluginSetup: vi.fn(async () => ({ sessionId: "session-1", status: "authorizing" })),
+      getPluginAuthSession: vi.fn(async () => ({
+        sessionId: "session-1",
+        pluginName: plugin.name,
+        setupId: readySetup.requirement.id,
+        status: "failed",
+        errorMessage: "账号已授权，但 Outlook 工具运行时未就绪。",
+      })),
+    } as unknown as RuntimeClient;
+    const onNotice = vi.fn();
+    const timeoutSpy = vi.spyOn(window, "setTimeout").mockImplementation((handler) => {
+      if (typeof handler === "function") queueMicrotask(() => handler());
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    });
+
+    try {
+      await act(async () => {
+        root.render(
+          <PluginConsole
+            plugin={{ ...plugin, setupItems: [readySetup] }}
+            runtimeClient={runtimeClient}
+            onBack={() => undefined}
+            onPluginUpdated={() => undefined}
+            onUninstall={() => undefined}
+            onUsePlugin={() => undefined}
+            onUsePluginComponent={() => undefined}
+            onNotice={onNotice}
+          />,
+        );
+      });
+      await settle();
+      const accountTrigger = container.querySelector<HTMLButtonElement>(".aw-plugin-account__trigger");
+      await act(async () => accountTrigger?.click());
+      const reconnect = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+        .find((button) => button.textContent?.includes("重新连接"));
+      await act(async () => reconnect?.click());
+      await settle();
+      await settle();
+
+      expect(runtimeClient.getPluginAuthSession).toHaveBeenCalledWith(plugin.name, "session-1");
+      expect(container.querySelector(".aw-plugin-console__error")).toBeNull();
+      expect(container.textContent).toContain("已连接");
+      expect(onNotice).toHaveBeenCalledWith("插件账号已连接，关联组件状态已刷新");
+    } finally {
+      timeoutSpy.mockRestore();
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it("uses the same independent dialog for MCP, rules, agents, commands, hooks and variables", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -516,6 +1015,71 @@ describe("AwakenPluginConsole compact component flow", () => {
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
     expect(dialog?.textContent).toContain("MCP 运行状态");
     expect(dialog?.textContent).not.toContain("重新加载");
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("shows a host-managed Outlook MCP in the normal MCP group with read-only runtime controls", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const outlookMcp: AwakenPluginConsoleComponent = {
+      ...mcpComponent,
+      logicalId: "mcp_server/.awaken/setup.json#host_connector:outlook-account",
+      logicalIdEncoded: "host-outlook-mcp",
+      name: "Outlook MCP",
+      switchable: false,
+      authenticationState: "ready",
+      mcp: {
+        shortName: "awaken-outlook",
+        transport: "in-process",
+        connectionState: "connected",
+        toolsLoaded: true,
+        toolCount: 1,
+        hostManaged: true,
+        connectorId: "awaken.microsoft.outlook",
+      },
+    };
+    await act(async () => {
+      root.render(
+        <AwakenPluginConsole
+          name="awaken-outlook"
+          enabled
+          components={[outlookMcp]}
+          selectedDetail={{
+            component: outlookMcp,
+            properties: {},
+            mcp: {
+              shortName: "awaken-outlook",
+              environment: "local_process",
+              connectionState: "connected",
+              toolsLoaded: true,
+              tools: [{ name: "list_messages", description: "读取邮件列表", enabled: true }],
+              hostManaged: true,
+              connectorId: "awaken.microsoft.outlook",
+            },
+          }}
+          activeDetailTab="overview"
+          onBack={() => undefined}
+          onEnabledChange={() => undefined}
+          onUninstall={() => undefined}
+          onComponentOpen={() => undefined}
+          onComponentEnabledChange={() => undefined}
+          onDetailTabChange={() => undefined}
+          onDetailClose={() => undefined}
+          onMcpToolEnabledChange={() => undefined}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("MCP 服务");
+    expect(container.textContent).toContain("Outlook MCP");
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog?.textContent).toContain("由 Awaken 连接器管理");
+    expect(dialog?.textContent).toContain("list_messages");
+	expect(dialog?.textContent).not.toContain("hostManaged");
+    expect(dialog?.querySelector<HTMLButtonElement>('[role="switch"][aria-label*="list_messages"]')?.disabled).toBe(true);
 
     await act(async () => root.unmount());
     container.remove();

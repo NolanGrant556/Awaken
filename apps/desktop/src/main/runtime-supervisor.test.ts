@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
-import { RuntimeSupervisor } from "./runtime-supervisor.js";
+import {
+  RuntimeSupervisor,
+  resolveBuiltinPluginsSourceRoot,
+} from "./runtime-supervisor.js";
 import { type RuntimeManifest } from "./runtime-control.js";
 
 vi.mock("electron", () => ({
@@ -14,6 +17,7 @@ vi.mock("electron", () => ({
     getPath: vi.fn((name: string) =>
       name === "home" ? "/Users/awaken-home" : "/tmp/awaken-user-data",
     ),
+    getAppPath: vi.fn(() => "/repo/apps/desktop"),
   },
 }));
 
@@ -54,10 +58,12 @@ describe("RuntimeSupervisor", () => {
     const previousAPIKey = process.env.LLM_API_KEY;
     const previousProcessOnly = process.env.AWAKEN_PROCESS_ONLY_CANARY;
     const previousBundledSkills = process.env.AWAKEN_BUNDLED_SKILL_DIRS;
+    const previousBundledPlugins = process.env.AWAKEN_BUNDLED_PLUGIN_DIR;
     process.env.AWAKEN_CONFIG_DIR = "/tmp/legacy-config";
     process.env.LLM_API_KEY = "legacy-key";
     process.env.AWAKEN_PROCESS_ONLY_CANARY = "must-not-flow-back";
     process.env.AWAKEN_BUNDLED_SKILL_DIRS = "/tmp/process-controlled-skills";
+    process.env.AWAKEN_BUNDLED_PLUGIN_DIR = "/tmp/process-controlled-plugins";
     const supervisor = new RuntimeSupervisor(
       {},
       {
@@ -111,6 +117,11 @@ describe("RuntimeSupervisor", () => {
       } else {
         process.env.AWAKEN_BUNDLED_SKILL_DIRS = previousBundledSkills;
       }
+      if (previousBundledPlugins === undefined) {
+        delete process.env.AWAKEN_BUNDLED_PLUGIN_DIR;
+      } else {
+        process.env.AWAKEN_BUNDLED_PLUGIN_DIR = previousBundledPlugins;
+      }
     }
 
     expect(info).toEqual({
@@ -126,6 +137,11 @@ describe("RuntimeSupervisor", () => {
       AWAKEN_LOGIN_ENV_CANARY: "login-value",
       AWAKEN_BUNDLED_SKILL_DIRS:
         join("/Users/awaken-home", ".awaken", "skills", "system-skills"),
+      AWAKEN_BUNDLED_PLUGIN_DIR: join(
+        "/repo/apps/desktop",
+        "resources",
+        "builtin-plugins",
+      ),
     });
     expect(spawnOptions?.env?.AWAKEN_WEB_SEARCH_PROVIDERS).toBe("exa,tavily");
     expect(spawnOptions?.env).not.toHaveProperty("AWAKEN_CONFIG_DIR");
@@ -138,6 +154,19 @@ describe("RuntimeSupervisor", () => {
     expect(spawnOptions?.env).not.toHaveProperty(
       "AWAKEN_PROCESS_ONLY_CANARY",
     );
+  });
+
+  it("resolves the built-in Plugin source for development and packaged apps", () => {
+    expect(resolveBuiltinPluginsSourceRoot({
+      packaged: false,
+      resourcesPath: "/Applications/Awaken.app/Contents/Resources",
+      appPath: "/repo/apps/desktop",
+    })).toBe(join("/repo/apps/desktop", "resources", "builtin-plugins"));
+    expect(resolveBuiltinPluginsSourceRoot({
+      packaged: true,
+      resourcesPath: "/Applications/Awaken.app/Contents/Resources",
+      appPath: "/repo/apps/desktop",
+    })).toBe(join("/Applications/Awaken.app/Contents/Resources", "builtin-plugins"));
   });
 
   it("sets an explicit empty default workspace so Core does not fall back to cwd", async () => {

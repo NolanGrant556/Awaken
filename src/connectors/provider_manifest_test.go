@@ -118,6 +118,11 @@ func TestBuiltinConnectorDefinitionsDeclareProviderFacts(t *testing.T) {
 		}
 	}
 	for _, definition := range definitions {
+		if definition.ID == "awaken.microsoft.outlook" && (len(definition.ServerNames) != 1 || definition.ServerNames[0] != "awaken-outlook") {
+			t.Errorf("Outlook host MCP identity = %v", definition.ServerNames)
+		}
+	}
+	for _, definition := range definitions {
 		if definition.ID == "dingtalk-workspace" || definition.ID == "lark-cli" {
 			if definition.Kind != KindCLI || definition.McpConfigFactory != nil {
 				t.Errorf("%s must be a CLI-only connector", definition.ID)
@@ -130,6 +135,20 @@ func TestBuiltinConnectorDefinitionsDeclareProviderFacts(t *testing.T) {
 			if definition.Kind != KindMCP || definition.AuthType != AuthOAuth2 || definition.OAuth == nil || definition.McpConfigFactory == nil {
 				t.Errorf("Outlook must be a host-authenticated in-process MCP connector: %+v", definition)
 			}
+			if definition.CatalogPlacement != CatalogPluginOnly {
+				t.Errorf("Outlook catalog placement = %q, want %q", definition.CatalogPlacement, CatalogPluginOnly)
+			}
+			scopes := map[string]bool{}
+			for _, scope := range definition.RequiredScopes {
+				scopes[scope] = true
+			}
+			for _, required := range []string{"Mail.ReadWrite", "Mail.Send", "Mail.ReadWrite.Shared", "Mail.Send.Shared", "MailboxSettings.ReadWrite"} {
+				if !scopes[required] {
+					t.Errorf("Outlook missing required scope %q: %v", required, definition.RequiredScopes)
+				}
+			}
+		} else if definition.CatalogPlacement != "" && definition.CatalogPlacement != CatalogConnectors {
+			t.Errorf("%s catalog placement = %q", definition.ID, definition.CatalogPlacement)
 		}
 	}
 }

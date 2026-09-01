@@ -28,6 +28,34 @@ func (h pluginHandlers) handleSetup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "summary": summary})
 }
 
+func (h pluginHandlers) handleActiveSetupSession(w http.ResponseWriter, r *http.Request) {
+	if !h.ensureStore(w) || !h.ensurePluginAuth(w) {
+		return
+	}
+	name := strings.TrimSpace(r.PathValue("name"))
+	setupID := strings.TrimSpace(r.PathValue("setupId"))
+	_, requirement, err := h.store.ResolveSetupRequirement(
+		name,
+		setupID,
+		strings.TrimSpace(r.URL.Query().Get("pluginDigest")),
+		strings.TrimSpace(r.URL.Query().Get("requirementFingerprint")),
+	)
+	if err != nil {
+		h.writeStoreError(w, err)
+		return
+	}
+	view, found, err := h.auth.ActiveSession(name, setupID, requirement.Fingerprint)
+	if err != nil {
+		writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "plugin authorization session could not be restored")
+		return
+	}
+	if !found {
+		writeJSON(w, http.StatusOK, map[string]any{"session": nil})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"session": view})
+}
+
 func (h pluginHandlers) handleStartSetupSession(w http.ResponseWriter, r *http.Request) {
 	if !h.ensureStore(w) || !h.ensurePluginAuth(w) {
 		return
@@ -67,6 +95,23 @@ func (h pluginHandlers) handleCancelSetupSession(w http.ResponseWriter, r *http.
 		return
 	}
 	view, err = h.auth.Cancel(view.SessionID)
+	if err != nil {
+		h.writePluginAuthError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
+func (h pluginHandlers) handleSetupAdminApprovalPending(w http.ResponseWriter, r *http.Request) {
+	if !h.ensurePluginAuth(w) {
+		return
+	}
+	view, err := h.auth.Session(strings.TrimSpace(r.PathValue("sessionId")))
+	if err != nil || view.PluginName != strings.TrimSpace(r.PathValue("name")) {
+		writeErrorJSON(w, http.StatusNotFound, "PLUGIN_AUTH_SESSION_NOT_FOUND", "plugin auth session not found")
+		return
+	}
+	view, err = h.auth.MarkAdminApprovalPending(view.SessionID)
 	if err != nil {
 		h.writePluginAuthError(w, err)
 		return

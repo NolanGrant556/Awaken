@@ -5,6 +5,7 @@ import {
   type AwakenPluginValidationSummary,
 } from "../AwakenPluginInstallDialog";
 import { AwakenPlugins } from "./AwakenPlugins";
+import type { AwakenPluginsView } from "./AwakenPlugins";
 import { awakenPluginsDemoItems } from "./AwakenPlugins.states";
 
 const installValidation: AwakenPluginValidationSummary = {
@@ -18,6 +19,7 @@ const installValidation: AwakenPluginValidationSummary = {
 export function AwakenPluginsDemo() {
   const [items, setItems] = useState(awakenPluginsDemoItems);
   const [searchValue, setSearchValue] = useState("");
+  const [activeView, setActiveView] = useState<AwakenPluginsView>("builtin");
   const [detailName, setDetailName] = useState<string | null>(null);
   const [installOpen, setInstallOpen] = useState(false);
   const [localPath, setLocalPath] = useState("");
@@ -36,9 +38,11 @@ export function AwakenPluginsDemo() {
       </header>
       <div style={{ height: 640 }}>
         <AwakenPlugins
+          activeView={activeView}
           searchValue={searchValue}
           plugins={items}
           onSearchChange={setSearchValue}
+          onViewChange={setActiveView}
           onRefresh={() => undefined}
           onInstall={() => setInstallOpen(true)}
           onPluginOpen={(plugin) => setDetailName(plugin.name)}

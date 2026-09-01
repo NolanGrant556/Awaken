@@ -155,6 +155,59 @@ func TestMcpToolAdapterPreservesOutputSchemaAsDetailsContract(t *testing.T) {
 	}
 }
 
+func TestMcpToolAdapterPreservesNullableOutputTypesWithoutFalseMismatch(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		schema     map[string]any
+		structured map[string]any
+		rootField  string
+	}{
+		{
+			name: "ordinary nullable array",
+			schema: map[string]any{
+				"type": "object", "additionalProperties": false,
+				"required": []string{"messages", "hasMore"},
+				"properties": map[string]any{
+					"messages": map[string]any{"type": []any{"null", "array"}, "items": map[string]any{"type": "object", "additionalProperties": true}},
+					"hasMore":  map[string]any{"type": "boolean"},
+				},
+			},
+			structured: map[string]any{"messages": []any{}, "hasMore": false},
+			rootField:  "messages",
+		},
+		{
+			name: "nullable array with canonical field conflict",
+			schema: map[string]any{
+				"type": "object", "additionalProperties": false,
+				"required": []string{"matches", "truncated"},
+				"properties": map[string]any{
+					"matches":   map[string]any{"type": []any{"null", "array"}, "items": map[string]any{"type": "string"}},
+					"truncated": map[string]any{"type": "boolean"},
+				},
+			},
+			structured: map[string]any{"matches": []any{"sentitems"}, "truncated": false},
+			rootField:  "mcp_payload",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			adapter := NewMcpToolAdapter(nil, "schema-server", &mcp.Tool{Name: "nullable", OutputSchema: test.schema})
+			definition := adapter.Definition()
+			if _, ok := definition.OutputSchema.Properties[test.rootField]; !ok {
+				t.Fatalf("normalized schema lost %q: %+v warnings=%v", test.rootField, definition.OutputSchema, adapter.OutputSchemaWarnings())
+			}
+			outcome := adapter.callResultOutcome(&mcp.CallToolResult{StructuredContent: test.structured})
+			normalized := outcome.Normalize(tool.OutcomeNormalizationContext{
+				OperationType: adapter.Name(), OutputSchema: definition.OutputSchema,
+			})
+			for _, warning := range normalized.Warnings {
+				if warning.Code == "tool_output_schema_mismatch" {
+					t.Fatalf("nullable output produced false schema warning: %+v", normalized)
+				}
+			}
+		})
+	}
+}
+
 func TestMcpToolAdapterWrapsCanonicalOutputSchemaConflicts(t *testing.T) {
 	adapter := NewMcpToolAdapter(nil, "schema-server", &mcp.Tool{
 		Name: "status_probe",
@@ -248,6 +301,48 @@ func TestMcpToolAdapterPreservesRecursiveInputSchema(t *testing.T) {
 	}
 	if terms.Items.Type != "string" || len(terms.Items.Enum) != 2 {
 		t.Fatalf("expected string enum item schema, got %+v", terms.Items)
+	}
+}
+
+func TestMcpToolAdapterPreservesNullableInputTypes(t *testing.T) {
+	adapter := NewMcpToolAdapter(nil, "schema-server", &mcp.Tool{
+		Name: "create_draft",
+		InputSchema: map[string]any{
+			"type": "object", "additionalProperties": false,
+			"required": []string{"subject", "to"},
+			"properties": map[string]any{
+				"subject": map[string]any{"type": "string"},
+				"to": map[string]any{
+					"type":  []any{"null", "array"},
+					"items": map[string]any{"type": "string"},
+				},
+			},
+		},
+	})
+
+	resolved := tool.ResolveInputSchema(adapter)
+	to, ok := resolved.Properties["to"]
+	if !ok || len(to.OneOf) != 2 {
+		t.Fatalf("nullable input property was lost: %+v", resolved)
+	}
+	var arrayOption *tool.ToolParam
+	for index := range to.OneOf {
+		if to.OneOf[index].Type == "array" {
+			arrayOption = &to.OneOf[index]
+		}
+	}
+	if arrayOption == nil || arrayOption.Items == nil || arrayOption.Items.Type != "string" {
+		t.Fatalf("nullable string array was not preserved: %+v", to)
+	}
+	parameters := adapter.Parameters()
+	var toParameter *tool.ToolParameter
+	for index := range parameters {
+		if parameters[index].Name == "to" {
+			toParameter = &parameters[index]
+		}
+	}
+	if toParameter == nil || toParameter.Type != "array" {
+		t.Fatalf("legacy parameter fallback did not retain the array type: %+v", parameters)
 	}
 }
 

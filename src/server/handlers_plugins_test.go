@@ -10,13 +10,63 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"awaken/src/connectors"
+	"awaken/src/mcpclient"
+	"awaken/src/pluginauth"
 	"awaken/src/plugins"
 	"awaken/src/plugins/ir"
 	awruntime "awaken/src/runtime"
 	"awaken/src/tool/trash"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+type pluginHostConnectorSource struct {
+	definition connectors.ConnectorDefinition
+}
+
+type pluginHostAuthSpy struct {
+	disconnectCalls atomic.Int32
+}
+
+func (*pluginHostAuthSpy) ConnectorStatus(connectorID string) (connectors.ConnectorStatus, error) {
+	return connectors.ConnectorStatus{ID: connectorID, State: connectors.StateConnected}, nil
+}
+
+func (*pluginHostAuthSpy) Start(context.Context, string) (connectors.ConnectorAuthStartResult, error) {
+	return connectors.ConnectorAuthStartResult{Status: "ready"}, nil
+}
+
+func (*pluginHostAuthSpy) Reauthorize(context.Context, string) (connectors.ConnectorAuthStartResult, error) {
+	return connectors.ConnectorAuthStartResult{Status: "ready"}, nil
+}
+
+func (*pluginHostAuthSpy) Session(string) (connectors.ConnectorAuthSession, error) {
+	return connectors.ConnectorAuthSession{Status: "ready"}, nil
+}
+
+func (*pluginHostAuthSpy) Cancel(string) (connectors.ConnectorAuthSession, error) {
+	return connectors.ConnectorAuthSession{Status: "cancelled"}, nil
+}
+
+func (*pluginHostAuthSpy) MarkAdminApprovalPending(string) (connectors.ConnectorAuthSession, error) {
+	return connectors.ConnectorAuthSession{Status: "pending_admin_approval"}, nil
+}
+
+func (s *pluginHostAuthSpy) Disconnect(context.Context, string) error {
+	s.disconnectCalls.Add(1)
+	return nil
+}
+
+func (s pluginHostConnectorSource) List(context.Context) ([]connectors.ConnectorDefinition, error) {
+	return []connectors.ConnectorDefinition{s.definition}, nil
+}
+
+func (pluginHostConnectorSource) Origin() connectors.SourceOrigin { return connectors.SourceLocal }
+func (pluginHostConnectorSource) Priority() int                   { return 10 }
 
 func TestPluginSetupAPIUsesDigestAndRequirementFingerprintCAS(t *testing.T) {
 	home := t.TempDir()
@@ -102,6 +152,87 @@ func writePluginTestFile(t *testing.T, path, contents string) {
 	}
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBuiltInPluginMetadataIsProjectedAndUninstallIsRejected(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AWAKEN_HOME", home)
+	store := plugins.NewStoreAt(home)
+	builtinRoot := t.TempDir()
+	packageRoot := filepath.Join(builtinRoot, "outlook")
+	writeHTTPPluginFixture(t, packageRoot, "awaken-outlook")
+	writePluginTestFile(t, filepath.Join(packageRoot, ".awaken", "builtin.json"), `{
+  "version": 1,
+  "displayName": "Outlook 邮箱",
+  "brandIcon": "outlook",
+  "order": 0
+}`)
+	if _, err := store.SyncBuiltinPlugins(t.Context(), builtinRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, nil, nil, store)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/plugins/awaken-outlook", nil))
+	if recorder.Code != http.StatusOK ||
+		!strings.Contains(recorder.Body.String(), `"builtin":true`) ||
+		!strings.Contains(recorder.Body.String(), `"brandIcon":"outlook"`) ||
+		!strings.Contains(recorder.Body.String(), `"displayName":"Outlook 邮箱"`) ||
+		!strings.Contains(recorder.Body.String(), `"enabled":false`) {
+		t.Fatalf("built-in response status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodDelete, "/v1/plugins/awaken-outlook", nil))
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), "BUILTIN_PLUGIN_IMMUTABLE") {
+		t.Fatalf("built-in delete status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestPluginDisableDoesNotDisconnectHostConnectorAccount(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AWAKEN_HOME", home)
+	store := plugins.NewStoreAt(home)
+	source := t.TempDir()
+	writeHTTPPluginFixture(t, source, "host-account-plugin")
+	writePluginTestFile(t, filepath.Join(source, ".awaken", "setup.json"), `{
+  "version": 1,
+  "requirements": [{
+    "id": "outlook-account",
+    "kind": "host_connector",
+    "title": "连接 Outlook 账号",
+    "required": true,
+    "connectorId": "awaken.microsoft.outlook",
+    "mcpServerName": "awaken-outlook",
+    "componentIds": ["skill/skills/lint"]
+  }]
+}`)
+	if _, err := store.Install(t.Context(), plugins.InstallRequest{Source: plugins.Source{Kind: plugins.SourceLocalPath, Path: source}}); err != nil {
+		t.Fatal(err)
+	}
+
+	hostAuth := &pluginHostAuthSpy{}
+	pluginAuth := pluginauth.NewService(store, nil, nil, mcpclient.NewInMemoryCredentialStore())
+	pluginAuth.SetHostConnectorAuth(hostAuth)
+	router := NewRouterWithScheduledTasks(nil, nil, nil, nil, nil, nil, "", nil, &ControlConfig{PluginAuth: pluginAuth}, nil, store)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/plugins/host-account-plugin/disable", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("disable status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if calls := hostAuth.disconnectCalls.Load(); calls != 0 {
+		t.Fatalf("disabling plugin disconnected shared host account: calls=%d", calls)
+	}
+
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/v1/plugins/host-account-plugin/enable", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("enable status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if calls := hostAuth.disconnectCalls.Load(); calls != 0 {
+		t.Fatalf("re-enabling plugin changed shared host account: calls=%d", calls)
 	}
 }
 
@@ -258,6 +389,120 @@ func TestPluginComponentListOmitsBodiesAndExecutionSpecs(t *testing.T) {
 	}
 	if !strings.Contains(body, `"catalogId":"plugin__safe-component-list__lint"`) {
 		t.Fatalf("component list omitted exact Plugin Skill catalog identity: %s", body)
+	}
+}
+
+func TestPluginHostConnectorMCPAppearsInInventoryWithRuntimeTools(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AWAKEN_HOME", home)
+	store := plugins.NewStoreAt(home)
+	source := t.TempDir()
+	writeHTTPPluginFixture(t, source, "host-outlook-plugin")
+	writePluginTestFile(t, filepath.Join(source, ".awaken", "setup.json"), `{
+  "version": 1,
+  "requirements": [{
+    "id": "outlook-account",
+    "kind": "host_connector",
+    "title": "连接 Outlook 账号",
+    "required": true,
+    "connectorId": "test.outlook",
+    "mcpServerName": "test.outlook",
+    "componentIds": ["skill/skills/lint"]
+  }]
+}`)
+	if _, err := store.Install(t.Context(), plugins.InstallRequest{Source: plugins.Source{Kind: plugins.SourceLocalPath, Path: source}}); err != nil {
+		t.Fatal(err)
+	}
+
+	inProc := mcpclient.NewInProcRegistry()
+	if err := inProc.Register("test.outlook", func() *mcp.Server {
+		server := mcp.NewServer(&mcp.Implementation{Name: "test-outlook", Version: "v1"}, nil)
+		mcp.AddTool(server, &mcp.Tool{Name: "list_messages", Description: "List Outlook messages"}, func(context.Context, *mcp.CallToolRequest, map[string]any) (*mcp.CallToolResult, map[string]any, error) {
+			return &mcp.CallToolResult{}, map[string]any{}, nil
+		})
+		return server
+	}); err != nil {
+		t.Fatal(err)
+	}
+	manager := mcpclient.NewManager(mcpclient.WithInProcRegistry(inProc))
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		manager.Shutdown(ctx)
+	})
+	connectorRegistry := connectors.NewRegistry(manager, nil)
+	definition := connectors.ConnectorDefinition{
+		ID: "test.outlook", Kind: connectors.KindMCP, DisplayName: "Outlook", Description: "Outlook 邮箱工具",
+		Category: connectors.CategoryChat, Provider: "Microsoft", AuthType: connectors.AuthNone,
+		TrustLevel: connectors.TrustUserLocal, SourceOrigin: connectors.SourceLocal,
+		MCPRawConfig: &mcpclient.McpServerConfig{InProc: &mcpclient.InProcTransportConfig{ServerName: "test.outlook"}},
+	}
+	if err := connectorRegistry.LoadSources(t.Context(), []connectors.ConnectorSource{pluginHostConnectorSource{definition: definition}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := connectorRegistry.Connect(t.Context(), definition.ID); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		snapshot, err := manager.SnapshotServer("test.outlook")
+		if err == nil && snapshot.State == mcpclient.StateConnected && snapshot.ToolsLoaded {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("host MCP did not become ready: snapshot=%+v err=%v", snapshot, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	router := NewRouterWithScheduledTasks(nil, nil, manager, connectorRegistry, nil, nil, "", nil, nil, nil, store)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/plugins/host-outlook-plugin/components", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("component list status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var states []struct {
+		Component struct {
+			LogicalIDEncoded string `json:"logicalIdEncoded"`
+			DisplayName      string `json:"displayName"`
+			MCP              *struct {
+				ConnectorID string `json:"connectorId"`
+			} `json:"mcp"`
+		} `json:"component"`
+		Switchable bool `json:"switchable"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &states); err != nil {
+		t.Fatal(err)
+	}
+	var hostComponent *struct {
+		Component struct {
+			LogicalIDEncoded string `json:"logicalIdEncoded"`
+			DisplayName      string `json:"displayName"`
+			MCP              *struct {
+				ConnectorID string `json:"connectorId"`
+			} `json:"mcp"`
+		} `json:"component"`
+		Switchable bool `json:"switchable"`
+	}
+	for index := range states {
+		if states[index].Component.MCP != nil && states[index].Component.MCP.ConnectorID == definition.ID {
+			hostComponent = &states[index]
+			break
+		}
+	}
+	if hostComponent == nil || hostComponent.Component.DisplayName != "Outlook MCP" || hostComponent.Switchable {
+		t.Fatalf("host MCP component=%+v response=%s", hostComponent, recorder.Body.String())
+	}
+
+	recorder = httptest.NewRecorder()
+	detailPath := "/v1/plugins/host-outlook-plugin/components/mcp_server/" + hostComponent.Component.LogicalIDEncoded
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, detailPath, nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("component detail status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"hostManaged":true`) || !strings.Contains(body, `"name":"list_messages"`) || !strings.Contains(body, `"sourceEditable":false`) {
+		t.Fatalf("host MCP detail omitted runtime ownership or tools: %s", body)
 	}
 }
 

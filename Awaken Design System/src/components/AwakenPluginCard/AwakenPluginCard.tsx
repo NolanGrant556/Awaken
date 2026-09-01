@@ -1,12 +1,20 @@
 import "./AwakenPluginCard.css";
 import { AwakenIcon } from "../AwakenIcon";
+import {
+  AwakenPluginBrandIcon,
+  isAwakenPluginBrand,
+} from "../AwakenPluginBrandIcon";
 import type { HTMLAttributes } from "react";
 import { AwakenSwitch } from "../AwakenSwitch";
 
 export type AwakenPluginCardItem = {
   name: string;
+  displayName?: string;
   description?: string;
   dialect?: string;
+  builtin?: boolean;
+  brandIcon?: string;
+  builtinOrder?: number;
   enabled: boolean;
   busy?: boolean;
   diagnostic?: string;
@@ -28,6 +36,7 @@ export function AwakenPluginCard({
   className,
   ...props
 }: AwakenPluginCardProps) {
+  const visibleName = plugin.displayName?.trim() || plugin.name;
   const dialectLabels: Record<string, string> = {
     agent_plugins: "Agent Plugins",
     codex: "Codex",
@@ -37,12 +46,18 @@ export function AwakenPluginCard({
   const body = (
     <>
       <span className="aw-plugin-card__icon" aria-hidden="true">
-        <AwakenIcon concept="plugin-default" size={20} />
+        {isAwakenPluginBrand(plugin.brandIcon) ? (
+          <AwakenPluginBrandIcon brand={plugin.brandIcon} size="card" />
+        ) : (
+          <AwakenIcon concept="plugin-default" size={20} />
+        )}
       </span>
       <span className="aw-plugin-card__copy">
         <span className="aw-plugin-card__title-row">
-          <span className="aw-plugin-card__name">{plugin.name}</span>
-          {plugin.dialect ? (
+          <span className="aw-plugin-card__name">{visibleName}</span>
+          {plugin.builtin ? (
+            <span className="aw-plugin-card__badge">Awaken 内置</span>
+          ) : plugin.dialect ? (
             <span className="aw-plugin-card__badge">{dialectLabels[plugin.dialect] ?? plugin.dialect}</span>
           ) : null}
         </span>
@@ -65,7 +80,7 @@ export function AwakenPluginCard({
         <button
           type="button"
           className="aw-plugin-card__main"
-          aria-label={`查看插件 ${plugin.name}`}
+          aria-label={`查看插件 ${visibleName}`}
           onClick={onOpen}
         >
           {body}
@@ -76,7 +91,7 @@ export function AwakenPluginCard({
       <div className="aw-plugin-card__actions">
         <AwakenSwitch
           checked={plugin.enabled}
-          label={plugin.name}
+          label={visibleName}
           busy={plugin.busy}
           size="compact"
           disabled={!onEnabledChange}

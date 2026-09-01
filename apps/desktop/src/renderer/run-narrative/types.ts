@@ -40,13 +40,7 @@ export type ChangedFile = {
 };
 
 export type DeliverableFileType =
-  | "word"
-  | "markdown"
-  | "excel"
-  | "pdf"
-  | "powerpoint"
-  | "image"
-  | "video";
+  "word" | "markdown" | "excel" | "pdf" | "powerpoint" | "image" | "video";
 
 export type DeliverableFile = {
   artifactId: string;
@@ -107,19 +101,21 @@ export type InspectorSelection =
   | { kind: "deliverables"; id: string };
 
 export type ACPDisplayStatus =
-  | "active"
-  | "done"
-  | "error"
-  | "interrupted"
-  | "closed"
-  | "started";
+  "active" | "done" | "error" | "interrupted" | "closed" | "started";
 
 export type SubagentNarrativeTask = {
   taskId: string;
   description: string;
   agentType: "explore" | "plan" | "review" | "general";
   workspaceMode?: "shared_readonly" | "shared" | "git_worktree" | string;
-  status: "queued" | "running" | "completed" | "failed" | "cancelling" | "cancelled" | "interrupted";
+  status:
+    | "queued"
+    | "running"
+    | "completed"
+    | "failed"
+    | "cancelling"
+    | "cancelled"
+    | "interrupted";
   activity?: string;
   toolUseCount: number;
   estimatedTokens?: number;
@@ -150,7 +146,12 @@ export type RunNarrativeItem =
       phase?: "continuation" | "compaction";
     }
   | { kind: "thinking"; id: string; text: string; status: "active" | "done" }
-  | { kind: "exploring"; id: string; actions: RunAction[]; status: "active" | "done" }
+  | {
+      kind: "exploring";
+      id: string;
+      actions: RunAction[];
+      status: "active" | "done";
+    }
   | {
       kind: "tool";
       id: string;
@@ -192,8 +193,19 @@ export type RunNarrativeItem =
       mediaItems?: MediaGenerationItem[];
       artifactPaths: string[];
     }
-  | { kind: "fileChange"; id: string; files: ChangedFile[]; status: "active" | "done" }
-  | { kind: "memoryReceipt"; id: string; title: string; detail?: string; status: "done" | "error" }
+  | {
+      kind: "fileChange";
+      id: string;
+      files: ChangedFile[];
+      status: "active" | "done";
+    }
+  | {
+      kind: "memoryReceipt";
+      id: string;
+      title: string;
+      detail?: string;
+      status: "done" | "error";
+    }
   | {
       kind: "acpSession";
       id: string;

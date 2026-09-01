@@ -52,6 +52,9 @@ func (s *Store) Uninstall(name string) (string, error) {
 		if !ok {
 			return fmt.Errorf("%w: %s", ErrNotFound, name)
 		}
+		if record.Builtin {
+			return fmt.Errorf("%w: %s", ErrBuiltinImmutable, name)
+		}
 		pkg := filepath.Join(s.packagesRoot, name)
 		data := filepath.Join(s.dataRoot, name)
 		if err := s.rejectUncontrolledPath(pkg); err != nil {
@@ -205,6 +208,9 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 	}
 
 	existing, exists := state.Plugins[name]
+	if exists && existing.Builtin && req.Builtin == nil {
+		return InstallResult{}, fmt.Errorf("%w: %s", ErrBuiltinImmutable, name)
+	}
 	if exists && !req.Replace {
 		return InstallResult{}, fmt.Errorf("%w: %s", ErrAlreadyExists, name)
 	}
@@ -217,6 +223,19 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 	dest := filepath.Join(s.packagesRoot, name)
 	if exists && req.Replace && existing.Digest == digest {
 		if _, matches, verifyErr := verifyTreeDigest(dest, existing.Digest); verifyErr == nil && matches {
+			if req.Builtin != nil {
+				existing.Builtin = true
+				existing.BrandIcon = strings.TrimSpace(req.Builtin.BrandIcon)
+				existing.BuiltinOrder = req.Builtin.Order
+				if displayName := strings.TrimSpace(req.Builtin.DisplayName); displayName != "" {
+					existing.DisplayName = displayName
+				}
+				existing.Source = req.Source
+				state.Plugins[name] = existing
+				if err := s.writeStateUnlocked(state); err != nil {
+					return InstallResult{}, err
+				}
+			}
 			plugin := s.loadRecord(name, existing)
 			return InstallResult{
 				Plugin:   plugin,
@@ -287,9 +306,17 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 
 	now := time.Now().UTC()
 	rec := Record{
-		Enabled: true, Version: manifest.Version, Source: req.Source, InstalledAt: now, Digest: digest,
+		Enabled: req.Builtin == nil, Version: manifest.Version, Source: req.Source, InstalledAt: now, Digest: digest,
 		Dialect: normalized.Layout.Dialect, ManifestPath: normalized.Layout.ManifestPath,
 		InstallationID: uuid.NewString(), DisplayName: normalized.Identity.DisplayName,
+	}
+	if req.Builtin != nil {
+		rec.Builtin = true
+		rec.BrandIcon = strings.TrimSpace(req.Builtin.BrandIcon)
+		rec.BuiltinOrder = req.Builtin.Order
+		if displayName := strings.TrimSpace(req.Builtin.DisplayName); displayName != "" {
+			rec.DisplayName = displayName
+		}
 	}
 	for _, secondary := range resolved.Secondary {
 		rec.SecondaryManifests = append(rec.SecondaryManifests, secondary.ManifestPath)

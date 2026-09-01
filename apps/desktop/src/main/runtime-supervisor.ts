@@ -82,6 +82,16 @@ function resolveBinaryPath(): string {
   return join(__dirname, "../../resources/bin", targetDir, binName);
 }
 
+export function resolveBuiltinPluginsSourceRoot(input: {
+  packaged: boolean;
+  resourcesPath: string;
+  appPath: string;
+}): string {
+  return input.packaged
+    ? join(input.resourcesPath, "builtin-plugins")
+    : join(input.appPath, "resources", "builtin-plugins");
+}
+
 function allocatePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer();
@@ -279,6 +289,7 @@ function sanitizedRuntimeEnv(
   const env = { ...sourceEnvironment };
   delete env.AWAKEN_CONFIG_DIR;
   delete env.AWAKEN_BUNDLED_SKILL_DIRS;
+  delete env.AWAKEN_BUNDLED_PLUGIN_DIR;
   delete env.LLM_API_KEY;
   delete env.LLM_BASE_URL;
   delete env.LLM_MODEL_ID;
@@ -454,6 +465,13 @@ export class RuntimeSupervisor {
             AWAKEN_BUNDLED_SKILL_DIRS: resolveSystemSkillsTargetRoot(
               app.getPath("home"),
             ),
+            // Built-in Plugins are release-owned packages. Core validates and
+            // copies them into the normal Store while preserving user state.
+            AWAKEN_BUNDLED_PLUGIN_DIR: resolveBuiltinPluginsSourceRoot({
+              packaged: app.isPackaged,
+              resourcesPath: process.resourcesPath,
+              appPath: app.getAppPath(),
+            }),
             // FileStore projects are selected per run. Core must never derive
             // a project from Electron userData, a previous workspace, or cwd.
             AWAKEN_DEFAULT_WORKSPACE: "",

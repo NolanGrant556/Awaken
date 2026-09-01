@@ -240,8 +240,12 @@ func (a *McpToolAdapter) Parameters() []tool.ToolParameter { return a.parameters
 // decoded safely, validation falls back to the legacy flat parameters.
 func (a *McpToolAdapter) InputSchema() tool.ToolParametersSchema {
 	if len(a.inputSchemaJSON) > 0 {
+		normalized, _, normalizeErr := normalizeMCPJSONSchema(a.inputSchemaJSON)
 		var schema tool.ToolParametersSchema
-		if err := json.Unmarshal(a.inputSchemaJSON, &schema); err == nil {
+		if normalizeErr == nil {
+			if err := json.Unmarshal(normalized, &schema); err != nil {
+				return tool.SchemaFromParameters(a.parameters)
+			}
 			if strings.TrimSpace(schema.Type) == "" && len(schema.Properties) > 0 {
 				schema.Type = "object"
 			}
@@ -489,8 +493,13 @@ func (a *McpToolAdapter) loadOutputSchema() {
 	if len(a.outputSchemaJSON) == 0 {
 		return
 	}
+	normalized, nullableUnion, err := normalizeMCPJSONSchema(a.outputSchemaJSON)
+	if err != nil {
+		a.outputSchemaWarning = []string{"MCP output schema uses unsupported JSON Schema forms and was not exposed as typed details"}
+		return
+	}
 	var schema tool.ToolParam
-	if err := json.Unmarshal(a.outputSchemaJSON, &schema); err != nil {
+	if err := json.Unmarshal(normalized, &schema); err != nil {
 		a.outputSchemaWarning = []string{"MCP output schema uses unsupported JSON Schema forms and was not exposed as typed details"}
 		return
 	}
@@ -498,6 +507,89 @@ func (a *McpToolAdapter) loadOutputSchema() {
 	a.outputSchema = adapted.Schema
 	a.outputWrapperKey = adapted.WrapperKey
 	a.outputSchemaWarning = append([]string(nil), adapted.Warnings...)
+	if nullableUnion {
+		a.outputSchemaWarning = append(a.outputSchemaWarning, "MCP output schema nullable type arrays were preserved as oneOf")
+	}
+}
+
+// normalizeMCPJSONSchema translates JSON Schema's compact union form
+// (`"type": ["null", "array"]`) into the equivalent oneOf form supported by
+// Awaken's recursive ToolParam contract. The Go MCP SDK emits compact nullable
+// unions for slices and pointers in both inputs and outputs. Rejecting an entire
+// schema for one nested nullable property either hides the model's parameters
+// or makes a successful result look like it returned undeclared fields.
+func normalizeMCPJSONSchema(raw json.RawMessage) (json.RawMessage, bool, error) {
+	var schema any
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil, false, err
+	}
+	changed, err := normalizeMCPTypeArrays(schema)
+	if err != nil {
+		return nil, false, err
+	}
+	normalized, err := json.Marshal(schema)
+	if err != nil {
+		return nil, false, err
+	}
+	return normalized, changed, nil
+}
+
+func normalizeMCPTypeArrays(value any) (bool, error) {
+	changed := false
+	switch current := value.(type) {
+	case []any:
+		for _, item := range current {
+			itemChanged, err := normalizeMCPTypeArrays(item)
+			if err != nil {
+				return false, err
+			}
+			changed = changed || itemChanged
+		}
+	case map[string]any:
+		for key, item := range current {
+			if key == "type" {
+				continue
+			}
+			itemChanged, err := normalizeMCPTypeArrays(item)
+			if err != nil {
+				return false, err
+			}
+			changed = changed || itemChanged
+		}
+		types, ok := current["type"].([]any)
+		if !ok {
+			return changed, nil
+		}
+		if len(types) == 0 || current["oneOf"] != nil {
+			return false, fmt.Errorf("unsupported MCP output schema type union")
+		}
+		options := make([]any, 0, len(types))
+		for _, rawType := range types {
+			typeName, ok := rawType.(string)
+			if !ok || (!isJSONSchemaType(typeName) && typeName != "null") {
+				return false, fmt.Errorf("unsupported MCP output schema type union")
+			}
+			option := make(map[string]any, len(current))
+			for key, item := range current {
+				if key == "type" || key == "description" {
+					continue
+				}
+				option[key] = item
+			}
+			option["type"] = typeName
+			options = append(options, option)
+		}
+		description, hasDescription := current["description"]
+		for key := range current {
+			delete(current, key)
+		}
+		if hasDescription {
+			current["description"] = description
+		}
+		current["oneOf"] = options
+		changed = true
+	}
+	return changed, nil
 }
 
 func (a *McpToolAdapter) structuredDetails(value any) (map[string]any, bool) {
@@ -831,11 +923,18 @@ func convertMcpInputSchema(schema any) []tool.ToolParameter {
 	if err != nil {
 		return nil
 	}
+	raw, _, err = normalizeMCPJSONSchema(raw)
+	if err != nil {
+		return nil
+	}
 	var parsed struct {
 		Type       string `json:"type"`
 		Properties map[string]struct {
 			Type        string `json:"type"`
 			Description string `json:"description"`
+			OneOf       []struct {
+				Type string `json:"type"`
+			} `json:"oneOf"`
 		} `json:"properties"`
 		Required []string `json:"required"`
 	}
@@ -859,6 +958,18 @@ func convertMcpInputSchema(schema any) []tool.ToolParameter {
 		prop := parsed.Properties[name]
 		paramType := prop.Type
 		desc := prop.Description
+		if paramType == "" {
+			for _, option := range prop.OneOf {
+				if option.Type == "null" {
+					continue
+				}
+				if paramType != "" || !isJSONSchemaType(option.Type) {
+					paramType = ""
+					break
+				}
+				paramType = option.Type
+			}
+		}
 		if !isJSONSchemaType(paramType) {
 			desc = fmt.Sprintf("%s (original type: %s; degraded to string)", desc, paramType)
 			paramType = "string"

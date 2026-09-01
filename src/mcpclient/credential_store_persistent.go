@@ -1,6 +1,8 @@
 package mcpclient
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,9 +20,19 @@ import (
 )
 
 const (
-	credentialKeyringService  = "awaken-mcp"
-	credentialMetadataVersion = 1
+	credentialKeyringService       = "awaken-mcp"
+	credentialMetadataVersion      = 1
+	credentialSecretChunkSize      = 2000
+	credentialSecretMaxChunks      = 128
+	credentialSecretManifestPrefix = "awaken-keychain-chunks-v1:"
 )
+
+type credentialSecretManifest struct {
+	Version  int    `json:"version"`
+	Revision string `json:"revision"`
+	Chunks   int    `json:"chunks"`
+	SHA256   string `json:"sha256"`
+}
 
 type secretBackend interface {
 	Get(service, user string) (string, error)
@@ -99,7 +111,7 @@ func (s *PersistentCredentialStore) LoadTokenSource(serverName string) (StoredTo
 	if err != nil {
 		return StoredTokenSource{}, err
 	}
-	payload, err := s.secrets.Get(credentialKeyringService, meta.CredentialRef)
+	payload, err := s.loadCredentialSecret(meta.CredentialRef)
 	if err != nil {
 		return StoredTokenSource{}, err
 	}
@@ -144,12 +156,12 @@ func (s *PersistentCredentialStore) saveTokenSourceLocked(serverName string, sou
 	if err != nil {
 		return fmt.Errorf("encode credential for %q: %w", serverName, err)
 	}
-	previousPayload, previousErr := s.secrets.Get(credentialKeyringService, source.CredentialRef)
+	previousPayload, previousErr := s.loadCredentialSecret(source.CredentialRef)
 	hadPreviousSecret := previousErr == nil
 	if previousErr != nil && !errors.Is(previousErr, ErrCredentialNotFound) {
 		return fmt.Errorf("read previous credential secret for %q: %w", serverName, previousErr)
 	}
-	if err := s.secrets.Set(credentialKeyringService, source.CredentialRef, string(payload)); err != nil {
+	if err := s.saveCredentialSecret(source.CredentialRef, string(payload)); err != nil {
 		return fmt.Errorf("persist credential secret for %q: %w", serverName, err)
 	}
 
@@ -204,13 +216,14 @@ func (s *PersistentCredentialStore) clearTokenSourceLocked(serverName string) er
 	hadPreviousSecret := false
 	if strings.TrimSpace(meta.CredentialRef) != "" {
 		var getErr error
-		previousPayload, getErr = s.secrets.Get(credentialKeyringService, meta.CredentialRef)
+		previousPayload, getErr = s.loadCredentialSecret(meta.CredentialRef)
 		hadPreviousSecret = getErr == nil
 		if getErr != nil && !errors.Is(getErr, ErrCredentialNotFound) {
 			return fmt.Errorf("read credential before delete for %q: %w", serverName, getErr)
 		}
-		if err := s.secrets.Delete(credentialKeyringService, meta.CredentialRef); err != nil {
-			return fmt.Errorf("delete credential secret for %q: %w", serverName, err)
+		if err := s.deleteCredentialSecret(meta.CredentialRef); err != nil {
+			rollbackErr := s.restoreSecret(meta.CredentialRef, previousPayload, hadPreviousSecret)
+			return errors.Join(fmt.Errorf("delete credential secret for %q: %w", serverName, err), rollbackErr)
 		}
 	}
 	delete(file.Accounts, serverName)
@@ -229,15 +242,157 @@ func (s *PersistentCredentialStore) restoreSecret(ref, previousPayload string, h
 		return nil
 	}
 	if hadPrevious {
-		if err := s.secrets.Set(credentialKeyringService, ref, previousPayload); err != nil {
+		if err := s.saveCredentialSecret(ref, previousPayload); err != nil {
 			return fmt.Errorf("restore previous credential secret: %w", err)
 		}
 		return nil
 	}
-	if err := s.secrets.Delete(credentialKeyringService, ref); err != nil {
+	if err := s.deleteCredentialSecret(ref); err != nil {
 		return fmt.Errorf("remove unreferenced credential secret: %w", err)
 	}
 	return nil
+}
+
+func (s *PersistentCredentialStore) loadCredentialSecret(ref string) (string, error) {
+	root, err := s.secrets.Get(credentialKeyringService, ref)
+	if err != nil {
+		return "", err
+	}
+	manifest, chunked, err := parseCredentialSecretManifest(root)
+	if err != nil {
+		return "", err
+	}
+	if !chunked {
+		return root, nil
+	}
+	var payload strings.Builder
+	payload.Grow(manifest.Chunks * credentialSecretChunkSize)
+	for index := 0; index < manifest.Chunks; index++ {
+		part, getErr := s.secrets.Get(credentialKeyringService, credentialSecretChunkRef(ref, manifest.Revision, index))
+		if getErr != nil {
+			return "", fmt.Errorf("read credential secret chunk %d of %d: %w", index+1, manifest.Chunks, getErr)
+		}
+		payload.WriteString(part)
+	}
+	joined := payload.String()
+	digest := sha256.Sum256([]byte(joined))
+	if hex.EncodeToString(digest[:]) != manifest.SHA256 {
+		return "", errors.New("credential secret chunks failed integrity verification")
+	}
+	return joined, nil
+}
+
+func (s *PersistentCredentialStore) saveCredentialSecret(ref, payload string) error {
+	previousRoot, previousErr := s.secrets.Get(credentialKeyringService, ref)
+	hadPreviousRoot := previousErr == nil
+	if previousErr != nil && !errors.Is(previousErr, ErrCredentialNotFound) {
+		return previousErr
+	}
+	previousManifest, previousChunked, manifestErr := parseCredentialSecretManifest(previousRoot)
+	if manifestErr != nil {
+		return manifestErr
+	}
+
+	if len(payload) <= credentialSecretChunkSize {
+		if err := s.secrets.Set(credentialKeyringService, ref, payload); err != nil {
+			return err
+		}
+		if previousChunked {
+			if err := s.deleteCredentialSecretChunks(ref, previousManifest); err != nil {
+				return errors.Join(err, s.restoreCredentialSecretRoot(ref, previousRoot, hadPreviousRoot))
+			}
+		}
+		return nil
+	}
+
+	chunkCount := (len(payload) + credentialSecretChunkSize - 1) / credentialSecretChunkSize
+	if chunkCount > credentialSecretMaxChunks {
+		return fmt.Errorf("credential secret exceeds the supported Keychain payload size")
+	}
+	manifest := credentialSecretManifest{Version: 1, Revision: uuid.NewString(), Chunks: chunkCount}
+	digest := sha256.Sum256([]byte(payload))
+	manifest.SHA256 = hex.EncodeToString(digest[:])
+	written := 0
+	for index := 0; index < chunkCount; index++ {
+		start := index * credentialSecretChunkSize
+		end := min(start+credentialSecretChunkSize, len(payload))
+		if err := s.secrets.Set(credentialKeyringService, credentialSecretChunkRef(ref, manifest.Revision, index), payload[start:end]); err != nil {
+			return errors.Join(err, s.deleteCredentialSecretChunks(ref, credentialSecretManifest{Revision: manifest.Revision, Chunks: written}))
+		}
+		written++
+	}
+	encodedManifest, err := json.Marshal(manifest)
+	if err != nil {
+		return errors.Join(err, s.deleteCredentialSecretChunks(ref, manifest))
+	}
+	if err := s.secrets.Set(credentialKeyringService, ref, credentialSecretManifestPrefix+string(encodedManifest)); err != nil {
+		return errors.Join(err, s.deleteCredentialSecretChunks(ref, manifest))
+	}
+	if previousChunked {
+		if err := s.deleteCredentialSecretChunks(ref, previousManifest); err != nil {
+			return errors.Join(err, s.restoreCredentialSecretRoot(ref, previousRoot, hadPreviousRoot), s.deleteCredentialSecretChunks(ref, manifest))
+		}
+	}
+	return nil
+}
+
+func (s *PersistentCredentialStore) deleteCredentialSecret(ref string) error {
+	root, err := s.secrets.Get(credentialKeyringService, ref)
+	if err != nil {
+		if errors.Is(err, ErrCredentialNotFound) {
+			return nil
+		}
+		return err
+	}
+	manifest, chunked, err := parseCredentialSecretManifest(root)
+	if err != nil {
+		return err
+	}
+	if err := s.secrets.Delete(credentialKeyringService, ref); err != nil {
+		return err
+	}
+	if chunked {
+		return s.deleteCredentialSecretChunks(ref, manifest)
+	}
+	return nil
+}
+
+func (s *PersistentCredentialStore) restoreCredentialSecretRoot(ref, root string, hadRoot bool) error {
+	if hadRoot {
+		return s.secrets.Set(credentialKeyringService, ref, root)
+	}
+	return s.secrets.Delete(credentialKeyringService, ref)
+}
+
+func (s *PersistentCredentialStore) deleteCredentialSecretChunks(ref string, manifest credentialSecretManifest) error {
+	var cleanupErr error
+	for index := 0; index < manifest.Chunks; index++ {
+		if err := s.secrets.Delete(credentialKeyringService, credentialSecretChunkRef(ref, manifest.Revision, index)); err != nil && !errors.Is(err, ErrCredentialNotFound) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete credential secret chunk %d of %d: %w", index+1, manifest.Chunks, err))
+		}
+	}
+	return cleanupErr
+}
+
+func credentialSecretChunkRef(ref, revision string, index int) string {
+	return fmt.Sprintf("%s:chunk:%s:%03d", ref, revision, index)
+}
+
+func parseCredentialSecretManifest(value string) (credentialSecretManifest, bool, error) {
+	if !strings.HasPrefix(value, credentialSecretManifestPrefix) {
+		return credentialSecretManifest{}, false, nil
+	}
+	var manifest credentialSecretManifest
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(value, credentialSecretManifestPrefix)), &manifest); err != nil {
+		return credentialSecretManifest{}, false, fmt.Errorf("decode credential secret manifest: %w", err)
+	}
+	if manifest.Version != 1 || manifest.Chunks < 1 || manifest.Chunks > credentialSecretMaxChunks || strings.TrimSpace(manifest.SHA256) == "" {
+		return credentialSecretManifest{}, false, errors.New("invalid credential secret manifest")
+	}
+	if _, err := uuid.Parse(manifest.Revision); err != nil {
+		return credentialSecretManifest{}, false, errors.New("invalid credential secret manifest revision")
+	}
+	return manifest, true, nil
 }
 
 func (s *PersistentCredentialStore) HasTokenSource(serverName string) (bool, error) {

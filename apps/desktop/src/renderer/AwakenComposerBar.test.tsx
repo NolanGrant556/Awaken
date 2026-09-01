@@ -212,6 +212,25 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(icon?.getAttribute("height")).toBe("16");
   });
 
+  it("uses the official Outlook mark instead of the generic Plugin icon", () => {
+    const { editor } = renderComposer({
+      tokens: [
+        {
+          id: "plugin:awaken-outlook:digest",
+          type: "plugin",
+          label: "Outlook 邮箱",
+          brandIcon: "outlook",
+        },
+      ],
+    });
+    const token = editor.querySelector<HTMLElement>(
+      '[data-composer-token-id="plugin:awaken-outlook:digest"]',
+    );
+
+    expect(token?.querySelector(".composer-bar-token-brand-icon")).not.toBeNull();
+    expect(token?.querySelector(".aw-icon--puzzle")).toBeNull();
+  });
+
   it("groups mention actions under the visible built-in and plugin section labels", () => {
     renderComposer({
       value: "@",
@@ -516,10 +535,11 @@ describe("AwakenComposerBar unified token editing", () => {
               leadingText: "我们 women ",
             },
             {
-              id: "plugin:business-review:digest",
+              id: "plugin:awaken-outlook:digest",
               type: "plugin",
-              label: "Business Review",
+              label: "Outlook 邮箱",
               leadingText: "2026 ",
+              brandIcon: "outlook",
             },
           ]}
         />,
@@ -528,12 +548,15 @@ describe("AwakenComposerBar unified token editing", () => {
 
     const icons = Array.from(
       host.querySelectorAll<SVGElement>(".execution-prompt-bubble-token-icon"),
-    );
-    expect(icons).toHaveLength(3);
+    ).filter((icon) => icon.tagName.toLowerCase() === "svg");
+    expect(icons).toHaveLength(2);
     expect(icons.every((icon) => icon.getAttribute("width") === "16")).toBe(true);
     expect(icons[0]?.classList).toContain("aw-icon--display-pointer");
     expect(icons[1]?.classList).toContain("aw-icon--book-open");
-    expect(icons[2]?.classList).toContain("aw-icon--puzzle");
+    expect(host.querySelector(".execution-prompt-bubble-token-brand-icon")).not.toBeNull();
+    expect(
+      host.querySelector(".execution-prompt-bubble-token-plugin .aw-icon--puzzle"),
+    ).toBeNull();
   });
 
   it("copies visible plaintext with token labels and no soft-wrap breaks", () => {

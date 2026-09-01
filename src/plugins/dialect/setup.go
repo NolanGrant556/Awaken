@@ -152,6 +152,27 @@ func parseSetupDocument(raw []byte, sourcePath string, dialect ir.Dialect, exist
 		if requirement.Kind == ir.SetupHostConnector && strings.TrimSpace(requirement.ConnectorID) == "" {
 			return nil, nil, fmt.Errorf("%s requirement %q requires connectorId", sourcePath, requirement.ID)
 		}
+		if requirement.Kind == ir.SetupHostConnector {
+			requirement.ConnectorID = strings.TrimSpace(requirement.ConnectorID)
+			shortName := strings.TrimSpace(requirement.MCPServerName)
+			if shortName == "" {
+				shortName = requirement.ConnectorID
+			}
+			component := ir.Component{
+				LogicalID: ir.LogicalID(ir.KindMCPServer, sourcePath, "host_connector:"+requirement.ID), Kind: ir.KindMCPServer,
+				DeclaredName: shortName, DerivedName: shortName, DisplayName: firstNonEmpty(requirement.Title, shortName),
+				Description: requirement.Description, SourceDialect: dialect, SourceManifestPath: sourcePath, SourcePath: sourcePath,
+				SourceDigest: digestBytes(requirement.Raw), Mapping: ir.MappingAdapted, Validation: "valid",
+				CanonicalProvenance: string(dialect) + ":host_connector",
+				MCP: &ir.MCPSpec{
+					ShortName: shortName, HostConnectorID: requirement.ConnectorID,
+					SourceShape: "host_connector", SourceTransport: "in-process", Transport: "in-process", Raw: requirement.Raw,
+				},
+			}
+			declaredComponents = append(declaredComponents, component)
+			components = append(components, component)
+			requirement.ComponentIDs = append(requirement.ComponentIDs, component.LogicalID)
+		}
 		if requirement.Kind == ir.SetupExternal {
 			if err := validateSetupURL(requirement.ExternalURL); err != nil {
 				return nil, nil, fmt.Errorf("%s requirement %q: %w", sourcePath, requirement.ID, err)
@@ -302,7 +323,7 @@ func appendNativeSetup(plugin *ir.NormalizedPlugin) {
 				SourceDialect: component.SourceDialect, SourcePath: component.SourcePath,
 			})
 		}
-		if component.MCP != nil && component.MCP.Transport != "stdio" {
+		if component.MCP != nil && component.MCP.HostConnectorID == "" && component.MCP.Transport != "stdio" {
 			plugin.Setup = append(plugin.Setup, ir.SetupRequirement{
 				ID: "mcp:" + component.LogicalID, Kind: ir.SetupMCPOAuth,
 				Title:       firstNonEmpty(component.DisplayName, component.MCP.ShortName) + " 授权",

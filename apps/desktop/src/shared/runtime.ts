@@ -729,9 +729,10 @@ export type RuntimeInfo = {
 };
 
 export type RuntimeConnectorState =
-  "disconnected" | "pending" | "connected" | "needs-auth" | "failed";
+  "disconnected" | "pending" | "connected" | "needs-auth" | "approval-required" | "failed";
 
 export type RuntimeConnectorKind = "mcp" | "cli";
+export type RuntimeConnectorCatalogPlacement = "connectors" | "plugin_only";
 
 export type CliProviderId = "dingtalk-workspace" | "lark-cli";
 export type CliActivation = "enabled" | "disabled";
@@ -822,6 +823,7 @@ export type RuntimeConnector = {
   provider?: string;
   state: RuntimeConnectorState;
   sourceOrigin: string;
+  catalogPlacement?: RuntimeConnectorCatalogPlacement;
   authType: string;
   lastError?: string;
   serverNames?: string[];
@@ -846,6 +848,7 @@ export type RuntimeConnectorActionResponse = {
 export type RuntimeConnectorAuthStatus =
   | "authorizing"
   | "verifying"
+  | "pending_admin_approval"
   | "ready"
   | "failed"
   | "expired"
@@ -1018,7 +1021,7 @@ export type RuntimePluginComponent = {
   secondaryProvenance?: string[];
   diagnostics?: RuntimePluginDiagnostic[];
   skill?: { path: string; catalogId?: string };
-  mcp?: { shortName?: string; transport?: string; connectionState?: string; toolsLoaded?: boolean; toolCount?: number };
+  mcp?: { shortName?: string; transport?: string; connectionState?: string; toolsLoaded?: boolean; toolCount?: number; hostManaged?: boolean; connectorId?: string };
   rule?: { activation?: string; globs?: string[]; scope?: string };
   agent?: { model?: string; readOnly?: boolean; maxTurns?: number; timeoutSeconds?: number };
   command?: { invocationName?: string; argumentHint?: string; acceptsArguments?: boolean; argumentsRequired?: boolean };
@@ -1056,6 +1059,7 @@ export type RuntimePluginSetupStatus =
   | "needs_auth"
   | "authorizing"
   | "verifying"
+  | "pending_admin_approval"
   | "expired"
   | "failed"
   | "unsupported";
@@ -1064,6 +1068,7 @@ export type RuntimePluginSetupAction =
   | "configure"
   | "authorize"
   | "cancel"
+  | "mark_admin_approval"
   | "retry"
   | "probe"
   | "disconnect"
@@ -1099,6 +1104,7 @@ export type RuntimePluginSetupSummary = {
   ready: number;
   needsConfiguration: number;
   needsAuth: number;
+  needsAdminApproval: number;
   inProgress: number;
   failed: number;
   unsupported: number;
@@ -1112,6 +1118,7 @@ export type RuntimePluginSetupResponse = {
 export type RuntimePluginSetupMutationRequest = {
   pluginDigest: string;
   requirementFingerprint: string;
+  force?: boolean;
 };
 
 export type RuntimePluginAuthSession = {
@@ -1197,6 +1204,9 @@ export type RuntimePluginServer = {
 export type RuntimePlugin = {
   name: string;
   displayName?: string;
+  builtin?: boolean;
+  brandIcon?: string;
+  builtinOrder?: number;
   version?: string;
   description?: string;
   author?: { name?: string; email?: string; url?: string };
@@ -2640,6 +2650,7 @@ export type AwakenBridge = {
   disconnectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
   getConnectorAuthSession?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
   cancelConnectorAuthSession?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
+  markConnectorAdminApprovalPending?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
   listCliConnectors: () => Promise<CliConnectorView[]>;
   refreshCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
   installCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
@@ -2735,8 +2746,14 @@ export type AwakenBridge = {
     setupId: string,
     request: RuntimePluginSetupMutationRequest,
   ) => Promise<RuntimePluginAuthSession>;
+  getActivePluginAuthSession?: (
+    name: string,
+    setupId: string,
+    request: RuntimePluginSetupMutationRequest,
+  ) => Promise<RuntimePluginAuthSession | null>;
   getPluginAuthSession?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
   cancelPluginAuthSession?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
+  markPluginAdminApprovalPending?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
   probePluginSetup?: (
     name: string,
     setupId: string,

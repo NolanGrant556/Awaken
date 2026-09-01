@@ -2,6 +2,10 @@ import "./AwakenUserPromptBlock.css";
 import { composerTokenIconConcept } from "../../composerTokenIcon";
 import { AwakenIcon } from "../AwakenIcon";
 import {
+  AwakenPluginBrandIcon,
+  isAwakenPluginBrand,
+} from "../AwakenPluginBrandIcon";
+import {
   Fragment,
   useEffect,
   useRef,
@@ -133,6 +137,7 @@ export type AwakenUserPromptToken = {
   label: string;
   leadingText?: string;
   title?: string;
+  brandIcon?: string;
 };
 
 export type AwakenUserPromptAttachment = {
@@ -417,11 +422,19 @@ export function AwakenUserPromptBlock({
         className={`execution-prompt-bubble-token execution-prompt-bubble-token-${tokenType}`}
         title={token.title ?? token.label}
       >
-        <AwakenIcon
-          concept={tokenConcept}
-          size={16}
-          className="execution-prompt-bubble-token-icon"
-        />
+        {isAwakenPluginBrand(token.brandIcon) ? (
+          <AwakenPluginBrandIcon
+            brand={token.brandIcon}
+            size="menu"
+            className="execution-prompt-bubble-token-icon execution-prompt-bubble-token-brand-icon"
+          />
+        ) : (
+          <AwakenIcon
+            concept={tokenConcept}
+            size={16}
+            className="execution-prompt-bubble-token-icon"
+          />
+        )}
         <span className="execution-prompt-bubble-token-label aw-text-selectable">
           {token.label}
         </span>

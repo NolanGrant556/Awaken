@@ -110,9 +110,7 @@ export type AguiRunOutcome = {
 };
 
 export type AguiProviderReconnectPhase =
-  | "waiting_for_network"
-  | "reconnecting"
-  | "recovered";
+  "waiting_for_network" | "reconnecting" | "recovered";
 
 export type AguiProviderReconnect = {
   phase: AguiProviderReconnectPhase;
@@ -467,7 +465,14 @@ export type AguiEvent = {
   subagentParentToolCallId?: string;
   subagentAgentType?: "explore" | "plan" | "review" | "general";
   subagentDescription?: string;
-  subagentStatus?: "queued" | "running" | "completed" | "failed" | "cancelling" | "cancelled" | "interrupted";
+  subagentStatus?:
+    | "queued"
+    | "running"
+    | "completed"
+    | "failed"
+    | "cancelling"
+    | "cancelled"
+    | "interrupted";
   subagentWorkspaceMode?: string;
   subagentModelProfileId?: string;
   subagentActivity?: string;

@@ -393,7 +393,9 @@ func (s *Store) loadRecord(name string, rec Record) *InstalledPlugin {
 		return &InstalledPlugin{
 			Name: name, Root: root, DataDir: dataDir, Enabled: rec.Enabled,
 			Source: rec.Source, Digest: rec.Digest, ActualDigest: actualDigest,
-			InstalledAt: rec.InstalledAt,
+			InstalledAt: rec.InstalledAt, Builtin: rec.Builtin,
+			BrandIcon: rec.BrandIcon, BuiltinOrder: rec.BuiltinOrder,
+			DisplayName: rec.DisplayName,
 			Diagnostics: []Diagnostic{errorDiag("plugin_digest_changed", message)},
 		}
 	}
@@ -410,6 +412,8 @@ func (s *Store) loadRecord(name string, rec Record) *InstalledPlugin {
 				Name: name, Root: root, DataDir: dataDir, Enabled: rec.Enabled, Source: rec.Source,
 				Digest: rec.Digest, ActualDigest: actualDigest, InstalledAt: rec.InstalledAt,
 				Dialect: rec.Dialect, ManifestPath: rec.ManifestPath, InstallationID: rec.InstallationID,
+				DisplayName: rec.DisplayName, Builtin: rec.Builtin,
+				BrandIcon: rec.BrandIcon, BuiltinOrder: rec.BuiltinOrder,
 				Diagnostics: []Diagnostic{errorDiag("plugin_manifest_invalid", parseErr.Error())},
 			}
 		}
@@ -450,6 +454,9 @@ func (s *Store) loadRecord(name string, rec Record) *InstalledPlugin {
 	}
 	plugin.InstallationID = rec.InstallationID
 	plugin.DisplayName = firstNonEmptyPlugin(rec.DisplayName, plugin.DisplayName, plugin.Manifest.Name)
+	plugin.Builtin = rec.Builtin
+	plugin.BrandIcon = rec.BrandIcon
+	plugin.BuiltinOrder = rec.BuiltinOrder
 	if len(plugin.Components) == 0 {
 		candidate := ir.ManifestCandidate{Dialect: plugin.Dialect, ManifestPath: plugin.ManifestPath, Manifestless: plugin.ManifestPath == "", IdentityHint: name, Valid: true}
 		if normalized, parseErr := dialect.NewDefaultRegistry().Parse(root, candidate, dialect.ParseOptions{PluginDigest: actualDigest}); parseErr == nil {
@@ -686,18 +693,16 @@ func (s *Store) SetEnabled(name string, enabled bool) (*InstalledPlugin, error) 
 		if !ok {
 			return fmt.Errorf("%w: %s", ErrNotFound, name)
 		}
-		if enabled {
-			loaded := s.loadRecord(name, rec)
-			if !loaded.IntegrityValid {
-				return fmt.Errorf("%w: %s", ErrDigestChanged, name)
-			}
-		}
 		rec.Enabled = enabled
+		loaded := s.loadRecord(name, rec)
+		if enabled && !loaded.IntegrityValid {
+			return fmt.Errorf("%w: %s", ErrDigestChanged, name)
+		}
 		state.Plugins[name] = rec
 		if err := s.writeStateUnlocked(state); err != nil {
 			return err
 		}
-		plugin = s.loadRecord(name, rec)
+		plugin = loaded
 		return nil
 	})
 	if err == nil {

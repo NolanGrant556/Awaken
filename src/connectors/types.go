@@ -12,11 +12,12 @@ import (
 type ConnectorState string
 
 const (
-	StateDisconnected ConnectorState = "disconnected"
-	StatePending      ConnectorState = "pending"
-	StateConnected    ConnectorState = "connected"
-	StateNeedsAuth    ConnectorState = "needs-auth"
-	StateFailed       ConnectorState = "failed"
+	StateDisconnected     ConnectorState = "disconnected"
+	StatePending          ConnectorState = "pending"
+	StateConnected        ConnectorState = "connected"
+	StateNeedsAuth        ConnectorState = "needs-auth"
+	StateApprovalRequired ConnectorState = "approval-required"
+	StateFailed           ConnectorState = "failed"
 )
 
 // ConnectorKind separates ordinary MCP-backed connectors from Desktop-owned
@@ -79,6 +80,17 @@ const (
 	SourceTeam    SourceOrigin = "team"
 )
 
+// CatalogPlacement declares where a connector is presented to users. The
+// connector runtime always remains registered; plugin-only host connectors are
+// operated through the referencing plugin rather than duplicated in the
+// top-level Connector catalog.
+type CatalogPlacement string
+
+const (
+	CatalogConnectors CatalogPlacement = "connectors"
+	CatalogPluginOnly CatalogPlacement = "plugin_only"
+)
+
 // McpConfigFactory is a function that produces one or more MCP server configs
 // from a connector definition and optional OAuth scopes. The returned map keys
 // are server keys (e.g. "notion", "notion_search") and the values are
@@ -121,6 +133,11 @@ type ConnectorDefinition struct {
 	// RequiredScopes lists the OAuth scopes needed for this connector to function.
 	RequiredScopes []string `json:"requiredScopes,omitempty"`
 
+	// ServerNames declares stable MCP runtime identities for host-provided
+	// servers. It lets plugin inventory resolve a host_connector reference even
+	// before the account is connected; live readiness still comes from Manager.
+	ServerNames []string `json:"serverNames,omitempty"`
+
 	// OAuth is present only for host-owned OAuth connectors. It is consumed by
 	// Core's connector account service and is never returned to Renderer.
 	OAuth *OAuthConnectorSpec `json:"-"`
@@ -130,6 +147,10 @@ type ConnectorDefinition struct {
 
 	// SourceOrigin records which source provided this definition.
 	SourceOrigin SourceOrigin `json:"sourceOrigin"`
+
+	// CatalogPlacement controls the user-facing catalog that owns this
+	// connector's setup entry. Empty values normalize to CatalogConnectors.
+	CatalogPlacement CatalogPlacement `json:"catalogPlacement,omitempty"`
 
 	// McpConfigFactory is the function that generates MCP server configs from
 	// this connector definition. Only set for builtin connectors; local and team
@@ -171,6 +192,10 @@ type ConnectorStatus struct {
 
 	// SourceOrigin records which source provided this connector.
 	SourceOrigin SourceOrigin `json:"sourceOrigin"`
+
+	// CatalogPlacement is copied from the definition so API consumers can
+	// enforce the same no-duplicate presentation boundary.
+	CatalogPlacement CatalogPlacement `json:"catalogPlacement"`
 
 	// AuthType describes how authentication is performed.
 	AuthType AuthType `json:"authType"`

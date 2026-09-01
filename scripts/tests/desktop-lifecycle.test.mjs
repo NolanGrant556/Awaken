@@ -186,17 +186,66 @@ describe("desktop package staging", () => {
     assert.match(config, /resources\/bin\/\$\{platform\}-\$\{arch\}/);
     assert.doesNotMatch(config, /^\s*- from: resources\/bin\s*$/m);
     assert.match(config, /^\s*- from: resources\/system-skills\s*$/m);
+    assert.match(config, /^\s*- from: resources\/builtin-plugins\s*$/m);
     assert.match(config, /^\s*- from: resources\/officecli-release\.json\s*$/m);
     assert.match(config, /^\s*- from: resources\/licenses\s*$/m);
     const buildSource = readFileSync(join(repoRoot, "scripts", "build-binary.mjs"), "utf8");
     assert.match(buildSource, /awaken-network-watch\.exe/);
     assert.match(buildSource, /platform === "win32"/);
+    assert.match(
+      buildSource,
+      /defaultMicrosoftOutlookClientId = "1bdaadb2-a9d3-44a9-99cf-806172ca83af"/,
+    );
+    assert.match(buildSource, /AWAKEN_MICROSOFT_CLIENT_ID/);
     const ensureSource = readFileSync(
       join(repoRoot, "scripts", "ensure-desktop-runtime.mjs"),
       "utf8",
     );
     assert.match(ensureSource, /companionBinaryPaths/);
     assert.match(ensureSource, /awaken-network-watch\.exe/);
+  });
+
+  it("ships the complete Outlook built-in Plugin package", () => {
+    const pluginRoot = join(
+      repoRoot,
+      "apps",
+      "desktop",
+      "resources",
+      "builtin-plugins",
+      "awaken-outlook",
+    );
+    const metadata = JSON.parse(
+      readFileSync(join(pluginRoot, ".awaken", "builtin.json"), "utf8"),
+    );
+    const manifest = JSON.parse(
+      readFileSync(join(pluginRoot, "plugin.json"), "utf8"),
+    );
+    assert.deepEqual(metadata, {
+      version: 1,
+      displayName: "Outlook 邮箱",
+      brandIcon: "outlook",
+      order: 0,
+    });
+    assert.equal(manifest.name, "awaken-outlook");
+    assert.equal(manifest.version, "1.1.0");
+    assert.doesNotThrow(() =>
+      JSON.parse(readFileSync(join(pluginRoot, ".awaken", "setup.json"), "utf8")),
+    );
+    for (const skill of [
+      "inbox-triage",
+      "outlook-email",
+      "reply-drafting",
+      "subscription-cleanup",
+      "task-extraction",
+      "shared-mailboxes",
+      "attachment-management",
+      "scheduled-mail",
+      "mailbox-organization",
+    ]) {
+      const source = readFileSync(join(pluginRoot, "skills", skill, "SKILL.md"), "utf8");
+      assert.match(source, /^---\nname: [a-z0-9-]+\ndescription: .+/);
+      assert.match(source, /\nmetadata:\n\s+display_name: .+/);
+    }
   });
 
   it("pins one verified OfficeCLI asset per supported product target", () => {

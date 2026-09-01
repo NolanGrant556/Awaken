@@ -12,6 +12,10 @@ import {
 import { getAwakenIcon, iconForConcept, type AwakenIconName } from "../../icons";
 import { composerTokenIconConcept } from "../../composerTokenIcon";
 import {
+  awakenPluginBrandAsset,
+  isAwakenPluginBrand,
+} from "../AwakenPluginBrandIcon";
+import {
   type ComposerInputCaretRect,
   pastedImageFilesFromClipboardData,
   shouldSubmitComposerInputKey,
@@ -25,6 +29,7 @@ export type ComposerInlineToken = {
   label: string;
   title?: string;
   leadingText?: string;
+  brandIcon?: string;
 };
 
 export type ComposerInlineTokenSegment = {
@@ -229,7 +234,15 @@ function structuredValuesEqual(
 }
 
 function tokenRenderSignature(tokens: ComposerInlineToken[]): string {
-  return JSON.stringify(tokens.map(({ id, type, label, title }) => [id, type, label, title ?? ""]));
+  return JSON.stringify(
+    tokens.map(({ id, type, label, title, brandIcon }) => [
+      id,
+      type,
+      label,
+      title ?? "",
+      brandIcon ?? "",
+    ]),
+  );
 }
 
 function appendAwakenLineIcon(
@@ -272,11 +285,21 @@ function composerTokenElement(document: Document, token: ComposerInlineToken): H
   element.setAttribute("contenteditable", "false");
   element.setAttribute("draggable", "false");
   element.title = token.title ?? token.label;
-  appendAwakenLineIcon(
-    document,
-    element,
-    iconForConcept(composerTokenIconConcept(token.type)),
-  );
+  if (isAwakenPluginBrand(token.brandIcon)) {
+    const image = document.createElement("img");
+    image.className = "composer-bar-token-icon composer-bar-token-brand-icon";
+    image.src = awakenPluginBrandAsset(token.brandIcon);
+    image.alt = "";
+    image.draggable = false;
+    image.setAttribute("aria-hidden", "true");
+    element.append(image);
+  } else {
+    appendAwakenLineIcon(
+      document,
+      element,
+      iconForConcept(composerTokenIconConcept(token.type)),
+    );
+  }
 
   const label = document.createElement("span");
   label.className = "composer-bar-token-label";

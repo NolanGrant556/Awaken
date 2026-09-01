@@ -864,6 +864,34 @@ describe("runtime reducer run narrative projection", () => {
     });
   });
 
+  it("creates a durable prompt item for a comment-only run", () => {
+    const comment = {
+      id: "comment-1",
+      projectId: "project-1",
+      folderPath: "/workspace",
+      relativePath: "src/main.ts",
+      displayName: "main.ts",
+      contentDigest: "a".repeat(64),
+      startLine: 7,
+      endLine: 8,
+      selectedText: "const value = 1;",
+      comment: "请提取为常量",
+      createdAt: "2026-08-31T00:00:00.000Z",
+      validationState: "ready" as const,
+    };
+    const state = dispatch([{
+      type: "run/requested",
+      prompt: "",
+      promptFileComments: [comment],
+    }]);
+
+    expect(state.narrative.committedItems[0]).toMatchObject({
+      kind: "prompt",
+      text: "",
+      fileComments: [comment],
+    });
+  });
+
   it("projects reasoning and text deltas into thinking and answer items", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "Say hello" },

@@ -84,6 +84,7 @@ type refreshThreadContextSnapshotRequest struct {
 type errorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
+	Details any    `json:"details,omitempty"`
 }
 
 type threadTranscriptRunResponse struct {
@@ -98,9 +99,13 @@ type threadTranscriptResponse struct {
 }
 
 func writeErrorJSON(w http.ResponseWriter, status int, code, message string) {
+	writeErrorDetailsJSON(w, status, code, message, nil)
+}
+
+func writeErrorDetailsJSON(w http.ResponseWriter, status int, code, message string, details any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(errorResponse{Error: code, Message: message})
+	_ = json.NewEncoder(w).Encode(errorResponse{Error: code, Message: message, Details: details})
 }
 
 func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +124,21 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 
 	run, err := h.runService.StartRun(req)
 	if err != nil {
+		var fileCommentErr *awruntime.FileCommentValidationError
 		switch {
+		case errors.As(err, &fileCommentErr):
+			status := http.StatusBadRequest
+			code := "INVALID_FILE_COMMENT"
+			message := "文件评论无效，请重新选择评论行。"
+			if fileCommentErr.Stale {
+				status = http.StatusConflict
+				code = "FILE_COMMENT_STALE"
+				message = "文件内容已变化，请重新选择评论行。"
+			}
+			writeErrorDetailsJSON(w, status, code, message, map[string]string{
+				"comment_id": fileCommentErr.CommentID,
+				"reason":     fileCommentErr.Reason,
+			})
 		case errors.Is(err, awruntime.ErrThreadNotFound):
 			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
 		case errors.Is(err, awruntime.ErrThreadWorkspaceMismatch):

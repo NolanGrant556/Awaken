@@ -1017,11 +1017,141 @@ body.is-project-file-list-resizing .project-files-workspace__body {
   box-shadow: 0 2px 14px color-mix(in srgb, #000 16%, transparent);
 }
 
-.project-file-code-preview__editor {
+.project-file-code-preview__editor-shell {
+  position: relative;
   height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.project-file-code-preview__editor {
+  height: 100%;
+}
+
+.project-file-code-preview__editor .project-file-line-comment-selection {
+  background: color-mix(in srgb, var(--aw-accent) 14%, transparent);
+}
+
+.project-file-code-preview__editor .project-file-line-comment-selection-gutter {
+  background: color-mix(in srgb, var(--aw-accent) 14%, transparent);
+  color: var(--aw-accent);
+}
+
+.project-file-line-comment-add {
+  position: absolute;
+  z-index: 5;
+  left: 4px;
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: var(--aw-text-primary);
+  color: var(--aw-bg-main);
+  box-shadow: 0 2px 8px color-mix(in srgb, #000 18%, transparent);
+  cursor: pointer;
+}
+
+.project-file-line-comments {
+  box-sizing: border-box;
+  margin: 8px 18px 10px 48px;
+  color: var(--aw-text-primary);
+  font-family: var(--aw-font-family);
+}
+
+.project-file-line-comment-card,
+.project-file-line-comment-editor {
+  position: relative;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: 10px;
+  background: var(--aw-surface-panel);
+  box-shadow: 0 5px 18px color-mix(in srgb, #000 7%, transparent);
+}
+
+.project-file-line-comment-card + .project-file-line-comment-card,
+.project-file-line-comment-card + .project-file-line-comment-editor {
+  margin-top: 8px;
+}
+
+.project-file-line-comment-card header,
+.project-file-line-comment-editor header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+}
+
+.project-file-line-comment-card header strong,
+.project-file-line-comment-editor header strong {
+  color: var(--aw-text-secondary);
+}
+
+.project-file-line-comment-card p {
+  margin: 12px 0 4px;
+  white-space: pre-wrap;
+}
+
+.project-file-line-comment-delete {
+  display: block;
+  margin: 8px 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--aw-text-tertiary);
+  cursor: pointer;
+}
+
+.project-file-line-comment-stale,
+.project-file-line-comment-error {
+  display: block;
+  margin-top: 8px;
+  color: var(--aw-danger, #c84444);
+  font-size: var(--aw-font-size-xs);
+}
+
+.project-file-line-comment-editor textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 74px;
+  margin-top: 12px;
+  padding: 0;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--aw-text-primary);
+  font: inherit;
+}
+
+.project-file-line-comment-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.project-file-line-comment-actions button {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--aw-text-secondary);
+  cursor: pointer;
+}
+
+.project-file-line-comment-actions button:last-child {
+  background: var(--aw-text-primary);
+  color: var(--aw-bg-main);
+}
+
+.project-file-line-comment-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .project-file-markdown-preview {

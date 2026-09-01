@@ -101,6 +101,9 @@ func projectV1TranscriptRecords(records []TranscriptRecord) []agentcore.Semantic
 				if len(record.ComposerTokens) > 0 {
 					payload["composer_tokens"] = cloneComposerTokens(record.ComposerTokens)
 				}
+				if len(record.FileComments) > 0 {
+					payload["file_comments"] = cloneFileLineComments(record.FileComments)
+				}
 				appendRec(agentcore.SemanticKindUserMessage, record, record.ParentMessageID, payload)
 			case string(convcontext.RoleAssistant):
 				payload := map[string]any{

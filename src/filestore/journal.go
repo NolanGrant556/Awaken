@@ -132,6 +132,25 @@ func (j *Journal) LastSeq() uint64 {
 // Append durably commits payload as the next record: encode -> write ->
 // fsync, before any side effect may proceed.
 func (j *Journal) Append(payload any) (JournalRecord, error) {
+	records, report, err := loadJournalRecords(j.path)
+	if err != nil {
+		return JournalRecord{}, err
+	}
+	if report.TruncatedTailBytes > 0 {
+		return JournalRecord{}, fmt.Errorf(
+			"filestore: journal has an incomplete tail before append: %s",
+			j.path,
+		)
+	}
+	if len(records) == 0 {
+		j.lastSeq = 0
+	} else {
+		// Another process may have appended while this handle was idle. The
+		// authority owner serializes writers with an OS-backed store lock, but
+		// each process still has its own cached lastSeq. Refreshing under that
+		// lock prevents a later owner from reusing the previous owner's seq.
+		j.lastSeq = records[len(records)-1].Seq
+	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return JournalRecord{}, fmt.Errorf("filestore: encode journal payload: %w", err)

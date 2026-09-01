@@ -13,6 +13,8 @@ export type DesktopOperationIssueCode =
   | "run_conflict"
   | "run_input_invalid"
   | "runtime_unavailable"
+  | "file_comment_stale"
+  | "invalid_file_comment"
   | "operation_failed";
 
 export type DesktopOperationRecoveryAction = "retry" | "relaunch" | "reenter";
@@ -22,6 +24,8 @@ export type DesktopOperationIssue = {
   message: string;
   retryable: boolean;
   actions: DesktopOperationRecoveryAction[];
+  commentId?: string;
+  reason?: string;
 };
 
 export type DesktopOperationResult<T> =
@@ -139,6 +143,35 @@ export type RunInputAttachment = {
   byteSize?: number;
 };
 
+export type FileLineCommentWire = {
+  id: string;
+  project_id: string;
+  folder_path: string;
+  relative_path: string;
+  display_name: string;
+  content_digest: string;
+  start_line: number;
+  end_line: number;
+  selected_text: string;
+  comment: string;
+  created_at: string;
+};
+
+export type FileLineComment = {
+  id: string;
+  projectId: string;
+  folderPath: string;
+  relativePath: string;
+  displayName: string;
+  contentDigest: string;
+  startLine: number;
+  endLine: number;
+  selectedText: string;
+  comment: string;
+  createdAt: string;
+  validationState?: "ready" | "stale";
+};
+
 export type PickedAttachmentFile = {
   id: string;
   kind: RunInputAttachmentKind;
@@ -161,6 +194,7 @@ export type RuntimeRunWire = {
   input?: string;
   input_attachments?: RunInputAttachmentWire[];
   composer_tokens?: ComposerToken[];
+  file_comments?: FileLineCommentWire[];
   status: RuntimeRunStatus;
   result?: string;
   error?: string;
@@ -229,6 +263,7 @@ export type RuntimeRun = {
   input?: string;
   inputAttachments?: RunInputAttachment[];
   composerTokens?: ComposerToken[];
+  fileComments?: FileLineComment[];
   status: RuntimeRunStatus;
   result?: string;
   error?: string;
@@ -1994,6 +2029,7 @@ export type StartRunRequestWire = {
   input: string;
   attachments?: RunInputAttachmentWire[];
   composer_tokens?: ComposerToken[];
+  file_comments?: FileLineCommentWire[];
   thread_id?: string;
   workspace: WorkspaceConfigWire;
   client: ClientInfoWire;
@@ -2006,6 +2042,7 @@ export type StartRunRequest = {
   input: string;
   attachments?: RunInputAttachment[];
   composerTokens?: ComposerToken[];
+  fileComments?: FileLineComment[];
   threadId?: string;
   workspace: WorkspaceConfig;
   client: ClientInfo;
@@ -2840,6 +2877,7 @@ export function normalizeRuntimeRun(run: RuntimeRunWire): RuntimeRun {
       ...token,
       payload: token.payload ? { ...token.payload } : undefined,
     })),
+    fileComments: run.file_comments?.map(normalizeFileLineComment),
     status: run.status,
     result: run.result,
     error: run.error,
@@ -3014,6 +3052,7 @@ export function normalizeStartRunRequest(request: StartRunRequest): StartRunRequ
     input: request.input,
     attachments: request.attachments?.map(toRunInputAttachmentWire),
     composer_tokens: request.composerTokens,
+    file_comments: request.fileComments?.map(toFileLineCommentWire),
     thread_id: request.threadId,
     workspace: {
       project_id: request.workspace.projectId,
@@ -3271,6 +3310,39 @@ export function toRunInputAttachmentWire(attachment: RunInputAttachment): RunInp
     width: attachment.width,
     height: attachment.height,
     byte_size: attachment.byteSize,
+  };
+}
+
+export function normalizeFileLineComment(comment: FileLineCommentWire): FileLineComment {
+  return {
+    id: comment.id,
+    projectId: comment.project_id,
+    folderPath: comment.folder_path,
+    relativePath: comment.relative_path,
+    displayName: comment.display_name,
+    contentDigest: comment.content_digest,
+    startLine: comment.start_line,
+    endLine: comment.end_line,
+    selectedText: comment.selected_text,
+    comment: comment.comment,
+    createdAt: comment.created_at,
+    validationState: "ready",
+  };
+}
+
+export function toFileLineCommentWire(comment: FileLineComment): FileLineCommentWire {
+  return {
+    id: comment.id,
+    project_id: comment.projectId,
+    folder_path: comment.folderPath,
+    relative_path: comment.relativePath,
+    display_name: comment.displayName,
+    content_digest: comment.contentDigest,
+    start_line: comment.startLine,
+    end_line: comment.endLine,
+    selected_text: comment.selectedText,
+    comment: comment.comment,
+    created_at: comment.createdAt,
   };
 }
 

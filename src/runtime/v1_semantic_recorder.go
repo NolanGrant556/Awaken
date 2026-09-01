@@ -154,6 +154,7 @@ func semanticRecordToV1Transcript(record agentcore.SemanticRecord) ([]Transcript
 			transcriptAttachmentsFromSemanticUserMessage(record.Payload),
 		)
 		base.ComposerTokens = composerTokensFromSemanticUserMessage(record.Payload)
+		base.FileComments = fileLineCommentsFromSemanticUserMessage(record.Payload)
 		base.MessageID = firstNonEmpty(record.RecordID, fmt.Sprintf("msg_%s", record.RecordID))
 		return []TranscriptRecord{base}, true
 	case agentcore.SemanticKindReasoningSummary:

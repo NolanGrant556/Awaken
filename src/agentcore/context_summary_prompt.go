@@ -32,28 +32,38 @@ func compactSummarySystemPrompt() string {
 	return strings.Join([]string{
 		"You are compacting older Awaken conversation history into a handoff summary.",
 		"The compressed conversation will replace the older raw messages, so fidelity matters more than brevity.",
-		"You may first write an <analysis> block to audit the source history, then write the final <summary> block.",
-		"Only the final summary will be retained.",
+		"Start the response with <summary> immediately and end with </summary>.",
+		"Do not output analysis, reasoning, a preamble, JSON, or code fences; only the final summary is retained.",
 		"Use exactly these section headings, in this exact order, once each:",
 		strings.Join(compactSummarySections, " | "),
 		"Rules:",
 		"- Every explicit user fact, preference, constraint, correction, and pending request from the shown history must appear in the summary or be marked unknown.",
 		"- Preserve important tool findings, file paths, errors, key values, decisions, unresolved asks, and current working state.",
 		"- Preserve enough detail for another agent to continue the task without reading the raw history.",
-		"- Prefer factual bullets beginning with '- '; use as many bullets as needed for fidelity.",
+		"- Prefer concise factual bullets beginning with '- '. Complete all 13 headings before adding a second bullet to any section.",
 		"- If an item appears in [STRUCTURAL_COMPACTION] or [PRUNED_SAFE_GROUP_DIGEST], treat it as source evidence, not metadata to ignore.",
 		"- If the shown older history contains any user request, Active Task or Pending User Asks must preserve that request; do not write '- None.' for both.",
 		"- If tool results or file paths appear in the shown older history, Critical Context, Completed Actions, or Relevant Files must preserve the important findings.",
 		"- Do not invent missing facts. Use '- None.' when the source history does not provide an item.",
-		"- Do not call tools. Do not output JSON or code fences.",
+		"- Do not call tools.",
 	}, "\n")
 }
 
-func compactSummaryUserInstruction(boundaryID string, envelope ContextEnvelope, sourceMessages []convcontext.Message, tailMessages []convcontext.Message, hookInstruction string) string {
+func compactSummaryUserInstruction(boundaryID string, envelope ContextEnvelope, sourceMessages []convcontext.Message, tailMessages []convcontext.Message, hookInstruction string, maxTokens int) string {
 	parts := []string{
 		fmt.Sprintf("Create the compact handoff summary for boundary %s.", boundaryID),
 		"Summarize only the older conversation history already shown in this request.",
 		"The newest protected tail will remain as raw messages after the compact boundary, so only mention it when needed for continuity.",
+	}
+	if maxTokens > 0 {
+		bodyBudget := maxTokens - compactSummaryHostHeaderReserveTokens
+		if bodyBudget < 256 {
+			bodyBudget = 256
+		}
+		parts = append(parts,
+			fmt.Sprintf("Hard output budget: at most %d tokens for the complete response and about %d tokens for summary facts.", maxTokens, bodyBudget),
+			"Fit all 13 headings and </summary> before the limit. Under a tight budget, use one short bullet per heading, put continuity-critical facts first, and use '- None.' immediately when no fact is needed.",
+		)
 	}
 	if envelope.RuntimeSnapshot.WorkspaceRoot != "" {
 		parts = append(parts, "Workspace root: "+envelope.RuntimeSnapshot.WorkspaceRoot)
@@ -61,6 +71,10 @@ func compactSummaryUserInstruction(boundaryID string, envelope ContextEnvelope, 
 	if latestUser := latestMessageContent(sourceMessages, convcontext.RoleUser); latestUser != "" {
 		parts = append(parts, "Latest older user request that MUST be preserved:")
 		parts = append(parts, "- "+limitSummaryText(latestUser))
+	}
+	if latestProgress := compactSummaryLatestProgress(sourceMessages); latestProgress != "" {
+		parts = append(parts, "Latest older assistant progress marker that MUST be preserved:")
+		parts = append(parts, "- "+latestProgress)
 	}
 	if tools := collectCompactToolNames(sourceMessages); len(tools) > 0 {
 		parts = append(parts, "Older tool activity that MUST be reflected when relevant:")

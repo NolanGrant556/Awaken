@@ -208,8 +208,12 @@ func (state ContextWindowState) ShouldBlock() bool {
 }
 
 // ConservativeProjectedTokens returns the safer of the current local estimate
-// and a provider-anchored projection. Old records that predate the sent-request
-// estimate fall back to the narrower host-delta behavior.
+// and a provider-anchored projection. A provider anchor is monotonic within one
+// context epoch: only a successful compact or an incompatible model identity
+// may reset it. This matters because admission runs before Context Epoch
+// lowering while the paired sent-request estimate is captured after lowering;
+// treating that phase difference as a real negative delta can hide an already
+// full provider request.
 func (state ContextWindowState) ConservativeProjectedTokens() int {
 	projected := state.EstimatedTokens
 	if state.LastAPIUsageTokens <= 0 {
@@ -225,7 +229,12 @@ func (state ContextWindowState) ConservativeProjectedTokens() int {
 func (state ContextWindowState) actualUsageProjectedTokens() int {
 	delta := state.EstimatedDeltaTokens
 	if state.LastSentEstimatedInputTokens > 0 {
-		delta = state.EstimatedTokens - state.LastSentEstimatedInputTokens
+		if pairedDelta := state.EstimatedTokens - state.LastSentEstimatedInputTokens; pairedDelta > delta {
+			delta = pairedDelta
+		}
+	}
+	if delta < 0 {
+		delta = 0
 	}
 	if delta > 0 && state.LastAPIUsageTokens > int(^uint(0)>>1)-delta {
 		return int(^uint(0) >> 1)

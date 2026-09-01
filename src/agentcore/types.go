@@ -166,6 +166,11 @@ type AgentConfig struct {
 	// identity for repeated compaction; executable authorities remain supplied
 	// by the current Runtime snapshots rather than deserialized from Journal.
 	RestoredContextBundleV2 *PostCompactContextBundleV2
+	// RestoredContextWindowUsageAnchor is the latest compatible agent_turn
+	// provider-usage anchor carried across runs for conservative context-window
+	// admission. It is rebuilt from durable model_usage records on restore and
+	// reset after successful compact.
+	RestoredContextWindowUsageAnchor *ContextWindowUsageAnchor
 	// ComputerRuntime is the run-bound Computer coordinator. When set, the
 	// environment snapshot is probed with ComputerEnabled=true and the
 	// ToolRuntime is wired with a ComputerExecutor. nil disables Computer Use.

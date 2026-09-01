@@ -260,7 +260,7 @@ func buildOpenAIResponsesInput(req Request) ([]any, error) {
 		if strings.TrimSpace(req.UserPrompt) == "" {
 			return []any{}, nil
 		}
-		return []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "input_text", "text": req.UserPrompt}}}}, nil
+		return []any{map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": req.UserPrompt}}}}, nil
 	}
 	if err := convcontext.ValidateToolResultPairing(req.Messages); err != nil {
 		return nil, fmt.Errorf("invalid Responses tool result pairing: %w", err)
@@ -270,18 +270,24 @@ func buildOpenAIResponsesInput(req Request) ([]any, error) {
 		message := req.Messages[index]
 		switch message.Role {
 		case convcontext.RoleUser:
-			input = append(input, map[string]any{"role": "user", "content": openAIResponsesUserContent(message)})
+			input = append(input, map[string]any{"type": "message", "role": "user", "content": openAIResponsesUserContent(message)})
 		case convcontext.RoleAssistant:
 			if strings.TrimSpace(message.Content) != "" {
-				input = append(input, map[string]any{"role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": message.Content}}})
+				input = append(input, map[string]any{
+					"type": "message", "role": "assistant", "status": "completed",
+					"content": []any{map[string]any{"type": "output_text", "text": message.Content}},
+				})
 			}
 			for _, call := range message.ToolCalls {
-				input = append(input, map[string]any{"type": "function_call", "call_id": call.ID, "name": call.Function.Name, "arguments": call.Function.Arguments})
+				input = append(input, map[string]any{
+					"type": "function_call", "call_id": call.ID, "name": call.Function.Name,
+					"arguments": call.Function.Arguments, "status": "completed",
+				})
 			}
 		case convcontext.RoleTool:
 			input = append(input, map[string]any{"type": "function_call_output", "call_id": message.ToolCallID, "output": openAIToolMessageContent(message)})
 			if media := openAIResponsesToolMediaContent(message); len(media) > 0 {
-				input = append(input, map[string]any{"role": "user", "content": media})
+				input = append(input, map[string]any{"type": "message", "role": "user", "content": media})
 			}
 		}
 	}

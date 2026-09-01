@@ -673,14 +673,15 @@ func runIDsFromSemanticRecords(records []agentcore.SemanticRecord) []string {
 
 func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restoredTranscript {
 	restored := restoredTranscript{
-		Messages:               messagesFromSemanticRecords(records),
-		RunIDs:                 runIDsFromSemanticRecords(records),
-		SkillContextBlocks:     skillContextBlocksFromSemanticRecords(records),
-		CompactContextBlocks:   agentcore.CompactContextBlocksFromBundleV2(latestContextBundleV2FromSemanticRecords(records)),
-		SkillInvokedAt:         skillInvocationTimesFromSemanticRecords(records),
-		ActivatedDeferredTools: activatedDeferredToolsFromSemanticRecords(records),
-		RunPlanSnapshots:       runPlanSnapshotsFromSemanticRecords(records),
-		LatestContextBundleV2:  latestContextBundleV2FromSemanticRecords(records),
+		Messages:                         messagesFromSemanticRecords(records),
+		RunIDs:                           runIDsFromSemanticRecords(records),
+		SkillContextBlocks:               skillContextBlocksFromSemanticRecords(records),
+		CompactContextBlocks:             agentcore.CompactContextBlocksFromBundleV2(latestContextBundleV2FromSemanticRecords(records)),
+		RestoredContextWindowUsageAnchor: latestContextWindowUsageAnchorFromSemanticRecords(records),
+		SkillInvokedAt:                   skillInvocationTimesFromSemanticRecords(records),
+		ActivatedDeferredTools:           activatedDeferredToolsFromSemanticRecords(records),
+		RunPlanSnapshots:                 runPlanSnapshotsFromSemanticRecords(records),
+		LatestContextBundleV2:            latestContextBundleV2FromSemanticRecords(records),
 	}
 	for _, record := range records {
 		if restored.CreatedAt.IsZero() || record.Timestamp.Before(restored.CreatedAt) {
@@ -700,6 +701,59 @@ func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restored
 		restored.UpdatedAt = restored.CreatedAt
 	}
 	return restored
+}
+
+func latestContextWindowUsageAnchorFromSemanticRecords(records []agentcore.SemanticRecord) *agentcore.ContextWindowUsageAnchor {
+	for index := len(records) - 1; index >= 0; index-- {
+		record := records[index]
+		if strings.TrimSpace(stringPayload(record.Payload, "agent_id")) != "" {
+			continue
+		}
+		switch record.Kind {
+		case agentcore.SemanticKindContextCompacted, agentcore.SemanticKindContextCompactedV2:
+			return nil
+		case agentcore.SemanticKindContextEpoch:
+			if isHardContextWindowUsageBoundary(stringPayload(record.Payload, "boundary_reason")) ||
+				isHardContextWindowUsageBoundary(stringPayload(record.Payload, "creation_boundary_reason")) {
+				return nil
+			}
+		case agentcore.SemanticKindModelUsage:
+			usage, ok := modelUsageRecordFromSemanticPayload(record.Payload)
+			if !ok || strings.TrimSpace(usage.Purpose) != "agent_turn" || usage.Status != agentcore.ModelUsageSucceeded || !usage.UsageComplete {
+				continue
+			}
+			return agentcore.ContextWindowUsageAnchorFromModelUsage(usage)
+		}
+	}
+	return nil
+}
+
+func isHardContextWindowUsageBoundary(reason string) bool {
+	switch strings.TrimSpace(reason) {
+	case "initial_baseline",
+		"prompt_schema_incompatible",
+		"workspace_moved",
+		"provider_credential_changed",
+		"model_changed",
+		"provider_authority_incompatible",
+		"reasoning_policy_changed",
+		"compact_succeeded":
+		return true
+	default:
+		return false
+	}
+}
+
+func modelUsageRecordFromSemanticPayload(payload map[string]any) (agentcore.ModelUsageRecord, bool) {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return agentcore.ModelUsageRecord{}, false
+	}
+	var usage agentcore.ModelUsageRecord
+	if err := json.Unmarshal(encoded, &usage); err != nil || strings.TrimSpace(usage.RequestID) == "" {
+		return agentcore.ModelUsageRecord{}, false
+	}
+	return usage, true
 }
 
 func latestContextBundleV2FromSemanticRecords(records []agentcore.SemanticRecord) *agentcore.PostCompactContextBundleV2 {

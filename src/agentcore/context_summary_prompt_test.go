@@ -7,6 +7,23 @@ import (
 	convcontext "awaken/src/context"
 )
 
+func TestCompactSummaryPromptUsesBudgetFirstFinalOnlyContract(t *testing.T) {
+	system := compactSummarySystemPrompt()
+	if strings.Contains(strings.ToLower(system), "may first write an <analysis>") ||
+		!strings.Contains(system, "Start the response with <summary> immediately") {
+		t.Fatalf("compact summary system prompt must not spend a tight budget on analysis: %s", system)
+	}
+	instruction := compactSummaryUserInstruction(
+		"compact-budget", ContextEnvelope{},
+		[]convcontext.Message{{Role: convcontext.RoleUser, Content: "preserve the canary"}},
+		nil, "", 1024,
+	)
+	if !strings.Contains(instruction, "Hard output budget: at most 1024 tokens") ||
+		!strings.Contains(instruction, "Fit all 13 headings and </summary> before the limit") {
+		t.Fatalf("compact summary request must expose the tight output contract: %s", instruction)
+	}
+}
+
 func TestNormalizeCompactSummaryProducesFixedSectionOrder(t *testing.T) {
 	raw := strings.Join([]string{
 		"## Goal",

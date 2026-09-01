@@ -859,11 +859,11 @@ function stubElectronBridge(): void {
       getAgentPlanMediaTools: vi.fn(async () => ({ configurations: [] })),
       saveAgentPlanMediaTool: vi.fn(async () => ({
         settings: { configurations: [] },
-        restartStatus: "restarted" as const,
+        applyStatus: "applied" as const,
       })),
       deleteAgentPlanMediaTool: vi.fn(async () => ({
         settings: { configurations: [] },
-        restartStatus: "restarted" as const,
+        applyStatus: "applied" as const,
       })),
       saveModelProfile: vi.fn(),
       deleteModelProfile: vi.fn(),
@@ -2775,46 +2775,16 @@ describe("context usage presentation", () => {
     ).toBe(27_200);
   });
 
-  it("projects the latest compact diagnostics into the context panel", () => {
-    const data = contextUsagePanelData(
-      {
-        eventType: "AWAKEN_CONTEXT_SNAPSHOT",
-        modelWindow: 200_000,
-        effectiveWindow: 200_000,
-        estimatedTokens: 18_000,
-      },
-      undefined,
-      {
-        eventType: "AWAKEN_COMPACT_FINISHED",
-        status: "finished",
-        compactTarget: 20_000,
-        preCompactEstimatedTokens: 176_000,
-        postCompactEstimatedTokens: 17_500,
-        conservativeProjectedTokens: 18_000,
-        mandatoryFloorTokens: 11_200,
-        contributionTokens: { system_prompt: 4_000, conversation: 14_000 },
-        nativeAttempted: true,
-        nativeUsed: false,
-        nativeReason: "native_projection_fallback",
-        failureReason: "native_projection_fallback",
-      },
-    );
-
-    expect(data?.compactDiagnostics).toEqual({
-      status: "finished",
-      targetTokens: 20_000,
-      preCompactTokens: 176_000,
-      postCompactTokens: 18_000,
-      mandatoryFloorTokens: 11_200,
-      contributionTokens: [
-        { id: "system_prompt", label: "系统提示词", estimatedTokens: 4_000 },
-        { id: "conversation", label: "对话", estimatedTokens: 14_000 },
-      ],
-      nativeAttempted: true,
-      nativeUsed: false,
-      nativeReason: "native_projection_fallback",
-      failureReason: "native_projection_fallback",
+  it("keeps compact diagnostics out of the context panel props", () => {
+    const data = contextUsagePanelData({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      modelWindow: 200_000,
+      effectiveWindow: 200_000,
+      estimatedTokens: 18_000,
     });
+
+    expect(data).toBeDefined();
+    expect("compactDiagnostics" in (data ?? {})).toBe(false);
   });
 
   it("does not reuse provider usage after an incompatible context identity change", () => {
@@ -3386,7 +3356,6 @@ describe("context usage presentation", () => {
       totalTokens: undefined,
       calculatedCostUsd: 0.0123,
       currency: "USD",
-      invalidationReason: undefined,
       purpose: "agent_turn",
       errorCode: undefined,
     });
@@ -3467,27 +3436,58 @@ describe("context usage presentation", () => {
     expect(html).not.toContain("未命中");
   });
 
-  it("does not present a host context boundary as provider cache data", () => {
-    const html = renderToString(
-      React.createElement(AwakenContextUsagePanel, {
-        currentInputTokens: 16_000,
-        effectiveInputWindowTokens: 240_000,
-        modelWindowTokens: 256_000,
+  it("does not project invalidation reasons into the panel usage details", () => {
+    const data = contextUsagePanelData({
+      eventType: "AWAKEN_CONTEXT_SNAPSHOT",
+      snapshot: {
+        schemaVersion: 4,
+        snapshotId: "ctx-no-invalidation",
+        estimatorId: "awaken_leaf_v4",
+        basis: "current_projection",
+        modelWindowTokens: 128_000,
         outputReserveTokens: 16_000,
-        autoCompactThresholdTokens: 216_000,
-        contributions: [],
-        latestModelUsage: {
-          status: "succeeded",
-          invalidationReason: "initial_baseline",
-          calculatedCostUsd: null,
-        },
-        onClose: vi.fn(),
-      }),
-    );
+        effectiveInputWindowTokens: 112_000,
+        estimatedInputTokens: 24_000,
+        warningThresholdTokens: 95_000,
+        autoCompactThresholdTokens: 100_800,
+        compactTargetTokens: 40_000,
+        contributions: [
+          { kind: "conversation", estimatedTokens: 24_000, sourceCount: 8 },
+        ],
+        generatedAt: "2026-07-19T00:00:00Z",
+      },
+      latestModelUsage: {
+        schemaVersion: 1,
+        requestId: "req-no-invalidation",
+        purpose: "agent_turn",
+        cacheMode: "automatic_prefix",
+        inputTokens: 24_000,
+        cachedInputTokens: 8_000,
+        uncachedInputTokens: 16_000,
+        invalidationReason: "append_only_host_delta:skills",
+        usageComplete: true,
+        latencyMs: 20,
+        status: "succeeded",
+        completedAt: "2026-07-19T00:00:01Z",
+      },
+    });
 
-    expect(html).not.toContain("上次请求");
-    expect(html).not.toContain("initial_baseline");
-    expect(html).not.toContain("失效原因");
+    expect(data?.latestModelUsage).toEqual({
+      status: "succeeded",
+      cacheMode: "automatic_prefix",
+      cacheKeyApplied: undefined,
+      cachedInputTokens: 8_000,
+      uncachedInputTokens: 16_000,
+      cacheWriteTokens: undefined,
+      inputTokens: 24_000,
+      outputTokens: undefined,
+      reasoningTokens: undefined,
+      totalTokens: undefined,
+      calculatedCostUsd: undefined,
+      currency: undefined,
+      purpose: "agent_turn",
+      errorCode: undefined,
+    });
   });
 
   it("keeps legacy aggregates honest when no typed breakdown exists", () => {

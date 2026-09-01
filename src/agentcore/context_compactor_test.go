@@ -246,6 +246,39 @@ func TestCompactConversationStructuralPassCountsMultipleToolResults(t *testing.T
 	}
 }
 
+func TestCompactConversationPinsLatestAssistantProgressOutsideModelSummary(t *testing.T) {
+	messages := []convcontext.Message{
+		{Role: convcontext.RoleUser, Content: "process 24 files"},
+		{Role: convcontext.RoleAssistant, Content: "21/24 complete; continue the final three files."},
+		{Role: convcontext.RoleUser, Content: "keep going after compact"},
+	}
+	result, err := CompactConversationWithRequest(stdcontext.Background(), CompactRequest{
+		Mode:         CompactModeManual,
+		Messages:     messages,
+		Envelope:     ContextEnvelope{Messages: messages, Model: "test-model"},
+		TargetTokens: 1,
+		summaryInvoker: func(_ stdcontext.Context, _ llm.Config, req llm.Request) (string, error) {
+			instruction := req.Messages[len(req.Messages)-1].Content
+			if !strings.Contains(instruction, "Latest older assistant progress marker that MUST be preserved") ||
+				!strings.Contains(instruction, "21/24 complete") {
+				t.Fatalf("summary request did not pin latest progress: %s", instruction)
+			}
+			return renderCompactSummarySections(map[string][]string{
+				"Active Task":       {"- Process the requested files."},
+				"Completed Actions": {"- Earlier files were processed."},
+				"Remaining Work":    {"- Continue from the protected tail."},
+				"Critical Context":  {"- Preserve the exact progress marker."},
+			}), nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("CompactConversationWithRequest returned error: %v", err)
+	}
+	if !strings.Contains(result.SummaryMessage.Content, "Latest compacted assistant progress: 21/24 complete; continue the final three files.") {
+		t.Fatalf("host-owned compact header lost latest progress: %s", result.SummaryMessage.Content)
+	}
+}
+
 func TestCompactConversationSummaryFailureAddsFallbackMarker(t *testing.T) {
 	fallbackFact := "fallback canary fact: preserve customer tier platinum"
 	messages := []convcontext.Message{

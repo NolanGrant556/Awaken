@@ -31,6 +31,7 @@ var (
 
 type compactSummaryBuildResult struct {
 	Text                 string
+	LatestProgressMarker string
 	Fallback             CompactFallback
 	ToolResultsPruned    int
 	PrunedGroups         int
@@ -379,7 +380,7 @@ func buildSemanticCompactSummary(ctx stdcontext.Context, req CompactRequest, bou
 		}
 		userInstruction := convcontext.Message{
 			Role:    convcontext.RoleUser,
-			Content: compactSummaryUserInstruction(boundaryID, req.Envelope, messages, tailMessages, req.HookInstruction),
+			Content: compactSummaryUserInstruction(boundaryID, req.Envelope, messages, tailMessages, req.HookInstruction, summaryMaxTokens),
 		}
 		summaryRequestMessages := append(messages, userInstruction)
 		if err := convcontext.ValidateToolResultPairing(summaryRequestMessages); err != nil {
@@ -424,6 +425,7 @@ func buildSemanticCompactSummary(ctx stdcontext.Context, req CompactRequest, bou
 			}
 			return compactSummaryBuildResult{
 				Text:                 normalizedSummary,
+				LatestProgressMarker: compactSummaryLatestProgress(messages),
 				ToolResultsPruned:    toolResultsPruned,
 				PrunedGroups:         prunedGroups,
 				PrunedMessages:       prunedMessages,
@@ -846,6 +848,7 @@ func compactFallbackBuildResult(fallback CompactFallback, currentGroups [][]conv
 	}
 	return compactSummaryBuildResult{
 		Text:                 compactFallbackSummary(fallback.Marker, fallback.Reason, compactedMessages, tailMessages, envelope, toolResultsPruned, prunedGroups, prunedMessages),
+		LatestProgressMarker: compactSummaryLatestProgress(compactedMessages),
 		Fallback:             fallback,
 		ToolResultsPruned:    toolResultsPruned,
 		PrunedGroups:         prunedGroups,
@@ -871,8 +874,19 @@ func buildCompactSummaryMessage(boundaryID string, mode CompactMode, summary com
 		parts = append(parts, fmt.Sprintf("Fallback marker: %s.", summary.Fallback.Marker))
 		parts = append(parts, "Fallback reason: "+singleLineCompactText(summary.Fallback.Reason)+".")
 	}
+	if summary.LatestProgressMarker != "" {
+		parts = append(parts, "Latest compacted assistant progress: "+summary.LatestProgressMarker)
+	}
 	parts = append(parts, summary.Text)
 	return strings.Join(parts, "\n")
+}
+
+func compactSummaryLatestProgress(messages []convcontext.Message) string {
+	progress := latestMessageContent(messages, convcontext.RoleAssistant)
+	if progress == "" {
+		return ""
+	}
+	return boundedCheckpointValue(progress, 240)
 }
 
 func firstNonEmptyCompactValue(values ...string) string {

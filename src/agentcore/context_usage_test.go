@@ -167,3 +167,61 @@ func TestReasoningPolicyEntersEpochAndModelUsageIdentity(t *testing.T) {
 		t.Fatalf("auxiliary usage inherited agent reasoning policy: %+v", auxiliary)
 	}
 }
+
+func TestContextWindowUsageAnchorFromModelUsagePrefersTotalThenInput(t *testing.T) {
+	sentEstimate := 73_000
+	inputTokens := 91_000
+	totalTokens := 97_000
+	usage := ModelUsageRecord{
+		RequestID:                "req-1",
+		Purpose:                  "agent_turn",
+		Status:                   ModelUsageSucceeded,
+		UsageComplete:            true,
+		ProviderID:               "minimax",
+		ProfileID:                "profile-a",
+		CredentialRevision:       3,
+		ModelID:                  "ep-1",
+		CapabilityModelID:        "MiniMax-M1",
+		EndpointSelector:         "ep-1",
+		ModelSelectorKind:        "endpoint",
+		ProtocolFamily:           "openai_chat",
+		ReasoningPolicy:          " HIGH ",
+		SentEstimatedInputTokens: &sentEstimate,
+		InputTokens:              &inputTokens,
+		TotalTokens:              &totalTokens,
+	}
+
+	anchor := ContextWindowUsageAnchorFromModelUsage(usage)
+	if anchor == nil || anchor.UsageTokens != totalTokens || anchor.SentEstimatedInputTokens != sentEstimate {
+		t.Fatalf("expected total-tokens anchor, got %+v", anchor)
+	}
+
+	usage.TotalTokens = nil
+	anchor = ContextWindowUsageAnchorFromModelUsage(usage)
+	if anchor == nil || anchor.UsageTokens != inputTokens {
+		t.Fatalf("expected input-tokens fallback anchor, got %+v", anchor)
+	}
+}
+
+func TestContextWindowUsageAnchorCompatibilityUsesExactIdentity(t *testing.T) {
+	anchor := &ContextWindowUsageAnchor{
+		ProviderID: "doubao", ProfileID: "profile-a", CredentialRevision: 7,
+		ModelID: "ep-1", CapabilityModelID: "doubao-seed-2.1-pro", EndpointSelector: "ep-1",
+		ModelSelectorKind: "endpoint", ProtocolFamily: "openai_chat", ReasoningPolicy: "max",
+		UsageTokens: 88_000, SentEstimatedInputTokens: 76_000,
+	}
+	matching := ModelConfig{
+		ProviderID: "doubao", ProfileID: "profile-a", CredentialRevision: 7,
+		Model: "ep-1", CapabilityModelID: "doubao-seed-2.1-pro", EndpointSelector: "ep-1",
+		ModelSelectorKind: "endpoint", Protocol: "openai_chat", ReasoningEffort: " MAX ",
+	}
+	if !ContextWindowUsageAnchorCompatibleWithModelConfig(anchor, matching) {
+		t.Fatalf("expected exact-compatible anchor to match: %+v", anchor)
+	}
+
+	mismatchedReasoning := matching
+	mismatchedReasoning.ReasoningEffort = "high"
+	if ContextWindowUsageAnchorCompatibleWithModelConfig(anchor, mismatchedReasoning) {
+		t.Fatalf("reasoning mismatch must invalidate usage anchor")
+	}
+}

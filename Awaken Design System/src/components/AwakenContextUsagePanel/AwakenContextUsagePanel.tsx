@@ -40,22 +40,8 @@ export type AwakenContextUsageModelUsage = {
   totalTokens?: number | null;
   calculatedCostUsd?: number | null;
   currency?: string;
-  invalidationReason?: string;
   purpose?: string;
   errorCode?: string;
-};
-
-export type AwakenContextCompactDiagnostics = {
-  status: "started" | "finished" | "failed";
-  targetTokens?: number;
-  preCompactTokens?: number;
-  postCompactTokens?: number;
-  mandatoryFloorTokens?: number;
-  contributionTokens?: AwakenContextUsageContribution[];
-  nativeAttempted?: boolean;
-  nativeUsed?: boolean;
-  nativeReason?: string;
-  failureReason?: string;
 };
 
 export type AwakenContextUsagePanelProps = {
@@ -67,7 +53,6 @@ export type AwakenContextUsagePanelProps = {
   autoCompactThresholdTokens: number;
   contributions?: AwakenContextUsageContribution[];
   latestModelUsage?: AwakenContextUsageModelUsage | null;
-  compactDiagnostics?: AwakenContextCompactDiagnostics | null;
   onClose: () => void;
 };
 
@@ -156,7 +141,6 @@ export const AwakenContextUsagePanel = forwardRef<
     effectiveInputWindowTokens,
     contributions = [],
     latestModelUsage,
-    compactDiagnostics,
     onClose,
   },
   forwardedRef,
@@ -185,12 +169,6 @@ export const AwakenContextUsagePanel = forwardRef<
     : undefined;
 
   const usageSummary = `${formatContextUsageTokens(currentInputTokens)} / ${formatContextUsageTokens(effectiveInputWindowTokens)} Token`;
-  const compactStatusLabel =
-    compactDiagnostics?.status === "finished"
-      ? "已完成"
-      : compactDiagnostics?.status === "failed"
-        ? "失败"
-        : "进行中";
 
   return (
     <div
@@ -292,86 +270,6 @@ export const AwakenContextUsagePanel = forwardRef<
           )}
         </section>
 
-        {compactDiagnostics ? (
-          <section
-            className="aw-context-usage-panel__compact-diagnostics"
-            aria-label="最近一次上下文压缩诊断"
-          >
-            <h3>最近一次压缩</h3>
-            <dl>
-              <div className="aw-context-usage-panel__row">
-                <dt>状态</dt>
-                <dd>{compactStatusLabel}</dd>
-              </div>
-              {compactDiagnostics.targetTokens !== undefined ? (
-                <div className="aw-context-usage-panel__row">
-                  <dt>10% 目标</dt>
-                  <dd>
-                    {formatContextUsageTokens(compactDiagnostics.targetTokens)}
-                  </dd>
-                </div>
-              ) : null}
-              {compactDiagnostics.preCompactTokens !== undefined ? (
-                <div className="aw-context-usage-panel__row">
-                  <dt>压缩前</dt>
-                  <dd>
-                    {formatContextUsageTokens(
-                      compactDiagnostics.preCompactTokens,
-                    )}
-                  </dd>
-                </div>
-              ) : null}
-              {compactDiagnostics.postCompactTokens !== undefined ? (
-                <div className="aw-context-usage-panel__row">
-                  <dt>压缩后（保守）</dt>
-                  <dd>
-                    {formatContextUsageTokens(
-                      compactDiagnostics.postCompactTokens,
-                    )}
-                  </dd>
-                </div>
-              ) : null}
-              {compactDiagnostics.mandatoryFloorTokens !== undefined ? (
-                <div className="aw-context-usage-panel__row">
-                  <dt>必选下限</dt>
-                  <dd>
-                    {formatContextUsageTokens(
-                      compactDiagnostics.mandatoryFloorTokens,
-                    )}
-                  </dd>
-                </div>
-              ) : null}
-              {compactDiagnostics.nativeAttempted ? (
-                <div className="aw-context-usage-panel__row">
-                  <dt>供应商原生压缩</dt>
-                  <dd>
-                    {compactDiagnostics.nativeUsed ? "已使用" : "已回退本地"}
-                  </dd>
-                </div>
-              ) : null}
-              {compactDiagnostics.failureReason ? (
-                <div className="aw-context-usage-panel__row">
-                  <dt>失败原因</dt>
-                  <dd className="aw-context-usage-panel__diagnostic-code">
-                    {compactDiagnostics.failureReason}
-                  </dd>
-                </div>
-              ) : null}
-              {compactDiagnostics.contributionTokens?.map((contribution) => (
-                <div
-                  key={contribution.id}
-                  className="aw-context-usage-panel__row"
-                >
-                  <dt>压缩预算 · {contribution.label}</dt>
-                  <dd>
-                    {formatContextUsageTokens(contribution.estimatedTokens)}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-        ) : null}
-
         {showUsageDetails ? (
           <section
             className="aw-context-usage-panel__usage-details"
@@ -430,12 +328,6 @@ export const AwakenContextUsagePanel = forwardRef<
                 <div className="aw-context-usage-panel__row">
                   <dt>成本</dt>
                   <dd>{costLabel}</dd>
-                </div>
-              ) : null}
-              {latestModelUsage.invalidationReason ? (
-                <div className="aw-context-usage-panel__row">
-                  <dt>失效原因</dt>
-                  <dd>{latestModelUsage.invalidationReason}</dd>
                 </div>
               ) : null}
             </dl>

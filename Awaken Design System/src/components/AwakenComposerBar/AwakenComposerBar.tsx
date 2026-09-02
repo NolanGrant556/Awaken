@@ -383,6 +383,9 @@ export function AwakenFileCommentSummary({
 }: AwakenFileCommentSummaryProps) {
   const [open, setOpen] = useState(false);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const commentIdentity = comments
+    .map((comment) => `${comment.id}:${comment.validationState ?? "ready"}`)
+    .join("|");
   const { refs, floatingStyles } = useFloating({
     open,
     onOpenChange: setOpen,
@@ -395,6 +398,10 @@ export function AwakenFileCommentSummary({
   useEffect(() => () => {
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    setOpen(false);
+  }, [commentIdentity]);
 
   if (comments.length === 0) return null;
   const selectedTextMode = comments.every((comment) => comment.kind === "selection");
@@ -417,35 +424,21 @@ export function AwakenFileCommentSummary({
           setOpen(true);
         }}
         onPointerLeave={scheduleClose}
-        onFocusCapture={() => {
-          cancelClose();
-          setOpen(true);
-        }}
-        onBlurCapture={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) scheduleClose();
-        }}
       >
-        <button
-          type="button"
+        <span
           className="composer-file-comments-trigger"
           aria-label={selectedTextMode
             ? `${comments.length} 个已选文本片段`
             : `${comments.length} 个文件评论`}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          onClick={() => setOpen(true)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") setOpen(false);
-          }}
         >
           <AwakenIcon concept="file-comment" size={16} />
           <span>{comments.length} 个{selectedTextMode ? "已选文本片段" : "评论"}</span>
-        </button>
-        {selectedTextMode && onClear ? (
+        </span>
+        {onClear ? (
           <button
             type="button"
             className="composer-file-comments-clear-trigger"
-            aria-label="移除全部已选文本片段"
+            aria-label={selectedTextMode ? "移除全部已选文本片段" : "移除全部评论"}
             onClick={onClear}
           >
             <AwakenIcon concept="close" size={14} />
@@ -1689,16 +1682,24 @@ export function AwakenComposerBar({
           <AwakenFileCommentSummary
             comments={fileComments.filter((item) => item.kind !== "selection")}
             onRemoveComment={onRemoveFileComment}
-            onClear={onClearFileComments}
+            onClear={onRemoveFileComment
+              ? () => {
+                  for (const item of fileComments) {
+                    if (item.kind !== "selection") onRemoveFileComment(item.id);
+                  }
+                }
+              : onClearFileComments}
           />
           <AwakenFileCommentSummary
             comments={fileComments.filter((item) => item.kind === "selection")}
             onRemoveComment={onRemoveFileComment}
-            onClear={() => {
-              for (const item of fileComments) {
-                if (item.kind === "selection") onRemoveFileComment?.(item.id);
-              }
-            }}
+            onClear={onRemoveFileComment
+              ? () => {
+                  for (const item of fileComments) {
+                    if (item.kind === "selection") onRemoveFileComment(item.id);
+                  }
+                }
+              : onClearFileComments}
           />
           <div className="composer-bar-input-wrap" ref={inputWrapRef}>
             {renderSlashPalette()}

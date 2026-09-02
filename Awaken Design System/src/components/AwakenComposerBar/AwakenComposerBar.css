@@ -11,9 +11,27 @@
 
 .composer-file-comments {
   position: relative;
-  display: block;
+  display: inline-flex;
+  align-items: center;
   width: fit-content;
   margin: 0 0 7px;
+}
+
+.composer-file-comments-clear-trigger {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-left: -31px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--aw-text-secondary);
+  cursor: pointer;
+}
+
+.composer-file-comments:has(.composer-file-comments-clear-trigger) .composer-file-comments-trigger {
+  padding-right: 36px;
 }
 
 .composer-file-comments-trigger {

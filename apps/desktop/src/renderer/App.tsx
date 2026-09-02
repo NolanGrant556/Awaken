@@ -7269,6 +7269,10 @@ export function App() {
     setNotice(null);
   }
 
+  function handleAddFileTextSelection(selection: FileLineComment): void {
+    handleCreateFileLineComment({ ...selection, kind: "selection", comment: "" });
+  }
+
   function handleRemoveFileLineComment(commentId: string): void {
     setComposerComments((current) =>
       current.filter((comment) => comment.id !== commentId),
@@ -9529,14 +9533,22 @@ export function App() {
                                       attachments={promptAttachmentViews(
                                         turn.prompt.attachments,
                                       )}
-                                      structuredContent={
-                                        <FileCommentSummary
-                                          comments={
-                                            turn.prompt.fileComments ?? []
-                                          }
-                                          className="execution-turn-file-comments"
-                                        />
-                                      }
+                                      structuredContent={(
+                                        <>
+                                          <FileCommentSummary
+                                            comments={(turn.prompt.fileComments ?? []).filter(
+                                              (item) => item.kind !== "selection",
+                                            )}
+                                            className="execution-turn-file-comments"
+                                          />
+                                          <FileCommentSummary
+                                            comments={(turn.prompt.fileComments ?? []).filter(
+                                              (item) => item.kind === "selection",
+                                            )}
+                                            className="execution-turn-file-comments"
+                                          />
+                                        </>
+                                      )}
                                       expanded={
                                         promptBubbleModeByTurnId[turn.id] ===
                                         "expanded"
@@ -9629,6 +9641,7 @@ export function App() {
                         addTaskDisabled={isBusy}
                         fileComments={composerComments}
                         onCreateFileComment={handleCreateFileLineComment}
+                        onAddFileTextSelection={handleAddFileTextSelection}
                         onDeleteFileComment={handleRemoveFileLineComment}
                         onAddTaskContext={handleAddProjectEntryToTask}
                       />

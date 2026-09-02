@@ -1,17 +1,10 @@
 // @vitest-environment jsdom
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectFilePreviewTextHandle } from "../../shared/runtime";
 import MarkdownPreview, { markdownFromEditable } from "./MarkdownPreview";
-
-const projectFileStyles = readFileSync(
-  resolve(process.cwd(), "src/renderer/styles/project-files.css"),
-  "utf8",
-);
 
 const preview: ProjectFilePreviewTextHandle = {
   previewId: "preview-md",
@@ -20,8 +13,9 @@ const preview: ProjectFilePreviewTextHandle = {
   transport: "text",
   displayName: "README.md",
   relativePath: "README.md",
-  byteLength: 16,
-  content: "# Title\n\nHello",
+  byteLength: 28,
+  content: "# Title\n\nFirst paragraph.\n",
+  contentDigest: "a".repeat(64),
   language: "markdown",
 };
 
@@ -34,20 +28,10 @@ const frameProps = {
 
 async function settleUntil(isReady: () => boolean): Promise<void> {
   await act(async () => {
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
       if (isReady()) return;
     }
-  });
-}
-
-async function setEditorValue(
-  editor: HTMLElement,
-  html: string,
-): Promise<void> {
-  await act(async () => {
-    editor.innerHTML = html;
-    editor.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
 
@@ -56,9 +40,7 @@ describe("MarkdownPreview", () => {
   let root: Root;
 
   beforeEach(() => {
-    (
-      globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
-    ).IS_REACT_ACT_ENVIRONMENT = true;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -70,230 +52,135 @@ describe("MarkdownPreview", () => {
     vi.restoreAllMocks();
   });
 
-  it("opens in preview mode and switches to the same formatted document in edit mode", async () => {
+  it("defaults to preview and switches to editable Markdown source with one text action", async () => {
     await act(async () => {
       root.render(
         <MarkdownPreview
           preview={preview}
           frameProps={frameProps}
-          onSave={vi.fn(async () => ({ ok: true as const, byteLength: 16 }))}
+          onSave={vi.fn(async () => ({ ok: true as const, byteLength: 28 }))}
         />,
       );
     });
 
-    expect(container.querySelector("[data-preview-kind='markdown']")?.textContent).toContain(
-      "Title",
+    expect(container.querySelector("[data-markdown-mode='preview']")?.textContent).toContain("Title");
+    expect(container.querySelector(".cm-editor")).toBeNull();
+    const toggle = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "查看源代码",
     );
-    expect(container.querySelector("[data-markdown-editor]")).toBeNull();
+    expect(toggle).toBeDefined();
+    expect(container.querySelector('[aria-label="保存 Markdown"]')).toBeNull();
+    expect(container.querySelector('[aria-label="重新载入文件预览"]')).toBeNull();
 
-    await act(async () => {
-      container
-        .querySelector<HTMLButtonElement>('[aria-label="编辑 Markdown"]')
-        ?.click();
-    });
-
-    const editor = container.querySelector<HTMLElement>(
-      "[data-markdown-editor]",
-    );
-    expect(editor?.querySelector("h1")?.textContent).toBe("Title");
-    expect(editor?.textContent).not.toContain("# Title");
-    expect(editor?.getAttribute("data-markdown-mode")).toBe("edit");
-    expect(editor?.classList.contains("project-file-markdown-preview")).toBe(true);
-    expect(editor?.classList.contains("is-editing")).toBe(false);
-    expect(container.querySelector(".project-file-markdown-mode-switch")).not.toBeNull();
-    expect(container.querySelector(".project-file-markdown-save-state")).not.toBeNull();
+    await act(async () => toggle?.click());
+    expect(container.querySelector(".cm-editor")).not.toBeNull();
+    expect(container.textContent).toContain("查看预览");
   });
 
-  it("preserves the content scroll position while switching preview and edit modes", async () => {
+  it("annotates rendered blocks with source lines for preview selection actions", async () => {
+    await act(async () => {
+      root.render(<MarkdownPreview preview={preview} frameProps={frameProps} />);
+    });
+
+    const heading = container.querySelector("h1");
+    const paragraph = container.querySelector("p");
+    expect(heading?.getAttribute("data-source-start-line")).toBe("1");
+    expect(paragraph?.getAttribute("data-source-start-line")).toBe("3");
+  });
+
+  it("adds a rendered Markdown selection to the conversation with canonical source lines", async () => {
+    const onAddTextSelection = vi.fn();
     await act(async () => {
       root.render(
         <MarkdownPreview
           preview={preview}
           frameProps={frameProps}
-          onSave={vi.fn(async () => ({ ok: true as const, byteLength: 16 }))}
+          onAddTextSelection={onAddTextSelection}
         />,
       );
     });
 
-    const previewArticle = container.querySelector<HTMLElement>(
-      "[data-markdown-mode='preview']",
-    );
-    if (!previewArticle) throw new Error("missing preview article");
-    previewArticle.scrollTop = 420;
-
-    await act(async () => {
-      container
-        .querySelector<HTMLButtonElement>('[aria-label="编辑 Markdown"]')
-        ?.click();
+    const paragraph = container.querySelector("p");
+    const textNode = paragraph?.firstChild;
+    expect(textNode).toBeDefined();
+    const range = document.createRange();
+    Object.defineProperty(range, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        bottom: 24,
+        height: 16,
+        left: 12,
+        right: 120,
+        top: 8,
+        width: 108,
+        x: 12,
+        y: 8,
+        toJSON: () => ({}),
+      }),
     });
-    const editor = container.querySelector<HTMLElement>(
-      "[data-markdown-mode='edit']",
-    );
-    expect(editor?.scrollTop).toBe(420);
-    if (!editor) throw new Error("missing editor");
-    editor.scrollTop = 760;
-
+    range.selectNodeContents(textNode!);
+    const browserSelection = window.getSelection();
+    browserSelection?.removeAllRanges();
+    browserSelection?.addRange(range);
     await act(async () => {
-      container
-        .querySelector<HTMLButtonElement>('[aria-label="预览 Markdown"]')
+      paragraph?.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const addButton = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "添加到对话",
+    );
+    expect(addButton).toBeDefined();
+    await act(async () => addButton?.click());
+    expect(onAddTextSelection).toHaveBeenCalledWith(expect.objectContaining({
+      startLine: 3,
+      endLine: 3,
+      selectedText: "First paragraph.",
+    }));
+  });
+
+  it("switches a rendered selection to source and opens the existing line comment editor", async () => {
+    await act(async () => {
+      root.render(
+        <MarkdownPreview
+          preview={{ ...preview, content: "# Title\n\nFirst line\nSecond line\n" }}
+          frameProps={frameProps}
+          onCreateComment={vi.fn()}
+        />,
+      );
+    });
+    const textNode = container.querySelector("p")?.firstChild;
+    const range = document.createRange();
+    Object.defineProperty(range, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        bottom: 24, height: 16, left: 12, right: 120, top: 8, width: 108, x: 12, y: 8,
+        toJSON: () => ({}),
+      }),
+    });
+    range.selectNodeContents(textNode!);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    await act(async () => {
+      container.querySelector("p")?.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "评论")
         ?.click();
     });
     await settleUntil(
-      () => container.querySelector("[data-markdown-mode='preview']") !== null,
+      () => container.querySelector(".project-file-line-comment-editor textarea") !== null,
     );
 
-    expect(
-      container.querySelector<HTMLElement>("[data-markdown-mode='preview']")
-        ?.scrollTop,
-    ).toBe(760);
+    expect(container.querySelector(".cm-editor")).not.toBeNull();
+    expect(container.querySelectorAll(".project-file-line-comment-selection")).toHaveLength(2);
+    expect(container.querySelector(".project-file-line-comment-editor textarea")?.getAttribute("aria-label"))
+      .toBe("第 3–4 行 评论内容");
   });
 
-  it("does not restyle the whole document when editing", () => {
-    const editorRule = projectFileStyles.match(
-      /\.project-file-markdown-editor\s*\{([^}]*)\}/,
-    )?.[1];
-
-    expect(editorRule).toBeDefined();
-    expect(editorRule).not.toMatch(
-      /(?:background|box-shadow|font-size|line-height|padding|margin)\s*:/,
-    );
-    expect(projectFileStyles).not.toContain(
-      ".project-file-markdown-editor.is-editing",
-    );
-    expect(projectFileStyles).toContain(
-      ".project-file-markdown-mode-switch button[aria-pressed=\"true\"]",
-    );
-    expect(projectFileStyles).toMatch(
-      /\.project-file-markdown-save-state:has\(\.project-file-markdown-preview__status\)\s*\{\s*padding-right:\s*8px;/,
-    );
-  });
-
-  it("saves dirty Markdown when switching back to preview", async () => {
-    const onSave = vi.fn(async (content: string) => ({
-      ok: true as const,
-      byteLength: content.length,
-    }));
-
-    await act(async () => {
-      root.render(
-        <MarkdownPreview
-          preview={preview}
-          frameProps={frameProps}
-          onSave={onSave}
-        />,
-      );
-    });
-    await act(async () => {
-      container
-        .querySelector<HTMLButtonElement>('[aria-label="编辑 Markdown"]')
-        ?.click();
-    });
-    const editor = container.querySelector<HTMLElement>(
-      "[data-markdown-editor]",
-    );
-    if (!editor) throw new Error("missing editor");
-    await setEditorValue(editor, "<h1>Changed</h1>");
-    expect(
-      container.querySelector(".project-file-markdown-save-state.is-dirty"),
-    ).not.toBeNull();
-    expect(container.querySelector("[role='status']")?.textContent).toBe(
-      "未保存",
-    );
-    await act(async () => {
-      container
-        .querySelector<HTMLButtonElement>('[aria-label="预览 Markdown"]')
-        ?.click();
-    });
-    await settleUntil(
-      () => container.querySelector("[data-markdown-mode='preview']") !== null,
-    );
-
-    expect(onSave).toHaveBeenCalledWith("# Changed\n");
-    expect(
-      container.querySelector("[data-preview-kind='markdown']")?.textContent,
-    ).toContain("Changed");
-    expect(container.querySelector("[data-markdown-editor]")).toBeNull();
-  });
-
-  it("keeps the editor open when save fails", async () => {
-    const onSave = vi.fn(async () => ({
-      ok: false as const,
-      code: "FILE_UNWRITABLE" as const,
-      message: "这个 Markdown 文件当前不可写入。",
-    }));
-
-    await act(async () => {
-      root.render(
-        <MarkdownPreview
-          preview={preview}
-          frameProps={frameProps}
-          onSave={onSave}
-        />,
-      );
-    });
-    await act(async () => {
-      container
-        .querySelector<HTMLButtonElement>('[aria-label="编辑 Markdown"]')
-        ?.click();
-    });
-    const editor = container.querySelector<HTMLElement>(
-      "[data-markdown-editor]",
-    );
-    if (!editor) throw new Error("missing editor");
-    await setEditorValue(editor, "<h1>Locked</h1>");
-    await act(async () => {
-      container
-        .querySelector<HTMLButtonElement>('[aria-label="预览 Markdown"]')
-        ?.click();
-    });
-    await settleUntil(() => container.textContent?.includes("不可写入") === true);
-
-    expect(container.querySelector("[data-markdown-editor]")).not.toBeNull();
-    expect(container.querySelector("[role='alert']")?.textContent).toContain(
-      "不可写入",
-    );
-  });
-
-  it("saves with Ctrl/Cmd+S from the editor", async () => {
-    const onSave = vi.fn(async (content: string) => ({
-      ok: true as const,
-      byteLength: content.length,
-    }));
-
-    await act(async () => {
-      root.render(
-        <MarkdownPreview
-          preview={preview}
-          frameProps={frameProps}
-          onSave={onSave}
-        />,
-      );
-    });
-    await act(async () => {
-      container
-        .querySelector<HTMLButtonElement>('[aria-label="编辑 Markdown"]')
-        ?.click();
-    });
-    const editor = container.querySelector<HTMLElement>(
-      "[data-markdown-editor]",
-    );
-    if (!editor) throw new Error("missing editor");
-    await setEditorValue(editor, "<h1>Shortcut</h1>");
-    await act(async () => {
-      editor.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "s",
-          ctrlKey: true,
-          bubbles: true,
-        }),
-      );
-    });
-    await settleUntil(() => onSave.mock.calls.length > 0);
-
-    expect(onSave).toHaveBeenCalledWith("# Shortcut\n");
-  });
-
-  it("serializes formatted edits back to Markdown without exposing source markers", () => {
+  it("serializes formatted edits back to Markdown for legacy draft recovery", () => {
     const editor = document.createElement("article");
     editor.innerHTML =
       "<h2>Summary</h2><p><strong>Ready</strong> and <em>reviewed</em>.</p>" +

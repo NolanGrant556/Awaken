@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { AwakenIcon } from "@awaken/design-system";
 import { defaultKeymap } from "@codemirror/commands";
 import {
@@ -18,7 +18,11 @@ import {
   lineNumbers,
   WidgetType,
 } from "@codemirror/view";
-import type { FileLineComment, ProjectFilePreviewTextHandle } from "../../shared/runtime";
+import type {
+  FileLineComment,
+  ProjectFilePreviewSaveResult,
+  ProjectFilePreviewTextHandle,
+} from "../../shared/runtime";
 import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 import { loadPreviewLanguage } from "./previewLanguage";
 
@@ -32,6 +36,11 @@ export type CodePreviewProps = {
   onCreateComment?: (selection: CodePreviewLineSelection, comment: string) => void;
   onDeleteComment?: (commentId: string) => void;
   commentDisabled?: boolean;
+  editable?: boolean;
+  onSave?: (content: string) => Promise<ProjectFilePreviewSaveResult>;
+  commentRequest?: { id: string; startLine: number; endLine: number };
+  onCommentRequestHandled?: (id: string) => void;
+  leadingFormatActions?: ReactNode;
 };
 
 export type CodePreviewLineSelection = {
@@ -294,6 +303,11 @@ export default function CodePreview({
   onCreateComment,
   onDeleteComment,
   commentDisabled = false,
+  editable = false,
+  onSave,
+  commentRequest,
+  onCommentRequestHandled,
+  leadingFormatActions,
 }: CodePreviewProps) {
   const editorHostRef = useRef<HTMLDivElement>(null);
   const editorShellRef = useRef<HTMLDivElement>(null);
@@ -306,8 +320,26 @@ export default function CodePreview({
   const [plusTop, setPlusTop] = useState<number>();
   const onCreateCommentRef = useRef(onCreateComment);
   const onDeleteCommentRef = useRef(onDeleteComment);
+  const onSaveRef = useRef(onSave);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const latestContentRef = useRef(preview.content);
+  const [saveError, setSaveError] = useState<string>();
+  const [editorVersion, setEditorVersion] = useState(0);
   onCreateCommentRef.current = onCreateComment;
   onDeleteCommentRef.current = onDeleteComment;
+  onSaveRef.current = onSave;
+
+  const saveContent = useCallback((content: string) => {
+    latestContentRef.current = content;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    if (!onSaveRef.current) return;
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = undefined;
+      void onSaveRef.current?.(latestContentRef.current).then((result) => {
+        setSaveError(result.ok ? undefined : result.message);
+      }).catch(() => setSaveError("暂时无法自动保存这个文件。"));
+    }, 450);
+  }, []);
 
   const updateSelection = useCallback((view: EditorView, expose: boolean) => {
     if (!expose) return;
@@ -351,14 +383,17 @@ export default function CodePreview({
                 },
                 ...defaultKeymap,
               ]),
-              EditorState.readOnly.of(true),
-              EditorView.editable.of(false),
+              EditorState.readOnly.of(!editable),
+              EditorView.editable.of(editable),
               EditorView.contentAttributes.of({
-                "aria-label": `${preview.displayName} 只读代码预览`,
+                "aria-label": editable
+                  ? `${preview.displayName} 文本编辑器`
+                  : `${preview.displayName} 只读代码预览`,
               }),
               wrapCompartmentRef.current.of(EditorView.lineWrapping),
               fileCommentWidgetField,
               EditorView.updateListener.of((update) => {
+                if (update.docChanged && editable) saveContent(update.state.doc.toString());
                 if (update.selectionSet) updateSelection(update.view, true);
                 else if (update.viewportChanged && lineSelectionRef.current) updateSelection(update.view, true);
               }),
@@ -391,6 +426,7 @@ export default function CodePreview({
           }),
         });
         editorRef.current = view;
+        setEditorVersion((value) => value + 1);
         view.scrollDOM.addEventListener("scroll", () => updateSelection(view, Boolean(lineSelectionRef.current)), {
           passive: true,
         });
@@ -398,11 +434,37 @@ export default function CodePreview({
     );
     return () => {
       cancelled = true;
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = undefined;
+        if (onSaveRef.current && latestContentRef.current !== preview.content) {
+          void onSaveRef.current(latestContentRef.current);
+        }
+      }
       editorRef.current?.destroy();
       editorRef.current = null;
       host.replaceChildren();
     };
-  }, [commentDisabled, preview.content, preview.displayName, preview.language, updateSelection]);
+  }, [commentDisabled, editable, preview.displayName, preview.language, preview.previewId, saveContent, updateSelection]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !commentRequest) return;
+    const startLine = Math.max(1, Math.min(commentRequest.startLine, editor.state.doc.lines));
+    const endLine = Math.max(startLine, Math.min(commentRequest.endLine, editor.state.doc.lines));
+    editor.dispatch({
+      selection: {
+        anchor: editor.state.doc.line(startLine).from,
+        head: editor.state.doc.line(endLine).to,
+      },
+      scrollIntoView: true,
+    });
+    const selection = codePreviewLineSelection(editor.state);
+    lineSelectionRef.current = selection;
+    setLineSelection(selection);
+    setEditingSelection(selection);
+    onCommentRequestHandled?.(commentRequest.id);
+  }, [commentRequest, editorVersion, onCommentRequestHandled]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -427,25 +489,29 @@ export default function CodePreview({
       {...frameProps}
       formatLabel={preview.language ?? "纯文本"}
       formatActions={
-        <button
-          type="button"
-          aria-label="自动换行"
-          title="自动换行"
-          aria-pressed={lineWrapping}
-          onClick={() => {
-            const next = !lineWrapping;
-            setLineWrapping(next);
-            const editor = editorRef.current;
-            if (!editor) return;
-            editor.dispatch({
-              effects: wrapCompartmentRef.current.reconfigure(
-                next ? EditorView.lineWrapping : [],
-              ),
-            });
-          }}
-        >
-          <AwakenIcon concept="wrap-text" size={16} />
-        </button>
+        <>
+          {leadingFormatActions}
+          {saveError ? <span className="project-file-auto-save-error" role="alert">{saveError}</span> : null}
+          <button
+            type="button"
+            aria-label="自动换行"
+            title="自动换行"
+            aria-pressed={lineWrapping}
+            onClick={() => {
+              const next = !lineWrapping;
+              setLineWrapping(next);
+              const editor = editorRef.current;
+              if (!editor) return;
+              editor.dispatch({
+                effects: wrapCompartmentRef.current.reconfigure(
+                  next ? EditorView.lineWrapping : [],
+                ),
+              });
+            }}
+          >
+            <AwakenIcon concept="wrap-text" size={16} />
+          </button>
+        </>
       }
     >
       <div ref={editorShellRef} className="project-file-code-preview__editor-shell">

@@ -80,6 +80,7 @@ export type ProjectFilesWorkspaceProps = {
   onPreviewPrimaryClick?: () => void;
   fileComments?: FileLineComment[];
   onCreateFileComment?: (comment: FileLineComment) => void;
+  onAddFileTextSelection?: (selection: FileLineComment) => void;
   onDeleteFileComment?: (commentId: string) => void;
   addTaskDisabled?: boolean;
   onAddTaskContext?: (
@@ -248,6 +249,7 @@ export function ProjectFilesWorkspace({
   onPreviewPrimaryClick,
   fileComments = [],
   onCreateFileComment,
+  onAddFileTextSelection,
   onDeleteFileComment,
   addTaskDisabled = false,
   onAddTaskContext,
@@ -1009,6 +1011,7 @@ export function ProjectFilesWorkspace({
               onPreviewPrimaryClick={onPreviewPrimaryClick}
               fileComments={fileComments}
               onCreateFileComment={onCreateFileComment}
+              onAddFileTextSelection={onAddFileTextSelection}
               onDeleteFileComment={onDeleteFileComment}
               fileCommentDisabled={addTaskDisabled}
             />

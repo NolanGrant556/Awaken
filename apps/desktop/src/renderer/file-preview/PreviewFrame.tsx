@@ -18,7 +18,6 @@ export default function PreviewFrame({
   formatLabel,
   formatActions,
   loading = false,
-  onReload,
   onOpenExternal,
   onReveal,
   revealLabel = "在文件管理器中显示",
@@ -40,14 +39,6 @@ export default function PreviewFrame({
             </div>
           ) : null}
           <div className="project-file-preview-heading__file-actions">
-            <button
-              type="button"
-              aria-label="重新载入文件预览"
-              title="重新载入文件预览"
-              onClick={onReload}
-            >
-              <AwakenIcon concept="refresh" size={16} />
-            </button>
             <button
               type="button"
               aria-label="使用系统默认应用打开"

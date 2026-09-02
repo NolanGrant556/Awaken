@@ -1687,4 +1687,30 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(host.querySelector(".composer-bar-model-effort-panel")).toBeNull();
   });
+
+  it("renders selected file text as a removable context summary", () => {
+    const onRemoveFileComment = vi.fn();
+    renderComposer({
+      fileComments: [{
+        id: "selection-1",
+        kind: "selection",
+        displayName: "README.md",
+        relativePath: "README.md",
+        startLine: 2,
+        endLine: 3,
+        selectedText: "First\nSecond",
+        comment: "",
+        validationState: "ready",
+      }],
+      onRemoveFileComment,
+    });
+
+    expect(host.textContent).toContain("1 个已选文本片段");
+    const clear = host.querySelector<HTMLButtonElement>(
+      '[aria-label="移除全部已选文本片段"]',
+    );
+    expect(clear).not.toBeNull();
+    act(() => clear?.click());
+    expect(onRemoveFileComment).toHaveBeenCalledWith("selection-1");
+  });
 });

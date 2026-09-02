@@ -49,6 +49,12 @@ apps/desktop/resources/bin/
 
 # Local Awaken runtime transcripts
 .awaken/
+# Product-owned metadata inside bundled Desktop plugins is release source, not
+# local runtime state. Keep these narrow exceptions so clean clones receive the
+# same packages that maintainers validate locally.
+!apps/desktop/resources/builtin-plugins/*/.awaken/
+!apps/desktop/resources/builtin-plugins/*/.awaken/builtin.json
+!apps/desktop/resources/builtin-plugins/*/.awaken/setup.json
 
 # Local agent/workspace files
 sourcecode/

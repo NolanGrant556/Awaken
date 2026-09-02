@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -16,6 +17,7 @@ import {
   officeCliTarget,
   readOfficeCliManifest,
 } from "../prepare-officecli.mjs";
+import { validateBuiltinPlugins } from "../validate-builtin-plugins.mjs";
 
 const tempRoots = [];
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -142,6 +144,43 @@ describe("desktop managed entrypoint", () => {
 });
 
 describe("desktop package staging", () => {
+  it("rejects a bundled Plugin whose built-in identity metadata is missing", () => {
+    const root = mkdtempSync(join(tmpdir(), "awaken-builtin-plugin-validation-"));
+    tempRoots.push(root);
+    const pluginRoot = join(
+      root,
+      "apps",
+      "desktop",
+      "resources",
+      "builtin-plugins",
+      "example-plugin",
+    );
+    mkdirSync(pluginRoot, { recursive: true });
+    writeFileSync(
+      join(pluginRoot, "plugin.json"),
+      JSON.stringify({ name: "example-plugin", version: "1.0.0" }),
+    );
+
+    const errors = validateBuiltinPlugins({ repoRoot: root });
+    assert.ok(
+      errors.some((error) => error.includes("example-plugin/.awaken/builtin.json")),
+      errors.join("\n"),
+    );
+  });
+
+  it("keeps every bundled Plugin resource complete and tracked", () => {
+    const result = spawnSync(
+      process.execPath,
+      [join(repoRoot, "scripts", "validate-builtin-plugins.mjs"), "--require-tracked"],
+      { cwd: repoRoot, encoding: "utf8" },
+    );
+    assert.equal(
+      result.status,
+      0,
+      [result.stdout, result.stderr].filter(Boolean).join("\n"),
+    );
+  });
+
   it("removes generated package outputs without creating runtime staging", () => {
     const root = mkdtempSync(join(tmpdir(), "awaken-desktop-clean-"));
     tempRoots.push(root);
@@ -227,7 +266,7 @@ describe("desktop package staging", () => {
       order: 0,
     });
     assert.equal(manifest.name, "awaken-outlook");
-    assert.equal(manifest.version, "1.1.0");
+    assert.equal(manifest.version, "1.4.0");
     assert.doesNotThrow(() =>
       JSON.parse(readFileSync(join(pluginRoot, ".awaken", "setup.json"), "utf8")),
     );

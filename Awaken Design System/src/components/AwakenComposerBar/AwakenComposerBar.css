@@ -49,10 +49,8 @@
 }
 
 .composer-file-comments-popover {
-  position: absolute;
-  z-index: 50;
-  bottom: calc(100% + 8px);
-  left: 0;
+  position: fixed;
+  z-index: var(--aw-z-popover);
   display: grid;
   width: min(430px, calc(100vw - 32px));
   max-height: min(480px, calc(100vh - 64px));

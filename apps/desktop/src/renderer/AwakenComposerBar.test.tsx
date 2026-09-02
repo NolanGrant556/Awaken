@@ -1713,4 +1713,34 @@ describe("AwakenComposerBar unified token editing", () => {
     act(() => clear?.click());
     expect(onRemoveFileComment).toHaveBeenCalledWith("selection-1");
   });
+
+  it("portals file context details above the composer stacking context", () => {
+    renderComposer({
+      fileComments: [{
+        id: "selection-1",
+        kind: "selection",
+        displayName: "README.md",
+        relativePath: "README.md",
+        startLine: 2,
+        endLine: 3,
+        selectedText: "First\nSecond",
+        comment: "",
+        validationState: "ready",
+      }],
+    });
+
+    act(() => {
+      host.querySelector<HTMLButtonElement>(
+        '[aria-label="1 个已选文本片段"]',
+      )?.click();
+    });
+
+    expect(host.querySelector(".composer-file-comments-popover")).toBeNull();
+    const popover = document.body.querySelector<HTMLElement>(
+      '.composer-file-comments-popover[aria-label="已选文本片段详情"]',
+    );
+    expect(popover).not.toBeNull();
+    expect(popover?.style.position).toBe("fixed");
+    expect(host.contains(popover)).toBe(false);
+  });
 });

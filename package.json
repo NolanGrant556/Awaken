@@ -21,6 +21,7 @@
     "dist:desktop:adhoc": "npm run build:ui && npm --workspace @awaken/desktop run dist:adhoc",
     "dist:desktop:release": "npm run build:ui && npm --workspace @awaken/desktop run dist:release",
     "test:desktop-lifecycle": "node --test scripts/tests/desktop-lifecycle.test.mjs",
+    "check:builtin-plugins": "node scripts/validate-builtin-plugins.mjs --require-tracked",
     "test:desktop-release": "node --test scripts/tests/desktop-release.test.mjs",
     "test:docs-links": "node --test scripts/tests/doc-links.test.mjs",
     "test:system-skills": "python3 -B -m unittest discover -s scripts/tests -p 'system_skills_*_test.py'",

@@ -1,0 +1,33 @@
+name: builtin-plugin-integrity
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/builtin-plugin-integrity.yml"
+      - ".gitignore"
+      - "apps/desktop/resources/builtin-plugins/**"
+      - "scripts/validate-builtin-plugins.mjs"
+      - "scripts/tests/desktop-lifecycle.test.mjs"
+  pull_request:
+    paths:
+      - ".github/workflows/builtin-plugin-integrity.yml"
+      - ".gitignore"
+      - "apps/desktop/resources/builtin-plugins/**"
+      - "scripts/validate-builtin-plugins.mjs"
+      - "scripts/tests/desktop-lifecycle.test.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify bundled Plugin resources are complete and tracked
+        run: node scripts/validate-builtin-plugins.mjs --require-tracked

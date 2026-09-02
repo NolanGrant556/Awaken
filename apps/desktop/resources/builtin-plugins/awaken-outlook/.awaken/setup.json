@@ -1,0 +1,26 @@
+{
+  "$schema": "https://awaken.dev/schemas/plugin-setup/1.0.0/setup.schema.json",
+  "version": 1,
+  "requirements": [
+    {
+      "id": "outlook-account",
+      "kind": "host_connector",
+      "title": "连接 Outlook 账号",
+      "description": "在系统浏览器中登录 Microsoft。账号和凭据由 Awaken 宿主连接器管理，可被需要 Outlook 的插件安全复用。",
+      "required": true,
+      "connectorId": "awaken.microsoft.outlook",
+      "mcpServerName": "awaken-outlook",
+      "componentIds": [
+        "skill/skills/outlook-email",
+        "skill/skills/inbox-triage",
+        "skill/skills/reply-drafting",
+        "skill/skills/subscription-cleanup",
+        "skill/skills/task-extraction",
+        "skill/skills/shared-mailboxes",
+        "skill/skills/attachment-management",
+        "skill/skills/scheduled-mail",
+        "skill/skills/mailbox-organization"
+      ]
+    }
+  ]
+}

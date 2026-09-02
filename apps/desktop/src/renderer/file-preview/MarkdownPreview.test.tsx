@@ -140,12 +140,13 @@ describe("MarkdownPreview", () => {
   });
 
   it("switches a rendered selection to source and opens the existing line comment editor", async () => {
+    const onCreateComment = vi.fn();
     await act(async () => {
       root.render(
         <MarkdownPreview
           preview={{ ...preview, content: "# Title\n\nFirst line\nSecond line\n" }}
           frameProps={frameProps}
-          onCreateComment={vi.fn()}
+          onCreateComment={onCreateComment}
         />,
       );
     });
@@ -176,8 +177,36 @@ describe("MarkdownPreview", () => {
 
     expect(container.querySelector(".cm-editor")).not.toBeNull();
     expect(container.querySelectorAll(".project-file-line-comment-selection")).toHaveLength(2);
-    expect(container.querySelector(".project-file-line-comment-editor textarea")?.getAttribute("aria-label"))
-      .toBe("第 3–4 行 评论内容");
+    const textarea = container.querySelector<HTMLTextAreaElement>(
+      ".project-file-line-comment-editor textarea",
+    );
+    expect(textarea?.getAttribute("aria-label")).toBe("第 3–4 行 评论内容");
+
+    textarea?.focus();
+    const typingKey = new KeyboardEvent("keydown", {
+      key: "修",
+      bubbles: true,
+      cancelable: true,
+    });
+    textarea?.dispatchEvent(typingKey);
+    expect(typingKey.defaultPrevented).toBe(false);
+    await act(async () => {
+      if (textarea) textarea.value = "请修改这两行";
+      textarea?.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    });
+    const submit = [...container.querySelectorAll<HTMLButtonElement>(
+      ".project-file-line-comment-editor button",
+    )].find((button) => button.textContent === "评论");
+    expect(submit?.disabled).toBe(false);
+    await act(async () => submit?.click());
+    expect(onCreateComment).toHaveBeenCalledWith(
+      {
+        startLine: 3,
+        endLine: 4,
+        selectedText: "First line\nSecond line",
+      },
+      "请修改这两行",
+    );
   });
 
   it("serializes formatted edits back to Markdown for legacy draft recovery", () => {

@@ -176,7 +176,9 @@ class FileLineCommentWidget extends WidgetType {
   }
 
   ignoreEvent(): boolean {
-    return false;
+    // The comment form owns its textarea and button events. Letting CodeMirror
+    // handle them prevents the textarea from receiving normal editing input.
+    return true;
   }
 }
 

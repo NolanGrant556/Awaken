@@ -728,11 +728,6 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   overflow: visible;
 }
 
-.execution-prompt-bubble-structured-content .composer-file-comments-popover {
-  top: calc(100% + 8px);
-  bottom: auto;
-}
-
 .execution-prompt-bubble-token {
   display: inline-flex;
   align-items: center;

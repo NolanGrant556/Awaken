@@ -49,6 +49,7 @@ export type FilePreviewHostProps = {
   onPreviewPrimaryClick?: () => void;
   fileComments?: FileLineComment[];
   onCreateFileComment?: (comment: FileLineComment) => void;
+  onAddFileTextSelection?: (selection: FileLineComment) => void;
   onDeleteFileComment?: (commentId: string) => void;
   fileCommentDisabled?: boolean;
 };
@@ -77,6 +78,7 @@ export default function FilePreviewHost({
   onPreviewPrimaryClick,
   fileComments = [],
   onCreateFileComment,
+  onAddFileTextSelection,
   onDeleteFileComment,
   fileCommentDisabled = false,
 }: FilePreviewHostProps) {
@@ -84,7 +86,11 @@ export default function FilePreviewHost({
   const [retryGeneration, setRetryGeneration] = useState(0);
   const [guestLoading, setGuestLoading] = useState(false);
   const activePreviewIdRef = useRef<string | undefined>(undefined);
-	const markdownDigestRef = useRef<string | undefined>(undefined);
+  const textSaveStateRef = useRef<{
+    previewId?: string;
+    digest?: string;
+    queue: Promise<void>;
+  }>({ queue: Promise.resolve() });
   const generationRef = useRef(0);
   const onModeChangeRef = useRef(onModeChange);
   const onPreviewLabelChangeRef = useRef(onPreviewLabelChange);
@@ -132,9 +138,13 @@ export default function FilePreviewHost({
           return;
         }
         activePreviewIdRef.current = result.preview.previewId;
-		markdownDigestRef.current = result.preview.transport === "text"
-			? result.preview.contentDigest
-			: undefined;
+        textSaveStateRef.current = {
+          previewId: result.preview.previewId,
+          digest: result.preview.transport === "text"
+            ? result.preview.contentDigest
+            : undefined,
+          queue: Promise.resolve(),
+        };
         onModeChangeRef.current(result.preview.kind === "html" ? "browser" : "files");
         setState({ status: "ready", preview: result.preview });
       })
@@ -210,6 +220,61 @@ export default function FilePreviewHost({
         });
       });
   }
+
+  const saveTextContent = (content: string) => {
+    if (!actionRequest) {
+      return Promise.resolve({
+        ok: false as const,
+        code: "INVALID_REQUEST" as const,
+        message: "无法保存此文件。",
+      });
+    }
+    const saveState = textSaveStateRef.current;
+    return new Promise<Awaited<ReturnType<RuntimeClient["saveProjectMarkdownFile"]>>>((resolve, reject) => {
+      saveState.queue = saveState.queue
+        .catch(() => undefined)
+        .then(async () => {
+          try {
+            const result = await runtimeClient.saveProjectMarkdownFile({
+              ...actionRequest,
+              content,
+              expectedDigest: saveState.digest,
+            });
+            if (result.ok && result.digest) saveState.digest = result.digest;
+            resolve(result);
+          } catch (error) {
+            reject(error);
+          }
+        });
+    });
+  };
+
+  const createFileContext = (
+    selectionRange: import("./CodePreview").CodePreviewLineSelection,
+    kind: "comment" | "selection",
+    commentText = "",
+  ) => {
+    const contentDigest = textSaveStateRef.current.digest;
+    if (!projectId || !folderPath || !selection || !contentDigest) return;
+    const item: FileLineComment = {
+      id: globalThis.crypto?.randomUUID?.() ??
+        `file-context-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      kind,
+      projectId,
+      folderPath,
+      relativePath: selection.relativePath,
+      displayName: preview.displayName,
+      contentDigest,
+      startLine: selectionRange.startLine,
+      endLine: selectionRange.endLine,
+      selectedText: selectionRange.selectedText,
+      comment: commentText.trim(),
+      createdAt: new Date().toISOString(),
+      validationState: "ready",
+    };
+    if (kind === "selection") onAddFileTextSelection?.(item);
+    else onCreateFileComment?.(item);
+  };
 
   if (mode === "browser" && state.status !== "ready") {
     return (
@@ -319,62 +384,31 @@ export default function FilePreviewHost({
               <MarkdownPreview
                 preview={preview}
                 frameProps={frameProps}
-                onSave={(content) =>
-                  actionRequest
-					? runtimeClient.saveProjectMarkdownFile({
-							...actionRequest,
-							content,
-						expectedDigest: actionRequest.relativePath === ".awaken/AGENTS.md"
-							? markdownDigestRef.current
-							: undefined,
-						  }).then((result) => {
-							if (result.ok && result.digest) markdownDigestRef.current = result.digest;
-							if (!result.ok && result.code === "FILE_CHANGED" && result.currentDigest) {
-								markdownDigestRef.current = result.currentDigest;
-							}
-							return result;
-						  })
-                    : Promise.resolve({
-                        ok: false,
-                        code: "INVALID_REQUEST",
-                        message: "无法保存此文件。",
-                      })
-                }
+                onSave={saveTextContent}
+                fileComments={fileComments.filter(
+                  (item) => item.projectId === projectId && item.folderPath === folderPath &&
+                    item.relativePath === selection?.relativePath,
+                )}
+                onCreateComment={(range, text) => createFileContext(range, "comment", text)}
+                onAddTextSelection={(range) => createFileContext(range, "selection")}
+                onDeleteComment={onDeleteFileComment}
+                commentDisabled={fileCommentDisabled}
               />
             ) : preview.transport === "text" && preview.kind === "code" ? (
               <CodePreview
                 preview={preview}
                 frameProps={frameProps}
+                editable
+                onSave={saveTextContent}
                 fileComments={fileComments.filter(
                   (comment) =>
+                    comment.kind !== "selection" &&
                     comment.projectId === projectId &&
                     comment.folderPath === folderPath &&
                     comment.relativePath === selection?.relativePath,
                 )}
-                onCreateComment={(selectionRange, commentText) => {
-                  if (
-                    !projectId ||
-                    !folderPath ||
-                    !selection ||
-                    !preview.contentDigest ||
-                    !onCreateFileComment
-                  ) return;
-                  onCreateFileComment({
-                    id: globalThis.crypto?.randomUUID?.() ??
-                      `file-comment-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-                    projectId,
-                    folderPath,
-                    relativePath: selection.relativePath,
-                    displayName: preview.displayName,
-                    contentDigest: preview.contentDigest,
-                    startLine: selectionRange.startLine,
-                    endLine: selectionRange.endLine,
-                    selectedText: selectionRange.selectedText,
-                    comment: commentText.trim(),
-                    createdAt: new Date().toISOString(),
-                    validationState: "ready",
-                  });
-                }}
+                onCreateComment={(selectionRange, commentText) =>
+                  createFileContext(selectionRange, "comment", commentText)}
                 onDeleteComment={onDeleteFileComment}
                 commentDisabled={fileCommentDisabled}
               />

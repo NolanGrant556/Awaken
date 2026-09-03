@@ -86,7 +86,7 @@ func semanticFileLineCommentsForRun(comments []FileLineComment) []agentcore.Sema
 	converted := make([]agentcore.SemanticFileLineComment, 0, len(comments))
 	for _, comment := range comments {
 		converted = append(converted, agentcore.SemanticFileLineComment{
-			ID: comment.ID, ProjectID: comment.ProjectID, FolderPath: comment.FolderPath,
+			ID: comment.ID, Kind: comment.Kind, ProjectID: comment.ProjectID, FolderPath: comment.FolderPath,
 			RelativePath: comment.RelativePath, DisplayName: comment.DisplayName,
 			ContentDigest: comment.ContentDigest, StartLine: comment.StartLine,
 			EndLine: comment.EndLine, SelectedText: comment.SelectedText,

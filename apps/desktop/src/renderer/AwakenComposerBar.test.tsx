@@ -1687,4 +1687,110 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(host.querySelector(".composer-bar-model-effort-panel")).toBeNull();
   });
+
+  it("renders selected file text as a removable context summary", () => {
+    const onRemoveFileComment = vi.fn();
+    renderComposer({
+      fileComments: [{
+        id: "selection-1",
+        kind: "selection",
+        displayName: "README.md",
+        relativePath: "README.md",
+        startLine: 2,
+        endLine: 3,
+        selectedText: "First\nSecond",
+        comment: "",
+        validationState: "ready",
+      }],
+      onRemoveFileComment,
+    });
+
+    expect(host.textContent).toContain("1 个已选文本片段");
+    const clear = host.querySelector<HTMLButtonElement>(
+      '[aria-label="移除全部已选文本片段"]',
+    );
+    expect(clear).not.toBeNull();
+    act(() => clear?.click());
+    expect(onRemoveFileComment).toHaveBeenCalledWith("selection-1");
+  });
+
+  it("keeps newly added context details closed until the summary is hovered", () => {
+    const selection = {
+        id: "selection-1",
+        kind: "selection" as const,
+        displayName: "README.md",
+        relativePath: "README.md",
+        startLine: 2,
+        endLine: 3,
+        selectedText: "First\nSecond",
+        comment: "",
+        validationState: "ready" as const,
+    };
+    renderComposer({ fileComments: [] });
+    renderComposer({ fileComments: [selection] });
+
+    expect(document.body.querySelector(".composer-file-comments-popover")).toBeNull();
+    const summary = host.querySelector<HTMLElement>(".composer-file-comments");
+    act(() => {
+      summary?.dispatchEvent(new Event("pointerover", { bubbles: true }));
+    });
+
+    expect(host.querySelector(".composer-file-comments-popover")).toBeNull();
+    const popover = document.body.querySelector<HTMLElement>(
+      '.composer-file-comments-popover[aria-label="已选文本片段详情"]',
+    );
+    expect(popover).not.toBeNull();
+    expect(popover?.style.position).toBe("fixed");
+    expect(host.contains(popover)).toBe(false);
+  });
+
+  it("keeps hover-only clear controls mounted inside both context summaries", () => {
+    const onRemoveFileComment = vi.fn();
+    renderComposer({
+      fileComments: [
+        {
+          id: "comment-1",
+          kind: "comment",
+          displayName: "README.md",
+          relativePath: "README.md",
+          startLine: 1,
+          endLine: 1,
+          selectedText: "# Title",
+          comment: "Rename this",
+          validationState: "ready",
+        },
+        {
+          id: "selection-1",
+          kind: "selection",
+          displayName: "README.md",
+          relativePath: "README.md",
+          startLine: 2,
+          endLine: 3,
+          selectedText: "First\nSecond",
+          comment: "",
+          validationState: "ready",
+        },
+      ],
+      onRemoveFileComment,
+    });
+
+    const clearComments = host.querySelector<HTMLButtonElement>(
+      '[aria-label="移除全部评论"]',
+    );
+    const clearSelections = host.querySelector<HTMLButtonElement>(
+      '[aria-label="移除全部已选文本片段"]',
+    );
+    expect(clearComments).not.toBeNull();
+    expect(clearSelections).not.toBeNull();
+    expect(clearComments?.className).toContain("composer-file-comments-clear-trigger");
+    expect(clearSelections?.className).toContain("composer-file-comments-clear-trigger");
+
+    act(() => clearComments?.click());
+    expect(onRemoveFileComment).toHaveBeenCalledTimes(1);
+    expect(onRemoveFileComment).toHaveBeenLastCalledWith("comment-1");
+    onRemoveFileComment.mockClear();
+    act(() => clearSelections?.click());
+    expect(onRemoveFileComment).toHaveBeenCalledTimes(1);
+    expect(onRemoveFileComment).toHaveBeenLastCalledWith("selection-1");
+  });
 });

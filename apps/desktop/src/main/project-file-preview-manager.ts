@@ -723,7 +723,7 @@ export class ProjectFilePreviewManager {
     request: ProjectFilePreviewSaveRequest,
   ): Promise<ProjectFilePreviewSaveResult> {
     if (typeof request?.content !== "string") {
-      return saveError("INVALID_REQUEST", "Markdown 保存请求无效。");
+      return saveError("INVALID_REQUEST", "文本保存请求无效。");
     }
     if (request.content.length > MAX_TEXT_PREVIEW_BYTES) {
       return saveError(
@@ -740,8 +740,8 @@ export class ProjectFilePreviewManager {
       const resolved = await resolveProjectFile(await this.options.getProjects(), request);
       if (!resolved.ok) return resolved;
       const classification = classifyPreviewFile(resolved.file.displayName);
-      if (classification?.kind !== "markdown") {
-        return saveError("UNSUPPORTED_FILE_TYPE", "当前只支持保存 Markdown 文件。");
+      if (classification?.kind !== "markdown" && classification?.kind !== "code") {
+        return saveError("UNSUPPORTED_FILE_TYPE", "当前只支持保存 Markdown、代码和纯文本文件。");
       }
 
       const nextBuffer = Buffer.from(request.content, "utf8");
@@ -792,7 +792,7 @@ export class ProjectFilePreviewManager {
 		return {
 			ok: true,
 			byteLength: nextBuffer.length,
-			...(isProjectAgents ? { digest: sha256(nextBuffer) } : {}),
+			digest: sha256(nextBuffer),
 		};
     } catch (error) {
       const code = nodeErrorCode(error);
@@ -800,9 +800,9 @@ export class ProjectFilePreviewManager {
         return saveError("FILE_NOT_FOUND", "所选项目文件不存在。");
       }
       if (code === "EACCES" || code === "EPERM" || code === "EROFS") {
-        return saveError("FILE_UNWRITABLE", "这个 Markdown 文件当前不可写入。");
+        return saveError("FILE_UNWRITABLE", "这个文本文件当前不可写入。");
       }
-      return saveError("FILE_UNWRITABLE", "暂时无法保存这个 Markdown 文件。");
+      return saveError("FILE_UNWRITABLE", "暂时无法保存这个文本文件。");
     }
   }
 

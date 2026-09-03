@@ -131,12 +131,13 @@ describe("FilePreviewHost", () => {
     expect(
       container.querySelectorAll(".project-file-preview-heading"),
     ).toHaveLength(1);
-    expect(container.querySelector('[aria-label="预览 Markdown"]')).not.toBeNull();
-    expect(container.querySelector('[aria-label="编辑 Markdown"]')).not.toBeNull();
+    expect(container.textContent).toContain("查看源代码");
+    expect(container.querySelector('[aria-label="保存 Markdown"]')).toBeNull();
+    expect(container.querySelector('[aria-label="重新载入文件预览"]')).toBeNull();
     expect(container.querySelector(".project-file-preview-toolbar")).toBeNull();
   });
 
-  it("keeps Markdown edit mode and the active preview across parent callback rerenders", async () => {
+  it("keeps Markdown source mode and the active preview across parent callback rerenders", async () => {
     const startProjectFilePreview = vi.fn(async (request) => ({
       ok: true as const,
       preview: {
@@ -176,19 +177,20 @@ describe("FilePreviewHost", () => {
 
     await act(async () => root.render(render(() => undefined)));
     await settleUntil(
-      () => container.querySelector('[aria-label="编辑 Markdown"]') !== null,
+      () => [...container.querySelectorAll("button")].some((button) => button.textContent === "查看源代码"),
     );
     await act(async () => {
-      container
-        .querySelector<HTMLButtonElement>('[aria-label="编辑 Markdown"]')
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "查看源代码")
         ?.click();
     });
-    expect(container.querySelector("[data-markdown-mode='edit']")).not.toBeNull();
+    expect(container.querySelector(".cm-editor")).not.toBeNull();
 
     await act(async () => root.render(render(() => undefined)));
 
     expect(startProjectFilePreview).toHaveBeenCalledTimes(1);
-    expect(container.querySelector("[data-markdown-mode='edit']")).not.toBeNull();
+    expect(container.querySelector(".cm-editor")).not.toBeNull();
+    expect(container.textContent).toContain("查看预览");
     expect(container.textContent).not.toContain("正在准备预览");
   });
 
@@ -241,7 +243,7 @@ describe("FilePreviewHost", () => {
       container.querySelectorAll(".project-file-preview-heading"),
     ).toHaveLength(1);
     expect(container.querySelector(".project-file-preview-toolbar")).toBeNull();
-    expect(container.querySelector('[aria-label="编辑 Markdown"]')).toBeNull();
+    expect(container.textContent).not.toContain("查看源代码");
     expect(container.textContent).not.toContain("搜索");
   });
 

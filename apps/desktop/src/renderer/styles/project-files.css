@@ -1915,3 +1915,52 @@ body.is-project-file-list-resizing .project-files-workspace__body {
   font-size: 10px;
   white-space: nowrap;
 }
+.project-file-markdown-source-toggle {
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--aw-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.project-file-markdown-selectable {
+  position: relative;
+}
+
+.project-file-markdown-selection-actions {
+  position: absolute;
+  z-index: 12;
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--aw-border-light);
+  border-radius: 10px;
+  background: var(--aw-surface-panel);
+  box-shadow: var(--aw-shadow-popover);
+}
+
+.project-file-markdown-selection-actions button {
+  min-height: 34px;
+  padding: 6px 11px;
+  border: 0;
+  border-right: 1px solid var(--aw-border-light);
+  background: transparent;
+  color: var(--aw-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.project-file-markdown-selection-actions button:last-child {
+  border-right: 0;
+}
+
+.project-file-auto-save-error {
+  max-width: 240px;
+  color: var(--aw-status-error);
+  font-size: var(--aw-font-size-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

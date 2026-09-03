@@ -425,7 +425,7 @@ describe("ProjectFilePreviewManager", () => {
     manager.dispose();
   });
 
-  it("saves Markdown in place and rejects every other preview kind", async () => {
+  it("saves editable text previews in place and rejects non-text preview kinds", async () => {
     const root = await temporaryRoot();
     await fs.writeFile(path.join(root, "README.md"), "# Project\n");
     await fs.writeFile(path.join(root, "notes.txt"), "plain\n");
@@ -452,12 +452,9 @@ describe("ProjectFilePreviewManager", () => {
         relativePath: "notes.txt",
         content: "changed\n",
       }),
-    ).resolves.toMatchObject({
-      ok: false,
-      code: "UNSUPPORTED_FILE_TYPE",
-    });
+    ).resolves.toMatchObject({ ok: true, byteLength: Buffer.byteLength("changed\n") });
     await expect(fs.readFile(path.join(root, "notes.txt"), "utf8")).resolves.toBe(
-      "plain\n",
+      "changed\n",
     );
     await expect(
       manager.saveMarkdown({

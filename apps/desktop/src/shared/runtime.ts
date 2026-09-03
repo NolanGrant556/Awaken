@@ -145,6 +145,7 @@ export type RunInputAttachment = {
 
 export type FileLineCommentWire = {
   id: string;
+  kind?: "comment" | "selection";
   project_id: string;
   folder_path: string;
   relative_path: string;
@@ -159,6 +160,7 @@ export type FileLineCommentWire = {
 
 export type FileLineComment = {
   id: string;
+  kind?: "comment" | "selection";
   projectId: string;
   folderPath: string;
   relativePath: string;
@@ -3316,6 +3318,7 @@ export function toRunInputAttachmentWire(attachment: RunInputAttachment): RunInp
 export function normalizeFileLineComment(comment: FileLineCommentWire): FileLineComment {
   return {
     id: comment.id,
+    kind: comment.kind ?? "comment",
     projectId: comment.project_id,
     folderPath: comment.folder_path,
     relativePath: comment.relative_path,
@@ -3333,6 +3336,7 @@ export function normalizeFileLineComment(comment: FileLineCommentWire): FileLine
 export function toFileLineCommentWire(comment: FileLineComment): FileLineCommentWire {
   return {
     id: comment.id,
+    kind: comment.kind ?? "comment",
     project_id: comment.projectId,
     folder_path: comment.folderPath,
     relative_path: comment.relativePath,

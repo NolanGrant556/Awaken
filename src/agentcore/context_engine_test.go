@@ -3,6 +3,7 @@ package agentcore
 import (
 	stdcontext "context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -590,8 +591,8 @@ func TestContextGovernorRejectsCompactThatStaysAboveAutoThreshold(t *testing.T) 
 	if governor.consecutiveCompactFailures != 1 || governor.lastCompactFailureReason != compactFailureStillAboveAutoThreshold {
 		t.Fatalf("failure state = failures=%d reason=%q", governor.consecutiveCompactFailures, governor.lastCompactFailureReason)
 	}
-	if engine.compactCalls != compactInnerRetryLimit+1 {
-		t.Fatalf("expected %d inner compact attempts, got %d", compactInnerRetryLimit+1, engine.compactCalls)
+	if engine.compactCalls != 2 {
+		t.Fatalf("expected one retry with a lighter tail, got %d attempts", engine.compactCalls)
 	}
 	if len(sink.blocked) != 0 {
 		t.Fatalf("must not emit CONTEXT_BLOCKED before three failures, got %v", sink.blocked)
@@ -617,6 +618,84 @@ func TestContextGovernorRejectsCompactAboveHardTargetEvenBelowAutoThreshold(t *t
 	)
 	if err == nil || !errors.Is(err, ErrCompactTargetUnachievable) {
 		t.Fatalf("expected hard-target failure, got %v", err)
+	}
+}
+
+func TestCompactTargetUnachievableOpensCircuitImmediately(t *testing.T) {
+	governor := newContextGovernor(&fakeContextEngine{}, nil, nil)
+	err := &CompactTargetUnachievableError{Reason: "mandatory_floor_exceeds_target", Projected: 29237, Target: 27704, MandatoryFloor: 29237}
+
+	governor.recordCompactFailure(err)
+
+	if !governor.compactCircuitOpen {
+		t.Fatal("compact target unachievable must open the circuit immediately")
+	}
+	if governor.consecutiveCompactFailures != 1 {
+		t.Fatalf("consecutiveCompactFailures=%d, want 1", governor.consecutiveCompactFailures)
+	}
+	if governor.lastCompactFailureClass != "budget_unresolved" {
+		t.Fatalf("lastCompactFailureClass=%q, want budget_unresolved", governor.lastCompactFailureClass)
+	}
+}
+
+func TestPostProjectionTargetFailureUsesBudgetFamilyBeforeCircuit(t *testing.T) {
+	governor := newContextGovernor(&fakeContextEngine{}, nil, nil)
+	err := &CompactTargetUnachievableError{
+		Reason: "post_compact_projection_exceeds_target", Projected: 29_237,
+		Target: 27_704, MandatoryFloor: 21_000,
+	}
+
+	governor.recordCompactFailure(err)
+
+	if governor.compactCircuitOpen {
+		t.Fatal("a reducible post-projection miss must not open the circuit after one failure")
+	}
+	if governor.consecutiveCompactFailures != 1 || governor.lastCompactFailureClass != "budget_unresolved" {
+		t.Fatalf("unexpected failure state: count=%d class=%q", governor.consecutiveCompactFailures, governor.lastCompactFailureClass)
+	}
+}
+
+func TestContextGovernorPreflightMandatoryFloorSkipsSummaryModelCall(t *testing.T) {
+	originalMessages := []convcontext.Message{
+		{Role: convcontext.RoleUser, Content: strings.Repeat("old context ", 4_000)},
+		{Role: convcontext.RoleAssistant, Content: "ack"},
+		{Role: convcontext.RoleUser, Content: "latest tail"},
+	}
+	originalEnvelope := ContextEnvelope{Messages: originalMessages}
+	engine := &fakeContextEngine{
+		evaluateFn: func(envelope ContextEnvelope) ContextWindowState {
+			if len(envelope.Messages) > 0 && envelope.Messages[0].CompactBoundaryID == "compact-preflight" {
+				state := testContextWindowState(12_500)
+				state.HardCompactTarget = true
+				return state
+			}
+			state := testContextWindowState(96_000)
+			state.HardCompactTarget = true
+			return state
+		},
+		compactFn: func(ctx stdcontext.Context, req CompactRequest) (CompactResult, error) {
+			t.Fatalf("compact summary model must not be called when preflight mandatory floor already exceeds target")
+			return CompactResult{}, nil
+		},
+	}
+	governor := newContextGovernor(engine, nil, nil)
+	sink := &fakeContextEventSink{}
+
+	_, err := governor.PrepareRequest(stdcontext.Background(), LLMRequest{
+		Messages:      originalMessages,
+		EnvelopeDebug: &originalEnvelope,
+	}, sink)
+	if err == nil || !errors.Is(err, errContextWindowBlocked) {
+		t.Fatalf("expected preflight compact target failure, got %v", err)
+	}
+	if engine.compactCalls != 0 {
+		t.Fatalf("mandatory-floor preflight must skip summary model call, got %d compact calls", engine.compactCalls)
+	}
+	if len(sink.failed) != 1 || !strings.Contains(sink.failed[0], "pre_compact_mandatory_floor_exceeds_target") {
+		t.Fatalf("expected failed event to expose preflight target reason, got %+v", sink.failed)
+	}
+	if len(sink.blocked) != 1 || !strings.Contains(sink.blocked[0], "COMPACT_TARGET_UNACHIEVABLE") {
+		t.Fatalf("expected context blocked after immediate circuit open, got %+v", sink.blocked)
 	}
 }
 
@@ -733,5 +812,51 @@ func TestContextGovernorFallbackSummaryIsNotSuccess(t *testing.T) {
 	}
 	if applyCalled != 0 {
 		t.Fatalf("fallback compact applied a new epoch")
+	}
+	if engine.compactCalls != 1 {
+		t.Fatalf("fallback summary should stop the current compact cycle, got %d attempts", engine.compactCalls)
+	}
+}
+
+func TestContextGovernorTreatsMixedBudgetFailuresAsOneCircuitFamily(t *testing.T) {
+	governor := newContextGovernor(&fakeContextEngine{}, nil, nil)
+
+	governor.recordCompactFailure(fmt.Errorf("%w: post=95000 pre=98000", errInsufficientReduction))
+	if governor.consecutiveCompactFailures != 1 || governor.lastCompactFailureClass != "budget_unresolved" {
+		t.Fatalf("first budget failure not tracked as a family: failures=%d class=%q reason=%q", governor.consecutiveCompactFailures, governor.lastCompactFailureClass, governor.lastCompactFailureReason)
+	}
+
+	governor.recordCompactFailure(fmt.Errorf("%w: post=93000 auto=91000", errStillAboveAutoThreshold))
+	governor.recordCompactFailure(fmt.Errorf("%w: post=97000 block=96000", errStillAboveBlockThreshold))
+	if !governor.compactCircuitOpen || governor.consecutiveCompactFailures != 3 {
+		t.Fatalf("mixed budget failures should still open the circuit, got failures=%d open=%v", governor.consecutiveCompactFailures, governor.compactCircuitOpen)
+	}
+	if governor.lastCompactFailureReason != compactFailureStillAboveBlockThreshold {
+		t.Fatalf("last compact failure reason should still expose the specific failure, got %q", governor.lastCompactFailureReason)
+	}
+}
+
+func TestShouldRetryCompactPostconditionStopsOnMandatoryFloorFailure(t *testing.T) {
+	if shouldRetryCompactPostcondition(nil, CompactResult{}, 0) {
+		t.Fatal("nil postcondition error must not retry")
+	}
+	if shouldRetryCompactPostcondition(errInsufficientReduction, CompactResult{Fallback: CompactFallback{Used: true}}, 0) {
+		t.Fatal("fallback summary must not trigger another compact-summary request")
+	}
+	if shouldRetryCompactPostcondition(&CompactTargetUnachievableError{
+		Reason: "mandatory_floor_exceeds_target", Projected: 29237, Target: 27704, MandatoryFloor: 29237,
+	}, CompactResult{}, 0) {
+		t.Fatal("mandatory floor above target must stop inner retries")
+	}
+	if !shouldRetryCompactPostcondition(&CompactTargetUnachievableError{
+		Reason: "post_compact_projection_exceeds_target", Projected: 29237, Target: 27704, MandatoryFloor: 21000,
+	}, CompactResult{}, 0) {
+		t.Fatal("a reducible post-projection miss should allow one lighter-tail retry")
+	}
+	if !shouldRetryCompactPostcondition(fmt.Errorf("%w: post=95000 auto=91000", errStillAboveAutoThreshold), CompactResult{}, 0) {
+		t.Fatal("retryable postcondition should still allow one lighter-tail retry")
+	}
+	if shouldRetryCompactPostcondition(fmt.Errorf("%w: post=95000 auto=91000", errStillAboveAutoThreshold), CompactResult{}, 1) {
+		t.Fatal("retryable postcondition should stop after one lighter-tail retry")
 	}
 }

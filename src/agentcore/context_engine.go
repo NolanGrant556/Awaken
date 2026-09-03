@@ -61,6 +61,7 @@ type contextGovernor struct {
 	lastSentEstimatedInputTokens    int
 	pendingSentEstimatedInputTokens int
 	lastCompactFailureReason        string
+	lastCompactFailureClass         string
 	lastCompactBudgetReceipt        *CompactBudgetReceipt
 	lastCompactNativeAttempted      bool
 	lastCompactNativeUsed           bool
@@ -260,6 +261,14 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 			return llmReq, err
 		}
 	}
+	if preflightErr := g.preflightCompactTarget(llmReq, state, tailBudget); preflightErr != nil {
+		g.recordCompactFailure(preflightErr)
+		failedState := g.withRunState(llmReq.ContextWindowState)
+		if events != nil {
+			events.emitCompactFailed(failedState, mode, preflightErr.Error(), compactFailureReason(preflightErr), preflightErr)
+		}
+		return llmReq, preflightErr
+	}
 	compactRequest := CompactRequest{
 		Mode:             mode,
 		Envelope:         *llmReq.EnvelopeDebug,
@@ -289,6 +298,9 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 		}
 		if postErr := g.evaluateCompactPostcondition(llmReq, state, result); postErr != nil {
 			err = postErr
+			if !shouldRetryCompactPostcondition(postErr, result, attempt) {
+				break
+			}
 			continue
 		}
 		err = nil
@@ -326,6 +338,7 @@ func (g *contextGovernor) compactForRequest(ctx stdcontext.Context, llmReq LLMRe
 	result.NativeCompactionReason = g.lastCompactNativeReason
 	g.consecutiveCompactFailures = 0
 	g.lastCompactFailureReason = ""
+	g.lastCompactFailureClass = ""
 	// A successful compact changes the conversation, so the previous
 	// provider-reported usage no longer corresponds to the next request's
 	// input. Reset the actual-usage trigger so ShouldAutoCompactByActualUsage
@@ -397,15 +410,32 @@ func cloneStringIntMap(input map[string]int) map[string]int {
 
 func (g *contextGovernor) recordCompactFailure(err error) {
 	reason := compactFailureReason(err)
-	if reason == g.lastCompactFailureReason {
+	class := compactFailureClass(err)
+	if compactMandatoryFloorUnreachable(err) {
+		g.consecutiveCompactFailures = 1
+		g.lastCompactFailureReason = reason
+		g.lastCompactFailureClass = class
+		g.compactCircuitOpen = true
+		return
+	}
+	if class == g.lastCompactFailureClass {
 		g.consecutiveCompactFailures++
 	} else {
 		g.consecutiveCompactFailures = 1
-		g.lastCompactFailureReason = reason
 	}
+	g.lastCompactFailureReason = reason
+	g.lastCompactFailureClass = class
 	if g.consecutiveCompactFailures >= 3 {
 		g.compactCircuitOpen = true
 	}
+}
+
+func compactMandatoryFloorUnreachable(err error) bool {
+	var targetErr *CompactTargetUnachievableError
+	if !errors.As(err, &targetErr) || targetErr == nil {
+		return false
+	}
+	return targetErr.Target > 0 && targetErr.MandatoryFloor > targetErr.Target
 }
 
 func (g *contextGovernor) evaluateCompactPostcondition(llmReq LLMRequest, preState ContextWindowState, result CompactResult) error {
@@ -541,6 +571,57 @@ func compactableHistoryTokens(messages []convcontext.Message, targetTokens, proj
 	return localPrefix
 }
 
+func (g *contextGovernor) preflightCompactTarget(llmReq LLMRequest, state ContextWindowState, targetTokens int) error {
+	if llmReq.EnvelopeDebug == nil || !state.HardCompactTarget || state.CompactTarget <= 0 {
+		return nil
+	}
+	prefixGroups, tailGroups := splitCompactGroups(llmReq.Messages, targetTokens)
+	prefixMessages := flattenCompactGroups(prefixGroups)
+	tailMessages := flattenCompactGroups(tailGroups)
+	if len(prefixMessages) == 0 {
+		return nil
+	}
+	req := CompactRequest{
+		Mode:         CompactModeAuto,
+		Envelope:     *llmReq.EnvelopeDebug,
+		Messages:     llmReq.Messages,
+		TargetTokens: targetTokens,
+	}
+	if over, limit := compactTailExceedsBudget(req, tailMessages); over {
+		tailMessages = lightenCompactTail(tailMessages)
+		if estimateMessagesTokens(tailMessages) > limit {
+			absorbed, protected, err := absorbOversizedCompactTail(prefixMessages, tailMessages, limit)
+			if err != nil {
+				return nil
+			}
+			prefixMessages = absorbed
+			tailMessages = protected
+		}
+	}
+	preflight := convcontext.Message{
+		Role:              convcontext.RoleUser,
+		Content:           "compact preflight summary",
+		CompactBoundaryID: "compact-preflight",
+	}
+	envelope := *llmReq.EnvelopeDebug
+	envelope.Messages = append([]convcontext.Message{preflight}, stripProviderOpaqueCompactionState(tailMessages)...)
+	postState := g.engine.Evaluate(envelope)
+	projected := postState.ConservativeProjectedTokens()
+	target := state.CompactTarget
+	if postState.CompactTarget > 0 {
+		target = postState.CompactTarget
+	}
+	if projected <= target {
+		return nil
+	}
+	return &CompactTargetUnachievableError{
+		Reason:         "pre_compact_mandatory_floor_exceeds_target",
+		Projected:      projected,
+		Target:         target,
+		MandatoryFloor: projected,
+	}
+}
+
 func compactFailureReason(err error) string {
 	if err == nil {
 		return ""
@@ -561,6 +642,42 @@ func compactFailureReason(err error) string {
 	default:
 		return err.Error()
 	}
+}
+
+func compactFailureClass(err error) string {
+	reason := compactFailureReason(err)
+	switch reason {
+	case compactFailureInsufficientReduction,
+		compactFailureStillAboveAutoThreshold,
+		compactFailureStillAboveBlockThreshold,
+		"compact_target_unachievable":
+		return "budget_unresolved"
+	default:
+		return reason
+	}
+}
+
+func shouldRetryCompactPostcondition(err error, result CompactResult, attempt int) bool {
+	if err == nil {
+		return false
+	}
+	if result.Fallback.Used {
+		return false
+	}
+	if errors.Is(err, errInsufficientReduction) {
+		return false
+	}
+	var targetErr *CompactTargetUnachievableError
+	if errors.As(err, &targetErr) {
+		if compactMandatoryFloorUnreachable(targetErr) {
+			return false
+		}
+		return attempt < 1
+	}
+	if attempt >= 1 {
+		return false
+	}
+	return errors.Is(err, errStillAboveAutoThreshold) || errors.Is(err, errStillAboveBlockThreshold)
 }
 
 func (g *contextGovernor) compactCircuitOpenError() error {

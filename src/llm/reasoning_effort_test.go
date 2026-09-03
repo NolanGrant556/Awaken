@@ -72,11 +72,11 @@ func TestQwen38AuxiliaryRequestDoesNotDisableRequiredReasoning(t *testing.T) {
 	}
 }
 
-func TestAuxiliaryRequestDoesNotInheritReasoningEffort(t *testing.T) {
+func TestKimiK3AuxiliaryRequestUsesLowEffortInsteadOfInheritingThreadEffort(t *testing.T) {
 	prepared, err := PrepareRequest(Config{
 		APIKey: "test", BaseURL: "https://api.moonshot.cn/v1", Protocol: ProtocolOpenAIChat,
 		ProviderID: "kimi-cn", Model: "kimi-k3", ReasoningEffort: "max",
-	}, Request{Purpose: RequestPurposeThreadTitle}, false)
+	}, Request{Purpose: RequestPurposeThreadTitle, ReasoningPolicy: "max"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,8 +84,52 @@ func TestAuxiliaryRequestDoesNotInheritReasoningEffort(t *testing.T) {
 	if err := json.Unmarshal(prepared.Body, &body); err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := body["reasoning_effort"]; exists {
-		t.Fatalf("auxiliary request inherited reasoning_effort: %s", prepared.Body)
+	if got, _ := body["reasoning_effort"].(string); got != "low" {
+		t.Fatalf("auxiliary request reasoning_effort = %q, want low: %s", got, prepared.Body)
+	}
+}
+
+func TestKimiK3CompactSummaryUsesLowEffortWhenDisableReasoningContractUnavailable(t *testing.T) {
+	prepared, err := PrepareRequest(Config{
+		APIKey: "test", BaseURL: "https://api.kimi.com/coding/v1", Protocol: ProtocolOpenAIChat,
+		ProviderID: "kimi-coding-plan", Model: "k3", ReasoningEffort: "max",
+	}, Request{Purpose: RequestPurposeCompactSummary, DisableReasoning: true}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(prepared.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	var effort string
+	if err := json.Unmarshal(body["reasoning_effort"], &effort); err != nil {
+		t.Fatalf("missing reasoning_effort for Kimi K3 compact summary: %s", prepared.Body)
+	}
+	if effort != "low" {
+		t.Fatalf("compact_summary reasoning_effort = %q, want low: %s", effort, prepared.Body)
+	}
+	if raw, exists := body["thinking"]; exists {
+		t.Fatalf("Kimi K3 compact summary must not emit unsupported thinking disable contract: %s", raw)
+	}
+	if raw, exists := body["enable_thinking"]; exists {
+		t.Fatalf("Kimi K3 compact summary must not emit unsupported enable_thinking contract: %s", raw)
+	}
+}
+
+func TestKimiK3MemoryAuxiliaryRequestDoesNotForceLowEffort(t *testing.T) {
+	prepared, err := PrepareRequest(Config{
+		APIKey: "test", BaseURL: "https://api.moonshot.cn/v1", Protocol: ProtocolOpenAIChat,
+		ProviderID: "kimi-cn", Model: "kimi-k3", ReasoningEffort: "max",
+	}, Request{Purpose: RequestPurposeMemoryRecall, ReasoningPolicy: "max"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(prepared.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if raw, exists := body["reasoning_effort"]; exists {
+		t.Fatalf("memory auxiliary request must not inherit compact/title low-effort policy: %s", raw)
 	}
 }
 

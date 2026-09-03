@@ -113,6 +113,55 @@ func (s *callToolSession) ListResources(context.Context, *mcp.ListResourcesParam
 func (s *callToolSession) Close() error { return nil }
 func (s *callToolSession) Wait() error  { return nil }
 
+type blockingRouteSession struct {
+	started   chan struct{}
+	release   chan struct{}
+	closed    chan struct{}
+	startOnce sync.Once
+	closeOnce sync.Once
+}
+
+func newBlockingRouteSession() *blockingRouteSession {
+	return &blockingRouteSession{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		closed:  make(chan struct{}),
+	}
+}
+
+func (s *blockingRouteSession) ListTools(context.Context, *mcp.ListToolsParams) (*mcp.ListToolsResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *blockingRouteSession) CallTool(ctx context.Context, _ *mcp.CallToolParams) (*mcp.CallToolResult, error) {
+	s.startOnce.Do(func() { close(s.started) })
+	select {
+	case <-s.release:
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ok"}}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (s *blockingRouteSession) ListPrompts(context.Context, *mcp.ListPromptsParams) (*mcp.ListPromptsResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *blockingRouteSession) GetPrompt(context.Context, *mcp.GetPromptParams) (*mcp.GetPromptResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *blockingRouteSession) ListResources(context.Context, *mcp.ListResourcesParams) (*mcp.ListResourcesResult, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *blockingRouteSession) Close() error {
+	s.closeOnce.Do(func() { close(s.closed) })
+	return nil
+}
+
+func (s *blockingRouteSession) Wait() error { return nil }
+
 // echoServerWithTools returns an in-proc factory that exposes N tools named
 // echo1..echoN, all read-only. Used to verify the manager registers each
 // tool with the mcp__{server}__{tool} prefix.
@@ -785,6 +834,79 @@ func TestReconnectFailedForNetworkRouteOnlyRearmsNetworkServers(t *testing.T) {
 	}
 	if mgr.servers["in-process"].state != StateFailed {
 		t.Fatalf("in-process server state = %s", mgr.servers["in-process"].state)
+	}
+}
+
+func TestRestartConnectedStdioForNetworkRouteWaitsForActiveCall(t *testing.T) {
+	stdioSession := newBlockingRouteSession()
+	httpSession := newBlockingRouteSession()
+	mgr := NewManager(WithLogger(noopLogger{}))
+	mgr.servers = map[string]*managedServer{
+		"stdio": {
+			name: "stdio", transport: TransportStdio, state: StateConnected, session: stdioSession,
+			config: McpServerConfig{Stdio: &StdioTransportConfig{Command: "missing-test-command"}},
+		},
+		"http": {
+			name: "http", transport: TransportHTTP, state: StateConnected, session: httpSession,
+			config: McpServerConfig{HTTP: &HTTPTransportConfig{URL: "http://127.0.0.1:1"}},
+		},
+	}
+
+	callDone := make(chan error, 1)
+	go func() {
+		_, err := mgr.CallTool(context.Background(), "mcp__stdio__probe", nil)
+		callDone <- err
+	}()
+	select {
+	case <-stdioSession.started:
+	case <-time.After(time.Second):
+		t.Fatal("stdio tool call did not start")
+	}
+
+	restartCtx, cancelRestart := context.WithCancel(context.Background())
+	defer cancelRestart()
+	if got := mgr.RestartConnectedStdioForNetworkRoute(restartCtx); got != 1 {
+		t.Fatalf("scheduled restarts = %d, want 1", got)
+	}
+
+	stdioSnapshot, err := mgr.SnapshotServer("stdio")
+	if err != nil {
+		t.Fatalf("snapshot stdio: %v", err)
+	}
+	if stdioSnapshot.State != StatePending {
+		t.Fatalf("stdio state = %s, want pending", stdioSnapshot.State)
+	}
+	httpSnapshot, err := mgr.SnapshotServer("http")
+	if err != nil {
+		t.Fatalf("snapshot http: %v", err)
+	}
+	if httpSnapshot.State != StateConnected {
+		t.Fatalf("http state = %s, want connected", httpSnapshot.State)
+	}
+	select {
+	case <-stdioSession.closed:
+		t.Fatal("stdio session closed before the active call reached its boundary")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(stdioSession.release)
+	select {
+	case err := <-callDone:
+		if err != nil {
+			t.Fatalf("active stdio call failed: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("active stdio call did not complete")
+	}
+	select {
+	case <-stdioSession.closed:
+	case <-time.After(time.Second):
+		t.Fatal("stdio session was not closed after the active call completed")
+	}
+	select {
+	case <-httpSession.closed:
+		t.Fatal("connected HTTP session must not restart for a route generation change")
+	default:
 	}
 }
 

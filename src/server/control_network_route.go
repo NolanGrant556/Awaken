@@ -45,6 +45,7 @@ func (h *controlHandlers) handleUpdateNetworkRoute(w http.ResponseWriter, r *htt
 	}
 	if h.mcpManager != nil && normalized.Generation != previous.Generation {
 		h.mcpManager.ReconnectFailedForNetworkRoute(context.Background())
+		h.mcpManager.RestartConnectedStdioForNetworkRoute(context.Background())
 	}
 	writeJSON(w, http.StatusOK, normalized)
 }

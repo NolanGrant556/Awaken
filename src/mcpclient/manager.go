@@ -396,19 +396,25 @@ func (m *Manager) connectLoop(parentCtx context.Context, server *managedServer) 
 			// Block until the session terminates.
 			_ = session.Wait()
 			m.mu.Lock()
-			server.session = nil
-			server.tools = nil
-			server.toolsLoaded = false
-			if server.state == StateConnected {
-				server.state = StateFailed
-				server.errorReason = "session ended"
+			current, isCurrent := m.servers[server.name]
+			isCurrent = isCurrent && current == server
+			if isCurrent {
+				server.session = nil
+				server.tools = nil
+				server.toolsLoaded = false
+				if server.state == StateConnected {
+					server.state = StateFailed
+					server.errorReason = "session ended"
+				}
 			}
 			m.mu.Unlock()
-			m.unregisterTools(server.name)
-			if m.onToolsChanged != nil {
-				m.onToolsChanged(server.name)
+			if isCurrent {
+				m.unregisterTools(server.name)
+				if m.onToolsChanged != nil {
+					m.onToolsChanged(server.name)
+				}
+				m.emitEvent(ServerEvent{Type: EventDisconnected, ServerName: server.name})
 			}
-			m.emitEvent(ServerEvent{Type: EventDisconnected, ServerName: server.name})
 			return
 		}
 		if isAuthError(err) {
@@ -640,8 +646,9 @@ func (m *Manager) ForceReconnect(ctx context.Context, name string) error {
 
 // ReconnectFailedForNetworkRoute re-arms failed network-sensitive servers
 // after the host reports a route change. Pending servers already rebuild their
-// transport on every retry, and connected servers keep their current session;
-// neither is interrupted. In-process servers do not depend on host networking.
+// transport on every retry. Connected stdio servers are handled separately by
+// RestartConnectedStdioForNetworkRoute; connected HTTP/SSE sessions remain in
+// place. In-process servers do not depend on host networking.
 func (m *Manager) ReconnectFailedForNetworkRoute(ctx context.Context) int {
 	m.mu.RLock()
 	names := make([]string, 0)
@@ -666,6 +673,61 @@ func (m *Manager) ReconnectFailedForNetworkRoute(ctx context.Context) int {
 		reconnected++
 	}
 	return reconnected
+}
+
+// RestartConnectedStdioForNetworkRoute schedules connected stdio servers for
+// a child-process rebuild after the current tool call, if any, reaches its
+// call boundary. A child process cannot receive environment updates in place,
+// so keeping the existing session would leave HTTP_PROXY/HTTPS_PROXY stale
+// after a proxy listener appears or disappears.
+//
+// The method marks each selected server pending before waiting on callMu. New
+// calls therefore fail against the live pending state instead of queueing on
+// the stale session. The in-flight call is never cancelled or replayed.
+func (m *Manager) RestartConnectedStdioForNetworkRoute(ctx context.Context) int {
+	type candidate struct {
+		server *managedServer
+		scoped ScopedMcpServerConfig
+	}
+
+	m.mu.Lock()
+	candidates := make([]candidate, 0)
+	for _, server := range m.servers {
+		if server.transport != TransportStdio || server.state != StateConnected {
+			continue
+		}
+		server.state = StatePending
+		server.errorReason = "network route changed; stdio reconnect pending"
+		candidates = append(candidates, candidate{
+			server: server,
+			scoped: ScopedMcpServerConfig{
+				Name: server.name, Scope: server.scope, SourceRevision: server.sourceRevision, Config: server.config,
+			},
+		})
+	}
+	m.mu.Unlock()
+
+	for _, item := range candidates {
+		if m.onToolsChanged != nil {
+			m.onToolsChanged(item.server.name)
+		}
+		go func(item candidate) {
+			item.server.callMu.Lock()
+			defer item.server.callMu.Unlock()
+
+			m.mu.RLock()
+			current, exists := m.servers[item.server.name]
+			stillCurrent := exists && current == item.server && current.state == StatePending
+			m.mu.RUnlock()
+			if !stillCurrent {
+				return
+			}
+			if err := m.RestartWithConfig(ctx, item.scoped); err != nil {
+				m.logger.Warnf("mcp stdio server %q network-route restart failed: %v", item.server.name, err)
+			}
+		}(item)
+	}
+	return len(candidates)
 }
 
 // RestartWithConfig stops an existing server (if any), unregisters its tools,
@@ -854,14 +916,23 @@ func (m *Manager) callServerTool(ctx context.Context, serverName, toolName, disp
 	if !exists {
 		return nil, &ToolNotFoundError{ToolName: displayName}
 	}
-	if server.state == StateNeedsAuth {
-		return nil, &NeedsAuthError{ServerName: serverName, Reason: server.errorReason}
-	}
-	if server.state != StateConnected || server.session == nil {
-		return nil, fmt.Errorf("mcp server %q is %s; cannot call %s", serverName, server.state, displayName)
-	}
 	server.callMu.Lock()
 	defer server.callMu.Unlock()
+	m.mu.RLock()
+	current, stillExists := m.servers[serverName]
+	state := server.state
+	reason := server.errorReason
+	session := server.session
+	m.mu.RUnlock()
+	if !stillExists || current != server {
+		return nil, fmt.Errorf("mcp server %q changed while preparing %s; retry after reconnect", serverName, displayName)
+	}
+	if state == StateNeedsAuth {
+		return nil, &NeedsAuthError{ServerName: serverName, Reason: reason}
+	}
+	if state != StateConnected || session == nil {
+		return nil, fmt.Errorf("mcp server %q is %s; cannot call %s", serverName, state, displayName)
+	}
 	server.elicitationMu.Lock()
 	server.activeCallContext = ctx
 	server.elicitationMu.Unlock()
@@ -870,7 +941,7 @@ func (m *Manager) callServerTool(ctx context.Context, serverName, toolName, disp
 		server.activeCallContext = nil
 		server.elicitationMu.Unlock()
 	}()
-	result, err := server.session.CallTool(ctx, &mcp.CallToolParams{
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: arguments,
 	})
@@ -879,8 +950,8 @@ func (m *Manager) callServerTool(ctx context.Context, serverName, toolName, disp
 	// server needs-auth while the call is in flight; inspect that state for both
 	// return shapes so the agent layer receives one typed authorization signal.
 	m.mu.RLock()
-	state := server.state
-	reason := server.errorReason
+	state = server.state
+	reason = server.errorReason
 	m.mu.RUnlock()
 	if state == StateNeedsAuth {
 		return nil, &NeedsAuthError{ServerName: serverName, Reason: reason}

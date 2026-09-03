@@ -31,14 +31,16 @@ const (
 	strategyChangeTurnFailures = 6
 	strategyChangeRunFailures  = 12
 
-	ErrorCodeToolRetryBlocked = "tool_retry_blocked"
-	ErrorCodeRepeatedFailure  = "repeated_tool_failure"
+	ErrorCodeToolRetryBlocked           = "tool_retry_blocked"
+	ErrorCodeRepeatedFailure            = "repeated_tool_failure"
+	ErrorCodeRepeatedSuccessfulMutation = "repeated_successful_mutation"
 
 	// StatusStrategyChangeRequired marks a recoverable tool result whose exact
 	// call must not be replayed; the agent must change tool, arguments, or
 	// implementation path. The run continues.
 	StatusStrategyChangeRequired            = "strategy_change_required"
 	StatusExternalStateConfirmationRequired = "external_state_confirmation_required"
+	StatusSuccessfulMutationAlreadyApplied  = "successful_mutation_already_applied"
 )
 
 // FailureSupervisor enforces hard budgets and recovery policy for repeated
@@ -46,11 +48,13 @@ const (
 type FailureSupervisor struct {
 	workspaceRoot string
 
-	callAttempts        map[string]int
-	callFailureMeta     map[string]callFailureMeta
-	classFailures       map[string]int
-	classFailureMeta    map[string]classFailureMeta
-	toolConsecutiveFail map[string]int
+	callAttempts             map[string]int
+	callFailureMeta          map[string]callFailureMeta
+	classFailures            map[string]int
+	classFailureMeta         map[string]classFailureMeta
+	toolConsecutiveFail      map[string]int
+	successfulMutations      map[string]int
+	successfulMutationBlocks map[string]int
 
 	lastFingerprint       string
 	sameFingerprintStreak int
@@ -121,14 +125,16 @@ type AfterOutcomeDecision struct {
 
 func NewFailureSupervisor(workspaceRoot string, maxAgentTurns, maxToolExecutions int) *FailureSupervisor {
 	return &FailureSupervisor{
-		workspaceRoot:       strings.TrimSpace(workspaceRoot),
-		callAttempts:        map[string]int{},
-		callFailureMeta:     map[string]callFailureMeta{},
-		classFailures:       map[string]int{},
-		classFailureMeta:    map[string]classFailureMeta{},
-		toolConsecutiveFail: map[string]int{},
-		maxAgentTurns:       EffectiveMaxAgentTurns(maxAgentTurns),
-		maxToolExecutions:   EffectiveMaxToolExecutions(maxToolExecutions),
+		workspaceRoot:            strings.TrimSpace(workspaceRoot),
+		callAttempts:             map[string]int{},
+		callFailureMeta:          map[string]callFailureMeta{},
+		classFailures:            map[string]int{},
+		classFailureMeta:         map[string]classFailureMeta{},
+		toolConsecutiveFail:      map[string]int{},
+		successfulMutations:      map[string]int{},
+		successfulMutationBlocks: map[string]int{},
+		maxAgentTurns:            EffectiveMaxAgentTurns(maxAgentTurns),
+		maxToolExecutions:        EffectiveMaxToolExecutions(maxToolExecutions),
 	}
 }
 
@@ -200,6 +206,31 @@ func (s *FailureSupervisor) BeforeCall(call context.ToolCall) BeforeCallDecision
 	decision := BeforeCallDecision{
 		Allow:         true,
 		CallSignature: signature,
+	}
+
+	mutationSignature := SuccessfulMutationSignature(toolName, call.Function.Arguments)
+	if s.successfulMutations[mutationSignature] > 0 {
+		s.successfulMutationBlocks[mutationSignature]++
+		decision.Allow = false
+		decision.Block = true
+		decision.ErrorCode = ErrorCodeRepeatedSuccessfulMutation
+		decision.ErrorMessage = fmt.Sprintf(
+			"blocked repeated successful mutation %s: the same business arguments were already applied; changing only idempotency_key does not create a new operation",
+			toolName,
+		)
+		decision.RecoveryOptions = []string{
+			"continue_to_the_next_task_step",
+			"read_back_external_state_if_verification_is_needed",
+			"change_business_arguments_only_if_a_correction_is_required",
+		}
+		decision.RecoveryRequired = true
+		decision.AttemptCount = s.successfulMutationBlocks[mutationSignature]
+		if decision.AttemptCount >= 2 {
+			decision.TerminateRun = true
+			decision.TerminalReason = TerminalReasonRepeatedToolFailure
+			decision.ErrorMessage += "; stopping run after the model ignored the first no-progress block"
+		}
+		return decision
 	}
 
 	if s.toolExecutions >= s.maxToolExecutions {
@@ -325,6 +356,9 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 
 	isFailure := outcome.IsError()
 	if !isFailure {
+		if successfulOutcomeRepresentsMutation(toolName, outcome) {
+			s.successfulMutations[SuccessfulMutationSignature(toolName, call.Function.Arguments)]++
+		}
 		recoveryMutation := outcomeMayHaveRevisedShellInputs(toolName, call.Function.Arguments, outcome)
 		s.resetFailureHistoryAfterSuccess(toolName, signature, revision, recoveryMutation)
 		s.toolConsecutiveFail[toolName] = 0
@@ -550,6 +584,8 @@ func SyntheticBlockedResult(call context.ToolCall, decision BeforeCallDecision) 
 		status = StatusExternalStateConfirmationRequired
 		nextActions = append([]string(nil), decision.RecoveryOptions...)
 		changedCallAllowed = false
+	} else if decision.ErrorCode == ErrorCodeRepeatedSuccessfulMutation {
+		status = StatusSuccessfulMutationAlreadyApplied
 	}
 	guidance, _ := json.Marshal(map[string]any{
 		"status":               status,
@@ -596,6 +632,55 @@ func SyntheticBlockedResult(call context.ToolCall, decision BeforeCallDecision) 
 		Outcome:    outcome,
 		StartedAt:  now,
 		FinishedAt: now,
+	}
+}
+
+// SuccessfulMutationSignature identifies a business mutation independently of
+// a caller-generated idempotency token. The token protects provider replay; it
+// must not let a model disguise the same already-successful write as new work.
+func SuccessfulMutationSignature(toolName, arguments string) string {
+	var payload any
+	if err := json.Unmarshal([]byte(arguments), &payload); err != nil {
+		return CallSignature(toolName, arguments)
+	}
+	stripMutationTransportFields(payload)
+	canonical, err := json.Marshal(payload)
+	if err != nil {
+		return CallSignature(toolName, arguments)
+	}
+	return strings.TrimSpace(toolName) + "|mutation|" + hashCanonicalArguments(string(canonical))
+}
+
+func stripMutationTransportFields(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		delete(typed, "idempotency_key")
+		delete(typed, "idempotencyKey")
+		for _, child := range typed {
+			stripMutationTransportFields(child)
+		}
+	case []any:
+		for _, child := range typed {
+			stripMutationTransportFields(child)
+		}
+	}
+}
+
+func successfulOutcomeRepresentsMutation(toolName string, outcome tool.ExecutionOutcome) bool {
+	if outcome.IsError() || outcome.Operation == nil {
+		return false
+	}
+	switch outcome.Operation.SideEffectState {
+	case tool.OutcomeSideEffectApplied:
+		return true
+	case tool.OutcomeSideEffectUnknown:
+		// MCP mutation tools currently cannot surface a host-observed filesystem
+		// delta, so their successful write annotation normalizes to unknown. MCP
+		// read tools normalize to none. Broad Bash remains excluded because an
+		// identical successful command can be a legitimate probe or test rerun.
+		return strings.HasPrefix(strings.TrimSpace(toolName), "mcp__")
+	default:
+		return false
 	}
 }
 

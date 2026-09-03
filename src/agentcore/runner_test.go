@@ -28,6 +28,11 @@ type runnerTestTool struct {
 	fail bool
 }
 
+type runnerMutationTestTool struct {
+	name  string
+	calls *int
+}
+
 type failingContextEpochStore struct {
 	err error
 }
@@ -65,6 +70,22 @@ func (t runnerTestTool) Execute(ctx context.Context, input string) (string, erro
 		return "", errors.New("boom")
 	}
 	return "echo:" + input, nil
+}
+
+func (t runnerMutationTestTool) Name() string        { return t.name }
+func (t runnerMutationTestTool) Description() string { return "test mutation tool" }
+func (t runnerMutationTestTool) Parameters() []tool.ToolParameter {
+	return []tool.ToolParameter{{Name: "value", Type: "string", Required: true}, {Name: "idempotency_key", Type: "string", Required: true}}
+}
+func (t runnerMutationTestTool) Definition() tool.ToolDefinition {
+	return tool.ToolDefinition{
+		Name: t.name, DisplayName: t.name, Source: tool.SourceBuiltin,
+		Description: "test mutation tool", Annotations: tool.ToolAnnotations{ReadOnly: false},
+	}
+}
+func (t runnerMutationTestTool) Execute(context.Context, string) (string, error) {
+	*t.calls++
+	return `{"ok":true,"dry_run":false}`, nil
 }
 
 func TestRunnerNativeToolCallLoop(t *testing.T) {
@@ -114,6 +135,41 @@ func TestRunnerNativeToolCallLoop(t *testing.T) {
 	}
 	if messages[2].Role != convcontext.RoleTool || !toolContentMatches(messages[2].Content, "echo:hello") {
 		t.Fatalf("expected tool result message, got %+v", messages[2])
+	}
+}
+
+func TestRunnerStopsModelThatIgnoresRepeatedSuccessfulMutationBlock(t *testing.T) {
+	toolName := "mcp__runner_successful_mutation_" + t.Name()
+	executions := 0
+	mustRegisterRunnerTool(t, runnerMutationTestTool{name: toolName, calls: &executions})
+
+	cfg := AgentConfig{MaxThoughts: 5, ModelConfig: ModelConfig{Model: "test-model"}}
+	conv := convcontext.NewConversation(nil)
+	conv.UserInput("perform one mutation")
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+	modelCalls := 0
+	var events []AwakenEvent
+	runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		modelCalls++
+		return &llm.Response{ToolCalls: []llm.ToolCall{{
+			ID: fmt.Sprintf("mutation-%d", modelCalls), Name: toolName,
+			Input: fmt.Sprintf(`{"value":"same","idempotency_key":"key-%d"}`, modelCalls),
+		}}}, nil
+	}
+
+	answer, err := runner.RunStreamWithEvents(context.Background(), EventSinkFunc(func(event AwakenEvent) {
+		events = append(events, event)
+	}))
+	if err == nil || answer != "" || executions != 1 || modelCalls != 3 {
+		t.Fatalf("repeated successful mutation loop not stopped: answer=%q err=%v executions=%d model_calls=%d", answer, err, executions, modelCalls)
+	}
+	if !strings.Contains(err.Error(), "tool supervision stopped run") {
+		t.Fatalf("unexpected terminal error: %v", err)
+	}
+	for _, event := range events {
+		if event.Type == RunFinishedEventType {
+			t.Fatalf("successful mutation loop must not emit run_finished: %+v", event)
+		}
 	}
 }
 
@@ -1133,29 +1189,58 @@ func installSuccessfulTestCompactor(runner *Runner) {
 	}
 }
 
-func TestRunnerThinkingOnlyResponseIsNotEmpty(t *testing.T) {
+func TestRunnerThinkingOnlyResponseContinuesToVisibleAnswer(t *testing.T) {
 	conv := convcontext.NewConversation(nil)
 	cfg := AgentConfig{
-		MaxThoughts: 1,
+		MaxThoughts: 2,
 		ModelConfig: ModelConfig{
 			Model: "test-model",
 		},
 	}
 	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+	calls := 0
 	runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		calls++
 		inputTokens := 7
-		return &llm.Response{Thinking: "reasoning only", Usage: &llm.Usage{InputTokens: &inputTokens}}, nil
+		if calls == 1 {
+			return &llm.Response{Thinking: "reasoning only", Usage: &llm.Usage{InputTokens: &inputTokens}}, nil
+		}
+		return &llm.Response{Content: "visible answer", Usage: &llm.Usage{InputTokens: &inputTokens}}, nil
 	}
 
 	answer, err := runner.RunStreamWithEvents(context.Background(), EventSinkFunc(func(event AwakenEvent) {}))
 	if err != nil {
 		t.Fatalf("RunStreamWithEvents returned error: %v", err)
 	}
-	if answer != "" {
-		t.Fatalf("expected empty final answer for thinking-only response, got %q", answer)
+	if answer != "visible answer" || calls != 2 {
+		t.Fatalf("thinking-only response must continue once: answer=%q calls=%d", answer, calls)
 	}
 	if runner.contextGovernor.lastAPIUsageTokens != 7 {
 		t.Fatalf("expected runner to retain usage from thinking-only response, got %d", runner.contextGovernor.lastAPIUsageTokens)
+	}
+}
+
+func TestRunnerRepeatedThinkingOnlyResponseFailsEmptyResponse(t *testing.T) {
+	conv := convcontext.NewConversation(nil)
+	cfg := AgentConfig{MaxThoughts: 3, ModelConfig: ModelConfig{Model: "test-model"}}
+	runner := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+	calls := 0
+	var events []AwakenEvent
+	runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		calls++
+		return &llm.Response{Thinking: "reasoning only"}, nil
+	}
+
+	answer, err := runner.RunStreamWithEvents(context.Background(), EventSinkFunc(func(event AwakenEvent) {
+		events = append(events, event)
+	}))
+	if !errors.Is(err, llm.ErrEmptyResponse) || answer != "" || calls != 2 {
+		t.Fatalf("repeated thinking-only must fail after one continuation: answer=%q err=%v calls=%d", answer, err, calls)
+	}
+	for _, event := range events {
+		if event.Type == RunFinishedEventType {
+			t.Fatalf("thinking-only failure must not emit run_finished: %+v", event)
+		}
 	}
 }
 

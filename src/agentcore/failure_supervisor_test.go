@@ -76,6 +76,72 @@ func TestFailureSupervisorAllowsRetryableTwiceThenBlocks(t *testing.T) {
 	}
 }
 
+func TestFailureSupervisorBlocksRepeatedSuccessfulMCPMutationAcrossIdempotencyKeys(t *testing.T) {
+	s := NewFailureSupervisor("/tmp/ws", 8, 32)
+	first := convcontext.ToolCall{ID: "write-1", Function: convcontext.FunctionCall{
+		Name:      "mcp__erp__set_color_scheme",
+		Arguments: `{"bill_num":"MO-1","rows":[{"part":"face"}],"confirm_write":true,"idempotency_key":"first-key"}`,
+	}}
+	before := s.BeforeCall(first)
+	if !before.Allow {
+		t.Fatalf("first mutation blocked: %+v", before)
+	}
+	s.NoteRealExecution(before.CallSignature)
+	outcome := tool.SucceededOutcome("updated")
+	outcome.Operation = &tool.OperationDescriptor{Type: first.Function.Name, SideEffectState: tool.OutcomeSideEffectUnknown}
+	s.AfterOutcome(first, outcome)
+
+	repeated := first
+	repeated.ID = "write-2"
+	repeated.Function.Arguments = `{"rows":[{"part":"face"}],"idempotency_key":"second-key","bill_num":"MO-1","confirm_write":true}`
+	blocked := s.BeforeCall(repeated)
+	if !blocked.Block || blocked.TerminateRun || blocked.ErrorCode != ErrorCodeRepeatedSuccessfulMutation {
+		t.Fatalf("same business mutation with a fresh idempotency key was not blocked once: %+v", blocked)
+	}
+	result := SyntheticBlockedResult(repeated, blocked)
+	if !strings.Contains(result.Content, StatusSuccessfulMutationAlreadyApplied) || result.Outcome.Diagnostic["changed_call_allowed"] != true {
+		t.Fatalf("successful-mutation guidance missing: %+v", result)
+	}
+
+	blockedAgain := s.BeforeCall(repeated)
+	if !blockedAgain.Block || !blockedAgain.TerminateRun || blockedAgain.TerminalReason != TerminalReasonRepeatedToolFailure {
+		t.Fatalf("model ignoring the successful-mutation block must terminate: %+v", blockedAgain)
+	}
+
+	corrected := repeated
+	corrected.ID = "write-3"
+	corrected.Function.Arguments = `{"bill_num":"MO-1","rows":[{"part":"face","dosage":1.18}],"confirm_write":true,"idempotency_key":"third-key"}`
+	if decision := s.BeforeCall(corrected); decision.Block || !decision.Allow {
+		t.Fatalf("changed business arguments must remain allowed: %+v", decision)
+	}
+}
+
+func TestFailureSupervisorDoesNotTreatReadOrPreviewAsSameMutation(t *testing.T) {
+	s := NewFailureSupervisor("/tmp/ws", 8, 32)
+	read := convcontext.ToolCall{ID: "read-1", Function: convcontext.FunctionCall{Name: "mcp__erp__get_order", Arguments: `{"bill_num":"MO-1"}`}}
+	before := s.BeforeCall(read)
+	s.NoteRealExecution(before.CallSignature)
+	readOutcome := tool.SucceededOutcome("found")
+	readOutcome.Operation = &tool.OperationDescriptor{Type: read.Function.Name, SideEffectState: tool.OutcomeSideEffectNone}
+	s.AfterOutcome(read, readOutcome)
+	if repeated := s.BeforeCall(read); repeated.Block || !repeated.Allow {
+		t.Fatalf("repeated read must remain allowed: %+v", repeated)
+	}
+
+	preview := convcontext.ToolCall{ID: "preview", Function: convcontext.FunctionCall{Name: "mcp__erp__create_order", Arguments: `{"bill_num":"MO-1","dry_run":true,"idempotency_key":"preview-key"}`}}
+	previewBefore := s.BeforeCall(preview)
+	s.NoteRealExecution(previewBefore.CallSignature)
+	previewOutcome := tool.SucceededOutcome("preview")
+	previewOutcome.Operation = &tool.OperationDescriptor{Type: preview.Function.Name, SideEffectState: tool.OutcomeSideEffectUnknown}
+	s.AfterOutcome(preview, previewOutcome)
+	realWrite := preview
+	realWrite.ID = "write"
+	realWrite.Function.Arguments = `{"bill_num":"MO-1","confirm_write":true,"idempotency_key":"write-key"}`
+	if decision := s.BeforeCall(realWrite); decision.Block || !decision.Allow {
+		t.Fatalf("preview must not block a semantically different real write: %+v", decision)
+	}
+}
+
 func TestFailureSupervisorAllowsCorrectedInputAfterRepeatedPreflightValidationFailures(t *testing.T) {
 	s := NewFailureSupervisor("/tmp/ws", 8, 32)
 	invalidCalls := []convcontext.ToolCall{

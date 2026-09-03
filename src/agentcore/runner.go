@@ -25,13 +25,15 @@ import (
 )
 
 const (
-	maxTurnDiffChars                  = 50000
-	maxOutputContinuationAttempts     = 1
-	maxOutputContinuationPromptPrefix = "请继续上一条回答，从中断处继续，不要重复已经输出的内容。"
-	toolResultOffloadThresholdBytes   = 32 * 1024
-	maxTransientLLMRetries            = 5
-	initialConnectionRetryDelay       = 5 * time.Second
-	maxConnectionRetryDelay           = 60 * time.Second
+	maxTurnDiffChars                     = 50000
+	maxOutputContinuationAttempts        = 1
+	maxOutputContinuationPromptPrefix    = "请继续上一条回答，从中断处继续，不要重复已经输出的内容。"
+	maxReasoningOnlyContinuationAttempts = 1
+	reasoningOnlyContinuationPrompt      = "上一轮只返回了内部推理，没有提供可见答复或工具调用。请继续当前任务：未完成就调用下一步工具，已经完成就返回明确的可见结果。"
+	toolResultOffloadThresholdBytes      = 32 * 1024
+	maxTransientLLMRetries               = 5
+	initialConnectionRetryDelay          = 5 * time.Second
+	maxConnectionRetryDelay              = 60 * time.Second
 )
 
 var (
@@ -363,6 +365,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	turnState := newTurnState(events.threadID, events.runID, r.effectiveMaxThoughts(), r.config.ModelConfig.Model)
 	transition := TransitionInitial
 	maxOutputContinuations := 0
+	reasoningOnlyContinuations := 0
 	var continuedOutput strings.Builder
 	maxThoughts := r.effectiveMaxThoughts()
 	beforeFinishBlocks := 0
@@ -425,6 +428,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 			return "", err
 		}
 		if len(response.ToolCalls) > 0 {
+			reasoningOnlyContinuations = 0
 			toolCalls := llmToolCallsToContext(response.ToolCalls)
 			results := r.executeToolCalls(ctx, toolCalls, events)
 			r.conversation.ToolExchangeWithProviderState(response.Content, toolCalls, toolExecutionResultsToContext(results), response.ProviderOpaqueState)
@@ -513,7 +517,19 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 			continue
 		}
 
-		if !responseHasSignal(response) {
+		if !responseHasTerminalSignal(response) {
+			if strings.TrimSpace(response.Thinking) != "" && reasoningOnlyContinuations < maxReasoningOnlyContinuationAttempts {
+				reasoningOnlyContinuations++
+				// Preserve provider-native reasoning replay without presenting it as
+				// a user-visible answer. The synthetic host instruction gives the
+				// same run one bounded chance to produce a tool call or final text.
+				r.conversation.AssistantOutputWithProviderState("", nil, response.ProviderOpaqueState)
+				r.conversation.SyntheticUserInput(reasoningOnlyContinuationPrompt, fmt.Sprintf("reasoning_only_%s_%d", r.runID, reasoningOnlyContinuations))
+				events.turnFinished(ctx, "", TransitionReasoningOnlyContinuation)
+				events.resetTurn()
+				transition = TransitionReasoningOnlyContinuation
+				continue
+			}
 			events.turnFinished(ctx, TerminalReasonEmptyResponse, "")
 			events.runErrored(ctx, llm.ErrEmptyResponse, TerminalReasonEmptyResponse)
 			return "", llm.ErrEmptyResponse
@@ -2420,7 +2436,7 @@ func (r *Runner) stopAfterToolExchangeIfNeeded(ctx stdcontext.Context, events *r
 	if events != nil && events.pendingTerminalReason != "" {
 		reason := events.pendingTerminalReason
 		events.pendingTerminalReason = ""
-		runErr := fmt.Errorf("tool failure budget exceeded: %s", reason)
+		runErr := fmt.Errorf("tool supervision stopped run: %s", reason)
 		events.turnFinished(ctx, reason, "")
 		events.runErrored(ctx, runErr, reason)
 		return true, runErr
@@ -2495,11 +2511,11 @@ func maxOutputReachedError(attempts int, stopReason string) error {
 	return fmt.Errorf("model reached max output limit after %d continuation attempt(s): stop_reason=%s", attempts, stopReason)
 }
 
-func responseHasSignal(response *llm.Response) bool {
+func responseHasTerminalSignal(response *llm.Response) bool {
 	if response == nil {
 		return false
 	}
-	return strings.TrimSpace(response.Content) != "" || strings.TrimSpace(response.Thinking) != "" || len(response.ToolCalls) > 0
+	return strings.TrimSpace(response.Content) != "" || len(response.ToolCalls) > 0
 }
 
 func lastAPIUsageTokens(response *llm.Response) int {

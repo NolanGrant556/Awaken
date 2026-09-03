@@ -292,6 +292,7 @@ describe("runtime shared start run normalization", () => {
 
     expect(wire.file_comments).toEqual([{
       id: "comment-1",
+      kind: "comment",
       project_id: "project-1",
       folder_path: "/workspace",
       relative_path: "src/main.ts",

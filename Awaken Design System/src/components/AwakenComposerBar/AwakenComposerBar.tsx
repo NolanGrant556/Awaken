@@ -8,6 +8,14 @@ import type {
   ReactNode,
   Ref,
 } from "react";
+import {
+  autoUpdate,
+  flip,
+  FloatingPortal,
+  offset,
+  shift,
+  useFloating,
+} from "@floating-ui/react";
 import { AwakenIcon } from "../AwakenIcon";
 import { AwakenComposerInput, type ComposerInputSelection } from "../AwakenComposerInput";
 import { AwakenContextButton } from "../AwakenContextButton";
@@ -344,6 +352,7 @@ export type AwakenComposerBarProps = {
 
 export type ComposerBarFileComment = {
   id: string;
+  kind?: "comment" | "selection";
   displayName: string;
   relativePath: string;
   startLine: number;
@@ -374,12 +383,28 @@ export function AwakenFileCommentSummary({
 }: AwakenFileCommentSummaryProps) {
   const [open, setOpen] = useState(false);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const commentIdentity = comments
+    .map((comment) => `${comment.id}:${comment.validationState ?? "ready"}`)
+    .join("|");
+  const { refs, floatingStyles } = useFloating({
+    open,
+    onOpenChange: setOpen,
+    placement: "top-start",
+    strategy: "fixed",
+    whileElementsMounted: autoUpdate,
+    middleware: [offset(8), flip({ padding: 12 }), shift({ padding: 12 })],
+  });
 
   useEffect(() => () => {
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
   }, []);
 
+  useEffect(() => {
+    setOpen(false);
+  }, [commentIdentity]);
+
   if (comments.length === 0) return null;
+  const selectedTextMode = comments.every((comment) => comment.kind === "selection");
 
   const cancelClose = () => {
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
@@ -390,71 +415,89 @@ export function AwakenFileCommentSummary({
   };
 
   return (
-    <span
-      className={`composer-file-comments${className ? ` ${className}` : ""}`}
-      onPointerEnter={() => {
-        cancelClose();
-        setOpen(true);
-      }}
-      onPointerLeave={scheduleClose}
-      onFocusCapture={() => {
-        cancelClose();
-        setOpen(true);
-      }}
-      onBlurCapture={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) scheduleClose();
-      }}
-    >
-      <button
-        type="button"
-        className="composer-file-comments-trigger"
-        aria-label={`${comments.length} 个文件评论`}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen(true)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") setOpen(false);
+    <>
+      <span
+        ref={refs.setReference}
+        className={`composer-file-comments${className ? ` ${className}` : ""}`}
+        onPointerEnter={() => {
+          cancelClose();
+          setOpen(true);
         }}
+        onPointerLeave={scheduleClose}
       >
-        <AwakenIcon concept="file-comment" size={16} />
-        <span>{comments.length} 个评论</span>
-      </button>
-      {open ? (
-        <span className="composer-file-comments-popover" role="dialog" aria-label="文件评论详情">
-          <span className="composer-file-comments-header">
-            <strong>文件评论</strong>
-            {onClear ? (
-              <button type="button" onClick={onClear}>全部移除</button>
-            ) : null}
-          </span>
-          <span className="composer-file-comments-list">
-            {comments.map((comment) => (
-              <span key={comment.id} className="composer-file-comment-card">
-                <span className="composer-file-comment-location">
-                  <strong>{comment.relativePath || comment.displayName}</strong>
-                  <span>{fileCommentRangeLabel(comment)}</span>
-                </span>
-                <code>{comment.selectedText}</code>
-                <span className="composer-file-comment-body">{comment.comment}</span>
-                {comment.validationState === "stale" ? (
-                  <span className="composer-file-comment-stale">文件已变化，需要重新选择</span>
-                ) : null}
-                {onRemoveComment ? (
-                  <button
-                    type="button"
-                    className="composer-file-comment-remove"
-                    aria-label={`移除 ${comment.relativePath} ${fileCommentRangeLabel(comment)} 评论`}
-                    onClick={() => onRemoveComment(comment.id)}
-                  >
-                    移除
-                  </button>
-                ) : null}
-              </span>
-            ))}
-          </span>
+        <span
+          className="composer-file-comments-trigger"
+          aria-label={selectedTextMode
+            ? `${comments.length} 个已选文本片段`
+            : `${comments.length} 个文件评论`}
+        >
+          <AwakenIcon concept="file-comment" size={16} />
+          <span>{comments.length} 个{selectedTextMode ? "已选文本片段" : "评论"}</span>
         </span>
+        {onClear ? (
+          <button
+            type="button"
+            className="composer-file-comments-clear-trigger"
+            aria-label={selectedTextMode ? "移除全部已选文本片段" : "移除全部评论"}
+            onClick={onClear}
+          >
+            <AwakenIcon concept="close" size={14} />
+          </button>
+        ) : null}
+      </span>
+      {open ? (
+        <FloatingPortal>
+          <span
+            ref={refs.setFloating}
+            style={floatingStyles}
+            className="composer-file-comments-popover"
+            role="dialog"
+            aria-label={selectedTextMode ? "已选文本片段详情" : "文件评论详情"}
+            onPointerEnter={cancelClose}
+            onPointerLeave={scheduleClose}
+            onFocusCapture={cancelClose}
+            onBlurCapture={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) scheduleClose();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setOpen(false);
+            }}
+          >
+            <span className="composer-file-comments-header">
+              <strong>{selectedTextMode ? "已选文本片段" : "文件评论"}</strong>
+              {onClear && !selectedTextMode ? (
+                <button type="button" onClick={onClear}>全部移除</button>
+              ) : null}
+            </span>
+            <span className="composer-file-comments-list">
+              {comments.map((comment) => (
+                <span key={comment.id} className="composer-file-comment-card">
+                  <span className="composer-file-comment-location">
+                    <strong>{comment.relativePath || comment.displayName}</strong>
+                    <span>{fileCommentRangeLabel(comment)}</span>
+                  </span>
+                  <code>{comment.selectedText}</code>
+                  {comment.comment ? <span className="composer-file-comment-body">{comment.comment}</span> : null}
+                  {comment.validationState === "stale" ? (
+                    <span className="composer-file-comment-stale">文件已变化，需要重新选择</span>
+                  ) : null}
+                  {onRemoveComment ? (
+                    <button
+                      type="button"
+                      className="composer-file-comment-remove"
+                      aria-label={`移除 ${comment.relativePath} ${fileCommentRangeLabel(comment)} ${selectedTextMode ? "已选文本片段" : "评论"}`}
+                      onClick={() => onRemoveComment(comment.id)}
+                    >
+                      移除
+                    </button>
+                  ) : null}
+                </span>
+              ))}
+            </span>
+          </span>
+        </FloatingPortal>
       ) : null}
-    </span>
+    </>
   );
 }
 
@@ -1637,9 +1680,26 @@ export function AwakenComposerBar({
             </div>
           ) : null}
           <AwakenFileCommentSummary
-            comments={fileComments}
+            comments={fileComments.filter((item) => item.kind !== "selection")}
             onRemoveComment={onRemoveFileComment}
-            onClear={onClearFileComments}
+            onClear={onRemoveFileComment
+              ? () => {
+                  for (const item of fileComments) {
+                    if (item.kind !== "selection") onRemoveFileComment(item.id);
+                  }
+                }
+              : onClearFileComments}
+          />
+          <AwakenFileCommentSummary
+            comments={fileComments.filter((item) => item.kind === "selection")}
+            onRemoveComment={onRemoveFileComment}
+            onClear={onRemoveFileComment
+              ? () => {
+                  for (const item of fileComments) {
+                    if (item.kind === "selection") onRemoveFileComment(item.id);
+                  }
+                }
+              : onClearFileComments}
           />
           <div className="composer-bar-input-wrap" ref={inputWrapRef}>
             {renderSlashPalette()}

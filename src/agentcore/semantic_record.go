@@ -151,6 +151,7 @@ type SemanticComposerToken struct {
 
 type SemanticFileLineComment struct {
 	ID            string    `json:"id"`
+	Kind          string    `json:"kind,omitempty"`
 	ProjectID     string    `json:"project_id"`
 	FolderPath    string    `json:"folder_path"`
 	RelativePath  string    `json:"relative_path"`

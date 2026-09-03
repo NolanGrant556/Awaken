@@ -155,6 +155,26 @@ func TestMcpToolAdapterPreservesOutputSchemaAsDetailsContract(t *testing.T) {
 	}
 }
 
+func TestMcpToolAdapterTreatsMissingOutputSchemaAsUntypedDetails(t *testing.T) {
+	adapter := NewMcpToolAdapter(nil, "schema-server", &mcp.Tool{Name: "legacy_structured"})
+	def := tool.ResolveDefinition(adapter)
+	if def.OutputSchema.Type != "object" || def.OutputSchema.AdditionalProperties == nil || !*def.OutputSchema.AdditionalProperties {
+		t.Fatalf("missing MCP output schema must accept untyped structured details: %+v", def.OutputSchema)
+	}
+	outcome := adapter.callResultOutcome(&mcp.CallToolResult{
+		StructuredContent: map[string]any{"ok": true, "count": float64(1)},
+	})
+	outcome.Normalize(tool.OutcomeNormalizationContext{
+		OperationType: adapter.Name(),
+		OutputSchema:  def.OutputSchema,
+	})
+	for _, warning := range outcome.Warnings {
+		if warning.Code == "tool_output_schema_mismatch" {
+			t.Fatalf("untyped MCP structured output must not produce a false schema warning: %+v", outcome)
+		}
+	}
+}
+
 func TestMcpToolAdapterPreservesNullableOutputTypesWithoutFalseMismatch(t *testing.T) {
 	for _, test := range []struct {
 		name       string

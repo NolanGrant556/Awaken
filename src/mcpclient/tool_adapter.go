@@ -82,7 +82,18 @@ func NewMcpToolAdapter(manager *Manager, serverName string, mcpTool *mcp.Tool, o
 		fileBridgeScope:  tool.FileBridgeNone,
 		networkScope:     tool.NetworkScopeRestricted,
 	}
-	adapter.loadOutputSchema()
+	if mcpTool.OutputSchema == nil {
+		// MCP servers may return StructuredContent without declaring an
+		// outputSchema. Absence means "untyped", not "no details allowed".
+		// Keep the result compatibility-graded while accepting the server's
+		// object-shaped structured payload without a false mismatch warning.
+		adapter.outputSchema = tool.ToolParam{
+			Type:                 "object",
+			AdditionalProperties: tool.BoolPtr(true),
+		}
+	} else {
+		adapter.loadOutputSchema()
+	}
 	if mcpTool.Annotations != nil {
 		adapter.readOnly = mcpTool.Annotations.ReadOnlyHint
 		if mcpTool.Annotations.DestructiveHint != nil {

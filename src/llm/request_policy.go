@@ -12,10 +12,11 @@ func applyRequestPolicy(cfg Config, req Request) Request {
 }
 
 // nativeReasoningEffort lowers Awaken's stable low/high/max vocabulary at the
-// provider boundary. Auxiliary requests intentionally return no effort even
-// when their Config came from the same profile as an agent turn.
+// provider boundary. Auxiliary requests normally omit effort, but exact
+// provider/model contracts may still force a reduced effort to avoid large
+// private-reasoning overhead when reasoning cannot be disabled.
 func nativeReasoningEffort(cfg Config, req Request) string {
-	if !isAgentExecutionPurpose(req.Purpose) {
+	if !isAgentExecutionPurpose(req.Purpose) && !supportsAuxiliaryReasoningEffort(cfg, req) {
 		return ""
 	}
 	effort := strings.ToLower(strings.TrimSpace(req.ReasoningPolicy))
@@ -100,6 +101,16 @@ func isAgentExecutionPurpose(purpose RequestPurpose) bool {
 	return purpose == RequestPurposeAgentTurn || purpose == RequestPurposeSubagent || purpose == RequestPurposeScheduledTask || purpose == RequestPurposeHookAgent
 }
 
+func supportsAuxiliaryReasoningEffort(cfg Config, req Request) bool {
+	if req.Purpose != RequestPurposeThreadTitle && req.Purpose != RequestPurposeCompactSummary {
+		return false
+	}
+	provider := strings.ToLower(strings.TrimSpace(cfg.ProviderID))
+	model := capabilityModelID(cfg, req)
+	return (provider == "kimi-cn" && model == "kimi-k3") ||
+		(provider == "kimi-coding-plan" && (model == "k3" || model == "k3-256k"))
+}
+
 // capabilityModelID is the documented model-family identity used for
 // capability decisions. Endpoint-selector providers deliberately fail closed
 // when a host supplies only an opaque ep-* transport selector.
@@ -124,7 +135,12 @@ func applyAuxiliaryRequestPolicy(cfg Config, req Request) Request {
 		req.DisableReasoning = false
 		setCompactTemperature(&req, 1.0)
 	case isKimiK3(model):
-		// Kimi K3 rejects compact temperatures and currently requires 1.
+		// Kimi K3 does not expose a confirmed reasoning-off switch on these
+		// routes. Force the lowest supported effort for auxiliary calls so
+		// title/compact requests do not spend most of their budget on private
+		// reasoning.
+		req.DisableReasoning = false
+		req.ReasoningPolicy = "low"
 		setCompactTemperature(&req, 1.0)
 	case isKimiK25OrK26(model):
 		if req.DisableReasoning {

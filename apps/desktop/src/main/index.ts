@@ -28,6 +28,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { AguiEvent } from "../shared/agui.js";
 import {
+  safelySendToRenderer,
+  shouldRecoverMainRenderer,
+} from "./renderer-delivery.js";
+import {
   DESKTOP_SELECT_ALL_REQUESTED_CHANNEL,
   isDesktopSelectAllShortcut,
   isDesktopTabNavigation,
@@ -905,12 +909,13 @@ function stopProjectTrashWorker(): void {
   }
 }
 
-function sendToRenderer(channel: string, payload: unknown, targetId: number): void {
+function sendToRenderer(
+  channel: string,
+  payload: unknown,
+  targetId: number,
+): boolean {
   const target = webContents.fromId(targetId);
-  if (!target || target.isDestroyed()) {
-    return;
-  }
-  target.send(channel, payload);
+  return safelySendToRenderer(target, channel, payload);
 }
 
 function consumeSSEFrame(frame: string, onEvent: (event: AguiEvent) => void): void {
@@ -1000,13 +1005,14 @@ async function pumpRunEvents(
   body: ReadableStream<Uint8Array>,
   subscriptionId: string,
   targetId: number,
+  controller: AbortController,
 ): Promise<void> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
 
   try {
-    while (true) {
+    while (!controller.signal.aborted) {
       const { done, value } = await reader.read();
       if (done) {
         break;
@@ -1020,9 +1026,10 @@ async function pumpRunEvents(
         if (!frame.trim()) {
           continue;
         }
+        let rendererAvailable = true;
         consumeSSEFrame(frame, (event) => {
           trackMemoryActivity(event);
-          sendToRenderer(
+          rendererAvailable = sendToRenderer(
             "awaken:run-event",
             {
               subscriptionId,
@@ -1031,13 +1038,18 @@ async function pumpRunEvents(
             targetId,
           );
         });
+        if (!rendererAvailable) {
+          controller.abort();
+          return;
+        }
       }
     }
 
-    if (buffer.trim()) {
+    if (buffer.trim() && !controller.signal.aborted) {
+      let rendererAvailable = true;
       consumeSSEFrame(buffer, (event) => {
         trackMemoryActivity(event);
-        sendToRenderer(
+        rendererAvailable = sendToRenderer(
           "awaken:run-event",
           {
             subscriptionId,
@@ -1046,17 +1058,23 @@ async function pumpRunEvents(
           targetId,
         );
       });
+      if (!rendererAvailable) {
+        controller.abort();
+        return;
+      }
     }
   } finally {
     reader.releaseLock();
+    subscriptions.delete(subscriptionId);
   }
 
   // Normal completion: cleanup and notify renderer. On error, this path is
   // skipped (the rejection propagates to the .catch() handler in
   // subscribeToRun, which sends run-error BEFORE run-closed so the renderer
   // receives the real error message before the subscription is torn down).
-  subscriptions.delete(subscriptionId);
-  sendToRenderer("awaken:run-closed", { subscriptionId }, targetId);
+  if (!controller.signal.aborted) {
+    sendToRenderer("awaken:run-closed", { subscriptionId }, targetId);
+  }
 }
 
 async function subscribeToRun(
@@ -1088,7 +1106,7 @@ async function subscribeToRun(
     webContentsId: target.id,
   });
 
-  void pumpRunEvents(response.body, subscriptionId, target.id).catch((error: unknown) => {
+  void pumpRunEvents(response.body, subscriptionId, target.id, controller).catch((error: unknown) => {
     if (controller.signal.aborted) {
       return;
     }
@@ -1207,6 +1225,8 @@ function createMainWindow(): BrowserWindow {
   let rendererReadyToShow = false;
   let didShowWindow = false;
   let fallbackShowTimer: ReturnType<typeof setTimeout> | undefined;
+  let rendererRecoveryAttempts = 0;
+  let rendererRecoveryTimer: ReturnType<typeof setTimeout> | undefined;
 
   function showMainWindow(): void {
     if (didShowWindow || !electronReadyToShow || mainWindow.isDestroyed()) {
@@ -1237,6 +1257,46 @@ function createMainWindow(): BrowserWindow {
 
   ipcMain.on("awaken:renderer-ready", handleRendererReady);
 
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    cleanupWindowSubscriptions(webContentsId);
+    if (
+      isQuitting ||
+      mainWindow.isDestroyed() ||
+      !shouldRecoverMainRenderer(details.reason, rendererRecoveryAttempts)
+    ) {
+      return;
+    }
+
+    rendererRecoveryAttempts += 1;
+    console.error("main_renderer_process_gone", {
+      reason: details.reason,
+      exitCode: details.exitCode,
+      recoveryAttempt: rendererRecoveryAttempts,
+    });
+    if (rendererRecoveryTimer) {
+      clearTimeout(rendererRecoveryTimer);
+    }
+    rendererRecoveryTimer = setTimeout(() => {
+      rendererRecoveryTimer = undefined;
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.webContents.reloadIgnoringCache();
+      }
+    }, 150);
+  });
+
+  mainWindow.webContents.on("did-finish-load", () => {
+    if (rendererRecoveryAttempts === 0) {
+      return;
+    }
+    if (rendererRecoveryTimer) {
+      clearTimeout(rendererRecoveryTimer);
+    }
+    rendererRecoveryTimer = setTimeout(() => {
+      rendererRecoveryTimer = undefined;
+      rendererRecoveryAttempts = 0;
+    }, 30_000);
+  });
+
   mainWindow.on("closed", () => {
     if (mainWindowRef === mainWindow) {
       mainWindowRef = null;
@@ -1245,6 +1305,10 @@ function createMainWindow(): BrowserWindow {
     if (fallbackShowTimer) {
       clearTimeout(fallbackShowTimer);
       fallbackShowTimer = undefined;
+    }
+    if (rendererRecoveryTimer) {
+      clearTimeout(rendererRecoveryTimer);
+      rendererRecoveryTimer = undefined;
     }
     cleanupWindowSubscriptions(webContentsId);
     projectFilePreviewManager?.releaseAll();

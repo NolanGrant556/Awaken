@@ -14,6 +14,10 @@ import {
   hasExpandedFileComposerDraft,
   shouldCollapseExpandedFileComposer,
 } from "./ExpandedFileComposer";
+import {
+  shouldRenderWorkbenchNarrative,
+  shouldShowRunPlanSurface,
+} from "./WorkbenchSurfacePolicy";
 
 describe("expanded file workspace shell", () => {
   it("gives the expanded file surface the shell while keeping the composer mounted", () => {
@@ -116,7 +120,7 @@ describe("expanded file workspace shell", () => {
     ).toBe("full");
   });
 
-  it("keeps the full composer mounted behind each compact presentation", () => {
+  it("unmounts the expensive full composer behind compact presentations", () => {
     const html = renderToString(
       <ExpandedFileComposer
         active
@@ -131,9 +135,29 @@ describe("expanded file workspace shell", () => {
     );
 
     expect(html).toContain('data-expanded-file-composer-state="compact"');
-    expect(html).toContain("原输入框");
-    expect(html).toContain('aria-hidden="true"');
+    expect(html).not.toContain("原输入框");
     expect(html).toContain("继续对话");
+  });
+
+  it("suspends narrative and run-plan surfaces while the file surface is active", () => {
+    expect(
+      shouldRenderWorkbenchNarrative({
+        showCenterComposer: false,
+        fileWorkspaceSurfaceActive: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRenderWorkbenchNarrative({
+        showCenterComposer: false,
+        fileWorkspaceSurfaceActive: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowRunPlanSurface({
+        fileWorkspaceSurfaceActive: true,
+        mediaPreviewActive: false,
+      }),
+    ).toBe(false);
   });
 
   it("formats the completed status in Chinese", () => {

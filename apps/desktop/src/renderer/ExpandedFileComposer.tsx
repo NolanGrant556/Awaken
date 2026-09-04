@@ -147,15 +147,9 @@ export function ExpandedFileComposer({
       className={`expanded-file-composer is-${presentation}`}
       data-expanded-file-composer-state={presentation}
     >
-      <div
-        className={`expanded-file-composer__full${
-          fullVisible ? "" : " is-inactive"
-        }`}
-        aria-hidden={fullVisible ? undefined : true}
-        inert={!fullVisible}
-      >
-        {children}
-      </div>
+      {fullVisible ? (
+        <div className="expanded-file-composer__full">{children}</div>
+      ) : null}
 
       {presentation === "rail" ? (
         <button

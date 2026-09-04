@@ -195,6 +195,10 @@ import {
   type ExpandedFileComposerTrackedRun,
   type ExpandedFileComposerIdleMode,
 } from "./ExpandedFileComposer";
+import {
+  shouldRenderWorkbenchNarrative,
+  shouldShowRunPlanSurface,
+} from "./WorkbenchSurfacePolicy";
 import { ProjectFilesWorkspace } from "./ProjectFilesWorkspace";
 import ProjectFileIcon from "./ProjectFileIcon";
 import type { ProjectFileWorkspaceMode } from "./file-preview/FilePreviewHost";
@@ -9126,7 +9130,10 @@ export function App() {
                               />
                             </div>
                           ) : null}
-                          {!activeMediaPreviewItem &&
+                          {shouldShowRunPlanSurface({
+                            fileWorkspaceSurfaceActive,
+                            mediaPreviewActive: Boolean(activeMediaPreviewItem),
+                          }) &&
                           runPlanEntry.panelOpen &&
                           activeRunPlan ? (
                             <div
@@ -9315,7 +9322,12 @@ export function App() {
                               {renderExternalActionGate()}
                               {renderComputerReviewGate()}
                               {renderComputerHandoffIndicator()}
-                              {runPlanEntry.entryVisible && activeRunPlan ? (
+                              {shouldShowRunPlanSurface({
+                                fileWorkspaceSurfaceActive,
+                                mediaPreviewActive: Boolean(
+                                  activeMediaPreviewItem,
+                                ),
+                              }) && runPlanEntry.entryVisible && activeRunPlan ? (
                                 <RunPlanTrigger
                                   ref={runPlanEntry.triggerRef}
                                   items={activeRunPlanItems}
@@ -9462,7 +9474,10 @@ export function App() {
                         </div>
                       ) : null}
 
-                      {showCenterComposer ? null : (
+                      {shouldRenderWorkbenchNarrative({
+                        showCenterComposer,
+                        fileWorkspaceSurfaceActive,
+                      }) ? (
                         <ExecutionFeed>
                           {narrativeSections.leadItems.map((item) =>
                             renderNarrativeItem(
@@ -9586,7 +9601,7 @@ export function App() {
                             );
                           })}
                         </ExecutionFeed>
-                      )}
+                      ) : null}
                     </RunStage>
                   }
                   inspector={

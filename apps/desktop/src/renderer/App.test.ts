@@ -3277,9 +3277,9 @@ describe("context usage presentation", () => {
     expect(html).toContain("系统提示词");
     expect(html).toContain("上下文用量");
     expect(html).toContain("当前使用");
-    expect(html).toContain("24K / 112K Token");
+    expect(html).toContain("24K / 112K 上下文用量");
     expect(html).not.toContain("预计使用");
-    expect(html).not.toContain("~24K / 112K Token");
+    expect(html).not.toContain("~24K / 112K 上下文用量");
     expect(html).not.toContain("上下文用了");
     expect(html).not.toContain("约 24K");
     expect(html).not.toContain("模型总窗口");

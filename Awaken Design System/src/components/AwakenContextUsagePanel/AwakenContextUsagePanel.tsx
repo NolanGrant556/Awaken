@@ -168,7 +168,7 @@ export const AwakenContextUsagePanel = forwardRef<
     ? formatCostLabel(latestModelUsage)
     : undefined;
 
-  const usageSummary = `${formatContextUsageTokens(currentInputTokens)} / ${formatContextUsageTokens(effectiveInputWindowTokens)} Token`;
+  const usageSummary = `${formatContextUsageTokens(currentInputTokens)} / ${formatContextUsageTokens(effectiveInputWindowTokens)} 上下文用量`;
 
   return (
     <div

@@ -296,3 +296,17 @@ describe("preload thread archive bridge", () => {
     expect(invokeMock).toHaveBeenLastCalledWith("awaken:set-thread-archived", "thread-1", true);
   });
 });
+
+describe("preload thread rewind bridge", () => {
+  it("forwards the target and expected head through the dedicated IPC channel", async () => {
+    const bridge = exposedBridge as Record<string, (...args: unknown[]) => unknown>;
+    const request = {
+      threadId: "thread-1",
+      targetRunId: "run-2",
+      expectedHeadRunId: "run-3",
+    };
+    invokeMock.mockResolvedValue({ removedRunIds: ["run-2", "run-3"] });
+    await bridge.rewindThread(request);
+    expect(invokeMock).toHaveBeenLastCalledWith("awaken:rewind-thread", request);
+  });
+});

@@ -93,6 +93,7 @@ export const APPROVED_LUCIDE_SOURCES = {
   sun: "SunMedium",
   symlink: "FileSymlink",
   table: "TableProperties",
+  undo: "Undo2",
   upload: "Upload",
   "video-camera": "Video",
   wifi: "Wifi",

@@ -1264,6 +1264,30 @@ func TestRefreshThreadContextSnapshotEndpointPersistsReplayableV4Detail(t *testi
 	}
 }
 
+func TestRewindThreadEndpointValidatesTargetAndExpectedHead(t *testing.T) {
+	router := NewRouter(awruntime.NewRunService(nil, nil), nil)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/threads/thread-1/rewind",
+		strings.NewReader(`{"target_run_id":"run-1"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var response errorResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if response.Error != "INVALID_REWIND_TARGET" {
+		t.Fatalf("expected INVALID_REWIND_TARGET, got %+v", response)
+	}
+}
+
 func TestGetThreadTranscriptEndpointProjectsDurableSemanticFramesAfterRestart(t *testing.T) {
 	t.Setenv("AWAKEN_HOME", t.TempDir())
 	workspace := t.TempDir()

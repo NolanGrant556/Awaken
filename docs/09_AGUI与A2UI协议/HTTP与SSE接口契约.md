@@ -30,6 +30,7 @@ PATCH  /v1/threads/{thread_id}
 DELETE /v1/threads/{thread_id}
 POST   /v1/threads/batch-delete
 GET    /v1/threads/{thread_id}/transcript
+POST   /v1/threads/{thread_id}/rewind
 POST   /v1/threads/{thread_id}/context-snapshot
 POST   /v1/runs
 GET    /v1/runs/{run_id}
@@ -52,7 +53,9 @@ POST   /v1/shutdown
 
 `POST /v1/threads/batch-delete` 接受 `{"thread_ids":[...]}`，最多 200 个非空 thread ID，按首次出现顺序去重。响应始终区分 `deleted_thread_ids` 与 `failures[{thread_id,error,message}]`；逐项复用单条 durable delete，当前 active thread 以 `THREAD_BUSY` 留在失败集合。该 route 不承诺跨 session 原子性，Desktop 只能移除 `deleted_thread_ids`，不得把失败项乐观隐藏。
 
-`/v1/shutdown` 只有注入 shutdown callback 才注册。`GET /v1/runtime/activity` 无条件注册、`RunService` 缺席时返回 503，只读返回 `{active_run_count, cancelling_run_count, observed_at}`（RFC3339 UTC）：`active_run_count` 统计当前 in-flight run（含正在取消的 run；普通、定时与 ACP run 都经 `RunService.StartRun`，统一计入），`cancelling_run_count` 是其中已进入 cancelling 状态的子集。其用途是 Electron Main 在退出/维护类操作（如更新重启）前读取运行时活动快照；Renderer 不直接调用。`/audit` 当前返回空数组，查询链尚未接通；其审计语义由 04 域记录。`POST /v1/threads/{thread_id}/context-snapshot` 接收与 run 相同的 `model_profile`，只重建并耐久化该 thread 的当前下一请求 projection；不发 provider 请求，响应为 204。Desktop 在 GET transcript 前调用它；没有可运行 profile 时直接读取历史 transcript。
+`POST /v1/threads/{thread_id}/rewind` 接受 `target_run_id + expected_head_run_id`，成功返回更新后的 `thread`、改写前 canonical `target_run` 与 `removed_run_ids`。它只改写 SemanticJournal v2 普通会话的 active lineage，不回滚工具副作用；busy、stale head、旧 transcript 与特殊会话的错误码和 Desktop 恢复行为只见 [01 用户消息撤销与编辑](../01_桌面工作台/中间交互区域/用户消息撤销与编辑设计契约.md)。
+
+`/v1/shutdown` 只有注入 shutdown callback 才注册。`GET /v1/runtime/activity` 无条件注册、`RunService` 缺席时返回 503，只读返回 `{active_run_count, cancelling_run_count, observed_at}`（RFC3339 UTC）：`active_run_count` 统计当前 in-flight run（含正在取消的 run；普通、定时与 ACP run 都经 `RunService.StartRun`，统一计入），`cancelling_run_count` 是其中已进入 cancelling 状态的子集。其用途是 Electron Main 在退出/维护类操作（如更新重启）前读取运行时活动快照；Renderer 不直接调用。`/audit` 当前返回空数组，查询链尚未接通；其审计语义由 04 域记录。`POST /v1/threads/{thread_id}/context-snapshot` 接收与 run 相同的 `model_profile`，只重建并耐久化该 thread 的当前下一请求 projection；不发 provider 请求，响应为 204。Desktop 在 GET transcript 前调用它；没有可运行 profile 时直接读取历史 transcript。active lineage 为空时同样 204，不报错、不追加 snapshot。
 
 Hook routes 只有 `RunService` 注入时注册，业务合同由 [Hook 产品与架构契约](../04_工具权限与审批/Hook产品与架构契约.md)拥有。GET 的 Settings 检查 DTO 返回 snapshot identity、enabled count、来源 receipt/诊断，以及 Core 严格解析和归一化后的静态 Hook 详情；详情可以包含命令 argv、URL、matcher 或 prompt 供当前用户在信任前审查，但不包含 secret 引用值、运行输入、环境或输出，也不进入 run snapshot/Journal。trust 绑定 `projectId + canonical sourcePath + digest`，revoke 绑定 project/source，均只影响后续 run。run 内 `hook_invocation_started/completed` 分别投影为 `AWAKEN_HOOK_STARTED/COMPLETED`；wire 只含 invocation/Hook/event/source identity、status/action/reason、duration 与有界 preview，不含 command、配置路径、输入正文、secret env 或完整 stdout/stderr。
 

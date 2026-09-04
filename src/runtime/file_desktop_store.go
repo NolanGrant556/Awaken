@@ -693,6 +693,34 @@ func (s *FileDesktopStore) CreateThread(snapshot ThreadSnapshot, modelProfileKey
 	return s.upsertThread(snapshot, modelProfileKey, preview)
 }
 
+// ApplyThreadRewind updates the metadata projection after the append-only
+// thread_rewound journal fact has been flushed. The journal remains authority;
+// this side file only keeps sidebar/head reads fast.
+func (s *FileDesktopStore) ApplyThreadRewind(snapshot ThreadSnapshot, preview string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+
+	metadata, err := s.readSessionMetadata(snapshot.ThreadID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ErrThreadNotFound
+		}
+		return err
+	}
+	metadata.LatestRunID = strings.TrimSpace(snapshot.RunID)
+	metadata.Preview = strings.TrimSpace(preview)
+	metadata.UpdatedAt = formatStoredTime(snapshot.UpdatedAt)
+	metadata.SelectedModelProfileID = strings.TrimSpace(snapshot.SelectedModelProfileID)
+	metadata.ReasoningEffortByProfile = cloneStringMap(snapshot.ReasoningEffortByProfile)
+	metadata.Workspace = snapshot.Workspace
+	return s.writeSessionMetadata(metadata)
+}
+
 func (s *FileDesktopStore) AppendRunInput(snapshot ThreadSnapshot, run Run, sessionID string, input string, attachments []RunInputAttachment) error {
 	path := s.ThreadTranscriptPath(run.ThreadID)
 	schema, err := DetectJournalSchema(path)

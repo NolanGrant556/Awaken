@@ -98,6 +98,11 @@ type threadTranscriptResponse struct {
 	Runs   []threadTranscriptRunResponse `json:"runs"`
 }
 
+type rewindThreadRequest struct {
+	TargetRunID       string `json:"target_run_id"`
+	ExpectedHeadRunID string `json:"expected_head_run_id"`
+}
+
 func writeErrorJSON(w http.ResponseWriter, status int, code, message string) {
 	writeErrorDetailsJSON(w, status, code, message, nil)
 }
@@ -395,6 +400,39 @@ func (h runHandlers) handleGetThreadTranscript(w http.ResponseWriter, r *http.Re
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (h runHandlers) handleRewindThread(w http.ResponseWriter, r *http.Request) {
+	var req rewindThreadRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
+	result, err := h.runService.RewindThread(awruntime.RewindThreadRequest{
+		ThreadID:          r.PathValue("thread_id"),
+		TargetRunID:       req.TargetRunID,
+		ExpectedHeadRunID: req.ExpectedHeadRunID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, awruntime.ErrThreadNotFound):
+			writeErrorJSON(w, http.StatusNotFound, "THREAD_NOT_FOUND", err.Error())
+		case errors.Is(err, awruntime.ErrThreadBusy):
+			writeErrorJSON(w, http.StatusConflict, "THREAD_BUSY", err.Error())
+		case errors.Is(err, awruntime.ErrThreadHistoryConflict):
+			writeErrorJSON(w, http.StatusConflict, "THREAD_HISTORY_CONFLICT", err.Error())
+		case errors.Is(err, awruntime.ErrThreadRewindUnsupported):
+			writeErrorJSON(w, http.StatusConflict, "THREAD_REWIND_UNSUPPORTED", err.Error())
+		case errors.Is(err, awruntime.ErrInvalidInput):
+			writeErrorJSON(w, http.StatusBadRequest, "INVALID_REWIND_TARGET", err.Error())
+		case errors.Is(err, awruntime.ErrPersistenceUnavailable):
+			writeErrorJSON(w, http.StatusServiceUnavailable, "PERSISTENCE_UNAVAILABLE", err.Error())
+		default:
+			writeErrorJSON(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to rewind thread")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (h runHandlers) handleRefreshThreadContextSnapshot(w http.ResponseWriter, r *http.Request) {

@@ -10,6 +10,37 @@ import (
 	"awaken/src/tool"
 )
 
+func TestActiveSemanticRecordsFoldsRepeatedRewindsIntoOneLineage(t *testing.T) {
+	record := func(kind agentcore.SemanticKind, runID string, payload map[string]any) agentcore.SemanticRecord {
+		return agentcore.NewSemanticRecord(kind, "thread-1", runID, "", "", "", payload)
+	}
+	records := []agentcore.SemanticRecord{
+		record(agentcore.SemanticKindThread, "", map[string]any{"label": "Thread"}),
+		record(agentcore.SemanticKindUserMessage, "run-1", map[string]any{"content": "first"}),
+		record(agentcore.SemanticKindRunTerminal, "run-1", map[string]any{"status": "finished"}),
+		record(agentcore.SemanticKindUserMessage, "run-2", map[string]any{"content": "removed"}),
+		record(agentcore.SemanticKindRunTerminal, "run-2", map[string]any{"status": "finished"}),
+		record(agentcore.SemanticKindThreadRewound, "", map[string]any{"target_run_id": "run-2"}),
+		record(agentcore.SemanticKindUserMessage, "run-3", map[string]any{"content": "replacement"}),
+		record(agentcore.SemanticKindRunTerminal, "run-3", map[string]any{"status": "finished"}),
+		record(agentcore.SemanticKindThreadRewound, "", map[string]any{"target_run_id": "run-3"}),
+	}
+
+	active := activeSemanticRecords(records)
+	if len(active) != 3 {
+		t.Fatalf("expected thread plus run-1 records, got %+v", active)
+	}
+	for _, item := range active {
+		if item.Kind == agentcore.SemanticKindThreadRewound || item.RunID == "run-2" || item.RunID == "run-3" {
+			t.Fatalf("inactive semantic record leaked into active lineage: %+v", item)
+		}
+	}
+	messages := messagesFromSemanticRecords(records)
+	if len(messages) != 1 || messages[0].Content != "first" {
+		t.Fatalf("expected only the first user message, got %+v", messages)
+	}
+}
+
 func TestMessagesFromSemanticRecordsRestoresCanonicalOutcomeModelPayload(t *testing.T) {
 	exitCode := 7
 	now := time.Now().UTC()

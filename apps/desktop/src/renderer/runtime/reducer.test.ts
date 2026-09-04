@@ -84,6 +84,131 @@ describe("runtime reducer user question resolution", () => {
   });
 });
 
+describe("runtime reducer thread rewind replay", () => {
+  it("clears the sidebar run head when replay restores an empty lineage", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "first" },
+      {
+        type: "run/created",
+        run: makeRun({
+          runId: "run-1",
+          threadId: "thread-1",
+          status: "finished",
+        }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "first",
+        runId: "run-1",
+      },
+      {
+        type: "run/replayBatch",
+        actions: [
+          {
+            type: "run/threadReplayStarted",
+            threadId: "thread-1",
+          },
+        ],
+      },
+    ]);
+
+    expect(state.runId).toBeUndefined();
+    expect(state.threads[0]?.threadId).toBe("thread-1");
+    expect(state.threads[0]?.runId).toBeUndefined();
+    expect(state.threads[0]?.activeRunId).toBeUndefined();
+  });
+
+  it("keeps only the canonical prefix when a replacement run is requested after rewind replay", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "first" },
+      {
+        type: "run/created",
+        run: makeRun({
+          runId: "run-1",
+          threadId: "thread-1",
+          status: "finished",
+        }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "first",
+        runId: "run-1",
+      },
+      { type: "run/requested", prompt: "second" },
+      {
+        type: "run/created",
+        run: makeRun({
+          runId: "run-2",
+          threadId: "thread-1",
+          status: "finished",
+        }),
+      },
+      {
+        type: "run/replayBatch",
+        actions: [
+          {
+            type: "run/threadReplayStarted",
+            threadId: "thread-1",
+            runId: "run-1",
+          },
+          { type: "run/requested", prompt: "first", runId: "run-1" },
+          {
+            type: "run/created",
+            run: makeRun({
+              runId: "run-1",
+              threadId: "thread-1",
+              status: "finished",
+            }),
+          },
+        ],
+      },
+      { type: "run/requested", prompt: "replacement" },
+    ]);
+
+    const prompts = state.narrative.committedItems.filter(
+      (item) => item.kind === "prompt",
+    );
+    expect(prompts.map((item) => item.text)).toEqual(["first", "replacement"]);
+  });
+
+  it("starts a replacement from an empty lineage with a single prompt", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "first" },
+      {
+        type: "run/created",
+        run: makeRun({
+          runId: "run-1",
+          threadId: "thread-1",
+          status: "finished",
+        }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "first",
+        runId: "run-1",
+      },
+      {
+        type: "run/replayBatch",
+        actions: [
+          {
+            type: "run/threadReplayStarted",
+            threadId: "thread-1",
+          },
+        ],
+      },
+      { type: "run/requested", prompt: "edited" },
+    ]);
+
+    const prompts = state.narrative.committedItems.filter(
+      (item) => item.kind === "prompt",
+    );
+    expect(prompts.map((item) => item.text)).toEqual(["edited"]);
+  });
+});
+
 describe("runtime reducer cancel handling", () => {
   it("restores transcript actions in one reducer transition and marks only replayed narrative items", () => {
     const replayed = reduceRuntimeState(createInitialRuntimeState(), {
@@ -3568,6 +3693,7 @@ describe("runtime reducer thread snapshots", () => {
     expect(narrativeItems).toContainEqual({
       kind: "prompt",
       id: "prompt:draft:1",
+      runId: "run-1",
       text: "first prompt",
     });
     expect(
@@ -3683,8 +3809,8 @@ describe("runtime reducer thread snapshots", () => {
       (item) => item.kind === "prompt",
     );
     expect(prompts).toEqual([
-      { kind: "prompt", id: "prompt:draft:1", text: "first prompt" },
-      { kind: "prompt", id: "prompt:thread-1:2", text: "follow up prompt" },
+      { kind: "prompt", id: "prompt:draft:1", runId: "run-1", text: "first prompt" },
+      { kind: "prompt", id: "prompt:thread-1:2", runId: "run-2", text: "follow up prompt" },
     ]);
     expect(new Set(prompts.map((item) => item.id)).size).toBe(2);
     expect(state.narrative.committedItems).toContainEqual({

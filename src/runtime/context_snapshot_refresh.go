@@ -56,6 +56,12 @@ func (s *RunService) RefreshThreadContextSnapshot(ctx context.Context, threadID 
 	if err != nil {
 		return ContextSnapshotRefreshResult{}, err
 	}
+	runID := latestRunIDForContextRefresh(meta, restored)
+	if runID == "" {
+		// First-turn rewind leaves a selectable thread with an empty active
+		// lineage. There is no run to attach a current-next-request projection.
+		return ContextSnapshotRefreshResult{}, nil
+	}
 	agent := s.createAgent(meta.Snapshot.Workspace, threadID, profile)
 	if agent == nil {
 		return ContextSnapshotRefreshResult{}, fmt.Errorf("agent is not configured")
@@ -104,10 +110,6 @@ func (s *RunService) RefreshThreadContextSnapshot(ctx context.Context, threadID 
 	// ordering. File metadata can lag after recovery and must only be a fallback;
 	// otherwise a fresh snapshot attached to an older run is overwritten by a
 	// later stale snapshot during Renderer replay.
-	runID := latestRunIDForContextRefresh(meta, restored)
-	if runID == "" {
-		return ContextSnapshotRefreshResult{}, fmt.Errorf("thread %s has no durable run", threadID)
-	}
 	sessionID, turnID := latestSemanticIdentity(records, runID)
 	previous, previousRunID, hasPrevious := latestContextUsageSnapshot(records)
 

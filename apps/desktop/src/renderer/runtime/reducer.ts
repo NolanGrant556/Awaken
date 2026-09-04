@@ -287,6 +287,7 @@ export type ThreadItem = {
   archived?: boolean;
   archivedAt?: string;
   source?: string;
+  acpSessionId?: string;
 };
 
 type ThreadViewState = {
@@ -367,6 +368,7 @@ export type RuntimeAction =
       promptTokens?: PromptNarrativeToken[];
       promptFileComments?: import("../../shared/runtime").FileLineComment[];
       startedAtMs?: number;
+      runId?: string;
     }
   | { type: "run/created"; run: RuntimeRun }
   | { type: "run/createFailed"; message: string }
@@ -787,6 +789,7 @@ export function threadItemFromRuntime(thread: RuntimeThread): ThreadItem {
     archived: thread.archived,
     ...(thread.archivedAt ? { archivedAt: thread.archivedAt } : {}),
     ...(thread.source ? { source: thread.source } : {}),
+    ...(thread.acpSessionId ? { acpSessionId: thread.acpSessionId } : {}),
     ...(thread.titleSource ? { titleSource: thread.titleSource } : {}),
     ...(thread.titleStatus ? { titleStatus: thread.titleStatus } : {}),
     ...(thread.titleUpdatedAt ? { titleUpdatedAt: thread.titleUpdatedAt } : {}),
@@ -2108,6 +2111,7 @@ export function reduceRuntimeState(
               nextNarrativeScope(state),
               action.promptTokens,
               action.promptFileComments,
+              action.runId,
             )
           : createRunRequestedNarrative(
               action.prompt,
@@ -2115,6 +2119,7 @@ export function reduceRuntimeState(
               nextNarrativeScope(state),
               action.promptTokens,
               action.promptFileComments,
+              action.runId,
             ),
         subagentsById: state.subagentsById,
         subagentOrder: state.subagentOrder,
@@ -2129,13 +2134,28 @@ export function reduceRuntimeState(
         runStartedAtMs: action.startedAtMs,
         runCompletedAtMs: undefined,
       };
-    case "run/created":
+    case "run/created": {
+      const committedItems = [...state.narrative.committedItems];
+      for (let index = committedItems.length - 1; index >= 0; index -= 1) {
+        const item = committedItems[index];
+        if (item?.kind === "prompt" && !item.runId) {
+          committedItems[index] = { ...item, runId: action.run.runId };
+          break;
+        }
+      }
       return saveActiveThreadView(
         syncActiveThreadSummary({
-          ...syncFromRun(state, action.run),
+          ...syncFromRun(
+            {
+              ...state,
+              narrative: { ...state.narrative, committedItems },
+            },
+            action.run,
+          ),
           activeThreadId: action.run.threadId,
         }),
       );
+    }
     case "run/createFailed":
       return saveActiveThreadView({
         ...state,
@@ -2318,7 +2338,15 @@ export function reduceRuntimeState(
         ...view,
         activeThreadId: action.threadId,
         supervisorStatus: state.supervisorStatus,
-        threads: state.threads,
+        threads: state.threads.map((thread) =>
+          thread.threadId === action.threadId
+            ? {
+                ...thread,
+                runId: action.runId,
+                activeRunId: undefined,
+              }
+            : thread,
+        ),
         threadViews: {
           ...state.threadViews,
           [action.threadId]: view,

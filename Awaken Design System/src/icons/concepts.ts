@@ -29,6 +29,7 @@ export const AWAKEN_ICON_CONCEPTS = {
   search: "magnifying-glass",
   refresh: "arrows-cw",
   settings: "cog",
+  undo: "undo",
 
   // 方向与披露
   disclose: "chevron-right",

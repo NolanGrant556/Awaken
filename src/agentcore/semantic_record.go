@@ -38,14 +38,17 @@ const (
 	// written before the disclosure generalization. Restore still merges it
 	// into the activated set; new activations write
 	// SemanticKindDeferredToolsActivated.
-	SemanticKindMCPToolsActivated      SemanticKind = "mcp_tools_activated"
-	SemanticKindResourceReceipt        SemanticKind = "resource_receipt"
-	SemanticKindRuntimeNotice          SemanticKind = "runtime_notice"
-	SemanticKindContextCompacted       SemanticKind = "context_compacted"
-	SemanticKindContextCompactedV2     SemanticKind = "context_compacted_v2"
-	SemanticKindRecoveryDecision       SemanticKind = "recovery_decision"
-	SemanticKindTurnBoundary           SemanticKind = "turn_boundary"
-	SemanticKindRunTerminal            SemanticKind = "run_terminal"
+	SemanticKindMCPToolsActivated  SemanticKind = "mcp_tools_activated"
+	SemanticKindResourceReceipt    SemanticKind = "resource_receipt"
+	SemanticKindRuntimeNotice      SemanticKind = "runtime_notice"
+	SemanticKindContextCompacted   SemanticKind = "context_compacted"
+	SemanticKindContextCompactedV2 SemanticKind = "context_compacted_v2"
+	SemanticKindRecoveryDecision   SemanticKind = "recovery_decision"
+	SemanticKindTurnBoundary       SemanticKind = "turn_boundary"
+	SemanticKindRunTerminal        SemanticKind = "run_terminal"
+	// SemanticKindThreadRewound changes the active linear history without
+	// rewriting prior journal records. Its payload names the first run removed.
+	SemanticKindThreadRewound          SemanticKind = "thread_rewound"
 	SemanticKindPersistenceWarning     SemanticKind = "persistence_warning"
 	SemanticKindMemoryRecalled         SemanticKind = "memory_recalled"
 	SemanticKindMemoryMutated          SemanticKind = "memory_mutated"

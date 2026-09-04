@@ -227,6 +227,7 @@ describe("thread transcript replay helpers", () => {
     const actions = actionsForThreadTranscript(transcript);
     expect(actions).toContainEqual({
       type: "run/requested",
+      runId: "run-structured-input",
       prompt: "",
       promptAttachments: transcript.runs[0].run.inputAttachments,
       promptTokens: transcript.runs[0].run.composerTokens,
@@ -237,6 +238,7 @@ describe("thread transcript replay helpers", () => {
     expect(state.narrative.committedItems).toContainEqual({
       kind: "prompt",
       id: "prompt:thread-structured-input:1",
+      runId: "run-structured-input",
       text: "",
       attachments: transcript.runs[0].run.inputAttachments,
       tokens: transcript.runs[0].run.composerTokens,
@@ -400,11 +402,13 @@ describe("thread transcript replay helpers", () => {
     });
     expect(actions).toContainEqual({
       type: "run/requested",
+      runId: "run-1",
       prompt: "你好",
       startedAtMs: Date.parse("2026-06-24T00:00:00Z"),
     });
     expect(actions).toContainEqual({
       type: "run/requested",
+      runId: "run-2",
       prompt: "再次告诉我",
       startedAtMs: Date.parse("2026-06-24T00:01:00Z"),
     });

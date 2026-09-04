@@ -38,6 +38,7 @@ export function createRunRequestedNarrative(
   scopeId = "current",
   tokens?: PromptNarrativeToken[],
   fileComments?: FileLineComment[],
+  runId?: string,
 ): RunNarrativeState {
   return appendRunRequestedNarrative(
     createInitialRunNarrativeState(),
@@ -46,6 +47,7 @@ export function createRunRequestedNarrative(
     scopeId,
     tokens,
     fileComments,
+    runId,
   );
 }
 
@@ -56,6 +58,7 @@ export function appendRunRequestedNarrative(
   scopeId = "current",
   tokens?: PromptNarrativeToken[],
   fileComments?: FileLineComment[],
+  runId?: string,
 ): RunNarrativeState {
   const trimmed = prompt.trim();
   const settledState = state.activeItem ? commitActive(state, "done") : state;
@@ -79,6 +82,7 @@ export function appendRunRequestedNarrative(
     ? upsertCommitted(settledState.committedItems, {
         kind: "prompt",
         id: `prompt:${scopeId}`,
+        ...(runId ? { runId } : {}),
         text: trimmed,
         ...(promptAttachments ? { attachments: promptAttachments } : {}),
         ...(promptTokens ? { tokens: promptTokens } : {}),

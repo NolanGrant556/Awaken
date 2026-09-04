@@ -92,6 +92,26 @@ func TestProjectSemanticRecordSuppressesLocalContextAuthorities(t *testing.T) {
 	}
 }
 
+func TestProjectSemanticRecordSuppressesThreadRewound(t *testing.T) {
+	record := agentcore.NewSemanticRecord(
+		agentcore.SemanticKindThreadRewound,
+		"thread-1",
+		"",
+		"",
+		"",
+		"",
+		map[string]any{
+			"rewind_id":                   "rewind-1",
+			"target_run_id":               "run-1",
+			"previous_active_head_run_id": "run-1",
+			"mode":                        "undo",
+		},
+	)
+	if frames := ProjectSemanticRecord(record); len(frames) != 0 {
+		t.Fatalf("thread_rewound projected to wire: %+v", frames)
+	}
+}
+
 func TestProjectComputerSessionAndVerificationEvents(t *testing.T) {
 	sessionFrames := ProjectSemanticRecord(agentcore.SemanticRecord{
 		Kind: agentcore.SemanticKindComputerStateChanged,

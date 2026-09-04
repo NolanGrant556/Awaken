@@ -88,7 +88,7 @@ http://127.0.0.1:5173/#/components/awaken-memory-settings
 
 ## 图标库契约
 
-Awaken 的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是唯一渲染出口，Gallery 入口是 `awaken-icon`。当前 108 个线性字形由 94 个经用户确认并静态固化的 Lucide authored 母形、6 个本轮 Awaken 定制几何，以及 8 个保持既有产品识别的字形组成；另有 MCP 和 Agent Plugins 两个官方品牌标记。
+Awaken 的线性图标集由 `src/icons` 唯一拥有，`AwakenIcon` 是唯一渲染出口，Gallery 入口是 `awaken-icon`。当前 109 个线性字形由 95 个经用户确认并静态固化的 Lucide authored 母形、6 个本轮 Awaken 定制几何，以及 8 个保持既有产品识别的字形组成；另有 MCP 和 Agent Plugins 两个官方品牌标记。
 
 ### 分层与 owner
 
@@ -160,7 +160,7 @@ Agent Plugins 使用官方文档站 `app/icon.svg` 的 authored paths，在注�
 
 ### 图标库的验证
 
-图标层的契约测试在 `apps/desktop/src/renderer/awakenIconLibrary.test.ts`（desktop Vitest alias 直接指向本包源码）。覆盖 94 项来源完整性、path 快照、Awaken 构造几何光学盒、16 网格边界、两档内建描边、KeyRound 子路径填充、概念表、九个已确认产品字形摘要，以及「运行时源码与 dependencies 不依赖 lucide-react」「调用点只用尺寸档且不低于 minSize」守卫。
+图标层的契约测试在 `apps/desktop/src/renderer/awakenIconLibrary.test.ts`（desktop Vitest alias 直接指向本包源码）。覆盖 95 项来源完整性、path 快照、Awaken 构造几何光学盒、16 网格边界、两档内建描边、KeyRound 子路径填充、概念表、九个已确认产品字形摘要，以及「运行时源码与 dependencies 不依赖 lucide-react」「调用点只用尺寸档且不低于 minSize」守卫。
 
 ## 组件 URL 规则
 

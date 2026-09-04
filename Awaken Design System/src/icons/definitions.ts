@@ -5,7 +5,7 @@
  * 交汇处留光学缺口。这套参数是在 12/13/14/16px 真实渲染下逐轮筛出来的，
  * 每条注释里的「实测」都指真实抗锯齿结果，不是推断。
  *
- * 94 个用户确认的 Lucide authored 字形由 approvedLucideGlyphs.ts 在 registry 层
+ * 95 个用户确认的 Lucide authored 字形由 approvedLucideGlyphs.ts 在 registry 层
  * 覆盖同名几何；本文件仍为每个 name 提供 purpose、shape、minSize 与 filled 元数据，
  * 并直接拥有 6 个定制几何和 8 个保持既有产品识别的线性字形。
  */
@@ -1674,6 +1674,12 @@ const RAW_DEFINITIONS = {
       const r = 5.6;
       return [arc(8, 8, r, 230, -80), arrow(8, 8, r, -80, -1, 3.1, 32)];
     },
+  },
+  undo: {
+    // 试过 rotate-ccw：整圆回转会被读成「重置视图」，不像撤回一条消息。
+    // Lucide Undo2 是左指箭头加右下 U 弯，16px 下仍能和编辑铅笔、复制区分。
+    shape: "square",
+    purpose: "撤销消息 / 撤回上一步",
   },
   pencil: {
     shape: "circle",

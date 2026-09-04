@@ -116,6 +116,8 @@ import {
   type SkillProjectRoots,
   type SkillPreviewResponse,
   type RuntimeThreadTranscript,
+  type RewindThreadRequest,
+  type RewindThreadResult,
   type RuntimeThread,
   type RuntimeThreadListView,
   type SetThreadArchivedResult,
@@ -279,6 +281,8 @@ const bridge: AwakenBridge = {
       "awaken:get-thread-transcript",
       threadId,
     ) as Promise<RuntimeThreadTranscript>,
+  rewindThread: (request: RewindThreadRequest) =>
+    ipcRenderer.invoke("awaken:rewind-thread", request) as Promise<RewindThreadResult>,
   listThreads: (view?: RuntimeThreadListView) =>
     ipcRenderer.invoke("awaken:list-threads", view) as Promise<RuntimeThread[]>,
   renameThread: (threadId: string, label: string) =>

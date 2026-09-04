@@ -18,6 +18,7 @@ import {
 } from "react";
 
 import { AwakenCopyButton } from "../AwakenCopyButton";
+import { AwakenTooltip } from "../AwakenTooltip";
 
 const collapsedAttachmentLimit = 3;
 const expandDragThresholdPx = 4;
@@ -160,6 +161,16 @@ export type AwakenUserPromptBlockProps = {
   structuredContent?: ReactNode;
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
+  onUndo?: () => void;
+  onEdit?: () => void;
+  actionsDisabled?: boolean;
+  actionPending?: boolean;
+  editing?: boolean;
+  editText?: string;
+  onEditTextChange?: (value: string) => void;
+  onCancelEdit?: () => void;
+  onSubmitEdit?: () => void;
+  editSubmitDisabled?: boolean;
 };
 
 /** Visible prompt payload for copy: attachment names, then inline token labels + text. */
@@ -199,6 +210,16 @@ export function AwakenUserPromptBlock({
   structuredContent,
   expanded,
   onExpandedChange,
+  onUndo,
+  onEdit,
+  actionsDisabled = false,
+  actionPending = false,
+  editing = false,
+  editText = text,
+  onEditTextChange,
+  onCancelEdit,
+  onSubmitEdit,
+  editSubmitDisabled,
 }: AwakenUserPromptBlockProps) {
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(false);
   const blockRef = useRef<HTMLElement | null>(null);
@@ -446,6 +467,55 @@ export function AwakenUserPromptBlock({
     );
   }
 
+  if (editing) {
+    return (
+      <article
+        ref={blockRef}
+        className="execution-prompt-block execution-prompt-block-editing"
+      >
+        <div className="execution-prompt-editor">
+          <textarea
+            className="execution-prompt-editor-input"
+            data-aw-run-stage-scroll-boundary=""
+            value={editText}
+            onChange={(event) => onEditTextChange?.(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                onCancelEdit?.();
+              }
+            }}
+            disabled={actionPending}
+            autoFocus
+            aria-label="编辑消息"
+          />
+          <div className="execution-prompt-editor-actions">
+            <button
+              type="button"
+              onClick={onCancelEdit}
+              disabled={actionPending}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="execution-prompt-editor-send"
+              onClick={onSubmitEdit}
+              disabled={
+                actionPending ||
+                (editSubmitDisabled ?? editText.trim().length === 0)
+              }
+            >
+              {actionPending ? "发送中…" : "发送"}
+            </button>
+          </div>
+        </div>
+      </article>
+    );
+  }
+
+  const hasActions = Boolean(onUndo || onEdit);
+  const showToolbar = isExpanded || hasActions;
   return (
     <article
       ref={blockRef}
@@ -517,32 +587,59 @@ export function AwakenUserPromptBlock({
             {structuredContent}
           </div>
         ) : null}
-        {isExpanded ? (
-          <div
-            className="execution-prompt-bubble-toolbar"
-            aria-label="Prompt actions"
-          >
-            <AwakenCopyButton
-              text={resolvedCopyText}
-              label="Copy prompt"
-              copiedLabel="Copied"
-              errorLabel="Copy failed"
-              iconOnly
-              feedbackDurationMs={1000}
-              onClick={(event) => {
-                event.stopPropagation();
-              }}
-              style={{
-                width: "24px",
-                height: "24px",
-                borderRadius: "8px",
-                background: "var(--aw-bg-fill-light)",
-                borderColor: "var(--aw-border-light)",
-              }}
-            />
-          </div>
-        ) : null}
       </div>
+      {showToolbar ? (
+        <div
+          className="execution-prompt-bubble-toolbar"
+          aria-label="消息操作"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {onUndo ? (
+            <AwakenTooltip label="撤销此消息">
+              <button
+                type="button"
+                className="execution-prompt-action-button"
+                aria-label="撤销此消息"
+                disabled={actionsDisabled || actionPending}
+                onClick={onUndo}
+              >
+                <AwakenIcon concept="undo" size={16} />
+              </button>
+            </AwakenTooltip>
+          ) : null}
+          {onEdit ? (
+            <AwakenTooltip label="编辑此消息">
+              <button
+                type="button"
+                className="execution-prompt-action-button"
+                aria-label="编辑此消息"
+                disabled={actionsDisabled || actionPending}
+                onClick={onEdit}
+              >
+                <AwakenIcon concept="edit" size={16} />
+              </button>
+            </AwakenTooltip>
+          ) : null}
+          <AwakenCopyButton
+            text={resolvedCopyText}
+            label="Copy prompt"
+            copiedLabel="Copied"
+            errorLabel="Copy failed"
+            iconOnly
+            feedbackDurationMs={1000}
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+            style={{
+              width: "24px",
+              height: "24px",
+              borderRadius: "8px",
+              background: "var(--aw-bg-fill-light)",
+              borderColor: "var(--aw-border-light)",
+            }}
+          />
+        </div>
+      ) : null}
     </article>
   );
 }

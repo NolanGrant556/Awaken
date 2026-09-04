@@ -1903,6 +1903,311 @@ func TestGetThreadTranscriptReturnsOrderedRunsAndInputs(t *testing.T) {
 	}
 }
 
+func TestRewindThreadRemovesTargetSuffixAndAllowsReplacementAfterRestart(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	root := t.TempDir()
+	service := newDurableThreadTestService()
+	firstRun, err := service.StartRun(StartRunRequest{
+		Input:     "first",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("first StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, firstRun.RunID)
+	waitForTranscriptMessageCount(t, root, firstRun.ThreadID, 2)
+
+	secondRun, err := service.StartRun(StartRunRequest{
+		Input:     "second",
+		ThreadID:  firstRun.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("second StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, secondRun.RunID)
+	waitForTranscriptMessageCount(t, root, firstRun.ThreadID, 4)
+
+	result, err := service.RewindThread(RewindThreadRequest{
+		ThreadID:          firstRun.ThreadID,
+		TargetRunID:       secondRun.RunID,
+		ExpectedHeadRunID: secondRun.RunID,
+	})
+	if err != nil {
+		t.Fatalf("RewindThread returned error: %v", err)
+	}
+	if result.TargetRun.RunID != secondRun.RunID {
+		t.Fatalf("expected removed target run %q, got %+v", secondRun.RunID, result.TargetRun)
+	}
+	if !reflect.DeepEqual(result.RemovedRunIDs, []string{secondRun.RunID}) {
+		t.Fatalf("unexpected removed run ids: %+v", result.RemovedRunIDs)
+	}
+	if result.Thread.RunID != firstRun.RunID {
+		t.Fatalf("expected active head %q, got %q", firstRun.RunID, result.Thread.RunID)
+	}
+
+	rewound, err := service.GetThreadTranscript(firstRun.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadTranscript after rewind returned error: %v", err)
+	}
+	if len(rewound.Runs) != 1 || rewound.Runs[0].Run.RunID != firstRun.RunID {
+		t.Fatalf("expected only the first run after rewind, got %+v", rewound.Runs)
+	}
+
+	replacementRun, err := service.StartRun(StartRunRequest{
+		Input:     "replacement",
+		ThreadID:  firstRun.ThreadID,
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("replacement StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, replacementRun.RunID)
+	waitForTranscriptMessageCount(t, root, firstRun.ThreadID, 4)
+
+	restarted := newDurableThreadTestService()
+	if err := restarted.SetDefaultWorkspace(WorkspaceConfig{WorkspaceRoot: root}); err != nil {
+		t.Fatalf("SetDefaultWorkspace returned error: %v", err)
+	}
+	transcript, err := restarted.GetThreadTranscript(firstRun.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadTranscript after restart returned error: %v", err)
+	}
+	if len(transcript.Runs) != 2 {
+		t.Fatalf("expected first and replacement runs, got %+v", transcript.Runs)
+	}
+	if transcript.Runs[0].Run.RunID != firstRun.RunID || transcript.Runs[1].Run.RunID != replacementRun.RunID {
+		t.Fatalf("unexpected active lineage after restart: %+v", transcript.Runs)
+	}
+	for _, entry := range transcript.Runs {
+		if entry.Run.RunID == secondRun.RunID {
+			t.Fatalf("rewound run %q resurfaced after restart", secondRun.RunID)
+		}
+	}
+
+	if _, err := restarted.RewindThread(RewindThreadRequest{
+		ThreadID:          firstRun.ThreadID,
+		TargetRunID:       firstRun.RunID,
+		ExpectedHeadRunID: replacementRun.RunID,
+	}); err != nil {
+		t.Fatalf("rewind first run returned error: %v", err)
+	}
+	emptyTranscript, err := restarted.GetThreadTranscript(firstRun.ThreadID)
+	if err != nil {
+		t.Fatalf("GetThreadTranscript after full rewind returned error: %v", err)
+	}
+	if len(emptyTranscript.Runs) != 0 || emptyTranscript.Thread.RunID != "" {
+		t.Fatalf("expected an empty active lineage, got %+v", emptyTranscript)
+	}
+	threads := restarted.ListThreads(ThreadListViewActive)
+	if len(threads) != 1 || threads[0].RunID != "" {
+		t.Fatalf("expected cleared latest run metadata, got %+v", threads)
+	}
+}
+
+func TestRewindThreadRejectsStaleExpectedHead(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	root := t.TempDir()
+	service := newDurableThreadTestService()
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "hello",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+	waitForTranscriptMessageCount(t, root, run.ThreadID, 2)
+
+	_, err = service.RewindThread(RewindThreadRequest{
+		ThreadID:          run.ThreadID,
+		TargetRunID:       run.RunID,
+		ExpectedHeadRunID: "stale-head",
+	})
+	if !errors.Is(err, ErrThreadHistoryConflict) {
+		t.Fatalf("expected ErrThreadHistoryConflict, got %v", err)
+	}
+}
+
+func TestRewindThreadRejectsBusyThread(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	root := t.TempDir()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	service := NewRunService(
+		func(workspace WorkspaceConfig, threadID string) *agentcore.Agent {
+			return agentcore.NewAgentWithThreadID(agentcore.AgentConfig{
+				Workspace: agentcore.WorkspaceConfig{Root: workspace.WorkspaceRoot},
+			}, threadID)
+		},
+		func(agent *agentcore.Agent) Executor {
+			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				sink.Emit(agentcore.AwakenEvent{Type: agentcore.RunStartedEventType})
+				close(started)
+				<-release
+				sink.Emit(agentcore.AwakenEvent{
+					Type:           agentcore.RunFinishedEventType,
+					Content:        "done",
+					TerminalReason: agentcore.TerminalReasonCompleted,
+				})
+				return "done", nil
+			})
+		},
+	)
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "busy",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	<-started
+	_, err = service.RewindThread(RewindThreadRequest{
+		ThreadID:          run.ThreadID,
+		TargetRunID:       run.RunID,
+		ExpectedHeadRunID: run.RunID,
+	})
+	if !errors.Is(err, ErrThreadBusy) {
+		t.Fatalf("expected ErrThreadBusy, got %v", err)
+	}
+	close(release)
+	waitForRunTerminal(t, service, run.RunID)
+}
+
+func TestRewindThreadRejectsArchivedScheduledAndACPSessions(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	root := t.TempDir()
+
+	t.Run("archived", func(t *testing.T) {
+		service := newDurableThreadTestService()
+		run, err := service.StartRun(StartRunRequest{
+			Input:     "archive me",
+			Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		})
+		if err != nil {
+			t.Fatalf("StartRun returned error: %v", err)
+		}
+		waitForRunTerminal(t, service, run.RunID)
+		waitForTranscriptMessageCount(t, root, run.ThreadID, 2)
+		if _, err := service.SetThreadArchived(run.ThreadID, true); err != nil {
+			t.Fatalf("SetThreadArchived returned error: %v", err)
+		}
+		_, err = service.RewindThread(RewindThreadRequest{
+			ThreadID:          run.ThreadID,
+			TargetRunID:       run.RunID,
+			ExpectedHeadRunID: run.RunID,
+		})
+		if !errors.Is(err, ErrThreadRewindUnsupported) {
+			t.Fatalf("expected ErrThreadRewindUnsupported, got %v", err)
+		}
+	})
+
+	t.Run("scheduled", func(t *testing.T) {
+		service := newDurableThreadTestService()
+		run, err := service.StartRun(StartRunRequest{
+			Input:     "scheduled",
+			Workspace: WorkspaceConfig{WorkspaceRoot: root},
+			Client:    ClientInfo{Source: ScheduledClientSource},
+		})
+		if err != nil {
+			t.Fatalf("StartRun returned error: %v", err)
+		}
+		waitForRunTerminal(t, service, run.RunID)
+		waitForTranscriptMessageCount(t, root, run.ThreadID, 2)
+		_, err = service.RewindThread(RewindThreadRequest{
+			ThreadID:          run.ThreadID,
+			TargetRunID:       run.RunID,
+			ExpectedHeadRunID: run.RunID,
+		})
+		if !errors.Is(err, ErrThreadRewindUnsupported) {
+			t.Fatalf("expected ErrThreadRewindUnsupported, got %v", err)
+		}
+	})
+
+	t.Run("acp after restart", func(t *testing.T) {
+		service := newDurableThreadTestService()
+		run, err := service.StartRun(StartRunRequest{
+			Input:     "acp",
+			Workspace: WorkspaceConfig{WorkspaceRoot: root},
+			Client: ClientInfo{
+				Source:    ACPThreadSource,
+				SessionID: "acp-session-1",
+			},
+		})
+		if err != nil {
+			t.Fatalf("StartRun returned error: %v", err)
+		}
+		waitForRunTerminal(t, service, run.RunID)
+		waitForTranscriptMessageCount(t, root, run.ThreadID, 2)
+
+		restarted := newDurableThreadTestService()
+		if err := restarted.SetDefaultWorkspace(WorkspaceConfig{WorkspaceRoot: root}); err != nil {
+			t.Fatalf("SetDefaultWorkspace returned error: %v", err)
+		}
+		_, err = restarted.RewindThread(RewindThreadRequest{
+			ThreadID:          run.ThreadID,
+			TargetRunID:       run.RunID,
+			ExpectedHeadRunID: run.RunID,
+		})
+		if !errors.Is(err, ErrThreadRewindUnsupported) {
+			t.Fatalf("expected ErrThreadRewindUnsupported after restart, got %v", err)
+		}
+	})
+}
+
+func TestRewindThreadAllowsDesktopClientSessionID(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	root := t.TempDir()
+	service := newDurableThreadTestService()
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "desktop session",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+		Client: ClientInfo{
+			SessionID:  "742dcff7-2cc8-46b7-941b-6c4d46aefe85",
+			RequestID:  "req-1",
+			EntryPoint: "desktop",
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+	waitForTranscriptMessageCount(t, root, run.ThreadID, 2)
+	if _, err := service.RewindThread(RewindThreadRequest{
+		ThreadID:          run.ThreadID,
+		TargetRunID:       run.RunID,
+		ExpectedHeadRunID: run.RunID,
+	}); err != nil {
+		t.Fatalf("desktop client session id must not block rewind, got %v", err)
+	}
+}
+
+func TestRewindThreadRejectsV1Journal(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	root := t.TempDir()
+	service := newDurableThreadTestService()
+	run, err := service.StartRun(StartRunRequest{
+		Input:     "legacy",
+		Workspace: WorkspaceConfig{WorkspaceRoot: root},
+	})
+	if err != nil {
+		t.Fatalf("StartRun returned error: %v", err)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+	waitForTranscriptMessageCount(t, root, run.ThreadID, 2)
+	if err := os.WriteFile(transcriptPath(run.ThreadID), []byte(`{"record_type":"message","role":"user","content":"legacy"}\n`), 0o600); err != nil {
+		t.Fatalf("write v1 journal: %v", err)
+	}
+	_, err = service.RewindThread(RewindThreadRequest{
+		ThreadID:          run.ThreadID,
+		TargetRunID:       run.RunID,
+		ExpectedHeadRunID: run.RunID,
+	})
+	if !errors.Is(err, ErrThreadRewindUnsupported) {
+		t.Fatalf("expected ErrThreadRewindUnsupported for v1 journal, got %v", err)
+	}
+}
+
 func TestGetThreadTranscriptRestoresDurableThreadWithoutMemory(t *testing.T) {
 	setRuntimeUserDataDir(t)
 	root := t.TempDir()

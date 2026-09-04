@@ -49,6 +49,7 @@ import {
   normalizeRuntimeProjectOperation,
   normalizeRuntimeInfo,
   normalizeRuntimeRun,
+  normalizeRewindThreadResult,
   normalizeRuntimeThreadTranscript,
   normalizeRuntimeThread,
   normalizeStartRunRequest,
@@ -114,6 +115,8 @@ import {
   type RuntimeMcpServer,
   type RuntimeMcpServerConfigResponse,
   type RuntimeRunWire,
+  type RewindThreadRequest,
+  type RewindThreadResultWire,
   type RuntimeProject,
   type RuntimeProjectOperation,
   type RuntimeProjectOperationWire,
@@ -3179,6 +3182,21 @@ ipcMain.handle("awaken:get-thread-transcript", async (_event, threadId: string) 
   );
 
   return normalizeRuntimeThreadTranscript(transcript);
+});
+
+ipcMain.handle("awaken:rewind-thread", async (_event, request: RewindThreadRequest) => {
+  const result = await requestRuntimeDomain<RewindThreadResultWire>(
+    `/v1/threads/${encodeURIComponent(request.threadId)}/rewind`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target_run_id: request.targetRunId,
+        expected_head_run_id: request.expectedHeadRunId,
+      }),
+    },
+  );
+  return normalizeRewindThreadResult(result);
 });
 
 ipcMain.handle("awaken:list-threads", async (_event, view?: RuntimeThreadListView) => {

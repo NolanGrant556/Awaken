@@ -19,6 +19,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   App,
+  composerDraftFromRuntimeRun,
   composerMetaItemsForFileWorkspaceSurface,
   composerStructuredDraftLength,
   contextUsageMeta,
@@ -27,6 +28,9 @@ import {
   isUserQuestionSelectionAnswered,
   insertComposerTokenAtOffset,
   modelProfileLabel,
+  promptRewindConfirmDialog,
+  PROMPT_REWIND_DRAFT_WARNING_COPY,
+  PROMPT_REWIND_SIDE_EFFECT_COPY,
   replaceComposerActionTriggerWithToken,
   modelPreferenceChangeForOption,
   modelPreferenceRecoveryKey,
@@ -43,6 +47,7 @@ import {
   promptNarrativeTokensForComposer,
   promptTextAfterTokenLeadingText,
   promptTokenViews,
+  effectivePromptForComposerDraft,
   reconcileComposerStructuredInput,
   resolveBackendProjectOrder,
   resolveRunProjectForRun,
@@ -710,6 +715,7 @@ function stubElectronBridge(): void {
       probeACPRunner: vi.fn(),
       getRun: vi.fn(),
       getThreadTranscript: vi.fn(),
+      rewindThread: vi.fn(),
       listThreads: vi.fn(async () => []),
       renameThread: vi.fn(),
       updateThreadModelPreference: vi.fn(),
@@ -3867,6 +3873,51 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).toContain("Copy prompt");
   });
 
+  it("renders undo/edit actions and the controlled inline editor", () => {
+    const actionHtml = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "需要修改的消息",
+        onUndo: () => undefined,
+        onEdit: () => undefined,
+      }),
+    );
+    expect(actionHtml).toContain("撤销此消息");
+    expect(actionHtml).toContain("aw-icon--undo");
+    expect(actionHtml).toContain("编辑此消息");
+
+    const editorHtml = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "原消息",
+        editing: true,
+        editText: "新消息",
+        onCancelEdit: () => undefined,
+        onSubmitEdit: () => undefined,
+      }),
+    );
+    expect(editorHtml).toContain("编辑消息");
+    expect(editorHtml).toContain("新消息");
+    expect(editorHtml).toContain("取消");
+    expect(editorHtml).toContain("发送");
+  });
+
+  it("keeps structured-only inline send enabled and marks the editor as a nested scroll boundary", () => {
+    const editorHtml = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "",
+        editing: true,
+        editText: "",
+        editSubmitDisabled: false,
+        onCancelEdit: () => undefined,
+        onSubmitEdit: () => undefined,
+      }),
+    );
+    expect(editorHtml).toContain("data-aw-run-stage-scroll-boundary");
+    expect(editorHtml).toContain("发送");
+    expect(editorHtml).not.toMatch(
+      /execution-prompt-editor-send"[^>]*disabled/,
+    );
+  });
+
   it("marks prompt text, token labels, and file names as selectable", () => {
     const html = renderToString(
       React.createElement(AwakenUserPromptBlock, {
@@ -3990,6 +4041,67 @@ describe("prompt token text projection", () => {
       " 这个技能写",
     );
     expect(promptTextAfterTokenLeadingText("请使用", tokens)).toBe("");
+  });
+
+  it("restores a removed run as an editable structured composer draft", () => {
+    const draft = composerDraftFromRuntimeRun({
+      runId: "run-2",
+      threadId: "thread-1",
+      input: "请使用 修改前的正文",
+      inputAttachments: [
+        {
+          id: "image-1",
+          kind: "image",
+          mimeType: "image/png",
+          displayName: "reference.png",
+          dataBase64: "YWJj",
+        },
+      ],
+      composerTokens: [
+        {
+          id: "skill-1",
+          type: "skill",
+          label: "documents",
+          leadingText: "请使用 ",
+          payload: { skillFilePath: "/skills/documents/SKILL.md" },
+        },
+      ],
+      fileComments: [],
+      status: "finished",
+      cancelRequested: false,
+      createdAt: "2026-09-04T00:00:00Z",
+      updatedAt: "2026-09-04T00:00:01Z",
+    });
+
+    expect(draft.value).toBe("修改前的正文");
+    expect(draft.attachments[0]?.previewURL).toBe(
+      "data:image/png;base64,YWJj",
+    );
+    expect(draft.tokenLeadingTexts).toEqual({ "skill-1": "请使用 " });
+    expect(effectivePromptForComposerDraft(draft)).toBe(
+      "请使用 修改前的正文",
+    );
+    expect(
+      effectivePromptForComposerDraft({ ...draft, value: "修改后的正文" }),
+    ).toBe("请使用 修改后的正文");
+  });
+});
+
+describe("prompt rewind confirm copy", () => {
+  it("uses the same side-effect warning for undo and edit send", () => {
+    expect(promptRewindConfirmDialog({ mode: "undo", hasDraft: false })).toEqual({
+      title: "撤销此消息？",
+      confirmLabel: "撤销",
+      paragraphs: [PROMPT_REWIND_SIDE_EFFECT_COPY],
+    });
+    expect(promptRewindConfirmDialog({ mode: "edit", hasDraft: true })).toEqual({
+      title: "发送编辑后的消息？",
+      confirmLabel: "发送",
+      paragraphs: [
+        PROMPT_REWIND_DRAFT_WARNING_COPY,
+        PROMPT_REWIND_SIDE_EFFECT_COPY,
+      ],
+    });
   });
 });
 

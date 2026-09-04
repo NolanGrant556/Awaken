@@ -338,6 +338,7 @@ export type RuntimeThreadWire = {
   /** Go zero time serializes as "0001-01-01T00:00:00Z" and means absent. */
   archived_at?: string;
   source?: string;
+  acp_session_id?: string;
 };
 
 export type RuntimeThread = {
@@ -358,6 +359,7 @@ export type RuntimeThread = {
   archived: boolean;
   archivedAt?: string;
   source?: string;
+  acpSessionId?: string;
 };
 
 export type RuntimeThreadListView = "active" | "archived";
@@ -741,6 +743,24 @@ export type RuntimeThreadTranscriptRun = {
 export type RuntimeThreadTranscript = {
   thread: RuntimeThread;
   runs: RuntimeThreadTranscriptRun[];
+};
+
+export type RewindThreadRequest = {
+  threadId: string;
+  targetRunId: string;
+  expectedHeadRunId: string;
+};
+
+export type RewindThreadResultWire = {
+  thread: RuntimeThreadWire;
+  target_run: RuntimeRunWire;
+  removed_run_ids: string[];
+};
+
+export type RewindThreadResult = {
+  thread: RuntimeThread;
+  targetRun: RuntimeRun;
+  removedRunIds: string[];
 };
 
 export type RuntimeInfoWire = {
@@ -2548,6 +2568,7 @@ export type AwakenBridge = {
   probeACPRunner: (runnerId: string) => Promise<ACPRunnerProbeResult>;
   getRun: (runId: string) => Promise<RuntimeRun>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
+  rewindThread: (request: RewindThreadRequest) => Promise<RewindThreadResult>;
   listThreads: (view?: RuntimeThreadListView) => Promise<RuntimeThread[]>;
   renameThread: (threadId: string, label: string) => Promise<RuntimeThread>;
   setThreadArchived: (threadId: string, archived: boolean) => Promise<SetThreadArchivedResult>;
@@ -2963,6 +2984,7 @@ export function normalizeRuntimeThread(thread: RuntimeThreadWire): RuntimeThread
         ? thread.archived_at
         : undefined,
     source: thread.source || undefined,
+    acpSessionId: thread.acp_session_id || undefined,
   };
 }
 
@@ -3033,6 +3055,16 @@ export function normalizeRuntimeThreadTranscript(
       events: entry.events,
       streamCursor: entry.stream_cursor ?? 0,
     })),
+  };
+}
+
+export function normalizeRewindThreadResult(
+  result: RewindThreadResultWire,
+): RewindThreadResult {
+  return {
+    thread: normalizeRuntimeThread(result.thread),
+    targetRun: normalizeRuntimeRun(result.target_run),
+    removedRunIds: [...result.removed_run_ids],
   };
 }
 

@@ -154,7 +154,57 @@ func loadSemanticRecordsForThread(path string) ([]agentcore.SemanticRecord, int,
 	return records, agentcore.SemanticSchemaVersion, err
 }
 
+// activeSemanticRecords folds append-only rewind markers into the one active
+// linear run lineage exposed to conversation restore and transcript replay.
+// Rewound records remain on disk for crash recovery and audit, but never flow
+// back into model context or the Workbench.
+func activeSemanticRecords(records []agentcore.SemanticRecord) []agentcore.SemanticRecord {
+	activeRunIDs := make([]string, 0)
+	knownRunIDs := make(map[string]struct{})
+	for _, record := range records {
+		if record.Kind == agentcore.SemanticKindThreadRewound {
+			target := strings.TrimSpace(stringPayload(record.Payload, "target_run_id"))
+			for index, runID := range activeRunIDs {
+				if runID == target {
+					activeRunIDs = activeRunIDs[:index]
+					break
+				}
+			}
+			continue
+		}
+		runID := strings.TrimSpace(record.RunID)
+		if runID == "" {
+			continue
+		}
+		if _, known := knownRunIDs[runID]; known {
+			continue
+		}
+		knownRunIDs[runID] = struct{}{}
+		activeRunIDs = append(activeRunIDs, runID)
+	}
+
+	active := make(map[string]struct{}, len(activeRunIDs))
+	for _, runID := range activeRunIDs {
+		active[runID] = struct{}{}
+	}
+	filtered := make([]agentcore.SemanticRecord, 0, len(records))
+	for _, record := range records {
+		if record.Kind == agentcore.SemanticKindThreadRewound {
+			continue
+		}
+		if record.RunID == "" {
+			filtered = append(filtered, record)
+			continue
+		}
+		if _, ok := active[record.RunID]; ok {
+			filtered = append(filtered, record)
+		}
+	}
+	return filtered
+}
+
 func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convcontext.Message {
+	records = activeSemanticRecords(records)
 	messages := make([]convcontext.Message, 0, len(records))
 	pendingAssistant := map[string]int{}
 	pendingProviderState := map[string]*convcontext.ProviderOpaqueMessageState{}
@@ -392,10 +442,21 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 		openHooks         map[string]agentcore.SemanticRecord
 		openSubagents     map[string]agentcore.SemanticRecord
 	}
+	activeRunIDs := make(map[string]struct{})
+	for _, record := range activeSemanticRecords(records) {
+		if runID := strings.TrimSpace(record.RunID); runID != "" {
+			activeRunIDs[runID] = struct{}{}
+		}
+	}
 	runs := map[string]*runState{}
 	for _, record := range records {
-		runID := record.RunID
+		runID := strings.TrimSpace(record.RunID)
 		if runID == "" {
+			continue
+		}
+		if _, active := activeRunIDs[runID]; !active {
+			// Rewound runs stay on disk for audit. Crash recovery must not
+			// append after the marker and resurrect them into active lineage.
 			continue
 		}
 		state, ok := runs[runID]

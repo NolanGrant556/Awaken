@@ -44,6 +44,8 @@ var (
 	ErrThreadWorkspaceMismatch      = errors.New("thread workspace mismatch")
 	ErrThreadBusy                   = errors.New("thread already has an active run")
 	ErrThreadArchived               = errors.New("thread is archived")
+	ErrThreadHistoryConflict        = errors.New("thread history changed")
+	ErrThreadRewindUnsupported      = errors.New("thread does not support rewind")
 	ErrThreadArchiveUnsupported     = errors.New("thread does not support archiving")
 	ErrThreadLabelInvalid           = errors.New("thread label is required")
 	ErrThreadModelPreferenceInvalid = errors.New("thread model preference is invalid")
@@ -567,6 +569,22 @@ type ThreadTranscriptRun struct {
 type ThreadTranscript struct {
 	Thread ThreadSnapshot
 	Runs   []ThreadTranscriptRun
+}
+
+type RewindThreadRequest struct {
+	ThreadID          string `json:"-"`
+	TargetRunID       string `json:"target_run_id"`
+	ExpectedHeadRunID string `json:"expected_head_run_id"`
+}
+
+type RewindThreadResult struct {
+	Thread        ThreadSnapshot `json:"thread"`
+	TargetRun     Run            `json:"target_run"`
+	RemovedRunIDs []string       `json:"removed_run_ids"`
+}
+
+type threadRewindMetadataStore interface {
+	ApplyThreadRewind(snapshot ThreadSnapshot, preview string) error
 }
 
 func NewRunService(
@@ -2405,6 +2423,8 @@ func (s *RunService) GetRun(runID string) (Run, error) {
 }
 
 func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, error) {
+	s.projectMutationMu.RLock()
+	defer s.projectMutationMu.RUnlock()
 	s.mu.RLock()
 	thread, ok := s.threads[threadID]
 	if !ok {
@@ -2457,7 +2477,7 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 			if err != nil {
 				return ThreadTranscript{}, err
 			}
-			durableRuns = durableRunsFromSemanticRecords(threadID, records)
+			durableRuns = durableRunsFromSemanticRecords(threadID, activeSemanticRecords(records))
 		}
 	}
 	if len(durableRuns) == 0 && len(sessionByRunID) < len(runIDs) {
@@ -2505,6 +2525,138 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 		Thread: snapshot,
 		Runs:   runs,
 	}, nil
+}
+
+// RewindThread removes the target run and every causal successor from the
+// active thread lineage. It never attempts to undo filesystem or external-tool
+// side effects produced by those runs.
+func (s *RunService) RewindThread(req RewindThreadRequest) (RewindThreadResult, error) {
+	threadID := strings.TrimSpace(req.ThreadID)
+	targetRunID := strings.TrimSpace(req.TargetRunID)
+	expectedHeadRunID := strings.TrimSpace(req.ExpectedHeadRunID)
+	if threadID == "" || targetRunID == "" || expectedHeadRunID == "" {
+		return RewindThreadResult{}, ErrInvalidInput
+	}
+	if s.journals == nil {
+		return RewindThreadResult{}, ErrPersistenceUnavailable
+	}
+
+	// Rewind is exclusive with StartRun and project lifecycle mutation so the
+	// expected-head check and durable marker form one compare-and-swap boundary.
+	s.projectMutationMu.Lock()
+	defer s.projectMutationMu.Unlock()
+	s.mu.Lock()
+	thread, ok := s.threads[threadID]
+	if ok && (thread.activeRunID != "" || thread.deletionRequested) {
+		s.mu.Unlock()
+		return RewindThreadResult{}, ErrThreadBusy
+	}
+	s.mu.Unlock()
+
+	pathStore, ok := s.threadStore.(interface{ ThreadTranscriptPath(string) string })
+	if !ok {
+		return RewindThreadResult{}, ErrThreadRewindUnsupported
+	}
+	metadataStore, ok := s.threadStore.(threadRewindMetadataStore)
+	if !ok {
+		return RewindThreadResult{}, ErrThreadRewindUnsupported
+	}
+	journalPath := pathStore.ThreadTranscriptPath(threadID)
+	schema, detectErr := DetectJournalSchema(journalPath)
+	if detectErr != nil && !os.IsNotExist(detectErr) {
+		return RewindThreadResult{}, ErrThreadRewindUnsupported
+	}
+	if detectErr == nil && schema != agentcore.SemanticSchemaVersion {
+		return RewindThreadResult{}, ErrThreadRewindUnsupported
+	}
+
+	transcript, err := s.threadStore.GetTranscript(threadID)
+	if err != nil {
+		return RewindThreadResult{}, err
+	}
+	if threadRewindUnsupported(transcript.Thread) {
+		return RewindThreadResult{}, ErrThreadRewindUnsupported
+	}
+	if len(transcript.Runs) == 0 || transcript.Runs[len(transcript.Runs)-1].Run.RunID != expectedHeadRunID {
+		return RewindThreadResult{}, ErrThreadHistoryConflict
+	}
+	targetIndex := -1
+	for index := range transcript.Runs {
+		if transcript.Runs[index].Run.RunID == targetRunID {
+			targetIndex = index
+			break
+		}
+	}
+	if targetIndex < 0 {
+		return RewindThreadResult{}, ErrThreadHistoryConflict
+	}
+	journal, err := s.journals.Open(threadID)
+	if err != nil {
+		return RewindThreadResult{}, err
+	}
+	removedRunIDs := make([]string, 0, len(transcript.Runs)-targetIndex)
+	for _, entry := range transcript.Runs[targetIndex:] {
+		removedRunIDs = append(removedRunIDs, entry.Run.RunID)
+	}
+	record := agentcore.NewSemanticRecord(
+		agentcore.SemanticKindThreadRewound,
+		threadID,
+		"",
+		"",
+		"",
+		"",
+		map[string]any{
+			"rewind_id":                   newRuntimeID("rewind"),
+			"target_run_id":               targetRunID,
+			"previous_active_head_run_id": expectedHeadRunID,
+			"mode":                        "undo",
+		},
+	)
+	if err := journal.Append(context.Background(), record); err != nil {
+		return RewindThreadResult{}, err
+	}
+	if err := journal.Flush(context.Background()); err != nil {
+		return RewindThreadResult{}, err
+	}
+
+	// Journal is authority after flush. Drop in-memory sessions before the
+	// metadata projection so a later List/Get cannot emit the removed suffix.
+	s.mu.Lock()
+	for _, runID := range removedRunIDs {
+		delete(s.sessions, runID)
+	}
+	delete(s.threads, threadID)
+	s.mu.Unlock()
+	if err := s.journals.CloseThread(threadID); err != nil {
+		log.Printf("rewind journal close failed for %s after durable marker: %v", threadID, err)
+	}
+
+	next := transcript.Thread
+	next.ActiveRunID = ""
+	next.RunID = ""
+	preview := ""
+	if targetIndex > 0 {
+		previous := transcript.Runs[targetIndex-1].Run
+		next.RunID = previous.RunID
+		preview = strings.TrimSpace(previous.Input)
+	}
+	next.UpdatedAt = time.Now().UTC()
+	if err := metadataStore.ApplyThreadRewind(next, preview); err != nil {
+		log.Printf("rewind metadata projection failed for %s after durable marker: %v", threadID, err)
+	}
+
+	return RewindThreadResult{
+		Thread:        next,
+		TargetRun:     transcript.Runs[targetIndex].Run,
+		RemovedRunIDs: removedRunIDs,
+	}, nil
+}
+
+func threadRewindUnsupported(thread ThreadSnapshot) bool {
+	source := strings.TrimSpace(thread.Source)
+	return thread.Archived ||
+		source == ScheduledClientSource ||
+		source == ACPThreadSource
 }
 
 func isActiveTranscriptReplaySupplement(kind agentcore.SemanticKind) bool {

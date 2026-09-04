@@ -540,3 +540,60 @@ func TestExecutionJournalRealClosedFileWriteFailureKeepsAssignedPendingRecord(t 
 		t.Fatalf("failed durable write must retain assigned sequence, next=%d", journal.NextSeq())
 	}
 }
+
+func TestRecoverOrphanRunsDoesNotResurrectRewoundLineage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "thread_rewound_orphan.jsonl")
+	journal, err := NewExecutionJournal(path, "thread_rewound_orphan")
+	if err != nil {
+		t.Fatalf("NewExecutionJournal: %v", err)
+	}
+	ctx := context.Background()
+	records := []agentcore.SemanticRecord{
+		agentcore.NewSemanticRecord(agentcore.SemanticKindUserMessage, "thread_rewound_orphan", "run_rewound", "", "", "", map[string]any{"content": "old prompt"}),
+		agentcore.NewSemanticRecord(agentcore.SemanticKindRunStarted, "thread_rewound_orphan", "run_rewound", "", "", "", map[string]any{}),
+		agentcore.NewSemanticRecord(agentcore.SemanticKindModelRequest, "thread_rewound_orphan", "run_rewound", "turn_1", "", "", map[string]any{
+			"request_id": "request_rewound", "purpose": "agent_turn", "model_id": "test-model", "protocol_family": "openai_chat",
+		}),
+		agentcore.NewSemanticRecord(agentcore.SemanticKindThreadRewound, "thread_rewound_orphan", "", "", "", "", map[string]any{
+			"target_run_id": "run_rewound",
+		}),
+	}
+	if err := journal.AppendBatch(ctx, records); err != nil {
+		t.Fatalf("AppendBatch: %v", err)
+	}
+	if err := journal.Flush(ctx); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	loaded, err := ReadExecutionJournal(path)
+	if err != nil {
+		t.Fatalf("ReadExecutionJournal: %v", err)
+	}
+	reopened, err := NewExecutionJournal(path, "thread_rewound_orphan")
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer reopened.Close()
+	recovered, err := recoverOrphanRuns(ctx, reopened, loaded)
+	if err != nil {
+		t.Fatalf("recoverOrphanRuns: %v", err)
+	}
+	if len(recovered) != len(loaded) {
+		t.Fatalf("expected no recovery records after rewind, got %d records from %d", len(recovered), len(loaded))
+	}
+	for _, record := range recovered {
+		if record.Kind == agentcore.SemanticKindRunTerminal || record.Kind == agentcore.SemanticKindModelUsage {
+			t.Fatalf("rewound run was resurrected by recovery: %+v", record)
+		}
+	}
+	active := activeSemanticRecords(recovered)
+	for _, record := range active {
+		if record.RunID == "run_rewound" {
+			t.Fatalf("rewound run leaked into active lineage: %+v", record)
+		}
+	}
+}

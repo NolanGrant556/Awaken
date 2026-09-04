@@ -173,8 +173,8 @@ describe("光学与网格不变量", () => {
     }
   });
 
-  it("94 个确认候选全部静态固化并保留 Lucide 来源与许可", () => {
-    expect(APPROVED_LUCIDE_ICON_NAMES).toHaveLength(94);
+  it("95 个确认候选全部静态固化并保留 Lucide 来源与许可", () => {
+    expect(APPROVED_LUCIDE_ICON_NAMES).toHaveLength(95);
     expect(Object.keys(APPROVED_LUCIDE_SOURCES).sort()).toEqual(APPROVED_LUCIDE_ICON_NAMES);
     for (const name of APPROVED_LUCIDE_ICON_NAMES) {
       const icon = getAwakenIcon(name);

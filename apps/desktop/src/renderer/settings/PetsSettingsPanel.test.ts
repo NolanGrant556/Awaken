@@ -185,6 +185,11 @@ function createMockRuntimeClient(): RuntimeClient {
       updatedAt: new Date().toISOString(),
     })),
     getThreadTranscript: vi.fn(async () => ({ thread: {} as never, runs: [] })),
+    rewindThread: vi.fn(async () => ({
+      thread: {} as never,
+      targetRun: {} as never,
+      removedRunIds: [],
+    })),
     listThreads: vi.fn(async () => []),
     renameThread: vi.fn(async () => ({
       archived: false,

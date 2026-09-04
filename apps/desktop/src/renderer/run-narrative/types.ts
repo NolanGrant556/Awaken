@@ -134,6 +134,7 @@ export type RunNarrativeItem =
   | {
       kind: "prompt";
       id: string;
+      runId?: string;
       text: string;
       attachments?: RunInputAttachment[];
       tokens?: PromptNarrativeToken[];

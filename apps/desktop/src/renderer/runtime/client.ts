@@ -109,6 +109,8 @@ import {
   type SkillProjectRoots,
   type SkillPreviewResponse,
   type RuntimeThreadTranscript,
+  type RewindThreadRequest,
+  type RewindThreadResult,
   type RuntimeThread,
   type RuntimeThreadListView,
   type SetThreadArchivedResult,
@@ -379,6 +381,7 @@ export type RuntimeClient = {
   getModelProfileBalances: () => Promise<ModelProfileBalancesResult>;
   getRun: (runId: string) => Promise<RuntimeRun>;
   getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
+  rewindThread: (request: RewindThreadRequest) => Promise<RewindThreadResult>;
   listThreads: (view?: RuntimeThreadListView) => Promise<RuntimeThread[]>;
   renameThread: (threadId: string, label: string) => Promise<RuntimeThread>;
   setThreadArchived: (threadId: string, archived: boolean) => Promise<SetThreadArchivedResult>;
@@ -714,6 +717,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getModelProfileBalances: () => bridge.getModelProfileBalances(),
     getRun: (runId) => bridge.getRun(runId),
     getThreadTranscript: (threadId) => bridge.getThreadTranscript(threadId),
+    rewindThread: (request) => bridge.rewindThread(request),
     listThreads: (view) => bridge.listThreads(view),
     renameThread: (threadId, label) => bridge.renameThread(threadId, label),
     setThreadArchived: (threadId, archived) => bridge.setThreadArchived(threadId, archived),

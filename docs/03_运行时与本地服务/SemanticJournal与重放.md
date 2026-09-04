@@ -12,7 +12,7 @@ runtime_notice, recovery_decision, context_compacted, context_compacted_v2, turn
 run_terminal, persistence_warning, memory_recalled, memory_mutated,
 context_snapshot, model_request, model_usage, context_epoch, instruction_snapshot,
 provider_opaque_state, hook_snapshot, hook_invocation_started,
-hook_invocation_completed
+hook_invocation_completed, thread_rewound,
 computer_session_opened, computer_state_changed,
 computer_observation_captured, computer_action_prepared,
 computer_review_requested, computer_review_resolved,
@@ -22,6 +22,8 @@ computer_session_closed, computer_media_accessed
 ```
 
 `permission_decision` 是工具自动策略或 transform 的记录，不代表通用 Approval 能力。
+
+`thread_rewound` 是普通会话 active lineage 改写的 append-only authority，本身不投影 AG-UI frame。读取、conversation 恢复与 transcript 重放必须先按该 marker 过滤目标 run 及其因果后缀；物理 journal 不截断。交互、CAS、副作用与恢复规则由 [01 用户消息撤销与编辑](../01_桌面工作台/中间交互区域/用户消息撤销与编辑设计契约.md) 唯一拥有。
 
 `hook_snapshot` 是 run 配置审计事实，紧随 `run_started` 耐久化；它只含 snapshot ID、schema version、enabled/diagnostic 数量和各来源的 kind/status/digest/hook count，不含路径、matcher、command 或环境。它不投影 AG-UI frame，也不证明命令已经执行。每次真实执行在 spawn 前 append+flush `hook_invocation_started`，结束后 append+flush `hook_invocation_completed`；completion 只保存 identity、event/source、spawn/process/status/action/reason、duration、输入摘要、输出摘要与有界 preview，不保存 command、完整路径、输入正文、环境或完整 stdout/stderr。
 
@@ -82,7 +84,7 @@ agent_id               # 仅 child runner
 
 `context_snapshot` 保存版本、basis、模型/协议/window/threshold、request-shape digest 和 typed contribution 计数；`model_request` 保存 request identity、purpose、模型/协议、shape digest、估算和 retry，不保存 HTTP body；`model_usage` 保存 provider/profile/credential/model/endpoint、cache metadata、nullable normalized/raw usage、pricing/cost、request ID、latency和终态。缺失 provider 字段保持缺失，不折 0。live 与 replay 使用同一 semantic projector，最近 provider usage 不反向改写当前 context snapshot。Renderer 回放同一 thread 的多个 run 时保留最后一个合法 `context_snapshot`；`compact_summary` / `native_compaction` usage 只作为压缩冻结的耐久时序标记，不作为面板用量，后续完整 snapshot 只有已经满足自身 hard target 才能解除没有 live lifecycle frame 的回放冻结。失败压缩后的高位 snapshot 与后续 run 没有快照都不能覆盖已恢复值；新的 `RUN_STARTED` 才结束上一 run 的失败冻结。Core 启动新 run 时则可独立从最后兼容硬边界之后恢复最近成功完整 `agent_turn` 的 provider total/input 与 `sent_estimated_input_tokens`，只作为 governor 的预算锚点；同一 context epoch 内该锚点是非递减下界，pre-epoch admission 与 post-epoch sent request 的估算阶段差异不能降低它，identity 不兼容、字段不完整或成功 compact 后才清除或拒绝恢复。`instruction_snapshot` 则是 run-scoped：重放按所属 run 恢复，不能像 thread-scoped context snapshot 跨 run 沿用。
 
-Desktop 打开 thread 时先调用 `POST /v1/threads/{thread_id}/context-snapshot`，body 只复用当前 run profile 合同。Core 从 durable conversation 恢复 compact、附件、tool result 和已激活 Skill，结合当前 tool/MCP availability、Skill catalog、Memory 与当前 profile 生成下一请求的 v4 snapshot，flush 后 Desktop 再 GET transcript。该动作不发 provider 请求、不写 `model_request/model_usage`、不保存 API key；相同 projection 不重复追加。旧 run 的终态 session 仍驻留内存时，transcript 合并必须把此类 replay supplement 投影出来。没有可运行 profile 或 active run 正在拥有 live projection 时，历史 transcript 仍可读，不伪造 snapshot。
+Desktop 打开 thread 时先调用 `POST /v1/threads/{thread_id}/context-snapshot`，body 只复用当前 run profile 合同。Core 从 durable conversation 恢复 compact、附件、tool result 和已激活 Skill，结合当前 tool/MCP availability、Skill catalog、Memory 与当前 profile 生成下一请求的 v4 snapshot，flush 后 Desktop 再 GET transcript。该动作不发 provider 请求、不写 `model_request/model_usage`、不保存 API key；相同 projection 不重复追加。旧 run 的终态 session 仍驻留内存时，transcript 合并必须把此类 replay supplement 投影出来。没有可运行 profile、active run 正在拥有 live projection，或 active lineage 为空（例如撤销首轮）时，历史 transcript 仍可读，不伪造 snapshot，refresh 返回成功且不追加 record。
 
 `reasoning_summary` 是 provider-neutral 的可展示事实：其来源只能是 LLM transport 已归一化的 `OnContent(text, isThinking=true)` 流；OpenAI-compatible、Anthropic 或后续适配器越过 `src/llm` 后都走同一写入与重放路径。模型没有发出可展示 reasoning 时不创建该记录。它不进入下一次模型上下文，也不替代 provider 私有续接状态。
 

@@ -125,6 +125,7 @@ export function actionsForThreadTranscript(
     if (prompt || hasPromptAttachments || hasPromptTokens || hasPromptFileComments) {
       actions.push({
         type: "run/requested",
+        runId: entry.run.runId,
         prompt,
         promptAttachments: entry.run.inputAttachments,
         promptTokens: entry.run.composerTokens,

@@ -150,6 +150,49 @@ func TestRefreshThreadContextSnapshotKeepsInstructionEpochIdentity(t *testing.T)
 	}
 }
 
+func TestRefreshThreadContextSnapshotNoopsWhenActiveLineageIsEmpty(t *testing.T) {
+	setRuntimeUserDataDir(t)
+	workspace := t.TempDir()
+	service := newContextRefreshTestService()
+	profile := &ModelProfileConfig{
+		ProfileID: "profile-deepseek", ProviderID: "deepseek", ModelID: "deepseek-v4-pro",
+		BaseURL: "https://api.deepseek.com", Protocol: "openai_chat", APIKey: "secret",
+		CredentialRevision: 1, ContextWindow: 256_000, MaxTokens: 16_000,
+	}
+	run, err := service.StartRun(StartRunRequest{
+		Input:        "唯一一轮",
+		Workspace:    WorkspaceConfig{WorkspaceRoot: workspace},
+		ModelProfile: profile,
+	})
+	if err != nil {
+		t.Fatalf("start seed run: %v", err)
+	}
+	waitForRunTerminal(t, service, run.RunID)
+	if _, err := service.RewindThread(RewindThreadRequest{
+		ThreadID:          run.ThreadID,
+		TargetRunID:       run.RunID,
+		ExpectedHeadRunID: run.RunID,
+	}); err != nil {
+		t.Fatalf("rewind only run: %v", err)
+	}
+
+	result, err := service.RefreshThreadContextSnapshot(context.Background(), run.ThreadID, profile)
+	if err != nil {
+		t.Fatalf("refresh empty lineage: %v", err)
+	}
+	if result.Persisted {
+		t.Fatal("empty lineage must not persist a context snapshot")
+	}
+
+	transcript, err := service.GetThreadTranscript(run.ThreadID)
+	if err != nil {
+		t.Fatalf("get empty transcript: %v", err)
+	}
+	if len(transcript.Runs) != 0 {
+		t.Fatalf("expected empty active lineage, got %+v", transcript.Runs)
+	}
+}
+
 func TestLatestDurableRunPrefersJournalReplayOrder(t *testing.T) {
 	restored := restoredTranscript{RunIDs: []string{"run-old", "run-latest"}}
 	meta := storedThreadRecord{Snapshot: ThreadSnapshot{RunID: "run-old"}}

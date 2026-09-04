@@ -522,6 +522,7 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		agentcore.SemanticKindComputerSessionClosed:
 		return projectComputerEvent(base, record.Kind, payload)
 	case agentcore.SemanticKindThread,
+		agentcore.SemanticKindThreadRewound,
 		agentcore.SemanticKindFileChange,
 		// Progressive-disclosure activation is host-internal bookkeeping:
 		// the tool_find tool call/result already carries the user-visible

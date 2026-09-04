@@ -279,7 +279,7 @@ describe("RunStage layout", () => {
       '<div className="project-files-tab-rail">',
     );
     const tabsStart = appSource.indexOf(
-      '<div className="project-files-tabs"',
+      'className="project-files-tabs"',
       railStart,
     );
     const addStart = appSource.indexOf('aria-label="新建文件标签"', tabsStart);
@@ -339,8 +339,8 @@ describe("RunStage layout", () => {
     expect(appSource).toContain(
       "artifactPreviewTabMediaIconConcept(\n                          artifactSelection.mediaKind,",
     );
-    expect(appSource).toContain(
-      '<AwakenIcon concept={mediaIconConcept} size={16} />',
+    expect(appSource).toMatch(
+      /<AwakenIcon\s+concept=\{mediaIconConcept\}\s+size=\{16\}/,
     );
     expect(appSource).toContain(
       "data-file-icon={mediaIconConcept ?? iconKind}",

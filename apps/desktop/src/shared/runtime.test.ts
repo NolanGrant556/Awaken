@@ -8,6 +8,7 @@ import {
   normalizeModelProvider,
   normalizeRuntimeRun,
   normalizeRuntimeThread,
+  normalizeRewindThreadResult,
   normalizeStartRunRequest,
 } from "./runtime.js";
 
@@ -353,6 +354,37 @@ describe("runtime shared start run normalization", () => {
         },
       ],
     });
+  });
+});
+
+describe("runtime shared thread rewind normalization", () => {
+  it("normalizes the canonical target run and active thread projection", () => {
+    const result = normalizeRewindThreadResult({
+      thread: {
+        thread_id: "thread-1",
+        label: "Thread",
+        run_id: "run-1",
+        workspace: { workspace_root: "/tmp" },
+        created_at: "2026-09-04T00:00:00Z",
+        updated_at: "2026-09-04T00:01:00Z",
+      },
+      target_run: {
+        run_id: "run-2",
+        thread_id: "thread-1",
+        input: "撤销我",
+        status: "finished",
+        cancel_requested: false,
+        created_at: "2026-09-04T00:00:30Z",
+        updated_at: "2026-09-04T00:00:40Z",
+      },
+      removed_run_ids: ["run-2", "run-3"],
+    });
+    expect(result.thread.runId).toBe("run-1");
+    expect(result.targetRun).toMatchObject({
+      runId: "run-2",
+      input: "撤销我",
+    });
+    expect(result.removedRunIds).toEqual(["run-2", "run-3"]);
   });
 });
 

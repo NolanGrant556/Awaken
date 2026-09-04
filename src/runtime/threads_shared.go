@@ -24,7 +24,7 @@ func restoreThreadFromDurableRecord(record storedThreadRecord, path, threadID st
 		if loadErr != nil {
 			return storedThreadRecord{}, restoredTranscript{}, loadErr
 		}
-		restored = restoredTranscriptFromSemantic(records)
+		restored = restoredTranscriptFromSemantic(activeSemanticRecords(records))
 	} else {
 		restored, err = loadRestoredTranscriptAtPath(path)
 		if err != nil {
@@ -42,6 +42,12 @@ func restoreThreadFromDurableRecord(record storedThreadRecord, path, threadID st
 	}
 	if record.Snapshot.UpdatedAt.IsZero() {
 		record.Snapshot.UpdatedAt = restored.UpdatedAt
+	}
+	if schema == agentcore.SemanticSchemaVersion {
+		record.Snapshot.RunID = ""
+		if len(restored.RunIDs) > 0 {
+			record.Snapshot.RunID = restored.RunIDs[len(restored.RunIDs)-1]
+		}
 	}
 	return record, restored, nil
 }
@@ -62,6 +68,7 @@ func threadTranscriptFromDurableRecord(record storedThreadRecord, path, threadID
 		if loadErr != nil {
 			return ThreadTranscript{}, loadErr
 		}
+		records = activeSemanticRecords(records)
 		restored := restoredTranscriptFromSemantic(records)
 		runs := durableRunsFromSemanticRecords(threadID, records)
 		snapshot := record.Snapshot
@@ -74,7 +81,8 @@ func threadTranscriptFromDurableRecord(record storedThreadRecord, path, threadID
 		if snapshot.UpdatedAt.IsZero() {
 			snapshot.UpdatedAt = restored.UpdatedAt
 		}
-		if snapshot.RunID == "" && len(restored.RunIDs) > 0 {
+		snapshot.RunID = ""
+		if len(restored.RunIDs) > 0 {
 			snapshot.RunID = restored.RunIDs[len(restored.RunIDs)-1]
 		}
 		ordered := make([]ThreadTranscriptRun, 0, len(restored.RunIDs))

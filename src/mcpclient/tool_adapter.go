@@ -34,6 +34,7 @@ type McpToolAdapter struct {
 	description     string
 	parameters      []tool.ToolParameter
 	readOnly        bool
+	errorReadOnly   bool // Original, internally consistent provider declaration.
 	destructive     bool
 	openWorld       bool
 	requiresAuth    bool
@@ -95,6 +96,7 @@ func NewMcpToolAdapter(manager *Manager, serverName string, mcpTool *mcp.Tool, o
 		adapter.loadOutputSchema()
 	}
 	if mcpTool.Annotations != nil {
+		adapter.errorReadOnly = mcpTool.Annotations.ReadOnlyHint && (mcpTool.Annotations.DestructiveHint == nil || !*mcpTool.Annotations.DestructiveHint)
 		adapter.readOnly = mcpTool.Annotations.ReadOnlyHint
 		if mcpTool.Annotations.DestructiveHint != nil {
 			adapter.destructive = *mcpTool.Annotations.DestructiveHint
@@ -415,6 +417,7 @@ func (a *McpToolAdapter) callResultOutcome(result *mcp.CallToolResult) tool.Exec
 		outcome := tool.FailedOutcome(content, errorCodeMCPReportedError, tool.ErrorCategoryDomain, false)
 		outcome.RecoveryOptions = []string{"inspect_tool_error", "adjust_arguments_or_strategy"}
 		outcome.Diagnostic = a.mcpDiagnostic(result)
+		a.applyErrorMetadata(&outcome, result)
 		return outcome
 	}
 

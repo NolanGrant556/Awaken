@@ -77,6 +77,8 @@ signature 由 tool name + canonical arguments hash 组成，fingerprint 用稳�
 
 同 capability 存在多个 provider 也不允许 runtime 在失败后暗中换实现。若 provider A 已 `transport=completed` 且返回 partial/observed side effect，当次 call 必须以 A 的失败与变更事实终止，不自动调用 provider B。只有模型在检查外部状态后明确发出新的 B tool call，B 才可执行。
 
+MCP 可选只读错误扩展由 [06 工具接入](../06_MCP运行时/工具接入与技能桥接.md#11-可选只读错误语义) 拥有。provider 内部恢复耗尽后进入本节 non-retryable 预算；宿主不叠加重发，也不把下游超时误认成输入校验失败。未知副作用仍遵守原有核查规则。
+
 ## 4. 耐久顺序
 
 有副作用工具必须先写 tool call/decision 语义记录，再开始 transport；结果和 observed changes 完成后再写 terminal。live 与 replay 使用同一 semantic projector。

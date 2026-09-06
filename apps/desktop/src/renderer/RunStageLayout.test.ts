@@ -624,7 +624,7 @@ describe("RunStage layout", () => {
 
     expect(collapsedText).toContain(".execution-prompt-bubble-main::after");
     expect(collapsedText).toContain("padding-bottom: 0;");
-    expect(collapsedText).toContain("height: 6px;");
+    expect(collapsedText).toContain("height: 3px;");
     expect(collapsedText).toContain("linear-gradient(");
     expect(collapsedText).toContain("var(--execution-prompt-surface)");
     expect(collapsedText).toContain("pointer-events: none;");

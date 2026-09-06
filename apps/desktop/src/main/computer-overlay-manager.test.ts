@@ -6,10 +6,11 @@ const electronMocks = vi.hoisted(() => {
   const handlers = new Map<string, (...args: any[]) => any>();
   const windows: any[] = [];
   let nextWebContentsId = 100;
-  const BrowserWindow = vi.fn(function BrowserWindowMock() {
+  const BrowserWindow = vi.fn(function BrowserWindowMock(options: Record<string, unknown> = {}) {
     const listeners = new Map<string, () => void>();
     const webContentsListeners = new Map<string, () => void>();
     const window = {
+      options,
       destroyed: false,
       visible: false,
       minimized: false,
@@ -47,6 +48,7 @@ const electronMocks = vi.hoisted(() => {
       setVisibleOnAllWorkspaces: vi.fn(),
       setAlwaysOnTop: vi.fn(),
       moveTop: vi.fn(),
+      setIgnoreMouseEvents: vi.fn(),
       on: vi.fn((name: string, listener: () => void) => {
         listeners.set(name, listener);
       }),
@@ -75,11 +77,16 @@ vi.mock("electron", () => ({
     getDisplayNearestPoint: vi.fn(() => ({
       workArea: { x: 0, y: 24, width: 1440, height: 876 },
     })),
+    getPrimaryDisplay: vi.fn(() => ({
+      bounds: { x: 0, y: 0, width: 1440, height: 900 },
+      workArea: { x: 0, y: 24, width: 1440, height: 876 },
+    })),
   },
 }));
 
 import {
   ComputerOverlayManager,
+  computerPointerScreenPoint,
   isComputerToolName,
   resolveComputerOverlayPaths,
 } from "./computer-overlay-manager.js";
@@ -155,7 +162,7 @@ describe("ComputerOverlayManager", () => {
       "run-1",
     );
     expect(overlay.hide).not.toHaveBeenCalled();
-    expect(electronMocks.BrowserWindow).toHaveBeenCalledTimes(1);
+    expect(electronMocks.BrowserWindow).toHaveBeenCalledTimes(2);
 
     manager.handleRunEvent(
       event({
@@ -178,7 +185,7 @@ describe("ComputerOverlayManager", () => {
       "run-1",
     );
     expect(overlay.hide).not.toHaveBeenCalled();
-    expect(electronMocks.BrowserWindow).toHaveBeenCalledTimes(1);
+    expect(electronMocks.BrowserWindow).toHaveBeenCalledTimes(2);
 
     manager.handleRunEvent(event({ type: "RUN_FINISHED", runId: "run-1" }), "run-1");
     expect(overlay.hide).toHaveBeenCalledTimes(1);
@@ -260,18 +267,79 @@ describe("ComputerOverlayManager", () => {
       }),
       "run-stop",
     );
-    await vi.waitFor(() =>
-      expect(electronMocks.windows[0]?.showInactive).toHaveBeenCalledTimes(1),
-    );
+    await vi.waitFor(() => expect(electronMocks.windows).toHaveLength(2));
     const stopHandler = electronMocks.handlers.get(COMPUTER_OVERLAY_CHANNELS.stop);
 
-    const result = await stopHandler?.({ sender: { id: 9999 } });
+    const cursor = electronMocks.windows[1];
+    const fromUnknown = await stopHandler?.({ sender: { id: 9999 } });
+    const fromCursor = await stopHandler?.({ sender: cursor.webContents });
 
-    expect(result).toEqual({
+    expect(fromUnknown).toEqual({
+      ok: false,
+      message: "Computer Use 当前没有正在执行的调用。",
+    });
+    expect(fromCursor).toEqual({
       ok: false,
       message: "Computer Use 当前没有正在执行的调用。",
     });
     expect(stopComputerUse).not.toHaveBeenCalled();
+    await manager.dispose();
+  });
+
+  it("places a click-through cursor and hides it during handoff", async () => {
+    const manager = new ComputerOverlayManager({ stopComputerUse: vi.fn(async () => undefined) });
+    manager.initialize();
+    manager.handleRunEvent(
+      event({
+        type: "TOOL_CALL_START",
+        runId: "run-1",
+        toolCallName: "computer_act",
+      }),
+      "run-1",
+    );
+    await vi.waitFor(() => expect(electronMocks.windows).toHaveLength(2));
+    const cursor = electronMocks.windows[1];
+    expect(cursor.options).toMatchObject({
+      focusable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+    });
+    expect(cursor.setIgnoreMouseEvents).toHaveBeenCalledWith(true, { forward: true });
+    expect(cursor.setBounds).toHaveBeenCalledWith(
+      expect.objectContaining({ x: 720 - 1, y: 450 - 1, width: 32, height: 32 }),
+      false,
+    );
+
+    manager.handleRunEvent(
+      event({
+        type: "AWAKEN_COMPUTER_POINTER_HINT",
+        runId: "run-1",
+        computerPointerKind: "click",
+        computerPointerSpace: "primary_display_dip",
+        computerPointerX: 100,
+        computerPointerY: 40,
+      }),
+      "run-1",
+    );
+    await vi.waitFor(() =>
+      expect(cursor.setBounds).toHaveBeenCalledWith(
+        expect.objectContaining({ x: 99, y: 39 }),
+        false,
+      ),
+    );
+
+    manager.handleRunEvent(
+      event({ type: "AWAKEN_COMPUTER_HANDOFF_STARTED", runId: "run-1" }),
+      "run-1",
+    );
+    expect(cursor.hide).toHaveBeenCalled();
+    expect(electronMocks.windows[0].hide).not.toHaveBeenCalled();
+
+    manager.handleRunEvent(
+      event({ type: "AWAKEN_COMPUTER_HANDOFF_ENDED", runId: "run-1" }),
+      "run-1",
+    );
+    await vi.waitFor(() => expect(cursor.showInactive.mock.calls.length).toBeGreaterThan(1));
     await manager.dispose();
   });
 });
@@ -284,10 +352,48 @@ describe("computer overlay helpers", () => {
     expect(isComputerToolName("bash")).toBe(false);
   });
 
+  it("maps pointer hints into Electron screen points", () => {
+    expect(
+      computerPointerScreenPoint(
+        event({
+          type: "AWAKEN_COMPUTER_POINTER_HINT",
+          computerPointerX: 10,
+          computerPointerY: 20,
+          computerPointerSpace: "primary_display_dip",
+        }),
+        { x: 100, y: 50 },
+      ),
+    ).toEqual({ x: 110, y: 70 });
+    expect(
+      computerPointerScreenPoint(
+        event({
+          type: "AWAKEN_COMPUTER_POINTER_HINT",
+          computerPointerX: 0,
+          computerPointerY: 0,
+          computerPointerSpace: "screen_dip",
+        }),
+        { x: 100, y: 50 },
+      ),
+    ).toEqual({ x: 0, y: 0 });
+    expect(
+      computerPointerScreenPoint(
+        event({
+          type: "AWAKEN_COMPUTER_POINTER_HINT",
+          computerPointerX: 12,
+          computerPointerY: 8,
+          computerPointerSpace: "window_pixel",
+        }),
+        { x: 0, y: 0 },
+      ),
+    ).toBeNull();
+  });
+
   it("resolves preload and renderer paths from dist/main", () => {
     expect(resolveComputerOverlayPaths("/app/dist/main")).toEqual({
       preloadPath: "/app/dist/preload/computer-overlay.js",
       rendererPath: "/app/dist/renderer/computer-overlay.html",
+      cursorPreloadPath: "/app/dist/preload/computer-cursor.js",
+      cursorRendererPath: "/app/dist/renderer/computer-cursor.html",
     });
   });
 });

@@ -394,6 +394,7 @@ export function projectAguiEventToNarrative(
     }
     case "AWAKEN_ARTIFACT_CREATED":
     case "AWAKEN_ARTIFACT_UPDATED":
+    case "AWAKEN_COMPUTER_POINTER_HINT":
       return base;
     case "AWAKEN_SKILL_DISCOVERED":
       return base;

@@ -24,6 +24,7 @@ export default defineConfig(({ mode }) => {
           main: "index.html",
           petOverlay: "pet-overlay.html",
           computerOverlay: "computer-overlay.html",
+          computerCursor: "computer-cursor.html",
         },
       },
     },

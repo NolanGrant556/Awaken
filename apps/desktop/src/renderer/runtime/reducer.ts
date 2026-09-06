@@ -3724,6 +3724,8 @@ export function reduceRuntimeState(
           });
           break;
         }
+        case "AWAKEN_COMPUTER_POINTER_HINT":
+          break;
         case "AWAKEN_ARTIFACT_CREATED":
         case "AWAKEN_ARTIFACT_UPDATED": {
           nextState.artifacts = upsertArtifact(

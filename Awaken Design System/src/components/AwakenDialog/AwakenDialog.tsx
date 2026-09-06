@@ -26,6 +26,7 @@ export type AwakenDialogProps = {
   bodyClassName?: string;
   bodyRef?: Ref<HTMLDivElement>;
   bodyTabIndex?: number;
+  modal?: boolean;
 };
 
 const focusableSelector = [
@@ -51,6 +52,7 @@ export function AwakenDialog({
   bodyClassName,
   bodyRef,
   bodyTabIndex,
+  modal = true,
 }: AwakenDialogProps) {
   const generatedTitleId = useId();
   const titleId = ariaLabelledBy ?? generatedTitleId;
@@ -115,7 +117,7 @@ export function AwakenDialog({
           className ?? "",
         ].filter(Boolean).join(" ")}
         role="dialog"
-        aria-modal="true"
+        aria-modal={modal ? "true" : "false"}
         aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => {

@@ -67,7 +67,10 @@ export function AwakenDialog({
     (initialFocusRef?.current ?? firstFocusable ?? dialog)?.focus();
 
     return () => {
-      if (previousActiveElement instanceof HTMLElement) {
+      if (
+        previousActiveElement instanceof HTMLElement &&
+        previousActiveElement.isConnected
+      ) {
         previousActiveElement.focus();
       }
     };

@@ -3155,7 +3155,6 @@ export function App() {
       return;
     }
     setPendingPromptRewind(undefined);
-    setEditingPrompt(undefined);
     setRevealPromptReplacement(false);
   }, [revealPromptReplacement, visibleNarrativeItems]);
   const replayedNarrativeItemIds = useMemo(
@@ -6284,6 +6283,7 @@ export function App() {
         replaceTargetRunId: targetRunId,
         onReplacementCommitted: () => {
           replacementCommitted = true;
+          setEditingPrompt(undefined);
           setRevealPromptReplacement(true);
         },
       });

@@ -222,6 +222,16 @@ export function shouldUseCenterComposer({
   return !hasNarrative && !hasRun;
 }
 
+export function workbenchHasRun({
+  runId,
+  isBusy,
+}: {
+  runId?: string;
+  isBusy: boolean;
+}): boolean {
+  return Boolean(runId) || isBusy;
+}
+
 export function projectVisibleNarrativeItems({
   items,
   isBusy,

@@ -138,6 +138,7 @@ import {
   projectVisibleNarrativeItems,
   shouldShowAssistantAnswerFooter,
   shouldUseCenterComposer,
+  workbenchHasRun,
   turnMarkerRailHeight,
   turnMarkerRailDisplay,
   type NarrativeTurnBodySegment,
@@ -5295,7 +5296,10 @@ export function App() {
   const showCenterComposer = shouldUseCenterComposerWithFileWorkspace({
     standardCenterComposer: shouldUseCenterComposer({
       hasNarrative: visibleNarrativeItems.length > 0,
-      hasRun: Boolean(runtimeState.runId),
+      hasRun: workbenchHasRun({
+        runId: runtimeState.runId,
+        isBusy,
+      }),
       hasNotice: Boolean(notice),
       hasError: Boolean(runtimeState.errorMessage),
       needsRestart: desktopNeedsRestart,
@@ -5902,7 +5906,7 @@ export function App() {
     forceNewThread?: boolean;
     draft?: ThreadComposerDraft;
     restoreCanonicalOnFailure?: boolean;
-    resetEmptyRewoundThread?: boolean;
+    replaceTargetRunId?: string;
   }): Promise<void> {
     if (!desktopReady) {
       setNotice(
@@ -6009,20 +6013,26 @@ export function App() {
     terminalSeenRef.current = false;
     setNotice(null);
     prepareForRunStart();
-    if (options?.resetEmptyRewoundThread && runtimeState.activeThreadId) {
+    if (options?.replaceTargetRunId) {
       dispatch({
-        type: "run/threadReplayStarted",
-        threadId: runtimeState.activeThreadId,
+        type: "run/promptReplaced",
+        targetRunId: options.replaceTargetRunId,
+        prompt,
+        promptAttachments: forceNewThread ? [] : runInputAttachments,
+        promptTokens: forceNewThread ? [] : draftPromptTokens,
+        promptFileComments: forceNewThread ? [] : draftFileComments,
+        startedAtMs: Date.now(),
+      });
+    } else {
+      dispatch({
+        type: "run/requested",
+        prompt,
+        promptAttachments: forceNewThread ? [] : runInputAttachments,
+        promptTokens: forceNewThread ? [] : draftPromptTokens,
+        promptFileComments: forceNewThread ? [] : draftFileComments,
+        startedAtMs: Date.now(),
       });
     }
-    dispatch({
-      type: "run/requested",
-      prompt,
-      promptAttachments: forceNewThread ? [] : runInputAttachments,
-      promptTokens: forceNewThread ? [] : draftPromptTokens,
-      promptFileComments: forceNewThread ? [] : draftFileComments,
-      startedAtMs: Date.now(),
-    });
     clearThreadComposerDraft();
 
     try {
@@ -6237,9 +6247,10 @@ export function App() {
     if (!editingPrompt) {
       return;
     }
+    const targetRunId = editingPrompt.runId;
     setPromptReplacementPending(true);
     try {
-      const result = await rewindPromptRun(editingPrompt.runId, {
+      const result = await rewindPromptRun(targetRunId, {
         applyReplay: false,
       });
       if (!result) {
@@ -6254,30 +6265,10 @@ export function App() {
         editedDraft,
         composerDraftOwnerKey(result.thread.threadId),
       );
-      const predecessorRunId = result.thread.runId || undefined;
-      if (predecessorRunId) {
-        dispatch({
-          type: "run/threadReplayStarted",
-          threadId: result.thread.threadId,
-          runId: predecessorRunId,
-        });
-        try {
-          await replayThreadTranscript(
-            result.thread.threadId,
-            threadLoadSeqRef.current,
-          );
-          void refreshThreads();
-        } catch (error) {
-          setNotice(
-            error instanceof Error ? error.message : "撤销消息失败，请稍后重试",
-          );
-          return;
-        }
-      }
       await handleSubmitWithPrompt({
         draft: editedDraft,
         restoreCanonicalOnFailure: true,
-        resetEmptyRewoundThread: !predecessorRunId,
+        replaceTargetRunId: targetRunId,
       });
     } finally {
       setPromptReplacementPending(false);

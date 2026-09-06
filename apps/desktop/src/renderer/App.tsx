@@ -3,7 +3,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -3040,8 +3039,6 @@ export function App() {
   >();
   const [promptReplacementPending, setPromptReplacementPending] =
     useState(false);
-  const [revealPromptReplacement, setRevealPromptReplacement] =
-    useState(false);
   const composerDraftKey = composerDraftOwnerKey(runtimeState.activeThreadId);
   const {
     draft: composerDraft,
@@ -3147,16 +3144,6 @@ export function App() {
     ];
     return projectVisibleNarrativeItems({ items: narrativeItems, isBusy });
   }, [isBusy, runtimeState.narrative]);
-  useLayoutEffect(() => {
-    if (!revealPromptReplacement) {
-      return;
-    }
-    if (!visibleNarrativeItems.some((item) => item.kind === "prompt")) {
-      return;
-    }
-    setPendingPromptRewind(undefined);
-    setRevealPromptReplacement(false);
-  }, [revealPromptReplacement, visibleNarrativeItems]);
   const replayedNarrativeItemIds = useMemo(
     () => new Set(runtimeState.narrative.replayedItemIds),
     [runtimeState.narrative.replayedItemIds],
@@ -6265,7 +6252,6 @@ export function App() {
     const targetRunId = editingPrompt.runId;
     const editedText = editingPrompt.text;
     setPromptReplacementPending(true);
-    let replacementCommitted = false;
     try {
       const result = await rewindPromptRun(targetRunId, {
         applyReplay: false,
@@ -6282,15 +6268,10 @@ export function App() {
         restoreCanonicalOnFailure: true,
         replaceTargetRunId: targetRunId,
         onReplacementCommitted: () => {
-          replacementCommitted = true;
           setEditingPrompt(undefined);
-          setRevealPromptReplacement(true);
         },
       });
     } finally {
-      if (!replacementCommitted) {
-        setPendingPromptRewind(undefined);
-      }
       setPromptReplacementPending(false);
     }
   }
@@ -6300,8 +6281,8 @@ export function App() {
     if (!pending) {
       return;
     }
+    setPendingPromptRewind(undefined);
     if (pending.mode === "undo") {
-      setPendingPromptRewind(undefined);
       await handleUndoPrompt(pending.runId);
       return;
     }
@@ -10444,11 +10425,9 @@ export function App() {
       <Dialog
         open={Boolean(pendingPromptRewind)}
         title={promptRewindDialog?.title ?? "确认改写对话"}
+        modal={false}
         onOpenChange={(open) => {
           if (!open) {
-            if (promptReplacementPending) {
-              return;
-            }
             setPendingPromptRewind(undefined);
           }
         }}
@@ -10457,15 +10436,7 @@ export function App() {
             <Button
               variant="default"
               size="md"
-              disabled={
-                pendingPromptRewind?.mode === "edit" && promptReplacementPending
-              }
-              onClick={() => {
-                if (promptReplacementPending) {
-                  return;
-                }
-                setPendingPromptRewind(undefined);
-              }}
+              onClick={() => setPendingPromptRewind(undefined)}
             >
               取消
             </Button>
@@ -10475,13 +10446,7 @@ export function App() {
               loading={
                 pendingPromptRewind?.mode === "edit" && promptReplacementPending
               }
-              disabled={
-                pendingPromptRewind?.mode === "edit" && promptReplacementPending
-              }
               onClick={() => {
-                if (promptReplacementPending) {
-                  return;
-                }
                 void handleConfirmPromptRewind();
               }}
             >

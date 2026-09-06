@@ -623,6 +623,9 @@ describe("RunStage layout", () => {
     );
 
     expect(collapsedText).toContain("padding-bottom: 0;");
+    expect(collapsedText).toContain(
+      "margin-bottom: calc(-1 * var(--execution-prompt-attachment-gap));",
+    );
     expect(collapsedText).toContain("mask-image:");
     expect(collapsedText).toContain("-webkit-mask-image:");
     expect(collapsedText).toContain("calc(100% - 10px)");

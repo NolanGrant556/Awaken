@@ -88,6 +88,7 @@ const (
 	EventAwakenComputerVerification    EventType = "AWAKEN_COMPUTER_VERIFICATION_COMPLETED"
 	EventAwakenComputerHandoffStarted  EventType = "AWAKEN_COMPUTER_HANDOFF_STARTED"
 	EventAwakenComputerHandoffEnded    EventType = "AWAKEN_COMPUTER_HANDOFF_ENDED"
+	EventAwakenComputerPointerHint     EventType = "AWAKEN_COMPUTER_POINTER_HINT"
 	// EventAwakenProviderReconnect is a live-only status frame while the
 	// runner waits for the provider network or retries a disconnected
 	// stream. It is never written to SemanticJournal and must not appear
@@ -524,6 +525,15 @@ type Event struct {
 	ComputerActor              string   `json:"computerActor,omitempty"`
 	ComputerHandoff            bool     `json:"computerHandoff,omitempty"`
 	ComputerEvidenceRefs       []string `json:"computerEvidenceRefs,omitempty"`
+	// Computer pointer overlay fields, surfaced on AWAKEN_COMPUTER_POINTER_HINT.
+	// Coordinates are visual only; 0 is a legal screen edge and must not be
+	// omitted when the pointer is present.
+	ComputerPointerKind  string `json:"computerPointerKind,omitempty"`
+	ComputerPointerSpace string `json:"computerPointerSpace,omitempty"`
+	ComputerPointerX     *int   `json:"computerPointerX,omitempty"`
+	ComputerPointerY     *int   `json:"computerPointerY,omitempty"`
+	ComputerPointerToX   *int   `json:"computerPointerToX,omitempty"`
+	ComputerPointerToY   *int   `json:"computerPointerToY,omitempty"`
 	// ProviderReconnect is live-only. Replay and SemanticJournal must not
 	// reconstruct this frame from durable records.
 	ProviderReconnect *ProviderReconnectPayload `json:"providerReconnect,omitempty"`

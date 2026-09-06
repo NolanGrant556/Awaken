@@ -94,7 +94,7 @@ function parseStructuredJSON(result) {
   }
 }
 
-async function listOnScreenWindows() {
+async function listOnScreenWindows(record) {
   let lastError = "unknown list_windows failure";
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
@@ -107,6 +107,7 @@ async function listOnScreenWindows() {
       } else {
         const parsed = parseStructuredJSON(result);
         if (Array.isArray(parsed.windows)) {
+          rememberWindowBounds(record, parsed.windows);
           return parsed.windows.map((window) => ({
             target_ref: `pid:${window.pid}/window:${window.window_id}`,
             pid: window.pid,
@@ -130,6 +131,39 @@ async function listOnScreenWindows() {
     }
   }
   throw new Error(`desktop window discovery failed after retry: ${lastError}`);
+}
+
+function rememberWindowBounds(record, windows) {
+  if (!record) {
+    return;
+  }
+  record.windowBounds = new Map();
+  for (const window of windows) {
+    const bounds = readWindowBounds(window);
+    if (!bounds) {
+      continue;
+    }
+    record.windowBounds.set(`${window.pid}:${String(window.window_id)}`, bounds);
+  }
+}
+
+function readWindowBounds(window) {
+  const nested = window?.bounds;
+  if (
+    nested &&
+    Number.isFinite(nested.x) &&
+    Number.isFinite(nested.y)
+  ) {
+    return { x: Math.round(nested.x), y: Math.round(nested.y) };
+  }
+  if (Number.isFinite(window?.x) && Number.isFinite(window?.y)) {
+    return { x: Math.round(window.x), y: Math.round(window.y) };
+  }
+  return null;
+}
+
+function lookupWindowOrigin(record, pid, windowID) {
+  return record.windowBounds?.get(`${pid}:${String(windowID)}`) ?? null;
 }
 
 let driver;
@@ -237,6 +271,7 @@ async function handleStartSession({ sessionID, captureScope, fenceToken, control
     observations: new Map(),
     preparedActions: new Map(),
     actionResults: new Map(),
+    windowBounds: new Map(),
   });
   return {
     host_session_ref: output.state.session,
@@ -268,7 +303,7 @@ async function handleGetDesktopState({ sessionID }) {
     ...toolResultEnvelope(result),
     observation_token: observationToken,
     coordinate_space: coordinateSpace,
-    available_windows: await listOnScreenWindows(),
+    available_windows: await listOnScreenWindows(record),
   };
 }
 
@@ -298,18 +333,34 @@ async function handleGetWindowState({ sessionID, pid, windowID }) {
     targetGeneration: record.targetGeneration,
     target,
   });
+  let origin = lookupWindowOrigin(record, target.pid, target.window_id);
+  if (!origin) {
+    try {
+      await listOnScreenWindows(record);
+      origin = lookupWindowOrigin(record, target.pid, target.window_id);
+    } catch {
+      origin = null;
+    }
+  }
+  const coordinateSpace = {
+    unit: "window_pixel",
+    width: screenshotWidth,
+    height: screenshotHeight,
+    source_screenshot_width: screenshotWidth,
+    source_screenshot_height: screenshotHeight,
+    scale_x: 1,
+    scale_y: 1,
+  };
+  if (origin) {
+    coordinateSpace.has_origin = true;
+    coordinateSpace.origin_x = origin.x;
+    coordinateSpace.origin_y = origin.y;
+    coordinateSpace.origin_space = "screen_dip";
+  }
   return {
     ...toolResultEnvelope(result),
     observation_token: observationToken,
-    coordinate_space: {
-      unit: "window_pixel",
-      width: screenshotWidth,
-      height: screenshotHeight,
-      source_screenshot_width: screenshotWidth,
-      source_screenshot_height: screenshotHeight,
-      scale_x: 1,
-      scale_y: 1,
-    },
+    coordinate_space: coordinateSpace,
     target: {
       pid: target.pid,
       window_id: String(target.window_id),

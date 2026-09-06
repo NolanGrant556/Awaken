@@ -5000,3 +5000,21 @@ describe("runtime reducer run plan snapshots", () => {
     expect(replayed.providerReconnectAttempts).toEqual([]);
   });
 });
+
+describe("runtime reducer computer pointer hints", () => {
+  it("does not project overlay cursor hints into Workbench state", () => {
+    const before = dispatch([{ type: "run/requested", prompt: "打开计算器" }]);
+    const after = reduceRuntimeState(before, runEvent({
+      type: "AWAKEN_COMPUTER_POINTER_HINT",
+      runId: "run-1",
+      computerPointerKind: "click",
+      computerPointerSpace: "primary_display_dip",
+      computerPointerX: 100,
+      computerPointerY: 40,
+    }));
+
+    expect(after.steps).toEqual(before.steps);
+    expect(after.narrative.committedItems).toEqual(before.narrative.committedItems);
+    expect(after.phase).toBe(before.phase);
+  });
+});

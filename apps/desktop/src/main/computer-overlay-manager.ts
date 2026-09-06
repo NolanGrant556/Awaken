@@ -10,7 +10,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AguiEvent } from "../shared/agui.js";
 import {
+  COMPUTER_CURSOR_CHANNELS,
   COMPUTER_OVERLAY_CHANNELS,
+  type ComputerCursorHint,
   type ComputerOverlayState,
   type ComputerOverlayStopResult,
 } from "../shared/computer-overlay.js";
@@ -20,6 +22,9 @@ const overlayWidth = 360;
 const overlayHeight = 58;
 const overlayTopMargin = 18;
 const overlayRecoveryIntervalMs = 3_000;
+const cursorSize = 32;
+const cursorHotspotX = 6;
+const cursorHotspotY = 4;
 const computerToolNames = new Set([
   "computer_observe",
   "computer_act",
@@ -30,13 +35,24 @@ export type ComputerOverlayManagerDependencies = {
   stopComputerUse: (runId: string) => Promise<void>;
 };
 
+export type OverlayScreenPoint = {
+  x: number;
+  y: number;
+  toX?: number;
+  toY?: number;
+};
+
 export function resolveComputerOverlayPaths(baseDir: string): {
   preloadPath: string;
   rendererPath: string;
+  cursorPreloadPath: string;
+  cursorRendererPath: string;
 } {
   return {
     preloadPath: join(baseDir, "../preload/computer-overlay.js"),
     rendererPath: join(baseDir, "../renderer/computer-overlay.html"),
+    cursorPreloadPath: join(baseDir, "../preload/computer-cursor.js"),
+    cursorRendererPath: join(baseDir, "../renderer/computer-cursor.html"),
   };
 }
 
@@ -44,13 +60,52 @@ export function isComputerToolName(name: string | undefined): boolean {
   return computerToolNames.has((name ?? "").trim().toLowerCase());
 }
 
+export function computerPointerScreenPoint(
+  event: AguiEvent,
+  primaryBounds: { x: number; y: number },
+): OverlayScreenPoint | null {
+  if (
+    typeof event.computerPointerX !== "number" ||
+    typeof event.computerPointerY !== "number" ||
+    !Number.isFinite(event.computerPointerX) ||
+    !Number.isFinite(event.computerPointerY)
+  ) {
+    return null;
+  }
+  const space = event.computerPointerSpace || "primary_display_dip";
+  const origin =
+    space === "screen_dip"
+      ? { x: 0, y: 0 }
+      : space === "primary_display_dip"
+        ? primaryBounds
+        : null;
+  if (!origin) return null;
+  const point: OverlayScreenPoint = {
+    x: Math.round(origin.x + event.computerPointerX),
+    y: Math.round(origin.y + event.computerPointerY),
+  };
+  if (
+    typeof event.computerPointerToX === "number" &&
+    typeof event.computerPointerToY === "number" &&
+    Number.isFinite(event.computerPointerToX) &&
+    Number.isFinite(event.computerPointerToY)
+  ) {
+    point.toX = Math.round(origin.x + event.computerPointerToX);
+    point.toY = Math.round(origin.y + event.computerPointerToY);
+  }
+  return point;
+}
+
 export class ComputerOverlayManager {
   private window: BrowserWindow | null = null;
+  private cursorWindow: BrowserWindow | null = null;
   private readonly stopComputerUse: (runId: string) => Promise<void>;
   private readonly computerRuns = new Map<string, true>();
   private currentState: ComputerOverlayState | null = null;
   private handlersRegistered = false;
   private recoveryTimer: ReturnType<typeof setInterval> | null = null;
+  private cursorSuppressed = false;
+  private lastCursorPoint: { x: number; y: number } | null = null;
   private readonly handleDisplayChange = (): void => {
     if (!this.currentState || !this.window || this.window.isDestroyed()) return;
     this.placeAtScreenTop(this.window);
@@ -104,6 +159,29 @@ export class ComputerOverlayManager {
       return;
     }
 
+    if (event.type === "AWAKEN_COMPUTER_POINTER_HINT") {
+      if (this.currentState?.runId === runId) {
+        void this.applyPointerHint(event);
+      }
+      return;
+    }
+
+    if (event.type === "AWAKEN_COMPUTER_HANDOFF_STARTED") {
+      if (this.currentState?.runId === runId) {
+        this.cursorSuppressed = true;
+        this.hideCursor();
+      }
+      return;
+    }
+
+    if (event.type === "AWAKEN_COMPUTER_HANDOFF_ENDED") {
+      if (this.currentState?.runId === runId) {
+        this.cursorSuppressed = false;
+        void this.showCursor(this.lastCursorPoint ?? this.defaultCursorPoint());
+      }
+      return;
+    }
+
     const sessionClosed =
       event.type === "AWAKEN_COMPUTER_SESSION_CHANGED" &&
       event.computerSessionState === "closed";
@@ -125,6 +203,8 @@ export class ComputerOverlayManager {
     this.stopRecoveryWatchdog();
     this.computerRuns.clear();
     this.currentState = null;
+    this.cursorSuppressed = false;
+    this.lastCursorPoint = null;
     if (this.handlersRegistered) {
       ipcMain.removeHandler(COMPUTER_OVERLAY_CHANNELS.getState);
       ipcMain.removeHandler(COMPUTER_OVERLAY_CHANNELS.stop);
@@ -137,16 +217,22 @@ export class ComputerOverlayManager {
       this.window.destroy();
     }
     this.window = null;
+    if (this.cursorWindow && !this.cursorWindow.isDestroyed()) {
+      this.cursorWindow.destroy();
+    }
+    this.cursorWindow = null;
   }
 
   private async showForRun(runId: string): Promise<void> {
     this.currentState = { runId, stopping: false };
+    this.cursorSuppressed = false;
     const overlay = await this.ensureWindow();
     if (!this.currentState || this.currentState.runId !== runId) return;
     this.placeAtScreenTop(overlay);
     overlay.webContents.send(COMPUTER_OVERLAY_CHANNELS.stateChanged, this.currentState);
     overlay.showInactive();
     this.applyVisibilityPolicy(overlay, true);
+    await this.showCursor(this.lastCursorPoint ?? this.defaultCursorPoint());
     this.startRecoveryWatchdog();
   }
 
@@ -171,10 +257,13 @@ export class ComputerOverlayManager {
   private hide(): void {
     this.stopRecoveryWatchdog();
     this.currentState = null;
+    this.cursorSuppressed = false;
+    this.lastCursorPoint = null;
     if (this.window && !this.window.isDestroyed()) {
       this.window.webContents.send(COMPUTER_OVERLAY_CHANNELS.stateChanged, null);
       this.window.hide();
     }
+    this.hideCursor();
   }
 
   private async stopCurrentComputerUse(): Promise<ComputerOverlayStopResult> {
@@ -250,6 +339,108 @@ export class ComputerOverlayManager {
     return overlay;
   }
 
+  private async ensureCursorWindow(): Promise<BrowserWindow> {
+    if (this.cursorWindow && !this.cursorWindow.isDestroyed()) return this.cursorWindow;
+
+    const point = this.lastCursorPoint ?? this.defaultCursorPoint();
+    const overlay = new BrowserWindow({
+      width: cursorSize,
+      height: cursorSize,
+      x: point.x - cursorHotspotX,
+      y: point.y - cursorHotspotY,
+      frame: false,
+      transparent: true,
+      backgroundColor: "#00000000",
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      focusable: false,
+      hasShadow: false,
+      show: false,
+      acceptFirstMouse: false,
+      paintWhenInitiallyHidden: true,
+      roundedCorners: false,
+      webPreferences: {
+        preload: resolveComputerOverlayPaths(__dirname).cursorPreloadPath,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: false,
+        backgroundThrottling: false,
+      },
+    });
+    this.cursorWindow = overlay;
+    overlay.setIgnoreMouseEvents(true, { forward: true });
+    this.applyVisibilityPolicy(overlay);
+    overlay.on("closed", () => {
+      if (this.cursorWindow === overlay) this.cursorWindow = null;
+    });
+    overlay.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    const { cursorRendererPath } = resolveComputerOverlayPaths(__dirname);
+    if (app.isPackaged) {
+      await overlay.loadFile(cursorRendererPath);
+    } else {
+      await overlay.loadURL("http://127.0.0.1:5174/computer-cursor.html");
+    }
+    return overlay;
+  }
+
+  private async applyPointerHint(event: AguiEvent): Promise<void> {
+    const primary = screen.getPrimaryDisplay();
+    const point = computerPointerScreenPoint(event, primary.bounds);
+    const pulse = event.computerPointerKind === "click" || event.computerPointerKind === "double_click";
+    if (point?.toX != null && point.toY != null) {
+      await this.showCursor({ x: point.x, y: point.y }, { kind: event.computerPointerKind ?? "", pulse: false });
+      await this.showCursor({ x: point.toX, y: point.toY }, { kind: event.computerPointerKind ?? "", pulse });
+      return;
+    }
+    if (point) {
+      await this.showCursor(point, { kind: event.computerPointerKind ?? "", pulse });
+    }
+  }
+
+  private async showCursor(
+    point: { x: number; y: number },
+    hint?: ComputerCursorHint,
+  ): Promise<void> {
+    this.lastCursorPoint = point;
+    if (this.cursorSuppressed || !this.currentState) return;
+    const overlay = await this.ensureCursorWindow();
+    if (this.cursorSuppressed || !this.currentState) return;
+    overlay.setBounds(
+      {
+        x: point.x - cursorHotspotX,
+        y: point.y - cursorHotspotY,
+        width: cursorSize,
+        height: cursorSize,
+      },
+      false,
+    );
+    overlay.showInactive();
+    this.applyVisibilityPolicy(overlay, true);
+    overlay.setIgnoreMouseEvents(true, { forward: true });
+    if (hint) {
+      overlay.webContents.send(COMPUTER_CURSOR_CHANNELS.hintChanged, hint);
+    }
+  }
+
+  private hideCursor(): void {
+    if (this.cursorWindow && !this.cursorWindow.isDestroyed()) {
+      this.cursorWindow.hide();
+    }
+  }
+
+  private defaultCursorPoint(): { x: number; y: number } {
+    const display = screen.getPrimaryDisplay();
+    return {
+      x: Math.round(display.bounds.x + display.bounds.width / 2),
+      y: Math.round(display.bounds.y + display.bounds.height / 2),
+    };
+  }
+
   private startRecoveryWatchdog(): void {
     this.stopRecoveryWatchdog();
     this.recoveryTimer = setInterval(() => {
@@ -269,6 +460,11 @@ export class ComputerOverlayManager {
     if (overlay.isMinimized()) overlay.restore();
     if (!overlay.isVisible()) overlay.showInactive();
     this.applyVisibilityPolicy(overlay, true);
+    if (!this.cursorSuppressed && this.cursorWindow && !this.cursorWindow.isDestroyed()) {
+      if (!this.cursorWindow.isVisible()) this.cursorWindow.showInactive();
+      this.applyVisibilityPolicy(this.cursorWindow, true);
+      this.cursorWindow.setIgnoreMouseEvents(true, { forward: true });
+    }
   }
 
   private placeAtScreenTop(overlay: BrowserWindow): void {
@@ -302,5 +498,4 @@ export class ComputerOverlayManager {
         event.sender.id === this.window.webContents.id,
     );
   }
-
 }

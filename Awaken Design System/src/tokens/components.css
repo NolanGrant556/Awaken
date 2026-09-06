@@ -912,6 +912,16 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   padding-top: 4px;
 }
 
+.execution-prompt-bubble-time {
+  margin: 0 4px 0 0;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: 24px;
+  font-weight: var(--aw-font-weight-regular);
+  white-space: nowrap;
+  user-select: none;
+}
+
 .execution-prompt-bubble-toolbar button {
   flex: none;
 }

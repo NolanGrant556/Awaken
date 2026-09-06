@@ -171,6 +171,8 @@ export type AwakenUserPromptBlockProps = {
   onCancelEdit?: () => void;
   onSubmitEdit?: () => void;
   editSubmitDisabled?: boolean;
+  timestampLabel?: string;
+  timestampDateTime?: string;
 };
 
 /** Visible prompt payload for copy: attachment names, then inline token labels + text. */
@@ -220,6 +222,8 @@ export function AwakenUserPromptBlock({
   onCancelEdit,
   onSubmitEdit,
   editSubmitDisabled,
+  timestampLabel,
+  timestampDateTime,
 }: AwakenUserPromptBlockProps) {
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(false);
   const blockRef = useRef<HTMLElement | null>(null);
@@ -515,7 +519,7 @@ export function AwakenUserPromptBlock({
   }
 
   const hasActions = Boolean(onUndo || onEdit);
-  const showToolbar = isExpanded || hasActions;
+  const showToolbar = isExpanded || hasActions || Boolean(timestampLabel);
   return (
     <article
       ref={blockRef}
@@ -594,6 +598,14 @@ export function AwakenUserPromptBlock({
           aria-label="消息操作"
           onClick={(event) => event.stopPropagation()}
         >
+          {timestampLabel ? (
+            <time
+              className="execution-prompt-bubble-time"
+              dateTime={timestampDateTime}
+            >
+              {timestampLabel}
+            </time>
+          ) : null}
           {onUndo ? (
             <AwakenTooltip label="撤销此消息">
               <button

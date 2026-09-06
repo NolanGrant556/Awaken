@@ -217,6 +217,52 @@ export function shouldUseCenterComposer({
   return !hasNarrative && !hasRun;
 }
 
+const USER_PROMPT_WEEKDAYS = [
+  "星期日",
+  "星期一",
+  "星期二",
+  "星期三",
+  "星期四",
+  "星期五",
+  "星期六",
+] as const;
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function startOfLocalDayMs(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function startOfLocalWeekMondayMs(date: Date): number {
+  const day = date.getDay();
+  const daysFromMonday = (day + 6) % 7;
+  return startOfLocalDayMs(date) - daysFromMonday * 24 * 60 * 60 * 1000;
+}
+
+export function formatUserPromptTimestamp({
+  atMs,
+  nowMs = Date.now(),
+}: {
+  atMs: number;
+  nowMs?: number;
+}): string | undefined {
+  if (!Number.isFinite(atMs)) {
+    return undefined;
+  }
+  const at = new Date(atMs);
+  const now = new Date(nowMs);
+  const time = `${pad2(at.getHours())}:${pad2(at.getMinutes())}`;
+  if (startOfLocalDayMs(at) === startOfLocalDayMs(now)) {
+    return time;
+  }
+  if (startOfLocalWeekMondayMs(at) === startOfLocalWeekMondayMs(now)) {
+    return `${USER_PROMPT_WEEKDAYS[at.getDay()]} ${time}`;
+  }
+  return `${at.getMonth() + 1}月${at.getDate()}日 ${time}`;
+}
+
 export function projectVisibleNarrativeItems({
   items,
   isBusy,

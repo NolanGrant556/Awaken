@@ -209,6 +209,19 @@ describe("runtime reducer thread rewind replay", () => {
   });
 });
 
+describe("runtime reducer prompt timestamps", () => {
+  it("stores startedAtMs on the requested prompt", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "hello", startedAtMs: 1_725_000_000_000 },
+    ]);
+    expect(state.narrative.committedItems[0]).toMatchObject({
+      kind: "prompt",
+      text: "hello",
+      createdAtMs: 1_725_000_000_000,
+    });
+  });
+});
+
 describe("runtime reducer cancel handling", () => {
   it("restores transcript actions in one reducer transition and marks only replayed narrative items", () => {
     const replayed = reduceRuntimeState(createInitialRuntimeState(), {
@@ -812,7 +825,7 @@ describe("runtime reducer replay idempotency", () => {
     expect(
       state.narrative.committedItems.filter((item) => item.kind === "prompt"),
     ).toEqual([
-      { kind: "prompt", id: "prompt:thread-1:1", text: "Restore this run" },
+      { kind: "prompt", id: "prompt:thread-1:1", text: "Restore this run", createdAtMs: Date.parse("2026-01-01T00:00:00Z") },
     ]);
   });
 

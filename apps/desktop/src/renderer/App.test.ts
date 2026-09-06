@@ -150,6 +150,7 @@ import {
   shouldShowTurnMarkerRail,
   turnMarkerRailHeight,
   shouldUseCenterComposer,
+  formatUserPromptTimestamp,
   turnMarkerRailDisplay,
 } from "./workbenchPresentation";
 import type { AwakenBridge } from "../shared/runtime";
@@ -3873,6 +3874,25 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).toContain("Copy prompt");
   });
 
+  it("renders the send time to the left of undo/edit/copy", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "需要修改的消息",
+        timestampLabel: "星期六 09:53",
+        timestampDateTime: "2026-09-05T01:53:00.000Z",
+        onUndo: () => undefined,
+        onEdit: () => undefined,
+      }),
+    );
+    expect(html).toContain("execution-prompt-bubble-time");
+    expect(html).toContain('dateTime="2026-09-05T01:53:00.000Z"');
+    expect(html.indexOf("星期六 09:53")).toBeGreaterThan(-1);
+    expect(html.indexOf("星期六 09:53")).toBeLessThan(
+      html.indexOf("撤销此消息"),
+    );
+    expect(html.indexOf("撤销此消息")).toBeLessThan(html.indexOf("编辑此消息"));
+  });
+
   it("renders undo/edit actions and the controlled inline editor", () => {
     const actionHtml = renderToString(
       React.createElement(AwakenUserPromptBlock, {
@@ -5045,6 +5065,37 @@ describe("App workbench presentation", () => {
         needsRestart: true,
       }),
     ).toBe(true);
+  });
+
+  it("formats user prompt timestamps as today, weekday, or month-day", () => {
+    const nowMs = new Date(2026, 8, 6, 15, 0, 0).getTime();
+    expect(
+      formatUserPromptTimestamp({
+        atMs: new Date(2026, 8, 6, 9, 53, 0).getTime(),
+        nowMs,
+      }),
+    ).toBe("09:53");
+    expect(
+      formatUserPromptTimestamp({
+        atMs: new Date(2026, 8, 5, 9, 53, 0).getTime(),
+        nowMs,
+      }),
+    ).toBe("星期六 09:53");
+    expect(
+      formatUserPromptTimestamp({
+        atMs: new Date(2026, 8, 1, 14, 5, 0).getTime(),
+        nowMs,
+      }),
+    ).toBe("星期二 14:05");
+    expect(
+      formatUserPromptTimestamp({
+        atMs: new Date(2026, 7, 30, 9, 53, 0).getTime(),
+        nowMs,
+      }),
+    ).toBe("8月30日 09:53");
+    expect(
+      formatUserPromptTimestamp({ atMs: Number.NaN, nowMs }),
+    ).toBeUndefined();
   });
 
   it("shows only the trailing planning item while a run awaits its first visible output", () => {

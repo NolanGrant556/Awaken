@@ -2410,4 +2410,18 @@ describe("run plan narrative ownership (RP-D03)", () => {
       finished.committedItems.some((item) => item.kind === "providerReconnect"),
     ).toBe(false);
   });
+
+  it("does not turn computer pointer hints into narrative items", () => {
+    const initial = createInitialRunNarrativeState();
+    const next = projectAguiEventToNarrative(initial, {
+      type: "AWAKEN_COMPUTER_POINTER_HINT",
+      runId: "run-1",
+      computerPointerKind: "click",
+      computerPointerSpace: "primary_display_dip",
+      computerPointerX: 0,
+      computerPointerY: 0,
+    });
+    expect(next.committedItems).toEqual(initial.committedItems);
+    expect(next.replayedItemIds).toEqual(initial.replayedItemIds);
+  });
 });

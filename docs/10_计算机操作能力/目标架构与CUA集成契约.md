@@ -110,7 +110,7 @@ CUA 的 permission mode 和低层 policy 按 Host/Driver generation 固定，模
 | `src/server` | 实现状态契约定义的 review/takeover/session 控制 route 和安全契约定义的鉴权；不得承载 raw Driver API |
 | `src/protocol/agui` | 从 SemanticJournal 投影 Computer live/replay 事件 |
 | `src/computer/cua` | CUA SDK 适配层、HostClient JSON-RPC 和 `HostManager`（当前 interim 由 Core 持有） |
-| `apps/desktop/src/main` | 目标：Host lifecycle、TCC/readiness、control token 调用和 Renderer 隔离；当前还由 `ComputerOverlayManager` 独立订阅 run event、管理跨应用置顶提示与自身可见性恢复，并从专用 overlay IPC 终止 Computer Use 而不取消 run；不得借用 `PetWindowManager` 的窗口、IPC 或状态 |
+| `apps/desktop/src/main` | 目标：Host lifecycle、TCC/readiness、control token 调用和 Renderer 隔离；当前还由 `ComputerOverlayManager` 独立订阅 run event、管理跨应用置顶提示、独立点击穿透的虚拟鼠标，以及自身可见性恢复，并从专用 overlay IPC 终止 Computer Use 而不取消 run；不得借用 `PetWindowManager` 的窗口、IPC 或状态 |
 | `apps/desktop/src/shared` | Main/Renderer 共享的判别联合与 typed IPC contract |
 | `apps/desktop/src/renderer` | 主窗口只消费 review、takeover 和只读 replay，不拥有 policy，也不拥有跨应用 Computer 调用提示 |
 | `AwakenComputerHost` | 验证调用身份/fence/precondition，适配 CUA 并注入输入 |

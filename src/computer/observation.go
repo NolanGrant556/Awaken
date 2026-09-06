@@ -24,8 +24,11 @@ type Observation struct {
 	Elements          []ElementRef     `json:"elements,omitempty"`
 	AvailableWindows  []WindowRef      `json:"available_windows,omitempty"`
 	CoordinateSpace   *CoordinateSpace `json:"coordinate_space,omitempty"`
-	MissingReason     string           `json:"missing_reason,omitempty"`
-	PolicySnapshotID  PolicySnapshotID `json:"policy_snapshot_id"`
+	// PointerTargets are overlay-only click centers parsed from accessibility
+	// geometry. They are not model-visible and do not authorize input.
+	PointerTargets   []PointerTarget  `json:"-"`
+	MissingReason    string           `json:"missing_reason,omitempty"`
+	PolicySnapshotID PolicySnapshotID `json:"policy_snapshot_id"`
 }
 
 // CoordinateSpace describes the exact coordinate system presented to the
@@ -40,6 +43,11 @@ type CoordinateSpace struct {
 	SourceScreenshotHeight int     `json:"source_screenshot_height,omitempty"`
 	ScaleX                 float64 `json:"scale_x,omitempty"`
 	ScaleY                 float64 `json:"scale_y,omitempty"`
+	// HasOrigin is required because a window can legitimately sit at (0,0).
+	HasOrigin   bool   `json:"has_origin,omitempty"`
+	OriginX     int    `json:"origin_x"`
+	OriginY     int    `json:"origin_y"`
+	OriginSpace string `json:"origin_space,omitempty"`
 }
 
 // NewObservation creates an observation linked to a session.

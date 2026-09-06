@@ -81,6 +81,7 @@ export type AguiEventType =
   | "AWAKEN_COMPUTER_VERIFICATION_COMPLETED"
   | "AWAKEN_COMPUTER_HANDOFF_STARTED"
   | "AWAKEN_COMPUTER_HANDOFF_ENDED"
+  | "AWAKEN_COMPUTER_POINTER_HINT"
   | "AWAKEN_PROVIDER_RECONNECT"
   | "AWAKEN_UNKNOWN_EVENT";
 
@@ -523,5 +524,11 @@ export type AguiEvent = {
   computerActor?: string;
   computerHandoff?: boolean;
   computerEvidenceRefs?: string[];
+  computerPointerKind?: string;
+  computerPointerSpace?: string;
+  computerPointerX?: number;
+  computerPointerY?: number;
+  computerPointerToX?: number;
+  computerPointerToY?: number;
   providerReconnect?: AguiProviderReconnect;
 };

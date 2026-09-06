@@ -141,6 +141,50 @@ func TestProjectComputerSessionAndVerificationEvents(t *testing.T) {
 	}
 }
 
+func TestProjectComputerActionStartedPointerHint(t *testing.T) {
+	frames := ProjectSemanticRecord(agentcore.SemanticRecord{
+		Kind: agentcore.SemanticKindComputerActionStarted,
+		Payload: map[string]any{
+			"action_id":     "act-1",
+			"action":        "click",
+			"pointer_kind":  "click",
+			"pointer_space": "primary_display_dip",
+			"pointer_x":     0,
+			"pointer_y":     40,
+			"pointer_to_x":  80,
+			"pointer_to_y":  90,
+		},
+	})
+	if len(frames) != 1 || frames[0].Type != EventAwakenComputerPointerHint {
+		t.Fatalf("expected pointer hint, got %+v", frames)
+	}
+	event := frames[0]
+	if event.ComputerPointerKind != "click" || event.ComputerPointerSpace != "primary_display_dip" {
+		t.Fatalf("unexpected pointer metadata: %+v", event)
+	}
+	if event.ComputerPointerX == nil || *event.ComputerPointerX != 0 || event.ComputerPointerY == nil || *event.ComputerPointerY != 40 {
+		t.Fatalf("origin (0,40) must survive projection: %+v", event)
+	}
+	if event.ComputerPointerToX == nil || *event.ComputerPointerToX != 80 {
+		t.Fatalf("expected drag destination, got %+v", event)
+	}
+
+	waitFrames := ProjectSemanticRecord(agentcore.SemanticRecord{
+		Kind: agentcore.SemanticKindComputerActionStarted,
+		Payload: map[string]any{
+			"action_id":    "act-2",
+			"action":       "wait",
+			"pointer_kind": "wait",
+		},
+	})
+	if len(waitFrames) != 1 ||
+		waitFrames[0].Type != EventAwakenComputerPointerHint ||
+		waitFrames[0].ComputerPointerX != nil ||
+		waitFrames[0].ComputerPointerKind != "wait" {
+		t.Fatalf("wait should project without coordinates: %+v", waitFrames)
+	}
+}
+
 func TestProjectReasoningSummaryProducesCompleteLifecycle(t *testing.T) {
 	record := agentcore.SemanticRecord{
 		SchemaVersion: 2,

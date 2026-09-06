@@ -428,14 +428,19 @@ func (r *Runtime) Perform(ctx context.Context, action PreparedAction, review *Re
 	if previous, ok := r.actionResults[action.ActionID]; ok {
 		return previous, nil
 	}
-	if err := r.recordComputerFact(ctx, computerActionStartedKind, map[string]any{
+	started := map[string]any{
 		"action_id":      string(action.ActionID),
 		"observation_id": string(action.ObservationID),
 		"session_id":     string(action.SessionID),
 		"action":         string(action.Kind),
 		"risk":           string(action.Risk),
 		"has_review":     review != nil,
-	}); err != nil {
+	}
+	obs := r.observations[action.ObservationID]
+	for key, value := range PointerHintForAction(action, obs).Payload() {
+		started[key] = value
+	}
+	if err := r.recordComputerFact(ctx, computerActionStartedKind, started); err != nil {
 		return ActionResult{}, fmt.Errorf("record computer action start: %w", err)
 	}
 	operationCtx, finishOperation, err := r.beginDriverOperation(ctx)

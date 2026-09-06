@@ -519,7 +519,8 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		agentcore.SemanticKindComputerVerificationCompleted,
 		agentcore.SemanticKindComputerControlTransferStarted,
 		agentcore.SemanticKindComputerControlTransferCompleted,
-		agentcore.SemanticKindComputerSessionClosed:
+		agentcore.SemanticKindComputerSessionClosed,
+		agentcore.SemanticKindComputerActionStarted:
 		return projectComputerEvent(base, record.Kind, payload)
 	case agentcore.SemanticKindThread,
 		agentcore.SemanticKindThreadRewound,
@@ -598,6 +599,8 @@ func projectComputerEvent(base Event, kind agentcore.SemanticKind, payload map[s
 	case agentcore.SemanticKindComputerSessionClosed:
 		event.Type = EventAwakenComputerSessionChanged
 		event.ComputerSessionState = "closed"
+	case agentcore.SemanticKindComputerActionStarted:
+		event.Type = EventAwakenComputerPointerHint
 	}
 	event.ComputerReviewID = stringFromAny(payload["review_id"])
 	event.ComputerActionID = stringFromAny(payload["action_id"])
@@ -610,6 +613,12 @@ func projectComputerEvent(base Event, kind agentcore.SemanticKind, payload map[s
 	event.ComputerDecision = stringFromAny(payload["decision"])
 	event.ComputerActor = stringFromAny(payload["actor"])
 	event.ComputerEvidenceRefs = stringSliceFromAny(payload["evidence_refs"])
+	event.ComputerPointerKind = firstNonEmpty(stringFromAny(payload["pointer_kind"]), stringFromAny(payload["action"]))
+	event.ComputerPointerSpace = stringFromAny(payload["pointer_space"])
+	event.ComputerPointerX = optionalIntPointer(payload, "pointer_x")
+	event.ComputerPointerY = optionalIntPointer(payload, "pointer_y")
+	event.ComputerPointerToX = optionalIntPointer(payload, "pointer_to_x")
+	event.ComputerPointerToY = optionalIntPointer(payload, "pointer_to_y")
 	switch kind {
 	case agentcore.SemanticKindComputerControlTransferStarted:
 		event.ComputerHandoff = true
@@ -785,6 +794,23 @@ func boolPointerFromAny(value any) *bool {
 		return nil
 	}
 	return &valueBool
+}
+
+func optionalIntPointer(payload map[string]any, key string) *int {
+	if payload == nil {
+		return nil
+	}
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return nil
+	}
+	switch value.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, json.Number:
+		number := intFromAny(value)
+		return &number
+	default:
+		return nil
+	}
 }
 
 func intFromAny(value any) int {

@@ -242,6 +242,7 @@ describe("thread transcript replay helpers", () => {
       text: "",
       attachments: transcript.runs[0].run.inputAttachments,
       tokens: transcript.runs[0].run.composerTokens,
+      createdAtMs: Date.parse("2026-07-11T00:00:00Z"),
     });
   });
 

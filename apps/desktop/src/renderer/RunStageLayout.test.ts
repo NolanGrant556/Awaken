@@ -604,4 +604,78 @@ describe("RunStage layout", () => {
       /\.subagent-inspector__status\s*\{[^}]*flex:\s*0 0 auto;[^}]*white-space:\s*nowrap;/,
     );
   });
+
+  it("fades collapsed prompt overflow instead of ellipsis, and keeps copy as a flat icon", () => {
+    const designSystemStyles = readFileSync(
+      new URL(
+        "../../../../Awaken Design System/src/tokens/components.css",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const collapsedText = designSystemStyles.slice(
+      designSystemStyles.indexOf(
+        ".execution-prompt-block-limited:not(.execution-prompt-block-expanded)",
+      ),
+      designSystemStyles.indexOf(
+        ".execution-prompt-block-expanded .execution-prompt-bubble {",
+      ),
+    );
+
+    expect(collapsedText).toContain("padding-bottom: 0;");
+    expect(collapsedText).toContain(
+      "margin-bottom: calc(-1 * var(--execution-prompt-attachment-gap));",
+    );
+    expect(collapsedText).toContain("mask-image:");
+    expect(collapsedText).toContain("-webkit-mask-image:");
+    expect(collapsedText).toContain("calc(100% - 16px)");
+    expect(collapsedText).toContain("mask-size: 100% 100%;");
+    expect(collapsedText).toContain("overflow: hidden;");
+    expect(collapsedText).not.toContain(".execution-prompt-bubble::after");
+    expect(collapsedText).not.toContain(".execution-prompt-bubble-main::after");
+    expect(collapsedText).not.toContain(".execution-prompt-bubble-text::after");
+    expect(collapsedText).not.toContain("-webkit-line-clamp");
+    expect(collapsedText).toContain("line-height: 16px;");
+
+    const copyButton = cssRule(designSystemStyles, ".execution-prompt-copy-button");
+    expect(copyButton).toContain("background: transparent !important;");
+    expect(copyButton).toContain("border: 0 !important;");
+    expect(copyButton).toContain("box-shadow: none !important;");
+
+    const workbenchStyles = readFileSync(
+      new URL("./styles/workbench.css", import.meta.url),
+      "utf8",
+    );
+    expect(workbenchStyles).toContain(
+      ".execution-prompt-block-limited:not(.execution-prompt-block-expanded)",
+    );
+    expect(workbenchStyles).toContain(
+      "--execution-prompt-collapsed-content-height: 48px;",
+    );
+    expect(workbenchStyles).not.toContain(
+      "--execution-prompt-collapsed-content-height: 50px;",
+    );
+    expect(workbenchStyles).toContain("padding: 10px 16px 0;");
+    expect(workbenchStyles).toMatch(
+      /\.execution-turn-header[\s\S]*?\.execution-prompt-block-limited:not\(\.execution-prompt-block-expanded\)[\s\S]*?\.execution-prompt-bubble \{[\s\S]*?padding: 10px 16px 0;/,
+    );
+  });
+
+  it("collapses a hidden rewind dialog overlay instead of leaving a fullscreen cover", () => {
+    const dialogStyles = readFileSync(
+      new URL(
+        "../../../../Awaken Design System/src/components/AwakenDialog/AwakenDialog.css",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hiddenBackdrop = cssRule(dialogStyles, ".aw-dialog-backdrop--hidden");
+    expect(hiddenBackdrop).toContain("animation: none;");
+    expect(hiddenBackdrop).toContain("inset: auto;");
+    expect(hiddenBackdrop).toContain("width: 0;");
+    expect(hiddenBackdrop).toContain("height: 0;");
+    expect(hiddenBackdrop).toContain("visibility: hidden;");
+    expect(hiddenBackdrop).toContain("pointer-events: none;");
+    expect(dialogStyles).toContain("@keyframes aw-dialog-backdrop-in");
+  });
 });

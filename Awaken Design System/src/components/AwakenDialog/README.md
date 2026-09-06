@@ -18,5 +18,6 @@
 - 仅包含 UI：不产生 runtime、Electron、AG-UI、A2UI 或文件系统副作用。
 - Portal 遮罩使用全局模态层级，不能被 full-screen Settings 外壳或其页面级浮层覆盖。
 - 通过 props 输入，通过回调输出。
+- 遮罩可用 `backdropClassName` 叠加状态。`aw-dialog-backdrop--hidden` 在卸载前先停止覆盖窗口，避免全屏 Portal 卸掉时闪白。
 - 公共 API 变化时同步更新可观测状态。
 - 原 `awaken-dialog` URL 跳转到“「左侧栏」组件库”；组件源码和公开导出继续供 Desktop 与其他设计系统组件使用。

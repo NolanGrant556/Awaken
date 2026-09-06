@@ -873,12 +873,30 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble {
+  position: relative;
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 22px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--aw-bg-white) 0%, transparent),
+    var(--aw-bg-white)
+  );
+  border-bottom-left-radius: inherit;
+  border-bottom-right-radius: inherit;
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
   .execution-prompt-bubble-text {
-  display: -webkit-box;
   max-height: var(--execution-prompt-collapsed-content-height);
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
 }
 
 .execution-prompt-block-expanded .execution-prompt-bubble {
@@ -938,6 +956,31 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 .execution-prompt-action-button:disabled {
   cursor: default;
   opacity: 0.45;
+}
+
+.execution-prompt-copy-button {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: var(--aw-text-tertiary) !important;
+}
+
+.execution-prompt-copy-button[data-copy-state="idle"]:hover,
+.execution-prompt-copy-button[data-copy-state="idle"]:focus-visible {
+  background: var(--aw-bg-fill-light) !important;
+  color: var(--aw-text-primary) !important;
+}
+
+.execution-prompt-copy-button[data-copy-state="copied"] {
+  color: var(--aw-status-success) !important;
+}
+
+.execution-prompt-copy-button[data-copy-state="error"] {
+  color: var(--aw-status-danger) !important;
+}
+
+.execution-prompt-copy-button:disabled {
+  background: transparent !important;
 }
 
 .execution-prompt-editor {

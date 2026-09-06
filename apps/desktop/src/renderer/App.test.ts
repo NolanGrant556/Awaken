@@ -29,6 +29,7 @@ import {
   insertComposerTokenAtOffset,
   modelProfileLabel,
   promptRewindConfirmDialog,
+  threadSupportsMessageRewind,
   PROMPT_REWIND_DRAFT_WARNING_COPY,
   PROMPT_REWIND_SIDE_EFFECT_COPY,
   replaceComposerActionTriggerWithToken,
@@ -3873,6 +3874,20 @@ describe("AwakenUserPromptBlock layout contract", () => {
     expect(html).toContain("Copy prompt");
   });
 
+  it("shows undo/edit/copy together without a raised copy chip", () => {
+    const html = renderToString(
+      React.createElement(AwakenUserPromptBlock, {
+        text: "需要修改的消息",
+        onUndo: () => undefined,
+        onEdit: () => undefined,
+      }),
+    );
+    expect(html).toContain("execution-prompt-bubble-toolbar");
+    expect(html).toContain("execution-prompt-copy-button");
+    expect(html).toMatch(/background:\s*transparent/);
+    expect(html).not.toContain("aw-bg-fill-light");
+  });
+
   it("renders undo/edit actions and the controlled inline editor", () => {
     const actionHtml = renderToString(
       React.createElement(AwakenUserPromptBlock, {
@@ -4102,6 +4117,16 @@ describe("prompt rewind confirm copy", () => {
         PROMPT_REWIND_SIDE_EFFECT_COPY,
       ],
     });
+  });
+
+  it("treats a new ordinary thread as rewind-capable before it is listed", () => {
+    expect(threadSupportsMessageRewind(undefined)).toBe(true);
+    expect(threadSupportsMessageRewind({ source: "ordinary" })).toBe(true);
+    expect(threadSupportsMessageRewind({ source: "acp_bridge" })).toBe(false);
+    expect(threadSupportsMessageRewind({ source: "scheduled_task" })).toBe(
+      false,
+    );
+    expect(threadSupportsMessageRewind({ archived: true })).toBe(false);
   });
 });
 

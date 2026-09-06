@@ -752,6 +752,17 @@ export function promptRewindConfirmDialog(input: {
   };
 }
 
+export function threadSupportsMessageRewind(thread?: {
+  archived?: boolean;
+  source?: string;
+}): boolean {
+  return (
+    !thread?.archived &&
+    thread?.source !== "scheduled_task" &&
+    thread?.source !== "acp_bridge"
+  );
+}
+
 export function composerDraftFromRuntimeRun(
   run: RuntimeRun,
   value = promptTextAfterTokenLeadingText(run.input ?? "", run.composerTokens),
@@ -4262,12 +4273,8 @@ export function App() {
         (thread) => thread.threadId === runtimeState.activeThreadId,
       )
     : undefined;
-  const activeThreadSupportsMessageRewind = Boolean(
-    activeThread &&
-      !activeThread.archived &&
-      activeThread.source !== "scheduled_task" &&
-      activeThread.source !== "acp_bridge",
-  );
+  const activeThreadSupportsMessageRewind =
+    threadSupportsMessageRewind(activeThread);
   const requestedModelProfileId =
     activeThread?.selectedModelProfileId ??
     newThreadModelPreference.selectedModelProfileId;
@@ -9835,9 +9842,11 @@ export function App() {
                                         );
                                       }}
                                       onUndo={
-                                        promptRunId &&
                                         activeThreadSupportsMessageRewind
                                           ? () => {
+                                              if (!promptRunId) {
+                                                return;
+                                              }
                                               requestPromptRewind(
                                                 promptRunId,
                                                 "undo",
@@ -9846,9 +9855,11 @@ export function App() {
                                           : undefined
                                       }
                                       onEdit={
-                                        promptRunId &&
                                         activeThreadSupportsMessageRewind
                                           ? () => {
+                                              if (!promptRunId) {
+                                                return;
+                                              }
                                               setEditingPrompt({
                                                 turnId: turn.id,
                                                 runId: promptRunId,
@@ -9858,6 +9869,7 @@ export function App() {
                                           : undefined
                                       }
                                       actionsDisabled={
+                                        !promptRunId ||
                                         isBusy ||
                                         Boolean(messageActionPendingRunId) ||
                                         Boolean(editingPrompt) ||

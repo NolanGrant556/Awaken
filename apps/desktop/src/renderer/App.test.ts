@@ -151,6 +151,7 @@ import {
   shouldShowTurnMarkerRail,
   turnMarkerRailHeight,
   shouldUseCenterComposer,
+  workbenchHasRun,
   turnMarkerRailDisplay,
 } from "./workbenchPresentation";
 import type { AwakenBridge } from "../shared/runtime";
@@ -5079,6 +5080,29 @@ describe("App workbench presentation", () => {
         hasError: false,
         needsRestart: false,
         holdWorkbench: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("treats a starting replacement as an active run so the dock does not fall back to home", () => {
+    expect(
+      workbenchHasRun({
+        isBusy: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldUseCenterComposer({
+        hasNarrative: false,
+        hasRun: workbenchHasRun({ isBusy: true }),
+        hasNotice: false,
+        hasError: false,
+        needsRestart: false,
+      }),
+    ).toBe(false);
+    expect(
+      workbenchHasRun({
+        runId: undefined,
+        isBusy: false,
       }),
     ).toBe(false);
   });

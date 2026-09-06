@@ -55,6 +55,8 @@ type McpToolAdapter struct {
 	providerMetadata      MCPToolProviderMetadata
 	artifactOutputEnabled bool
 	providerManifest      tool.ProviderManifest
+	readOperations        *mcpReadOperations
+	readOperationsWarning string
 }
 
 // McpToolAdapterOption configures an adapter at construction.
@@ -137,6 +139,7 @@ func NewMcpToolAdapter(manager *Manager, serverName string, mcpTool *mcp.Tool, o
 		opt(adapter)
 	}
 	adapter.resolveProviderManifest(mcpTool)
+	adapter.loadReadOperations(mcpTool)
 	return adapter
 }
 
@@ -384,7 +387,7 @@ func (a *McpToolAdapter) ExecuteOutcome(ctx context.Context, input string, _ too
 		outcome := a.publishArtifactOutput(ctx, result)
 		return outcome.WithTiming(started, time.Now().UTC()), nil
 	}
-	outcome := a.callResultOutcome(result)
+	outcome := a.callResultOutcomeForArguments(result, arguments)
 	return outcome.WithTiming(started, time.Now().UTC()), nil
 }
 
@@ -397,6 +400,10 @@ const (
 )
 
 func (a *McpToolAdapter) callResultOutcome(result *mcp.CallToolResult) tool.ExecutionOutcome {
+	return a.callResultOutcomeForArguments(result, nil)
+}
+
+func (a *McpToolAdapter) callResultOutcomeWithReadEligibility(result *mcp.CallToolResult, readErrorEligible bool) tool.ExecutionOutcome {
 	if result == nil {
 		outcome := tool.FailedOutcome(
 			"MCP tool returned no result",
@@ -417,7 +424,7 @@ func (a *McpToolAdapter) callResultOutcome(result *mcp.CallToolResult) tool.Exec
 		outcome := tool.FailedOutcome(content, errorCodeMCPReportedError, tool.ErrorCategoryDomain, false)
 		outcome.RecoveryOptions = []string{"inspect_tool_error", "adjust_arguments_or_strategy"}
 		outcome.Diagnostic = a.mcpDiagnostic(result)
-		a.applyErrorMetadata(&outcome, result)
+		a.applyErrorMetadata(&outcome, result, readErrorEligible)
 		return outcome
 	}
 

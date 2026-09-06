@@ -25,7 +25,7 @@ type mcpErrorMetadata struct {
 	RetryExhausted  *bool  `json:"retry_exhausted"`
 }
 
-func (a *McpToolAdapter) applyErrorMetadata(outcome *tool.ExecutionOutcome, result *mcp.CallToolResult) {
+func (a *McpToolAdapter) applyErrorMetadata(outcome *tool.ExecutionOutcome, result *mcp.CallToolResult, readEligible bool) {
 	raw, exists := result.Meta[toolErrorMetadataKey]
 	if !exists {
 		return
@@ -47,7 +47,7 @@ func (a *McpToolAdapter) applyErrorMetadata(outcome *tool.ExecutionOutcome, resu
 	}
 	// Read annotations are provider hints, not proof of external state. Only a
 	// consistent read-only tool can opt into this narrowly scoped extension.
-	if !a.errorReadOnly || !a.readOnly || a.destructive || a.artifactOutputEnabled {
+	if !readEligible {
 		invalid()
 		return
 	}

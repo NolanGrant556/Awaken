@@ -65,7 +65,7 @@ MCP delete 与其他 MCP mutation 一样直接进入 provider transport，不要
 
 当前硬预算是：默认 128 turns/512 个 supervisor-admitted tool calls；同一 retryable call 最多允许 2 次失败尝试，non-retryable 最多 1 次；已进入 transport 的失败按同 tool + resource revision + error class 累计 3 次后阻断下一变体；同 fingerprint 连续 2 次后注入 recovery directive。`transport=not_started + error_category=validation` 的宿主输入预检失败只约束完全相同的 call signature，不进入 resource/error-class 预算，因此模型修正参数后的新调用仍可执行；它仍计入 run/turn 总失败数与 tool execution 预算。调用方可配置 turn/call 上限，其余阈值当前固定。
 
-成功变更另有无进展拦截：当 Outcome 已成功，且宿主已观测变更或 MCP mutation 的 side effect 仍是 `unknown`时，监督器记录排除顶层/嵌套 `idempotency_key` 后的 canonical 业务签名。同一 run 内再提交相同工具和相同业务参数时，不进入真实 transport，返回 `repeated_successful_mutation` / `successful_mutation_already_applied`。首次要求继续下一步、只读回查或真正修改业务参数；连续忽略一次后终止 run。MCP read 的 side effect 为 `none`，不受此规则影响；广义 `Bash` 的 `unknown` 不足以判定变更，也不进入该拦截。
+成功变更另有无进展拦截：当 Outcome 已成功，且宿主已观测变更或 MCP mutation 的 side effect 仍是 `unknown`时，监督器记录排除顶层/嵌套 `idempotency_key` 后的 canonical 业务签名。同一 run 内再提交相同工具和相同业务参数时，不进入真实 transport，返回 `repeated_successful_mutation` / `successful_mutation_already_applied`。首次要求继续下一步、只读回查或真正修改业务参数；连续忽略一次后终止 run。MCP read（含[显式声明的本次只读操作](../06_MCP运行时/工具接入与技能桥接.md#11-按本次操作声明只读)）的 side effect 为 `none`，不受此规则影响；广义 `Bash` 的 `unknown` 不足以判定变更，也不进入该拦截。
 
 单个业务工具的累计失败不再直接终止 run：单 turn 6 次或单 run 12 次失败会升级为强制 `strategy_change_required` directive——要求更换工具、参数或实现路径，或停止该策略并说明；run 只被 run 级预算（max turns / max tool executions）终止。被阻断的完全相同重复调用返回结构化 guidance（`status=strategy_change_required`、`same_call_retryable=false`、`changed_call_allowed=true`、`next_actions`），canonical Outcome 的 `retryable` 保持 `false`，避免同一结果同时出现真假相反的 retry 信号；一般失败改变工具、参数或策略视为新的尝试，不沿用旧 fingerprint 阻断。`ask_user` 是交互门例外：非重试的输入校验失败已给出正确结构后，相同参数再次出现会以 `repeated_tool_failure` 终止 run，避免无限等待前循环。另一个例外是 Host 明确标记 `requires_external_state_confirmation` 的未知外部副作用：首次失败即建立 `external_state_confirmation_required` 屏障，当前 run 内同一工具即使更换参数也不得再次进入 transport，只能先核对外部状态或向用户说明。
 
@@ -77,7 +77,7 @@ signature 由 tool name + canonical arguments hash 组成，fingerprint 用稳�
 
 同 capability 存在多个 provider 也不允许 runtime 在失败后暗中换实现。若 provider A 已 `transport=completed` 且返回 partial/observed side effect，当次 call 必须以 A 的失败与变更事实终止，不自动调用 provider B。只有模型在检查外部状态后明确发出新的 B tool call，B 才可执行。
 
-MCP 可选只读错误扩展由 [06 工具接入](../06_MCP运行时/工具接入与技能桥接.md#11-可选只读错误语义) 拥有。provider 内部恢复耗尽后进入本节 non-retryable 预算；宿主不叠加重发，也不把下游超时误认成输入校验失败。未知副作用仍遵守原有核查规则。
+MCP 可选只读错误扩展由 [06 工具接入](../06_MCP运行时/工具接入与技能桥接.md#12-可选只读错误语义) 拥有。provider 内部恢复耗尽后进入本节 non-retryable 预算；宿主不叠加重发，也不把下游超时误认成输入校验失败。未知副作用仍遵守原有核查规则。
 
 ## 4. 耐久顺序
 

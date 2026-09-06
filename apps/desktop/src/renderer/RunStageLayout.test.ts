@@ -622,15 +622,15 @@ describe("RunStage layout", () => {
       ),
     );
 
-    expect(collapsedText).toContain(".execution-prompt-bubble-main::after");
     expect(collapsedText).toContain("padding-bottom: 0;");
-    expect(collapsedText).toContain("height: 3px;");
-    expect(collapsedText).toContain("linear-gradient(");
-    expect(collapsedText).toContain("var(--execution-prompt-surface)");
-    expect(collapsedText).toContain("pointer-events: none;");
+    expect(collapsedText).toContain("mask-image:");
+    expect(collapsedText).toContain("-webkit-mask-image:");
+    expect(collapsedText).toContain("calc(100% - 10px)");
+    expect(collapsedText).toContain("mask-size: 100% 100%;");
+    expect(collapsedText).toContain("overflow: hidden;");
     expect(collapsedText).not.toContain(".execution-prompt-bubble::after");
+    expect(collapsedText).not.toContain(".execution-prompt-bubble-main::after");
     expect(collapsedText).not.toContain(".execution-prompt-bubble-text::after");
-    expect(collapsedText).not.toContain("mask-image:");
     expect(collapsedText).not.toContain("-webkit-line-clamp");
     expect(designSystemStyles).toContain(".execution-prompt-copy-button");
     expect(designSystemStyles).toContain("box-shadow: none !important;");
@@ -642,14 +642,16 @@ describe("RunStage layout", () => {
     expect(workbenchStyles).toContain(
       ".execution-prompt-block-limited:not(.execution-prompt-block-expanded)",
     );
+    expect(collapsedText).toContain("line-height: 16px;");
     expect(workbenchStyles).toContain(
       "--execution-prompt-collapsed-content-height: 48px;",
     );
     expect(workbenchStyles).not.toContain(
-      "--execution-prompt-collapsed-content-height: 54px;",
+      "--execution-prompt-collapsed-content-height: 50px;",
     );
+    expect(workbenchStyles).toContain("padding: 10px 16px 0;");
     expect(workbenchStyles).toMatch(
-      /\.execution-turn-header[\s\S]*?\.execution-prompt-block-limited:not\(\.execution-prompt-block-expanded\)[\s\S]*?\.execution-prompt-bubble \{[\s\S]*?padding-bottom: 0;/,
+      /\.execution-turn-header[\s\S]*?\.execution-prompt-block-limited:not\(\.execution-prompt-block-expanded\)[\s\S]*?\.execution-prompt-bubble \{[\s\S]*?padding: 10px 16px 0;/,
     );
   });
 });

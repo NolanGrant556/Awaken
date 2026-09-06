@@ -747,7 +747,7 @@
 .execution-turn-header
   .execution-prompt-block-limited:not(.execution-prompt-block-expanded)
   .execution-prompt-bubble {
-  padding-bottom: 0;
+  padding: 10px 16px 0;
 }
 
 .execution-turn-body {

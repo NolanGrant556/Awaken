@@ -139,6 +139,10 @@ import {
   shouldShowAssistantAnswerFooter,
   shouldUseCenterComposer,
   formatUserPromptTimestamp,
+  workbenchHasRun,
+  promptRewindDialogOverlay,
+  scheduleAfterNextPaint,
+  waitForNextPaint,
   turnMarkerRailHeight,
   turnMarkerRailDisplay,
   type NarrativeTurnBodySegment,
@@ -751,6 +755,17 @@ export function promptRewindConfirmDialog(input: {
       ? [PROMPT_REWIND_DRAFT_WARNING_COPY, PROMPT_REWIND_SIDE_EFFECT_COPY]
       : [PROMPT_REWIND_SIDE_EFFECT_COPY],
   };
+}
+
+export function threadSupportsMessageRewind(thread?: {
+  archived?: boolean;
+  source?: string;
+}): boolean {
+  return (
+    !thread?.archived &&
+    thread?.source !== "scheduled_task" &&
+    thread?.source !== "acp_bridge"
+  );
 }
 
 export function composerDraftFromRuntimeRun(
@@ -3026,6 +3041,9 @@ export function App() {
   const [messageActionPendingRunId, setMessageActionPendingRunId] = useState<
     string | undefined
   >();
+  const [promptReplacementPending, setPromptReplacementPending] =
+    useState(false);
+  const [rewindDialogHidden, setRewindDialogHidden] = useState(false);
   const composerDraftKey = composerDraftOwnerKey(runtimeState.activeThreadId);
   const {
     draft: composerDraft,
@@ -4248,6 +4266,7 @@ export function App() {
     setNotice(null);
     setEditingPrompt(undefined);
     setPendingPromptRewind(undefined);
+    setRewindDialogHidden(false);
     setMessageActionPendingRunId(undefined);
     setNewThreadModelPreference({ reasoningEffortByProfile: {} });
     localStorage.removeItem("awaken:runId");
@@ -4263,12 +4282,8 @@ export function App() {
         (thread) => thread.threadId === runtimeState.activeThreadId,
       )
     : undefined;
-  const activeThreadSupportsMessageRewind = Boolean(
-    activeThread &&
-      !activeThread.archived &&
-      activeThread.source !== "scheduled_task" &&
-      activeThread.source !== "acp_bridge",
-  );
+  const activeThreadSupportsMessageRewind =
+    threadSupportsMessageRewind(activeThread);
   const requestedModelProfileId =
     activeThread?.selectedModelProfileId ??
     newThreadModelPreference.selectedModelProfileId;
@@ -5287,10 +5302,14 @@ export function App() {
   const showCenterComposer = shouldUseCenterComposerWithFileWorkspace({
     standardCenterComposer: shouldUseCenterComposer({
       hasNarrative: visibleNarrativeItems.length > 0,
-      hasRun: Boolean(runtimeState.runId),
+      hasRun: workbenchHasRun({
+        runId: runtimeState.runId,
+        isBusy,
+      }),
       hasNotice: Boolean(notice),
       hasError: Boolean(runtimeState.errorMessage),
       needsRestart: desktopNeedsRestart,
+      holdWorkbench: promptReplacementPending,
     }),
     fileWorkspaceOpen,
     fileWorkspaceExpanded,
@@ -5893,6 +5912,8 @@ export function App() {
     forceNewThread?: boolean;
     draft?: ThreadComposerDraft;
     restoreCanonicalOnFailure?: boolean;
+    replaceTargetRunId?: string;
+    onReplacementCommitted?: () => void;
   }): Promise<void> {
     if (!desktopReady) {
       setNotice(
@@ -5999,14 +6020,27 @@ export function App() {
     terminalSeenRef.current = false;
     setNotice(null);
     prepareForRunStart();
-    dispatch({
-      type: "run/requested",
-      prompt,
-      promptAttachments: forceNewThread ? [] : runInputAttachments,
-      promptTokens: forceNewThread ? [] : draftPromptTokens,
-      promptFileComments: forceNewThread ? [] : draftFileComments,
-      startedAtMs: Date.now(),
-    });
+    if (options?.replaceTargetRunId) {
+      dispatch({
+        type: "run/promptReplaced",
+        targetRunId: options.replaceTargetRunId,
+        prompt,
+        promptAttachments: forceNewThread ? [] : runInputAttachments,
+        promptTokens: forceNewThread ? [] : draftPromptTokens,
+        promptFileComments: forceNewThread ? [] : draftFileComments,
+        startedAtMs: Date.now(),
+      });
+    } else {
+      dispatch({
+        type: "run/requested",
+        prompt,
+        promptAttachments: forceNewThread ? [] : runInputAttachments,
+        promptTokens: forceNewThread ? [] : draftPromptTokens,
+        promptFileComments: forceNewThread ? [] : draftFileComments,
+        startedAtMs: Date.now(),
+      });
+    }
+    options?.onReplacementCommitted?.();
     clearThreadComposerDraft();
 
     try {
@@ -6140,6 +6174,7 @@ export function App() {
   }
 
   function requestPromptRewind(runId: string, mode: "undo" | "edit"): void {
+    setRewindDialogHidden(false);
     setPendingPromptRewind({
       runId,
       mode,
@@ -6147,8 +6182,14 @@ export function App() {
     });
   }
 
+  function dismissPromptRewindDialog(): void {
+    setPendingPromptRewind(undefined);
+    setRewindDialogHidden(false);
+  }
+
   async function rewindPromptRun(
     runId: string,
+    options?: { applyReplay?: boolean },
   ): Promise<RewindThreadResult | undefined> {
     const threadId = runtimeState.activeThreadId;
     const expectedHeadRunId = [...narrativeSections.turns]
@@ -6180,6 +6221,10 @@ export function App() {
     const loadSeq = threadLoadSeqRef.current + 1;
     threadLoadSeqRef.current = loadSeq;
     terminalSeenRef.current = false;
+    if (options?.applyReplay === false) {
+      setMessageActionPendingRunId(undefined);
+      return result;
+    }
     dispatch({
       type: "run/threadReplayStarted",
       threadId,
@@ -6216,23 +6261,32 @@ export function App() {
     if (!editingPrompt) {
       return;
     }
-    const result = await rewindPromptRun(editingPrompt.runId);
-    if (!result) {
-      return;
+    const targetRunId = editingPrompt.runId;
+    const editedText = editingPrompt.text;
+    setPromptReplacementPending(true);
+    try {
+      const result = await rewindPromptRun(targetRunId, {
+        applyReplay: false,
+      });
+      if (!result) {
+        return;
+      }
+      const editedDraft = composerDraftFromRuntimeRun(
+        result.targetRun,
+        editedText,
+      );
+      await handleSubmitWithPrompt({
+        draft: editedDraft,
+        restoreCanonicalOnFailure: true,
+        replaceTargetRunId: targetRunId,
+        onReplacementCommitted: () => {
+          setEditingPrompt(undefined);
+          scheduleAfterNextPaint(dismissPromptRewindDialog);
+        },
+      });
+    } finally {
+      setPromptReplacementPending(false);
     }
-    const editedDraft = composerDraftFromRuntimeRun(
-      result.targetRun,
-      editingPrompt.text,
-    );
-    setEditingPrompt(undefined);
-    replaceComposerDraft(
-      editedDraft,
-      composerDraftOwnerKey(result.thread.threadId),
-    );
-    await handleSubmitWithPrompt({
-      draft: editedDraft,
-      restoreCanonicalOnFailure: true,
-    });
   }
 
   async function handleConfirmPromptRewind(): Promise<void> {
@@ -6240,12 +6294,18 @@ export function App() {
     if (!pending) {
       return;
     }
-    setPendingPromptRewind(undefined);
     if (pending.mode === "undo") {
+      dismissPromptRewindDialog();
       await handleUndoPrompt(pending.runId);
       return;
     }
-    await handleSubmitPromptEdit();
+    setRewindDialogHidden(true);
+    try {
+      await waitForNextPaint();
+      await handleSubmitPromptEdit();
+    } finally {
+      scheduleAfterNextPaint(dismissPromptRewindDialog);
+    }
   }
 
   async function handleComposerSubmit(): Promise<void> {
@@ -6285,6 +6345,7 @@ export function App() {
     setNotice(null);
     setEditingPrompt(undefined);
     setPendingPromptRewind(undefined);
+    setRewindDialogHidden(false);
     setMessageActionPendingRunId(undefined);
     prepareForThreadSwitch();
     dispatch({ type: "run/threadSwitch", threadId });
@@ -8743,6 +8804,10 @@ export function App() {
   const promptRewindDialog = pendingPromptRewind
     ? promptRewindConfirmDialog(pendingPromptRewind)
     : undefined;
+  const promptRewindOverlay = promptRewindDialogOverlay({
+    pending: Boolean(pendingPromptRewind),
+    hidden: rewindDialogHidden,
+  });
 
   return (
     <>
@@ -9848,9 +9913,11 @@ export function App() {
                                         );
                                       }}
                                       onUndo={
-                                        promptRunId &&
                                         activeThreadSupportsMessageRewind
                                           ? () => {
+                                              if (!promptRunId) {
+                                                return;
+                                              }
                                               requestPromptRewind(
                                                 promptRunId,
                                                 "undo",
@@ -9859,9 +9926,11 @@ export function App() {
                                           : undefined
                                       }
                                       onEdit={
-                                        promptRunId &&
                                         activeThreadSupportsMessageRewind
                                           ? () => {
+                                              if (!promptRunId) {
+                                                return;
+                                              }
                                               setEditingPrompt({
                                                 turnId: turn.id,
                                                 runId: promptRunId,
@@ -9871,6 +9940,7 @@ export function App() {
                                           : undefined
                                       }
                                       actionsDisabled={
+                                        !promptRunId ||
                                         isBusy ||
                                         Boolean(messageActionPendingRunId) ||
                                         Boolean(editingPrompt) ||
@@ -9906,7 +9976,7 @@ export function App() {
                                       }}
                                       onCancelEdit={() => {
                                         setEditingPrompt(undefined);
-                                        setPendingPromptRewind(undefined);
+                                        dismissPromptRewindDialog();
                                       }}
                                       onSubmitEdit={() => {
                                         if (!promptRunId) {
@@ -10389,11 +10459,13 @@ export function App() {
         <p className="project-delete-dialog-copy">{threadDeleteDialogCopy}</p>
       </Dialog>
       <Dialog
-        open={Boolean(pendingPromptRewind)}
+        open={promptRewindOverlay.open}
         title={promptRewindDialog?.title ?? "确认改写对话"}
+        modal={false}
+        backdropClassName={promptRewindOverlay.backdropClassName}
         onOpenChange={(open) => {
-          if (!open) {
-            setPendingPromptRewind(undefined);
+          if (!open && promptRewindOverlay.allowDismiss) {
+            dismissPromptRewindDialog();
           }
         }}
         footer={
@@ -10401,13 +10473,16 @@ export function App() {
             <Button
               variant="default"
               size="md"
-              onClick={() => setPendingPromptRewind(undefined)}
+              onClick={() => dismissPromptRewindDialog()}
             >
               取消
             </Button>
             <Button
               variant="primary"
               size="md"
+              loading={
+                pendingPromptRewind?.mode === "edit" && promptReplacementPending
+              }
               onClick={() => {
                 void handleConfirmPromptRewind();
               }}

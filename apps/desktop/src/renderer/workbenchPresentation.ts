@@ -207,13 +207,18 @@ export function diffLineStats(diff?: string): {
 export function shouldUseCenterComposer({
   hasNarrative,
   hasRun,
+  holdWorkbench = false,
 }: {
   hasNarrative: boolean;
   hasRun: boolean;
   hasNotice: boolean;
   hasError: boolean;
   needsRestart: boolean;
+  holdWorkbench?: boolean;
 }): boolean {
+  if (holdWorkbench) {
+    return false;
+  }
   return !hasNarrative && !hasRun;
 }
 
@@ -261,6 +266,58 @@ export function formatUserPromptTimestamp({
     return `${USER_PROMPT_WEEKDAYS[at.getDay()]} ${time}`;
   }
   return `${at.getMonth() + 1}月${at.getDate()}日 ${time}`;
+}
+
+export const PROMPT_REWIND_DIALOG_HIDDEN_BACKDROP_CLASS =
+  "aw-dialog-backdrop--hidden";
+
+export function promptRewindDialogOverlay({
+  pending,
+  hidden,
+}: {
+  pending: boolean;
+  hidden: boolean;
+}): {
+  open: boolean;
+  backdropClassName?: string;
+  allowDismiss: boolean;
+} {
+  if (!pending) {
+    return { open: false, allowDismiss: true };
+  }
+  return {
+    open: true,
+    backdropClassName: hidden
+      ? PROMPT_REWIND_DIALOG_HIDDEN_BACKDROP_CLASS
+      : undefined,
+    allowDismiss: !hidden,
+  };
+}
+
+export function scheduleAfterNextPaint(callback: () => void): void {
+  if (typeof requestAnimationFrame !== "function") {
+    callback();
+    return;
+  }
+  requestAnimationFrame(() => {
+    requestAnimationFrame(callback);
+  });
+}
+
+export function waitForNextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    scheduleAfterNextPaint(resolve);
+  });
+}
+
+export function workbenchHasRun({
+  runId,
+  isBusy,
+}: {
+  runId?: string;
+  isBusy: boolean;
+}): boolean {
+  return Boolean(runId) || isBusy;
 }
 
 export function projectVisibleNarrativeItems({

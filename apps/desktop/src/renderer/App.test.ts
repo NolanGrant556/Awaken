@@ -29,6 +29,7 @@ import {
   insertComposerTokenAtOffset,
   modelProfileLabel,
   promptRewindConfirmDialog,
+  threadSupportsMessageRewind,
   PROMPT_REWIND_DRAFT_WARNING_COPY,
   PROMPT_REWIND_SIDE_EFFECT_COPY,
   replaceComposerActionTriggerWithToken,
@@ -151,6 +152,10 @@ import {
   turnMarkerRailHeight,
   shouldUseCenterComposer,
   formatUserPromptTimestamp,
+  workbenchHasRun,
+  promptRewindDialogOverlay,
+  PROMPT_REWIND_DIALOG_HIDDEN_BACKDROP_CLASS,
+  scheduleAfterNextPaint,
   turnMarkerRailDisplay,
 } from "./workbenchPresentation";
 import type { AwakenBridge } from "../shared/runtime";
@@ -3884,6 +3889,7 @@ describe("AwakenUserPromptBlock layout contract", () => {
         onEdit: () => undefined,
       }),
     );
+    expect(html).toContain("execution-prompt-bubble-toolbar");
     expect(html).toContain("execution-prompt-bubble-time");
     expect(html).toContain('dateTime="2026-09-05T01:53:00.000Z"');
     expect(html.indexOf("星期六 09:53")).toBeGreaterThan(-1);
@@ -4125,6 +4131,16 @@ describe("prompt rewind confirm copy", () => {
         PROMPT_REWIND_SIDE_EFFECT_COPY,
       ],
     });
+  });
+
+  it("treats a new ordinary thread as rewind-capable before it is listed", () => {
+    expect(threadSupportsMessageRewind(undefined)).toBe(true);
+    expect(threadSupportsMessageRewind({ source: "ordinary" })).toBe(true);
+    expect(threadSupportsMessageRewind({ source: "acp_bridge" })).toBe(false);
+    expect(threadSupportsMessageRewind({ source: "scheduled_task" })).toBe(
+      false,
+    );
+    expect(threadSupportsMessageRewind({ archived: true })).toBe(false);
   });
 });
 
@@ -5068,6 +5084,84 @@ describe("App workbench presentation", () => {
         needsRestart: true,
       }),
     ).toBe(true);
+
+    expect(
+      shouldUseCenterComposer({
+        hasNarrative: false,
+        hasRun: false,
+        hasNotice: false,
+        hasError: false,
+        needsRestart: false,
+        holdWorkbench: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("hides the rewind confirm overlay without unmounting while an edit send commits", () => {
+    expect(
+      promptRewindDialogOverlay({ pending: false, hidden: false }),
+    ).toEqual({
+      open: false,
+      allowDismiss: true,
+    });
+    expect(
+      promptRewindDialogOverlay({ pending: true, hidden: false }),
+    ).toEqual({
+      open: true,
+      allowDismiss: true,
+    });
+    expect(
+      promptRewindDialogOverlay({ pending: true, hidden: true }),
+    ).toEqual({
+      open: true,
+      backdropClassName: PROMPT_REWIND_DIALOG_HIDDEN_BACKDROP_CLASS,
+      allowDismiss: false,
+    });
+  });
+
+  it("defers rewind dialog unmount until the following paint", () => {
+    const frames: FrameRequestCallback[] = [];
+    const originalRaf = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    }) as typeof requestAnimationFrame;
+    const calls: string[] = [];
+    try {
+      scheduleAfterNextPaint(() => {
+        calls.push("done");
+      });
+      expect(calls).toEqual([]);
+      frames[0]?.(0);
+      expect(calls).toEqual([]);
+      frames[1]?.(0);
+      expect(calls).toEqual(["done"]);
+    } finally {
+      globalThis.requestAnimationFrame = originalRaf;
+    }
+  });
+
+  it("treats a starting replacement as an active run so the dock does not fall back to home", () => {
+    expect(
+      workbenchHasRun({
+        isBusy: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldUseCenterComposer({
+        hasNarrative: false,
+        hasRun: workbenchHasRun({ isBusy: true }),
+        hasNotice: false,
+        hasError: false,
+        needsRestart: false,
+      }),
+    ).toBe(false);
+    expect(
+      workbenchHasRun({
+        runId: undefined,
+        isBusy: false,
+      }),
+    ).toBe(false);
   });
 
   it("formats user prompt timestamps as today, weekday, or month-day", () => {

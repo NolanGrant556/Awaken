@@ -207,14 +207,117 @@ export function diffLineStats(diff?: string): {
 export function shouldUseCenterComposer({
   hasNarrative,
   hasRun,
+  holdWorkbench = false,
 }: {
   hasNarrative: boolean;
   hasRun: boolean;
   hasNotice: boolean;
   hasError: boolean;
   needsRestart: boolean;
+  holdWorkbench?: boolean;
 }): boolean {
+  if (holdWorkbench) {
+    return false;
+  }
   return !hasNarrative && !hasRun;
+}
+
+const USER_PROMPT_WEEKDAYS = [
+  "星期日",
+  "星期一",
+  "星期二",
+  "星期三",
+  "星期四",
+  "星期五",
+  "星期六",
+] as const;
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function startOfLocalDayMs(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function startOfLocalWeekMondayMs(date: Date): number {
+  const day = date.getDay();
+  const daysFromMonday = (day + 6) % 7;
+  return startOfLocalDayMs(date) - daysFromMonday * 24 * 60 * 60 * 1000;
+}
+
+export function formatUserPromptTimestamp({
+  atMs,
+  nowMs = Date.now(),
+}: {
+  atMs: number;
+  nowMs?: number;
+}): string | undefined {
+  if (!Number.isFinite(atMs)) {
+    return undefined;
+  }
+  const at = new Date(atMs);
+  const now = new Date(nowMs);
+  const time = `${pad2(at.getHours())}:${pad2(at.getMinutes())}`;
+  if (startOfLocalDayMs(at) === startOfLocalDayMs(now)) {
+    return time;
+  }
+  if (startOfLocalWeekMondayMs(at) === startOfLocalWeekMondayMs(now)) {
+    return `${USER_PROMPT_WEEKDAYS[at.getDay()]} ${time}`;
+  }
+  return `${at.getMonth() + 1}月${at.getDate()}日 ${time}`;
+}
+
+export const PROMPT_REWIND_DIALOG_HIDDEN_BACKDROP_CLASS =
+  "aw-dialog-backdrop--hidden";
+
+export function promptRewindDialogOverlay({
+  pending,
+  hidden,
+}: {
+  pending: boolean;
+  hidden: boolean;
+}): {
+  open: boolean;
+  backdropClassName?: string;
+  allowDismiss: boolean;
+} {
+  if (!pending) {
+    return { open: false, allowDismiss: true };
+  }
+  return {
+    open: true,
+    backdropClassName: hidden
+      ? PROMPT_REWIND_DIALOG_HIDDEN_BACKDROP_CLASS
+      : undefined,
+    allowDismiss: !hidden,
+  };
+}
+
+export function scheduleAfterNextPaint(callback: () => void): void {
+  if (typeof requestAnimationFrame !== "function") {
+    callback();
+    return;
+  }
+  requestAnimationFrame(() => {
+    requestAnimationFrame(callback);
+  });
+}
+
+export function waitForNextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    scheduleAfterNextPaint(resolve);
+  });
+}
+
+export function workbenchHasRun({
+  runId,
+  isBusy,
+}: {
+  runId?: string;
+  isBusy: boolean;
+}): boolean {
+  return Boolean(runId) || isBusy;
 }
 
 export function projectVisibleNarrativeItems({

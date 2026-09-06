@@ -670,6 +670,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   --execution-prompt-expanded-content-height: 180px;
   --execution-prompt-attachment-size: 52px;
   --execution-prompt-attachment-gap: 8px;
+  --execution-prompt-surface: var(--aw-bg-white);
   width: 100%;
   box-sizing: border-box;
   max-width: 100%;
@@ -677,7 +678,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   padding: 7px 12px;
   border: 1px solid var(--aw-border-light);
   border-radius: var(--aw-radius-control);
-  background: var(--aw-bg-white);
+  background: var(--execution-prompt-surface);
   color: var(--aw-text-primary);
   font-size: var(--aw-font-size-base);
   line-height: var(--aw-line-height-base);
@@ -873,12 +874,42 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .execution-prompt-block-limited:not(.execution-prompt-block-expanded)
-  .execution-prompt-bubble-text {
-  display: -webkit-box;
+  .execution-prompt-bubble {
+  padding-bottom: 0;
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble-select-root {
+  margin-bottom: calc(-1 * var(--execution-prompt-attachment-gap));
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble-main {
   max-height: var(--execution-prompt-collapsed-content-height);
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble-text {
+  max-height: var(--execution-prompt-collapsed-content-height);
+  overflow: hidden;
+  line-height: 16px;
 }
 
 .execution-prompt-block-expanded .execution-prompt-bubble {
@@ -912,6 +943,16 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   padding-top: 4px;
 }
 
+.execution-prompt-bubble-time {
+  margin: 0 4px 0 0;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: 24px;
+  font-weight: var(--aw-font-weight-regular);
+  white-space: nowrap;
+  user-select: none;
+}
+
 .execution-prompt-bubble-toolbar button {
   flex: none;
 }
@@ -938,6 +979,31 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 .execution-prompt-action-button:disabled {
   cursor: default;
   opacity: 0.45;
+}
+
+.execution-prompt-copy-button {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: var(--aw-text-tertiary) !important;
+}
+
+.execution-prompt-copy-button[data-copy-state="idle"]:hover,
+.execution-prompt-copy-button[data-copy-state="idle"]:focus-visible {
+  background: var(--aw-bg-fill-light) !important;
+  color: var(--aw-text-primary) !important;
+}
+
+.execution-prompt-copy-button[data-copy-state="copied"] {
+  color: var(--aw-status-success) !important;
+}
+
+.execution-prompt-copy-button[data-copy-state="error"] {
+  color: var(--aw-status-danger) !important;
+}
+
+.execution-prompt-copy-button:disabled {
+  background: transparent !important;
 }
 
 .execution-prompt-editor {

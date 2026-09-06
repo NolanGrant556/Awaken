@@ -370,6 +370,15 @@ export type RuntimeAction =
       startedAtMs?: number;
       runId?: string;
     }
+  | {
+      type: "run/promptReplaced";
+      targetRunId?: string;
+      prompt: string;
+      promptAttachments?: RunInputAttachment[];
+      promptTokens?: PromptNarrativeToken[];
+      promptFileComments?: import("../../shared/runtime").FileLineComment[];
+      startedAtMs?: number;
+    }
   | { type: "run/created"; run: RuntimeRun }
   | { type: "run/createFailed"; message: string }
   | { type: "run/cancelRequested" }
@@ -857,6 +866,19 @@ function recoveredNarrativeScope(run: RuntimeRun): string {
 
 function shouldAppendNarrative(state: RuntimeViewState): boolean {
   return Boolean(state.activeThreadId || state.threadId);
+}
+
+export function committedItemsBeforePromptRun(
+  items: RunNarrativeItem[],
+  targetRunId?: string,
+): RunNarrativeItem[] {
+  if (!targetRunId) {
+    return [];
+  }
+  const index = items.findIndex(
+    (item) => item.kind === "prompt" && item.runId === targetRunId,
+  );
+  return index >= 0 ? items.slice(0, index) : [];
 }
 
 function scopeNarrativeEvent(
@@ -2071,6 +2093,28 @@ export function reduceRuntimeState(
         threads: state.threads,
         threadViews: saveActiveThreadView(state).threadViews,
       };
+    case "run/promptReplaced": {
+      const sliced: RuntimeViewState = {
+        ...state,
+        runId: undefined,
+        status: undefined,
+        narrative: {
+          ...createInitialRunNarrativeState(),
+          committedItems: committedItemsBeforePromptRun(
+            state.narrative.committedItems,
+            action.targetRunId,
+          ),
+        },
+      };
+      return reduceRuntimeState(sliced, {
+        type: "run/requested",
+        prompt: action.prompt,
+        promptAttachments: action.promptAttachments,
+        promptTokens: action.promptTokens,
+        promptFileComments: action.promptFileComments,
+        startedAtMs: action.startedAtMs,
+      });
+    }
     case "run/requested":
       return {
         prompt: action.prompt,
@@ -2110,9 +2154,10 @@ export function reduceRuntimeState(
               action.promptAttachments,
               nextNarrativeScope(state),
               action.promptTokens,
-              action.promptFileComments,
-              action.runId,
-            )
+            action.promptFileComments,
+            action.runId,
+            action.startedAtMs,
+          )
           : createRunRequestedNarrative(
               action.prompt,
               action.promptAttachments,
@@ -2120,6 +2165,7 @@ export function reduceRuntimeState(
               action.promptTokens,
               action.promptFileComments,
               action.runId,
+              action.startedAtMs,
             ),
         subagentsById: state.subagentsById,
         subagentOrder: state.subagentOrder,
@@ -2314,6 +2360,9 @@ export function reduceRuntimeState(
                 action.run.inputAttachments,
                 recoveredNarrativeScope(action.run),
                 action.run.composerTokens,
+                undefined,
+                undefined,
+                Date.parse(action.run.createdAt),
               )
             : hasPromptAttachments
               ? createRunRequestedNarrative(
@@ -2321,6 +2370,9 @@ export function reduceRuntimeState(
                   action.run.inputAttachments,
                   recoveredNarrativeScope(action.run),
                   action.run.composerTokens,
+                  undefined,
+                  undefined,
+                  Date.parse(action.run.createdAt),
                 )
               : createInitialRunNarrativeState(),
           supervisorStatus: state.supervisorStatus,

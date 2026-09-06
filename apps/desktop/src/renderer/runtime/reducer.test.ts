@@ -207,6 +207,114 @@ describe("runtime reducer thread rewind replay", () => {
     );
     expect(prompts.map((item) => item.text)).toEqual(["edited"]);
   });
+
+  it("replaces the first prompt in one transition without an empty intermediate narrative", () => {
+    const beforeReplace = dispatch([
+      { type: "run/requested", prompt: "first" },
+      {
+        type: "run/created",
+        run: makeRun({
+          runId: "run-1",
+          threadId: "thread-1",
+          status: "finished",
+        }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "first",
+        runId: "run-1",
+      },
+    ]);
+    expect(
+      beforeReplace.narrative.committedItems
+        .filter((item) => item.kind === "prompt")
+        .map((item) => item.text),
+    ).toEqual(["first"]);
+
+    const replaced = reduceRuntimeState(beforeReplace, {
+      type: "run/promptReplaced",
+      targetRunId: "run-1",
+      prompt: "edited first message",
+    });
+
+    expect(replaced.activeThreadId).toBe("thread-1");
+    expect(replaced.phase).toBe("starting");
+    expect(replaced.runId).toBeUndefined();
+    expect(
+      replaced.narrative.committedItems
+        .filter((item) => item.kind === "prompt")
+        .map((item) => item.text),
+    ).toEqual(["edited first message"]);
+    expect(replaced.narrative.activeItem).toMatchObject({
+      kind: "planning",
+      status: "active",
+    });
+  });
+
+  it("keeps the prefix and drops the edited suffix in one prompt replacement", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "first" },
+      {
+        type: "run/created",
+        run: makeRun({
+          runId: "run-1",
+          threadId: "thread-1",
+          status: "finished",
+        }),
+      },
+      {
+        type: "run/threadAdded",
+        threadId: "thread-1",
+        label: "first",
+        runId: "run-1",
+      },
+      { type: "run/requested", prompt: "second" },
+      {
+        type: "run/created",
+        run: makeRun({
+          runId: "run-2",
+          threadId: "thread-1",
+          status: "finished",
+        }),
+      },
+      { type: "run/requested", prompt: "third" },
+      {
+        type: "run/created",
+        run: makeRun({
+          runId: "run-3",
+          threadId: "thread-1",
+          status: "finished",
+        }),
+      },
+      {
+        type: "run/promptReplaced",
+        targetRunId: "run-2",
+        prompt: "edited second",
+      },
+    ]);
+
+    expect(
+      state.narrative.committedItems
+        .filter((item) => item.kind === "prompt")
+        .map((item) => item.text),
+    ).toEqual(["first", "edited second"]);
+    expect(state.phase).toBe("starting");
+    expect(state.activeThreadId).toBe("thread-1");
+  });
+});
+
+describe("runtime reducer prompt timestamps", () => {
+  it("stores startedAtMs on the requested prompt", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "hello", startedAtMs: 1_725_000_000_000 },
+    ]);
+    expect(state.narrative.committedItems[0]).toMatchObject({
+      kind: "prompt",
+      text: "hello",
+      createdAtMs: 1_725_000_000_000,
+    });
+  });
 });
 
 describe("runtime reducer cancel handling", () => {
@@ -812,7 +920,7 @@ describe("runtime reducer replay idempotency", () => {
     expect(
       state.narrative.committedItems.filter((item) => item.kind === "prompt"),
     ).toEqual([
-      { kind: "prompt", id: "prompt:thread-1:1", text: "Restore this run" },
+      { kind: "prompt", id: "prompt:thread-1:1", text: "Restore this run", createdAtMs: Date.parse("2026-01-01T00:00:00Z") },
     ]);
   });
 

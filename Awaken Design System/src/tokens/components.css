@@ -879,6 +879,11 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble-select-root {
+  margin-bottom: calc(-1 * var(--execution-prompt-attachment-gap));
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
   .execution-prompt-bubble-main {
   max-height: var(--execution-prompt-collapsed-content-height);
   overflow: hidden;

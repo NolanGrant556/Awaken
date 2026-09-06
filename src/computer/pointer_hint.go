@@ -1,5 +1,7 @@
 package computer
 
+import "strings"
+
 // PointerSpace identifies the coordinate system of a virtual-cursor hint.
 // Desktop Main converts these values into Electron screen DIP before placing
 // the click-through overlay cursor.
@@ -25,6 +27,16 @@ type PointerHint struct {
 	Space PointerSpace `json:"space,omitempty"`
 }
 
+// PointerTarget is an overlay-only click center parsed from accessibility
+// geometry. Absolute targets are already screen DIP; other targets are
+// window-local pixels and still require a trusted window origin.
+type PointerTarget struct {
+	Locator  string
+	X        int
+	Y        int
+	Absolute bool
+}
+
 // PointerHintForAction derives the overlay cursor target from a prepared
 // action and its bound observation. Keyboard, hotkey, type, and wait actions
 // have no new pointer location.
@@ -33,10 +45,10 @@ func PointerHintForAction(action PreparedAction, obs *Observation) PointerHint {
 	switch action.Kind {
 	case ActionClick, ActionDoubleClick, ActionScroll, ActionMoveCursor:
 		x, y, ok := pointerPoint(action)
-		if !ok {
-			return hint
+		if ok {
+			return locatePointer(hint, obs, x, y, nil, nil)
 		}
-		return locatePointer(hint, obs, x, y, nil, nil)
+		return pointerHintFromAccessibility(hint, action, obs)
 	case ActionDrag:
 		fromX, fromOK := integerParameter(action.Parameters, "from_x")
 		fromY, fromYOK := integerParameter(action.Parameters, "from_y")
@@ -78,6 +90,38 @@ func locatePointer(hint PointerHint, obs *Observation, x, y int, toX, toY *int) 
 	hint.ToY = toY
 	hint.Space = space
 	return hint
+}
+
+func pointerHintFromAccessibility(hint PointerHint, action PreparedAction, obs *Observation) PointerHint {
+	token := strings.TrimSpace(action.Target.Locator)
+	if token == "" {
+		token, _ = stringParameter(action.Parameters, "element_token")
+	}
+	if token == "" || obs == nil {
+		return hint
+	}
+	for _, target := range obs.PointerTargets {
+		if target.Locator != token {
+			continue
+		}
+		if target.Absolute {
+			hint.X = intPointer(target.X)
+			hint.Y = intPointer(target.Y)
+			hint.Space = PointerSpaceScreenDIP
+			return hint
+		}
+		return locatePointer(hint, obs, target.X, target.Y, nil, nil)
+	}
+	return hint
+}
+
+func stringParameter(parameters map[string]any, name string) (string, bool) {
+	if parameters == nil {
+		return "", false
+	}
+	text, ok := parameters[name].(string)
+	text = strings.TrimSpace(text)
+	return text, ok && text != ""
 }
 
 func pointerPoint(action PreparedAction) (int, int, bool) {

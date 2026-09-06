@@ -198,6 +198,7 @@ func (d *cuaDriverAdapter) Observe(ctx context.Context, sessionID computer.Sessi
 			return computer.Observation{}, fmt.Errorf("save accessibility tree: %w", err)
 		}
 		obs.AccessibilityTree = &ref
+		obs.PointerTargets = computer.PointerTargetsFromAccessibilityTree([]byte(state.StructuredJSON), obs.CoordinateSpace)
 	}
 
 	rec.session.LastObservation = &obs.ObservationID

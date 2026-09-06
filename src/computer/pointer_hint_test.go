@@ -77,3 +77,79 @@ func TestPointerHintDragAndFallback(t *testing.T) {
 		t.Fatalf("wait must not move the pointer: %+v", wait)
 	}
 }
+
+func TestPointerHintUsesAccessibilityGeometry(t *testing.T) {
+	obs := &Observation{
+		Scope: CaptureWindow,
+		CoordinateSpace: &CoordinateSpace{
+			HasOrigin:   true,
+			OriginX:     200,
+			OriginY:     80,
+			OriginSpace: string(PointerSpaceScreenDIP),
+		},
+		PointerTargets: PointerTargetsFromAccessibilityTree([]byte(`{
+			"elements": [
+				{"element_token":"s1:5","x":10,"y":20,"width":40,"height":10},
+				{"element_token":"s1:9","frame":{"x":400,"y":120,"w":20,"h":8}}
+			]
+		}`), nil),
+	}
+
+	local := PointerHintForAction(PreparedAction{
+		Kind:   ActionClick,
+		Target: ElementRef{Locator: "s1:5"},
+	}, obs)
+	if local.Space != PointerSpaceScreenDIP || local.X == nil || *local.X != 230 || *local.Y != 105 {
+		t.Fatalf("expected window-local AX center at screen (230,105), got %+v", local)
+	}
+
+	absolute := PointerHintForAction(PreparedAction{
+		Kind:   ActionClick,
+		Target: ElementRef{Locator: "s1:9"},
+	}, obs)
+	if absolute.Space != PointerSpaceScreenDIP || absolute.X == nil || *absolute.X != 410 || *absolute.Y != 124 {
+		t.Fatalf("expected absolute AX frame center (410,124), got %+v", absolute)
+	}
+
+	missing := PointerHintForAction(PreparedAction{
+		Kind:   ActionClick,
+		Target: ElementRef{Locator: "s1:5"},
+	}, &Observation{Scope: CaptureWindow, PointerTargets: obs.PointerTargets})
+	if missing.X != nil {
+		t.Fatalf("window-local AX geometry without origin must not become screen coords: %+v", missing)
+	}
+
+	explicit := PointerHintForAction(PreparedAction{
+		Kind:       ActionClick,
+		Target:     ElementRef{Locator: "s1:5"},
+		Parameters: map[string]any{"x": 1, "y": 2},
+	}, obs)
+	if explicit.X == nil || *explicit.X != 201 || *explicit.Y != 82 {
+		t.Fatalf("explicit coordinates must win over AX geometry: %+v", explicit)
+	}
+}
+
+func TestPointerHintScalesWindowsLogicalPixelFrames(t *testing.T) {
+	obs := &Observation{
+		Scope: CaptureWindow,
+		CoordinateSpace: &CoordinateSpace{
+			Unit:        "logical_pixel",
+			ScaleX:      1.25,
+			ScaleY:      1.25,
+			HasOrigin:   true,
+			OriginX:     0,
+			OriginY:     0,
+			OriginSpace: string(PointerSpaceScreenDIP),
+		},
+		PointerTargets: PointerTargetsFromAccessibilityTree([]byte(`{
+			"elements":[{"element_token":"s1:1","frame":{"x":125,"y":250,"width":50,"height":50}}]
+		}`), &CoordinateSpace{Unit: "logical_pixel", ScaleX: 1.25, ScaleY: 1.25}),
+	}
+	hint := PointerHintForAction(PreparedAction{
+		Kind:   ActionClick,
+		Target: ElementRef{Locator: "s1:1"},
+	}, obs)
+	if hint.X == nil || *hint.X != 120 || *hint.Y != 220 {
+		t.Fatalf("physical AX frame should convert to DIP center (120,220), got %+v", hint)
+	}
+}

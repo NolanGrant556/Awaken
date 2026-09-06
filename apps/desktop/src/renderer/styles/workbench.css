@@ -732,7 +732,7 @@
 }
 
 .execution-turn-header .execution-prompt-bubble {
-  --execution-prompt-collapsed-content-height: 54px;
+  --execution-prompt-collapsed-content-height: 48px;
   --execution-prompt-expanded-content-height: 162px;
   --execution-prompt-surface: var(--aw-surface-raised);
   width: 100%;

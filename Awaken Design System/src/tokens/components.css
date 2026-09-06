@@ -884,16 +884,14 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   overflow: hidden;
   -webkit-mask-image: linear-gradient(
     to bottom,
-    #000 calc(100% - 12px),
-    rgba(0, 0, 0, 0.55) calc(100% - 5px),
-    rgba(0, 0, 0, 0.2) calc(100% - 1px),
+    #000 calc(100% - 8px),
+    rgba(0, 0, 0, 0.5) calc(100% - 3px),
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
-    #000 calc(100% - 12px),
-    rgba(0, 0, 0, 0.55) calc(100% - 5px),
-    rgba(0, 0, 0, 0.2) calc(100% - 1px),
+    #000 calc(100% - 8px),
+    rgba(0, 0, 0, 0.5) calc(100% - 3px),
     transparent 100%
   );
   -webkit-mask-size: 100% 100%;

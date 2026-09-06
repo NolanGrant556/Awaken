@@ -734,12 +734,13 @@
 .execution-turn-header .execution-prompt-bubble {
   --execution-prompt-collapsed-content-height: 54px;
   --execution-prompt-expanded-content-height: 162px;
+  --execution-prompt-surface: var(--aw-surface-raised);
   width: 100%;
   max-width: 100%;
   padding: 10px 16px;
   border-color: var(--aw-border-light);
   border-radius: var(--aw-radius-panel);
-  background: var(--aw-surface-raised);
+  background: var(--execution-prompt-surface);
   box-shadow: var(--aw-shadow-raised);
 }
 

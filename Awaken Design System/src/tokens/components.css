@@ -670,6 +670,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   --execution-prompt-expanded-content-height: 180px;
   --execution-prompt-attachment-size: 52px;
   --execution-prompt-attachment-gap: 8px;
+  --execution-prompt-surface: var(--aw-bg-white);
   width: 100%;
   box-sizing: border-box;
   max-width: 100%;
@@ -677,7 +678,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   padding: 7px 12px;
   border: 1px solid var(--aw-border-light);
   border-radius: var(--aw-radius-control);
-  background: var(--aw-bg-white);
+  background: var(--execution-prompt-surface);
   color: var(--aw-text-primary);
   font-size: var(--aw-font-size-base);
   line-height: var(--aw-line-height-base);
@@ -873,30 +874,27 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .execution-prompt-block-limited:not(.execution-prompt-block-expanded)
-  .execution-prompt-bubble {
-  position: relative;
-}
-
-.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
-  .execution-prompt-bubble::after {
-  content: "";
-  position: absolute;
-  inset: auto 0 0;
-  height: 22px;
-  pointer-events: none;
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--aw-bg-white) 0%, transparent),
-    var(--aw-bg-white)
-  );
-  border-bottom-left-radius: inherit;
-  border-bottom-right-radius: inherit;
-}
-
-.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
   .execution-prompt-bubble-text {
+  position: relative;
   max-height: var(--execution-prompt-collapsed-content-height);
   overflow: hidden;
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble-text::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--aw-line-height-base);
+  pointer-events: none;
+  z-index: 1;
+  background: linear-gradient(
+    to top,
+    var(--execution-prompt-surface) 0%,
+    transparent 100%
+  );
 }
 
 .execution-prompt-block-expanded .execution-prompt-bubble {

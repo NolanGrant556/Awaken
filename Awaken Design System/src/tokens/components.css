@@ -874,14 +874,18 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .execution-prompt-block-limited:not(.execution-prompt-block-expanded)
-  .execution-prompt-bubble-text {
+  .execution-prompt-bubble-main {
   position: relative;
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble-text {
   max-height: var(--execution-prompt-collapsed-content-height);
   overflow: hidden;
 }
 
 .execution-prompt-block-limited:not(.execution-prompt-block-expanded)
-  .execution-prompt-bubble-text::after {
+  .execution-prompt-bubble-main::after {
   content: "";
   position: absolute;
   left: 0;

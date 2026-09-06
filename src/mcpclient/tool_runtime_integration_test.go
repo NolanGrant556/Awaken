@@ -2,6 +2,7 @@ package mcpclient_test
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,6 +14,73 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// Real tools/list and calls through Manager + ToolRuntime + supervisor. The
+// read hint must survive MCP serialization and canonical Outcome normalization.
+func TestMixedMCPReadOperationsRepeatWhileDuplicateWritesStayBlocked(t *testing.T) {
+	const serverName = "runtime-mixed-operations"
+	var reads, writes atomic.Int32
+	registry := mcpclient.NewInProcRegistry()
+	if err := registry.Register(serverName, func() *mcp.Server {
+		server := mcp.NewServer(&mcp.Implementation{Name: serverName, Version: "1"}, nil)
+		server.AddTool(&mcp.Tool{
+			Name: "records", Annotations: &mcp.ToolAnnotations{DestructiveHint: tool.BoolPtr(true)},
+			InputSchema: map[string]any{"type": "object", "required": []string{"action"}, "properties": map[string]any{"action": map[string]any{"type": "string"}, "idempotency_key": map[string]any{"type": "string"}}},
+			Meta:        mcp.Meta{"io.awaken.tool/read-operations/v1": map[string]any{"parameter": "action", "values": []string{"query"}}},
+		}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			if string(req.Params.Arguments) == `{"action":"query"}` {
+				reads.Add(1)
+			} else {
+				writes.Add(1)
+			}
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "ok"}}}, nil
+		})
+		return server
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mgr := mcpclient.NewManager(mcpclient.WithInProcRegistry(registry))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	mgr.Start(ctx, []mcpclient.ScopedMcpServerConfig{{Name: serverName, Scope: mcpclient.ScopeProject, Config: mcpclient.McpServerConfig{InProc: &mcpclient.InProcTransportConfig{ServerName: serverName}}}})
+	defer mgr.Shutdown(context.Background())
+	defer mcpclient.UnregisterMcpToolsForTest(serverName)
+	if err := mcpclient.WaitForServerStateForTest(mgr, serverName, mcpclient.StateConnected, 3*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	runtime := agentcore.NewToolRuntime(nil)
+	supervisor := agentcore.NewFailureSupervisor(t.TempDir(), 16, 32)
+	name := mcpclient.McpToolName(serverName, "records")
+	for i, args := range []string{`{"action":"query"}`, `{"action":"query"}`, `{"action":"execute","idempotency_key":"one"}`, `{"action":"query"}`, `{"action":"execute","idempotency_key":"two"}`, `{"action":"resume"}`} {
+		call := convcontext.ToolCall{ID: fmt.Sprint(i), Function: convcontext.FunctionCall{Name: name, Arguments: args}}
+		decision := supervisor.BeforeCall(call)
+		if i == 4 {
+			if !decision.Block || decision.ErrorCode != agentcore.ErrorCodeRepeatedSuccessfulMutation {
+				t.Fatalf("repeat write escaped: %+v", decision)
+			}
+			continue
+		}
+		if !decision.Allow {
+			t.Fatalf("call %d blocked: %+v", i, decision)
+		}
+		supervisor.NoteRealExecution(decision.CallSignature)
+		result := runtime.Execute(ctx, call)
+		if result.Outcome.IsError() {
+			t.Fatalf("call %d failed: %+v", i, result.Outcome)
+		}
+		want := tool.OutcomeSideEffectUnknown
+		if i == 0 || i == 1 || i == 3 {
+			want = tool.OutcomeSideEffectNone
+		}
+		if result.Outcome.Operation.SideEffectState != want {
+			t.Fatalf("call %d side effects: %+v", i, result.Outcome)
+		}
+		supervisor.AfterOutcome(call, result.Outcome)
+	}
+	if reads.Load() != 3 || writes.Load() != 2 {
+		t.Fatalf("provider count reads=%d writes=%d", reads.Load(), writes.Load())
+	}
+}
 
 type unrestrictedRuntimeInput struct {
 	Command    string           `json:"command,omitempty"`

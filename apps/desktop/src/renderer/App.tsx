@@ -3036,6 +3036,8 @@ export function App() {
   const [messageActionPendingRunId, setMessageActionPendingRunId] = useState<
     string | undefined
   >();
+  const [promptReplacementPending, setPromptReplacementPending] =
+    useState(false);
   const composerDraftKey = composerDraftOwnerKey(runtimeState.activeThreadId);
   const {
     draft: composerDraft,
@@ -5297,6 +5299,7 @@ export function App() {
       hasNotice: Boolean(notice),
       hasError: Boolean(runtimeState.errorMessage),
       needsRestart: desktopNeedsRestart,
+      holdWorkbench: promptReplacementPending,
     }),
     fileWorkspaceOpen,
     fileWorkspaceExpanded,
@@ -5899,6 +5902,7 @@ export function App() {
     forceNewThread?: boolean;
     draft?: ThreadComposerDraft;
     restoreCanonicalOnFailure?: boolean;
+    resetEmptyRewoundThread?: boolean;
   }): Promise<void> {
     if (!desktopReady) {
       setNotice(
@@ -6005,6 +6009,12 @@ export function App() {
     terminalSeenRef.current = false;
     setNotice(null);
     prepareForRunStart();
+    if (options?.resetEmptyRewoundThread && runtimeState.activeThreadId) {
+      dispatch({
+        type: "run/threadReplayStarted",
+        threadId: runtimeState.activeThreadId,
+      });
+    }
     dispatch({
       type: "run/requested",
       prompt,
@@ -6155,6 +6165,7 @@ export function App() {
 
   async function rewindPromptRun(
     runId: string,
+    options?: { applyReplay?: boolean },
   ): Promise<RewindThreadResult | undefined> {
     const threadId = runtimeState.activeThreadId;
     const expectedHeadRunId = [...narrativeSections.turns]
@@ -6186,6 +6197,10 @@ export function App() {
     const loadSeq = threadLoadSeqRef.current + 1;
     threadLoadSeqRef.current = loadSeq;
     terminalSeenRef.current = false;
+    if (options?.applyReplay === false) {
+      setMessageActionPendingRunId(undefined);
+      return result;
+    }
     dispatch({
       type: "run/threadReplayStarted",
       threadId,
@@ -6222,23 +6237,51 @@ export function App() {
     if (!editingPrompt) {
       return;
     }
-    const result = await rewindPromptRun(editingPrompt.runId);
-    if (!result) {
-      return;
+    setPromptReplacementPending(true);
+    try {
+      const result = await rewindPromptRun(editingPrompt.runId, {
+        applyReplay: false,
+      });
+      if (!result) {
+        return;
+      }
+      const editedDraft = composerDraftFromRuntimeRun(
+        result.targetRun,
+        editingPrompt.text,
+      );
+      setEditingPrompt(undefined);
+      replaceComposerDraft(
+        editedDraft,
+        composerDraftOwnerKey(result.thread.threadId),
+      );
+      const predecessorRunId = result.thread.runId || undefined;
+      if (predecessorRunId) {
+        dispatch({
+          type: "run/threadReplayStarted",
+          threadId: result.thread.threadId,
+          runId: predecessorRunId,
+        });
+        try {
+          await replayThreadTranscript(
+            result.thread.threadId,
+            threadLoadSeqRef.current,
+          );
+          void refreshThreads();
+        } catch (error) {
+          setNotice(
+            error instanceof Error ? error.message : "撤销消息失败，请稍后重试",
+          );
+          return;
+        }
+      }
+      await handleSubmitWithPrompt({
+        draft: editedDraft,
+        restoreCanonicalOnFailure: true,
+        resetEmptyRewoundThread: !predecessorRunId,
+      });
+    } finally {
+      setPromptReplacementPending(false);
     }
-    const editedDraft = composerDraftFromRuntimeRun(
-      result.targetRun,
-      editingPrompt.text,
-    );
-    setEditingPrompt(undefined);
-    replaceComposerDraft(
-      editedDraft,
-      composerDraftOwnerKey(result.thread.threadId),
-    );
-    await handleSubmitWithPrompt({
-      draft: editedDraft,
-      restoreCanonicalOnFailure: true,
-    });
   }
 
   async function handleConfirmPromptRewind(): Promise<void> {

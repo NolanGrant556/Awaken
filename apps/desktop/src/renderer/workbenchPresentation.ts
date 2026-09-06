@@ -207,13 +207,18 @@ export function diffLineStats(diff?: string): {
 export function shouldUseCenterComposer({
   hasNarrative,
   hasRun,
+  holdWorkbench = false,
 }: {
   hasNarrative: boolean;
   hasRun: boolean;
   hasNotice: boolean;
   hasError: boolean;
   needsRestart: boolean;
+  holdWorkbench?: boolean;
 }): boolean {
+  if (holdWorkbench) {
+    return false;
+  }
   return !hasNarrative && !hasRun;
 }
 

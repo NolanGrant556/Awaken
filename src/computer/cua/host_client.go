@@ -101,6 +101,10 @@ type HostCoordinateSpace struct {
 	SourceScreenshotHeight int     `json:"source_screenshot_height"`
 	ScaleX                 float64 `json:"scale_x"`
 	ScaleY                 float64 `json:"scale_y"`
+	HasOrigin              bool    `json:"has_origin,omitempty"`
+	OriginX                int     `json:"origin_x"`
+	OriginY                int     `json:"origin_y"`
+	OriginSpace            string  `json:"origin_space,omitempty"`
 }
 
 // HostImage is a screenshot returned by the host.

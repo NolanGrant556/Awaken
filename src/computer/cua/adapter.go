@@ -177,6 +177,10 @@ func (d *cuaDriverAdapter) Observe(ctx context.Context, sessionID computer.Sessi
 			SourceScreenshotHeight: state.CoordinateSpace.SourceScreenshotHeight,
 			ScaleX:                 state.CoordinateSpace.ScaleX,
 			ScaleY:                 state.CoordinateSpace.ScaleY,
+			HasOrigin:              state.CoordinateSpace.HasOrigin,
+			OriginX:                state.CoordinateSpace.OriginX,
+			OriginY:                state.CoordinateSpace.OriginY,
+			OriginSpace:            state.CoordinateSpace.OriginSpace,
 		}
 	}
 

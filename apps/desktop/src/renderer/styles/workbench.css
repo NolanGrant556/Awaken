@@ -744,6 +744,12 @@
   box-shadow: var(--aw-shadow-raised);
 }
 
+.execution-turn-header
+  .execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble {
+  padding-bottom: 2px;
+}
+
 .execution-turn-body {
   display: grid;
   gap: 14px;

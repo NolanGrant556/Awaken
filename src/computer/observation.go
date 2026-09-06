@@ -24,8 +24,11 @@ type Observation struct {
 	Elements          []ElementRef     `json:"elements,omitempty"`
 	AvailableWindows  []WindowRef      `json:"available_windows,omitempty"`
 	CoordinateSpace   *CoordinateSpace `json:"coordinate_space,omitempty"`
-	MissingReason     string           `json:"missing_reason,omitempty"`
-	PolicySnapshotID  PolicySnapshotID `json:"policy_snapshot_id"`
+	// PointerTargets are overlay-only click centers parsed from accessibility
+	// geometry. They are not model-visible and do not authorize input.
+	PointerTargets   []PointerTarget  `json:"-"`
+	MissingReason    string           `json:"missing_reason,omitempty"`
+	PolicySnapshotID PolicySnapshotID `json:"policy_snapshot_id"`
 }
 
 // CoordinateSpace describes the exact coordinate system presented to the

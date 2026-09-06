@@ -896,7 +896,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 6px;
+  height: 3px;
   pointer-events: none;
   z-index: 1;
   background: linear-gradient(

@@ -2110,9 +2110,10 @@ export function reduceRuntimeState(
               action.promptAttachments,
               nextNarrativeScope(state),
               action.promptTokens,
-              action.promptFileComments,
-              action.runId,
-            )
+            action.promptFileComments,
+            action.runId,
+            action.startedAtMs,
+          )
           : createRunRequestedNarrative(
               action.prompt,
               action.promptAttachments,
@@ -2120,6 +2121,7 @@ export function reduceRuntimeState(
               action.promptTokens,
               action.promptFileComments,
               action.runId,
+              action.startedAtMs,
             ),
         subagentsById: state.subagentsById,
         subagentOrder: state.subagentOrder,
@@ -2314,6 +2316,9 @@ export function reduceRuntimeState(
                 action.run.inputAttachments,
                 recoveredNarrativeScope(action.run),
                 action.run.composerTokens,
+                undefined,
+                undefined,
+                Date.parse(action.run.createdAt),
               )
             : hasPromptAttachments
               ? createRunRequestedNarrative(
@@ -2321,6 +2326,9 @@ export function reduceRuntimeState(
                   action.run.inputAttachments,
                   recoveredNarrativeScope(action.run),
                   action.run.composerTokens,
+                  undefined,
+                  undefined,
+                  Date.parse(action.run.createdAt),
                 )
               : createInitialRunNarrativeState(),
           supervisorStatus: state.supervisorStatus,

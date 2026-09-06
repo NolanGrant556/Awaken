@@ -39,6 +39,7 @@ export function createRunRequestedNarrative(
   tokens?: PromptNarrativeToken[],
   fileComments?: FileLineComment[],
   runId?: string,
+  createdAtMs?: number,
 ): RunNarrativeState {
   return appendRunRequestedNarrative(
     createInitialRunNarrativeState(),
@@ -48,6 +49,7 @@ export function createRunRequestedNarrative(
     tokens,
     fileComments,
     runId,
+    createdAtMs,
   );
 }
 
@@ -59,6 +61,7 @@ export function appendRunRequestedNarrative(
   tokens?: PromptNarrativeToken[],
   fileComments?: FileLineComment[],
   runId?: string,
+  createdAtMs?: number,
 ): RunNarrativeState {
   const trimmed = prompt.trim();
   const settledState = state.activeItem ? commitActive(state, "done") : state;
@@ -83,6 +86,9 @@ export function appendRunRequestedNarrative(
         kind: "prompt",
         id: `prompt:${scopeId}`,
         ...(runId ? { runId } : {}),
+        ...(typeof createdAtMs === "number" && Number.isFinite(createdAtMs)
+          ? { createdAtMs }
+          : {}),
         text: trimmed,
         ...(promptAttachments ? { attachments: promptAttachments } : {}),
         ...(promptTokens ? { tokens: promptTokens } : {}),

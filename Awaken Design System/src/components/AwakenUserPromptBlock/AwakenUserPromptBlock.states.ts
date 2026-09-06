@@ -13,6 +13,8 @@ export const AwakenUserPromptBlockStates: AwakenUserPromptBlockState[] = [
     label: "用户提示",
     props: {
       text: "请检查 Awaken Design System 里这一组组件的用途说明是否准确。",
+      timestampLabel: "09:53",
+      timestampDateTime: "2026-09-06T01:53:00.000Z",
       tokens: [
         {
           id: "skill:design-review:user",
@@ -27,6 +29,8 @@ export const AwakenUserPromptBlockStates: AwakenUserPromptBlockState[] = [
     label: "追问提示",
     props: {
       text: "继续上一轮修改，再检查 states 里是否还有临时示例文案。",
+      timestampLabel: "星期六 09:53",
+      timestampDateTime: "2026-09-05T01:53:00.000Z",
     } as unknown as Partial<ComponentProps<typeof AwakenUserPromptBlock>>,
   },
   {

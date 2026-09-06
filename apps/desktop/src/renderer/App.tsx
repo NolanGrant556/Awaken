@@ -138,6 +138,7 @@ import {
   projectVisibleNarrativeItems,
   shouldShowAssistantAnswerFooter,
   shouldUseCenterComposer,
+  formatUserPromptTimestamp,
   turnMarkerRailHeight,
   turnMarkerRailDisplay,
   type NarrativeTurnBodySegment,
@@ -9797,6 +9798,18 @@ export function App() {
                                   <div className="execution-turn-header">
                                     <UserPromptBlock
                                       text={visiblePromptText}
+                                      timestampLabel={
+                                        turn.prompt.createdAtMs != null
+                                          ? formatUserPromptTimestamp({
+                                              atMs: turn.prompt.createdAtMs,
+                                            })
+                                          : undefined
+                                      }
+                                      timestampDateTime={
+                                        turn.prompt.createdAtMs != null
+                                          ? new Date(turn.prompt.createdAtMs).toISOString()
+                                          : undefined
+                                      }
                                       tokens={promptTokenViews(
                                         turn.prompt.tokens,
                                         composerPluginBrandByName,

@@ -306,7 +306,7 @@ describe("ComputerOverlayManager", () => {
     });
     expect(cursor.setIgnoreMouseEvents).toHaveBeenCalledWith(true, { forward: true });
     expect(cursor.setBounds).toHaveBeenCalledWith(
-      expect.objectContaining({ x: 720 - 1, y: 450 - 1, width: 32, height: 32 }),
+      expect.objectContaining({ x: 720 - 5, y: 450 - 3, width: 32, height: 32 }),
       false,
     );
 
@@ -323,7 +323,7 @@ describe("ComputerOverlayManager", () => {
     );
     await vi.waitFor(() =>
       expect(cursor.setBounds).toHaveBeenCalledWith(
-        expect.objectContaining({ x: 99, y: 39 }),
+        expect.objectContaining({ x: 95, y: 37 }),
         false,
       ),
     );

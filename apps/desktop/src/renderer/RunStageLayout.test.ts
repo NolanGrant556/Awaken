@@ -628,7 +628,7 @@ describe("RunStage layout", () => {
     );
     expect(collapsedText).toContain("mask-image:");
     expect(collapsedText).toContain("-webkit-mask-image:");
-    expect(collapsedText).toContain("calc(100% - 10px)");
+    expect(collapsedText).toContain("calc(100% - 16px)");
     expect(collapsedText).toContain("mask-size: 100% 100%;");
     expect(collapsedText).toContain("overflow: hidden;");
     expect(collapsedText).not.toContain(".execution-prompt-bubble::after");

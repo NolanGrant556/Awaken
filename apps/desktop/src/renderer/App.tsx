@@ -3,6 +3,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -3039,6 +3040,8 @@ export function App() {
   >();
   const [promptReplacementPending, setPromptReplacementPending] =
     useState(false);
+  const [revealPromptReplacement, setRevealPromptReplacement] =
+    useState(false);
   const composerDraftKey = composerDraftOwnerKey(runtimeState.activeThreadId);
   const {
     draft: composerDraft,
@@ -3144,6 +3147,17 @@ export function App() {
     ];
     return projectVisibleNarrativeItems({ items: narrativeItems, isBusy });
   }, [isBusy, runtimeState.narrative]);
+  useLayoutEffect(() => {
+    if (!revealPromptReplacement) {
+      return;
+    }
+    if (!visibleNarrativeItems.some((item) => item.kind === "prompt")) {
+      return;
+    }
+    setPendingPromptRewind(undefined);
+    setEditingPrompt(undefined);
+    setRevealPromptReplacement(false);
+  }, [revealPromptReplacement, visibleNarrativeItems]);
   const replayedNarrativeItemIds = useMemo(
     () => new Set(runtimeState.narrative.replayedItemIds),
     [runtimeState.narrative.replayedItemIds],
@@ -6014,7 +6028,6 @@ export function App() {
     terminalSeenRef.current = false;
     setNotice(null);
     prepareForRunStart();
-    options?.onReplacementCommitted?.();
     if (options?.replaceTargetRunId) {
       dispatch({
         type: "run/promptReplaced",
@@ -6035,6 +6048,7 @@ export function App() {
         startedAtMs: Date.now(),
       });
     }
+    options?.onReplacementCommitted?.();
     clearThreadComposerDraft();
 
     try {
@@ -6270,12 +6284,7 @@ export function App() {
         replaceTargetRunId: targetRunId,
         onReplacementCommitted: () => {
           replacementCommitted = true;
-          setPendingPromptRewind(undefined);
-          setEditingPrompt(undefined);
-          replaceComposerDraft(
-            editedDraft,
-            composerDraftOwnerKey(result.thread.threadId),
-          );
+          setRevealPromptReplacement(true);
         },
       });
     } finally {

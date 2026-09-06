@@ -5907,6 +5907,7 @@ export function App() {
     draft?: ThreadComposerDraft;
     restoreCanonicalOnFailure?: boolean;
     replaceTargetRunId?: string;
+    onReplacementCommitted?: () => void;
   }): Promise<void> {
     if (!desktopReady) {
       setNotice(
@@ -6013,6 +6014,7 @@ export function App() {
     terminalSeenRef.current = false;
     setNotice(null);
     prepareForRunStart();
+    options?.onReplacementCommitted?.();
     if (options?.replaceTargetRunId) {
       dispatch({
         type: "run/promptReplaced",
@@ -6248,7 +6250,9 @@ export function App() {
       return;
     }
     const targetRunId = editingPrompt.runId;
+    const editedText = editingPrompt.text;
     setPromptReplacementPending(true);
+    let replacementCommitted = false;
     try {
       const result = await rewindPromptRun(targetRunId, {
         applyReplay: false,
@@ -6258,19 +6262,26 @@ export function App() {
       }
       const editedDraft = composerDraftFromRuntimeRun(
         result.targetRun,
-        editingPrompt.text,
-      );
-      setEditingPrompt(undefined);
-      replaceComposerDraft(
-        editedDraft,
-        composerDraftOwnerKey(result.thread.threadId),
+        editedText,
       );
       await handleSubmitWithPrompt({
         draft: editedDraft,
         restoreCanonicalOnFailure: true,
         replaceTargetRunId: targetRunId,
+        onReplacementCommitted: () => {
+          replacementCommitted = true;
+          setPendingPromptRewind(undefined);
+          setEditingPrompt(undefined);
+          replaceComposerDraft(
+            editedDraft,
+            composerDraftOwnerKey(result.thread.threadId),
+          );
+        },
       });
     } finally {
+      if (!replacementCommitted) {
+        setPendingPromptRewind(undefined);
+      }
       setPromptReplacementPending(false);
     }
   }
@@ -6280,8 +6291,8 @@ export function App() {
     if (!pending) {
       return;
     }
-    setPendingPromptRewind(undefined);
     if (pending.mode === "undo") {
+      setPendingPromptRewind(undefined);
       await handleUndoPrompt(pending.runId);
       return;
     }
@@ -10426,6 +10437,9 @@ export function App() {
         title={promptRewindDialog?.title ?? "确认改写对话"}
         onOpenChange={(open) => {
           if (!open) {
+            if (promptReplacementPending) {
+              return;
+            }
             setPendingPromptRewind(undefined);
           }
         }}
@@ -10434,14 +10448,31 @@ export function App() {
             <Button
               variant="default"
               size="md"
-              onClick={() => setPendingPromptRewind(undefined)}
+              disabled={
+                pendingPromptRewind?.mode === "edit" && promptReplacementPending
+              }
+              onClick={() => {
+                if (promptReplacementPending) {
+                  return;
+                }
+                setPendingPromptRewind(undefined);
+              }}
             >
               取消
             </Button>
             <Button
               variant="primary"
               size="md"
+              loading={
+                pendingPromptRewind?.mode === "edit" && promptReplacementPending
+              }
+              disabled={
+                pendingPromptRewind?.mode === "edit" && promptReplacementPending
+              }
               onClick={() => {
+                if (promptReplacementPending) {
+                  return;
+                }
                 void handleConfirmPromptRewind();
               }}
             >

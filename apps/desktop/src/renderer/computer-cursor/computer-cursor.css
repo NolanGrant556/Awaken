@@ -23,16 +23,17 @@ body,
   height: 32px;
   display: block;
   overflow: visible;
-  transform-origin: 5px 3px;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+  transform-origin: 6px 4px;
+  filter: drop-shadow(0 0 1.5px rgba(255, 255, 255, 0.95))
+    drop-shadow(0 0 3px rgba(190, 230, 255, 0.45));
 }
 
 .computer-cursor-outline {
   fill: #ffffff;
   stroke: #ffffff;
-  stroke-width: 2.4;
-  stroke-linejoin: round;
-  stroke-linecap: round;
+  stroke-width: 2.8;
+  stroke-linejoin: miter;
+  stroke-miterlimit: 8;
 }
 
 .computer-cursor-fill {

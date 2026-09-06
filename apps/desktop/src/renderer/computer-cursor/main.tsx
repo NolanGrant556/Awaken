@@ -9,8 +9,10 @@ declare global {
   }
 }
 
+// 45° tip, bisector down-right. Trailing edge is a shallow inward notch —
+// arrowhead only, no Windows-style stem.
 const cursorPath =
-  "M5 3 L5 23.6 L9.8 18.9 L13.6 28.2 L17.2 26.6 L13.3 17.2 L21.4 17.2 Z";
+  "M 6 4 L 12.5 19.7 L 15.1 13.1 L 21.7 10.5 Z";
 
 function ComputerCursorApp() {
   const [hint, setHint] = useState<ComputerCursorHint | null>({ kind: "idle", pulse: false });

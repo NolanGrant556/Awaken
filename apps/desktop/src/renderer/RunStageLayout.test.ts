@@ -604,4 +604,28 @@ describe("RunStage layout", () => {
       /\.subagent-inspector__status\s*\{[^}]*flex:\s*0 0 auto;[^}]*white-space:\s*nowrap;/,
     );
   });
+
+  it("fades collapsed prompt overflow instead of ellipsis, and keeps copy as a flat icon", () => {
+    const designSystemStyles = readFileSync(
+      new URL(
+        "../../../../Awaken Design System/src/tokens/components.css",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const collapsedText = designSystemStyles.slice(
+      designSystemStyles.indexOf(
+        ".execution-prompt-block-limited:not(.execution-prompt-block-expanded)",
+      ),
+      designSystemStyles.indexOf(
+        ".execution-prompt-block-expanded .execution-prompt-bubble {",
+      ),
+    );
+
+    expect(collapsedText).toContain("linear-gradient(");
+    expect(collapsedText).toContain("pointer-events: none;");
+    expect(collapsedText).not.toContain("-webkit-line-clamp");
+    expect(designSystemStyles).toContain(".execution-prompt-copy-button");
+    expect(designSystemStyles).toContain("box-shadow: none !important;");
+  });
 });

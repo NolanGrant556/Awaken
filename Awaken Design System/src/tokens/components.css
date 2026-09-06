@@ -884,14 +884,18 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   overflow: hidden;
   -webkit-mask-image: linear-gradient(
     to bottom,
-    #000 calc(100% - (var(--aw-line-height-base) * 0.55)),
+    #000 calc(100% - (var(--aw-line-height-base) / 2)),
     transparent 100%
   );
   mask-image: linear-gradient(
     to bottom,
-    #000 calc(100% - (var(--aw-line-height-base) * 0.55)),
+    #000 calc(100% - (var(--aw-line-height-base) / 2)),
     transparent 100%
   );
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }
 
 .execution-prompt-block-expanded .execution-prompt-bubble {

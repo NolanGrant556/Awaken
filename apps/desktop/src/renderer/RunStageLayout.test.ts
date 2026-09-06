@@ -625,7 +625,7 @@ describe("RunStage layout", () => {
     expect(collapsedText).toContain("padding-bottom: 0;");
     expect(collapsedText).toContain("mask-image: linear-gradient(");
     expect(collapsedText).toContain("-webkit-mask-image: linear-gradient(");
-    expect(collapsedText).toContain("var(--aw-line-height-base) / 2");
+    expect(collapsedText).toContain("calc(100% - 8px)");
     expect(collapsedText).not.toContain(".execution-prompt-bubble-main::after");
     expect(collapsedText).not.toContain(".execution-prompt-bubble::after");
     expect(collapsedText).not.toContain(".execution-prompt-bubble-text::after");
@@ -641,10 +641,10 @@ describe("RunStage layout", () => {
       ".execution-prompt-block-limited:not(.execution-prompt-block-expanded)",
     );
     expect(workbenchStyles).toContain(
-      "--execution-prompt-collapsed-content-height: 60px;",
+      "--execution-prompt-collapsed-content-height: 54px;",
     );
     expect(workbenchStyles).not.toContain(
-      "--execution-prompt-collapsed-content-height: 54px;",
+      "--execution-prompt-collapsed-content-height: 60px;",
     );
     expect(workbenchStyles).toMatch(
       /\.execution-turn-header[\s\S]*?\.execution-prompt-block-limited:not\(\.execution-prompt-block-expanded\)[\s\S]*?\.execution-prompt-bubble \{[\s\S]*?padding-bottom: 0;/,

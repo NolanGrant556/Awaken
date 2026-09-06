@@ -622,6 +622,7 @@ describe("RunStage layout", () => {
       ),
     );
 
+    expect(collapsedText).toContain(".execution-prompt-bubble-main");
     expect(collapsedText).toContain("padding-bottom: 0;");
     expect(collapsedText).toContain("mask-image: linear-gradient(");
     expect(collapsedText).toContain("-webkit-mask-image: linear-gradient(");

@@ -879,8 +879,8 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .execution-prompt-block-limited:not(.execution-prompt-block-expanded)
-  .execution-prompt-bubble-text {
-  max-height: var(--execution-prompt-collapsed-content-height);
+  .execution-prompt-bubble-main {
+  position: relative;
   overflow: hidden;
   -webkit-mask-image: linear-gradient(
     to bottom,
@@ -900,6 +900,12 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   mask-size: 100% 100%;
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble-text {
+  max-height: var(--execution-prompt-collapsed-content-height);
+  overflow: hidden;
 }
 
 .execution-prompt-block-expanded .execution-prompt-bubble {

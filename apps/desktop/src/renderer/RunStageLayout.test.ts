@@ -625,7 +625,9 @@ describe("RunStage layout", () => {
     expect(collapsedText).toContain("padding-bottom: 0;");
     expect(collapsedText).toContain("mask-image: linear-gradient(");
     expect(collapsedText).toContain("-webkit-mask-image: linear-gradient(");
-    expect(collapsedText).toContain("calc(100% - 8px)");
+    expect(collapsedText).toContain("calc(100% - 12px)");
+    expect(collapsedText).toContain("rgba(0, 0, 0, 0.55)");
+    expect(collapsedText).toContain("rgba(0, 0, 0, 0.2)");
     expect(collapsedText).not.toContain(".execution-prompt-bubble-main::after");
     expect(collapsedText).not.toContain(".execution-prompt-bubble::after");
     expect(collapsedText).not.toContain(".execution-prompt-bubble-text::after");

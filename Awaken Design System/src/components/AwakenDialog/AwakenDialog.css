@@ -120,6 +120,18 @@
   padding: var(--aw-space-5) var(--aw-space-8) var(--aw-space-7);
 }
 
+.aw-dialog-backdrop--hidden {
+  animation: none;
+  inset: auto;
+  width: 0;
+  height: 0;
+  padding: 0;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 @keyframes aw-dialog-backdrop-in {
   from {
     opacity: 0;

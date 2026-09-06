@@ -27,6 +27,7 @@ export type AwakenDialogProps = {
   bodyRef?: Ref<HTMLDivElement>;
   bodyTabIndex?: number;
   modal?: boolean;
+  backdropClassName?: string;
 };
 
 const focusableSelector = [
@@ -53,6 +54,7 @@ export function AwakenDialog({
   bodyRef,
   bodyTabIndex,
   modal = true,
+  backdropClassName,
 }: AwakenDialogProps) {
   const generatedTitleId = useId();
   const titleId = ariaLabelledBy ?? generatedTitleId;
@@ -101,7 +103,9 @@ export function AwakenDialog({
 
   const dialog = (
     <div
-      className="aw-dialog-backdrop"
+      className={["aw-dialog-backdrop", backdropClassName]
+        .filter(Boolean)
+        .join(" ")}
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) {

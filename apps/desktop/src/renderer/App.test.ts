@@ -152,6 +152,9 @@ import {
   turnMarkerRailHeight,
   shouldUseCenterComposer,
   workbenchHasRun,
+  promptRewindDialogOverlay,
+  PROMPT_REWIND_DIALOG_HIDDEN_BACKDROP_CLASS,
+  scheduleAfterNextPaint,
   turnMarkerRailDisplay,
 } from "./workbenchPresentation";
 import type { AwakenBridge } from "../shared/runtime";
@@ -5082,6 +5085,50 @@ describe("App workbench presentation", () => {
         holdWorkbench: true,
       }),
     ).toBe(false);
+  });
+
+  it("hides the rewind confirm overlay without unmounting while an edit send commits", () => {
+    expect(
+      promptRewindDialogOverlay({ pending: false, hidden: false }),
+    ).toEqual({
+      open: false,
+      allowDismiss: true,
+    });
+    expect(
+      promptRewindDialogOverlay({ pending: true, hidden: false }),
+    ).toEqual({
+      open: true,
+      allowDismiss: true,
+    });
+    expect(
+      promptRewindDialogOverlay({ pending: true, hidden: true }),
+    ).toEqual({
+      open: true,
+      backdropClassName: PROMPT_REWIND_DIALOG_HIDDEN_BACKDROP_CLASS,
+      allowDismiss: false,
+    });
+  });
+
+  it("defers rewind dialog unmount until the following paint", () => {
+    const frames: FrameRequestCallback[] = [];
+    const originalRaf = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    }) as typeof requestAnimationFrame;
+    const calls: string[] = [];
+    try {
+      scheduleAfterNextPaint(() => {
+        calls.push("done");
+      });
+      expect(calls).toEqual([]);
+      frames[0]?.(0);
+      expect(calls).toEqual([]);
+      frames[1]?.(0);
+      expect(calls).toEqual(["done"]);
+    } finally {
+      globalThis.requestAnimationFrame = originalRaf;
+    }
   });
 
   it("treats a starting replacement as an active run so the dock does not fall back to home", () => {

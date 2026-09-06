@@ -222,6 +222,48 @@ export function shouldUseCenterComposer({
   return !hasNarrative && !hasRun;
 }
 
+export const PROMPT_REWIND_DIALOG_HIDDEN_BACKDROP_CLASS =
+  "aw-dialog-backdrop--hidden";
+
+export function promptRewindDialogOverlay({
+  pending,
+  hidden,
+}: {
+  pending: boolean;
+  hidden: boolean;
+}): {
+  open: boolean;
+  backdropClassName?: string;
+  allowDismiss: boolean;
+} {
+  if (!pending) {
+    return { open: false, allowDismiss: true };
+  }
+  return {
+    open: true,
+    backdropClassName: hidden
+      ? PROMPT_REWIND_DIALOG_HIDDEN_BACKDROP_CLASS
+      : undefined,
+    allowDismiss: !hidden,
+  };
+}
+
+export function scheduleAfterNextPaint(callback: () => void): void {
+  if (typeof requestAnimationFrame !== "function") {
+    callback();
+    return;
+  }
+  requestAnimationFrame(() => {
+    requestAnimationFrame(callback);
+  });
+}
+
+export function waitForNextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    scheduleAfterNextPaint(resolve);
+  });
+}
+
 export function workbenchHasRun({
   runId,
   isBusy,

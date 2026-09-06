@@ -139,6 +139,9 @@ import {
   shouldShowAssistantAnswerFooter,
   shouldUseCenterComposer,
   workbenchHasRun,
+  promptRewindDialogOverlay,
+  scheduleAfterNextPaint,
+  waitForNextPaint,
   turnMarkerRailHeight,
   turnMarkerRailDisplay,
   type NarrativeTurnBodySegment,
@@ -3039,6 +3042,7 @@ export function App() {
   >();
   const [promptReplacementPending, setPromptReplacementPending] =
     useState(false);
+  const [rewindDialogHidden, setRewindDialogHidden] = useState(false);
   const composerDraftKey = composerDraftOwnerKey(runtimeState.activeThreadId);
   const {
     draft: composerDraft,
@@ -4261,6 +4265,7 @@ export function App() {
     setNotice(null);
     setEditingPrompt(undefined);
     setPendingPromptRewind(undefined);
+    setRewindDialogHidden(false);
     setMessageActionPendingRunId(undefined);
     setNewThreadModelPreference({ reasoningEffortByProfile: {} });
     localStorage.removeItem("awaken:runId");
@@ -6168,11 +6173,17 @@ export function App() {
   }
 
   function requestPromptRewind(runId: string, mode: "undo" | "edit"): void {
+    setRewindDialogHidden(false);
     setPendingPromptRewind({
       runId,
       mode,
       hasDraft: composerHasUnsentDraft(),
     });
+  }
+
+  function dismissPromptRewindDialog(): void {
+    setPendingPromptRewind(undefined);
+    setRewindDialogHidden(false);
   }
 
   async function rewindPromptRun(
@@ -6269,6 +6280,7 @@ export function App() {
         replaceTargetRunId: targetRunId,
         onReplacementCommitted: () => {
           setEditingPrompt(undefined);
+          scheduleAfterNextPaint(dismissPromptRewindDialog);
         },
       });
     } finally {
@@ -6281,12 +6293,18 @@ export function App() {
     if (!pending) {
       return;
     }
-    setPendingPromptRewind(undefined);
     if (pending.mode === "undo") {
+      dismissPromptRewindDialog();
       await handleUndoPrompt(pending.runId);
       return;
     }
-    await handleSubmitPromptEdit();
+    setRewindDialogHidden(true);
+    try {
+      await waitForNextPaint();
+      await handleSubmitPromptEdit();
+    } finally {
+      scheduleAfterNextPaint(dismissPromptRewindDialog);
+    }
   }
 
   async function handleComposerSubmit(): Promise<void> {
@@ -6326,6 +6344,7 @@ export function App() {
     setNotice(null);
     setEditingPrompt(undefined);
     setPendingPromptRewind(undefined);
+    setRewindDialogHidden(false);
     setMessageActionPendingRunId(undefined);
     prepareForThreadSwitch();
     dispatch({ type: "run/threadSwitch", threadId });
@@ -8784,6 +8803,10 @@ export function App() {
   const promptRewindDialog = pendingPromptRewind
     ? promptRewindConfirmDialog(pendingPromptRewind)
     : undefined;
+  const promptRewindOverlay = promptRewindDialogOverlay({
+    pending: Boolean(pendingPromptRewind),
+    hidden: rewindDialogHidden,
+  });
 
   return (
     <>
@@ -9940,7 +9963,7 @@ export function App() {
                                       }}
                                       onCancelEdit={() => {
                                         setEditingPrompt(undefined);
-                                        setPendingPromptRewind(undefined);
+                                        dismissPromptRewindDialog();
                                       }}
                                       onSubmitEdit={() => {
                                         if (!promptRunId) {
@@ -10423,12 +10446,13 @@ export function App() {
         <p className="project-delete-dialog-copy">{threadDeleteDialogCopy}</p>
       </Dialog>
       <Dialog
-        open={Boolean(pendingPromptRewind)}
+        open={promptRewindOverlay.open}
         title={promptRewindDialog?.title ?? "确认改写对话"}
         modal={false}
+        backdropClassName={promptRewindOverlay.backdropClassName}
         onOpenChange={(open) => {
-          if (!open) {
-            setPendingPromptRewind(undefined);
+          if (!open && promptRewindOverlay.allowDismiss) {
+            dismissPromptRewindDialog();
           }
         }}
         footer={
@@ -10436,7 +10460,7 @@ export function App() {
             <Button
               variant="default"
               size="md"
-              onClick={() => setPendingPromptRewind(undefined)}
+              onClick={() => dismissPromptRewindDialog()}
             >
               取消
             </Button>

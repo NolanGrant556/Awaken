@@ -5070,6 +5070,17 @@ describe("App workbench presentation", () => {
         needsRestart: true,
       }),
     ).toBe(true);
+
+    expect(
+      shouldUseCenterComposer({
+        hasNarrative: false,
+        hasRun: false,
+        hasNotice: false,
+        hasError: false,
+        needsRestart: false,
+        holdWorkbench: true,
+      }),
+    ).toBe(false);
   });
 
   it("shows only the trailing planning item while a run awaits its first visible output", () => {

@@ -604,4 +604,18 @@ describe("RunStage layout", () => {
       /\.subagent-inspector__status\s*\{[^}]*flex:\s*0 0 auto;[^}]*white-space:\s*nowrap;/,
     );
   });
+
+  it("keeps the prompt copy action a flat icon without a raised chip", () => {
+    const designSystemStyles = readFileSync(
+      new URL(
+        "../../../../Awaken Design System/src/tokens/components.css",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const copyButton = cssRule(designSystemStyles, ".execution-prompt-copy-button");
+    expect(copyButton).toContain("background: transparent !important;");
+    expect(copyButton).toContain("border: 0 !important;");
+    expect(copyButton).toContain("box-shadow: none !important;");
+  });
 });

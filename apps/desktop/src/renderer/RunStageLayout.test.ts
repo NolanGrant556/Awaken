@@ -657,4 +657,22 @@ describe("RunStage layout", () => {
       /\.execution-turn-header[\s\S]*?\.execution-prompt-block-limited:not\(\.execution-prompt-block-expanded\)[\s\S]*?\.execution-prompt-bubble \{[\s\S]*?padding: 10px 16px 0;/,
     );
   });
+
+  it("collapses a hidden rewind dialog overlay instead of leaving a fullscreen cover", () => {
+    const dialogStyles = readFileSync(
+      new URL(
+        "../../../../Awaken Design System/src/components/AwakenDialog/AwakenDialog.css",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hiddenBackdrop = cssRule(dialogStyles, ".aw-dialog-backdrop--hidden");
+    expect(hiddenBackdrop).toContain("animation: none;");
+    expect(hiddenBackdrop).toContain("inset: auto;");
+    expect(hiddenBackdrop).toContain("width: 0;");
+    expect(hiddenBackdrop).toContain("height: 0;");
+    expect(hiddenBackdrop).toContain("visibility: hidden;");
+    expect(hiddenBackdrop).toContain("pointer-events: none;");
+    expect(dialogStyles).toContain("@keyframes aw-dialog-backdrop-in");
+  });
 });

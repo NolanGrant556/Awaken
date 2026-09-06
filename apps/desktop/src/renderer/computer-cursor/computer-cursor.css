@@ -22,7 +22,22 @@ body,
   width: 32px;
   height: 32px;
   display: block;
-  transform-origin: 1px 1px;
+  overflow: visible;
+  transform-origin: 5px 3px;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+}
+
+.computer-cursor-outline {
+  fill: #ffffff;
+  stroke: #ffffff;
+  stroke-width: 2.4;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.computer-cursor-fill {
+  fill: #111111;
+  stroke: none;
 }
 
 .computer-cursor.is-pulse {

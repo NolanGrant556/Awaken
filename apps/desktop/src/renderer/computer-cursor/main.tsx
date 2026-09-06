@@ -9,6 +9,9 @@ declare global {
   }
 }
 
+const cursorPath =
+  "M5 3 L5 23.6 L9.8 18.9 L13.6 28.2 L17.2 26.6 L13.3 17.2 L21.4 17.2 Z";
+
 function ComputerCursorApp() {
   const [hint, setHint] = useState<ComputerCursorHint | null>({ kind: "idle", pulse: false });
 
@@ -24,14 +27,8 @@ function ComputerCursorApp() {
       viewBox="0 0 32 32"
       aria-hidden="true"
     >
-      <path
-        d="M1.2 1.2 L1.2 23.4 L8.1 17.8 L12.8 28.4 L17.2 26.5 L12.4 15.7 L21.2 15.7 Z"
-        fill="#ffffff"
-      />
-      <path
-        d="M3.1 3.6 L3.1 20.6 L8.4 16.2 L12.8 26.2 L15.4 25.1 L10.9 15 L18.4 15 Z"
-        fill="#111111"
-      />
+      <path className="computer-cursor-outline" d={cursorPath} />
+      <path className="computer-cursor-fill" d={cursorPath} />
     </svg>
   );
 }

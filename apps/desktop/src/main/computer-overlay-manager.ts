@@ -23,8 +23,8 @@ const overlayHeight = 58;
 const overlayTopMargin = 18;
 const overlayRecoveryIntervalMs = 3_000;
 const cursorSize = 32;
-const cursorHotspotX = 1;
-const cursorHotspotY = 1;
+const cursorHotspotX = 5;
+const cursorHotspotY = 3;
 const computerToolNames = new Set([
   "computer_observe",
   "computer_act",

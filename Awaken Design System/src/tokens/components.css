@@ -880,30 +880,31 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 
 .execution-prompt-block-limited:not(.execution-prompt-block-expanded)
   .execution-prompt-bubble-main {
-  position: relative;
+  max-height: var(--execution-prompt-collapsed-content-height);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0,
+    #000 calc(100% - 10px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0,
+    #000 calc(100% - 10px),
+    transparent 100%
+  );
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }
 
 .execution-prompt-block-limited:not(.execution-prompt-block-expanded)
   .execution-prompt-bubble-text {
   max-height: var(--execution-prompt-collapsed-content-height);
   overflow: hidden;
-}
-
-.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
-  .execution-prompt-bubble-main::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 3px;
-  pointer-events: none;
-  z-index: 1;
-  background: linear-gradient(
-    to top,
-    var(--execution-prompt-surface) 0%,
-    transparent 100%
-  );
+  line-height: 16px;
 }
 
 .execution-prompt-block-expanded .execution-prompt-bubble {

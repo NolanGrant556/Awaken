@@ -874,6 +874,11 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
 }
 
 .execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble {
+  padding-bottom: 2px;
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
   .execution-prompt-bubble-main {
   position: relative;
 }
@@ -891,7 +896,7 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   left: 0;
   right: 0;
   bottom: 0;
-  height: var(--aw-line-height-base);
+  height: 12px;
   pointer-events: none;
   z-index: 1;
   background: linear-gradient(

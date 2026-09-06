@@ -622,16 +622,26 @@ describe("RunStage layout", () => {
       ),
     );
 
-    expect(collapsedText).toContain(".execution-prompt-bubble-main::after");
-    expect(collapsedText).toContain("padding-bottom: 2px;");
-    expect(collapsedText).toContain("height: 12px;");
-    expect(collapsedText).toContain("linear-gradient(");
-    expect(collapsedText).toContain("var(--execution-prompt-surface)");
-    expect(collapsedText).toContain("pointer-events: none;");
+    expect(collapsedText).toContain("padding-bottom: 0;");
+    expect(collapsedText).toContain("mask-image: linear-gradient(");
+    expect(collapsedText).toContain("-webkit-mask-image: linear-gradient(");
+    expect(collapsedText).toContain("var(--aw-line-height-base) * 0.55");
+    expect(collapsedText).not.toContain(".execution-prompt-bubble-main::after");
     expect(collapsedText).not.toContain(".execution-prompt-bubble::after");
     expect(collapsedText).not.toContain(".execution-prompt-bubble-text::after");
     expect(collapsedText).not.toContain("-webkit-line-clamp");
     expect(designSystemStyles).toContain(".execution-prompt-copy-button");
     expect(designSystemStyles).toContain("box-shadow: none !important;");
+
+    const workbenchStyles = readFileSync(
+      new URL("./styles/workbench.css", import.meta.url),
+      "utf8",
+    );
+    expect(workbenchStyles).toContain(
+      ".execution-prompt-block-limited:not(.execution-prompt-block-expanded)",
+    );
+    expect(workbenchStyles).toMatch(
+      /\.execution-turn-header[\s\S]*?\.execution-prompt-block-limited:not\(\.execution-prompt-block-expanded\)[\s\S]*?\.execution-prompt-bubble \{[\s\S]*?padding-bottom: 0;/,
+    );
   });
 });

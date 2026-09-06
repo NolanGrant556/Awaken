@@ -3891,6 +3891,9 @@ describe("AwakenUserPromptBlock layout contract", () => {
       html.indexOf("撤销此消息"),
     );
     expect(html.indexOf("撤销此消息")).toBeLessThan(html.indexOf("编辑此消息"));
+    expect(html).toContain("execution-prompt-copy-button");
+    expect(html).toMatch(/background:\s*transparent/);
+    expect(html).not.toContain("aw-bg-fill-light");
   });
 
   it("renders undo/edit actions and the controlled inline editor", () => {

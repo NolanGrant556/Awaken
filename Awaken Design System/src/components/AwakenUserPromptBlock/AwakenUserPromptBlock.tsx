@@ -639,15 +639,18 @@ export function AwakenUserPromptBlock({
             errorLabel="Copy failed"
             iconOnly
             feedbackDurationMs={1000}
+            className="execution-prompt-action-button execution-prompt-copy-button"
             onClick={(event) => {
               event.stopPropagation();
             }}
             style={{
               width: "24px",
               height: "24px",
+              border: 0,
               borderRadius: "8px",
-              background: "var(--aw-bg-fill-light)",
-              borderColor: "var(--aw-border-light)",
+              background: "transparent",
+              boxShadow: "none",
+              color: "var(--aw-text-tertiary)",
             }}
           />
         </div>

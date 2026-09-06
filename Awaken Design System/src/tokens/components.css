@@ -950,6 +950,31 @@ body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
   opacity: 0.45;
 }
 
+.execution-prompt-copy-button {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: var(--aw-text-tertiary) !important;
+}
+
+.execution-prompt-copy-button[data-copy-state="idle"]:hover,
+.execution-prompt-copy-button[data-copy-state="idle"]:focus-visible {
+  background: var(--aw-bg-fill-light) !important;
+  color: var(--aw-text-primary) !important;
+}
+
+.execution-prompt-copy-button[data-copy-state="copied"] {
+  color: var(--aw-status-success) !important;
+}
+
+.execution-prompt-copy-button[data-copy-state="error"] {
+  color: var(--aw-status-danger) !important;
+}
+
+.execution-prompt-copy-button:disabled {
+  background: transparent !important;
+}
+
 .execution-prompt-editor {
   display: grid;
   gap: 10px;

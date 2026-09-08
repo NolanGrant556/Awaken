@@ -809,7 +809,7 @@ func (s *FileDesktopStore) ListThreads(view ThreadListView) ([]ThreadSnapshot, e
 	if err != nil {
 		return nil, err
 	}
-	var records []storedThreadRecord
+	threads := make([]ThreadSnapshot, 0, len(sessions))
 	for _, meta := range sessions {
 		// Deletion always wins over archiving: deleted records never appear
 		// in any view.
@@ -826,42 +826,10 @@ func (s *FileDesktopStore) ListThreads(view ThreadListView) ([]ThreadSnapshot, e
 				continue
 			}
 		}
-		records = append(records, storedRecordFromSessionMetadata(meta))
+		threads = append(threads, storedRecordFromSessionMetadata(meta).Snapshot)
 	}
-	if view == ThreadListViewArchived {
-		// Frozen archived query contract: archivedAt DESC, updatedAt DESC,
-		// createdAt DESC, threadId ASC.
-		sort.Slice(records, func(i, j int) bool {
-			a, b := records[i].Snapshot, records[j].Snapshot
-			if !a.ArchivedAt.Equal(b.ArchivedAt) {
-				return a.ArchivedAt.After(b.ArchivedAt)
-			}
-			if !a.UpdatedAt.Equal(b.UpdatedAt) {
-				return a.UpdatedAt.After(b.UpdatedAt)
-			}
-			if !a.CreatedAt.Equal(b.CreatedAt) {
-				return a.CreatedAt.After(b.CreatedAt)
-			}
-			return a.ThreadID < b.ThreadID
-		})
-	} else {
-		// Frozen query contract: updatedAt DESC, createdAt DESC, threadId ASC.
-		sort.Slice(records, func(i, j int) bool {
-			a, b := records[i].Snapshot, records[j].Snapshot
-			if !a.UpdatedAt.Equal(b.UpdatedAt) {
-				return a.UpdatedAt.After(b.UpdatedAt)
-			}
-			if !a.CreatedAt.Equal(b.CreatedAt) {
-				return a.CreatedAt.After(b.CreatedAt)
-			}
-			return a.ThreadID < b.ThreadID
-		})
-	}
-	out := make([]ThreadSnapshot, 0, len(records))
-	for _, record := range records {
-		out = append(out, record.Snapshot)
-	}
-	return out, nil
+	sortThreadSnapshots(threads, view)
+	return threads, nil
 }
 
 // SetThreadArchived flips the durable archived flag in one locked atomic

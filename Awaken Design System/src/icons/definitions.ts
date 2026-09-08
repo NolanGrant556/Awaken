@@ -940,7 +940,7 @@ const RAW_DEFINITIONS = {
   moon: {
     shape: "circle",
     fit: "radial",
-    purpose: "黑色主题",
+    purpose: "深色主题",
     build: () => crescent(),
   },
   display: {

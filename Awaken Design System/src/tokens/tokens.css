@@ -7,11 +7,11 @@
      骨架变量见文件下半部分；骨架变更 = 交互变更，必须走中间区域复核
      ============================================================ */
 
-  /* Neutral scale: near-white surfaces; fills & borders derive from rgb(82,82,88) */
+  /* Neutral scale: soft gray canvas, quieter navigation, white raised controls */
 
   /* Background */
-  --aw-bg-main: #ffffff;
-  --aw-bg-nav: #f7f7f8;
+  --aw-bg-main: #f8f8f8;
+  --aw-bg-nav: #f0f0f0;
   --aw-bg-white: #ffffff;
   --aw-bg-fill-light: rgba(82, 82, 88, 0.06);
   --aw-bg-fill-main: rgba(82, 82, 88, 0.1);
@@ -19,9 +19,9 @@
   --aw-overlay-backdrop: rgba(0, 0, 0, 0.28);
 
   /* Text */
-  --aw-text-primary: #1d1d1f;
-  --aw-text-secondary: #505054;
-  --aw-text-tertiary: #747478;
+  --aw-text-primary: #2f2f2f;
+  --aw-text-secondary: #575757;
+  --aw-text-tertiary: #696969;
   --aw-text-disabled: #aaaab0;
   --aw-text-blue: #2f74ff;
   --aw-text-onblack: #ffffff;
@@ -59,14 +59,14 @@
   --aw-surface-canvas: var(--aw-bg-main);
   --aw-surface-navigation: var(--aw-bg-nav);
   --aw-surface-chrome: var(--aw-bg-main);
-  --aw-surface-work: #ffffff;
-  --aw-surface-detail: #ffffff;
+  --aw-surface-work: var(--aw-bg-main);
+  --aw-surface-detail: var(--aw-bg-main);
   --aw-surface-raised: #ffffff;
-  --aw-surface-panel: #f7f7f8;
+  --aw-surface-panel: #f0f0f0;
   --aw-surface-panel-muted: rgba(82, 82, 88, 0.06);
   --aw-surface-hover: rgba(82, 82, 88, 0.06);
   --aw-surface-composer: var(--aw-bg-fill-light);
-  --aw-surface-code: #f5f5f6;
+  --aw-surface-code: #f0f0f0;
   --aw-surface-selection: rgba(82, 82, 88, 0.1);
   --aw-surface-focus: rgba(255, 255, 255, 1);
   --aw-surface-danger: rgba(232, 70, 58, 0.08);
@@ -78,7 +78,7 @@
   --aw-surface-runtime-pill: var(--aw-surface-status-pill);
   --aw-text-muted: var(--aw-text-secondary);
   --aw-text-subtle: var(--aw-text-tertiary);
-  --aw-text-code: #1d1d1f;
+  --aw-text-code: var(--aw-text-primary);
   --aw-code-inline-text: #4d6078;
   --aw-code-inline-bg: rgba(77, 96, 120, 0.09);
   --aw-code-syntax-comment: #747b86;
@@ -118,14 +118,14 @@
   --aw-context-meter-indicator: #168fd2;
   --aw-brand-wordmark-filter: none;
   --aw-composer-surface: var(--aw-bg-white);
-  --aw-composer-border: rgba(82, 82, 88, 0.24);
+  --aw-composer-border: rgba(82, 82, 88, 0.16);
   --aw-composer-shadow:
-    0 22px 56px rgba(29, 29, 31, 0.1),
-    0 5px 14px rgba(29, 29, 31, 0.05),
+    0 8px 28px rgba(29, 29, 31, 0.05),
+    0 2px 6px rgba(29, 29, 31, 0.03),
     0 1px 2px rgba(29, 29, 31, 0.05);
   --aw-composer-shadow-focus:
     var(--aw-shadow-focus),
-    0 24px 60px rgba(29, 29, 31, 0.12);
+    0 10px 32px rgba(29, 29, 31, 0.07);
   --aw-composer-attachment-remove-bg: rgba(29, 29, 31, 0.72);
   --aw-composer-attachment-remove-fg: var(--aw-text-onblack);
   --aw-composer-attachment-remove-border: transparent;
@@ -133,9 +133,9 @@
   --aw-composer-halo:
     radial-gradient(
       ellipse at 50% 58%,
-      rgba(255, 255, 255, 0.9) 0%,
-      rgba(255, 255, 255, 0.56) 44%,
-      rgba(255, 255, 255, 0) 72%
+      rgba(248, 248, 248, 0.72) 0%,
+      rgba(248, 248, 248, 0.36) 44%,
+      rgba(248, 248, 248, 0) 72%
     ),
     radial-gradient(
       ellipse at 50% 82%,
@@ -260,38 +260,38 @@
   /* ============================================================
      皮肤变量（纯视觉：颜色/阴影色值，不参与布局测量）
      对几何与滚动定位安全，仍必须通过视觉、浅色/深色主题与无障碍验收
-     深色中性基：表面已是暖黑，填充/边框由暖白 rgb(237,235,232) 派生
+     深色中性基：炭灰工作区与逐级提亮的面板；填充/边框由中性浅灰派生
      ============================================================ */
 
   /* Background */
-  --aw-bg-main: #11110f;
-  --aw-bg-nav: #171714;
-  --aw-bg-white: #1d1c19;
-  --aw-bg-fill-light: rgba(237, 235, 232, 0.07);
-  --aw-bg-fill-main: rgba(237, 235, 232, 0.11);
-  --aw-bg-fill-dark: rgba(237, 235, 232, 0.16);
+  --aw-bg-main: #1a1a1a;
+  --aw-bg-nav: #1f1f1f;
+  --aw-bg-white: #242424;
+  --aw-bg-fill-light: rgba(222, 222, 222, 0.07);
+  --aw-bg-fill-main: rgba(222, 222, 222, 0.11);
+  --aw-bg-fill-dark: rgba(222, 222, 222, 0.16);
   --aw-overlay-backdrop: rgba(0, 0, 0, 0.58);
 
   /* Text */
-  --aw-text-primary: #f2f1ed;
-  --aw-text-secondary: #d2d0ca;
-  --aw-text-tertiary: #aaa69e;
-  --aw-text-disabled: #66635d;
+  --aw-text-primary: #dedede;
+  --aw-text-secondary: #bdbdbd;
+  --aw-text-tertiary: #a0a0a0;
+  --aw-text-disabled: #707070;
   --aw-text-blue: #8ab3ff;
-  --aw-text-onblack: #11110f;
+  --aw-text-onblack: #1a1a1a;
 
   /* Border */
-  --aw-border-main: rgba(237, 235, 232, 0.14);
-  --aw-border-light: rgba(237, 235, 232, 0.09);
-  --aw-border-active: rgba(237, 235, 232, 0.74);
-  --aw-border-control: rgba(237, 235, 232, 0.18);
-  --aw-border-control-hover: rgba(237, 235, 232, 0.3);
+  --aw-border-main: rgba(222, 222, 222, 0.14);
+  --aw-border-light: rgba(222, 222, 222, 0.09);
+  --aw-border-active: rgba(222, 222, 222, 0.74);
+  --aw-border-control: rgba(222, 222, 222, 0.18);
+  --aw-border-control-hover: rgba(222, 222, 222, 0.3);
   --aw-focus-ring: color-mix(in srgb, var(--aw-accent) 72%, transparent);
 
   /* Button */
-  --aw-button-black: #f2f1ed;
+  --aw-button-black: #dedede;
   --aw-button-black-hover: #ffffff;
-  --aw-button-black-active: #dfddd7;
+  --aw-button-black-active: #d0d0d0;
 
   /* Status base hues (same one-base-per-family rule as light) */
   --aw-success: #49c89c;
@@ -310,28 +310,28 @@
   /* Run Workbench semantic tokens v2 */
   --aw-surface-canvas: var(--aw-bg-main);
   --aw-surface-navigation: var(--aw-bg-nav);
-  --aw-surface-chrome: #11110f;
-  --aw-surface-work: #11110f;
-  --aw-surface-detail: #181815;
-  --aw-surface-raised: #22211d;
-  --aw-surface-panel: #1b1a17;
-  --aw-surface-panel-muted: rgba(237, 235, 232, 0.07);
-  --aw-surface-hover: rgba(237, 235, 232, 0.08);
-  --aw-surface-composer: rgba(237, 235, 232, 0.08);
-  --aw-surface-code: #161613;
-  --aw-surface-selection: rgba(237, 235, 232, 0.13);
-  --aw-surface-focus: #262521;
+  --aw-surface-chrome: #1a1a1a;
+  --aw-surface-work: #1a1a1a;
+  --aw-surface-detail: #1f1f1f;
+  --aw-surface-raised: #292929;
+  --aw-surface-panel: #242424;
+  --aw-surface-panel-muted: rgba(222, 222, 222, 0.07);
+  --aw-surface-hover: rgba(222, 222, 222, 0.08);
+  --aw-surface-composer: rgba(222, 222, 222, 0.08);
+  --aw-surface-code: #202020;
+  --aw-surface-selection: rgba(222, 222, 222, 0.13);
+  --aw-surface-focus: #2c2c2c;
   --aw-surface-danger: rgba(255, 117, 107, 0.11);
-  --aw-surface-status-pill: rgba(237, 235, 232, 0.08);
-  --aw-surface-muted-fill: rgba(237, 235, 232, 0.07);
+  --aw-surface-status-pill: rgba(222, 222, 222, 0.08);
+  --aw-surface-muted-fill: rgba(222, 222, 222, 0.07);
   --aw-surface-sidebar: var(--aw-surface-navigation);
   --aw-surface-stage: var(--aw-surface-work);
   --aw-surface-inspector: var(--aw-surface-detail);
   --aw-surface-runtime-pill: var(--aw-surface-status-pill);
-  --aw-text-code: #ebe9e2;
+  --aw-text-code: #dedede;
   --aw-code-inline-text: #c1cbd8;
   --aw-code-inline-bg: rgba(193, 203, 216, 0.12);
-  --aw-code-syntax-comment: #96938c;
+  --aw-code-syntax-comment: #999999;
   --aw-code-syntax-keyword: #c4a7e7;
   --aw-code-syntax-string: #9fca8c;
   --aw-code-syntax-number: #e0ad72;
@@ -347,7 +347,7 @@
   --aw-status-success-text: #75d8b3;
   --aw-status-danger-bg: rgba(255, 117, 107, 0.15);
   --aw-status-danger-text: #ff9a92;
-  --aw-status-danger-foreground: #11110f;
+  --aw-status-danger-foreground: #1a1a1a;
   --aw-status-danger-hover: color-mix(in srgb, var(--aw-error) 86%, #ffffff);
   --aw-diff-added: rgba(73, 200, 156, 0.15);
   --aw-diff-added-text: #87ddb9;
@@ -355,33 +355,33 @@
   --aw-diff-removed-text: #ffa19a;
   --aw-diff-changed: rgba(240, 166, 74, 0.15);
   --aw-diff-changed-text: var(--aw-warning-text);
-  --aw-terminal-bg: #0c0a09;
-  --aw-terminal-text: #f2f1ed;
+  --aw-terminal-bg: #1a1a1a;
+  --aw-terminal-text: #dedede;
   --aw-brand-wordmark-filter: invert(1) brightness(1.08);
-  --aw-composer-surface: #1d1c19;
-  --aw-composer-border: rgba(237, 235, 232, 0.28);
+  --aw-composer-surface: #242424;
+  --aw-composer-border: rgba(222, 222, 222, 0.14);
   --aw-composer-shadow:
-    0 24px 56px rgba(0, 0, 0, 0.42),
-    0 6px 16px rgba(0, 0, 0, 0.28),
-    0 1px 0 rgba(237, 235, 232, 0.03);
+    0 8px 28px rgba(0, 0, 0, 0.22),
+    0 2px 6px rgba(0, 0, 0, 0.16),
+    0 1px 0 rgba(222, 222, 222, 0.03);
   --aw-composer-shadow-focus:
     var(--aw-shadow-focus),
-    0 26px 60px rgba(0, 0, 0, 0.48);
-  --aw-composer-attachment-remove-bg: rgba(245, 245, 241, 0.94);
-  --aw-composer-attachment-remove-fg: #111110;
-  --aw-composer-attachment-remove-border: rgba(237, 235, 232, 0.32);
+    0 10px 32px rgba(0, 0, 0, 0.28);
+  --aw-composer-attachment-remove-bg: rgba(222, 222, 222, 0.94);
+  --aw-composer-attachment-remove-fg: #1a1a1a;
+  --aw-composer-attachment-remove-border: rgba(222, 222, 222, 0.32);
   --aw-composer-attachment-remove-shadow: 0 4px 12px rgba(0, 0, 0, 0.32);
   --aw-composer-halo:
     radial-gradient(
       ellipse at 50% 58%,
-      rgba(34, 33, 29, 0.76) 0%,
-      rgba(34, 33, 29, 0.38) 44%,
-      rgba(17, 17, 15, 0) 74%
+      rgba(36, 36, 36, 0.76) 0%,
+      rgba(36, 36, 36, 0.38) 44%,
+      rgba(26, 26, 26, 0) 74%
     ),
     radial-gradient(
       ellipse at 50% 82%,
-      rgba(0, 0, 0, 0.36) 0%,
-      rgba(0, 0, 0, 0.14) 48%,
+      rgba(0, 0, 0, 0.18) 0%,
+      rgba(0, 0, 0, 0.07) 48%,
       rgba(0, 0, 0, 0) 76%
     );
 

@@ -76,7 +76,7 @@ describe("AppearanceSettings", () => {
     expect(html).not.toContain("显示大小");
     expect(html).not.toContain("100%");
     expect(html).toContain("浅色");
-    expect(html).toContain("黑色");
+    expect(html).toContain("深色");
     expect(html).toContain('role="radiogroup"');
     expect(html.match(/aria-checked="false"/g)).toHaveLength(2);
     expect(html).toContain('aria-checked="true"');

@@ -15,7 +15,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--aw-bg-white);
+  background: var(--aw-surface-canvas);
   color: var(--aw-text-primary);
   -webkit-user-select: none;
   user-select: none;
@@ -47,7 +47,7 @@
   --aw-settings-window-top: 24px;
   min-height: 680px;
   border: 1px solid var(--aw-border-main);
-  background: var(--aw-bg-white);
+  background: var(--aw-surface-canvas);
 }
 
 .aw-settings-sidebar {
@@ -109,7 +109,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--aw-bg-white);
+  background: var(--aw-surface-canvas);
 }
 
 .aw-settings-scroll {

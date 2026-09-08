@@ -23,8 +23,8 @@ export function windowBackgroundColor(
   shouldUseDarkColors: boolean,
 ): string {
   return effectiveThemeForPreference(theme, shouldUseDarkColors) === "dark"
-    ? "#0f0f0e"
-    : "#f8f8f7";
+    ? "#1a1a1a"
+    : "#f8f8f8";
 }
 
 export function updateMainWindowBackground(

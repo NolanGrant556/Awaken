@@ -40,23 +40,15 @@ type ComposerLifecycle = {
 
 export function composerRuntimePanelsForStatus({
   desktopNeedsRestart,
-  desktopStarting,
 }: ComposerRuntimeStatus): ComposerRuntimePanel[] {
   const panels: ComposerRuntimePanel[] = [];
 
   if (desktopNeedsRestart) {
     panels.push({
       id: "restart",
-      title: "Awaken needs restart",
-      message: "Quit Awaken and open it again.",
+      title: "Awaken 需要重新启动",
+      message: "请退出 Awaken 后重新打开。",
       tone: "error",
-    });
-  }
-  if (desktopStarting) {
-    panels.push({
-      id: "starting",
-      title: "Starting Awaken",
-      message: "Preparing the desktop app.",
     });
   }
   return panels;

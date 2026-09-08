@@ -31,6 +31,8 @@ computer_session_closed, computer_media_accessed
 
 `instruction_snapshot` 在 run 执行前保存本次冻结指令的安全摘要：snapshot ID/time/partial、每个来源的 scope/display path/scope root/digest/original/applied bytes/truncated/status 和 diagnostics。它不保存 global/project 正文。旧 run 没有该 kind 时保持“无历史摘要”，不得读取当前文件反向补造。
 
+活动 run 的 transcript 通过 `Session.TranscriptSnapshot()` 在同一临界区读取 run 状态、已发布事件与 stream cursor；状态更新和 EventBus 发布在该临界区内完成，锁顺序固定为 Session → EventBus。不能分开读取事件与 run 状态，否则完成边界可能组合出“已完成状态 + 缺少终态的旧事件”。EventBus 发布使用非阻塞通道且不回调 Session；耐久 journal 仍是重启后的唯一 authority。`session_snapshot_test.go` 覆盖成功、取消、错误及 agent/semantic 两条发布路径的并发快照。
+
 ## 2. Journal-first 写入顺序
 
 - composer 将文本、有序 attachments 和 tokens 写入结构化 `user_message`；含 Skill token 的路径必须在预激活前完成该写入；

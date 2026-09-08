@@ -1,3 +1,13 @@
+import {
+  UserQuestionPrompt,
+  isUserQuestionSelectionAnswered,
+  nextUserQuestionPromptIndex,
+  selectedUserQuestionLabels,
+} from "./UserQuestionPrompt";
+import {
+  contextUsageMeta,
+  contextUsagePanelData,
+} from "./contextUsagePresentation";
 import React from "react";
 import {
   AwakenComposerBar,
@@ -17,58 +27,68 @@ import {
 } from "@awaken/design-system";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { App } from "./App";
 import {
-  App,
   composerDraftFromRuntimeRun,
-  composerMetaItemsForFileWorkspaceSurface,
-  composerStructuredDraftLength,
-  contextUsageMeta,
-  contextUsagePanelData,
-  fileWorkspacePanelActionForState,
-  isUserQuestionSelectionAnswered,
-  insertComposerTokenAtOffset,
-  modelProfileLabel,
   promptRewindConfirmDialog,
   threadSupportsMessageRewind,
   PROMPT_REWIND_DRAFT_WARNING_COPY,
   PROMPT_REWIND_SIDE_EFFECT_COPY,
-  replaceComposerActionTriggerWithToken,
-  modelPreferenceChangeForOption,
-  modelPreferenceRecoveryKey,
-  mediaRevealLabelForPlatform,
-  artifactPreviewTabMediaIconConcept,
-  shouldSubmitProjectNameInputKey,
-  mediaFormatLabelForPath,
-  mediaArtifactRequestForPath,
-  nextUserQuestionPromptIndex,
-  nextSubagentInspectorTaskId,
-  subagentAgentTypeLabel,
-  subagentElapsedMs,
-  subagentWorkspaceModeLabel,
   promptNarrativeTokensForComposer,
   promptTextAfterTokenLeadingText,
   promptTokenViews,
   effectivePromptForComposerDraft,
+} from "./promptPresentation";
+import {
+  composerMetaItemsForFileWorkspaceSurface,
+  fileWorkspacePanelActionForState,
+  shouldEnableInspectorResizeHandle,
+  shouldUseCenterComposerWithFileWorkspace,
+  workbenchInspectorPresentation,
+} from "./desktopSurfacePresentation";
+import {
+  composerStructuredDraftLength,
+  insertComposerTokenAtOffset,
+  replaceComposerActionTriggerWithToken,
   reconcileComposerStructuredInput,
+} from "./composerStructuredDraft";
+import {
+  modelProfileLabel,
+  modelPreferenceChangeForOption,
+  modelPreferenceRecoveryKey,
+} from "./modelPreferencePresentation";
+import {
+  mediaRevealLabelForPlatform,
+  artifactPreviewTabMediaIconConcept,
+  mediaFormatLabelForPath,
+  mediaArtifactRequestForPath,
+} from "./artifactMediaPresentation";
+import {
+  shouldSubmitProjectNameInputKey,
   resolveBackendProjectOrder,
   resolveRunProjectForRun,
   resolveRunRootsForRun,
   partitionPickedProjectFolders,
   resolveWorkspaceRootForRun,
-  selectedUserQuestionLabels,
   sharedFolderTrashWarning,
-  shouldEnableInspectorResizeHandle,
-  shouldUseCenterComposerWithFileWorkspace,
   shouldResetActiveThreadForWorkspaceChange,
+} from "./projectRunScope";
+import {
+  nextSubagentInspectorTaskId,
+  subagentAgentTypeLabel,
+  subagentElapsedMs,
+  subagentWorkspaceModeLabel,
+} from "./subagentPresentation";
+import {
   shouldShowSidebarThreadSpinner,
   sidebarThreadArchiveMenuState,
   sidebarThreadMenuItems,
+} from "./sidebarThreadPresentation";
+import {
   activityBatchSummary,
   toolRecordIdForNarrativeItem,
   toolTracePresentation,
-  workbenchInspectorPresentation,
-  UserQuestionPrompt,
-} from "./App";
+} from "./toolTracePresentation";
 import {
   activeComposerPaletteActions,
   actionsFromSlashProviders,
@@ -626,20 +646,20 @@ describe("activity batch presentation", () => {
   it("creates deterministic command, check, skill and error summaries", () => {
     expect(
       activityBatchSummary([
-      { kind: "terminal", title: "运行 git status", status: "done" },
-      { kind: "terminal", title: "运行 npm test", status: "error" },
+        { kind: "terminal", title: "运行 git status", status: "done" },
+        { kind: "terminal", title: "运行 npm test", status: "error" },
       ]),
     ).toEqual({ label: "运行了 2 条命令", detail: "1 个异常" });
     expect(
       activityBatchSummary([
-      { kind: "tool", title: "读取 README", status: "done" },
-      { kind: "tool", title: "搜索 package.json", status: "done" },
+        { kind: "tool", title: "读取 README", status: "done" },
+        { kind: "tool", title: "搜索 package.json", status: "done" },
       ]),
     ).toEqual({ label: "检查了 2 项", detail: undefined });
     expect(
       activityBatchSummary([
-      { kind: "skill", title: "PDF Skill", status: "done" },
-      { kind: "tool", title: "读取文件", status: "active" },
+        { kind: "skill", title: "PDF Skill", status: "done" },
+        { kind: "tool", title: "读取文件", status: "active" },
       ]),
     ).toEqual({ label: "正在使用 PDF Skill · 1 个工具", detail: undefined });
   });
@@ -780,13 +800,13 @@ function stubElectronBridge(): void {
       setPrimaryProjectFolder: vi.fn(),
       trashProjectFolder: vi.fn(),
       getProjectOperation: vi.fn(),
-    openArtifact: vi.fn(async () => ({ ok: true as const })),
-    getArtifactMediaSource: vi.fn(async () => ({
-      ok: true as const,
-      src: "awaken-artifact://media/test/artifact.png",
-      mimeType: "image/png",
-      byteLength: 128,
-    })),
+      openArtifact: vi.fn(async () => ({ ok: true as const })),
+      getArtifactMediaSource: vi.fn(async () => ({
+        ok: true as const,
+        src: "awaken-artifact://media/test/artifact.png",
+        mimeType: "image/png",
+        byteLength: 128,
+      })),
       revealPath: vi.fn(async () => ({ ok: true as const })),
       revealArtifact: vi.fn(async () => ({ ok: true as const })),
       startRun: vi.fn(),
@@ -2271,14 +2291,9 @@ describe("composer lifecycle presentation", () => {
     ).toEqual([
       {
         id: "restart",
-        title: "Awaken needs restart",
-        message: "Quit Awaken and open it again.",
+        title: "Awaken 需要重新启动",
+        message: "请退出 Awaken 后重新打开。",
         tone: "error",
-      },
-      {
-        id: "starting",
-        title: "Starting Awaken",
-        message: "Preparing the desktop app.",
       },
     ]);
   });
@@ -3659,7 +3674,9 @@ describe("AwakenUserPromptBlock layout contract", () => {
     const bubbleEnd = html.indexOf("</article>", bubbleStart);
     const bubbleHtml = html.slice(bubbleStart, bubbleEnd);
     expect(bubbleHtml).toContain("execution-prompt-bubble-structured-content");
-    expect(bubbleHtml).toContain("execution-prompt-bubble-has-structured-content");
+    expect(bubbleHtml).toContain(
+      "execution-prompt-bubble-has-structured-content",
+    );
     expect(bubbleHtml).toContain("test-file-comment-summary");
     expect(bubbleHtml).toContain("1 个评论");
     expect(bubbleHtml).toContain('role="button"');
@@ -4103,13 +4120,9 @@ describe("prompt token text projection", () => {
     });
 
     expect(draft.value).toBe("修改前的正文");
-    expect(draft.attachments[0]?.previewURL).toBe(
-      "data:image/png;base64,YWJj",
-    );
+    expect(draft.attachments[0]?.previewURL).toBe("data:image/png;base64,YWJj");
     expect(draft.tokenLeadingTexts).toEqual({ "skill-1": "请使用 " });
-    expect(effectivePromptForComposerDraft(draft)).toBe(
-      "请使用 修改前的正文",
-    );
+    expect(effectivePromptForComposerDraft(draft)).toBe("请使用 修改前的正文");
     expect(
       effectivePromptForComposerDraft({ ...draft, value: "修改后的正文" }),
     ).toBe("请使用 修改后的正文");
@@ -4118,19 +4131,23 @@ describe("prompt token text projection", () => {
 
 describe("prompt rewind confirm copy", () => {
   it("uses the same side-effect warning for undo and edit send", () => {
-    expect(promptRewindConfirmDialog({ mode: "undo", hasDraft: false })).toEqual({
+    expect(
+      promptRewindConfirmDialog({ mode: "undo", hasDraft: false }),
+    ).toEqual({
       title: "撤销此消息？",
       confirmLabel: "撤销",
       paragraphs: [PROMPT_REWIND_SIDE_EFFECT_COPY],
     });
-    expect(promptRewindConfirmDialog({ mode: "edit", hasDraft: true })).toEqual({
-      title: "发送编辑后的消息？",
-      confirmLabel: "发送",
-      paragraphs: [
-        PROMPT_REWIND_DRAFT_WARNING_COPY,
-        PROMPT_REWIND_SIDE_EFFECT_COPY,
-      ],
-    });
+    expect(promptRewindConfirmDialog({ mode: "edit", hasDraft: true })).toEqual(
+      {
+        title: "发送编辑后的消息？",
+        confirmLabel: "发送",
+        paragraphs: [
+          PROMPT_REWIND_DRAFT_WARNING_COPY,
+          PROMPT_REWIND_SIDE_EFFECT_COPY,
+        ],
+      },
+    );
   });
 
   it("treats a new ordinary thread as rewind-capable before it is listed", () => {
@@ -4362,14 +4379,14 @@ describe("thread-scoped Composer drafts", () => {
     expect(
       composerSelectionsEqual(
         {
-      anchor: 3,
-      focus: 3,
-      caretRect: { left: 1, top: 2, bottom: 3 },
+          anchor: 3,
+          focus: 3,
+          caretRect: { left: 1, top: 2, bottom: 3 },
         },
         {
-      anchor: 3,
-      focus: 3,
-      caretRect: { left: 1, top: 2, bottom: 3 },
+          anchor: 3,
+          focus: 3,
+          caretRect: { left: 1, top: 2, bottom: 3 },
         },
       ),
     ).toBe(true);
@@ -4430,7 +4447,7 @@ describe("project workspace helpers", () => {
   ] as const)(
     "classifies durable project operation %o as %s",
     (operation, expected) => {
-    expect(projectOperationReconciliationState(operation)).toBe(expected);
+      expect(projectOperationReconciliationState(operation)).toBe(expected);
     },
   );
 
@@ -4975,8 +4992,9 @@ describe("App workbench presentation", () => {
     expect(html).not.toContain("等待运行");
     expect(html).not.toContain("run-stage-header");
     expect(html).not.toContain("run-timeline-shell");
-    expect(html).toContain("composer-runtime-panels");
-    expect(html).toContain("Starting Awaken");
+    expect(html).not.toContain("composer-runtime-panels");
+    expect(html).toContain("desktop-startup-status is-brand");
+    expect(html).toContain("正在启动 Awaken");
   });
 
   it("only exposes inspector controls on the main workbench", () => {
@@ -5104,15 +5122,13 @@ describe("App workbench presentation", () => {
       open: false,
       allowDismiss: true,
     });
-    expect(
-      promptRewindDialogOverlay({ pending: true, hidden: false }),
-    ).toEqual({
-      open: true,
-      allowDismiss: true,
-    });
-    expect(
-      promptRewindDialogOverlay({ pending: true, hidden: true }),
-    ).toEqual({
+    expect(promptRewindDialogOverlay({ pending: true, hidden: false })).toEqual(
+      {
+        open: true,
+        allowDismiss: true,
+      },
+    );
+    expect(promptRewindDialogOverlay({ pending: true, hidden: true })).toEqual({
       open: true,
       backdropClassName: PROMPT_REWIND_DIALOG_HIDDEN_BACKDROP_CLASS,
       allowDismiss: false,
@@ -5657,17 +5673,17 @@ describe("App workbench presentation", () => {
 
       expect(
         projectNarrativeTurnBodySegments({
-        turnId: "prompt:media",
-        items: [
-          thinking,
-          media,
-          postMediaThinking,
-          interimAnswer,
-          publishTool,
-          readGroup,
-          answer,
-        ],
-        executionProcessOpen: false,
+          turnId: "prompt:media",
+          items: [
+            thinking,
+            media,
+            postMediaThinking,
+            interimAnswer,
+            publishTool,
+            readGroup,
+            answer,
+          ],
+          executionProcessOpen: false,
         }),
       ).toEqual([
         {

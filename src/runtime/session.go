@@ -272,6 +272,10 @@ func cloneComposerTokens(tokens []ComposerToken) []ComposerToken {
 func (s *Session) Snapshot() Run {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.snapshotLocked()
+}
+
+func (s *Session) snapshotLocked() Run {
 	snapshot := s.run
 	snapshot.InputAttachments = cloneRunInputAttachments(snapshot.InputAttachments)
 	snapshot.ComposerTokens = cloneComposerTokens(snapshot.ComposerTokens)
@@ -327,12 +331,10 @@ func (s *Session) RequestCancel() Run {
 	}
 	cancel := s.cancel
 	snapshot := s.run
-	bus := s.bus
-	s.mu.Unlock()
-
 	if statusChanged {
-		bus.Append(statusEvent, false)
+		s.bus.Append(statusEvent, false)
 	}
+	s.mu.Unlock()
 
 	if cancel != nil {
 		cancel()
@@ -389,10 +391,8 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 		RunID:      s.run.RunID,
 		AgentEvent: event,
 	}
-	bus := s.bus
+	s.bus.Append(wrapped, terminal)
 	s.mu.Unlock()
-
-	bus.Append(wrapped, terminal)
 }
 
 // RecordSemanticRecords publishes already-assigned durable facts into the live
@@ -459,10 +459,8 @@ func (s *Session) RecordSemanticRecords(records []agentcore.SemanticRecord) {
 			SemanticRecord: record,
 			TerminalReason: terminalReason,
 		}
-		bus := s.bus
+		s.bus.Append(wrapped, terminal)
 		s.mu.Unlock()
-
-		bus.Append(wrapped, terminal)
 	}
 }
 
@@ -471,6 +469,16 @@ func (s *Session) StreamCursor() uint64 {
 		return 0
 	}
 	return s.bus.StreamCursor()
+}
+
+// TranscriptSnapshot captures run state and the corresponding published stream
+// under the same lock. Publication always locks Session before EventBus; Append
+// is non-blocking and never calls back into Session.
+func (s *Session) TranscriptSnapshot() (Run, []Event, uint64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	events, cursor := s.bus.Snapshot()
+	return s.snapshotLocked(), events, cursor
 }
 
 func (s *Session) StreamSnapshot() ([]Event, uint64) {
@@ -513,10 +521,8 @@ func (s *Session) AwaitUserQuestion(ctx context.Context, request agentcore.Awake
 		RunID:      s.run.RunID,
 		AgentEvent: request,
 	}
-	bus := s.bus
+	s.bus.Append(wrapped, false)
 	s.mu.Unlock()
-
-	bus.Append(wrapped, false)
 
 	select {
 	case resolution := <-pending.resolution:
@@ -589,10 +595,8 @@ func (s *Session) resolveUserQuestion(questionID string, resolution agentcore.Us
 		RunID:      s.run.RunID,
 		AgentEvent: resolved,
 	}
-	bus := s.bus
+	s.bus.Append(wrapped, false)
 	s.mu.Unlock()
-
-	bus.Append(wrapped, false)
 	pending.resolution <- resolution
 	return nil
 }
@@ -639,10 +643,8 @@ func (s *Session) awaitExternalInteractionAnswer(ctx context.Context, request ag
 		RunID:      s.run.RunID,
 		AgentEvent: request,
 	}
-	bus := s.bus
+	s.bus.Append(wrapped, false)
 	s.mu.Unlock()
-
-	bus.Append(wrapped, false)
 
 	select {
 	case resolution := <-pending.answer:
@@ -699,10 +701,8 @@ func (s *Session) ResolveExternalInteractionWithContent(interactionID string, re
 		RunID:      s.run.RunID,
 		AgentEvent: resolved,
 	}
-	bus := s.bus
+	s.bus.Append(wrapped, false)
 	s.mu.Unlock()
-
-	bus.Append(wrapped, false)
 	pending.answer <- agentcore.ExternalInteractionAnswer{Resolution: resolution, Content: cloneInteractionContent(content)}
 	return nil
 }
@@ -768,11 +768,9 @@ func (s *Session) CompleteCancelled(message, result string) {
 		Code:           "RUN_CANCELLED",
 		TerminalReason: agentcore.TerminalReasonCancelled,
 	}
-	bus := s.bus
+	s.bus.Append(statusEvent, false)
+	s.bus.Append(event, true)
 	s.mu.Unlock()
-
-	bus.Append(statusEvent, false)
-	bus.Append(event, true)
 }
 
 func (s *Session) CompleteFinished(result string) {
@@ -804,10 +802,8 @@ func (s *Session) CompleteFinished(result string) {
 		RunID:      s.run.RunID,
 		AgentEvent: event,
 	}
-	bus := s.bus
+	s.bus.Append(wrapped, true)
 	s.mu.Unlock()
-
-	bus.Append(wrapped, true)
 }
 
 func (s *Session) CompleteError(message, code string) {
@@ -836,10 +832,8 @@ func (s *Session) CompleteError(message, code string) {
 		Code:           code,
 		TerminalReason: agentcore.TerminalReasonModelError,
 	}
-	bus := s.bus
+	s.bus.Append(event, true)
 	s.mu.Unlock()
-
-	bus.Append(event, true)
 }
 
 func isTerminalStatus(status RunStatus) bool {

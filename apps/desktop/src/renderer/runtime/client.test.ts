@@ -64,6 +64,25 @@ function installBridge(bridge: AwakenBridge): void {
 }
 
 describe("electron runtime client", () => {
+  it("disposes a reconnect that resolves after unsubscribe and ignores its late frames", async () => {
+    const { bridge } = createElectronBridge({ status: "running" });
+    let finish!: (id: string) => void;
+    const handlers: Array<Parameters<AwakenBridge["subscribeRun"]>[1]> = [];
+    bridge.subscribeRun = vi.fn((_runId, callbacks) => {
+      handlers.push(callbacks);
+      return handlers.length === 1 ? Promise.resolve("first") : new Promise<string>((resolve) => { finish = resolve; });
+    });
+    installBridge(bridge);
+    const onEvent = vi.fn();
+    const stop = await createRuntimeClient().subscribeRun("run-1", { onEvent });
+    handlers[0].onClose?.();
+    await vi.advanceTimersByTimeAsync(1000);
+    stop();
+    finish("late"); await Promise.resolve();
+    handlers[1].onEvent({ type: "RUN_STARTED", runId: "run-1" });
+    expect(bridge.unsubscribeRun).toHaveBeenCalledWith("late");
+    expect(onEvent).not.toHaveBeenCalled();
+  });
   it("forwards question cancellation through the dedicated bridge", async () => {
     const { bridge } = createElectronBridge({ status: "running" });
     installBridge(bridge);

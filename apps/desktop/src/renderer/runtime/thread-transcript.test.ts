@@ -61,6 +61,17 @@ function makeTranscript(): RuntimeThreadTranscript {
   };
 }
 
+it("reconciles a terminal run after replaying a pre-terminal event snapshot", () => {
+  const transcript = makeTranscript();
+  const latest = transcript.runs.at(-1)!;
+  latest.run.status = "finished";
+  latest.run.finishedAt = "2026-06-24T00:01:12Z";
+  const state = actionsForThreadTranscript(transcript).reduce(reduceRuntimeState, createInitialRuntimeState());
+  expect(state.status).toBe("finished");
+  expect(state.phase).toBe("done");
+  expect(state.timelineStatus).not.toBe("running");
+});
+
 describe("thread transcript replay helpers", () => {
   it("replays a host-owned scheduled reminder without a user prompt", () => {
     const transcript: RuntimeThreadTranscript = {

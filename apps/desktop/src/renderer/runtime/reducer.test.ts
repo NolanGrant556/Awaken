@@ -3693,6 +3693,19 @@ describe("runtime reducer run narrative projection", () => {
 });
 
 describe("runtime reducer thread snapshots", () => {
+  it("clears a background running summary when the Core list no longer has an active run", () => {
+    const thread: RuntimeThread = { threadId: "A", label: "A", runId: "run-A", activeRunId: "run-A", archived: false, createdAt: "", updatedAt: "", workspace: { workspaceRoot: "/tmp/test", writableRoots: [] } };
+    let state = reduceRuntimeState(createInitialRuntimeState(), { type: "run/threadsLoaded", threads: [thread] });
+    state = reduceRuntimeState(state, { type: "run/threadsLoaded", threads: [{ ...thread, activeRunId: undefined }] });
+    expect(state.threads[0].activeRunId).toBeUndefined();
+    expect(state.threads[0].runStatus).not.toBe("running");
+  });
+
+  it("does not apply a late event from another selected task", () => {
+    const state = reduceRuntimeState(createInitialRuntimeState(), { type: "run/created", run: makeRun({ threadId: "B", runId: "run-B" }) });
+    expect(reduceRuntimeState(state, runEvent({ type: "RUN_STARTED", threadId: "A", runId: "run-A" }))).toBe(state);
+    expect(reduceRuntimeState(state, runEvent({ type: "RUN_FINISHED", threadId: "B", runId: "old-run-B" }))).toBe(state);
+  });
   it("tracks sidebar run status across run lifecycle", () => {
     let state = createInitialRuntimeState();
     state = reduceRuntimeState(state, {

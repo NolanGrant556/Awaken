@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { correctXlsxPictureLayout, XLSX_PICTURE_LAYOUT_VERSION } from "./xlsx-preview-pictures.js";
 import {
   MAX_OFFICE_HTML_BYTES,
   MAX_OFFICE_STDERR_BYTES,
@@ -324,6 +325,7 @@ export class OfficeCliRenderer {
           size: originalStat.size,
           mtimeMs: originalStat.mtimeMs,
           version: manifest.version,
+          pictureLayoutVersion: XLSX_PICTURE_LAYOUT_VERSION,
         }),
       )
       .digest("hex");
@@ -348,6 +350,11 @@ export class OfficeCliRenderer {
         ["view", sourcePath, "html", "-o", temporaryPath],
         { signal },
       );
+      const rawOutputStat = await fs.stat(temporaryPath);
+      if (rawOutputStat.size <= 0 || rawOutputStat.size > MAX_OFFICE_HTML_BYTES) {
+        throw new OfficeCliError("PREVIEW_RESOURCE_LIMIT", "Office 预览结果超过安全上限。");
+      }
+      await correctXlsxPictureLayout(sourcePath, temporaryPath, signal);
       const [outputStat, afterStat] = await Promise.all([
         fs.stat(temporaryPath),
         fs.stat(sourcePath),

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,6 +22,7 @@ import (
 )
 
 type fakeHostConnectorAuth struct {
+	mu           sync.Mutex
 	status       connectors.ConnectorStatus
 	session      connectors.ConnectorAuthSession
 	started      string
@@ -30,27 +32,39 @@ type fakeHostConnectorAuth struct {
 }
 
 func (f *fakeHostConnectorAuth) ConnectorStatus(string) (connectors.ConnectorStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.status, nil
 }
 func (f *fakeHostConnectorAuth) Start(_ context.Context, connectorID string) (connectors.ConnectorAuthStartResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.started = connectorID
 	expires := time.Now().Add(time.Minute)
 	f.session = connectors.ConnectorAuthSession{SessionID: "host-session", ConnectorID: connectorID, Status: "authorizing", ExpiresAt: &expires}
 	return connectors.ConnectorAuthStartResult{SessionID: f.session.SessionID, ConnectorID: connectorID, Status: f.session.Status, AuthorizationURL: "https://login.example.test/authorize", ExpiresAt: &expires}, nil
 }
 func (f *fakeHostConnectorAuth) Reauthorize(_ context.Context, connectorID string) (connectors.ConnectorAuthStartResult, error) {
+	f.mu.Lock()
 	f.reauthorized = connectorID
+	f.mu.Unlock()
 	return f.Start(context.Background(), connectorID)
 }
 func (f *fakeHostConnectorAuth) Session(string) (connectors.ConnectorAuthSession, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.session, nil
 }
 func (f *fakeHostConnectorAuth) Cancel(sessionID string) (connectors.ConnectorAuthSession, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.cancelled = sessionID
 	f.session.Status = "cancelled"
 	return f.session, nil
 }
 func (f *fakeHostConnectorAuth) MarkAdminApprovalPending(sessionID string) (connectors.ConnectorAuthSession, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.session.Status = "pending_admin_approval"
 	f.session.ErrorMessage = "等待组织管理员批准；批准后请重新连接。"
 	f.status.State = connectors.StateApprovalRequired
@@ -58,6 +72,8 @@ func (f *fakeHostConnectorAuth) MarkAdminApprovalPending(sessionID string) (conn
 	return f.session, nil
 }
 func (f *fakeHostConnectorAuth) Disconnect(_ context.Context, connectorID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.disconnected = connectorID
 	return nil
 }

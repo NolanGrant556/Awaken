@@ -43,7 +43,7 @@ func (s *Store) Install(ctx context.Context, req InstallRequest) (InstallResult,
 // Uninstall moves the package and data directories to Trash, then drops the record.
 func (s *Store) Uninstall(name string) (string, error) {
 	var trashed string
-	err := s.withMutationLock(func() error {
+	err := s.withMutationLock(func() (operationErr error) {
 		state, err := s.readStateUnlocked()
 		if err != nil && !os.IsNotExist(err) {
 			return err
@@ -69,7 +69,11 @@ func (s *Store) Uninstall(name string) (string, error) {
 		if err != nil {
 			return fmt.Errorf("create uninstall rollback directory: %w", err)
 		}
-		defer os.RemoveAll(rollbackRoot)
+		if err := writeRollback(rollbackRoot, pluginRollback{Name: name, Previous: record, PackageBackup: "package", DataBackup: "data", Uninstall: true}); err != nil {
+			os.RemoveAll(rollbackRoot)
+			return err
+		}
+		defer finishPluginRollback(rollbackRoot, &operationErr)
 		packageBackup := filepath.Join(rollbackRoot, "package")
 		dataBackup := filepath.Join(rollbackRoot, "data")
 		packageStaged, dataStaged := false, false
@@ -149,7 +153,7 @@ func (s *Store) Uninstall(name string) (string, error) {
 	return trashed, err
 }
 
-func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallResult, error) {
+func (s *Store) installLocked(ctx context.Context, req InstallRequest) (result InstallResult, operationErr error) {
 	state, err := s.readStateUnlocked()
 	if err != nil && !os.IsNotExist(err) {
 		return InstallResult{}, err
@@ -260,7 +264,11 @@ func (s *Store) installLocked(ctx context.Context, req InstallRequest) (InstallR
 			if err != nil {
 				return InstallResult{}, fmt.Errorf("create replacement rollback directory: %w", err)
 			}
-			defer os.RemoveAll(rollbackRoot)
+			if err := writeRollback(rollbackRoot, pluginRollback{Name: name, Previous: existing, PackageBackup: name, NextDigest: digest}); err != nil {
+				os.RemoveAll(rollbackRoot)
+				return InstallResult{}, err
+			}
+			defer finishPluginRollback(rollbackRoot, &operationErr)
 			previousBackup = filepath.Join(rollbackRoot, name)
 			if err := os.Rename(dest, previousBackup); err != nil {
 				return InstallResult{}, fmt.Errorf("stage existing plugin package for replacement: %w", err)

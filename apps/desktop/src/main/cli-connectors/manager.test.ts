@@ -479,7 +479,8 @@ fi
     const started = await manager.startAuth("lark-cli");
     expect(started.authSession).toMatchObject({ provider: "lark-cli", phase: "waiting_user" });
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if (manager.list().find((entry) => entry.providerId === "lark-cli")?.readiness.overall === "ready") break;
+      const entry = manager.list().find((entry) => entry.providerId === "lark-cli");
+      if (entry?.readiness.overall === "ready" && !entry.authSession) break;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
 

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -108,10 +109,11 @@ func TestLeaseIdleCallback(t *testing.T) {
 
 func TestLeaseIdleCallbackBlockedByActiveRun(t *testing.T) {
 	called := make(chan struct{}, 1)
-	activeRuns := 1
+	var activeRuns atomic.Int32
+	activeRuns.Store(1)
 	lm := NewLeaseManagerWithInterval(func() {
 		called <- struct{}{}
-	}, 100*time.Millisecond, WithActiveRunCountFunc(func() int { return activeRuns }), WithIdleBudget(100*time.Millisecond))
+	}, 100*time.Millisecond, WithActiveRunCountFunc(func() int { return int(activeRuns.Load()) }), WithIdleBudget(100*time.Millisecond))
 	lease, _ := lm.CreateLease("bridge", "bridge-1")
 	lm.mu.Lock()
 	lm.leases[lease.LeaseID].ExpiresAt = time.Now().UTC().Add(-time.Second)
@@ -127,7 +129,7 @@ func TestLeaseIdleCallbackBlockedByActiveRun(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 	}
 
-	activeRuns = 0
+	activeRuns.Store(0)
 	select {
 	case <-called:
 	case <-time.After(2 * time.Second):

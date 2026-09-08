@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -50,8 +52,11 @@ type managedTask struct {
 }
 
 type messageReceiptRecord struct {
+	taskID  string
 	content string
 	receipt MessageReceipt
+	done    chan struct{}
+	err     error
 }
 
 type Manager struct {
@@ -64,7 +69,9 @@ type Manager struct {
 	order                        []string
 	delivered                    map[string]bool
 	pendingTerminalNotifications []string
-	messageReceipts              map[string]messageReceiptRecord
+	messageReceipts              map[string]*messageReceiptRecord
+	reservedRoots                map[string][]string
+	closed                       bool
 	reserved                     int
 	slots                        chan struct{}
 	notify                       chan struct{}
@@ -88,8 +95,9 @@ func NewManager(parent context.Context, cfg Config) *Manager {
 	return &Manager{
 		ctx: ctx, cancel: cancel, cfg: cfg,
 		tasks:           make(map[string]*managedTask),
+		reservedRoots:   make(map[string][]string),
 		delivered:       make(map[string]bool),
-		messageReceipts: make(map[string]messageReceiptRecord),
+		messageReceipts: make(map[string]*messageReceiptRecord),
 		slots:           make(chan struct{}, cfg.MaxConcurrent),
 		notify:          make(chan struct{}, 1),
 	}
@@ -119,16 +127,21 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 	if len(writableRoots) == 0 {
 		writableRoots = append([]string(nil), m.cfg.ParentWritableRoots...)
 	}
-	if request.WorkspaceMode == WorkspaceShared {
-		if err := m.rejectOverlappingSharedWrite(writableRoots); err != nil {
-			return TaskSnapshot{}, err
-		}
-	}
 	if modelProfileID := strings.TrimSpace(m.cfg.ModelProfileID); modelProfileID != "" {
 		request.ModelProfileID = modelProfileID
 	}
 
 	m.mu.Lock()
+	if m.closed || m.ctx.Err() != nil {
+		m.mu.Unlock()
+		return TaskSnapshot{}, runtimeError(ErrorRuntimeUnavailable, "manager is closed")
+	}
+	if request.WorkspaceMode == WorkspaceShared {
+		if err := m.rejectOverlappingSharedWrite(writableRoots); err != nil {
+			m.mu.Unlock()
+			return TaskSnapshot{}, err
+		}
+	}
 	if len(m.order)+m.reserved >= m.cfg.MaxTasks {
 		m.mu.Unlock()
 		return TaskSnapshot{}, runtimeError(ErrorLimitReached, "maximum tasks for this run reached")
@@ -136,6 +149,10 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 	m.reserved++
 	now := time.Now().UTC()
 	taskID := newID("subtask")
+	if request.WorkspaceMode == WorkspaceShared {
+		m.reservedRoots[taskID] = writableRoots
+	}
+	m.wg.Add(1)
 	snapshot := TaskSnapshot{
 		TaskID: taskID, AgentID: newID("subagent"),
 		ParentAgentID:    firstNonBlank(request.ParentAgentID, "root"),
@@ -150,7 +167,9 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 	if err := m.persist(ctx, "subagent_spawned", snapshot); err != nil {
 		m.mu.Lock()
 		m.reserved--
+		delete(m.reservedRoots, taskID)
 		m.mu.Unlock()
+		m.wg.Done()
 		return TaskSnapshot{}, err
 	}
 
@@ -162,12 +181,12 @@ func (m *Manager) Spawn(ctx context.Context, request SpawnRequest) (TaskSnapshot
 	}
 	m.mu.Lock()
 	m.reserved--
+	delete(m.reservedRoots, taskID)
 	m.tasks[taskID] = task
 	m.order = append(m.order, taskID)
 	m.mu.Unlock()
 	m.signal()
 
-	m.wg.Add(1)
 	go m.runTask(taskCtx, taskID)
 	return snapshot, nil
 }
@@ -196,7 +215,7 @@ func (m *Manager) runTask(ctx context.Context, taskID string) {
 		return
 	}
 	task.mutationMu.Lock()
-	snapshot := task.snapshot
+	snapshot := cloneTaskSnapshot(task.snapshot)
 	if ctx.Err() != nil || snapshot.Status == StatusCancelling {
 		task.mutationMu.Unlock()
 		m.finishCancelled(taskID)
@@ -268,7 +287,7 @@ func (m *Manager) finish(taskID string, status TaskStatus, result, code, message
 	}
 	task.mutationMu.Lock()
 	defer task.mutationMu.Unlock()
-	snapshot := task.snapshot
+	snapshot := cloneTaskSnapshot(task.snapshot)
 	if snapshot.Terminal() {
 		return
 	}
@@ -298,7 +317,7 @@ func (m *Manager) reportProgress(ctx context.Context, taskID string, update Prog
 	}
 	task.mutationMu.Lock()
 	defer task.mutationMu.Unlock()
-	snapshot := task.snapshot
+	snapshot := cloneTaskSnapshot(task.snapshot)
 	if snapshot.Terminal() || snapshot.Status == StatusCancelling {
 		return nil
 	}
@@ -390,7 +409,7 @@ func (m *Manager) List() []TaskSnapshot {
 	result := make([]TaskSnapshot, 0, len(m.order))
 	for _, id := range m.order {
 		if task := m.tasks[id]; task != nil {
-			result = append(result, task.snapshot)
+			result = append(result, cloneTaskSnapshot(task.snapshot))
 		}
 	}
 	return result
@@ -454,7 +473,7 @@ func (m *Manager) waitState(request WaitRequest, consume bool) ([]TaskSnapshot, 
 		if task == nil {
 			return nil, false, runtimeError(ErrorNotFound, "task does not exist in this run")
 		}
-		snapshot := task.snapshot
+		snapshot := cloneTaskSnapshot(task.snapshot)
 		all = append(all, snapshot)
 		if snapshot.Terminal() {
 			terminal++
@@ -503,7 +522,7 @@ func (m *Manager) DrainTerminalNotifications() []TaskSnapshot {
 			continue
 		}
 		m.delivered[taskID] = true
-		result = append(result, task.snapshot)
+		result = append(result, cloneTaskSnapshot(task.snapshot))
 	}
 	return result
 }
@@ -540,23 +559,43 @@ func (m *Manager) MessageIdempotent(ctx context.Context, taskID, content, idempo
 	if len(content) > maxPromptBytes {
 		return MessageReceipt{}, runtimeError(ErrorInvalidInput, "message exceeds the supported limit")
 	}
-	if idempotencyKey != "" {
-		m.mu.RLock()
-		recorded, ok := m.messageReceipts[idempotencyKey]
-		m.mu.RUnlock()
-		if ok {
-			if recorded.content != content {
-				return MessageReceipt{}, runtimeError(ErrorIdempotency, "idempotency key was reused with a different body")
-			}
-			return recorded.receipt, nil
+	if idempotencyKey == "" {
+		return m.queueMessage(ctx, taskID, content)
+	}
+	m.mu.Lock()
+	if recorded, ok := m.messageReceipts[idempotencyKey]; ok {
+		m.mu.Unlock()
+		if recorded.taskID != taskID || recorded.content != content {
+			return MessageReceipt{}, runtimeError(ErrorIdempotency, "idempotency key was reused with a different task or body")
+		}
+		select {
+		case <-recorded.done:
+			return recorded.receipt, recorded.err
+		case <-ctx.Done():
+			return MessageReceipt{}, ctx.Err()
 		}
 	}
+	recorded := &messageReceiptRecord{taskID: taskID, content: content, done: make(chan struct{})}
+	m.messageReceipts[idempotencyKey] = recorded
+	m.mu.Unlock()
+	receipt, err := m.queueMessage(ctx, taskID, content)
+	m.mu.Lock()
+	recorded.receipt, recorded.err = receipt, err
+	if err != nil {
+		delete(m.messageReceipts, idempotencyKey)
+	}
+	close(recorded.done)
+	m.mu.Unlock()
+	return receipt, err
+}
+
+func (m *Manager) queueMessage(ctx context.Context, taskID, content string) (MessageReceipt, error) {
 	task := m.task(taskID)
 	if task == nil {
 		return MessageReceipt{}, runtimeError(ErrorNotFound, "task does not exist in this run")
 	}
 	task.mutationMu.Lock()
-	snapshot := task.snapshot
+	snapshot := cloneTaskSnapshot(task.snapshot)
 	if snapshot.Terminal() || snapshot.Status == StatusCancelling {
 		task.mutationMu.Unlock()
 		return MessageReceipt{}, runtimeError(ErrorNotRunning, "subagent is not running")
@@ -569,11 +608,6 @@ func (m *Manager) MessageIdempotent(ctx context.Context, taskID, content, idempo
 	task.messages = append(task.messages, queued)
 	task.mutationMu.Unlock()
 	receipt := MessageReceipt{TaskID: taskID, QueuedAt: queued.QueuedAt, MessageID: queued.ID}
-	if idempotencyKey != "" {
-		m.mu.Lock()
-		m.messageReceipts[idempotencyKey] = messageReceiptRecord{content: content, receipt: receipt}
-		m.mu.Unlock()
-	}
 	m.signal()
 	return receipt, nil
 }
@@ -610,21 +644,25 @@ func (m *Manager) attachWorktree(taskID string, receipt *WorktreeReceipt) {
 	}
 	task.mutationMu.Lock()
 	defer task.mutationMu.Unlock()
-	copied := *receipt
-	task.snapshot.Worktree = &copied
+	snapshot := cloneTaskSnapshot(task.snapshot)
+	snapshot.Worktree = receipt
+	m.replaceSnapshot(taskID, snapshot)
 }
 
 func (m *Manager) rejectOverlappingSharedWrite(writableRoots []string) error {
 	if len(writableRoots) == 0 {
 		return nil
 	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	for _, roots := range m.reservedRoots {
+		if rootsOverlap(writableRoots, roots) {
+			return runtimeError(ErrorBoundaryViolation, "a pending child already reserved this writable root")
+		}
+	}
 	for _, task := range m.tasks {
 		if task == nil {
 			continue
 		}
-		snapshot := task.snapshot
+		snapshot := cloneTaskSnapshot(task.snapshot)
 		if snapshot.Terminal() || snapshot.WorkspaceMode != WorkspaceShared {
 			continue
 		}
@@ -646,7 +684,7 @@ func rootsOverlap(left, right []string) bool {
 			if b == "" {
 				continue
 			}
-			if a == b || strings.HasPrefix(a, b+string(osPathSeparator)) || strings.HasPrefix(b, a+string(osPathSeparator)) {
+			if rootContains(a, b) || rootContains(b, a) {
 				return true
 			}
 		}
@@ -654,12 +692,40 @@ func rootsOverlap(left, right []string) bool {
 	return false
 }
 
-const osPathSeparator = "/"
+func rootContains(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
 
 func normalizeRoot(value string) string {
 	value = strings.TrimSpace(value)
-	value = strings.TrimRight(value, "/\\")
-	return value
+	if value == "" {
+		return ""
+	}
+	absolute, err := filepath.Abs(value)
+	if err != nil {
+		return filepath.Clean(value)
+	}
+	ancestor := absolute
+	var suffix []string
+	for {
+		if resolved, err := filepath.EvalSymlinks(ancestor); err == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			absolute = resolved
+			break
+		}
+		if filepath.Dir(ancestor) == ancestor {
+			break
+		}
+		suffix = append(suffix, filepath.Base(ancestor))
+		ancestor = filepath.Dir(ancestor)
+	}
+	if runtime.GOOS == "windows" {
+		absolute = strings.ToLower(absolute)
+	}
+	return absolute
 }
 
 func (m *Manager) Cancel(ctx context.Context, taskID, _ string) (TaskSnapshot, error) {
@@ -670,7 +736,7 @@ func (m *Manager) Cancel(ctx context.Context, taskID, _ string) (TaskSnapshot, e
 	}
 	task.mutationMu.Lock()
 	defer task.mutationMu.Unlock()
-	snapshot := task.snapshot
+	snapshot := cloneTaskSnapshot(task.snapshot)
 	if snapshot.Terminal() {
 		return snapshot, nil
 	}
@@ -709,7 +775,10 @@ func (m *Manager) Close(ctx context.Context) error {
 	if m == nil {
 		return nil
 	}
+	m.mu.Lock()
+	m.closed = true
 	m.cancel()
+	m.mu.Unlock()
 	done := make(chan struct{})
 	go func() {
 		m.wg.Wait()
@@ -787,7 +856,7 @@ func (m *Manager) replaceSnapshot(taskID string, snapshot TaskSnapshot) bool {
 		m.mu.Unlock()
 		return false
 	}
-	task.snapshot = snapshot
+	task.snapshot = cloneTaskSnapshot(snapshot)
 	if snapshot.Terminal() && !m.delivered[taskID] {
 		m.pendingTerminalNotifications = append(m.pendingTerminalNotifications, taskID)
 	}
@@ -797,6 +866,20 @@ func (m *Manager) replaceSnapshot(taskID string, snapshot TaskSnapshot) bool {
 }
 
 func cloneTaskSnapshot(snapshot TaskSnapshot) TaskSnapshot {
+	if snapshot.Worktree != nil {
+		receipt := *snapshot.Worktree
+		receipt.Changed = append([]string(nil), receipt.Changed...)
+		snapshot.Worktree = &receipt
+	}
+	if snapshot.StartedAt != nil {
+		value := *snapshot.StartedAt
+		snapshot.StartedAt = &value
+	}
+	if snapshot.FinishedAt != nil {
+		value := *snapshot.FinishedAt
+		snapshot.FinishedAt = &value
+	}
+
 	snapshot.HostToolReceipts = append([]HostToolReceipt(nil), snapshot.HostToolReceipts...)
 	for i := range snapshot.HostToolReceipts {
 		snapshot.HostToolReceipts[i].Details = cloneAnyMap(snapshot.HostToolReceipts[i].Details)
@@ -810,9 +893,26 @@ func cloneAnyMap(source map[string]any) map[string]any {
 	}
 	cloned := make(map[string]any, len(source))
 	for key, value := range source {
-		cloned[key] = value
+		cloned[key] = cloneDetailValue(value)
 	}
 	return cloned
+}
+
+func cloneDetailValue(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		return cloneAnyMap(value)
+	case []any:
+		copied := make([]any, len(value))
+		for i, item := range value {
+			copied[i] = cloneDetailValue(item)
+		}
+		return copied
+	case []string:
+		return append([]string(nil), value...)
+	default:
+		return value
+	}
 }
 
 func (m *Manager) prompt(taskID string) string {

@@ -115,6 +115,7 @@ export function normalizedFileExtension(fileName: string): string {
 
 export function classifyPreviewFile(
   fileName: string,
+  safeText = false,
 ): PreviewFileClassification | undefined {
   const extension = normalizedFileExtension(fileName);
   const normalizedName = fileName.toLocaleLowerCase();
@@ -125,7 +126,7 @@ export function classifyPreviewFile(
   if (pdfExtensions.has(extension)) return { kind: "pdf", extension };
   if (imageExtensions.has(extension)) return { kind: "image", extension };
   if (htmlExtensions.has(extension)) return { kind: "html", extension };
-  if (codeExtensions.has(extension) || extensionlessCodeFiles.has(normalizedName)) {
+  if (codeExtensions.has(extension) || extensionlessCodeFiles.has(normalizedName) || safeText) {
     return {
       kind: "code",
       extension,

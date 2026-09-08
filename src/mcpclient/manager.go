@@ -88,8 +88,10 @@ type Manager struct {
 	// subscribers is the set of active ServerEvent subscribers. Each
 	// subscriber has a buffered channel that receives ServerEvent values.
 	// The channel is closed when the subscriber's context is cancelled.
-	subscribers   map[chan ServerEvent]context.Context
-	subscribersMu sync.Mutex
+	subscribers       map[chan ServerEvent]context.Context
+	subscribersMu     sync.Mutex
+	subscribersClosed bool
+	subscribersDone   chan struct{}
 
 	// nextSeq is a monotonic counter used to preserve the order in which servers
 	// were added to the manager. It is incremented atomically when a server is
@@ -1178,23 +1180,35 @@ func (m *Manager) ClearCredentialsFor(scoped ScopedMcpServerConfig) error {
 // Shutdown closes every connection. Used by tests and on graceful host
 // shutdown. It also closes all subscriber channels.
 func (m *Manager) Shutdown(ctx context.Context) {
+	m.subscribersMu.Lock()
+	if m.subscribersClosed {
+		m.subscribersMu.Unlock()
+		return
+	}
+	m.subscribersClosed = true
+	if m.subscribersDone != nil {
+		close(m.subscribersDone)
+	}
+	for ch := range m.subscribers {
+		delete(m.subscribers, ch)
+		close(ch)
+	}
+	m.subscribersMu.Unlock()
 	m.mu.Lock()
+	var sessions []Session
 	for _, server := range m.servers {
 		if server.cancelCtx != nil {
 			server.cancelCtx()
 		}
 		if server.session != nil {
-			_ = server.session.Close()
+			sessions = append(sessions, server.session)
+			server.session = nil
 		}
 	}
 	m.mu.Unlock()
-
-	m.subscribersMu.Lock()
-	for ch := range m.subscribers {
-		close(ch)
+	for _, session := range sessions {
+		_ = session.Close()
 	}
-	m.subscribers = nil
-	m.subscribersMu.Unlock()
 }
 
 // Subscribe returns a buffered channel that receives ServerEvent values for
@@ -1204,6 +1218,15 @@ func (m *Manager) Shutdown(ctx context.Context) {
 func (m *Manager) Subscribe(ctx context.Context) <-chan ServerEvent {
 	ch := make(chan ServerEvent, 64)
 	m.subscribersMu.Lock()
+	if m.subscribersClosed {
+		close(ch)
+		m.subscribersMu.Unlock()
+		return ch
+	}
+	if m.subscribersDone == nil {
+		m.subscribersDone = make(chan struct{})
+	}
+	done := m.subscribersDone
 	if m.subscribers == nil {
 		m.subscribers = make(map[chan ServerEvent]context.Context)
 	}
@@ -1212,11 +1235,16 @@ func (m *Manager) Subscribe(ctx context.Context) <-chan ServerEvent {
 
 	// Start a goroutine that closes the channel when ctx is done.
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-done:
+		}
 		m.subscribersMu.Lock()
-		delete(m.subscribers, ch)
+		if _, exists := m.subscribers[ch]; exists {
+			delete(m.subscribers, ch)
+			close(ch)
+		}
 		m.subscribersMu.Unlock()
-		close(ch)
 	}()
 
 	return ch

@@ -3224,6 +3224,11 @@ var _ agentcore.UserQuestionAwaiter = sessionEventSink{}
 func TestRunServiceCreatesComputerRuntimeWhenEnabledAndVisionSupported(t *testing.T) {
 	t.Setenv(awakenHomeEnv, t.TempDir())
 	var createdAgent *agentcore.Agent
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
 	service := NewRunServiceWithModelProfiles(
 		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
 			createdAgent = agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
@@ -3231,6 +3236,8 @@ func TestRunServiceCreatesComputerRuntimeWhenEnabledAndVisionSupported(t *testin
 		},
 		func(agent *agentcore.Agent) Executor {
 			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				close(entered)
+				<-release
 				return "done", nil
 			})
 		},
@@ -3266,6 +3273,12 @@ func TestRunServiceCreatesComputerRuntimeWhenEnabledAndVisionSupported(t *testin
 	if cr == nil {
 		t.Fatalf("expected non-nil computer runtime")
 	}
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("executor did not start")
+	}
+
 	if createdAgent.GetConfig().ComputerRuntime != cr {
 		t.Fatalf("agent config should reference the same computer runtime")
 	}
@@ -3282,6 +3295,7 @@ func TestRunServiceCreatesComputerRuntimeWhenEnabledAndVisionSupported(t *testin
 		}
 	}
 
+	unblock()
 	waitForRunTerminal(t, service, run.RunID)
 
 	if _, err := service.ComputerRuntime(run.RunID); err == nil {
@@ -3294,6 +3308,11 @@ func TestRunServiceCreatesComputerRuntimeWhenEnabledAndVisionSupported(t *testin
 func TestRunServiceDoesNotCreateComputerRuntimeWithoutVision(t *testing.T) {
 	t.Setenv(awakenHomeEnv, t.TempDir())
 	var createdAgent *agentcore.Agent
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
 	service := NewRunServiceWithModelProfiles(
 		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
 			createdAgent = agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
@@ -3301,6 +3320,8 @@ func TestRunServiceDoesNotCreateComputerRuntimeWithoutVision(t *testing.T) {
 		},
 		func(agent *agentcore.Agent) Executor {
 			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				close(entered)
+				<-release
 				return "done", nil
 			})
 		},
@@ -3328,16 +3349,28 @@ func TestRunServiceDoesNotCreateComputerRuntimeWithoutVision(t *testing.T) {
 	if _, err := service.ComputerRuntime(run.RunID); err == nil {
 		t.Fatalf("expected no computer runtime when vision is not supported")
 	}
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("executor did not start")
+	}
+
 	if createdAgent.GetConfig().ExecutionEnvironmentSnapshot.ComputerEnabled {
 		t.Fatalf("environment snapshot should have ComputerEnabled=false")
 	}
 
+	unblock()
 	waitForRunTerminal(t, service, run.RunID)
 }
 
 func TestRunServiceDoesNotCreateComputerRuntimeWhenDisabled(t *testing.T) {
 	t.Setenv(awakenHomeEnv, t.TempDir())
 	var createdAgent *agentcore.Agent
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
 	service := NewRunServiceWithModelProfiles(
 		func(workspace WorkspaceConfig, threadID string, profile *ModelProfileConfig) *agentcore.Agent {
 			createdAgent = agentcore.NewAgentWithThreadID(agentcore.AgentConfig{}, threadID)
@@ -3345,6 +3378,8 @@ func TestRunServiceDoesNotCreateComputerRuntimeWhenDisabled(t *testing.T) {
 		},
 		func(agent *agentcore.Agent) Executor {
 			return ExecutorFunc(func(ctx context.Context, input string, sink agentcore.EventSink) (string, error) {
+				close(entered)
+				<-release
 				return "done", nil
 			})
 		},
@@ -3371,10 +3406,17 @@ func TestRunServiceDoesNotCreateComputerRuntimeWhenDisabled(t *testing.T) {
 	if _, err := service.ComputerRuntime(run.RunID); err == nil {
 		t.Fatalf("expected no computer runtime when computer use is disabled")
 	}
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("executor did not start")
+	}
+
 	if createdAgent.GetConfig().ExecutionEnvironmentSnapshot.ComputerEnabled {
 		t.Fatalf("environment snapshot should have ComputerEnabled=false")
 	}
 
+	unblock()
 	waitForRunTerminal(t, service, run.RunID)
 }
 

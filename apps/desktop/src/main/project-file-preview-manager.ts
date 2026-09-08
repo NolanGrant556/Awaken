@@ -42,7 +42,6 @@ import {
   MAX_TEXT_PREVIEW_BYTES,
   classifyPreviewFile,
   decodeTextPreviewBuffer,
-  languageNameForFile,
   mimeTypeForFile,
   parseSingleByteRange,
   previewByteLimit,
@@ -457,11 +456,7 @@ export class ProjectFilePreviewManager {
           "Awaken 暂不支持预览这种文件格式。",
         );
       }
-      classification = {
-        kind: "code",
-        extension: path.extname(source.displayName).slice(1).toLocaleLowerCase(),
-        language: languageNameForFile(source.displayName),
-      };
+      classification = classifyPreviewFile(source.displayName, true)!;
     }
     if (sourceRef.kind === "artifact" && classification.kind === "html") {
       return previewError("UNSUPPORTED_FILE_TYPE", "交付物暂不支持内嵌预览 HTML。");
@@ -739,8 +734,13 @@ export class ProjectFilePreviewManager {
     try {
       const resolved = await resolveProjectFile(await this.options.getProjects(), request);
       if (!resolved.ok) return resolved;
-      const classification = classifyPreviewFile(resolved.file.displayName);
-      if (classification?.kind !== "markdown" && classification?.kind !== "code") {
+      const current = await readFilePrefix(resolved.file.realPath, MAX_TEXT_PREVIEW_BYTES + 1);
+      if (current.length > MAX_TEXT_PREVIEW_BYTES) {
+        return saveError("FILE_TOO_LARGE", "文件大小超过当前文本预览上限。");
+      }
+      const safeText = decodeTextPreviewBuffer(current) !== undefined;
+      const classification = classifyPreviewFile(resolved.file.displayName, safeText);
+      if (!safeText || (classification?.kind !== "markdown" && classification?.kind !== "code")) {
         return saveError("UNSUPPORTED_FILE_TYPE", "当前只支持保存 Markdown、代码和纯文本文件。");
       }
 
@@ -756,7 +756,6 @@ export class ProjectFilePreviewManager {
         );
       }
 
-      const current = await fs.readFile(resolved.file.realPath);
 		const isProjectAgents = resolved.file.relativePath === ".awaken/AGENTS.md";
 		if (isProjectAgents && !request.expectedDigest) {
 			return saveError("INVALID_REQUEST", "保存项目 AGENTS.md 需要当前文件摘要。");

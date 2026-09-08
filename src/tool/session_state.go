@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"awaken/src/filestore"
 )
 
 // FileReadState is a host-computed snapshot proving what a thread observed.
@@ -45,8 +47,6 @@ type ToolSessionState struct {
 	readProjections map[string]ReadProjectionState
 	mediaGroups     map[string]MediaGroupState
 	cwd             string
-	pathMu          sync.Mutex
-	pathLock        map[string]*sync.Mutex
 }
 
 func NewToolSessionState(initialCWD string) *ToolSessionState {
@@ -54,7 +54,6 @@ func NewToolSessionState(initialCWD string) *ToolSessionState {
 		files:           make(map[string]FileReadState),
 		readProjections: make(map[string]ReadProjectionState),
 		mediaGroups:     make(map[string]MediaGroupState),
-		pathLock:        make(map[string]*sync.Mutex),
 	}
 	if initialCWD != "" {
 		if absolute, err := filepath.Abs(initialCWD); err == nil {
@@ -201,23 +200,15 @@ func (s *ToolSessionState) SetCWD(path string) error {
 // WithPathLock serializes compare-and-write for one canonical path without
 // blocking edits to unrelated files.
 func (s *ToolSessionState) WithPathLock(path string, fn func(string) error) error {
+	return s.WithPathLockContext(context.Background(), path, fn)
+}
+
+func (s *ToolSessionState) WithPathLockContext(ctx context.Context, path string, fn func(string) error) error {
 	canonical, err := canonicalSessionPath(path)
 	if err != nil {
 		return err
 	}
-	if s == nil {
-		return fn(canonical)
-	}
-	s.pathMu.Lock()
-	lock := s.pathLock[canonical]
-	if lock == nil {
-		lock = &sync.Mutex{}
-		s.pathLock[canonical] = lock
-	}
-	s.pathMu.Unlock()
-	lock.Lock()
-	defer lock.Unlock()
-	return fn(canonical)
+	return filestore.WithPathLock(ctx, canonical, func() error { return fn(canonical) })
 }
 
 type toolSessionStateContextKey struct{}

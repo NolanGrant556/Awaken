@@ -1,0 +1,6 @@
+{
+  "plugin": "full-fix-acceptance",
+  "record_absent": true,
+  "package_absent": true,
+  "data_absent": true
+}

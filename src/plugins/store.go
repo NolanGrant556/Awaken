@@ -108,7 +108,9 @@ func NewStoreAtWithTrashAndSecrets(home string, adapter trash.TrashAdapter, secr
 	if _, err := store.readStateUnlocked(); err != nil && !errors.Is(err, os.ErrNotExist) {
 		store.corruptErr = err
 	}
-	store.cleanupOrphanStaging()
+	// Recovery failures preserve their backups and are surfaced again on the
+	// next explicit mutation/recovery attempt. Catalog reads remain available.
+	_ = store.RecoverPendingOperations()
 	return store
 }
 
@@ -182,16 +184,6 @@ func (s *Store) ensureDirs() error {
 	return nil
 }
 
-func (s *Store) cleanupOrphanStaging() {
-	entries, err := os.ReadDir(s.stagingRoot)
-	if err != nil {
-		return
-	}
-	for _, entry := range entries {
-		_ = os.RemoveAll(filepath.Join(s.stagingRoot, entry.Name()))
-	}
-}
-
 func (s *Store) withLock(fn func() error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -213,6 +205,9 @@ func (s *Store) withMutationLock(fn func() error) error {
 		s.leaseMu.Unlock()
 		if active > 0 {
 			return fmt.Errorf("%w: %d active run lease(s); cancel or finish them before changing plugins", ErrRuntimeLeaseActive, active)
+		}
+		if err := s.recoverPendingOperationsLocked(); err != nil {
+			return err
 		}
 		return fn()
 	})

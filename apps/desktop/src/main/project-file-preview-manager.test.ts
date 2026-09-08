@@ -540,3 +540,22 @@ describe("ProjectFilePreviewManager", () => {
 		await expect(fs.readFile(path.join(root, ".awaken", "AGENTS.md"), "utf8")).resolves.toBe("# Local draft\n");
 	});
 });
+
+it("accepts saving safe unknown-extension text after successful preview", async () => {
+  const root = await temporaryRoot();
+  const file = path.join(root, "notes.audittext");
+  await fs.writeFile(file, "old text");
+  const { manager } = createManager(root);
+  try {
+    const request = { projectId: "project-1", folderPath: root, relativePath: "notes.audittext" };
+    const opened = await manager.start({ ...request, requestId: "unknown-text" });
+    expect(opened).toMatchObject({ ok: true, preview: { kind: "code", transport: "text" } });
+    expect(await manager.saveMarkdown({ ...request, content: "new text" })).toMatchObject({ ok: true });
+    expect(await fs.readFile(file, "utf8")).toBe("new text");
+    await fs.writeFile(file, Buffer.from([0, 1, 2, 3]));
+    expect(await manager.saveMarkdown({ ...request, content: "must not overwrite binary" })).toMatchObject({ ok: false });
+    expect(await fs.readFile(file)).toEqual(Buffer.from([0, 1, 2, 3]));
+  } finally {
+    manager.dispose();
+  }
+});

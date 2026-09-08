@@ -1,0 +1,3 @@
+{"method":"tools/call","params":{"name":"fix_ping","arguments":{}}}
+{"method":"resources/read","params":{"uri":"fix://templates/resource-proof"}}
+{"method":"prompts/get","params":{"arguments":{"name":"0909"},"name":"fix-prompt"}}

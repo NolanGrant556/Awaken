@@ -45,21 +45,70 @@ func NewBridge(logger Logger, mcpManager McpBridgeManager) *Bridge {
 	}
 }
 
-// FetchPromptBody implements McpBodyFetcher. It fetches the prompt template
-// body from the MCP server at execution time.
-func (b *Bridge) FetchPromptBody(ctx context.Context, serverName, promptName string) (string, error) {
-	session, err := b.mcpManager.Session(serverName)
+// FetchBody resolves the bound prompt or resource only when it is invoked.
+// Descriptions are catalog metadata, never executable skill instructions.
+func (b *Bridge) FetchBody(ctx context.Context, binding McpBinding, args map[string]string) (string, error) {
+	session, err := b.mcpManager.Session(binding.ServerName)
 	if err != nil {
-		return "", fmt.Errorf("mcp_fetch_failed: server=%s prompt=%s: %w", serverName, promptName, err)
+		return "", fmt.Errorf("mcp_fetch_failed: server=%s: %w", binding.ServerName, err)
 	}
-	result, err := session.GetPrompt(ctx, &mcp.GetPromptParams{
-		Name:      promptName,
-		Arguments: nil,
-	})
-	if err != nil {
-		return "", fmt.Errorf("mcp_fetch_failed: server=%s prompt=%s: %w", serverName, promptName, err)
+	var parts []string
+	switch binding.Kind {
+	case "prompt", "":
+		result, err := session.GetPrompt(ctx, &mcp.GetPromptParams{Name: binding.PromptName, Arguments: args})
+		if err != nil {
+			return "", fmt.Errorf("mcp_fetch_failed: prompt=%s: %w", binding.PromptName, err)
+		}
+		if result == nil {
+			return "", fmt.Errorf("mcp_fetch_failed: empty prompt response")
+		}
+		for _, message := range result.Messages {
+			if message == nil {
+				return "", fmt.Errorf("mcp_fetch_failed: nil prompt message")
+			}
+			content, ok := message.Content.(*mcp.TextContent)
+			if !ok || content == nil {
+				return "", fmt.Errorf("mcp_fetch_failed: skill bridge supports text prompt messages only")
+			}
+			// Preserve role boundaries for multi-message prompts. A single user
+			// message is already an instruction body and needs no extra wrapper.
+			text := content.Text
+			if len(result.Messages) > 1 || message.Role != "user" {
+				text = "[" + string(message.Role) + "]\n" + text
+			}
+			parts = append(parts, text)
+		}
+	case "resource":
+		reader, ok := session.(interface {
+			ReadResource(context.Context, *mcp.ReadResourceParams) (*mcp.ReadResourceResult, error)
+		})
+		if !ok || strings.TrimSpace(binding.ResourceURI) == "" {
+			return "", fmt.Errorf("mcp_fetch_failed: resource reader or URI unavailable")
+		}
+		result, err := reader.ReadResource(ctx, &mcp.ReadResourceParams{URI: binding.ResourceURI})
+		if err != nil {
+			return "", fmt.Errorf("mcp_fetch_failed: resource=%s: %w", binding.ResourceURI, err)
+		}
+		if result == nil {
+			return "", fmt.Errorf("mcp_fetch_failed: empty resource response")
+		}
+		for _, content := range result.Contents {
+			if content == nil || content.Blob != nil {
+				return "", fmt.Errorf("mcp_fetch_failed: skill bridge supports text resources only")
+			}
+			parts = append(parts, content.Text)
+		}
+	default:
+		return "", fmt.Errorf("mcp_fetch_failed: unknown binding kind %q", binding.Kind)
 	}
-	return result.Description, nil
+	body := strings.Join(parts, "\n\n")
+	if strings.TrimSpace(body) == "" {
+		return "", fmt.Errorf("mcp_fetch_failed: empty skill body")
+	}
+	if len(body) > 1024*1024 {
+		return "", fmt.Errorf("mcp_fetch_failed: skill body exceeds 1 MiB")
+	}
+	return body, nil
 }
 
 // McpBridgeManager is the subset of mcpclient.Manager that the bridge needs.
@@ -73,6 +122,23 @@ type McpBridgeManager interface {
 // It blocks until ctx is cancelled. Call it in a goroutine.
 func (b *Bridge) Start(ctx context.Context, mcpManager McpBridgeManager, registry *SkillRegistry) {
 	ch := mcpManager.Subscribe(ctx)
+	// Subscribe before taking the snapshot so connections established during
+	// startup are covered by either the snapshot or the event stream.
+	for _, snapshot := range mcpManager.Snapshot() {
+		if snapshot.State == mcpclient.StateConnected {
+			b.debounceSync(ctx, mcpManager, registry, snapshot.Name)
+		}
+	}
+	defer func() {
+		b.debounceMu.Lock()
+		defer b.debounceMu.Unlock()
+		for _, timer := range b.debounce {
+			timer.Stop()
+		}
+		for _, cancel := range b.debounceCancel {
+			cancel()
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -94,6 +160,15 @@ func (b *Bridge) handleEvent(ctx context.Context, mcpManager McpBridgeManager, r
 		b.debounceSync(ctx, mcpManager, registry, evt.ServerName)
 	case mcpclient.EventDisconnected,
 		mcpclient.EventDisabled:
+		b.debounceMu.Lock()
+		if timer := b.debounce[evt.ServerName]; timer != nil {
+			timer.Stop()
+		}
+		if cancel := b.debounceCancel[evt.ServerName]; cancel != nil {
+			cancel()
+		}
+		// Serialize removal against publication of a completed fetch.
+		defer b.debounceMu.Unlock()
 		// Remove all bridged skills for this server immediately.
 		prefix := "mcp__" + evt.ServerName + "__"
 		registry.UnregisterSkillsByPrefix(prefix)
@@ -181,6 +256,11 @@ func (b *Bridge) syncForServer(ctx context.Context, mcpManager McpBridgeManager,
 		}
 	}
 
+	b.debounceMu.Lock()
+	defer b.debounceMu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
 	// Remove all existing skills for this server, then re-register the new set.
 	prefix := "mcp__" + serverName + "__"
 	registry.UnregisterSkillsByPrefix(prefix)
@@ -282,9 +362,9 @@ func (b *Bridge) resourceToSkill(serverName string, res *mcp.Resource, sourceCon
 		State:              StateLoaded,
 		BodyFetcher:        b,
 		McpBinding: &McpBinding{
-			ServerName: serverName,
-			PromptName: slug,
-			Kind:       "resource",
+			ServerName:  serverName,
+			ResourceURI: res.URI,
+			Kind:        "resource",
 		},
 	}
 }

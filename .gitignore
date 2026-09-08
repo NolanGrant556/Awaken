@@ -59,7 +59,13 @@ apps/desktop/resources/bin/
 # Local agent/workspace files
 sourcecode/
 .tmp-pr-export/
-.codex/
+.codex/*
+!.codex/skills/
+.codex/skills/*
+!.codex/skills/llm-provider-management/
+.codex/skills/llm-provider-management/.obsidian/
+.codex/skills/llm-provider-management/**/__pycache__/
+.codex/skills/llm-provider-management/**/*.pyc
 .claude/
 CLAUDE.md
 openspec/

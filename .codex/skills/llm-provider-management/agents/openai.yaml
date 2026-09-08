@@ -1,0 +1,4 @@
+interface:
+  display_name: "Awaken LLM 供应商管理"
+  short_description: "维护 Awaken 供应商协议、模型能力、缓存、推理与套餐规则"
+  default_prompt: "使用 $llm-provider-management 核对并更新 Awaken 的 LLM 供应商合同与能力映射。"

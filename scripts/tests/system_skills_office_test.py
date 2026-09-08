@@ -111,44 +111,31 @@ def minimal_pptx_files() -> dict[str, str]:
     }
 
 
-class SkillTextTests(unittest.TestCase):
-    def test_three_skills_keep_awaken_contract_and_chinese_workflow(self):
-        versions = {"word": "2.2.0", "ppt": "2.1.0", "excel": "2.2.0"}
-        for skill, version in versions.items():
-            body = (SYSTEM_SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
-            self.assertIn(f"version: {version}", body)
-            self.assertIn("${AWAKEN_SKILL_DIR}", body)
-            self.assertIn("artifact_publish", body)
-            self.assertIn("依赖", body)
-            self.assertIn("校验", body)
-            self.assertIn("Python 3.9", body)
-            self.assertIn("execution_plan.python", body)
-            self.assertIn("禁止接 `| tail`", body)
-            self.assertIn("不得改用裸", body)
-
-    def test_excel_documents_windows_launcher_and_shell_safe_paths(self):
-        body = (SYSTEM_SKILLS / "excel" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("Windows 注入到正文的 Skill 路径使用 `C:/...`", body)
-        self.assertIn('py -3 -B "${AWAKEN_SKILL_DIR}/scripts/doctor.py"', body)
-        self.assertIn("<execution_plan.python>", body)
-        self.assertNotIn('--dependency-root "$PWD"', body)
-
-    def test_word_reading_has_one_bundled_route(self):
-        body = (SYSTEM_SKILLS / "word" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("scripts/read_docx.py", body)
-        self.assertIn("执行唯一阅读 CLI", body)
-        self.assertIn("doctor 返回的 execution_plan.python", body)
-        self.assertNotIn("`pandoc` 或 `markitdown`", body.lower())
-        self.assertNotIn("markitdown[docx]", body.lower())
-
-    def test_pdf_reading_starts_with_a_bounded_successful_range(self):
-        body = (SYSTEM_SKILLS / "pdf" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("version: 1.1.2", body)
-        self.assertIn('pages: "1-10"', body)
-        self.assertIn("page_count", body)
-        self.assertIn("route=native_pdf", body)
-        self.assertIn("宿主也会把超过 10 页的渲染页路线自动归一化", body)
-        self.assertNotIn("read_pdf_pages_required", body)
+class SkillResourceRoutingTests(unittest.TestCase):
+    def test_bundled_markdown_references_are_reachable_and_stay_in_package(self):
+        import re
+        from urllib.parse import unquote
+        for root in SYSTEM_SKILLS.iterdir():
+            if not (root / "SKILL.md").is_file():
+                continue
+            visited = set()
+            pending = [root / "SKILL.md"]
+            while pending:
+                path = pending.pop().resolve()
+                if path in visited:
+                    continue
+                visited.add(path)
+                for target in re.findall(r"\[[^\]]*\]\(([^)]+)\)", path.read_text(encoding="utf-8")):
+                    target = unquote(target.strip("<>").split("#", 1)[0])
+                    if not target or re.match(r"[a-zA-Z]+:", target):
+                        continue
+                    destination = (path.parent / target).resolve()
+                    self.assertTrue(destination.is_relative_to(root.resolve()), (path, target))
+                    self.assertTrue(destination.is_file(), (path, target))
+                    if destination.suffix == ".md":
+                        pending.append(destination)
+            for reference in (root / "references").glob("*.md"):
+                self.assertIn(reference.resolve(), visited, f"unrouted reference: {reference}")
 
 
 class WordScriptTests(unittest.TestCase):

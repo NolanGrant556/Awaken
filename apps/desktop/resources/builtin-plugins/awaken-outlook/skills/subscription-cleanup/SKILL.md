@@ -1,6 +1,6 @@
 ---
 name: subscription-cleanup
-description: 识别 Outlook 新闻简报和重复订阅邮件，检查标准退订方式，并在用户确认后执行一键退订、mailto 退订、分类、移动或删除。用户要求退订或清理营销邮件时使用。
+description: 识别并处理 Outlook 订阅邮件，或执行用户指定的退订时使用。
 metadata:
   display_name: 订阅邮件清理
 ---

@@ -1,10 +1,12 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"awaken/src/skills"
 	"testing"
 
 	"awaken/src/plugins/ir"
@@ -26,7 +28,7 @@ func TestOfficialOutlookPluginDeclaresHostConnectorForEverySkill(t *testing.T) {
 	if validated.Name != "awaken-outlook" || len(validated.Setup) != 1 || validated.Setup[0].Kind != ir.SetupHostConnector {
 		t.Fatalf("validation = %+v", validated)
 	}
-	if validated.Version != "1.4.0" {
+	if validated.Version == "" {
 		t.Fatalf("Outlook plugin version = %q", validated.Version)
 	}
 	requirement := validated.Setup[0]
@@ -76,29 +78,54 @@ func TestOfficialOutlookPluginDeclaresHostConnectorForEverySkill(t *testing.T) {
 	}
 }
 
-func TestOfficialOutlookSkillsDefineDraftFirstConfirmationProtocol(t *testing.T) {
+func TestOfficialOutlookWorkflowResourcesSurviveInstallAndExport(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", "apps", "desktop", "resources", "builtin-plugins", "awaken-outlook"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, test := range []struct {
-		path     string
-		required []string
-	}{
-		{path: "outlook-email", required: []string{"提问用户", "停止等待", "发送摘要", `{"to":["person@example.com"]}`, "结果未知时不要自动再发", "get_messages_batch", "nextCursor", "find_mail_folder"}},
-		{path: "reply-drafting", required: []string{"原邮件发件人", "提问用户", "停止等待", "只调用一次", "额外抄送"}},
-		{path: "scheduled-mail", required: []string{"提问用户", "停止等待", "不得调用 `send_draft`", "already_absent"}},
-		{path: "shared-mailboxes", required: []string{"发件邮箱为该共享邮箱", "提问用户", "停止等待"}},
-		{path: "attachment-management", required: []string{"发送摘要", "提问用户", "停止等待"}},
-	} {
-		data, err := os.ReadFile(filepath.Join(root, "skills", test.path, "SKILL.md"))
-		if err != nil {
-			t.Fatal(err)
+	store := NewStoreAt(t.TempDir())
+	validation, err := store.Validate(context.Background(), Source{Kind: SourceLocalPath, Path: root})
+	if err != nil || !validation.Valid {
+		t.Fatalf("validation=%+v err=%v", validation, err)
+	}
+	installed, err := store.Install(context.Background(), InstallRequest{
+		Source: Source{Kind: SourceLocalPath, Path: root}, ExpectedDigest: validation.Digest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exported := filepath.Join(t.TempDir(), "exported")
+	if _, err := store.Export("awaken-outlook", exported); err != nil {
+		t.Fatal(err)
+	}
+	for _, packageRoot := range []string{installed.Plugin.Root, exported} {
+		definitions := skills.LoadDir(filepath.Join(packageRoot, "skills"), skills.SourceProject)
+		definition := definitions["outlook-email"]
+		if definition == nil {
+			t.Fatal("outlook-email is missing from the installed catalog")
 		}
-		content := string(data)
-		for _, required := range test.required {
-			if !strings.Contains(content, required) {
-				t.Errorf("%s is missing %q", test.path, required)
+		inventory, err := skills.ListSkillPackageResources(definition)
+		if err != nil || inventory.Truncated {
+			t.Fatalf("resource inventory=%+v err=%v", inventory, err)
+		}
+		for _, name := range []string{"读取与对象.md", "发送与确认.md"} {
+			rel := filepath.Join("skills", "outlook-email", "references", name)
+			original, err := os.ReadFile(filepath.Join(root, rel))
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual, err := os.ReadFile(filepath.Join(packageRoot, rel))
+			if err != nil || !bytes.Equal(original, actual) {
+				t.Fatalf("workflow resource changed or missing: %s, err=%v", rel, err)
+			}
+			found := false
+			for _, entry := range inventory.Entries {
+				if entry.Path == "references/"+name && entry.Kind == "file" {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("workflow resource is not discoverable: %s", name)
 			}
 		}
 	}

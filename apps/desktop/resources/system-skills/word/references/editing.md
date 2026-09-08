@@ -32,3 +32,25 @@
 3. 抽取文本对比；
 4. 渲染并逐页检查；
 5. 发布新文件，不覆盖用户原件。
+
+## 编辑已有文档
+
+高保真路线：
+
+```text
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/ooxml_package.py" unpack input.docx ./docx-unpacked
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/merge_runs.py" ./docx-unpacked
+# 使用 Read/Edit 精确修改 ./docx-unpacked/word/*.xml
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/ooxml_package.py" pack ./docx-unpacked output.docx
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/validate_docx.py" output.docx --original input.docx --json
+```
+
+`merge_runs.py` 只合并格式完全一致、且只包含普通文本的相邻 run；含域、超链接、批注标记、制表符、换行、绘图或修订的 run 不会合并。更完整的判断见 `references/editing.md`。
+
+接受全部修订时输出新文件，不覆盖原件：
+
+```text
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/accept_changes.py" input.docx accepted.docx --json
+```
+
+超时、LibreOffice 未写回、输出仍含修订节点都必须视为失败。

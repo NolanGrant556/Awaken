@@ -31,3 +31,36 @@
 - 对日期边界、闰年、月末和文本日期做样本验证；
 - 对百分比确认底层值为 `0.15` 而不是 `15`；
 - 对外部链接公式保留原始缓存与原件，禁止无备份重算。
+
+## 重算（含公式时必须）
+
+对 Agent 新生成的 `output.xlsx`：
+
+```bash
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/recalc.py" output.xlsx --json > ./recalc-result.json
+```
+
+对用户原文件的编辑结果，显式输出新路径：
+
+```bash
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/recalc.py" edited-before-recalc.xlsx --output final.xlsx --json > ./recalc-result.json
+```
+
+脚本使用独立 LibreOffice profile，在临时副本上重算；只有 LibreOffice 真正写回后才原子替换目标。以下情况必须失败而不是假成功：
+
+- LibreOffice 未找到、非零退出或超时；
+- 文件包含外部工作簿链接；
+- 有公式但文件没有被真正写回；
+- 输出无法再由 openpyxl 读取。
+
+随后用 `Read` 打开完整 `recalc-result.json`。若 JSON `status=errors_found`，根据 `error_summary` 修复后再次重算；若 `status=failed` 或 Bash 非零则路线失败。不能只看进程是否启动、Bash 是否打印了文件路径或管道末端退出码。
+
+## 公式语义抽查
+
+重算成功后：
+
+1. 抽查 2–3 个关键公式的输入、范围、绝对/相对引用和结果；
+2. 检查横向/纵向复制的公式是否连续一致；
+3. 检查除数为零、空值、日期边界和单位换算；
+4. 检查总计是否遗漏最后一行或包含表头；
+5. 再运行 `inspect_workbook.py`，确认缓存和错误状态。

@@ -9,6 +9,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 
 PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
@@ -19,9 +20,39 @@ PLUGIN_FIELDS = {
 }
 PLUGIN_NAME_RE = re.compile(r"^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]{0,62}[a-z0-9])?$")
 SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-RESOURCE_RE = re.compile(r"(?<![A-Za-z0-9_.-])((?:scripts|references|assets)/[A-Za-z0-9_.\-/]+)")
 MAX_FILES = 10_000
 MAX_BYTES = 500 << 20
+
+
+def referenced_resources(body: str) -> list[str]:
+    """Read explicit package paths without truncating Unicode or external paths.
+
+    Kept in both portable Creator packages: neither installed package may import
+    files from the other one's installation directory.
+    """
+    candidates: list[str] = []
+    def collect(match: re.Match[str]) -> str:
+        candidates.append(next(value for value in match.groups() if value is not None))
+        return " "
+
+    # Angle-bracket destinations support spaces; ordinary Markdown links may
+    # carry a title. Code spans and quoted CLI arguments preserve spaces too.
+    remaining = re.sub(r'\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^\s)]+)(?:\s+"[^"\n]*")?)\s*\)', collect, body)
+    remaining = re.sub(r'(?<!`)`([^`\n]+)`(?!`)', collect, remaining)
+    remaining = re.sub(r'"([^"\n]+)"|\'([^\'\n]+)\'', collect, remaining)
+    candidates.extend(re.findall(
+        r'(?<![\w/\\.$~:-])((?:\./)?(?:scripts|references|assets)/[^\s`"\'<>()[\]，。；、]+)', remaining
+    ))
+    paths: set[str] = set()
+    for candidate in candidates:
+        candidate = candidate.strip().removeprefix("${AWAKEN_SKILL_DIR}/").removeprefix("./")
+        if not candidate.startswith(("scripts/", "references/", "assets/")):
+            continue
+        if any(marker in candidate for marker in ("${", "<", ">", "*")):
+            continue
+        candidate = unquote(candidate.split("#", 1)[0]).rstrip(".,;:，。；")
+        paths.add(candidate)
+    return sorted(paths)
 
 
 def scalar_value(lines: list[str], key: str) -> str | None:
@@ -82,8 +113,10 @@ def validate_skill(root: Path, errors: list[str], warnings: list[str]) -> None:
         errors.append(f"{label}: description must be 1-1024 characters")
     if not body:
         warnings.append(f"{label}: SKILL.md body is empty")
-    for rel in sorted({match.rstrip(".,;:)") for match in RESOURCE_RE.findall(body)}):
-        if not (root / rel).exists():
+    for rel in referenced_resources(body):
+        if not (root / rel).resolve().is_relative_to(root):
+            errors.append(f"{label}: referenced resource escapes package: {rel}")
+        elif not (root / rel).exists():
             errors.append(f"{label}: referenced resource does not exist: {rel}")
     for directory in ("scripts", "references", "assets"):
         candidate = root / directory

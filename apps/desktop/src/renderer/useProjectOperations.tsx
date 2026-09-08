@@ -70,7 +70,6 @@ type Options = {
   refreshThreads: () => Promise<void>;
   loadThreadsIntoState: () => Promise<RuntimeThread[]>;
   resetActiveThreadContext: () => void;
-  handleSelectProject: (id: string) => void;
   dispatch: (action: RuntimeAction) => void;
 };
 export function useProjectOperations(options: Options) {
@@ -84,7 +83,6 @@ export function useProjectOperations(options: Options) {
     refreshThreads,
     loadThreadsIntoState,
     resetActiveThreadContext,
-    handleSelectProject,
     dispatch,
   } = options;
   const {

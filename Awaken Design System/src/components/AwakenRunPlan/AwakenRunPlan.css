@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 /* AwakenRunPlanTrigger: compact entry inside the ComposerDock stack. The
    caller (App.tsx) owns placement; the trigger only styles its own pill. */

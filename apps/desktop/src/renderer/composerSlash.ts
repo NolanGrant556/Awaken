@@ -258,7 +258,6 @@ export function pluginComposerTokenFromAction(plugin: RuntimePlugin): ComposerTo
 }
 
 export function pluginSkillComposerTokenFromAction(
-  plugin: RuntimePlugin,
   component: RuntimePluginComponent,
 ): ComposerToken {
   const catalogId = component.skill?.catalogId?.trim();

@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 /*
  * 图标的尺寸与描边由图标层决定，这里不再覆写 svg。

@@ -24,9 +24,7 @@ export function GlobalAgentsSettingsPanel({ runtimeClient }: Props) {
     setLoading(true);
     setMessage(undefined);
     try {
-      if (!runtimeClient.getGlobalAgentsDocument) {
-        throw new Error("当前 Desktop bridge 不支持全局指令。");
-      }
+
       const next = await runtimeClient.getGlobalAgentsDocument();
       setDocument(next);
       setDraft(next.content);
@@ -47,9 +45,7 @@ export function GlobalAgentsSettingsPanel({ runtimeClient }: Props) {
     setSaving(true);
     setMessage(undefined);
     try {
-      if (!runtimeClient.saveGlobalAgentsDocument) {
-        throw new Error("当前 Desktop bridge 不支持保存全局指令。");
-      }
+
       const next = await runtimeClient.saveGlobalAgentsDocument({
         expectedRevision: document.revision,
         content: draft,
@@ -77,9 +73,7 @@ export function GlobalAgentsSettingsPanel({ runtimeClient }: Props) {
     setSaving(true);
     setMessage(undefined);
     try {
-      if (!runtimeClient.deleteGlobalAgentsDocument) {
-        throw new Error("当前 Desktop bridge 不支持删除全局指令。");
-      }
+
       const next = await runtimeClient.deleteGlobalAgentsDocument({
         expectedRevision: document.revision,
       });

@@ -1,3 +1,153 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
+
+.thought-trace {
+  display: grid;
+  min-width: 0;
+  color: var(--aw-text-secondary);
+}
+
+.thought-trace-heading {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 2px 5px 2px 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--aw-text-subtle);
+  text-align: left;
+  cursor: pointer;
+  transition: color 140ms ease;
+}
+
+.thought-trace-heading:hover,
+.thought-trace-heading:focus-visible {
+  color: var(--aw-text-primary);
+}
+
+.thought-trace-heading:focus-visible {
+  outline: 2px solid var(--aw-border-control-hover);
+  outline-offset: 3px;
+}
+
+:root[data-aw-focus-modality="keyboard"] .thought-trace-heading:focus-visible {
+  outline: none;
+}
+
+:root[data-aw-focus-modality="keyboard"]
+  .thought-trace-heading:focus-visible
+  :is(.thought-trace-disclosure-label, .aw-thinking-orb-status__label) {
+  text-decoration-line: underline;
+  text-decoration-color: var(--aw-border-control-hover);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.thought-trace-status {
+  transition: opacity 140ms ease;
+}
+
+.thought-trace-disclosure {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 20px;
+  color: inherit;
+  font-size: 12px;
+  line-height: 14px;
+}
+
+.thought-trace-disclosure-icon {
+  display: grid;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  color: inherit;
+}
+
+.thought-trace-disclosure-icon svg {
+  display: block;
+  transition: transform 300ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.thought-trace-open .thought-trace-disclosure-icon svg {
+  transform: rotate(90deg);
+}
+
+.thought-trace-disclosure-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.thought-trace-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 400ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.thought-trace-body[data-expanded="true"] {
+  grid-template-rows: 1fr;
+}
+
+.thought-trace-body-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.thought-trace p {
+  max-width: 76ch;
+  margin: 0;
+  padding: 5px 0;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  animation: thought-trace-content-enter 320ms ease-out both;
+}
+
+.thought-trace[data-animate-entry="false"] .thought-trace-disclosure,
+.thought-trace[data-animate-entry="false"] p {
+  animation: none;
+}
+
+.thought-trace-error p {
+  color: var(--aw-status-danger-text);
+}
+
+@keyframes thought-trace-content-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thought-trace-disclosure {
+    animation: none;
+  }
+
+  .thought-trace-disclosure-icon svg {
+    transition: none;
+  }
+
+  .thought-trace-body {
+    transition: none;
+  }
+
+  .thought-trace p {
+    animation: none;
+  }
+}
 
 /* AwakenThoughtTrace currently uses shared Awaken Design System tokens and component classes. */

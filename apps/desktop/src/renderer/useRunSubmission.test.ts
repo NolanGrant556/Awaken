@@ -30,21 +30,6 @@ function setup(startRun: Options["runtimeClient"]["startRun"]) {
     onTranscript: vi.fn(),
   });
   session.begin("A");
-  const registry: Options["registry"] = {
-    workspacePath: "",
-    workspaceTargetPathRef: { current: "" },
-    conversationScope: true,
-    selectedProjectId: undefined,
-    defaultWorkspacePath: "",
-    defaultProjectRemoved: false,
-    activeThreadWorkspacePath: undefined,
-    projectsFromWorkspace: [],
-    defaultProjectDisplayName: undefined,
-    effectiveDefaultWorkspacePath: undefined,
-    isWorkspaceValid: true,
-    backendProjectIdFor: () => undefined,
-    setRemovedProjectIds: vi.fn(),
-  };
   const draft = {
     draft: {
       value: "isolated test",
@@ -65,7 +50,8 @@ function setup(startRun: Options["runtimeClient"]["startRun"]) {
     desktopReady: true,
     desktopNeedsRestart: false,
     isBusy: false,
-    registry,
+    getSubmissionScope: () => ({ valid: true, workspace: { workspaceRoot: "" } }),
+    onRunStarted: vi.fn(),
     draft,
     composerDraftKey: "thread:A",
     fileWorkspaceSurfaceActive: false,

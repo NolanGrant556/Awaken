@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 .aw-plugin-install-dialog {
   width: min(560px, calc(100vw - 48px));

@@ -1,5 +1,0 @@
-*** Begin Patch
-*** Update File: notes/sample.txt
-@@
-*** End of File
-*** End Patch

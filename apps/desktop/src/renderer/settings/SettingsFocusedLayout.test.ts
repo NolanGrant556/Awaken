@@ -1,51 +1,31 @@
+import { readStyleSource } from "../style-test-source";
 /// <reference types="node" />
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const settingsStyles = readFileSync(
-  new URL(
+const settingsStyles = readStyleSource(new URL(
     "../../../../../Awaken Design System/src/components/AwakenSettings/AwakenSettings.css",
     import.meta.url,
-  ),
-  "utf8",
-);
-const petsStyles = readFileSync(
-  new URL(
+  ));
+const petsStyles = readStyleSource(new URL(
     "../../../../../Awaken Design System/src/components/AwakenPetsSettings/AwakenPetsSettings.css",
     import.meta.url,
-  ),
-  "utf8",
-);
-const computerStyles = readFileSync(
-  new URL(
+  ));
+const computerStyles = readStyleSource(new URL(
     "../../../../../Awaken Design System/src/components/AwakenComputerSettings/AwakenComputerSettings.css",
     import.meta.url,
-  ),
-  "utf8",
-);
-const searchStyles = readFileSync(
-  new URL(
+  ));
+const searchStyles = readStyleSource(new URL(
     "../../../../../Awaken Design System/src/components/AwakenSearchSettings/AwakenSearchSettings.css",
     import.meta.url,
-  ),
-  "utf8",
-);
-const archivedChatsStyles = readFileSync(
-  new URL(
+  ));
+const archivedChatsStyles = readStyleSource(new URL(
     "../../../../../Awaken Design System/src/components/AwakenArchivedChatsSettings/AwakenArchivedChatsSettings.css",
     import.meta.url,
-  ),
-  "utf8",
-);
-const desktopStyles = readFileSync(
-  new URL("../styles.css", import.meta.url),
-  "utf8",
-);
-const globalAgentsStyles = readFileSync(
-  new URL("./GlobalAgentsSettingsPanel.css", import.meta.url),
-  "utf8",
-);
+  ));
+const desktopStyles = readStyleSource(new URL("../styles.css", import.meta.url));
+const globalAgentsStyles = readStyleSource(new URL("./GlobalAgentsSettingsPanel.css", import.meta.url));
 const globalAgentsComponent = readFileSync(
   new URL("./GlobalAgentsSettingsPanel.tsx", import.meta.url),
   "utf8",

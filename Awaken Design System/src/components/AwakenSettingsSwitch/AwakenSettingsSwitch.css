@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 .aw-settings-switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; color: var(--aw-text-primary); cursor: pointer; }
 .aw-settings-switch--card { padding: 14px; border: 1px solid var(--aw-border-main); border-radius: 12px; background: var(--aw-surface-raised); }

@@ -1,16 +1,16 @@
+import { readStyleSource } from "../style-test-source";
 // @vitest-environment jsdom
 /// <reference types="node" />
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { act, useState } from "react";
-import { createRoot } from "react-dom/client";
-import { describe, expect, it, vi } from "vitest";
 import {
   AwakenPluginConsole,
   type AwakenPluginConsoleComponent,
   type AwakenPluginConsoleDetail,
   type AwakenPluginSetupItem,
 } from "@awaken/design-system";
+import { resolve } from "node:path";
+import { act, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { describe, expect, it, vi } from "vitest";
 import type {
   RuntimePlugin,
   RuntimePluginComponentDetail,
@@ -206,13 +206,10 @@ describe("AwakenPluginConsole compact component flow", () => {
   });
 
   it("keeps Plugin titles fully visible instead of ellipsizing them", () => {
-    const styles = readFileSync(
-      resolve(
+    const styles = readStyleSource(resolve(
         process.cwd(),
         "../../Awaken Design System/src/components/AwakenPluginConsole/AwakenPluginConsole.css",
-      ),
-      "utf8",
-    );
+      ));
     const titleRule = styles.match(/\.aw-plugin-console__title h1 \{([^}]*)\}/)?.[1] ?? "";
     expect(titleRule).toContain("overflow-wrap: anywhere");
     expect(titleRule).toContain("line-height: 1.15");
@@ -323,13 +320,10 @@ describe("AwakenPluginConsole compact component flow", () => {
   });
 
   it("keeps component keyboard focus on the rounded row instead of drawing an inner blue box", () => {
-    const styles = readFileSync(
-      resolve(
+    const styles = readStyleSource(resolve(
         process.cwd(),
         "../../Awaken Design System/src/components/AwakenPluginConsole/AwakenPluginConsole.css",
-      ),
-      "utf8",
-    );
+      ));
     const keyboardSelector =
       ':root[data-aw-focus-modality="keyboard"] .aw-plugin-component-row:has(.aw-plugin-component-row__main:focus-visible) {';
     const keyboardRuleStart = styles.indexOf(keyboardSelector);
@@ -484,6 +478,8 @@ describe("AwakenPluginConsole compact component flow", () => {
       switchable: true,
     };
     const runtimeClient = {
+      getPluginSetup: vi.fn(async () => ({ items: [], summary: { total: 0, ready: 0, needsConfiguration: 0, needsAuth: 0, needsAdminApproval: 0, inProgress: 0, failed: 0, unsupported: 0 } })),
+
       listPluginComponents: vi.fn(async () => [state]),
       getPluginComponent: vi.fn(async () => ({
         state,
@@ -565,6 +561,8 @@ describe("AwakenPluginConsole compact component flow", () => {
       resolveEnable = resolvePromise;
     });
     const runtimeClient = {
+      getPluginSetup: vi.fn(async () => ({ items: [], summary: { total: 0, ready: 0, needsConfiguration: 0, needsAuth: 0, needsAdminApproval: 0, inProgress: 0, failed: 0, unsupported: 0 } })),
+
       listPluginComponents: vi.fn(async () => [state]),
       getPluginConfiguration: vi.fn(async () => ({ fields: [], revision: 1 })),
       enablePlugin: vi.fn(() => pendingEnable),
@@ -642,6 +640,8 @@ describe("AwakenPluginConsole compact component flow", () => {
     };
     const never = new Promise<never>(() => undefined);
     const runtimeClient = {
+      getPluginSetup: vi.fn(async () => ({ items: [], summary: { total: 0, ready: 0, needsConfiguration: 0, needsAuth: 0, needsAdminApproval: 0, inProgress: 0, failed: 0, unsupported: 0 } })),
+
       listPluginComponents: vi.fn()
         .mockResolvedValueOnce([state])
         .mockReturnValueOnce(never),
@@ -1300,6 +1300,8 @@ describe("AwakenPluginConsole compact component flow", () => {
       },
     );
     const runtimeClient = {
+      getPluginSetup: vi.fn(async () => ({ items: [], summary: { total: 0, ready: 0, needsConfiguration: 0, needsAuth: 0, needsAdminApproval: 0, inProgress: 0, failed: 0, unsupported: 0 } })),
+
       listPluginComponents: vi.fn(async () => [state]),
       getPluginComponent: vi.fn(async () => detail()),
       updatePluginComponentSource,

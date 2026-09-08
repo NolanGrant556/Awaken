@@ -4,14 +4,10 @@ import type {
   RuntimeRunStatus,
   StartRunRequest,
 } from "../shared/runtime";
+import { runtimeRequestIssue } from "../shared/runtime-request";
 import { type ExpandedFileComposerTrackedRun } from "./ExpandedFileComposer";
 import { toRunInputAttachment } from "./composerAttachments";
-import {
-  resolveRunProjectForRun,
-  resolveRunRootsForRun,
-  resolveWorkspaceRootForRun,
-} from "./projectRunScope";
-import { DEFAULT_WORKSPACE_PROJECT_ID } from "./projectWorkspace";
+import type { RunSubmissionScope } from "./projectRunScope";
 import {
   composerThreadLabel,
   effectivePromptForComposerDraft,
@@ -20,10 +16,8 @@ import {
 import type { RuntimeClient } from "./runtime/client";
 import type { RuntimeAction, RuntimeViewState } from "./runtime/reducer";
 import type { ThreadSession } from "./runtime/thread-session";
-import { useProjectRegistry } from "./useProjectRegistry";
 import {
-  useThreadComposerDraft,
-  type ThreadComposerDraft,
+  type ThreadComposerDraft
 } from "./useThreadComposerDraft";
 type Options = {
   runtimeClient: RuntimeClient;
@@ -33,23 +27,13 @@ type Options = {
   desktopReady: boolean;
   desktopNeedsRestart: boolean;
   isBusy: boolean;
-  registry: Pick<
-    ReturnType<typeof useProjectRegistry>,
-    | "workspacePath"
-    | "workspaceTargetPathRef"
-    | "conversationScope"
-    | "selectedProjectId"
-    | "defaultWorkspacePath"
-    | "defaultProjectRemoved"
-    | "activeThreadWorkspacePath"
-    | "projectsFromWorkspace"
-    | "defaultProjectDisplayName"
-    | "effectiveDefaultWorkspacePath"
-    | "isWorkspaceValid"
-    | "backendProjectIdFor"
-    | "setRemovedProjectIds"
-  >;
-  draft: ReturnType<typeof useThreadComposerDraft>;
+  getSubmissionScope: () => RunSubmissionScope;
+  onRunStarted: (projectId?: string) => void;
+  draft: {
+    draft: ThreadComposerDraft;
+    clearDraft: () => void;
+    replaceDraft: (draft: ThreadComposerDraft, ownerKey?: string) => void;
+  };
   composerDraftKey: string;
   selectedModelProfile?: RuntimeModelProfileSummary;
   selectedReasoningEffort?: ReasoningEffortLevel;
@@ -65,6 +49,8 @@ type Options = {
 export function useRunSubmission(options: Options) {
   const {
     runtimeClient,
+    getSubmissionScope,
+    onRunStarted,
     threadSession,
     dispatch,
     runtimeState,
@@ -81,21 +67,6 @@ export function useRunSubmission(options: Options) {
     startThreadTitlePoll,
     setNotice,
   } = options;
-  const {
-    workspacePath,
-    workspaceTargetPathRef,
-    conversationScope,
-    selectedProjectId,
-    defaultWorkspacePath,
-    defaultProjectRemoved,
-    activeThreadWorkspacePath,
-    projectsFromWorkspace,
-    defaultProjectDisplayName,
-    effectiveDefaultWorkspacePath,
-    isWorkspaceValid,
-    backendProjectIdFor,
-    setRemovedProjectIds,
-  } = options.registry;
   const {
     draft,
     clearDraft: clearThreadComposerDraft,
@@ -195,22 +166,14 @@ export function useRunSubmission(options: Options) {
     if (isBusy && !forceNewThread) {
       return;
     }
-    if (!isWorkspaceValid) {
+    const scope = getSubmissionScope();
+    if (!scope.valid) {
       setNotice("Please enter a valid absolute workspace path.");
       return;
     }
 
     const submissionGeneration = threadSession.currentGeneration;
-    const workspaceRoot = resolveWorkspaceRootForRun({
-      workspacePath,
-      workspaceTargetPath: workspaceTargetPathRef.current,
-      conversationScope,
-      selectedProjectId,
-      defaultWorkspacePath,
-      defaultProjectRemoved,
-      activeThreadWorkspacePath,
-      projectsFromWorkspace,
-    });
+    const { workspaceRoot } = scope.workspace;
     // An empty root means the selected project has no folder bound, so there is
     // no directory to validate; Core resolves its session workspace instead.
     if (workspaceRoot) {
@@ -251,20 +214,7 @@ export function useRunSubmission(options: Options) {
     clearThreadComposerDraft();
 
     try {
-      const { projectId: runProjectId, projectName: runProjectName } =
-        resolveRunProjectForRun({
-          workspaceRoot,
-          selectedProjectId,
-          defaultWorkspacePath,
-          defaultProjectName: defaultProjectDisplayName,
-          effectiveDefaultWorkspacePath,
-          projectsFromWorkspace,
-        });
-      const runRoots = resolveRunRootsForRun({
-        workspaceRoot,
-        projectsFromWorkspace,
-        projectId: runProjectId,
-      });
+      const runProjectId = scope.projectId;
       const isNewThread = forceNewThread || !runtimeState.activeThreadId;
       const nextThreadLabel = isNewThread
         ? composerThreadLabel(prompt, draftAttachments, draftComposerTokens)
@@ -286,19 +236,7 @@ export function useRunSubmission(options: Options) {
         modelProfileId: selectedModelProfile?.id,
         reasoningEffort: selectedReasoningEffort,
         workspace: {
-          // projectId is what lets Core place a folder-less run in that
-          // project's own session workspace rather than guess an identity from
-          // the path. With no folder there is no root to declare either.
-          projectId: runProjectId
-            ? backendProjectIdFor(runProjectId)
-            : undefined,
-          // The agent is told which project it is in, so it can answer about the
-          // folder group as a whole instead of only seeing its cwd.
-          projectName: runProjectName,
-          workspaceRoot,
-          readableRoots: runRoots.length > 0 ? runRoots : undefined,
-          writableRoots: runRoots.length > 0 ? runRoots : undefined,
-          outputRoots: runRoots.length > 0 ? runRoots : undefined,
+          ...scope.workspace,
           attachedFiles: attachedFiles.length > 0 ? attachedFiles : undefined,
         },
         client: {
@@ -319,13 +257,7 @@ export function useRunSubmission(options: Options) {
           runId: run.runId,
         });
       }
-      if (runProjectId === DEFAULT_WORKSPACE_PROJECT_ID) {
-        setRemovedProjectIds((current) =>
-          current.filter(
-            (projectId) => projectId !== DEFAULT_WORKSPACE_PROJECT_ID,
-          ),
-        );
-      }
+      onRunStarted(runProjectId);
       dispatch({ type: "run/created", run });
       dispatch({
         type: "run/threadAdded",
@@ -394,7 +326,7 @@ export function useRunSubmission(options: Options) {
       if (!threadSession.isCurrent(generation)) return;
       const message =
         error instanceof Error ? error.message : "Failed to cancel run";
-      if (message.includes("RUN_NOT_FOUND")) {
+      if (runtimeRequestIssue(error).code === "RUN_NOT_FOUND") {
         // The run no longer exists on the server (e.g. runtime restarted or
         // the run already terminated). Reset the local runtime state so the
         // user can start fresh instead of showing a confusing error.

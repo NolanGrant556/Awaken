@@ -1,13 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  PET_CELL_HEIGHT,
-  PET_CELL_WIDTH,
-  PET_SHEET_COLUMNS,
   PET_SHEET_WIDTH,
   petSheetHeightForVersion,
-  type PetSpriteVersion,
   type PetSource,
+  type PetSpriteVersion
 } from "../../shared/pets.js";
 
 const MAX_MANIFEST_BYTES = 64 * 1024;

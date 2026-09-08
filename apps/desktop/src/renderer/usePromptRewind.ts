@@ -19,7 +19,6 @@ import {
   waitForNextPaint,
 } from "./workbenchPresentation";
 type Options = {
-  promptReplacementPending: boolean;
   setPromptReplacementPending: (pending: boolean) => void;
   runtimeClient: RuntimeClient;
   threadSession: ThreadSession;
@@ -39,7 +38,6 @@ type Options = {
 };
 export function usePromptRewind(options: Options) {
   const {
-    promptReplacementPending,
     setPromptReplacementPending,
     runtimeClient,
     threadSession,

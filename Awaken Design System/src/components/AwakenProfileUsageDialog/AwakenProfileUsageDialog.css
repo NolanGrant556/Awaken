@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 .aw-dialog.aw-profile-usage-dialog {
   width: min(780px, calc(100vw - 48px));

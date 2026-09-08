@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import { act, createRef } from "react";
+import { AwakenMermaidDiagram } from "@awaken/design-system";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AwakenMermaidDiagram } from "@awaken/design-system";
 
 vi.mock("mermaid", () => ({
   default: {

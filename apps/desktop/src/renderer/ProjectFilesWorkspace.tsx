@@ -56,11 +56,12 @@ export type ProjectFilesWorkspaceProps = {
     | "saveProjectMarkdownFile"
     | "openArtifact"
     | "revealArtifact"
+    | "createProjectAgentsFile"
   > &
     Partial<
       Pick<
         RuntimeClient,
-        "createProjectAgentsFile" | "onProjectFilePreviewInteraction"
+        "onProjectFilePreviewInteraction"
       >
     >;
   projectId?: string;
@@ -709,7 +710,6 @@ export function ProjectFilesWorkspace({
   const showCreateProjectAgents = Boolean(
     projectId &&
       selectedFolder?.isPrimary &&
-      runtimeClient.createProjectAgentsFile &&
       projectAgentsKnown &&
       !projectAgentsExists,
   );
@@ -726,7 +726,7 @@ export function ProjectFilesWorkspace({
   }, [agentsDirectoryListing, errorMessage, loadingPaths, rootAwakenDirectory]);
 
   async function createProjectAgents(): Promise<void> {
-    if (!projectId || !runtimeClient.createProjectAgentsFile) return;
+    if (!(projectId)) return;
     try {
       const result = await runtimeClient.createProjectAgentsFile(projectId);
       if (!result.ok) {

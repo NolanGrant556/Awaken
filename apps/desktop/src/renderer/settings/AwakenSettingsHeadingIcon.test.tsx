@@ -1,11 +1,10 @@
-import React from "react";
-import { renderToString } from "react-dom/server";
 import {
   AwakenMemoryLightFlowLayout,
   AwakenSettings,
   AwakenSettingsNavItems,
   iconForConcept,
 } from "@awaken/design-system";
+import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 describe("AwakenSettings section heading icons", () => {

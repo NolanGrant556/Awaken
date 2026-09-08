@@ -356,7 +356,6 @@ export function WorkbenchOverlays({
           onMediaError={() =>
             refreshArtifactMediaSource(
               activeMediaPreviewItem.sourceKey,
-              activeMediaPreviewItem.request,
             )
           }
           onMetadata={(metadata) =>

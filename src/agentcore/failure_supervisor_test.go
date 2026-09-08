@@ -49,13 +49,13 @@ func TestFailureSupervisorBlocksNonRetryableDuplicate(t *testing.T) {
 	s := NewFailureSupervisor("/tmp/ws", 8, 32)
 	call := convcontext.ToolCall{ID: "c1", Function: convcontext.FunctionCall{Name: "Edit", Arguments: `{"file_path":"a","old_string":"x","new_string":"y"}`}}
 	before := s.BeforeCall(call)
-	if !before.Allow {
+	if before.Action != CallExecute {
 		t.Fatalf("first call blocked: %+v", before)
 	}
 	s.NoteRealExecution(before.CallSignature)
 	s.AfterOutcome(call, tool.FailedOutcome("not found", "edit_match_not_found", tool.ErrorCategoryDomain, false))
 	second := s.BeforeCall(call)
-	if !second.Block || second.ErrorCode != ErrorCodeToolRetryBlocked || len(second.RecoveryOptions) == 0 {
+	if second.Action == CallExecute || second.ErrorCode != ErrorCodeToolRetryBlocked || len(second.RecoveryOptions) == 0 {
 		t.Fatalf("duplicate was not blocked: %+v", second)
 	}
 }
@@ -65,13 +65,13 @@ func TestFailureSupervisorAllowsRetryableTwiceThenBlocks(t *testing.T) {
 	call := convcontext.ToolCall{ID: "c1", Function: convcontext.FunctionCall{Name: "Bash", Arguments: `{"command":"false"}`}}
 	for index := 0; index < 2; index++ {
 		before := s.BeforeCall(call)
-		if before.Block {
+		if before.Action != CallExecute {
 			t.Fatalf("attempt %d blocked", index+1)
 		}
 		s.NoteRealExecution(before.CallSignature)
 		s.AfterOutcome(call, tool.FailedOutcome("exit 1", tool.ErrorCodeProcessExitNonzero, tool.ErrorCategoryProcess, true))
 	}
-	if third := s.BeforeCall(call); !third.Block {
+	if third := s.BeforeCall(call); third.Action == CallExecute {
 		t.Fatalf("third call not blocked: %+v", third)
 	}
 }
@@ -83,7 +83,7 @@ func TestFailureSupervisorBlocksRepeatedSuccessfulMCPMutationAcrossIdempotencyKe
 		Arguments: `{"bill_num":"MO-1","rows":[{"part":"face"}],"confirm_write":true,"idempotency_key":"first-key"}`,
 	}}
 	before := s.BeforeCall(first)
-	if !before.Allow {
+	if before.Action != CallExecute {
 		t.Fatalf("first mutation blocked: %+v", before)
 	}
 	s.NoteRealExecution(before.CallSignature)
@@ -95,7 +95,7 @@ func TestFailureSupervisorBlocksRepeatedSuccessfulMCPMutationAcrossIdempotencyKe
 	repeated.ID = "write-2"
 	repeated.Function.Arguments = `{"rows":[{"part":"face"}],"idempotency_key":"second-key","bill_num":"MO-1","confirm_write":true}`
 	blocked := s.BeforeCall(repeated)
-	if !blocked.Block || blocked.TerminateRun || blocked.ErrorCode != ErrorCodeRepeatedSuccessfulMutation {
+	if blocked.Action == CallExecute || blocked.Action == CallStopRun || blocked.ErrorCode != ErrorCodeRepeatedSuccessfulMutation {
 		t.Fatalf("same business mutation with a fresh idempotency key was not blocked once: %+v", blocked)
 	}
 	result := SyntheticBlockedResult(repeated, blocked)
@@ -104,14 +104,14 @@ func TestFailureSupervisorBlocksRepeatedSuccessfulMCPMutationAcrossIdempotencyKe
 	}
 
 	blockedAgain := s.BeforeCall(repeated)
-	if !blockedAgain.Block || !blockedAgain.TerminateRun || blockedAgain.TerminalReason != TerminalReasonRepeatedToolFailure {
+	if blockedAgain.Action == CallExecute || blockedAgain.Action != CallStopRun || blockedAgain.TerminalReason != TerminalReasonRepeatedToolFailure {
 		t.Fatalf("model ignoring the successful-mutation block must terminate: %+v", blockedAgain)
 	}
 
 	corrected := repeated
 	corrected.ID = "write-3"
 	corrected.Function.Arguments = `{"bill_num":"MO-1","rows":[{"part":"face","dosage":1.18}],"confirm_write":true,"idempotency_key":"third-key"}`
-	if decision := s.BeforeCall(corrected); decision.Block || !decision.Allow {
+	if decision := s.BeforeCall(corrected); decision.Action != CallExecute {
 		t.Fatalf("changed business arguments must remain allowed: %+v", decision)
 	}
 }
@@ -124,7 +124,7 @@ func TestFailureSupervisorDoesNotTreatReadOrPreviewAsSameMutation(t *testing.T) 
 	readOutcome := tool.SucceededOutcome("found")
 	readOutcome.Operation = &tool.OperationDescriptor{Type: read.Function.Name, SideEffectState: tool.OutcomeSideEffectNone}
 	s.AfterOutcome(read, readOutcome)
-	if repeated := s.BeforeCall(read); repeated.Block || !repeated.Allow {
+	if repeated := s.BeforeCall(read); repeated.Action != CallExecute {
 		t.Fatalf("repeated read must remain allowed: %+v", repeated)
 	}
 
@@ -137,7 +137,7 @@ func TestFailureSupervisorDoesNotTreatReadOrPreviewAsSameMutation(t *testing.T) 
 	realWrite := preview
 	realWrite.ID = "write"
 	realWrite.Function.Arguments = `{"bill_num":"MO-1","confirm_write":true,"idempotency_key":"write-key"}`
-	if decision := s.BeforeCall(realWrite); decision.Block || !decision.Allow {
+	if decision := s.BeforeCall(realWrite); decision.Action != CallExecute {
 		t.Fatalf("preview must not block a semantically different real write: %+v", decision)
 	}
 }
@@ -151,7 +151,7 @@ func TestFailureSupervisorAllowsCorrectedInputAfterRepeatedPreflightValidationFa
 	}
 	for _, call := range invalidCalls {
 		before := s.BeforeCall(call)
-		if before.Block || !before.Allow {
+		if before.Action != CallExecute {
 			t.Fatalf("preflight validation call was blocked too early: %+v", before)
 		}
 		s.NoteRealExecution(before.CallSignature)
@@ -163,7 +163,7 @@ func TestFailureSupervisorAllowsCorrectedInputAfterRepeatedPreflightValidationFa
 
 	corrected := convcontext.ToolCall{ID: "valid", Function: convcontext.FunctionCall{Name: "computer_act", Arguments: `{"observation_id":"obs-1","action":"click","target":{"x":0,"y":10}}`}}
 	decision := s.BeforeCall(corrected)
-	if decision.Block || !decision.Allow {
+	if decision.Action != CallExecute {
 		t.Fatalf("corrected input inherited a resource failure barrier: %+v", decision)
 	}
 }
@@ -204,7 +204,7 @@ func TestFailureSupervisorDOCXFailuresDoNotBlockFreshTXTRead(t *testing.T) {
 			},
 		}
 		before := s.BeforeCall(call)
-		if before.Block || !before.Allow {
+		if before.Action != CallExecute {
 			t.Fatalf("DOCX read %d was blocked before execution: %+v", index+1, before)
 		}
 		s.NoteRealExecution(before.CallSignature)
@@ -219,14 +219,14 @@ func TestFailureSupervisorDOCXFailuresDoNotBlockFreshTXTRead(t *testing.T) {
 		},
 	}
 	decision := s.BeforeCall(fresh)
-	if decision.Block || !decision.Allow {
+	if decision.Action != CallExecute {
 		t.Fatalf("fresh TXT read inherited unrelated DOCX failures: %+v", decision)
 	}
 }
 
 func TestSyntheticBlockedResultRequiresStrategyChange(t *testing.T) {
 	call := convcontext.ToolCall{ID: "blocked", Function: convcontext.FunctionCall{Name: "Read", Arguments: `{"file_path":"missing"}`}}
-	result := SyntheticBlockedResult(call, BeforeCallDecision{Block: true, ErrorCode: ErrorCodeRepeatedFailure, ErrorMessage: "repeated", RecoveryOptions: []string{"change_path"}})
+	result := SyntheticBlockedResult(call, BeforeCallDecision{Action: CallBlock, ErrorCode: ErrorCodeRepeatedFailure, ErrorMessage: "repeated", RecoveryOptions: []string{"change_path"}})
 	if !result.IsError || result.Outcome.ErrorCode != ErrorCodeRepeatedFailure || !strings.Contains(result.Content, StatusStrategyChangeRequired) {
 		t.Fatalf("blocked result=%+v", result)
 	}
@@ -241,14 +241,14 @@ func TestFailureSupervisorTerminatesRepeatedInvalidAskUserCall(t *testing.T) {
 	s := NewFailureSupervisor("/tmp/ws", 8, 32)
 	call := convcontext.ToolCall{ID: "ask-empty", Function: convcontext.FunctionCall{Name: "ask_user", Arguments: `{}`}}
 	first := s.BeforeCall(call)
-	if !first.Allow {
+	if first.Action != CallExecute {
 		t.Fatalf("first ask_user call blocked: %+v", first)
 	}
 	s.NoteRealExecution(first.CallSignature)
 	s.AfterOutcome(call, tool.FailedOutcome("questions required", "ask_user_invalid_input", tool.ErrorCategoryValidation, false))
 
 	blocked := s.BeforeCall(call)
-	if !blocked.Block || !blocked.TerminateRun || blocked.TerminalReason != TerminalReasonRepeatedToolFailure {
+	if blocked.Action == CallExecute || blocked.Action != CallStopRun || blocked.TerminalReason != TerminalReasonRepeatedToolFailure {
 		t.Fatalf("repeated invalid ask_user call did not terminate: %+v", blocked)
 	}
 	result := SyntheticBlockedResult(call, blocked)
@@ -262,7 +262,7 @@ func TestFailureSupervisorBlocksChangedArgumentsAfterUnknownExternalCreation(t *
 	s := NewFailureSupervisor("/tmp/ws", 8, 32)
 	first := convcontext.ToolCall{ID: "video-1", Function: convcontext.FunctionCall{Name: "video_generate", Arguments: `{"prompt":"first","duration":5}`}}
 	before := s.BeforeCall(first)
-	if !before.Allow {
+	if before.Action != CallExecute {
 		t.Fatalf("first video call blocked: %+v", before)
 	}
 	s.NoteRealExecution(before.CallSignature)
@@ -279,7 +279,7 @@ func TestFailureSupervisorBlocksChangedArgumentsAfterUnknownExternalCreation(t *
 
 	changed := convcontext.ToolCall{ID: "video-2", Function: convcontext.FunctionCall{Name: "video_generate", Arguments: `{"prompt":"changed","duration":10}`}}
 	blocked := s.BeforeCall(changed)
-	if !blocked.Block || blocked.Allow || !blocked.ExternalStateConfirmationRequired {
+	if blocked.Action == CallExecute || !blocked.ExternalStateConfirmationRequired {
 		t.Fatalf("changed video submission was not blocked: %+v", blocked)
 	}
 	result := SyntheticBlockedResult(changed, blocked)
@@ -291,7 +291,7 @@ func TestFailureSupervisorBlocksChangedArgumentsAfterUnknownExternalCreation(t *
 	}
 
 	unrelated := convcontext.ToolCall{ID: "read-1", Function: convcontext.FunctionCall{Name: "Read", Arguments: `{"file_path":"a"}`}}
-	if decision := s.BeforeCall(unrelated); decision.Block {
+	if decision := s.BeforeCall(unrelated); decision.Action != CallExecute {
 		t.Fatalf("external-state barrier blocked unrelated tool: %+v", decision)
 	}
 }

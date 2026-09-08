@@ -274,11 +274,6 @@ func (s *FileDesktopStore) lockPath() string {
 	return filepath.Join(s.gen, "locks", "store.lock")
 }
 
-// Prepare satisfies the store preparation hook used before run creation.
-func (s *FileDesktopStore) Prepare() error {
-	return nil
-}
-
 func (s *FileDesktopStore) UserDataRoot() string {
 	return s.root
 }

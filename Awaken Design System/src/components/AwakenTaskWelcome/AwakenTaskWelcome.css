@@ -1,3 +1,46 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
+
+.aw-task-welcome {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  width: min(760px, 100%);
+  min-width: 0;
+  margin: 0 auto;
+  padding: 0 0 2px;
+  text-align: center;
+  color: var(--aw-text-primary);
+}
+
+.aw-task-welcome__logo {
+  display: block;
+  width: 220px;
+  max-width: 62%;
+  height: auto;
+  filter: var(--aw-brand-wordmark-filter, none);
+  image-rendering: auto;
+  user-select: none;
+}
+
+.aw-task-welcome__message {
+  margin: 0;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-lg);
+  font-weight: var(--aw-font-weight-medium);
+  letter-spacing: 0;
+  line-height: var(--aw-line-height-lg);
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .aw-task-welcome__logo {
+    width: 200px;
+  }
+
+  .aw-task-welcome__message {
+    font-size: var(--aw-font-size-md);
+    white-space: normal;
+  }
+}
 
 /* AwakenTaskWelcome uses shared Awaken Design System component classes. */

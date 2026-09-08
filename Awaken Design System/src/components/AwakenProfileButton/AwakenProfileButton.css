@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 .aw-profile-button__chevron {
   transform: rotate(180deg);

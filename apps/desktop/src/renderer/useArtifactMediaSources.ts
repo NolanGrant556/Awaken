@@ -190,7 +190,6 @@ export function useArtifactMediaSources(
 
   function refreshArtifactMediaSource(
     key: string,
-    request: ArtifactOpenRequest,
   ): void {
     const retries = artifactMediaSourceRetryRef.current.get(key) ?? 0;
     if (retries >= MAX_ARTIFACT_MEDIA_SOURCE_RETRIES) {

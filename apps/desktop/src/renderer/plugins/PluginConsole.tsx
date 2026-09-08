@@ -329,21 +329,7 @@ export function PluginConsole({
   }
 
   function loadPluginSetup() {
-    return runtimeClient.getPluginSetup
-      ? runtimeClient.getPluginSetup(plugin.name)
-      : Promise.resolve({
-          items: plugin.setupItems ?? [],
-          summary: plugin.setupSummary ?? {
-            total: 0,
-            ready: 0,
-            needsConfiguration: 0,
-            needsAuth: 0,
-            needsAdminApproval: 0,
-            inProgress: 0,
-            failed: 0,
-            unsupported: 0,
-          },
-        });
+    return runtimeClient.getPluginSetup(plugin.name);
   }
 
   useEffect(() => {
@@ -420,14 +406,14 @@ export function PluginConsole({
     items: RuntimePluginSetupItem[],
     pollGeneration: number,
   ): Promise<void> {
-    if (!runtimeClient.getActivePluginAuthSession || !plugin.digest?.trim()) return;
+    if (!(plugin.digest?.trim())) return;
     const pendingItems = items.filter(
       (item) => item.status === "authorizing" || item.status === "verifying",
     );
     if (pendingItems.length === 0) return;
     const recovered = await Promise.all(pendingItems.map(async (item) => {
       try {
-        const session = await runtimeClient.getActivePluginAuthSession!(
+        const session = await runtimeClient.getActivePluginAuthSession(
           plugin.name,
           item.requirement.id,
           setupMutation(item),
@@ -468,7 +454,7 @@ export function PluginConsole({
       for (let attempt = 0; attempt < 600; attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 1000));
         if (pollGeneration !== setupPollGenerationRef.current) return;
-        if (!runtimeClient.getPluginAuthSession) throw new Error("当前 Desktop 不支持插件授权会话");
+
         const session = await runtimeClient.getPluginAuthSession(plugin.name, sessionId);
         if (pollGeneration !== setupPollGenerationRef.current) return;
         if (session.status === "authorizing" || session.status === "verifying") continue;
@@ -529,7 +515,7 @@ export function PluginConsole({
       if (action === "mark_admin_approval") {
         const sessionId = activeSetupSessions[item.requirement.id];
         if (!sessionId) throw new Error("当前没有可标记的插件授权会话");
-        if (!runtimeClient.markPluginAdminApprovalPending) throw new Error("当前 Desktop 不支持管理员审批状态");
+
         await runtimeClient.markPluginAdminApprovalPending(plugin.name, sessionId);
         setActiveSetupSessions((current) => {
           const next = { ...current };
@@ -543,34 +529,34 @@ export function PluginConsole({
       if (action === "cancel") {
         const sessionId = activeSetupSessions[item.requirement.id];
         if (sessionId) {
-          if (!runtimeClient.cancelPluginAuthSession) throw new Error("当前 Desktop 不支持取消插件授权");
+
           await runtimeClient.cancelPluginAuthSession(plugin.name, sessionId);
         }
         await refreshSetupAndRuntime();
         return;
       }
       if (action === "disconnect") {
-        if (!runtimeClient.disconnectPluginSetup) throw new Error("当前 Desktop 不支持退出插件账号");
+
         const response = await runtimeClient.disconnectPluginSetup(plugin.name, item.requirement.id, request);
         updateSnapshot({ setupItems: response.items ?? [] });
         await refreshSetupAndRuntime();
         return;
       }
       if (action === "probe") {
-        if (!runtimeClient.probePluginSetup) throw new Error("当前 Desktop 不支持重新检测插件设置");
+
         const response = await runtimeClient.probePluginSetup(plugin.name, item.requirement.id, request);
         updateSnapshot({ setupItems: response.items ?? [] });
         await refreshSetupAndRuntime();
         return;
       }
       if (item.requirement.kind === "cli_login" && item.requirement.providerId) {
-        if (!runtimeClient.startPluginSetup) throw new Error("当前 Desktop 不支持插件账号连接");
+
         await runtimeClient.startPluginSetup(plugin.name, item.requirement.id, request);
         await runtimeClient.startCliAuth(item.requirement.providerId as CliProviderId);
         await refreshSetupAndRuntime();
         return;
       }
-      if (!runtimeClient.startPluginSetup) throw new Error("当前 Desktop 不支持插件账号连接");
+
       const session = await runtimeClient.startPluginSetup(plugin.name, item.requirement.id, request);
       if (session.sessionId) {
         setActiveSetupSessions((current) => ({ ...current, [item.requirement.id]: session.sessionId }));

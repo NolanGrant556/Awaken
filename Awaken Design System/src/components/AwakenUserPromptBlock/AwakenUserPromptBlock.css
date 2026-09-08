@@ -1,3 +1,427 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
+
+.execution-prompt-block {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 0 0 6px;
+}
+
+.execution-prompt-bubble {
+  --execution-prompt-collapsed-content-height: 60px;
+  --execution-prompt-expanded-content-height: 180px;
+  --execution-prompt-attachment-size: 52px;
+  --execution-prompt-attachment-gap: 8px;
+  --execution-prompt-surface: var(--aw-bg-white);
+  width: 100%;
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: 0;
+  padding: 7px 12px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-control);
+  background: var(--execution-prompt-surface);
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
+  cursor: text;
+  overflow: hidden;
+}
+
+.execution-prompt-bubble-select-root {
+  display: grid;
+  gap: var(--execution-prompt-attachment-gap);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.execution-prompt-bubble-text {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 36%, transparent)
+    transparent;
+  scrollbar-width: thin;
+}
+
+.execution-prompt-bubble-main {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.execution-prompt-bubble-structured-content {
+  display: flex;
+  min-width: 0;
+}
+
+.execution-prompt-bubble-structured-content-separated {
+  margin-top: var(--execution-prompt-attachment-gap);
+}
+
+.execution-prompt-bubble-structured-content > .composer-file-comments {
+  margin-bottom: 0;
+}
+
+.execution-prompt-bubble-has-structured-content {
+  overflow: visible;
+}
+
+.execution-prompt-bubble-token {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  gap: 5px;
+  min-width: 0;
+  min-height: var(--aw-line-height-base);
+  max-width: min(220px, 100%);
+  margin-inline-end: var(--aw-space-3);
+  padding: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--aw-text-blue);
+  font-size: inherit;
+  font-weight: var(--aw-font-weight-medium);
+  line-height: inherit;
+}
+
+.execution-prompt-bubble-token-icon {
+  display: block;
+  flex: 0 0 auto;
+  width: var(--aw-icon-size-16);
+  height: var(--aw-icon-size-16);
+  color: currentColor;
+}
+
+.execution-prompt-bubble-token-brand-icon {
+  object-fit: contain;
+}
+
+.execution-prompt-bubble-token[data-prompt-token-selected] {
+  background: color-mix(in srgb, var(--aw-text-blue) 22%, transparent);
+}
+
+.execution-prompt-bubble-inline-text {
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
+  white-space: pre-wrap;
+}
+
+.execution-prompt-bubble-token-label {
+  min-width: 0;
+  overflow: hidden;
+  line-height: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.execution-prompt-bubble-attachments {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  margin-bottom: var(--execution-prompt-attachment-gap);
+  overflow: hidden;
+}
+
+.execution-prompt-bubble-attachments:only-child {
+  margin-bottom: 0;
+}
+
+.execution-prompt-bubble-attachment {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  max-width: 168px;
+  height: var(--execution-prompt-attachment-size);
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-control);
+  overflow: hidden;
+  background: var(--aw-bg-fill-light);
+}
+
+.execution-prompt-bubble-attachment-image {
+  width: var(--execution-prompt-attachment-size);
+  flex: 0 0 var(--execution-prompt-attachment-size);
+}
+
+.execution-prompt-bubble-attachment-thumbnail {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.execution-prompt-bubble-file-card {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.execution-prompt-bubble-file-icon {
+  color: var(--aw-text-tertiary);
+}
+
+.execution-prompt-bubble-file-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-medium);
+  line-height: var(--aw-line-height-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.execution-prompt-bubble-file-extension {
+  color: var(--aw-text-tertiary);
+  font-size: 10px;
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: 1;
+}
+
+.execution-prompt-bubble-attachment-more {
+  justify-content: center;
+  max-width: 72px;
+  padding: 0 10px;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: 1;
+}
+
+.execution-prompt-bubble:focus-visible {
+  outline: 2px solid var(--aw-focus-ring);
+  outline-offset: 2px;
+}
+
+.execution-prompt-bubble[role="button"] {
+  cursor: pointer;
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble {
+  padding-bottom: 0;
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble-select-root {
+  margin-bottom: calc(-1 * var(--execution-prompt-attachment-gap));
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble-main {
+  max-height: var(--execution-prompt-collapsed-content-height);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+.execution-prompt-block-limited:not(.execution-prompt-block-expanded)
+  .execution-prompt-bubble-text {
+  max-height: var(--execution-prompt-collapsed-content-height);
+  overflow: hidden;
+  line-height: 16px;
+}
+
+.execution-prompt-block-expanded .execution-prompt-bubble {
+  display: grid;
+  gap: var(--execution-prompt-attachment-gap);
+  cursor: text;
+}
+
+.execution-prompt-block-expanded .execution-prompt-bubble-attachments {
+  margin-bottom: 0;
+}
+
+.execution-prompt-block-expanded .execution-prompt-bubble-attachments {
+  grid-template-columns: repeat(auto-fill, minmax(132px, 168px));
+  max-height: none;
+}
+
+.execution-prompt-block-expanded .execution-prompt-bubble-text {
+  max-height: var(--execution-prompt-expanded-content-height);
+  overscroll-behavior: contain;
+  overflow-y: auto;
+}
+
+.execution-prompt-bubble-toolbar {
+  box-sizing: border-box;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: 24px;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.execution-prompt-bubble-time {
+  margin: 0 4px 0 0;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+  line-height: 24px;
+  font-weight: var(--aw-font-weight-regular);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.execution-prompt-bubble-toolbar button {
+  flex: none;
+}
+
+.execution-prompt-action-button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--aw-text-tertiary);
+  cursor: pointer;
+}
+
+.execution-prompt-action-button:hover,
+.execution-prompt-action-button:focus-visible {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.execution-prompt-action-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.execution-prompt-copy-button {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: var(--aw-text-tertiary) !important;
+}
+
+.execution-prompt-copy-button[data-copy-state="idle"]:hover,
+.execution-prompt-copy-button[data-copy-state="idle"]:focus-visible {
+  background: var(--aw-bg-fill-light) !important;
+  color: var(--aw-text-primary) !important;
+}
+
+.execution-prompt-copy-button[data-copy-state="copied"] {
+  color: var(--aw-status-success) !important;
+}
+
+.execution-prompt-copy-button[data-copy-state="error"] {
+  color: var(--aw-status-danger) !important;
+}
+
+.execution-prompt-copy-button:disabled {
+  background: transparent !important;
+}
+
+.execution-prompt-editor {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--aw-border-control-hover);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-bg-white);
+}
+
+.execution-prompt-editor-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 96px;
+  max-height: 240px;
+  overflow: auto;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--aw-text-primary);
+  font: inherit;
+  line-height: var(--aw-line-height-base);
+}
+
+.execution-prompt-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.execution-prompt-editor-actions button {
+  min-height: 30px;
+  padding: 5px 12px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-bg-white);
+  color: var(--aw-text-primary);
+  cursor: pointer;
+}
+
+.execution-prompt-editor-actions .execution-prompt-editor-send {
+  border-color: var(--aw-text-primary);
+  background: var(--aw-text-primary);
+  color: var(--aw-bg-white);
+}
+
+.execution-prompt-editor-actions button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.execution-prompt-bubble-text::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.execution-prompt-bubble-text::-webkit-scrollbar-track,
+.execution-prompt-bubble-text::-webkit-scrollbar-track-piece,
+.execution-prompt-bubble-text::-webkit-scrollbar-corner {
+  background: transparent;
+  border: 0;
+}
+
+.execution-prompt-bubble-text::-webkit-scrollbar-thumb {
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--aw-radius-pill);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 36%, transparent);
+}
+
+.execution-prompt-bubble-text::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
 
 /* AwakenUserPromptBlock currently uses shared Awaken Design System tokens and component classes. */

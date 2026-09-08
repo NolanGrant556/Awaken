@@ -1,19 +1,5 @@
 import type { RunStepItem } from "@awaken/design-system";
 import type {
-  AguiACPPermissionOption,
-  AguiArtifactStatus,
-  AguiContextUsageSnapshot,
-  AguiEvent,
-  AguiModelUsageRecord,
-  AguiProviderReconnect,
-  AguiRunPlanItem,
-	InstructionSnapshotSummary,
-} from "./agui";
-import {
-  toolDisplayStateFromStatus,
-  type ToolDisplayState,
-} from "../../shared/toolStatus";
-import type {
   RunInputAttachment,
   RuntimeRun,
   RuntimeRunStatus,
@@ -24,6 +10,10 @@ import type {
   ThreadTitleStatus,
 } from "../../shared/runtime";
 import {
+  toolDisplayStateFromStatus,
+  type ToolDisplayState,
+} from "../../shared/toolStatus";
+import {
   addRunErrorToNarrative,
   appendRunRequestedNarrative,
   createInitialRunNarrativeState,
@@ -31,12 +21,23 @@ import {
   eventResumesAfterProviderReconnect,
   projectAguiEventToNarrative,
   restoreLiveProviderReconnectItems,
-  type PromptNarrativeToken,
   type DeliverableFileType,
+  type PromptNarrativeToken,
   type RunNarrativeItem,
   type RunNarrativeState,
   type SubagentNarrativeTask,
 } from "../run-narrative";
+import type {
+  AguiACPPermissionOption,
+  AguiArtifactStatus,
+  AguiContextUsageSnapshot,
+  AguiEvent,
+  AguiModelUsageRecord,
+  AguiProviderReconnect,
+  AguiRunPlanItem,
+  InstructionSnapshotSummary,
+} from "./agui";
+import { compactEventDetails } from "./compact-event";
 import { runtimeErrorMessageForDisplay } from "./error-display";
 
 export type RuntimePhase =
@@ -322,36 +323,7 @@ type ThreadViewState = {
   providerReconnectAttempts: ProviderReconnectAttempt[];
 };
 
-export type RuntimeViewState = {
-  prompt: string;
-  promptAttachments?: RunInputAttachment[];
-  runId?: string;
-  threadId?: string;
-  phase: RuntimePhase;
-  status?: RuntimeRunStatus;
-  timelineTitle: string;
-  timelineStatus: TimelineStatus;
-  steps: RunStepItem[];
-  assistantText: string;
-  reasoningText: string;
-  toolResults: ToolResultRecord[];
-  patchPreviews: PatchPreviewRecord[];
-  userQuestions: UserQuestionItem[];
-  externalInteractions: ExternalInteractionItem[];
-  computerReviews: ComputerReviewItem[];
-  computerHandoffs: ComputerHandoffItem[];
-  computerSession?: ComputerSessionItem;
-  artifacts: ArtifactRecord[];
-  turnDiff?: TurnDiffRecord;
-  inspectorSummary: InspectorSummary;
-  narrative: RunNarrativeState;
-  subagentsById: Record<string, SubagentTaskView>;
-  subagentOrder: string[];
-  runPlansById: Record<string, RunPlanView>;
-  errorMessage?: string;
-  runStartedAtMs?: number;
-  runCompletedAtMs?: number;
-  providerReconnectAttempts: ProviderReconnectAttempt[];
+export type RuntimeViewState = ThreadViewState & {
   threads: ThreadItem[];
   activeThreadId?: string;
   threadViews: Record<string, ThreadViewState>;
@@ -492,37 +464,13 @@ const initialState: RuntimeViewState = {
 };
 
 function viewFromState(state: RuntimeViewState): ThreadViewState {
-  return {
-    prompt: state.prompt,
-    promptAttachments: state.promptAttachments,
-    runId: state.runId,
-    threadId: state.threadId,
-    phase: state.phase,
-    status: state.status,
-    timelineTitle: state.timelineTitle,
-    timelineStatus: state.timelineStatus,
-    steps: state.steps,
-    assistantText: state.assistantText,
-    reasoningText: state.reasoningText,
-    toolResults: state.toolResults,
-    patchPreviews: state.patchPreviews,
-    userQuestions: state.userQuestions,
-    externalInteractions: state.externalInteractions,
-    computerReviews: state.computerReviews,
-    computerHandoffs: state.computerHandoffs,
-    computerSession: state.computerSession,
-    artifacts: state.artifacts,
-    turnDiff: state.turnDiff,
-    inspectorSummary: state.inspectorSummary,
-    narrative: state.narrative,
-    subagentsById: state.subagentsById,
-    subagentOrder: state.subagentOrder,
-    runPlansById: state.runPlansById,
-    errorMessage: state.errorMessage,
-    runStartedAtMs: state.runStartedAtMs,
-    runCompletedAtMs: state.runCompletedAtMs,
-    providerReconnectAttempts: state.providerReconnectAttempts ?? [],
-  };
+  const { threads: _threads, activeThreadId: _activeThreadId,
+    threadViews: _threadViews, supervisorStatus: _supervisorStatus, ...view } = state;
+  return view;
+}
+
+export function threadViewFor(state: RuntimeViewState, threadId: string): ThreadViewState | undefined {
+  return state.activeThreadId === threadId ? state : state.threadViews[threadId];
 }
 
 function emptyThreadView(threadId: string, runId?: string): ThreadViewState {
@@ -726,23 +674,11 @@ function applyProviderReconnect(
   return next;
 }
 
-function saveActiveThreadView(state: RuntimeViewState): RuntimeViewState {
-  if (!state.activeThreadId) {
-    return state;
-  }
-  return {
-    ...state,
-    threadViews: {
-      ...state.threadViews,
-      [state.activeThreadId]: viewFromState(state),
-    },
-  };
-}
-
 function restoreThreadView(
   state: RuntimeViewState,
   threadId: string,
 ): RuntimeViewState {
+  if (state.activeThreadId === threadId) return state;
   const thread = state.threads.find((item) => item.threadId === threadId);
   const view =
     state.threadViews[threadId] ?? emptyThreadView(threadId, thread?.runId);
@@ -1585,90 +1521,14 @@ function mergeContextWindowRecord(
   };
 }
 
-function isFiniteNumber(value: number | undefined): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function compactBoundaryFromMessage(message?: string): string | undefined {
-  const match = message?.match(/\bboundary=([^\s]+)/);
-  return match?.[1];
-}
-
-function compactModeFromMessage(message?: string): string | undefined {
-  const match = message?.match(
-    /\bcompact (?:started|finished|failed):\s*([a-z_]+)(?=\s|$)/i,
-  );
-  return match?.[1]?.toLowerCase();
-}
-
-function compactEstimatedTokensFromMessage(
-  message?: string,
-): number | undefined {
-  const match = message?.match(/\bestimated_tokens=(\d+)\b/i);
-  if (!match) {
-    return undefined;
-  }
-  const parsed = Number(match[1]);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function compactStatus(event: AguiEvent): CompactRecord["status"] {
-  if (event.type === "AWAKEN_COMPACT_FAILED") {
-    return "failed";
-  }
-  if (event.type === "AWAKEN_COMPACT_FINISHED") {
-    return "finished";
-  }
-  return "started";
-}
 
 function compactRecord(
   event: AguiEvent,
   previousContextWindow?: ContextWindowRecord,
 ): CompactRecord {
-  const structuredMode = event.contextCompactMode?.trim();
-  const fallbackMode = compactModeFromMessage(event.message);
-  const mode = structuredMode || fallbackMode;
-
-  const structuredBoundaryId = event.contextCompactBoundaryId?.trim();
-  const fallbackBoundaryId = compactBoundaryFromMessage(event.message);
-  const boundaryId = structuredBoundaryId || fallbackBoundaryId;
-
-  const structuredPreEstimate = event.contextCompactPreEstimateTokens;
-  const fallbackPreEstimate =
-    event.type === "AWAKEN_COMPACT_STARTED"
-      ? event.contextEstimatedTokens
-      : previousContextWindow?.estimatedTokens;
-  const preCompactEstimatedTokens = isFiniteNumber(structuredPreEstimate)
-    ? structuredPreEstimate
-    : fallbackPreEstimate;
-
-  const structuredPostEstimate = event.contextCompactPostEstimateTokens;
-  const fallbackPostEstimate =
-    event.type === "AWAKEN_COMPACT_FINISHED"
-      ? (event.contextEstimatedTokens ??
-        compactEstimatedTokensFromMessage(event.message))
-      : undefined;
-  const postCompactEstimatedTokens = isFiniteNumber(structuredPostEstimate)
-    ? structuredPostEstimate
-    : fallbackPostEstimate;
-
-  const usedFallback =
-    (!structuredMode && Boolean(fallbackMode)) ||
-    (!structuredBoundaryId && Boolean(fallbackBoundaryId)) ||
-    (!isFiniteNumber(structuredPreEstimate) &&
-      isFiniteNumber(preCompactEstimatedTokens)) ||
-    (!isFiniteNumber(structuredPostEstimate) &&
-      isFiniteNumber(postCompactEstimatedTokens));
-
   return {
     ...contextWindowRecord(event),
-    status: compactStatus(event),
-    mode,
-    boundaryId,
-    preCompactEstimatedTokens,
-    postCompactEstimatedTokens,
-    fallbackState: usedFallback ? "legacy" : "structured",
+    ...compactEventDetails(event, previousContextWindow?.estimatedTokens),
     toolResultsPrunedCount: event.compactToolResultsPrunedCount,
     prunedSafeGroupCount: event.compactPrunedSafeGroupCount,
     prunedMessageCount: event.compactPrunedMessageCount,
@@ -2056,7 +1916,23 @@ function replayIdentityIds(item: RunNarrativeItem): string[] {
     : [item.id];
 }
 
-export function reduceRuntimeState(
+/** The active view lives at the top level; threadViews holds inactive views only. */
+export function reduceRuntimeState(state: RuntimeViewState, action: RuntimeAction): RuntimeViewState {
+  const next = reduceActiveRuntimeState(state, action);
+  if (next === state) return state;
+  let threadViews = next.threadViews;
+  if (state.activeThreadId && state.activeThreadId !== next.activeThreadId
+      && next.threads.some((thread) => thread.threadId === state.activeThreadId)) {
+    threadViews = { ...threadViews, [state.activeThreadId]: viewFromState(state) };
+  }
+  if (next.activeThreadId && Object.prototype.hasOwnProperty.call(threadViews, next.activeThreadId)) {
+    threadViews = { ...threadViews };
+    delete threadViews[next.activeThreadId];
+  }
+  return threadViews === next.threadViews ? next : { ...next, threadViews };
+}
+
+function reduceActiveRuntimeState(
   state: RuntimeViewState,
   action: RuntimeAction,
 ): RuntimeViewState {
@@ -2078,13 +1954,13 @@ export function reduceRuntimeState(
         replayedState,
         liveReconnect,
       );
-      return saveActiveThreadView({
+      return {
         ...restored,
         narrative: {
           ...restored.narrative,
           replayedItemIds: [...new Set(replayedItemIds)],
         },
-      });
+      };
     }
     case "run/reset":
       return {
@@ -2092,7 +1968,7 @@ export function reduceRuntimeState(
         narrative: createInitialRunNarrativeState(),
         supervisorStatus: state.supervisorStatus,
         threads: state.threads,
-        threadViews: saveActiveThreadView(state).threadViews,
+        threadViews: state.threadViews,
       };
     case "run/promptReplaced": {
       const sliced: RuntimeViewState = {
@@ -2190,8 +2066,7 @@ export function reduceRuntimeState(
           break;
         }
       }
-      return saveActiveThreadView(
-        syncActiveThreadSummary({
+      return syncActiveThreadSummary({
           ...syncFromRun(
             {
               ...state,
@@ -2200,11 +2075,10 @@ export function reduceRuntimeState(
             action.run,
           ),
           activeThreadId: action.run.threadId,
-        }),
-      );
+        });
     }
     case "run/createFailed":
-      return saveActiveThreadView({
+      return {
         ...state,
         phase: "error",
         timelineStatus: "error",
@@ -2222,26 +2096,24 @@ export function reduceRuntimeState(
             tag: "http",
           }),
         ),
-      });
+      };
     case "run/cancelRequested":
-      return saveActiveThreadView(
-        syncActiveThreadSummary({
+      return syncActiveThreadSummary({
           ...state,
           phase: "cancelling",
           status: "cancelling",
 		timelineStatus: "running",
 		userQuestions: [],
 		externalInteractions: [],
-	}),
-      );
+	});
     case "run/snapshotSynced":
     case "run/cancelSync": {
       const synced = syncActiveThreadSummary(syncFromRun(state, action.run));
       if (action.type === "run/snapshotSynced" && state.status === action.run.status
-        && state.phase === synced.phase) return saveActiveThreadView(synced);
+        && state.phase === synced.phase) return synced;
       const terminalStatus = terminalStatusForRun(action.run.status);
       if (!terminalStatus) {
-        return saveActiveThreadView(synced);
+        return synced;
       }
 
       let terminalNarrative = synced.narrative;
@@ -2261,7 +2133,7 @@ export function reduceRuntimeState(
             terminalStatus === "cancelled" ? "你停止生成了本次回答" : undefined,
         });
       }
-      return saveActiveThreadView({
+      return {
         ...synced,
         narrative: appendFinalDeliverableSummary(
           terminalNarrative,
@@ -2269,11 +2141,10 @@ export function reduceRuntimeState(
           terminalStatus,
           action.run.runId,
         ),
-      });
+      };
     }
     case "run/streamError":
-      return saveActiveThreadView(
-        syncActiveThreadSummary({
+      return syncActiveThreadSummary({
           ...state,
           phase: "reconnecting",
           timelineStatus: "running",
@@ -2294,11 +2165,9 @@ export function reduceRuntimeState(
               },
             ),
           ),
-        }),
-      );
+        });
     case "run/streamFailed":
-      return saveActiveThreadView(
-        syncActiveThreadSummary({
+      return syncActiveThreadSummary({
           ...state,
           phase: "error",
           status: "error",
@@ -2338,23 +2207,19 @@ export function reduceRuntimeState(
             "error",
             state.runId,
           ),
-        }),
-      );
+        });
     case "run/reconnecting":
-      return saveActiveThreadView(
-        syncActiveThreadSummary({
+      return syncActiveThreadSummary({
           ...state,
           phase: "reconnecting",
           timelineStatus: "running",
-        }),
-      );
+        });
     case "run/recovered": {
       const prompt = recoveryPrompt(state, action.run, action.prompt);
       const hasPromptAttachments =
         (action.run.inputAttachments?.length ?? 0) > 0;
       const hasPromptTokens = (action.run.composerTokens?.length ?? 0) > 0;
-      return saveActiveThreadView(
-        syncActiveThreadSummary({
+      return syncActiveThreadSummary({
           ...syncFromRun(initialState, action.run),
           prompt,
           narrative:
@@ -2384,8 +2249,7 @@ export function reduceRuntimeState(
           threads: state.threads,
           threadViews: state.threadViews,
           activeThreadId: action.run.threadId,
-        }),
-      );
+        });
     }
     case "run/threadReplayStarted": {
       const view = emptyThreadView(action.threadId, action.runId);
@@ -2485,10 +2349,10 @@ export function reduceRuntimeState(
           artifactCount: 0,
         }),
       };
-      return saveActiveThreadView(next);
+      return next;
     }
     case "run/threadSwitch":
-      return restoreThreadView(saveActiveThreadView(state), action.threadId);
+      return restoreThreadView(state, action.threadId);
     case "run/threadRenamed": {
       const next = threadItemFromRuntime(action.thread);
       const existing = state.threads.find(
@@ -2517,7 +2381,7 @@ export function reduceRuntimeState(
         action.event,
       );
       if (subagentNarrativeState) {
-        return saveActiveThreadView(subagentNarrativeState);
+        return subagentNarrativeState;
       }
       if (action.event.type === "AWAKEN_PLAN_UPDATED") {
         // Plan full snapshots update the per-run durable fact store. The
@@ -2535,12 +2399,10 @@ export function reduceRuntimeState(
         if (planState === state && projectedNarrative === state.narrative) {
           return state;
         }
-        return saveActiveThreadView(
-          syncActiveThreadSummary({
+        return syncActiveThreadSummary({
             ...planState,
             narrative: projectedNarrative,
-          }),
-        );
+          });
       }
       if (action.event.type === "TOOL_CALL_ARGS_DELTA") {
         const projectedNarrative = projectAguiEventToNarrative(
@@ -2550,9 +2412,7 @@ export function reduceRuntimeState(
         if (projectedNarrative === state.narrative) {
           return state;
         }
-        return saveActiveThreadView(
-          syncActiveThreadSummary({ ...state, narrative: projectedNarrative }),
-        );
+        return syncActiveThreadSummary({ ...state, narrative: projectedNarrative });
       }
       let nextState = { ...state };
       if (
@@ -3872,7 +3732,7 @@ export function reduceRuntimeState(
             nextState.runId,
           )
         : narrativeWithElapsed;
-      return saveActiveThreadView(syncActiveThreadSummary(nextState));
+      return syncActiveThreadSummary(nextState);
     }
     case "supervisor/status-changed":
       return {

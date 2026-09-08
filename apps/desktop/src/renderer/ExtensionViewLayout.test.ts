@@ -1,10 +1,8 @@
+import { readStyleSource } from "./style-test-source";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const extensionStyles = readFileSync(
-  new URL("./styles.css", import.meta.url),
-  "utf8",
-);
+const extensionStyles = readStyleSource(new URL("./styles.css", import.meta.url));
 const extensionsSource = readFileSync(
   new URL("./ExtensionsView.tsx", import.meta.url),
   "utf8",

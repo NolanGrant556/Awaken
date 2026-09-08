@@ -39,7 +39,7 @@ export function useThreadNavigation(options: Options) {
     onActiveThreadArchived,
     threadsForProject,
   } = options;
-  const { refreshThreads, loadThreadsIntoState, stopThreadTitlePoll } =
+  const { refreshThreads, loadThreadsIntoState } =
     options.directory;
 
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);

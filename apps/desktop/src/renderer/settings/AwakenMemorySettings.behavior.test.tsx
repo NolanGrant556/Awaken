@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
-import React, { act } from "react";
+import { AwakenMemorySettings, type AwakenMemoryActivityItem, type AwakenMemoryDetail, type AwakenMemoryListItem } from "@awaken/design-system";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AwakenMemorySettings, type AwakenMemoryActivityItem, type AwakenMemoryDetail, type AwakenMemoryListItem } from "@awaken/design-system";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

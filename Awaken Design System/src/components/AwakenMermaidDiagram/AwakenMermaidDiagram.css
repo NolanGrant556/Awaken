@@ -1,3 +1,302 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
+
+.assistant-mermaid-diagram {
+  display: grid;
+  position: relative;
+  align-content: start;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  max-height: min(420px, 70vh);
+  min-width: 0;
+  margin: 2px 0;
+  padding: 14px;
+  overflow: hidden;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-bg-white);
+}
+
+.assistant-mermaid-toolbar {
+  display: inline-flex;
+  z-index: 2;
+  align-items: center;
+  justify-self: end;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-control);
+  background: color-mix(in srgb, var(--aw-surface-raised) 92%, transparent);
+  box-shadow: var(--aw-shadow-raised);
+}
+
+.assistant-mermaid-diagram > .assistant-mermaid-toolbar {
+  position: sticky;
+  top: 0;
+}
+
+.assistant-mermaid-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--aw-radius-compact);
+  background: transparent;
+  color: var(--aw-text-muted);
+  cursor: pointer;
+}
+
+.assistant-mermaid-action svg {
+  width: var(--aw-icon-size-14);
+  height: var(--aw-icon-size-14);
+}
+
+.assistant-mermaid-action:hover,
+.assistant-mermaid-action:focus-visible {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+.assistant-mermaid-action:focus-visible {
+  outline: 2px solid var(--aw-focus-ring);
+  outline-offset: 2px;
+}
+
+.assistant-mermaid-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.assistant-mermaid-action.is-copied {
+  background: var(--aw-success-soft-bg);
+  color: var(--aw-status-success);
+}
+
+.assistant-mermaid-action.is-error {
+  background: var(--aw-error-soft-bg);
+  color: var(--aw-status-danger);
+}
+
+.assistant-mermaid-diagram::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+}
+
+.assistant-mermaid-diagram::-webkit-scrollbar-track,
+.assistant-mermaid-diagram::-webkit-scrollbar-track-piece,
+.assistant-mermaid-diagram::-webkit-scrollbar-corner {
+  border: 0;
+  background: transparent;
+}
+
+.assistant-mermaid-diagram::-webkit-scrollbar-thumb {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--aw-radius-pill);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent);
+}
+
+.assistant-mermaid-diagram::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.assistant-mermaid-diagram-svg {
+  display: flex;
+  width: 100%;
+  min-height: 100%;
+  justify-content: center;
+}
+
+.assistant-mermaid-diagram-svg svg {
+  display: block;
+  max-width: 100%;
+  max-height: 340px;
+  width: auto;
+  height: auto;
+}
+
+.assistant-mermaid-expanded-backdrop {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--aw-overlay-backdrop);
+}
+
+.assistant-mermaid-expanded-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  box-sizing: border-box;
+  width: min(1120px, calc(100vw - 48px));
+  height: min(760px, calc(100vh - 48px));
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+  border: 1px solid var(--aw-border-main);
+  border-radius: var(--aw-radius-panel);
+  background: var(--aw-bg-white);
+  box-shadow: var(--aw-shadow-popover);
+}
+
+.assistant-mermaid-expanded-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+
+.assistant-mermaid-expanded-panel .assistant-mermaid-toolbar {
+  position: static;
+  margin-bottom: 0;
+}
+
+.assistant-mermaid-zoom-controls {
+  display: inline-flex;
+  z-index: 2;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-control);
+  background: color-mix(in srgb, var(--aw-surface-raised) 92%, transparent);
+  box-shadow: var(--aw-shadow-raised);
+}
+
+.assistant-mermaid-zoom-range {
+  width: clamp(72px, 18vw, 116px);
+  accent-color: var(--aw-border-active);
+  cursor: pointer;
+}
+
+.assistant-mermaid-zoom-range:focus-visible {
+  outline: 2px solid var(--aw-focus-ring);
+  outline-offset: 2px;
+}
+
+.assistant-mermaid-zoom-value {
+  min-width: 42px;
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: var(--aw-line-height-xs);
+  text-align: center;
+}
+
+.assistant-mermaid-expanded-scroll {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+  border: 1px solid var(--aw-border-light);
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-bg-white);
+  cursor: grab;
+  overscroll-behavior: contain;
+  touch-action: none;
+  user-select: none;
+}
+
+.assistant-mermaid-expanded-scroll.is-panning {
+  cursor: grabbing;
+}
+
+.assistant-mermaid-expanded-zoom-frame {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  margin: auto;
+}
+
+.assistant-mermaid-expanded-svg {
+  align-self: start;
+  width: 100%;
+  height: 100%;
+  min-width: auto;
+  min-height: auto;
+}
+
+.assistant-mermaid-expanded-svg svg {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+}
+
+.assistant-mermaid-expanded-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+}
+
+.assistant-mermaid-expanded-scroll::-webkit-scrollbar-track,
+.assistant-mermaid-expanded-scroll::-webkit-scrollbar-track-piece,
+.assistant-mermaid-expanded-scroll::-webkit-scrollbar-corner {
+  border: 0;
+  background: transparent;
+}
+
+.assistant-mermaid-expanded-scroll::-webkit-scrollbar-thumb {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--aw-radius-pill);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent);
+}
+
+.assistant-mermaid-expanded-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.assistant-mermaid-diagram-loading {
+  place-items: center;
+  min-height: 140px;
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-sm);
+}
+
+.assistant-mermaid-diagram-error {
+  gap: 8px;
+  border-color: var(--aw-error-soft-border);
+  background: var(--aw-error-soft-bg);
+}
+
+.assistant-mermaid-error-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.assistant-mermaid-diagram-error figcaption {
+  margin: 0;
+  color: var(--aw-status-danger-text);
+  font-weight: var(--aw-font-weight-semibold);
+}
+
+.assistant-mermaid-diagram-error p {
+  color: var(--aw-status-danger-text);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+}
 
 /* AwakenMermaidDiagram uses shared assistant-message diagram styles. */

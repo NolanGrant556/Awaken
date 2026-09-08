@@ -1,4 +1,3 @@
-import React from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { ExternalActionGate } from "./ExternalActionGate";

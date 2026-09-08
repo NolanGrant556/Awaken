@@ -1,3 +1,4 @@
+import { runtimeRequestIssue } from "../../shared/runtime-request";
 const PLUGIN_ERROR_MESSAGES: Record<string, string> = {
   PLUGIN_NOT_FOUND: "插件不存在或已经被移除",
   PLUGIN_ALREADY_EXISTS: "已经存在同名插件",
@@ -19,31 +20,17 @@ const PLUGIN_ERROR_MESSAGES: Record<string, string> = {
   INVALID_REQUEST: "请求格式无效",
 };
 
-const IPC_PREFIX = /^Error invoking remote method\s+(['"])[^'"]+\1:\s*(?:Error:\s*)?/i;
 const POSIX_ABSOLUTE_PATH = /(?<!:)(?:\/[\w.@+~-]+){2,}/gu;
 const WINDOWS_ABSOLUTE_PATH = /\b[A-Za-z]:\\[^\r\n,，。；;）)\]"']+/g;
 
-function rawErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error ?? "");
-}
-
-function withoutIPC(error: unknown): string {
-  return rawErrorMessage(error)
-    .trim()
-    .replace(IPC_PREFIX, "")
-    .replace(/^Error:\s*/i, "")
-    .trim();
-}
-
 export function pluginErrorCode(error: unknown): string | null {
-  const match = withoutIPC(error).match(/(?:^|\s)([A-Z][A-Z0-9_]+)\s*:/);
-  return match?.[1] ?? null;
+  const code = runtimeRequestIssue(error).code;
+  return code === "DESKTOP_REQUEST_FAILED" ? null : code;
 }
 
 export function pluginErrorMessage(error: unknown): string {
-  const stripped = withoutIPC(error);
-  const code = pluginErrorCode(stripped);
+  const stripped = runtimeRequestIssue(error).message;
+  const code = pluginErrorCode(error);
   const mapped = code
     ? PLUGIN_ERROR_MESSAGES[code] ?? (code.startsWith("VARIABLE_") ? "插件变量配置无效" : undefined)
     : undefined;

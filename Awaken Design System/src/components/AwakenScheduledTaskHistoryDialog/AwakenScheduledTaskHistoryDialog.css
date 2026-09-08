@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 .aw-dialog.aw-scheduled-task-history-dialog {
   width: min(640px, calc(100vw - 48px));

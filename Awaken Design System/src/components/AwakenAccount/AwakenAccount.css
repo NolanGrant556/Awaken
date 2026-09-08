@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 .aw-account {
   width: min(100%, var(--aw-sidebar-width));

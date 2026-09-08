@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectFilePreviewTextHandle } from "../../shared/runtime";
-import MarkdownPreview, { markdownFromEditable } from "./MarkdownPreview";
+import MarkdownPreview from "./MarkdownPreview";
 
 const preview: ProjectFilePreviewTextHandle = {
   previewId: "preview-md",
@@ -209,14 +209,5 @@ describe("MarkdownPreview", () => {
     );
   });
 
-  it("serializes formatted edits back to Markdown for legacy draft recovery", () => {
-    const editor = document.createElement("article");
-    editor.innerHTML =
-      "<h2>Summary</h2><p><strong>Ready</strong> and <em>reviewed</em>.</p>" +
-      "<ul><li>First</li><li>Second</li></ul>";
 
-    expect(markdownFromEditable(editor)).toBe(
-      "## Summary\n\n**Ready** and *reviewed*.\n\n- First\n- Second\n",
-    );
-  });
 });

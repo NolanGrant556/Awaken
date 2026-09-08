@@ -1316,9 +1316,7 @@ export function ExtensionsView({
     try {
       const activeSessionId = connectorAuthSessions[connector.id];
       if (activeSessionId) {
-        if (!runtimeClient.cancelConnectorAuthSession) {
-          throw new Error("当前 Desktop 不支持取消连接器授权");
-        }
+
         await runtimeClient.cancelConnectorAuthSession(activeSessionId);
         setConnectorAuthSessions((current) => {
           const next = { ...current };
@@ -1349,10 +1347,7 @@ export function ExtensionsView({
   }
 
   async function pollConnectorAuthSession(connector: RuntimeConnector, sessionId: string): Promise<void> {
-    if (!runtimeClient.getConnectorAuthSession) {
-      setErrorMessage("当前 Desktop 不支持连接器授权会话");
-      return;
-    }
+
     for (;;) {
       await new Promise((resolve) => window.setTimeout(resolve, 750));
       try {
@@ -1392,10 +1387,7 @@ export function ExtensionsView({
       setErrorMessage("当前没有可标记的连接器授权会话");
       return;
     }
-    if (!runtimeClient.markConnectorAdminApprovalPending) {
-      setErrorMessage("当前 Desktop 不支持管理员审批状态");
-      return;
-    }
+
     setBusyConnectorId(connector.id);
     setErrorMessage(null);
     try {

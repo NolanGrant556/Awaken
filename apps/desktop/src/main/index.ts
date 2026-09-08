@@ -2989,6 +2989,7 @@ ipcMain.handle(
       return {
         provider: normalizeModelProvider(result.provider),
         message: result.message,
+        discoveredModelIds: result.discoveredModelIds,
       };
     }),
 );

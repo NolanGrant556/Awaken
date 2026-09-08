@@ -102,7 +102,9 @@ function providerModalSelectTrigger(label: string): HTMLButtonElement {
     document.querySelectorAll<HTMLButtonElement>(".aw-select__trigger"),
   ).find((button) => {
     const labelId = button.getAttribute("aria-labelledby");
-    return labelId ? document.getElementById(labelId)?.textContent === label : false;
+    return labelId
+      ? document.getElementById(labelId)?.textContent === label
+      : false;
   });
   if (!trigger) {
     throw new Error(`Select trigger not found for ${label}`);
@@ -129,10 +131,7 @@ function enterApiKey(value = "test-key"): void {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-function enterTextInput(
-  input: HTMLInputElement,
-  value: string,
-): void {
+function enterTextInput(input: HTMLInputElement, value: string): void {
   const setter = Object.getOwnPropertyDescriptor(
     HTMLInputElement.prototype,
     "value",
@@ -181,7 +180,10 @@ describe("DesktopSettingsDialog model connection feedback", () => {
       projectId: "project-1",
       archived: true,
       archivedAt: "2026-08-24T01:00:00Z",
-      workspace: { workspaceRoot: "/tmp/project-1", writableRoots: ["/tmp/project-1"] },
+      workspace: {
+        workspaceRoot: "/tmp/project-1",
+        writableRoots: ["/tmp/project-1"],
+      },
       createdAt: "2026-08-23T01:00:00Z",
       updatedAt: "2026-08-24T01:00:00Z",
     };
@@ -191,17 +193,22 @@ describe("DesktopSettingsDialog model connection feedback", () => {
       getAgentPlanAccount: vi.fn(async () => null),
       syncModelCapabilities: vi.fn(async () => [deepSeekProvider]),
       listThreads: vi.fn(async () => [archivedThread]),
-      listProjects: vi.fn(async () => [{
-        projectId: "project-1",
-        workspaceRoot: "/tmp/project-1",
-        folders: [],
-        displayName: "项目一",
-        state: "active",
-        createdAt: "2026-08-01T00:00:00Z",
-        updatedAt: "2026-08-01T00:00:00Z",
-        version: 1,
-      }]),
-      setThreadArchived: vi.fn(async () => ({ ok: true, thread: archivedThread })),
+      listProjects: vi.fn(async () => [
+        {
+          projectId: "project-1",
+          workspaceRoot: "/tmp/project-1",
+          folders: [],
+          displayName: "项目一",
+          state: "active",
+          createdAt: "2026-08-01T00:00:00Z",
+          updatedAt: "2026-08-01T00:00:00Z",
+          version: 1,
+        },
+      ]),
+      setThreadArchived: vi.fn(async () => ({
+        ok: true,
+        thread: archivedThread,
+      })),
     } as unknown as RuntimeClient;
 
     await act(async () => {
@@ -235,8 +242,11 @@ describe("DesktopSettingsDialog model connection feedback", () => {
     expect(toast?.getAttribute("role")).toBe("status");
     expect(toast?.getAttribute("aria-live")).toBe("polite");
     expect(toast?.getAttribute("aria-atomic")).toBe("true");
-    expect(container.querySelector(".aw-archived-chats + .aw-archived-chats__status-text"))
-      .toBeNull();
+    expect(
+      container.querySelector(
+        ".aw-archived-chats + .aw-archived-chats__status-text",
+      ),
+    ).toBeNull();
   });
 
   it("keeps progress and the successful result visible inside the provider modal", async () => {
@@ -389,7 +399,10 @@ describe("DesktopSettingsDialog model connection feedback", () => {
   });
 
   it("shows the three LLM protocols in the provider modal and refreshes the catalog status", async () => {
-    const refreshResult = deferred<{ provider: ModelProvider; message: string }>();
+    const refreshResult = deferred<{
+      provider: ModelProvider;
+      message: string;
+    }>();
     const runtimeClient = {
       listModelProviders: vi.fn(async () => [deepSeekProvider]),
       listModelProfiles: vi.fn(async () => []),
@@ -441,7 +454,9 @@ describe("DesktopSettingsDialog model connection feedback", () => {
 
     const messagesOption = Array.from(
       document.querySelectorAll<HTMLButtonElement>(".aw-select__option"),
-    ).find((button) => button.getAttribute("data-value") === "anthropic_messages");
+    ).find(
+      (button) => button.getAttribute("data-value") === "anthropic_messages",
+    );
     await act(async () => messagesOption?.click());
     expect(baseURLInput?.value).toBe("https://api.deepseek.com/anthropic");
     await act(async () => enterApiKey());
@@ -453,7 +468,9 @@ describe("DesktopSettingsDialog model connection feedback", () => {
 
     await act(async () => refreshButton?.click());
     expect(refreshButton?.disabled).toBe(true);
-    expect(container.textContent).not.toContain("当前先展示官方清单与本地缓存；填写或复用 API Key 后可从供应商 API 刷新。");
+    expect(container.textContent).not.toContain(
+      "当前先展示官方清单与本地缓存；填写或复用 API Key 后可从供应商 API 刷新。",
+    );
 
     await act(async () =>
       refreshResult.resolve({
@@ -467,9 +484,234 @@ describe("DesktopSettingsDialog model connection feedback", () => {
       }),
     );
 
-    expect(container.textContent).toContain("已从 DeepSeek API 同步 2 个模型。");
+    expect(container.textContent).toContain(
+      "已从 DeepSeek API 同步 2 个模型。",
+    );
     expect(refreshButton?.disabled).toBe(false);
     expect(runtimeClient.refreshModelCatalog).toHaveBeenCalledTimes(1);
+  });
+
+  it("defaults discovered models to checked and saves only the checked models", async () => {
+    const discoveredProvider: ModelProvider = {
+      ...deepSeekProvider,
+      models: ["deepseek-v4-pro", "deepseek-v4-flash", "responses-only"],
+      modelCapabilities: {
+        "deepseek-v4-pro": { supportedProtocols: ["openai_chat"] },
+        "deepseek-v4-flash": { supportedProtocols: ["openai_chat"] },
+        "responses-only": { supportedProtocols: ["openai_responses"] },
+      },
+      catalogSource: "provider_api",
+      catalogObservedAt: "2026-09-08T00:00:00.000Z",
+    };
+    const savedProfiles: RuntimeModelProfileSummary[] = [];
+    const runtimeClient = {
+      listModelProviders: vi.fn(async () => [deepSeekProvider]),
+      listModelProfiles: vi.fn(async () => savedProfiles),
+      getAgentPlanAccount: vi.fn(async () => null),
+      syncModelCapabilities: vi.fn(async () => [deepSeekProvider]),
+      refreshModelCatalog: vi.fn(async () => ({
+        provider: discoveredProvider,
+        message: "已从 DeepSeek API 同步 3 个模型。",
+        discoveredModelIds: [
+          "deepseek-v4-pro",
+          "deepseek-v4-flash",
+          "responses-only",
+        ],
+      })),
+      saveModelProfile: vi.fn(async (request) => {
+        const profile: RuntimeModelProfileSummary = {
+          id: `profile-${request.modelId}`,
+          providerId: request.providerId,
+          displayName: request.displayName ?? "DeepSeek",
+          modelId: request.modelId,
+          baseURL: request.baseURL ?? deepSeekProvider.baseURL,
+          protocol: request.protocol ?? deepSeekProvider.protocol,
+          authScheme: request.authScheme ?? deepSeekProvider.authScheme,
+          hasKey: true,
+          enabled: request.enabled ?? true,
+          isDefault: request.isDefault ?? false,
+          profileStatus: "ready",
+          advanced: request.advanced,
+        };
+        savedProfiles.push(profile);
+        return profile;
+      }),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <DesktopSettingsDialog
+          open
+          runtimeClient={runtimeClient}
+          theme="light"
+          themePreference="system"
+          themeSaving={false}
+          themeMessage={null}
+          onThemePreferenceChange={vi.fn()}
+          onOpenChange={vi.fn()}
+          onProfilesChanged={vi.fn()}
+          onThreadsChanged={vi.fn()}
+          initialModelSection="api"
+        />,
+      );
+    });
+    await settle();
+    await act(async () => providerButton()?.click());
+    await act(async () => enterApiKey("all-models-key"));
+
+    const refreshButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent?.includes("刷新模型目录"));
+    await act(async () => refreshButton?.click());
+    await settle();
+
+    const modelCheckboxes = Array.from(
+      document.querySelectorAll<HTMLInputElement>(
+        ".model-provider-model-checkbox",
+      ),
+    );
+    expect(modelCheckboxes).toHaveLength(2);
+    expect(modelCheckboxes.every((checkbox) => checkbox.checked)).toBe(true);
+    await act(async () => modelCheckboxes[1]?.click());
+
+    const saveButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent?.includes("保存连接"));
+    await act(async () => saveButton?.click());
+    await settle();
+
+    expect(runtimeClient.refreshModelCatalog).toHaveBeenLastCalledWith(
+      expect.objectContaining({ apiKey: "all-models-key" }),
+    );
+    expect(runtimeClient.refreshModelCatalog).toHaveBeenCalledTimes(2);
+    expect(runtimeClient.saveModelProfile).toHaveBeenCalledTimes(1);
+    expect(
+      vi
+        .mocked(runtimeClient.saveModelProfile)
+        .mock.calls.map(([request]) => request.modelId),
+    ).toEqual(["deepseek-v4-pro"]);
+    expect(
+      vi
+        .mocked(runtimeClient.saveModelProfile)
+        .mock.calls.map(([request]) => request.apiKey),
+    ).toEqual(["all-models-key"]);
+  });
+
+  it("shows model save failures inside the provider modal instead of the Settings toast", async () => {
+    const runtimeClient = {
+      listModelProviders: vi.fn(async () => [deepSeekProvider]),
+      listModelProfiles: vi.fn(async () => []),
+      getAgentPlanAccount: vi.fn(async () => null),
+      syncModelCapabilities: vi.fn(async () => [deepSeekProvider]),
+      refreshModelCatalog: vi.fn(async () => ({
+        provider: deepSeekProvider,
+        message: "已从 DeepSeek API 同步 1 个模型。",
+        discoveredModelIds: ["deepseek-v4-pro"],
+      })),
+      saveModelProfile: vi.fn(async () => {
+        throw new Error("模型配置重复，添加失败");
+      }),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <DesktopSettingsDialog
+          open
+          runtimeClient={runtimeClient}
+          theme="light"
+          themePreference="system"
+          themeSaving={false}
+          themeMessage={null}
+          onThemePreferenceChange={vi.fn()}
+          onOpenChange={vi.fn()}
+          onProfilesChanged={vi.fn()}
+          onThreadsChanged={vi.fn()}
+          initialModelSection="api"
+        />,
+      );
+    });
+    await settle();
+    await act(async () => providerButton()?.click());
+    await act(async () => enterApiKey("failing-key"));
+    const saveButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent?.includes("保存连接"));
+    await act(async () => saveButton?.click());
+    await settle();
+
+    expect(
+      document.querySelector(".model-provider-operation-error")?.textContent,
+    ).toContain("模型配置重复，添加失败");
+    expect(document.querySelector(".aw-settings-toast")).toBeNull();
+    expect(
+      document.querySelector(".model-settings-message")?.textContent ?? "",
+    ).not.toContain("模型配置重复");
+  });
+
+  it("upserts a profile that appeared after the provider modal opened", async () => {
+    const existingProfile: RuntimeModelProfileSummary = {
+      id: "deepseek-existing",
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "deepseek-v4-pro",
+      baseURL: deepSeekProvider.baseURL,
+      protocol: deepSeekProvider.protocol,
+      authScheme: deepSeekProvider.authScheme,
+      hasKey: true,
+      enabled: true,
+      isDefault: true,
+      profileStatus: "ready",
+    };
+    const listModelProfiles = vi
+      .fn<() => Promise<RuntimeModelProfileSummary[]>>()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([existingProfile]);
+    const runtimeClient = {
+      listModelProviders: vi.fn(async () => [deepSeekProvider]),
+      listModelProfiles,
+      getAgentPlanAccount: vi.fn(async () => null),
+      syncModelCapabilities: vi.fn(async () => [deepSeekProvider]),
+      refreshModelCatalog: vi.fn(async () => ({
+        provider: deepSeekProvider,
+        message: "已从 DeepSeek API 同步 1 个模型。",
+        discoveredModelIds: ["deepseek-v4-pro"],
+      })),
+      saveModelProfile: vi.fn(async () => existingProfile),
+    } as unknown as RuntimeClient;
+
+    await act(async () => {
+      root.render(
+        <DesktopSettingsDialog
+          open
+          runtimeClient={runtimeClient}
+          theme="light"
+          themePreference="system"
+          themeSaving={false}
+          themeMessage={null}
+          onThemePreferenceChange={vi.fn()}
+          onOpenChange={vi.fn()}
+          onProfilesChanged={vi.fn()}
+          onThreadsChanged={vi.fn()}
+          initialModelSection="api"
+        />,
+      );
+    });
+    await settle();
+    await act(async () => providerButton()?.click());
+    await act(async () => enterApiKey("retry-key"));
+    const saveButton = Array.from(
+      document.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent?.includes("保存连接"));
+    await act(async () => saveButton?.click());
+    await settle();
+
+    expect(runtimeClient.saveModelProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "deepseek-existing",
+        templateProfileId: undefined,
+        modelId: "deepseek-v4-pro",
+      }),
+    );
   });
 
   it("labels a custom endpoint as user-declared instead of an official three-protocol provider", async () => {
@@ -491,7 +733,10 @@ describe("DesktopSettingsDialog model connection feedback", () => {
       listModelProviders: vi.fn(async () => [deepSeekProvider, customProvider]),
       listModelProfiles: vi.fn(async () => []),
       getAgentPlanAccount: vi.fn(async () => null),
-      syncModelCapabilities: vi.fn(async () => [deepSeekProvider, customProvider]),
+      syncModelCapabilities: vi.fn(async () => [
+        deepSeekProvider,
+        customProvider,
+      ]),
       saveModelProfile: vi.fn(async (request) => ({
         id: "custom-profile",
         providerId: "custom",
@@ -545,8 +790,10 @@ describe("DesktopSettingsDialog model connection feedback", () => {
       "OpenAI Responses",
       "Anthropic Messages",
     ]);
-    expect(container.textContent).toContain("选择接口协议并填写对应的 Base URL");
-    expect(document.querySelector('input[placeholder="输入模型 ID"]')).toBeTruthy();
+    expect(container.querySelector(".model-provider-template-note")).toBeNull();
+    expect(
+      document.querySelector('input[placeholder="输入模型 ID"]'),
+    ).toBeTruthy();
     expect(document.querySelector(".model-custom-picker-trigger")).toBeNull();
     expect(
       Array.from(document.querySelectorAll("button")).some((button) =>
@@ -636,7 +883,9 @@ describe("DesktopSettingsDialog model connection feedback", () => {
     await settle();
     await act(async () => providerButton("Kimi Coding Plan")?.click());
 
-    expect(container.textContent).toContain("未提供可由当前推理凭据调用的模型目录 API");
+    expect(container.textContent).toContain(
+      "未提供可由当前推理凭据调用的模型目录 API",
+    );
     expect(
       Array.from(document.querySelectorAll("button")).some((button) =>
         button.textContent?.includes("刷新模型目录"),
@@ -709,8 +958,12 @@ describe("DesktopSettingsDialog model connection feedback", () => {
     await act(async () => llmButton?.click());
     await settle();
 
-    expect(container.textContent).not.toContain("未知（等待目录数据或用户覆盖）");
-    expect(container.textContent).toContain("当前目录没有返回上下文窗口，可手动输入后保存。");
+    expect(container.textContent).not.toContain(
+      "未知（等待目录数据或用户覆盖）",
+    );
+    expect(container.textContent).toContain(
+      "当前目录没有返回上下文窗口，可手动输入后保存。",
+    );
     expect(container.querySelector(".configured-context-range")).toBeNull();
 
     const contextInput = container.querySelector<HTMLInputElement>(

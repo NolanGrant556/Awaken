@@ -83,24 +83,68 @@ describe("AwakenModelProviderForm custom model input", () => {
       );
     });
 
-    const input = host.querySelector<HTMLInputElement>('input[role="combobox"]');
+    const input = host.querySelector<HTMLInputElement>(
+      'input[role="combobox"]',
+    );
     expect(input?.value).toBe("qwen3.8-max");
     expect(host.querySelector("datalist")).toBeNull();
     expect(input?.getAttribute("aria-expanded")).toBe("false");
     act(() => input?.focus());
-    expect([...host.querySelectorAll('[role="option"]')].map((option) => option.textContent))
-      .toEqual(["qwen3.8-max", "qwen3.7-plus"]);
+    expect(
+      [...host.querySelectorAll('[role="option"]')].map(
+        (option) => option.textContent,
+      ),
+    ).toEqual(["qwen3.8-max", "qwen3.7-plus"]);
     expect(input?.getAttribute("aria-expanded")).toBe("true");
-    act(() => host.querySelectorAll<HTMLButtonElement>('[role="option"]')[1]?.click());
+    act(() =>
+      host.querySelectorAll<HTMLButtonElement>('[role="option"]')[1]?.click(),
+    );
     expect(onModelChange).toHaveBeenCalledWith("qwen3.7-plus");
     act(() => {
       if (input) {
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        )?.set;
         setter?.call(input, "qwen-custom-id");
         input.dispatchEvent(new Event("input", { bubbles: true }));
       }
     });
     expect(onModelChange).toHaveBeenCalledWith("qwen-custom-id");
+  });
+
+  it("renders model candidates as right-aligned checkboxes in multi-select mode", () => {
+    const onSelectedModelIdsChange = vi.fn();
+    act(() => {
+      root.render(
+        <AwakenModelProviderForm
+          providerId="deepseek"
+          modelMode="multi-select"
+          models={["deepseek-v4-pro", "deepseek-v4-flash"]}
+          modelId="deepseek-v4-pro"
+          selectedModelIds={["deepseek-v4-pro", "deepseek-v4-flash"]}
+          baseURL="https://api.deepseek.com"
+          apiKey="key"
+          apiKeyPlaceholder="API Key"
+          apiDocsURL="https://platform.deepseek.com/api_keys"
+          onModelChange={vi.fn()}
+          onSelectedModelIdsChange={onSelectedModelIdsChange}
+          onBaseURLChange={vi.fn()}
+          onApiKeyChange={vi.fn()}
+        />,
+      );
+    });
+
+    expect(
+      host.querySelector('.aw-select__trigger[aria-labelledby$="model-label"]'),
+    ).toBeNull();
+    const checkboxes = host.querySelectorAll<HTMLInputElement>(
+      ".model-provider-model-checkbox",
+    );
+    expect(checkboxes).toHaveLength(2);
+    expect([...checkboxes].every((checkbox) => checkbox.checked)).toBe(true);
+    act(() => checkboxes[1]?.click());
+    expect(onSelectedModelIdsChange).toHaveBeenCalledWith(["deepseek-v4-pro"]);
   });
 
   it("offers Ark Model IDs while allowing a manual Endpoint ID", () => {
@@ -130,21 +174,28 @@ describe("AwakenModelProviderForm custom model input", () => {
       );
     });
 
-    const input = host.querySelector<HTMLInputElement>('input[role="combobox"]');
+    const input = host.querySelector<HTMLInputElement>(
+      'input[role="combobox"]',
+    );
     expect(input?.placeholder).toBe("选择或输入 Model ID / Endpoint ID");
     expect(input?.value).toBe("Doubao-Seed-2.1-Pro");
     expect(host.textContent).toContain("模型 / 推理接入点");
     act(() => input?.focus());
-    expect([...host.querySelectorAll('[role="option"]')].map((option) => option.textContent))
-      .toEqual([
-        "Doubao-Seed-2.1-Pro",
-        "Doubao-Seed-2.1-Turbo",
-      ]);
-    act(() => host.querySelectorAll<HTMLButtonElement>('[role="option"]')[1]?.click());
+    expect(
+      [...host.querySelectorAll('[role="option"]')].map(
+        (option) => option.textContent,
+      ),
+    ).toEqual(["Doubao-Seed-2.1-Pro", "Doubao-Seed-2.1-Turbo"]);
+    act(() =>
+      host.querySelectorAll<HTMLButtonElement>('[role="option"]')[1]?.click(),
+    );
     expect(onModelChange).toHaveBeenCalledWith("doubao-seed-2-1-turbo-260628");
     act(() => {
       if (input) {
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value",
+        )?.set;
         setter?.call(input, "ep-custom-endpoint");
         input.dispatchEvent(new Event("input", { bubbles: true }));
       }
@@ -208,13 +259,17 @@ describe("AwakenModelProviderForm custom model input", () => {
     );
 
     act(() => root.render(renderForm("", "")));
-    const button = host.querySelector<HTMLButtonElement>(".model-provider-primary-test")!;
+    const button = host.querySelector<HTMLButtonElement>(
+      ".model-provider-primary-test",
+    )!;
     expect(button.disabled).toBe(true);
 
     act(() => root.render(renderForm("local-model", "")));
     expect(button.disabled).toBe(true);
 
-    act(() => root.render(renderForm("local-model", "http://127.0.0.1:8080/v1")));
+    act(() =>
+      root.render(renderForm("local-model", "http://127.0.0.1:8080/v1")),
+    );
     expect(button.disabled).toBe(false);
     act(() => button.click());
     expect(onTest).toHaveBeenCalledTimes(1);
@@ -250,7 +305,9 @@ describe("AwakenModelProviderForm custom model input", () => {
       );
     });
 
-    expect(host.querySelectorAll(".model-provider-readonly-choice")).toHaveLength(2);
+    expect(
+      host.querySelectorAll(".model-provider-readonly-choice"),
+    ).toHaveLength(2);
     expect(host.querySelectorAll(".aw-select__trigger")).toHaveLength(0);
     expect(host.textContent).not.toContain("API 密钥发送方式");
     expect(host.textContent).not.toContain("当前 Header：");

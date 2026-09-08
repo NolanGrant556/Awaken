@@ -21,10 +21,11 @@ export type AwakenModelProviderTestFeedback = {
 export type AwakenModelProviderFormProps = {
   providerId: string;
   presentation?: "inline" | "modal";
-  modelMode: "custom" | "editable" | "endpoint" | "select";
+  modelMode: "custom" | "editable" | "endpoint" | "select" | "multi-select";
   models: string[];
   modelDisplayNames?: Record<string, string>;
   modelId: string;
+  selectedModelIds?: string[];
   protocol?: string;
   protocolOptions?: Array<{ value: string; label: string }>;
   authScheme?: string;
@@ -46,6 +47,7 @@ export type AwakenModelProviderFormProps = {
   saving?: boolean;
   testing?: boolean;
   testFeedback?: AwakenModelProviderTestFeedback | null;
+  operationError?: string | null;
   showCatalogRefresh?: boolean;
   refreshingCatalog?: boolean;
   catalogStatus?: string;
@@ -54,6 +56,7 @@ export type AwakenModelProviderFormProps = {
   refreshingAccount?: boolean;
   deletingAccount?: boolean;
   onModelChange: (modelId: string) => void;
+  onSelectedModelIdsChange?: (modelIds: string[]) => void;
   onProtocolChange?: (protocol: string) => void;
   onAuthSchemeChange?: (authScheme: string) => void;
   onBaseURLChange: (baseURL: string) => void;
@@ -98,8 +101,11 @@ export function AwakenModelProviderForm({
   models,
   modelDisplayNames = EMPTY_MODEL_DISPLAY_NAMES,
   modelId,
+  selectedModelIds = [],
   protocol = "openai_chat",
-  protocolOptions = [{ value: "openai_chat", label: "OpenAI Chat Completions" }],
+  protocolOptions = [
+    { value: "openai_chat", label: "OpenAI Chat Completions" },
+  ],
   authScheme = "bearer",
   authSchemeOptions = [{ value: "bearer", label: "Authorization: Bearer" }],
   showAuthScheme = false,
@@ -119,6 +125,7 @@ export function AwakenModelProviderForm({
   saving = false,
   testing = false,
   testFeedback = null,
+  operationError = null,
   showCatalogRefresh = false,
   refreshingCatalog = false,
   catalogStatus,
@@ -127,6 +134,7 @@ export function AwakenModelProviderForm({
   refreshingAccount = false,
   deletingAccount = false,
   onModelChange,
+  onSelectedModelIdsChange,
   onProtocolChange,
   onAuthSchemeChange,
   onBaseURLChange,
@@ -147,8 +155,7 @@ export function AwakenModelProviderForm({
   );
   const modelCatalogRef = useRef<HTMLDivElement>(null);
   const hasDraftApiKey = authScheme === "none" || apiKey.trim().length > 0;
-  const hasTestTarget =
-    modelId.trim().length > 0 && baseURL.trim().length > 0;
+  const hasTestTarget = modelId.trim().length > 0 && baseURL.trim().length > 0;
   const canTest = hasDraftApiKey && hasTestTarget;
   const fieldId = useId();
   const modelLabelId = `${fieldId}-model-label`;
@@ -217,12 +224,18 @@ export function AwakenModelProviderForm({
 
       {showManagementApiKey ? (
         <div className="model-provider-field">
-          <label htmlFor={`${fieldId}-management-api-key`}>组织用量管理密钥（可选）</label>
+          <label htmlFor={`${fieldId}-management-api-key`}>
+            组织用量管理密钥（可选）
+          </label>
           <input
             id={`${fieldId}-management-api-key`}
             type="password"
             value={managementApiKey}
-            placeholder={maskedManagementApiKey ? `已保存 ${maskedManagementApiKey}；留空保持不变` : "仅用于组织用量与成本 API，不参与推理"}
+            placeholder={
+              maskedManagementApiKey
+                ? `已保存 ${maskedManagementApiKey}；留空保持不变`
+                : "仅用于组织用量与成本 API，不参与推理"
+            }
             onChange={(event) => onManagementApiKeyChange?.(event.target.value)}
           />
         </div>
@@ -230,7 +243,9 @@ export function AwakenModelProviderForm({
 
       {modelMode === "custom" ? (
         <div className="model-provider-field">
-          <label id={modelLabelId} htmlFor={modelInputId}>模型</label>
+          <label id={modelLabelId} htmlFor={modelInputId}>
+            模型
+          </label>
           <input
             id={modelInputId}
             type="text"
@@ -240,6 +255,36 @@ export function AwakenModelProviderForm({
             onChange={(event) => onModelChange(event.target.value)}
           />
         </div>
+      ) : modelMode === "multi-select" ? (
+        <fieldset className="model-provider-model-checklist-field">
+          <legend>模型</legend>
+          <div className="model-provider-model-checklist">
+            {models.map((model) => {
+              const checked = selectedModelIds.includes(model);
+              return (
+                <label
+                  key={model}
+                  className="model-provider-model-checklist__option"
+                >
+                  <span>{modelDisplayValue(modelDisplayNames, model)}</span>
+                  <input
+                    className="model-provider-model-checkbox"
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => {
+                      const next = event.target.checked
+                        ? [...selectedModelIds, model]
+                        : selectedModelIds.filter(
+                            (modelId) => modelId !== model,
+                          );
+                      onSelectedModelIdsChange?.(next);
+                    }}
+                  />
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
       ) : modelMode === "endpoint" || modelMode === "editable" ? (
         <div className="model-provider-field">
           <label id={modelLabelId} htmlFor={modelInputId}>
@@ -296,13 +341,17 @@ export function AwakenModelProviderForm({
                     role="option"
                     aria-selected={model === modelId}
                     onClick={() => {
-                      setModelInputValue(modelDisplayValue(modelDisplayNames, model));
+                      setModelInputValue(
+                        modelDisplayValue(modelDisplayNames, model),
+                      );
                       onModelChange(model);
                       setModelCatalogOpen(false);
                     }}
                   >
                     <span>{modelDisplayValue(modelDisplayNames, model)}</span>
-                    {model === modelId ? <AwakenIcon concept="success" size={16} /> : null}
+                    {model === modelId ? (
+                      <AwakenIcon concept="success" size={16} />
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -333,7 +382,10 @@ export function AwakenModelProviderForm({
             authSchemeOptions,
             onAuthSchemeChange,
           )}
-          <p id={authHeaderExampleId} className="model-provider-auth-header-example">
+          <p
+            id={authHeaderExampleId}
+            className="model-provider-auth-header-example"
+          >
             当前 Header：
             <code>{authHeaderExample(authScheme)}</code>
           </p>
@@ -341,7 +393,9 @@ export function AwakenModelProviderForm({
       ) : null}
 
       <div className="model-provider-field">
-        <label htmlFor={`${fieldId}-api-key`}>{authScheme === "none" ? "API 密钥（不需要）" : "API 密钥"}</label>
+        <label htmlFor={`${fieldId}-api-key`}>
+          {authScheme === "none" ? "API 密钥（不需要）" : "API 密钥"}
+        </label>
         <div className="model-provider-secret-field">
           <input
             id={`${fieldId}-api-key`}
@@ -358,7 +412,11 @@ export function AwakenModelProviderForm({
             aria-pressed={showApiKey}
             onClick={() => onShowApiKeyChange?.(!showApiKey)}
           >
-            {showApiKey ? <AwakenIcon concept="conceal" size={16} /> : <AwakenIcon concept="reveal" size={16} />}
+            {showApiKey ? (
+              <AwakenIcon concept="conceal" size={16} />
+            ) : (
+              <AwakenIcon concept="reveal" size={16} />
+            )}
           </button>
         </div>
       </div>
@@ -367,7 +425,10 @@ export function AwakenModelProviderForm({
         <div className="model-provider-capability-toggle">
           <div>
             <strong>视觉多模态</strong>
-            <p>开启后允许发送图片，并可把 PDF 页面渲染为图片读取；不代表接口支持原生 PDF。</p>
+            <p>
+              开启后允许发送图片，并可把 PDF
+              页面渲染为图片读取；不代表接口支持原生 PDF。
+            </p>
           </div>
           <AwakenSwitch
             checked={supportsVision}
@@ -397,7 +458,12 @@ export function AwakenModelProviderForm({
               variant="default"
               size="md"
               loading={refreshingCatalog}
-              disabled={saving || deletingAccount || refreshingAccount || !hasDraftApiKey}
+              disabled={
+                saving ||
+                deletingAccount ||
+                refreshingAccount ||
+                !hasDraftApiKey
+              }
               onClick={onRefreshCatalog}
             >
               刷新模型目录
@@ -405,17 +471,48 @@ export function AwakenModelProviderForm({
           ) : null}
           {showAccountActions ? (
             <>
-              <AwakenButton variant="default" size="md" loading={refreshingAccount} disabled={saving || deletingAccount} onClick={onRefreshAccount}>刷新模型目录</AwakenButton>
-              <AwakenButton variant="default" size="md" loading={deletingAccount} disabled={saving || refreshingAccount} onClick={onDeleteAccount}>删除账户</AwakenButton>
+              <AwakenButton
+                variant="default"
+                size="md"
+                loading={refreshingAccount}
+                disabled={saving || deletingAccount}
+                onClick={onRefreshAccount}
+              >
+                刷新模型目录
+              </AwakenButton>
+              <AwakenButton
+                variant="default"
+                size="md"
+                loading={deletingAccount}
+                disabled={saving || refreshingAccount}
+                onClick={onDeleteAccount}
+              >
+                删除账户
+              </AwakenButton>
             </>
           ) : null}
         </div>
       ) : null}
 
       {catalogStatus ? (
-        <p className="model-provider-status-note" role="status" aria-live="polite">
+        <p
+          className="model-provider-status-note"
+          role="status"
+          aria-live="polite"
+        >
           {catalogStatus}
         </p>
+      ) : null}
+
+      {operationError ? (
+        <div
+          className="model-provider-operation-error"
+          role="alert"
+          aria-live="assertive"
+        >
+          <AwakenIcon concept="error" size={16} />
+          <span>{operationError}</span>
+        </div>
       ) : null}
 
       {presentation === "modal" ? (
@@ -449,14 +546,36 @@ export function AwakenModelProviderForm({
 
       <div className="model-provider-form-footer">
         <div className="model-provider-link-row">
-          <a href={apiDocsURL} target="_blank" rel="noreferrer"><AwakenIcon concept="api-key" size={14} />获取 API 密钥</a>
-          {accountStatus ? <span className="model-provider-account-status">{accountStatus}</span> : null}
+          <a href={apiDocsURL} target="_blank" rel="noreferrer">
+            <AwakenIcon concept="api-key" size={14} />
+            获取 API 密钥
+          </a>
+          {accountStatus ? (
+            <span className="model-provider-account-status">
+              {accountStatus}
+            </span>
+          ) : null}
         </div>
         <div className="model-provider-form-actions">
           {presentation === "modal" && onCancel ? (
-            <AwakenButton variant="default" size="md" disabled={saving} onClick={onCancel}>取消</AwakenButton>
+            <AwakenButton
+              variant="default"
+              size="md"
+              disabled={saving}
+              onClick={onCancel}
+            >
+              取消
+            </AwakenButton>
           ) : null}
-          <AwakenButton variant="primary" size="md" loading={saving} disabled={testing} onClick={onSubmit}>保存连接</AwakenButton>
+          <AwakenButton
+            variant="primary"
+            size="md"
+            loading={saving}
+            disabled={testing}
+            onClick={onSubmit}
+          >
+            保存连接
+          </AwakenButton>
         </div>
       </div>
     </>

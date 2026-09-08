@@ -276,7 +276,7 @@ type SkillHooks struct {
 // execution time. MCP prompts/list only returns names and descriptions;
 // the actual prompt template must be fetched via prompts/get.
 type McpBodyFetcher interface {
-	FetchPromptBody(ctx context.Context, serverName, promptName string) (string, error)
+	FetchBody(ctx context.Context, binding McpBinding, args map[string]string) (string, error)
 }
 
 // McpBinding identifies the MCP prompt or resource that was bridged into
@@ -286,7 +286,10 @@ type McpBinding struct {
 	// ServerName is the MCP server that hosts this prompt or resource.
 	ServerName string `json:"serverName" yaml:"serverName"`
 
-	// PromptName is the original prompt or resource name on the server.
+	// ResourceURI is the exact URI used by resources/read.
+	ResourceURI string `json:"resourceUri,omitempty" yaml:"resourceUri,omitempty"`
+
+	// PromptName is the original prompt name on the server.
 	PromptName string `json:"promptName" yaml:"promptName"`
 
 	// Kind is "prompt" for prompts/list entries or "resource" for

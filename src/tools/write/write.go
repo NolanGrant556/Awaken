@@ -98,7 +98,7 @@ func (t *Tool) ExecuteOutcome(ctx context.Context, input string, _ tool.ToolObse
 		state = tool.NewToolSessionState(permissionContext.WorkspaceRootOrCWD())
 	}
 	var outcome tool.ExecutionOutcome
-	err = state.WithPathLock(path, func(canonical string) error {
+	err = state.WithPathLockContext(ctx, path, func(canonical string) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}

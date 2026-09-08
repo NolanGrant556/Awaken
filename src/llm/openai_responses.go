@@ -234,9 +234,12 @@ func (t *openAIResponsesTransport) streamPrepared(ctx stdctx.Context, cfg Config
 		}
 		if data == "[DONE]" {
 			terminalSeen = true
-			continue
+			break
 		}
 		state.consume(data)
+		if state.completed {
+			break
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		if watchdog.TimedOut() {

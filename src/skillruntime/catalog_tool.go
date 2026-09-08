@@ -144,7 +144,7 @@ Available Skills:
 func (t *CatalogTool) Parameters() []tool.ToolParameter {
 	return []tool.ToolParameter{
 		{Name: "skill", Type: "string", Description: "Catalog Skill name.", Required: true},
-		{Name: "args", Type: "string", Description: "Optional arguments passed to the Skill.", Required: false},
+		{Name: "args", Type: "string", Description: "Optional arguments passed to the Skill. For MCP prompt skills, pass a JSON object string with named string values, e.g. {\"name\":\"Ada\"}.", Required: false},
 	}
 }
 

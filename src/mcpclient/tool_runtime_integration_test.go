@@ -55,12 +55,12 @@ func TestMixedMCPReadOperationsRepeatWhileDuplicateWritesStayBlocked(t *testing.
 		call := convcontext.ToolCall{ID: fmt.Sprint(i), Function: convcontext.FunctionCall{Name: name, Arguments: args}}
 		decision := supervisor.BeforeCall(call)
 		if i == 4 {
-			if !decision.Block || decision.ErrorCode != agentcore.ErrorCodeRepeatedSuccessfulMutation {
+			if decision.Action != agentcore.CallBlock || decision.ErrorCode != agentcore.ErrorCodeRepeatedSuccessfulMutation {
 				t.Fatalf("repeat write escaped: %+v", decision)
 			}
 			continue
 		}
-		if !decision.Allow {
+		if decision.Action != agentcore.CallExecute {
 			t.Fatalf("call %d blocked: %+v", i, decision)
 		}
 		supervisor.NoteRealExecution(decision.CallSignature)

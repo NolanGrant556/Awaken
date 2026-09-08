@@ -1,0 +1,14 @@
+{
+  "fix-A.txt": {
+    "content": "FIX A LLM VERIFIED",
+    "sha256": "67da22b2cdc61013013590b8cfdd4326c580b5eb7978c634fbdc0fbdea4feb25"
+  },
+  "fix-B.txt": {
+    "content": "FIX B PERSISTED",
+    "sha256": "33f37067738308d40d98e2596aa4b5c2e40f20b7a5cac04e1413152496236b9f"
+  },
+  "fix.notesunknown": {
+    "content": "UNKNOWN TEXT SAVED 0909",
+    "sha256": "0ee7f1e4516dc4039154a97d63d87a991fa0ecf41f217ceab3c5dba7f58e5ad2"
+  }
+}

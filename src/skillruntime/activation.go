@@ -2,6 +2,7 @@ package skillruntime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -191,7 +192,32 @@ func (a *Activator) Activate(req ActivationRequest) (*SkillActivationPlan, error
 		if fetchCtx == nil {
 			fetchCtx = context.Background()
 		}
-		fetched, fetchErr := def.BodyFetcher.FetchPromptBody(fetchCtx, def.McpBinding.ServerName, def.McpBinding.PromptName)
+		supplied := req.Args
+		if supplied == nil && strings.TrimSpace(req.RawArgs) != "" {
+			if err := json.Unmarshal([]byte(req.RawArgs), &supplied); err != nil || supplied == nil {
+				cerr := SkillCompatibilityError{Code: "invalid_argument", Message: "MCP skill args must be a JSON object of named string values"}
+				plan.CompatibilityStatus = CompatibilityFailed
+				plan.CompatibilityErrors = append(plan.CompatibilityErrors, cerr)
+				return plan, &cerr
+			}
+		}
+		args := make(map[string]string, len(def.Arguments))
+		for _, arg := range def.Arguments {
+			value := supplied[arg.Name]
+			if value == "" && arg.Required {
+				cerr := SkillCompatibilityError{Code: "missing_argument", Message: fmt.Sprintf("skill %q requires argument %q", skillID, arg.Name)}
+				plan.CompatibilityStatus = CompatibilityFailed
+				plan.CompatibilityErrors = append(plan.CompatibilityErrors, cerr)
+				return plan, &cerr
+			}
+			if value == "" {
+				value = arg.Default
+			}
+			if value != "" {
+				args[arg.Name] = value
+			}
+		}
+		fetched, fetchErr := def.BodyFetcher.FetchBody(fetchCtx, *def.McpBinding, args)
 		if fetchErr != nil {
 			plan.CompatibilityStatus = CompatibilityFailed
 			cerr := SkillCompatibilityError{Code: CompatibilityFailed, Message: fetchErr.Error()}
@@ -211,7 +237,7 @@ func (a *Activator) Activate(req ActivationRequest) (*SkillActivationPlan, error
 	}
 	promptRoot := skillRootForPrompt(runtime.GOOS, def.RootDir)
 	body = strings.ReplaceAll(body, "${AWAKEN_SKILL_DIR}", promptRoot)
-	if !req.SkipArgRender {
+	if !req.SkipArgRender && def.McpBinding == nil {
 		argDefs := make([]SkillArgDef, len(def.Arguments))
 		for i, arg := range def.Arguments {
 			argDefs[i] = SkillArgDef{

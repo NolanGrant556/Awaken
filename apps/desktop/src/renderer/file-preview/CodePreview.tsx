@@ -323,25 +323,13 @@ export default function CodePreview({
   const onCreateCommentRef = useRef(onCreateComment);
   const onDeleteCommentRef = useRef(onDeleteComment);
   const onSaveRef = useRef(onSave);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const latestContentRef = useRef(preview.content);
+  const commentDisabledRef = useRef(commentDisabled);
   const [saveError, setSaveError] = useState<string>();
   const [editorVersion, setEditorVersion] = useState(0);
   onCreateCommentRef.current = onCreateComment;
   onDeleteCommentRef.current = onDeleteComment;
   onSaveRef.current = onSave;
-
-  const saveContent = useCallback((content: string) => {
-    latestContentRef.current = content;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    if (!onSaveRef.current) return;
-    saveTimerRef.current = setTimeout(() => {
-      saveTimerRef.current = undefined;
-      void onSaveRef.current?.(latestContentRef.current).then((result) => {
-        setSaveError(result.ok ? undefined : result.message);
-      }).catch(() => setSaveError("暂时无法自动保存这个文件。"));
-    }, 450);
-  }, []);
+  commentDisabledRef.current = commentDisabled;
 
   const updateSelection = useCallback((view: EditorView, expose: boolean) => {
     if (!expose) return;
@@ -357,6 +345,26 @@ export default function CodePreview({
     let cancelled = false;
     const host = editorHostRef.current;
     if (!host) return;
+    // Capture this editor's owner. Cleanup must never use the next preview's
+    // callback or content, even when React renders that preview first.
+    const save = onSaveRef.current;
+    let latestContent = preview.content;
+    let saveTimer: ReturnType<typeof setTimeout> | undefined;
+    const flush = () => {
+      saveTimer = undefined;
+      if (!save) return;
+      void save(latestContent).then((result) => {
+        if (!cancelled) setSaveError(result.ok ? undefined : result.message);
+      }).catch(() => {
+        if (!cancelled) setSaveError("暂时无法自动保存这个文件。");
+      });
+    };
+    const saveContent = (content: string) => {
+      latestContent = content;
+      if (saveTimer) clearTimeout(saveTimer);
+      if (save) saveTimer = setTimeout(flush, 450);
+    };
+    setSaveError(undefined);
     void loadPreviewLanguage(preview.displayName, preview.language).then(
       (language) => {
         if (cancelled || !editorHostRef.current) return;
@@ -373,7 +381,7 @@ export default function CodePreview({
                 {
                   key: "Mod-Shift-m",
                   run: (currentView) => {
-                    if (commentDisabled || !onCreateCommentRef.current) return false;
+                    if (commentDisabledRef.current || !onCreateCommentRef.current) return false;
                     const selection = codePreviewLineSelection(currentView.state);
                     lineSelectionRef.current = selection;
                     setLineSelection(selection);
@@ -436,18 +444,15 @@ export default function CodePreview({
     );
     return () => {
       cancelled = true;
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = undefined;
-        if (onSaveRef.current && latestContentRef.current !== preview.content) {
-          void onSaveRef.current(latestContentRef.current);
-        }
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        flush();
       }
       editorRef.current?.destroy();
       editorRef.current = null;
       host.replaceChildren();
     };
-  }, [commentDisabled, editable, preview.displayName, preview.language, preview.previewId, saveContent, updateSelection]);
+  }, [editable, preview.displayName, preview.language, preview.previewId, updateSelection]);
 
   useEffect(() => {
     const editor = editorRef.current;

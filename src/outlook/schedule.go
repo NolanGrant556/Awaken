@@ -72,8 +72,22 @@ func (s *MailScheduler) Start() error {
 	if s.started {
 		return nil
 	}
-	if _, err := s.loadLocked(); err != nil {
+	file, err := s.loadLocked()
+	if err != nil {
 		return err
+	}
+	changed := false
+	for i := range file.Items {
+		if file.Items[i].State == "sending" {
+			file.Items[i].State = "failed"
+			file.Items[i].LastError = "发送结果未知，请先核对已发送邮件；不会自动重试"
+			changed = true
+		}
+	}
+	if changed {
+		if err := s.saveLocked(file); err != nil {
+			return err
+		}
 	}
 	s.started = true
 	s.stopCh = make(chan struct{})
@@ -220,6 +234,10 @@ func (s *MailScheduler) Cancel(ctx context.Context, scheduleID string, deleteDra
 		kept := file.Items[:0]
 		for _, item := range file.Items {
 			if item.ID == scheduleID {
+				if item.State == "sending" {
+					s.mu.Unlock()
+					return CancelScheduledMailResult{}, fmt.Errorf("邮件已进入发送阶段，无法确认取消；请核对已发送邮件")
+				}
 				cancelled = item
 				continue
 			}
@@ -305,7 +323,7 @@ func (s *MailScheduler) nextDelay() time.Duration {
 	now := s.now()
 	var next time.Time
 	for _, item := range file.Items {
-		if item.State == "failed" {
+		if item.State != "scheduled" {
 			continue
 		}
 		due := item.SendAt
@@ -335,7 +353,7 @@ func (s *MailScheduler) processDue() {
 	now := s.now().UTC()
 	due := make([]ScheduledMail, 0)
 	for _, item := range file.Items {
-		if item.State == "failed" {
+		if item.State != "scheduled" {
 			continue
 		}
 		dueAt := item.SendAt
@@ -347,20 +365,53 @@ func (s *MailScheduler) processDue() {
 		}
 	}
 	s.mu.Unlock()
-	for _, item := range due {
+	for _, candidate := range due {
+		item, claimed, err := s.claimDue(candidate.ID)
+		if err != nil {
+			return
+		}
+		if !claimed {
+			continue
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		sendErr := s.client.SendDraft(ctx, item.Mailbox, item.DraftID)
 		cancel()
-		s.recordAttempt(item.ID, sendErr)
+		if err := s.recordAttempt(item.ID, sendErr); err != nil {
+			return
+		}
 	}
 }
 
-func (s *MailScheduler) recordAttempt(scheduleID string, sendErr error) {
+// claimDue rechecks the durable record immediately before dispatch. Cancellation
+// and dispatch have one owner: only a persisted sending claim permits a send.
+func (s *MailScheduler) claimDue(id string) (ScheduledMail, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	file, err := s.loadLocked()
 	if err != nil {
-		return
+		return ScheduledMail{}, false, err
+	}
+	now := s.now()
+	for i := range file.Items {
+		item := &file.Items[i]
+		if item.ID != id || item.State != "scheduled" || item.SendAt.After(now) || (item.NextAttemptAt != nil && item.NextAttemptAt.After(now)) {
+			continue
+		}
+		item.State = "sending"
+		if err := s.saveLocked(file); err != nil {
+			return ScheduledMail{}, false, err
+		}
+		return *item, true, nil
+	}
+	return ScheduledMail{}, false, nil
+}
+
+func (s *MailScheduler) recordAttempt(scheduleID string, sendErr error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	file, err := s.loadLocked()
+	if err != nil {
+		return err
 	}
 	kept := file.Items[:0]
 	for _, item := range file.Items {
@@ -386,7 +437,7 @@ func (s *MailScheduler) recordAttempt(scheduleID string, sendErr error) {
 		kept = append(kept, item)
 	}
 	file.Items = kept
-	_ = s.saveLocked(file)
+	return s.saveLocked(file)
 }
 
 func (s *MailScheduler) reload() {

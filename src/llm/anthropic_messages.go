@@ -286,6 +286,9 @@ func (t *anthropicTransport) streamPrepared(ctx stdctx.Context, cfg Config, prep
 				continue
 			}
 			state.consume(data, currentEvent)
+			if state.completed {
+				break
+			}
 		}
 	}
 

@@ -30,7 +30,7 @@ func (s *Store) UpdateMCPSource(name, logicalID, expectedRecordedDigest, source 
 
 	var result UpdateComponentSourceResult
 	changed := false
-	err := s.withMutationLock(func() error {
+	err := s.withMutationLock(func() (operationErr error) {
 		state, err := s.readStateUnlocked()
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
@@ -99,7 +99,9 @@ func (s *Store) UpdateMCPSource(name, logicalID, expectedRecordedDigest, source 
 		if err != nil {
 			return fmt.Errorf("create MCP source edit staging directory: %w", err)
 		}
-		defer os.RemoveAll(transactionRoot)
+		// Before activation this directory contains only a disposable candidate.
+		// Once the rollback record exists, failed operations keep the previous package.
+		defer finishPluginRollback(transactionRoot, &operationErr)
 		candidateRoot := filepath.Join(transactionRoot, "candidate")
 		if err := filestore.EnsureDir(candidateRoot); err != nil {
 			return err
@@ -164,6 +166,9 @@ func (s *Store) UpdateMCPSource(name, logicalID, expectedRecordedDigest, source 
 			return recordedDigestChangedError(expectedRecordedDigest, current.Digest)
 		}
 
+		if err := writeRollback(transactionRoot, pluginRollback{Name: name, Previous: current, PackageBackup: "previous", NextDigest: validation.Digest}); err != nil {
+			return err
+		}
 		previousRoot := filepath.Join(transactionRoot, "previous")
 		if err := os.Rename(liveRoot, previousRoot); err != nil {
 			return fmt.Errorf("stage previous plugin package: %w", err)

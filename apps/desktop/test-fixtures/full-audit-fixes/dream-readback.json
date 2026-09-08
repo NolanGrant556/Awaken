@@ -1,0 +1,29 @@
+{
+  "task_id": "dream_0c63d883a44a45848266e454aaab9007",
+  "status": "completed",
+  "phase": "terminal",
+  "project_id": null,
+  "scopes": [
+    "user"
+  ],
+  "reports": {
+    "user": {
+      "updated": 0,
+      "superseded": 0,
+      "conflicts": 0,
+      "skipped": 0
+    }
+  },
+  "created_at": "2026-09-08T17:55:24.91679Z",
+  "finished_at": "2026-09-08T17:55:30.404671Z",
+  "model_usage": [
+    {
+      "purpose": "memory_maintenance",
+      "model_id": "k3",
+      "protocol_family": "openai_chat",
+      "status": "succeeded",
+      "input_tokens": 720,
+      "output_tokens": 32
+    }
+  ]
+}

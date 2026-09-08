@@ -57,7 +57,12 @@ export type FilePreviewHostProps = {
 type PreviewState =
   | { status: "idle" }
   | { status: "loading"; requestId: string; displayName: string }
-  | { status: "ready"; preview: ProjectFilePreviewHandle }
+  | {
+      status: "ready";
+      preview: ProjectFilePreviewHandle;
+      request: ProjectFilePreviewActionRequest;
+      saveState: { digest?: string; queue: Promise<void> };
+    }
   | { status: "error"; requestId: string; message: string };
 
 function previewRequestId(): string {
@@ -86,11 +91,6 @@ export default function FilePreviewHost({
   const [retryGeneration, setRetryGeneration] = useState(0);
   const [guestLoading, setGuestLoading] = useState(false);
   const activePreviewIdRef = useRef<string | undefined>(undefined);
-  const textSaveStateRef = useRef<{
-    previewId?: string;
-    digest?: string;
-    queue: Promise<void>;
-  }>({ queue: Promise.resolve() });
   const generationRef = useRef(0);
   const onModeChangeRef = useRef(onModeChange);
   const onPreviewLabelChangeRef = useRef(onPreviewLabelChange);
@@ -138,15 +138,15 @@ export default function FilePreviewHost({
           return;
         }
         activePreviewIdRef.current = result.preview.previewId;
-        textSaveStateRef.current = {
-          previewId: result.preview.previewId,
-          digest: result.preview.transport === "text"
-            ? result.preview.contentDigest
-            : undefined,
-          queue: Promise.resolve(),
-        };
         onModeChangeRef.current(result.preview.kind === "html" ? "browser" : "files");
-        setState({ status: "ready", preview: result.preview });
+        setState({
+          status: "ready", preview: result.preview,
+          request: { projectId, folderPath, relativePath: selection.relativePath },
+          saveState: {
+            digest: result.preview.transport === "text" ? result.preview.contentDigest : undefined,
+            queue: Promise.resolve(),
+          },
+        });
       })
       .catch(() => {
         if (generationRef.current === generation) {
@@ -189,7 +189,7 @@ export default function FilePreviewHost({
   });
 
   const actionRequest: ProjectFilePreviewActionRequest | undefined =
-    projectId && folderPath && selection
+    state.status === "ready" ? state.request : projectId && folderPath && selection
       ? {
           projectId,
           folderPath,
@@ -222,21 +222,23 @@ export default function FilePreviewHost({
   }
 
   const saveTextContent = (content: string) => {
-    if (!actionRequest) {
+    if (state.status !== "ready") {
       return Promise.resolve({
         ok: false as const,
         code: "INVALID_REQUEST" as const,
         message: "无法保存此文件。",
       });
     }
-    const saveState = textSaveStateRef.current;
+    // The request and digest belong to the loaded preview, including its final
+    // flush after selection has already moved to another file.
+    const { request, saveState } = state;
     return new Promise<Awaited<ReturnType<RuntimeClient["saveProjectMarkdownFile"]>>>((resolve, reject) => {
       saveState.queue = saveState.queue
         .catch(() => undefined)
         .then(async () => {
           try {
             const result = await runtimeClient.saveProjectMarkdownFile({
-              ...actionRequest,
+              ...request,
               content,
               expectedDigest: saveState.digest,
             });
@@ -254,7 +256,7 @@ export default function FilePreviewHost({
     kind: "comment" | "selection",
     commentText = "",
   ) => {
-    const contentDigest = textSaveStateRef.current.digest;
+    const contentDigest = state.status === "ready" ? state.saveState.digest : undefined;
     if (!projectId || !folderPath || !selection || !contentDigest) return;
     const item: FileLineComment = {
       id: globalThis.crypto?.randomUUID?.() ??

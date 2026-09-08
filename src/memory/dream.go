@@ -271,7 +271,7 @@ func (r *DreamRunner) Start(parent context.Context, store *Store, cfg llm.Config
 	task := DreamTask{TaskID: "dream_" + strings.ReplaceAll(uuid.NewString(), "-", ""), Status: DreamQueued, Phase: "queued", ProjectID: project, Scopes: append([]Scope(nil), scopes...), Reports: map[Scope]MaintenanceReport{}, CreatedAt: now}
 	ctx, cancel := context.WithCancel(parent)
 	r.mu.Lock()
-	r.tasks[task.TaskID] = task
+	r.tasks[task.TaskID] = cloneDreamTask(task)
 	r.cancels[task.TaskID] = cancel
 	err := r.persistLocked(task)
 	if err != nil {
@@ -287,11 +287,59 @@ func (r *DreamRunner) Start(parent context.Context, store *Store, cfg llm.Config
 	return task, nil
 }
 
+func cloneDreamTask(task DreamTask) DreamTask {
+	task.Scopes = append([]Scope(nil), task.Scopes...)
+	if task.Reports != nil {
+		reports := make(map[Scope]MaintenanceReport, len(task.Reports))
+		for scope, report := range task.Reports {
+			reports[scope] = report
+		}
+		task.Reports = reports
+	}
+	task.StartedAt = cloneDreamValue(task.StartedAt)
+	task.FinishedAt = cloneDreamValue(task.FinishedAt)
+	task.ModelRequests = append([]DreamModelRequest(nil), task.ModelRequests...)
+	task.ModelUsage = append([]DreamModelUsageRecord(nil), task.ModelUsage...)
+	for i := range task.ModelUsage {
+		usage := &task.ModelUsage[i]
+		usage.InputTokens = cloneDreamValue(usage.InputTokens)
+		usage.CachedInputTokens = cloneDreamValue(usage.CachedInputTokens)
+		usage.UncachedInputTokens = cloneDreamValue(usage.UncachedInputTokens)
+		usage.CacheWriteTokens = cloneDreamValue(usage.CacheWriteTokens)
+		usage.OutputTokens = cloneDreamValue(usage.OutputTokens)
+		usage.ReasoningTokens = cloneDreamValue(usage.ReasoningTokens)
+		usage.TotalTokens = cloneDreamValue(usage.TotalTokens)
+		usage.CalculatedCostUSD = cloneDreamValue(usage.CalculatedCostUSD)
+		usage.PricingSnapshot = cloneDreamValue(usage.PricingSnapshot)
+		usage.RateLimitObservation = cloneDreamValue(usage.RateLimitObservation)
+		usage.RawUsage.PromptTokens = cloneDreamValue(usage.RawUsage.PromptTokens)
+		usage.RawUsage.InputTokens = cloneDreamValue(usage.RawUsage.InputTokens)
+		usage.RawUsage.CompletionTokens = cloneDreamValue(usage.RawUsage.CompletionTokens)
+		usage.RawUsage.OutputTokens = cloneDreamValue(usage.RawUsage.OutputTokens)
+		usage.RawUsage.ReasoningTokens = cloneDreamValue(usage.RawUsage.ReasoningTokens)
+		usage.RawUsage.TotalTokens = cloneDreamValue(usage.RawUsage.TotalTokens)
+		usage.RawUsage.CachedTokens = cloneDreamValue(usage.RawUsage.CachedTokens)
+		usage.RawUsage.PromptCacheHitTokens = cloneDreamValue(usage.RawUsage.PromptCacheHitTokens)
+		usage.RawUsage.PromptCacheMissTokens = cloneDreamValue(usage.RawUsage.PromptCacheMissTokens)
+		usage.RawUsage.CacheReadInputTokens = cloneDreamValue(usage.RawUsage.CacheReadInputTokens)
+		usage.RawUsage.CacheCreationInputTokens = cloneDreamValue(usage.RawUsage.CacheCreationInputTokens)
+	}
+	return task
+}
+
+func cloneDreamValue[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	copied := *value
+	return &copied
+}
+
 func (r *DreamRunner) Get(taskID string) (DreamTask, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	task, ok := r.tasks[taskID]
-	return task, ok
+	return cloneDreamTask(task), ok
 }
 func (r *DreamRunner) Cancel(taskID string) bool {
 	r.mu.RLock()
@@ -315,7 +363,7 @@ func (r *DreamRunner) List(limit int, projectID string) []DreamTask {
 		if (projectID == "" && task.ProjectID != "") || (projectID != "" && task.ProjectID != "" && task.ProjectID != projectID) {
 			continue
 		}
-		result = append(result, task)
+		result = append(result, cloneDreamTask(task))
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
 	if len(result) > limit {
@@ -405,7 +453,7 @@ func (r *DreamRunner) run(ctx context.Context, store *Store, cfg llm.Config, tas
 func (r *DreamRunner) update(taskID string, mutate func(*DreamTask)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	task := r.tasks[taskID]
+	task := cloneDreamTask(r.tasks[taskID])
 	mutate(&task)
 	r.tasks[taskID] = task
 	return r.persistLocked(task)

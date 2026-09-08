@@ -11,6 +11,7 @@ export function AwakenContextButton({ onClick, disabled }: AwakenContextButtonPr
   return (
     <AwakenIconButton
       label="添加上下文"
+      title="addContext"
       onClick={onClick}
       disabled={disabled}
       variant="square"

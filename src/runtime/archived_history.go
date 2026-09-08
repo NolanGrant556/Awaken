@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -154,16 +153,7 @@ func (s *RunService) ReadArchivedHistory(_ context.Context, request tool.Archive
 		return tool.ArchivedHistoryReadResult{}, archivedHistoryError(tool.ArchivedHistoryErrorReadFailed, "the archived journal could not be read", true)
 	}
 
-	records := make([]agentcore.SemanticRecord, 0)
-	for _, run := range transcript.Runs {
-		records = append(records, run.SemanticRecords...)
-	}
-	sort.SliceStable(records, func(i, j int) bool {
-		if records[i].Seq != records[j].Seq {
-			return records[i].Seq < records[j].Seq
-		}
-		return records[i].Timestamp.Before(records[j].Timestamp)
-	})
+	records := sortedThreadHistoryRecords(transcript)
 	items := make([]tool.ArchivedHistoryItem, 0, len(records))
 	for _, record := range records {
 		if request.BeforeSeq > 0 && record.Seq >= request.BeforeSeq {

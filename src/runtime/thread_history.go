@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -60,16 +61,7 @@ func (s *RunService) ReadCurrentThreadHistory(_ context.Context, request tool.Th
 		}
 		return tool.ThreadHistoryReadResult{}, archivedHistoryError(tool.ThreadHistoryErrorReadFailed, "current thread journal could not be read", true)
 	}
-	records := make([]agentcore.SemanticRecord, 0)
-	for _, run := range transcript.Runs {
-		records = append(records, run.SemanticRecords...)
-	}
-	sort.SliceStable(records, func(i, j int) bool {
-		if records[i].Seq != records[j].Seq {
-			return records[i].Seq < records[j].Seq
-		}
-		return records[i].Timestamp.Before(records[j].Timestamp)
-	})
+	records := sortedThreadHistoryRecords(transcript)
 	queryLower := strings.ToLower(query)
 	items := make([]tool.ArchivedHistoryItem, 0, len(records))
 	for _, record := range records {
@@ -108,6 +100,21 @@ func (s *RunService) ReadCurrentThreadHistory(_ context.Context, request tool.Th
 	return result, nil
 }
 
+// Copy before sorting so history queries cannot reorder transcript run data.
+func sortedThreadHistoryRecords(transcript ThreadTranscript) []agentcore.SemanticRecord {
+	records := make([]agentcore.SemanticRecord, 0)
+	for _, run := range transcript.Runs {
+		records = append(records, run.SemanticRecords...)
+	}
+	sort.SliceStable(records, func(i, j int) bool {
+		if records[i].Seq != records[j].Seq {
+			return records[i].Seq < records[j].Seq
+		}
+		return records[i].Timestamp.Before(records[j].Timestamp)
+	})
+	return records
+}
+
 func sanitizeCurrentThreadHistoryContent(content string) string {
 	content = threadHistorySecretPattern.ReplaceAllStringFunc(content, func(value string) string {
 		for index, char := range value {
@@ -140,51 +147,34 @@ func boundThreadHistoryItems(items []tool.ArchivedHistoryItem, maxTotalChars int
 	if len(items) == 0 || maxTotalChars <= 0 {
 		return []tool.ArchivedHistoryItem{}, len(items) > 0
 	}
-	consume := func(item tool.ArchivedHistoryItem, remaining int) (tool.ArchivedHistoryItem, int, bool) {
-		runes := []rune(item.Content)
-		if len(runes) <= remaining {
-			return item, remaining - len(runes), false
-		}
-		if remaining <= 0 {
-			return tool.ArchivedHistoryItem{}, remaining, true
-		}
-		item.Content = string(runes[:remaining])
-		item.ContentTruncated = true
-		return item, 0, true
-	}
 	remaining := maxTotalChars
 	result := make([]tool.ArchivedHistoryItem, 0, len(items))
 	truncated := false
-	if !preferTail {
-		for _, item := range items {
-			bounded, next, clipped := consume(item, remaining)
-			if bounded.Seq == 0 {
-				truncated = true
-				break
-			}
-			result = append(result, bounded)
-			remaining = next
-			truncated = truncated || clipped
-			if remaining == 0 {
-				truncated = truncated || len(result) < len(items)
-				break
-			}
+	for offset := range items {
+		index := offset
+		if preferTail {
+			index = len(items) - 1 - offset
 		}
-		return result, truncated
-	}
-	for index := len(items) - 1; index >= 0; index-- {
-		bounded, next, clipped := consume(items[index], remaining)
-		if bounded.Seq == 0 {
+		item := items[index]
+		if item.Seq == 0 {
 			truncated = true
 			break
 		}
-		result = append([]tool.ArchivedHistoryItem{bounded}, result...)
-		remaining = next
-		truncated = truncated || clipped
+		runes := []rune(item.Content)
+		if len(runes) > remaining {
+			item.Content = string(runes[:remaining])
+			item.ContentTruncated = true
+			truncated = true
+		}
+		remaining -= min(len(runes), remaining)
+		result = append(result, item)
 		if remaining == 0 {
 			truncated = truncated || len(result) < len(items)
 			break
 		}
+	}
+	if preferTail {
+		slices.Reverse(result)
 	}
 	return result, truncated
 }

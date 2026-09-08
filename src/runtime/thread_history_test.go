@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -33,10 +35,61 @@ func TestReadCurrentThreadHistoryIsBoundedQueryableAndCurrentThreadOnly(t *testi
 	if err != nil || len(page.Items) != 2 || page.NextBeforeSeq == 0 {
 		t.Fatalf("latest page=%+v err=%v", page, err)
 	}
+	older, err := service.ReadCurrentThreadHistory(context.Background(), tool.ThreadHistoryReadRequest{
+		ThreadID: "thread_current_history", BeforeSeq: page.NextBeforeSeq, Limit: 2, MaxCharsPerItem: 100,
+	})
+	if err != nil || len(older.Items) != 2 || older.Items[0].Content != "first question" || older.Items[1].Content != "first answer" || older.NextBeforeSeq != 0 {
+		t.Fatalf("older page=%+v err=%v", older, err)
+	}
+	forward, err := service.ReadCurrentThreadHistory(context.Background(), tool.ThreadHistoryReadRequest{
+		ThreadID: "thread_current_history", AfterSeq: older.Items[1].Seq, Limit: 1, MaxCharsPerItem: 100,
+	})
+	if err != nil || len(forward.Items) != 1 || forward.Items[0].Content != "second question" || forward.NextAfterSeq != forward.Items[0].Seq {
+		t.Fatalf("forward page=%+v err=%v", forward, err)
+	}
 	if _, err := service.ReadCurrentThreadHistory(context.Background(), tool.ThreadHistoryReadRequest{
 		ThreadID: "thread_current_history", BeforeSeq: 10, AfterSeq: 1,
 	}); archivedHistoryErrorCode(err) != tool.ThreadHistoryErrorInvalidInput {
 		t.Fatalf("mixed sequence range error=%v", err)
+	}
+}
+
+func TestThreadHistoryBudgetPreservesOrderAndInput(t *testing.T) {
+	items := []tool.ArchivedHistoryItem{
+		{Seq: 1, Content: "甲乙丙"},
+		{Seq: 2, Content: "🙂ab"},
+		{Seq: 3, Content: "丁戊己"},
+	}
+	for _, test := range []struct {
+		name       string
+		budget     int
+		preferTail bool
+		want       []tool.ArchivedHistoryItem
+		truncated  bool
+	}{
+		{"head_partial", 5, false, []tool.ArchivedHistoryItem{{Seq: 1, Content: "甲乙丙"}, {Seq: 2, Content: "🙂a", ContentTruncated: true}}, true},
+		{"tail_partial", 5, true, []tool.ArchivedHistoryItem{{Seq: 2, Content: "🙂a", ContentTruncated: true}, {Seq: 3, Content: "丁戊己"}}, true},
+		{"head_exact_item", 3, false, items[:1], true},
+		{"tail_exact_item", 3, true, items[2:], true},
+		{"head_full_page", 9, false, items, false},
+		{"tail_full_page", 9, true, items, false},
+		{"head_spare_budget", 12, false, items, false},
+		{"tail_spare_budget", 12, true, items, false},
+		{"zero_budget", 0, false, []tool.ArchivedHistoryItem{}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			input := slices.Clone(items)
+			got, truncated := boundThreadHistoryItems(input, test.budget, test.preferTail)
+			if !reflect.DeepEqual(got, test.want) || truncated != test.truncated {
+				t.Fatalf("got %+v truncated=%v; want %+v truncated=%v", got, truncated, test.want, test.truncated)
+			}
+			if !reflect.DeepEqual(input, items) {
+				t.Fatal("budgeting modified the source history")
+			}
+		})
+	}
+	if got, truncated := boundThreadHistoryItems(nil, 5, true); len(got) != 0 || truncated {
+		t.Fatalf("empty history=%+v truncated=%v", got, truncated)
 	}
 }
 

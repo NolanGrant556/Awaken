@@ -2150,18 +2150,7 @@ func (s *RunService) ListThreads(view ThreadListView) []ThreadSnapshot {
 			seen[thread.ThreadID] = true
 		}
 	}
-	sort.Slice(threads, func(i, j int) bool {
-		if view == ThreadListViewArchived && !threads[i].ArchivedAt.Equal(threads[j].ArchivedAt) {
-			return threads[i].ArchivedAt.After(threads[j].ArchivedAt)
-		}
-		if !threads[i].UpdatedAt.Equal(threads[j].UpdatedAt) {
-			return threads[i].UpdatedAt.After(threads[j].UpdatedAt)
-		}
-		if !threads[i].CreatedAt.Equal(threads[j].CreatedAt) {
-			return threads[i].CreatedAt.After(threads[j].CreatedAt)
-		}
-		return threads[i].ThreadID < threads[j].ThreadID
-	})
+	sortThreadSnapshots(threads, view)
 	return threads
 }
 

@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,6 +28,24 @@ const (
 	// internal reconciliation and tests, not for the regular sidebar.
 	ThreadListViewAll ThreadListView = "all"
 )
+
+// Both durable lists and merged live lists use the same ordering. Archive
+// time takes priority only in the archived view; the thread ID breaks ties.
+func sortThreadSnapshots(threads []ThreadSnapshot, view ThreadListView) {
+	sort.Slice(threads, func(i, j int) bool {
+		a, b := threads[i], threads[j]
+		if view == ThreadListViewArchived && !a.ArchivedAt.Equal(b.ArchivedAt) {
+			return a.ArchivedAt.After(b.ArchivedAt)
+		}
+		if !a.UpdatedAt.Equal(b.UpdatedAt) {
+			return a.UpdatedAt.After(b.UpdatedAt)
+		}
+		if !a.CreatedAt.Equal(b.CreatedAt) {
+			return a.CreatedAt.After(b.CreatedAt)
+		}
+		return a.ThreadID < b.ThreadID
+	})
+}
 
 type ThreadStore interface {
 	CreateThread(snapshot ThreadSnapshot, modelProfileKey, preview string) error

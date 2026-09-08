@@ -572,7 +572,8 @@ function reconnectDelay(retryCount: number): number {
 }
 
 function isTerminalEvent(event: AguiEvent): boolean {
-  return event.type === "RUN_FINISHED" || event.type === "RUN_ERROR";
+  return event.type === "RUN_FINISHED" || event.type === "RUN_ERROR"
+    || (event.type === "RUN_STATUS_CHANGED" && (event.status === "cancelled" || event.status === "finished" || event.status === "error"));
 }
 
 function isRunNotFoundError(message: string): boolean {
@@ -824,6 +825,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
 
       const wrappedHandlers = {
         onEvent: (event: AguiEvent) => {
+          if (disposed) return;
           const cursor = event.streamCursor ?? event.seq;
           if (cursor !== undefined && cursor > lastCursor) {
             lastCursor = cursor;
@@ -878,7 +880,9 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
       async function resubscribe(): Promise<void> {
         if (disposed || terminalSeen) return;
         try {
-          currentSubscriptionId = await bridge.subscribeRun(runId, wrappedHandlers, lastCursor);
+          const subscriptionId = await bridge.subscribeRun(runId, wrappedHandlers, lastCursor);
+          if (disposed || terminalSeen) bridge.unsubscribeRun(subscriptionId);
+          else currentSubscriptionId = subscriptionId;
         } catch (error) {
           if (disposed || terminalSeen) return;
           attemptReconnect(error instanceof Error ? error.message : "Reconnection failed");

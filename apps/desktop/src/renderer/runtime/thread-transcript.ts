@@ -141,6 +141,12 @@ export function actionsForThreadTranscript(
         receivedAtMs: receivedAtMsForReplayEvent(entry.run, event),
       });
     });
+    // Older Core versions could pair a terminal run snapshot with events read
+    // just before the terminal was published. Reconcile after replay so those
+    // earlier RUN_STARTED frames cannot leave a finished task looking busy.
+    if (entry.run.status !== "running" && entry.run.status !== "cancelling") {
+      actions.push({ type: "run/snapshotSynced", run: entry.run });
+    }
   });
 
   return actions;

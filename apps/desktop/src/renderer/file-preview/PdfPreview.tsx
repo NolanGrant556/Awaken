@@ -8,6 +8,7 @@ import {
 } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { ProjectFilePreviewUrlHandle } from "../../shared/runtime";
+import { PreviewToolsMenu } from "./PreviewToolsMenu";
 import PreviewFrame, { type PreviewFrameProps } from "./PreviewFrame";
 
 GlobalWorkerOptions.workerSrc = workerUrl;
@@ -173,6 +174,47 @@ export default function PdfPreview({
     setScale(clamp(nextScale, MIN_SCALE, MAX_SCALE));
   };
 
+  const zoomControls = (
+    <div className="project-file-preview-heading__control-group">
+      <button
+        type="button"
+        aria-label="缩小"
+        title="缩小"
+        onClick={() => changeScale((fitWidth ? 1 : scale) - SCALE_STEP)}
+      >
+        <AwakenIcon concept="collapse" size={16} />
+      </button>
+      <output aria-label="缩放比例">
+        {fitWidth ? "适宽" : `${Math.round(scale * 100)}%`}
+      </output>
+      <button
+        type="button"
+        aria-label="放大"
+        title="放大"
+        onClick={() => changeScale((fitWidth ? 1 : scale) + SCALE_STEP)}
+      >
+        <AwakenIcon concept="add" size={16} />
+      </button>
+      <button
+        type="button"
+        aria-label="适应宽度"
+        title="适应宽度"
+        aria-pressed={fitWidth}
+        onClick={() => setFitWidth(true)}
+      >
+        <AwakenIcon concept="fit-page" size={16} />
+      </button>
+      <button
+        type="button"
+        aria-label="顺时针旋转"
+        title="顺时针旋转"
+        onClick={() => setRotation((value) => (value + 90) % 360)}
+      >
+        <AwakenIcon concept="rotate-cw" size={16} />
+      </button>
+    </div>
+  );
+
   return (
     <PreviewFrame
       {...frameProps}
@@ -214,44 +256,10 @@ export default function PdfPreview({
               <AwakenIcon concept="disclose" size={16} />
             </button>
           </div>
-          <div className="project-file-preview-heading__control-group">
-            <button
-              type="button"
-              aria-label="缩小"
-              title="缩小"
-              onClick={() => changeScale((fitWidth ? 1 : scale) - SCALE_STEP)}
-            >
-              <AwakenIcon concept="collapse" size={16} />
-            </button>
-            <output aria-label="缩放比例">
-              {fitWidth ? "适宽" : `${Math.round(scale * 100)}%`}
-            </output>
-            <button
-              type="button"
-              aria-label="放大"
-              title="放大"
-              onClick={() => changeScale((fitWidth ? 1 : scale) + SCALE_STEP)}
-            >
-              <AwakenIcon concept="add" size={16} />
-            </button>
-            <button
-              type="button"
-              aria-label="适应宽度"
-              title="适应宽度"
-              aria-pressed={fitWidth}
-              onClick={() => setFitWidth(true)}
-            >
-              <AwakenIcon concept="fit-page" size={16} />
-            </button>
-            <button
-              type="button"
-              aria-label="顺时针旋转"
-              title="顺时针旋转"
-              onClick={() => setRotation((value) => (value + 90) % 360)}
-            >
-              <AwakenIcon concept="rotate-cw" size={16} />
-            </button>
+          <div className="project-file-pdf-preview__full-tools">
+            {zoomControls}
           </div>
+          <PreviewToolsMenu>{zoomControls}</PreviewToolsMenu>
         </div>
       }
     >

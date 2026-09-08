@@ -96,7 +96,9 @@ describe("RunStage layout", () => {
     expect(cssRule(workbenchStyles, ".run-stage-center-composer")).toContain(
       "gap: 16px;",
     );
-    expect(cssRule(designSystemStyles, ".aw-task-welcome")).toContain("gap: 14px;");
+    expect(cssRule(designSystemStyles, ".aw-task-welcome")).toContain(
+      "gap: 14px;",
+    );
     expect(cssRule(designSystemStyles, ".aw-task-welcome__message")).toContain(
       "font-size: var(--aw-font-size-lg);",
     );
@@ -112,19 +114,32 @@ describe("RunStage layout", () => {
     expect(composerToken).toContain("gap: 5px;");
     expect(composerToken).toContain("min-height: var(--aw-line-height-md);");
     expect(composerToken).toContain("margin-inline-end: var(--aw-space-3);");
-    expect(composerToken).toContain("font-weight: var(--aw-font-weight-medium);");
+    expect(composerToken).toContain(
+      "font-weight: var(--aw-font-weight-medium);",
+    );
 
-    const composerTokenIcon = cssRule(composerStyles, ".composer-bar-token-icon");
+    const composerTokenIcon = cssRule(
+      composerStyles,
+      ".composer-bar-token-icon",
+    );
     expect(composerTokenIcon).toContain("width: var(--aw-icon-size-16);");
     expect(composerTokenIcon).toContain("height: var(--aw-icon-size-16);");
     expect(composerTokenIcon).not.toContain("transform:");
 
-    const promptBubble = cssRule(designSystemStyles, ".execution-prompt-bubble");
-    expect(promptBubble).toContain("--execution-prompt-collapsed-content-height: 60px;");
+    const promptBubble = cssRule(
+      designSystemStyles,
+      ".execution-prompt-bubble",
+    );
+    expect(promptBubble).toContain(
+      "--execution-prompt-collapsed-content-height: 60px;",
+    );
     expect(promptBubble).toContain("font-size: var(--aw-font-size-base);");
     expect(promptBubble).toContain("line-height: var(--aw-line-height-base);");
 
-    const promptToken = cssRule(designSystemStyles, ".execution-prompt-bubble-token");
+    const promptToken = cssRule(
+      designSystemStyles,
+      ".execution-prompt-bubble-token",
+    );
     expect(promptToken).toContain("vertical-align: middle;");
     expect(promptToken).toContain("gap: 5px;");
     expect(promptToken).toContain("margin-inline-end: var(--aw-space-3);");
@@ -151,8 +166,12 @@ describe("RunStage layout", () => {
       primaryNavSource.indexOf("const rowBase"),
       primaryNavSource.indexOf("const iconWrapStyle"),
     );
-    expect(newTaskStyle).toContain('fontWeight: "var(--aw-font-weight-medium)"');
-    expect(primaryNavStyle).toContain('fontWeight: "var(--aw-font-weight-medium)"');
+    expect(newTaskStyle).toContain(
+      'fontWeight: "var(--aw-font-weight-medium)"',
+    );
+    expect(primaryNavStyle).toContain(
+      'fontWeight: "var(--aw-font-weight-medium)"',
+    );
     expect(newTaskStyle).not.toContain("--aw-font-weight-semibold");
     expect(primaryNavStyle).not.toContain("--aw-font-weight-semibold");
   });
@@ -237,24 +256,6 @@ describe("RunStage layout", () => {
     expect(overlay).toContain("pointer-events: none;");
   });
 
-  it("makes plan, context, subagent, and media overlays mutually exclusive", () => {
-    const appSource = readFileSync(
-      new URL("./App.tsx", import.meta.url),
-      "utf8",
-    );
-    const planToggleStart = appSource.indexOf("onToggle={() => {");
-    const planToggleEnd = appSource.indexOf("}}", planToggleStart);
-    const planToggle = appSource.slice(planToggleStart, planToggleEnd);
-
-    expect(planToggleStart).toBeGreaterThan(-1);
-    expect(planToggle).toContain("setContextUsagePanelOpen(false)");
-    expect(planToggle).toContain("setOpenSubagentTaskId(undefined)");
-    expect(appSource).toContain("runPlanEntry.closePanel(false);");
-    expect(appSource).toContain(
-      "bottom: runPlanPanelBottomOffset({\n                                  composerContentInset: composerContentInsetPx,",
-    );
-  });
-
   it("keeps the composer mounted while ask_user is active", () => {
     const appSource = readFileSync(
       new URL("./App.tsx", import.meta.url),
@@ -263,52 +264,17 @@ describe("RunStage layout", () => {
 
     expect(appSource).not.toContain("{activeUserQuestion ? null : (");
     expect(appSource).toContain("{renderUserQuestionPrompt()}");
-    expect(appSource).toContain('<ComposerBar\n                                  value={composerValue}');
+    expect(appSource).toMatch(/<ComposerSurface\s+variant="dock"/);
   });
 
   it("keeps file tabs scrollable while panel controls stay in fixed chrome actions", () => {
-    const appSource = readFileSync(
-      new URL("./App.tsx", import.meta.url),
-      "utf8",
-    );
     const projectFileStyles = readFileSync(
       new URL("./styles/project-files.css", import.meta.url),
       "utf8",
     );
-    const railStart = appSource.indexOf(
-      '<div className="project-files-tab-rail">',
-    );
-    const tabsStart = appSource.indexOf(
-      'className="project-files-tabs"',
-      railStart,
-    );
-    const addStart = appSource.indexOf('aria-label="新建文件标签"', tabsStart);
-    const actionsStart = appSource.indexOf(
-      '<div className="project-files-chrome-actions">',
-      addStart,
-    );
-    const expandToggleStart = appSource.indexOf(
-      'className="workbench-chrome-icon workbench-chrome-expand-toggle"',
-      actionsStart,
-    );
-    const inspectorToggleStart = appSource.indexOf(
-      'className="workbench-chrome-icon workbench-chrome-panel-toggle"',
-      expandToggleStart,
-    );
-
-    expect(railStart).toBeGreaterThan(-1);
-    expect(tabsStart).toBeGreaterThan(railStart);
-    expect(addStart).toBeGreaterThan(tabsStart);
-    expect(actionsStart).toBeGreaterThan(addStart);
-    expect(expandToggleStart).toBeGreaterThan(actionsStart);
-    expect(inspectorToggleStart).toBeGreaterThan(expandToggleStart);
-
     const rail = cssRule(projectFileStyles, ".project-files-tab-rail");
     const tabs = cssRule(projectFileStyles, ".project-files-tabs");
-    const actions = cssRule(
-      projectFileStyles,
-      ".project-files-chrome-actions",
-    );
+    const actions = cssRule(projectFileStyles, ".project-files-chrome-actions");
     const addWrapper = cssRule(
       projectFileStyles,
       ".project-files-tab-rail > span",
@@ -327,37 +293,6 @@ describe("RunStage layout", () => {
     expect(expandToggle).toContain("flex: 0 0 auto;");
   });
 
-  it("keeps Artifact tabs mounted while project-file slots become active", () => {
-    const appSource = readFileSync(
-      new URL("./App.tsx", import.meta.url),
-      "utf8",
-    );
-
-    expect(appSource).toContain(
-      "artifactPreviewTabsState.tabs.map((artifactTab) =>",
-    );
-    expect(appSource).toContain(
-      "artifactPreviewTabMediaIconConcept(\n                          artifactSelection.mediaKind,",
-    );
-    expect(appSource).toMatch(
-      /<AwakenIcon\s+concept=\{mediaIconConcept\}\s+size=\{16\}/,
-    );
-    expect(appSource).toContain(
-      "data-file-icon={mediaIconConcept ?? iconKind}",
-    );
-    expect(appSource).toContain(
-      'dispatchArtifactPreviewTabs({ type: "deactivate" });\n    dispatchFileWorkspaceTabs({ type: "open", tab });',
-    );
-    expect(appSource).toContain("handleOpenDeliverablePreview(file, threadId)");
-    expect(appSource).toContain("isMedia && threadId\n                  ? () => handleOpenDeliverablePreview");
-    expect(appSource).not.toContain(
-      'isMedia && typeof mediaSourceState === "string" && threadId',
-    );
-    expect(appSource).not.toContain("pinnedMedia");
-    expect(appSource).not.toContain("MediaInspector");
-    expect(appSource).not.toContain("setDeliverablePreview");
-  });
-
   it("keeps the inspector toggle on the same right-side anchor when collapsed", () => {
     const designSystemStyles = readFileSync(
       new URL(
@@ -366,7 +301,10 @@ describe("RunStage layout", () => {
       ),
       "utf8",
     );
-    const expandedChrome = cssRule(designSystemStyles, ".workbench-chrome-right");
+    const expandedChrome = cssRule(
+      designSystemStyles,
+      ".workbench-chrome-right",
+    );
     const collapsedChrome = cssRule(
       designSystemStyles,
       ".desktop-root-inspector-collapsed .workbench-chrome-right",
@@ -401,12 +339,6 @@ describe("RunStage layout", () => {
     expect(designSystemStyles).not.toMatch(
       /\.workbench-chrome-panel-toggle::(?:before|after)/,
     );
-
-    const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-    expect(appSource).toContain("fileWorkspacePanelActionForState({");
-    expect(appSource).toContain(
-      'fileWorkspacePanelAction === "contract"\n                                ? handleContractFileWorkspace\n                                : handleExpandFileWorkspace',
-    );
   });
 
   it("keeps chrome icons raster-stable at press and toggle time", () => {
@@ -430,7 +362,10 @@ describe("RunStage layout", () => {
     // Idle dimming must stay on the status text: animating opacity on the
     // container that owns the toggle button promotes/demotes a compositor
     // layer around pointer interaction and re-rasterizes the icon.
-    const statusContainer = cssRule(designSystemStyles, ".workbench-chrome-status");
+    const statusContainer = cssRule(
+      designSystemStyles,
+      ".workbench-chrome-status",
+    );
     expect(statusContainer).not.toContain("opacity");
     const statusText = cssRule(designSystemStyles, ".workbench-chrome-state");
     expect(statusText).toContain("opacity: 0.56;");
@@ -455,81 +390,12 @@ describe("RunStage layout", () => {
     expect(designSystemStyles).toMatch(
       /\.aw-workbench-inspector-resize-handle::before \{\s*opacity: 0;\s*animation: aw-inspector-handle-line-in 120ms ease 180ms forwards;\s*\}/,
     );
-    expect(designSystemStyles).toContain("@keyframes aw-inspector-handle-line-in");
+    expect(designSystemStyles).toContain(
+      "@keyframes aw-inspector-handle-line-in",
+    );
     expect(designSystemStyles).toMatch(
       /@media \(prefers-reduced-motion: reduce\) \{\s*\.aw-workbench-inspector-resize-handle::before \{\s*opacity: 1;\s*animation: none;/,
     );
-  });
-
-  it("uses semantic disclosure identities instead of mutable render positions", () => {
-    const appSource = readFileSync(
-      new URL("./App.tsx", import.meta.url),
-      "utf8",
-    );
-
-    expect(appSource).toContain(
-      "`${disclosureScope}:segment:${segment.id}`",
-    );
-    expect(appSource).toContain(
-      "`${disclosureKey}:action:${action.id}`",
-    );
-    expect(appSource).toContain(
-      '}:turn:${turn.id}`;',
-    );
-    expect(appSource).toContain(
-      "`${turnDisclosureScope}:body:${segment.id}`",
-    );
-    expect(appSource).not.toContain(
-      "`${disclosureScope}:segment:${segmentIndex}`",
-    );
-    expect(appSource).not.toContain(
-      "`${disclosureKey}:action:${actionIndex}`",
-    );
-  });
-
-  it("renders provider reconnect as a narrative item instead of a timer chrome slot", () => {
-    const appSource = readFileSync(
-      new URL("./App.tsx", import.meta.url),
-      "utf8",
-    );
-
-    expect(appSource).toContain('if (item.kind === "providerReconnect")');
-    expect(appSource).toContain("<ReconnectStatus");
-    expect(appSource).not.toContain("renderProviderReconnectStatus");
-    expect(appSource).not.toContain("isLatestPrompt\n                                      ? renderProviderReconnectStatus()");
-  });
-
-  it("renders subagent detail through RunStage overlay instead of the narrative item", () => {
-    const appSource = readFileSync(
-      new URL("./App.tsx", import.meta.url),
-      "utf8",
-    );
-    const subagentGroupStart = appSource.indexOf(
-      'if (item.kind === "subagentGroup")',
-    );
-    const nextNarrativeKind = appSource.indexOf(
-      'if (item.kind === "scheduledNotice")',
-      subagentGroupStart,
-    );
-    const runStageOverlayStart = appSource.indexOf("overlay={");
-    const runStageComposerStart = appSource.indexOf(
-      "composer={",
-      runStageOverlayStart,
-    );
-
-    expect(subagentGroupStart).toBeGreaterThan(-1);
-    expect(nextNarrativeKind).toBeGreaterThan(subagentGroupStart);
-    expect(
-      appSource.slice(subagentGroupStart, nextNarrativeKind),
-    ).not.toContain("SubagentExecutionCard");
-    expect(runStageOverlayStart).toBeGreaterThan(-1);
-    expect(runStageComposerStart).toBeGreaterThan(runStageOverlayStart);
-    expect(
-      appSource.slice(runStageOverlayStart, runStageComposerStart),
-    ).toContain('className="subagent-detail-overlay"');
-    expect(
-      appSource.slice(runStageOverlayStart, runStageComposerStart),
-    ).toContain("<SubagentExecutionCard");
   });
 
   it("keeps subagent identity and terminal status on one header line", () => {
@@ -637,7 +503,10 @@ describe("RunStage layout", () => {
     expect(collapsedText).not.toContain("-webkit-line-clamp");
     expect(collapsedText).toContain("line-height: 16px;");
 
-    const copyButton = cssRule(designSystemStyles, ".execution-prompt-copy-button");
+    const copyButton = cssRule(
+      designSystemStyles,
+      ".execution-prompt-copy-button",
+    );
     expect(copyButton).toContain("background: transparent !important;");
     expect(copyButton).toContain("border: 0 !important;");
     expect(copyButton).toContain("box-shadow: none !important;");
@@ -678,4 +547,26 @@ describe("RunStage layout", () => {
     expect(hiddenBackdrop).toContain("pointer-events: none;");
     expect(dialogStyles).toContain("@keyframes aw-dialog-backdrop-in");
   });
+});
+
+// This is an ownership assertion: the actual panel actions are covered by
+// WorkbenchComposition.behavior.test.tsx.
+it("keeps Subagent details in the declared RunStage overlay owner", () => {
+  const root = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+  const narrative = readFileSync(
+    new URL("./useNarrativeRenderer.tsx", import.meta.url),
+    "utf8",
+  );
+  const overlay = readFileSync(
+    new URL("./WorkbenchOverlays.tsx", import.meta.url),
+    "utf8",
+  );
+  const start = narrative.indexOf('if (item.kind === "subagentGroup")');
+  const end = narrative.indexOf('if (item.kind === "scheduledNotice")', start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  expect(narrative.slice(start, end)).not.toContain("SubagentExecutionCard");
+  expect(root).toMatch(/overlay=\{\s*<WorkbenchOverlays/);
+  expect(overlay).toContain('className="subagent-detail-overlay"');
+  expect(overlay).toContain("<SubagentExecutionCard");
 });

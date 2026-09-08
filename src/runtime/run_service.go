@@ -2455,7 +2455,7 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 	}
 	activeRuns := make(map[string]activeRunSnapshot, len(sessionByRunID))
 	for runID, session := range sessionByRunID {
-		events, cursor := session.StreamSnapshot()
+		run, events, cursor := session.TranscriptSnapshot()
 		published := make(map[string]struct{})
 		for _, event := range events {
 			if event.Kind == EventKindSemantic && event.SemanticRecord.RecordID != "" {
@@ -2463,7 +2463,7 @@ func (s *RunService) GetThreadTranscript(threadID string) (ThreadTranscript, err
 			}
 		}
 		activeRuns[runID] = activeRunSnapshot{
-			run:          session.Snapshot(),
+			run:          run,
 			events:       events,
 			streamCursor: cursor,
 			publishedIDs: published,

@@ -383,6 +383,7 @@ export type RuntimeAction =
   | { type: "run/createFailed"; message: string }
   | { type: "run/cancelRequested" }
   | { type: "run/cancelSync"; run: RuntimeRun }
+  | { type: "run/snapshotSynced"; run: RuntimeRun }
   | { type: "run/streamError"; message: string }
   | { type: "run/streamFailed"; message: string }
   | { type: "run/reconnecting" }
@@ -2233,8 +2234,11 @@ export function reduceRuntimeState(
 		externalInteractions: [],
 	}),
       );
+    case "run/snapshotSynced":
     case "run/cancelSync": {
       const synced = syncActiveThreadSummary(syncFromRun(state, action.run));
+      if (action.type === "run/snapshotSynced" && state.status === action.run.status
+        && state.phase === synced.phase) return saveActiveThreadView(synced);
       const terminalStatus = terminalStatusForRun(action.run.status);
       if (!terminalStatus) {
         return saveActiveThreadView(synced);
@@ -2432,8 +2436,11 @@ export function reduceRuntimeState(
           titleSeedRunId: preserveManual
             ? existing?.titleSeedRunId
             : fromRuntime.titleSeedRunId,
-          runStatus:
-            existing?.runStatus ?? (thread.activeRunId ? "running" : undefined),
+          runStatus: thread.activeRunId
+            ? (existing?.runId === thread.activeRunId && existing.runStatus === "cancelling"
+              ? "cancelling" : "running")
+            : (existing?.runStatus && !isActiveRunStatus(existing.runStatus)
+              ? existing.runStatus : undefined),
           artifactCount: existing?.artifactCount ?? 0,
         };
       });
@@ -2501,6 +2508,10 @@ export function reduceRuntimeState(
       };
     }
     case "run/event": {
+      // Replay establishes each run through run/created before its frames.
+      // Live frames from a disposed selection may never enter another view.
+      if ((action.event.threadId && state.activeThreadId && action.event.threadId !== state.activeThreadId)
+        || (action.event.runId && state.runId && action.event.runId !== state.runId)) return state;
       const subagentNarrativeState = reduceSubagentNarrativeEvent(
         state,
         action.event,

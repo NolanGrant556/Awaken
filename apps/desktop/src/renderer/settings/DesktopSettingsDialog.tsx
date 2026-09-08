@@ -17,6 +17,7 @@ import type {
   AwakenTheme,
   AwakenThemePreference,
   ModelAccessType,
+  ModelCatalogRefreshResult,
   ModelProfileSaveRequest,
   ModelProvider,
   RuntimeModelProfileSummary,
@@ -38,6 +39,7 @@ export type DraftState = {
   templateProfileId?: string;
   providerId: string;
   modelId: string;
+  selectedModelIds: string[];
   apiKey: string;
   managementApiKey: string;
   baseURL: string;
@@ -130,7 +132,6 @@ const CONTEXT_WINDOW_ANCHOR_SNAP_TOLERANCE = 10_000;
 const MAX_TOKENS_DEFAULT = 8192;
 const MAX_TOKENS_MIN = 256;
 const MAX_TOKENS_MAX = 1_000_000;
-const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";
 const PROTOCOL_LABELS: Record<string, string> = {
   openai_chat: "OpenAI Chat Completions",
   openai_responses: "OpenAI Responses",
@@ -154,7 +155,8 @@ function protocolOptions(provider: ModelProvider, currentProtocol?: string) {
       : protocols;
   return availableProtocols.map((value) => ({
     value,
-    label: PROTOCOL_LABELS[value] ??
+    label:
+      PROTOCOL_LABELS[value] ??
       (value === "minimax_chat" ? "MiniMax Legacy" : value),
   }));
 }
@@ -273,6 +275,30 @@ export function modelCandidatesForProtocol(
   });
 }
 
+function selectedModelsAfterCatalogRefresh(
+  previousProvider: ModelProvider,
+  refreshedProvider: ModelProvider,
+  protocol: string,
+  selectedModelIds: string[],
+): string[] {
+  const previousCandidates = modelCandidatesForProtocol(
+    previousProvider,
+    protocol,
+  );
+  const refreshedCandidates = modelCandidatesForProtocol(
+    refreshedProvider,
+    protocol,
+  );
+  const previouslySelectedAll =
+    previousCandidates.length > 0 &&
+    previousCandidates.every((modelId) => selectedModelIds.includes(modelId));
+  return previouslySelectedAll
+    ? refreshedCandidates
+    : refreshedCandidates.filter((modelId) =>
+        selectedModelIds.includes(modelId),
+      );
+}
+
 function contextWindowMaxForProfile(
   profile: RuntimeModelProfileSummary,
   providers: ModelProvider[],
@@ -281,10 +307,12 @@ function contextWindowMaxForProfile(
   const capability = provider
     ? modelCapabilityFor(provider, profile.modelId)
     : undefined;
-  return profile.advanced?.maxInputTokens ??
+  return (
+    profile.advanced?.maxInputTokens ??
     capability?.maxInputTokens ??
     capability?.contextWindow ??
-    0;
+    0
+  );
 }
 
 function contextWindowForProfile(
@@ -325,7 +353,7 @@ function advancedWithModelCapability(
 ): RuntimeModelProfileSummary["advanced"] {
   const capability = modelCapabilityFor(provider, modelId);
   const customVision =
-    provider.id === "custom" ? advanced?.supportsVision ?? false : undefined;
+    provider.id === "custom" ? (advanced?.supportsVision ?? false) : undefined;
   if (!capability) {
     const nextAdvanced = overwrite
       ? {
@@ -462,6 +490,7 @@ function draftFromProvider(provider: ModelProvider): DraftState {
   return {
     providerId: provider.id,
     modelId: provider.defaultModel,
+    selectedModelIds: modelCandidatesForProtocol(provider, provider.protocol),
     apiKey: "",
     managementApiKey: "",
     baseURL: provider.baseURL,
@@ -495,6 +524,10 @@ function draftFromTemplate(
     templateProfileId: templateProfile.id,
     providerId: templateProfile.providerId,
     modelId,
+    selectedModelIds: modelCandidatesForProtocol(
+      provider,
+      templateProfile.protocol || provider.protocol,
+    ),
     apiKey: "",
     managementApiKey: "",
     baseURL: templateProfile.baseURL || provider.baseURL,
@@ -525,6 +558,10 @@ export function draftFromExistingProfile(
     profileId: profile.id,
     providerId: profile.providerId,
     modelId,
+    selectedModelIds: modelCandidatesForProtocol(
+      provider,
+      profile.protocol || provider.protocol,
+    ),
     apiKey: "",
     managementApiKey: "",
     baseURL: profile.baseURL || provider.baseURL,
@@ -624,6 +661,7 @@ export function DesktopSettingsDialog({
   const [testing, setTesting] = useState(false);
   const [testFeedback, setTestFeedback] =
     useState<ModelConnectionTestFeedback | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [refreshingAgentPlan, setRefreshingAgentPlan] = useState(false);
   const [refreshingCatalog, setRefreshingCatalog] = useState(false);
   const [catalogStatus, setCatalogStatus] = useState<string | null>(null);
@@ -742,6 +780,7 @@ export function DesktopSettingsDialog({
     setDraft(null);
     setShowApiKey(false);
     setTestFeedback(null);
+    setConnectionError(null);
     setCatalogStatus(null);
   }
 
@@ -758,6 +797,7 @@ export function DesktopSettingsDialog({
       setActiveSettingsSection(initialSection);
       setShowApiKey(false);
       setTestFeedback(null);
+      setConnectionError(null);
       setDeletingProfileId(null);
       setToastMessage(null);
       if (toastTimerRef.current !== null) {
@@ -786,6 +826,7 @@ export function DesktopSettingsDialog({
         setExpandedProviderId(null);
         setDraft(null);
         setShowApiKey(false);
+        setConnectionError(null);
         setCatalogStatus(null);
         setRefreshingCatalog(false);
         catalogRefreshIdRef.current += 1;
@@ -846,15 +887,16 @@ export function DesktopSettingsDialog({
     setDraft(nextDraft);
     setShowApiKey(false);
     setTestFeedback(null);
+    setConnectionError(null);
     setMessage(null);
     setCatalogStatus(
       provider.id === "custom"
         ? null
         : provider.catalogStrategy === "none"
-        ? `${provider.displayName} 未提供可由当前推理凭据调用的模型目录 API，请使用官方清单或手填模型 ID。`
-        : provider.catalogObservedAt
-        ? `当前目录来自供应商 API，观测时间 ${provider.catalogObservedAt}`
-        : "当前先展示官方清单与本地缓存；填写或复用 API Key 后可从供应商 API 刷新。",
+          ? `${provider.displayName} 未提供可由当前推理凭据调用的模型目录 API，请使用官方清单或手填模型 ID。`
+          : provider.catalogObservedAt
+            ? `当前目录来自供应商 API，观测时间 ${provider.catalogObservedAt}`
+            : "当前先展示官方清单与本地缓存；填写或复用 API Key 后可从供应商 API 刷新。",
     );
 
     const template = providerTemplateProfile(provider.id);
@@ -882,11 +924,12 @@ export function DesktopSettingsDialog({
     setDraft(draftFromExistingProfile(profile, provider));
     setShowApiKey(false);
     setTestFeedback(null);
-    setMessage(
+    setConnectionError(
       profile.profileStatus === "unreadable"
         ? "请重新输入 API key。保存成功后会更新 ~/.awaken/.env 中该配置对应的变量。"
         : null,
     );
+    setMessage(null);
   }
 
   async function saveDraft(): Promise<void> {
@@ -894,34 +937,132 @@ export function DesktopSettingsDialog({
     const provider = providerById.get(draft.providerId);
     if (!provider) return;
     if (draft.requiresApiKey && draft.apiKey.trim() === "") {
-      setMessage("请先输入新的 API key。");
+      setConnectionError("请先输入新的 API key。");
       return;
     }
     setSaving(true);
     setTestFeedback(null);
-    setMessage(null);
+    setConnectionError(null);
     try {
-      await runtimeClient.saveModelProfile(toSaveRequest(draft, provider));
+      let resolvedProvider = provider;
+      let modelIds = [draft.modelId];
+
+      // A provider connection is account-scoped in the UI, while runtime
+      // profiles remain model-scoped. Materialize only the checked LLMs that
+      // this exact credential can currently see.
+      if (
+        provider.id !== "custom" &&
+        provider.accessType !== "agent_plan" &&
+        !provider.endpointModel
+      ) {
+        modelIds = draft.selectedModelIds;
+        if (provider.catalogStrategy === "none") {
+          modelIds = draft.selectedModelIds;
+        } else {
+          const refreshed = await refreshCatalog(provider, draft, true);
+          if (refreshed) {
+            resolvedProvider = refreshed.provider;
+            const discovered = new Set(refreshed.discoveredModelIds ?? []);
+            const compatible = modelCandidatesForProtocol(
+              refreshed.provider,
+              draft.protocol,
+            ).filter((modelId) => discovered.has(modelId));
+            const selectedAfterRefresh = selectedModelsAfterCatalogRefresh(
+              provider,
+              refreshed.provider,
+              draft.protocol,
+              draft.selectedModelIds,
+            );
+            if (compatible.length > 0) {
+              modelIds = compatible.filter((modelId) =>
+                selectedAfterRefresh.includes(modelId),
+              );
+            }
+          }
+        }
+      }
+
+      modelIds = Array.from(
+        new Set(modelIds.map((modelId) => modelId.trim()).filter(Boolean)),
+      );
+      if (modelIds.length === 0) {
+        throw new Error("请至少勾选一个模型。");
+      }
+      const preferredModelId = modelIds.includes(draft.modelId)
+        ? draft.modelId
+        : modelIds.includes(resolvedProvider.defaultModel)
+          ? resolvedProvider.defaultModel
+          : modelIds[0];
+      modelIds.sort((left, right) => {
+        if (left === preferredModelId) return -1;
+        if (right === preferredModelId) return 1;
+        return left.localeCompare(right);
+      });
+
+      // Read identities again at commit time. A previous multi-model save may
+      // have stopped partway through, or another window may have changed the
+      // provider since this dialog opened. Reusing those exact profiles makes
+      // Save a retryable upsert instead of reporting a stale duplicate.
+      const knownProfiles = await runtimeClient.listModelProfiles();
+      let templateProfileId = draft.templateProfileId;
+      let savedCount = 0;
+      for (const modelId of modelIds) {
+        const existing = knownProfiles.find(
+          (profile) =>
+            profile.providerId === provider.id &&
+            profile.modelId === modelId &&
+            profile.protocol === draft.protocol &&
+            profile.authScheme === draft.authScheme &&
+            profile.baseURL.replace(/\/+$/, "") ===
+              draft.baseURL.replace(/\/+$/, ""),
+        );
+        const request = toSaveRequest(
+          {
+            ...draft,
+            profileId: existing?.id,
+            templateProfileId: existing ? undefined : templateProfileId,
+            modelId,
+            isDefault: savedCount === 0 ? draft.isDefault : false,
+            advanced: advancedWithModelCapability(
+              resolvedProvider,
+              modelId,
+              draft.advanced,
+              true,
+            ),
+          },
+          resolvedProvider,
+        );
+        if (savedCount > 0) request.managementApiKey = undefined;
+        const saved = await runtimeClient.saveModelProfile(request);
+        const savedIndex = knownProfiles.findIndex(
+          (profile) => profile.id === saved.id,
+        );
+        if (savedIndex >= 0) {
+          knownProfiles[savedIndex] = saved;
+        } else {
+          knownProfiles.push(saved);
+        }
+        templateProfileId ??= saved.id;
+        savedCount += 1;
+      }
       await loadModelSettings();
       collapseProviderEditor();
       onProfilesChanged();
-      showToast("模型配置已保存");
+      showToast(
+        savedCount > 1 ? `已添加 ${savedCount} 个模型` : "模型配置已保存",
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Failed to save model profile";
-      if (errorMessage.includes(DUPLICATE_MODEL_PROFILE_ERROR)) {
-        showToast(DUPLICATE_MODEL_PROFILE_ERROR);
-        setMessage(null);
-        return;
-      }
-      setMessage(errorMessage);
+      setConnectionError(errorMessage);
     } finally {
       setSaving(false);
     }
   }
 
   async function testDraft(): Promise<void> {
-    if (!draft || (draft.authScheme !== "none" && draft.apiKey.trim() === "")) return;
+    if (!draft || (draft.authScheme !== "none" && draft.apiKey.trim() === ""))
+      return;
     const provider = providerById.get(draft.providerId);
     if (!provider) return;
     setTesting(true);
@@ -952,7 +1093,7 @@ export function DesktopSettingsDialog({
     provider: ModelProvider,
     catalogDraft: DraftState,
     background = false,
-  ): Promise<void> {
+  ): Promise<ModelCatalogRefreshResult | undefined> {
     const refreshId = catalogRefreshIdRef.current + 1;
     catalogRefreshIdRef.current = refreshId;
     setRefreshingCatalog(true);
@@ -967,11 +1108,22 @@ export function DesktopSettingsDialog({
         ),
       );
       setDraft((current) => {
-        if (!current || current.providerId !== result.provider.id) return current;
-        const selectedModelId = current.modelId || result.provider.defaultModel;
+        if (!current || current.providerId !== result.provider.id)
+          return current;
+        const selectedModelIds = selectedModelsAfterCatalogRefresh(
+          provider,
+          result.provider,
+          current.protocol,
+          current.selectedModelIds,
+        );
+        const selectedModelId = selectedModelIds.includes(current.modelId)
+          ? current.modelId
+          : (selectedModelIds[0] ??
+            (current.modelId || result.provider.defaultModel));
         return {
           ...current,
           modelId: selectedModelId,
+          selectedModelIds,
           advanced: advancedWithModelCapability(
             result.provider,
             selectedModelId,
@@ -986,6 +1138,7 @@ export function DesktopSettingsDialog({
       ) {
         setCatalogStatus(result.message);
       }
+      return result;
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "刷新模型目录失败";
@@ -999,6 +1152,7 @@ export function DesktopSettingsDialog({
             : errorMessage,
         );
       }
+      return undefined;
     } finally {
       if (catalogRefreshIdRef.current === refreshId) {
         setRefreshingCatalog(false);
@@ -1021,8 +1175,12 @@ export function DesktopSettingsDialog({
       const account = await runtimeClient.refreshAgentPlanModels();
       setAgentPlanAccount(account);
       await loadModelSettings();
-      const imageCount = account.catalog.filter((item) => item.kind === "image").length;
-      const videoCount = account.catalog.filter((item) => item.kind === "video").length;
+      const imageCount = account.catalog.filter(
+        (item) => item.kind === "image",
+      ).length;
+      const videoCount = account.catalog.filter(
+        (item) => item.kind === "video",
+      ).length;
       const status = `Agent Plan 目录已刷新：主模型 ark-code-latest，图片 ${imageCount} 个，视频 ${videoCount} 个`;
       setCatalogStatus(status);
       showToast(status);
@@ -1259,7 +1417,11 @@ export function DesktopSettingsDialog({
   async function deleteConfiguredProfile(
     profile: RuntimeModelProfileSummary,
   ): Promise<void> {
-    if (!window.confirm(`删除 ${profile.modelDisplayName ?? profile.modelId} 的模型配置？`)) {
+    if (
+      !window.confirm(
+        `删除 ${profile.modelDisplayName ?? profile.modelId} 的模型配置？`,
+      )
+    ) {
       return;
     }
 
@@ -1359,8 +1521,11 @@ export function DesktopSettingsDialog({
         <PetsSettingsPanel runtimeClient={runtimeClient} />
       ) : activeSettingsSection === "computer" ? (
         <ComputerSettingsPanel runtimeClient={runtimeClient} />
-		) : activeSettingsSection === "hooks" ? (
-			<HooksSettingsPanel runtimeClient={runtimeClient} currentProjectId={currentProjectId} />
+      ) : activeSettingsSection === "hooks" ? (
+        <HooksSettingsPanel
+          runtimeClient={runtimeClient}
+          currentProjectId={currentProjectId}
+        />
       ) : activeSettingsSection === "acp" ? (
         <ACPSettingsPanel runtimeClient={runtimeClient} />
       ) : activeSettingsSection === "archived-chats" ? (
@@ -1427,9 +1592,9 @@ export function DesktopSettingsDialog({
                         ? "custom"
                         : selectedProvider.endpointModel
                           ? "endpoint"
-                          : selectedProvider.allowCustomModel
-                            ? "editable"
-                          : "select"
+                          : selectedProvider.accessType === "agent_plan"
+                            ? "select"
+                            : "multi-select"
                     }
                     models={modelCandidatesForProtocol(
                       selectedProvider,
@@ -1442,6 +1607,7 @@ export function DesktopSettingsDialog({
                           selectedProviderDraft.modelId
                         : selectedProviderDraft.modelId
                     }
+                    selectedModelIds={selectedProviderDraft.selectedModelIds}
                     protocol={selectedProviderDraft.protocol}
                     protocolOptions={protocolOptions(
                       selectedProvider,
@@ -1456,29 +1622,29 @@ export function DesktopSettingsDialog({
                     apiKey={selectedProviderDraft.apiKey}
                     managementApiKey={selectedProviderDraft.managementApiKey}
                     maskedManagementApiKey={
-                      selectedProviderProfiles.find((profile) => profile.hasManagementKey)
-                        ?.maskedManagementKey
+                      selectedProviderProfiles.find(
+                        (profile) => profile.hasManagementKey,
+                      )?.maskedManagementKey
                     }
-                    showManagementApiKey={selectedProvider.id === "openai" || selectedProvider.id === "anthropic"}
+                    showManagementApiKey={
+                      selectedProvider.id === "openai" ||
+                      selectedProvider.id === "anthropic"
+                    }
                     apiKeyPlaceholder={`输入 ${selectedProvider.keyEnvName}`}
                     apiDocsURL={selectedProvider.apiDocsURL}
-                    templateNote={
-                      selectedProvider.endpointModel
-                        ? "按量调用可选择官方 Model ID；使用自建推理接入点时可输入 ep-* Endpoint ID。"
-                        : selectedProvider.id === "custom"
-                          ? "选择接口协议并填写对应的 Base URL。"
-                        : null
-                    }
+                    templateNote={null}
                     showApiKey={showApiKey}
                     showVisionCapability={selectedProvider.id === "custom"}
                     supportsVision={
                       selectedProvider.id === "custom"
-                        ? selectedProviderDraft.advanced?.supportsVision ?? false
+                        ? (selectedProviderDraft.advanced?.supportsVision ??
+                          false)
                         : false
                     }
                     saving={saving}
                     testing={testing}
                     testFeedback={testFeedback}
+                    operationError={connectionError}
                     showCatalogRefresh={
                       selectedProvider.id !== "custom" &&
                       selectedProvider.accessType !== "agent_plan" &&
@@ -1488,10 +1654,10 @@ export function DesktopSettingsDialog({
                     catalogStatus={
                       selectedProvider.id === "custom"
                         ? undefined
-                        : catalogStatus ??
+                        : (catalogStatus ??
                           (selectedProvider.catalogStrategy === "none"
                             ? `${selectedProvider.displayName} 未提供可由当前推理凭据调用的模型目录 API，请使用官方清单或手填模型 ID。`
-                            : undefined)
+                            : undefined))
                     }
                     showAccountActions={
                       selectedProvider.accessType === "agent_plan"
@@ -1526,18 +1692,43 @@ export function DesktopSettingsDialog({
                         ),
                       });
                     }}
+                    onSelectedModelIdsChange={(selectedModelIds) => {
+                      setTestFeedback(null);
+                      const nextModelId = selectedModelIds.includes(
+                        selectedProviderDraft.modelId,
+                      )
+                        ? selectedProviderDraft.modelId
+                        : (selectedModelIds[0] ?? "");
+                      setDraft({
+                        ...selectedProviderDraft,
+                        selectedModelIds,
+                        modelId: nextModelId,
+                        advanced: nextModelId
+                          ? advancedWithModelCapability(
+                              selectedProvider,
+                              nextModelId,
+                              selectedProviderDraft.advanced,
+                              true,
+                            )
+                          : selectedProviderDraft.advanced,
+                      });
+                    }}
                     onProtocolChange={(protocol) => {
                       setTestFeedback(null);
+                      const selectedModelIds = modelCandidatesForProtocol(
+                        selectedProvider,
+                        protocol,
+                      );
+                      const nextModelId =
+                        selectedModelIds[0] ?? selectedProviderDraft.modelId;
                       const knownOfficialBaseURLs = new Set([
                         selectedProvider.baseURL.replace(/\/+$/, ""),
                         ...Object.values(selectedProvider.protocolBaseURLs).map(
                           (value) => value.replace(/\/+$/, ""),
                         ),
                       ]);
-                      const currentBaseURL = selectedProviderDraft.baseURL.replace(
-                        /\/+$/,
-                        "",
-                      );
+                      const currentBaseURL =
+                        selectedProviderDraft.baseURL.replace(/\/+$/, "");
                       const knownOfficialAuthSchemes = new Set([
                         selectedProvider.authScheme,
                         ...Object.values(selectedProvider.protocolAuthSchemes),
@@ -1545,15 +1736,23 @@ export function DesktopSettingsDialog({
                       setDraft({
                         ...selectedProviderDraft,
                         protocol,
+                        selectedModelIds,
+                        modelId: nextModelId,
+                        advanced: advancedWithModelCapability(
+                          selectedProvider,
+                          nextModelId,
+                          selectedProviderDraft.advanced,
+                          true,
+                        ),
                         baseURL: knownOfficialBaseURLs.has(currentBaseURL)
-                          ? selectedProvider.protocolBaseURLs[protocol] ??
-                            selectedProvider.baseURL
+                          ? (selectedProvider.protocolBaseURLs[protocol] ??
+                            selectedProvider.baseURL)
                           : selectedProviderDraft.baseURL,
                         authScheme: knownOfficialAuthSchemes.has(
                           selectedProviderDraft.authScheme,
                         )
-                          ? selectedProvider.protocolAuthSchemes[protocol] ??
-                            selectedProvider.authScheme
+                          ? (selectedProvider.protocolAuthSchemes[protocol] ??
+                            selectedProvider.authScheme)
                           : selectedProviderDraft.authScheme,
                       });
                     }}
@@ -1628,7 +1827,8 @@ export function DesktopSettingsDialog({
                       ? providerBrand(providerById.get(profile.providerId)!)
                       : undefined,
                     modelId: profile.modelDisplayName ?? profile.modelId,
-                    protocolLabel: PROTOCOL_LABELS[profile.protocol] ?? profile.protocol,
+                    protocolLabel:
+                      PROTOCOL_LABELS[profile.protocol] ?? profile.protocol,
                     isDefault: profile.isDefault,
                     credentialStatus: credentialStatusLabel(
                       profile.profileStatus,
@@ -1642,7 +1842,10 @@ export function DesktopSettingsDialog({
                     contextUnknown: contextWindowMax <= 0,
                     contextWindowInput: profileDraft.contextWindowInput,
                     contextWindowMin: CONTEXT_WINDOW_MIN,
-                    contextWindowMax: Math.max(CONTEXT_WINDOW_MIN, contextWindowMax),
+                    contextWindowMax: Math.max(
+                      CONTEXT_WINDOW_MIN,
+                      contextWindowMax,
+                    ),
                     contextWindowStep: CONTEXT_WINDOW_SLIDER_STEP,
                     contextFill: contextWindowFill(
                       profileDraft.contextWindow,
@@ -1655,9 +1858,12 @@ export function DesktopSettingsDialog({
                     contextAnchorValue: effectiveAnchor,
                     contextAnchorLabel: formatContextWindow(effectiveAnchor),
                     contextEndLabel: formatContextWindow(contextWindowMax),
-                    compressionValue: contextWindowMax > 0
-                      ? calculateAutoCompactThreshold(profileDraft.contextWindow)
-                      : "未知",
+                    compressionValue:
+                      contextWindowMax > 0
+                        ? calculateAutoCompactThreshold(
+                            profileDraft.contextWindow,
+                          )
+                        : "未知",
                     maxTokensInput: profileDraft.maxTokensInput,
                   };
                 })}

@@ -1753,6 +1753,7 @@ export type ModelProfileTestResult = {
 export type ModelCatalogRefreshResult = {
   provider: ModelProvider;
   message: string;
+  discoveredModelIds?: string[];
 };
 
 export type ModelReasoningCapabilityTestResult = ModelProfileTestResult & {

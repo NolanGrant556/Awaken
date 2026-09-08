@@ -583,15 +583,12 @@ function normalizeProviderModelId(provider: ModelProviderWire | undefined, model
   if (provider.id === "doubao" && trimmed === "doubao-seed-2.1-pro") {
     return "doubao-seed-2-1-pro-260628";
   }
-  if (provider.endpoint_model) {
-    // Ark accepts either an exact Model ID or an ep-* Endpoint ID. Endpoint
-    // providers therefore cannot collapse an unknown selector to the default
-    // model: doing so changes the request target and invents capabilities.
-    return trimmed || provider.default_model;
-  }
-  if (provider.allow_custom_model) return trimmed || provider.default_model;
-  if (trimmed && provider.models.includes(trimmed)) return trimmed;
-  return provider.default_model;
+  // Provider catalogs can expose exact model IDs that are newer than the
+  // versioned built-in manifest. Never collapse such an observed selector to
+  // the default model: that aliases two profiles and produces a false
+  // duplicate. Restricted catalogs (for example Agent Plan) validate before
+  // reaching this normalization boundary.
+  return trimmed || provider.default_model;
 }
 
 function isEndpointSelector(selector: string): boolean {
@@ -1457,7 +1454,11 @@ export class ModelProfileStore {
 
   async refreshProviderCatalog(
     request: ModelProfileSaveRequest,
-  ): Promise<{ provider: ModelProviderWire; message: string }> {
+  ): Promise<{
+    provider: ModelProviderWire;
+    message: string;
+    discoveredModelIds: string[];
+  }> {
     const provider = providerById(request.providerId);
     if (!provider) throw new Error("未知模型供应商");
     const strategy = provider.catalog_strategy ?? "openai";
@@ -1469,6 +1470,7 @@ export class ModelProfileStore {
           catalog_source: "unavailable",
         },
         message: `${provider.display_name} 未提供可由当前推理凭据调用的模型目录 API，请使用官方清单或手填模型 ID。`,
+        discoveredModelIds: [],
       };
     }
 
@@ -1543,6 +1545,7 @@ export class ModelProfileStore {
         message: catalog.models.length > 0
           ? `已从 ${provider.display_name} API 同步 ${catalog.models.length} 个模型。`
           : `${provider.display_name} 模型目录 API 已响应，但没有返回可用模型。`,
+        discoveredModelIds: catalog.models,
       };
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {

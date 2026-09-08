@@ -1749,6 +1749,89 @@ describe("ModelProfileStore", () => {
     });
   });
 
+  it("keeps a live-catalog DeepSeek model distinct from the built-in default", async () => {
+    const store = new ModelProfileStore(configDir);
+    const first = await store.saveProfile({
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "deepseek-v4-flash",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "test-key",
+      enabled: true,
+      isDefault: true,
+    });
+    await store.saveProfile({
+      templateProfileId: first.id,
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "deepseek-v4-flash-vision-exp",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "test-key",
+      enabled: true,
+      isDefault: false,
+    });
+    await store.saveProfile({
+      templateProfileId: first.id,
+      providerId: "deepseek",
+      displayName: "DeepSeek",
+      modelId: "deepseek-v4-pro",
+      baseURL: "https://api.deepseek.com",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "test-key",
+      enabled: true,
+      isDefault: false,
+    });
+
+    await expect(store.listProfiles()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ model_id: "deepseek-v4-flash" }),
+        expect.objectContaining({ model_id: "deepseek-v4-flash-vision-exp" }),
+        expect.objectContaining({ model_id: "deepseek-v4-pro" }),
+      ]),
+    );
+    await expect(store.listProfiles()).resolves.toHaveLength(3);
+  });
+
+  it("preserves a live-catalog model outside the built-in list for another provider", async () => {
+    const store = new ModelProfileStore(configDir);
+    const first = await store.saveProfile({
+      providerId: "glm",
+      displayName: "GLM",
+      modelId: "glm-live-catalog-preview",
+      baseURL: "https://open.bigmodel.cn/api/paas/v4",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "test-key",
+      enabled: true,
+      isDefault: true,
+    });
+    await store.saveProfile({
+      templateProfileId: first.id,
+      providerId: "glm",
+      displayName: "GLM",
+      modelId: "glm-5.2",
+      baseURL: "https://open.bigmodel.cn/api/paas/v4",
+      protocol: "openai_chat",
+      authScheme: "bearer",
+      apiKey: "test-key",
+      enabled: true,
+      isDefault: false,
+    });
+
+    await expect(store.listProfiles()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ model_id: "glm-live-catalog-preview" }),
+        expect.objectContaining({ model_id: "glm-5.2" }),
+      ]),
+    );
+    await expect(store.listProfiles()).resolves.toHaveLength(2);
+  });
+
   it("rejects a duplicate provider-model pair when adding a new profile", async () => {
     const store = new ModelProfileStore(configDir);
 

@@ -98,8 +98,17 @@ export function AwakenComputerSettings({
   onOpenPermissionSettings,
 }: AwakenComputerSettingsProps) {
   const hostReady = status?.available === true && status?.healthy === true;
+  const nodeReady = Boolean(status?.node_path?.trim());
+  const installationReady = hostReady && nodeReady;
   const screenRecordingReady = status?.tcc_screen_recording === true;
   const accessibilityReady = status?.tcc_accessibility === true;
+
+  const installationDetail =
+    status === null
+      ? "未检测"
+      : installationReady
+        ? "已安装"
+        : "安装异常，请重新安装 Computer Use。";
 
   function patch(partial: Partial<AwakenComputerSettingsValue>) {
     if (!settings) return;
@@ -126,86 +135,6 @@ export function AwakenComputerSettings({
           <AwakenIcon concept="refresh" size={16} />
           {loading ? "检测中…" : "刷新状态"}
         </AwakenButton>
-      </div>
-
-      <div className="computer-settings-card">
-        <div className="computer-settings-card-header">
-          <AwakenIcon concept="computer-use" size={20} />
-          <h3>运行状态</h3>
-        </div>
-        <div className="computer-settings-status-list">
-          <StatusItem
-            label="CUA Host 侧链"
-            ok={hostReady}
-            detail={
-              status === null
-                ? "未检测"
-                : hostReady
-                  ? `版本 ${status.version ?? "未知"}`
-                  : status.message ?? "不可用"
-            }
-          />
-          <StatusItem
-            label="Node runtime"
-            ok={status?.node_path !== undefined && status.node_path !== ""}
-            detail={status?.node_path}
-          />
-          <StatusItem
-            label="屏幕录制权限"
-            ok={screenRecordingReady}
-            detail={
-              screenRecordingReady
-                ? "已授权"
-                : "需要在系统设置中开启屏幕录制权限"
-            }
-            actionLabel={screenRecordingReady ? undefined : "去授权"}
-            actionDisabled={settingsBusy}
-            onAction={
-              screenRecordingReady
-                ? undefined
-                : () => onOpenPermissionSettings?.("screen_recording")
-            }
-          />
-          <StatusItem
-            label="辅助功能权限"
-            ok={accessibilityReady}
-            detail={
-              accessibilityReady
-                ? "已授权"
-                : "需要在系统设置中开启辅助功能权限"
-            }
-            actionLabel={accessibilityReady ? undefined : "去授权"}
-            actionDisabled={settingsBusy}
-            onAction={
-              accessibilityReady
-                ? undefined
-                : () => onOpenPermissionSettings?.("accessibility")
-            }
-          />
-        </div>
-        {settings?.enabled &&
-        (!hostReady || !screenRecordingReady || !accessibilityReady) ? (
-          <div className="computer-settings-status-actions">
-            <AwakenButton
-              size="sm"
-              loading={settingsBusy}
-              disabled={settingsBusy}
-              onClick={() => {
-                if (!hostReady) {
-                  onSetupRuntime?.();
-                } else {
-                  onRequestPermissions?.();
-                }
-              }}
-            >
-              {settingsBusy
-                ? "配置中…"
-                : !hostReady
-                  ? "准备 CUA 运行时"
-                  : "继续授权"}
-            </AwakenButton>
-          </div>
-        ) : null}
       </div>
 
       <div className="computer-settings-card">
@@ -270,6 +199,77 @@ export function AwakenComputerSettings({
           <li>密码、OTP、支付、登录/身份验证、系统安全授权必须交由用户接管完成。</li>
           <li>截图与 accessibility 树按会话隔离，最长保留 24 小时，总量上限 500 MiB。</li>
         </ul>
+      </div>
+
+      <div className="computer-settings-card computer-settings-card--status">
+        <div className="computer-settings-card-header">
+          <AwakenIcon concept="computer-use" size={20} />
+          <h3>运行状态</h3>
+        </div>
+        <div className="computer-settings-status-list">
+          <StatusItem
+            label="Computer Use 安装状态"
+            ok={installationReady}
+            detail={installationDetail}
+          />
+          <StatusItem
+            label="屏幕录制权限"
+            ok={screenRecordingReady}
+            detail={
+              screenRecordingReady
+                ? "已授权"
+                : "需要在系统设置中开启屏幕录制权限"
+            }
+            actionLabel={screenRecordingReady ? undefined : "去授权"}
+            actionDisabled={settingsBusy}
+            onAction={
+              screenRecordingReady
+                ? undefined
+                : () => onOpenPermissionSettings?.("screen_recording")
+            }
+          />
+          <StatusItem
+            label="辅助功能权限"
+            ok={accessibilityReady}
+            detail={
+              accessibilityReady
+                ? "已授权"
+                : "需要在系统设置中开启辅助功能权限"
+            }
+            actionLabel={accessibilityReady ? undefined : "去授权"}
+            actionDisabled={settingsBusy}
+            onAction={
+              accessibilityReady
+                ? undefined
+                : () => onOpenPermissionSettings?.("accessibility")
+            }
+          />
+        </div>
+        {settings?.enabled &&
+        (!installationReady ||
+          !screenRecordingReady ||
+          !accessibilityReady) ? (
+          <div className="computer-settings-status-actions">
+            <AwakenButton
+              size="sm"
+              loading={settingsBusy}
+              disabled={settingsBusy}
+              onClick={() => {
+                if (!installationReady) {
+                  onSetupRuntime?.();
+                } else {
+                  onRequestPermissions?.();
+                }
+              }}
+            >
+              {settingsBusy
+                ? "配置中…"
+                : !installationReady
+                  ? "安装 Computer Use"
+                  : "继续授权"}
+            </AwakenButton>
+          </div>
+        ) : null}
       </div>
 
     </section>

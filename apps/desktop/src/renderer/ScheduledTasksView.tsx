@@ -1,4 +1,4 @@
-// 定时任务产品页面（契约 §4.1/§4.4）：列表 + 创建/编辑 + 模板闭环 + 启停/立即执行/删除。
+// 定时任务产品页面（契约 [入口与页面](docs/12_定时任务/定时执行与提醒/实现方案.md#入口与页面)/[编辑、启停、删除和立即执行](docs/12_定时任务/定时执行与提醒/需求文档.md#编辑启停删除和立即执行)）：列表 + 创建/编辑 + 模板闭环 + 启停/立即执行/删除。
 // 所有 Core payload 组装与错误映射都委托 ./adapter，本组件只做状态编排；
 // 切换本页面不触碰当前项目、活动 thread 或进行中的 run。
 import {
@@ -515,7 +515,7 @@ export function ScheduledTasksView({
     });
   }
 
-  // 模板选择只预填 draft，绝不直接创建（契约 §5）。
+  // 模板选择只预填 draft，绝不直接创建（契约 [内置模板目录](docs/12_定时任务/定时执行与提醒/需求文档.md#内置模板目录)）。
   function handleTemplateSelect(templateId: string): void {
     setTemplateOpen(false);
     openCreateEditor(buildTemplateDraft(templateId, systemTimezone, new Date()));

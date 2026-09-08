@@ -8,7 +8,7 @@ import (
 	"unicode/utf8"
 )
 
-// Contract §6.3 limits. Core is the only validation owner; Renderer and
+// Contract [校验](docs/12_定时任务/定时执行与提醒/实现方案.md#校验) limits. Core is the only validation owner; Renderer and
 // templates pre-fill but never validate authoritatively.
 const (
 	MaxNameRunes                  = 120
@@ -194,7 +194,7 @@ func ValidateExecutionOptions(opts ExecutionOptions) error {
 
 // ValidateSchedule validates the schedule branch. Cron schedules must also
 // produce a future occurrence from the validator clock; a calendar run_at in
-// the past stays valid because the misfire rules (§8.3) define how it runs.
+// the past stays valid because the misfire rules ([misfire、时区和 DST](docs/12_定时任务/定时执行与提醒/实现方案.md#misfire时区和-dst)) define how it runs.
 func (v Validator) ValidateSchedule(sched Schedule) error {
 	if sched.Timezone == "" {
 		return invalid("schedule.timezone", "must be a valid IANA timezone")

@@ -73,11 +73,11 @@ const (
 	EventAwakenACPPermissionRequested       EventType = "AWAKEN_ACP_PERMISSION_REQUESTED"
 	EventAwakenACPPermissionResolved        EventType = "AWAKEN_ACP_PERMISSION_RESOLVED"
 	// EventAwakenScheduledNotice is the host-owned fixed-reminder fact of a
-	// scheduled task (contract docs/12_定时任务/定时任务设计契约.md §9.4/§10).
+	// scheduled task (contract [固定提醒](docs/12_定时任务/定时执行与提醒/实现方案.md#固定提醒)/[HTTP、IPC 与事件](docs/12_定时任务/定时执行与提醒/实现方案.md#httpipc-与事件)).
 	// It is a replayable in-thread fact, never a user or assistant message.
 	EventAwakenScheduledNotice EventType = "AWAKEN_SCHEDULED_NOTICE"
 	// EventAwakenPlanUpdated is the replayable full-snapshot fact of one root
-	// run's plan (contract: 运行计划与任务进度设计契约 §8.1). There are no
+	// run's plan (contract: [事件合同](docs/02_主智能体闭环/运行计划/实现方案.md#事件合同)). There are no
 	// started/item/finished delta events; the whole sanitized snapshot travels
 	// on every frame so reconnect, dedup and replay never depend on lost frames.
 	EventAwakenPlanUpdated             EventType = "AWAKEN_PLAN_UPDATED"
@@ -92,7 +92,7 @@ const (
 	// EventAwakenProviderReconnect is a live-only status frame while the
 	// runner waits for the provider network or retries a disconnected
 	// stream. It is never written to SemanticJournal and must not appear
-	// in durable replay. Contract: docs/09_AGUI与A2UI协议/事件与字段契约.md.
+	// in durable replay. Contract: docs/09_AGUI与A2UI协议/本地接口与事件协议/实现方案.md.
 	EventAwakenProviderReconnect EventType = "AWAKEN_PROVIDER_RECONNECT"
 	EventAwakenUnknown           EventType = "AWAKEN_UNKNOWN_EVENT"
 )
@@ -482,7 +482,7 @@ type Event struct {
 	ArtifactContent         string                `json:"artifactContent,omitempty"`
 	ArtifactStatus          string                `json:"artifactStatus,omitempty"`
 	// Scheduled-task fixed-reminder fields, surfaced on AWAKEN_SCHEDULED_NOTICE
-	// (contract §9.4). They carry only task/execution identity, the task name
+	// (contract [固定提醒](docs/12_定时任务/定时执行与提醒/实现方案.md#固定提醒)). They carry only task/execution identity, the task name
 	// and the fixed notice content; JSON keys follow the existing camelCase
 	// wire convention consumed by apps/desktop/src/shared/agui.ts.
 	TaskID        string `json:"taskId,omitempty"`
@@ -490,7 +490,7 @@ type Event struct {
 	TaskName      string `json:"taskName,omitempty"`
 	NoticeContent string `json:"noticeContent,omitempty"`
 	// Run-plan full-snapshot fields, surfaced on AWAKEN_PLAN_UPDATED (contract
-	// 运行计划与任务进度设计契约 §8.1). toolCallId/threadId/runId/turnId/
+	// [事件合同](docs/02_主智能体闭环/运行计划/实现方案.md#事件合同)). toolCallId/threadId/runId/turnId/
 	// recordId/semanticSeq reuse the existing Event identity fields above.
 	PlanID                string               `json:"planId,omitempty"`
 	PlanVersion           uint64               `json:"planVersion,omitempty"`

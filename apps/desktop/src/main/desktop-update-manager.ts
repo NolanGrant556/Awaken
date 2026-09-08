@@ -1,5 +1,5 @@
 // DesktopUpdateManager：Electron Main 侧应用更新的唯一 owner。
-// 设计权威：docs/01_桌面工作台/桌面生命周期与发布/应用版本与自动更新设计契约.md §3、§5、§9.2。
+// 设计权威：[产品行为与界面契约](docs/01_桌面工作台/应用生命周期与更新/需求文档.md#产品行为与界面契约)、[状态、命令与必须保持的规则](docs/01_桌面工作台/应用生命周期与更新/实现方案.md#状态命令与必须保持的规则)、[Electron Main 与退出编排](docs/01_桌面工作台/应用生命周期与更新/实现方案.md#electron-main-与退出编排)。
 //
 // 关键不变量：
 // - autoDownload=false / autoInstallOnAppQuit=false：检查不代替用户点击，普通退出不意外更新。
@@ -591,7 +591,7 @@ export class DesktopUpdateManager {
       return;
     }
     // 当前锁定的 electron-updater 不提供可测的"缓存再验证"公开 API，
-    // 按设计契约 §5.1 降级：跨 App 重启不保留 downloaded 状态，
+    // 按设计契约 [已下载更新的恢复与再验证](docs/01_桌面工作台/应用生命周期与更新/实现方案.md#已下载更新的恢复与再验证) 降级：跨 App 重启不保留 downloaded 状态，
     // receipt 仅作为日志线索，随后由正常 check 重新发现并下载。
     try {
       const receipt = JSON.parse(raw) as DesktopUpdateReceipt;

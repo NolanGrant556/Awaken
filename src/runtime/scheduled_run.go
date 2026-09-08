@@ -10,8 +10,10 @@ import (
 	"awaken/src/modelprofile"
 )
 
-// Scheduled-task integration (contract docs/12_定时任务/定时任务设计契约.md
-// §4.5, §9). Everything here is host-only: these are plain Go methods on
+// Scheduled-task integration contracts:
+// [专属线程](docs/12_定时任务/定时执行与提醒/需求文档.md#专属线程)
+// [执行、线程与无人值守边界](docs/12_定时任务/定时执行与提醒/实现方案.md#执行线程与无人值守边界)
+// Everything here is host-only: these are plain Go methods on
 // RunService used by src/scheduledtask, never mapped by HTTP handlers, so a
 // renderer client cannot forge the scheduled_task source or pin titles.
 
@@ -33,7 +35,7 @@ type ScheduledRunRequest struct {
 }
 
 // StartScheduledRun starts an unattended Agent run for a scheduled task on
-// the task's stable dedicated thread (contract §9.3). It reuses StartRun's
+// the task's stable dedicated thread (contract [Agent 任务](docs/12_定时任务/定时执行与提醒/实现方案.md#agent-任务)). It reuses StartRun's
 // journal, context, tool snapshot, project fence and recovery path; the only
 // differences are the scheduled_task client identity, the task-owned initial
 // thread title (no prompt-derived label, no LLM title generation) and the
@@ -58,7 +60,7 @@ func (s *RunService) StartScheduledRun(req ScheduledRunRequest) (Run, error) {
 }
 
 // ScheduledNoticeRequest is the host-only input for a fixed reminder
-// (contract §9.4). Content is the fixed reminder body; no model is involved.
+// (contract [固定提醒](docs/12_定时任务/定时执行与提醒/实现方案.md#固定提醒)). Content is the fixed reminder body; no model is involved.
 type ScheduledNoticeRequest struct {
 	TaskID      string
 	ExecutionID string
@@ -243,7 +245,7 @@ func (s *RunService) PublishScheduledNotice(ctx context.Context, req ScheduledNo
 }
 
 // UpdateScheduledThreadTitle follows a scheduled-task rename on the task's
-// dedicated thread (contract §4.5): a title the user renamed manually
+// dedicated thread (contract [专属线程](docs/12_定时任务/定时执行与提醒/需求文档.md#专属线程)): a title the user renamed manually
 // (titleSource=manual) is never overwritten. It is a no-op when the thread is
 // unknown or already manual.
 func (s *RunService) UpdateScheduledThreadTitle(threadID, taskName string) error {

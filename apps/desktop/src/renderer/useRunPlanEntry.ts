@@ -19,7 +19,7 @@ export type RunPlanEntryController = {
 };
 
 /**
- * Owns the task-plan entry state for the active thread (contract §8.3:
+ * Owns the task-plan entry state for the active thread (contract [Workbench ownership](docs/02_主智能体闭环/运行计划/实现方案.md#workbench-ownership):
  * App.tsx owns open state, trigger ref, overlay composition and focus
  * restore; the scroll controller is untouched because the trigger is a
  * passive layout change inside the measured composer dock stack).
@@ -158,7 +158,7 @@ export function useRunPlanEntry({
   }
 
   // Escape and outside-pointer close, mirroring the context usage panel;
-  // closing always restores focus to the trigger (contract §5.3/§5.5).
+  // closing always restores focus to the trigger (contract [展开面板](docs/02_主智能体闭环/运行计划/需求文档.md#展开面板)/[可访问性和窄窗](docs/02_主智能体闭环/运行计划/需求文档.md#可访问性和窄窗)).
   useEffect(() => {
     if (!panelOpen) {
       return;

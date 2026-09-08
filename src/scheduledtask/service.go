@@ -110,7 +110,7 @@ func (s *Service) PublishEvent(event Event) {
 	listener(event)
 }
 
-// Create validates and persists a new task (contract §6.3: Core is the only
+// Create validates and persists a new task (contract [校验](docs/12_定时任务/定时执行与提醒/实现方案.md#校验): Core is the only
 // validation owner; client-supplied identity and timestamps are discarded by
 // the repository).
 func (s *Service) Create(task Task) (Task, error) {
@@ -187,7 +187,7 @@ func (s *Service) syncThreadTitle(threadID, taskName string) {
 }
 
 // Delete tombstones a task under version CAS. A task with an active
-// execution cannot be deleted (contract §4.4): cancel it or wait for it to
+// execution cannot be deleted (contract [编辑、启停、删除和立即执行](docs/12_定时任务/定时执行与提醒/需求文档.md#编辑启停删除和立即执行)): cancel it or wait for it to
 // finish. The dedicated thread and its artifacts are never deleted with the
 // task. An idempotency key lets retries replay a previously successful
 // delete as success, even after the task becomes invisible to Get.
@@ -241,7 +241,7 @@ func (s *Service) Resume(taskID string, expectedVersion int64) (Task, error) {
 	return updated, nil
 }
 
-// RunNow dispatches a manual execution (contract §4.4): allowed for paused
+// RunNow dispatches a manual execution (contract [编辑、启停、删除和立即执行](docs/12_定时任务/定时执行与提醒/需求文档.md#编辑启停删除和立即执行)): allowed for paused
 // tasks, never consumes the occurrence count, deduplicated by the
 // idempotency key, and rejected while the task has an active execution.
 func (s *Service) RunNow(taskID, idempotencyKey string) (Execution, error) {

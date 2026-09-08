@@ -1,4 +1,4 @@
-// 内置定时任务模板目录的唯一权威实现（《定时任务设计契约》§5）。
+// 内置定时任务模板目录的唯一权威实现（[内置模板目录](docs/12_定时任务/定时执行与提醒/需求文档.md#内置模板目录)）。
 // 本模块是纯函数：选择模板只产生编辑器 draft，绝不发任何请求；
 // Core payload（task_id/version/run_at offset 换算等）由保存链路负责，不在这里出现。
 import type { AwakenScheduledTaskDraft } from "@awaken/design-system";
@@ -16,7 +16,7 @@ export type ScheduledTaskTemplate = {
   cron?: string;
 };
 
-// 名称与正文逐字取自契约 §5.1/§5.2；description/frequencyText 是模板卡的展示文案。
+// 名称与正文逐字取自契约 [循环任务](docs/12_定时任务/定时执行与提醒/需求文档.md#循环任务)/[日程任务](docs/12_定时任务/定时执行与提醒/需求文档.md#日程任务)；description/frequencyText 是模板卡的展示文案。
 export const SCHEDULED_TASK_TEMPLATES: readonly ScheduledTaskTemplate[] = [
   {
     templateId: "daily_tech_news_brief",
@@ -246,7 +246,7 @@ export function buildTemplateDraft(
   const draft: AwakenScheduledTaskDraft = {
     name: template.name,
     enabled: true,
-    // 项目不猜测，必须由用户在保存前显式选择（契约 §5）。
+    // 项目不猜测，必须由用户在保存前显式选择（契约 [内置模板目录](docs/12_定时任务/定时执行与提醒/需求文档.md#内置模板目录)）。
     projectId: "",
     scheduleKind: template.category,
     cronPreset: "custom",

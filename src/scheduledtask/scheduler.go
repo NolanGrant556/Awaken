@@ -63,7 +63,7 @@ func (t *ManualTimer) Fire(at time.Time) bool {
 	return true
 }
 
-// maxConcurrentAgentExecutions is the global agent semaphore (contract §8.4).
+// maxConcurrentAgentExecutions is the global agent semaphore (contract [并发与幂等](docs/12_定时任务/定时执行与提醒/实现方案.md#并发与幂等)).
 // Reminders never occupy it.
 const maxConcurrentAgentExecutions = 2
 
@@ -105,7 +105,7 @@ type SchedulerConfig struct {
 }
 
 // Scheduler owns the scheduling loop, misfire recovery, per-task re-entry
-// protection and the global agent concurrency cap (contract §8). All timer
+// protection and the global agent concurrency cap (contract [调度语义](docs/12_定时任务/定时执行与提醒/实现方案.md#调度语义)). All timer
 // computation goes through the injectable clock and timer factory.
 type Scheduler struct {
 	repo      Repository
@@ -154,7 +154,7 @@ func NewScheduler(cfg SchedulerConfig) *Scheduler {
 	return scheduler
 }
 
-// Start runs the startup recovery of contract §8.1 and launches the
+// Start runs the startup recovery of contract [Core 生命周期](docs/12_定时任务/定时执行与提醒/实现方案.md#core-生命周期) and launches the
 // scheduling loop. It is idempotent. Recovery seals leftover executions,
 // re-validates every enabled definition (a single bad definition becomes
 // invalid without blocking the others), settles exhausted schedules, applies
@@ -194,7 +194,7 @@ func (s *Scheduler) Start() error {
 	return nil
 }
 
-// Stop implements the shutdown order of contract §8.1: stop accepting new
+// Stop implements the shutdown order of contract [Core 生命周期](docs/12_定时任务/定时执行与提醒/实现方案.md#core-生命周期): stop accepting new
 // occurrences, mark queued entries cancelled, request cancellation of active
 // scheduled runs and return inside the caller's graceful-shutdown budget
 // without waiting for terminal records; unsealed executions are recovered as
@@ -270,7 +270,7 @@ func (s *Scheduler) publish(event Event) {
 	}
 }
 
-// recover performs the §8.1 startup recovery synchronously.
+// recover performs the [Core 生命周期](docs/12_定时任务/定时执行与提醒/实现方案.md#core-生命周期) startup recovery synchronously.
 func (s *Scheduler) recover() error {
 	tasks, err := s.repo.List()
 	if err != nil {
@@ -310,7 +310,7 @@ func (s *Scheduler) recover() error {
 			}
 		}
 	}
-	// Misfire pass: coalesce missed occurrences per task (§8.3).
+	// Misfire pass: coalesce missed occurrences per task ([misfire、时区和 DST](docs/12_定时任务/定时执行与提醒/实现方案.md#misfire时区和-dst)).
 	tasks, err = s.repo.List()
 	if err != nil {
 		return err
@@ -623,7 +623,7 @@ func (s *Scheduler) runExecution(active *activeExecution, task Task, exec Execut
 		return
 	}
 
-	// Consume the occurrence before executing (§8.4: scheduled/misfire
+	// Consume the occurrence before executing ([并发与幂等](docs/12_定时任务/定时执行与提醒/实现方案.md#并发与幂等): scheduled/misfire
 	// occurrences count whether they succeed, fail or skip; manual never
 	// counts).
 	if !manual {
@@ -790,7 +790,7 @@ func (s *Scheduler) handleUserCancel(active *activeExecution, task Task, exec Ex
 }
 
 // acquireAgentSlot takes the global agent semaphore, queueing inside the
-// task's misfire grace (contract §4.2). It returns a non-empty terminal
+// task's misfire grace (contract [普通创建](docs/12_定时任务/定时执行与提醒/需求文档.md#普通创建)). It returns a non-empty terminal
 // status when the execution must end before starting: skipped when the grace
 // expired, cancelled when the caller cancelled while queued.
 func (s *Scheduler) acquireAgentSlot(active *activeExecution, task Task, occurrence time.Time) (ExecutionStatus, string, string) {
@@ -893,7 +893,7 @@ func (s *Scheduler) checkCompletion(taskID string) {
 	}
 }
 
-// RunManual dispatches a trigger=manual execution (contract §4.4): allowed
+// RunManual dispatches a trigger=manual execution (contract [编辑、启停、删除和立即执行](docs/12_定时任务/定时执行与提醒/需求文档.md#编辑启停删除和立即执行)): allowed
 // for paused tasks, never consumes the occurrence count, deduplicated by the
 // caller's idempotency key.
 func (s *Scheduler) RunManual(task Task, idempotencyKey string) (Execution, error) {
@@ -922,7 +922,7 @@ func (s *Scheduler) RunManual(task Task, idempotencyKey string) (Execution, erro
 
 // CancelExecution cancels the task's currently dispatched execution: queued
 // entries are marked cancelled directly, running ones are cancelled through
-// the executor (contract §4.4). It reports whether there was anything to
+// the executor (contract [编辑、启停、删除和立即执行](docs/12_定时任务/定时执行与提醒/需求文档.md#编辑启停删除和立即执行)). It reports whether there was anything to
 // cancel.
 func (s *Scheduler) CancelExecution(taskID string) bool {
 	s.mu.Lock()

@@ -561,7 +561,7 @@ export function subagentDetailPanelBottomOffset({
 
 /**
  * Bottom offset of the run-plan overlay panel (contract 运行计划与任务进度
- * 设计契约 §5.3): the panel sits 12px above the measured composer content
+ * 设计契约 [展开面板](docs/02_主智能体闭环/运行计划/需求文档.md#展开面板)): the panel sits 12px above the measured composer content
  * inset, same rule as the subagent detail overlay.
  */
 export function runPlanPanelBottomOffset({

@@ -1,6 +1,6 @@
 # AwakenArchivedChatsSettings
 
-Settings 固定末项「已归档的聊天」的页面组件（对应设计契约 `docs/01_桌面工作台/左侧栏/会话归档设计契约.md` §3.2–§3.4）。纯受控 UI-only：分组、行数据、日期显示串都由调用方传入，组件不读取 Runtime、Electron、FileStore 或项目 store；行为只通过 callbacks 传出。
+Settings 固定末项「已归档的聊天」的页面组件（对应设计契约 `docs/01_桌面工作台/会话管理/实现方案.md` 相应章节–相应章节）。纯受控 UI-only：分组、行数据、日期显示串都由调用方传入，组件不读取 Runtime、Electron、FileStore 或项目 store；行为只通过 callbacks 传出。
 
 ## Props
 

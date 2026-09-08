@@ -100,7 +100,8 @@ describe("SCHEDULED_TASK_TEMPLATES 目录", () => {
     }
   });
 
-  it("模板名称逐字符合契约 §5", () => {
+  // 契约：[内置模板目录](docs/12_定时任务/定时执行与提醒/需求文档.md#内置模板目录)
+  it("模板名称逐字符合契约 “内置模板目录”", () => {
     expect(SCHEDULED_TASK_TEMPLATES.map((t) => [t.templateId, t.name])).toEqual([
       ["daily_tech_news_brief", "工作日科技新闻早报"],
       ["weekend_relaxation_reminder", "周末电影推荐"],
@@ -115,7 +116,8 @@ describe("SCHEDULED_TASK_TEMPLATES 目录", () => {
     ]);
   });
 
-  it("cron 表达式与契约 §5.1 一致", () => {
+  // 契约：[循环任务](docs/12_定时任务/定时执行与提醒/需求文档.md#循环任务)
+  it("cron 表达式与契约 “循环任务” 一致", () => {
     const cronById = Object.fromEntries(
       SCHEDULED_TASK_TEMPLATES.filter((t) => t.category === "cron").map((t) => [t.templateId, t.cron]),
     );
@@ -127,7 +129,8 @@ describe("SCHEDULED_TASK_TEMPLATES 目录", () => {
     });
   });
 
-  it("模板正文逐字符合契约 §5.1/§5.2", () => {
+  // 契约：[循环任务](docs/12_定时任务/定时执行与提醒/需求文档.md#循环任务)、[日程任务](docs/12_定时任务/定时执行与提醒/需求文档.md#日程任务)
+  it("模板正文逐字符合契约 “循环任务”/“日程任务”", () => {
     const contentById = Object.fromEntries(SCHEDULED_TASK_TEMPLATES.map((t) => [t.templateId, t.content]));
     expect(contentById).toEqual({
       daily_tech_news_brief: "整理今天最值得关注的科技新闻，输出 5–8 条；每条含标题、核心进展、关注原因，最后给出趋势判断",

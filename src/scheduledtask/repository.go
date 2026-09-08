@@ -2,7 +2,7 @@ package scheduledtask
 
 import "time"
 
-// Execution history projection limit (contract §4.4: the API shows the most
+// Execution history projection limit (contract [编辑、启停、删除和立即执行](docs/12_定时任务/定时执行与提醒/需求文档.md#编辑启停删除和立即执行): the API shows the most
 // recent 50 records).
 const (
 	DefaultExecutionLimit = 50
@@ -73,7 +73,7 @@ type Repository interface {
 	ListExecutions(taskID string, limit int) ([]Execution, error)
 
 	// SealInterrupted appends status=interrupted for every queued/running
-	// execution of the task (Core restart recovery, contract §8.1). It
+	// execution of the task (Core restart recovery, contract [Core 生命周期](docs/12_定时任务/定时执行与提醒/实现方案.md#core-生命周期)). It
 	// returns the sealed records; already-terminal executions are untouched.
 	SealInterrupted(taskID string, clock Clock) ([]Execution, error)
 

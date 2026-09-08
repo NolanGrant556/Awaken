@@ -1331,7 +1331,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			restoredMeta = &latestMeta
 			restored = &latestRestored
 			// Archived threads reject new runs even when the caller bypasses
-			// the UI; the user must unarchive first (archive contract §4.4).
+			// the UI; the user must unarchive first (archive contract [状态转换](docs/01_桌面工作台/会话管理/实现方案.md#状态转换)).
 			if restoredMeta.Snapshot.Archived {
 				s.mu.Unlock()
 				return rollbackStart(ErrThreadArchived, false)
@@ -1422,7 +1422,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 			return rollbackStart(ErrThreadNotFound, false)
 		}
 		// Archived threads reject new runs even when the caller bypasses the
-		// UI; the user must unarchive first (archive contract §4.4).
+		// UI; the user must unarchive first (archive contract [状态转换](docs/01_桌面工作台/会话管理/实现方案.md#状态转换)).
 		if thread.archived {
 			s.mu.Unlock()
 			return rollbackStart(ErrThreadArchived, false)

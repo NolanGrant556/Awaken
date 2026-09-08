@@ -13,7 +13,7 @@ import (
 )
 
 // handlers_scheduled_tasks.go owns the /v1/scheduled-tasks HTTP surface
-// (contract §10): typed CRUD under version CAS, manual run/cancel, execution
+// (contract [HTTP、IPC 与事件](docs/12_定时任务/定时执行与提醒/实现方案.md#httpipc-与事件)): typed CRUD under version CAS, manual run/cancel, execution
 // history and the live event SSE stream. Scheduling authority stays in
 // src/scheduledtask; this file only maps transport.
 
@@ -200,7 +200,7 @@ func (h *scheduledTaskHandlers) taskWire(task scheduledtask.Task) scheduledTaskW
 }
 
 // writeServiceError maps scheduled-task domain errors onto the transport
-// codes of contract §10. Validation messages carry only the field name and a
+// codes of contract [HTTP、IPC 与事件](docs/12_定时任务/定时执行与提醒/实现方案.md#httpipc-与事件). Validation messages carry only the field name and a
 // static issue label; task content never appears in any error body.
 func writeScheduledTaskError(w http.ResponseWriter, err error) {
 	switch {

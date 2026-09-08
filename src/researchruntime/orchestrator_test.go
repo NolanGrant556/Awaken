@@ -43,7 +43,7 @@ func (s *stubChildren) Run(_ context.Context, spec ChildSpec) (ChildResult, erro
 
 func testReceipts(value string) []subagentruntime.HostToolReceipt {
 	var receipts []subagentruntime.HostToolReceipt
-	for _, path := range []string{"docs/04_工具权限与审批/工具定义与暴露.md", "src/tools/web_search/web_search.go"} {
+	for _, path := range []string{"docs/04_工具权限与审批/工具发现与执行/实现方案.md", "src/tools/web_search/web_search.go"} {
 		if strings.Contains(value, path) {
 			receipts = append(receipts, subagentruntime.HostToolReceipt{ToolCallID: "read-" + path, ToolName: "Read", Details: map[string]any{"file_path": "/workspace/" + path, "sha256": digestOf(path)}})
 		}
@@ -103,7 +103,7 @@ func TestParseIntentRequiresQuery(t *testing.T) {
 func TestOrchestratorProducesCitedPartialReport(t *testing.T) {
 	children := &stubChildren{responses: []string{
 		`{"questions":[{"id":"q1","text":"What search providers exist?"}]}`,
-		`{"claims":[{"id":"claim-0","question_id":"q1","statement":"WebSearch uses Exa by default.","confidence":"high","evidence":[{"kind":"workspace","title":"tools doc","locator":"docs/04_工具权限与审批/工具定义与暴露.md:123","source_type":"primary"}]}],"uncertainties":[]}`,
+		`{"claims":[{"id":"claim-0","question_id":"q1","statement":"WebSearch uses Exa by default.","confidence":"high","evidence":[{"kind":"workspace","title":"tools doc","locator":"docs/04_工具权限与审批/工具发现与执行/实现方案.md:123","source_type":"primary"}]}],"uncertainties":[]}`,
 		`{"verdicts":[{"claim_id":"claim-0","verdict":"partial","reason":"single workspace source"}]}`,
 	}}
 	publisher := &memPublisher{}
@@ -119,7 +119,7 @@ func TestOrchestratorProducesCitedPartialReport(t *testing.T) {
 	if result.Outcome != OutcomePartial {
 		t.Fatalf("outcome=%s", result.Outcome)
 	}
-	if !strings.Contains(result.Markdown, "[S1]") || !strings.Contains(result.Markdown, "工具定义与暴露.md") {
+	if !strings.Contains(result.Markdown, "[S1]") || !strings.Contains(result.Markdown, "docs/04_工具权限与审批/工具发现与执行/实现方案.md:123") {
 		t.Fatalf("markdown=%s", result.Markdown)
 	}
 	if len(children.calls) != 3 {

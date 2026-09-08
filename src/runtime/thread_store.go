@@ -13,7 +13,7 @@ import (
 // ThreadListView selects which non-deleted threads a list query returns.
 // Deleted records are excluded from every view; deletion always wins over
 // archiving. Callers pass the explicit enum instead of raw boolean
-// combinations (archive contract §4.2).
+// combinations (archive contract [查询合同](docs/01_桌面工作台/会话管理/实现方案.md#查询合同)).
 type ThreadListView string
 
 const (

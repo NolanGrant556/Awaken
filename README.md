@@ -10,7 +10,7 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 
 - 左侧栏负责项目与线程入口，并提供已停止会话的归档入口；root Agent 可通过受控只读工具按 `thread_id` 列出和分页读取归档历史，物理 FileStore 路径不进入模型权限；
 - 中间工作区负责输入、运行叙事、状态反馈和最终交付物；
-- 右侧 Inspector 当前提供项目文件工作区、文件夹组选择、筛选、只读目录树以及 Office、代码/文本、PDF、图片和 HTML 只读预览；从项目文件树打开的 Markdown 可在同一文件工作区切换预览与编辑并写回原文件。交付物中的 Markdown、图片和视频分别落入三种 Artifact 标签：Markdown 临时标签只读，运行过程媒体继续留在 `RunStage.overlay`，终态 ready 媒体在右侧文件工作区打开临时 Artifact 文件标签。HTML 统一进入隔离的“浏览器”入口；当前 thread 存在原生 Subagent 记录时，还提供子任务详情、状态、活动、结果、错误与单任务取消；项目 Markdown 以外的文件编辑与通用工具详情尚未接通；
+- 右侧 Inspector 当前提供项目文件工作区、文件夹组选择、筛选、只读目录树以及 Office、代码/文本、PDF、图片和 HTML 只读预览；从项目文件树打开的 Markdown 可在同一文件工作区切换预览与编辑并写回原文件。交付物中的 Markdown、图片和视频分别落入三种 Artifact 标签：Markdown 临时标签只读，运行过程媒体继续留在 `RunStage.overlay`，终态 ready 媒体在右侧文件工作区打开临时 Artifact 文件标签。HTML 统一进入隔离的“浏览器”入口；当前 thread 存在原生 Subagent 记录时，还提供子任务详情、状态、活动、结果、错误与单任务取消；项目代码和安全纯文本也支持编辑与自动保存，通用工具详情尚未接通；
 - Settings 承载模型、搜索、长期记忆、全局规则、外观、桌面宠物、计算机操作、Hook、ACP runner 和固定末项“已归档的聊天”等配置与管理界面；设置界面的用户可见标题显示为“钩子”；
 - Desktop 负责启动、监督和关闭本地 `awaken-core`，用户不需要单独运行 Core；
 - `Awaken Design System` 是纯 UI 组件包和 Gallery，不拥有产品状态、后端策略或运行时协议。
@@ -21,25 +21,147 @@ Awaken 是一个本地优先的桌面智能体产品。它以 Awaken Desktop 为
 
 | 功能域 | 当前能力摘要 | 权威入口 |
 | --- | --- | --- |
-| 桌面工作台 | 项目与线程导航、会话归档与恢复、用户消息撤销与编辑、Workbench 输入和运行叙事、附件、交付物、全局/项目 AGENTS.md 入口、外观、宠物与 Desktop 生命周期 | [01 桌面工作台](docs/01_桌面工作台/索引.md) |
-| 主智能体闭环 | thread/run、多轮上下文、AGENTS.md 运行快照、压缩、主动提问、取消和失败终止；主 run 支持 root-only `update_plan`、耐久运行计划、实时进度入口与终态历史，并可通过 `archived_history` 只读查询归档会话；原生 Subagent 支持 explore/plan/review/general、shared_readonly/shared/git_worktree、每 run 8 个任务/4 并发、终态自动交接、status/wait/cancel/message、Memory snapshot 继承、orphan interrupted、耐久事件与 Desktop 任务组/Inspector | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
-| 运行时与本地服务 | Desktop 托管本地服务、SemanticJournal、工具媒体 blob、当前用户执行环境观察与历史回放 | [03 运行时与本地服务](docs/03_运行时与本地服务/索引.md) |
-| 工具、权限与安全执行 | 七个模型基础工具、provider/capability/dependency、每 run 可用性快照、零审批、TaskScope/Trash；工具渐进披露（低频内建辅助工具与 MCP 工具的定义按需经 `tool_find` 检索加载，不长期占用上下文）；root-only 归档历史只读桥；user/project/project-local Hook、自然语言配置工具、command/受控 HTTP/prompt/只读 agent 执行器、十一类边界、阻断/输入更新、耐久回执与显式 Skill 激活注册；以及保留工具的窄 broker 合同 | [04 工具、权限与安全执行](docs/04_工具权限与审批/索引.md) |
-| 模型与供应商 | 模型 profile、能力与余额、调用链、安全凭据存储及故障恢复 | [05 模型与供应商配置](docs/05_模型与供应商配置/索引.md) |
-| MCP runtime | user/project/dynamic 配置、stdio/http/sse、动态工具直通、可选只读错误与 Artifact metadata、认证与 prompt/resource Skill bridge | [06 MCP 运行时](docs/06_MCP运行时/索引.md) |
-| 连接器 | MCP/CLI provider 目录、官方 CLI 安装与授权、host Connector 本地 OAuth 账号、生命周期、readiness 与重启 ownership 边界；当前 Awaken Outlook 通过插件专属的 host Connector、系统浏览器 PKCE 与本地 Microsoft Graph MCP 管理个人/共享邮箱、草稿、附件、文件夹、分类、退订和本机定时发送，不在连接器目录重复展示 | [07 连接器](docs/07_连接器/索引.md) |
-| 技能 | 多来源 Universal Skill 完整目录包发现、按需文件树/正文/资源、composer 当前选择的 run-scoped 确定性绑定、统一 catalog、inline/真实 child fork、MCP 动态来源与恢复；composer 显式激活后可注册包内受控 Hook；模型可用内置 Creator 脚手架生成完整候选，并 dry-run 校验、受控导出、安装或 Trash 替换用户 Skill；以及随 App 分发的 word/excel/ppt/pdf/code-search/PDF_Max/skill-creator/plugin-creator 八个内置 Skill 包 | [08 技能](docs/08_技能/索引.md) |
-| ACP Client/Agent | ACP Client（Phase 0–4）：runner 配置、probe 与 Desktop 设置页；`delegate_external_agent` 工具、会话生命周期与权限处理已在 Core 实现；Workbench 嵌套进度与 permission gate UI 已实现。ACP Agent（Phase 5）：`cmd/awaken-acp` 与 `src/acp/agentbridge` 已实现 stdio transport、launcher lease、authenticated control routes、Core 事件投影、模型 profile selector/default fallback 与 cancel/close；Desktop-owned 与 core-only 的真实 stdio prompt 已通过，第三方 client、headless 多进程验收与跨 Core 重启恢复仍是已知缺口 | [02 主智能体闭环](docs/02_主智能体闭环/索引.md) |
-| AG-UI 与 A2UI | Awaken 自有事件到 AG-UI-compatible wire 的映射；A2UI 仅作参考 | [09 AG-UI 与 A2UI 协议](docs/09_AGUI与A2UI协议/索引.md) |
-| Computer Use | CUA Host、观察/动作/验证工具、复核、暂停/接管/交还、媒体策略与发布准入 | [10 计算机操作能力](docs/10_计算机操作能力/索引.md) |
-| 长期记忆与 Dream | Markdown Memory、主模型相关性召回、受控工具、无正文事件、Settings 查看/删除、手动/空闲期 Dream、Workbench 紧凑回执与 Dream 重启恢复 | [11 长期记忆](docs/11_长期记忆/索引.md) |
-| 定时任务 | 首版已支持：左侧一级入口、循环/日程任务、10 个内置模板、创建/编辑/启停/删除/立即执行/取消、专属线程、执行历史、Core 内调度器与 misfire 恢复、Agent 与固定提醒两类任务；Agent 编辑器支持 `/` Skill 与 `@` Computer Use/Plugin 结构化选择；Desktop 完全退出后不运行 | [12 定时任务](docs/12_定时任务/索引.md) |
-| 移动端 | 当前不支持；已确认目标设计为 Desktop/Core 继续拥有本机执行与耐久事实，手机通过受控 Gateway 与可自托管 relay 查看和控制任务，不直接连接或暴露 loopback Core | [13 移动端](docs/13_移动端/索引.md) |
-| 插件 | Desktop 以自动校验/digest 锁定安装管理 Agent Plugins 1.0.0、Codex、Claude Code、Cursor user-scope ZIP 包，并把随 Desktop 发布、默认关闭且不可卸载的 Awaken 内置插件投影到独立页签；首个内置插件为带官方图标和中文 Skills 的 Outlook 邮箱。统一控制台展示 Skills、MCP、Rules、Agents、Commands、Hooks、Variables、Apps，并把可运行组件接入现有 Skill/MCP/instructions/Hook/Subagent runtime。安装入口只接受点击选择或拖入的本地 ZIP，同名插件自动安全替换，不提供 URL/Git 安装、Marketplace 或插件目录聚合；另支持组件与 tool override、Variable/Secret、插件 OAuth/Device/MCP OAuth、宿主 CLI/host Connector 引用、Hook 回执、Plugin Agent/Command/Rule Composer token、升级迁移、Trash 与 run generation lease。插件进程默认保持当前用户完全访问，但不能读取宿主或其他插件凭据。Codex Apps 仍只识别不运行；project scope、跨重启 Hook receipt 索引和 Windows/Linux 实机仍不支持或未验收 | [14 插件](docs/14_插件/索引.md) |
-| 编码工作台 | 当前不支持；已确认目标设计为 checkpoint 式代码撤回、右侧栏“变更”diff 面板、typed 只读 `git_workspace` 工具与 Git 状态条、内置 Git 防护 Hook preset，以及项目 `.awaken/coding.json` 编码环境契约；当前可用的编码相关底座（typed 文件工具、`Bash`、`git_remote`、Subagent `git_worktree`）仍由 04/02 域拥有 | [15 编码工作台](docs/15_编码工作台/索引.md) |
-| 深度研究 | Workbench `@deep-research`（`@研究`）已支持宿主编排的只读多源研究报告（公开 HTTPS 网页 + 当前工作区），固定走规划/调研/核验/报告四阶段，以成功的 `Read`/`WebFetch` 回执约束证据并输出 Verified/Partial 报告卡；显式 URL 由宿主按原值抓取，逐跳 SSRF 检查 fail closed。任意远程 Git clone、用户 Skill 编排和不经 `WebFetch` 的 URL 核验不在范围 | [16 深度研究](docs/16_深度研究/索引.md) |
+| 桌面工作台 | 项目与线程导航、会话归档与恢复、用户消息撤销与编辑、Workbench 输入和运行叙事、附件、交付物、全局/项目 AGENTS.md 入口、外观、宠物与 Desktop 生命周期 | [01 桌面工作台](#01_桌面工作台) |
+| 主智能体闭环 | thread/run、多轮上下文、AGENTS.md 运行快照、压缩、主动提问、取消和失败终止；主 run 支持 root-only `update_plan`、耐久运行计划、实时进度入口与终态历史，并可通过 `archived_history` 只读查询归档会话；原生 Subagent 支持 explore/plan/review/general、shared_readonly/shared/git_worktree、每 run 8 个任务/4 并发、终态自动交接、status/wait/cancel/message、Memory snapshot 继承、orphan interrupted、耐久事件与 Desktop 任务组/Inspector | [02 主智能体闭环](#02_主智能体闭环) |
+| 运行时与本地服务 | Desktop 托管本地服务、SemanticJournal、工具媒体 blob、当前用户执行环境观察与历史回放 | [03 运行时与本地服务](#03_运行时与本地服务) |
+| 工具、权限与安全执行 | 八个模型基础工具、provider/capability/dependency、每 run 可用性快照、零审批、TaskScope/Trash；工具渐进披露（低频内建辅助工具与 MCP 工具的定义按需经 `tool_find` 检索加载，不长期占用上下文）；root-only 归档历史只读桥；user/project/project-local Hook、自然语言配置工具、command/受控 HTTP/prompt/只读 agent 执行器、十一类边界、阻断/输入更新、耐久回执与显式 Skill 激活注册；以及保留工具的窄 broker 合同 | [04 工具、权限与安全执行](#04_工具权限与审批) |
+| 模型与供应商 | 模型 profile、能力与余额、调用链、安全凭据存储及故障恢复 | [05 模型与供应商配置](#05_模型与供应商配置) |
+| MCP runtime | user/project/dynamic 配置、stdio/http/sse、动态工具直通、可选只读错误与 Artifact metadata、认证与 prompt/resource Skill bridge | [06 MCP 运行时](#06_mcp运行时) |
+| 连接器 | MCP/CLI provider 目录、官方 CLI 安装与授权、host Connector 本地 OAuth 账号、生命周期、readiness 与重启 ownership 边界；当前 Awaken Outlook 通过插件专属的 host Connector、系统浏览器 PKCE 与本地 Microsoft Graph MCP 管理个人/共享邮箱、草稿、附件、文件夹、分类、退订和本机定时发送，不在连接器目录重复展示 | [07 连接器](#07_连接器) |
+| 技能 | 多来源 Universal Skill 完整目录包发现、按需文件树/正文/资源、composer 当前选择的 run-scoped 确定性绑定、统一 catalog、inline/真实 child fork、MCP 动态来源与恢复；composer 显式激活后可注册包内受控 Hook；模型可用内置 Creator 脚手架生成完整候选，并 dry-run 校验、受控导出、安装或 Trash 替换用户 Skill；以及随 App 分发的 word/excel/ppt/pdf/code-search/PDF_Max/skill-creator/plugin-creator 八个内置 Skill 包 | [08 技能](#08_技能) |
+| ACP Client/Agent | ACP Client（Phase 0–4）：runner 配置、probe 与 Desktop 设置页；`delegate_external_agent` 工具、会话生命周期与权限处理已在 Core 实现；Workbench 嵌套进度与 permission gate UI 已实现。ACP Agent（Phase 5）：`cmd/awaken-acp` 与 `src/acp/agentbridge` 已实现 stdio transport、launcher lease、authenticated control routes、Core 事件投影、模型 profile selector/default fallback 与 cancel/close；Desktop-owned 与 core-only 的真实 stdio prompt 已通过，第三方 client、headless 多进程验收与跨 Core 重启恢复仍是已知缺口 | [02 主智能体闭环](#02_主智能体闭环) |
+| AG-UI 与 A2UI | Awaken 自有事件到 AG-UI-compatible wire 的映射；A2UI 仅作参考 | [09 AG-UI 与 A2UI 协议](#09_agui与a2ui协议) |
+| Computer Use | CUA Host、观察/动作/验证工具、复核、暂停/接管/交还、媒体策略与发布准入 | [10 计算机操作能力](#10_计算机操作能力) |
+| 长期记忆与 Dream | Markdown Memory、主模型相关性召回、受控工具、无正文事件、Settings 查看/删除、手动/空闲期 Dream、Workbench 紧凑回执与 Dream 重启恢复 | [11 长期记忆](#11_长期记忆) |
+| 定时任务 | 首版已支持：左侧一级入口、循环/日程任务、10 个内置模板、创建/编辑/启停/删除/立即执行/取消、专属线程、执行历史、Core 内调度器与 misfire 恢复、Agent 与固定提醒两类任务；Agent 编辑器支持 `/` Skill 与 `@` Computer Use/Plugin 结构化选择；Desktop 完全退出后不运行 | [12 定时任务](#12_定时任务) |
+| 移动端 | 当前不支持；已确认目标设计为 Desktop/Core 继续拥有本机执行与耐久事实，手机通过受控 Gateway 与可自托管 relay 查看和控制任务，不直接连接或暴露 loopback Core | [13 移动端](#13_移动端) |
+| 插件 | Desktop 以自动校验/digest 锁定安装管理 Agent Plugins 1.0.0、Codex、Claude Code、Cursor user-scope ZIP 包，并把随 Desktop 发布、默认关闭且不可卸载的 Awaken 内置插件投影到独立页签；首个内置插件为带官方图标和中文 Skills 的 Outlook 邮箱。统一控制台展示 Skills、MCP、Rules、Agents、Commands、Hooks、Variables、Apps，并把可运行组件接入现有 Skill/MCP/instructions/Hook/Subagent runtime。安装入口只接受点击选择或拖入的本地 ZIP，同名插件自动安全替换，不提供 URL/Git 安装、Marketplace 或插件目录聚合；另支持组件与 tool override、Variable/Secret、插件 OAuth/Device/MCP OAuth、宿主 CLI/host Connector 引用、Hook 回执、Plugin Agent/Command/Rule Composer token、升级迁移、Trash 与 run generation lease。插件进程默认保持当前用户完全访问，但不能读取宿主或其他插件凭据。Codex Apps 仍只识别不运行；project scope、跨重启 Hook receipt 索引和 Windows/Linux 实机仍不支持或未验收 | [14 插件](#14_插件) |
+| 编码工作台 | 当前不支持；已确认目标设计为 checkpoint 式代码撤回、右侧栏“变更”diff 面板、typed 只读 `git_workspace` 工具与 Git 状态条、内置 Git 防护 Hook preset，以及项目 `.awaken/coding.json` 编码环境契约；当前可用的编码相关底座（typed 文件工具、`Bash`、`git_remote`、Subagent `git_worktree`）仍由 04/02 域拥有 | [15 编码工作台](#15_编码工作台) |
+| 深度研究 | Workbench `@deep-research`（`@研究`）已支持宿主编排的只读多源研究报告（公开 HTTPS 网页 + 当前工作区），固定走规划/调研/核验/报告四阶段，以成功的 `Read`/`WebFetch` 回执约束证据并输出 Verified/Partial 报告卡；显式 URL 由宿主按原值抓取，逐跳 SSRF 检查 fail closed。任意远程 Git clone、用户 Skill 编排和不经 `WebFetch` 的 URL 核验不在范围 | [16 深度研究](#16_深度研究) |
 
-各入口的 `索引.md` 只负责路由。产品行为、代码 owner、状态/数据/事件流、异常恢复和验收方法以索引指向的专项文档为准。
+功能文档按“板块 → 功能”组织，每个功能只保留《需求文档》和《实现方案》。下面列出全部功能入口；需求说明用户行为与限制，实现说明代码、数据、接口、恢复和验证。
+
+## 功能文档
+
+当前共 16 个板块、38 个功能、76 份文档。新增或合并功能时，同时更新本目录和 AGENTS.md 的数量。
+
+### 01_桌面工作台
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 项目管理 | [需求文档](docs/01_桌面工作台/项目管理/需求文档.md) | [实现方案](docs/01_桌面工作台/项目管理/实现方案.md) |
+| 会话管理 | [需求文档](docs/01_桌面工作台/会话管理/需求文档.md) | [实现方案](docs/01_桌面工作台/会话管理/实现方案.md) |
+| 工作台布局与运行展示 | [需求文档](docs/01_桌面工作台/工作台布局与运行展示/需求文档.md) | [实现方案](docs/01_桌面工作台/工作台布局与运行展示/实现方案.md) |
+| 消息输入与编辑 | [需求文档](docs/01_桌面工作台/消息输入与编辑/需求文档.md) | [实现方案](docs/01_桌面工作台/消息输入与编辑/实现方案.md) |
+| 文件浏览与评论 | [需求文档](docs/01_桌面工作台/文件浏览与评论/需求文档.md) | [实现方案](docs/01_桌面工作台/文件浏览与评论/实现方案.md) |
+| 交付物展示 | [需求文档](docs/01_桌面工作台/交付物展示/需求文档.md) | [实现方案](docs/01_桌面工作台/交付物展示/实现方案.md) |
+| 外观与主题 | [需求文档](docs/01_桌面工作台/外观与主题/需求文档.md) | [实现方案](docs/01_桌面工作台/外观与主题/实现方案.md) |
+| 桌面宠物 | [需求文档](docs/01_桌面工作台/桌面宠物/需求文档.md) | [实现方案](docs/01_桌面工作台/桌面宠物/实现方案.md) |
+| 应用生命周期与更新 | [需求文档](docs/01_桌面工作台/应用生命周期与更新/需求文档.md) | [实现方案](docs/01_桌面工作台/应用生命周期与更新/实现方案.md) |
+
+### 02_主智能体闭环
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 对话运行与恢复 | [需求文档](docs/02_主智能体闭环/对话运行与恢复/需求文档.md) | [实现方案](docs/02_主智能体闭环/对话运行与恢复/实现方案.md) |
+| 规则指令 | [需求文档](docs/02_主智能体闭环/规则指令/需求文档.md) | [实现方案](docs/02_主智能体闭环/规则指令/实现方案.md) |
+| 上下文与用量 | [需求文档](docs/02_主智能体闭环/上下文与用量/需求文档.md) | [实现方案](docs/02_主智能体闭环/上下文与用量/实现方案.md) |
+| 子智能体协作 | [需求文档](docs/02_主智能体闭环/子智能体协作/需求文档.md) | [实现方案](docs/02_主智能体闭环/子智能体协作/实现方案.md) |
+| ACP协作 | [需求文档](docs/02_主智能体闭环/ACP协作/需求文档.md) | [实现方案](docs/02_主智能体闭环/ACP协作/实现方案.md) |
+| 运行计划 | [需求文档](docs/02_主智能体闭环/运行计划/需求文档.md) | [实现方案](docs/02_主智能体闭环/运行计划/实现方案.md) |
+
+### 03_运行时与本地服务
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 本地服务管理 | [需求文档](docs/03_运行时与本地服务/本地服务管理/需求文档.md) | [实现方案](docs/03_运行时与本地服务/本地服务管理/实现方案.md) |
+| 数据存储与重放 | [需求文档](docs/03_运行时与本地服务/数据存储与重放/需求文档.md) | [实现方案](docs/03_运行时与本地服务/数据存储与重放/实现方案.md) |
+| 本机依赖与文件生成 | [需求文档](docs/03_运行时与本地服务/本机依赖与文件生成/需求文档.md) | [实现方案](docs/03_运行时与本地服务/本机依赖与文件生成/实现方案.md) |
+| 网络代理与恢复 | [需求文档](docs/03_运行时与本地服务/网络代理与恢复/需求文档.md) | [实现方案](docs/03_运行时与本地服务/网络代理与恢复/实现方案.md) |
+
+### 04_工具权限与审批
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 工具发现与执行 | [需求文档](docs/04_工具权限与审批/工具发现与执行/需求文档.md) | [实现方案](docs/04_工具权限与审批/工具发现与执行/实现方案.md) |
+| 文件操作与路径安全 | [需求文档](docs/04_工具权限与审批/文件操作与路径安全/需求文档.md) | [实现方案](docs/04_工具权限与审批/文件操作与路径安全/实现方案.md) |
+| 命令执行 | [需求文档](docs/04_工具权限与审批/命令执行/需求文档.md) | [实现方案](docs/04_工具权限与审批/命令执行/实现方案.md) |
+| 文件发布 | [需求文档](docs/04_工具权限与审批/文件发布/需求文档.md) | [实现方案](docs/04_工具权限与审批/文件发布/实现方案.md) |
+| 钩子 | [需求文档](docs/04_工具权限与审批/钩子/需求文档.md) | [实现方案](docs/04_工具权限与审批/钩子/实现方案.md) |
+
+### 05_模型与供应商配置
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 模型配置与调用 | [需求文档](docs/05_模型与供应商配置/模型配置与调用/需求文档.md) | [实现方案](docs/05_模型与供应商配置/模型配置与调用/实现方案.md) |
+| 凭据存储与恢复 | [需求文档](docs/05_模型与供应商配置/凭据存储与恢复/需求文档.md) | [实现方案](docs/05_模型与供应商配置/凭据存储与恢复/实现方案.md) |
+
+### 06_MCP运行时
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 连接配置与认证 | [需求文档](docs/06_MCP运行时/连接配置与认证/需求文档.md) | [实现方案](docs/06_MCP运行时/连接配置与认证/实现方案.md) |
+| 工具与技能桥接 | [需求文档](docs/06_MCP运行时/工具与技能桥接/需求文档.md) | [实现方案](docs/06_MCP运行时/工具与技能桥接/实现方案.md) |
+
+### 07_连接器
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 连接器管理 | [需求文档](docs/07_连接器/连接器管理/需求文档.md) | [实现方案](docs/07_连接器/连接器管理/实现方案.md) |
+
+### 08_技能
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 技能管理与执行 | [需求文档](docs/08_技能/技能管理与执行/需求文档.md) | [实现方案](docs/08_技能/技能管理与执行/实现方案.md) |
+
+### 09_AGUI与A2UI协议
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 本地接口与事件协议 | [需求文档](docs/09_AGUI与A2UI协议/本地接口与事件协议/需求文档.md) | [实现方案](docs/09_AGUI与A2UI协议/本地接口与事件协议/实现方案.md) |
+
+### 10_计算机操作能力
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 桌面观察与操作 | [需求文档](docs/10_计算机操作能力/桌面观察与操作/需求文档.md) | [实现方案](docs/10_计算机操作能力/桌面观察与操作/实现方案.md) |
+
+### 11_长期记忆
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 长期记忆与Dream | [需求文档](docs/11_长期记忆/长期记忆与Dream/需求文档.md) | [实现方案](docs/11_长期记忆/长期记忆与Dream/实现方案.md) |
+
+### 12_定时任务
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 定时执行与提醒 | [需求文档](docs/12_定时任务/定时执行与提醒/需求文档.md) | [实现方案](docs/12_定时任务/定时执行与提醒/实现方案.md) |
+
+### 13_移动端
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 手机远程访问 | [需求文档](docs/13_移动端/手机远程访问/需求文档.md) | [实现方案](docs/13_移动端/手机远程访问/实现方案.md) |
+
+### 14_插件
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 插件管理与运行 | [需求文档](docs/14_插件/插件管理与运行/需求文档.md) | [实现方案](docs/14_插件/插件管理与运行/实现方案.md) |
+
+### 15_编码工作台
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 代码变更与撤回 | [需求文档](docs/15_编码工作台/代码变更与撤回/需求文档.md) | [实现方案](docs/15_编码工作台/代码变更与撤回/实现方案.md) |
+
+### 16_深度研究
+
+| 功能 | 用户需求 | 技术实现 |
+| --- | --- | --- |
+| 研究报告 | [需求文档](docs/16_深度研究/研究报告/需求文档.md) | [实现方案](docs/16_深度研究/研究报告/实现方案.md) |
 
 ## 总体架构
 
@@ -137,19 +259,19 @@ Gallery 使用 mock state，只能证明组件渲染，不能替代 Awaken Deskt
 
 ## Coding Agent 读档路径
 
-协作、读档与完成规则见 [AGENTS.md](AGENTS.md)。需要领域背景时，从上面的能力地图进入受影响功能域的 `索引.md`，按当前任务读取对应唯一权威；真实 Desktop 验证使用本 README 的正式入口。
+协作、读档与完成规则见 [AGENTS.md](AGENTS.md)。需要领域背景时，从下方功能文档目录进入受影响功能，先读需求，再按任务读取实现方案；真实 Desktop 验证使用本 README 的正式入口。
 
 ## 项目级硬边界
 
 - Desktop 是正式产品 consumer，并拥有 `awaken-core` 的本地生命周期；不得增加需要用户独立维护的第二套 Core 入口。
-- Workbench 中间区域的 ownership、唯一滚动容器和 `center` / `dock` 形态不得绕过；具体规则只以 [架构契约](docs/01_桌面工作台/中间交互区域/架构契约.md) 为准。
+- Workbench 中间区域的 ownership、唯一滚动容器和 `center` / `dock` 形态不得绕过；具体规则只以 [架构契约](docs/01_桌面工作台/工作台布局与运行展示/实现方案.md) 为准。
 - `Awaken Design System` 不得依赖 Electron、HTTP/SSE、Agent Core、MCP 或产品 store；Desktop 也不得从其源码内部路径建立私有耦合。
 - `src/agentcore` 不依赖 `src/protocol/agui`；内部语义与外部 wire 由协议映射层隔离。
 - Renderer 不拥有后端权限、路径安全、凭据或持久化策略；这些决策必须留在相应 Main/Core owner。
 - Gallery、旧截图、旧验收摘要和绕过 Desktop 的 provider smoke 不能作为真实产品通过证据。
 - `Bash` 以 Desktop 向 `awaken-core` 注入的当前登录用户身份和 login 环境直接执行，不经过 restricted/staging broker，也不声称 workspace 隔离、全部副作用可观测或任意删除可恢复；TaskScope、Trash 与 staging 只属于实际选用的 typed 工具及 `dependency_install`、`git_remote`、MCP Artifact bridge。Computer-ready run 同时暴露 `Bash` 与三个 `computer_*` 工具：前者用于 CLI、Python/Typst、构建和 Skill 脚本，后者用于直接 GUI 观察与输入。只有 Computer lane 内动作受其 review、lease/fence 和 verify 约束，Bash 事件保持独立且不能冒充 Computer 证据。消息发送不经过 Awaken 人工审核门。
 - 不得把 A2UI、原生 OS Computer Use、MCP WebSocket、完整 OAuth/401 自动恢复、全平台强制 Shell overlay 等尚未实现或不完整能力写成当前支持。
-- Memory/Dream 的已实现范围、child 对父 `MemoryRecallSnapshot` 的继承约束和真实 Desktop/跨平台验收缺口只以 [11 长期记忆](docs/11_长期记忆/索引.md) 为准。
+- Memory/Dream 的已实现范围、child 对父 `MemoryRecallSnapshot` 的继承约束和真实 Desktop/跨平台验收缺口只以 [11 长期记忆](#11_长期记忆) 为准。
 - 不提交 secret、userData、依赖目录或生成产物；不覆盖或清理与当前任务无关的本地改动。
 - 代码改变产品事实时，必须在同一任务同步更新唯一权威文档和当前验收证据。
 

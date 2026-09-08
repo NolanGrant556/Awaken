@@ -58,7 +58,7 @@ func (c *FakeClock) Advance(d time.Duration) {
 // cronParser accepts exactly the five standard fields (minute, hour,
 // day-of-month, month, day-of-week) with English names for month/DOW. The
 // Descriptor flag stays off on purpose: @every/@daily shorthands are not
-// part of the contract (§6.3).
+// part of the contract ([校验](docs/12_定时任务/定时执行与提醒/实现方案.md#校验)).
 var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
 // dowRangeEndingAtSeven matches range tokens such as "5-7" or "1-7/2".
@@ -150,7 +150,7 @@ func NextOccurrence(sched Schedule, after time.Time) (time.Time, bool) {
 		}
 		next := parsed.Next(after.In(loc))
 		// Fall-back repeats a local wall-clock time twice; the contract
-		// executes each expression occurrence only once (§8.3), so skip the
+		// executes each expression occurrence only once ([misfire、时区和 DST](docs/12_定时任务/定时执行与提醒/实现方案.md#misfire时区和-dst)), so skip the
 		// second instant of an already-seen local time.
 		for !next.IsZero() && sameLocalWallTime(next, after.In(loc)) {
 			next = parsed.Next(next)
@@ -217,7 +217,7 @@ type MisfireDecision struct {
 // cannot loop DecideMisfire forever.
 const maxMisfireScanSteps = 1000000
 
-// DecideMisfire applies the contract §8.3 misfire rules.
+// DecideMisfire applies the contract [misfire、时区和 DST](docs/12_定时任务/定时执行与提醒/实现方案.md#misfire时区和-dst) misfire rules.
 //
 // lastProcessed is the newest occurrence already processed (nil when none);
 // notBefore lower-bounds the scan (normally the task creation time, so a

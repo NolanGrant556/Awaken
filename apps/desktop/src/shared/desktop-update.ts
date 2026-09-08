@@ -1,5 +1,5 @@
 // Desktop 应用更新的共享契约：状态机快照、错误码、receipt 与 IPC channel。
-// 设计权威：docs/01_桌面工作台/桌面生命周期与发布/应用版本与自动更新设计契约.md §5、§9.3。
+// 设计权威：[状态、命令与必须保持的规则](docs/01_桌面工作台/应用生命周期与更新/实现方案.md#状态命令与必须保持的规则)、[Shared / Preload IPC](docs/01_桌面工作台/应用生命周期与更新/实现方案.md#shared--preload-ipc)。
 // Main 是状态唯一 owner；Renderer 只投影本文件定义的快照，不自行比较版本或选择资产。
 
 export type DesktopUpdatePhase =
@@ -150,7 +150,7 @@ export function isStableDesktopUpdateIdentity(input: {
 export type DesktopUpdateReceiptVerdict = "keep" | "discard";
 
 /**
- * 启动对账（设计契约 §5.1 第 1 步）：receipt 不可解析、target 不一致或
+ * 启动对账（设计契约 [已下载更新的恢复与再验证](docs/01_桌面工作台/应用生命周期与更新/实现方案.md#已下载更新的恢复与再验证) 第 1 步）：receipt 不可解析、target 不一致或
  * version 不高于当前版本时都必须丢弃。receipt 只描述"见过哪个版本"，
  * 不恢复 downloaded 状态，也不据此触碰 updater 缓存目录。
  */
@@ -222,7 +222,7 @@ export function classifyDesktopUpdateError(
   }
 }
 
-/** 侧栏只在可操作状态显示更新入口（设计契约 §3.2）。 */
+/** 侧栏只在可操作状态显示更新入口（设计契约 [`aw-sidebar-profile` 更新入口](docs/01_桌面工作台/应用生命周期与更新/实现方案.md#aw-sidebar-profile-更新入口)）。 */
 export function isDesktopUpdateActionablePhase(phase: DesktopUpdatePhase): boolean {
   return (
     phase === "available" ||

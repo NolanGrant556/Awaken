@@ -4,7 +4,7 @@ import {
   type ScheduledTaskEventWire,
 } from "../shared/runtime.js";
 
-// Scheduled-task Main-side adapter (contract docs/12_定时任务 §10): parses
+// Scheduled-task Main-side adapter (contract [HTTP、IPC 与事件](docs/12_定时任务/定时执行与提醒/实现方案.md#httpipc-与事件)): parses
 // the Core /v1/scheduled-tasks/events SSE stream, keeps it alive across
 // reconnects and decides which events become native notifications. The
 // module is Electron-free so vitest can drive it with mocked fetch/sleep.

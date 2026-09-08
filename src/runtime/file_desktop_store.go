@@ -476,7 +476,7 @@ func storedRecordFromSessionMetadata(meta fileSessionMetadata) storedThreadRecor
 	}
 	// archived_at only exists while archived=true. Older metadata may carry
 	// archived without archived_at; fall back to updated_at for display and
-	// ordering instead of rewriting history (archive contract §4.1).
+	// ordering instead of rewriting history (archive contract [Durable metadata](docs/01_桌面工作台/会话管理/实现方案.md#durable-metadata)).
 	var archivedAt time.Time
 	if meta.Archived {
 		archivedAt = parseStoredTime(meta.ArchivedAt)
@@ -868,7 +868,7 @@ func (s *FileDesktopStore) ListThreads(view ThreadListView) ([]ThreadSnapshot, e
 // metadata write. Archiving never touches updated_at, so a management action
 // cannot push a conversation to the top of the regular list; the same target
 // state is idempotent and never rewrites archived_at; unarchiving clears
-// archived_at together with the flag (archive contract §4.1/§4.3).
+// archived_at together with the flag (archive contract [Durable metadata](docs/01_桌面工作台/会话管理/实现方案.md#durable-metadata)/[变更合同](docs/01_桌面工作台/会话管理/实现方案.md#变更合同)).
 func (s *FileDesktopStore) SetThreadArchived(threadID string, archived bool, now time.Time) (ThreadSnapshot, error) {
 	threadID = strings.TrimSpace(threadID)
 	if threadID == "" {

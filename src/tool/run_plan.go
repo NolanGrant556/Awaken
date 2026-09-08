@@ -8,7 +8,7 @@ import (
 )
 
 // RunPlanStatus is the stable three-state status of one run plan item
-// (contract: docs/02_主智能体闭环/运行计划与任务进度设计契约.md §7.1).
+// (contract: [快照数据](docs/02_主智能体闭环/运行计划/实现方案.md#快照数据)).
 type RunPlanStatus string
 
 const (
@@ -54,7 +54,7 @@ type RunPlanResult struct {
 	AllCompleted   bool
 }
 
-// Stable error codes carried by RunPlanError (contract §6.2/§10).
+// Stable error codes carried by RunPlanError (contract [校验规则](docs/02_主智能体闭环/运行计划/实现方案.md#校验规则)/[异常、恢复与降级](docs/02_主智能体闭环/运行计划/实现方案.md#异常恢复与降级)).
 const (
 	RunPlanErrorInvalidInput       = "plan_invalid_input"
 	RunPlanErrorVersionConflict    = "plan_version_conflict"
@@ -87,7 +87,7 @@ func (e *RunPlanError) Error() string {
 // RunPlanService is the narrow run-scoped plan contract consumed by the
 // update_plan tool. Validation and journal-first persistence orchestration
 // are the implementation's responsibility; the tool package must not import
-// agentcore (import-cycle boundary, contract §7.1).
+// agentcore (import-cycle boundary, contract [快照数据](docs/02_主智能体闭环/运行计划/实现方案.md#快照数据)).
 type RunPlanService interface {
 	// ApplyUpdate validates and durably applies one whole-table update.
 	// The host-owned identity supplies run/turn/tool-call identity; model

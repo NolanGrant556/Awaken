@@ -60,7 +60,7 @@ API、Coding Plan、Token Plan、Agent Plan 使用不同凭据、网关和计费
 - 模型能力声明：`src/modelprofile/registry.go` 与 `apps/desktop/src/main/model-capabilities.ts`。
 - Awaken effort 到供应商原生值的映射：`src/llm/request_policy.go`；三协议 wire lowering：`src/llm/openai_chat.go`、`src/llm/openai_responses.go`、`src/llm/anthropic_messages.go`。
 - 缓存、推理开关、请求策略和 usage：`src/llm/` 对应 capability/adapter 文件。
-- 产品事实：`docs/05_模型与供应商配置/模型配置与调用.md`；缓存与成本事实：`docs/02_主智能体闭环/提示词缓存与成本治理.md`。
+- 产品事实：`docs/05_模型与供应商配置/模型配置与调用/实现方案.md`；缓存与成本事实：`docs/02_主智能体闭环/上下文与用量/实现方案.md`。
 
 不要把 vendor route、协议 adapter、模型 capability 和套餐计费写进同一个不可拆分判断。
 

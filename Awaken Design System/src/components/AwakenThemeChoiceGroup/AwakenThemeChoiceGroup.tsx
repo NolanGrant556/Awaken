@@ -13,7 +13,7 @@ export type AwakenThemeChoiceGroupProps = {
 const choices = [
   { value: "system", label: "跟随系统", concept: "theme-system" as const },
   { value: "light", label: "浅色", concept: "theme-light" as const },
-  { value: "dark", label: "黑色", concept: "theme-dark" as const },
+  { value: "dark", label: "深色", concept: "theme-dark" as const },
 ] as const;
 
 export function AwakenThemeChoiceGroup({

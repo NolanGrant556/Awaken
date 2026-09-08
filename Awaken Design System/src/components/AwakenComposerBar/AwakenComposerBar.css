@@ -74,7 +74,8 @@
 }
 
 .composer-bar textarea::placeholder {
-  color: var(--aw-text-disabled);
+  color: var(--aw-text-tertiary);
+  opacity: 1;
 }
 
 .composer-bar textarea::-webkit-scrollbar {

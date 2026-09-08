@@ -386,38 +386,73 @@ func (e *RunServiceExecutor) awaitTerminal(ctx context.Context, task Task, run r
 		for _, event := range subscription.History {
 			if gate := interactionGate(event); gate != "" {
 				e.RunService.CancelRun(run.RunID)
-				e.drainToTerminal(events)
+				e.drainToTerminal(subscription.Done)
 				return &ExecError{Code: ErrorCodeScheduledInteractionRequired, Message: "interaction required: " + gate}
 			}
 		}
 		subscription.History = nil
+		// A run may already have finished before Subscribe. Prefer its recorded
+		// outcome even if cancellation or the timeout is also ready.
 		select {
+		case <-subscription.Done:
+			return e.completedOutcome(run.RunID)
+		default:
+		}
+		select {
+		case <-subscription.Done:
+			return e.completedOutcome(run.RunID)
 		case event, ok := <-events:
 			if !ok {
-				return e.terminalOutcome(run.RunID)
+				// A subscriber overflow is not a run terminal. Reattach to the
+				// retained history so an interaction gate cannot be lost either.
+				if subscription.Close != nil {
+					subscription.Close()
+				}
+				subscription, err = e.RunService.Subscribe(run.RunID, 0)
+				if err != nil {
+					return &ExecError{Code: ErrorCodeRunFailed, Message: "run stream unavailable"}
+				}
+				events = subscription.Events
+				continue
 			}
 			if gate := interactionGate(event); gate != "" {
 				e.RunService.CancelRun(run.RunID)
-				e.drainToTerminal(events)
+				e.drainToTerminal(subscription.Done)
 				return &ExecError{Code: ErrorCodeScheduledInteractionRequired, Message: "interaction required: " + gate}
 			}
 		case <-timer.C():
 			e.RunService.CancelRun(run.RunID)
-			e.drainToTerminal(events)
+			e.drainToTerminal(subscription.Done)
 			return &ExecError{Code: ErrorCodeExecutionTimeout, Message: "execution timed out"}
 		case <-ctx.Done():
 			e.RunService.CancelRun(run.RunID)
-			e.drainToTerminal(events)
+			e.drainToTerminal(subscription.Done)
 			return &ExecError{Code: ErrorCodeRunCancelled, Message: "execution cancelled", Cancelled: true}
 		}
 	}
 }
 
-// drainToTerminal waits for the run bus to close after a cancellation so the
-// execution only returns once the run has exactly one terminal state.
-func (e *RunServiceExecutor) drainToTerminal(events <-chan runtime.Event) {
-	for range events {
+// Cancellation waits for the run, independently of subscriber delivery.
+func (e *RunServiceExecutor) drainToTerminal(done <-chan struct{}) {
+	<-done
+}
+
+// A terminal can arrive alongside a buffered gate. Check the complete history
+// before reporting success, including runs that finished before subscribing.
+func (e *RunServiceExecutor) completedOutcome(runID string) *ExecError {
+	sub, err := e.RunService.Subscribe(runID, 0)
+	if err != nil {
+		return &ExecError{Code: ErrorCodeRunFailed, Message: "run outcome unavailable"}
 	}
+	if sub.Close != nil {
+		defer sub.Close()
+	}
+	for _, event := range sub.History {
+		if gate := interactionGate(event); gate != "" {
+			return &ExecError{Code: ErrorCodeScheduledInteractionRequired, Message: "interaction required: " + gate}
+		}
+	}
+	return e.terminalOutcome(runID)
 }
 
 // terminalOutcome maps the durable run status onto an execution outcome.

@@ -3,6 +3,7 @@ package scheduledtask
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -62,11 +63,11 @@ func (c *FakeClock) Advance(d time.Duration) {
 var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
 // dowRangeEndingAtSeven matches range tokens such as "5-7" or "1-7/2".
-var dowRangeEndingAtSeven = regexp.MustCompile(`^(.+)-7(/[0-9]+)?$`)
+var dowRangeEndingAtSeven = regexp.MustCompile(`^([0-9]+|(?i:sun|mon|tue|wed|thu|fri|sat))-7(?:/([0-9]+))?$`)
 
 // normalizeDOWField maps the numeric Sunday 7 onto 0, which is what the
-// underlying parser accepts. A range ending at 7 ("5-7") wraps onto the next
-// week, so it becomes "<low>-6,0".
+// underlying parser accepts. Expand a range before translating Sunday so the
+// original starting point and step determine whether 7 actually occurs.
 func normalizeDOWField(field string) string {
 	parts := strings.Split(field, ",")
 	out := make([]string, 0, len(parts)+1)
@@ -76,8 +77,35 @@ func normalizeDOWField(field string) string {
 			out = append(out, "0")
 		case dowRangeEndingAtSeven.MatchString(part):
 			match := dowRangeEndingAtSeven.FindStringSubmatch(part)
-			step := match[2]
-			out = append(out, match[1]+"-6"+step, "0")
+			start, err := strconv.Atoi(match[1])
+			if err != nil {
+				nameIndex := strings.Index("sunmontuewedthufrisat", strings.ToLower(match[1]))
+				if nameIndex < 0 {
+					out = append(out, part)
+					continue
+				}
+				start = nameIndex / 3
+			}
+			if start > 7 {
+				out = append(out, part)
+				continue
+			}
+			step := 1
+			if match[2] != "" {
+				step, err = strconv.Atoi(match[2])
+				if err != nil || step <= 0 {
+					// Preserve invalid input for the parser to reject.
+					out = append(out, part)
+					continue
+				}
+			}
+			for day := start; day <= 7; {
+				out = append(out, strconv.Itoa(day%7))
+				if step > 7-day {
+					break
+				}
+				day += step
+			}
 		default:
 			out = append(out, part)
 		}

@@ -382,3 +382,38 @@ func TestDecideMisfireAllWithFakeClock(t *testing.T) {
 		t.Fatalf("advanced fake-clock decision = %+v", decision)
 	}
 }
+
+func TestCronSundayRangePreservesStartingPointAndStep(t *testing.T) {
+	for _, tc := range []struct {
+		field string
+		days  []time.Weekday
+	}{
+		{"2-7/2", []time.Weekday{time.Tuesday, time.Thursday, time.Saturday}},
+		{"1-7/2", []time.Weekday{time.Monday, time.Wednesday, time.Friday, time.Sunday}},
+		{"5-7", []time.Weekday{time.Friday, time.Saturday, time.Sunday}},
+		{"7-7", []time.Weekday{time.Sunday}},
+		{"MON-7/2", []time.Weekday{time.Monday, time.Wednesday, time.Friday, time.Sunday}},
+		{"0,2-7/2", []time.Weekday{time.Tuesday, time.Thursday, time.Saturday, time.Sunday}},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			start := time.Date(2026, 9, 7, 0, 0, 0, 0, time.UTC)
+			cursor := start
+			for _, want := range tc.days {
+				got, ok := NextOccurrence(cronSchedule("0 9 * * "+tc.field, "UTC"), cursor)
+				if !ok || got.Weekday() != want || !got.Before(start.AddDate(0, 0, 7)) {
+					t.Fatalf("next=%v, want weekday %v in same week", got, want)
+				}
+				cursor = got
+			}
+			next, ok := NextOccurrence(cronSchedule("0 9 * * "+tc.field, "UTC"), cursor)
+			if !ok || next.Before(start.AddDate(0, 0, 7)) {
+				t.Fatalf("invented occurrence: %v", next)
+			}
+		})
+	}
+	for _, field := range []string{"2-7/0", "8-7/2", "2-7/999999999999999999999999999", "-1-7"} {
+		if _, err := parseCron("0 9 * * " + field); err == nil {
+			t.Errorf("invalid field accepted: %s", field)
+		}
+	}
+}

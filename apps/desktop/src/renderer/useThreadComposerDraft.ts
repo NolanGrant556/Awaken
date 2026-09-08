@@ -71,15 +71,25 @@ export function composerSelectionsEqual(
 }
 
 export function useThreadComposerDraft(ownerKey: string) {
-  const [drafts, setDrafts] = useState<Record<string, ThreadComposerDraft>>({});
-  const draft = threadComposerDraftForOwner(drafts, ownerKey);
+  const [state, setState] = useState<{
+    drafts: Record<string, ThreadComposerDraft>;
+    pendingSubmissions: Record<string, symbol>;
+  }>({ drafts: {}, pendingSubmissions: {} });
+  const draft = threadComposerDraftForOwner(state.drafts, ownerKey);
 
   const updateField = useCallback(
     <Key extends keyof ThreadComposerDraft>(
       field: Key,
       action: SetStateAction<ThreadComposerDraft[Key]>,
     ): void => {
-      setDrafts((current) => updateThreadComposerDraftField(current, ownerKey, field, action));
+      setState((current) => {
+        const drafts = updateThreadComposerDraftField(current.drafts, ownerKey, field, action);
+        if (drafts === current.drafts) return current;
+        const pendingSubmissions = { ...current.pendingSubmissions };
+        // Caret movement after clearing the input is not a new user draft.
+        if (field !== "selection") delete pendingSubmissions[ownerKey];
+        return { drafts, pendingSubmissions };
+      });
     },
     [ownerKey],
   );
@@ -118,17 +128,39 @@ export function useThreadComposerDraft(ownerKey: string) {
 
   const replaceDraft = useCallback(
     (nextDraft: ThreadComposerDraft, targetOwnerKey = ownerKey): void => {
-      setDrafts((current) => ({ ...current, [targetOwnerKey]: nextDraft }));
+      setState((current) => {
+        const pendingSubmissions = { ...current.pendingSubmissions };
+        delete pendingSubmissions[targetOwnerKey];
+        return { drafts: { ...current.drafts, [targetOwnerKey]: nextDraft }, pendingSubmissions };
+      });
     },
     [ownerKey],
   );
 
   const clearDraft = useCallback(
     (targetOwnerKey = ownerKey): void => {
-      setDrafts((current) => ({ ...current, [targetOwnerKey]: EMPTY_COMPOSER_DRAFT }));
+      replaceDraft(EMPTY_COMPOSER_DRAFT, targetOwnerKey);
     },
-    [ownerKey],
+    [ownerKey, replaceDraft],
   );
+
+  // The returned recovery action belongs to this submission and this owner,
+  // even after navigation. A later edit/reset/submission invalidates it.
+  const clearForSubmission = useCallback((targetOwnerKey = ownerKey) => {
+    const submission = Symbol("draft-submission");
+    setState((current) => ({
+      drafts: { ...current.drafts, [targetOwnerKey]: EMPTY_COMPOSER_DRAFT },
+      pendingSubmissions: { ...current.pendingSubmissions, [targetOwnerKey]: submission },
+    }));
+    return (restoredDraft: ThreadComposerDraft): void => {
+      setState((current) => {
+        if (current.pendingSubmissions[targetOwnerKey] !== submission) return current;
+        const pendingSubmissions = { ...current.pendingSubmissions };
+        delete pendingSubmissions[targetOwnerKey];
+        return { drafts: { ...current.drafts, [targetOwnerKey]: restoredDraft }, pendingSubmissions };
+      });
+    };
+  }, [ownerKey]);
 
   return {
     draft,
@@ -141,5 +173,6 @@ export function useThreadComposerDraft(ownerKey: string) {
     setSelection,
     replaceDraft,
     clearDraft,
+    clearForSubmission,
   };
 }

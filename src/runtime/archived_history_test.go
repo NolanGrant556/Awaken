@@ -88,6 +88,26 @@ func TestArchivedHistoryListAndReadStayInsideArchivedAuthority(t *testing.T) {
 
 func createArchivedHistoryFixture(t *testing.T, store *FileDesktopStore, snapshot ThreadSnapshot, archivedAt time.Time, archived bool) {
 	t.Helper()
+	if id := snapshot.Workspace.ProjectID; id != "" {
+		if _, err := store.ProjectByID(id); errors.Is(err, ErrProjectNotFound) {
+			store.mu.Lock()
+			lock, err := store.lockStore()
+			if err == nil {
+				err = store.commitMutation(fileLifecycleMutation{Kind: "CreateProject", Projects: []Project{{
+					ProjectID: id, DisplayName: snapshot.Workspace.ProjectName,
+					Folders: []ProjectFolder{{Path: snapshot.Workspace.WorkspaceRoot, IsPrimary: true}},
+					State:   ProjectStateActive, Version: 1,
+				}}})
+				_ = lock.Release()
+			}
+			store.mu.Unlock()
+			if err != nil {
+				t.Fatal(err)
+			}
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := store.CreateThread(snapshot, "profile", snapshot.Label); err != nil {
 		t.Fatal(err)
 	}

@@ -209,61 +209,54 @@ func newFileDesktopStore(root string) (*FileDesktopStore, error) {
 }
 
 func (s *FileDesktopStore) openLifecycle() error {
+	// Opening may truncate an interrupted journal tail. It must share the
+	// writer lock so another instance's in-progress append is never truncated.
+	lock, err := s.acquireStoreLock()
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
 	journal, _, err := filestore.OpenJournal(filepath.Join(s.gen, "lifecycle", "mutations.jsonl"))
 	if err != nil {
 		return err
 	}
 	s.journal = journal
-
-	state := newFileLifecycleState()
-	statePath := s.statePath()
-	if err := filestore.ReadJSON(statePath, state); err != nil {
-		if !os.IsNotExist(err) {
-			// The snapshot only accelerates startup; a corrupt snapshot is
-			// rebuilt from the lifecycle journal, which stays authoritative.
-			state = newFileLifecycleState()
-		} else {
-			state = newFileLifecycleState()
-		}
+	// Rebuild from the journal at startup, including when state.json is valid
+	// JSON with a current applied_seq but omitted another writer's mutations.
+	// Snapshots are projections, never an independent source of project facts.
+	s.state = newFileLifecycleState()
+	if err := s.refreshLifecycleLocked(); err != nil {
+		_ = journal.Close()
+		return err
 	}
-	normalizeLoadedProjects(state)
-	records, err := journal.Records()
+	return s.persistState()
+}
+
+// refreshLifecycleLocked catches this instance up before it reads or builds a
+// mutation. Both the process mutex and store lock are held (or this instance
+// is still being constructed). Applying a record is idempotent on retry.
+func (s *FileDesktopStore) refreshLifecycleLocked() error {
+	records, err := s.journal.Records()
 	if err != nil {
 		return err
 	}
-	rolledForward := false
+	if uint64(len(records)) < s.state.AppliedSeq {
+		return fmt.Errorf("%w: lifecycle journal moved behind the applied sequence", filestore.ErrCorruptJournal)
+	}
 	for _, record := range records {
-		if record.Seq <= state.AppliedSeq {
+		if record.Seq <= s.state.AppliedSeq {
 			continue
 		}
 		var mutation fileLifecycleMutation
 		if err := json.Unmarshal(record.Payload, &mutation); err != nil {
 			return fmt.Errorf("filestore lifecycle record %d undecodable: %w", record.Seq, err)
 		}
-		if err := s.applyMutation(state, mutation); err != nil {
+		if err := s.applyMutation(s.state, mutation); err != nil {
 			return err
 		}
-		state.AppliedSeq = record.Seq
-		rolledForward = true
-	}
-	s.state = state
-	if rolledForward {
-		return s.persistState()
+		s.state.AppliedSeq = record.Seq
 	}
 	return nil
-}
-
-// normalizeLoadedProjects upgrades a snapshot written before multi-folder
-// projects existed. Such a snapshot has a WorkspaceRoot per project and no
-// folder list; promoting it here means the rest of the store only ever sees the
-// folder-list invariant.
-func normalizeLoadedProjects(state *fileLifecycleState) {
-	if state == nil || len(state.Projects) == 0 {
-		return
-	}
-	for projectID, project := range state.Projects {
-		state.Projects[projectID] = project.withNormalizedFolders()
-	}
 }
 
 func (s *FileDesktopStore) statePath() string {
@@ -305,6 +298,18 @@ func sanitizeSessionID(threadID string) string {
 // lockStore takes the short-lived cross-process mutation lock. Acquisition
 // failure is a hard error: there is no lock-free fallback.
 func (s *FileDesktopStore) lockStore() (*filestore.FileLock, error) {
+	lock, err := s.acquireStoreLock()
+	if err != nil {
+		return nil, err
+	}
+	if err := s.refreshLifecycleLocked(); err != nil {
+		_ = lock.Release()
+		return nil, err
+	}
+	return lock, nil
+}
+
+func (s *FileDesktopStore) acquireStoreLock() (*filestore.FileLock, error) {
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		lock, err := filestore.AcquireLock(s.lockPath(), "awaken-core", 10*time.Second)
@@ -455,6 +460,16 @@ func (s *FileDesktopStore) threadRecord(threadID string) (storedThreadRecord, er
 	return storedRecordFromSessionMetadata(meta), nil
 }
 
+func sessionProjectID(meta fileSessionMetadata) string {
+	if id := strings.TrimSpace(meta.Workspace.ProjectID); id != "" {
+		return id
+	}
+	if meta.Workspace.SessionWorkspace {
+		return ""
+	}
+	return meta.ProjectID
+}
+
 func storedRecordFromSessionMetadata(meta fileSessionMetadata) storedThreadRecord {
 	workspace := meta.Workspace
 	if strings.TrimSpace(workspace.WorkspaceRoot) == "" {
@@ -482,7 +497,7 @@ func storedRecordFromSessionMetadata(meta fileSessionMetadata) storedThreadRecor
 	return storedThreadRecord{
 		Snapshot: ThreadSnapshot{
 			ThreadID:                 meta.ThreadID,
-			ProjectID:                meta.ProjectID,
+			ProjectID:                sessionProjectID(meta),
 			Label:                    trimThreadLabel(meta.Title),
 			TitleSource:              source,
 			TitleStatus:              status,
@@ -521,18 +536,33 @@ func (s *FileDesktopStore) upsertThread(snapshot ThreadSnapshot, modelProfileKey
 	if snapshot.UpdatedAt.IsZero() {
 		snapshot.UpdatedAt = snapshot.CreatedAt
 	}
-	projectID := ""
-	// A thread-owned session workspace is not a project folder. In particular,
-	// ignore a stale top-level ProjectID that older path inference may have
-	// written: an actual folder-less project always carries its identity inside
-	// Workspace.ProjectID after normalization.
-	if !snapshot.Workspace.SessionWorkspace || strings.TrimSpace(snapshot.Workspace.ProjectID) != "" {
-		var err error
+	existing, metadataErr := s.readSessionMetadata(snapshot.ThreadID)
+	if metadataErr != nil && !os.IsNotExist(metadataErr) {
+		return metadataErr
+	}
+	projectID := strings.TrimSpace(snapshot.Workspace.ProjectID)
+	if metadataErr == nil {
+		owner := sessionProjectID(existing)
+		if projectID != "" && projectID != owner {
+			return fmt.Errorf("%w: thread project cannot change", ErrThreadWorkspaceMismatch)
+		}
+		projectID = owner
+	} else if projectID != "" {
+		if _, exists := s.state.Projects[projectID]; !exists {
+			return ErrProjectNotFound
+		}
+	} else if !snapshot.Workspace.SessionWorkspace {
+		if holders := s.projectsHoldingFolderLocked(snapshot.Workspace.WorkspaceRoot); len(holders) > 1 {
+			return fmt.Errorf("%w: project_id is required for a shared folder", ErrInvalidInput)
+		}
 		projectID, err = s.ensureProjectLocked(snapshot.Workspace.WorkspaceRoot, false)
 		if err != nil {
 			return err
 		}
 	}
+	// Freeze the same owner in both projections; never derive it again from
+	// folder order on a later flush or after a project loses its last folder.
+	snapshot.Workspace.ProjectID = projectID
 
 	incomingTitle := trimThreadLabel(firstNonEmpty(snapshot.Label, snapshot.ThreadID))
 	incomingSource := strings.TrimSpace(string(snapshot.TitleSource))
@@ -540,8 +570,7 @@ func (s *FileDesktopStore) upsertThread(snapshot ThreadSnapshot, modelProfileKey
 	incomingTitleUpdated := formatStoredTime(snapshot.TitleUpdatedAt)
 	incomingSeed := strings.TrimSpace(snapshot.TitleSeedRunID)
 
-	existing, err := s.readSessionMetadata(snapshot.ThreadID)
-	if os.IsNotExist(err) {
+	if os.IsNotExist(metadataErr) {
 		meta := fileSessionMetadata{
 			SchemaVersion:            1,
 			ThreadID:                 snapshot.ThreadID,
@@ -564,9 +593,6 @@ func (s *FileDesktopStore) upsertThread(snapshot ThreadSnapshot, modelProfileKey
 			Workspace:                snapshot.Workspace,
 		}
 		return s.writeSessionMetadata(meta)
-	}
-	if err != nil {
-		return err
 	}
 
 	downgrade := incomingSource == string(ThreadTitleSourceFirstUser) &&
@@ -1021,6 +1047,11 @@ func (s *FileDesktopStore) DeleteThread(threadID string) error {
 func (s *FileDesktopStore) ProjectsHoldingFolder(root string) ([]Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Release()
 	return s.projectsHoldingFolderLocked(root), nil
 }
 
@@ -1045,6 +1076,11 @@ func (s *FileDesktopStore) projectsHoldingFolderLocked(root string) []Project {
 func (s *FileDesktopStore) ListProjects(includeRemoved bool) ([]Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Release()
 	return s.listProjectsLocked(includeRemoved), nil
 }
 
@@ -1094,6 +1130,11 @@ func (s *FileDesktopStore) orderedProjectIDsLocked() []string {
 func (s *FileDesktopStore) ProjectByID(projectID string) (Project, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return Project{}, err
+	}
+	defer lock.Release()
 	project, ok := s.state.Projects[strings.TrimSpace(projectID)]
 	if !ok {
 		return Project{}, ErrProjectNotFound
@@ -1109,12 +1150,17 @@ func (s *FileDesktopStore) ThreadDeletionState(threadID string) (string, bool, b
 	if err != nil {
 		return "", false, false, err
 	}
-	return meta.ProjectID, meta.Deleted, true, nil
+	return sessionProjectID(meta), meta.Deleted, true, nil
 }
 
 func (s *FileDesktopStore) LookupIdempotentOperation(key, projectID string, action ProjectOperationAction) (ProjectOperation, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return ProjectOperation{}, false, err
+	}
+	defer lock.Release()
 	operationID, ok := s.state.OperationKeys[strings.TrimSpace(key)]
 	if !ok {
 		return ProjectOperation{}, false, nil
@@ -1130,6 +1176,11 @@ func (s *FileDesktopStore) LookupIdempotentOperation(key, projectID string, acti
 func (s *FileDesktopStore) OperationByID(operationID string) (ProjectOperation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return ProjectOperation{}, err
+	}
+	defer lock.Release()
 	operation, ok := s.state.Operations[strings.TrimSpace(operationID)]
 	if !ok {
 		return ProjectOperation{}, ErrProjectOperationNotFound
@@ -1150,12 +1201,22 @@ func (s *FileDesktopStore) pendingCleanupLocked(operationID string) int {
 func (s *FileDesktopStore) PendingCleanupCount(operationID string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return 0, err
+	}
+	defer lock.Release()
 	return s.pendingCleanupLocked(operationID), nil
 }
 
 func (s *FileDesktopStore) ListPendingTrashOperations() ([]ProjectOperation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Release()
 	operations := make([]ProjectOperation, 0, len(s.state.Operations))
 	for _, operation := range s.state.Operations {
 		if operation.Action != ProjectOperationTrashAndPurge {
@@ -1181,6 +1242,11 @@ func (s *FileDesktopStore) ListPendingTrashOperations() ([]ProjectOperation, err
 func (s *FileDesktopStore) OperationThreadIDs(operationID string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := s.lockStore()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Release()
 	threads := append([]string(nil), s.state.OperationThreads[operationID]...)
 	sort.Strings(threads)
 	return threads, nil
@@ -1197,7 +1263,7 @@ func (s *FileDesktopStore) liveThreadIDsForProjectLocked(projectID string) ([]st
 	}
 	var threads []liveThread
 	for _, meta := range sessions {
-		if meta.Deleted || meta.ProjectID != projectID {
+		if meta.Deleted || sessionProjectID(meta) != projectID {
 			continue
 		}
 		threads = append(threads, liveThread{id: meta.ThreadID, created: parseStoredTime(meta.CreatedAt)})

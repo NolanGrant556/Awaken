@@ -964,6 +964,16 @@ describe("AwakenComposerBar unified token editing", () => {
     expect(host.querySelector(".composer-bar-project-shelf")).toBeNull();
   });
 
+  it("uses the localized context label and camel-case title for the add-context control", () => {
+    renderComposer({ variant: "center" });
+
+    const contextButton = host.querySelector<HTMLButtonElement>(
+      '.composer-bar-context button[aria-label="添加上下文"]',
+    );
+    expect(contextButton).not.toBeNull();
+    expect(contextButton?.getAttribute("title")).toBe("addContext");
+  });
+
   it("previews at most three plugin icons and selects from the compact full list", () => {
     const onSelectOption = vi.fn();
     const { rerender } = renderComposer({

@@ -204,7 +204,7 @@
   align-items: center;
   gap: 5px;
   min-width: 0;
-  height: 26px;
+  height: 28px;
   padding: 0 8px 0 5px;
   border: 0;
   border-radius: var(--aw-radius-pill);
@@ -392,7 +392,7 @@
 
 .composer-bar-center .composer-bar-context .composer-bar-plugin-trigger {
   width: auto !important;
-  height: 26px !important;
+  height: 28px !important;
   padding: 0 8px 0 5px !important;
   border-radius: var(--aw-radius-pill) !important;
   background: var(--aw-bg-fill-main) !important;
@@ -401,7 +401,7 @@
 
 .composer-bar-dock .composer-bar-context .composer-bar-plugin-trigger {
   width: auto !important;
-  height: 24px !important;
+  height: 28px !important;
   padding: 0 7px 0 4px !important;
   border-radius: var(--aw-radius-pill) !important;
   background: var(--aw-bg-fill-main) !important;

@@ -79,7 +79,7 @@ func resolveRuntimeStoreRoot() string {
 	return desktopdata.AwakenHomeRoot()
 }
 
-func newThreadStore() ThreadStore {
+func newThreadStore() DesktopRepository {
 	root := resolveRuntimeStoreRoot()
 	if root == "" {
 		dir, err := os.MkdirTemp("", "awaken-store-")

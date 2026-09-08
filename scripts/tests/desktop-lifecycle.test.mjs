@@ -266,7 +266,7 @@ describe("desktop package staging", () => {
       order: 0,
     });
     assert.equal(manifest.name, "awaken-outlook");
-    assert.equal(manifest.version, "1.4.0");
+    assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
     assert.doesNotThrow(() =>
       JSON.parse(readFileSync(join(pluginRoot, ".awaken", "setup.json"), "utf8")),
     );

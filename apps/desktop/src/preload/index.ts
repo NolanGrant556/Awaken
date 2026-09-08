@@ -1,3 +1,4 @@
+import type { DesktopRequestResult } from "../shared/runtime-request.js";
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from "electron";
 import type { AguiEvent } from "../shared/agui.js";
 import { DESKTOP_SELECT_ALL_REQUESTED_CHANNEL } from "../shared/desktop-selection.js";
@@ -43,12 +44,12 @@ import {
   type DeleteSkillRequest,
   type DeleteSkillResponse,
   type GetSkillPreviewRequest,
-	type GlobalAgentsDeleteRequest,
-	type GlobalAgentsDocument,
-	type GlobalAgentsSaveRequest,
-	type HookRevokeRequest,
-	type HookStatus,
-	type HookTrustRequest,
+  type GlobalAgentsDeleteRequest,
+  type GlobalAgentsDocument,
+  type GlobalAgentsSaveRequest,
+  type HookRevokeRequest,
+  type HookStatus,
+  type HookTrustRequest,
   type InstallPluginRequest,
   type InstallPluginResponse,
   type InstallSkillRequest,
@@ -83,7 +84,7 @@ import {
   type ProjectFilePreviewStartRequest,
   type ProjectFilePreviewStartResult,
   type ProjectMutationResult,
-	type ProjectAgentsCreateResult,
+  type ProjectAgentsCreateResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
   type RuntimeConnectorAuthSession,
@@ -233,15 +234,15 @@ const bridge: AwakenBridge = {
   getSearchSettings: () => ipcRenderer.invoke("awaken:get-search-settings"),
   saveSearchSettings: (request) => ipcRenderer.invoke("awaken:save-search-settings", request),
   testSearchProvider: (request) => ipcRenderer.invoke("awaken:test-search-provider", request),
-  getACPRunners: () => ipcRenderer.invoke("awaken:get-acp-runners") as Promise<ACPRunnersSettings>,
+  getACPRunners: () => ipcRenderer.invoke("awaken:get-acp-runners") as Promise<DesktopRequestResult<ACPRunnersSettings>>,
   createACPRunner: (request: ACPRunnerCreateRequest) =>
-    ipcRenderer.invoke("awaken:create-acp-runner", request) as Promise<ACPRunnerView>,
+    ipcRenderer.invoke("awaken:create-acp-runner", request) as Promise<DesktopRequestResult<ACPRunnerView>>,
   updateACPRunner: (runnerId: string, request: ACPRunnerUpdateRequest) =>
-    ipcRenderer.invoke("awaken:update-acp-runner", runnerId, request) as Promise<ACPRunnerView>,
+    ipcRenderer.invoke("awaken:update-acp-runner", runnerId, request) as Promise<DesktopRequestResult<ACPRunnerView>>,
   deleteACPRunner: (runnerId: string) =>
-    ipcRenderer.invoke("awaken:delete-acp-runner", runnerId) as Promise<void>,
+    ipcRenderer.invoke("awaken:delete-acp-runner", runnerId) as Promise<DesktopRequestResult<void>>,
   probeACPRunner: (runnerId: string) =>
-    ipcRenderer.invoke("awaken:probe-acp-runner", runnerId) as Promise<ACPRunnerProbeResult>,
+    ipcRenderer.invoke("awaken:probe-acp-runner", runnerId) as Promise<DesktopRequestResult<ACPRunnerProbeResult>>,
   listMemories: (request?: MemoryListRequest) =>
     ipcRenderer.invoke("awaken:list-memories", request) as Promise<RuntimeMemory[]>,
   getMemory: (memoryId: string, projectId?: string) =>
@@ -275,34 +276,34 @@ const bridge: AwakenBridge = {
     memoryDreamReceiptHandlers.add(handler);
     return () => memoryDreamReceiptHandlers.delete(handler);
   },
-  getRun: (runId: string) => ipcRenderer.invoke("awaken:get-run", runId) as Promise<RuntimeRun>,
+  getRun: (runId: string) => ipcRenderer.invoke("awaken:get-run", runId) as Promise<DesktopRequestResult<RuntimeRun>>,
   getThreadTranscript: (threadId: string) =>
     ipcRenderer.invoke(
       "awaken:get-thread-transcript",
       threadId,
-    ) as Promise<RuntimeThreadTranscript>,
+    ) as Promise<DesktopRequestResult<RuntimeThreadTranscript>>,
   rewindThread: (request: RewindThreadRequest) =>
-    ipcRenderer.invoke("awaken:rewind-thread", request) as Promise<RewindThreadResult>,
+    ipcRenderer.invoke("awaken:rewind-thread", request) as Promise<DesktopRequestResult<RewindThreadResult>>,
   listThreads: (view?: RuntimeThreadListView) =>
-    ipcRenderer.invoke("awaken:list-threads", view) as Promise<RuntimeThread[]>,
+    ipcRenderer.invoke("awaken:list-threads", view) as Promise<DesktopRequestResult<RuntimeThread[]>>,
   renameThread: (threadId: string, label: string) =>
-    ipcRenderer.invoke("awaken:rename-thread", threadId, label) as Promise<RuntimeThread>,
+    ipcRenderer.invoke("awaken:rename-thread", threadId, label) as Promise<DesktopRequestResult<RuntimeThread>>,
   setThreadArchived: (threadId: string, archived: boolean) =>
     ipcRenderer.invoke(
       "awaken:set-thread-archived",
       threadId,
       archived,
-    ) as Promise<SetThreadArchivedResult>,
+    ) as Promise<DesktopRequestResult<SetThreadArchivedResult>>,
   updateThreadModelPreference: (threadId: string, request: ThreadModelPreferenceRequest) =>
     ipcRenderer.invoke(
       "awaken:update-thread-model-preference",
       threadId,
       request,
-    ) as Promise<RuntimeThread>,
+    ) as Promise<DesktopRequestResult<RuntimeThread>>,
   deleteThread: (threadId: string) =>
-    ipcRenderer.invoke("awaken:delete-thread", threadId) as Promise<ThreadDeleteResult>,
+    ipcRenderer.invoke("awaken:delete-thread", threadId) as Promise<DesktopRequestResult<ThreadDeleteResult>>,
   deleteThreads: (threadIds: string[]) =>
-    ipcRenderer.invoke("awaken:delete-threads", threadIds) as Promise<ThreadBatchDeleteResult>,
+    ipcRenderer.invoke("awaken:delete-threads", threadIds) as Promise<DesktopRequestResult<ThreadBatchDeleteResult>>,
   listProjects: (includeRemoved = false) =>
     ipcRenderer.invoke("awaken:list-projects", includeRemoved) as Promise<RuntimeProject[]>,
   listProjectDirectory: (request: ProjectDirectoryListRequest) =>
@@ -425,7 +426,7 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:delete-project-threads", {
       projectId,
       idempotencyKey,
-    }) as Promise<ProjectMutationResult>,
+    }) as Promise<DesktopRequestResult<ProjectMutationResult>>,
   trashProjectFolder: (projectId: string, path: string, idempotencyKey: string) =>
     ipcRenderer.invoke("awaken:trash-project-folder", {
       projectId,
@@ -451,13 +452,13 @@ const bridge: AwakenBridge = {
   startRun: (request: StartRunRequest) =>
     ipcRenderer.invoke("awaken:start-run", request) as Promise<DesktopOperationResult<RuntimeRun>>,
   cancelRun: (runId: string) =>
-    ipcRenderer.invoke("awaken:cancel-run", runId) as Promise<RuntimeRun>,
+    ipcRenderer.invoke("awaken:cancel-run", runId) as Promise<DesktopRequestResult<RuntimeRun>>,
   cancelSubagent: (runId: string, taskId: string, reason?: string) =>
     ipcRenderer.invoke("awaken:cancel-subagent", {
       runId,
       taskId,
       reason,
-    }) as Promise<void>,
+    }) as Promise<DesktopRequestResult<void>>,
   messageSubagent: (
     runId: string,
     taskId: string,
@@ -469,18 +470,18 @@ const bridge: AwakenBridge = {
       taskId,
       content,
       idempotencyKey,
-    }) as Promise<void>,
+    }) as Promise<DesktopRequestResult<void>>,
   answerUserQuestion: (runId: string, questionId: string, answer: string) =>
     ipcRenderer.invoke("awaken:answer-user-question", {
       runId,
       questionId,
       answer,
-    }) as Promise<void>,
+    }) as Promise<DesktopRequestResult<void>>,
   cancelUserQuestion: (runId: string, questionId: string) =>
     ipcRenderer.invoke("awaken:cancel-user-question", {
       runId,
       questionId,
-    }) as Promise<void>,
+    }) as Promise<DesktopRequestResult<void>>,
   resolveExternalInteraction: (
     runId: string,
     interactionId: string,
@@ -492,7 +493,7 @@ const bridge: AwakenBridge = {
       interactionId,
       resolution,
       content,
-    }) as Promise<void>,
+    }) as Promise<DesktopRequestResult<void>>,
   resolveACPPermission: (
     runId: string,
     interactionId: string,
@@ -504,7 +505,7 @@ const bridge: AwakenBridge = {
       interactionId,
       optionId,
       cancelled,
-    }) as Promise<void>,
+    }) as Promise<DesktopRequestResult<void>>,
   resolveComputerReview: (runId: string, reviewId: string, decision: "approved_once" | "denied") =>
     ipcRenderer.invoke("awaken:resolve-computer-review", {
       runId,
@@ -533,12 +534,13 @@ const bridge: AwakenBridge = {
     subscriptions.set(subscriptionId, handlers);
 
     try {
-      await ipcRenderer.invoke("awaken:subscribe-run", {
+      const result = await ipcRenderer.invoke("awaken:subscribe-run", {
         runId,
         subscriptionId,
         afterCursor,
-      });
-      return subscriptionId;
+      }) as DesktopRequestResult<string>;
+      if (!result.ok) subscriptions.delete(subscriptionId);
+      return result;
     } catch (error) {
       subscriptions.delete(subscriptionId);
       throw error;
@@ -647,31 +649,31 @@ const bridge: AwakenBridge = {
     ipcRenderer.invoke("awaken:delete-skill", request) as Promise<DeleteSkillResponse>,
   disableSkill: (id: string) => ipcRenderer.invoke("awaken:disable-skill", id) as Promise<void>,
   enableSkill: (id: string) => ipcRenderer.invoke("awaken:enable-skill", id) as Promise<void>,
-  listPlugins: () => ipcRenderer.invoke("awaken:list-plugins") as Promise<RuntimePlugin[]>,
+  listPlugins: () => ipcRenderer.invoke("awaken:list-plugins") as Promise<DesktopRequestResult<RuntimePlugin[]>>,
   getPlugin: (name: string) =>
-    ipcRenderer.invoke("awaken:get-plugin", name) as Promise<RuntimePlugin>,
+    ipcRenderer.invoke("awaken:get-plugin", name) as Promise<DesktopRequestResult<RuntimePlugin>>,
   validatePlugin: (source: RuntimePluginSource) =>
-    ipcRenderer.invoke("awaken:validate-plugin", source) as Promise<RuntimePluginValidation>,
+    ipcRenderer.invoke("awaken:validate-plugin", source) as Promise<DesktopRequestResult<RuntimePluginValidation>>,
   installPlugin: (request: InstallPluginRequest) =>
-    ipcRenderer.invoke("awaken:install-plugin", request) as Promise<InstallPluginResponse>,
+    ipcRenderer.invoke("awaken:install-plugin", request) as Promise<DesktopRequestResult<InstallPluginResponse>>,
   commitPlugin: (name: string, request: CommitPluginRequest) =>
-    ipcRenderer.invoke("awaken:commit-plugin", name, request) as Promise<InstallPluginResponse>,
+    ipcRenderer.invoke("awaken:commit-plugin", name, request) as Promise<DesktopRequestResult<InstallPluginResponse>>,
   enablePlugin: (name: string) =>
-    ipcRenderer.invoke("awaken:enable-plugin", name) as Promise<RuntimePlugin>,
+    ipcRenderer.invoke("awaken:enable-plugin", name) as Promise<DesktopRequestResult<RuntimePlugin>>,
   disablePlugin: (name: string) =>
-    ipcRenderer.invoke("awaken:disable-plugin", name) as Promise<RuntimePlugin>,
+    ipcRenderer.invoke("awaken:disable-plugin", name) as Promise<DesktopRequestResult<RuntimePlugin>>,
   uninstallPlugin: (name: string) =>
-    ipcRenderer.invoke("awaken:uninstall-plugin", name) as Promise<{
+    ipcRenderer.invoke("awaken:uninstall-plugin", name) as Promise<DesktopRequestResult<{
       trashedPath?: string;
       message: string;
-    }>,
+    }>>,
   enablePluginServer: (name: string, shortName: string) =>
-    ipcRenderer.invoke("awaken:enable-plugin-server", name, shortName) as Promise<RuntimePlugin>,
+    ipcRenderer.invoke("awaken:enable-plugin-server", name, shortName) as Promise<DesktopRequestResult<RuntimePlugin>>,
   disablePluginServer: (name: string, shortName: string) =>
-    ipcRenderer.invoke("awaken:disable-plugin-server", name, shortName) as Promise<RuntimePlugin>,
+    ipcRenderer.invoke("awaken:disable-plugin-server", name, shortName) as Promise<DesktopRequestResult<RuntimePlugin>>,
   listPluginComponents: (name: string) =>
     ipcRenderer.invoke("awaken:list-plugin-components", name) as Promise<
-      RuntimePluginComponentState[]
+      DesktopRequestResult<RuntimePluginComponentState[]>
     >,
   getPluginComponent: (
     name: string,
@@ -683,7 +685,7 @@ const bridge: AwakenBridge = {
       name,
       kind,
       logicalIdEncoded,
-    ) as Promise<RuntimePluginComponentDetail>,
+    ) as Promise<DesktopRequestResult<RuntimePluginComponentDetail>>,
   updatePluginComponentSource: (
     name: string,
     kind: RuntimePluginComponentKind,
@@ -696,7 +698,7 @@ const bridge: AwakenBridge = {
       kind,
       logicalIdEncoded,
       request,
-    ) as Promise<RuntimePluginComponentSourceResponse>,
+    ) as Promise<DesktopRequestResult<RuntimePluginComponentSourceResponse>>,
   setPluginComponentState: (
     name: string,
     kind: RuntimePluginComponentKind,
@@ -709,7 +711,7 @@ const bridge: AwakenBridge = {
       kind,
       logicalIdEncoded,
       enabled,
-    ) as Promise<RuntimePluginComponentStateResponse>,
+    ) as Promise<DesktopRequestResult<RuntimePluginComponentStateResponse>>,
   setPluginMcpToolState: (
     name: string,
     logicalIdEncoded: string,
@@ -722,7 +724,7 @@ const bridge: AwakenBridge = {
       logicalIdEncoded,
       toolName,
       enabled,
-    ) as Promise<RuntimePluginComponentStateResponse>,
+    ) as Promise<DesktopRequestResult<RuntimePluginComponentStateResponse>>,
   setPluginRuleActivation: (
     name: string,
     logicalIdEncoded: string,
@@ -733,37 +735,37 @@ const bridge: AwakenBridge = {
       name,
       logicalIdEncoded,
       activation,
-    ) as Promise<{ plugin: RuntimePlugin; revision: number }>,
+    ) as Promise<DesktopRequestResult<{ plugin: RuntimePlugin; revision: number }>>,
   listPluginHookReceipts: (name: string, logicalIdEncoded: string, revisionId?: string) =>
     ipcRenderer.invoke(
       "awaken:list-plugin-hook-receipts",
       name,
       logicalIdEncoded,
       revisionId,
-    ) as Promise<RuntimePluginHookReceiptResponse>,
+    ) as Promise<DesktopRequestResult<RuntimePluginHookReceiptResponse>>,
   retryPluginHookReceipt: (name: string, logicalIdEncoded: string, receiptId: string) =>
     ipcRenderer.invoke(
       "awaken:retry-plugin-hook-receipt",
       name,
       logicalIdEncoded,
       receiptId,
-    ) as Promise<{ receipt: RuntimePluginHookReceipt; diagnosticOnly: true }>,
+    ) as Promise<DesktopRequestResult<{ receipt: RuntimePluginHookReceipt; diagnosticOnly: true }>>,
   getPluginConfiguration: (name: string) =>
     ipcRenderer.invoke("awaken:get-plugin-configuration", name) as Promise<
-      RuntimePluginConfigurationResponse
+      DesktopRequestResult<RuntimePluginConfigurationResponse>
     >,
   updatePluginConfiguration: (name: string, request: UpdatePluginConfigurationRequest) =>
     ipcRenderer.invoke("awaken:update-plugin-configuration", name, request) as Promise<
-      RuntimePluginConfigurationResponse
+      DesktopRequestResult<RuntimePluginConfigurationResponse>
     >,
   getPluginSetup: (name: string) =>
-    ipcRenderer.invoke("awaken:get-plugin-setup", name) as Promise<RuntimePluginSetupResponse>,
+    ipcRenderer.invoke("awaken:get-plugin-setup", name) as Promise<DesktopRequestResult<RuntimePluginSetupResponse>>,
   startPluginSetup: (
     name: string,
     setupId: string,
     request: RuntimePluginSetupMutationRequest,
   ) =>
-    ipcRenderer.invoke("awaken:start-plugin-setup", name, setupId, request) as Promise<RuntimePluginAuthSession>,
+    ipcRenderer.invoke("awaken:start-plugin-setup", name, setupId, request) as Promise<DesktopRequestResult<RuntimePluginAuthSession>>,
   getActivePluginAuthSession: (
     name: string,
     setupId: string,
@@ -773,25 +775,25 @@ const bridge: AwakenBridge = {
     name,
     setupId,
     request,
-  ) as Promise<RuntimePluginAuthSession | null>,
+  ) as Promise<DesktopRequestResult<RuntimePluginAuthSession | null>>,
   getPluginAuthSession: (name: string, sessionId: string) =>
-    ipcRenderer.invoke("awaken:get-plugin-auth-session", name, sessionId) as Promise<RuntimePluginAuthSession>,
+    ipcRenderer.invoke("awaken:get-plugin-auth-session", name, sessionId) as Promise<DesktopRequestResult<RuntimePluginAuthSession>>,
   cancelPluginAuthSession: (name: string, sessionId: string) =>
-    ipcRenderer.invoke("awaken:cancel-plugin-auth-session", name, sessionId) as Promise<RuntimePluginAuthSession>,
+    ipcRenderer.invoke("awaken:cancel-plugin-auth-session", name, sessionId) as Promise<DesktopRequestResult<RuntimePluginAuthSession>>,
   markPluginAdminApprovalPending: (name: string, sessionId: string) =>
-    ipcRenderer.invoke("awaken:mark-plugin-admin-approval", name, sessionId) as Promise<RuntimePluginAuthSession>,
+    ipcRenderer.invoke("awaken:mark-plugin-admin-approval", name, sessionId) as Promise<DesktopRequestResult<RuntimePluginAuthSession>>,
   probePluginSetup: (
     name: string,
     setupId: string,
     request: RuntimePluginSetupMutationRequest,
   ) =>
-    ipcRenderer.invoke("awaken:probe-plugin-setup", name, setupId, request) as Promise<RuntimePluginSetupResponse>,
+    ipcRenderer.invoke("awaken:probe-plugin-setup", name, setupId, request) as Promise<DesktopRequestResult<RuntimePluginSetupResponse>>,
   disconnectPluginSetup: (
     name: string,
     setupId: string,
     request: RuntimePluginSetupMutationRequest,
   ) =>
-    ipcRenderer.invoke("awaken:disconnect-plugin-setup", name, setupId, request) as Promise<RuntimePluginSetupResponse>,
+    ipcRenderer.invoke("awaken:disconnect-plugin-setup", name, setupId, request) as Promise<DesktopRequestResult<RuntimePluginSetupResponse>>,
   listModelProviders: () =>
     ipcRenderer.invoke("awaken:list-model-providers") as Promise<ModelProvider[]>,
   listModelProfiles: () =>
@@ -858,12 +860,12 @@ const bridge: AwakenBridge = {
   pickDirectory: (defaultPath?: string) =>
     ipcRenderer.invoke("awaken:pick-directory", defaultPath) as Promise<WorkspacePickResult>,
   pickPluginSource: (defaultPath?: string) =>
-    ipcRenderer.invoke("awaken:pick-plugin-source", defaultPath) as Promise<WorkspacePickResult>,
+    ipcRenderer.invoke("awaken:pick-plugin-source", defaultPath) as Promise<DesktopRequestResult<WorkspacePickResult>>,
   resolveDroppedPluginSource: (file: File) =>
     ipcRenderer.invoke(
       "awaken:resolve-dropped-plugin-source",
       webUtils.getPathForFile(file),
-    ) as Promise<WorkspacePickResult>,
+    ) as Promise<DesktopRequestResult<WorkspacePickResult>>,
   pickProjectFolders: (defaultPath?: string) =>
     ipcRenderer.invoke(
       "awaken:pick-project-folders",
@@ -882,41 +884,41 @@ const bridge: AwakenBridge = {
     ipcRenderer.send("awaken:renderer-ready");
   },
   listScheduledTasks: () =>
-    ipcRenderer.invoke("awaken:list-scheduled-tasks") as Promise<ScheduledTask[]>,
+    ipcRenderer.invoke("awaken:list-scheduled-tasks") as Promise<DesktopRequestResult<ScheduledTask[]>>,
   getScheduledTask: (taskId: string) =>
-    ipcRenderer.invoke("awaken:get-scheduled-task", taskId) as Promise<ScheduledTask>,
+    ipcRenderer.invoke("awaken:get-scheduled-task", taskId) as Promise<DesktopRequestResult<ScheduledTask>>,
   createScheduledTask: (input: ScheduledTaskCreateInput) =>
-    ipcRenderer.invoke("awaken:create-scheduled-task", input) as Promise<ScheduledTask>,
+    ipcRenderer.invoke("awaken:create-scheduled-task", input) as Promise<DesktopRequestResult<ScheduledTask>>,
   patchScheduledTask: (taskId: string, input: ScheduledTaskPatchInput) =>
-    ipcRenderer.invoke("awaken:patch-scheduled-task", taskId, input) as Promise<ScheduledTask>,
+    ipcRenderer.invoke("awaken:patch-scheduled-task", taskId, input) as Promise<DesktopRequestResult<ScheduledTask>>,
   deleteScheduledTask: (taskId: string, expectedVersion: number, idempotencyKey: string) =>
     ipcRenderer.invoke("awaken:delete-scheduled-task", {
       taskId,
       expectedVersion,
       idempotencyKey,
-    }) as Promise<void>,
+    }) as Promise<DesktopRequestResult<void>>,
   pauseScheduledTask: (taskId: string, expectedVersion: number) =>
     ipcRenderer.invoke("awaken:pause-scheduled-task", {
       taskId,
       expectedVersion,
-    }) as Promise<ScheduledTask>,
+    }) as Promise<DesktopRequestResult<ScheduledTask>>,
   resumeScheduledTask: (taskId: string, expectedVersion: number) =>
     ipcRenderer.invoke("awaken:resume-scheduled-task", {
       taskId,
       expectedVersion,
-    }) as Promise<ScheduledTask>,
+    }) as Promise<DesktopRequestResult<ScheduledTask>>,
   runScheduledTaskNow: (taskId: string, idempotencyKey: string) =>
     ipcRenderer.invoke("awaken:run-scheduled-task-now", {
       taskId,
       idempotencyKey,
-    }) as Promise<ScheduledTaskExecution>,
+    }) as Promise<DesktopRequestResult<ScheduledTaskExecution>>,
   cancelScheduledTaskExecution: (taskId: string) =>
-    ipcRenderer.invoke("awaken:cancel-scheduled-task-execution", taskId) as Promise<void>,
+    ipcRenderer.invoke("awaken:cancel-scheduled-task-execution", taskId) as Promise<DesktopRequestResult<void>>,
   listScheduledTaskExecutions: (taskId: string) =>
     ipcRenderer.invoke("awaken:list-scheduled-task-executions", taskId) as Promise<
-      ScheduledTaskExecution[]
+      DesktopRequestResult<ScheduledTaskExecution[]>
     >,
-  getSystemTimezone: () => ipcRenderer.invoke("awaken:get-system-timezone") as Promise<string>,
+  getSystemTimezone: () => ipcRenderer.invoke("awaken:get-system-timezone") as Promise<DesktopRequestResult<string>>,
   subscribeScheduledTaskEvents: (handler) => {
     scheduledTaskEventHandlers.add(handler);
     return () => scheduledTaskEventHandlers.delete(handler);

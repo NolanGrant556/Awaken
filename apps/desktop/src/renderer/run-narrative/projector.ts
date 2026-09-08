@@ -1,3 +1,4 @@
+import { compactEventDetails } from "../runtime/compact-event";
 import type { AguiEvent } from "../../shared/agui";
 import type { FileLineComment, RunInputAttachment } from "../../shared/runtime";
 import {
@@ -983,16 +984,6 @@ function acpDisplayStatus(event: AguiEvent): ACPDisplayStatus {
   }
 }
 
-function acpRunnerLabel(runnerId?: string): string {
-  if (!runnerId) {
-    return "External agent";
-  }
-  return runnerId
-    .split("-")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
 function commitACPSession(
   state: RunNarrativeState,
   event: AguiEvent,
@@ -1593,93 +1584,10 @@ function hasToolNarrativeIdentity(
   });
 }
 
-function compactBoundaryId(event: AguiEvent): string {
-  const boundary =
-    compactString(event.contextCompactBoundaryId) ||
-    compactString(event.compactBoundaryId) ||
-    compactBoundaryFromMessage(event.message);
-  return `compact:${eventScopedId(event, boundary ?? `${event.type}:${event.seq ?? "latest"}`)}`;
-}
-
-function compactString(value?: string): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed || undefined;
-}
-
-function compactStatus(event: AguiEvent): CompactBoundaryItem["status"] {
-  if (event.type === "AWAKEN_COMPACT_FAILED") {
-    return "failed";
-  }
-  if (event.type === "AWAKEN_COMPACT_FINISHED") {
-    return "finished";
-  }
-  return "started";
-}
-
-function compactMode(event: AguiEvent): string | undefined {
-  return (
-    compactString(event.contextCompactMode) ||
-    compactString(event.compactMode) ||
-    compactModeFromMessage(event.message)
-  );
-}
-
-function compactBoundaryValue(event: AguiEvent): string | undefined {
-  return (
-    compactString(event.contextCompactBoundaryId) ||
-    compactString(event.compactBoundaryId) ||
-    compactBoundaryFromMessage(event.message)
-  );
-}
-
-function compactPreEstimate(event: AguiEvent): number | undefined {
-  return (
-    finiteNumber(event.contextCompactPreEstimateTokens) ??
-    finiteNumber(event.compactPreEstimate) ??
-    (event.type === "AWAKEN_COMPACT_STARTED"
-      ? finiteNumber(event.contextEstimatedTokens)
-      : undefined)
-  );
-}
-
-function compactPostEstimate(event: AguiEvent): number | undefined {
-  return (
-    finiteNumber(event.contextCompactPostEstimateTokens) ??
-    finiteNumber(event.compactPostEstimate) ??
-    (event.type === "AWAKEN_COMPACT_FINISHED"
-      ? (finiteNumber(event.contextEstimatedTokens) ??
-        compactEstimatedTokensFromMessage(event.message))
-      : undefined)
-  );
-}
-
 function finiteNumber(value?: number): number | undefined {
   return typeof value === "number" && Number.isFinite(value)
     ? value
     : undefined;
-}
-
-function compactBoundaryFromMessage(message?: string): string | undefined {
-  const match = message?.match(/\bboundary=([^\s]+)/);
-  return match?.[1];
-}
-
-function compactModeFromMessage(message?: string): string | undefined {
-  const match = message?.match(
-    /\bcompact (?:started|finished|failed):\s*([a-z_]+)(?=\s|$)/i,
-  );
-  return match?.[1]?.toLowerCase();
-}
-
-function compactEstimatedTokensFromMessage(
-  message?: string,
-): number | undefined {
-  const match = message?.match(/\bestimated_tokens=(\d+)\b/i);
-  if (!match) {
-    return undefined;
-  }
-  const parsed = Number(match[1]);
-  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function compactTitle(
@@ -1752,11 +1660,8 @@ function commitCompactBoundary(
   state: RunNarrativeState,
   event: AguiEvent,
 ): RunNarrativeState {
-  const status = compactStatus(event);
-  const mode = compactMode(event);
-  const boundaryId = compactBoundaryValue(event);
-  const preEstimate = compactPreEstimate(event);
-  const postEstimate = compactPostEstimate(event);
+  const { status, mode, boundaryId, preCompactEstimatedTokens: preEstimate,
+    postCompactEstimatedTokens: postEstimate } = compactEventDetails(event);
   const fallbackUsed = event.compactFallbackUsed;
   const targetTokens = finiteNumber(event.contextCompactTarget);
   const mandatoryFloorTokens = finiteNumber(event.compactMandatoryFloor);
@@ -1766,7 +1671,7 @@ function commitCompactBoundary(
   );
   const item: CompactBoundaryItem = {
     kind: "compactBoundary",
-    id: compactBoundaryId(event),
+    id: `compact:${eventScopedId(event, boundaryId ?? `${event.type}:${event.seq ?? "latest"}`)}`,
     status,
     title: compactTitle(status, mode),
     detail: compactDetail({

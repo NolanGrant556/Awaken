@@ -1,4 +1,12 @@
-import type { AguiEvent } from "./agui";
+import { runtimeRequestIssue, unwrapRuntimeRequest } from "../../shared/runtime-request";
+import type { DesktopUpdateSnapshot } from "../../shared/desktop-update";
+import type {
+  PetActivitySnapshot,
+  PetImportReport,
+  PetSettings,
+  PetSummary,
+} from "../../shared/pets";
+import type { ProjectFilePreviewInteraction } from "../../shared/project-file-preview-interaction";
 import {
   type ACPRunnerCreateRequest,
   type ACPRunnerProbeResult,
@@ -8,59 +16,58 @@ import {
   type AgentPlanAccount,
   type AgentPlanAccountSaveRequest,
   type AgentPlanMediaCapability,
-  type AgentPlanMediaToolSaveRequest,
   type AgentPlanMediaTools,
+  type AgentPlanMediaToolSaveRequest,
   type AgentPlanMediaToolsSaveResult,
-  type AttachmentPickResult,
+  type ArtifactMediaSourceResult,
   type ArtifactOpenRequest,
   type ArtifactOpenResult,
-  type ArtifactMediaSourceResult,
   type ArtifactPreviewStartRequest,
+  type AttachmentPickResult,
   type AwakenBridge,
-  type ConfigureMcpServersRequest,
-  type ConfigureMcpServersResponse,
-  type CommitPluginRequest,
   type CliActivation,
   type CliConnectorStateHandler,
   type CliConnectorView,
   type CliProviderId,
+  type CommitPluginRequest,
   type ComposerCatalogEvent,
   type ComputerHostStatus,
   type ComputerSettingsDocument,
   type ComputerSettingsSaveRequest,
-  type DesktopPreferences,
-  type DesktopPreferencesSaveRequest,
-  type DesktopOperationIssue,
-  type DesktopOperationResult,
-  type DesktopOperationRecoveryAction,
-  type DesktopPlatform,
+  type ConfigureMcpServersRequest,
+  type ConfigureMcpServersResponse,
   type DeleteSkillRequest,
   type DeleteSkillResponse,
+  type DesktopOperationIssue,
+  type DesktopOperationRecoveryAction,
+  type DesktopOperationResult,
+  type DesktopPlatform,
+  type DesktopPreferences,
+  type DesktopPreferencesSaveRequest,
   type GetSkillPreviewRequest,
-	type GlobalAgentsDeleteRequest,
-	type GlobalAgentsDocument,
-	type GlobalAgentsSaveRequest,
-	type HookRevokeRequest,
-	type HookStatus,
-	type HookTrustRequest,
+  type GlobalAgentsDeleteRequest,
+  type GlobalAgentsDocument,
+  type GlobalAgentsSaveRequest,
+  type HookRevokeRequest,
+  type HookStatus,
+  type HookTrustRequest,
   type InstallPluginRequest,
   type InstallPluginResponse,
   type InstallSkillRequest,
   type InstallSkillResponse,
-  type ModelProfileBalancesResult,
-  type ModelCatalogRefreshResult,
-  type ModelReasoningCapabilityTestResult,
-  type UserQuestionAnswer,
-  type ModelProfileSaveRequest,
-  type ModelPurposeRouting,
-  type ModelProfileTestResult,
-  type ModelProvider,
   type MemoryDreamTask,
   type MemoryListRequest,
   type MemorySettingsDocument,
   type MemorySettingsPatch,
+  type ModelCatalogRefreshResult,
+  type ModelProfileBalancesResult,
+  type ModelProfileSaveRequest,
+  type ModelProfileTestResult,
+  type ModelProvider,
+  type ModelPurposeRouting,
+  type ModelReasoningCapabilityTestResult,
+  type ProjectAgentsCreateResult,
   type ProjectDirectoryChangedEvent,
-  type ProjectFolderSelection,
   type ProjectDirectoryListRequest,
   type ProjectDirectoryListResult,
   type ProjectDirectoryWatchRequest,
@@ -76,9 +83,12 @@ import {
   type ProjectFilePreviewSaveResult,
   type ProjectFilePreviewStartRequest,
   type ProjectFilePreviewStartResult,
+  type ProjectFolderSelection,
+  type ProjectFoldersPickResult,
   type ProjectMutationResult,
-	type ProjectAgentsCreateResult,
   type ProjectReorderResult,
+  type RewindThreadRequest,
+  type RewindThreadResult,
   type RuntimeConnector,
   type RuntimeConnectorActionResponse,
   type RuntimeConnectorAuthSession,
@@ -86,66 +96,56 @@ import {
   type RuntimeLogEntry,
   type RuntimeMcpServer,
   type RuntimeMcpServerConfigResponse,
-  type RuntimeModelProfileSummary,
   type RuntimeMemory,
-  type RuntimeRun,
-  type RuntimeProject,
-  type RuntimeProjectOperation,
+  type RuntimeModelProfileSummary,
   type RuntimePlugin,
+  type RuntimePluginAuthSession,
   type RuntimePluginComponentDetail,
   type RuntimePluginComponentKind,
   type RuntimePluginComponentSourceResponse,
   type RuntimePluginComponentState,
   type RuntimePluginComponentStateResponse,
+  type RuntimePluginConfigurationResponse,
   type RuntimePluginHookReceipt,
   type RuntimePluginHookReceiptResponse,
-  type RuntimePluginConfigurationResponse,
-  type RuntimePluginAuthSession,
   type RuntimePluginSetupMutationRequest,
   type RuntimePluginSetupResponse,
   type RuntimePluginSource,
   type RuntimePluginValidation,
+  type RuntimeProject,
+  type RuntimeProjectOperation,
+  type RuntimeRun,
   type RuntimeSkill,
-  type SkillProjectRoots,
-  type SkillPreviewResponse,
-  type RuntimeThreadTranscript,
-  type RewindThreadRequest,
-  type RewindThreadResult,
   type RuntimeThread,
   type RuntimeThreadListView,
-  type SetThreadArchivedResult,
+  type RuntimeThreadTranscript,
   type RuntimeToolInfo,
-  type SearchSettings,
-  type SearchSettingsSaveRequest,
-  type SearchSettingsSaveResult,
-  type SearchProviderTestRequest,
-  type SearchProviderTestResult,
   type ScheduledTask,
   type ScheduledTaskCreateInput,
   type ScheduledTaskEvent,
   type ScheduledTaskExecution,
   type ScheduledTaskPatchInput,
+  type SearchProviderTestRequest,
+  type SearchProviderTestResult,
+  type SearchSettings,
+  type SearchSettingsSaveRequest,
+  type SearchSettingsSaveResult,
+  type SetThreadArchivedResult,
+  type SkillPreviewResponse,
+  type SkillProjectRoots,
   type StartRunRequest,
   type SupervisorStatusInfo,
-  type ThreadDeleteResult,
   type ThreadBatchDeleteResult,
+  type ThreadDeleteResult,
   type ThreadModelPreferenceRequest,
   type UpdateMcpServerConfigRequest,
   type UpdatePluginComponentSourceRequest,
   type UpdatePluginConfigurationRequest,
-  type ProjectFoldersPickResult,
   type UpsertProjectResult,
   type WorkspacePickResult,
-  type WorkspaceValidationResult,
+  type WorkspaceValidationResult
 } from "../../shared/runtime";
-import type { DesktopUpdateSnapshot } from "../../shared/desktop-update";
-import type { ProjectFilePreviewInteraction } from "../../shared/project-file-preview-interaction";
-import type {
-  PetActivitySnapshot,
-  PetImportReport,
-  PetSettings,
-  PetSummary,
-} from "../../shared/pets";
+import type { AguiEvent } from "./agui";
 
 export type SubscribeHandlers = {
   onEvent: (event: AguiEvent) => void;
@@ -236,9 +236,9 @@ export type RuntimeClient = {
   listConnectors: () => Promise<RuntimeConnector[]>;
   connectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
   disconnectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
-  getConnectorAuthSession?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
-  cancelConnectorAuthSession?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
-  markConnectorAdminApprovalPending?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
+  getConnectorAuthSession: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
+  cancelConnectorAuthSession: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
+  markConnectorAdminApprovalPending: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
   listCliConnectors: () => Promise<CliConnectorView[]>;
   refreshCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
   installCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
@@ -328,34 +328,34 @@ export type RuntimeClient = {
     name: string,
     request: UpdatePluginConfigurationRequest,
   ) => Promise<RuntimePluginConfigurationResponse>;
-  getPluginSetup?: (name: string) => Promise<RuntimePluginSetupResponse>;
-  startPluginSetup?: (
+  getPluginSetup: (name: string) => Promise<RuntimePluginSetupResponse>;
+  startPluginSetup: (
     name: string,
     setupId: string,
     request: RuntimePluginSetupMutationRequest,
   ) => Promise<RuntimePluginAuthSession>;
-  getActivePluginAuthSession?: (
+  getActivePluginAuthSession: (
     name: string,
     setupId: string,
     request: RuntimePluginSetupMutationRequest,
   ) => Promise<RuntimePluginAuthSession | null>;
-  getPluginAuthSession?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
-  cancelPluginAuthSession?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
-  markPluginAdminApprovalPending?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
-  probePluginSetup?: (
+  getPluginAuthSession: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
+  cancelPluginAuthSession: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
+  markPluginAdminApprovalPending: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
+  probePluginSetup: (
     name: string,
     setupId: string,
     request: RuntimePluginSetupMutationRequest,
   ) => Promise<RuntimePluginSetupResponse>;
-  disconnectPluginSetup?: (
+  disconnectPluginSetup: (
     name: string,
     setupId: string,
     request: RuntimePluginSetupMutationRequest,
   ) => Promise<RuntimePluginSetupResponse>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
-  getModelPurposeRouting?: () => Promise<ModelPurposeRouting>;
-  saveModelPurposeRouting?: (routing: ModelPurposeRouting) => Promise<ModelPurposeRouting>;
+  getModelPurposeRouting: () => Promise<ModelPurposeRouting>;
+  saveModelPurposeRouting: (routing: ModelPurposeRouting) => Promise<ModelPurposeRouting>;
   getAgentPlanAccount: () => Promise<AgentPlanAccount>;
   saveAgentPlanAccount: (request: AgentPlanAccountSaveRequest) => Promise<AgentPlanAccount>;
   refreshAgentPlanModels: () => Promise<AgentPlanAccount>;
@@ -427,10 +427,10 @@ export type RuntimeClient = {
   saveProjectMarkdownFile: (
     request: ProjectFilePreviewSaveRequest,
   ) => Promise<ProjectFilePreviewSaveResult>;
-	createProjectAgentsFile?: (projectId: string) => Promise<ProjectAgentsCreateResult>;
-	getGlobalAgentsDocument?: () => Promise<GlobalAgentsDocument>;
-	saveGlobalAgentsDocument?: (request: GlobalAgentsSaveRequest) => Promise<GlobalAgentsDocument>;
-	deleteGlobalAgentsDocument?: (request: GlobalAgentsDeleteRequest) => Promise<GlobalAgentsDocument>;
+	createProjectAgentsFile: (projectId: string) => Promise<ProjectAgentsCreateResult>;
+	getGlobalAgentsDocument: () => Promise<GlobalAgentsDocument>;
+	saveGlobalAgentsDocument: (request: GlobalAgentsSaveRequest) => Promise<GlobalAgentsDocument>;
+	deleteGlobalAgentsDocument: (request: GlobalAgentsDeleteRequest) => Promise<GlobalAgentsDocument>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
   createProject: (
     folders: ProjectFolderSelection[],
@@ -458,8 +458,8 @@ export type RuntimeClient = {
   revealArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
   startRun: (request: StartRunRequest) => Promise<RuntimeRun>;
   cancelRun: (runId: string) => Promise<RuntimeRun>;
-  cancelSubagent?: (runId: string, taskId: string, reason?: string) => Promise<void>;
-  messageSubagent?: (
+  cancelSubagent: (runId: string, taskId: string, reason?: string) => Promise<void>;
+  messageSubagent: (
     runId: string,
     taskId: string,
     content: string,
@@ -508,9 +508,9 @@ export type RuntimeClient = {
   getMemory: (memoryId: string, projectId?: string) => Promise<RuntimeMemory>;
   deleteMemory: (memoryId: string, expectedRevision: number, projectId?: string) => Promise<void>;
   getMemorySettings: () => Promise<MemorySettingsDocument>;
-	getHookStatus?: (projectId?: string) => Promise<HookStatus>;
-	trustProjectHook?: (request: HookTrustRequest) => Promise<HookStatus>;
-	revokeProjectHook?: (request: HookRevokeRequest) => Promise<HookStatus>;
+	getHookStatus: (projectId?: string) => Promise<HookStatus>;
+	trustProjectHook: (request: HookTrustRequest) => Promise<HookStatus>;
+	revokeProjectHook: (request: HookRevokeRequest) => Promise<HookStatus>;
   updateMemorySettings: (request: MemorySettingsPatch) => Promise<MemorySettingsDocument>;
   startMemoryDream: (projectId?: string) => Promise<MemoryDreamTask>;
   getMemoryDream: (taskId: string) => Promise<MemoryDreamTask>;
@@ -576,15 +576,6 @@ function isTerminalEvent(event: AguiEvent): boolean {
     || (event.type === "RUN_STATUS_CHANGED" && (event.status === "cancelled" || event.status === "finished" || event.status === "error"));
 }
 
-function isRunNotFoundError(message: string): boolean {
-  const normalized = message.toLowerCase();
-  return (
-    normalized.includes("run_not_found") ||
-    normalized.includes("404 page not found") ||
-    normalized.includes("404 not found")
-  );
-}
-
 function createElectronClient(bridge: AwakenBridge): RuntimeClient {
   return {
     source: "electron",
@@ -594,23 +585,17 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     getSearchSettings: () => bridge.getSearchSettings(),
     saveSearchSettings: (request) => bridge.saveSearchSettings(request),
     testSearchProvider: (request) => bridge.testSearchProvider(request),
-    getACPRunners: () => bridge.getACPRunners(),
-    createACPRunner: (request) => bridge.createACPRunner(request),
-    updateACPRunner: (runnerId, request) => bridge.updateACPRunner(runnerId, request),
-    deleteACPRunner: (runnerId) => bridge.deleteACPRunner(runnerId),
-    probeACPRunner: (runnerId) => bridge.probeACPRunner(runnerId),
+    getACPRunners: () => unwrapRuntimeRequest(bridge.getACPRunners()),
+    createACPRunner: (request) => unwrapRuntimeRequest(bridge.createACPRunner(request)),
+    updateACPRunner: (runnerId, request) => unwrapRuntimeRequest(bridge.updateACPRunner(runnerId, request)),
+    deleteACPRunner: (runnerId) => unwrapRuntimeRequest(bridge.deleteACPRunner(runnerId)),
+    probeACPRunner: (runnerId) => unwrapRuntimeRequest(bridge.probeACPRunner(runnerId)),
     listConnectors: () => bridge.listConnectors(),
     connectConnector: (connectorId) => bridge.connectConnector(connectorId),
     disconnectConnector: (connectorId) => bridge.disconnectConnector(connectorId),
-    getConnectorAuthSession: bridge.getConnectorAuthSession
-      ? (sessionId) => bridge.getConnectorAuthSession!(sessionId)
-      : undefined,
-    cancelConnectorAuthSession: bridge.cancelConnectorAuthSession
-      ? (sessionId) => bridge.cancelConnectorAuthSession!(sessionId)
-      : undefined,
-    markConnectorAdminApprovalPending: bridge.markConnectorAdminApprovalPending
-      ? (sessionId) => bridge.markConnectorAdminApprovalPending!(sessionId)
-      : undefined,
+    getConnectorAuthSession: (sessionId) => bridge.getConnectorAuthSession(sessionId),
+    cancelConnectorAuthSession: (sessionId) => bridge.cancelConnectorAuthSession(sessionId),
+    markConnectorAdminApprovalPending: (sessionId) => bridge.markConnectorAdminApprovalPending(sessionId),
     listCliConnectors: () => bridge.listCliConnectors(),
     refreshCliConnector: (providerId) => bridge.refreshCliConnector(providerId),
     installCliConnector: (providerId) => bridge.installCliConnector(providerId),
@@ -639,58 +624,42 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     deleteSkill: (request) => bridge.deleteSkill(request),
     disableSkill: (id) => bridge.disableSkill(id),
     enableSkill: (id) => bridge.enableSkill(id),
-    listPlugins: () => bridge.listPlugins(),
-    getPlugin: (name) => bridge.getPlugin(name),
-    validatePlugin: (source) => bridge.validatePlugin(source),
-    installPlugin: (request) => bridge.installPlugin(request),
-    commitPlugin: (name, request) => bridge.commitPlugin(name, request),
-    enablePlugin: (name) => bridge.enablePlugin(name),
-    disablePlugin: (name) => bridge.disablePlugin(name),
-    uninstallPlugin: (name) => bridge.uninstallPlugin(name),
-    enablePluginServer: (name, shortName) => bridge.enablePluginServer(name, shortName),
-    disablePluginServer: (name, shortName) => bridge.disablePluginServer(name, shortName),
-    listPluginComponents: (name) => bridge.listPluginComponents(name),
+    listPlugins: () => unwrapRuntimeRequest(bridge.listPlugins()),
+    getPlugin: (name) => unwrapRuntimeRequest(bridge.getPlugin(name)),
+    validatePlugin: (source) => unwrapRuntimeRequest(bridge.validatePlugin(source)),
+    installPlugin: (request) => unwrapRuntimeRequest(bridge.installPlugin(request)),
+    commitPlugin: (name, request) => unwrapRuntimeRequest(bridge.commitPlugin(name, request)),
+    enablePlugin: (name) => unwrapRuntimeRequest(bridge.enablePlugin(name)),
+    disablePlugin: (name) => unwrapRuntimeRequest(bridge.disablePlugin(name)),
+    uninstallPlugin: (name) => unwrapRuntimeRequest(bridge.uninstallPlugin(name)),
+    enablePluginServer: (name, shortName) => unwrapRuntimeRequest(bridge.enablePluginServer(name, shortName)),
+    disablePluginServer: (name, shortName) => unwrapRuntimeRequest(bridge.disablePluginServer(name, shortName)),
+    listPluginComponents: (name) => unwrapRuntimeRequest(bridge.listPluginComponents(name)),
     getPluginComponent: (name, kind, logicalIdEncoded) =>
-      bridge.getPluginComponent(name, kind, logicalIdEncoded),
+      unwrapRuntimeRequest(bridge.getPluginComponent(name, kind, logicalIdEncoded)),
     updatePluginComponentSource: (name, kind, logicalIdEncoded, request) =>
-      bridge.updatePluginComponentSource(name, kind, logicalIdEncoded, request),
+      unwrapRuntimeRequest(bridge.updatePluginComponentSource(name, kind, logicalIdEncoded, request)),
     setPluginComponentState: (name, kind, logicalIdEncoded, enabled) =>
-      bridge.setPluginComponentState(name, kind, logicalIdEncoded, enabled),
+      unwrapRuntimeRequest(bridge.setPluginComponentState(name, kind, logicalIdEncoded, enabled)),
     setPluginMcpToolState: (name, logicalIdEncoded, toolName, enabled) =>
-      bridge.setPluginMcpToolState(name, logicalIdEncoded, toolName, enabled),
+      unwrapRuntimeRequest(bridge.setPluginMcpToolState(name, logicalIdEncoded, toolName, enabled)),
     setPluginRuleActivation: (name, logicalIdEncoded, activation) =>
-      bridge.setPluginRuleActivation(name, logicalIdEncoded, activation),
+      unwrapRuntimeRequest(bridge.setPluginRuleActivation(name, logicalIdEncoded, activation)),
     listPluginHookReceipts: (name, logicalIdEncoded, revisionId) =>
-      bridge.listPluginHookReceipts(name, logicalIdEncoded, revisionId),
+      unwrapRuntimeRequest(bridge.listPluginHookReceipts(name, logicalIdEncoded, revisionId)),
     retryPluginHookReceipt: (name, logicalIdEncoded, receiptId) =>
-      bridge.retryPluginHookReceipt(name, logicalIdEncoded, receiptId),
-    getPluginConfiguration: (name) => bridge.getPluginConfiguration(name),
+      unwrapRuntimeRequest(bridge.retryPluginHookReceipt(name, logicalIdEncoded, receiptId)),
+    getPluginConfiguration: (name) => unwrapRuntimeRequest(bridge.getPluginConfiguration(name)),
     updatePluginConfiguration: (name, request) =>
-      bridge.updatePluginConfiguration(name, request),
-    getPluginSetup: bridge.getPluginSetup
-      ? (name) => bridge.getPluginSetup!(name)
-      : undefined,
-    startPluginSetup: bridge.startPluginSetup
-      ? (name, setupId, request) => bridge.startPluginSetup!(name, setupId, request)
-      : undefined,
-    getActivePluginAuthSession: bridge.getActivePluginAuthSession
-      ? (name, setupId, request) => bridge.getActivePluginAuthSession!(name, setupId, request)
-      : undefined,
-    getPluginAuthSession: bridge.getPluginAuthSession
-      ? (name, sessionId) => bridge.getPluginAuthSession!(name, sessionId)
-      : undefined,
-    cancelPluginAuthSession: bridge.cancelPluginAuthSession
-      ? (name, sessionId) => bridge.cancelPluginAuthSession!(name, sessionId)
-      : undefined,
-    markPluginAdminApprovalPending: bridge.markPluginAdminApprovalPending
-      ? (name, sessionId) => bridge.markPluginAdminApprovalPending!(name, sessionId)
-      : undefined,
-    probePluginSetup: bridge.probePluginSetup
-      ? (name, setupId, request) => bridge.probePluginSetup!(name, setupId, request)
-      : undefined,
-    disconnectPluginSetup: bridge.disconnectPluginSetup
-      ? (name, setupId, request) => bridge.disconnectPluginSetup!(name, setupId, request)
-      : undefined,
+      unwrapRuntimeRequest(bridge.updatePluginConfiguration(name, request)),
+    getPluginSetup: (name) => unwrapRuntimeRequest(bridge.getPluginSetup(name)),
+    startPluginSetup: (name, setupId, request) => unwrapRuntimeRequest(bridge.startPluginSetup(name, setupId, request)),
+    getActivePluginAuthSession: (name, setupId, request) => unwrapRuntimeRequest(bridge.getActivePluginAuthSession(name, setupId, request)),
+    getPluginAuthSession: (name, sessionId) => unwrapRuntimeRequest(bridge.getPluginAuthSession(name, sessionId)),
+    cancelPluginAuthSession: (name, sessionId) => unwrapRuntimeRequest(bridge.cancelPluginAuthSession(name, sessionId)),
+    markPluginAdminApprovalPending: (name, sessionId) => unwrapRuntimeRequest(bridge.markPluginAdminApprovalPending(name, sessionId)),
+    probePluginSetup: (name, setupId, request) => unwrapRuntimeRequest(bridge.probePluginSetup(name, setupId, request)),
+    disconnectPluginSetup: (name, setupId, request) => unwrapRuntimeRequest(bridge.disconnectPluginSetup(name, setupId, request)),
     listModelProviders: () => bridge.listModelProviders(),
     listModelProfiles: () => bridge.listModelProfiles(),
     getModelPurposeRouting: () => bridge.getModelPurposeRouting(),
@@ -716,16 +685,16 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     refreshModelCatalog: (request) =>
       unwrapDesktopOperation(bridge.refreshModelCatalog(request)),
     getModelProfileBalances: () => bridge.getModelProfileBalances(),
-    getRun: (runId) => bridge.getRun(runId),
-    getThreadTranscript: (threadId) => bridge.getThreadTranscript(threadId),
-    rewindThread: (request) => bridge.rewindThread(request),
-    listThreads: (view) => bridge.listThreads(view),
-    renameThread: (threadId, label) => bridge.renameThread(threadId, label),
-    setThreadArchived: (threadId, archived) => bridge.setThreadArchived(threadId, archived),
+    getRun: (runId) => unwrapRuntimeRequest(bridge.getRun(runId)),
+    getThreadTranscript: (threadId) => unwrapRuntimeRequest(bridge.getThreadTranscript(threadId)),
+    rewindThread: (request) => unwrapRuntimeRequest(bridge.rewindThread(request)),
+    listThreads: (view) => unwrapRuntimeRequest(bridge.listThreads(view)),
+    renameThread: (threadId, label) => unwrapRuntimeRequest(bridge.renameThread(threadId, label)),
+    setThreadArchived: (threadId, archived) => unwrapRuntimeRequest(bridge.setThreadArchived(threadId, archived)),
     updateThreadModelPreference: (threadId, request) =>
-      bridge.updateThreadModelPreference(threadId, request),
-    deleteThread: (threadId) => bridge.deleteThread(threadId),
-    deleteThreads: (threadIds) => bridge.deleteThreads(threadIds),
+      unwrapRuntimeRequest(bridge.updateThreadModelPreference(threadId, request)),
+    deleteThread: (threadId) => unwrapRuntimeRequest(bridge.deleteThread(threadId)),
+    deleteThreads: (threadIds) => unwrapRuntimeRequest(bridge.deleteThreads(threadIds)),
     listProjects: (includeRemoved) => bridge.listProjects(includeRemoved),
     listProjectDirectory: (request) => bridge.listProjectDirectory(request),
     watchProjectDirectory: (request) => bridge.watchProjectDirectory(request),
@@ -742,18 +711,10 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     openProjectFileExternally: (request) => bridge.openProjectFileExternally(request),
     revealProjectFile: (request) => bridge.revealProjectFile(request),
     saveProjectMarkdownFile: (request) => bridge.saveProjectMarkdownFile(request),
-		createProjectAgentsFile: bridge.createProjectAgentsFile
-			? (projectId) => bridge.createProjectAgentsFile!(projectId)
-			: undefined,
-		getGlobalAgentsDocument: bridge.getGlobalAgentsDocument
-			? () => bridge.getGlobalAgentsDocument!()
-			: undefined,
-		saveGlobalAgentsDocument: bridge.saveGlobalAgentsDocument
-			? (request) => bridge.saveGlobalAgentsDocument!(request)
-			: undefined,
-		deleteGlobalAgentsDocument: bridge.deleteGlobalAgentsDocument
-			? (request) => bridge.deleteGlobalAgentsDocument!(request)
-			: undefined,
+		createProjectAgentsFile: (projectId) => bridge.createProjectAgentsFile(projectId),
+		getGlobalAgentsDocument: () => bridge.getGlobalAgentsDocument(),
+		saveGlobalAgentsDocument: (request) => bridge.saveGlobalAgentsDocument(request),
+		deleteGlobalAgentsDocument: (request) => bridge.deleteGlobalAgentsDocument(request),
     upsertProject: (workspaceRoot, displayName) => bridge.upsertProject(workspaceRoot, displayName),
     createProject: (folders, displayName) => bridge.createProject(folders, displayName),
     renameProject: (projectId, displayName) => bridge.renameProject(projectId, displayName),
@@ -763,7 +724,7 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     reorderProjects: (projectIds) => bridge.reorderProjects(projectIds),
     detachProject: (projectId, idempotencyKey) => bridge.detachProject(projectId, idempotencyKey),
     deleteProjectThreads: (projectId, idempotencyKey) =>
-      bridge.deleteProjectThreads(projectId, idempotencyKey),
+      unwrapRuntimeRequest(bridge.deleteProjectThreads(projectId, idempotencyKey)),
     trashProjectFolder: (projectId, path, idempotencyKey) =>
       bridge.trashProjectFolder(projectId, path, idempotencyKey),
     getProjectOperation: (operationId) => bridge.getProjectOperation(operationId),
@@ -772,18 +733,14 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     revealPath: (target) => bridge.revealPath(target),
     revealArtifact: (request) => bridge.revealArtifact(request),
     startRun: (request) => unwrapDesktopOperation(bridge.startRun(request)),
-    cancelRun: bridge.cancelRun,
-    cancelSubagent: bridge.cancelSubagent
-      ? (runId, taskId, reason) => bridge.cancelSubagent!(runId, taskId, reason)
-      : undefined,
-    messageSubagent: bridge.messageSubagent
-      ? (runId, taskId, content, idempotencyKey) =>
-          bridge.messageSubagent!(runId, taskId, content, idempotencyKey)
-      : undefined,
-    answerUserQuestion: bridge.answerUserQuestion,
-    cancelUserQuestion: bridge.cancelUserQuestion,
-    resolveExternalInteraction: bridge.resolveExternalInteraction,
-    resolveACPPermission: bridge.resolveACPPermission,
+    cancelRun: (...args) => unwrapRuntimeRequest(bridge.cancelRun(...args)),
+    cancelSubagent: (runId, taskId, reason) => unwrapRuntimeRequest(bridge.cancelSubagent(runId, taskId, reason)),
+    messageSubagent: (runId, taskId, content, idempotencyKey) =>
+          unwrapRuntimeRequest(bridge.messageSubagent(runId, taskId, content, idempotencyKey)),
+    answerUserQuestion: (...args) => unwrapRuntimeRequest(bridge.answerUserQuestion(...args)),
+    cancelUserQuestion: (...args) => unwrapRuntimeRequest(bridge.cancelUserQuestion(...args)),
+    resolveExternalInteraction: (...args) => unwrapRuntimeRequest(bridge.resolveExternalInteraction(...args)),
+    resolveACPPermission: (...args) => unwrapRuntimeRequest(bridge.resolveACPPermission(...args)),
     resolveComputerReview: bridge.resolveComputerReview,
     computerSessionControl: bridge.computerSessionControl,
     getComputerHostStatus: () => bridge.getComputerHostStatus(),
@@ -800,15 +757,9 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     deleteMemory: (memoryId, expectedRevision, projectId) =>
       bridge.deleteMemory(memoryId, expectedRevision, projectId),
     getMemorySettings: () => bridge.getMemorySettings(),
-		getHookStatus: bridge.getHookStatus
-			? (projectId) => bridge.getHookStatus!(projectId)
-			: undefined,
-		trustProjectHook: bridge.trustProjectHook
-			? (request) => bridge.trustProjectHook!(request)
-			: undefined,
-		revokeProjectHook: bridge.revokeProjectHook
-			? (request) => bridge.revokeProjectHook!(request)
-			: undefined,
+		getHookStatus: (projectId) => bridge.getHookStatus(projectId),
+		trustProjectHook: (request) => bridge.trustProjectHook(request),
+		revokeProjectHook: (request) => bridge.revokeProjectHook(request),
     updateMemorySettings: (request) => bridge.updateMemorySettings(request),
     startMemoryDream: (projectId) => bridge.startMemoryDream(projectId),
     getMemoryDream: (taskId) => bridge.getMemoryDream(taskId),
@@ -849,14 +800,15 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
         },
       };
 
-      function attemptReconnect(reason: string): void {
+      function attemptReconnect(error: unknown): void {
         if (disposed || terminalSeen) return;
         // Reentrancy guard: if a reconnect is already pending, ignore
         // additional onError/onClose triggers that fire in the same window.
         if (reconnectTimer) return;
-        if (isRunNotFoundError(reason)) {
+        const issue = runtimeRequestIssue(error);
+        if (issue.code === "RUN_NOT_FOUND") {
           handlers.onError?.(
-            `Run session was not found on the server (it may have been lost after restart): ${reason}`,
+            `Run session was not found on the server (it may have been lost after restart): ${issue.message}`,
           );
           return;
         }
@@ -880,20 +832,20 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
       async function resubscribe(): Promise<void> {
         if (disposed || terminalSeen) return;
         try {
-          const subscriptionId = await bridge.subscribeRun(runId, wrappedHandlers, lastCursor);
+          const subscriptionId = await unwrapRuntimeRequest(bridge.subscribeRun(runId, wrappedHandlers, lastCursor));
           if (disposed || terminalSeen) bridge.unsubscribeRun(subscriptionId);
           else currentSubscriptionId = subscriptionId;
         } catch (error) {
           if (disposed || terminalSeen) return;
-          attemptReconnect(error instanceof Error ? error.message : "Reconnection failed");
+          attemptReconnect(error);
         }
       }
 
       try {
-        currentSubscriptionId = await bridge.subscribeRun(runId, wrappedHandlers, lastCursor);
+        currentSubscriptionId = await unwrapRuntimeRequest(bridge.subscribeRun(runId, wrappedHandlers, lastCursor));
       } catch (error) {
         if (disposed) throw error;
-        attemptReconnect(error instanceof Error ? error.message : "Initial subscription failed");
+        attemptReconnect(error);
       }
 
       return () => {
@@ -910,28 +862,28 @@ function createElectronClient(bridge: AwakenBridge): RuntimeClient {
     },
     pickAttachments: (defaultPath) => bridge.pickAttachments(defaultPath),
     pickDirectory: (defaultPath) => bridge.pickDirectory(defaultPath),
-    pickPluginSource: (defaultPath) => bridge.pickPluginSource(defaultPath),
-    resolveDroppedPluginSource: (file) => bridge.resolveDroppedPluginSource(file),
+    pickPluginSource: (defaultPath) => unwrapRuntimeRequest(bridge.pickPluginSource(defaultPath)),
+    resolveDroppedPluginSource: (file) => unwrapRuntimeRequest(bridge.resolveDroppedPluginSource(file)),
     pickProjectFolders: (defaultPath) => bridge.pickProjectFolders(defaultPath),
     validateWorkspace: (path) => bridge.validateWorkspace(path),
     getSupervisorStatus: () => bridge.getSupervisorStatus(),
     onSupervisorStatusChange: (callback) => bridge.onSupervisorStatusChange(callback),
     notifyRendererReady: () => bridge.notifyRendererReady(),
-    listScheduledTasks: () => bridge.listScheduledTasks(),
-    getScheduledTask: (taskId) => bridge.getScheduledTask(taskId),
-    createScheduledTask: (input) => bridge.createScheduledTask(input),
-    patchScheduledTask: (taskId, input) => bridge.patchScheduledTask(taskId, input),
+    listScheduledTasks: () => unwrapRuntimeRequest(bridge.listScheduledTasks()),
+    getScheduledTask: (taskId) => unwrapRuntimeRequest(bridge.getScheduledTask(taskId)),
+    createScheduledTask: (input) => unwrapRuntimeRequest(bridge.createScheduledTask(input)),
+    patchScheduledTask: (taskId, input) => unwrapRuntimeRequest(bridge.patchScheduledTask(taskId, input)),
     deleteScheduledTask: (taskId, expectedVersion, idempotencyKey) =>
-      bridge.deleteScheduledTask(taskId, expectedVersion, idempotencyKey),
+      unwrapRuntimeRequest(bridge.deleteScheduledTask(taskId, expectedVersion, idempotencyKey)),
     pauseScheduledTask: (taskId, expectedVersion) =>
-      bridge.pauseScheduledTask(taskId, expectedVersion),
+      unwrapRuntimeRequest(bridge.pauseScheduledTask(taskId, expectedVersion)),
     resumeScheduledTask: (taskId, expectedVersion) =>
-      bridge.resumeScheduledTask(taskId, expectedVersion),
+      unwrapRuntimeRequest(bridge.resumeScheduledTask(taskId, expectedVersion)),
     runScheduledTaskNow: (taskId, idempotencyKey) =>
-      bridge.runScheduledTaskNow(taskId, idempotencyKey),
-    cancelScheduledTaskExecution: (taskId) => bridge.cancelScheduledTaskExecution(taskId),
-    listScheduledTaskExecutions: (taskId) => bridge.listScheduledTaskExecutions(taskId),
-    getSystemTimezone: () => bridge.getSystemTimezone(),
+      unwrapRuntimeRequest(bridge.runScheduledTaskNow(taskId, idempotencyKey)),
+    cancelScheduledTaskExecution: (taskId) => unwrapRuntimeRequest(bridge.cancelScheduledTaskExecution(taskId)),
+    listScheduledTaskExecutions: (taskId) => unwrapRuntimeRequest(bridge.listScheduledTaskExecutions(taskId)),
+    getSystemTimezone: () => unwrapRuntimeRequest(bridge.getSystemTimezone()),
     subscribeScheduledTaskEvents: (handler) => bridge.subscribeScheduledTaskEvents(handler),
     onScheduledTaskThreadActivation: (handler) => bridge.onScheduledTaskThreadActivation(handler),
     getDesktopUpdateState: () => bridge.getDesktopUpdateState(),

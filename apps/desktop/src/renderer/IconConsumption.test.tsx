@@ -1,10 +1,9 @@
-import React from "react";
-import { renderToString } from "react-dom/server";
 import {
   AwakenConnectorCard,
   AwakenConnectors,
   AwakenSkillCard,
 } from "@awaken/design-system";
+import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 describe("connector and skill icon consumption", () => {

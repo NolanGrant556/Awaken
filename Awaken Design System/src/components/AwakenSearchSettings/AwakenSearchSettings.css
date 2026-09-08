@@ -1,4 +1,40 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
+
+/* Shared status and switch primitives */
+.extension-state {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  max-width: 100%;
+  min-height: 20px;
+  padding: 0 7px;
+  border-radius: var(--aw-radius-pill);
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-tertiary);
+  font-size: 11px;
+  font-weight: var(--aw-font-weight-heavy);
+  line-height: 1;
+}
+
+.extension-state-connected,
+.extension-state-loaded {
+  background: color-mix(in srgb, var(--aw-success) 13%, var(--aw-bg-white));
+  color: color-mix(in srgb, var(--aw-success) 72%, var(--aw-text-primary));
+}
+
+.extension-state-failed,
+.extension-state-invalid {
+  background: color-mix(in srgb, var(--aw-error) 10%, var(--aw-bg-white));
+  color: color-mix(in srgb, var(--aw-error) 72%, var(--aw-text-primary));
+}
+
+.extension-state-pending,
+.extension-state-needs-auth,
+.extension-state-disabled_by_policy,
+.extension-state-shadowed {
+  background: color-mix(in srgb, var(--aw-warning) 18%, var(--aw-bg-white));
+  color: color-mix(in srgb, var(--aw-warning) 74%, var(--aw-text-primary));
+}
 
 .search-settings { display: grid; gap: 18px; box-sizing: border-box; width: min(100%, var(--aw-settings-focused-content-width, 820px)); margin-inline: auto; padding: 8px 0 36px; }
 .search-settings-intro h2 { margin: 0 0 6px; font-size: 16px; }

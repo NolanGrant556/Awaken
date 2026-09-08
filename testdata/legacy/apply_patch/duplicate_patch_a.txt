@@ -1,6 +1,0 @@
-*** Begin Patch
-*** Update File: notes/sample.txt
-@@
--alpha
-+beta
-*** End Patch

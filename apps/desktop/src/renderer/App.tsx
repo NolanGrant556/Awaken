@@ -1,3 +1,4 @@
+import { useRuntimeInteractions } from "./useRuntimeInteractions";
 import {
   AwakenAppShell as AppShell,
   AwakenIcon,
@@ -54,7 +55,6 @@ import {
   artifactMediaSourceKey,
   mediaRevealLabelForPlatform,
 } from "./artifactMediaPresentation";
-import { composerAttachmentViews } from "./composerAttachments";
 import {
   pluginAgentComposerTokenFromAction,
   pluginCommandComposerTokenFromAction,
@@ -168,6 +168,7 @@ export function App() {
   );
   const {
     runtimeInfo,
+    runtimeRefreshError,
     modelProfiles,
     modelProviders,
     desktopReady,
@@ -258,16 +259,13 @@ export function App() {
     !activeExtensionSection && !scheduledTasksNavActive;
   const [extensionNavigationEpoch, setExtensionNavigationEpoch] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
-  const [resolvingExternalInteractionId, setResolvingExternalInteractionId] =
-    useState<string | null>(null);
+  useEffect(() => {
+    if (runtimeRefreshError) setNotice(runtimeRefreshError);
+  }, [runtimeRefreshError]);
+
   const [resolvingUserQuestionId, setResolvingUserQuestionId] = useState<
     string | null
   >(null);
-  const [resolvingComputerReviewId, setResolvingComputerReviewId] = useState<
-    string | null
-  >(null);
-  const [controllingComputerHandoffId, setControllingComputerHandoffId] =
-    useState<string | null>(null);
   const [newThreadModelPreference, setNewThreadModelPreference] = useState<{
     selectedModelProfileId?: string;
     reasoningEffortByProfile: Record<string, ReasoningEffortLevel>;
@@ -331,7 +329,6 @@ export function App() {
     refreshThreads,
     loadThreadsIntoState,
     resetActiveThreadContext,
-    handleSelectProject,
     dispatch,
   });
   const {
@@ -627,116 +624,6 @@ export function App() {
     }
   }
 
-  async function resolveActiveExternalInteraction(
-    resolution: "completed" | "cancelled" | "expired" | "failed",
-    content?: Record<string, unknown>,
-  ): Promise<void> {
-    if (!runtimeState.runId || !activeExternalInteraction) {
-      return;
-    }
-    if (resolvingExternalInteractionId === activeExternalInteraction.id) {
-      return;
-    }
-    setNotice(null);
-    setResolvingExternalInteractionId(activeExternalInteraction.id);
-    try {
-      await runtimeClient.resolveExternalInteraction(
-        runtimeState.runId,
-        activeExternalInteraction.id,
-        resolution,
-        content,
-      );
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Failed to resolve external interaction",
-      );
-    } finally {
-      setResolvingExternalInteractionId(null);
-    }
-  }
-
-  async function resolveActiveACPPermission(
-    optionId: string,
-    cancelled = false,
-  ): Promise<void> {
-    if (!runtimeState.runId || !activeExternalInteraction) {
-      return;
-    }
-    if (resolvingExternalInteractionId === activeExternalInteraction.id) {
-      return;
-    }
-    setNotice(null);
-    setResolvingExternalInteractionId(activeExternalInteraction.id);
-    try {
-      await runtimeClient.resolveACPPermission(
-        runtimeState.runId,
-        activeExternalInteraction.id,
-        optionId,
-        cancelled,
-      );
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Failed to resolve ACP permission",
-      );
-    } finally {
-      setResolvingExternalInteractionId(null);
-    }
-  }
-
-  async function resolveActiveComputerReview(
-    decision: "approved_once" | "denied",
-  ): Promise<void> {
-    if (!runtimeState.runId || !activeComputerReview) {
-      return;
-    }
-    if (resolvingComputerReviewId === activeComputerReview.id) {
-      return;
-    }
-    setNotice(null);
-    setResolvingComputerReviewId(activeComputerReview.id);
-    try {
-      await runtimeClient.resolveComputerReview(
-        runtimeState.runId,
-        activeComputerReview.reviewId,
-        decision,
-      );
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Failed to resolve computer review",
-      );
-    } finally {
-      setResolvingComputerReviewId(null);
-    }
-  }
-
-  async function returnComputerControl(): Promise<void> {
-    if (!runtimeState.runId || !activeComputerHandoff) {
-      return;
-    }
-    if (controllingComputerHandoffId === activeComputerHandoff.id) {
-      return;
-    }
-    setNotice(null);
-    setControllingComputerHandoffId(activeComputerHandoff.id);
-    try {
-      await runtimeClient.computerSessionControl(runtimeState.runId, "return");
-    } catch (error) {
-      setNotice(
-        error instanceof Error
-          ? error.message
-          : "Failed to return computer control",
-      );
-    } finally {
-      setControllingComputerHandoffId(null);
-    }
-  }
-
   function resetActiveThreadContext(): void {
     threadSession.begin();
     setNotice(null);
@@ -856,6 +743,10 @@ export function App() {
   const activeComputerHandoff = runtimeState.computerHandoffs.find(
     (item) => item.active,
   );
+  const { resolvingExternalInteractionId, resolvingComputerReviewId, controllingComputerHandoffId, resolveActiveExternalInteraction, resolveActiveACPPermission, resolveActiveComputerReview, returnComputerControl } = useRuntimeInteractions({
+    runId: runtimeState.runId, activeExternalInteraction, activeComputerReview,
+    activeComputerHandoff, runtimeClient, setNotice,
+  });
   const navItems: NavItem[] = [
     {
       id: "connectors",
@@ -1418,7 +1309,7 @@ export function App() {
   ): void {
     if (component.kind === "skill") {
       insertComposerTokenFromExtensions(
-        pluginSkillComposerTokenFromAction(plugin, component),
+        pluginSkillComposerTokenFromAction(component),
       );
       return;
     }
@@ -1455,7 +1346,8 @@ export function App() {
     desktopReady,
     desktopNeedsRestart,
     isBusy,
-    registry: projectRegistry,
+    getSubmissionScope: projectRegistry.getSubmissionScope,
+    onRunStarted: projectRegistry.onRunStarted,
     draft: composerDraftController,
     composerDraftKey,
     selectedModelProfile,
@@ -1468,7 +1360,6 @@ export function App() {
     setNotice,
   });
   const promptActions = usePromptRewind({
-    promptReplacementPending,
     setPromptReplacementPending,
     runtimeClient,
     threadSession,
@@ -1695,7 +1586,7 @@ export function App() {
   }
 
   async function handleCancelSubagent(taskId: string): Promise<void> {
-    if (!runtimeState.runId || !runtimeClient.cancelSubagent) return;
+    if (!(runtimeState.runId)) return;
     setCancellingSubagentTaskId(taskId);
     setNotice(null);
     try {
@@ -1778,7 +1669,6 @@ export function App() {
   const deliverablePreviewMediaMetadata = deliverablePreviewMediaSourceKey
     ? artifactMediaMetadata[deliverablePreviewMediaSourceKey]
     : undefined;
-  const composerBarAttachments = composerAttachmentViews(composerAttachments);
   const currentConversationLabel = activeThread?.label?.trim() || "新建任务";
 
   function renderExternalActionGate() {
@@ -2208,7 +2098,6 @@ export function App() {
                             ? () =>
                                 refreshArtifactMediaSource(
                                   deliverablePreviewMediaSourceKey,
-                                  deliverablePreview,
                                 )
                             : undefined
                         }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   RuntimeInfo,
   ModelProvider,
@@ -8,11 +8,12 @@ import type { RuntimeClient } from "./runtime/client";
 import type { RuntimeViewState, RuntimeAction } from "./runtime/reducer";
 
 export function useDesktopRuntime(
-  runtimeClient: RuntimeClient,
+  runtimeClient: Pick<RuntimeClient,
+    "getRuntimeInfo" | "listModelProfiles" | "listModelProviders" |
+    "getSupervisorStatus" | "onSupervisorStatusChange" | "notifyRendererReady">,
   supervisorStatus: RuntimeViewState["supervisorStatus"],
   dispatch: (action: RuntimeAction) => void,
 ) {
-  const runtimeState = { supervisorStatus };
 
   const rendererReadyNotifiedRef = useRef(false);
 
@@ -25,52 +26,63 @@ export function useDesktopRuntime(
   const [modelProviders, setModelProviders] = useState<ModelProvider[]>([]);
 
   const desktopReady =
-    runtimeState.supervisorStatus === "running" && runtimeInfo !== null;
+    supervisorStatus === "running" && runtimeInfo !== null;
 
-  const desktopNeedsRestart = runtimeState.supervisorStatus === "crashed";
+  const desktopNeedsRestart = supervisorStatus === "crashed";
 
   const desktopStarting = !desktopReady && !desktopNeedsRestart;
 
+  const [runtimeRefreshError, setRuntimeRefreshError] = useState<string | null>(null);
+  const generationRef = useRef(0);
+  const inFlightRef = useRef<Promise<void> | null>(null);
+
+  const refreshRuntimeInfoNow = useCallback((): Promise<void> => {
+    if (supervisorStatus !== "running") return Promise.resolve();
+    if (inFlightRef.current) return inFlightRef.current;
+    const generation = generationRef.current;
+    const request = Promise.allSettled([
+      runtimeClient.getRuntimeInfo(),
+      runtimeClient.listModelProfiles(),
+      runtimeClient.listModelProviders(),
+    ]).then(([info, profiles, providers]) => {
+      if (generation !== generationRef.current) return;
+      if (info.status === "fulfilled") setRuntimeInfo(info.value);
+      if (profiles.status === "fulfilled") setModelProfiles(profiles.value);
+      if (providers.status === "fulfilled") setModelProviders(providers.value);
+      setRuntimeRefreshError(
+        [info, profiles, providers].some((result) => result.status === "rejected")
+          ? "运行信息暂时无法刷新，请稍后重试。"
+          : null,
+      );
+    }).finally(() => {
+      if (inFlightRef.current === request) inFlightRef.current = null;
+    });
+    inFlightRef.current = request;
+    return request;
+  }, [runtimeClient, supervisorStatus]);
+
   useEffect(() => {
     let cancelled = false;
-
-    async function poll(): Promise<void> {
-      if (runtimeState.supervisorStatus !== "running") {
-        setRuntimeInfo(null);
-        setModelProfiles([]);
-        setModelProviders([]);
-        return;
-      }
-      try {
-        const [info, profiles, providers] = await Promise.all([
-          runtimeClient.getRuntimeInfo(),
-          runtimeClient.listModelProfiles().catch(() => []),
-          runtimeClient.listModelProviders().catch(() => []),
-        ]);
-        if (!cancelled) {
-          setRuntimeInfo(info);
-          setModelProfiles(profiles);
-          setModelProviders(providers);
-        }
-      } catch {
-        if (!cancelled) {
-          setRuntimeInfo(null);
-          setModelProfiles([]);
-          setModelProviders([]);
-        }
-      }
-    }
-
-    void poll();
-    const interval = setInterval(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (supervisorStatus !== "running") {
+      setRuntimeInfo(null);
+      setModelProfiles([]);
+      setModelProviders([]);
+      setRuntimeRefreshError(null);
+    } else {
+      const poll = async () => {
+        await refreshRuntimeInfoNow();
+        if (!cancelled) timer = setTimeout(() => { void poll(); }, 3000);
+      };
       void poll();
-    }, 3000);
-
+    }
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      generationRef.current += 1;
+      inFlightRef.current = null;
+      clearTimeout(timer);
     };
-  }, [runtimeClient, runtimeState.supervisorStatus]);
+  }, [refreshRuntimeInfoNow, supervisorStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -98,7 +110,7 @@ export function useDesktopRuntime(
       cancelled = true;
       unsubscribeStatus();
     };
-  }, [runtimeClient]);
+  }, [runtimeClient, dispatch]);
 
   useEffect(() => {
     if (
@@ -108,7 +120,6 @@ export function useDesktopRuntime(
       return;
     }
 
-    rendererReadyNotifiedRef.current = true;
     let cancelled = false;
 
     async function notifyWhenStable(): Promise<void> {
@@ -124,6 +135,7 @@ export function useDesktopRuntime(
         requestAnimationFrame(() => resolve()),
       );
       if (!cancelled) {
+        rendererReadyNotifiedRef.current = true;
         runtimeClient.notifyRendererReady();
       }
     }
@@ -135,30 +147,9 @@ export function useDesktopRuntime(
     };
   }, [desktopNeedsRestart, desktopReady, runtimeClient]);
 
-  async function refreshRuntimeInfoNow(): Promise<void> {
-    if (runtimeState.supervisorStatus !== "running") {
-      setRuntimeInfo(null);
-      setModelProfiles([]);
-      setModelProviders([]);
-      return;
-    }
-    try {
-      const [info, profiles, providers] = await Promise.all([
-        runtimeClient.getRuntimeInfo(),
-        runtimeClient.listModelProfiles().catch(() => []),
-        runtimeClient.listModelProviders().catch(() => []),
-      ]);
-      setRuntimeInfo(info);
-      setModelProfiles(profiles);
-      setModelProviders(providers);
-    } catch {
-      setRuntimeInfo(null);
-      setModelProfiles([]);
-      setModelProviders([]);
-    }
-  }
   return {
     runtimeInfo,
+    runtimeRefreshError,
     modelProfiles,
     modelProviders,
     desktopReady,

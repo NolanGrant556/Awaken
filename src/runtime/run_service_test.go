@@ -2861,13 +2861,6 @@ type appendFailingThreadStore struct {
 	fail bool
 }
 
-func (s *appendFailingThreadStore) Prepare() error {
-	if preparer, ok := s.ThreadStore.(interface{ Prepare() error }); ok {
-		return preparer.Prepare()
-	}
-	return nil
-}
-
 func (s *appendFailingThreadStore) AppendRunInput(snapshot ThreadSnapshot, run Run, sessionID, input string, attachments []RunInputAttachment) error {
 	if s.fail {
 		return errors.New("injected append run input failure")

@@ -50,7 +50,6 @@ type FailureSupervisor struct {
 
 	callAttempts             map[string]int
 	callFailureMeta          map[string]callFailureMeta
-	classFailures            map[string]int
 	classFailureMeta         map[string]classFailureMeta
 	toolConsecutiveFail      map[string]int
 	successfulMutations      map[string]int
@@ -71,7 +70,6 @@ type FailureSupervisor struct {
 type callFailureMeta struct {
 	retryable bool
 	errorCode string
-	attempts  int
 }
 
 type classFailureMeta struct {
@@ -96,15 +94,20 @@ type RecoveryDirective struct {
 	ExternalStateConfirmationRequired bool
 }
 
-// BeforeCallDecision is returned before a real tool execution.
+type CallAction uint8
+
+const (
+	CallExecute CallAction = iota
+	CallBlock
+	CallStopRun
+)
+
+// BeforeCallDecision has one action, so blocking and executing cannot conflict.
 type BeforeCallDecision struct {
-	Allow                             bool
-	Block                             bool
+	Action                            CallAction
 	ErrorCode                         string
 	ErrorMessage                      string
 	RecoveryOptions                   []string
-	TerminateTurn                     bool
-	TerminateRun                      bool
 	TerminalReason                    TerminalReason
 	CallSignature                     string
 	AttemptCount                      int
@@ -117,9 +120,6 @@ type AfterOutcomeDecision struct {
 	Fingerprint      string
 	RecoveryRequired bool
 	RecoveryOptions  []string
-	TerminateTurn    bool
-	TerminateRun     bool
-	TerminalReason   TerminalReason
 	Directive        *RecoveryDirective
 }
 
@@ -128,7 +128,6 @@ func NewFailureSupervisor(workspaceRoot string, maxAgentTurns, maxToolExecutions
 		workspaceRoot:            strings.TrimSpace(workspaceRoot),
 		callAttempts:             map[string]int{},
 		callFailureMeta:          map[string]callFailureMeta{},
-		classFailures:            map[string]int{},
 		classFailureMeta:         map[string]classFailureMeta{},
 		toolConsecutiveFail:      map[string]int{},
 		successfulMutations:      map[string]int{},
@@ -199,20 +198,19 @@ func (s *FailureSupervisor) ToolExecutions() int {
 // BeforeCall decides whether a tool call may execute.
 func (s *FailureSupervisor) BeforeCall(call context.ToolCall) BeforeCallDecision {
 	if s == nil {
-		return BeforeCallDecision{Allow: true}
+		return BeforeCallDecision{Action: CallExecute}
 	}
 	toolName := strings.TrimSpace(call.Function.Name)
 	signature := CallSignature(toolName, call.Function.Arguments)
 	decision := BeforeCallDecision{
-		Allow:         true,
+		Action:        CallExecute,
 		CallSignature: signature,
 	}
 
 	mutationSignature := SuccessfulMutationSignature(toolName, call.Function.Arguments)
 	if s.successfulMutations[mutationSignature] > 0 {
 		s.successfulMutationBlocks[mutationSignature]++
-		decision.Allow = false
-		decision.Block = true
+		decision.Action = CallBlock
 		decision.ErrorCode = ErrorCodeRepeatedSuccessfulMutation
 		decision.ErrorMessage = fmt.Sprintf(
 			"blocked repeated successful mutation %s: the same business arguments were already applied; changing only idempotency_key does not create a new operation",
@@ -226,7 +224,7 @@ func (s *FailureSupervisor) BeforeCall(call context.ToolCall) BeforeCallDecision
 		decision.RecoveryRequired = true
 		decision.AttemptCount = s.successfulMutationBlocks[mutationSignature]
 		if decision.AttemptCount >= 2 {
-			decision.TerminateRun = true
+			decision.Action = CallStopRun
 			decision.TerminalReason = TerminalReasonRepeatedToolFailure
 			decision.ErrorMessage += "; stopping run after the model ignored the first no-progress block"
 		}
@@ -234,9 +232,8 @@ func (s *FailureSupervisor) BeforeCall(call context.ToolCall) BeforeCallDecision
 	}
 
 	if s.toolExecutions >= s.maxToolExecutions {
-		decision.Allow = false
-		decision.Block = true
-		decision.TerminateRun = true
+		decision.Action = CallBlock
+		decision.Action = CallStopRun
 		decision.TerminalReason = TerminalReasonRepeatedToolFailure
 		decision.ErrorCode = ErrorCodeRepeatedFailure
 		decision.ErrorMessage = fmt.Sprintf("tool execution budget exceeded (%d)", s.maxToolExecutions)
@@ -245,8 +242,7 @@ func (s *FailureSupervisor) BeforeCall(call context.ToolCall) BeforeCallDecision
 	}
 
 	if s.pendingRecovery != nil && s.pendingRecovery.ExternalStateConfirmationRequired && s.pendingRecovery.ToolName == toolName {
-		decision.Allow = false
-		decision.Block = true
+		decision.Action = CallBlock
 		decision.ErrorCode = firstNonEmptyString(s.pendingRecovery.ErrorCode, ErrorCodeToolRetryBlocked)
 		decision.ErrorMessage = firstNonEmptyString(
 			s.pendingRecovery.Message,
@@ -268,8 +264,7 @@ func (s *FailureSupervisor) BeforeCall(call context.ToolCall) BeforeCallDecision
 			limit = maxNonRetryableSameCallAttempts
 		}
 		if attempts >= limit {
-			decision.Allow = false
-			decision.Block = true
+			decision.Action = CallBlock
 			decision.ErrorCode = ErrorCodeToolRetryBlocked
 			decision.ErrorMessage = fmt.Sprintf(
 				"blocked repeated tool call %s after %d failure(s); error_code=%s retryable=%v",
@@ -285,7 +280,7 @@ func (s *FailureSupervisor) BeforeCall(call context.ToolCall) BeforeCallDecision
 			// feedback, replaying the identical arguments cannot make progress and
 			// must not consume the remainder of the run budget.
 			if toolName == askuser.ToolName && !meta.retryable {
-				decision.TerminateRun = true
+				decision.Action = CallStopRun
 				decision.TerminalReason = TerminalReasonRepeatedToolFailure
 				decision.ErrorMessage += "; stopping run because ask_user repeated identical invalid arguments after corrective feedback"
 				decision.RecoveryOptions = mergeUniqueStrings(decision.RecoveryOptions, []string{
@@ -303,8 +298,7 @@ func (s *FailureSupervisor) BeforeCall(call context.ToolCall) BeforeCallDecision
 	// arguments (and therefore call_signature) changed.
 	revision := ResourceRevision(call.Function.Arguments, tool.ExecutionOutcome{})
 	if exhausted, ok := s.exhaustedClass(toolName, revision); ok {
-		decision.Allow = false
-		decision.Block = true
+		decision.Action = CallBlock
 		decision.ErrorCode = ErrorCodeRepeatedFailure
 		decision.ErrorMessage = fmt.Sprintf(
 			"blocked %s before execution: tool/resource/error class %s failed %d times (revision=%s)",
@@ -379,20 +373,18 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 	s.callFailureMeta[signature] = callFailureMeta{
 		retryable: outcome.Retryable,
 		errorCode: errorCode,
-		attempts:  s.callAttempts[signature],
 	}
 
 	classKey := toolName + "|" + revision + "|" + errorClass
 	inputRejectedBeforeExecution := outcome.TransportStatus == tool.TransportNotStarted &&
 		outcome.ErrorCategory == tool.ErrorCategoryValidation
 	if !inputRejectedBeforeExecution {
-		s.classFailures[classKey] = s.classFailures[classKey] + 1
 		s.classFailureMeta[classKey] = classFailureMeta{
 			toolName:   toolName,
 			revision:   revision,
 			errorClass: errorClass,
 			errorCode:  errorCode,
-			failures:   s.classFailures[classKey],
+			failures:   s.classFailureMeta[classKey].failures + 1,
 		}
 	}
 
@@ -445,7 +437,7 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 		decision.Directive = directive
 	}
 
-	if !inputRejectedBeforeExecution && s.classFailures[classKey] >= maxSameClassFailures {
+	if !inputRejectedBeforeExecution && s.classFailureMeta[classKey].failures >= maxSameClassFailures {
 		decision.RecoveryRequired = true
 		decision.RecoveryOptions = mergeUniqueStrings(decision.RecoveryOptions, []string{
 			"change_tool_or_refresh_resource_revision",
@@ -459,11 +451,11 @@ func (s *FailureSupervisor) AfterOutcome(call context.ToolCall, outcome tool.Exe
 				ResourceRevision: revision,
 				ErrorCode:        errorCode,
 				Fingerprint:      fingerprint,
-				AttemptCount:     s.classFailures[classKey],
+				AttemptCount:     s.classFailureMeta[classKey].failures,
 				RecoveryOptions:  decision.RecoveryOptions,
 				Message: fmt.Sprintf(
 					"recovery_required: same tool/resource/error class failed %d times",
-					s.classFailures[classKey],
+					s.classFailureMeta[classKey].failures,
 				),
 			}
 			s.pendingRecovery = decision.Directive
@@ -591,7 +583,7 @@ func SyntheticBlockedResult(call context.ToolCall, decision BeforeCallDecision) 
 		"status":               status,
 		"same_call_retryable":  false,
 		"changed_call_allowed": changedCallAllowed,
-		"run_will_terminate":   decision.TerminateRun || decision.TerminateTurn,
+		"run_will_terminate":   decision.Action == CallStopRun,
 		"next_actions":         nextActions,
 	})
 	content := msg + "\n" + string(guidance)
@@ -612,7 +604,7 @@ func SyntheticBlockedResult(call context.ToolCall, decision BeforeCallDecision) 
 			"same_call_retryable":                  false,
 			"retryable":                            false,
 			"changed_call_allowed":                 changedCallAllowed,
-			"run_will_terminate":                   decision.TerminateRun || decision.TerminateTurn,
+			"run_will_terminate":                   decision.Action == CallStopRun,
 			"call_signature":                       decision.CallSignature,
 			"attempt_count":                        decision.AttemptCount,
 			"recovery_required":                    decision.RecoveryRequired,
@@ -746,7 +738,6 @@ func (s *FailureSupervisor) resetFailureHistoryAfterSuccess(toolName, signature,
 	for key, meta := range s.classFailureMeta {
 		if meta.toolName == toolName && meta.revision == revision {
 			delete(s.classFailureMeta, key)
-			delete(s.classFailures, key)
 		}
 	}
 
@@ -767,7 +758,6 @@ func (s *FailureSupervisor) resetFailureHistoryAfterSuccess(toolName, signature,
 	for key, meta := range s.classFailureMeta {
 		if meta.toolName == "Bash" {
 			delete(s.classFailureMeta, key)
-			delete(s.classFailures, key)
 		}
 	}
 	s.toolConsecutiveFail["Bash"] = 0

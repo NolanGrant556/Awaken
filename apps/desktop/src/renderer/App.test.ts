@@ -1,3 +1,4 @@
+import { mockDesktopReply } from "./runtime/bridge-test-helper";
 import {
   UserQuestionPrompt,
   isUserQuestionSelectionAnswered,
@@ -723,6 +724,26 @@ describe("media artifact request compatibility", () => {
 function stubElectronBridge(): void {
   vi.stubGlobal("window", {
     awaken: {
+      getConnectorAuthSession: vi.fn(async () => { throw new Error("Unconfigured getConnectorAuthSession"); }),
+      cancelConnectorAuthSession: vi.fn(async () => { throw new Error("Unconfigured cancelConnectorAuthSession"); }),
+      markConnectorAdminApprovalPending: vi.fn(async () => { throw new Error("Unconfigured markConnectorAdminApprovalPending"); }),
+      getPluginSetup: vi.fn(async () => { throw new Error("Unconfigured getPluginSetup"); }),
+      startPluginSetup: vi.fn(async () => { throw new Error("Unconfigured startPluginSetup"); }),
+      getActivePluginAuthSession: vi.fn(async () => { throw new Error("Unconfigured getActivePluginAuthSession"); }),
+      getPluginAuthSession: vi.fn(async () => { throw new Error("Unconfigured getPluginAuthSession"); }),
+      cancelPluginAuthSession: vi.fn(async () => { throw new Error("Unconfigured cancelPluginAuthSession"); }),
+      markPluginAdminApprovalPending: vi.fn(async () => { throw new Error("Unconfigured markPluginAdminApprovalPending"); }),
+      probePluginSetup: vi.fn(async () => { throw new Error("Unconfigured probePluginSetup"); }),
+      disconnectPluginSetup: vi.fn(async () => { throw new Error("Unconfigured disconnectPluginSetup"); }),
+      createProjectAgentsFile: vi.fn(async () => { throw new Error("Unconfigured createProjectAgentsFile"); }),
+      getGlobalAgentsDocument: vi.fn(async () => { throw new Error("Unconfigured getGlobalAgentsDocument"); }),
+      saveGlobalAgentsDocument: vi.fn(async () => { throw new Error("Unconfigured saveGlobalAgentsDocument"); }),
+      deleteGlobalAgentsDocument: vi.fn(async () => { throw new Error("Unconfigured deleteGlobalAgentsDocument"); }),
+      cancelSubagent: vi.fn(async () => { throw new Error("Unconfigured cancelSubagent"); }),
+      messageSubagent: vi.fn(async () => { throw new Error("Unconfigured messageSubagent"); }),
+      getHookStatus: vi.fn(async () => { throw new Error("Unconfigured getHookStatus"); }),
+      trustProjectHook: vi.fn(async () => { throw new Error("Unconfigured trustProjectHook"); }),
+      revokeProjectHook: vi.fn(async () => { throw new Error("Unconfigured revokeProjectHook"); }),
       platform: "macos",
       onSelectAllRequested: vi.fn(() => () => {}),
       relaunchDesktop: vi.fn(async () => undefined),
@@ -734,19 +755,19 @@ function stubElectronBridge(): void {
       })),
       saveSearchSettings: vi.fn(),
       testSearchProvider: vi.fn(),
-      getACPRunners: vi.fn(async () => ({ runners: [] })),
-      createACPRunner: vi.fn(),
-      updateACPRunner: vi.fn(),
-      deleteACPRunner: vi.fn(),
-      probeACPRunner: vi.fn(),
-      getRun: vi.fn(),
-      getThreadTranscript: vi.fn(),
-      rewindThread: vi.fn(),
-      listThreads: vi.fn(async () => []),
-      renameThread: vi.fn(),
-      updateThreadModelPreference: vi.fn(),
-      deleteThread: vi.fn(async () => ({ ok: true as const })),
-      deleteThreads: vi.fn(async (threadIds: string[]) => ({
+      getACPRunners: mockDesktopReply(async () => ({ runners: [] })),
+      createACPRunner: mockDesktopReply(),
+      updateACPRunner: mockDesktopReply(),
+      deleteACPRunner: mockDesktopReply(),
+      probeACPRunner: mockDesktopReply(),
+      getRun: mockDesktopReply(),
+      getThreadTranscript: mockDesktopReply(),
+      rewindThread: mockDesktopReply(),
+      listThreads: mockDesktopReply(async () => []),
+      renameThread: mockDesktopReply(),
+      updateThreadModelPreference: mockDesktopReply(),
+      deleteThread: mockDesktopReply(async () => ({ ok: true as const })),
+      deleteThreads: mockDesktopReply(async (threadIds: string[]) => ({
         ok: true as const,
         deletedThreadIds: threadIds,
         failures: [],
@@ -793,7 +814,7 @@ function stubElectronBridge(): void {
       renameProject: vi.fn(),
       reorderProjects: vi.fn(),
       detachProject: vi.fn(),
-      deleteProjectThreads: vi.fn(),
+      deleteProjectThreads: mockDesktopReply(),
       createProject: vi.fn(),
       attachProjectFolder: vi.fn(),
       detachProjectFolder: vi.fn(),
@@ -810,9 +831,9 @@ function stubElectronBridge(): void {
       revealPath: vi.fn(async () => ({ ok: true as const })),
       revealArtifact: vi.fn(async () => ({ ok: true as const })),
       startRun: vi.fn(),
-      cancelRun: vi.fn(),
-      answerUserQuestion: vi.fn(),
-      cancelUserQuestion: vi.fn(),
+      cancelRun: mockDesktopReply(),
+      answerUserQuestion: mockDesktopReply(),
+      cancelUserQuestion: mockDesktopReply(),
       subscribeRun: vi.fn(),
       unsubscribeRun: vi.fn(),
       getDesktopPreferences: vi.fn(async () => ({ theme: "light" as const })),
@@ -824,8 +845,8 @@ function stubElectronBridge(): void {
       listCliConnectors: vi.fn(async () => []),
       installCliConnector: vi.fn(),
       refreshCliConnector: vi.fn(),
-      resolveExternalInteraction: vi.fn(),
-      resolveACPPermission: vi.fn(),
+      resolveExternalInteraction: mockDesktopReply(),
+      resolveACPPermission: mockDesktopReply(),
       cancelCliInstall: vi.fn(),
       startCliAuth: vi.fn(),
       cancelCliAuth: vi.fn(),
@@ -853,26 +874,26 @@ function stubElectronBridge(): void {
       deleteSkill: vi.fn(),
       disableSkill: vi.fn(),
       enableSkill: vi.fn(),
-      listPlugins: vi.fn(async () => []),
-      getPlugin: vi.fn(),
-      validatePlugin: vi.fn(),
-      installPlugin: vi.fn(),
-      commitPlugin: vi.fn(),
-      updatePluginComponentSource: vi.fn(),
-      enablePlugin: vi.fn(),
-      disablePlugin: vi.fn(),
-      uninstallPlugin: vi.fn(),
-      enablePluginServer: vi.fn(),
-      disablePluginServer: vi.fn(),
-      listPluginComponents: vi.fn(async () => []),
-      getPluginComponent: vi.fn(),
-      setPluginComponentState: vi.fn(),
-      setPluginMcpToolState: vi.fn(),
-      setPluginRuleActivation: vi.fn(),
-      listPluginHookReceipts: vi.fn(),
-      retryPluginHookReceipt: vi.fn(),
-      getPluginConfiguration: vi.fn(async () => ({ fields: [], revision: 0 })),
-      updatePluginConfiguration: vi.fn(),
+      listPlugins: mockDesktopReply(async () => []),
+      getPlugin: mockDesktopReply(),
+      validatePlugin: mockDesktopReply(),
+      installPlugin: mockDesktopReply(),
+      commitPlugin: mockDesktopReply(),
+      updatePluginComponentSource: mockDesktopReply(),
+      enablePlugin: mockDesktopReply(),
+      disablePlugin: mockDesktopReply(),
+      uninstallPlugin: mockDesktopReply(),
+      enablePluginServer: mockDesktopReply(),
+      disablePluginServer: mockDesktopReply(),
+      listPluginComponents: mockDesktopReply(async () => []),
+      getPluginComponent: mockDesktopReply(),
+      setPluginComponentState: mockDesktopReply(),
+      setPluginMcpToolState: mockDesktopReply(),
+      setPluginRuleActivation: mockDesktopReply(),
+      listPluginHookReceipts: mockDesktopReply(),
+      retryPluginHookReceipt: mockDesktopReply(),
+      getPluginConfiguration: mockDesktopReply(async () => ({ fields: [], revision: 0 })),
+      updatePluginConfiguration: mockDesktopReply(),
       listModelProviders: vi.fn(async () => []),
       listModelProfiles: vi.fn(async () => []),
       getModelPurposeRouting: vi.fn(async () => ({})),
@@ -921,8 +942,8 @@ function stubElectronBridge(): void {
       getModelProfileBalances: vi.fn(async () => ({ balances: [] })),
       pickAttachments: vi.fn(async () => ({ canceled: true as const })),
       pickDirectory: vi.fn(async () => ({ canceled: true as const })),
-      pickPluginSource: vi.fn(async () => ({ canceled: true as const })),
-      resolveDroppedPluginSource: vi.fn(async () => ({
+      pickPluginSource: mockDesktopReply(async () => ({ canceled: true as const })),
+      resolveDroppedPluginSource: mockDesktopReply(async () => ({
         canceled: true as const,
       })),
       pickProjectFolders: vi.fn(async () => ({ canceled: true as const })),
@@ -1023,29 +1044,29 @@ function stubElectronBridge(): void {
       listMemoryDreams: vi.fn(async () => []),
       cancelMemoryDream: vi.fn(async () => undefined),
       onMemoryDreamReceipt: vi.fn(() => () => {}),
-      listScheduledTasks: vi.fn(async () => []),
-      getScheduledTask: vi.fn(async () => {
+      listScheduledTasks: mockDesktopReply(async () => []),
+      getScheduledTask: mockDesktopReply(async () => {
         throw new Error("not found");
       }),
-      createScheduledTask: vi.fn(async () => {
+      createScheduledTask: mockDesktopReply(async () => {
         throw new Error("not implemented");
       }),
-      patchScheduledTask: vi.fn(async () => {
+      patchScheduledTask: mockDesktopReply(async () => {
         throw new Error("not implemented");
       }),
-      deleteScheduledTask: vi.fn(async () => undefined),
-      pauseScheduledTask: vi.fn(async () => {
+      deleteScheduledTask: mockDesktopReply(async () => undefined),
+      pauseScheduledTask: mockDesktopReply(async () => {
         throw new Error("not implemented");
       }),
-      resumeScheduledTask: vi.fn(async () => {
+      resumeScheduledTask: mockDesktopReply(async () => {
         throw new Error("not implemented");
       }),
-      runScheduledTaskNow: vi.fn(async () => {
+      runScheduledTaskNow: mockDesktopReply(async () => {
         throw new Error("not implemented");
       }),
-      cancelScheduledTaskExecution: vi.fn(async () => undefined),
-      listScheduledTaskExecutions: vi.fn(async () => []),
-      getSystemTimezone: vi.fn(async () => "UTC"),
+      cancelScheduledTaskExecution: mockDesktopReply(async () => undefined),
+      listScheduledTaskExecutions: mockDesktopReply(async () => []),
+      getSystemTimezone: mockDesktopReply(async () => "UTC"),
       subscribeScheduledTaskEvents: vi.fn(() => () => {}),
       onScheduledTaskThreadActivation: vi.fn(() => () => {}),
       getDesktopUpdateState: vi.fn(async () => ({
@@ -1104,7 +1125,7 @@ function stubElectronBridge(): void {
         tcc_accessibility: false,
       })),
       openComputerPermissionSettings: vi.fn(async () => undefined),
-      setThreadArchived: vi.fn(async () => ({
+      setThreadArchived: mockDesktopReply(async () => ({
         ok: true as const,
         thread: {} as never,
       })),
@@ -1947,14 +1968,6 @@ describe("Composer Slash Palette helpers", () => {
   it("builds an exact plugin Skill token from the Core-owned catalog id", () => {
     expect(
       pluginSkillComposerTokenFromAction(
-        {
-          name: "acme.tools",
-          enabled: true,
-          source: { kind: "local_path", path: "/tmp/acme" },
-          digest: "digest-v1",
-          skillCount: 1,
-          serverCount: 0,
-        },
         {
           logicalId: "skill/skills/review/SKILL.md",
           logicalIdEncoded: "encoded",

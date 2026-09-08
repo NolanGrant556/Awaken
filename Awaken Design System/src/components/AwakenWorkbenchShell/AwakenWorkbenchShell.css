@@ -1,3 +1,595 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
+
+body.is-layout-resizing,
+body.is-layout-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+body.is-layout-resizing .aw-app-shell,
+body.is-layout-resizing .aw-app-sidebar-slot,
+body.is-layout-resizing .aw-app-sidebar-slot .aw-sidebar,
+body.is-layout-resizing .workbench-chrome-left,
+body.is-layout-resizing .workbench-chrome-right,
+body.is-layout-resizing .aw-app-sidebar-resize-handle,
+body.is-layout-resizing .aw-workbench-inspector-resize-handle,
+body.is-layout-resizing .aw-workbench-shell {
+  transition: none !important;
+}
+
+/* Run Workbench layout */
+.aw-workbench-sidebar-frame {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.aw-app-sidebar-slot {
+  transition: border-color 210ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.aw-app-shell:has(.aw-app-sidebar-resize-handle) .aw-app-sidebar-slot,
+.aw-app-shell:has(.aw-app-sidebar-resize-handle) .workbench-chrome-left {
+  border-right-color: transparent !important;
+}
+
+.aw-app-sidebar-slot .aw-sidebar {
+  visibility: visible;
+  transition:
+    opacity 170ms ease,
+    transform 210ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    visibility 0s linear 0s;
+}
+
+.aw-app-shell-sidebar-collapsed .aw-app-sidebar-slot {
+  pointer-events: none;
+  border-right-color: transparent !important;
+}
+
+.aw-app-shell-sidebar-collapsed .aw-app-sidebar-slot .aw-sidebar {
+  visibility: hidden;
+  opacity: 0;
+  transform: translateX(-12px);
+  transition:
+    opacity 170ms ease,
+    transform 210ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    visibility 0s linear 210ms;
+}
+
+.aw-app-sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--aw-sidebar-width) - 5px);
+  z-index: 8;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+  -webkit-app-region: no-drag;
+  transition: left 210ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.aw-app-sidebar-resize-handle::before,
+.aw-app-sidebar-resize-handle::after,
+.aw-workbench-inspector-resize-handle::before,
+.aw-workbench-inspector-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  border-radius: var(--aw-radius-pill);
+  pointer-events: none;
+}
+
+.aw-app-sidebar-resize-handle::before,
+.aw-workbench-inspector-resize-handle::before {
+  background: var(--aw-border-light);
+}
+
+.aw-app-sidebar-resize-handle::after,
+.aw-workbench-inspector-resize-handle::after {
+  background: var(--aw-border-active);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.aw-app-sidebar-resize-handle:hover::after,
+.aw-app-sidebar-resize-handle:focus-visible::after {
+  opacity: 0.28;
+}
+
+body.is-sidebar-resizing .aw-app-sidebar-resize-handle::after {
+  opacity: 0.34;
+}
+
+.workbench-chrome {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  background: var(--aw-surface-chrome, var(--aw-bg-main));
+  -webkit-app-region: drag;
+}
+
+.desktop-root-inspector-expanded .workbench-chrome::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: var(--aw-inspector-width, 300px);
+  bottom: 0;
+  width: 1px;
+  background: var(--aw-border-light);
+  pointer-events: none;
+}
+
+.desktop-root-inspector-expanded:has(.aw-workbench-inspector-resize-handle)
+  .workbench-chrome::after,
+.desktop-root-inspector-expanded:has(.aw-workbench-inspector-resize-handle)
+  .aw-run-stage {
+  border-right-color: transparent;
+}
+
+.desktop-root-inspector-expanded:has(.aw-workbench-inspector-resize-handle)
+  .workbench-chrome::after {
+  display: none;
+}
+
+.workbench-chrome-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: var(--aw-sidebar-width);
+  height: 100%;
+  min-width: 0;
+  padding-right: 12px;
+  border-right: 1px solid var(--aw-border-light);
+  background: var(--aw-bg-nav);
+  transition:
+    width 210ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    padding-right 210ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.workbench-chrome-center {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  box-sizing: border-box;
+  height: 100%;
+  min-width: 0;
+  padding: 0 12px;
+  -webkit-app-region: drag;
+}
+
+.workbench-chrome-collapsed .workbench-chrome-left {
+  width: auto;
+  border-right: 0;
+  background: transparent;
+}
+
+.workbench-chrome-window-spacer {
+  flex: 0 0 var(--aw-window-controls-spacer, 88px);
+  height: 1px;
+}
+
+/* On non-macOS platforms the traffic-light spacer is hidden, so we add a
+   small left padding to keep the first icon from touching the window edge. */
+.workbench-chrome-no-spacer .workbench-chrome-left {
+  padding-left: 12px;
+}
+
+.workbench-chrome-icon {
+  position: relative;
+  /* The optical offset must stay on an integer CSS pixel. A fractional value
+     (e.g. -0.75px) parks the 22px button and its 1.2px-stroke icon off the
+     device pixel grid, so every re-rasterization redistributes the stroke
+     anti-aliasing and reads as a subtle jump on Retina displays. */
+  top: var(--aw-window-control-top-offset, -1px);
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--aw-radius-compact);
+  background: transparent;
+  color: var(--aw-text-secondary);
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+  -webkit-app-region: no-drag;
+}
+
+.workbench-chrome-icon svg,
+.aw-workbench-inspector-toggle svg {
+  width: var(--aw-icon-size-16);
+  height: var(--aw-icon-size-16);
+}
+
+.workbench-chrome-icon:hover,
+.workbench-chrome-icon:focus-visible,
+.workbench-chrome-icon.is-active {
+  background: var(--aw-bg-fill-main);
+  color: var(--aw-text-primary);
+}
+
+.workbench-chrome-right {
+  display: flex;
+  flex: 0 0 var(--aw-inspector-width, 300px);
+  align-items: center;
+  justify-content: flex-end;
+  box-sizing: border-box;
+  width: var(--aw-inspector-width, 300px);
+  height: 100%;
+  min-width: 0;
+  padding: 0 12px;
+  transition:
+    width 170ms ease,
+    flex-basis 170ms ease;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-root-inspector-collapsed .workbench-chrome-right {
+  flex-basis: var(--aw-inspector-collapsed-width, 42px);
+  width: var(--aw-inspector-collapsed-width, 42px);
+  padding: 0 12px 0 8px;
+}
+
+/* Keep the Inspector toggle outside the flex item whose width animates from
+   the 42px collapsed rail to the user-resized Inspector width. Its visual
+   position is owned by the fixed 44px chrome instead, so fractional widths
+   during the 170ms panel transition cannot re-rasterize the icon at a moving
+   local origin. The expanded slot reserves the button plus its 8px gap. */
+.desktop-root-inspector-expanded
+  .workbench-chrome-right:has(.workbench-chrome-panel-toggle) {
+  padding-right: 42px;
+}
+
+.workbench-chrome-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Idle dimming is scoped to the status text. Animating opacity on the whole
+   status container would keep the inspector toggle inside a stacking context
+   that gets promoted/demoted around hover and press, re-rasterizing the
+   stroke icon exactly when the user clicks. The icon button keeps the same
+   resting appearance as its file-mode siblings instead. */
+.workbench-chrome-state {
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+  white-space: nowrap;
+  opacity: 0.56;
+  transition: opacity 140ms ease;
+}
+
+.workbench-chrome-status:hover .workbench-chrome-state,
+.workbench-chrome-status:focus-within .workbench-chrome-state {
+  opacity: 1;
+}
+
+.workbench-chrome-panel-toggle {
+  position: absolute;
+  z-index: 1;
+  top: calc(50% - 11px + var(--aw-window-control-top-offset, -1px));
+  right: 12px;
+  flex: 0 0 auto;
+  appearance: none;
+  -webkit-appearance: none;
+  box-shadow: none;
+}
+
+.workbench-chrome-panel-toggle:hover,
+.workbench-chrome-panel-toggle:focus-visible {
+  box-shadow: var(--aw-shadow-control);
+}
+
+.aw-workbench-shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--aw-inspector-width, 300px);
+  height: 100%;
+  min-height: 0;
+  transition: grid-template-columns 170ms ease;
+}
+
+.aw-workbench-shell-inspector-collapsed {
+  grid-template-columns: minmax(0, 1fr) 0px;
+}
+
+.aw-workbench-shell-inspector-expanded {
+  grid-template-columns: minmax(0, 1fr) 0px;
+}
+
+.aw-workbench-shell-inspector-expanded .aw-run-stage {
+  border-right: 0;
+}
+
+.aw-workbench-shell-inspector-expanded .aw-workbench-inspector {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  box-sizing: border-box;
+  width: 100%;
+  max-height: none;
+  border-left: 0;
+  box-shadow: none;
+}
+
+.aw-workbench-shell-inspector-expanded .aw-workbench-inspector-surface-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.aw-workbench-shell-inspector-collapsed .aw-run-stage {
+  border-right: 0;
+}
+
+.aw-workbench-shell-inspector-collapsed .aw-workbench-inspector {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  width: var(--aw-inspector-collapsed-width, 42px);
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  pointer-events: none;
+}
+
+.aw-run-stage {
+  --aw-composer-content-inset: 0px;
+  --aw-composer-output-gap: 72px;
+  --aw-composer-safe-area: 28px;
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--aw-border-main);
+  background: var(--aw-surface-work);
+}
+
+.aw-run-stage-scroll {
+  --aw-prompt-anchor-offset: 0px;
+  --aw-turn-content-width: 760px;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  padding: 0 32px 28px;
+  overflow: auto;
+  scrollbar-gutter: stable both-edges;
+  scroll-padding-top: var(--aw-prompt-anchor-offset);
+}
+
+.aw-run-stage-scroll:focus,
+.aw-run-stage-scroll:focus-visible {
+  outline: none;
+}
+
+.aw-run-stage-scroll > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.aw-run-stage-scroll-inactive {
+  pointer-events: none;
+}
+
+.aw-composer-dock {
+  display: flex;
+  justify-content: center;
+  padding: 12px 32px 18px;
+  border-top: 1px solid var(--aw-border-main);
+  background: var(--aw-surface-work);
+}
+
+.aw-composer-dock > * {
+  width: min(760px, 100%);
+}
+
+.aw-run-stage:has(> .aw-composer-dock) {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.aw-run-stage:has(> .aw-composer-dock) .aw-run-stage-scroll {
+  position: absolute;
+  inset: 0 0 var(--aw-composer-content-inset, 0px);
+  padding-bottom: var(--aw-output-gap, var(--aw-composer-output-gap, 72px));
+  scroll-padding-bottom: var(
+    --aw-output-gap,
+    var(--aw-composer-output-gap, 72px)
+  );
+}
+
+.aw-run-stage > .aw-composer-dock {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 5;
+  box-sizing: border-box;
+  padding: 16px 32px 18px;
+  border-top: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
+.aw-run-stage > .aw-composer-dock > * {
+  position: relative;
+  pointer-events: auto;
+}
+
+.aw-workbench-inspector {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  padding: 18px 14px;
+  overflow: auto;
+  background: var(--aw-bg-main);
+}
+
+.aw-workbench-inspector-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: calc(var(--aw-inspector-width, 300px) - 5px);
+  z-index: 8;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+  -webkit-app-region: no-drag;
+  transition: right 170ms ease;
+}
+
+/* The handle mounts at its final position the moment the inspector starts its
+   170ms expansion, so its 1px line would float over the stage ahead of the
+   moving panel edge. Fade the line in only after the panel has arrived. */
+.aw-workbench-inspector-resize-handle::before {
+  opacity: 0;
+  animation: aw-inspector-handle-line-in 120ms ease 180ms forwards;
+}
+
+@keyframes aw-inspector-handle-line-in {
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-workbench-inspector-resize-handle::before {
+    opacity: 1;
+    animation: none;
+  }
+}
+
+.aw-workbench-inspector-resize-handle:hover::after,
+.aw-workbench-inspector-resize-handle:focus-visible::after {
+  opacity: 0.28;
+}
+
+body.is-inspector-resizing .aw-workbench-inspector-resize-handle::after {
+  opacity: 0.34;
+}
+
+.aw-workbench-inspector-collapsed-slot {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  padding-top: 3px;
+  pointer-events: auto;
+}
+
+.aw-workbench-inspector-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--aw-radius-control);
+  background: transparent;
+  color: var(--aw-text-tertiary);
+  cursor: pointer;
+}
+
+.aw-workbench-inspector-toggle:hover,
+.aw-workbench-inspector-toggle:focus-visible {
+  background: var(--aw-bg-fill-light);
+  color: var(--aw-text-primary);
+}
+
+@media (max-width: 1320px) {
+  .aw-run-stage-scroll,
+  .aw-composer-dock {
+    padding-right: 28px;
+    padding-left: 28px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .aw-workbench-shell {
+    grid-template-columns: minmax(0, 1fr);
+    height: 100%;
+    min-height: 0;
+  }
+
+  .aw-run-stage {
+    min-height: 0;
+    border-right: 0;
+    border-bottom: 0;
+  }
+
+  .aw-workbench-inspector {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 7;
+    box-sizing: border-box;
+    width: min(
+      var(--aw-inspector-width, 300px),
+      calc(100% - var(--aw-inspector-collapsed-width, 42px))
+    );
+    max-height: none;
+    overflow: auto;
+    border-left: 1px solid var(--aw-border-light);
+    box-shadow: -18px 0 42px rgba(29, 29, 31, 0.1);
+  }
+
+  .aw-workbench-shell-inspector-collapsed .aw-workbench-inspector {
+    width: var(--aw-inspector-collapsed-width, 42px);
+    border-left: 0;
+    box-shadow: none;
+  }
+
+  .aw-workbench-shell-inspector-expanded .aw-workbench-inspector {
+    inset: 0;
+    z-index: 4;
+    width: 100%;
+    border-left: 0;
+    box-shadow: none;
+  }
+
+  .aw-workbench-inspector-resize-handle {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .aw-run-stage {
+    min-height: 620px;
+  }
+
+  .aw-run-stage-scroll,
+  .aw-composer-dock {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .aw-workbench-inspector {
+    padding: 16px;
+  }
+}
 
 /* AwakenWorkbenchShell currently uses shared Awaken Design System tokens and component classes. */

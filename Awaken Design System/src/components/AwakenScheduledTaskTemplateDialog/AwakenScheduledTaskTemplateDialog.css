@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 /* 契约 §4.3：模板窗口宽度约 860px；body 可滚动，header/footer 由 AwakenDialog 保持稳定。 */
 .aw-dialog.aw-scheduled-task-template-dialog {

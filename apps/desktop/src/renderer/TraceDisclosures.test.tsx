@@ -1,8 +1,5 @@
+import { readStyleSource } from "./style-test-source";
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import React, { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import {
   AwakenDisclosure,
   AwakenMediaGenerationCard,
@@ -10,6 +7,9 @@ import {
   AwakenToolTraceGroup,
   AwakenToolTraceLine,
 } from "@awaken/design-system";
+import { resolve } from "node:path";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("execution trace disclosures", () => {
@@ -80,13 +80,10 @@ describe("execution trace disclosures", () => {
   });
 
   it("does not hide a completed Thought label or reserve fading body height", () => {
-    const componentStyles = readFileSync(
-      resolve(
+    const componentStyles = readStyleSource(resolve(
         process.cwd(),
         "../../Awaken Design System/src/tokens/components.css",
-      ),
-      "utf8",
-    );
+      ));
     const disclosureBlock = componentStyles.match(
       /\.thought-trace-disclosure\s*\{([\s\S]*?)\n\}/,
     )?.[1];
@@ -335,13 +332,10 @@ describe("execution trace disclosures", () => {
   });
 
   it("bounds long detail cards and scrolls their sections inside the card", () => {
-    const componentStyles = readFileSync(
-      resolve(
+    const componentStyles = readStyleSource(resolve(
         process.cwd(),
         "../../Awaken Design System/src/tokens/components.css",
-      ),
-      "utf8",
-    );
+      ));
 
     expect(componentStyles).toMatch(
       /\.tool-trace-output-card\s*\{[\s\S]*?max-height:\s*320px;[\s\S]*?overflow:\s*hidden;/,
@@ -449,10 +443,7 @@ describe("execution trace disclosures", () => {
   });
 
   it("lets Chromium skip only offscreen collapsed trace layout", () => {
-    const workbenchStyles = readFileSync(
-      resolve(process.cwd(), "src/renderer/styles/workbench.css"),
-      "utf8",
-    );
+    const workbenchStyles = readStyleSource(resolve(process.cwd(), "src/renderer/styles/workbench.css"));
 
     expect(workbenchStyles).toMatch(
       /\.thought-trace\[data-disclosure-state="closed"\][\s\S]*?content-visibility:\s*auto;/,
@@ -546,13 +537,10 @@ describe("execution trace disclosures", () => {
       "false",
     ]);
 
-    const componentStyles = readFileSync(
-      resolve(
+    const componentStyles = readStyleSource(resolve(
         process.cwd(),
         "../../Awaken Design System/src/tokens/components.css",
-      ),
-      "utf8",
-    );
+      ));
     expect(componentStyles).toMatch(
       /\.tool-trace-item\[data-animate-entry="false"\]\s*\{[\s\S]*?animation:\s*none;/,
     );
@@ -580,13 +568,10 @@ describe("execution trace disclosures", () => {
       "false",
     ]);
 
-    const componentStyles = readFileSync(
-      resolve(
+    const componentStyles = readStyleSource(resolve(
         process.cwd(),
         "../../Awaken Design System/src/tokens/components.css",
-      ),
-      "utf8",
-    );
+      ));
     expect(componentStyles).toMatch(
       /\.thought-trace\[data-animate-entry="false"\] \.thought-trace-disclosure,[\s\S]*?animation:\s*none;/,
     );
@@ -645,27 +630,18 @@ describe("execution trace disclosures", () => {
   });
 
   it("keeps compact triggers content-sized and expanded bodies at the original left edge", () => {
-    const componentStyles = readFileSync(
-      resolve(
+    const componentStyles = readStyleSource(resolve(
         process.cwd(),
         "../../Awaken Design System/src/tokens/components.css",
-      ),
-      "utf8",
-    );
-    const mediaStyles = readFileSync(
-      resolve(
+      ));
+    const mediaStyles = readStyleSource(resolve(
         process.cwd(),
         "../../Awaken Design System/src/components/AwakenMediaGenerationCard/AwakenMediaGenerationCard.css",
-      ),
-      "utf8",
-    );
-    const disclosureStyles = readFileSync(
-      resolve(
+      ));
+    const disclosureStyles = readStyleSource(resolve(
         process.cwd(),
         "../../Awaken Design System/src/components/AwakenDisclosure/AwakenDisclosure.css",
-      ),
-      "utf8",
-    );
+      ));
 
     expect(componentStyles).toMatch(
       /\.tool-trace-line\s*\{[\s\S]*?width:\s*fit-content;/,
@@ -701,27 +677,18 @@ describe("execution trace disclosures", () => {
   });
 
   it("uses text-only hover emphasis without card backgrounds across disclosure triggers", () => {
-    const componentStyles = readFileSync(
-      resolve(
+    const componentStyles = readStyleSource(resolve(
         process.cwd(),
         "../../Awaken Design System/src/tokens/components.css",
-      ),
-      "utf8",
-    );
-    const mediaStyles = readFileSync(
-      resolve(
+      ));
+    const mediaStyles = readStyleSource(resolve(
         process.cwd(),
         "../../Awaken Design System/src/components/AwakenMediaGenerationCard/AwakenMediaGenerationCard.css",
-      ),
-      "utf8",
-    );
-    const disclosureStyles = readFileSync(
-      resolve(
+      ));
+    const disclosureStyles = readStyleSource(resolve(
         process.cwd(),
         "../../Awaken Design System/src/components/AwakenDisclosure/AwakenDisclosure.css",
-      ),
-      "utf8",
-    );
+      ));
 
     for (const styles of [componentStyles, mediaStyles, disclosureStyles]) {
       expect(styles).not.toContain("background: var(--aw-surface-hover)");

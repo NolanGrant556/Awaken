@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 
-import React, { act } from "react";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ModelProfileBalance } from "../shared/runtime";
 import {
   ProfileBalancePopover,
   credentialRecoveryForBalances,
 } from "./ProfileBalancePopover";
 import type { RuntimeClient } from "./runtime/client";
-import type { ModelProfileBalance } from "../shared/runtime";
 
 const mockBalances: ModelProfileBalance[] = [
   {

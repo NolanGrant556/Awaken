@@ -27,3 +27,7 @@ await Promise.all([
   copyDirectoryContents(join(root, "src", "tokens"), join(root, "dist", "tokens")),
   copyDirectoryContents(join(root, "src", "assets"), join(root, "dist", "assets")),
 ]);
+
+// Keep the public component stylesheet self-contained in published packages.
+// Vite has already resolved all component-owned imports into this bundle.
+await copyFile(join(root, "dist", "index.css"), join(root, "dist", "tokens", "components.css"));

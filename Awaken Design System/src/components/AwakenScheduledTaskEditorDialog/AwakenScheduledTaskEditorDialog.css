@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 .aw-dialog.aw-scheduled-task-editor-dialog {
   width: min(760px, calc(100vw - 48px));

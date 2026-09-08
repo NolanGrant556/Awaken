@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 .aw-project-hover-card {
   z-index: var(--aw-z-popover);

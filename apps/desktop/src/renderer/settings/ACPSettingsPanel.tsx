@@ -1,10 +1,11 @@
+import { runtimeRequestIssue } from "../../shared/runtime-request";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
-  AwakenIcon,
-  AwakenButton as Button,
   AwakenDialog,
+  AwakenIcon,
   AwakenSwitch,
+  AwakenButton as Button,
   AwakenTooltip as Tooltip,
 } from "@awaken/design-system";
 import type {
@@ -168,11 +169,7 @@ function parseEnvTextForEdit(value: string): {
 
 function formatProbeError(error: unknown, name: string): string {
   if (!(error instanceof Error)) return "探测失败";
-  let message = error.message;
-  const ipcPrefix = "Error invoking remote method 'awaken:probe-acp-runner': ";
-  if (message.startsWith(ipcPrefix)) {
-    message = message.slice(ipcPrefix.length);
-  }
+  const message = runtimeRequestIssue(error).message;
   if (
     message.includes("executable file not found in %PATH%") ||
     message.includes("executable file not found in PATH")

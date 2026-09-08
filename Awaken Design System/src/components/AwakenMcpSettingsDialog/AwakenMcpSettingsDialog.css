@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 .aw-dialog.aw-mcp-settings-dialog { width: min(900px, calc(100vw - 48px)); }
 .aw-mcp-settings-dialog__body { display: grid; gap: 22px; min-width: 0; }

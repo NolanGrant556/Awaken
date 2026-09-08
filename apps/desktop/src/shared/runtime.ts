@@ -1,7 +1,8 @@
+import type { DesktopRequestResult } from "./runtime-request.js";
 import type { AguiEvent, InstructionSnapshotSummary } from "./agui.js";
-import type { ProjectFilePreviewInteraction } from "./project-file-preview-interaction.js";
-import type { PetActivitySnapshot, PetBridge } from "./pets.js";
 import type { DesktopUpdateSnapshot } from "./desktop-update.js";
+import type { PetBridge } from "./pets.js";
+import type { ProjectFilePreviewInteraction } from "./project-file-preview-interaction.js";
 
 export type DesktopPlatform = "macos" | "windows" | "linux";
 
@@ -28,8 +29,8 @@ export type DesktopOperationIssue = {
   reason?: string;
 };
 
-export type DesktopOperationResult<T> =
-  { ok: true; value: T } | { ok: false; issue: DesktopOperationIssue };
+export type DesktopOperationResult<T, Issue = DesktopOperationIssue> =
+  { ok: true; value: T } | { ok: false; issue: Issue };
 
 export type AwakenTheme = "light" | "dark";
 export type AwakenThemePreference = "system" | AwakenTheme;
@@ -2562,23 +2563,23 @@ export type AwakenBridge = {
   getSearchSettings: () => Promise<SearchSettings>;
   saveSearchSettings: (request: SearchSettingsSaveRequest) => Promise<SearchSettingsSaveResult>;
   testSearchProvider: (request: SearchProviderTestRequest) => Promise<SearchProviderTestResult>;
-  getACPRunners: () => Promise<ACPRunnersSettings>;
-  createACPRunner: (request: ACPRunnerCreateRequest) => Promise<ACPRunnerView>;
-  updateACPRunner: (runnerId: string, request: ACPRunnerUpdateRequest) => Promise<ACPRunnerView>;
-  deleteACPRunner: (runnerId: string) => Promise<void>;
-  probeACPRunner: (runnerId: string) => Promise<ACPRunnerProbeResult>;
-  getRun: (runId: string) => Promise<RuntimeRun>;
-  getThreadTranscript: (threadId: string) => Promise<RuntimeThreadTranscript>;
-  rewindThread: (request: RewindThreadRequest) => Promise<RewindThreadResult>;
-  listThreads: (view?: RuntimeThreadListView) => Promise<RuntimeThread[]>;
-  renameThread: (threadId: string, label: string) => Promise<RuntimeThread>;
-  setThreadArchived: (threadId: string, archived: boolean) => Promise<SetThreadArchivedResult>;
+  getACPRunners: () => Promise<DesktopRequestResult<ACPRunnersSettings>>;
+  createACPRunner: (request: ACPRunnerCreateRequest) => Promise<DesktopRequestResult<ACPRunnerView>>;
+  updateACPRunner: (runnerId: string, request: ACPRunnerUpdateRequest) => Promise<DesktopRequestResult<ACPRunnerView>>;
+  deleteACPRunner: (runnerId: string) => Promise<DesktopRequestResult<void>>;
+  probeACPRunner: (runnerId: string) => Promise<DesktopRequestResult<ACPRunnerProbeResult>>;
+  getRun: (runId: string) => Promise<DesktopRequestResult<RuntimeRun>>;
+  getThreadTranscript: (threadId: string) => Promise<DesktopRequestResult<RuntimeThreadTranscript>>;
+  rewindThread: (request: RewindThreadRequest) => Promise<DesktopRequestResult<RewindThreadResult>>;
+  listThreads: (view?: RuntimeThreadListView) => Promise<DesktopRequestResult<RuntimeThread[]>>;
+  renameThread: (threadId: string, label: string) => Promise<DesktopRequestResult<RuntimeThread>>;
+  setThreadArchived: (threadId: string, archived: boolean) => Promise<DesktopRequestResult<SetThreadArchivedResult>>;
   updateThreadModelPreference: (
     threadId: string,
     request: ThreadModelPreferenceRequest,
-  ) => Promise<RuntimeThread>;
-  deleteThread: (threadId: string) => Promise<ThreadDeleteResult>;
-  deleteThreads: (threadIds: string[]) => Promise<ThreadBatchDeleteResult>;
+  ) => Promise<DesktopRequestResult<RuntimeThread>>;
+  deleteThread: (threadId: string) => Promise<DesktopRequestResult<ThreadDeleteResult>>;
+  deleteThreads: (threadIds: string[]) => Promise<DesktopRequestResult<ThreadBatchDeleteResult>>;
   listProjects: (includeRemoved?: boolean) => Promise<RuntimeProject[]>;
   listProjectDirectory: (
     request: ProjectDirectoryListRequest,
@@ -2615,10 +2616,10 @@ export type AwakenBridge = {
   saveProjectMarkdownFile: (
     request: ProjectFilePreviewSaveRequest,
   ) => Promise<ProjectFilePreviewSaveResult>;
-	createProjectAgentsFile?: (projectId: string) => Promise<ProjectAgentsCreateResult>;
-	getGlobalAgentsDocument?: () => Promise<GlobalAgentsDocument>;
-	saveGlobalAgentsDocument?: (request: GlobalAgentsSaveRequest) => Promise<GlobalAgentsDocument>;
-	deleteGlobalAgentsDocument?: (request: GlobalAgentsDeleteRequest) => Promise<GlobalAgentsDocument>;
+	createProjectAgentsFile: (projectId: string) => Promise<ProjectAgentsCreateResult>;
+	getGlobalAgentsDocument: () => Promise<GlobalAgentsDocument>;
+	saveGlobalAgentsDocument: (request: GlobalAgentsSaveRequest) => Promise<GlobalAgentsDocument>;
+	deleteGlobalAgentsDocument: (request: GlobalAgentsDeleteRequest) => Promise<GlobalAgentsDocument>;
   upsertProject: (workspaceRoot: string, displayName?: string) => Promise<UpsertProjectResult>;
   createProject: (
     folders: ProjectFolderSelection[],
@@ -2633,7 +2634,7 @@ export type AwakenBridge = {
   deleteProjectThreads: (
     projectId: string,
     idempotencyKey: string,
-  ) => Promise<ProjectMutationResult>;
+  ) => Promise<DesktopRequestResult<ProjectMutationResult>>;
   trashProjectFolder: (
     projectId: string,
     path: string,
@@ -2647,28 +2648,28 @@ export type AwakenBridge = {
   revealPath: (target: string) => Promise<{ ok: boolean; message?: string }>;
   revealArtifact: (request: ArtifactOpenRequest) => Promise<ArtifactOpenResult>;
   startRun: (request: StartRunRequest) => Promise<DesktopOperationResult<RuntimeRun>>;
-  cancelRun: (runId: string) => Promise<RuntimeRun>;
-  cancelSubagent?: (runId: string, taskId: string, reason?: string) => Promise<void>;
-  messageSubagent?: (
+  cancelRun: (runId: string) => Promise<DesktopRequestResult<RuntimeRun>>;
+  cancelSubagent: (runId: string, taskId: string, reason?: string) => Promise<DesktopRequestResult<void>>;
+  messageSubagent: (
     runId: string,
     taskId: string,
     content: string,
     idempotencyKey?: string,
-  ) => Promise<void>;
-  answerUserQuestion: (runId: string, questionId: string, answer: string) => Promise<void>;
-  cancelUserQuestion: (runId: string, questionId: string) => Promise<void>;
+  ) => Promise<DesktopRequestResult<void>>;
+  answerUserQuestion: (runId: string, questionId: string, answer: string) => Promise<DesktopRequestResult<void>>;
+  cancelUserQuestion: (runId: string, questionId: string) => Promise<DesktopRequestResult<void>>;
   resolveExternalInteraction: (
     runId: string,
     interactionId: string,
     resolution: "completed" | "cancelled" | "expired" | "failed",
     content?: Record<string, unknown>,
-  ) => Promise<void>;
+  ) => Promise<DesktopRequestResult<void>>;
   resolveACPPermission: (
     runId: string,
     interactionId: string,
     optionId: string,
     cancelled: boolean,
-  ) => Promise<void>;
+  ) => Promise<DesktopRequestResult<void>>;
   resolveComputerReview: (
     runId: string,
     reviewId: string,
@@ -2688,7 +2689,7 @@ export type AwakenBridge = {
   openComputerPermissionSettings: (
     permission: ComputerPermission,
   ) => Promise<void>;
-  subscribeRun: (runId: string, handlers: RunStreamHandlers, afterSeq?: number) => Promise<string>;
+  subscribeRun: (runId: string, handlers: RunStreamHandlers, afterSeq?: number) => Promise<DesktopRequestResult<string>>;
   unsubscribeRun: (subscriptionId: string) => void;
   getDesktopPreferences: () => Promise<DesktopPreferences>;
   saveDesktopPreferences: (request: DesktopPreferencesSaveRequest) => Promise<DesktopPreferences>;
@@ -2696,9 +2697,9 @@ export type AwakenBridge = {
   getMemory: (memoryId: string, projectId?: string) => Promise<RuntimeMemory>;
   deleteMemory: (memoryId: string, expectedRevision: number, projectId?: string) => Promise<void>;
   getMemorySettings: () => Promise<MemorySettingsDocument>;
-	getHookStatus?: (projectId?: string) => Promise<HookStatus>;
-	trustProjectHook?: (request: HookTrustRequest) => Promise<HookStatus>;
-	revokeProjectHook?: (request: HookRevokeRequest) => Promise<HookStatus>;
+	getHookStatus: (projectId?: string) => Promise<HookStatus>;
+	trustProjectHook: (request: HookTrustRequest) => Promise<HookStatus>;
+	revokeProjectHook: (request: HookRevokeRequest) => Promise<HookStatus>;
   updateMemorySettings: (request: MemorySettingsPatch) => Promise<MemorySettingsDocument>;
   startMemoryDream: (projectId?: string) => Promise<MemoryDreamTask>;
   getMemoryDream: (taskId: string) => Promise<MemoryDreamTask>;
@@ -2709,9 +2710,9 @@ export type AwakenBridge = {
   listConnectors: () => Promise<RuntimeConnector[]>;
   connectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
   disconnectConnector: (connectorId: string) => Promise<RuntimeConnectorActionResponse>;
-  getConnectorAuthSession?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
-  cancelConnectorAuthSession?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
-  markConnectorAdminApprovalPending?: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
+  getConnectorAuthSession: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
+  cancelConnectorAuthSession: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
+  markConnectorAdminApprovalPending: (sessionId: string) => Promise<RuntimeConnectorAuthSession>;
   listCliConnectors: () => Promise<CliConnectorView[]>;
   refreshCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
   installCliConnector: (providerId: CliProviderId) => Promise<CliConnectorView>;
@@ -2747,84 +2748,84 @@ export type AwakenBridge = {
   deleteSkill: (request: DeleteSkillRequest) => Promise<DeleteSkillResponse>;
   disableSkill: (id: string) => Promise<void>;
   enableSkill: (id: string) => Promise<void>;
-  listPlugins: () => Promise<RuntimePlugin[]>;
-  getPlugin: (name: string) => Promise<RuntimePlugin>;
-  validatePlugin: (source: RuntimePluginSource) => Promise<RuntimePluginValidation>;
-  installPlugin: (request: InstallPluginRequest) => Promise<InstallPluginResponse>;
-  commitPlugin: (name: string, request: CommitPluginRequest) => Promise<InstallPluginResponse>;
-  enablePlugin: (name: string) => Promise<RuntimePlugin>;
-  disablePlugin: (name: string) => Promise<RuntimePlugin>;
-  uninstallPlugin: (name: string) => Promise<{ trashedPath?: string; message: string }>;
-  enablePluginServer: (name: string, shortName: string) => Promise<RuntimePlugin>;
-  disablePluginServer: (name: string, shortName: string) => Promise<RuntimePlugin>;
-  listPluginComponents: (name: string) => Promise<RuntimePluginComponentState[]>;
+  listPlugins: () => Promise<DesktopRequestResult<RuntimePlugin[]>>;
+  getPlugin: (name: string) => Promise<DesktopRequestResult<RuntimePlugin>>;
+  validatePlugin: (source: RuntimePluginSource) => Promise<DesktopRequestResult<RuntimePluginValidation>>;
+  installPlugin: (request: InstallPluginRequest) => Promise<DesktopRequestResult<InstallPluginResponse>>;
+  commitPlugin: (name: string, request: CommitPluginRequest) => Promise<DesktopRequestResult<InstallPluginResponse>>;
+  enablePlugin: (name: string) => Promise<DesktopRequestResult<RuntimePlugin>>;
+  disablePlugin: (name: string) => Promise<DesktopRequestResult<RuntimePlugin>>;
+  uninstallPlugin: (name: string) => Promise<DesktopRequestResult<{ trashedPath?: string; message: string }>>;
+  enablePluginServer: (name: string, shortName: string) => Promise<DesktopRequestResult<RuntimePlugin>>;
+  disablePluginServer: (name: string, shortName: string) => Promise<DesktopRequestResult<RuntimePlugin>>;
+  listPluginComponents: (name: string) => Promise<DesktopRequestResult<RuntimePluginComponentState[]>>;
   getPluginComponent: (
     name: string,
     kind: RuntimePluginComponentKind,
     logicalIdEncoded: string,
-  ) => Promise<RuntimePluginComponentDetail>;
+  ) => Promise<DesktopRequestResult<RuntimePluginComponentDetail>>;
   updatePluginComponentSource: (
     name: string,
     kind: RuntimePluginComponentKind,
     logicalIdEncoded: string,
     request: UpdatePluginComponentSourceRequest,
-  ) => Promise<RuntimePluginComponentSourceResponse>;
+  ) => Promise<DesktopRequestResult<RuntimePluginComponentSourceResponse>>;
   setPluginComponentState: (
     name: string,
     kind: RuntimePluginComponentKind,
     logicalIdEncoded: string,
     enabled: boolean,
-  ) => Promise<RuntimePluginComponentStateResponse>;
+  ) => Promise<DesktopRequestResult<RuntimePluginComponentStateResponse>>;
   setPluginMcpToolState: (
     name: string,
     logicalIdEncoded: string,
     toolName: string,
     enabled: boolean,
-  ) => Promise<RuntimePluginComponentStateResponse>;
+  ) => Promise<DesktopRequestResult<RuntimePluginComponentStateResponse>>;
   setPluginRuleActivation: (
     name: string,
     logicalIdEncoded: string,
     activation: "always" | "file_globs" | "manual" | "model_decides",
-  ) => Promise<{ plugin: RuntimePlugin; revision: number }>;
+  ) => Promise<DesktopRequestResult<{ plugin: RuntimePlugin; revision: number }>>;
   listPluginHookReceipts: (
     name: string,
     logicalIdEncoded: string,
     revisionId?: string,
-  ) => Promise<RuntimePluginHookReceiptResponse>;
+  ) => Promise<DesktopRequestResult<RuntimePluginHookReceiptResponse>>;
   retryPluginHookReceipt: (
     name: string,
     logicalIdEncoded: string,
     receiptId: string,
-  ) => Promise<{ receipt: RuntimePluginHookReceipt; diagnosticOnly: true }>;
-  getPluginConfiguration: (name: string) => Promise<RuntimePluginConfigurationResponse>;
+  ) => Promise<DesktopRequestResult<{ receipt: RuntimePluginHookReceipt; diagnosticOnly: true }>>;
+  getPluginConfiguration: (name: string) => Promise<DesktopRequestResult<RuntimePluginConfigurationResponse>>;
   updatePluginConfiguration: (
     name: string,
     request: UpdatePluginConfigurationRequest,
-  ) => Promise<RuntimePluginConfigurationResponse>;
-  getPluginSetup?: (name: string) => Promise<RuntimePluginSetupResponse>;
-  startPluginSetup?: (
+  ) => Promise<DesktopRequestResult<RuntimePluginConfigurationResponse>>;
+  getPluginSetup: (name: string) => Promise<DesktopRequestResult<RuntimePluginSetupResponse>>;
+  startPluginSetup: (
     name: string,
     setupId: string,
     request: RuntimePluginSetupMutationRequest,
-  ) => Promise<RuntimePluginAuthSession>;
-  getActivePluginAuthSession?: (
+  ) => Promise<DesktopRequestResult<RuntimePluginAuthSession>>;
+  getActivePluginAuthSession: (
     name: string,
     setupId: string,
     request: RuntimePluginSetupMutationRequest,
-  ) => Promise<RuntimePluginAuthSession | null>;
-  getPluginAuthSession?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
-  cancelPluginAuthSession?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
-  markPluginAdminApprovalPending?: (name: string, sessionId: string) => Promise<RuntimePluginAuthSession>;
-  probePluginSetup?: (
+  ) => Promise<DesktopRequestResult<RuntimePluginAuthSession | null>>;
+  getPluginAuthSession: (name: string, sessionId: string) => Promise<DesktopRequestResult<RuntimePluginAuthSession>>;
+  cancelPluginAuthSession: (name: string, sessionId: string) => Promise<DesktopRequestResult<RuntimePluginAuthSession>>;
+  markPluginAdminApprovalPending: (name: string, sessionId: string) => Promise<DesktopRequestResult<RuntimePluginAuthSession>>;
+  probePluginSetup: (
     name: string,
     setupId: string,
     request: RuntimePluginSetupMutationRequest,
-  ) => Promise<RuntimePluginSetupResponse>;
-  disconnectPluginSetup?: (
+  ) => Promise<DesktopRequestResult<RuntimePluginSetupResponse>>;
+  disconnectPluginSetup: (
     name: string,
     setupId: string,
     request: RuntimePluginSetupMutationRequest,
-  ) => Promise<RuntimePluginSetupResponse>;
+  ) => Promise<DesktopRequestResult<RuntimePluginSetupResponse>>;
   listModelProviders: () => Promise<ModelProvider[]>;
   listModelProfiles: () => Promise<RuntimeModelProfileSummary[]>;
   getModelPurposeRouting: () => Promise<ModelPurposeRouting>;
@@ -2860,28 +2861,28 @@ export type AwakenBridge = {
   getModelProfileBalances: () => Promise<ModelProfileBalancesResult>;
   pickAttachments: (defaultPath?: string) => Promise<AttachmentPickResult>;
   pickDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>;
-  pickPluginSource: (defaultPath?: string) => Promise<WorkspacePickResult>;
-  resolveDroppedPluginSource: (file: File) => Promise<WorkspacePickResult>;
+  pickPluginSource: (defaultPath?: string) => Promise<DesktopRequestResult<WorkspacePickResult>>;
+  resolveDroppedPluginSource: (file: File) => Promise<DesktopRequestResult<WorkspacePickResult>>;
   pickProjectFolders: (defaultPath?: string) => Promise<ProjectFoldersPickResult>;
   validateWorkspace: (path: string) => Promise<WorkspaceValidationResult>;
   getSupervisorStatus: () => Promise<SupervisorStatusInfo>;
   onSupervisorStatusChange: (callback: (info: SupervisorStatusInfo) => void) => () => void;
   notifyRendererReady: () => void;
-  listScheduledTasks: () => Promise<ScheduledTask[]>;
-  getScheduledTask: (taskId: string) => Promise<ScheduledTask>;
-  createScheduledTask: (input: ScheduledTaskCreateInput) => Promise<ScheduledTask>;
-  patchScheduledTask: (taskId: string, input: ScheduledTaskPatchInput) => Promise<ScheduledTask>;
+  listScheduledTasks: () => Promise<DesktopRequestResult<ScheduledTask[]>>;
+  getScheduledTask: (taskId: string) => Promise<DesktopRequestResult<ScheduledTask>>;
+  createScheduledTask: (input: ScheduledTaskCreateInput) => Promise<DesktopRequestResult<ScheduledTask>>;
+  patchScheduledTask: (taskId: string, input: ScheduledTaskPatchInput) => Promise<DesktopRequestResult<ScheduledTask>>;
   deleteScheduledTask: (
     taskId: string,
     expectedVersion: number,
     idempotencyKey: string,
-  ) => Promise<void>;
-  pauseScheduledTask: (taskId: string, expectedVersion: number) => Promise<ScheduledTask>;
-  resumeScheduledTask: (taskId: string, expectedVersion: number) => Promise<ScheduledTask>;
-  runScheduledTaskNow: (taskId: string, idempotencyKey: string) => Promise<ScheduledTaskExecution>;
-  cancelScheduledTaskExecution: (taskId: string) => Promise<void>;
-  listScheduledTaskExecutions: (taskId: string) => Promise<ScheduledTaskExecution[]>;
-  getSystemTimezone: () => Promise<string>;
+  ) => Promise<DesktopRequestResult<void>>;
+  pauseScheduledTask: (taskId: string, expectedVersion: number) => Promise<DesktopRequestResult<ScheduledTask>>;
+  resumeScheduledTask: (taskId: string, expectedVersion: number) => Promise<DesktopRequestResult<ScheduledTask>>;
+  runScheduledTaskNow: (taskId: string, idempotencyKey: string) => Promise<DesktopRequestResult<ScheduledTaskExecution>>;
+  cancelScheduledTaskExecution: (taskId: string) => Promise<DesktopRequestResult<void>>;
+  listScheduledTaskExecutions: (taskId: string) => Promise<DesktopRequestResult<ScheduledTaskExecution[]>>;
+  getSystemTimezone: () => Promise<DesktopRequestResult<string>>;
   subscribeScheduledTaskEvents: (handler: (event: ScheduledTaskEvent) => void) => () => void;
   onScheduledTaskThreadActivation: (handler: (threadId: string) => void) => () => void;
   getDesktopUpdateState: () => Promise<DesktopUpdateSnapshot>;

@@ -7,30 +7,44 @@ import type {
   AgentPlanMediaCapability,
   AgentPlanMediaToolSaveRequest,
   AgentPlanMediaToolsWire,
-  ModelReasoningCapabilityTestResult,
   ModelCredentialReference,
   ModelProfileAdvanced,
   ModelProfileBalanceWire,
+  ModelProfileRunConfig,
   ModelProfileSaveRequest,
   ModelProfileTestResult,
   ModelProviderWire,
-  RuntimeModelProfileSummaryWire,
-  ModelProfileRunConfig,
   ModelPurpose,
   ModelPurposeRouting,
+  ModelReasoningCapabilityTestResult,
   ReasoningEffortCapabilityWire,
   ReasoningEffortLevel,
+  RuntimeModelProfileSummaryWire,
 } from "../shared/runtime.js";
 import { VOLCENGINE_AGENT_PLAN_ACCOUNT_ID } from "../shared/runtime.js";
+import { AgentPlanAccountStore } from "./agent-plan-account-store.js";
+import { AgentPlanMediaToolsStore } from "./agent-plan-media-tools-store.js";
 import {
-  capabilityForModel,
+  AwakenEnvStore,
+  AwakenEnvStoreError,
+} from "./awaken-env-store.js";
+import {
+  BalanceFetchError,
+  fetchAnthropicOrganizationUsage,
+  fetchDeepSeekBalance,
+  fetchKimiBalance,
+  fetchKimiCodingBalance,
+  fetchMiniMaxTokenPlanBalance,
+  fetchOpenAIOrganizationUsage,
+} from "./model-balance-fetchers.js";
+import {
   effectiveCapabilityForProfile,
   normalizeAdvancedWithModelCapability,
   reasoningEffortCapability,
   resolveReasoningEffort,
   setCapabilityOverrides,
   validateReasoningEffort,
-  withModelCapabilities,
+  withModelCapabilities
 } from "./model-capabilities.js";
 import {
   capabilityEndpointContract,
@@ -42,21 +56,6 @@ import {
   type CapabilityResolution,
   type ScopedCapabilityOverrides,
 } from "./model-capability-sync.js";
-import {
-  fetchDeepSeekBalance,
-  fetchKimiBalance,
-  fetchKimiCodingBalance,
-  fetchMiniMaxTokenPlanBalance,
-  fetchOpenAIOrganizationUsage,
-  fetchAnthropicOrganizationUsage,
-  BalanceFetchError,
-} from "./model-balance-fetchers.js";
-import {
-  AwakenEnvStore,
-  AwakenEnvStoreError,
-} from "./awaken-env-store.js";
-import { AgentPlanAccountStore } from "./agent-plan-account-store.js";
-import { AgentPlanMediaToolsStore } from "./agent-plan-media-tools-store.js";
 
 const MODEL_PROFILES_FILE = "models.json";
 const DUPLICATE_MODEL_PROFILE_ERROR = "模型配置重复，添加失败";

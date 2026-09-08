@@ -1,3 +1,4 @@
+import { runtimeRequestIssue } from "../../shared/runtime-request";
 // 定时任务 Renderer 适配层：编辑器 draft ↔ Core wire payload 的唯一转换点。
 // Design System 只懂 draft 与展示字符串，Core 只懂 RFC3339/cron/字段校验；
 // 时区 offset 换算、cron 人类可读文案、HTTP 错误 → fieldErrors 的映射都收敛在这里。
@@ -451,8 +452,7 @@ export function formatExecutionItem(
 }
 
 // === 提交错误映射 ===
-// Main 把 Core 的 domain error code 以 "<CODE>: <message>" 形式嵌入 IPC 错误消息
-// （Electron 只保留 message）；没有 code 时按 Core 稳定文案做子串匹配兜底。
+// IPC 结果保留 code 与字段详情；旧文本错误只在 shared/runtime-request 中解析。
 
 export type ScheduledTaskSubmitErrorMapping = {
   errorMessage: string | null;
@@ -474,27 +474,16 @@ const WIRE_FIELD_TO_DRAFT_FIELD: Record<string, AwakenScheduledTaskDraftField> =
   "execution.misfire_grace_seconds": "misfireGraceSeconds",
 };
 
-const IPC_ERROR_PREFIX = /^Error invoking remote method '[^']*':\s*/;
-
-/** 去掉 Electron IPC 与 error name 前缀，留下干净的领域错误文案。 */
 export function scheduledTaskErrorMessage(error: unknown): string {
-  let message = error instanceof Error ? error.message : String(error);
-  message = message.replace(IPC_ERROR_PREFIX, "");
-  message = message.replace(/^RuntimeDomainError:\s*/, "");
-  return message;
+  return runtimeRequestIssue(error).message;
 }
 
 export function isVersionConflictError(error: unknown): boolean {
-  const message = scheduledTaskErrorMessage(error);
-  return message.includes("VERSION_CONFLICT") || message.includes("task was modified");
+  return runtimeRequestIssue(error).code === "VERSION_CONFLICT";
 }
 
 export function isTaskAlreadyRunningError(error: unknown): boolean {
-  const message = scheduledTaskErrorMessage(error);
-  return (
-    message.includes("TASK_ALREADY_RUNNING") ||
-    message.includes("task already has an active execution")
-  );
+  return runtimeRequestIssue(error).code === "TASK_ALREADY_RUNNING";
 }
 
 export const VERSION_CONFLICT_MESSAGE = "任务已被其他地方修改，请刷新后重试。";
@@ -506,11 +495,11 @@ export function mapScheduledTaskSubmitError(error: unknown): ScheduledTaskSubmit
     return { errorMessage: VERSION_CONFLICT_MESSAGE, fieldErrors: {} };
   }
   const message = scheduledTaskErrorMessage(error);
-  const match = /invalid ([a-z_.]+):\s*(.+?)\s*$/.exec(message);
-  if (match) {
-    const field = WIRE_FIELD_TO_DRAFT_FIELD[match[1]];
+  const details = runtimeRequestIssue(error).details;
+  if (details?.field && details.reason) {
+    const field = WIRE_FIELD_TO_DRAFT_FIELD[details.field];
     if (field) {
-      return { errorMessage: null, fieldErrors: { [field]: match[2] } };
+      return { errorMessage: null, fieldErrors: { [field]: details.reason } };
     }
   }
   return { errorMessage: message || "保存失败，请稍后重试。", fieldErrors: {} };

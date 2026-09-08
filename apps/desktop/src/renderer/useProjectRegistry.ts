@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { RuntimeInfo, RuntimeProject } from "../shared/runtime";
 import {
   resolveWorkspaceRootForRun,
+  resolveRunProjectForRun,
+  resolveRunRootsForRun,
+  type RunSubmissionScope,
   sameWorkspaceProjectFolders,
   sameWorkspaceProjects,
 } from "./projectRunScope";
@@ -351,7 +354,33 @@ export function useProjectRegistry(
         ?.folders ?? []
     );
   }
+  function getSubmissionScope(): RunSubmissionScope {
+    const workspaceRoot = resolveWorkspaceRootForRun({
+      workspacePath, workspaceTargetPath: workspaceTargetPathRef.current,
+      conversationScope, selectedProjectId, defaultWorkspacePath,
+      defaultProjectRemoved, activeThreadWorkspacePath, projectsFromWorkspace,
+    });
+    const { projectId, projectName } = resolveRunProjectForRun({
+      workspaceRoot, selectedProjectId, defaultWorkspacePath,
+      defaultProjectName: defaultProjectDisplayName, effectiveDefaultWorkspacePath, projectsFromWorkspace,
+    });
+    const roots = resolveRunRootsForRun({ workspaceRoot, projectsFromWorkspace, projectId });
+    return { valid: isWorkspaceValid, projectId, workspace: {
+      workspaceRoot, projectId: projectId ? backendProjectIdFor(projectId) : undefined, projectName,
+      readableRoots: roots.length ? roots : undefined,
+      writableRoots: roots.length ? roots : undefined,
+      outputRoots: roots.length ? roots : undefined,
+    } };
+  }
+
+  function onRunStarted(projectId?: string): void {
+    if (projectId === DEFAULT_WORKSPACE_PROJECT_ID) {
+      setRemovedProjectIds((current) => current.filter((id) => id !== projectId));
+    }
+  }
   return {
+    getSubmissionScope,
+    onRunStarted,
     setDefaultProjectDisplayName,
     setProjectsFromWorkspace,
     workspaceTargetPathRef,

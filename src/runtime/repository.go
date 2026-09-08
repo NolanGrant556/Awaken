@@ -7,8 +7,14 @@ import "time"
 // layout so lifecycle and replay ownership remain explicit.
 type ThreadRepository interface {
 	ThreadStore
-	Prepare() error
 	ThreadTranscriptPath(threadID string) string
+}
+
+// DesktopRepository supplies both thread and project storage at startup.
+// Each service still consumes only the domain interface it needs.
+type DesktopRepository interface {
+	ThreadRepository
+	ProjectLifecycleRepository
 }
 
 // ProjectRepository owns durable project rows and the project operation state
@@ -59,8 +65,7 @@ type CleanupJobStore interface {
 }
 
 // ProjectLifecycleRepository is the full storage capability ProjectService
-// consumes. RunService registers a ProjectService only when its thread store
-// also satisfies this contract; no concrete store type checks remain.
+// consumes. RunService supplies this dependency when constructing ProjectService.
 type ProjectLifecycleRepository interface {
 	ProjectRepository
 	CleanupJobStore

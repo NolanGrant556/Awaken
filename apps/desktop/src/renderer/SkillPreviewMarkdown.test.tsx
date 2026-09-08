@@ -1,17 +1,14 @@
+import { readStyleSource } from "./style-test-source";
 /// <reference types="node" />
 
-import { readFileSync } from "node:fs";
 import { AwakenMarkdownRenderer } from "@awaken/design-system";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-const skillPreviewStyles = readFileSync(
-  new URL(
+const skillPreviewStyles = readStyleSource(new URL(
     "../../../../Awaken Design System/src/components/AwakenSkillPreviewDialog/AwakenSkillPreviewDialog.css",
     import.meta.url,
-  ),
-  "utf8",
-);
+  ));
 
 describe("Skill preview Markdown policy", () => {
   it("renders GFM while keeping active content, images, Mermaid, and unsafe links inert", () => {

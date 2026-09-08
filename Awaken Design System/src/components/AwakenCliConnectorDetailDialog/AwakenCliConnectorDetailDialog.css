@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 .aw-dialog.aw-cli-connector-detail-dialog {
   width: min(360px, calc(100vw - 48px));

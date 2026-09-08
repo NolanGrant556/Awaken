@@ -1,3 +1,4 @@
+import { mockDesktopReply } from "./bridge-test-helper";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AwakenBridge, SupervisorStatusInfo } from "../../shared/runtime";
 import {
@@ -20,21 +21,21 @@ function createElectronBridge(
   const statusCallbacks: Array<(info: SupervisorStatusInfo) => void> = [];
   const bridge = {
     platform: "macos",
-    getRun: vi.fn(),
-    getThreadTranscript: vi.fn(),
-    listThreads: vi.fn(async () => []),
-    renameThread: vi.fn(),
-    deleteThread: vi.fn(),
-    deleteThreads: vi.fn(),
+    getRun: mockDesktopReply(),
+    getThreadTranscript: mockDesktopReply(),
+    listThreads: mockDesktopReply(async () => []),
+    renameThread: mockDesktopReply(),
+    deleteThread: mockDesktopReply(),
+    deleteThreads: mockDesktopReply(),
     startRun: vi.fn(),
-    cancelRun: vi.fn(),
-    answerUserQuestion: vi.fn(),
-    cancelUserQuestion: vi.fn(),
-    subscribeRun: vi.fn(async () => "subscription-1"),
+    cancelRun: mockDesktopReply(),
+    answerUserQuestion: mockDesktopReply(),
+    cancelUserQuestion: mockDesktopReply(),
+    subscribeRun: mockDesktopReply(async () => "subscription-1"),
     unsubscribeRun: vi.fn(),
     getRuntimeInfo: vi.fn(),
     pickDirectory: vi.fn(async () => ({ canceled: true as const })),
-    pickPluginSource: vi.fn(async () => ({ canceled: true as const })),
+    pickPluginSource: mockDesktopReply(async () => ({ canceled: true as const })),
     pickProjectFolders: vi.fn(async () => ({ canceled: true as const })),
     validateWorkspace: vi.fn(async () => ({ valid: true as const })),
     deleteMcpServer: vi.fn(async () => undefined),
@@ -68,7 +69,7 @@ describe("electron runtime client", () => {
     const { bridge } = createElectronBridge({ status: "running" });
     let finish!: (id: string) => void;
     const handlers: Array<Parameters<AwakenBridge["subscribeRun"]>[1]> = [];
-    bridge.subscribeRun = vi.fn((_runId, callbacks) => {
+    bridge.subscribeRun = mockDesktopReply((_runId, callbacks) => {
       handlers.push(callbacks);
       return handlers.length === 1 ? Promise.resolve("first") : new Promise<string>((resolve) => { finish = resolve; });
     });
@@ -78,7 +79,7 @@ describe("electron runtime client", () => {
     handlers[0].onClose?.();
     await vi.advanceTimersByTimeAsync(1000);
     stop();
-    finish("late"); await Promise.resolve();
+    finish("late"); await vi.advanceTimersByTimeAsync(0);
     handlers[1].onEvent({ type: "RUN_STARTED", runId: "run-1" });
     expect(bridge.unsubscribeRun).toHaveBeenCalledWith("late");
     expect(onEvent).not.toHaveBeenCalled();
@@ -165,7 +166,7 @@ describe("electron runtime client", () => {
 
   it("forwards plugin source browsing through the dedicated bridge", async () => {
     const { bridge } = createElectronBridge({ status: "running" });
-    bridge.pickPluginSource = vi.fn(async () => ({
+    bridge.pickPluginSource = mockDesktopReply(async () => ({
       canceled: false as const,
       path: "/Users/test/Desktop/acme.zip",
     }));
@@ -222,7 +223,7 @@ describe("electron runtime client", () => {
 
   it("forwards batch thread deletion through the typed bridge", async () => {
     const { bridge } = createElectronBridge({ status: "running" });
-    bridge.deleteThreads = vi.fn(async () => ({
+    bridge.deleteThreads = mockDesktopReply(async () => ({
       ok: true as const,
       deletedThreadIds: ["thread-1"],
       failures: [{ threadId: "thread-2", code: "THREAD_BUSY", message: "busy" }],
@@ -256,7 +257,7 @@ describe("electron runtime client", () => {
       handlers: Parameters<AwakenBridge["subscribeRun"]>[1];
       afterSeq?: number;
     }> = [];
-    bridge.subscribeRun = vi.fn(async (_runId, handlers, afterSeq) => {
+    bridge.subscribeRun = mockDesktopReply(async (_runId, handlers, afterSeq) => {
       subscriptions.push({ handlers, afterSeq });
       return `subscription-${subscriptions.length}`;
     });
@@ -295,7 +296,7 @@ describe("electron runtime client", () => {
       handlers: Parameters<AwakenBridge["subscribeRun"]>[1];
       afterSeq?: number;
     }> = [];
-    bridge.subscribeRun = vi.fn(async (_runId, handlers, afterSeq) => {
+    bridge.subscribeRun = mockDesktopReply(async (_runId, handlers, afterSeq) => {
       subscriptions.push({ handlers, afterSeq });
       return `subscription-${subscriptions.length}`;
     });
@@ -326,7 +327,7 @@ describe("electron runtime client", () => {
       handlers: Parameters<AwakenBridge["subscribeRun"]>[1];
       afterSeq?: number;
     }> = [];
-    bridge.subscribeRun = vi.fn(async (_runId, handlers, afterSeq) => {
+    bridge.subscribeRun = mockDesktopReply(async (_runId, handlers, afterSeq) => {
       subscriptions.push({ handlers, afterSeq });
       return `subscription-${subscriptions.length}`;
     });
@@ -354,7 +355,7 @@ describe("electron runtime client", () => {
       handlers: Parameters<AwakenBridge["subscribeRun"]>[1];
       afterSeq?: number;
     }> = [];
-    bridge.subscribeRun = vi.fn(async (_runId, handlers, afterSeq) => {
+    bridge.subscribeRun = mockDesktopReply(async (_runId, handlers, afterSeq) => {
       subscriptions.push({ handlers, afterSeq });
       return `subscription-${subscriptions.length}`;
     });
@@ -382,10 +383,28 @@ describe("electron runtime client", () => {
   });
 });
 
+describe("structured subscription errors", () => {
+  it("stops retrying a missing run even when the message is localized", async () => {
+    const { bridge } = createElectronBridge({ status: "running" });
+    bridge.subscribeRun = vi.fn(async () => ({
+      ok: false as const,
+      issue: { code: "RUN_NOT_FOUND", status: 404, message: "运行记录已不存在" },
+    }));
+    installBridge(bridge);
+    const onError = vi.fn();
+    const onReconnect = vi.fn();
+    await createRuntimeClient().subscribeRun("missing-run", { onEvent: vi.fn(), onError, onReconnect });
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(bridge.subscribeRun).toHaveBeenCalledTimes(1);
+    expect(onReconnect).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining("运行记录已不存在"));
+  });
+});
+
 describe("electron runtime client thread archive", () => {
   it("forwards the thread list view through the typed bridge", async () => {
     const { bridge } = createElectronBridge({ status: "running" });
-    bridge.listThreads = vi.fn(async () => []);
+    bridge.listThreads = mockDesktopReply(async () => []);
     installBridge(bridge);
 
     const client = createRuntimeClient();
@@ -400,11 +419,14 @@ describe("electron runtime client thread archive", () => {
     const { bridge } = createElectronBridge({ status: "running" });
     bridge.setThreadArchived = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true, thread: { threadId: "thread-1", archived: true } })
+      .mockResolvedValueOnce({ ok: true, value: { ok: true, thread: { threadId: "thread-1", archived: true } } })
       .mockResolvedValueOnce({
-        ok: false,
-        code: "THREAD_BUSY",
-        message: "请先停止正在运行的任务",
+        ok: true,
+        value: {
+          ok: false,
+          code: "THREAD_BUSY",
+          message: "请先停止正在运行的任务",
+        },
       });
     installBridge(bridge);
 

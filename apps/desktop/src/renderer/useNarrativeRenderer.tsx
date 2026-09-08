@@ -591,7 +591,7 @@ export function useNarrativeRenderer(options: Options) {
               : undefined,
           onMediaError:
             sourceKey && entry.request
-              ? () => refreshArtifactMediaSource(sourceKey, entry.request!)
+              ? () => refreshArtifactMediaSource(sourceKey)
               : undefined,
           onMetadata: sourceKey
             ? (metadata: AwakenMediaMetadata) =>
@@ -742,7 +742,7 @@ export function useNarrativeRenderer(options: Options) {
               onMediaError:
                 mediaRequest && mediaSourceKey
                   ? () =>
-                      refreshArtifactMediaSource(mediaSourceKey, mediaRequest)
+                      refreshArtifactMediaSource(mediaSourceKey)
                   : undefined,
               onMediaMetadata: mediaSourceKey
                 ? (metadata: AwakenMediaMetadata) =>

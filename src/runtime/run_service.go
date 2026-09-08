@@ -460,11 +460,6 @@ func (s *RunService) restoreSkillInvocationHistory(activator *skillruntime.Activ
 	if s == nil || activator == nil || activator.Registry == nil || s.threadStore == nil {
 		return
 	}
-	if preparer, ok := s.threadStore.(interface{ Prepare() error }); ok {
-		if err := preparer.Prepare(); err != nil {
-			return
-		}
-	}
 	threads, err := s.threadStore.ListThreads(ThreadListViewAll)
 	if err != nil {
 		return
@@ -592,12 +587,6 @@ func NewRunService(
 	newExecutor func(agent *agentcore.Agent) Executor,
 ) *RunService {
 	store := newThreadStore()
-	pathFn := func(threadID string) string {
-		if repo, ok := store.(ThreadRepository); ok {
-			return repo.ThreadTranscriptPath(threadID)
-		}
-		return transcriptPath(threadID)
-	}
 	service := &RunService{
 		sessions:             make(map[string]*Session),
 		threads:              make(map[string]*Thread),
@@ -605,18 +594,14 @@ func NewRunService(
 		newAgent:             newAgent,
 		newExecutor:          newExecutor,
 		threadStore:          store,
-		journals:             newJournalManager(pathFn),
+		journals:             newJournalManager(store.ThreadTranscriptPath),
 		computerLeaseManager: computer.NewLeaseManager(),
 		instructionLoader:    instructions.NewLoader(""),
 		globalInstructions:   instructions.NewGlobalDocumentStore(""),
 		pluginHookReceipts:   hookruntime.NewReceiptStore(),
 		asyncHookCompletions: hookruntime.NewAsyncCompletionStore(),
 	}
-	// Project lifecycle is available whenever the thread store also satisfies
-	// the domain repository contract; no concrete storage type checks.
-	if repo, ok := store.(ProjectLifecycleRepository); ok {
-		service.projectService = newProjectService(service, repo)
-	}
+	service.projectService = newProjectService(service, store)
 	return service
 }
 
@@ -1138,11 +1123,6 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 	if s.journals == nil && !s.allowNoopRecorder {
 		return Run{}, ErrPersistenceUnavailable
 	}
-	if preparer, ok := s.threadStore.(interface{ Prepare() error }); ok {
-		if err := preparer.Prepare(); err != nil {
-			return Run{}, fmt.Errorf("prepare thread store: %w", err)
-		}
-	}
 
 	runID := newRuntimeID("run")
 	threadID := strings.TrimSpace(req.ThreadID)
@@ -1358,11 +1338,7 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				projectID: firstNonEmpty(restoredMeta.Snapshot.ProjectID, scopeProjectID(workspace)),
 				agent:     agent,
 				workspace: workspace,
-				// thread label is only the creation-time fallback and must not overwrite
-				// a later manual/generated rename after restart.
 				// FileStore metadata owns mutable title state. The append-only journal's
-				// thread label is only the creation-time fallback and must not overwrite
-				// a later manual/generated rename after restart.
 				// thread label is only the creation-time fallback and must not overwrite
 				// a later manual/generated rename after restart.
 				label:                    firstNonEmpty(restoredMeta.Snapshot.Label, restored.Label),
@@ -1386,72 +1362,49 @@ func (s *RunService) StartRun(req StartRunRequest) (Run, error) {
 				acpSessionID:             restoredMeta.Snapshot.ACPSessionID,
 			}
 			applyThreadModelPreference(s.threads[threadID], req.ModelProfile)
-			s.sessions[runID] = session
 			threadSnapshot = s.threads[threadID].snapshot()
-			s.mu.Unlock()
-			configureAgentForRun(agent, modelRequestPurposeForClient(req.Client), hookSnapshot, &instructionSnapshot)
-			if err := s.bindAgentRecorder(agent, session, threadID, runID, req.Client.SessionID, threadSnapshot.Label); err != nil {
-				return rollbackStart(err, false)
+		} else {
+			previousThread = cloneThread(thread)
+			if !sameWorkspaceRoot(thread.workspace, workspace) && !req.reanchorWorkspace {
+				s.mu.Unlock()
+				return rollbackStart(ErrThreadWorkspaceMismatch, false)
 			}
-			if err := persistInstructionSnapshot(session, req.Client.SessionID); err != nil {
-				return rollbackStart(err, false)
+			if thread.deletionRequested {
+				s.mu.Unlock()
+				return rollbackStart(ErrThreadNotFound, false)
 			}
-			s.bindSubagentController(ctx, agent, session, subagentModelProfileID(req.ModelProfile))
-			if err := s.threadStore.CreateThread(threadSnapshot, modelProfileKey, threadLabel); err != nil {
-				return rollbackStart(err, true)
+			// Archived threads reject new runs even when the caller bypasses the
+			// UI; the user must unarchive first (archive contract [状态转换](docs/01_桌面工作台/会话管理/实现方案.md#状态转换)).
+			if thread.archived {
+				s.mu.Unlock()
+				return rollbackStart(ErrThreadArchived, false)
 			}
-			if err := s.threadStore.AppendRunInput(threadSnapshot, session.Snapshot(), req.Client.SessionID, trimmed, persistedAttachments); err != nil {
-				return rollbackStart(err, true)
+			if thread.activeRunID != "" {
+				s.mu.Unlock()
+				return rollbackStart(ErrThreadBusy, false)
 			}
-			executor := s.newExecutor(agent)
-			s.runWG.Add(1)
-			go func() {
-				defer s.runWG.Done()
-				s.executeWithMediaArtifactReferences(session, executor, agent, effectiveInput, trimmed, persistedAttachments, mediaArtifactReferences, ctx)
-			}()
-			pluginLeaseTransferred = true
-			return session.Snapshot(), nil
-		}
-		previousThread = cloneThread(thread)
-		if !sameWorkspaceRoot(thread.workspace, workspace) && !req.reanchorWorkspace {
-			s.mu.Unlock()
-			return rollbackStart(ErrThreadWorkspaceMismatch, false)
-		}
-		if thread.deletionRequested {
-			s.mu.Unlock()
-			return rollbackStart(ErrThreadNotFound, false)
-		}
-		// Archived threads reject new runs even when the caller bypasses the
-		// UI; the user must unarchive first (archive contract [状态转换](docs/01_桌面工作台/会话管理/实现方案.md#状态转换)).
-		if thread.archived {
-			s.mu.Unlock()
-			return rollbackStart(ErrThreadArchived, false)
-		}
-		if thread.activeRunID != "" {
-			s.mu.Unlock()
-			return rollbackStart(ErrThreadBusy, false)
-		}
-		agent = thread.agent
-		if modelProfileKey != thread.modelProfileKey || !sameTaskScope(thread.workspace, workspace) {
-			agent = s.createAgent(workspace, threadID, req.ModelProfile)
-			if agent != nil && thread.agent != nil {
-				agent.GetConversation().Context.SetMessages(thread.agent.GetConversation().Context.GetMessages())
-				cfg := agent.GetConfig()
-				cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), thread.agent.GetConfig().SkillContextBlocks...)
-				cfg.ActivatedDeferredTools = append([]string(nil), thread.agent.GetConfig().ActivatedDeferredTools...)
-				cfg.RestoredContextWindowUsageAnchor = agentcore.CloneContextWindowUsageAnchor(thread.agent.GetConfig().RestoredContextWindowUsageAnchor)
-				agent.Reconfigure(cfg)
+			agent = thread.agent
+			if modelProfileKey != thread.modelProfileKey || !sameTaskScope(thread.workspace, workspace) {
+				agent = s.createAgent(workspace, threadID, req.ModelProfile)
+				if agent != nil && thread.agent != nil {
+					agent.GetConversation().Context.SetMessages(thread.agent.GetConversation().Context.GetMessages())
+					cfg := agent.GetConfig()
+					cfg.SkillContextBlocks = append([]agentcore.ContextBlock(nil), thread.agent.GetConfig().SkillContextBlocks...)
+					cfg.ActivatedDeferredTools = append([]string(nil), thread.agent.GetConfig().ActivatedDeferredTools...)
+					cfg.RestoredContextWindowUsageAnchor = agentcore.CloneContextWindowUsageAnchor(thread.agent.GetConfig().RestoredContextWindowUsageAnchor)
+					agent.Reconfigure(cfg)
+				}
+				thread.agent = agent
+				thread.modelProfileKey = modelProfileKey
+				thread.workspace = workspace
 			}
-			thread.agent = agent
-			thread.modelProfileKey = modelProfileKey
-			thread.workspace = workspace
+			thread.activeRunID = runID
+			thread.latestRunID = runID
+			thread.runIDs = append(thread.runIDs, runID)
+			thread.updatedAt = now
+			applyThreadModelPreference(thread, req.ModelProfile)
+			threadSnapshot = thread.snapshot()
 		}
-		thread.activeRunID = runID
-		thread.latestRunID = runID
-		thread.runIDs = append(thread.runIDs, runID)
-		thread.updatedAt = now
-		applyThreadModelPreference(thread, req.ModelProfile)
-		threadSnapshot = thread.snapshot()
 	} else {
 		agent = s.createAgent(workspace, threadID, req.ModelProfile)
 		titleSource := ThreadTitleSourceFirstUser

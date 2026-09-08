@@ -397,7 +397,7 @@ describe("submit error mapping", () => {
     expect(
       mapScheduledTaskSubmitError(ipc("VALIDATION_FAILED: invalid execution.profile_id: profile is not ready")),
     ).toEqual({
-      errorMessage: "VALIDATION_FAILED: invalid execution.profile_id: profile is not ready",
+      errorMessage: "invalid execution.profile_id: profile is not ready",
       fieldErrors: {},
     });
   });

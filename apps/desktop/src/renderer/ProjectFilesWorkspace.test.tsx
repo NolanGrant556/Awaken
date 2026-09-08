@@ -1,6 +1,6 @@
+import { readStyleSource } from "./style-test-source";
 // @vitest-environment jsdom
 
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -11,10 +11,7 @@ import {
   projectFilesSubmenuPlacement,
 } from "./ProjectFilesWorkspace";
 
-const projectFileStyles = readFileSync(
-  resolve(process.cwd(), "src/renderer/styles/project-files.css"),
-  "utf8",
-);
+const projectFileStyles = readStyleSource(resolve(process.cwd(), "src/renderer/styles/project-files.css"));
 
 async function settle(): Promise<void> {
   await act(async () => {
@@ -180,8 +177,9 @@ describe("ProjectFilesWorkspace", () => {
       root.render(
         <ProjectFilesWorkspace
           runtimeClient={{
+createProjectAgentsFile: vi.fn(),
+
             listProjectDirectory,
-            createProjectAgentsFile: vi.fn(),
             ...previewRuntimeClient(),
           }}
           projectId="project-1"
@@ -228,7 +226,8 @@ describe("ProjectFilesWorkspace", () => {
     }));
     const runtimeClient = {
       ...previewRuntimeClient(),
-      listProjectDirectory: vi.fn(async () => ({
+      createProjectAgentsFile: vi.fn(),
+        listProjectDirectory: vi.fn(async () => ({
         ok: true as const,
         relativePath: "",
         entries: [],
@@ -273,7 +272,8 @@ describe("ProjectFilesWorkspace", () => {
     const startArtifactPreview = vi.fn();
     const runtimeClient = {
       ...previewRuntimeClient(),
-      listProjectDirectory: vi.fn(async () => ({
+      createProjectAgentsFile: vi.fn(),
+        listProjectDirectory: vi.fn(async () => ({
         ok: true as const,
         relativePath: "",
         entries: [],
@@ -321,7 +321,8 @@ describe("ProjectFilesWorkspace", () => {
     const onPreviewPrimaryClick = vi.fn();
     const runtimeClient = {
       ...previewRuntimeClient(),
-      listProjectDirectory: vi.fn(async () => ({
+      createProjectAgentsFile: vi.fn(),
+        listProjectDirectory: vi.fn(async () => ({
         ok: true as const,
         relativePath: "",
         entries: [],
@@ -384,7 +385,9 @@ describe("ProjectFilesWorkspace", () => {
       root.render(
         <ProjectFilesWorkspace
           runtimeClient={{
-            listProjectDirectory: vi.fn(),
+createProjectAgentsFile: vi.fn(),
+
+        listProjectDirectory: vi.fn(),
             ...previewRuntimeClient(),
           }}
           folders={[]}
@@ -409,7 +412,9 @@ describe("ProjectFilesWorkspace", () => {
     await act(async () => {
       root.render(
         <ProjectFilesWorkspace
-          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
+          runtimeClient={{
+createProjectAgentsFile: vi.fn(),
+ listProjectDirectory, ...previewRuntimeClient() }}
           projectId="project-1"
           projectLabel="Awaken"
           folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
@@ -502,7 +507,9 @@ describe("ProjectFilesWorkspace", () => {
     await act(async () => {
       root.render(
         <ProjectFilesWorkspace
-          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
+          runtimeClient={{
+createProjectAgentsFile: vi.fn(),
+ listProjectDirectory, ...previewRuntimeClient() }}
           projectId="project-1"
           folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
         />,
@@ -525,7 +532,9 @@ describe("ProjectFilesWorkspace", () => {
     await act(async () => {
       root.render(
         <ProjectFilesWorkspace
-          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
+          runtimeClient={{
+createProjectAgentsFile: vi.fn(),
+ listProjectDirectory, ...previewRuntimeClient() }}
           projectId="project-1"
           folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
           onPreviewPrimaryClick={onPreviewPrimaryClick}
@@ -569,7 +578,9 @@ describe("ProjectFilesWorkspace", () => {
     await act(async () => {
       root.render(
         <ProjectFilesWorkspace
-          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
+          runtimeClient={{
+createProjectAgentsFile: vi.fn(),
+ listProjectDirectory, ...previewRuntimeClient() }}
           projectId="project-1"
           projectLabel="Awaken"
           folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
@@ -687,7 +698,9 @@ describe("ProjectFilesWorkspace", () => {
     await act(async () => {
       root.render(
         <ProjectFilesWorkspace
-          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
+          runtimeClient={{
+createProjectAgentsFile: vi.fn(),
+ listProjectDirectory, ...previewRuntimeClient() }}
           projectId="project-1"
           projectLabel="Awaken"
           folders={[
@@ -750,6 +763,8 @@ describe("ProjectFilesWorkspace", () => {
     let emitDirectoryChanged: ((event: { subscriptionId: string }) => void) | undefined;
     const unwatchProjectDirectory = vi.fn(async () => undefined);
     const runtimeActions = {
+createProjectAgentsFile: vi.fn(),
+
       ...previewRuntimeClient(),
       listProjectDirectory,
       watchProjectDirectory: vi.fn(async () => ({
@@ -815,6 +830,8 @@ describe("ProjectFilesWorkspace", () => {
     );
     let emitDirectoryChanged: ((event: { subscriptionId: string }) => void) | undefined;
     const runtimeActions = {
+createProjectAgentsFile: vi.fn(),
+
       ...previewRuntimeClient(),
       listProjectDirectory,
       watchProjectDirectory: vi.fn(async () => ({
@@ -883,7 +900,9 @@ describe("ProjectFilesWorkspace", () => {
     await act(async () => {
       root.render(
         <ProjectFilesWorkspace
-          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
+          runtimeClient={{
+createProjectAgentsFile: vi.fn(),
+ listProjectDirectory, ...previewRuntimeClient() }}
           projectId="project-1"
           projectLabel="Awaken"
           folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
@@ -933,7 +952,9 @@ describe("ProjectFilesWorkspace", () => {
     await act(async () => {
       root.render(
         <ProjectFilesWorkspace
-          runtimeClient={{ listProjectDirectory, ...runtimeActions }}
+          runtimeClient={{
+createProjectAgentsFile: vi.fn(),
+ listProjectDirectory, ...runtimeActions }}
           projectId="project-1"
           projectLabel="Awaken"
           folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
@@ -1063,7 +1084,9 @@ describe("ProjectFilesWorkspace", () => {
     await act(async () => {
       root.render(
         <ProjectFilesWorkspace
-          runtimeClient={{ listProjectDirectory, ...runtimeActions }}
+          runtimeClient={{
+createProjectAgentsFile: vi.fn(),
+ listProjectDirectory, ...runtimeActions }}
           projectId="project-1"
           folders={[{ path: windowsFolder, label: "Awaken Project", isPrimary: true }]}
         />,
@@ -1116,7 +1139,9 @@ describe("ProjectFilesWorkspace", () => {
     await act(async () => {
       root.render(
         <ProjectFilesWorkspace
-          runtimeClient={{ listProjectDirectory, ...runtimeActions }}
+          runtimeClient={{
+createProjectAgentsFile: vi.fn(),
+ listProjectDirectory, ...runtimeActions }}
           projectId="project-1"
           folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
         />,
@@ -1159,7 +1184,9 @@ describe("ProjectFilesWorkspace", () => {
     await act(async () => {
       root.render(
         <ProjectFilesWorkspace
-          runtimeClient={{ listProjectDirectory, ...previewRuntimeClient() }}
+          runtimeClient={{
+createProjectAgentsFile: vi.fn(),
+ listProjectDirectory, ...previewRuntimeClient() }}
           projectId="project-1"
           folders={[{ path: "/workspace/app", label: "App", isPrimary: true }]}
           onAddTaskContext={vi.fn(async () => ({ ok: true as const }))}

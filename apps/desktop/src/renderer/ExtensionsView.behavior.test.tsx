@@ -482,6 +482,8 @@ describe("ExtensionsView behavior", () => {
       });
     const onNotice = vi.fn();
     const runtimeClient = {
+      getPluginSetup: vi.fn(async () => ({ items: [], summary: { total: 0, ready: 0, needsConfiguration: 0, needsAuth: 0, needsAdminApproval: 0, inProgress: 0, failed: 0, unsupported: 0 } })),
+
       getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
       listProjects: vi.fn(async () => [runtimeProject]),
       listConnectors: vi.fn(async () => []),
@@ -715,6 +717,8 @@ describe("ExtensionsView behavior", () => {
       resolvePluginDetail = resolve;
     });
     const runtimeClient = {
+      getPluginSetup: vi.fn(async () => ({ items: [], summary: { total: 0, ready: 0, needsConfiguration: 0, needsAuth: 0, needsAdminApproval: 0, inProgress: 0, failed: 0, unsupported: 0 } })),
+
       getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
       listProjects: vi.fn(async () => [runtimeProject]),
       listConnectors: vi.fn(async () => []),
@@ -1006,6 +1010,8 @@ describe("ExtensionsView behavior", () => {
     const onNotice = vi.fn();
     const setPluginComponentState = vi.fn(async () => ({ plugin, revision: 2 }));
     const runtimeClient = {
+      getPluginSetup: vi.fn(async () => ({ items: [], summary: { total: 0, ready: 0, needsConfiguration: 0, needsAuth: 0, needsAdminApproval: 0, inProgress: 0, failed: 0, unsupported: 0 } })),
+
       getRuntimeInfo: vi.fn(async () => ({ defaultWorkspace: projectRoot })),
       listProjects: vi.fn(async () => [runtimeProject]),
       listConnectors: vi.fn(async () => []),

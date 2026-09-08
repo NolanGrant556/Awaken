@@ -336,7 +336,6 @@ export class RuntimeSupervisor {
   private child: ChildProcess | null = null;
   private runtimeBaseUrl: string | undefined;
   private controlClient: RuntimeControlClient | null = null;
-  private runtimeIdentity: string | undefined;
 
   private status: SupervisorStatus = "stopped";
   private statusInfo: SupervisorStatusInfo = { status: "stopped" };
@@ -419,7 +418,6 @@ export class RuntimeSupervisor {
         }
         await client.createLease(ownerID, "desktop");
         this.controlClient = client;
-        this.runtimeIdentity = manifest.runtime_identity;
         this.setStatus("external-attached");
         return this.getStatus();
       }
@@ -744,7 +742,6 @@ export class RuntimeSupervisor {
     await client.verifyIdentity(expectedRuntimeIdentity);
     await client.createLease(`desktop-${app.getPath("userData")}`, "desktop");
     this.controlClient = client;
-    this.runtimeIdentity = manifest.runtime_identity;
   }
 
   private async releaseControlLease(): Promise<void> {
@@ -755,7 +752,6 @@ export class RuntimeSupervisor {
         // Best effort: the Core will reclaim the lease via TTL.
       }
       this.controlClient = null;
-      this.runtimeIdentity = undefined;
     }
   }
 

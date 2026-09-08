@@ -1,6 +1,6 @@
+import { readStyleSource } from "./style-test-source";
 /// <reference types="node" />
 
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 function cssRule(source: string, selector: string): string {
@@ -17,14 +17,11 @@ function cssRule(source: string, selector: string): string {
 
 describe("Project Skills folder layout", () => {
   it("keeps Desktop and Design System folders filling from the left", () => {
-    const desktopStyles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
-    const designSystemStyles = readFileSync(
-      new URL(
+    const desktopStyles = readStyleSource(new URL("./styles.css", import.meta.url));
+    const designSystemStyles = readStyleSource(new URL(
         "../../../../Awaken Design System/src/components/AwakenSkills/AwakenSkills.css",
         import.meta.url,
-      ),
-      "utf8",
-    );
+      ));
 
     const rules = [
       cssRule(desktopStyles, ".skill-project-folder-grid"),

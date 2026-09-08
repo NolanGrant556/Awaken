@@ -1,3 +1,16 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
+
+.execution-feed {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  width: min(var(--aw-turn-content-width), 100%);
+  min-width: 0;
+  justify-self: center;
+}
+
+.execution-feed-empty {
+  min-height: 48vh;
+}
 
 /* AwakenExecutionFeed currently uses shared Awaken Design System tokens and component classes. */

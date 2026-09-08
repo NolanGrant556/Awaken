@@ -1,9 +1,9 @@
 /** @vitest-environment jsdom */
 
-import React, { act } from "react";
+import { AwakenProjectTree } from "@awaken/design-system";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AwakenProjectTree } from "@awaken/design-system";
 
 describe("conversation batch selection", () => {
   let host: HTMLDivElement;

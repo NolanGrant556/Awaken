@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 .aw-dialog.aw-project-skills-dialog {
   width: min(980px, calc(100vw - 80px));

@@ -1,4 +1,4 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
 
 .aw-dialog.aw-skill-preview {
   width: min(820px, calc(100vw - 80px));

@@ -1,3 +1,4 @@
+import { threadViewFor } from "./reducer";
 import { describe, expect, it } from "vitest";
 import type { AguiEvent } from "../../shared/agui";
 import type {
@@ -374,7 +375,7 @@ describe("runtime reducer cancel handling", () => {
       );
     }
     expect(
-      replayed.threadViews["thread-1"]?.narrative.replayedItemIds,
+      threadViewFor(replayed, "thread-1")?.narrative.replayedItemIds,
     ).toContain(historicalTool?.id);
 
     const withLiveTool = reduceRuntimeState(
@@ -4578,7 +4579,7 @@ describe("runtime reducer run plan snapshots", () => {
       version: 2,
       completedCount: 2,
     });
-    expect(state.threadViews["thread-1"]?.runPlansById["run-1"]?.version).toBe(
+    expect(threadViewFor(state, "thread-1")?.runPlansById["run-1"]?.version).toBe(
       2,
     );
   });
@@ -4600,7 +4601,7 @@ describe("runtime reducer run plan snapshots", () => {
 
     expect(state.runPlansById["run-2"]?.planId).toBe("plan-2");
     expect(state.runPlansById["run-1"]).toBeUndefined();
-    expect(state.threadViews["thread-1"]?.runPlansById["run-1"]).toMatchObject({
+    expect(threadViewFor(state, "thread-1")?.runPlansById["run-1"]).toMatchObject({
       planId: "plan-1",
       version: 1,
     });

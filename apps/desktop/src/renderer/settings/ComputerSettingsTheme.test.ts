@@ -1,21 +1,15 @@
+import { readStyleSource } from "../style-test-source";
 /// <reference types="node" />
 
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const computerSettingsStyles = readFileSync(
-  new URL(
+const computerSettingsStyles = readStyleSource(new URL(
     "../../../../../Awaken Design System/src/components/AwakenComputerSettings/AwakenComputerSettings.css",
     import.meta.url,
-  ),
-  "utf8",
-);
+  ));
 
 describe("Computer settings theme contract", () => {
   it("uses the current semantic tokens for dark and light themes", () => {
-    expect(computerSettingsStyles).toContain(
-      '@import "../../tokens/components.css";',
-    );
     expect(computerSettingsStyles).toMatch(
       /\.computer-settings\s*\{[\s\S]*?color:\s*var\(--aw-text-primary\);/,
     );

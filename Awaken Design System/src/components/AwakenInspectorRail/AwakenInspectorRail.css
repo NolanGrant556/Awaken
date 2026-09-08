@@ -1,3 +1,184 @@
-@import "../../tokens/components.css";
+@import "../../tokens/base.css";
+
+.light-inspector-rail {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.light-inspector-rail-no-head {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.light-inspector-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.light-inspector-head-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.light-inspector-head h2 {
+  margin: 0;
+  color: var(--aw-text-primary);
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-font-weight-bold);
+  line-height: var(--aw-line-height-sm);
+}
+
+.light-inspector-head span {
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  line-height: var(--aw-line-height-xs);
+  white-space: nowrap;
+}
+
+.light-inspector-nav {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.light-inspector-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--aw-radius-control);
+  background: var(--aw-surface-panel-muted);
+  color: var(--aw-text-secondary);
+  font-size: var(--aw-font-size-base);
+  line-height: var(--aw-line-height-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+.light-inspector-tab-label,
+.light-inspector-tab-meta {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.light-inspector-tab-label {
+  gap: 10px;
+}
+
+.light-inspector-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--aw-text-tertiary);
+}
+
+.light-inspector-tab-icon svg {
+  width: var(--aw-icon-size-16);
+  height: var(--aw-icon-size-16);
+}
+
+.light-inspector-tab-meta {
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.light-inspector-tab:hover:enabled,
+.light-inspector-tab.is-active {
+  background: var(--aw-surface-panel);
+  color: var(--aw-text-primary);
+}
+
+.light-inspector-tab:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.light-inspector-tab strong {
+  color: var(--aw-text-tertiary);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: var(--aw-line-height-xs);
+}
+
+.light-inspector-delta {
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-font-weight-semibold);
+  line-height: var(--aw-line-height-xs);
+  white-space: nowrap;
+}
+
+.light-inspector-delta-added {
+  color: var(--aw-status-success-text);
+}
+
+.light-inspector-delta-removed {
+  color: var(--aw-status-danger-text);
+}
+
+.light-inspector-detail {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.aw-run-stage-scroll,
+.aw-workbench-inspector,
+.light-inspector-detail {
+  scrollbar-color: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent)
+    transparent;
+  scrollbar-width: thin;
+}
+
+.aw-run-stage-scroll::-webkit-scrollbar,
+.aw-workbench-inspector::-webkit-scrollbar,
+.light-inspector-detail::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+}
+
+.aw-run-stage-scroll::-webkit-scrollbar-track,
+.aw-run-stage-scroll::-webkit-scrollbar-track-piece,
+.aw-run-stage-scroll::-webkit-scrollbar-corner,
+.aw-workbench-inspector::-webkit-scrollbar-track,
+.aw-workbench-inspector::-webkit-scrollbar-track-piece,
+.aw-workbench-inspector::-webkit-scrollbar-corner,
+.light-inspector-detail::-webkit-scrollbar-track,
+.light-inspector-detail::-webkit-scrollbar-track-piece,
+.light-inspector-detail::-webkit-scrollbar-corner {
+  background: transparent;
+  border: 0;
+}
+
+.aw-run-stage-scroll::-webkit-scrollbar-thumb,
+.aw-workbench-inspector::-webkit-scrollbar-thumb,
+.light-inspector-detail::-webkit-scrollbar-thumb {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--aw-radius-pill);
+  background: color-mix(in srgb, var(--aw-text-tertiary) 28%, transparent);
+}
+
+.aw-run-stage-scroll::-webkit-scrollbar-button,
+.aw-workbench-inspector::-webkit-scrollbar-button,
+.light-inspector-detail::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
 
 /* The canonical Inspector rail intentionally keeps the established Desktop class contract. */

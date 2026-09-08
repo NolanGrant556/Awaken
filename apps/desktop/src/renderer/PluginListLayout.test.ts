@@ -1,13 +1,10 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { readStyleSource } from "./style-test-source";
 
-const pluginListStyles = readFileSync(
-  new URL(
+const pluginListStyles = readStyleSource(new URL(
     "../../../../Awaken Design System/src/components/AwakenPlugins/AwakenPlugins.css",
     import.meta.url,
-  ),
-  "utf8",
-);
+  ));
 
 describe("Plugin list layout", () => {
   it("keeps page scrolling outside the centered grid and preserves a bottom tail", () => {

@@ -329,3 +329,10 @@ export function resolveBackendProjectOrder(
     ? backendIds
     : undefined;
 }
+
+/** Frozen project selection consumed by one run submission. */
+export type RunSubmissionScope = {
+  valid: boolean;
+  projectId?: string;
+  workspace: import("../shared/runtime").StartRunRequest["workspace"];
+};

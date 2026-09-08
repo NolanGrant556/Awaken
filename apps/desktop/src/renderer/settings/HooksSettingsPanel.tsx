@@ -116,11 +116,7 @@ export function HooksSettingsPanel({ runtimeClient, currentProjectId }: { runtim
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async (selected = projectId) => {
-    if (!runtimeClient.getHookStatus) {
-      setMessage("当前 Desktop 运行时尚未提供钩子配置接口。");
-      setLoading(false);
-      return;
-    }
+
     setLoading(true);
     try {
       const [nextStatus, nextProjects] = await Promise.all([runtimeClient.getHookStatus(selected || undefined), runtimeClient.listProjects(false)]);
@@ -139,8 +135,8 @@ export function HooksSettingsPanel({ runtimeClient, currentProjectId }: { runtim
     setLoading(true);
     try {
       const next = trust
-        ? await runtimeClient.trustProjectHook?.({ projectId, sourcePath: source.path, digest: source.digest ?? "" })
-        : await runtimeClient.revokeProjectHook?.({ projectId, sourcePath: source.path });
+        ? await runtimeClient.trustProjectHook({ projectId, sourcePath: source.path, digest: source.digest ?? "" })
+        : await runtimeClient.revokeProjectHook({ projectId, sourcePath: source.path });
       if (next) setStatus(next);
       setMessage(trust ? "已信任当前配置摘要；只会影响后续新任务。" : "已撤销信任；只会影响后续新任务。");
     } catch (error) {

@@ -18,7 +18,6 @@ function isWaiting(state: WaitingStateLike): boolean {
 function statusForThread(
   thread: ThreadItem,
   view: WaitingStateLike | undefined,
-  isActive: boolean,
 ): PetSessionStatus {
   if (view && isWaiting(view)) return "waiting";
   if (!thread.runStatus) return "idle";
@@ -49,7 +48,7 @@ type ActiveViewLike = Pick<
 
 function activeView(state: RuntimeViewState): ActiveViewLike {
   return (
-    (state.activeThreadId ? state.threadViews[state.activeThreadId] : undefined) ?? state
+    state
   );
 }
 
@@ -107,7 +106,7 @@ export function projectPetActivity(
   for (const thread of state.threads) {
     const isActive = state.activeThreadId === thread.threadId;
     const view = isActive ? activeView(state) : state.threadViews[thread.threadId];
-    const status = statusForThread(thread, view, isActive);
+    const status = statusForThread(thread, view);
     const updatedAtMs =
       status === "review" || status === "failed"
         ? view?.runCompletedAtMs ?? view?.runStartedAtMs ?? now

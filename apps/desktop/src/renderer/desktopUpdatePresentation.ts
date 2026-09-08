@@ -1,6 +1,6 @@
 // Desktop 更新状态的 Renderer 投影：只把 Main snapshot 映射为侧栏按钮/确认框文案。
 // App 不维护第二套 phase reducer；状态 authority 在 Electron Main。
-// 设计权威：docs/01_桌面工作台/桌面生命周期与发布/应用版本与自动更新设计契约.md §3、§9.4。
+// 设计权威：[产品行为与界面契约](docs/01_桌面工作台/应用生命周期与更新/需求文档.md#产品行为与界面契约)、[Renderer 与 Design System](docs/01_桌面工作台/应用生命周期与更新/实现方案.md#renderer-与-design-system)。
 
 import type { AwakenSidebarUpdateAction } from "@awaken/design-system";
 import {

@@ -770,7 +770,7 @@ func TestSealInterrupted(t *testing.T) {
 }
 
 // Repository errors carry identity and codes only; task content never leaks
-// into them (contract §7).
+// into them (contract [持久化与 authority](docs/12_定时任务/定时执行与提醒/实现方案.md#持久化与-authority)).
 func TestRepositoryErrorsNeverContainContent(t *testing.T) {
 	repo, _, _ := openTestRepo(t)
 	secret := "SECRET-PROMPT-7xk29q-do-not-leak"
@@ -804,7 +804,7 @@ func TestRepositoryErrorsNeverContainContent(t *testing.T) {
 }
 
 // Task definitions must not persist credentials or resolved profiles: the
-// persisted snapshot contains only the opaque profile ID (contract §7).
+// persisted snapshot contains only the opaque profile ID (contract [持久化与 authority](docs/12_定时任务/定时执行与提醒/实现方案.md#持久化与-authority)).
 func TestSnapshotContainsNoCredentials(t *testing.T) {
 	repo, _, genDir := openTestRepo(t)
 	task := sampleTask("no-secrets")
@@ -839,7 +839,7 @@ func TestListExecutionsTombstonedTask(t *testing.T) {
 	if err := repo.Delete(created.TaskID, created.Version, ""); err != nil {
 		t.Fatal(err)
 	}
-	// User-visible history disappears with the task (contract §7).
+	// User-visible history disappears with the task (contract [持久化与 authority](docs/12_定时任务/定时执行与提醒/实现方案.md#持久化与-authority)).
 	if _, err := repo.ListExecutions(created.TaskID, 0); !errors.Is(err, ErrTaskNotFound) {
 		t.Fatalf("ListExecutions tombstoned = %v, want ErrTaskNotFound", err)
 	}

@@ -1,5 +1,5 @@
 // DesktopShutdownCoordinator：从 index.ts 的 before-quit 抽取的可等待、幂等退出编排。
-// 设计权威：docs/01_桌面工作台/桌面生命周期与发布/应用版本与自动更新设计契约.md §6、§9.2。
+// 设计权威：[重启安装与 Desktop 生命周期](docs/01_桌面工作台/应用生命周期与更新/实现方案.md#重启安装与-desktop-生命周期)、[Electron Main 与退出编排](docs/01_桌面工作台/应用生命周期与更新/实现方案.md#electron-main-与退出编排)。
 //
 // - 同一 stop() promise 处理重入，不并发关闭两次。
 // - "normal" 成功后由调用方 app.exit()；"update-install" 成功后只能交给

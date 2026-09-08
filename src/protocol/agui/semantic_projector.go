@@ -404,7 +404,7 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		notice.RuntimeVersion = stringFromAny(payload["runtime_version"])
 		return []Event{notice}
 	case agentcore.SemanticKindScheduledNotice:
-		// Host-owned fixed reminder (contract §9.4/§10): one replayable frame
+		// Host-owned fixed reminder (contract [固定提醒](docs/12_定时任务/定时执行与提醒/实现方案.md#固定提醒)/[HTTP、IPC 与事件](docs/12_定时任务/定时执行与提醒/实现方案.md#httpipc-与事件)): one replayable frame
 		// carrying only task/execution identity, the task name and the fixed
 		// content. Missing payload fields degrade to empty strings; the frame
 		// is still emitted so live and replay stay in lockstep.
@@ -416,7 +416,7 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		notice.NoticeContent = stringFromAny(payload["content"])
 		return []Event{notice}
 	case agentcore.SemanticKindPlanUpdated:
-		// Durable run-plan full snapshot (contract §8.1): one replayable frame
+		// Durable run-plan full snapshot (contract [事件合同](docs/02_主智能体闭环/运行计划/实现方案.md#事件合同)): one replayable frame
 		// carrying the sanitized snapshot and derived counters. Missing payload
 		// fields degrade to zero values; the frame is still emitted so live and
 		// replay stay in lockstep. Version ordering/dedup is the Desktop

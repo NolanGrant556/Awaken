@@ -11,7 +11,7 @@ import (
 	"awaken/src/tool"
 )
 
-// Run-plan validation bounds (contract §6.2).
+// Run-plan validation bounds (contract [校验规则](docs/02_主智能体闭环/运行计划/实现方案.md#校验规则)).
 const (
 	runPlanMinItems          = 1
 	runPlanMaxItems          = 12
@@ -66,7 +66,7 @@ type runPlanService struct {
 }
 
 // NewRunPlanService creates the run-scoped RunPlanService for one root run.
-// Child agents must never receive one (contract §6.1: root-only tool).
+// Child agents must never receive one (contract [工具定义](docs/02_主智能体闭环/运行计划/实现方案.md#工具定义): root-only tool).
 func NewRunPlanService(config RunPlanServiceConfig) tool.RunPlanService {
 	if config.Now == nil {
 		config.Now = func() time.Time { return time.Now().UTC() }
@@ -138,7 +138,7 @@ func (s *runPlanService) ApplyUpdate(ctx stdcontext.Context, identity tool.ToolE
 	}
 	counts := DeriveRunPlanCounts(next.Items)
 
-	// Journal-first causal order (contract §7.2): the durable plan_updated
+	// Journal-first causal order (contract [SemanticJournal](docs/02_主智能体闭环/运行计划/实现方案.md#semanticjournal)): the durable plan_updated
 	// record must be appended and flushed before the in-memory snapshot moves.
 	if s.config.Persist == nil {
 		return tool.RunPlanResult{}, &tool.RunPlanError{

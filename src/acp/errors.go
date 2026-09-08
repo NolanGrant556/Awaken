@@ -2,7 +2,7 @@ package acp
 
 import "errors"
 
-// Error codes from the ACP design document §16.
+// Error codes from the ACP design document [错误码与恢复](docs/02_主智能体闭环/ACP协作/实现方案.md#错误码与恢复).
 const (
 	ErrCodeRunnerNotConfigured     = "acp_runner_not_configured"
 	ErrCodeRunnerNotReady          = "acp_runner_not_ready"

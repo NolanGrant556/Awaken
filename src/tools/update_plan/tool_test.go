@@ -60,7 +60,7 @@ const validInput = `{"plan":[` +
 	`{"step":"调查现状","active_form":"正在调查现状","status":"in_progress"},` +
 	`{"step":"实现功能","active_form":"正在实现功能","status":"pending"}]}`
 
-// RP-G01 (tool level): a successful update emits the §6.1 output schema.
+// RP-G01 (tool level): a successful update emits the [工具定义](docs/02_主智能体闭环/运行计划/实现方案.md#工具定义) output schema.
 func TestUpdatePlanSuccessOutputSchema(t *testing.T) {
 	service := successService()
 	outcome, err := (&Tool{}).ExecuteOutcome(ctxWithService(service), validInput, nil)
@@ -200,7 +200,7 @@ func TestUpdatePlanServiceUnavailable(t *testing.T) {
 	}
 }
 
-// The definition must carry the §5.1 usage boundaries and the §6.3 model
+// The definition must carry the [何时建立计划](docs/02_主智能体闭环/运行计划/需求文档.md#何时建立计划) usage boundaries and the [模型使用约束](docs/02_主智能体闭环/运行计划/实现方案.md#模型使用约束) model
 // constraints, and the tool must be registered for the root tool pool.
 func TestUpdatePlanDefinitionContract(t *testing.T) {
 	registered, err := tool.GetRegisteredTool(ToolName)

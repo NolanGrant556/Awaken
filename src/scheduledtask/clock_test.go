@@ -234,7 +234,7 @@ func TestNextOccurrenceCalendarUntil(t *testing.T) {
 }
 
 // NextOccurrence only computes time: a count repeat end does not bound it.
-// The scheduler bounds execution via consumed_occurrences (contract §8.3).
+// The scheduler bounds execution via consumed_occurrences (contract [misfire、时区和 DST](docs/12_定时任务/定时执行与提醒/实现方案.md#misfire时区和-dst)).
 func TestNextOccurrenceCalendarCountDoesNotBoundTime(t *testing.T) {
 	runAt := time.Date(2026, 7, 27, 9, 0, 0, 0, time.UTC)
 	sched := Schedule{
@@ -282,7 +282,7 @@ func TestDecideMisfireWithinGraceRunsOnce(t *testing.T) {
 }
 
 // Multiple missed occurrences coalesce into exactly one misfire execution;
-// they are never replayed one by one (contract §8.3).
+// they are never replayed one by one (contract [misfire、时区和 DST](docs/12_定时任务/定时执行与提醒/实现方案.md#misfire时区和-dst)).
 func TestDecideMisfireCoalescesMultipleMisses(t *testing.T) {
 	last := time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC)
 	now := time.Date(2026, 7, 26, 11, 0, 0, 0, time.UTC) // six 10-minute ticks missed
@@ -311,7 +311,7 @@ func TestDecideMisfireBeyondGraceSkips(t *testing.T) {
 }
 
 // A non-repeating calendar schedule skipped beyond grace is exhausted and
-// the task becomes completed (contract §8.3).
+// the task becomes completed (contract [misfire、时区和 DST](docs/12_定时任务/定时执行与提醒/实现方案.md#misfire时区和-dst)).
 func TestDecideMisfireOneTimeBeyondGraceSkipsAndCompletes(t *testing.T) {
 	runAt := time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC)
 	sched := Schedule{Kind: ScheduleKindCalendar, Timezone: "UTC", RunAt: &runAt}

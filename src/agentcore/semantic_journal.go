@@ -226,7 +226,7 @@ func ArtifactSemanticRecord(threadID, runID, turnID, sessionID string, event Awa
 }
 
 // PlanUpdatedSemanticRecord assembles the durable, sanitized plan_updated
-// fact (contract §7.2): the bounded snapshot, derived counters and the
+// fact (contract [SemanticJournal](docs/02_主智能体闭环/运行计划/实现方案.md#semanticjournal)): the bounded snapshot, derived counters and the
 // tool_call receipt only — no model reasoning or raw unvalidated JSON.
 func PlanUpdatedSemanticRecord(
 	threadID, runID, turnID, sessionID, toolCallID string,

@@ -1,7 +1,7 @@
 // Package scheduledtask owns the scheduled-task domain of Awaken Core:
 // task/schedule/action/execution schema, five-field cron and calendar time
 // math, validation and the journal-first repository. The authoritative
-// contract is docs/12_定时任务/定时任务设计契约.md.
+// contract is docs/12_定时任务/定时执行与提醒/实现方案.md.
 //
 // Slice A scope: model, time calculation and repository only. No HTTP
 // surface and no real timers are registered here.
@@ -87,7 +87,7 @@ func (s ExecutionStatus) Terminal() bool {
 	return false
 }
 
-// TaskState is the materialized task state (contract §6.2). It is computed,
+// TaskState is the materialized task state (contract [状态与执行记录](docs/12_定时任务/定时执行与提醒/实现方案.md#状态与执行记录)). It is computed,
 // never stored.
 type TaskState string
 
@@ -201,7 +201,7 @@ type TemplateOrigin struct {
 	Source     string `json:"source"`
 }
 
-// Task is the persisted scheduled-task definition (contract §6.1). TaskID,
+// Task is the persisted scheduled-task definition (contract [定义](docs/12_定时任务/定时执行与提醒/实现方案.md#定义)). TaskID,
 // Version, CreatedAt and UpdatedAt are Core-generated; client-supplied
 // identity, state, next-run and timestamps are never trusted.
 type Task struct {
@@ -227,7 +227,7 @@ type Task struct {
 	// or repeat count reached); completed tasks are never scheduled again.
 	Completed bool `json:"completed,omitempty"`
 	// InvalidReason is set by the scheduler when a persisted definition no
-	// longer validates at startup (contract §8.1). It carries only the
+	// longer validates at startup (contract [Core 生命周期](docs/12_定时任务/定时执行与提醒/实现方案.md#core-生命周期)). It carries only the
 	// sanitized field/issue label of the validation error, never content.
 	// A successful edit clears it.
 	InvalidReason string `json:"invalid_reason,omitempty"`

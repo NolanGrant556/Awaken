@@ -1,6 +1,6 @@
 // Package filestore provides the durable-file primitives used by the
 // current FileStore authority documented in
-// docs/03_运行时与本地服务/全局数据与会话存储.md:
+// docs/03_运行时与本地服务/数据存储与重放/实现方案.md:
 // atomic JSON replacement with parent-directory fsync, fsynced append-only
 // journals with committed-offset tail recovery, OS-backed cross-process
 // locks, revision compare-and-swap, format-version gating and strict 0700/0600

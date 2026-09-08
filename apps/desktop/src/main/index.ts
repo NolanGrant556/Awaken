@@ -1391,7 +1391,7 @@ function broadcastPetCatalogChanged(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Scheduled tasks (contract docs/12_定时任务 §10): typed IPC forwards plus a
+// Scheduled tasks (contract [HTTP、IPC 与事件](docs/12_定时任务/定时执行与提醒/实现方案.md#httpipc-与事件)): typed IPC forwards plus a
 // resident SSE subscription that feeds renderer refreshes and native
 // notifications. Renderer pages being closed never affects this pump, so a
 // notice is never lost with the page.

@@ -172,7 +172,7 @@ func (h runHandlers) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 func (h runHandlers) handleListThreads(w http.ResponseWriter, r *http.Request) {
 	// A missing view defaults to active so existing callers automatically
 	// exclude archived threads; unknown values are rejected, never silently
-	// downgraded (archive contract §4.2).
+	// downgraded (archive contract [查询合同](docs/01_桌面工作台/会话管理/实现方案.md#查询合同)).
 	var view awruntime.ThreadListView
 	switch raw := strings.TrimSpace(r.URL.Query().Get("view")); raw {
 	case "", string(awruntime.ThreadListViewActive):

@@ -989,7 +989,7 @@ function upsertSubagentTaskView(
 
 /**
  * Version-upsert one AWAKEN_PLAN_UPDATED full snapshot under its runId
- * (contract §8.2/§10): the same planId at the same version is idempotent
+ * (contract [Reducer 与 narrative](docs/02_主智能体闭环/运行计划/实现方案.md#reducer-与-narrative)/[异常、恢复与降级](docs/02_主智能体闭环/运行计划/实现方案.md#异常恢复与降级)): the same planId at the same version is idempotent
  * replay/overlap, a lower version is a stale late frame, and only a strictly
  * higher version — or a different planId, i.e. a new plan in that run — may
  * replace the stored snapshot in place. Frames without runId fall back to the

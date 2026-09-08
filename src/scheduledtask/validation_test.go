@@ -108,7 +108,7 @@ func TestValidateTimezone(t *testing.T) {
 }
 
 // A custom cron with no future occurrence inside the search window is
-// rejected (contract §6.3).
+// rejected (contract [校验](docs/12_定时任务/定时执行与提醒/实现方案.md#校验)).
 func TestValidateCronNoFutureOccurrence(t *testing.T) {
 	v := validatorAt(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	task := validTask()
@@ -362,7 +362,7 @@ func TestValidateProjectAndProfileCheckers(t *testing.T) {
 }
 
 // Task content is user business data: it must never appear in error
-// messages (contract §7).
+// messages (contract [持久化与 authority](docs/12_定时任务/定时执行与提醒/实现方案.md#持久化与-authority)).
 func TestValidationErrorNeverContainsContent(t *testing.T) {
 	secret := "SECRET-CONTENT-9f3k2m-do-not-leak"
 	v := validatorAt(time.Date(2026, 7, 26, 10, 0, 0, 0, time.UTC))

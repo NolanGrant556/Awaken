@@ -15,7 +15,7 @@ import (
 )
 
 // FileRepository persists scheduled tasks inside a FileStore generation
-// directory (contract §7):
+// directory (contract [持久化与 authority](docs/12_定时任务/定时执行与提醒/实现方案.md#持久化与-authority)):
 //
 //	<generation>/scheduled-tasks/
 //	  mutations.jsonl          (definition/version/enable/thread/complete/tombstone authority)
@@ -340,7 +340,7 @@ func (r *FileRepository) Create(task Task) (Task, error) {
 	}
 	now := r.clock.Now().UTC()
 	// Client-supplied identity, state and timestamps are untrusted: Core
-	// generates all of them (contract §6.3).
+	// generates all of them (contract [校验](docs/12_定时任务/定时执行与提醒/实现方案.md#校验)).
 	created := task
 	created.TaskID = TaskIDPrefix + uuid.NewString()
 	created.Version = 1
@@ -680,7 +680,7 @@ func (r *FileRepository) AppendExecution(taskID string, exec Execution) (Executi
 }
 
 // executionKeyMatches reports whether an incoming create duplicates an
-// existing execution under the contract §8.4 idempotency rules. Manual
+// existing execution under the contract [并发与幂等](docs/12_定时任务/定时执行与提醒/实现方案.md#并发与幂等) idempotency rules. Manual
 // triggers dedupe on the caller-supplied idempotency key. Scheduled and
 // misfire triggers share the same occurrence identity: the same scheduled
 // for time can only create one execution, even if a crash changes the
@@ -714,7 +714,7 @@ func (r *FileRepository) ListExecutions(taskID string, limit int) ([]Execution, 
 	defer r.mu.Unlock()
 	if _, err := r.liveTaskLocked(taskID); err != nil {
 		// Executions of tombstoned tasks are history of a deleted task and
-		// disappear with it (contract §7); an unknown task is not found.
+		// disappear with it (contract [持久化与 authority](docs/12_定时任务/定时执行与提醒/实现方案.md#持久化与-authority)); an unknown task is not found.
 		return nil, err
 	}
 	if _, err := r.executionJournalLocked(taskID); err != nil {

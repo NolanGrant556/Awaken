@@ -2315,7 +2315,7 @@ export type ACPRunnerUpdateRequest = Partial<Omit<ACPRunnerCreateRequest, "id" |
 };
 
 // ---------------------------------------------------------------------------
-// Scheduled tasks (contract docs/12_定时任务 §10). Wire shapes mirror the Go
+// Scheduled tasks (contract [HTTP、IPC 与事件](docs/12_定时任务/定时执行与提醒/实现方案.md#httpipc-与事件)). Wire shapes mirror the Go
 // json tags of src/scheduledtask; the camelCase projections are the only
 // shapes Renderer code may touch.
 // ---------------------------------------------------------------------------

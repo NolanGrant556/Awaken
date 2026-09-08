@@ -39,7 +39,7 @@ function archivedChatRowFromThread(thread: RuntimeThread): AwakenArchivedChatRow
 }
 
 /**
- * 契约 §3.3 分组：active 项目按 FileStore 项目顺序，removed 项目随后，
+ * 契约 [页面列表、搜索与分组](docs/01_桌面工作台/会话管理/需求文档.md#页面列表搜索与分组) 分组：active 项目按 FileStore 项目顺序，removed 项目随后，
  * 空 projectId 用「对话」组，无法解析的非空 projectId 各自独立成组并按
  * projectId 稳定排序。空组不渲染；组内顺序保持 Core 返回顺序。
  */

@@ -324,7 +324,7 @@ export type AguiEvent = {
   executionId?: string;
   taskName?: string;
   noticeContent?: string;
-  // Run-plan full snapshot, surfaced on AWAKEN_PLAN_UPDATED (contract §8.1).
+  // Run-plan full snapshot, surfaced on AWAKEN_PLAN_UPDATED (contract [事件合同](docs/02_主智能体闭环/运行计划/实现方案.md#事件合同)).
   planId?: string;
   planVersion?: number;
   planExplanation?: string;

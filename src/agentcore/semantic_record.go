@@ -72,13 +72,13 @@ const (
 	SemanticKindACPPermissionRequested SemanticKind = "acp_permission_requested"
 	SemanticKindACPPermissionResolved  SemanticKind = "acp_permission_resolved"
 	// SemanticKindScheduledNotice is the host-owned fixed-reminder fact of a
-	// scheduled task (contract §9.4). The payload carries only task/execution
+	// scheduled task (contract [固定提醒](docs/12_定时任务/定时执行与提醒/实现方案.md#固定提醒)). The payload carries only task/execution
 	// identity, the task name and the fixed content; it is never a user or
 	// assistant message.
 	SemanticKindScheduledNotice SemanticKind = "scheduled_notice"
 
 	// SemanticKindPlanUpdated is the durable, sanitized run-plan snapshot fact
-	// of one root run (contract: 运行计划与任务进度设计契约 §7.2). The payload
+	// of one root run (contract: [SemanticJournal](docs/02_主智能体闭环/运行计划/实现方案.md#semanticjournal)). The payload
 	// carries only the bounded snapshot, derived counters and tool_call_id —
 	// never model reasoning or raw unvalidated JSON.
 	SemanticKindPlanUpdated SemanticKind = "plan_updated"

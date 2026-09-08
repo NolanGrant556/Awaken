@@ -16,7 +16,7 @@ import (
 // Execution error codes recorded on execution-history records. They are
 // stable wire values; error messages next to them stay short code-level
 // phrases and never carry prompts, reminder content, API keys, tokens,
-// QR codes or raw stdout/stderr (contract §9.3).
+// QR codes or raw stdout/stderr (contract [Agent 任务](docs/12_定时任务/定时执行与提醒/实现方案.md#agent-任务)).
 const (
 	ErrorCodeTaskAlreadyRunning           = "TASK_ALREADY_RUNNING"
 	ErrorCodeTaskThreadBusy               = "TASK_THREAD_BUSY"
@@ -147,12 +147,12 @@ func (e *RunServiceExecutor) Cancel(taskID string) {
 }
 
 // UpdateScheduledThreadTitle follows a task rename onto the dedicated thread
-// (contract §4.5); a manually renamed thread title is never overwritten.
+// (contract [专属线程](docs/12_定时任务/定时执行与提醒/需求文档.md#专属线程)); a manually renamed thread title is never overwritten.
 func (e *RunServiceExecutor) UpdateScheduledThreadTitle(threadID, taskName string) error {
 	return e.RunService.UpdateScheduledThreadTitle(threadID, taskName)
 }
 
-// resolveWorkspace re-reads the project at trigger time (contract §9.1): the
+// resolveWorkspace re-reads the project at trigger time (contract [项目与 TaskScope](docs/12_定时任务/定时执行与提醒/实现方案.md#项目与-taskscope)): the
 // current primary folder becomes the working directory and all current
 // folders the readable/writable/output roots. A folder-less project runs in
 // its session workspace. Removed projects, deletion in progress and missing
@@ -200,7 +200,7 @@ func (e *RunServiceExecutor) resolveWorkspace(projectID string) (runtime.Workspa
 }
 
 // resolveProfile re-resolves the model profile at trigger time (contract
-// §9.2): an empty ID picks the current default ready profile, an explicit ID
+// [模型 profile](docs/12_定时任务/定时执行与提醒/实现方案.md#模型-profile)): an empty ID picks the current default ready profile, an explicit ID
 // must still be ready. There is no fallback and no silent provider switch.
 func (e *RunServiceExecutor) resolveProfile(profileID string) (*runtime.ModelProfileConfig, *ExecError) {
 	if e.Profiles == nil {
@@ -294,7 +294,7 @@ func (e *RunServiceExecutor) ExecuteAgent(ctx context.Context, task Task, exec E
 
 // mapStartError converts StartScheduledRun failures into sanitized execution
 // outcomes. Thread busy is a skip, not an error: nothing is written to any
-// other thread (contract §4.5).
+// other thread (contract [专属线程](docs/12_定时任务/定时执行与提醒/需求文档.md#专属线程)).
 func mapStartError(err error) *ExecError {
 	switch {
 	case errors.Is(err, runtime.ErrThreadBusy):
@@ -337,7 +337,7 @@ func (e *RunServiceExecutor) ExecuteReminder(ctx context.Context, task Task, exe
 
 // interactionGate reports the interaction gate an event represents, or "".
 // Unattended scheduled runs fail fast on the first ask_user, external
-// authorization, ACP permission or auth gate (contract §9.3); only the gate
+// authorization, ACP permission or auth gate (contract [Agent 任务](docs/12_定时任务/定时执行与提醒/实现方案.md#agent-任务)); only the gate
 // type is recorded.
 func interactionGate(event runtime.Event) string {
 	if event.Kind == runtime.EventKindAgent {

@@ -967,7 +967,7 @@ func skillContextBlocksFromSemanticRecords(records []agentcore.SemanticRecord) [
 }
 
 // runPlanSnapshotsFromSemanticRecords rebuilds the latest root run plan
-// snapshot per run from durable plan_updated records (运行计划契约 §7.3).
+// snapshot per run from durable plan_updated records ([运行状态机](docs/02_主智能体闭环/运行计划/实现方案.md#运行状态机)).
 // Child-local records (payload agent_id set) never contribute, and a lower
 // version never replaces a higher one — replay is idempotent by plan version.
 func runPlanSnapshotsFromSemanticRecords(records []agentcore.SemanticRecord) map[string]tool.RunPlanSnapshot {

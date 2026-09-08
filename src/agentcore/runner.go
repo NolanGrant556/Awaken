@@ -335,7 +335,7 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	r.toolRuntime.runID = r.runID
 	r.toolRuntime.threadID = r.threadID
 	if r.config.SubagentOrigin == nil {
-		// Root-only run plan service (运行计划契约 §6.1/§7.2): child runners
+		// Root-only run plan service ([工具定义](docs/02_主智能体闭环/运行计划/实现方案.md#工具定义)/[SemanticJournal](docs/02_主智能体闭环/运行计划/实现方案.md#semanticjournal)): child runners
 		// (SubagentOrigin != nil) never receive one, so update_plan degrades
 		// to plan_service_unavailable there instead of mutating parent state.
 		planService := NewRunPlanService(RunPlanServiceConfig{
@@ -2325,7 +2325,7 @@ func anchorChildWorkspace(child *AgentConfig, parent AgentConfig, receipt subage
 }
 
 // persistRunPlanRecord is the journal-first gate behind RunPlanService
-// (contract §7.2): the plan_updated record must be appended AND flushed
+// (contract [SemanticJournal](docs/02_主智能体闭环/运行计划/实现方案.md#semanticjournal)): the plan_updated record must be appended AND flushed
 // before the in-memory snapshot may move. Failures are reported through the
 // run's standard fail-stop persistence path so a half-persisted plan can
 // never become live truth.

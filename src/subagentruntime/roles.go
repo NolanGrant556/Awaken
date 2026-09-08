@@ -44,7 +44,7 @@ const (
 	acpConfigHidden     = "configure_acp_runner"
 	hookConfigHidden    = "configure_hook"
 	// runPlanHidden keeps the root-only update_plan tool out of child tool
-	// pools; child progress uses native Subagent facts (运行计划契约 §6.1).
+	// pools; child progress uses native Subagent facts ([工具定义](docs/02_主智能体闭环/运行计划/实现方案.md#工具定义)).
 	runPlanHidden = "update_plan"
 	// archivedHistoryHidden keeps cross-thread private history in the root
 	// Agent. Children receive only the task context their parent delegates.

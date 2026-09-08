@@ -271,6 +271,11 @@ describe("taskToDraft", () => {
 });
 
 describe("describeCronExpression / formatScheduleText", () => {
+  it("preserves custom restrictions instead of inventing a daily schedule", () => {
+    for (const expression of ["0 9 * * 2-7/2", "0 9 * * 1,3,5", "0 9 * 1 *", "0 9 1,15 * *", "*/10 9 * * *"]) {
+      expect(describeCronExpression(expression)).toBe(`Cron ${expression}`);
+    }
+  });
   it("describes common expressions", () => {
     expect(describeCronExpression("30 9 * * 1-5")).toBe("工作日 09:30");
     expect(describeCronExpression("0 10 * * 6,0")).toBe("周六/周日 10:00");

@@ -1,0 +1,85 @@
+{
+  "captured_at": "2026-09-08T16:35:45.441319+00:00",
+  "platform": "macOS arm64",
+  "entrypoint": "npm run close:desktop && npm run open:desktop",
+  "base_commit": "aada2caba7f4cec66213bfe559070372f7aad332",
+  "working_tree": "uncommitted fixes; source digests below identify inspected code",
+  "data_scope": "Dedicated BUG0909-A and BUG0909-B test projects; ordinary Awaken business root. Shared folder is a temporary test fixture.",
+  "desktop_checks": [
+    "folderless project first run produced no extra project",
+    "shared-folder A/B threads remain in their explicit projects",
+    "A/B unsent drafts remain independent across switching",
+    "paused custom Cron Agent ran once and finished successfully",
+    "full Desktop/Core restart preserved four thread owners and scheduled success",
+    "continued the same shared-folder A thread after restart and received BUG-FIX-A-RESUMED-0909"
+  ],
+  "automated_only": [
+    "two FileStore instances interleaving writes and stale snapshot rebuild",
+    "submission rejection arriving after navigation",
+    "newer draft edits invalidate an older recovery",
+    "Agent terminal before Subscribe, subscriber overflow, cancellation and timeout",
+    "manual queue skip consumes zero schedule occurrences",
+    "weekday-range step expansion"
+  ],
+  "thread_owners": {
+    "thread_1788885020715099000_10": "project_1788884642149916000_1",
+    "thread_1788884816804141000_6": "project_1788884796229535000_4",
+    "thread_1788884836283829000_8": "project_1788884642149916000_1",
+    "thread_1788884674087134000_3": "project_1788884642149916000_1"
+  },
+  "project_names": {
+    "project_1788884796229535000_4": "BUG0909-B",
+    "project_1788884642149916000_1": "BUG0909-A"
+  },
+  "scheduled_task": {
+    "task_id": "sched_68bed2fa-b8a9-4954-b1ca-9d2cb6784987",
+    "enabled": false,
+    "cron": "0 9 * * 2-7/2",
+    "last_status": "success"
+  },
+  "screenshots": {
+    "desktop-cold-recovery.png": "A shared-folder thread reopened after full restart",
+    "desktop-schedule-success.png": "paused Agent task success and preserved custom Cron text",
+    "desktop-draft-A.png": "A draft restored on return from B",
+    "desktop-draft-B.png": "B draft retained on return from A"
+  },
+  "source_sha256": {
+    "src/runtime/file_desktop_store.go": "1631f355d50e59d6a1ba8def68e8ddea74aa5a249dc7450902ab180c483824cc",
+    "src/runtime/event_bus.go": "0cb9c6a5a7c2004a693eb57c6eb5614c98f25c4a80f5153028676635ea31a1c7",
+    "src/scheduledtask/executor.go": "b8e3368c12ca718a4a1274410db3ff3a2a33c898f504b4f919b344ee8d19e6b5",
+    "src/scheduledtask/scheduler.go": "2552e1e1471716433c8491c9918efb2cd9561dffba5852d660f8105ebc36b8f9",
+    "src/scheduledtask/clock.go": "ed0bba03039b7552fcd037cfaa48fbd86a47f56fcd333982d599ccc347aab801",
+    "apps/desktop/src/renderer/useRunSubmission.ts": "5814289a417d1c0aedceb46cb711ba17c4a54a4533461c8ebb6f22a24954885c",
+    "apps/desktop/src/renderer/useThreadComposerDraft.ts": "aed146d50a089cea0591e0dd2eb6f342529439ad658bcd2b962ee535c2cdf626",
+    "apps/desktop/src/renderer/scheduled-tasks/adapter.ts": "53990f97d039a8af3ce0863bd8384a5562a95dc06385b9aa0fb3f10c46cdd72f"
+  },
+  "validation": {
+    "desktop_vitest": {
+      "files": 144,
+      "passed": 1519,
+      "max_workers": 4
+    },
+    "go_packages": [
+      "src/runtime",
+      "src/scheduledtask",
+      "src/filestore",
+      "src/server",
+      "src/protocol/agui"
+    ],
+    "targeted_race": "passed",
+    "desktop_typecheck": "passed",
+    "desktop_build": "passed",
+    "docs_check": "passed",
+    "diff_check": "passed"
+  },
+  "validation_notes": [
+    "An unchanged Lark onboarding test failed in the initial default-concurrency run and its isolated retry; both subsequent full-suite runs with maxWorkers=4 passed without changing Lark code.",
+    "Desktop startup rebuilds the design-system dist; typecheck was rerun in dependency order after a concurrent startup/typecheck encountered intermediate declaration output.",
+    "Only named test projects were used for Desktop actions; no existing project history was deleted. The test scheduled task remains paused."
+  ],
+  "final_activity": {
+    "active_run_count": 0,
+    "cancelling_run_count": 0,
+    "observed_at": "2026-09-08T16:37:36Z"
+  }
+}

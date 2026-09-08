@@ -173,3 +173,33 @@ func TestEventBusSubscribeAfterSeqBeyondLastReturnsNoHistory(t *testing.T) {
 		t.Fatalf("expected 0 replayed events after seq=100, got %d", len(sub.History))
 	}
 }
+
+func TestEventBusRunCompletionIsIndependentOfSubscriberClosure(t *testing.T) {
+	bus := NewEventBus()
+	sub := bus.Subscribe(0)
+	for i := 0; i <= cap(sub.Events); i++ {
+		bus.Append(Event{}, false)
+	}
+	for range sub.Events {
+	}
+	select {
+	case <-sub.Done:
+		t.Fatal("subscriber overflow completed the run")
+	default:
+	}
+	bus.Append(Event{}, true)
+	select {
+	case <-sub.Done:
+	default:
+		t.Fatal("terminal did not close run completion signal")
+	}
+	replay := bus.Subscribe(0)
+	if replay.Events != nil {
+		t.Fatal("completed replay unexpectedly has a live channel")
+	}
+	select {
+	case <-replay.Done:
+	default:
+		t.Fatal("late subscriber lost run completion")
+	}
+}

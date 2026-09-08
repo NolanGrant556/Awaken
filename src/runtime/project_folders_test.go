@@ -694,6 +694,9 @@ func TestLegacySnapshotWithoutFoldersIsPromotedToASinglePrimaryFolder(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.journal.Append(fileLifecycleMutation{Kind: "EnsureProject", Projects: []Project{{ProjectID: "project_legacy", WorkspaceRoot: normalizeProjectWorkspaceRoot(legacyRoot), DisplayName: "legacy", State: ProjectStateActive, Version: 1}}}); err != nil {
+		t.Fatal(err)
+	}
 	legacy := map[string]any{
 		"applied_seq": 0,
 		"projects": map[string]any{

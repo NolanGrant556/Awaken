@@ -30,6 +30,7 @@ function setup(startRun: Options["runtimeClient"]["startRun"]) {
     onTranscript: vi.fn(),
   });
   session.begin("A");
+  const restoreDraft = vi.fn();
   const draft = {
     draft: {
       value: "isolated test",
@@ -39,8 +40,7 @@ function setup(startRun: Options["runtimeClient"]["startRun"]) {
       tokenPlacements: {},
       tokenLeadingTexts: {},
     },
-    clearDraft: vi.fn(),
-    replaceDraft: vi.fn(),
+    clearForSubmission: vi.fn(() => restoreDraft),
   } as unknown as Options["draft"];
   const options: Options = {
     runtimeClient: client,
@@ -67,6 +67,7 @@ function setup(startRun: Options["runtimeClient"]["startRun"]) {
     client,
     dispatch,
     draft,
+    restoreDraft,
     actions: useRunSubmission(options),
   };
 }
@@ -103,13 +104,26 @@ describe("run submission coordination", () => {
       }),
     );
     await f.actions.handleSubmitWithPrompt();
-    expect(f.draft.replaceDraft).toHaveBeenCalledWith(
+    expect(f.draft.clearForSubmission).toHaveBeenCalledWith("thread:A");
+    expect(f.restoreDraft).toHaveBeenCalledWith(
       expect.objectContaining({ value: "isolated test" }),
-      "thread:A",
     );
     expect(f.dispatch).toHaveBeenLastCalledWith({
       type: "run/createFailed",
       message: "offline",
     });
   });
+});
+
+it("restores a rejected submission after leaving its thread without changing the selected view", async () => {
+  let reject!: (error: Error) => void;
+  const pending = new Promise<RuntimeRun>((_, fail) => { reject = fail; });
+  const f = setup(vi.fn(() => pending));
+  const sending = f.actions.handleSubmitWithPrompt();
+  expect(f.draft.clearForSubmission).toHaveBeenCalledWith("thread:A");
+  f.session.begin("B");
+  reject(new Error("offline"));
+  await sending;
+  expect(f.restoreDraft).toHaveBeenCalledWith(expect.objectContaining({ value: "isolated test" }));
+  expect(f.dispatch.mock.calls.some(([action]) => action.type === "run/createFailed")).toBe(false);
 });

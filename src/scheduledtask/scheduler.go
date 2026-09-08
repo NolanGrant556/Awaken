@@ -482,7 +482,7 @@ func (s *Scheduler) dispatch(task Task, occurrence time.Time, trigger Trigger, i
 		// nothing new to dispatch. Make sure the occurrence is consumed and the
 		// task completion state is up to date (e.g. one-time calendar after crash).
 		if !manual {
-			if err := s.consumeIfNeeded(task, occurrence); err != nil {
+			if err := s.consumeIfNeeded(task, occurrence, trigger); err != nil {
 				// The existing execution is already in flight or terminal; record a
 				// separate persistence-failure terminal for this dispatch attempt.
 				s.transitionTerminal(task, exec, ExecutionStatusError, ErrorCodePersistenceFailed, err.Error(), "", "")
@@ -503,7 +503,7 @@ func (s *Scheduler) dispatch(task Task, occurrence time.Time, trigger Trigger, i
 			return exec
 		}
 		s.transitionTerminal(task, exec, ExecutionStatusSkipped, ErrorCodeTaskAlreadyRunning, "task already has an active execution", "", "")
-		if err := s.consumeIfNeeded(task, occurrence); err != nil {
+		if err := s.consumeIfNeeded(task, occurrence, trigger); err != nil {
 			// Occurrence consumption is atomic and conflicts are now impossible; a
 			// failure here is a hard persistence error. The skipped record stays
 			// terminal; the next scheduler loop will re-evaluate this occurrence.
@@ -530,7 +530,10 @@ func (s *Scheduler) finalizeQueuedManualConflict(task Task, exec Execution) {
 }
 
 // consumeIfNeeded advances the occurrence cursor exactly once per occurrence.
-func (s *Scheduler) consumeIfNeeded(task Task, occurrence time.Time) error {
+func (s *Scheduler) consumeIfNeeded(task Task, occurrence time.Time, trigger Trigger) error {
+	if trigger == TriggerManual {
+		return nil
+	}
 	current, err := s.repo.Get(task.TaskID)
 	if err != nil {
 		return err
@@ -572,7 +575,7 @@ func (s *Scheduler) recordSkipped(task Task, occurrence time.Time, trigger Trigg
 			return
 		}
 	}
-	if err := s.consumeIfNeeded(task, occurrence); err != nil {
+	if err := s.consumeIfNeeded(task, occurrence, trigger); err != nil {
 		// The skipped record is already terminal; a consumption failure here is
 		// best-effort surfaced through the next loop's re-evaluation.
 		_ = err
@@ -607,7 +610,7 @@ func (s *Scheduler) runExecution(active *activeExecution, task Task, exec Execut
 		if status, code, message := s.acquireAgentSlot(active, task, occurrence); status != "" {
 			if status == ExecutionStatusSkipped {
 				s.transitionTerminal(task, exec, status, code, message, "", "")
-				s.consumeIfNeeded(task, occurrence)
+				s.consumeIfNeeded(task, occurrence, exec.Trigger)
 				s.checkCompletion(task.TaskID)
 				s.publishFinished(task, exec, ExecutionStatusSkipped, "")
 			} else if !s.isShutdown(active) {
@@ -627,7 +630,7 @@ func (s *Scheduler) runExecution(active *activeExecution, task Task, exec Execut
 	// occurrences count whether they succeed, fail or skip; manual never
 	// counts).
 	if !manual {
-		if err := s.consumeIfNeeded(task, occurrence); err != nil {
+		if err := s.consumeIfNeeded(task, occurrence, exec.Trigger); err != nil {
 			s.transitionTerminal(task, exec, ExecutionStatusError, ErrorCodePersistenceFailed, err.Error(), "", "")
 			s.publishFinished(task, exec, ExecutionStatusError, "")
 			return

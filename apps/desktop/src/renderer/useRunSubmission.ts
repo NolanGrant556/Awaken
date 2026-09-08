@@ -31,8 +31,7 @@ type Options = {
   onRunStarted: (projectId?: string) => void;
   draft: {
     draft: ThreadComposerDraft;
-    clearDraft: () => void;
-    replaceDraft: (draft: ThreadComposerDraft, ownerKey?: string) => void;
+    clearForSubmission: (ownerKey?: string) => (draft: ThreadComposerDraft) => void;
   };
   composerDraftKey: string;
   selectedModelProfile?: RuntimeModelProfileSummary;
@@ -69,8 +68,7 @@ export function useRunSubmission(options: Options) {
   } = options;
   const {
     draft,
-    clearDraft: clearThreadComposerDraft,
-    replaceDraft: replaceComposerDraft,
+    clearForSubmission,
   } = options.draft;
   const {
     value: composerValue,
@@ -211,7 +209,7 @@ export function useRunSubmission(options: Options) {
       });
     }
     options?.onReplacementCommitted?.();
-    clearThreadComposerDraft();
+    const restoreSubmissionDraft = clearForSubmission(composerDraftKey);
 
     try {
       const runProjectId = scope.projectId;
@@ -273,7 +271,6 @@ export function useRunSubmission(options: Options) {
       void refreshThreads();
       await threadSession.subscribe(run, loadSeq);
     } catch (error) {
-      if (!threadSession.isCurrent(loadSeq)) return;
       const message =
         error instanceof Error ? error.message : "Failed to create run";
       const issue = error as Error & { code?: string; commentId?: string };
@@ -288,7 +285,8 @@ export function useRunSubmission(options: Options) {
               ),
             }
           : draftComposerState;
-      replaceComposerDraft(restoredComposerState, composerDraftKey);
+      restoreSubmissionDraft(restoredComposerState);
+      if (!threadSession.isCurrent(loadSeq)) return;
       if (options?.restoreCanonicalOnFailure && runtimeState.activeThreadId) {
         try {
           await threadSession.replay(runtimeState.activeThreadId, loadSeq);

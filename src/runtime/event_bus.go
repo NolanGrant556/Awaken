@@ -11,7 +11,10 @@ const subscriberBufferSize = 2048
 type Subscription struct {
 	History []Event
 	Events  <-chan Event
-	Close   func()
+	// Done closes only when the run publishes its terminal event. Events may
+	// close earlier when a slow subscriber is disconnected, or be nil on replay.
+	Done  <-chan struct{}
+	Close func()
 }
 
 type EventBus struct {
@@ -21,11 +24,13 @@ type EventBus struct {
 	subscribers map[int]chan Event
 	nextID      int
 	closed      bool
+	done        chan struct{}
 }
 
 func NewEventBus() *EventBus {
 	return &EventBus{
 		subscribers: make(map[int]chan Event),
+		done:        make(chan struct{}),
 	}
 }
 
@@ -66,6 +71,7 @@ func (b *EventBus) Append(event Event, terminal bool) {
 
 	if terminal {
 		b.subscribers = nil
+		close(b.done)
 	}
 }
 
@@ -80,7 +86,7 @@ func (b *EventBus) Subscribe(afterSeq uint64) Subscription {
 		}
 	}
 	if b.closed {
-		return Subscription{History: history}
+		return Subscription{History: history, Done: b.done}
 	}
 
 	id := b.nextID
@@ -91,6 +97,7 @@ func (b *EventBus) Subscribe(afterSeq uint64) Subscription {
 	return Subscription{
 		History: history,
 		Events:  ch,
+		Done:    b.done,
 		Close: func() {
 			b.mu.Lock()
 			delete(b.subscribers, id)

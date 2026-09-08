@@ -330,18 +330,25 @@ export function describeCronExpression(expression: string): string {
   if (fields.length !== 5) {
     return `Cron ${expression.trim()}`;
   }
-  const [minute, hour, dayOfMonth, , dayOfWeek] = fields;
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = fields;
+  const dowText = cronDowText(dayOfWeek);
+  // Describe only expressions this formatter understands completely. Dropping
+  // a month or weekday restriction would tell users a different schedule.
+  if (month !== "*" || (dayOfWeek !== "*" && !dowText) ||
+    (dayOfMonth !== "*" && (!/^\d+$/.test(dayOfMonth) || dayOfWeek !== "*"))) {
+    return `Cron ${expression.trim()}`;
+  }
 
   if (minute === "*" && hour === "*" && dayOfMonth === "*" && dayOfWeek === "*") {
     return "每分钟";
   }
   if (minute.startsWith("*/") && dayOfMonth === "*") {
+    if (hour !== "*" && !/^\d+-\d+$/.test(hour)) return `Cron ${expression.trim()}`;
     const every = minute.slice(2);
-    const dowText = cronDowText(dayOfWeek) || "每天";
     const hourRange = /^\d+-\d+$/.test(hour)
       ? ` ${hour.split("-").map((bound) => `${bound.padStart(2, "0")}:00`).join("–")}`
       : "";
-    return `${dowText}${hourRange} 每 ${every} 分钟`;
+    return `${dowText || "每天"}${hourRange} 每 ${every} 分钟`;
   }
 
   if (/^\d+$/.test(minute) && hour === "*" && dayOfMonth === "*" && dayOfWeek === "*") {
@@ -357,7 +364,6 @@ export function describeCronExpression(expression: string): string {
   if (dayOfMonth !== "*") {
     return `每月 ${Number(dayOfMonth)} 日 ${timeText}`;
   }
-  const dowText = cronDowText(dayOfWeek);
   if (dowText) {
     return `${dowText} ${timeText}`;
   }

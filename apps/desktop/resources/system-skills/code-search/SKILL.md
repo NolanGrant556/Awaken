@@ -1,15 +1,14 @@
 ---
 name: code-search
-version: 1.0.0
-description: 使用现有 WebSearch 检索代码、API 用法、具体符号与错误信息，并给出可复制的最小片段、版本约束、风险和来源。
-when_to_use: 用户需要查找某语言、框架或库的代码示例、具体符号用法、版本差异或错误解决方案时。
+version: 1.1.0
+description: 需要搜索公开代码示例、API 用法、版本差异或错误说明时使用。
 user-invocable: true
 context: inline
 ---
 
 # Code Search
 
-只使用现有 `WebSearch` 工具完成代码检索，不调用动态 MCP 工具，不调用已弃用的 `get_code_context_exa`，也不假设存在独立 `CodeSearch` 或 `WebFetch` 工具。
+使用 `WebSearch` 定位公开代码和 API 资料；需要完整示例或核验来源时，若当前 run 可用则用 `WebFetch` 读取官方原文。工具不可用或抓取不足时限定结论，不把搜索摘要当全文。不调用已弃用的 `get_code_context_exa`，不假设存在独立 `CodeSearch` 工具。工作区内部代码定位使用现有文件搜索工具，不因此加载本 Skill。
 
 当前固定使用 `context: inline`，在主 Agent 上下文中执行。这是现阶段的产品选择：等 Awaken 的 subagent 产品入口与真实 Desktop 验收完整后，再评估迁移为 fork；迁移前不得只修改 frontmatter 而绕过父子上下文、工具继承和验收合同。
 

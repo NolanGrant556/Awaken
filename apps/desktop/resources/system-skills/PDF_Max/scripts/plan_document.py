@@ -69,6 +69,19 @@ def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         string_set(manifest.get("hard_constraints"), "manifest.hard_constraints")
     )
     normalized["content_features"] = features
+    decisions = manifest.get("enhancement_decisions")
+    if decisions is not None:
+        if not isinstance(decisions, dict) or set(decisions) - {"context", "accept", "reject"}:
+            raise ValueError("enhancement_decisions 只接受 context、accept、reject")
+        if not isinstance(decisions.get("context"), str) or not decisions["context"].strip():
+            raise ValueError("enhancement_decisions.context 必须来自当前计划")
+        accepted = string_set(decisions.get("accept"), "enhancement_decisions.accept")
+        rejected = string_set(decisions.get("reject"), "enhancement_decisions.reject")
+        if accepted & rejected:
+            raise ValueError("同一增强不能同时接受和拒绝")
+        normalized["enhancement_decisions"] = {
+            "context": decisions["context"], "accept": sorted(accepted), "reject": sorted(rejected)
+        }
     return normalized
 
 
@@ -346,6 +359,16 @@ def choose_packages(
     low_risk: list[dict[str, Any]] = []
     confirmation: list[dict[str, Any]] = []
     exclusions: list[dict[str, str]] = []
+    decisions = manifest.get("enhancement_decisions") or {}
+    accepted = set(decisions.get("accept", []))
+    rejected = set(decisions.get("reject", []))
+    decidable = {
+        entry["id"] for entry in catalog["packages"]
+        if entry["adoption"] not in {"A", "B"}
+        and entry.get("conflict_group") != "slides-engine"
+    }
+    if (accepted | rejected) - decidable:
+        raise ValueError("增强决策包含未知或不可选的 package ID")
 
     for entry in catalog["packages"]:
         if entry.get("conflict_group") == "slides-engine":
@@ -366,8 +389,15 @@ def choose_packages(
         elif entry["adoption"] == "B":
             low_risk.append(item)
         else:
-            item["auto_apply"] = False
-            confirmation.append(item)
+            if entry["id"] in rejected:
+                exclusions.append({"id": entry["id"], "reason": "用户已拒绝本次增强。"})
+            elif entry["id"] in accepted:
+                item["auto_apply"] = True
+                item["reason"] = "用户已确认当前计划中的增强。"
+                required.append(item)
+            else:
+                item["auto_apply"] = False
+                confirmation.append(item)
 
     grouped: dict[str, list[dict[str, Any]]] = {}
     for item in required + low_risk + confirmation:
@@ -380,6 +410,7 @@ def choose_packages(
         hard = [item for item in items if item.get("adoption") == "A"]
         if len(hard) == 1:
             winner = hard[0]
+            required = [item for item in required if item.get("conflict_group") != group or item is winner]
             low_risk = [item for item in low_risk if item.get("conflict_group") != group]
             confirmation = [item for item in confirmation if item.get("conflict_group") != group]
             for item in items:
@@ -422,8 +453,16 @@ def create_plan(
     previous: dict[str, Any] | None,
 ) -> dict[str, Any]:
     catalog_version = str(catalog.get("catalog_version", "unknown"))
+    decision_manifest = {key: value for key, value in manifest.items() if key != "enhancement_decisions"}
+    # Bind choices to the actual catalog contents as well as task and compiler.
+    catalog_digest = hashlib.sha256(json.dumps(catalog, sort_keys=True).encode("utf-8")).hexdigest()
+    decision_context = fingerprint(decision_manifest, catalog_digest, version)
+    decisions = manifest.get("enhancement_decisions")
+    if decisions and decisions["context"] != decision_context:
+        raise ValueError("增强确认已过期：移除 enhancement_decisions，重新规划后核对选择")
     fp = fingerprint(manifest, catalog_version, version)
     plan = new_plan(fp, catalog_version, version)
+    plan["decision_context"] = decision_context
     plan = choose_packages(manifest, catalog, choose_base(manifest, catalog, plan))
     # 旧计划只作为“是否复用决策”的提示；完整计划始终从可信清单重新生成，
     # 不会把工作区中的自由文本命令复制回新计划。

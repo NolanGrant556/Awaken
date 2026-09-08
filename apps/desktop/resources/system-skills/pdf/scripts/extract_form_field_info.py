@@ -8,6 +8,8 @@ import sys
 
 from pypdf import PdfReader
 
+from form_fields import field_locations
+
 
 def make_field_dict(field_id: str, field) -> dict:
     info = {"field_id": field_id}
@@ -31,21 +33,22 @@ def main() -> int:
         return 2
 
     reader = PdfReader(sys.argv[1])
-    fields = reader.get_fields() or {}
     out = []
-    for field_id, field in fields.items():
-        if field is None:
-            continue
-        if field.get("/Kids") and field.get("/FT") != "/Tx":
-            continue
+    for field_id, (field, pages) in field_locations(reader).items():
         item = make_field_dict(field_id, field)
-        # 粗略页码：pypdf 不总提供；填表脚本里用户可再核对
-        item["page"] = 1
-        out.append(item)
+        if not pages:
+            out.append({**item, "page": None, "warning": "no visible widget; cannot fill by page"})
+        else:
+            # One row per real widget page preserves the existing page contract.
+            out.extend({**item, "page": page} for page in pages)
 
     print(json.dumps(out, ensure_ascii=False, indent=2))
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except (OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1)

@@ -68,3 +68,7 @@ await pptx.writeFile({ fileName: "output.pptx" });
 ```
 
 写出后立即进行内容、结构、视觉三层 QA。结构错误应在生成脚本中修复并重建，不要手工修补最终包后丢失可复现性。
+
+## 生成顺序与对象完整性
+
+PptxGenJS 表格、图表或复制页产生重复 shape ID 时，修复生成順序或重建对象，不以打包后 XML 补丁作为正式生成步骤。组合图次坐标轴必须同时声明完整主／次 category 与 value axis。speaker notes 使用 slide.addNotes()，不画进页面。

@@ -1,6 +1,6 @@
 ---
 name: mailbox-organization
-description: 设计和执行 Outlook 邮箱文件夹、分类、已读状态和邮件移动方案。用户要求建立文件夹、管理分类、归档、批量移动或整理邮箱结构时使用。
+description: 创建或整理 Outlook 文件夹、分类、已读状态和邮件归档时使用。
 metadata:
   display_name: 邮箱文件夹与分类
 ---

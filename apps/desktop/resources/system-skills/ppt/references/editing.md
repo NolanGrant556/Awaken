@@ -45,3 +45,25 @@
 - 不使用正则跨多个标签盲目替换；
 - 外部文件先校验 ZIP 路径、relationship 和 content type；
 - 输出到新文件，并保留原件作为结构基线。
+
+## 模板编辑
+
+先建立版式地图：
+
+```bash
+python3 -m markitdown template.pptx > template-content.md
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/thumbnail.py" template.pptx template-map.jpg --json
+```
+
+再按 `references/editing.md` 修改。不要把所有内容都塞进同一个“标题 + 项目符号”模板页；布局数量、内容数量不一致时应删除整组多余视觉元素，而不是只清空文字。
+
+高保真解包路线：
+
+```bash
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/ooxml_package.py" unpack template.pptx ./pptx-unpacked
+# Read/Edit 精确修改 ppt/slides、notesSlides、charts 或 relationships
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/ooxml_package.py" pack ./pptx-unpacked output.pptx
+"<doctor 返回的 execution_plan.python>" -B "${AWAKEN_SKILL_DIR}/scripts/validate_pptx.py" output.pptx --original template.pptx --json
+```
+
+结构性增删页必须先完成，再修改具体页面内容；否则复制页可能把已替换的内容或共享图表关系一起复制。

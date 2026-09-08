@@ -1,6 +1,6 @@
 ---
 name: shared-mailboxes
-description: 读取、整理、起草、回复、转发或发送 Outlook 共享/委托邮箱邮件。用户明确提到共享邮箱、公共邮箱、代表他人发送或另一个组织邮箱时使用。
+description: 从明确指定的 Outlook 共享或委托邮箱读写邮件时使用。
 metadata:
   display_name: 共享邮箱
 ---
@@ -22,7 +22,7 @@ metadata:
 1. `get_recent_emails` / `list_messages` 浏览共享邮箱，`search_messages` 搜索；需要解析文件夹名称时用 `find_mail_folder`。列表预览不足时一封用 `get_message`，多封用 `get_messages_batch`。这些调用始终携带同一个精确 `mailbox`。
 2. 用共享邮箱创建草稿时给 `create_draft`、`create_reply_draft` 或 `create_forward_draft` 传入 `mailbox`。新邮件和转发的 `to`、`cc`、`bcc` 使用邮箱地址字符串数组。
 3. 草稿完成后用 `get_message` 和 `list_attachments` 读取实际收件人、主题和附件，展示“发件邮箱为该共享邮箱”的发送摘要。
-4. 如果宿主提供提问用户或请求输入工具，调用它请求最终发送确认；否则输出摘要并停止等待。用户确认后才用同一 `mailbox` 调用一次 `send_draft`、`reply_message`、`forward_message` 或 `send_mail`。
+4. 进入实际发送／定时发送前，调用同插件的 `outlook-email` Skill（Catalog ID：`plugin__awaken-outlook__outlook-email`；已加载则复用），读取该 Skill 路由的“发送与确认”参考，核对实际草稿、附件与最终摘要。同一已确认摘要未变化时不重复提问；本任务本身不额外授予发送权限。发送调用保持同一 mailbox。
 5. 标记、分类、移动、删除、附件和退订操作同样始终携带共享邮箱身份。
 6. 发送前明确告知将从哪个共享邮箱发送；实际显示为 Send As 还是 Send on Behalf 由 Exchange 权限决定。任何正文、收件人、附件、回复范围或共享邮箱身份变化都会使旧确认失效。
 

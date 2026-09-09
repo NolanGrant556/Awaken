@@ -22,9 +22,6 @@ import {
   reorderProjectIds,
   shouldSubmitComposerInputKey,
   shouldActivateComposerMetaItemKey,
-  slashPaletteStyleForAnchor,
-  slashPaletteStyleForCaret,
-  slashPreviewStyleForAnchor,
 } from "@awaken/design-system";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -112,7 +109,6 @@ import {
   slashTriggerFromComposerValue,
   type SlashAction,
 } from "./composerSlash";
-import { composerRuntimePanelsForStatus } from "./useComposerLifecycle";
 import {
   composerSelectionsEqual,
   composerDraftOwnerKey,
@@ -2294,24 +2290,6 @@ describe("Composer Slash Palette helpers", () => {
   });
 });
 
-describe("composer lifecycle presentation", () => {
-  it("builds runtime panels without changing their placement order", () => {
-    expect(
-      composerRuntimePanelsForStatus({
-        desktopNeedsRestart: true,
-        desktopStarting: true,
-      }),
-    ).toEqual([
-      {
-        id: "restart",
-        title: "Awaken 需要重新启动",
-        message: "请退出 Awaken 后重新打开。",
-        tone: "error",
-      },
-    ]);
-  });
-});
-
 describe("assistant answer footer contract", () => {
   it("shows final answer actions only for completed final answers", () => {
     expect(
@@ -2562,68 +2540,7 @@ describe("AwakenComposerBar layout contract", () => {
     expect(html).not.toContain("composer-bar-inline-editor");
   });
 
-  it("keeps slash preview positioning inside the viewport", () => {
-    const rightEdge = slashPreviewStyleForAnchor(
-      { left: 600, right: 700, top: 40 },
-      { width: 760, height: 420 },
-    );
-    const rightEdgeLeft = Number(rightEdge.left);
-    const rightEdgeWidth = Number(rightEdge.width);
 
-    expect(rightEdgeWidth).toBeLessThanOrEqual(220);
-    expect(rightEdgeLeft).toBeGreaterThanOrEqual(8);
-    expect(rightEdgeLeft + rightEdgeWidth).toBeLessThanOrEqual(752);
-
-    const narrowViewport = slashPreviewStyleForAnchor(
-      { left: 150, right: 190, top: 170 },
-      { width: 210, height: 220 },
-    );
-    const narrowLeft = Number(narrowViewport.left);
-    const narrowTop = Number(narrowViewport.top);
-    const narrowWidth = Number(narrowViewport.width);
-
-    expect(narrowLeft).toBeGreaterThanOrEqual(8);
-    expect(narrowLeft + narrowWidth).toBeLessThanOrEqual(202);
-    expect(narrowTop).toBeGreaterThanOrEqual(8);
-  });
-
-  it("anchors slash preview relative to the palette instead of the desktop", () => {
-    const style = slashPreviewStyleForAnchor(
-      { left: 420, right: 720, top: 180 },
-      { width: 1200, height: 700 },
-      { left: 420, top: 120 },
-    );
-
-    expect(style.left).toBe(306);
-    expect(style.top).toBe(58);
-    expect(style.width).toBe(220);
-  });
-
-  it("limits slash palette height to the space above the composer", () => {
-    expect(
-      slashPaletteStyleForAnchor(160, 700)["--composer-bar-slash-max-height"],
-    ).toBe("146px");
-    expect(
-      slashPaletteStyleForAnchor(520, 700)["--composer-bar-slash-max-height"],
-    ).toBe("210px");
-  });
-
-  it("anchors the slash palette beside the caret and clamps it inside the viewport", () => {
-    expect(
-      slashPaletteStyleForCaret(
-        { left: 350, top: 400 },
-        { left: 100, right: 1100, bottom: 600 },
-        { width: 1200, height: 700 },
-      ),
-    ).toMatchObject({ left: "250px", bottom: "205px" });
-    expect(
-      slashPaletteStyleForCaret(
-        { left: 1150, top: 400 },
-        { left: 100, right: 1100, bottom: 600 },
-        { width: 1200, height: 700 },
-      ).left,
-    ).toBe("832px");
-  });
 });
 
 describe("run plan presentation", () => {

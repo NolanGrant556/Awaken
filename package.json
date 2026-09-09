@@ -33,7 +33,8 @@
     "typecheck:desktop": "npm run build:ui && npm --workspace @awaken/desktop run typecheck",
     "capture:workbench": "node scripts/capture-workbench-acceptance.mjs",
     "capture:workbench:vrt": "node scripts/capture-workbench-vrt.mjs",
-    "acceptance:desktop-hardening": "node scripts/accept-desktop-hardening.mjs"
+    "acceptance:desktop-hardening": "node scripts/accept-desktop-hardening.mjs",
+    "test:composer-layout": "node --test scripts/tests/composer-layout.test.mjs"
   },
   "devDependencies": {
     "@electron/asar": "^4.3.0",

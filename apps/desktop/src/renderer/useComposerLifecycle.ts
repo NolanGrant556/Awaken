@@ -2,19 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 
 export type ComposerSubmitMode = "send" | "stop";
 
-export type ComposerRuntimePanel = {
-  id: string;
-  title: string;
-  message: string;
-  tone?: "error";
-};
-
-type ComposerRuntimeStatus = {
-  desktopNeedsRestart: boolean;
-  desktopStarting: boolean;
-};
-
-type ComposerLifecycleOptions = ComposerRuntimeStatus & {
+type ComposerLifecycleOptions = {
   composerValue: string;
   desktopReady: boolean;
   isBusy: boolean;
@@ -35,30 +23,11 @@ type ComposerLifecycle = {
   composerFocusOffset?: number;
   requestComposerFocus: (offset?: number) => void;
   composerBarState: ComposerBarLifecycleState;
-  composerRuntimePanels: ComposerRuntimePanel[];
 };
-
-export function composerRuntimePanelsForStatus({
-  desktopNeedsRestart,
-}: ComposerRuntimeStatus): ComposerRuntimePanel[] {
-  const panels: ComposerRuntimePanel[] = [];
-
-  if (desktopNeedsRestart) {
-    panels.push({
-      id: "restart",
-      title: "Awaken 需要重新启动",
-      message: "请退出 Awaken 后重新打开。",
-      tone: "error",
-    });
-  }
-  return panels;
-}
 
 export function useComposerLifecycle({
   composerValue,
   desktopReady,
-  desktopStarting,
-  desktopNeedsRestart,
   isBusy,
   isWorkspaceValid,
   hasAttachments,
@@ -96,20 +65,10 @@ export function useComposerLifecycle({
     trimmedComposerValue,
   ]);
 
-  const composerRuntimePanels = useMemo(
-    () =>
-      composerRuntimePanelsForStatus({
-        desktopNeedsRestart,
-        desktopStarting,
-      }),
-    [desktopNeedsRestart, desktopStarting],
-  );
-
   return {
     composerFocusRequest: composerFocusTarget.request,
     composerFocusOffset: composerFocusTarget.offset,
     requestComposerFocus,
     composerBarState,
-    composerRuntimePanels,
   };
 }

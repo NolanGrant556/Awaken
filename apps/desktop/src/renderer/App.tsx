@@ -703,8 +703,6 @@ export function App() {
   const composerLifecycle = useComposerLifecycle({
     composerValue,
     desktopReady,
-    desktopStarting,
-    desktopNeedsRestart,
     isBusy,
     isWorkspaceValid,
     hasAttachments:
@@ -713,8 +711,7 @@ export function App() {
       composerComments.length > 0,
     inputAttachmentBlocked: false,
   });
-  const { requestComposerFocus, composerBarState, composerRuntimePanels } =
-    composerLifecycle;
+  const { requestComposerFocus, composerBarState } = composerLifecycle;
   const composerInput = useComposerInput({
     runtimeClient,
     desktopReady,
@@ -1031,9 +1028,7 @@ export function App() {
     },
     registry: projectRegistry,
     forceFull: Boolean(
-      composerRuntimePanels.length > 0 ||
-        activeUserQuestion ||
-        activeExternalInteraction,
+      desktopNeedsRestart || activeUserQuestion || activeExternalInteraction,
     ),
     hasDraft: hasExpandedFileComposerDraft({
       effectiveText: trimmedEffectiveComposerValue,
@@ -1755,29 +1750,6 @@ export function App() {
     );
   }
 
-  function renderComposerRuntimePanels() {
-    if (composerRuntimePanels.length === 0) {
-      return null;
-    }
-
-    return (
-      <div className="composer-runtime-panels">
-        {composerRuntimePanels.map((panel) => (
-          <div
-            key={panel.id}
-            className={`runtime-panel composer-runtime-panel${
-              panel.tone === "error" ? " runtime-panel-error" : ""
-            }`}
-            role={panel.tone === "error" ? "alert" : "status"}
-          >
-            <strong>{panel.title}</strong>
-            <p>{panel.message}</p>
-          </div>
-        ))}
-      </div>
-    );
-  }
-
   function renderNoticeToast() {
     if (!notice) {
       return null;
@@ -1956,9 +1928,9 @@ export function App() {
                             <div className="composer-dock-stack">
                               <DesktopStartupStatus
                                 starting={desktopStarting}
+                                needsRestart={desktopNeedsRestart}
                                 placement="inline"
                               />
-                              {renderComposerRuntimePanels()}
                               {renderUserQuestionPrompt()}
                               {renderExternalActionGate()}
                               {renderComputerReviewGate()}
@@ -2029,10 +2001,12 @@ export function App() {
                       {showCenterComposer ? (
                         <div className="run-stage-center-composer">
                           <div className="desktop-task-welcome">
-                            <DesktopStartupStatus starting={desktopStarting} />
+                            <DesktopStartupStatus
+                              starting={desktopStarting}
+                              needsRestart={desktopNeedsRestart}
+                            />
                             <TaskWelcome />
                           </div>
-                          {renderComposerRuntimePanels()}
                           {renderUserQuestionPrompt()}
                           {renderExternalActionGate()}
                           {renderComputerReviewGate()}

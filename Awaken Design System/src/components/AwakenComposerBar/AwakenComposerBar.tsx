@@ -13,9 +13,12 @@ import {
   flip,
   FloatingPortal,
   offset,
+  computePosition,
+  size,
   shift,
   useFloating,
 } from "@floating-ui/react";
+import { AwakenComposerSlashPreview } from "./AwakenComposerSlashPreview";
 import { AwakenIcon } from "../AwakenIcon";
 import { AwakenComposerInput, type ComposerInputSelection } from "../AwakenComposerInput";
 import { AwakenContextButton } from "../AwakenContextButton";
@@ -190,7 +193,7 @@ export type ComposerBarPluginPicker = {
 
 type SlashPreviewState = {
   actionId: string;
-  style: CSSProperties;
+  anchor: HTMLElement;
 };
 
 type SlashPaletteStyle = CSSProperties & {
@@ -237,82 +240,6 @@ function slashActionSections(
     sections.push({ label, actions: [action] });
     return sections;
   }, []);
-}
-
-export type SlashPreviewAnchorRect = {
-  left: number;
-  right: number;
-  top: number;
-};
-
-export type SlashPreviewViewport = {
-  width: number;
-  height: number;
-};
-
-export type SlashPreviewContainerRect = {
-  left: number;
-  top: number;
-};
-
-export function slashPreviewStyleForAnchor(
-  rect: SlashPreviewAnchorRect,
-  viewport: SlashPreviewViewport,
-  containerRect?: SlashPreviewContainerRect,
-): CSSProperties {
-  const margin = 8;
-  const gap = 6;
-  const availableWidth = Math.max(0, viewport.width - margin * 2);
-  const width = Math.min(220, availableWidth);
-  const heightEstimate = Math.min(150, Math.max(0, viewport.height - margin * 2));
-
-  let left = rect.right + gap;
-  if (left + width > viewport.width - margin) {
-    left = rect.left - width - gap;
-  }
-  left = Math.min(Math.max(margin, left), Math.max(margin, viewport.width - width - margin));
-
-  let top = rect.top - 2;
-  if (top + heightEstimate > viewport.height - margin) {
-    top = viewport.height - heightEstimate - margin;
-  }
-  top = Math.max(margin, top);
-
-  return {
-    left: containerRect ? left - containerRect.left : left,
-    top: containerRect ? top - containerRect.top : top,
-    width,
-  };
-}
-
-export function slashPaletteStyleForAnchor(
-  anchorTop: number,
-  viewportHeight: number,
-): SlashPaletteStyle {
-  const margin = 8;
-  const gap = 6;
-  const maxHeight = Math.max(88, Math.min(210, Math.floor(anchorTop - margin - gap)));
-
-  return { "--composer-bar-slash-max-height": `${maxHeight}px` };
-}
-
-export function slashPaletteStyleForCaret(
-  caretRect: { left: number; top: number },
-  inputRect: { left: number; right: number; bottom: number },
-  viewport: { width: number; height: number },
-): SlashPaletteStyle {
-  const margin = 8;
-  const gap = 5;
-  const paletteWidth = Math.min(260, Math.max(0, viewport.width - 24));
-  const viewportLeft = Math.min(
-    Math.max(margin, caretRect.left),
-    Math.max(margin, viewport.width - paletteWidth - margin),
-  );
-  return {
-    ...slashPaletteStyleForAnchor(caretRect.top, viewport.height),
-    left: `${viewportLeft - inputRect.left}px`,
-    bottom: `${Math.max(gap, inputRect.bottom - caretRect.top + gap)}px`,
-  };
 }
 
 export type AwakenComposerBarProps = {
@@ -745,24 +672,46 @@ export function AwakenComposerBar({
       return;
     }
 
-    function updateSlashPaletteStyle(): void {
-      const rect = inputWrapRef.current?.getBoundingClientRect();
-      if (!rect) {
-        setSlashPaletteStyle(HIDDEN_SLASH_PALETTE_STYLE);
-        return;
-      }
-      const positionedStyle = inputSelection?.caretRect
-        ? slashPaletteStyleForCaret(inputSelection.caretRect, rect, {
-            width: window.innerWidth,
-            height: window.innerHeight,
-          })
-        : slashPaletteStyleForAnchor(rect.top, window.innerHeight);
-      setSlashPaletteStyle({ ...positionedStyle, visibility: "visible" });
+    const input = inputWrapRef.current;
+    const palette = slashPaletteRef.current;
+    if (!input || !palette) return;
+    const initialRect = input.getBoundingClientRect();
+    const initialCaret = inputSelection?.caretRect;
+    let disposed = false;
+    let revision = 0;
+
+    async function updateSlashPaletteStyle(): Promise<void> {
+      const request = ++revision;
+
+      const rect = input!.getBoundingClientRect();
+      // The caret remains relative to the input while its dialog scrolls.
+      const caret = initialCaret ? {
+        left: initialCaret.left + rect.left - initialRect.left,
+        top: initialCaret.top + rect.top - initialRect.top,
+        bottom: initialCaret.bottom + rect.top - initialRect.top,
+      } : { left: rect.left, top: rect.top, bottom: rect.top };
+      const position = await computePosition({
+        contextElement: input!,
+        getBoundingClientRect: () => new DOMRect(caret.left, caret.top, 0, caret.bottom - caret.top),
+      }, palette!, {
+        placement: "top-start",
+        middleware: [
+          offset(5),
+          flip({ padding: 8 }),
+          shift({ padding: 8 }),
+          size({ padding: 8, apply({ availableWidth, availableHeight, elements }) {
+            if (disposed || request !== revision) return;
+            elements.floating.style.width = `${Math.max(0, Math.min(260, availableWidth))}px`;
+            elements.floating.style.setProperty("--composer-bar-slash-max-height", `${Math.max(0, Math.min(210, availableHeight))}px`);
+          } }),
+        ],
+      });
+      if (disposed || request !== revision) return;
+      setSlashPaletteStyle({ left: position.x, top: position.y, bottom: "auto", visibility: "visible" });
     }
 
-    updateSlashPaletteStyle();
-    window.addEventListener("resize", updateSlashPaletteStyle);
-    return () => window.removeEventListener("resize", updateSlashPaletteStyle);
+    const cleanup = autoUpdate(input, palette, () => { void updateSlashPaletteStyle(); });
+    return () => { disposed = true; cleanup(); };
   }, [inputSelection, slashPalette?.open, slashActions.length, value, tokens.length]);
 
   useEffect(() => {
@@ -1556,16 +1505,7 @@ export function AwakenComposerBar({
       return;
     }
 
-    const rect = event.currentTarget.getBoundingClientRect();
-    const paletteRect = slashPaletteRef.current?.getBoundingClientRect();
-    setSlashPreviewState({
-      actionId: action.id,
-      style: slashPreviewStyleForAnchor(
-        { left: rect.left, right: rect.right, top: rect.top },
-        { width: window.innerWidth, height: window.innerHeight },
-        paletteRect ? { left: paletteRect.left, top: paletteRect.top } : undefined,
-      ),
-    });
+    setSlashPreviewState({ actionId: action.id, anchor: event.currentTarget });
   }
 
   function renderSlashPalette() {
@@ -1579,6 +1519,7 @@ export function AwakenComposerBar({
           role="listbox"
           aria-label="Slash actions"
           onMouseLeave={() => setSlashPreviewState(null)}
+          onScroll={() => setSlashPreviewState(null)}
         >
           {slashPalette.loading ? (
             <div className="composer-bar-slash-empty" role="status">
@@ -1642,20 +1583,11 @@ export function AwakenComposerBar({
           )}
         </div>
         {slashPreviewState && (slashPreviewDescription || slashPreviewPath) ? (
-          <div
-            className="composer-bar-slash-preview"
-            style={slashPreviewState.style}
-            aria-hidden="true"
-          >
-            {slashPreviewDescription ? (
-              <span className="composer-bar-slash-preview-description">
-                {slashPreviewDescription}
-              </span>
-            ) : null}
-            {slashPreviewPath ? (
-              <span className="composer-bar-slash-preview-path">{slashPreviewPath}</span>
-            ) : null}
-          </div>
+          <AwakenComposerSlashPreview
+            anchor={slashPreviewState.anchor}
+            description={slashPreviewDescription}
+            path={slashPreviewPath}
+          />
         ) : null}
       </div>
     );

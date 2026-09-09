@@ -1363,8 +1363,8 @@
 
 .composer-bar-token {
   display: inline-flex;
-  align-items: center;
-  vertical-align: middle;
+  align-items: baseline;
+  vertical-align: baseline;
   gap: 5px;
   min-width: 0;
   min-height: var(--aw-line-height-md);
@@ -1380,6 +1380,7 @@
 }
 
 .composer-bar-token-icon {
+  align-self: center;
   display: block;
   flex: 0 0 auto;
   width: var(--aw-icon-size-16);
@@ -1699,6 +1700,7 @@
 }
 
 .composer-bar-slash-list {
+  box-sizing: border-box;
   display: grid;
   max-height: var(--composer-bar-slash-max-height, 210px);
   padding: 4px;
@@ -1818,6 +1820,7 @@
 }
 
 .composer-bar-slash-preview {
+  box-sizing: border-box;
   position: absolute;
   z-index: 40;
   display: grid;

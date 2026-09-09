@@ -1,0 +1,390 @@
+{
+  "schema_version": 1,
+  "verified_on": "2026-09-09",
+  "base_commit": "93df3371bcf6ddd5a80abc01921d2a104a839e57",
+  "source_sha256": {
+    "Awaken Design System/src/components/AwakenComposerBar/AwakenComposerSlashPreview.tsx": "f965f34b936ea18be2b5664968b0b1dc0062d6685e27924cef5bacd024d573c3",
+    "scripts/test-fixtures/composer-layout/fixture.tsx": "f2a3d42eb511f856588c52c1b4cb6cdbee19f3ff36e48b30fedf638290b5e6bb",
+    "scripts/tests/composer-layout.test.mjs": "aaf68e64bfe863dfa2830fcd5b685f69a42c3488be5e2f60fffbc66b21743226",
+    "Awaken Design System/src/components/AwakenComposerBar/AwakenComposerBar.css": "7a9ae5c4cabd8dce8b46c973acafe5f5e26c703017a6ea5171b1a5f5c9374fdb",
+    "Awaken Design System/src/components/AwakenComposerBar/AwakenComposerBar.tsx": "5b4f6adf64b1a643add4288e7aea60800a98d64984ae13ef1e7af1847f911387",
+    "Awaken Design System/src/components/AwakenUserPromptBlock/AwakenUserPromptBlock.css": "b8e79d0ed88b43c7a3777ab9ee36652ad708ce535f10fbbebb77a25b82f269bb",
+    "apps/desktop/src/renderer/App.test.ts": "486b91ec17636ea3864934b890edeabfcd9fbf73844a3f4e5c53c4b32870a514",
+    "apps/desktop/src/renderer/App.tsx": "94f4523829b6558927754923e8d44b1941e8119d235fb257730f10ba574bd6ab",
+    "apps/desktop/src/renderer/DesktopStartupStatus.test.tsx": "4d90589290c90c2fa90d96daaa08b3144d5826ec767a11cf2a7f4ce80a20a932",
+    "apps/desktop/src/renderer/DesktopStartupStatus.tsx": "f14ca513be2d2e5470499b100415a322f9041c22a73730043a363e8ba998cf93",
+    "apps/desktop/src/renderer/RunStageLayout.test.ts": "df1a54394a5202a25e60b26f1d56ed7dbc9f311a9d05d9d80512c03914c3764c",
+    "apps/desktop/src/renderer/styles/workbench.css": "f5f27f51fc168ddc79d7780dfcb3317bc68e6e5b7afd087e2556b3f5342c04c7",
+    "apps/desktop/src/renderer/useComposerLifecycle.ts": "55d0742cc6389da1cd2e7790d0f17bb3dc971a6b9d3a22d6e7c9e9f78a5a9264"
+  },
+  "scope": [
+    "首页重启提示使用品牌标识上方的纯文字",
+    "主候选菜单与说明避让滚动弹窗的裁切边界",
+    "首页、对话、定时任务输入和已发送气泡的标记文字基线"
+  ],
+  "automated": {
+    "electron_scenarios": [
+      {
+        "name": "center: mixed text and tokens share a baseline",
+        "passed": true,
+        "details": [
+          {
+            "label": "ppt",
+            "textTop": 60.5,
+            "bodyTop": 60.5,
+            "iconHeight": 16
+          },
+          {
+            "label": "插件",
+            "textTop": 60.5,
+            "bodyTop": 60.5,
+            "iconHeight": 16
+          },
+          {
+            "label": "Computer Use",
+            "textTop": 60.5,
+            "bodyTop": 60.5,
+            "iconHeight": 16
+          }
+        ]
+      },
+      {
+        "name": "dock: mixed text and tokens share a baseline",
+        "passed": true,
+        "details": [
+          {
+            "label": "ppt",
+            "textTop": 59.5,
+            "bodyTop": 59.5,
+            "iconHeight": 16
+          },
+          {
+            "label": "插件",
+            "textTop": 59.5,
+            "bodyTop": 59.5,
+            "iconHeight": 16
+          },
+          {
+            "label": "Computer Use",
+            "textTop": 59.5,
+            "bodyTop": 59.5,
+            "iconHeight": 16
+          }
+        ]
+      },
+      {
+        "name": "embedded: mixed text and tokens share a baseline",
+        "passed": true,
+        "details": [
+          {
+            "label": "ppt",
+            "textTop": 60.5,
+            "bodyTop": 60.5,
+            "iconHeight": 16
+          },
+          {
+            "label": "插件",
+            "textTop": 60.5,
+            "bodyTop": 60.5,
+            "iconHeight": 16
+          },
+          {
+            "label": "Computer Use",
+            "textTop": 60.5,
+            "bodyTop": 60.5,
+            "iconHeight": 16
+          }
+        ]
+      },
+      {
+        "name": "prompt bubble preserves the same token baseline",
+        "passed": true,
+        "details": [
+          {
+            "label": "ppt",
+            "textTop": 49.5,
+            "bodyTop": 49.5,
+            "iconHeight": 16
+          },
+          {
+            "label": "插件",
+            "textTop": 49.5,
+            "bodyTop": 49.5,
+            "iconHeight": 16
+          },
+          {
+            "label": "Computer Use",
+            "textTop": 49.5,
+            "bodyTop": 49.5,
+            "iconHeight": 16
+          }
+        ]
+      },
+      {
+        "name": "restart notice stays above the brand without moving the composer",
+        "passed": true,
+        "details": {
+          "noticeBottom": 106,
+          "logoTop": 120,
+          "composerTop": 193.8046875
+        }
+      },
+      {
+        "name": "preview respects dialog clipping at offset 20",
+        "passed": true,
+        "details": {
+          "preview": {
+            "x": 464,
+            "y": 283,
+            "width": 220,
+            "height": 45.6875,
+            "top": 283,
+            "right": 684,
+            "bottom": 328.6875,
+            "left": 464
+          },
+          "clippingBoundary": {
+            "x": 160,
+            "y": 80,
+            "width": 560,
+            "height": 500,
+            "top": 80,
+            "right": 720,
+            "bottom": 580,
+            "left": 160
+          }
+        }
+      },
+      {
+        "name": "preview respects dialog clipping at offset 260",
+        "passed": true,
+        "details": {
+          "preview": {
+            "x": 222,
+            "y": 283,
+            "width": 220,
+            "height": 45.6875,
+            "top": 283,
+            "right": 442,
+            "bottom": 328.6875,
+            "left": 222
+          },
+          "clippingBoundary": {
+            "x": 160,
+            "y": 80,
+            "width": 560,
+            "height": 500,
+            "top": 80,
+            "right": 720,
+            "bottom": 580,
+            "left": 160
+          }
+        }
+      },
+      {
+        "name": "palette clamps a caret near a scrolling dialog edge",
+        "passed": true,
+        "details": {
+          "palette": {
+            "x": 406.3671875,
+            "y": 339.5,
+            "width": 260,
+            "height": 36,
+            "top": 339.5,
+            "right": 666.3671875,
+            "bottom": 375.5,
+            "left": 406.3671875
+          },
+          "boundary": {
+            "x": 160,
+            "y": 80,
+            "width": 560,
+            "height": 500,
+            "top": 80,
+            "right": 720,
+            "bottom": 580,
+            "left": 160
+          }
+        }
+      }
+    ],
+    "baseline_scenarios": [
+      {
+        "name": "center: mixed text and tokens share a baseline",
+        "passed": false,
+        "error": "Error: ppt: text baseline differs by 1.3125px"
+      },
+      {
+        "name": "dock: mixed text and tokens share a baseline",
+        "passed": false,
+        "error": "Error: ppt: text baseline differs by 1.3125px"
+      },
+      {
+        "name": "embedded: mixed text and tokens share a baseline",
+        "passed": false,
+        "error": "Error: ppt: text baseline differs by 1.3125px"
+      },
+      {
+        "name": "prompt bubble preserves the same token baseline",
+        "passed": false,
+        "error": "Error: ppt: text baseline differs by 1.3125px"
+      },
+      {
+        "name": "restart notice stays above the brand without moving the composer",
+        "passed": false,
+        "error": "Error: restart error must remain visible"
+      },
+      {
+        "name": "preview respects dialog clipping at offset 20",
+        "passed": false,
+        "error": "Error: scrolling must clear the old hovered preview"
+      },
+      {
+        "name": "preview respects dialog clipping at offset 260",
+        "passed": false,
+        "error": "Error: preview clipped horizontally: 704..924, boundary 160..720"
+      },
+      {
+        "name": "palette clamps a caret near a scrolling dialog edge",
+        "passed": false,
+        "error": "Error: palette clipped horizontally: 926.3671875 > 720"
+      }
+    ],
+    "desktop_tests": {
+      "files": 149,
+      "tests": 1550,
+      "result": "passed"
+    },
+    "commands_passed": [
+      "npm run test:composer-layout",
+      "npm --workspace @awaken/desktop test",
+      "npm --workspace @awaken/desktop run typecheck",
+      "npm --workspace @awaken/design-system run build",
+      "npm --workspace @awaken/desktop run build",
+      "node scripts/check-docs.mjs",
+      "git diff --check"
+    ],
+    "regression_note": "移除 6 项旧卡片/坐标函数的过时断言测试，新增 2 项状态时序测试与 8 个真实 Electron 排版场景；Node 测试输出额外计入 1 个父测试。"
+  },
+  "real_desktop": {
+    "platform": "macOS Electron，README 正式开发入口，http://127.0.0.1:5174/",
+    "browser_path": "Browser plugin absent；真实产品通过 CUA 操作。自动化另外启动隔离 Electron，不接用户 Core。",
+    "viewports": [
+      [
+        1439,
+        902
+      ],
+      [
+        1151,
+        902
+      ],
+      [
+        1151,
+        760
+      ]
+    ],
+    "interactions": [
+      "首页在中文、英文和数字后选择 /ppt 与 @computer，插入后继续输入",
+      "只提交一轮隔离提示，最终回答为 ALIGNMENT-OK",
+      "在同一真实会话的 dock 输入框再次选择 Skill 与 Computer Use，检查已发送气泡和输入框；随后清空未发送验收草稿",
+      "定时任务创建表单选择 acp-workspace，在右侧边缘输入 @；选择 Outlook 后继续输入 /ppt 并选择；未保存或执行定时任务",
+      "通过拖动原窗口边缘缩窄、降低高度，复核主菜单与说明完整显示；取消表单后恢复窗口并返回首页"
+    ],
+    "preview_trigger": "输入、选择、滚动和窗口 resize 均为 CUA 原生操作。由于工具没有 hover API，说明框通过 DevTools 向真实已渲染候选按钮派发 mouseover；关闭 DevTools 后截取真实产品窗口，未注入 mock DOM 或替换菜单内容。",
+    "normal_geometry": {
+      "viewport": [
+        1439,
+        902
+      ],
+      "preview": {
+        "x": 498.3515625,
+        "y": 417.5,
+        "width": 220,
+        "height": 75.375
+      },
+      "menu": {
+        "x": 719.3515625,
+        "y": 363.5,
+        "width": 260,
+        "height": 210
+      },
+      "dialog_body": {
+        "x": 340.5,
+        "y": 102,
+        "width": 758,
+        "height": 717
+      }
+    },
+    "narrow_geometry": {
+      "viewport": [
+        1151,
+        902
+      ],
+      "preview": {
+        "x": 354.3515625,
+        "y": 389.5,
+        "width": 220,
+        "height": 75.375
+      },
+      "menu": {
+        "x": 575.3515625,
+        "y": 363.5,
+        "width": 260,
+        "height": 210
+      },
+      "dialog_body": {
+        "x": 196.5,
+        "y": 102,
+        "width": 758,
+        "height": 717
+      }
+    },
+    "small_token_metrics": {
+      "viewport": [
+        1151,
+        760
+      ],
+      "labels": [
+        "Outlook 邮箱",
+        "ppt"
+      ],
+      "font_size": "14px",
+      "line_height": "20px",
+      "vertical_align": "baseline",
+      "icon_height_px": 16
+    },
+    "thread": {
+      "thread_id": "thread_1788925696751205000_4",
+      "run_id": "run_1788925696751198000_3",
+      "prompt_verified": true,
+      "final_answer": "ALIGNMENT-OK",
+      "archived": true,
+      "active_list_absent_verified": true
+    },
+    "health": "正式窗口正常渲染；未出现框架错误覆盖层。控制台仅见 React DevTools 提示及开发模式已有 Electron CSP 警告。",
+    "final_state": "验收会话已归档保留历史，未保存的定时表单已取消；Awaken 打开并停在正常首页。"
+  },
+  "screenshots": {
+    "home.jpg": {
+      "sha256": "e0a5676c20c7e8231fcd9a1dfd453099d1f58778a21de75da723b178f4b068c8"
+    },
+    "dock-and-prompt.jpg": {
+      "sha256": "81b4f8a05aa20a23b0eb2665ce759e5db5004e14e571ae432ad15deb6bc596cd"
+    },
+    "menu-normal.jpg": {
+      "sha256": "c97a1a21419f48cc3d6da90a6b986f08cca1d5756e4eba0e8dd7653b20c3bacd"
+    },
+    "menu-small.jpg": {
+      "sha256": "744d858b63e5fddc0d75b5b37bb25f359d474f6c8332e479fb789db2ad010ddc"
+    },
+    "scheduled-tokens.jpg": {
+      "sha256": "effa7d9905efcc21b1e3cec4669e3c64e73a1da69219acbbd1d6a2e907c27429"
+    }
+  },
+  "limits": [
+    "重启错误文字通过真实组件的隔离 Electron 几何与状态时序测试验证，没有终止用户正在使用的 Core 来制造实际崩溃。",
+    "未实测 Windows/Linux。",
+    "标记混排和菜单操作不作为相应技能、插件或 Computer Use 能力的业务执行验收。"
+  ],
+  "git_state_at_capture": "尚未提交或推送"
+}

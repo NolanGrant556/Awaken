@@ -13,16 +13,11 @@
 }
 
 .composer-dock-stack,
-.user-question-card,
-.composer-runtime-panels {
+.user-question-card {
   display: grid;
   gap: 10px;
   width: min(760px, 100%);
   min-width: 0;
-}
-
-.composer-runtime-panels {
-  gap: 8px;
 }
 
 .user-question-card {
@@ -867,19 +862,6 @@
   background: var(--aw-success-soft-bg);
 }
 
-.composer-runtime-panel {
-  width: 100%;
-  padding: 12px 14px;
-  box-shadow: var(--aw-shadow-raised);
-}
-
-.composer-runtime-panel-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-
 .desktop-task-welcome { position: relative; }
 .desktop-startup-status {
   color: var(--aw-text-primary);
@@ -895,8 +877,11 @@
   bottom: calc(100% + 14px);
   left: 50%;
   transform: translateX(-50%);
-  white-space: nowrap;
+  width: max-content;
+  max-width: calc(100vw - 48px);
+  text-align: center;
 }
+.desktop-startup-status.is-error { color: var(--aw-status-danger-text); }
 .desktop-startup-status.is-inline { justify-self: center; }
 .desktop-startup-status.is-leaving { opacity: 0; }
 @media (prefers-reduced-motion: reduce) {

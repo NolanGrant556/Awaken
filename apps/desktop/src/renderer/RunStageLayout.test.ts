@@ -82,8 +82,8 @@ describe("RunStage layout", () => {
       "line-height: var(--aw-line-height-md);",
     );
 
+    // Text baselines are measured in scripts/tests/composer-layout.test.mjs.
     const composerToken = cssRule(composerStyles, ".composer-bar-token");
-    expect(composerToken).toContain("vertical-align: middle;");
     expect(composerToken).toContain("gap: 5px;");
     expect(composerToken).toContain("min-height: var(--aw-line-height-md);");
     expect(composerToken).toContain("margin-inline-end: var(--aw-space-3);");
@@ -113,7 +113,6 @@ describe("RunStage layout", () => {
       designSystemStyles,
       ".execution-prompt-bubble-token",
     );
-    expect(promptToken).toContain("vertical-align: middle;");
     expect(promptToken).toContain("gap: 5px;");
     expect(promptToken).toContain("margin-inline-end: var(--aw-space-3);");
     expect(promptToken).toContain("font-weight: var(--aw-font-weight-medium);");

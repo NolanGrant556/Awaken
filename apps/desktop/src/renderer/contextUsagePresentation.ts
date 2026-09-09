@@ -409,7 +409,9 @@ export function contextUsagePanelData(
             uncachedInputTokens:
               contextWindow.latestModelUsage.uncachedInputTokens,
           cacheWriteTokens: contextWindow.latestModelUsage.cacheWriteTokens,
-          inputTokens: contextWindow.latestModelUsage.inputTokens,
+          inputTokens: compatibleProviderInputTokens(
+            contextWindow.latestModelUsage, snapshot, currentModel,
+          ),
           outputTokens: contextWindow.latestModelUsage.outputTokens,
           reasoningTokens: contextWindow.latestModelUsage.reasoningTokens,
           totalTokens: contextWindow.latestModelUsage.totalTokens,

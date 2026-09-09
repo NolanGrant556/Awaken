@@ -100,6 +100,18 @@ function resolveCacheState(
   return { label: "未命中", tone: "miss" };
 }
 
+function formatCacheRate(usage: AwakenContextUsageModelUsage): string {
+  if (usage.cacheMode === "undocumented") return "未确认";
+  const cached = usage.cachedInputTokens;
+  const input = usage.inputTokens;
+  if (
+    cached == null || input == null ||
+    !Number.isFinite(cached) || !Number.isFinite(input) ||
+    input <= 0 || cached < 0 || cached > input
+  ) return "未知";
+  return `${((cached / input) * 100).toFixed(1)}%`;
+}
+
 function formatCostLabel(
   usage: AwakenContextUsageModelUsage,
 ): string | undefined {
@@ -288,42 +300,10 @@ export const AwakenContextUsagePanel = forwardRef<
                   </dd>
                 </div>
               ) : null}
-              {latestModelUsage.inputTokens != null ? (
-                <div className="aw-context-usage-panel__row">
-                  <dt>输入 Token</dt>
-                  <dd>
-                    {formatContextUsageTokens(latestModelUsage.inputTokens)}
-                  </dd>
-                </div>
-              ) : null}
-              {latestModelUsage.cachedInputTokens != null ? (
-                <div className="aw-context-usage-panel__row">
-                  <dt>命中 Token</dt>
-                  <dd>
-                    {formatContextUsageTokens(
-                      latestModelUsage.cachedInputTokens,
-                    )}
-                  </dd>
-                </div>
-              ) : null}
-              {latestModelUsage.uncachedInputTokens != null ? (
-                <div className="aw-context-usage-panel__row">
-                  <dt>未命中 Token</dt>
-                  <dd>
-                    {formatContextUsageTokens(
-                      latestModelUsage.uncachedInputTokens,
-                    )}
-                  </dd>
-                </div>
-              ) : null}
-              {latestModelUsage.outputTokens != null ? (
-                <div className="aw-context-usage-panel__row">
-                  <dt>输出 Token</dt>
-                  <dd>
-                    {formatContextUsageTokens(latestModelUsage.outputTokens)}
-                  </dd>
-                </div>
-              ) : null}
+              <div className="aw-context-usage-panel__row">
+                <dt title="本次请求命中缓存的 Token 占总输入 Token 的比例">缓存率</dt>
+                <dd>{formatCacheRate(latestModelUsage)}</dd>
+              </div>
               {costLabel !== undefined ? (
                 <div className="aw-context-usage-panel__row">
                   <dt>成本</dt>
@@ -331,6 +311,51 @@ export const AwakenContextUsagePanel = forwardRef<
                 </div>
               ) : null}
             </dl>
+            {[latestModelUsage.inputTokens, latestModelUsage.cachedInputTokens,
+              latestModelUsage.uncachedInputTokens, latestModelUsage.outputTokens]
+              .some((value) => value != null) ? (
+              <details className="aw-context-usage-panel__token-details">
+                <summary>Token 明细</summary>
+                <dl>
+                  {latestModelUsage.inputTokens != null ? (
+                    <div className="aw-context-usage-panel__row">
+                      <dt>输入 Token</dt>
+                      <dd>
+                        {formatContextUsageTokens(latestModelUsage.inputTokens)}
+                      </dd>
+                    </div>
+                  ) : null}
+                  {latestModelUsage.cachedInputTokens != null ? (
+                    <div className="aw-context-usage-panel__row">
+                      <dt>命中 Token</dt>
+                      <dd>
+                        {formatContextUsageTokens(
+                          latestModelUsage.cachedInputTokens,
+                        )}
+                      </dd>
+                    </div>
+                  ) : null}
+                  {latestModelUsage.uncachedInputTokens != null ? (
+                    <div className="aw-context-usage-panel__row">
+                      <dt>未命中 Token</dt>
+                      <dd>
+                        {formatContextUsageTokens(
+                          latestModelUsage.uncachedInputTokens,
+                        )}
+                      </dd>
+                    </div>
+                  ) : null}
+                  {latestModelUsage.outputTokens != null ? (
+                    <div className="aw-context-usage-panel__row">
+                      <dt>输出 Token</dt>
+                      <dd>
+                        {formatContextUsageTokens(latestModelUsage.outputTokens)}
+                      </dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </details>
+            ) : null}
           </section>
         ) : null}
       </div>

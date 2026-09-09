@@ -95,6 +95,10 @@
 
 .aw-project-skills-dialog__folder-popover {
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-width: var(--aw-popover-available-width, calc(100vw - 16px));
+  max-height: var(--aw-popover-available-height, calc(100vh - 16px));
   width: min(340px, calc(100vw - 32px));
   overflow: hidden;
   border: 1px solid var(--aw-border-main);
@@ -109,6 +113,7 @@
 }
 
 .aw-project-skills-dialog__folder-popover-heading {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -135,6 +140,10 @@
 }
 
 .aw-project-skills-dialog__folder-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   display: grid;
   gap: 1px;
   padding: 5px;

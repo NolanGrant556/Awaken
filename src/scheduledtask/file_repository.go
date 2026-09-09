@@ -152,6 +152,7 @@ func OpenFileRepository(genDir string, clock Clock) (*FileRepository, error) {
 		lockWaitTimeout: defaultLockWaitTimeout,
 	}
 	if err := repo.openState(); err != nil {
+		_ = repo.Close()
 		return nil, err
 	}
 	return repo, nil
@@ -174,31 +175,34 @@ func (r *FileRepository) executionsDir() string {
 }
 
 func (r *FileRepository) openState() error {
+	lock, err := r.acquireLock()
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
 	journal, _, err := filestore.OpenJournal(r.mutationsPath())
 	if err != nil {
 		return err
 	}
 	r.journal = journal
+	if err := r.refreshStateLocked(); err != nil {
+		return err
+	}
+	return r.persistStateLocked()
+}
 
-	state := newRepositoryState()
-	if err := filestore.ReadJSON(r.statePath(), state); err != nil {
-		// Missing or corrupt snapshot: rebuild from the journal, which stays
-		// authoritative. A corrupt snapshot is never treated as an empty
-		// store silently — the journal must fold cleanly or Open fails.
-		state = newRepositoryState()
+// refreshStateLocked reads journal authority while the generation lock is held.
+// A snapshot, even valid JSON with a matching seq, cannot prove its completeness.
+func (r *FileRepository) refreshStateLocked() error {
+	if r.journal == nil {
+		return nil
 	}
-	if state.Tasks == nil {
-		state.Tasks = map[string]taskRecord{}
-	}
-	records, err := journal.Records()
+	records, err := r.journal.Records()
 	if err != nil {
 		return err
 	}
-	rolledForward := false
+	state := newRepositoryState()
 	for _, record := range records {
-		if record.Seq <= state.AppliedSeq {
-			continue
-		}
 		var m mutation
 		if err := json.Unmarshal(record.Payload, &m); err != nil {
 			return fmt.Errorf("%w: undecodable mutation at seq %d", ErrCorruptState, record.Seq)
@@ -207,17 +211,10 @@ func (r *FileRepository) openState() error {
 			return fmt.Errorf("%w at seq %d: %v", ErrCorruptState, record.Seq, err)
 		}
 		state.AppliedSeq = record.Seq
-		rolledForward = true
 	}
 	r.state = state
-	if state.DeleteReceipts != nil {
-		r.deleteReceipts = state.DeleteReceipts
-	} else {
-		r.deleteReceipts = map[string]deleteReceipt{}
-	}
-	if rolledForward {
-		return r.persistStateLocked()
-	}
+	r.deleteReceipts = state.DeleteReceipts
+	r.trimDeleteReceiptsLocked()
 	return nil
 }
 
@@ -282,13 +279,21 @@ func (r *FileRepository) persistStateLocked() error {
 }
 
 // acquireLock takes the short-lived generation store lock, polling briefly
-// like the FileDesktopStore write path. Acquisition failure is a hard error;
+// like the FileDesktopStore path, then refreshes definition authority. Caller
+// holds r.mu (or is opening this unshared instance). Failure is a hard error;
 // there is no lock-free fallback.
 func (r *FileRepository) acquireLock() (*filestore.FileLock, error) {
+	if r.closed {
+		return nil, fmt.Errorf("scheduledtask: repository is closed")
+	}
 	deadline := time.Now().Add(r.lockWaitTimeout)
 	for {
 		lock, err := filestore.AcquireLock(r.lockPath(), storeLockOwner, storeLockTTL)
 		if err == nil {
+			if err := r.refreshStateLocked(); err != nil {
+				_ = lock.Release()
+				return nil, err
+			}
 			return lock, nil
 		}
 		if !errors.Is(err, filestore.ErrLockHeld) || time.Now().After(deadline) {
@@ -366,6 +371,11 @@ func (r *FileRepository) Create(task Task) (Task, error) {
 func (r *FileRepository) Get(taskID string) (Task, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	lock, err := r.acquireLock()
+	if err != nil {
+		return Task{}, err
+	}
+	defer lock.Release()
 	return r.liveTaskLocked(taskID)
 }
 
@@ -373,6 +383,11 @@ func (r *FileRepository) Get(taskID string) (Task, error) {
 func (r *FileRepository) List() ([]Task, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	lock, err := r.acquireLock()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Release()
 	tasks := make([]Task, 0, len(r.state.Tasks))
 	for _, record := range r.state.Tasks {
 		if record.Deleted {
@@ -546,6 +561,9 @@ func (r *FileRepository) ConsumeOccurrence(taskID string, occurrence time.Time) 
 		return Task{}, err
 	}
 	occurrence = occurrence.UTC()
+	if current.LastProcessedOccurrence != nil && occurrence.Equal(*current.LastProcessedOccurrence) {
+		return current, nil
+	}
 	updated := current
 	updated.ConsumedOccurrences++
 	if updated.LastProcessedOccurrence == nil || occurrence.After(*updated.LastProcessedOccurrence) {
@@ -603,26 +621,26 @@ func (r *FileRepository) MarkCompleted(taskID string) (Task, error) {
 }
 
 // executionJournalLocked returns the open per-task execution journal,
-// opening and indexing it on first use. Caller holds r.mu.
+// refreshing the index on each transaction. Caller holds r.mu and store lock.
 func (r *FileRepository) executionJournalLocked(taskID string) (*filestore.Journal, error) {
-	if journal, ok := r.execJournals[taskID]; ok {
-		return journal, nil
+	journal := r.execJournals[taskID]
+	if journal == nil {
+		var err error
+		journal, _, err = filestore.OpenJournal(filepath.Join(r.executionsDir(), taskID+".jsonl"))
+		if err != nil {
+			return nil, err
+		}
+		r.execJournals[taskID] = journal
 	}
-	path := filepath.Join(r.executionsDir(), taskID+".jsonl")
-	journal, _, err := filestore.OpenJournal(path)
-	if err != nil {
-		return nil, err
-	}
+
 	records, err := journal.Records()
 	if err != nil {
-		journal.Close()
 		return nil, err
 	}
 	index := map[string]Execution{}
 	for _, record := range records {
 		var exec Execution
 		if err := json.Unmarshal(record.Payload, &exec); err != nil {
-			journal.Close()
 			return nil, fmt.Errorf("%w: undecodable execution record at seq %d for task %s", ErrCorruptState, record.Seq, taskID)
 		}
 		index[exec.ExecutionID] = exec
@@ -636,6 +654,11 @@ func (r *FileRepository) executionJournalLocked(taskID string) (*filestore.Journ
 func (r *FileRepository) AppendExecution(taskID string, exec Execution) (Execution, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	lock, err := r.acquireLock()
+	if err != nil {
+		return Execution{}, false, err
+	}
+	defer lock.Release()
 	if r.closed {
 		return Execution{}, false, fmt.Errorf("scheduledtask: repository is closed")
 	}
@@ -696,11 +719,6 @@ func executionKeyMatches(existing, incoming Execution) bool {
 }
 
 func (r *FileRepository) appendExecutionRecordLocked(journal *filestore.Journal, index map[string]Execution, exec Execution) (Execution, error) {
-	lock, err := r.acquireLock()
-	if err != nil {
-		return Execution{}, err
-	}
-	defer lock.Release()
 	if _, err := journal.Append(exec); err != nil {
 		return Execution{}, err
 	}
@@ -712,6 +730,11 @@ func (r *FileRepository) appendExecutionRecordLocked(journal *filestore.Journal,
 func (r *FileRepository) ListExecutions(taskID string, limit int) ([]Execution, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	lock, err := r.acquireLock()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Release()
 	if _, err := r.liveTaskLocked(taskID); err != nil {
 		// Executions of tombstoned tasks are history of a deleted task and
 		// disappear with it (contract [持久化与 authority](docs/12_定时任务/定时执行与提醒/实现方案.md#持久化与-authority)); an unknown task is not found.
@@ -750,6 +773,11 @@ func (r *FileRepository) SealInterrupted(taskID string, clock Clock) ([]Executio
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	lock, err := r.acquireLock()
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Release()
 	if _, err := r.liveTaskLocked(taskID); err != nil {
 		return nil, err
 	}

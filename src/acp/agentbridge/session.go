@@ -49,7 +49,12 @@ func (s *bridgeSession) Prompt(ctx context.Context, text string) (acpsdk.StopRea
 		s.mu.Unlock()
 	}()
 
-	runCtx, runCancel := context.WithCancel(s.ctx)
+	runCtx, runCancel := context.WithCancel(ctx)
+	stopSessionCancel := context.AfterFunc(s.ctx, runCancel)
+	defer stopSessionCancel()
+	if s.ctx.Err() != nil {
+		runCancel()
+	}
 	defer runCancel()
 	s.mu.Lock()
 	s.promptCancel = runCancel
@@ -63,9 +68,15 @@ func (s *bridgeSession) Prompt(ctx context.Context, text string) (acpsdk.StopRea
 	s.mu.Lock()
 	selectedProfileID := s.selectedProfileID
 	s.mu.Unlock()
+	if runCtx.Err() != nil {
+		return acpsdk.StopReasonCancelled, nil
+	}
 	run, err := s.coreClient.CreateRunForSession(runCtx, s.mapping.ACPSessionID, text, selectedProfileID)
 	if err != nil {
-		if errors.Is(runCtx.Err(), context.Canceled) {
+		if runCtx.Err() != nil {
+			if cleanupErr := s.cancelCreatingRun(); cleanupErr != nil {
+				return "", fmt.Errorf("confirm cancelled run creation: %w", cleanupErr)
+			}
 			return acpsdk.StopReasonCancelled, nil
 		}
 		return "", fmt.Errorf("create run: %w", err)
@@ -126,6 +137,8 @@ func (s *bridgeSession) Prompt(ctx context.Context, text string) (acpsdk.StopRea
 					continue
 				}
 				if err := s.handleFrame(runCtx, run.RunID, frame); err != nil {
+					runCancel()
+					s.cancelAndWait(run.RunID)
 					return "", err
 				}
 				if cursor > lastCursor {
@@ -181,17 +194,66 @@ func (s *bridgeSession) hasTerminal() bool {
 	return s.terminalSeen
 }
 
-func (s *bridgeSession) cancelAndWait(runID string) {
+// Keep prompt ownership until Core releases its creation reservation. If the
+// response was lost after creation, recover the run ID before cancelling it.
+func (s *bridgeSession) cancelCreatingRun() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		mapping, err := s.coreClient.GetACPSession(ctx, s.mapping.ACPSessionID)
+		if err != nil {
+			return err
+		}
+		if mapping == nil || (!mapping.RunStarting && mapping.CurrentRunID == "") {
+			return nil
+		}
+		if mapping.CurrentRunID != "" {
+			if err := s.cancelAndWaitContext(ctx, mapping.CurrentRunID); err != nil {
+				latest, readErr := s.coreClient.GetACPSession(ctx, s.mapping.ACPSessionID)
+				if readErr == nil && (latest == nil || (!latest.RunStarting && latest.CurrentRunID == "")) {
+					return nil
+				}
+				return err
+			}
+			// Core also cleans up cancelled create requests. A lost successful
+			// response leaves cleanup to this bridge after draining the run.
+			if err := s.coreClient.ClearCurrentRun(ctx, s.mapping.ACPSessionID, mapping.CurrentRunID); err != nil {
+				return err
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (s *bridgeSession) cancelAndWait(runID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = s.coreClient.CancelRunControl(ctx, s.mapping.ACPSessionID, runID)
+	return s.cancelAndWaitContext(ctx, runID)
+}
+
+func (s *bridgeSession) cancelAndWaitContext(ctx context.Context, runID string) error {
+	if err := s.coreClient.CancelRunControl(ctx, s.mapping.ACPSessionID, runID); err != nil {
+		return err
+	}
 	frames, errs := s.coreClient.StreamRunEventsControl(ctx, s.mapping.ACPSessionID, runID, 0)
-	for range frames {
+	for frame := range frames {
+		if frame.Type == agui.EventRunFinished || frame.Type == agui.EventRunError {
+			return nil
+		}
 	}
-	select {
-	case <-errs:
-	case <-ctx.Done():
+	if err := <-errs; err != nil {
+		return err
 	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return errors.New("cancelled run stream ended before a terminal event")
 }
 
 func (s *bridgeSession) handleFrame(runCtx context.Context, runID string, frame EventFrame) error {
@@ -217,7 +279,11 @@ func (s *bridgeSession) handleFrame(runCtx context.Context, runID string, frame 
 		s.mu.Unlock()
 		return nil
 	case agui.EventTextMessageContent:
-		return s.emitTextDelta(s.dedupeTextDelta(frame.MessageID, frame.Delta))
+		text, err := s.dedupeTextDelta(frame)
+		if err != nil {
+			return err
+		}
+		return s.emitTextDelta(text)
 	case agui.EventToolCallStart:
 		return s.emitToolCall(frame.ToolCallID, frame.ToolCallName, string(acpsdk.ToolCallStatusPending))
 	case agui.EventToolCallEnd:
@@ -255,11 +321,12 @@ func (s *bridgeSession) emitTextDelta(text string) error {
 	})
 }
 
-// dedupeTextDelta collapses the final durable assistant-message projection
-// when the same message was already streamed as ephemeral text chunks.
-func (s *bridgeSession) dedupeTextDelta(messageID, delta string) string {
+// dedupeTextDelta distinguishes transport deltas from durable full-message
+// projections. Equal text can be a legitimate repeated token, not a replay.
+func (s *bridgeSession) dedupeTextDelta(frame EventFrame) (string, error) {
+	messageID, delta := frame.MessageID, frame.Delta
 	if messageID == "" || delta == "" {
-		return delta
+		return delta, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -267,16 +334,15 @@ func (s *bridgeSession) dedupeTextDelta(messageID, delta string) string {
 		s.textByMessageID = make(map[string]string)
 	}
 	previous := s.textByMessageID[messageID]
-	switch {
-	case delta == previous:
-		return ""
-	case previous != "" && strings.HasPrefix(delta, previous):
+	if frame.RecordID != "" || frame.SemanticSeq != 0 {
+		if !strings.HasPrefix(delta, previous) {
+			return "", errors.New("ACP durable text disagrees with streamed message")
+		}
 		s.textByMessageID[messageID] = delta
-		return strings.TrimPrefix(delta, previous)
-	default:
-		s.textByMessageID[messageID] = previous + delta
-		return delta
+		return strings.TrimPrefix(delta, previous), nil
 	}
+	s.textByMessageID[messageID] = previous + delta
+	return delta, nil
 }
 
 func (s *bridgeSession) emitToolCall(toolCallID, title, status string) error {

@@ -19,7 +19,7 @@ const (
 )
 
 // Event is one live scheduled-task fact. Only notice events carry Content
-// (the fixed reminder body, for the Desktop native notification); every
+// (a fixed reminder or a safe persistence-failure warning); every
 // other event leaves it empty.
 type Event struct {
 	Type        EventType

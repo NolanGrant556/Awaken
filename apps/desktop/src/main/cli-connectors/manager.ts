@@ -61,6 +61,8 @@ type InstallationRecord = {
 type StoredInstallations = { version: 1; records: Partial<Record<CliProviderId, InstallationRecord>> };
 
 type AuthSessionInternal = {
+  controller: AbortController;
+  filesReady?: Promise<void>;
   view: CliAuthSessionView;
   directory: string;
   child?: ChildProcess;
@@ -125,6 +127,8 @@ export class CliConnectorManager {
   private readonly installSettled = new Map<CliProviderId, Promise<void>>();
   private readonly installProgress = new Map<CliProviderId, CliInstallProgress>();
   private readonly authSessions = new Map<CliProviderId, AuthSessionInternal>();
+  private readonly authEpochs = new Map<CliProviderId, number>();
+  private disposed = false;
 
   constructor(private readonly options: ManagerOptions) {
     this.root = path.join(options.homeDir, ".awaken", "runtime", "cli");
@@ -284,50 +288,40 @@ export class CliConnectorManager {
     return this.view(providerId);
   }
 
-  private async configureLark(continueWithAuth = false): Promise<CliConnectorView> {
-    const providerId: CliProviderId = "lark-cli";
-    const executable = this.requireExecutable(providerId);
-    if (this.authSessions.has(providerId)) return this.view(providerId);
-    await this.prepareNetworkOperation("cli-auth");
-    const session = await this.createAuthSession(providerId, "正在打开飞书应用配置页面…");
-    const child = spawn(executable, ["config", "init", "--new"], this.spawnOptions(session.directory));
-    this.monitorVerificationUrl(session, child, "请在已打开的飞书页面完成应用配置");
-    session.child = child;
-    session.view.phase = "waiting_user";
-    this.emit(providerId);
-    void this.finishBlockingSession(providerId, child, true, continueWithAuth);
-    return this.view(providerId);
-  }
-
   async startAuth(providerId: CliProviderId): Promise<CliConnectorView> {
     this.assertProvider(providerId);
+    if (this.disposed) throw new CliConnectorError("CLI_MANAGER_CLOSED", "连接器管理器已关闭");
     if (this.authSessions.has(providerId)) return this.view(providerId);
-    if (providerId === "lark-cli" && this.readiness(providerId).configuration === "required") {
-      return this.configureLark(true);
-    }
-    await this.prepareNetworkOperation("cli-auth");
     const executable = this.requireExecutable(providerId);
-    const session = await this.createAuthSession(
-      providerId,
-      providerId === "dingtalk-workspace" ? "请在已打开的浏览器中完成钉钉授权" : "正在打开飞书授权页面…",
-    );
-    this.setReadiness(providerId, {
-      ...this.readiness(providerId),
-      authentication: "in_progress",
-      overall: "working",
-      safeError: undefined,
-      updatedAt: new Date().toISOString(),
-    });
-    if (providerId === "dingtalk-workspace") {
-      const child = spawn(executable, ["auth", "login", "--format", "json"], this.spawnOptions(session.directory));
-      this.monitorVerificationUrl(session, child, "请在已打开的钉钉页面完成授权");
-      session.child = child;
-      session.view.phase = "waiting_user";
-      this.emit(providerId);
-      void this.finishBlockingSession(providerId, child, false);
-      return this.view(providerId);
+    const configurationOnly = providerId === "lark-cli" && this.readiness(providerId).configuration === "required";
+    // Reserve ownership before the first await, including directory/network setup.
+    const session = this.createAuthSession(providerId, configurationOnly
+      ? "正在打开飞书应用配置页面…" : "正在打开官方授权页面…");
+    this.setReadiness(providerId, { ...this.readiness(providerId), authentication: "in_progress",
+      overall: "working", safeError: undefined, updatedAt: new Date().toISOString() });
+    try {
+      await this.prepareNetworkOperation("cli-auth");
+      if (!this.ownsAuth(session)) return this.view(providerId);
+      session.filesReady = (async () => {
+        await this.ensureAuthRoot();
+        if (this.ownsAuth(session)) await fs.mkdir(session.directory, { recursive: true, mode: 0o700 });
+      })();
+      await session.filesReady;
+      if (!this.ownsAuth(session)) return this.view(providerId);
+      if (configurationOnly || providerId === "dingtalk-workspace") {
+        const args = configurationOnly ? ["config", "init", "--new"] : ["auth", "login", "--format", "json"];
+        const child = spawn(executable, args, this.spawnOptions(session.directory));
+        session.child = child;
+        this.monitorVerificationUrl(session, child, "请在已打开的官方页面完成操作");
+        session.view.phase = "waiting_user";
+        this.emit(providerId);
+        void this.finishBlockingSession(session, child, configurationOnly, configurationOnly);
+      } else {
+        void this.startLarkSplitAuth(session, executable);
+      }
+    } catch (error) {
+      await this.failSession(session, mapError(error, "CLI_AUTH_START_FAILED"), configurationOnly);
     }
-    void this.startLarkSplitAuth(session, executable);
     return this.view(providerId);
   }
 
@@ -337,11 +331,12 @@ export class CliConnectorManager {
     // Remove ownership before terminating the child so a late exit event cannot
     // turn this explicit cancellation into a failed authorization state.
     this.authSessions.delete(providerId);
+    this.advanceAuthEpoch(providerId);
+    session.controller.abort();
     session.child?.kill();
     session.view.phase = "cancelled";
     session.view.safeMessage = "授权已取消";
     delete session.deviceCode;
-    await this.cleanupSessionFiles(session);
     this.setReadiness(providerId, {
       ...this.readiness(providerId),
       authentication: "required",
@@ -349,6 +344,7 @@ export class CliConnectorManager {
       safeError: undefined,
       updatedAt: new Date().toISOString(),
     });
+    await this.cleanupSessionFiles(session);
     return this.view(providerId);
   }
 
@@ -394,18 +390,22 @@ export class CliConnectorManager {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
     const sessions = [...this.authSessions.values()];
     for (const controller of this.installControllers.values()) controller.abort();
-    for (const session of sessions) session.child?.kill();
+    for (const session of sessions) { session.controller.abort(); session.child?.kill(); }
     this.installControllers.clear();
     this.authSessions.clear();
     await Promise.all(sessions.map((session) => this.cleanupSessionFiles(session)));
   }
 
   private async refresh(providerId: CliProviderId): Promise<CliConnectorView> {
+    const epoch = this.authEpochs.get(providerId);
+    const commit = (readiness: CliConnectorReadiness) =>
+      this.disposed || this.authEpochs.get(providerId) !== epoch ? this.view(providerId) : this.setReadiness(providerId, readiness);
     const asset = this.assetFor(providerId);
     if (!asset) {
-      return this.setReadiness(providerId, {
+      return commit({
         providerId,
         activation: "enabled",
         install: "unsupported",
@@ -427,7 +427,7 @@ export class CliConnectorManager {
       : candidates.find((candidate) => ownershipForPath(candidate, this.options.homeDir) === "awaken-managed")
         ?? candidates[0];
     if (!executablePath) {
-      return this.setReadiness(providerId, {
+      return commit({
         providerId,
         activation: record?.activation ?? "enabled",
         install: "missing",
@@ -477,10 +477,10 @@ export class CliConnectorManager {
         };
         await this.saveInstallations();
       }
-      return this.setReadiness(providerId, readiness);
+      return commit(readiness);
     } catch (error) {
       const mapped = mapError(error, "CLI_EXECUTABLE_INVALID");
-      return this.setReadiness(providerId, {
+      return commit({
         providerId,
         activation: record?.activation ?? "enabled",
         install: "installed",
@@ -576,8 +576,8 @@ export class CliConnectorManager {
 
   private async startLarkSplitAuth(session: AuthSessionInternal, executable: string): Promise<void> {
     try {
-      const initiated = await this.runCommand(executable, ["auth", "login", "--recommend", "--no-wait", "--json"], session.directory, 30_000);
-      if (this.authSessions.get("lark-cli") !== session) return;
+      const initiated = await this.runCommand(executable, ["auth", "login", "--recommend", "--no-wait", "--json"], session.directory, 30_000, session.controller.signal);
+      if (!this.ownsAuth(session)) return;
       if (initiated.exitCode !== 0) throw new CliConnectorError("CLI_AUTH_START_FAILED", "无法发起飞书授权", "retry");
       const payload = parseJSONObject(initiated.stdout);
       const verificationUrl = stringField(payload, ["verification_url", "verification_uri_complete", "verification_uri"]);
@@ -588,103 +588,90 @@ export class CliConnectorManager {
       session.view.safeMessage = "请在已打开的飞书页面完成授权";
       this.emit("lark-cli");
       await this.presentVerificationUrl(session, verificationUrl);
-      if (this.authSessions.get("lark-cli") !== session) return;
+      if (!this.ownsAuth(session)) return;
       session.view.phase = "confirming";
       session.view.safeMessage = "等待飞书确认授权…";
       const child = spawn(executable, ["auth", "login", "--device-code", deviceCode, "--json"], this.spawnOptions(session.directory));
       drainChildOutput(child);
       session.child = child;
       this.emit("lark-cli");
-      await this.finishBlockingSession("lark-cli", child, false);
+      await this.finishBlockingSession(session, child, false);
     } catch (error) {
-      await this.failSession("lark-cli", mapError(error, "CLI_AUTH_FAILED"));
+      await this.failSession(session, mapError(error, "CLI_AUTH_FAILED"));
     }
   }
 
   private async finishBlockingSession(
-    providerId: CliProviderId,
-    child: ChildProcess,
-    configurationOnly: boolean,
-    continueWithAuth = false,
+    session: AuthSessionInternal, child: ChildProcess, configurationOnly: boolean, continueWithAuth = false,
   ): Promise<void> {
-    const exitCode = await childExit(child);
-    const session = this.authSessions.get(providerId);
-    if (!session || session.child !== child) return;
-    if (exitCode !== 0) {
-      await this.failSession(providerId, new CliConnectorError(configurationOnly ? "CLI_CONFIGURE_FAILED" : "CLI_AUTH_FAILED", configurationOnly ? "CLI 配置未完成" : "CLI 授权未完成", "retry"), configurationOnly);
-      return;
-    }
-    delete session.deviceCode;
-    if (configurationOnly) {
-      this.authSessions.delete(providerId);
-      await this.cleanupSessionFiles(session);
+    const providerId = session.view.provider;
+    try {
+      const exitCode = await childExit(child);
+      if (!this.ownsAuth(session) || session.child !== child) return;
+      if (exitCode !== 0) throw new CliConnectorError(configurationOnly ? "CLI_CONFIGURE_FAILED" : "CLI_AUTH_FAILED",
+        configurationOnly ? "CLI 配置未完成" : "CLI 授权未完成", "retry");
+      delete session.deviceCode;
       const refreshed = await this.refresh(providerId);
-      if (continueWithAuth) {
-        if (refreshed.readiness.configuration !== "ready") {
-          this.setReadiness(providerId, {
-            ...refreshed.readiness,
-            configuration: "failed",
-            overall: "failed",
-            safeError: {
-              code: "CLI_CONFIGURE_VERIFY_FAILED",
-              message: "飞书应用配置结果验证失败",
-              recovery: "retry",
-            },
-            updatedAt: new Date().toISOString(),
-          });
-          return;
-        }
-        await this.startAuth(providerId);
+      if (!this.ownsAuth(session)) return;
+      if (configurationOnly ? refreshed.readiness.configuration !== "ready" : refreshed.readiness.authentication !== "authorized") {
+        throw new CliConnectorError(configurationOnly ? "CLI_CONFIGURE_VERIFY_FAILED" : "CLI_AUTH_VERIFY_FAILED", "授权配置结果验证失败", "retry");
       }
-      return;
+      await this.cleanupSessionFiles(session);
+      if (!this.ownsAuth(session)) return;
+      session.view.phase = "authorized";
+      session.view.safeMessage = "授权成功";
+      this.authSessions.delete(providerId);
+      this.advanceAuthEpoch(providerId);
+      this.emit(providerId);
+      if (configurationOnly && continueWithAuth) await this.startAuth(providerId);
+    } catch (error) {
+      await this.failSession(session, mapError(error, "CLI_AUTH_FAILED"), configurationOnly);
     }
-    const refreshed = await this.refresh(providerId);
-    if (refreshed.readiness.authentication !== "authorized") {
-      await this.failSession(providerId, new CliConnectorError("CLI_AUTH_VERIFY_FAILED", "授权结果验证失败", "retry"));
-      return;
-    }
-    session.view.phase = "authorized";
-    session.view.safeMessage = "授权成功";
-    await this.cleanupSessionFiles(session);
-    this.emit(providerId);
-    this.authSessions.delete(providerId);
-    this.emit(providerId);
   }
 
-  private async failSession(providerId: CliProviderId, error: CliConnectorError, configurationOnly = false): Promise<void> {
-    const session = this.authSessions.get(providerId);
-    if (!session) return;
+  private async failSession(session: AuthSessionInternal, error: CliConnectorError, configurationOnly = false): Promise<void> {
+    if (!this.ownsAuth(session)) return;
+    const providerId = session.view.provider;
+    session.controller.abort();
     session.child?.kill();
     delete session.deviceCode;
     session.view.phase = "failed";
     session.view.safeMessage = error.message;
-    await this.cleanupSessionFiles(session);
+    try { await this.cleanupSessionFiles(session); } catch {
+      error = new CliConnectorError("CLI_AUTH_CLEANUP_FAILED", "授权临时文件清理失败，请重试", "retry");
+    }
+    if (!this.ownsAuth(session)) return;
     this.setReadiness(providerId, {
       ...this.readiness(providerId),
       configuration: configurationOnly ? "failed" : this.readiness(providerId).configuration,
       authentication: configurationOnly ? this.readiness(providerId).authentication : "failed",
-      overall: "failed",
-      safeError: { code: error.code, message: error.message, recovery: error.recovery },
+      overall: "failed", safeError: { code: error.code, message: error.message, recovery: error.recovery },
       updatedAt: new Date().toISOString(),
     });
-    this.emit(providerId);
   }
 
-  private async createAuthSession(providerId: CliProviderId, message: string): Promise<AuthSessionInternal> {
-    await this.ensureAuthRoot();
+  private ownsAuth(session: AuthSessionInternal): boolean {
+    return !this.disposed && this.authSessions.get(session.view.provider) === session;
+  }
+
+  private advanceAuthEpoch(providerId: CliProviderId): void {
+    this.authEpochs.set(providerId, (this.authEpochs.get(providerId) ?? 0) + 1);
+  }
+
+  private createAuthSession(providerId: CliProviderId, message: string): AuthSessionInternal {
     const id = randomUUID();
-    const directory = path.join(this.authRoot, providerId, id);
-    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     const session: AuthSessionInternal = {
-      directory,
+      directory: path.join(this.authRoot, providerId, id), controller: new AbortController(),
       view: { id, provider: providerId, phase: "starting", safeMessage: message },
     };
     this.authSessions.set(providerId, session);
+    this.advanceAuthEpoch(providerId);
     this.emit(providerId);
     return session;
   }
 
   private async cleanupSessionFiles(session: AuthSessionInternal): Promise<void> {
+    await session.filesReady?.catch(() => undefined);
     await fs.rm(session.directory, { recursive: true, force: true });
   }
 
@@ -705,7 +692,7 @@ export class CliConnectorManager {
       if (!verificationUrl || session.openedVerificationUrl === verificationUrl) return;
       session.view.safeMessage = safeMessage;
       void this.presentVerificationUrl(session, verificationUrl).catch((error) => {
-        void this.failSession(session.view.provider, mapError(error, "CLI_AUTH_PAGE_OPEN_FAILED"));
+        void this.failSession(session, mapError(error, "CLI_AUTH_PAGE_OPEN_FAILED"));
       });
     };
     child.stdout?.on("data", onData);
@@ -713,7 +700,7 @@ export class CliConnectorManager {
   }
 
   private async presentVerificationUrl(session: AuthSessionInternal, verificationUrl: string): Promise<void> {
-    if (this.authSessions.get(session.view.provider) !== session) return;
+    if (!this.ownsAuth(session)) return;
     const safeUrl = authVerificationUrl(verificationUrl, session.view.provider);
     if (!safeUrl || session.openedVerificationUrl === safeUrl) return;
     session.openedVerificationUrl = safeUrl;
@@ -981,10 +968,11 @@ export class CliConnectorManager {
     return safeSpawnOptions(cwd, this.commandEnvironment());
   }
 
-  private async runCommand(executable: string, args: string[], cwd: string, timeoutMs: number): Promise<CommandResult> {
+  private async runCommand(executable: string, args: string[], cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<CommandResult> {
     await this.prepareNetworkOperation("cli-command");
+    signal?.throwIfAborted();
     try {
-      const result = await runCommand(executable, args, cwd, timeoutMs, this.commandEnvironment());
+      const result = await runCommand(executable, args, cwd, timeoutMs, this.commandEnvironment(), signal);
       if (looksLikeNetworkTransportFailure(`${result.stderr}\n${result.stdout}`)) {
         this.options.onTransportFailure?.("cli-command");
       }
@@ -1200,8 +1188,10 @@ async function runCommand(
   cwd: string,
   timeoutMs: number,
   environment: NodeJS.ProcessEnv = process.env,
+  signal?: AbortSignal,
 ): Promise<CommandResult> {
-  const child = spawn(executable, args, safeSpawnOptions(cwd, environment));
+  signal?.throwIfAborted();
+  const child = spawn(executable, args, { ...safeSpawnOptions(cwd, environment), signal });
   let stdout = "";
   let stderr = "";
   child.stdout?.on("data", (chunk: Buffer) => { if (stdout.length < commandOutputLimit) stdout += chunk.toString("utf8"); });

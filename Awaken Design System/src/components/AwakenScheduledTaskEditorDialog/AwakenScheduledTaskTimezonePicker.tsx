@@ -22,9 +22,9 @@ export function AwakenScheduledTaskTimezonePicker({
   disabled,
   onChange,
 }: AwakenScheduledTaskTimezonePickerProps) {
+  const searchRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const searchRef = useRef<HTMLInputElement>(null);
   const referenceDate = useMemo(() => {
     const parsed = referenceLocal ? new Date(`${referenceLocal}:00Z`) : new Date();
     return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
@@ -42,13 +42,14 @@ export function AwakenScheduledTaskTimezonePicker({
 
   return (
     <AwakenPopover
+      viewportBounded
+      initialFocusRef={searchRef}
       open={open}
       onOpenChange={(nextOpen) => {
         if (disabled) return;
         setOpen(nextOpen);
         if (nextOpen) {
           setQuery("");
-          window.setTimeout(() => searchRef.current?.focus(), 0);
         }
       }}
       placement="bottom-start"
@@ -74,7 +75,11 @@ export function AwakenScheduledTaskTimezonePicker({
         <div
           className="aw-scheduled-task-editor__timezone-popover"
           onKeyDown={(event) => {
-            if (event.key === "Escape") event.stopPropagation();
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              setOpen(false);
+            }
           }}
         >
           <label className="aw-scheduled-task-editor__timezone-search">

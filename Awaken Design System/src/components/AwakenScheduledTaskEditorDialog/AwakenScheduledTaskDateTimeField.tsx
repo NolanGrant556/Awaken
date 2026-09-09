@@ -149,6 +149,7 @@ export function AwakenScheduledTaskDateTimeField({
 
   return (
     <AwakenPopover
+      viewportBounded
       open={open}
       onOpenChange={(nextOpen) => {
         if (!disabled) setOpen(nextOpen);
@@ -174,7 +175,11 @@ export function AwakenScheduledTaskDateTimeField({
           className="aw-scheduled-task-editor__datetime-popover"
           aria-label={`${ariaLabel}选择器`}
           onKeyDown={(event) => {
-            if (event.key === "Escape") event.stopPropagation();
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              setOpen(false);
+            }
           }}
         >
           <div className="aw-scheduled-task-editor__calendar-head">

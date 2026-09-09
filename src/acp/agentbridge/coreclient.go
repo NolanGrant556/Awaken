@@ -194,12 +194,41 @@ func (c *CoreClient) HeartbeatLease(ctx context.Context, leaseID string) (time.T
 // ACPSessionMapping is the bridge-local view of a Core ACP session.
 type ACPSessionMapping struct {
 	ACPSessionID  string `json:"acp_session_id"`
+	CurrentRunID  string `json:"current_run_id"`
+	RunStarting   bool   `json:"run_starting"`
 	ProjectID     string `json:"project_id"`
 	ThreadID      string `json:"thread_id"`
 	CanonicalCWD  string `json:"canonical_cwd"`
 	Visibility    string `json:"visibility"`
 	ClientName    string `json:"client_name,omitempty"`
 	ClientVersion string `json:"client_version,omitempty"`
+}
+
+// GetACPSession reads the creation reservation and current run atomically.
+// A nil mapping means the session was closed.
+func (c *CoreClient) GetACPSession(ctx context.Context, sessionID string) (*ACPSessionMapping, error) {
+	u := c.BaseURL + "/v1/control/acp/sessions/" + url.PathEscape(sessionID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", c.authHeader())
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("get ACP session status %d", resp.StatusCode)
+	}
+	var mapping ACPSessionMapping
+	if err := json.NewDecoder(resp.Body).Decode(&mapping); err != nil {
+		return nil, err
+	}
+	return &mapping, nil
 }
 
 // CreateACPSession asks Core to map an ACP session to a project/thread.
@@ -228,28 +257,6 @@ func (c *CoreClient) CreateACPSession(ctx context.Context, acpSessionID, cwd, vi
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("create session status %d", resp.StatusCode)
-	}
-	var mapping ACPSessionMapping
-	if err := json.NewDecoder(resp.Body).Decode(&mapping); err != nil {
-		return nil, err
-	}
-	return &mapping, nil
-}
-
-// GetACPSession fetches a session mapping.
-func (c *CoreClient) GetACPSession(ctx context.Context, acpSessionID string) (*ACPSessionMapping, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/v1/control/acp/sessions/"+url.PathEscape(acpSessionID), nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", c.authHeader())
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("get session status %d", resp.StatusCode)
 	}
 	var mapping ACPSessionMapping
 	if err := json.NewDecoder(resp.Body).Decode(&mapping); err != nil {

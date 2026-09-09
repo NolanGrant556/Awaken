@@ -412,6 +412,9 @@ func TestPauseSkipsAndResumeReschedules(t *testing.T) {
 
 	h.clock.Set(time.Date(2026, 7, 26, 11, 0, 0, 0, time.UTC))
 	h.timers.fireUntil(t, h.clock, "first execution", func() bool { return h.exec.agentCallCount() == 1 })
+	// The executor may still bind its thread (and advance the task version).
+	// This test pauses after completion, not concurrently with that CAS.
+	h.sched.waitWorkers()
 
 	fresh, err := h.repo.Get(task.TaskID)
 	if err != nil {

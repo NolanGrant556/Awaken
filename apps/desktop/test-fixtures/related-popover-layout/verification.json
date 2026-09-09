@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-09-09T03:26:23.270317+00:00",
+  "base_head": "898e58b0ba68fcfa93f579ba490153aad14f74c6",
+  "working_tree": "main，含此前已授权但尚未提交的深度审计与定时选择器修复",
+  "source_sha256": {
+    "Awaken Design System/src/components/AwakenSelect/AwakenSelect.tsx": "fcac35d1d0d3fcb0b84bd5f85c640df77ccbfe9e8f6d4738628a7cd7ce107210",
+    "Awaken Design System/src/components/AwakenModelProviderForm/AwakenModelProviderForm.tsx": "8804df2db593fa2edca3e7166566cd66d2c58cd2e0c61d3e63bb5632c15f995f",
+    "Awaken Design System/src/components/AwakenPopover/AwakenPopover.tsx": "391e13b476f09ed3c8dac1887758f7160d4478c54452d96e3537ac486fe8482d",
+    "Awaken Design System/src/components/AwakenProjectHoverCard/AwakenProjectHoverCard.tsx": "39b37902ec836b285f317936644a2511711f1430b2e27107df59ed00b59376dd",
+    "Awaken Design System/src/components/AwakenProjectHoverCard/AwakenProjectHoverCard.css": "21b6a217c97313c7c09bfb2cf1f802590e1f8f890e7ead81718c1d9815bbf504",
+    "Awaken Design System/src/components/AwakenProjectSkillsDialog/AwakenProjectSkillsDialog.tsx": "dc3243e14e24a2944b1884e5e283f01ba48089ed4f03f570f004f8ed2fe2879b",
+    "Awaken Design System/src/components/AwakenProjectSkillsDialog/AwakenProjectSkillsDialog.css": "781dedafcb85c96aa6f7cc2f235e9e84aabee4d2832860fabc87b9af66a380c6",
+    "apps/desktop/src/renderer/NestedMenuEscape.behavior.test.tsx": "ddb215b8ef2b5c2138926af09636ac5891b4df716ab5c1da984f25e689b5ed2c",
+    "apps/desktop/src/renderer/FolderPopover.behavior.test.tsx": "d22bbb022b69b7cd8e1faa07367c1cdb1f2e103f358ff3f1c193628a24a12371"
+  },
+  "automated": {
+    "new_regression_tests": 8,
+    "previous_scheduled_picker_regression_tests": 4,
+    "full_desktop": {
+      "command": "npm --workspace @awaken/desktop test",
+      "files_passed": 150,
+      "tests_passed": 1554,
+      "log": "/tmp/awaken-related-popovers/desktop-tests.log"
+    },
+    "final_focused": {
+      "command": "npm --workspace @awaken/desktop test -- src/renderer/NestedMenuEscape.behavior.test.tsx src/renderer/FolderPopover.behavior.test.tsx",
+      "files_passed": 2,
+      "tests_passed": 8,
+      "note": "全量检查后，将模型目录夹具改为真实 Desktop 使用的 endpoint 模式，并加强焦点恢复与第二次 Escape 断言；聚焦复验通过。",
+      "log": "/tmp/awaken-related-popovers/final-focused-tests.log"
+    },
+    "passed_commands": [
+      "npm --workspace @awaken/desktop run typecheck",
+      "npm --workspace @awaken/design-system run build",
+      "npm --workspace @awaken/desktop run build",
+      "node scripts/check-docs.mjs",
+      "git diff --check"
+    ],
+    "baseline_failures": "修复前 Select 的 trigger/option 两场景与模型目录 input 场景均会关闭父弹窗；普通 portalled Dropdown 对照通过。",
+    "limitations": "jsdom 只验证交互与尺寸配置，不提供真实像素布局。"
+  },
+  "desktop": {
+    "platform": "macOS / Electron / Awaken Desktop 正式开发入口",
+    "origin": "http://127.0.0.1:5174/",
+    "fixture": {
+      "name": "POPOVER-BOUNDARY-QA-0909",
+      "folder_count": 40,
+      "skill_count": 1,
+      "skill_content": "惰性布局验收说明，不执行包内代码",
+      "created_via": "正常 Core 项目与文件夹接口"
+    },
+    "cases": [
+      {
+        "issue": "Skills 文件夹筛选长列表超出视口",
+        "before": "24 文件夹已让浮层越过窗口并产生整页滚动条",
+        "after": "40 文件夹在常规与小窗口内由列表内部滚动；顶部说明保留；选择末尾零 Skill 文件夹后父窗口保留并显示空态",
+        "window_sizes": "常规视口约 1440×902，小窗口约 1150×760",
+        "screenshots": [
+          "skills-before.jpg",
+          "skills-fixed.jpg",
+          "skills-small.jpg",
+          "skills-last-folder.jpg"
+        ]
+      },
+      {
+        "issue": "项目悬停卡片长列表撑高整页",
+        "before": {
+          "viewport": [
+            1440,
+            902
+          ],
+          "doc": [
+            1429,
+            1230
+          ],
+          "folders": 40,
+          "card": {
+            "x": 280.5,
+            "y": 8,
+            "width": 280,
+            "height": 1222,
+            "top": 8,
+            "right": 560.5,
+            "bottom": 1230,
+            "left": 280.5
+          },
+          "overflow": "visible"
+        },
+        "after": {
+          "viewport": [
+            1440,
+            902
+          ],
+          "doc": [
+            1440,
+            902
+          ],
+          "folders": 40,
+          "card": {
+            "x": 280.5,
+            "y": 8,
+            "width": 280,
+            "height": 886,
+            "top": 8,
+            "right": 560.5,
+            "bottom": 894,
+            "left": 280.5
+          },
+          "scrollHeight": 1220,
+          "overflow": "auto"
+        },
+        "interaction": "通过 DevTools 向真实项目行派发原生 mouseenter 触发组件自带悬停延迟，然后关闭 DevTools 并用桌面滚动操作到 folder-40 与编辑项目。",
+        "screenshots": [
+          "hover-fixed.jpg",
+          "hover-last-folder.jpg"
+        ],
+        "limits": "末项定位目录回调用自动化验证；未用物理鼠标逐条验证所有进入/离开轨迹。"
+      },
+      {
+        "issue": "Select Escape 同时关闭创建任务弹窗",
+        "entry": "定时任务 > 创建任务 > 循环计划",
+        "after": "首次 Escape 只关闭菜单并保留 ESC-KEEP-DRAFT-QA 草稿；第二次关闭父弹窗；未保存任务",
+        "screenshots": [
+          "select-escape-keeps-draft.jpg"
+        ]
+      },
+      {
+        "issue": "模型目录 Escape 同时关闭供应商配置弹窗",
+        "entry": "设置 > 模型 > API > 配置 API Key > Doubao Ark > 模型 / 推理接入点",
+        "after": "目录关闭，关闭配置面板按钮与模型输入框仍存在；随后关闭面板返回应用",
+        "evidence": "model-escape-after.txt",
+        "limits": "仅验证配置交互；未填写、修改或保存凭据，未调用供应商。"
+      }
+    ],
+    "cleanup": {
+      "project_id": "project_1788922704780463000_1",
+      "active_project_absent": true,
+      "temporary_workspace_removed": true
+    },
+    "final_state": "已刷新 Desktop 并核对验收项目不在侧栏，Awaken 保持打开。",
+    "limits": [
+      "未进行 Windows/Linux 实机验收。",
+      "未把其他未复现的浮层一并改成新定位策略，也不声明项目内所有浮层均无缺陷。",
+      "本轮是界面修复，未发起 LLM 请求或执行 Skill。"
+    ]
+  },
+  "images": {
+    "hover-last-folder.jpg": {
+      "sha256": "ee679f161ae0035552b0ec2b6a0dd7856c20908594aa5b100e8972a00fb87f01",
+      "format": "jpeg"
+    },
+    "skills-before.jpg": {
+      "sha256": "fd48fc3843e8653f21171d6fd7ef1480fa574a6c64730a88a70d60b9dba95966",
+      "format": "jpeg"
+    },
+    "skills-last-folder.jpg": {
+      "sha256": "22d9c62c9109b90a8858532f2e80192dfa5144f1f2815a2e655c2b833a1eb78b",
+      "format": "jpeg"
+    },
+    "hover-fixed.jpg": {
+      "sha256": "1115c46a8ae35e45d2a96bf1ecc088abc361c0408f082f5a0a64a68c9a4fc116",
+      "format": "jpeg"
+    },
+    "select-escape-keeps-draft.jpg": {
+      "sha256": "a5dea22fba5b02fb0eebf94b84dc5aeeb83db51662f4d5bbebc010a3798ae139",
+      "format": "jpeg"
+    },
+    "skills-small.jpg": {
+      "sha256": "145ec24878e863ef1f27bea443d3c02946babb7dfaa0682549cd2cfde0775e70",
+      "format": "jpeg"
+    },
+    "skills-fixed.jpg": {
+      "sha256": "4fa37530e4d2b31caddd4f82bd7937a1b08c26b2742ce4cb11ce24f03292ac42",
+      "format": "jpeg"
+    }
+  },
+  "git": "未提交或推送"
+}

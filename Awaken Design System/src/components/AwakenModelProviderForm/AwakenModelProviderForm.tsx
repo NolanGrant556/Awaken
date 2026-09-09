@@ -290,7 +290,18 @@ export function AwakenModelProviderForm({
           <label id={modelLabelId} htmlFor={modelInputId}>
             {modelMode === "endpoint" ? "模型 / 推理接入点" : "模型"}
           </label>
-          <div className="model-provider-model-combobox" ref={modelCatalogRef}>
+          <div
+            className="model-provider-model-combobox"
+            ref={modelCatalogRef}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape" || !modelCatalogOpen) return;
+              event.preventDefault();
+              event.stopPropagation();
+              // Focus may itself open the catalog; close after restoring focus.
+              document.getElementById(modelInputId)?.focus({ preventScroll: true });
+              setModelCatalogOpen(false);
+            }}
+          >
             <input
               id={modelInputId}
               role="combobox"
@@ -307,7 +318,6 @@ export function AwakenModelProviderForm({
               aria-autocomplete="list"
               onFocus={() => setModelCatalogOpen(true)}
               onKeyDown={(event) => {
-                if (event.key === "Escape") setModelCatalogOpen(false);
                 if (event.key === "ArrowDown") setModelCatalogOpen(true);
               }}
               onChange={(event) => {

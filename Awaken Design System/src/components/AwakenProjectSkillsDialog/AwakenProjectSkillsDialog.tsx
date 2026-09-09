@@ -136,6 +136,7 @@ export function AwakenProjectSkillsDialog({
           <div className="aw-project-skills-dialog__heading">
             {primaryFolder ? (
               <AwakenPopover
+                viewportBounded
                 open={folderPopoverOpen}
                 onOpenChange={setFolderPopoverOpen}
                 placement="bottom-start"

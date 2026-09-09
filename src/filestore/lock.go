@@ -70,6 +70,17 @@ func AcquireLock(path, ownerID string, ttl time.Duration) (*FileLock, error) {
 			return nil, fmt.Errorf("filestore: create lock file: %w", err)
 		}
 		stale, observed, staleErr := lockIsStale(path, ttl)
+		// O_EXCL publishes the filename before its JSON owner is written. Give
+		// that short initialization window a bounded chance to finish; never
+		// remove or ignore an unreadable lock while waiting.
+		for retry := 0; staleErr != nil && retry < 10; retry++ {
+			var syntaxErr *json.SyntaxError
+			if !errors.As(staleErr, &syntaxErr) {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+			stale, observed, staleErr = lockIsStale(path, ttl)
+		}
 		if staleErr != nil {
 			return nil, staleErr
 		}

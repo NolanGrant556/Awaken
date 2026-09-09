@@ -81,6 +81,9 @@ type anthropicStreamEvent struct {
 	ContentBlock *anthropicContentBlock `json:"content_block,omitempty"`
 	Delta        *anthropicStreamDelta  `json:"delta,omitempty"`
 	Usage        *anthropicUsage        `json:"usage,omitempty"`
+	Error        *struct {
+		Type string `json:"type"`
+	} `json:"error,omitempty"`
 }
 
 type anthropicStreamDelta struct {
@@ -601,6 +604,7 @@ type anthropicStreamState struct {
 	usage       *Usage
 	stopReason  string
 	completed   bool
+	failure     error
 }
 
 type anthropicToolAccumulator struct {
@@ -709,6 +713,19 @@ func (s *anthropicStreamState) consume(data string, event string) {
 
 	case "error":
 		s.completed = true
+		code := "unknown"
+		status := 0
+		if streamEvent.Error != nil {
+			// Keep only protocol error types, never the provider's raw message.
+			statuses := map[string]int{"invalid_request_error": 400, "authentication_error": 401,
+				"permission_error": 403, "not_found_error": 404, "request_too_large": 413,
+				"rate_limit_error": 429, "api_error": 500, "overloaded_error": 529}
+			if known, ok := statuses[streamEvent.Error.Type]; ok {
+				code, status = streamEvent.Error.Type, known
+			}
+		}
+		s.failure = &RequestError{StatusCode: status, Detail: "anthropic stream error " + code}
+		s.emitEvent(StreamEvent{Type: StreamEventFailed, ErrorCode: code})
 	}
 }
 
@@ -737,6 +754,9 @@ func (s *anthropicStreamState) emitEvent(event StreamEvent) {
 }
 
 func (s *anthropicStreamState) response() (*Response, error) {
+	if s.failure != nil {
+		return nil, s.failure
+	}
 	result := &Response{
 		Content:          s.content.String(),
 		Thinking:         s.thinking.String(),

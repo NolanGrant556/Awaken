@@ -118,6 +118,17 @@ func TestControlACPRunLifecycle(t *testing.T) {
 		t.Fatalf("cross-session thread: expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 
+	// A cancelled HTTP create must not launch a model or occupy the session.
+	cancelledCtx, cancelCreate := context.WithCancel(context.Background())
+	cancelCreate()
+	cancelledBody, _ := json.Marshal(map[string]any{"input": "cancelled before start"})
+	cancelledRequest := httptest.NewRequest(http.MethodPost, "/v1/control/acp/sessions/"+sessionID+"/runs", bytes.NewReader(cancelledBody)).WithContext(cancelledCtx)
+	cancelledRequest.Header.Set("Authorization", "Bearer "+id.ControlToken)
+	router.ServeHTTP(httptest.NewRecorder(), cancelledRequest)
+	if len(selectedProfile) != 0 {
+		t.Fatal("cancelled create launched an agent")
+	}
+
 	// Create run.
 	runBody, _ := json.Marshal(map[string]any{
 		"thread_id":        threadID,
@@ -307,7 +318,7 @@ type fakePermissionAwaiter struct {
 	pending map[string]acp.PendingPermission
 }
 
-func (f *fakePermissionAwaiter) AwaitPermission(ctx context.Context, req acp.PermissionRequest) (acp.PermissionResolution, error) {
+func (f *fakePermissionAwaiter) AwaitPermission(ctx context.Context, req acp.PermissionRequest, ready func()) (acp.PermissionResolution, error) {
 	return acp.PermissionResolution{}, nil
 }
 

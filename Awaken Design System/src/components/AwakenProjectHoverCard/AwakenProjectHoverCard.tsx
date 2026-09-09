@@ -8,6 +8,7 @@ import {
   offset,
   safePolygon,
   shift,
+  size,
   useDismiss,
   useFloating,
   useHover,
@@ -55,12 +56,26 @@ export function AwakenProjectHoverCard({
     }
   }, [disabled]);
 
-  const { refs, floatingStyles, context } = useFloating({
+  const { refs, floatingStyles, context, isPositioned } = useFloating({
     open: isOpen,
     onOpenChange: setOpen,
     placement,
+    strategy: "fixed",
     whileElementsMounted: autoUpdate,
-    middleware: [offset(8), flip({ padding: 8 }), shift({ padding: 8 })],
+    middleware: [
+      offset(8),
+      flip({ padding: 8 }),
+      shift({ padding: 8 }),
+      size({
+        padding: 8,
+        apply({ availableWidth, availableHeight, elements }) {
+          Object.assign(elements.floating.style, {
+            maxWidth: `${Math.max(0, availableWidth)}px`,
+            maxHeight: `${Math.max(0, availableHeight)}px`,
+          });
+        },
+      }),
+    ],
   });
 
   const hover = useHover(context, {
@@ -87,7 +102,7 @@ export function AwakenProjectHoverCard({
           <div
             ref={refs.setFloating}
             {...getFloatingProps()}
-            style={floatingStyles}
+            style={{ ...floatingStyles, visibility: isPositioned ? undefined : "hidden" }}
             className="aw-project-hover-card"
           >
             <div className="aw-project-hover-card__header">

@@ -485,8 +485,9 @@ func (s *Scheduler) dispatch(task Task, occurrence time.Time, trigger Trigger, i
 			if err := s.consumeIfNeeded(task, occurrence, trigger); err != nil {
 				// The existing execution is already in flight or terminal; record a
 				// separate persistence-failure terminal for this dispatch attempt.
-				s.transitionTerminal(task, exec, ExecutionStatusError, ErrorCodePersistenceFailed, err.Error(), "", "")
-				s.publishFinished(task, exec, ExecutionStatusError, "")
+				if s.transitionTerminal(task, exec, ExecutionStatusError, ErrorCodePersistenceFailed, err.Error(), "", "") {
+					s.publishFinished(task, exec, ExecutionStatusError, "")
+				}
 				return exec
 			}
 			s.checkCompletion(task.TaskID)
@@ -609,13 +610,16 @@ func (s *Scheduler) runExecution(active *activeExecution, task Task, exec Execut
 	if agentTask {
 		if status, code, message := s.acquireAgentSlot(active, task, occurrence); status != "" {
 			if status == ExecutionStatusSkipped {
-				s.transitionTerminal(task, exec, status, code, message, "", "")
+				committed := s.transitionTerminal(task, exec, status, code, message, "", "")
 				s.consumeIfNeeded(task, occurrence, exec.Trigger)
 				s.checkCompletion(task.TaskID)
-				s.publishFinished(task, exec, ExecutionStatusSkipped, "")
+				if committed {
+					s.publishFinished(task, exec, ExecutionStatusSkipped, "")
+				}
 			} else if !s.isShutdown(active) {
-				s.transitionTerminal(task, exec, status, code, message, "", "")
-				s.publishFinished(task, exec, ExecutionStatusCancelled, "")
+				if s.transitionTerminal(task, exec, status, code, message, "", "") {
+					s.publishFinished(task, exec, ExecutionStatusCancelled, "")
+				}
 			}
 			return
 		}
@@ -631,8 +635,9 @@ func (s *Scheduler) runExecution(active *activeExecution, task Task, exec Execut
 	// counts).
 	if !manual {
 		if err := s.consumeIfNeeded(task, occurrence, exec.Trigger); err != nil {
-			s.transitionTerminal(task, exec, ExecutionStatusError, ErrorCodePersistenceFailed, err.Error(), "", "")
-			s.publishFinished(task, exec, ExecutionStatusError, "")
+			if s.transitionTerminal(task, exec, ExecutionStatusError, ErrorCodePersistenceFailed, err.Error(), "", "") {
+				s.publishFinished(task, exec, ExecutionStatusError, "")
+			}
 			return
 		}
 	}
@@ -662,8 +667,9 @@ func (s *Scheduler) runExecution(active *activeExecution, task Task, exec Execut
 		shutdown := active.shutdown
 		s.mu.Unlock()
 		if !shutdown {
-			s.transitionTerminal(task, exec, ExecutionStatusCancelled, ErrorCodeRunCancelled, "execution cancelled while running", "", "")
-			s.publishFinished(task, exec, ExecutionStatusCancelled, "")
+			if s.transitionTerminal(task, exec, ExecutionStatusCancelled, ErrorCodeRunCancelled, "execution cancelled while running", "", "") {
+				s.publishFinished(task, exec, ExecutionStatusCancelled, "")
+			}
 		}
 		return
 	}
@@ -696,7 +702,9 @@ func (s *Scheduler) runExecution(active *activeExecution, task Task, exec Execut
 
 	switch {
 	case execErr == nil:
-		s.transitionTerminal(task, exec, ExecutionStatusSuccess, "", "", runID, threadID)
+		if !s.transitionTerminal(task, exec, ExecutionStatusSuccess, "", "", runID, threadID) {
+			break
+		}
 		s.publishFinished(task, exec, ExecutionStatusSuccess, threadID)
 		if !agentTask {
 			// Reminder notice: Desktop turns this into a native notification.
@@ -712,14 +720,17 @@ func (s *Scheduler) runExecution(active *activeExecution, task Task, exec Execut
 			})
 		}
 	case execErr.Skipped:
-		s.transitionTerminal(task, exec, ExecutionStatusSkipped, execErr.Code, execErr.Message, runID, threadID)
-		s.publishFinished(task, exec, ExecutionStatusSkipped, threadID)
+		if s.transitionTerminal(task, exec, ExecutionStatusSkipped, execErr.Code, execErr.Message, runID, threadID) {
+			s.publishFinished(task, exec, ExecutionStatusSkipped, threadID)
+		}
 	case execErr.Cancelled:
-		s.transitionTerminal(task, exec, ExecutionStatusCancelled, execErr.Code, execErr.Message, runID, threadID)
-		s.publishFinished(task, exec, ExecutionStatusCancelled, threadID)
+		if s.transitionTerminal(task, exec, ExecutionStatusCancelled, execErr.Code, execErr.Message, runID, threadID) {
+			s.publishFinished(task, exec, ExecutionStatusCancelled, threadID)
+		}
 	default:
-		s.transitionTerminal(task, exec, ExecutionStatusError, execErr.Code, execErr.Message, runID, threadID)
-		s.publishFinished(task, exec, ExecutionStatusError, threadID)
+		if s.transitionTerminal(task, exec, ExecutionStatusError, execErr.Code, execErr.Message, runID, threadID) {
+			s.publishFinished(task, exec, ExecutionStatusError, threadID)
+		}
 	}
 
 	if !manual {
@@ -786,8 +797,9 @@ func (s *Scheduler) handleUserCancel(active *activeExecution, task Task, exec Ex
 		return false
 	}
 	if !s.isShutdown(active) {
-		s.transitionTerminal(task, exec, ExecutionStatusCancelled, ErrorCodeRunCancelled, message, "", "")
-		s.publishFinished(task, exec, ExecutionStatusCancelled, "")
+		if s.transitionTerminal(task, exec, ExecutionStatusCancelled, ErrorCodeRunCancelled, message, "", "") {
+			s.publishFinished(task, exec, ExecutionStatusCancelled, "")
+		}
 	}
 	return true
 }
@@ -828,13 +840,13 @@ func (s *Scheduler) acquireAgentSlot(active *activeExecution, task Task, occurre
 }
 
 // transitionTerminal appends the terminal record of an execution.
-func (s *Scheduler) transitionTerminal(task Task, exec Execution, status ExecutionStatus, code, message, runID, threadID string) {
+func (s *Scheduler) transitionTerminal(task Task, exec Execution, status ExecutionStatus, code, message, runID, threadID string) bool {
 	now := s.clock.Now().UTC()
 	startedAt := exec.StartedAt
 	if startedAt.IsZero() {
 		startedAt = now
 	}
-	_, _, _ = s.repo.AppendExecution(task.TaskID, Execution{
+	_, _, err := s.repo.AppendExecution(task.TaskID, Execution{
 		ExecutionID:  exec.ExecutionID,
 		Trigger:      exec.Trigger,
 		ScheduledFor: exec.ScheduledFor,
@@ -847,6 +859,15 @@ func (s *Scheduler) transitionTerminal(task Task, exec Execution, status Executi
 		ErrorCode:    code,
 		ErrorMessage: message,
 	})
+	if err != nil {
+		// The queued/running journal identity remains recoverable as interrupted.
+		// Do not replay an executor to compensate for a failed result write.
+		s.publish(Event{Type: EventNotice, TaskID: task.TaskID, ProjectID: task.ProjectID,
+			ExecutionID: exec.ExecutionID, RunID: runID, ThreadID: threadID, TaskName: task.Name,
+			Status: string(ExecutionStatusError), Content: "执行状态保存失败。请检查磁盘后重启 Awaken 恢复；重试业务操作前请先核对实际结果。"})
+		return false
+	}
+	return true
 }
 
 func (s *Scheduler) publishFinished(task Task, exec Execution, status ExecutionStatus, threadID string) {

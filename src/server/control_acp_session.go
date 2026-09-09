@@ -99,6 +99,7 @@ func (h *acpSessionControlHandlers) handleGetACPSession(w http.ResponseWriter, r
 		"project_id":     mapping.ProjectID,
 		"thread_id":      mapping.ThreadID,
 		"current_run_id": mapping.CurrentRunID,
+		"run_starting":   mapping.RunStarting,
 		"canonical_cwd":  mapping.CanonicalCWD,
 		"visibility":     mapping.Visibility,
 		"client_name":    mapping.ClientName,

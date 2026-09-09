@@ -170,12 +170,22 @@ func TestMinimalEnvironmentPreventsPythonBytecodeWrites(t *testing.T) {
 	t.Fatalf("PYTHONDONTWRITEBYTECODE is missing: %#v", environment)
 }
 
-type testAsyncLifecycle struct{ retained atomic.Int32 }
+type testAsyncLifecycle struct {
+	retained atomic.Int32
+	released chan struct{}
+}
 
 func (l *testAsyncLifecycle) RetainAsyncHook() func() {
 	l.retained.Add(1)
 	var once sync.Once
-	return func() { once.Do(func() { l.retained.Add(-1) }) }
+	return func() {
+		once.Do(func() {
+			l.retained.Add(-1)
+			if l.released != nil {
+				close(l.released)
+			}
+		})
+	}
 }
 
 func TestDispatcherClaudeAsyncDeclarationReturnsBeforeProcessCompletion(t *testing.T) {
@@ -183,7 +193,7 @@ func TestDispatcherClaudeAsyncDeclarationReturnsBeforeProcessCompletion(t *testi
 	hook.Protocol = "claude_code"
 	hook.Matcher = Matcher{}
 	store := NewAsyncCompletionStore()
-	lifecycle := &testAsyncLifecycle{}
+	lifecycle := &testAsyncLifecycle{released: make(chan struct{})}
 	dispatcher := NewDispatcher(AvailabilitySnapshot{
 		HooksByEvent: map[Event][]CompiledHook{EventRunStart: {hook}},
 		AsyncSink:    store, AsyncLifecycle: lifecycle,
@@ -204,6 +214,12 @@ func TestDispatcherClaudeAsyncDeclarationReturnsBeforeProcessCompletion(t *testi
 	case <-recorder.completedSignal:
 	case <-time.After(6 * time.Second):
 		t.Fatal("async Hook did not complete")
+	}
+	// InvocationCompleted precedes the asynchronous goroutine's deferred release.
+	select {
+	case <-lifecycle.released:
+	case <-time.After(time.Second):
+		t.Fatal("async Hook did not release its lifecycle")
 	}
 	outcome, ok := recorder.latestCompleted()
 	if !ok || outcome.Status != "success" || outcome.DurationMS < 200 || lifecycle.retained.Load() != 0 {

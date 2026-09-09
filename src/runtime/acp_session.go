@@ -41,7 +41,7 @@ type ACPSessionMapping struct {
 	ClientVersion string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
-	runStarting   bool
+	RunStarting   bool
 	closing       bool
 }
 
@@ -224,7 +224,7 @@ func (m *ACPSessionManager) SetCurrentRun(acpSessionID, runID string) error {
 		return ErrACPSessionBusy
 	}
 	mapping.CurrentRunID = runID
-	mapping.runStarting = false
+	mapping.RunStarting = false
 	mapping.UpdatedAt = time.Now().UTC()
 	return nil
 }
@@ -238,10 +238,10 @@ func (m *ACPSessionManager) BeginRun(acpSessionID string) error {
 	if !ok {
 		return ErrACPSessionNotFound
 	}
-	if mapping.closing || mapping.runStarting || mapping.CurrentRunID != "" {
+	if mapping.closing || mapping.RunStarting || mapping.CurrentRunID != "" {
 		return ErrACPSessionBusy
 	}
-	mapping.runStarting = true
+	mapping.RunStarting = true
 	mapping.UpdatedAt = time.Now().UTC()
 	return nil
 }
@@ -250,10 +250,26 @@ func (m *ACPSessionManager) BeginRun(acpSessionID string) error {
 func (m *ACPSessionManager) AbortRun(acpSessionID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if mapping, ok := m.sessions[acpSessionID]; ok && mapping.runStarting {
-		mapping.runStarting = false
+	if mapping, ok := m.sessions[acpSessionID]; ok && mapping.RunStarting {
+		mapping.RunStarting = false
 		mapping.UpdatedAt = time.Now().UTC()
 	}
+}
+
+// CancelAndClearRun preserves the run association until cancellation reaches a
+// terminal state. A timeout leaves it available for bridge reconciliation.
+func (m *ACPSessionManager) CancelAndClearRun(ctx context.Context, sessionID, runID string) error {
+	if m.runService == nil {
+		return errors.New("ACP run service unavailable")
+	}
+	if _, err := m.runService.CancelRun(runID); err != nil && !errors.Is(err, ErrRunNotFound) {
+		return err
+	}
+	if err := m.waitForTerminal(ctx, runID); err != nil {
+		return err
+	}
+	m.ClearCurrentRun(sessionID, runID)
+	return nil
 }
 
 // ClearCurrentRun removes the active run association when it finishes.

@@ -14,9 +14,10 @@ import (
 	"awaken/src/tool"
 )
 
-// PermissionAwaiter resolves pending ACP permission requests.
+// PermissionAwaiter registers the request before calling ready, then waits.
+// The callback may publish the request and synchronously resolve it.
 type PermissionAwaiter interface {
-	AwaitPermission(ctx context.Context, req PermissionRequest) (PermissionResolution, error)
+	AwaitPermission(ctx context.Context, req PermissionRequest, ready func()) (PermissionResolution, error)
 	Resolve(interactionID string, res PermissionResolution) error
 	Pending(interactionID string) (PendingPermission, bool)
 }
@@ -561,33 +562,6 @@ func (h *managerPermissionHandler) RequestPermission(ctx context.Context, req Pe
 	req.RunnerID = h.conv.Key.RunnerID
 	req.ACPSessionID = h.conv.ACPSessionID
 	req.ExpiresAt = time.Now().Add(time.Duration(h.conv.RunnerSnapshot.TurnTimeoutSeconds) * time.Second)
-	h.conv.SetPendingPermission(&req)
-	defer h.conv.ClearPendingPermission()
-
-	options := make([]map[string]any, 0, len(req.Options))
-	for _, opt := range req.Options {
-		options = append(options, map[string]any{
-			"option_id": opt.OptionID,
-			"name":      opt.Name,
-			"kind":      opt.Kind,
-		})
-	}
-	emitACPEvent(h.ctx, tool.ACPEvent{
-		Type:          tool.ACPEventTypePermissionRequested,
-		ThreadID:      h.conv.Key.ThreadID,
-		ToolCallID:    h.turn.ToolCallID,
-		InteractionID: req.InteractionID,
-		Content:       req.Title,
-		Diagnostic: map[string]any{
-			"runner_id":      h.conv.Key.RunnerID,
-			"acp_session_id": h.conv.ACPSessionID,
-			"turn_id":        h.turn.TurnID,
-			"kind":           req.Kind,
-			"title":          req.Title,
-			"options":        options,
-			"expires_at":     req.ExpiresAt.UTC().Format(time.RFC3339Nano),
-		},
-	})
 
 	h.manager.mu.RLock()
 	awaiter := h.manager.awaiter
@@ -609,7 +583,36 @@ func (h *managerPermissionHandler) RequestPermission(ctx context.Context, req Pe
 		})
 		return PermissionResolution{InteractionID: req.InteractionID, Cancelled: true}, nil
 	}
-	res, err := awaiter.AwaitPermission(ctx, req)
+	defer h.conv.ClearPendingPermission()
+	res, err := awaiter.AwaitPermission(ctx, req, func() {
+		h.conv.SetPendingPermission(&req)
+
+		options := make([]map[string]any, 0, len(req.Options))
+		for _, opt := range req.Options {
+			options = append(options, map[string]any{
+				"option_id": opt.OptionID,
+				"name":      opt.Name,
+				"kind":      opt.Kind,
+			})
+		}
+		emitACPEvent(h.ctx, tool.ACPEvent{
+			Type:          tool.ACPEventTypePermissionRequested,
+			ThreadID:      h.conv.Key.ThreadID,
+			ToolCallID:    h.turn.ToolCallID,
+			InteractionID: req.InteractionID,
+			Content:       req.Title,
+			Diagnostic: map[string]any{
+				"runner_id":      h.conv.Key.RunnerID,
+				"acp_session_id": h.conv.ACPSessionID,
+				"turn_id":        h.turn.TurnID,
+				"kind":           req.Kind,
+				"title":          req.Title,
+				"options":        options,
+				"expires_at":     req.ExpiresAt.UTC().Format(time.RFC3339Nano),
+			},
+		})
+
+	})
 	resolutionContent := res.OptionID
 	if resolutionContent == "" {
 		resolutionContent = "cancelled"
@@ -639,6 +642,7 @@ type ChanPermissionAwaiter struct {
 }
 
 type pendingRecord struct {
+	ctx context.Context
 	ch  chan PermissionResolution
 	req PendingPermission
 }
@@ -648,15 +652,29 @@ func NewChanPermissionAwaiter() *ChanPermissionAwaiter {
 	return &ChanPermissionAwaiter{pending: make(map[string]pendingRecord)}
 }
 
-func (a *ChanPermissionAwaiter) AwaitPermission(ctx context.Context, req PermissionRequest) (PermissionResolution, error) {
+func (a *ChanPermissionAwaiter) AwaitPermission(ctx context.Context, req PermissionRequest, ready func()) (PermissionResolution, error) {
+	if !req.ExpiresAt.IsZero() {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, req.ExpiresAt)
+		defer cancel()
+	}
+	if err := ctx.Err(); err != nil {
+		return PermissionResolution{InteractionID: req.InteractionID, Cancelled: true}, err
+	}
+
 	allowed := make([]string, 0, len(req.Options))
 	for _, opt := range req.Options {
 		allowed = append(allowed, opt.OptionID)
 	}
 	ch := make(chan PermissionResolution, 1)
 	a.mu.Lock()
+	if _, exists := a.pending[req.InteractionID]; exists {
+		a.mu.Unlock()
+		return PermissionResolution{}, fmt.Errorf("%s: duplicate interaction", ErrCodePermissionExpired)
+	}
 	a.pending[req.InteractionID] = pendingRecord{
-		ch: ch,
+		ctx: ctx,
+		ch:  ch,
 		req: PendingPermission{
 			InteractionID:    req.InteractionID,
 			ThreadID:         req.ThreadID,
@@ -669,9 +687,14 @@ func (a *ChanPermissionAwaiter) AwaitPermission(ctx context.Context, req Permiss
 	a.mu.Unlock()
 	defer func() {
 		a.mu.Lock()
-		delete(a.pending, req.InteractionID)
+		if a.pending[req.InteractionID].ch == ch {
+			delete(a.pending, req.InteractionID)
+		}
 		a.mu.Unlock()
 	}()
+	if ready != nil {
+		ready()
+	}
 	select {
 	case <-ctx.Done():
 		return PermissionResolution{InteractionID: req.InteractionID, Cancelled: true}, ctx.Err()
@@ -687,8 +710,11 @@ func newInteractionID() string {
 func (a *ChanPermissionAwaiter) Resolve(interactionID string, res PermissionResolution) error {
 	a.mu.Lock()
 	rec, ok := a.pending[interactionID]
+	if ok {
+		delete(a.pending, interactionID)
+	}
 	a.mu.Unlock()
-	if !ok {
+	if !ok || rec.ctx.Err() != nil {
 		return fmt.Errorf("%s: %s", ErrCodePermissionExpired, interactionID)
 	}
 	select {

@@ -1,12 +1,13 @@
 import "./AwakenPopover.css";
 import { useState, useCallback, useRef, useEffect } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import {
   useFloating,
   autoUpdate,
   offset,
   flip,
   shift,
+  size,
   useClick,
   useDismiss,
   useRole,
@@ -27,6 +28,9 @@ export type AwakenPopoverProps = {
   role?: "dialog" | "menu" | "listbox" | "tree" | "grid";
   /** Keep the floating surface beside its trigger so clipping ancestors can bound placement. */
   portalled?: boolean;
+  /** Bound a portalled picker to the viewport without creating document overflow. */
+  viewportBounded?: boolean;
+  initialFocusRef?: RefObject<HTMLElement | null>;
 };
 
 export function AwakenPopover({
@@ -39,6 +43,8 @@ export function AwakenPopover({
   matchTriggerWidth = false,
   role = "dialog",
   portalled = true,
+  viewportBounded = false,
+  initialFocusRef,
 }: AwakenPopoverProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
 
@@ -55,15 +61,27 @@ export function AwakenPopover({
     [isControlled, onOpenChange]
   );
 
-  const { refs, floatingStyles, context } = useFloating({
+  const constrainToViewport = portalled && viewportBounded;
+  const { refs, floatingStyles, context, isPositioned } = useFloating({
     open: isOpen,
     onOpenChange: handleOpenChange,
     placement,
+    strategy: constrainToViewport ? "fixed" : "absolute",
     whileElementsMounted: autoUpdate,
     middleware: [
       offset(offsetValue),
       flip({ padding: 8 }),
       shift({ padding: 8 }),
+      constrainToViewport && size({
+        padding: 8,
+        apply({ availableWidth, availableHeight, rects, elements }) {
+          elements.floating.style.setProperty("--aw-popover-available-width", `${Math.max(0, availableWidth)}px`);
+          elements.floating.style.setProperty("--aw-popover-available-height", `${Math.max(0, availableHeight)}px`);
+          if (matchTriggerWidth) {
+            elements.floating.style.width = `${rects.reference.width}px`;
+          }
+        },
+      }),
     ],
   });
 
@@ -80,18 +98,18 @@ export function AwakenPopover({
   const triggerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (matchTriggerWidth && refs.floating.current && triggerRef.current) {
+    if (!constrainToViewport && matchTriggerWidth && refs.floating.current && triggerRef.current) {
       const width = triggerRef.current.offsetWidth;
       refs.floating.current.style.width = `${width}px`;
     }
-  }, [matchTriggerWidth, refs.floating, isOpen]);
+  }, [constrainToViewport, matchTriggerWidth, refs.floating, isOpen]);
 
   const floatingSurface = isOpen ? (
-    <FloatingFocusManager context={context} modal={false}>
+    <FloatingFocusManager context={context} modal={false} initialFocus={initialFocusRef} disabled={constrainToViewport && !isPositioned}>
       <div
         ref={refs.setFloating}
         className="aw-popover__floating"
-        style={floatingStyles}
+        style={{ ...floatingStyles, visibility: constrainToViewport && !isPositioned ? "hidden" : undefined }}
         {...getFloatingProps()}
       >
         {content}

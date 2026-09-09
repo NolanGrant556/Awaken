@@ -1,9 +1,12 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"awaken/src/acp"
 	"awaken/src/modelprofile"
@@ -80,6 +83,9 @@ func (h *acpRunControlHandlers) handleCreateACPRun(w http.ResponseWriter, r *htt
 	profile, err := h.modelProfileStore.Resolve(req.ModelProfileID)
 	if err != nil {
 		writeErrorJSON(w, http.StatusBadRequest, "ACP_MODEL_PROFILE_UNAVAILABLE", "the selected Awaken model profile is unavailable")
+		return
+	}
+	if r.Context().Err() != nil {
 		return
 	}
 	if err := h.acpSessionManager.BeginRun(sessionID); err != nil {
@@ -160,14 +166,29 @@ func (h *acpRunControlHandlers) handleCreateACPRun(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// A cancelled create request must not leave an unclaimed run executing.
+	delivered := false
+	defer func() {
+		if !delivered {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = h.acpSessionManager.CancelAndClearRun(cleanupCtx, sessionID, run.RunID)
+		}
+	}()
 	if err := h.acpSessionManager.SetCurrentRun(sessionID, run.RunID); err != nil {
 		_, _ = h.runService.CancelRun(run.RunID)
 		writeErrorJSON(w, http.StatusInternalServerError, "SET_CURRENT_RUN_FAILED", err.Error())
 		return
 	}
 	committed = true
+	if r.Context().Err() != nil {
+		return
+	}
 
-	writeJSON(w, http.StatusCreated, run)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	err = json.NewEncoder(w).Encode(run)
+	delivered = err == nil && r.Context().Err() == nil
 }
 
 func runtimeModelProfile(profile modelprofile.ResolvedProfile) *awruntime.ModelProfileConfig {

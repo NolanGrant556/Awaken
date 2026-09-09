@@ -1,6 +1,10 @@
 @import "../../tokens/base.css";
 
 .aw-project-hover-card {
+  box-sizing: border-box;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   z-index: var(--aw-z-popover);
   display: grid;
   gap: var(--aw-space-1);

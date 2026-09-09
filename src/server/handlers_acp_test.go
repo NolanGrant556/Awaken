@@ -78,9 +78,9 @@ func TestHandleUpdateRunnerMergesEnvWithSetRemove(t *testing.T) {
 		Enabled: true,
 		Command: "npx",
 		Env: map[string]string{
-			"KEEP":     "old",
-			"REMOVE":   "me",
-			"REPLACE":  "old-value",
+			"KEEP":    "old",
+			"REMOVE":  "me",
+			"REPLACE": "old-value",
 		},
 	}); err != nil {
 		t.Fatalf("upsert runner: %v", err)
@@ -126,20 +126,22 @@ func TestHandleResolvePermissionValidatesRunID(t *testing.T) {
 
 	h := &acpHandlers{manager: mgr}
 
-	// Seed a pending permission record directly in the awaiter.
+	// Wait for registration explicitly; a sleep does not establish ownership.
+	ctx, cancel := context.WithCancel(contextBackground())
+	defer cancel()
+	registered := make(chan struct{})
 	go func() {
-		_, _ = awaiter.AwaitPermission(contextBackground(), acp.PermissionRequest{
+		_, _ = awaiter.AwaitPermission(ctx, acp.PermissionRequest{
 			InteractionID: "perm-1",
 			ThreadID:      "thread-1",
 			RunID:         "run-1",
 			RunnerID:      "codex",
 			ACPSessionID:  "session-1",
 			Options:       []acp.PermissionOption{{OptionID: "allow", Name: "Allow"}},
-		})
+		}, func() { close(registered) })
 	}()
 
-	// Give the goroutine time to register.
-	timeSleep(50 * time.Millisecond)
+	<-registered
 
 	payload, _ := json.Marshal(map[string]any{"option_id": "allow"})
 	req := httptest.NewRequest(http.MethodPost, "/v1/runs/wrong-run/acp-permissions/perm-1/resolve", bytes.NewReader(payload))

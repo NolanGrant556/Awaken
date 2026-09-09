@@ -1,0 +1,369 @@
+{
+  "schema_version": 1,
+  "verified_on": "2026-09-09",
+  "environment": "macOS managed Awaken Desktop, http://127.0.0.1:5174/",
+  "scope": "定时任务编辑器的项目、日期时间和时区选择器；空白隔离表单未保存、未创建或执行任务。",
+  "before": {
+    "user_report": "时区弹层越过窗口底部，出现整页右侧滚动条并发生位移。",
+    "measured_top_overflow": {
+      "viewport": [
+        1440,
+        903
+      ],
+      "floating": [
+        365,
+        -18,
+        390,
+        453
+      ],
+      "position": "absolute"
+    }
+  },
+  "after": {
+    "metrics": [
+      {
+        "vp": [
+          1440,
+          903
+        ],
+        "doc": [
+          1440,
+          1440,
+          903
+        ],
+        "scroll": [
+          0,
+          0
+        ],
+        "dialog": [
+          340,
+          29.5,
+          760,
+          860
+        ],
+        "floating": null,
+        "list": null,
+        "focus": "关闭"
+      },
+      {
+        "vp": [
+          1440,
+          903
+        ],
+        "doc": [
+          1440,
+          1440,
+          903
+        ],
+        "scroll": [
+          0,
+          0
+        ],
+        "dialog": [
+          340,
+          21.5,
+          760,
+          860
+        ],
+        "floating": null,
+        "list": null,
+        "focus": null
+      },
+      {
+        "vp": [
+          1440,
+          903
+        ],
+        "doc": [
+          1440,
+          1440,
+          903
+        ],
+        "scroll": [
+          0,
+          0
+        ],
+        "dialog": [
+          340,
+          21.5,
+          760,
+          860
+        ],
+        "floating": [
+          365,
+          8,
+          390,
+          427
+        ],
+        "strategy": "fixed",
+        "list": [
+          374,
+          62,
+          372,
+          364
+        ],
+        "focus": "时区"
+      },
+      {
+        "vp": [
+          1440,
+          903
+        ],
+        "doc": [
+          1440,
+          1440,
+          903
+        ],
+        "scroll": [
+          0,
+          0
+        ],
+        "dialog": [
+          340,
+          21.5,
+          760,
+          860
+        ],
+        "floating": [
+          365,
+          8,
+          390,
+          143
+        ],
+        "strategy": "fixed",
+        "list": [
+          374,
+          62,
+          372,
+          80
+        ],
+        "focus": "搜索时区"
+      },
+      {
+        "vp": [
+          1440,
+          903
+        ],
+        "doc": [
+          1440,
+          1440,
+          903
+        ],
+        "scroll": [
+          0,
+          0
+        ],
+        "dialog": [
+          340,
+          21.5,
+          760,
+          860
+        ],
+        "floating": [
+          365,
+          487,
+          390,
+          143
+        ],
+        "strategy": "fixed",
+        "list": [
+          374,
+          541,
+          372,
+          80
+        ],
+        "focus": "搜索时区"
+      },
+      {
+        "vp": [
+          1440,
+          903
+        ],
+        "doc": [
+          1440,
+          1440,
+          903
+        ],
+        "scroll": [
+          0,
+          0
+        ],
+        "dialog": [
+          340,
+          21.5,
+          760,
+          860
+        ],
+        "floating": null,
+        "list": null,
+        "focus": "时区"
+      },
+      {
+        "vp": [
+          1440,
+          903
+        ],
+        "doc": [
+          1440,
+          1440,
+          903
+        ],
+        "scroll": [
+          0,
+          0
+        ],
+        "dialog": [
+          340,
+          21.5,
+          760,
+          860
+        ],
+        "floating": [
+          365,
+          347,
+          326,
+          414
+        ],
+        "strategy": "fixed",
+        "list": null,
+        "focus": "开始时间"
+      },
+      {
+        "vp": [
+          1440,
+          903
+        ],
+        "doc": [
+          1440,
+          1440,
+          903
+        ],
+        "scroll": [
+          0,
+          0
+        ],
+        "dialog": [
+          340,
+          21.5,
+          760,
+          860
+        ],
+        "floating": null,
+        "list": null,
+        "focus": "开始时间"
+      },
+      {
+        "vp": [
+          1152,
+          760
+        ],
+        "doc": [
+          1152,
+          1152,
+          760
+        ],
+        "scroll": [
+          0,
+          0
+        ],
+        "dialog": [
+          196,
+          20,
+          760,
+          720
+        ],
+        "floating": [
+          221,
+          8,
+          390,
+          425.5
+        ],
+        "strategy": "fixed",
+        "list": [
+          230,
+          62,
+          372,
+          362.5
+        ],
+        "focus": "时区"
+      },
+      {
+        "vp": [
+          1152,
+          760
+        ],
+        "doc": [
+          1152,
+          1152,
+          760
+        ],
+        "scroll": [
+          0,
+          0
+        ],
+        "dialog": [
+          196,
+          20,
+          760,
+          720
+        ],
+        "floating": [
+          221,
+          8,
+          390,
+          425.5
+        ],
+        "strategy": "fixed",
+        "list": [
+          230,
+          62,
+          372,
+          362.5
+        ],
+        "focus": "搜索时区"
+      }
+    ],
+    "assertions": [
+      "document clientWidth/scrollWidth 等于窗口宽度",
+      "document scrollHeight 等于窗口高度",
+      "window scrollX/scrollY 均为 0",
+      "弹层保留至少 8px 窗口边距（允许 0.5px 浮点差）"
+    ],
+    "interactions": [
+      "时区候选内部滚动，表单保持位置",
+      "搜索 Tokyo 并选择日本标准时间，弹层关闭",
+      "日期选择器可在小窗口内部滚动到小时、分钟和完成按钮",
+      "修改小时后 Escape 返回外层编辑器",
+      "时区搜索框 Escape 关闭选择器、保留编辑器",
+      "项目选择器展开与 Escape 返回",
+      "退出未保存验收表单，恢复窗口大小"
+    ]
+  },
+  "automation": {
+    "desktop_tests": {
+      "files": 148,
+      "tests": 1546,
+      "result": "passed"
+    },
+    "desktop_typecheck": "passed",
+    "design_system_build": "passed",
+    "desktop_build": "passed",
+    "docs_check": "passed",
+    "git_diff_check": "passed"
+  },
+  "screenshots": [
+    "timezone-normal.jpg",
+    "timezone-small.jpg",
+    "datetime-normal.jpg",
+    "datetime-small.jpg",
+    "project-small.jpg"
+  ],
+  "limits": [
+    "jsdom 验证交互与定位配置；实际几何由 Desktop 测量和截图证明。",
+    "未实测 Windows/Linux 或全部窗口尺寸。"
+  ],
+  "git": {
+    "committed": false,
+    "pushed": false
+  }
+}

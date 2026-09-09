@@ -458,12 +458,32 @@
 .aw-scheduled-task-editor__project-popover,
 .aw-scheduled-task-editor__datetime-popover,
 .aw-scheduled-task-editor__timezone-popover {
+  box-sizing: border-box;
+  max-width: var(--aw-popover-available-width, calc(100vw - 16px));
+  max-height: var(--aw-popover-available-height, calc(100vh - 16px));
   overflow: hidden;
   border: 1px solid var(--aw-border-main);
   border-radius: 12px;
   background: var(--aw-surface-raised);
   color: var(--aw-text-primary);
   box-shadow: var(--aw-shadow-popover);
+}
+
+.aw-scheduled-task-editor__project-popover,
+.aw-scheduled-task-editor__timezone-popover {
+  display: flex;
+  flex-direction: column;
+}
+
+.aw-scheduled-task-editor__project-popover-head,
+.aw-scheduled-task-editor__project-search,
+.aw-scheduled-task-editor__timezone-search {
+  flex-shrink: 0;
+}
+
+.aw-scheduled-task-editor__project-list,
+.aw-scheduled-task-editor__timezone-list {
+  min-height: 0;
 }
 
 .aw-scheduled-task-editor__project-popover {
@@ -583,6 +603,8 @@
 }
 
 .aw-scheduled-task-editor__datetime-popover {
+  overflow-y: auto;
+  overscroll-behavior: contain;
   width: 326px;
   padding: 12px;
 }

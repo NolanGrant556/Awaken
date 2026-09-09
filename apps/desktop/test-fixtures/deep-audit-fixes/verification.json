@@ -1,0 +1,205 @@
+{
+  "schema_version": 1,
+  "verified_on": "2026-09-09",
+  "base_commit": "898e58b0ba68fcfa93f579ba490153aad14f74c6",
+  "branch": "main",
+  "environment": {
+    "os": "macOS",
+    "identity": "development",
+    "entrypoint": "npm run open:desktop",
+    "model_profile": "k3 · high",
+    "acp_protocol_version": 1,
+    "acp_sdk": "github.com/coder/acp-go-sdk v0.13.5"
+  },
+  "bugs": [
+    {
+      "id": "N01",
+      "problem": "Anthropic 流内错误被当成成功",
+      "owner": "src/llm/anthropic_messages.go",
+      "regression_tests": [
+        "src/llm/anthropic_stream_error_test.go"
+      ],
+      "verified_behavior": "HTTP 200 SSE 在部分正文或完整工具参数后报错；返回错误，无成功结果或可执行工具结果。"
+    },
+    {
+      "id": "N02",
+      "problem": "旧定时存储实例覆盖新修改",
+      "owner": "src/scheduledtask/file_repository.go",
+      "regression_tests": [
+        "src/scheduledtask/repository_consistency_test.go"
+      ],
+      "verified_behavior": "锁内重读 journal，按最新版本检查写入；执行幂等、终态、删除标记同步刷新，并独立重开读回。"
+    },
+    {
+      "id": "N03",
+      "problem": "归档或删除 A 的迟到响应重置 B",
+      "owner": "apps/desktop/src/renderer/useThreadNavigation.ts",
+      "regression_tests": [
+        "apps/desktop/src/renderer/useThreadNavigation.test.tsx"
+      ],
+      "verified_behavior": "响应完成时核对当前会话；延迟响应与 A→B 切换测试覆盖归档和删除。"
+    },
+    {
+      "id": "N04",
+      "problem": "旧授权回调误伤新授权及重复启动",
+      "owner": "apps/desktop/src/main/cli-connectors/manager.ts",
+      "regression_tests": [
+        "apps/desktop/src/main/cli-connectors/auth-ownership.test.ts",
+        "apps/desktop/src/main/cli-connectors/manager.test.ts"
+      ],
+      "verified_behavior": "首个 await 前建立授权占位，回调核对实例，取消传播到进程，旧刷新不覆盖新状态。"
+    },
+    {
+      "id": "N05",
+      "problem": "ACP 审批发布早于等待记录",
+      "owner": "src/acp/manager.go",
+      "regression_tests": [
+        "src/acp/permission_registration_test.go",
+        "src/server/handlers_acp_test.go"
+      ],
+      "verified_behavior": "先注册等待记录再发布事件；立即提交、重复提交、取消后迟到回应均有测试。"
+    },
+    {
+      "id": "N06",
+      "problem": "ACP 将合法重复文字误去重",
+      "owner": "src/acp/agentbridge/session.go",
+      "regression_tests": [
+        "src/acp/agentbridge/session_test.go"
+      ],
+      "verified_behavior": "按传输 cursor 与耐久记录身份处理重放；保留重复文字、中文和空白，矛盾全文报错。"
+    },
+    {
+      "id": "N07",
+      "problem": "ACP 创建期间取消未传播",
+      "owner": "src/acp/agentbridge/session.go",
+      "regression_tests": [
+        "src/acp/agentbridge/prompt_cancellation_test.go",
+        "src/server/control_acp_run_test.go",
+        "src/runtime/acp_session_test.go"
+      ],
+      "verified_behavior": "创建请求关联调用方取消；Core 终态后释放关联，bridge 等待创建占位清理再返回取消；立即继续有正式测试和真实模型结果。"
+    },
+    {
+      "id": "N08",
+      "problem": "定时任务终态保存失败仍通知成功",
+      "owner": "src/scheduledtask/scheduler.go",
+      "regression_tests": [
+        "src/scheduledtask/terminal_persistence_test.go"
+      ],
+      "verified_behavior": "确认终态落盘后发布完成；保存失败发出安全错误提示，保留记录待重启封口为 interrupted，不重跑业务。"
+    }
+  ],
+  "acceptance_followups": [
+    {
+      "problem": "首次存储锁文件已创建但 owner JSON 尚未写完导致启动报错",
+      "owner": "src/filestore/lock.go",
+      "regression_test": "src/filestore/lock_initialization_test.go",
+      "result": "有界重读后继续核验 owner；持续损坏仍报错，不删除或绕过未知锁。修复后真实启动及重启成功。"
+    },
+    {
+      "problem": "旧 Hook 测试在异步生命周期释放前断言",
+      "regression_test": "src/hookruntime/dispatcher_test.go",
+      "result": "测试显式等待 lifecycle release；产品行为未改。"
+    }
+  ],
+  "automation": {
+    "go_race": {
+      "command": "go test -race -p 2 ./...",
+      "result": "passed",
+      "followup": "随后对 agentbridge 的取消预算和 scheduledtask 的独立读回断言再运行聚焦竞态测试。"
+    },
+    "go_build": {
+      "command": "go build ./...",
+      "result": "passed"
+    },
+    "go_vet": {
+      "command": "go vet ./...",
+      "result": "passed"
+    },
+    "desktop": {
+      "command": "npm test --workspace @awaken/desktop",
+      "files": 148,
+      "tests": 1542,
+      "result": "passed"
+    },
+    "desktop_typecheck": {
+      "command": "npm run typecheck --workspace @awaken/desktop",
+      "result": "passed"
+    },
+    "desktop_build": {
+      "command": "npm run build --workspace @awaken/desktop",
+      "result": "passed"
+    },
+    "docs": {
+      "command": "node scripts/check-docs.mjs",
+      "areas": 16,
+      "features": 38,
+      "documents": 76,
+      "result": "passed"
+    },
+    "diff_check": {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  },
+  "desktop_acceptance": {
+    "thread_switch": {
+      "A_output": "DEEP-FIX-A-0909",
+      "B_output": "DEEP-FIX-B-0909",
+      "operation": "B 选中时归档本次验收 A",
+      "result": "B 的正文和输入框保留",
+      "screenshot": "archive-preserves-b.png",
+      "timing_limit": "精确迟到响应次序由组件测试覆盖。"
+    },
+    "acp": {
+      "transport": "真实 stdio protocol client → awaken-acp --startup=fail → Desktop-owned Core → 保存的真实 LLM 配置",
+      "result": {
+        "cancel_prompt_error": "<nil>",
+        "cancel_request_error": "<nil>",
+        "cancel_stop_reason": "cancelled",
+        "resumed_error": "<nil>",
+        "resumed_text": "DEEP-FIX-ACP-RESUMED-0909",
+        "session_id": "acp_1788920080126979000",
+        "stop_reason": "end_turn",
+        "text": "ha ha ha! DEEP-FIX-ACP-0909"
+      }
+    },
+    "cli_connectors": {
+      "dingtalk": "已连接",
+      "lark": "已连接",
+      "account_changes": "无",
+      "limit": "没有登出、重新授权或验证外部完整登录页面；竞争路径使用隔离测试。"
+    },
+    "scheduled_task": {
+      "task_id": "sched_0e1315ae-4b5d-41d1-9071-ab937a3780ac",
+      "name": "DEEP-FIX-SCHEDULE-0909",
+      "enabled": false,
+      "execution_id": "exec_de48d1ac-d4d4-4a3c-b3e1-37cfd2e346b1",
+      "run_id": "run_1788920146442764000_7",
+      "thread_id": "thread_1788920146442766000_8",
+      "status": "success",
+      "output": "DEEP-FIX-SCHEDULE-OK-0909",
+      "trigger": "manual",
+      "disk_readback": "独立读取 state.json 与执行 journal，仅记录本次隔离任务。",
+      "after_restart": "列表仍暂停，执行历史成功，线程回答仍可读取。",
+      "screenshots": [
+        "schedule-history.png",
+        "schedule-output.png",
+        "schedule-after-restart.png",
+        "schedule-output-after-restart.png"
+      ]
+    },
+    "final_state": "Awaken 开启；本次定时任务暂停，不会后台循环执行。"
+  },
+  "not_executed": [
+    "真实供应商限流/服务异常注入",
+    "用户存储磁盘写失败注入",
+    "真实账号退出重登及授权竞争",
+    "全部第三方 ACP runner/client、permission UI 和 packaged identity 矩阵",
+    "Windows/Linux 实机验证"
+  ],
+  "publication": {
+    "committed": false,
+    "pushed": false
+  }
+}

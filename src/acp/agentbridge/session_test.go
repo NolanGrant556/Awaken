@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -301,19 +302,37 @@ func TestSessionEventMappingRunError(t *testing.T) {
 	}
 }
 
-func TestSessionDedupesDurableAssistantProjectionAfterLiveChunks(t *testing.T) {
-	s := &bridgeSession{}
-	if got := s.dedupeTextDelta("msg_1", "ACP_"); got != "ACP_" {
-		t.Fatalf("first chunk: got %q", got)
-	}
-	if got := s.dedupeTextDelta("msg_1", "OK"); got != "OK" {
-		t.Fatalf("second chunk: got %q", got)
-	}
-	if got := s.dedupeTextDelta("msg_1", "ACP_OK"); got != "" {
-		t.Fatalf("durable replay must be suppressed, got %q", got)
-	}
-	if got := s.dedupeTextDelta("msg_2", "other"); got != "other" {
-		t.Fatalf("different message must remain independent, got %q", got)
+func TestSessionDedupesOnlyDurableAssistantProjection(t *testing.T) {
+	for _, chunks := range [][]string{{"ACP_", "OK"}, {"ha", "ha", "!"}, {" ", " ", "x"}, {"哈", "哈哈", "！"}} {
+		t.Run(strings.Join(chunks, "|"), func(t *testing.T) {
+			s := &bridgeSession{}
+			var actual string
+			for _, delta := range chunks {
+				got, err := s.dedupeTextDelta(EventFrame{MessageID: "msg_1", Delta: delta})
+				if err != nil {
+					t.Fatal(err)
+				}
+				actual += got
+			}
+			expected := strings.Join(chunks, "")
+			for range 2 {
+				got, err := s.dedupeTextDelta(EventFrame{MessageID: "msg_1", Delta: expected, RecordID: "record_1", SemanticSeq: 3})
+				if err != nil {
+					t.Fatal(err)
+				}
+				actual += got
+			}
+			if actual != expected {
+				t.Fatalf("got %q want %q", actual, expected)
+			}
+			got, err := s.dedupeTextDelta(EventFrame{MessageID: "msg_2", Delta: "other", RecordID: "record_2"})
+			if got != "other" || err != nil {
+				t.Fatalf("independent durable message: %q %v", got, err)
+			}
+			if _, err := s.dedupeTextDelta(EventFrame{MessageID: "msg_1", Delta: "different", RecordID: "record_3"}); err == nil {
+				t.Fatal("conflicting durable text accepted")
+			}
+		})
 	}
 }
 

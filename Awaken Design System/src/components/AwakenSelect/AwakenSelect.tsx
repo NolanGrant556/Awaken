@@ -98,6 +98,13 @@ export function AwakenSelect({
     <div
       className={`aw-select${className ? ` ${className}` : ""}`}
       data-menu-placement={menuPlacement}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !open) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setOpen(false);
+        triggerRef.current?.focus({ preventScroll: true });
+      }}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
       }}
@@ -117,10 +124,6 @@ export function AwakenSelect({
           setOpen((current) => !current);
         }}
         onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            setOpen(false);
-            return;
-          }
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
             event.preventDefault();
             if (!open) setOpen(true);
@@ -144,12 +147,6 @@ export function AwakenSelect({
           aria-label={labelledBy ? undefined : ariaLabel}
           aria-labelledby={labelledBy}
           onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              setOpen(false);
-              triggerRef.current?.focus();
-              return;
-            }
             if (!(event.target instanceof HTMLButtonElement)) return;
             if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
               return;

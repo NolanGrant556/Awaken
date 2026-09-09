@@ -42,6 +42,11 @@ export function useThreadNavigation(options: Options) {
   const { refreshThreads, loadThreadsIntoState } =
     options.directory;
 
+  // Mutations may settle after navigation. Their target stays fixed, while
+  // clearing the workbench must use the selection at completion time.
+  const activeThreadIdRef = useRef(runtimeState.activeThreadId);
+  activeThreadIdRef.current = runtimeState.activeThreadId;
+
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
 
   const [renamingThreadId, setRenamingThreadId] = useState<string | null>(null);
@@ -175,7 +180,7 @@ export function useThreadNavigation(options: Options) {
   async function refreshAfterThreadMutation(
     removedThreadIds: string[] = [],
   ): Promise<void> {
-    if (removedThreadIds.includes(runtimeState.activeThreadId ?? "")) {
+    if (removedThreadIds.includes(activeThreadIdRef.current ?? "")) {
       resetActiveThreadContext();
     }
 
@@ -214,7 +219,7 @@ export function useThreadNavigation(options: Options) {
         return;
       }
 
-      if (threadId === runtimeState.activeThreadId) {
+      if (threadId === activeThreadIdRef.current) {
         onActiveThreadArchived();
       }
       clearThreadComposerDraft(composerDraftOwnerKey(threadId));

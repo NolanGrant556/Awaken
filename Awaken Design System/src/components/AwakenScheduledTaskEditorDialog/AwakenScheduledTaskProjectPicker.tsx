@@ -18,9 +18,9 @@ export function AwakenScheduledTaskProjectPicker({
   disabled,
   onChange,
 }: AwakenScheduledTaskProjectPickerProps) {
+  const searchRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const searchRef = useRef<HTMLInputElement>(null);
   const selected = projects.find((project) => project.projectId === value);
   const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
   const filteredProjects = useMemo(
@@ -36,13 +36,14 @@ export function AwakenScheduledTaskProjectPicker({
 
   return (
     <AwakenPopover
+      viewportBounded
+      initialFocusRef={searchRef}
       open={open}
       onOpenChange={(nextOpen) => {
         if (disabled) return;
         setOpen(nextOpen);
         if (nextOpen) {
           setQuery("");
-          window.setTimeout(() => searchRef.current?.focus(), 0);
         }
       }}
       placement="bottom-start"
@@ -70,7 +71,11 @@ export function AwakenScheduledTaskProjectPicker({
         <div
           className="aw-scheduled-task-editor__project-popover"
           onKeyDown={(event) => {
-            if (event.key === "Escape") event.stopPropagation();
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              setOpen(false);
+            }
           }}
         >
           <div className="aw-scheduled-task-editor__project-popover-head">

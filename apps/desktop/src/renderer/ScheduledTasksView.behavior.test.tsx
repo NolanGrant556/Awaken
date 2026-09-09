@@ -283,6 +283,46 @@ describe("ScheduledTasksView", () => {
     expect(document.body.textContent).not.toContain("Asia/Tokyo");
   });
 
+  it.each(["运行项目", "开始时间", "时区"])("bounds the %s picker to the viewport", async (label) => {
+    await renderView(createRuntimeClientMock());
+    await click(buttonByText("创建任务"));
+    await click(buttonByText("日程任务"));
+    await click(buttonByAriaLabel(label));
+    const floating = document.querySelector<HTMLElement>(".aw-popover__floating");
+    expect(floating).toBeTruthy();
+    expect(floating?.style.position).toBe("fixed");
+    expect(floating?.style.getPropertyValue("--aw-popover-available-height")).toMatch(/^\d+(?:\.\d+)?px$/);
+    expect(floating?.style.visibility).not.toBe("hidden");
+  });
+
+  it("closes the timezone picker without losing or submitting the draft", async () => {
+    const client = createRuntimeClientMock();
+    await renderView(client);
+    await click(buttonByText("创建任务"));
+    await setFieldValue(document.querySelector<HTMLInputElement>('input[aria-label="任务名称"]'), "保留的草稿");
+    await click(buttonByText("日程任务"));
+
+    await click(buttonByAriaLabel("时区"));
+    let search = document.querySelector<HTMLInputElement>('input[aria-label="搜索时区"]');
+    // Floating UI moves focus on the frame after placement has settled.
+    await act(async () => { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); });
+    expect(document.activeElement).toBe(search);
+    await act(async () => {
+      search?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    await settle();
+    expect(document.querySelector('.aw-scheduled-task-editor__timezone-popover')).toBeNull();
+    expect(buttonByAriaLabel("开始时间")).toBeTruthy();
+    await click(buttonByAriaLabel("时区"));
+    search = document.querySelector<HTMLInputElement>('input[aria-label="搜索时区"]');
+    await setFieldValue(search, "Tokyo");
+    await click(document.querySelector('.aw-scheduled-task-editor__timezone-list button[role="option"]'));
+    expect(buttonByAriaLabel("时区")?.textContent).toContain("日本标准时间");
+    expect(document.querySelector('.aw-scheduled-task-editor__timezone-popover')).toBeNull();
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="任务名称"]')?.value).toBe("保留的草稿");
+    expect(client.createScheduledTask).not.toHaveBeenCalled();
+  });
+
   it("renders rows with state badges and resolved project names", async () => {
     const tasks = [
       cronTask(),

@@ -1,7 +1,11 @@
 package runtime
 
 import (
+	"context"
 	"errors"
+	"time"
+
+	"awaken/src/agentcore"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,5 +96,44 @@ func TestStableCWDHash(t *testing.T) {
 	}
 	if h1 == h3 {
 		t.Fatal("different cwd produced same hash")
+	}
+}
+
+func TestACPCancelRetainsRunUntilTerminal(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	service := NewRunService(nil, func(*agentcore.Agent) Executor {
+		return ExecutorFunc(func(ctx context.Context, _ string, _ agentcore.EventSink) (string, error) {
+			close(started)
+			<-ctx.Done()
+			<-release
+			return "", ctx.Err()
+		})
+	})
+	run, err := service.StartRun(StartRunRequest{Input: "test", Workspace: WorkspaceConfig{WorkspaceRoot: t.TempDir()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	manager := NewACPSessionManager(service, nil)
+	manager.sessions["s1"] = &ACPSessionMapping{ACPSessionID: "s1", ThreadID: run.ThreadID, CurrentRunID: run.RunID}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	err = manager.CancelAndClearRun(ctx, "s1", run.RunID)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		close(release)
+		t.Fatalf("expected pending cleanup, got %v", err)
+	}
+	if err := manager.BeginRun("s1"); !errors.Is(err, ErrACPSessionBusy) {
+		close(release)
+		t.Fatalf("released active run before terminal: %v", err)
+	}
+	close(release)
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
+	defer cleanupCancel()
+	if err := manager.CancelAndClearRun(cleanupCtx, "s1", run.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.BeginRun("s1"); err != nil {
+		t.Fatalf("session did not become available: %v", err)
 	}
 }

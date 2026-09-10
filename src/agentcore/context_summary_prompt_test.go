@@ -19,8 +19,12 @@ func TestCompactSummaryPromptUsesBudgetFirstFinalOnlyContract(t *testing.T) {
 		nil, "", 1024,
 	)
 	if !strings.Contains(instruction, "Hard output budget: at most 1024 tokens") ||
-		!strings.Contains(instruction, "Fit all 13 headings and </summary> before the limit") {
+		!strings.Contains(instruction, "Fit continuity-critical facts and </summary> before the limit") {
 		t.Fatalf("compact summary request must expose the tight output contract: %s", instruction)
+	}
+	if !strings.Contains(system, "Prefer these section headings") ||
+		strings.Contains(system, "Use exactly these section headings") {
+		t.Fatalf("compact summary system prompt must treat headings as guidance: %s", system)
 	}
 }
 
@@ -78,6 +82,37 @@ func TestNormalizeCompactSummaryStripsAnalysisWrapper(t *testing.T) {
 	if !strings.Contains(normalized, "Active Task\n- Continue low distortion compact.") ||
 		!strings.Contains(normalized, "Critical Context\n- legacy canary survives.") {
 		t.Fatalf("expected numbered headings inside summary wrapper to normalize, got %q", normalized)
+	}
+}
+
+func TestNormalizeCompactSummaryAcceptsCaseInsensitiveHeadings(t *testing.T) {
+	raw := strings.Join([]string{
+		"active task",
+		"- Continue the MODEL-008 retest.",
+		"CRITICAL CONTEXT",
+		"- Keep source SHA256 9585489d.",
+	}, "\n")
+
+	normalized := normalizeCompactSummary(raw)
+	if !strings.Contains(normalized, "Active Task\n- Continue the MODEL-008 retest.") ||
+		!strings.Contains(normalized, "Critical Context\n- Keep source SHA256 9585489d.") {
+		t.Fatalf("expected canonical section names after case-insensitive parse, got %q", normalized)
+	}
+}
+
+func TestResolveCompactSummaryTextKeepsUnstructuredNarrative(t *testing.T) {
+	prose := "主 Agent 已读到第 72 块，子任务还在跑，不要丢掉 SA-R1-FIRST-CH372。"
+	text, structuredEmpty := resolveCompactSummaryText(prose, 1024)
+	if structuredEmpty || !strings.Contains(text, "SA-R1-FIRST-CH372") {
+		t.Fatalf("expected unstructured prose to stay installable, text=%q empty=%v", text, structuredEmpty)
+	}
+}
+
+func TestResolveCompactSummaryTextTreatsAllNoneAsStructuredEmpty(t *testing.T) {
+	raw := renderCompactSummarySections(map[string][]string{})
+	text, structuredEmpty := resolveCompactSummaryText(raw, 1024)
+	if !structuredEmpty || text != "" {
+		t.Fatalf("expected all-None headings to request fallback, text=%q empty=%v", text, structuredEmpty)
 	}
 }
 

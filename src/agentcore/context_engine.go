@@ -444,9 +444,6 @@ func compactMandatoryFloorUnreachable(err error) bool {
 }
 
 func (g *contextGovernor) evaluateCompactPostcondition(llmReq LLMRequest, preState ContextWindowState, result CompactResult) error {
-	if result.Fallback.Used {
-		return fmt.Errorf("%w: fallback summary is not a successful compact: %s", errInsufficientReduction, strings.TrimSpace(result.Fallback.Reason))
-	}
 	summaryText := strings.TrimSpace(result.SummaryMessage.Content)
 	if summaryText == "" && len(result.Messages) > 0 {
 		summaryText = strings.TrimSpace(result.Messages[0].Content)
@@ -666,11 +663,8 @@ func compactFailureClass(err error) string {
 	}
 }
 
-func shouldRetryCompactPostcondition(err error, result CompactResult, attempt int) bool {
+func shouldRetryCompactPostcondition(err error, _ CompactResult, attempt int) bool {
 	if err == nil {
-		return false
-	}
-	if result.Fallback.Used {
 		return false
 	}
 	if errors.Is(err, errInsufficientReduction) {

@@ -790,10 +790,14 @@ func TestTryReactiveCompactSkipsSameOversizedTail(t *testing.T) {
 	}
 }
 
-func TestContextGovernorFallbackSummaryIsNotSuccess(t *testing.T) {
+func TestContextGovernorFallbackSummaryAppliesWhenWindowDrops(t *testing.T) {
 	envelope := ContextEnvelope{
 		Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: "large context"}},
 	}
+	compactedMessages := []convcontext.Message{{
+		Role: convcontext.RoleUser, Content: "[COMPACT_FALLBACK:llm_summary_failed] host recovered user ask", CompactBoundaryID: "compact-fallback",
+	}}
+	compactedEnvelope := ContextEnvelope{Messages: compactedMessages}
 	applyCalled := 0
 	engine := &fakeContextEngine{
 		evaluateFn: func(envelope ContextEnvelope) ContextWindowState {
@@ -805,16 +809,14 @@ func TestContextGovernorFallbackSummaryIsNotSuccess(t *testing.T) {
 		compactFn: func(ctx stdcontext.Context, req CompactRequest) (CompactResult, error) {
 			return CompactResult{
 				BoundaryID:     "compact-fallback",
-				SummaryMessage: convcontext.Message{Role: convcontext.RoleUser, Content: "[COMPACT_FALLBACK:llm_summary_failed]"},
-				Messages: []convcontext.Message{{
-					Role: convcontext.RoleUser, Content: "[COMPACT_FALLBACK:llm_summary_failed]", CompactBoundaryID: "compact-fallback",
-				}},
-				Fallback: CompactFallback{Used: true, Marker: "[COMPACT_FALLBACK:llm_summary_failed]", Reason: "provider unavailable"},
+				SummaryMessage: compactedMessages[0],
+				Messages:       compactedMessages,
+				Fallback:       CompactFallback{Used: true, Marker: "[COMPACT_FALLBACK:llm_summary_failed]", Reason: "provider unavailable"},
 			}, nil
 		},
 	}
 	governor := newContextGovernor(engine, func() (LLMRequest, error) {
-		return LLMRequest{Messages: envelope.Messages, EnvelopeDebug: &envelope}, nil
+		return LLMRequest{Messages: compactedMessages, EnvelopeDebug: &compactedEnvelope}, nil
 	}, func(_ stdcontext.Context, result CompactResult) error {
 		applyCalled++
 		return nil
@@ -824,19 +826,19 @@ func TestContextGovernorFallbackSummaryIsNotSuccess(t *testing.T) {
 		EnvelopeDebug: &envelope,
 	}, &fakeContextEventSink{})
 	if err != nil {
-		t.Fatalf("recoverable fallback at block must keep the pre-compact surface, got %v", err)
+		t.Fatalf("installable fallback that drops below block must succeed, got %v", err)
 	}
-	if applyCalled != 0 {
-		t.Fatalf("fallback compact applied a new epoch")
+	if applyCalled != 1 {
+		t.Fatalf("expected fallback compact to apply a new epoch, applyCalled=%d", applyCalled)
 	}
 	if engine.compactCalls != 1 {
-		t.Fatalf("fallback summary should stop the current compact cycle, got %d attempts", engine.compactCalls)
+		t.Fatalf("successful fallback should stop the current compact cycle, got %d attempts", engine.compactCalls)
 	}
-	if len(req.Messages) != 1 || req.Messages[0].CompactBoundaryID != "" {
-		t.Fatalf("fallback must not replace conversation, got %+v", req.Messages)
+	if len(req.Messages) != 1 || req.Messages[0].CompactBoundaryID != "compact-fallback" {
+		t.Fatalf("expected compacted conversation after fallback install, got %+v", req.Messages)
 	}
-	if governor.consecutiveCompactFailures != 1 || governor.compactCircuitOpen {
-		t.Fatalf("first recoverable fallback should not open the circuit, failures=%d open=%v", governor.consecutiveCompactFailures, governor.compactCircuitOpen)
+	if governor.consecutiveCompactFailures != 0 || governor.compactCircuitOpen {
+		t.Fatalf("successful fallback must not count as a compact failure, failures=%d open=%v", governor.consecutiveCompactFailures, governor.compactCircuitOpen)
 	}
 }
 
@@ -914,7 +916,10 @@ func TestShouldRetryCompactPostconditionStopsOnMandatoryFloorFailure(t *testing.
 		t.Fatal("nil postcondition error must not retry")
 	}
 	if shouldRetryCompactPostcondition(errInsufficientReduction, CompactResult{Fallback: CompactFallback{Used: true}}, 0) {
-		t.Fatal("fallback summary must not trigger another compact-summary request")
+		t.Fatal("insufficient reduction must not trigger another compact-summary request")
+	}
+	if !shouldRetryCompactPostcondition(fmt.Errorf("%w: post=95000 auto=91000", errStillAboveAutoThreshold), CompactResult{Fallback: CompactFallback{Used: true}}, 0) {
+		t.Fatal("fallback that still sits above auto should allow one lighter-tail retry")
 	}
 	if shouldRetryCompactPostcondition(&CompactTargetUnachievableError{
 		Reason: "mandatory_floor_exceeds_target", Projected: 29237, Target: 27704, MandatoryFloor: 29237,

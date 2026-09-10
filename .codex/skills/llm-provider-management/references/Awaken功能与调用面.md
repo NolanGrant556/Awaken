@@ -33,7 +33,7 @@
 | --- | --- | --- | --- |
 | `agent_turn` | 主会话 Agent 循环 | thread 固定 profile | tools、多模态、缓存、effort、上下文、usage |
 | `thread_title` | 左侧栏会话标题 | 默认继承 thread；可有 host route | 辅助请求禁用/收窄 reasoning、独立缓存作用域 |
-| `compact_summary` | 上下文压缩摘要 | 默认继承 thread；可有 host route | 8192 输出上限、禁用/收窄 reasoning、独立缓存作用域 |
+| `compact_summary` | 上下文压缩摘要 | 默认继承 thread；可有 host route | 动态 1024–4096 输出上限、按 `ResolveReasoningOffDecision` 禁用或收窄 reasoning、独立缓存作用域 |
 | `native_compaction` | exact OpenAI Responses 原生压缩 | 固定使用当前 thread profile，不走用途 route | official endpoint/capability、opaque output、独立 usage、失败回落本地 V2 |
 | `subagent` | 原生 Subagent | 默认继承 parent；可有 host route | 子线程上下文、工具能力、独立 usage 与缓存 identity |
 | `scheduled_task` | 定时任务运行 | 任务显式 pin；否则用途 route/默认 profile | 无前台选择器、失效 pin fail closed、套餐可用性 |

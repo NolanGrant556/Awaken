@@ -819,18 +819,75 @@ func TestContextGovernorFallbackSummaryIsNotSuccess(t *testing.T) {
 		applyCalled++
 		return nil
 	})
-	_, err := governor.PrepareRequest(stdcontext.Background(), LLMRequest{
+	req, err := governor.PrepareRequest(stdcontext.Background(), LLMRequest{
 		Messages:      envelope.Messages,
 		EnvelopeDebug: &envelope,
 	}, &fakeContextEventSink{})
-	if !errors.Is(err, errInsufficientReduction) {
-		t.Fatalf("fallback summary must not count as success, got %v", err)
+	if err != nil {
+		t.Fatalf("recoverable fallback at block must keep the pre-compact surface, got %v", err)
 	}
 	if applyCalled != 0 {
 		t.Fatalf("fallback compact applied a new epoch")
 	}
 	if engine.compactCalls != 1 {
 		t.Fatalf("fallback summary should stop the current compact cycle, got %d attempts", engine.compactCalls)
+	}
+	if len(req.Messages) != 1 || req.Messages[0].CompactBoundaryID != "" {
+		t.Fatalf("fallback must not replace conversation, got %+v", req.Messages)
+	}
+	if governor.consecutiveCompactFailures != 1 || governor.compactCircuitOpen {
+		t.Fatalf("first recoverable fallback should not open the circuit, failures=%d open=%v", governor.consecutiveCompactFailures, governor.compactCircuitOpen)
+	}
+}
+
+func TestContextGovernorRecoverableCompactFailureAtBlockContinuesUntilCircuitOpens(t *testing.T) {
+	envelope := ContextEnvelope{
+		Messages: []convcontext.Message{{Role: convcontext.RoleUser, Content: "large context"}},
+	}
+	engine := &fakeContextEngine{
+		evaluateFn: func(envelope ContextEnvelope) ContextWindowState {
+			return testBlockedContextWindowState(98000)
+		},
+		compactFn: func(ctx stdcontext.Context, req CompactRequest) (CompactResult, error) {
+			return CompactResult{
+				Fallback: CompactFallback{Used: true, Reason: "compact summary has no final text"},
+			}, nil
+		},
+	}
+	governor := newContextGovernor(engine, func() (LLMRequest, error) {
+		return LLMRequest{Messages: envelope.Messages, EnvelopeDebug: &envelope}, nil
+	}, func(_ stdcontext.Context, result CompactResult) error {
+		t.Fatal("applyCompactResult must not run after a recoverable summary failure")
+		return nil
+	})
+	sink := &fakeContextEventSink{}
+	for i := 0; i < 2; i++ {
+		req, err := governor.PrepareRequest(stdcontext.Background(), LLMRequest{
+			Messages:      envelope.Messages,
+			EnvelopeDebug: &envelope,
+		}, sink)
+		if err != nil {
+			t.Fatalf("attempt %d: recoverable compact failure must not abort the run, got %v", i+1, err)
+		}
+		if errors.Is(err, errContextWindowBlocked) {
+			t.Fatalf("attempt %d blocked too early: %v", i+1, err)
+		}
+		if len(req.Messages) != 1 {
+			t.Fatalf("attempt %d replaced conversation: %+v", i+1, req.Messages)
+		}
+		if len(sink.blocked) != 0 {
+			t.Fatalf("attempt %d emitted CONTEXT_BLOCKED: %v", i+1, sink.blocked)
+		}
+	}
+	_, err := governor.PrepareRequest(stdcontext.Background(), LLMRequest{
+		Messages:      envelope.Messages,
+		EnvelopeDebug: &envelope,
+	}, sink)
+	if !errors.Is(err, errContextWindowBlocked) {
+		t.Fatalf("third recoverable failure should open the circuit and block, got %v", err)
+	}
+	if !governor.compactCircuitOpen || governor.consecutiveCompactFailures < 3 {
+		t.Fatalf("expected circuit open after 3 failures, got failures=%d open=%v", governor.consecutiveCompactFailures, governor.compactCircuitOpen)
 	}
 }
 

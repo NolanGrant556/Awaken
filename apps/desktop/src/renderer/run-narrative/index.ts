@@ -7,6 +7,7 @@ export {
   eventResumesAfterProviderReconnect,
   projectAguiEventToNarrative,
   restoreLiveProviderReconnectItems,
+  settleSubagentNarrative,
 } from "./projector";
 
 export type {

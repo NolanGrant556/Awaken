@@ -116,6 +116,47 @@ func TestKimiK3CompactSummaryUsesLowEffortWhenDisableReasoningContractUnavailabl
 	}
 }
 
+func TestDoubaoResponsesCompactSummaryUsesLowEffortWhenDisableContractUnavailable(t *testing.T) {
+	prepared, err := PrepareRequest(Config{
+		APIKey: "test", BaseURL: "https://ark.cn-beijing.volces.com/api/v3",
+		Protocol: ProtocolOpenAIResponses, ProviderID: "doubao",
+		Model: "doubao-seed-2-1-pro-260628", ReasoningEffort: "max",
+	}, Request{Purpose: RequestPurposeCompactSummary, DisableReasoning: true, ReasoningPolicy: "max"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.ReasoningPolicy != "low" {
+		t.Fatalf("prepared reasoning policy = %q, want low so omit is not recorded as disabled", prepared.ReasoningPolicy)
+	}
+	var body struct {
+		Reasoning *openAIResponsesReasoning `json:"reasoning"`
+	}
+	if err := json.Unmarshal(prepared.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Reasoning == nil || body.Reasoning.Effort != "low" {
+		t.Fatalf("Doubao compact summary must send lowest effort instead of omitting reasoning: %s", prepared.Body)
+	}
+}
+
+func TestDoubaoResponsesOpaqueEndpointDoesNotInventDisableOrEffort(t *testing.T) {
+	prepared, err := PrepareRequest(Config{
+		APIKey: "test", BaseURL: "https://ark.cn-beijing.volces.com/api/v3",
+		Protocol: ProtocolOpenAIResponses, ProviderID: "doubao",
+		Model: "ep-test", ModelSelectorKind: "endpoint",
+	}, Request{Purpose: RequestPurposeCompactSummary, DisableReasoning: true}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(prepared.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if raw, exists := body["reasoning"]; exists {
+		t.Fatalf("opaque Doubao endpoint must not invent reasoning control: %s", raw)
+	}
+}
+
 func TestKimiK3MemoryAuxiliaryRequestDoesNotForceLowEffort(t *testing.T) {
 	prepared, err := PrepareRequest(Config{
 		APIKey: "test", BaseURL: "https://api.moonshot.cn/v1", Protocol: ProtocolOpenAIChat,

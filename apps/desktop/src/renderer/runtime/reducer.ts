@@ -21,6 +21,7 @@ import {
   eventResumesAfterProviderReconnect,
   projectAguiEventToNarrative,
   restoreLiveProviderReconnectItems,
+  settleSubagentNarrative,
   type DeliverableFileType,
   type PromptNarrativeToken,
   type RunNarrativeItem,
@@ -950,7 +951,7 @@ function upsertSubagentTaskView(
     reasoningEffort: event.subagentReasoningEffort ?? previous?.reasoningEffort,
     modelBindingSource: event.subagentModelBindingSource ?? previous?.modelBindingSource,
     sideEffectState: event.subagentSideEffectState ?? previous?.sideEffectState,
-    narrative: previous?.narrative ?? createInitialRunNarrativeState(),
+    narrative: settleSubagentNarrative(previous?.narrative ?? createInitialRunNarrativeState(), status),
   };
   const subagentsById = { ...state.subagentsById, [taskId]: next };
   if (closed && agentId) {
@@ -1045,6 +1046,14 @@ function reduceSubagentNarrativeEvent(
   if (event.type === "AWAKEN_USER_QUESTION_REQUESTED" || event.type === "AWAKEN_USER_QUESTION_RESOLVED") return state;
   const withTask = upsertSubagentTaskView(state, event);
   const task = withTask.subagentsById[taskId];
+  // Lifecycle terminal wins over delayed ephemeral stream frames. Durable
+  // snapshots and canonical tool results still reconcile the retained history.
+  if (isTerminalSubagentStatus(task.status) && !event.recordId && [
+    "REASONING_START", "REASONING_MESSAGE_CONTENT", "REASONING_END",
+    "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END",
+    "TOOL_CALL_START", "TOOL_CALL_ARGS_DELTA", "TOOL_CALL_ARGS",
+    "AWAKEN_TURN_STARTED", "AWAKEN_COMPACT_STARTED", "AWAKEN_PROVIDER_RECONNECT",
+  ].includes(event.type)) return withTask;
   const isContextEvent = event.type.startsWith("AWAKEN_CONTEXT_") || event.type === "AWAKEN_MODEL_USAGE";
   const contextWindow = isContextEvent ? mergeContextWindowRecord(task.contextWindow, event) : task.contextWindow;
   const acceptPlan = event.type === "AWAKEN_PLAN_UPDATED" && (event.planVersion ?? 0) >= (task.planVersion ?? 0);
@@ -1070,11 +1079,11 @@ function reduceSubagentNarrativeEvent(
         contextWindow,
         planItems: acceptPlan ? event.planItems?.map(item => ({ step: item.step, activeForm: item.activeForm, status: item.status })) : task.planItems,
         planVersion: acceptPlan ? event.planVersion : task.planVersion,
-        activity: event.agentPhase === "waiting_children" ? "等待子任务结果" : task.activity,
-        narrative: projectAguiEventToNarrative(
+        activity: !isTerminalSubagentStatus(task.status) && event.agentPhase === "waiting_children" ? "等待子任务结果" : task.activity,
+        narrative: settleSubagentNarrative(projectAguiEventToNarrative(
           task.narrative,
           scopeSubagentNarrativeEvent(event, withTask, taskId),
-        ),
+        ), task.status),
       },
     },
   };

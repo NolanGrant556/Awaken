@@ -1303,6 +1303,50 @@ function commitActive(
   };
 }
 
+/** A child lifecycle terminal closes its own presentation, even without stream-end frames. */
+export function settleSubagentNarrative(
+  state: RunNarrativeState,
+  status: SubagentNarrativeTask["status"],
+): RunNarrativeState {
+  if (!["completed", "failed", "cancelled", "interrupted"].includes(status)) return state;
+  // A task terminal is not a successful tool receipt. Keep known outcomes and
+  // mark unfinished tools as stopped; late canonical results may still replace them.
+  const stoppedToolStatus = status === "cancelled" ? "cancelled" : "interrupted";
+  const settle = (item: RunNarrativeItem): RunNarrativeItem => {
+    if (item.kind === "exploring") {
+      const actions = item.actions.map((action): RunAction => action.status === "active"
+        ? { ...action, status: stoppedToolStatus } : action);
+      return item.status === "active" || actions.some((action, i) => action !== item.actions[i])
+        ? { ...item, actions, status: "done" } : item;
+    }
+    if (item.kind === "mediaGeneration") {
+      return ["preparing", "queued", "generating", "downloading"].includes(item.status)
+        ? { ...item, status: status === "cancelled" ? "cancelled" : "unknown" } : item;
+    }
+    if (!("status" in item) || item.status !== "active") return item;
+    if (item.kind === "acpTool" || item.kind === "acpSession" || item.kind === "hook") {
+      return { ...item, status: "interrupted" };
+    }
+    if (item.kind === "tool") {
+      return { ...item, status: stoppedToolStatus };
+    }
+    return applyStatus(item, "done");
+  };
+  const cleared = clearProviderReconnectItems(state);
+  const committedItems = cleared.committedItems
+    .filter(item => item.kind !== "planning")
+    .map(settle);
+  const active = cleared.activeItem;
+  if (!active && committedItems.length === cleared.committedItems.length &&
+    committedItems.every((item, i) => item === cleared.committedItems[i])) return cleared;
+  return {
+    ...cleared,
+    committedItems: active && active.kind !== "planning"
+      ? upsertCommitted(committedItems, settle(active)) : committedItems,
+    activeItem: undefined,
+  };
+}
+
 function commitRunCancelledHint(
   state: RunNarrativeState,
   event: AguiEvent,
@@ -2247,8 +2291,12 @@ function updateExploringAction(
   detail?: string,
   toolStatus?: string,
 ): RunNarrativeState {
-  const existing =
-    state.activeItem?.kind === "exploring" ? state.activeItem : undefined;
+  const previousGroup = state.committedItems.find(
+    (item): item is Extract<RunNarrativeItem, { kind: "exploring" }> =>
+      item.kind === "exploring" && item.actions.some(action => action.id === exploringActionId(event)),
+  );
+  const existing = previousGroup ??
+    (state.activeItem?.kind === "exploring" ? state.activeItem : undefined);
   const id = existing?.id ?? exploringId(event);
   const action: RunAction = {
     id: exploringActionId(event),
@@ -2261,6 +2309,16 @@ function updateExploringAction(
     status,
     toolStatus,
   };
+
+  if (previousGroup) {
+    return {
+      ...state,
+      committedItems: upsertCommitted(state.committedItems, {
+        ...previousGroup,
+        actions: upsertAction(previousGroup.actions, action),
+      }),
+    };
+  }
 
   return setActive(
     {

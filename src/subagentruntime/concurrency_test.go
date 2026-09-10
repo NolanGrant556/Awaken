@@ -22,25 +22,19 @@ func TestConcurrentSharedSpawn(t *testing.T) {
 	errs := make(chan error, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
-			_, e := m.Spawn(context.Background(), SpawnRequest{Description: "audit", Prompt: "audit", AgentType: AgentTypeGeneral, WorkspaceMode: WorkspaceShared, WritableRoots: []string{"/tmp/awaken-audit-shared"}})
+			_, e := m.Spawn(context.Background(), SpawnRequest{Description: "audit", Prompt: "audit", AgentType: AgentTypeGeneral, WorkspaceMode: WorkspaceShared})
 			errs <- e
 		}()
 	}
 	<-reached
-	if err := <-errs; ErrorCode(err) != ErrorBoundaryViolation {
-		close(release)
-		t.Fatalf("pending reservation did not reject overlap: %v", err)
-	}
+	<-reached
 	close(release)
-	accepted := 0
-	for i := 0; i < 1; i++ {
-		if <-errs == nil {
-			accepted++
+	for i := 0; i < 2; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("shared workspace must allow independent file work: %v", err)
 		}
 	}
-	if accepted != 1 {
-		t.Fatalf("overlapping concurrent writers admitted=%d; expected 1", accepted)
-	}
+
 }
 func TestWorktreeSnapshotRace(t *testing.T) {
 	started := make(chan StartRequest, 1)

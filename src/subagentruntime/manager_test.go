@@ -12,7 +12,7 @@ func TestManagerSpawnWaitAndDurableOrdering(t *testing.T) {
 	var mu sync.Mutex
 	var events []string
 	manager := NewManager(context.Background(), Config{
-		MaxConcurrent: 1,
+		Policy: Policy{MaxActiveAgents: 1},
 		Starter: func(context.Context, StartRequest) (string, error) {
 			mu.Lock()
 			events = append(events, "starter")
@@ -150,8 +150,7 @@ func TestManagerRejectsNestedAndWritableSpawn(t *testing.T) {
 
 func TestManagerAcceptsPlanAndGeneralShared(t *testing.T) {
 	manager := NewManager(context.Background(), Config{
-		ParentWritableRoots: []string{"/workspace"},
-		Starter:             func(context.Context, StartRequest) (string, error) { return "done", nil },
+		Starter: func(context.Context, StartRequest) (string, error) { return "done", nil },
 	})
 	plan, err := manager.Spawn(context.Background(), SpawnRequest{
 		Description: "plan change", Prompt: "plan the auth rewrite", AgentType: AgentTypePlan,
@@ -168,12 +167,13 @@ func TestManagerAcceptsPlanAndGeneralShared(t *testing.T) {
 	_, err = manager.Spawn(context.Background(), SpawnRequest{
 		Description: "second write", Prompt: "also write", AgentType: AgentTypeGeneral, WorkspaceMode: WorkspaceShared,
 	})
-	if ErrorCode(err) != ErrorBoundaryViolation {
-		t.Fatalf("overlapping shared write: %v", err)
+	if err != nil {
+		t.Fatalf("shared workspace: %v", err)
 	}
+	_ = manager.Close(context.Background())
 }
 
-func TestManagerMessageQueuesBeforeChildDrainAndRejectsTerminal(t *testing.T) {
+func TestManagerMessagesRequireIncorporationAndCanQueueForIdleAgent(t *testing.T) {
 	started := make(chan StartRequest, 1)
 	release := make(chan struct{})
 	var events []string
@@ -210,12 +210,16 @@ func TestManagerMessageQueuesBeforeChildDrainAndRejectsTerminal(t *testing.T) {
 	if len(queued) != 1 || queued[0].Content != "follow up" {
 		t.Fatalf("drain = %+v", queued)
 	}
-	if second := request.DrainMessages(); len(second) != 0 {
-		t.Fatalf("messages must be one-shot: %+v", second)
+	if second := request.DrainMessages(); len(second) != 1 || second[0].ID != receipt.MessageID {
+		t.Fatalf("message disappeared before incorporation: %+v", second)
+	}
+	request.IncorporateMessages([]string{receipt.MessageID})
+	if len(request.DrainMessages()) != 0 {
+		t.Fatal("incorporated message was not removed")
 	}
 	close(release)
 	_, _ = manager.Wait(context.Background(), WaitRequest{TaskIDs: []string{task.TaskID}, Timeout: time.Second})
-	if _, err := manager.Message(context.Background(), task.TaskID, "too late"); ErrorCode(err) != ErrorNotRunning {
+	if _, err := manager.Message(context.Background(), task.TaskID, "next assignment"); err != nil {
 		t.Fatalf("terminal message: %v", err)
 	}
 	mu.Lock()
@@ -259,7 +263,7 @@ func TestManagerMessageIdempotency(t *testing.T) {
 func TestManagerCancelDoesNotCancelSibling(t *testing.T) {
 	started := make(chan string, 2)
 	manager := NewManager(context.Background(), Config{
-		MaxConcurrent: 2,
+		Policy: Policy{MaxActiveAgents: 2},
 		Starter: func(ctx context.Context, request StartRequest) (string, error) {
 			started <- request.Task.TaskID
 			<-ctx.Done()
@@ -288,7 +292,7 @@ func TestManagerWaitAnyOnlyDeliversNewCompletions(t *testing.T) {
 	releaseFirst := make(chan struct{})
 	releaseSecond := make(chan struct{})
 	manager := NewManager(context.Background(), Config{
-		MaxConcurrent: 2,
+		Policy: Policy{MaxActiveAgents: 2},
 		Starter: func(_ context.Context, request StartRequest) (string, error) {
 			if request.Task.Description == "first" {
 				<-releaseFirst
@@ -491,7 +495,7 @@ func TestManagerCancelQueuedTaskNeverStartsIt(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan string, 2)
 	manager := NewManager(context.Background(), Config{
-		MaxConcurrent: 1,
+		Policy: Policy{MaxActiveAgents: 1},
 		Starter: func(ctx context.Context, request StartRequest) (string, error) {
 			started <- request.Task.TaskID
 			select {
@@ -529,7 +533,7 @@ func TestManagerCancelQueuedTaskNeverStartsIt(t *testing.T) {
 	_ = manager.Close(context.Background())
 }
 
-func TestManagerCancelGraceInterruptsUncooperativeStarter(t *testing.T) {
+func TestManagerCancelGraceKeepsUncooperativeStarterStopping(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})
 	manager := NewManager(context.Background(), Config{
@@ -548,12 +552,18 @@ func TestManagerCancelGraceInterruptsUncooperativeStarter(t *testing.T) {
 	if _, err := manager.Cancel(context.Background(), task.TaskID, "test"); err != nil {
 		t.Fatal(err)
 	}
-	result, err := manager.Wait(context.Background(), WaitRequest{TaskIDs: []string{task.TaskID}, Timeout: time.Second})
-	if err != nil || result.Tasks[0].Status != StatusInterrupted {
+	result, err := manager.Wait(context.Background(), WaitRequest{TaskIDs: []string{task.TaskID}, Timeout: 50 * time.Millisecond})
+	if err != nil || result.Tasks[0].Status != StatusCancelling {
 		t.Fatalf("cancel grace result = %+v err=%v", result, err)
+	}
+	if !manager.HasLiveWork("") {
+		t.Fatal("stopping worker disappeared")
 	}
 	close(release)
 	_ = manager.Close(context.Background())
+	if task, _ := manager.Status(task.TaskID); task.Status != StatusCancelled {
+		t.Fatal(task.Status)
+	}
 }
 
 func TestManagerTerminalPersistenceFailureDoesNotPublishFalseTerminal(t *testing.T) {
@@ -584,5 +594,26 @@ func TestManagerTerminalPersistenceFailureDoesNotPublishFalseTerminal(t *testing
 	}
 	if err := manager.Close(context.Background()); err == nil || ErrorCode(err) != ErrorPersistence {
 		t.Fatalf("close did not surface terminal persistence failure: %v", err)
+	}
+}
+
+func TestWaitAnyReturnsAlreadyDeliveredTerminalTasks(t *testing.T) {
+	for _, status := range []TaskStatus{StatusCompleted, StatusFailed, StatusCancelled, StatusInterrupted} {
+		t.Run(string(status), func(t *testing.T) {
+			m := NewManager(t.Context(), Config{})
+			defer m.Close(context.Background())
+			m.Restore([]RestoredTask{
+				{Snapshot: TaskSnapshot{TaskID: "done", AgentID: "child", ParentAgentID: "root", Status: status}, ResultDelivered: true},
+				{Snapshot: TaskSnapshot{TaskID: "other", AgentID: "other-child", ParentAgentID: "root", Status: StatusCompleted}, ResultDelivered: true},
+			})
+			for _, eventDriven := range []bool{false, true} {
+				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+				result, err := m.Wait(ctx, WaitRequest{TaskIDs: []string{"done", "other"}, ReturnWhen: "any", EventDriven: eventDriven})
+				cancel()
+				if err != nil || result.RetrievalStatus != RetrievalCompleted || len(result.Tasks) != 2 {
+					t.Fatalf("all targets are terminal: eventDriven=%v status=%s tasks=%d err=%v", eventDriven, result.RetrievalStatus, len(result.Tasks), err)
+				}
+			}
+		})
 	}
 }

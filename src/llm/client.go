@@ -543,17 +543,11 @@ func Call(ctx stdctx.Context, cfg Config, req Request) (string, error) {
 
 // Invoke 同步调用，返回完整响应
 func Invoke(ctx stdctx.Context, cfg Config, req Request) (*Response, error) {
-	if apiKeyRequired(cfg) && cfg.APIKey == "" {
-		return nil, ErrMissingAPIKey
+	prepared, err := PrepareRequest(cfg, req, false)
+	if err != nil {
+		return nil, err
 	}
-
-	model := resolveModel(cfg, req)
-	if model == "" {
-		return nil, ErrMissingModel
-	}
-
-	transport := getTransport(cfg)
-	return transport.Invoke(ctx, cfg, req)
+	return InvokePrepared(ctx, cfg, prepared)
 }
 
 // StreamCall 流式调用（兼容旧 API）
@@ -568,20 +562,11 @@ func StreamInvoke(ctx stdctx.Context, cfg Config, req Request, callback StreamCa
 }
 
 func StreamInvokeWithObserver(ctx stdctx.Context, cfg Config, req Request, observer StreamObserver) (*Response, error) {
-	if apiKeyRequired(cfg) && cfg.APIKey == "" {
-		return nil, ErrMissingAPIKey
+	prepared, err := PrepareRequest(cfg, req, true)
+	if err != nil {
+		return nil, err
 	}
-
-	model := resolveModel(cfg, req)
-	if model == "" {
-		return nil, ErrMissingModel
-	}
-
-	transport := getTransport(cfg)
-	if observerTransport, ok := transport.(observerTransport); ok {
-		return observerTransport.StreamInvokeWithObserver(ctx, cfg, req, observer)
-	}
-	return transport.StreamInvoke(ctx, cfg, req, observer.OnContent)
+	return StreamPreparedWithObserver(ctx, cfg, prepared, observer)
 }
 
 func apiKeyRequired(cfg Config) bool {

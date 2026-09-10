@@ -50,7 +50,7 @@ func TestComposerForkSkillRunsChildBeforeParentWithoutContextLeak(t *testing.T) 
 name: fork-composer
 description: Execute separately.
 context: fork
-agent: Researcher
+agent: general
 ---
 CHILD_ONLY_INSTRUCTION
 `), 0o644); err != nil {
@@ -95,8 +95,11 @@ CHILD_ONLY_INSTRUCTION
 	}
 	encodedChild, _ := json.Marshal(requests[0])
 	encodedParent, _ := json.Marshal(requests[1])
-	childSystemPrompt, _ := providerSystemAndLastUserContent(t, requests[0])
+	childSystemPrompt, childUserContent := providerSystemAndLastUserContent(t, requests[0])
 	parentSystemPrompt, parentUserContent := providerSystemAndLastUserContent(t, requests[1])
+	if !strings.Contains(childUserContent, "research this") {
+		t.Fatalf("fork child lost invocation arguments without a template placeholder: %q", childUserContent)
+	}
 	if !strings.Contains(string(encodedChild), "CHILD_ONLY_INSTRUCTION") {
 		t.Fatalf("child request missing fork body: %s", encodedChild)
 	}

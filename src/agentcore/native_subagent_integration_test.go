@@ -62,7 +62,7 @@ func TestNativeSubagentToolRunsReadOnlyChildAndReturnsHandoff(t *testing.T) {
 		return &llm.Response{Content: "认证入口位于 auth/service.go"}, nil
 	}
 	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
-		MaxConcurrent: 1,
+		Policy: subagentruntime.Policy{MaxActiveAgents: 1},
 		Starter: func(ctx context.Context, request subagentruntime.StartRequest) (string, error) {
 			return runner.startNativeChild(ctx, request, childSink)
 		},
@@ -163,7 +163,7 @@ func TestNativeSubagentToolRunsReadOnlyChildAndReturnsHandoff(t *testing.T) {
 	}
 }
 
-func TestRootAutomaticallyReceivesTerminalHandoffAfterWaitTimeout(t *testing.T) {
+func TestRootAutomaticallyReceivesTerminalHandoffAfterStatusSnapshot(t *testing.T) {
 	releaseChild := make(chan struct{})
 	terminalPersisted := make(chan struct{})
 	var terminalOnce sync.Once
@@ -206,7 +206,7 @@ func TestRootAutomaticallyReceivesTerminalHandoffAfterWaitTimeout(t *testing.T) 
 			}
 			waitInput, err := json.Marshal(map[string]any{
 				"action": "wait", "task_ids": []string{tasks[0].TaskID},
-				"return_when": "all", "timeout_ms": 1,
+				"return_when": "all", "timeout_ms": 0,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -296,25 +296,14 @@ func TestRootDefersFinalAnswerWhileSubagentIsStillRunning(t *testing.T) {
 				Input: `{"action":"spawn","description":"review","prompt":"review","agent_type":"review","workspace_mode":"shared_readonly"}`,
 			}}}, nil
 		case 2:
+			time.AfterFunc(30*time.Millisecond, func() { close(releaseChild) })
 			return &llm.Response{Content: "premature answer"}, nil
 		case 3:
-			var sawActiveNotice bool
-			for _, message := range conversation.Context.GetMessages() {
-				if message.Origin == convcontext.MessageOriginSynthetic && strings.Contains(message.Content, "Subagents are still active") {
-					sawActiveNotice = true
-				}
-			}
-			if !sawActiveNotice {
-				t.Fatal("missing host-owned active Subagent wait instruction")
-			}
-			close(releaseChild)
 			select {
 			case <-terminalPersisted:
-			case <-time.After(time.Second):
-				t.Fatal("child terminal state was not persisted")
+			default:
+				t.Fatal("root requested the model again before the child completed")
 			}
-			return &llm.Response{Content: "waiting for handoff"}, nil
-		case 4:
 			var sawTerminalHandoff bool
 			for _, message := range conversation.Context.GetMessages() {
 				if message.Origin == convcontext.MessageOriginSynthetic && strings.Contains(message.Content, "child result") {
@@ -335,7 +324,7 @@ func TestRootDefersFinalAnswerWhileSubagentIsStillRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunStreamWithEvents: %v", err)
 	}
-	if answer != "final answer with child result" || turn != 4 {
+	if answer != "final answer with child result" || turn != 3 {
 		t.Fatalf("answer=%q turns=%d", answer, turn)
 	}
 }
@@ -433,7 +422,6 @@ func TestNativeGeneralSharedChildWritesParentWorkspace(t *testing.T) {
 	}
 	var drained []string
 	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
-		ParentWritableRoots: []string{root},
 		Starter: func(ctx context.Context, request subagentruntime.StartRequest) (string, error) {
 			original := request.DrainMessages
 			request.DrainMessages = func() []subagentruntime.QueuedMessage {
@@ -632,4 +620,76 @@ func runnerForEmitterRequest(events *runEventEmitter) (string, error) {
 		return "", context.Canceled
 	}
 	return events.subagentTaskID, nil
+}
+
+func TestSubagentHandoffRetainsCandidateBeforeResult(t *testing.T) {
+	for _, completedDuringCall := range []bool{false, true} {
+		name := "host_wait"
+		if completedDuringCall {
+			name = "terminal_notification"
+		}
+		t.Run(name, func(t *testing.T) {
+			release := make(chan struct{})
+			var once sync.Once
+			finish := func() { once.Do(func() { close(release) }) }
+			defer finish()
+			m := subagentruntime.NewManager(t.Context(), subagentruntime.Config{Starter: func(ctx context.Context, _ subagentruntime.StartRequest) (string, error) {
+				select {
+				case <-release:
+					return "child evidence", nil
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+			}})
+			t.Cleanup(func() { _ = m.Close(context.Background()) })
+			cfg := AgentConfig{MaxThoughts: 4, SubagentController: m, ToolExposure: tool.ToolExposurePolicy{Mode: tool.ExposureAll}}
+			conv := convcontext.NewConversation(nil)
+			conv.UserInput("Combine the parent's analysis and child's evidence")
+			r := NewRunner(cfg, conv, NewRequestBuilder(cfg))
+			r.threadID, r.runID = "handoff-thread", "handoff-run"
+			turns := 0
+			const candidate = "Parent analysis worth retaining: computed-total-913"
+			r.streamLLMFunc = func(ctx context.Context, _ *runEventEmitter) (*llm.Response, error) {
+				turns++
+				if turns == 1 {
+					return &llm.Response{ToolCalls: []llm.ToolCall{{ID: "spawn", Name: "subagent", Input: `{"action":"spawn","description":"evidence","prompt":"return evidence","agent_type":"general"}`}}}, nil
+				}
+				if turns == 2 {
+					if completedDuringCall {
+						finish()
+						tasks := m.List()
+						if len(tasks) != 1 {
+							t.Fatalf("expected one child: %+v", tasks)
+						}
+						if _, err := m.Wait(ctx, subagentruntime.WaitRequest{TaskIDs: []string{tasks[0].TaskID}, ReturnWhen: "all", EventDriven: true, DeferAcknowledgement: true}); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						time.AfterFunc(20*time.Millisecond, finish)
+					}
+					return &llm.Response{Content: candidate}, nil
+				}
+				candidateIndex, resultIndex, count := -1, -1, 0
+				for index, msg := range conv.Context.GetMessages() {
+					if msg.Role == convcontext.RoleAssistant && msg.Content == candidate {
+						candidateIndex = index
+						count++
+					}
+					if strings.Contains(msg.Content, "Host notification:") && strings.Contains(msg.Content, "child evidence") {
+						resultIndex = index
+					}
+				}
+				if count != 1 || candidateIndex >= resultIndex {
+					t.Errorf("candidate must appear exactly once before child result: count=%d candidate=%d result=%d", count, candidateIndex, resultIndex)
+				}
+				return &llm.Response{Content: "consolidated"}, nil
+			}
+			if _, err := r.RunStreamWithEvents(t.Context(), EventSinkFunc(func(AwakenEvent) {})); err != nil {
+				t.Fatal(err)
+			}
+			if turns != 3 {
+				t.Fatalf("expected one synthesis after handoff; turns=%d", turns)
+			}
+		})
+	}
 }

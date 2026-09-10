@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	DefaultMaxAgentTurns     = 128
-	DefaultMaxToolExecutions = 512
+	DefaultMaxAgentTurns     = 256
+	DefaultMaxToolExecutions = 1024
 
 	maxRetryableSameCallAttempts    = 2
 	maxNonRetryableSameCallAttempts = 1

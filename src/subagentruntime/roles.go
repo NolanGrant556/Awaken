@@ -100,10 +100,10 @@ func RoleCatalog() map[string]Role {
 			ReadOnly:  false,
 			SystemPrompt: "You are a local Awaken Subagent acting as a general-purpose coding agent. " +
 				"Complete the assigned implementation. You may use the inherited file and shell tools inside the granted workspace. " +
-				"You cannot ask the user questions, cannot spawn another Subagent, and cannot widen permissions. " +
+				"Return missing information to the parent Agent instead of asking the user directly. You may delegate authorized work. Preserve other Agents' and the user's changes. Do not widen permissions. " +
 				"If you are running in a git worktree, keep all writes inside that worktree and return a concise handoff " +
 				"listing changed paths. The parent Agent reviews and integrates; you do not merge.",
-			DisallowedTools: append([]string{}, orchestrationTools...),
+			DisallowedTools: []string{askUserHidden},
 		},
 	}
 }
@@ -130,14 +130,16 @@ func LookupRole(agentType string) (Role, bool) {
 	if strings.HasPrefix(normalized, "plugin__") && resolvedType != normalized {
 		return Role{}, false
 	}
-	role.DisallowedTools = appendUniqueRoleStrings(role.DisallowedTools, orchestrationTools...)
+	if role.ReadOnly {
+		role.DisallowedTools = appendUniqueRoleStrings(role.DisallowedTools, orchestrationTools...)
+	}
 	return role, true
 }
 
 func NormalizeAgentType(agentType string) string {
 	agentType = strings.ToLower(strings.TrimSpace(agentType))
 	if agentType == "" {
-		return AgentTypeExplore
+		return AgentTypeGeneral
 	}
 	return agentType
 }
@@ -166,7 +168,7 @@ func ValidateSpawnCombo(agentType, workspaceMode string) error {
 		}
 		return nil
 	}
-	if workspaceMode != WorkspaceShared && workspaceMode != WorkspaceGitWorktree {
+	if workspaceMode != WorkspaceShared && workspaceMode != WorkspaceGitWorktree && workspaceMode != WorkspaceSharedReadOnly {
 		return runtimeError(ErrorWorkspaceMode, "write-capable agent types require shared or git_worktree")
 	}
 	return nil

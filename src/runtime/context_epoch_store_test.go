@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -586,4 +588,41 @@ func currentContextEpochPath(t *testing.T, threadID string) string {
 		t.Fatal(err)
 	}
 	return filepath.Join(dir, pointer.EpochID+".json")
+}
+
+func TestChildEpochReusesLegacyDirectoryAfterRestart(t *testing.T) {
+	t.Setenv(awakenHomeEnv, t.TempDir())
+	candidate := testContextEpochCandidate()
+	candidate.AgentID = "child-legacy-epoch"
+	first, err := NewContextEpochStore().Project(t.Context(), candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The old implementation hashed an always-empty revision after this separator.
+	digest := sha256.Sum256([]byte(candidate.AgentID + "\x00"))
+	dir := filepath.Join(activeSessionsDir(), safeTranscriptFileName(candidate.ThreadID), "context", "agents", hex.EncodeToString(digest[:]), "epochs")
+	path := filepath.Join(dir, first.Receipt.EpochID+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacy map[string]any
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	legacy["context_revision"] = ""
+	data, err = json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := NewContextEpochStore().Project(t.Context(), candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Receipt.EpochID != first.Receipt.EpochID || restored.SystemPrompt != first.SystemPrompt {
+		t.Fatal("legacy child baseline changed across restart")
+	}
 }

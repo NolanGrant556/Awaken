@@ -67,7 +67,7 @@ func (claudeCodeAdapter) Parse(root string, candidate ir.ManifestCandidate, opti
 	if len(skillPaths) == 0 && !hasDeclaredSkills && existingPath(root, "SKILL.md") {
 		skillPaths = []string{""}
 	}
-	items, diags := parseSkillComponents(root, skillPaths, ir.DialectClaudeCode, manifestPath, ir.MappingAdapted)
+	items, diags := parseSkillComponents(root, identity.Name, skillPaths, ir.DialectClaudeCode, manifestPath, ir.MappingAdapted)
 	plugin.Components, plugin.Diagnostics = append(plugin.Components, items...), append(plugin.Diagnostics, diags...)
 
 	// commands and agents use explicit manifest paths instead of defaults.

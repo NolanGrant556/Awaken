@@ -32,8 +32,11 @@ type SkillInvocationResult struct {
 // first meta context and call agentcore.CreateSubagent with the remaining
 // model/agent hints. ToolHints never restrict the inherited parent tool pool.
 type SkillForkRequest struct {
-	SkillID   string
-	Body      string
+	SkillID string
+	Body    string
+	// Arguments preserves the invocation input independently of substitutions
+	// in Body, including Skills that do not contain an argument placeholder.
+	Arguments string
 	RootDir   string
 	SkillPath string
 	Agent     string
@@ -242,7 +245,7 @@ func (t *CatalogTool) Invoke(ctx context.Context, request SkillInvocationRequest
 			return SkillInvocationResult{Plan: plan}, &SkillCompatibilityError{Code: "skill_fork_unavailable", Message: "context: fork requires a configured ChildAgentStarter"}
 		}
 		child, childErr := starter.StartSkillChild(ctx, SkillForkRequest{
-			SkillID: plan.SkillID, Body: plan.MainBody, RootDir: plan.RootDir,
+			SkillID: plan.SkillID, Body: plan.MainBody, Arguments: request.Args, RootDir: plan.RootDir,
 			SkillPath: plan.SkillFilePath, Agent: plan.Agent, Model: plan.Model,
 			Effort: plan.Effort, ToolHints: append([]skills.ToolHint(nil), plan.ToolHints...),
 		})

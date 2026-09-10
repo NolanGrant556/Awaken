@@ -9,7 +9,7 @@ import (
 
 const searchProvidersEnv = "AWAKEN_WEB_SEARCH_PROVIDERS"
 
-var ChildToolAllowlist = []string{"Read", "Glob", "Grep", "WebSearch", "WebFetch"}
+var ChildToolAllowlist = []string{"Read", "Glob", "Grep", "WebSearch", "WebFetch", "tool_result_read"}
 
 var ChildToolDenylist = []string{
 	"Bash", "Edit", "Write", "trash_file", "artifact_publish", "subagent", "ask_user",
@@ -27,7 +27,7 @@ func SearchChannelsEnabled() bool {
 }
 
 func ChildToolAllowlistFor(hint SourceHint, searchEnabled bool) []string {
-	allow := []string{"Read", "Glob", "Grep"}
+	allow := []string{"Read", "Glob", "Grep", "tool_result_read"}
 	if hint != SourceWorkspace && searchEnabled {
 		allow = append(allow, "WebSearch", "WebFetch")
 	}

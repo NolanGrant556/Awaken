@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"io"
 	"net/http"
 
 	"awaken/src/computer"
@@ -71,8 +72,21 @@ func (h *computerControlHandlers) handleComputerSessionControl(w http.ResponseWr
 		return
 	}
 
+	var req struct {
+		SessionID string `json:"session_id,omitempty"`
+	}
+	if err := decodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		writeErrorJSON(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
 	runID := r.PathValue("run_id")
-	cr, err := h.runService.ComputerRuntime(runID)
+	var cr *computer.Runtime
+	var err error
+	if req.SessionID != "" {
+		cr, err = h.runService.ComputerRuntimeForSession(runID, req.SessionID)
+	} else {
+		cr, err = h.runService.ComputerRuntime(runID)
+	}
 	if err != nil {
 		if errors.Is(err, awruntime.ErrRunNotFound) {
 			writeErrorJSON(w, http.StatusNotFound, "RUN_NOT_FOUND", err.Error())
@@ -89,7 +103,7 @@ func (h *computerControlHandlers) handleComputerSessionControl(w http.ResponseWr
 	case "takeover":
 		opErr = cr.Takeover(r.Context())
 	case "return":
-		opErr = cr.Return(r.Context())
+		opErr = cr.ReturnToSession(r.Context(), computer.SessionID(req.SessionID))
 	case "terminate":
 		opErr = cr.Terminate(r.Context(), "user_stopped")
 	default:
@@ -134,17 +148,12 @@ func (h *computerControlHandlers) handleResolveComputerReview(w http.ResponseWri
 		return
 	}
 
-	cr, err := h.runService.ComputerRuntime(runID)
+	reviewID := computer.ReviewID(r.PathValue("review_id"))
+	cr, err := h.runService.ComputerRuntimeForReview(runID, string(reviewID))
 	if err != nil {
-		if errors.Is(err, awruntime.ErrRunNotFound) {
-			writeErrorJSON(w, http.StatusNotFound, "RUN_NOT_FOUND", err.Error())
-			return
-		}
 		writeErrorJSON(w, http.StatusBadRequest, "COMPUTER_RUNTIME_UNAVAILABLE", err.Error())
 		return
 	}
-
-	reviewID := computer.ReviewID(r.PathValue("review_id"))
 	decision := computer.ReviewDecision(req.Decision)
 	review, err := cr.ResolveReview(r.Context(), reviewID, decision, req.Actor, r.Header.Get("X-Request-ID"))
 	if err != nil {

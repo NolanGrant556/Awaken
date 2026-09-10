@@ -275,4 +275,10 @@ func TestIsPromptTooLongError(t *testing.T) {
 	if isPromptTooLongError(errInsufficientReduction) || isPromptTooLongError(errOversizedProtectedTail) {
 		t.Fatalf("compact postcondition errors must not trigger reactive compact")
 	}
+	if !isPromptTooLongError(errors.New("LLM request failed: status 401: k3-256k supports only 256K context.")) {
+		t.Fatal("provider-specific context cap should allow a bounded reactive compact")
+	}
+	if isPromptTooLongError(errors.New("status 401: invalid API key")) {
+		t.Fatal("ordinary authentication failures must not trigger compaction")
+	}
 }

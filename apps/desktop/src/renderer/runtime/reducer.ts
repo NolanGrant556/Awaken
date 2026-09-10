@@ -109,11 +109,23 @@ export type TurnDiffRecord = {
 };
 
 export type SubagentTaskView = SubagentNarrativeTask & {
+  runId?: string;
+  background?: boolean;
+  closed?: boolean;
+  workflow?: string;
+  attemptId?: string;
+  contextMode?: string;
+  contextWindow?: ContextWindowRecord;
+  planItems?: RunPlanItemView[];
+  planVersion?: number;
   agentId?: string;
   parentAgentId?: string;
   parentToolCallId?: string;
   workspaceMode?: string;
   modelProfileId?: string;
+  modelId?: string;
+  reasoningEffort?: string;
+  modelBindingSource?: string;
   sideEffectState?: string;
   narrative: RunNarrativeState;
 };
@@ -388,12 +400,15 @@ export type UserQuestion = {
 };
 
 export type UserQuestionItem = {
+  runId?: string;
   id: string;
   questions: UserQuestion[];
   sourceTool?: string;
 };
 
 export type ExternalInteractionItem = {
+	 runId?: string;
+	 taskId?: string;
   id: string;
   kind: "external" | "acp-permission" | "mcp-elicitation";
   title?: string;
@@ -409,6 +424,7 @@ export type ExternalInteractionItem = {
 };
 
 export type ComputerReviewItem = {
+	 taskId?: string;
   id: string;
   runId?: string;
   reviewId: string;
@@ -423,6 +439,7 @@ export type ComputerReviewItem = {
 };
 
 export type ComputerHandoffItem = {
+  taskId?: string;
   id: string;
   runId?: string;
   sessionId?: string;
@@ -430,6 +447,7 @@ export type ComputerHandoffItem = {
 };
 
 export type ComputerSessionItem = {
+  taskId?: string;
   runId?: string;
   sessionId?: string;
   state: string;
@@ -878,9 +896,26 @@ function upsertSubagentTaskView(
   const taskId = event.subagentTaskId?.trim();
   if (!taskId) return state;
   const previous = state.subagentsById[taskId];
+  const agentId = event.subagentAgentId ?? previous?.agentId;
+  // A new assignment resumes the Agent's last plan before its next update.
+  // Existing assignment rows retain the facts observed for that assignment.
+  const continuedPlan = previous ?? (agentId ? Object.values(state.subagentsById)
+    .filter(task => task.agentId === agentId && task.planItems?.length)
+    .sort((a, b) => (b.planVersion ?? 0) - (a.planVersion ?? 0))[0] : undefined);
+  const closed = event.subagentClosed === true || previous?.closed === true ||
+    (Boolean(agentId) && Object.values(state.subagentsById).some(task => task.agentId === agentId && task.closed));
   const status = acceptedSubagentStatus(previous?.status, event.subagentStatus);
   const terminal = isTerminalSubagentStatus(status);
   const next: SubagentTaskView = {
+    runId: event.runId ?? previous?.runId,
+    background: event.subagentBackground ?? previous?.background,
+    closed,
+    workflow: event.subagentWorkflow ?? previous?.workflow,
+    attemptId: event.subagentAttemptId ?? previous?.attemptId,
+    contextMode: event.subagentContextMode ?? previous?.contextMode,
+    contextWindow: previous?.contextWindow,
+    planItems: continuedPlan?.planItems,
+    planVersion: continuedPlan?.planVersion,
     taskId,
     description:
       event.subagentDescription?.trim() ||
@@ -905,18 +940,27 @@ function upsertSubagentTaskView(
       event.subagentResultPreview?.trim() || previous?.resultPreview,
     errorCode: event.subagentErrorCode ?? previous?.errorCode,
     errorMessage: event.subagentErrorMessage ?? previous?.errorMessage,
-    agentId: event.subagentAgentId ?? previous?.agentId,
+    agentId,
     parentAgentId: event.subagentParentAgentId ?? previous?.parentAgentId,
     parentToolCallId:
       event.subagentParentToolCallId ?? previous?.parentToolCallId,
     workspaceMode: event.subagentWorkspaceMode ?? previous?.workspaceMode,
     modelProfileId: event.subagentModelProfileId ?? previous?.modelProfileId,
+    modelId: event.subagentModelId ?? previous?.modelId,
+    reasoningEffort: event.subagentReasoningEffort ?? previous?.reasoningEffort,
+    modelBindingSource: event.subagentModelBindingSource ?? previous?.modelBindingSource,
     sideEffectState: event.subagentSideEffectState ?? previous?.sideEffectState,
     narrative: previous?.narrative ?? createInitialRunNarrativeState(),
   };
+  const subagentsById = { ...state.subagentsById, [taskId]: next };
+  if (closed && agentId) {
+    for (const [id, task] of Object.entries(subagentsById)) {
+      if (task.agentId === agentId && !task.closed) subagentsById[id] = { ...task, closed: true };
+    }
+  }
   return {
     ...state,
-    subagentsById: { ...state.subagentsById, [taskId]: next },
+    subagentsById,
     subagentOrder: previous
       ? state.subagentOrder
       : [...state.subagentOrder, taskId],
@@ -998,14 +1042,35 @@ function reduceSubagentNarrativeEvent(
 ): RuntimeViewState | undefined {
   const taskId = event.subagentTaskId?.trim();
   if (!taskId || subagentLifecycleEventTypes.has(event.type)) return undefined;
+  if (event.type === "AWAKEN_USER_QUESTION_REQUESTED" || event.type === "AWAKEN_USER_QUESTION_RESOLVED") return state;
   const withTask = upsertSubagentTaskView(state, event);
   const task = withTask.subagentsById[taskId];
+  const isContextEvent = event.type.startsWith("AWAKEN_CONTEXT_") || event.type === "AWAKEN_MODEL_USAGE";
+  const contextWindow = isContextEvent ? mergeContextWindowRecord(task.contextWindow, event) : task.contextWindow;
+  const acceptPlan = event.type === "AWAKEN_PLAN_UPDATED" && (event.planVersion ?? 0) >= (task.planVersion ?? 0);
+  let gates = withTask;
+  if (event.type.startsWith("AWAKEN_COMPUTER_") || event.type.startsWith("AWAKEN_EXTERNAL_INTERACTION_") || event.type.startsWith("AWAKEN_ACP_PERMISSION_")) {
+    const projected = reduceActiveRuntimeState({ ...withTask, runId: event.runId, status: "running" }, {
+      type: "run/event", event: { ...event, subagentTaskId: undefined, subagentAgentId: undefined },
+    });
+    gates = { ...withTask,
+      externalInteractions: projected.externalInteractions.map(item => item.id === (event.interactionId ?? event.toolCallId) ? { ...item, runId: event.runId, taskId } : item),
+      computerReviews: projected.computerReviews.map(item => item.reviewId === event.computerReviewId ? { ...item, runId: event.runId, taskId } : item),
+      computerHandoffs: projected.computerHandoffs.map(item => item.sessionId === event.computerSessionId ? { ...item, runId: event.runId, taskId } : item),
+      computerSession: projected.computerSession?.sessionId === event.computerSessionId && projected.computerSession
+        ? { ...projected.computerSession, runId: event.runId, taskId } : projected.computerSession,
+    };
+  }
   return {
-    ...withTask,
+    ...gates,
     subagentsById: {
       ...withTask.subagentsById,
       [taskId]: {
         ...task,
+        contextWindow,
+        planItems: acceptPlan ? event.planItems?.map(item => ({ step: item.step, activeForm: item.activeForm, status: item.status })) : task.planItems,
+        planVersion: acceptPlan ? event.planVersion : task.planVersion,
+        activity: event.agentPhase === "waiting_children" ? "等待子任务结果" : task.activity,
         narrative: projectAguiEventToNarrative(
           task.narrative,
           scopeSubagentNarrativeEvent(event, withTask, taskId),
@@ -1832,7 +1897,7 @@ function syncFromRun(
       status: run.status,
 		timelineStatus: "running",
 		userQuestions: [],
-		externalInteractions: [],
+		externalInteractions: state.externalInteractions.filter(item => Boolean(item.taskId)),
 		steps: toSteps(
         upsertStep(
           state.steps.map((step, index) => ({
@@ -1862,7 +1927,7 @@ function syncFromRun(
       status: run.status,
 		timelineStatus: "done",
 		userQuestions: [],
-		externalInteractions: [],
+		externalInteractions: state.externalInteractions.filter(item => Boolean(item.taskId)),
 	};
   }
 
@@ -1876,7 +1941,7 @@ function syncFromRun(
       status: run.status,
 		timelineStatus: "done",
 		userQuestions: [],
-		externalInteractions: [],
+		externalInteractions: state.externalInteractions.filter(item => Boolean(item.taskId)),
 	};
   }
 
@@ -1891,7 +1956,7 @@ function syncFromRun(
       timelineStatus: "error",
 		errorMessage: run.error || "Run failed",
 		userQuestions: [],
-		externalInteractions: [],
+		externalInteractions: state.externalInteractions.filter(item => Boolean(item.taskId)),
 	};
   }
 
@@ -2006,10 +2071,10 @@ function reduceActiveRuntimeState(
 		toolResults: [],
 		patchPreviews: [],
 		userQuestions: [],
-		externalInteractions: [],
-		computerReviews: [],
-		computerHandoffs: [],
-		computerSession: undefined,
+		externalInteractions: state.externalInteractions.filter(item => Boolean(item.taskId)),
+		computerReviews: state.computerReviews.filter(item => Boolean(item.taskId)),
+		computerHandoffs: state.computerHandoffs.filter(item => Boolean(item.taskId)),
+		computerSession: state.computerSession?.taskId ? state.computerSession : undefined,
 		artifacts: [],
         turnDiff: undefined,
         // Context usage is thread-scoped next-request state, not run-local
@@ -2104,7 +2169,7 @@ function reduceActiveRuntimeState(
           status: "cancelling",
 		timelineStatus: "running",
 		userQuestions: [],
-		externalInteractions: [],
+		externalInteractions: state.externalInteractions.filter(item => Boolean(item.taskId)),
 	});
     case "run/snapshotSynced":
     case "run/cancelSync": {
@@ -2174,7 +2239,7 @@ function reduceActiveRuntimeState(
           timelineStatus: "error",
 		errorMessage: action.message,
 		userQuestions: [],
-		externalInteractions: [],
+		externalInteractions: state.externalInteractions.filter(item => Boolean(item.taskId)),
         providerReconnectAttempts: [],
 		inspectorSummary: {
             ...state.inspectorSummary,
@@ -2375,7 +2440,7 @@ function reduceActiveRuntimeState(
       // Replay establishes each run through run/created before its frames.
       // Live frames from a disposed selection may never enter another view.
       if ((action.event.threadId && state.activeThreadId && action.event.threadId !== state.activeThreadId)
-        || (action.event.runId && state.runId && action.event.runId !== state.runId)) return state;
+        || (!action.event.subagentTaskId && action.event.runId && state.runId && action.event.runId !== state.runId)) return state;
       const subagentNarrativeState = reduceSubagentNarrativeEvent(
         state,
         action.event,
@@ -2532,23 +2597,23 @@ function reduceActiveRuntimeState(
             nextState.phase = "cancelling";
             nextState.timelineStatus = "running";
             nextState.userQuestions = [];
-            nextState.externalInteractions = [];
-            nextState.computerReviews = [];
-            nextState.computerHandoffs = [];
+            nextState.externalInteractions = nextState.externalInteractions.filter(item => Boolean(item.taskId));
+            nextState.computerReviews = nextState.computerReviews.filter(item => Boolean(item.taskId));
+            nextState.computerHandoffs = nextState.computerHandoffs.filter(item => Boolean(item.taskId));
           } else if (status === "cancelled") {
             nextState.phase = "cancelled";
             nextState.timelineStatus = "done";
             nextState.userQuestions = [];
-            nextState.externalInteractions = [];
-            nextState.computerReviews = [];
-            nextState.computerHandoffs = [];
+            nextState.externalInteractions = nextState.externalInteractions.filter(item => Boolean(item.taskId));
+            nextState.computerReviews = nextState.computerReviews.filter(item => Boolean(item.taskId));
+            nextState.computerHandoffs = nextState.computerHandoffs.filter(item => Boolean(item.taskId));
           } else if (status === "finished") {
             nextState.phase = "done";
             nextState.timelineStatus = "done";
             nextState.userQuestions = [];
-            nextState.externalInteractions = [];
-            nextState.computerReviews = [];
-            nextState.computerHandoffs = [];
+            nextState.externalInteractions = nextState.externalInteractions.filter(item => Boolean(item.taskId));
+            nextState.computerReviews = nextState.computerReviews.filter(item => Boolean(item.taskId));
+            nextState.computerHandoffs = nextState.computerHandoffs.filter(item => Boolean(item.taskId));
             nextState.runCompletedAtMs =
               nextState.runCompletedAtMs ??
               (validTimestamp(action.event.timestamp)
@@ -2558,9 +2623,9 @@ function reduceActiveRuntimeState(
             nextState.phase = "error";
             nextState.timelineStatus = "error";
             nextState.userQuestions = [];
-            nextState.externalInteractions = [];
-            nextState.computerReviews = [];
-            nextState.computerHandoffs = [];
+            nextState.externalInteractions = nextState.externalInteractions.filter(item => Boolean(item.taskId));
+            nextState.computerReviews = nextState.computerReviews.filter(item => Boolean(item.taskId));
+            nextState.computerHandoffs = nextState.computerHandoffs.filter(item => Boolean(item.taskId));
           }
           if (
             status === "cancelled" ||
@@ -2598,9 +2663,9 @@ function reduceActiveRuntimeState(
           nextState.status = "finished";
           nextState.timelineStatus = "done";
           nextState.userQuestions = [];
-          nextState.externalInteractions = [];
-          nextState.computerReviews = [];
-          nextState.computerHandoffs = [];
+          nextState.externalInteractions = nextState.externalInteractions.filter(item => Boolean(item.taskId));
+          nextState.computerReviews = nextState.computerReviews.filter(item => Boolean(item.taskId));
+          nextState.computerHandoffs = nextState.computerHandoffs.filter(item => Boolean(item.taskId));
           nextState.providerReconnectAttempts = [];
           nextState.runCompletedAtMs =
             nextState.runCompletedAtMs ??
@@ -3334,7 +3399,12 @@ function reduceActiveRuntimeState(
           try {
             const parsed = JSON.parse(action.event.content ?? "{}");
             if (Array.isArray(parsed.questions)) {
-              questions = parsed.questions as UserQuestion[];
+              questions = parsed.questions.map(
+                ({ multi_select, ...question }: UserQuestion & { multi_select?: boolean }) => ({
+                  ...question,
+                  multiSelect: multi_select === true,
+                }),
+              );
             }
           } catch {
             // ignore parse errors
@@ -3343,6 +3413,7 @@ function reduceActiveRuntimeState(
             nextState.userQuestions,
             {
               id: questionId,
+              runId: action.event.runId ?? state.runId,
               questions,
               sourceTool: action.event.toolCallName,
             },
@@ -3520,14 +3591,21 @@ function reduceActiveRuntimeState(
         }
         case "AWAKEN_COMPUTER_SESSION_CHANGED": {
           const sessionState = action.event.computerSessionState ?? "ready";
-          nextState.computerSession =
-            sessionState === "closed"
-              ? undefined
-              : {
-                  runId: action.event.runId ?? nextState.runId,
-                  sessionId: action.event.computerSessionId,
-                  state: sessionState,
-                };
+          const sessionId = action.event.computerSessionId;
+          if (sessionState === "closed") {
+            // A late root/child close must not clear another owner's active session.
+            if (nextState.computerSession?.sessionId === sessionId) {
+              nextState.computerSession = undefined;
+            }
+            nextState.computerHandoffs = nextState.computerHandoffs.filter(item => item.sessionId !== sessionId);
+            nextState.computerReviews = nextState.computerReviews.filter(item => item.sessionId !== sessionId);
+          } else {
+            nextState.computerSession = {
+              runId: action.event.runId ?? nextState.runId,
+              sessionId,
+              state: sessionState,
+            };
+          }
           break;
         }
         case "AWAKEN_COMPUTER_VERIFICATION_COMPLETED": {
@@ -3626,9 +3704,9 @@ function reduceActiveRuntimeState(
             nextState.status = "cancelled";
             nextState.timelineStatus = "done";
             nextState.userQuestions = [];
-            nextState.externalInteractions = [];
-            nextState.computerReviews = [];
-            nextState.computerHandoffs = [];
+            nextState.externalInteractions = nextState.externalInteractions.filter(item => Boolean(item.taskId));
+            nextState.computerReviews = nextState.computerReviews.filter(item => Boolean(item.taskId));
+            nextState.computerHandoffs = nextState.computerHandoffs.filter(item => Boolean(item.taskId));
             records = upsertStep(records, "run-cancelled", {
               title: "Run cancelled",
               description: action.event.message || "Run was cancelled by user",
@@ -3645,9 +3723,9 @@ function reduceActiveRuntimeState(
             );
             nextState.errorMessage = errorMessage;
             nextState.userQuestions = [];
-            nextState.externalInteractions = [];
-            nextState.computerReviews = [];
-            nextState.computerHandoffs = [];
+            nextState.externalInteractions = nextState.externalInteractions.filter(item => Boolean(item.taskId));
+            nextState.computerReviews = nextState.computerReviews.filter(item => Boolean(item.taskId));
+            nextState.computerHandoffs = nextState.computerHandoffs.filter(item => Boolean(item.taskId));
             records = upsertStep(records, "run-error", {
               title: "Run failed",
               description: errorMessage,

@@ -69,6 +69,9 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		messages = modelProvider.GetMessagesForModel()
 	}
 	messages = attributeContextMessages(messages)
+	if origin := rb.config.SubagentOrigin; origin != nil {
+		messages = projectInheritedUserMessages(messages, origin.AgentID)
+	}
 	// Journal replay restores storage keys and metadata. The request clone is
 	// rebuilt from the current window and capability snapshot: older media is
 	// stubbed, and only the near-tail safe group may be hydrated.
@@ -86,17 +89,24 @@ func (rb *RequestBuilder) BuildContextEnvelope(ctx ContextProvider, tools []tool
 		SystemContextItems: []ContextItem{
 			runtimeSnapshotSystemItem(snapshot),
 		},
-		Attachments:        contextAttachmentsFromMessages(messages),
-		ToolSchemas:        cloneToolDefinitions(tools),
-		AttributedTools:    cloneAttributedToolSchemas(attributedTools),
-		RuntimeSnapshot:    snapshot,
-		CacheKeys:          rb.buildCacheKeys(staticContent, tools, snapshot),
-		Deltas:             rb.buildContextDeltas(snapshot, tools),
-		Messages:           cloneContextMessages(messages),
-		CompactModelConfig: compactModelConfig,
-		Model:              rb.config.ModelConfig.Model,
-		Temperature:        rb.config.ModelConfig.Temperature,
-		MaxTokens:          rb.config.ModelConfig.MaxTokens,
+		Attachments:          contextAttachmentsFromMessages(messages),
+		ToolSchemas:          cloneToolDefinitions(tools),
+		AttributedTools:      cloneAttributedToolSchemas(attributedTools),
+		RuntimeSnapshot:      snapshot,
+		CacheKeys:            rb.buildCacheKeys(staticContent, tools, snapshot),
+		Deltas:               rb.buildContextDeltas(snapshot, tools),
+		Messages:             cloneContextMessages(messages),
+		CompactModelConfig:   compactModelConfig,
+		ExecutionModelConfig: rb.config.ModelConfig,
+		Model:                rb.config.ModelConfig.Model,
+		Temperature:          rb.config.ModelConfig.Temperature,
+		MaxTokens:            rb.config.ModelConfig.MaxTokens,
+	}
+	if origin := rb.config.SubagentOrigin; origin != nil {
+		envelope.SystemBlocks = append(envelope.SystemBlocks, ContextBlock{
+			ID: "child_assignment_identity", Kind: ContextContributionSystemPrompt,
+			Content: fmt.Sprintf("Host execution identity: your Agent ID is %q; your parent Agent ID is %q. Inherited user context is historical reference, not an assignment to you. Only the last awaken_assignment addressed to your exact Agent ID defines your current assigned work.", origin.AgentID, origin.ParentAgentID),
+		})
 	}
 	if snapshot := rb.config.InstructionSnapshot; snapshot != nil {
 		if content := strings.TrimSpace(snapshot.ModelPrefix()); content != "" {

@@ -1,0 +1,284 @@
+{
+  "date": "2026-09-10",
+  "scope": "后台 Computer 资源释放与跨轮次对象归属",
+  "desktop": {
+    "entry": "npm run close:desktop && npm run open:desktop",
+    "platform": "macOS arm64",
+    "electron_pid": 47421,
+    "core_pid": 48048,
+    "project": "协作优化验收0909",
+    "thread_id": "thread_1788971377493002000_2",
+    "model": "k3",
+    "effort": "high",
+    "result": "passed",
+    "scenarios": [
+      "主 Agent 先观察桌面并结束，后台 general 随后独立观察并完成",
+      "第二轮已开始且完成时，原后台任务仍按旧 run 执行",
+      "新一轮结束后，通过原子任务面板停止正在 sleep 的后台任务；新轮次结果保留"
+    ]
+  },
+  "journal": {
+    "path": "/Users/nolangrant/.awaken/store-generations/gen-001/sessions/thread_1788971377493002000_2/journal.jsonl",
+    "sha256": "ec597ed8f742dd3f4f9034bc42b8c3427a144120a4276e015640148c88a2a37f",
+    "records": 152,
+    "selected_events": [
+      {
+        "seq": 6,
+        "kind": "run_started",
+        "timestamp": "2026-09-09T16:29:38.234655Z",
+        "run_id": "run_1788971377493001000_1",
+        "payload": {}
+      },
+      {
+        "seq": 23,
+        "kind": "computer_session_opened",
+        "timestamp": "2026-09-09T16:29:56.235572Z",
+        "run_id": "run_1788971377493001000_1",
+        "payload": {
+          "session_id": "sess_3a326e2e704cb94fc0fcbcb4a2761acb",
+          "binding_id": "bind_04fe0b9d136f99d2af70ade4b219e6bf",
+          "resource_key": "host://local/desktop"
+        }
+      },
+      {
+        "seq": 24,
+        "kind": "computer_observation_captured",
+        "timestamp": "2026-09-09T16:29:56.759331Z",
+        "run_id": "run_1788971377493001000_1",
+        "payload": {
+          "session_id": "sess_3a326e2e704cb94fc0fcbcb4a2761acb",
+          "has_screenshot": true,
+          "observation_id": "obs_df003bbe8bbf78e509d4dd344a346d12"
+        }
+      },
+      {
+        "seq": 49,
+        "kind": "assistant_message",
+        "timestamp": "2026-09-09T16:30:21.440404Z",
+        "run_id": "run_1788971377493001000_1",
+        "payload": {
+          "content": "OWNER-916-ROOT-DONE"
+        }
+      },
+      {
+        "seq": 52,
+        "kind": "run_terminal",
+        "timestamp": "2026-09-09T16:30:21.461926Z",
+        "run_id": "run_1788971377493001000_1",
+        "payload": {
+          "status": "finished",
+          "terminal_reason": "completed"
+        }
+      },
+      {
+        "seq": 53,
+        "kind": "computer_session_closed",
+        "timestamp": "2026-09-09T16:30:21.511363Z",
+        "run_id": "run_1788971377493001000_1",
+        "payload": {
+          "session_id": "sess_3a326e2e704cb94fc0fcbcb4a2761acb",
+          "reason": "work_ended"
+        }
+      },
+      {
+        "seq": 68,
+        "kind": "run_started",
+        "timestamp": "2026-09-09T16:30:51.610518Z",
+        "run_id": "run_1788971450969008000_3",
+        "payload": {}
+      },
+      {
+        "seq": 73,
+        "kind": "assistant_message",
+        "timestamp": "2026-09-09T16:30:55.133089Z",
+        "run_id": "run_1788971450969008000_3",
+        "payload": {
+          "content": "OWNER-916-ROUND2"
+        }
+      },
+      {
+        "seq": 76,
+        "kind": "run_terminal",
+        "timestamp": "2026-09-09T16:30:55.159376Z",
+        "run_id": "run_1788971450969008000_3",
+        "payload": {
+          "status": "finished",
+          "terminal_reason": "completed"
+        }
+      },
+      {
+        "seq": 82,
+        "kind": "computer_session_opened",
+        "timestamp": "2026-09-09T16:30:58.413511Z",
+        "run_id": "run_1788971377493001000_1",
+        "payload": {
+          "agent_id": "subagent_4596f59eb82161ba99e9c7ee",
+          "subagent_task_id": "subtask_b79054c0ec15d478871a3da9",
+          "attempt_id": "attempt_3c6ac6a6f67d67ec70594c6f",
+          "session_id": "sess_6bfbbadb9603d7b3159c22d5e06f4604",
+          "binding_id": "bind_8779be24d61c3dd404b02f4c5ff9bdd1",
+          "resource_key": "host://local/desktop"
+        }
+      },
+      {
+        "seq": 83,
+        "kind": "computer_observation_captured",
+        "timestamp": "2026-09-09T16:30:58.818719Z",
+        "run_id": "run_1788971377493001000_1",
+        "payload": {
+          "agent_id": "subagent_4596f59eb82161ba99e9c7ee",
+          "subagent_task_id": "subtask_b79054c0ec15d478871a3da9",
+          "attempt_id": "attempt_3c6ac6a6f67d67ec70594c6f",
+          "session_id": "sess_6bfbbadb9603d7b3159c22d5e06f4604",
+          "has_screenshot": true,
+          "observation_id": "obs_78333edcef5a8bc6a4efd1600d71c783"
+        }
+      },
+      {
+        "seq": 94,
+        "kind": "assistant_message",
+        "timestamp": "2026-09-09T16:31:05.456045Z",
+        "run_id": "run_1788971377493001000_1",
+        "payload": {
+          "agent_id": "subagent_4596f59eb82161ba99e9c7ee",
+          "subagent_task_id": "subtask_b79054c0ec15d478871a3da9",
+          "attempt_id": "attempt_3c6ac6a6f67d67ec70594c6f",
+          "content": "OWNER-916-CHILD-OK"
+        }
+      },
+      {
+        "seq": 97,
+        "kind": "computer_session_closed",
+        "timestamp": "2026-09-09T16:31:05.482569Z",
+        "run_id": "run_1788971377493001000_1",
+        "payload": {
+          "agent_id": "subagent_4596f59eb82161ba99e9c7ee",
+          "subagent_task_id": "subtask_b79054c0ec15d478871a3da9",
+          "attempt_id": "attempt_3c6ac6a6f67d67ec70594c6f",
+          "session_id": "sess_6bfbbadb9603d7b3159c22d5e06f4604",
+          "reason": "agent_attempt_ended"
+        }
+      },
+      {
+        "seq": 98,
+        "kind": "subagent_terminal",
+        "timestamp": "2026-09-09T16:31:05.498283Z",
+        "run_id": "run_1788971377493001000_1",
+        "payload": {
+          "agent_id": "subagent_4596f59eb82161ba99e9c7ee",
+          "task_id": "subtask_b79054c0ec15d478871a3da9",
+          "attempt_id": "attempt_3c6ac6a6f67d67ec70594c6f",
+          "status": "completed"
+        }
+      },
+      {
+        "seq": 102,
+        "kind": "run_started",
+        "timestamp": "2026-09-09T16:31:42.287219Z",
+        "run_id": "run_1788971501690068000_4",
+        "payload": {}
+      },
+      {
+        "seq": 125,
+        "kind": "assistant_message",
+        "timestamp": "2026-09-09T16:31:56.708409Z",
+        "run_id": "run_1788971501690068000_4",
+        "payload": {
+          "content": "CANCEL-ROOT-DONE\n\n（后台子任务 subtask_96769b7b73f1c68869cc93e5 已排队运行，明确允许其在主回复结束后继续执行 sleep 120，不等待、不轮询。）"
+        }
+      },
+      {
+        "seq": 128,
+        "kind": "run_terminal",
+        "timestamp": "2026-09-09T16:31:56.73666Z",
+        "run_id": "run_1788971501690068000_4",
+        "payload": {
+          "status": "finished",
+          "terminal_reason": "completed"
+        }
+      },
+      {
+        "seq": 138,
+        "kind": "run_started",
+        "timestamp": "2026-09-09T16:32:28.150705Z",
+        "run_id": "run_1788971547543540000_5",
+        "payload": {}
+      },
+      {
+        "seq": 143,
+        "kind": "assistant_message",
+        "timestamp": "2026-09-09T16:32:31.755468Z",
+        "run_id": "run_1788971547543540000_5",
+        "payload": {
+          "content": "CANCEL-NEXT-ROUND"
+        }
+      },
+      {
+        "seq": 146,
+        "kind": "run_terminal",
+        "timestamp": "2026-09-09T16:32:31.776156Z",
+        "run_id": "run_1788971547543540000_5",
+        "payload": {
+          "status": "finished",
+          "terminal_reason": "completed"
+        }
+      },
+      {
+        "seq": 152,
+        "kind": "subagent_terminal",
+        "timestamp": "2026-09-09T16:32:42.372486Z",
+        "run_id": "run_1788971501690068000_4",
+        "payload": {
+          "agent_id": "subagent_5c8fd35b006c6b697d040580",
+          "task_id": "subtask_96769b7b73f1c68869cc93e5",
+          "attempt_id": "attempt_f478b7d5bf3570ff8d9a491d",
+          "status": "cancelled"
+        }
+      }
+    ]
+  },
+  "automated": {
+    "desktop_tests": {
+      "files": 151,
+      "tests": 1563,
+      "passed": true
+    },
+    "desktop_typecheck": "passed",
+    "desktop_build": "passed",
+    "go_packages": [
+      "./src/runtime",
+      "./src/server",
+      "./src/computer/..."
+    ],
+    "go_packages_result": "passed",
+    "go_race_focused": [
+      "TestRootComputerCleanupDoesNotWaitForBackgroundRetention",
+      "TestComputerSessionControlStaysWithOriginalRun",
+      "TestSessionDefersPluginLeaseReleaseUntilAsyncHooksFinish"
+    ],
+    "go_race_result": "passed",
+    "docs_and_diff": "passed"
+  },
+  "limits": [
+    "专用 Computer review 与 handoff 的跨轮次按钮、原 session 匹配和旧对象拒绝由组件/接口/fake Driver 测试验证；本次没有触发真实原生接管或复核流程。",
+    "仅验收 macOS managed Desktop 与当前 k3 配置，不代表所有平台和供应商。"
+  ],
+  "evidence_files": [
+    {
+      "path": "background-completed-after-next-round.png",
+      "sha256": "a05de1e84bf6133c74e5b282e167d7120829530cb3227de5988da12513141cda"
+    },
+    {
+      "path": "cancelled-original-task.png",
+      "sha256": "e80ae3f9c869c40d1f22b55ba4e288e0b1be64ccc3fa464d38c03f26424a7599"
+    },
+    {
+      "path": "cancelled-panel.txt",
+      "sha256": "129fea8249a6b8b97b5445871cc74e44b78262011a6bec024452f5f2b765e77d"
+    },
+    {
+      "path": "completed-panel.txt",
+      "sha256": "315739016fa4cb318432775a6652233230fc3c21f9598f1745b8896d5b658abd"
+    }
+  ]
+}

@@ -6,11 +6,21 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 )
 
 func newPreparedRequest(req Request, protocol Protocol, endpoint string, body []byte, stream bool) PreparedRequest {
 	digest := sha256.Sum256(body)
+	policy := strings.ToLower(strings.TrimSpace(req.ReasoningPolicy))
+	if req.DisableReasoning {
+		policy = "disabled"
+	} else if policy == "" {
+		policy = "provider_default"
+	}
 	return PreparedRequest{
+		AffinityScopeID: req.AffinityScopeID, Timing: &RequestTiming{},
+		Purpose: req.Purpose, ReasoningPolicy: policy,
 		RequestID: req.RequestID, Protocol: protocol, Endpoint: endpoint,
 		Body: append([]byte(nil), body...), RequestShapeDigest: hex.EncodeToString(digest[:]),
 		Stream: stream, StreamIdleTimeout: req.StreamIdleTimeout,
@@ -19,7 +29,13 @@ func newPreparedRequest(req Request, protocol Protocol, endpoint string, body []
 }
 
 // PrepareRequest performs provider protocol lowering exactly once.
-func PrepareRequest(cfg Config, req Request, stream bool) (PreparedRequest, error) {
+func PrepareRequest(cfg Config, req Request, stream bool) (prepared PreparedRequest, prepareErr error) {
+	started := time.Now()
+	defer func() {
+		if prepared.Timing != nil {
+			prepared.Timing.PrepareMS = time.Since(started).Milliseconds()
+		}
+	}()
 	if apiKeyRequired(cfg) && cfg.APIKey == "" {
 		return PreparedRequest{}, ErrMissingAPIKey
 	}
@@ -45,6 +61,11 @@ func PrepareRequest(cfg Config, req Request, stream bool) (PreparedRequest, erro
 }
 
 func InvokePrepared(ctx stdctx.Context, cfg Config, prepared PreparedRequest) (*Response, error) {
+	release, err := acquireModelRequest(ctx, cfg, prepared)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if prepared.Stream {
 		return nil, fmt.Errorf("prepared request is streaming")
 	}
@@ -66,6 +87,21 @@ func InvokePrepared(ctx stdctx.Context, cfg Config, prepared PreparedRequest) (*
 }
 
 func StreamPreparedWithObserver(ctx stdctx.Context, cfg Config, prepared PreparedRequest, observer StreamObserver) (*Response, error) {
+	release, admissionErr := acquireModelRequest(ctx, cfg, prepared)
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+	defer release()
+	originalOnContent := observer.OnContent
+	observer.OnContent = func(delta string, thinking bool) {
+		if delta != "" && prepared.Timing != nil && prepared.Timing.FirstTokenMS == nil {
+			elapsed := time.Since(prepared.Timing.TransportStarted).Milliseconds()
+			prepared.Timing.FirstTokenMS = &elapsed
+		}
+		if originalOnContent != nil {
+			originalOnContent(delta, thinking)
+		}
+	}
 	if !prepared.Stream {
 		return nil, fmt.Errorf("prepared request is not streaming")
 	}

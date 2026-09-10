@@ -701,6 +701,7 @@ func TestToolResultPersistenceFailureStopsLaterExecutionsAndEmitsPersistenceErro
 	toolName := "journal_side_effect_" + t.Name()
 	var executions int
 	mustRegisterRunnerTool(t, countingJournalTool{name: toolName, calls: &executions})
+	t.Cleanup(func() { tool.UnregisterTool(toolName) })
 	recorder := &failingRecorder{failToolResult: true}
 	var gotEvents []AwakenEvent
 	events := newRunEventEmitter("thread_test", EventSinkFunc(func(event AwakenEvent) {

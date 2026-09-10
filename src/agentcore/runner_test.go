@@ -1276,7 +1276,8 @@ func TestNewRunnerRestoresCompatibleContextWindowUsageAnchor(t *testing.T) {
 			ModelSelectorKind: "endpoint", Protocol: "openai_chat", ReasoningEffort: " MAX ",
 		},
 		RestoredContextWindowUsageAnchor: &ContextWindowUsageAnchor{
-			ProviderID: "doubao", ProfileID: "profile-a", CredentialRevision: 7,
+			EstimatorID: contextEstimatorID,
+			ProviderID:  "doubao", ProfileID: "profile-a", CredentialRevision: 7,
 			ModelID: "ep-1", CapabilityModelID: "doubao-seed-2.1-pro", EndpointSelector: "ep-1",
 			ModelSelectorKind: "endpoint", ProtocolFamily: "openai_chat", ReasoningPolicy: "max",
 			UsageTokens: 96_000, SentEstimatedInputTokens: 74_000,

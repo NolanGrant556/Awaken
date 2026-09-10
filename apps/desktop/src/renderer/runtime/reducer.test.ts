@@ -48,6 +48,25 @@ function makeRun(overrides: Partial<RuntimeRun> = {}): RuntimeRun {
 }
 
 describe("runtime reducer user question resolution", () => {
+  it("projects the Core multi_select field without turning a multi-select question into single-select", () => {
+    const state = dispatch([
+      { type: "run/requested", prompt: "选择测试范围" },
+      runEvent({
+        type: "AWAKEN_USER_QUESTION_REQUESTED",
+        runId: "run-1",
+        threadId: "thread-1",
+        questionId: "question-multi",
+        content: JSON.stringify({ questions: [
+          { question: "选择范围", multi_select: true, options: [{ label: "文件" }, { label: "邮件" }] },
+          { question: "选择优先级", multi_select: false, options: [{ label: "高" }, { label: "低" }] },
+          { question: "默认单选", options: [{ label: "A" }, { label: "B" }] },
+        ] }),
+      }),
+    ]);
+    expect(state.userQuestions[0].questions.map((q) => q.multiSelect)).toEqual([true, false, false]);
+    expect(state.userQuestions[0].questions[0].options.map((q) => q.label)).toEqual(["文件", "邮件"]);
+  });
+
   it("removes a cancelled question while keeping the run active", () => {
     const state = dispatch([
       { type: "run/requested", prompt: "需要一个选择" },

@@ -18,6 +18,7 @@ type Subscription struct {
 }
 
 type EventBus struct {
+	maxEvents   int
 	mu          sync.Mutex
 	events      []Event
 	nextSeq     uint64
@@ -27,6 +28,22 @@ type EventBus struct {
 	done        chan struct{}
 }
 
+func NewActivityBus() *EventBus { bus := NewEventBus(); bus.maxEvents = 4096; return bus }
+
+func (b *EventBus) Close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return
+	}
+	b.closed = true
+	for id, ch := range b.subscribers {
+		close(ch)
+		delete(b.subscribers, id)
+	}
+	close(b.done)
+}
+
 func NewEventBus() *EventBus {
 	return &EventBus{
 		subscribers: make(map[int]chan Event),
@@ -34,17 +51,21 @@ func NewEventBus() *EventBus {
 	}
 }
 
-func (b *EventBus) Append(event Event, terminal bool) {
+func (b *EventBus) Append(event Event, terminal bool) uint64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.closed {
-		return
+		return 0
 	}
 
 	b.nextSeq++
 	event.Seq = b.nextSeq
 
 	b.events = append(b.events, event)
+	if b.maxEvents > 0 && len(b.events) > b.maxEvents {
+		b.events[0] = Event{}
+		b.events = b.events[1:]
+	}
 
 	if terminal {
 		b.closed = true
@@ -73,12 +94,42 @@ func (b *EventBus) Append(event Event, terminal bool) {
 		b.subscribers = nil
 		close(b.done)
 	}
+	return event.Seq
+}
+
+// RetainAfterClose keeps late child facts available for transcript replay.
+// It never reopens the terminated root stream or wakes its subscribers.
+func (b *EventBus) RetainAfterClose(event Event) uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.closed {
+		return 0
+	}
+	b.nextSeq++
+	event.Seq = b.nextSeq
+	b.events = append(b.events, event)
+	return event.Seq
 }
 
 func (b *EventBus) Subscribe(afterSeq uint64) Subscription {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	return b.subscribeLocked(afterSeq)
+}
 
+// SubscribeRetained validates the replay range and subscribes under one lock;
+// otherwise a burst between validation and subscription can silently lose facts.
+func (b *EventBus) SubscribeRetained(afterSeq uint64) (Subscription, uint64, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	last := streamCursorForEventSeq(b.nextSeq)
+	if len(b.events) > 0 && b.events[0].Seq > 1 && afterSeq < b.events[0].Seq-1 {
+		return Subscription{}, last, ErrActivityCursorExpired
+	}
+	return b.subscribeLocked(afterSeq), last, nil
+}
+
+func (b *EventBus) subscribeLocked(afterSeq uint64) Subscription {
 	history := make([]Event, 0, len(b.events))
 	for _, event := range b.events {
 		if event.Seq > afterSeq {

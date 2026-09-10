@@ -24,6 +24,8 @@ const (
 
 // Config 是 LLM 配置
 type Config struct {
+	AccountScopeID        string
+	RequestScheduler      *RequestScheduler
 	APIKey                string
 	BaseURL               string
 	Model                 string
@@ -58,6 +60,7 @@ const (
 	RequestPurposeConnectionTest    RequestPurpose = "connection_test"
 	RequestPurposeHookPrompt        RequestPurpose = "hook_prompt"
 	RequestPurposeHookAgent         RequestPurpose = "hook_agent"
+	RequestPurposeResearchSynthesis RequestPurpose = "research_synthesis"
 )
 
 // Request 是统一请求结构
@@ -104,6 +107,10 @@ type NativeCompactionState struct {
 // persist its digest before invoking SendPrepared; transports must not rebuild
 // or mutate Body after this point.
 type PreparedRequest struct {
+	AffinityScopeID    string
+	Timing             *RequestTiming
+	Purpose            RequestPurpose
+	ReasoningPolicy    string
 	RequestID          string
 	Protocol           Protocol
 	Endpoint           string
@@ -113,6 +120,14 @@ type PreparedRequest struct {
 	StreamIdleTimeout  time.Duration
 	Cache              PreparedPromptCache
 	Operation          PreparedOperation
+}
+
+type RequestTiming struct {
+	PrepareMS        int64
+	QueueWaitMS      int64
+	TransportMS      int64
+	TransportStarted time.Time
+	FirstTokenMS     *int64
 }
 
 type PreparedOperation string

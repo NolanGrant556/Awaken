@@ -11,6 +11,7 @@ import (
 // Binding is created once per root run. It captures the immutable policy,
 // resource identity and media readiness that the run's tool snapshot pins.
 type Binding struct {
+	WaitForResource              bool             `json:"-"`
 	BindingID                    BindingID        `json:"binding_id"`
 	ThreadID                     string           `json:"thread_id"`
 	RunID                        string           `json:"run_id"`

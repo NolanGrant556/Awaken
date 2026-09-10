@@ -10,7 +10,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func configureProcessTree(command *exec.Cmd) {
+func configureProcessTree(command *exec.Cmd) (func(), error) {
 	command.SysProcAttr = &windows.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP}
 	command.Cancel = func() error {
 		if command.Process == nil {
@@ -23,4 +23,5 @@ func configureProcessTree(command *exec.Cmd) {
 		return command.Process.Kill()
 	}
 	command.WaitDelay = 2 * time.Second
+	return func() {}, nil
 }

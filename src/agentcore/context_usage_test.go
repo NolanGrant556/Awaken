@@ -58,7 +58,7 @@ func TestContextUsageSnapshotClassifiesTypedSourcesWithoutDebugDuplication(t *te
 	if _, exists := byKind[ContextContributionSkillsMemory]; exists {
 		t.Fatalf("v2 snapshot emitted legacy combined Skill/Memory contribution: %+v", byKind)
 	}
-	if snapshot.SchemaVersion != 4 || snapshot.EstimatorID != "awaken_leaf_v4" {
+	if snapshot.SchemaVersion != 4 || snapshot.EstimatorID != "awaken_leaf_v5" {
 		t.Fatalf("expected v4 context estimator, got schema=%d estimator=%s", snapshot.SchemaVersion, snapshot.EstimatorID)
 	}
 	if snapshot.ModelID != "ep-test" || snapshot.CapabilityModelID != "doubao-seed-2.1-pro" || snapshot.EndpointSelector != "ep-test" || snapshot.ModelSelectorKind != "endpoint" {

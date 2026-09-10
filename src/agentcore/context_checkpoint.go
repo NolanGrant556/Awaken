@@ -24,6 +24,7 @@ func buildTaskCheckpointV2(
 	artifacts []ArtifactRef,
 ) (TaskCheckpointV2, []CheckpointFact) {
 	checkpoint := TaskCheckpointV2{}
+	planRefreshed := false
 	if prior != nil && prior.TaskCheckpoint.State == MaterializationMaterialized && prior.TaskCheckpoint.Value != nil {
 		checkpoint = cloneTaskCheckpoint(*prior.TaskCheckpoint.Value)
 	}
@@ -41,9 +42,12 @@ func buildTaskCheckpointV2(
 	}
 	if planService != nil {
 		if snapshot, ok := planService.Snapshot(); ok {
-			checkpoint.CompletedActions = nil
-			checkpoint.InProgress = nil
-			checkpoint.RemainingWork = nil
+			planRefreshed = true
+			// Replace the mutable plan, preserving independent completed tool
+			// receipts and other facts stored in the same categories.
+			checkpoint.CompletedActions = withoutCheckpointFactKind(checkpoint.CompletedActions, "plan_item")
+			checkpoint.InProgress = withoutCheckpointFactKind(checkpoint.InProgress, "plan_item")
+			checkpoint.RemainingWork = withoutCheckpointFactKind(checkpoint.RemainingWork, "plan_item")
 			for index, item := range snapshot.Items {
 				source := []string{fmt.Sprintf("plan:%s:v%d:item:%d", snapshot.PlanID, snapshot.Version, index)}
 				fact := newCheckpointFact("plan_item", item.Step, "important", item.Status != tool.RunPlanCompleted, source)
@@ -86,7 +90,14 @@ func buildTaskCheckpointV2(
 	}
 	expectedFacts := make([]CheckpointFact, 0)
 	if prior != nil && prior.TaskCheckpoint.State == MaterializationMaterialized && prior.TaskCheckpoint.Value != nil {
-		expectedFacts = append(expectedFacts, allCheckpointFacts(*prior.TaskCheckpoint.Value)...)
+		for _, fact := range allCheckpointFacts(*prior.TaskCheckpoint.Value) {
+			// Current host snapshots supersede old plan versions and child
+			// statuses. Requiring both versions would reject normal progress.
+			if (planRefreshed && fact.Kind == "plan_item") || fact.Kind == "subagent_state" {
+				continue
+			}
+			expectedFacts = append(expectedFacts, fact)
+		}
 	}
 	expectedFacts = append(expectedFacts, sourceFacts...)
 	if len(sourceFacts) == 0 {
@@ -97,6 +108,16 @@ func buildTaskCheckpointV2(
 	}
 	evictedFactIDs := capCheckpointFacts(&checkpoint)
 	return checkpoint, filterEvictedCheckpointFacts(expectedFacts, evictedFactIDs)
+}
+
+func withoutCheckpointFactKind(facts []CheckpointFact, kind string) []CheckpointFact {
+	result := make([]CheckpointFact, 0, len(facts))
+	for _, fact := range facts {
+		if fact.Kind != kind {
+			result = append(result, fact)
+		}
+	}
+	return result
 }
 
 func cloneTaskCheckpoint(value TaskCheckpointV2) TaskCheckpointV2 {
@@ -202,7 +223,13 @@ func checkpointSourceFacts(recorder SemanticRecorder, sourceStart, sourceEnd int
 	if !ok {
 		return nil, nil
 	}
-	records, err := reader.SemanticRecords(uint64(sourceStart), uint64(sourceEnd))
+	var records []SemanticRecord
+	var err error
+	if scoped, ok := recorder.(AgentSemanticRecordRangeReader); ok {
+		records, err = scoped.SemanticRecordsForAgent(agentID, uint64(sourceStart), uint64(sourceEnd))
+	} else {
+		records, err = reader.SemanticRecords(uint64(sourceStart), uint64(sourceEnd))
+	}
 	if err != nil {
 		return nil, err
 	}

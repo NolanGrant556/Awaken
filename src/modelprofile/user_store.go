@@ -25,11 +25,12 @@ var (
 // ProfileSummary is the non-sensitive model selector data exposed to a local
 // ACP client. ID is an opaque reference to an Awaken-owned profile.
 type ProfileSummary struct {
-	ID          string `json:"id"`
-	ProviderID  string `json:"provider_id"`
-	DisplayName string `json:"display_name"`
-	ModelID     string `json:"model_id"`
-	IsDefault   bool   `json:"is_default"`
+	ReasoningEffortLevels []string `json:"reasoning_effort_levels,omitempty"`
+	ID                    string   `json:"id"`
+	ProviderID            string   `json:"provider_id"`
+	DisplayName           string   `json:"display_name"`
+	ModelID               string   `json:"model_id"`
+	IsDefault             bool     `json:"is_default"`
 }
 
 // ResolvedProfile is a complete run profile resolved from Awaken-owned local
@@ -83,7 +84,9 @@ func (s *UserStore) ListReady() (ProfileCatalog, error) {
 	summaries := make([]ProfileSummary, 0, len(profiles))
 	defaultID := ""
 	for _, profile := range profiles {
-		summaries = append(summaries, profile.ProfileSummary)
+		summary := profile.ProfileSummary
+		summary.ReasoningEffortLevels = append([]string(nil), profile.ReasoningEffortLevels...)
+		summaries = append(summaries, summary)
 		if defaultID == "" && profile.IsDefault {
 			defaultID = profile.ID
 		}

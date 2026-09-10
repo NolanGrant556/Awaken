@@ -215,7 +215,12 @@ func (r *Runtime) OpenSession(ctx context.Context, scope CaptureScope, target Ta
 	if err != nil {
 		return Session{}, err
 	}
-	lease, err := r.lease.Acquire(r.bind.ResourceKey, r.bind, sess.SessionID, string(r.bind.RootAgentID), r.bind.MaxDuration())
+	var lease ResourceLease
+	if r.bind.WaitForResource {
+		lease, err = r.lease.AcquireContext(operationCtx, r.bind.ResourceKey, r.bind, sess.SessionID, string(r.bind.RootAgentID), r.bind.MaxDuration())
+	} else {
+		lease, err = r.lease.Acquire(r.bind.ResourceKey, r.bind, sess.SessionID, string(r.bind.RootAgentID), r.bind.MaxDuration())
+	}
 	if err != nil {
 		return Session{}, fmt.Errorf("acquire resource lease: %w", err)
 	}
@@ -627,10 +632,19 @@ func (r *Runtime) Takeover(ctx context.Context) error {
 
 // Return returns control to the Agent after pause or takeover.
 func (r *Runtime) Return(ctx context.Context) error {
+	return r.ReturnToSession(ctx, "")
+}
+
+// ReturnToSession rejects stale handoffs before changing the current session.
+// An empty ID preserves the legacy run-level control contract.
+func (r *Runtime) ReturnToSession(ctx context.Context, expected SessionID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.session == nil {
 		return r.noActiveSessionError()
+	}
+	if expected != "" && r.session.SessionID != expected {
+		return fmt.Errorf("computer session %s is no longer active", expected)
 	}
 	previousState := r.session.State
 	if err := r.session.MarkResuming(); err != nil {

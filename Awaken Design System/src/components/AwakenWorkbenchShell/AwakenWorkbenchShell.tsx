@@ -7,6 +7,7 @@ export type AwakenWorkbenchShellProps = {
   inspectorCollapsed?: boolean;
   inspectorExpanded?: boolean;
   inspectorSurfaceActive?: boolean;
+  inspectorNarrowLayout?: "overlay" | "split";
   inspectorResizeHandleProps?: HTMLAttributes<HTMLDivElement>;
   collapsedInspectorControl?: ReactNode;
 };
@@ -17,6 +18,7 @@ export function AwakenWorkbenchShell({
   inspectorCollapsed,
   inspectorExpanded,
   inspectorSurfaceActive = true,
+  inspectorNarrowLayout = "overlay",
   inspectorResizeHandleProps,
   collapsedInspectorControl,
 }: AwakenWorkbenchShellProps) {
@@ -24,7 +26,7 @@ export function AwakenWorkbenchShell({
     inspectorCollapsed ? " aw-workbench-shell-inspector-collapsed" : ""
   }${
     inspectorExpanded ? " aw-workbench-shell-inspector-expanded" : ""
-  }`;
+  }${inspectorNarrowLayout === "split" ? " aw-workbench-shell-inspector-split" : ""}`;
   const inspectorResizeHandleClass = [
     "aw-workbench-inspector-resize-handle",
     inspectorResizeHandleProps?.className,

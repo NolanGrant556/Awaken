@@ -1,9 +1,36 @@
 package runtime
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
+
+func TestActivityBusRequiresCompleteReplayAfterOverflow(t *testing.T) {
+	bus := NewActivityBus()
+	defer bus.Close()
+	slow := bus.Subscribe(0)
+	for i := 0; i < 5000; i++ {
+		bus.Append(Event{Message: "durable child fact"}, false)
+	}
+	for range slow.Events {
+	}
+	if _, _, err := bus.SubscribeRetained(903); !errors.Is(err, ErrActivityCursorExpired) {
+		t.Fatalf("missing event 904 must require canonical replay: %v", err)
+	}
+	sub, cursor, err := bus.SubscribeRetained(904)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	if len(sub.History) != 4096 || sub.History[0].Seq != 905 || sub.History[4095].Seq != 5000 || cursor != streamCursorForEventSeq(5000) {
+		t.Fatalf("incomplete replay: %d events, cursor %d", len(sub.History), cursor)
+	}
+	bus.Append(Event{Message: "terminal child fact"}, false)
+	if event := <-sub.Events; event.Seq != 5001 {
+		t.Fatalf("live boundary: %+v", event)
+	}
+}
 
 func TestEventBusDropsSlowSubscriberWithoutBlockingAppend(t *testing.T) {
 	bus := NewEventBus()

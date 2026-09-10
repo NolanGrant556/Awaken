@@ -7,6 +7,29 @@ import (
 	"awaken/src/tool"
 )
 
+func TestTokenEstimateDoesNotTreatCJKAsLatinCharacters(t *testing.T) {
+	if got := EstimateTokens(strings.Repeat("天地玄黄宇宙洪荒", 1000)); got < 8000 {
+		t.Fatalf("large CJK text was underestimated as Latin: %d", got)
+	}
+	if got := EstimateTokens(strings.Repeat("abcd", 1000)); got != 1000 {
+		t.Fatalf("Latin estimate changed: %d", got)
+	}
+}
+
+func TestTokenEstimateKeepsMixedScriptAndWordBounds(t *testing.T) {
+	for text, want := range map[string]int{
+		"ABCD中文":        3,
+		"漢字かなカナ한글abcd":  9,
+		"🙂abcd":         1,
+		"one two three": 4,
+		"   ":           0,
+	} {
+		if got := EstimateTokens(text); got != want {
+			t.Errorf("EstimateTokens(%q) = %d; want %d", text, got, want)
+		}
+	}
+}
+
 func TestContextDoesNotStoreSystemPrompt(t *testing.T) {
 	ctx := New()
 	if got := ctx.GetMessages(); len(got) != 0 {

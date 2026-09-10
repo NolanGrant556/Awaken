@@ -39,6 +39,8 @@ type ContextEpochToolCandidate struct {
 }
 
 type ContextEpochCandidate struct {
+	AgentID string
+
 	ThreadID            string
 	WorkspaceRoot       string
 	ProviderID          string

@@ -198,6 +198,7 @@ const RUNTIME_LABELS: Record<string, string> = {
 };
 
 function componentSpecificSummary(component: AwakenPluginConsoleComponent): string | undefined {
+  if (component.validation === "invalid" || component.mappingState === "invalid") return "组件不可用，查看原因";
   if (component.kind === "skill") return "查看技能内容";
   if (component.kind === "rule") {
     const activation = {
@@ -638,9 +639,18 @@ export function PluginComponentDetailDialog({
       {feedback.message}
     </span>
   ) : null;
+  const invalidSkillReason = isSkillPreview && detail &&
+    (detail.component.validation === "invalid" || detail.component.mappingState === "invalid")
+    ? detail.diagnostics?.find((diagnostic) => diagnostic.severity === "error")?.message || "技能校验未通过。"
+    : undefined;
   const footer = isSkillPreview ? (
     <div className="aw-plugin-component-dialog__skill-footer">
       {feedbackNode}
+      {!feedbackNode && invalidSkillReason ? (
+        <span className="aw-plugin-component-dialog__feedback" data-tone="error" role="alert">
+          技能不可用：{invalidSkillReason.length > 300 ? `${invalidSkillReason.slice(0, 300)}…` : invalidSkillReason}
+        </span>
+      ) : null}
       {canUseInChat ? (
         <span className="aw-plugin-component-dialog__footer-actions">
           <AwakenButton size="sm" variant="primary" onClick={() => detail && onUseInChat?.(detail)}>

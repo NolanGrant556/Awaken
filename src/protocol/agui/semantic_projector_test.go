@@ -11,6 +11,20 @@ import (
 	"awaken/src/tool"
 )
 
+func TestChildPlanUsageAndComputerFactsKeepTheirOwnWireScope(t *testing.T) {
+	for _, kind := range []agentcore.SemanticKind{agentcore.SemanticKindPlanUpdated, agentcore.SemanticKindContextSnapshot, agentcore.SemanticKindModelUsage, agentcore.SemanticKindComputerReviewRequested} {
+		record := agentcore.NewSemanticRecord(kind, "thread", "run", "turn", "tool", "", map[string]any{
+			"agent_id": "child", "parent_agent_id": "root", "subagent_task_id": "task",
+			"plan_id": "plan", "version": 1, "items": []map[string]any{{"step": "Read", "active_form": "Reading", "status": "in_progress"}},
+			"review_id": "review", "request_id": "request",
+		})
+		frames := ProjectSemanticRecord(record)
+		if len(frames) != 1 || frames[0].SubagentTaskID != "task" || frames[0].SubagentAgentID != "child" {
+			t.Fatalf("%s lost scope: %+v", kind, frames)
+		}
+	}
+}
+
 func TestProjectSemanticRecordsToolOrder(t *testing.T) {
 	ts := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	records := []agentcore.SemanticRecord{

@@ -2,17 +2,26 @@ package agentcore
 
 import (
 	stdcontext "context"
+	"fmt"
 	"strings"
 	"time"
 
 	convcontext "awaken/src/context"
 	"awaken/src/llm"
+	"awaken/src/subagentruntime"
 )
 
 // ModelCallAuthority selects exactly one durable accounting scope. Thread
 // calls use SemanticJournal; Dream and profile connection tests use their own
 // authorities and therefore do not call these helpers.
 type ModelCallAuthority struct {
+	MaxInputTokens   int
+	AgentID          string
+	ParentAgentID    string
+	SubagentTaskID   string
+	AttemptID        string
+	LogicalCallID    string
+	Progress         subagentruntime.ProgressReporter
 	ThreadID         string
 	RunID            string
 	TurnID           string
@@ -41,6 +50,12 @@ func prepareRecordedModelCall(
 	if err != nil {
 		return llm.PreparedRequest{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return llm.PreparedRequest{}, err
+	}
+	if authority.MaxInputTokens > 0 && convcontext.EstimateTokens(string(prepared.Body)) > authority.MaxInputTokens {
+		return llm.PreparedRequest{}, fmt.Errorf("model input exceeds the configured input capacity (%d)", authority.MaxInputTokens)
+	}
 	if !authority.valid() {
 		return prepared, nil
 	}
@@ -49,6 +64,15 @@ func prepareRecordedModelCall(
 		prepared.RequestID, req.Purpose, firstNonEmptyModelValue(req.Model, cfg.Model), string(prepared.Protocol),
 		prepared.RequestShapeDigest, convcontext.EstimateTokens(string(prepared.Body)), retryIndex,
 	)
+	record.Payload["logical_call_id"] = authority.LogicalCallID
+	if authority.AttemptID != "" {
+		record.Payload["attempt_id"] = authority.AttemptID
+	}
+	if authority.AgentID != "" {
+		record.Payload["agent_id"] = authority.AgentID
+		record.Payload["parent_agent_id"] = authority.ParentAgentID
+		record.Payload["subagent_task_id"] = authority.SubagentTaskID
+	}
 	if strings.TrimSpace(authority.HookInvocationID) != "" {
 		record.Payload["hook_invocation_id"] = authority.HookInvocationID
 	}
@@ -68,6 +92,8 @@ func persistRecordedModelUsage(ctx stdcontext.Context, authority ModelCallAuthor
 		return nil
 	}
 	emitter := newRunEventEmitter(authority.ThreadID, authority.Sink)
+	emitter.agentID, emitter.parentAgentID, emitter.subagentTaskID = authority.AgentID, authority.ParentAgentID, authority.SubagentTaskID
+	emitter.attemptID, emitter.subagentProgress = authority.AttemptID, authority.Progress
 	emitter.runID = authority.RunID
 	emitter.sessionID = authority.SessionID
 	emitter.recorder = authority.Recorder
@@ -86,6 +112,9 @@ func InvokeRecordedModel(
 	retryIndex int,
 	auxiliaryFallback bool,
 ) (*llm.Response, error) {
+	if authority.LogicalCallID == "" {
+		authority.LogicalCallID = newAwakenID("model_call")
+	}
 	if strings.TrimSpace(req.RequestID) == "" {
 		req.RequestID = newAwakenID("model_request")
 	}
@@ -96,6 +125,9 @@ func InvokeRecordedModel(
 	started := time.Now()
 	response, callErr := llm.InvokePrepared(ctx, cfg, prepared)
 	usage := modelUsageRecord(prepared.RequestID, firstNonEmptyModelValue(req.Model, cfg.Model), string(prepared.Protocol), cfg, req.Purpose, prepared, started, response, callErr, ctx.Err())
+	sentTokens := convcontext.EstimateTokens(string(prepared.Body))
+	usage.SentEstimatedInputTokens = &sentTokens
+	usage.InputEstimatorID, usage.LogicalCallID = contextEstimatorID, authority.LogicalCallID
 	usage.RetryIndex = retryIndex
 	usage.AuxiliaryFallback = auxiliaryFallback
 	if persistErr := persistRecordedModelUsage(ctx, authority, usage); persistErr != nil {
@@ -114,6 +146,9 @@ func StreamRecordedModel(
 	retryIndex int,
 	auxiliaryFallback bool,
 ) (*llm.Response, error) {
+	if authority.LogicalCallID == "" {
+		authority.LogicalCallID = newAwakenID("model_call")
+	}
 	if strings.TrimSpace(req.RequestID) == "" {
 		req.RequestID = newAwakenID("model_request")
 	}
@@ -124,6 +159,9 @@ func StreamRecordedModel(
 	started := time.Now()
 	response, callErr := llm.StreamPreparedWithObserver(ctx, cfg, prepared, observer)
 	usage := modelUsageRecord(prepared.RequestID, firstNonEmptyModelValue(req.Model, cfg.Model), string(prepared.Protocol), cfg, req.Purpose, prepared, started, response, callErr, ctx.Err())
+	sentTokens := convcontext.EstimateTokens(string(prepared.Body))
+	usage.SentEstimatedInputTokens = &sentTokens
+	usage.InputEstimatorID, usage.LogicalCallID = contextEstimatorID, authority.LogicalCallID
 	usage.RetryIndex = retryIndex
 	usage.AuxiliaryFallback = auxiliaryFallback
 	if persistErr := persistRecordedModelUsage(ctx, authority, usage); persistErr != nil {

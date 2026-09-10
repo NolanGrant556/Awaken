@@ -66,6 +66,7 @@ export type AguiEventType =
 	| "AWAKEN_INSTRUCTION_SNAPSHOT"
   | "AWAKEN_MODEL_USAGE"
   | "AWAKEN_SUBAGENT_CHANGED"
+  | "AWAKEN_AGENT_PHASE"
   | "AWAKEN_SUBAGENT_ACTIVITY"
   | "AWAKEN_SUBAGENT_MESSAGE_QUEUED"
   | "AWAKEN_MEMORY_DREAM_COMPLETED"
@@ -281,6 +282,7 @@ export type AguiEvent = {
   streamCursor?: number;
   semanticSeq?: number;
   recordId?: string;
+  sourceEventId?: string;
   threadId?: string;
   runId?: string;
   turnId?: string;
@@ -476,6 +478,15 @@ export type AguiEvent = {
     | "interrupted";
   subagentWorkspaceMode?: string;
   subagentModelProfileId?: string;
+  subagentModelId?: string;
+  subagentBackground?: boolean;
+  subagentClosed?: boolean;
+  subagentAttemptId?: string;
+  subagentContextMode?: string;
+  subagentWorkflow?: string;
+  subagentReasoningEffort?: string;
+  subagentModelBindingSource?: string;
+  agentPhase?: string;
   subagentActivity?: string;
   subagentToolUseCount?: number;
   subagentEstimatedTokens?: number;

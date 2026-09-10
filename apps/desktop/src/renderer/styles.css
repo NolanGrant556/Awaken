@@ -1666,128 +1666,64 @@ pre {
   word-break: break-word;
 }
 
-.subagent-inspector {
-  display: grid;
-  gap: 18px;
-  padding: 16px;
-  overflow: auto;
-}
-
-.subagent-inspector__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.subagent-inspector__header > div {
-  flex: 1;
+.inspector-surfaces, .inspector-surface {
+  width: 100%;
+  height: 100%;
   min-width: 0;
+  min-height: 0;
 }
-
-.subagent-inspector__header h3,
-.subagent-inspector section h4 {
-  margin: 0;
-}
-
-.subagent-inspector__header h3 {
-  margin-top: 4px;
-  font-size: 15px;
-}
-
-.subagent-inspector__eyebrow,
-.subagent-inspector__status {
-  color: var(--aw-color-text-muted, #777);
-  font-size: 11px;
-  text-transform: uppercase;
-}
-
-.subagent-inspector__status {
-  flex: 0 0 auto;
-  padding: 3px 7px;
-  border-radius: 999px;
-  background: rgba(127, 127, 127, 0.1);
-  white-space: nowrap;
-}
-
-.subagent-inspector__status--running,
-.subagent-inspector__status--queued,
-.subagent-inspector__status--cancelling {
-  color: #526ee8;
-  background: rgba(82, 110, 232, 0.12);
-}
-
-.subagent-inspector__status--completed {
-  color: #237d50;
-  background: rgba(35, 125, 80, 0.12);
-}
-
-.subagent-inspector__status--failed,
-.subagent-inspector__status--interrupted {
-  color: #b24a43;
-  background: rgba(178, 74, 67, 0.12);
-}
-
-.subagent-inspector__switcher {
-  display: grid;
-  gap: 4px;
-}
-
-.subagent-inspector__metrics {
+.inspector-surface[hidden] { display: none; }
+.subagent-panel {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.subagent-inspector__metrics span {
-  padding: 4px 7px;
-  border-radius: 7px;
-  background: rgba(127, 127, 127, 0.08);
-  color: var(--aw-color-text-muted, #666);
-  font-size: 11px;
-}
-
-.subagent-inspector__switcher button {
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
   overflow: hidden;
-  padding: 7px 9px;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
+  color: var(--aw-text-primary);
+  background: var(--aw-surface-work);
 }
-
-.subagent-inspector__switcher button:hover,
-.subagent-inspector__switcher button.is-active {
-  background: rgba(127, 127, 127, 0.1);
+.subagent-panel__header {
+  flex: none;
+  background: var(--aw-surface-detail);
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--aw-border-light);
 }
-
-.subagent-inspector section {
-  display: grid;
-  gap: 7px;
+.subagent-panel__header h2 {
+  margin: 9px 0;
+  font-size: 15px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
-
-.subagent-inspector section h4 {
+.subagent-panel__role, .subagent-panel__metrics, .subagent-panel__context {
+  color: var(--aw-text-muted);
   font-size: 12px;
+  line-height: 1.6;
 }
-
-.subagent-inspector section p,
-.subagent-inspector section pre {
-  margin: 0;
-  color: var(--aw-color-text-muted, #666);
-  font: inherit;
-  font-size: 12px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
+.subagent-panel__role { margin-left: 8px; }
+.subagent-panel__metrics, .subagent-panel__context { margin: 0; overflow-wrap: anywhere; }
+.subagent-panel__status { font-size: 12px; color: var(--aw-text-secondary); }
+.subagent-panel__status--running, .subagent-panel__status--queued, .subagent-panel__status--cancelling { color: var(--aw-status-running); }
+.subagent-panel__status--completed { color: var(--aw-status-success-text); }
+.subagent-panel__status--failed, .subagent-panel__status--interrupted { color: var(--aw-status-danger-text); }
+.subagent-panel__body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 16px 18px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  user-select: text;
 }
-
-.subagent-inspector__error p {
-  color: #b24a43 !important;
-}
+.subagent-panel__body > * { flex: none; min-width: 0; }
+.subagent-panel__plan { font-size: 12px; line-height: 1.7; }
+.subagent-panel__plan summary { cursor: pointer; color: var(--aw-text-secondary); }
+.subagent-panel__plan ol { padding-left: 20px; margin: 8px 0 0; }
+.subagent-panel__footer { display: flex; justify-content: flex-end; padding: 10px 18px; border-top: 1px solid var(--aw-border-light); }
 
 .subagent-execution-empty {
   margin: 0;

@@ -884,11 +884,11 @@ async function subscribeToRun(
   runId: string,
   subscriptionId: string,
   afterCursor?: number,
+  activityThreadId?: string,
 ): Promise<void> {
   const controller = new AbortController();
-  const eventsUrl = afterCursor
-    ? `/v1/runs/${runId}/events?after_cursor=${afterCursor}`
-    : `/v1/runs/${runId}/events`;
+  const path = activityThreadId ? `/v1/threads/${encodeURIComponent(activityThreadId)}/activity` : `/v1/runs/${encodeURIComponent(runId)}/events`;
+  const eventsUrl = afterCursor ? `${path}?after_cursor=${afterCursor}` : path;
   const response = await fetch(runtimeUrl(eventsUrl), {
     headers: {
       Accept: "text/event-stream",
@@ -2481,6 +2481,7 @@ app.whenReady().then(async () => {
     prepareNetworkRoute,
     ensureComputerRunMonitor,
     subscribeToRun,
+    subscribeToThreadActivity: (target, threadId, subscriptionId, afterCursor) => subscribeToRun(target, "", subscriptionId, afterCursor, threadId),
     toRendererSupervisorStatus,
   });
   registerExtensionsIpc({

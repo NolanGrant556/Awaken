@@ -32,7 +32,7 @@ func (agentPluginsAdapter) Parse(root string, candidate ir.ManifestCandidate, op
 		RawManifest: raw,
 	}
 	if existingPath(root, "skills") {
-		components, diagnostics := parseSkillComponents(root, []string{"skills"}, ir.DialectAgentPlugins, "plugin.json", ir.MappingNative)
+		components, diagnostics := parseSkillComponents(root, identity.Name, []string{"skills"}, ir.DialectAgentPlugins, "plugin.json", ir.MappingNative)
 		plugin.Components = append(plugin.Components, components...)
 		plugin.Diagnostics = append(plugin.Diagnostics, diagnostics...)
 	}

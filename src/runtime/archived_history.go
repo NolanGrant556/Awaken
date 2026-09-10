@@ -156,6 +156,11 @@ func (s *RunService) ReadArchivedHistory(_ context.Context, request tool.Archive
 	records := sortedThreadHistoryRecords(transcript)
 	items := make([]tool.ArchivedHistoryItem, 0, len(records))
 	for _, record := range records {
+		// Cross-thread history exposes the user-facing conversation. Private
+		// child transcripts require an explicit current-thread lineage grant.
+		if id := stringPayload(record.Payload, "agent_id"); id != "" && id != "root" {
+			continue
+		}
 		if request.BeforeSeq > 0 && record.Seq >= request.BeforeSeq {
 			continue
 		}
@@ -177,7 +182,7 @@ func (s *RunService) ReadArchivedHistory(_ context.Context, request tool.Archive
 }
 
 func archivedHistoryItem(record agentcore.SemanticRecord, includeToolActivity bool, maxChars int) (tool.ArchivedHistoryItem, bool) {
-	item := tool.ArchivedHistoryItem{Seq: record.Seq, Kind: string(record.Kind), Timestamp: record.Timestamp}
+	item := tool.ArchivedHistoryItem{Seq: record.Seq, Kind: string(record.Kind), Timestamp: record.Timestamp, AgentID: stringPayload(record.Payload, "agent_id")}
 	switch record.Kind {
 	case agentcore.SemanticKindUserMessage:
 		item.Role = "user"

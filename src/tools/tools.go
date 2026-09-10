@@ -22,6 +22,7 @@ import (
 	_ "awaken/src/tools/subagent"
 	_ "awaken/src/tools/thread_history_read"
 	_ "awaken/src/tools/tool_find"
+	_ "awaken/src/tools/tool_result_read"
 	_ "awaken/src/tools/trash_file"
 	_ "awaken/src/tools/update_plan"
 	_ "awaken/src/tools/web_fetch"

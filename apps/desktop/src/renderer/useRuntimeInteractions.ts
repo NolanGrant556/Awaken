@@ -10,6 +10,10 @@ type Options = {
   runtimeClient: Pick<RuntimeClient, "resolveExternalInteraction" | "resolveACPPermission" | "resolveComputerReview" | "computerSessionControl">;
   setNotice: (message: string | null) => void;
 };
+// Legacy root items may omit runId. A child must always keep its original owner.
+function ownerRunId(item: { runId?: string; taskId?: string } | undefined, currentRunId?: string): string | undefined {
+  return item?.runId ?? (item?.taskId ? undefined : currentRunId);
+}
 export function useRuntimeInteractions({ runId, activeExternalInteraction, activeComputerReview,
   activeComputerHandoff, runtimeClient, setNotice }: Options) {
   const [resolvingExternalInteractionId, setResolvingExternalInteractionId] =
@@ -23,7 +27,8 @@ export function useRuntimeInteractions({ runId, activeExternalInteraction, activ
     resolution: "completed" | "cancelled" | "expired" | "failed",
     content?: Record<string, unknown>,
   ): Promise<void> {
-    if (!runId || !activeExternalInteraction) {
+    const targetRunId = ownerRunId(activeExternalInteraction, runId);
+    if (!targetRunId || !activeExternalInteraction) {
       return;
     }
     if (resolvingExternalInteractionId === activeExternalInteraction.id) {
@@ -33,7 +38,7 @@ export function useRuntimeInteractions({ runId, activeExternalInteraction, activ
     setResolvingExternalInteractionId(activeExternalInteraction.id);
     try {
       await runtimeClient.resolveExternalInteraction(
-        runId,
+        targetRunId,
         activeExternalInteraction.id,
         resolution,
         content,
@@ -53,7 +58,8 @@ export function useRuntimeInteractions({ runId, activeExternalInteraction, activ
     optionId: string,
     cancelled = false,
   ): Promise<void> {
-    if (!runId || !activeExternalInteraction) {
+    const targetRunId = ownerRunId(activeExternalInteraction, runId);
+    if (!targetRunId || !activeExternalInteraction) {
       return;
     }
     if (resolvingExternalInteractionId === activeExternalInteraction.id) {
@@ -63,7 +69,7 @@ export function useRuntimeInteractions({ runId, activeExternalInteraction, activ
     setResolvingExternalInteractionId(activeExternalInteraction.id);
     try {
       await runtimeClient.resolveACPPermission(
-        runId,
+        targetRunId,
         activeExternalInteraction.id,
         optionId,
         cancelled,
@@ -82,7 +88,8 @@ export function useRuntimeInteractions({ runId, activeExternalInteraction, activ
   async function resolveActiveComputerReview(
     decision: "approved_once" | "denied",
   ): Promise<void> {
-    if (!runId || !activeComputerReview) {
+    const targetRunId = ownerRunId(activeComputerReview, runId);
+    if (!targetRunId || !activeComputerReview) {
       return;
     }
     if (resolvingComputerReviewId === activeComputerReview.id) {
@@ -92,7 +99,7 @@ export function useRuntimeInteractions({ runId, activeExternalInteraction, activ
     setResolvingComputerReviewId(activeComputerReview.id);
     try {
       await runtimeClient.resolveComputerReview(
-        runId,
+        targetRunId,
         activeComputerReview.reviewId,
         decision,
       );
@@ -108,7 +115,8 @@ export function useRuntimeInteractions({ runId, activeExternalInteraction, activ
   }
 
   async function returnComputerControl(): Promise<void> {
-    if (!runId || !activeComputerHandoff) {
+    const targetRunId = ownerRunId(activeComputerHandoff, runId);
+    if (!targetRunId || !activeComputerHandoff) {
       return;
     }
     if (controllingComputerHandoffId === activeComputerHandoff.id) {
@@ -117,7 +125,7 @@ export function useRuntimeInteractions({ runId, activeExternalInteraction, activ
     setNotice(null);
     setControllingComputerHandoffId(activeComputerHandoff.id);
     try {
-      await runtimeClient.computerSessionControl(runId, "return");
+      await runtimeClient.computerSessionControl(targetRunId, "return", activeComputerHandoff.sessionId);
     } catch (error) {
       setNotice(
         error instanceof Error

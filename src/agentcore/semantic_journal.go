@@ -179,6 +179,9 @@ func ToolResultSemanticRecord(threadID, runID, turnID, sessionID string, result 
 		"content":      content,
 		"is_error":     result.IsError,
 	}
+	if len(result.terminalSubagentTaskIDs) > 0 {
+		payload["terminal_subagent_task_ids"] = append([]string(nil), result.terminalSubagentTaskIDs...)
+	}
 	if result.Outcome.Status != "" {
 		durableOutcome := result.Outcome
 		if sanitizer, ok := registeredRuntime.(tool.SemanticJournalOutcomeSanitizer); ok {

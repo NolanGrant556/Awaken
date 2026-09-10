@@ -367,6 +367,12 @@ func TestRequestBuilderExposesComputerToolsOnlyForReadyRunSnapshot(t *testing.T)
 
 	disabledEnvironment := tool.ExecutionEnvironmentSnapshot{SnapshotID: "computer-disabled"}
 	disabledSnapshot := tool.NewRunToolAvailabilitySnapshot(disabledEnvironment)
+	childSnapshot, childEnvironment := disabledSnapshot.WithComputerState(disabledEnvironment, true)
+	child := NewRequestBuilder(AgentConfig{ExecutionEnvironmentSnapshot: &childEnvironment, ToolAvailabilitySnapshot: &childSnapshot}).Build(convcontext.New(), nil)
+	assertComputerVisibility(t, names(child), true)
+	if disabledEnvironment.ComputerEnabled || disabledSnapshot.EnvironmentSnapshotID != "computer-disabled" || childSnapshot.CatalogVersion != disabledSnapshot.CatalogVersion {
+		t.Fatal("child Computer readiness must preserve the parent's pinned catalog and environment")
+	}
 	disabled := NewRequestBuilder(AgentConfig{
 		ExecutionEnvironmentSnapshot: &disabledEnvironment,
 		ToolAvailabilitySnapshot:     &disabledSnapshot,

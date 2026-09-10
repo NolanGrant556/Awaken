@@ -10,9 +10,10 @@ import (
 	"strings"
 
 	"awaken/src/plugins/ir"
+	"awaken/src/skills"
 )
 
-func parseSkillComponents(root string, paths []string, dialect ir.Dialect, manifestPath string, mapping ir.MappingState) ([]ir.Component, []ir.Diagnostic) {
+func parseSkillComponents(root, pluginName string, paths []string, dialect ir.Dialect, manifestPath string, mapping ir.MappingState) ([]ir.Component, []ir.Diagnostic) {
 	var components []ir.Component
 	var diagnostics []ir.Diagnostic
 	seen := map[string]bool{}
@@ -58,19 +59,41 @@ func parseSkillComponents(root string, paths []string, dialect ir.Dialect, manif
 				SourceDigest: digestBytes(raw), Mapping: mapping, Validation: "valid",
 				CanonicalProvenance: string(dialect), Skill: &ir.SkillSpec{Path: packagePath},
 			}
-			if parseErr != nil || declaredName == "" || description == "" {
+			expectedDirectory := filepath.Base(filepath.Dir(file))
+			if packagePath == "." {
+				// The staging directory is temporary; installation names the
+				// package root after the resolved plugin identity.
+				expectedDirectory = pluginName
+			}
+			validationErr := parseErr
+			if validationErr == nil {
+				validationErr = validateRuntimeSkill(string(raw), expectedDirectory)
+			}
+			if validationErr != nil {
 				component.Mapping = ir.MappingInvalid
 				component.Validation = "invalid"
-				message := "Skill requires name and description frontmatter"
-				if parseErr != nil {
-					message = parseErr.Error()
-				}
-				component.Diagnostics = append(component.Diagnostics, componentDiagnostic("plugin_skill_invalid", message, "error", component))
+				component.Diagnostics = append(component.Diagnostics, componentDiagnostic("plugin_skill_invalid", validationErr.Error(), "error", component))
 			}
 			components = append(components, component)
 		}
 	}
 	return components, diagnostics
+}
+
+// Use the same Skill-owned validators as registry loading, rather than a
+// weaker dialect-specific interpretation of name/description fields.
+func validateRuntimeSkill(raw, directory string) error {
+	if err := skills.ValidateAgentSkillEntrypoint(raw, directory); err != nil {
+		return err
+	}
+	def, err := skills.ParseFrontmatter(raw)
+	if err != nil {
+		return err
+	}
+	if err := skills.ValidateNameReserved(def.Name); err != nil {
+		return err
+	}
+	return skills.ValidateSchema(def)
 }
 
 func parseMCPFileComponents(root, relative string, dialect ir.Dialect, manifestPath string, mapping ir.MappingState) ([]ir.Component, []ir.Diagnostic) {

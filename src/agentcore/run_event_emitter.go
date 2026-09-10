@@ -13,6 +13,12 @@ import (
 )
 
 type runEventEmitter struct {
+	logicalModelCallID    string
+	transportAttempt      int
+	attemptID             string
+	inboxMessageIDs       func() []string
+	contextRevision       func() uint64
+	contextCommitted      func()
 	sink                  EventSink
 	recorder              SemanticRecorder
 	sessionID             string
@@ -40,7 +46,6 @@ type runEventEmitter struct {
 	subagentProgress      subagentruntime.ProgressReporter
 	beforeTerminal        func(stdcontext.Context) error
 	afterTerminal         func(stdcontext.Context, string, TerminalReason, int)
-	auxiliaryRequestIndex int
 }
 
 func newRunEventEmitter(threadID string, sink EventSink) *runEventEmitter {
@@ -75,7 +80,12 @@ func (s runScopedEventSink) AwaitUserQuestion(ctx stdcontext.Context, request Aw
 	}
 	s.emitter.fillIDs(&request)
 	if awaiter, ok := s.emitter.sink.(UserQuestionAwaiter); ok {
-		return awaiter.AwaitUserQuestion(ctx, request)
+		resume := subagentruntime.SuspendExecution(ctx)
+		answer, err := awaiter.AwaitUserQuestion(ctx, request)
+		if resumeErr := resume(); err == nil {
+			err = resumeErr
+		}
+		return answer, err
 	}
 	return UserQuestionResolution{}, stdcontext.Canceled
 }
@@ -86,7 +96,12 @@ func (s runScopedEventSink) AwaitExternalInteraction(ctx stdcontext.Context, req
 	}
 	s.emitter.fillIDs(&request)
 	if awaiter, ok := s.emitter.sink.(ExternalInteractionAwaiter); ok {
-		return awaiter.AwaitExternalInteraction(ctx, request)
+		resume := subagentruntime.SuspendExecution(ctx)
+		answer, err := awaiter.AwaitExternalInteraction(ctx, request)
+		if resumeErr := resume(); err == nil {
+			err = resumeErr
+		}
+		return answer, err
 	}
 	return "", stdcontext.Canceled
 }
@@ -97,7 +112,12 @@ func (s runScopedEventSink) AwaitExternalInteractionForm(ctx stdcontext.Context,
 	}
 	s.emitter.fillIDs(&request)
 	if awaiter, ok := s.emitter.sink.(ExternalInteractionFormAwaiter); ok {
-		return awaiter.AwaitExternalInteractionForm(ctx, request)
+		resume := subagentruntime.SuspendExecution(ctx)
+		answer, err := awaiter.AwaitExternalInteractionForm(ctx, request)
+		if resumeErr := resume(); err == nil {
+			err = resumeErr
+		}
+		return answer, err
 	}
 	return ExternalInteractionAnswer{}, stdcontext.Canceled
 }
@@ -220,6 +240,9 @@ func (e *runEventEmitter) withAgentIdentity(record SemanticRecord) SemanticRecor
 		copyPayload[key] = value
 	}
 	copyPayload["agent_id"] = e.agentID
+	if e.attemptID != "" {
+		copyPayload["attempt_id"] = e.attemptID
+	}
 	if strings.TrimSpace(e.parentAgentID) != "" {
 		copyPayload["parent_agent_id"] = e.parentAgentID
 	}
@@ -335,6 +358,16 @@ func (e *runEventEmitter) turnFinished(ctx stdcontext.Context, reason TerminalRe
 		TransitionReason: transition,
 	}
 	e.fillIDs(&event)
+	commitsContext := ctx.Err() == nil && (reason == TerminalReasonCompleted || (reason == "" && transition != ""))
+	payload := map[string]any{"terminal_reason": string(reason), "transition_reason": string(transition)}
+	if commitsContext {
+		if e.inboxMessageIDs != nil {
+			payload["incorporated_message_ids"] = e.inboxMessageIDs()
+		}
+		if e.contextRevision != nil {
+			payload["context_revision"] = e.contextRevision()
+		}
+	}
 	if e.recorder != nil {
 		if err := e.persistDurable(ctx, "turn_boundary", NewSemanticRecord(
 			SemanticKindTurnBoundary,
@@ -343,16 +376,27 @@ func (e *runEventEmitter) turnFinished(ctx stdcontext.Context, reason TerminalRe
 			e.turnID(),
 			"",
 			e.sessionID,
-			map[string]any{
-				"terminal_reason":   string(reason),
-				"transition_reason": string(transition),
-			},
+			payload,
 		), event); err != nil {
 			return
+		}
+		if commitsContext {
+			persistCtx, cancel := durablePersistenceContext(ctx)
+			defer cancel()
+			if err := e.recorder.Flush(persistCtx); err != nil {
+				e.notePersistenceFailure("context_commit", err)
+				return
+			}
+			if e.contextCommitted != nil {
+				e.contextCommitted()
+			}
 		}
 		return
 	}
 	e.sink.Emit(event)
+	if commitsContext && e.contextCommitted != nil {
+		e.contextCommitted()
+	}
 }
 
 func (e *runEventEmitter) runFinished(ctx stdcontext.Context, content string, state *ContextWindowState, reasons ...TerminalReason) {

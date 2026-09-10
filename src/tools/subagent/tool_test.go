@@ -3,6 +3,7 @@ package subagenttool
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,7 +11,33 @@ import (
 	"awaken/src/tool"
 )
 
-func TestWaitTimeoutReturnsNeutralRetrievalStatus(t *testing.T) {
+func TestDurableStatusAndWaitReturnFullBodyWithoutEarlyAcknowledgement(t *testing.T) {
+	for _, action := range []string{"status", "wait"} {
+		t.Run(action, func(t *testing.T) {
+			policy := subagentruntime.Policy{}.Effective()
+			manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{Policy: policy})
+			defer manager.Close(context.Background())
+			full := strings.Repeat("verified-result-", 4000) + "END-742"
+			manager.Restore([]subagentruntime.RestoredTask{{Snapshot: subagentruntime.TaskSnapshot{TaskID: "task", AgentID: "child", ParentAgentID: "root", Status: subagentruntime.StatusCompleted, ResultContent: full, ResultPreview: "short preview"}}})
+			input := `{"action":"status","task_id":"task"}`
+			if action == "wait" {
+				input = `{"action":"wait","task_ids":["task"],"return_when":"all"}`
+			}
+			output, err := (&SubagentTool{}).Execute(subagentruntime.WithController(context.Background(), manager), input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(output, full) {
+				t.Fatal("explicit retrieval returned only the UI preview")
+			}
+			if len(manager.DrainTerminalNotifications()) != 1 {
+				t.Fatal("tool retrieval acknowledged before Runner persistence")
+			}
+		})
+	}
+}
+
+func TestWaitHostDeadlineReturnsNeutralRetrievalStatus(t *testing.T) {
 	release := make(chan struct{})
 	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
 		Starter: func(_ context.Context, _ subagentruntime.StartRequest) (string, error) {
@@ -28,7 +55,9 @@ func TestWaitTimeoutReturnsNeutralRetrievalStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	ctx := subagentruntime.WithController(context.Background(), manager)
+	deadlineCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	ctx := subagentruntime.WithController(deadlineCtx, manager)
 	raw, _ := json.Marshal(map[string]any{
 		"action": "wait", "task_ids": []string{task.TaskID}, "return_when": "all", "timeout_ms": 1,
 	})
@@ -53,6 +82,7 @@ func TestWaitTimeoutReturnsNeutralRetrievalStatus(t *testing.T) {
 
 func TestSpawnInheritsHostTurnAndModelProfileIdentity(t *testing.T) {
 	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
+		ModelProfileID: "profile-1",
 		Starter: func(context.Context, subagentruntime.StartRequest) (string, error) {
 			return "done", nil
 		},
@@ -113,7 +143,7 @@ func TestMessageActionQueuesPrompt(t *testing.T) {
 	}
 }
 
-func TestTerminalStatusConsumesAutomaticNotification(t *testing.T) {
+func TestTerminalStatusRetainsNotificationUntilRunnerAcknowledges(t *testing.T) {
 	manager := subagentruntime.NewManager(context.Background(), subagentruntime.Config{
 		Starter: func(context.Context, subagentruntime.StartRequest) (string, error) {
 			return "done", nil
@@ -146,7 +176,7 @@ func TestTerminalStatusConsumesAutomaticNotification(t *testing.T) {
 	if _, err := (&SubagentTool{}).Execute(ctx, string(statusInput)); err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if notifications := manager.DrainTerminalNotifications(); len(notifications) != 0 {
-		t.Fatalf("terminal status must consume automatic notification: %+v", notifications)
+	if notifications := manager.DrainTerminalNotifications(); len(notifications) != 1 {
+		t.Fatalf("status cannot acknowledge before Runner persistence: %+v", notifications)
 	}
 }

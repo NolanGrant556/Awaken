@@ -129,6 +129,9 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		return nil, err
 	}
 	requestID := newAwakenID("model_request")
+	if events != nil && events.logicalModelCallID == "" {
+		events.logicalModelCallID = newAwakenID("model_call")
+	}
 	config := r.transportConfig(llmReq)
 	messages := make([]context.Message, 0, len(llmReq.PrefixMessages)+len(llmReq.Messages))
 	messages = append(messages, cloneContextMessages(llmReq.PrefixMessages)...)
@@ -137,7 +140,7 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		RequestID: requestID, SystemPrompt: llmReq.SystemPrompt, Messages: messages,
 		Tools: llmReq.Tools, Model: llmReq.Model, Temperature: llmReq.Temperature,
 		MaxTokens: llmReq.MaxTokens, Purpose: r.modelRequestPurpose(),
-		AffinityScopeID:       r.threadID,
+		AffinityScopeID:       agentAffinityScope(r.threadID, r.config),
 		ReasoningPolicy:       r.config.ModelConfig.ReasoningEffort,
 		NativeCompactionState: nativeCompactionStateFromBundle(r.config.ModelConfig, r.config.RestoredContextBundleV2),
 	}
@@ -183,8 +186,13 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 		}
 	}
 	usage := modelUsageRecord(requestID, llmReq.Model, protocol, config, request.Purpose, prepared, started, response, streamErr, ctx.Err())
+	if events != nil {
+		usage.LogicalCallID, usage.RetryIndex = events.logicalModelCallID, events.transportAttempt
+		events.transportAttempt++
+	}
 	sentEstimatedInputTokens := snapshot.EstimatedInputTokens
 	usage.SentEstimatedInputTokens = &sentEstimatedInputTokens
+	usage.InputEstimatorID = snapshot.EstimatorID
 	if llmReq.ContextEpoch != nil {
 		usage.ContextEpochID = llmReq.ContextEpoch.EpochID
 		usage.PrefixDigest = llmReq.ContextEpoch.BaselineDigest
@@ -199,7 +207,11 @@ func (r *Runner) streamLLM(ctx stdcontext.Context, events *runEventEmitter) (*ll
 }
 
 func (r *Runner) modelRequestPurpose() llm.RequestPurpose {
-	purpose := r.config.ModelRequestPurpose
+	return effectiveModelRequestPurpose(r.config)
+}
+
+func effectiveModelRequestPurpose(config AgentConfig) llm.RequestPurpose {
+	purpose := config.ModelRequestPurpose
 	if purpose == "" {
 		return llm.RequestPurposeAgentTurn
 	}
@@ -256,6 +268,19 @@ func modelUsageRecord(requestID, model, protocol string, config llm.Config, purp
 		LatencyMS: time.Since(started).Milliseconds(),
 		Status:    ModelUsageSucceeded, CompletedAt: time.Now().UTC(),
 	}
+	if prepared.ReasoningPolicy != "" {
+		record.ReasoningPolicy = prepared.ReasoningPolicy
+	}
+	if prepared.Timing != nil {
+		queue, transport := prepared.Timing.QueueWaitMS, prepared.Timing.TransportMS
+		prepare := prepared.Timing.PrepareMS
+		record.PrepareMS = &prepare
+		record.QueueWaitMS = &queue
+		if !prepared.Timing.TransportStarted.IsZero() {
+			record.TransportMS = &transport
+			record.FirstTokenMS = prepared.Timing.FirstTokenMS
+		}
+	}
 	if response != nil {
 		record.ProviderRequestID = response.ProviderRequestID
 		record.RateLimitObservation = modelRateLimitObservation(response.RateLimitObservation)
@@ -295,7 +320,7 @@ func modelRateLimitObservation(value *llm.RateLimitObservation) *RateLimitObserv
 }
 
 func normalizedModelUsageReasoningPolicy(config llm.Config, purpose llm.RequestPurpose) string {
-	if purpose != llm.RequestPurposeAgentTurn {
+	if purpose != llm.RequestPurposeAgentTurn && purpose != llm.RequestPurposeSubagent && purpose != llm.RequestPurposeScheduledTask && purpose != llm.RequestPurposeHookAgent {
 		return ""
 	}
 	value := strings.ToLower(strings.TrimSpace(config.ReasoningEffort))
@@ -340,4 +365,11 @@ func rawModelUsage(value llm.RawUsage) RawModelUsage {
 		PromptCacheMissTokens: cloneTokenPointer(value.PromptCacheMissTokens), CacheReadInputTokens: cloneTokenPointer(value.CacheReadInputTokens),
 		CacheCreationInputTokens: cloneTokenPointer(value.CacheCreationInputTokens),
 	}
+}
+
+func agentAffinityScope(threadID string, config AgentConfig) string {
+	if config.SubagentOrigin != nil && config.SubagentOrigin.AgentID != "" {
+		return threadID + ":agent:" + config.SubagentOrigin.AgentID
+	}
+	return threadID
 }

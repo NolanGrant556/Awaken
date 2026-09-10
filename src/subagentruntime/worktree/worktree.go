@@ -23,6 +23,38 @@ func New() *Service {
 	return &Service{Git: runGit}
 }
 
+// Revalidate checks the retained worktree against the current repository and
+// its exact branch before a continuing Agent may regain file access.
+func (s *Service) Revalidate(ctx context.Context, workspaceRoot string, receipt subagentruntime.WorktreeReceipt) (subagentruntime.WorktreeReceipt, error) {
+	info, err := os.Lstat(receipt.Path)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || receipt.Cleaned || !strings.HasPrefix(receipt.Branch, branchPrefix) {
+		return receipt, fmt.Errorf("saved worktree is unavailable or changed")
+	}
+	commonDir := func(dir string) (string, error) {
+		value, err := s.git(ctx, dir, "rev-parse", "--git-common-dir")
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(value) {
+			value = filepath.Join(dir, value)
+		}
+		return filepath.EvalSymlinks(value)
+	}
+	parentCommon, err := commonDir(workspaceRoot)
+	if err != nil {
+		return receipt, err
+	}
+	childCommon, err := commonDir(receipt.Path)
+	if err != nil || childCommon != parentCommon {
+		return receipt, fmt.Errorf("saved worktree belongs to a different repository")
+	}
+	branch, err := s.git(ctx, receipt.Path, "branch", "--show-current")
+	if err != nil || branch != receipt.Branch {
+		return receipt, fmt.Errorf("saved worktree branch changed")
+	}
+	return s.Inspect(ctx, receipt)
+}
+
 func (s *Service) Create(ctx context.Context, workspaceRoot, taskID string) (subagentruntime.WorktreeReceipt, error) {
 	if s == nil {
 		s = New()
@@ -63,12 +95,16 @@ func (s *Service) Inspect(ctx context.Context, receipt subagentruntime.WorktreeR
 	if err == nil {
 		receipt.HeadCommit = head
 	}
-	status, err := s.git(ctx, receipt.Path, "status", "--porcelain")
+	status, err := s.git(ctx, receipt.Path, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		receipt.NeedsReview = true
 		return receipt, nil
 	}
-	changed := changedPaths(status)
+	changed, err := changedPaths(status)
+	if err != nil {
+		receipt.NeedsReview = true
+		return receipt, nil
+	}
 	receipt.Changed = changed
 	receipt.Dirty = len(changed) > 0 || (receipt.BaseCommit != "" && receipt.HeadCommit != "" && receipt.HeadCommit != receipt.BaseCommit)
 	receipt.NeedsReview = receipt.Dirty
@@ -129,7 +165,12 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 		}
 		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), message)
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	for _, arg := range args {
+		if arg == "-z" {
+			return stdout.String(), nil
+		}
+	}
+	return strings.TrimSuffix(stdout.String(), "\n"), nil
 }
 
 func unsupportedOrFailed(err error) error {
@@ -160,24 +201,29 @@ func shortTaskID(taskID string) string {
 	return cleaned
 }
 
-func changedPaths(status string) []string {
-	if strings.TrimSpace(status) == "" {
-		return nil
+func changedPaths(status string) ([]string, error) {
+	if status == "" {
+		return nil, nil
 	}
+	if !strings.HasSuffix(status, "\x00") {
+		return nil, fmt.Errorf("incomplete NUL-delimited git status")
+	}
+	entries := strings.Split(status, "\x00")
 	var paths []string
-	for _, line := range strings.Split(status, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+	for i := 0; i < len(entries)-1; i++ {
+		entry := entries[i]
+		if len(entry) < 4 || entry[2] != ' ' {
+			return nil, fmt.Errorf("invalid git status entry")
 		}
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		path := fields[len(fields)-1]
-		if path != "" {
-			paths = append(paths, filepath.ToSlash(path))
+		paths = append(paths, filepath.ToSlash(entry[3:]))
+		// Porcelain -z puts the destination first, followed by the source
+		// as a separate NUL-terminated path for renames and copies.
+		if strings.ContainsAny(entry[:2], "RC") {
+			i++
+			if i >= len(entries)-1 || entries[i] == "" {
+				return nil, fmt.Errorf("incomplete git rename source")
+			}
 		}
 	}
-	return paths
+	return paths, nil
 }

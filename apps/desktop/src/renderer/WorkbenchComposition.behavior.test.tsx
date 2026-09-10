@@ -2,6 +2,7 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
+import { DesktopInspectorRail } from "./DesktopInspectorRail";
 import { DesktopWorkbenchChrome } from "./DesktopWorkbenchChrome";
 import { DesktopExecutionFeed } from "./DesktopExecutionFeed";
 import { useFileWorkspaceSession } from "./useFileWorkspaceSession";
@@ -10,6 +11,8 @@ import { useNarrativeRenderer } from "./useNarrativeRenderer";
 import { createInitialRuntimeState } from "./runtime/reducer";
 import { createWorkbenchDisclosureStore } from "./workbenchDisclosureStore";
 import type { NarrativeTurnSection } from "./workbenchPresentation";
+import { SubagentPanel } from "./SubagentPanel";
+import type { SubagentTaskView } from "./runtime/reducer";
 
 describe("Desktop composition boundaries", () => {
   let host: HTMLDivElement, root: Root;
@@ -44,7 +47,9 @@ describe("Desktop composition boundaries", () => {
       ],
     } satisfies Parameters<typeof useFileWorkspaceSession>[0]["registry"];
     await mount(() => {
+      const panels = useWorkbenchPanels(undefined, { closePanel: vi.fn() }, vi.fn());
       files = useFileWorkspaceSession({
+        inspectorTabs: panels.inspectorTabs,
         registry,
         runtimeState: createInitialRuntimeState(),
         forceFull: false,
@@ -60,6 +65,8 @@ describe("Desktop composition boundaries", () => {
           platform="macos"
           currentConversationLabel="Fixture thread"
           handleNewTask={vi.fn()}
+          subagentTabs={[]}
+          onOpenSubagent={vi.fn()}
         />
       );
     });
@@ -79,6 +86,117 @@ describe("Desktop composition boundaries", () => {
     expect(
       actions.querySelector(".workbench-chrome-panel-toggle"),
     ).not.toBeNull();
+  });
+
+  it("opens child tabs beside files without a child composer and keeps the exact failed assignment", async () => {
+    let panels!: ReturnType<typeof useWorkbenchPanels>;
+    let files!: ReturnType<typeof useFileWorkspaceSession>;
+    const cancel = vi.fn();
+    const tasks: SubagentTaskView[] = [
+      { taskId: "failed", agentId: "same-agent", description: "读取样本", agentType: "general", status: "failed", toolUseCount: 4,
+        errorCode: "read_failed", errorMessage: "原分配的失败", narrative: createInitialRuntimeState().narrative },
+      { taskId: "done", agentId: "same-agent", description: "读取样本", agentType: "general", status: "completed", toolUseCount: 6,
+        resultPreview: "后续分配已完成", narrative: createInitialRuntimeState().narrative },
+    ];
+    await mount(() => {
+      panels = useWorkbenchPanels("thread", { closePanel: vi.fn() }, vi.fn());
+      files = useFileWorkspaceSession({
+        inspectorTabs: panels.inspectorTabs,
+        runtimeState: { ...createInitialRuntimeState(), activeThreadId: "thread" },
+        registry: { workspaceLabelProjectId: "project", backendProjectIdFor: () => "project",
+          projectLabelById: new Map([["project", "Fixture"]]), foldersForProjectId: () => [] },
+        forceFull: false, hasDraft: true, isBusy: false, requestComposerFocus: vi.fn(),
+        onBeforeFileOpen: vi.fn(), onBeforeFileExpand: vi.fn(),
+      });
+      const task = tasks.find(task => task.taskId === panels.openSubagentTaskId);
+      return <>
+        <DesktopWorkbenchChrome fileWorkspace={files} platform="macos" currentConversationLabel="主任务" handleNewTask={vi.fn()}
+          subagentTabs={tasks.filter(task => panels.subagentTabs.taskIds.includes(task.taskId))}
+          onOpenSubagent={panels.openSubagentTab} />
+        <textarea aria-label="主任务输入" defaultValue="保留主草稿" />
+        {task ? <SubagentPanel task={task} nowMs={0} cancelling={false} onCancel={cancel} renderActivity={() => null} /> : null}
+      </>;
+    });
+    const draft = host.querySelector("textarea")!;
+    await act(async () => {
+      files.handleOpenFileWorkspace();
+      files.handleOpenProjectFileTab({ id: "file", projectId: "project", folderPath: "/fixture", relativePath: "notes.txt", name: "notes.txt", mode: "files" });
+      panels.openSubagentTab("failed");
+    });
+    expect(host.querySelectorAll('[role="tab"][aria-selected="true"]')).toHaveLength(1);
+    expect(host.querySelector('[role="tabpanel"]')?.textContent).toContain("原分配的失败");
+    expect(host.querySelector('[role="tabpanel"] textarea, [role="tabpanel"] form')).toBeNull();
+    expect(host.querySelectorAll("textarea")).toHaveLength(1);
+    await act(async () => panels.openSubagentTab("done"));
+    await act(async () => host.querySelector<HTMLButtonElement>('#subagent-tab-failed')!.click());
+    expect(host.querySelector('[role="tabpanel"]')?.textContent).toContain("原分配的失败");
+    expect(host.querySelectorAll('#subagent-tab-failed')).toHaveLength(1);
+    await act(async () => host.querySelector<HTMLButtonElement>('[role="tab"][title="notes.txt"]')!.click());
+    expect(panels.openSubagentTaskId).toBeUndefined();
+    expect(panels.subagentTabs.taskIds).toEqual(["failed", "done"]);
+    expect(files.activeFileWorkspaceTab?.name).toBe("notes.txt");
+    await act(async () => panels.openSubagentTab("done"));
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="关闭子任务标签 读取样本"]')!.click());
+    expect(panels.openSubagentTaskId).toBe("done");
+    expect(cancel).not.toHaveBeenCalled();
+    expect(host.querySelector("textarea")).toBe(draft);
+    expect(draft.value).toBe("保留主草稿");
+  });
+
+  it.each(["subagent", "files", "browser", "no-project"])("opens a fresh chooser from %s and preserves existing tabs", async (surface) => {
+    let panels!: ReturnType<typeof useWorkbenchPanels>;
+    let files!: ReturnType<typeof useFileWorkspaceSession>;
+    const task: SubagentTaskView = { taskId: "child", agentId: "agent", description: "样本",
+      agentType: "general", status: "completed", toolUseCount: 0, narrative: createInitialRuntimeState().narrative };
+    await mount(() => {
+      panels = useWorkbenchPanels("thread", { closePanel: vi.fn() }, vi.fn());
+      files = useFileWorkspaceSession({
+        inspectorTabs: panels.inspectorTabs,
+        runtimeState: { ...createInitialRuntimeState(), activeThreadId: "thread" },
+        registry: { workspaceLabelProjectId: surface === "no-project" ? undefined : "project",
+          backendProjectIdFor: () => "project", projectLabelById: new Map(), foldersForProjectId: () => [] },
+        forceFull: false, hasDraft: true, isBusy: false, requestComposerFocus: vi.fn(),
+        onBeforeFileOpen: vi.fn(), onBeforeFileExpand: vi.fn(),
+      });
+      return <><DesktopWorkbenchChrome fileWorkspace={files} platform="macos" currentConversationLabel="主任务" handleNewTask={vi.fn()}
+        subagentTabs={panels.subagentTabs.taskIds.length ? [task] : []}
+        onOpenSubagent={panels.openSubagentTab} />
+        {files.inspectorChooserActive ? <DesktopInspectorRail handleOpenFileWorkspace={files.handleChooseInspectorEntry} /> : null}</>;
+    });
+    await act(async () => {
+      if (surface === "files" || surface === "browser") {
+        files.handleOpenFileWorkspace(surface);
+        files.handleOpenProjectFileTab({ id: "existing", projectId: "project", folderPath: "/fixture",
+          relativePath: "sample.html", name: "sample.html", mode: surface });
+      } else panels.openSubagentTab("child");
+    });
+    const before = files.visibleFileWorkspaceTabSlots;
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="新建标签"]')!.click());
+    expect(files.inspectorChooserActive).toBe(true);
+    expect(files.visibleFileWorkspaceTabSlots).toEqual(before);
+    expect(panels.openSubagentTaskId).toBeUndefined();
+    expect(host.querySelectorAll('[role="tab"][aria-selected="true"]')).toHaveLength(0);
+    const choices = host.querySelectorAll<HTMLButtonElement>('.light-inspector-nav button');
+    expect(Array.from(choices, button => button.textContent)).toEqual(["文件", "浏览器"]);
+    await act(async () => choices[surface === "browser" ? 1 : 0].click());
+    expect(files.inspectorChooserActive).toBe(false);
+    expect(files.fileWorkspaceOpen).toBe(true);
+    expect(files.fileWorkspaceMode).toBe(surface === "browser" ? "browser" : "files");
+    expect(files.activeFileWorkspaceTab).toBeUndefined();
+    if (surface !== "no-project") {
+      expect(files.visibleFileWorkspaceTabSlots).toHaveLength(before.length + 1);
+      expect(files.visibleFileWorkspaceTabSlots.slice(0, before.length)).toEqual(before);
+      const count = files.visibleFileWorkspaceTabSlots.length;
+      await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="新建标签"]')!.click());
+      expect(files.inspectorChooserActive).toBe(true);
+      expect(files.visibleFileWorkspaceTabSlots).toHaveLength(count);
+      if (before[0]) {
+        await act(async () => files.handleActivateProjectFileTab(before[0]));
+        expect(files.inspectorChooserActive).toBe(false);
+        expect(files.activeFileWorkspaceTab).toEqual(before[0].tab);
+      }
+    }
+    if (surface === "subagent" || surface === "no-project") expect(panels.subagentTabs.taskIds).toEqual(["child"]);
   });
 
   it("preserves the mounted Artifact tab while selecting a project file", async () => {
@@ -130,7 +248,7 @@ describe("Desktop composition boundaries", () => {
     expect(host.querySelector(".workbench-chrome-panel-toggle")).toBe(toggle);
   });
 
-  it("closes competing panels on media and subagent actions and clears selection on thread change", async () => {
+  it("keeps the independent child tab when opening media and clears it on thread change", async () => {
     let panels!: ReturnType<typeof useWorkbenchPanels>;
     let threadId = "A";
     const closePlan = vi.fn();
@@ -138,14 +256,13 @@ describe("Desktop composition boundaries", () => {
       panels = useWorkbenchPanels(
         threadId,
         { closePanel: closePlan },
-        () => "child",
         vi.fn(),
       );
       return null;
     }
     await act(async () => root.render(<Harness />));
     await act(async () => panels.setContextUsagePanelOpen(true));
-    await act(async () => panels.handleOpenSubagent());
+    await act(async () => panels.openSubagentTab("child"));
     expect(panels.contextUsagePanelOpen).toBe(false);
     expect(panels.openSubagentTaskId).toBe("child");
     await act(async () =>
@@ -162,10 +279,12 @@ describe("Desktop composition boundaries", () => {
         "media",
       ),
     );
-    expect(panels.openSubagentTaskId).toBeUndefined();
+    expect(panels.openSubagentTaskId).toBe("child");
     expect(closePlan).toHaveBeenCalledWith(false);
     threadId = "B";
     await act(async () => root.render(<Harness />));
+    expect(panels.openSubagentTaskId).toBeUndefined();
+    expect(panels.subagentTabs.taskIds).toEqual([]);
     expect(panels.mediaPreview).toBeNull();
     expect(panels.contextUsagePanelOpen).toBe(false);
   });

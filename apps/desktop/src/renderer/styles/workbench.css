@@ -24,7 +24,9 @@
   position: relative;
   isolation: isolate;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 18px;
+  max-height: min(600px, calc(100dvh - 240px));
   box-sizing: border-box;
   padding: 20px 22px 18px;
   border: 1px solid var(--aw-composer-border);
@@ -154,10 +156,12 @@
   display: grid;
   gap: 14px;
   min-width: 0;
-  max-height: min(420px, 48vh);
+  min-height: 0;
   margin: 0 -8px;
   padding: 0 8px;
   overflow-y: auto;
+  overflow-wrap: anywhere;
+  overscroll-behavior-y: contain;
   scrollbar-gutter: stable;
 }
 
@@ -184,6 +188,7 @@
   font-size: 17px;
   font-weight: var(--aw-font-weight-semibold);
   line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .user-question-card__options {
@@ -606,34 +611,6 @@
   justify-content: center;
   min-width: 0;
   pointer-events: none;
-}
-
-.subagent-detail-overlay {
-  position: absolute;
-  top: 28px;
-  right: 32px;
-  left: 32px;
-  z-index: 6;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  min-width: 0;
-  pointer-events: none;
-}
-
-.subagent-detail-overlay > .aw-subagent-execution-card {
-  display: flex;
-  flex-direction: column;
-  width: min(680px, 100%);
-  max-height: min(560px, 100%);
-  margin-top: 0;
-  pointer-events: auto;
-}
-
-.subagent-detail-overlay .aw-subagent-execution-card__body {
-  flex: 1 1 auto;
-  min-height: 0;
-  max-height: none;
 }
 
 .return-to-latest-button {

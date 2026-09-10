@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +76,8 @@ func (s *Session) SetInstructionSnapshot(snapshot instructions.Summary) {
 }
 
 type Event struct {
+	SourceSeq      uint64
+	Activity       bool
 	Kind           EventKind
 	Seq            uint64 // monotonically increasing sequence number assigned by EventBus
 	Timestamp      time.Time
@@ -88,11 +92,34 @@ type Event struct {
 	TerminalReason agentcore.TerminalReason
 }
 
+// appendEventLocked preserves the original run frame identity while adding
+// a separate thread activity cursor. Closing a root stream does not close the
+// activity stream used by its explicitly retained children.
+func (s *Session) appendEventLocked(event Event, terminal bool) {
+	event.SourceSeq = s.bus.Append(event, terminal)
+	if event.SourceSeq == 0 {
+		agentID := event.AgentEvent.AgentID
+		if event.Kind == EventKindSemantic {
+			agentID, _ = event.SemanticRecord.Payload["agent_id"].(string)
+		}
+		if agentID != "" && agentID != "root" {
+			event.SourceSeq = s.bus.RetainAfterClose(event)
+		}
+	}
+	event.Activity = true
+	if s.activity != nil {
+		s.activity.Append(event, false)
+	}
+}
+
 type Session struct {
+	childComputers       map[string]*computer.Runtime
+	computerReviewOwners map[string]*computer.Runtime
 	mu                   sync.RWMutex
 	run                  Run
 	cancel               context.CancelFunc
 	bus                  *EventBus
+	activity             *EventBus
 	semanticRecorder     agentcore.SemanticRecorder
 	subagents            subagentruntime.Controller
 	userQuestions        map[string]*pendingUserQuestion
@@ -200,11 +227,28 @@ func (s *Session) ComputerRuntime() *computer.Runtime {
 }
 
 type pendingUserQuestion struct {
+	ctx        context.Context
 	request    agentcore.AwakenEvent
 	resolution chan agentcore.UserQuestionResolution
 }
 
+func (s *Session) SetActivityBus(bus *EventBus) {
+	s.mu.Lock()
+	s.activity = bus
+	s.mu.Unlock()
+}
+
+// CloseRootComputer ends only the root execution's desktop ownership. Child
+// runtimes own their leases independently; retaining shared Plugin resources
+// must never prevent a waiting child from acquiring the root's released lease.
+func (s *Session) CloseRootComputer() {
+	if runtime := s.ComputerRuntime(); runtime != nil {
+		_ = runtime.Terminate(context.Background(), "work_ended")
+	}
+}
+
 type pendingExternalInteraction struct {
+	ctx     context.Context
 	request agentcore.AwakenEvent
 	answer  chan agentcore.ExternalInteractionAnswer
 }
@@ -332,7 +376,7 @@ func (s *Session) RequestCancel() Run {
 	cancel := s.cancel
 	snapshot := s.run
 	if statusChanged {
-		s.bus.Append(statusEvent, false)
+		s.appendEventLocked(statusEvent, false)
 	}
 	s.mu.Unlock()
 
@@ -351,6 +395,13 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 	event.Timestamp = timestamp
 
 	s.mu.Lock()
+	if event.AgentID != "" && event.AgentID != "root" {
+		event.ThreadID, event.RunID = s.run.ThreadID, s.run.RunID
+		wrapped := Event{Kind: EventKindAgent, Timestamp: timestamp, ThreadID: s.run.ThreadID, RunID: s.run.RunID, AgentEvent: event}
+		s.appendEventLocked(wrapped, false)
+		s.mu.Unlock()
+		return
+	}
 	if isTerminalStatus(s.run.Status) {
 		s.mu.Unlock()
 		return
@@ -391,7 +442,7 @@ func (s *Session) RecordAgentEvent(event agentcore.AwakenEvent) {
 		RunID:      s.run.RunID,
 		AgentEvent: event,
 	}
-	s.bus.Append(wrapped, terminal)
+	s.appendEventLocked(wrapped, terminal)
 	s.mu.Unlock()
 }
 
@@ -410,6 +461,12 @@ func (s *Session) RecordSemanticRecords(records []agentcore.SemanticRecord) {
 		record.Timestamp = timestamp
 
 		s.mu.Lock()
+		if id := stringPayload(record.Payload, "agent_id"); id != "" && id != "root" {
+			wrapped := Event{Kind: EventKindSemantic, Timestamp: timestamp, ThreadID: s.run.ThreadID, RunID: s.run.RunID, SemanticRecord: record}
+			s.appendEventLocked(wrapped, false)
+			s.mu.Unlock()
+			continue
+		}
 		if isTerminalStatus(s.run.Status) {
 			s.mu.Unlock()
 			return
@@ -459,7 +516,7 @@ func (s *Session) RecordSemanticRecords(records []agentcore.SemanticRecord) {
 			SemanticRecord: record,
 			TerminalReason: terminalReason,
 		}
-		s.bus.Append(wrapped, terminal)
+		s.appendEventLocked(wrapped, terminal)
 		s.mu.Unlock()
 	}
 }
@@ -478,7 +535,38 @@ func (s *Session) TranscriptSnapshot() (Run, []Event, uint64) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	events, cursor := s.bus.Snapshot()
-	return s.snapshotLocked(), events, cursor
+	// A finished root bus no longer retains late child gates. Reconstruct
+	// current child gates from their live owners so transcript reload (including
+	// activity-buffer overflow) cannot lose a still-answerable question.
+	filtered := events[:0]
+	var nextSeq uint64
+	for _, event := range events {
+		nextSeq = max(nextSeq, event.Seq)
+		if event.Kind == EventKindAgent && event.AgentEvent.AgentID != "" && event.AgentEvent.AgentID != "root" {
+			switch event.AgentEvent.Type {
+			case agentcore.UserQuestionRequestedType, agentcore.UserQuestionResolvedType, agentcore.ExternalInteractionRequestedType, agentcore.ExternalInteractionResolvedType:
+				continue
+			}
+		}
+		filtered = append(filtered, event)
+	}
+	var pending []agentcore.AwakenEvent
+	for _, interaction := range s.externalInteractions {
+		if interaction.ctx.Err() == nil && interaction.request.AgentID != "" && interaction.request.AgentID != "root" {
+			pending = append(pending, interaction.request)
+		}
+	}
+	sort.Slice(pending, func(i, j int) bool {
+		if pending[i].Timestamp.Equal(pending[j].Timestamp) {
+			return pending[i].QuestionID+pending[i].InteractionID < pending[j].QuestionID+pending[j].InteractionID
+		}
+		return pending[i].Timestamp.Before(pending[j].Timestamp)
+	})
+	for _, request := range pending {
+		nextSeq++
+		filtered = append(filtered, Event{Kind: EventKindAgent, Seq: nextSeq, ThreadID: s.run.ThreadID, RunID: s.run.RunID, Timestamp: request.Timestamp, AgentEvent: request})
+	}
+	return s.snapshotLocked(), filtered, cursor
 }
 
 func (s *Session) StreamSnapshot() ([]Event, uint64) {
@@ -488,7 +576,13 @@ func (s *Session) StreamSnapshot() ([]Event, uint64) {
 	return s.bus.Snapshot()
 }
 
+var ErrChildUserQuestionUnsupported = errors.New("child questions must be returned to the parent Agent")
+
 func (s *Session) AwaitUserQuestion(ctx context.Context, request agentcore.AwakenEvent) (agentcore.UserQuestionResolution, error) {
+	if (strings.TrimSpace(request.AgentID) != "" && strings.TrimSpace(request.AgentID) != "root") || strings.TrimSpace(request.SubagentTaskID) != "" {
+		return agentcore.UserQuestionResolution{}, ErrChildUserQuestionUnsupported
+	}
+
 	timestamp := request.Timestamp.UTC()
 	if request.Timestamp.IsZero() {
 		timestamp = time.Now().UTC()
@@ -500,12 +594,13 @@ func (s *Session) AwaitUserQuestion(ctx context.Context, request agentcore.Awake
 	}
 
 	pending := &pendingUserQuestion{
+		ctx:        ctx,
 		request:    request,
 		resolution: make(chan agentcore.UserQuestionResolution, 1),
 	}
 
 	s.mu.Lock()
-	if isTerminalStatus(s.run.Status) {
+	if ctx.Err() != nil || isTerminalStatus(s.run.Status) {
 		s.mu.Unlock()
 		return agentcore.UserQuestionResolution{}, ErrRunTerminal
 	}
@@ -521,7 +616,7 @@ func (s *Session) AwaitUserQuestion(ctx context.Context, request agentcore.Awake
 		RunID:      s.run.RunID,
 		AgentEvent: request,
 	}
-	s.bus.Append(wrapped, false)
+	s.appendEventLocked(wrapped, false)
 	s.mu.Unlock()
 
 	select {
@@ -529,7 +624,12 @@ func (s *Session) AwaitUserQuestion(ctx context.Context, request agentcore.Awake
 		return resolution, nil
 	case <-ctx.Done():
 		s.mu.Lock()
-		delete(s.userQuestions, request.QuestionID)
+		if s.userQuestions[request.QuestionID] == pending {
+			delete(s.userQuestions, request.QuestionID)
+			resolved := request
+			resolved.Type, resolved.QuestionResolution = agentcore.UserQuestionResolvedType, "cancelled"
+			s.appendEventLocked(Event{Kind: EventKindAgent, ThreadID: s.run.ThreadID, RunID: s.run.RunID, Timestamp: time.Now().UTC(), AgentEvent: resolved}, false)
+		}
 		s.mu.Unlock()
 		return agentcore.UserQuestionResolution{}, ctx.Err()
 	}
@@ -570,14 +670,15 @@ func (s *Session) resolveUserQuestion(questionID string, resolution agentcore.Us
 
 	now := time.Now().UTC()
 	s.mu.Lock()
-	if isTerminalStatus(s.run.Status) {
-		s.mu.Unlock()
-		return ErrRunTerminal
-	}
 	pending, ok := s.userQuestions[questionID]
 	if !ok {
 		s.mu.Unlock()
 		return ErrUserQuestionNotFound
+	}
+	if pending.ctx.Err() != nil || isTerminalStatus(s.run.Status) {
+		delete(s.userQuestions, questionID)
+		s.mu.Unlock()
+		return ErrRunTerminal
 	}
 	delete(s.userQuestions, questionID)
 	resolved := pending.request
@@ -595,7 +696,7 @@ func (s *Session) resolveUserQuestion(questionID string, resolution agentcore.Us
 		RunID:      s.run.RunID,
 		AgentEvent: resolved,
 	}
-	s.bus.Append(wrapped, false)
+	s.appendEventLocked(wrapped, false)
 	s.mu.Unlock()
 	pending.resolution <- resolution
 	return nil
@@ -622,12 +723,13 @@ func (s *Session) awaitExternalInteractionAnswer(ctx context.Context, request ag
 	}
 
 	pending := &pendingExternalInteraction{
+		ctx:     ctx,
 		request: request,
 		answer:  make(chan agentcore.ExternalInteractionAnswer, 1),
 	}
 
 	s.mu.Lock()
-	if isTerminalStatus(s.run.Status) {
+	if ctx.Err() != nil || (isTerminalStatus(s.run.Status) && (request.AgentID == "" || request.AgentID == "root")) {
 		s.mu.Unlock()
 		return agentcore.ExternalInteractionAnswer{}, ErrRunTerminal
 	}
@@ -643,7 +745,7 @@ func (s *Session) awaitExternalInteractionAnswer(ctx context.Context, request ag
 		RunID:      s.run.RunID,
 		AgentEvent: request,
 	}
-	s.bus.Append(wrapped, false)
+	s.appendEventLocked(wrapped, false)
 	s.mu.Unlock()
 
 	select {
@@ -651,7 +753,12 @@ func (s *Session) awaitExternalInteractionAnswer(ctx context.Context, request ag
 		return resolution, nil
 	case <-ctx.Done():
 		s.mu.Lock()
-		delete(s.externalInteractions, request.InteractionID)
+		if s.externalInteractions[request.InteractionID] == pending {
+			delete(s.externalInteractions, request.InteractionID)
+			resolved := request
+			resolved.Type, resolved.InteractionResolution = agentcore.ExternalInteractionResolvedType, string(agentcore.ExternalInteractionCancelled)
+			s.appendEventLocked(Event{Kind: EventKindAgent, ThreadID: s.run.ThreadID, RunID: s.run.RunID, Timestamp: time.Now().UTC(), AgentEvent: resolved}, false)
+		}
 		s.mu.Unlock()
 		return agentcore.ExternalInteractionAnswer{}, ctx.Err()
 	}
@@ -677,12 +784,13 @@ func (s *Session) ResolveExternalInteractionWithContent(interactionID string, re
 
 	now := time.Now().UTC()
 	s.mu.Lock()
-	if isTerminalStatus(s.run.Status) {
-		s.mu.Unlock()
-		return ErrRunTerminal
-	}
 	pending, ok := s.externalInteractions[interactionID]
 	if !ok {
+		s.mu.Unlock()
+		return ErrExternalInteractionNotFound
+	}
+	if pending.ctx.Err() != nil || (isTerminalStatus(s.run.Status) && (pending.request.AgentID == "" || pending.request.AgentID == "root")) {
+		delete(s.externalInteractions, interactionID)
 		s.mu.Unlock()
 		return ErrExternalInteractionNotFound
 	}
@@ -701,7 +809,7 @@ func (s *Session) ResolveExternalInteractionWithContent(interactionID string, re
 		RunID:      s.run.RunID,
 		AgentEvent: resolved,
 	}
-	s.bus.Append(wrapped, false)
+	s.appendEventLocked(wrapped, false)
 	s.mu.Unlock()
 	pending.answer <- agentcore.ExternalInteractionAnswer{Resolution: resolution, Content: cloneInteractionContent(content)}
 	return nil

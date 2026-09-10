@@ -53,6 +53,9 @@ func NewAgentWithConversation(config AgentConfig, conv *context.Conversation) *A
 }
 
 func NewAgentWithConversationAndThreadID(config AgentConfig, conv *context.Conversation, threadID string) *Agent {
+	if config.ChildSessions == nil {
+		config.ChildSessions = NewChildSessions()
+	}
 	if config.ToolSessionState == nil {
 		config.ToolSessionState = tool.NewToolSessionState(config.Workspace.Root)
 	}

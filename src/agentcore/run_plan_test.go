@@ -672,7 +672,7 @@ func TestRootRunWiresRunPlanService(t *testing.T) {
 // RP-G10 (runtime half): a child run never receives a RunPlanService, so
 // update_plan degrades to plan_service_unavailable instead of touching the
 // parent's plan.
-func TestChildRunHasNoRunPlanService(t *testing.T) {
+func TestChildRunOwnsIndependentRunPlanService(t *testing.T) {
 	root := t.TempDir()
 	config := AgentConfig{
 		MaxThoughts: 4,
@@ -712,31 +712,23 @@ func TestChildRunHasNoRunPlanService(t *testing.T) {
 	if _, err := runner.RunStreamWithEvents(stdcontext.Background(), EventSinkFunc(func(AwakenEvent) {})); err != nil {
 		t.Fatalf("RunStreamWithEvents: %v", err)
 	}
-	if runner.runPlanService != nil {
-		t.Fatal("child run must not bind a RunPlanService")
+	if runner.runPlanService == nil {
+		t.Fatal("child must own its own plan service")
 	}
-	var toolResultRecord *SemanticRecord
-	for index := range recorder.snapshot() {
-		record := recorder.snapshot()[index]
+	var plans int
+	for _, record := range recorder.snapshot() {
 		if record.Kind == SemanticKindPlanUpdated {
-			t.Fatalf("child run must not persist plan_updated: %+v", record)
-		}
-		if record.Kind == SemanticKindToolResult && record.Payload["tool_name"] == "update_plan" {
-			copy := record
-			toolResultRecord = &copy
+			plans++
+			if record.Payload["agent_id"] != "child_plan" {
+				t.Fatal("child plan leaked into root scope")
+			}
 		}
 	}
-	if toolResultRecord == nil || toolResultRecord.Payload["is_error"] != true {
-		t.Fatalf("child update_plan must fail closed: %+v", toolResultRecord)
-	}
-	content, _ := toolResultRecord.Payload["content"].(string)
-	if !strings.Contains(content, "plan_service_unavailable") {
-		t.Fatalf("child update_plan content = %q", content)
+	if plans != 1 {
+		t.Fatalf("expected one child plan, got %d", plans)
 	}
 }
 
-// RP-G10 (exposure half): the root tool pool exposes update_plan while every
-// native child role hides it.
 func TestRunPlanToolExposureRootVsChild(t *testing.T) {
 	names := map[string]bool{}
 	for _, registered := range tool.FilterToolsForExposure(tool.ListTools(), tool.DefaultToolExposurePolicy()) {
@@ -754,8 +746,8 @@ func TestRunPlanToolExposureRootVsChild(t *testing.T) {
 		child := childConfig
 		applyChildRole(&child, subagentruntime.TaskSnapshot{AgentType: agentType})
 		policy := child.ToolExposure
-		if tool.IsToolExposed("update_plan", policy) {
-			t.Fatalf("child role %q must hide update_plan", agentType)
+		if tool.IsToolExposed("update_plan", policy) != (agentType == "general") {
+			t.Fatalf("child role %q has the wrong plan capability", agentType)
 		}
 	}
 	if !tool.IsToolExposed("update_plan", rootConfig.ToolExposure) {

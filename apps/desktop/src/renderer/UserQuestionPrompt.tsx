@@ -72,6 +72,7 @@ export function UserQuestionPrompt({
   );
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const otherInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
+  const questionBodyRef = useRef<HTMLDivElement | null>(null);
   const questions = question.questions;
 
   useEffect(() => {
@@ -84,6 +85,12 @@ export function UserQuestionPrompt({
       clampUserQuestionPromptIndex(current, questions.length),
     );
   }, [questions.length]);
+
+  useEffect(() => {
+    if (questionBodyRef.current) {
+      questionBodyRef.current.scrollTop = 0;
+    }
+  }, [question.id, activeQuestionIndex]);
 
   if (questions.length === 0) {
     return null;
@@ -214,14 +221,7 @@ export function UserQuestionPrompt({
     >
       <div className="user-question-card__topbar">
         <div className="user-question-card__heading">
-          {activeQuestion.header ? (
-            <div className="user-question-card__header">
-              {activeQuestion.header}
-            </div>
-          ) : null}
-          <div className="user-question-card__title">
-            {activeQuestion.question}
-          </div>
+          <div className="user-question-card__header">需要回答</div>
         </div>
         <div className="user-question-card__topbar-actions">
           {hasMultipleQuestions ? (
@@ -263,11 +263,25 @@ export function UserQuestionPrompt({
           </button>
         </div>
       </div>
-      <div className="user-question-card__body">
+      <div
+        className="user-question-card__body"
+        ref={questionBodyRef}
+        role="region"
+        aria-label="问题与选项"
+        tabIndex={0}
+      >
         <div
           className="user-question-card__question"
           key={`${currentPageIndex}:${activeQuestion.question}`}
         >
+          {activeQuestion.header ? (
+            <div className="user-question-card__header">
+              {activeQuestion.header}
+            </div>
+          ) : null}
+          <div className="user-question-card__title">
+            {activeQuestion.question}
+          </div>
           <div className="user-question-card__options">
             {options.map((option) => (
               <button

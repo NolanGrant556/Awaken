@@ -10,7 +10,7 @@ import (
 var explicitHTTPSURLPattern = regexp.MustCompile(`https://[^\s<>"'，。；！？、（）【】]+`)
 
 func ExplicitHTTPSURLs(query string) []string {
-	matches := explicitHTTPSURLPattern.FindAllString(query, 4)
+	matches := explicitHTTPSURLPattern.FindAllString(query, -1)
 	urls := make([]string, 0, len(matches))
 	for _, match := range matches {
 		match = strings.TrimRight(match, "，。；！？、,;!?)）】}")

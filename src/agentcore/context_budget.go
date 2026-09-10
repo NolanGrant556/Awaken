@@ -114,7 +114,7 @@ func (r *Runner) projectConfigTokens(config AgentConfig, messages []convcontext.
 	wireRequest := llm.Request{
 		SystemPrompt: request.SystemPrompt, Messages: wireMessages, Tools: request.Tools,
 		Model: request.Model, Temperature: request.Temperature, MaxTokens: request.MaxTokens,
-		Purpose: llm.RequestPurposeAgentTurn, AffinityScopeID: r.threadID,
+		Purpose: effectiveModelRequestPurpose(config), AffinityScopeID: agentAffinityScope(r.threadID, config),
 		ReasoningPolicy:       config.ModelConfig.ReasoningEffort,
 		NativeCompactionState: nativeCompactionStateFromBundle(config.ModelConfig, config.RestoredContextBundleV2),
 	}

@@ -261,6 +261,7 @@ func archivedHistoryOutputSchema() tool.ToolParam {
 	}}
 	item := tool.ToolParam{Type: "object", AdditionalProperties: closed, Required: []string{"seq", "kind", "timestamp"}, Properties: map[string]tool.ToolParam{
 		"seq": {Type: "integer"}, "kind": {Type: "string"}, "role": {Type: "string"}, "content": {Type: "string"},
+		"origin_agent_id":   {Type: "string"},
 		"content_truncated": {Type: "boolean"}, "tool_name": {Type: "string"}, "tool_call_id": {Type: "string"}, "is_error": {Type: "boolean"}, "timestamp": {Type: "string"},
 	}}
 	return tool.ToolParam{Type: "object", AdditionalProperties: closed,

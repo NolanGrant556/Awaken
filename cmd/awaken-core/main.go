@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -60,7 +62,16 @@ var microsoftOutlookClientID string
 
 func main() {
 	ownerMode := flag.String("owner-mode", "desktop", "Core owner mode: desktop or headless")
+	activeAgents := flag.Int("active-agents", 8, "Maximum active Agents per task, including root")
+	queuedAssignments := flag.Int("queued-assignments", 128, "Maximum queued Agent assignments")
+	modelRequests := flag.Int("model-requests", 8, "Maximum in-flight model requests across Core")
+	accountRequests := flag.Int("account-model-requests", 0, "Optional per-account in-flight limit; zero inherits Core limit")
 	flag.Parse()
+	if *activeAgents < 1 || *activeAgents > 64 || *queuedAssignments < 1 || *queuedAssignments > 1024 || *modelRequests < 1 || *modelRequests > 64 || *accountRequests < 0 || *accountRequests > 64 {
+		log.Fatal("invalid collaboration capacity")
+	}
+	llm.ConfigureRequestAdmission(*modelRequests, *queuedAssignments)
+	llm.ConfigureAccountRequestAdmission(*accountRequests)
 	routeManager := networkroute.NewFromEnvironment(os.Environ())
 	networkroute.InstallDefaultHTTPTransport(routeManager)
 
@@ -178,6 +189,9 @@ func main() {
 				log.Printf("[memory] automatic recall disabled: %v", recallErr)
 			}
 			agentCfg := agentcore.AgentConfig{
+				CollaborationPolicy:   subagentruntime.Policy{Version: 1, MaxActiveAgents: *activeAgents, MaxQueuedAssignments: *queuedAssignments, MaxDepth: 8},
+				ResolveModelBinding:   resolveAgentModelBinding,
+				ListModelBindings:     listAgentModelBindings,
 				MaxThoughts:           0,
 				EntryPoint:            "awaken-core",
 				ModelConfig:           modelCfg,
@@ -665,24 +679,25 @@ func modelConfigFromProfile(profile *runtime.ModelProfileConfig) agentcore.Model
 		return agentcore.ModelConfig{}
 	}
 	return agentcore.ModelConfig{
-		APIKey:              profile.APIKey,
-		BaseURL:             profile.BaseURL,
-		InferenceEndpoint:   profile.InferenceEndpoint,
-		Model:               profile.ModelID,
-		CapabilityModelID:   profile.CapabilityModelID,
-		EndpointSelector:    profile.EndpointSelector,
-		ModelSelectorKind:   profile.ModelSelectorKind,
-		Protocol:            profile.Protocol,
-		ProviderID:          profile.ProviderID,
-		ProfileID:           profile.ProfileID,
-		CredentialRevision:  profile.CredentialRevision,
-		Temperature:         profile.Temperature,
-		MaxTokens:           profile.MaxTokens,
-		AuthScheme:          profile.AuthScheme,
-		ContextWindow:       profile.ContextWindow,
-		MaxInputTokens:      profile.MaxInputTokens,
-		SupportsPromptCache: profile.SupportsPromptCache,
-		ReasoningEffort:     profile.ReasoningEffort,
+		APIKey:                 profile.APIKey,
+		ConfigSnapshotRevision: profile.ConfigSnapshotRevision,
+		BaseURL:                profile.BaseURL,
+		InferenceEndpoint:      profile.InferenceEndpoint,
+		Model:                  profile.ModelID,
+		CapabilityModelID:      profile.CapabilityModelID,
+		EndpointSelector:       profile.EndpointSelector,
+		ModelSelectorKind:      profile.ModelSelectorKind,
+		Protocol:               profile.Protocol,
+		ProviderID:             profile.ProviderID,
+		ProfileID:              profile.ProfileID,
+		CredentialRevision:     profile.CredentialRevision,
+		Temperature:            profile.Temperature,
+		MaxTokens:              profile.MaxTokens,
+		AuthScheme:             profile.AuthScheme,
+		ContextWindow:          profile.ContextWindow,
+		MaxInputTokens:         profile.MaxInputTokens,
+		SupportsPromptCache:    profile.SupportsPromptCache,
+		ReasoningEffort:        profile.ReasoningEffort,
 		Capabilities: tool.ModelCapabilities{
 			SupportsVision:      profile.SupportsVision,
 			SupportsNativePDF:   profile.SupportsNativePDF,
@@ -696,7 +711,13 @@ func purposeModelConfig(profile *runtime.ModelProfileConfig, purpose string) age
 	if profile == nil {
 		return agentcore.ModelConfig{}
 	}
-	return modelConfigFromProfile(profile.PurposeProfiles[purpose])
+	cfg := modelConfigFromProfile(profile.PurposeProfiles[purpose])
+	cfg.BindingSource = profile.PurposeProfileSources[purpose]
+	if cfg.BindingSource == "" && cfg.Model != "" {
+		cfg.BindingSource = "host_route"
+	}
+	cfg.ConfigSnapshotRevision = profile.ConfigSnapshotRevision
+	return cfg
 }
 
 // buildMCPManager loads project and user MCP configs, merges them, and
@@ -968,4 +989,49 @@ func buildCUADriverFactory(manager *cua.HostManager, vault computer.MediaVault) 
 			MediaVault: vault,
 		})
 	}
+}
+
+// Resolve a pinned child profile from current Host configuration. A removed,
+// disabled or unavailable pin never falls back to the root/default profile.
+func resolveAgentModelBinding(ctx context.Context, profileID, effort string) (agentcore.ModelConfig, error) {
+	if err := ctx.Err(); err != nil {
+		return agentcore.ModelConfig{}, err
+	}
+	if strings.TrimSpace(profileID) == "" {
+		return agentcore.ModelConfig{}, fmt.Errorf("child model profile binding is missing")
+	}
+	resolved, err := modelprofile.NewUserStore(desktopdata.AwakenHomeRoot()).Resolve(profileID)
+	if err != nil {
+		return agentcore.ModelConfig{}, err
+	}
+	if effort != "" {
+		if !slices.Contains(resolved.ReasoningEffortLevels, effort) {
+			return agentcore.ModelConfig{}, fmt.Errorf("pinned child reasoning effort is no longer supported")
+		}
+		resolved.ReasoningEffort = effort
+	}
+	config := modelConfigFromProfile(runtime.ModelProfileConfigFromResolved(resolved))
+	public := config
+	public.APIKey = ""
+	encoded, err := json.Marshal(public)
+	if err != nil {
+		return agentcore.ModelConfig{}, err
+	}
+	config.ConfigSnapshotRevision = fmt.Sprintf("%x", sha256.Sum256(encoded))
+	return config, nil
+}
+
+func listAgentModelBindings(ctx context.Context) ([]subagentruntime.ModelOption, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	catalog, err := modelprofile.NewUserStore(desktopdata.AwakenHomeRoot()).ListReady()
+	if err != nil {
+		return nil, err
+	}
+	options := make([]subagentruntime.ModelOption, 0, len(catalog.Profiles))
+	for _, profile := range catalog.Profiles {
+		options = append(options, subagentruntime.ModelOption{ProfileID: profile.ID, Name: profile.DisplayName, ModelID: profile.ModelID, Efforts: append([]string(nil), profile.ReasoningEffortLevels...)})
+	}
+	return options, nil
 }

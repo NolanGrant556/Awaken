@@ -216,6 +216,10 @@ func messagesFromSemanticRecords(records []agentcore.SemanticRecord) []convconte
 			continue
 		}
 		switch record.Kind {
+		case agentcore.SemanticKindRuntimeNotice:
+			if stringPayload(record.Payload, "event_type") == "agent_context_message" {
+				messages = append(messages, convcontext.Message{Role: convcontext.RoleUser, Content: stringPayload(record.Payload, "content"), MessageID: stringPayload(record.Payload, "message_id"), Origin: convcontext.MessageOriginSynthetic})
+			}
 		case agentcore.SemanticKindUserMessage:
 			messages = append(messages, convcontext.Message{
 				Role:    convcontext.RoleUser,
@@ -379,6 +383,7 @@ func compactedMessagesFromSemanticRecord(_ string, payload map[string]any) ([]co
 		}
 		messages = append(messages, convcontext.Message{
 			Role:                role,
+			OriginAgentID:       message.OriginAgentID,
 			Content:             content,
 			Attachments:         transcriptAttachmentsToContextAttachments(attachments),
 			ToolCalls:           append([]convcontext.ToolCall(nil), message.ToolCalls...),
@@ -472,7 +477,12 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 			state.terminal = true
 		case agentcore.SemanticKindSubagentSpawned, agentcore.SemanticKindSubagentStatusChanged, agentcore.SemanticKindSubagentProgress:
 			if taskID := stringPayload(record.Payload, "task_id"); taskID != "" {
-				state.openSubagents[taskID] = record
+				status := subagentruntime.TaskSnapshot{Status: subagentruntime.TaskStatus(stringPayload(record.Payload, "status"))}
+				if status.Terminal() {
+					delete(state.openSubagents, taskID)
+				} else {
+					state.openSubagents[taskID] = record
+				}
 			}
 		case agentcore.SemanticKindSubagentTerminal:
 			delete(state.openSubagents, stringPayload(record.Payload, "task_id"))
@@ -532,7 +542,7 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 		for invocationID, started := range state.openHooks {
 			completed := agentcore.NewSemanticRecord(
 				agentcore.SemanticKindHookInvocationCompleted,
-				journal.ThreadID(), runID, started.TurnID, "", started.SessionID,
+				journal.ThreadID(), runID, started.TurnID, started.ParentID, started.SessionID,
 				map[string]any{
 					"invocation_id": invocationID,
 					"hook_id":       stringPayload(started.Payload, "hook_id"),
@@ -545,6 +555,7 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 					"reason_code":   "process_restarted",
 				},
 			)
+			copyRecoveredAgentIdentity(completed.Payload, started.Payload)
 			assigned, err := journal.AppendAssigned(ctx, completed)
 			if err != nil {
 				return appended, err
@@ -566,6 +577,7 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 			usageRecord := agentcore.ModelUsageSemanticRecord(
 				journal.ThreadID(), runID, requestRecord.TurnID, requestRecord.SessionID, usage,
 			)
+			copyRecoveredAgentIdentity(usageRecord.Payload, requestRecord.Payload)
 			assigned, err := journal.AppendAssigned(ctx, usageRecord)
 			if err != nil {
 				return appended, err
@@ -581,6 +593,7 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 				"is_error":     true,
 				"outcome":      outcomeToAnyMap(outcome),
 			}
+			copyRecoveredAgentIdentity(payload, callRecord.Payload)
 			resultRec := agentcore.NewSemanticRecord(
 				agentcore.SemanticKindToolResult,
 				journal.ThreadID(),
@@ -624,6 +637,14 @@ func recoverOrphanRuns(ctx context.Context, journal *ExecutionJournal, records [
 		return records, nil
 	}
 	return append(append([]agentcore.SemanticRecord{}, records...), appended...), nil
+}
+
+func copyRecoveredAgentIdentity(target, source map[string]any) {
+	for _, key := range []string{"agent_id", "parent_agent_id", "subagent_task_id", "attempt_id", "logical_call_id", "retry_index"} {
+		if value, ok := source[key]; ok {
+			target[key] = value
+		}
+	}
 }
 
 func outcomeToAnyMap(outcome tool.ExecutionOutcome) map[string]any {
@@ -765,9 +786,13 @@ func restoredTranscriptFromSemantic(records []agentcore.SemanticRecord) restored
 }
 
 func latestContextWindowUsageAnchorFromSemanticRecords(records []agentcore.SemanticRecord) *agentcore.ContextWindowUsageAnchor {
+	return contextWindowUsageAnchorForAgent(records, "")
+}
+
+func contextWindowUsageAnchorForAgent(records []agentcore.SemanticRecord, agentID string) *agentcore.ContextWindowUsageAnchor {
 	for index := len(records) - 1; index >= 0; index-- {
 		record := records[index]
-		if strings.TrimSpace(stringPayload(record.Payload, "agent_id")) != "" {
+		if strings.TrimSpace(stringPayload(record.Payload, "agent_id")) != agentID {
 			continue
 		}
 		switch record.Kind {
@@ -780,7 +805,7 @@ func latestContextWindowUsageAnchorFromSemanticRecords(records []agentcore.Seman
 			}
 		case agentcore.SemanticKindModelUsage:
 			usage, ok := modelUsageRecordFromSemanticPayload(record.Payload)
-			if !ok || strings.TrimSpace(usage.Purpose) != "agent_turn" || usage.Status != agentcore.ModelUsageSucceeded || !usage.UsageComplete {
+			if !ok || (strings.TrimSpace(usage.Purpose) != "agent_turn" && strings.TrimSpace(usage.Purpose) != "subagent" && strings.TrimSpace(usage.Purpose) != "scheduled_task") || usage.Status != agentcore.ModelUsageSucceeded || !usage.UsageComplete {
 				continue
 			}
 			return agentcore.ContextWindowUsageAnchorFromModelUsage(usage)

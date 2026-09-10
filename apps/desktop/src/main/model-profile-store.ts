@@ -1678,21 +1678,75 @@ export class ModelProfileStore {
   async resolvePurposeRunProfile(
     purpose: ModelPurpose,
     inheritedProfileId?: string,
+    requestedEffort?: import("../shared/runtime.js").ReasoningEffortLevel,
   ): Promise<ModelProfileRunConfig | undefined> {
-    const store = await this.readStore();
-    const routedID = store.purposeRoutes?.[purpose];
-    const routedProfile = routedID
-      ? store.profiles.find((profile) => profile.id === routedID && profile.enabled)
-      : undefined;
-    if (routedProfile) {
-      try {
-        return await this.resolveRunProfile(routedProfile.id);
-      } catch {
-        // A stale optional route inherits the caller's profile. Explicit
-        // scheduled-task pins are resolved by Core and still fail closed.
+    const bundle = await this.resolveRunBundle(inheritedProfileId, requestedEffort, [purpose]);
+    if (!bundle) return undefined;
+    return bundle.purposeProfiles?.[purpose] ?? { ...bundle, purposeProfiles: undefined };
+  }
+
+  // One run uses one store snapshot. Only explicit, runnable routes are
+  // expanded: an absent route must keep inheriting the executing Agent later.
+  async resolveRunBundle(
+    profileId?: string,
+    requestedEffort?: import("../shared/runtime.js").ReasoningEffortLevel,
+    purposes: ModelPurpose[] = ["thread_title", "compact_summary", "subagent", "hook_prompt", "hook_agent"],
+  ): Promise<ModelProfileRunConfig | undefined> {
+    return this.withStoreMutation(async () => {
+      const store = await this.readStore();
+      const selected = store.profiles.find((entry) => entry.id === profileId && entry.enabled)
+        ?? store.profiles.find((entry) => entry.isDefault && entry.enabled)
+        ?? store.profiles.find((entry) => entry.enabled);
+      if (!selected) return undefined;
+      const credentials = new Map<string, Promise<{ apiKey: string; credentialRevision?: number }>>();
+      const readCredential = (profile: StoredModelProfile) => {
+        const ref = profile.credentialReference;
+        const key = ref?.kind === "provider_account" ? `${ref.providerId}:${ref.accountId}` : profile.id;
+        let pending = credentials.get(key);
+        if (!pending) {
+          pending = this.readProfileCredential(profile);
+          credentials.set(key, pending);
+        }
+        return pending;
+      };
+      const selectedCredential = await readCredential(selected);
+      const routed = new Map<string, StoredModelProfile>();
+      for (const purpose of purposes) {
+        const id = store.purposeRoutes?.[purpose];
+        const profile = store.profiles.find((entry) => entry.id === id && entry.enabled);
+        if (profile) routed.set(profile.id, profile);
       }
-    }
-    return this.resolveRunProfile(inheritedProfileId);
+      // Read all credentials before synchronously compiling capabilities. A
+      // rejected optional route does not discard the selected configuration.
+      const resolvedCredentials = new Map<string, { apiKey: string; credentialRevision?: number }>();
+      const entries = [...routed.values()];
+      const results = await Promise.allSettled(entries.map(readCredential));
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled") resolvedCredentials.set(entries[index].id, result.value);
+      });
+      const bundle = this.compileRunProfile(selected, selectedCredential, requestedEffort);
+      const profiles = new Map<string, ModelProfileRunConfig>([[selected.id, { ...bundle }]]);
+      for (const profile of entries) {
+        if (profiles.has(profile.id)) continue;
+        const credential = resolvedCredentials.get(profile.id);
+        if (!credential) continue;
+        try { profiles.set(profile.id, this.compileRunProfile(profile, credential)); } catch { /* optional route */ }
+      }
+      bundle.purposeProfiles = {};
+      bundle.purposeProfileSources = {};
+      for (const purpose of purposes) {
+        const id = store.purposeRoutes?.[purpose];
+        const profile = id ? profiles.get(id) : undefined;
+        bundle.purposeProfileSources[purpose] = profile ? "host_route" : id ? "optional_route_fallback" : "inherited";
+        if (profile) bundle.purposeProfiles[purpose] = { ...profile };
+      }
+      // No credential bytes enter the revision or any durable/public metadata.
+      bundle.configSnapshotRevision = createHash("sha256").update(JSON.stringify({
+        store, requestedEffort,
+        profiles: [...profiles.values()].map(({ apiKey: _secret, ...profile }) => profile),
+      })).digest("hex");
+      return bundle;
+    });
   }
 
   async saveProfile(request: ModelProfileSaveRequest): Promise<RuntimeModelProfileSummaryWire> {
@@ -1979,10 +2033,17 @@ export class ModelProfileStore {
       store.profiles.find((entry) => entry.isDefault && entry.enabled) ??
       store.profiles.find((entry) => entry.enabled);
     if (!profile) return undefined;
+    return this.compileRunProfile(profile, await this.readProfileCredential(profile), requestedEffort);
+  }
+
+  private compileRunProfile(
+    profile: StoredModelProfile,
+    credential: { apiKey: string; credentialRevision?: number },
+    requestedEffort?: import("../shared/runtime.js").ReasoningEffortLevel,
+  ): ModelProfileRunConfig {
     const provider = providerById(profile.providerId);
     const capabilityModelId = normalizeProviderModelId(provider, profile.modelId);
     const baseURL = normalizeProviderBaseURL(provider, profile.baseURL, profile.protocol);
-    const credential = await this.readProfileCredential(profile);
     const apiKey = credential.apiKey;
     if (!apiKey && profile.authScheme !== "none") {
       throw new Error("请先在设置 > 模型中配置 API key。");

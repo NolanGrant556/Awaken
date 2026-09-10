@@ -1,10 +1,23 @@
-.aw-workbench-inspector:has(> .project-files-workspace) {
+.aw-workbench-inspector:has(> .inspector-surfaces > .inspector-entry-page) {
+  display: block;
+  padding: 0;
+}
+
+.inspector-entry-page {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 24px 14px;
+  background: var(--aw-surface-work);
+}
+
+.aw-workbench-inspector:has(> .inspector-surfaces > .inspector-surface),
+.aw-workbench-inspector:has(> .inspector-surfaces > .subagent-panel) {
   display: block;
   padding: 0;
   overflow: hidden;
 }
 
-.aw-workbench-shell:has(> .aw-workbench-inspector > .project-files-workspace) {
+.aw-workbench-shell:has(> .aw-workbench-inspector > .inspector-surfaces > .inspector-surface) {
   transition: none;
 }
 

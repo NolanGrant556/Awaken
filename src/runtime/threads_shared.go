@@ -8,6 +8,29 @@ import (
 	"awaken/src/agentcore"
 )
 
+// Never open a recovery writer behind the current thread's journal owner.
+// In-process projections use that owner's snapshot; cold reads alone perform
+// orphan recovery before acquiring a new writer.
+func (s *RunService) restoreOwnedThread(threadID string) (storedThreadRecord, restoredTranscript, error) {
+	s.mu.RLock()
+	thread := s.threads[threadID]
+	var meta storedThreadRecord
+	if thread != nil {
+		meta = storedThreadRecord{Snapshot: thread.snapshot(), ModelProfileKey: thread.modelProfileKey}
+	}
+	s.mu.RUnlock()
+	if thread != nil && s.journals != nil {
+		if journal, ok := s.journals.Get(threadID); ok {
+			records, err := journal.SnapshotRecords()
+			if err != nil {
+				return meta, restoredTranscript{}, err
+			}
+			return meta, restoredTranscriptFromSemantic(activeSemanticRecords(records)), nil
+		}
+	}
+	return s.threadStore.RestoreThread(threadID)
+}
+
 // restoreThreadFromDurableRecord assembles the in-memory restoration facts
 // from FileStore metadata and its canonical journal.
 func restoreThreadFromDurableRecord(record storedThreadRecord, path, threadID string) (storedThreadRecord, restoredTranscript, error) {

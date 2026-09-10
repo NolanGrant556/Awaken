@@ -44,7 +44,7 @@ func TestRefreshThreadContextSnapshotPersistsV4ForDurableHistory(t *testing.T) {
 	if !result.Persisted {
 		t.Fatal("expected regenerated context snapshot to be persisted")
 	}
-	if result.Snapshot.SchemaVersion != 4 || result.Snapshot.EstimatorID != "awaken_leaf_v4" {
+	if result.Snapshot.SchemaVersion != 4 || result.Snapshot.EstimatorID != "awaken_leaf_v5" {
 		t.Fatalf("expected current v4 estimator, got %+v", result.Snapshot)
 	}
 	if result.Snapshot.ModelWindowTokens != 1_000_000 || result.Snapshot.EffectiveInputWindowTokens != 1_000_000 {

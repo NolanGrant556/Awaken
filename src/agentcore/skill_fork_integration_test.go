@@ -11,6 +11,7 @@ import (
 	"awaken/src/llm"
 	"awaken/src/skillruntime"
 	"awaken/src/skills"
+	"awaken/src/subagentruntime"
 	"awaken/src/tool"
 )
 
@@ -53,7 +54,7 @@ func TestUnifiedSkillCatalogRunsForkInSeparateChildContext(t *testing.T) {
 name: forked-research
 description: Research in a separate child Agent.
 context: fork
-agent: Researcher
+agent: general
 ---
 Use the package references and return a concise research result.
 `), 0o644); err != nil {
@@ -105,10 +106,8 @@ Use the package references and return a concise research result.
 		switch record.Kind {
 		case SemanticKindSkillActivated:
 			activationIndex = index
-		case SemanticKindRuntimeNotice:
-			if record.Payload["notice"] == "skill_child_started" {
-				childStartIndex = index
-			}
+		case SemanticKindSubagentSpawned:
+			childStartIndex = index
 		case SemanticKindRunStarted, SemanticKindRunTerminal:
 			t.Fatalf("child emitted parent run lifecycle record: %+v", record)
 		}
@@ -118,5 +117,63 @@ Use the package references and return a concise research result.
 	}
 	if invokedAt, ok := registry.LastInvokedAt("forked-research"); !ok || invokedAt.IsZero() {
 		t.Fatal("successful fork invocation did not update recent use")
+	}
+}
+
+func TestSkillForkMustPreserveCreatorLifetime(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "review-fork")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: review-fork\ndescription: Local audit fork fixture.\ncontext: fork\nagent: general\n---\nReturn the assigned fixture result.\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	registry := skills.NewSkillRegistry(nil)
+	registry.LoadFromSources(map[skills.SourceOrigin]string{skills.SourceProject: root})
+	skillsManager := skillruntime.NewManager(registry, nil)
+	t.Cleanup(skillsManager.Shutdown)
+	cfg := AgentConfig{Workspace: WorkspaceConfig{Root: root, ReadableRoots: []string{root}, WritableRoots: []string{root}}, ToolExposure: tool.ToolExposurePolicy{Mode: tool.ExposureAll}}
+	runner := NewRunner(cfg, convcontext.NewConversation(nil), NewRequestBuilder(cfg))
+	runner.threadID, runner.runID, runner.sessionID = "audit-thread", "audit-run", "audit-session"
+	runner.recorder = &forkCaptureRecorder{}
+	runner.streamLLMFunc = func(context.Context, *runEventEmitter) (*llm.Response, error) {
+		return &llm.Response{Content: "fork complete"}, nil
+	}
+	sink := EventSinkFunc(func(AwakenEvent) {})
+	managerCfg := SubagentManagerConfig(runner.config)
+	managerCfg.RunID, managerCfg.ThreadID = runner.runID, runner.threadID
+	managerCfg.Starter = runner.scopedChildStarter(sink)
+	managerCfg.PrepareSpawn = runner.prepareChildSpawn(sink)
+	managerCfg.Persist = runner.persistSubagentEvent
+	manager := subagentruntime.NewManager(t.Context(), managerCfg)
+	t.Cleanup(func() { _ = manager.Close(context.Background()) })
+	runner.subagentController = manager.Bind(t.Context(), "root", 0, managerCfg)
+	events := newRunEventEmitter(runner.threadID, sink)
+	events.runID, events.sessionID, events.recorder = runner.runID, runner.sessionID, runner.recorder
+	results := runner.executeToolCalls(t.Context(), []convcontext.ToolCall{{ID: "audit-skill-call", Function: convcontext.FunctionCall{Name: skillruntime.CatalogToolName, Arguments: `{"skill":"review-fork","args":"local"}`}}}, events)
+	if len(results) != 1 || results[0].IsError {
+		t.Fatalf("fixture Skill did not complete: %+v", results)
+	}
+	t.Logf("Skill completed with %q", results[0].Content)
+	next, err := runner.subagentController.Spawn(t.Context(), subagentruntime.SpawnRequest{Description: "after fork", Prompt: "next valid assignment", RunID: runner.runID, ThreadID: runner.threadID})
+	if err != nil {
+		t.Fatalf("active root lost creator after successful Skill tool batch: %v", err)
+	}
+	if _, err := runner.subagentController.Wait(t.Context(), subagentruntime.WaitRequest{TaskIDs: []string{next.TaskID}, ReturnWhen: "all", EventDriven: true}); err != nil {
+		t.Fatal(err)
+	}
+	continued, err := runner.subagentController.(subagentruntime.SessionController).Followup(t.Context(), next.TaskID, "continue the same Agent")
+	if err != nil {
+		t.Fatalf("Skill broke same-Agent followup: %v", err)
+	}
+	if continued.AgentID != next.AgentID || continued.TaskID == next.TaskID {
+		t.Fatal("followup must retain Agent identity with a new assignment")
+	}
+	if err := manager.EndAttempt(t.Context(), "root", runner.runID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.subagentController.Spawn(t.Context(), subagentruntime.SpawnRequest{Description: "after end", Prompt: "must be fenced", RunID: runner.runID, ThreadID: runner.threadID}); err == nil {
+		t.Fatal("Skill erased the run identity used to fence an ended attempt")
 	}
 }

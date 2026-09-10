@@ -225,6 +225,22 @@ func TestContextGovernorRecordResponseUsageSetsLastAPIUsageTokens(t *testing.T) 
 	}
 }
 
+func TestUsageAnchorFromOlderEstimatorKeepsTruthWithoutOldCalibration(t *testing.T) {
+	config := ModelConfig{Model: "model", ProfileID: "profile"}
+	anchor := ContextWindowUsageAnchorFromModelConfig(config, 228782, 83157)
+	anchor.EstimatorID = "awaken_leaf_v4"
+	governor := newContextGovernor(nil, nil, nil)
+	governor.RestoreUsageAnchor(anchor, config)
+	if governor.lastAPIUsageTokens != 228782 || governor.lastSentEstimatedInputTokens != 0 {
+		t.Fatal("old CJK underestimate was reused to inflate the new mandatory floor")
+	}
+	anchor.EstimatorID = contextEstimatorID
+	governor.RestoreUsageAnchor(anchor, config)
+	if governor.lastSentEstimatedInputTokens != 83157 {
+		t.Fatal("current estimator lost its paired usage anchor")
+	}
+}
+
 func TestConservativeProjectedTokensAnchorsProviderUsageToCurrentEstimate(t *testing.T) {
 	state := testContextWindowState(14572)
 	state.LastAPIUsageTokens = 20224

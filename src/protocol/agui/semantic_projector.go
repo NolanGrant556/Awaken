@@ -77,6 +77,27 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 			agentcore.SemanticKindToolResult,
 			agentcore.SemanticKindHookInvocationStarted,
 			agentcore.SemanticKindHookInvocationCompleted,
+			agentcore.SemanticKindPlanUpdated,
+			agentcore.SemanticKindContextSnapshot,
+			agentcore.SemanticKindModelUsage,
+			agentcore.SemanticKindRuntimeNotice,
+			agentcore.SemanticKindPermissionDecision,
+			agentcore.SemanticKindRecoveryDecision,
+			agentcore.SemanticKindSkillActivated,
+			agentcore.SemanticKindResourceReceipt,
+			agentcore.SemanticKindArtifact,
+			agentcore.SemanticKindTurnDiff,
+			agentcore.SemanticKindMemoryRecalled,
+			agentcore.SemanticKindMemoryMutated,
+			agentcore.SemanticKindComputerSessionOpened,
+			agentcore.SemanticKindComputerStateChanged,
+			agentcore.SemanticKindComputerReviewRequested,
+			agentcore.SemanticKindComputerReviewResolved,
+			agentcore.SemanticKindComputerActionStarted,
+			agentcore.SemanticKindComputerControlTransferStarted,
+			agentcore.SemanticKindComputerControlTransferCompleted,
+			agentcore.SemanticKindComputerSessionClosed,
+			agentcore.SemanticKindComputerVerificationCompleted,
 			agentcore.SemanticKindTurnBoundary:
 			childPayload := make(map[string]any, len(payload))
 			for key, value := range payload {
@@ -382,6 +403,9 @@ func projectSemanticRecord(record agentcore.SemanticRecord) []Event {
 		notice := base
 		eventType := agentcore.AwakenEventType(stringFromAny(payload["event_type"]))
 		switch eventType {
+		case "AgentPhaseChanged":
+			notice.Type = EventAwakenAgentPhase
+			notice.AgentPhase = stringFromAny(payload["phase"])
 		case agentcore.RuntimePrepareEventType, agentcore.RuntimePrepareStartedEventType:
 			notice.Type = EventAwakenRuntimePrepare
 		case agentcore.RuntimePrepareProgressEventType:
@@ -640,6 +664,14 @@ func applySubagentPayload(dst *Event, payload map[string]any) {
 	dst.SubagentDescription = stringFromAny(payload["description"])
 	dst.SubagentStatus = stringFromAny(payload["status"])
 	dst.SubagentWorkspaceMode = stringFromAny(payload["workspace_mode"])
+	dst.SubagentModelID = stringFromAny(payload["model_id"])
+	dst.SubagentBackground, _ = payload["background"].(bool)
+	dst.SubagentClosed, _ = payload["agent_closed"].(bool)
+	dst.SubagentAttemptID = stringFromAny(payload["attempt_id"])
+	dst.SubagentContextMode = stringFromAny(payload["context_mode"])
+	dst.SubagentWorkflow = stringFromAny(payload["workflow"])
+	dst.SubagentReasoningEffort = stringFromAny(payload["reasoning_effort"])
+	dst.SubagentModelBindingSource = stringFromAny(payload["model_binding_source"])
 	dst.SubagentModelProfileID = stringFromAny(payload["model_profile_id"])
 	dst.SubagentActivity = stringFromAny(payload["current_activity"])
 	dst.SubagentToolUseCount = intFromAny(payload["tool_use_count"])

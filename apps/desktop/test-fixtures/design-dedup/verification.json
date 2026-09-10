@@ -1,0 +1,207 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-09-09T15:30:19.995568+00:00",
+  "scope": "重复设计收敛：只读子任务、统一标签、工具执行、订阅重连、模型转换、Manager Policy",
+  "git": {
+    "branch": "main",
+    "head": "f9b1dc16ae9bd2e8d02e3bc5634aaa2bae174f42",
+    "worktree": "dirty; changes not committed"
+  },
+  "source_sha256": {
+    "src/agentcore/child_creator.go": "adb16a6728f3589f536b788daff931d42d26fac416d2f461678831db6affa08f",
+    "src/agentcore/tool_call_pipeline.go": "893487e8006190c5d55fc1e9bab83e979289a2f30f25af1dbea7cda0d91d62a0",
+    "src/agentcore/parallel_reads.go": "9646645d838b965861fa0a428c20e88b49018d48cafcbfeda2929e28b576c94e",
+    "src/agentcore/runner_tools.go": "7b6770e77e80306fd0271a4bf568dd1cf9c7578568940fb2dbbc87167082c357",
+    "src/runtime/session.go": "f4b34f798c70432b196b6e8e7d75e01db7b918f3ebbc6369516b02a841673eb5",
+    "src/subagentruntime/manager.go": "5999efbef7fb9d8390fab9107030bdde57ba9b57e54d4921fb4bdf91eb294177",
+    "src/subagentruntime/controller_scope.go": "cae91759582bac8cb82b94a838e96563822fcfe4a9dc18b2b9c1b450f996f1a3",
+    "cmd/awaken-core/main.go": "e86661f233e64cb3dc0588c217b6e4aefcb0d41db59b90f8f54c62742757a61d",
+    "apps/desktop/src/renderer/runtime/reducer.ts": "c2e5da5527d86fddfdce9c41f7c9ebd6b133ca45d1e90ca5338d0f676426e891",
+    "apps/desktop/src/renderer/runtime/reconnecting-subscription.ts": "7fbc1e343dfe499d310ffc0a4ac708a138dabaec94c82121209e21508c466612",
+    "apps/desktop/src/renderer/runtime/activity-client.ts": "40e57c3f27b8dd1fee582fbb83f5c82af3484db3c4025244f88ef198eb666c9d",
+    "apps/desktop/src/renderer/runtime/client.ts": "9bf15e2185f87f48e52ce7698714d43242e90588b2f86472878c2dc5e6d7e630",
+    "apps/desktop/src/renderer/inspectorTabs.ts": "28d1bc6d6895752620c3c00b37f45fbc147f9407685e5c5c004e474b9663ad4d",
+    "apps/desktop/src/renderer/useWorkbenchPanels.ts": "31a117f4aa52291cbe76883447f2bc5644f258bab01b26cf45cb6ada4c811fca",
+    "apps/desktop/src/renderer/useFileWorkspaceSession.ts": "4fb82d886bba10d11df139bcb8f3ba03c5061b91c0eef0079581a7bbb705e7aa",
+    "apps/desktop/src/renderer/DesktopWorkbenchChrome.tsx": "63e488544efb1560cf25d428170c83ced68fd1630aa36df00957f082544f99f9",
+    "apps/desktop/src/renderer/SubagentPanel.tsx": "aad9911956489da2eef1a3d92f0895230f653dcf8aa64bcef705c37de216689a",
+    "apps/desktop/src/renderer/App.tsx": "6dc5fd0352db19e915e4b2f5517a89daf3d86665f23156d35879386b0ea9d3ab",
+    "Awaken Design System/src/components/AwakenSubagentGroup/subagentStatus.ts": "794463fc47ccc657c7fe8e1deecca4757bd9f40da786cce96f4fe6a986c98213"
+  },
+  "automated_checks": [
+    {
+      "command": "go test ./...",
+      "log": "/tmp/awaken-dedup-all-go.txt",
+      "log_sha256": "0efc60a429df9b58667939437406cc86e3e5e9983a551681ff32bd1d5f5277ea",
+      "result": "passed",
+      "exit_code": 0
+    },
+    {
+      "command": "go test -race ./src/agentcore ./src/subagentruntime ./src/runtime ./src/server",
+      "log": "/tmp/awaken-dedup-race.txt",
+      "log_sha256": "eb1105b9170bbdc445314e1dae3c9e227d5730577453411eaefe866d7f8e951b",
+      "result": "4 packages passed",
+      "exit_code": 0
+    },
+    {
+      "command": "go vet ./...",
+      "log": "/tmp/awaken-dedup-vet.txt",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "result": "passed",
+      "exit_code": 0
+    },
+    {
+      "command": "Desktop full Vitest suite --maxWorkers=2",
+      "log": "/tmp/awaken-dedup-all-ui.txt",
+      "log_sha256": "ec532e35f95feb9960f50cfa28e5a4c06fdcc1407aeb118b130b2f7e1f495e96",
+      "result": "150 files, 1558 tests passed; before final narrow renderer cleanup",
+      "exit_code": 0
+    },
+    {
+      "command": "Desktop runtime focused suite",
+      "log": "/tmp/awaken-dedup-runtime-ui.txt",
+      "log_sha256": "6fcdbcdd02b2745e851e6cb0b0bac348738b315415aa0211e5b953e6f04ab910",
+      "result": "7 files, 176 tests passed after question-state cleanup",
+      "exit_code": 0
+    },
+    {
+      "command": "Desktop inspector/composition focused suite",
+      "log": "/tmp/awaken-dedup-tabs-tests.txt",
+      "log_sha256": "c64785ce95a0cde27630f92b7ff5f053ca6f4572a271550aeb5bb0ee0806f91f",
+      "result": "2 files, 18 tests passed after placeholder fix",
+      "exit_code": 0
+    },
+    {
+      "command": "npm --workspace @awaken/desktop run typecheck",
+      "log": "/tmp/awaken-dedup-types.txt",
+      "log_sha256": "a4b40c009f2ac300e0fd6a005c7e48dc24adcc307fce76740e82d9e240aaea21",
+      "result": "passed on final renderer source",
+      "exit_code": 0
+    },
+    {
+      "command": "npm run build:desktop",
+      "log": "/tmp/awaken-dedup-build.txt",
+      "log_sha256": "af32ca9a8caaf92cc652693fded69624c5dc086c7b34db1ee63350b4d14f3ecd",
+      "result": "passed; managed Desktop restarted with built Core",
+      "exit_code": 0
+    },
+    {
+      "command": "npm --workspace @awaken/desktop run build",
+      "log": "/tmp/awaken-dedup-final-build.txt",
+      "log_sha256": "09b1619da94caea4d46d0a571b69d4d29ed2c96a29b7608450e611e644d328c1",
+      "result": "passed on final renderer source",
+      "exit_code": 0
+    },
+    {
+      "command": "Design System component smoke",
+      "log": "/tmp/awaken-dedup-component-smoke.txt",
+      "log_sha256": "d6718e5d32270d210574bbc7c3c1736f2254e27d9126e350bbf7881af295ec58",
+      "result": "73 components passed",
+      "exit_code": 0
+    }
+  ],
+  "desktop": {
+    "entry": "npm run close:desktop followed by npm run open:desktop",
+    "platform": "macOS",
+    "renderer": "managed development renderer, final UI changes applied by HMR",
+    "project": "协作优化验收0909",
+    "workspace": "/private/tmp/awaken-optimization-acceptance-20260909",
+    "thread_id": "thread_1788967191592131000_2",
+    "run_id": "run_1788967191592126000_1",
+    "agent_id": "subagent_3c310ca0f0677b4283f780c0",
+    "model": "k3",
+    "effort": "high",
+    "journal_path": "/Users/nolangrant/.awaken/store-generations/gen-001/sessions/thread_1788967191592131000_2/journal.jsonl",
+    "journal_sha256": "9fc5e18859564475b40f12835c640d8b04ed732b7e9f4e12f251e8dc9d421bf7",
+    "journal_records": 108,
+    "sequence_evidence": {
+      "spawn": 18,
+      "read_calls": [
+        32,
+        34
+      ],
+      "read_results": [
+        37,
+        40
+      ],
+      "first_terminal": 50,
+      "root_question_call": 65,
+      "root_answer_result": 67,
+      "followup_call": 73,
+      "continuation_spawn": 74,
+      "second_terminal": 92,
+      "root_terminal": 108
+    },
+    "results": {
+      "first": "NEED_OPTION",
+      "second": "DEDUP-915-A",
+      "root_status": "finished",
+      "same_agent": true,
+      "tool_names": [
+        "Read",
+        "ask_user",
+        "subagent"
+      ],
+      "child_tools": [
+        "Read",
+        "Read"
+      ],
+      "root_question_answer": "A"
+    },
+    "ui_checks": [
+      {
+        "case": "parent-question",
+        "result": "主 Agent 问题面板可操作；子任务面板只读，无输入框",
+        "screenshot": "parent-question.jpg"
+      },
+      {
+        "case": "blank-browser-mode",
+        "result": "从浏览器切到 subagent，再返回，浏览器标签名称和模式保留",
+        "screenshot": "browser-restored.jpg"
+      },
+      {
+        "case": "mixed-tab-close",
+        "result": "按打开顺序排列 child1/browser/child2，关闭 browser 后选中右邻 child2；修复并复验只剩 child 时无空文件占位标签",
+        "screenshot": "mixed-tab-close.jpg"
+      },
+      {
+        "case": "new-tab-entry",
+        "result": "新建标签显示文件和浏览器两个大按钮，原标签保留",
+        "screenshot": "entry-page.jpg"
+      },
+      {
+        "case": "file-and-draft-retained",
+        "result": "compact-result.json 在文件/选择页/subagent 间往返后仍显示 CTX-ALPHA-372、CTX-ZULU-985、96；DRAFT-DEDUP-915 草稿保留。验收后清空了本次草稿，未发送",
+        "screenshot": "file-preview-restored.jpg"
+      }
+    ]
+  },
+  "screenshots": {
+    "file-preview-restored.jpg": {
+      "sha256": "89d1fcc72eab7b78787b39cb874bc7c44c3c532109046f4001f846d40c6963c1",
+      "capture": "native CUA screenshot; visually inspected"
+    },
+    "mixed-tab-close.jpg": {
+      "sha256": "a8feac43a2cee81dd820a6c76d1c5e21215a999cbdf5955f3228b2fb477e7cb4",
+      "capture": "native CUA screenshot; visually inspected"
+    },
+    "parent-question.jpg": {
+      "sha256": "584bfe5a233e976b0aa678eae69c77b269ce82455752b595adf2d2f331398cc6",
+      "capture": "native CUA screenshot; visually inspected"
+    },
+    "entry-page.jpg": {
+      "sha256": "106e35572928cf4fb55ad8c41fac35b9ed8313bf026aa6e7f97e3d98b1e40d28",
+      "capture": "native CUA screenshot; visually inspected"
+    },
+    "browser-restored.jpg": {
+      "sha256": "235de037870ae7e7b63230a82bde925c4e194ec03ffae44a471d2e338950935a",
+      "capture": "native CUA screenshot; visually inspected"
+    }
+  },
+  "limitations": [
+    "本次 Desktop 验证使用 macOS、k3/high 和隔离项目，不代表全部供应商、平台或性能矩阵。",
+    "外部授权恢复、失败持久化边界和订阅重连策略由自动化验证，本次实机未制造外部授权或断线。",
+    "交付物和跨会话标签边界由 reducer/组合测试覆盖，本次实机主要验证文件、空白浏览器和 subagent。",
+    "构建仍有已知的大 bundle 提示；测试环境仍有 canvas getContext 未实现提示，相关命令成功退出。"
+  ]
+}

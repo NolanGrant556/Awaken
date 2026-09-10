@@ -64,6 +64,9 @@ func finalizeToolResult(result ToolExecutionResult) ToolExecutionResult {
 	if canonicalContent == "" {
 		canonicalContent = result.Content
 	}
+	if result.fullContent == "" && len(canonicalContent) > toolResultOffloadThresholdBytes {
+		result.fullContent = canonicalContent
+	}
 	limited := outputlimit.Limit(canonicalContent, outputlimit.DefaultToolResultMaxChars)
 	result.Content = limited.Content
 	result.Truncated = result.Truncated || result.Outcome.Truncated || limited.Truncated

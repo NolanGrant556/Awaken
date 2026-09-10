@@ -13,7 +13,7 @@ func TestValidateSpawnCombo(t *testing.T) {
 		{AgentTypeGeneral, WorkspaceGitWorktree, ""},
 		{AgentTypeExplore, WorkspaceGitWorktree, ErrorWorkspaceMode},
 		{AgentTypePlan, WorkspaceShared, ErrorWorkspaceMode},
-		{AgentTypeGeneral, WorkspaceSharedReadOnly, ErrorWorkspaceMode},
+		{AgentTypeGeneral, WorkspaceSharedReadOnly, ""},
 		{"custom", WorkspaceSharedReadOnly, ErrorInvalidInput},
 	}
 	for _, testCase := range cases {
@@ -31,7 +31,7 @@ func TestValidateSpawnCombo(t *testing.T) {
 }
 
 func TestNormalizeDefaults(t *testing.T) {
-	if NormalizeAgentType("") != AgentTypeExplore {
+	if NormalizeAgentType("") != AgentTypeGeneral {
 		t.Fatalf("empty type default")
 	}
 	if NormalizeWorkspaceMode(AgentTypeExplore, "") != WorkspaceSharedReadOnly {
@@ -74,8 +74,11 @@ func TestReadOnlyRolesHideMutationTools(t *testing.T) {
 
 // RP-G10: the root-only update_plan tool is hidden from every child role;
 // child progress uses native Subagent facts ([工具定义](docs/02_主智能体闭环/运行计划/实现方案.md#工具定义)).
-func TestAllRolesHideUpdatePlan(t *testing.T) {
+func TestSpecialistRolesHideUpdatePlan(t *testing.T) {
 	for agentType := range RoleCatalog() {
+		if agentType == AgentTypeGeneral {
+			continue
+		}
 		role, ok := LookupRole(agentType)
 		if !ok {
 			t.Fatalf("%s role missing", agentType)
@@ -92,8 +95,11 @@ func TestAllRolesHideUpdatePlan(t *testing.T) {
 	}
 }
 
-func TestAllRolesHideArchivedHistory(t *testing.T) {
+func TestSpecialistRolesHideArchivedHistory(t *testing.T) {
 	for agentType := range RoleCatalog() {
+		if agentType == AgentTypeGeneral {
+			continue
+		}
 		role, ok := LookupRole(agentType)
 		if !ok {
 			t.Fatalf("%s role missing", agentType)

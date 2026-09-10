@@ -66,6 +66,7 @@ type ArchivedHistoryReadRequest struct {
 // ArchivedHistoryItem is one bounded semantic journal item. Content is
 // untrusted historical data and never becomes system or user authority.
 type ArchivedHistoryItem struct {
+	AgentID          string    `json:"origin_agent_id,omitempty"`
 	Seq              uint64    `json:"seq"`
 	Kind             string    `json:"kind"`
 	Role             string    `json:"role,omitempty"`

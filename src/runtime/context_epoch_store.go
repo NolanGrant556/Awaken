@@ -21,10 +21,40 @@ import (
 )
 
 type ContextEpochFileStore struct {
-	mu sync.Mutex
+	mu    sync.Mutex
+	locks map[string]*contextEpochLock
 }
 
 func NewContextEpochStore() *ContextEpochFileStore { return &ContextEpochFileStore{} }
+
+type contextEpochLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+func (store *ContextEpochFileStore) lockContext(key string) func() {
+	store.mu.Lock()
+	if store.locks == nil {
+		store.locks = make(map[string]*contextEpochLock)
+	}
+	entry := store.locks[key]
+	if entry == nil {
+		entry = &contextEpochLock{}
+		store.locks[key] = entry
+	}
+	entry.refs++
+	store.mu.Unlock()
+	entry.mu.Lock()
+	return func() {
+		entry.mu.Unlock()
+		store.mu.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(store.locks, key)
+		}
+		store.mu.Unlock()
+	}
+}
 
 type contextEpochPointer struct {
 	SchemaVersion int    `json:"schema_version"`
@@ -62,6 +92,7 @@ type contextEpochDelta struct {
 }
 
 type contextEpochSidecar struct {
+	AgentID                string                       `json:"agent_id,omitempty"`
 	SchemaVersion          int                          `json:"schema_version"`
 	EpochID                string                       `json:"epoch_id"`
 	ThreadID               string                       `json:"thread_id"`
@@ -92,14 +123,24 @@ type contextEpochSidecar struct {
 	needsNormalization     bool
 }
 
-func (store *ContextEpochFileStore) Project(_ context.Context, candidate agentcore.ContextEpochCandidate) (agentcore.ContextEpochProjection, error) {
+func (store *ContextEpochFileStore) Project(ctx context.Context, candidate agentcore.ContextEpochCandidate) (agentcore.ContextEpochProjection, error) {
 	if strings.TrimSpace(candidate.ThreadID) == "" {
 		return agentcore.ContextEpochProjection{}, errors.New("context epoch requires thread identity")
 	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-
 	dir := filepath.Join(activeSessionsDir(), safeTranscriptFileName(candidate.ThreadID), "context", "epochs")
+	if candidate.AgentID == "root" {
+		candidate.AgentID = ""
+	}
+	if candidate.AgentID != "" {
+		// Keep the original separator so existing child epoch directories remain readable.
+		digest := sha256.Sum256([]byte(candidate.AgentID + "\x00"))
+		dir = filepath.Join(activeSessionsDir(), safeTranscriptFileName(candidate.ThreadID), "context", "agents", hex.EncodeToString(digest[:]), "epochs")
+	}
+	unlock := store.lockContext(dir)
+	defer unlock()
+	if err := ctx.Err(); err != nil {
+		return agentcore.ContextEpochProjection{}, err
+	}
 	if err := filestore.EnsureDir(dir); err != nil {
 		return agentcore.ContextEpochProjection{}, err
 	}
@@ -160,8 +201,9 @@ func newContextEpoch(candidate agentcore.ContextEpochCandidate, sequence uint64)
 		credentialRevision = 1
 	}
 	baselineDigest := contextEpochBaselineDigest(candidate.ExactSystemPrompt, candidate.PrefixMessages)
+	// Preserve the empty legacy revision slot in persisted epoch IDs.
 	epochSeed := strings.Join([]string{
-		candidate.ThreadID, fmt.Sprint(sequence), baselineDigest, candidate.ProviderID,
+		candidate.ThreadID, candidate.AgentID, "", fmt.Sprint(sequence), baselineDigest, candidate.ProviderID,
 		candidate.ProfileID, fmt.Sprint(credentialRevision), candidate.ModelID,
 		candidate.CapabilityModelID, candidate.EndpointSelector, candidate.ModelSelectorKind,
 		candidate.ProtocolFamily, candidate.EndpointContractID, candidate.NormalizedBaseURL,
@@ -171,7 +213,7 @@ func newContextEpoch(candidate agentcore.ContextEpochCandidate, sequence uint64)
 	epochHash := sha256.Sum256([]byte(epochSeed))
 	epoch := contextEpochSidecar{
 		SchemaVersion: agentcore.ContextEpochSchemaVersion, EpochID: "epoch_" + hex.EncodeToString(epochHash[:12]),
-		ThreadID: candidate.ThreadID, BaselineSequence: sequence, ExactBaselineText: candidate.ExactSystemPrompt,
+		ThreadID: candidate.ThreadID, AgentID: candidate.AgentID, BaselineSequence: sequence, ExactBaselineText: candidate.ExactSystemPrompt,
 		PrefixMessages: append([]convcontext.Message(nil), candidate.PrefixMessages...), InstructionDigest: candidate.InstructionDigest,
 		BaselineDigest: baselineDigest, PromptSchemaVersion: candidate.PromptSchemaVersion,
 		WorkspaceRoot: candidate.WorkspaceRoot, ProviderID: candidate.ProviderID, ProfileID: candidate.ProfileID,
@@ -210,6 +252,8 @@ func contextEpochBoundaryReason(current contextEpochSidecar, candidate agentcore
 		revision = 1
 	}
 	switch {
+	case current.AgentID != candidate.AgentID:
+		return "context_identity_changed"
 	case current.SchemaVersion != agentcore.ContextEpochSchemaVersion || current.PromptSchemaVersion != candidate.PromptSchemaVersion:
 		return "prompt_schema_incompatible"
 	// An empty candidate digest means the projection did not evaluate the

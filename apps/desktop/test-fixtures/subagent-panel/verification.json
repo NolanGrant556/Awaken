@@ -1,0 +1,317 @@
+{
+  "schema_version": 1,
+  "scope": "Subagent read-only Inspector tabs and parent-only conversation",
+  "recorded_at": "2026-09-09T14:12:53.752016+00:00",
+  "baseline_commit": "f9b1dc16ae9bd2e8d02e3bc5634aaa2bae174f42",
+  "branch": "main",
+  "committed": false,
+  "desktop": {
+    "entry": "npm run open:desktop",
+    "electron_pid": 23061,
+    "core_pid": 23494,
+    "restored_window": "1440x903",
+    "original_theme_restored": "light",
+    "temporary_draft_cleared": true
+  },
+  "live_collaboration": {
+    "thread_id": "thread_1788962322571083000_2",
+    "run_id": "run_1788962322571078000_1",
+    "agent_id": "subagent_10d044b06f2d4e10cc16586c",
+    "assignments": [
+      {
+        "task_id": "subtask_045fb7fd87368c45941e9da9",
+        "attempt_id": "attempt_5015b3a0cdad9bb3fc65ed95",
+        "terminal_seq": 56,
+        "result": "NEED_OPTION"
+      },
+      {
+        "task_id": "subtask_13028356bd9e0ab430c3909e",
+        "attempt_id": "attempt_7d97ecb8587b2664c31e525b",
+        "terminal_seq": 92,
+        "result": "PANEL-913-A"
+      }
+    ],
+    "question_owner": "root",
+    "question_tool_seq": 65,
+    "answer_result_seq": 67,
+    "parent_followup_seq": 73,
+    "root_terminal_seq": 106,
+    "child_ask_user_calls": 0,
+    "child_tools": [
+      "Bash: sleep 15"
+    ],
+    "child_file_writes": 0
+  },
+  "ui_checks": [
+    "Clicking a child row opens its exact assignment in the right-side tab; no center child overlay or child input form.",
+    "Repeated clicks reuse a tab. Closing the active tab selects its neighbor and does not close the Agent.",
+    "Main draft DRAFT-PANEL-912 survives child/file switching and is cleared after acceptance.",
+    "compact-result.json preview and directory selection restore immediately after visiting the child tab.",
+    "Collapsing and expanding restores the selected child tab. Switching thread clears old child tabs before replay.",
+    "Light and dark child panels are readable; original light theme restored.",
+    "The first narrow-window attempt exposed the inherited Inspector overlay covering the main composer. The split-layout fix was repeated in real Desktop and keeps the send button visible.",
+    "Parent ask_user followed by parent subagent followup completed with the same Agent and two separate assignments."
+  ],
+  "screenshots": {
+    "completed-with-draft.jpg": {
+      "sha256": "381b3b91fac9ffaedef19504d77cb332d71a1784a7c30a908ab956835973a9a9",
+      "pixels": [
+        1225,
+        768
+      ],
+      "status": "observed"
+    },
+    "dark-panel.jpg": {
+      "sha256": "1a7b49d21ea4363edd86e6c9299299bfa74a08af31b8bcb5beb53389401e9a97",
+      "pixels": [
+        1225,
+        768
+      ],
+      "status": "observed"
+    },
+    "file-preview-restored.jpg": {
+      "sha256": "c1bd17a52c7dd753429f60ed4660d78b979914610629daf08e47736a920a412f",
+      "pixels": [
+        1225,
+        768
+      ],
+      "status": "observed"
+    },
+    "historical-failure.jpg": {
+      "sha256": "e447bdf4e4c581fb811765cf2a0c49f0621f8de76a40e9f819467dd8e5910269",
+      "pixels": [
+        1225,
+        768
+      ],
+      "status": "observed"
+    },
+    "narrow-panel-before.jpg": {
+      "sha256": "4df1b9564338e65a0b8fac725b7ed5c91d0b35a34c71516c5821469a9607fd44",
+      "pixels": [
+        954,
+        768
+      ],
+      "status": "failed_before_fix"
+    },
+    "narrow-panel.jpg": {
+      "sha256": "98b2e0563357211a3fd3f169f1f8e97221b9b90808c9bdea0441168934fde3a3",
+      "pixels": [
+        954,
+        768
+      ],
+      "status": "observed"
+    },
+    "parent-question.jpg": {
+      "sha256": "eb4f44221f3c2c861aa3dd5e5e0da8887505dd6623ff31869dc6bdf9a1ee5698",
+      "pixels": [
+        1225,
+        768
+      ],
+      "status": "observed"
+    }
+  },
+  "automated": {
+    "go_all": "passed",
+    "race_packages": [
+      "agentcore",
+      "subagentruntime",
+      "runtime",
+      "server"
+    ],
+    "race": "passed",
+    "go_vet": "passed",
+    "desktop_test_files": 152,
+    "desktop_tests_passed": 1559,
+    "desktop_test_command": "npm --workspace @awaken/desktop test -- --maxWorkers=2",
+    "typecheck": "passed",
+    "desktop_build": "passed",
+    "component_smoke_count": 73,
+    "docs": "16 sections / 38 features / 76 documents passed",
+    "diff_check": "passed"
+  },
+  "test_notes": [
+    "Initial project-folder fixture cleanup raced its asynchronous StartRun journal writer. The fixture now drains workers before TempDir cleanup; full Go and race passed afterward.",
+    "An initial high-concurrency Desktop run timed out in an unrelated scheduled-task test and cascaded act failures. The final complete run with two workers passed.",
+    "Earlier static layout assertions were updated for the new inspector owner and narrow media rule."
+  ],
+  "limits": [
+    "macOS managed Desktop only; Windows/Linux not exercised.",
+    "Live child ask_user refusal is covered by ToolRuntime tests; the real model followed its hidden-tool/parent-handoff policy without attempting the forbidden tool.",
+    "This evidence does not complete the earlier optimization plan provider, long-context or performance matrices."
+  ],
+  "logs": {
+    "go_all": {
+      "path": "/tmp/awaken-subagent-panel-all-go.txt",
+      "sha256": "12fcf0d1956cddfcbc10f44891fcabe2c9521abb066449d4be54f309fc7615c1"
+    },
+    "race": {
+      "path": "/tmp/awaken-subagent-panel-race.txt",
+      "sha256": "da0d0a2ed62299d7a375b1aa413b2849356f2f884a0df57bae57ff2b377ba5ea"
+    },
+    "go_vet": {
+      "path": "/tmp/awaken-subagent-panel-vet.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "desktop_tests": {
+      "path": "/tmp/awaken-subagent-panel-all-ui-final.txt",
+      "sha256": "f168312de4005848eacf9f03f3cd5e822770d5d47eeea07ad9249ce602358c9c"
+    },
+    "typecheck": {
+      "path": "/tmp/awaken-subagent-panel-typecheck-final.txt",
+      "sha256": "a4b40c009f2ac300e0fd6a005c7e48dc24adcc307fce76740e82d9e240aaea21"
+    },
+    "build": {
+      "path": "/tmp/awaken-subagent-panel-build-final.txt",
+      "sha256": "f14b7b3f1a86a4f195a3ad88b67382e8e290ab7d21975f8633aebc4fc4edd69a"
+    },
+    "component_smoke": {
+      "path": "/tmp/awaken-subagent-panel-ui-smoke.txt",
+      "sha256": "d6718e5d32270d210574bbc7c3c1736f2254e27d9126e350bbf7881af295ec58"
+    }
+  },
+  "source_sha256": {
+    "Awaken Design System/src/components/AwakenWorkbenchShell/AwakenWorkbenchShell.tsx": "f2f0cbd81113081c07a49920456e2a1e14973b0803a658ddd30ea6ce48bf9dc9",
+    "Awaken Design System/src/components/AwakenWorkbenchShell/AwakenWorkbenchShell.css": "a0b03960a0e244bbf5266e237d222e98ad78a38c1f6360d3d648118aad1d423d",
+    "apps/desktop/src/renderer/App.tsx": "5c5f3dbaf183e08fe92cf53ad10ec3d8b5307250dedfa6d399653b4c0505c0de",
+    "apps/desktop/src/renderer/DesktopInspectorRail.tsx": "62592cc961b9559df712dd1233d3c23a94f19efab68344cfde9e498844f92b8e",
+    "apps/desktop/src/renderer/DesktopWorkbenchChrome.tsx": "553d88cfc20cac824d949c22313cba201b78edfd3f6dca1626db70d5c9c50a9d",
+    "apps/desktop/src/renderer/WorkbenchOverlays.tsx": "dad7681726beffd1185f57ace5ad3328c84d49ea56d28b7eefb7bd8c049f36b0",
+    "apps/desktop/src/renderer/SubagentPanel.tsx": "aad9911956489da2eef1a3d92f0895230f653dcf8aa64bcef705c37de216689a",
+    "apps/desktop/src/renderer/subagentTabs.ts": "5831007624436e85ff2a5b02c99acb72ba42eeb54a401b224507dbfcacfd6120",
+    "apps/desktop/src/renderer/subagentTabs.test.ts": "9334c8c0e610b0611be09369a8153d1acaab9161e3f45e69aaf6795653e56a92",
+    "apps/desktop/src/renderer/useWorkbenchPanels.ts": "48fc0518d22b0335173651ed3b88eecdad37aed293021a1a566249a4d9d31048",
+    "apps/desktop/src/renderer/useFileWorkspaceSession.ts": "a13a306185544c4cba51402f8a89a6a7cb0a13e64ea4cbc1a5f375b832c6e925",
+    "apps/desktop/src/renderer/styles.css": "10d56927f6712d4521470f5fe71bace0fb9c64fd20883fd71692fc7bf2c8909d",
+    "apps/desktop/src/renderer/styles/project-files.css": "b33e607703e019e9b9a72ec0a3304b6851a3f60c8ac4c8e50e7340f2b53a8fa3",
+    "apps/desktop/src/renderer/styles/workbench.css": "9c77250b28e20331f793876da7a927786ab6c3700147076da679cc899c340bfb",
+    "apps/desktop/src/renderer/WorkbenchComposition.behavior.test.tsx": "9846bb720ad1b1506b6538de0b28b3128c1c0b310eebee4704ab5ae48771953b",
+    "apps/desktop/src/renderer/RunStageLayout.test.ts": "5f544285b40f22394f8139347ef5a22415c781fc0484d564227561750325c101",
+    "apps/desktop/src/renderer/runtime/client.ts": "c79c70c8a835cc55ce701e03f176b843e21d6e6fee8c5eaa65824a75c69cf250",
+    "apps/desktop/src/main/runs-ipc.ts": "40759a0aa5f2242238ec8a7bcfaaa1e9c6abf64e937f57dffe5c90390fc6bf8f",
+    "apps/desktop/src/preload/index.ts": "40d4a47b4e96ddcea2c656dd182ba26aa75e2d97be9210bc270ae09253018221",
+    "apps/desktop/src/shared/runtime.ts": "204ece64cce71b9b769b11a7318f67f491249508538f946026d4950e71c03b4a",
+    "src/agentcore/runner_subagents.go": "2f134aa8c5e6cf25d10aacaa55cc158bdca88ac85569f1e80368702e0ea0d599",
+    "src/agentcore/tool_runtime.go": "74cb4ff540e10cfcf5ca310b63dde3d882707d5694e233fcfe4ae2e835bedca9",
+    "src/agentcore/child_user_interaction_test.go": "5d630e1cdbd416abd430aca94461b916e29b2e9f8c8a59eccc25be85c3900d05",
+    "src/subagentruntime/roles.go": "f33d9f6ee241536cdb471c474d88332b77e799fa8421f2d1aa6580bc23a25897",
+    "src/runtime/thread_activity.go": "ee5bd932de4e1a4fd37b1a6e05569de0400aa5c29c62335b320558340a63306b",
+    "src/runtime/collaboration_restore_test.go": "426a3f1ea4e4ea91d3466bf0dade8890a84c1b853f25bfafdfd0192b56345092",
+    "src/runtime/project_folders_test.go": "fae89fe0871e617bdd9ecbeec96e30c956144f62064249c76e699318c4d2a53a",
+    "src/runtime/run_service.go": "a7727a5d43dec75d355cabb9ed5532842191fcbb780820ede9909d979ccccc03",
+    "src/server/router.go": "1868b3338afad3df2787ee6ffbf1f830b7d3de4d98d45c3cffb38740d1e4f856",
+    "src/server/handlers.go": "a7d905833be8d3bb964715da4b6c82f0482b1bacf3fc992b78b74c9ed64a35f7",
+    "src/server/handlers_thread_activity.go": "78a2ea5aa5c486e0146a10d5572731e3759940dbd79fff59367cdeb257a2ddaa",
+    "src/server/subagent_readonly_test.go": "c922471df37b137006db3f0dcc342c67d1eb4dda894be869699b19fd659f7c15"
+  },
+  "compact_list_presentation": {
+    "recorded_at": "2026-09-09T14:31:57.465552+00:00",
+    "scope": "Center subagent group presentation only; right-side details and task selection unchanged.",
+    "screenshot": {
+      "path": "compact-list.jpg",
+      "sha256": "64d11acfc91600d4cdce70afad14c2ad5102b882cbd908b6a694faa6112efce9"
+    },
+    "source_sha256": {
+      "Awaken Design System/src/components/AwakenSubagentGroup/AwakenSubagentGroup.tsx": "815b79ca873e9ef85b4e7b26c1ea7ce9edcea86df1ebce3d83786ea2c7fdbf1b",
+      "Awaken Design System/src/components/AwakenSubagentGroup/AwakenSubagentGroup.css": "5bb37f9f211e2457cf6ccbd3888c6073a4123fa2385c0a690ba0482a2b9e596b"
+    },
+    "desktop_observations": [
+      "Header displays subagent without aggregate counts.",
+      "Each completed assignment occupies one line containing only its name and 完成.",
+      "Clicking the second assignment opens its existing right-side tab with PANEL-913-A."
+    ],
+    "automated": {
+      "ui_build": "passed",
+      "desktop_typecheck": "passed",
+      "focused_desktop_tests": 10,
+      "component_render_smoke": 73,
+      "docs": "passed",
+      "diff_check": "passed"
+    },
+    "limits": [
+      "This scoped UI check does not rerun the previous backend or full Desktop test matrix.",
+      "Live screenshot covers completed assignments; running and failure labels use the existing status data."
+    ]
+  },
+  "new_tab_and_panel_theme": {
+    "recorded_at": "2026-09-09T14:41:28.331475+00:00",
+    "scope": "Unified plus entry and theme-aligned subagent surface",
+    "desktop_checks": [
+      "Subagent plus opens a new blank file/browser chooser.",
+      "Plus from compact-result.json preserves its tab and selects a new blank slot.",
+      "Plus from browser mode creates a new blank slot in files mode.",
+      "Returning to compact-result.json restores CTX-ALPHA-372, CTX-ZULU-985 and blocks_read=96.",
+      "Subagent panel inspected in light and dark themes; original dark preference restored."
+    ],
+    "automated": {
+      "focused_tests": 17,
+      "desktop_typecheck": "passed",
+      "desktop_build": "passed",
+      "docs": "passed",
+      "diff_check": "passed"
+    },
+    "source_sha256": {
+      "apps/desktop/src/renderer/DesktopWorkbenchChrome.tsx": "b0a8921b38fbd4459bb0a9afa77346c135fcffbbf359c9ba9031e0642a00f49f",
+      "apps/desktop/src/renderer/useFileWorkspaceSession.ts": "7245d93433b545fcc569a833699ce9f71ef41b95447bc14e213fc2e820fe3c19",
+      "apps/desktop/src/renderer/styles.css": "f8715a6c26930603bd3292d23f28b52c3f5b1d4f14af9c3dfff961b24dd1e69f",
+      "apps/desktop/src/renderer/WorkbenchComposition.behavior.test.tsx": "7b2071330596ee256c4bf8ad4e2634e20e6b088d22be1ab61bbca68c9cda2184"
+    },
+    "screenshots": {
+      "theme-aligned-dark.jpg": "8173b1c22b9985f827530dac82d7c35a291835245c2427799590a1644129391d",
+      "theme-aligned-light.jpg": "56c271705150c7cd68157dbd2f93ed9a150bedce322a94b4cb179187f203317a",
+      "new-tab-chooser.jpg": "6c42c762c4a2848167e38b4b09b94d88f0ea66c082bdcda4de6aab60ab4c4a7b"
+    },
+    "limits": [
+      "Browser entry was tested with its empty local-HTML preview; no external browser navigation.",
+      "No-project behavior covered by composition regression test.",
+      "Backend unchanged; Go suite not rerun for this UI change."
+    ]
+  },
+  "entry_buttons": {
+    "recorded_at": "2026-09-09T14:47:13.325774+00:00",
+    "supersedes": "new_tab_and_panel_theme plus-button behavior; prior theme evidence remains applicable",
+    "behavior": [
+      "Plus shows the existing vertical 文件 and 浏览器 buttons; no directory or preview is visible.",
+      "Selecting 文件 or 浏览器 creates a new slot and opens that mode.",
+      "Existing tabs and preview selection are retained while the entry page is visible."
+    ],
+    "desktop_checks": [
+      "Subagent plus: two buttons shown.",
+      "File plus: two buttons shown and compact-result.json tab retained.",
+      "Browser choice: browser empty state displayed.",
+      "Browser plus: two buttons shown.",
+      "Existing compact-result.json tab restores CTX-ALPHA-372, CTX-ZULU-985 and blocks_read=96."
+    ],
+    "screenshot": {
+      "path": "entry-buttons.jpg",
+      "sha256": "20be1e83d54587d71ad32b85a7294a3787e3c93e2602403bd8bed5bf7b0edf7c"
+    },
+    "checks": {
+      "focused_tests": 17,
+      "typecheck": "passed",
+      "desktop_build": "passed",
+      "docs": "passed",
+      "diff_check": "passed"
+    },
+    "source_sha256": {
+      "apps/desktop/src/renderer/useFileWorkspaceSession.ts": "bd15cf7f63153be68013222fdb7c3e6c0b3442f4c1188c747a1e6b57a0b2a165",
+      "apps/desktop/src/renderer/App.tsx": "39f0b23a0213353dce325978c488663b6b3c3511a610cd77f394aa5fa7afad29",
+      "apps/desktop/src/renderer/styles/project-files.css": "192e496b26ab390eaa5eb160003bfd09064d9be074356d62f1a5638b4afe9b49",
+      "apps/desktop/src/renderer/WorkbenchComposition.behavior.test.tsx": "bd1d3755bd4c15e66856a2ea83bd487895ce9b651299a0821fa9f766f5989d39"
+    },
+    "limits": [
+      "macOS dark Desktop only for this correction; backend unchanged.",
+      "Browser validation covers the local HTML empty state, not external navigation."
+    ]
+  },
+  "file_toolbar_only": {
+    "scope": "Remove only the browser button from the file workspace toolbar; keep the plus entry browser choice.",
+    "screenshot": "file-toolbar-only.jpg",
+    "screenshot_sha256": "1b1add8ac751d8a033ce984312d808a32829bb8cd10af06c186364b33dfa0d1d",
+    "source_sha256": "07f80056904e8d06455074946ffe259721d6064e469477e0ed6b96ca5a401288",
+    "desktop": "Observed toolbar contains only 文件 while browser empty preview remains visible.",
+    "typecheck": "passed",
+    "project_files_tests": 23,
+    "docs": "passed",
+    "diff_check": "passed"
+  }
+}

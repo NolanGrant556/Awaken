@@ -35,7 +35,6 @@ export * from "./AwakenIcon";
 export * from "./AwakenIconButton";
 export * from "./AwakenInspectorRail";
 export * from "./AwakenSubagentGroup";
-export * from "./AwakenSubagentExecutionCard";
 export * from "./AwakenMarkdownRenderer";
 export * from "./AwakenMermaidDiagram";
 export * from "./AwakenMemoryLightFlow";

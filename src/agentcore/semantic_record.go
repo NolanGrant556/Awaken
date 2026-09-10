@@ -210,6 +210,10 @@ type SemanticRecordRangeReader interface {
 	SemanticRecords(fromSeq, toSeq uint64) ([]SemanticRecord, error)
 }
 
+type AgentSemanticRecordRangeReader interface {
+	SemanticRecordsForAgent(agentID string, fromSeq, toSeq uint64) ([]SemanticRecord, error)
+}
+
 // FlushedSemanticRecorder appends one safety-sensitive fact, flushes durable
 // storage, and only then publishes the assigned record to live consumers.
 // Facts whose UI must never get ahead of durable truth (for example Computer

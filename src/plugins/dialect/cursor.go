@@ -46,7 +46,7 @@ func (cursorAdapter) Parse(root string, candidate ir.ManifestCandidate, options 
 	} else if !hasSkills && existingPath(root, "SKILL.md") {
 		skillPaths = []string{""}
 	}
-	items, diags := parseSkillComponents(root, skillPaths, ir.DialectCursor, manifestPath, ir.MappingAdapted)
+	items, diags := parseSkillComponents(root, identity.Name, skillPaths, ir.DialectCursor, manifestPath, ir.MappingAdapted)
 	plugin.Components, plugin.Diagnostics = append(plugin.Components, items...), append(plugin.Diagnostics, diags...)
 
 	for _, definition := range []struct {

@@ -20,10 +20,12 @@ const (
 	maxOutputContinuationPromptPrefix    = "请继续上一条回答，从中断处继续，不要重复已经输出的内容。"
 	maxReasoningOnlyContinuationAttempts = 1
 	reasoningOnlyContinuationPrompt      = "上一轮只返回了内部推理，没有提供可见答复或工具调用。请继续当前任务：未完成就调用下一步工具，已经完成就返回明确的可见结果。"
-	toolResultOffloadThresholdBytes      = 32 * 1024
-	maxTransientLLMRetries               = 5
-	initialConnectionRetryDelay          = 5 * time.Second
-	maxConnectionRetryDelay              = 60 * time.Second
+	// Stay within the 12 Ki-rune model content projection even for ASCII.
+	// The UI preview budget is independent of full-result retrieval.
+	toolResultOffloadThresholdBytes = 12 * 1024
+	maxTransientLLMRetries          = 5
+	initialConnectionRetryDelay     = 5 * time.Second
+	maxConnectionRetryDelay         = 60 * time.Second
 )
 
 var (
@@ -32,6 +34,9 @@ var (
 )
 
 type Runner struct {
+	pendingInbox            []string
+	inboxErr                error
+	incorporateMessages     func([]string)
 	config                  AgentConfig
 	conversation            *context.Conversation
 	reqBuilder              *RequestBuilder
@@ -55,12 +60,18 @@ type Runner struct {
 }
 
 func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *RequestBuilder) *Runner {
+	if config.ChildSessions == nil {
+		config.ChildSessions = NewChildSessions()
+	}
 	runner := &Runner{
 		config:            config,
 		conversation:      conv,
 		reqBuilder:        reqBuilder,
 		toolRuntime:       NewToolRuntimeWithConfig(nil, toolRuntimeConfigFromAgentConfig(config)),
 		failureSupervisor: NewFailureSupervisor(config.Workspace.Root, config.MaxThoughts, config.MaxToolExecutions),
+	}
+	if config.SubagentOrigin != nil {
+		runner.failureSupervisor.toolExecutions = config.AgentToolsUsed
 	}
 	runner.contextGovernor = newContextGovernor(
 		NewContextEngine(contextWindowConfigFromModelConfig(config.ModelConfig)),
@@ -146,7 +157,22 @@ func NewRunner(config AgentConfig, conv *context.Conversation, reqBuilder *Reque
 
 func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (answer string, runErr error) {
 	events := newRunEventEmitter(r.threadID, sink)
+	events.attemptID = r.config.AttemptID
+	events.inboxMessageIDs = func() []string { return append([]string(nil), r.pendingInbox...) }
+	events.contextRevision = func() uint64 { return r.config.ContextRevision + 1 }
+	events.contextCommitted = func() {
+		r.config.ContextRevision++
+		if r.incorporateMessages != nil {
+			r.incorporateMessages(r.pendingInbox)
+		}
+		r.pendingInbox = nil
+	}
 	defer r.syncRestoredContextWindowUsageAnchor()
+	defer func() {
+		if r.config.SubagentOrigin != nil && r.failureSupervisor != nil {
+			r.config.AgentToolsUsed = r.failureSupervisor.toolExecutions
+		}
+	}()
 	if r.configureEmitter != nil {
 		r.configureEmitter(events)
 	}
@@ -170,31 +196,57 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	}
 	events.recorder = r.recorder
 	events.sessionID = r.sessionID
-	if r.config.SubagentOrigin == nil {
-		r.subagentController = r.config.SubagentController
-		if r.subagentController == nil && r.recorder != nil {
-			subagentProfileID := strings.TrimSpace(r.config.SubagentModelConfig.ProfileID)
-			if subagentProfileID == "" {
-				subagentProfileID = strings.TrimSpace(r.config.ModelConfig.ProfileID)
+	r.subagentController = r.config.SubagentController
+	if r.subagentController == nil && r.recorder != nil && r.config.SubagentOrigin == nil {
+		managerConfig := r.childCreatorConfig(events.sink)
+		managerConfig.Persist = r.persistSubagentEvent
+		r.subagentController = subagentruntime.NewManager(ctx, managerConfig)
+	}
+	if r.subagentController != nil {
+		if binder, ok := r.subagentController.(interface {
+			Bind(stdcontext.Context, string, int, subagentruntime.Config) subagentruntime.Controller
+		}); ok {
+			creatorID, depth := "root", 0
+			if r.config.SubagentOrigin != nil {
+				creatorID, depth = r.config.SubagentOrigin.AgentID, r.config.SubagentOrigin.Depth
 			}
-			r.subagentController = subagentruntime.NewManager(ctx, subagentruntime.Config{
-				MaxTasks: 8, MaxConcurrent: 4, ModelProfileID: subagentProfileID,
-				ParentWorkspaceRoot: r.config.Workspace.Root,
-				ParentWritableRoots: append([]string(nil), r.config.Workspace.WritableRoots...),
-				Starter: func(childCtx stdcontext.Context, request subagentruntime.StartRequest) (string, error) {
-					return r.startNativeChildWithHooks(childCtx, request, events)
-				},
-				Persist: r.persistSubagentEvent,
-			})
+			managerConfig := r.childCreatorConfig(events.sink)
+			r.subagentController = binder.Bind(ctx, creatorID, depth, managerConfig)
 		}
-		if r.subagentController != nil {
-			events.beforeTerminal = func(terminalCtx stdcontext.Context) error {
-				barrierCtx, cancel := stdcontext.WithTimeout(stdcontext.Background(), 5*time.Second)
-				defer cancel()
-				return r.subagentController.Close(barrierCtx)
+		if execution, ok := r.subagentController.(interface {
+			EnterExecution(stdcontext.Context) (stdcontext.Context, func(), error)
+		}); ok {
+			var release func()
+			var err error
+			ctx, release, err = execution.EnterExecution(ctx)
+			if err != nil {
+				return "", err
 			}
+			defer release()
+		}
+		events.beforeTerminal = func(terminalCtx stdcontext.Context) error {
+			// Cancellation is a request; terminal waits for actual child cleanup.
+			barrierCtx := stdcontext.Background()
+			if scoped, ok := r.subagentController.(interface {
+				EndAttempt(stdcontext.Context, string) error
+			}); ok {
+				if err := scoped.EndAttempt(barrierCtx, r.runID); err != nil {
+					return err
+				}
+				r.retireChildCreator(events.sink)
+				return nil
+			}
+			return r.subagentController.Close(barrierCtx)
+		}
+		if r.suppressRunLifecycle {
+			defer func() {
+				if err := events.beforeTerminal(stdcontext.Background()); err != nil && runErr == nil {
+					runErr = err
+				}
+			}()
 		}
 	}
+
 	r.toolRuntime = NewToolRuntimeWithConfig(events.scopedSink(), toolRuntimeConfigFromAgentConfig(r.config))
 	// The run identity is host-owned and becomes final only after the emitter
 	// adopts a caller-supplied ID or generates one. Bind that exact identity to
@@ -202,21 +254,28 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 	// Child/fork runners enter through this same path with their inherited ID.
 	r.toolRuntime.runID = r.runID
 	r.toolRuntime.threadID = r.threadID
-	if r.config.SubagentOrigin == nil {
-		// Root-only run plan service ([工具定义](docs/02_主智能体闭环/运行计划/实现方案.md#工具定义)/[SemanticJournal](docs/02_主智能体闭环/运行计划/实现方案.md#semanticjournal)): child runners
-		// (SubagentOrigin != nil) never receive one, so update_plan degrades
-		// to plan_service_unavailable there instead of mutating parent state.
+	{
+		// Each Runner owns its plan; records carry the current Agent identity.
 		planService := NewRunPlanService(RunPlanServiceConfig{
+			Restored:  r.config.RestoredRunPlan,
 			ThreadID:  r.threadID,
 			RunID:     r.runID,
 			SessionID: r.sessionID,
 			Persist: func(persistCtx stdcontext.Context, record SemanticRecord) error {
-				return r.persistRunPlanRecord(persistCtx, events, record)
+				return r.persistRunPlanRecord(persistCtx, events, events.withAgentIdentity(record))
 			},
 		})
 		r.runPlanService = planService
 		r.toolRuntime.runPlanService = planService
+		r.config.RunPlanContextProvider = planService.ContextBlock
 		r.reqBuilder.UpdateRunPlanContextProvider(planService.ContextBlock)
+		defer func() {
+			if r.config.SubagentOrigin != nil {
+				if snapshot, ok := planService.Snapshot(); ok {
+					r.config.RestoredRunPlan = &snapshot
+				}
+			}
+		}()
 	}
 	if !r.config.HookLifecycleStarted {
 		if err := events.runStarted(ctx); err != nil {
@@ -250,8 +309,11 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		default:
 		}
 
-		r.injectSubagentTerminalNotifications()
+		r.injectSubagentTerminalNotifications(nil)
 		r.injectSubagentQueuedMessages()
+		if r.inboxErr != nil {
+			return "", r.inboxErr
+		}
 
 		if r.failureSupervisor != nil {
 			r.failureSupervisor.BeginTurn()
@@ -260,6 +322,14 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 		events.turnStarted(turnState)
 
 		streamLLM := r.streamLLM
+		if r.config.SubagentOrigin != nil {
+			if r.config.AgentTurnsUsed >= r.effectiveMaxThoughts() {
+				err := maxThoughtsError(r.effectiveMaxThoughts())
+				events.runErrored(ctx, err, TerminalReasonMaxTurns)
+				return "", err
+			}
+			r.config.AgentTurnsUsed++
+		}
 		if r.streamLLMFunc != nil {
 			streamLLM = r.streamLLMFunc
 		}
@@ -309,30 +379,56 @@ func (r *Runner) RunStreamWithEvents(ctx stdcontext.Context, sink EventSink) (an
 			continue
 		}
 
+		// Inputs queued during the final provider call still belong to this
+		// active assignment. Preserve the older answer before the new input and
+		// cross another request boundary instead of leaving the input idle.
+		if !response.MaxOutputReached {
+			if messages := r.queuedSubagentMessages(); len(messages) > 0 {
+				if response.Content != "" {
+					r.conversation.AssistantOutputWithProviderState(response.Content, nil, response.ProviderOpaqueState)
+				}
+				r.appendSubagentQueuedMessages(messages)
+				if r.inboxErr != nil {
+					return "", r.inboxErr
+				}
+				events.turnFinished(ctx, "", TransitionSubagentNotification)
+				events.resetTurn()
+				transition = TransitionSubagentNotification
+				continue
+			}
+		}
+
 		// A child can finish while the provider is generating this turn. Do not
 		// let a response built from the older running snapshot become the root's
 		// final answer; retain it as context, append the durable terminal handoff,
 		// and give the model one fresh continuation boundary.
-		if !response.MaxOutputReached && r.injectSubagentTerminalNotifications() > 0 {
-			if response.Content != "" {
-				r.conversation.AssistantOutputWithProviderState(response.Content, nil, response.ProviderOpaqueState)
-			}
+		notifications := 0
+		if !response.MaxOutputReached {
+			notifications = r.injectSubagentTerminalNotifications(response)
+		}
+		if r.inboxErr != nil {
+			return "", r.inboxErr
+		}
+		if notifications > 0 {
 			events.turnFinished(ctx, "", TransitionSubagentNotification)
 			events.resetTurn()
 			transition = TransitionSubagentNotification
 			continue
 		}
-		// A root response cannot become terminal while a child is still active.
-		// Preserve the attempted answer as context and add a host-owned wait
-		// instruction so the next model boundary must observe the child result.
-		if !response.MaxOutputReached && r.injectActiveSubagentWaitInstruction() > 0 {
-			if response.Content != "" {
-				r.conversation.AssistantOutputWithProviderState(response.Content, nil, response.ProviderOpaqueState)
+		// Pure waiting is owned by the Host. An unchanged child set never
+		// consumes another root model turn just to ask it to keep waiting.
+		if !response.MaxOutputReached {
+			waited, waitErr := r.waitForActiveSubagents(ctx, events, response)
+			if waitErr != nil {
+				events.runErrored(ctx, waitErr, terminalReasonForError(waitErr))
+				return "", waitErr
 			}
-			events.turnFinished(ctx, "", TransitionSubagentNotification)
-			events.resetTurn()
-			transition = TransitionSubagentNotification
-			continue
+			if waited {
+				events.turnFinished(ctx, "", TransitionSubagentNotification)
+				events.resetTurn()
+				transition = TransitionSubagentNotification
+				continue
+			}
 		}
 
 		if response.MaxOutputReached {
@@ -450,6 +546,10 @@ func (r *Runner) persistHookSnapshot(ctx stdcontext.Context) error {
 		"snapshot_id": snapshot.SnapshotID, "schema_version": snapshot.SchemaVersion,
 		"enabled_hook_count": enabled, "diagnostic_count": len(snapshot.Diagnostics), "sources": sources,
 	})
+	if origin := r.config.SubagentOrigin; origin != nil {
+		record.Payload["agent_id"], record.Payload["parent_agent_id"] = origin.AgentID, origin.ParentAgentID
+		record.Payload["subagent_task_id"], record.Payload["attempt_id"] = r.config.SubagentTaskID, r.config.AttemptID
+	}
 	persistCtx, cancel := durablePersistenceContext(ctx)
 	defer cancel()
 	if err := r.recorder.Append(persistCtx, record); err != nil {

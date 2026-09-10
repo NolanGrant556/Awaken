@@ -25,7 +25,7 @@ var (
 	)
 )
 
-func (s *RunService) ReadCurrentThreadHistory(_ context.Context, request tool.ThreadHistoryReadRequest) (tool.ThreadHistoryReadResult, error) {
+func (s *RunService) ReadCurrentThreadHistory(ctx context.Context, request tool.ThreadHistoryReadRequest) (tool.ThreadHistoryReadResult, error) {
 	threadID := strings.TrimSpace(request.ThreadID)
 	query := strings.TrimSpace(request.Query)
 	if threadID == "" || utf8.RuneCountInString(threadID) > maxArchivedHistoryIdentifierChars || utf8.RuneCountInString(query) > maxArchivedHistoryQueryChars ||
@@ -64,7 +64,11 @@ func (s *RunService) ReadCurrentThreadHistory(_ context.Context, request tool.Th
 	records := sortedThreadHistoryRecords(transcript)
 	queryLower := strings.ToLower(query)
 	items := make([]tool.ArchivedHistoryItem, 0, len(records))
+	scope := tool.AgentHistoryScopeFromContext(ctx)
 	for _, record := range records {
+		if !scope.Allows(stringPayload(record.Payload, "agent_id"), record.Seq) {
+			continue
+		}
 		if request.BeforeSeq > 0 && record.Seq >= request.BeforeSeq {
 			continue
 		}

@@ -42,8 +42,11 @@ type ChildClient interface {
 }
 
 type ChildResult struct {
-	Output   string
-	Receipts []subagentruntime.HostToolReceipt
+	AgentID   string
+	TaskID    string
+	AttemptID string
+	Output    string
+	Receipts  []subagentruntime.HostToolReceipt
 }
 
 type PlanWriter interface {
@@ -203,9 +206,14 @@ func (o *Orchestrator) prefetchExplicitSources(ctx context.Context, intent Inten
 	urls := ExplicitHTTPSURLs(intent.Query)
 	results := make([]PrefetchedSource, 0, len(urls))
 	var coverage []string
-	for _, url := range urls {
+	for index, url := range urls {
 		if o.stopped(ctx) {
 			return results, coverage, nil
+		}
+		if index >= 4 {
+			coverage = append(coverage, "explicit URL exceeds this research run's four-source prefetch limit: "+url)
+			results = append(results, PrefetchedSource{URL: url, ErrorCode: "explicit_source_limit"})
+			continue
 		}
 		result, err := o.Prefetch.Fetch(ctx, url)
 		if err != nil {
@@ -266,10 +274,13 @@ func (o *Orchestrator) research(ctx context.Context, intent Intent, questions []
 			defer wg.Done()
 			prompt := researcherPrompt(intent, question)
 			var seedReceipts []subagentruntime.HostToolReceipt
-			if index == 0 && len(prefetched) > 0 {
-				prompt += prefetchedSourcePrompt(prefetched[0])
-				if prefetched[0].Receipt != nil {
-					seedReceipts = append(seedReceipts, *prefetched[0].Receipt)
+			for sourceIndex, source := range prefetched {
+				if sourceIndex%len(questions) != index || source.ErrorCode == "explicit_source_limit" {
+					continue
+				}
+				prompt += prefetchedSourcePrompt(source)
+				if source.Receipt != nil {
+					seedReceipts = append(seedReceipts, *source.Receipt)
 				}
 			}
 			child, err := o.Children.Run(ctx, ChildSpec{
@@ -339,7 +350,36 @@ func (o *Orchestrator) research(ctx context.Context, intent Intent, questions []
 	if err := o.append(ctx, "research_claim_batch", map[string]any{"claim_count": len(claims), "evidence_count": len(evidence)}); err != nil {
 		return claims, evidence, coverage, err
 	}
+	for _, source := range prefetched {
+		if source.ErrorCode != "" || source.Receipt == nil {
+			continue
+		}
+		locator, _ := source.Receipt.Details["final_url"].(string)
+		covered := false
+		for _, item := range evidence {
+			if item.Locator == source.URL || (locator != "" && item.Locator == locator) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			coverage = append(coverage, "explicit URL was fetched but no grounded claim covered it: "+source.URL)
+		}
+	}
 	return claims, evidence, coverage, nil
+}
+
+func receiptsForChild(child ChildResult) []subagentruntime.HostToolReceipt {
+	if child.AgentID == "" {
+		return child.Receipts
+	} // legacy/test adapter without execution identities
+	var receipts []subagentruntime.HostToolReceipt
+	for _, receipt := range child.Receipts {
+		if receipt.AgentID == child.AgentID && receipt.TaskID == child.TaskID && receipt.AttemptID == child.AttemptID {
+			receipts = append(receipts, receipt)
+		}
+	}
+	return receipts
 }
 
 func (o *Orchestrator) verify(ctx context.Context, intent Intent, claims []Claim, evidence []Evidence, coverage []string) ([]Claim, []string, error) {
@@ -351,7 +391,14 @@ func (o *Orchestrator) verify(ctx context.Context, intent Intent, claims []Claim
 		byID[ev.ID] = append(byID[ev.ID], ev)
 	}
 	shards := shardClaims(claims, 2)
-	for _, shard := range shards {
+	type verificationResult struct {
+		child    ChildResult
+		err      error
+		expected map[string]bool
+	}
+	results := make([]verificationResult, len(shards))
+	var wait sync.WaitGroup
+	for index, shard := range shards {
 		if o.stopped(ctx) {
 			return claims, coverage, nil
 		}
@@ -365,10 +412,25 @@ func (o *Orchestrator) verify(ctx context.Context, intent Intent, claims []Claim
 			}
 			prompt += verifierPrompt(claim, flattenEvidence(evs)) + "\n"
 		}
-		child, err := o.Children.Run(ctx, ChildSpec{
-			Description: "核验", Prompt: prompt, AgentType: subagentruntime.AgentTypeReview,
-			Host: spawnOptions(intent),
-		})
+		wait.Add(1)
+		go func(index int, prompt string, expected map[string]bool) {
+			defer wait.Done()
+			if o.stopped(ctx) {
+				results[index] = verificationResult{err: context.Canceled, expected: expected}
+				return
+			}
+			child, err := o.Children.Run(ctx, ChildSpec{Description: "核验", Prompt: prompt, AgentType: subagentruntime.AgentTypeReview, Host: spawnOptions(intent)})
+			results[index] = verificationResult{child: child, err: err, expected: expected}
+		}(index, prompt, expected)
+	}
+	wait.Wait()
+	if o.stopped(ctx) {
+		return claims, coverage, nil
+	}
+	// Merge in stable shard order so scheduling cannot renumber claims or
+	// citations. Every shard keeps its own independently obtained receipts.
+	for _, result := range results {
+		child, err, expected := result.child, result.err, result.expected
 		if err != nil {
 			coverage = keepShardPartial(claims, expected, coverage, "verifier shard failed; shard kept as partial")
 			continue
@@ -393,7 +455,7 @@ func (o *Orchestrator) verify(ctx context.Context, intent Intent, claims []Claim
 		}
 		for i := range claims {
 			if status, ok := seen[claims[i].ID]; ok {
-				if !receiptsSupportClaim(claims[i], evidence, child.Receipts) {
+				if !receiptsSupportClaim(claims[i], evidence, receiptsForChild(child)) {
 					claims[i].VerificationStatus = "partial"
 					coverage = append(coverage, "verifier did not re-read evidence for "+claims[i].ID+"; claim kept as partial")
 					continue

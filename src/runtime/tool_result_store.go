@@ -65,9 +65,13 @@ func (s *ToolResultStore) OffloadToolResult(
 		}
 		preview = string(previewBytes) + "…"
 	}
-	return agentcore.ToolResultOffloadReceipt{
+	receipt := agentcore.ToolResultOffloadReceipt{
 		StorageKey: storageKey, Digest: hex.EncodeToString(digest[:]), ByteSize: len(data), Preview: preview,
-	}, nil
+	}
+	if err := persistToolResultOwner(targetPath, threadID, identity, receipt); err != nil {
+		return agentcore.ToolResultOffloadReceipt{}, err
+	}
+	return receipt, nil
 }
 
 func (s *ToolResultStore) HydrateOffloadedToolResult(

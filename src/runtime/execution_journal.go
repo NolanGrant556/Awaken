@@ -22,6 +22,7 @@ import (
 var (
 	ErrJournalMiddleCorruption = errors.New("journal middle corruption")
 	ErrJournalEncoding         = errors.New("journal encoding error")
+	ErrJournalExternalChange   = errors.New("journal changed outside its active writer; reopen before writing")
 )
 
 const (
@@ -32,14 +33,17 @@ const (
 
 // ExecutionJournal is the per-thread SemanticRecorder implementation.
 type ExecutionJournal struct {
-	mu       sync.Mutex
-	path     string
-	threadID string
-	file     *os.File
-	nextSeq  uint64
-	pending  []agentcore.SemanticRecord
-	seenIDs  map[string]struct{}
-	closed   bool
+	mu         sync.Mutex
+	index      []journalIndexEntry
+	indexInfo  os.FileInfo
+	writerInfo os.FileInfo
+	path       string
+	threadID   string
+	file       *os.File
+	nextSeq    uint64
+	pending    []agentcore.SemanticRecord
+	seenIDs    map[string]struct{}
+	closed     bool
 	// syncHook is a test-only fault injection point. Production leaves it nil
 	// and uses os.File.Sync directly.
 	syncHook        func() error
@@ -92,17 +96,7 @@ func (j *ExecutionJournal) SemanticRecords(fromSeq, toSeq uint64) ([]agentcore.S
 	if fromSeq == 0 || toSeq < fromSeq {
 		return nil, fmt.Errorf("invalid semantic record range %d..%d", fromSeq, toSeq)
 	}
-	records, err := ReadExecutionJournal(j.path)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]agentcore.SemanticRecord, 0)
-	for _, record := range records {
-		if record.Seq >= fromSeq && record.Seq <= toSeq {
-			result = append(result, record)
-		}
-	}
-	return result, nil
+	return j.indexedRecords(fromSeq, toSeq, nil)
 }
 
 func (j *ExecutionJournal) Append(ctx context.Context, record agentcore.SemanticRecord) error {
@@ -147,6 +141,9 @@ func (j *ExecutionJournal) AppendFlushed(ctx context.Context, record agentcore.S
 	if j.closed {
 		return agentcore.SemanticRecord{}, fmt.Errorf("journal closed")
 	}
+	if err := j.ensureWriterAuthority(); err != nil {
+		return agentcore.SemanticRecord{}, err
+	}
 	if err := j.writePendingWithRetry(ctx, true); err != nil {
 		return agentcore.SemanticRecord{}, err
 	}
@@ -157,15 +154,19 @@ func (j *ExecutionJournal) AppendFlushed(ctx context.Context, record agentcore.S
 	if len(prepared) != 1 {
 		return agentcore.SemanticRecord{}, fmt.Errorf("%w: record %q was not prepared", ErrJournalEncoding, record.RecordID)
 	}
-	records, err := ReadExecutionJournal(j.path)
+	if err := j.ensureIndex(); err != nil {
+		return agentcore.SemanticRecord{}, err
+	}
+	previous, err := os.ReadFile(j.path)
 	if err != nil {
 		return agentcore.SemanticRecord{}, err
 	}
-	records = append(records, prepared[0])
-	data, err := encodeExecutionJournal(records)
+	added, err := encodeExecutionJournal(prepared)
 	if err != nil {
 		return agentcore.SemanticRecord{}, err
 	}
+	data := append(previous, added...)
+
 	if j.file != nil {
 		if err := j.file.Close(); err != nil {
 			return agentcore.SemanticRecord{}, err
@@ -180,6 +181,8 @@ func (j *ExecutionJournal) AppendFlushed(ctx context.Context, record agentcore.S
 			return agentcore.SemanticRecord{}, writeErr
 		}
 	}
+	j.addIndexedBytes(added, int64(len(previous)))
+	j.writerInfo = j.indexInfo
 	j.seenIDs[prepared[0].RecordID] = struct{}{}
 	if prepared[0].Seq+1 > j.nextSeq {
 		j.nextSeq = prepared[0].Seq + 1
@@ -218,12 +221,19 @@ func (j *ExecutionJournal) appendBatchAssigned(ctx context.Context, records []ag
 	if j.closed {
 		return nil, fmt.Errorf("journal closed")
 	}
+	if err := j.ensureWriterAuthority(); err != nil {
+		return nil, err
+	}
 	prepared, err := j.prepareRecords(records)
 	if err != nil {
 		return nil, err
 	}
 	if len(prepared) == 0 {
 		return nil, nil
+	}
+	// Invalid payloads must not reserve sequence numbers or poison dedup state.
+	if _, err := encodeExecutionJournal(prepared); err != nil {
+		return nil, err
 	}
 
 	j.pending = append(j.pending, prepared...)
@@ -291,7 +301,7 @@ func (j *ExecutionJournal) prepareRecords(records []agentcore.SemanticRecord) ([
 	out := make([]agentcore.SemanticRecord, 0, len(records))
 	nextSeq := j.nextSeq
 	// Include already-pending IDs so a retry of the same batch is skipped.
-	seen := cloneSeenIDs(j.seenIDs)
+	seen := make(map[string]struct{}, len(records)+len(j.pending))
 	for _, pending := range j.pending {
 		seen[pending.RecordID] = struct{}{}
 		if pending.Seq+1 > nextSeq {
@@ -322,6 +332,9 @@ func (j *ExecutionJournal) prepareRecords(records []agentcore.SemanticRecord) ([
 		if record.RecordID == "" {
 			record.RecordID = agentcore.NewSemanticRecordID(string(record.Kind))
 		}
+		if _, already := j.seenIDs[record.RecordID]; already {
+			continue
+		}
 		if _, already := seen[record.RecordID]; already {
 			continue
 		}
@@ -338,14 +351,6 @@ func (j *ExecutionJournal) prepareRecords(records []agentcore.SemanticRecord) ([
 		nextSeq = record.Seq + 1
 	}
 	return out, nil
-}
-
-func cloneSeenIDs(in map[string]struct{}) map[string]struct{} {
-	out := make(map[string]struct{}, len(in))
-	for id := range in {
-		out[id] = struct{}{}
-	}
-	return out
 }
 
 func (j *ExecutionJournal) writePendingWithRetry(ctx context.Context, syncFile bool) error {
@@ -405,11 +410,18 @@ func (j *ExecutionJournal) writePendingWithRetry(ctx context.Context, syncFile b
 }
 
 func (j *ExecutionJournal) appendPendingOnce() error {
+	if err := j.ensureWriterAuthority(); err != nil {
+		return err
+	}
 	if j.file == nil {
 		if err := j.reopenForAppend(); err != nil {
 			return err
 		}
 	}
+	if err := j.ensureIndex(); err != nil {
+		return err
+	}
+	offset := j.indexInfo.Size()
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
@@ -418,9 +430,21 @@ func (j *ExecutionJournal) appendPendingOnce() error {
 			return fmt.Errorf("%w: %v", ErrJournalEncoding, err)
 		}
 	}
-	if _, err := j.file.Write(buf.Bytes()); err != nil {
-		return err
+	if n, err := j.file.Write(buf.Bytes()); err != nil || n != buf.Len() {
+		if n > 0 {
+			if rollbackErr := j.file.Truncate(offset); rollbackErr != nil {
+				return errors.Join(err, rollbackErr)
+			}
+			_, _ = j.file.Seek(0, io.SeekEnd)
+			j.writerInfo, _ = os.Stat(j.path)
+		}
+		if err != nil {
+			return err
+		}
+		return io.ErrShortWrite
 	}
+	j.addIndexedBytes(buf.Bytes(), offset)
+	j.writerInfo = j.indexInfo
 	return nil
 }
 
@@ -470,7 +494,7 @@ var _ agentcore.FlushedSemanticRecorder = (*ExecutionJournal)(nil)
 var _ agentcore.SemanticRecordRangeReader = (*ExecutionJournal)(nil)
 
 func (j *ExecutionJournal) openAndScan() error {
-	file, err := os.OpenFile(j.path, os.O_CREATE|os.O_RDWR, 0o644)
+	file, err := os.OpenFile(j.path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("open journal: %w", err)
 	}
@@ -486,6 +510,33 @@ func (j *ExecutionJournal) openAndScan() error {
 		j.seenIDs[record.RecordID] = struct{}{}
 	}
 	j.nextSeq = nextSeq
+	data, err := os.ReadFile(j.path)
+	if err != nil {
+		return err
+	}
+	entries, err := indexJournalBytes(data, 0)
+	if err != nil {
+		return err
+	}
+	validEnd := int64(0)
+	if len(entries) > 0 {
+		validEnd = entries[len(entries)-1].end
+	}
+	if validEnd < int64(len(data)) && len(bytes.TrimSpace(data[validEnd:])) > 0 {
+		if err := file.Truncate(validEnd); err != nil {
+			return err
+		}
+		data = data[:validEnd]
+	}
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		if _, err := file.WriteAt([]byte{'\n'}, int64(len(data))); err != nil {
+			return err
+		}
+	}
+	j.writerInfo, err = os.Stat(j.path)
+	if err != nil {
+		return err
+	}
 	if _, err := file.Seek(0, io.SeekEnd); err != nil {
 		_ = file.Close()
 		j.file = nil
@@ -494,8 +545,19 @@ func (j *ExecutionJournal) openAndScan() error {
 	return nil
 }
 
+func (j *ExecutionJournal) ensureWriterAuthority() error {
+	current, err := os.Stat(j.path)
+	if err != nil {
+		return err
+	}
+	if j.writerInfo != nil && (!os.SameFile(j.writerInfo, current) || j.writerInfo.Size() != current.Size() || j.writerInfo.ModTime() != current.ModTime()) {
+		return ErrJournalExternalChange
+	}
+	return nil
+}
+
 func (j *ExecutionJournal) reopenForAppend() error {
-	file, err := os.OpenFile(j.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o644)
+	file, err := os.OpenFile(j.path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}

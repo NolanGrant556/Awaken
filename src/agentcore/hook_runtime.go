@@ -23,6 +23,9 @@ type semanticHookRecorder struct {
 	turnID         func() string
 	sessionID      string
 	subagentTaskID string
+	agentID        string
+	parentAgentID  string
+	attemptID      string
 }
 
 func hookToolSubject(call convcontext.ToolCall, result *ToolExecutionResult) map[string]any {
@@ -106,6 +109,10 @@ func (r semanticHookRecorder) appendFlushed(ctx context.Context, record Semantic
 	if r.recorder == nil {
 		return ErrPersistenceUnavailable
 	}
+	if r.agentID != "" {
+		record.Payload["agent_id"], record.Payload["parent_agent_id"] = r.agentID, r.parentAgentID
+		record.Payload["attempt_id"] = r.attemptID
+	}
 	persistCtx, cancel := durablePersistenceContext(ctx)
 	defer cancel()
 	if err := r.recorder.Append(persistCtx, record); err != nil {
@@ -129,7 +136,12 @@ func (r *Runner) hookRecorder(events *runEventEmitter, subagentTaskID string) ho
 	if events != nil {
 		turn = events.turnID
 	}
-	return semanticHookRecorder{runner: r, recorder: r.recorder, threadID: r.threadID, runID: r.runID, turnID: turn, sessionID: r.sessionID, subagentTaskID: subagentTaskID}
+	recorder := semanticHookRecorder{runner: r, recorder: r.recorder, threadID: r.threadID, runID: r.runID, turnID: turn, sessionID: r.sessionID, subagentTaskID: subagentTaskID}
+	if origin := r.config.SubagentOrigin; origin != nil {
+		recorder.agentID, recorder.parentAgentID, recorder.attemptID = origin.AgentID, origin.ParentAgentID, r.config.AttemptID
+		recorder.subagentTaskID = r.config.SubagentTaskID
+	}
+	return recorder
 }
 
 func (r *Runner) dispatchHook(ctx context.Context, events *runEventEmitter, event hookruntime.Event, subject map[string]any) (hookruntime.DispatchResult, error) {
